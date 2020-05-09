@@ -80,7 +80,7 @@ fn main() {
     s.logger.set_full_logpath('./vls.log')
     for {
         raw := os.get_raw_line()
-        rpcreq := raw
+        rpcreq := raw.replace('\\r\\n', '\r\n')
         resp := s.exec(rpcreq) or {
             s.error(err)
             continue
