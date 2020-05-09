@@ -1,13 +1,13 @@
 # V-LSP
-Language Server Protocol server written on V
+Language Server Protocol server written on V.
 
 ## Roadmap
 ### General
-- [ ] `initialize`
-- [ ] `initialized`
-- [ ] `shutdown`
-- [ ] `exit`
-- [ ] `$/cancelRequest`
+- [x] `initialize`
+- [x] `initialized`
+- [x] `shutdown`
+- [x] `exit`
+- [ ] `$/cancelRequest` (VLS does not support request cancellation yet.)
 ### Window
 - [ ] `showMessage`
 - [ ] `showMessageRequest`
