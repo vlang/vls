@@ -1,0 +1,9 @@
+[submodule "modules/jsonrpc"]
+	path = modules/jsonrpc
+	url = https://github.com/nedpals/v-jsonrpc
+[submodule "modules/vargs"]
+	path = modules/vargs
+	url = https://github.com/nedpals/vargs
+[submodule "modules/lsp"]
+	path = modules/lsp
+	url = https://github.com/nedpals/lsp.v
