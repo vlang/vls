@@ -34,7 +34,7 @@ Language Server Protocol server written on V.
 - [ ] `didSave`
 - [ ] `didClose`
 ### Diagnostics
-- [ ] `publishDiagnostics`
+- [x] `publishDiagnostics`
 ### Language Features
 - [ ] `completion`
 - [ ] `completion resolve`
