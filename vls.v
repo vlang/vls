@@ -149,16 +149,16 @@ fn (mut s Vls) start_stdio() {
     mut incoming := ''
     mut expected_len := 0
     mut waiting := ''
-    
-    mut n := 1
+
+    if !os.exists('./vls_input.log') {
+        os.create('./vls_input.log') or {
+            panic(err)
+        }
+    }
 
     for {
         mut line := os.get_raw_line()
-
         line += os.get_raw_line()
-        line += os.get_raw_line()
-        line += os.get_raw_line()
-        n+=2
         // if line.starts_with('Content-Length: ') {
         //     incoming = line
         //     expected_len = line.all_after('Content-Length: ').int()
@@ -177,12 +177,10 @@ fn (mut s Vls) start_stdio() {
         //     } else {
         //         incoming = incoming + line
         //     }
-
-            n++
         // }
         
         stdin_log := os.read_file('./vls_input.log') or { break }
-        os.write_file('./vls_input.log', stdin_log + '\r\n' + (n/3).str() + ' ' + line)
+        os.write_file('./vls_input.log', stdin_log + '\n' + line)
         // stdout_log := os.read_file('./vls_output.log') or { continue }
         // os.write_file('./vls_output.log', stdout_log + '\n' + incoming)
 
