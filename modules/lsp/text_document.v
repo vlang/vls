@@ -1,7 +1,5 @@
 module lsp
 
-import math
-
 pub struct Position {
 pub:
     line int
@@ -62,8 +60,8 @@ pub struct TextDocumentPositionParams {
 }
 
 pub const (
-	MarkupKindPlainText = 'plaintext'
-	MarkupKindMarkdown = 'markdown'
+	markup_kind_plaintext = 'plaintext'
+	markup_kind_markdown = 'markdown'
 )
 
 pub struct MarkupContent {

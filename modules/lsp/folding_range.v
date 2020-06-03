@@ -13,9 +13,9 @@ pub struct FoldingRangeParams {
 }
 
 pub const (
-	FoldingRangeKindComment = 'comment'
-	FoldingRangeKindImports = 'imports'
-	FoldingRangeKindRegion = 'region'
+	folding_range_kind_comment = 'comment'
+	folding_range_kind_imports = 'imports'
+	folding_range_kind_region = 'region'
 )
 
 pub struct FoldingRange {

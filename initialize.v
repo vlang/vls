@@ -1,8 +1,8 @@
 module main
 
 import jsonrpc
-import json
-import lsp
+// import json
+// import lsp
 
 // method: 'initialize'
 fn (mut s Vls) initialize(mut ctx jsonrpc.Context) ?string {
@@ -11,12 +11,12 @@ fn (mut s Vls) initialize(mut ctx jsonrpc.Context) ?string {
     if ctx.req.params != '{}' {
         // println(ctx.req.params)
         // decoded_params := json.decode(lsp.InitializeParams, ctx.req.params) or {
-        //     return error('${jsonrpc.INVALID_PARAMS}')
+        //     return error('${jsonrpc.invalid_params}')
         // }
 
         // params = decoded_params
     } else {
-        return error('${jsonrpc.INVALID_PARAMS}')
+        return error('${jsonrpc.invalid_params}')
     }
 
     // s.send('{"jsonrpc":"2.0","method":"window/logMessage","params":{"type":3,"message":"Commencing VLS..."}}')

@@ -38,8 +38,8 @@ pub struct CompletionList {
 }
 
 pub const (
-	PlainText = 1
-	Snippet = 2
+	plain_text = 1
+	snippet = 2
 )
 
 pub struct CompletionItem {

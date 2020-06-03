@@ -1,20 +1,19 @@
 module jsonrpc
 
 import json
-import net.http
 import strings
 
 pub const (
-	JRPC_VERSION = '2.0'
-    PARSE_ERROR = -32700
-    INVALID_REQUEST = -32600
-    METHOD_NOT_FOUND = -32601
-    INVALID_PARAMS = -32602
-    INTERNAL_ERROR = -32693    
-    SERVER_ERROR_START = -32099
-    SERVER_ERROR_END = -32600
-    SERVER_NOT_INITIALIZED = -32002
-    UNKNOWN_ERROR = -32001
+	jrpc_version = '2.0'
+    parse_error = -32700
+    invalid_request = -32600
+    method_not_found = -32601
+    invalid_params = -32602
+    internal_error = -32693    
+    server_error_start = -32099
+    server_error_end = -32600
+    server_not_initialized = -32002
+    unknown_error = -32001
 )
 
 type ProcFunc = fn (mut ctx Context) string
@@ -27,7 +26,7 @@ pub mut:
 
 struct Request {
 pub mut:
-    jsonrpc string = JRPC_VERSION
+    jsonrpc string = jrpc_version
     id int
     method string
     params string [raw]
@@ -35,7 +34,7 @@ pub mut:
 
 pub struct Response {
 pub:
-    jsonrpc string = JRPC_VERSION
+    jsonrpc string = jrpc_version
 pub mut:
     id int
     error ResponseError
@@ -64,13 +63,13 @@ pub fn (mut res Response) send_error(err_code int) {
 
 pub fn err_message(err_code int) string {
 	msg := match err_code {
-		PARSE_ERROR { 'Invalid JSON' }
-		INVALID_PARAMS { 'Invalid params.' }
-		INVALID_REQUEST { 'Invalid request.' }
-		METHOD_NOT_FOUND { 'Method not found.' }
-		SERVER_ERROR_END { 'Error while stopping the server.' }
-		SERVER_NOT_INITIALIZED { 'Server not yet initialized.' }
-		SERVER_ERROR_START { 'Error while starting the server.' }
+		parse_error { 'Invalid JSON' }
+		invalid_params { 'Invalid params.' }
+		invalid_request { 'Invalid request.' }
+		method_not_found { 'Method not found.' }
+		server_error_end { 'Error while stopping the server.' }
+		server_not_initialized { 'Server not yet initialized.' }
+		server_error_start { 'Error while starting the server.' }
 		else { 'Unknown error.' }
 	}
 
@@ -120,7 +119,7 @@ pub fn serialize_str_data(data string) string {
 }
 
 pub fn (err &ResponseError) gen_json() string {
-	g := strings.new_builder(2000)
+	mut g := strings.new_builder(2000)
 	data := serialize_str_data(err.data)
 	encoded := if data[0] == `"` && data[data.len-1] == `"` { data[1..data.len-1] } else { data }
 	g.write('{"code":${err.code},"message":"${err.message}","data":')
@@ -146,12 +145,12 @@ pub fn process_request(js_str string) Request {
 // 	content := vals[vals.len-1]
 
 // 	if incoming.len == 0 {
-// 		internal_err := INTERNAL_ERROR
+// 		internal_err := internal_error
 // 		return error(internal_err.str())
 // 	}
 
 // 	if content in ['{}', ''] || vals.len < 2 {
-// 		invalid_req := INVALID_REQUEST
+// 		invalid_req := invalid_request
 // 		return error(invalid_req.str())
 // 	}
 
@@ -164,7 +163,7 @@ pub fn process_request(js_str string) Request {
 // 		proc := srv.procs[req.method]
 // 		res.result = proc(ctx)
 // 	} else {
-// 		method_nf := METHOD_NOT_FOUND
+// 		method_nf := method_not_found
 // 		return error(method_nf.str())
 // 	}
 

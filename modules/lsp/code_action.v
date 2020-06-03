@@ -1,7 +1,7 @@
 module lsp
 
 pub struct CodeActionOptions {
-	code_action_kinds []CodeActionKind [json:codeActionKinds]
+	code_action_kinds []string [json:codeActionKinds]
 }
 
 // method: ‘textDocument/codeAction’
@@ -14,14 +14,14 @@ pub struct CodeActionParams {
 
 // type CodeActionKind string
 pub const (
-	Empty = ''
-	QuickFix = 'quickfix'
-	Refactor = 'refactor'
-	RefactorExtract = 'refactor.extract'
-	RefactorInline = 'refactor.inline'
-	RefactorRewrite = 'refactor.rewrite'
-	Source = 'source'
-	SourceOrganizeImports = 'source.organizeImports'
+	empty = ''
+	quick_fix = 'quickfix'
+	refactor = 'refactor'
+	refactor_extract = 'refactor.extract'
+	refactor_inline = 'refactor.inline'
+	refactor_rewrite = 'refactor.rewrite'
+	source = 'source'
+	source_organize_imports = 'source.organizeImports'
 )
 
 pub struct CodeActionContext {
@@ -39,5 +39,5 @@ pub struct CodeAction {
 
 pub struct CodeActionRegistrationOptions {
 	document_selector []DocumentFilter [json:documentSelector]
-	code_action_kinds []CodeActionKind [json:codeActionKinds]
+	code_action_kinds []string [json:codeActionKinds]
 }

@@ -1,10 +1,10 @@
 module main
 
 import jsonrpc
-import lsp
-import net.http
+// import lsp
+// import net.http
 import net
-import json
+// import json
 import os
 import log
 
@@ -28,7 +28,7 @@ fn (mut s Vls) exec(incoming string) ?string {
 
 	if incoming.len == 0 {
         s.logger.error('INTERNAL ERROR')
-		return error('${jsonrpc.INTERNAL_ERROR}')
+		return error('${jsonrpc.internal_error}')
 	}
 
     if vals.len < 3 {
@@ -37,7 +37,7 @@ fn (mut s Vls) exec(incoming string) ?string {
 
 	if content == '{}' {
         s.logger.error('INVALID REQUEST')
-		return error('${jsonrpc.INVALID_REQUEST};Content ${incoming.len} is invalid.')
+		return error('${jsonrpc.invalid_request};Content ${incoming.len} is invalid.')
 	}
 
     // TODO: vls crashes when the rpc params is empty/void
@@ -56,7 +56,7 @@ fn (mut s Vls) exec(incoming string) ?string {
         'initialized' { res.result  = s.initialized() }
         'shutdown' { res.result = s.shutdown() }
         'exit' { s.exit() }
-        else { return error('${jsonrpc.METHOD_NOT_FOUND}') }
+        else { return error('${jsonrpc.method_not_found}') }
     }
 
     return res.gen_resp_text()

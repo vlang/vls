@@ -2,7 +2,7 @@ module lsp
 
 pub struct HoverSettings {
 	dynamic_registration bool [json:dynamicRegistration]
-	content_format []MarkupKind [json:contentFormat]
+	content_format []string [json:contentFormat]
 }
 
 // method: ‘textDocument/hover’
