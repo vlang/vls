@@ -1,6 +1,7 @@
 module lsp
 
 pub struct CompletionOptions {
+pub mut:
 	resolve_provider bool [json:resolveProvider]
 	trigger_characters []string [json:triggerCharacters]
 }
@@ -17,7 +18,10 @@ pub struct CompletionItemSettings {
 // method: ‘textDocument/completion’
 // response: []CompletionItem | CompletionList | none
 pub struct CompletionParams {
+pub:
 	// extend: TextDocumentPositionParams
+	text_document TextDocumentIdentifier [json:textDocument]
+	position Position
 	context CompletionContext
 }
 
@@ -28,11 +32,13 @@ pub enum CompletionTriggerKind {
 }
 
 pub struct CompletionContext {
+pub:
 	trigger_kind CompletionTriggerKind [json:triggerKind]
 	trigger_character string [json:triggerCharacter]
 }
 
 pub struct CompletionList {
+pub:
 	is_incomplete bool [json:isIncomplete]
 	items []CompletionItem
 }
@@ -43,21 +49,22 @@ pub const (
 )
 
 pub struct CompletionItem {
+pub mut:
 	label string
-	kind int
+	kind CompletionItemKind
 	detail string
 	// documentation string | MarkupContent
-	documentation string [raw]
+	documentation MarkupContent
 	deprecated bool
-	preselect bool
-	sort_text string [json:sortText]
-	filter_text string [json:filterText]
+	// preselect bool
+	// sort_text string [json:sortText]
+	// filter_text string [json:filterText]
 	insert_text string [json:insertText]
-	text_edit TextEdit [json:textEdit]
-	additional_text_edits []TextEdit [json:additionalTextEdits]
-	commit_characters []string [json:commitCharacters]
-	command Command
-	data string [raw]
+	// text_edit TextEdit [json:textEdit]
+	// additional_text_edits []TextEdit [json:additionalTextEdits]
+	// commit_characters []string [json:commitCharacters]
+	// command Command
+	// data string [raw]
 }
 
 pub enum CompletionItemKind {
@@ -68,12 +75,12 @@ pub enum CompletionItemKind {
 	field = 5
 	variable = 6
 	class = 7
-	@interface = 8
-	@module = 9
+	interface_ = 8
+	module_ = 9
 	property = 10
 	unit = 11
 	value = 12
-	@enum = 13
+	enum_ = 13
 	keyword = 14
 	snippet = 15
 	color = 16
@@ -82,7 +89,7 @@ pub enum CompletionItemKind {
 	folder = 19
 	enum_member = 20
 	constant = 21
-	@struct = 22
+	struct_ = 22
 	event = 23
 	operator = 24
 	type_parameter = 25

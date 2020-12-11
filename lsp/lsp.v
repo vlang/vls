@@ -1,6 +1,6 @@
 module lsp
 
-type DocumentUri string
+type DocumentUri = string
 
 pub struct NotificationMessage {
     method string

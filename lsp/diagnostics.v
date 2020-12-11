@@ -1,8 +1,9 @@
 module lsp
 
 pub struct Diagnostic {
+pub mut:
 	range Range
-	severity int
+	severity DiagnosticSeverity
 	code string
 	source string
 	message string

@@ -167,7 +167,8 @@ pub mut:
 
 pub struct ServerCapabilities {
 pub mut:
-	text_document_sync int [json:textDocumentSync]
+	// text_document_sync TextDocumentSyncOptions [json:textDocumentSync]
+	text_document_sync	int [json:textDocumentSync]
 	hover_provider bool [json:hoverProvider]
 	completion_provider CompletionOptions [json:completionProvider]
 	signature_help_provider SignatureHelpOptions [json:signatureHelpProvider]

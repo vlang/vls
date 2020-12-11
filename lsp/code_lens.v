@@ -1,6 +1,7 @@
 module lsp
 
 pub struct CodeLensOptions {
+pub mut:
 	resolve_provider bool [json:resolveProvider]
 }
 

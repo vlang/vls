@@ -2,7 +2,7 @@ module lsp
 
 pub struct TextDocumentSyncOptions {
 	open_close bool [json:openClose]
-	change int
+	change int = int(TextDocumentSyncKind.none_)
 	will_save bool [json:willSave]
 	will_save_wait_until bool [json:willSaveWaitUntil]
 	save SaveOptions
@@ -15,19 +15,22 @@ pub struct SaveOptions {
 // method: ‘textDocument/didOpen’
 // notification
 pub struct DidOpenTextDocumentParams {
+pub:
 	text_document TextDocumentItem [json:textDocument]
 }
 
 // method: ‘textDocument/didChange’
 // notification
 pub struct DidChangeTextDocumentParams {
+pub:
 	text_document VersionedTextDocumentIdentifier [json:textDocument]
 	content_changes []TextDocumentContentChangeEvent [json:contentChanges]
 }
 
 pub struct TextDocumentContentChangeEvent {
-	range Range
-	range_length int [json:rangeLength]
+pub:
+	// range Range
+	// range_length int [json:rangeLength]
 	text string
 }
 
@@ -56,6 +59,7 @@ pub enum TextDocumentSaveReason {
 // method: ‘textDocument/didSave’
 // notification
 pub struct DidSaveTextDocumentParams {
+pub:
 	text_document TextDocumentIdentifier [json:textDocument]
 	text string
 }
@@ -68,6 +72,7 @@ pub struct TextDocumentChangeRegistrationOptions {
 // method: ‘textDocument/didClose’
 // notification
 pub struct DidCloseTextDocumentParams {
+pub:
 	text_document TextDocumentIdentifier [json:textDocument]
 }
 

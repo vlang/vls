@@ -3,7 +3,8 @@ module lsp
 // method: ‘window/showMessage’
 // notification
 pub struct ShowMessageParams {
-	@type int
+	@type MessageType
+	// @type int
 	message string
 }
 
@@ -17,7 +18,7 @@ pub enum MessageType {
 // method: ‘window/showMessageRequest’
 // response: MessageActionItem | none / null
 pub struct ShowMessageRequestParams {
-	@type int
+	@type MessageType
 	message string
 	actions []MessageActionItem
 }
@@ -29,7 +30,7 @@ pub struct MessageActionItem {
 // method: ‘window/logMessage’
 // notification
 pub struct LogMessageParams {
-	@type int
+	@type MessageType
 	message string
 }
 

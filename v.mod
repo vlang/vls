@@ -1,5 +1,6 @@
 Module {
-    name: 'v-lsp',
-    version: '1.0.0',
-    dependencies: []
+	name: 'vls'
+	description: ''
+	version: '0.0.1'
+	dependencies: []
 }

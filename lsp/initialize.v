@@ -5,14 +5,14 @@ module lsp
 // notes: should be map[string]string
 pub struct InitializeParams {
 pub mut:
-	process_id int [json:processId]
-	client_info ClientInfo [json:clientInfo]
+	process_id int [skip]
+	client_info ClientInfo [skip; json:clientInfo]
 	root_uri string [json:rootUri]
 	root_path string [json:rootPath]
-	initialization_options string [raw;json:initializationOptions]
-	capabilities ClientCapabilities
+	initialization_options string [skip; json:initializationOptions]
+	capabilities ClientCapabilities [skip]
 	trace string
-	workspace_folders []WorkspaceFolder [json:workspaceFolders]
+	workspace_folders []WorkspaceFolder [skip]
 }
 
 pub struct ClientInfo {
@@ -55,7 +55,7 @@ pub enum FailureHandlingKind {
 
 // TextDocumentSyncKind
 pub enum TextDocumentSyncKind {
-	@none = 0
+	none_ = 0
 	full = 1
 	incremental = 2
 }

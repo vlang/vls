@@ -40,10 +40,12 @@ pub struct ConfigurationItem {
 // method: ‘workspace/didChangeWatchedFiles’
 // notification
 pub struct DidChangeWatchedFilesParams {
+pub:
 	changes []FileEvent
 }
 
 pub struct FileEvent {
+pub:
 	uri string
 	@type int
 }

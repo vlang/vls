@@ -8,9 +8,15 @@ pub struct HoverSettings {
 // method: ‘textDocument/hover’
 // response: Hover | none
 // request: TextDocumentPositionParams
+pub struct HoverParams {
+pub:
+	text_document TextDocumentIdentifier [json:textDocument]
+	position Position
+}
 
 pub struct Hover {
-	contents string [raw]
+pub:
+	contents MarkedString
 	range Range
 }
 
