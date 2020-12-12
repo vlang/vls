@@ -9,10 +9,10 @@ Windows support is also unstable for now. Please file an issue if you experience
 ## Installation
 Installation requires you to have Git and V installed and compile the language server by yourself. You need to execute the following:
 ```
-git clone https://github.com/nedpals/vls2.git vls && cd vls/
+git clone https://github.com/vlang/vls.git vls && cd vls/
 
 # Build the project
-v -o vls .
+v -o bin/vls cmd/vls
 ```
 
 ## Usage
