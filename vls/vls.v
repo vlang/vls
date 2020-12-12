@@ -79,6 +79,31 @@ pub fn (mut ls Vls) execute(payload string) string {
 	return ''
 }
 
+// send outputs the response on the desired connection type
+fn (mut vls Vls) send(data string) {
+	if data.len == 0 {
+		if vls.test_mode {
+			vls.response = ''
+		}
+
+		return
+	}
+
+	if vls.test_mode {
+		vls.response = data
+	}
+
+	response := 'Content-Length: ${data.len}\r\n\r\n$data'
+	match vls.connection_type {
+		.tcp {
+			// TODO: tcp
+		}
+		.stdio {
+			print(response)
+		}
+	}
+}
+
 fn C.fgetc(stream byteptr) int
 
 // start_loop starts an endless loop which waits for the request data and prints the responses to the desired connection type

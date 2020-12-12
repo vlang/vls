@@ -4,31 +4,6 @@ import lsp
 import json
 import jsonrpc
 
-// send outputs the response on the desired connection type
-fn (mut vls Vls) send(data string) {
-	if data.len == 0 {
-		if vls.test_mode {
-			vls.response = ''
-		}
-
-		return
-	}
-
-	if vls.test_mode {
-		vls.response = data
-	}
-
-	response := 'Content-Length: ${data.len}\r\n\r\n$data'
-	match vls.connection_type {
-		.tcp {
-			// TODO: tcp
-		}
-		.stdio {
-			print(response)
-		}
-	}
-}
-
 // log_message sends a window/logMessage notification to the client
 fn (mut ls Vls) log_message(message string, typ lsp.MessageType) {
 	result := jsonrpc.NotificationMessage<lsp.LogMessageParams>{
