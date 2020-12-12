@@ -81,8 +81,8 @@ pub fn (mut ls Vls) execute(payload string) string {
 
 fn C.fgetc(stream byteptr) int
 
-// start_server starts an endless loop which waits for the request data and prints the responses to the desired connection type
-pub fn (mut ls Vls) start_server() {
+// start_loop starts an endless loop which waits for the request data and prints the responses to the desired connection type
+pub fn (mut ls Vls) start_loop() {
 	// TODO: tcp
 
 	for {
