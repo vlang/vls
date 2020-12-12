@@ -5,7 +5,7 @@ import json
 import jsonrpc
 
 // initialize sends the server capabilities to the client
-fn (mut ls Vls) initialize(id int, params string) {
+fn (mut ls Vls) initialize(id int, params string) string {
 	initialize_params := json.decode(lsp.InitializeParams, params) or { panic(err) }
 	mut capabilities := lsp.ServerCapabilities{
 		text_document_sync: 1
@@ -24,7 +24,7 @@ fn (mut ls Vls) initialize(id int, params string) {
 	// only files are supported right now
 	ls.root_path = initialize_params.root_uri.trim_prefix('file://')
 	ls.status = .initialized
-	ls.send(json.encode(result))
+	return json.encode(result)
 }
 
 // shutdown sets the state to shutdown but does not exit

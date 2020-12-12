@@ -1,8 +1,6 @@
 module vls
 
 import lsp
-import json
-import jsonrpc
 import v.token
 
 fn position_to_range(source string, pos token.Position) lsp.Range {
@@ -31,17 +29,4 @@ fn position_to_range(source string, pos token.Position) lsp.Range {
 			character: end_char
 		}
 	}
-}
-
-// publish_diagnostics sends errors, warnings and other diagnostics to the editor
-fn (ls Vls) publish_diagnostics(uri string, diagnostics []lsp.Diagnostic) {
-	result := jsonrpc.NotificationMessage<lsp.PublishDiagnosticsParams>{
-		method: 'textDocument/publishDiagnostics'
-		params: lsp.PublishDiagnosticsParams{
-			uri: uri
-			diagnostics: diagnostics
-		}
-	}
-	str := json.encode(result)
-	ls.send(str)
 }

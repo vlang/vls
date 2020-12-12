@@ -7,15 +7,21 @@ import v.ast
 import json
 import jsonrpc
 import strings
+import net
+import io
 
 const (
 	content_length = 'Content-Length: '
 )
 
+pub enum ConnectionType {
+	tcp
+	stdio
+}
+
 pub struct Vls {
 mut:
 	table            &table.Table = table.new_table()
-	status           ServerStatus = .off
 	// imports
 	import_graph     map[string][]string
 	mod_import_paths map[string]string
@@ -27,27 +33,28 @@ mut:
 	asts             map[string]map[string]ast.File
 	current_file     string
 	root_path        string
+	connection_type  ConnectionType = .stdio
 pub mut:
 	// TODO: replace with io.Writer
-	send             fn (string) = fn (res string) {}
+	// send             fn (string) = fn (res string) {}
+	status           ServerStatus = .off
+	response         string
+	test_mode       bool
 }
 
-pub fn (mut ls Vls) execute(payload string) {
+pub fn (mut ls Vls) execute(payload string) string {
 	request := json.decode(jsonrpc.Request, payload) or {
-		ls.send(new_error(jsonrpc.parse_error))
-		return
+		return new_error(jsonrpc.parse_error)
 	}
 	if request.method != 'exit' && ls.status == .shutdown {
-		ls.send(new_error(jsonrpc.invalid_request))
-		return
+		return new_error(jsonrpc.invalid_request)
 	}
 	if request.method != 'initialize' && ls.status != .initialized {
-		ls.send(new_error(jsonrpc.server_not_initialized))
-		return
+		return new_error(jsonrpc.server_not_initialized)
 	}
 	match request.method {
 		'initialize' {
-			ls.initialize(request.id, request.params)
+			return ls.initialize(request.id, request.params)
 		}
 		'initialized' {} // does nothing currently
 		'shutdown' {
@@ -57,28 +64,27 @@ pub fn (mut ls Vls) execute(payload string) {
 			ls.exit(request.params)
 		}
 		'textDocument/didOpen' {
-			ls.did_open(request.id, request.params)
+			return ls.did_open(request.id, request.params)
 		}
 		'textDocument/didChange' {
-			ls.did_change(request.id, request.params)
+			return ls.did_change(request.id, request.params)
 		}
 		else {
 			if ls.status != .initialized {
-				ls.send(new_error(jsonrpc.server_not_initialized))
+				return new_error(jsonrpc.server_not_initialized)
 			}
 		}
 	}
-}
 
-// status returns the current server status
-pub fn (ls Vls) status() ServerStatus {
-	return ls.status
+	return ''
 }
 
 fn C.fgetc(stream byteptr) int
 
-// start_loop starts an endless loop which waits for stdin and prints responses to the stdout
-pub fn (mut ls Vls) start_loop() {
+// start_server starts an endless loop which waits for the request data and prints the responses to the desired connection type
+pub fn (mut ls Vls) start_server() {
+	// TODO: tcp
+
 	for {
 		first_line := get_raw_input()
 		if first_line.len < 1 || !first_line.starts_with(content_length) {
@@ -96,7 +102,7 @@ pub fn (mut ls Vls) start_loop() {
 			conlen--
 		}
 		payload := buf.str()
-		ls.execute(payload[1..])
+		ls.send(ls.execute(payload[1..]))
 		unsafe { buf.free() }
 	}
 }
