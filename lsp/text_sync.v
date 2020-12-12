@@ -64,11 +64,6 @@ pub:
 	text string
 }
 
-pub struct TextDocumentChangeRegistrationOptions {
-	document_selector []DocumentFilter [json:documentSelector]
-	include_text bool [json:includeText]
-}
-
 // method: ‘textDocument/didClose’
 // notification
 pub struct DidCloseTextDocumentParams {
