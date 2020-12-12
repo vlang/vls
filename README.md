@@ -2,9 +2,7 @@
 VLS (V Language Server) is a LSP v3.15-compatible language server for V.
 
 ## Current Status
-VLS is a work-in-progress. This version of VLS is rewritten from scratch and will be migrated to [https://github.com/vlang/vls](https://github.com/vlang/vls) once it is finalized.
-
-VLS has also issues with memory management (for now) and may not be guaranteed to work on large codebases.
+VLS is a work-in-progress. It has issues with memory management (for now) and may not be guaranteed to work on medium to large-sized codebases.
 
 Windows support is also unstable for now. Please file an issue if you experience problems with it.
 
@@ -93,7 +91,7 @@ Afterwards, go to your editor's configuration and scroll to the V extension sect
 
 # Contributing
 ## Submitting a pull request
-- Fork it (https://github.com/nedpals/vls2/fork)
+- Fork it (https://github.com/vlang/vls/fork)
 - Create your feature branch (git checkout -b my-new-feature)
 - Commit your changes (git commit -am 'Add some feature')
 - Push to the branch (git push origin my-new-feature)
