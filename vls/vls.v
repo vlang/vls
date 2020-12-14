@@ -12,8 +12,9 @@ const (
 	content_length = 'Content-Length: '
 )
 
-interface Sender {
+interface ReceiveSender {
 	send(data string)
+	receive() string 
 }
 
 struct Vls {
@@ -32,13 +33,13 @@ mut:
 	current_file     string
 	root_path        string
 pub mut:
-	// TODO: replace with io.Writer
-	output           Sender
+	// TODO: replace with io.ReadWriter
+	io               ReceiveSender
 }
 
-pub fn new(io Sender) Vls {
+pub fn new(io ReceiveSender) Vls {
 	return Vls{
-		output: io
+		io: io
 	}
 }
 
@@ -87,7 +88,7 @@ pub fn (ls Vls) status() ServerStatus {
 
 // TODO: fn (ls Vls) send<T>(data T) {
 fn (ls Vls) send(data string) {
-	ls.output.send(data)
+	ls.io.send(data)
 }
 
 fn C.fgetc(stream byteptr) int
@@ -95,24 +96,8 @@ fn C.fgetc(stream byteptr) int
 // start_loop starts an endless loop which waits for stdin and prints responses to the stdout
 pub fn (mut ls Vls) start_loop() {
 	for {
-		first_line := get_raw_input()
-		if first_line.len < 1 || !first_line.starts_with(content_length) {
-			continue
-		}
-		mut buf := strings.new_builder(1)
-		mut conlen := first_line[content_length.len..].int()
-		$if !windows { conlen++ }
-		for conlen > 0 {
-			c := C.fgetc(C.stdin)
-			$if !windows {
-				if c == 10 { continue }
-			}
-			buf.write_b(byte(c))
-			conlen--
-		}
-		payload := buf.str()
-		ls.execute(payload[1..])
-		unsafe { buf.free() }
+		payload := ls.io.receive()
+		ls.execute(payload)
 	}
 }
 
