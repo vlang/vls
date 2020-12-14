@@ -152,6 +152,11 @@ pub enum ServerStatus {
 	shutdown
 }
 
+// status returns the current status of the server
+fn (ls Vls) status() ServerStatus {
+	return ls.status
+}
+
 // with error
 struct JrpcResponse2<T> {
 	jsonrpc string = jsonrpc.version
