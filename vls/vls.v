@@ -12,6 +12,10 @@ const (
 	content_length = 'Content-Length: '
 )
 
+interface Sender {
+	send(data string)
+}
+
 pub struct Vls {
 mut:
 	table            &table.Table = table.new_table()
@@ -29,7 +33,13 @@ mut:
 	root_path        string
 pub mut:
 	// TODO: replace with io.Writer
-	send             fn (string) = fn (res string) {}
+	output           Sender
+}
+
+pub fn new(io Sender) Vls {
+	return Vls{
+		output: io
+	}
 }
 
 pub fn (mut ls Vls) execute(payload string) {
@@ -73,6 +83,11 @@ pub fn (mut ls Vls) execute(payload string) {
 // status returns the current server status
 pub fn (ls Vls) status() ServerStatus {
 	return ls.status
+}
+
+// TODO: fn (ls Vls) send<T>(data T) {
+fn (ls Vls) send(data string) {
+	ls.output.send(data)
 }
 
 fn C.fgetc(stream byteptr) int
