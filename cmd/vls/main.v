@@ -10,8 +10,6 @@ fn (io Stdio) send(output string) {
 
 
 fn main() {
-	mut ls := vls.Vls{
-		output: Stdio{}
-	}
+	mut ls := vls.new(Stdio{})
 	ls.start_loop()
 }

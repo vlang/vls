@@ -16,7 +16,7 @@ interface Sender {
 	send(data string)
 }
 
-pub struct Vls {
+struct Vls {
 mut:
 	table            &table.Table = table.new_table()
 	status           ServerStatus = .off
