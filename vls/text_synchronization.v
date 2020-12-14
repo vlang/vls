@@ -17,19 +17,19 @@ const (
 	builtin_path = os.join_path(vlib_path, 'builtin')
 )
 
-fn (mut ls Vls) did_open(id int, params string) string {
+fn (mut ls Vls) did_open(id int, params string) {
 	did_open_params := json.decode(lsp.DidOpenTextDocumentParams, params) or { panic(err) }
 	source := did_open_params.text_document.text
-	return ls.show_diagnostics(source, did_open_params.text_document.uri)
+	ls.show_diagnostics(source, did_open_params.text_document.uri)
 }
 
-fn (mut ls Vls) did_change(id int, params string) string {
+fn (mut ls Vls) did_change(id int, params string) {
 	did_change_params := json.decode(lsp.DidChangeTextDocumentParams, params) or { panic(err) }
 	source := did_change_params.content_changes[0].text
-	return ls.show_diagnostics(source, did_change_params.text_document.uri)
+	ls.show_diagnostics(source, did_change_params.text_document.uri)
 }
 
-fn (mut ls Vls) show_diagnostics(source string, uri string) string {
+fn (mut ls Vls) show_diagnostics(source string, uri string) {
 	file_path := uri.trim_prefix('file://')
 	target_dir := os.dir(file_path)
 	ls.log_message(target_dir, .info)
@@ -93,7 +93,7 @@ fn (mut ls Vls) show_diagnostics(source string, uri string) string {
 			diagnostics: diagnostics
 		}
 	}
-	return json.encode(result)
+	ls.send(json.encode(result))
 }
 
 fn (ls Vls) parse_imports(parsed_files []ast.File, table &table.Table, pref &pref.Preferences, scope &ast.Scope) []ast.File {

@@ -6,18 +6,7 @@ import v.token
 import v.ast
 import json
 import jsonrpc
-import strings
-import net
-import io
-
-const (
-	content_length = 'Content-Length: '
-)
-
-pub enum ConnectionType {
-	tcp
-	stdio
-}
+import eventbus
 
 pub struct Vls {
 mut:
@@ -33,28 +22,33 @@ mut:
 	asts             map[string]map[string]ast.File
 	current_file     string
 	root_path        string
-	connection_type  ConnectionType = .stdio
+	status           ServerStatus = .off
+	eb							 &eventbus.EventBus = eventbus.new()
+	// for additional contexts such as tcp context and etc.
+	ctx							 voidptr
 pub mut:
 	// TODO: replace with io.Writer
 	// send             fn (string) = fn (res string) {}
-	status           ServerStatus = .off
 	response         string
-	test_mode       bool
+	test_mode        bool
 }
 
-pub fn (mut ls Vls) execute(payload string) string {
+pub fn (mut ls Vls) execute(payload string) {
 	request := json.decode(jsonrpc.Request, payload) or {
-		return new_error(jsonrpc.parse_error)
+		ls.send_error(jsonrpc.parse_error)
+		return
 	}
 	if request.method != 'exit' && ls.status == .shutdown {
-		return new_error(jsonrpc.invalid_request)
+		ls.send_error(jsonrpc.invalid_request)
+		return
 	}
 	if request.method != 'initialize' && ls.status != .initialized {
-		return new_error(jsonrpc.server_not_initialized)
+		ls.send_error(jsonrpc.server_not_initialized)
+		return
 	}
 	match request.method {
 		'initialize' {
-			return ls.initialize(request.id, request.params)
+			ls.initialize(request.id, request.params)
 		}
 		'initialized' {} // does nothing currently
 		'shutdown' {
@@ -64,86 +58,39 @@ pub fn (mut ls Vls) execute(payload string) string {
 			ls.exit(request.params)
 		}
 		'textDocument/didOpen' {
-			return ls.did_open(request.id, request.params)
+			ls.did_open(request.id, request.params)
 		}
 		'textDocument/didChange' {
-			return ls.did_change(request.id, request.params)
+			ls.did_change(request.id, request.params)
 		}
 		else {
 			if ls.status != .initialized {
-				return new_error(jsonrpc.server_not_initialized)
+				ls.send_error(jsonrpc.server_not_initialized)
 			}
 		}
 	}
-
-	return ''
 }
 
-// send outputs the response on the desired connection type
-fn (mut vls Vls) send(data string) {
+// send dispatches the response data to the subscribed events
+fn (mut ls Vls) send(data string) {
 	if data.len == 0 {
-		if vls.test_mode {
-			vls.response = ''
+		if ls.test_mode {
+			ls.response = ''
 		}
 
 		return
 	}
 
-	if vls.test_mode {
-		vls.response = data
-	}
-
-	response := 'Content-Length: ${data.len}\r\n\r\n$data'
-	match vls.connection_type {
-		.tcp {
-			// TODO: tcp
-		}
-		.stdio {
-			print(response)
-		}
+	if ls.test_mode {
+		ls.response = data
+	} else {
+		response := 'Content-Length: ${data.len}\r\n\r\n$data'
+		ls.eb.publish('response', ls, response.str)
 	}
 }
 
-fn C.fgetc(stream byteptr) int
-
-// start_loop starts an endless loop which waits for the request data and prints the responses to the desired connection type
-pub fn (mut ls Vls) start_loop() {
-	// TODO: tcp
-
-	for {
-		first_line := get_raw_input()
-		if first_line.len < 1 || !first_line.starts_with(content_length) {
-			continue
-		}
-		mut buf := strings.new_builder(1)
-		mut conlen := first_line[content_length.len..].int()
-		$if !windows { conlen++ }
-		for conlen > 0 {
-			c := C.fgetc(C.stdin)
-			$if !windows {
-				if c == 10 { continue }
-			}
-			buf.write_b(byte(c))
-			conlen--
-		}
-		payload := buf.str()
-		ls.send(ls.execute(payload[1..]))
-		unsafe { buf.free() }
-	}
-}
-
-fn get_raw_input() string {
-	eof := C.EOF
-	mut buf := strings.new_builder(200)
-	for {
-		c := C.fgetc(C.stdin)
-		chr := byte(c)
-		if buf.len > 2 && (c == eof || chr in [`\r`, `\n`]) {
-			break
-		}
-		buf.write_b(chr)
-	}
-	return buf.str()
+pub fn (ls Vls) subscriber() eventbus.Subscriber {
+	return *ls.eb.subscriber
 }
 
 pub enum ServerStatus {
@@ -171,4 +118,10 @@ fn new_error(code int) string {
 		error: jsonrpc.new_response_error(code)
 	}
 	return json.encode(err)
+}
+
+// send_error
+pub fn (mut ls Vls) send_error(code int) {
+	err := new_error(code)
+	ls.send(err)
 }
