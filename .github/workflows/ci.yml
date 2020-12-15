@@ -1,12 +1,6 @@
 name: CI
 
-on:
-  push:
-    paths-ignore:
-      - "**.md"
-  pull_request:
-    paths-ignore:
-      - "**.md"
+on: [push, pull_request]
 
 jobs:
   ubuntu-tcc:
@@ -15,14 +9,17 @@ jobs:
     env:
       VFLAGS: -cc tcc
     steps:
+    - name: Checkout V
+      uses: actions/checkout@v2
+      with:
+        repository: vlang/v
     - uses: actions/checkout@v2
+      with:
+        path: vls
     - name: Build local v
-      run: |
-        git clone https://github.com/vlang/v
-        cd v
-        make -j4
+      run: make -j4
     - name: Run tests
-      run: ./v/v test .
+      run: ./v test vls
 
   macos-clang:
     runs-on: macOS-latest
@@ -30,14 +27,17 @@ jobs:
     env:
       VFLAGS: -cc clang
     steps:
+    - name: Checkout V
+      uses: actions/checkout@v2
+      with:
+        repository: vlang/v
     - uses: actions/checkout@v2
+      with:
+        path: vls
     - name: Build local v
-      run: |
-        git clone https://github.com/vlang/v
-        cd v
-        make -j4
+      run: make -j4
     - name: Run tests
-      run: ./v/v test .
+      run: ./v test vls
 
   windows-msvc:
     runs-on: windows-2019
@@ -45,11 +45,14 @@ jobs:
     env:
         VFLAGS: -cc msvc
     steps:
+    - name: Checkout V
+      uses: actions/checkout@v2
+      with:
+        repository: vlang/v
     - uses: actions/checkout@v2
+      with:
+        path: vls
     - name: Build local v
-      run: |
-        git clone https://github.com/vlang/v
-        cd v
-        make -j4
+      run: .\make.bat -msvc
     - name: Run tests
-      run: .\v\v.exe test .
+      run: .\v.exe test vls
