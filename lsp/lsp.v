@@ -11,8 +11,11 @@ pub fn (du DocumentUri) path() string {
 }
 
 pub fn document_uri_from_path(path string) DocumentUri {
-	f_path := if !path.starts_with('file://') { 'file://' + path } else { path }
-	return DocumentUri(f_path)
+	return if !path.starts_with('file://') {
+		'file://' + path
+	} else {
+		path
+	}
 }
 
 pub struct NotificationMessage {
