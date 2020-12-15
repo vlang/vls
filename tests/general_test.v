@@ -2,7 +2,7 @@ import vls
 import vls.testing
 
 fn test_wrong_first_request() {
-	io := testing.Testio{}
+	mut io := testing.Testio{}
 	payload := '{"jsonrpc":"2.0","id":1,"method":"shutdown","params":{}}'
 	mut ls := vls.new(io)
 	ls.execute(payload)
@@ -12,7 +12,7 @@ fn test_wrong_first_request() {
 }
 
 fn test_initialize_with_capabilities() {
-	io := testing.Testio{}
+	mut io := testing.Testio{}
 	payload := '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}'
 	mut ls := vls.new(io)
 	ls.execute(payload)
@@ -38,7 +38,7 @@ fn test_shutdown() {
 }
 
 fn init() vls.Vls {
-	io := testing.Testio{}
+	mut io := testing.Testio{}
 	payload := '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}'
 	mut ls := vls.new(io)
 	ls.execute(payload)
