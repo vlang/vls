@@ -3,10 +3,9 @@ module lsp
 // method: ‘textDocument/documentHighlight’
 // response: []DocumentHighlight | none
 // request: TextDocumentPositionParams
-
 pub struct DocumentHighlight {
 	range Range
-	kind int
+	kind  int
 }
 
 pub enum DocumentHighlightKind {

@@ -7,16 +7,15 @@ pub struct RegistrationParams {
 }
 
 pub struct Registration {
-	id int
-	method string
+	id               int
+	method           string
 	register_options string [raw]
 }
 
 // base interface for registration register_options
 // pub struct TextDocumentRegistrationOptions {
-// 	document_selector []DocumentFilter [json:documentSelector]
+// document_selector []DocumentFilter [json:documentSelector]
 // }
-
 // method: ‘client/unregisterCapability’
 // response: void
 pub struct UnregistrationParams {
@@ -24,6 +23,6 @@ pub struct UnregistrationParams {
 }
 
 pub struct Unregistration {
-	id int
+	id     int
 	method string
 }

@@ -2,17 +2,17 @@ module lsp
 
 pub struct CompletionOptions {
 pub mut:
-	resolve_provider bool [json:resolveProvider]
-	trigger_characters []string [json:triggerCharacters]
+	resolve_provider   bool     [json: resolveProvider]
+	trigger_characters []string [json: triggerCharacters]
 }
 
 pub struct CompletionItemSettings {
-	snippet_support bool [json:snippetSupport]
-	commit_characters_support bool [json:commitCharactersSupport]
-	documentation_format bool [json:documentationFormat]
-	preselect_support bool [json:preselectSupport]
-	deprecated_support bool [json:deprecatedSupport]
-	tag_support ValueSet [json:tag_support]
+	snippet_support           bool     [json: snippetSupport]
+	commit_characters_support bool     [json: commitCharactersSupport]
+	documentation_format      bool     [json: documentationFormat]
+	preselect_support         bool     [json: preselectSupport]
+	deprecated_support        bool     [json: deprecatedSupport]
+	tag_support               ValueSet [json: tag_support]
 }
 
 // method: ‘textDocument/completion’
@@ -20,9 +20,9 @@ pub struct CompletionItemSettings {
 pub struct CompletionParams {
 pub:
 	// extend: TextDocumentPositionParams
-	text_document TextDocumentIdentifier [json:textDocument]
-	position Position
-	context CompletionContext
+	text_document TextDocumentIdentifier [json: textDocument]
+	position      Position
+	context       CompletionContext
 }
 
 pub enum CompletionTriggerKind {
@@ -33,33 +33,33 @@ pub enum CompletionTriggerKind {
 
 pub struct CompletionContext {
 pub:
-	trigger_kind CompletionTriggerKind [json:triggerKind]
-	trigger_character string [json:triggerCharacter]
+	trigger_kind      CompletionTriggerKind [json: triggerKind]
+	trigger_character string                [json: triggerCharacter]
 }
 
 pub struct CompletionList {
 pub:
-	is_incomplete bool [json:isIncomplete]
-	items []CompletionItem
+	is_incomplete bool             [json: isIncomplete]
+	items         []CompletionItem
 }
 
 pub const (
 	plain_text = 1
-	snippet = 2
+	snippet    = 2
 )
 
 pub struct CompletionItem {
 pub mut:
-	label string
-	kind CompletionItemKind
-	detail string
+	label         string
+	kind          CompletionItemKind
+	detail        string
 	// documentation string | MarkupContent
 	documentation MarkupContent
-	deprecated bool
+	deprecated    bool
 	// preselect bool
 	// sort_text string [json:sortText]
 	// filter_text string [json:filterText]
-	insert_text string [json:insertText]
+	insert_text   string             [json: insertText]
 	// text_edit TextEdit [json:textEdit]
 	// additional_text_edits []TextEdit [json:additionalTextEdits]
 	// commit_characters []string [json:commitCharacters]
@@ -96,10 +96,10 @@ pub enum CompletionItemKind {
 }
 
 pub struct CompletionRegistrationOptions {
-	document_selector []DocumentFilter [json:documentSelector]
-	trigger_characters []string [json:triggerCharacters]
-	all_commit_characters []string [json:allCommitCharacters]
-	resolve_provider bool [json:resolveProvider]
+	document_selector     []DocumentFilter [json: documentSelector]
+	trigger_characters    []string         [json: triggerCharacters]
+	all_commit_characters []string         [json: allCommitCharacters]
+	resolve_provider      bool             [json: resolveProvider]
 }
 
 // method: ‘completionItem/resolve’

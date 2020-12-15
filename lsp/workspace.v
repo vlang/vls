@@ -1,14 +1,14 @@
 module lsp
 
 pub struct WorkspaceFolder {
-	uri string
+	uri  DocumentUri
 	name string
 }
 
 pub struct WorkspaceEdit {
-	document_changes bool [json:documentChanges]
-	resource_operations []string [json:resourceOperations]
-	failure_handling string [json:failureHandling]
+	document_changes    bool     [json: documentChanges]
+	resource_operations []string [json: resourceOperations]
+	failure_handling    string   [json: failureHandling]
 }
 
 pub struct DidChangeWorkspaceFoldersParams {
@@ -16,7 +16,7 @@ pub struct DidChangeWorkspaceFoldersParams {
 }
 
 pub struct WorkspaceFoldersChangeEvent {
-	added []WorkspaceFolder
+	added   []WorkspaceFolder
 	removed []WorkspaceFolder
 }
 
@@ -33,8 +33,8 @@ pub struct ConfigurationParams {
 }
 
 pub struct ConfigurationItem {
-	scope_uri string [json:scopeUri]
-	section string
+	scope_uri DocumentUri [json: scopeUri]
+	section   string
 }
 
 // method: ‘workspace/didChangeWatchedFiles’
@@ -46,7 +46,7 @@ pub:
 
 pub struct FileEvent {
 pub:
-	uri string
+	uri   DocumentUri
 	@type int
 }
 
@@ -60,19 +60,17 @@ pub struct DidChangeWatchedFilesRegistrationOptions {
 	watchers []FileSystemWatcher
 }
 
-
-//  The  glob pattern to watch.
-//  Glob patterns can have the following syntax:
-//  - `*` to match one or more characters in a path segment
-//  - `?` to match on one character in a path segment
-//  - `**` to match any number of path segments, including none
-//  - `{}` to group conditions (e.g. `**​/*.{ts,js}` matches all TypeScript and JavaScript files)
-//  - `[]` to declare a range of characters to match in a path segment (e.g., `example.[0-9]` to match on `example.0`, `example.1`, …)
-//  - `[!...]` to negate a range of characters to match in a path segment (e.g., `example.[!0-9]` to match on `example.a`, `example.b`, but not `example.0`)
-
+// The  glob pattern to watch.
+// Glob patterns can have the following syntax:
+// - `*` to match one or more characters in a path segment
+// - `?` to match on one character in a path segment
+// - `**` to match any number of path segments, including none
+// - `{}` to group conditions (e.g. `**​/*.{ts,js}` matches all TypeScript and JavaScript files)
+// - `[]` to declare a range of characters to match in a path segment (e.g., `example.[0-9]` to match on `example.0`, `example.1`, …)
+// - `[!...]` to negate a range of characters to match in a path segment (e.g., `example.[!0-9]` to match on `example.a`, `example.b`, but not `example.0`)
 pub struct FileSystemWatcher {
-	glob_pattern string [json:globPattern]
-	kind int
+	glob_pattern string [json: globPattern]
+	kind         int
 }
 
 pub enum WatchKind {
@@ -90,7 +88,7 @@ pub struct WorkspaceSymbolParams {
 // method: ‘workspace/executeCommand’
 // response: any | null
 pub struct ExecuteCommandParams {
-	command string
+	command   string
 	arguments string [raw]
 }
 
@@ -103,10 +101,10 @@ pub struct ExecuteCommandRegistrationOptions {
 //
 pub struct ApplyWorkspaceEditParams {
 	label string
-	edit WorkspaceEdit
+	edit  WorkspaceEdit
 }
 
 pub struct ApplyWorkspaceEditResponse {
-	applied bool
-	failure_reason string [json:failureReason]
+	applied        bool
+	failure_reason string [json: failureReason]
 }
