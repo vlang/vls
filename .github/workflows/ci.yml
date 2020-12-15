@@ -1,0 +1,55 @@
+name: CI
+
+on:
+  push:
+    paths-ignore:
+      - "**.md"
+  pull_request:
+    paths-ignore:
+      - "**.md"
+
+jobs:
+  ubuntu-tcc:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      VFLAGS: -cc tcc
+    steps:
+    - uses: actions/checkout@v2
+    - name: Build local v
+      run: |
+        git clone https://github.com/vlang/v
+        cd v
+        make -j4
+    - name: Run tests
+      run: ./v/v test .
+
+  macos-clang:
+    runs-on: macOS-latest
+    timeout-minutes: 30
+    env:
+      VFLAGS: -cc clang
+    steps:
+    - uses: actions/checkout@v2
+    - name: Build local v
+      run: |
+        git clone https://github.com/vlang/v
+        cd v
+        make -j4
+    - name: Run tests
+      run: ./v/v test .
+
+  windows-msvc:
+    runs-on: windows-2019
+    timeout-minutes: 30
+    env:
+        VFLAGS: -cc msvc
+    steps:
+    - uses: actions/checkout@v2
+    - name: Build local v
+      run: |
+        git clone https://github.com/vlang/v
+        cd v
+        make -j4
+    - name: Run tests
+      run: .\v\v.exe test .
