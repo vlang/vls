@@ -9,6 +9,6 @@ pub fn (mut io Testio) send(data string) {
 	io.response = data
 }
 
-pub fn (io Testio) receive() string {
+pub fn (io Testio) receive() ?string {
 	return ''
 }

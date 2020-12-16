@@ -8,13 +8,9 @@ import json
 import jsonrpc
 import strings
 
-const (
-	content_length = 'Content-Length: '
-)
-
 interface ReceiveSender {
 	send(data string)
-	receive() string 
+	receive() ?string 
 }
 
 struct Vls {
@@ -96,7 +92,7 @@ fn C.fgetc(stream byteptr) int
 // start_loop starts an endless loop which waits for stdin and prints responses to the stdout
 pub fn (mut ls Vls) start_loop() {
 	for {
-		payload := ls.io.receive()
+		payload := ls.io.receive() or { continue }
 		ls.execute(payload)
 	}
 }
