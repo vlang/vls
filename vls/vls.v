@@ -8,10 +8,6 @@ import json
 import jsonrpc
 import strings
 
-const (
-	content_length = 'Content-Length: '
-)
-
 interface ReceiveSender {
 	send(data string)
 	receive() string 

@@ -1,5 +1,9 @@
 module main
 
+const (
+	content_length = 'Content-Length: '
+)
+
 fn C.fgetc(stream byteptr) int
 
 struct Stdio {}
