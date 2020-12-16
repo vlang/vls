@@ -22,7 +22,7 @@ fn (mut ls Vls) initialize(id int, params string) {
 		}
 	}
 	// only files are supported right now
-	ls.root_path = initialize_params.root_uri.trim_prefix('file://')
+	ls.root_path = initialize_params.root_uri.path()
 	ls.status = .initialized
 	ls.send(json.encode(result))
 }

@@ -4,5 +4,4 @@ module lsp
 // response: SignatureHelp | none
 // request: TextDocumentPositionParams
 // struct SymbolInformation {
-
 // }

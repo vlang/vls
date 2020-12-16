@@ -1,28 +1,26 @@
 module lsp
 
 // /**
-//  * Folding range provider options.
-//  */
+// * Folding range provider options.
+// */
 // export interface FoldingRangeProviderOptions {
 // }
-
 // method: ‘textDocument/foldingRange’
 // response: []FoldingRange | none
 pub struct FoldingRangeParams {
-	text_document TextDocumentIdentifier [json:textDocument]
+	text_document TextDocumentIdentifier [json: textDocument]
 }
 
 pub const (
 	folding_range_kind_comment = 'comment'
 	folding_range_kind_imports = 'imports'
-	folding_range_kind_region = 'region'
+	folding_range_kind_region  = 'region'
 )
 
 pub struct FoldingRange {
-	start_line int [json:startLine]
-	start_character int [json:startCharacter]
-	end_line int [json:endLine]
-	end_character int [json:endCharacter]
-	kind string
+	start_line      int    [json: startLine]
+	start_character int    [json: startCharacter]
+	end_line        int    [json: endLine]
+	end_character   int    [json: endCharacter]
+	kind            string
 }
-

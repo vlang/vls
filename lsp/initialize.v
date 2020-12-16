@@ -5,20 +5,20 @@ module lsp
 // notes: should be map[string]string
 pub struct InitializeParams {
 pub mut:
-	process_id int [skip]
-	client_info ClientInfo [skip; json:clientInfo]
-	root_uri string [json:rootUri]
-	root_path string [json:rootPath]
-	initialization_options string [skip; json:initializationOptions]
-	capabilities ClientCapabilities [skip]
-	trace string
-	workspace_folders []WorkspaceFolder [skip]
+	process_id             int                [skip]
+	client_info            ClientInfo         [skip; json: clientInfo]
+	root_uri               DocumentUri        [json: rootUri]
+	root_path              string             [json: rootPath]
+	initialization_options string             [skip; json: initializationOptions]
+	capabilities           ClientCapabilities [skip]
+	trace                  string
+	workspace_folders      []WorkspaceFolder  [skip]
 }
 
 pub struct ClientInfo {
 pub mut:
-	name string [json:name]
-	version string [json:version]
+	name    string [json: name]
+	version string [json: version]
 }
 
 pub struct InitializeResult {
@@ -28,7 +28,6 @@ pub struct InitializeResult {
 // method: ‘initialized’
 // notification
 // pub struct InitializedParams {}
-
 pub enum InitializeErrorCode {
 	unknown_protocol_version = 1
 }
@@ -37,12 +36,13 @@ pub struct InitializeError {
 	retry bool
 }
 
-/**
+/*
+*
  * The kind of resource operations supported by the client.
- */
+*/
 pub enum ResourceOperationKind {
-	create 
-	rename 
+	create
+	rename
 	delete
 }
 
@@ -70,6 +70,5 @@ pub struct StaticRegistrationOptions {
 
 // method: ‘shutdown’
 // response: none
-
 // method: ‘exit’
 // response: none

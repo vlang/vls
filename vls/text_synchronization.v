@@ -28,8 +28,8 @@ fn (mut ls Vls) did_change(id int, params string) {
 	ls.show_diagnostics(source, did_change_params.text_document.uri)
 }
 
-fn (ls Vls) show_diagnostics(source string, uri string) {
-	file_path := uri.trim_prefix('file://')
+fn (ls Vls) show_diagnostics(source string, uri lsp.DocumentUri) {
+	file_path := uri.path()
 	target_dir := os.dir(file_path)
 	ls.log_message(target_dir, .info)
 	scope := ast.Scope{
