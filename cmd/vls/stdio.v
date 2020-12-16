@@ -14,10 +14,10 @@ pub fn (io Stdio) send(output string) {
 	print('Content-Length: ${output.len}\r\n\r\n$output')
 }
 
-pub fn (io Stdio) receive() string {
+pub fn (io Stdio) receive() ?string {
 	first_line := get_raw_input()
 	if first_line.len < 1 || !first_line.starts_with(content_length) {
-		continue
+		return error('content length is missing')
 	}
 	mut buf := strings.new_builder(1)
 	mut conlen := first_line[content_length.len..].int()
