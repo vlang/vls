@@ -2,12 +2,6 @@ module lsp
 
 type DocumentUri = string
 
-// NOTE: This method is temporary for now as
-// asserting directly to a string results to C gen error.
-pub fn (du DocumentUri) str() string {
-	return du
-}
-
 pub fn (du DocumentUri) path() string {
 	return if du.starts_with('file://') {
 		du.all_after('file://')
