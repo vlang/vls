@@ -2,7 +2,9 @@ module lsp
 
 fn test_document_uri_from_path() {
 	input := '/foo/bar/test.v'
-	assert document_uri_from_path(input).str() == 'file:///foo/bar/test.v'
+	// NOTE: Testing will result to a cgen error when not explictly casted to string. 
+	expected := document_uri_from_path(input).str()
+	assert expected == 'file:///foo/bar/test.v'
 }
 
 fn test_document_uri_path() {
