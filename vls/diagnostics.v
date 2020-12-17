@@ -34,7 +34,7 @@ fn position_to_range(source string, pos token.Position) lsp.Range {
 }
 
 // publish_diagnostics sends errors, warnings and other diagnostics to the editor
-fn (ls Vls) publish_diagnostics(uri string, diagnostics []lsp.Diagnostic) {
+fn (ls Vls) publish_diagnostics(uri lsp.DocumentUri, diagnostics []lsp.Diagnostic) {
 	result := jsonrpc.NotificationMessage<lsp.PublishDiagnosticsParams>{
 		method: 'textDocument/publishDiagnostics'
 		params: lsp.PublishDiagnosticsParams{
