@@ -1,9 +1,6 @@
 module vls
 
 import v.table
-import v.doc
-import v.token
-import v.ast
 import json
 import jsonrpc
 import strings
@@ -17,16 +14,7 @@ struct Vls {
 mut:
 	table            &table.Table = table.new_table()
 	status           ServerStatus = .off
-	// imports
-	import_graph     map[string][]string
-	mod_import_paths map[string]string
-	mod_docs         map[string]doc.Doc
-	// directory -> file name
-	// projects         map[string]Project
-	docs             map[string]doc.Doc
-	tokens           map[string]map[string][]token.Token
-	asts             map[string]map[string]ast.File
-	current_file     string
+	files            map[string]string
 	root_path        string
 pub mut:
 	// TODO: replace with io.ReadWriter

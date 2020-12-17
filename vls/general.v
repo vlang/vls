@@ -31,12 +31,6 @@ fn (mut ls Vls) initialize(id int, params string) {
 // shutdown sets the state to shutdown but does not exit
 fn (mut ls Vls) shutdown(params string) {
 	ls.status = .shutdown
-	unsafe {
-		// ls.projects.free()
-		ls.mod_import_paths.free()
-		ls.import_graph.free()
-		ls.mod_docs.free()
-	}
 }
 
 // exit stops the process

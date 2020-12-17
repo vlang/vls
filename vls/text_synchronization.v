@@ -19,19 +19,20 @@ const (
 fn (mut ls Vls) did_open(id int, params string) {
 	did_open_params := json.decode(lsp.DidOpenTextDocumentParams, params) or { panic(err) }
 	source := did_open_params.text_document.text
+	ls.files[did_open_params.text_document.uri.str()] = source
 	ls.show_diagnostics(source, did_open_params.text_document.uri)
 }
 
 fn (mut ls Vls) did_change(id int, params string) {
 	did_change_params := json.decode(lsp.DidChangeTextDocumentParams, params) or { panic(err) }
 	source := did_change_params.content_changes[0].text
+	ls.files[did_change_params.text_document.uri.str()] = source
 	ls.show_diagnostics(source, did_change_params.text_document.uri)
 }
 
 fn (ls Vls) show_diagnostics(source string, uri lsp.DocumentUri) {
 	file_path := uri.path()
 	target_dir := os.dir(file_path)
-	ls.log_message(target_dir, .info)
 	scope := ast.Scope{
 		parent: 0
 	}
