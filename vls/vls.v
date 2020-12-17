@@ -10,7 +10,7 @@ import strings
 
 interface ReceiveSender {
 	send(data string)
-	receive() ?string 
+	receive() ?string
 }
 
 struct Vls {
@@ -44,36 +44,42 @@ pub fn (mut ls Vls) execute(payload string) {
 		ls.send(new_error(jsonrpc.parse_error))
 		return
 	}
-	if request.method != 'exit' && ls.status == .shutdown {
-		ls.send(new_error(jsonrpc.invalid_request))
-		return
-	}
-	if request.method != 'initialize' && ls.status != .initialized {
-		ls.send(new_error(jsonrpc.server_not_initialized))
-		return
-	}
-	match request.method {
-		'initialize' {
-			ls.initialize(request.id, request.params)
-		}
-		'initialized' {} // does nothing currently
-		'shutdown' {
-			ls.shutdown(request.params)
-		}
-		'exit' {
-			ls.exit(request.params)
-		}
-		'textDocument/didOpen' {
-			ls.did_open(request.id, request.params)
-		}
-		'textDocument/didChange' {
-			ls.did_change(request.id, request.params)
-		}
-		else {
-			if ls.status != .initialized {
-				ls.send(new_error(jsonrpc.server_not_initialized))
+	match .status{
+		.initialized {
+			match request.method { // not only requests but also notifications
+				'initialized' {} // does nothing currently
+				'shutdown' {
+					ls.shutdown(request.id, request.params)
+				}
+				'exit' {
+					ls.exit(request.params)
+				}
+				'textDocument/didOpen' {
+					ls.did_open(request.id, request.params)
+				}
+				'textDocument/didChange' {
+					ls.did_change(request.id, request.params)
+				}
+			}
+		} else {
+			match request.method {
+				'exit' {
+					ls.exit(request.params)
+				}
+				'initialize' {
+					ls.initialize(request.id, request.params)
+				}
+				else {
+					if .status == .shutdown {
+						ls.send(new_error(jsonrpc.invalid_request))
+					}
+					else {
+						ls.send(new_error(jsonrpc.server_not_initialized))
+					}
+				}
 			}
 		}
+
 	}
 }
 
