@@ -131,4 +131,8 @@ fn (mut ls Vls) completion(id int, params string) {
 		id: id
 		result: ls.cached_completion
 	}))
+
+	unsafe {
+		completion_items.free()
+	}
 }

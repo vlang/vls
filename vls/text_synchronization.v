@@ -90,6 +90,16 @@ fn (mut ls Vls) show_diagnostics(source string, uri lsp.DocumentUri) {
 	ls.files[parsed_file.path] = parsed_file
 	ls.tables[target_dir] = table
 	ls.publish_diagnostics(uri, diagnostics)
+
+	unsafe {
+		parsed_file.stmts.free()
+		parsed_file.errors.free()
+		parsed_file.warnings.free()
+		diagnostics.free()
+		source.free()
+	}
+}
+
 fn (mut ls Vls) extract_symbols(parsed_files []ast.File, table &table.Table) {
 	for file in parsed_files {
 		for stmt in file.stmts {
@@ -148,12 +158,16 @@ fn (mut ls Vls) parse_imports(parsed_files []ast.File, table &table.Table, pref 
 				ls.parse_imports(newly_parsed_files, table, pref, scope)
 				done_imports << imp.mod
 				found = true
+				unsafe { newly_parsed_files.free() }
 				break
 			}
 			if !found {
 				panic('cannot find module $imp.mod')
 			}
 		}
+	}
+	unsafe {
+		done_imports.free()
 	}
 }
 

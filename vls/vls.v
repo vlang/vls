@@ -1,7 +1,7 @@
 module vls
 
 import v.table
-import v.doc
+import lsp
 import v.token
 import v.ast
 import json
@@ -22,6 +22,7 @@ mut:
 	sources						map[string]string
 	tables						map[string]&table.Table
 	root_path         string
+	cached_completion []lsp.CompletionItem
 pub mut:
 	// TODO: replace with io.ReadWriter
 	io               ReceiveSender
@@ -65,6 +66,9 @@ pub fn (mut ls Vls) execute(payload string) {
 		}
 		'textDocument/didChange' {
 			ls.did_change(request.id, request.params)
+		}
+		'textDocument/completion' {
+			ls.completion(request.id, request.params)
 		}
 		else {
 			if ls.status != .initialized {

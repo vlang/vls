@@ -51,6 +51,12 @@ fn (mut ls Vls) initialize(id int, params string) {
 	ls.insert_files(parsed_builtin_files)
 	ls.parse_imports(parsed_builtin_files, ls.base_table, &pref, &scope)
 	ls.send(json.encode(result))
+
+	unsafe {
+		builtin_files.free()
+		files_to_parse.free()
+		parsed_builtin_files.free()
+	}
 }
 
 // shutdown sets the state to shutdown but does not exit
