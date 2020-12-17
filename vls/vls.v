@@ -15,27 +15,18 @@ interface ReceiveSender {
 
 struct Vls {
 mut:
-	table            &table.Table = table.new_table()
-	status           ServerStatus = .off
-	// imports
-	import_graph     map[string][]string
-	mod_import_paths map[string]string
-	mod_docs         map[string]doc.Doc
-	// directory -> file name
-	// projects         map[string]Project
-	docs             map[string]doc.Doc
-	tokens           map[string]map[string][]token.Token
-	asts             map[string]map[string]ast.File
-	current_file     string
-	root_path        string
+	base_table				&table.Table
 pub mut:
 	// TODO: replace with io.ReadWriter
 	io               ReceiveSender
 }
 
 pub fn new(io ReceiveSender) Vls {
+	mut tbl := table.new_table()
+	tbl.is_fmt = false
 	return Vls{
 		io: io
+		base_table: tbl
 	}
 }
 
