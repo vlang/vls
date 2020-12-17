@@ -88,6 +88,7 @@ fn (mut ls Vls) show_diagnostics(source string, uri lsp.DocumentUri) {
 
 	ls.sources[file_path] = source
 	ls.files[parsed_file.path] = parsed_file
+	ls.tables[target_dir] = table
 	ls.publish_diagnostics(uri, diagnostics)
 fn (mut ls Vls) extract_symbols(parsed_files []ast.File, table &table.Table) {
 	for file in parsed_files {

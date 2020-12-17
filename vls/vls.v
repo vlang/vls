@@ -20,6 +20,7 @@ mut:
 	symbols						map[string]&ast.Stmt
 	files							map[string]ast.File
 	sources						map[string]string
+	tables						map[string]&table.Table
 	root_path         string
 pub mut:
 	// TODO: replace with io.ReadWriter
