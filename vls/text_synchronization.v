@@ -28,10 +28,10 @@ fn (mut ls Vls) did_change(id int, params string) {
 	ls.show_diagnostics(source, did_change_params.text_document.uri)
 }
 
-fn (ls Vls) show_diagnostics(source string, uri lsp.DocumentUri) {
+fn (mut ls Vls) show_diagnostics(source string, uri lsp.DocumentUri) {
 	file_path := uri.path()
 	target_dir := os.dir(file_path)
-	ls.log_message(target_dir, .info)
+	// ls.log_message(target_dir, .info)
 	scope := ast.Scope{
 		parent: 0
 	}
@@ -47,48 +47,83 @@ fn (ls Vls) show_diagnostics(source string, uri lsp.DocumentUri) {
 			vmodules_path
 		]
 	}
-	table := table.new_table()
-	mut builtin_files := os.ls(builtin_path) or { panic(err) }
-	files_to_parse := pref.should_compile_filtered_files(builtin_path, builtin_files)
-	mut parsed_files := []ast.File{}
-	parsed_files << parser.parse_text(source, file_path, table, .skip_comments, &pref, &scope)
-	parsed_files << parser.parse_files(files_to_parse, table, &pref, &scope)
-	parsed_files << ls.parse_imports(parsed_files, table, &pref, &scope)
-	mut parsing_errors := false
-	for f in parsed_files {
-		if f.errors.len > 0 {
-			parsing_errors = true
-			break
-		}
+	table := ls.new_table()
+
+	if file_path in ls.sources {
+		ls.sources.delete(file_path)
 	}
-	if !parsing_errors {
+
+	if file_path in ls.files {
+		ls.files.delete(file_path)
+	}	
+
+	if target_dir in ls.tables {
+		ls.tables.delete(target_dir)
+	}	
+
+	mut parsed_file := parser.parse_text(source, file_path, table, .skip_comments, &pref, &scope)
+	if parsed_file.errors.len == 0 {
 		mut checker := checker.new_checker(table, &pref)
-		checker.check_files(parsed_files)
+		checker.check(parsed_file)
+		ls.extract_symbols([parsed_file], table)
+		ls.parse_imports([parsed_file], table, &pref, &scope)
 	}
+
 	mut diagnostics := []lsp.Diagnostic{}
-	for _, file in parsed_files {
-		if uri.ends_with(file.path) {
-			for _, error in file.errors {
-				diagnostics << lsp.Diagnostic{
-					range: position_to_range(source, error.pos)
-					severity: .error
-					message: error.message
-				}
-			}
-			for _, warning in file.warnings {
-				diagnostics << lsp.Diagnostic{
-					range: position_to_range(source, warning.pos)
-					severity: .warning
-					message: warning.message
-				}
-			}
+	for _, error in parsed_file.errors {
+		diagnostics << lsp.Diagnostic{
+			range: position_to_lsp_range(source, error.pos)
+			severity: .error
+			message: error.message
 		}
 	}
+
+	for _, warning in parsed_file.warnings {
+		diagnostics << lsp.Diagnostic{
+			range: position_to_lsp_range(source, warning.pos)
+			severity: .warning
+			message: warning.message
+		}
+	}
+
+	ls.sources[file_path] = source
+	ls.files[parsed_file.path] = parsed_file
 	ls.publish_diagnostics(uri, diagnostics)
+fn (mut ls Vls) extract_symbols(parsed_files []ast.File, table &table.Table) {
+	for file in parsed_files {
+		for stmt in file.stmts {
+			mut name := ''
+			match stmt {
+				ast.InterfaceDecl,
+				ast.StructDecl,
+				ast.EnumDecl {
+					name = stmt.name
+				}
+				ast.FnDecl {
+					name = stmt.name
+					
+					if stmt.is_method {
+						rec_name := table.type_to_str(stmt.receiver.typ)
+						name = rec_name + '.' + name
+					}
+				}
+				else { continue }
+			}
+			ls.symbols[name] = &stmt
+		}
+	}
 }
 
-fn (ls Vls) parse_imports(parsed_files []ast.File, table &table.Table, pref &pref.Preferences, scope &ast.Scope) []ast.File {
-	mut newly_parsed_files := []ast.File{}
+fn (mut ls Vls) insert_files(files []ast.File) int {
+	mut inserted := 0
+	for file in files {
+		ls.files[file.path] = file
+		inserted++
+	}
+	return inserted
+}
+
+fn (mut ls Vls) parse_imports(parsed_files []ast.File, table &table.Table, pref &pref.Preferences, scope &ast.Scope) {
 	mut done_imports := parsed_files.map(it.mod.name)
 
 	// NB: b.parsed_files is appended in the loop,
@@ -105,12 +140,11 @@ fn (ls Vls) parse_imports(parsed_files []ast.File, table &table.Table, pref &pre
 				if !os.exists(mod_dir) {
 					continue
 				}
-				mut files := os.ls(mod_dir) or {
-					[]string{}
-				}
+				mut files := os.ls(mod_dir) or { []string{} }
 				files = pref.should_compile_filtered_files(mod_dir, files)
-				newly_parsed_files << parser.parse_files(files, table, pref, scope)
-				newly_parsed_files << ls.parse_imports(newly_parsed_files, table, pref, scope)
+				newly_parsed_files := parser.parse_files(files, table, pref, scope)
+				ls.insert_files(newly_parsed_files)
+				ls.parse_imports(newly_parsed_files, table, pref, scope)
 				done_imports << imp.mod
 				found = true
 				break
@@ -120,5 +154,19 @@ fn (ls Vls) parse_imports(parsed_files []ast.File, table &table.Table, pref &pre
 			}
 		}
 	}
-	return newly_parsed_files
+}
+
+fn (ls Vls) new_table() &table.Table {
+	mut tbl := table.new_table()
+	tbl.types = ls.base_table.types.clone()
+	tbl.type_idxs = ls.base_table.type_idxs.clone()
+	tbl.fns = ls.base_table.fns.clone()
+	tbl.imports = ls.base_table.imports.clone()
+	tbl.modules = ls.base_table.modules.clone()
+	tbl.cflags = ls.base_table.cflags.clone()
+	tbl.redefined_fns = ls.base_table.redefined_fns.clone()
+	tbl.fn_gen_types = ls.base_table.fn_gen_types.clone()
+	tbl.cmod_prefix = ls.base_table.cmod_prefix
+	tbl.is_fmt = ls.base_table.is_fmt
+	return tbl
 }

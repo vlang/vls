@@ -16,6 +16,11 @@ interface ReceiveSender {
 struct Vls {
 mut:
 	base_table				&table.Table
+	status            ServerStatus = .off
+	symbols						map[string]&ast.Stmt
+	files							map[string]ast.File
+	sources						map[string]string
+	root_path         string
 pub mut:
 	// TODO: replace with io.ReadWriter
 	io               ReceiveSender
