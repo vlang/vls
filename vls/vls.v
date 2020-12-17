@@ -44,7 +44,7 @@ pub fn (mut ls Vls) execute(payload string) {
 		ls.send(new_error(jsonrpc.parse_error))
 		return
 	}
-	match .status{
+	match ls.status{
 		.initialized {
 			match request.method { // not only requests but also notifications
 				'initialized' {} // does nothing currently
@@ -60,6 +60,7 @@ pub fn (mut ls Vls) execute(payload string) {
 				'textDocument/didChange' {
 					ls.did_change(request.id, request.params)
 				}
+				else {}
 			}
 		} else {
 			match request.method {
@@ -70,7 +71,7 @@ pub fn (mut ls Vls) execute(payload string) {
 					ls.initialize(request.id, request.params)
 				}
 				else {
-					if .status == .shutdown {
+					if ls.status == .shutdown {
 						ls.send(new_error(jsonrpc.invalid_request))
 					}
 					else {
