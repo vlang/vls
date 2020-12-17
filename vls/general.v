@@ -14,6 +14,7 @@ fn (mut ls Vls) initialize(id int, params string) {
 		completion_provider: lsp.CompletionOptions{
 			resolve_provider: false
 		}
+		document_formatting_provider: true
 	}
 	result := jsonrpc.Response<lsp.InitializeResult>{
 		id: id

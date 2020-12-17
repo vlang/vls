@@ -10,7 +10,7 @@ import strings
 
 interface ReceiveSender {
 	send(data string)
-	receive() ?string 
+	receive() ?string
 }
 
 struct Vls {
@@ -68,6 +68,9 @@ pub fn (mut ls Vls) execute(payload string) {
 		}
 		'textDocument/didChange' {
 			ls.did_change(request.id, request.params)
+		}
+		'textDocument/formatting' {
+			ls.formatting(request.id, request.params)
 		}
 		else {
 			if ls.status != .initialized {
