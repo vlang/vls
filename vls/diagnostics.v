@@ -4,32 +4,37 @@ import lsp
 import json
 import jsonrpc
 import v.token
+import v.util
 
-fn position_to_range(source string, pos token.Position) lsp.Range {
-	before := source[..pos.pos]
-	mut end_pos := pos.pos + pos.len
-	part := if source.len > end_pos {
-		source[pos.pos..end_pos]
-	} else {
-		// eof error
-		''
-	}
-	start_char := before.all_after_last('\n').len
-	after_last_nl := part.all_after_last('\n')
-	end_line := pos.line_nr + part.count('\n')
-	mut end_char := after_last_nl.len
-	if pos.line_nr == end_line {
-		end_char += start_char
-	}
-	return  lsp.Range{
-		start: lsp.Position{
-			line: pos.line_nr
-			character: start_char
+// get_column computes the column of the source based on the given initial position
+fn get_column(source string, init_pos int) int {
+	mut p := init_pos
+	if source.len > 0 {
+		for ; p >= 0; p-- {
+			if source[p] == `\r` || source[p] == `\n` {
+				break
+			}
 		}
-		end: lsp.Position{
-			line: end_line
-			character: end_char
-		}
+	}
+	return p - 1
+}
+
+// position_to_lsp_pos converts the token.Position into lsp.Position
+pub fn position_to_lsp_pos(source string, pos token.Position) lsp.Position {
+	p := util.imax(0, util.imin(source.len - 1, pos.pos))
+	column := util.imax(0, pos.pos - get_column(source, p)) - 1
+	return lsp.Position{ 
+		line: pos.line_nr, 
+		character: util.imax(1, column) - 1
+	}
+}
+
+// position_to_lsp_pos converts the token.Position into lsp.Range
+fn position_to_lsp_range(source string, pos token.Position) lsp.Range {
+	start_pos := position_to_lsp_pos(source, pos)
+	return lsp.Range{ 
+		start: start_pos, 
+		end: { start_pos | character: start_pos.character + pos.len }
 	}
 }
 

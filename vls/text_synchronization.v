@@ -66,14 +66,14 @@ fn (mut ls Vls) show_diagnostics(source string, uri lsp.DocumentUri) {
 		if uri.ends_with(file.path) {
 			for _, error in file.errors {
 				diagnostics << lsp.Diagnostic{
-					range: position_to_range(source, error.pos)
+					range: position_to_lsp_range(source, error.pos)
 					severity: .error
 					message: error.message
 				}
 			}
 			for _, warning in file.warnings {
 				diagnostics << lsp.Diagnostic{
-					range: position_to_range(source, warning.pos)
+					range: position_to_lsp_range(source, warning.pos)
 					severity: .warning
 					message: warning.message
 				}
