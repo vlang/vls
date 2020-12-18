@@ -64,6 +64,9 @@ pub fn (mut ls Vls) execute(payload string) {
 			'textDocument/didChange' {
 				ls.did_change(request.id, request.params)
 			}
+			'textDocument/formatting' {
+				ls.formatting(request.id, request.params)
+			}
 			else {}
 		}
 	} else {
