@@ -19,14 +19,14 @@ const (
 fn (mut ls Vls) did_open(id int, params string) {
 	did_open_params := json.decode(lsp.DidOpenTextDocumentParams, params) or { panic(err) }
 	source := did_open_params.text_document.text
-	ls.files[did_open_params.text_document.uri.str()] = source
+	ls.sources[did_open_params.text_document.uri.str()] = source
 	ls.show_diagnostics(source, did_open_params.text_document.uri)
 }
 
 fn (mut ls Vls) did_change(id int, params string) {
 	did_change_params := json.decode(lsp.DidChangeTextDocumentParams, params) or { panic(err) }
 	source := did_change_params.content_changes[0].text
-	ls.files[did_change_params.text_document.uri.str()] = source
+	ls.sources[did_change_params.text_document.uri.str()] = source
 	ls.show_diagnostics(source, did_change_params.text_document.uri)
 }
 

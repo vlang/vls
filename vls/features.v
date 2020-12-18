@@ -17,7 +17,7 @@ fn (ls Vls) formatting(id int, params string) {
 	scope := ast.Scope{
 		parent: 0
 	}
-	source := ls.files[formatting_params.text_document.uri.str()]
+	source := ls.sources[formatting_params.text_document.uri.str()]
 	source_lines := source.split_into_lines()
 	file_path := formatting_params.text_document.uri.path()
 	file_ast := parser.parse_text(source, file_path, table, .skip_comments, &pref, &scope)
