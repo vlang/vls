@@ -20,7 +20,7 @@ fn (ls Vls) formatting(id int, params string) {
 	source := ls.sources[formatting_params.text_document.uri.str()]
 	source_lines := source.split_into_lines()
 	file_path := formatting_params.text_document.uri.path()
-	file_ast := parser.parse_text(source, file_path, table, .skip_comments, &pref, &scope)
+	file_ast := ls.files[file_path]
 	formatted_content := fmt.fmt(file_ast, table, false)
 	resp := jsonrpc.Response<[]lsp.TextEdit>{
 		id: id
