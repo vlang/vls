@@ -5,6 +5,7 @@ import v.ast
 import v.pref
 import json
 import jsonrpc
+import lsp
 
 interface ReceiveSender {
 	send(data string)
@@ -18,7 +19,10 @@ mut:
 	// which are only parsed once.
 	base_table &table.Table
 	status     ServerStatus = .off
+	// TODO: change map key to DocumentUri
+	// files  map[DocumentUri]ast.File
 	files      map[string]ast.File
+	// sources  map[DocumentUri]string
 	sources    map[string]string
 	// NB: a separate table is required for each folder in
 	// order to do functions such as typ_to_string or when
@@ -28,6 +32,7 @@ mut:
 	// A single table is not feasible since files are always
 	// changing and there can be instances that a change might
 	// break another module/project data.
+	// tables  map[DocumentUri]&table.Table
 	tables     map[string]&table.Table
 	root_path  string
 pub mut:
@@ -124,10 +129,14 @@ fn new_scope_and_pref(lookup_paths ...string) (&ast.Scope, &pref.Preferences) {
 
 fn (mut ls Vls) insert_files(files []ast.File) {
 	for file in files {
-		if file.path in ls.files {
-			ls.files.delete(file.path)
+		file_uri := lsp.document_uri_from_path(file.path)
+		if file_uri in ls.files {
+			ls.files.delete(file_uri)
 		}
-		ls.files[file.path] = file
+		ls.files[file_uri.str()] = file
+		unsafe {
+			file_uri.free()
+		}
 	}
 }
 
