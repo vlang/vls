@@ -3,7 +3,6 @@ module vls
 import lsp
 import json
 import jsonrpc
-import v.parser
 import v.table
 import v.pref
 import v.fmt
