@@ -27,26 +27,15 @@ fn (mut ls Vls) initialize(id int, params string) {
 	ls.send(json.encode(result))
 }
 
-struct NullResponse {
-	jsonrpc string = jsonrpc.version
-	id      int
-	result  string = 'null'
-}
-
 // shutdown sets the state to shutdown but does not exit
 fn (mut ls Vls) shutdown(id int, params string) {
 	ls.status = .shutdown
-	result := NullResponse{
+	result := jsonrpc.Response<string>{
 		id: id
+		result: 'null'
 		// error: code and message set in case an exception happens during shutdown request
 	}
 	ls.send(json.encode(result))
-	unsafe {
-		// ls.projects.free()
-		ls.mod_import_paths.free()
-		ls.import_graph.free()
-		ls.mod_docs.free()
-	}
 }
 
 // exit stops the process
