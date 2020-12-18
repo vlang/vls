@@ -21,7 +21,6 @@ fn (mut ls Vls) initialize(id int, params string) {
 	// only files are supported right now
 	ls.root_path = initialize_params.root_uri.path()
 	ls.status = .initialized
-
 	// since builtin is used frequently, they should be parsed first and only once
 	scope, pref := new_scope_and_pref()
 	builtin_files := os.ls(builtin_path) or { panic(err) }
@@ -30,7 +29,6 @@ fn (mut ls Vls) initialize(id int, params string) {
 	parsed_files << ls.parse_imports(parsed_files, ls.base_table, pref, scope)
 	ls.insert_files(parsed_files)
 	ls.send(json.encode(result))
-
 	unsafe {
 		builtin_files.free()
 		files_to_parse.free()

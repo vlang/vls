@@ -8,7 +8,7 @@ import jsonrpc
 
 interface ReceiveSender {
 	send(data string)
-	receive() ?string 
+	receive() ?string
 }
 
 struct Vls {
@@ -16,10 +16,10 @@ mut:
 	// NB: a base table is required since this is where we
 	// are gonna store the information for the builtin types
 	// which are only parsed once.
-	base_table				&table.Table
-	status            ServerStatus = .off
-	files							map[string]ast.File
-	sources						map[string]string
+	base_table &table.Table
+	status     ServerStatus = .off
+	files      map[string]ast.File
+	sources    map[string]string
 	// NB: a separate table is required for each folder in
 	// order to do functions such as typ_to_string or when
 	// some of the features needed additional information
@@ -28,11 +28,11 @@ mut:
 	// A single table is not feasible since files are always
 	// changing and there can be instances that a change might
 	// break another module/project data.
-	tables						map[string]&table.Table
-	root_path         string
+	tables     map[string]&table.Table
+	root_path  string
 pub mut:
 	// TODO: replace with io.ReadWriter
-	io               ReceiveSender
+	io         ReceiveSender
 }
 
 pub fn new(io ReceiveSender) Vls {
@@ -107,18 +107,15 @@ fn new_scope_and_pref(lookup_paths ...string) (&ast.Scope, &pref.Preferences) {
 		lookup_path := lookup_paths[i]
 		lpaths.prepend(lookup_path)
 	}
-
 	scope := &ast.Scope{
 		parent: 0
 	}
-
 	prefs := &pref.Preferences{
 		output_mode: .silent
 		backend: .c
 		os: ._auto
 		lookup_path: lpaths
 	}
-
 	return scope, prefs
 }
 
@@ -126,8 +123,7 @@ fn (mut ls Vls) insert_files(files []ast.File) {
 	for file in files {
 		if file.path in ls.files {
 			ls.files.delete(file.path)
-		}	
-
+		}
 		ls.files[file.path] = file
 	}
 }
@@ -155,11 +151,11 @@ pub enum ServerStatus {
 }
 
 // with error
-struct JrpcResponse2<T> {
+struct JrpcResponse2 <T> {
 	jsonrpc string = jsonrpc.version
-	id int
-	error jsonrpc.ResponseError
-	result T
+	id      int
+	error   jsonrpc.ResponseError
+	result  T
 }
 
 [inline]
