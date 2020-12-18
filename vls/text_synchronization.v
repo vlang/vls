@@ -37,6 +37,28 @@ fn (mut ls Vls) did_change(id int, params string) {
 	ls.sources[uri.str()] = source
 	ls.show_diagnostics(source, uri)
 }
+
+fn (mut ls Vls) did_close(id int, params string) {
+	did_close_params := json.decode(lsp.DidCloseTextDocumentParams, params) or { panic(err) }
+	uri := did_close_params.text_document.uri
+	file_dir := os.dir(uri)
+	mut no_active_files := true
+
+	for f_uri, _ in ls.files {
+		if f_uri != uri && f_uri.starts_with(file_dir) {
+			no_active_files = false
+			break
+		}
+	}
+	
+	if no_active_files {
+		ls.tables.delete(file_dir)
+	}
+	
+	ls.sources.delete(uri.str())
+	ls.files.delete(uri.str())
+	// clear diagnostics
+	ls.publish_diagnostics(did_close_params.text_document.uri, []lsp.Diagnostic{})
 }
 
 fn (mut ls Vls) show_diagnostics(source string, uri lsp.DocumentUri) {
