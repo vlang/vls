@@ -38,8 +38,9 @@ fn (mut ls Vls) show_diagnostics(source string, uri lsp.DocumentUri) {
 	mut has_errors := false
 	mut parsed_files := []ast.File{}
 	mut diagnostics := []lsp.Diagnostic{}
-	if file_path in ls.sources {
-		ls.sources.delete(file_path)
+	// TODO: move this out from show_diagnostics
+	if uri.str() in ls.sources {
+		ls.sources.delete(uri.str())
 	}
 	if target_dir in ls.tables {
 		ls.tables.delete(target_dir)
@@ -75,7 +76,8 @@ fn (mut ls Vls) show_diagnostics(source string, uri lsp.DocumentUri) {
 			}
 		}
 	}
-	ls.sources[file_path] = source
+	// TODO: move this out from show_diagnostics
+	ls.sources[uri.str()] = source
 	ls.tables[target_dir] = table
 	ls.insert_files(parsed_files)
 	ls.publish_diagnostics(uri, diagnostics)

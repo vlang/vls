@@ -3,6 +3,7 @@ module lsp
 // method: ‘textDocument/formatting’
 // response: []TextEdit | none
 pub struct DocumentFormattingParams {
+pub:
 	text_document TextDocumentIdentifier [json: textDocument]
 	options       FormattingOptions
 }

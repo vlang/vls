@@ -74,6 +74,9 @@ pub fn (mut ls Vls) execute(payload string) {
 		'textDocument/didChange' {
 			ls.did_change(request.id, request.params)
 		}
+		'textDocument/formatting' {
+			ls.formatting(request.id, request.params)
+		}
 		else {
 			if ls.status != .initialized {
 				ls.send(new_error(jsonrpc.server_not_initialized))
