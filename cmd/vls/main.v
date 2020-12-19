@@ -2,16 +2,11 @@ module main
 
 import cli
 import vls
+import v.vmod
 import os
 
 const (
-	// flag name - description
-	feature_flag_data = {
-		'diagnostics': 'the diagnostics feature'
-		'completion': 'the autocompletion feature'
-		'document-symbols': 'the document symbols feature'
-		'workspace-symbols': 'the workspace symbols feature'
-	}
+	meta = vmod.decode(@VMOD_FILE)?
 )
 
 fn run_cli(cmd cli.Command) ? {
@@ -22,8 +17,8 @@ fn run_cli(cmd cli.Command) ? {
 fn main() {
 	mut cmd := cli.Command{
 		name: 'vls'
-		version: '0.0.1'
-		description: 'vls is a language server for the V language.'
+		version: meta.version
+		description: meta.description
 		execute: run_cli
 	}
 
