@@ -5,6 +5,7 @@ import v.ast
 import v.pref
 import json
 import jsonrpc
+import lsp
 
 interface ReceiveSender {
 	send(data string)
@@ -18,7 +19,10 @@ mut:
 	// which are only parsed once.
 	base_table &table.Table
 	status     ServerStatus = .off
+	// TODO: change map key to DocumentUri
+	// files  map[DocumentUri]ast.File
 	files      map[string]ast.File
+	// sources  map[DocumentUri]string
 	sources    map[string]string
 	// NB: a separate table is required for each folder in
 	// order to do functions such as typ_to_string or when
@@ -28,8 +32,9 @@ mut:
 	// A single table is not feasible since files are always
 	// changing and there can be instances that a change might
 	// break another module/project data.
+	// tables  map[DocumentUri]&table.Table
 	tables     map[string]&table.Table
-	root_path  string
+	root_path  lsp.DocumentUri
 pub mut:
 	// TODO: replace with io.ReadWriter
 	io         ReceiveSender
@@ -74,6 +79,9 @@ pub fn (mut ls Vls) execute(payload string) {
 		'textDocument/didChange' {
 			ls.did_change(request.id, request.params)
 		}
+		'textDocument/didClose' {
+			ls.did_close(request.id, request.params)
+		}
 		'textDocument/formatting' {
 			ls.formatting(request.id, request.params)
 		}
@@ -103,7 +111,7 @@ pub fn (mut ls Vls) start_loop() {
 	}
 }
 
-//
+// new_scope_and_pref returns a new instance of scope and pref based on the given lookup paths
 fn new_scope_and_pref(lookup_paths ...string) (&ast.Scope, &pref.Preferences) {
 	mut lpaths := [vlib_path, vmodules_path]
 	for i := lookup_paths.len - 1; i >= 0; i-- {
@@ -122,16 +130,21 @@ fn new_scope_and_pref(lookup_paths ...string) (&ast.Scope, &pref.Preferences) {
 	return scope, prefs
 }
 
+// insert_files inserts an array file asts onto the ls.files map
 fn (mut ls Vls) insert_files(files []ast.File) {
 	for file in files {
-		if file.path in ls.files {
-			ls.files.delete(file.path)
+		file_uri := lsp.document_uri_from_path(file.path)
+		if file_uri in ls.files {
+			ls.files.delete(file_uri)
 		}
-		ls.files[file.path] = file
+		ls.files[file_uri.str()] = file
+		unsafe {
+			file_uri.free()
+		}
 	}
 }
 
-// new_table returns a new table based on the existing data from base_table
+// new_table returns a new table based on the existing data of base_table
 fn (ls Vls) new_table() &table.Table {
 	mut tbl := table.new_table()
 	tbl.types = ls.base_table.types.clone()
