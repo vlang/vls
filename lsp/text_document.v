@@ -36,7 +36,7 @@ pub:
 
 pub struct VersionedTextDocumentIdentifier {
 pub:
-	uri     string
+	uri     DocumentUri
 	version int
 }
 

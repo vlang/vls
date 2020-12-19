@@ -19,7 +19,7 @@ fn (mut ls Vls) initialize(id int, params string) {
 		}
 	}
 	// only files are supported right now
-	ls.root_path = initialize_params.root_uri.path()
+	ls.root_path = initialize_params.root_uri
 	ls.status = .initialized
 	// since builtin is used frequently, they should be parsed first and only once
 	scope, pref := new_scope_and_pref()
