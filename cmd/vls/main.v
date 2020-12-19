@@ -16,10 +16,12 @@ fn run_cli(cmd cli.Command) ? {
 	enable_features := if enable_flag_raw.len > 0 { enable_flag_raw.split(',') } else { []string{} }
 	disable_features := if disable_flag_raw.len > 0 { disable_flag_raw.split(',') } else { []string{} }
 	ls.set_features(enable_features, true) or {
-		panic('error: $err')
+		eprintln('error: $err')
+		exit(1)
 	}
 	ls.set_features(disable_features, false) or {
-		panic('error: $err')
+		eprintln('error: $err')
+		exit(1)
 	}
 	ls.start_loop()
 }
