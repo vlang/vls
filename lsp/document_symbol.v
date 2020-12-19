@@ -4,7 +4,7 @@ module lsp
 // response: []DocumentSymbol | []SymbolInformation | none
 pub struct DocumentSymbolParams {
 pub:
-	text_document TextDocumentIdentifier [json:textDocument]
+	text_document TextDocumentIdentifier [json: textDocument]
 }
 
 pub enum SymbolKind {
@@ -38,20 +38,20 @@ pub enum SymbolKind {
 
 pub struct DocumentSymbol {
 pub mut:
-	name string
-	detail string
-	kind SymbolKind
-	deprecated bool
-	range Range
-	selection_range Range [json:selectionRange]
-	children []DocumentSymbol
+	name            string
+	detail          string
+	kind            SymbolKind
+	deprecated      bool
+	range           Range
+	selection_range Range            [json: selectionRange]
+	children        []DocumentSymbol
 }
 
 pub struct SymbolInformation {
 pub mut:
-	name string
-	kind SymbolKind
-	deprecated bool
-	location Location
-	container_name string [json:containerName]
+	name           string
+	kind           SymbolKind
+	deprecated     bool
+	location       Location
+	container_name string     [json: containerName]
 }
