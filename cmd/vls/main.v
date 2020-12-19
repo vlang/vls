@@ -11,6 +11,16 @@ const (
 
 fn run_cli(cmd cli.Command) ? {
 	mut ls := vls.new(Stdio{})
+	enable_flag_raw := cmd.flags.get_string('enable') or { '' }
+	disable_flag_raw := cmd.flags.get_string('disable') or { '' }
+	enable_features := if enable_flag_raw.len > 0 { enable_flag_raw.split(',') } else { []string{} }
+	disable_features := if disable_flag_raw.len > 0 { disable_flag_raw.split(',') } else { []string{} }
+	ls.set_features(enable_features, true) or {
+		panic('error: $err')
+	}
+	ls.set_features(disable_features, false) or {
+		panic('error: $err')
+	}
 	ls.start_loop()
 }
 
@@ -22,22 +32,20 @@ fn main() {
 		execute: run_cli
 	}
 
-	for name, desc in feature_flag_data {
-		cmd.add_flags([
-			cli.Flag{
-				flag: .bool
-				name: 'enable-$name'
-				description: 'Enables $desc'
-				value: 'true'
-			},
-			cli.Flag{
-				flag: .bool
-				name: 'disable-$name'
-				description: 'Disables $desc'
-				value: 'false'
-			}
-		])
-	}
+	cmd.add_flags([
+		cli.Flag{
+			flag: .string
+			name: 'enable'
+			abbrev: 'e'
+			description: 'Enables specific language features.'
+		},
+		cli.Flag{
+			flag: .string
+			name: 'disable'
+			abbrev: 'd'
+			description: 'Disables specific language features.'
+		}
+	])
 
 	cmd.parse(os.args)
 }

@@ -6,6 +6,15 @@ import v.pref
 import json
 import jsonrpc
 
+pub const (
+	// These are the list of features available in VLS
+	// If the feature is experimental, the name should have a `experimental:` prefix
+	features_list = [
+		'diagnostics', 
+		'formatting'
+	]
+)
+
 interface ReceiveSender {
 	send(data string)
 	receive() ?string
@@ -30,17 +39,27 @@ mut:
 	// break another module/project data.
 	tables     map[string]&table.Table
 	root_path  string
+	enabled_features   map[string]bool
 pub mut:
 	// TODO: replace with io.ReadWriter
 	io         ReceiveSender
 }
 
 pub fn new(io ReceiveSender) Vls {
+	mut enabled_features := map[string]bool{}
 	mut tbl := table.new_table()
 	tbl.is_fmt = false
+	for f_name in features_list {
+		is_experimental := f_name.starts_with('experimental:')
+		features_name := f_name.all_after('experimental:')
+		// stable feature (!is_experimental) = true
+		// experimental = false
+		enabled_features[features_name] = !is_experimental
+	}
 	return Vls{
 		io: io
 		base_table: tbl
+		enabled_features: enabled_features
 	}
 }
 
@@ -75,7 +94,9 @@ pub fn (mut ls Vls) execute(payload string) {
 			ls.did_change(request.id, request.params)
 		}
 		'textDocument/formatting' {
-			ls.formatting(request.id, request.params)
+			if ls.enabled_features['formatting'] {
+				ls.formatting(request.id, request.params)
+			}
 		}
 		else {
 			if ls.status != .initialized {
@@ -145,6 +166,17 @@ fn (ls Vls) new_table() &table.Table {
 	tbl.cmod_prefix = ls.base_table.cmod_prefix
 	tbl.is_fmt = ls.base_table.is_fmt
 	return tbl
+}
+
+// set_features enables or disables a language feature. emits an error if not found
+pub fn (mut ls Vls) set_features(features []string, state bool) ? {
+	for feature_name in features {
+		if feature_name !in ls.enabled_features {
+			return error('feature "$feature_name" not found')
+		}
+
+		ls.enabled_features[feature_name] = state
+	}
 }
 
 pub enum ServerStatus {
