@@ -43,22 +43,25 @@ fn (mut ls Vls) did_close(id int, params string) {
 	uri := did_close_params.text_document.uri
 	file_dir := os.dir(uri)
 	mut no_active_files := true
-
+	ls.sources.delete(uri.str())
+	ls.files.delete(uri.str())
 	for f_uri, _ in ls.files {
-		if f_uri != uri && f_uri.starts_with(file_dir) {
+		if f_uri.starts_with(file_dir) {
 			no_active_files = false
 			break
 		}
 	}
-	
 	if no_active_files {
-		ls.tables.delete(file_dir)
+		ls.tables.delete(file_dir)	
 	}
-	
-	ls.sources.delete(uri.str())
-	ls.files.delete(uri.str())
-	// clear diagnostics
-	ls.publish_diagnostics(did_close_params.text_document.uri, []lsp.Diagnostic{})
+	// NB: The diagnostics will be cleared if:
+  // - TODO: If a workspace has opened multiple programs with main() function and one of them is closed.
+  // - If a file opened is outside the root path or workspace.
+  // - If there are no remaining files opened on a specific folder.
+	if no_active_files || !uri.starts_with(ls.root_path) {
+		// clear diagnostics
+		ls.publish_diagnostics(uri, []lsp.Diagnostic{})
+	}
 }
 
 fn (mut ls Vls) show_diagnostics(source string, uri lsp.DocumentUri) {
