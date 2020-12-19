@@ -20,8 +20,7 @@ fn (mut ls Vls) did_open(id int, params string) {
 	did_open_params := json.decode(lsp.DidOpenTextDocumentParams, params) or { panic(err) }
 	source := did_open_params.text_document.text
 	uri := did_open_params.text_document.uri
-	
-	ls.sources[uri.str()] = source
+	ls.process_file(source, uri)
 	ls.show_diagnostics(source, uri)
 }
 
@@ -29,12 +28,7 @@ fn (mut ls Vls) did_change(id int, params string) {
 	did_change_params := json.decode(lsp.DidChangeTextDocumentParams, params) or { panic(err) }
 	source := did_change_params.content_changes[0].text
 	uri := did_change_params.text_document.uri
-
-	if uri in ls.sources {
-		ls.sources.delete(uri)
-	}
-
-	ls.sources[uri.str()] = source
+	ls.process_file(source, uri)
 	ls.show_diagnostics(source, uri)
 }
 
@@ -64,7 +58,7 @@ fn (mut ls Vls) did_close(id int, params string) {
 	}
 }
 
-fn (mut ls Vls) show_diagnostics(source string, uri lsp.DocumentUri) {
+fn (mut ls Vls) process_file(source string, uri lsp.DocumentUri) {
 	file_path := uri.path()
 	target_dir := os.dir(file_path)
 	target_dir_uri := os.dir(uri)
@@ -73,7 +67,7 @@ fn (mut ls Vls) show_diagnostics(source string, uri lsp.DocumentUri) {
 		'modules'))
 	table := ls.new_table()
 	mut parsed_files := []ast.File{}
-	
+	mut has_errors := false
 	parsed_files <<
 		parser.parse_text(source, file_path, table, .skip_comments, pref, scope)
 	parsed_files << ls.parse_imports(parsed_files, table, pref, scope)
@@ -87,9 +81,13 @@ fn (mut ls Vls) show_diagnostics(source string, uri lsp.DocumentUri) {
 		mut checker := checker.new_checker(table, pref)
 		checker.check_files(parsed_files)
 	}
+	if uri in ls.sources {
+		ls.sources.delete(uri)
+	}
 	if target_dir_uri in ls.tables {
 		ls.tables.delete(target_dir_uri)
 	}
+	ls.sources[uri.str()] = source
 	ls.tables[target_dir] = table
 	ls.insert_files(parsed_files)
 	unsafe {
