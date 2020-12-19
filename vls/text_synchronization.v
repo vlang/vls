@@ -69,9 +69,8 @@ fn (mut ls Vls) show_diagnostics(source string, uri lsp.DocumentUri) {
 	scope, pref := new_scope_and_pref(target_dir, os.dir(target_dir), os.join_path(target_dir,
 		'modules'))
 	table := ls.new_table()
-	mut has_errors := false
 	mut parsed_files := []ast.File{}
-	mut diagnostics := []lsp.Diagnostic{}
+	
 	parsed_files <<
 		parser.parse_text(source, file_path, table, .skip_comments, pref, scope)
 	parsed_files << ls.parse_imports(parsed_files, table, pref, scope)
@@ -90,28 +89,8 @@ fn (mut ls Vls) show_diagnostics(source string, uri lsp.DocumentUri) {
 	}
 	ls.tables[target_dir] = table
 	ls.insert_files(parsed_files)
-	for _, file in parsed_files {
-		if uri.ends_with(file.path) {
-			for _, error in file.errors {
-				diagnostics << lsp.Diagnostic{
-					range: position_to_lsp_range(source, error.pos)
-					severity: .error
-					message: error.message
-				}
-			}
-			for _, warning in file.warnings {
-				diagnostics << lsp.Diagnostic{
-					range: position_to_lsp_range(source, warning.pos)
-					severity: .warning
-					message: warning.message
-				}
-			}
-		}
-	}
-	ls.publish_diagnostics(uri, diagnostics)
 	unsafe {
 		parsed_files.free()
-		diagnostics.free()
 		source.free()
 	}
 }
