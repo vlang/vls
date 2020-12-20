@@ -68,7 +68,7 @@ pub fn (mut ls Vls) execute(payload string) {
 		}
 		'initialized' {} // does nothing currently
 		'shutdown' {
-			ls.shutdown(request.params)
+			ls.shutdown(request.id)
 		}
 		'exit' {
 			ls.exit()
