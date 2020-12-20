@@ -6,6 +6,31 @@ import jsonrpc
 import v.token
 import v.util
 
+// compute_offset returns a byte offset from the given position
+pub fn compute_offset(source string, line int, col int) int {
+	lines := source.split_into_lines()
+	mut offset := 0
+	for i, ln in lines {
+		if i == line {
+			if col > ln.len {
+				return -1
+			}
+			if ln.len == 0 {
+				offset++
+				break
+			}
+			offset += col
+			break
+		} else {
+			offset += ln.len+1
+		}
+	}
+	unsafe {
+		lines.free()
+	}
+	return offset
+}
+
 // get_column computes the column of the source based on the given initial position
 fn get_column(source string, init_pos int) int {
 	mut p := init_pos
