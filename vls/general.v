@@ -42,7 +42,7 @@ fn (mut ls Vls) shutdown(params string) {
 }
 
 // exit stops the process
-fn (ls Vls) exit(params string) {
+fn (ls Vls) exit() {
 	// move exit to shutdown for now
 	// == .shutdown => 0
 	// != .shutdown => 1
