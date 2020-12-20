@@ -5,8 +5,6 @@ import json
 import jsonrpc
 import os
 import v.parser
-import v.pref
-import v.ast
 
 // initialize sends the server capabilities to the client
 fn (mut ls Vls) initialize(id int, params string) {
@@ -26,36 +24,20 @@ fn (mut ls Vls) initialize(id int, params string) {
 		}
 	}
 	// only files are supported right now
-	ls.root_path = initialize_params.root_uri.path()
+	ls.root_path = initialize_params.root_uri
 	ls.status = .initialized
-
 	// since builtin is used frequently, they should be parsed first and only once
-	scope := ast.Scope{
-		parent: 0
-	}
-
-	pref := pref.Preferences{
-		output_mode: .silent
-		backend: .c
-		os: ._auto
-		lookup_path: [
-			vlib_path,
-			vmodules_path
-		]
-	}
-
+	scope, pref := new_scope_and_pref()
 	builtin_files := os.ls(builtin_path) or { panic(err) }
 	files_to_parse := pref.should_compile_filtered_files(builtin_path, builtin_files)
-	parsed_builtin_files := parser.parse_files(files_to_parse, ls.base_table, &pref, &scope)
-	ls.extract_symbols(parsed_builtin_files, ls.base_table)
-	ls.insert_files(parsed_builtin_files)
-	ls.parse_imports(parsed_builtin_files, ls.base_table, &pref, &scope)
+	mut parsed_files := parser.parse_files(files_to_parse, ls.base_table, pref, scope)
+	parsed_files << ls.parse_imports(parsed_files, ls.base_table, pref, scope)
+	ls.insert_files(parsed_files)
 	ls.send(json.encode(result))
-
 	unsafe {
 		builtin_files.free()
 		files_to_parse.free()
-		parsed_builtin_files.free()
+		parsed_files.free()
 	}
 }
 

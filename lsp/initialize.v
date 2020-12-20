@@ -8,7 +8,7 @@ pub mut:
 	process_id             int                [skip]
 	client_info            ClientInfo         [skip; json: clientInfo]
 	root_uri               DocumentUri        [json: rootUri]
-	root_path              string             [json: rootPath]
+	root_path              DocumentUri        [json: rootPath]
 	initialization_options string             [skip; json: initializationOptions]
 	capabilities           ClientCapabilities [skip]
 	trace                  string

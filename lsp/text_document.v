@@ -14,7 +14,7 @@ pub:
 
 pub struct TextEdit {
 	range    Range
-	new_text string
+	new_text string [json:newText]
 }
 
 pub struct TextDocumentIdentifier {
@@ -37,7 +37,7 @@ pub:
 
 pub struct VersionedTextDocumentIdentifier {
 pub:
-	uri     string
+	uri     DocumentUri
 	version int
 }
 
