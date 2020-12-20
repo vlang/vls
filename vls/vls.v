@@ -71,7 +71,7 @@ pub fn (mut ls Vls) execute(payload string) {
 			ls.shutdown(request.params)
 		}
 		'exit' {
-			ls.exit(request.params)
+			ls.exit()
 		}
 		'textDocument/didOpen' {
 			ls.did_open(request.id, request.params)
