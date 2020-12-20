@@ -54,40 +54,44 @@ pub fn (mut ls Vls) execute(payload string) {
 		ls.send(new_error(jsonrpc.parse_error))
 		return
 	}
-	if request.method != 'exit' && ls.status == .shutdown {
-		ls.send(new_error(jsonrpc.invalid_request))
-		return
-	}
-	if request.method != 'initialize' && ls.status != .initialized {
-		ls.send(new_error(jsonrpc.server_not_initialized))
-		return
-	}
-	match request.method {
-		'initialize' {
-			ls.initialize(request.id, request.params)
+	if ls.status == .initialized {
+		match request.method { // not only requests but also notifications
+			'initialized' {} // does nothing currently
+			'shutdown' {
+				ls.shutdown(request.id)
+			}
+			'exit' {
+				ls.exit()
+			}
+			'textDocument/didOpen' {
+				ls.did_open(request.id, request.params)
+			}
+			'textDocument/didChange' {
+				ls.did_change(request.id, request.params)
+			}
+			'textDocument/didClose' {
+				ls.did_close(request.id, request.params)
+			}
+			'textDocument/formatting' {
+				ls.formatting(request.id, request.params)
+			}
+			else {}
 		}
-		'initialized' {} // does nothing currently
-		'shutdown' {
-			ls.shutdown(request.id)
-		}
-		'exit' {
-			ls.exit()
-		}
-		'textDocument/didOpen' {
-			ls.did_open(request.id, request.params)
-		}
-		'textDocument/didChange' {
-			ls.did_change(request.id, request.params)
-		}
-		'textDocument/didClose' {
-			ls.did_close(request.id, request.params)
-		}
-		'textDocument/formatting' {
-			ls.formatting(request.id, request.params)
-		}
-		else {
-			if ls.status != .initialized {
-				ls.send(new_error(jsonrpc.server_not_initialized))
+	} else {
+		match request.method {
+			'exit' {
+				ls.exit()
+			}
+			'initialize' {
+				ls.initialize(request.id, request.params)
+			}
+			else {
+				if ls.status == .shutdown {
+					ls.send(new_error(jsonrpc.invalid_request))
+				}
+				else {
+					ls.send(new_error(jsonrpc.server_not_initialized))
+				}
 			}
 		}
 	}
