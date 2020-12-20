@@ -7,12 +7,27 @@ import json
 import jsonrpc
 import lsp
 
-pub const (
-	// These are the list of features available in VLS
-	// If the feature is experimental, the name should have a `experimental:` prefix
-	features_list = [
-		'diagnostics', 
-		'formatting'
+// These are the list of features available in VLS
+// If the feature is experimental, the value name should have a `exp_` prefix
+pub enum Feature {
+	diagnostics
+	formatting
+}
+
+// feature_from_str returns the Feature-enum value equivalent of the given string.
+// used internally for Vls.set_features method only.
+fn feature_from_str(feature_name string) ?Feature {
+	match feature_name {
+		'diagnostics' { return Feature.diagnostics }
+		'formatting' { return Feature.formatting }
+		else { return error('feature "$feature_name" not found') }
+	}
+}
+
+const (
+	default_features_list = [
+		Feature.diagnostics,
+		.formatting
 	]
 )
 
@@ -44,7 +59,7 @@ mut:
 	// tables  map[DocumentUri]&table.Table
 	tables     map[string]&table.Table
 	root_path  lsp.DocumentUri
-	enabled_features   map[string]bool
+	enabled_features   []Feature = default_features_list
 pub mut:
 	// TODO: replace with io.ReadWriter
 	io         ReceiveSender
@@ -54,17 +69,9 @@ pub fn new(io ReceiveSender) Vls {
 	mut enabled_features := map[string]bool{}
 	mut tbl := table.new_table()
 	tbl.is_fmt = false
-	for f_name in features_list {
-		is_experimental := f_name.starts_with('experimental:')
-		features_name := f_name.all_after('experimental:')
-		// stable feature (!is_experimental) = true
-		// experimental = false
-		enabled_features[features_name] = !is_experimental
-	}
 	return Vls{
 		io: io
 		base_table: tbl
-		enabled_features: enabled_features
 	}
 }
 
@@ -102,7 +109,7 @@ pub fn (mut ls Vls) execute(payload string) {
 			ls.did_close(request.id, request.params)
 		}
 		'textDocument/formatting' {
-			if ls.enabled_features['formatting'] {
+			if ls.enabled_features.has(.formatting) {
 				ls.formatting(request.id, request.params)
 			}
 		}
@@ -182,13 +189,25 @@ fn (ls Vls) new_table() &table.Table {
 }
 
 // set_features enables or disables a language feature. emits an error if not found
-pub fn (mut ls Vls) set_features(features []string, state bool) ? {
+pub fn (mut ls Vls) set_features(features []string, enable bool) ? {
 	for feature_name in features {
-		if feature_name !in ls.enabled_features {
-			return error('feature "$feature_name" not found')
+		feature_val := feature_from_str(feature_name)?
+		if feature_val !in ls.enabled_features && !enable {
+			return error('feature "$feature_name" is already disabled')
+		} else if feature_val in ls.enabled_features && enable {
+			return error('feature "$feature_name" is already enabled')
+		} else if feature_val !in ls.enabled_features && enable {
+			ls.enabled_features << feature_val
+		} else {
+			mut idx := -1
+			for i, f in ls.enabled_features {
+				if f == feature_val {
+					idx = i
+					break
+				}
+			}
+			ls.enabled_features.delete(idx)
 		}
-
-		ls.enabled_features[feature_name] = state
 	}
 }
 
