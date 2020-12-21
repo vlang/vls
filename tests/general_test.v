@@ -48,9 +48,13 @@ fn test_shutdown() {
 fn test_set_features() {
 	mut io := testing.Testio{}
 	mut ls := vls.new(io)
-	assert ls.features() == ['formatting', 'diagnostics']
+	assert ls.features() == ['diagnostics', 'formatting']
 	ls.set_features(['formatting'], false)
 	assert ls.features() == ['diagnostics']
 	ls.set_features(['formatting'], true)
-	assert ls.features() == ['formatting', 'diagnostics']
+	assert ls.features() == ['diagnostics', 'formatting']
+	ls.set_features(['logging'], true) or {
+		assert err == 'feature "logging" not found'
+		return
+	}
 }
