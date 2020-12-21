@@ -32,13 +32,14 @@ fn (mut ls Vls) initialize(id int, params string) {
 	files_to_parse := pref.should_compile_filtered_files(builtin_path, builtin_files)
 	mut parsed_files := parser.parse_files(files_to_parse, ls.base_table, pref, scope)
 	parsed_files << ls.parse_imports(parsed_files, ls.base_table, pref, scope)
+	ls.extract_symbols(parsed_files, ls.base_table, true)
 	ls.insert_files(parsed_files)
-	ls.send(json.encode(result))
 	unsafe {
 		builtin_files.free()
 		files_to_parse.free()
 		parsed_files.free()
 	}
+	ls.send(json.encode(result))
 }
 
 // shutdown sets the state to shutdown but does not exit
