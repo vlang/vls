@@ -22,6 +22,10 @@ fn (mut ls Vls) did_open(id int, params string) {
 	uri := did_open_params.text_document.uri
 	ls.process_file(source, uri)
 	ls.show_diagnostics(source, uri)
+	unsafe {
+		source.free()
+		uri.str().free()
+	}
 }
 
 fn (mut ls Vls) did_change(id int, params string) {
@@ -30,6 +34,10 @@ fn (mut ls Vls) did_change(id int, params string) {
 	uri := did_change_params.text_document.uri
 	ls.process_file(source, uri)
 	ls.show_diagnostics(source, uri)
+	unsafe {
+		source.free()
+		uri.str().free()
+	}
 }
 
 fn (mut ls Vls) did_close(id int, params string) {
@@ -59,6 +67,7 @@ fn (mut ls Vls) did_close(id int, params string) {
 }
 
 fn (mut ls Vls) process_file(source string, uri lsp.DocumentUri) {
+	ls.sources[uri.str()] = source
 	file_path := uri.path()
 	target_dir := os.dir(file_path)
 	target_dir_uri := os.dir(uri)
@@ -67,28 +76,12 @@ fn (mut ls Vls) process_file(source string, uri lsp.DocumentUri) {
 		'modules'))
 	table := ls.new_table()
 	mut parsed_files := []ast.File{}
-	mut has_errors := false
-	parsed_files <<
-		parser.parse_text(source, file_path, table, .skip_comments, pref, scope)
-	parsed_files << ls.parse_imports(parsed_files, table, pref, scope)
-	for parsed_file in parsed_files {
-		if parsed_file.errors.len > 0 {
-			has_errors = true
-			break
-		}
-	}
-	if !has_errors {
-		mut checker := checker.new_checker(table, pref)
-		checker.check_files(parsed_files)
-	}
-	if uri in ls.sources {
-		ls.sources.delete(uri)
-	}
-	if target_dir_uri in ls.tables {
-		ls.tables.delete(target_dir_uri)
-	}
-	ls.sources[uri.str()] = source
-	ls.tables[target_dir] = table
+	mut checker := checker.new_checker(table, pref)
+	parsed_files << parser.parse_text(source, file_path, table, .skip_comments, pref, scope)
+	imported_files := ls.parse_imports(parsed_files, table, pref, scope)
+	checker.check_files(parsed_files)
+	ls.extract_symbols(imported_files, table, true)
+	ls.tables[target_dir_uri] = table
 	ls.insert_files(parsed_files)
 	unsafe {
 		parsed_files.free()
@@ -96,16 +89,8 @@ fn (mut ls Vls) process_file(source string, uri lsp.DocumentUri) {
 	}
 }
 
-fn (mut ls Vls) insert_files(files []ast.File) int {
-	mut inserted := 0
-	for file in files {
-		ls.files[file.path] = file
-		inserted++
-	}
-	return inserted
-}
-
-fn (mut ls Vls) parse_imports(parsed_files []ast.File, table &table.Table, pref &pref.Preferences, scope &ast.Scope) {
+fn (ls Vls) parse_imports(parsed_files []ast.File, table &table.Table, pref &pref.Preferences, scope &ast.Scope) []ast.File {
+	mut newly_parsed_files := []ast.File{}
 	mut done_imports := parsed_files.map(it.mod.name)
 	// NB: b.parsed_files is appended in the loop,
 	// so we can not use the shorter `for in` form.
@@ -128,7 +113,6 @@ fn (mut ls Vls) parse_imports(parsed_files []ast.File, table &table.Table, pref 
 					ls.parse_imports(newly_parsed_files, table, pref, scope)
 				done_imports << imp.mod
 				found = true
-				unsafe { newly_parsed_files.free() }
 				break
 			}
 			if !found {
