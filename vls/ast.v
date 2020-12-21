@@ -34,7 +34,7 @@ fn (node AstNode) children() []AstNode {
 			ast.ArrayInit {
 				return node.exprs.map(AstNode(it))
 			}
-			ast.SelectorExpr,
+			// ast.SelectorExpr,
 			ast.PostfixExpr, 
 			ast.UnsafeExpr,
 			ast.AsCast,
@@ -173,9 +173,12 @@ pub fn (ls Vls) get_ast_by_pos(line int, col int, source string, nodes []AstNode
 			if node is ast.Import {
 				tok_pos = { tok_pos | pos: tok_pos.pos - 7, len: tok_pos.len + node.mod.len + node.alias.len + 7 }
 			}
+		} else if node is ast.StructField {
+			tok_pos = tok_pos.extend(node.type_pos)
 		}
+
 		range := position_to_lsp_range(source, tok_pos)
-		if range.start.line == line && (col >= range.start.character || col <= range.end.character) {
+		if range.start.line == line && (col >= range.start.character && col <= range.end.character) {
 			return node
 		}
 		children := node.children()
