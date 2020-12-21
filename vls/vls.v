@@ -109,7 +109,9 @@ pub fn (mut ls Vls) execute(payload string) {
 				ls.did_close(request.id, request.params)
 			}
 			'textDocument/formatting' {
-				ls.formatting(request.id, request.params)
+				if ls.enabled_features.has(.formatting) {
+					ls.formatting(request.id, request.params)
+				}
 			}
 			else {}
 		}
@@ -131,6 +133,11 @@ pub fn (mut ls Vls) execute(payload string) {
 			}
 		}
 	}
+}
+
+// features returns the current server features enabled
+pub fn (ls Vls) features() []string {
+	return ls.enabled_features.map(it.str())
 }
 
 // status returns the current server status
