@@ -43,12 +43,17 @@ fn (mut ls Vls) initialize(id int, params string) {
 }
 
 // shutdown sets the state to shutdown but does not exit
-fn (mut ls Vls) shutdown(params string) {
+fn (mut ls Vls) shutdown(id int) {
 	ls.status = .shutdown
+	result := jsonrpc.Response<string>{
+		id: id
+		result: 'null'
+		// error: code and message set in case an exception happens during shutdown request
+	}
 }
 
 // exit stops the process
-fn (ls Vls) exit(params string) {
+fn (ls Vls) exit() {
 	// move exit to shutdown for now
 	// == .shutdown => 0
 	// != .shutdown => 1
