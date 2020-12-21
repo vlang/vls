@@ -17,13 +17,13 @@ mut:
 	// NB: a base table is required since this is where we
 	// are gonna store the information for the builtin types
 	// which are only parsed once.
-	base_table &table.Table
-	status     ServerStatus = .off
+	base_table        &table.Table
+	status            ServerStatus = .off
 	// TODO: change map key to DocumentUri
 	// files  map[DocumentUri]ast.File
-	files      map[string]ast.File
+	files             map[string]ast.File
 	// sources  map[DocumentUri]string
-	sources    map[string]string
+	sources           map[string]string
 	// NB: a separate table is required for each folder in
 	// order to do functions such as typ_to_string or when
 	// some of the features needed additional information
@@ -33,13 +33,13 @@ mut:
 	// changing and there can be instances that a change might
 	// break another module/project data.
 	// tables  map[DocumentUri]&table.Table
-	tables     map[string]&table.Table
-	root_path  lsp.DocumentUri
-	symbols						map[string]ast.Stmt
+	tables            map[string]&table.Table
+	root_path         lsp.DocumentUri
+	symbols           map[string]ast.Stmt
 	cached_completion []lsp.CompletionItem
 pub mut:
 	// TODO: replace with io.ReadWriter
-	io         ReceiveSender
+	io                ReceiveSender
 }
 
 pub fn new(io ReceiveSender) Vls {
@@ -146,16 +146,15 @@ fn (mut ls Vls) extract_symbols(parsed_files []ast.File, table &table.Table, pub
 			}
 			mut name := ''
 			match stmt {
-				ast.InterfaceDecl,
-				ast.StructDecl,
-				ast.EnumDecl,
-				ast.FnDecl {
+				ast.InterfaceDecl, ast.StructDecl, ast.EnumDecl, ast.FnDecl {
 					if pub_only && !stmt.is_pub {
 						continue
 					}
 					name = stmt.name
 				}
-				else { continue }
+				else {
+					continue
+				}
 			}
 			ls.symbols[name] = stmt
 		}
@@ -170,9 +169,7 @@ fn (mut ls Vls) insert_files(files []ast.File) {
 			ls.files.delete(file_uri)
 		}
 		ls.files[file_uri.str()] = file
-		unsafe {
-			file_uri.free()
-		}
+		unsafe {file_uri.free()}
 	}
 }
 

@@ -22,12 +22,10 @@ pub fn compute_offset(source string, line int, col int) int {
 			offset += col
 			break
 		} else {
-			offset += ln.len+1
+			offset += ln.len + 1
 		}
 	}
-	unsafe {
-		lines.free()
-	}
+	unsafe {lines.free()}
 	return offset
 }
 
@@ -98,7 +96,5 @@ fn (ls Vls) publish_diagnostics(uri lsp.DocumentUri, diagnostics []lsp.Diagnosti
 	}
 	str := json.encode(result)
 	ls.send(str)
-	unsafe {
-		diagnostics.free()
-	}
+	unsafe {diagnostics.free()}
 }

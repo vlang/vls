@@ -4,49 +4,28 @@ import v.ast
 import v.table
 import v.token
 
-pub type AstNode = ast.Stmt | ast.Expr | ast.StructField | ast.Field | ast.ConstField | ast.StructInitField | ast.GlobalField | ast.EnumField | table.Param
+pub type AstNode = ast.ConstField | ast.EnumField | ast.Expr | ast.Field | ast.GlobalField |
+	ast.Stmt | ast.StructField | ast.StructInitField | table.Param
 
 fn (node AstNode) position() token.Position {
 	match node {
-		ast.Stmt {
-			return node.position()
-		}
-		ast.Expr {
-			return node.position()
-		}
-		ast.StructField,
-		ast.Field,
-		ast.EnumField,
-		ast.ConstField,
-		ast.StructInitField,
-		ast.GlobalField,
-		table.Param {
-			return node.pos
-		}
+		ast.Stmt { return node.position() }
+		ast.Expr { return node.position() }
+		ast.StructField, ast.Field, ast.EnumField, ast.ConstField, ast.StructInitField, ast.GlobalField, table.Param { return node.pos }
 	}
 }
 
 fn (node AstNode) children() []AstNode {
 	if node is ast.Expr {
 		match node {
-			ast.StringInterLiteral,
-			ast.Assoc,
-			ast.ArrayInit {
+			ast.StringInterLiteral, ast.Assoc, ast.ArrayInit {
 				return node.exprs.map(AstNode(it))
 			}
 			// ast.SelectorExpr,
-			ast.PostfixExpr, 
-			ast.UnsafeExpr,
-			ast.AsCast,
-			ast.ParExpr,
-			ast.IfGuardExpr, 
-			ast.SizeOf,
-			ast.Likely,
-			ast.TypeOf {
+			ast.PostfixExpr, ast.UnsafeExpr, ast.AsCast, ast.ParExpr, ast.IfGuardExpr, ast.SizeOf, ast.Likely, ast.TypeOf {
 				return [AstNode(node.expr)]
 			}
-			ast.LockExpr,
-			ast.OrExpr {
+			ast.LockExpr, ast.OrExpr {
 				return node.stmts.map(AstNode(it))
 			}
 			ast.StructInit {
@@ -97,20 +76,12 @@ fn (node AstNode) children() []AstNode {
 			else {}
 		}
 	}
-
 	if node is ast.Stmt {
 		match node {
-			ast.Block,
-			ast.DeferStmt,
-			ast.ForCStmt,
-			ast.ForInStmt,
-			ast.ForStmt,
-			ast.CompFor {
+			ast.Block, ast.DeferStmt, ast.ForCStmt, ast.ForInStmt, ast.ForStmt, ast.CompFor {
 				return node.stmts.map(AstNode(it))
 			}
-			ast.Module,
-			ast.ExprStmt,
-			ast.AssertStmt {
+			ast.Module, ast.ExprStmt, ast.AssertStmt {
 				return [AstNode(node.expr)]
 			}
 			ast.InterfaceDecl {
@@ -126,13 +97,13 @@ fn (node AstNode) children() []AstNode {
 			}
 			ast.StructDecl {
 				return node.fields.map(AstNode(it))
-			} 
+			}
 			ast.GlobalDecl {
 				return node.fields.map(AstNode(it))
-			} 
+			}
 			ast.ConstDecl {
 				return node.fields.map(AstNode(it))
-			} 
+			}
 			ast.EnumDecl {
 				return node.fields.map(AstNode(it))
 			}
@@ -148,17 +119,12 @@ fn (node AstNode) children() []AstNode {
 			else {}
 		}
 	}
-
 	match node {
-		ast.EnumField,
-		ast.GlobalField,
-		ast.StructInitField,
-		ast.ConstField {
-			return [AstNode(node.expr)]
-		}
+		ast.EnumField, ast.GlobalField, ast.StructInitField, ast.ConstField { return [
+				AstNode(node.expr),
+			] }
 		else {}
 	}
-
 	return []AstNode{}
 }
 
@@ -167,28 +133,30 @@ pub fn (ls Vls) get_ast_by_pos(line int, col int, source string, nodes []AstNode
 		mut tok_pos := node.position()
 		if node is ast.Stmt {
 			if node is ast.Module {
-				tok_pos = { tok_pos | len: tok_pos.len + node.name.len }
+				tok_pos = {
+					tok_pos |
+					len: tok_pos.len + node.name.len
+				}
 			}
-
 			if node is ast.Import {
-				tok_pos = { tok_pos | pos: tok_pos.pos - 7, len: tok_pos.len + node.mod.len + node.alias.len + 7 }
+				tok_pos = {
+					tok_pos |
+					pos: tok_pos.pos - 7
+					len: tok_pos.len + node.mod.len + node.alias.len + 7
+				}
 			}
 		} else if node is ast.StructField {
 			tok_pos = tok_pos.extend(node.type_pos)
 		}
-
 		range := position_to_lsp_range(source, tok_pos)
 		if range.start.line == line && (col >= range.start.character && col <= range.end.character) {
 			return node
 		}
 		children := node.children()
 		if children.len > 0 {
-			child_ast := ls.get_ast_by_pos(line, col, source, children) or { 
-				continue
-			}
+			child_ast := ls.get_ast_by_pos(line, col, source, children) or { continue }
 			return child_ast
 		}
 	}
-
 	return error('not found')
 }

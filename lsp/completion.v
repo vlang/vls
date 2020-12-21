@@ -50,8 +50,8 @@ pub const (
 
 pub struct CompletionItem {
 pub mut:
-	label         string
-	kind          CompletionItemKind
+	label string
+	kind  CompletionItemKind
 	// TODO: comment the unnecessary fields for now to avoid any errors
 	// detail        string
 	// documentation string | MarkupContent
