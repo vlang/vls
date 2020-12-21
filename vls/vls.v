@@ -135,6 +135,33 @@ fn new_scope_and_pref(lookup_paths ...string) (&ast.Scope, &pref.Preferences) {
 	return scope, prefs
 }
 
+// extract_symbols extracts the top-level statements and stores them into ls.symbols for quick access
+fn (mut ls Vls) extract_symbols(parsed_files []ast.File, table &table.Table, pub_only bool) {
+	for file in parsed_files {
+		for stmt in file.stmts {
+			if stmt is ast.FnDecl {
+				if stmt.is_method {
+					continue
+				}
+			}
+			mut name := ''
+			match stmt {
+				ast.InterfaceDecl,
+				ast.StructDecl,
+				ast.EnumDecl,
+				ast.FnDecl {
+					if pub_only && !stmt.is_pub {
+						continue
+					}
+					name = stmt.name
+				}
+				else { continue }
+			}
+			ls.symbols[name] = stmt
+		}
+	}
+}
+
 // insert_files inserts an array file asts onto the ls.files map
 fn (mut ls Vls) insert_files(files []ast.File) {
 	for file in files {
