@@ -14,6 +14,17 @@ pub enum Feature {
 	formatting
 }
 
+// TODO: remove this after <https://github.com/vlang/v/issues/7434> has been merged
+fn (fa []Feature) has(feat Feature) bool {
+	for f in fa {
+		if f == feat {
+			return true
+		}
+	}
+
+	return false
+}
+
 // feature_from_str returns the Feature-enum value equivalent of the given string.
 // used internally for Vls.set_features method only.
 fn feature_from_str(feature_name string) ?Feature {
@@ -66,7 +77,6 @@ pub mut:
 }
 
 pub fn new(io ReceiveSender) Vls {
-	mut enabled_features := map[string]bool{}
 	mut tbl := table.new_table()
 	tbl.is_fmt = false
 	return Vls{
@@ -194,11 +204,11 @@ fn (ls Vls) new_table() &table.Table {
 pub fn (mut ls Vls) set_features(features []string, enable bool) ? {
 	for feature_name in features {
 		feature_val := feature_from_str(feature_name)?
-		if feature_val !in ls.enabled_features && !enable {
+		if !ls.enabled_features.has(feature_val) && !enable {
 			return error('feature "$feature_name" is already disabled')
-		} else if feature_val in ls.enabled_features && enable {
+		} else if ls.enabled_features.has(feature_val) && enable {
 			return error('feature "$feature_name" is already enabled')
-		} else if feature_val !in ls.enabled_features && enable {
+		} else if !ls.enabled_features.has(feature_val) && enable {
 			ls.enabled_features << feature_val
 		} else {
 			mut idx := -1
