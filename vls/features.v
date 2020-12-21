@@ -4,11 +4,12 @@ import lsp
 import json
 import jsonrpc
 import v.fmt
+import os
 
-fn (ls Vls) formatting(id int, params string) {
+fn (mut ls Vls) formatting(id int, params string) {
 	formatting_params := json.decode(lsp.DocumentFormattingParams, params) or { panic(err) }
 	uri := formatting_params.text_document.uri.str()
-	table := ls.tables[uri]
+	table := ls.tables[os.dir(uri)]
 	file_ast := ls.files[uri]
 	source := ls.sources[uri]
 	source_lines := source.split_into_lines()
