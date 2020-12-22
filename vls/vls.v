@@ -14,17 +14,6 @@ pub enum Feature {
 	formatting
 }
 
-// TODO: remove this after <https://github.com/vlang/v/issues/7434> has been merged
-fn (fa []Feature) has(feat Feature) bool {
-	for f in fa {
-		if f == feat {
-			return true
-		}
-	}
-
-	return false
-}
-
 // feature_from_str returns the Feature-enum value equivalent of the given string.
 // used internally for Vls.set_features method only.
 fn feature_from_str(feature_name string) ?Feature {
@@ -109,7 +98,7 @@ pub fn (mut ls Vls) execute(payload string) {
 				ls.did_close(request.id, request.params)
 			}
 			'textDocument/formatting' {
-				if ls.enabled_features.has(.formatting) {
+				if Feature.formatting in ls.enabled_features {
 					ls.formatting(request.id, request.params)
 				}
 			}
@@ -211,11 +200,11 @@ fn (ls Vls) new_table() &table.Table {
 pub fn (mut ls Vls) set_features(features []string, enable bool) ? {
 	for feature_name in features {
 		feature_val := feature_from_str(feature_name)?
-		if !ls.enabled_features.has(feature_val) && !enable {
+		if feature_val !in ls.enabled_features  && !enable {
 			return error('feature "$feature_name" is already disabled')
-		} else if ls.enabled_features.has(feature_val) && enable {
+		} else if feature_val in ls.enabled_features && enable {
 			return error('feature "$feature_name" is already enabled')
-		} else if !ls.enabled_features.has(feature_val) && enable {
+		} else if feature_val !in ls.enabled_features && enable {
 			ls.enabled_features << feature_val
 		} else {
 			mut idx := -1
