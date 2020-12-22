@@ -136,8 +136,8 @@ pub fn (mut ls Vls) execute(payload string) {
 }
 
 // features returns the current server features enabled
-pub fn (ls Vls) features() []string {
-	return ls.enabled_features.map(it.str())
+pub fn (ls Vls) features() []Feature {
+	return ls.enabled_features
 }
 
 // status returns the current server status
