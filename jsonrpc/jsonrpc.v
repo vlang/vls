@@ -21,6 +21,14 @@ pub mut:
 	params  string [raw]
 }
 
+pub struct TestRequest <T> {
+pub mut:
+	jsonrpc string = version
+	id int
+	method string
+	params T
+}
+
 pub struct Response <T> {
 pub:
 	jsonrpc string = version
