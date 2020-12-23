@@ -20,8 +20,8 @@ pub fn (io Stdio) receive() ?string {
 	if first_line.len < 1 || !first_line.starts_with(content_length) {
 		return error('content length is missing')
 	}
-	mut buf := strings.new_builder(1)
 	mut conlen := first_line[content_length.len..].int()
+	mut buf := strings.new_builder(conlen)
 	$if !windows {
 		conlen++
 	}
