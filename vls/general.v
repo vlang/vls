@@ -50,6 +50,7 @@ fn (mut ls Vls) shutdown(id int) {
 		result: 'null'
 		// error: code and message set in case an exception happens during shutdown request
 	}
+	json.encode(result)
 }
 
 // exit stops the process
