@@ -70,18 +70,16 @@ pub fn (mut ls Vls) execute(payload string) {
 		}
 	} else {
 		match request.method {
-			'exit' {
-				ls.exit()
-			}
-			'initialize' {
-				ls.initialize(request.id, request.params)
-			}
+			'exit' { ls.exit() }
+			'initialize' { ls.initialize(request.id, request.params) }
 			else {
-				if ls.status == .shutdown {
-					ls.send(new_error(jsonrpc.invalid_request))
+				err_type := if ls.status == .shutdown {
+					jsonrpc.invalid_request
 				} else {
-					ls.send(new_error(jsonrpc.server_not_initialized))
+					jsonrpc.server_not_initialized
 				}
+
+				ls.send(new_error(err_type))
 			}
 		}
 	}
