@@ -9,7 +9,7 @@ Windows support is also unstable for now. Please file an issue if you experience
 ## Installation
 Installation requires you to have Git and V installed and compile the language server by yourself. You need to execute the following:
 ```
-git clone https://github.com/nedpals/vls2.git vls && cd vls/
+git clone https://github.com/vlang/vls.git vls && cd vls/
 
 # Build the project
 v -prod cmd/vls
@@ -92,7 +92,7 @@ Afterwards, go to your editor's configuration and scroll to the V extension sect
 
 # Contributing
 ## Submitting a pull request
-- Fork it (https://github.com/nedpals/vls2/fork)
+- Fork it (https://github.com/vlang/vls/fork)
 - Create your feature branch (git checkout -b my-new-feature)
 - Commit your changes (git commit -am 'Add some feature')
 - Push to the branch (git push origin my-new-feature)
