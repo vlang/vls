@@ -35,6 +35,14 @@ pub struct NotificationMessage <T> {
 	params  T
 }
 
+// with error
+struct Response2 <T> {
+	jsonrpc string = version
+	id      int
+	error   ResponseError
+	result  T
+}
+
 struct ResponseError {
 mut:
 	code    int
@@ -42,6 +50,7 @@ mut:
 	data    string
 }
 
+[inline]
 pub fn new_response_error(err_code int) ResponseError {
 	return ResponseError{
 		code: err_code
