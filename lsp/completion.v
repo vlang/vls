@@ -60,7 +60,7 @@ pub mut:
 	// preselect bool
 	// sort_text string [json:sortText]
 	// filter_text string [json:filterText]
-	// insert_text   string             [json: insertText]
+	insert_text   string             [json: insertText]
 	// text_edit TextEdit [json:textEdit]
 	// additional_text_edits []TextEdit [json:additionalTextEdits]
 	// commit_characters []string [json:commitCharacters]

@@ -27,15 +27,18 @@ fn (ls Vls) completion_item_stmt(stmt ast.Stmt, mut completion_items []lsp.Compl
 				return
 			}
 			if !cfg.fields_only {
+				label := stmt.name.all_after('${cfg.mod}.') + '{}'
 				completion_items << lsp.CompletionItem{
-					label: stmt.name.all_after('${cfg.mod}.') + '{}'
+					label: label
 					kind: .struct_
+					insert_text: label
 				}
 			} else {
 				for field in stmt.fields {
 					completion_items << lsp.CompletionItem{
 						label: field.name
 						kind: .field
+						insert_text: field.name
 					}
 				}
 			}
@@ -47,6 +50,7 @@ fn (ls Vls) completion_item_stmt(stmt ast.Stmt, mut completion_items []lsp.Compl
 			completion_items << stmt.fields.map(lsp.CompletionItem{
 				label: it.name.all_after('${cfg.mod}.')
 				kind: .constant
+				insert_text: it.name.all_after('${cfg.mod}.')
 			})
 		}
 		ast.EnumDecl {
@@ -54,31 +58,46 @@ fn (ls Vls) completion_item_stmt(stmt ast.Stmt, mut completion_items []lsp.Compl
 				return
 			}
 			for field in stmt.fields {
+				label := stmt.name.all_after('${cfg.mod}.') + '.' + field.name
 				completion_items << lsp.CompletionItem{
-					label: stmt.name.all_after('${cfg.mod}.') + '.' + field.name
+					label: label
 					kind: .enum_member
+					insert_text: label
 				}
 			}
 		}
-		// TODO: Add support for type definitions
-		// ast.TypeDecl {
-		// }
+		ast.TypeDecl {
+			match stmt {
+				ast.AliasTypeDecl, ast.SumTypeDecl, ast.FnTypeDecl {
+					label := stmt.name.all_after('${cfg.mod}.')
+					completion_items << lsp.CompletionItem{
+						label: label
+						kind: .type_parameter
+						insert_text: label
+					}
+				}
+			}
+		}
 		ast.FnDecl {
 			if (cfg.pub_only && !stmt.is_pub) || stmt.name == 'main.main' {
 				return
 			}
+			label := stmt.name.all_after('${cfg.mod}.')
 			completion_items << lsp.CompletionItem{
-				label: stmt.name.all_after('${cfg.mod}.')
+				label: label
 				kind: .function
+				insert_text: '${label}()'
 			}
 		}
 		ast.InterfaceDecl {
 			if cfg.pub_only && !stmt.is_pub {
 				return
 			}
+			label := stmt.name.all_after('${cfg.mod}.')
 			completion_items << lsp.CompletionItem{
-				label: stmt.name.all_after('${cfg.mod}.')
+				label: label
 				kind: .interface_
+				insert_text: label
 			}
 		}
 		ast.ExprStmt {
@@ -117,9 +136,30 @@ fn (ls Vls) completion_item_expr(expr ast.Expr, mut completion_items []lsp.Compl
 			completion_items << lsp.CompletionItem{
 				label: m.name
 				kind: .method
+				insert_text: '${m.name}()'
 			}
 		}
 	}
+	// TODO: crashes
+	//  else { 
+	// 	if expr is ast.SelectorExpr {
+	// 		if expr.expr is ast.Ident {
+	// 			ident := expr.expr
+
+	// 			if ident.name !in cfg.file.imports.map(if it.alias.len > 0 { it.alias } else { it.mod }) {	
+	// 				return
+	// 			}
+
+	// 			for sym_name, stmt in ls.symbols {
+	// 				if !sym_name.starts_with(ident.name) {
+	// 					continue
+	// 				}
+
+	// 				ls.completion_item_stmt(stmt, mut completion_items, cfg)
+	// 			}
+	// 		}
+	// 	}
+	// }
 }
 
 fn (mut ls Vls) completion(id int, params string) {
@@ -148,7 +188,10 @@ fn (mut ls Vls) completion(id int, params string) {
 		// again but uses local variables which sounds dumb.
 		node := ls.get_ast_by_pos(pos.line, pos.character - 2, src.bytestr(), file.stmts.map(AstNode(it))) or {
 			ls.log_message('ast node not found... sending cached one', .info)
-			ls.send_cached_completion(id)
+			ls.send(json.encode(jsonrpc.Response<[]lsp.CompletionItem>{
+				id: id
+				result: ls.cached_completion
+			}))
 			return
 		}
 		if ctx.trigger_character == '.' {
@@ -159,6 +202,9 @@ fn (mut ls Vls) completion(id int, params string) {
 				ls.completion_item_stmt(node, mut completion_items, file: file, table: table)
 			}
 		}
+		// if ctx.trigger_character == '=' {
+		// 	ls.log_message(src.str(),.info)
+		// }
 		// if ctx.trigger_character == '=' src[offset-1] != `:` {
 		// 	need_more = false
 		// } 
@@ -167,19 +213,27 @@ fn (mut ls Vls) completion(id int, params string) {
 	}
 	if show_local {
 		scope := file.scope.innermost(offset)
-		for child in file.scope.children {
-			ls.log_message([child.start_pos, child.end_pos].str(), .info)
-		}
+		// TODO: get the module names
+		// for imp in file.imports {
+		// 	completion_items << lsp.CompletionItem{
+		// 		label: if imp.alias.len > 0 { imp.alias } else { imp.mod }
+		// 		kind: .module_
+		// 	}
+		// }
+
+		// get variables inside the scope
 		for _, obj in scope.objects {
 			if obj is ast.Var {
 				completion_items << lsp.CompletionItem{
 					label: obj.name
 					kind: .variable
+					insert_text: obj.name
 				}
 			}
 		}
 	}
 	if show_global {
+		// get all functions with the relative dir
 		for fpath, ffile in ls.files {
 			if !fpath.starts_with(dir) {
 				continue
@@ -193,27 +247,14 @@ fn (mut ls Vls) completion(id int, params string) {
 			}
 		}
 	}
-	// if !show_global && !show_local && !has_str_method {
-	// 	completion_items << lsp.CompletionItem{
-	// 		label: 'str'
-	// 		kind: .method
-	// 	}
-	// }
+
 	if completion_items.len > 0 {
 		ls.cached_completion = completion_items.clone()
-	} else {
-		ls.send_cached_completion(id)
+		ls.send(json.encode(jsonrpc.Response<[]lsp.CompletionItem>{
+			id: id
+			result: completion_items
+		}))
 	}
-	ls.send(json.encode(jsonrpc.Response<[]lsp.CompletionItem>{
-		id: id
-		result: completion_items
-	}))
+	
 	unsafe {completion_items.free()}
-}
-
-fn (ls Vls) send_cached_completion(id int) {
-	ls.send(json.encode(jsonrpc.Response<[]lsp.CompletionItem>{
-		id: id
-		result: ls.cached_completion
-	}))
 }
