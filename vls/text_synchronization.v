@@ -60,7 +60,7 @@ fn (mut ls Vls) did_close(id int, params string) {
 }
 
 fn (mut ls Vls) process_file(source string, uri lsp.DocumentUri) {
-	ls.sources[uri.str()] = source
+	ls.sources[uri.str()] = source.bytes()
 	file_path := uri.path()
 	target_dir := os.dir(file_path)
 	target_dir_uri := os.dir(uri)

@@ -23,7 +23,7 @@ mut:
 	// files  map[DocumentUri]ast.File
 	files             map[string]ast.File
 	// sources  map[DocumentUri]string
-	sources           map[string]string
+	sources           map[string][]byte
 	// NB: a separate table is required for each folder in
 	// order to do functions such as typ_to_string or when
 	// some of the features needed additional information

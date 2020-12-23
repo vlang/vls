@@ -1,23 +1,6 @@
-// THIS FEATURE CANNOT BE USED OR MERGED BEFORE A RELEVANT PR IN PARSER 
-// HAS BEEN MERGED: <link to the PR has not been available yet>
-//
 // TODO: This code will be probably moved to features.v depending on the
 // complexity of the code. What you're seeing here is not final so please
 // bear in mind about it. 
-//
-// @ned: The problem I'm encountering right now is the delays of the changes
-// applied from textDocument/didEdit. The delay causes to have innacurate
-// converted positions which is very important in finding the AST node. The 
-// AST node is used in order to get more information and accurately suggest
-// what the user is trying to type. So far I've tried to processing the file
-// on completion but the same thing happens. I'm also thinking of using a
-// WaitGroup instead and attach it to the did_edit method and invoke the
-// `.wait` method on completion as well as in other features.   
-// 
-// Another problem is that only one variable is handled at a time. The meaning
-// for this is that the server cannot access variable A information without
-// commenting variable B.
-//
 // TODO: Add tests for it
 module vls
 
@@ -148,7 +131,9 @@ fn (mut ls Vls) completion(id int, params string) {
 	table := ls.tables[dir]
 	ctx := completion_params.context
 	pos := completion_params.position
-	offset := compute_offset(src, pos.line, pos.character) - 3
+	// TODO: temporary. will remove it later
+	raw_offset := compute_offset(src.bytestr(), pos.line, pos.character)
+	offset := raw_offset - 4
 	// mut has_str_method := false
 	mut show_global := false
 	mut show_local := true
@@ -161,7 +146,7 @@ fn (mut ls Vls) completion(id int, params string) {
 		// when a user presses esc after it presses one of the trigger
 		// characters (like dot). instead, it regenerates a new output
 		// again but uses local variables which sounds dumb.
-		node := ls.get_ast_by_pos(pos.line, pos.character - 2, src, file.stmts.map(AstNode(it))) or {
+		node := ls.get_ast_by_pos(pos.line, pos.character - 2, src.bytestr(), file.stmts.map(AstNode(it))) or {
 			ls.log_message('ast node not found... sending cached one', .info)
 			ls.send_cached_completion(id)
 			return
