@@ -21,23 +21,16 @@ fn (mut ls Vls) did_open(id int, params string) {
 	source := did_open_params.text_document.text
 	uri := did_open_params.text_document.uri
 	ls.process_file(source, uri)
-	ls.show_diagnostics(source, uri)
-	unsafe {
-		source.free()
-		uri.str().free()
-	}
 }
 
 fn (mut ls Vls) did_change(id int, params string) {
 	did_change_params := json.decode(lsp.DidChangeTextDocumentParams, params) or { panic(err) }
 	source := did_change_params.content_changes[0].text
 	uri := did_change_params.text_document.uri
-	ls.process_file(source, uri)
-	ls.show_diagnostics(source, uri)
 	unsafe {
-		source.free()
-		uri.str().free()
+		ls.sources[uri.str()].free()
 	}
+	ls.process_file(source, uri)
 }
 
 fn (mut ls Vls) did_close(id int, params string) {
@@ -81,6 +74,7 @@ fn (mut ls Vls) process_file(source string, uri lsp.DocumentUri) {
 		parser.parse_text(source, file_path, table, .skip_comments, pref, scope)
 	imported_files := ls.parse_imports(parsed_files, table, pref, scope)
 	checker.check_files(parsed_files)
+	ls.show_diagnostics(parsed_files[0], source, uri)
 	ls.extract_symbols(imported_files, table, true)
 	ls.tables[target_dir_uri] = table
 	ls.insert_files(parsed_files)
