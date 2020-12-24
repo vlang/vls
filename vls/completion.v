@@ -51,7 +51,7 @@ fn (ls Vls) completion_item_from_stmt(stmt ast.Stmt, cfg CompletionItemConfig) [
 			completion_items << stmt.fields.map(lsp.CompletionItem{
 				label: it.name.all_after('${cfg.mod}.')
 				kind: .constant
-				insert_text: stmt.name.all_after('${cfg.mod}.')
+				insert_text: it.name.all_after('${cfg.mod}.')
 			})
 		}
 		ast.EnumDecl {
