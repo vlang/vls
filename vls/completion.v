@@ -12,16 +12,15 @@ import v.ast
 import v.table
 
 struct CompletionItemConfig {
-	pub_only    bool = true
-	mod         string
-	file        ast.File
-	offset      int
-	table       &table.Table
+	pub_only bool = true
+	mod      string
+	file     ast.File
+	offset   int
+	table    &table.Table
 }
 
 fn (ls Vls) completion_item_from_stmt(stmt ast.Stmt, cfg CompletionItemConfig) []lsp.CompletionItem {
 	mut completion_items := []lsp.CompletionItem{}
-
 	match stmt {
 		ast.StructDecl {
 			if cfg.pub_only && !stmt.is_pub {
@@ -30,7 +29,9 @@ fn (ls Vls) completion_item_from_stmt(stmt ast.Stmt, cfg CompletionItemConfig) [
 			mut insert_text := stmt.name.all_after('${cfg.mod}.') + '{\n'
 			mut i := stmt.fields.len - 1
 			for field in stmt.fields {
-				if field.has_default_expr { continue }
+				if field.has_default_expr {
+					continue
+				}
 				// TODO: trigger autocompletion
 				insert_text += '\t$field.name: \$$i\n'
 				i--
@@ -50,7 +51,7 @@ fn (ls Vls) completion_item_from_stmt(stmt ast.Stmt, cfg CompletionItemConfig) [
 			completion_items << stmt.fields.map(lsp.CompletionItem{
 				label: it.name.all_after('${cfg.mod}.')
 				kind: .constant
-				insert_text: it.name.all_after('${cfg.mod}.')
+				insert_text: stmt.name.all_after('${cfg.mod}.')
 			})
 		}
 		ast.EnumDecl {
@@ -122,7 +123,6 @@ fn (ls Vls) completion_item_from_expr(expr ast.Expr, cfg CompletionItemConfig) [
 		// 		if !sym_name.starts_with(ident.name) {
 		// 			continue
 		// 		}
-
 		// 		ls.completion_item_from_stmt(stmt, mut completion_items, cfg)
 		// 	}
 		// }
@@ -131,7 +131,7 @@ fn (ls Vls) completion_item_from_expr(expr ast.Expr, cfg CompletionItemConfig) [
 		type_sym := cfg.table.get_type_symbol(expr_type)
 		completion_items << ls.completion_item_from_type_info(type_sym.info)
 		if type_sym.kind == .array || type_sym.kind == .map {
-			base_symbol_name :=  if type_sym.kind == .array { 'array' } else { 'map' }
+			base_symbol_name := if type_sym.kind == .array { 'array' } else { 'map' }
 			if base_type_sym := cfg.table.find_type(base_symbol_name) {
 				completion_items << ls.completion_item_from_type_info(base_type_sym.info)
 			}
@@ -152,10 +152,12 @@ fn (ls Vls) completion_item_from_fn(fnn table.Fn, is_method bool) lsp.Completion
 	}
 	insert_text += '('
 	for j, param in fnn.params {
-		if is_method && j == 0 { continue }
+		if is_method && j == 0 {
+			continue
+		}
 		i++
 		insert_text += '\${$i:$param.name}'
-		if j < fnn.params.len-1 {
+		if j < fnn.params.len - 1 {
 			insert_text += ', '
 		}
 	}
@@ -193,7 +195,8 @@ fn (mut ls Vls) completion(id int, params string) {
 	ctx := completion_params.context
 	pos := completion_params.position
 	offset := compute_offset(src, pos.line, pos.character) - 4
-	ls.log_message('position: { line: $pos.line, col: $pos.character } |  offset: $offset | trigger_kind: $ctx', .info)
+	ls.log_message('position: { line: $pos.line, col: $pos.character } |  offset: $offset | trigger_kind: $ctx',
+		.info)
 	mut show_global := true
 	mut show_global_fn := false
 	mut show_local := true
@@ -207,27 +210,28 @@ fn (mut ls Vls) completion(id int, params string) {
 			show_local = false
 			if node is ast.Stmt {
 				ls.log_message('node: ' + typeof(node), .info)
-				completion_items << ls.completion_item_from_stmt(node, file: file, table: table)
+				completion_items <<
+					ls.completion_item_from_stmt(node, file: file, table: table)
 			}
 		} else if ctx.trigger_character == '=' {
-			ls.log_message(src[offset-2].str(), .info)
-			if offset-2 >= 0 && src[offset-2] == `:` {
+			ls.log_message(src[offset - 2].str(), .info)
+			if offset - 2 >= 0 && src[offset - 2] == `:` {
 				ls.log_message('assign found', .info)
 				show_global = true
 			} else {
 				// TODO
 				return
 			}
-		} 
-	} else if ctx.trigger_kind == .invoked && (offset-1 >= 0 && src[offset-1] == ` `) {
+		}
+	} else if ctx.trigger_kind == .invoked && (offset - 1 >= 0 && src[offset - 1] == ` `) {
 		// show_global = true
-	} else if ctx.trigger_kind == .invoked && (offset-1 >= 0 && src[offset-1] == `.`) {
+	} else if ctx.trigger_kind == .invoked && (offset - 1 >= 0 && src[offset - 1] == `.`) {
 		ls.completion(id, json.encode({
 			completion_params |
 			context: lsp.CompletionContext{
-				trigger_kind: .trigger_character
-				trigger_character: src[offset-1].str()
-			}
+			trigger_kind: .trigger_character
+			trigger_character: src[offset - 1].str()
+		}
 		}))
 		return
 	} else {
@@ -242,7 +246,6 @@ fn (mut ls Vls) completion(id int, params string) {
 		// 		kind: .module_
 		// 	}
 		// }
-
 		// get variables inside the scope
 		for _, obj in scope.objects {
 			if obj is ast.Var {
@@ -263,12 +266,8 @@ fn (mut ls Vls) completion(id int, params string) {
 				if show_global_fn && stmt !is ast.FnDecl {
 					continue
 				}
-				completion_items << ls.completion_item_from_stmt(stmt,
-					mod: ffile.mod.name
-					file: ffile
-					table: table
-					pub_only: false
-				)
+				completion_items <<
+					ls.completion_item_from_stmt(stmt, mod: ffile.mod.name, file: ffile, table: table, pub_only: false)
 			}
 		}
 	}
@@ -278,7 +277,7 @@ fn (mut ls Vls) completion(id int, params string) {
 			result: completion_items
 		}))
 	}
-	unsafe {completion_items.free()}
+	unsafe { completion_items.free() }
 }
 
 // TODO: remove later if table is sufficient enough for grabbing information

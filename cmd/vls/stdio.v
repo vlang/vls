@@ -36,7 +36,7 @@ pub fn (io Stdio) receive() ?string {
 		conlen--
 	}
 	payload := buf.str()
-	unsafe {buf.free()}
+	unsafe { buf.free() }
 	return payload[1..]
 }
 

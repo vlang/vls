@@ -14,7 +14,7 @@ pub fn compute_offset(src []byte, line int, col int) int {
 	mut src_col := 0
 	for i, byt in src {
 		is_lf := byt == `\n`
-		is_crlf := i != src.len - 1 && unsafe {byt == `\r` && src[i + 1] == `\n`}
+		is_crlf := i != src.len - 1 && unsafe { byt == `\r` && src[i + 1] == `\n` }
 		is_eol := is_lf || is_crlf
 		if is_eol {
 			if src_line == line && col > src_col {
@@ -98,5 +98,5 @@ fn (ls Vls) publish_diagnostics(uri lsp.DocumentUri, diagnostics []lsp.Diagnosti
 	}
 	str := json.encode(result)
 	ls.send(str)
-	unsafe {diagnostics.free()}
+	unsafe { diagnostics.free() }
 }

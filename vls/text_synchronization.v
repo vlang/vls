@@ -27,9 +27,7 @@ fn (mut ls Vls) did_change(id int, params string) {
 	did_change_params := json.decode(lsp.DidChangeTextDocumentParams, params) or { panic(err) }
 	source := did_change_params.content_changes[0].text
 	uri := did_change_params.text_document.uri
-	unsafe {
-		ls.sources[uri.str()].free()
-	}
+	unsafe { ls.sources[uri.str()].free() }
 	ls.process_file(source, uri)
 }
 
@@ -115,6 +113,6 @@ fn (ls Vls) parse_imports(parsed_files []ast.File, table &table.Table, pref &pre
 			}
 		}
 	}
-	unsafe {done_imports.free()}
+	unsafe { done_imports.free() }
 	return newly_parsed_files
 }
