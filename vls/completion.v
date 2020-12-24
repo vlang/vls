@@ -19,7 +19,7 @@ struct CompletionItemConfig {
 	table    &table.Table
 }
 
-fn (ls Vls) completion_item_from_stmt(stmt ast.Stmt, cfg CompletionItemConfig) []lsp.CompletionItem {
+fn (ls Vls) completion_items_from_stmt(stmt ast.Stmt, cfg CompletionItemConfig) []lsp.CompletionItem {
 	mut completion_items := []lsp.CompletionItem{}
 	match stmt {
 		ast.StructDecl {
@@ -83,7 +83,7 @@ fn (ls Vls) completion_item_from_stmt(stmt ast.Stmt, cfg CompletionItemConfig) [
 			if (cfg.pub_only && !stmt.is_pub) || stmt.name == 'main.main' {
 				return completion_items
 			}
-			completion_items << ls.completion_item_from_fn(table.Fn{
+			completion_items << ls.completion_items_from_fn(table.Fn{
 				name: stmt.name.all_after('${stmt.mod}.')
 				is_generic: stmt.is_generic
 				params: stmt.params
@@ -101,14 +101,14 @@ fn (ls Vls) completion_item_from_stmt(stmt ast.Stmt, cfg CompletionItemConfig) [
 			}
 		}
 		ast.ExprStmt {
-			completion_items << ls.completion_item_from_expr(stmt.expr, cfg)
+			completion_items << ls.completion_items_from_expr(stmt.expr, cfg)
 		}
 		else {}
 	}
 	return completion_items
 }
 
-fn (ls Vls) completion_item_from_expr(expr ast.Expr, cfg CompletionItemConfig) []lsp.CompletionItem {
+fn (ls Vls) completion_items_from_expr(expr ast.Expr, cfg CompletionItemConfig) []lsp.CompletionItem {
 	mut completion_items := []lsp.CompletionItem{}
 	mut expr_type := table.Type(0)
 	if expr is ast.SelectorExpr {
@@ -123,28 +123,28 @@ fn (ls Vls) completion_item_from_expr(expr ast.Expr, cfg CompletionItemConfig) [
 		// 		if !sym_name.starts_with(ident.name) {
 		// 			continue
 		// 		}
-		// 		ls.completion_item_from_stmt(stmt, mut completion_items, cfg)
+		// 		ls.completion_items_from_stmt(stmt, mut completion_items, cfg)
 		// 	}
 		// }
 	}
 	if expr_type != 0 {
 		type_sym := cfg.table.get_type_symbol(expr_type)
-		completion_items << ls.completion_item_from_type_info(type_sym.info)
+		completion_items << ls.completion_items_from_type_info(type_sym.info)
 		if type_sym.kind == .array || type_sym.kind == .map {
 			base_symbol_name := if type_sym.kind == .array { 'array' } else { 'map' }
 			if base_type_sym := cfg.table.find_type(base_symbol_name) {
-				completion_items << ls.completion_item_from_type_info(base_type_sym.info)
+				completion_items << ls.completion_items_from_type_info(base_type_sym.info)
 			}
 		}
 		// list all methods
 		for m in type_sym.methods {
-			completion_items << ls.completion_item_from_fn(m, true)
+			completion_items << ls.completion_items_from_fn(m, true)
 		}
 	}
 	return completion_items
 }
 
-fn (ls Vls) completion_item_from_fn(fnn table.Fn, is_method bool) lsp.CompletionItem {
+fn (ls Vls) completion_items_from_fn(fnn table.Fn, is_method bool) lsp.CompletionItem {
 	mut i := 0
 	mut insert_text := fnn.name
 	if fnn.is_generic {
@@ -170,7 +170,7 @@ fn (ls Vls) completion_item_from_fn(fnn table.Fn, is_method bool) lsp.Completion
 	}
 }
 
-fn (ls Vls) completion_item_from_type_info(type_info table.TypeInfo) []lsp.CompletionItem {
+fn (ls Vls) completion_items_from_type_info(type_info table.TypeInfo) []lsp.CompletionItem {
 	mut completion_items := []lsp.CompletionItem{}
 	if type_info is table.Struct {
 		for field in type_info.fields {
@@ -212,7 +212,7 @@ fn (mut ls Vls) completion(id int, params string) {
 			if node is ast.Stmt {
 				ls.log_message('node: ' + typeof(node), .info)
 				completion_items <<
-					ls.completion_item_from_stmt(node, file: file, table: table)
+					ls.completion_items_from_stmt(node, file: file, table: table)
 			}
 		} else if ctx.trigger_character == '=' {
 			ls.log_message(src[offset - 2].str(), .info)
@@ -224,7 +224,7 @@ fn (mut ls Vls) completion(id int, params string) {
 				return
 			}
 		}
-	} else if ctx.trigger_kind == .invoked && (offset - 1 >= 0 && src[offset - 1] == ` `) {
+	// } else if ctx.trigger_kind == .invoked && (offset - 1 >= 0 && src[offset - 1] == ` `) {
 		// show_global = true
 	} else if ctx.trigger_kind == .invoked && (offset - 1 >= 0 && src[offset - 1] == `.`) {
 		ls.completion(id, json.encode({
@@ -268,7 +268,7 @@ fn (mut ls Vls) completion(id int, params string) {
 					continue
 				}
 				completion_items <<
-					ls.completion_item_from_stmt(stmt, mod: ffile.mod.name, file: ffile, table: table, pub_only: false)
+					ls.completion_items_from_stmt(stmt, mod: ffile.mod.name, file: ffile, table: table, pub_only: false)
 			}
 		}
 	}
