@@ -49,7 +49,7 @@ pub fn new(io ReceiveSender) Vls {
 	}
 }
 
-pub fn (mut ls Vls) execute(payload string) {
+pub fn (mut ls Vls) dispatch(payload string) {
 	request := json.decode(jsonrpc.Request, payload) or {
 		ls.send(new_error(jsonrpc.parse_error))
 		return
@@ -111,7 +111,7 @@ fn (ls Vls) send(data string) {
 pub fn (mut ls Vls) start_loop() {
 	for {
 		payload := ls.io.receive() or { continue }
-		ls.execute(payload)
+		ls.dispatch(payload)
 	}
 }
 
