@@ -128,7 +128,7 @@ fn (node AstNode) children() []AstNode {
 	return []AstNode{}
 }
 
-pub fn (ls Vls) get_ast_by_pos(line int, col int, source string, nodes []AstNode) ?AstNode {
+pub fn (ls Vls) get_ast_by_pos(line int, col int, source []byte, nodes []AstNode) ?AstNode {
 	for node in nodes {
 		mut tok_pos := node.position()
 		if node is ast.Stmt {

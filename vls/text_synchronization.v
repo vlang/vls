@@ -74,7 +74,7 @@ fn (mut ls Vls) process_file(source string, uri lsp.DocumentUri) {
 		parser.parse_text(source, file_path, table, .skip_comments, pref, scope)
 	imported_files := ls.parse_imports(parsed_files, table, pref, scope)
 	checker.check_files(parsed_files)
-	ls.show_diagnostics(parsed_files[0], source, uri)
+	ls.show_diagnostics(parsed_files[0], ls.sources[uri.str()], uri)
 	ls.extract_symbols(imported_files, table, true)
 	ls.tables[target_dir_uri] = table
 	ls.insert_files(parsed_files)
