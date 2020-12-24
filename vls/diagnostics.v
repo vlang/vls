@@ -8,25 +8,27 @@ import v.util
 import v.ast
 
 // compute_offset returns a byte offset from the given position
-pub fn compute_offset(source string, line int, col int) int {
-	lines := source.split_into_lines()
+pub fn compute_offset(src []byte, line int, col int) int {
 	mut offset := 0
-	for i, ln in lines {
-		if i == line {
-			if col > ln.len {
+	mut src_line := 0
+	mut src_col := 0
+	for i, byt in src {
+		is_lf := byt == `\n`
+		is_crlf := i != src.len - 1 && unsafe {byt == `\r` && src[i + 1] == `\n`}
+		is_eol := is_lf || is_crlf
+		if is_eol {
+			if src_line == line && col > src_col {
 				return -1
 			}
-			if ln.len == 0 {
-				offset++
-				break
-			}
-			offset += col
-			break
-		} else {
-			offset += ln.len + 1
+			src_line++
+			src_col = 0
+			offset++
+			continue
 		}
+		src_col++
+		offset++
 	}
-	unsafe {lines.free()}
+	offset++
 	return offset
 }
 
