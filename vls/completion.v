@@ -202,7 +202,8 @@ fn (mut ls Vls) completion(id int, params string) {
 	mut show_local := true
 	mut completion_items := []lsp.CompletionItem{}
 	if ctx.trigger_kind == .trigger_character {
-		node := ls.get_ast_by_pos(pos.line, pos.character - 1, src, file.stmts.map(AstNode(it))) or {
+		// TODO: will be replaced with the v.ast one
+		node := file.stmts.map(AstNode(it)).find_by_pos(offset - 1) or {
 			AstNode{}
 		}
 		if ctx.trigger_character == '.' {

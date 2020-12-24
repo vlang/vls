@@ -1,3 +1,5 @@
+// TODO: I'll be keeping this for now until I can come up a nice alternative
+// based on the suggestion by spytheman that will be pushed to v.ast module - @ned
 module vls
 
 import v.ast
@@ -5,13 +7,13 @@ import v.table
 import v.token
 
 pub type AstNode = ast.ConstField | ast.EnumField | ast.Expr | ast.Field | ast.GlobalField |
-	ast.Stmt | ast.StructField | ast.StructInitField | table.Param
+	ast.Stmt | ast.StructField | ast.StructInitField | table.Param | ast.SelectBranch
 
 fn (node AstNode) position() token.Position {
 	match node {
 		ast.Stmt { return node.position() }
 		ast.Expr { return node.position() }
-		ast.StructField, ast.Field, ast.EnumField, ast.ConstField, ast.StructInitField, ast.GlobalField, table.Param { return node.pos }
+		ast.SelectBranch, ast.StructField, ast.Field, ast.EnumField, ast.ConstField, ast.StructInitField, ast.GlobalField, table.Param { return node.pos }
 	}
 }
 
@@ -55,7 +57,9 @@ fn (node AstNode) children() []AstNode {
 				// TODO: include branches
 				return [AstNode(node.cond)]
 			}
-			// SelectExpr {}
+			ast.SelectExpr {
+				return node.branches.map(AstNode(it))
+			}
 			ast.ChanInit {
 				return [AstNode(node.cap_expr)]
 			}
@@ -120,15 +124,21 @@ fn (node AstNode) children() []AstNode {
 		}
 	}
 	match node {
-		ast.EnumField, ast.GlobalField, ast.StructInitField, ast.ConstField { return [
-				AstNode(node.expr),
-			] }
+		ast.EnumField, ast.GlobalField, ast.StructInitField, ast.ConstField { 
+			return [AstNode(node.expr)] 
+		}
+		ast.SelectBranch {
+			mut children := []AstNode{}
+			children << node.stmt
+			children << node.stmts.map(AstNode(it))
+			return children
+		}
 		else {}
 	}
 	return []AstNode{}
 }
 
-pub fn (ls Vls) get_ast_by_pos(line int, col int, source []byte, nodes []AstNode) ?AstNode {
+pub fn (nodes []AstNode) find_by_pos(pos int) ?AstNode {
 	for node in nodes {
 		mut tok_pos := node.position()
 		if node is ast.Stmt {
@@ -148,13 +158,12 @@ pub fn (ls Vls) get_ast_by_pos(line int, col int, source []byte, nodes []AstNode
 		} else if node is ast.StructField {
 			tok_pos = tok_pos.extend(node.type_pos)
 		}
-		range := position_to_lsp_range(source, tok_pos)
-		if range.start.line == line && (col >= range.start.character && col <= range.end.character) {
+		if pos >= tok_pos.pos && pos <= tok_pos.pos + tok_pos.len {
 			return node
 		}
 		children := node.children()
 		if children.len > 0 {
-			child_ast := ls.get_ast_by_pos(line, col, source, children) or { continue }
+			child_ast := children.find_by_pos(pos) or { continue }
 			return child_ast
 		}
 	}
