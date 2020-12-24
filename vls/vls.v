@@ -36,7 +36,6 @@ mut:
 	tables            map[string]&table.Table
 	root_path         lsp.DocumentUri
 	symbols           map[string]ast.Stmt
-	cached_completion []lsp.CompletionItem
 pub mut:
 	// TODO: replace with io.ReadWriter
 	io                ReceiveSender
