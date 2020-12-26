@@ -20,9 +20,8 @@ pub fn (io Stdio) receive() ?string {
 		return error('content length is missing')
 	}
 	mut conlen := first_line[content_length.len..].int()
-	$if !windows { conlen++ }
 	mut buf := strings.new_builder(conlen)
-	for conlen > 0 {
+	for conlen >= 0 {
 		c := C.fgetc(C.stdin)
 		$if !windows {
 			if c == 10 { continue }
