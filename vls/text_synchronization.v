@@ -64,8 +64,11 @@ fn (mut ls Vls) process_file(source string, uri lsp.DocumentUri) {
 	target_dir := os.dir(file_path)
 	target_dir_uri := os.dir(uri)
 	// ls.log_message(target_dir, .info)
-	scope, pref := new_scope_and_pref(target_dir, os.dir(target_dir), os.join_path(target_dir,
+	scope, mut pref := new_scope_and_pref(target_dir, os.dir(target_dir), os.join_path(target_dir,
 		'modules'))
+	if uri.ends_with('_test.v') {
+		pref.is_test = true
+	}
 	table := ls.new_table()
 	mut parsed_files := []ast.File{}
 	mut checker := checker.new_checker(table, pref)
