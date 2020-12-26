@@ -58,11 +58,16 @@ pub fn (mut ls Vls) dispatch(payload string) {
 		match request.method { // not only requests but also notifications
 			'initialized' {} // does nothing currently
 			'shutdown' {
-				ls.shutdown(request.id)
-			}
-			'exit' {
+				// NB: Some users reported that after closing their text editors,
+				// the vls process isn't properly closed at all and the editor still
+				// continuously sending useless requests during the shutdown phase
+				// which dramatically increases the memory. Unless there is a fix
+				// or other possible alternatives, the solution for now is to
+				// immediately exit when the server receives a shutdown request.
 				ls.exit()
+				// ls.shutdown(request.id)
 			}
+			'exit' { /* ignore for the reasons stated in the above comment */ }
 			'textDocument/didOpen' {
 				ls.did_open(request.id, request.params)
 			}
