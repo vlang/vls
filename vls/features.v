@@ -97,6 +97,7 @@ fn (ls Vls) generate_symbols(file ast.File, uri lsp.DocumentUri) []lsp.SymbolInf
 						}
 					}
 				}
+				continue
 			}
 			ast.EnumDecl {
 				name = stmt.name
