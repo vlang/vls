@@ -11,7 +11,7 @@ import os
 fn (ls Vls) formatting(id int, params string) {
 	formatting_params := json.decode(lsp.DocumentFormattingParams, params) or { panic(err) }
 	uri := formatting_params.text_document.uri.str()
-	table := ls.tables[os.dir(uri)]
+	table := ls.tables[os.dir(uri.str())]
 	file_ast := ls.files[uri]
 	source := ls.sources[uri].bytestr()
 	source_lines := source.split_into_lines()
@@ -73,7 +73,11 @@ fn (ls Vls) document_symbol(id int, params string) {
 fn (ls Vls) generate_symbols(file ast.File, uri lsp.DocumentUri) []lsp.SymbolInformation {
 	mut symbols := []lsp.SymbolInformation{}
 	source := ls.sources[uri.str()]
-	table := ls.tables[os.dir(uri.str())]
+	dir := os.dir(uri.str())
+	if dir !in ls.tables {
+		return symbols
+	}
+	table := ls.tables[dir]
 
 	for stmt in file.stmts {
 		mut name := ''

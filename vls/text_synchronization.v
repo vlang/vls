@@ -87,7 +87,7 @@ fn (mut ls Vls) process_file(source string, uri lsp.DocumentUri) {
 	if target_dir_uri in ls.tables {
 		ls.tables.delete(target_dir_uri)
 	}
-	ls.tables[target_dir] = table
+	ls.tables[target_dir_uri] = table
 	ls.insert_files(parsed_files)
 	ls.show_diagnostics(ls.files[uri.str()], ls.sources[uri.str()])
 	unsafe {
