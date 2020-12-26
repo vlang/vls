@@ -30,8 +30,7 @@ fn (mut ls Vls) initialize(id int, params string) {
 	scope, pref := new_scope_and_pref()
 	builtin_files := os.ls(builtin_path) or { panic(err) }
 	files_to_parse := pref.should_compile_filtered_files(builtin_path, builtin_files)
-	mut parsed_files := parser.parse_files(files_to_parse, ls.base_table, pref, scope)
-	parsed_files << ls.parse_imports(parsed_files, ls.base_table, pref, scope)
+	parsed_files := parser.parse_files(files_to_parse, ls.base_table, pref, scope)
 	ls.insert_files(parsed_files)
 	unsafe {
 		builtin_files.free()
