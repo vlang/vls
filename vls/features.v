@@ -13,7 +13,7 @@ fn (ls Vls) formatting(id int, params string) {
 	uri := formatting_params.text_document.uri.str()
 	table := ls.tables[uri]
 	file_ast := ls.files[uri]
-	source := ls.sources[uri]
+	source := ls.sources[uri].bytestr()
 	source_lines := source.split_into_lines()
 	formatted_content := fmt.fmt(file_ast, table, false)
 	resp := jsonrpc.Response<[]lsp.TextEdit>{

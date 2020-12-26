@@ -21,15 +21,14 @@ fn (mut ls Vls) did_open(id int, params string) {
 	source := did_open_params.text_document.text
 	uri := did_open_params.text_document.uri
 	ls.process_file(source, uri)
-	ls.show_diagnostics(source, uri)
 }
 
 fn (mut ls Vls) did_change(id int, params string) {
 	did_change_params := json.decode(lsp.DidChangeTextDocumentParams, params) or { panic(err) }
 	source := did_change_params.content_changes[0].text
 	uri := did_change_params.text_document.uri
+	unsafe { ls.sources[uri.str()].free() }
 	ls.process_file(source, uri)
-	ls.show_diagnostics(source, uri)
 }
 
 fn (mut ls Vls) did_close(id int, params string) {
@@ -59,6 +58,7 @@ fn (mut ls Vls) did_close(id int, params string) {
 }
 
 fn (mut ls Vls) process_file(source string, uri lsp.DocumentUri) {
+	ls.sources[uri.str()] = source.bytes()
 	file_path := uri.path()
 	target_dir := os.dir(file_path)
 	target_dir_uri := os.dir(uri)
@@ -84,15 +84,12 @@ fn (mut ls Vls) process_file(source string, uri lsp.DocumentUri) {
 		mut checker := checker.new_checker(table, pref)
 		checker.check_files(parsed_files)
 	}
-	if uri in ls.sources {
-		ls.sources.delete(uri)
-	}
 	if target_dir_uri in ls.tables {
 		ls.tables.delete(target_dir_uri)
 	}
-	ls.sources[uri.str()] = source
 	ls.tables[target_dir] = table
 	ls.insert_files(parsed_files)
+	ls.show_diagnostics(ls.files[uri.str()], ls.sources[uri.str()])
 	unsafe {
 		parsed_files.free()
 		source.free()
