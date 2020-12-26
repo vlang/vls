@@ -19,6 +19,8 @@ struct CompletionItemConfig {
 	table    &table.Table
 }
 
+// type CompletionSource = ast.Stmt | ast.Expr | table.Fn | table.TypeInfo
+
 fn (ls Vls) completion_items_from_stmt(stmt ast.Stmt, cfg CompletionItemConfig) []lsp.CompletionItem {
 	mut completion_items := []lsp.CompletionItem{}
 	match stmt {
@@ -113,19 +115,24 @@ fn (ls Vls) completion_items_from_expr(expr ast.Expr, cfg CompletionItemConfig) 
 	mut expr_type := table.Type(0)
 	if expr is ast.SelectorExpr {
 		expr_type = expr.expr_type
-		// TODO: crashes
-		// if expr_type == 0 && expr.expr is ast.Ident {
-		// 	ident := expr.expr
-		// 	if ident.name !in cfg.file.imports.map(if it.alias.len > 0 { it.alias } else { it.mod }) {	
-		// 		return completion_items
-		// 	}
-		// 	for sym_name, stmt in ls.symbols {
-		// 		if !sym_name.starts_with(ident.name) {
-		// 			continue
-		// 		}
-		// 		ls.completion_items_from_stmt(stmt, mut completion_items, cfg)
-		// 	}
-		// }
+		// NB: wont work yet unless https://github.com/vlang/v/pull/7574 is merged
+		if expr_type == 0 && expr.expr is ast.Ident {
+			ident := expr.expr as ast.Ident
+			// ls.log_message('[completion_items_from_expr] creating data for $ident.name', .info)
+			if ident.name !in cfg.file.imports.map(if it.alias.len > 0 { it.alias } else { it.mod }) {	
+				return completion_items
+			}
+			for sym_name, stmt in ls.symbols {
+				if !sym_name.starts_with(ident.name + '.') {
+					continue
+				}
+				ls.log_message('[completion_items_from_expr] $sym_name', .info)
+				// NB: symbols of the said module does not show the full list
+				// unless by pressing cmd/ctrl+space or by pressing escape key
+				// + deleting the dot + typing again the dot
+				completion_items << ls.completion_items_from_stmt(stmt, { cfg | mod: ident.name })
+			}
+		}
 	}
 	if expr_type != 0 {
 		type_sym := cfg.table.get_type_symbol(expr_type)
@@ -238,13 +245,16 @@ fn (mut ls Vls) completion(id int, params string) {
 	}
 	if show_local {
 		scope := file.scope.innermost(offset)
-		// TODO: get the module names
-		// for imp in file.imports {
-		// 	completion_items << lsp.CompletionItem{
-		// 		label: if imp.alias.len > 0 { imp.alias } else { imp.mod }
-		// 		kind: .module_
-		// 	}
-		// }
+		// get the module names
+		for imp in file.imports {
+			if imp.mod in ls.invalid_imports[file_uri.str()] {
+				continue
+			}
+			completion_items << lsp.CompletionItem{
+				label: if imp.alias.len > 0 { imp.alias } else { imp.mod }
+				kind: .module_
+			}
+		}
 		// get variables inside the scope
 		for _, obj in scope.objects {
 			if obj is ast.Var {
