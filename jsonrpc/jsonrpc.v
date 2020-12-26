@@ -35,6 +35,15 @@ pub struct NotificationMessage <T> {
 	params  T
 }
 
+// with error
+// TODO: must be removed when omitempty JSON is supported
+struct JrpcResponse2 <T> {
+	jsonrpc string = jsonrpc.version
+	id      int
+	error   jsonrpc.ResponseError
+	result  T
+}
+
 struct ResponseError {
 mut:
 	code    int
