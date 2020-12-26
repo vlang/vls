@@ -5,7 +5,7 @@ fn test_wrong_first_request() {
 	mut io := testing.Testio{}
 	payload := '{"jsonrpc":"2.0","id":1,"method":"shutdown","params":{}}'
 	mut ls := vls.new(io)
-	ls.execute(payload)
+	ls.dispatch(payload)
 	status := ls.status()
 	assert status == .off
 	assert io.response ==
@@ -16,7 +16,7 @@ fn test_initialize_with_capabilities() {
 	mut io := testing.Testio{}
 	payload := '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}'
 	mut ls := vls.new(io)
-	ls.execute(payload)
+	ls.dispatch(payload)
 	status := ls.status()
 	assert status == .initialized
 	assert io.response ==
@@ -26,7 +26,7 @@ fn test_initialize_with_capabilities() {
 fn test_initialized() {
 	payload := '{"jsonrpc":"2.0","id":1,"method":"initialized","params":{}}'
 	mut ls := init()
-	ls.execute(payload)
+	ls.dispatch(payload)
 	status := ls.status()
 	assert status == .initialized
 }
@@ -34,7 +34,7 @@ fn test_initialized() {
 fn test_shutdown() {
 	payload := '{"jsonrpc":"2.0","method":"shutdown","params":{}}'
 	mut ls := init()
-	ls.execute(payload)
+	ls.dispatch(payload)
 	status := ls.status()
 	assert status == .shutdown
 }
@@ -43,6 +43,6 @@ fn init() vls.Vls {
 	mut io := testing.Testio{}
 	payload := '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}'
 	mut ls := vls.new(io)
-	ls.execute(payload)
+	ls.dispatch(payload)
 	return ls
 }
