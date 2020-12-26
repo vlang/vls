@@ -202,6 +202,13 @@ fn (mut ls Vls) completion(id int, params string) {
 	ctx := completion_params.context
 	pos := completion_params.position
 	offset := compute_offset(src, pos.line, pos.character)
+	cfg := CompletionItemConfig{
+		mod: file.mod.name
+		file: file
+		offset: offset
+		table: table
+	}
+	// ls.log_message('position: { line: $pos.line, col: $pos.character } | offset: $offset | trigger_kind: $ctx', .info)
 	mut show_global := true
 	mut show_global_fn := false
 	mut show_local := true
@@ -217,7 +224,7 @@ fn (mut ls Vls) completion(id int, params string) {
 			if node is ast.Stmt {
 				ls.log_message('node: ' + typeof(node), .info)
 				completion_items <<
-					ls.completion_items_from_stmt(node, file: file, table: table)
+					ls.completion_items_from_stmt(node, cfg)
 			}
 		} else if ctx.trigger_character == '=' {
 			ls.log_message(src[offset - 2].str(), .info)
@@ -276,7 +283,7 @@ fn (mut ls Vls) completion(id int, params string) {
 					continue
 				}
 				completion_items <<
-					ls.completion_items_from_stmt(stmt, mod: ffile.mod.name, file: ffile, table: table, pub_only: false)
+					ls.completion_items_from_stmt(stmt, { cfg | mod: ffile.mod.name, file: ffile, pub_only: false })
 			}
 		}
 	}
