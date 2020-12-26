@@ -37,10 +37,10 @@ pub struct NotificationMessage <T> {
 
 // with error
 // TODO: must be removed when omitempty JSON is supported
-struct JrpcResponse2 <T> {
-	jsonrpc string = jsonrpc.version
+pub struct Response2 <T> {
+	jsonrpc string = version
 	id      int
-	error   jsonrpc.ResponseError
+	error   ResponseError
 	result  T
 }
 
@@ -51,6 +51,7 @@ mut:
 	data    string
 }
 
+[inline]
 pub fn new_response_error(err_code int) ResponseError {
 	return ResponseError{
 		code: err_code
