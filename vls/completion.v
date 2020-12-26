@@ -194,16 +194,14 @@ fn (mut ls Vls) completion(id int, params string) {
 	table := ls.tables[dir]
 	ctx := completion_params.context
 	pos := completion_params.position
-	offset := compute_offset(src, pos.line, pos.character) - 4
-	ls.log_message('position: { line: $pos.line, col: $pos.character } |  offset: $offset | trigger_kind: $ctx',
-		.info)
+	offset := compute_offset(src, pos.line, pos.character)
 	mut show_global := true
 	mut show_global_fn := false
 	mut show_local := true
 	mut completion_items := []lsp.CompletionItem{}
 	if ctx.trigger_kind == .trigger_character {
 		// TODO: will be replaced with the v.ast one
-		node := file.stmts.map(AstNode(it)).find_by_pos(offset - 1) or {
+		node := file.stmts.map(AstNode(it)).find_by_pos(offset - 2) or {
 			AstNode{}
 		}
 		if ctx.trigger_character == '.' {

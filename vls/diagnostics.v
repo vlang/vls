@@ -16,6 +16,9 @@ pub fn compute_offset(src []byte, line int, col int) int {
 		is_lf := byt == `\n`
 		is_crlf := i != src.len - 1 && unsafe { byt == `\r` && src[i + 1] == `\n` }
 		is_eol := is_lf || is_crlf
+		if src_line == line && src_col == col {
+			return offset
+		}
 		if is_eol {
 			if src_line == line && col > src_col {
 				return -1
