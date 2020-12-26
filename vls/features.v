@@ -74,6 +74,8 @@ fn (ls Vls) generate_symbols(file ast.File, uri lsp.DocumentUri) []lsp.SymbolInf
 	mut symbols := []lsp.SymbolInformation{}
 	source := ls.sources[uri.str()]
 	dir := os.dir(uri.str())
+	// NB: should never happen. just in case
+	// the requests aren't executed in order
 	if dir !in ls.tables {
 		return symbols
 	}
