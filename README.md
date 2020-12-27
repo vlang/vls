@@ -4,8 +4,6 @@ VLS (V Language Server) is a LSP v3.15-compatible language server for V.
 ## Current Status
 VLS is a work-in-progress. It has issues with memory management (for now) and may not be guaranteed to work on large codebases.
 
-Windows support is also unstable for now. Please file an issue if you experience problems with it.
-
 ## Installation
 Installation requires you to have Git and V installed and compile the language server by yourself. You need to execute the following:
 ```
