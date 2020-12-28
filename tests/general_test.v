@@ -31,13 +31,13 @@ fn test_initialized() {
 	assert status == .initialized
 }
 
-fn test_shutdown() {
-	payload := '{"jsonrpc":"2.0","method":"shutdown","params":{}}'
-	mut ls := init()
-	ls.dispatch(payload)
-	status := ls.status()
-	assert status == .shutdown
-}
+// fn test_shutdown() {
+// 	payload := '{"jsonrpc":"2.0","method":"shutdown","params":{}}'
+// 	mut ls := init()
+// 	ls.dispatch(payload)
+// 	status := ls.status()
+// 	assert status == .shutdown
+// }
 
 fn init() vls.Vls {
 	mut io := testing.Testio{}

@@ -36,7 +36,8 @@ pub struct NotificationMessage <T> {
 }
 
 // with error
-struct Response2 <T> {
+// TODO: must be removed when omitempty JSON is supported
+pub struct Response2 <T> {
 	jsonrpc string = version
 	id      int
 	error   ResponseError

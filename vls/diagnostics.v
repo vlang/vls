@@ -71,7 +71,8 @@ fn position_to_lsp_range(source []byte, pos token.Position) lsp.Range {
 }
 
 // show_diagnostics converts the file ast's errors and warnings and publishes them to the editor
-fn (ls Vls) show_diagnostics(file ast.File, source []byte, uri lsp.DocumentUri) {
+fn (ls Vls) show_diagnostics(file ast.File, source []byte) {
+	uri := lsp.document_uri_from_path(file.path)
 	mut diagnostics := []lsp.Diagnostic{}
 	for _, error in file.errors {
 		diagnostics << lsp.Diagnostic{

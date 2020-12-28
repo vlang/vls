@@ -77,13 +77,16 @@ fn (mut ls Vls) process_file(source string, uri lsp.DocumentUri) {
 	imported_files, import_errors := ls.parse_imports(parsed_files, table, pref, scope)
 	checker.check_files(parsed_files)
 	ls.extract_symbols(imported_files, table, true)
+	if target_dir_uri in ls.tables {
+		ls.tables.delete(target_dir_uri)
+	}
 	ls.tables[target_dir_uri] = table
 	ls.insert_files(parsed_files)
 	for err in import_errors {
 		err_file_uri := lsp.document_uri_from_path(err.file_path).str()
 		ls.files[err_file_uri].errors << err
 	}
-	ls.show_diagnostics(ls.files[uri.str()], ls.sources[uri.str()], uri)
+	ls.show_diagnostics(ls.files[uri.str()], ls.sources[uri.str()])
 	unsafe {
 		imported_files.free()
 		import_errors.free()

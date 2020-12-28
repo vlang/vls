@@ -22,7 +22,7 @@ mut:
 	// TODO: change map key to DocumentUri
 	// files  map[DocumentUri]ast.File
 	files      map[string]ast.File
-	// sources  map[DocumentUri]string
+	// sources  map[DocumentUri][]byte
 	sources    map[string][]byte
 	// NB: a separate table is required for each folder in
 	// order to do functions such as typ_to_string or when
@@ -59,8 +59,17 @@ pub fn (mut ls Vls) dispatch(payload string) {
 	if ls.status == .initialized {
 		match request.method { // not only requests but also notifications
 			'initialized' {} // does nothing currently
-			'shutdown' { ls.shutdown(request.id) }
-			'exit' { ls.exit() }
+			'shutdown' {
+				// NB: Some users reported that after closing their text editors,
+				// the vls process isn't properly closed at all and the editor still
+				// continuously sending useless requests during the shutdown phase
+				// which dramatically increases the memory. Unless there is a fix
+				// or other possible alternatives, the solution for now is to
+				// immediately exit when the server receives a shutdown request.
+				ls.exit()
+				// ls.shutdown(request.id)
+			}
+			'exit' { /* ignore for the reasons stated in the above comment */ }
 			'textDocument/didOpen' { ls.did_open(request.id, request.params) }
 			'textDocument/didChange' { ls.did_change(request.id, request.params) }
 			'textDocument/didClose' { ls.did_close(request.id, request.params) }

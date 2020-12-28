@@ -22,10 +22,7 @@ pub fn (io Stdio) receive() ?string {
 	}
 	mut conlen := first_line[content_length.len..].int()
 	mut buf := strings.new_builder(conlen)
-	$if !windows {
-		conlen++
-	}
-	for conlen > 0 {
+	for conlen >= 0 {
 		c := C.fgetc(C.stdin)
 		$if !windows {
 			if c == 10 {
