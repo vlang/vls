@@ -220,7 +220,7 @@ fn (mut ls Vls) completion(id int, params string) {
 	
 	// adjust context data if the trigger symbols are on the left
 	if ctx.trigger_kind == .invoked && offset - 1 >= 0 && file.stmts.len > 0 && src.len > 3 {
-		if src[offset - 1] in [`.`, `:`, `=`] {
+		if src[offset - 1] in [`.`, `:`, `=`, `{`, `,`] {
 			ctx = lsp.CompletionContext{
 				trigger_kind: .trigger_character
 				trigger_character: src[offset - 1].str()
@@ -246,8 +246,9 @@ fn (mut ls Vls) completion(id int, params string) {
 
 	// ls.log_message('position: { line: $pos.line, col: $pos.character } | offset: $offset | trigger_kind: $ctx', .info)
 	if ctx.trigger_kind == .trigger_character {
-		// TODO: will be replaced with the v.ast one
-		if ctx.trigger_character == '.' {
+		// TODO: enum support inside struct fields
+		if ctx.trigger_character == '.' && (offset - 1 >= 0 && src[offset - 1] != ` `) {
+			// TODO: will be replaced with the v.ast one
 			node := file.stmts.map(AstNode(it)).find_by_pos(offset - 2) or { AstNode{} }
 			show_global = false
 			show_local = false
@@ -283,6 +284,24 @@ fn (mut ls Vls) completion(id int, params string) {
 							field_type_sym := table.get_type_symbol(field_node.expected_type)
 							completion_items << ls.completion_items_from_type_info(field_type_sym.info)
 							filter_type = field_node.expected_type
+						} else {
+							// if structinit is empty or not within the field position, it must show the list of missing fields
+							defined_fields := node.fields.map(it.name)
+							struct_type_sym := table.get_type_symbol(node.typ)
+							struct_type_info := struct_type_sym.info as table.Struct
+
+							for field in struct_type_info.fields {
+								if field.name in defined_fields {
+									continue
+								}
+
+								completion_items << lsp.CompletionItem{
+									label: '$field.name:'
+									kind: .field
+									insert_text: '$field.name: \$0'
+									insert_text_format: .snippet
+								}
+							}
 						}
 					}
 					else { ls.log_message(typeof(node), .info) }
