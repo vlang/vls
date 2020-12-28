@@ -58,6 +58,7 @@ fn (mut ls Vls) did_close(id int, params string) {
 	}
 }
 
+// TODO: edits must use []lsp.TextEdit instead of string
 fn (mut ls Vls) process_file(source string, uri lsp.DocumentUri) {
 	ls.sources[uri.str()] = source.bytes()
 	file_path := uri.path()
@@ -77,16 +78,14 @@ fn (mut ls Vls) process_file(source string, uri lsp.DocumentUri) {
 	imported_files, import_errors := ls.parse_imports(parsed_files, table, pref, scope)
 	checker.check_files(parsed_files)
 	ls.extract_symbols(imported_files, table, true)
-	if target_dir_uri in ls.tables {
-		ls.tables.delete(target_dir_uri)
-	}
 	ls.tables[target_dir_uri] = table
 	ls.insert_files(parsed_files)
 	for err in import_errors {
 		err_file_uri := lsp.document_uri_from_path(err.file_path).str()
 		ls.files[err_file_uri].errors << err
+		unsafe { err_file_uri.free() }
 	}
-	ls.show_diagnostics(ls.files[uri.str()], ls.sources[uri.str()])
+	ls.show_diagnostics(uri)
 	unsafe {
 		imported_files.free()
 		import_errors.free()
@@ -158,7 +157,10 @@ fn (mut ls Vls) parse_imports(parsed_files []ast.File, table &table.Table, pref 
 			}
 		}
 		ls.invalid_imports[file_uri] = invalid_imports.clone()
-		unsafe { invalid_imports.free() }
+		unsafe { 
+			invalid_imports.free()
+			file_uri.free()
+		}
 	}
 	unsafe { done_imports.free() }
 	return newly_parsed_files, errs
