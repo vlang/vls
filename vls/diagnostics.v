@@ -5,7 +5,6 @@ import json
 import jsonrpc
 import v.token
 import v.util
-import v.ast
 
 // compute_offset returns a byte offset from the given position
 pub fn compute_offset(src []byte, line int, col int) int {
@@ -71,8 +70,9 @@ fn position_to_lsp_range(source []byte, pos token.Position) lsp.Range {
 }
 
 // show_diagnostics converts the file ast's errors and warnings and publishes them to the editor
-fn (ls Vls) show_diagnostics(file ast.File, source []byte) {
-	uri := lsp.document_uri_from_path(file.path)
+fn (ls Vls) show_diagnostics(uri lsp.DocumentUri) {
+	file := ls.files[uri.str()]
+	source := ls.sources[uri.str()]
 	mut diagnostics := []lsp.Diagnostic{}
 	for _, error in file.errors {
 		diagnostics << lsp.Diagnostic{
