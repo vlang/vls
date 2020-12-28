@@ -113,11 +113,11 @@ fn (ls Vls) completion_items_from_stmt(stmt ast.Stmt, cfg CompletionItemConfig) 
 fn (ls Vls) completion_items_from_expr(expr ast.Expr, cfg CompletionItemConfig) []lsp.CompletionItem {
 	mut completion_items := []lsp.CompletionItem{}
 	mut expr_type := table.Type(0)
+	// TODO: support for infix/postfix expr
 	if expr is ast.SelectorExpr {
 		expr_type = expr.expr_type
 		if expr_type == 0 && expr.expr is ast.Ident {
 			ident := expr.expr as ast.Ident
-			// ls.log_message('[completion_items_from_expr] creating data for $ident.name', .info)
 			if ident.name !in cfg.file.imports.map(if it.alias.len > 0 { it.alias } else { it.mod }) {	
 				return completion_items
 			}
@@ -256,8 +256,8 @@ fn (mut ls Vls) completion(id int, params string) {
 					ls.completion_items_from_stmt(node, cfg)
 			}
 		} else {
-			ls.log_message(ctx.trigger_character, .info)
 			node := file.stmts.map(AstNode(it)).find_by_pos(offset) or { AstNode{} }
+			ls.log_message(typeof(node), .info)
 			if node is ast.Stmt {
 				// TODO: transfer it to completion_item_for_stmt
 				match node {
@@ -268,12 +268,9 @@ fn (mut ls Vls) completion(id int, params string) {
 							filter_type = node.left_types[node.left_types.len - 1]
 						}
 					}
-					else {
-						ls.log_message(typeof(node), .info)
-					}
+					else { ls.log_message(typeof(node), .info) }
 				}
 			} else if node is ast.Expr {
-				ls.log_message(typeof(node), .info)
 				// TODO: transfer it to completion_item_for_expr
 				match node {
 					ast.StructInit {
@@ -288,9 +285,7 @@ fn (mut ls Vls) completion(id int, params string) {
 							filter_type = field_node.expected_type
 						}
 					}
-					else {
-						ls.log_message(typeof(node), .info)
-					}
+					else { ls.log_message(typeof(node), .info) }
 				}
 			}
 		}
