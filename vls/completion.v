@@ -219,7 +219,7 @@ fn (mut ls Vls) completion(id int, params string) {
 	mut filter_type := table.Type(0)
 	
 	// adjust context data if the trigger symbols are on the left
-	if ctx.trigger_kind == .invoked && offset - 1 >= 0 {
+	if ctx.trigger_kind == .invoked && offset - 1 >= 0 && file.stmts.len > 0 && src.len > 3 {
 		if src[offset - 1] in [`.`, `:`, `=`] {
 			ctx = lsp.CompletionContext{
 				trigger_kind: .trigger_character
@@ -292,6 +292,21 @@ fn (mut ls Vls) completion(id int, params string) {
 						ls.log_message(typeof(node), .info)
 					}
 				}
+			}
+		}
+	} else if ctx.trigger_kind == .invoked && (file.stmts.len == 0 || src.len <= 3) {
+		// should never happen but just to make sure
+		show_global = false
+		show_local = false
+
+		folder_name := os.base(os.dir(file_uri.str())).replace(' ', '_')
+		module_name_suggestions := ['module main', 'module $folder_name']
+		
+		for sg in module_name_suggestions {
+			completion_items << lsp.CompletionItem{
+				label: sg
+				insert_text: sg
+				kind: .variable
 			}
 		}
 	} else {
