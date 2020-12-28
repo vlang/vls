@@ -208,21 +208,43 @@ fn (mut ls Vls) completion(id int, params string) {
 	dir := os.dir(file_uri)
 	file := ls.files[file_uri.str()]
 	src := ls.sources[file_uri.str()]
+
+	mut pos := completion_params.position
+	mut offset := compute_offset(src, pos.line, pos.character)
+	mut ctx := completion_params.context
+	mut show_global := true
+	mut show_global_fn := false
+	mut show_local := true
+	mut completion_items := []lsp.CompletionItem{}
+	mut filter_type := table.Type(0)
+	
+	// adjust context data if the trigger symbols are on the left
+	if ctx.trigger_kind == .invoked && offset - 1 >= 0 {
+		if src[offset - 1] in [`.`, `:`, `=`] {
+			ctx = lsp.CompletionContext{
+				trigger_kind: .trigger_character
+				trigger_character: src[offset - 1].str()
+			}
+		} else if src[offset - 1] == ` ` && offset - 2 >= 0 && src[offset - 2] !in [src[offset - 1], `.`] {
+			ctx = lsp.CompletionContext{
+				trigger_kind: .trigger_character
+				trigger_character: src[offset - 2].str()
+			}
+
+			offset -= 2
+			pos = { pos | character: pos.character - 2 }
+		}
+	}
+
 	table := ls.tables[dir]
-	ctx := completion_params.context
-	pos := completion_params.position
-	offset := compute_offset(src, pos.line, pos.character)
 	cfg := CompletionItemConfig{
 		mod: file.mod.name
 		file: file
 		offset: offset
 		table: table
 	}
+
 	// ls.log_message('position: { line: $pos.line, col: $pos.character } | offset: $offset | trigger_kind: $ctx', .info)
-	mut show_global := true
-	mut show_global_fn := false
-	mut show_local := true
-	mut completion_items := []lsp.CompletionItem{}
 	if ctx.trigger_kind == .trigger_character {
 		// TODO: will be replaced with the v.ast one
 		node := file.stmts.map(AstNode(it)).find_by_pos(offset - 2) or {
@@ -232,7 +254,6 @@ fn (mut ls Vls) completion(id int, params string) {
 			show_global = false
 			show_local = false
 			if node is ast.Stmt {
-				ls.log_message('node: ' + typeof(node), .info)
 				completion_items <<
 					ls.completion_items_from_stmt(node, cfg)
 			}
@@ -246,17 +267,7 @@ fn (mut ls Vls) completion(id int, params string) {
 				return
 			}
 		}
-	// } else if ctx.trigger_kind == .invoked && (offset - 1 >= 0 && src[offset - 1] == ` `) {
-		// show_global = true
-	} else if ctx.trigger_kind == .invoked && (offset - 1 >= 0 && src[offset - 1] == `.`) {
-		ls.completion(id, json.encode({
-			completion_params |
-			context: lsp.CompletionContext{
-			trigger_kind: .trigger_character
-			trigger_character: src[offset - 1].str()
 		}
-		}))
-		return
 	} else {
 		show_global_fn = true
 	}
