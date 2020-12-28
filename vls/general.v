@@ -28,13 +28,12 @@ fn (mut ls Vls) initialize(id int, params string) {
 	ls.status = .initialized
 	// since builtin is used frequently, they should be parsed first and only once
 	scope, pref := new_scope_and_pref()
-	builtin_files := os.ls(builtin_path) or { panic(err) }
-	files_to_parse := pref.should_compile_filtered_files(builtin_path, builtin_files)
-	parsed_files := parser.parse_files(files_to_parse, ls.base_table, pref, scope)
+	mut builtin_files := os.ls(builtin_path) or { panic(err) }
+	builtin_files = pref.should_compile_filtered_files(builtin_path, builtin_files)
+	parsed_files := parser.parse_files(builtin_files, ls.base_table, pref, scope)
 	ls.insert_files(parsed_files)
 	unsafe {
 		builtin_files.free()
-		files_to_parse.free()
 		parsed_files.free()
 	}
 	ls.send(json.encode(result))
