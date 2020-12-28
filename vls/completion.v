@@ -115,7 +115,6 @@ fn (ls Vls) completion_items_from_expr(expr ast.Expr, cfg CompletionItemConfig) 
 	mut expr_type := table.Type(0)
 	if expr is ast.SelectorExpr {
 		expr_type = expr.expr_type
-		// NB: wont work yet unless https://github.com/vlang/v/pull/7574 is merged
 		if expr_type == 0 && expr.expr is ast.Ident {
 			ident := expr.expr as ast.Ident
 			// ls.log_message('[completion_items_from_expr] creating data for $ident.name', .info)
@@ -126,7 +125,6 @@ fn (ls Vls) completion_items_from_expr(expr ast.Expr, cfg CompletionItemConfig) 
 				if !sym_name.starts_with(ident.name + '.') {
 					continue
 				}
-				ls.log_message('[completion_items_from_expr] $sym_name', .info)
 				// NB: symbols of the said module does not show the full list
 				// unless by pressing cmd/ctrl+space or by pressing escape key
 				// + deleting the dot + typing again the dot
@@ -179,14 +177,26 @@ fn (ls Vls) completion_items_from_fn(fnn table.Fn, is_method bool) lsp.Completio
 
 fn (ls Vls) completion_items_from_type_info(type_info table.TypeInfo) []lsp.CompletionItem {
 	mut completion_items := []lsp.CompletionItem{}
-	if type_info is table.Struct {
-		for field in type_info.fields {
-			completion_items << lsp.CompletionItem{
-				label: field.name
-				kind: .field
-				insert_text: field.name
+	match type_info {
+		table.Struct {
+			for field in type_info.fields {
+				completion_items << lsp.CompletionItem{
+					label: field.name
+					kind: .field
+					insert_text: field.name
+				}
 			}
 		}
+		table.Enum {
+			for val in type_info.vals {
+				completion_items << lsp.CompletionItem{
+					label: '.$val'
+					kind: .field
+					insert_text: '.$val'
+				}
+			}
+		}
+		else {}
 	}
 	return completion_items
 }
