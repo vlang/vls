@@ -247,45 +247,79 @@ fn (mut ls Vls) completion(id int, params string) {
 	// ls.log_message('position: { line: $pos.line, col: $pos.character } | offset: $offset | trigger_kind: $ctx', .info)
 	if ctx.trigger_kind == .trigger_character {
 		// TODO: will be replaced with the v.ast one
-		node := file.stmts.map(AstNode(it)).find_by_pos(offset - 2) or {
-			AstNode{}
-		}
 		if ctx.trigger_character == '.' {
+			node := file.stmts.map(AstNode(it)).find_by_pos(offset - 2) or { AstNode{} }
 			show_global = false
 			show_local = false
 			if node is ast.Stmt {
 				completion_items <<
 					ls.completion_items_from_stmt(node, cfg)
 			}
-		} else if ctx.trigger_character == '=' {
-			ls.log_message(src[offset - 2].str(), .info)
-			if offset - 2 >= 0 && src[offset - 2] == `:` {
-				ls.log_message('assign found', .info)
-				show_global = true
-			} else {
-				// TODO
-				return
+		} else {
+			ls.log_message(ctx.trigger_character, .info)
+			node := file.stmts.map(AstNode(it)).find_by_pos(offset) or { AstNode{} }
+			if node is ast.Stmt {
+				// TODO: transfer it to completion_item_for_stmt
+				match node {
+					ast.AssignStmt {
+						// TODO: support for multi assign
+						if node.op != .decl_assign {
+							show_global = false
+							filter_type = node.left_types[node.left_types.len - 1]
+						}
+					}
+					else {
+						ls.log_message(typeof(node), .info)
+					}
+				}
+			} else if node is ast.Expr {
+				ls.log_message(typeof(node), .info)
+				// TODO: transfer it to completion_item_for_expr
+				match node {
+					ast.StructInit {
+						show_global = false
+						show_local = false
+						field_node := node.fields.map(AstNode(it)).find_by_pos(offset - 1) or { AstNode{} }
+						if field_node is ast.StructInitField {
+							// NB: enable local results only if the node is a field
+							show_local = true
+							field_type_sym := table.get_type_symbol(field_node.expected_type)
+							completion_items << ls.completion_items_from_type_info(field_type_sym.info)
+							filter_type = field_node.expected_type
+						}
+					}
+					else {
+						ls.log_message(typeof(node), .info)
+					}
+				}
 			}
-		}
 		}
 	} else {
 		show_global_fn = true
 	}
+
 	if show_local {
-		scope := file.scope.innermost(offset)
-		// get the module names
-		for imp in file.imports {
-			if imp.mod in ls.invalid_imports[file_uri.str()] {
-				continue
-			}
-			completion_items << lsp.CompletionItem{
-				label: if imp.alias.len > 0 { imp.alias } else { imp.mod }
-				kind: .module_
+		if filter_type == 0 {
+			// get the module names
+			for imp in file.imports {
+				if imp.mod in ls.invalid_imports[file_uri.str()] {
+					continue
+				}
+				
+				completion_items << lsp.CompletionItem{
+					label: if imp.alias.len > 0 { imp.alias } else { imp.mod }
+					kind: .module_
+				}
 			}
 		}
+
+		scope := file.scope.innermost(offset)
 		// get variables inside the scope
 		for _, obj in scope.objects {
 			if obj is ast.Var {
+				if filter_type != 0 && obj.typ != filter_type {
+					continue
+				}
 				completion_items << lsp.CompletionItem{
 					label: obj.name
 					kind: .variable
@@ -294,6 +328,7 @@ fn (mut ls Vls) completion(id int, params string) {
 			}
 		}
 	}
+	
 	if show_global {
 		for fpath, ffile in ls.files {
 			if !fpath.starts_with(dir) {
@@ -308,6 +343,7 @@ fn (mut ls Vls) completion(id int, params string) {
 			}
 		}
 	}
+
 	if completion_items.len > 0 {
 		ls.send(json.encode(jsonrpc.Response<[]lsp.CompletionItem>{
 			id: id
