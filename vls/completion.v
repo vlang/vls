@@ -201,6 +201,10 @@ fn (mut cfg CompletionItemConfig) completion_items_from_expr(expr ast.Expr) []ls
 fn (mut cfg CompletionItemConfig) completion_items_from_fn(fnn table.Fn, is_method bool) lsp.CompletionItem {
 	mut i := 0
 	mut insert_text := fnn.name
+	mut kind := lsp.CompletionItemKind.function
+	if is_method {
+		kind = .method
+	}
 	if fnn.is_generic {
 		insert_text += '<\${$i:T}>'
 	}
@@ -218,7 +222,7 @@ fn (mut cfg CompletionItemConfig) completion_items_from_fn(fnn table.Fn, is_meth
 	insert_text += ')'
 	return lsp.CompletionItem{
 		label: fnn.name
-		kind: .method
+		kind: kind
 		insert_text_format: .snippet
 		insert_text: insert_text
 	}
@@ -240,7 +244,7 @@ fn (mut cfg CompletionItemConfig) completion_items_from_type_info(type_info tabl
 			for val in type_info.vals {
 				completion_items << lsp.CompletionItem{
 					label: '.$val'
-					kind: .field
+					kind: .enum_member
 					insert_text: '.$val'
 				}
 			}
