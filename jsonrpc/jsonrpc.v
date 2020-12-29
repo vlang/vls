@@ -44,8 +44,8 @@ pub struct Response2 <T> {
 	result  T
 }
 
-struct ResponseError {
-mut:
+pub struct ResponseError {
+pub mut:
 	code    int
 	message string
 	data    string

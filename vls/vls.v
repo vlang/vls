@@ -35,6 +35,7 @@ mut:
 	// tables  map[DocumentUri]&table.Table
 	tables     map[string]&table.Table
 	root_path  lsp.DocumentUri
+	capabilities lsp.ServerCapabilities
 pub mut:
 	// TODO: replace with io.ReadWriter
 	io         ReceiveSender
@@ -106,6 +107,11 @@ pub fn (mut ls Vls) dispatch(payload string) {
 			}
 		}
 	}
+}
+
+// capabilities returns the current server capabilities
+pub fn (ls Vls) capabilities() lsp.ServerCapabilities {
+	return ls.capabilities
 }
 
 // status returns the current server status

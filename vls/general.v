@@ -9,7 +9,7 @@ import v.parser
 // initialize sends the server capabilities to the client
 fn (mut ls Vls) initialize(id int, params string) {
 	initialize_params := json.decode(lsp.InitializeParams, params) or { panic(err) }
-	mut capabilities := lsp.ServerCapabilities{
+	ls.capabilities = lsp.ServerCapabilities{
 		text_document_sync: 1
 		workspace_symbol_provider: true
 		document_symbol_provider: true
@@ -17,7 +17,7 @@ fn (mut ls Vls) initialize(id int, params string) {
 	result := jsonrpc.Response<lsp.InitializeResult>{
 		id: id
 		result: lsp.InitializeResult{
-			capabilities: capabilities
+			capabilities: ls.capabilities
 		}
 	}
 	// only files are supported right now
