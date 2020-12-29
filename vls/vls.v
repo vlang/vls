@@ -149,7 +149,7 @@ fn new_scope_and_pref(lookup_paths ...string) (&ast.Scope, &pref.Preferences) {
 fn (mut ls Vls) insert_files(files []ast.File) {
 	for file in files {
 		file_uri := lsp.document_uri_from_path(file.path)
-		if file_uri in ls.files {
+		if file_uri.str() in ls.files {
 			ls.files.delete(file_uri)
 		}
 		ls.files[file_uri.str()] = file
