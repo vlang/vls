@@ -111,6 +111,13 @@ fn (mut cfg CompletionItemConfig) completion_items_from_stmt(stmt ast.Stmt) []ls
 		ast.ExprStmt {
 			completion_items << cfg.completion_items_from_expr(stmt.expr)
 		}
+		ast.AssignStmt {
+			// TODO: support for multi assign
+			if stmt.op != .decl_assign {
+				cfg.show_global = false
+				cfg.filter_type = stmt.left_types[stmt.left_types.len - 1]
+			}
+		}
 		else {}
 	}
 	return completion_items
@@ -120,26 +127,59 @@ fn (mut cfg CompletionItemConfig) completion_items_from_expr(expr ast.Expr) []ls
 	mut completion_items := []lsp.CompletionItem{}
 	mut expr_type := table.Type(0)
 	// TODO: support for infix/postfix expr
-	if expr is ast.SelectorExpr {
-		expr_type = expr.expr_type
-		if expr_type == 0 && expr.expr is ast.Ident {
-			ident := expr.expr as ast.Ident
-			if ident.name !in cfg.file.imports.map(if it.alias.len > 0 { it.alias } else { it.mod }) {	
-				return completion_items
-			}
-			old_mod := cfg.mod
-			for sym_name, stmt in cfg.ls.symbols {
-				if !sym_name.starts_with(ident.name + '.') {
-					continue
+	match expr {
+		ast.SelectorExpr {
+			expr_type = expr.expr_type
+			if expr_type == 0 && expr.expr is ast.Ident {
+				ident := expr.expr as ast.Ident
+				if ident.name !in cfg.file.imports.map(if it.alias.len > 0 { it.alias } else { it.mod }) {	
+					return completion_items
 				}
-				// NB: symbols of the said module does not show the full list
-				// unless by pressing cmd/ctrl+space or by pressing escape key
-				// + deleting the dot + typing again the dot
-				cfg.mod = ident.name
-				completion_items << cfg.completion_items_from_stmt(stmt)
+				old_mod := cfg.mod
+				for sym_name, stmt in cfg.ls.symbols {
+					if !sym_name.starts_with(ident.name + '.') {
+						continue
+					}
+					// NB: symbols of the said module does not show the full list
+					// unless by pressing cmd/ctrl+space or by pressing escape key
+					// + deleting the dot + typing again the dot
+					cfg.mod = ident.name
+					completion_items << cfg.completion_items_from_stmt(stmt)
+				}
+				cfg.mod = old_mod
 			}
-			cfg.mod = old_mod
+			return completion_items
 		}
+		ast.StructInit {
+			cfg.show_global = false
+			cfg.show_local = false
+			field_node := expr.fields.map(AstNode(it)).find_by_pos(cfg.offset - 1) or { AstNode{} }
+			if field_node is ast.StructInitField {
+				// NB: enable local results only if the node is a field
+				cfg.show_local = true
+				field_type_sym := cfg.table.get_type_symbol(field_node.expected_type)
+				completion_items << cfg.completion_items_from_type_info(field_type_sym.info)
+				cfg.filter_type = field_node.expected_type
+			} else {
+				// if structinit is empty or not within the field position, it must show the list of missing fields
+				defined_fields := expr.fields.map(it.name)
+				struct_type_sym := cfg.table.get_type_symbol(expr.typ)
+				struct_type_info := struct_type_sym.info as table.Struct
+
+				for field in struct_type_info.fields {
+					if field.name in defined_fields {
+						continue
+					}
+					completion_items << lsp.CompletionItem{
+						label: '$field.name:'
+						kind: .field
+						insert_text: '$field.name: \$0'
+						insert_text_format: .snippet
+					}
+				}
+			}
+		}
+		else {}
 	}
 	if expr_type != 0 {
 		type_sym := cfg.table.get_type_symbol(expr_type)
@@ -257,59 +297,14 @@ fn (mut ls Vls) completion(id int, params string) {
 			cfg.show_global = false
 			cfg.show_local = false
 			if node is ast.Stmt {
-				completion_items <<
-					cfg.completion_items_from_stmt(node)
+				completion_items << cfg.completion_items_from_stmt(node)
 			}
 		} else {
 			node := file.stmts.map(AstNode(it)).find_by_pos(offset) or { AstNode{} }
-			ls.log_message(typeof(node), .info)
 			if node is ast.Stmt {
-				// TODO: transfer it to completion_item_for_stmt
-				match node {
-					ast.AssignStmt {
-						// TODO: support for multi assign
-						if node.op != .decl_assign {
-							cfg.show_global = false
-							cfg.filter_type = node.left_types[node.left_types.len - 1]
-						}
-					}
-					else { ls.log_message(typeof(node), .info) }
-				}
+				completion_items << cfg.completion_items_from_stmt(node)
 			} else if node is ast.Expr {
-				// TODO: transfer it to completion_item_for_expr
-				match node {
-					ast.StructInit {
-						cfg.show_global = false
-						cfg.show_local = false
-						field_node := node.fields.map(AstNode(it)).find_by_pos(offset - 1) or { AstNode{} }
-						if field_node is ast.StructInitField {
-							// NB: enable local results only if the node is a field
-							cfg.show_local = true
-							field_type_sym := cfg.table.get_type_symbol(field_node.expected_type)
-							completion_items << cfg.completion_items_from_type_info(field_type_sym.info)
-							cfg.filter_type = field_node.expected_type
-						} else {
-							// if structinit is empty or not within the field position, it must show the list of missing fields
-							defined_fields := node.fields.map(it.name)
-							struct_type_sym := cfg.table.get_type_symbol(node.typ)
-							struct_type_info := struct_type_sym.info as table.Struct
-
-							for field in struct_type_info.fields {
-								if field.name in defined_fields {
-									continue
-								}
-
-								completion_items << lsp.CompletionItem{
-									label: '$field.name:'
-									kind: .field
-									insert_text: '$field.name: \$0'
-									insert_text_format: .snippet
-								}
-							}
-						}
-					}
-					else { ls.log_message(typeof(node), .info) }
-				}
+				completion_items << cfg.completion_items_from_expr(node)
 			}
 		}
 	} else if ctx.trigger_kind == .invoked && (file.stmts.len == 0 || src.len <= 3) {
