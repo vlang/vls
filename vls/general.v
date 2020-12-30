@@ -12,7 +12,7 @@ fn (mut ls Vls) initialize(id int, params string) {
 	mut capabilities := lsp.ServerCapabilities{
 		text_document_sync: 1
 		completion_provider: lsp.CompletionOptions{
-			trigger_characters: ['=', '.', ':', '{', ',']
+			trigger_characters: ['=', '.', ':', '{', ',', '(', ' ']
 			resolve_provider: false
 		}
 		workspace_symbol_provider: true

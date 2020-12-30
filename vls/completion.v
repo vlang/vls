@@ -22,7 +22,7 @@ mut:
 	show_global_fn bool
 	show_local 		 bool = true
 	filter_type 	 table.Type = table.Type(0)
-	ls						 &Vls
+	ls						 Vls
 }
 
 // type CompletionSource = ast.Stmt | ast.Expr | table.Fn | table.TypeInfo
@@ -88,13 +88,14 @@ fn (mut cfg CompletionItemConfig) completion_items_from_stmt(stmt ast.Stmt) []ls
 			}
 		}
 		ast.FnDecl {
-			if (cfg.pub_only && !stmt.is_pub) || stmt.name == 'main.main' {
+			if (cfg.pub_only && !stmt.is_pub) || stmt.name == 'main.main' || stmt.is_method {
 				return completion_items
 			}
 			completion_items << cfg.completion_items_from_fn(table.Fn{
 				name: stmt.name.all_after('${stmt.mod}.')
 				is_generic: stmt.is_generic
 				params: stmt.params
+				return_type: stmt.return_type
 			}, stmt.is_method)
 		}
 		ast.InterfaceDecl {
@@ -115,6 +116,7 @@ fn (mut cfg CompletionItemConfig) completion_items_from_stmt(stmt ast.Stmt) []ls
 			// TODO: support for multi assign
 			if stmt.op != .decl_assign {
 				cfg.show_global = false
+				cfg.show_global_fn = false
 				cfg.filter_type = stmt.left_types[stmt.left_types.len - 1]
 			}
 		}
@@ -147,7 +149,33 @@ fn (mut cfg CompletionItemConfig) completion_items_from_expr(expr ast.Expr) []ls
 					completion_items << cfg.completion_items_from_stmt(stmt)
 				}
 				cfg.mod = old_mod
+			} else if expr_type != 0 {
+				type_sym := cfg.table.get_type_symbol(expr_type)
+				completion_items << cfg.completion_items_from_type_info(type_sym.info)
+				if type_sym.kind == .array || type_sym.kind == .map {
+					base_symbol_name := if type_sym.kind == .array { 'array' } else { 'map' }
+					if base_type_sym := cfg.table.find_type(base_symbol_name) {
+						completion_items << cfg.completion_items_from_type_info(base_type_sym.info)
+					}
+				}
+				// list all methods
+				for m in type_sym.methods {
+					completion_items << cfg.completion_items_from_fn(m, true)
+				}
 			}
+			return completion_items
+		}
+		ast.CallExpr {
+			current_arg_idx := expr.args.len
+			if current_arg_idx < expr.expected_arg_types.len {
+				cfg.show_local = true
+				cfg.show_global = false
+				cfg.filter_type = expr.expected_arg_types[current_arg_idx]
+			} else {
+				cfg.show_local = false
+				cfg.show_global = false
+			}
+
 			return completion_items
 		}
 		ast.StructInit {
@@ -161,7 +189,8 @@ fn (mut cfg CompletionItemConfig) completion_items_from_expr(expr ast.Expr) []ls
 				completion_items << cfg.completion_items_from_type_info(field_type_sym.info)
 				cfg.filter_type = field_node.expected_type
 			} else {
-				// if structinit is empty or not within the field position, it must show the list of missing fields
+				// if structinit is empty or not within the field position, 
+				// it must show the list of missing fields instead
 				defined_fields := expr.fields.map(it.name)
 				struct_type_sym := cfg.table.get_type_symbol(expr.typ)
 				struct_type_info := struct_type_sym.info as table.Struct
@@ -180,20 +209,6 @@ fn (mut cfg CompletionItemConfig) completion_items_from_expr(expr ast.Expr) []ls
 			}
 		}
 		else {}
-	}
-	if expr_type != 0 {
-		type_sym := cfg.table.get_type_symbol(expr_type)
-		completion_items << cfg.completion_items_from_type_info(type_sym.info)
-		if type_sym.kind == .array || type_sym.kind == .map {
-			base_symbol_name := if type_sym.kind == .array { 'array' } else { 'map' }
-			if base_type_sym := cfg.table.find_type(base_symbol_name) {
-				completion_items << cfg.completion_items_from_type_info(base_type_sym.info)
-			}
-		}
-		// list all methods
-		for m in type_sym.methods {
-			completion_items << cfg.completion_items_from_fn(m, true)
-		}
 	}
 	return completion_items
 }
@@ -220,6 +235,9 @@ fn (mut cfg CompletionItemConfig) completion_items_from_fn(fnn table.Fn, is_meth
 		}
 	}
 	insert_text += ')'
+	if fnn.return_type.has_flag(.optional) {
+		insert_text += ' or { panic(err) }'
+	}
 	return lsp.CompletionItem{
 		label: fnn.name
 		kind: kind
@@ -263,48 +281,48 @@ fn (mut ls Vls) completion(id int, params string) {
 	src := ls.sources[file_uri.str()]
 
 	mut pos := completion_params.position
-	mut offset := compute_offset(src, pos.line, pos.character)
 	mut ctx := completion_params.context
 	mut completion_items := []lsp.CompletionItem{}
 	mut cfg := CompletionItemConfig{
 		mod: file.mod.name
 		file: file
-		offset: offset
+		offset: compute_offset(src, pos.line, pos.character)
 		table: ls.tables[dir]
 		ls: ls
 	}
-	
+
 	// adjust context data if the trigger symbols are on the left
-	if ctx.trigger_kind == .invoked && offset - 1 >= 0 && file.stmts.len > 0 && src.len > 3 {
-		if src[offset - 1] in [`.`, `:`, `=`, `{`, `,`] {
+	if ctx.trigger_kind == .invoked && cfg.offset - 1 >= 0 && file.stmts.len > 0 && src.len > 3 {
+		if src[cfg.offset - 1] in [`.`, `:`, `=`, `{`, `,`, `(`] {
 			ctx = lsp.CompletionContext{
 				trigger_kind: .trigger_character
-				trigger_character: src[offset - 1].str()
+				trigger_character: src[cfg.offset - 1].str()
 			}
-		} else if src[offset - 1] == ` ` && offset - 2 >= 0 && src[offset - 2] !in [src[offset - 1], `.`] {
+		} else if src[cfg.offset - 1] == ` ` && cfg.offset - 2 >= 0 && src[cfg.offset - 2] !in [src[cfg.offset - 1], `.`] {
 			ctx = lsp.CompletionContext{
 				trigger_kind: .trigger_character
-				trigger_character: src[offset - 2].str()
+				trigger_character: src[cfg.offset - 2].str()
 			}
 
-			offset -= 2
+			cfg.offset -= 2
 			pos = { pos | character: pos.character - 2 }
 		}
 	}
-
 	// ls.log_message('position: { line: $pos.line, col: $pos.character } | offset: $offset | trigger_kind: $ctx', .info)
 	if ctx.trigger_kind == .trigger_character {
+		ls.log_message(src[cfg.offset - 2].str(), .info)
 		// TODO: enum support inside struct fields
-		if ctx.trigger_character == '.' && (offset - 1 >= 0 && src[offset - 1] != ` `) {
+		if ctx.trigger_character == '.' && (cfg.offset - 1 >= 0 && src[cfg.offset - 1] != ` `) {
 			// TODO: will be replaced with the v.ast one
-			node := file.stmts.map(AstNode(it)).find_by_pos(offset - 2) or { AstNode{} }
+			node := file.stmts.map(AstNode(it)).find_by_pos(cfg.offset - 2) or { AstNode{} }
 			cfg.show_global = false
 			cfg.show_local = false
 			if node is ast.Stmt {
+				ls.log_message(typeof(node), .info)
 				completion_items << cfg.completion_items_from_stmt(node)
 			}
 		} else {
-			node := file.stmts.map(AstNode(it)).find_by_pos(offset) or { AstNode{} }
+			node := file.stmts.map(AstNode(it)).find_by_pos(cfg.offset) or { AstNode{} }
 			if node is ast.Stmt {
 				completion_items << cfg.completion_items_from_stmt(node)
 			} else if node is ast.Expr {
@@ -345,7 +363,7 @@ fn (mut ls Vls) completion(id int, params string) {
 			}
 		}
 
-		scope := file.scope.innermost(offset)
+		scope := file.scope.innermost(cfg.offset)
 		// get variables inside the scope
 		for _, obj in scope.objects {
 			if obj is ast.Var {
@@ -375,8 +393,7 @@ fn (mut ls Vls) completion(id int, params string) {
 				}
 				cfg.mod = ffile.mod.name
 				cfg.file = ffile
-				completion_items <<
-					cfg.completion_items_from_stmt(stmt)
+				completion_items << cfg.completion_items_from_stmt(stmt)
 			}
 		}
 		cfg.mod = old_mod
@@ -384,12 +401,10 @@ fn (mut ls Vls) completion(id int, params string) {
 		cfg.pub_only = true
 	}
 
-	if completion_items.len > 0 {
-		ls.send(json.encode(jsonrpc.Response<[]lsp.CompletionItem>{
-			id: id
-			result: completion_items
-		}))
-	}
+	ls.send(json.encode(jsonrpc.Response<[]lsp.CompletionItem>{
+		id: id
+		result: completion_items
+	}))
 	unsafe { completion_items.free() }
 }
 
