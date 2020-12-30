@@ -361,11 +361,12 @@ fn (mut ls Vls) completion(id int, params string) {
 					cfg.completion_items_from_type_info(sym_name.all_after(file.mod.name + '.'), type_sym.info, false)
 			}
 		}
+		// include functions from builtin and within the same namespace
 		for _, fnn in cfg.table.fns {
-			if fnn.mod != file.mod.name || fnn.name == 'main.main' {
-				continue
+			if (fnn.mod == 'builtin' && fnn.name in ls.builtin_symbols) ||
+					(fnn.mod == file.mod.name && fnn.name != 'main.main') {
+				completion_items << cfg.completion_items_from_fn(fnn, false)
 			}
-			completion_items << cfg.completion_items_from_fn(fnn, false)
 		}
 	}
 	ls.send(json.encode(jsonrpc.Response<[]lsp.CompletionItem>{

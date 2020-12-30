@@ -5,6 +5,7 @@ import json
 import jsonrpc
 import os
 import v.parser
+import v.ast
 
 // initialize sends the server capabilities to the client
 fn (mut ls Vls) initialize(id int, params string) {
@@ -28,16 +29,29 @@ fn (mut ls Vls) initialize(id int, params string) {
 	ls.root_path = initialize_params.root_uri
 	ls.status = .initialized
 	// since builtin is used frequently, they should be parsed first and only once
+	ls.process_builtin()
+	ls.send(json.encode(result))
+}
+
+fn (mut ls Vls) process_builtin() {
 	scope, pref := new_scope_and_pref()
 	mut builtin_files := os.ls(builtin_path) or { panic(err) }
 	builtin_files = pref.should_compile_filtered_files(builtin_path, builtin_files)
 	parsed_files := parser.parse_files(builtin_files, ls.base_table, pref, scope)
-	ls.insert_files(parsed_files)
+	for file in parsed_files {
+		for stmt in file.stmts {
+			if stmt is ast.FnDecl {
+				if !stmt.is_pub || stmt.is_method {
+					continue
+				}
+				ls.builtin_symbols << stmt.name
+			}
+		}
+	}
 	unsafe {
 		builtin_files.free()
 		parsed_files.free()
 	}
-	ls.send(json.encode(result))
 }
 
 // shutdown sets the state to shutdown but does not exit

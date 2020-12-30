@@ -36,6 +36,7 @@ mut:
 	tables          map[string]&table.Table
 	root_path       lsp.DocumentUri
 	invalid_imports map[string][]string
+	builtin_symbols []string
 pub mut:
 	// TODO: replace with io.ReadWriter
 	io              ReceiveSender
