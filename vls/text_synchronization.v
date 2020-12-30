@@ -111,6 +111,7 @@ fn (mut ls Vls) parse_imports(parsed_files []ast.File, table &table.Table, pref 
 				continue
 			}
 			mut found := false
+			mut import_err_msg := "cannot find module '$imp.mod'" 
 			for path in pref.lookup_path {
 				mod_dir := os.join_path(path, imp.mod.split('.').join(os.path_separator))
 				if !os.exists(mod_dir) {
@@ -118,19 +119,11 @@ fn (mut ls Vls) parse_imports(parsed_files []ast.File, table &table.Table, pref 
 				}
 				mut files := os.ls(mod_dir) or { []string{} }
 				files = pref.should_compile_filtered_files(mod_dir, files)
-				found = true
 				if files.len == 0 {
-					errs << errors.Error{
-						message: "cannot find module '$imp.mod'"
-						file_path: file.path
-						pos: imp.pos
-						reporter: .checker
-					}
-					if imp.mod !in invalid_imports {
-						invalid_imports << imp.mod
-					}
+					import_err_msg = "module '$imp.mod' is empty"
 					break
 				}
+				found = true
 				newly_parsed_files << parser.parse_files(files, table, pref, scope)
 				newly_parsed_files2, errs2 := ls.parse_imports(newly_parsed_files, table,
 					pref, scope)
@@ -145,7 +138,7 @@ fn (mut ls Vls) parse_imports(parsed_files []ast.File, table &table.Table, pref 
 			}
 			if !found {
 				errs << errors.Error{
-					message: "cannot find module '$imp.mod'"
+					message: import_err_msg
 					file_path: file.path
 					pos: imp.pos
 					reporter: .checker
