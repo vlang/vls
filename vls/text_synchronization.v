@@ -132,7 +132,8 @@ fn (mut ls Vls) parse_imports(parsed_files []ast.File, table &table.Table, pref 
 					break
 				}
 				newly_parsed_files << parser.parse_files(files, table, pref, scope)
-				newly_parsed_files2, errs2 := ls.parse_imports(newly_parsed_files, table, pref, scope)
+				newly_parsed_files2, errs2 := ls.parse_imports(newly_parsed_files, table,
+					pref, scope)
 				errs << errs2
 				newly_parsed_files << newly_parsed_files2
 				done_imports << imp.mod
@@ -156,7 +157,7 @@ fn (mut ls Vls) parse_imports(parsed_files []ast.File, table &table.Table, pref 
 			}
 		}
 		ls.invalid_imports[file_uri] = invalid_imports.clone()
-		unsafe { 
+		unsafe {
 			invalid_imports.free()
 			file_uri.free()
 		}

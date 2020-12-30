@@ -7,7 +7,7 @@ import v.table
 import v.token
 
 pub type AstNode = ast.ConstField | ast.EnumField | ast.Expr | ast.Field | ast.GlobalField |
-	ast.Stmt | ast.StructField | ast.StructInitField | table.Param | ast.SelectBranch
+	ast.SelectBranch | ast.Stmt | ast.StructField | ast.StructInitField | table.Param
 
 fn (node AstNode) position() token.Position {
 	match node {
@@ -124,8 +124,8 @@ fn (node AstNode) children() []AstNode {
 		}
 	}
 	match node {
-		ast.EnumField, ast.GlobalField, ast.StructInitField, ast.ConstField { 
-			return [AstNode(node.expr)] 
+		ast.EnumField, ast.GlobalField, ast.StructInitField, ast.ConstField {
+			return [AstNode(node.expr)]
 		}
 		ast.SelectBranch {
 			mut children := []AstNode{}
