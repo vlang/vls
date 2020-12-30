@@ -38,7 +38,6 @@ fn test_initialized() {
 // 	status := ls.status()
 // 	assert status == .shutdown
 // }
-
 fn init() vls.Vls {
 	mut io := testing.Testio{}
 	payload := '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}'
