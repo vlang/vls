@@ -35,7 +35,6 @@ mut:
 	// tables  map[DocumentUri]&table.Table
 	tables     map[string]&table.Table
 	root_path  lsp.DocumentUri
-	symbols    map[string]ast.Stmt
 	invalid_imports map[string][]string
 pub mut:
 	// TODO: replace with io.ReadWriter

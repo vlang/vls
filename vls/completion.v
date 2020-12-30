@@ -14,7 +14,6 @@ import v.table
 struct CompletionItemConfig {
 mut:
 	pub_only 	     bool = true
-	mod      			 string
 	file     			 ast.File
 	offset   			 int
 	table    			 &table.Table
@@ -22,6 +21,7 @@ mut:
 	show_global_fn bool
 	show_local 		 bool = true
 	filter_type 	 table.Type = table.Type(0)
+	fields_only    bool
 	ls						 Vls
 }
 
@@ -30,85 +30,6 @@ mut:
 fn (mut cfg CompletionItemConfig) completion_items_from_stmt(stmt ast.Stmt) []lsp.CompletionItem {
 	mut completion_items := []lsp.CompletionItem{}
 	match stmt {
-		ast.StructDecl {
-			if cfg.pub_only && !stmt.is_pub {
-				return completion_items
-			}
-			mut insert_text := stmt.name.all_after('${cfg.mod}.') + '{\n'
-			mut i := stmt.fields.len - 1
-			for field in stmt.fields {
-				if field.has_default_expr {
-					continue
-				}
-				// TODO: trigger autocompletion
-				insert_text += '\t$field.name: \$$i\n'
-				i--
-			}
-			insert_text += '}'
-			completion_items << lsp.CompletionItem{
-				label: stmt.name.all_after('${cfg.mod}.') + '{}'
-				kind: .struct_
-				insert_text: insert_text
-				insert_text_format: .snippet
-			}
-		}
-		ast.ConstDecl {
-			if cfg.pub_only && !stmt.is_pub {
-				return completion_items
-			}
-			completion_items << stmt.fields.map(lsp.CompletionItem{
-				label: it.name.all_after('${cfg.mod}.')
-				kind: .constant
-				insert_text: it.name.all_after('${cfg.mod}.')
-			})
-		}
-		ast.EnumDecl {
-			if cfg.pub_only && !stmt.is_pub {
-				return completion_items
-			}
-			for field in stmt.fields {
-				label := stmt.name.all_after('${cfg.mod}.') + '.' + field.name
-				completion_items << lsp.CompletionItem{
-					label: label
-					kind: .enum_member
-					insert_text: label
-				}
-			}
-		}
-		ast.TypeDecl {
-			match stmt {
-				ast.AliasTypeDecl, ast.SumTypeDecl, ast.FnTypeDecl {
-					label := stmt.name.all_after('${cfg.mod}.')
-					completion_items << lsp.CompletionItem{
-						label: label
-						kind: .type_parameter
-						insert_text: label
-					}
-				}
-			}
-		}
-		ast.FnDecl {
-			if (cfg.pub_only && !stmt.is_pub) || stmt.name == 'main.main' || stmt.is_method {
-				return completion_items
-			}
-			completion_items << cfg.completion_items_from_fn(table.Fn{
-				name: stmt.name.all_after('${stmt.mod}.')
-				is_generic: stmt.is_generic
-				params: stmt.params
-				return_type: stmt.return_type
-			}, stmt.is_method)
-		}
-		ast.InterfaceDecl {
-			if cfg.pub_only && !stmt.is_pub {
-				return completion_items
-			}
-			label := stmt.name.all_after('${cfg.mod}.')
-			completion_items << lsp.CompletionItem{
-				label: label
-				kind: .interface_
-				insert_text: label
-			}
-		}
 		ast.ExprStmt {
 			completion_items << cfg.completion_items_from_expr(stmt.expr)
 		}
@@ -136,28 +57,38 @@ fn (mut cfg CompletionItemConfig) completion_items_from_expr(expr ast.Expr) []ls
 				ident := expr.expr as ast.Ident
 				if ident.name !in cfg.file.imports.map(if it.alias.len > 0 { it.alias } else { it.mod }) {	
 					return completion_items
-				}
-				old_mod := cfg.mod
-				for sym_name, stmt in cfg.ls.symbols {
-					if !sym_name.starts_with(ident.name + '.') {
+				}				
+				// NB: symbols of the said module does not show the full list
+				// unless by pressing cmd/ctrl+space or by pressing escape key
+				// + deleting the dot + typing again the dot
+				for sym_name, idx in cfg.table.type_idxs {
+					if idx <= 0 || idx >= cfg.table.types.len || !sym_name.starts_with(ident.name + '.') {
 						continue
 					}
-					// NB: symbols of the said module does not show the full list
-					// unless by pressing cmd/ctrl+space or by pressing escape key
-					// + deleting the dot + typing again the dot
-					cfg.mod = ident.name
-					completion_items << cfg.completion_items_from_stmt(stmt)
+					// TODO: support for typedefs
+					type_sym := unsafe { &cfg.table.types[idx] }
+					completion_items << cfg.completion_items_from_type_info(
+						sym_name.all_after(ident.name + '.'), 
+						type_sym.info,
+						false
+					)
 				}
-				cfg.mod = old_mod
+				for _, fnn in cfg.table.fns {
+					if fnn.mod != ident.name || !fnn.is_pub {
+						continue
+					}
+					completion_items << cfg.completion_items_from_fn(fnn, false)
+				}
 			} else if expr_type != 0 {
 				type_sym := cfg.table.get_type_symbol(expr_type)
-				completion_items << cfg.completion_items_from_type_info(type_sym.info)
+				completion_items << cfg.completion_items_from_type_info('', type_sym.info, true)
 				if type_sym.kind == .array || type_sym.kind == .map {
 					base_symbol_name := if type_sym.kind == .array { 'array' } else { 'map' }
 					if base_type_sym := cfg.table.find_type(base_symbol_name) {
-						completion_items << cfg.completion_items_from_type_info(base_type_sym.info)
+						completion_items << cfg.completion_items_from_type_info('', base_type_sym.info, true)
 					}
 				}
+				
 				// list all methods
 				for m in type_sym.methods {
 					completion_items << cfg.completion_items_from_fn(m, true)
@@ -186,7 +117,7 @@ fn (mut cfg CompletionItemConfig) completion_items_from_expr(expr ast.Expr) []ls
 				// NB: enable local results only if the node is a field
 				cfg.show_local = true
 				field_type_sym := cfg.table.get_type_symbol(field_node.expected_type)
-				completion_items << cfg.completion_items_from_type_info(field_type_sym.info)
+				completion_items << cfg.completion_items_from_type_info('', field_type_sym.info, field_type_sym.info is table.Enum)
 				cfg.filter_type = field_node.expected_type
 			} else {
 				// if structinit is empty or not within the field position, 
@@ -215,7 +146,7 @@ fn (mut cfg CompletionItemConfig) completion_items_from_expr(expr ast.Expr) []ls
 
 fn (mut cfg CompletionItemConfig) completion_items_from_fn(fnn table.Fn, is_method bool) lsp.CompletionItem {
 	mut i := 0
-	mut insert_text := fnn.name
+	mut insert_text := fnn.name.all_after(fnn.mod + '.')
 	mut kind := lsp.CompletionItemKind.function
 	if is_method {
 		kind = .method
@@ -239,32 +170,59 @@ fn (mut cfg CompletionItemConfig) completion_items_from_fn(fnn table.Fn, is_meth
 		insert_text += ' or { panic(err) }'
 	}
 	return lsp.CompletionItem{
-		label: fnn.name
+		label: fnn.name.all_after(fnn.mod + '.')
 		kind: kind
 		insert_text_format: .snippet
 		insert_text: insert_text
 	}
 }
 
-fn (mut cfg CompletionItemConfig) completion_items_from_type_info(type_info table.TypeInfo) []lsp.CompletionItem {
+fn (mut cfg CompletionItemConfig) completion_items_from_type_info(name string, type_info table.TypeInfo, fields_only bool) []lsp.CompletionItem {
 	mut completion_items := []lsp.CompletionItem{}
 	match type_info {
 		table.Struct {
-			for field in type_info.fields {
+			if !fields_only {
+				mut insert_text := '$name{\n'
+				mut i := type_info.fields.len - 1
+				for field in type_info.fields {
+					if field.has_default_expr {
+						continue
+					}
+					// TODO: trigger autocompletion
+					insert_text += '\t$field.name: \$$i\n'
+					i--
+				}
+				insert_text += '}'
 				completion_items << lsp.CompletionItem{
-					label: field.name
-					kind: .field
-					insert_text: field.name
+					label: '$name{}'
+					kind: .struct_
+					insert_text: insert_text
+					insert_text_format: .snippet
+				}
+			} else {
+				for field in type_info.fields {
+					completion_items << lsp.CompletionItem{
+						label: field.name
+						kind: .field
+						insert_text: field.name
+					}
 				}
 			}
 		}
 		table.Enum {
 			for val in type_info.vals {
 				completion_items << lsp.CompletionItem{
-					label: '.$val'
+					label: if fields_only { '.$val' } else { '${name}.$val' }
 					kind: .enum_member
-					insert_text: '.$val'
+					insert_text: if fields_only { '.$val' } else { '${name}.$val' }
 				}
+			}
+		}
+		table.Alias, table.SumType, table.FnType, table.Interface {
+			completion_items << lsp.CompletionItem{
+				label: name
+				kind: .type_parameter
+				insert_text: name
 			}
 		}
 		else {}
@@ -284,7 +242,6 @@ fn (mut ls Vls) completion(id int, params string) {
 	mut ctx := completion_params.context
 	mut completion_items := []lsp.CompletionItem{}
 	mut cfg := CompletionItemConfig{
-		mod: file.mod.name
 		file: file
 		offset: compute_offset(src, pos.line, pos.character)
 		table: ls.tables[dir]
@@ -363,6 +320,19 @@ fn (mut ls Vls) completion(id int, params string) {
 			}
 		}
 
+		for _, obj in file.scope.objects {
+			if obj is ast.ConstField {
+				if cfg.filter_type != 0 && obj.typ != cfg.filter_type {
+					continue
+				}
+				completion_items << lsp.CompletionItem{
+					label: obj.name.all_after('${obj.mod}.')
+					kind: .constant
+					insert_text: obj.name.all_after('${obj.mod}.')
+				}
+			}
+		}
+
 		scope := file.scope.innermost(cfg.offset)
 		// get variables inside the scope
 		for _, obj in scope.objects {
@@ -380,25 +350,26 @@ fn (mut ls Vls) completion(id int, params string) {
 	}
 	
 	if cfg.show_global {
-		old_mod := cfg.mod
-		old_file := cfg.file
-		cfg.pub_only = false
-		for fpath, ffile in ls.files {
-			if !fpath.starts_with(dir) {
-				continue
-			}
-			for stmt in ffile.stmts {
-				if cfg.show_global_fn && stmt !is ast.FnDecl {
+		if !cfg.show_global_fn {
+			for sym_name, idx in cfg.table.type_idxs {
+				if idx <= 0 || idx >= cfg.table.types.len || !sym_name.starts_with(file.mod.name + '.') {
 					continue
 				}
-				cfg.mod = ffile.mod.name
-				cfg.file = ffile
-				completion_items << cfg.completion_items_from_stmt(stmt)
+				// TODO: support for typedefs
+				type_sym := unsafe { &cfg.table.types[idx] }
+				completion_items << cfg.completion_items_from_type_info(
+					sym_name.all_after(file.mod.name + '.'), 
+					type_sym.info,
+					false
+				)
 			}
 		}
-		cfg.mod = old_mod
-		cfg.file = old_file
-		cfg.pub_only = true
+		for _, fnn in cfg.table.fns {
+			if fnn.mod != file.mod.name || fnn.name == 'main.main' {
+				continue
+			}
+			completion_items << cfg.completion_items_from_fn(fnn, false)
+		}
 	}
 
 	ls.send(json.encode(jsonrpc.Response<[]lsp.CompletionItem>{
@@ -406,31 +377,4 @@ fn (mut ls Vls) completion(id int, params string) {
 		result: completion_items
 	}))
 	unsafe { completion_items.free() }
-}
-
-// TODO: remove later if table is sufficient enough for grabbing information
-// extract_symbols extracts the top-level statements and stores them into ls.symbols for quick access
-fn (mut ls Vls) extract_symbols(parsed_files []ast.File, table &table.Table, pub_only bool) {
-	for file in parsed_files {
-		for stmt in file.stmts {
-			if stmt is ast.FnDecl {
-				if stmt.is_method {
-					continue
-				}
-			}
-			mut name := ''
-			match stmt {
-				ast.InterfaceDecl, ast.StructDecl, ast.EnumDecl, ast.FnDecl {
-					if pub_only && !stmt.is_pub {
-						continue
-					}
-					name = stmt.name
-				}
-				else {
-					continue
-				}
-			}
-			ls.symbols[name] = stmt
-		}
-	}
 }
