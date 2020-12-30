@@ -8,8 +8,7 @@ const (
 
 fn C.fgetc(stream byteptr) int
 
-struct Stdio {
-}
+struct Stdio {}
 
 pub fn (io Stdio) send(output string) {
 	print('Content-Length: $output.len\r\n\r\n$output')
