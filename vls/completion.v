@@ -23,6 +23,7 @@ mut:
 	filter_type    table.Type = table.Type(0)
 	fields_only    bool
 	ls             Vls
+	file_imports   []string
 }
 
 fn (mut cfg CompletionItemConfig) completion_items_from_stmt(stmt ast.Stmt) []lsp.CompletionItem {
@@ -53,11 +54,7 @@ fn (mut cfg CompletionItemConfig) completion_items_from_expr(expr ast.Expr) []ls
 			expr_type = expr.expr_type
 			if expr_type == 0 && expr.expr is ast.Ident {
 				ident := expr.expr as ast.Ident
-				if ident.name !in cfg.file.imports.map(if it.alias.len > 0 {
-					it.alias
-				} else {
-					it.mod
-				}) {
+				if ident.name !in cfg.file_imports {
 					return completion_items
 				}
 				// NB: symbols of the said module does not show the full list
@@ -211,18 +208,15 @@ fn (mut cfg CompletionItemConfig) completion_items_from_type_info(name string, t
 		}
 		table.Enum {
 			for val in type_info.vals {
+				label := if fields_only {
+					'.$val'
+				} else {
+					'${name}.$val'
+				}
 				completion_items << lsp.CompletionItem{
-					label: if fields_only {
-						'.$val'
-					} else {
-						'${name}.$val'
-					}
+					label: label
 					kind: .enum_member
-					insert_text: if fields_only {
-						'.$val'
-					} else {
-						'${name}.$val'
-					}
+					insert_text: label
 				}
 			}
 		}
@@ -238,24 +232,64 @@ fn (mut cfg CompletionItemConfig) completion_items_from_type_info(name string, t
 	return completion_items
 }
 
+fn (cfg CompletionItemConfig) completion_items_from_dir(dir string, dir_contents []string) []lsp.CompletionItem {
+	mut completion_items := []lsp.CompletionItem{}
+	for name in dir_contents {
+		full_path := os.join_path(dir, name)
+		if !os.is_dir(full_path) || name in cfg.file_imports {
+			continue
+		}
+
+		subdir_contents := os.ls(full_path) or { []string{} }
+		completion_items << cfg.completion_items_from_dir(full_path, subdir_contents)
+		if name == 'modules' {
+			continue
+		}
+	
+		completion_items << lsp.CompletionItem{
+			label: name
+			kind: .folder
+			insert_text: name
+		}
+	}
+	return completion_items
+}
+
 // TODO: make params use lsp.CompletionParams in the future
 fn (mut ls Vls) completion(id int, params string) {
 	completion_params := json.decode(lsp.CompletionParams, params) or { panic(err) }
 	file_uri := completion_params.text_document.uri
-	dir := os.dir(file_uri)
 	file := ls.files[file_uri.str()]
 	src := ls.sources[file_uri.str()]
 	mut pos := completion_params.position
 	mut ctx := completion_params.context
 	mut completion_items := []lsp.CompletionItem{}
+	mut in_import_stmt := false
 	mut cfg := CompletionItemConfig{
 		file: file
+		file_imports: file.imports.map(if it.alias.len > 0 {
+			it.alias
+		} else {
+			it.mod
+		})
 		offset: compute_offset(src, pos.line, pos.character)
-		table: ls.tables[dir]
+		table: ls.tables[os.dir(file_uri)]
 		ls: ls
 	}
+	// check if the cursor is in the import stmt
+	// FIXME: support is not yet final. would need to patch the parser to support incomplete import stmt
+	{
+		is_space1 := ctx.trigger_kind == .trigger_character && ctx.trigger_character == ' '
+		is_space2 := ctx.trigger_kind == .invoked && cfg.offset - 1 >= 0 && src[cfg.offset - 1] == ` `
+		is_import_key := cfg.offset - 7 >= 0 && src[cfg.offset-7..cfg.offset-1].bytestr() == 'import'
+		if (is_space1 || is_space2) && is_import_key {
+			in_import_stmt = true
+			cfg.show_local = false
+			cfg.show_global = false
+		}
+	}
 	// adjust context data if the trigger symbols are on the left
-	if ctx.trigger_kind == .invoked && cfg.offset - 1 >= 0 && file.stmts.len > 0 && src.len > 3 {
+	if !in_import_stmt && ctx.trigger_kind == .invoked && cfg.offset - 1 >= 0 && file.stmts.len > 0 && src.len > 3 {
 		if src[cfg.offset - 1] in [`.`, `:`, `=`, `{`, `,`, `(`] {
 			ctx = lsp.CompletionContext{
 				trigger_kind: .trigger_character
@@ -275,7 +309,16 @@ fn (mut ls Vls) completion(id int, params string) {
 		}
 	}
 	// ls.log_message('position: { line: $pos.line, col: $pos.character } | offset: $offset | trigger_kind: $ctx', .info)
-	if ctx.trigger_kind == .trigger_character {
+	if in_import_stmt {
+		dir := os.dir(file_uri.path())
+		dir_contents := os.ls(dir) or { []string{} }
+		// list all folders
+		completion_items << cfg.completion_items_from_dir(dir, dir_contents)
+		
+		// list all vlib
+		// TODO: vlib must be computed at once only
+		
+	} else if ctx.trigger_kind == .trigger_character {
 		// TODO: enum support inside struct fields
 		if ctx.trigger_character == '.' && (cfg.offset - 1 >= 0 && src[cfg.offset - 1] != ` `) {
 			cfg.show_global = false
