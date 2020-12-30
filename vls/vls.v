@@ -81,11 +81,8 @@ pub fn (mut ls Vls) dispatch(payload string) {
 			'exit' { ls.exit() }
 			'initialize' { ls.initialize(request.id, request.params) }
 			else {
-				if ls.status == .shutdown {
-					ls.send(new_error(jsonrpc.invalid_request))
-				} else {
-					ls.send(new_error(jsonrpc.server_not_initialized))
-				}
+				err_type := if ls.status == .shutdown { jsonrpc.invalid_request } else { jsonrpc.server_not_initialized }
+				ls.send(new_error(err_type))
 			}
 		}
 	}
