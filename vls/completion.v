@@ -25,7 +25,6 @@ mut:
 	ls             Vls
 }
 
-// type CompletionSource = ast.Stmt | ast.Expr | table.Fn | table.TypeInfo
 fn (mut cfg CompletionItemConfig) completion_items_from_stmt(stmt ast.Stmt) []lsp.CompletionItem {
 	mut completion_items := []lsp.CompletionItem{}
 	match stmt {
@@ -277,24 +276,18 @@ fn (mut ls Vls) completion(id int, params string) {
 	}
 	// ls.log_message('position: { line: $pos.line, col: $pos.character } | offset: $offset | trigger_kind: $ctx', .info)
 	if ctx.trigger_kind == .trigger_character {
-		ls.log_message(src[cfg.offset - 2].str(), .info)
 		// TODO: enum support inside struct fields
 		if ctx.trigger_character == '.' && (cfg.offset - 1 >= 0 && src[cfg.offset - 1] != ` `) {
-			// TODO: will be replaced with the v.ast one
-			node := file.stmts.map(AstNode(it)).find_by_pos(cfg.offset - 2) or { AstNode{} }
 			cfg.show_global = false
 			cfg.show_local = false
-			if node is ast.Stmt {
-				ls.log_message(typeof(node), .info)
-				completion_items << cfg.completion_items_from_stmt(node)
-			}
-		} else {
-			node := file.stmts.map(AstNode(it)).find_by_pos(cfg.offset) or { AstNode{} }
-			if node is ast.Stmt {
-				completion_items << cfg.completion_items_from_stmt(node)
-			} else if node is ast.Expr {
-				completion_items << cfg.completion_items_from_expr(node)
-			}
+			cfg.offset -= 2
+		}
+		// TODO: will be replaced with the v.ast one
+		node := file.stmts.map(AstNode(it)).find_by_pos(cfg.offset) or { AstNode{} }
+		if node is ast.Stmt {
+			completion_items << cfg.completion_items_from_stmt(node)
+		} else if node is ast.Expr {
+			completion_items << cfg.completion_items_from_expr(node)
 		}
 	} else if ctx.trigger_kind == .invoked && (file.stmts.len == 0 || src.len <= 3) {
 		// should never happen but just to make sure
@@ -363,7 +356,6 @@ fn (mut ls Vls) completion(id int, params string) {
 					idx >= cfg.table.types.len || !sym_name.starts_with(file.mod.name + '.') {
 					continue
 				}
-				// TODO: support for typedefs
 				type_sym := unsafe { &cfg.table.types[idx] }
 				completion_items <<
 					cfg.completion_items_from_type_info(sym_name.all_after(file.mod.name + '.'), type_sym.info, false)
