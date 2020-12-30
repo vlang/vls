@@ -26,7 +26,11 @@ fn (ls Vls) formatting(id int, params string) {
 				}
 				end: lsp.Position{
 					line: source_lines.len
-					character: if source_lines.last().len > 0 { source_lines.last().len - 1 } else { 0 }
+					character: if source_lines.last().len > 0 {
+						source_lines.last().len - 1
+					} else {
+						0
+					}
 				}
 			}
 			new_text: formatted_content
@@ -80,7 +84,6 @@ fn (ls Vls) generate_symbols(file ast.File, uri lsp.DocumentUri) []lsp.SymbolInf
 		return symbols
 	}
 	table := ls.tables[dir]
-
 	for stmt in file.stmts {
 		mut name := ''
 		mut kind := lsp.SymbolKind.null

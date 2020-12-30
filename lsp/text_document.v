@@ -13,7 +13,7 @@ pub struct Range {
 
 pub struct TextEdit {
 	range    Range
-	new_text string [json:newText]
+	new_text string [json: newText]
 }
 
 pub struct TextDocumentIdentifier {

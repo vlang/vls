@@ -25,7 +25,7 @@ pub struct Response <T> {
 pub:
 	jsonrpc string = version
 	id      int
-//	error   ResponseError
+	//	error   ResponseError
 	result  T
 }
 
