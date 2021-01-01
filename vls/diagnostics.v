@@ -36,7 +36,11 @@ fn position_to_lsp_range(source []byte, pos token.Position) lsp.Range {
 	return lsp.Range{
 		start: start_pos
 		end: lsp.Position{
-			line: if pos.last_line > pos.line_nr { pos.last_line } else { start_pos.line }
+			line: if pos.last_line > pos.line_nr {
+				pos.last_line
+			} else {
+				start_pos.line
+			}
 			character: start_pos.character + pos.len
 		}
 	}

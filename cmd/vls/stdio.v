@@ -24,7 +24,9 @@ pub fn (io Stdio) receive() ?string {
 	for conlen >= 0 {
 		c := C.fgetc(C.stdin)
 		$if !windows {
-			if c == 10 { continue }
+			if c == 10 {
+				continue
+			}
 		}
 		buf.write_b(byte(c))
 		conlen--
