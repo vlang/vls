@@ -26,10 +26,12 @@ pub fn (io Testio) receive() ?string {
 	return ''
 }
 
+// request returns a JSON string of JSON-RPC request with empty parameters
 pub fn (mut io Testio) request(method string) string {
 	return io.request_with_params(method, map[string]string{})
 }
 
+// request_with_params returns a JSON string of JSON-RPC request with parameters
 pub fn (mut io Testio) request_with_params<T>(method string, params T) string {
 	enc_params := json.encode(params)
 	payload := '{"jsonrpc":"$jsonrpc.version","id":$io.current_req_id,"method":"$method","params":$enc_params}'
@@ -37,6 +39,7 @@ pub fn (mut io Testio) request_with_params<T>(method string, params T) string {
 	return payload
 }
 
+// assert_response verifies the response result/notification params
 pub fn (io Testio) assert_response<T>(payload T) {
 	expected := json.encode(payload)
 	resp := json.decode(TestResponse, io.response) or {
@@ -52,6 +55,7 @@ pub fn (io Testio) assert_response<T>(payload T) {
 	}
 }
 
+// assert_error verifies the error code and message from the response
 pub fn (io Testio) assert_error(code int, message string) {
 	resp := json.decode(TestResponse, io.response) or {
 		assert false
