@@ -1,30 +1,29 @@
 import vls
 import vls.testing
+import lsp
 
 fn test_wrong_first_request() {
 	mut io := testing.Testio{}
 	mut ls := vls.new(io)
-	ls.dispatch(io.request('shutdown'))
-	status := ls.status()
-	assert status == .off
+	payload := io.request('shutdown')
+	ls.dispatch(payload)
+	assert ls.status() == .off
 	io.assert_error(-32002, "Server not yet initialized.")
 }
 
 fn test_initialize_with_capabilities() {
-	mut io := testing.Testio{}
-	mut ls := vls.new(io)
-	ls.dispatch(io.request('initialize'))
-	status := ls.status()
-	assert status == .initialized
-	testing.assert_response(io, ls.capabilities())
+	mut io, mut ls := init()
+	assert ls.status() == .initialized
+	io.assert_response(lsp.InitializeResult{
+		capabilities: ls.capabilities()
+	})
 }
 
 fn test_initialized() {
-	payload := '{"jsonrpc":"2.0","id":1,"method":"initialized","params":{}}'
-	mut ls := init()
+	mut io, mut ls := init()
+	payload := io.request('initialized')
 	ls.dispatch(payload)
-	status := ls.status()
-	assert status == .initialized
+	assert ls.status() == .initialized
 }
 
 // fn test_shutdown() {
@@ -35,10 +34,10 @@ fn test_initialized() {
 // 	assert status == .shutdown
 // }
 
-fn init() vls.Vls {
+fn init() (testing.Testio, vls.Vls) {
 	mut io := testing.Testio{}
-	payload := '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}'
 	mut ls := vls.new(io)
+	payload := io.request('initialize')
 	ls.dispatch(payload)
-	return ls
+	return io, ls
 }
