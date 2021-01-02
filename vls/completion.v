@@ -40,6 +40,15 @@ fn (mut cfg CompletionItemConfig) completion_items_from_stmt(stmt ast.Stmt) []ls
 				cfg.filter_type = stmt.left_types[stmt.left_types.len - 1]
 			}
 		}
+		ast.Import {
+			dir := os.dir(cfg.file.path)
+			dir_contents := os.ls(dir) or { []string{} }
+			// list all folders
+			completion_items << cfg.completion_items_from_dir(dir, dir_contents)
+			
+			// list all vlib
+			// TODO: vlib must be computed at once only
+		}
 		else {}
 	}
 	return completion_items
@@ -65,7 +74,6 @@ fn (mut cfg CompletionItemConfig) completion_items_from_expr(expr ast.Expr) []ls
 						idx >= cfg.table.types.len || !sym_name.starts_with(ident.name + '.') {
 						continue
 					}
-					// TODO: support for typedefs
 					type_sym := unsafe { &cfg.table.types[idx] }
 					completion_items <<
 						cfg.completion_items_from_type_info(sym_name.all_after(ident.name + '.'), type_sym.info, false)
@@ -264,7 +272,6 @@ fn (mut ls Vls) completion(id int, params string) {
 	mut pos := completion_params.position
 	mut ctx := completion_params.context
 	mut completion_items := []lsp.CompletionItem{}
-	mut in_import_stmt := false
 	mut cfg := CompletionItemConfig{
 		file: file
 		file_imports: file.imports.map(if it.alias.len > 0 {
@@ -276,20 +283,8 @@ fn (mut ls Vls) completion(id int, params string) {
 		table: ls.tables[os.dir(file_uri)]
 		ls: ls
 	}
-	// check if the cursor is in the import stmt
-	// FIXME: support is not yet final. would need to patch the parser to support incomplete import stmt
-	{
-		is_space1 := ctx.trigger_kind == .trigger_character && ctx.trigger_character == ' '
-		is_space2 := ctx.trigger_kind == .invoked && cfg.offset - 1 >= 0 && src[cfg.offset - 1] == ` `
-		is_import_key := cfg.offset - 7 >= 0 && src[cfg.offset-7..cfg.offset-1].bytestr() == 'import'
-		if (is_space1 || is_space2) && is_import_key {
-			in_import_stmt = true
-			cfg.show_local = false
-			cfg.show_global = false
-		}
-	}
 	// adjust context data if the trigger symbols are on the left
-	if !in_import_stmt && ctx.trigger_kind == .invoked && cfg.offset - 1 >= 0 && file.stmts.len > 0 && src.len > 3 {
+	if ctx.trigger_kind == .invoked && cfg.offset - 1 >= 0 && file.stmts.len > 0 && src.len > 3 {
 		if src[cfg.offset - 1] in [`.`, `:`, `=`, `{`, `,`, `(`] {
 			ctx = lsp.CompletionContext{
 				trigger_kind: .trigger_character
@@ -309,16 +304,7 @@ fn (mut ls Vls) completion(id int, params string) {
 		}
 	}
 	// ls.log_message('position: { line: $pos.line, col: $pos.character } | offset: $offset | trigger_kind: $ctx', .info)
-	if in_import_stmt {
-		dir := os.dir(file_uri.path())
-		dir_contents := os.ls(dir) or { []string{} }
-		// list all folders
-		completion_items << cfg.completion_items_from_dir(dir, dir_contents)
-		
-		// list all vlib
-		// TODO: vlib must be computed at once only
-		
-	} else if ctx.trigger_kind == .trigger_character {
+	if ctx.trigger_kind == .trigger_character {
 		// TODO: enum support inside struct fields
 		if ctx.trigger_character == '.' && (cfg.offset - 1 >= 0 && src[cfg.offset - 1] != ` `) {
 			cfg.show_global = false
