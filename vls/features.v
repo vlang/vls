@@ -43,7 +43,7 @@ fn (ls Vls) formatting(id int, params string) {
 	}
 }
 
-fn (ls Vls) workspace_symbol(id int, params string) {
+fn (mut ls Vls) workspace_symbol(id int, params string) {
 	mut symbols := []lsp.SymbolInformation{}
 	for file_uri, file in ls.files {
 		if !file_uri.starts_with(ls.root_path.str()) {
@@ -55,12 +55,9 @@ fn (ls Vls) workspace_symbol(id int, params string) {
 		id: id
 		result: symbols
 	}))
-	unsafe {
-		symbols.free()
-	}
 }
 
-fn (ls Vls) document_symbol(id int, params string) {
+fn (mut ls Vls) document_symbol(id int, params string) {
 	document_symbol_params := json.decode(lsp.DocumentSymbolParams, params) or { panic(err) }
 	uri := document_symbol_params.text_document.uri
 	file := ls.files[uri.str()]
@@ -69,13 +66,14 @@ fn (ls Vls) document_symbol(id int, params string) {
 		id: id
 		result: symbols
 	}))
-	unsafe {
-		symbols.free()
-	}
 }
 
-fn (ls Vls) generate_symbols(file ast.File, uri lsp.DocumentUri) []lsp.SymbolInformation {
+fn (mut ls Vls) generate_symbols(file ast.File, uri lsp.DocumentUri) []lsp.SymbolInformation {
 	mut symbols := []lsp.SymbolInformation{}
+	sym_is_cached := uri.str() in ls.doc_symbols
+	if file.errors.len > 0 && sym_is_cached {
+		return ls.doc_symbols[uri.str()]
+	}
 	source := ls.sources[uri.str()]
 	dir := os.dir(uri.str())
 	// NB: should never happen. just in case
@@ -144,5 +142,6 @@ fn (ls Vls) generate_symbols(file ast.File, uri lsp.DocumentUri) []lsp.SymbolInf
 			}
 		}
 	}
+	ls.doc_symbols[uri.str()] = symbols
 	return symbols
 }
