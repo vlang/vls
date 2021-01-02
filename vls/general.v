@@ -9,6 +9,8 @@ import v.parser
 // initialize sends the server capabilities to the client
 fn (mut ls Vls) initialize(id int, params string) {
 	initialize_params := json.decode(lsp.InitializeParams, params) or { panic(err) }
+	// TODO: configure capabilities based on client support
+	ls.client_capabilities = initialize_params.capabilities
 	ls.capabilities = lsp.ServerCapabilities{
 		text_document_sync: 1
 		workspace_symbol_provider: true
