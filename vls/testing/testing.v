@@ -5,17 +5,22 @@ import jsonrpc
 
 struct TestResponse {
 	jsonrpc string = jsonrpc.version
-	id 			int
-	result 	string [raw]
-	params  string [raw] // for notification
+	id      int
+	result  string                [raw]
 	error   jsonrpc.ResponseError
+}
+
+struct TestNotification {
+	jsonrpc string = jsonrpc.version
+	method  string
+	params  string [raw]
 }
 
 pub struct Testio {
 mut:
 	current_req_id int = 1
 pub mut:
-	response string
+	response       string
 }
 
 pub fn (mut io Testio) send(data string) {
@@ -46,13 +51,19 @@ pub fn (io Testio) assert_response<T>(payload T) {
 		assert false
 		return
 	}
-	if resp.params.len > 0 {
-		assert resp.result.len == 0
-		assert resp.params == expected
-	} else {
-		assert resp.params.len == 0
-		assert resp.result == expected
+	assert resp.result == expected
+}
+
+// assert_notification verifies the parameters of the notification
+pub fn (io Testio) assert_notification<T>(expected_method string, payload T) {
+	eprintln('response: ' + io.response)
+	expected_params := json.encode(payload)
+	resp := json.decode(TestNotification, io.response) or {
+		assert false
+		return
 	}
+	assert resp.method == expected_method
+	assert resp.params == expected_params
 }
 
 // assert_error verifies the error code and message from the response
@@ -64,4 +75,3 @@ pub fn (io Testio) assert_error(code int, message string) {
 	assert resp.error.code == code
 	assert resp.error.message == message
 }
-

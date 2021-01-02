@@ -8,7 +8,7 @@ fn test_wrong_first_request() {
 	payload := io.request('shutdown')
 	ls.dispatch(payload)
 	assert ls.status() == .off
-	io.assert_error(-32002, "Server not yet initialized.")
+	io.assert_error(-32002, 'Server not yet initialized.')
 }
 
 fn test_initialize_with_capabilities() {
@@ -33,7 +33,6 @@ fn test_initialized() {
 // 	status := ls.status()
 // 	assert status == .shutdown
 // }
-
 fn init() (testing.Testio, vls.Vls) {
 	mut io := testing.Testio{}
 	mut ls := vls.new(io)
