@@ -8,15 +8,13 @@ fn test_wrong_first_request() {
 	payload := io.request('shutdown')
 	ls.dispatch(payload)
 	assert ls.status() == .off
-	io.assert_error(-32002, 'Server not yet initialized.')
+	assert io.check_error(-32002, 'Server not yet initialized.')
 }
 
 fn test_initialize_with_capabilities() {
 	mut io, mut ls := init()
 	assert ls.status() == .initialized
-	io.assert_response(lsp.InitializeResult{
-		capabilities: ls.capabilities()
-	})
+	assert io.result<lsp.InitializeResult>() == lsp.InitializeResult{}
 }
 
 fn test_initialized() {

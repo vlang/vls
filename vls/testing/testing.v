@@ -6,7 +6,7 @@ import jsonrpc
 struct TestResponse {
 	jsonrpc string = jsonrpc.version
 	id      int
-	result  string                [raw]
+	result  string [raw]
 	error   jsonrpc.ResponseError
 }
 
@@ -18,13 +18,16 @@ struct TestNotification {
 
 pub struct Testio {
 mut:
-	current_req_id int = 1
+	current_req_id    int = 1
+	has_decoded       bool
+	response          TestResponse
 pub mut:
-	response       string
+	response_data     string
 }
 
 pub fn (mut io Testio) send(data string) {
-	io.response = data
+	io.has_decoded = false
+	io.response_data = data
 }
 
 pub fn (io Testio) receive() ?string {
@@ -44,34 +47,39 @@ pub fn (mut io Testio) request_with_params<T>(method string, params T) string {
 	return payload
 }
 
-// assert_response verifies the response result/notification params
-pub fn (io Testio) assert_response<T>(payload T) {
-	expected := json.encode(payload)
-	resp := json.decode(TestResponse, io.response) or {
-		assert false
-		return
+// check_response verifies the response result/notification params
+pub fn (mut io Testio) result<T>() T {
+	io.decode_response() or {
+		return T{}
 	}
-	assert resp.result == expected
+	decoded_result := json.decode(T, io.response.result) or {
+		return T{}
+	}
+	return decoded_result
 }
 
-// assert_notification verifies the parameters of the notification
-pub fn (io Testio) assert_notification<T>(expected_method string, payload T) {
-	eprintln('response: ' + io.response)
-	expected_params := json.encode(payload)
-	resp := json.decode(TestNotification, io.response) or {
-		assert false
-		return
+// check_notification verifies the parameters of the notification
+// pub fn (io Testio) notification<T>() (string, T) {
+// 	resp := json.decode(TestNotification, io.response) or {
+// 		return '', T{}
+// 	}
+// 	decoded_params := json.decode(T, resp.params) or {
+// 		return '', T{}
+// 	}
+// 	return resp.method, decoded_params
+// }
+
+// check_error verifies the error code and message from the response
+pub fn (mut io Testio) response_error() (int, string) {
+	io.decode_response() or {
+		return -1, ''
 	}
-	assert resp.method == expected_method
-	assert resp.params == expected_params
+	return io.response.error.code, io.response.error.message
 }
 
-// assert_error verifies the error code and message from the response
-pub fn (io Testio) assert_error(code int, message string) {
-	resp := json.decode(TestResponse, io.response) or {
-		assert false
-		return
+fn (mut io Testio) decode_response() ? {
+	if !io.has_decoded {
+		io.response = json.decode(TestResponse, io.response_data)?
+		io.has_decoded = true
 	}
-	assert resp.error.code == code
-	assert resp.error.message == message
 }
