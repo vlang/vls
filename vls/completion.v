@@ -13,16 +13,16 @@ import v.table
 
 struct CompletionItemConfig {
 mut:
-	pub_only       bool = true
-	file           ast.File
-	offset         int
-	table          &table.Table
-	show_global    bool = true
+	pub_only            bool = true
+	file                ast.File
+	offset              int
+	table               &table.Table
+	show_global         bool = true
 	show_only_global_fn bool
-	show_local     bool = true
-	filter_type    table.Type = table.Type(0)
-	fields_only    bool
-	file_imports   []string
+	show_local          bool       = true
+	filter_type         table.Type = table.Type(0)
+	fields_only         bool
+	file_imports        []string
 }
 
 fn (mut cfg CompletionItemConfig) completion_items_from_stmt(stmt ast.Stmt) []lsp.CompletionItem {
@@ -43,7 +43,6 @@ fn (mut cfg CompletionItemConfig) completion_items_from_stmt(stmt ast.Stmt) []ls
 			dir_contents := os.ls(dir) or { []string{} }
 			// list all folders
 			completion_items << cfg.completion_items_from_dir(dir, dir_contents)
-			
 			// list all vlib
 			// TODO: vlib must be computed at once only
 		}
@@ -54,12 +53,11 @@ fn (mut cfg CompletionItemConfig) completion_items_from_stmt(stmt ast.Stmt) []ls
 
 fn (mut cfg CompletionItemConfig) completion_items_from_table(prefix_name string) []lsp.CompletionItem {
 	mut completion_items := []lsp.CompletionItem{}
-	if cfg.show_global && cfg.show_only_global_fn { 
+	if cfg.show_global && cfg.show_only_global_fn {
 		return completion_items
 	}
 	for sym_name, idx in cfg.table.type_idxs {
-		if idx <= 0 ||
-			idx >= cfg.table.types.len || !sym_name.starts_with('${prefix_name}.') {
+		if idx <= 0 || idx >= cfg.table.types.len || !sym_name.starts_with('${prefix_name}.') {
 			continue
 		}
 		type_sym := unsafe { &cfg.table.types[idx] }
@@ -124,7 +122,9 @@ fn (mut cfg CompletionItemConfig) completion_items_from_expr(expr ast.Expr) []ls
 		ast.StructInit {
 			cfg.show_global = false
 			cfg.show_local = false
-			field_node := find_ast_by_pos(expr.fields.map(ast.Node(it)), cfg.offset - 1) or { ast.Node{} }
+			field_node := find_ast_by_pos(expr.fields.map(ast.Node(it)), cfg.offset - 1) or {
+				ast.Node{}
+			}
 			if field_node is ast.StructInitField {
 				// NB: enable local results only if the node is a field
 				cfg.show_local = true
@@ -159,11 +159,7 @@ fn (mut cfg CompletionItemConfig) completion_items_from_expr(expr ast.Expr) []ls
 fn (mut cfg CompletionItemConfig) completion_items_from_fn(fnn table.Fn, is_method bool) lsp.CompletionItem {
 	mut i := 0
 	mut insert_text := fnn.name.all_after(fnn.mod + '.')
-	kind := if is_method {
-		lsp.CompletionItemKind.method
-	} else {
-		lsp.CompletionItemKind.function
-	}
+	kind := if is_method { lsp.CompletionItemKind.method } else { lsp.CompletionItemKind.function }
 	if fnn.is_generic {
 		insert_text += '<\${$i:T}>'
 	}
@@ -223,11 +219,7 @@ fn (mut cfg CompletionItemConfig) completion_items_from_type_info(name string, t
 		}
 		table.Enum {
 			for val in type_info.vals {
-				label := if fields_only {
-					'.$val'
-				} else {
-					'${name}.$val'
-				}
+				label := if fields_only { '.$val' } else { '${name}.$val' }
 				completion_items << lsp.CompletionItem{
 					label: label
 					kind: .enum_member
@@ -254,13 +246,11 @@ fn (cfg CompletionItemConfig) completion_items_from_dir(dir string, dir_contents
 		if !os.is_dir(full_path) || name in cfg.file_imports {
 			continue
 		}
-
 		subdir_contents := os.ls(full_path) or { []string{} }
 		completion_items << cfg.completion_items_from_dir(full_path, subdir_contents)
 		if name == 'modules' {
 			continue
 		}
-	
 		completion_items << lsp.CompletionItem{
 			label: name
 			kind: .folder
@@ -281,11 +271,7 @@ fn (mut ls Vls) completion(id int, params string) {
 	mut completion_items := []lsp.CompletionItem{}
 	mut cfg := CompletionItemConfig{
 		file: file
-		file_imports: file.imports.map(if it.alias.len > 0 {
-			it.alias
-		} else {
-			it.mod
-		})
+		file_imports: file.imports.map(if it.alias.len > 0 { it.alias } else { it.mod })
 		offset: compute_offset(src, pos.line, pos.character)
 		table: ls.tables[os.dir(file_uri)]
 	}
@@ -365,7 +351,9 @@ fn (mut ls Vls) completion(id int, params string) {
 						}
 						name = obj.name
 					}
-					else { continue }
+					else {
+						continue
+					}
 				}
 				mut kind := lsp.CompletionItemKind.variable
 				if obj is ast.ConstField {
@@ -384,8 +372,9 @@ fn (mut ls Vls) completion(id int, params string) {
 		completion_items << cfg.completion_items_from_table(file.mod.name)
 		// include functions from builtin and within the same namespace
 		for _, fnn in cfg.table.fns {
-			if (fnn.mod == 'builtin' && fnn.name in ls.builtin_symbols) ||
-					(fnn.mod == file.mod.name && fnn.name != 'main.main') {
+			if (fnn.mod == 'builtin' &&
+				fnn.name in ls.builtin_symbols) ||
+				(fnn.mod == file.mod.name && fnn.name != 'main.main') {
 				completion_items << cfg.completion_items_from_fn(fnn, false)
 			}
 		}

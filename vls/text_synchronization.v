@@ -111,7 +111,7 @@ fn (mut ls Vls) parse_imports(parsed_files []ast.File, table &table.Table, pref 
 				continue
 			}
 			mut found := false
-			mut import_err_msg := "cannot find module '$imp.mod'" 
+			mut import_err_msg := "cannot find module '$imp.mod'"
 			for path in pref.lookup_path {
 				mod_dir := os.join_path(path, imp.mod.split('.').join(os.path_separator))
 				if !os.exists(mod_dir) {
