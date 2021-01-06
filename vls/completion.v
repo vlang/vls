@@ -117,7 +117,7 @@ fn (mut cfg CompletionItemConfig) completion_items_from_expr(expr ast.Expr) []ls
 		ast.StructInit {
 			cfg.show_global = false
 			cfg.show_local = false
-			field_node := expr.fields.map(AstNode(it)).find_by_pos(cfg.offset - 1) or { AstNode{} }
+			field_node := find_ast_by_pos(expr.fields.map(ast.Node(it)), cfg.offset - 1) or { ast.Node{} }
 			if field_node is ast.StructInitField {
 				// NB: enable local results only if the node is a field
 				cfg.show_local = true
@@ -311,8 +311,7 @@ fn (mut ls Vls) completion(id int, params string) {
 			cfg.show_local = false
 			cfg.offset -= 2
 		}
-		// TODO: will be replaced with the v.ast one
-		node := file.stmts.map(AstNode(it)).find_by_pos(cfg.offset) or { AstNode{} }
+		node := find_ast_by_pos(file.stmts.map(ast.Node(it)), cfg.offset) or { ast.Node{} }
 		if node is ast.Stmt {
 			completion_items << cfg.completion_items_from_stmt(node)
 		} else if node is ast.Expr {
