@@ -18,11 +18,10 @@ mut:
 	offset         int
 	table          &table.Table
 	show_global    bool = true
-	show_global_fn bool
+	show_only_global_fn bool
 	show_local     bool = true
 	filter_type    table.Type = table.Type(0)
 	fields_only    bool
-	ls             Vls
 	file_imports   []string
 }
 
@@ -33,10 +32,9 @@ fn (mut cfg CompletionItemConfig) completion_items_from_stmt(stmt ast.Stmt) []ls
 			completion_items << cfg.completion_items_from_expr(stmt.expr)
 		}
 		ast.AssignStmt {
-			// TODO: support for multi assign
 			if stmt.op != .decl_assign {
 				cfg.show_global = false
-				cfg.show_global_fn = false
+				cfg.show_only_global_fn = false
 				cfg.filter_type = stmt.left_types[stmt.left_types.len - 1]
 			}
 		}
@@ -50,6 +48,23 @@ fn (mut cfg CompletionItemConfig) completion_items_from_stmt(stmt ast.Stmt) []ls
 			// TODO: vlib must be computed at once only
 		}
 		else {}
+	}
+	return completion_items
+}
+
+fn (mut cfg CompletionItemConfig) completion_items_from_table(prefix_name string) []lsp.CompletionItem {
+	mut completion_items := []lsp.CompletionItem{}
+	if cfg.show_global && cfg.show_only_global_fn { 
+		return completion_items
+	}
+	for sym_name, idx in cfg.table.type_idxs {
+		if idx <= 0 ||
+			idx >= cfg.table.types.len || !sym_name.starts_with('${prefix_name}.') {
+			continue
+		}
+		type_sym := unsafe { &cfg.table.types[idx] }
+		completion_items <<
+			cfg.completion_items_from_type_info(sym_name.all_after('${prefix_name}.'), type_sym.info, false)
 	}
 	return completion_items
 }
@@ -69,15 +84,7 @@ fn (mut cfg CompletionItemConfig) completion_items_from_expr(expr ast.Expr) []ls
 				// NB: symbols of the said module does not show the full list
 				// unless by pressing cmd/ctrl+space or by pressing escape key
 				// + deleting the dot + typing again the dot
-				for sym_name, idx in cfg.table.type_idxs {
-					if idx <= 0 ||
-						idx >= cfg.table.types.len || !sym_name.starts_with(ident.name + '.') {
-						continue
-					}
-					type_sym := unsafe { &cfg.table.types[idx] }
-					completion_items <<
-						cfg.completion_items_from_type_info(sym_name.all_after(ident.name + '.'), type_sym.info, false)
-				}
+				completion_items << cfg.completion_items_from_table(ident.name)
 				for _, fnn in cfg.table.fns {
 					if fnn.mod != ident.name || !fnn.is_pub {
 						continue
@@ -152,9 +159,10 @@ fn (mut cfg CompletionItemConfig) completion_items_from_expr(expr ast.Expr) []ls
 fn (mut cfg CompletionItemConfig) completion_items_from_fn(fnn table.Fn, is_method bool) lsp.CompletionItem {
 	mut i := 0
 	mut insert_text := fnn.name.all_after(fnn.mod + '.')
-	mut kind := lsp.CompletionItemKind.function
-	if is_method {
-		kind = .method
+	kind := if is_method {
+		lsp.CompletionItemKind.method
+	} else {
+		lsp.CompletionItemKind.function
 	}
 	if fnn.is_generic {
 		insert_text += '<\${$i:T}>'
@@ -193,7 +201,6 @@ fn (mut cfg CompletionItemConfig) completion_items_from_type_info(name string, t
 					if field.has_default_expr {
 						continue
 					}
-					// TODO: trigger autocompletion
 					insert_text += '\t$field.name: \$$i\n'
 					i--
 				}
@@ -281,7 +288,6 @@ fn (mut ls Vls) completion(id int, params string) {
 		})
 		offset: compute_offset(src, pos.line, pos.character)
 		table: ls.tables[os.dir(file_uri)]
-		ls: ls
 	}
 	// adjust context data if the trigger symbols are on the left
 	if ctx.trigger_kind == .invoked && cfg.offset - 1 >= 0 && file.stmts.len > 0 && src.len > 3 {
@@ -303,9 +309,7 @@ fn (mut ls Vls) completion(id int, params string) {
 			}
 		}
 	}
-	// ls.log_message('position: { line: $pos.line, col: $pos.character } | offset: $offset | trigger_kind: $ctx', .info)
 	if ctx.trigger_kind == .trigger_character {
-		// TODO: enum support inside struct fields
 		if ctx.trigger_character == '.' && (cfg.offset - 1 >= 0 && src[cfg.offset - 1] != ` `) {
 			cfg.show_global = false
 			cfg.show_local = false
@@ -331,7 +335,7 @@ fn (mut ls Vls) completion(id int, params string) {
 			}
 		}
 	} else {
-		cfg.show_global_fn = true
+		cfg.show_only_global_fn = true
 	}
 	if cfg.show_local {
 		if cfg.filter_type == 0 {
@@ -350,45 +354,34 @@ fn (mut ls Vls) completion(id int, params string) {
 				}
 			}
 		}
-		for _, obj in file.scope.objects {
-			if obj is ast.ConstField {
-				if cfg.filter_type != 0 && obj.typ != cfg.filter_type {
-					continue
+		inner_scope := file.scope.innermost(cfg.offset)
+		for scope in [file.scope, inner_scope] {
+			for _, obj in scope.objects {
+				mut name := ''
+				match obj {
+					ast.ConstField, ast.Var {
+						if cfg.filter_type != 0 && obj.typ != cfg.filter_type {
+							continue
+						}
+						name = obj.name
+					}
+					else { continue }
+				}
+				mut kind := lsp.CompletionItemKind.variable
+				if obj is ast.ConstField {
+					name = name.all_after('${obj.mod}.')
+					kind = .constant
 				}
 				completion_items << lsp.CompletionItem{
-					label: obj.name.all_after('${obj.mod}.')
-					kind: .constant
-					insert_text: obj.name.all_after('${obj.mod}.')
-				}
-			}
-		}
-		scope := file.scope.innermost(cfg.offset)
-		// get variables inside the scope
-		for _, obj in scope.objects {
-			if obj is ast.Var {
-				if cfg.filter_type != 0 && obj.typ != cfg.filter_type {
-					continue
-				}
-				completion_items << lsp.CompletionItem{
-					label: obj.name
-					kind: .variable
-					insert_text: obj.name
+					label: name
+					kind: kind
+					insert_text: name
 				}
 			}
 		}
 	}
 	if cfg.show_global {
-		if !cfg.show_global_fn {
-			for sym_name, idx in cfg.table.type_idxs {
-				if idx <= 0 ||
-					idx >= cfg.table.types.len || !sym_name.starts_with(file.mod.name + '.') {
-					continue
-				}
-				type_sym := unsafe { &cfg.table.types[idx] }
-				completion_items <<
-					cfg.completion_items_from_type_info(sym_name.all_after(file.mod.name + '.'), type_sym.info, false)
-			}
-		}
+		completion_items << cfg.completion_items_from_table(file.mod.name)
 		// include functions from builtin and within the same namespace
 		for _, fnn in cfg.table.fns {
 			if (fnn.mod == 'builtin' && fnn.name in ls.builtin_symbols) ||
