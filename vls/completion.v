@@ -14,9 +14,9 @@ import v.table
 struct CompletionItemConfig {
 mut:
 	file                ast.File
-	offset              int // position of the cursor. used for finding the AST node
+	offset              int 			 // position of the cursor. used for finding the AST node
 	table               &table.Table
-	show_global         bool = true // for displaying global (project) symbols
+	show_global         bool 			 = true // for displaying global (project) symbols
 	show_only_global_fn bool       // for displaying only the functions of the project
 	show_local          bool       = true // for displaying local variables
 	filter_type         table.Type = table.Type(0) // filters results by type
@@ -33,6 +33,9 @@ fn (mut cfg CompletionItemConfig) completion_items_from_stmt(stmt ast.Stmt) []ls
 		}
 		ast.AssignStmt {
 			if stmt.op != .decl_assign {
+				// When reassigning a new value, the server must display
+				// the list of available symbols that have the same type
+				// as the variable on the left.
 				cfg.show_global = false
 				cfg.show_only_global_fn = false
 				cfg.filter_type = stmt.left_types[stmt.left_types.len - 1]
@@ -51,14 +54,21 @@ fn (mut cfg CompletionItemConfig) completion_items_from_stmt(stmt ast.Stmt) []ls
 	return completion_items
 }
 
-// completion_items_from_table returns a list of results extracted from the table information.
+// completion_items_from_table returns a list of results extracted from the type symbols of the table.
 fn (mut cfg CompletionItemConfig) completion_items_from_table(prefix_name string) []lsp.CompletionItem {
+	// NB: symbols of the said module does not show the full list
+	// unless by pressing cmd/ctrl+space or by pressing escape key
+	// + deleting the dot + typing again the dot
 	mut completion_items := []lsp.CompletionItem{}
+
+	// Do not proceed if the functions the only ones required 
+	// to be displayed to the client
 	if cfg.show_global && cfg.show_only_global_fn {
 		return completion_items
 	}
+
 	for sym_name, idx in cfg.table.type_idxs {
-		if idx <= 0 || idx >= cfg.table.types.len || !sym_name.starts_with('${prefix_name}.') {
+		if idx <= 0 || idx >= cfg.table.types.len || (prefix_name.len > 0 && !sym_name.starts_with('${prefix_name}.')) {
 			continue
 		}
 		type_sym := unsafe { &cfg.table.types[idx] }
@@ -71,19 +81,17 @@ fn (mut cfg CompletionItemConfig) completion_items_from_table(prefix_name string
 // completion_items_from_expr returns a list of results extracted from the Expr node info.
 fn (mut cfg CompletionItemConfig) completion_items_from_expr(expr ast.Expr) []lsp.CompletionItem {
 	mut completion_items := []lsp.CompletionItem{}
-	mut expr_type := table.Type(0)
-	// TODO: support for infix/postfix expr
+
 	match expr {
 		ast.SelectorExpr {
-			expr_type = expr.expr_type
-			if expr_type == 0 && expr.expr is ast.Ident {
+			// If the expr_type is zero and the ident is a
+			// module, then it should include a list of public
+			// symbols of that module.
+			if expr.expr_type == 0 && expr.expr is ast.Ident {
 				ident := expr.expr as ast.Ident
 				if ident.name !in cfg.file_imports {
 					return completion_items
 				}
-				// NB: symbols of the said module does not show the full list
-				// unless by pressing cmd/ctrl+space or by pressing escape key
-				// + deleting the dot + typing again the dot
 				completion_items << cfg.completion_items_from_table(ident.name)
 				for _, fnn in cfg.table.fns {
 					if fnn.mod != ident.name || !fnn.is_pub {
@@ -91,10 +99,15 @@ fn (mut cfg CompletionItemConfig) completion_items_from_expr(expr ast.Expr) []ls
 					}
 					completion_items << cfg.completion_items_from_fn(fnn, false)
 				}
-			} else if expr_type != 0 {
+			} else if expr.expr_type != 0 {
 				type_sym := cfg.table.get_type_symbol(expr_type)
+
+				// Include the list of available struct fields based on the type info
 				completion_items <<
 					cfg.completion_items_from_type_info('', type_sym.info, true)
+
+				// If the expr_type is an array or map type, it should
+				// include the fields and methods of map/array type.
 				if type_sym.kind == .array || type_sym.kind == .map {
 					base_symbol_name := if type_sym.kind == .array { 'array' } else { 'map' }
 					if base_type_sym := cfg.table.find_type(base_symbol_name) {
@@ -102,7 +115,8 @@ fn (mut cfg CompletionItemConfig) completion_items_from_expr(expr ast.Expr) []ls
 							cfg.completion_items_from_type_info('', base_type_sym.info, true)
 					}
 				}
-				// list all methods
+
+				// Include all the type methods
 				for m in type_sym.methods {
 					completion_items << cfg.completion_items_from_fn(m, true)
 				}
@@ -110,15 +124,15 @@ fn (mut cfg CompletionItemConfig) completion_items_from_expr(expr ast.Expr) []ls
 			return completion_items
 		}
 		ast.CallExpr {
-			current_arg_idx := expr.args.len
-			if current_arg_idx < expr.expected_arg_types.len {
+			// Filter the list of local symbols based on
+			// the current arg's type.
+			if expr.args.len < expr.expected_arg_types.len {
 				cfg.show_local = true
-				cfg.show_global = false
-				cfg.filter_type = expr.expected_arg_types[current_arg_idx]
+				cfg.filter_type = expr.expected_arg_types[expr.args.len]
 			} else {
 				cfg.show_local = false
-				cfg.show_global = false
 			}
+			cfg.show_global = false
 			return completion_items
 		}
 		ast.StructInit {
@@ -136,7 +150,7 @@ fn (mut cfg CompletionItemConfig) completion_items_from_expr(expr ast.Expr) []ls
 				cfg.filter_type = field_node.expected_type
 			} else {
 				// if structinit is empty or not within the field position, 
-				// it must show the list of missing fields instead
+				// it must include the list of missing fields instead
 				defined_fields := expr.fields.map(it.name)
 				struct_type_sym := cfg.table.get_type_symbol(expr.typ)
 				struct_type_info := struct_type_sym.info as table.Struct
@@ -161,7 +175,11 @@ fn (mut cfg CompletionItemConfig) completion_items_from_expr(expr ast.Expr) []ls
 // completion_items_from_fn returns the list of items extracted from the table.Fn information
 fn (mut cfg CompletionItemConfig) completion_items_from_fn(fnn table.Fn, is_method bool) lsp.CompletionItem {
 	mut i := 0
+	
+	// This will create a snippet that will automatically
+	// create a call expression based on the information of the function
 	mut insert_text := fnn.name.all_after(fnn.mod + '.')
+
 	kind := if is_method { lsp.CompletionItemKind.method } else { lsp.CompletionItemKind.function }
 	if fnn.is_generic {
 		insert_text += '<\${$i:T}>'
@@ -223,6 +241,8 @@ fn (mut cfg CompletionItemConfig) completion_items_from_type_info(name string, t
 		}
 		table.Enum {
 			for val in type_info.vals {
+				// Use short enum syntax when reassigning, within
+				// struct fields, and etc.
 				label := if fields_only { '.$val' } else { '${name}.$val' }
 				completion_items << lsp.CompletionItem{
 					label: label
@@ -274,7 +294,7 @@ fn (mut ls Vls) completion(id int, params string) {
 	pos := completion_params.position
 
 	// The context is used for if and when to trigger autocompletion.
-	// See L277-L284 for the `mut` reason.
+	// See comments `cfg` for reason.
 	mut ctx := completion_params.context
 	
 	// This is where the items will be pushed and sent to the client.
@@ -314,6 +334,7 @@ fn (mut ls Vls) completion(id int, params string) {
 			cfg.offset -= 2
 		}
 	}
+
 	// The language server uses the `trigger_character` as a sole basis for triggering
 	// the data extraction and autocompletion. The `trigger_character` kind is only
 	// received by the server if the user presses one of the server-defined trigger
@@ -326,6 +347,7 @@ fn (mut ls Vls) completion(id int, params string) {
 			cfg.show_local = false
 			cfg.offset -= 2
 		}
+
 		// Once the offset has been finalized it will then search for the AST node and
 		// extract it's data using the corresponding methods depending on the node type.
 		node := find_ast_by_pos(file.stmts.map(ast.Node(it)), cfg.offset) or { ast.Node{} }
@@ -354,6 +376,7 @@ fn (mut ls Vls) completion(id int, params string) {
 		// Display only the project's functions if none are satisfied
 		cfg.show_only_global_fn = true
 	}
+
 	// Local results. Module names and the scope-based symbols.
 	if cfg.show_local {
 		// Imported modules. They will be shown to the user if there is no given
@@ -373,6 +396,7 @@ fn (mut ls Vls) completion(id int, params string) {
 				}
 			}
 		}
+
 		// Scope-based symbols that includes the variables inside
 		// the functions and the constants of the file.
 		inner_scope := file.scope.innermost(cfg.offset)
@@ -403,6 +427,7 @@ fn (mut ls Vls) completion(id int, params string) {
 			}
 		}
 	}
+
 	// Global results. This includes all the symbols within the module such as
 	// the structs, typedefs, enums, and the functions.
 	if cfg.show_global {
@@ -418,6 +443,7 @@ fn (mut ls Vls) completion(id int, params string) {
 			}
 		}
 	}
+
 	// After that, it will send the list to the client.
 	ls.send(json.encode(jsonrpc.Response<[]lsp.CompletionItem>{
 		id: id
