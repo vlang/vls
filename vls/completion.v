@@ -14,9 +14,9 @@ import v.table
 struct CompletionItemConfig {
 mut:
 	file                ast.File
-	offset              int 			 // position of the cursor. used for finding the AST node
+	offset              int        // position of the cursor. used for finding the AST node
 	table               &table.Table
-	show_global         bool 			 = true // for displaying global (project) symbols
+	show_global         bool       = true // for displaying global (project) symbols
 	show_only_global_fn bool       // for displaying only the functions of the project
 	show_local          bool       = true // for displaying local variables
 	filter_type         table.Type = table.Type(0) // filters results by type
@@ -98,10 +98,9 @@ fn (mut cfg CompletionItemConfig) completion_items_from_expr(expr ast.Expr) []ls
 				}
 				completion_items << cfg.completion_items_from_table(ident.name)
 				for _, fnn in cfg.table.fns {
-					if fnn.mod != ident.name || !fnn.is_pub {
-						continue
+					if fnn.mod == ident.name && fnn.is_pub {
+						completion_items << cfg.completion_items_from_fn(fnn, false)
 					}
-					completion_items << cfg.completion_items_from_fn(fnn, false)
 				}
 			} else if expr.expr_type != 0 {
 				type_sym := cfg.table.get_type_symbol(expr_type)
@@ -449,7 +448,8 @@ fn (mut ls Vls) completion(id int, params string) {
 		// This part will extract the functions from both the builtin module and
 		// within the module (except the main() fn if present.)
 		for _, fnn in cfg.table.fns {
-			if fnn.mod == file.mod.name || (fnn.mod == 'builtin' && fnn.name in ls.builtin_symbols()) {
+			if fnn.mod == file.mod.name ||
+				(fnn.mod == 'builtin' && fnn.name in ls.builtin_symbols()) {
 				completion_items << cfg.completion_items_from_fn(fnn, false)
 			}
 		}
