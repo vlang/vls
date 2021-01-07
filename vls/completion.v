@@ -177,12 +177,18 @@ fn (mut cfg CompletionItemConfig) completion_items_from_expr(expr ast.Expr) []ls
 }
 
 // completion_items_from_fn returns the list of items extracted from the table.Fn information
-fn (mut cfg CompletionItemConfig) completion_items_from_fn(fnn table.Fn, is_method bool) lsp.CompletionItem {
-	mut i := 0
+fn (mut cfg CompletionItemConfig) completion_items_from_fn(fnn table.Fn, is_method bool) []lsp.CompletionItem {
+	mut completion_items := []lsp.CompletionItem{}
+	
+	fn_name := fnn.name.all_after(fnn.mod + '.')
+	if fn_name == 'main' {
+		return completion_items
+	}
 	
 	// This will create a snippet that will automatically
 	// create a call expression based on the information of the function
-	mut insert_text := fnn.name.all_after(fnn.mod + '.')
+	mut insert_text := fn_name
+	mut i := 0
 
 	kind := if is_method { lsp.CompletionItemKind.method } else { lsp.CompletionItemKind.function }
 	if fnn.is_generic {
@@ -203,12 +209,13 @@ fn (mut cfg CompletionItemConfig) completion_items_from_fn(fnn table.Fn, is_meth
 	if fnn.return_type.has_flag(.optional) {
 		insert_text += ' or { panic(err) }'
 	}
-	return lsp.CompletionItem{
-		label: fnn.name.all_after(fnn.mod + '.')
+	completion_items << lsp.CompletionItem{
+		label: fn_name
 		kind: kind
 		insert_text_format: .snippet
 		insert_text: insert_text
 	}
+	return completion_items
 }
 
 // completion_items_from_type_info returns the list of items extracted from the type information.
@@ -435,14 +442,14 @@ fn (mut ls Vls) completion(id int, params string) {
 	// Global results. This includes all the symbols within the module such as
 	// the structs, typedefs, enums, and the functions.
 	if cfg.show_global {
+
 		// In table, functions are separated from type symbols.
 		completion_items << cfg.completion_items_from_table(file.mod.name)
+
 		// This part will extract the functions from both the builtin module and
 		// within the module (except the main() fn if present.)
 		for _, fnn in cfg.table.fns {
-			if (fnn.mod == 'builtin' &&
-				fnn.name in ls.builtin_symbols) ||
-				(fnn.mod == file.mod.name && fnn.name != 'main.main') {
+			if fnn.mod == file.mod.name || (fnn.mod == 'builtin' && fnn.name in ls.builtin_symbols()) {
 				completion_items << cfg.completion_items_from_fn(fnn, false)
 			}
 		}
