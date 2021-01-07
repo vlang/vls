@@ -55,7 +55,7 @@ fn (mut cfg CompletionItemConfig) completion_items_from_stmt(stmt ast.Stmt) []ls
 }
 
 // completion_items_from_table returns a list of results extracted from the type symbols of the table.
-fn (mut cfg CompletionItemConfig) completion_items_from_table(prefix_name string) []lsp.CompletionItem {
+fn (mut cfg CompletionItemConfig) completion_items_from_table(mod_name string) []lsp.CompletionItem {
 	// NB: symbols of the said module does not show the full list
 	// unless by pressing cmd/ctrl+space or by pressing escape key
 	// + deleting the dot + typing again the dot
@@ -68,12 +68,16 @@ fn (mut cfg CompletionItemConfig) completion_items_from_table(prefix_name string
 	}
 
 	for sym_name, idx in cfg.table.type_idxs {
-		if idx <= 0 || idx >= cfg.table.types.len || (prefix_name.len > 0 && !sym_name.starts_with('${prefix_name}.')) {
-			continue
+		// Just to make sure, negative type indexes or greater than the type table
+		// length are not allowed. Symbols names that does not start with a given
+		// module name are also not allowed.
+		valid_type := idx >= 0 || idx < cfg.table.types.len
+		sym_part_of_module := mod_name.len > 0 && sym_name.starts_with('${mod_name}.')
+		if valid_type || sym_part_of_module {
+			type_sym := unsafe { &cfg.table.types[idx] }
+			completion_items <<
+				cfg.completion_items_from_type_info(sym_name.all_after('${mod_name}.'), type_sym.info, false)
 		}
-		type_sym := unsafe { &cfg.table.types[idx] }
-		completion_items <<
-			cfg.completion_items_from_type_info(sym_name.all_after('${prefix_name}.'), type_sym.info, false)
 	}
 	return completion_items
 }
