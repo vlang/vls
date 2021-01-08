@@ -103,7 +103,7 @@ fn (mut cfg CompletionItemConfig) completion_items_from_expr(expr ast.Expr) []ls
 					}
 				}
 			} else if expr.expr_type != 0 {
-				type_sym := cfg.table.get_type_symbol(expr_type)
+				type_sym := cfg.table.get_type_symbol(expr.expr_type)
 
 				// Include the list of available struct fields based on the type info
 				completion_items <<
@@ -449,7 +449,7 @@ fn (mut ls Vls) completion(id int, params string) {
 		// within the module (except the main() fn if present.)
 		for _, fnn in cfg.table.fns {
 			if fnn.mod == file.mod.name ||
-				(fnn.mod == 'builtin' && fnn.name in ls.builtin_symbols()) {
+				(fnn.mod == 'builtin' && fnn.name in ls.builtin_symbols) {
 				completion_items << cfg.completion_items_from_fn(fnn, false)
 			}
 		}
