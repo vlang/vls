@@ -330,18 +330,23 @@ fn (mut ls Vls) completion(id int, params string) {
 	// or near the cursor. In that case, the context data would be modified in 
 	// order to satisfy those specific cases. 
 	if ctx.trigger_kind == .invoked && cfg.offset - 1 >= 0 && file.stmts.len > 0 && src.len > 3 {
+		mut prev_idx := cfg.offset
+		mut ctx_changed := false
 		if src[cfg.offset - 1] in [`.`, `:`, `=`, `{`, `,`, `(`] {
-			ctx = lsp.CompletionContext{
-				trigger_kind: .trigger_character
-				trigger_character: src[cfg.offset - 1].str()
-			}
+			prev_idx--
+			ctx_changed = true
 		} else if src[cfg.offset - 1] == ` ` &&
 			cfg.offset - 2 >= 0 && src[cfg.offset - 2] !in [src[cfg.offset - 1], `.`] {
+			prev_idx -= 2
+			cfg.offset -= 2
+			ctx_changed = true
+		}
+
+		if ctx_changed {
 			ctx = lsp.CompletionContext{
 				trigger_kind: .trigger_character
-				trigger_character: src[cfg.offset - 2].str()
+				trigger_character: src[prev_idx].str()
 			}
-			cfg.offset -= 2
 		}
 	}
 
