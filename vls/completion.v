@@ -21,7 +21,8 @@ mut:
 	show_local          bool       = true // for displaying local variables
 	filter_type         table.Type = table.Type(0) // filters results by type
 	fields_only         bool       // for displaying only the struct/enum fields
-	file_imports        []string   // for displaying module symbols or module list
+	modules_aliases     []string   // for displaying module symbols or module list
+	imports_list        []string   // for completion_items_from_dir and import symbols list
 }
 
 // completion_items_from_stmt returns a list of results from the extracted Stmt node info.
@@ -58,7 +59,7 @@ fn (mut cfg CompletionItemConfig) completion_items_from_stmt(stmt ast.Stmt) []ls
 }
 
 // completion_items_from_table returns a list of results extracted from the type symbols of the table.
-fn (mut cfg CompletionItemConfig) completion_items_from_table(mod_name string) []lsp.CompletionItem {
+fn (mut cfg CompletionItemConfig) completion_items_from_table(mod_name string, symbols ...string) []lsp.CompletionItem {
 	// NB: symbols of the said module does not show the full list
 	// unless by pressing cmd/ctrl+space or by pressing escape key
 	// + deleting the dot + typing again the dot
@@ -76,10 +77,10 @@ fn (mut cfg CompletionItemConfig) completion_items_from_table(mod_name string) [
 		// module name are also not allowed.
 		valid_type := idx >= 0 || idx < cfg.table.types.len
 		sym_part_of_module := mod_name.len > 0 && sym_name.starts_with('${mod_name}.')
-		if valid_type || sym_part_of_module {
+		name := sym_name.all_after('${mod_name}.')
+		if valid_type || sym_part_of_module || (symbols.len > 0 && name in symbols) {
 			type_sym := unsafe { &cfg.table.types[idx] }
-			completion_items <<
-				cfg.completion_items_from_type_info(sym_name.all_after('${mod_name}.'), type_sym.info, false)
+			completion_items << cfg.completion_items_from_type_info(name, type_sym.info, false)
 		}
 	}
 	return completion_items
@@ -96,7 +97,7 @@ fn (mut cfg CompletionItemConfig) completion_items_from_expr(expr ast.Expr) []ls
 			// symbols of that module.
 			if expr.expr_type == 0 && expr.expr is ast.Ident {
 				ident := expr.expr as ast.Ident
-				if ident.name !in cfg.file_imports {
+				if ident.name !in cfg.modules_aliases {
 					return completion_items
 				}
 				completion_items << cfg.completion_items_from_table(ident.name)
@@ -281,7 +282,7 @@ fn (cfg CompletionItemConfig) completion_items_from_dir(dir string, dir_contents
 	mut completion_items := []lsp.CompletionItem{}
 	for name in dir_contents {
 		full_path := os.join_path(dir, name)
-		if !os.is_dir(full_path) || name in cfg.file_imports {
+		if !os.is_dir(full_path) || name in cfg.imports_list {
 			continue
 		}
 		subdir_contents := os.ls(full_path) or { []string{} }
@@ -339,9 +340,15 @@ fn (mut ls Vls) completion(id int, params string) {
 	// The V parser on the other hand, uses a byte offset (line number is supplied
 	// but for certain cases) hence the need to convert the said positions to byte
 	// offsets. 
+	// 
+	// NOTE: Transfer it back to struct fields after
+	// https://github.com/vlang/v/pull/7976 has been merged.
+	modules_aliases := file.imports.map(it.alias)
+	imports_list := file.imports.map(it.mod)
 	mut cfg := CompletionItemConfig{
 		file: file
-		file_imports: file.imports.map(if it.alias.len > 0 { it.alias } else { it.mod })
+		modules_aliases: modules_aliases
+		imports_list: imports_list
 		offset: compute_offset(src, pos.line, pos.character)
 		table: ls.tables[os.dir(file_uri)]
 	}
@@ -404,17 +411,10 @@ fn (mut ls Vls) completion(id int, params string) {
 	if cfg.show_local {
 		// Imported modules. They will be shown to the user if there is no given
 		// type for filtering the results. Invalid imports are excluded.
-		if cfg.filter_type == table.Type(0) {
-			for imp in file.imports {
-				if imp.mod in ls.invalid_imports[file_uri.str()] {
-					continue
-				}
+		for imp in file.imports {
+			if imp.syms.len == 0 && (cfg.filter_type == table.Type(0) || imp.mod !in ls.invalid_imports[file_uri.str()]) {	
 				completion_items << lsp.CompletionItem{
-					label: if imp.alias.len > 0 {
-						imp.alias
-					} else {
-						imp.mod
-					}
+					label: imp.alias
 					kind: .module_
 				}
 			}
@@ -428,10 +428,9 @@ fn (mut ls Vls) completion(id int, params string) {
 				mut name := ''
 				match obj {
 					ast.ConstField, ast.Var {
-						if cfg.filter_type != 0 && obj.typ != cfg.filter_type {
-							continue
+						if cfg.filter_type == table.Type(0) && obj.typ == cfg.filter_type {
+							name = obj.name
 						}
-						name = obj.name
 					}
 					else {
 						continue
@@ -454,6 +453,16 @@ fn (mut ls Vls) completion(id int, params string) {
 	// Global results. This includes all the symbols within the module such as
 	// the structs, typedefs, enums, and the functions.
 	if cfg.show_global {
+		mut import_symbols := []string{}
+		for imp in cfg.file.imports {
+			if imp.syms.len == 0 {
+				continue
+			}
+			for sym in imp.syms {
+				import_symbols << imp.mod + '.' + sym.name
+			}
+			completion_items << cfg.completion_items_from_table(imp.mod, imp.syms.map(it.name)...)
+		}
 
 		// In table, functions are separated from type symbols.
 		completion_items << cfg.completion_items_from_table(file.mod.name)
@@ -462,10 +471,12 @@ fn (mut ls Vls) completion(id int, params string) {
 		// within the module (except the main() fn if present.)
 		for _, fnn in cfg.table.fns {
 			if fnn.mod == file.mod.name ||
-				(fnn.mod == 'builtin' && fnn.name in ls.builtin_symbols) {
+				(fnn.mod == 'builtin' && fnn.name in ls.builtin_symbols) ||
+				(fnn.mod in cfg.imports_list && fnn.name in import_symbols) {
 				completion_items << cfg.completion_items_from_fn(fnn, false)
 			}
 		}
+		unsafe { import_symbols.free() }
 	}
 
 	// After that, it will send the list to the client.
@@ -473,5 +484,9 @@ fn (mut ls Vls) completion(id int, params string) {
 		id: id
 		result: completion_items
 	}))
-	unsafe { completion_items.free() }
+	unsafe {
+		completion_items.free()
+		modules_aliases.free()
+		imports_list.free()
+	}
 }
