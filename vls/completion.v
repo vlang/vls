@@ -49,6 +49,9 @@ fn (mut cfg CompletionItemConfig) completion_items_from_stmt(stmt ast.Stmt) []ls
 			// list all vlib
 			// TODO: vlib must be computed at once only
 		}
+		ast.Module {
+			completion_items << cfg.suggest_mod_names()
+		}
 		else {}
 	}
 	return completion_items
@@ -295,6 +298,24 @@ fn (cfg CompletionItemConfig) completion_items_from_dir(dir string, dir_contents
 	return completion_items
 }
 
+fn (mut cfg CompletionItemConfig) suggest_mod_names() []lsp.CompletionItem {
+	mut completion_items := []lsp.CompletionItem{}
+	// Explicitly disabling the global and local completion
+	// should never happen but just to make sure.
+	cfg.show_global = false
+	cfg.show_local = false
+	folder_name := os.base(os.dir(cfg.file.path)).replace(' ', '_')
+	module_name_suggestions := ['module main', 'module $folder_name']
+	for sg in module_name_suggestions {
+		completion_items << lsp.CompletionItem{
+			label: sg
+			insert_text: sg
+			kind: .variable
+		}
+	}
+	return completion_items
+}
+
 // TODO: make params use lsp.CompletionParams in the future
 fn (mut ls Vls) completion(id int, params string) {
 	completion_params := json.decode(lsp.CompletionParams, params) or { panic(err) }
@@ -373,20 +394,7 @@ fn (mut ls Vls) completion(id int, params string) {
 		}
 	} else if ctx.trigger_kind == .invoked && (file.stmts.len == 0 || src.len <= 3) {
 		// When a V file is empty, a list of `module $name` suggsestions will be displayed.
-
-		// Explicitly disabling the global and local completion
-		// should never happen but just to make sure.
-		cfg.show_global = false
-		cfg.show_local = false
-		folder_name := os.base(os.dir(file_uri.str())).replace(' ', '_')
-		module_name_suggestions := ['module main', 'module $folder_name']
-		for sg in module_name_suggestions {
-			completion_items << lsp.CompletionItem{
-				label: sg
-				insert_text: sg
-				kind: .variable
-			}
-		}
+		completion_items << cfg.suggest_mod_names()
 	} else {
 		// Display only the project's functions if none are satisfied
 		cfg.show_only_global_fn = true
