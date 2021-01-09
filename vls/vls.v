@@ -46,8 +46,8 @@ mut:
 	// TODO: change map key to DocumentUri
 	// files  map[DocumentUri]ast.File
 	files      map[string]ast.File
-	// sources  map[DocumentUri]string
-	sources    map[string]string
+	// sources  map[DocumentUri][]byte
+	sources    map[string][]byte
 	// NB: a separate table is required for each folder in
 	// order to do functions such as typ_to_string or when
 	// some of the features needed additional information
@@ -74,7 +74,7 @@ pub fn new(io ReceiveSender) Vls {
 	}
 }
 
-pub fn (mut ls Vls) execute(payload string) {
+pub fn (mut ls Vls) dispatch(payload string) {
 	request := json.decode(jsonrpc.Request, payload) or {
 		ls.send(new_error(jsonrpc.parse_error))
 		return
@@ -83,42 +83,31 @@ pub fn (mut ls Vls) execute(payload string) {
 		match request.method { // not only requests but also notifications
 			'initialized' {} // does nothing currently
 			'shutdown' {
-				ls.shutdown(request.id)
-			}
-			'exit' {
+				// NB: Some users reported that after closing their text editors,
+				// the vls process isn't properly closed at all and the editor still
+				// continuously sending useless requests during the shutdown phase
+				// which dramatically increases the memory. Unless there is a fix
+				// or other possible alternatives, the solution for now is to
+				// immediately exit when the server receives a shutdown request.
 				ls.exit()
+				// ls.shutdown(request.id)
 			}
-			'textDocument/didOpen' {
-				ls.did_open(request.id, request.params)
-			}
-			'textDocument/didChange' {
-				ls.did_change(request.id, request.params)
-			}
-			'textDocument/didClose' {
-				ls.did_close(request.id, request.params)
-			}
-			'textDocument/formatting' {
-				if Feature.formatting in ls.enabled_features {
-					ls.formatting(request.id, request.params)
-				}
-			}
+			'exit' { /* ignore for the reasons stated in the above comment */ }
+			'textDocument/didOpen' { ls.did_open(request.id, request.params) }
+			'textDocument/didChange' { ls.did_change(request.id, request.params) }
+			'textDocument/didClose' { ls.did_close(request.id, request.params) }
+			'textDocument/formatting' { ls.formatting(request.id, request.params) }
+			'textDocument/documentSymbol' { ls.document_symbol(request.id, request.params) }
+			'workspace/symbol' { ls.workspace_symbol(request.id, request.params) }
 			else {}
 		}
 	} else {
 		match request.method {
-			'exit' {
-				ls.exit()
-			}
-			'initialize' {
-				ls.initialize(request.id, request.params)
-			}
+			'exit' { ls.exit() }
+			'initialize' { ls.initialize(request.id, request.params) }
 			else {
-				if ls.status == .shutdown {
-					ls.send(new_error(jsonrpc.invalid_request))
-				}
-				else {
-					ls.send(new_error(jsonrpc.server_not_initialized))
-				}
+				err_type := if ls.status == .shutdown { jsonrpc.invalid_request } else { jsonrpc.server_not_initialized }
+				ls.send(new_error(err_type))
 			}
 		}
 	}
@@ -143,7 +132,7 @@ fn (ls Vls) send(data string) {
 pub fn (mut ls Vls) start_loop() {
 	for {
 		payload := ls.io.receive() or { continue }
-		ls.execute(payload)
+		ls.dispatch(payload)
 	}
 }
 
@@ -170,7 +159,7 @@ fn new_scope_and_pref(lookup_paths ...string) (&ast.Scope, &pref.Preferences) {
 fn (mut ls Vls) insert_files(files []ast.File) {
 	for file in files {
 		file_uri := lsp.document_uri_from_path(file.path)
-		if file_uri in ls.files {
+		if file_uri.str() in ls.files {
 			ls.files.delete(file_uri)
 		}
 		ls.files[file_uri.str()] = file
@@ -225,17 +214,9 @@ pub enum ServerStatus {
 	shutdown
 }
 
-// with error
-struct JrpcResponse2 <T> {
-	jsonrpc string = jsonrpc.version
-	id      int
-	error   jsonrpc.ResponseError
-	result  T
-}
-
 [inline]
 fn new_error(code int) string {
-	err := JrpcResponse2<string>{
+	err := jsonrpc.Response2<string>{
 		error: jsonrpc.new_response_error(code)
 	}
 	return json.encode(err)

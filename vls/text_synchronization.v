@@ -21,15 +21,14 @@ fn (mut ls Vls) did_open(id int, params string) {
 	source := did_open_params.text_document.text
 	uri := did_open_params.text_document.uri
 	ls.process_file(source, uri)
-	ls.show_diagnostics(source, uri)
 }
 
 fn (mut ls Vls) did_change(id int, params string) {
 	did_change_params := json.decode(lsp.DidChangeTextDocumentParams, params) or { panic(err) }
 	source := did_change_params.content_changes[0].text
 	uri := did_change_params.text_document.uri
+	unsafe { ls.sources[uri.str()].free() }
 	ls.process_file(source, uri)
-	ls.show_diagnostics(source, uri)
 }
 
 fn (mut ls Vls) did_close(id int, params string) {
@@ -46,12 +45,12 @@ fn (mut ls Vls) did_close(id int, params string) {
 		}
 	}
 	if no_active_files {
-		ls.tables.delete(file_dir)	
+		ls.tables.delete(file_dir)
 	}
 	// NB: The diagnostics will be cleared if:
-  // - TODO: If a workspace has opened multiple programs with main() function and one of them is closed.
-  // - If a file opened is outside the root path or workspace.
-  // - If there are no remaining files opened on a specific folder.
+	// - TODO: If a workspace has opened multiple programs with main() function and one of them is closed.
+	// - If a file opened is outside the root path or workspace.
+	// - If there are no remaining files opened on a specific folder.
 	if no_active_files || !uri.starts_with(ls.root_path) {
 		// clear diagnostics
 		ls.publish_diagnostics(uri, []lsp.Diagnostic{})
@@ -59,12 +58,16 @@ fn (mut ls Vls) did_close(id int, params string) {
 }
 
 fn (mut ls Vls) process_file(source string, uri lsp.DocumentUri) {
+	ls.sources[uri.str()] = source.bytes()
 	file_path := uri.path()
 	target_dir := os.dir(file_path)
 	target_dir_uri := os.dir(uri)
 	// ls.log_message(target_dir, .info)
-	scope, pref := new_scope_and_pref(target_dir, os.dir(target_dir), os.join_path(target_dir,
+	scope, mut pref := new_scope_and_pref(target_dir, os.dir(target_dir), os.join_path(target_dir,
 		'modules'))
+	if uri.ends_with('_test.v') {
+		pref.is_test = true
+	}
 	table := ls.new_table()
 	mut parsed_files := []ast.File{}
 	mut has_errors := false
@@ -81,15 +84,12 @@ fn (mut ls Vls) process_file(source string, uri lsp.DocumentUri) {
 		mut checker := checker.new_checker(table, pref)
 		checker.check_files(parsed_files)
 	}
-	if uri in ls.sources {
-		ls.sources.delete(uri)
-	}
 	if target_dir_uri in ls.tables {
 		ls.tables.delete(target_dir_uri)
 	}
-	ls.sources[uri.str()] = source
-	ls.tables[target_dir] = table
+	ls.tables[target_dir_uri] = table
 	ls.insert_files(parsed_files)
+	ls.show_diagnostics(ls.files[uri.str()], ls.sources[uri.str()])
 	unsafe {
 		parsed_files.free()
 		source.free()
@@ -127,6 +127,6 @@ fn (ls Vls) parse_imports(parsed_files []ast.File, table &table.Table, pref &pre
 			}
 		}
 	}
-	unsafe {done_imports.free()}
+	unsafe { done_imports.free() }
 	return newly_parsed_files
 }

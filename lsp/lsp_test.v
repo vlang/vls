@@ -8,6 +8,5 @@ fn test_document_uri_from_path() {
 fn test_document_uri_path() {
 	uri := DocumentUri('file:///baz/foo/hello.v')
 	expected := '/baz/foo/hello.v'
-
 	assert uri.path() == expected
 }

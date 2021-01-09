@@ -15,7 +15,7 @@ pub enum SignatureHelpTriggerKind {
 // response: SignatureHelp | none
 pub struct SignatureHelpParams {
 	TextDocumentPositionParams
-	context                    SignatureHelpContext
+	context SignatureHelpContext
 }
 
 pub struct SignatureHelpContext {

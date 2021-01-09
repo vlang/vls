@@ -5,6 +5,8 @@ import vls
 import v.vmod
 import os
 
+fn C._setmode(int, int)
+
 const (
 	meta = vmod.decode(@VMOD_FILE)?
 )
@@ -21,6 +23,12 @@ fn run_cli(cmd cli.Command) ? {
 }
 
 fn main() {
+	$if windows {
+		// 0x8000 = _O_BINARY from <fcntl.h>
+		// windows replaces \n => \r\n, so \r\n will be replaced to \r\r\n
+		// binary mode prevents this
+		C._setmode(C._fileno(C.stdout), 0x8000)
+	}
 	mut cmd := cli.Command{
 		name: 'vls'
 		version: meta.version
