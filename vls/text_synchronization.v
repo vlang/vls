@@ -6,6 +6,7 @@ import v.parser
 import v.table
 import v.pref
 import v.ast
+import v.errors
 import v.checker
 import os
 
@@ -73,7 +74,8 @@ fn (mut ls Vls) process_file(source string, uri lsp.DocumentUri) {
 	mut has_errors := false
 	parsed_files <<
 		parser.parse_text(source, file_path, table, .skip_comments, pref, scope)
-	parsed_files << ls.parse_imports(parsed_files, table, pref, scope)
+	imported_files, import_errors := ls.parse_imports(parsed_files, table, pref, scope)
+	parsed_files << imported_files
 	for parsed_file in parsed_files {
 		if parsed_file.errors.len > 0 {
 			has_errors = true
@@ -84,30 +86,41 @@ fn (mut ls Vls) process_file(source string, uri lsp.DocumentUri) {
 		mut checker := checker.new_checker(table, pref)
 		checker.check_files(parsed_files)
 	}
-	if target_dir_uri in ls.tables {
-		ls.tables.delete(target_dir_uri)
-	}
 	ls.tables[target_dir_uri] = table
 	ls.insert_files(parsed_files)
+	for err in import_errors {
+		err_file_uri := lsp.document_uri_from_path(err.file_path).str()
+		ls.files[err_file_uri].errors << err
+		unsafe { err_file_uri.free() }
+	}
 	ls.show_diagnostics(uri)
 	unsafe {
+		imported_files.free()
+		import_errors.free()
 		parsed_files.free()
 		source.free()
 	}
 }
 
-fn (ls Vls) parse_imports(parsed_files []ast.File, table &table.Table, pref &pref.Preferences, scope &ast.Scope) []ast.File {
+fn (mut ls Vls) parse_imports(parsed_files []ast.File, table &table.Table, pref &pref.Preferences, scope &ast.Scope) ([]ast.File, []errors.Error) {
 	mut newly_parsed_files := []ast.File{}
+	mut errs := []errors.Error{}
 	mut done_imports := parsed_files.map(it.mod.name)
 	// NB: b.parsed_files is appended in the loop,
 	// so we can not use the shorter `for in` form.
 	for i := 0; i < parsed_files.len; i++ {
 		file := parsed_files[i]
+		file_uri := lsp.document_uri_from_path(file.path).str()
+		if file_uri in ls.invalid_imports {
+			unsafe { ls.invalid_imports[file_uri].free() }
+		}
+		mut invalid_imports := []string{}
 		for _, imp in file.imports {
 			if imp.mod in done_imports {
 				continue
 			}
 			mut found := false
+			mut import_err_msg := "cannot find module '$imp.mod'"
 			for path in pref.lookup_path {
 				mod_dir := os.join_path(path, imp.mod.split('.').join(os.path_separator))
 				if !os.exists(mod_dir) {
@@ -115,18 +128,42 @@ fn (ls Vls) parse_imports(parsed_files []ast.File, table &table.Table, pref &pre
 				}
 				mut files := os.ls(mod_dir) or { []string{} }
 				files = pref.should_compile_filtered_files(mod_dir, files)
-				newly_parsed_files << parser.parse_files(files, table, pref, scope)
-				newly_parsed_files <<
-					ls.parse_imports(newly_parsed_files, table, pref, scope)
-				done_imports << imp.mod
+				if files.len == 0 {
+					import_err_msg = "module '$imp.mod' is empty"
+					break
+				}
 				found = true
+				newly_parsed_files << parser.parse_files(files, table, pref, scope)
+				newly_parsed_files2, errs2 := ls.parse_imports(newly_parsed_files, table,
+					pref, scope)
+				errs << errs2
+				newly_parsed_files << newly_parsed_files2
+				done_imports << imp.mod
+				unsafe {
+					newly_parsed_files2.free()
+					errs2.free()
+				}
 				break
 			}
 			if !found {
-				panic('cannot find module $imp.mod')
+				errs << errors.Error{
+					message: import_err_msg
+					file_path: file.path
+					pos: imp.pos
+					reporter: .checker
+				}
+				if imp.mod !in invalid_imports {
+					invalid_imports << imp.mod
+				}
+				continue
 			}
+		}
+		ls.invalid_imports[file_uri] = invalid_imports.clone()
+		unsafe {
+			invalid_imports.free()
+			file_uri.free()
 		}
 	}
 	unsafe { done_imports.free() }
-	return newly_parsed_files
+	return newly_parsed_files, errs
 }

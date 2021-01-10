@@ -65,6 +65,7 @@ mut:
 	// tables  map[DocumentUri]&table.Table
 	tables     map[string]&table.Table
 	root_path  lsp.DocumentUri
+	invalid_imports map[string][]string // where it stores a list of invalid imports
 	enabled_features   []Feature = default_features_list
 pub mut:
 	// TODO: replace with io.ReadWriter
@@ -169,9 +170,7 @@ fn (mut ls Vls) insert_files(files []ast.File) {
 			ls.files.delete(file_uri)
 		}
 		ls.files[file_uri.str()] = file
-		unsafe {
-			file_uri.free()
-		}
+		unsafe { file_uri.free() }
 	}
 }
 
