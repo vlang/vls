@@ -12,6 +12,8 @@ import lsp
 pub enum Feature {
 	diagnostics
 	formatting
+	document_symbol
+	workspace_symbol
 }
 
 // feature_from_str returns the Feature-enum value equivalent of the given string.
@@ -20,6 +22,8 @@ fn feature_from_str(feature_name string) ?Feature {
 	match feature_name {
 		'diagnostics' { return Feature.diagnostics }
 		'formatting' { return Feature.formatting }
+		'document_symbol' { return Feature.document_symbol }
+		'workspace_symbol' { return Feature.workspace_symbol }
 		else { return error('feature "$feature_name" not found') }
 	}
 }
