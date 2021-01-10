@@ -5,7 +5,6 @@ import json
 import jsonrpc
 import v.token
 import v.util
-import v.ast
 
 // get_column computes the column of the source based on the given initial position
 fn get_column(source []byte, init_pos int) int {
@@ -47,8 +46,9 @@ fn position_to_lsp_range(source []byte, pos token.Position) lsp.Range {
 }
 
 // show_diagnostics converts the file ast's errors and warnings and publishes them to the editor
-fn (ls Vls) show_diagnostics(file ast.File, source []byte) {
-	uri := lsp.document_uri_from_path(file.path)
+fn (ls Vls) show_diagnostics(uri lsp.DocumentUri) {
+	file := ls.files[uri.str()]
+	source := ls.sources[uri.str()]
 	mut diagnostics := []lsp.Diagnostic{}
 	for _, error in file.errors {
 		diagnostics << lsp.Diagnostic{
@@ -79,7 +79,5 @@ fn (ls Vls) publish_diagnostics(uri lsp.DocumentUri, diagnostics []lsp.Diagnosti
 	}
 	str := json.encode(result)
 	ls.send(str)
-	unsafe {
-		diagnostics.free()
-	}
+	unsafe { diagnostics.free() }
 }
