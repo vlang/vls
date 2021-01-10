@@ -194,8 +194,8 @@ fn (ls Vls) new_table() &table.Table {
 // set_features enables or disables a language feature. emits an error if not found
 pub fn (mut ls Vls) set_features(features []string, enable bool) ? {
 	for feature_name in features {
-		feature_val := feature_from_str(feature_name)?
-		if feature_val !in ls.enabled_features  && !enable {
+		feature_val := feature_from_str(feature_name) ?
+		if feature_val !in ls.enabled_features && !enable {
 			return error('feature "$feature_name" is already disabled')
 		} else if feature_val in ls.enabled_features && enable {
 			return error('feature "$feature_name" is already enabled')
