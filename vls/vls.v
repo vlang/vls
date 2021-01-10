@@ -36,7 +36,7 @@ pub const (
 		.formatting,
 		.document_symbol,
 		.workspace_symbol,
-		.completion
+		.completion,
 	]
 )
 
@@ -50,13 +50,13 @@ mut:
 	// NB: a base table is required since this is where we
 	// are gonna store the information for the builtin types
 	// which are only parsed once.
-	base_table      &table.Table
-	status          ServerStatus = .off
+	base_table       &table.Table
+	status           ServerStatus = .off
 	// TODO: change map key to DocumentUri
 	// files  map[DocumentUri]ast.File
-	files           map[string]ast.File
+	files            map[string]ast.File
 	// sources  map[DocumentUri][]byte
-	sources         map[string][]byte
+	sources          map[string][]byte
 	// NB: a separate table is required for each folder in
 	// order to do functions such as typ_to_string or when
 	// some of the features needed additional information
@@ -66,15 +66,15 @@ mut:
 	// changing and there can be instances that a change might
 	// break another module/project data.
 	// tables  map[DocumentUri]&table.Table
-	tables     map[string]&table.Table
-	root_path  lsp.DocumentUri
-	invalid_imports map[string][]string // where it stores a list of invalid imports
-	doc_symbols     map[string][]lsp.SymbolInformation // doc_symbols is used for caching document symbols
-	builtin_symbols []string // list of publicly available symbols in builtin
-	enabled_features   []Feature = default_features_list
+	tables           map[string]&table.Table
+	root_path        lsp.DocumentUri
+	invalid_imports  map[string][]string // where it stores a list of invalid imports
+	doc_symbols      map[string][]lsp.SymbolInformation // doc_symbols is used for caching document symbols
+	builtin_symbols  []string // list of publicly available symbols in builtin
+	enabled_features []Feature = default_features_list
 pub mut:
 	// TODO: replace with io.ReadWriter
-	io              ReceiveSender
+	io               ReceiveSender
 }
 
 pub fn new(io ReceiveSender) Vls {
@@ -199,8 +199,8 @@ fn (ls Vls) new_table() &table.Table {
 // set_features enables or disables a language feature. emits an error if not found
 pub fn (mut ls Vls) set_features(features []string, enable bool) ? {
 	for feature_name in features {
-		feature_val := feature_from_str(feature_name)?
-		if feature_val !in ls.enabled_features  && !enable {
+		feature_val := feature_from_str(feature_name) ?
+		if feature_val !in ls.enabled_features && !enable {
 			return error('feature "$feature_name" is already disabled')
 		} else if feature_val in ls.enabled_features && enable {
 			return error('feature "$feature_name" is already enabled')
