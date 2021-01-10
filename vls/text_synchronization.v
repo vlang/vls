@@ -58,6 +58,7 @@ fn (mut ls Vls) did_close(id int, params string) {
 	}
 }
 
+// TODO: edits must use []lsp.TextEdit instead of string
 fn (mut ls Vls) process_file(source string, uri lsp.DocumentUri) {
 	ls.sources[uri.str()] = source.bytes()
 	file_path := uri.path()
@@ -71,21 +72,11 @@ fn (mut ls Vls) process_file(source string, uri lsp.DocumentUri) {
 	}
 	table := ls.new_table()
 	mut parsed_files := []ast.File{}
-	mut has_errors := false
+	mut checker := checker.new_checker(table, pref)
 	parsed_files <<
 		parser.parse_text(source, file_path, table, .skip_comments, pref, scope)
 	imported_files, import_errors := ls.parse_imports(parsed_files, table, pref, scope)
-	parsed_files << imported_files
-	for parsed_file in parsed_files {
-		if parsed_file.errors.len > 0 {
-			has_errors = true
-			break
-		}
-	}
-	if !has_errors {
-		mut checker := checker.new_checker(table, pref)
-		checker.check_files(parsed_files)
-	}
+	checker.check_files(parsed_files)
 	ls.tables[target_dir_uri] = table
 	ls.insert_files(parsed_files)
 	for err in import_errors {
