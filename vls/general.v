@@ -11,9 +11,9 @@ fn (mut ls Vls) initialize(id int, params string) {
 	initialize_params := json.decode(lsp.InitializeParams, params) or { panic(err) }
 	mut capabilities := lsp.ServerCapabilities{
 		text_document_sync: 1
-		workspace_symbol_provider: true
-		document_symbol_provider: true
-		document_formatting_provider: true
+		workspace_symbol_provider: Feature.workspace_symbol in ls.enabled_features
+		document_symbol_provider: Feature.document_symbol in ls.enabled_features
+		document_formatting_provider: Feature.formatting in ls.enabled_features
 	}
 	result := jsonrpc.Response<lsp.InitializeResult>{
 		id: id

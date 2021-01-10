@@ -50,11 +50,11 @@ fn test_initialized() {
 fn test_set_features() {
 	mut io := testing.Testio{}
 	mut ls := vls.new(io)
-	assert ls.features() == [.diagnostics, .formatting]
+	assert ls.features() == vls.default_features_list
 	ls.set_features(['formatting'], false)
-	assert ls.features() == [.diagnostics]
+	assert ls.features() == [.diagnostics, .document_symbol, .workspace_symbol]
 	ls.set_features(['formatting'], true)
-	assert ls.features() == [.diagnostics, .formatting]
+	assert ls.features() == [.diagnostics, .document_symbol, .workspace_symbol, .formatting]
 	ls.set_features(['logging'], true) or {
 		assert err == 'feature "logging" not found'
 		return

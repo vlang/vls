@@ -28,10 +28,12 @@ fn feature_from_str(feature_name string) ?Feature {
 	}
 }
 
-const (
+pub const (
 	default_features_list = [
 		Feature.diagnostics,
-		.formatting
+		.formatting,
+		.document_symbol,
+		.workspace_symbol
 	]
 )
 
