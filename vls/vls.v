@@ -7,6 +7,34 @@ import json
 import jsonrpc
 import lsp
 
+// These are the list of features available in VLS
+// If the feature is experimental, the value name should have a `exp_` prefix
+pub enum Feature {
+	diagnostics
+	formatting
+	document_symbol
+	workspace_symbol
+}
+
+// feature_from_str returns the Feature-enum value equivalent of the given string.
+// used internally for Vls.set_features method only.
+fn feature_from_str(feature_name string) ?Feature {
+	match feature_name {
+		'diagnostics' { return Feature.diagnostics }
+		'formatting' { return Feature.formatting }
+		'document_symbol' { return Feature.document_symbol }
+		'workspace_symbol' { return Feature.workspace_symbol }
+		else { return error('feature "$feature_name" not found') }
+	}
+}
+
+const (
+	default_features_list = [
+		Feature.diagnostics,
+		.formatting
+	]
+)
+
 interface ReceiveSender {
 	send(data string)
 	receive() ?string
@@ -38,6 +66,7 @@ mut:
 	invalid_imports map[string][]string // where it stores a list invalid imports for autocompletion
 	builtin_symbols []string // list of publicly available symbols in builtin
 	doc_symbols     map[string][]lsp.SymbolInformation // doc_symbols is used for caching document symbols
+	enabled_features   []Feature = default_features_list
 pub mut:
 	// TODO: replace with io.ReadWriter
 	io              ReceiveSender
@@ -90,6 +119,11 @@ pub fn (mut ls Vls) dispatch(payload string) {
 			}
 		}
 	}
+}
+
+// features returns the current server features enabled
+pub fn (ls Vls) features() []Feature {
+	return ls.enabled_features
 }
 
 // status returns the current server status
@@ -155,6 +189,29 @@ fn (ls Vls) new_table() &table.Table {
 	tbl.cmod_prefix = ls.base_table.cmod_prefix
 	tbl.is_fmt = ls.base_table.is_fmt
 	return tbl
+}
+
+// set_features enables or disables a language feature. emits an error if not found
+pub fn (mut ls Vls) set_features(features []string, enable bool) ? {
+	for feature_name in features {
+		feature_val := feature_from_str(feature_name)?
+		if feature_val !in ls.enabled_features  && !enable {
+			return error('feature "$feature_name" is already disabled')
+		} else if feature_val in ls.enabled_features && enable {
+			return error('feature "$feature_name" is already enabled')
+		} else if feature_val !in ls.enabled_features && enable {
+			ls.enabled_features << feature_val
+		} else {
+			mut idx := -1
+			for i, f in ls.enabled_features {
+				if f == feature_val {
+					idx = i
+					break
+				}
+			}
+			ls.enabled_features.delete(idx)
+		}
+	}
 }
 
 pub enum ServerStatus {

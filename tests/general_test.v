@@ -1,6 +1,14 @@
 import vls
 import vls.testing
 
+fn init() vls.Vls {
+	mut io := testing.Testio{}
+	payload := '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}'
+	mut ls := vls.new(io)
+	ls.dispatch(payload)
+	return ls
+}
+
 fn test_wrong_first_request() {
 	mut io := testing.Testio{}
 	payload := '{"jsonrpc":"2.0","id":1,"method":"shutdown","params":{}}'
@@ -38,10 +46,17 @@ fn test_initialized() {
 // 	status := ls.status()
 // 	assert status == .shutdown
 // }
-fn init() vls.Vls {
+
+fn test_set_features() {
 	mut io := testing.Testio{}
-	payload := '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}'
 	mut ls := vls.new(io)
-	ls.dispatch(payload)
-	return ls
+	assert ls.features() == [.diagnostics, .formatting]
+	ls.set_features(['formatting'], false)
+	assert ls.features() == [.diagnostics]
+	ls.set_features(['formatting'], true)
+	assert ls.features() == [.diagnostics, .formatting]
+	ls.set_features(['logging'], true) or {
+		assert err == 'feature "logging" not found'
+		return
+	}
 }
