@@ -7,6 +7,7 @@ pub:
 }
 
 pub struct Range {
+pub:
 	start Position
 	end   Position
 }
