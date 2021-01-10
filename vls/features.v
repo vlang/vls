@@ -6,15 +6,22 @@ import jsonrpc
 import v.ast
 import v.fmt
 import v.table
+import v.parser
+import v.pref
 import os
 
 fn (ls Vls) formatting(id int, params string) {
 	formatting_params := json.decode(lsp.DocumentFormattingParams, params) or { panic(err) }
 	uri := formatting_params.text_document.uri.str()
-	table := ls.tables[os.dir(uri)]
-	file_ast := ls.files[uri]
+	path := formatting_params.text_document.uri.path()
 	source := ls.sources[uri].bytestr()
 	source_lines := source.split_into_lines()
+	mut prefs := pref.new_preferences()
+	prefs.is_fmt = true
+	table := table.new_table()
+	file_ast := parser.parse_text(source, path, table, .parse_comments, prefs, &ast.Scope{
+		parent: 0
+	})
 	formatted_content := fmt.fmt(file_ast, table, false)
 	resp := jsonrpc.Response<[]lsp.TextEdit>{
 		id: id
