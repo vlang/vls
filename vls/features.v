@@ -461,6 +461,7 @@ fn (mut cfg CompletionItemConfig) suggest_mod_names() []lsp.CompletionItem {
 
 // TODO: make params use lsp.CompletionParams in the future
 fn (mut ls Vls) completion(id int, params string) {
+	if Feature.completion !in ls.enabled_features { return }
 	completion_params := json.decode(lsp.CompletionParams, params) or { panic(err) }
 	file_uri := completion_params.text_document.uri
 	file := ls.files[file_uri.str()]
