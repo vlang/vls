@@ -15,6 +15,7 @@ pub enum Feature {
 	document_symbol
 	workspace_symbol
 	completion
+	signature_help
 }
 
 // feature_from_str returns the Feature-enum value equivalent of the given string.
@@ -26,6 +27,7 @@ fn feature_from_str(feature_name string) ?Feature {
 		'document_symbol' { return Feature.document_symbol }
 		'workspace_symbol' { return Feature.workspace_symbol }
 		'completion' { return Feature.completion }
+		'signature_help' { return Feature.signature_help }
 		else { return error('feature "$feature_name" not found') }
 	}
 }
@@ -37,6 +39,7 @@ pub const (
 		.document_symbol,
 		.workspace_symbol,
 		.completion,
+		.signature_help,
 	]
 )
 
@@ -112,6 +115,7 @@ pub fn (mut ls Vls) dispatch(payload string) {
 			'textDocument/documentSymbol' { ls.document_symbol(request.id, request.params) }
 			'workspace/symbol' { ls.workspace_symbol(request.id, request.params) }
 			'textDocument/completion' { ls.completion(request.id, request.params) }
+			'textDocument/signatureHelp' { ls.signature_help(request.id, request.params) }
 			else {}
 		}
 	} else {

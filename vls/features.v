@@ -9,6 +9,7 @@ import v.table
 import v.parser
 import v.pref
 import os
+import strings
 
 fn (ls Vls) formatting(id int, params string) {
 	formatting_params := json.decode(lsp.DocumentFormattingParams, params) or { panic(err) }
@@ -151,6 +152,115 @@ fn (mut ls Vls) generate_symbols(file ast.File, uri lsp.DocumentUri) []lsp.Symbo
 	}
 	ls.doc_symbols[uri.str()] = symbols
 	return symbols
+}
+
+
+fn (ls Vls) signature_help(id int, params string) {
+	signature_params := json.decode(lsp.SignatureHelpParams, params) or { panic(err) }
+
+	uri := signature_params.text_document.uri
+	pos := signature_params.position
+	ctx := signature_params.context
+	mut result := '{"jsonrpc":"2.0","id":$id,"result":null}'
+	if Feature.signature_help !in ls.enabled_features {
+		ls.send(result)
+		return
+	}
+
+// TODO: detect current argument
+	if ctx.trigger_kind == .trigger_character && ctx.trigger_character == ',' && ctx.is_retrigger {
+		mut active_sighelp := ctx.active_signature_help
+
+		if active_sighelp.signatures.len > 0 && 
+			 active_sighelp.active_parameter < active_sighelp.signatures[0].parameters.len {
+			active_sighelp.active_parameter++
+		}
+
+		result = json.encode(jsonrpc.Response<lsp.SignatureHelp>{
+			id: id
+			result: active_sighelp
+		})
+
+		ls.send(result)
+		return
+	}
+
+	file := ls.files[uri.str()]
+	src := ls.sources[uri.str()]
+	table := ls.tables[os.dir(uri.str())]
+	offset := compute_offset(src, pos.line, pos.character)
+	
+	// ls.log_message(ctx.str(), .info)
+	// ls.log_message(pos.str(), .info)
+	// ls.log_message(offset.str(), .info)
+
+	node := find_ast_by_pos(file.stmts.map(ast.Node(it)), offset) or {
+		ls.send(result) // null
+		ls.show_message(err, .info)
+		return
+	}
+
+	mut expr := ast.Expr{}
+	if node is ast.Stmt {
+		if node is ast.ExprStmt {
+			expr = node.expr
+		}
+	} else if node is ast.Expr {
+		expr = node
+	}
+	
+	// ls.log_message(typeof(expr), .info)
+	if expr is ast.CallExpr {
+		call_expr := expr as ast.CallExpr
+		mut label := ''
+		mut param_infos := []lsp.ParameterInformation{}
+		mut params_data := []table.Param{}
+		mut skip_receiver := false
+
+		if call_expr.is_method {
+			left_type_sym := table.get_type_symbol(call_expr.left_type)
+			if method := table.type_find_method(left_type_sym, call_expr.name) {
+				skip_receiver = true
+				label = table.fn_signature(method, skip_receiver: true, type_only: false)
+				params_data << method.params
+			}
+		} else {
+			if fn_data := table.find_fn(call_expr.name) {
+				label = table.fn_signature(fn_data, skip_receiver: false, type_only: false)
+				params_data << fn_data.params
+			}
+		}
+
+		start := int(skip_receiver)
+		for i in start .. params_data.len {
+			param := params_data[i]
+			mut sb := strings.new_builder(1)
+			mut typ := param.typ
+			if param.is_mut {
+				typ = typ.deref()
+				sb.write('mut ')
+			}
+			sb.write('$param.name ')
+			styp := table.type_to_str(typ)
+			sb.write('$styp')
+			param_infos << lsp.ParameterInformation{
+				label: sb.str()
+			}
+			unsafe { sb.free() }
+		}
+
+		result = json.encode(jsonrpc.Response<lsp.SignatureHelp>{
+			id: id
+			result: lsp.SignatureHelp{
+				signatures: [lsp.SignatureInformation{
+					label: label
+					parameters: param_infos
+				}]
+			}
+		})
+	}
+
+	ls.send(result)
 }
 
 struct CompletionItemConfig {

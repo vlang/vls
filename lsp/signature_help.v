@@ -14,13 +14,17 @@ pub enum SignatureHelpTriggerKind {
 // method: ‘textDocument/signatureHelp’
 // response: SignatureHelp | none
 pub struct SignatureHelpParams {
-	TextDocumentPositionParams
+pub:
+	// extend: TextDocumentPositionParams
+	text_document TextDocumentIdentifier [json: textDocument]
+	position      Position
 	context SignatureHelpContext
 }
 
 pub struct SignatureHelpContext {
+pub:
 	trigger_kind          SignatureHelpTriggerKind [json: triggerKind]
-	trigger_character     string
+	trigger_character     string									 [json: triggerCharacter]
 	is_retrigger          bool                     [json: isRetrigger]
 	active_signature_help SignatureHelp            [json: activeSignatureHelp]
 }
@@ -28,7 +32,8 @@ pub struct SignatureHelpContext {
 pub struct SignatureHelp {
 pub:
 	signatures       []SignatureInformation
-	active_signature int                    [json: activeSignature]
+	// active_signature int                    [json: activeSignature]
+pub mut:
 	active_parameter int                    [json: activeParameter]
 }
 
@@ -42,9 +47,9 @@ pub mut:
 
 pub struct ParameterInformation {
 	// label string | [int, int]
-	label    string [raw]
+	label    string
 	// document: string | MarkedContent
-	document string
+	// document string
 }
 
 pub struct SignatureHelpRegistrationOptions {

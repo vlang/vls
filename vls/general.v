@@ -19,6 +19,10 @@ fn (mut ls Vls) initialize(id int, params string) {
 		workspace_symbol_provider: Feature.workspace_symbol in ls.enabled_features
 		document_symbol_provider: Feature.document_symbol in ls.enabled_features
 		document_formatting_provider: Feature.formatting in ls.enabled_features
+		signature_help_provider: lsp.SignatureHelpOptions{
+			trigger_characters: ['(']
+			retrigger_characters: [',']
+		}
 	}
 	result := jsonrpc.Response<lsp.InitializeResult>{
 		id: id

@@ -52,9 +52,9 @@ fn test_set_features() {
 	mut ls := vls.new(io)
 	assert ls.features() == vls.default_features_list
 	ls.set_features(['formatting'], false)
-	assert ls.features() == [.diagnostics, .document_symbol, .workspace_symbol, .completion]
+	assert ls.features() == [.diagnostics, .document_symbol, .workspace_symbol, .completion, .signature_help]
 	ls.set_features(['formatting'], true)
-	assert ls.features() == [.diagnostics, .document_symbol, .workspace_symbol, .completion, .formatting]
+	assert ls.features() == [.diagnostics, .document_symbol, .workspace_symbol, .completion, .formatting, .signature_help]
 	ls.set_features(['logging'], true) or {
 		assert err == 'feature "logging" not found'
 		return
