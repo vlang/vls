@@ -14,6 +14,7 @@ pub enum Feature {
 	formatting
 	document_symbol
 	workspace_symbol
+	completion
 }
 
 // feature_from_str returns the Feature-enum value equivalent of the given string.
@@ -24,14 +25,18 @@ fn feature_from_str(feature_name string) ?Feature {
 		'formatting' { return Feature.formatting }
 		'document_symbol' { return Feature.document_symbol }
 		'workspace_symbol' { return Feature.workspace_symbol }
+		'completion' { return Feature.completion }
 		else { return error('feature "$feature_name" not found') }
 	}
 }
 
-const (
+pub const (
 	default_features_list = [
 		Feature.diagnostics,
-		.formatting
+		.formatting,
+		.document_symbol,
+		.workspace_symbol,
+		.completion
 	]
 )
 
