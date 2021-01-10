@@ -461,7 +461,7 @@ fn (mut ls Vls) completion(id int, params string) {
 			for sym in imp.syms {
 				import_symbols << imp.mod + '.' + sym.name
 			}
-			completion_items << cfg.completion_items_from_table(imp.mod, imp.syms.map(it.name)...)
+			completion_items << cfg.completion_items_from_table(imp.mod, ...imp.syms.map(it.name))
 		}
 
 		// In table, functions are separated from type symbols.
