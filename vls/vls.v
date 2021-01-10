@@ -66,6 +66,7 @@ mut:
 	tables     map[string]&table.Table
 	root_path  lsp.DocumentUri
 	invalid_imports map[string][]string // where it stores a list of invalid imports
+	doc_symbols     map[string][]lsp.SymbolInformation // doc_symbols is used for caching document symbols
 	enabled_features   []Feature = default_features_list
 pub mut:
 	// TODO: replace with io.ReadWriter
