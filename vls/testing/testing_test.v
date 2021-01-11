@@ -31,7 +31,7 @@ fn test_request_with_params() {
 	assert io.current_req_id == 2
 }
 
-fn test_check_response() {
+fn test_result() {
 	mut io := Testio{}
 	result := {
 		'hello': 'world'
@@ -44,23 +44,29 @@ fn test_check_response() {
 	assert io.result<map[string]string>() == result
 }
 
-// fn test_check_notification() {
+// fn test_notification() {
 // 	mut io := Testio{}
 // 	request := json.encode(jsonrpc.NotificationMessage<string>{
 // 		method: 'log'
 // 		params: 'just a log'
 // 	})
 // 	io.send(request)
-// 	method, params := 
-// 	assert io.check_notification('log', 'just a log')
+// 	method, params := io.notification<string>() or {
+// 		assert false
+// 		return
+// 	}
+// 	assert method == 'log'
+// 	assert params == 'just a log'
 // }
 
-// fn test_check_error() {
-// 	mut io := Testio{}
-// 	payload := jsonrpc.Response2<map[string]string>{
-// 		error: jsonrpc.new_response_error(jsonrpc.method_not_found)
-// 	}
-// 	request := json.encode(payload)
-// 	io.send(request)
-// 	assert io.check_error(jsonrpc.method_not_found, 'Method not found.')
-// }
+fn test_response_error() {
+	mut io := Testio{}
+	payload := jsonrpc.Response2<map[string]string>{
+		error: jsonrpc.new_response_error(jsonrpc.method_not_found)
+	}
+	request := json.encode(payload)
+	io.send(request)
+	err_code, err_message := io.response_error()
+	assert err_code == jsonrpc.method_not_found
+	assert err_message == 'Method not found.'
+}

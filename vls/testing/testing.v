@@ -59,13 +59,9 @@ pub fn (mut io Testio) result<T>() T {
 }
 
 // check_notification verifies the parameters of the notification
-// pub fn (io Testio) notification<T>() (string, T) {
-// 	resp := json.decode(TestNotification, io.response) or {
-// 		return '', T{}
-// 	}
-// 	decoded_params := json.decode(T, resp.params) or {
-// 		return '', T{}
-// 	}
+// pub fn (io Testio) notification<T>() ?(string, T) {
+// 	resp := json.decode(TestNotification, io.response_data) ?
+// 	decoded_params := json.decode(T, resp.params) ?
 // 	return resp.method, decoded_params
 // }
 
