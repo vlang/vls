@@ -8,6 +8,7 @@ import v.fmt
 import v.table
 import v.parser
 import v.pref
+import v.token
 import os
 
 fn (ls Vls) formatting(id int, params string) {
@@ -632,4 +633,86 @@ fn (mut ls Vls) completion(id int, params string) {
 		modules_aliases.free()
 		imports_list.free()
 	}
+}
+
+fn (ls Vls) token_search(pos int, tokens []token.Token) ?token.Token {
+	for tok in tokens {
+		if tok.kind == .comment { continue }
+		if pos >= tok.pos && pos <= tok.pos + tok.len {
+			return tok
+		}
+	}
+
+	return error('token not found')
+}
+
+fn (ls Vls) hover(id int, params string) {
+	hover_params := json.decode(lsp.HoverParams, params) or { panic(err) }
+	uri := hover_params.text_document.uri
+	pos := hover_params.position
+	src := ls.sources[uri.str()]
+	offset := compute_offset(src, pos.line, pos.character)
+	// tokens := ls.tokens[uri.str()]
+	file_ast := ls.files[uri.str()]
+	// tok := ls.token_search(offset, tokens) or {
+	// 	ls.send('{"jsonrpc":"2.0","id":$id,"result":null}')
+	// 	return
+	// }
+
+	node := find_ast_by_pos(file_ast.stmts.map(ast.Node(it)), offset) or {
+		ls.send('{"jsonrpc":"2.0","id":$id,"result":null}')
+		return
+	}
+
+	match node {
+		ast.Stmt {
+			range := position_to_lsp_range(src, node.position())
+			result := jsonrpc.Response<lsp.Hover>{
+				id: id
+				result: lsp.Hover{
+					contents: lsp.MarkedString{
+						language: 'v'
+						value: node.str()
+					}
+					range: range
+				}
+			}
+			ls.send(json.encode(result))
+			return
+		}
+		ast.Expr {
+			range := position_to_lsp_range(src, node.position())
+			result := jsonrpc.Response<lsp.Hover>{
+				id: id
+				result: lsp.Hover{
+					contents: lsp.MarkedString{
+						language: 'v'
+						value: node.str()
+					}
+					range: range
+				}
+			}
+			ls.send(json.encode(result))
+			return
+		}
+		else {}
+	}
+
+	ls.send('{"jsonrpc":"2.0","id":$id,"result":null}')
+	// tok_range := position_to_lsp_range(src, { pos: tok.pos, len: tok.len, line_nr: tok.line_nr-1 })
+	// if tok.lit.len > 0 {
+	// 	result := jsonrpc.Response<lsp.Hover>{
+	// 		id: id
+	// 		result: lsp.Hover{
+	// 			contents: lsp.MarkedString{
+	// 				language: 'v'
+	// 				value: tok.lit.str()
+	// 			}
+	// 			range: tok_range
+	// 		}
+	// 	}
+	// 	ls.send(json.encode(result))
+	// } else {
+	// 	ls.send('null')
+	// }
 }

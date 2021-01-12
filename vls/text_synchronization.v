@@ -3,6 +3,7 @@ module vls
 import json
 import lsp
 import v.parser
+import v.scanner
 import v.table
 import v.pref
 import v.ast
@@ -73,11 +74,14 @@ fn (mut ls Vls) process_file(source string, uri lsp.DocumentUri) {
 	table := ls.new_table()
 	mut parsed_files := []ast.File{}
 	mut checker := checker.new_checker(table, pref)
+	mut sc := scanner.new_scanner(source, .skip_comments, pref)
+	sc.scan_all_tokens_in_buffer()
 	parsed_files <<
 		parser.parse_text(source, file_path, table, .skip_comments, pref, scope)
 	imported_files, import_errors := ls.parse_imports(parsed_files, table, pref, scope)
 	checker.check_files(parsed_files)
 	ls.tables[target_dir_uri] = table
+	ls.tokens[uri.str()] = sc.all_tokens
 	ls.insert_files(parsed_files)
 	for err in import_errors {
 		err_file_uri := lsp.document_uri_from_path(err.file_path).str()

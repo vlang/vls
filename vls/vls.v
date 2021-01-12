@@ -1,5 +1,6 @@
 module vls
 
+import v.token
 import v.table
 import v.ast
 import v.pref
@@ -15,6 +16,7 @@ pub enum Feature {
 	document_symbol
 	workspace_symbol
 	completion
+	hover
 }
 
 // feature_from_str returns the Feature-enum value equivalent of the given string.
@@ -26,6 +28,7 @@ fn feature_from_str(feature_name string) ?Feature {
 		'document_symbol' { return Feature.document_symbol }
 		'workspace_symbol' { return Feature.workspace_symbol }
 		'completion' { return Feature.completion }
+		'hover' { return Feature.hover }
 		else { return error('feature "$feature_name" not found') }
 	}
 }
@@ -72,6 +75,7 @@ mut:
 	doc_symbols      map[string][]lsp.SymbolInformation // doc_symbols is used for caching document symbols
 	builtin_symbols  []string // list of publicly available symbols in builtin
 	enabled_features []Feature = default_features_list
+	tokens					 map[string][]token.Token
 pub mut:
 	// TODO: replace with io.ReadWriter
 	io               ReceiveSender
@@ -112,6 +116,7 @@ pub fn (mut ls Vls) dispatch(payload string) {
 			'textDocument/documentSymbol' { ls.document_symbol(request.id, request.params) }
 			'workspace/symbol' { ls.workspace_symbol(request.id, request.params) }
 			'textDocument/completion' { ls.completion(request.id, request.params) }
+			'textDocument/hover' { ls.hover(request.id, request.params) }
 			else {}
 		}
 	} else {
