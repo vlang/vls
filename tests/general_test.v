@@ -20,7 +20,9 @@ fn test_wrong_first_request() {
 fn test_initialize_with_capabilities() {
 	mut io, mut ls := init()
 	assert ls.status() == .initialized
-	assert io.result() == json.encode(lsp.InitializeResult{})
+	assert io.result() == json.encode(lsp.InitializeResult{
+		capabilities: ls.capabilities()
+	})
 }
 
 fn test_initialized() {
