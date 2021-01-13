@@ -5,7 +5,34 @@ import json
 import jsonrpc
 import v.token
 import v.util
-import v.ast
+
+// compute_offset returns a byte offset from the given position
+pub fn compute_offset(src []byte, line int, col int) int {
+	mut offset := 0
+	mut src_line := 0
+	mut src_col := 0
+	for i, byt in src {
+		is_lf := byt == `\n`
+		is_crlf := i != src.len - 1 && unsafe { byt == `\r` && src[i + 1] == `\n` }
+		is_eol := is_lf || is_crlf
+		if src_line == line && src_col == col {
+			return offset
+		}
+		if is_eol {
+			if src_line == line && col > src_col {
+				return -1
+			}
+			src_line++
+			src_col = 0
+			offset++
+			continue
+		}
+		src_col++
+		offset++
+	}
+	offset++
+	return offset
+}
 
 // get_column computes the column of the source based on the given initial position
 fn get_column(source []byte, init_pos int) int {
@@ -47,8 +74,9 @@ fn position_to_lsp_range(source []byte, pos token.Position) lsp.Range {
 }
 
 // show_diagnostics converts the file ast's errors and warnings and publishes them to the editor
-fn (ls Vls) show_diagnostics(file ast.File, source []byte) {
-	uri := lsp.document_uri_from_path(file.path)
+fn (ls Vls) show_diagnostics(uri lsp.DocumentUri) {
+	file := ls.files[uri.str()]
+	source := ls.sources[uri.str()]
 	mut diagnostics := []lsp.Diagnostic{}
 	for _, error in file.errors {
 		diagnostics << lsp.Diagnostic{
@@ -69,6 +97,7 @@ fn (ls Vls) show_diagnostics(file ast.File, source []byte) {
 
 // publish_diagnostics sends errors, warnings and other diagnostics to the editor
 fn (ls Vls) publish_diagnostics(uri lsp.DocumentUri, diagnostics []lsp.Diagnostic) {
+	if Feature.diagnostics !in ls.enabled_features { return }
 	result := jsonrpc.NotificationMessage<lsp.PublishDiagnosticsParams>{
 		method: 'textDocument/publishDiagnostics'
 		params: lsp.PublishDiagnosticsParams{
@@ -78,7 +107,5 @@ fn (ls Vls) publish_diagnostics(uri lsp.DocumentUri, diagnostics []lsp.Diagnosti
 	}
 	str := json.encode(result)
 	ls.send(str)
-	unsafe {
-		diagnostics.free()
-	}
+	unsafe { diagnostics.free() }
 }

@@ -5,6 +5,7 @@ import json
 import jsonrpc
 import os
 import v.parser
+import v.ast
 
 // initialize sends the server capabilities to the client
 fn (mut ls Vls) initialize(id int, params string) {
@@ -13,8 +14,13 @@ fn (mut ls Vls) initialize(id int, params string) {
 	ls.client_capabilities = initialize_params.capabilities
 	ls.capabilities = lsp.ServerCapabilities{
 		text_document_sync: 1
-		workspace_symbol_provider: true
-		document_symbol_provider: true
+		completion_provider: lsp.CompletionOptions{
+			trigger_characters: if Feature.completion !in ls.enabled_features { []string{} } else { ['=', '.', ':', '{', ',', '(', ' '] }
+			resolve_provider: false
+		}
+		workspace_symbol_provider: Feature.workspace_symbol in ls.enabled_features
+		document_symbol_provider: Feature.document_symbol in ls.enabled_features
+		document_formatting_provider: Feature.formatting in ls.enabled_features
 	}
 	result := jsonrpc.Response<lsp.InitializeResult>{
 		id: id
@@ -26,16 +32,27 @@ fn (mut ls Vls) initialize(id int, params string) {
 	ls.root_path = initialize_params.root_uri
 	ls.status = .initialized
 	// since builtin is used frequently, they should be parsed first and only once
-	scope, pref := new_scope_and_pref()
-	builtin_files := os.ls(builtin_path) or { panic(err) }
-	files_to_parse := pref.should_compile_filtered_files(builtin_path, builtin_files)
-	mut parsed_files := parser.parse_files(files_to_parse, ls.base_table, pref, scope)
-	parsed_files << ls.parse_imports(parsed_files, ls.base_table, pref, scope)
-	ls.insert_files(parsed_files)
+	ls.process_builtin()
 	ls.send(json.encode(result))
+}
+
+fn (mut ls Vls) process_builtin() {
+	scope, pref := new_scope_and_pref()
+	mut builtin_files := os.ls(builtin_path) or { panic(err) }
+	builtin_files = pref.should_compile_filtered_files(builtin_path, builtin_files)
+	parsed_files := parser.parse_files(builtin_files, ls.base_table, pref, scope)
+	for file in parsed_files {
+		for stmt in file.stmts {
+			if stmt is ast.FnDecl {
+				if !stmt.is_pub || stmt.is_method {
+					continue
+				}
+				ls.builtin_symbols << stmt.name
+			}
+		}
+	}
 	unsafe {
 		builtin_files.free()
-		files_to_parse.free()
 		parsed_files.free()
 	}
 }

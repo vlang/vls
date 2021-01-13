@@ -1,8 +1,7 @@
+> VLS is a work-in-progress, pre-alpha language server. It may not be guaranteed to work reliably on your system due to memory management issues and other factors.
+
 # vls
 VLS (V Language Server) is a LSP v3.15-compatible language server for V.
-
-## Current Status
-VLS is a work-in-progress. It has issues with memory management (for now) and may not be guaranteed to work on large codebases.
 
 ## Installation
 Installation requires you to have Git and V installed and compile the language server by yourself. You need to execute the following:
@@ -15,6 +14,8 @@ v -prod cmd/vls
 ```
 
 ## Usage
+> **NOTE:** VLS only officially supports VSCode for now ([vls#52](https://github.com/vlang/vls/issues/52)).
+
 In order to use the language server, you need to have a text editor with support for LSP. In this case, the recommended editor for testing (for now) is to have [Visual Studio Code](https://code.visualstudio.com) and the [vscode-vlang](https://github.com/vlang/vscode-vlang) extension version 0.1.4 or above installed.
 
 ![Instructions](instructions.png)
@@ -61,9 +62,9 @@ Afterwards, go to your editor's configuration and scroll to the V extension sect
 ### Diagnostics
 - [x] `publishDiagnostics`
 ### Language Features
-- [ ] `completion` (disabled for now)
+- [ ] `completion`
 - [ ] `completion resolve`
-- [ ] `hover` (disabled for now)
+- [ ] `hover`
 - [ ] `signatureHelp`
 - [ ] `declaration`
 - [ ] `definition`
