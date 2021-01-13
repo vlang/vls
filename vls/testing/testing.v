@@ -48,28 +48,22 @@ pub fn (mut io Testio) request_with_params<T>(method string, params T) string {
 }
 
 // check_response verifies the response result/notification params
-pub fn (mut io Testio) result<T>() T {
+pub fn (mut io Testio) result() string {
 	io.decode_response() or {
-		return T{}
+		return ''
 	}
-	decoded_result := json.decode(T, io.response.result) or {
-		return T{}
-	}
-	return decoded_result
+	return io.response.result
 }
 
 // check_notification verifies the parameters of the notification
-// pub fn (io Testio) notification<T>() ?(string, T) {
-// 	resp := json.decode(TestNotification, io.response_data) ?
-// 	decoded_params := json.decode(T, resp.params) ?
-// 	return resp.method, decoded_params
-// }
+pub fn (io Testio) notification() ?(string, string) {
+	resp := json.decode(TestNotification, io.response_data) ?
+	return resp.method, resp.params
+}
 
 // check_error verifies the error code and message from the response
-pub fn (mut io Testio) response_error() (int, string) {
-	io.decode_response() or {
-		return -1, ''
-	}
+pub fn (mut io Testio) response_error() ?(int, string) {
+	io.decode_response() ?
 	return io.response.error.code, io.response.error.message
 }
 

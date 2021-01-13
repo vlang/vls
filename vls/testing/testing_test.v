@@ -41,23 +41,23 @@ fn test_result() {
 		result: result
 	}
 	io.send(json.encode(resp))
-	assert io.result<map[string]string>() == result
+	assert io.result() == json.encode(result)
 }
 
-// fn test_notification() {
-// 	mut io := Testio{}
-// 	request := json.encode(jsonrpc.NotificationMessage<string>{
-// 		method: 'log'
-// 		params: 'just a log'
-// 	})
-// 	io.send(request)
-// 	method, params := io.notification<string>() or {
-// 		assert false
-// 		return
-// 	}
-// 	assert method == 'log'
-// 	assert params == 'just a log'
-// }
+fn test_notification() {
+	mut io := Testio{}
+	request := json.encode(jsonrpc.NotificationMessage<string>{
+		method: 'log'
+		params: 'just a log'
+	})
+	io.send(request)
+	method, params := io.notification() or {
+		assert false
+		return
+	}
+	assert method == 'log'
+	assert params == json.encode('just a log')
+}
 
 fn test_response_error() {
 	mut io := Testio{}
@@ -66,7 +66,10 @@ fn test_response_error() {
 	}
 	request := json.encode(payload)
 	io.send(request)
-	err_code, err_message := io.response_error()
+	err_code, err_message := io.response_error() or {
+		assert false
+		return
+	}
 	assert err_code == jsonrpc.method_not_found
 	assert err_message == 'Method not found.'
 }

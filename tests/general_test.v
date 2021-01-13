@@ -1,6 +1,7 @@
 import vls
 import vls.testing
 import lsp
+import json
 
 fn test_wrong_first_request() {
 	mut io := testing.Testio{}
@@ -8,13 +9,18 @@ fn test_wrong_first_request() {
 	payload := io.request('shutdown')
 	ls.dispatch(payload)
 	assert ls.status() == .off
-	assert io.check_error(-32002, 'Server not yet initialized.')
+	err_code, err_msg := io.response_error() or {
+		assert false
+		return
+	}
+	assert err_code == -32002
+	assert err_msg == 'Server not yet initialized.'
 }
 
 fn test_initialize_with_capabilities() {
 	mut io, mut ls := init()
 	assert ls.status() == .initialized
-	assert io.result<lsp.InitializeResult>() == lsp.InitializeResult{}
+	assert io.result() == json.encode(lsp.InitializeResult{})
 }
 
 fn test_initialized() {
@@ -31,6 +37,7 @@ fn test_initialized() {
 // 	status := ls.status()
 // 	assert status == .shutdown
 // }
+
 fn init() (testing.Testio, vls.Vls) {
 	mut io := testing.Testio{}
 	mut ls := vls.new(io)
