@@ -244,5 +244,71 @@ fn test_document_symbols() {
 	bench.stop()
 }
 
+fn test_workspace_symbols() {
+	mut io := testing.Testio{}
+	mut ls := vls.new(io)
+	ls.dispatch(io.request('initialize'))
+
+	files := get_input_filepaths('workspace_symbols') or {
+		assert false
+		return
+	}
+
+	workspace_symbols_result := [
+		lsp.SymbolInformation{
+			name: 'main'
+			kind: .function
+			location: lsp.Location{
+				uri: lsp.document_uri_from_path(files[0])
+				range: lsp.Range{
+					start: lsp.Position{2, 0}
+					end: lsp.Position{4, 9}
+				}
+			}
+		},
+		lsp.SymbolInformation{
+			name: 'Person'
+			kind: .struct_
+			location: lsp.Location{
+				uri: lsp.document_uri_from_path(files[1])
+				range: lsp.Range{
+					start: lsp.Position{2, 0}
+					end: lsp.Position{4, 13}
+				}
+			}
+		},
+		lsp.SymbolInformation{
+			name: 'hello'
+			kind: .function
+			location: lsp.Location{
+				uri: lsp.document_uri_from_path(files[1])
+				range: lsp.Range{
+					start: lsp.Position{6, 0}
+					end: lsp.Position{8, 21}
+				}
+			}
+		}
+	]
+
+	for file_path in files {
+		content := os.read_file(file_path) or {
+			assert false
+			continue
+		}
+
+		// open document
+		ls.dispatch(io.request_with_params('textDocument/didOpen', lsp.DidOpenTextDocumentParams{
+			text_document: lsp.TextDocumentItem {
+				uri: lsp.document_uri_from_path(file_path)
+				language_id: 'v'
+				version: 1
+				text: content
+			}
+		}))
+	}
+
+	ls.dispatch(io.request_with_params('workspace/symbol', lsp.WorkspaceSymbolParams{}))
+	assert io.result() == json.encode(workspace_symbols_result)
+}
+
 // fn test_completion() {}
-// fn test_workspace_symbols() {}
