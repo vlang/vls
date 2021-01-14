@@ -10,7 +10,7 @@ struct Foo {
 fn test_send() {
 	mut io := Testio{}
 	io.send('request message')
-	assert io.response_data == 'request message'
+	assert io.raw_response == 'request message'
 }
 
 fn test_request() {
@@ -56,7 +56,7 @@ fn test_notification() {
 		return
 	}
 	assert method == 'log'
-	assert params == json.encode('just a log')
+	assert params == '"just a log"'
 }
 
 fn test_response_error() {

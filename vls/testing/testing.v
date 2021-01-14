@@ -20,14 +20,14 @@ pub struct Testio {
 mut:
 	current_req_id    int = 1
 	has_decoded       bool
-	response          TestResponse
+	response          TestResponse // parsed response data from raw_response
 pub mut:
-	response_data     string
+	raw_response     string // raw JSON string of the response data
 }
 
 pub fn (mut io Testio) send(data string) {
 	io.has_decoded = false
-	io.response_data = data
+	io.raw_response = data
 }
 
 pub fn (io Testio) receive() ?string {
@@ -47,7 +47,7 @@ pub fn (mut io Testio) request_with_params<T>(method string, params T) string {
 	return payload
 }
 
-// check_response verifies the response result/notification params
+// result verifies the response result/notification params
 pub fn (mut io Testio) result() string {
 	io.decode_response() or {
 		return ''
@@ -55,13 +55,13 @@ pub fn (mut io Testio) result() string {
 	return io.response.result
 }
 
-// check_notification verifies the parameters of the notification
+// notification verifies the parameters of the notification
 pub fn (io Testio) notification() ?(string, string) {
-	resp := json.decode(TestNotification, io.response_data) ?
+	resp := json.decode(TestNotification, io.raw_response) ?
 	return resp.method, resp.params
 }
 
-// check_error verifies the error code and message from the response
+// response_error verifies the error code and message from the response
 pub fn (mut io Testio) response_error() ?(int, string) {
 	io.decode_response() ?
 	return io.response.error.code, io.response.error.message
@@ -69,7 +69,7 @@ pub fn (mut io Testio) response_error() ?(int, string) {
 
 fn (mut io Testio) decode_response() ? {
 	if !io.has_decoded {
-		io.response = json.decode(TestResponse, io.response_data)?
+		io.response = json.decode(TestResponse, io.raw_response)?
 		io.has_decoded = true
 	}
 }
