@@ -42,6 +42,7 @@ pub:
 }
 
 pub struct Location {
+pub mut:
 	uri   DocumentUri
 	range Range
 }

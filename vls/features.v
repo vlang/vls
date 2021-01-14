@@ -97,7 +97,7 @@ fn (mut ls Vls) generate_symbols(file ast.File, uri lsp.DocumentUri) []lsp.Symbo
 			ast.ConstDecl {
 				for field in stmt.fields {
 					symbols << lsp.SymbolInformation{
-						name: field.name
+						name: field.name.all_after(file.mod.name + '.')
 						kind: .constant
 						location: lsp.Location{
 							uri: uri
