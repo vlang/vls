@@ -6,7 +6,7 @@ import jsonrpc
 struct TestResponse {
 	jsonrpc string = jsonrpc.version
 	id      int
-	result  string [raw]
+	result  string                [raw]
 	error   jsonrpc.ResponseError
 }
 
@@ -18,11 +18,11 @@ struct TestNotification {
 
 pub struct Testio {
 mut:
-	current_req_id    int = 1
-	has_decoded       bool
-	response          TestResponse // parsed response data from raw_response
+	current_req_id int = 1
+	has_decoded    bool
+	response       TestResponse // parsed response data from raw_response
 pub mut:
-	raw_response     string // raw JSON string of the response data
+	raw_response string // raw JSON string of the response data
 }
 
 pub fn (mut io Testio) send(data string) {
@@ -49,9 +49,7 @@ pub fn (mut io Testio) request_with_params<T>(method string, params T) string {
 
 // result verifies the response result/notification params
 pub fn (mut io Testio) result() string {
-	io.decode_response() or {
-		return ''
-	}
+	io.decode_response() or { return '' }
 	return io.response.result
 }
 
@@ -69,7 +67,7 @@ pub fn (mut io Testio) response_error() ?(int, string) {
 
 fn (mut io Testio) decode_response() ? {
 	if !io.has_decoded {
-		io.response = json.decode(TestResponse, io.raw_response)?
+		io.response = json.decode(TestResponse, io.raw_response) ?
 		io.has_decoded = true
 	}
 }
