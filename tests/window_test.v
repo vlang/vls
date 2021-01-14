@@ -17,7 +17,6 @@ fn test_log_message_error() {
 		assert false
 		return
 	}
-	
 	assert method == log_message_method
 	assert params == json.encode(lsp.LogMessageParams{
 		@type: .error
@@ -34,7 +33,6 @@ fn test_log_message_warning() {
 		assert false
 		return
 	}
-	
 	assert method == log_message_method
 	assert params == json.encode(lsp.LogMessageParams{
 		@type: .warning
@@ -51,7 +49,6 @@ fn test_log_message_info() {
 		assert false
 		return
 	}
-	
 	assert method == log_message_method
 	assert params == json.encode(lsp.LogMessageParams{
 		@type: .info
@@ -68,7 +65,6 @@ fn test_log_message_log() {
 		assert false
 		return
 	}
-	
 	assert method == log_message_method
 	assert params == json.encode(lsp.LogMessageParams{
 		@type: .log
@@ -85,7 +81,6 @@ fn test_show_message_error() {
 		assert false
 		return
 	}
-	
 	assert method == show_message_method
 	assert params == json.encode(lsp.ShowMessageParams{
 		@type: .error
@@ -102,7 +97,6 @@ fn test_show_message_warning() {
 		assert false
 		return
 	}
-	
 	assert method == show_message_method
 	assert params == json.encode(lsp.ShowMessageParams{
 		@type: .warning
@@ -119,7 +113,6 @@ fn test_show_message_info() {
 		assert false
 		return
 	}
-	
 	assert method == show_message_method
 	assert params == json.encode(lsp.ShowMessageParams{
 		@type: .info
@@ -136,7 +129,6 @@ fn test_show_message_log() {
 		assert false
 		return
 	}
-	
 	assert method == show_message_method
 	assert params == json.encode(lsp.ShowMessageParams{
 		@type: .log
@@ -153,7 +145,6 @@ fn test_show_message_request() {
 		assert false
 		return
 	}
-	
 	assert method == 'window/showMessageRequest'
 	assert params == json.encode(lsp.ShowMessageRequestParams{
 		@type: .info
