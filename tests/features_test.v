@@ -8,6 +8,7 @@ import os
 // results
 import test_files.document_symbols { doc_symbols_result }
 import test_files.workspace_symbols { workspace_symbols_result }
+import test_files.diagnostics { diagnostics_result }
 
 const test_files_dir = os.join_path(os.dir(@FILE), 'test_files') 
 
@@ -203,8 +204,16 @@ fn test_workspace_symbols() {
 	assert io.result() == json.encode(workspace_symbols_result)
 }
 
-		}
-	]
+fn test_diagnostics() {
+	mut io := testing.Testio{}
+	mut ls := vls.new(io)
+	ls.dispatch(io.request('initialize'))
+
+	files := get_input_filepaths('diagnostics') or {
+		assert false
+		return
+	}
+
 
 	for file_path in files {
 		content := os.read_file(file_path) or {
@@ -223,8 +232,13 @@ fn test_workspace_symbols() {
 		}))
 	}
 
-	ls.dispatch(io.request_with_params('workspace/symbol', lsp.WorkspaceSymbolParams{}))
-	assert io.result() == json.encode(workspace_symbols_result)
+	method, params := io.notification() or {
+		assert false
+		return
+	}
+
+	assert method == 'textDocument/publishDiagnostics'
+	assert params == json.encode(diagnostics_result)
 }
 
 // fn test_completion() {}
