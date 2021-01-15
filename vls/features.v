@@ -15,13 +15,18 @@ fn (ls Vls) formatting(id int, params string) {
 	uri := formatting_params.text_document.uri.str()
 	path := formatting_params.text_document.uri.path()
 	source := ls.sources[uri].bytestr()
-	source_lines := source.split_into_lines()
 	mut prefs := pref.new_preferences()
+	prefs.output_mode = .silent
 	prefs.is_fmt = true
 	table := table.new_table()
 	file_ast := parser.parse_text(source, path, table, .parse_comments, prefs, &ast.Scope{
 		parent: 0
 	})
+	if file_ast.errors.len > 0 {
+		ls.send_null(id)
+		return
+	}
+	source_lines := source.split_into_lines()
 	formatted_content := fmt.fmt(file_ast, table, false)
 	resp := jsonrpc.Response<[]lsp.TextEdit>{
 		id: id

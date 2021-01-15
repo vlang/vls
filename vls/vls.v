@@ -148,6 +148,11 @@ fn (ls Vls) send(data string) {
 	ls.io.send(data)
 }
 
+// send_null sends a null result to the client
+fn (ls Vls) send_null(id int) {
+	ls.io.send('{"jsonrpc":"2.0","id":$id,"result":null}')
+}
+
 // start_loop starts an endless loop which waits for stdin and prints responses to the stdout
 pub fn (mut ls Vls) start_loop() {
 	for {
