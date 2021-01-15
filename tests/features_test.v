@@ -9,6 +9,7 @@ import os
 import test_files.document_symbols { doc_symbols_result }
 import test_files.workspace_symbols { workspace_symbols_result }
 import test_files.diagnostics { diagnostics_result }
+import test_files.completion { completion_contexts, completion_positions, completion_results }
 
 const test_files_dir = os.join_path(os.dir(@FILE), 'test_files') 
 
@@ -18,7 +19,7 @@ fn get_input_filepaths(folder_name string) ?[]string {
 	mut filtered := []string{}
 
 	for path in dir {
-		if !path.ends_with('.vv') {
+		if !path.ends_with('.vv') || path.ends_with('.skip.vv') {
 			continue
 		}
 		filtered << os.join_path(target_path, path)
@@ -241,4 +242,81 @@ fn test_diagnostics() {
 	assert params == json.encode(diagnostics_result)
 }
 
-// fn test_completion() {}
+// TODO:
+// fn test_completion() {
+// 	mut io := testing.Testio{}
+// 	mut ls := vls.new(io)
+// 	ls.dispatch(io.request('initialize'))
+
+// 	mut bench := benchmark.new_benchmark()
+// 	test_files := get_input_filepaths('completion') or {
+// 		assert false
+// 		return
+// 	}
+	
+// 	bench.set_total_expected_steps(test_files.len)
+// 	for test_file_path in test_files {
+// 		test_name := os.base(test_file_path)
+// 		if test_name !in completion_results {
+// 			bench.fail()
+// 			eprintln(bench.step_message_fail('missing results for $test_name'))
+// 			assert false
+// 			return
+// 		} else if test_name !in completion_contexts{
+// 			bench.fail()
+// 			eprintln(bench.step_message_fail('missing context data for $test_name'))
+// 			assert false
+// 			return
+// 		} else if test_name !in completion_positions {
+// 			bench.fail()
+// 			eprintln(bench.step_message_fail('missing position data for $test_name'))
+// 			assert false
+// 			return
+// 		}
+		
+// 		doc_uri := lsp.document_uri_from_path(test_file_path)
+// 		content := os.read_file(test_file_path) or {
+// 			bench.fail()
+// 			eprintln(bench.step_message_fail('file $test_file_path is missing'))
+// 			assert false
+// 			continue
+// 		}
+
+
+// 		// open document
+// 		ls.dispatch(io.request_with_params('textDocument/didOpen', lsp.DidOpenTextDocumentParams{
+// 			text_document: lsp.TextDocumentItem {
+// 				uri: doc_uri
+// 				language_id: 'v'
+// 				version: 1
+// 				text: content
+// 			}
+// 		}))
+
+// 		// initiate completion request
+// 		ls.dispatch(io.request_with_params('textDocument/completion', lsp.CompletionParams{
+// 			text_document: lsp.TextDocumentIdentifier{
+// 				uri: doc_uri
+// 			}
+// 			position: completion_positions[test_name]
+// 			context: completion_contexts[test_name]
+// 		}))
+
+// 		// compare content
+// 		eprintln(bench.step_message('Testing $test_file_path'))
+// 		assert io.result() == json.encode(completion_results[test_name])
+
+// 		bench.ok()
+// 		println(bench.step_message_ok(test_name))
+
+// 		// Delete document
+// 		ls.dispatch(io.request_with_params('textDocument/didClose', lsp.DidCloseTextDocumentParams{
+// 			text_document: lsp.TextDocumentIdentifier{
+// 				uri: doc_uri
+// 			}
+// 		}))
+
+// 		bench.step()
+// 	}
+// 	bench.stop()
+// }

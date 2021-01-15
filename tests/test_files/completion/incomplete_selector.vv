@@ -1,0 +1,10 @@
+module main
+
+struct Foo {
+  name string
+}
+
+fn main() {
+  foo := Foo{'bob'}
+  foo.
+}
