@@ -21,3 +21,13 @@ pub const completion_positions = {
 	'local_results.vv':       lsp.Position{5, 2}
 	'struct_init.vv':         lsp.Position{8, 16}
 }
+
+pub const completion_results = {
+	'assign.vv':              []lsp.CompletionItem{}
+	'blank.vv':               []lsp.CompletionItem{}
+	'import.vv':              []lsp.CompletionItem{}
+	'incomplete_module.vv':   []lsp.CompletionItem{}
+	'incomplete_selector.vv': []lsp.CompletionItem{}
+	'local_results.vv':       []lsp.CompletionItem{}
+	'struct_init.vv':         []lsp.CompletionItem{}
+}
