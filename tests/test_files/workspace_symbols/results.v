@@ -5,7 +5,7 @@ import os
 
 const base_dir = os.dir(@FILE)
 
-pub const	workspace_symbols_result = [
+pub const workspace_symbols_result = [
 	lsp.SymbolInformation{
 		name: 'main'
 		kind: .function
