@@ -660,12 +660,12 @@ fn (ls Vls) hover(id int, params string) {
 	// tokens := ls.tokens[uri.str()]
 	file_ast := ls.files[uri.str()]
 	// tok := ls.token_search(offset, tokens) or {
-	// 	ls.send('{"jsonrpc":"2.0","id":$id,"result":null}')
+	// 	ls.send_null(id)
 	// 	return
 	// }
 
 	node := find_ast_by_pos(file_ast.stmts.map(ast.Node(it)), offset) or {
-		ls.send('{"jsonrpc":"2.0","id":$id,"result":null}')
+		ls.send_null(id)
 		return
 	}
 
@@ -703,7 +703,7 @@ fn (ls Vls) hover(id int, params string) {
 		else {}
 	}
 
-	ls.send('{"jsonrpc":"2.0","id":$id,"result":null}')
+	ls.send_null(id)
 	// tok_range := position_to_lsp_range(src, { pos: tok.pos, len: tok.len, line_nr: tok.line_nr-1 })
 	// if tok.lit.len > 0 {
 	// 	result := jsonrpc.Response<lsp.Hover>{
