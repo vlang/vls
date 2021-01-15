@@ -19,7 +19,7 @@ fn get_input_filepaths(folder_name string) ?[]string {
 	mut filtered := []string{}
 
 	for path in dir {
-		if !path.ends_with('.vv') || path.ends_with('.skip.vv') {
+		if !path.ends_with('.vv') || path.ends_with('_skip.vv') {
 			continue
 		}
 		filtered << os.join_path(target_path, path)
