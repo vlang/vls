@@ -5,7 +5,11 @@ import benchmark
 import lsp
 import os
 
-const test_files_dir = os.join_path(os.dir(@FILE), 'features_test_files') 
+// results
+import test_files.document_symbols { doc_symbols_result }
+import test_files.workspace_symbols { workspace_symbols_result }
+
+const test_files_dir = os.join_path(os.dir(@FILE), 'test_files') 
 
 fn get_input_filepaths(folder_name string) ?[]string {
 	target_path := os.join_path(test_files_dir, folder_name)
@@ -101,83 +105,6 @@ fn test_formatting() {
 	bench.stop()
 }
 
-// file_uris will be replaced inside the test case
-// because the uri may be different in each platform
-const doc_symbols_results = {
-	'simple.vv': [
-		lsp.SymbolInformation{
-			name: 'Uri'
-			kind: .type_parameter
-			location: lsp.Location{
-				range: lsp.Range{
-					start: lsp.Position{2, 0}
-					end: lsp.Position{2, 8}
-				}
-			}
-		},
-		lsp.SymbolInformation{
-			name: 'text'
-			kind: .constant
-			location: lsp.Location{
-				range: lsp.Range{
-					start: lsp.Position{5, 2}
-					end: lsp.Position{5, 6}
-				}
-			}
-		},
-		lsp.SymbolInformation{
-			name: 'two'
-			kind: .constant
-			location: lsp.Location{
-				range: lsp.Range{
-					start: lsp.Position{6, 2}
-					end: lsp.Position{6, 5}
-				}
-			}
-		},
-		lsp.SymbolInformation{
-			name: 'Color'
-			kind: .enum_
-			location: lsp.Location{
-				range: lsp.Range{
-					start: lsp.Position{9, 0}
-					end: lsp.Position{13, 10}
-				}
-			}
-		},
-		lsp.SymbolInformation{
-			name: 'Person'
-			kind: .struct_
-			location: lsp.Location{
-				range: lsp.Range{
-					start: lsp.Position{15, 0}
-					end: lsp.Position{17, 13}
-				}
-			}
-		},
-		lsp.SymbolInformation{
-			name: 'Person.say'
-			kind: .method
-			location: lsp.Location{
-				range: lsp.Range{
-					start: lsp.Position{19, 0}
-					end: lsp.Position{21, 19}
-				}
-			}
-		},
-		lsp.SymbolInformation{
-			name: 'main'
-			kind: .function
-			location: lsp.Location{
-				range: lsp.Range{
-					start: lsp.Position{23, 0}
-					end: lsp.Position{26, 9}
-				}
-			}
-		}
-	]
-}
-
 fn test_document_symbols() {
 	mut io := testing.Testio{}
 	mut ls := vls.new(io)
@@ -219,7 +146,7 @@ fn test_document_symbols() {
 
 		// compare content
 		eprintln(bench.step_message('Testing $test_file_path'))
-		result := doc_symbols_results[test_name].map(lsp.SymbolInformation{
+		result := doc_symbols_result[test_name].map(lsp.SymbolInformation{
 			name: it.name
 			kind: it.kind
 			location: lsp.Location{
@@ -254,39 +181,28 @@ fn test_workspace_symbols() {
 		return
 	}
 
-	workspace_symbols_result := [
-		lsp.SymbolInformation{
-			name: 'main'
-			kind: .function
-			location: lsp.Location{
-				uri: lsp.document_uri_from_path(files[0])
-				range: lsp.Range{
-					start: lsp.Position{2, 0}
-					end: lsp.Position{4, 9}
-				}
+
+	for file_path in files {
+		content := os.read_file(file_path) or {
+			assert false
+			continue
+		}
+
+		// open document
+		ls.dispatch(io.request_with_params('textDocument/didOpen', lsp.DidOpenTextDocumentParams{
+			text_document: lsp.TextDocumentItem {
+				uri: lsp.document_uri_from_path(file_path)
+				language_id: 'v'
+				version: 1
+				text: content
 			}
-		},
-		lsp.SymbolInformation{
-			name: 'Person'
-			kind: .struct_
-			location: lsp.Location{
-				uri: lsp.document_uri_from_path(files[1])
-				range: lsp.Range{
-					start: lsp.Position{2, 0}
-					end: lsp.Position{4, 13}
-				}
-			}
-		},
-		lsp.SymbolInformation{
-			name: 'hello'
-			kind: .function
-			location: lsp.Location{
-				uri: lsp.document_uri_from_path(files[1])
-				range: lsp.Range{
-					start: lsp.Position{6, 0}
-					end: lsp.Position{8, 21}
-				}
-			}
+		}))
+	}
+
+	ls.dispatch(io.request_with_params('workspace/symbol', lsp.WorkspaceSymbolParams{}))
+	assert io.result() == json.encode(workspace_symbols_result)
+}
+
 		}
 	]
 
