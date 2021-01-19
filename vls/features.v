@@ -227,6 +227,7 @@ fn (mut cfg CompletionItemConfig) completion_items_from_table(mod_name string, s
 		name := sym_name.all_after('${mod_name}.')
 		if valid_type || sym_part_of_module || (symbols.len > 0 && name in symbols) {
 			type_sym := unsafe { &cfg.table.types[idx] }
+			if type_sym.mod != mod_name { continue }
 			completion_items << cfg.completion_items_from_type_info(name, type_sym.info, false)
 		}
 	}
@@ -575,10 +576,11 @@ fn (mut ls Vls) completion(id int, params string) {
 			for _, obj in scope.objects {
 				mut name := ''
 				match obj {
-					ast.ConstField, ast.Var {
+					ast.ConstField, ast.Var {		
 						if cfg.filter_type == table.Type(0) && obj.typ == cfg.filter_type {
-							name = obj.name
+							continue
 						}
+						name = obj.name
 					}
 					else {
 						continue

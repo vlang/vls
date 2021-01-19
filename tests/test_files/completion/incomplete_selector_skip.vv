@@ -4,6 +4,10 @@ struct Foo {
   name string
 }
 
+fn (f Foo) lol() string {
+  return f.name
+}
+
 fn main() {
   foo := Foo{'bob'}
   foo.

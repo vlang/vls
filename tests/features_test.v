@@ -193,70 +193,62 @@ fn test_diagnostics() {
 	assert params == json.encode(diagnostics_result)
 }
 
-// TODO:
-// fn test_completion() {
-// 	mut io := testing.Testio{}
-// 	mut ls := vls.new(io)
-// 	ls.dispatch(io.request('initialize'))
+fn test_completion() {
+	mut io := testing.Testio{}
+	mut ls := vls.new(io)
+	ls.dispatch(io.request('initialize'))
 
-// 	mut bench := benchmark.new_benchmark()
-// 	test_files := get_input_filepaths('completion') or {
-// 		assert false
-// 		return
-// 	}
+	mut bench := benchmark.new_benchmark()
+	test_files := get_input_filepaths('completion') or {
+		assert false
+		return
+	}
 	
-// 	bench.set_total_expected_steps(test_files.len)
-// 	for test_file_path in test_files {
-// 		test_name := os.base(test_file_path)
-// 		mut has_err := false
-// 		if test_name !in completion_results {
-// 			bench.fail()
-// 			eprintln(bench.step_message_fail('missing results for $test_name'))
-// 			has_err = true
-// 		} else if test_name !in completion_contexts{
-// 			bench.fail()
-// 			eprintln(bench.step_message_fail('missing context data for $test_name'))
-// 			has_err = true
-// 		} else if test_name !in completion_positions {
-// 			bench.fail()
-// 			eprintln(bench.step_message_fail('missing position data for $test_name'))
-// 			has_err = true
-// 		}
-// 		if has_err {
-// 			assert false
-// 		}
-// 		content := os.read_file(test_file_path) or {
-// 			bench.fail()
-// 			eprintln(bench.step_message_fail('file $test_file_path is missing'))
-// 			assert false
-// 			return
-// 		}
-// 		// open document
-// 		req, doc_id := open_document(mut io, test_file_path, content)
-// 		ls.dispatch(io.request_with_params('textDocument/didOpen', lsp.DidOpenTextDocumentParams{
-// 			text_document: lsp.TextDocumentItem {
-// 				uri: doc_id.uri
-// 				language_id: 'v'
-// 				version: 1
-// 				text: content
-// 			}
-// 		}))
-// 		// initiate completion request
-// 		ls.dispatch(io.request_with_params('textDocument/completion', lsp.CompletionParams{
-// 			text_document: doc_id
-// 			position: completion_positions[test_name]
-// 			context: completion_contexts[test_name]
-// 		}))
-// 		// compare content
-// 		eprintln(bench.step_message('Testing $test_file_path'))
-// 		assert io.result() == json.encode(completion_results[test_name])
-// 		bench.ok()
-// 		println(bench.step_message_ok(test_name))
-// 		// Delete document
-// 		ls.dispatch(io.request_with_params('textDocument/didClose', lsp.DidCloseTextDocumentParams{
-// 			text_document: doc_id
-// 		}))
-// 		bench.step()
-// 	}
-// 	bench.stop()
-// }
+	bench.set_total_expected_steps(test_files.len)
+	for test_file_path in test_files {
+		test_name := os.base(test_file_path)
+		mut has_err := false
+		if test_name !in completion_results {
+			bench.fail()
+			eprintln(bench.step_message_fail('missing results for $test_name'))
+			has_err = true
+		} else if test_name !in completion_contexts{
+			bench.fail()
+			eprintln(bench.step_message_fail('missing context data for $test_name'))
+			has_err = true
+		} else if test_name !in completion_positions {
+			bench.fail()
+			eprintln(bench.step_message_fail('missing position data for $test_name'))
+			has_err = true
+		}
+		if has_err {
+			assert false
+		}
+		content := os.read_file(test_file_path) or {
+			bench.fail()
+			eprintln(bench.step_message_fail('file $test_file_path is missing'))
+			assert false
+			return
+		}
+		// open document
+		req, doc_id := open_document(mut io, test_file_path, content)
+		ls.dispatch(req)
+		// initiate completion request
+		ls.dispatch(io.request_with_params('textDocument/completion', lsp.CompletionParams{
+			text_document: doc_id
+			position: completion_positions[test_name]
+			context: completion_contexts[test_name]
+		}))
+		// compare content
+		eprintln(bench.step_message('Testing $test_file_path'))
+		assert io.result() == json.encode(completion_results[test_name])
+		bench.ok()
+		println(bench.step_message_ok(test_name))
+		// Delete document
+		ls.dispatch(io.request_with_params('textDocument/didClose', lsp.DidCloseTextDocumentParams{
+			text_document: doc_id
+		}))
+		bench.step()
+	}
+	bench.stop()
+}

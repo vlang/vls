@@ -41,13 +41,15 @@ fn (mut ls Vls) process_builtin() {
 	mut builtin_files := os.ls(builtin_path) or { panic(err) }
 	builtin_files = pref.should_compile_filtered_files(builtin_path, builtin_files)
 	parsed_files := parser.parse_files(builtin_files, ls.base_table, pref, scope)
-	for file in parsed_files {
-		for stmt in file.stmts {
-			if stmt is ast.FnDecl {
-				if !stmt.is_pub || stmt.is_method {
-					continue
+	$if !test {
+		for file in parsed_files {
+			for stmt in file.stmts {
+				if stmt is ast.FnDecl {
+					if !stmt.is_pub || stmt.is_method {
+						continue
+					}
+					ls.builtin_symbols << stmt.name
 				}
-				ls.builtin_symbols << stmt.name
 			}
 		}
 	}

@@ -23,11 +23,79 @@ pub const completion_positions = {
 }
 
 pub const completion_results = {
-	'assign.vv':              []lsp.CompletionItem{}
-	'blank.vv':               []lsp.CompletionItem{}
+	'assign.vv':              [
+		lsp.CompletionItem{
+			label: 'two'
+			kind: .variable
+			insert_text: 'two'
+		},
+		lsp.CompletionItem{
+			label: 'zero'
+			kind: .variable
+			insert_text: 'zero'
+		},
+	]
+	'blank.vv':               [
+		lsp.CompletionItem{
+			label: 'module main'
+			kind: .variable
+			insert_text: 'module main'
+		},
+		lsp.CompletionItem{
+			label: 'module completion'
+			kind: .variable
+			insert_text: 'module completion'
+		},
+	]
 	'import.vv':              []lsp.CompletionItem{}
-	'incomplete_module.vv':   []lsp.CompletionItem{}
-	'incomplete_selector.vv': []lsp.CompletionItem{}
-	'local_results.vv':       []lsp.CompletionItem{}
-	'struct_init.vv':         []lsp.CompletionItem{}
+	'incomplete_module.vv':   [
+		lsp.CompletionItem{
+			label: 'module main'
+			kind: .variable
+			insert_text: 'module main'
+		},
+		lsp.CompletionItem{
+			label: 'module completion'
+			kind: .variable
+			insert_text: 'module completion'
+		},
+	]
+	'incomplete_selector.vv': [
+		lsp.CompletionItem{
+			label: 'name'
+			kind: .field
+			insert_text: 'name'
+		},
+		lsp.CompletionItem{
+			label: 'lol'
+			kind: .method
+			insert_text: 'lol()'
+		},
+	]
+	'local_results.vv':       [
+		lsp.CompletionItem{
+			label: 'foo'
+			kind: .variable
+			insert_text: 'foo'
+		},
+		lsp.CompletionItem{
+			label: 'bar'
+			kind: .variable
+			insert_text: 'bar'
+		},
+	]
+	'struct_init.vv':         [
+		lsp.CompletionItem{
+			label: 'name:'
+			kind: .field
+			insert_text_format: .snippet
+			insert_text: 'name: \$0'
+		},
+		lsp.CompletionItem{
+			label: 'age:'
+			kind: .field
+			insert_text_format: .snippet
+			insert_text: 'age: \$0'
+		},
+	]
 }
