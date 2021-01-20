@@ -434,16 +434,17 @@ fn (cfg CompletionItemConfig) completion_items_from_dir(dir string, dir_contents
 			continue
 		}
 		subdir_contents := os.ls(full_path) or { []string{} }
+		mod_name := if prefix.len > 0 { '${prefix}.${name}' } else { name }
 		if name == 'modules' {
-			completion_items << cfg.completion_items_from_dir(full_path, subdir_contents, '')
+			completion_items << cfg.completion_items_from_dir(full_path, subdir_contents, mod_name)
 			continue
 		}
 		completion_items << lsp.CompletionItem{
-			label: if prefix.len > 0 { '${prefix}.${name}' } else { name }
+			label: mod_name
 			kind: .folder
-			insert_text: if prefix.len > 0 { '${prefix}.${name}' } else { name }
+			insert_text: mod_name
 		}
-		completion_items << cfg.completion_items_from_dir(full_path, subdir_contents, name)
+		completion_items << cfg.completion_items_from_dir(full_path, subdir_contents, mod_name)
 	}
 	return completion_items
 }
