@@ -226,6 +226,7 @@ fn (mut cfg CompletionItemConfig) completion_items_from_table(mod_name string, s
 		sym_part_of_module := mod_name.len > 0 && sym_name.starts_with('${mod_name}.')
 		name := sym_name.all_after('${mod_name}.')
 		if valid_type || sym_part_of_module || (symbols.len > 0 && name in symbols) {
+			if type_sym.mod != mod_name { continue }
 			type_sym := unsafe { &cfg.table.types[idx] }
 			if type_sym.mod != mod_name { continue }
 			completion_items << cfg.completion_items_from_type_info(name, type_sym.info, false)
@@ -430,7 +431,7 @@ fn (cfg CompletionItemConfig) completion_items_from_dir(dir string, dir_contents
 	mut completion_items := []lsp.CompletionItem{}
 	for name in dir_contents {
 		full_path := os.join_path(dir, name)
-		if !os.is_dir(full_path) || name in cfg.imports_list {
+		if !os.is_dir(full_path) || name in cfg.imports_list || name.starts_with('.') {
 			continue
 		}
 		subdir_contents := os.ls(full_path) or { []string{} }
