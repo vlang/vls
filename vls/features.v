@@ -193,7 +193,7 @@ fn (mut cfg CompletionItemConfig) completion_items_from_stmt(stmt ast.Stmt) []ls
 			dir := os.dir(cfg.file.path)
 			dir_contents := os.ls(dir) or { []string{} }
 			// list all folders
-			completion_items << cfg.completion_items_from_dir(dir, dir_contents)
+			completion_items << cfg.completion_items_from_dir(dir, dir_contents, '')
 			// list all vlib
 			// TODO: vlib must be computed at once only
 		}
@@ -226,7 +226,6 @@ fn (mut cfg CompletionItemConfig) completion_items_from_table(mod_name string, s
 		sym_part_of_module := mod_name.len > 0 && sym_name.starts_with('${mod_name}.')
 		name := sym_name.all_after('${mod_name}.')
 		if valid_type || sym_part_of_module || (symbols.len > 0 && name in symbols) {
-			if type_sym.mod != mod_name { continue }
 			type_sym := unsafe { &cfg.table.types[idx] }
 			if type_sym.mod != mod_name { continue }
 			completion_items << cfg.completion_items_from_type_info(name, type_sym.info, false)
@@ -427,7 +426,7 @@ fn (mut cfg CompletionItemConfig) completion_items_from_type_info(name string, t
 }
 
 // completion_items_from_dir returns the list of import-able folders for autocompletion.
-fn (cfg CompletionItemConfig) completion_items_from_dir(dir string, dir_contents []string) []lsp.CompletionItem {
+fn (cfg CompletionItemConfig) completion_items_from_dir(dir string, dir_contents []string, prefix string) []lsp.CompletionItem {
 	mut completion_items := []lsp.CompletionItem{}
 	for name in dir_contents {
 		full_path := os.join_path(dir, name)
@@ -435,15 +434,16 @@ fn (cfg CompletionItemConfig) completion_items_from_dir(dir string, dir_contents
 			continue
 		}
 		subdir_contents := os.ls(full_path) or { []string{} }
-		completion_items << cfg.completion_items_from_dir(full_path, subdir_contents)
 		if name == 'modules' {
+			completion_items << cfg.completion_items_from_dir(full_path, subdir_contents, '')
 			continue
 		}
 		completion_items << lsp.CompletionItem{
-			label: name
+			label: if prefix.len > 0 { '${prefix}.${name}' } else { name }
 			kind: .folder
-			insert_text: name
+			insert_text: if prefix.len > 0 { '${prefix}.${name}' } else { name }
 		}
+		completion_items << cfg.completion_items_from_dir(full_path, subdir_contents, name)
 	}
 	return completion_items
 }

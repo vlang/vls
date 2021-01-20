@@ -47,7 +47,18 @@ pub const completion_results = {
 			insert_text: 'module completion'
 		},
 	]
-	'import.vv':              []lsp.CompletionItem{}
+	'import.vv':              [
+		lsp.CompletionItem{
+			label: 'abc'
+			kind: .folder
+			insert_text: 'abc'
+		},
+		lsp.CompletionItem{
+			label: 'abc.def'
+			kind: .folder
+			insert_text: 'abc.def'
+		},
+	]
 	'incomplete_module.vv':   [
 		lsp.CompletionItem{
 			label: 'module main'
