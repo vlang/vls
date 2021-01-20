@@ -58,6 +58,11 @@ pub const completion_results = {
 			kind: .folder
 			insert_text: 'abc.def'
 		},
+		lsp.CompletionItem{
+			label: 'abc.def.ghi'
+			kind: .folder
+			insert_text: 'abc.def.ghi'
+		},
 	]
 	'incomplete_module.vv':   [
 		lsp.CompletionItem{
