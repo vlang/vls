@@ -27,6 +27,19 @@ fn open_document(mut io testing.Testio, file_path string, contents string) (stri
 	return req, docid
 }
 
+fn file_errors(mut io testing.Testio) ?[]lsp.Diagnostic {
+	mut errors := []lsp.Diagnostic{}
+	_, diag_params := io.notification() ?
+	diag_info := json.decode(lsp.PublishDiagnosticsParams, diag_params) ?
+	for diag in diag_info.diagnostics {
+		if diag.severity != .error {
+			continue
+		}
+		errors << diag		
+	}
+	return errors
+}
+
 fn get_input_filepaths(folder_name string) ?[]string {
 	target_path := os.join_path(test_files_dir, folder_name)
 	dir := os.ls(target_path) ?
@@ -69,6 +82,16 @@ fn test_formatting() {
 		// open document
 		req, doc_id := open_document(mut io, test_file_path, content)
 		ls.dispatch(req)
+		errors := file_errors(mut io) or {
+			assert false
+			return
+		}
+		if test_file_path.ends_with('error.vv') {
+			assert errors.len > 0
+			continue
+		} else {
+			assert errors.len == 0
+		}
 		// initiate formatting request
 		ls.dispatch(io.request_with_params('textDocument/formatting', lsp.DocumentFormattingParams{
 			text_document: doc_id

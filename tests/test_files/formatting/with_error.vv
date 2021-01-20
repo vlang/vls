@@ -1,0 +1,4 @@
+struct Test {
+  foo string
+
+fn main() {
