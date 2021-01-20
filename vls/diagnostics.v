@@ -30,7 +30,6 @@ pub fn compute_offset(src []byte, line int, col int) int {
 		src_col++
 		offset++
 	}
-	offset++
 	return offset
 }
 
