@@ -226,6 +226,7 @@ fn (mut cfg CompletionItemConfig) completion_items_from_table(mod_name string, s
 		sym_part_of_module := mod_name.len > 0 && sym_name.starts_with('${mod_name}.')
 		name := sym_name.all_after('${mod_name}.')
 		if valid_type || sym_part_of_module || (symbols.len > 0 && name in symbols) {
+			if type_sym.mod != mod_name { continue }
 			type_sym := unsafe { &cfg.table.types[idx] }
 			completion_items << cfg.completion_items_from_type_info(name, type_sym.info, false)
 		}
