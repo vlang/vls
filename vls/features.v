@@ -193,7 +193,7 @@ fn (mut cfg CompletionItemConfig) completion_items_from_stmt(stmt ast.Stmt) []ls
 			dir := os.dir(cfg.file.path)
 			dir_contents := os.ls(dir) or { []string{} }
 			// list all folders
-			completion_items << cfg.completion_items_from_dir(dir, dir_contents)
+			completion_items << cfg.completion_items_from_dir(dir, dir_contents, '')
 			// list all vlib
 			// TODO: vlib must be computed at once only
 		}
@@ -426,7 +426,7 @@ fn (mut cfg CompletionItemConfig) completion_items_from_type_info(name string, t
 }
 
 // completion_items_from_dir returns the list of import-able folders for autocompletion.
-fn (cfg CompletionItemConfig) completion_items_from_dir(dir string, dir_contents []string) []lsp.CompletionItem {
+fn (cfg CompletionItemConfig) completion_items_from_dir(dir string, dir_contents []string, prefix string) []lsp.CompletionItem {
 	mut completion_items := []lsp.CompletionItem{}
 	for name in dir_contents {
 		full_path := os.join_path(dir, name)
@@ -434,15 +434,17 @@ fn (cfg CompletionItemConfig) completion_items_from_dir(dir string, dir_contents
 			continue
 		}
 		subdir_contents := os.ls(full_path) or { []string{} }
-		completion_items << cfg.completion_items_from_dir(full_path, subdir_contents)
+		mod_name := if prefix.len > 0 { '${prefix}.${name}' } else { name }
 		if name == 'modules' {
+			completion_items << cfg.completion_items_from_dir(full_path, subdir_contents, mod_name)
 			continue
 		}
 		completion_items << lsp.CompletionItem{
-			label: name
+			label: mod_name
 			kind: .folder
-			insert_text: name
+			insert_text: mod_name
 		}
+		completion_items << cfg.completion_items_from_dir(full_path, subdir_contents, mod_name)
 	}
 	return completion_items
 }
