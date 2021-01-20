@@ -430,7 +430,7 @@ fn (cfg CompletionItemConfig) completion_items_from_dir(dir string, dir_contents
 	mut completion_items := []lsp.CompletionItem{}
 	for name in dir_contents {
 		full_path := os.join_path(dir, name)
-		if !os.is_dir(full_path) || name in cfg.imports_list {
+		if !os.is_dir(full_path) || name in cfg.imports_list || name.starts_with('.') {
 			continue
 		}
 		subdir_contents := os.ls(full_path) or { []string{} }
