@@ -578,8 +578,9 @@ fn (mut ls Vls) completion(id int, params string) {
 				match obj {
 					ast.ConstField, ast.Var {
 						if cfg.filter_type == table.Type(0) && obj.typ == cfg.filter_type {
-							name = obj.name
+							continue
 						}
+						name = obj.name
 					}
 					else {
 						continue
