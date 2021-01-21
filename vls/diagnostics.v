@@ -1,7 +1,6 @@
 module vls
 
 import lsp
-import json
 import jsonrpc
 import v.token
 import v.util
@@ -104,7 +103,6 @@ fn (ls Vls) publish_diagnostics(uri lsp.DocumentUri, diagnostics []lsp.Diagnosti
 			diagnostics: diagnostics
 		}
 	}
-	str := json.encode(result)
-	ls.send(str)
+	ls.send(result)
 	unsafe { diagnostics.free() }
 }

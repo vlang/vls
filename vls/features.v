@@ -48,7 +48,7 @@ fn (ls Vls) formatting(id int, params string) {
 			new_text: formatted_content
 		}]
 	}
-	ls.send(json.encode(resp))
+	ls.send(resp)
 	unsafe {
 		source_lines.free()
 		formatted_content.free()
@@ -63,10 +63,10 @@ fn (mut ls Vls) workspace_symbol(id int, params string) {
 		}
 		symbols << ls.generate_symbols(file, file_uri)
 	}
-	ls.send(json.encode(jsonrpc.Response<[]lsp.SymbolInformation>{
+	ls.send(jsonrpc.Response<[]lsp.SymbolInformation>{
 		id: id
 		result: symbols
-	}))
+	})
 }
 
 fn (mut ls Vls) document_symbol(id int, params string) {
@@ -74,10 +74,10 @@ fn (mut ls Vls) document_symbol(id int, params string) {
 	uri := document_symbol_params.text_document.uri
 	file := ls.files[uri.str()]
 	symbols := ls.generate_symbols(file, uri)
-	ls.send(json.encode(jsonrpc.Response<[]lsp.SymbolInformation>{
+	ls.send(jsonrpc.Response<[]lsp.SymbolInformation>{
 		id: id
 		result: symbols
-	}))
+	})
 }
 
 fn (mut ls Vls) generate_symbols(file ast.File, uri lsp.DocumentUri) []lsp.SymbolInformation {
@@ -212,7 +212,7 @@ fn (mut cfg CompletionItemConfig) completion_items_from_table(mod_name string, s
 	// + deleting the dot + typing again the dot
 	mut completion_items := []lsp.CompletionItem{}
 
-	// Do not proceed if the functions the only ones required 
+	// Do not proceed if the functions the only ones required
 	// to be displayed to the client
 	if cfg.show_global && cfg.show_only_global_fn {
 		return completion_items
@@ -304,7 +304,7 @@ fn (mut cfg CompletionItemConfig) completion_items_from_expr(expr ast.Expr) []ls
 					cfg.completion_items_from_type_info('', field_type_sym.info, field_type_sym.info is table.Enum)
 				cfg.filter_type = field_node.expected_type
 			} else {
-				// if structinit is empty or not within the field position, 
+				// if structinit is empty or not within the field position,
 				// it must include the list of missing fields instead
 				defined_fields := expr.fields.map(it.name)
 				struct_type_sym := cfg.table.get_type_symbol(expr.typ)
@@ -330,12 +330,12 @@ fn (mut cfg CompletionItemConfig) completion_items_from_expr(expr ast.Expr) []ls
 // completion_items_from_fn returns the list of items extracted from the table.Fn information
 fn (mut cfg CompletionItemConfig) completion_items_from_fn(fnn table.Fn, is_method bool) []lsp.CompletionItem {
 	mut completion_items := []lsp.CompletionItem{}
-	
+
 	fn_name := fnn.name.all_after(fnn.mod + '.')
 	if fn_name == 'main' {
 		return completion_items
 	}
-	
+
 	// This will create a snippet that will automatically
 	// create a call expression based on the information of the function
 	mut insert_text := fn_name
@@ -479,19 +479,19 @@ fn (mut ls Vls) completion(id int, params string) {
 	// The context is used for if and when to trigger autocompletion.
 	// See comments `cfg` for reason.
 	mut ctx := completion_params.context
-	
+
 	// This is where the items will be pushed and sent to the client.
 	mut completion_items := []lsp.CompletionItem{}
-	
+
 	// The config is used by all methods for determining the results to be sent
 	// to the client. See the field comments in CompletionItemConfig for their
-	// purposes. 
+	// purposes.
 	//
 	// Other parsers use line character-based position for determining the AST node.
 	// The V parser on the other hand, uses a byte offset (line number is supplied
 	// but for certain cases) hence the need to convert the said positions to byte
-	// offsets. 
-	// 
+	// offsets.
+	//
 	// NOTE: Transfer it back to struct fields after
 	// https://github.com/vlang/v/pull/7976 has been merged.
 	modules_aliases := file.imports.map(it.alias)
@@ -503,11 +503,11 @@ fn (mut ls Vls) completion(id int, params string) {
 		offset: compute_offset(src, pos.line, pos.character)
 		table: ls.tables[os.dir(file_uri)]
 	}
-	// There are some instances that the user would invoke the autocompletion 
+	// There are some instances that the user would invoke the autocompletion
 	// through a combination of shortcuts (like Ctrl/Cmd+Space) and the results
 	// wouldn't appear even though one of the trigger characters is on the left
-	// or near the cursor. In that case, the context data would be modified in 
-	// order to satisfy those specific cases. 
+	// or near the cursor. In that case, the context data would be modified in
+	// order to satisfy those specific cases.
 	if ctx.trigger_kind == .invoked && cfg.offset - 1 >= 0 && file.stmts.len > 0 && src.len > 3 {
 		mut prev_idx := cfg.offset
 		mut ctx_changed := false
@@ -532,7 +532,7 @@ fn (mut ls Vls) completion(id int, params string) {
 	// The language server uses the `trigger_character` as a sole basis for triggering
 	// the data extraction and autocompletion. The `trigger_character` kind is only
 	// received by the server if the user presses one of the server-defined trigger
-	// characters [dot, parenthesis, curly brace, etc.] 
+	// characters [dot, parenthesis, curly brace, etc.]
 	if ctx.trigger_kind == .trigger_character {
 		// The offset is adjusted and the suggestions for local and global symbols are
 		// disabled if a period/dot is detected and the character on the left is not a space.
@@ -563,7 +563,7 @@ fn (mut ls Vls) completion(id int, params string) {
 		// Imported modules. They will be shown to the user if there is no given
 		// type for filtering the results. Invalid imports are excluded.
 		for imp in file.imports {
-			if imp.syms.len == 0 && (cfg.filter_type == table.Type(0) || imp.mod !in ls.invalid_imports[file_uri.str()]) {	
+			if imp.syms.len == 0 && (cfg.filter_type == table.Type(0) || imp.mod !in ls.invalid_imports[file_uri.str()]) {
 				completion_items << lsp.CompletionItem{
 					label: imp.alias
 					kind: .module_
@@ -632,10 +632,10 @@ fn (mut ls Vls) completion(id int, params string) {
 	}
 
 	// After that, it will send the list to the client.
-	ls.send(json.encode(jsonrpc.Response<[]lsp.CompletionItem>{
+	ls.send(jsonrpc.Response<[]lsp.CompletionItem>{
 		id: id
 		result: completion_items
-	}))
+	})
 	unsafe {
 		completion_items.free()
 		modules_aliases.free()
