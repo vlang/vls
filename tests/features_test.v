@@ -74,12 +74,6 @@ fn test_formatting() {
 			continue
 		}
 		content_lines := content.split_into_lines()
-		exp_content := os.read_file(exp_file_path) or {
-			bench.fail()
-			eprintln(bench.step_message_fail('file $exp_file_path is missing'))
-			assert false
-			continue
-		}
 		// open document
 		req, doc_id := open_document(mut io, test_file_path, content)
 		ls.dispatch(req)
@@ -92,6 +86,12 @@ fn test_formatting() {
 			continue
 		} else {
 			assert errors.len == 0
+		}
+		exp_content := os.read_file(exp_file_path) or {
+			bench.fail()
+			eprintln(bench.step_message_fail('file $exp_file_path is missing'))
+			assert false
+			continue
 		}
 		// initiate formatting request
 		ls.dispatch(io.request_with_params('textDocument/formatting', lsp.DocumentFormattingParams{
