@@ -65,6 +65,7 @@ fn test_formatting() {
 	}
 	bench.set_total_expected_steps(test_files.len)
 	for test_file_path in test_files {
+		bench.step()
 		exp_file_path := test_file_path.replace('.vv', '.out')
 		content := os.read_file(test_file_path) or {
 			bench.fail()
@@ -117,7 +118,6 @@ fn test_formatting() {
 		ls.dispatch(io.request_with_params('textDocument/didClose', lsp.DidCloseTextDocumentParams{
 			text_document: doc_id
 		}))
-		bench.step()
 	}
 	bench.stop()
 }
@@ -134,6 +134,7 @@ fn test_document_symbols() {
 
 	bench.set_total_expected_steps(test_files.len)
 	for test_file_path in test_files {
+		bench.step()
 		test_name := os.base(test_file_path)
 		content := os.read_file(test_file_path) or {
 			bench.fail()
@@ -165,7 +166,6 @@ fn test_document_symbols() {
 		ls.dispatch(io.request_with_params('textDocument/didClose', lsp.DidCloseTextDocumentParams{
 			text_document: doc_id
 		}))
-		bench.step()
 	}
 	bench.stop()
 }
@@ -229,6 +229,7 @@ fn test_completion() {
 	
 	bench.set_total_expected_steps(test_files.len)
 	for test_file_path in test_files {
+		bench.step()
 		test_name := os.base(test_file_path)
 		mut has_err := false
 		if test_name !in completion_results {
@@ -271,7 +272,6 @@ fn test_completion() {
 		ls.dispatch(io.request_with_params('textDocument/didClose', lsp.DidCloseTextDocumentParams{
 			text_document: doc_id
 		}))
-		bench.step()
 	}
 	bench.stop()
 }
