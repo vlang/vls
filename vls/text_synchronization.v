@@ -52,7 +52,7 @@ fn (mut ls Vls) did_close(id int, params string) {
 	// - TODO: If a workspace has opened multiple programs with main() function and one of them is closed.
 	// - If a file opened is outside the root path or workspace.
 	// - If there are no remaining files opened on a specific folder.
-	if no_active_files || !uri.starts_with(ls.root_path) {
+	if no_active_files || !uri.starts_with(ls.root_uri) {
 		// clear diagnostics
 		ls.publish_diagnostics(uri, []lsp.Diagnostic{})
 	}
@@ -66,7 +66,7 @@ fn (mut ls Vls) process_file(source string, uri lsp.DocumentUri) {
 	target_dir_uri := os.dir(uri)
 	// ls.log_message(target_dir, .info)
 	scope, mut pref := new_scope_and_pref(target_dir, os.dir(target_dir), os.join_path(target_dir,
-		'modules'))
+		'modules'), ls.root_uri.path())
 	if uri.ends_with('_test.v') {
 		pref.is_test = true
 	}
