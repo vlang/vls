@@ -169,6 +169,7 @@ fn new_scope_and_pref(lookup_paths ...string) (&ast.Scope, &pref.Preferences) {
 		backend: .c
 		os: ._auto
 		lookup_path: lpaths
+		is_shared: true
 	}
 	return scope, prefs
 }
