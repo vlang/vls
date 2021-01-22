@@ -1,5 +1,5 @@
 import vls
-import vls.testing
+import testing
 
 fn init() vls.Vls {
 	mut io := testing.Testio{}

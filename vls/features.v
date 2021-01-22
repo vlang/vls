@@ -342,8 +342,16 @@ fn (mut cfg CompletionItemConfig) completion_items_from_fn(fnn table.Fn, is_meth
 	mut i := 0
 
 	kind := if is_method { lsp.CompletionItemKind.method } else { lsp.CompletionItemKind.function }
-	if fnn.is_generic {
-		insert_text += '<\${$i:T}>'
+	if fnn.generic_names.len > 0 {
+		insert_text += '<'
+		for gi, gn in fnn.generic_names {
+			if gi != 0 {
+				insert_text += ', '
+			}
+			insert_text += '\${$i:$gn}'
+			i++
+		}
+		insert_text += '>'
 	}
 	insert_text += '('
 	for j, param in fnn.params {
