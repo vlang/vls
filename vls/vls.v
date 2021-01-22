@@ -143,9 +143,9 @@ pub fn (ls Vls) status() ServerStatus {
 	return ls.status
 }
 
-// TODO: fn (ls Vls) send<T>(data T) {
-fn (ls Vls) send(data string) {
-	ls.io.send(data)
+fn (ls Vls) send<T>(data T) {
+	str := json.encode(data)
+	ls.io.send(str)
 }
 
 // send_null sends a null result to the client
@@ -238,9 +238,8 @@ pub enum ServerStatus {
 }
 
 [inline]
-fn new_error(code int) string {
-	err := jsonrpc.Response2<string>{
+fn new_error(code int) jsonrpc.Response2<string> {
+	return jsonrpc.Response2<string>{
 		error: jsonrpc.new_response_error(code)
 	}
-	return json.encode(err)
 }

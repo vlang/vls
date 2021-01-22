@@ -33,7 +33,7 @@ fn (mut ls Vls) initialize(id int, params string) {
 	ls.status = .initialized
 	// since builtin is used frequently, they should be parsed first and only once
 	ls.process_builtin()
-	ls.send(json.encode(result))
+	ls.send(result)
 }
 
 fn (mut ls Vls) process_builtin() {

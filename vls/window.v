@@ -1,7 +1,6 @@
 module vls
 
 import lsp
-import json
 import jsonrpc
 
 // log_message sends a window/logMessage notification to the client
@@ -13,7 +12,7 @@ fn (ls Vls) log_message(message string, typ lsp.MessageType) {
 			message: message
 		}
 	}
-	ls.send(json.encode(result))
+	ls.send(result)
 }
 
 // show_message sends a window/showMessage notification to the client
@@ -25,7 +24,7 @@ fn (ls Vls) show_message(message string, typ lsp.MessageType) {
 			message: message
 		}
 	}
-	ls.send(json.encode(result))
+	ls.send(result)
 }
 
 fn (ls Vls) show_message_request(message string, actions []lsp.MessageActionItem, typ lsp.MessageType) {
@@ -37,5 +36,5 @@ fn (ls Vls) show_message_request(message string, actions []lsp.MessageActionItem
 			actions: actions
 		}
 	}
-	ls.send(json.encode(result))
+	ls.send(result)
 }
