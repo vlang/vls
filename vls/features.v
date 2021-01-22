@@ -240,6 +240,8 @@ fn (mut cfg CompletionItemConfig) completion_items_from_expr(expr ast.Expr) []ls
 
 	match expr {
 		ast.SelectorExpr {
+			cfg.show_global = false
+			
 			// If the expr_type is zero and the ident is a
 			// module, then it should include a list of public
 			// symbols of that module.
@@ -374,7 +376,15 @@ fn (mut cfg CompletionItemConfig) completion_items_from_type_info(name string, t
 	mut completion_items := []lsp.CompletionItem{}
 	match type_info {
 		table.Struct {
-			if !fields_only {
+			if fields_only {
+				for field in type_info.fields {
+					completion_items << lsp.CompletionItem{
+						label: field.name
+						kind: .field
+						insert_text: field.name
+					}
+				}
+			} else {
 				mut insert_text := '$name{\n'
 				mut i := type_info.fields.len - 1
 				for field in type_info.fields {
@@ -390,14 +400,6 @@ fn (mut cfg CompletionItemConfig) completion_items_from_type_info(name string, t
 					kind: .struct_
 					insert_text: insert_text
 					insert_text_format: .snippet
-				}
-			} else {
-				for field in type_info.fields {
-					completion_items << lsp.CompletionItem{
-						label: field.name
-						kind: .field
-						insert_text: field.name
-					}
 				}
 			}
 		}

@@ -17,7 +17,7 @@ pub const completion_positions = {
 	'blank.vv':               lsp.Position{0, 0}
 	'import.vv':              lsp.Position{2, 7}
 	'incomplete_module.vv':   lsp.Position{0, 7}
-	'incomplete_selector.vv': lsp.Position{8, 6}
+	'incomplete_selector.vv': lsp.Position{12, 7}
 	'local_results.vv':       lsp.Position{5, 2}
 	'struct_init.vv':         lsp.Position{8, 16}
 }
@@ -86,6 +86,7 @@ pub const completion_results = {
 			label: 'lol'
 			kind: .method
 			insert_text: 'lol()'
+			insert_text_format: .snippet
 		},
 	]
 	'local_results.vv':       [
