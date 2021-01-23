@@ -241,7 +241,7 @@ fn (mut cfg CompletionItemConfig) completion_items_from_expr(expr ast.Expr) []ls
 	match expr {
 		ast.SelectorExpr {
 			cfg.show_global = false
-			
+
 			// If the expr_type is zero and the ident is a
 			// module, then it should include a list of public
 			// symbols of that module.
@@ -569,6 +569,7 @@ fn (mut ls Vls) completion(id int, params string) {
 				completion_items << lsp.CompletionItem{
 					label: imp.alias
 					kind: .module_
+					insert_text: imp.alias
 				}
 			}
 		}

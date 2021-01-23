@@ -9,6 +9,7 @@ pub const completion_contexts = {
 	'incomplete_module.vv':   lsp.CompletionContext{.invoked, ''}
 	'incomplete_selector.vv': lsp.CompletionContext{.trigger_character, '.'}
 	'local_results.vv':       lsp.CompletionContext{.invoked, ''}
+	'module_symbols_selector.vv': lsp.CompletionContext{.trigger_character, '.'}
 	'struct_init.vv':         lsp.CompletionContext{.trigger_character, '{'}
 }
 
@@ -19,6 +20,7 @@ pub const completion_positions = {
 	'incomplete_module.vv':   lsp.Position{0, 7}
 	'incomplete_selector.vv': lsp.Position{12, 7}
 	'local_results.vv':       lsp.Position{5, 2}
+	'module_symbols_selector.vv': lsp.Position{5, 7}
 	'struct_init.vv':         lsp.Position{8, 16}
 }
 
@@ -101,6 +103,7 @@ pub const completion_results = {
 			insert_text: 'bar'
 		},
 	]
+	'module_symbols_selector.vv': []lsp.CompletionItem{}
 	'struct_init.vv':         [
 		lsp.CompletionItem{
 			label: 'name:'
