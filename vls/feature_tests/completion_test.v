@@ -10,6 +10,7 @@ const completion_contexts = {
 	'assign.vv':              lsp.CompletionContext{.trigger_character, ' '}
 	'blank.vv':               lsp.CompletionContext{.invoked, ''}
 	'call_args.vv':						lsp.CompletionContext{.invoked, ''}
+	'enum_val_in_struct.vv':	lsp.CompletionContext{.trigger_character, ' '}
 	'import.vv':              lsp.CompletionContext{.trigger_character, ' '}
 	'incomplete_module.vv':   lsp.CompletionContext{.invoked, ''}
 	'incomplete_selector.vv': lsp.CompletionContext{.trigger_character, '.'}
@@ -22,6 +23,7 @@ const completion_positions = {
 	'assign.vv':              lsp.Position{6, 7}
 	'blank.vv':               lsp.Position{0, 0}
 	'call_args.vv':						lsp.Position{10, 14}
+	'enum_val_in_struct.vv':	lsp.Position{14, 20}
 	'import.vv':              lsp.Position{2, 7}
 	'incomplete_module.vv':   lsp.Position{0, 7}
 	'incomplete_selector.vv': lsp.Position{12, 6}
@@ -65,6 +67,28 @@ const completion_results = {
 			label: 'sample_num2'
 			kind: .variable
 			insert_text: 'sample_num2'
+		},
+	]
+	'enum_val_in_struct.vv':						[
+		lsp.CompletionItem{
+			label: '.golden_retriever'
+			kind: .enum_member
+			insert_text: '.golden_retriever'
+		},
+		lsp.CompletionItem{
+			label: '.beagle'
+			kind: .enum_member
+			insert_text: '.beagle'
+		},
+		lsp.CompletionItem{
+			label: '.chihuahua'
+			kind: .enum_member
+			insert_text: '.chihuahua'
+		},
+		lsp.CompletionItem{
+			label: '.dalmatian'
+			kind: .enum_member
+			insert_text: '.dalmatian'
 		},
 	]
 	'import.vv':              [

@@ -1,0 +1,16 @@
+module main
+
+enum Breed {
+  golden_retriever
+  beagle
+  chihuahua
+  dalmatian
+}
+
+struct Dog {
+  breed Breed
+}
+
+fn main() {
+  baz := Dog{breed: }
+}

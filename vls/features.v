@@ -545,6 +545,7 @@ fn (mut ls Vls) completion(id int, params string) {
 	// received by the server if the user presses one of the server-defined trigger
 	// characters [dot, parenthesis, curly brace, etc.]
 	if ctx.trigger_kind == .trigger_character {
+		// NOTE: DO NOT REMOVE YET ~ @ned
 		// // The offset is adjusted and the suggestions for local and global symbols are
 		// // disabled if a period/dot is detected and the character on the left is not a space.
 		// if ctx.trigger_character == '.' && (cfg.offset - 1 >= 0 && src[cfg.offset - 1] != ` `) {
