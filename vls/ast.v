@@ -16,15 +16,6 @@ pub fn find_ast_by_pos(nodes []ast.Node, offset int) ?ast.Node {
 	for node in nodes {
 		walker.inspect(node, data, fn (node ast.Node, mut data FindNodeByPos) bool {
 			node_pos := node.position()
-			// match node {
-			// 	ast.Expr {
-			// 		println(typeof(node))
-			// 	}
-			// 	ast.Stmt {
-			// 		println(typeof(node))
-			// 	}
-			// 	else {}
-			// }
 			if node is ast.Expr {
 				expr := node
 				if node is ast.SelectorExpr {
