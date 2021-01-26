@@ -67,7 +67,7 @@ mut:
 	// break another module/project data.
 	// tables  map[DocumentUri]&table.Table
 	tables           map[string]&table.Table
-	root_path        lsp.DocumentUri
+	root_uri        lsp.DocumentUri
 	invalid_imports  map[string][]string // where it stores a list of invalid imports
 	doc_symbols      map[string][]lsp.SymbolInformation // doc_symbols is used for caching document symbols
 	builtin_symbols  []string // list of publicly available symbols in builtin
@@ -176,6 +176,7 @@ fn new_scope_and_pref(lookup_paths ...string) (&ast.Scope, &pref.Preferences) {
 		backend: .c
 		os: ._auto
 		lookup_path: lpaths
+		is_shared: true
 	}
 	return scope, prefs
 }

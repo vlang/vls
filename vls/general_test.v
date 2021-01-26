@@ -1,5 +1,5 @@
 import vls
-import vls.testing
+import testing
 import lsp
 import json
 

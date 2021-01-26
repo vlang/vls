@@ -58,7 +58,7 @@ fn (ls Vls) formatting(id int, params string) {
 fn (mut ls Vls) workspace_symbol(id int, params string) {
 	mut symbols := []lsp.SymbolInformation{}
 	for file_uri, file in ls.files {
-		if !file_uri.starts_with(ls.root_path.str()) {
+		if !file_uri.starts_with(ls.root_uri.str()) {
 			continue
 		}
 		symbols << ls.generate_symbols(file, file_uri)
@@ -344,8 +344,16 @@ fn (mut cfg CompletionItemConfig) completion_items_from_fn(fnn table.Fn, is_meth
 	mut i := 0
 
 	kind := if is_method { lsp.CompletionItemKind.method } else { lsp.CompletionItemKind.function }
-	if fnn.is_generic {
-		insert_text += '<\${$i:T}>'
+	if fnn.generic_names.len > 0 {
+		insert_text += '<'
+		for gi, gn in fnn.generic_names {
+			if gi != 0 {
+				insert_text += ', '
+			}
+			insert_text += '\${$i:$gn}'
+			i++
+		}
+		insert_text += '>'
 	}
 	insert_text += '('
 	for j, param in fnn.params {
