@@ -89,6 +89,7 @@ pub fn load_test_file_paths(folder_name string) ?[]string {
 		filtered << os.join_path(target_path, path)
 	}
 	unsafe { dir.free() }
+	filtered.sort()
 	return filtered
 }
 
