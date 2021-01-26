@@ -1,11 +1,12 @@
-module workspace_symbols
-
+import vls
+import vls.testing
+import json
 import lsp
 import os
 
-const base_dir = os.dir(@FILE)
+const base_dir = os.join_path(os.dir(@FILE), 'test_files', 'workspace_symbols')
 
-pub const workspace_symbols_result = [
+const workspace_symbols_result = [
 	lsp.SymbolInformation{
 		name: 'main'
 		kind: .function
@@ -40,3 +41,25 @@ pub const workspace_symbols_result = [
 		}
 	}
 ]
+
+
+fn test_workspace_symbols() {
+	mut io := testing.Testio{}
+	mut ls := vls.new(io)
+	ls.dispatch(io.request('initialize'))
+	files := testing.load_test_file_paths('workspace_symbols') or {
+		assert false
+		return
+	}
+	for file_path in files {
+		content := os.read_file(file_path) or {
+			assert false
+			continue
+		}
+		// open document
+		req, _ := io.open_document(file_path, content)
+		ls.dispatch(req)
+	}
+	ls.dispatch(io.request_with_params('workspace/symbol', lsp.WorkspaceSymbolParams{}))
+	assert io.result() == json.encode(workspace_symbols_result)
+}

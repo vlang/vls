@@ -1,10 +1,12 @@
-module document_symbols
-
+import vls
+import vls.testing
+import json
 import lsp
+import os
 
 // file_uris will be replaced inside the test case
 // because the uri may be different in each platform
-pub const doc_symbols_result = {
+const doc_symbols_result = {
 	'simple.vv': [
 		lsp.SymbolInformation{
 			name: 'Uri'
@@ -77,4 +79,49 @@ pub const doc_symbols_result = {
 			}
 		}
 	]
+}
+
+fn test_document_symbols() {
+	mut io := testing.Testio{}
+	mut ls := vls.new(io)
+	ls.dispatch(io.request('initialize'))
+	test_files := testing.load_test_file_paths('document_symbols') or {
+		assert false
+		return
+	}
+
+	io.bench.set_total_expected_steps(test_files.len)
+	for test_file_path in test_files {
+		io.bench.step()
+		test_name := os.base(test_file_path)
+		content := os.read_file(test_file_path) or {
+			io.bench.fail()
+			eprintln(io.bench.step_message_fail('file $test_file_path is missing'))
+			assert false
+			continue
+		}
+		// open document
+		req, doc_id := io.open_document(test_file_path, content)
+		ls.dispatch(req)
+		// initiate formatting request
+		ls.dispatch(io.request_with_params('textDocument/documentSymbol', lsp.DocumentFormattingParams{
+			text_document: doc_id
+		}))
+		// compare content
+		eprintln(io.bench.step_message('Testing $test_file_path'))
+		result := doc_symbols_result[test_name].map(lsp.SymbolInformation{
+			name: it.name
+			kind: it.kind
+			location: lsp.Location{
+				uri: doc_id.uri
+				range: it.location.range
+			}
+		})
+		assert io.result() == json.encode(result)
+		io.bench.ok()
+		println(io.bench.step_message_ok(test_name))
+		// Delete document
+		ls.dispatch(io.close_document(doc_id))
+	}
+	io.bench.stop()
 }

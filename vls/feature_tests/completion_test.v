@@ -1,8 +1,10 @@
-module completion
-
+import vls
+import vls.testing
+import json
 import lsp
+import os
 
-pub const completion_contexts = {
+const completion_contexts = {
 	'assign.vv':              lsp.CompletionContext{.trigger_character, ' '}
 	'blank.vv':               lsp.CompletionContext{.invoked, ''}
 	'import.vv':              lsp.CompletionContext{.trigger_character, ' '}
@@ -13,7 +15,7 @@ pub const completion_contexts = {
 	'struct_init.vv':         lsp.CompletionContext{.trigger_character, '{'}
 }
 
-pub const completion_positions = {
+const completion_positions = {
 	'assign.vv':              lsp.Position{6, 8}
 	'blank.vv':               lsp.Position{0, 0}
 	'import.vv':              lsp.Position{2, 7}
@@ -24,7 +26,7 @@ pub const completion_positions = {
 	'struct_init.vv':         lsp.Position{8, 16}
 }
 
-pub const completion_results = {
+const completion_results = {
 	'assign.vv':              [
 		lsp.CompletionItem{
 			label: 'two'
@@ -118,4 +120,57 @@ pub const completion_results = {
 			insert_text: 'age: \$0'
 		},
 	]
+}
+
+fn test_completion() {
+	mut io := testing.Testio{}
+	mut ls := vls.new(io)
+	ls.dispatch(io.request('initialize'))
+
+	test_files := testing.load_test_file_paths('completion') or {
+		assert false
+		return
+	}
+	
+	io.bench.set_total_expected_steps(test_files.len)
+	for test_file_path in test_files {
+		io.bench.step()
+		test_name := os.base(test_file_path)
+		mut err_msg := ''
+		if test_name !in completion_results {
+			err_msg = 'missing results for $test_name'
+		} else if test_name !in completion_contexts{
+			err_msg = 'missing context data for $test_name'
+		} else if test_name !in completion_positions {
+			err_msg = 'missing position data for $test_name'
+		}
+		if err_msg.len > 0 {
+			io.bench.fail()
+			eprintln(io.bench.step_message_fail(err_msg))
+			assert false
+		}
+		content := os.read_file(test_file_path) or {
+			io.bench.fail()
+			eprintln(io.bench.step_message_fail('file $test_file_path is missing'))
+			assert false
+			return
+		}
+		// open document
+		req, doc_id := io.open_document(test_file_path, content)
+		ls.dispatch(req)
+		// initiate completion request
+		ls.dispatch(io.request_with_params('textDocument/completion', lsp.CompletionParams{
+			text_document: doc_id
+			position: completion_positions[test_name]
+			context: completion_contexts[test_name]
+		}))
+		// compare content
+		eprintln(io.bench.step_message('Testing $test_file_path'))
+		assert io.result() == json.encode(completion_results[test_name])
+		io.bench.ok()
+		println(io.bench.step_message_ok(test_name))
+		// Delete document
+		ls.dispatch(io.close_document(doc_id))
+	}
+	io.bench.stop()
 }
