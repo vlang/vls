@@ -96,6 +96,7 @@ fn (mut ls Vls) process_file(source string, uri lsp.DocumentUri) {
 	}
 }
 
+// NOTE: once builder.find_module_path is extracted, simplify parse_imports
 fn (mut ls Vls) parse_imports(parsed_files []ast.File, table &table.Table, pref &pref.Preferences, scope &ast.Scope) ([]ast.File, []errors.Error) {
 	mut newly_parsed_files := []ast.File{}
 	mut errs := []errors.Error{}

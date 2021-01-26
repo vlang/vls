@@ -4,9 +4,12 @@ import json
 import lsp
 import os
 
+// NOTE: skip module_symbols_selector for now, see note in text_synchronization.v#parse_imports 
+
 const completion_contexts = {
 	'assign.vv':              lsp.CompletionContext{.trigger_character, ' '}
 	'blank.vv':               lsp.CompletionContext{.invoked, ''}
+	'call_args.vv':						lsp.CompletionContext{.invoked, ''}
 	'import.vv':              lsp.CompletionContext{.trigger_character, ' '}
 	'incomplete_module.vv':   lsp.CompletionContext{.invoked, ''}
 	'incomplete_selector.vv': lsp.CompletionContext{.trigger_character, '.'}
@@ -16,13 +19,14 @@ const completion_contexts = {
 }
 
 const completion_positions = {
-	'assign.vv':              lsp.Position{6, 8}
+	'assign.vv':              lsp.Position{6, 7}
 	'blank.vv':               lsp.Position{0, 0}
+	'call_args.vv':						lsp.Position{10, 14}
 	'import.vv':              lsp.Position{2, 7}
 	'incomplete_module.vv':   lsp.Position{0, 7}
-	'incomplete_selector.vv': lsp.Position{12, 7}
+	'incomplete_selector.vv': lsp.Position{12, 6}
 	'local_results.vv':       lsp.Position{5, 2}
-	'module_symbols_selector.vv': lsp.Position{5, 7}
+	'module_symbols_selector.vv': lsp.Position{5, 6}
 	'struct_init.vv':         lsp.Position{8, 16}
 }
 
@@ -49,6 +53,18 @@ const completion_results = {
 			label: 'module completion'
 			kind: .variable
 			insert_text: 'module completion'
+		},
+	]
+	'call_args.vv':						[
+		lsp.CompletionItem{
+			label: 'sample_num'
+			kind: .variable
+			insert_text: 'sample_num'
+		},
+		lsp.CompletionItem{
+			label: 'sample_num2'
+			kind: .variable
+			insert_text: 'sample_num2'
 		},
 	]
 	'import.vv':              [
@@ -105,7 +121,19 @@ const completion_results = {
 			insert_text: 'bar'
 		},
 	]
-	'module_symbols_selector.vv': []lsp.CompletionItem{}
+	'module_symbols_selector.vv': [
+		lsp.CompletionItem{
+			label: 'Point'
+			kind: .struct_
+			insert_text: 'Point{}'
+		},
+		lsp.CompletionItem{
+			label: 'this_is_a_function'
+			kind: .function
+			insert_text: 'this_is_a_function()'
+			insert_text_format: .snippet
+		},
+	]
 	'struct_init.vv':         [
 		lsp.CompletionItem{
 			label: 'name:'
@@ -125,7 +153,9 @@ const completion_results = {
 fn test_completion() {
 	mut io := testing.Testio{}
 	mut ls := vls.new(io)
-	ls.dispatch(io.request('initialize'))
+	ls.dispatch(io.request_with_params('initialize', lsp.InitializeParams{
+		root_uri: lsp.document_uri_from_path(os.join_path(os.dir(@FILE), 'test_files', 'completion'))
+	}))
 
 	test_files := testing.load_test_file_paths('completion') or {
 		assert false

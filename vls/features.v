@@ -241,6 +241,7 @@ fn (mut cfg CompletionItemConfig) completion_items_from_expr(expr ast.Expr) []ls
 	match expr {
 		ast.SelectorExpr {
 			cfg.show_global = false
+			cfg.show_local = false
 
 			// If the expr_type is zero and the ident is a
 			// module, then it should include a list of public
@@ -544,13 +545,13 @@ fn (mut ls Vls) completion(id int, params string) {
 	// received by the server if the user presses one of the server-defined trigger
 	// characters [dot, parenthesis, curly brace, etc.]
 	if ctx.trigger_kind == .trigger_character {
-		// The offset is adjusted and the suggestions for local and global symbols are
-		// disabled if a period/dot is detected and the character on the left is not a space.
-		if ctx.trigger_character == '.' && (cfg.offset - 1 >= 0 && src[cfg.offset - 1] != ` `) {
-			cfg.show_global = false
-			cfg.show_local = false
-			cfg.offset -= 2
-		}
+		// // The offset is adjusted and the suggestions for local and global symbols are
+		// // disabled if a period/dot is detected and the character on the left is not a space.
+		// if ctx.trigger_character == '.' && (cfg.offset - 1 >= 0 && src[cfg.offset - 1] != ` `) {
+		// 	cfg.show_global = false
+		// 	cfg.show_local = false
+		// 	cfg.offset -= 2
+		// }
 
 		// Once the offset has been finalized it will then search for the AST node and
 		// extract it's data using the corresponding methods depending on the node type.
@@ -589,8 +590,8 @@ fn (mut ls Vls) completion(id int, params string) {
 			for _, obj in scope.objects {
 				mut name := ''
 				match obj {
-					ast.ConstField, ast.Var {		
-						if cfg.filter_type == table.Type(0) && obj.typ == cfg.filter_type {
+					ast.ConstField, ast.Var {
+						if cfg.filter_type != table.Type(0) && obj.typ != cfg.filter_type {
 							continue
 						}
 						name = obj.name
