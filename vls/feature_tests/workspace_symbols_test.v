@@ -39,9 +39,8 @@ const workspace_symbols_result = [
 				end: lsp.Position{8, 21}
 			}
 		}
-	}
+	},
 ]
-
 
 fn test_workspace_symbols() {
 	mut io := testing.Testio{}

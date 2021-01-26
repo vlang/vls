@@ -77,7 +77,7 @@ const doc_symbols_result = {
 					end: lsp.Position{26, 9}
 				}
 			}
-		}
+		},
 	]
 }
 

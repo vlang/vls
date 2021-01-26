@@ -1,5 +1,5 @@
 import vls
-import testing
+import vls.testing
 import lsp
 import json
 
@@ -46,8 +46,7 @@ fn test_set_features() {
 	ls.set_features(['formatting'], false)
 	assert ls.features() == [.diagnostics, .document_symbol, .workspace_symbol, .completion]
 	ls.set_features(['formatting'], true)
-	assert ls.features() ==
-		[.diagnostics, .document_symbol, .workspace_symbol, .completion, .formatting]
+	assert ls.features() == [.diagnostics, .document_symbol, .workspace_symbol, .completion, .formatting]
 	ls.set_features(['logging'], true) or {
 		assert err == 'feature "logging" not found'
 		return

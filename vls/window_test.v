@@ -1,6 +1,6 @@
 import vls
 import lsp
-import testing
+import vls.testing
 import json
 
 const (

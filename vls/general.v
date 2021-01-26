@@ -15,7 +15,15 @@ fn (mut ls Vls) initialize(id int, params string) {
 	ls.capabilities = lsp.ServerCapabilities{
 		text_document_sync: 1
 		completion_provider: lsp.CompletionOptions{
-			trigger_characters: if Feature.completion !in ls.enabled_features { []string{} } else { ['=', '.', ':', '{', ',', '(', ' '] }
+			trigger_characters: if Feature.completion !in ls.enabled_features { []string{} } else { [
+					'=',
+					'.',
+					':',
+					'{',
+					',',
+					'(',
+					' ',
+				] }
 			resolve_provider: false
 		}
 		workspace_symbol_provider: Feature.workspace_symbol in ls.enabled_features

@@ -4,7 +4,7 @@ import v.ast
 import v.ast.walker
 
 struct FindNodeByPos {
-	pos  int
+	pos int
 mut:
 	node ast.Node
 }

@@ -30,8 +30,8 @@ pub struct CodeActionContext {
 }
 
 pub struct CodeAction {
-	title       string
-	kind        string
+	title string
+	kind  string
 	// CodeActionKind
 	diagnostics []Diagnostic
 	edit        WorkspaceEdit

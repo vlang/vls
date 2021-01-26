@@ -70,7 +70,7 @@ pub const (
 )
 
 pub struct MarkupContent {
-	kind  string
+	kind string
 	// MarkupKind
 	value string
 }

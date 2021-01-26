@@ -18,13 +18,13 @@ const diagnostics_result = lsp.PublishDiagnosticsParams{
 			}
 		},
 		lsp.Diagnostic{
-			message: 'module \'os\' is imported but never used'
+			message: "module 'os' is imported but never used"
 			severity: .warning
 			range: lsp.Range{
 				start: lsp.Position{2, 7}
 				end: lsp.Position{2, 9}
 			}
-		}
+		},
 	]
 }
 

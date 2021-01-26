@@ -34,7 +34,7 @@ pub:
 
 pub struct SignatureInformation {
 pub mut:
-	label      string
+	label string
 	// document: string | MarkedContent
 	document   string                 [raw]
 	parameters []ParameterInformation
@@ -42,7 +42,7 @@ pub mut:
 
 pub struct ParameterInformation {
 	// label string | [int, int]
-	label    string [raw]
+	label string [raw]
 	// document: string | MarkedContent
 	document string
 }

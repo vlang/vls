@@ -25,7 +25,7 @@ mut:
 	has_decoded    bool
 	response       TestResponse // parsed response data from raw_response
 pub mut:
-	bench					 benchmark.Benchmark = benchmark.new_benchmark()
+	bench        benchmark.Benchmark = benchmark.new_benchmark()
 	raw_response string // raw JSON string of the response data
 }
 
@@ -79,7 +79,7 @@ fn (mut io Testio) decode_response() ? {
 pub const test_files_dir = os.join_path(os.dir(os.dir(@FILE)), 'feature_tests', 'test_files')
 
 pub fn load_test_file_paths(folder_name string) ?[]string {
-	target_path := os.join_path(test_files_dir, folder_name)
+	target_path := os.join_path(testing.test_files_dir, folder_name)
 	dir := os.ls(target_path) ?
 	mut filtered := []string{}
 	for path in dir {
@@ -95,14 +95,16 @@ pub fn load_test_file_paths(folder_name string) ?[]string {
 pub fn (mut io Testio) open_document(file_path string, contents string) (string, lsp.TextDocumentIdentifier) {
 	doc_uri := lsp.document_uri_from_path(file_path)
 	req := io.request_with_params('textDocument/didOpen', lsp.DidOpenTextDocumentParams{
-		text_document: lsp.TextDocumentItem {
+		text_document: lsp.TextDocumentItem{
 			uri: doc_uri
 			language_id: 'v'
 			version: 1
 			text: contents
 		}
 	})
-	docid := lsp.TextDocumentIdentifier{ uri: doc_uri }
+	docid := lsp.TextDocumentIdentifier{
+		uri: doc_uri
+	}
 	return req, docid
 }
 
@@ -120,7 +122,7 @@ pub fn (mut io Testio) file_errors() ?[]lsp.Diagnostic {
 		if diag.severity != .error {
 			continue
 		}
-		errors << diag		
+		errors << diag
 	}
 	return errors
 }
