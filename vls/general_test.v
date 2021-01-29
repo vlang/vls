@@ -43,9 +43,15 @@ fn test_set_features() {
 	mut io := testing.Testio{}
 	mut ls := vls.new(io)
 	assert ls.features() == vls.default_features_list
-	ls.set_features(['formatting'], false)
+	ls.set_features(['formatting'], false) or {
+		assert false
+		return
+	}
 	assert ls.features() == [.diagnostics, .document_symbol, .workspace_symbol, .completion]
-	ls.set_features(['formatting'], true)
+	ls.set_features(['formatting'], true) or {
+		assert false
+		return
+	}
 	assert ls.features() == [.diagnostics, .document_symbol, .workspace_symbol, .completion, .formatting]
 	ls.set_features(['logging'], true) or {
 		assert err == 'feature "logging" not found'
