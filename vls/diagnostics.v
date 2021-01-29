@@ -23,7 +23,12 @@ pub fn compute_offset(src []byte, line int, col int) int {
 			}
 			src_line++
 			src_col = 0
-			offset++
+			// TODO: add crlf test for this
+			if is_crlf {
+				offset += 2
+			} else {
+				offset++
+			}
 			continue
 		}
 		src_col++
