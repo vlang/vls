@@ -70,7 +70,7 @@ fn (mut ls Vls) process_file(source string, uri lsp.DocumentUri) {
 	if uri.ends_with('_test.v') {
 		pref.is_test = true
 	}
-	table := if target_dir_uri in ls.tables { ls.tables[target_dir_uri] } else { ls.new_table() }
+	table := ls.new_table()
 	mut parsed_files := []ast.File{}
 	mut checker := checker.new_checker(table, pref)
 	mod_dir := os.dir(file_path)
