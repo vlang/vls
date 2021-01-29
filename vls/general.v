@@ -49,6 +49,9 @@ fn (mut ls Vls) process_builtin() {
 	mut builtin_files := os.ls(builtin_path) or { panic(err) }
 	builtin_files = pref.should_compile_filtered_files(builtin_path, builtin_files)
 	parsed_files := parser.parse_files(builtin_files, ls.base_table, pref, scope)
+	// This part extracts the symbols for the builtin module
+	// for use in autocompletion. This is disabled in test mode in
+	// order to simplify the testing output in autocompletion test.
 	$if !test {
 		for file in parsed_files {
 			for stmt in file.stmts {
