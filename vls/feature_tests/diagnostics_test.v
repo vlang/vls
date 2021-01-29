@@ -38,7 +38,8 @@ fn test_diagnostics() {
 	}
 	for file_path in files {
 		content := os.read_file(file_path) or {
-			assert false
+			io.bench.fail()
+			eprintln(io.bench.step_message_fail('file $file_path is missing'))
 			continue
 		}
 		// open document

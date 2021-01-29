@@ -197,12 +197,10 @@ fn test_completion() {
 		root_uri: lsp.document_uri_from_path(os.join_path(os.dir(@FILE), 'test_files',
 			'completion'))
 	}))
-
 	test_files := testing.load_test_file_paths('completion') or {
 		assert false
 		return
 	}
-
 	io.bench.set_total_expected_steps(test_files.len)
 	for test_file_path in test_files {
 		io.bench.step()
@@ -217,13 +215,12 @@ fn test_completion() {
 		if err_msg.len != 0 {
 			io.bench.fail()
 			eprintln(io.bench.step_message_fail(err_msg))
-			assert false
+			continue
 		}
 		content := os.read_file(test_file_path) or {
 			io.bench.fail()
 			eprintln(io.bench.step_message_fail('file $test_file_path is missing'))
-			assert false
-			return
+			continue
 		}
 		// open document
 		req, doc_id := io.open_document(test_file_path, content)
@@ -236,10 +233,13 @@ fn test_completion() {
 		// compare content
 		println(io.bench.step_message('Testing $test_file_path'))
 		assert io.result() == json.encode(completion_results[test_name])
-		io.bench.ok()
-		println(io.bench.step_message_ok(test_name))
 		// Delete document
 		ls.dispatch(io.close_document(doc_id))
+		io.bench.ok()
+		println(io.bench.step_message_ok(test_name))
+	}
+	if io.bench.nfail != 0 {
+		assert false
 	}
 	io.bench.stop()
 }

@@ -89,7 +89,6 @@ fn test_document_symbols() {
 		assert false
 		return
 	}
-
 	io.bench.set_total_expected_steps(test_files.len)
 	for test_file_path in test_files {
 		io.bench.step()
@@ -97,7 +96,6 @@ fn test_document_symbols() {
 		content := os.read_file(test_file_path) or {
 			io.bench.fail()
 			eprintln(io.bench.step_message_fail('file $test_file_path is missing'))
-			assert false
 			continue
 		}
 		// open document
@@ -122,6 +120,9 @@ fn test_document_symbols() {
 		println(io.bench.step_message_ok(test_name))
 		// Delete document
 		ls.dispatch(io.close_document(doc_id))
+	}
+	if io.bench.nfail != 0 {
+		assert false
 	}
 	io.bench.stop()
 }
