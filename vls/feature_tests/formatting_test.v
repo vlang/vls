@@ -48,7 +48,7 @@ fn test_formatting() {
 			text_document: doc_id
 		}))
 		// compare content
-		eprintln(io.bench.step_message('Testing $test_file_path'))
+		println(io.bench.step_message('Testing $test_file_path'))
 		assert io.result() == json.encode([lsp.TextEdit{
 			range: lsp.Range{
 				start: lsp.Position{

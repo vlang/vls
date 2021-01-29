@@ -219,7 +219,7 @@ fn test_completion() {
 			context: completion_contexts[test_name]
 		}))
 		// compare content
-		eprintln(io.bench.step_message('Testing $test_file_path'))
+		println(io.bench.step_message('Testing $test_file_path'))
 		assert io.result() == json.encode(completion_results[test_name])
 		io.bench.ok()
 		println(io.bench.step_message_ok(test_name))

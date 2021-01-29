@@ -108,7 +108,7 @@ fn test_document_symbols() {
 			text_document: doc_id
 		}))
 		// compare content
-		eprintln(io.bench.step_message('Testing $test_file_path'))
+		println(io.bench.step_message('Testing $test_file_path'))
 		result := doc_symbols_result[test_name].map(lsp.SymbolInformation{
 			name: it.name
 			kind: it.kind
