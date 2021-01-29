@@ -19,7 +19,6 @@ fn test_formatting() {
 		content := os.read_file(test_file_path) or {
 			io.bench.fail()
 			eprintln(io.bench.step_message_fail('file $test_file_path is missing'))
-			assert false
 			continue
 		}
 		content_lines := content.split_into_lines()
@@ -27,8 +26,9 @@ fn test_formatting() {
 		req, doc_id := io.open_document(test_file_path, content)
 		ls.dispatch(req)
 		errors := io.file_errors() or {
-			assert false
-			return
+			io.bench.fail()
+			eprintln(io.bench.step_message_fail('file $test_file_path has errors'))
+			continue
 		}
 		if test_file_path.ends_with('error.vv') {
 			assert errors.len > 0
@@ -40,7 +40,6 @@ fn test_formatting() {
 		exp_content := os.read_file(exp_file_path) or {
 			io.bench.fail()
 			eprintln(io.bench.step_message_fail('file $exp_file_path is missing'))
-			assert false
 			continue
 		}
 		// initiate formatting request
@@ -66,6 +65,9 @@ fn test_formatting() {
 		println(io.bench.step_message_ok(os.base(test_file_path)))
 		// Delete document
 		ls.dispatch(io.close_document(doc_id))
+	}
+	if io.bench.nfail != 0 {
+		assert false
 	}
 	io.bench.stop()
 }
