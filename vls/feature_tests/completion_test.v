@@ -5,30 +5,47 @@ import lsp
 import os
 
 // NOTE: skip module_symbols_selector for now, see note in text_synchronization.v#parse_imports 
-const completion_contexts = {
-	'assign.vv':                  lsp.CompletionContext{.trigger_character, ' '}
-	'blank.vv':                   lsp.CompletionContext{.invoked, ''}
-	'call_args.vv':               lsp.CompletionContext{.invoked, ''}
-	'enum_val_in_struct.vv':      lsp.CompletionContext{.trigger_character, ' '}
-	'import.vv':                  lsp.CompletionContext{.trigger_character, ' '}
-	'incomplete_module.vv':       lsp.CompletionContext{.invoked, ''}
-	'incomplete_selector.vv':     lsp.CompletionContext{.trigger_character, '.'}
-	'local_results.vv':           lsp.CompletionContext{.invoked, ''}
-	'module_symbols_selector.vv': lsp.CompletionContext{.trigger_character, '.'}
-	'struct_init.vv':             lsp.CompletionContext{.trigger_character, '{'}
-}
-
-const completion_positions = {
-	'assign.vv':                  lsp.Position{6, 7}
-	'blank.vv':                   lsp.Position{0, 0}
-	'call_args.vv':               lsp.Position{10, 14}
-	'enum_val_in_struct.vv':      lsp.Position{14, 20}
-	'import.vv':                  lsp.Position{2, 7}
-	'incomplete_module.vv':       lsp.Position{0, 7}
-	'incomplete_selector.vv':     lsp.Position{12, 6}
-	'local_results.vv':           lsp.Position{5, 2}
-	'module_symbols_selector.vv': lsp.Position{5, 6}
-	'struct_init.vv':             lsp.Position{8, 16}
+const completion_inputs = {
+	'assign.vv':                  lsp.CompletionParams{
+		context: lsp.CompletionContext{.trigger_character, ' '}
+		position: lsp.Position{6, 7}
+	}
+	'blank.vv':                   lsp.CompletionParams{
+		context: lsp.CompletionContext{.invoked, ''}
+		position: lsp.Position{0, 0}
+	}
+	'call_args.vv':               lsp.CompletionParams{
+		context: lsp.CompletionContext{.invoked, ''}
+		position: lsp.Position{10, 14}
+	}
+	'enum_val_in_struct.vv':      lsp.CompletionParams{
+		context: lsp.CompletionContext{.trigger_character, ' '}
+		position: lsp.Position{14, 20}
+	}
+	'import.vv':                  lsp.CompletionParams{
+		context: lsp.CompletionContext{.trigger_character, ' '}
+		position: lsp.Position{2, 7}
+	}
+	'incomplete_module.vv':       lsp.CompletionParams{
+		context: lsp.CompletionContext{.invoked, ''}
+		position: lsp.Position{0, 7}
+	}
+	'incomplete_selector.vv':     lsp.CompletionParams{
+		context: lsp.CompletionContext{.trigger_character, '.'}
+		position: lsp.Position{12, 6}
+	}
+	'local_results.vv':           lsp.CompletionParams{
+		context: lsp.CompletionContext{.invoked, ''}
+		position: lsp.Position{5, 2}
+	}
+	'module_symbols_selector.vv': lsp.CompletionParams{
+		context: lsp.CompletionContext{.trigger_character, '.'}
+		position: lsp.Position{5, 6}
+	}
+	'struct_init.vv':             lsp.CompletionParams{
+		context: lsp.CompletionContext{.trigger_character, '{'}
+		position: lsp.Position{8, 16}
+	}
 }
 
 const completion_results = {
@@ -190,15 +207,14 @@ fn test_completion() {
 	for test_file_path in test_files {
 		io.bench.step()
 		test_name := os.base(test_file_path)
-		mut err_msg := ''
-		if test_name !in completion_results {
-			err_msg = 'missing results for $test_name'
-		} else if test_name !in completion_contexts {
-			err_msg = 'missing context data for $test_name'
-		} else if test_name !in completion_positions {
-			err_msg = 'missing position data for $test_name'
+		mut err_msg := if test_name !in completion_results {
+			'missing results for $test_name'
+		} else if test_name !in completion_inputs {
+			'missing input data for $test_name'
+		} else {
+			''
 		}
-		if err_msg.len > 0 {
+		if err_msg.len != 0 {
 			io.bench.fail()
 			eprintln(io.bench.step_message_fail(err_msg))
 			assert false
@@ -214,9 +230,8 @@ fn test_completion() {
 		ls.dispatch(req)
 		// initiate completion request
 		ls.dispatch(io.request_with_params('textDocument/completion', lsp.CompletionParams{
+			...completion_inputs[test_name]
 			text_document: doc_id
-			position: completion_positions[test_name]
-			context: completion_contexts[test_name]
 		}))
 		// compare content
 		println(io.bench.step_message('Testing $test_file_path'))
