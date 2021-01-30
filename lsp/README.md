@@ -1,5 +1,5 @@
 # LSP.V
-Implementation of the Language Server Protocol spec on V. For use on the [VLS](https://github.com/nedpals/vls) language server.
+Type declaration module of the Language Server Protocol 3.15 spec. For use on the [V Language Server](https://github.com/vlang/vls).
 
 ## Roadmap
 ### General
@@ -60,10 +60,5 @@ Implementation of the Language Server Protocol spec on V. For use on the [VLS](h
 - [x] `rename`
 - [x] `prepareRename`
 - [x] `foldingRange`
-    
-    
-## OTHER TODO
-~~- Transfer structs and enums on `structs.v` to its appropriate designated files.~~
-- Generalize file structure (Merging small content-files with bigger ones)
 
-#### 2020 Ned Palacios
+#### 2020-2021 Ned Palacios
