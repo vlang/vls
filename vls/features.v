@@ -8,7 +8,6 @@ import v.fmt
 import v.table
 import v.parser
 import v.pref
-import v.token
 import os
 
 fn (ls Vls) formatting(id int, params string) {
@@ -652,135 +651,163 @@ fn (mut ls Vls) completion(id int, params string) {
 	}
 }
 
+struct HoverConfig {
+mut:
+	src									[]byte
+	file                ast.File
+	offset              int        // position of the cursor. used for finding the AST node
+	table               &table.Table
+	is_var							bool
+}
 
+fn (mut cfg HoverConfig) hover_from_stmt(node ast.Stmt) ?lsp.Hover {
+	mut pos := node.position()
+	match node {
+		ast.Return {
+			return none
+		}
+		ast.AssignStmt {
+			// transfer this code to v.ast module
+			mut left_pos := node.left[0].position()
+			for i, p in node.left {
+				if i == 0 { continue }
+				left_pos = left_pos.extend(p.position())
+			}
+			pos = left_pos.extend(pos)
+		}
+		else {}
+	}
+	return lsp.Hover{
+		contents: lsp.MarkedString{
+			language: 'v'
+			value: node.str()
+		}
+		range: position_to_lsp_range(cfg.src, pos)
+	}
+}
+
+fn (mut cfg HoverConfig) hover_from_expr(node ast.Expr) ?lsp.Hover {
+	match node {
+		ast.Ident {
+			obj := cfg.file.scope.innermost(cfg.offset)
+			obj_node := obj.find_var(node.name) ?
+			range := position_to_lsp_range(cfg.src, node.pos)
+			typ_name := cfg.table.type_to_str(obj_node.typ).all_after('main.')
+			return lsp.Hover{
+				contents: lsp.MarkedString{
+					language: 'v'
+					value: if obj_node.is_mut { 'mut ${obj_node.name} $typ_name' } else { '${obj_node.name} $typ_name' }
+				}
+				range: range
+			}
+		}
+		ast.SelectorExpr {
+			if node.expr is ast.Ident || (cfg.offset >= node.pos.pos && cfg.offset <= node.pos.pos + node.pos.len) {
+				range := position_to_lsp_range(cfg.src, node.pos)
+				typ_name := cfg.table.type_to_str(node.typ).all_after('main.')
+				parent_name := if node.expr_type != table.Type(0) { cfg.table.type_to_str(node.expr_type).all_after('main.') + '.' } else { '' }
+				field_name := '$parent_name${node.field_name}'
+
+				return lsp.Hover{
+					contents: lsp.MarkedString{
+						language: 'v'
+						value: if node.is_mut { 'mut $field_name $typ_name' } else { '$field_name $typ_name' }
+					}
+					range: range
+				}
+			}
+
+			cfg.is_var = true
+			return cfg.hover_from_expr(node.expr)
+		}
+		else {
+			return lsp.Hover{
+				contents: lsp.MarkedString{
+					language: 'v'
+					value: node.str()
+				}
+				range: position_to_lsp_range(cfg.src, node.position())
+			}
+		}
+	}
+}
 
 fn (ls Vls) hover(id int, params string) {
 	hover_params := json.decode(lsp.HoverParams, params) or { panic(err) }
 	uri := hover_params.text_document.uri
+	pos := hover_params.position
 	src := ls.sources[uri.str()]
-	offset := compute_offset(src, hover_params.position.line, hover_params.position.character)
-	file_ast := ls.files[uri.str()]
-	table := ls.tables[os.dir(uri.str())]
-	node := find_ast_by_pos(file_ast.stmts.map(ast.Node(it)), offset) or {
+
+	mut cfg := HoverConfig{
+		src: src
+		file: ls.files[uri.str()]
+		table: ls.tables[os.dir(uri.str())]
+		offset: compute_offset(src, pos.line, pos.character)
+	}
+
+	node := find_ast_by_pos(cfg.file.stmts.map(ast.Node(it)), cfg.offset) or {
 		ls.send_null(id)
 		return
 	}
-	obj := file_ast.scope.innermost(offset)
 
+	mut hover_data := lsp.Hover{}
 	match node {
 		ast.Stmt {
-			if node is ast.Return {
+			hover_data = cfg.hover_from_stmt(node) or {
 				ls.send_null(id)
 				return
 			}
-			mut pos := node.position()
-			// transfer this code to v.ast module
-			if node is ast.AssignStmt {
-				mut left_pos := node.left[0].position()
-				for i, p in node.left {
-					if i == 0 { continue }
-					left_pos = left_pos.extend(p.position())
-				}
-				pos = left_pos.extend(pos)
-			}
-			range := position_to_lsp_range(src, pos)
-			ls.send(jsonrpc.Response<lsp.Hover>{
-				id: id
-				result: lsp.Hover{
-					contents: lsp.MarkedString{
-						language: 'v'
-						value: node.str()
-					}
-					range: range
-				}
-			})
-			return
 		}
 		ast.Expr {
-			if node is ast.Ident {
-				if obj_node := obj.find_var(node.name) {
-					range := position_to_lsp_range(src, ast.Node(ast.ScopeObject(obj_node)).position())
-					typ_name := table.type_to_str(obj_node.typ)
-
-					ls.send(jsonrpc.Response<lsp.Hover>{
-						id: id
-						result: lsp.Hover{
-							contents: lsp.MarkedString{
-								language: 'v'
-								value: if obj_node.is_mut { 'mut ${obj_node.name} $typ_name' } else { '${obj_node.name} $typ_name' }
-							}
-							range: range
-						}
-					})
-					return
-				}
+			hover_data = cfg.hover_from_expr(node) or {
+				ls.send_null(id)
+				return
 			}
-			//  else if node is ast.SelectorExpr {
-				
-			// }
-			range := position_to_lsp_range(src, node.position())
-			ls.send(jsonrpc.Response<lsp.Hover>{
-				id: id
-				result: lsp.Hover{
-					contents: lsp.MarkedString{
-						language: 'v'
-						value: node.str()
-					}
-					range: range
-				}
-			})
-			return
 		}
 		ast.StructField {
 			range := position_to_lsp_range(src, node.pos.extend(node.type_pos))
-			typ_name := table.type_to_str(node.typ)
-
-			ls.send(jsonrpc.Response<lsp.Hover>{
-				id: id
-				result: lsp.Hover{
-					contents: lsp.MarkedString{
-						language: 'v'
-						value: '${node.name} $typ_name'
-					}
-					range: range
+			typ_name := cfg.table.type_to_str(node.typ).all_after('main.')
+			hover_data = lsp.Hover{
+				contents: lsp.MarkedString{
+					language: 'v'
+					value: '${node.name} $typ_name'
 				}
-			})
+				range: range
+			}
 		}
 		ast.StructInitField {
 			range := position_to_lsp_range(src, node.pos)
-			typ_name := table.type_to_str(node.expected_type)
-
-			ls.send(jsonrpc.Response<lsp.Hover>{
-				id: id
-				result: lsp.Hover{
-					contents: lsp.MarkedString{
-						language: 'v'
-						value: '${node.name} $typ_name'
-					}
-					range: range
+			typ_name := cfg.table.type_to_str(node.expected_type).all_after('main.')
+			hover_data = lsp.Hover{
+				contents: lsp.MarkedString{
+					language: 'v'
+					value: '${node.name} $typ_name'
 				}
-			})
+				range: range
+			}
 		}
 		table.Param {
-			if obj_node := obj.find_var(node.name) {
-				range := position_to_lsp_range(src, node.pos.extend(node.type_pos))
-				typ_name := table.type_to_str(obj_node.typ)
-
-				ls.send(jsonrpc.Response<lsp.Hover>{
-					id: id
-					result: lsp.Hover{
-						contents: lsp.MarkedString{
-							language: 'v'
-							value: if obj_node.is_mut { 'mut ${obj_node.name} $typ_name' } else { '${obj_node.name} $typ_name' }
-						}
-						range: range
-					}
-				})
+			obj_node := cfg.file.scope.innermost(cfg.offset).find_var(node.name) or {
+				ls.send_null(id)
 				return
+			}
+			range := position_to_lsp_range(src, node.pos.extend(node.type_pos))
+			typ_name := cfg.table.type_to_str(obj_node.typ).all_after('main.')
+			hover_data = lsp.Hover{
+				contents: lsp.MarkedString{
+					language: 'v'
+					value: if obj_node.is_mut { 'mut ${obj_node.name} $typ_name' } else { '${obj_node.name} $typ_name' }
+				}
+				range: range
 			}
 		}
 		else {
 			ls.send_null(id)
+			return
 		}
 	}
+	ls.send(jsonrpc.Response<lsp.Hover>{
+		id: id
+		result: hover_data
+	})
 }
