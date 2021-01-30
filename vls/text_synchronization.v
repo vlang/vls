@@ -52,12 +52,13 @@ fn (mut ls Vls) did_close(id int, params string) {
 	// - TODO: If a workspace has opened multiple programs with main() function and one of them is closed.
 	// - If a file opened is outside the root path or workspace.
 	// - If there are no remaining files opened on a specific folder.
-	if no_active_files || !uri.starts_with(ls.root_path) {
+	if no_active_files || !uri.starts_with(ls.root_uri) {
 		// clear diagnostics
 		ls.publish_diagnostics(uri, []lsp.Diagnostic{})
 	}
 }
 
+// TODO: edits must use []lsp.TextEdit instead of string
 fn (mut ls Vls) process_file(source string, uri lsp.DocumentUri) {
 	ls.sources[uri.str()] = source.bytes()
 	file_path := uri.path()
@@ -65,27 +66,20 @@ fn (mut ls Vls) process_file(source string, uri lsp.DocumentUri) {
 	target_dir_uri := os.dir(uri)
 	// ls.log_message(target_dir, .info)
 	scope, mut pref := new_scope_and_pref(target_dir, os.dir(target_dir), os.join_path(target_dir,
-		'modules'))
+		'modules'), ls.root_uri.path())
 	if uri.ends_with('_test.v') {
 		pref.is_test = true
 	}
 	table := ls.new_table()
 	mut parsed_files := []ast.File{}
-	mut has_errors := false
-	parsed_files <<
-		parser.parse_text(source, file_path, table, .skip_comments, pref, scope)
+	mut checker := checker.new_checker(table, pref)
+	mod_dir := os.dir(file_path)
+	cur_mod_files := os.ls(mod_dir) or { [] }
+	other_files := pref.should_compile_filtered_files(mod_dir, cur_mod_files).filter(it != file_path)
+	parsed_files << parser.parse_files(other_files, table, pref, scope)
+	parsed_files << parser.parse_text(source, file_path, table, .skip_comments, pref, scope)
 	imported_files, import_errors := ls.parse_imports(parsed_files, table, pref, scope)
-	parsed_files << imported_files
-	for parsed_file in parsed_files {
-		if parsed_file.errors.len > 0 {
-			has_errors = true
-			break
-		}
-	}
-	if !has_errors {
-		mut checker := checker.new_checker(table, pref)
-		checker.check_files(parsed_files)
-	}
+	checker.check_files(parsed_files)
 	ls.tables[target_dir_uri] = table
 	ls.insert_files(parsed_files)
 	for err in import_errors {

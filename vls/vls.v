@@ -15,6 +15,7 @@ pub enum Feature {
 	document_symbol
 	workspace_symbol
 	signature_help
+	completion
 }
 
 // feature_from_str returns the Feature-enum value equivalent of the given string.
@@ -26,6 +27,7 @@ fn feature_from_str(feature_name string) ?Feature {
 		'document_symbol' { return Feature.document_symbol }
 		'workspace_symbol' { return Feature.workspace_symbol }
 		'signature_help' { return Feature.signature_help }
+		'completion' { return Feature.completion }
 		else { return error('feature "$feature_name" not found') }
 	}
 }
@@ -37,6 +39,7 @@ pub const (
 		.document_symbol,
 		.workspace_symbol,
 		.signature_help,
+		.completion,
 	]
 )
 
@@ -50,13 +53,13 @@ mut:
 	// NB: a base table is required since this is where we
 	// are gonna store the information for the builtin types
 	// which are only parsed once.
-	base_table &table.Table
-	status     ServerStatus = .off
+	base_table       &table.Table
+	status           ServerStatus = .off
 	// TODO: change map key to DocumentUri
 	// files  map[DocumentUri]ast.File
-	files      map[string]ast.File
+	files            map[string]ast.File
 	// sources  map[DocumentUri][]byte
-	sources    map[string][]byte
+	sources          map[string][]byte
 	// NB: a separate table is required for each folder in
 	// order to do functions such as typ_to_string or when
 	// some of the features needed additional information
@@ -66,14 +69,15 @@ mut:
 	// changing and there can be instances that a change might
 	// break another module/project data.
 	// tables  map[DocumentUri]&table.Table
-	tables     map[string]&table.Table
-	root_path  lsp.DocumentUri
-	invalid_imports map[string][]string // where it stores a list of invalid imports
-	doc_symbols     map[string][]lsp.SymbolInformation // doc_symbols is used for caching document symbols
-	enabled_features   []Feature = default_features_list
+	tables           map[string]&table.Table
+	root_uri        lsp.DocumentUri
+	invalid_imports  map[string][]string // where it stores a list of invalid imports
+	doc_symbols      map[string][]lsp.SymbolInformation // doc_symbols is used for caching document symbols
+	builtin_symbols  []string // list of publicly available symbols in builtin
+	enabled_features []Feature = default_features_list
 pub mut:
 	// TODO: replace with io.ReadWriter
-	io         ReceiveSender
+	io               ReceiveSender
 }
 
 pub fn new(io ReceiveSender) Vls {
@@ -111,6 +115,7 @@ pub fn (mut ls Vls) dispatch(payload string) {
 			'textDocument/documentSymbol' { ls.document_symbol(request.id, request.params) }
 			'workspace/symbol' { ls.workspace_symbol(request.id, request.params) }
 			'textDocument/signatureHelp' { ls.signature_help(request.id, request.params) }
+			'textDocument/completion' { ls.completion(request.id, request.params) }
 			else {}
 		}
 	} else {
@@ -135,9 +140,14 @@ pub fn (ls Vls) status() ServerStatus {
 	return ls.status
 }
 
-// TODO: fn (ls Vls) send<T>(data T) {
-fn (ls Vls) send(data string) {
-	ls.io.send(data)
+fn (ls Vls) send<T>(data T) {
+	str := json.encode(data)
+	ls.io.send(str)
+}
+
+// send_null sends a null result to the client
+fn (ls Vls) send_null(id int) {
+	ls.io.send('{"jsonrpc":"2.0","id":$id,"result":null}')
 }
 
 // start_loop starts an endless loop which waits for stdin and prints responses to the stdout
@@ -163,6 +173,7 @@ fn new_scope_and_pref(lookup_paths ...string) (&ast.Scope, &pref.Preferences) {
 		backend: .c
 		os: ._auto
 		lookup_path: lpaths
+		is_shared: true
 	}
 	return scope, prefs
 }
@@ -225,9 +236,8 @@ pub enum ServerStatus {
 }
 
 [inline]
-fn new_error(code int) string {
-	err := jsonrpc.Response2<string>{
+fn new_error(code int) jsonrpc.Response2<string> {
+	return jsonrpc.Response2<string>{
 		error: jsonrpc.new_response_error(code)
 	}
-	return json.encode(err)
 }
