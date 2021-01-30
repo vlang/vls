@@ -1,6 +1,5 @@
 module vls
 
-import v.token
 import v.table
 import v.ast
 import v.pref
@@ -75,7 +74,6 @@ mut:
 	doc_symbols      map[string][]lsp.SymbolInformation // doc_symbols is used for caching document symbols
 	builtin_symbols  []string // list of publicly available symbols in builtin
 	enabled_features []Feature = default_features_list
-	tokens					 map[string][]token.Token
 pub mut:
 	// TODO: replace with io.ReadWriter
 	io               ReceiveSender
