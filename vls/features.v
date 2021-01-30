@@ -666,25 +666,34 @@ fn (ls Vls) token_search(pos int, tokens []token.Token) ?token.Token {
 fn (ls Vls) hover(id int, params string) {
 	hover_params := json.decode(lsp.HoverParams, params) or { panic(err) }
 	uri := hover_params.text_document.uri
-	pos := hover_params.position
 	src := ls.sources[uri.str()]
-	offset := compute_offset(src, pos.line, pos.character)
-	// tokens := ls.tokens[uri.str()]
+	offset := compute_offset(src, hover_params.position.line, hover_params.position.character)
 	file_ast := ls.files[uri.str()]
-	// tok := ls.token_search(offset, tokens) or {
-	// 	ls.send_null(id)
-	// 	return
-	// }
-
+	table := ls.tables[os.dir(uri.str())]
 	node := find_ast_by_pos(file_ast.stmts.map(ast.Node(it)), offset) or {
 		ls.send_null(id)
 		return
 	}
+	obj := file_ast.scope.innermost(offset)
 
 	match node {
 		ast.Stmt {
-			range := position_to_lsp_range(src, node.position())
-			result := jsonrpc.Response<lsp.Hover>{
+			if node is ast.Return {
+				ls.send_null(id)
+				return
+			}
+			mut pos := node.position()
+			// transfer this code to v.ast module
+			if node is ast.AssignStmt {
+				mut left_pos := node.left[0].position()
+				for i, p in node.left {
+					if i == 0 { continue }
+					left_pos = left_pos.extend(p.position())
+				}
+				pos = left_pos.extend(pos)
+			}
+			range := position_to_lsp_range(src, pos)
+			ls.send(jsonrpc.Response<lsp.Hover>{
 				id: id
 				result: lsp.Hover{
 					contents: lsp.MarkedString{
@@ -693,13 +702,33 @@ fn (ls Vls) hover(id int, params string) {
 					}
 					range: range
 				}
-			}
-			ls.send(json.encode(result))
+			})
 			return
 		}
 		ast.Expr {
+			if node is ast.Ident {
+				if obj_node := obj.find_var(node.name) {
+					range := position_to_lsp_range(src, ast.Node(ast.ScopeObject(obj_node)).position())
+					typ_name := table.type_to_str(obj_node.typ)
+
+					ls.send(jsonrpc.Response<lsp.Hover>{
+						id: id
+						result: lsp.Hover{
+							contents: lsp.MarkedString{
+								language: 'v'
+								value: if obj_node.is_mut { 'mut ${obj_node.name} $typ_name' } else { '${obj_node.name} $typ_name' }
+							}
+							range: range
+						}
+					})
+					return
+				}
+			}
+			//  else if node is ast.SelectorExpr {
+				
+			// }
 			range := position_to_lsp_range(src, node.position())
-			result := jsonrpc.Response<lsp.Hover>{
+			ls.send(jsonrpc.Response<lsp.Hover>{
 				id: id
 				result: lsp.Hover{
 					contents: lsp.MarkedString{
@@ -708,28 +737,59 @@ fn (ls Vls) hover(id int, params string) {
 					}
 					range: range
 				}
-			}
-			ls.send(json.encode(result))
+			})
 			return
 		}
-		else {}
-	}
+		ast.StructField {
+			range := position_to_lsp_range(src, node.pos.extend(node.type_pos))
+			typ_name := table.type_to_str(node.typ)
 
-	ls.send_null(id)
-	// tok_range := position_to_lsp_range(src, { pos: tok.pos, len: tok.len, line_nr: tok.line_nr-1 })
-	// if tok.lit.len > 0 {
-	// 	result := jsonrpc.Response<lsp.Hover>{
-	// 		id: id
-	// 		result: lsp.Hover{
-	// 			contents: lsp.MarkedString{
-	// 				language: 'v'
-	// 				value: tok.lit.str()
-	// 			}
-	// 			range: tok_range
-	// 		}
-	// 	}
-	// 	ls.send(json.encode(result))
-	// } else {
-	// 	ls.send('null')
-	// }
+			ls.send(jsonrpc.Response<lsp.Hover>{
+				id: id
+				result: lsp.Hover{
+					contents: lsp.MarkedString{
+						language: 'v'
+						value: '${node.name} $typ_name'
+					}
+					range: range
+				}
+			})
+		}
+		ast.StructInitField {
+			range := position_to_lsp_range(src, node.pos)
+			typ_name := table.type_to_str(node.expected_type)
+
+			ls.send(jsonrpc.Response<lsp.Hover>{
+				id: id
+				result: lsp.Hover{
+					contents: lsp.MarkedString{
+						language: 'v'
+						value: '${node.name} $typ_name'
+					}
+					range: range
+				}
+			})
+		}
+		table.Param {
+			if obj_node := obj.find_var(node.name) {
+				range := position_to_lsp_range(src, node.pos.extend(node.type_pos))
+				typ_name := table.type_to_str(obj_node.typ)
+
+				ls.send(jsonrpc.Response<lsp.Hover>{
+					id: id
+					result: lsp.Hover{
+						contents: lsp.MarkedString{
+							language: 'v'
+							value: if obj_node.is_mut { 'mut ${obj_node.name} $typ_name' } else { '${obj_node.name} $typ_name' }
+						}
+						range: range
+					}
+				})
+				return
+			}
+		}
+		else {
+			ls.send_null(id)
+		}
+	}
 }
