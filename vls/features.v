@@ -652,16 +652,7 @@ fn (mut ls Vls) completion(id int, params string) {
 	}
 }
 
-fn (ls Vls) token_search(pos int, tokens []token.Token) ?token.Token {
-	for tok in tokens {
-		if tok.kind == .comment { continue }
-		if pos >= tok.pos && pos <= tok.pos + tok.len {
-			return tok
-		}
-	}
 
-	return error('token not found')
-}
 
 fn (ls Vls) hover(id int, params string) {
 	hover_params := json.decode(lsp.HoverParams, params) or { panic(err) }
