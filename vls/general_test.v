@@ -28,7 +28,7 @@ fn test_initialize_with_capabilities() {
 	status := ls.status()
 	assert status == .initialized
 	assert io.response ==
-		'{"jsonrpc":"2.0","id":1,"result":{"capabilities":{"textDocumentSync":1,"hoverProvider":false,"completionProvider":{"resolveProvider":false,"triggerCharacters":["=",".",":","{",",","("," "]},"signatureHelpProvider":{"triggerCharacters":[],"retriggerCharacters":[]},"definitionProvider":false,"typeDefinitionProvider":false,"implementationProvider":false,"referencesProvider":false,"documentHightlightProvider":false,"documentSymbolProvider":true,"workspaceSymbolProvider":true,"codeActionProvider":false,"codeLensProvider":{"resolveProvider":false},"documentFormattingProvider":true,"documentOnTypeFormattingProvider":{"moreTriggerCharacter":[]},"renameProvider":false,"documentLinkProvider":false,"colorProvider":false,"declarationProvider":false,"executeCommandProvider":"","experimental":{}}}}'
+		'{"jsonrpc":"2.0","id":1,"result":{"capabilities":{"textDocumentSync":1,"hoverProvider":false,"completionProvider":{"resolveProvider":false,"triggerCharacters":["=",".",":","{",",","("," "]},"signatureHelpProvider":{"triggerCharacters":["("],"retriggerCharacters":[","]},"definitionProvider":false,"typeDefinitionProvider":false,"implementationProvider":false,"referencesProvider":false,"documentHightlightProvider":false,"documentSymbolProvider":true,"workspaceSymbolProvider":true,"codeActionProvider":false,"codeLensProvider":{"resolveProvider":false},"documentFormattingProvider":true,"documentOnTypeFormattingProvider":{"moreTriggerCharacter":[]},"renameProvider":false,"documentLinkProvider":false,"colorProvider":false,"declarationProvider":false,"executeCommandProvider":"","experimental":{}}}}'
 }
 
 fn test_initialized() {
@@ -55,12 +55,12 @@ fn test_set_features() {
 		assert false
 		return
 	}
-	assert ls.features() == [.diagnostics, .document_symbol, .workspace_symbol, .completion]
+	assert ls.features() == [.diagnostics, .document_symbol, .workspace_symbol, .signature_help, .completion]
 	ls.set_features(['formatting'], true) or {
 		assert false
 		return
 	}
-	assert ls.features() == [.diagnostics, .document_symbol, .workspace_symbol, .completion, .formatting]
+	assert ls.features() == [.diagnostics, .document_symbol, .workspace_symbol, .signature_help, .completion, .formatting]
 	ls.set_features(['logging'], true) or {
 		assert err == 'feature "logging" not found'
 		return
