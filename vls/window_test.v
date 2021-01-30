@@ -1,6 +1,6 @@
 import vls
 import lsp
-import vls.testing
+import testing
 
 fn test_log_message() {
 	mut io := testing.Testio{}

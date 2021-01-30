@@ -70,7 +70,7 @@ mut:
 	// break another module/project data.
 	// tables  map[DocumentUri]&table.Table
 	tables           map[string]&table.Table
-	root_path        lsp.DocumentUri
+	root_uri        lsp.DocumentUri
 	invalid_imports  map[string][]string // where it stores a list of invalid imports
 	doc_symbols      map[string][]lsp.SymbolInformation // doc_symbols is used for caching document symbols
 	builtin_symbols  []string // list of publicly available symbols in builtin
@@ -141,9 +141,9 @@ pub fn (ls Vls) status() ServerStatus {
 	return ls.status
 }
 
-// TODO: fn (ls Vls) send<T>(data T) {
-fn (ls Vls) send(data string) {
-	ls.io.send(data)
+fn (ls Vls) send<T>(data T) {
+	str := json.encode(data)
+	ls.io.send(str)
 }
 
 // send_null sends a null result to the client
@@ -174,6 +174,7 @@ fn new_scope_and_pref(lookup_paths ...string) (&ast.Scope, &pref.Preferences) {
 		backend: .c
 		os: ._auto
 		lookup_path: lpaths
+		is_shared: true
 	}
 	return scope, prefs
 }
@@ -236,9 +237,8 @@ pub enum ServerStatus {
 }
 
 [inline]
-fn new_error(code int) string {
-	err := jsonrpc.Response2<string>{
+fn new_error(code int) jsonrpc.Response2<string> {
+	return jsonrpc.Response2<string>{
 		error: jsonrpc.new_response_error(code)
 	}
-	return json.encode(err)
 }
