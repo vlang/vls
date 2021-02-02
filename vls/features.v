@@ -27,7 +27,7 @@ fn (ls Vls) formatting(id int, params string) {
 		return
 	}
 	source_lines := source.split_into_lines()
-	formatted_content := fmt.fmt(file_ast, table, false)
+	formatted_content := fmt.fmt(file_ast, table, prefs, false)
 	resp := jsonrpc.Response<[]lsp.TextEdit>{
 		id: id
 		result: [lsp.TextEdit{
