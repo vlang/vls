@@ -6,12 +6,12 @@ import benchmark
 import lsp
 
 const compute_offset_inputs = {
-	'crlf.crlf.vv': [3, 22]
+	'crlf.vv': [3, 22]
 	'lf.vv':   [2, 14]
 }
 
 const compute_offset_results = {
-	'crlf.crlf.vv': 55
+	'crlf.vv': 55
 	'lf.vv':   41
 }
 
