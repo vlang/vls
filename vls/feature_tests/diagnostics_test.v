@@ -48,10 +48,8 @@ fn test_diagnostics() {
 		req, _ := io.open_document(file_path, content)
 		ls.dispatch(req)
 	}
-	method, params := io.notification() or {
-		assert false
-		return
-	}
+	method, params := io.notification() or { '', '{}' }
+	diagnostic_params := json.decode(lsp.PublishDiagnosticsParams, params) or { lsp.PublishDiagnosticsParams{} }
 	assert method == 'textDocument/publishDiagnostics'
-	assert params == json.encode(diagnostics_result)
+	assert diagnostic_params == diagnostics_result
 }
