@@ -207,7 +207,7 @@ fn test_completion() {
 	for test_file_path in test_files {
 		io.bench.step()
 		test_name := os.base(test_file_path)
-		mut err_msg := if test_name !in completion_results {
+		err_msg := if test_name !in completion_results {
 			'missing results for $test_name'
 		} else if test_name !in completion_inputs {
 			'missing input data for $test_name'

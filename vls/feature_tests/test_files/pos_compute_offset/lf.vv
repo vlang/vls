@@ -1,0 +1,4 @@
+module main
+fn lf_test() {
+    test := 123
+}

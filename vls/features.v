@@ -561,10 +561,14 @@ fn (mut ls Vls) completion(id int, params string) {
 		// Once the offset has been finalized it will then search for the AST node and
 		// extract it's data using the corresponding methods depending on the node type.
 		node := find_ast_by_pos(file.stmts.map(ast.Node(it)), cfg.offset) or { ast.Node{} }
-		if node is ast.Stmt {
-			completion_items << cfg.completion_items_from_stmt(node)
-		} else if node is ast.Expr {
-			completion_items << cfg.completion_items_from_expr(node)
+		match node {
+			ast.Stmt {
+				completion_items << cfg.completion_items_from_stmt(node)
+			}
+			ast.Expr {
+				completion_items << cfg.completion_items_from_expr(node)
+			}
+			else {}
 		}
 	} else if ctx.trigger_kind == .invoked && (file.stmts.len == 0 || src.len <= 3) {
 		// When a V file is empty, a list of `module $name` suggsestions will be displayed.

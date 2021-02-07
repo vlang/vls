@@ -1,0 +1,4 @@
+fn with_last_line() {
+  test := 123
+  name := 'hello'
+}
