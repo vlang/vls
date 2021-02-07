@@ -86,6 +86,8 @@ fn test_document_symbols() {
 	mut ls := vls.new(io)
 	ls.dispatch(io.request('initialize'))
 	test_files := testing.load_test_file_paths('document_symbols') or {
+		io.bench.fail()
+		eprintln(io.bench.step_message_fail(err))
 		assert false
 		return
 	}

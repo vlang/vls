@@ -33,6 +33,8 @@ fn test_diagnostics() {
 	mut ls := vls.new(io)
 	ls.dispatch(io.request('initialize'))
 	files := testing.load_test_file_paths('diagnostics') or {
+		io.bench.fail()
+		eprintln(io.bench.step_message_fail(err))
 		assert false
 		return
 	}

@@ -198,6 +198,8 @@ fn test_completion() {
 			'completion'))
 	}))
 	test_files := testing.load_test_file_paths('completion') or {
+		io.bench.fail()
+		eprintln(io.bench.step_message_fail(err))
 		assert false
 		return
 	}

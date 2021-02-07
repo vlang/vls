@@ -57,6 +57,8 @@ fn test_workspace_symbols() {
 	mut ls := vls.new(io)
 	ls.dispatch(io.request('initialize'))
 	files := testing.load_test_file_paths('workspace_symbols') or {
+		io.bench.fail()
+		eprintln(io.bench.step_message_fail(err))
 		assert false
 		return
 	}
