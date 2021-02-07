@@ -27,7 +27,7 @@ fn (ls Vls) formatting(id int, params string) {
 		return
 	}
 	source_lines := source.split_into_lines()
-	formatted_content := fmt.fmt(file_ast, table, false)
+	formatted_content := fmt.fmt(file_ast, table, prefs, false)
 	resp := jsonrpc.Response<[]lsp.TextEdit>{
 		id: id
 		result: [lsp.TextEdit{
@@ -55,7 +55,7 @@ fn (ls Vls) formatting(id int, params string) {
 	}
 }
 
-fn (mut ls Vls) workspace_symbol(id int, params string) {
+fn (mut ls Vls) workspace_symbol(id int, _ string) {
 	mut symbols := []lsp.SymbolInformation{}
 	for file_uri, file in ls.files {
 		if !file_uri.starts_with(ls.root_uri.str()) {
@@ -328,7 +328,7 @@ fn (mut cfg CompletionItemConfig) completion_items_from_expr(expr ast.Expr) []ls
 }
 
 // completion_items_from_fn returns the list of items extracted from the table.Fn information
-fn (mut cfg CompletionItemConfig) completion_items_from_fn(fnn table.Fn, is_method bool) []lsp.CompletionItem {
+fn (mut _ CompletionItemConfig) completion_items_from_fn(fnn table.Fn, is_method bool) []lsp.CompletionItem {
 	mut completion_items := []lsp.CompletionItem{}
 
 	fn_name := fnn.name.all_after(fnn.mod + '.')
@@ -378,7 +378,7 @@ fn (mut cfg CompletionItemConfig) completion_items_from_fn(fnn table.Fn, is_meth
 }
 
 // completion_items_from_type_info returns the list of items extracted from the type information.
-fn (mut cfg CompletionItemConfig) completion_items_from_type_info(name string, type_info table.TypeInfo, fields_only bool) []lsp.CompletionItem {
+fn (mut _ CompletionItemConfig) completion_items_from_type_info(name string, type_info table.TypeInfo, fields_only bool) []lsp.CompletionItem {
 	mut completion_items := []lsp.CompletionItem{}
 	match type_info {
 		table.Struct {
