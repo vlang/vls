@@ -73,7 +73,7 @@ mut:
 	builtin_symbols     []string // list of publicly available symbols in builtin
 	enabled_features    []Feature = vls.default_features_list
 	capabilities        lsp.ServerCapabilities
-	client_capabilities lsp.ClientCapabilities
+	// client_capabilities lsp.ClientCapabilities
 pub mut:
 	// TODO: replace with io.ReadWriter
 	io ReceiveSender
