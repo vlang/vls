@@ -1,0 +1,3 @@
+*.v linguist-language=V text=auto eol=lf
+*.crlf.vv linguist-language=V text=auto eol=crlf
+*.vv linguist-language=V text=auto eol=lf
