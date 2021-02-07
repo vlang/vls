@@ -49,6 +49,9 @@ fn test_compute_offset() {
 		input := compute_offset_inputs[test_name]
 		expected := compute_offset_results[test_name]
 		result := vls.compute_offset(content, input[0], input[1])
+		if result != expected {
+			println('content (for debugging):' + content[..result].str())
+		}
 		assert result == expected
 		bench.ok()
 		println(bench.step_message_ok(test_name))
