@@ -1,3 +1,2 @@
 *.v linguist-language=V text=auto eol=lf
-*.vv linguist-language=V text=auto eol=lf
 vls/tests/test_files/pos_compute_offset/crlf.vv linguist-language=V text=auto eol=crlf
