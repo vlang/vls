@@ -701,8 +701,27 @@ fn (mut cfg HoverConfig) hover_from_expr(node ast.Expr) ?lsp.Hover {
 				range: range
 			}
 		}
+		ast.CallExpr {
+			mut signature := ''
+			if node.is_method || node.is_field {
+				parent_type_name := cfg.table.type_to_str(node.left_type).all_after('main.')
+				signature += parent_type_name + '.'
+			}
+
+			return_type := cfg.table.type_to_str(node.return_type).all_after('main.')
+			signature += '${node.name}() $return_type'
+			range := position_to_lsp_range(cfg.src, node.pos)
+
+			return lsp.Hover{
+				contents: lsp.MarkedString{
+					language: 'v'
+					value: signature
+				}
+				range: range
+			}
+		}
 		ast.SelectorExpr {
-			if node.expr is ast.Ident || (cfg.offset >= node.pos.pos && cfg.offset <= node.pos.pos + node.pos.len) {
+			if node.expr is ast.Ident || is_within_pos(cfg.offset, node.pos) {
 				range := position_to_lsp_range(cfg.src, node.pos)
 				typ_name := cfg.table.type_to_str(node.typ).all_after('main.')
 				parent_name := if node.expr_type != table.Type(0) { cfg.table.type_to_str(node.expr_type).all_after('main.') + '.' } else { '' }

@@ -19,12 +19,15 @@ pub fn find_ast_by_pos(nodes []ast.Node, offset int) ?ast.Node {
 			node_pos := node.position()
 			if node is ast.Expr {
 				expr := node
-				if node is ast.SelectorExpr {
-					data.node = expr
-					return false
+				match node {
+					ast.SelectorExpr, ast.CallExpr {
+						data.node = expr
+						return false
+					}
+					else {}
 				}
 			}
-			if pos >= node_pos.pos && pos <= node_pos.pos + node_pos.len {
+			if is_within_pos(pos, node_pos) {
 				data.node = node
 				return false
 			}

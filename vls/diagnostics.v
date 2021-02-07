@@ -5,6 +5,10 @@ import jsonrpc
 import v.token
 import v.util
 
+pub fn is_within_pos(offset int, pos token.Position) bool {
+	return offset >= pos.pos && offset <= pos.pos + pos.len
+}
+
 // compute_offset returns a byte offset from the given position
 pub fn compute_offset(src []byte, line int, col int) int {
 	mut offset := 0
