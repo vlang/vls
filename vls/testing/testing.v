@@ -76,7 +76,7 @@ fn (mut io Testio) decode_response() ? {
 	}
 }
 
-pub const test_files_dir = os.join_path(os.dir(os.dir(@FILE)), 'feature_tests', 'test_files')
+pub const test_files_dir = os.join_path(os.dir(os.dir(@FILE)), 'tests', 'test_files')
 
 // load_test_file_paths returns a list of input test file locations.
 pub fn load_test_file_paths(folder_name string) ?[]string {
