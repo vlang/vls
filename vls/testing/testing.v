@@ -38,12 +38,12 @@ pub fn (io Testio) receive() ?string {
 	return ''
 }
 
-// request returns a JSON string of JSON-RPC request with empty parameters
+// request returns a JSON string of JSON-RPC request with empty parameters.
 pub fn (mut io Testio) request(method string) string {
 	return io.request_with_params(method, map[string]string{})
 }
 
-// request_with_params returns a JSON string of JSON-RPC request with parameters
+// request_with_params returns a JSON string of JSON-RPC request with parameters.
 pub fn (mut io Testio) request_with_params<T>(method string, params T) string {
 	enc_params := json.encode(params)
 	payload := '{"jsonrpc":"$jsonrpc.version","id":$io.current_req_id,"method":"$method","params":$enc_params}'
@@ -51,19 +51,19 @@ pub fn (mut io Testio) request_with_params<T>(method string, params T) string {
 	return payload
 }
 
-// result verifies the response result/notification params
+// result verifies the response result/notification params.
 pub fn (mut io Testio) result() string {
 	io.decode_response() or { return '' }
 	return io.response.result
 }
 
-// notification verifies the parameters of the notification
+// notification verifies the parameters of the notification.
 pub fn (io Testio) notification() ?(string, string) {
 	resp := json.decode(TestNotification, io.raw_response) ?
 	return resp.method, resp.params
 }
 
-// response_error verifies the error code and message from the response
+// response_error verifies the error code and message from the response.
 pub fn (mut io Testio) response_error() ?(int, string) {
 	io.decode_response() ?
 	return io.response.error.code, io.response.error.message
@@ -78,9 +78,12 @@ fn (mut io Testio) decode_response() ? {
 
 pub const test_files_dir = os.join_path(os.dir(os.dir(@FILE)), 'feature_tests', 'test_files')
 
+// load_test_file_paths returns a list of input test file locations.
 pub fn load_test_file_paths(folder_name string) ?[]string {
 	target_path := os.join_path(testing.test_files_dir, folder_name)
-	dir := os.ls(target_path) ?
+	dir := os.ls(target_path) or {
+		return error('error loading test files for "$folder_name"')
+	}
 	mut filtered := []string{}
 	for path in dir {
 		if !path.ends_with('.vv') || path.ends_with('_skip.vv') {
@@ -93,6 +96,7 @@ pub fn load_test_file_paths(folder_name string) ?[]string {
 	return filtered
 }
 
+// open_document generates and returns the request data for the `textDocument/didOpen` reqeust.
 pub fn (mut io Testio) open_document(file_path string, contents string) (string, lsp.TextDocumentIdentifier) {
 	doc_uri := lsp.document_uri_from_path(file_path)
 	req := io.request_with_params('textDocument/didOpen', lsp.DidOpenTextDocumentParams{
@@ -109,12 +113,15 @@ pub fn (mut io Testio) open_document(file_path string, contents string) (string,
 	return req, docid
 }
 
+// close_document generates and returns the request data for the `textDocument/didClose` reqeust.
 pub fn (mut io Testio) close_document(doc_id lsp.TextDocumentIdentifier) string {
 	return io.request_with_params('textDocument/didClose', lsp.DidCloseTextDocumentParams{
 		text_document: doc_id
 	})
 }
 
+// file_errors parses and returns the list of file errors received
+// from the server after executing the `textDocument/didOpen` request.
 pub fn (mut io Testio) file_errors() ?[]lsp.Diagnostic {
 	mut errors := []lsp.Diagnostic{}
 	_, diag_params := io.notification() ?
