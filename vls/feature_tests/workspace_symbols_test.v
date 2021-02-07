@@ -71,11 +71,8 @@ fn test_workspace_symbols() {
 		req, _ := io.open_document(file_path, content)
 		ls.dispatch(req)
 	}
-	if io.bench.nfail == 0 {
-		ls.dispatch(io.request_with_params('workspace/symbol', lsp.WorkspaceSymbolParams{}))
-		assert io.result() == json.encode(workspace_symbols_result)
-	} else {
-		assert false
-	}
+	assert io.bench.nfail == 0
+	ls.dispatch(io.request_with_params('workspace/symbol', lsp.WorkspaceSymbolParams{}))
+	assert io.result() == json.encode(workspace_symbols_result)
 	io.bench.stop()
 }

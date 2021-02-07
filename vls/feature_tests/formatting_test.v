@@ -68,8 +68,6 @@ fn test_formatting() {
 		// Delete document
 		ls.dispatch(io.close_document(doc_id))
 	}
-	if io.bench.nfail != 0 {
-		assert false
-	}
+	assert io.bench.nfail == 0
 	io.bench.stop()
 }

@@ -240,8 +240,6 @@ fn test_completion() {
 		io.bench.ok()
 		println(io.bench.step_message_ok(test_name))
 	}
-	if io.bench.nfail != 0 {
-		assert false
-	}
+	assert io.bench.nfail == 0
 	io.bench.stop()
 }
