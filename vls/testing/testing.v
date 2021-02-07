@@ -91,6 +91,9 @@ pub fn load_test_file_paths(folder_name string) ?[]string {
 	}
 	unsafe { dir.free() }
 	filtered.sort()
+	if filtered.len == 0 {
+		return error('no test files found for "$folder_name"')
+	}
 	return filtered
 }
 
