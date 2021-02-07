@@ -230,7 +230,8 @@ fn (mut cfg CompletionItemConfig) completion_items_from_table(mod_name string, s
 			if type_sym.mod != mod_name {
 				continue
 			}
-			completion_items << cfg.completion_items_from_type_info(name, type_sym.info, false)
+			completion_items << cfg.completion_items_from_type_info(name, type_sym.info,
+				false)
 		}
 	}
 	return completion_items
@@ -263,14 +264,16 @@ fn (mut cfg CompletionItemConfig) completion_items_from_expr(expr ast.Expr) []ls
 				type_sym := cfg.table.get_type_symbol(expr.expr_type)
 
 				// Include the list of available struct fields based on the type info
-				completion_items << cfg.completion_items_from_type_info('', type_sym.info, true)
+				completion_items << cfg.completion_items_from_type_info('', type_sym.info,
+					true)
 
 				// If the expr_type is an array or map type, it should
 				// include the fields and methods of map/array type.
 				if type_sym.kind == .array || type_sym.kind == .map {
 					base_symbol_name := if type_sym.kind == .array { 'array' } else { 'map' }
 					if base_type_sym := cfg.table.find_type(base_symbol_name) {
-						completion_items << cfg.completion_items_from_type_info('', base_type_sym.info, true)
+						completion_items << cfg.completion_items_from_type_info('', base_type_sym.info,
+							true)
 					}
 				}
 				// Include all the type methods
@@ -302,7 +305,8 @@ fn (mut cfg CompletionItemConfig) completion_items_from_expr(expr ast.Expr) []ls
 				// NB: enable local results only if the node is a field
 				cfg.show_local = true
 				field_type_sym := cfg.table.get_type_symbol(field_node.expected_type)
-				completion_items << cfg.completion_items_from_type_info('', field_type_sym.info, field_type_sym.info is table.Enum)
+				completion_items << cfg.completion_items_from_type_info('', field_type_sym.info,
+					field_type_sym.info is table.Enum)
 				cfg.filter_type = field_node.expected_type
 			} else {
 				// if structinit is empty or not within the field position,
@@ -444,7 +448,8 @@ fn (cfg CompletionItemConfig) completion_items_from_dir(dir string, dir_contents
 		subdir_contents := os.ls(full_path) or { []string{} }
 		mod_name := if prefix.len > 0 { '${prefix}.$name' } else { name }
 		if name == 'modules' {
-			completion_items << cfg.completion_items_from_dir(full_path, subdir_contents, mod_name)
+			completion_items << cfg.completion_items_from_dir(full_path, subdir_contents,
+				mod_name)
 			continue
 		}
 		completion_items << lsp.CompletionItem{
@@ -452,7 +457,8 @@ fn (cfg CompletionItemConfig) completion_items_from_dir(dir string, dir_contents
 			kind: .folder
 			insert_text: mod_name
 		}
-		completion_items << cfg.completion_items_from_dir(full_path, subdir_contents, mod_name)
+		completion_items << cfg.completion_items_from_dir(full_path, subdir_contents,
+			mod_name)
 	}
 	return completion_items
 }

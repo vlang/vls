@@ -49,7 +49,9 @@ fn test_diagnostics() {
 		ls.dispatch(req)
 	}
 	method, params := io.notification() or { '', '{}' }
-	diagnostic_params := json.decode(lsp.PublishDiagnosticsParams, params) or { lsp.PublishDiagnosticsParams{} }
+	diagnostic_params := json.decode(lsp.PublishDiagnosticsParams, params) or {
+		lsp.PublishDiagnosticsParams{}
+	}
 	assert method == 'textDocument/publishDiagnostics'
 	assert diagnostic_params == diagnostics_result
 }

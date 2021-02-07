@@ -81,9 +81,7 @@ pub const test_files_dir = os.join_path(os.dir(os.dir(@FILE)), 'feature_tests', 
 // load_test_file_paths returns a list of input test file locations.
 pub fn load_test_file_paths(folder_name string) ?[]string {
 	target_path := os.join_path(testing.test_files_dir, folder_name)
-	dir := os.ls(target_path) or {
-		return error('error loading test files for "$folder_name"')
-	}
+	dir := os.ls(target_path) or { return error('error loading test files for "$folder_name"') }
 	mut filtered := []string{}
 	for path in dir {
 		if !path.ends_with('.vv') || path.ends_with('_skip.vv') {

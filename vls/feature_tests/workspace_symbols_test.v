@@ -5,6 +5,7 @@ import lsp
 import os
 
 const base_dir = os.join_path(os.dir(@FILE), 'test_files', 'workspace_symbols')
+
 const workspace_symbols_result = [
 	lsp.SymbolInformation{
 		name: 'foo'

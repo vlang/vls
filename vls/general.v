@@ -25,7 +25,7 @@ fn (mut ls Vls) initialize(id int, params string) {
 		document_symbol_provider: Feature.document_symbol in ls.enabled_features
 		document_formatting_provider: Feature.formatting in ls.enabled_features
 	}
-	
+
 	if Feature.completion in ls.enabled_features {
 		ls.capabilities.completion_provider.trigger_characters = vls.completion_trigger_characters
 	}
