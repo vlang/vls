@@ -7,6 +7,10 @@ import os
 import v.parser
 import v.ast
 
+const (
+	completion_trigger_characters = ['=', '.', ':', '{', ',', '(', ' ']
+)
+
 // initialize sends the server capabilities to the client
 fn (mut ls Vls) initialize(id int, params string) {
 	initialize_params := json.decode(lsp.InitializeParams, params) or { panic(err) }
@@ -15,21 +19,17 @@ fn (mut ls Vls) initialize(id int, params string) {
 	ls.capabilities = lsp.ServerCapabilities{
 		text_document_sync: 1
 		completion_provider: lsp.CompletionOptions{
-			trigger_characters: if Feature.completion !in ls.enabled_features { []string{} } else { [
-					'=',
-					'.',
-					':',
-					'{',
-					',',
-					'(',
-					' ',
-				] }
 			resolve_provider: false
 		}
 		workspace_symbol_provider: Feature.workspace_symbol in ls.enabled_features
 		document_symbol_provider: Feature.document_symbol in ls.enabled_features
 		document_formatting_provider: Feature.formatting in ls.enabled_features
 	}
+	
+	if Feature.completion in ls.enabled_features {
+		ls.capabilities.completion_provider.trigger_characters = vls.completion_trigger_characters
+	}
+
 	result := jsonrpc.Response<lsp.InitializeResult>{
 		id: id
 		result: lsp.InitializeResult{
