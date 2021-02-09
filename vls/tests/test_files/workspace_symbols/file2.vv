@@ -1,0 +1,9 @@
+module main
+
+struct Person {
+  name string
+}
+
+fn hello(name string) {
+  println(name)
+}

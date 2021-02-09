@@ -1,0 +1,8 @@
+module main
+
+fn main() {
+  two := 2
+  mut zero := 0
+  
+  two = 
+}

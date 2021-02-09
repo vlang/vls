@@ -24,6 +24,7 @@ pub struct DiagnosticRelatedInformation {
 
 // method: ‘textDocument/publishDiagnostics’
 pub struct PublishDiagnosticsParams {
+pub:
 	uri         DocumentUri
 	diagnostics []Diagnostic
 }

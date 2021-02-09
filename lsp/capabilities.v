@@ -88,7 +88,7 @@ pub mut:
 
 pub struct SignatureInformationCapability {
 pub mut:
-	document_format       []string   [json: documentFormat]
+	document_format []string [json: documentFormat]
 	// MarkupKind
 	parameter_information ParamsInfo [json: parameterInformation]
 }

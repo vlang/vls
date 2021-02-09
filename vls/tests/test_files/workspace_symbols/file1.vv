@@ -1,0 +1,9 @@
+module main
+
+fn foo() string {
+  return 'hello'
+}
+
+fn main() {
+  // test
+}

@@ -1,0 +1,7 @@
+module main
+
+fn main() {
+  foo := 'Test'
+  bar := 2
+  
+}

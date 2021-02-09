@@ -15,7 +15,7 @@ pub const (
 
 pub struct Request {
 pub mut:
-	jsonrpc string = version
+	jsonrpc string = jsonrpc.version
 	id      int
 	method  string
 	params  string [raw]
@@ -23,14 +23,14 @@ pub mut:
 
 pub struct Response <T> {
 pub:
-	jsonrpc string = version
+	jsonrpc string = jsonrpc.version
 	id      int
 	//	error   ResponseError
-	result  T
+	result T
 }
 
 pub struct NotificationMessage <T> {
-	jsonrpc string = version
+	jsonrpc string = jsonrpc.version
 	method  string
 	params  T
 }
@@ -38,14 +38,14 @@ pub struct NotificationMessage <T> {
 // with error
 // TODO: must be removed when omitempty JSON is supported
 pub struct Response2 <T> {
-	jsonrpc string = version
+	jsonrpc string = jsonrpc.version
 	id      int
 	error   ResponseError
 	result  T
 }
 
-struct ResponseError {
-mut:
+pub struct ResponseError {
+pub mut:
 	code    int
 	message string
 	data    string
@@ -61,19 +61,19 @@ pub fn new_response_error(err_code int) ResponseError {
 
 pub fn err_message(err_code int) string {
 	// can't use error consts in match
-	if err_code == parse_error {
+	if err_code == jsonrpc.parse_error {
 		return 'Invalid JSON.'
-	} else if err_code == invalid_params {
+	} else if err_code == jsonrpc.invalid_params {
 		return 'Invalid params.'
-	} else if err_code == invalid_request {
+	} else if err_code == jsonrpc.invalid_request {
 		return 'Invalid request.'
-	} else if err_code == method_not_found {
+	} else if err_code == jsonrpc.method_not_found {
 		return 'Method not found.'
-	} else if err_code == server_error_end {
+	} else if err_code == jsonrpc.server_error_end {
 		return 'An error occurred while stopping the server.'
-	} else if err_code == server_error_start {
+	} else if err_code == jsonrpc.server_error_start {
 		return 'An error occurred while starting the server.'
-	} else if err_code == server_not_initialized {
+	} else if err_code == jsonrpc.server_not_initialized {
 		return 'Server not yet initialized.'
 	}
 	return 'Unknown error.'
