@@ -17,14 +17,14 @@ const (
 	builtin_path  = os.join_path(vlib_path, 'builtin')
 )
 
-fn (mut ls Vls) did_open(id int, params string) {
+fn (mut ls Vls) did_open(_ int, params string) {
 	did_open_params := json.decode(lsp.DidOpenTextDocumentParams, params) or { panic(err) }
 	source := did_open_params.text_document.text
 	uri := did_open_params.text_document.uri
 	ls.process_file(source, uri)
 }
 
-fn (mut ls Vls) did_change(id int, params string) {
+fn (mut ls Vls) did_change(_ int, params string) {
 	did_change_params := json.decode(lsp.DidChangeTextDocumentParams, params) or { panic(err) }
 	source := did_change_params.content_changes[0].text
 	uri := did_change_params.text_document.uri
@@ -32,7 +32,7 @@ fn (mut ls Vls) did_change(id int, params string) {
 	ls.process_file(source, uri)
 }
 
-fn (mut ls Vls) did_close(id int, params string) {
+fn (mut ls Vls) did_close(_ int, params string) {
 	did_close_params := json.decode(lsp.DidCloseTextDocumentParams, params) or { panic(err) }
 	uri := did_close_params.text_document.uri
 	file_dir := os.dir(uri)
@@ -77,7 +77,8 @@ fn (mut ls Vls) process_file(source string, uri lsp.DocumentUri) {
 	cur_mod_files := os.ls(mod_dir) or { [] }
 	other_files := pref.should_compile_filtered_files(mod_dir, cur_mod_files).filter(it != file_path)
 	parsed_files << parser.parse_files(other_files, table, pref, scope)
-	parsed_files << parser.parse_text(source, file_path, table, .skip_comments, pref, scope)
+	parsed_files << parser.parse_text(source, file_path, table, .skip_comments, pref,
+		scope)
 	imported_files, import_errors := ls.parse_imports(parsed_files, table, pref, scope)
 	checker.check_files(parsed_files)
 	ls.tables[target_dir_uri] = table
@@ -96,6 +97,7 @@ fn (mut ls Vls) process_file(source string, uri lsp.DocumentUri) {
 	}
 }
 
+// NOTE: once builder.find_module_path is extracted, simplify parse_imports
 fn (mut ls Vls) parse_imports(parsed_files []ast.File, table &table.Table, pref &pref.Preferences, scope &ast.Scope) ([]ast.File, []errors.Error) {
 	mut newly_parsed_files := []ast.File{}
 	mut errs := []errors.Error{}

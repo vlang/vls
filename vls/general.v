@@ -7,13 +7,18 @@ import os
 import v.parser
 import v.ast
 
+const (
+	completion_trigger_characters = ['=', '.', ':', '{', ',', '(', ' ']
+)
+
 // initialize sends the server capabilities to the client
 fn (mut ls Vls) initialize(id int, params string) {
 	initialize_params := json.decode(lsp.InitializeParams, params) or { panic(err) }
-	mut capabilities := lsp.ServerCapabilities{
+	// TODO: configure capabilities based on client support
+	// ls.client_capabilities = initialize_params.capabilities
+	ls.capabilities = lsp.ServerCapabilities{
 		text_document_sync: 1
 		completion_provider: lsp.CompletionOptions{
-			trigger_characters: if Feature.completion !in ls.enabled_features { []string{} } else { ['=', '.', ':', '{', ',', '(', ' '] }
 			resolve_provider: false
 		}
 		workspace_symbol_provider: Feature.workspace_symbol in ls.enabled_features
@@ -24,10 +29,15 @@ fn (mut ls Vls) initialize(id int, params string) {
 			retrigger_characters: [',']
 		}
 	}
+
+	if Feature.completion in ls.enabled_features {
+		ls.capabilities.completion_provider.trigger_characters = vls.completion_trigger_characters
+	}
+
 	result := jsonrpc.Response<lsp.InitializeResult>{
 		id: id
 		result: lsp.InitializeResult{
-			capabilities: capabilities
+			capabilities: ls.capabilities
 		}
 	}
 	// only files are supported right now
@@ -43,13 +53,18 @@ fn (mut ls Vls) process_builtin() {
 	mut builtin_files := os.ls(builtin_path) or { panic(err) }
 	builtin_files = pref.should_compile_filtered_files(builtin_path, builtin_files)
 	parsed_files := parser.parse_files(builtin_files, ls.base_table, pref, scope)
-	for file in parsed_files {
-		for stmt in file.stmts {
-			if stmt is ast.FnDecl {
-				if !stmt.is_pub || stmt.is_method {
-					continue
+	// This part extracts the symbols for the builtin module
+	// for use in autocompletion. This is disabled in test mode in
+	// order to simplify the testing output in autocompletion test.
+	$if !test {
+		for file in parsed_files {
+			for stmt in file.stmts {
+				if stmt is ast.FnDecl {
+					if !stmt.is_pub || stmt.is_method {
+						continue
+					}
+					ls.builtin_symbols << stmt.name
 				}
-				ls.builtin_symbols << stmt.name
 			}
 		}
 	}

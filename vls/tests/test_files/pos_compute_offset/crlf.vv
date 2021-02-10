@@ -1,0 +1,5 @@
+module main
+
+fn crlf_test() {
+    test := 'Hello World'
+}

@@ -42,6 +42,7 @@ pub:
 }
 
 pub struct Location {
+pub mut:
 	uri   DocumentUri
 	range Range
 }
@@ -69,7 +70,7 @@ pub const (
 )
 
 pub struct MarkupContent {
-	kind  string
+	kind string
 	// MarkupKind
 	value string
 }

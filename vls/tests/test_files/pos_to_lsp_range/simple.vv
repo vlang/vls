@@ -1,0 +1,5 @@
+module main
+
+pub fn should_be_one_line() {
+  // test comment
+}

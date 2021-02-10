@@ -1,0 +1,27 @@
+module main
+
+type Uri = string
+
+const (
+  text = 'helo'
+  two = 2
+)
+
+enum Color {
+  red
+  blue
+  yellow
+}
+
+struct Person {
+  name string
+}
+
+fn (p Person) say() {
+  println('hello! $p.name')
+}
+
+fn main() {
+  per := Person{}
+  per.say()
+}

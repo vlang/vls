@@ -1,0 +1,12 @@
+module main
+
+fn add_to_four(num int) int {
+  return num + 4
+}
+
+fn main() {
+  sample_num := 2
+  sample_num2 := 3
+  should_not_appear := 'hey'
+  add_to_four()
+}

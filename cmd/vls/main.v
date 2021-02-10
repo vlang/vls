@@ -8,7 +8,7 @@ import os
 fn C._setmode(int, int)
 
 const (
-	meta = vmod.decode(@VMOD_FILE)?
+	meta = vmod.decode(@VMOD_FILE) ?
 )
 
 fn run_cli(cmd cli.Command) ? {
@@ -16,9 +16,13 @@ fn run_cli(cmd cli.Command) ? {
 	enable_flag_raw := cmd.flags.get_string('enable') or { '' }
 	disable_flag_raw := cmd.flags.get_string('disable') or { '' }
 	enable_features := if enable_flag_raw.len > 0 { enable_flag_raw.split(',') } else { []string{} }
-	disable_features := if disable_flag_raw.len > 0 { disable_flag_raw.split(',') } else { []string{} }
-	ls.set_features(enable_features, true)?
-	ls.set_features(disable_features, false)?
+	disable_features := if disable_flag_raw.len > 0 {
+		disable_flag_raw.split(',')
+	} else {
+		[]string{}
+	}
+	ls.set_features(enable_features, true) ?
+	ls.set_features(disable_features, false) ?
 	ls.start_loop()
 }
 
@@ -48,7 +52,7 @@ fn main() {
 			name: 'disable'
 			abbrev: 'd'
 			description: 'Disables specific language features.'
-		}
+		},
 	])
 
 	cmd.parse(os.args)

@@ -1,42 +1,35 @@
 import vls
-import testing
-
-fn init() vls.Vls {
-	mut io := testing.Testio{}
-	payload := '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}'
-	mut ls := vls.new(io)
-	ls.dispatch(payload)
-	return ls
-}
+import vls.testing
+import lsp
+import json
 
 fn test_wrong_first_request() {
 	mut io := testing.Testio{}
-	payload := '{"jsonrpc":"2.0","id":1,"method":"shutdown","params":{}}'
 	mut ls := vls.new(io)
+	payload := io.request('shutdown')
 	ls.dispatch(payload)
-	status := ls.status()
-	assert status == .off
-	assert io.response ==
-		'{"jsonrpc":"2.0","id":0,"error":{"code":-32002,"message":"Server not yet initialized.","data":""},"result":""}'
+	assert ls.status() == .off
+	err_code, err_msg := io.response_error() or {
+		assert false
+		return
+	}
+	assert err_code == -32002
+	assert err_msg == 'Server not yet initialized.'
 }
 
 fn test_initialize_with_capabilities() {
-	mut io := testing.Testio{}
-	payload := '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}'
-	mut ls := vls.new(io)
-	ls.dispatch(payload)
-	status := ls.status()
-	assert status == .initialized
-	assert io.response ==
-		'{"jsonrpc":"2.0","id":1,"result":{"capabilities":{"textDocumentSync":1,"hoverProvider":false,"completionProvider":{"resolveProvider":false,"triggerCharacters":["=",".",":","{",",","("," "]},"signatureHelpProvider":{"triggerCharacters":["("],"retriggerCharacters":[","]},"definitionProvider":false,"typeDefinitionProvider":false,"implementationProvider":false,"referencesProvider":false,"documentHightlightProvider":false,"documentSymbolProvider":true,"workspaceSymbolProvider":true,"codeActionProvider":false,"codeLensProvider":{"resolveProvider":false},"documentFormattingProvider":true,"documentOnTypeFormattingProvider":{"moreTriggerCharacter":[]},"renameProvider":false,"documentLinkProvider":false,"colorProvider":false,"declarationProvider":false,"executeCommandProvider":"","experimental":{}}}}'
+	mut io, mut ls := init()
+	assert ls.status() == .initialized
+	assert io.result() == json.encode(lsp.InitializeResult{
+		capabilities: ls.capabilities()
+	})
 }
 
 fn test_initialized() {
-	payload := '{"jsonrpc":"2.0","id":1,"method":"initialized","params":{}}'
-	mut ls := init()
+	mut io, mut ls := init()
+	payload := io.request('initialized')
 	ls.dispatch(payload)
-	status := ls.status()
-	assert status == .initialized
+	assert ls.status() == .initialized
 }
 
 // fn test_shutdown() {
@@ -46,7 +39,6 @@ fn test_initialized() {
 // 	status := ls.status()
 // 	assert status == .shutdown
 // }
-
 fn test_set_features() {
 	mut io := testing.Testio{}
 	mut ls := vls.new(io)
@@ -65,4 +57,12 @@ fn test_set_features() {
 		assert err == 'feature "logging" not found'
 		return
 	}
+}
+
+fn init() (testing.Testio, vls.Vls) {
+	mut io := testing.Testio{}
+	mut ls := vls.new(io)
+	payload := io.request('initialize')
+	ls.dispatch(payload)
+	return io, ls
 }
