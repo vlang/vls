@@ -1,0 +1,1 @@
+type Handler = fn (string) string
