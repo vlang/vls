@@ -10,6 +10,7 @@ import v.parser
 import v.pref
 import os
 
+// formatting returns the formatted output of the specified file.
 fn (ls Vls) formatting(id int, params string) {
 	formatting_params := json.decode(lsp.DocumentFormattingParams, params) or { panic(err) }
 	uri := formatting_params.text_document.uri.str()
@@ -55,6 +56,7 @@ fn (ls Vls) formatting(id int, params string) {
 	}
 }
 
+// workspace_symbol returns the list of symbols available in the specific workspace.
 fn (mut ls Vls) workspace_symbol(id int, _ string) {
 	mut symbols := []lsp.SymbolInformation{}
 	for file_uri, file in ls.files {
@@ -69,6 +71,7 @@ fn (mut ls Vls) workspace_symbol(id int, _ string) {
 	})
 }
 
+// document_symbol returns the list of symbols in the specific file.
 fn (mut ls Vls) document_symbol(id int, params string) {
 	document_symbol_params := json.decode(lsp.DocumentSymbolParams, params) or { panic(err) }
 	uri := document_symbol_params.text_document.uri
@@ -80,6 +83,7 @@ fn (mut ls Vls) document_symbol(id int, params string) {
 	})
 }
 
+// generate_symbols generates and returns an array of symbols from the given ast.File.
 fn (mut ls Vls) generate_symbols(file ast.File, uri lsp.DocumentUri) []lsp.SymbolInformation {
 	mut symbols := []lsp.SymbolInformation{}
 	sym_is_cached := uri.str() in ls.doc_symbols
@@ -463,6 +467,7 @@ fn (cfg CompletionItemConfig) completion_items_from_dir(dir string, dir_contents
 	return completion_items
 }
 
+// suggest_mod_names returns a list of suggestions for module statement.
 fn (mut cfg CompletionItemConfig) suggest_mod_names() []lsp.CompletionItem {
 	mut completion_items := []lsp.CompletionItem{}
 	// Explicitly disabling the global and local completion
@@ -481,6 +486,9 @@ fn (mut cfg CompletionItemConfig) suggest_mod_names() []lsp.CompletionItem {
 	return completion_items
 }
 
+// completion generates and returns a list of symbol suggestions
+// from the given position/scope of a specific file.
+// 
 // TODO: make params use lsp.CompletionParams in the future
 fn (mut ls Vls) completion(id int, params string) {
 	if Feature.completion !in ls.enabled_features {

@@ -20,7 +20,7 @@ pub:
 	range    Range
 }
 
-// pub type MarkedString = string | MarkedStringS
+// pub type MarkedString = string | MarkedString
 pub struct MarkedString {
 	language string
 	value    string

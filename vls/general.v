@@ -11,7 +11,7 @@ const (
 	completion_trigger_characters = ['=', '.', ':', '{', ',', '(', ' ']
 )
 
-// initialize sends the server capabilities to the client
+// initialize sends the server capabilities to the client.
 fn (mut ls Vls) initialize(id int, params string) {
 	initialize_params := json.decode(lsp.InitializeParams, params) or { panic(err) }
 	// TODO: configure capabilities based on client support
@@ -44,6 +44,8 @@ fn (mut ls Vls) initialize(id int, params string) {
 	ls.send(result)
 }
 
+// process_builtin imports the builtin module, extracts its symbols, and uses its data
+// as the base for the base table to be used later when a file is parsed.
 fn (mut ls Vls) process_builtin() {
 	scope, pref := new_scope_and_pref()
 	mut builtin_files := os.ls(builtin_path) or { panic(err) }
@@ -70,7 +72,7 @@ fn (mut ls Vls) process_builtin() {
 	}
 }
 
-// shutdown sets the state to shutdown but does not exit
+// shutdown sets the state to shutdown but does not exit.
 fn (mut ls Vls) shutdown(id int) {
 	ls.status = .shutdown
 	result := jsonrpc.Response<string>{

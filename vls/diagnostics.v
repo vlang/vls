@@ -3,7 +3,7 @@ module vls
 import lsp
 import jsonrpc
 
-// show_diagnostics converts the file ast's errors and warnings and publishes them to the editor
+// show_diagnostics converts the file ast's errors and warnings and publishes them to the editor.
 fn (ls Vls) show_diagnostics(uri lsp.DocumentUri) {
 	file := ls.files[uri.str()]
 	source := ls.sources[uri.str()]
@@ -25,7 +25,7 @@ fn (ls Vls) show_diagnostics(uri lsp.DocumentUri) {
 	ls.publish_diagnostics(uri, diagnostics)
 }
 
-// publish_diagnostics sends errors, warnings and other diagnostics to the editor
+// publish_diagnostics sends errors, warnings and other diagnostics to the editor.
 fn (ls Vls) publish_diagnostics(uri lsp.DocumentUri, diagnostics []lsp.Diagnostic) {
 	if Feature.diagnostics !in ls.enabled_features {
 		return

@@ -8,9 +8,12 @@ import os
 fn C._setmode(int, int)
 
 const (
+	// meta information extracted from vls's v.mod file
+	// such as the version, description, and etc.
 	meta = vmod.decode(@VMOD_FILE) ?
 )
 
+// run_cli is a callback function for VLS CLI instance.
 fn run_cli(cmd cli.Command) ? {
 	mut ls := vls.new(Stdio{})
 	enable_flag_raw := cmd.flags.get_string('enable') or { '' }

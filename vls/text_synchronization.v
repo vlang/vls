@@ -17,6 +17,7 @@ const (
 	builtin_path  = os.join_path(vlib_path, 'builtin')
 )
 
+// did_open opens the received file from the client.
 fn (mut ls Vls) did_open(_ int, params string) {
 	did_open_params := json.decode(lsp.DidOpenTextDocumentParams, params) or { panic(err) }
 	source := did_open_params.text_document.text
@@ -24,6 +25,7 @@ fn (mut ls Vls) did_open(_ int, params string) {
 	ls.process_file(source, uri)
 }
 
+// did_change receives and processes the changes of the given file.
 fn (mut ls Vls) did_change(_ int, params string) {
 	did_change_params := json.decode(lsp.DidChangeTextDocumentParams, params) or { panic(err) }
 	source := did_change_params.content_changes[0].text
@@ -32,6 +34,8 @@ fn (mut ls Vls) did_change(_ int, params string) {
 	ls.process_file(source, uri)
 }
 
+// did_close deletes the mentioned file and the parent folder's table data if
+// none of the files in the said folder are currently opened by the client/editor.
 fn (mut ls Vls) did_close(_ int, params string) {
 	did_close_params := json.decode(lsp.DidCloseTextDocumentParams, params) or { panic(err) }
 	uri := did_close_params.text_document.uri
@@ -58,6 +62,8 @@ fn (mut ls Vls) did_close(_ int, params string) {
 	}
 }
 
+// process_file processes the received source and document URI from the client.
+//
 // TODO: edits must use []lsp.TextEdit instead of string
 fn (mut ls Vls) process_file(source string, uri lsp.DocumentUri) {
 	ls.sources[uri.str()] = source.bytes()
@@ -97,6 +103,8 @@ fn (mut ls Vls) process_file(source string, uri lsp.DocumentUri) {
 	}
 }
 
+// parse_imports parses the ast.File's imports and imports the modules.
+//
 // NOTE: once builder.find_module_path is extracted, simplify parse_imports
 fn (mut ls Vls) parse_imports(parsed_files []ast.File, table &table.Table, pref &pref.Preferences, scope &ast.Scope) ([]ast.File, []errors.Error) {
 	mut newly_parsed_files := []ast.File{}

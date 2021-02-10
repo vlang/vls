@@ -9,6 +9,7 @@ mut:
 	node ast.Node
 }
 
+// find_ast_by_pos searches and returns an AST node based on the given offset position.
 pub fn find_ast_by_pos(nodes []ast.Node, offset int) ?ast.Node {
 	mut data := FindNodeByPos{
 		pos: offset

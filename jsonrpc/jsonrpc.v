@@ -35,7 +35,8 @@ pub struct NotificationMessage <T> {
 	params  T
 }
 
-// with error
+// Response2 is similar to the Response struct but with an error field.
+//
 // TODO: must be removed when omitempty JSON is supported
 pub struct Response2 <T> {
 	jsonrpc string = jsonrpc.version
@@ -59,8 +60,9 @@ pub fn new_response_error(err_code int) ResponseError {
 	}
 }
 
+// err_messages returns the appropriate error message based on the given error code.
 pub fn err_message(err_code int) string {
-	// can't use error consts in match
+	// NB: can't use error consts in match
 	if err_code == jsonrpc.parse_error {
 		return 'Invalid JSON.'
 	} else if err_code == jsonrpc.invalid_params {
