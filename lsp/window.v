@@ -3,7 +3,7 @@ module lsp
 // method: ‘window/showMessage’
 // notification
 pub struct ShowMessageParams {
-	@type   MessageType
+	@type MessageType
 	// @type int
 	message string
 }

@@ -1,0 +1,10 @@
+module main
+
+struct Test{
+  this_is_a_long_field int
+  bar string
+}
+
+fn main () {
+  println ('hello!')
+}

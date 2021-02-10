@@ -50,8 +50,8 @@ pub enum InsertTextFormat {
 
 pub struct CompletionItem {
 pub mut:
-	label              string
-	kind               CompletionItemKind
+	label string
+	kind  CompletionItemKind
 	// TODO: comment the unnecessary fields for now to avoid any errors
 	// detail        string
 	// documentation string | MarkupContent
@@ -60,8 +60,8 @@ pub mut:
 	// preselect bool
 	// sort_text string [json:sortText]
 	// filter_text string [json:filterText]
-	insert_text        string             [json: insertText]
-	insert_text_format InsertTextFormat   [json: insertTextFormat] = .plain_text
+	insert_text        string           [json: insertText]
+	insert_text_format InsertTextFormat [json: insertTextFormat] = .plain_text
 	// text_edit TextEdit [json:textEdit]
 	// additional_text_edits []TextEdit [json:additionalTextEdits]
 	// commit_characters []string [json:commitCharacters]
