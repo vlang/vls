@@ -675,6 +675,13 @@ mut:
 fn (mut cfg HoverConfig) hover_from_stmt(node ast.Stmt) ?lsp.Hover {
 	mut pos := node.position()
 	match node {
+		ast.Module {
+			name := if node.short_name.len > 0 { node.short_name } else { node.name }
+			return lsp.Hover{
+				contents: lsp.v_marked_string('module $name')
+				range: position_to_lsp_range(cfg.src, pos.extend(node.name_pos))
+			}
+		}
 		ast.FnDecl {
 			name := node.name.all_after(cfg.file.mod.short_name + '.')
 			return_type_name := cfg.table.type_to_str(node.return_type)

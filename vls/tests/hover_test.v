@@ -15,6 +15,9 @@ const hover_inputs = {
 	'import.vv': lsp.HoverParams{
 		position: lsp.Position{0, 8}
 	}
+	'module.vv': lsp.HoverParams{
+		position: lsp.Position{0, 5}
+	}
 	'selector_expr.vv': lsp.HoverParams{
 		position: lsp.Position{6, 10}
 	}
@@ -55,6 +58,13 @@ const hover_results = {
 		range: lsp.Range{
 			start: lsp.Position{0,0}
 			end: lsp.Position{0,9}
+		}
+	}
+	'module.vv': lsp.Hover{
+		contents: lsp.MarkedString{'v', 'module foo'}
+		range: lsp.Range{
+			start: lsp.Position{0,0}
+			end: lsp.Position{0,10}
 		}
 	}
 	'selector_expr.vv': lsp.Hover{
