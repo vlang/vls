@@ -26,7 +26,7 @@ pub fn find_ast_by_pos(nodes []ast.Node, offset int) ?ast.Node {
 					else {}
 				}
 			}
-			if is_within_pos(pos, node_pos) {
+			if is_within_pos(data.pos, node_pos) {
 				data.node = node
 				return false
 			}
