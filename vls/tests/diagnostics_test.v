@@ -10,7 +10,7 @@ const diagnostics_result = lsp.PublishDiagnosticsParams{
 	uri: lsp.document_uri_from_path(os.join_path(base_dir, 'simple.vv'))
 	diagnostics: [
 		lsp.Diagnostic{
-			message: 'unexpected `eof`, expecting `}`'
+			message: 'unexpected eof, expecting `}`'
 			severity: .error
 			range: lsp.Range{
 				start: lsp.Position{4, 10}
