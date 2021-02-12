@@ -12,34 +12,34 @@ const hover_inputs = {
 	'call_expr_simple.vv': lsp.HoverParams{
 		position: lsp.Position{5, 6}
 	}
-	'enum.vv': lsp.HoverParams{
+	'enum.vv':             lsp.HoverParams{
 		position: lsp.Position{0, 8}
 	}
-	'function.vv': lsp.HoverParams{
+	'function.vv':         lsp.HoverParams{
 		position: lsp.Position{0, 6}
 	}
-	'import.vv': lsp.HoverParams{
+	'import.vv':           lsp.HoverParams{
 		position: lsp.Position{0, 8}
 	}
-	'module.vv': lsp.HoverParams{
+	'module.vv':           lsp.HoverParams{
 		position: lsp.Position{0, 5}
 	}
-	'selector_expr.vv': lsp.HoverParams{
+	'selector_expr.vv':    lsp.HoverParams{
 		position: lsp.Position{6, 10}
 	}
-	'struct.vv': lsp.HoverParams{
+	'struct.vv':           lsp.HoverParams{
 		position: lsp.Position{0, 8}
 	}
-	'type_alias.vv': lsp.HoverParams{
+	'type_alias.vv':       lsp.HoverParams{
 		position: lsp.Position{0, 7}
 	}
-	'type_fn.vv': lsp.HoverParams{
+	'type_fn.vv':          lsp.HoverParams{
 		position: lsp.Position{0, 7}
 	}
-	'type_sum.vv': lsp.HoverParams{
+	'type_sum.vv':         lsp.HoverParams{
 		position: lsp.Position{0, 7}
 	}
-	'variable.vv': lsp.HoverParams{
+	'variable.vv':         lsp.HoverParams{
 		position: lsp.Position{2, 12}
 	}
 }
@@ -48,85 +48,85 @@ const hover_results = {
 	'call_expr_method.vv': lsp.Hover{
 		contents: lsp.MarkedString{'v', 'Foo.call() string'}
 		range: lsp.Range{
-			start: lsp.Position{10,13}
-			end: lsp.Position{10,19}
+			start: lsp.Position{10, 13}
+			end: lsp.Position{10, 19}
 		}
 	}
 	'call_expr_simple.vv': lsp.Hover{
 		contents: lsp.MarkedString{'v', 'greet()'}
 		range: lsp.Range{
-			start: lsp.Position{5,2}
-			end: lsp.Position{5,14}
+			start: lsp.Position{5, 2}
+			end: lsp.Position{5, 14}
 		}
 	}
-	'enum.vv': lsp.Hover{
+	'enum.vv':             lsp.Hover{
 		contents: lsp.MarkedString{'v', 'enum Color'}
 		range: lsp.Range{
-			start: lsp.Position{0,0}
-			end: lsp.Position{4,10}
+			start: lsp.Position{0, 0}
+			end: lsp.Position{4, 10}
 		}
 	}
-	'function.vv': lsp.Hover{
+	'function.vv':         lsp.Hover{
 		contents: lsp.MarkedString{'v', 'fn foo(param1 string, mut param2 []string) bool'}
 		range: lsp.Range{
-			start: lsp.Position{0,0}
-			end: lsp.Position{2,47}
+			start: lsp.Position{0, 0}
+			end: lsp.Position{2, 47}
 		}
 	}
-	'import.vv': lsp.Hover{
+	'import.vv':           lsp.Hover{
 		contents: lsp.MarkedString{'v', 'import os as os'}
 		range: lsp.Range{
-			start: lsp.Position{0,0}
-			end: lsp.Position{0,9}
+			start: lsp.Position{0, 0}
+			end: lsp.Position{0, 9}
 		}
 	}
-	'module.vv': lsp.Hover{
+	'module.vv':           lsp.Hover{
 		contents: lsp.MarkedString{'v', 'module foo'}
 		range: lsp.Range{
-			start: lsp.Position{0,0}
-			end: lsp.Position{0,10}
+			start: lsp.Position{0, 0}
+			end: lsp.Position{0, 10}
 		}
 	}
-	'selector_expr.vv': lsp.Hover{
+	'selector_expr.vv':    lsp.Hover{
 		contents: lsp.MarkedString{'v', 'Person.name string'}
 		range: lsp.Range{
-			start: lsp.Position{6,9}
-			end: lsp.Position{6,13}
+			start: lsp.Position{6, 9}
+			end: lsp.Position{6, 13}
 		}
 	}
-	'struct.vv': lsp.Hover{
+	'struct.vv':           lsp.Hover{
 		contents: lsp.MarkedString{'v', 'struct Abc'}
 		range: lsp.Range{
-			start: lsp.Position{0,0}
-			end: lsp.Position{2,10}
+			start: lsp.Position{0, 0}
+			end: lsp.Position{2, 10}
 		}
 	}
-	'type_alias.vv': lsp.Hover{
+	'type_alias.vv':       lsp.Hover{
 		contents: lsp.MarkedString{'v', 'type Str = string'}
 		range: lsp.Range{
-			start: lsp.Position{0,0}
-			end: lsp.Position{0,8}
+			start: lsp.Position{0, 0}
+			end: lsp.Position{0, 8}
 		}
 	}
-	'type_fn.vv': lsp.Hover{
+	'type_fn.vv':          lsp.Hover{
 		contents: lsp.MarkedString{'v', 'type Handler = fn (string) string'}
 		range: lsp.Range{
-			start: lsp.Position{0,0}
-			end: lsp.Position{0,12}
+			start: lsp.Position{0, 0}
+			end: lsp.Position{0, 12}
 		}
 	}
-	'type_sum.vv': lsp.Hover{
+	'type_sum.vv':         lsp.Hover{
 		contents: lsp.MarkedString{'v', 'type Any = int | string'}
 		range: lsp.Range{
-			start: lsp.Position{0,0}
-			end: lsp.Position{0,8}
+			start: lsp.Position{0, 0}
+			end: lsp.Position{0, 8}
 		}
 	}
-	'variable.vv': lsp.Hover{
+	'variable.vv':         lsp.Hover{
 		contents: lsp.MarkedString{'v', 'num int'}
 		range: lsp.Range{
-			start: lsp.Position{2,10}
-			end: lsp.Position{2,13}
+			start: lsp.Position{2, 10}
+			end: lsp.Position{2, 13}
 		}
 	}
 }
