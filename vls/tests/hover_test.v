@@ -6,6 +6,12 @@ import os
 
 // TODO:
 const hover_inputs = {
+	'call_expr_method.vv': lsp.HoverParams{
+		position: lsp.Position{10, 16}
+	}
+	'call_expr_simple.vv': lsp.HoverParams{
+		position: lsp.Position{5, 6}
+	}
 	'enum.vv': lsp.HoverParams{
 		position: lsp.Position{0, 8}
 	}
@@ -39,6 +45,20 @@ const hover_inputs = {
 }
 
 const hover_results = {
+	'call_expr_method.vv': lsp.Hover{
+		contents: lsp.MarkedString{'v', 'Foo.call() string'}
+		range: lsp.Range{
+			start: lsp.Position{10,13}
+			end: lsp.Position{10,19}
+		}
+	}
+	'call_expr_simple.vv': lsp.Hover{
+		contents: lsp.MarkedString{'v', 'greet()'}
+		range: lsp.Range{
+			start: lsp.Position{5,2}
+			end: lsp.Position{5,14}
+		}
+	}
 	'enum.vv': lsp.Hover{
 		contents: lsp.MarkedString{'v', 'enum Color'}
 		range: lsp.Range{

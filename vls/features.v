@@ -798,8 +798,12 @@ fn (mut cfg HoverConfig) hover_from_expr(node ast.Expr) ?lsp.Hover {
 				signature += parent_type_name + '.'
 			}
 
-			return_type := cfg.table.type_to_str(node.return_type).all_after('main.')
-			signature += '${node.name}() $return_type'
+			name := node.name.all_after('main.')
+			signature += '${name}()'
+			if node.return_type != table.void_type {
+				return_type := cfg.table.type_to_str(node.return_type).all_after('main.')
+				signature += ' $return_type'
+			}
 			range := position_to_lsp_range(cfg.src, node.pos)
 
 			return lsp.Hover{
