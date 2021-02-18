@@ -671,6 +671,7 @@ mut:
 	table  &table.Table
 }
 
+// hover_from_stmt returns the hover data for a specific ast.Stmt.
 fn (mut cfg HoverConfig) hover_from_stmt(node ast.Stmt) ?lsp.Hover {
 	mut pos := node.position()
 	match node {
@@ -780,6 +781,7 @@ fn (mut cfg HoverConfig) hover_from_stmt(node ast.Stmt) ?lsp.Hover {
 	}
 }
 
+// hover_from_stmt returns the hover data for a specific ast.Expr.
 fn (mut cfg HoverConfig) hover_from_expr(node ast.Expr) ?lsp.Hover {
 	match node {
 		ast.Ident {
@@ -902,6 +904,7 @@ fn (ls Vls) hover(id int, params string) {
 			}
 		}
 		else {
+			// returns a null result for unsupported nodes
 			ls.send_null(id)
 			return
 		}
