@@ -669,7 +669,6 @@ mut:
 	file   ast.File
 	offset int // position of the cursor. used for finding the AST node
 	table  &table.Table
-	is_var bool
 }
 
 fn (mut cfg HoverConfig) hover_from_stmt(node ast.Stmt) ?lsp.Hover {
@@ -831,8 +830,6 @@ fn (mut cfg HoverConfig) hover_from_expr(node ast.Expr) ?lsp.Hover {
 					range: range
 				}
 			}
-
-			cfg.is_var = true
 			return cfg.hover_from_expr(node.expr)
 		}
 		else {
