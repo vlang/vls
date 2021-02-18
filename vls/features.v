@@ -169,21 +169,6 @@ fn (ls Vls) signature_help(id int, params string) {
 		return
 	}
 
-// TODO: detect current argument
-	if ctx.trigger_kind == .trigger_character && ctx.trigger_character == ',' && ctx.is_retrigger {
-		mut active_sighelp := ctx.active_signature_help
-		if active_sighelp.signatures.len > 0 && 
-			 active_sighelp.active_parameter < active_sighelp.signatures[0].parameters.len {
-			active_sighelp.active_parameter++
-		}
-
-		ls.send(jsonrpc.Response<lsp.SignatureHelp>{
-			id: id
-			result: active_sighelp
-		})
-		return
-	}
-
 	file := ls.files[uri.str()]
 	src := ls.sources[uri.str()]
 	table := ls.tables[os.dir(uri.str())]
@@ -195,6 +180,9 @@ fn (ls Vls) signature_help(id int, params string) {
 
 	mut expr := ast.Expr{}
 	if node is ast.Stmt {
+		// if the selected node is an ExprStmt,
+		// the expr content of the ExprStmt node
+		// will be used.
 		if node is ast.ExprStmt {
 			expr = node.expr
 		}
@@ -202,8 +190,34 @@ fn (ls Vls) signature_help(id int, params string) {
 		expr = node
 	}
 	
+	// signature help supports function calls for now
+	// hence checking the expr if it's a CallExpr node.
 	if expr is ast.CallExpr {
 		call_expr := expr as ast.CallExpr
+
+		// for retrigger, it utilizes the current signature help data
+		if ctx.is_retrigger {
+			mut active_sighelp := ctx.active_signature_help
+
+			if ctx.trigger_kind == .content_change {
+				// change the current active param value to the length of the current args.
+				active_sighelp.active_parameter = call_expr.args.len - 1
+			} else if ctx.trigger_kind == .trigger_character && ctx.trigger_character == ',' && active_sighelp.signatures.len > 0 && 
+				active_sighelp.active_parameter < active_sighelp.signatures[0].parameters.len {
+				// when pressing comma, it must proceed to the next parameter
+				// by incrementing the active parameter.
+				active_sighelp.active_parameter++
+			}
+
+			ls.send(jsonrpc.Response<lsp.SignatureHelp>{
+				id: id
+				result: active_sighelp
+			})
+			return
+		}
+
+		// create a signature help info based on the 
+		// call expr info
 		mut label := ''
 		mut param_infos := []lsp.ParameterInformation{}
 		mut params_data := []table.Param{}
@@ -251,6 +265,7 @@ fn (ls Vls) signature_help(id int, params string) {
 		return
 	}
 
+	// send null result for unsupported node
 	ls.send_null(id)
 }
 struct CompletionItemConfig {
