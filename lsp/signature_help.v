@@ -20,38 +20,33 @@ pub:
 	// embed: TextDocumentPositionParams
 	text_document TextDocumentIdentifier [json: textDocument]
 	position      Position
-	context SignatureHelpContext
+	context       SignatureHelpContext
 }
 
 pub struct SignatureHelpContext {
 pub:
 	trigger_kind          SignatureHelpTriggerKind [json: triggerKind]
-	trigger_character     string									 [json: triggerCharacter]
+	trigger_character     string                   [json: triggerCharacter]
 	is_retrigger          bool                     [json: isRetrigger]
 	active_signature_help SignatureHelp            [json: activeSignatureHelp]
 }
 
 pub struct SignatureHelp {
 pub:
-	signatures       []SignatureInformation
-	// active_signature int                    [json: activeSignature]
+	signatures []SignatureInformation
 pub mut:
-	active_parameter int                    [json: activeParameter]
+	active_parameter int [json: activeParameter]
 }
 
 pub struct SignatureInformation {
 pub mut:
-	label string
-	// document: string | MarkedContent
+	label      string
 	document   string                 [raw]
 	parameters []ParameterInformation
 }
 
 pub struct ParameterInformation {
-	// label string | [int, int]
-	label    string
-	// document: string | MarkedContent
-	// document string
+	label string
 }
 
 pub struct SignatureHelpRegistrationOptions {

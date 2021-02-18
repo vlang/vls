@@ -4,7 +4,7 @@ import json
 import lsp
 import os
 
-const signature_help_inputs = {
+const signature_help_inputs = map{
 	'simple.vv': lsp.SignatureHelpParams{
 		context: lsp.SignatureHelpContext{
 			trigger_kind: .trigger_character
@@ -14,15 +14,15 @@ const signature_help_inputs = {
 	}
 }
 
-const signature_help_results = {
+const signature_help_results = map{
 	'simple.vv': lsp.SignatureHelp{
 		signatures: [
 			lsp.SignatureInformation{
 				label: 'fn main.greet(name string)'
 				parameters: [
-					lsp.ParameterInformation{'name string'}
+					lsp.ParameterInformation{'name string'},
 				]
-			}
+			},
 		]
 		active_parameter: 0
 	}

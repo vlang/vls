@@ -189,7 +189,6 @@ fn (ls Vls) signature_help(id int, params string) {
 	} else if node is ast.Expr {
 		expr = node
 	}
-	
 	// signature help supports function calls for now
 	// hence checking the expr if it's a CallExpr node.
 	if expr is ast.CallExpr {
@@ -202,8 +201,9 @@ fn (ls Vls) signature_help(id int, params string) {
 			if ctx.trigger_kind == .content_change {
 				// change the current active param value to the length of the current args.
 				active_sighelp.active_parameter = call_expr.args.len - 1
-			} else if ctx.trigger_kind == .trigger_character && ctx.trigger_character == ',' && active_sighelp.signatures.len > 0 && 
-				active_sighelp.active_parameter < active_sighelp.signatures[0].parameters.len {
+			} else if ctx.trigger_kind == .trigger_character && ctx.trigger_character == ','
+				&& active_sighelp.signatures.len > 0
+				&& active_sighelp.active_parameter < active_sighelp.signatures[0].parameters.len {
 				// when pressing comma, it must proceed to the next parameter
 				// by incrementing the active parameter.
 				active_sighelp.active_parameter++
@@ -215,7 +215,6 @@ fn (ls Vls) signature_help(id int, params string) {
 			})
 			return
 		}
-
 		// create a signature help info based on the 
 		// call expr info
 		mut label := ''
@@ -264,10 +263,10 @@ fn (ls Vls) signature_help(id int, params string) {
 		})
 		return
 	}
-
 	// send null result for unsupported node
 	ls.send_null(id)
 }
+
 struct CompletionItemConfig {
 mut:
 	file                ast.File

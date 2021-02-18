@@ -8,8 +8,8 @@ import v.parser
 import v.ast
 
 const (
-	completion_trigger_characters = ['=', '.', ':', '{', ',', '(', ' ']
-	signature_help_trigger_characters = ['(']
+	completion_trigger_characters       = ['=', '.', ':', '{', ',', '(', ' ']
+	signature_help_trigger_characters   = ['(']
 	signature_help_retrigger_characters = [',', ' ']
 )
 
@@ -37,7 +37,7 @@ fn (mut ls Vls) initialize(id int, params string) {
 			trigger_characters: vls.signature_help_trigger_characters
 			retrigger_characters: vls.signature_help_retrigger_characters
 		}
-	} 
+	}
 
 	result := jsonrpc.Response<lsp.InitializeResult>{
 		id: id
