@@ -64,7 +64,7 @@ Afterwards, go to your editor's configuration and scroll to the V extension sect
 ### Language Features
 - [ ] `completion`
 - [ ] `completion resolve`
-- [ ] `hover`
+- [x] `hover`
 - [x] `signatureHelp`
 - [ ] `declaration`
 - [ ] `definition`

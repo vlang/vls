@@ -1,0 +1,4 @@
+fn main() {
+  num := 1
+  num2 := num
+}

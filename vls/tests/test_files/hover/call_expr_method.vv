@@ -1,0 +1,12 @@
+struct Foo {
+  name string
+}
+
+fn (foo Foo) call() string {
+  return foo.name
+}
+
+fn main() {
+  foo := Foo{'bar'}
+  baz := foo.call()
+}
