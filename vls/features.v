@@ -787,9 +787,9 @@ fn (mut cfg HoverConfig) hover_from_expr(node ast.Expr) ?lsp.Hover {
 			obj_node := obj.find_var(node.name) ?
 			range := position_to_lsp_range(cfg.src, node.pos)
 			typ_name := cfg.table.type_to_str(obj_node.typ).all_after('main.')
+			prefix := if obj_node.is_mut { 'mut ' } else { '' }
 			return lsp.Hover{
-				contents: lsp.v_marked_string(if obj_node.is_mut { 'mut ' } else { '' } +
-					'$obj_node.name $typ_name')
+				contents: lsp.v_marked_string('$prefix$obj_node.name $typ_name')
 				range: range
 			}
 		}
@@ -823,10 +823,9 @@ fn (mut cfg HoverConfig) hover_from_expr(node ast.Expr) ?lsp.Hover {
 					''
 				}
 				field_name := '$parent_name$node.field_name'
-
+				prefix := if node.is_mut { 'mut ' } else { '' }
 				return lsp.Hover{
-					contents: lsp.v_marked_string(if node.is_mut { 'mut ' } else { '' } +
-						'$field_name $typ_name')
+					contents: lsp.v_marked_string('$prefix$field_name $typ_name')
 					range: range
 				}
 			}
@@ -896,9 +895,9 @@ fn (ls Vls) hover(id int, params string) {
 			}
 			range := position_to_lsp_range(src, node.pos.extend(node.type_pos))
 			typ_name := cfg.table.type_to_str(obj_node.typ).all_after('main.')
+			prefix := if obj_node.is_mut { 'mut ' } else { '' }
 			hover_data = lsp.Hover{
-				contents: lsp.v_marked_string(if obj_node.is_mut { 'mut ' } else { '' } +
-					'$obj_node.name $typ_name')
+				contents: lsp.v_marked_string('$prefix$obj_node.name $typ_name')
 				range: range
 			}
 		}
