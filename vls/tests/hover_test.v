@@ -33,6 +33,9 @@ const hover_inputs = {
 	'struct.vv':           lsp.HoverParams{
 		position: lsp.Position{0, 8}
 	}
+	'struct_init.vv':      lsp.HoverParams{
+		position: lsp.Position{8, 7}
+	}
 	'type_alias.vv':       lsp.HoverParams{
 		position: lsp.Position{0, 7}
 	}
@@ -109,6 +112,13 @@ const hover_results = {
 		range: lsp.Range{
 			start: lsp.Position{0, 0}
 			end: lsp.Position{2, 10}
+		}
+	}
+	'struct_init.vv':      lsp.Hover{
+		contents: lsp.MarkedString{'v', 'name string'}
+		range: lsp.Range{
+			start: lsp.Position{8, 4}
+			end: lsp.Position{8, 15}
 		}
 	}
 	'type_alias.vv':       lsp.Hover{
