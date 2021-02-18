@@ -1,0 +1,5 @@
+module main
+
+fn add_stuff(mut arr []string, text string) {
+  arr << text
+}

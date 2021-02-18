@@ -15,6 +15,9 @@ const hover_inputs = {
 	'enum.vv':             lsp.HoverParams{
 		position: lsp.Position{0, 8}
 	}
+	'function_param.vv':   lsp.HoverParams{
+		position: lsp.Position{2, 18}
+	}
 	'function.vv':         lsp.HoverParams{
 		position: lsp.Position{0, 6}
 	}
@@ -64,6 +67,13 @@ const hover_results = {
 		range: lsp.Range{
 			start: lsp.Position{0, 0}
 			end: lsp.Position{4, 10}
+		}
+	}
+	'function_param.vv':   lsp.Hover{
+		contents: lsp.MarkedString{'v', 'mut arr []string'}
+		range: lsp.Range{
+			start: lsp.Position{2, 17}
+			end: lsp.Position{2, 22}
 		}
 	}
 	'function.vv':         lsp.Hover{

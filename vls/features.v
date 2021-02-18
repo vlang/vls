@@ -891,15 +891,14 @@ fn (ls Vls) hover(id int, params string) {
 			}
 		}
 		table.Param {
-			obj_node := cfg.file.scope.innermost(cfg.offset).find_var(node.name) or {
-				ls.send_null(id)
-				return
-			}
 			range := position_to_lsp_range(src, node.pos.extend(node.type_pos))
-			typ_name := cfg.table.type_to_str(obj_node.typ).all_after('main.')
-			prefix := if obj_node.is_mut { 'mut ' } else { '' }
+			mut type_name := cfg.table.type_to_str(node.typ).all_after('main.')
+			if node.is_mut {
+				type_name = type_name[1..]
+			}
+			prefix := if node.is_mut { 'mut ' } else { '' }
 			hover_data = lsp.Hover{
-				contents: lsp.v_marked_string('$prefix$obj_node.name $typ_name')
+				contents: lsp.v_marked_string('$prefix$node.name $type_name')
 				range: range
 			}
 		}
