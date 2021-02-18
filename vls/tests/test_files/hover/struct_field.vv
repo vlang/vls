@@ -1,0 +1,5 @@
+module main
+
+struct Foo {
+  bar string
+}
