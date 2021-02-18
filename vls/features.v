@@ -789,6 +789,8 @@ fn (mut cfg HoverConfig) hover_from_expr(node ast.Expr) ?lsp.Hover {
 			obj := cfg.file.scope.innermost(cfg.offset)
 			obj_node := obj.find_var(node.name) ?
 			range := position_to_lsp_range(cfg.src, node.pos)
+			// TODO: create a wrapper function that will auto-format type
+			// based on the VLS style.
 			typ_name := cfg.table.type_to_str(obj_node.typ).all_after('main.')
 			prefix := if obj_node.is_mut { 'mut ' } else { '' }
 			return lsp.Hover{
