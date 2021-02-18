@@ -760,6 +760,7 @@ fn (mut cfg HoverConfig) hover_from_stmt(node ast.Stmt) ?lsp.Hover {
 			}
 		}
 		ast.Return {
+			// return and trigger null result for now
 			return none
 		}
 		ast.AssignStmt {
@@ -855,12 +856,16 @@ fn (ls Vls) hover(id int, params string) {
 		offset: compute_offset(src, pos.line, pos.character)
 	}
 
+	// an AST walker will find a node based on the offset
 	node := find_ast_by_pos(cfg.file.stmts.map(ast.Node(it)), cfg.offset) or {
 		ls.send_null(id)
 		return
 	}
 
 	mut hover_data := lsp.Hover{}
+
+	// the contents of the node will be extracted and be injected 
+	// into the hover_data variable
 	match node {
 		ast.Stmt {
 			hover_data = cfg.hover_from_stmt(node) or {
