@@ -1,0 +1,11 @@
+module main
+
+struct Person {
+  name string
+}
+
+fn main() {
+  person := Person{
+    name: 'Bob'
+  }
+}
