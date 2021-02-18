@@ -15,7 +15,9 @@ pub enum SignatureHelpTriggerKind {
 // response: SignatureHelp | none
 pub struct SignatureHelpParams {
 pub:
-	// extend: TextDocumentPositionParams
+	// TODO: utilize struct embedding feature
+	// for all structs that use TextDocumentPositionParams
+	// embed: TextDocumentPositionParams
 	text_document TextDocumentIdentifier [json: textDocument]
 	position      Position
 	context SignatureHelpContext
