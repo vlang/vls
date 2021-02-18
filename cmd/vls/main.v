@@ -12,7 +12,7 @@ const (
 )
 
 fn run_cli(cmd cli.Command) ? {
-	mut ls := vls.new(Stdio{})
+	mut ls := vls.new(&Stdio{})
 	enable_flag_raw := cmd.flags.get_string('enable') or { '' }
 	disable_flag_raw := cmd.flags.get_string('disable') or { '' }
 	enable_features := if enable_flag_raw.len > 0 { enable_flag_raw.split(',') } else { []string{} }
