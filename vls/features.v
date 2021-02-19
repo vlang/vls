@@ -9,7 +9,7 @@ import v.table
 import v.parser
 import v.pref
 import os
-import strings
+// import strings
 
 fn (ls Vls) formatting(id int, params string) {
 	formatting_params := json.decode(lsp.DocumentFormattingParams, params) or { panic(err) }
@@ -237,19 +237,17 @@ fn (ls Vls) signature_help(id int, params string) {
 		start := int(skip_receiver) // index 1 for true, 0 for false
 		for i in start .. params_data.len {
 			param := params_data[i]
-			mut sb := strings.new_builder(1)
+			mut sb := ''
 			mut typ := param.typ
 			if param.is_mut {
 				typ = typ.deref()
-				sb.write('mut ')
+				sb += 'mut '
 			}
-			sb.write('$param.name ')
 			styp := table.type_to_str(typ)
-			sb.write('$styp')
+			sb += '$param.name $styp'
 			param_infos << lsp.ParameterInformation{
-				label: sb.str()
+				label: sb
 			}
-			unsafe { sb.free() }
 		}
 
 		ls.send(jsonrpc.Response<lsp.SignatureHelp>{
