@@ -171,7 +171,7 @@ fn (ls Vls) signature_help(id int, params string) {
 
 	file := ls.files[uri.str()]
 	src := ls.sources[uri.str()]
-	table := ls.tables[os.dir(uri.str())]
+	tbl := ls.tables[os.dir(uri.str())]
 	offset := compute_offset(src, pos.line, pos.character)
 	node := find_ast_by_pos(file.stmts.map(ast.Node(it)), offset) or {
 		ls.send_null(id)
@@ -217,25 +217,41 @@ fn (ls Vls) signature_help(id int, params string) {
 		}
 		// create a signature help info based on the 
 		// call expr info
-		mut label := ''
+		// TODO: use string concat in the meantime as
+		// the msvc CI fails when using strings.builder
+		// as it produces bad output (in the case of msvc)
+		mut label := 'fn '
+		mut return_type := ''
 		mut param_infos := []lsp.ParameterInformation{}
 		mut params_data := []table.Param{}
 		mut skip_receiver := false
 
 		if call_expr.is_method {
-			left_type_sym := table.get_type_symbol(call_expr.left_type)
-			if method := table.type_find_method(left_type_sym, call_expr.name) {
+			left_type_sym := tbl.get_type_symbol(call_expr.left_type)
+			if method := tbl.type_find_method(left_type_sym, call_expr.name) {
 				skip_receiver = true
-				label = table.fn_signature(method, skip_receiver: true)
+				label += '(${left_type_sym.name}) ${method.name}('
+
+				if method.return_type != table.Type(0) {
+					return_type = tbl.type_to_str(method.return_type)
+				}
+
 				params_data << method.params
 			}
-		} else if fn_data := table.find_fn(call_expr.name) {
-			label = table.fn_signature(fn_data, skip_receiver: false)
+		} else if fn_data := tbl.find_fn(call_expr.name) {
+			if fn_data.return_type != table.Type(0) {
+				return_type = tbl.type_to_str(fn_data.return_type)
+			}
+
+			label += '${fn_data.name}('
 			params_data << fn_data.params
 		}
 
 		start := int(skip_receiver) // index 1 for true, 0 for false
 		for i in start .. params_data.len {
+			if i != start {
+				label += ', '
+			}
 			param := params_data[i]
 			mut sb := ''
 			mut typ := param.typ
@@ -243,12 +259,14 @@ fn (ls Vls) signature_help(id int, params string) {
 				typ = typ.deref()
 				sb += 'mut '
 			}
-			styp := table.type_to_str(typ)
+			styp := tbl.type_to_str(typ)
 			sb += '$param.name $styp'
+			label += sb
 			param_infos << lsp.ParameterInformation{
 				label: sb
 			}
 		}
+		label += ') $return_type'
 
 		ls.send(jsonrpc.Response<lsp.SignatureHelp>{
 			id: id
