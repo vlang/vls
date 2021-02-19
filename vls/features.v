@@ -920,3 +920,55 @@ fn (ls Vls) hover(id int, params string) {
 		result: hover_data
 	})
 }
+
+fn (ls Vls) folding_range(id int, params string) {
+	folding_range_params := json.decode(lsp.FoldingRangeParams, params) or { panic(err) }
+	uri := folding_range_params.text_document.uri
+	file := ls.files[uri.str()] or {
+		ls.send_null(id)
+		return
+	}
+	src := ls.sources[uri.str()]
+	mut folding_ranges := []lsp.FoldingRange{}
+	
+	// TODO: enable parsing with .toplevel_comments included
+	for stmt in file.stmts {
+		match stmt {
+			ast.ExprStmt {
+				if stmt.expr is ast.Comment {
+					range := position_to_lsp_range(src, stmt.expr.pos)
+					folding_ranges << lsp.FoldingRange{
+						start_line: range.start.line
+						start_character: range.start.character
+						end_line: range.end.line
+						end_character: range.end.character
+						kind: lsp.folding_range_kind_comment
+					}
+				}
+			}
+			ast.StructDecl, ast.EnumDecl, ast.FnDecl, ast.InterfaceDecl {
+				range := position_to_lsp_range(src, stmt.pos)
+				folding_ranges << lsp.FoldingRange{
+					start_line: range.start.line
+					start_character: range.start.character
+					end_line: range.end.line
+					end_character: range.end.character
+					kind: lsp.folding_range_kind_region
+				}
+			}
+			else {}
+		}
+	}
+
+	if folding_ranges.len == 0 {
+		ls.send_null(id)
+	} else {
+		ls.send(jsonrpc.Response<[]lsp.FoldingRange>{
+			id: id
+			result: folding_ranges
+		})
+	}
+	unsafe {
+		folding_ranges.free()
+	}
+}
