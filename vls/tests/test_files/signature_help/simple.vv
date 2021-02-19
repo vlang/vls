@@ -1,6 +1,6 @@
 module main
 
-fn greet(name string) {
+fn greet(name string) bool {
   println(name)
 }
 

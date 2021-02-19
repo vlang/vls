@@ -18,7 +18,7 @@ const signature_help_results = map{
 	'simple.vv': lsp.SignatureHelp{
 		signatures: [
 			lsp.SignatureInformation{
-				label: 'fn main.greet(name string)'
+				label: 'fn main.greet(name string) bool'
 				parameters: [
 					lsp.ParameterInformation{'name string'},
 				]
