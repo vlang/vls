@@ -5,7 +5,7 @@ import lsp
 import os
 
 fn test_formatting() {
-	mut io := testing.Testio{}
+	mut io := &testing.Testio{}
 	mut ls := vls.new(io)
 	ls.dispatch(io.request('initialize'))
 	test_files := testing.load_test_file_paths('formatting') or {

@@ -191,7 +191,7 @@ const completion_results = {
 }
 
 fn test_completion() {
-	mut io := testing.Testio{}
+	mut io := &testing.Testio{}
 	mut ls := vls.new(io)
 	ls.dispatch(io.request_with_params('initialize', lsp.InitializeParams{
 		root_uri: lsp.document_uri_from_path(os.join_path(os.dir(@FILE), 'test_files',

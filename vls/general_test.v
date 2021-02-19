@@ -4,7 +4,7 @@ import lsp
 import json
 
 fn test_wrong_first_request() {
-	mut io := testing.Testio{}
+	mut io := &testing.Testio{}
 	mut ls := vls.new(io)
 	payload := io.request('shutdown')
 	ls.dispatch(payload)
@@ -40,7 +40,7 @@ fn test_initialized() {
 // 	assert status == .shutdown
 // }
 fn test_set_features() {
-	mut io := testing.Testio{}
+	mut io := &testing.Testio{}
 	mut ls := vls.new(io)
 	assert ls.features() == vls.default_features_list
 	ls.set_features(['formatting'], false) or {
@@ -59,8 +59,8 @@ fn test_set_features() {
 	}
 }
 
-fn init() (testing.Testio, vls.Vls) {
-	mut io := testing.Testio{}
+fn init() (&testing.Testio, vls.Vls) {
+	mut io := &testing.Testio{}
 	mut ls := vls.new(io)
 	payload := io.request('initialize')
 	ls.dispatch(payload)

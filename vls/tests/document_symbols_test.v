@@ -82,7 +82,7 @@ const doc_symbols_result = {
 }
 
 fn test_document_symbols() {
-	mut io := testing.Testio{}
+	mut io := &testing.Testio{}
 	mut ls := vls.new(io)
 	ls.dispatch(io.request('initialize'))
 	test_files := testing.load_test_file_paths('document_symbols') or {
