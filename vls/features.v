@@ -930,7 +930,7 @@ fn (ls Vls) folding_range(id int, params string) {
 	}
 	src := ls.sources[uri.str()]
 	mut folding_ranges := []lsp.FoldingRange{}
-	
+
 	// TODO: enable parsing with .toplevel_comments included
 	for stmt in file.stmts {
 		match stmt {

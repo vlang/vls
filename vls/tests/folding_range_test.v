@@ -5,45 +5,45 @@ import lsp
 import os
 
 // TODO: enable top level comments support in the future
-const folding_range_results = {
-	'simple.vv': [
-		lsp.FoldingRange {
+const folding_range_results = map{
+	'simple.vv':  [
+		lsp.FoldingRange{
 			start_line: 2
 			start_character: 0
 			end_line: 6
 			end_character: 11
 			kind: 'region'
 		},
-		lsp.FoldingRange {
+		lsp.FoldingRange{
 			start_line: 8
 			start_character: 0
 			end_line: 11
 			end_character: 9
 			kind: 'region'
 		},
-		lsp.FoldingRange {
+		lsp.FoldingRange{
 			start_line: 13
 			start_character: 0
 			end_line: 17
 			end_character: 10
 			kind: 'region'
 		},
-		lsp.FoldingRange {
+		lsp.FoldingRange{
 			start_line: 19
 			start_character: 0
 			end_line: 23
 			end_character: 9
 			kind: 'region'
-		}
+		},
 	]
 	'comment.vv': [
-		lsp.FoldingRange {
+		lsp.FoldingRange{
 			start_line: 0
 			start_character: 0
 			end_line: 18
 			end_character: 2
 			kind: 'comment'
-		}
+		},
 	]
 }
 
