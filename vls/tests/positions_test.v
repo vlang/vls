@@ -1,6 +1,6 @@
 import os
-import vls
-import vls.testing
+import vls.vls
+import vls.vls.testing
 import v.token
 import benchmark
 import lsp

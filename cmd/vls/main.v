@@ -1,7 +1,7 @@
 module main
 
 import cli
-import vls
+import vls.vls
 import v.vmod
 import os
 
