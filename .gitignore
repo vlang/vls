@@ -1,1 +1,5 @@
+# Editor files
+*.code-workspace
+
+# Other
 cmd/vls/vls
