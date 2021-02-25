@@ -1,0 +1,24 @@
+module main
+
+struct Stru {
+  name string
+  age int
+  height f32
+}
+
+interface Speaker {
+  speak(word string) string
+  silent()
+}
+
+enum Color {
+  red
+  blue
+  green
+}
+
+fn main() {
+  num := 2
+  hello := 'world'
+  foo := 10.00
+}

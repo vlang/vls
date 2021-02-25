@@ -87,7 +87,7 @@ Afterwards, go to your editor's configuration and scroll to the V extension sect
 - [ ] `onTypeFormatting`
 - [ ] `rename`
 - [ ] `prepareRename`
-- [ ] `foldingRange`
+- [x] `foldingRange`
 
 # Contributing
 ## Submitting a pull request

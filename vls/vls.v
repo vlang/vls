@@ -16,6 +16,7 @@ pub enum Feature {
 	workspace_symbol
 	completion
 	hover
+	folding_range
 }
 
 // feature_from_str returns the Feature-enum value equivalent of the given string.
@@ -28,6 +29,7 @@ fn feature_from_str(feature_name string) ?Feature {
 		'workspace_symbol' { return Feature.workspace_symbol }
 		'completion' { return Feature.completion }
 		'hover' { return Feature.hover }
+		'folding_range' { return Feature.folding_range }
 		else { return error('feature "$feature_name" not found') }
 	}
 }
@@ -39,6 +41,7 @@ pub const (
 		.document_symbol,
 		.workspace_symbol,
 		.completion,
+		.folding_range,
 	]
 )
 
@@ -117,6 +120,7 @@ pub fn (mut ls Vls) dispatch(payload string) {
 			'workspace/symbol' { ls.workspace_symbol(request.id, request.params) }
 			'textDocument/completion' { ls.completion(request.id, request.params) }
 			'textDocument/hover' { ls.hover(request.id, request.params) }
+			'textDocument/foldingRange' { ls.folding_range(request.id, request.params) }
 			else {}
 		}
 	} else {
