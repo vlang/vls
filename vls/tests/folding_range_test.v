@@ -56,7 +56,7 @@ fn test_folding_range() {
 	}))
 	test_files := testing.load_test_file_paths('folding_range') or {
 		io.bench.fail()
-		eprintln(io.bench.step_message_fail(err))
+		eprintln(io.bench.step_message_fail(err.msg))
 		assert false
 		return
 	}
