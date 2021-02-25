@@ -1,6 +1,8 @@
 > VLS is a work-in-progress, pre-alpha language server. It may not be guaranteed to work reliably on your system due to memory management issues and other factors.
 
 # vls
+[![CI](https://github.com/vlang/vls/actions/workflows/ci.yml/badge.svg)](https://github.com/vlang/vls/actions/workflows/ci.yml)
+
 VLS (V Language Server) is a LSP v3.15-compatible language server for [the V programming language](https://github.com/vlang/v).
 
 ## Installation
