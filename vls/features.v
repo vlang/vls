@@ -253,17 +253,19 @@ fn (ls Vls) signature_help(id int, params string) {
 				label += ', '
 			}
 			param := params_data[i]
-			mut sb := ''
+			// TODO: revert back to strings.builder once
+			//  the issue with MSVC has been fully resolved.
+			mut param_signature := ''
 			mut typ := param.typ
 			if param.is_mut {
 				typ = typ.deref()
-				sb += 'mut '
+				param_signature += 'mut '
 			}
 			styp := tbl.type_to_str(typ)
-			sb += '$param.name $styp'
-			label += sb
+			param_signature += '$param.name $styp'
+			label += param_signature
 			param_infos << lsp.ParameterInformation{
-				label: sb
+				label: param_signature
 			}
 		}
 		label += ') $return_type'
