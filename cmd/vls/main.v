@@ -21,6 +21,8 @@ fn run_cli(cmd cli.Command) ? {
 	} else {
 		[]string{}
 	}
+	debug_mode := cmd.flags.get_bool('debug') or { false }
+	ls.set_debug(debug_mode)
 	ls.set_features(enable_features, true) ?
 	ls.set_features(disable_features, false) ?
 	ls.start_loop()
@@ -53,6 +55,11 @@ fn main() {
 			abbrev: 'd'
 			description: 'Disables specific language features.'
 		},
+		cli.Flag{
+			flag: .bool
+			name: 'debug'
+			description: 'Toggles language server\'s debug mode.'
+		}
 	])
 
 	cmd.parse(os.args)

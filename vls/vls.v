@@ -6,6 +6,7 @@ import v.pref
 import json
 import jsonrpc
 import lsp
+import log
 
 // These are the list of features available in VLS
 // If the feature is experimental, the value name should have a `exp_` prefix
@@ -79,6 +80,8 @@ mut:
 	builtin_symbols  []string // list of publicly available symbols in builtin
 	enabled_features []Feature = vls.default_features_list
 	capabilities     lsp.ServerCapabilities
+	logger           log.Log
+	debug            bool
 	// client_capabilities lsp.ClientCapabilities
 pub mut:
 	// TODO: replace with io.ReadWriter
@@ -91,6 +94,10 @@ pub fn new(io ReceiveSender) Vls {
 	return Vls{
 		io: io
 		base_table: tbl
+		debug: true
+		logger: log.Log{
+			level: .info
+		}
 	}
 }
 
@@ -100,6 +107,7 @@ pub fn (mut ls Vls) dispatch(payload string) {
 		return
 	}
 	if ls.status == .initialized {
+		ls.logger.info('Receiving -> id: ${request.id} | method: ${request.method} | params_len: ${request.params.len}')
 		match request.method { // not only requests but also notifications
 			'initialized' {} // does nothing currently
 			'shutdown' {
@@ -151,14 +159,36 @@ pub fn (ls Vls) status() ServerStatus {
 	return ls.status
 }
 
-fn (ls Vls) send<T>(data T) {
+// set_debug sets the debug mode of the language server
+pub fn (mut ls Vls) set_debug(state bool) {
+	ls.debug = state
+}
+
+pub fn (mut ls Vls) panic(message string) {
+	err_msg := '${message}. Please refer to ${ls.logger.output_file_name} for more details.'
+	ls.show_message(err_msg, .info)
+	ls.logger.fatal(err_msg)
+}
+
+fn (mut ls Vls) send<T>(data T) {
 	str := json.encode(data)
+	$if T is jsonrpc.Response {
+		ls.logger.info('Sending -> id: ${data.id} | len: ${str.len}')
+		ls.logger.debug(str)
+	} $else $if T is jsonrpc.NotificationMessage {
+		ls.logger.info('Notifying -> params: ${data.params} | len: ${str.len}')
+		ls.logger.debug(str)
+	} $else {
+		ls.logger.info(str)
+	}
 	ls.io.send(str)
 }
 
 // send_null sends a null result to the client
-fn (ls Vls) send_null(id int) {
-	ls.io.send('{"jsonrpc":"2.0","id":$id,"result":null}')
+fn (mut ls Vls) send_null(id int) {
+	str := '{"jsonrpc":"2.0","id":$id,"result":null}'
+	ls.logger.info('Sending -> id: $id | null')
+	ls.io.send(str)
 }
 
 // start_loop starts an endless loop which waits for stdin and prints responses to the stdout

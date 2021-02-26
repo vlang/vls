@@ -2,9 +2,10 @@ module vls
 
 import lsp
 import jsonrpc
+import json
 
 // log_message sends a window/logMessage notification to the client
-fn (ls Vls) log_message(message string, typ lsp.MessageType) {
+fn (mut ls Vls) log_message(message string, typ lsp.MessageType) {
 	result := jsonrpc.NotificationMessage<lsp.LogMessageParams>{
 		method: 'window/logMessage'
 		params: lsp.LogMessageParams{
@@ -16,7 +17,7 @@ fn (ls Vls) log_message(message string, typ lsp.MessageType) {
 }
 
 // show_message sends a window/showMessage notification to the client
-fn (ls Vls) show_message(message string, typ lsp.MessageType) {
+fn (mut ls Vls) show_message(message string, typ lsp.MessageType) {
 	result := jsonrpc.NotificationMessage<lsp.ShowMessageParams>{
 		method: 'window/showMessage'
 		params: lsp.ShowMessageParams{
@@ -24,10 +25,15 @@ fn (ls Vls) show_message(message string, typ lsp.MessageType) {
 			message: message
 		}
 	}
-	ls.send(result)
+	if typ == .error {
+		src := json.encode(result)
+		ls.io.send(src)
+	} else {
+		ls.send(result)
+	}
 }
 
-fn (ls Vls) show_message_request(message string, actions []lsp.MessageActionItem, typ lsp.MessageType) {
+fn (mut ls Vls) show_message_request(message string, actions []lsp.MessageActionItem, typ lsp.MessageType) {
 	result := jsonrpc.NotificationMessage<lsp.ShowMessageRequestParams>{
 		method: 'window/showMessageRequest'
 		params: lsp.ShowMessageRequestParams{

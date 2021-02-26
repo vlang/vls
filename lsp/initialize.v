@@ -6,7 +6,7 @@ module lsp
 pub struct InitializeParams {
 pub mut:
 	process_id             int                [skip]
-	client_info            ClientInfo         [skip; json: clientInfo]
+	client_info            ClientInfo         [json: clientInfo]
 	root_uri               DocumentUri        [json: rootUri]
 	root_path              DocumentUri        [json: rootPath]
 	initialization_options string             [skip; json: initializationOptions]

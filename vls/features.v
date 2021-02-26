@@ -10,7 +10,7 @@ import v.parser
 import v.pref
 import os
 
-fn (ls Vls) formatting(id int, params string) {
+fn (mut ls Vls) formatting(id int, params string) {
 	formatting_params := json.decode(lsp.DocumentFormattingParams, params) or { panic(err) }
 	uri := formatting_params.text_document.uri.str()
 	path := formatting_params.text_document.uri.path()
@@ -486,7 +486,7 @@ fn (mut ls Vls) completion(id int, params string) {
 	if Feature.completion !in ls.enabled_features {
 		return
 	}
-	completion_params := json.decode(lsp.CompletionParams, params) or { panic(err) }
+	completion_params := json.decode(lsp.CompletionParams, params) or { ls.panic(err) }
 	file_uri := completion_params.text_document.uri
 	file := ls.files[file_uri.str()]
 	src := ls.sources[file_uri.str()]
@@ -845,8 +845,8 @@ fn (mut cfg HoverConfig) hover_from_expr(node ast.Expr) ?lsp.Hover {
 	}
 }
 
-fn (ls Vls) hover(id int, params string) {
-	hover_params := json.decode(lsp.HoverParams, params) or { panic(err) }
+fn (mut ls Vls) hover(id int, params string) {
+	hover_params := json.decode(lsp.HoverParams, params) or { ls.panic(err) }
 	uri := hover_params.text_document.uri
 	pos := hover_params.position
 	src := ls.sources[uri.str()]
@@ -921,8 +921,8 @@ fn (ls Vls) hover(id int, params string) {
 	})
 }
 
-fn (ls Vls) folding_range(id int, params string) {
-	folding_range_params := json.decode(lsp.FoldingRangeParams, params) or { panic(err) }
+fn (mut ls Vls) folding_range(id int, params string) {
+	folding_range_params := json.decode(lsp.FoldingRangeParams, params) or { ls.panic(err) }
 	uri := folding_range_params.text_document.uri
 	file := ls.files[uri.str()] or {
 		ls.send_null(id)

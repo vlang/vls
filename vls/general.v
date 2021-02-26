@@ -6,6 +6,8 @@ import jsonrpc
 import os
 import v.parser
 import v.ast
+import v.vmod
+import runtime
 
 const (
 	completion_trigger_characters = ['=', '.', ':', '{', ',', '(', ' ']
@@ -41,14 +43,50 @@ fn (mut ls Vls) initialize(id int, params string) {
 	// only files are supported right now
 	ls.root_uri = initialize_params.root_uri
 	ls.status = .initialized
+
+	// set up logger set to the workspace path
+	ls.setup_logger(initialize_params.trace, initialize_params.client_info)
+
 	// since builtin is used frequently, they should be parsed first and only once
 	ls.process_builtin()
 	ls.send(result)
 }
 
+fn (mut ls Vls) setup_logger(trace string, client_info lsp.ClientInfo) {
+	is_debug := ls.debug || (!ls.debug && trace == 'verbose')
+	meta := vmod.decode(@VMOD_FILE) or { vmod.Manifest{} }
+	mut arch := 32
+	if runtime.is_64bit() {
+		arch += 32
+	}
+
+	log_path := if is_debug {
+		os.join_path(ls.root_uri.path(), 'vls.log')
+	} else {
+		os.join_path(os.temp_dir(), 'vls.log')
+	}
+	
+	os.rm(log_path) or { }
+	if is_debug {
+		ls.logger.set_level(.debug)
+	}
+
+	ls.logger.set_full_logpath(log_path)
+	// print important info for reporting
+	ls.logger.info('==========V L S==========')
+	ls.logger.info('VLS Version: ${meta.version}')
+	ls.logger.info('OS: ${os.user_os()} $arch')
+	if client_info.name.len != 0 {
+		ls.logger.info('Client / Editor: ${client_info.name} ${client_info.version}')
+	} else {
+		ls.logger.info('Client / Editor: Unknown')
+	}
+	ls.logger.info('=========================')
+}
+
 fn (mut ls Vls) process_builtin() {
 	scope, pref := new_scope_and_pref()
-	mut builtin_files := os.ls(builtin_path) or { panic(err) }
+	mut builtin_files := os.ls(builtin_path) or { ls.panic(err) }
 	builtin_files = pref.should_compile_filtered_files(builtin_path, builtin_files)
 	parsed_files := parser.parse_files(builtin_files, ls.base_table, pref, scope)
 	// This part extracts the symbols for the builtin module
@@ -84,7 +122,10 @@ fn (mut ls Vls) shutdown(id int) {
 }
 
 // exit stops the process
-fn (ls Vls) exit() {
+fn (mut ls Vls) exit() {
+	// saves the log into the disk
+	ls.logger.close()
+
 	// move exit to shutdown for now
 	// == .shutdown => 0
 	// != .shutdown => 1
