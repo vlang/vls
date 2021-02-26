@@ -189,6 +189,7 @@ pub mut:
 	color_provider                       bool                            [json: colorProvider]
 	declaration_provider                 bool                            [json: declarationProvider]
 	execute_command_provder              string                          [raw; json: executeCommandProvider]
+	folding_range_provider               bool                            [json: foldingRangeProvider]
 	experimental                         map[string]bool
 }
 

@@ -4,7 +4,7 @@ import lsp
 import json
 
 fn test_wrong_first_request() {
-	mut io := testing.Testio{}
+	mut io := &testing.Testio{}
 	mut ls := vls.new(io)
 	payload := io.request('shutdown')
 	ls.dispatch(payload)
@@ -40,27 +40,27 @@ fn test_initialized() {
 // 	assert status == .shutdown
 // }
 fn test_set_features() {
-	mut io := testing.Testio{}
+	mut io := &testing.Testio{}
 	mut ls := vls.new(io)
 	assert ls.features() == vls.default_features_list
 	ls.set_features(['formatting'], false) or {
 		assert false
 		return
 	}
-	assert ls.features() == [.diagnostics, .document_symbol, .workspace_symbol, .signature_help, .completion]
+	assert ls.features() == [.diagnostics, .document_symbol, .workspace_symbol, .signature_help, .completion, .folding_range]
 	ls.set_features(['formatting'], true) or {
 		assert false
 		return
 	}
-	assert ls.features() == [.diagnostics, .document_symbol, .workspace_symbol, .signature_help, .completion, .formatting]
+	assert ls.features() == [.diagnostics, .document_symbol, .workspace_symbol, .completion, .folding_range, .signature_help, .formatting]
 	ls.set_features(['logging'], true) or {
 		assert err == 'feature "logging" not found'
 		return
 	}
 }
 
-fn init() (testing.Testio, vls.Vls) {
-	mut io := testing.Testio{}
+fn init() (&testing.Testio, vls.Vls) {
+	mut io := &testing.Testio{}
 	mut ls := vls.new(io)
 	payload := io.request('initialize')
 	ls.dispatch(payload)

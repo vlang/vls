@@ -54,7 +54,7 @@ const workspace_symbols_result = [
 ]
 
 fn test_workspace_symbols() {
-	mut io := testing.Testio{}
+	mut io := &testing.Testio{}
 	mut ls := vls.new(io)
 	ls.dispatch(io.request('initialize'))
 	files := testing.load_test_file_paths('workspace_symbols') or {

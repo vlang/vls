@@ -29,7 +29,7 @@ const diagnostics_result = lsp.PublishDiagnosticsParams{
 }
 
 fn test_diagnostics() {
-	mut io := testing.Testio{}
+	mut io := &testing.Testio{}
 	mut ls := vls.new(io)
 	ls.dispatch(io.request('initialize'))
 	files := testing.load_test_file_paths('diagnostics') or {

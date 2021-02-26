@@ -17,6 +17,7 @@ pub enum Feature {
 	signature_help
 	completion
 	hover
+	folding_range
 }
 
 // feature_from_str returns the Feature-enum value equivalent of the given string.
@@ -30,6 +31,7 @@ fn feature_from_str(feature_name string) ?Feature {
 		'signature_help' { return Feature.signature_help }
 		'completion' { return Feature.completion }
 		'hover' { return Feature.hover }
+		'folding_range' { return Feature.folding_range }
 		else { return error('feature "$feature_name" not found') }
 	}
 }
@@ -42,6 +44,7 @@ pub const (
 		.workspace_symbol,
 		.signature_help,
 		.completion,
+		.folding_range,
 	]
 )
 
@@ -121,6 +124,7 @@ pub fn (mut ls Vls) dispatch(payload string) {
 			'textDocument/signatureHelp' { ls.signature_help(request.id, request.params) }
 			'textDocument/completion' { ls.completion(request.id, request.params) }
 			'textDocument/hover' { ls.hover(request.id, request.params) }
+			'textDocument/foldingRange' { ls.folding_range(request.id, request.params) }
 			else {}
 		}
 	} else {
