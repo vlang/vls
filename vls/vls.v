@@ -44,6 +44,7 @@ pub const (
 		.workspace_symbol,
 		.signature_help,
 		.completion,
+		.hover,
 		.folding_range,
 	]
 )
