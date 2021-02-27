@@ -64,7 +64,7 @@ Afterwards, go to your editor's configuration and scroll to the V extension sect
 ### Diagnostics
 - [x] `publishDiagnostics`
 ### Language Features
-- [ ] `completion`
+- [x] `completion`
 - [ ] `completion resolve`
 - [x] `hover`
 - [ ] `signatureHelp`
