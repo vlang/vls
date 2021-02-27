@@ -9,6 +9,7 @@ import v.table
 import v.parser
 import v.pref
 import os
+// import strings
 
 fn (ls Vls) formatting(id int, params string) {
 	formatting_params := json.decode(lsp.DocumentFormattingParams, params) or { panic(err) }
@@ -156,6 +157,132 @@ fn (mut ls Vls) generate_symbols(file ast.File, uri lsp.DocumentUri) []lsp.Symbo
 	}
 	ls.doc_symbols[uri.str()] = symbols
 	return symbols
+}
+
+fn (ls Vls) signature_help(id int, params string) {
+	signature_params := json.decode(lsp.SignatureHelpParams, params) or { panic(err) }
+	uri := signature_params.text_document.uri
+	pos := signature_params.position
+	ctx := signature_params.context
+	if Feature.signature_help !in ls.enabled_features {
+		ls.send_null(id)
+		return
+	}
+
+	file := ls.files[uri.str()]
+	src := ls.sources[uri.str()]
+	tbl := ls.tables[os.dir(uri.str())]
+	offset := compute_offset(src, pos.line, pos.character)
+	node := find_ast_by_pos(file.stmts.map(ast.Node(it)), offset) or {
+		ls.send_null(id)
+		return
+	}
+
+	mut expr := ast.Expr{}
+	if node is ast.Stmt {
+		// if the selected node is an ExprStmt,
+		// the expr content of the ExprStmt node
+		// will be used.
+		if node is ast.ExprStmt {
+			expr = node.expr
+		}
+	} else if node is ast.Expr {
+		expr = node
+	}
+	// signature help supports function calls for now
+	// hence checking the expr if it's a CallExpr node.
+	if expr is ast.CallExpr {
+		call_expr := expr as ast.CallExpr
+
+		// for retrigger, it utilizes the current signature help data
+		if ctx.is_retrigger {
+			mut active_sighelp := ctx.active_signature_help
+
+			if ctx.trigger_kind == .content_change {
+				// change the current active param value to the length of the current args.
+				active_sighelp.active_parameter = call_expr.args.len - 1
+			} else if ctx.trigger_kind == .trigger_character && ctx.trigger_character == ','
+				&& active_sighelp.signatures.len > 0
+				&& active_sighelp.active_parameter < active_sighelp.signatures[0].parameters.len {
+				// when pressing comma, it must proceed to the next parameter
+				// by incrementing the active parameter.
+				active_sighelp.active_parameter++
+			}
+
+			ls.send(jsonrpc.Response<lsp.SignatureHelp>{
+				id: id
+				result: active_sighelp
+			})
+			return
+		}
+		// create a signature help info based on the 
+		// call expr info
+		// TODO: use string concat in the meantime as
+		// the msvc CI fails when using strings.builder
+		// as it produces bad output (in the case of msvc)
+		mut label := 'fn '
+		mut return_type := ''
+		mut param_infos := []lsp.ParameterInformation{}
+		mut params_data := []table.Param{}
+		mut skip_receiver := false
+
+		if call_expr.is_method {
+			left_type_sym := tbl.get_type_symbol(call_expr.left_type)
+			if method := tbl.type_find_method(left_type_sym, call_expr.name) {
+				skip_receiver = true
+				label += '(${left_type_sym.name}) ${method.name}('
+
+				if method.return_type != table.Type(0) {
+					return_type = tbl.type_to_str(method.return_type)
+				}
+
+				params_data << method.params
+			}
+		} else if fn_data := tbl.find_fn(call_expr.name) {
+			if fn_data.return_type != table.Type(0) {
+				return_type = tbl.type_to_str(fn_data.return_type)
+			}
+
+			label += '${fn_data.name}('
+			params_data << fn_data.params
+		}
+
+		start := int(skip_receiver) // index 1 for true, 0 for false
+		for i in start .. params_data.len {
+			if i != start {
+				label += ', '
+			}
+			param := params_data[i]
+			// TODO: revert back to strings.builder once
+			//  the issue with MSVC has been fully resolved.
+			mut param_signature := ''
+			mut typ := param.typ
+			if param.is_mut {
+				typ = typ.deref()
+				param_signature += 'mut '
+			}
+			styp := tbl.type_to_str(typ)
+			param_signature += '$param.name $styp'
+			label += param_signature
+			param_infos << lsp.ParameterInformation{
+				label: param_signature
+			}
+		}
+		label += ') $return_type'
+
+		ls.send(jsonrpc.Response<lsp.SignatureHelp>{
+			id: id
+			result: lsp.SignatureHelp{
+				signatures: [lsp.SignatureInformation{
+					label: label
+					parameters: param_infos
+				}]
+			}
+		})
+		return
+	}
+	// send null result for unsupported node
+	ls.send_null(id)
 }
 
 struct CompletionItemConfig {
