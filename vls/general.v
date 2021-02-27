@@ -8,6 +8,7 @@ import v.parser
 import v.ast
 import v.vmod
 import runtime
+import lsp.log
 
 const (
 	completion_trigger_characters = ['=', '.', ':', '{', ',', '(', ' ']
@@ -67,21 +68,18 @@ fn (mut ls Vls) setup_logger(trace string, client_info lsp.ClientInfo) {
 	}
 	
 	os.rm(log_path) or { }
-	if is_debug {
-		ls.logger.set_level(.debug)
-	}
 
-	ls.logger.set_full_logpath(log_path)
+	ls.logger = log.new(log_path, .text)
 	// print important info for reporting
-	ls.logger.info('==========V L S==========')
-	ls.logger.info('VLS Version: ${meta.version}')
-	ls.logger.info('OS: ${os.user_os()} $arch')
+	ls.log_message('==========V L S==========', .info)
+	ls.log_message('VLS Version: ${meta.version}', .info)
+	ls.log_message('OS: ${os.user_os()} $arch', .info)
 	if client_info.name.len != 0 {
-		ls.logger.info('Client / Editor: ${client_info.name} ${client_info.version}')
+		ls.log_message('Client / Editor: ${client_info.name} ${client_info.version}', .info)
 	} else {
-		ls.logger.info('Client / Editor: Unknown')
+		ls.log_message('Client / Editor: Unknown', .info)
 	}
-	ls.logger.info('=========================')
+	ls.log_message('=========================', .info)
 }
 
 fn (mut ls Vls) process_builtin() {

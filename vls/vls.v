@@ -6,7 +6,7 @@ import v.pref
 import json
 import jsonrpc
 import lsp
-import log
+import lsp.log
 
 // These are the list of features available in VLS
 // If the feature is experimental, the value name should have a `exp_` prefix
@@ -95,9 +95,6 @@ pub fn new(io ReceiveSender) Vls {
 		io: io
 		base_table: tbl
 		debug: true
-		logger: log.Log{
-			level: .info
-		}
 	}
 }
 
@@ -107,7 +104,7 @@ pub fn (mut ls Vls) dispatch(payload string) {
 		return
 	}
 	if ls.status == .initialized {
-		ls.logger.info('Receiving -> id: ${request.id} | method: ${request.method} | params_len: ${request.params.len}')
+		ls.logger.request(payload, .receive)
 		match request.method { // not only requests but also notifications
 			'initialized' {} // does nothing currently
 			'shutdown' {
@@ -165,29 +162,32 @@ pub fn (mut ls Vls) set_debug(state bool) {
 }
 
 pub fn (mut ls Vls) panic(message string) {
-	err_msg := '${message}. Please refer to ${ls.logger.output_file_name} for more details.'
-	ls.show_message(err_msg, .info)
-	ls.logger.fatal(err_msg)
+	err_msg := '${message}. Please refer to ${ls.logger.file_path} for more details.'
+	ls.show_message(err_msg, .error)
+	ls.logger.close()
+	ls.exit()
 }
 
 fn (mut ls Vls) send<T>(data T) {
 	str := json.encode(data)
-	$if T is jsonrpc.Response {
-		ls.logger.info('Sending -> id: ${data.id} | len: ${str.len}')
-		ls.logger.debug(str)
-	} $else $if T is jsonrpc.NotificationMessage {
-		ls.logger.info('Notifying -> params: ${data.params} | len: ${str.len}')
-		ls.logger.debug(str)
-	} $else {
-		ls.logger.info(str)
+	ls.logger.response(str, .send)
+	ls.io.send(str)
+}
+
+fn (mut ls Vls) notify<T>(method string, params T) {
+	result := jsonrpc.NotificationMessage<T>{
+		method: method
+		params: params
 	}
+	str := json.encode(result)
+	ls.logger.notification(str, .send)
 	ls.io.send(str)
 }
 
 // send_null sends a null result to the client
 fn (mut ls Vls) send_null(id int) {
 	str := '{"jsonrpc":"2.0","id":$id,"result":null}'
-	ls.logger.info('Sending -> id: $id | null')
+	ls.logger.response(str, .send)
 	ls.io.send(str)
 }
 

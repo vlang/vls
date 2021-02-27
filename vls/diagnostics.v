@@ -1,7 +1,6 @@
 module vls
 
 import lsp
-import jsonrpc
 
 // show_diagnostics converts the file ast's errors and warnings and publishes them to the editor
 fn (mut ls Vls) show_diagnostics(uri lsp.DocumentUri) {
@@ -30,13 +29,9 @@ fn (mut ls Vls) publish_diagnostics(uri lsp.DocumentUri, diagnostics []lsp.Diagn
 	if Feature.diagnostics !in ls.enabled_features {
 		return
 	}
-	result := jsonrpc.NotificationMessage<lsp.PublishDiagnosticsParams>{
-		method: 'textDocument/publishDiagnostics'
-		params: lsp.PublishDiagnosticsParams{
-			uri: uri
-			diagnostics: diagnostics
-		}
-	}
-	ls.send(result)
+	ls.notify('textDocument/publishDiagnostics', lsp.PublishDiagnosticsParams{
+		uri: uri
+		diagnostics: diagnostics
+	})
 	unsafe { diagnostics.free() }
 }
