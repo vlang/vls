@@ -159,7 +159,7 @@ fn (mut ls Vls) generate_symbols(file ast.File, uri lsp.DocumentUri) []lsp.Symbo
 	return symbols
 }
 
-fn (ls Vls) signature_help(id int, params string) {
+fn (mut ls Vls) signature_help(id int, params string) {
 	signature_params := json.decode(lsp.SignatureHelpParams, params) or { panic(err) }
 	uri := signature_params.text_document.uri
 	pos := signature_params.position

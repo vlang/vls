@@ -138,7 +138,7 @@ fn test_show_message_log() {
 
 fn test_show_message_request() {
 	mut io := &testing.Testio{}
-	ls := vls.new(io)
+	mut ls := vls.new(io)
 	actions := [lsp.MessageActionItem{'Retry'}]
 	ls.show_message_request('Failed!', actions, .info)
 	method, params := io.notification() or {

@@ -15,9 +15,10 @@ mut:
 	file os.File
 	format Format = .json
 	buffer strings.Builder
+	file_opened bool
+	enabled bool
 pub mut:
 	file_path string
-	opened bool
 	cur_requests map[int]string = map[int]string{}
 }
 
@@ -52,13 +53,14 @@ pub struct LogItem {
 pub fn new(format Format) Log {
 	return Log{
 		format: format
-		opened: false
+		file_opened: false
+		enabled: true
 		buffer: strings.new_builder(20)
 	}
 }
 
 pub fn (mut l Log) set_logpath(path string) {
-	if l.opened { 
+	if l.file_opened { 
 		l.close()
 	}
 
@@ -68,7 +70,8 @@ pub fn (mut l Log) set_logpath(path string) {
 
 	l.file = file
 	l.file_path = path
-	l.opened = true
+	l.file_opened = true
+	l.enabled = true
 }
 
 pub fn (mut l Log) flush() {
@@ -76,13 +79,25 @@ pub fn (mut l Log) flush() {
 }
 
 pub fn (mut l Log) close() {
-	l.opened = false
+	l.file_opened = false
 	l.file.close()
+}
+
+pub fn (mut l Log) enable() {
+	l.enabled = true
+}
+
+pub fn (mut l Log) disable() {
+	l.enabled = false
 }
 
 [manualfree]
 fn (mut l Log) write(item LogItem) {
-	if l.opened {
+	if !l.enabled { 
+		return
+	}
+
+	if l.file_opened {
 		if l.buffer.len != 0 {
 			unsafe { 
 				l.file.write_bytes(l.buffer.buf.data, l.buffer.len)

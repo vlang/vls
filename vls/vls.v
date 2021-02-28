@@ -210,6 +210,10 @@ fn (mut ls Vls) send_null(id int) {
 
 // start_loop starts an endless loop which waits for stdin and prints responses to the stdout
 pub fn (mut ls Vls) start_loop() {
+	$if test {
+		ls.logger.disable()
+	}
+
 	for {
 		payload := ls.io.receive() or { continue }
 		ls.dispatch(payload)
