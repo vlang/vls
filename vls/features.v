@@ -12,7 +12,7 @@ import os
 // import strings
 
 fn (ls Vls) formatting(id int, params string) {
-	formatting_params := json.decode(lsp.DocumentFormattingParams, params) or { panic(err) }
+	formatting_params := json.decode(lsp.DocumentFormattingParams, params) or { panic(err.msg) }
 	uri := formatting_params.text_document.uri.str()
 	path := formatting_params.text_document.uri.path()
 	source := ls.sources[uri].bytestr()
@@ -71,7 +71,7 @@ fn (mut ls Vls) workspace_symbol(id int, _ string) {
 }
 
 fn (mut ls Vls) document_symbol(id int, params string) {
-	document_symbol_params := json.decode(lsp.DocumentSymbolParams, params) or { panic(err) }
+	document_symbol_params := json.decode(lsp.DocumentSymbolParams, params) or { panic(err.msg) }
 	uri := document_symbol_params.text_document.uri
 	file := ls.files[uri.str()]
 	symbols := ls.generate_symbols(file, uri)
@@ -497,7 +497,7 @@ fn (mut _ CompletionItemConfig) completion_items_from_fn(fnn table.Fn, is_method
 	}
 	insert_text += ')'
 	if fnn.return_type.has_flag(.optional) {
-		insert_text += ' or { panic(err) }'
+		insert_text += ' or { panic(err.msg) }'
 	}
 	completion_items << lsp.CompletionItem{
 		label: fn_name
@@ -613,7 +613,7 @@ fn (mut ls Vls) completion(id int, params string) {
 	if Feature.completion !in ls.enabled_features {
 		return
 	}
-	completion_params := json.decode(lsp.CompletionParams, params) or { panic(err) }
+	completion_params := json.decode(lsp.CompletionParams, params) or { panic(err.msg) }
 	file_uri := completion_params.text_document.uri
 	file := ls.files[file_uri.str()]
 	src := ls.sources[file_uri.str()]
@@ -973,7 +973,7 @@ fn (mut cfg HoverConfig) hover_from_expr(node ast.Expr) ?lsp.Hover {
 }
 
 fn (ls Vls) hover(id int, params string) {
-	hover_params := json.decode(lsp.HoverParams, params) or { panic(err) }
+	hover_params := json.decode(lsp.HoverParams, params) or { panic(err.msg) }
 	uri := hover_params.text_document.uri
 	pos := hover_params.position
 	src := ls.sources[uri.str()]
@@ -1049,7 +1049,7 @@ fn (ls Vls) hover(id int, params string) {
 }
 
 fn (ls Vls) folding_range(id int, params string) {
-	folding_range_params := json.decode(lsp.FoldingRangeParams, params) or { panic(err) }
+	folding_range_params := json.decode(lsp.FoldingRangeParams, params) or { panic(err.msg) }
 	uri := folding_range_params.text_document.uri
 	file := ls.files[uri.str()] or {
 		ls.send_null(id)

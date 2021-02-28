@@ -15,7 +15,7 @@ const (
 
 // initialize sends the server capabilities to the client
 fn (mut ls Vls) initialize(id int, params string) {
-	initialize_params := json.decode(lsp.InitializeParams, params) or { panic(err) }
+	initialize_params := json.decode(lsp.InitializeParams, params) or { panic(err.msg) }
 	// TODO: configure capabilities based on client support
 	// ls.client_capabilities = initialize_params.capabilities
 	ls.capabilities = lsp.ServerCapabilities{
@@ -57,7 +57,7 @@ fn (mut ls Vls) initialize(id int, params string) {
 
 fn (mut ls Vls) process_builtin() {
 	scope, pref := new_scope_and_pref()
-	mut builtin_files := os.ls(builtin_path) or { panic(err) }
+	mut builtin_files := os.ls(builtin_path) or { panic(err.msg) }
 	builtin_files = pref.should_compile_filtered_files(builtin_path, builtin_files)
 	parsed_files := parser.parse_files(builtin_files, ls.base_table, pref, scope)
 	// This part extracts the symbols for the builtin module

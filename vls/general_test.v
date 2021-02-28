@@ -54,7 +54,7 @@ fn test_set_features() {
 	}
 	assert ls.features() == [.diagnostics, .document_symbol, .workspace_symbol, .signature_help, .completion, .hover, .folding_range, .formatting]
 	ls.set_features(['logging'], true) or {
-		assert err == 'feature "logging" not found'
+		assert err.msg == 'feature "logging" not found'
 		return
 	}
 }

@@ -19,7 +19,7 @@ fn test_compute_offset() {
 	mut bench := benchmark.new_benchmark()
 	test_files := testing.load_test_file_paths('pos_compute_offset') or {
 		bench.fail()
-		eprintln(bench.step_message_fail(err))
+		eprintln(bench.step_message_fail(err.msg))
 		assert false
 		return
 	}
@@ -78,7 +78,7 @@ fn test_position_to_lsp_pos() {
 	mut bench := benchmark.new_benchmark()
 	test_files := testing.load_test_file_paths('pos_to_lsp_pos') or {
 		bench.fail()
-		eprintln(bench.step_message_fail(err))
+		eprintln(bench.step_message_fail(err.msg))
 		assert false
 		return
 	}
@@ -157,7 +157,7 @@ fn test_position_to_lsp_range() {
 	mut bench := benchmark.new_benchmark()
 	test_files := testing.load_test_file_paths('pos_to_lsp_range') or {
 		bench.fail()
-		eprintln(bench.step_message_fail(err))
+		eprintln(bench.step_message_fail(err.msg))
 		assert false
 		return
 	}
