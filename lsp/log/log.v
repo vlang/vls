@@ -12,23 +12,23 @@ pub enum Format {
 
 pub struct Log {
 mut:
-	file os.File
-	format Format = .json
-	buffer strings.Builder
+	file        os.File
+	format      Format = .json
+	buffer      strings.Builder
 	file_opened bool
-	enabled bool
+	enabled     bool
 pub mut:
-	file_path string
+	file_path    string
 	cur_requests map[int]string = map[int]string{}
 }
 
 const (
 	send_notification = 'send-notification'
 	recv_notification = 'recv-notification'
-	send_request = 'send-request'
-	recv_request = 'recv-request'
-	send_response = 'send-response'
-	recv_response = 'recv-response'
+	send_request      = 'send-request'
+	recv_request      = 'recv-request'
+	send_response     = 'send-response'
+	recv_response     = 'recv-response'
 )
 
 pub enum TransportKind {
@@ -37,16 +37,16 @@ pub enum TransportKind {
 }
 
 struct Payload {
-	id int
+	id     int
 	method string
 	result string [raw]
 	params string [raw]
 }
 
 pub struct LogItem {
-	@type string
-	message string
-	method string
+	@type     string
+	message   string
+	method    string
 	timestamp time.Time // unix timestamp
 }
 
@@ -60,13 +60,11 @@ pub fn new(format Format) Log {
 }
 
 pub fn (mut l Log) set_logpath(path string) {
-	if l.file_opened { 
+	if l.file_opened {
 		l.close()
 	}
 
-	file := os.open_append(os.real_path(path)) or {
-		panic(err)
-	}
+	file := os.open_append(os.real_path(path)) or { panic(err) }
 
 	l.file = file
 	l.file_path = path
@@ -93,15 +91,15 @@ pub fn (mut l Log) disable() {
 
 [manualfree]
 fn (mut l Log) write(item LogItem) {
-	if !l.enabled { 
+	if !l.enabled {
 		return
 	}
 
 	if l.file_opened {
 		if l.buffer.len != 0 {
-			unsafe { 
+			unsafe {
 				l.file.write_bytes(l.buffer.buf.data, l.buffer.len)
-				l.buffer.free() 
+				l.buffer.free()
 			}
 		}
 
@@ -126,7 +124,7 @@ pub fn (mut l Log) request(msg string, kind TransportKind) {
 		l.cur_requests.delete(payload.id.str())
 	}
 
-	l.write({@type: kind_str, message: msg, method: req_method, timestamp: time.now()})
+	l.write(@type: kind_str, message: msg, method: req_method, timestamp: time.now())
 }
 
 pub fn (mut l Log) response(msg string, kind TransportKind) {
@@ -135,7 +133,7 @@ pub fn (mut l Log) response(msg string, kind TransportKind) {
 		.receive { log.recv_response }
 	}
 
-	l.write({@type: kind_str, message: msg, timestamp: time.now()})
+	l.write(@type: kind_str, message: msg, timestamp: time.now())
 }
 
 pub fn (mut l Log) notification(msg string, kind TransportKind) {
@@ -144,7 +142,7 @@ pub fn (mut l Log) notification(msg string, kind TransportKind) {
 		.receive { log.recv_notification }
 	}
 
-	l.write({@type: kind_str, message: msg, timestamp: time.now()})
+	l.write(@type: kind_str, message: msg, timestamp: time.now())
 }
 
 fn (li LogItem) encode(format Format) string {
