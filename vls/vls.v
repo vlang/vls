@@ -7,6 +7,7 @@ import json
 import jsonrpc
 import lsp
 import lsp.log
+import os
 
 // These are the list of features available in VLS
 // If the feature is experimental, the value name should have a `exp_` prefix
@@ -95,6 +96,7 @@ pub fn new(io ReceiveSender) Vls {
 		io: io
 		base_table: tbl
 		debug: true
+		logger: log.new(.json)
 	}
 }
 
@@ -103,8 +105,8 @@ pub fn (mut ls Vls) dispatch(payload string) {
 		ls.send(new_error(jsonrpc.parse_error))
 		return
 	}
+	ls.logger.request(payload, .receive)
 	if ls.status == .initialized {
-		ls.logger.request(payload, .receive)
 		match request.method { // not only requests but also notifications
 			'initialized' {} // does nothing currently
 			'shutdown' {
@@ -161,7 +163,13 @@ pub fn (mut ls Vls) set_debug(state bool) {
 	ls.debug = state
 }
 
-pub fn (mut ls Vls) panic(message string) {
+fn (ls Vls) log_path() string {
+	return os.join_path(ls.root_uri.path(), 'vls.log')
+}
+
+// panic generates a log report and exits the language server.
+fn (mut ls Vls) panic(message string) {
+	ls.logger.set_logpath(ls.log_path())
 	err_msg := '${message}. Please refer to ${ls.logger.file_path} for more details.'
 	ls.show_message(err_msg, .error)
 	ls.logger.close()
@@ -174,12 +182,11 @@ fn (mut ls Vls) send<T>(data T) {
 	ls.io.send(str)
 }
 
-fn (mut ls Vls) notify<T>(method string, params T) {
-	result := jsonrpc.NotificationMessage<T>{
-		method: method
-		params: params
-	}
-	str := json.encode(result)
+// TODO: set result param type to jsonrpc.NotificationMessage<T>
+// merge notify back to send method once compile-time type introspection
+// supports base generic types (e.g $if T is jsonrpc.NotificationMessage)
+fn (mut ls Vls) notify<T>(data T) {
+	str := json.encode(data)
 	ls.logger.notification(str, .send)
 	ls.io.send(str)
 }

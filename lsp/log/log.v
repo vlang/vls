@@ -3,6 +3,7 @@ module log
 import os
 import time
 import json
+import strings
 
 pub enum Format {
 	json
@@ -13,6 +14,7 @@ pub struct Log {
 mut:
 	file os.File
 	format Format = .json
+	buffer strings.Builder
 pub mut:
 	file_path string
 	opened bool
@@ -47,17 +49,26 @@ pub struct LogItem {
 	timestamp time.Time // unix timestamp
 }
 
-pub fn new(path string, format Format) Log {
+pub fn new(format Format) Log {
+	return Log{
+		format: format
+		opened: false
+		buffer: strings.new_builder(20)
+	}
+}
+
+pub fn (mut l Log) set_logpath(path string) {
+	if l.opened { 
+		l.close()
+	}
+
 	file := os.open_append(os.real_path(path)) or {
 		panic(err)
 	}
 
-	return Log{
-		file: file
-		file_path: path
-		format: format
-		opened: true
-	}
+	l.file = file
+	l.file_path = path
+	l.opened = true
 }
 
 pub fn (mut l Log) flush() {
@@ -69,18 +80,19 @@ pub fn (mut l Log) close() {
 	l.file.close()
 }
 
+[manualfree]
 fn (mut l Log) write(item LogItem) {
-	if !l.opened {
-		return
-	}
+	if l.opened {
+		if l.buffer.len != 0 {
+			unsafe { 
+				l.file.write_bytes(l.buffer.buf.data, l.buffer.len)
+				l.buffer.free() 
+			}
+		}
 
-	match l.format {
-		.json {
-			l.file.writeln(item.json() + '\r') or { panic(err) }
-		}
-		.text {
-			l.file.writeln(item.text() + '\n\n') or { panic(err) }
-		}
+		l.file.writeln(item.encode(l.format)) or { panic(err) }
+	} else {
+		l.buffer.writeln(item.encode(l.format))
 	}
 }
 
@@ -118,6 +130,13 @@ pub fn (mut l Log) notification(msg string, kind TransportKind) {
 	}
 
 	l.write({@type: kind_str, message: msg, timestamp: time.now()})
+}
+
+fn (li LogItem) encode(format Format) string {
+	match format {
+		.json { return li.json() }
+		.text { return li.text() }
+	}
 }
 
 pub fn (li LogItem) json() string {

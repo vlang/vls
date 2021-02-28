@@ -8,7 +8,6 @@ import v.parser
 import v.ast
 import v.vmod
 import runtime
-import lsp.log
 
 const (
 	completion_trigger_characters = ['=', '.', ':', '{', ',', '(', ' ']
@@ -54,32 +53,26 @@ fn (mut ls Vls) initialize(id int, params string) {
 }
 
 fn (mut ls Vls) setup_logger(trace string, client_info lsp.ClientInfo) {
-	is_debug := ls.debug || (!ls.debug && trace == 'verbose')
 	meta := vmod.decode(@VMOD_FILE) or { vmod.Manifest{} }
 	mut arch := 32
 	if runtime.is_64bit() {
 		arch += 32
 	}
 
-	log_path := if is_debug {
-		os.join_path(ls.root_uri.path(), 'vls.log')
-	} else {
-		os.join_path(os.temp_dir(), 'vls.log')
-	}
-	
-	os.rm(log_path) or { }
+	// Create the file either in debug mode or in 'panic' method.
+	// if ls.debug || (!ls.debug && trace == 'verbose') {
+		log_path := ls.log_path()
+		os.rm(log_path) or { }
+		ls.logger.set_logpath(log_path)
+	// }
 
-	ls.logger = log.new(log_path, .text)
 	// print important info for reporting
-	ls.log_message('==========V L S==========', .info)
-	ls.log_message('VLS Version: ${meta.version}', .info)
-	ls.log_message('OS: ${os.user_os()} $arch', .info)
+	ls.log_message('VLS Version: ${meta.version}, OS: ${os.user_os()} $arch', .info)
 	if client_info.name.len != 0 {
 		ls.log_message('Client / Editor: ${client_info.name} ${client_info.version}', .info)
 	} else {
 		ls.log_message('Client / Editor: Unknown', .info)
 	}
-	ls.log_message('=========================', .info)
 }
 
 fn (mut ls Vls) process_builtin() {
