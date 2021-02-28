@@ -60,11 +60,11 @@ fn (mut ls Vls) setup_logger(trace string, client_info lsp.ClientInfo) {
 	}
 
 	// Create the file either in debug mode or in 'panic' method.
-	// if ls.debug || (!ls.debug && trace == 'verbose') {
+	if ls.debug || (!ls.debug && trace == 'verbose') {
 		log_path := ls.log_path()
 		os.rm(log_path) or { }
 		ls.logger.set_logpath(log_path)
-	// }
+	}
 
 	// print important info for reporting
 	ls.log_message('VLS Version: ${meta.version}, OS: ${os.user_os()} $arch', .info)
