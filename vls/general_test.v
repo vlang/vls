@@ -18,7 +18,7 @@ fn test_wrong_first_request() {
 }
 
 fn test_initialize_with_capabilities() {
-	mut io, mut ls := init()
+	mut io, mut ls := init_tests()
 	assert ls.status() == .initialized
 	assert io.result() == json.encode(lsp.InitializeResult{
 		capabilities: ls.capabilities()
@@ -26,7 +26,7 @@ fn test_initialize_with_capabilities() {
 }
 
 fn test_initialized() {
-	mut io, mut ls := init()
+	mut io, mut ls := init_tests()
 	payload := io.request('initialized')
 	ls.dispatch(payload)
 	assert ls.status() == .initialized
@@ -34,7 +34,7 @@ fn test_initialized() {
 
 // fn test_shutdown() {
 // 	payload := '{"jsonrpc":"2.0","method":"shutdown","params":{}}'
-// 	mut ls := init()
+// 	mut ls := init_tests()
 // 	ls.dispatch(payload)
 // 	status := ls.status()
 // 	assert status == .shutdown
@@ -47,19 +47,19 @@ fn test_set_features() {
 		assert false
 		return
 	}
-	assert ls.features() == [.diagnostics, .document_symbol, .workspace_symbol, .completion, .hover, .folding_range]
+	assert ls.features() == [.diagnostics, .document_symbol, .workspace_symbol, .signature_help, .completion, .hover, .folding_range]
 	ls.set_features(['formatting'], true) or {
 		assert false
 		return
 	}
-	assert ls.features() == [.diagnostics, .document_symbol, .workspace_symbol, .completion, .hover, .folding_range, .formatting]
+	assert ls.features() == [.diagnostics, .document_symbol, .workspace_symbol, .signature_help, .completion, .hover, .folding_range, .formatting]
 	ls.set_features(['logging'], true) or {
 		assert err == 'feature "logging" not found'
 		return
 	}
 }
 
-fn init() (&testing.Testio, vls.Vls) {
+fn init_tests() (&testing.Testio, vls.Vls) {
 	mut io := &testing.Testio{}
 	mut ls := vls.new(io)
 	payload := io.request('initialize')

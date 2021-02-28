@@ -16,6 +16,7 @@ pub enum Feature {
 	formatting
 	document_symbol
 	workspace_symbol
+	signature_help
 	completion
 	hover
 	folding_range
@@ -29,6 +30,7 @@ fn feature_from_str(feature_name string) ?Feature {
 		'formatting' { return Feature.formatting }
 		'document_symbol' { return Feature.document_symbol }
 		'workspace_symbol' { return Feature.workspace_symbol }
+		'signature_help' { return Feature.signature_help }
 		'completion' { return Feature.completion }
 		'hover' { return Feature.hover }
 		'folding_range' { return Feature.folding_range }
@@ -42,6 +44,7 @@ pub const (
 		.formatting,
 		.document_symbol,
 		.workspace_symbol,
+		.signature_help,
 		.completion,
 		.hover,
 		.folding_range,
@@ -132,6 +135,7 @@ pub fn (mut ls Vls) dispatch(payload string) {
 			'textDocument/formatting' { ls.formatting(request.id, request.params) }
 			'textDocument/documentSymbol' { ls.document_symbol(request.id, request.params) }
 			'workspace/symbol' { ls.workspace_symbol(request.id, request.params) }
+			'textDocument/signatureHelp' { ls.signature_help(request.id, request.params) }
 			'textDocument/completion' { ls.completion(request.id, request.params) }
 			'textDocument/hover' { ls.hover(request.id, request.params) }
 			'textDocument/foldingRange' { ls.folding_range(request.id, request.params) }

@@ -67,7 +67,7 @@ Afterwards, go to your editor's configuration and scroll to the V extension sect
 - [x] `completion`
 - [ ] `completion resolve`
 - [x] `hover`
-- [ ] `signatureHelp`
+- [x] `signatureHelp`
 - [ ] `declaration`
 - [ ] `definition`
 - [ ] `typeDefinition`

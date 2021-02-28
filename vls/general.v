@@ -10,7 +10,9 @@ import v.vmod
 import runtime
 
 const (
-	completion_trigger_characters = ['=', '.', ':', '{', ',', '(', ' ']
+	completion_trigger_characters       = ['=', '.', ':', '{', ',', '(', ' ']
+	signature_help_trigger_characters   = ['(']
+	signature_help_retrigger_characters = [',', ' ']
 )
 
 // initialize sends the server capabilities to the client
@@ -32,6 +34,13 @@ fn (mut ls Vls) initialize(id int, params string) {
 
 	if Feature.completion in ls.enabled_features {
 		ls.capabilities.completion_provider.trigger_characters = vls.completion_trigger_characters
+	}
+
+	if Feature.signature_help in ls.enabled_features {
+		ls.capabilities.signature_help_provider = lsp.SignatureHelpOptions{
+			trigger_characters: vls.signature_help_trigger_characters
+			retrigger_characters: vls.signature_help_retrigger_characters
+		}
 	}
 
 	result := jsonrpc.Response<lsp.InitializeResult>{
