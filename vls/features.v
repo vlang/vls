@@ -810,6 +810,9 @@ fn (mut cfg HoverConfig) hover_from_stmt(node ast.Stmt) ?lsp.Hover {
 			}
 		}
 		ast.FnDecl {
+			if node.return_type == table.Type(0) {
+				return none
+			}
 			name := node.name.all_after(cfg.file.mod.short_name + '.')
 			return_type_name := cfg.table.type_to_str(node.return_type)
 			mut signature := 'fn'
@@ -863,16 +866,25 @@ fn (mut cfg HoverConfig) hover_from_stmt(node ast.Stmt) ?lsp.Hover {
 
 			match node {
 				ast.AliasTypeDecl {
+					if node.parent_type == table.Type(0) {
+						return none
+					}
 					name = node.name
 					branches = cfg.table.type_to_str(node.parent_type)
 				}
 				ast.FnTypeDecl {
+					if node.typ == table.Type(0) {
+						return none
+					}
 					name = node.name.all_after(cfg.file.mod.short_name + '.')
 					branches = cfg.table.type_to_str(node.typ)
 				}
 				ast.SumTypeDecl {
 					name = node.name
 					for i, var in node.variants {
+						if var.typ == table.Type(0) {
+							return none
+						}
 						branches += cfg.table.type_to_str(var.typ)
 						if i != node.variants.len - 1 {
 							branches += ' | '
@@ -915,6 +927,9 @@ fn (mut cfg HoverConfig) hover_from_expr(node ast.Expr) ?lsp.Hover {
 		ast.Ident {
 			obj := cfg.file.scope.innermost(cfg.offset)
 			obj_node := obj.find_var(node.name) ?
+			if obj_node.typ == table.Type(0) {
+				return none
+			}
 			range := position_to_lsp_range(cfg.src, node.pos)
 			// TODO: create a wrapper function that will auto-format type
 			// based on the VLS style.
@@ -928,13 +943,16 @@ fn (mut cfg HoverConfig) hover_from_expr(node ast.Expr) ?lsp.Hover {
 		ast.CallExpr {
 			mut signature := ''
 			if node.is_method || node.is_field {
+				if node.left_type == table.Type(0) {
+					return none
+				}
 				parent_type_name := cfg.table.type_to_str(node.left_type).all_after('main.')
 				signature += parent_type_name + '.'
 			}
 
 			name := node.name.all_after('main.')
 			signature += '${name}()'
-			if node.return_type != table.void_type {
+			if node.return_type.is_full() {
 				return_type := cfg.table.type_to_str(node.return_type).all_after('main.')
 				signature += ' $return_type'
 			}
@@ -947,6 +965,9 @@ fn (mut cfg HoverConfig) hover_from_expr(node ast.Expr) ?lsp.Hover {
 		}
 		ast.SelectorExpr {
 			if node.expr is ast.Ident || is_within_pos(cfg.offset, node.pos) {
+				if node.typ == table.Type(0) {
+					return none
+				}
 				range := position_to_lsp_range(cfg.src, node.pos)
 				typ_name := cfg.table.type_to_str(node.typ).all_after('main.')
 				parent_name := if node.expr_type != table.Type(0) {
@@ -995,6 +1016,7 @@ fn (ls Vls) hover(id int, params string) {
 
 	// the contents of the node will be extracted and be injected 
 	// into the hover_data variable
+	// TODO: simplify == tablt.Type(0) checking in the future
 	match node {
 		ast.Stmt {
 			hover_data = cfg.hover_from_stmt(node) or {
@@ -1009,6 +1031,10 @@ fn (ls Vls) hover(id int, params string) {
 			}
 		}
 		ast.StructField {
+			if node.typ == table.Type(0) {
+				ls.send_null(id)
+				return
+			}
 			range := position_to_lsp_range(src, node.pos.extend(node.type_pos))
 			typ_name := cfg.table.type_to_str(node.typ).all_after('main.')
 			hover_data = lsp.Hover{
@@ -1017,6 +1043,10 @@ fn (ls Vls) hover(id int, params string) {
 			}
 		}
 		ast.StructInitField {
+			if node.expected_type == table.Type(0) {
+				ls.send_null(id)
+				return
+			}
 			range := position_to_lsp_range(src, node.pos)
 			typ_name := cfg.table.type_to_str(node.expected_type).all_after('main.')
 			hover_data = lsp.Hover{
@@ -1025,6 +1055,10 @@ fn (ls Vls) hover(id int, params string) {
 			}
 		}
 		table.Param {
+			if node.typ == table.Type(0) {
+				ls.send_null(id)
+				return
+			}
 			range := position_to_lsp_range(src, node.pos.extend(node.type_pos))
 			mut type_name := cfg.table.type_to_str(node.typ).all_after('main.')
 			if node.is_mut {
