@@ -184,24 +184,24 @@ pub fn (li LogItem) json() string {
 // TODO: ignore this for now
 pub fn (li LogItem) text() string {
 	return 'TODO'
-// 	payload := json.decode(Payload, li.message) or { Payload{} }
+	// 	payload := json.decode(Payload, li.message) or { Payload{} }
 
-// 	method := if li.method.len != 0 { li.method } else { payload.method }
-// 	message := match li.kind {
-// 		.send_notification { 'Sending notification \'$method\'.' }
-// 		.recv_notification { 'Received notification \'$method\'.' }
-// 		.send_request { 'Sending request \'$method - (${payload.id})\'.' }
-// 		.recv_request { 'Received request \'$method - (${payload.id})\'.' }
-// 		.send_response { 'Sending response \'$method - (${payload.id})\'. Process request took 0ms' }
-// 		.recv_response { 'Received response \'$method - (${payload.id})\' in 0ms.' }
-// 	}
+	// 	method := if li.method.len != 0 { li.method } else { payload.method }
+	// 	message := match li.kind {
+	// 		.send_notification { 'Sending notification \'$method\'.' }
+	// 		.recv_notification { 'Received notification \'$method\'.' }
+	// 		.send_request { 'Sending request \'$method - (${payload.id})\'.' }
+	// 		.recv_request { 'Received request \'$method - (${payload.id})\'.' }
+	// 		.send_response { 'Sending response \'$method - (${payload.id})\'. Process request took 0ms' }
+	// 		.recv_response { 'Received response \'$method - (${payload.id})\' in 0ms.' }
+	// 	}
 
-// 	params_msg := if li.message == 'null' { 
-// 		'No result returned.' 
-// 	}	else if li.kind == .send_response || li.kind == .recv_response { 
-// 		'Result: ${li.message}'
-// 	} else {
-// 		'Params: ${li.message}'
-// 	}
-// 	return '[Trace - ${li.timestamp.hhmmss()}] $message\n$params_msg'
+	// 	params_msg := if li.message == 'null' { 
+	// 		'No result returned.' 
+	// 	}	else if li.kind == .send_response || li.kind == .recv_response { 
+	// 		'Result: ${li.message}'
+	// 	} else {
+	// 		'Params: ${li.message}'
+	// 	}
+	// 	return '[Trace - ${li.timestamp.hhmmss()}] $message\n$params_msg'
 }

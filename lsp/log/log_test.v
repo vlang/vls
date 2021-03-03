@@ -6,7 +6,7 @@ import json
 // const current_time = time.now()
 
 struct TestLogItem {
-	kind string
+	kind    string
 	message string
 	// timestamp time.Time
 }
