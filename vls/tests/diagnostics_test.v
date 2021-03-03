@@ -34,7 +34,7 @@ fn test_diagnostics() {
 	ls.dispatch(io.request('initialize'))
 	files := testing.load_test_file_paths('diagnostics') or {
 		io.bench.fail()
-		eprintln(io.bench.step_message_fail(err))
+		eprintln(io.bench.step_message_fail(err.msg))
 		assert false
 		return
 	}
