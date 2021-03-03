@@ -1136,3 +1136,130 @@ fn (mut ls Vls) folding_range(id int, params string) {
 		folding_ranges.free()
 	}
 }
+
+fn (mut ls Vls) definition(id int, params string) {
+	goto_definition_params := json.decode(lsp.TextDocumentPositionParams, params) or { panic(err.msg) }
+	uri := goto_definition_params.text_document.uri
+	pos := goto_definition_params.position
+	source := ls.sources[uri.str()]
+	file := ls.files[uri.str()]
+	offset := compute_offset(source, pos.line, pos.character)
+	mut node := find_ast_by_pos(ast.Node(file).children(), offset) or {
+		ls.send_null(id)
+		return
+	}
+
+	mut is_call_expr_or_selector_expr := false
+	if mut node is ast.Expr {
+		if mut node is ast.CallExpr {
+			// do not change node if position is within the call expr name
+			is_call_expr_or_selector_expr = !is_within_pos(offset, node.name_pos)
+		} else if node is ast.SelectorExpr {
+			is_call_expr_or_selector_expr = true
+		}
+	}
+
+	if is_call_expr_or_selector_expr {
+		node = find_ast_by_pos(node.children(), offset) or {
+			ls.send_null(id)
+			return
+		}
+	}
+
+	// ls.log_message(node.type_name(), .info)
+
+	match mut node {
+		ast.Stmt {
+			ls.log_message(node.str(), .info)
+		} 
+		ast.Expr {
+			ls.log_message(node.type_name(), .info)
+
+			match mut node {
+				ast.Ident {
+					obj := node.obj
+					ls.log_message(obj.type_name(), .info)
+					match obj {
+						ast.Var, ast.ConstField {
+							target_range := position_to_lsp_range(source, obj.pos)
+							ls.send(jsonrpc.Response<lsp.LocationLink>{
+								id: id
+								result: lsp.LocationLink{
+									origin_selection_range: position_to_lsp_range(source, node.pos)
+									target_uri: uri
+									target_range: target_range
+									target_selection_range: target_range
+								}
+							})
+							return
+						}
+						else {}
+					}
+				}
+				ast.CallExpr {
+					if node.name in ls.builtin_symbols {
+						loc := ls.builtin_symbol_locations[node.name] or {
+							ls.send_null(id)
+							return
+						}
+
+						ls.send(jsonrpc.Response<lsp.LocationLink>{
+							id: id
+							result: lsp.LocationLink{
+								origin_selection_range: position_to_lsp_range(source, node.name_pos)
+								target_uri: loc.uri
+								target_range: loc.range
+								target_selection_range: loc.range
+							}
+						})
+						return
+					} else {
+						loc := ls.symbol_locations[uri.dir()]['${file.mod.short_name}.${node.name}'] or {
+							ls.send_null(id)
+							return
+						}
+
+						ls.send(jsonrpc.Response<lsp.LocationLink>{
+							id: id
+							result: lsp.LocationLink{
+								origin_selection_range: position_to_lsp_range(source, node.name_pos)
+								target_uri: loc.uri
+								target_range: loc.range
+								target_selection_range: loc.range
+							}
+						})
+						return
+					}
+				}
+				else {}
+			}
+		}
+		ast.CallArg {
+			ls.log_message(node.expr.type_name(), .info)
+			if node.expr is ast.Ident {
+				obj := node.expr.obj
+				ls.log_message(obj.type_name(), .info)
+				match obj {
+					ast.Var, ast.ConstField {
+						target_range := position_to_lsp_range(source, obj.pos)
+						ls.send(jsonrpc.Response<lsp.LocationLink>{
+							id: id
+							result: lsp.LocationLink{
+								origin_selection_range: position_to_lsp_range(source, node.pos)
+								target_uri: uri
+								target_range: target_range
+								target_selection_range: target_range
+							}
+						})
+						return
+					}
+					else {}
+				}
+			}
+		}
+		else {}
+	}
+
+	// TODO: send null for now
+	ls.send_null(id)
+}
