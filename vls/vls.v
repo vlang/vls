@@ -180,7 +180,7 @@ fn (ls Vls) log_path() string {
 // panic generates a log report and exits the language server.
 fn (mut ls Vls) panic(message string) {
 	ls.logger.set_logpath(ls.log_path())
-	err_msg := '${message}. Please refer to ${ls.logger.file_path} for more details.'
+	err_msg := 'VLS Panic: ${message}. Please refer to ${ls.logger.file_path} for more details. If you believe this is a bug, please report the issue to https://github.com/vlang/vls/issues/new.'
 	ls.show_message(err_msg, .error)
 	ls.logger.close()
 	ls.exit()
