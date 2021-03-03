@@ -70,6 +70,7 @@ pub fn new(format Format) Log {
 	}
 }
 
+// set_logpath sets the filepath of the log file and opens the file.
 pub fn (mut l Log) set_logpath(path string) {
 	if l.file_opened {
 		l.close()
@@ -83,23 +84,29 @@ pub fn (mut l Log) set_logpath(path string) {
 	l.enabled = true
 }
 
+// flush flushes the contents of the log file into the disk.
 pub fn (mut l Log) flush() {
 	l.file.flush()
 }
 
+// close closes the log file.
 pub fn (mut l Log) close() {
 	l.file_opened = false
 	l.file.close()
 }
 
+// enable enables/starts the logging.
 pub fn (mut l Log) enable() {
 	l.enabled = true
 }
 
+// disable disables/stops the logging.
 pub fn (mut l Log) disable() {
 	l.enabled = false
 }
 
+// write writes the log item into the log file or in the
+// buffer if the file is not opened yet.
 [manualfree]
 fn (mut l Log) write(item LogItem) {
 	if !l.enabled {
@@ -120,6 +127,7 @@ fn (mut l Log) write(item LogItem) {
 	}
 }
 
+// request logs a request message.
 pub fn (mut l Log) request(msg string, kind TransportKind) {
 	req_kind := match kind {
 		.send { LogKind.send_request }
@@ -138,6 +146,7 @@ pub fn (mut l Log) request(msg string, kind TransportKind) {
 	l.write(kind: req_kind, message: msg, method: req_method, timestamp: time.now())
 }
 
+// response logs a response message.
 pub fn (mut l Log) response(msg string, kind TransportKind) {
 	resp_kind := match kind {
 		.send { LogKind.send_response }
@@ -147,6 +156,7 @@ pub fn (mut l Log) response(msg string, kind TransportKind) {
 	l.write(kind: resp_kind, message: msg, timestamp: time.now())
 }
 
+// notification logs a notification message.
 pub fn (mut l Log) notification(msg string, kind TransportKind) {
 	notif_kind := match kind {
 		.send { LogKind.send_notification }
@@ -156,6 +166,8 @@ pub fn (mut l Log) notification(msg string, kind TransportKind) {
 	l.write(kind: notif_kind, message: msg, timestamp: time.now())
 }
 
+// encode returns the string representation of the format
+// based on the given format
 fn (li LogItem) encode(format Format) string {
 	match format {
 		.json { return li.json() }
@@ -163,10 +175,12 @@ fn (li LogItem) encode(format Format) string {
 	}
 }
 
+// json is a JSON string representation of the log item.
 pub fn (li LogItem) json() string {
 	return '{"kind":"${li.kind}","message":${li.message},"timestamp":${li.timestamp.unix}}'
 }
 
+// text is the standard LSP text log representation of the log item.
 // TODO: ignore this for now
 pub fn (li LogItem) text() string {
 	return 'TODO'
