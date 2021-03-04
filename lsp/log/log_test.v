@@ -1,6 +1,6 @@
 module log
 
-// import time
+import time
 import json
 
 // const current_time = time.now()
@@ -105,4 +105,21 @@ fn test_response_receive() {
 	assert result.kind == 'recv-response'
 	assert result.message == 'Response received.'
 	// assert result.timestamp == current_time
+}
+
+fn test_log_item_text() {
+	mut lg := new(.text)
+
+	lg.request('{"jsonrpc":"2.0","id":1,"method":"hello","params":{"name":"Bob"}}', .send)
+	lg.request('{"jsonrpc":"2.0","id":1,"method":"hello","params":{"name":"Bob"}}', .receive)
+	time.sleep(320 * time.millisecond)
+	lg.response('{"jsonrpc":"2.0","id":1,"result":"Hello Bob!"}', .send)
+	time.sleep(100 * time.millisecond)
+	lg.response('{"jsonrpc":"2.0","id":1,"result":"Hello Bob!"}', .receive)
+	time.sleep(20 * time.millisecond)
+	lg.notification('{"jsonrpc":"2.0","method":"wave","params":{"name":"Bob"}}', .send)
+	lg.notification('{"jsonrpc":"2.0","method":"wave","params":{"name":"Bob"}}', .receive)
+	
+	content := lg.buffer.str()
+	assert content.len > 0
 }

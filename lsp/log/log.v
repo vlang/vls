@@ -14,12 +14,13 @@ pub struct Log {
 mut:
 	file        os.File
 	format      Format = .json
-	buffer      strings.Builder
+	buffer      strings.Builder [skip]
 	file_opened bool
 	enabled     bool
+	last_timestamp time.Time = time.now()
 pub mut:
 	file_path    string
-	cur_requests map[int]string = map[int]string{}
+	cur_requests map[int]string
 }
 
 pub enum TransportKind {
@@ -70,6 +71,10 @@ pub fn new(format Format) Log {
 	}
 }
 
+pub fn (l Log) str() string {
+	return 'log.Log{}'
+}
+
 // set_logpath sets the filepath of the log file and opens the file.
 pub fn (mut l Log) set_logpath(path string) {
 	if l.file_opened {
@@ -113,6 +118,7 @@ fn (mut l Log) write(item LogItem) {
 		return
 	}
 
+	content := item.encode(l.format, l.last_timestamp)
 	if l.file_opened {
 		if l.buffer.len != 0 {
 			unsafe {
@@ -121,10 +127,13 @@ fn (mut l Log) write(item LogItem) {
 			}
 		}
 
-		l.file.writeln(item.encode(l.format)) or { panic(err) }
+		l.file.writeln(content) or { panic(err) }
 	} else {
-		l.buffer.writeln(item.encode(l.format))
+		l.buffer.writeln(content)
 	}
+
+	l.last_timestamp = item.timestamp
+	unsafe { content.free() }
 }
 
 // request logs a request message.
@@ -135,12 +144,10 @@ pub fn (mut l Log) request(msg string, kind TransportKind) {
 	}
 
 	mut req_method := ''
-	payload := json.decode(Payload, msg) or { Payload{} }
 	if kind == .receive {
+		payload := json.decode(Payload, msg) or { Payload{} }
 		l.cur_requests[payload.id] = payload.method
-	} else {
-		req_method = l.cur_requests[payload.id] or { '' }
-		l.cur_requests.delete(payload.id.str())
+		req_method = payload.method
 	}
 
 	l.write(kind: req_kind, message: msg, method: req_method, timestamp: time.now())
@@ -153,7 +160,14 @@ pub fn (mut l Log) response(msg string, kind TransportKind) {
 		.receive { LogKind.recv_response }
 	}
 
-	l.write(kind: resp_kind, message: msg, timestamp: time.now())
+	payload := json.decode(Payload, msg) or { Payload{} }
+	mut resp_method := ''
+	if payload.id in l.cur_requests {
+		resp_method = l.cur_requests[payload.id]
+		l.cur_requests.delete(payload.id.str())
+	}
+
+	l.write(kind: resp_kind, message: msg, method: resp_method, timestamp: time.now())
 }
 
 // notification logs a notification message.
@@ -168,10 +182,10 @@ pub fn (mut l Log) notification(msg string, kind TransportKind) {
 
 // encode returns the string representation of the format
 // based on the given format
-fn (li LogItem) encode(format Format) string {
+fn (li LogItem) encode(format Format, last_timestamp time.Time) string {
 	match format {
 		.json { return li.json() }
-		.text { return li.text() }
+		.text { return li.text(last_timestamp) }
 	}
 }
 
@@ -182,26 +196,27 @@ pub fn (li LogItem) json() string {
 
 // text is the standard LSP text log representation of the log item.
 // TODO: ignore this for now
-pub fn (li LogItem) text() string {
-	return 'TODO'
-	// 	payload := json.decode(Payload, li.message) or { Payload{} }
+pub fn (li LogItem) text(last_timestamp time.Time) string {
+	payload := json.decode(Payload, li.message) or { Payload{} }
+	elapsed := li.timestamp - last_timestamp
+	elapsed_ms := elapsed.milliseconds()
 
-	// 	method := if li.method.len != 0 { li.method } else { payload.method }
-	// 	message := match li.kind {
-	// 		.send_notification { 'Sending notification \'$method\'.' }
-	// 		.recv_notification { 'Received notification \'$method\'.' }
-	// 		.send_request { 'Sending request \'$method - (${payload.id})\'.' }
-	// 		.recv_request { 'Received request \'$method - (${payload.id})\'.' }
-	// 		.send_response { 'Sending response \'$method - (${payload.id})\'. Process request took 0ms' }
-	// 		.recv_response { 'Received response \'$method - (${payload.id})\' in 0ms.' }
-	// 	}
+	method := if li.method.len != 0 { li.method } else { payload.method }
+	message := match li.kind {
+		.send_notification { 'Sending notification \'$method\'.' }
+		.recv_notification { 'Received notification \'$method\'.' }
+		.send_request { 'Sending request \'$method - (${payload.id})\'.' }
+		.recv_request { 'Received request \'$method - (${payload.id})\'.' }
+		.send_response { 'Sending response \'$method - (${payload.id})\' took ${elapsed_ms}ms' }
+		.recv_response { 'Received response \'$method - (${payload.id})\' in ${elapsed_ms}ms' }
+	}
 
-	// 	params_msg := if li.message == 'null' { 
-	// 		'No result returned.' 
-	// 	}	else if li.kind == .send_response || li.kind == .recv_response { 
-	// 		'Result: ${li.message}'
-	// 	} else {
-	// 		'Params: ${li.message}'
-	// 	}
-	// 	return '[Trace - ${li.timestamp.hhmmss()}] $message\n$params_msg'
+	params_msg := if li.message == 'null' { 
+		'No result returned.' 
+	}	else if li.kind == .send_response || li.kind == .recv_response { 
+		'Result: ' + li.message
+	} else {
+		'Params: ' + li.message
+	}
+	return '[Trace - ${li.timestamp.hhmmss()}] $message\n$params_msg\n\n'
 }
