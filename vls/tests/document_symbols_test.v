@@ -6,7 +6,7 @@ import os
 
 // file_uris will be replaced inside the test case
 // because the uri may be different in each platform
-const doc_symbols_result = {
+const doc_symbols_result = map{
 	'simple.vv': [
 		lsp.SymbolInformation{
 			name: 'Uri'
@@ -24,7 +24,7 @@ const doc_symbols_result = {
 			location: lsp.Location{
 				range: lsp.Range{
 					start: lsp.Position{5, 2}
-					end: lsp.Position{5, 6}
+					end: lsp.Position{5, 15}
 				}
 			}
 		},
@@ -34,7 +34,7 @@ const doc_symbols_result = {
 			location: lsp.Location{
 				range: lsp.Range{
 					start: lsp.Position{6, 2}
-					end: lsp.Position{6, 5}
+					end: lsp.Position{6, 9}
 				}
 			}
 		},

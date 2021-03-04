@@ -5,12 +5,12 @@ import v.token
 import benchmark
 import lsp
 
-const compute_offset_inputs = {
+const compute_offset_inputs = map{
 	'crlf.vv': [3, 22]
 	'lf.vv':   [2, 14]
 }
 
-const compute_offset_results = {
+const compute_offset_results = map{
 	'crlf.vv': 55
 	'lf.vv':   41
 }
@@ -60,14 +60,14 @@ fn test_compute_offset() {
 	bench.stop()
 }
 
-const position_to_lsp_pos_inputs = {
+const position_to_lsp_pos_inputs = map{
 	'simple.vv': token.Position{
 		line_nr: 2
 		pos: 13
 	}
 }
 
-const position_to_lsp_pos_results = {
+const position_to_lsp_pos_results = map{
 	'simple.vv': lsp.Position{
 		line: 2
 		character: 0
@@ -116,7 +116,7 @@ fn test_position_to_lsp_pos() {
 	bench.stop()
 }
 
-const position_to_lsp_range_inputs = {
+const position_to_lsp_range_inputs = map{
 		'simple.vv':         token.Position{
 			line_nr: 2
 			pos: 13
@@ -130,7 +130,7 @@ const position_to_lsp_range_inputs = {
 		}
 	}
 
-const position_to_lsp_range_results = {
+const position_to_lsp_range_results = map{
 		'simple.vv':         lsp.Range{
 			start: lsp.Position{
 				line: 2
