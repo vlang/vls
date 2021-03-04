@@ -164,6 +164,7 @@ pub fn (ls Vls) status() ServerStatus {
 	return ls.status
 }
 
+// log_path returns the combined path of the workspace's root URI and the log file name.
 fn (ls Vls) log_path() string {
 	return os.join_path(ls.root_uri.path(), 'vls.log')
 }
