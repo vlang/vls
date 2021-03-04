@@ -164,11 +164,6 @@ pub fn (ls Vls) status() ServerStatus {
 	return ls.status
 }
 
-// set_debug sets the debug mode of the language server
-pub fn (mut ls Vls) set_debug(state bool) {
-	ls.debug = state
-}
-
 fn (ls Vls) log_path() string {
 	return os.join_path(ls.root_uri.path(), 'vls.log')
 }
