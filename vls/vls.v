@@ -101,8 +101,7 @@ pub fn new(io ReceiveSender) Vls {
 		io: io
 		base_table: tbl
 		debug: io.debug
-		debug: debug
-		logger: log.new(.json)
+		logger: log.new(.text)
 	}
 }
 
