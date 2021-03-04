@@ -6,7 +6,7 @@ import os
 
 // file_uris will be replaced inside the test case
 // because the uri may be different in each platform
-const doc_symbols_result = {
+const doc_symbols_result = map{
 	'simple.vv': [
 		lsp.SymbolInformation{
 			name: 'Uri'
