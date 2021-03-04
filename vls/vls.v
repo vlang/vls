@@ -52,6 +52,7 @@ pub const (
 )
 
 interface ReceiveSender {
+	debug bool
 	send(data string)
 	receive() ?string
 }
@@ -94,16 +95,12 @@ pub mut:
 
 pub fn new(io ReceiveSender) Vls {
 	mut tbl := table.new_table()
-	mut debug := true
 	tbl.is_fmt = false
-	
-	$if test {
-		debug = false
-	}
 
 	return Vls{
 		io: io
 		base_table: tbl
+		debug: io.debug
 		debug: debug
 		logger: log.new(.json)
 	}

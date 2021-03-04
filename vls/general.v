@@ -68,7 +68,7 @@ fn (mut ls Vls) setup_logger(trace string, client_info lsp.ClientInfo) {
 		arch += 32
 	}
 
-	// Create the file either in debug mode or in 'panic' method.
+	// Create the file either in debug mode or when the client trace is set to verbose.
 	if ls.debug || (!ls.debug && trace == 'verbose') {
 		log_path := ls.log_path()
 		os.rm(log_path) or { }
