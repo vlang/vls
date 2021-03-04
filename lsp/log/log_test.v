@@ -119,7 +119,7 @@ fn test_log_item_text() {
 	time.sleep(20 * time.millisecond)
 	lg.notification('{"jsonrpc":"2.0","method":"wave","params":{"name":"Bob"}}', .send)
 	lg.notification('{"jsonrpc":"2.0","method":"wave","params":{"name":"Bob"}}', .receive)
-	
+
 	content := lg.buffer.str()
 	assert content.len > 0
 }

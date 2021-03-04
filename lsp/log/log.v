@@ -12,11 +12,11 @@ pub enum Format {
 
 pub struct Log {
 mut:
-	file        os.File
-	format      Format = .json
-	buffer      strings.Builder [skip]
-	file_opened bool
-	enabled     bool
+	file           os.File
+	format         Format = .json
+	buffer         strings.Builder
+	file_opened    bool
+	enabled        bool
 	last_timestamp time.Time = time.now()
 pub mut:
 	file_path    string
@@ -211,9 +211,9 @@ pub fn (li LogItem) text(last_timestamp time.Time) string {
 		.recv_response { 'Received response \'$method - (${payload.id})\' in ${elapsed_ms}ms' }
 	}
 
-	params_msg := if li.message == 'null' { 
-		'No result returned.' 
-	}	else if li.kind == .send_response || li.kind == .recv_response { 
+	params_msg := if li.message == 'null' {
+		'No result returned.'
+	} else if li.kind == .send_response || li.kind == .recv_response {
 		'Result: ' + li.message
 	} else {
 		'Params: ' + li.message

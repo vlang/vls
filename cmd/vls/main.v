@@ -57,8 +57,8 @@ fn main() {
 		cli.Flag{
 			flag: .bool
 			name: 'debug'
-			description: 'Toggles language server\'s debug mode.'
-		}
+			description: "Toggles language server's debug mode."
+		},
 	])
 
 	cmd.parse(os.args)

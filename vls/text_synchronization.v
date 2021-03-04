@@ -25,7 +25,9 @@ fn (mut ls Vls) did_open(_ int, params string) {
 }
 
 fn (mut ls Vls) did_change(_ int, params string) {
-	did_change_params := json.decode(lsp.DidChangeTextDocumentParams, params) or { ls.panic(err.msg) }
+	did_change_params := json.decode(lsp.DidChangeTextDocumentParams, params) or {
+		ls.panic(err.msg)
+	}
 	source := did_change_params.content_changes[0].text
 	uri := did_change_params.text_document.uri
 	unsafe { ls.sources[uri.str()].free() }
