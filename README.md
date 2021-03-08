@@ -89,6 +89,13 @@ Afterwards, go to your editor's configuration and scroll to the V extension sect
 - [ ] `prepareRename`
 - [x] `foldingRange`
 
+## Debugging
+If you have encountered problems with the language server or would just like to see the information being sent to the server under the hood, you can check them out by uploading the `vls.log` file to the [LSP Inspector](https://iwanabethatguy.github.io/language-server-protocol-inspector/). 
+
+![LSP Inspector](inspector-output.png)
+
+By default, logging is only enabled and when the server crashes. To enable it, pass a `-debug` flag to language server command-line arguments. 
+
 # Contributing
 ## Submitting a pull request
 - Fork it (https://github.com/vlang/vls/fork)
