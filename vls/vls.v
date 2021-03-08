@@ -85,7 +85,7 @@ mut:
 	builtin_symbols  []string // list of publicly available symbols in builtin
 	enabled_features []Feature = vls.default_features_list
 	capabilities     lsp.ServerCapabilities
-	logger           log.Log
+	logger           log.Logger
 	debug            bool
 	// client_capabilities lsp.ClientCapabilities
 pub mut:
@@ -149,6 +149,12 @@ pub fn (mut ls Vls) dispatch(payload string) {
 	}
 }
 
+// set_logger changes the language server's logger
+pub fn (mut ls Vls) set_logger(logger log.Logger) {
+	ls.logger.close()
+	ls.logger = logger
+}
+
 // capabilities returns the current server capabilities
 pub fn (ls Vls) capabilities() lsp.ServerCapabilities {
 	return ls.capabilities
@@ -171,8 +177,9 @@ fn (ls Vls) log_path() string {
 
 // panic generates a log report and exits the language server.
 fn (mut ls Vls) panic(message string) {
-	ls.logger.set_logpath(ls.log_path())
-	err_msg := 'VLS Panic: ${message}. Please refer to ${ls.logger.file_path} for more details. If you believe this is a bug, please report the issue to https://github.com/vlang/vls/issues/new.'
+	log_path := ls.log_path()
+	ls.logger.set_logpath(log_path)
+	err_msg := 'VLS Panic: ${message}. Please refer to ${os.real_path(log_path)} for more details. If you believe this is a bug, please report the issue to https://github.com/vlang/vls/issues/new.'
 	ls.show_message(err_msg, .error)
 	ls.logger.close()
 	ls.exit()

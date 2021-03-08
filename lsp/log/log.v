@@ -5,6 +5,18 @@ import time
 import json
 import strings
 
+pub interface Logger {
+mut:
+	close()
+	flush()
+	enable()
+	disable()
+	request(msg string, kind TransportKind)
+	response(msg string, kind TransportKind)
+	notification(msg string, kind TransportKind)
+	set_logpath(path string)
+}
+
 pub enum Format {
 	json
 	text
@@ -92,6 +104,10 @@ pub fn (mut l Log) flush() {
 
 // close closes the log file.
 pub fn (mut l Log) close() {
+	if !l.file_opened {
+		return
+	}
+	
 	l.file_opened = false
 	l.file.close()
 }
