@@ -74,8 +74,8 @@ pub struct LogItem {
 	timestamp time.Time // unix timestamp
 }
 
-pub fn new(format Format) Log {
-	return Log{
+pub fn new(format Format) &Log {
+	return &Log{
 		format: format
 		file_opened: false
 		enabled: true
