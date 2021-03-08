@@ -3,12 +3,9 @@ module log
 import time
 import json
 
-// const current_time = time.now()
-
 struct TestLogItem {
 	kind    string
 	message string
-	// timestamp time.Time
 }
 
 fn test_notification_send() {
@@ -24,7 +21,6 @@ fn test_notification_send() {
 
 	assert result.kind == 'send-notification'
 	assert result.message == 'Hello!'
-	// assert result.timestamp == current_time
 }
 
 fn test_notification_receive() {
@@ -40,7 +36,6 @@ fn test_notification_receive() {
 
 	assert result.kind == 'recv-notification'
 	assert result.message == 'Received!'
-	// assert result.timestamp == current_time
 }
 
 fn test_request_send() {
@@ -56,7 +51,6 @@ fn test_request_send() {
 
 	assert result.kind == 'send-request'
 	assert result.message == 'Request sent.'
-	// assert result.timestamp == current_time
 }
 
 fn test_request_receive() {
@@ -72,7 +66,6 @@ fn test_request_receive() {
 
 	assert result.kind == 'recv-request'
 	assert result.message == 'Request received.'
-	// assert result.timestamp == current_time
 }
 
 fn test_response_send() {
@@ -88,7 +81,6 @@ fn test_response_send() {
 
 	assert result.kind == 'send-response'
 	assert result.message == 'Response sent.'
-	// assert result.timestamp == current_time
 }
 
 fn test_response_receive() {
@@ -104,7 +96,6 @@ fn test_response_receive() {
 
 	assert result.kind == 'recv-response'
 	assert result.message == 'Response received.'
-	// assert result.timestamp == current_time
 }
 
 fn test_log_item_text() {
