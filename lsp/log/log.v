@@ -71,10 +71,6 @@ pub fn new(format Format) Log {
 	}
 }
 
-pub fn (l Log) str() string {
-	return 'log.Log{}'
-}
-
 // set_logpath sets the filepath of the log file and opens the file.
 pub fn (mut l Log) set_logpath(path string) {
 	if l.file_opened {
