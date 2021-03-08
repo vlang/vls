@@ -90,11 +90,14 @@ Afterwards, go to your editor's configuration and scroll to the V extension sect
 - [x] `foldingRange`
 
 ## Debugging
-If you have encountered problems with the language server or would just like to see the information being sent to the server under the hood, you can check them out by uploading the `vls.log` file to the [LSP Inspector](https://iwanabethatguy.github.io/language-server-protocol-inspector/). 
+> By default, logging is only saved on server crash. Pass the `-debug` flag to language server command-line to save the log on exit. 
+
+VLS provides a log file (`${workspacePath}/vls.log`) for debugging language server for certain situations (e.g unexpected crash). To read the contents of the `vls.log` file, simply upload the file to the [LSP Inspector](https://iwanabethatguy.github.io/language-server-protocol-inspector/) and select `vls.log`. 
 
 ![LSP Inspector](inspector-output.png)
 
-By default, logging is only enabled and when the server crashes. To enable it, pass a `-debug` flag to language server command-line arguments. 
+### Error Reporting
+If you encounter a crash in the language server, be sure to attach the `vls.log` file when [submitting an issue to the issue tracker](https://github.com/vlang/vls/issues/new).
 
 # Contributing
 ## Submitting a pull request

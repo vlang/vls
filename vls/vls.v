@@ -179,7 +179,7 @@ fn (ls Vls) log_path() string {
 fn (mut ls Vls) panic(message string) {
 	log_path := ls.log_path()
 	ls.logger.set_logpath(log_path)
-	err_msg := 'VLS Panic: ${message}. Please refer to ${os.real_path(log_path)} for more details. If you believe this is a bug, please report the issue to https://github.com/vlang/vls/issues/new.'
+	err_msg := 'VLS Panic: ${message}. Log saved to ${os.real_path(log_path)}. Please refer to https://github.com/vlang/vls#error-reporting for more details.'
 	ls.show_message(err_msg, .error)
 	ls.logger.close()
 	ls.exit()
