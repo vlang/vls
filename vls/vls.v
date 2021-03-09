@@ -225,6 +225,7 @@ fn (mut ls Vls) send_null(id int) {
 	str := '{"jsonrpc":"2.0","id":$id,"result":null}'
 	ls.logger.response(str, .send)
 	ls.io.send(str)
+	ls.logger.response(str, .receive)
 }
 
 // start_loop starts an endless loop which waits for stdin and prints responses to the stdout
