@@ -6,6 +6,8 @@ import v.pref
 import json
 import jsonrpc
 import lsp
+import lsp.log
+import os
 
 // These are the list of features available in VLS
 // If the feature is experimental, the value name should have a `exp_` prefix
@@ -50,6 +52,7 @@ pub const (
 )
 
 interface ReceiveSender {
+	debug bool
 	send(data string)
 	receive() ?string
 }
@@ -82,6 +85,8 @@ mut:
 	builtin_symbols  []string // list of publicly available symbols in builtin
 	enabled_features []Feature = vls.default_features_list
 	capabilities     lsp.ServerCapabilities
+	logger           log.Logger
+	debug            bool
 	// client_capabilities lsp.ClientCapabilities
 pub mut:
 	// TODO: replace with io.ReadWriter
@@ -91,9 +96,12 @@ pub mut:
 pub fn new(io ReceiveSender) Vls {
 	mut tbl := table.new_table()
 	tbl.is_fmt = false
+
 	return Vls{
 		io: io
 		base_table: tbl
+		debug: io.debug
+		logger: log.new(.text)
 	}
 }
 
@@ -101,6 +109,23 @@ pub fn (mut ls Vls) dispatch(payload string) {
 	request := json.decode(jsonrpc.Request, payload) or {
 		ls.send(new_error(jsonrpc.parse_error))
 		return
+	}
+	// The server will log a send request/notification
+	// log based on the the received payload since the spec
+	// doesn't indicate a way to log on the client side and
+	// notify it to the server.
+	//
+	// Notification has no ID attached so the server can detect
+	// if its a notification or a request payload by checking
+	// if the ID is on the default value which is -2. (Some
+	// clients such as VSCode used 0 as the first request ID
+	// hence the use of a negative integer).
+	if request.id == -2 {
+		ls.logger.notification(payload, .send)
+		ls.logger.notification(payload, .receive)
+	} else {
+		ls.logger.request(payload, .send)
+		ls.logger.request(payload, .receive)
 	}
 	if ls.status == .initialized {
 		match request.method { // not only requests but also notifications
@@ -140,6 +165,12 @@ pub fn (mut ls Vls) dispatch(payload string) {
 	}
 }
 
+// set_logger changes the language server's logger
+pub fn (mut ls Vls) set_logger(logger log.Logger) {
+	ls.logger.close()
+	ls.logger = logger
+}
+
 // capabilities returns the current server capabilities
 pub fn (ls Vls) capabilities() lsp.ServerCapabilities {
 	return ls.capabilities
@@ -155,14 +186,46 @@ pub fn (ls Vls) status() ServerStatus {
 	return ls.status
 }
 
-fn (ls Vls) send<T>(data T) {
+// log_path returns the combined path of the workspace's root URI and the log file name.
+fn (ls Vls) log_path() string {
+	return os.join_path(ls.root_uri.path(), 'vls.log')
+}
+
+// panic generates a log report and exits the language server.
+fn (mut ls Vls) panic(message string) {
+	log_path := ls.log_path()
+	ls.logger.set_logpath(log_path)
+	err_msg := 'VLS Panic: ${message}. Log saved to ${os.real_path(log_path)}. Please refer to https://github.com/vlang/vls#error-reporting for more details.'
+	ls.show_message(err_msg, .error)
+	ls.logger.close()
+	ls.exit()
+}
+
+fn (mut ls Vls) send<T>(data T) {
 	str := json.encode(data)
+	ls.logger.response(str, .send)
 	ls.io.send(str)
+	// See line 113 for the explanation
+	ls.logger.response(str, .receive)
+}
+
+// TODO: set result param type to jsonrpc.NotificationMessage<T>
+// merge notify back to send method once compile-time type introspection
+// supports base generic types (e.g $if T is jsonrpc.NotificationMessage)
+fn (mut ls Vls) notify<T>(data T) {
+	str := json.encode(data)
+	ls.logger.notification(str, .send)
+	ls.io.send(str)
+	// See line 113 for the explanation
+	ls.logger.notification(str, .receive)
 }
 
 // send_null sends a null result to the client
-fn (ls Vls) send_null(id int) {
-	ls.io.send('{"jsonrpc":"2.0","id":$id,"result":null}')
+fn (mut ls Vls) send_null(id int) {
+	str := '{"jsonrpc":"2.0","id":$id,"result":null}'
+	ls.logger.response(str, .send)
+	ls.io.send(str)
+	ls.logger.response(str, .receive)
 }
 
 // start_loop starts an endless loop which waits for stdin and prints responses to the stdout

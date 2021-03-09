@@ -6,6 +6,8 @@ import jsonrpc
 import os
 import v.parser
 import v.ast
+import v.vmod
+import runtime
 
 const (
 	completion_trigger_characters       = ['=', '.', ':', '{', ',', '(', ' ']
@@ -15,7 +17,7 @@ const (
 
 // initialize sends the server capabilities to the client
 fn (mut ls Vls) initialize(id int, params string) {
-	initialize_params := json.decode(lsp.InitializeParams, params) or { panic(err.msg) }
+	initialize_params := json.decode(lsp.InitializeParams, params) or { ls.panic(err.msg) }
 	// TODO: configure capabilities based on client support
 	// ls.client_capabilities = initialize_params.capabilities
 	ls.capabilities = lsp.ServerCapabilities{
@@ -50,14 +52,41 @@ fn (mut ls Vls) initialize(id int, params string) {
 	// only files are supported right now
 	ls.root_uri = initialize_params.root_uri
 	ls.status = .initialized
+
+	// set up logger set to the workspace path
+	ls.setup_logger(initialize_params.trace, initialize_params.client_info)
+
 	// since builtin is used frequently, they should be parsed first and only once
 	ls.process_builtin()
 	ls.send(result)
 }
 
+fn (mut ls Vls) setup_logger(trace string, client_info lsp.ClientInfo) {
+	meta := vmod.decode(@VMOD_FILE) or { vmod.Manifest{} }
+	mut arch := 32
+	if runtime.is_64bit() {
+		arch += 32
+	}
+
+	// Create the file either in debug mode or when the client trace is set to verbose.
+	if ls.debug || (!ls.debug && trace == 'verbose') {
+		log_path := ls.log_path()
+		os.rm(log_path) or { }
+		ls.logger.set_logpath(log_path)
+	}
+
+	// print important info for reporting
+	ls.log_message('VLS Version: ${meta.version}, OS: ${os.user_os()} $arch', .info)
+	if client_info.name.len != 0 {
+		ls.log_message('Client / Editor: ${client_info.name} ${client_info.version}', .info)
+	} else {
+		ls.log_message('Client / Editor: Unknown', .info)
+	}
+}
+
 fn (mut ls Vls) process_builtin() {
 	scope, pref := new_scope_and_pref()
-	mut builtin_files := os.ls(builtin_path) or { panic(err.msg) }
+	mut builtin_files := os.ls(builtin_path) or { ls.panic(err.msg) }
 	builtin_files = pref.should_compile_filtered_files(builtin_path, builtin_files)
 	parsed_files := parser.parse_files(builtin_files, ls.base_table, pref, scope)
 	// This part extracts the symbols for the builtin module
@@ -93,7 +122,10 @@ fn (mut ls Vls) shutdown(id int) {
 }
 
 // exit stops the process
-fn (ls Vls) exit() {
+fn (mut ls Vls) exit() {
+	// saves the log into the disk
+	ls.logger.close()
+
 	// move exit to shutdown for now
 	// == .shutdown => 0
 	// != .shutdown => 1

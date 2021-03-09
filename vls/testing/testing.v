@@ -27,6 +27,7 @@ mut:
 pub mut:
 	bench        benchmark.Benchmark = benchmark.new_benchmark()
 	raw_response string // raw JSON string of the response data
+	debug        bool
 }
 
 pub fn (mut io Testio) send(data string) {

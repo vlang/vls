@@ -11,8 +11,8 @@ import v.pref
 import os
 // import strings
 
-fn (ls Vls) formatting(id int, params string) {
-	formatting_params := json.decode(lsp.DocumentFormattingParams, params) or { panic(err.msg) }
+fn (mut ls Vls) formatting(id int, params string) {
+	formatting_params := json.decode(lsp.DocumentFormattingParams, params) or { ls.panic(err.msg) }
 	uri := formatting_params.text_document.uri.str()
 	path := formatting_params.text_document.uri.path()
 	source := ls.sources[uri].bytestr()
@@ -71,7 +71,7 @@ fn (mut ls Vls) workspace_symbol(id int, _ string) {
 }
 
 fn (mut ls Vls) document_symbol(id int, params string) {
-	document_symbol_params := json.decode(lsp.DocumentSymbolParams, params) or { panic(err.msg) }
+	document_symbol_params := json.decode(lsp.DocumentSymbolParams, params) or { ls.panic(err.msg) }
 	uri := document_symbol_params.text_document.uri
 	file := ls.files[uri.str()]
 	symbols := ls.generate_symbols(file, uri)
@@ -159,8 +159,8 @@ fn (mut ls Vls) generate_symbols(file ast.File, uri lsp.DocumentUri) []lsp.Symbo
 	return symbols
 }
 
-fn (ls Vls) signature_help(id int, params string) {
-	signature_params := json.decode(lsp.SignatureHelpParams, params) or { panic(err.msg) }
+fn (mut ls Vls) signature_help(id int, params string) {
+	signature_params := json.decode(lsp.SignatureHelpParams, params) or { ls.panic(err.msg) }
 	uri := signature_params.text_document.uri
 	pos := signature_params.position
 	ctx := signature_params.context
@@ -613,7 +613,7 @@ fn (mut ls Vls) completion(id int, params string) {
 	if Feature.completion !in ls.enabled_features {
 		return
 	}
-	completion_params := json.decode(lsp.CompletionParams, params) or { panic(err.msg) }
+	completion_params := json.decode(lsp.CompletionParams, params) or { ls.panic(err.msg) }
 	file_uri := completion_params.text_document.uri
 	file := ls.files[file_uri.str()]
 	src := ls.sources[file_uri.str()]
@@ -993,8 +993,8 @@ fn (mut cfg HoverConfig) hover_from_expr(node ast.Expr) ?lsp.Hover {
 	}
 }
 
-fn (ls Vls) hover(id int, params string) {
-	hover_params := json.decode(lsp.HoverParams, params) or { panic(err.msg) }
+fn (mut ls Vls) hover(id int, params string) {
+	hover_params := json.decode(lsp.HoverParams, params) or { ls.panic(err.msg) }
 	uri := hover_params.text_document.uri
 	pos := hover_params.position
 	src := ls.sources[uri.str()]
@@ -1082,8 +1082,8 @@ fn (ls Vls) hover(id int, params string) {
 	})
 }
 
-fn (ls Vls) folding_range(id int, params string) {
-	folding_range_params := json.decode(lsp.FoldingRangeParams, params) or { panic(err.msg) }
+fn (mut ls Vls) folding_range(id int, params string) {
+	folding_range_params := json.decode(lsp.FoldingRangeParams, params) or { ls.panic(err.msg) }
 	uri := folding_range_params.text_document.uri
 	file := ls.files[uri.str()] or {
 		ls.send_null(id)

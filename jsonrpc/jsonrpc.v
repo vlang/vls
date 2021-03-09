@@ -16,7 +16,7 @@ pub const (
 pub struct Request {
 pub mut:
 	jsonrpc string = jsonrpc.version
-	id      int
+	id      int    = -2
 	method  string
 	params  string [raw]
 }
