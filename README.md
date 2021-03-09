@@ -20,7 +20,7 @@ v -prod cmd/vls
 
 In order to use the language server, you need to have a text editor with support for LSP. In this case, the recommended editor for testing (for now) is to have [Visual Studio Code](https://code.visualstudio.com) and the [vscode-vlang](https://github.com/vlang/vscode-vlang) extension version 0.1.4 or above installed.
 
-![Instructions](instructions.png)
+![Instructions](images/instructions.png)
 
 Afterwards, go to your editor's configuration and scroll to the V extension section. From there, enable VLS by checking the box and input the absolute path of where the language server is located.
 
@@ -94,7 +94,7 @@ Afterwards, go to your editor's configuration and scroll to the V extension sect
 
 VLS provides a log file (`${workspacePath}/vls.log`) for debugging language server for certain situations (e.g unexpected crash). To read the contents of the `vls.log` file, simply upload the file to the [LSP Inspector](https://iwanabethatguy.github.io/language-server-protocol-inspector/) and select `vls.log`. 
 
-![LSP Inspector](inspector-output.png)
+![LSP Inspector](images/inspector-output.png)
 
 ### Error Reporting
 If you encounter a crash in the language server, be sure to attach the `vls.log` file when [submitting an issue](https://github.com/vlang/vls/issues/new).
