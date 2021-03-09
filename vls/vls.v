@@ -110,7 +110,23 @@ pub fn (mut ls Vls) dispatch(payload string) {
 		ls.send(new_error(jsonrpc.parse_error))
 		return
 	}
-	ls.logger.request(payload, .receive)
+	// The server will log a send request/notification
+	// log based on the the received payload since the spec
+	// doesn't indicate a way to log on the client side and
+	// notify it to the server.
+	//
+	// Notification has no ID attached so the server can detect
+	// if its a notification or a request payload by checking
+	// if the ID is on the default value which is -2. (Some
+	// clients such as VSCode used 0 as the first request ID
+	// hence the use of a negative integer).
+	if request.id == -2 {
+		ls.logger.notification(payload, .send)
+		ls.logger.notification(payload, .receive)
+	} else {
+		ls.logger.request(payload, .send)
+		ls.logger.request(payload, .receive)
+	}
 	if ls.status == .initialized {
 		match request.method { // not only requests but also notifications
 			'initialized' {} // does nothing currently
@@ -189,6 +205,8 @@ fn (mut ls Vls) send<T>(data T) {
 	str := json.encode(data)
 	ls.logger.response(str, .send)
 	ls.io.send(str)
+	// See line 113 for the explanation
+	ls.logger.response(str, .receive)
 }
 
 // TODO: set result param type to jsonrpc.NotificationMessage<T>
@@ -198,6 +216,8 @@ fn (mut ls Vls) notify<T>(data T) {
 	str := json.encode(data)
 	ls.logger.notification(str, .send)
 	ls.io.send(str)
+	// See line 113 for the explanation
+	ls.logger.notification(str, .receive)
 }
 
 // send_null sends a null result to the client
@@ -211,7 +231,6 @@ fn (mut ls Vls) send_null(id int) {
 pub fn (mut ls Vls) start_loop() {
 	for {
 		payload := ls.io.receive() or { continue }
-		ls.logger.request(payload, .send)
 		ls.dispatch(payload)
 	}
 }
