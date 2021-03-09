@@ -97,7 +97,7 @@ VLS provides a log file (`${workspacePath}/vls.log`) for debugging language serv
 ![LSP Inspector](inspector-output.png)
 
 ### Error Reporting
-If you encounter a crash in the language server, be sure to attach the `vls.log` file when [submitting an issue to the issue tracker](https://github.com/vlang/vls/issues/new).
+If you encounter a crash in the language server, be sure to attach the `vls.log` file when [submitting an issue](https://github.com/vlang/vls/issues/new).
 
 # Contributing
 ## Submitting a pull request
