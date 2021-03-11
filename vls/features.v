@@ -98,7 +98,7 @@ fn (mut ls Vls) generate_symbols(file ast.File, uri lsp.DocumentUri) []lsp.Symbo
 	for stmt in file.stmts {
 		mut name := ''
 		mut kind := lsp.SymbolKind.null
-		mut pos := position_to_lsp_range(source, stmt.position())
+		mut pos := position_to_lsp_range(source, stmt.pos)
 		match stmt {
 			ast.ConstDecl {
 				for field in stmt.fields {
@@ -800,7 +800,7 @@ mut:
 
 // hover_from_stmt returns the hover data for a specific ast.Stmt.
 fn (mut cfg HoverConfig) hover_from_stmt(node ast.Stmt) ?lsp.Hover {
-	mut pos := node.position()
+	mut pos := node.pos
 	match node {
 		ast.Module {
 			name := if node.short_name.len > 0 { node.short_name } else { node.name }
