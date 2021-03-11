@@ -26,6 +26,7 @@ fn (mut ls Vls) show_diagnostics(uri lsp.DocumentUri) {
 }
 
 // publish_diagnostics sends errors, warnings and other diagnostics to the editor
+[manualfree]
 fn (mut ls Vls) publish_diagnostics(uri lsp.DocumentUri, diagnostics []lsp.Diagnostic) {
 	if Feature.diagnostics !in ls.enabled_features {
 		return

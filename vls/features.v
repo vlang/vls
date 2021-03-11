@@ -11,6 +11,7 @@ import v.pref
 import os
 // import strings
 
+[manualfree]
 fn (mut ls Vls) formatting(id int, params string) {
 	formatting_params := json.decode(lsp.DocumentFormattingParams, params) or { ls.panic(err.msg) }
 	uri := formatting_params.text_document.uri.str()
@@ -609,6 +610,7 @@ fn (mut cfg CompletionItemConfig) suggest_mod_names() []lsp.CompletionItem {
 }
 
 // TODO: make params use lsp.CompletionParams in the future
+[manualfree]
 fn (mut ls Vls) completion(id int, params string) {
 	if Feature.completion !in ls.enabled_features {
 		return
@@ -1082,6 +1084,7 @@ fn (mut ls Vls) hover(id int, params string) {
 	})
 }
 
+[manualfree]
 fn (mut ls Vls) folding_range(id int, params string) {
 	folding_range_params := json.decode(lsp.FoldingRangeParams, params) or { ls.panic(err.msg) }
 	uri := folding_range_params.text_document.uri

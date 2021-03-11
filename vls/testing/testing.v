@@ -80,6 +80,7 @@ fn (mut io Testio) decode_response() ? {
 pub const test_files_dir = os.join_path(os.dir(os.dir(@FILE)), 'tests', 'test_files')
 
 // load_test_file_paths returns a list of input test file locations.
+[manualfree]
 pub fn load_test_file_paths(folder_name string) ?[]string {
 	target_path := os.join_path(testing.test_files_dir, folder_name)
 	dir := os.ls(target_path) or { return error('error loading test files for "$folder_name"') }

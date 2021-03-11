@@ -84,6 +84,7 @@ fn (mut ls Vls) setup_logger(trace string, client_info lsp.ClientInfo) {
 	}
 }
 
+[manualfree]
 fn (mut ls Vls) process_builtin() {
 	scope, pref := new_scope_and_pref()
 	mut builtin_files := os.ls(builtin_path) or { ls.panic(err.msg) }
