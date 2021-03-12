@@ -23,7 +23,7 @@ pub fn find_ast_by_pos(nodes []ast.Node, offset int) ?ast.Node {
 			if is_within_pos(data.pos, node_pos) {
 				data.node = node
 				data.found = true
-			} else if data.pos - node_pos.pos <= 5 {
+			} else if data.pos - node_pos.pos >= -5 && data.pos - node_pos.pos <= 5 {
 				if node is ast.Expr {
 					expr := node
 					match node {
@@ -34,7 +34,13 @@ pub fn find_ast_by_pos(nodes []ast.Node, offset int) ?ast.Node {
 						else {}
 					}
 				} else if node is ast.Stmt {
-					data.found = node is ast.Import
+					stmt := node
+					if node is ast.AssignStmt {
+						data.node = stmt
+						data.found = true
+					} else {
+						data.found = node is ast.Import
+					}
 				}
 			}
 			return if data.found { false } else { true }

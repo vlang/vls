@@ -1,0 +1,6 @@
+module main
+
+fn main() {
+	test := 1
+	println(test)
+}

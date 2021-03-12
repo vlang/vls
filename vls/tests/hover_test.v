@@ -51,6 +51,9 @@ const hover_inputs = map{
 	'variable.vv':         lsp.HoverParams{
 		position: lsp.Position{2, 12}
 	}
+	'with_call_expr_below.vv': lsp.HoverParams{
+		position: lsp.Position{3, 4}
+	}
 }
 
 const hover_results = map{
@@ -157,6 +160,13 @@ const hover_results = map{
 		range: lsp.Range{
 			start: lsp.Position{2, 10}
 			end: lsp.Position{2, 13}
+		}
+	},
+	'with_call_expr_below.vv': lsp.Hover{
+		contents: lsp.MarkedString{'v', 'test int'}
+		range: lsp.Range{
+			start: lsp.Position{3, 2}
+			end: lsp.Position{3, 6}
 		}
 	}
 }
