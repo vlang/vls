@@ -1,7 +1,7 @@
 module vls
 
+import math.mathutil as mu
 import v.token
-import v.util
 import lsp
 
 pub fn is_within_pos(offset int, pos token.Position) bool {
@@ -56,11 +56,11 @@ fn get_column(source []byte, init_pos int) int {
 
 // position_to_lsp_pos converts the token.Position into lsp.Position
 pub fn position_to_lsp_pos(source []byte, pos token.Position) lsp.Position {
-	p := util.imax(0, util.imin(source.len - 1, pos.pos))
-	column := util.imax(0, pos.pos - get_column(source, p)) - 1
+	p := mu.max(0, mu.min(source.len - 1, pos.pos))
+	column := mu.max(0, pos.pos - get_column(source, p)) - 1
 	return lsp.Position{
 		line: pos.line_nr
-		character: util.imax(1, column) - 1
+		character: mu.max(1, column) - 1
 	}
 }
 
