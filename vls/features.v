@@ -231,7 +231,7 @@ fn (mut ls Vls) signature_help(id int, params string) {
 			left_type_sym := tbl.get_type_symbol(call_expr.left_type)
 			if method := tbl.type_find_method(left_type_sym, call_expr.name) {
 				skip_receiver = true
-				label += '(${left_type_sym.name}) ${method.name}('
+				label += '($left_type_sym.name) ${method.name}('
 
 				if method.return_type != table.Type(0) {
 					return_type = tbl.type_to_str(method.return_type)
@@ -350,11 +350,11 @@ fn (mut cfg CompletionItemConfig) completion_items_from_table(mod_name string, s
 		// Just to make sure, negative type indexes or greater than the type table
 		// length are not allowed. Symbols names that does not start with a given
 		// module name are also not allowed.
-		valid_type := idx >= 0 || idx < cfg.table.types.len
+		valid_type := idx >= 0 || idx < cfg.table.type_symbols.len
 		sym_part_of_module := mod_name.len > 0 && sym_name.starts_with('${mod_name}.')
 		name := sym_name.all_after('${mod_name}.')
 		if valid_type || sym_part_of_module || (symbols.len > 0 && name in symbols) {
-			type_sym := unsafe { &cfg.table.types[idx] }
+			type_sym := unsafe { &cfg.table.type_symbols[idx] }
 			if type_sym.mod != mod_name {
 				continue
 			}

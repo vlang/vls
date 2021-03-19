@@ -128,7 +128,8 @@ pub fn (mut ls Vls) dispatch(payload string) {
 		ls.logger.request(payload, .receive)
 	}
 	if ls.status == .initialized {
-		match request.method { // not only requests but also notifications
+		match request.method {
+			// not only requests but also notifications
 			'initialized' {} // does nothing currently
 			'shutdown' {
 				// NB: Some users reported that after closing their text editors,
@@ -140,25 +141,55 @@ pub fn (mut ls Vls) dispatch(payload string) {
 				ls.exit()
 				// ls.shutdown(request.id)
 			}
-			'exit' { /* ignore for the reasons stated in the above comment */ }
-			'textDocument/didOpen' { ls.did_open(request.id, request.params) }
-			'textDocument/didChange' { ls.did_change(request.id, request.params) }
-			'textDocument/didClose' { ls.did_close(request.id, request.params) }
-			'textDocument/formatting' { ls.formatting(request.id, request.params) }
-			'textDocument/documentSymbol' { ls.document_symbol(request.id, request.params) }
-			'workspace/symbol' { ls.workspace_symbol(request.id, request.params) }
-			'textDocument/signatureHelp' { ls.signature_help(request.id, request.params) }
-			'textDocument/completion' { ls.completion(request.id, request.params) }
-			'textDocument/hover' { ls.hover(request.id, request.params) }
-			'textDocument/foldingRange' { ls.folding_range(request.id, request.params) }
+			'exit' {
+				// ignore for the reasons stated in the above comment
+			}
+			'textDocument/didOpen' {
+				ls.did_open(request.id, request.params)
+			}
+			'textDocument/didChange' {
+				ls.did_change(request.id, request.params)
+			}
+			'textDocument/didClose' {
+				ls.did_close(request.id, request.params)
+			}
+			'textDocument/formatting' {
+				ls.formatting(request.id, request.params)
+			}
+			'textDocument/documentSymbol' {
+				ls.document_symbol(request.id, request.params)
+			}
+			'workspace/symbol' {
+				ls.workspace_symbol(request.id, request.params)
+			}
+			'textDocument/signatureHelp' {
+				ls.signature_help(request.id, request.params)
+			}
+			'textDocument/completion' {
+				ls.completion(request.id, request.params)
+			}
+			'textDocument/hover' {
+				ls.hover(request.id, request.params)
+			}
+			'textDocument/foldingRange' {
+				ls.folding_range(request.id, request.params)
+			}
 			else {}
 		}
 	} else {
 		match request.method {
-			'exit' { ls.exit() }
-			'initialize' { ls.initialize(request.id, request.params) }
+			'exit' {
+				ls.exit()
+			}
+			'initialize' {
+				ls.initialize(request.id, request.params)
+			}
 			else {
-				err_type := if ls.status == .shutdown { jsonrpc.invalid_request } else { jsonrpc.server_not_initialized }
+				err_type := if ls.status == .shutdown {
+					jsonrpc.invalid_request
+				} else {
+					jsonrpc.server_not_initialized
+				}
 				ls.send(new_error(err_type))
 			}
 		}
@@ -272,7 +303,7 @@ fn (mut ls Vls) insert_files(files []ast.File) {
 // new_table returns a new table based on the existing data of base_table
 fn (ls Vls) new_table() &table.Table {
 	mut tbl := table.new_table()
-	tbl.types = ls.base_table.types.clone()
+	tbl.type_symbols = ls.base_table.type_symbols.clone()
 	tbl.type_idxs = ls.base_table.type_idxs.clone()
 	tbl.fns = ls.base_table.fns.clone()
 	tbl.imports = ls.base_table.imports.clone()
