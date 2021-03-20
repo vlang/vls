@@ -134,7 +134,7 @@ fn (mut l Log) write(item LogItem) {
 	if l.file_opened {
 		if l.buffer.len != 0 {
 			unsafe {
-				l.file.write_bytes(l.buffer.buf.data, l.buffer.len)
+				l.file.write_ptr(l.buffer.buf.data, l.buffer.len)
 				l.buffer.free()
 			}
 		}
