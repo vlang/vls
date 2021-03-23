@@ -41,36 +41,21 @@ pub fn compute_offset(src []byte, line int, col int) int {
 	return offset
 }
 
-// get_column computes the column of the source based on the given initial position
-fn get_column(source []byte, init_pos int) int {
-	mut p := init_pos
-	if source.len > 0 {
-		for ; p >= 0; p-- {
-			if source[p] == `\r` || source[p] == `\n` {
-				break
-			}
-		}
-	}
-	return p - 1
-}
-
 // position_to_lsp_pos converts the token.Position into lsp.Position
-pub fn position_to_lsp_pos(source []byte, pos token.Position) lsp.Position {
-	p := mu.max(0, mu.min(source.len - 1, pos.pos))
-	column := mu.max(0, pos.pos - get_column(source, p)) - 1
+pub fn position_to_lsp_pos(pos token.Position) lsp.Position {
 	return lsp.Position{
 		line: pos.line_nr
-		character: mu.max(1, column) - 1
+		character: pos.col
 	}
 }
 
 // position_to_lsp_pos converts the token.Position into lsp.Range
-fn position_to_lsp_range(source []byte, pos token.Position) lsp.Range {
-	start_pos := position_to_lsp_pos(source, pos)
+fn position_to_lsp_range(pos token.Position) lsp.Range {
+	start_pos := position_to_lsp_pos(pos)
 	return lsp.Range{
 		start: start_pos
 		end: lsp.Position{
-			line: if pos.last_line > pos.line_nr { pos.last_line } else { start_pos.line }
+			line: mu.max(pos.last_line, start_pos.line)
 			character: start_pos.character + pos.len
 		}
 	}
