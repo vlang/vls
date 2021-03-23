@@ -107,7 +107,7 @@ fn test_position_to_lsp_pos() {
 		}
 		input := position_to_lsp_pos_inputs[test_name]
 		expected := position_to_lsp_pos_results[test_name]
-		result := vls.position_to_lsp_pos(content, input)
+		result := vls.position_to_lsp_pos(input)
 		assert result == expected
 		bench.ok()
 		println(bench.step_message_ok(test_name))
@@ -117,41 +117,41 @@ fn test_position_to_lsp_pos() {
 }
 
 const position_to_lsp_range_inputs = map{
-		'simple.vv':         token.Position{
-			line_nr: 2
-			pos: 13
-			len: 29
-		}
-		'with_last_line.vv': token.Position{
-			line_nr: 0
-			pos: 0
-			len: 55
-			last_line: 4
-		}
+	'simple.vv':         token.Position{
+		line_nr: 2
+		pos: 13
+		len: 29
 	}
+	'with_last_line.vv': token.Position{
+		line_nr: 0
+		pos: 0
+		len: 55
+		last_line: 4
+	}
+}
 
 const position_to_lsp_range_results = map{
-		'simple.vv':         lsp.Range{
-			start: lsp.Position{
-				line: 2
-				character: 0
-			}
-			end: lsp.Position{
-				line: 2
-				character: 29
-			}
+	'simple.vv':         lsp.Range{
+		start: lsp.Position{
+			line: 2
+			character: 0
 		}
-		'with_last_line.vv': lsp.Range{
-			start: lsp.Position{
-				line: 0
-				character: 0
-			}
-			end: lsp.Position{
-				line: 3
-				character: 1
-			}
+		end: lsp.Position{
+			line: 2
+			character: 29
 		}
 	}
+	'with_last_line.vv': lsp.Range{
+		start: lsp.Position{
+			line: 0
+			character: 0
+		}
+		end: lsp.Position{
+			line: 3
+			character: 1
+		}
+	}
+}
 
 fn test_position_to_lsp_range() {
 	mut bench := benchmark.new_benchmark()
@@ -186,7 +186,7 @@ fn test_position_to_lsp_range() {
 		}
 		input := position_to_lsp_pos_inputs[test_name]
 		expected := position_to_lsp_pos_results[test_name]
-		result := vls.position_to_lsp_pos(content, input)
+		result := vls.position_to_lsp_pos(input)
 		assert result == expected
 		bench.ok()
 		println(bench.step_message_ok(test_name))
