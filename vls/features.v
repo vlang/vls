@@ -99,7 +99,7 @@ fn (mut ls Vls) generate_symbols(file ast.File, uri lsp.DocumentUri) []lsp.Symbo
 	for stmt in file.stmts {
 		mut name := ''
 		mut kind := lsp.SymbolKind.null
-		mut pos := position_to_lsp_range(source, stmt.pos)
+		mut pos := position_to_lsp_range(stmt.pos)
 		match stmt {
 			ast.ConstDecl {
 				for field in stmt.fields {
@@ -108,7 +108,7 @@ fn (mut ls Vls) generate_symbols(file ast.File, uri lsp.DocumentUri) []lsp.Symbo
 						kind: .constant
 						location: lsp.Location{
 							uri: uri
-							range: position_to_lsp_range(source, field.pos)
+							range: position_to_lsp_range(field.pos)
 						}
 					}
 				}
@@ -171,9 +171,8 @@ fn (mut ls Vls) signature_help(id int, params string) {
 	}
 
 	file := ls.files[uri.str()]
-	src := ls.sources[uri.str()]
 	tbl := ls.tables[os.dir(uri.str())]
-	offset := compute_offset(src, pos.line, pos.character)
+	offset := compute_offset(ls.sources[uri.str()], pos.line, pos.character)
 	node := find_ast_by_pos(file.stmts.map(ast.Node(it)), offset) or {
 		ls.send_null(id)
 		return
@@ -794,7 +793,6 @@ fn (mut ls Vls) completion(id int, params string) {
 
 struct HoverConfig {
 mut:
-	src    []byte
 	file   ast.File
 	offset int // position of the cursor. used for finding the AST node
 	table  &table.Table
@@ -808,7 +806,7 @@ fn (mut cfg HoverConfig) hover_from_stmt(node ast.Stmt) ?lsp.Hover {
 			name := if node.short_name.len > 0 { node.short_name } else { node.name }
 			return lsp.Hover{
 				contents: lsp.v_marked_string('module $name')
-				range: position_to_lsp_range(cfg.src, pos.extend(node.name_pos))
+				range: position_to_lsp_range(pos.extend(node.name_pos))
 			}
 		}
 		ast.FnDecl {
@@ -845,21 +843,21 @@ fn (mut cfg HoverConfig) hover_from_stmt(node ast.Stmt) ?lsp.Hover {
 			signature += ') $return_type_name'
 			return lsp.Hover{
 				contents: lsp.v_marked_string(signature)
-				range: position_to_lsp_range(cfg.src, pos)
+				range: position_to_lsp_range(pos)
 			}
 		}
 		ast.StructDecl {
 			name := node.name.all_after(cfg.file.mod.short_name + '.')
 			return lsp.Hover{
 				contents: lsp.v_marked_string('struct $name')
-				range: position_to_lsp_range(cfg.src, pos)
+				range: position_to_lsp_range(pos)
 			}
 		}
 		ast.EnumDecl {
 			name := node.name.all_after(cfg.file.mod.short_name + '.')
 			return lsp.Hover{
 				contents: lsp.v_marked_string('enum $name')
-				range: position_to_lsp_range(cfg.src, pos)
+				range: position_to_lsp_range(pos)
 			}
 		}
 		ast.TypeDecl {
@@ -897,7 +895,7 @@ fn (mut cfg HoverConfig) hover_from_stmt(node ast.Stmt) ?lsp.Hover {
 
 			return lsp.Hover{
 				contents: lsp.v_marked_string('type $name = $branches')
-				range: position_to_lsp_range(cfg.src, pos)
+				range: position_to_lsp_range(pos)
 			}
 		}
 		ast.Return {
@@ -919,7 +917,7 @@ fn (mut cfg HoverConfig) hover_from_stmt(node ast.Stmt) ?lsp.Hover {
 	}
 	return lsp.Hover{
 		contents: lsp.v_marked_string(node.str())
-		range: position_to_lsp_range(cfg.src, pos)
+		range: position_to_lsp_range(pos)
 	}
 }
 
@@ -932,7 +930,7 @@ fn (mut cfg HoverConfig) hover_from_expr(node ast.Expr) ?lsp.Hover {
 			if obj_node.typ == table.Type(0) {
 				return none
 			}
-			range := position_to_lsp_range(cfg.src, node.pos)
+			range := position_to_lsp_range(node.pos)
 			// TODO: create a wrapper function that will auto-format type
 			// based on the VLS style.
 			typ_name := cfg.table.type_to_str(obj_node.typ).all_after('main.')
@@ -958,7 +956,7 @@ fn (mut cfg HoverConfig) hover_from_expr(node ast.Expr) ?lsp.Hover {
 				return_type := cfg.table.type_to_str(node.return_type).all_after('main.')
 				signature += ' $return_type'
 			}
-			range := position_to_lsp_range(cfg.src, node.pos)
+			range := position_to_lsp_range(node.pos)
 
 			return lsp.Hover{
 				contents: lsp.v_marked_string(signature)
@@ -970,7 +968,7 @@ fn (mut cfg HoverConfig) hover_from_expr(node ast.Expr) ?lsp.Hover {
 				if node.typ == table.Type(0) {
 					return none
 				}
-				range := position_to_lsp_range(cfg.src, node.pos)
+				range := position_to_lsp_range(node.pos)
 				typ_name := cfg.table.type_to_str(node.typ).all_after('main.')
 				parent_name := if node.expr_type != table.Type(0) {
 					cfg.table.type_to_str(node.expr_type).all_after('main.') + '.'
@@ -989,7 +987,7 @@ fn (mut cfg HoverConfig) hover_from_expr(node ast.Expr) ?lsp.Hover {
 		else {
 			return lsp.Hover{
 				contents: lsp.v_marked_string(node.str())
-				range: position_to_lsp_range(cfg.src, node.position())
+				range: position_to_lsp_range(node.position())
 			}
 		}
 	}
@@ -999,13 +997,11 @@ fn (mut ls Vls) hover(id int, params string) {
 	hover_params := json.decode(lsp.HoverParams, params) or { ls.panic(err.msg) }
 	uri := hover_params.text_document.uri
 	pos := hover_params.position
-	src := ls.sources[uri.str()]
 
 	mut cfg := HoverConfig{
-		src: src
 		file: ls.files[uri.str()]
 		table: ls.tables[os.dir(uri.str())]
-		offset: compute_offset(src, pos.line, pos.character)
+		offset: compute_offset(ls.sources[uri.str()], pos.line, pos.character)
 	}
 
 	// an AST walker will find a node based on the offset
@@ -1037,7 +1033,7 @@ fn (mut ls Vls) hover(id int, params string) {
 				ls.send_null(id)
 				return
 			}
-			range := position_to_lsp_range(src, node.pos.extend(node.type_pos))
+			range := position_to_lsp_range(node.pos.extend(node.type_pos))
 			typ_name := cfg.table.type_to_str(node.typ).all_after('main.')
 			hover_data = lsp.Hover{
 				contents: lsp.v_marked_string('$node.name $typ_name')
@@ -1049,7 +1045,7 @@ fn (mut ls Vls) hover(id int, params string) {
 				ls.send_null(id)
 				return
 			}
-			range := position_to_lsp_range(src, node.pos)
+			range := position_to_lsp_range(node.pos)
 			typ_name := cfg.table.type_to_str(node.expected_type).all_after('main.')
 			hover_data = lsp.Hover{
 				contents: lsp.v_marked_string('$node.name $typ_name')
@@ -1061,7 +1057,7 @@ fn (mut ls Vls) hover(id int, params string) {
 				ls.send_null(id)
 				return
 			}
-			range := position_to_lsp_range(src, node.pos.extend(node.type_pos))
+			range := position_to_lsp_range(node.pos.extend(node.type_pos))
 			mut type_name := cfg.table.type_to_str(node.typ).all_after('main.')
 			if node.is_mut {
 				type_name = type_name[1..]
@@ -1092,7 +1088,6 @@ fn (mut ls Vls) folding_range(id int, params string) {
 		ls.send_null(id)
 		return
 	}
-	src := ls.sources[uri.str()]
 	mut folding_ranges := []lsp.FoldingRange{}
 
 	// TODO: enable parsing with .toplevel_comments included
@@ -1100,7 +1095,7 @@ fn (mut ls Vls) folding_range(id int, params string) {
 		match stmt {
 			ast.ExprStmt {
 				if stmt.expr is ast.Comment {
-					range := position_to_lsp_range(src, stmt.expr.pos)
+					range := position_to_lsp_range(stmt.expr.pos)
 					folding_ranges << lsp.FoldingRange{
 						start_line: range.start.line
 						start_character: range.start.character
@@ -1111,7 +1106,7 @@ fn (mut ls Vls) folding_range(id int, params string) {
 				}
 			}
 			ast.StructDecl, ast.EnumDecl, ast.FnDecl, ast.InterfaceDecl {
-				range := position_to_lsp_range(src, stmt.pos)
+				range := position_to_lsp_range(stmt.pos)
 				folding_ranges << lsp.FoldingRange{
 					start_line: range.start.line
 					start_character: range.start.character
