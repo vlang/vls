@@ -88,7 +88,6 @@ fn (mut ls Vls) generate_symbols(file ast.File, uri lsp.DocumentUri) []lsp.Symbo
 	if file.errors.len > 0 && sym_is_cached {
 		return ls.doc_symbols[uri.str()]
 	}
-	source := ls.sources[uri.str()]
 	dir := os.dir(uri.str())
 	// NB: should never happen. just in case
 	// the requests aren't executed in order
