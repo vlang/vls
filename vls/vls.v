@@ -288,7 +288,6 @@ fn (mut ls Vls) insert_files(files []ast.File) {
 //
 fn (mut ls Vls) extract_symbol_locations(uri lsp.DocumentUri, mod string, stmts []ast.Stmt) {
 	path := uri.dir()
-	source := ls.sources[uri.str()]
 	if path in ls.symbol_locations {
 		unsafe {
 			ls.symbol_locations[path].free()
@@ -306,7 +305,27 @@ fn (mut ls Vls) extract_symbol_locations(uri lsp.DocumentUri, mod string, stmts 
 					}
 					ls.symbol_locations[path][name] = lsp.Location{
 						uri: uri
-						range: position_to_lsp_range(source, field.pos)
+						range: position_to_lsp_range(field.pos)
+					}
+				}
+			}
+			ast.StructDecl {
+				stmt_name := stmt.name
+				if stmt_name in ls.symbol_locations {
+					ls.symbol_locations.delete(stmt_name)
+				}
+				ls.symbol_locations[path][stmt_name] = lsp.Location{
+					uri: uri
+					range: position_to_lsp_range(stmt.pos)
+				}
+				for field in stmt.fields {
+					name := '${stmt_name}.${field.name}'
+					if name in ls.symbol_locations {
+						ls.symbol_locations.delete(name)
+					}
+					ls.symbol_locations[path][name] = lsp.Location{
+						uri: uri
+						range: position_to_lsp_range(field.pos)
 					}
 				}
 			}
@@ -317,17 +336,17 @@ fn (mut ls Vls) extract_symbol_locations(uri lsp.DocumentUri, mod string, stmts 
 				}
 				ls.symbol_locations[path][stmt_name] = lsp.Location{
 					uri: uri
-					range: position_to_lsp_range(source, stmt.pos)
+					range: position_to_lsp_range(stmt.pos)
 				}
 
 				for field in stmt.fields {
-					name := '${mod}.${field.name}'
+					name := '${stmt_name}.${field.name}'
 					if name in ls.symbol_locations {
 						ls.symbol_locations.delete(name)
 					}
 					ls.symbol_locations[path][name] = lsp.Location{
 						uri: uri
-						range: position_to_lsp_range(source, field.pos)
+						range: position_to_lsp_range(field.pos)
 					}
 				}
 			}
@@ -338,7 +357,7 @@ fn (mut ls Vls) extract_symbol_locations(uri lsp.DocumentUri, mod string, stmts 
 				}
 				ls.symbol_locations[path][stmt_name] = lsp.Location{
 					uri: uri
-					range: position_to_lsp_range(source, stmt.pos)
+					range: position_to_lsp_range(stmt.pos)
 				}
 			}
 			ast.InterfaceDecl {
@@ -348,7 +367,7 @@ fn (mut ls Vls) extract_symbol_locations(uri lsp.DocumentUri, mod string, stmts 
 				}
 				ls.symbol_locations[path][stmt_name] = lsp.Location{
 					uri: uri
-					range: position_to_lsp_range(source, stmt.pos)
+					range: position_to_lsp_range(stmt.pos)
 				}
 			}
 			ast.TypeDecl {
@@ -360,7 +379,7 @@ fn (mut ls Vls) extract_symbol_locations(uri lsp.DocumentUri, mod string, stmts 
 						}
 						ls.symbol_locations[path][stmt_name] = lsp.Location{
 							uri: uri
-							range: position_to_lsp_range(source, stmt.pos)
+							range: position_to_lsp_range(stmt.pos)
 						}
 					}
 				}

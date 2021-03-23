@@ -96,17 +96,36 @@ fn (mut ls Vls) process_builtin() {
 	// order to simplify the testing output in autocompletion test.
 	$if !test {
 		for file in parsed_files {
-			src := os.read_bytes(file.path) or { []byte{} }
 			for stmt in file.stmts {
-				if stmt is ast.FnDecl {
-					if !stmt.is_pub || stmt.is_method {
-						continue
+				doc_uri := lsp.document_uri_from_path(file.path)
+
+				match stmt {
+					ast.FnDecl {
+						if !stmt.is_pub || stmt.is_method {
+							continue
+						}
+						ls.builtin_symbols << stmt.name
+						ls.builtin_symbol_locations[stmt.name] = lsp.Location{
+							uri: doc_uri
+							range: position_to_lsp_range(stmt.pos)
+						}
 					}
-					ls.builtin_symbols << stmt.name
-					ls.builtin_symbol_locations[stmt.name] = lsp.Location{
-						uri: lsp.document_uri_from_path(file.path)
-						range: position_to_lsp_range(src, stmt.pos)
+					ast.StructDecl {
+						if stmt.language != .v { continue }
+
+						ls.builtin_symbol_locations[stmt.name] = lsp.Location{
+							uri: doc_uri
+							range: position_to_lsp_range(stmt.pos)
+						}
+
+						for field in stmt.fields {
+							ls.builtin_symbol_locations['${stmt.name}.${field.name}'] = lsp.Location{
+								uri: doc_uri
+								range: position_to_lsp_range(field.pos)
+							}
+						}
 					}
+					else {}
 				}
 			}
 		}
