@@ -1224,6 +1224,7 @@ fn (cfg DefinitionConfig) definition_from_expr(node ast.Expr) ?lsp.LocationLink 
 			}
 
 			entry_name := cfg.table.type_to_str(node.typ)
+
 			if entry_name in cfg.builtin_symbol_locations {
 				builtin_loc := cfg.builtin_symbol_locations[entry_name] ?
 
@@ -1236,12 +1237,15 @@ fn (cfg DefinitionConfig) definition_from_expr(node ast.Expr) ?lsp.LocationLink 
 			}
 
 			loc := cfg.symbol_locations[entry_name] ?
-			return lsp.LocationLink{
-				origin_selection_range: position_to_lsp_range(node.name_pos)
-				target_uri: loc.uri
-				target_range: loc.range
-				target_selection_range: loc.range
-			}
+			// ls.log_message(loc.str(), .info)
+			return error(loc.str())
+
+			// return lsp.LocationLink{
+			// 	origin_selection_range: position_to_lsp_range(node.name_pos)
+			// 	target_uri: loc.uri
+			// 	target_range: loc.range
+			// 	target_selection_range: loc.range
+			// }
 		}
 		// ast.EnumVal {
 		// 	if node.typ == table.Type(0) {
@@ -1318,6 +1322,7 @@ fn (mut ls Vls) definition(id int, params string) {
 		ast.Expr {
 			ls.log_message(node.type_name(), .info)
 			res := cfg.definition_from_expr(node) or {
+				ls.log_message(err.msg, .info)
 				ls.send_null(id)
 				return
 			}		
@@ -1337,6 +1342,17 @@ fn (mut ls Vls) definition(id int, params string) {
 				id: id
 				result: res
 			})
+			return
+		}
+		ast.StructInitField {
+			if !is_within_pos(cfg.offset, node.name_pos) {
+				ls.send_null(id)
+				return
+			}
+
+			inner_scope := cfg.file.scope.innermost(cfg.offset) 
+			ls.log_message(inner_scope.str(), .info)
+			ls.send_null(id)
 			return
 		}
 		else {}
