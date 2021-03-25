@@ -1,6 +1,12 @@
 module lsp
 
+import os
+
 type DocumentUri = string
+
+pub fn (du DocumentUri) dir() string {
+	return os.dir(du)
+}
 
 pub fn (du DocumentUri) path() string {
 	return if du.starts_with('file://') { du.all_after('file://') } else { '' }

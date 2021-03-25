@@ -30,6 +30,8 @@ fn (mut ls Vls) initialize(id int, params string) {
 		document_formatting_provider: Feature.formatting in ls.enabled_features
 		hover_provider: Feature.hover in ls.enabled_features
 		folding_range_provider: Feature.folding_range in ls.enabled_features
+		definition_provider: true
+		implementation_provider: Feature.implementation in ls.enabled_features
 	}
 
 	if Feature.completion in ls.enabled_features {

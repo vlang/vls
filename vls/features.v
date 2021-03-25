@@ -8,6 +8,7 @@ import v.fmt
 import v.table
 import v.parser
 import v.pref
+import v.token
 import os
 // import strings
 
@@ -1129,4 +1130,120 @@ fn (mut ls Vls) folding_range(id int, params string) {
 	unsafe {
 		folding_ranges.free()
 	}
+}
+
+fn (ls Vls) find_interfaces_of(uri lsp.DocumentUri, typ table.Type) []string {
+	tbl := ls.tables[uri.dir()]
+	type_sym := tbl.get_type_symbol(typ)
+	mut interface_names := []string{}
+
+loop_symbols: for ttype_sym in tbl.type_symbols {
+		if ttype_sym.info is table.Interface {
+			// check if the type is present in the interface typeinfo
+			for ityp in ttype_sym.info.types {
+				if ityp == typ {
+					interface_names << ttype_sym.name
+					continue loop_symbols
+				}
+			}
+
+			for imethod in ttype_sym.info.methods {
+				if method := type_sym.find_method(imethod.name) {
+					msg := tbl.is_same_method(imethod, method)
+					if msg.len > 0 {
+						continue loop_symbols
+					}
+					continue
+				}
+				continue loop_symbols
+			}
+
+			for ifield in ttype_sym.info.fields {
+				if field := tbl.find_field_with_embeds(type_sym, ifield.name) {
+					if ifield.typ != field.typ || (ifield.is_mut && !(field.is_mut || field.is_global) ) {
+						continue loop_symbols
+					}
+
+					continue
+				}
+				continue loop_symbols
+			}
+
+			interface_names << ttype_sym.name
+		}
+	}
+
+	ls.log_message(interfa.info)
+
+	return interface_names
+}
+
+fn (mut ls Vls) implementation(id int, params string) {
+	implementation_params := json.decode(lsp.TextDocumentPositionParams, params) or { ls.panic(err.msg) }
+
+	uri := implementation_params.text_document.uri
+	pos := implementation_params.position
+	source := ls.sources[uri.str()]
+	offset := compute_offset(source, pos.line, pos.character)
+	file := ls.files[uri.str()]
+	node := find_ast_by_pos(file.stmts.map(ast.Node(it)), offset) or {
+		ls.send_null(id)
+		return
+	}
+
+	// check if offset is within the type position
+	mut is_within_type_pos := false
+	if node is ast.StructField {
+		is_within_type_pos = is_within_pos(offset, node.type_pos)
+	} else if node is table.Param {
+		is_within_type_pos = is_within_pos(offset, node.type_pos)
+	}
+
+	if is_within_type_pos {
+		mut typ := table.Type(0)
+		mut type_pos := token.Position{}
+
+		match node {
+			ast.StructField {
+				typ = node.typ
+				type_pos = node.type_pos
+			}
+			table.Param {
+				typ = node.typ
+				type_pos = node.type_pos
+			}
+			else {}
+		}
+
+		if typ == table.Type(0) {
+			ls.send_null(id)
+			return
+		}
+
+		inames := ls.find_interfaces_of(uri, typ)
+		symbol_locations := ls.symbol_locations[uri.dir()].clone()
+		range := position_to_lsp_range(type_pos)
+		mut locations := []lsp.LocationLink{len: inames.len}
+		
+		for iname in inames {
+			loc := symbol_locations[iname] or {
+				continue
+			}
+
+			locations << lsp.LocationLink{
+				origin_selection_range: range
+				target_uri: loc.uri
+				target_range: loc.range
+				target_selection_range: loc.range
+			}
+		}
+
+		ls.send(jsonrpc.Response<[]lsp.LocationLink>{
+			id: id
+			result: locations
+		})
+		return
+	}
+
+	ls.send_null(id)
 }
