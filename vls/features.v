@@ -322,10 +322,70 @@ fn (mut cfg CompletionItemConfig) completion_items_from_stmt(stmt ast.Stmt) []ls
 			cfg.show_local = false
 			dir := os.dir(cfg.file.path)
 			dir_contents := os.ls(dir) or { []string{} }
-			// list all folders
-			completion_items << cfg.completion_items_from_dir(dir, dir_contents, '')
-			// list all vlib
-			// TODO: vlib must be computed at once only
+
+			// Checks the offset if it is within the import symbol section
+			// a.k.a import <module_name> { <import symbols> }
+			if is_within_pos(cfg.offset, stmt.syms_pos) {
+				already_imported := stmt.syms.map(it.name)
+
+				for _, idx in cfg.table.type_idxs {
+					type_sym := unsafe { &cfg.table.type_symbols[idx] }
+					name := type_sym.name.all_after(type_sym.mod + '.')
+					if type_sym.mod != stmt.mod || name in already_imported {
+						continue
+					}
+					match type_sym.kind {
+						.struct_ {
+							completion_items << lsp.CompletionItem{
+								label: name
+								kind: .struct_
+								insert_text: name
+							}
+						}
+						.enum_ {
+							completion_items << lsp.CompletionItem{
+								label: name
+								kind: .enum_
+								insert_text: name
+							}
+						}
+						.interface_ {
+							completion_items << lsp.CompletionItem{
+								label: name
+								kind: .interface_
+								insert_text: name
+							}
+						}
+						.sum_type, .alias {
+							completion_items << lsp.CompletionItem{
+								label: name
+								kind: .type_parameter
+								insert_text: name
+							}
+						}
+						else {
+							continue
+						}
+					}
+				}
+
+				for _, fnn in cfg.table.fns {
+					name := fnn.name.all_after(fnn.mod + '.')
+
+					if fnn.mod == stmt.mod && name !in already_imported && fnn.is_pub {
+						completion_items << lsp.CompletionItem{
+							label: name
+							kind: .function
+							insert_text: name
+						}
+					}
+				}
+			} else {
+				// list all folders
+				completion_items << cfg.completion_items_from_dir(dir, dir_contents, '')
+				// list all vlib
+				// TODO: vlib must be computed at once only
+			}
 		}
 		ast.Module {
 			completion_items << cfg.suggest_mod_names()
@@ -484,10 +544,11 @@ fn (mut cfg CompletionItemConfig) completion_items_from_struct_init_field(field 
 fn (mut _ CompletionItemConfig) completion_items_from_fn(fnn table.Fn, is_method bool) []lsp.CompletionItem {
 	mut completion_items := []lsp.CompletionItem{}
 
-	fn_name := fnn.name.all_after(fnn.mod + '.')
-	if fn_name == 'main' {
+	if fnn.is_main {
 		return completion_items
 	}
+
+	fn_name := fnn.name.all_after(fnn.mod + '.')
 	// This will create a snippet that will automatically
 	// create a call expression based on the information of the function
 	mut insert_text := fn_name
