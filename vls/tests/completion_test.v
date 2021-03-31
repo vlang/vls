@@ -34,6 +34,10 @@ const completion_inputs = map{
 		context: lsp.CompletionContext{.trigger_character, '.'}
 		position: lsp.Position{13, 6}
 	}
+	'import_symbols.vv':                    lsp.CompletionParams{
+		context: lsp.CompletionContext{.trigger_character, ' '}
+		position: lsp.Position{2, 13}
+	}
 	'import.vv':                            lsp.CompletionParams{
 		context: lsp.CompletionContext{.trigger_character, ' '}
 		position: lsp.Position{2, 7}
@@ -156,6 +160,33 @@ const completion_results = map{
 			kind: .method
 			insert_text: 'lol()'
 			insert_text_format: .snippet
+		},
+	]
+	'import_symbols.vv':                    [
+		lsp.CompletionItem{
+			label: 'DB'
+			kind: .struct_
+			insert_text: 'DB'
+		},
+		lsp.CompletionItem{
+			label: 'Row'
+			kind: .struct_
+			insert_text: 'Row'
+		},
+		lsp.CompletionItem{
+			label: 'C.PGResult'
+			kind: .struct_
+			insert_text: 'C.PGResult'
+		},
+		lsp.CompletionItem{
+			label: 'Config'
+			kind: .struct_
+			insert_text: 'Config'
+		},
+		lsp.CompletionItem{
+			label: 'connect'
+			kind: .function
+			insert_text: 'connect'
 		},
 	]
 	'import.vv':                            [
