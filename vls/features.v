@@ -359,8 +359,7 @@ fn (mut cfg CompletionItemConfig) completion_items_from_table(mod_name string, s
 			if type_sym.mod != mod_name {
 				continue
 			}
-			completion_items << cfg.completion_items_from_type_info(name, type_sym.info,
-				false)
+			completion_items << cfg.completion_items_from_type_sym(name, type_sym, false)
 		}
 	}
 	return completion_items
@@ -398,15 +397,14 @@ fn (mut cfg CompletionItemConfig) completion_items_from_expr(expr ast.Expr) []ls
 				}
 
 				// Include the list of available struct fields based on the type info
-				completion_items << cfg.completion_items_from_type_info('', type_sym.info,
-					true)
+				completion_items << cfg.completion_items_from_type_sym('', type_sym, true)
 
 				// If the selected type is an array or map type, it should
 				// include the fields and methods of map/array type.
 				if type_sym.kind == .array || type_sym.kind == .map {
 					base_symbol_name := if type_sym.kind == .array { 'array' } else { 'map' }
 					if base_type_sym := cfg.table.find_type(base_symbol_name) {
-						completion_items << cfg.completion_items_from_type_info('', base_type_sym.info,
+						completion_items << cfg.completion_items_from_type_sym('', base_type_sym,
 							true)
 					}
 				}
@@ -475,7 +473,7 @@ fn (mut cfg CompletionItemConfig) completion_items_from_struct_init_field(field 
 	cfg.show_local = true
 	cfg.show_global = false
 	field_type_sym := cfg.table.get_type_symbol(field.expected_type)
-	completion_items << cfg.completion_items_from_type_info('', field_type_sym.info, field_type_sym.info is table.Enum)
+	completion_items << cfg.completion_items_from_type_sym('', field_type_sym, field_type_sym.info is table.Enum)
 	cfg.filter_type = field.expected_type
 
 	return completion_items
@@ -530,13 +528,17 @@ fn (mut _ CompletionItemConfig) completion_items_from_fn(fnn table.Fn, is_method
 	return completion_items
 }
 
-// completion_items_from_type_info returns the list of items extracted from the type information.
-fn (mut _ CompletionItemConfig) completion_items_from_type_info(name string, type_info table.TypeInfo, fields_only bool) []lsp.CompletionItem {
+// completion_items_from_type_sym returns the list of items extracted from the type symbol.
+fn (mut cfg CompletionItemConfig) completion_items_from_type_sym(name string, type_sym table.TypeSymbol, fields_only bool) []lsp.CompletionItem {
+	type_info := type_sym.info
 	mut completion_items := []lsp.CompletionItem{}
 	match type_info {
 		table.Struct {
 			if fields_only {
 				for field in type_info.fields {
+					if !field.is_pub && cfg.file.mod.name != type_sym.mod {
+						continue
+					}
 					completion_items << lsp.CompletionItem{
 						label: field.name
 						kind: .field
@@ -547,7 +549,8 @@ fn (mut _ CompletionItemConfig) completion_items_from_type_info(name string, typ
 				mut insert_text := '$name{\n'
 				mut i := type_info.fields.len - 1
 				for field in type_info.fields {
-					if field.has_default_expr {
+					if (!field.is_pub && cfg.file.mod.name != type_sym.mod)
+						|| field.has_default_expr {
 						continue
 					}
 					insert_text += '\t$field.name: \$$i\n'
