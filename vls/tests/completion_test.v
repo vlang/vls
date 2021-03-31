@@ -38,6 +38,10 @@ const completion_inputs = map{
 		context: lsp.CompletionContext{.invoked, ''}
 		position: lsp.Position{0, 7}
 	}
+	'incomplete_nested_selector.vv':        lsp.CompletionParams{
+		context: lsp.CompletionContext{.trigger_character, '.'}
+		position: lsp.Position{14, 10}
+	}
 	'incomplete_selector.vv':               lsp.CompletionParams{
 		context: lsp.CompletionContext{.trigger_character, '.'}
 		position: lsp.Position{12, 6}
@@ -164,6 +168,19 @@ const completion_results = map{
 			label: 'module completion'
 			kind: .variable
 			insert_text: 'module completion'
+		},
+	]
+	'incomplete_nested_selector.vv':        [
+		lsp.CompletionItem{
+			label: 'name'
+			kind: .field
+			insert_text: 'name'
+		},
+		lsp.CompletionItem{
+			label: 'theres_a_method'
+			kind: .method
+			insert_text: 'theres_a_method()'
+			insert_text_format: .snippet
 		},
 	]
 	'incomplete_selector.vv':               [
