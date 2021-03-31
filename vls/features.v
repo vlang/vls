@@ -901,6 +901,9 @@ fn (mut cfg HoverConfig) hover_from_stmt(node ast.Stmt) ?lsp.Hover {
 			// return and trigger null result for now
 			return none
 		}
+		ast.NodeError {
+			return none
+		}
 		ast.AssignStmt {
 			// transfer this code to v.ast module
 			mut left_pos := node.left[0].position()
@@ -982,6 +985,9 @@ fn (mut cfg HoverConfig) hover_from_expr(node ast.Expr) ?lsp.Hover {
 				}
 			}
 			return cfg.hover_from_expr(node.expr)
+		}
+		ast.NodeError {
+			return none
 		}
 		else {
 			return lsp.Hover{
