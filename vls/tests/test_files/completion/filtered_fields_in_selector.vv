@@ -1,0 +1,8 @@
+module main
+
+import log
+
+fn main() {
+  logger := log.Log{}
+  logger.
+}
