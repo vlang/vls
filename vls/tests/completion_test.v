@@ -22,6 +22,10 @@ const completion_inputs = map{
 		context: lsp.CompletionContext{.trigger_character, ' '}
 		position: lsp.Position{14, 20}
 	}
+	'filtered_fields_in_selector.vv':       lsp.CompletionParams{
+		context: lsp.CompletionContext{.trigger_character, '.'}
+		position: lsp.Position{6, 9}
+	}
 	'filtered_methods_in_immutable_var.vv': lsp.CompletionParams{
 		context: lsp.CompletionContext{.trigger_character, '.'}
 		position: lsp.Position{13, 6}
@@ -117,6 +121,19 @@ const completion_results = map{
 			label: '.dalmatian'
 			kind: .enum_member
 			insert_text: '.dalmatian'
+		},
+	]
+	'filtered_fields_in_selector.vv':       [
+		lsp.CompletionItem{
+			label: 'output_file_name'
+			kind: .field
+			insert_text: 'output_file_name'
+		},
+		lsp.CompletionItem{
+			label: 'log_cli'
+			kind: .method
+			insert_text: 'log_cli(\${1:s}, \${2:level})'
+			insert_text_format: .snippet
 		},
 	]
 	'filtered_methods_in_immutable_var.vv': [
