@@ -316,6 +316,8 @@ fn (mut cfg CompletionItemConfig) completion_items_from_stmt(stmt ast.Stmt) []ls
 			}
 		}
 		ast.Import {
+			cfg.show_global = false
+			cfg.show_local = false
 			dir := os.dir(cfg.file.path)
 			dir_contents := os.ls(dir) or { []string{} }
 			// list all folders
