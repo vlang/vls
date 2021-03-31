@@ -390,6 +390,7 @@ fn (mut cfg CompletionItemConfig) completion_items_from_expr(expr ast.Expr) []ls
 				}
 			} else if expr.expr_type != 0 {
 				type_sym := cfg.table.get_type_symbol(expr.expr_type)
+				mut is_mut := false
 
 				// Include the list of available struct fields based on the type info
 				completion_items << cfg.completion_items_from_type_info('', type_sym.info,
@@ -404,8 +405,17 @@ fn (mut cfg CompletionItemConfig) completion_items_from_expr(expr ast.Expr) []ls
 							true)
 					}
 				}
+				root := expr.root_ident()
+				if root.obj is ast.Var {
+					is_mut = root.obj.is_mut
+				}
 				// Include all the type methods
 				for m in type_sym.methods {
+					// If SelectorExpr is immutable and the method is mutable,
+					// it should be excluded.
+					if !is_mut && m.params[0].is_mut {
+						continue
+					}
 					completion_items << cfg.completion_items_from_fn(m, true)
 				}
 			}
