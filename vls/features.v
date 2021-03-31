@@ -429,12 +429,7 @@ fn (mut cfg CompletionItemConfig) completion_items_from_expr(expr ast.Expr) []ls
 				ast.Node{}
 			}
 			if field_node is ast.StructInitField {
-				// NB: enable local results only if the node is a field
-				cfg.show_local = true
-				field_type_sym := cfg.table.get_type_symbol(field_node.expected_type)
-				completion_items << cfg.completion_items_from_type_info('', field_type_sym.info,
-					field_type_sym.info is table.Enum)
-				cfg.filter_type = field_node.expected_type
+				completion_items << cfg.completion_items_from_struct_init_field(field_node)
 			} else {
 				// if structinit is empty or not within the field position,
 				// it must include the list of missing fields instead
@@ -456,6 +451,21 @@ fn (mut cfg CompletionItemConfig) completion_items_from_expr(expr ast.Expr) []ls
 		}
 		else {}
 	}
+	return completion_items
+}
+
+// completion_items_from_struct_init_field returns the list of items extracted from the ast.StructInitField information
+// TODO: move it to a single method once other nodes are supported.
+fn (mut cfg CompletionItemConfig) completion_items_from_struct_init_field(field ast.StructInitField) []lsp.CompletionItem {
+	mut completion_items := []lsp.CompletionItem{}
+
+	// NB: enable local results only if the node is a field
+	cfg.show_local = true
+	cfg.show_global = false
+	field_type_sym := cfg.table.get_type_symbol(field.expected_type)
+	completion_items << cfg.completion_items_from_type_info('', field_type_sym.info, field_type_sym.info is table.Enum)
+	cfg.filter_type = field.expected_type
+
 	return completion_items
 }
 
@@ -685,6 +695,9 @@ fn (mut ls Vls) completion(id int, params string) {
 		// 	cfg.show_local = false
 		// 	cfg.offset -= 2
 		// }
+		if src[cfg.offset - 1] == ` ` {
+			cfg.offset--
+		}
 
 		// Once the offset has been finalized it will then search for the AST node and
 		// extract it's data using the corresponding methods depending on the node type.
@@ -695,6 +708,9 @@ fn (mut ls Vls) completion(id int, params string) {
 			}
 			ast.Expr {
 				completion_items << cfg.completion_items_from_expr(node)
+			}
+			ast.StructInitField {
+				completion_items << cfg.completion_items_from_struct_init_field(node)
 			}
 			else {}
 		}
