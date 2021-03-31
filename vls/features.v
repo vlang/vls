@@ -296,6 +296,7 @@ mut:
 	fields_only         bool       // for displaying only the struct/enum fields
 	modules_aliases     []string   // for displaying module symbols or module list
 	imports_list        []string   // for completion_items_from_dir and import symbols list
+	is_mut              bool       // filters results based on the object's mutability state.
 }
 
 // completion_items_from_stmt returns a list of results from the extracted Stmt node info.
@@ -388,15 +389,19 @@ fn (mut cfg CompletionItemConfig) completion_items_from_expr(expr ast.Expr) []ls
 						completion_items << cfg.completion_items_from_fn(fnn, false)
 					}
 				}
-			} else if expr.expr_type != 0 {
-				type_sym := cfg.table.get_type_symbol(expr.expr_type)
-				mut is_mut := false
+			} else if expr.expr_type != 0 || expr.typ != 0 {
+				selected_typ := if expr.typ != 0 { expr.typ } else { expr.expr_type }
+				type_sym := cfg.table.get_type_symbol(selected_typ)
+				root := expr.root_ident()
+				if root.obj is ast.Var {
+					cfg.is_mut = root.obj.is_mut
+				}
 
 				// Include the list of available struct fields based on the type info
 				completion_items << cfg.completion_items_from_type_info('', type_sym.info,
 					true)
 
-				// If the expr_type is an array or map type, it should
+				// If the selected type is an array or map type, it should
 				// include the fields and methods of map/array type.
 				if type_sym.kind == .array || type_sym.kind == .map {
 					base_symbol_name := if type_sym.kind == .array { 'array' } else { 'map' }
@@ -405,15 +410,11 @@ fn (mut cfg CompletionItemConfig) completion_items_from_expr(expr ast.Expr) []ls
 							true)
 					}
 				}
-				root := expr.root_ident()
-				if root.obj is ast.Var {
-					is_mut = root.obj.is_mut
-				}
 				// Include all the type methods
 				for m in type_sym.methods {
 					// If SelectorExpr is immutable and the method is mutable,
 					// it should be excluded.
-					if !is_mut && m.params[0].is_mut {
+					if !cfg.is_mut && m.params[0].is_mut {
 						continue
 					}
 					completion_items << cfg.completion_items_from_fn(m, true)
