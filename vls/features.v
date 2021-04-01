@@ -177,7 +177,7 @@ fn (mut ls Vls) signature_help(id int, params string) {
 		return
 	}
 
-	mut expr := ast.Expr{}
+	mut expr := ast.empty_expr()
 	if node is ast.Stmt {
 		// if the selected node is an ExprStmt,
 		// the expr content of the ExprStmt node
@@ -1336,42 +1336,39 @@ fn (cfg DefinitionConfig) definition_from_expr(node ast.Expr) ?lsp.LocationLink 
 			}
 
 			loc := cfg.symbol_locations[entry_name] ?
-			// ls.log_message(loc.str(), .info)
-			return error(loc.str())
-
-			// return lsp.LocationLink{
-			// 	origin_selection_range: position_to_lsp_range(node.name_pos)
-			// 	target_uri: loc.uri
-			// 	target_range: loc.range
-			// 	target_selection_range: loc.range
-			// }
+			return lsp.LocationLink{
+				origin_selection_range: position_to_lsp_range(node.name_pos)
+				target_uri: loc.uri
+				target_range: loc.range
+				target_selection_range: loc.range
+			}
 		}
-		// ast.EnumVal {
-		// 	if node.typ == table.Type(0) {
-		// 		return none
-		// 	}
+		ast.EnumVal {
+			// if node.typ == table.Type(0) {
+			// 	return none
+			// }
 
-		// 	enum_type_name := cfg.table.type_to_str(node.typ)
-		// 	entry_name := '${enum_type_name}.${node.val}'
-		// 	if entry_name in cfg.builtin_symbol_locations {
-		// 		builtin_loc := cfg.builtin_symbol_locations[entry_name] ?
+			enum_type_name := cfg.table.type_to_str(node.typ)
+			entry_name := '${enum_type_name}.${node.val}'
+			if entry_name in cfg.builtin_symbol_locations {
+				builtin_loc := cfg.builtin_symbol_locations[entry_name] ?
 
-		// 		return lsp.LocationLink{
-		// 			origin_selection_range: position_to_lsp_range(node.pos)
-		// 			target_uri: builtin_loc.uri
-		// 			target_range: builtin_loc.range
-		// 			target_selection_range: builtin_loc.range
-		// 		}
-		// 	}
+				return lsp.LocationLink{
+					origin_selection_range: position_to_lsp_range(node.pos)
+					target_uri: builtin_loc.uri
+					target_range: builtin_loc.range
+					target_selection_range: builtin_loc.range
+				}
+			}
 
-		// 	loc := cfg.symbol_locations[entry_name] ?
-		// 	return lsp.LocationLink{
-		// 		origin_selection_range: position_to_lsp_range(node.pos)
-		// 		target_uri: loc.uri
-		// 		target_range: loc.range
-		// 		target_selection_range: loc.range
-		// 	}
-		// }
+			loc := cfg.symbol_locations[entry_name] ?
+			return lsp.LocationLink{
+				origin_selection_range: position_to_lsp_range(node.pos)
+				target_uri: loc.uri
+				target_range: loc.range
+				target_selection_range: loc.range
+			}
+		}
 		else {}
 	}
 
@@ -1415,11 +1412,12 @@ fn (mut ls Vls) definition(id int, params string) {
 	}
 
 	match mut node {
-		ast.Stmt {
-			ls.log_message(node.str(), .info)
-		} 
+		ast.Stmt {} 
 		ast.Expr {
 			ls.log_message(node.type_name(), .info)
+				// ls.log_message('test!', .info)
+			// if node is ast.EnumVal {
+			// }
 			res := cfg.definition_from_expr(node) or {
 				ls.log_message(err.msg, .info)
 				ls.send_null(id)
@@ -1432,7 +1430,7 @@ fn (mut ls Vls) definition(id int, params string) {
 			return	
 		}
 		ast.CallArg {
-			ls.log_message(node.expr.type_name(), .info)
+			// ls.log_message(node.expr.type_name(), .info)
 			res := cfg.definition_from_expr(node.expr) or {
 				ls.send_null(id)
 				return
@@ -1444,14 +1442,42 @@ fn (mut ls Vls) definition(id int, params string) {
 			return
 		}
 		ast.StructInitField {
-			if !is_within_pos(cfg.offset, node.name_pos) {
+			if !is_within_pos(cfg.offset, node.name_pos) || node.parent_type == table.Type(0) {
 				ls.send_null(id)
 				return
 			}
 
-			inner_scope := cfg.file.scope.innermost(cfg.offset) 
-			ls.log_message(inner_scope.str(), .info)
-			ls.send_null(id)
+			struct_type_name := cfg.table.type_to_str(node.parent_type)
+			entry_name := '${struct_type_name}.${node.name}'
+			if entry_name in cfg.builtin_symbol_locations {
+				builtin_loc := cfg.builtin_symbol_locations[entry_name] or {
+					ls.send_null(id)
+					return
+				}
+
+				ls.send(jsonrpc.Response<lsp.LocationLink>{
+				id: id
+				result:lsp.LocationLink{
+					origin_selection_range: position_to_lsp_range(node.pos)
+					target_uri: builtin_loc.uri
+					target_range: builtin_loc.range
+					target_selection_range: builtin_loc.range
+				}})
+			}
+
+			loc := cfg.symbol_locations[entry_name] or {
+				ls.send_null(id)
+				return
+			}
+
+			ls.send(jsonrpc.Response<lsp.LocationLink>{
+				id: id
+				result: lsp.LocationLink{
+				origin_selection_range: position_to_lsp_range(node.name_pos)
+				target_uri: loc.uri
+				target_range: loc.range
+				target_selection_range: loc.range
+			}})
 			return
 		}
 		else {}
