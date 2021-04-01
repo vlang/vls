@@ -5,7 +5,6 @@ import json
 import jsonrpc
 import v.ast
 import v.fmt
-import v.table
 import v.parser
 import v.pref
 import os
@@ -20,7 +19,7 @@ fn (mut ls Vls) formatting(id int, params string) {
 	mut prefs := pref.new_preferences()
 	prefs.output_mode = .silent
 	prefs.is_fmt = true
-	table := table.new_table()
+	table := ast.new_table()
 	file_ast := parser.parse_text(source, path, table, .parse_comments, prefs, &ast.Scope{
 		parent: 0
 	})
@@ -222,7 +221,7 @@ fn (mut ls Vls) signature_help(id int, params string) {
 		mut label := 'fn '
 		mut return_type := ''
 		mut param_infos := []lsp.ParameterInformation{}
-		mut params_data := []table.Param{}
+		mut params_data := []ast.Param{}
 		mut skip_receiver := false
 
 		if call_expr.is_method {
@@ -231,14 +230,14 @@ fn (mut ls Vls) signature_help(id int, params string) {
 				skip_receiver = true
 				label += '($left_type_sym.name) ${method.name}('
 
-				if method.return_type != table.Type(0) {
+				if method.return_type != ast.Type(0) {
 					return_type = tbl.type_to_str(method.return_type)
 				}
 
 				params_data << method.params
 			}
 		} else if fn_data := tbl.find_fn(call_expr.name) {
-			if fn_data.return_type != table.Type(0) {
+			if fn_data.return_type != ast.Type(0) {
 				return_type = tbl.type_to_str(fn_data.return_type)
 			}
 
@@ -288,11 +287,11 @@ struct CompletionItemConfig {
 mut:
 	file                ast.File
 	offset              int // position of the cursor. used for finding the AST node
-	table               &table.Table
+	table               &ast.Table
 	show_global         bool = true // for displaying global (project) symbols
 	show_only_global_fn bool       // for displaying only the functions of the project
 	show_local          bool       = true // for displaying local variables
-	filter_type         table.Type = table.Type(0) // filters results by type
+	filter_type         ast.Type = ast.Type(0) // filters results by type
 	fields_only         bool       // for displaying only the struct/enum fields
 	modules_aliases     []string   // for displaying module symbols or module list
 	imports_list        []string   // for completion_items_from_dir and import symbols list
@@ -394,7 +393,7 @@ fn (mut cfg CompletionItemConfig) completion_items_from_stmt(stmt ast.Stmt) []ls
 	return completion_items
 }
 
-// completion_items_from_table returns a list of results extracted from the type symbols of the table.
+// completion_items_from_table returns a list of results extracted from the type symbols of the ast.
 fn (mut cfg CompletionItemConfig) completion_items_from_table(mod_name string, symbols ...string) []lsp.CompletionItem {
 	// NB: symbols of the said module does not show the full list
 	// unless by pressing cmd/ctrl+space or by pressing escape key
@@ -505,7 +504,7 @@ fn (mut cfg CompletionItemConfig) completion_items_from_expr(expr ast.Expr) []ls
 				// it must include the list of missing fields instead
 				defined_fields := expr.fields.map(it.name)
 				struct_type_sym := cfg.table.get_type_symbol(expr.typ)
-				struct_type_info := struct_type_sym.info as table.Struct
+				struct_type_info := struct_type_sym.info as ast.Struct
 				for field in struct_type_info.fields {
 					if field.name in defined_fields {
 						continue
@@ -533,14 +532,14 @@ fn (mut cfg CompletionItemConfig) completion_items_from_struct_init_field(field 
 	cfg.show_local = true
 	cfg.show_global = false
 	field_type_sym := cfg.table.get_type_symbol(field.expected_type)
-	completion_items << cfg.completion_items_from_type_sym('', field_type_sym, field_type_sym.info is table.Enum)
+	completion_items << cfg.completion_items_from_type_sym('', field_type_sym, field_type_sym.info is ast.Enum)
 	cfg.filter_type = field.expected_type
 
 	return completion_items
 }
 
-// completion_items_from_fn returns the list of items extracted from the table.Fn information
-fn (mut _ CompletionItemConfig) completion_items_from_fn(fnn table.Fn, is_method bool) []lsp.CompletionItem {
+// completion_items_from_fn returns the list of items extracted from the ast.Fn information
+fn (mut _ CompletionItemConfig) completion_items_from_fn(fnn ast.Fn, is_method bool) []lsp.CompletionItem {
 	mut completion_items := []lsp.CompletionItem{}
 
 	if fnn.is_main {
@@ -590,11 +589,11 @@ fn (mut _ CompletionItemConfig) completion_items_from_fn(fnn table.Fn, is_method
 }
 
 // completion_items_from_type_sym returns the list of items extracted from the type symbol.
-fn (mut cfg CompletionItemConfig) completion_items_from_type_sym(name string, type_sym table.TypeSymbol, fields_only bool) []lsp.CompletionItem {
+fn (mut cfg CompletionItemConfig) completion_items_from_type_sym(name string, type_sym ast.TypeSymbol, fields_only bool) []lsp.CompletionItem {
 	type_info := type_sym.info
 	mut completion_items := []lsp.CompletionItem{}
 	match type_info {
-		table.Struct {
+		ast.Struct {
 			if fields_only {
 				for field in type_info.fields {
 					if !field.is_pub && cfg.file.mod.name != type_sym.mod {
@@ -626,7 +625,7 @@ fn (mut cfg CompletionItemConfig) completion_items_from_type_sym(name string, ty
 				}
 			}
 		}
-		table.Enum {
+		ast.Enum {
 			for val in type_info.vals {
 				// Use short enum syntax when reassigning, within
 				// struct fields, and etc.
@@ -638,7 +637,7 @@ fn (mut cfg CompletionItemConfig) completion_items_from_type_sym(name string, ty
 				}
 			}
 		}
-		table.Alias, table.SumType, table.FnType, table.Interface {
+		ast.Alias, ast.SumType, ast.FnType, ast.Interface {
 			completion_items << lsp.CompletionItem{
 				label: name
 				kind: .type_parameter
@@ -803,7 +802,7 @@ fn (mut ls Vls) completion(id int, params string) {
 		// Imported modules. They will be shown to the user if there is no given
 		// type for filtering the results. Invalid imports are excluded.
 		for imp in file.imports {
-			if imp.syms.len == 0 && (cfg.filter_type == table.Type(0)
+			if imp.syms.len == 0 && (cfg.filter_type == ast.Type(0)
 				|| imp.mod !in ls.invalid_imports[file_uri.str()]) {
 				completion_items << lsp.CompletionItem{
 					label: imp.alias
@@ -821,7 +820,7 @@ fn (mut ls Vls) completion(id int, params string) {
 				mut name := ''
 				match obj {
 					ast.ConstField, ast.Var {
-						if cfg.filter_type != table.Type(0) && obj.typ != cfg.filter_type {
+						if cfg.filter_type != ast.Type(0) && obj.typ != cfg.filter_type {
 							continue
 						}
 						name = obj.name
@@ -887,7 +886,7 @@ struct HoverConfig {
 mut:
 	file   ast.File
 	offset int // position of the cursor. used for finding the AST node
-	table  &table.Table
+	table  &ast.Table
 }
 
 // hover_from_stmt returns the hover data for a specific ast.Stmt.
@@ -902,7 +901,7 @@ fn (mut cfg HoverConfig) hover_from_stmt(node ast.Stmt) ?lsp.Hover {
 			}
 		}
 		ast.FnDecl {
-			if node.return_type == table.Type(0) {
+			if node.return_type == ast.Type(0) {
 				return none
 			}
 			name := node.name.all_after(cfg.file.mod.short_name + '.')
@@ -958,14 +957,14 @@ fn (mut cfg HoverConfig) hover_from_stmt(node ast.Stmt) ?lsp.Hover {
 
 			match node {
 				ast.AliasTypeDecl {
-					if node.parent_type == table.Type(0) {
+					if node.parent_type == ast.Type(0) {
 						return none
 					}
 					name = node.name
 					branches = cfg.table.type_to_str(node.parent_type)
 				}
 				ast.FnTypeDecl {
-					if node.typ == table.Type(0) {
+					if node.typ == ast.Type(0) {
 						return none
 					}
 					name = node.name.all_after(cfg.file.mod.short_name + '.')
@@ -974,7 +973,7 @@ fn (mut cfg HoverConfig) hover_from_stmt(node ast.Stmt) ?lsp.Hover {
 				ast.SumTypeDecl {
 					name = node.name
 					for i, var in node.variants {
-						if var.typ == table.Type(0) {
+						if var.typ == ast.Type(0) {
 							return none
 						}
 						branches += cfg.table.type_to_str(var.typ)
@@ -1022,7 +1021,7 @@ fn (mut cfg HoverConfig) hover_from_expr(node ast.Expr) ?lsp.Hover {
 		ast.Ident {
 			obj := cfg.file.scope.innermost(cfg.offset)
 			obj_node := obj.find_var(node.name) ?
-			if obj_node.typ == table.Type(0) {
+			if obj_node.typ == ast.Type(0) {
 				return none
 			}
 			range := position_to_lsp_range(node.pos)
@@ -1038,7 +1037,7 @@ fn (mut cfg HoverConfig) hover_from_expr(node ast.Expr) ?lsp.Hover {
 		ast.CallExpr {
 			mut signature := ''
 			if node.is_method || node.is_field {
-				if node.left_type == table.Type(0) {
+				if node.left_type == ast.Type(0) {
 					return none
 				}
 				parent_type_name := cfg.table.type_to_str(node.left_type).all_after('main.')
@@ -1060,12 +1059,12 @@ fn (mut cfg HoverConfig) hover_from_expr(node ast.Expr) ?lsp.Hover {
 		}
 		ast.SelectorExpr {
 			if node.expr is ast.Ident || is_within_pos(cfg.offset, node.pos) {
-				if node.typ == table.Type(0) {
+				if node.typ == ast.Type(0) {
 					return none
 				}
 				range := position_to_lsp_range(node.pos)
 				typ_name := cfg.table.type_to_str(node.typ).all_after('main.')
-				parent_name := if node.expr_type != table.Type(0) {
+				parent_name := if node.expr_type != ast.Type(0) {
 					cfg.table.type_to_str(node.expr_type).all_after('main.') + '.'
 				} else {
 					''
@@ -1127,7 +1126,7 @@ fn (mut ls Vls) hover(id int, params string) {
 			}
 		}
 		ast.StructField {
-			if node.typ == table.Type(0) {
+			if node.typ == ast.Type(0) {
 				ls.send_null(id)
 				return
 			}
@@ -1139,7 +1138,7 @@ fn (mut ls Vls) hover(id int, params string) {
 			}
 		}
 		ast.StructInitField {
-			if node.expected_type == table.Type(0) {
+			if node.expected_type == ast.Type(0) {
 				ls.send_null(id)
 				return
 			}
@@ -1150,8 +1149,8 @@ fn (mut ls Vls) hover(id int, params string) {
 				range: range
 			}
 		}
-		table.Param {
-			if node.typ == table.Type(0) {
+		ast.Param {
+			if node.typ == ast.Type(0) {
 				ls.send_null(id)
 				return
 			}

@@ -1,6 +1,5 @@
 module vls
 
-import v.table
 import v.ast
 import v.pref
 import json
@@ -62,7 +61,7 @@ mut:
 	// NB: a base table is required since this is where we
 	// are gonna store the information for the builtin types
 	// which are only parsed once.
-	base_table &table.Table
+	base_table &ast.Table
 	status     ServerStatus = .off
 	// TODO: change map key to DocumentUri
 	// files  map[DocumentUri]ast.File
@@ -72,13 +71,13 @@ mut:
 	// NB: a separate table is required for each folder in
 	// order to do functions such as typ_to_string or when
 	// some of the features needed additional information
-	// that is mostly stored into the table.
+	// that is mostly stored into the ast.
 	//
 	// A single table is not feasible since files are always
 	// changing and there can be instances that a change might
 	// break another module/project data.
-	// tables  map[DocumentUri]&table.Table
-	tables           map[string]&table.Table
+	// tables  map[DocumentUri]&ast.Table
+	tables           map[string]&ast.Table
 	root_uri         lsp.DocumentUri
 	invalid_imports  map[string][]string // where it stores a list of invalid imports
 	doc_symbols      map[string][]lsp.SymbolInformation // doc_symbols is used for caching document symbols
@@ -94,7 +93,7 @@ pub mut:
 }
 
 pub fn new(io ReceiveSender) Vls {
-	mut tbl := table.new_table()
+	mut tbl := ast.new_table()
 	tbl.is_fmt = false
 
 	return Vls{
@@ -301,8 +300,8 @@ fn (mut ls Vls) insert_files(files []ast.File) {
 }
 
 // new_table returns a new table based on the existing data of base_table
-fn (ls Vls) new_table() &table.Table {
-	mut tbl := table.new_table()
+fn (ls Vls) new_table() &ast.Table {
+	mut tbl := ast.new_table()
 	tbl.type_symbols = ls.base_table.type_symbols.clone()
 	tbl.type_idxs = ls.base_table.type_idxs.clone()
 	tbl.fns = ls.base_table.fns.clone()
