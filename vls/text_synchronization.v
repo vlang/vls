@@ -3,7 +3,6 @@ module vls
 import json
 import lsp
 import v.parser
-import v.table
 import v.pref
 import v.ast
 import v.errors
@@ -103,7 +102,7 @@ fn (mut ls Vls) process_file(source string, uri lsp.DocumentUri) {
 
 // NOTE: once builder.find_module_path is extracted, simplify parse_imports
 [manualfree]
-fn (mut ls Vls) parse_imports(parsed_files []ast.File, table &table.Table, pref &pref.Preferences, scope &ast.Scope) ([]ast.File, []errors.Error) {
+fn (mut ls Vls) parse_imports(parsed_files []ast.File, table &ast.Table, pref &pref.Preferences, scope &ast.Scope) ([]ast.File, []errors.Error) {
 	mut newly_parsed_files := []ast.File{}
 	mut errs := []errors.Error{}
 	mut done_imports := parsed_files.map(it.mod.name)
