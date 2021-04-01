@@ -6,50 +6,70 @@ import os
 
 // NOTE: skip module_symbols_selector for now, see note in text_synchronization.v#parse_imports 
 const completion_inputs = map{
-	'assign.vv':                  lsp.CompletionParams{
+	'assign.vv':                            lsp.CompletionParams{
 		context: lsp.CompletionContext{.trigger_character, ' '}
 		position: lsp.Position{6, 7}
 	}
-	'blank.vv':                   lsp.CompletionParams{
+	'blank.vv':                             lsp.CompletionParams{
 		context: lsp.CompletionContext{.invoked, ''}
 		position: lsp.Position{0, 0}
 	}
-	'call_args.vv':               lsp.CompletionParams{
+	'call_args.vv':                         lsp.CompletionParams{
 		context: lsp.CompletionContext{.invoked, ''}
 		position: lsp.Position{10, 14}
 	}
-	'enum_val_in_struct.vv':      lsp.CompletionParams{
+	'enum_val_in_struct.vv':                lsp.CompletionParams{
 		context: lsp.CompletionContext{.trigger_character, ' '}
 		position: lsp.Position{14, 20}
 	}
-	'import.vv':                  lsp.CompletionParams{
+	'filtered_fields_in_selector.vv':       lsp.CompletionParams{
+		context: lsp.CompletionContext{.trigger_character, '.'}
+		position: lsp.Position{6, 9}
+	}
+	'filtered_methods_in_immutable_var.vv': lsp.CompletionParams{
+		context: lsp.CompletionContext{.trigger_character, '.'}
+		position: lsp.Position{13, 6}
+	}
+	'filtered_methods_in_mutable_var.vv':   lsp.CompletionParams{
+		context: lsp.CompletionContext{.trigger_character, '.'}
+		position: lsp.Position{13, 6}
+	}
+	'import_symbols.vv':                    lsp.CompletionParams{
+		context: lsp.CompletionContext{.trigger_character, ' '}
+		position: lsp.Position{2, 13}
+	}
+	'import.vv':                            lsp.CompletionParams{
 		context: lsp.CompletionContext{.trigger_character, ' '}
 		position: lsp.Position{2, 7}
 	}
-	'incomplete_module.vv':       lsp.CompletionParams{
+	'incomplete_module.vv':                 lsp.CompletionParams{
 		context: lsp.CompletionContext{.invoked, ''}
 		position: lsp.Position{0, 7}
 	}
-	'incomplete_selector.vv':     lsp.CompletionParams{
+	'incomplete_nested_selector.vv':        lsp.CompletionParams{
+		context: lsp.CompletionContext{.trigger_character, '.'}
+		position: lsp.Position{14, 10}
+	}
+	'incomplete_selector.vv':               lsp.CompletionParams{
 		context: lsp.CompletionContext{.trigger_character, '.'}
 		position: lsp.Position{12, 6}
 	}
-	'local_results.vv':           lsp.CompletionParams{
+	'local_results.vv':                     lsp.CompletionParams{
 		context: lsp.CompletionContext{.invoked, ''}
 		position: lsp.Position{5, 2}
 	}
-	'module_symbols_selector.vv': lsp.CompletionParams{
+	'module_symbols_selector.vv':           lsp.CompletionParams{
 		context: lsp.CompletionContext{.trigger_character, '.'}
 		position: lsp.Position{5, 6}
 	}
-	'struct_init.vv':             lsp.CompletionParams{
+	'struct_init.vv':                       lsp.CompletionParams{
 		context: lsp.CompletionContext{.trigger_character, '{'}
 		position: lsp.Position{8, 16}
 	}
 }
 
 const completion_results = map{
-	'assign.vv':                  [
+	'assign.vv':                            [
 		lsp.CompletionItem{
 			label: 'two'
 			kind: .variable
@@ -61,7 +81,7 @@ const completion_results = map{
 			insert_text: 'zero'
 		},
 	]
-	'blank.vv':                   [
+	'blank.vv':                             [
 		lsp.CompletionItem{
 			label: 'module main'
 			kind: .variable
@@ -73,7 +93,7 @@ const completion_results = map{
 			insert_text: 'module completion'
 		},
 	]
-	'call_args.vv':               [
+	'call_args.vv':                         [
 		lsp.CompletionItem{
 			label: 'sample_num'
 			kind: .variable
@@ -85,7 +105,7 @@ const completion_results = map{
 			insert_text: 'sample_num2'
 		},
 	]
-	'enum_val_in_struct.vv':      [
+	'enum_val_in_struct.vv':                [
 		lsp.CompletionItem{
 			label: '.golden_retriever'
 			kind: .enum_member
@@ -107,7 +127,69 @@ const completion_results = map{
 			insert_text: '.dalmatian'
 		},
 	]
-	'import.vv':                  [
+	'filtered_fields_in_selector.vv':       [
+		lsp.CompletionItem{
+			label: 'output_file_name'
+			kind: .field
+			insert_text: 'output_file_name'
+		},
+		lsp.CompletionItem{
+			label: 'log_cli'
+			kind: .method
+			insert_text: 'log_cli(\${1:s}, \${2:level})'
+			insert_text_format: .snippet
+		},
+	]
+	'filtered_methods_in_immutable_var.vv': [
+		lsp.CompletionItem{
+			label: 'lol'
+			kind: .method
+			insert_text: 'lol()'
+			insert_text_format: .snippet
+		},
+	]
+	'filtered_methods_in_mutable_var.vv':   [
+		lsp.CompletionItem{
+			label: 'set_name'
+			kind: .method
+			insert_text: 'set_name(\${1:name})'
+			insert_text_format: .snippet
+		},
+		lsp.CompletionItem{
+			label: 'lol'
+			kind: .method
+			insert_text: 'lol()'
+			insert_text_format: .snippet
+		},
+	]
+	'import_symbols.vv':                    [
+		lsp.CompletionItem{
+			label: 'DB'
+			kind: .struct_
+			insert_text: 'DB'
+		},
+		lsp.CompletionItem{
+			label: 'Row'
+			kind: .struct_
+			insert_text: 'Row'
+		},
+		lsp.CompletionItem{
+			label: 'C.PGResult'
+			kind: .struct_
+			insert_text: 'C.PGResult'
+		},
+		lsp.CompletionItem{
+			label: 'Config'
+			kind: .struct_
+			insert_text: 'Config'
+		},
+		lsp.CompletionItem{
+			label: 'connect'
+			kind: .function
+			insert_text: 'connect'
+		},
+	]
+	'import.vv':                            [
 		lsp.CompletionItem{
 			label: 'abc'
 			kind: .folder
@@ -124,7 +206,7 @@ const completion_results = map{
 			insert_text: 'abc.def.ghi'
 		},
 	]
-	'incomplete_module.vv':       [
+	'incomplete_module.vv':                 [
 		lsp.CompletionItem{
 			label: 'module main'
 			kind: .variable
@@ -136,7 +218,20 @@ const completion_results = map{
 			insert_text: 'module completion'
 		},
 	]
-	'incomplete_selector.vv':     [
+	'incomplete_nested_selector.vv':        [
+		lsp.CompletionItem{
+			label: 'name'
+			kind: .field
+			insert_text: 'name'
+		},
+		lsp.CompletionItem{
+			label: 'theres_a_method'
+			kind: .method
+			insert_text: 'theres_a_method()'
+			insert_text_format: .snippet
+		},
+	]
+	'incomplete_selector.vv':               [
 		lsp.CompletionItem{
 			label: 'name'
 			kind: .field
@@ -149,7 +244,7 @@ const completion_results = map{
 			insert_text_format: .snippet
 		},
 	]
-	'local_results.vv':           [
+	'local_results.vv':                     [
 		lsp.CompletionItem{
 			label: 'foo'
 			kind: .variable
@@ -161,7 +256,7 @@ const completion_results = map{
 			insert_text: 'bar'
 		},
 	]
-	'module_symbols_selector.vv': [
+	'module_symbols_selector.vv':           [
 		lsp.CompletionItem{
 			label: 'Point'
 			kind: .struct_
@@ -174,7 +269,7 @@ const completion_results = map{
 			insert_text_format: .snippet
 		},
 	]
-	'struct_init.vv':             [
+	'struct_init.vv':                       [
 		lsp.CompletionItem{
 			label: 'name:'
 			kind: .field

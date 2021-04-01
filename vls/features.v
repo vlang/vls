@@ -296,6 +296,7 @@ mut:
 	fields_only         bool       // for displaying only the struct/enum fields
 	modules_aliases     []string   // for displaying module symbols or module list
 	imports_list        []string   // for completion_items_from_dir and import symbols list
+	is_mut              bool       // filters results based on the object's mutability state.
 }
 
 // completion_items_from_stmt returns a list of results from the extracted Stmt node info.
@@ -316,12 +317,74 @@ fn (mut cfg CompletionItemConfig) completion_items_from_stmt(stmt ast.Stmt) []ls
 			}
 		}
 		ast.Import {
+			cfg.show_global = false
+			cfg.show_local = false
 			dir := os.dir(cfg.file.path)
 			dir_contents := os.ls(dir) or { []string{} }
-			// list all folders
-			completion_items << cfg.completion_items_from_dir(dir, dir_contents, '')
-			// list all vlib
-			// TODO: vlib must be computed at once only
+
+			// Checks the offset if it is within the import symbol section
+			// a.k.a import <module_name> { <import symbols> }
+			if is_within_pos(cfg.offset, stmt.syms_pos) {
+				already_imported := stmt.syms.map(it.name)
+
+				for _, idx in cfg.table.type_idxs {
+					type_sym := unsafe { &cfg.table.type_symbols[idx] }
+					name := type_sym.name.all_after(type_sym.mod + '.')
+					if type_sym.mod != stmt.mod || name in already_imported {
+						continue
+					}
+					match type_sym.kind {
+						.struct_ {
+							completion_items << lsp.CompletionItem{
+								label: name
+								kind: .struct_
+								insert_text: name
+							}
+						}
+						.enum_ {
+							completion_items << lsp.CompletionItem{
+								label: name
+								kind: .enum_
+								insert_text: name
+							}
+						}
+						.interface_ {
+							completion_items << lsp.CompletionItem{
+								label: name
+								kind: .interface_
+								insert_text: name
+							}
+						}
+						.sum_type, .alias {
+							completion_items << lsp.CompletionItem{
+								label: name
+								kind: .type_parameter
+								insert_text: name
+							}
+						}
+						else {
+							continue
+						}
+					}
+				}
+
+				for _, fnn in cfg.table.fns {
+					name := fnn.name.all_after(fnn.mod + '.')
+
+					if fnn.mod == stmt.mod && name !in already_imported && fnn.is_pub {
+						completion_items << lsp.CompletionItem{
+							label: name
+							kind: .function
+							insert_text: name
+						}
+					}
+				}
+			} else {
+				// list all folders
+				completion_items << cfg.completion_items_from_dir(dir, dir_contents, '')
+				// list all vlib
+				// TODO: vlib must be computed at once only
+			}
 		}
 		ast.Module {
 			completion_items << cfg.suggest_mod_names()
@@ -356,8 +419,7 @@ fn (mut cfg CompletionItemConfig) completion_items_from_table(mod_name string, s
 			if type_sym.mod != mod_name {
 				continue
 			}
-			completion_items << cfg.completion_items_from_type_info(name, type_sym.info,
-				false)
+			completion_items << cfg.completion_items_from_type_sym(name, type_sym, false)
 		}
 	}
 	return completion_items
@@ -386,24 +448,33 @@ fn (mut cfg CompletionItemConfig) completion_items_from_expr(expr ast.Expr) []ls
 						completion_items << cfg.completion_items_from_fn(fnn, false)
 					}
 				}
-			} else if expr.expr_type != 0 {
-				type_sym := cfg.table.get_type_symbol(expr.expr_type)
+			} else if expr.expr_type != 0 || expr.typ != 0 {
+				selected_typ := if expr.typ != 0 { expr.typ } else { expr.expr_type }
+				type_sym := cfg.table.get_type_symbol(selected_typ)
+				root := expr.root_ident()
+				if root.obj is ast.Var {
+					cfg.is_mut = root.obj.is_mut
+				}
 
 				// Include the list of available struct fields based on the type info
-				completion_items << cfg.completion_items_from_type_info('', type_sym.info,
-					true)
+				completion_items << cfg.completion_items_from_type_sym('', type_sym, true)
 
-				// If the expr_type is an array or map type, it should
+				// If the selected type is an array or map type, it should
 				// include the fields and methods of map/array type.
 				if type_sym.kind == .array || type_sym.kind == .map {
 					base_symbol_name := if type_sym.kind == .array { 'array' } else { 'map' }
 					if base_type_sym := cfg.table.find_type(base_symbol_name) {
-						completion_items << cfg.completion_items_from_type_info('', base_type_sym.info,
+						completion_items << cfg.completion_items_from_type_sym('', base_type_sym,
 							true)
 					}
 				}
 				// Include all the type methods
 				for m in type_sym.methods {
+					// If SelectorExpr is immutable and the method is mutable,
+					// it should be excluded.
+					if !cfg.is_mut && m.params[0].is_mut {
+						continue
+					}
 					completion_items << cfg.completion_items_from_fn(m, true)
 				}
 			}
@@ -428,12 +499,7 @@ fn (mut cfg CompletionItemConfig) completion_items_from_expr(expr ast.Expr) []ls
 				ast.Node{}
 			}
 			if field_node is ast.StructInitField {
-				// NB: enable local results only if the node is a field
-				cfg.show_local = true
-				field_type_sym := cfg.table.get_type_symbol(field_node.expected_type)
-				completion_items << cfg.completion_items_from_type_info('', field_type_sym.info,
-					field_type_sym.info is table.Enum)
-				cfg.filter_type = field_node.expected_type
+				completion_items << cfg.completion_items_from_struct_init_field(field_node)
 			} else {
 				// if structinit is empty or not within the field position,
 				// it must include the list of missing fields instead
@@ -458,14 +524,30 @@ fn (mut cfg CompletionItemConfig) completion_items_from_expr(expr ast.Expr) []ls
 	return completion_items
 }
 
+// completion_items_from_struct_init_field returns the list of items extracted from the ast.StructInitField information
+// TODO: move it to a single method once other nodes are supported.
+fn (mut cfg CompletionItemConfig) completion_items_from_struct_init_field(field ast.StructInitField) []lsp.CompletionItem {
+	mut completion_items := []lsp.CompletionItem{}
+
+	// NB: enable local results only if the node is a field
+	cfg.show_local = true
+	cfg.show_global = false
+	field_type_sym := cfg.table.get_type_symbol(field.expected_type)
+	completion_items << cfg.completion_items_from_type_sym('', field_type_sym, field_type_sym.info is table.Enum)
+	cfg.filter_type = field.expected_type
+
+	return completion_items
+}
+
 // completion_items_from_fn returns the list of items extracted from the table.Fn information
 fn (mut _ CompletionItemConfig) completion_items_from_fn(fnn table.Fn, is_method bool) []lsp.CompletionItem {
 	mut completion_items := []lsp.CompletionItem{}
 
-	fn_name := fnn.name.all_after(fnn.mod + '.')
-	if fn_name == 'main' {
+	if fnn.is_main {
 		return completion_items
 	}
+
+	fn_name := fnn.name.all_after(fnn.mod + '.')
 	// This will create a snippet that will automatically
 	// create a call expression based on the information of the function
 	mut insert_text := fn_name
@@ -507,13 +589,17 @@ fn (mut _ CompletionItemConfig) completion_items_from_fn(fnn table.Fn, is_method
 	return completion_items
 }
 
-// completion_items_from_type_info returns the list of items extracted from the type information.
-fn (mut _ CompletionItemConfig) completion_items_from_type_info(name string, type_info table.TypeInfo, fields_only bool) []lsp.CompletionItem {
+// completion_items_from_type_sym returns the list of items extracted from the type symbol.
+fn (mut cfg CompletionItemConfig) completion_items_from_type_sym(name string, type_sym table.TypeSymbol, fields_only bool) []lsp.CompletionItem {
+	type_info := type_sym.info
 	mut completion_items := []lsp.CompletionItem{}
 	match type_info {
 		table.Struct {
 			if fields_only {
 				for field in type_info.fields {
+					if !field.is_pub && cfg.file.mod.name != type_sym.mod {
+						continue
+					}
 					completion_items << lsp.CompletionItem{
 						label: field.name
 						kind: .field
@@ -524,7 +610,8 @@ fn (mut _ CompletionItemConfig) completion_items_from_type_info(name string, typ
 				mut insert_text := '$name{\n'
 				mut i := type_info.fields.len - 1
 				for field in type_info.fields {
-					if field.has_default_expr {
+					if (!field.is_pub && cfg.file.mod.name != type_sym.mod)
+						|| field.has_default_expr {
 						continue
 					}
 					insert_text += '\t$field.name: \$$i\n'
@@ -684,6 +771,9 @@ fn (mut ls Vls) completion(id int, params string) {
 		// 	cfg.show_local = false
 		// 	cfg.offset -= 2
 		// }
+		if src[cfg.offset - 1] == ` ` {
+			cfg.offset--
+		}
 
 		// Once the offset has been finalized it will then search for the AST node and
 		// extract it's data using the corresponding methods depending on the node type.
@@ -694,6 +784,9 @@ fn (mut ls Vls) completion(id int, params string) {
 			}
 			ast.Expr {
 				completion_items << cfg.completion_items_from_expr(node)
+			}
+			ast.StructInitField {
+				completion_items << cfg.completion_items_from_struct_init_field(node)
 			}
 			else {}
 		}
@@ -901,6 +994,9 @@ fn (mut cfg HoverConfig) hover_from_stmt(node ast.Stmt) ?lsp.Hover {
 			// return and trigger null result for now
 			return none
 		}
+		ast.NodeError {
+			return none
+		}
 		ast.AssignStmt {
 			// transfer this code to v.ast module
 			mut left_pos := node.left[0].position()
@@ -991,6 +1087,9 @@ fn (mut cfg HoverConfig) hover_from_expr(node ast.Expr) ?lsp.Hover {
 				contents: lsp.v_marked_string('enum val')
 				range: position_to_lsp_range(node.pos)
 			}
+		}
+		ast.NodeError {
+			return none
 		}
 		else {
 			return lsp.Hover{

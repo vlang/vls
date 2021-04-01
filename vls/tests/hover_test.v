@@ -6,49 +6,52 @@ import os
 
 // TODO:
 const hover_inputs = map{
-	'call_expr_method.vv': lsp.HoverParams{
+	'call_expr_method.vv':     lsp.HoverParams{
 		position: lsp.Position{10, 16}
 	}
-	'call_expr_simple.vv': lsp.HoverParams{
+	'call_expr_simple.vv':     lsp.HoverParams{
 		position: lsp.Position{5, 6}
 	}
-	'enum.vv':             lsp.HoverParams{
+	'enum.vv':                 lsp.HoverParams{
 		position: lsp.Position{0, 8}
 	}
-	'function_param.vv':   lsp.HoverParams{
+	'function_param.vv':       lsp.HoverParams{
 		position: lsp.Position{2, 18}
 	}
-	'function.vv':         lsp.HoverParams{
+	'function.vv':             lsp.HoverParams{
 		position: lsp.Position{0, 6}
 	}
-	'import.vv':           lsp.HoverParams{
+	'import.vv':               lsp.HoverParams{
 		position: lsp.Position{0, 8}
 	}
-	'module.vv':           lsp.HoverParams{
+	'module.vv':               lsp.HoverParams{
 		position: lsp.Position{0, 5}
 	}
-	'selector_expr.vv':    lsp.HoverParams{
+	'node_error.vv':           lsp.HoverParams{
+		position: lsp.Position{6, 5}
+	}
+	'selector_expr.vv':        lsp.HoverParams{
 		position: lsp.Position{6, 10}
 	}
-	'struct.vv':           lsp.HoverParams{
+	'struct.vv':               lsp.HoverParams{
 		position: lsp.Position{0, 8}
 	}
-	'struct_field.vv':     lsp.HoverParams{
+	'struct_field.vv':         lsp.HoverParams{
 		position: lsp.Position{3, 4}
 	}
-	'struct_init.vv':      lsp.HoverParams{
+	'struct_init.vv':          lsp.HoverParams{
 		position: lsp.Position{8, 7}
 	}
-	'type_alias.vv':       lsp.HoverParams{
+	'type_alias.vv':           lsp.HoverParams{
 		position: lsp.Position{0, 7}
 	}
-	'type_fn.vv':          lsp.HoverParams{
+	'type_fn.vv':              lsp.HoverParams{
 		position: lsp.Position{0, 7}
 	}
-	'type_sum.vv':         lsp.HoverParams{
+	'type_sum.vv':             lsp.HoverParams{
 		position: lsp.Position{0, 7}
 	}
-	'variable.vv':         lsp.HoverParams{
+	'variable.vv':             lsp.HoverParams{
 		position: lsp.Position{2, 12}
 	}
 	'with_call_expr_below.vv': lsp.HoverParams{
@@ -56,112 +59,115 @@ const hover_inputs = map{
 	}
 }
 
+const hover_should_return_null = ['node_error.vv']
+
 const hover_results = map{
-	'call_expr_method.vv': lsp.Hover{
+	'call_expr_method.vv':     lsp.Hover{
 		contents: lsp.MarkedString{'v', 'Foo.call() string'}
 		range: lsp.Range{
 			start: lsp.Position{10, 13}
 			end: lsp.Position{10, 19}
 		}
 	}
-	'call_expr_simple.vv': lsp.Hover{
+	'call_expr_simple.vv':     lsp.Hover{
 		contents: lsp.MarkedString{'v', 'greet()'}
 		range: lsp.Range{
 			start: lsp.Position{5, 2}
 			end: lsp.Position{5, 14}
 		}
 	}
-	'enum.vv':             lsp.Hover{
+	'enum.vv':                 lsp.Hover{
 		contents: lsp.MarkedString{'v', 'enum Color'}
 		range: lsp.Range{
 			start: lsp.Position{0, 0}
 			end: lsp.Position{4, 10}
 		}
 	}
-	'function_param.vv':   lsp.Hover{
+	'function_param.vv':       lsp.Hover{
 		contents: lsp.MarkedString{'v', 'mut arr []string'}
 		range: lsp.Range{
 			start: lsp.Position{2, 17}
 			end: lsp.Position{2, 22}
 		}
 	}
-	'function.vv':         lsp.Hover{
+	'function.vv':             lsp.Hover{
 		contents: lsp.MarkedString{'v', 'fn foo(param1 string, mut param2 []string) bool'}
 		range: lsp.Range{
 			start: lsp.Position{0, 0}
 			end: lsp.Position{2, 47}
 		}
 	}
-	'import.vv':           lsp.Hover{
+	'import.vv':               lsp.Hover{
 		contents: lsp.MarkedString{'v', 'import os as os'}
 		range: lsp.Range{
 			start: lsp.Position{0, 0}
 			end: lsp.Position{0, 9}
 		}
 	}
-	'module.vv':           lsp.Hover{
+	'module.vv':               lsp.Hover{
 		contents: lsp.MarkedString{'v', 'module foo'}
 		range: lsp.Range{
 			start: lsp.Position{0, 0}
 			end: lsp.Position{0, 10}
 		}
 	}
-	'selector_expr.vv':    lsp.Hover{
+	'node_error.vv':           lsp.Hover{}
+	'selector_expr.vv':        lsp.Hover{
 		contents: lsp.MarkedString{'v', 'Person.name string'}
 		range: lsp.Range{
 			start: lsp.Position{6, 9}
 			end: lsp.Position{6, 13}
 		}
 	}
-	'struct.vv':           lsp.Hover{
+	'struct.vv':               lsp.Hover{
 		contents: lsp.MarkedString{'v', 'struct Abc'}
 		range: lsp.Range{
 			start: lsp.Position{0, 0}
 			end: lsp.Position{2, 10}
 		}
 	}
-	'struct_field.vv':     lsp.Hover{
+	'struct_field.vv':         lsp.Hover{
 		contents: lsp.MarkedString{'v', 'bar string'}
 		range: lsp.Range{
 			start: lsp.Position{3, 2}
 			end: lsp.Position{3, 12}
 		}
 	}
-	'struct_init.vv':      lsp.Hover{
+	'struct_init.vv':          lsp.Hover{
 		contents: lsp.MarkedString{'v', 'name string'}
 		range: lsp.Range{
 			start: lsp.Position{8, 4}
 			end: lsp.Position{8, 15}
 		}
 	}
-	'type_alias.vv':       lsp.Hover{
+	'type_alias.vv':           lsp.Hover{
 		contents: lsp.MarkedString{'v', 'type Str = string'}
 		range: lsp.Range{
 			start: lsp.Position{0, 0}
 			end: lsp.Position{0, 8}
 		}
 	}
-	'type_fn.vv':          lsp.Hover{
+	'type_fn.vv':              lsp.Hover{
 		contents: lsp.MarkedString{'v', 'type Handler = fn (string) string'}
 		range: lsp.Range{
 			start: lsp.Position{0, 0}
 			end: lsp.Position{0, 12}
 		}
 	}
-	'type_sum.vv':         lsp.Hover{
+	'type_sum.vv':             lsp.Hover{
 		contents: lsp.MarkedString{'v', 'type Any = int | string'}
 		range: lsp.Range{
 			start: lsp.Position{0, 0}
 			end: lsp.Position{0, 8}
 		}
 	}
-	'variable.vv':         lsp.Hover{
+	'variable.vv':             lsp.Hover{
 		contents: lsp.MarkedString{'v', 'num int'}
 		range: lsp.Range{
 			start: lsp.Position{2, 10}
 			end: lsp.Position{2, 13}
 		}
-	},
+	}
 	'with_call_expr_below.vv': lsp.Hover{
 		contents: lsp.MarkedString{'v', 'test int'}
 		range: lsp.Range{
@@ -215,7 +221,12 @@ fn test_hover() {
 		}))
 		// compare content
 		println(io.bench.step_message('Testing $test_file_path'))
-		assert io.result() == json.encode(hover_results[test_name])
+		result := io.result()
+		if test_name in hover_should_return_null {
+			assert result == 'null'
+		} else {
+			assert result == json.encode(hover_results[test_name])
+		}
 		// Delete document
 		ls.dispatch(io.close_document(doc_id))
 		io.bench.ok()
