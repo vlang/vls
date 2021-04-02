@@ -177,7 +177,7 @@ fn (mut ls Vls) signature_help(id int, params string) {
 		return
 	}
 
-	mut expr := ast.Expr{}
+	mut expr := ast.empty_expr()
 	if node is ast.Stmt {
 		// if the selected node is an ExprStmt,
 		// the expr content of the ExprStmt node
@@ -496,7 +496,7 @@ fn (mut cfg CompletionItemConfig) completion_items_from_expr(expr ast.Expr) []ls
 			cfg.show_global = false
 			cfg.show_local = false
 			field_node := find_ast_by_pos(expr.fields.map(ast.Node(it)), cfg.offset - 1) or {
-				ast.Node{}
+				ast.empty_node()
 			}
 			if field_node is ast.StructInitField {
 				completion_items << cfg.completion_items_from_struct_init_field(field_node)
@@ -539,7 +539,7 @@ fn (mut cfg CompletionItemConfig) completion_items_from_struct_init_field(field 
 	return completion_items
 }
 
-// completion_items_from_fn returns the list of items extracted from the ast.Fn information
+// completion_items_from_fn returns the list of items extracted from the table.Fn information
 fn (mut _ CompletionItemConfig) completion_items_from_fn(fnn ast.Fn, is_method bool) []lsp.CompletionItem {
 	mut completion_items := []lsp.CompletionItem{}
 
@@ -777,7 +777,7 @@ fn (mut ls Vls) completion(id int, params string) {
 
 		// Once the offset has been finalized it will then search for the AST node and
 		// extract it's data using the corresponding methods depending on the node type.
-		node := find_ast_by_pos(file.stmts.map(ast.Node(it)), cfg.offset) or { ast.Node{} }
+		node := find_ast_by_pos(file.stmts.map(ast.Node(it)), cfg.offset) or { ast.empty_node() }
 		match node {
 			ast.Stmt {
 				completion_items << cfg.completion_items_from_stmt(node)
