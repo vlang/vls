@@ -310,16 +310,15 @@ fn (mut ls Vls) extract_symbol_locations(uri lsp.DocumentUri, mod string, stmts 
 				}
 			}
 			ast.StructDecl {
-				stmt_name := stmt.name
-				if stmt_name in ls.symbol_locations {
-					ls.symbol_locations.delete(stmt_name)
+				if stmt.name in ls.symbol_locations {
+					ls.symbol_locations.delete(stmt.name)
 				}
-				ls.symbol_locations[path][stmt_name] = lsp.Location{
+				ls.symbol_locations[path][stmt.name] = lsp.Location{
 					uri: uri
 					range: position_to_lsp_range(stmt.pos)
 				}
 				for field in stmt.fields {
-					name := '${stmt_name}.${field.name}'
+					name := '${stmt.name}.${field.name}'
 					if name in ls.symbol_locations {
 						ls.symbol_locations.delete(name)
 					}
@@ -330,17 +329,16 @@ fn (mut ls Vls) extract_symbol_locations(uri lsp.DocumentUri, mod string, stmts 
 				}
 			}
 			ast.EnumDecl {
-				stmt_name := '${mod}.${stmt.name}'
-				if stmt_name in ls.symbol_locations {
-					ls.symbol_locations.delete(stmt_name)
+				if stmt.name in ls.symbol_locations {
+					ls.symbol_locations.delete(stmt.name)
 				}
-				ls.symbol_locations[path][stmt_name] = lsp.Location{
+				ls.symbol_locations[path][stmt.name] = lsp.Location{
 					uri: uri
 					range: position_to_lsp_range(stmt.pos)
 				}
 
 				for field in stmt.fields {
-					name := '${stmt_name}.${field.name}'
+					name := '${stmt.name}.${field.name}'
 					if name in ls.symbol_locations {
 						ls.symbol_locations.delete(name)
 					}
