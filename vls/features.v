@@ -1079,9 +1079,6 @@ fn (mut cfg HoverConfig) hover_from_expr(node ast.Expr) ?lsp.Hover {
 			}
 			return cfg.hover_from_expr(node.expr)
 		}
-		ast.StructInit {
-			return none
-		}
 		ast.NodeError {
 			return none
 		}
@@ -1288,12 +1285,11 @@ fn (cfg DefinitionConfig) definition_from_expr(node ast.Expr) ?lsp.LocationLink 
 			return cfg.get_definition_data(node.name_pos, node.name, '${cfg.file.mod.short_name}.${node.name}')
 		}
 		ast.SelectorExpr {
-			if node.expr_type == ast.Type(0) || node.typ == ast.Type(0) {
+			if node.expr_type == ast.Type(0) {
 				return none
 			}
 
-			selected_typ := if node.typ != 0 { node.typ } else { node.expr_type }
-			struct_type_name := cfg.table.type_to_str(selected_typ)
+			struct_type_name := cfg.table.type_to_str(node.expr_type)
 			return cfg.get_definition_data(node.pos, '${struct_type_name}.${node.field_name}')
 		}
 		ast.StructInit {
