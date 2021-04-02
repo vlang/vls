@@ -1,0 +1,5 @@
+fn main() {
+  names := ['baz', 'boo']
+  iddx := 0
+  println(names[iddx])
+}

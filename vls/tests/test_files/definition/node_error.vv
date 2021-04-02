@@ -1,0 +1,4 @@
+struct Ff {
+  b int
+
+fn (f FF) errrr() {}

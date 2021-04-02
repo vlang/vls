@@ -1,0 +1,5 @@
+fn function_name() {}
+
+fn main() {
+  function_name()
+}

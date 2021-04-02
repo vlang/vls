@@ -1,0 +1,12 @@
+enum Kind {
+  handsome
+  ugly
+}
+
+struct Person2 {
+  kind Kind
+}
+
+fn main() {
+  pr := Person2{kind: .ugly}
+}
