@@ -71,7 +71,7 @@ mut:
 	// NB: a separate table is required for each folder in
 	// order to do functions such as typ_to_string or when
 	// some of the features needed additional information
-	// that is mostly stored into the table.
+	// that is mostly stored into the ast.
 	//
 	// A single table is not feasible since files are always
 	// changing and there can be instances that a change might

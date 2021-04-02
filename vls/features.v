@@ -289,13 +289,13 @@ mut:
 	offset              int // position of the cursor. used for finding the AST node
 	table               &ast.Table
 	show_global         bool = true // for displaying global (project) symbols
-	show_only_global_fn bool     // for displaying only the functions of the project
-	show_local          bool     = true // for displaying local variables
+	show_only_global_fn bool       // for displaying only the functions of the project
+	show_local          bool       = true // for displaying local variables
 	filter_type         ast.Type = ast.Type(0) // filters results by type
-	fields_only         bool     // for displaying only the struct/enum fields
-	modules_aliases     []string // for displaying module symbols or module list
-	imports_list        []string // for completion_items_from_dir and import symbols list
-	is_mut              bool     // filters results based on the object's mutability state.
+	fields_only         bool       // for displaying only the struct/enum fields
+	modules_aliases     []string   // for displaying module symbols or module list
+	imports_list        []string   // for completion_items_from_dir and import symbols list
+	is_mut              bool       // filters results based on the object's mutability state.
 }
 
 // completion_items_from_stmt returns a list of results from the extracted Stmt node info.
@@ -393,7 +393,7 @@ fn (mut cfg CompletionItemConfig) completion_items_from_stmt(stmt ast.Stmt) []ls
 	return completion_items
 }
 
-// completion_items_from_table returns a list of results extracted from the type symbols of the table.
+// completion_items_from_table returns a list of results extracted from the type symbols of the ast.
 fn (mut cfg CompletionItemConfig) completion_items_from_table(mod_name string, symbols ...string) []lsp.CompletionItem {
 	// NB: symbols of the said module does not show the full list
 	// unless by pressing cmd/ctrl+space or by pressing escape key
