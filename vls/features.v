@@ -7,7 +7,6 @@ import v.ast
 import v.fmt
 import v.parser
 import v.pref
-import v.token
 import os
 // import strings
 
@@ -1230,13 +1229,37 @@ fn (mut ls Vls) folding_range(id int, params string) {
 	}
 }
 
-fn (ls Vls) find_interfaces_of(uri lsp.DocumentUri, typ table.Type) []string {
+fn implementation_from_stmt(stmt ast.Stmt, table &ast.Table) ast.Type {
+	match stmt {
+		ast.StructDecl, ast.EnumDecl {
+			idx := table.find_type_idx(stmt.name)
+			if idx > 0 {
+				return ast.new_type(idx)
+			}
+		}
+		ast.TypeDecl {
+			match stmt {
+				ast.FnTypeDecl, ast.SumTypeDecl {
+					return stmt.typ
+				}
+				ast.AliasTypeDecl {
+					return stmt.parent_type
+				}
+			}
+		}
+		else {}
+	}
+
+	return ast.Type(0)
+}
+
+fn (mut ls Vls) find_interfaces_of(uri lsp.DocumentUri, typ ast.Type) []string {
 	tbl := ls.tables[uri.dir()]
 	type_sym := tbl.get_type_symbol(typ)
 	mut interface_names := []string{}
 
 loop_symbols: for ttype_sym in tbl.type_symbols {
-		if ttype_sym.info is table.Interface {
+		if ttype_sym.info is ast.Interface {
 			// check if the type is present in the interface typeinfo
 			for ityp in ttype_sym.info.types {
 				if ityp == typ {
@@ -1271,8 +1294,6 @@ loop_symbols: for ttype_sym in tbl.type_symbols {
 		}
 	}
 
-	ls.log_message(interfa.info)
-
 	return interface_names
 }
 
@@ -1283,6 +1304,7 @@ fn (mut ls Vls) implementation(id int, params string) {
 	pos := implementation_params.position
 	source := ls.sources[uri.str()]
 	offset := compute_offset(source, pos.line, pos.character)
+	table := ls.tables[uri.dir()]
 	file := ls.files[uri.str()]
 	node := find_ast_by_pos(file.stmts.map(ast.Node(it)), offset) or {
 		ls.send_null(id)
@@ -1290,53 +1312,59 @@ fn (mut ls Vls) implementation(id int, params string) {
 	}
 
 	// check if offset is within the type position
-	mut is_within_type_pos := false
-	if node is ast.StructField {
-		is_within_type_pos = is_within_pos(offset, node.type_pos)
-	} else if node is table.Param {
-		is_within_type_pos = is_within_pos(offset, node.type_pos)
+	mut is_within_type_pos := if node is ast.Stmt {
+		true
+	} else if node is ast.StructField {
+		is_within_pos(offset, node.type_pos)
+	} else if node is ast.Param {
+		is_within_pos(offset, node.type_pos)
+	} else if node is ast.SumTypeVariant {
+		true
+	} else {
+		false
+	}
+
+	if node is ast.Expr {
+		is_within_type_pos = if node is ast.StructInit {
+			is_within_pos(offset, node.name_pos)
+		} else {
+			false
+		}
 	}
 
 	if is_within_type_pos {
-		mut typ := table.Type(0)
-		mut type_pos := token.Position{}
+		mut typ := ast.Type(0)
 
-		match node {
-			ast.StructField {
+		if node is ast.Stmt {
+			typ = implementation_from_stmt(node, table)
+		} else if node is ast.Expr {
+			if node is ast.StructInit {
 				typ = node.typ
-				type_pos = node.type_pos
 			}
-			table.Param {
-				typ = node.typ
-				type_pos = node.type_pos
+		} else {
+			match node {
+				ast.StructField, ast.Param, ast.SumTypeVariant {
+					typ = node.typ
+				}
+				else {}
 			}
-			else {}
 		}
-
-		if typ == table.Type(0) {
+		
+		if typ == ast.Type(0) {
 			ls.send_null(id)
 			return
 		}
 
+		mut locations := []lsp.Location{}
 		inames := ls.find_interfaces_of(uri, typ)
-		symbol_locations := ls.symbol_locations[uri.dir()].clone()
-		range := position_to_lsp_range(type_pos)
-		mut locations := []lsp.LocationLink{len: inames.len}
-		
 		for iname in inames {
-			loc := symbol_locations[iname] or {
+			loc := ls.symbol_locations[uri.dir()][iname] or {
 				continue
 			}
-
-			locations << lsp.LocationLink{
-				origin_selection_range: range
-				target_uri: loc.uri
-				target_range: loc.range
-				target_selection_range: loc.range
-			}
+			locations << loc
 		}
 
-		ls.send(jsonrpc.Response<[]lsp.LocationLink>{
+		ls.send(jsonrpc.Response<[]lsp.Location>{
 			id: id
 			result: locations
 		})
