@@ -1239,10 +1239,11 @@ struct DefinitionConfig {
 }
 
 fn (cfg DefinitionConfig) get_symbol_location(pos token.Position, entry_name string, alt_entry_names ...string) ?lsp.LocationLink {
+	// alt_name is used when the given entry_name is not present in
+	// the builtin_symbol_locations map but can be found inside the
+	// symbol_locations map
 	alt_name := if alt_entry_names.len != 0 { alt_entry_names[0] } else { entry_name }
-	loc := cfg.builtin_symbol_locations[entry_name] or {
-		cfg.symbol_locations[alt_name] or { return error('$entry_name | $alt_name') }
-	}
+	loc := cfg.builtin_symbol_locations[entry_name] or { cfg.symbol_locations[alt_name] ? }
 
 	// NB: Compiling VLS without gc returns a symbol location data
 	// with an empty URI. This is triggered just to make sure.
@@ -1306,15 +1307,15 @@ fn (cfg DefinitionConfig) definition_from_expr(node ast.Expr) ?lsp.LocationLink 
 			enum_type_name := cfg.table.type_to_str(node.typ)
 			return cfg.get_symbol_location(node.pos, '${enum_type_name}.$node.val')
 		}
-		else {}
+		else {
+			return none
+		}
 	}
-
-	return none
 }
 
 fn (mut ls Vls) definition(id int, params string) {
 	goto_definition_params := json.decode(lsp.TextDocumentPositionParams, params) or {
-		panic(err.msg)
+		ls.panic(err.msg)
 	}
 	uri := goto_definition_params.text_document.uri
 	pos := goto_definition_params.position
@@ -1329,14 +1330,19 @@ fn (mut ls Vls) definition(id int, params string) {
 		symbol_locations: ls.symbol_locations[uri.dir()]
 		table: ls.tables[uri.dir()]
 	}
+	mut res := lsp.LocationLink{}
 
+	// an AST walker will find a node based on the offset
 	mut node := find_ast_by_pos(ast.Node(file).children(), offset) or {
 		ls.send_null(id)
 		return
 	}
 
+	// for CallExpr and SelectorExpr nodes, both of which
+	// have a special code inside the AST walker, will need to 
+	// have another check if the position is within their children
+	// before doing another AST traversal
 	mut should_find_child := false
-	mut res := lsp.LocationLink{}
 	if mut node is ast.Expr {
 		should_find_child = if mut node is ast.CallExpr {
 			!is_within_pos(offset, node.name_pos)
@@ -1348,6 +1354,7 @@ fn (mut ls Vls) definition(id int, params string) {
 	}
 
 	if should_find_child {
+		// falls back to the parent node if there's no child node found
 		node = find_ast_by_pos(node.children(), offset) or { node }
 	}
 
@@ -1378,6 +1385,7 @@ fn (mut ls Vls) definition(id int, params string) {
 			}
 		}
 		else {
+			// for unsupported nodes, the server will return null.
 			ls.send_null(id)
 			return
 		}
