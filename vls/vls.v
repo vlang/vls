@@ -49,7 +49,7 @@ pub const (
 		.completion,
 		.hover,
 		.folding_range,
-		.definition
+		.definition,
 	]
 )
 
@@ -80,17 +80,17 @@ mut:
 	// changing and there can be instances that a change might
 	// break another module/project data.
 	// tables  map[DocumentUri]&ast.Table
-	tables           map[string]&ast.Table
-	root_uri         lsp.DocumentUri
-	invalid_imports  map[string][]string // where it stores a list of invalid imports
-	doc_symbols      map[string][]lsp.SymbolInformation // doc_symbols is used for caching document symbols
-	builtin_symbols  []string // list of publicly available symbols in builtin
-	symbol_locations map[string]map[string]lsp.Location
+	tables                   map[string]&ast.Table
+	root_uri                 lsp.DocumentUri
+	invalid_imports          map[string][]string // where it stores a list of invalid imports
+	doc_symbols              map[string][]lsp.SymbolInformation // doc_symbols is used for caching document symbols
+	builtin_symbols          []string // list of publicly available symbols in builtin
+	symbol_locations         map[string]map[string]lsp.Location
 	builtin_symbol_locations map[string]lsp.Location
-	enabled_features []Feature = vls.default_features_list
-	capabilities     lsp.ServerCapabilities
-	logger           log.Logger
-	debug            bool
+	enabled_features         []Feature = vls.default_features_list
+	capabilities             lsp.ServerCapabilities
+	logger                   log.Logger
+	debug                    bool
 	// client_capabilities lsp.ClientCapabilities
 pub mut:
 	// TODO: replace with io.ReadWriter
