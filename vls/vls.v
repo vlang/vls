@@ -284,7 +284,7 @@ fn (mut ls Vls) insert_files(files []ast.File) {
 	}
 }
 
-//
+// extract_symbol_locations extracts and inserts the locations of the symbols inside the symbol_locations map
 fn (mut ls Vls) extract_symbol_locations(uri lsp.DocumentUri, mod string, stmts []ast.Stmt) {
 	path := uri.dir()
 	if path in ls.symbol_locations {
