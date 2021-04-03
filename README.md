@@ -71,7 +71,7 @@ Afterwards, go to your editor's configuration and scroll to the V extension sect
 - [ ] `declaration`
 - [ ] `definition`
 - [ ] `typeDefinition`
-- [ ] `implementation`
+- [x] `implementation`
 - [ ] `references`
 - [ ] `documentHighlight`
 - [x] `documentSymbol`
