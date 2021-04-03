@@ -1247,6 +1247,8 @@ fn (cfg DefinitionConfig) get_symbol_location(pos token.Position, entry_name str
 		}
 	}
 
+	// NB: Compiling VLS without gc returns a symbol location data
+	// with an empty URI. This is triggered just to make sure.
 	if loc.uri.len == 0 {
 		return error('empty URI')
 	}
@@ -1335,13 +1337,12 @@ fn (mut ls Vls) definition(id int, params string) {
 
 	mut should_find_child := false
 	if mut node is ast.Expr {
-		if mut node is ast.CallExpr {
-			// do not change node if position is within the call expr name
-			should_find_child = !is_within_pos(cfg.offset, node.name_pos)
+		should_find_child = if mut node is ast.CallExpr {
+			!is_within_pos(cfg.offset, node.name_pos)
 		} else if mut node is ast.SelectorExpr {
-			should_find_child = !is_within_pos(cfg.offset, node.pos)
-		} else if mut node is ast.StructInit {
-			should_find_child = !is_within_pos(cfg.offset, node.name_pos)
+			!is_within_pos(cfg.offset, node.pos)
+		} else {
+			false
 		}
 	}
 
