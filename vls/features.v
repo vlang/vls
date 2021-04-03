@@ -290,13 +290,13 @@ mut:
 	offset              int // position of the cursor. used for finding the AST node
 	table               &ast.Table
 	show_global         bool = true // for displaying global (project) symbols
-	show_only_global_fn bool       // for displaying only the functions of the project
-	show_local          bool       = true // for displaying local variables
+	show_only_global_fn bool     // for displaying only the functions of the project
+	show_local          bool     = true // for displaying local variables
 	filter_type         ast.Type = ast.Type(0) // filters results by type
-	fields_only         bool       // for displaying only the struct/enum fields
-	modules_aliases     []string   // for displaying module symbols or module list
-	imports_list        []string   // for completion_items_from_dir and import symbols list
-	is_mut              bool       // filters results based on the object's mutability state.
+	fields_only         bool     // for displaying only the struct/enum fields
+	modules_aliases     []string // for displaying module symbols or module list
+	imports_list        []string // for completion_items_from_dir and import symbols list
+	is_mut              bool     // filters results based on the object's mutability state.
 }
 
 // completion_items_from_stmt returns a list of results from the extracted Stmt node info.
@@ -1231,19 +1231,17 @@ fn (mut ls Vls) folding_range(id int, params string) {
 }
 
 struct DefinitionConfig {
-	uri lsp.DocumentUri
+	uri                      lsp.DocumentUri
 	builtin_symbol_locations map[string]lsp.Location
-	symbol_locations map[string]lsp.Location
-	table &ast.Table
-	mod string
+	symbol_locations         map[string]lsp.Location
+	table                    &ast.Table
+	mod                      string
 }
 
 fn (cfg DefinitionConfig) get_symbol_location(pos token.Position, entry_name string, alt_entry_names ...string) ?lsp.LocationLink {
 	alt_name := if alt_entry_names.len != 0 { alt_entry_names[0] } else { entry_name }
-	loc := cfg.builtin_symbol_locations[entry_name] or { 
-		cfg.symbol_locations[alt_name] or {
-			return error('$entry_name | $alt_name')
-		}
+	loc := cfg.builtin_symbol_locations[entry_name] or {
+		cfg.symbol_locations[alt_name] or { return error('$entry_name | $alt_name') }
 	}
 
 	// NB: Compiling VLS without gc returns a symbol location data
@@ -1283,7 +1281,7 @@ fn (cfg DefinitionConfig) definition_from_expr(node ast.Expr) ?lsp.LocationLink 
 			return cfg.definition_from_scope_obj(node, node.obj)
 		}
 		ast.CallExpr {
-			return cfg.get_symbol_location(node.name_pos, node.name, '${cfg.mod}.${node.name}')
+			return cfg.get_symbol_location(node.name_pos, node.name, '${cfg.mod}.$node.name')
 		}
 		ast.SelectorExpr {
 			if node.expr_type == ast.Type(0) {
@@ -1291,7 +1289,7 @@ fn (cfg DefinitionConfig) definition_from_expr(node ast.Expr) ?lsp.LocationLink 
 			}
 
 			struct_type_name := cfg.table.type_to_str(node.expr_type)
-			return cfg.get_symbol_location(node.pos, '${struct_type_name}.${node.field_name}')
+			return cfg.get_symbol_location(node.pos, '${struct_type_name}.$node.field_name')
 		}
 		ast.StructInit {
 			if node.typ == ast.Type(0) {
@@ -1306,7 +1304,7 @@ fn (cfg DefinitionConfig) definition_from_expr(node ast.Expr) ?lsp.LocationLink 
 			}
 
 			enum_type_name := cfg.table.type_to_str(node.typ)
-			return cfg.get_symbol_location(node.pos, '${enum_type_name}.${node.val}')
+			return cfg.get_symbol_location(node.pos, '${enum_type_name}.$node.val')
 		}
 		else {}
 	}
@@ -1315,7 +1313,9 @@ fn (cfg DefinitionConfig) definition_from_expr(node ast.Expr) ?lsp.LocationLink 
 }
 
 fn (mut ls Vls) definition(id int, params string) {
-	goto_definition_params := json.decode(lsp.TextDocumentPositionParams, params) or { panic(err.msg) }
+	goto_definition_params := json.decode(lsp.TextDocumentPositionParams, params) or {
+		panic(err.msg)
+	}
 	uri := goto_definition_params.text_document.uri
 	pos := goto_definition_params.position
 	source := ls.sources[uri.str()]
@@ -1372,7 +1372,7 @@ fn (mut ls Vls) definition(id int, params string) {
 			}
 
 			struct_type_name := cfg.table.type_to_str(node.parent_type)
-			res = cfg.get_symbol_location(node.name_pos, '${struct_type_name}.${node.name}') or {
+			res = cfg.get_symbol_location(node.name_pos, '${struct_type_name}.$node.name') or {
 				ls.send_null(id)
 				return
 			}
