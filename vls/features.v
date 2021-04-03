@@ -289,13 +289,13 @@ mut:
 	offset              int // position of the cursor. used for finding the AST node
 	table               &ast.Table
 	show_global         bool = true // for displaying global (project) symbols
-	show_only_global_fn bool       // for displaying only the functions of the project
-	show_local          bool       = true // for displaying local variables
+	show_only_global_fn bool     // for displaying only the functions of the project
+	show_local          bool     = true // for displaying local variables
 	filter_type         ast.Type = ast.Type(0) // filters results by type
-	fields_only         bool       // for displaying only the struct/enum fields
-	modules_aliases     []string   // for displaying module symbols or module list
-	imports_list        []string   // for completion_items_from_dir and import symbols list
-	is_mut              bool       // filters results based on the object's mutability state.
+	fields_only         bool     // for displaying only the struct/enum fields
+	modules_aliases     []string // for displaying module symbols or module list
+	imports_list        []string // for completion_items_from_dir and import symbols list
+	is_mut              bool     // filters results based on the object's mutability state.
 }
 
 // completion_items_from_stmt returns a list of results from the extracted Stmt node info.
@@ -1258,7 +1258,7 @@ fn (mut ls Vls) find_interfaces_of(uri lsp.DocumentUri, typ ast.Type) []string {
 	type_sym := tbl.get_type_symbol(typ)
 	mut interface_names := []string{}
 
-loop_symbols: for ttype_sym in tbl.type_symbols {
+	loop_symbols: for ttype_sym in tbl.type_symbols {
 		if ttype_sym.info is ast.Interface {
 			// check if the type is present in the interface typeinfo
 			for ityp in ttype_sym.info.types {
@@ -1281,7 +1281,8 @@ loop_symbols: for ttype_sym in tbl.type_symbols {
 
 			for ifield in ttype_sym.info.fields {
 				if field := tbl.find_field_with_embeds(type_sym, ifield.name) {
-					if ifield.typ != field.typ || (ifield.is_mut && !(field.is_mut || field.is_global) ) {
+					if ifield.typ != field.typ
+						|| (ifield.is_mut && !(field.is_mut || field.is_global)) {
 						continue loop_symbols
 					}
 
@@ -1298,7 +1299,9 @@ loop_symbols: for ttype_sym in tbl.type_symbols {
 }
 
 fn (mut ls Vls) implementation(id int, params string) {
-	implementation_params := json.decode(lsp.TextDocumentPositionParams, params) or { ls.panic(err.msg) }
+	implementation_params := json.decode(lsp.TextDocumentPositionParams, params) or {
+		ls.panic(err.msg)
+	}
 
 	uri := implementation_params.text_document.uri
 	pos := implementation_params.position
@@ -1349,7 +1352,7 @@ fn (mut ls Vls) implementation(id int, params string) {
 				else {}
 			}
 		}
-		
+
 		if typ == ast.Type(0) {
 			ls.send_null(id)
 			return
@@ -1358,9 +1361,7 @@ fn (mut ls Vls) implementation(id int, params string) {
 		mut locations := []lsp.Location{}
 		inames := ls.find_interfaces_of(uri, typ)
 		for iname in inames {
-			loc := ls.symbol_locations[uri.dir()][iname] or {
-				continue
-			}
+			loc := ls.symbol_locations[uri.dir()][iname] or { continue }
 			locations << loc
 		}
 
