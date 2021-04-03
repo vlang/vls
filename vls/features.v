@@ -1235,8 +1235,7 @@ struct DefinitionConfig {
 	builtin_symbol_locations map[string]lsp.Location
 	symbol_locations map[string]lsp.Location
 	table &ast.Table
-	offset int
-	file ast.File
+	mod string
 }
 
 fn (cfg DefinitionConfig) get_symbol_location(pos token.Position, entry_name string, alt_entry_names ...string) ?lsp.LocationLink {
@@ -1272,10 +1271,10 @@ fn (cfg DefinitionConfig) definition_from_scope_obj(node ast.Expr, obj ast.Scope
 				target_selection_range: target_range
 			}
 		}
-		else {}
+		else {
+			return none
+		}
 	}
-
-	return none
 }
 
 fn (cfg DefinitionConfig) definition_from_expr(node ast.Expr) ?lsp.LocationLink {
@@ -1284,7 +1283,7 @@ fn (cfg DefinitionConfig) definition_from_expr(node ast.Expr) ?lsp.LocationLink 
 			return cfg.definition_from_scope_obj(node, node.obj)
 		}
 		ast.CallExpr {
-			return cfg.get_symbol_location(node.name_pos, node.name, '${cfg.file.mod.short_name}.${node.name}')
+			return cfg.get_symbol_location(node.name_pos, node.name, '${cfg.mod}.${node.name}')
 		}
 		ast.SelectorExpr {
 			if node.expr_type == ast.Type(0) {
@@ -1320,81 +1319,72 @@ fn (mut ls Vls) definition(id int, params string) {
 	uri := goto_definition_params.text_document.uri
 	pos := goto_definition_params.position
 	source := ls.sources[uri.str()]
+	file := ls.files[uri.str()]
+	offset := compute_offset(source, pos.line, pos.character)
 
 	mut cfg := DefinitionConfig{
 		uri: uri
-		file: ls.files[uri.str()]
-		offset: compute_offset(source, pos.line, pos.character)
+		mod: file.mod.short_name
 		builtin_symbol_locations: ls.builtin_symbol_locations
 		symbol_locations: ls.symbol_locations[uri.dir()]
 		table: ls.tables[uri.dir()]
 	}
 
-	mut node := find_ast_by_pos(ast.Node(cfg.file).children(), cfg.offset) or {
+	mut node := find_ast_by_pos(ast.Node(file).children(), offset) or {
 		ls.send_null(id)
 		return
 	}
 
 	mut should_find_child := false
+	mut res := lsp.LocationLink{}
 	if mut node is ast.Expr {
 		should_find_child = if mut node is ast.CallExpr {
-			!is_within_pos(cfg.offset, node.name_pos)
+			!is_within_pos(offset, node.name_pos)
 		} else if mut node is ast.SelectorExpr {
-			!is_within_pos(cfg.offset, node.pos)
+			!is_within_pos(offset, node.pos)
 		} else {
 			false
 		}
 	}
 
 	if should_find_child {
-		node = find_ast_by_pos(node.children(), cfg.offset) or { node }
+		node = find_ast_by_pos(node.children(), offset) or { node }
 	}
 
 	match mut node {
-		ast.Stmt {} 
 		ast.Expr {
-			res := cfg.definition_from_expr(node) or {
+			res = cfg.definition_from_expr(node) or {
 				ls.log_message(err.msg, .info)
 				ls.send_null(id)
 				return
-			}		
-			ls.send(jsonrpc.Response<lsp.LocationLink>{
-				id: id
-				result: res
-			})
-			return	
+			}
 		}
 		ast.CallArg {
-			res := cfg.definition_from_expr(node.expr) or {
+			res = cfg.definition_from_expr(node.expr) or {
 				ls.send_null(id)
 				return
 			}
-			ls.send(jsonrpc.Response<lsp.LocationLink>{
-				id: id
-				result: res
-			})
-			return
 		}
 		ast.StructInitField {
-			if !is_within_pos(cfg.offset, node.name_pos) || node.parent_type == ast.Type(0) {
+			if !is_within_pos(offset, node.name_pos) || node.parent_type == ast.Type(0) {
 				ls.send_null(id)
 				return
 			}
 
 			struct_type_name := cfg.table.type_to_str(node.parent_type)
-			res := cfg.get_symbol_location(node.name_pos, '${struct_type_name}.${node.name}') or {
+			res = cfg.get_symbol_location(node.name_pos, '${struct_type_name}.${node.name}') or {
 				ls.send_null(id)
 				return
 			}
-
-			ls.send(jsonrpc.Response<lsp.LocationLink>{
-				id: id
-				result: res
-			})
+		}
+		else {
+			ls.send_null(id)
 			return
 		}
-		else {}
 	}
 
-	ls.send_null(id)
+	ls.send(jsonrpc.Response<lsp.LocationLink>{
+		id: id
+		result: res
+	})
 }
