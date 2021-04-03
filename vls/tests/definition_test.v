@@ -224,7 +224,7 @@ const definition_results = map{
 	}
 }
 
-fn test_hover() {
+fn test_definition() {
 	mut io := testing.Testio{}
 	mut ls := vls.new(io)
 	ls.dispatch(io.request_with_params('initialize', lsp.InitializeParams{
