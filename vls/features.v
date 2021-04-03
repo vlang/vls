@@ -88,7 +88,7 @@ fn (mut ls Vls) generate_symbols(file ast.File, uri lsp.DocumentUri) []lsp.Symbo
 	if file.errors.len > 0 && sym_is_cached {
 		return ls.doc_symbols[uri.str()]
 	}
-	dir := os.dir(uri.str())
+	dir := uri.dir()
 	// NB: should never happen. just in case
 	// the requests aren't executed in order
 	if dir !in ls.tables {
@@ -170,7 +170,7 @@ fn (mut ls Vls) signature_help(id int, params string) {
 	}
 
 	file := ls.files[uri.str()]
-	tbl := ls.tables[os.dir(uri.str())]
+	tbl := ls.tables[uri.dir()]
 	offset := compute_offset(ls.sources[uri.str()], pos.line, pos.character)
 	node := find_ast_by_pos(file.stmts.map(ast.Node(it)), offset) or {
 		ls.send_null(id)
@@ -731,7 +731,7 @@ fn (mut ls Vls) completion(id int, params string) {
 		modules_aliases: modules_aliases
 		imports_list: imports_list
 		offset: compute_offset(src, pos.line, pos.character)
-		table: ls.tables[os.dir(file_uri)]
+		table: ls.tables[file_uri.dir()]
 	}
 	// There are some instances that the user would invoke the autocompletion
 	// through a combination of shortcuts (like Ctrl/Cmd+Space) and the results
@@ -1098,7 +1098,7 @@ fn (mut ls Vls) hover(id int, params string) {
 
 	mut cfg := HoverConfig{
 		file: ls.files[uri.str()]
-		table: ls.tables[os.dir(uri.str())]
+		table: ls.tables[uri.dir()]
 		offset: compute_offset(ls.sources[uri.str()], pos.line, pos.character)
 	}
 
