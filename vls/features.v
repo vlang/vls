@@ -1238,12 +1238,8 @@ struct DefinitionConfig {
 	mod                      string
 }
 
-fn (cfg DefinitionConfig) get_symbol_location(pos token.Position, entry_name string, alt_entry_names ...string) ?lsp.LocationLink {
-	// alt_name is used when the given entry_name is not present in
-	// the builtin_symbol_locations map but can be found inside the
-	// symbol_locations map
-	alt_name := if alt_entry_names.len != 0 { alt_entry_names[0] } else { entry_name }
-	loc := cfg.builtin_symbol_locations[entry_name] or { cfg.symbol_locations[alt_name] ? }
+fn (cfg DefinitionConfig) get_symbol_location(pos token.Position, entry_name string) ?lsp.LocationLink {
+	loc := cfg.builtin_symbol_locations[entry_name] or { cfg.symbol_locations[entry_name] ? }
 
 	// NB: Compiling VLS without gc returns a symbol location data
 	// with an empty URI. This is triggered just to make sure.
@@ -1282,7 +1278,12 @@ fn (cfg DefinitionConfig) definition_from_expr(node ast.Expr) ?lsp.LocationLink 
 			return cfg.definition_from_scope_obj(node, node.obj)
 		}
 		ast.CallExpr {
-			return cfg.get_symbol_location(node.name_pos, node.name, '${cfg.mod}.$node.name')
+			name := if node.name in cfg.builtin_symbol_locations {
+				node.name
+			} else {
+				'${cfg.mod}.$node.name'
+			}
+			return cfg.get_symbol_location(node.name_pos, name)
 		}
 		ast.SelectorExpr {
 			if node.expr_type == ast.Type(0) {
