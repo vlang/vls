@@ -71,7 +71,7 @@ fn (mut ls Vls) setup_logger(trace string, client_info lsp.ClientInfo) {
 	// Create the file either in debug mode or when the client trace is set to verbose.
 	if ls.debug || (!ls.debug && trace == 'verbose') {
 		log_path := ls.log_path()
-		os.rm(log_path) or { }
+		os.rm(log_path) or {}
 		ls.logger.set_logpath(log_path)
 	}
 
