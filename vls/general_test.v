@@ -48,13 +48,13 @@ fn test_set_features() {
 		return
 	}
 	assert ls.features() == [.diagnostics, .document_symbol, .workspace_symbol, .signature_help,
-		.completion, .hover, .folding_range]
+		.completion, .hover, .folding_range, .implementation]
 	ls.set_features(['formatting'], true) or {
 		assert false
 		return
 	}
 	assert ls.features() == [.diagnostics, .document_symbol, .workspace_symbol, .signature_help,
-		.completion, .hover, .folding_range, .formatting]
+		.completion, .hover, .folding_range, .implementation, .formatting]
 	ls.set_features(['logging'], true) or {
 		assert err.msg == 'feature "logging" not found'
 		return
