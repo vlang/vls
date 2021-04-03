@@ -1239,7 +1239,7 @@ struct DefinitionConfig {
 	file ast.File
 }
 
-fn (cfg DefinitionConfig) get_definition_data(pos token.Position, entry_name string, alt_entry_names ...string) ?lsp.LocationLink {
+fn (cfg DefinitionConfig) get_symbol_location(pos token.Position, entry_name string, alt_entry_names ...string) ?lsp.LocationLink {
 	alt_name := if alt_entry_names.len != 0 { alt_entry_names[0] } else { entry_name }
 	loc := cfg.builtin_symbol_locations[entry_name] or { 
 		cfg.symbol_locations[alt_name] or {
@@ -1282,7 +1282,7 @@ fn (cfg DefinitionConfig) definition_from_expr(node ast.Expr) ?lsp.LocationLink 
 			return cfg.definition_from_scope_obj(node, node.obj)
 		}
 		ast.CallExpr {
-			return cfg.get_definition_data(node.name_pos, node.name, '${cfg.file.mod.short_name}.${node.name}')
+			return cfg.get_symbol_location(node.name_pos, node.name, '${cfg.file.mod.short_name}.${node.name}')
 		}
 		ast.SelectorExpr {
 			if node.expr_type == ast.Type(0) {
@@ -1290,14 +1290,14 @@ fn (cfg DefinitionConfig) definition_from_expr(node ast.Expr) ?lsp.LocationLink 
 			}
 
 			struct_type_name := cfg.table.type_to_str(node.expr_type)
-			return cfg.get_definition_data(node.pos, '${struct_type_name}.${node.field_name}')
+			return cfg.get_symbol_location(node.pos, '${struct_type_name}.${node.field_name}')
 		}
 		ast.StructInit {
 			if node.typ == ast.Type(0) {
 				return none
 			}
 
-			return cfg.get_definition_data(node.name_pos, cfg.table.type_to_str(node.typ))
+			return cfg.get_symbol_location(node.name_pos, cfg.table.type_to_str(node.typ))
 		}
 		ast.EnumVal {
 			if node.typ == ast.Type(0) {
@@ -1305,7 +1305,7 @@ fn (cfg DefinitionConfig) definition_from_expr(node ast.Expr) ?lsp.LocationLink 
 			}
 
 			enum_type_name := cfg.table.type_to_str(node.typ)
-			return cfg.get_definition_data(node.pos, '${enum_type_name}.${node.val}')
+			return cfg.get_symbol_location(node.pos, '${enum_type_name}.${node.val}')
 		}
 		else {}
 	}
@@ -1381,7 +1381,7 @@ fn (mut ls Vls) definition(id int, params string) {
 			}
 
 			struct_type_name := cfg.table.type_to_str(node.parent_type)
-			res := cfg.get_definition_data(node.name_pos, '${struct_type_name}.${node.name}') or {
+			res := cfg.get_symbol_location(node.name_pos, '${struct_type_name}.${node.name}') or {
 				ls.send_null(id)
 				return
 			}
