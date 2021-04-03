@@ -280,7 +280,7 @@ fn (mut ls Vls) insert_files(files []ast.File) {
 			ls.files.delete(file_uri)
 		}
 		ls.files[file_uri.str()] = file
-		unsafe { file_uri.free() }
+		// unsafe { file_uri.free() }
 	}
 }
 
