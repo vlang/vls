@@ -13,10 +13,15 @@ const definition_inputs = map{
 	'expr_in_array.vv':           lsp.Position{2, 19}
 	'expr_in_map_key.vv':         lsp.Position{4, 10}
 	'expr_in_map_value.vv':       lsp.Position{4, 17}
+	'fn_param_type.vv':           lsp.Position{4, 15}
+	'fn_return_type.vv':          lsp.Position{2, 18}
 	'index_expr.vv':              lsp.Position{3, 18}
+	'interface_field.vv':         lsp.Position{3, 11}
+	'interface_method.vv':        lsp.Position{5, 13}
 	'node_error.vv':              lsp.Position{3, 14}
-	'stmt.vv':                    lsp.Position{0, 23}
 	'selector_expr.vv':           lsp.Position{6, 10}
+	'stmt.vv':                    lsp.Position{0, 23}
+	'struct_field_type.vv':       lsp.Position{3, 8}
 	'struct_init_field_name.vv':  lsp.Position{5, 16}
 	'struct_init_field_value.vv': lsp.Position{10, 23}
 	'struct_init.vv':             lsp.Position{5, 11}
@@ -117,6 +122,36 @@ const definition_results = map{
 			end: lsp.Position{1, 13}
 		}
 	}
+	'fn_param_type.vv':           lsp.LocationLink{
+		target_uri: lsp.document_uri_from_path(os.join_path(base_dir, 'fn_param_type.vv'))
+		origin_selection_range: lsp.Range{
+			start: lsp.Position{4, 14}
+			end: lsp.Position{4, 16}
+		}
+		target_range: lsp.Range{
+			start: lsp.Position{0, 0}
+			end: lsp.Position{2, 9}
+		}
+		target_selection_range: lsp.Range{
+			start: lsp.Position{0, 0}
+			end: lsp.Position{2, 9}
+		}
+	}
+	'fn_return_type.vv':          lsp.LocationLink{
+		target_uri: lsp.document_uri_from_path(os.join_path(base_dir, 'fn_return_type.vv'))
+		origin_selection_range: lsp.Range{
+			start: lsp.Position{2, 16}
+			end: lsp.Position{2, 20}
+		}
+		target_range: lsp.Range{
+			start: lsp.Position{0, 0}
+			end: lsp.Position{0, 9}
+		}
+		target_selection_range: lsp.Range{
+			start: lsp.Position{0, 0}
+			end: lsp.Position{0, 9}
+		}
+	}
 	'index_expr.vv':              lsp.LocationLink{
 		target_uri: lsp.document_uri_from_path(os.join_path(base_dir, 'index_expr.vv'))
 		origin_selection_range: lsp.Range{
@@ -130,6 +165,36 @@ const definition_results = map{
 		target_selection_range: lsp.Range{
 			start: lsp.Position{2, 2}
 			end: lsp.Position{2, 6}
+		}
+	}
+	'interface_field.vv':         lsp.LocationLink{
+		target_uri: lsp.document_uri_from_path(os.join_path(base_dir, 'interface_field.vv'))
+		origin_selection_range: lsp.Range{
+			start: lsp.Position{3, 10}
+			end: lsp.Position{3, 13}
+		}
+		target_range: lsp.Range{
+			start: lsp.Position{0, 0}
+			end: lsp.Position{0, 8}
+		}
+		target_selection_range: lsp.Range{
+			start: lsp.Position{0, 0}
+			end: lsp.Position{0, 8}
+		}
+	}
+	'interface_method.vv':        lsp.LocationLink{
+		target_uri: lsp.document_uri_from_path(os.join_path(base_dir, 'interface_method.vv'))
+		origin_selection_range: lsp.Range{
+			start: lsp.Position{5, 10}
+			end: lsp.Position{6, 16}
+		}
+		target_range: lsp.Range{
+			start: lsp.Position{0, 0}
+			end: lsp.Position{2, 11}
+		}
+		target_selection_range: lsp.Range{
+			start: lsp.Position{0, 0}
+			end: lsp.Position{2, 11}
 		}
 	}
 	'selector_expr.vv':           lsp.LocationLink{
@@ -160,6 +225,21 @@ const definition_results = map{
 		target_selection_range: lsp.Range{
 			start: lsp.Position{1, 2}
 			end: lsp.Position{1, 13}
+		}
+	}
+	'struct_field_type.vv':       lsp.LocationLink{
+		target_uri: lsp.document_uri_from_path(os.join_path(base_dir, 'struct_field_type.vv'))
+		origin_selection_range: lsp.Range{
+			start: lsp.Position{3, 6}
+			end: lsp.Position{3, 9}
+		}
+		target_range: lsp.Range{
+			start: lsp.Position{0, 0}
+			end: lsp.Position{0, 8}
+		}
+		target_selection_range: lsp.Range{
+			start: lsp.Position{0, 0}
+			end: lsp.Position{0, 8}
 		}
 	}
 	'struct_init_field_value.vv': lsp.LocationLink{

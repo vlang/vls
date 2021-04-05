@@ -1360,6 +1360,20 @@ fn (mut ls Vls) definition(id int, params string) {
 	}
 
 	match mut node {
+		ast.Stmt {
+			if mut node is ast.FnDecl {
+				if !is_within_pos(offset, node.return_type_pos) {
+					ls.send_null(id)
+					return
+				}
+
+				type_name := cfg.table.type_to_str(node.return_type)
+				res = cfg.get_symbol_location(node.return_type_pos, type_name) or {
+					ls.send_null(id)
+					return
+				}
+			}
+		}
 		ast.Expr {
 			res = cfg.definition_from_expr(node) or {
 				ls.log_message(err.msg, .info)
@@ -1381,6 +1395,18 @@ fn (mut ls Vls) definition(id int, params string) {
 
 			struct_type_name := cfg.table.type_to_str(node.parent_type)
 			res = cfg.get_symbol_location(node.name_pos, '${struct_type_name}.$node.name') or {
+				ls.send_null(id)
+				return
+			}
+		}
+		ast.Param, ast.StructField {
+			if !is_within_pos(offset, node.type_pos) {
+				ls.send_null(id)
+				return
+			}
+
+			type_name := cfg.table.type_to_str(node.typ)
+			res = cfg.get_symbol_location(node.type_pos, type_name) or {
 				ls.send_null(id)
 				return
 			}
