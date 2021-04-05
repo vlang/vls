@@ -48,7 +48,7 @@ fn (mut ls Vls) did_close(_ int, params string) {
 		}
 	}
 	if no_active_files {
-		ls.tables.delete(file_dir)
+		ls.free_table(file_dir, did_close_params.text_document.uri)
 	}
 	// NB: The diagnostics will be cleared if:
 	// - TODO: If a workspace has opened multiple programs with main() function and one of them is closed.
@@ -73,6 +73,7 @@ fn (mut ls Vls) process_file(source string, uri lsp.DocumentUri) {
 	if uri.ends_with('_test.v') {
 		pref.is_test = true
 	}
+	ls.free_table(target_dir_uri, file_path)
 	table := ls.new_table()
 	mut parsed_files := []ast.File{}
 	mut checker := checker.new_checker(table, pref)
