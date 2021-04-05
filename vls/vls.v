@@ -285,6 +285,7 @@ fn (mut ls Vls) insert_files(files []ast.File) {
 }
 
 // extract_symbol_locations extracts and inserts the locations of the symbols inside the symbol_locations map
+// TODO: unify doc_symbols and ls.symbol_locations in the future
 fn (mut ls Vls) extract_symbol_locations(uri lsp.DocumentUri, mod string, stmts []ast.Stmt) {
 	path := uri.dir()
 	if path in ls.symbol_locations {
@@ -338,8 +339,7 @@ fn (mut ls Vls) extract_symbol_locations(uri lsp.DocumentUri, mod string, stmts 
 				}
 			}
 			ast.InterfaceDecl {
-				stmt_name := '${mod}.${stmt.name}'
-				ls.symbol_locations[path][stmt_name] = lsp.Location{
+				ls.symbol_locations[path][stmt.name] = lsp.Location{
 					uri: uri
 					range: position_to_lsp_range(stmt.pos)
 				}
