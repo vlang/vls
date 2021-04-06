@@ -1,0 +1,5 @@
+type Text = string
+
+fn do_nothing() Text {
+  return 'hey'
+}

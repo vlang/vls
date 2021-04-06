@@ -1,0 +1,7 @@
+struct Bazz {
+  bas int
+}
+
+interface Bazzs {
+  check() Bazz
+} 

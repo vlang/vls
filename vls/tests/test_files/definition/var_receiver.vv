@@ -1,0 +1,5 @@
+struct Pp {}
+
+fn (pp Pp) qq() {
+  ss := pp
+} 

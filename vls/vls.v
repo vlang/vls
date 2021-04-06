@@ -19,6 +19,7 @@ pub enum Feature {
 	completion
 	hover
 	folding_range
+	definition
 }
 
 // feature_from_str returns the Feature-enum value equivalent of the given string.
@@ -33,6 +34,7 @@ fn feature_from_str(feature_name string) ?Feature {
 		'completion' { return Feature.completion }
 		'hover' { return Feature.hover }
 		'folding_range' { return Feature.folding_range }
+		'definition' { return Feature.definition }
 		else { return error('feature "$feature_name" not found') }
 	}
 }
@@ -47,6 +49,7 @@ pub const (
 		.completion,
 		.hover,
 		.folding_range,
+		.definition,
 	]
 )
 
@@ -77,15 +80,17 @@ mut:
 	// changing and there can be instances that a change might
 	// break another module/project data.
 	// tables  map[DocumentUri]&ast.Table
-	tables           map[string]&ast.Table
-	root_uri         lsp.DocumentUri
-	invalid_imports  map[string][]string // where it stores a list of invalid imports
-	doc_symbols      map[string][]lsp.SymbolInformation // doc_symbols is used for caching document symbols
-	builtin_symbols  []string // list of publicly available symbols in builtin
-	enabled_features []Feature = vls.default_features_list
-	capabilities     lsp.ServerCapabilities
-	logger           log.Logger
-	debug            bool
+	tables                   map[string]&ast.Table
+	root_uri                 lsp.DocumentUri
+	invalid_imports          map[string][]string // where it stores a list of invalid imports
+	doc_symbols              map[string][]lsp.SymbolInformation // doc_symbols is used for caching document symbols
+	builtin_symbols          []string // list of publicly available symbols in builtin
+	symbol_locations         map[string]map[string]lsp.Location
+	builtin_symbol_locations map[string]lsp.Location
+	enabled_features         []Feature = vls.default_features_list
+	capabilities             lsp.ServerCapabilities
+	logger                   log.Logger
+	debug                    bool
 	// client_capabilities lsp.ClientCapabilities
 pub mut:
 	// TODO: replace with io.ReadWriter
@@ -141,41 +146,18 @@ pub fn (mut ls Vls) dispatch(payload string) {
 				ls.exit()
 				// ls.shutdown(request.id)
 			}
-			'exit' {
-				// ignore for the reasons stated in the above comment
-				// Freeing extra memory here
-				ls.exit()
-			}
-			'textDocument/didOpen' {
-				ls.did_open(request.id, request.params)
-			}
-			'textDocument/didChange' {
-				ls.did_change(request.id, request.params)
-			}
-			'textDocument/didClose' {
-				ls.did_close(request.id, request.params)
-			}
-			'textDocument/formatting' {
-				ls.formatting(request.id, request.params)
-			}
-			'textDocument/documentSymbol' {
-				ls.document_symbol(request.id, request.params)
-			}
-			'workspace/symbol' {
-				ls.workspace_symbol(request.id, request.params)
-			}
-			'textDocument/signatureHelp' {
-				ls.signature_help(request.id, request.params)
-			}
-			'textDocument/completion' {
-				ls.completion(request.id, request.params)
-			}
-			'textDocument/hover' {
-				ls.hover(request.id, request.params)
-			}
-			'textDocument/foldingRange' {
-				ls.folding_range(request.id, request.params)
-			}
+			'exit' { /* ignore for the reasons stated in the above comment */ }
+			'textDocument/didOpen' { ls.did_open(request.id, request.params) }
+			'textDocument/didChange' { ls.did_change(request.id, request.params) }
+			'textDocument/didClose' { ls.did_close(request.id, request.params) }
+			'textDocument/formatting' { ls.formatting(request.id, request.params) }
+			'textDocument/documentSymbol' { ls.document_symbol(request.id, request.params) }
+			'workspace/symbol' { ls.workspace_symbol(request.id, request.params) }
+			'textDocument/signatureHelp' { ls.signature_help(request.id, request.params) }
+			'textDocument/completion' { ls.completion(request.id, request.params) }
+			'textDocument/hover' { ls.hover(request.id, request.params) }
+			'textDocument/foldingRange' { ls.folding_range(request.id, request.params) }
+			'textDocument/definition' { ls.definition(request.id, request.params) }
 			else {}
 		}
 	} else {
@@ -294,11 +276,90 @@ fn new_scope_and_pref(lookup_paths ...string) (&ast.Scope, &pref.Preferences) {
 fn (mut ls Vls) insert_files(files []ast.File) {
 	for file in files {
 		file_uri := lsp.document_uri_from_path(file.path)
+		ls.extract_symbol_locations(file_uri, file.mod.name, file.stmts)
 		if file_uri.str() in ls.files {
 			ls.files.delete(file_uri)
 		}
 		ls.files[file_uri.str()] = file
-		unsafe { file_uri.free() }
+		// unsafe { file_uri.free() }
+	}
+}
+
+// extract_symbol_locations extracts and inserts the locations of the symbols inside the symbol_locations map
+// TODO: unify doc_symbols and ls.symbol_locations in the future
+fn (mut ls Vls) extract_symbol_locations(uri lsp.DocumentUri, mod string, stmts []ast.Stmt) {
+	path := uri.dir()
+	if path in ls.symbol_locations {
+		ls.symbol_locations.delete(path)
+	}
+
+	ls.symbol_locations[path] = map[string]lsp.Location{}
+	for stmt in stmts {
+		match stmt {
+			ast.ConstDecl {
+				for field in stmt.fields {
+					name := '${mod}.${field.name}'
+					ls.symbol_locations[path][name] = lsp.Location{
+						uri: uri
+						range: position_to_lsp_range(field.pos)
+					}
+				}
+			}
+			ast.StructDecl {
+				ls.symbol_locations[path][stmt.name] = lsp.Location{
+					uri: uri
+					range: position_to_lsp_range(stmt.pos)
+				}
+				for field in stmt.fields {
+					name := '${stmt.name}.${field.name}'
+					ls.symbol_locations[path][name] = lsp.Location{
+						uri: uri
+						range: position_to_lsp_range(field.pos)
+					}
+				}
+			}
+			ast.EnumDecl {
+				ls.symbol_locations[path][stmt.name] = lsp.Location{
+					uri: uri
+					range: position_to_lsp_range(stmt.pos)
+				}
+
+				for field in stmt.fields {
+					name := '${stmt.name}.${field.name}'
+					ls.symbol_locations[path][name] = lsp.Location{
+						uri: uri
+						range: position_to_lsp_range(field.pos)
+					}
+				}
+			}
+			ast.FnDecl {
+				stmt_name := '${mod}.${stmt.name}'
+				ls.symbol_locations[path][stmt_name] = lsp.Location{
+					uri: uri
+					range: position_to_lsp_range(stmt.pos)
+				}
+			}
+			ast.InterfaceDecl {
+				ls.symbol_locations[path][stmt.name] = lsp.Location{
+					uri: uri
+					range: position_to_lsp_range(stmt.pos)
+				}
+			}
+			ast.TypeDecl {
+				match stmt {
+					ast.AliasTypeDecl, ast.FnTypeDecl, ast.SumTypeDecl {
+						stmt_name := '${mod}.${stmt.name}'
+						ls.symbol_locations[path][stmt_name] = lsp.Location{
+							uri: uri
+							range: position_to_lsp_range(stmt.pos)
+						}
+					}
+				}
+			}
+			else {
+				continue
+			}
+		}
 	}
 }
 

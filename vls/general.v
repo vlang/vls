@@ -30,6 +30,7 @@ fn (mut ls Vls) initialize(id int, params string) {
 		document_formatting_provider: Feature.formatting in ls.enabled_features
 		hover_provider: Feature.hover in ls.enabled_features
 		folding_range_provider: Feature.folding_range in ls.enabled_features
+		definition_provider: Feature.definition in ls.enabled_features
 	}
 
 	if Feature.completion in ls.enabled_features {
@@ -96,11 +97,37 @@ fn (mut ls Vls) process_builtin() {
 	$if !test {
 		for file in parsed_files {
 			for stmt in file.stmts {
-				if stmt is ast.FnDecl {
-					if !stmt.is_pub || stmt.is_method {
-						continue
+				doc_uri := lsp.document_uri_from_path(file.path)
+
+				match stmt {
+					ast.FnDecl {
+						if !stmt.is_pub || stmt.is_method {
+							continue
+						}
+						ls.builtin_symbols << stmt.name
+						ls.builtin_symbol_locations[stmt.name] = lsp.Location{
+							uri: doc_uri
+							range: position_to_lsp_range(stmt.pos)
+						}
 					}
-					ls.builtin_symbols << stmt.name
+					ast.StructDecl {
+						if stmt.language != .v {
+							continue
+						}
+
+						ls.builtin_symbol_locations[stmt.name] = lsp.Location{
+							uri: doc_uri
+							range: position_to_lsp_range(stmt.pos)
+						}
+
+						for field in stmt.fields {
+							ls.builtin_symbol_locations['${stmt.name}.${field.name}'] = lsp.Location{
+								uri: doc_uri
+								range: position_to_lsp_range(field.pos)
+							}
+						}
+					}
+					else {}
 				}
 			}
 		}

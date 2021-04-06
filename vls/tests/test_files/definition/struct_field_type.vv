@@ -1,0 +1,5 @@
+type Num = int
+
+struct AnotherStruct {
+  num Num
+}

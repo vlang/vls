@@ -37,7 +37,7 @@ fn (mut ls Vls) did_change(_ int, params string) {
 fn (mut ls Vls) did_close(_ int, params string) {
 	did_close_params := json.decode(lsp.DidCloseTextDocumentParams, params) or { ls.panic(err.msg) }
 	uri := did_close_params.text_document.uri
-	file_dir := os.dir(uri)
+	file_dir := uri.dir()
 	mut no_active_files := true
 	ls.sources.delete(uri.str())
 	ls.files.delete(uri.str())
@@ -66,7 +66,7 @@ fn (mut ls Vls) process_file(source string, uri lsp.DocumentUri) {
 	ls.sources[uri.str()] = source.bytes()
 	file_path := uri.path()
 	target_dir := os.dir(file_path)
-	target_dir_uri := os.dir(uri)
+	target_dir_uri := uri.dir()
 	// ls.log_message(target_dir, .info)
 	scope, mut pref := new_scope_and_pref(target_dir, os.dir(target_dir), os.join_path(target_dir,
 		'modules'), ls.root_uri.path())
