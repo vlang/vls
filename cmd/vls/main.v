@@ -8,8 +8,13 @@ import os
 fn C._setmode(int, int)
 
 const (
-	meta = vmod.decode(@VMOD_FILE) ?
+	meta = meta_info()
 )
+
+fn meta_info() vmod.Manifest {
+	x := vmod.decode(@VMOD_FILE) or { panic(err) }
+	return x
+}
 
 fn run_cli(cmd cli.Command) ? {
 	enable_flag_raw := cmd.flags.get_string('enable') or { '' }

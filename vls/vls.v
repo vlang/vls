@@ -142,6 +142,7 @@ pub fn (mut ls Vls) dispatch(payload string) {
 				// which dramatically increases the memory. Unless there is a fix
 				// or other possible alternatives, the solution for now is to
 				// immediately exit when the server receives a shutdown request.
+				// Freeing extra memory here
 				ls.exit()
 				// ls.shutdown(request.id)
 			}
@@ -362,10 +363,34 @@ fn (mut ls Vls) extract_symbol_locations(uri lsp.DocumentUri, mod string, stmts 
 	}
 }
 
+fn (mut ls Vls) free_table(dir_path string, file_path string) {
+	if dir_path in ls.tables {
+		unsafe {
+			old_table := ls.tables[dir_path]
+			old_table.type_symbols.free()
+			old_table.type_idxs.free()
+			old_table.fns.free()
+			old_table.imports.free()
+			old_table.modules.free()
+			old_table.cflags.free()
+			old_table.redefined_fns.free()
+			old_table.fn_gen_types.free()
+		}
+		ls.tables.delete(dir_path)
+	}
+	if file_path in ls.invalid_imports {
+		unsafe {
+			ls.invalid_imports[file_path].free()
+		}
+		ls.invalid_imports.delete(file_path)
+	}
+}
+
 // new_table returns a new table based on the existing data of base_table
 fn (ls Vls) new_table() &ast.Table {
-	mut tbl := ast.new_table()
-	tbl.type_symbols = ls.base_table.type_symbols.clone()
+	mut tbl := &ast.Table{
+		type_symbols: ls.base_table.type_symbols.clone()
+	}
 	tbl.type_idxs = ls.base_table.type_idxs.clone()
 	tbl.fns = ls.base_table.fns.clone()
 	tbl.imports = ls.base_table.imports.clone()
