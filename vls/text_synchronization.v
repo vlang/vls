@@ -134,7 +134,15 @@ fn (mut ls Vls) parse_imports(parsed_files []ast.File, table &ast.Table, pref &p
 					break
 				}
 				found = true
-				newly_parsed_files << parser.parse_files(files, table, pref, scope)
+				mut tmp_new_parsed_files := parser.parse_files(files, table, pref, scope)
+				tmp_new_parsed_files = tmp_new_parsed_files.filter(it.mod.name !in done_imports)
+				mut clean_new_files_names := []string{}
+				for index, new_file in tmp_new_parsed_files {
+					if new_file.mod.name !in clean_new_files_names {
+						newly_parsed_files << tmp_new_parsed_files[index]
+						clean_new_files_names << new_file.mod.name
+					}
+				}
 				newly_parsed_files2, errs2 := ls.parse_imports(newly_parsed_files, table,
 					pref, scope)
 				errs << errs2
