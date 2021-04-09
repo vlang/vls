@@ -1424,7 +1424,6 @@ fn (mut ls Vls) definition(id int, params string) {
 	})
 }
 
-
 fn implementation_from_stmt(stmt ast.Stmt, table &ast.Table) ast.Type {
 	match stmt {
 		ast.StructDecl, ast.EnumDecl, ast.InterfaceDecl {
