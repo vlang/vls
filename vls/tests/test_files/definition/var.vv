@@ -1,0 +1,4 @@
+fn main() {
+  nmm := 10
+  println(nmm)
+}

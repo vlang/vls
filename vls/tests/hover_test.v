@@ -4,7 +4,6 @@ import json
 import lsp
 import os
 
-// TODO:
 const hover_inputs = map{
 	'call_expr_method.vv':     lsp.HoverParams{
 		position: lsp.Position{10, 16}

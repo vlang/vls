@@ -1,0 +1,6 @@
+fn function_name(num int) {}
+
+fn main() {
+  nm := 10
+  function_name(nm)
+}

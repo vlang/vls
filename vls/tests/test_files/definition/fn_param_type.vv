@@ -1,0 +1,5 @@
+struct Zz {
+  num int
+}
+
+fn do_what(zz Zz) {}

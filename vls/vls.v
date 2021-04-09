@@ -20,6 +20,7 @@ pub enum Feature {
 	hover
 	folding_range
 	implementation
+	definition
 }
 
 // feature_from_str returns the Feature-enum value equivalent of the given string.
@@ -35,6 +36,7 @@ fn feature_from_str(feature_name string) ?Feature {
 		'hover' { return Feature.hover }
 		'folding_range' { return Feature.folding_range }
 		'implementation' { return Feature.implementation }
+		'definition' { return Feature.definition }
 		else { return error('feature "$feature_name" not found') }
 	}
 }
@@ -50,6 +52,7 @@ pub const (
 		.hover,
 		.folding_range,
 		.implementation,
+		.definition,
 	]
 )
 
@@ -80,16 +83,17 @@ mut:
 	// changing and there can be instances that a change might
 	// break another module/project data.
 	// tables  map[DocumentUri]&ast.Table
-	tables           map[string]&ast.Table
-	root_uri         lsp.DocumentUri
-	invalid_imports  map[string][]string // where it stores a list of invalid imports
-	doc_symbols      map[string][]lsp.SymbolInformation // doc_symbols is used for caching document symbols
-	builtin_symbols  []string // list of publicly available symbols in builtin
-	symbol_locations map[string]map[string]lsp.Location
-	enabled_features []Feature = vls.default_features_list
-	capabilities     lsp.ServerCapabilities
-	logger           log.Logger
-	debug            bool
+	tables                   map[string]&ast.Table
+	root_uri                 lsp.DocumentUri
+	invalid_imports          map[string][]string // where it stores a list of invalid imports
+	doc_symbols              map[string][]lsp.SymbolInformation // doc_symbols is used for caching document symbols
+	builtin_symbols          []string // list of publicly available symbols in builtin
+	symbol_locations         map[string]map[string]lsp.Location
+	builtin_symbol_locations map[string]lsp.Location
+	enabled_features         []Feature = vls.default_features_list
+	capabilities             lsp.ServerCapabilities
+	logger                   log.Logger
+	debug                    bool
 	// client_capabilities lsp.ClientCapabilities
 pub mut:
 	// TODO: replace with io.ReadWriter
@@ -141,45 +145,23 @@ pub fn (mut ls Vls) dispatch(payload string) {
 				// which dramatically increases the memory. Unless there is a fix
 				// or other possible alternatives, the solution for now is to
 				// immediately exit when the server receives a shutdown request.
+				// Freeing extra memory here
 				ls.exit()
 				// ls.shutdown(request.id)
 			}
-			'exit' {
-				// ignore for the reasons stated in the above comment
-			}
-			'textDocument/didOpen' {
-				ls.did_open(request.id, request.params)
-			}
-			'textDocument/didChange' {
-				ls.did_change(request.id, request.params)
-			}
-			'textDocument/didClose' {
-				ls.did_close(request.id, request.params)
-			}
-			'textDocument/formatting' {
-				ls.formatting(request.id, request.params)
-			}
-			'textDocument/documentSymbol' {
-				ls.document_symbol(request.id, request.params)
-			}
-			'workspace/symbol' {
-				ls.workspace_symbol(request.id, request.params)
-			}
-			'textDocument/signatureHelp' {
-				ls.signature_help(request.id, request.params)
-			}
-			'textDocument/completion' {
-				ls.completion(request.id, request.params)
-			}
-			'textDocument/hover' {
-				ls.hover(request.id, request.params)
-			}
-			'textDocument/foldingRange' {
-				ls.folding_range(request.id, request.params)
-			}
-			'textDocument/implementation' {
-				ls.implementation(request.id, request.params)
-			}
+			'exit' { /* ignore for the reasons stated in the above comment */ }
+			'textDocument/didOpen' { ls.did_open(request.id, request.params) }
+			'textDocument/didChange' { ls.did_change(request.id, request.params) }
+			'textDocument/didClose' { ls.did_close(request.id, request.params) }
+			'textDocument/formatting' { ls.formatting(request.id, request.params) }
+			'textDocument/documentSymbol' { ls.document_symbol(request.id, request.params) }
+			'workspace/symbol' { ls.workspace_symbol(request.id, request.params) }
+			'textDocument/signatureHelp' { ls.signature_help(request.id, request.params) }
+			'textDocument/completion' { ls.completion(request.id, request.params) }
+			'textDocument/hover' { ls.hover(request.id, request.params) }
+			'textDocument/foldingRange' { ls.folding_range(request.id, request.params) }
+			'textDocument/definition' { ls.definition(request.id, request.params) }
+			'textDocument/implementation' { ls.implementation(request.id, request.params) }
 			else {}
 		}
 	} else {
@@ -298,16 +280,17 @@ fn new_scope_and_pref(lookup_paths ...string) (&ast.Scope, &pref.Preferences) {
 fn (mut ls Vls) insert_files(files []ast.File) {
 	for file in files {
 		file_uri := lsp.document_uri_from_path(file.path)
+		ls.extract_symbol_locations(file_uri, file.mod.name, file.stmts)
 		if file_uri.str() in ls.files {
 			ls.files.delete(file_uri)
 		}
 		ls.files[file_uri.str()] = file
-		ls.extract_symbol_locations(file_uri, file.mod.name, file.stmts)
-		unsafe { file_uri.free() }
+		// unsafe { file_uri.free() }
 	}
 }
 
 // extract_symbol_locations extracts and inserts the locations of the symbols inside the symbol_locations map
+// TODO: unify doc_symbols and ls.symbol_locations in the future
 fn (mut ls Vls) extract_symbol_locations(uri lsp.DocumentUri, mod string, stmts []ast.Stmt) {
 	path := uri.dir()
 	if path in ls.symbol_locations {
@@ -354,7 +337,8 @@ fn (mut ls Vls) extract_symbol_locations(uri lsp.DocumentUri, mod string, stmts 
 				}
 			}
 			ast.FnDecl {
-				ls.symbol_locations[path][stmt.name] = lsp.Location{
+				stmt_name := '${mod}.${stmt.name}'
+				ls.symbol_locations[path][stmt_name] = lsp.Location{
 					uri: uri
 					range: position_to_lsp_range(stmt.pos)
 				}
@@ -383,10 +367,34 @@ fn (mut ls Vls) extract_symbol_locations(uri lsp.DocumentUri, mod string, stmts 
 	}
 }
 
+fn (mut ls Vls) free_table(dir_path string, file_path string) {
+	if dir_path in ls.tables {
+		unsafe {
+			old_table := ls.tables[dir_path]
+			old_table.type_symbols.free()
+			old_table.type_idxs.free()
+			old_table.fns.free()
+			old_table.imports.free()
+			old_table.modules.free()
+			old_table.cflags.free()
+			old_table.redefined_fns.free()
+			old_table.fn_gen_types.free()
+		}
+		ls.tables.delete(dir_path)
+	}
+	if file_path in ls.invalid_imports {
+		unsafe {
+			ls.invalid_imports[file_path].free()
+		}
+		ls.invalid_imports.delete(file_path)
+	}
+}
+
 // new_table returns a new table based on the existing data of base_table
 fn (ls Vls) new_table() &ast.Table {
-	mut tbl := ast.new_table()
-	tbl.type_symbols = ls.base_table.type_symbols.clone()
+	mut tbl := &ast.Table{
+		type_symbols: ls.base_table.type_symbols.clone()
+	}
 	tbl.type_idxs = ls.base_table.type_idxs.clone()
 	tbl.fns = ls.base_table.fns.clone()
 	tbl.imports = ls.base_table.imports.clone()

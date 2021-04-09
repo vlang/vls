@@ -1,0 +1,7 @@
+struct Person3 {
+  name string
+}
+
+fn main() {
+  pr := Person3{'lol'}
+}

@@ -69,7 +69,7 @@ Afterwards, go to your editor's configuration and scroll to the V extension sect
 - [x] `hover`
 - [x] `signatureHelp`
 - [ ] `declaration`
-- [ ] `definition`
+- [x] `definition`
 - [ ] `typeDefinition`
 - [x] `implementation`
 - [ ] `references`

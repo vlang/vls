@@ -37,7 +37,7 @@ fn (mut ls Vls) did_change(_ int, params string) {
 fn (mut ls Vls) did_close(_ int, params string) {
 	did_close_params := json.decode(lsp.DidCloseTextDocumentParams, params) or { ls.panic(err.msg) }
 	uri := did_close_params.text_document.uri
-	file_dir := os.dir(uri)
+	file_dir := uri.dir()
 	mut no_active_files := true
 	ls.sources.delete(uri.str())
 	ls.files.delete(uri.str())
@@ -48,7 +48,7 @@ fn (mut ls Vls) did_close(_ int, params string) {
 		}
 	}
 	if no_active_files {
-		ls.tables.delete(file_dir)
+		ls.free_table(file_dir, did_close_params.text_document.uri)
 	}
 	// NB: The diagnostics will be cleared if:
 	// - TODO: If a workspace has opened multiple programs with main() function and one of them is closed.
@@ -66,13 +66,14 @@ fn (mut ls Vls) process_file(source string, uri lsp.DocumentUri) {
 	ls.sources[uri.str()] = source.bytes()
 	file_path := uri.path()
 	target_dir := os.dir(file_path)
-	target_dir_uri := os.dir(uri)
+	target_dir_uri := uri.dir()
 	// ls.log_message(target_dir, .info)
 	scope, mut pref := new_scope_and_pref(target_dir, os.dir(target_dir), os.join_path(target_dir,
 		'modules'), ls.root_uri.path())
 	if uri.ends_with('_test.v') {
 		pref.is_test = true
 	}
+	ls.free_table(target_dir_uri, file_path)
 	table := ls.new_table()
 	mut parsed_files := []ast.File{}
 	mut checker := checker.new_checker(table, pref)
@@ -133,7 +134,15 @@ fn (mut ls Vls) parse_imports(parsed_files []ast.File, table &ast.Table, pref &p
 					break
 				}
 				found = true
-				newly_parsed_files << parser.parse_files(files, table, pref, scope)
+				mut tmp_new_parsed_files := parser.parse_files(files, table, pref, scope)
+				tmp_new_parsed_files = tmp_new_parsed_files.filter(it.mod.name !in done_imports)
+				mut clean_new_files_names := []string{}
+				for index, new_file in tmp_new_parsed_files {
+					if new_file.mod.name !in clean_new_files_names {
+						newly_parsed_files << tmp_new_parsed_files[index]
+						clean_new_files_names << new_file.mod.name
+					}
+				}
 				newly_parsed_files2, errs2 := ls.parse_imports(newly_parsed_files, table,
 					pref, scope)
 				errs << errs2

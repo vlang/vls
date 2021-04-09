@@ -48,6 +48,7 @@ pub mut:
 }
 
 pub struct LocationLink {
+pub:
 	origin_selection_range Range       [json: originSelectionRange]
 	target_uri             DocumentUri [json: targetUri]
 	target_range           Range       [json: targetRange]

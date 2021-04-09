@@ -1,0 +1,4 @@
+fn main() {
+  just_a_name := 'Bob'
+  names := [just_a_name, 'Steve']
+}

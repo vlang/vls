@@ -176,7 +176,7 @@ pub fn (mut l Log) response(msg string, kind TransportKind) {
 	mut resp_method := ''
 	if payload.id in l.cur_requests {
 		resp_method = l.cur_requests[payload.id]
-		l.cur_requests.delete(payload.id.str())
+		l.cur_requests.delete(payload.id)
 	}
 
 	l.write(kind: resp_kind, message: msg, method: resp_method, timestamp: time.now())
