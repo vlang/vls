@@ -451,9 +451,10 @@ fn (mut cfg CompletionItemConfig) completion_items_from_expr(expr ast.Expr) []ls
 			} else if expr.expr_type != 0 || expr.typ != 0 {
 				selected_typ := if expr.typ != 0 { expr.typ } else { expr.expr_type }
 				type_sym := cfg.table.get_type_symbol(selected_typ)
-				root := expr.root_ident()
-				if root.obj is ast.Var {
-					cfg.is_mut = root.obj.is_mut
+				if root := expr.root_ident() {
+					if root.obj is ast.Var {
+						cfg.is_mut = root.obj.is_mut
+					}
 				}
 
 				// Include the list of available struct fields based on the type info
