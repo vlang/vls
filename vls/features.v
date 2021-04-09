@@ -214,7 +214,7 @@ fn (mut ls Vls) signature_help(id int, params string) {
 			})
 			return
 		}
-		// create a signature help info based on the 
+		// create a signature help info based on the
 		// call expr info
 		// TODO: use string concat in the meantime as
 		// the msvc CI fails when using strings.builder
@@ -451,9 +451,10 @@ fn (mut cfg CompletionItemConfig) completion_items_from_expr(expr ast.Expr) []ls
 			} else if expr.expr_type != 0 || expr.typ != 0 {
 				selected_typ := if expr.typ != 0 { expr.typ } else { expr.expr_type }
 				type_sym := cfg.table.get_type_symbol(selected_typ)
-				root := expr.root_ident()
-				if root.obj is ast.Var {
-					cfg.is_mut = root.obj.is_mut
+				if root := expr.root_ident() {
+					if root.obj is ast.Var {
+						cfg.is_mut = root.obj.is_mut
+					}
 				}
 
 				// Include the list of available struct fields based on the type info
@@ -1110,7 +1111,7 @@ fn (mut ls Vls) hover(id int, params string) {
 
 	mut hover_data := lsp.Hover{}
 
-	// the contents of the node will be extracted and be injected 
+	// the contents of the node will be extracted and be injected
 	// into the hover_data variable
 	// TODO: simplify == tablt.Type(0) checking in the future
 	match node {
@@ -1340,7 +1341,7 @@ fn (mut ls Vls) definition(id int, params string) {
 	}
 
 	// for CallExpr and SelectorExpr nodes, both of which
-	// have a special code inside the AST walker, will need to 
+	// have a special code inside the AST walker, will need to
 	// have another check if the position is within their children
 	// before doing another AST traversal
 	mut should_find_child := false
