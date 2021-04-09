@@ -1427,7 +1427,7 @@ fn (mut ls Vls) definition(id int, params string) {
 
 fn implementation_from_stmt(stmt ast.Stmt, table &ast.Table) ast.Type {
 	match stmt {
-		ast.StructDecl, ast.EnumDecl {
+		ast.StructDecl, ast.EnumDecl, ast.InterfaceDecl {
 			idx := table.find_type_idx(stmt.name)
 			if idx > 0 {
 				return ast.new_type(idx)
@@ -1535,6 +1535,9 @@ fn (mut ls Vls) implementation(id int, params string) {
 		mut typ := ast.Type(0)
 
 		if node is ast.Stmt {
+			if node is ast.InterfaceDecl {
+				ls.log_message(node.pos.str(), .info)
+			}
 			typ = implementation_from_stmt(node, table)
 		} else if node is ast.Expr {
 			if node is ast.StructInit {
@@ -1554,11 +1557,25 @@ fn (mut ls Vls) implementation(id int, params string) {
 			return
 		}
 
+		type_sym := table.get_type_symbol(typ)
 		mut locations := []lsp.Location{}
-		inames := ls.find_interfaces_of(uri, typ)
-		for iname in inames {
-			loc := ls.symbol_locations[uri.dir()][iname] or { continue }
-			locations << loc
+		
+		if type_sym.info is ast.Interface {
+			// TODO: still primitive. don't just rely on the type info's
+			// already existing types field
+			//
+			// find implementations of the interface type
+			for implementor_type in type_sym.info.types {
+				symbol_name := table.get_type_name(implementor_type)
+				locations << ls.symbol_locations[uri.dir()][symbol_name] or {
+					continue
+				}
+			}
+		} else {
+			inames := ls.find_interfaces_of(uri, typ)
+			for iname in inames {
+				locations << ls.symbol_locations[uri.dir()][iname] or { continue }
+			}
 		}
 
 		ls.send(jsonrpc.Response<[]lsp.Location>{
