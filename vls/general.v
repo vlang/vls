@@ -184,7 +184,7 @@ fn (mut ls Vls) exit() {
 		ls.base_table.modules.free()
 		ls.base_table.cflags.free()
 		ls.base_table.redefined_fns.free()
-		ls.base_table.fn_gen_types.free()
+		ls.base_table.fn_generic_types.free()
 		free(ls.base_table)
 	}
 	exit(int(ls.status != .shutdown))

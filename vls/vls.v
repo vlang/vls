@@ -374,7 +374,7 @@ fn (mut ls Vls) free_table(dir_path string, file_path string) {
 			old_table.modules.free()
 			old_table.cflags.free()
 			old_table.redefined_fns.free()
-			old_table.fn_gen_types.free()
+			old_table.fn_generic_types.free()
 		}
 		ls.tables.delete(dir_path)
 	}
@@ -397,7 +397,7 @@ fn (ls Vls) new_table() &ast.Table {
 	tbl.modules = ls.base_table.modules.clone()
 	tbl.cflags = ls.base_table.cflags.clone()
 	tbl.redefined_fns = ls.base_table.redefined_fns.clone()
-	tbl.fn_gen_types = ls.base_table.fn_gen_types.clone()
+	tbl.fn_generic_types = ls.base_table.fn_generic_types.clone()
 	tbl.cmod_prefix = ls.base_table.cmod_prefix
 	tbl.is_fmt = ls.base_table.is_fmt
 	return tbl
