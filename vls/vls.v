@@ -262,6 +262,7 @@ fn new_scope_and_pref(lookup_paths ...string) (&ast.Scope, &pref.Preferences) {
 		parent: 0
 	}
 	prefs := &pref.Preferences{
+		enable_globals: true
 		output_mode: .silent
 		backend: .c
 		os: ._auto
