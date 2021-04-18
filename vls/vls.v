@@ -367,15 +367,7 @@ fn (mut ls Vls) extract_symbol_locations(uri lsp.DocumentUri, mod string, stmts 
 fn (mut ls Vls) free_table(dir_path string, file_path string) {
 	if dir_path in ls.tables {
 		unsafe {
-			old_table := ls.tables[dir_path]
-			old_table.type_symbols.free()
-			old_table.type_idxs.free()
-			old_table.fns.free()
-			old_table.imports.free()
-			old_table.modules.free()
-			old_table.cflags.free()
-			old_table.redefined_fns.free()
-			old_table.fn_generic_types.free()
+			ls.tables[dir_path].free()
 		}
 		ls.tables.delete(dir_path)
 	}

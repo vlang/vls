@@ -133,24 +133,8 @@ fn (mut ls Vls) process_builtin() {
 		}
 	}
 	unsafe {
-		for file in parsed_files {
-			file.stmts.free()
-			free_scope(file.scope)
-		}
 		builtin_files.free()
 		parsed_files.free()
-	}
-}
-
-[unsafe]
-pub fn free_scope(s ast.Scope) {
-	unsafe {
-		s.objects.free()
-		s.struct_fields.free()
-		for child in s.children {
-			free_scope(child)
-		}
-		s.children.free()
 	}
 }
 
@@ -177,15 +161,7 @@ fn (mut ls Vls) exit() {
 		for key, _ in ls.tables {
 			ls.free_table(key, '')
 		}
-		ls.base_table.type_symbols.free()
-		ls.base_table.type_idxs.free()
-		ls.base_table.fns.free()
-		ls.base_table.imports.free()
-		ls.base_table.modules.free()
-		ls.base_table.cflags.free()
-		ls.base_table.redefined_fns.free()
-		ls.base_table.fn_generic_types.free()
-		free(ls.base_table)
+		ls.base_table.free()
 	}
 	exit(int(ls.status != .shutdown))
 }
