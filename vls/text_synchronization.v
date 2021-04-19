@@ -70,9 +70,11 @@ fn (mut ls Vls) process_file(source string, uri lsp.DocumentUri) {
 	// ls.log_message(target_dir, .info)
 	scope, mut pref := new_scope_and_pref(target_dir, os.dir(target_dir), os.join_path(target_dir,
 		'modules'), ls.root_uri.path())
-	if uri.ends_with('_test.v') {
-		pref.is_test = true
-	}
+	pref.is_test = file_path.ends_with('_test.v') || file_path.ends_with('_test.vv')
+		|| file_path.all_before_last('.v').all_before_last('.').ends_with('_test')
+	pref.is_vsh = file_path.ends_with('.vsh')
+	pref.is_script = pref.is_vsh || file_path.ends_with('.v') || file_path.ends_with('.vv')
+
 	ls.free_table(target_dir_uri, file_path)
 	table := ls.new_table()
 	mut parsed_files := []ast.File{}
