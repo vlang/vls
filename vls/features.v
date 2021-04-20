@@ -142,6 +142,9 @@ fn (mut ls Vls) generate_symbols(file ast.File, uri lsp.DocumentUri) []lsp.Symbo
 				}
 			}
 			ast.FnDecl {
+				if pos.start.line == pos.end.line && pos.start.character == pos.end.character {
+					continue
+				}
 				name = stmt.name
 				kind = .function
 				if stmt.is_method && stmt.receiver.typ != 0 {

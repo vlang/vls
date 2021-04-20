@@ -38,7 +38,7 @@ fn (mut ls Vls) did_change(_ int, params string) {
 	ls.process_file(source, uri)
 }
 
-[unsafe]
+[manualfree]
 fn (mut ls Vls) did_close(_ int, params string) {
 	did_close_params := json.decode(lsp.DidCloseTextDocumentParams, params) or { 
 		ls.panic(err.msg) 

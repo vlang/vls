@@ -18,7 +18,8 @@ const folding_range_results = map{
 			start_line: 8
 			start_character: 0
 			end_line: 11
-			end_character: 9
+			// end_character: 9
+			end_character: 60
 			kind: 'region'
 		},
 		lsp.FoldingRange{
