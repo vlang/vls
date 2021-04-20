@@ -38,6 +38,7 @@ fn (mut ls Vls) did_change(_ int, params string) {
 	ls.process_file(source, uri)
 }
 
+[manualfree]
 fn (mut ls Vls) did_close(_ int, params string) {
 	did_close_params := json.decode(lsp.DidCloseTextDocumentParams, params) or { 
 		ls.panic(err.msg) 
@@ -46,8 +47,12 @@ fn (mut ls Vls) did_close(_ int, params string) {
 	uri := did_close_params.text_document.uri
 	file_dir := uri.dir()
 	mut no_active_files := true
-	ls.sources.delete(uri.str())
-	ls.files.delete(uri.str())
+	unsafe {
+		ls.sources[uri].free()
+		ls.files[uri].free()
+	}
+	ls.sources.delete(uri)
+	ls.files.delete(uri)
 	for f_uri, _ in ls.files {
 		if f_uri.starts_with(file_dir) {
 			no_active_files = false
