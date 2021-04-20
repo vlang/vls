@@ -22,7 +22,7 @@ fn (mut ls Vls) initialize(id int, params string) {
 	ls.base_table.panic_handler = table_panic_handler
 	ls.base_table.panic_userdata = ls
 
-	initialize_params := json.decode(lsp.InitializeParams, params) or { 
+	initialize_params := json.decode(lsp.InitializeParams, params) or {
 		ls.panic(err.msg)
 		ls.send_null(id)
 		return
@@ -86,9 +86,9 @@ fn (mut ls Vls) setup_logger(trace string, client_info lsp.ClientInfo) {
 	}
 
 	// print important info for reporting
-	ls.log_message('VLS Version: ${meta.version}, OS: ${os.user_os()} $arch', .info)
+	ls.log_message('VLS Version: $meta.version, OS: $os.user_os() $arch', .info)
 	if client_info.name.len != 0 {
-		ls.log_message('Client / Editor: ${client_info.name} ${client_info.version}', .info)
+		ls.log_message('Client / Editor: $client_info.name $client_info.version', .info)
 	} else {
 		ls.log_message('Client / Editor: Unknown', .info)
 	}
@@ -97,7 +97,10 @@ fn (mut ls Vls) setup_logger(trace string, client_info lsp.ClientInfo) {
 [manualfree]
 fn (mut ls Vls) process_builtin() {
 	scope, pref := new_scope_and_pref()
-	mut builtin_files := os.ls(builtin_path) or { ls.panic(err.msg) }
+	mut builtin_files := os.ls(builtin_path) or {
+		ls.panic(err.msg)
+		return
+	}
 	builtin_files = pref.should_compile_filtered_files(builtin_path, builtin_files)
 	parsed_files := parser.parse_files(builtin_files, ls.base_table, pref, scope)
 	// This part extracts the symbols for the builtin module
@@ -130,7 +133,7 @@ fn (mut ls Vls) process_builtin() {
 						}
 
 						for field in stmt.fields {
-							ls.builtin_symbol_locations['${stmt.name}.${field.name}'] = lsp.Location{
+							ls.builtin_symbol_locations['${stmt.name}.$field.name'] = lsp.Location{
 								uri: doc_uri
 								range: position_to_lsp_range(field.pos)
 							}
