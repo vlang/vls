@@ -90,6 +90,7 @@ mut:
 	enabled_features         []Feature = vls.default_features_list
 	capabilities             lsp.ServerCapabilities
 	logger                   log.Logger
+	panic_count              int
 	debug                    bool
 	// client_capabilities lsp.ClientCapabilities
 pub mut:
@@ -208,12 +209,27 @@ fn (ls Vls) log_path() string {
 
 // panic generates a log report and exits the language server.
 fn (mut ls Vls) panic(message string) {
-	log_path := ls.log_path()
-	ls.logger.set_logpath(log_path)
-	err_msg := 'VLS Panic: ${message}. Log saved to ${os.real_path(log_path)}. Please refer to https://github.com/vlang/vls#error-reporting for more details.'
-	ls.show_message(err_msg, .error)
-	ls.logger.close()
-	ls.exit()
+	ls.panic_count++
+
+	// NB: Would 2 be enough to exit? 
+	if ls.panic_count == 2 {
+		log_path := ls.log_path()
+		ls.logger.set_logpath(log_path)
+		ls.show_message(
+			'VLS Panic: ${message}. Log saved to ${os.real_path(log_path)}. Please refer to https://github.com/vlang/vls#error-reporting for more details.', 
+			.error,
+		)
+		ls.logger.close()
+		ls.exit()
+	} else {
+		ls.log_message('VLS: An error occurred. Message: $message', .error)
+	}
+}
+
+// table_panic_handler handles the error behavior of the table. replaces panic.
+fn table_panic_handler(t &ast.Table, message string) {
+	mut ls := &Vls(t.panic_userdata)
+	ls.panic(message)
 }
 
 fn (mut ls Vls) send<T>(data T) {
@@ -380,7 +396,7 @@ fn (mut ls Vls) free_table(dir_path string, file_path string) {
 }
 
 // new_table returns a new table based on the existing data of base_table
-fn (ls Vls) new_table() &ast.Table {
+fn (ls &Vls) new_table() &ast.Table {
 	mut tbl := &ast.Table{
 		type_symbols: ls.base_table.type_symbols.clone()
 	}
@@ -393,6 +409,8 @@ fn (ls Vls) new_table() &ast.Table {
 	tbl.fn_generic_types = ls.base_table.fn_generic_types.clone()
 	tbl.cmod_prefix = ls.base_table.cmod_prefix
 	tbl.is_fmt = ls.base_table.is_fmt
+	tbl.panic_handler = table_panic_handler
+	tbl.panic_userdata = ls
 	return tbl
 }
 

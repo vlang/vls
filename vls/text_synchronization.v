@@ -17,7 +17,10 @@ const (
 )
 
 fn (mut ls Vls) did_open(_ int, params string) {
-	did_open_params := json.decode(lsp.DidOpenTextDocumentParams, params) or { ls.panic(err.msg) }
+	did_open_params := json.decode(lsp.DidOpenTextDocumentParams, params) or { 
+		ls.panic(err.msg)
+		return
+	}
 	source := did_open_params.text_document.text
 	uri := did_open_params.text_document.uri
 	ls.process_file(source, uri)
@@ -27,6 +30,7 @@ fn (mut ls Vls) did_open(_ int, params string) {
 fn (mut ls Vls) did_change(_ int, params string) {
 	did_change_params := json.decode(lsp.DidChangeTextDocumentParams, params) or {
 		ls.panic(err.msg)
+		return
 	}
 	source := did_change_params.content_changes[0].text
 	uri := did_change_params.text_document.uri
@@ -35,7 +39,10 @@ fn (mut ls Vls) did_change(_ int, params string) {
 }
 
 fn (mut ls Vls) did_close(_ int, params string) {
-	did_close_params := json.decode(lsp.DidCloseTextDocumentParams, params) or { ls.panic(err.msg) }
+	did_close_params := json.decode(lsp.DidCloseTextDocumentParams, params) or { 
+		ls.panic(err.msg) 
+		return
+	}
 	uri := did_close_params.text_document.uri
 	file_dir := uri.dir()
 	mut no_active_files := true

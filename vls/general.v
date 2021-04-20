@@ -17,7 +17,16 @@ const (
 
 // initialize sends the server capabilities to the client
 fn (mut ls Vls) initialize(id int, params string) {
-	initialize_params := json.decode(lsp.InitializeParams, params) or { ls.panic(err.msg) }
+	// NB: Just to be sure just in case the panic happens
+	// inside the base table.
+	ls.base_table.panic_handler = table_panic_handler
+	ls.base_table.panic_userdata = ls
+
+	initialize_params := json.decode(lsp.InitializeParams, params) or { 
+		ls.panic(err.msg)
+		ls.send_null(id)
+		return
+	}
 	// TODO: configure capabilities based on client support
 	// ls.client_capabilities = initialize_params.capabilities
 	ls.capabilities = lsp.ServerCapabilities{
