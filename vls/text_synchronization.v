@@ -21,9 +21,13 @@ fn (mut ls Vls) did_open(_ int, params string) {
 		ls.panic(err.msg)
 		return
 	}
-	source := did_open_params.text_document.text
-	uri := did_open_params.text_document.uri
-	ls.process_file(source, uri)
+	// Do not process it again if file already exists
+	if did_open_params.text_document.uri !in ls.files {
+		ls.process_file(
+			did_open_params.text_document.text, 
+			did_open_params.text_document.uri,
+		)
+	}
 }
 
 [manualfree]
