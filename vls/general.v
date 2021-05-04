@@ -17,6 +17,12 @@ const (
 
 // initialize sends the server capabilities to the client
 fn (mut ls Vls) initialize(id int, params string) {
+	// Show message that VLS is not yet ready!
+	ls.show_message(
+		'VLS is a work-in-progress, pre-alpha language server. It may not be guaranteed to work reliably due to memory issues and other related factors. We encourage you to submit an issue if you encounter any problems.',
+		.warning
+	)
+
 	// NB: Just to be sure just in case the panic happens
 	// inside the base table.
 	ls.base_table.panic_handler = table_panic_handler
