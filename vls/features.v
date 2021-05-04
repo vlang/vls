@@ -18,9 +18,14 @@ fn (mut ls Vls) formatting(id int, params string) {
 		ls.send_null(id)
 		return
 	}
-	uri := formatting_params.text_document.uri.str()
+	uri := formatting_params.text_document.uri
 	path := formatting_params.text_document.uri.path()
 	source := ls.sources[uri].bytestr()
+	if source.len == 0 {
+		ls.send_null(id)
+		return
+	}
+	
 	mut prefs := pref.new_preferences()
 	prefs.output_mode = .silent
 	prefs.is_fmt = true

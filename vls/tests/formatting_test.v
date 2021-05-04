@@ -39,30 +39,30 @@ fn test_formatting() {
 		} else {
 			assert errors.len == 0
 		}
-		exp_content := os.read_file(exp_file_path) or {
-			io.bench.fail()
-			eprintln(io.bench.step_message_fail('file $exp_file_path is missing'))
-			continue
-		}
+		exp_content := os.read_file(exp_file_path) or { '' }
 		// initiate formatting request
 		ls.dispatch(io.request_with_params('textDocument/formatting', lsp.DocumentFormattingParams{
 			text_document: doc_id
 		}))
 		// compare content
 		println(io.bench.step_message('Testing $test_file_path'))
-		assert io.result() == json.encode([lsp.TextEdit{
-			range: lsp.Range{
-				start: lsp.Position{
-					line: 0
-					character: 0
+		if test_file_path.ends_with('empty.vv') {
+			assert io.result() == 'null'
+		} else {
+			assert io.result() == json.encode([lsp.TextEdit{
+				range: lsp.Range{
+					start: lsp.Position{
+						line: 0
+						character: 0
+					}
+					end: lsp.Position{
+						line: content_lines.len
+						character: content_lines.last().len - 1
+					}
 				}
-				end: lsp.Position{
-					line: content_lines.len
-					character: content_lines.last().len - 1
-				}
-			}
-			new_text: exp_content.replace('\r\n', '\n')
-		}])
+				new_text: exp_content.replace('\r\n', '\n')
+			}])
+		}
 		io.bench.ok()
 		println(io.bench.step_message_ok(os.base(test_file_path)))
 		// Delete document
