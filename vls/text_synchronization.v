@@ -93,7 +93,7 @@ fn (mut ls Vls) process_file(source string, uri lsp.DocumentUri) {
 
 	ls.free_table(target_dir_uri, file_path)
 	table := ls.new_table()
-	mut parsed_files := []ast.File{}
+	mut parsed_files := []&ast.File{}
 	mut checker := checker.new_checker(table, pref)
 	mod_dir := os.dir(file_path)
 	cur_mod_files := os.ls(mod_dir) or { [] }
@@ -121,8 +121,8 @@ fn (mut ls Vls) process_file(source string, uri lsp.DocumentUri) {
 
 // NOTE: once builder.find_module_path is extracted, simplify parse_imports
 [manualfree]
-fn (mut ls Vls) parse_imports(parsed_files []ast.File, table &ast.Table, pref &pref.Preferences, scope &ast.Scope) ([]ast.File, []errors.Error) {
-	mut newly_parsed_files := []ast.File{}
+fn (mut ls Vls) parse_imports(parsed_files []&ast.File, table &ast.Table, pref &pref.Preferences, scope &ast.Scope) ([]&ast.File, []errors.Error) {
+	mut newly_parsed_files := []&ast.File{}
 	mut errs := []errors.Error{}
 	mut done_imports := parsed_files.map(it.mod.name)
 	// NB: b.parsed_files is appended in the loop,

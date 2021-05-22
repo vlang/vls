@@ -290,7 +290,7 @@ fn new_scope_and_pref(lookup_paths ...string) (&ast.Scope, &pref.Preferences) {
 
 // insert_files inserts an array file asts onto the ls.files map
 [manualfree]
-fn (mut ls Vls) insert_files(files []ast.File) {
+fn (mut ls Vls) insert_files(files []&ast.File) {
 	for file in files {
 		file_uri := lsp.document_uri_from_path(file.path)
 		ls.extract_symbol_locations(file_uri, file.mod.name, file.stmts)
