@@ -1,307 +1,307 @@
 module vls
 
 import lsp
-import json
-import jsonrpc
+// import json
+// import jsonrpc
 import v.ast
-import v.fmt
-import v.parser
-import v.pref
+// import v.fmt
+// import v.parser
+// import v.pref
 import v.token
 import os
 // import strings
 
 [manualfree]
 fn (mut ls Vls) formatting(id int, params string) {
-	formatting_params := json.decode(lsp.DocumentFormattingParams, params) or { 
-		ls.panic(err.msg)
-		ls.send_null(id)
-		return
-	}
-	uri := formatting_params.text_document.uri
-	path := formatting_params.text_document.uri.path()
-	source := ls.sources[uri].bytestr()
-	if source.len == 0 {
-		ls.send_null(id)
-		return
-	}
+	// formatting_params := json.decode(lsp.DocumentFormattingParams, params) or { 
+	// 	ls.panic(err.msg)
+	// 	ls.send_null(id)
+	// 	return
+	// }
+	// uri := formatting_params.text_document.uri
+	// path := formatting_params.text_document.uri.path()
+	// source := ls.sources[uri].bytestr()
+	// if source.len == 0 {
+	// 	ls.send_null(id)
+	// 	return
+	// }
 	
-	mut prefs := pref.new_preferences()
-	prefs.output_mode = .silent
-	prefs.is_fmt = true
-	table := ast.new_table()
-	file_ast := parser.parse_text(source, path, table, .parse_comments, prefs, &ast.Scope{
-		parent: 0
-	})
-	if file_ast.errors.len > 0 {
-		ls.send_null(id)
-		return
-	}
-	source_lines := source.split_into_lines()
-	formatted_content := fmt.fmt(file_ast, table, prefs, false)
-	resp := jsonrpc.Response<[]lsp.TextEdit>{
-		id: id
-		result: [lsp.TextEdit{
-			range: lsp.Range{
-				start: lsp.Position{
-					line: 0
-					character: 0
-				}
-				end: lsp.Position{
-					line: source_lines.len
-					character: if source_lines.last().len > 0 {
-						source_lines.last().len - 1
-					} else {
-						0
-					}
-				}
-			}
-			new_text: formatted_content
-		}]
-	}
-	ls.send(resp)
-	unsafe {
-		source_lines.free()
-		formatted_content.free()
-	}
+	// mut prefs := pref.new_preferences()
+	// prefs.output_mode = .silent
+	// prefs.is_fmt = true
+	// table := ast.new_table()
+	// file_ast := parser.parse_text(source, path, table, .parse_comments, prefs, &ast.Scope{
+	// 	parent: 0
+	// })
+	// if file_ast.errors.len > 0 {
+	// 	ls.send_null(id)
+	// 	return
+	// }
+	// source_lines := source.split_into_lines()
+	// formatted_content := fmt.fmt(file_ast, table, prefs, false)
+	// resp := jsonrpc.Response<[]lsp.TextEdit>{
+	// 	id: id
+	// 	result: [lsp.TextEdit{
+	// 		range: lsp.Range{
+	// 			start: lsp.Position{
+	// 				line: 0
+	// 				character: 0
+	// 			}
+	// 			end: lsp.Position{
+	// 				line: source_lines.len
+	// 				character: if source_lines.last().len > 0 {
+	// 					source_lines.last().len - 1
+	// 				} else {
+	// 					0
+	// 				}
+	// 			}
+	// 		}
+	// 		new_text: formatted_content
+	// 	}]
+	// }
+	// ls.send(resp)
+	// unsafe {
+	// 	source_lines.free()
+	// 	formatted_content.free()
+	// }
 }
 
 fn (mut ls Vls) workspace_symbol(id int, _ string) {
-	mut symbols := []lsp.SymbolInformation{}
-	for file_uri, file in ls.files {
-		if !file_uri.starts_with(ls.root_uri.str()) {
-			continue
-		}
-		symbols << ls.generate_symbols(file, file_uri)
-	}
-	ls.send(jsonrpc.Response<[]lsp.SymbolInformation>{
-		id: id
-		result: symbols
-	})
+	// mut symbols := []lsp.SymbolInformation{}
+	// for file_uri, file in ls.files {
+	// 	if !file_uri.starts_with(ls.root_uri.str()) {
+	// 		continue
+	// 	}
+	// 	symbols << ls.generate_symbols(file, file_uri)
+	// }
+	// ls.send(jsonrpc.Response<[]lsp.SymbolInformation>{
+	// 	id: id
+	// 	result: symbols
+	// })
 }
 
 fn (mut ls Vls) document_symbol(id int, params string) {
-	document_symbol_params := json.decode(lsp.DocumentSymbolParams, params) or { 
-		ls.panic(err.msg)
-		ls.send_null(id)
-		return
-	}
-	uri := document_symbol_params.text_document.uri
-	file := ls.files[uri.str()]
-	symbols := ls.generate_symbols(file, uri)
-	ls.send(jsonrpc.Response<[]lsp.SymbolInformation>{
-		id: id
-		result: symbols
-	})
+	// document_symbol_params := json.decode(lsp.DocumentSymbolParams, params) or { 
+	// 	ls.panic(err.msg)
+	// 	ls.send_null(id)
+	// 	return
+	// }
+	// uri := document_symbol_params.text_document.uri
+	// file := ls.files[uri.str()]
+	// symbols := ls.generate_symbols(file, uri)
+	// ls.send(jsonrpc.Response<[]lsp.SymbolInformation>{
+	// 	id: id
+	// 	result: symbols
+	// })
 }
 
 fn (mut ls Vls) generate_symbols(file ast.File, uri lsp.DocumentUri) []lsp.SymbolInformation {
 	mut symbols := []lsp.SymbolInformation{}
-	sym_is_cached := uri.str() in ls.doc_symbols
-	if file.errors.len > 0 && sym_is_cached {
-		return ls.doc_symbols[uri.str()]
-	}
-	dir := uri.dir()
-	// NB: should never happen. just in case
-	// the requests aren't executed in order
-	if dir !in ls.tables {
-		return symbols
-	}
-	table := ls.tables[dir]
-	for stmt in file.stmts {
-		mut name := ''
-		mut kind := lsp.SymbolKind.null
-		mut pos := position_to_lsp_range(stmt.pos)
-		match stmt {
-			ast.ConstDecl {
-				for field in stmt.fields {
-					symbols << lsp.SymbolInformation{
-						name: field.name.all_after(file.mod.name + '.')
-						kind: .constant
-						location: lsp.Location{
-							uri: uri
-							range: position_to_lsp_range(field.pos)
-						}
-					}
-				}
-				continue
-			}
-			ast.EnumDecl {
-				name = stmt.name
-				kind = .enum_
-			}
-			ast.StructDecl {
-				name = stmt.name
-				kind = .struct_
-			}
-			ast.InterfaceDecl {
-				name = stmt.name
-				kind = .interface_
-			}
-			ast.TypeDecl {
-				match stmt {
-					ast.AliasTypeDecl, ast.FnTypeDecl, ast.SumTypeDecl {
-						name = stmt.name
-						kind = .type_parameter
-					}
-				}
-			}
-			ast.FnDecl {
-				if pos.start.line == pos.end.line && pos.start.character == pos.end.character {
-					continue
-				}
-				name = stmt.name
-				kind = .function
-				if stmt.is_method && stmt.receiver.typ != 0 {
-					rec_type := table.type_to_str(stmt.receiver.typ)
-					name = rec_type + '.' + name
-					kind = .method
-				}
-			}
-			else {
-				continue
-			}
-		}
-		symbols << lsp.SymbolInformation{
-			name: name.all_after(file.mod.name + '.')
-			kind: kind
-			location: lsp.Location{
-				uri: uri
-				range: pos
-			}
-		}
-	}
-	ls.doc_symbols[uri.str()] = symbols
+	// sym_is_cached := uri.str() in ls.doc_symbols
+	// if file.errors.len > 0 && sym_is_cached {
+	// 	return ls.doc_symbols[uri.str()]
+	// }
+	// dir := uri.dir()
+	// // NB: should never happen. just in case
+	// // the requests aren't executed in order
+	// if dir !in ls.tables {
+	// 	return symbols
+	// }
+	// table := ls.tables[dir]
+	// for stmt in file.stmts {
+	// 	mut name := ''
+	// 	mut kind := lsp.SymbolKind.null
+	// 	mut pos := position_to_lsp_range(stmt.pos)
+	// 	match stmt {
+	// 		ast.ConstDecl {
+	// 			for field in stmt.fields {
+	// 				symbols << lsp.SymbolInformation{
+	// 					name: field.name.all_after(file.mod.name + '.')
+	// 					kind: .constant
+	// 					location: lsp.Location{
+	// 						uri: uri
+	// 						range: position_to_lsp_range(field.pos)
+	// 					}
+	// 				}
+	// 			}
+	// 			continue
+	// 		}
+	// 		ast.EnumDecl {
+	// 			name = stmt.name
+	// 			kind = .enum_
+	// 		}
+	// 		ast.StructDecl {
+	// 			name = stmt.name
+	// 			kind = .struct_
+	// 		}
+	// 		ast.InterfaceDecl {
+	// 			name = stmt.name
+	// 			kind = .interface_
+	// 		}
+	// 		ast.TypeDecl {
+	// 			match stmt {
+	// 				ast.AliasTypeDecl, ast.FnTypeDecl, ast.SumTypeDecl {
+	// 					name = stmt.name
+	// 					kind = .type_parameter
+	// 				}
+	// 			}
+	// 		}
+	// 		ast.FnDecl {
+	// 			if pos.start.line == pos.end.line && pos.start.character == pos.end.character {
+	// 				continue
+	// 			}
+	// 			name = stmt.name
+	// 			kind = .function
+	// 			if stmt.is_method && stmt.receiver.typ != 0 {
+	// 				rec_type := table.type_to_str(stmt.receiver.typ)
+	// 				name = rec_type + '.' + name
+	// 				kind = .method
+	// 			}
+	// 		}
+	// 		else {
+	// 			continue
+	// 		}
+	// 	}
+	// 	symbols << lsp.SymbolInformation{
+	// 		name: name.all_after(file.mod.name + '.')
+	// 		kind: kind
+	// 		location: lsp.Location{
+	// 			uri: uri
+	// 			range: pos
+	// 		}
+	// 	}
+	// }
+	// ls.doc_symbols[uri.str()] = symbols
 	return symbols
 }
 
 fn (mut ls Vls) signature_help(id int, params string) {
-	signature_params := json.decode(lsp.SignatureHelpParams, params) or { 
-		ls.panic(err.msg)
-		ls.send_null(id)
-		return
-	}
-	uri := signature_params.text_document.uri
-	pos := signature_params.position
-	ctx := signature_params.context
-	if Feature.signature_help !in ls.enabled_features {
-		ls.send_null(id)
-		return
-	}
+	// signature_params := json.decode(lsp.SignatureHelpParams, params) or { 
+	// 	ls.panic(err.msg)
+	// 	ls.send_null(id)
+	// 	return
+	// }
+	// uri := signature_params.text_document.uri
+	// pos := signature_params.position
+	// ctx := signature_params.context
+	// if Feature.signature_help !in ls.enabled_features {
+	// 	ls.send_null(id)
+	// 	return
+	// }
 
-	file := ls.files[uri.str()]
-	tbl := ls.tables[uri.dir()]
-	offset := compute_offset(ls.sources[uri.str()], pos.line, pos.character)
-	node := find_ast_by_pos(file.stmts.map(ast.Node(it)), offset) or {
-		ls.send_null(id)
-		return
-	}
+	// file := ls.files[uri.str()]
+	// tbl := ls.tables[uri.dir()]
+	// offset := compute_offset(ls.sources[uri.str()], pos.line, pos.character)
+	// node := find_ast_by_pos(file.stmts.map(ast.Node(it)), offset) or {
+	// 	ls.send_null(id)
+	// 	return
+	// }
 
-	mut expr := ast.empty_expr()
-	if node is ast.Stmt {
-		// if the selected node is an ExprStmt,
-		// the expr content of the ExprStmt node
-		// will be used.
-		if node is ast.ExprStmt {
-			expr = node.expr
-		}
-	} else if node is ast.Expr {
-		expr = node
-	}
-	// signature help supports function calls for now
-	// hence checking the expr if it's a CallExpr node.
-	if expr is ast.CallExpr {
-		call_expr := expr as ast.CallExpr
+	// mut expr := ast.empty_expr()
+	// if node is ast.Stmt {
+	// 	// if the selected node is an ExprStmt,
+	// 	// the expr content of the ExprStmt node
+	// 	// will be used.
+	// 	if node is ast.ExprStmt {
+	// 		expr = node.expr
+	// 	}
+	// } else if node is ast.Expr {
+	// 	expr = node
+	// }
+	// // signature help supports function calls for now
+	// // hence checking the expr if it's a CallExpr node.
+	// if expr is ast.CallExpr {
+	// 	call_expr := expr as ast.CallExpr
 
-		// for retrigger, it utilizes the current signature help data
-		if ctx.is_retrigger {
-			mut active_sighelp := ctx.active_signature_help
+	// 	// for retrigger, it utilizes the current signature help data
+	// 	if ctx.is_retrigger {
+	// 		mut active_sighelp := ctx.active_signature_help
 
-			if ctx.trigger_kind == .content_change {
-				// change the current active param value to the length of the current args.
-				active_sighelp.active_parameter = call_expr.args.len - 1
-			} else if ctx.trigger_kind == .trigger_character && ctx.trigger_character == ','
-				&& active_sighelp.signatures.len > 0
-				&& active_sighelp.active_parameter < active_sighelp.signatures[0].parameters.len {
-				// when pressing comma, it must proceed to the next parameter
-				// by incrementing the active parameter.
-				active_sighelp.active_parameter++
-			}
+	// 		if ctx.trigger_kind == .content_change {
+	// 			// change the current active param value to the length of the current args.
+	// 			active_sighelp.active_parameter = call_expr.args.len - 1
+	// 		} else if ctx.trigger_kind == .trigger_character && ctx.trigger_character == ','
+	// 			&& active_sighelp.signatures.len > 0
+	// 			&& active_sighelp.active_parameter < active_sighelp.signatures[0].parameters.len {
+	// 			// when pressing comma, it must proceed to the next parameter
+	// 			// by incrementing the active parameter.
+	// 			active_sighelp.active_parameter++
+	// 		}
 
-			ls.send(jsonrpc.Response<lsp.SignatureHelp>{
-				id: id
-				result: active_sighelp
-			})
-			return
-		}
-		// create a signature help info based on the
-		// call expr info
-		// TODO: use string concat in the meantime as
-		// the msvc CI fails when using strings.builder
-		// as it produces bad output (in the case of msvc)
-		mut label := 'fn '
-		mut return_type := ''
-		mut param_infos := []lsp.ParameterInformation{}
-		mut params_data := []ast.Param{}
-		mut skip_receiver := false
+	// 		ls.send(jsonrpc.Response<lsp.SignatureHelp>{
+	// 			id: id
+	// 			result: active_sighelp
+	// 		})
+	// 		return
+	// 	}
+	// 	// create a signature help info based on the
+	// 	// call expr info
+	// 	// TODO: use string concat in the meantime as
+	// 	// the msvc CI fails when using strings.builder
+	// 	// as it produces bad output (in the case of msvc)
+	// 	mut label := 'fn '
+	// 	mut return_type := ''
+	// 	mut param_infos := []lsp.ParameterInformation{}
+	// 	mut params_data := []ast.Param{}
+	// 	mut skip_receiver := false
 
-		if call_expr.is_method {
-			left_type_sym := tbl.get_type_symbol(call_expr.left_type)
-			if method := tbl.type_find_method(left_type_sym, call_expr.name) {
-				skip_receiver = true
-				label += '($left_type_sym.name) ${method.name}('
+	// 	if call_expr.is_method {
+	// 		left_type_sym := tbl.get_type_symbol(call_expr.left_type)
+	// 		if method := tbl.type_find_method(left_type_sym, call_expr.name) {
+	// 			skip_receiver = true
+	// 			label += '($left_type_sym.name) ${method.name}('
 
-				if method.return_type != ast.Type(0) {
-					return_type = tbl.type_to_str(method.return_type)
-				}
+	// 			if method.return_type != ast.Type(0) {
+	// 				return_type = tbl.type_to_str(method.return_type)
+	// 			}
 
-				params_data << method.params
-			}
-		} else if fn_data := tbl.find_fn(call_expr.name) {
-			if fn_data.return_type != ast.Type(0) {
-				return_type = tbl.type_to_str(fn_data.return_type)
-			}
+	// 			params_data << method.params
+	// 		}
+	// 	} else if fn_data := tbl.find_fn(call_expr.name) {
+	// 		if fn_data.return_type != ast.Type(0) {
+	// 			return_type = tbl.type_to_str(fn_data.return_type)
+	// 		}
 
-			label += '${fn_data.name}('
-			params_data << fn_data.params
-		}
+	// 		label += '${fn_data.name}('
+	// 		params_data << fn_data.params
+	// 	}
 
-		start := int(skip_receiver) // index 1 for true, 0 for false
-		for i in start .. params_data.len {
-			if i != start {
-				label += ', '
-			}
-			param := params_data[i]
-			// TODO: revert back to strings.builder once
-			//  the issue with MSVC has been fully resolved.
-			mut param_signature := ''
-			mut typ := param.typ
-			if param.is_mut {
-				typ = typ.deref()
-				param_signature += 'mut '
-			}
-			styp := tbl.type_to_str(typ)
-			param_signature += '$param.name $styp'
-			label += param_signature
-			param_infos << lsp.ParameterInformation{
-				label: param_signature
-			}
-		}
-		label += ') $return_type'
+	// 	start := int(skip_receiver) // index 1 for true, 0 for false
+	// 	for i in start .. params_data.len {
+	// 		if i != start {
+	// 			label += ', '
+	// 		}
+	// 		param := params_data[i]
+	// 		// TODO: revert back to strings.builder once
+	// 		//  the issue with MSVC has been fully resolved.
+	// 		mut param_signature := ''
+	// 		mut typ := param.typ
+	// 		if param.is_mut {
+	// 			typ = typ.deref()
+	// 			param_signature += 'mut '
+	// 		}
+	// 		styp := tbl.type_to_str(typ)
+	// 		param_signature += '$param.name $styp'
+	// 		label += param_signature
+	// 		param_infos << lsp.ParameterInformation{
+	// 			label: param_signature
+	// 		}
+	// 	}
+	// 	label += ') $return_type'
 
-		ls.send(jsonrpc.Response<lsp.SignatureHelp>{
-			id: id
-			result: lsp.SignatureHelp{
-				signatures: [lsp.SignatureInformation{
-					label: label
-					parameters: param_infos
-				}]
-			}
-		})
-		return
-	}
-	// send null result for unsupported node
-	ls.send_null(id)
+	// 	ls.send(jsonrpc.Response<lsp.SignatureHelp>{
+	// 		id: id
+	// 		result: lsp.SignatureHelp{
+	// 			signatures: [lsp.SignatureInformation{
+	// 				label: label
+	// 				parameters: param_infos
+	// 			}]
+	// 		}
+	// 	})
+	// 	return
+	// }
+	// // send null result for unsupported node
+	// ls.send_null(id)
 }
 
 struct CompletionItemConfig {
@@ -718,194 +718,194 @@ fn (mut cfg CompletionItemConfig) suggest_mod_names() []lsp.CompletionItem {
 // TODO: make params use lsp.CompletionParams in the future
 [manualfree]
 fn (mut ls Vls) completion(id int, params string) {
-	if Feature.completion !in ls.enabled_features {
-		return
-	}
-	completion_params := json.decode(lsp.CompletionParams, params) or { 
-		ls.panic(err.msg)
-		ls.send_null(id)
-		return
-	}
-	file_uri := completion_params.text_document.uri
-	file := ls.files[file_uri.str()]
-	src := ls.sources[file_uri.str()]
-	pos := completion_params.position
+	// if Feature.completion !in ls.enabled_features {
+	// 	return
+	// }
+	// completion_params := json.decode(lsp.CompletionParams, params) or { 
+	// 	ls.panic(err.msg)
+	// 	ls.send_null(id)
+	// 	return
+	// }
+	// file_uri := completion_params.text_document.uri
+	// file := ls.files[file_uri.str()]
+	// src := ls.sources[file_uri.str()]
+	// pos := completion_params.position
 
-	// The context is used for if and when to trigger autocompletion.
-	// See comments `cfg` for reason.
-	mut ctx := completion_params.context
+	// // The context is used for if and when to trigger autocompletion.
+	// // See comments `cfg` for reason.
+	// mut ctx := completion_params.context
 
-	// This is where the items will be pushed and sent to the client.
-	mut completion_items := []lsp.CompletionItem{}
+	// // This is where the items will be pushed and sent to the client.
+	// mut completion_items := []lsp.CompletionItem{}
 
-	// The config is used by all methods for determining the results to be sent
-	// to the client. See the field comments in CompletionItemConfig for their
-	// purposes.
-	//
-	// Other parsers use line character-based position for determining the AST node.
-	// The V parser on the other hand, uses a byte offset (line number is supplied
-	// but for certain cases) hence the need to convert the said positions to byte
-	// offsets.
-	//
-	// NOTE: Transfer it back to struct fields after
-	// https://github.com/vlang/v/pull/7976 has been merged.
-	modules_aliases := file.imports.map(it.alias)
-	imports_list := file.imports.map(it.mod)
-	mut cfg := CompletionItemConfig{
-		file: file
-		modules_aliases: modules_aliases
-		imports_list: imports_list
-		offset: compute_offset(src, pos.line, pos.character)
-		table: ls.tables[file_uri.dir()]
-	}
-	// There are some instances that the user would invoke the autocompletion
-	// through a combination of shortcuts (like Ctrl/Cmd+Space) and the results
-	// wouldn't appear even though one of the trigger characters is on the left
-	// or near the cursor. In that case, the context data would be modified in
-	// order to satisfy those specific cases.
-	if ctx.trigger_kind == .invoked && cfg.offset - 1 >= 0 && file.stmts.len > 0 && src.len > 3 {
-		mut prev_idx := cfg.offset
-		mut ctx_changed := false
-		if src[cfg.offset - 1] in [`.`, `:`, `=`, `{`, `,`, `(`] {
-			prev_idx--
-			ctx_changed = true
-		} else if src[cfg.offset - 1] == ` ` && cfg.offset - 2 >= 0
-			&& src[cfg.offset - 2] !in [src[cfg.offset - 1], `.`] {
-			prev_idx -= 2
-			cfg.offset -= 2
-			ctx_changed = true
-		}
+	// // The config is used by all methods for determining the results to be sent
+	// // to the client. See the field comments in CompletionItemConfig for their
+	// // purposes.
+	// //
+	// // Other parsers use line character-based position for determining the AST node.
+	// // The V parser on the other hand, uses a byte offset (line number is supplied
+	// // but for certain cases) hence the need to convert the said positions to byte
+	// // offsets.
+	// //
+	// // NOTE: Transfer it back to struct fields after
+	// // https://github.com/vlang/v/pull/7976 has been merged.
+	// modules_aliases := file.imports.map(it.alias)
+	// imports_list := file.imports.map(it.mod)
+	// mut cfg := CompletionItemConfig{
+	// 	file: file
+	// 	modules_aliases: modules_aliases
+	// 	imports_list: imports_list
+	// 	offset: compute_offset(src, pos.line, pos.character)
+	// 	table: ls.tables[file_uri.dir()]
+	// }
+	// // There are some instances that the user would invoke the autocompletion
+	// // through a combination of shortcuts (like Ctrl/Cmd+Space) and the results
+	// // wouldn't appear even though one of the trigger characters is on the left
+	// // or near the cursor. In that case, the context data would be modified in
+	// // order to satisfy those specific cases.
+	// if ctx.trigger_kind == .invoked && cfg.offset - 1 >= 0 && file.stmts.len > 0 && src.len > 3 {
+	// 	mut prev_idx := cfg.offset
+	// 	mut ctx_changed := false
+	// 	if src[cfg.offset - 1] in [`.`, `:`, `=`, `{`, `,`, `(`] {
+	// 		prev_idx--
+	// 		ctx_changed = true
+	// 	} else if src[cfg.offset - 1] == ` ` && cfg.offset - 2 >= 0
+	// 		&& src[cfg.offset - 2] !in [src[cfg.offset - 1], `.`] {
+	// 		prev_idx -= 2
+	// 		cfg.offset -= 2
+	// 		ctx_changed = true
+	// 	}
 
-		if ctx_changed {
-			ctx = lsp.CompletionContext{
-				trigger_kind: .trigger_character
-				trigger_character: src[prev_idx].str()
-			}
-		}
-	}
-	// The language server uses the `trigger_character` as a sole basis for triggering
-	// the data extraction and autocompletion. The `trigger_character` kind is only
-	// received by the server if the user presses one of the server-defined trigger
-	// characters [dot, parenthesis, curly brace, etc.]
-	if ctx.trigger_kind == .trigger_character {
-		// NOTE: DO NOT REMOVE YET ~ @ned
-		// // The offset is adjusted and the suggestions for local and global symbols are
-		// // disabled if a period/dot is detected and the character on the left is not a space.
-		// if ctx.trigger_character == '.' && (cfg.offset - 1 >= 0 && src[cfg.offset - 1] != ` `) {
-		// 	cfg.show_global = false
-		// 	cfg.show_local = false
-		// 	cfg.offset -= 2
-		// }
-		if src[cfg.offset - 1] == ` ` {
-			cfg.offset--
-		}
+	// 	if ctx_changed {
+	// 		ctx = lsp.CompletionContext{
+	// 			trigger_kind: .trigger_character
+	// 			trigger_character: src[prev_idx].str()
+	// 		}
+	// 	}
+	// }
+	// // The language server uses the `trigger_character` as a sole basis for triggering
+	// // the data extraction and autocompletion. The `trigger_character` kind is only
+	// // received by the server if the user presses one of the server-defined trigger
+	// // characters [dot, parenthesis, curly brace, etc.]
+	// if ctx.trigger_kind == .trigger_character {
+	// 	// NOTE: DO NOT REMOVE YET ~ @ned
+	// 	// // The offset is adjusted and the suggestions for local and global symbols are
+	// 	// // disabled if a period/dot is detected and the character on the left is not a space.
+	// 	// if ctx.trigger_character == '.' && (cfg.offset - 1 >= 0 && src[cfg.offset - 1] != ` `) {
+	// 	// 	cfg.show_global = false
+	// 	// 	cfg.show_local = false
+	// 	// 	cfg.offset -= 2
+	// 	// }
+	// 	if src[cfg.offset - 1] == ` ` {
+	// 		cfg.offset--
+	// 	}
 
-		// Once the offset has been finalized it will then search for the AST node and
-		// extract it's data using the corresponding methods depending on the node type.
-		node := find_ast_by_pos(file.stmts.map(ast.Node(it)), cfg.offset) or { ast.empty_node() }
-		match node {
-			ast.Stmt {
-				completion_items << cfg.completion_items_from_stmt(node)
-			}
-			ast.Expr {
-				completion_items << cfg.completion_items_from_expr(node)
-			}
-			ast.StructInitField {
-				completion_items << cfg.completion_items_from_struct_init_field(node)
-			}
-			else {}
-		}
-	} else if ctx.trigger_kind == .invoked && (file.stmts.len == 0 || src.len <= 3) {
-		// When a V file is empty, a list of `module $name` suggsestions will be displayed.
-		completion_items << cfg.suggest_mod_names()
-	} else {
-		// Display only the project's functions if none are satisfied
-		cfg.show_only_global_fn = true
-	}
+	// 	// Once the offset has been finalized it will then search for the AST node and
+	// 	// extract it's data using the corresponding methods depending on the node type.
+	// 	node := find_ast_by_pos(file.stmts.map(ast.Node(it)), cfg.offset) or { ast.empty_node() }
+	// 	match node {
+	// 		ast.Stmt {
+	// 			completion_items << cfg.completion_items_from_stmt(node)
+	// 		}
+	// 		ast.Expr {
+	// 			completion_items << cfg.completion_items_from_expr(node)
+	// 		}
+	// 		ast.StructInitField {
+	// 			completion_items << cfg.completion_items_from_struct_init_field(node)
+	// 		}
+	// 		else {}
+	// 	}
+	// } else if ctx.trigger_kind == .invoked && (file.stmts.len == 0 || src.len <= 3) {
+	// 	// When a V file is empty, a list of `module $name` suggsestions will be displayed.
+	// 	completion_items << cfg.suggest_mod_names()
+	// } else {
+	// 	// Display only the project's functions if none are satisfied
+	// 	cfg.show_only_global_fn = true
+	// }
 
-	// Local results. Module names and the scope-based symbols.
-	if cfg.show_local {
-		// Imported modules. They will be shown to the user if there is no given
-		// type for filtering the results. Invalid imports are excluded.
-		for imp in file.imports {
-			if imp.syms.len == 0 && (cfg.filter_type == ast.Type(0)
-				|| imp.mod !in ls.invalid_imports[file_uri.str()]) {
-				completion_items << lsp.CompletionItem{
-					label: imp.alias
-					kind: .module_
-					insert_text: imp.alias
-				}
-			}
-		}
+	// // Local results. Module names and the scope-based symbols.
+	// if cfg.show_local {
+	// 	// Imported modules. They will be shown to the user if there is no given
+	// 	// type for filtering the results. Invalid imports are excluded.
+	// 	for imp in file.imports {
+	// 		if imp.syms.len == 0 && (cfg.filter_type == ast.Type(0)
+	// 			|| imp.mod !in ls.invalid_imports[file_uri.str()]) {
+	// 			completion_items << lsp.CompletionItem{
+	// 				label: imp.alias
+	// 				kind: .module_
+	// 				insert_text: imp.alias
+	// 			}
+	// 		}
+	// 	}
 
-		// Scope-based symbols that includes the variables inside
-		// the functions and the constants of the file.
-		inner_scope := file.scope.innermost(cfg.offset)
-		for scope in [file.scope, inner_scope] {
-			for _, obj in scope.objects {
-				mut name := ''
-				match obj {
-					ast.ConstField, ast.Var {
-						if cfg.filter_type != ast.Type(0) && obj.typ != cfg.filter_type {
-							continue
-						}
-						name = obj.name
-					}
-					else {
-						continue
-					}
-				}
-				mut kind := lsp.CompletionItemKind.variable
-				if obj is ast.ConstField {
-					name = name.all_after('${obj.mod}.')
-					kind = .constant
-				}
-				completion_items << lsp.CompletionItem{
-					label: name
-					kind: kind
-					insert_text: name
-				}
-			}
-		}
-	}
-	// Global results. This includes all the symbols within the module such as
-	// the structs, typedefs, enums, and the functions.
-	if cfg.show_global {
-		mut import_symbols := []string{}
-		for imp in cfg.file.imports {
-			if imp.syms.len == 0 {
-				continue
-			}
-			for sym in imp.syms {
-				import_symbols << imp.mod + '.' + sym.name
-			}
-			completion_items << cfg.completion_items_from_table(imp.mod, ...imp.syms.map(it.name))
-		}
+	// 	// Scope-based symbols that includes the variables inside
+	// 	// the functions and the constants of the file.
+	// 	inner_scope := file.scope.innermost(cfg.offset)
+	// 	for scope in [file.scope, inner_scope] {
+	// 		for _, obj in scope.objects {
+	// 			mut name := ''
+	// 			match obj {
+	// 				ast.ConstField, ast.Var {
+	// 					if cfg.filter_type != ast.Type(0) && obj.typ != cfg.filter_type {
+	// 						continue
+	// 					}
+	// 					name = obj.name
+	// 				}
+	// 				else {
+	// 					continue
+	// 				}
+	// 			}
+	// 			mut kind := lsp.CompletionItemKind.variable
+	// 			if obj is ast.ConstField {
+	// 				name = name.all_after('${obj.mod}.')
+	// 				kind = .constant
+	// 			}
+	// 			completion_items << lsp.CompletionItem{
+	// 				label: name
+	// 				kind: kind
+	// 				insert_text: name
+	// 			}
+	// 		}
+	// 	}
+	// }
+	// // Global results. This includes all the symbols within the module such as
+	// // the structs, typedefs, enums, and the functions.
+	// if cfg.show_global {
+	// 	mut import_symbols := []string{}
+	// 	for imp in cfg.file.imports {
+	// 		if imp.syms.len == 0 {
+	// 			continue
+	// 		}
+	// 		for sym in imp.syms {
+	// 			import_symbols << imp.mod + '.' + sym.name
+	// 		}
+	// 		completion_items << cfg.completion_items_from_table(imp.mod, ...imp.syms.map(it.name))
+	// 	}
 
-		// In table, functions are separated from type symbols.
-		completion_items << cfg.completion_items_from_table(file.mod.name)
+	// 	// In table, functions are separated from type symbols.
+	// 	completion_items << cfg.completion_items_from_table(file.mod.name)
 
-		// This part will extract the functions from both the builtin module and
-		// within the module (except the main() fn if present.)
-		for _, fnn in cfg.table.fns {
-			if fnn.mod == file.mod.name
-				|| (fnn.mod == 'builtin' && fnn.name in ls.builtin_symbols)
-				|| (fnn.mod in cfg.imports_list && fnn.name in import_symbols) {
-				completion_items << cfg.completion_items_from_fn(fnn, false)
-			}
-		}
-		unsafe { import_symbols.free() }
-	}
-	// After that, it will send the list to the client.
-	ls.send(jsonrpc.Response<[]lsp.CompletionItem>{
-		id: id
-		result: completion_items
-	})
-	unsafe {
-		completion_items.free()
-		modules_aliases.free()
-		imports_list.free()
-	}
+	// 	// This part will extract the functions from both the builtin module and
+	// 	// within the module (except the main() fn if present.)
+	// 	for _, fnn in cfg.table.fns {
+	// 		if fnn.mod == file.mod.name
+	// 			|| (fnn.mod == 'builtin' && fnn.name in ls.builtin_symbols)
+	// 			|| (fnn.mod in cfg.imports_list && fnn.name in import_symbols) {
+	// 			completion_items << cfg.completion_items_from_fn(fnn, false)
+	// 		}
+	// 	}
+	// 	unsafe { import_symbols.free() }
+	// }
+	// // After that, it will send the list to the client.
+	// ls.send(jsonrpc.Response<[]lsp.CompletionItem>{
+	// 	id: id
+	// 	result: completion_items
+	// })
+	// unsafe {
+	// 	completion_items.free()
+	// 	modules_aliases.free()
+	// 	imports_list.free()
+	// }
 }
 
 struct HoverConfig {
@@ -1117,151 +1117,151 @@ fn (mut cfg HoverConfig) hover_from_expr(node ast.Expr) ?lsp.Hover {
 }
 
 fn (mut ls Vls) hover(id int, params string) {
-	hover_params := json.decode(lsp.HoverParams, params) or { 
-		ls.panic(err.msg)
-		ls.send_null(id)
-		return
-	}
+	// hover_params := json.decode(lsp.HoverParams, params) or { 
+	// 	ls.panic(err.msg)
+	// 	ls.send_null(id)
+	// 	return
+	// }
 
-	uri := hover_params.text_document.uri
-	pos := hover_params.position
+	// uri := hover_params.text_document.uri
+	// pos := hover_params.position
 
-	mut cfg := HoverConfig{
-		file: ls.files[uri.str()]
-		table: ls.tables[uri.dir()]
-		offset: compute_offset(ls.sources[uri.str()], pos.line, pos.character)
-	}
+	// mut cfg := HoverConfig{
+	// 	file: ls.files[uri.str()]
+	// 	table: ls.tables[uri.dir()]
+	// 	offset: compute_offset(ls.sources[uri.str()], pos.line, pos.character)
+	// }
 
-	// an AST walker will find a node based on the offset
-	node := find_ast_by_pos(cfg.file.stmts.map(ast.Node(it)), cfg.offset) or {
-		ls.send_null(id)
-		return
-	}
+	// // an AST walker will find a node based on the offset
+	// node := find_ast_by_pos(cfg.file.stmts.map(ast.Node(it)), cfg.offset) or {
+	// 	ls.send_null(id)
+	// 	return
+	// }
 
-	mut hover_data := lsp.Hover{}
+	// mut hover_data := lsp.Hover{}
 
-	// the contents of the node will be extracted and be injected
-	// into the hover_data variable
-	// TODO: simplify == tablt.Type(0) checking in the future
-	match node {
-		ast.Stmt {
-			hover_data = cfg.hover_from_stmt(node) or {
-				ls.send_null(id)
-				return
-			}
-		}
-		ast.Expr {
-			hover_data = cfg.hover_from_expr(node) or {
-				ls.send_null(id)
-				return
-			}
-		}
-		ast.StructField {
-			if node.typ == ast.Type(0) {
-				ls.send_null(id)
-				return
-			}
-			range := position_to_lsp_range(node.pos.extend(node.type_pos))
-			typ_name := cfg.table.type_to_str(node.typ).all_after('main.')
-			hover_data = lsp.Hover{
-				contents: lsp.v_marked_string('$node.name $typ_name')
-				range: range
-			}
-		}
-		ast.StructInitField {
-			if node.expected_type == ast.Type(0) {
-				ls.send_null(id)
-				return
-			}
-			range := position_to_lsp_range(node.pos)
-			typ_name := cfg.table.type_to_str(node.expected_type).all_after('main.')
-			hover_data = lsp.Hover{
-				contents: lsp.v_marked_string('$node.name $typ_name')
-				range: range
-			}
-		}
-		ast.Param {
-			if node.typ == ast.Type(0) {
-				ls.send_null(id)
-				return
-			}
-			range := position_to_lsp_range(node.pos.extend(node.type_pos))
-			mut type_name := cfg.table.type_to_str(node.typ).all_after('main.')
-			if node.is_mut {
-				type_name = type_name[1..]
-			}
-			prefix := if node.is_mut { 'mut ' } else { '' }
-			hover_data = lsp.Hover{
-				contents: lsp.v_marked_string('$prefix$node.name $type_name')
-				range: range
-			}
-		}
-		else {
-			// returns a null result for unsupported nodes
-			ls.send_null(id)
-			return
-		}
-	}
-	ls.send(jsonrpc.Response<lsp.Hover>{
-		id: id
-		result: hover_data
-	})
+	// // the contents of the node will be extracted and be injected
+	// // into the hover_data variable
+	// // TODO: simplify == tablt.Type(0) checking in the future
+	// match node {
+	// 	ast.Stmt {
+	// 		hover_data = cfg.hover_from_stmt(node) or {
+	// 			ls.send_null(id)
+	// 			return
+	// 		}
+	// 	}
+	// 	ast.Expr {
+	// 		hover_data = cfg.hover_from_expr(node) or {
+	// 			ls.send_null(id)
+	// 			return
+	// 		}
+	// 	}
+	// 	ast.StructField {
+	// 		if node.typ == ast.Type(0) {
+	// 			ls.send_null(id)
+	// 			return
+	// 		}
+	// 		range := position_to_lsp_range(node.pos.extend(node.type_pos))
+	// 		typ_name := cfg.table.type_to_str(node.typ).all_after('main.')
+	// 		hover_data = lsp.Hover{
+	// 			contents: lsp.v_marked_string('$node.name $typ_name')
+	// 			range: range
+	// 		}
+	// 	}
+	// 	ast.StructInitField {
+	// 		if node.expected_type == ast.Type(0) {
+	// 			ls.send_null(id)
+	// 			return
+	// 		}
+	// 		range := position_to_lsp_range(node.pos)
+	// 		typ_name := cfg.table.type_to_str(node.expected_type).all_after('main.')
+	// 		hover_data = lsp.Hover{
+	// 			contents: lsp.v_marked_string('$node.name $typ_name')
+	// 			range: range
+	// 		}
+	// 	}
+	// 	ast.Param {
+	// 		if node.typ == ast.Type(0) {
+	// 			ls.send_null(id)
+	// 			return
+	// 		}
+	// 		range := position_to_lsp_range(node.pos.extend(node.type_pos))
+	// 		mut type_name := cfg.table.type_to_str(node.typ).all_after('main.')
+	// 		if node.is_mut {
+	// 			type_name = type_name[1..]
+	// 		}
+	// 		prefix := if node.is_mut { 'mut ' } else { '' }
+	// 		hover_data = lsp.Hover{
+	// 			contents: lsp.v_marked_string('$prefix$node.name $type_name')
+	// 			range: range
+	// 		}
+	// 	}
+	// 	else {
+	// 		// returns a null result for unsupported nodes
+	// 		ls.send_null(id)
+	// 		return
+	// 	}
+	// }
+	// ls.send(jsonrpc.Response<lsp.Hover>{
+	// 	id: id
+	// 	result: hover_data
+	// })
 }
 
 [manualfree]
 fn (mut ls Vls) folding_range(id int, params string) {
-	folding_range_params := json.decode(lsp.FoldingRangeParams, params) or { 
-		ls.panic(err.msg)
-		ls.send_null(id)
-		return
-	}
-	uri := folding_range_params.text_document.uri
-	file := ls.files[uri.str()] or {
-		ls.send_null(id)
-		return
-	}
-	mut folding_ranges := []lsp.FoldingRange{}
+	// folding_range_params := json.decode(lsp.FoldingRangeParams, params) or { 
+	// 	ls.panic(err.msg)
+	// 	ls.send_null(id)
+	// 	return
+	// }
+	// uri := folding_range_params.text_document.uri
+	// file := ls.files[uri.str()] or {
+	// 	ls.send_null(id)
+	// 	return
+	// }
+	// mut folding_ranges := []lsp.FoldingRange{}
 
-	// TODO: enable parsing with .toplevel_comments included
-	for stmt in file.stmts {
-		match stmt {
-			ast.ExprStmt {
-				if stmt.expr is ast.Comment {
-					range := position_to_lsp_range(stmt.expr.pos)
-					folding_ranges << lsp.FoldingRange{
-						start_line: range.start.line
-						start_character: range.start.character
-						end_line: range.end.line
-						end_character: range.end.character
-						kind: lsp.folding_range_kind_comment
-					}
-				}
-			}
-			ast.StructDecl, ast.EnumDecl, ast.FnDecl, ast.InterfaceDecl {
-				range := position_to_lsp_range(stmt.pos)
-				folding_ranges << lsp.FoldingRange{
-					start_line: range.start.line
-					start_character: range.start.character
-					end_line: range.end.line
-					end_character: range.end.character
-					kind: lsp.folding_range_kind_region
-				}
-			}
-			else {}
-		}
-	}
+	// // TODO: enable parsing with .toplevel_comments included
+	// for stmt in file.stmts {
+	// 	match stmt {
+	// 		ast.ExprStmt {
+	// 			if stmt.expr is ast.Comment {
+	// 				range := position_to_lsp_range(stmt.expr.pos)
+	// 				folding_ranges << lsp.FoldingRange{
+	// 					start_line: range.start.line
+	// 					start_character: range.start.character
+	// 					end_line: range.end.line
+	// 					end_character: range.end.character
+	// 					kind: lsp.folding_range_kind_comment
+	// 				}
+	// 			}
+	// 		}
+	// 		ast.StructDecl, ast.EnumDecl, ast.FnDecl, ast.InterfaceDecl {
+	// 			range := position_to_lsp_range(stmt.pos)
+	// 			folding_ranges << lsp.FoldingRange{
+	// 				start_line: range.start.line
+	// 				start_character: range.start.character
+	// 				end_line: range.end.line
+	// 				end_character: range.end.character
+	// 				kind: lsp.folding_range_kind_region
+	// 			}
+	// 		}
+	// 		else {}
+	// 	}
+	// }
 
-	if folding_ranges.len == 0 {
-		ls.send_null(id)
-	} else {
-		ls.send(jsonrpc.Response<[]lsp.FoldingRange>{
-			id: id
-			result: folding_ranges
-		})
-	}
-	unsafe {
-		folding_ranges.free()
-	}
+	// if folding_ranges.len == 0 {
+	// 	ls.send_null(id)
+	// } else {
+	// 	ls.send(jsonrpc.Response<[]lsp.FoldingRange>{
+	// 		id: id
+	// 		result: folding_ranges
+	// 	})
+	// }
+	// unsafe {
+	// 	folding_ranges.free()
+	// }
 }
 
 struct DefinitionConfig {
@@ -1349,113 +1349,113 @@ fn (cfg DefinitionConfig) definition_from_expr(node ast.Expr) ?lsp.LocationLink 
 }
 
 fn (mut ls Vls) definition(id int, params string) {
-	goto_definition_params := json.decode(lsp.TextDocumentPositionParams, params) or {
-		ls.panic(err.msg)
-		ls.send_null(id)
-		return
-	}
-	uri := goto_definition_params.text_document.uri
-	pos := goto_definition_params.position
-	source := ls.sources[uri.str()]
-	file := ls.files[uri.str()]
-	offset := compute_offset(source, pos.line, pos.character)
+	// goto_definition_params := json.decode(lsp.TextDocumentPositionParams, params) or {
+	// 	ls.panic(err.msg)
+	// 	ls.send_null(id)
+	// 	return
+	// }
+	// uri := goto_definition_params.text_document.uri
+	// pos := goto_definition_params.position
+	// source := ls.sources[uri.str()]
+	// file := ls.files[uri.str()]
+	// offset := compute_offset(source, pos.line, pos.character)
 
-	mut cfg := DefinitionConfig{
-		uri: uri
-		mod: file.mod.short_name
-		builtin_symbol_locations: ls.builtin_symbol_locations
-		symbol_locations: ls.symbol_locations[uri.dir()]
-		table: ls.tables[uri.dir()]
-	}
-	mut res := lsp.LocationLink{}
+	// mut cfg := DefinitionConfig{
+	// 	uri: uri
+	// 	mod: file.mod.short_name
+	// 	builtin_symbol_locations: ls.builtin_symbol_locations
+	// 	symbol_locations: ls.symbol_locations[uri.dir()]
+	// 	table: ls.tables[uri.dir()]
+	// }
+	// mut res := lsp.LocationLink{}
 
-	// an AST walker will find a node based on the offset
-	mut node := find_ast_by_pos(ast.Node(file).children(), offset) or {
-		ls.send_null(id)
-		return
-	}
+	// // an AST walker will find a node based on the offset
+	// mut node := find_ast_by_pos(ast.Node(file).children(), offset) or {
+	// 	ls.send_null(id)
+	// 	return
+	// }
 
-	// for CallExpr and SelectorExpr nodes, both of which
-	// have a special code inside the AST walker, will need to
-	// have another check if the position is within their children
-	// before doing another AST traversal
-	mut should_find_child := false
-	if mut node is ast.Expr {
-		should_find_child = if mut node is ast.CallExpr {
-			!is_within_pos(offset, node.name_pos)
-		} else if mut node is ast.SelectorExpr {
-			!is_within_pos(offset, node.pos)
-		} else {
-			false
-		}
-	}
+	// // for CallExpr and SelectorExpr nodes, both of which
+	// // have a special code inside the AST walker, will need to
+	// // have another check if the position is within their children
+	// // before doing another AST traversal
+	// mut should_find_child := false
+	// if mut node is ast.Expr {
+	// 	should_find_child = if mut node is ast.CallExpr {
+	// 		!is_within_pos(offset, node.name_pos)
+	// 	} else if mut node is ast.SelectorExpr {
+	// 		!is_within_pos(offset, node.pos)
+	// 	} else {
+	// 		false
+	// 	}
+	// }
 
-	if should_find_child {
-		// falls back to the parent node if there's no child node found
-		node = find_ast_by_pos(node.children(), offset) or { node }
-	}
+	// if should_find_child {
+	// 	// falls back to the parent node if there's no child node found
+	// 	node = find_ast_by_pos(node.children(), offset) or { node }
+	// }
 
-	match mut node {
-		ast.Stmt {
-			if mut node is ast.FnDecl {
-				if !is_within_pos(offset, node.return_type_pos) {
-					ls.send_null(id)
-					return
-				}
+	// match mut node {
+	// 	ast.Stmt {
+	// 		if mut node is ast.FnDecl {
+	// 			if !is_within_pos(offset, node.return_type_pos) {
+	// 				ls.send_null(id)
+	// 				return
+	// 			}
 
-				type_name := cfg.table.type_to_str(node.return_type)
-				res = cfg.get_symbol_location(node.return_type_pos, type_name) or {
-					ls.send_null(id)
-					return
-				}
-			}
-		}
-		ast.Expr {
-			res = cfg.definition_from_expr(node) or {
-				ls.log_message(err.msg, .info)
-				ls.send_null(id)
-				return
-			}
-		}
-		ast.CallArg {
-			res = cfg.definition_from_expr(node.expr) or {
-				ls.send_null(id)
-				return
-			}
-		}
-		ast.StructInitField {
-			if !is_within_pos(offset, node.name_pos) || node.parent_type == ast.Type(0) {
-				ls.send_null(id)
-				return
-			}
+	// 			type_name := cfg.table.type_to_str(node.return_type)
+	// 			res = cfg.get_symbol_location(node.return_type_pos, type_name) or {
+	// 				ls.send_null(id)
+	// 				return
+	// 			}
+	// 		}
+	// 	}
+	// 	ast.Expr {
+	// 		res = cfg.definition_from_expr(node) or {
+	// 			ls.log_message(err.msg, .info)
+	// 			ls.send_null(id)
+	// 			return
+	// 		}
+	// 	}
+	// 	ast.CallArg {
+	// 		res = cfg.definition_from_expr(node.expr) or {
+	// 			ls.send_null(id)
+	// 			return
+	// 		}
+	// 	}
+	// 	ast.StructInitField {
+	// 		if !is_within_pos(offset, node.name_pos) || node.parent_type == ast.Type(0) {
+	// 			ls.send_null(id)
+	// 			return
+	// 		}
 
-			struct_type_name := cfg.table.type_to_str(node.parent_type)
-			res = cfg.get_symbol_location(node.name_pos, '${struct_type_name}.$node.name') or {
-				ls.send_null(id)
-				return
-			}
-		}
-		ast.Param, ast.StructField {
-			if !is_within_pos(offset, node.type_pos) {
-				ls.send_null(id)
-				return
-			}
+	// 		struct_type_name := cfg.table.type_to_str(node.parent_type)
+	// 		res = cfg.get_symbol_location(node.name_pos, '${struct_type_name}.$node.name') or {
+	// 			ls.send_null(id)
+	// 			return
+	// 		}
+	// 	}
+	// 	ast.Param, ast.StructField {
+	// 		if !is_within_pos(offset, node.type_pos) {
+	// 			ls.send_null(id)
+	// 			return
+	// 		}
 
-			type_name := cfg.table.type_to_str(node.typ)
-			res = cfg.get_symbol_location(node.type_pos, type_name) or {
-				ls.send_null(id)
-				return
-			}
-		}
-		else {
-			// for unsupported nodes, the server will return null.
-			ls.send_null(id)
-			return
-		}
-	}
+	// 		type_name := cfg.table.type_to_str(node.typ)
+	// 		res = cfg.get_symbol_location(node.type_pos, type_name) or {
+	// 			ls.send_null(id)
+	// 			return
+	// 		}
+	// 	}
+	// 	else {
+	// 		// for unsupported nodes, the server will return null.
+	// 		ls.send_null(id)
+	// 		return
+	// 	}
+	// }
 
-	ls.send(jsonrpc.Response<lsp.LocationLink>{
-		id: id
-		result: res
-	})
+	// ls.send(jsonrpc.Response<lsp.LocationLink>{
+	// 	id: id
+	// 	result: res
+	// })
 }

@@ -53,13 +53,6 @@ pub enum FailureHandlingKind {
 	text_only_transactional
 }
 
-// TextDocumentSyncKind
-pub enum TextDocumentSyncKind {
-	none_ = 0
-	full = 1
-	incremental = 2
-}
-
 pub struct ExecuteCommandOptions {
 	commands []string
 }

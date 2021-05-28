@@ -166,10 +166,16 @@ pub mut:
 	work_done_progress bool [json: workDoneProgress]
 }
 
+pub enum TextDocumentSyncKind {
+	none_ = 0
+	full = 1
+	incremental = 2
+}
+
 pub struct ServerCapabilities {
 pub mut:
 	// text_document_sync TextDocumentSyncOptions [json:textDocumentSync]
-	text_document_sync                   int                             [json: textDocumentSync]
+	text_document_sync                   TextDocumentSyncKind            [json: textDocumentSync]
 	hover_provider                       bool                            [json: hoverProvider]
 	completion_provider                  CompletionOptions               [json: completionProvider]
 	signature_help_provider              SignatureHelpOptions            [json: signatureHelpProvider]

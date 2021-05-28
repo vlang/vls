@@ -60,6 +60,59 @@ fn test_compute_offset() {
 	bench.stop()
 }
 
+const compute_position_inputs = map{
+	'crlf.vv': 55
+	'lf.vv':   41
+}
+
+const compute_position_results = map{
+	'crlf.vv': lsp.Position{3, 22}
+	'lf.vv':   lsp.Position{2, 14}
+}
+
+fn test_compute_position() {
+	mut bench := benchmark.new_benchmark()
+	// TODO:
+	test_files := testing.load_test_file_paths('pos_compute_offset') or {
+		bench.fail()
+		eprintln(bench.step_message_fail(err.msg))
+		assert false
+		return
+	}
+
+	bench.set_total_expected_steps(test_files.len)
+	for test_file_path in test_files {
+		bench.step()
+		test_name := os.base(test_file_path)
+		err_msg := if test_name !in compute_offset_results {
+			'missing results for $test_name'
+		} else if test_name !in compute_offset_inputs {
+			'missing input data for $test_name'
+		} else {
+			''
+		}
+		if err_msg.len != 0 {
+			bench.fail()
+			eprintln(bench.step_message_fail(err_msg))
+			continue
+		}
+		println(bench.step_message('Testing $test_name'))
+		content := os.read_bytes(test_file_path) or {
+			bench.fail()
+			eprintln(bench.step_message_fail('file $test_file_path is missing'))
+			continue
+		}
+		input := compute_position_inputs[test_name]
+		expected := compute_position_results[test_name]
+		result := vls.compute_position(content, input)
+		assert result == expected
+		bench.ok()
+		println(bench.step_message_ok(test_name))
+	}
+	assert bench.nfail == 0
+	bench.stop()
+}
+
 const position_to_lsp_pos_inputs = map{
 	'simple.vv': token.Position{
 		line_nr: 2

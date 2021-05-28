@@ -41,6 +41,40 @@ pub fn compute_offset(src []byte, line int, col int) int {
 	return offset
 }
 
+pub fn compute_position(src []byte, target_offset int) lsp.Position {
+	mut offset := 0
+	mut src_line := 0
+	mut src_col := 0
+	for i := 0; i < src.len; i++ {
+		byt := src[i]
+		is_lf := byt == `\n`
+		is_crlf := i != src.len - 1 && unsafe { byt == `\r` && src[i + 1] == `\n` }
+		is_eol := is_lf || is_crlf
+		if offset == target_offset {
+			break
+		}
+		if is_eol {
+			src_line++
+			src_col = 0
+			if is_crlf {
+				offset += 2
+				i++
+			} else {
+				offset++
+			}
+			continue
+		}
+		src_col++
+		offset++
+	}
+	if target_offset > offset {
+		remaining_offset := target_offset - offset
+		return lsp.Position{src_line, src_col + remaining_offset}
+	}
+	
+	return lsp.Position{src_line, src_col}
+}
+
 // position_to_lsp_pos converts the token.Position into lsp.Position
 pub fn position_to_lsp_pos(pos token.Position) lsp.Position {
 	return lsp.Position{

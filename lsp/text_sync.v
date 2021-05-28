@@ -29,7 +29,7 @@ pub:
 
 pub struct TextDocumentContentChangeEvent {
 pub:
-	// range Range
+	range Range
 	// range_length int [json:rangeLength]
 	text string
 }
