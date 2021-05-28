@@ -1,3 +1,5 @@
+> **NOTE!**: You are reading a developmental branch of VLS that uses the Tree-sitter Parser. This is not meant for the general public as it does not do any language features at this moment.
+
 > VLS is a work-in-progress, pre-alpha language server. It may not be guaranteed to work reliably on your system due to memory management issues and other factors.
 
 # vls
@@ -8,10 +10,14 @@ VLS (V Language Server) is a LSP v3.15-compatible language server for [the V pro
 ## Installation
 Installation requires you to have Git and V installed and compile the language server by yourself. You need to execute the following:
 ```
+# Install the tree-sitter grammar for V first
+git clone https://github.com/nedpals/tree-sitter-v ~/.vmodules/tree_sitter_v
+
+# Clone the project
 git clone https://github.com/vlang/vls.git vls && cd vls/
 
 # Build the project
-v -prod cmd/vls
+v cmd/vls
 # The binary will be create in the subfolder by default
 ```
 
