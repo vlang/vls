@@ -119,7 +119,7 @@ pub fn (mut an Analyzer) get_scope(node C.TSNode) &ScopeTree {
 
 pub fn (mut an Analyzer) register_symbol(info &TypeSymbol) ?&TypeSymbol {
 	if info.name in an.symbol_store {
-		return error('Symbol already exists.')
+		return error('Symbol already exists. (name="${info.name}")')
 	}
 
 	an.symbol_store[info.name] = info
@@ -202,10 +202,10 @@ pub fn (mut an Analyzer) top_level_statement() {
 			an.cursor.goto_first_child()
 			an.next()
 
-			spec_node := an.cursor.current_node()
+			// spec_node := an.cursor.current_node()
 			// println(mod_path.sexpr_str())
-			mod_path := spec_node.child_by_field_name('path').get_text(an.src_text)
-			mod_alias := spec_node.child_by_field_name('alias')
+			// mod_path := spec_node.child_by_field_name('path').get_text(an.src_text)
+			// mod_alias := spec_node.child_by_field_name('alias')
 
 			// print(mod_path)
 			// if !mod_alias.is_null() {
@@ -299,9 +299,114 @@ pub fn (mut an Analyzer) top_level_statement() {
 			an.cursor.parent()
 			an.cursor.parent()
 		}
-		// 'interface_declaration' {
+		'interface_declaration' {
+			// TODO: refactor
+			an.cursor.goto_first_child()
+			if an.current_node().get_type() == 'pub' {
+				access = SymbolAccess.public
+			}
+			
+			an.next()
+			mut sym := &TypeSymbol{
+				name: an.current_node().get_text(an.src_text)
+				access: access
+				range: range
+				kind: .struct_
+			}
 
-		// }
+			an.next()
+
+			fields_len := an.current_node().named_child_count()
+			an.cursor.goto_first_child()
+			for i := 0; i < fields_len; i++ {
+				an.next()
+				field_node := an.current_node()
+				match field_node.get_type() {
+					'interface_field_scope' {
+						// TODO: add if mut: check
+						access = .private_mutable
+					}
+					'interface_spec' {
+						param_node := field_node.child_by_field_name('parameters')
+						name_node := field_node.child_by_field_name('name')
+						result_node := field_node.child_by_field_name('result')
+
+						mut spec_sym := &TypeSymbol{
+							name: name_node.get_text(an.src_text)
+							kind: .field
+							range: field_node.range()
+							access: access
+							return_type: an.find_symbol(result_node.get_text(an.src_text))
+						}
+
+						an.register_symbol(spec_sym) or { eprintln(err) }
+
+						// scan params
+						params_len := param_node.named_child_count()
+						an.cursor.reset(param_node)
+						an.cursor.goto_first_child()
+
+						for j := 0; j < params_len; j++ {
+							if !an.current_node().is_named() {
+								an.next()
+							}
+
+							an.cursor.goto_first_child()
+							if an.current_node().get_type() == 'mut' {
+								access = SymbolAccess.private_mutable
+								an.next()
+							}
+
+							param_name := an.current_node().get_text(an.src_text)
+							param_range := an.current_node().range()
+							an.next()
+
+							param_type := an.current_node().get_text(an.src_text)
+							mut typ := an.find_symbol(param_type)
+							mut param_sym := &TypeSymbol{
+								name: param_name
+								kind: .variable
+								range: param_range
+								access: access
+							}
+
+							if !isnil(typ) {
+								param_sym.return_type = typ
+							}
+
+							spec_sym.add_child(mut param_sym) or { eprintln(err) }
+						}
+
+						an.cursor.parent()
+						an.cursor.parent()	
+
+						sym.add_child(mut spec_sym) or {
+							eprintln(err)
+						}
+					}
+					'struct_field_declaration' {
+						field_typ := an.find_symbol(field_node.child_by_field_name('type').get_text(an.src_text))
+						mut field_sym := &TypeSymbol{
+							name: field_node.child_by_field_name('name').get_text(an.src_text)
+							kind: .field
+							range: field_node.range()
+							access: access
+							return_type: field_typ
+						}
+
+						sym.add_child(mut field_sym) or { 
+							eprintln(err)
+						}
+					}
+					else { continue }
+				}
+				// scope.register(field_sym)
+			}
+
+			an.register_symbol(sym) or { eprintln(err) }
+			an.cursor.parent()
+			an.cursor.parent()
+		}
 		'enum_declaration' {
 			an.cursor.goto_first_child()
 

@@ -15,6 +15,11 @@ pub const (
 	foo = \'bar\'
 )
 
+interface Speaker {
+	speak(name string) string
+	foo int
+}
+
 struct Hey {
 	what string
 }
@@ -45,6 +50,6 @@ pub fn (mut h Hey) main(num int) int {
 	analyzer.top_level_statement()
 
 	// println(analyzer.scope)
-	println(analyzer.scope.innermost(55))
-	// println(analyzer.symbol_store)
+	// println(analyzer.scope.innermost(55))
+	println(analyzer.symbol_store)
 }
