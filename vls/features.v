@@ -13,7 +13,7 @@ import os
 
 [manualfree]
 fn (mut ls Vls) formatting(id int, params string) {
-	formatting_params := json.decode(lsp.DocumentFormattingParams, params) or { 
+	formatting_params := json.decode(lsp.DocumentFormattingParams, params) or {
 		ls.panic(err.msg)
 		ls.send_null(id)
 		return
@@ -25,7 +25,7 @@ fn (mut ls Vls) formatting(id int, params string) {
 		ls.send_null(id)
 		return
 	}
-	
+
 	mut prefs := pref.new_preferences()
 	prefs.output_mode = .silent
 	prefs.is_fmt = true
@@ -81,7 +81,7 @@ fn (mut ls Vls) workspace_symbol(id int, _ string) {
 }
 
 fn (mut ls Vls) document_symbol(id int, params string) {
-	document_symbol_params := json.decode(lsp.DocumentSymbolParams, params) or { 
+	document_symbol_params := json.decode(lsp.DocumentSymbolParams, params) or {
 		ls.panic(err.msg)
 		ls.send_null(id)
 		return
@@ -176,7 +176,7 @@ fn (mut ls Vls) generate_symbols(file ast.File, uri lsp.DocumentUri) []lsp.Symbo
 }
 
 fn (mut ls Vls) signature_help(id int, params string) {
-	signature_params := json.decode(lsp.SignatureHelpParams, params) or { 
+	signature_params := json.decode(lsp.SignatureHelpParams, params) or {
 		ls.panic(err.msg)
 		ls.send_null(id)
 		return
@@ -721,7 +721,7 @@ fn (mut ls Vls) completion(id int, params string) {
 	if Feature.completion !in ls.enabled_features {
 		return
 	}
-	completion_params := json.decode(lsp.CompletionParams, params) or { 
+	completion_params := json.decode(lsp.CompletionParams, params) or {
 		ls.panic(err.msg)
 		ls.send_null(id)
 		return
@@ -1117,7 +1117,7 @@ fn (mut cfg HoverConfig) hover_from_expr(node ast.Expr) ?lsp.Hover {
 }
 
 fn (mut ls Vls) hover(id int, params string) {
-	hover_params := json.decode(lsp.HoverParams, params) or { 
+	hover_params := json.decode(lsp.HoverParams, params) or {
 		ls.panic(err.msg)
 		ls.send_null(id)
 		return
@@ -1210,7 +1210,7 @@ fn (mut ls Vls) hover(id int, params string) {
 
 [manualfree]
 fn (mut ls Vls) folding_range(id int, params string) {
-	folding_range_params := json.decode(lsp.FoldingRangeParams, params) or { 
+	folding_range_params := json.decode(lsp.FoldingRangeParams, params) or {
 		ls.panic(err.msg)
 		ls.send_null(id)
 		return

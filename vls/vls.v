@@ -147,18 +147,42 @@ pub fn (mut ls Vls) dispatch(payload string) {
 				ls.exit()
 				// ls.shutdown(request.id)
 			}
-			'exit' { /* ignore for the reasons stated in the above comment */ }
-			'textDocument/didOpen' { ls.did_open(request.id, request.params) }
-			'textDocument/didChange' { ls.did_change(request.id, request.params) }
-			'textDocument/didClose' { ls.did_close(request.id, request.params) }
-			'textDocument/formatting' { ls.formatting(request.id, request.params) }
-			'textDocument/documentSymbol' { ls.document_symbol(request.id, request.params) }
-			'workspace/symbol' { ls.workspace_symbol(request.id, request.params) }
-			'textDocument/signatureHelp' { ls.signature_help(request.id, request.params) }
-			'textDocument/completion' { ls.completion(request.id, request.params) }
-			'textDocument/hover' { ls.hover(request.id, request.params) }
-			'textDocument/foldingRange' { ls.folding_range(request.id, request.params) }
-			'textDocument/definition' { ls.definition(request.id, request.params) }
+			'exit' {
+				// ignore for the reasons stated in the above comment
+			}
+			'textDocument/didOpen' {
+				ls.did_open(request.id, request.params)
+			}
+			'textDocument/didChange' {
+				ls.did_change(request.id, request.params)
+			}
+			'textDocument/didClose' {
+				ls.did_close(request.id, request.params)
+			}
+			'textDocument/formatting' {
+				ls.formatting(request.id, request.params)
+			}
+			'textDocument/documentSymbol' {
+				ls.document_symbol(request.id, request.params)
+			}
+			'workspace/symbol' {
+				ls.workspace_symbol(request.id, request.params)
+			}
+			'textDocument/signatureHelp' {
+				ls.signature_help(request.id, request.params)
+			}
+			'textDocument/completion' {
+				ls.completion(request.id, request.params)
+			}
+			'textDocument/hover' {
+				ls.hover(request.id, request.params)
+			}
+			'textDocument/foldingRange' {
+				ls.folding_range(request.id, request.params)
+			}
+			'textDocument/definition' {
+				ls.definition(request.id, request.params)
+			}
 			else {}
 		}
 	} else {
@@ -211,14 +235,12 @@ fn (ls Vls) log_path() string {
 fn (mut ls Vls) panic(message string) {
 	ls.panic_count++
 
-	// NB: Would 2 be enough to exit? 
+	// NB: Would 2 be enough to exit?
 	if ls.panic_count == 2 {
 		log_path := ls.log_path()
 		ls.logger.set_logpath(log_path)
-		ls.show_message(
-			'VLS Panic: ${message}. Log saved to ${os.real_path(log_path)}. Please refer to https://github.com/vlang/vls#error-reporting for more details.', 
-			.error,
-		)
+		ls.show_message('VLS Panic: ${message}. Log saved to ${os.real_path(log_path)}. Please refer to https://github.com/vlang/vls#error-reporting for more details.',
+			.error)
 		ls.logger.close()
 		ls.exit()
 	} else {
@@ -315,7 +337,7 @@ fn (mut ls Vls) extract_symbol_locations(uri lsp.DocumentUri, mod string, stmts 
 		match stmt {
 			ast.ConstDecl {
 				for field in stmt.fields {
-					name := '${mod}.${field.name}'
+					name := '${mod}.$field.name'
 					ls.symbol_locations[path][name] = lsp.Location{
 						uri: uri
 						range: position_to_lsp_range(field.pos)
@@ -328,7 +350,7 @@ fn (mut ls Vls) extract_symbol_locations(uri lsp.DocumentUri, mod string, stmts 
 					range: position_to_lsp_range(stmt.pos)
 				}
 				for field in stmt.fields {
-					name := '${stmt.name}.${field.name}'
+					name := '${stmt.name}.$field.name'
 					ls.symbol_locations[path][name] = lsp.Location{
 						uri: uri
 						range: position_to_lsp_range(field.pos)
@@ -342,7 +364,7 @@ fn (mut ls Vls) extract_symbol_locations(uri lsp.DocumentUri, mod string, stmts 
 				}
 
 				for field in stmt.fields {
-					name := '${stmt.name}.${field.name}'
+					name := '${stmt.name}.$field.name'
 					ls.symbol_locations[path][name] = lsp.Location{
 						uri: uri
 						range: position_to_lsp_range(field.pos)
@@ -350,7 +372,7 @@ fn (mut ls Vls) extract_symbol_locations(uri lsp.DocumentUri, mod string, stmts 
 				}
 			}
 			ast.FnDecl {
-				stmt_name := '${mod}.${stmt.name}'
+				stmt_name := '${mod}.$stmt.name'
 				ls.symbol_locations[path][stmt_name] = lsp.Location{
 					uri: uri
 					range: position_to_lsp_range(stmt.pos)
@@ -365,7 +387,7 @@ fn (mut ls Vls) extract_symbol_locations(uri lsp.DocumentUri, mod string, stmts 
 			ast.TypeDecl {
 				match stmt {
 					ast.AliasTypeDecl, ast.FnTypeDecl, ast.SumTypeDecl {
-						stmt_name := '${mod}.${stmt.name}'
+						stmt_name := '${mod}.$stmt.name'
 						ls.symbol_locations[path][stmt_name] = lsp.Location{
 							uri: uri
 							range: position_to_lsp_range(stmt.pos)

@@ -17,16 +17,13 @@ const (
 )
 
 fn (mut ls Vls) did_open(_ int, params string) {
-	did_open_params := json.decode(lsp.DidOpenTextDocumentParams, params) or { 
+	did_open_params := json.decode(lsp.DidOpenTextDocumentParams, params) or {
 		ls.panic(err.msg)
 		return
 	}
 	// Do not process it again if file already exists
 	if did_open_params.text_document.uri !in ls.files {
-		ls.process_file(
-			did_open_params.text_document.text, 
-			did_open_params.text_document.uri,
-		)
+		ls.process_file(did_open_params.text_document.text, did_open_params.text_document.uri)
 	}
 }
 
@@ -44,8 +41,8 @@ fn (mut ls Vls) did_change(_ int, params string) {
 
 [manualfree]
 fn (mut ls Vls) did_close(_ int, params string) {
-	did_close_params := json.decode(lsp.DidCloseTextDocumentParams, params) or { 
-		ls.panic(err.msg) 
+	did_close_params := json.decode(lsp.DidCloseTextDocumentParams, params) or {
+		ls.panic(err.msg)
 		return
 	}
 	uri := did_close_params.text_document.uri
