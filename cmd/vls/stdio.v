@@ -46,7 +46,7 @@ fn get_raw_input() string {
 	for {
 		c := C.fgetc(C.stdin)
 		chr := byte(c)
-		if buf.len > 2 && (c == eof || chr in [`\r`, `\n`]) {
+		if buf.buf.len > 2 && (c == eof || chr in [`\r`, `\n`]) {
 			break
 		}
 		buf.write_b(chr)
