@@ -6,7 +6,6 @@ import json
 import strings
 
 pub interface Logger {
-mut:
 	close()
 	flush()
 	enable()
@@ -107,7 +106,7 @@ pub fn (mut l Log) close() {
 	if !l.file_opened {
 		return
 	}
-	
+
 	l.file_opened = false
 	l.file.close()
 }
@@ -203,7 +202,7 @@ fn (li LogItem) encode(format Format, last_timestamp time.Time) string {
 
 // json is a JSON string representation of the log item.
 pub fn (li LogItem) json() string {
-	return '{"kind":"${li.kind}","message":${li.message},"timestamp":${li.timestamp.unix}}'
+	return '{"kind":"$li.kind","message":$li.message,"timestamp":$li.timestamp.unix}'
 }
 
 // text is the standard LSP text log representation of the log item.
@@ -217,10 +216,10 @@ pub fn (li LogItem) text(last_timestamp time.Time) string {
 	message := match li.kind {
 		.send_notification { 'Sending notification \'$method\'.' }
 		.recv_notification { 'Received notification \'$method\'.' }
-		.send_request { 'Sending request \'$method - (${payload.id})\'.' }
-		.recv_request { 'Received request \'$method - (${payload.id})\'.' }
-		.send_response { 'Sending response \'$method - (${payload.id})\' took ${elapsed_ms}ms' }
-		.recv_response { 'Received response \'$method - (${payload.id})\' in ${elapsed_ms}ms' }
+		.send_request { 'Sending request \'$method - ($payload.id)\'.' }
+		.recv_request { 'Received request \'$method - ($payload.id)\'.' }
+		.send_response { 'Sending response \'$method - ($payload.id)\' took ${elapsed_ms}ms' }
+		.recv_response { 'Received response \'$method - ($payload.id)\' in ${elapsed_ms}ms' }
 	}
 
 	params_msg := if li.message == 'null' {
@@ -230,5 +229,5 @@ pub fn (li LogItem) text(last_timestamp time.Time) string {
 	} else {
 		'Params: ' + li.message
 	}
-	return '[Trace - ${li.timestamp.hhmmss()}] $message\n$params_msg\n\n'
+	return '[Trace - $li.timestamp.hhmmss()] $message\n$params_msg\n\n'
 }

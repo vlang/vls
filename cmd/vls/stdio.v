@@ -6,7 +6,7 @@ const (
 	content_length = 'Content-Length: '
 )
 
-fn C.fgetc(stream byteptr) int
+fn C.fgetc(stream &byte) int
 
 struct Stdio {
 pub mut:
@@ -26,7 +26,7 @@ pub fn (_ Stdio) receive() ?string {
 	mut conlen := first_line[content_length.len..].int()
 	mut buf := strings.new_builder(conlen)
 	for conlen >= 0 {
-		c := C.fgetc(C.stdin)
+		c := C.fgetc(&byte(C.stdin))
 		$if !windows {
 			if c == 10 {
 				continue
@@ -44,7 +44,7 @@ fn get_raw_input() string {
 	eof := C.EOF
 	mut buf := strings.new_builder(200)
 	for {
-		c := C.fgetc(C.stdin)
+		c := C.fgetc(&byte(C.stdin))
 		chr := byte(c)
 		if buf.buf.len > 2 && (c == eof || chr in [`\r`, `\n`]) {
 			break
