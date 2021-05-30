@@ -131,9 +131,9 @@ fn (mut l Log) write(item LogItem) {
 
 	content := item.encode(l.format, l.last_timestamp)
 	if l.file_opened {
-		if l.buffer.buf.len != 0 {
+		if l.buffer.len != 0 {
 			unsafe {
-				l.file.write_ptr(l.buffer.buf.data, l.buffer.buf.len)
+				l.file.write_ptr(l.buffer.data, l.buffer.len)
 				l.buffer.free()
 			}
 		}
