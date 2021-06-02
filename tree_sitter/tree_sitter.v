@@ -107,7 +107,7 @@ fn C.ts_node_prev_named_sibling(node C.TSNode) C.TSNode
 
 fn C.ts_node_eq(node C.TSNode, another_node C.TSNode) bool
 
-pub fn (node C.TSNode) get_text(text string) string {
+pub fn (node C.TSNode) get_text(text []byte) string {
 	start_index := C.ts_node_start_byte(node)
 	end_index := C.ts_node_end_byte(node)
 	len := int(end_index - start_index)
@@ -115,7 +115,7 @@ pub fn (node C.TSNode) get_text(text string) string {
 		return ''
 	}
 
-	return text[start_index .. end_index]
+	return text[start_index .. end_index].bytestr()
 }
 
 [inline]
@@ -277,7 +277,7 @@ pub fn (cursor &C.TSTreeCursor) free() {
 }
 
 [inline]
-pub fn (cursor &C.TSTreeCursor) reset(node C.TSNode) {
+pub fn (mut cursor C.TSTreeCursor) reset(node C.TSNode) {
 	C.ts_tree_cursor_reset(cursor, node)
 }
 
@@ -292,17 +292,17 @@ pub fn (cursor &C.TSTreeCursor) current_field_name() string {
 }
 
 [inline]
-pub fn (cursor &C.TSTreeCursor) parent() bool {
+pub fn (mut cursor C.TSTreeCursor) to_parent() bool {
 	return C.ts_tree_cursor_goto_parent(cursor)
 }
 
 [inline]
-pub fn (cursor &C.TSTreeCursor) next() bool {
+pub fn (mut cursor C.TSTreeCursor) next() bool {
 	return C.ts_tree_cursor_goto_next_sibling(cursor)
 }
 
 [inline]
-pub fn (cursor &C.TSTreeCursor) goto_first_child() bool {
+pub fn (mut cursor C.TSTreeCursor) to_first_child() bool {
 	return C.ts_tree_cursor_goto_first_child(cursor)
 }
 

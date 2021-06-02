@@ -49,6 +49,63 @@ pub fn (mut scope ScopeTree) register(info &TypeSymbol) {
 	scope.symbols[info.name] = info
 }
 
+struct Import {
+mut:
+	resolved bool
+pub mut:
+	symbols []string
+	path string
+	mod string
+	alias string
+}
+
+pub struct Store {
+mut:
+	imports map[string][]Import
+	fs_to_module_names map[string]string
+	module_names_to_fs map[string]string
+pub mut:
+	symbols map[string]&TypeSymbol
+	opened_scopes map[string]&ScopeTree
+}
+
+pub fn (mut ss Store) find_symbol(name string) &TypeSymbol {
+	if name.len == 0 {
+		return &TypeSymbol(0)
+	}
+
+	typ := ss.symbols[name] or {
+		ss.register_symbol(&TypeSymbol{
+			name: name
+			kind: .placeholder
+		}) or { &TypeSymbol(0) }
+	}
+
+	return typ
+}
+
+pub fn (mut ss Store) register_symbol(info &TypeSymbol) ?&TypeSymbol {
+	if info.name in ss.symbols {
+		return error('Symbol already exists. (name="${info.name}")')
+	}
+
+	ss.symbols[info.name] = info
+	return info
+}
+
+pub fn (mut ss Store) add_import(dir string, imp Import) {
+	mut new_import := Import{ ...imp }
+	if new_import.path.len != 0 && !new_import.resolved {
+		new_import.resolved = true
+	}
+
+	if dir !in ss.imports {
+		ss.imports[dir] = []Import{}
+	}
+
+	ss.imports[dir] << new_import 
+}
+
 [heap]
 struct TypeSymbol {
 mut:
@@ -80,50 +137,34 @@ pub fn (mut info TypeSymbol) add_child(mut new_child TypeSymbol) ? {
 	info.children[new_child.name] = new_child
 }
 
-struct Import {
-pub:
-	mod string
-	alias string
-	symbols []string
-}
-
 pub struct Analyzer {
 pub mut:
+	cur_file_path string
 	cursor   C.TSTreeCursor
-	src_text string
-	symbol_store map[string]&TypeSymbol
-	import_list map[string][]string
+	src_text []byte
+	store &Store = &Store(0)
 	scope &ScopeTree = &ScopeTree(0)
 }
 
 pub fn (mut an Analyzer) get_scope(node C.TSNode) &ScopeTree {
 	if node.get_type() == 'source_file' {
-		if isnil(an.scope) {
-			an.scope = &ScopeTree{
+		if an.cur_file_path !in an.store.opened_scopes {
+			an.store.opened_scopes[an.cur_file_path] = &ScopeTree{
 				start_byte: node.start_byte()
 				end_byte: node.end_byte()
 			}
 		}
 
-		return an.scope
+		return an.store.opened_scopes[an.cur_file_path]
 	} else {
-		an.scope.children << &ScopeTree{
+		an.store.opened_scopes[an.cur_file_path].children << &ScopeTree{
 			start_byte: node.start_byte()
 			end_byte: node.end_byte()
-			parent: an.scope
+			parent: an.store.opened_scopes[an.cur_file_path]
 		}
 
-		return an.scope.children.last()
+		return an.store.opened_scopes[an.cur_file_path].children.last()
 	}
-}
-
-pub fn (mut an Analyzer) register_symbol(info &TypeSymbol) ?&TypeSymbol {
-	if info.name in an.symbol_store {
-		return error('Symbol already exists. (name="${info.name}")')
-	}
-
-	an.symbol_store[info.name] = info
-	return info
 }
 
 fn (mut an Analyzer) next() bool {
@@ -141,21 +182,6 @@ fn (mut an Analyzer) next() bool {
 	}
 
 	return true
-}
-
-pub fn (mut an Analyzer) find_symbol(name string) &TypeSymbol {
-	if name.len == 0 {
-		return &TypeSymbol(0)
-	}
-
-	typ := an.symbol_store[name] or {
-		an.register_symbol(&TypeSymbol{
-			name: name
-			kind: .placeholder
-		}) or { &TypeSymbol(0) }
-	}
-
-	return typ
 }
 
 fn (mut an Analyzer) current_node() C.TSNode {
@@ -178,7 +204,7 @@ pub fn (mut an Analyzer) infer_value_type(right C.TSNode) &TypeSymbol {
 		else { '' }
 	}
 
-	return an.find_symbol(typ)
+	return an.store.find_symbol(typ)
 }
 
 pub fn (mut an Analyzer) top_level_statement() {
@@ -190,7 +216,7 @@ pub fn (mut an Analyzer) top_level_statement() {
 	mut node_type := an.current_node().get_type()
 	mut access := SymbolAccess.private
 	if node_type == 'source_file' {
-		an.cursor.goto_first_child()
+		an.cursor.to_first_child()
 		node_type = an.current_node().get_type()
 	}
 
@@ -199,7 +225,7 @@ pub fn (mut an Analyzer) top_level_statement() {
 
 	match node_type {
 		'import_declaration' {
-			an.cursor.goto_first_child()
+			an.cursor.to_first_child()
 			an.next()
 
 			// spec_node := an.cursor.current_node()
@@ -212,11 +238,10 @@ pub fn (mut an Analyzer) top_level_statement() {
 			// 	println(' | alias: ${mod_alias.child_by_field_name('name').get_text(an.src_text)}')
 			// }
 
-			// println('')
-			an.cursor.parent()
+			an.cursor.to_parent()
 		}
 		'const_declaration' {
-			an.cursor.goto_first_child()
+			an.cursor.to_first_child()
 			if an.current_node().get_type() == 'pub' {
 				access = SymbolAccess.public
 			}
@@ -232,17 +257,17 @@ pub fn (mut an Analyzer) top_level_statement() {
 				}
 
 				const_sym.return_type = an.infer_value_type(spec_node.child_by_field_name('value'))
-				an.register_symbol(const_sym) or { eprint(err) }
+				an.store.register_symbol(const_sym) or { eprint(err) }
 				global_scope.register(const_sym)
 				if !an.next() {
 					break
 				}
 			}
 
-			an.cursor.parent()
+			an.cursor.to_parent()
 		}
 		'struct_declaration' {
-			an.cursor.goto_first_child()
+			an.cursor.to_first_child()
 			if an.current_node().get_type() == 'pub' {
 				access = SymbolAccess.public
 			}
@@ -259,7 +284,7 @@ pub fn (mut an Analyzer) top_level_statement() {
 			fields_len := an.current_node().named_child_count()
 			mut scope := an.get_scope(an.current_node())
 
-			an.cursor.goto_first_child()
+			an.cursor.to_first_child()
 			for i := 0; i < fields_len; i++ {
 				an.next()
 				field_node := an.current_node()
@@ -279,7 +304,7 @@ pub fn (mut an Analyzer) top_level_statement() {
 					continue
 				} 
 				
-				field_typ := an.find_symbol(field_node.child_by_field_name('type').get_text(an.src_text))
+				field_typ := an.store.find_symbol(field_node.child_by_field_name('type').get_text(an.src_text))
 				mut field_sym := &TypeSymbol{
 					name: field_node.child_by_field_name('name').get_text(an.src_text)
 					kind: .field
@@ -295,13 +320,13 @@ pub fn (mut an Analyzer) top_level_statement() {
 				scope.register(field_sym)
 			}
 
-			an.register_symbol(sym) or { eprintln(err) }
-			an.cursor.parent()
-			an.cursor.parent()
+			an.store.register_symbol(sym) or { eprintln(err) }
+			an.cursor.to_parent()
+			an.cursor.to_parent()
 		}
 		'interface_declaration' {
 			// TODO: refactor
-			an.cursor.goto_first_child()
+			an.cursor.to_first_child()
 			if an.current_node().get_type() == 'pub' {
 				access = SymbolAccess.public
 			}
@@ -317,7 +342,7 @@ pub fn (mut an Analyzer) top_level_statement() {
 			an.next()
 
 			fields_len := an.current_node().named_child_count()
-			an.cursor.goto_first_child()
+			an.cursor.to_first_child()
 			for i := 0; i < fields_len; i++ {
 				an.next()
 				field_node := an.current_node()
@@ -336,22 +361,22 @@ pub fn (mut an Analyzer) top_level_statement() {
 							kind: .field
 							range: field_node.range()
 							access: access
-							return_type: an.find_symbol(result_node.get_text(an.src_text))
+							return_type: an.store.find_symbol(result_node.get_text(an.src_text))
 						}
 
-						an.register_symbol(spec_sym) or { eprintln(err) }
+						an.store.register_symbol(spec_sym) or { eprintln(err) }
 
 						// scan params
 						params_len := param_node.named_child_count()
 						an.cursor.reset(param_node)
-						an.cursor.goto_first_child()
+						an.cursor.to_first_child()
 
 						for j := 0; j < params_len; j++ {
 							if !an.current_node().is_named() {
 								an.next()
 							}
 
-							an.cursor.goto_first_child()
+							an.cursor.to_first_child()
 							if an.current_node().get_type() == 'mut' {
 								access = SymbolAccess.private_mutable
 								an.next()
@@ -362,7 +387,7 @@ pub fn (mut an Analyzer) top_level_statement() {
 							an.next()
 
 							param_type := an.current_node().get_text(an.src_text)
-							mut typ := an.find_symbol(param_type)
+							mut typ := an.store.find_symbol(param_type)
 							mut param_sym := &TypeSymbol{
 								name: param_name
 								kind: .variable
@@ -377,15 +402,15 @@ pub fn (mut an Analyzer) top_level_statement() {
 							spec_sym.add_child(mut param_sym) or { eprintln(err) }
 						}
 
-						an.cursor.parent()
-						an.cursor.parent()	
+						an.cursor.to_parent()
+						an.cursor.to_parent()	
 
 						sym.add_child(mut spec_sym) or {
 							eprintln(err)
 						}
 					}
 					'struct_field_declaration' {
-						field_typ := an.find_symbol(field_node.child_by_field_name('type').get_text(an.src_text))
+						field_typ := an.store.find_symbol(field_node.child_by_field_name('type').get_text(an.src_text))
 						mut field_sym := &TypeSymbol{
 							name: field_node.child_by_field_name('name').get_text(an.src_text)
 							kind: .field
@@ -403,12 +428,12 @@ pub fn (mut an Analyzer) top_level_statement() {
 				// scope.register(field_sym)
 			}
 
-			an.register_symbol(sym) or { eprintln(err) }
-			an.cursor.parent()
-			an.cursor.parent()
+			an.store.register_symbol(sym) or { eprintln(err) }
+			an.cursor.to_parent()
+			an.cursor.to_parent()
 		}
 		'enum_declaration' {
-			an.cursor.goto_first_child()
+			an.cursor.to_first_child()
 
 			if an.current_node().get_type() == 'pub' {
 				access = SymbolAccess.public
@@ -426,7 +451,7 @@ pub fn (mut an Analyzer) top_level_statement() {
 			an.next()
 			members_len := an.current_node().named_child_count()
 
-			an.cursor.goto_first_child()
+			an.cursor.to_first_child()
 			for i := 0; i < members_len; i++ {
 				an.next()
 				member_node := an.current_node()
@@ -439,7 +464,7 @@ pub fn (mut an Analyzer) top_level_statement() {
 					kind: .field
 					range: member_node.range()
 					access: access
-					return_type: an.find_symbol('int')
+					return_type: an.store.find_symbol('int')
 				}
 
 				sym.add_child(mut member_sym) or { 
@@ -447,9 +472,9 @@ pub fn (mut an Analyzer) top_level_statement() {
 				}
 			}
 
-			an.register_symbol(sym) or { eprintln(err) }
-			an.cursor.parent()
-			an.cursor.parent()
+			an.store.register_symbol(sym) or { eprintln(err) }
+			an.cursor.to_parent()
+			an.cursor.to_parent()
 		}
 		'function_declaration' {
 			fn_node := an.current_node()
@@ -458,7 +483,7 @@ pub fn (mut an Analyzer) top_level_statement() {
 			name_node := fn_node.child_by_field_name('name')
 			body_node := fn_node.child_by_field_name('body')
 
-			an.cursor.goto_first_child()
+			an.cursor.to_first_child()
 			if an.current_node().get_type() == 'pub' {
 				access = SymbolAccess.public
 			}
@@ -473,9 +498,9 @@ pub fn (mut an Analyzer) top_level_statement() {
 
 			if !receiver_node.is_null() {
 				an.cursor.reset(receiver_node)
-				an.cursor.goto_first_child()
+				an.cursor.to_first_child()
 				an.cursor.next()
-				an.cursor.goto_first_child()
+				an.cursor.to_first_child()
 				if an.current_node().get_type() == 'mut' {
 					access = SymbolAccess.private_mutable
 					an.next()
@@ -485,7 +510,7 @@ pub fn (mut an Analyzer) top_level_statement() {
 				an.next()
 
 				rec_type := an.current_node().get_text(an.src_text)
-				mut typ := an.find_symbol(rec_type)	
+				mut typ := an.store.find_symbol(rec_type)	
 				mut receiver_sym := &TypeSymbol{
 					name: rec_name
 					kind: .variable
@@ -500,24 +525,24 @@ pub fn (mut an Analyzer) top_level_statement() {
 
 				fn_sym.add_child(mut receiver_sym) or { eprintln(err) }
 				scope.register(receiver_sym)
-				an.cursor.parent()
+				an.cursor.to_parent()
 
 				access = .private
 			} else {
-				an.register_symbol(fn_sym) or { eprintln(err) }
+				an.store.register_symbol(fn_sym) or { eprintln(err) }
 			}
 
 			// scan params
 			params_len := param_node.named_child_count()
 			an.cursor.reset(param_node)
-			an.cursor.goto_first_child()
+			an.cursor.to_first_child()
 
 			for i := 0; i < params_len; i++ {
 				if !an.current_node().is_named() {
 					an.next()
 				}
 
-				an.cursor.goto_first_child()
+				an.cursor.to_first_child()
 				if an.current_node().get_type() == 'mut' {
 					access = SymbolAccess.private_mutable
 					an.next()
@@ -529,7 +554,7 @@ pub fn (mut an Analyzer) top_level_statement() {
 
 				param_type := an.current_node().get_text(an.src_text)
 
-				mut typ := an.find_symbol(param_type)
+				mut typ := an.store.find_symbol(param_type)
 				mut param_sym := &TypeSymbol{
 					name: param_name
 					kind: .variable
@@ -545,14 +570,14 @@ pub fn (mut an Analyzer) top_level_statement() {
 				scope.register(param_sym)
 			}
 
-			an.cursor.parent()
-			an.cursor.parent()
+			an.cursor.to_parent()
+			an.cursor.to_parent()
 
-			fn_sym.return_type = an.find_symbol(fn_node.child_by_field_name('result').get_text(an.src_text))
+			fn_sym.return_type = an.store.find_symbol(fn_node.child_by_field_name('result').get_text(an.src_text))
 			body_sym_len := body_node.named_child_count()
 
 			an.cursor.reset(body_node)
-			an.cursor.goto_first_child()
+			an.cursor.to_first_child()
 			for i := 0; i < body_sym_len; i++ {
 				an.next()
 				if an.current_node().get_type() != 'short_var_declaration' {
@@ -599,4 +624,17 @@ pub fn (mut an Analyzer) top_level_statement() {
 	}
 
 	an.next()
+}
+
+pub fn (mut an Analyzer) analyze(root_node C.TSNode, src_text []byte, mut store Store) {
+	an.store = unsafe { store }
+	an.src_text = src_text
+	child_len := int(root_node.child_count())
+	an.cursor = root_node.tree_cursor()
+
+	for _ in 0 .. child_len {
+		an.top_level_statement()
+	}
+
+	unsafe { an.cursor.free() }
 }

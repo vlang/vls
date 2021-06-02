@@ -37,19 +37,11 @@ pub fn (mut h Hey) main(num int) int {
 }
 '
 	tree := parser.parse_string(src)
-	root_node := tree.root_node()
-	mut analyzer := analyzer.Analyzer{
-		src_text: src
-		cursor: root_node.tree_cursor()
-	}
-
-	analyzer.src_text = src
-	analyzer.top_level_statement()
-	analyzer.top_level_statement()
-	analyzer.top_level_statement()
-	analyzer.top_level_statement()
+	mut an := analyzer.Analyzer{}
+	mut store := analyzer.Store{}
+	an.analyze(tree.root_node(), src.bytes(), mut store)
 
 	// println(analyzer.scope)
 	// println(analyzer.scope.innermost(55))
-	println(analyzer.symbol_store)
+	println(store.symbols)
 }

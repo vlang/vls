@@ -27,7 +27,7 @@ fn (mut ls Vls) did_open(_ int, params string) {
 
 	ls.sources[uri] = src.bytes()
 	ls.trees[uri] = ls.parser.parse_string(src)
-	ls.log_message(ls.trees[uri].root_node().sexpr_str(), .info)
+	// ls.log_message(ls.trees[uri].root_node().sexpr_str(), .info)
 }
 
 [manualfree]
@@ -55,28 +55,32 @@ fn (mut ls Vls) did_change(_ int, params string) {
 		if new_len < old_len {}
 
 		// TODO: add doc
-		mut j := 0
-		mut k := old_end_idx
-		for i := new_end_idx; j < old_len - old_end_idx; i++ {
-			if k == old_len {
-				break
+		{
+			mut j := 0
+			mut k := old_end_idx
+			for i := new_end_idx; j < old_len - old_end_idx; i++ {
+				if k == old_len {
+					break
+				}
+
+				new_src[i] = old_src[k]
+				j++
+				k++
 			}
 
-			new_src[i] = old_src[k]
-			j++
-			k++
+			unsafe { old_src.free() }
 		}
 
-		unsafe { old_src.free() }
+		{
+			mut j := 0
+			for i := start_idx; i < new_src.len; i++ {
+				if j == content_change.text.len {
+					break
+				}
 
-		j = 0
-		for i := start_idx; i < new_src.len; i++ {
-			if j == content_change.text.len {
-				break
+				new_src[i] = content_change.text[j]
+				j++
 			}
-
-			new_src[i] = content_change.text[j]
-			j++
 		}
 		
 		ls.trees[uri].edit({
@@ -90,10 +94,14 @@ fn (mut ls Vls) did_change(_ int, params string) {
 	}
 	
 	unsafe { ls.sources[uri].free() }
+
 	ls.sources[uri] = new_src
+	new_tree := ls.parser.parse_string_with_old_tree(ls.sources[uri].bytestr(), ls.trees[uri])
+	ls.log_message('old tree: ${ls.trees[uri].root_node().sexpr_str()}', .info)
+	ls.log_message('new tree: ${new_tree.root_node().sexpr_str()}', .info)
 	ls.parser.parse_string_with_old_tree(ls.sources[uri].bytestr(), ls.trees[uri])
 	ls.log_message(ls.trees[uri].root_node().sexpr_str(), .info)
-	// ls.process_file(source, uri)
+	ls.trees[uri] = new_tree
 }
 
 [manualfree]
@@ -122,15 +130,15 @@ fn (mut ls Vls) did_close(_ int, params string) {
 // TODO: edits must use []lsp.TextEdit instead of string
 [manualfree]
 fn (mut ls Vls) process_file(uri lsp.DocumentUri) {
-	file_path := uri.path()
-	target_dir := os.dir(file_path)
-	target_dir_uri := uri.dir()
-	scope, mut pref := new_scope_and_pref(target_dir, os.dir(target_dir), os.join_path(target_dir,
-		'modules'), ls.root_uri.path())
-	pref.is_test = file_path.ends_with('_test.v') || file_path.ends_with('_test.vv')
-		|| file_path.all_before_last('.v').all_before_last('.').ends_with('_test')
-	pref.is_vsh = file_path.ends_with('.vsh')
-	pref.is_script = pref.is_vsh || file_path.ends_with('.v') || file_path.ends_with('.vv')
+	// file_path := uri.path()
+	// target_dir := os.dir(file_path)
+	// target_dir_uri := uri.dir()
+	// scope, mut pref := new_scope_and_pref(target_dir, os.dir(target_dir), os.join_path(target_dir,
+	// 	'modules'), ls.root_uri.path())
+	// pref.is_test = file_path.ends_with('_test.v') || file_path.ends_with('_test.vv')
+	// 	|| file_path.all_before_last('.v').all_before_last('.').ends_with('_test')
+	// pref.is_vsh = file_path.ends_with('.vsh')
+	// pref.is_script = pref.is_vsh || file_path.ends_with('.v') || file_path.ends_with('.vv')
 
 	// mut checker := checker.new_checker(table, pref)
 	// mod_dir := os.dir(file_path)
