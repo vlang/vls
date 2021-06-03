@@ -22,7 +22,7 @@ In order to use the language server, you need to have a text editor with support
 
 ![Instructions](images/instructions.png)
 
-Afterwards, go to your editor's configuration and scroll to the V extension section. From there, enable VLS by checking the box and input the absolute path of where the language server is located.
+Afterwards, go to your editor's configuration and scroll to the V extension section. From there, enable VLS by checking the box and input the absolute path of the `vls` language server executable. If you cloned the repository and compiled it from source, the executable will be in the `cmd/vls` directory. So make to add `cmd/vls/vls`.
 
 ## Roadmap
 - [ ] Queue support (support for cancelling requests)
