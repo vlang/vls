@@ -37,7 +37,7 @@ fn (mut ls Vls) did_change(_ int, params string) {
 		return
 	}
 	uri := did_change_params.text_document.uri
-	mut new_src := ls.sources[uri].clone()
+	mut new_src := ls.sources[uri]
 
 	for content_change in did_change_params.content_changes {
 		start_idx := compute_offset(new_src, content_change.range.start.line, content_change.range.start.character)
@@ -46,13 +46,12 @@ fn (mut ls Vls) did_change(_ int, params string) {
 		start_pos := content_change.range.start
 		old_end_pos := content_change.range.end
 		new_end_pos := compute_position(new_src, new_end_idx)
-		
+
 		old_len := new_src.len
 		new_len := old_len - (old_end_idx - start_idx) + content_change.text.len
 		old_src := new_src.clone()
 
 		unsafe { new_src.grow_len(new_len - old_len) }
-		if new_len < old_len {}
 
 		// TODO: add doc
 		{
@@ -92,16 +91,12 @@ fn (mut ls Vls) did_change(_ int, params string) {
 			new_end_point: C.TSPoint{u32(new_end_pos.line), u32(new_end_pos.character)}
 		})
 	}
-	
-	unsafe { ls.sources[uri].free() }
 
-	ls.sources[uri] = new_src
-	new_tree := ls.parser.parse_string_with_old_tree(ls.sources[uri].bytestr(), ls.trees[uri])
+	new_tree := ls.parser.parse_string_with_old_tree(new_src.bytestr(), ls.trees[uri])
 	ls.log_message('old tree: ${ls.trees[uri].root_node().sexpr_str()}', .info)
 	ls.log_message('new tree: ${new_tree.root_node().sexpr_str()}', .info)
-	ls.parser.parse_string_with_old_tree(ls.sources[uri].bytestr(), ls.trees[uri])
-	ls.log_message(ls.trees[uri].root_node().sexpr_str(), .info)
 	ls.trees[uri] = new_tree
+	ls.sources[uri] = new_src
 }
 
 [manualfree]
@@ -111,18 +106,17 @@ fn (mut ls Vls) did_close(_ int, params string) {
 		return
 	}
 	uri := did_close_params.text_document.uri
-	mut no_active_files := true
 	unsafe {
 		ls.sources[uri].free()
 		ls.trees[uri].free()
 	}
 	ls.sources.delete(uri)
+
 	// NB: The diagnostics will be cleared if:
 	// - TODO: If a workspace has opened multiple programs with main() function and one of them is closed.
 	// - If a file opened is outside the root path or workspace.
 	// - If there are no remaining files opened on a specific folder.
-	if no_active_files || !uri.starts_with(ls.root_uri) {
-		// clear diagnostics
+	if ls.sources.len == 0 || !uri.starts_with(ls.root_uri) {
 		ls.publish_diagnostics(uri, []lsp.Diagnostic{})
 	}
 }
