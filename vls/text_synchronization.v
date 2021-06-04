@@ -17,7 +17,7 @@ const (
 )
 
 fn (mut ls Vls) did_open(_ int, params string) {
-	did_open_params := json.decode(lsp.DidOpenTextDocumentParams, params) or { 
+	did_open_params := json.decode(lsp.DidOpenTextDocumentParams, params) or {
 		ls.panic(err.msg)
 		return
 	}
@@ -106,8 +106,8 @@ fn (mut ls Vls) did_change(_ int, params string) {
 
 [manualfree]
 fn (mut ls Vls) did_close(_ int, params string) {
-	did_close_params := json.decode(lsp.DidCloseTextDocumentParams, params) or { 
-		ls.panic(err.msg) 
+	did_close_params := json.decode(lsp.DidCloseTextDocumentParams, params) or {
+		ls.panic(err.msg)
 		return
 	}
 	uri := did_close_params.text_document.uri
@@ -167,8 +167,8 @@ fn (mut ls Vls) process_file(uri lsp.DocumentUri) {
 
 // NOTE: once builder.find_module_path is extracted, simplify parse_imports
 [manualfree]
-fn (mut ls Vls) parse_imports(parsed_files []ast.File, table &ast.Table, pref &pref.Preferences, scope &ast.Scope) ([]ast.File, []errors.Error) {
-	mut newly_parsed_files := []ast.File{}
+fn (mut ls Vls) parse_imports(parsed_files []&ast.File, table &ast.Table, pref &pref.Preferences, scope &ast.Scope) ([]&ast.File, []errors.Error) {
+	mut newly_parsed_files := []&ast.File{}
 	mut errs := []errors.Error{}
 	mut done_imports := parsed_files.map(it.mod.name)
 	// NB: b.parsed_files is appended in the loop,
