@@ -10,6 +10,7 @@ struct C.TSParser {}
 fn C.ts_parser_new() &C.TSParser
 fn C.ts_parser_set_language(parser &C.TSParser, language &C.TSLanguage) bool
 fn C.ts_parser_parse_string(parser &C.TSParser, old_tree &C.TSTree, str &char, len u32) &C.TSTree
+fn C.ts_parser_parse(parser &C.TSParser, old_tree &C.TSTree, input C.TSInput) &C.TSTree
 fn C.ts_parser_delete(tree &C.TSParser)
 
 [inline]
@@ -29,7 +30,7 @@ pub fn (mut parser C.TSParser) parse_string(content string) &C.TSTree {
 
 [inline]
 pub fn (mut parser C.TSParser) parse_string_with_old_tree(content string, old_tree &C.TSTree) &C.TSTree {
-	return C.ts_parser_parse_string(parser, old_tree, content.str, content.len)
+	return C.ts_parser_parse_string(parser, old_tree, &char(content.str), content.len)
 }
 
 [unsafe; inline]
@@ -126,21 +127,37 @@ pub fn (node C.TSNode) sexpr_str() string {
 
 [inline]
 pub fn (node C.TSNode) start_point() C.TSPoint {
+	if node.is_null() {
+		return C.TSPoint{0, 0}
+	}
+
 	return C.ts_node_start_point(node)
 }
 
 [inline]
 pub fn (node C.TSNode) end_point() C.TSPoint {
+	if node.is_null() {
+		return C.TSPoint{0, 0}
+	}
+
 	return C.ts_node_end_point(node)
 }
 
 [inline]
 pub fn (node C.TSNode) start_byte() u32 {
+	if node.is_null() {
+		return 0
+	}
+
 	return C.ts_node_start_byte(node)
 }
 
 [inline]
 pub fn (node C.TSNode) end_byte() u32 {
+	if node.is_null() {
+		return 0
+	}
+
 	return C.ts_node_end_byte(node)
 }
 
