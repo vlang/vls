@@ -7,41 +7,16 @@ fn main() {
 	parser.set_language(v.language)
 	
 	src := '
-import os
-import json as json2
+module main
 
-pub const (
-	hello = 1
-	foo = \'bar\'
-)
-
-interface Speaker {
-	speak(name string) string
-	foo int
-}
-
-struct Hey {
-	what string
-}
-
-pub enum Color {
-	red
-	blue
-	yellow
-}
-
-pub fn (mut h Hey) main(num int) int {
-	mut a, b := 0, 1
-	hello := 1
-	what := 2.5
+interface Hello {
+	hello(i int)
 }
 '
 	tree := parser.parse_string(src)
-	mut an := analyzer.Analyzer{}
 	mut store := analyzer.Store{}
-	an.analyze(tree.root_node(), src.bytes(), mut store)
-
-	// println(analyzer.scope)
-	// println(analyzer.scope.innermost(55))
+	store.set_active_file_path('foo/bar')
+	println(tree.root_node().sexpr_str())
+	analyzer.analyze(tree, src.bytes(), mut store)
 	println(store.symbols)
 }
