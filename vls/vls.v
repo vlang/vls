@@ -9,6 +9,7 @@ import lsp.log
 import os
 import tree_sitter
 import tree_sitter_v.bindings.v
+import analyzer
 
 // These are the list of features available in VLS
 // If the feature is experimental, the value name should have a `exp_` prefix
@@ -43,7 +44,7 @@ fn feature_from_str(feature_name string) ?Feature {
 
 pub const (
 	default_features_list = [
-		// Feature.diagnostics,
+		Feature.diagnostics,
 		// .formatting,
 		// .document_symbol,
 		// .workspace_symbol,
@@ -52,7 +53,7 @@ pub const (
 		// .hover,
 		// .folding_range,
 		// .definition,
-	]Feature{}
+	]
 )
 
 interface ReceiveSender {
@@ -68,6 +69,7 @@ mut:
 	// which are only parsed once.
 	// base_table &ast.Table
 	parser     &C.TSParser
+	store      analyzer.Store
 	status     ServerStatus = .off
 	// TODO: change map key to DocumentUri
 	// files  map[DocumentUri]ast.File
@@ -111,7 +113,6 @@ pub fn new(io ReceiveSender) Vls {
 	return Vls{
 		io: io
 		parser: parser
-		// base_table: tbl
 		debug: io.debug
 		logger: log.new(.text)
 	}
@@ -316,132 +317,6 @@ fn new_scope_and_pref(lookup_paths ...string) (&ast.Scope, &pref.Preferences) {
 	}
 	return scope, prefs
 }
-
-// insert_files inserts an array file asts onto the ls.files map
-// [manualfree]
-// fn (mut ls Vls) insert_files(files []ast.File) {
-// 	for file in files {
-// 		file_uri := lsp.document_uri_from_path(file.path)
-// 		ls.extract_symbol_locations(file_uri, file.mod.name, file.stmts)
-// 		if file_uri.str() in ls.files {
-// 			ls.files.delete(file_uri)
-// 		}
-// 		ls.files[file_uri.str()] = file
-// 		// unsafe { file_uri.free() }
-// 	}
-// }
-
-// extract_symbol_locations extracts and inserts the locations of the symbols inside the symbol_locations map
-// TODO: unify doc_symbols and ls.symbol_locations in the future
-fn (mut ls Vls) extract_symbol_locations(uri lsp.DocumentUri, mod string, stmts []ast.Stmt) {
-	// path := uri.dir()
-	// if path in ls.symbol_locations {
-	// 	ls.symbol_locations.delete(path)
-	// }
-
-	// ls.symbol_locations[path] = map[string]lsp.Location{}
-	// for stmt in stmts {
-	// 	match stmt {
-	// 		ast.ConstDecl {
-	// 			for field in stmt.fields {
-	// 				name := '${mod}.${field.name}'
-	// 				ls.symbol_locations[path][name] = lsp.Location{
-	// 					uri: uri
-	// 					range: position_to_lsp_range(field.pos)
-	// 				}
-	// 			}
-	// 		}
-	// 		ast.StructDecl {
-	// 			ls.symbol_locations[path][stmt.name] = lsp.Location{
-	// 				uri: uri
-	// 				range: position_to_lsp_range(stmt.pos)
-	// 			}
-	// 			for field in stmt.fields {
-	// 				name := '${stmt.name}.${field.name}'
-	// 				ls.symbol_locations[path][name] = lsp.Location{
-	// 					uri: uri
-	// 					range: position_to_lsp_range(field.pos)
-	// 				}
-	// 			}
-	// 		}
-	// 		ast.EnumDecl {
-	// 			ls.symbol_locations[path][stmt.name] = lsp.Location{
-	// 				uri: uri
-	// 				range: position_to_lsp_range(stmt.pos)
-	// 			}
-
-	// 			for field in stmt.fields {
-	// 				name := '${stmt.name}.${field.name}'
-	// 				ls.symbol_locations[path][name] = lsp.Location{
-	// 					uri: uri
-	// 					range: position_to_lsp_range(field.pos)
-	// 				}
-	// 			}
-	// 		}
-	// 		ast.FnDecl {
-	// 			stmt_name := '${mod}.${stmt.name}'
-	// 			ls.symbol_locations[path][stmt_name] = lsp.Location{
-	// 				uri: uri
-	// 				range: position_to_lsp_range(stmt.pos)
-	// 			}
-	// 		}
-	// 		ast.InterfaceDecl {
-	// 			ls.symbol_locations[path][stmt.name] = lsp.Location{
-	// 				uri: uri
-	// 				range: position_to_lsp_range(stmt.pos)
-	// 			}
-	// 		}
-	// 		ast.TypeDecl {
-	// 			match stmt {
-	// 				ast.AliasTypeDecl, ast.FnTypeDecl, ast.SumTypeDecl {
-	// 					stmt_name := '${mod}.${stmt.name}'
-	// 					ls.symbol_locations[path][stmt_name] = lsp.Location{
-	// 						uri: uri
-	// 						range: position_to_lsp_range(stmt.pos)
-	// 					}
-	// 				}
-	// 			}
-	// 		}
-	// 		else {
-	// 			continue
-	// 		}
-	// 	}
-	// }
-}
-
-// fn (mut ls Vls) free_table(dir_path string, file_path string) {
-// 	if dir_path in ls.tables {
-// 		unsafe {
-// 			ls.tables[dir_path].free()
-// 		}
-// 		ls.tables.delete(dir_path)
-// 	}
-// 	if file_path in ls.invalid_imports {
-// 		unsafe {
-// 			ls.invalid_imports[file_path].free()
-// 		}
-// 		ls.invalid_imports.delete(file_path)
-// 	}
-// }
-
-// new_table returns a new table based on the existing data of base_table
-// fn (ls &Vls) new_table() &ast.Table {
-// 	mut tbl := &ast.Table{
-// 		type_symbols: ls.base_table.type_symbols.clone()
-// 	}
-// 	tbl.type_idxs = ls.base_table.type_idxs.clone()
-// 	tbl.fns = ls.base_table.fns.clone()
-// 	tbl.imports = ls.base_table.imports.clone()
-// 	tbl.modules = ls.base_table.modules.clone()
-// 	tbl.cflags = ls.base_table.cflags.clone()
-// 	tbl.redefined_fns = ls.base_table.redefined_fns.clone()
-// 	tbl.fn_generic_types = ls.base_table.fn_generic_types.clone()
-// 	tbl.cmod_prefix = ls.base_table.cmod_prefix
-// 	tbl.is_fmt = ls.base_table.is_fmt
-// 	tbl.panic_handler = table_panic_handler
-// 	tbl.panic_userdata = ls
-// 	return tbl
-// }
 
 // set_features enables or disables a language feature. emits an error if not found
 pub fn (mut ls Vls) set_features(features []string, enable bool) ? {

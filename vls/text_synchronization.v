@@ -27,7 +27,12 @@ fn (mut ls Vls) did_open(_ int, params string) {
 
 	ls.sources[uri] = src.bytes()
 	ls.trees[uri] = ls.parser.parse_string(src)
-	// ls.log_message(ls.trees[uri].root_node().sexpr_str(), .info)
+	
+	ls.store.set_active_file_path(uri)
+	analyzer.analyze(ls.trees[uri], ls.sources[uri], mut ls.store)
+	ls.log_message(ls.store.messages.str(), .info)
+	ls.log_message(ls.trees[uri].root_node().sexpr_str(), .info)
+	ls.show_diagnostics(uri)
 }
 
 [manualfree]
