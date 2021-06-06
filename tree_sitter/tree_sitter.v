@@ -110,9 +110,9 @@ fn C.ts_node_first_child_for_byte(node C.TSNode, offset u32) C.TSNode
 fn C.ts_node_first_named_child_for_byte(node C.TSNode, offset u32) C.TSNode
 
 fn C.ts_node_descendant_for_byte_range(node C.TSNode, start_offset u32, end_offset u32) C.TSNode
-fn C.ts_node_descendant_for_point_range(node C.TSNode, start_point C.TSNode, end_point C.TSNode) C.TSNode
+fn C.ts_node_descendant_for_point_range(node C.TSNode, start_point C.TSPoint, end_point C.TSPoint) C.TSNode
 fn C.ts_node_named_descendant_for_byte_range(node C.TSNode, start_offset u32, end_offset u32) C.TSNode
-fn C.ts_node_named_descendant_for_point_range(node C.TSNode, start_point C.TSNode, end_point C.TSNode) C.TSNode
+fn C.ts_node_named_descendant_for_point_range(node C.TSNode, start_point C.TSPoint, end_point C.TSPoint) C.TSNode
 
 fn C.ts_node_eq(node C.TSNode, another_node C.TSNode) bool
 
@@ -279,8 +279,8 @@ pub fn (node C.TSNode) descendant_for_byte_range(start_range u32, end_range u32)
 }
 
 [inline]
-pub fn (node C.TSNode) descendant_for_point_range(start_range C.TSPoint, end_range C.TSPoint) C.TSNode {
-	return C.ts_node_descendant_for_point_range(node, start_range, end_range)
+pub fn (node C.TSNode) descendant_for_point_range(start_point C.TSPoint, end_point C.TSPoint) C.TSNode {
+	return C.ts_node_descendant_for_point_range(node, start_point, end_point)
 }
 
 [inline]
@@ -289,8 +289,8 @@ pub fn (node C.TSNode) named_descendant_for_byte_range(start_range u32, end_rang
 }
 
 [inline]
-pub fn (node C.TSNode) named_descendant_for_point_range(start_range C.TSPoint, end_range C.TSPoint) C.TSNode {
-	return C.ts_node_named_descendant_for_point_range(node, start_range, end_range)
+pub fn (node C.TSNode) named_descendant_for_point_range(start_point C.TSPoint, end_point C.TSPoint) C.TSNode {
+	return C.ts_node_named_descendant_for_point_range(node, start_point, end_point)
 }
 
 [inline]
