@@ -104,11 +104,11 @@ pub fn (mut ss Store) add_import(imp Import) {
 	}
 }
 
-pub fn (ss &Store) get_symbols_by_file_path(file_path string) []&TypeSymbol {
+pub fn (ss &Store) get_symbols_by_file_path(file_path string) []&Symbol {
 	dir := os.dir(file_path)
 	defer { unsafe { dir.free() } }
 
-	mut fetched_symbols := []&TypeSymbol{}
+	mut fetched_symbols := []&Symbol{}
 	if syms := ss.symbols[dir] {
 		for _, sym in syms {
 			if sym.file_path == file_path {
