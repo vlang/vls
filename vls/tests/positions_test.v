@@ -5,6 +5,8 @@ import v.token
 import benchmark
 import lsp
 
+// import tree_sitter
+
 const compute_offset_inputs = map{
 	'crlf.vv': [3, 22]
 	'lf.vv':   [2, 14]
@@ -113,21 +115,21 @@ fn test_compute_position() {
 	bench.stop()
 }
 
-const position_to_lsp_pos_inputs = map{
-	'simple.vv': token.Position{
-		line_nr: 2
-		pos: 13
+const tspoint_to_lsp_pos_inputs = map{
+	'simple.vv': C.TSPoint{
+		row: 2
+		column: 0
 	}
 }
 
-const position_to_lsp_pos_results = map{
+const tspoint_to_lsp_pos_results = map{
 	'simple.vv': lsp.Position{
 		line: 2
 		character: 0
 	}
 }
 
-fn test_position_to_lsp_pos() {
+fn test_tspoint_to_lsp_pos() {
 	mut bench := benchmark.new_benchmark()
 	test_files := testing.load_test_file_paths('pos_to_lsp_pos') or {
 		bench.fail()
@@ -140,9 +142,9 @@ fn test_position_to_lsp_pos() {
 	for test_file_path in test_files {
 		bench.step()
 		test_name := os.base(test_file_path)
-		err_msg := if test_name !in position_to_lsp_pos_inputs {
+		err_msg := if test_name !in tspoint_to_lsp_pos_inputs {
 			'missing results for $test_name'
-		} else if test_name !in position_to_lsp_pos_results {
+		} else if test_name !in tspoint_to_lsp_pos_results {
 			'missing input data for $test_name'
 		} else {
 			''
@@ -158,9 +160,9 @@ fn test_position_to_lsp_pos() {
 			eprintln(bench.step_message_fail('file $test_file_path is missing'))
 			continue
 		}
-		input := position_to_lsp_pos_inputs[test_name]
-		expected := position_to_lsp_pos_results[test_name]
-		result := vls.position_to_lsp_pos(input)
+		input := tspoint_to_lsp_pos_inputs[test_name]
+		expected := tspoint_to_lsp_pos_results[test_name]
+		result := vls.tspoint_to_lsp_pos(input)
 		assert result == expected
 		bench.ok()
 		println(bench.step_message_ok(test_name))
@@ -169,21 +171,18 @@ fn test_position_to_lsp_pos() {
 	bench.stop()
 }
 
-const position_to_lsp_range_inputs = map{
-	'simple.vv':         token.Position{
-		line_nr: 2
-		pos: 13
-		len: 29
+const tsrange_to_lsp_range_inputs = map{
+	'simple.vv':         C.TSRange{
+		start_point: C.TSPoint{2, 0}
+		end_point: C.TSPoint{2, 29}
 	}
-	'with_last_line.vv': token.Position{
-		line_nr: 0
-		pos: 0
-		len: 55
-		last_line: 4
+	'with_last_line.vv': C.TSRange{
+		start_point: C.TSPoint{0, 0}
+		end_point: C.TSPoint{3, 1}
 	}
 }
 
-const position_to_lsp_range_results = map{
+const tsrange_to_lsp_range_results = map{
 	'simple.vv':         lsp.Range{
 		start: lsp.Position{
 			line: 2
@@ -206,7 +205,7 @@ const position_to_lsp_range_results = map{
 	}
 }
 
-fn test_position_to_lsp_range() {
+fn test_tsrange_to_lsp_range() {
 	mut bench := benchmark.new_benchmark()
 	test_files := testing.load_test_file_paths('pos_to_lsp_range') or {
 		bench.fail()
@@ -219,9 +218,9 @@ fn test_position_to_lsp_range() {
 	for test_file_path in test_files {
 		bench.step()
 		test_name := os.base(test_file_path)
-		err_msg := if test_name !in position_to_lsp_range_inputs {
+		err_msg := if test_name !in tsrange_to_lsp_range_inputs {
 			'missing results for $test_name'
-		} else if test_name !in position_to_lsp_range_results {
+		} else if test_name !in tsrange_to_lsp_range_results {
 			'missing input data for $test_name'
 		} else {
 			''
@@ -237,9 +236,9 @@ fn test_position_to_lsp_range() {
 			eprintln(bench.step_message_fail('file $test_file_path is missing'))
 			continue
 		}
-		input := position_to_lsp_pos_inputs[test_name]
-		expected := position_to_lsp_pos_results[test_name]
-		result := vls.position_to_lsp_pos(input)
+		input := tspoint_to_lsp_pos_inputs[test_name]
+		expected := tspoint_to_lsp_pos_results[test_name]
+		result := vls.tspoint_to_lsp_pos(input)
 		assert result == expected
 		bench.ok()
 		println(bench.step_message_ok(test_name))

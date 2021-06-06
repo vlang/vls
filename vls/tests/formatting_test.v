@@ -56,8 +56,8 @@ fn test_formatting() {
 						character: 0
 					}
 					end: lsp.Position{
-						line: content_lines.len
-						character: content_lines.last().len - 1
+						line: content_lines.len - 1
+						character: content_lines.last().len
 					}
 				}
 				new_text: exp_content.replace('\r\n', '\n')

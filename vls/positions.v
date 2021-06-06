@@ -1,5 +1,8 @@
 module vls
 
+// commenting it here so that it recognizes that
+// TSPoint and TSRange is used from the "tree_sitter" module
+// import tree_sitter
 import math.mathutil as mu
 import v.token
 import lsp
@@ -76,21 +79,20 @@ pub fn compute_position(src []byte, target_offset int) lsp.Position {
 }
 
 // position_to_lsp_pos converts the token.Position into lsp.Position
-pub fn position_to_lsp_pos(pos token.Position) lsp.Position {
+pub fn tspoint_to_lsp_pos(point C.TSPoint) lsp.Position {
 	return lsp.Position{
-		line: pos.line_nr
-		character: pos.col
+		line: int(point.row)
+		character: int(point.column)
 	}
 }
 
 // position_to_lsp_pos converts the token.Position into lsp.Range
-fn position_to_lsp_range(pos token.Position) lsp.Range {
-	start_pos := position_to_lsp_pos(pos)
+fn tsrange_to_lsp_range(range C.TSRange) lsp.Range {
+	start_pos := tspoint_to_lsp_pos(range.start_point)
+	end_pos := tspoint_to_lsp_pos(range.end_point)
+
 	return lsp.Range{
 		start: start_pos
-		end: lsp.Position{
-			line: mu.max(pos.last_line, start_pos.line)
-			character: start_pos.character + pos.len
-		}
+		end: end_pos
 	}
 }
