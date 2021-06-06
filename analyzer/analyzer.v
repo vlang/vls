@@ -123,7 +123,7 @@ pub fn (mut ss Store) register_symbol(info &Symbol) ?&Symbol {
 	}
 
 	if info.name in ss.symbols[dir] {
-		return error('Symbol already exists. (name="${info.name}")')
+		return report_error('Symbol already exists. (name="${info.name}")', info.range)
 	}
 
 	ss.symbols[dir][info.name] = info
@@ -661,11 +661,18 @@ pub fn (mut an Analyzer) top_level_statement() {
 				}
 
 				sym.add_child(mut member_sym) or { 
-					eprintln(err)
+					an.unwrap_error(AnalyzerError{
+						msg: err.msg
+						range: member_node.range()
+					})
+					return
 				}
 			}
 
-			an.store.register_symbol(sym) or { eprintln(err) }
+			an.store.register_symbol(sym) or { 
+				an.unwrap_error(err)
+				return
+			}
 		}
 		'function_declaration' {
 			fn_node := an.current_node()

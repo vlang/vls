@@ -1,69 +1,77 @@
 module vls
 
 import lsp
-// import json
-// import jsonrpc
+import json
+import jsonrpc
 import v.ast
-// import v.fmt
-// import v.parser
-// import v.pref
 import v.token
 import os
-// import strings
+
+const temp_formatting_file_path = os.join_path(os.temp_dir(), 'vls_temp_formatting.v')
 
 [manualfree]
 fn (mut ls Vls) formatting(id int, params string) {
-	// formatting_params := json.decode(lsp.DocumentFormattingParams, params) or { 
-	// 	ls.panic(err.msg)
-	// 	ls.send_null(id)
-	// 	return
-	// }
-	// uri := formatting_params.text_document.uri
-	// path := formatting_params.text_document.uri.path()
-	// source := ls.sources[uri].bytestr()
-	// if source.len == 0 {
-	// 	ls.send_null(id)
-	// 	return
-	// }
+	formatting_params := json.decode(lsp.DocumentFormattingParams, params) or { 
+		ls.panic(err.msg)
+		ls.send_null(id)
+		return
+	}
 	
-	// mut prefs := pref.new_preferences()
-	// prefs.output_mode = .silent
-	// prefs.is_fmt = true
-	// table := ast.new_table()
-	// file_ast := parser.parse_text(source, path, table, .parse_comments, prefs, &ast.Scope{
-	// 	parent: 0
-	// })
-	// if file_ast.errors.len > 0 {
-	// 	ls.send_null(id)
-	// 	return
-	// }
-	// source_lines := source.split_into_lines()
-	// formatted_content := fmt.fmt(file_ast, table, prefs, false)
-	// resp := jsonrpc.Response<[]lsp.TextEdit>{
-	// 	id: id
-	// 	result: [lsp.TextEdit{
-	// 		range: lsp.Range{
-	// 			start: lsp.Position{
-	// 				line: 0
-	// 				character: 0
-	// 			}
-	// 			end: lsp.Position{
-	// 				line: source_lines.len
-	// 				character: if source_lines.last().len > 0 {
-	// 					source_lines.last().len - 1
-	// 				} else {
-	// 					0
-	// 				}
-	// 			}
-	// 		}
-	// 		new_text: formatted_content
-	// 	}]
-	// }
-	// ls.send(resp)
-	// unsafe {
-	// 	source_lines.free()
-	// 	formatted_content.free()
-	// }
+	uri := formatting_params.text_document.uri
+	source := ls.sources[uri]
+	tree_range := ls.trees[uri].root_node().range()
+	if source.len == 0 {
+		ls.send_null(id)
+		return
+	}
+	
+	// We don't integrate v.fmt and it's dependencies anymore to lessen
+	// cleanups everytime launching an instance.
+	// 
+	// To simplify this, we will make a temporary file and feed it into
+	// the v fmt CLI program since there is no cross-platform way to pipe
+	// raw strings directly into v fmt.
+	mut temp_file := os.open_file(temp_formatting_file_path, 'w') or {
+		ls.send_null(id)
+		return
+	}
+
+	temp_file.write(source) or {
+		ls.send_null(id)
+		return
+	}
+
+	temp_file.close()
+	fmt_res := os.execute('v fmt $temp_formatting_file_path')
+	if fmt_res.exit_code > 0 {
+		ls.show_message(fmt_res.output, .info)
+		ls.send_null(id)
+		return
+	}
+
+	resp := jsonrpc.Response<[]lsp.TextEdit>{
+		id: id
+		result: [lsp.TextEdit{
+			range: lsp.Range{
+				start: lsp.Position{
+					line: 0
+					character: 0
+				}
+				end: lsp.Position{
+					// TODO: put it into a separate function
+					line: int(tree_range.end_point.row) + 1 
+					character: int(tree_range.end_point.column) - 1
+				}
+			}
+			new_text: fmt_res.output
+		}]
+	}
+
+	ls.send(resp)
+	os.rm(temp_formatting_file_path) or { }
+	unsafe {
+		fmt_res.output.free()
+	}
 }
 
 fn (mut ls Vls) workspace_symbol(id int, _ string) {
