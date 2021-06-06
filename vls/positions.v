@@ -96,3 +96,10 @@ fn tsrange_to_lsp_range(range C.TSRange) lsp.Range {
 		end: end_pos
 	}
 }
+
+fn lsp_pos_to_tspoint(pos lsp.Position) C.TSPoint {
+	return C.TSPoint{
+		row: u32(pos.line)
+		column: u32(pos.character)
+	}
+}
