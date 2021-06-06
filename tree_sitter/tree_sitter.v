@@ -106,6 +106,14 @@ fn C.ts_node_prev_sibling(node C.TSNode) C.TSNode
 fn C.ts_node_next_named_sibling(node C.TSNode) C.TSNode
 fn C.ts_node_prev_named_sibling(node C.TSNode) C.TSNode
 
+fn C.ts_node_first_child_for_byte(node C.TSNode, offset u32) C.TSNode
+fn C.ts_node_first_named_child_for_byte(node C.TSNode, offset u32) C.TSNode
+
+fn C.ts_node_descendant_for_byte_range(node C.TSNode, start_offset u32, end_offset u32) C.TSNode
+fn C.ts_node_descendant_for_point_range(node C.TSNode, start_point C.TSNode, end_point C.TSNode) C.TSNode
+fn C.ts_node_named_descendant_for_byte_range(node C.TSNode, start_offset u32, end_offset u32) C.TSNode
+fn C.ts_node_named_descendant_for_point_range(node C.TSNode, start_point C.TSNode, end_point C.TSNode) C.TSNode
+
 fn C.ts_node_eq(node C.TSNode, another_node C.TSNode) bool
 
 pub fn (node C.TSNode) get_text(text []byte) string {
@@ -253,6 +261,36 @@ pub fn (node C.TSNode) next_named_sibling() C.TSNode {
 [inline]
 pub fn (node C.TSNode) prev_named_sibling() C.TSNode {
 	return C.ts_node_prev_named_sibling(node)
+}
+
+[inline]
+pub fn (node C.TSNode) first_child_for_byte(offset u32) C.TSNode {
+	return C.ts_node_first_child_for_byte(node, offset)
+}
+
+[inline]
+pub fn (node C.TSNode) first_named_child_for_byte(offset u32) C.TSNode {
+	return C.ts_node_first_named_child_for_byte(node, offset)
+}
+
+[inline]
+pub fn (node C.TSNode) descendant_for_byte_range(start_range u32, end_range u32) C.TSNode {
+	return C.ts_node_descendant_for_byte_range(node, start_range, end_range)
+}
+
+[inline]
+pub fn (node C.TSNode) descendant_for_point_range(start_range C.TSPoint, end_range C.TSPoint) C.TSNode {
+	return C.ts_node_descendant_for_point_range(node, start_range, end_range)
+}
+
+[inline]
+pub fn (node C.TSNode) named_descendant_for_byte_range(start_range u32, end_range u32) C.TSNode {
+	return C.ts_node_named_descendant_for_byte_range(node, start_range, end_range)
+}
+
+[inline]
+pub fn (node C.TSNode) named_descendant_for_point_range(start_range C.TSPoint, end_range C.TSPoint) C.TSNode {
+	return C.ts_node_named_descendant_for_point_range(node, start_range, end_range)
 }
 
 [inline]
