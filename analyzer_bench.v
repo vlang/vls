@@ -9,9 +9,7 @@ fn main() {
 	src := '
 module main
 
-interface Hello {
-	hello(i int)
-}
+struct Hello {}
 '
 	tree := parser.parse_string(src)
 	mut store := analyzer.Store{}

@@ -125,7 +125,6 @@ pub fn (node C.TSNode) sexpr_str() string {
 	return unsafe { sexpr.vstring() }
 }
 
-[inline]
 pub fn (node C.TSNode) start_point() C.TSPoint {
 	if node.is_null() {
 		return C.TSPoint{0, 0}
@@ -134,7 +133,6 @@ pub fn (node C.TSNode) start_point() C.TSPoint {
 	return C.ts_node_start_point(node)
 }
 
-[inline]
 pub fn (node C.TSNode) end_point() C.TSPoint {
 	if node.is_null() {
 		return C.TSPoint{0, 0}
@@ -143,7 +141,6 @@ pub fn (node C.TSNode) end_point() C.TSPoint {
 	return C.ts_node_end_point(node)
 }
 
-[inline]
 pub fn (node C.TSNode) start_byte() u32 {
 	if node.is_null() {
 		return 0
@@ -152,7 +149,6 @@ pub fn (node C.TSNode) start_byte() u32 {
 	return C.ts_node_start_byte(node)
 }
 
-[inline]
 pub fn (node C.TSNode) end_byte() u32 {
 	if node.is_null() {
 		return 0
