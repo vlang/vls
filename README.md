@@ -1,24 +1,31 @@
-> **NOTE!**: You are reading a developmental branch of VLS that uses the Tree-sitter Parser. This is not meant for the general public as it does not do any language features at this moment.
+> **NOTE!**: You are reading a developmental branch of VLS,
+that uses the Tree-sitter Parser.
+This is not meant for the general public as it does not do 
+any language features at this moment.
 
-> VLS is a work-in-progress, pre-alpha language server. It may not be guaranteed to work reliably on your system due to memory management issues and other factors.
+> VLS is a work-in-progress, pre-alpha language server.
+It may not be guaranteed to work reliably on your system
+due to memory management issues and other factors.
 
 # vls
 [![CI](https://github.com/vlang/vls/actions/workflows/ci.yml/badge.svg)](https://github.com/vlang/vls/actions/workflows/ci.yml)
 
-VLS (V Language Server) is a LSP v3.15-compatible language server for [the V programming language](https://github.com/vlang/v).
+VLS (V Language Server) is a LSP v3.15-compatible language server
+for [the V programming language](https://github.com/vlang/v).
 
-## Installation
-Installation requires you to have Git and V installed and compile the language server by yourself. You need to execute the following:
+# Installation
+You need to have Git and V installed before compiling the language server.
+You need to execute the following:
 ```
-# Install the tree-sitter grammar for V first
+## Install the tree-sitter grammar for V first:
 git clone https://github.com/nedpals/tree-sitter-v ~/.vmodules/tree_sitter_v
 
-# Clone the project
-git clone https://github.com/vlang/vls.git vls && cd vls/
+## Clone the project at the use-tree-sitter branch:
+git clone https://github.com/vlang/vls.git --branch use-tree-sitter vls && cd vls/
 
-# Build the project
+## Build the project
 v cmd/vls
-# The binary will be create in the subfolder by default
+# The binary will be created in the subfolder `cmd/vls` by default.
 ```
 
 ## Usage
@@ -28,7 +35,11 @@ In order to use the language server, you need to have a text editor with support
 
 ![Instructions](images/instructions.png)
 
-Afterwards, go to your editor's configuration and scroll to the V extension section. From there, enable VLS by checking the box and input the absolute path of the `vls` language server executable. If you cloned the repository and compiled it from source, the executable will be in the `cmd/vls` directory. So make to add `cmd/vls/vls`.
+Afterwards, go to your editor's configuration and scroll 
+to the V extension section. From there, enable VLS by checking
+the box and input the absolute path of the `vls` language server executable.
+If you cloned the repository and compiled it from source, the executable
+will be in the `cmd/vls` directory. So make to add `cmd/vls/vls`.
 
 ## Roadmap
 - [ ] Queue support (support for cancelling requests)
@@ -96,14 +107,20 @@ Afterwards, go to your editor's configuration and scroll to the V extension sect
 - [x] `foldingRange`
 
 ## Debugging
-> By default, log can only be accessed and saved on server crash. To save the log on exit, pass the `--debug` flag to the language server CLI. 
+> By default, log can only be accessed and saved on server crash.
+To save the log on exit, pass the `--debug` flag to the language server CLI. 
 
-VLS provides a log file (`${workspacePath}/vls.log`) for debugging language server for certain situations (e.g unexpected crash). To read the contents of the `vls.log` file, simply upload the file to the [LSP Inspector](https://iwanabethatguy.github.io/language-server-protocol-inspector/) and select `vls.log`. 
+VLS provides a log file (`${workspacePath}/vls.log`) for debugging language
+server for certain situations (e.g unexpected crash). To read the contents
+of the `vls.log` file, simply upload the file to the
+[LSP Inspector](https://iwanabethatguy.github.io/language-server-protocol-inspector/)
+and select `vls.log`.
 
 ![LSP Inspector](images/inspector-output.png)
 
 ### Error Reporting
-If you encounter a crash in the language server, be sure to attach the `vls.log` file when [submitting an issue](https://github.com/vlang/vls/issues/new).
+If you encounter a crash in the language server, be sure to attach the `vls.log`
+file when [submitting an issue](https://github.com/vlang/vls/issues/new).
 
 # Contributing
 ## Submitting a pull request
