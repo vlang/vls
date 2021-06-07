@@ -4,7 +4,6 @@ import lsp
 import json
 import jsonrpc
 import v.ast
-import v.token
 import os
 
 const temp_formatting_file_path = os.join_path(os.temp_dir(), 'vls_temp_formatting.v')
