@@ -2,7 +2,6 @@ module analyzer
 
 // it should be imported just to have those C type symbols available
 // import tree_sitter
-import os
 
 pub enum SymbolKind {
 	function

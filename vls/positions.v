@@ -3,8 +3,6 @@ module vls
 // commenting it here so that it recognizes that
 // TSPoint and TSRange is used from the "tree_sitter" module
 // import tree_sitter
-import math.mathutil as mu
-import v.token
 import lsp
 
 pub fn is_within_pos(offset int, pos token.Position) bool {
