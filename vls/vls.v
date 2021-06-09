@@ -48,7 +48,7 @@ pub const (
 		.formatting,
 		// .document_symbol,
 		// .workspace_symbol,
-		// .signature_help,
+		.signature_help,
 		// .completion,
 		// .hover,
 		// .folding_range,
