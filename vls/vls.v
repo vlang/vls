@@ -52,7 +52,7 @@ pub const (
 		// .completion,
 		// .hover,
 		// .folding_range,
-		// .definition,
+		.definition,
 	]
 )
 
