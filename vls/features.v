@@ -10,12 +10,12 @@ const temp_formatting_file_path = os.join_path(os.temp_dir(), 'vls_temp_formatti
 
 [manualfree]
 fn (mut ls Vls) formatting(id int, params string) {
-	formatting_params := json.decode(lsp.DocumentFormattingParams, params) or { 
+	formatting_params := json.decode(lsp.DocumentFormattingParams, params) or {
 		ls.panic(err.msg)
 		ls.send_null(id)
 		return
 	}
-	
+
 	uri := formatting_params.text_document.uri
 	source := ls.sources[uri]
 	tree_range := ls.trees[uri].root_node().range()
@@ -23,14 +23,14 @@ fn (mut ls Vls) formatting(id int, params string) {
 		ls.send_null(id)
 		return
 	}
-	
+
 	// We don't integrate v.fmt and it's dependencies anymore to lessen
 	// cleanups everytime launching an instance.
-	// 
+	//
 	// To simplify this, we will make a temporary file and feed it into
 	// the v fmt CLI program since there is no cross-platform way to pipe
 	// raw strings directly into v fmt.
-	mut temp_file := os.open_file(temp_formatting_file_path, 'w') or {
+	mut temp_file := os.open_file(vls.temp_formatting_file_path, 'w') or {
 		ls.send_null(id)
 		return
 	}
@@ -41,7 +41,7 @@ fn (mut ls Vls) formatting(id int, params string) {
 	}
 
 	temp_file.close()
-	fmt_res := os.execute('v fmt $temp_formatting_file_path')
+	fmt_res := os.execute('v fmt $vls.temp_formatting_file_path')
 	if fmt_res.exit_code > 0 {
 		ls.show_message(fmt_res.output, .info)
 		ls.send_null(id)
@@ -57,7 +57,7 @@ fn (mut ls Vls) formatting(id int, params string) {
 	}
 
 	ls.send(resp)
-	os.rm(temp_formatting_file_path) or { }
+	os.rm(vls.temp_formatting_file_path) or {}
 	unsafe {
 		fmt_res.output.free()
 	}
@@ -78,7 +78,7 @@ fn (mut ls Vls) workspace_symbol(id int, _ string) {
 }
 
 fn (mut ls Vls) document_symbol(id int, params string) {
-	// document_symbol_params := json.decode(lsp.DocumentSymbolParams, params) or { 
+	// document_symbol_params := json.decode(lsp.DocumentSymbolParams, params) or {
 	// 	ls.panic(err.msg)
 	// 	ls.send_null(id)
 	// 	return
@@ -174,7 +174,7 @@ fn (mut ls Vls) generate_symbols(file ast.File, uri lsp.DocumentUri) []lsp.Symbo
 
 fn (mut ls Vls) signature_help(id int, params string) {
 	// Initial checks.
-	signature_params := json.decode(lsp.SignatureHelpParams, params) or { 
+	signature_params := json.decode(lsp.SignatureHelpParams, params) or {
 		ls.panic(err.msg)
 		ls.send_null(id)
 		return
@@ -633,7 +633,7 @@ fn (mut ls Vls) completion(id int, params string) {
 	// if Feature.completion !in ls.enabled_features {
 	// 	return
 	// }
-	// completion_params := json.decode(lsp.CompletionParams, params) or { 
+	// completion_params := json.decode(lsp.CompletionParams, params) or {
 	// 	ls.panic(err.msg)
 	// 	ls.send_null(id)
 	// 	return
@@ -1029,7 +1029,7 @@ fn (mut ls Vls) completion(id int, params string) {
 // }
 
 fn (mut ls Vls) hover(id int, params string) {
-	// hover_params := json.decode(lsp.HoverParams, params) or { 
+	// hover_params := json.decode(lsp.HoverParams, params) or {
 	// 	ls.panic(err.msg)
 	// 	ls.send_null(id)
 	// 	return
@@ -1122,7 +1122,7 @@ fn (mut ls Vls) hover(id int, params string) {
 
 [manualfree]
 fn (mut ls Vls) folding_range(id int, params string) {
-	// folding_range_params := json.decode(lsp.FoldingRangeParams, params) or { 
+	// folding_range_params := json.decode(lsp.FoldingRangeParams, params) or {
 	// 	ls.panic(err.msg)
 	// 	ls.send_null(id)
 	// 	return
@@ -1261,16 +1261,39 @@ fn (mut ls Vls) folding_range(id int, params string) {
 // }
 
 fn (mut ls Vls) definition(id int, params string) {
-	// goto_definition_params := json.decode(lsp.TextDocumentPositionParams, params) or {
-	// 	ls.panic(err.msg)
-	// 	ls.send_null(id)
-	// 	return
-	// }
-	// uri := goto_definition_params.text_document.uri
-	// pos := goto_definition_params.position
-	// source := ls.sources[uri.str()]
-	// file := ls.files[uri.str()]
-	// offset := compute_offset(source, pos.line, pos.character)
+	goto_definition_params := json.decode(lsp.TextDocumentPositionParams, params) or {
+		ls.panic(err.msg)
+		ls.send_null(id)
+		return
+	}
+
+	if Feature.definition !in ls.enabled_features {
+		ls.send_null(id)
+		return
+	}
+
+	uri := goto_definition_params.text_document.uri
+	pos := goto_definition_params.position
+	source := ls.sources[uri]
+	offset := compute_offset(source, pos.line, pos.character)
+
+	node := ls.trees[uri].root_node().descendant_for_byte_range(u32(offset), u32(offset + 1))
+
+	if node.is_null() || node.get_type() != 'identifier' {
+		ls.send_null(id)
+		return
+	}
+
+	ls.show_message('Selected identifier: ${node.get_text(source)}', .info)
+
+	ls.send(jsonrpc.Response<lsp.LocationLink>{
+		id: id
+		result: lsp.LocationLink{
+			target_uri: uri
+			target_range: tsrange_to_lsp_range(node.range())
+			target_selection_range: tsrange_to_lsp_range(node.range())
+		}
+	})
 
 	// mut cfg := DefinitionConfig{
 	// 	uri: uri
