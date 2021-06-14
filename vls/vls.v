@@ -50,7 +50,7 @@ pub const (
 		// .workspace_symbol,
 		.signature_help,
 		// .completion,
-		// .hover,
+		.hover,
 		// .folding_range,
 		.definition,
 	]
@@ -86,7 +86,7 @@ mut:
 	// changing and there can be instances that a change might
 	// break another module/project data.
 	// tables  map[DocumentUri]&ast.Table
-	// tables                   map[string]&ast.Table
+	tables                   map[string]&ast.Table
 	root_uri                 lsp.DocumentUri
 	// invalid_imports          map[string][]string // where it stores a list of invalid imports
 	// doc_symbols              map[string][]lsp.SymbolInformation // doc_symbols is used for caching document symbols
