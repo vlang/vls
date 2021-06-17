@@ -61,7 +61,7 @@ pub mut:
 const void_type = &Symbol{ name: 'void' }
 
 [heap]
-struct Symbol {
+pub struct Symbol {
 pub mut:
 	name string
 	kind SymbolKind
