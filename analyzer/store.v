@@ -73,11 +73,11 @@ pub fn (mut ss Store) register_symbol(info &Symbol) ?&Symbol {
 	return info
 }
 
-pub fn (mut ss Store) add_import(imp Import) {
-	mut idx := -1
-
+pub fn (mut ss Store) add_import(imp Import) &Import {
 	dir := os.dir(ss.cur_file_path)
 	defer { unsafe { dir.free() } }
+
+	mut idx := -1
 	if dir in ss.imports {
 		// check if import has already imported
 		for i, stored_imp in ss.imports[dir] {
@@ -97,10 +97,15 @@ pub fn (mut ss Store) add_import(imp Import) {
 		}
 		
 		ss.imports[dir] << new_import 
+		last_idx := ss.imports[dir].len - 1
 
 		if imp.path !in ss.imported_paths {
 			ss.imported_paths << new_import.path
 		}
+
+		return &ss.imports[dir][last_idx]
+	} else {
+		return &ss.imports[dir][idx]
 	}
 }
 

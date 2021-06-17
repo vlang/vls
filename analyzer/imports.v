@@ -2,6 +2,123 @@ module analyzer
 
 // import tree_sitter
 
+pub struct Import {
+mut:
+	resolved bool
+pub mut:
+	module_name string
+	path string
+
+	// original module_names are not recorded as aliases
+	// e.g {'file.v': 'foo', 'file1.v': 'bar'}
+	aliases map[string]string
+
+	// e.g {'file.v': ['Any', 'decode', 'encode'], 'file2.v': ['foo']}
+	symbols map[string][]string
+}
+
+pub fn (mut imp Import) set_alias(file_name string, alias string) {
+	if alias == imp.module_name {
+		return
+	}
+
+	imp.aliases[file_name] = alias
+}
+
+pub fn (mut imp Import) add_symbols(file_name string, symbols ...string) {
+	if file_name !in imp.symbols {
+		imp.symbols[file_name] = []string{}
+	}
+
+	// to avoid duplicate symbols
+	for sym_name in symbols {
+		mut existing_idx := -1
+
+		for j, existing_sym_name in imp.symbols[file_name] {
+			if existing_sym_name == sym_name {
+				existing_idx = j
+				break
+			}
+		}
+
+		if existing_idx == -1 {
+			imp.symbols[file_name] << sym_name
+		} else {
+			continue
+		}
+	}
+}
+
+pub fn (mut imp Import) set_symbols(file_name string, symbols ...string) {
+	if file_name in imp.symbols {
+		mut syms := imp.symbols[file_name]
+		for i := 0; i < syms.len; i++ {
+			unsafe {
+				syms[i].free()
+			}
+
+			syms.delete(i)
+		}
+
+		unsafe {
+			syms.free()
+		}
+	}
+
+	imp.symbols[file_name] = symbols
+}
+
+// fn get_import_dir_and_files(mod string, paths ...string) ?(string, []string) {
+// 	for path in prefs.lookup_path {
+// 		mod_dir := os.join_path(path, mod.split('.').join(os.path_separator))
+
+// 		// if directory does not exist, proceed to another lookup path
+// 		if !os.exists(mod_dir) {
+// 			continue
+// 		}
+		
+// 		mut files := os.ls(mod_dir) or { 
+// 			// break loop if files is empty
+// 			break
+// 		}
+
+// 		filtered_files := prefs.should_compile_filtered_files(mod_dir, files)
+// 		unsafe { files.free() }
+
+// 		// return error if given directory is empty
+// 		if filtered_files.len == 0 {
+// 			unsafe { filtered_files.free() }
+// 			return error('module `$mod` is empty')
+// 		}
+		
+// 		return mod_dir, filtered_files
+// 	}
+
+// 	return error('cannot find module `$mod`')
+// }
+
+// fn (mut ss Store) resolve_module_path(module_name string, alias string) string {
+// 	dir := os.dir(ss.cur_file_path)
+// 	file_name := os.base(ss.cur_file_path)
+// 	defer { 
+// 		unsafe { 
+// 			dir.free() 
+// 			file_name.free()
+// 		} 
+// 	}
+
+// 	// check if module_name has already imported
+// 	if imports := ss.imports[dir] {
+// 		for imp in imports {
+// 			if imp.resolved && (imp.module_name == module_name || (file_name in imp.aliases && alias in imp.aliases[file_name])) {
+// 				return imp.path
+// 			}
+// 		}
+// 	}
+
+// 	return false
+// }
+
 // NOTE: once builder.find_module_path is extracted, simplify parse_imports
 // [manualfree]
 // fn (mut ss Store) parse_imports(import_ []C.TSTree) {
