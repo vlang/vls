@@ -458,13 +458,12 @@ fn (mut cfg CompletionItemConfig) completion_items_from_expr(expr ast.Expr) []ls
 			// module, then it should include a list of public
 			// symbols of that module.
 			if expr.expr_type == 0 && expr.expr is ast.Ident {
-				ident := expr.expr as ast.Ident
-				if ident.name !in cfg.modules_aliases {
+				if expr.expr.name !in cfg.modules_aliases {
 					return completion_items
 				}
-				completion_items << cfg.completion_items_from_table(ident.name)
+				completion_items << cfg.completion_items_from_table(expr.expr.name)
 				for _, fnn in cfg.table.fns {
-					if fnn.mod == ident.name && fnn.is_pub {
+					if fnn.mod == expr.expr.name && fnn.is_pub {
 						completion_items << cfg.completion_items_from_fn(fnn, false)
 					}
 				}
