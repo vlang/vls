@@ -122,6 +122,19 @@ fn (mut ls Vls) did_change(_ int, params string) {
 	// TODO: incremental approach to analyzing (analyze only the parts that changed)
 	// using `ts_tree_get_changed_ranges`. Sadly, it hangs at this moment.
 	// analyzer.analyze(ls.trees[uri], ls.sources[uri], mut ls.store)
+	
+	// FIXME: This injects a function symbol for testing signature help, once
+	// the analysis above works, it will work as a drop-in replacement (or with minor changes).
+	// ls.store.symbols[ls.store.get_module_path(uri)]['get_text'] = &analyzer.Symbol{
+	//	name: 'get_text'
+	//	kind: .function
+	//	access: .public
+	//	file_path: uri
+	//	return_type: &analyzer.Symbol{name: 'string'}
+	//	children: map{
+	//		'src': &analyzer.Symbol{return_type: &analyzer.Symbol{name: 'string'}}
+	//	}
+	//}
 }
 
 [manualfree]

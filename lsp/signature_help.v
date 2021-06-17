@@ -41,7 +41,7 @@ pub mut:
 pub struct SignatureInformation {
 pub mut:
 	label         string
-	documentation string
+	documentation MarkupContent
 	parameters    []ParameterInformation
 }
 

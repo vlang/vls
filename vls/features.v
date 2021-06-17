@@ -195,25 +195,34 @@ fn (mut ls Vls) signature_help(id int, params string) {
 		return
 	}
 
-	// Act on the symbol.
-	parent := node.parent().parent()
-	ls.show_message(parent.get_type(), .warning)
-	match parent.get_type() {
-		'call_expression' {
-			ls.send(jsonrpc.Response<lsp.SignatureHelp>{
-				id: id
-				result: lsp.SignatureHelp{
-					signatures: [lsp.SignatureInformation{
-						label: parent.get_text(ls.sources[uri])
-						documentation: 'This function call is undocumented'
-					}]
-				}
-			})
-		}
-		else {
-			ls.send_null(id)
-		}
+	// Fetch the symbol and report on it.
+	node_text := node.get_text(ls.sources[uri])
+	symbol := ls.store.find_symbol(uri, node_text)
+	if symbol.kind == .placeholder || symbol.name == 'void' {
+		ls.send_null(id)
+		return
 	}
+
+	mut params_text := ''
+	for children_name, _ in symbol.children {
+		if params_text.len != 0 {
+			params_text += ', '
+		}
+		params_text += '${children_name}: ${symbol.children[children_name].return_type.name}'
+	}
+
+	ls.send(jsonrpc.Response<lsp.SignatureHelp>{
+		id: id
+		result: lsp.SignatureHelp{
+			signatures: [lsp.SignatureInformation{
+				label: '${symbol.name}(${params_text}) -> ${symbol.return_type.name}'
+				documentation: lsp.MarkupContent{
+					kind: lsp.markup_kind_markdown
+					value: '*Defined in ${symbol.file_path[7..]}*'
+				}
+			}]
+		}
+	})
 }
 
 struct CompletionItemConfig {
