@@ -118,8 +118,8 @@ fn C.ts_node_named_descendant_for_point_range(node C.TSNode, start_point C.TSPoi
 fn C.ts_node_eq(node C.TSNode, another_node C.TSNode) bool
 
 pub fn (node C.TSNode) get_text(text []byte) string {
-	start_index := C.ts_node_start_byte(node)
-	end_index := C.ts_node_end_byte(node)
+	start_index := node.start_byte()
+	end_index := node.end_byte()
 	len := int(end_index - start_index)
 	if len < 1 {
 		return ''
