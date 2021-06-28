@@ -13,8 +13,30 @@ pub fn (tree &Tree) has(id string) bool {
 	tree.get_node(id) or {
 		return false
 	}
-	
+
 	return true
+}
+
+pub fn (tree &Tree) has_dependents(id string) bool {
+	for nid, _ in tree.nodes {
+		node := tree.get_node(nid) or { continue }
+		if id in node.dependencies {
+			return true
+		}
+	}
+
+	return false
+}
+
+pub fn (mut tree Tree) delete(nid string) {
+	node := tree.get_node(nid) or { return }
+
+	unsafe {
+		node.dependencies.free()
+		node.id.free()
+
+		tree.nodes.delete(nid)
+	}
 }
 
 pub fn (mut tree Tree) add(node Node) &Node {

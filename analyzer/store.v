@@ -6,6 +6,8 @@ import depgraph
 pub struct Store {
 pub mut:
 	cur_file_path string
+	cur_dir string
+	cur_file_name string
 	imports map[string][]Import
 	dependency_tree depgraph.Tree
 	messages []Message
@@ -26,22 +28,26 @@ pub fn (mut ss Store) set_active_file_path(file_path string) {
 		return
 	}
 
-	unsafe { ss.cur_file_path.free() }
+	unsafe { 
+		ss.cur_file_path.free()
+		ss.cur_dir.free()
+		ss.cur_file_name.free() 
+	}
 	ss.cur_file_path = file_path
+	ss.cur_dir = os.dir(file_path)
+	ss.cur_file_name = os.base(file_path)
 }
 
 pub fn (mut ss Store) get_module_path(module_name string) string {
-	dir := os.dir(ss.cur_file_path)
-	import_lists := ss.imports[dir]
+	import_lists := ss.imports[ss.cur_dir]
 	for imp in import_lists {
 		if imp.module_name == module_name || module_name in imp.aliases {
-			unsafe { dir.free() } 
 			return imp.path
 		}
 	}
 
 	// empty names should return the dir instead
-	return dir
+	return ss.cur_dir
 }
 
 pub fn (mut ss Store) find_symbol(module_name string, name string) &Symbol {
@@ -80,8 +86,7 @@ pub fn (mut ss Store) register_symbol(info &Symbol) ?&Symbol {
 }
 
 pub fn (mut ss Store) add_import(imp Import) (&Import, bool) {
-	dir := os.dir(ss.cur_file_path)
-	defer { unsafe { dir.free() } }
+	dir := ss.cur_dir
 
 	mut idx := -1
 	if dir in ss.imports {
@@ -130,4 +135,26 @@ pub fn (ss &Store) get_symbols_by_file_path(file_path string) []&Symbol {
 	}
 	
 	return fetched_symbols
+}
+
+pub fn (mut ss Store) delete(dir string) {
+	if !ss.dependency_tree.has_dependents(dir) {
+		// delete symbols and imports
+		// TODO: cleanup symbols
+		ss.symbols.delete(dir)
+		ss.symbols.delete(dir)
+	} else {
+		return
+	}
+
+	if dep_node := ss.dependency_tree.get_node(dir) {
+		// delete if found
+		ss.dependency_tree.delete(dir)
+
+		// delete it's dependencies if possible
+		all_dependencies := dep_node.get_all_dependencies()
+		for dep in all_dependencies {
+			ss.delete(dep)
+		}	
+	}
 }

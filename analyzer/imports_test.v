@@ -13,6 +13,9 @@ const (
 	vexe_path = os.dir(os.getenv('VEXE'))
 	// not a real path
 	file_path = '@TEST/hello.v'
+	test_lookup_paths = [
+		os.join_path(vexe_path, 'vlib')
+	]
 )
 
 fn parse_content() &C.TSTree {
@@ -56,7 +59,7 @@ fn test_import_modules() ? {
 	mut store := Store{}
 
 	store.set_active_file_path(file_path)
-	store.import_modules(tree, sample_content_bytes)
+	store.import_modules(tree, sample_content_bytes, test_lookup_paths)
 
-	assert store.dependency_tree.get_nodes().len == 3
+	assert store.dependency_tree.get_nodes().len == 2
 }

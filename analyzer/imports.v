@@ -97,14 +97,9 @@ const v_ext = '.v'
 
 [manualfree]
 fn (mut ss Store) inject_paths_of_new_imports(mut new_imports []&Import, lookup_paths []string) {
-	dir := os.dir(ss.cur_file_path)
-	defer {
-		unsafe { dir.free() }
-	}
-
-	mut project := ss.dependency_tree.get_node(dir) or {
+	mut project := ss.dependency_tree.get_node(ss.cur_dir) or {
 		// TODO: inject builtin directly
-		ss.dependency_tree.add({ id: dir })
+		ss.dependency_tree.add({ id: ss.cur_dir })
 	}
 
 	for i, new_import in new_imports {
@@ -114,7 +109,7 @@ fn (mut ss Store) inject_paths_of_new_imports(mut new_imports []&Import, lookup_
 
 		mod_name_arr := new_import.module_name.split('.')
 		for path in lookup_paths {
-			mod_dir := os.join_path(path, mod_name_arr.join(os.path_separator))		
+			mod_dir := os.join_path(path, ...mod_name_arr)		
 
 			if ss.dependency_tree.has(mod_dir) {
 				new_imports[i].set_path(mod_dir)
@@ -122,18 +117,18 @@ fn (mut ss Store) inject_paths_of_new_imports(mut new_imports []&Import, lookup_
 			}
 
 			if !os.exists(mod_dir) {
-				unsafe { 
-					mod_name_arr.free()
-					mod_dir.free()
-				}
+				// unsafe { 
+				// 	mod_name_arr.free()
+				// 	mod_dir.free()
+				// }
 				continue
 			}
 
 			mut files := os.ls(mod_dir) or { 
-				unsafe { 
-					mod_name_arr.free()
-					mod_dir.free()
-				}
+				// unsafe { 
+				// 	mod_name_arr.free()
+				// 	mod_dir.free()
+				// }
 				continue
 			}
 
@@ -176,14 +171,14 @@ fn (mut ss Store) inject_paths_of_new_imports(mut new_imports []&Import, lookup_
 			ss.report({
 				content: 'Module `${new_import.module_name}` not found'
 				file_path: ss.cur_file_path
-				range: new_import.ranges[os.base(ss.cur_file_path)]
+				range: new_import.ranges[ss.cur_file_name]
 			})
 			continue
 		}
 	}
 }
 
-fn (mut store Store) scan_imports(tree &C.TSTree, src_text []byte) []&Import {
+fn (mut ss Store) scan_imports(tree &C.TSTree, src_text []byte) []&Import {
 	root_node := tree.root_node()
 	named_child_len := root_node.named_child_count()
 	mut newly_imported_modules := []&Import{}
@@ -197,20 +192,15 @@ fn (mut store Store) scan_imports(tree &C.TSTree, src_text []byte) []&Import {
 		import_path_node := node.child_by_field_name('path')
 
 		// resolve it later after 
-		mut imp_module, already_imported := store.add_import({
+		mut imp_module, already_imported := ss.add_import({
 			resolved: false
 			module_name: import_path_node.get_text(src_text)
 		})
 
 		import_alias_node := node.child_by_field_name('alias')
 		import_symbols_node := node.child_by_field_name('symbols')
-
-		file_name := os.base(store.cur_file_path)
-		defer { 
-			unsafe { file_name.free() } 
-		}
 		if !import_alias_node.is_null() && import_symbols_node.is_null() {
-			imp_module.set_alias(file_name, import_alias_node.named_child(0).get_text(src_text))
+			imp_module.set_alias(ss.cur_file_name, import_alias_node.named_child(0).get_text(src_text))
 		} else if import_alias_node.is_null() && !import_symbols_node.is_null() {
 			symbols_len := import_symbols_node.named_child_count()
 			mut symbols := []string{len: int(symbols_len)}
@@ -218,29 +208,26 @@ fn (mut store Store) scan_imports(tree &C.TSTree, src_text []byte) []&Import {
 				symbols[j] = import_symbols_node.named_child(j).get_text(src_text)
 			}
 
-			imp_module.set_symbols(file_name, ...symbols)
+			imp_module.set_symbols(ss.cur_file_name, ...symbols)
 		}
 		
 		if !already_imported {
 			newly_imported_modules << imp_module
 		}
 
-		imp_module.track_file(file_name, node.range())
+		imp_module.track_file(ss.cur_file_name, node.range())
 	}
 
 	return newly_imported_modules
 }
 
-fn (mut store Store) import_modules(tree &C.TSTree, src []byte) {
+pub fn (mut store Store) import_modules(tree &C.TSTree, src []byte, lookup_paths []string) {
 	mut parser := tree_sitter.new_parser()
 	parser.set_language(v.language)
 
 	old_active_path := store.cur_file_path.clone()
 	mut imports := store.scan_imports(tree, src)
-	store.inject_paths_of_new_imports(mut imports, [
-		os.join_path(vexe_path, 'vlib')
-	])
-
+	store.inject_paths_of_new_imports(mut imports, lookup_paths)
 	if imports.len == 0 {
 		return
 	}
@@ -261,8 +248,10 @@ fn (mut store Store) import_modules(tree &C.TSTree, src []byte) {
 			full_path := os.join_path(new_import.path, file_name)
 			content := os.read_bytes(full_path) or { continue }
 			tree_from_import := parser.parse_string(content.bytestr())
+
+			// TODO: analyze import directly
 			store.set_active_file_path(full_path)
-			store.import_modules(tree_from_import, content)
+			store.import_modules(tree_from_import, content, lookup_paths)
 			imported++
 
 			unsafe {

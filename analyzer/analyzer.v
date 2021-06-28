@@ -382,15 +382,6 @@ pub fn (mut an Analyzer) top_level_statement() {
 	mut node_type := an.current_node().get_type()
 	mut access := SymbolAccess.private
 	if node_type == 'source_file' {
-		if an.current_node().is_missing() {
-			an.report({
-				kind: .warning
-				range: an.current_node().range()
-				file_path: an.cur_file_path
-				content: 'Missing node (For testing. please remove this warning in `source_file` node after implementing initial basic check features)'
-			})
-		}
-
 		an.cursor.to_first_child()
 		node_type = an.current_node().get_type()
 	}

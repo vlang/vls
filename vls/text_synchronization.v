@@ -23,9 +23,18 @@ fn (mut ls Vls) did_open(_ int, params string) {
 
 	ls.sources[uri] = src.bytes()
 	ls.trees[uri] = ls.parser.parse_string(src)
- 
-	ls.store.set_active_file_path(uri)
+	ls.store.set_active_file_path(uri.path())
+	
+	// should be moved in analyze?
+	ls.store.import_modules(ls.trees[uri], ls.sources[uri], [
+		uri.dir_path(),
+		os.join_path(uri.dir_path(), 'modules'),
+		vlib_path,
+		vmodules_path
+	])
+
 	analyzer.analyze(ls.trees[uri], ls.sources[uri], mut ls.store)
+
 	ls.log_message(ls.store.messages.str(), .info)
 	ls.log_message(ls.trees[uri].root_node().sexpr_str(), .info)
 	ls.show_diagnostics(uri)
@@ -119,6 +128,14 @@ fn (mut ls Vls) did_change(_ int, params string) {
 	ls.trees[uri] = new_tree
 	ls.sources[uri] = new_src
 
+	// TODO: discuss handling imports on did_change
+	// ls.store.import_modules(ls.trees[uri], ls.sources[uri], [
+	// 	uri.dir_path(),
+	// 	os.join_path(uri.dir_path(), 'modules'),
+	// 	vlib_path,
+	// 	vmodules_path
+	// ])
+
 	// TODO: incremental approach to analyzing (analyze only the parts that changed)
 	// using `ts_tree_get_changed_ranges`. Sadly, it hangs at this moment.
 	analyzer.analyze(ls.trees[uri], ls.sources[uri], mut ls.store)
@@ -130,13 +147,14 @@ fn (mut ls Vls) did_close(_ int, params string) {
 		ls.panic(err.msg)
 		return
 	}
+
 	uri := did_close_params.text_document.uri
 	unsafe {
 		ls.sources[uri].free()
 		ls.trees[uri].free()
 	}
-	ls.sources.delete(uri)
 
+	ls.store.delete(uri.dir_path())
 	// NB: The diagnostics will be cleared if:
 	// - TODO: If a workspace has opened multiple programs with main() function and one of them is closed.
 	// - If a file opened is outside the root path or workspace.
@@ -144,42 +162,4 @@ fn (mut ls Vls) did_close(_ int, params string) {
 	if ls.sources.len == 0 || !uri.starts_with(ls.root_uri) {
 		ls.publish_diagnostics(uri, []lsp.Diagnostic{})
 	}
-}
-
-// TODO: edits must use []lsp.TextEdit instead of string
-[manualfree]
-fn (mut ls Vls) process_file(uri lsp.DocumentUri) {
-	// file_path := uri.path()
-	// target_dir := os.dir(file_path)
-	// target_dir_uri := uri.dir()
-	// scope, mut pref := new_scope_and_pref(target_dir, os.dir(target_dir), os.join_path(target_dir,
-	// 	'modules'), ls.root_uri.path())
-	// pref.is_test = file_path.ends_with('_test.v') || file_path.ends_with('_test.vv')
-	// 	|| file_path.all_before_last('.v').all_before_last('.').ends_with('_test')
-	// pref.is_vsh = file_path.ends_with('.vsh')
-	// pref.is_script = pref.is_vsh || file_path.ends_with('.v') || file_path.ends_with('.vv')
-
-	// mut checker := checker.new_checker(table, pref)
-	// mod_dir := os.dir(file_path)
-	// cur_mod_files := os.ls(mod_dir) or { [] }
-	// other_files := pref.should_compile_filtered_files(mod_dir, cur_mod_files).filter(it != file_path)
-	// parsed_files << parser.parse_files(other_files, table, pref, scope)
-	// parsed_files << parser.parse_text(source, file_path, table, .skip_comments, pref,
-	// 	scope)
-	// imported_files, import_errors := ls.parse_imports(parsed_files, table, pref, scope)
-	// checker.check_files(parsed_files)
-	// ls.tables[target_dir_uri] = table
-	// ls.insert_files(parsed_files)
-	// for err in import_errors {
-	// 	err_file_uri := lsp.document_uri_from_path(err.file_path).str()
-	// 	ls.files[err_file_uri].errors << err
-	// 	unsafe { err_file_uri.free() }
-	// }
-	// ls.show_diagnostics(uri)
-	// unsafe {
-	// 	imported_files.free()
-	// 	import_errors.free()
-	// 	parsed_files.free()
-	// 	source.free()
-	// }
 }
