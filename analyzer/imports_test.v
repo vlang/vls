@@ -58,7 +58,5 @@ fn test_import_modules() ? {
 	store.set_active_file_path(file_path)
 	store.import_modules(tree, sample_content_bytes)
 
-	println(store.imports)
-	// println(store.dependency_tree.get_available_nodes())
-	assert store.dependency_tree.get_nodes().len == 2
+	assert store.dependency_tree.get_nodes().len == 3
 }
