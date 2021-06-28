@@ -1,17 +1,20 @@
-> **NOTE!**: You are reading a developmental branch of VLS,
-that uses the Tree-sitter Parser.
-This is not meant for the general public as it does not do 
-any language features at this moment.
-
-> VLS is a work-in-progress, pre-alpha language server.
-It may not be guaranteed to work reliably on your system
-due to memory management issues and other factors.
+> ## ⚠️ Warning (Please read this first) ⚠️
+> What you're seeing is the developmental branch of the V Language server
+> that uses the Tree Sitter parser. Language features such as autocompletion
+> and go to definition are being removed and reimplemented at this moment.
+>
+> We encourage to use the [legacy "master" branch](https://github.com/vlang/vls/tree/master)
+> if you want to try the last fully-functioning version of VLS.
 
 # vls
 [![CI](https://github.com/vlang/vls/actions/workflows/ci.yml/badge.svg)](https://github.com/vlang/vls/actions/workflows/ci.yml)
 
 VLS (V Language Server) is a LSP v3.15-compatible language server
 for [the V programming language](https://github.com/vlang/v).
+
+> VLS is a work-in-progress, pre-alpha language server.
+It may not be guaranteed to work reliably on your system
+due to memory management issues and other factors.
 
 # Installation
 You need to have Git and V installed before compiling the language server.
@@ -79,19 +82,19 @@ will be in the `cmd/vls` directory. So make to add `cmd/vls/vls`.
 - [ ] `didSave`
 - [x] `didClose`
 ### Diagnostics
-- [x] `publishDiagnostics`
+- [ ] `publishDiagnostics`
 ### Language Features
-- [x] `completion`
+- [ ] `completion`
 - [ ] `completion resolve`
-- [x] `hover`
-- [x] `signatureHelp`
+- [ ] `hover`
+- [ ] `signatureHelp`
 - [ ] `declaration`
-- [x] `definition`
+- [ ] `definition`
 - [ ] `typeDefinition`
 - [ ] `implementation`
 - [ ] `references`
 - [ ] `documentHighlight`
-- [x] `documentSymbol`
+- [ ] `documentSymbol`
 - [ ] `codeAction`
 - [ ] `codeLens`
 - [ ] `codeLens resolve`
@@ -104,7 +107,7 @@ will be in the `cmd/vls` directory. So make to add `cmd/vls/vls`.
 - [ ] `onTypeFormatting`
 - [ ] `rename`
 - [ ] `prepareRename`
-- [x] `foldingRange`
+- [ ] `foldingRange`
 
 ## Debugging
 > By default, log can only be accessed and saved on server crash.
