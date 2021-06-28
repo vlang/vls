@@ -23,7 +23,7 @@ fn (mut ls Vls) did_open(_ int, params string) {
 
 	ls.sources[uri] = src.bytes()
 	ls.trees[uri] = ls.parser.parse_string(src)
-	
+ 
 	ls.store.set_active_file_path(uri)
 	analyzer.analyze(ls.trees[uri], ls.sources[uri], mut ls.store)
 	ls.log_message(ls.store.messages.str(), .info)
@@ -121,7 +121,7 @@ fn (mut ls Vls) did_change(_ int, params string) {
 
 	// TODO: incremental approach to analyzing (analyze only the parts that changed)
 	// using `ts_tree_get_changed_ranges`. Sadly, it hangs at this moment.
-	// analyzer.analyze(ls.trees[uri], ls.sources[uri], mut ls.store)
+	analyzer.analyze(ls.trees[uri], ls.sources[uri], mut ls.store)
 }
 
 [manualfree]

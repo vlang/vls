@@ -194,26 +194,58 @@ fn (mut ls Vls) signature_help(id int, params string) {
 		ls.send_null(id)
 		return
 	}
+ 
+	// Fetch the symbol and report on it.
+	node_text := node.get_text(ls.sources[uri]) 
+	symbol := ls.store.find_symbol(uri, node_text)
+	if symbol.kind == .placeholder || symbol.name == 'void' {
+		ls.send_null(id)
+		return
+	}
 
-	// Act on the symbol.
-	parent := node.parent().parent()
-	ls.show_message(parent.get_type(), .warning)
-	match parent.get_type() {
-		'call_expression' {
-			ls.send(jsonrpc.Response<lsp.SignatureHelp>{
-				id: id
-				result: lsp.SignatureHelp{
-					signatures: [lsp.SignatureInformation{
-						label: parent.get_text(ls.sources[uri])
-						documentation: 'This function call is undocumented'
-					}]
-				}
-			})
+	// Build the message to report.
+	// TODO: Add more than variables once the analyzer reports them, which it
+	// does not seem to be the case right now. 
+	title := match symbol.kind {
+		.variable {
+			'${symbol.name}: ${symbol.return_type.name}' 
 		}
 		else {
-			ls.send_null(id)
+			'${symbol.name}'
 		}
 	}
+	access := match symbol.access {
+		.private {
+			"Private"
+		}
+		.private_mutable {
+			"Private and mutable"
+		}
+		.public {
+			"Public"
+		}
+		.public_mutable {
+			"Public and mutable"
+		}
+		.global {
+			"Global"
+		}
+	}
+	description := '*${access} symbol defined in [${symbol.file_path[7..]}](${symbol.file_path})*'
+
+	// Send the final message.
+	ls.send(jsonrpc.Response<lsp.SignatureHelp>{
+		id: id
+		result: lsp.SignatureHelp{
+			signatures: [lsp.SignatureInformation{
+				label: title
+				documentation: lsp.MarkupContent{
+					kind: lsp.markup_kind_markdown
+					value: description
+				}
+			}]
+		}
+	})
 }
 
 struct CompletionItemConfig {

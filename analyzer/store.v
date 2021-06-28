@@ -55,6 +55,7 @@ pub fn (mut ss Store) find_symbol(module_name string, name string) &Symbol {
 	typ := ss.symbols[module_path][name] or {
 		ss.register_symbol(&Symbol{
 			name: name.clone()
+			file_path: module_path.clone()
 			kind: .placeholder
 		}) or { 
 			analyzer.void_type

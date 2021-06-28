@@ -69,7 +69,7 @@ pub struct AnalyzerError {
 const void_type = &Symbol{ name: 'void' }
 
 [heap]
-struct Symbol {
+pub struct Symbol {
 pub mut:
 	name string
 	kind SymbolKind
@@ -81,6 +81,12 @@ pub mut:
 	generic_placeholder_len int
 	children map[string]&Symbol
 	file_path string
+}
+
+pub fn (info AnalyzerError) str() string {
+	start := '{${info.range.start_point.row}:${info.range.start_point.column}}'
+	end := '{${info.range.end_point.row}:${info.range.end_point.column}}'
+	return '[${start} -> ${end}] ${info.msg} (${info.code})'
 }
 
 pub fn (info &Symbol) str() string {
@@ -314,6 +320,7 @@ pub fn (mut an Analyzer) extract_block(node C.TSNode, mut scope ScopeTree) {
 fn report_error(msg string, range C.TSRange) IError {
 	return AnalyzerError{
 		msg: msg
+		code: 0
 		range: range
 	}
 }
@@ -409,7 +416,13 @@ pub fn (mut an Analyzer) top_level_statement() {
 					return_type: an.infer_value_type(spec_node.child_by_field_name('value'))
 				}
 
-				an.store.register_symbol(const_sym) or { eprint(err) }
+				an.store.register_symbol(const_sym) or {
+					if err is AnalyzerError {
+						eprintln(err.str())
+					} else {
+						eprintln('Unknown error')
+					}
+				}
 				global_scope.register(const_sym)
 			}
 		}
@@ -588,17 +601,19 @@ pub fn (mut an Analyzer) top_level_statement() {
 
 			if !receiver_node.is_null() {
 				an.extract_parameter_list(params_list_node, mut fn_sym, mut scope)
-				// TODO:
-				// keys := fn_sym.children.keys()
-				// last_param_key := keys.last()
-				// if !isnil(fn_sym.children[last_param_key].return_type) {
-				// 	fn_sym.children[last_param_key].return_type.add_child(mut fn_sym) or { eprintln(err) }
-				// }
-
-				// unsafe {
-				// 	keys.free()
-				// 	last_param_key.free()
-				// }
+				keys := fn_sym.children.keys()
+				if keys.len != 0 {
+					last_param_key := keys.last()
+					if !isnil(fn_sym.children[last_param_key].return_type) {
+						fn_sym.children[last_param_key].return_type.add_child(mut fn_sym) or { eprintln(err) }
+					}
+					unsafe {
+						last_param_key.free()
+					}
+				}
+				unsafe {
+					keys.free()
+				}
 			} else {
 				an.store.register_symbol(fn_sym) or { eprintln(err) }
 			}
