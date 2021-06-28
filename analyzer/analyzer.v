@@ -2,7 +2,7 @@ module analyzer
 
 // it should be imported just to have those C type symbols available
 // import tree_sitter
-import os
+// import os
 
 pub enum SymbolKind {
 	function
@@ -115,7 +115,7 @@ pub mut:
 }
 
 pub fn (mut an Analyzer) report(msg Message) {
-	an.store.messages << msg
+	an.store.report(msg)
 }
 
 pub fn (mut an Analyzer) find_symbol_by_node(node C.TSNode) &Symbol {
@@ -390,34 +390,7 @@ pub fn (mut an Analyzer) top_level_statement() {
 
 	mut global_scope := an.get_scope(an.current_node().parent())
 	match node_type {
-		'import_declaration' {
-			file_name := os.base(an.store.cur_file_path)
-
-			import_node := an.current_node()
-			import_path_node := import_node.child_by_field_name('path')
-			import_alias_node := import_node.child_by_field_name('alias')
-			import_symbols_node := import_node.child_by_field_name('symbols')
-
-			// resolve it later after 
-			mut imp_data := an.store.add_import({
-				resolved: false
-				module_name: import_path_node.get_text(an.src_text)
-			})
-
-			if !import_alias_node.is_null() && import_symbols_node.is_null() {
-				imp_data.set_alias(file_name, import_alias_node.get_text(an.src_text))
-			} else if import_alias_node.is_null() && !import_symbols_node.is_null() {
-				symbols_len := import_symbols_node.named_child_count()
-				mut symbols := []string{len: int(symbols_len)}
-				for i := u32(0); i < symbols_len; i++ {
-					symbols[i] = import_symbols_node.named_child(i).get_text(an.src_text)
-				}
-
-				imp_data.set_symbols(file_name, ...symbols)
-			}
-
-			unsafe { file_name.free() }
-		}
+		'import_declaration' {}
 		'const_declaration' {
 			const_node := an.current_node()
 			if const_node.child(0).get_type() == 'pub' {

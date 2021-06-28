@@ -1,15 +1,20 @@
 module analyzer
 
 import os
+import depgraph
 
 pub struct Store {
 pub mut:
 	cur_file_path string
 	imports map[string][]Import
-	imported_paths []string
+	dependency_tree depgraph.Tree
 	messages []Message
 	symbols map[string]map[string]&Symbol
 	opened_scopes map[string]&ScopeTree
+}
+
+pub fn (mut ss Store) report(msg Message) {
+	ss.messages << msg
 }
 
 pub fn (ss &Store) is_file_active(file_path string) bool {
@@ -73,7 +78,7 @@ pub fn (mut ss Store) register_symbol(info &Symbol) ?&Symbol {
 	return info
 }
 
-pub fn (mut ss Store) add_import(imp Import) &Import {
+pub fn (mut ss Store) add_import(imp Import) (&Import, bool) {
 	dir := os.dir(ss.cur_file_path)
 	defer { unsafe { dir.free() } }
 
@@ -81,7 +86,7 @@ pub fn (mut ss Store) add_import(imp Import) &Import {
 	if dir in ss.imports {
 		// check if import has already imported
 		for i, stored_imp in ss.imports[dir] {
-			if stored_imp.module_name == imp.module_name && stored_imp.path == imp.path {
+			if imp.module_name == stored_imp.module_name {
 				idx = i
 				break
 			}
@@ -99,13 +104,14 @@ pub fn (mut ss Store) add_import(imp Import) &Import {
 		ss.imports[dir] << new_import 
 		last_idx := ss.imports[dir].len - 1
 
-		if imp.path !in ss.imported_paths {
-			ss.imported_paths << new_import.path
-		}
+		// use ss.imports or ss.symbols?
+		// if imp.path !in ss.imported_paths {
+		// 	ss.imported_paths << new_import.path
+		// }
 
-		return &ss.imports[dir][last_idx]
+		return &ss.imports[dir][last_idx], false
 	} else {
-		return &ss.imports[dir][idx]
+		return &ss.imports[dir][idx], true
 	}
 }
 

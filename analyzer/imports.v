@@ -1,13 +1,22 @@
 module analyzer
 
-// import tree_sitter
+import os
+import tree_sitter
+import tree_sitter_v.bindings.v
 
 pub struct Import {
 mut:
+	// resolved indicates that an import's path has been resolved.
 	resolved bool
+
+	// imported indicates that the files of the modules are already imported.
+	imported bool
 pub mut:
 	module_name string
 	path string
+
+	// track who imported the file
+	ranges map[string]C.TSRange
 
 	// original module_names are not recorded as aliases
 	// e.g {'file.v': 'foo', 'file1.v': 'bar'}
@@ -23,6 +32,14 @@ pub fn (mut imp Import) set_alias(file_name string, alias string) {
 	}
 
 	imp.aliases[file_name] = alias
+}
+
+pub fn (mut imp Import) track_file(file_name string, range C.TSRange) {
+	if file_name in imp.ranges && range.eq(imp.ranges[file_name]) {
+		return
+	}
+
+	imp.ranges[file_name] = range
 }
 
 pub fn (mut imp Import) add_symbols(file_name string, symbols ...string) {
@@ -68,123 +85,199 @@ pub fn (mut imp Import) set_symbols(file_name string, symbols ...string) {
 	imp.symbols[file_name] = symbols
 }
 
-// fn get_import_dir_and_files(mod string, paths ...string) ?(string, []string) {
-// 	for path in prefs.lookup_path {
-// 		mod_dir := os.join_path(path, mod.split('.').join(os.path_separator))
+pub fn (mut imp Import) set_path(path string) {
+	if path.len != 0 {
+		imp.resolved = true
+	}
 
-// 		// if directory does not exist, proceed to another lookup path
-// 		if !os.exists(mod_dir) {
-// 			continue
-// 		}
+	imp.path = path
+}
+
+const v_ext = '.v'
+
+[manualfree]
+fn (mut ss Store) inject_paths_of_new_imports(mut new_imports []&Import, lookup_paths []string) {
+	dir := os.dir(ss.cur_file_path)
+	defer {
+		unsafe { dir.free() }
+	}
+
+	mut project := ss.dependency_tree.get_node(dir) or {
+		// TODO: inject builtin directly
+		ss.dependency_tree.add({ id: dir })
+	}
+
+	for i, new_import in new_imports {
+		if new_import.resolved {
+			continue
+		}
+
+		mod_name_arr := new_import.module_name.split('.')
+		for path in lookup_paths {
+			mod_dir := os.join_path(path, mod_name_arr.join(os.path_separator))		
+
+			if ss.dependency_tree.has(mod_dir) {
+				new_imports[i].set_path(mod_dir)
+				break
+			}
+
+			if !os.exists(mod_dir) {
+				unsafe { 
+					mod_name_arr.free()
+					mod_dir.free()
+				}
+				continue
+			}
+
+			mut files := os.ls(mod_dir) or { 
+				unsafe { 
+					mod_name_arr.free()
+					mod_dir.free()
+				}
+				continue
+			}
+
+			mut has_v_files := false
+			for file in files {
+				file_ext := os.file_ext(file)
+				if file_ext == v_ext {
+					has_v_files = true
+					unsafe { 
+						file_ext.free()
+						file.free()
+					}
+					break
+				}
+
+				unsafe { 
+					file_ext.free()
+					file.free()
+				}
+			}
+
+			if !has_v_files {
+				unsafe { 
+					mod_dir.free()
+				}
+				continue
+			}
+
+			new_imports[i].set_path(mod_dir)
+			ss.dependency_tree.add({ id: mod_dir })
+			break
+		}
+
+		if new_import.path !in project.dependencies {
+			project.dependencies << new_import.path
+		}
+
+		// unsafe { mod_name_arr.free() }
+		if !new_import.resolved {
+			ss.report({
+				content: 'Module `${new_import.module_name}` not found'
+				file_path: ss.cur_file_path
+				range: new_import.ranges[os.base(ss.cur_file_path)]
+			})
+			continue
+		}
+	}
+}
+
+fn (mut store Store) scan_imports(tree &C.TSTree, src_text []byte) []&Import {
+	root_node := tree.root_node()
+	named_child_len := root_node.named_child_count()
+	mut newly_imported_modules := []&Import{}
+
+	for i in 0 .. named_child_len {
+		node := root_node.named_child(i)
+		if node.get_type() != 'import_declaration' {
+			continue
+		}
+
+		import_path_node := node.child_by_field_name('path')
+
+		// resolve it later after 
+		mut imp_module, already_imported := store.add_import({
+			resolved: false
+			module_name: import_path_node.get_text(src_text)
+		})
+
+		import_alias_node := node.child_by_field_name('alias')
+		import_symbols_node := node.child_by_field_name('symbols')
+
+		file_name := os.base(store.cur_file_path)
+		defer { 
+			unsafe { file_name.free() } 
+		}
+		if !import_alias_node.is_null() && import_symbols_node.is_null() {
+			imp_module.set_alias(file_name, import_alias_node.named_child(0).get_text(src_text))
+		} else if import_alias_node.is_null() && !import_symbols_node.is_null() {
+			symbols_len := import_symbols_node.named_child_count()
+			mut symbols := []string{len: int(symbols_len)}
+			for j := u32(0); j < symbols_len; j++ {
+				symbols[j] = import_symbols_node.named_child(j).get_text(src_text)
+			}
+
+			imp_module.set_symbols(file_name, ...symbols)
+		}
 		
-// 		mut files := os.ls(mod_dir) or { 
-// 			// break loop if files is empty
-// 			break
-// 		}
+		if !already_imported {
+			newly_imported_modules << imp_module
+		}
 
-// 		filtered_files := prefs.should_compile_filtered_files(mod_dir, files)
-// 		unsafe { files.free() }
+		imp_module.track_file(file_name, node.range())
+	}
 
-// 		// return error if given directory is empty
-// 		if filtered_files.len == 0 {
-// 			unsafe { filtered_files.free() }
-// 			return error('module `$mod` is empty')
-// 		}
-		
-// 		return mod_dir, filtered_files
-// 	}
+	return newly_imported_modules
+}
 
-// 	return error('cannot find module `$mod`')
-// }
+fn (mut store Store) import_modules(tree &C.TSTree, src []byte) {
+	mut parser := tree_sitter.new_parser()
+	parser.set_language(v.language)
 
-// fn (mut ss Store) resolve_module_path(module_name string, alias string) string {
-// 	dir := os.dir(ss.cur_file_path)
-// 	file_name := os.base(ss.cur_file_path)
-// 	defer { 
-// 		unsafe { 
-// 			dir.free() 
-// 			file_name.free()
-// 		} 
-// 	}
+	old_active_path := store.cur_file_path.clone()
+	mut imports := store.scan_imports(tree, src)
+	store.inject_paths_of_new_imports(mut imports, [
+		os.join_path(vexe_path, 'vlib')
+	])
 
-// 	// check if module_name has already imported
-// 	if imports := ss.imports[dir] {
-// 		for imp in imports {
-// 			if imp.resolved && (imp.module_name == module_name || (file_name in imp.aliases && alias in imp.aliases[file_name])) {
-// 				return imp.path
-// 			}
-// 		}
-// 	}
+	if imports.len == 0 {
+		return
+	}
 
-// 	return false
-// }
+	for i, new_import in imports {
+		// skip if import is not resolved or already imported
+		if !new_import.resolved || new_import.imported {
+			continue
+		}
 
-// NOTE: once builder.find_module_path is extracted, simplify parse_imports
-// [manualfree]
-// fn (mut ss Store) parse_imports(import_ []C.TSTree) {
-// 	// NB: b.parsed_files is appended in the loop,
-// 	// so we can not use the shorter `for in` form.
-// 	for i := 0; i < parsed_files.len; i++ {
-// 		// TODO: use URI
-		
-// 		mut invalid_imports := []string{}
-// 		for _, imp in file.imports {
-// 			if imp.mod in done_imports {
-// 				continue
-// 			}
-// 			mut found := false
-// 			mut import_err_msg := "cannot find module '$imp.mod'"
-// 			for path in pref.lookup_path {
-// 				mod_dir := os.join_path(path, imp.mod.split('.').join(os.path_separator))
-// 				if !os.exists(mod_dir) {
-// 					continue
-// 				}
-// 				mut files := os.ls(mod_dir) or { []string{} }
-// 				files = pref.should_compile_filtered_files(mod_dir, files)
-// 				if files.len == 0 {
-// 					import_err_msg = "module '$imp.mod' is empty"
-// 					break
-// 				}
-// 				found = true
-// 				mut tmp_new_parsed_files := parser.parse_files(files, table, pref, scope)
-// 				tmp_new_parsed_files = tmp_new_parsed_files.filter(it.mod.name !in done_imports)
-// 				mut clean_new_files_names := []string{}
-// 				for index, new_file in tmp_new_parsed_files {
-// 					if new_file.mod.name !in clean_new_files_names {
-// 						newly_parsed_files << tmp_new_parsed_files[index]
-// 						clean_new_files_names << new_file.mod.name
-// 					}
-// 				}
-// 				newly_parsed_files2, errs2 := ls.parse_imports(newly_parsed_files, table,
-// 					pref, scope)
-// 				errs << errs2
-// 				newly_parsed_files << newly_parsed_files2
-// 				done_imports << imp.mod
-// 				unsafe {
-// 					newly_parsed_files2.free()
-// 					errs2.free()
-// 				}
-// 				break
-// 			}
-// 			if !found {
-// 				errs << errors.Error{
-// 					message: import_err_msg
-// 					file_path: file.path
-// 					pos: imp.pos
-// 					reporter: .checker
-// 				}
-// 				if imp.mod !in invalid_imports {
-// 					invalid_imports << imp.mod
-// 				}
-// 				continue
-// 			}
-// 		}
-// 		ls.invalid_imports[file_uri] = invalid_imports.clone()
-// 		unsafe {
-// 			invalid_imports.free()
-// 			file_uri.free()
-// 		}
-// 	}
-// 	unsafe { done_imports.free() }
-// 	return newly_parsed_files, errs
-// }
+		file_paths := os.ls(new_import.path) or { continue }
+		mut imported := 0
+		for file_name in file_paths {
+			if !file_name.ends_with(v_ext) || file_name.ends_with('_test.v') {
+				continue
+			}
+
+			full_path := os.join_path(new_import.path, file_name)
+			content := os.read_bytes(full_path) or { continue }
+			tree_from_import := parser.parse_string(content.bytestr())
+			store.set_active_file_path(full_path)
+			store.import_modules(tree_from_import, content)
+			imported++
+
+			unsafe {
+				content.free()
+				tree_from_import.free()
+			}
+		}
+
+		if imported > 0 {
+			imports[i].imported = true
+		}
+
+		store.set_active_file_path(old_active_path)
+		unsafe { file_paths.free() }
+	}
+
+	unsafe { parser.free() }
+}
