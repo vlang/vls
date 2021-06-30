@@ -51,7 +51,7 @@ pub const (
 		.signature_help,
 		// .completion,
 		.hover,
-		// .folding_range,
+		.folding_range,
 		.definition,
 	]
 )
