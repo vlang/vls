@@ -1198,58 +1198,46 @@ fn (mut ls Vls) hover(id int, params string) {
 
 [manualfree]
 fn (mut ls Vls) folding_range(id int, params string) {
-	// folding_range_params := json.decode(lsp.FoldingRangeParams, params) or {
-	// 	ls.panic(err.msg)
-	// 	ls.send_null(id)
-	// 	return
-	// }
-	// uri := folding_range_params.text_document.uri
-	// file := ls.files[uri.str()] or {
-	// 	ls.send_null(id)
-	// 	return
-	// }
-	// mut folding_ranges := []lsp.FoldingRange{}
+	folding_range_params := json.decode(lsp.FoldingRangeParams, params) or {
+		ls.panic(err.msg)
+		ls.send_null(id)
 
-	// // TODO: enable parsing with .toplevel_comments included
-	// for stmt in file.stmts {
-	// 	match stmt {
-	// 		ast.ExprStmt {
-	// 			if stmt.expr is ast.Comment {
-	// 				range := position_to_lsp_range(stmt.expr.pos)
-	// 				folding_ranges << lsp.FoldingRange{
-	// 					start_line: range.start.line
-	// 					start_character: range.start.character
-	// 					end_line: range.end.line
-	// 					end_character: range.end.character
-	// 					kind: lsp.folding_range_kind_comment
-	// 				}
-	// 			}
-	// 		}
-	// 		ast.StructDecl, ast.EnumDecl, ast.FnDecl, ast.InterfaceDecl {
-	// 			range := position_to_lsp_range(stmt.pos)
-	// 			folding_ranges << lsp.FoldingRange{
-	// 				start_line: range.start.line
-	// 				start_character: range.start.character
-	// 				end_line: range.end.line
-	// 				end_character: range.end.character
-	// 				kind: lsp.folding_range_kind_region
-	// 			}
-	// 		}
-	// 		else {}
-	// 	}
-	// }
+		return
+	}
+	uri  := folding_range_params.text_document.uri
+	tree := ls.trees[uri]
 
-	// if folding_ranges.len == 0 {
-	// 	ls.send_null(id)
-	// } else {
-	// 	ls.send(jsonrpc.Response<[]lsp.FoldingRange>{
-	// 		id: id
-	// 		result: folding_ranges
-	// 	})
-	// }
-	// unsafe {
-	// 	folding_ranges.free()
-	// }
+	root_node := tree.root_node()
+
+	// get the number of named child nodes
+	// named child nodes examples: struct_declaration, enum_declaration, etc.
+	named_children_len := root_node.named_child_count()
+
+	mut folding_ranges := []lsp.FoldingRange{}
+
+	// loop
+	for i := u32(0); i < named_children_len; i++ {
+		named_child := root_node.named_child(i)
+		folding_ranges << lsp.FoldingRange{
+			start_line: tsrange_to_lsp_range(named_child.range()).start.character
+			start_character: tsrange_to_lsp_range(named_child.range()).start.line
+			end_line: tsrange_to_lsp_range(named_child.range()).end.line
+			end_character: tsrange_to_lsp_range(named_child.range()).end.character
+			kind: 'region'
+		}
+	}
+
+	if folding_ranges.len == 0 {
+		ls.send_null(id)
+	} else {
+		ls.send(jsonrpc.Response<[]lsp.FoldingRange>{
+			id: id
+			result: folding_ranges
+		})
+	}
+	unsafe {
+		folding_ranges.free()
+	}
 }
 
 // struct DefinitionConfig {

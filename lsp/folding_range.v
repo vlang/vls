@@ -5,6 +5,7 @@ module lsp
 pub struct FoldingRangeParams {
 pub:
 	text_document TextDocumentIdentifier [json: textDocument]
+	position      Position
 }
 
 pub const (
