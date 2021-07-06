@@ -24,8 +24,6 @@ fn (mut ls Vls) did_open(_ int, params string) {
 	ls.sources[uri] = src.bytes()
 	ls.trees[uri] = ls.parser.parse_string(src)
 	ls.store.set_active_file_path(uri.path())
-	
-	// should be moved in analyze?
 	ls.store.import_modules(ls.trees[uri], ls.sources[uri], [
 		uri.dir_path(),
 		os.join_path(uri.dir_path(), 'modules'),
@@ -34,10 +32,11 @@ fn (mut ls Vls) did_open(_ int, params string) {
 	])
 
 	analyzer.analyze(ls.trees[uri], ls.sources[uri], mut ls.store)
+	ls.store.cleanup_imports()
 
-	ls.log_message(ls.store.messages.str(), .info)
-	ls.log_message(ls.trees[uri].root_node().sexpr_str(), .info)
 	ls.show_diagnostics(uri)
+	ls.log_message(ls.store.imports.str(), .info)
+	ls.log_message(ls.store.dependency_tree.str(), .info)
 }
 
 [manualfree]
@@ -47,6 +46,8 @@ fn (mut ls Vls) did_change(_ int, params string) {
 		return
 	}
 	uri := did_change_params.text_document.uri
+	ls.store.set_active_file_path(uri.path())
+
 	mut new_src := ls.sources[uri].clone()
 	ls.publish_diagnostics(uri, []lsp.Diagnostic{})
 
@@ -118,7 +119,29 @@ fn (mut ls Vls) did_change(_ int, params string) {
 	}
 
 	new_tree := ls.parser.parse_string_with_old_tree(new_src.bytestr(), ls.trees[uri])
-	ls.log_message('new tree: ${new_tree.root_node().sexpr_str()}', .info)
+	// ls.log_message('new tree: ${new_tree.root_node().sexpr_str()}', .info)
+
+	mut lookup_paths := [
+		uri.dir_path(),
+		os.join_path(uri.dir_path(), 'modules'),
+		vlib_path,
+		vmodules_path
+	]
+
+	ls.store.clear_messages()
+	ls.store.import_modules(new_tree, new_src, lookup_paths)
+	
+	for i := 0; lookup_paths.len != 0; {
+		unsafe { lookup_paths[i].free() }
+		lookup_paths.delete(i)
+	}
+
+	unsafe { lookup_paths.free() }
+
+	// TODO: incremental approach to analyzing (analyze only the parts that changed)
+	// using `ts_tree_get_changed_ranges`. Sadly, it hangs at this moment.
+	analyzer.analyze(ls.trees[uri], ls.sources[uri], mut ls.store)
+	ls.store.cleanup_imports()
 
 	unsafe { 
 		ls.trees[uri].free()
@@ -128,17 +151,9 @@ fn (mut ls Vls) did_change(_ int, params string) {
 	ls.trees[uri] = new_tree
 	ls.sources[uri] = new_src
 
-	// TODO: discuss handling imports on did_change
-	// ls.store.import_modules(ls.trees[uri], ls.sources[uri], [
-	// 	uri.dir_path(),
-	// 	os.join_path(uri.dir_path(), 'modules'),
-	// 	vlib_path,
-	// 	vmodules_path
-	// ])
-
-	// TODO: incremental approach to analyzing (analyze only the parts that changed)
-	// using `ts_tree_get_changed_ranges`. Sadly, it hangs at this moment.
-	analyzer.analyze(ls.trees[uri], ls.sources[uri], mut ls.store)
+	ls.show_diagnostics(uri)
+	ls.log_message(ls.store.imports.str(), .info)
+	ls.log_message(ls.store.dependency_tree.str(), .info)
 }
 
 [manualfree]

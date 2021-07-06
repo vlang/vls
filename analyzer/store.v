@@ -15,6 +15,17 @@ pub mut:
 	opened_scopes map[string]&ScopeTree
 }
 
+pub fn (mut ss Store) clear_messages() {
+	for i := 0; ss.messages.len != 0; {
+		msg := ss.messages[i]
+		unsafe {
+			msg.content.free()
+		}
+
+		ss.messages.delete(i)
+	}
+}
+
 pub fn (mut ss Store) report(msg Message) {
 	ss.messages << msg
 }
@@ -56,7 +67,7 @@ pub fn (mut ss Store) find_symbol(module_name string, name string) &Symbol {
 	}
 
 	module_path := ss.get_module_path(module_name)
-	defer { unsafe { module_path.free() } }
+	// defer { unsafe { module_path.free() } }
 
 	typ := ss.symbols[module_path][name] or {
 		ss.register_symbol(&Symbol{
@@ -87,7 +98,6 @@ pub fn (mut ss Store) register_symbol(info &Symbol) ?&Symbol {
 
 pub fn (mut ss Store) add_import(imp Import) (&Import, bool) {
 	dir := ss.cur_dir
-
 	mut idx := -1
 	if dir in ss.imports {
 		// check if import has already imported
@@ -109,14 +119,9 @@ pub fn (mut ss Store) add_import(imp Import) (&Import, bool) {
 		
 		ss.imports[dir] << new_import 
 		last_idx := ss.imports[dir].len - 1
-
-		// use ss.imports or ss.symbols?
-		// if imp.path !in ss.imported_paths {
-		// 	ss.imported_paths << new_import.path
-		// }
-
 		return &ss.imports[dir][last_idx], false
 	} else {
+		unsafe { imp.free() }
 		return &ss.imports[dir][idx], true
 	}
 }
@@ -137,24 +142,40 @@ pub fn (ss &Store) get_symbols_by_file_path(file_path string) []&Symbol {
 	return fetched_symbols
 }
 
-pub fn (mut ss Store) delete(dir string) {
-	if !ss.dependency_tree.has_dependents(dir) {
-		// delete symbols and imports
-		// TODO: cleanup symbols
-		ss.symbols.delete(dir)
-		ss.symbols.delete(dir)
-	} else {
+pub fn (mut ss Store) delete(dir string, excluded_dir ...string) {
+	mut is_used := ss.dependency_tree.has_dependents(dir, ...excluded_dir)
+	if is_used {
 		return
 	}
 
 	if dep_node := ss.dependency_tree.get_node(dir) {
-		// delete if found
-		ss.dependency_tree.delete(dir)
-
-		// delete it's dependencies if possible
+		// get all dependencies
 		all_dependencies := dep_node.get_all_dependencies()
+
+		// delete all dependencies if possible
 		for dep in all_dependencies {
-			ss.delete(dep)
-		}	
+			ss.delete(dep, dir)
+		}
+
+		// delete dir in dependency tree
+		ss.dependency_tree.delete(dir)
+	}
+
+	// delete all imports from unused dir
+	if !is_used {
+		unsafe {
+			// delete symbols and imports
+			// for _, sym in ss.symbols[dir] {
+			// 	sym.free()
+			// }
+
+			ss.symbols[dir].free()
+		}
+
+		ss.symbols.delete(dir)
+		for i := 0; ss.imports[dir].len != 0; {
+			unsafe { ss.imports[dir][i].free() }
+			ss.imports[dir].delete(i)
+		}
 	}
 }

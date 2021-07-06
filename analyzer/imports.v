@@ -42,6 +42,12 @@ pub fn (mut imp Import) track_file(file_name string, range C.TSRange) {
 	imp.ranges[file_name] = range
 }
 
+pub fn (mut imp Import) untrack_file(file_name string) {
+	if file_name in imp.ranges {
+		imp.ranges.delete(file_name)
+	}
+}
+
 pub fn (mut imp Import) add_symbols(file_name string, symbols ...string) {
 	if file_name !in imp.symbols {
 		imp.symbols[file_name] = []string{}
@@ -93,7 +99,26 @@ pub fn (mut imp Import) set_path(path string) {
 	imp.path = path
 }
 
-const v_ext = '.v'
+[unsafe]
+pub fn (imp &Import) free() {
+	unsafe {
+		imp.module_name.free()
+		imp.path.free()
+		imp.ranges.free()
+		imp.aliases.free()
+		imp.symbols.free()
+	}
+}
+
+pub fn (mut ss Store) find_import_by_position(range C.TSRange) ?&Import {
+	for mut imp in ss.imports[ss.cur_dir] {
+		if ss.cur_file_name in imp.ranges && imp.ranges[ss.cur_file_name].start_point.row == range.start_point.row {
+			return unsafe { imp }
+		}
+	}
+
+	return none
+}
 
 [manualfree]
 fn (mut ss Store) inject_paths_of_new_imports(mut new_imports []&Import, lookup_paths []string) {
@@ -109,26 +134,19 @@ fn (mut ss Store) inject_paths_of_new_imports(mut new_imports []&Import, lookup_
 
 		mod_name_arr := new_import.module_name.split('.')
 		for path in lookup_paths {
-			mod_dir := os.join_path(path, ...mod_name_arr)		
-
+			mod_dir := os.join_path(path, ...mod_name_arr)
 			if ss.dependency_tree.has(mod_dir) {
 				new_imports[i].set_path(mod_dir)
 				break
 			}
 
 			if !os.exists(mod_dir) {
-				// unsafe { 
-				// 	mod_name_arr.free()
-				// 	mod_dir.free()
-				// }
+				unsafe { mod_dir.free() }
 				continue
 			}
 
 			mut files := os.ls(mod_dir) or { 
-				// unsafe { 
-				// 	mod_name_arr.free()
-				// 	mod_dir.free()
-				// }
+				unsafe { mod_dir.free() }
 				continue
 			}
 
@@ -151,9 +169,7 @@ fn (mut ss Store) inject_paths_of_new_imports(mut new_imports []&Import, lookup_
 			}
 
 			if !has_v_files {
-				unsafe { 
-					mod_dir.free()
-				}
+				unsafe { mod_dir.free() }
 				continue
 			}
 
@@ -162,20 +178,55 @@ fn (mut ss Store) inject_paths_of_new_imports(mut new_imports []&Import, lookup_
 			break
 		}
 
-		if new_import.path !in project.dependencies {
+		if new_import.path !in project.dependencies && new_import.path.len != 0 {
 			project.dependencies << new_import.path
 		}
 
-		// unsafe { mod_name_arr.free() }
 		if !new_import.resolved {
 			ss.report({
 				content: 'Module `${new_import.module_name}` not found'
-				file_path: ss.cur_file_path
+				file_path: ss.cur_file_path.clone()
 				range: new_import.ranges[ss.cur_file_name]
 			})
 			continue
 		}
+
+		unsafe { mod_name_arr.free() }
 	}
+}
+
+pub fn (mut ss Store) cleanup_imports() int {
+	mut deleted := 0
+	orig_len := ss.imports[ss.cur_dir].len
+	for i := 0; i < ss.imports[ss.cur_dir].len; {
+		mut imp_module := ss.imports[ss.cur_dir][i]
+		if imp_module.ranges.len == 0 || (!imp_module.resolved || !imp_module.imported) {
+			// delete in the dependency tree
+			mut dep_node := ss.dependency_tree.get_node(ss.cur_dir) or {
+				panic('Should not panic. Please file an issue to github.com/vlang/vls.')
+				return deleted
+			}			
+
+			{
+				// intentionally do not use the variables to the same scope
+				deleted_idx := dep_node.remove_dependency(imp_module.path)
+				assert deleted_idx != -2
+			}
+
+			// delete dir if possible
+			ss.delete(imp_module.path)
+			unsafe { imp_module.free() }
+
+			ss.imports[ss.cur_dir].delete(i)
+			deleted++
+			continue
+		}
+
+		i++
+	}
+
+	assert ss.imports[ss.cur_dir].len == orig_len - deleted
+	return deleted
 }
 
 fn (mut ss Store) scan_imports(tree &C.TSTree, src_text []byte) []&Import {
@@ -190,6 +241,16 @@ fn (mut ss Store) scan_imports(tree &C.TSTree, src_text []byte) []&Import {
 		}
 
 		import_path_node := node.child_by_field_name('path')
+		if found_imp := ss.find_import_by_position(node.range()) {
+			mut imp_module := found_imp
+			if imp_module.module_name == import_path_node.get_text(src_text) {
+				continue
+			}
+
+			// if the current import node is not the same as before,
+			// untrack and remove the import entry asap
+			imp_module.untrack_file(ss.cur_file_name)
+		}
 
 		// resolve it later after 
 		mut imp_module, already_imported := ss.add_import({
@@ -215,7 +276,7 @@ fn (mut ss Store) scan_imports(tree &C.TSTree, src_text []byte) []&Import {
 			newly_imported_modules << imp_module
 		}
 
-		imp_module.track_file(ss.cur_file_name, node.range())
+		imp_module.track_file(ss.cur_file_name, import_path_node.range())
 	}
 
 	return newly_imported_modules
@@ -241,18 +302,19 @@ pub fn (mut store Store) import_modules(tree &C.TSTree, src []byte, lookup_paths
 		file_paths := os.ls(new_import.path) or { continue }
 		mut imported := 0
 		for file_name in file_paths {
-			if !file_name.ends_with(v_ext) || file_name.ends_with('_test.v') {
+			if !should_analyze_file(file_name) {
 				continue
 			}
 
 			full_path := os.join_path(new_import.path, file_name)
 			content := os.read_bytes(full_path) or { continue }
 			tree_from_import := parser.parse_string(content.bytestr())
-
-			// TODO: analyze import directly
 			store.set_active_file_path(full_path)
 			store.import_modules(tree_from_import, content, lookup_paths)
 			imported++
+
+			mut analyzer := analyzer.Analyzer{ is_import: true }
+			analyzer.analyze(tree_from_import.root_node(), content, mut store)
 
 			unsafe {
 				content.free()
@@ -267,6 +329,5 @@ pub fn (mut store Store) import_modules(tree &C.TSTree, src []byte, lookup_paths
 		store.set_active_file_path(old_active_path)
 		unsafe { file_paths.free() }
 	}
-
 	unsafe { parser.free() }
 }

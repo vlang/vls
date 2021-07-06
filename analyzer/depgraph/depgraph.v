@@ -9,18 +9,17 @@ mut:
 	nodes map[string]&Node
 }
 
-pub fn (tree &Tree) has(id string) bool {
-	tree.get_node(id) or {
-		return false
-	}
-
-	return true
+pub fn (tree &Tree) str() string {
+	return tree.nodes.str()
 }
 
-pub fn (tree &Tree) has_dependents(id string) bool {
-	for nid, _ in tree.nodes {
-		node := tree.get_node(nid) or { continue }
-		if id in node.dependencies {
+pub fn (tree &Tree) has(id string) bool {
+	return id in tree.nodes
+}
+
+pub fn (tree &Tree) has_dependents(id string, excluded ...string) bool {
+	for _, node in tree.nodes {
+		if id !in excluded && id in node.dependencies {
 			return true
 		}
 	}
@@ -29,14 +28,18 @@ pub fn (tree &Tree) has_dependents(id string) bool {
 }
 
 pub fn (mut tree Tree) delete(nid string) {
-	node := tree.get_node(nid) or { return }
+	mut node := tree.nodes[nid] or { return }
+	for i := 0; node.dependencies.len != 0; {
+		unsafe { node.dependencies[i].free() }
+		node.dependencies.delete(i)
+	}
 
 	unsafe {
 		node.dependencies.free()
 		node.id.free()
-
-		tree.nodes.delete(nid)
 	}
+
+	tree.nodes.delete(nid)
 }
 
 pub fn (mut tree Tree) add(node Node) &Node {
@@ -49,18 +52,17 @@ pub fn (mut tree Tree) add(node Node) &Node {
 	return tree.nodes[node.id]
 }
 
-pub fn (tree Tree) get_node(id string) ?&Node {
+pub fn (tree &Tree) get_node(id string) ?&Node {
 	return tree.nodes[id] ?
 }
 
-pub fn (mut tree Tree) get_nodes() map[string]&Node {
+pub fn (tree &Tree) get_nodes() map[string]&Node {
 	return tree.nodes
 }
 
-pub fn (tree Tree) get_available_nodes(completed ...string) []string {
+pub fn (tree &Tree) get_available_nodes(completed ...string) []string {
 	mut ret := []string{}
-	for node_id, _ in tree.nodes {
-		node := tree.get_node(node_id) or { continue }
+	for node_id, node in tree.nodes {
 		deps := node.get_all_dependencies(...completed)
 		if deps.len == 0 && node_id !in completed {
 			ret << node_id
@@ -70,6 +72,7 @@ pub fn (tree Tree) get_available_nodes(completed ...string) []string {
 	return ret
 }
 
+[heap]
 pub struct Node {
 mut:
 	tree &Tree = &Tree(0)
@@ -78,17 +81,28 @@ pub mut:
 	dependencies []string
 }
 
-pub fn (node &Node) get_all_dependencies(completed ...string) []string {
-	if node.dependencies.len == 0 {
-		return node.dependencies
+pub fn (node &Node) str() string {
+	return '${node.id} -> (${node.dependencies.join(', ')})'
+}
+
+pub fn (mut node Node) remove_dependency(dep_path string) int {
+	if node.dependencies.len == 0 || dep_path.len == 0 {
+		return -1
 	}
 
-	mut ret := node.dependencies.clone()
-	mut satisfied := map[string]bool{}
-	defer {
-		unsafe { satisfied.free() }
+	for i := 0; i < node.dependencies.len; i++ {
+		if node.dependencies[i] == dep_path {
+			node.dependencies.delete(i)
+			return i
+		}
 	}
-	
+
+	return -2
+}
+
+pub fn (node &Node) get_all_dependencies(completed ...string) []string {
+	mut ret := node.dependencies.clone()
+
 	for d in node.dependencies {
 		sub_node := node.tree.get_node(d) or {
 			// eprintln('Node ${d}, referenced as a dependency of ${node.id} does not exist in the tree.')
@@ -96,28 +110,15 @@ pub fn (node &Node) get_all_dependencies(completed ...string) []string {
 			continue
 		}
 
-		ret << sub_node.get_all_dependencies()
-	}
-
-	if completed.len == 0 {
-		return ret
-	}
-
-	for r in ret {
-		satisfied[r] = false
-	}
-
-	for c in completed {
-		satisfied[c] = true
-	}
-
-	unsafe { ret.free() }
-	ret = []
-
-	for name, status in satisfied {
-		if !status {
-			ret << name
+		other_deps := sub_node.get_all_dependencies()
+		for other_dep in other_deps {
+			if other_dep !in ret {
+				// push if other_dep is not present in ret
+				ret << other_dep
+			}
 		}
+
+		unsafe { other_deps.free() }
 	}
 
 	return ret

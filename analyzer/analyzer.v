@@ -107,6 +107,20 @@ pub fn (mut info Symbol) add_child(mut new_child Symbol) ? {
 	info.children[new_child.name] = new_child
 }
 
+[unsafe]
+pub fn (sym &Symbol) free() {
+	unsafe {
+		sym.name.free()
+		
+		for _, v in sym.children {
+			v.free()
+		}
+	
+		sym.children.free()
+		sym.file_path.free()
+	}
+}
+
 pub struct Analyzer {
 pub mut:
 	cur_file_path string
@@ -189,14 +203,15 @@ pub fn (mut an Analyzer) get_scope(node C.TSNode) &ScopeTree {
 }
 
 fn (mut an Analyzer) move_cursor() bool {
-	if an.current_node().has_error() {
-		an.report({
-			kind: .error
-			range: an.current_node().range()
-			file_path: an.cur_file_path
-			content: if an.current_node().is_missing() { 'Missing node' } else { 'Node error' }
-		})
-	}
+	// NOTE: Do this in the type checking instead.
+	// if an.current_node().has_error() && !an.current_node().is_missing() {
+	// 	an.report({
+	// 		kind: .error
+	// 		range: an.current_node().range()
+	// 		file_path: an.cur_file_path
+	// 		content: 'Node error'
+	// 	})
+	// }
 
 	return an.cursor.next()
 }
@@ -262,7 +277,9 @@ fn (mut an Analyzer) extract_parameter_list(node C.TSNode, mut type_symbol Symbo
 			return_type: an.find_symbol_by_node(param_type_node)
 		}
 
-		type_symbol.add_child(mut param_sym) or { eprintln(err) }
+		type_symbol.add_child(mut param_sym) or { 
+			// eprintln(err) 
+		}
 		scope.register(param_sym)
 	}
 }
@@ -373,7 +390,7 @@ pub fn (mut an Analyzer) unwrap_error(err IError) {
 		an.report({ 
 			content: err.msg
 			range: err.range
-			file_path: an.store.cur_file_path 
+			file_path: an.store.cur_file_path.clone()
 		})
 	}
 }
@@ -409,9 +426,9 @@ pub fn (mut an Analyzer) top_level_statement() {
 
 				an.store.register_symbol(const_sym) or {
 					if err is AnalyzerError {
-						eprintln(err.str())
+						// eprintln(err.str())
 					} else {
-						eprintln('Unknown error')
+						// eprintln('Unknown error')
 					}
 				}
 				global_scope.register(const_sym)
@@ -464,7 +481,7 @@ pub fn (mut an Analyzer) top_level_statement() {
 						}
 
 						sym.add_child(mut field_sym) or { 
-							eprintln(err)
+							// eprintln(err)
 						}
 
 						scope.register(field_sym)
@@ -476,7 +493,7 @@ pub fn (mut an Analyzer) top_level_statement() {
 			}
 
 			an.store.register_symbol(sym) or { 
-				eprintln(err) 
+				// eprintln(err) 
 			}
 		}
 		'interface_declaration' {
@@ -518,14 +535,16 @@ pub fn (mut an Analyzer) top_level_statement() {
 						}
 
 						sym.add_child(mut field_sym) or { 
-							eprintln(err)
+							// eprintln(err)
 						}
 					}
 					else { continue }
 				}
 			}
 
-			an.store.register_symbol(sym) or { eprintln(err) }
+			an.store.register_symbol(sym) or { 
+				// eprintln(err)
+			}
 		}
 		'enum_declaration' {
 			enum_decl_node := an.current_node()
@@ -567,7 +586,7 @@ pub fn (mut an Analyzer) top_level_statement() {
 			}
 
 			an.store.register_symbol(sym) or { 
-				an.unwrap_error(err)
+				// an.unwrap_error(err)
 				return
 			}
 		}
@@ -596,7 +615,9 @@ pub fn (mut an Analyzer) top_level_statement() {
 				if keys.len != 0 {
 					last_param_key := keys.last()
 					if !isnil(fn_sym.children[last_param_key].return_type) {
-						fn_sym.children[last_param_key].return_type.add_child(mut fn_sym) or { eprintln(err) }
+						fn_sym.children[last_param_key].return_type.add_child(mut fn_sym) or { 
+							// eprintln(err) 
+						}
 					}
 					unsafe {
 						last_param_key.free()
@@ -606,7 +627,9 @@ pub fn (mut an Analyzer) top_level_statement() {
 					keys.free()
 				}
 			} else {
-				an.store.register_symbol(fn_sym) or { eprintln(err) }
+				an.store.register_symbol(fn_sym) or { 
+					// eprintln(err) 
+				}
 			}
 
 			// scan params

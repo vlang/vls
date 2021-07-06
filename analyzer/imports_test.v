@@ -61,5 +61,79 @@ fn test_import_modules() ? {
 	store.set_active_file_path(file_path)
 	store.import_modules(tree, sample_content_bytes, test_lookup_paths)
 
-	assert store.dependency_tree.get_nodes().len == 2
+	assert store.imports[store.cur_dir].len == 2
+	assert store.imports[store.cur_dir][0].module_name == 'os'
+	assert store.imports[store.cur_dir][0].resolved == true
+	assert store.imports[store.cur_dir][0].imported == true
+	assert store.imports[store.cur_dir][1].module_name == 'env'
+	assert store.imports[store.cur_dir][1].resolved == false
+	assert store.dependency_tree.get_nodes().len == 3
+}
+
+fn test_import_modules_with_edits() ? {
+	mut parser := tree_sitter.new_parser()
+	parser.set_language(v.language)
+	sample_content2 := '
+	import os
+	'
+
+	mut tree := parser.parse_string(sample_content2)
+	mut store := Store{}
+	store.set_active_file_path(file_path)
+	store.import_modules(tree, sample_content2.bytes(), test_lookup_paths)
+	store.cleanup_imports()
+
+	assert store.imports[store.cur_dir].len == 1
+	assert store.imports[store.cur_dir][0].module_name == 'os'
+	assert store.imports[store.cur_dir][0].resolved == true
+	assert store.imports[store.cur_dir][0].imported == true
+	assert store.dependency_tree.get_nodes().len == 3
+	assert store.dependency_tree.has(os.join_path(vexe_path, 'vlib', 'os')) == true
+
+	new_content := '
+	import osx
+	'
+
+	// conform the tree to the new content
+	tree.edit({
+		start_byte: u32(10),
+		old_end_byte: u32(10),
+		new_end_byte: u32(11),
+		start_point: C.TSPoint{u32(1), u32(8)},
+		old_end_point: C.TSPoint{u32(1), u32(8)},
+		new_end_point: C.TSPoint{u32(1), u32(9)}
+	})
+
+	new_tree := parser.parse_string_with_old_tree(new_content, tree)
+	store.import_modules(new_tree, new_content.bytes(), test_lookup_paths)
+	store.cleanup_imports()
+
+	assert store.imports[store.cur_dir].len == 0
+	assert store.dependency_tree.get_nodes().len == 1
+	assert store.dependency_tree.has(os.join_path(vexe_path, 'vlib', 'os')) == false
+
+	// go back to old
+	new_tree.edit({
+		start_byte: u32(10),
+		old_end_byte: u32(10),
+		new_end_byte: u32(10),
+		start_point: C.TSPoint{u32(1), u32(8)},
+		old_end_point: C.TSPoint{u32(1), u32(9)},
+		new_end_point: C.TSPoint{u32(1), u32(8)}
+	})
+
+	new_new_tree := parser.parse_string_with_old_tree(sample_content2, new_tree)
+	store.import_modules(new_new_tree, sample_content2.bytes(), test_lookup_paths)
+	store.cleanup_imports()
+	
+	assert store.imports[store.cur_dir].len == 1
+	assert store.imports[store.cur_dir][0].module_name == 'os'
+	assert store.imports[store.cur_dir][0].path.len != 0
+	assert store.imports[store.cur_dir][0].resolved == true
+	assert store.imports[store.cur_dir][0].imported == true
+	assert store.dependency_tree.get_nodes().len == 3
+	// for name, _ in store.dependency_tree.get_nodes() {
+	// 	eprintln('Checking: $name')
+	// 	assert (name in store.imports) == true
+	// }
 }
