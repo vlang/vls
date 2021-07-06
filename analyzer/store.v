@@ -5,14 +5,44 @@ import depgraph
 
 pub struct Store {
 pub mut:
+	// The current file used
+	// e.g. /dir/foo.v
 	cur_file_path string
-	cur_dir string
-	cur_file_name string
-	imports map[string][]Import
+
+	// The current directory of the file used
+	// e.g. /dir
+	cur_dir string 
+
+	// The file name of the current file
+	// e.g. foo.v
+	cur_file_name string 
+
+	// List of imports per directory
+	// map goes: map[<full dir path>][]Import
+	imports map[string][]Import 
+
+	// Hack-free way for auto-injected dependencies
+	// to get referenced. This uses module name instead of
+	// full path since the most common autoinjected modules
+	// are on the vlib path.
+	// map goes: map[<module name>]<aliased path>
+	import_aliases map[string]string 
+
+	// Dependency tree. Used for tracking dependencies
+	// as basis for removing symbols/scopes/imports
+	// tree goes: tree[<full dir path>][]<full dir path>
 	dependency_tree depgraph.Tree
-	messages []Message
-	symbols map[string]map[string]&Symbol
-	opened_scopes map[string]&ScopeTree
+
+	// Used for diagnostics
+	messages []Message 
+
+	// Symbol table
+	// map goes: map[<full dir path>]map[<symbol name>]&Symbol
+	symbols map[string]map[string]&Symbol 
+
+	// Scope data for different opened files
+	// map goes: map[<full file path>]&ScopeTree
+	opened_scopes map[string]&ScopeTree 
 }
 
 pub fn (mut ss Store) clear_messages() {
