@@ -170,6 +170,10 @@ fn (mut ls Vls) did_close(_ int, params string) {
 	}
 
 	ls.store.delete(uri.dir_path())
+
+	unsafe { ls.store.opened_scopes[uri.path()].free() }
+	ls.store.opened_scopes.delete(uri.path())
+
 	// NB: The diagnostics will be cleared if:
 	// - TODO: If a workspace has opened multiple programs with main() function and one of them is closed.
 	// - If a file opened is outside the root path or workspace.
