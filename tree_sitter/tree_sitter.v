@@ -377,10 +377,22 @@ pub struct C.TSPoint {
 	column u32
 }
 
+pub fn (left_point C.TSPoint) eq(right_point C.TSPoint) bool {
+	return left_point.row == right_point.row && left_point.column == right_point.column
+}
+
 [typedef]
 pub struct C.TSRange {
 	start_point C.TSPoint
 	end_point   C.TSPoint
 	start_byte u32
 	end_byte u32
+}
+
+// change this later if V allows operator overloading on binded types
+pub fn (left_range C.TSRange) eq(right_range C.TSRange) bool {
+	return left_range.start_point.eq(right_range.start_point)
+		&& left_range.end_point.eq(right_range.end_point)
+		&& left_range.start_byte == right_range.start_byte
+		&& left_range.end_byte == right_range.end_byte
 }

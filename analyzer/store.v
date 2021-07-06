@@ -1,15 +1,63 @@
 module analyzer
 
 import os
+import depgraph
 
 pub struct Store {
 pub mut:
+	// The current file used
+	// e.g. /dir/foo.v
 	cur_file_path string
-	imports map[string][]Import
-	imported_paths []string
-	messages []Message
-	symbols map[string]map[string]&Symbol
-	opened_scopes map[string]&ScopeTree
+
+	// The current directory of the file used
+	// e.g. /dir
+	cur_dir string 
+
+	// The file name of the current file
+	// e.g. foo.v
+	cur_file_name string 
+
+	// List of imports per directory
+	// map goes: map[<full dir path>][]Import
+	imports map[string][]Import 
+
+	// Hack-free way for auto-injected dependencies
+	// to get referenced. This uses module name instead of
+	// full path since the most common autoinjected modules
+	// are on the vlib path.
+	// map goes: map[<module name>]<aliased path>
+	auto_imports map[string]string 
+
+	// Dependency tree. Used for tracking dependencies
+	// as basis for removing symbols/scopes/imports
+	// tree goes: tree[<full dir path>][]<full dir path>
+	dependency_tree depgraph.Tree
+
+	// Used for diagnostics
+	messages []Message 
+
+	// Symbol table
+	// map goes: map[<full dir path>]map[<symbol name>]&Symbol
+	symbols map[string]map[string]&Symbol 
+
+	// Scope data for different opened files
+	// map goes: map[<full file path>]&ScopeTree
+	opened_scopes map[string]&ScopeTree 
+}
+
+pub fn (mut ss Store) clear_messages() {
+	for i := 0; ss.messages.len != 0; {
+		msg := ss.messages[i]
+		unsafe {
+			msg.content.free()
+		}
+
+		ss.messages.delete(i)
+	}
+}
+
+pub fn (mut ss Store) report(msg Message) {
+	ss.messages << msg
 }
 
 pub fn (ss &Store) is_file_active(file_path string) bool {
@@ -21,22 +69,26 @@ pub fn (mut ss Store) set_active_file_path(file_path string) {
 		return
 	}
 
-	unsafe { ss.cur_file_path.free() }
+	unsafe { 
+		ss.cur_file_path.free()
+		ss.cur_dir.free()
+		ss.cur_file_name.free() 
+	}
 	ss.cur_file_path = file_path
+	ss.cur_dir = os.dir(file_path)
+	ss.cur_file_name = os.base(file_path)
 }
 
 pub fn (mut ss Store) get_module_path(module_name string) string {
-	dir := os.dir(ss.cur_file_path)
-	import_lists := ss.imports[dir]
+	import_lists := ss.imports[ss.cur_dir]
 	for imp in import_lists {
 		if imp.module_name == module_name || module_name in imp.aliases {
-			unsafe { dir.free() } 
 			return imp.path
 		}
 	}
 
 	// empty names should return the dir instead
-	return dir
+	return ss.cur_dir
 }
 
 pub fn (mut ss Store) find_symbol(module_name string, name string) &Symbol {
@@ -45,19 +97,34 @@ pub fn (mut ss Store) find_symbol(module_name string, name string) &Symbol {
 	}
 
 	module_path := ss.get_module_path(module_name)
-	defer { unsafe { module_path.free() } }
+	// defer { unsafe { module_path.free() } }
 
-	typ := ss.symbols[module_path][name] or {
-		ss.register_symbol(&Symbol{
+	if typ := ss.symbols[module_path][name] {
+		return typ
+	} else if aliased_path := ss.auto_imports[module_name] {
+		typ := ss.symbols[aliased_path][name] or {
+			ss.register_symbol(&Symbol{
+				name: name.clone()
+				file_path: module_path.clone()
+				kind: .placeholder
+			}) or {
+				analyzer.void_type
+			}
+		}
+
+		return typ
+	} else {
+		return ss.register_symbol(&Symbol{
 			name: name.clone()
 			file_path: module_path.clone()
 			kind: .placeholder
-		}) or { 
+		}) or {
 			analyzer.void_type
 		}
 	}
 
-	return typ
+	// This shouldn't happen
+	return analyzer.void_type
 }
 
 pub fn (mut ss Store) register_symbol(info &Symbol) ?&Symbol {
@@ -74,15 +141,13 @@ pub fn (mut ss Store) register_symbol(info &Symbol) ?&Symbol {
 	return info
 }
 
-pub fn (mut ss Store) add_import(imp Import) {
+pub fn (mut ss Store) add_import(imp Import) (&Import, bool) {
+	dir := ss.cur_dir
 	mut idx := -1
-
-	dir := os.dir(ss.cur_file_path)
-	defer { unsafe { dir.free() } }
 	if dir in ss.imports {
 		// check if import has already imported
 		for i, stored_imp in ss.imports[dir] {
-			if stored_imp.module_name == imp.module_name && stored_imp.path == imp.path {
+			if imp.module_name == stored_imp.module_name {
 				idx = i
 				break
 			}
@@ -98,10 +163,11 @@ pub fn (mut ss Store) add_import(imp Import) {
 		}
 		
 		ss.imports[dir] << new_import 
-
-		if imp.path !in ss.imported_paths {
-			ss.imported_paths << new_import.path
-		}
+		last_idx := ss.imports[dir].len - 1
+		return &ss.imports[dir][last_idx], false
+	} else {
+		unsafe { imp.free() }
+		return &ss.imports[dir][idx], true
 	}
 }
 
@@ -119,4 +185,42 @@ pub fn (ss &Store) get_symbols_by_file_path(file_path string) []&Symbol {
 	}
 	
 	return fetched_symbols
+}
+
+pub fn (mut ss Store) delete(dir string, excluded_dir ...string) {
+	mut is_used := ss.dependency_tree.has_dependents(dir, ...excluded_dir)
+	if is_used {
+		return
+	}
+
+	if dep_node := ss.dependency_tree.get_node(dir) {
+		// get all dependencies
+		all_dependencies := dep_node.get_all_dependencies()
+
+		// delete all dependencies if possible
+		for dep in all_dependencies {
+			ss.delete(dep, dir)
+		}
+
+		// delete dir in dependency tree
+		ss.dependency_tree.delete(dir)
+	}
+
+	// delete all imports from unused dir
+	if !is_used {
+		unsafe {
+			// delete symbols and imports
+			// for _, sym in ss.symbols[dir] {
+			// 	sym.free()
+			// }
+
+			ss.symbols[dir].free()
+		}
+
+		ss.symbols.delete(dir)
+		for i := 0; ss.imports[dir].len != 0; {
+			unsafe { ss.imports[dir][i].free() }
+			ss.imports[dir].delete(i)
+		}
+	}
 }

@@ -2,6 +2,7 @@ module analyzer
 
 // it should be imported just to have those C type symbols available
 // import tree_sitter
+// import os
 
 pub enum SymbolKind {
 	function
@@ -19,6 +20,23 @@ pub enum SymbolLanguage {
 	js
 	v
 }
+
+// pub enum Platform {
+// 	auto
+// 	ios
+// 	macos
+// 	linux
+// 	windows
+// 	freebsd
+// 	openbsd
+// 	netbsd
+// 	dragonfly
+// 	js
+// 	android
+// 	solaris
+// 	haiku
+// 	cross
+// }
 
 pub enum SymbolAccess {
 	private
@@ -46,16 +64,6 @@ pub struct AnalyzerError {
 	msg string
 	code int
 	range C.TSRange
-}
-
-struct Import {
-mut:
-	resolved bool
-pub mut:
-	module_name string
-	path string
-	// TODO: find a way to selectively import stuff
-	aliases []string
 }
 
 const void_type = &Symbol{ name: 'void' }
@@ -92,11 +100,25 @@ pub fn (infos []&Symbol) str() string {
 
 pub fn (mut info Symbol) add_child(mut new_child Symbol) ? {
 	if new_child.name in info.children {
-		return error('child exists.')
+		return error('child exists. (name="$new_child.name")')
 	}
 
 	new_child.parent = info
 	info.children[new_child.name] = new_child
+}
+
+[unsafe]
+pub fn (sym &Symbol) free() {
+	unsafe {
+		sym.name.free()
+		
+		for _, v in sym.children {
+			v.free()
+		}
+	
+		sym.children.free()
+		sym.file_path.free()
+	}
 }
 
 pub struct Analyzer {
@@ -105,10 +127,15 @@ pub mut:
 	cursor   C.TSTreeCursor
 	src_text []byte
 	store &Store = &Store(0)
+
+	// skips the local scopes and registers only
+	// the top-level ones regardless of its
+	// visibility
+	is_import bool
 }
 
 pub fn (mut an Analyzer) report(msg Message) {
-	an.store.messages << msg
+	an.store.report(msg)
 }
 
 pub fn (mut an Analyzer) find_symbol_by_node(node C.TSNode) &Symbol {
@@ -153,7 +180,7 @@ pub fn (mut an Analyzer) find_symbol_by_node(node C.TSNode) &Symbol {
 }
 
 pub fn (mut an Analyzer) get_scope(node C.TSNode) &ScopeTree {
-	if !node.is_null() {	
+	if !node.is_null() || !an.is_import {	
 		if node.get_type() == 'source_file' {
 			if an.store.cur_file_path !in an.store.opened_scopes {
 				an.store.opened_scopes[an.store.cur_file_path] = &ScopeTree{
@@ -173,18 +200,18 @@ pub fn (mut an Analyzer) get_scope(node C.TSNode) &ScopeTree {
 			return an.store.opened_scopes[an.store.cur_file_path].children.last()
 		}
 	}
-
 }
 
 fn (mut an Analyzer) move_cursor() bool {
-	if an.current_node().has_error() {
-		an.report({
-			kind: .error
-			range: an.current_node().range()
-			file_path: an.cur_file_path
-			content: if an.current_node().is_missing() { 'Missing node' } else { 'Node error' }
-		})
-	}
+	// NOTE: Do this in the type checking instead.
+	// if an.current_node().has_error() && !an.current_node().is_missing() {
+	// 	an.report({
+	// 		kind: .error
+	// 		range: an.current_node().range()
+	// 		file_path: an.cur_file_path
+	// 		content: 'Node error'
+	// 	})
+	// }
 
 	return an.cursor.next()
 }
@@ -250,13 +277,15 @@ fn (mut an Analyzer) extract_parameter_list(node C.TSNode, mut type_symbol Symbo
 			return_type: an.find_symbol_by_node(param_type_node)
 		}
 
-		type_symbol.add_child(mut param_sym) or { eprintln(err) }
+		type_symbol.add_child(mut param_sym) or { 
+			// eprintln(err) 
+		}
 		scope.register(param_sym)
 	}
 }
 
 pub fn (mut an Analyzer) extract_block(node C.TSNode, mut scope ScopeTree) {
-	if node.get_type() != 'block' {
+	if node.get_type() != 'block' || an.is_import {
 		return
 	}
 	
@@ -361,7 +390,7 @@ pub fn (mut an Analyzer) unwrap_error(err IError) {
 		an.report({ 
 			content: err.msg
 			range: err.range
-			file_path: an.store.cur_file_path 
+			file_path: an.store.cur_file_path.clone()
 		})
 	}
 }
@@ -370,38 +399,13 @@ pub fn (mut an Analyzer) top_level_statement() {
 	mut node_type := an.current_node().get_type()
 	mut access := SymbolAccess.private
 	if node_type == 'source_file' {
-		if an.current_node().is_missing() {
-			an.report({
-				kind: .warning
-				range: an.current_node().range()
-				file_path: an.cur_file_path
-				content: 'Missing node (For testing. please remove this warning in `source_file` node after implementing initial basic check features)'
-			})
-		}
-
 		an.cursor.to_first_child()
 		node_type = an.current_node().get_type()
 	}
 
 	mut global_scope := an.get_scope(an.current_node().parent())
 	match node_type {
-		'import_declaration' {
-			an.cursor.to_first_child()
-			an.next()
-
-			// TODO: make import system working
-			// spec_node := an.cursor.current_node()
-			// println(mod_path.sexpr_str())
-			// mod_path := spec_node.child_by_field_name('path').get_text(an.src_text)
-			// mod_alias := spec_node.child_by_field_name('alias')
-
-			// print(mod_path)
-			// if !mod_alias.is_null() {
-			// 	println(' | alias: ${mod_alias.child_by_field_name('name').get_text(an.src_text)}')
-			// }
-
-			an.cursor.to_parent()
-		}
+		'import_declaration' {}
 		'const_declaration' {
 			const_node := an.current_node()
 			if const_node.child(0).get_type() == 'pub' {
@@ -422,9 +426,9 @@ pub fn (mut an Analyzer) top_level_statement() {
 
 				an.store.register_symbol(const_sym) or {
 					if err is AnalyzerError {
-						eprintln(err.str())
+						// eprintln(err.str())
 					} else {
-						eprintln('Unknown error')
+						// eprintln('Unknown error')
 					}
 				}
 				global_scope.register(const_sym)
@@ -477,7 +481,7 @@ pub fn (mut an Analyzer) top_level_statement() {
 						}
 
 						sym.add_child(mut field_sym) or { 
-							eprintln(err)
+							// eprintln(err)
 						}
 
 						scope.register(field_sym)
@@ -489,7 +493,7 @@ pub fn (mut an Analyzer) top_level_statement() {
 			}
 
 			an.store.register_symbol(sym) or { 
-				eprintln(err) 
+				// eprintln(err) 
 			}
 		}
 		'interface_declaration' {
@@ -531,14 +535,16 @@ pub fn (mut an Analyzer) top_level_statement() {
 						}
 
 						sym.add_child(mut field_sym) or { 
-							eprintln(err)
+							// eprintln(err)
 						}
 					}
 					else { continue }
 				}
 			}
 
-			an.store.register_symbol(sym) or { eprintln(err) }
+			an.store.register_symbol(sym) or { 
+				// eprintln(err)
+			}
 		}
 		'enum_declaration' {
 			enum_decl_node := an.current_node()
@@ -580,7 +586,7 @@ pub fn (mut an Analyzer) top_level_statement() {
 			}
 
 			an.store.register_symbol(sym) or { 
-				an.unwrap_error(err)
+				// an.unwrap_error(err)
 				return
 			}
 		}
@@ -609,7 +615,9 @@ pub fn (mut an Analyzer) top_level_statement() {
 				if keys.len != 0 {
 					last_param_key := keys.last()
 					if !isnil(fn_sym.children[last_param_key].return_type) {
-						fn_sym.children[last_param_key].return_type.add_child(mut fn_sym) or { eprintln(err) }
+						fn_sym.children[last_param_key].return_type.add_child(mut fn_sym) or { 
+							// eprintln(err) 
+						}
 					}
 					unsafe {
 						last_param_key.free()
@@ -619,7 +627,9 @@ pub fn (mut an Analyzer) top_level_statement() {
 					keys.free()
 				}
 			} else {
-				an.store.register_symbol(fn_sym) or { eprintln(err) }
+				an.store.register_symbol(fn_sym) or { 
+					// eprintln(err) 
+				}
 			}
 
 			// scan params
@@ -643,6 +653,7 @@ pub fn (mut an Analyzer) analyze(root_node C.TSNode, src_text []byte, mut store 
 	for _ in 0 .. child_len {
 		an.top_level_statement()
 	}
+	unsafe { an.cursor.free() }
 }
 
 pub fn analyze(tree &C.TSTree, src_text []byte, mut store Store) {

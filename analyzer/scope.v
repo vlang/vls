@@ -9,6 +9,19 @@ mut:
 	children []&ScopeTree
 }
 
+[unsafe]
+pub fn (scope &ScopeTree) free() {
+	unsafe {
+		// for _, s in scope.symbols {
+		// 	s.free()
+		// }
+
+		for c in scope.children {
+			c.free()
+		}
+	}
+}
+
 pub fn (scope &ScopeTree) contains(pos u32) bool {
 	return pos >= scope.start_byte && pos <= scope.end_byte
 }

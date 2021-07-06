@@ -72,7 +72,7 @@ fn (mut ls Vls) initialize(id int, params string) {
 	ls.setup_logger(initialize_params.trace, initialize_params.client_info)
 
 	// since builtin is used frequently, they should be parsed first and only once
-	// ls.process_builtin()
+	ls.process_builtin()
 	ls.send(result)
 }
 
@@ -100,60 +100,18 @@ fn (mut ls Vls) setup_logger(trace string, client_info lsp.ClientInfo) {
 }
 
 [manualfree]
-// fn (mut ls Vls) process_builtin() {
-// 	scope, pref := new_scope_and_pref()
-// 	mut builtin_files := os.ls(builtin_path) or {
-// 		ls.panic(err.msg)
-// 		return
-// 	}
-// 	builtin_files = pref.should_compile_filtered_files(builtin_path, builtin_files)
-// 	parsed_files := parser.parse_files(builtin_files, ls.base_table, pref, scope)
-// 	// This part extracts the symbols for the builtin module
-// 	// for use in autocompletion. This is disabled in test mode in
-// 	// order to simplify the testing output in autocompletion test.
-// 	$if !test {
-// 		for file in parsed_files {
-// 			for stmt in file.stmts {
-// 				doc_uri := lsp.document_uri_from_path(file.path)
+fn (mut ls Vls) process_builtin() {
+	lookup_paths := [vlib_path, vmodules_path]
+	mut builtin_import, _ := ls.store.add_import({
+		resolved: true
+		module_name: 'builtin'
+		path: builtin_path
+	})
 
-// 				match stmt {
-// 					ast.FnDecl {
-// 						if !stmt.is_pub || stmt.is_method {
-// 							continue
-// 						}
-// 						ls.builtin_symbols << stmt.name
-// 						ls.builtin_symbol_locations[stmt.name] = lsp.Location{
-// 							uri: doc_uri
-// 							range: position_to_lsp_range(stmt.pos)
-// 						}
-// 					}
-// 					ast.StructDecl {
-// 						if stmt.language != .v {
-// 							continue
-// 						}
-
-// 						ls.builtin_symbol_locations[stmt.name] = lsp.Location{
-// 							uri: doc_uri
-// 							range: position_to_lsp_range(stmt.pos)
-// 						}
-
-// 						for field in stmt.fields {
-// 							ls.builtin_symbol_locations['${stmt.name}.$field.name'] = lsp.Location{
-// 								uri: doc_uri
-// 								range: position_to_lsp_range(field.pos)
-// 							}
-// 						}
-// 					}
-// 					else {}
-// 				}
-// 			}
-// 		}
-// 	}
-// 	unsafe {
-// 		builtin_files.free()
-// 		parsed_files.free()
-// 	}
-// }
+	mut imports := [builtin_import]
+	ls.store.import_modules(mut imports, lookup_paths)
+	ls.store.register_auto_import(builtin_import, '')
+}
 
 // shutdown sets the state to shutdown but does not exit
 fn (mut ls Vls) shutdown(id int) {

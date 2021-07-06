@@ -12,6 +12,10 @@ pub fn (du DocumentUri) path() string {
 	return if du.starts_with('file://') { du.all_after('file://') } else { '' }
 }
 
+pub fn (du DocumentUri) dir_path() string {
+	return os.dir(du.path())
+}
+
 pub fn document_uri_from_path(path string) DocumentUri {
 	return if !path.starts_with('file://') { 'file://' + path } else { path }
 }
