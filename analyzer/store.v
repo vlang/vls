@@ -26,7 +26,7 @@ pub mut:
 	// full path since the most common autoinjected modules
 	// are on the vlib path.
 	// map goes: map[<module name>]<aliased path>
-	import_aliases map[string]string 
+	auto_imports map[string]string 
 
 	// Dependency tree. Used for tracking dependencies
 	// as basis for removing symbols/scopes/imports
@@ -99,17 +99,32 @@ pub fn (mut ss Store) find_symbol(module_name string, name string) &Symbol {
 	module_path := ss.get_module_path(module_name)
 	// defer { unsafe { module_path.free() } }
 
-	typ := ss.symbols[module_path][name] or {
-		ss.register_symbol(&Symbol{
+	if typ := ss.symbols[module_path][name] {
+		return typ
+	} else if aliased_path := ss.auto_imports[module_name] {
+		typ := ss.symbols[aliased_path][name] or {
+			ss.register_symbol(&Symbol{
+				name: name.clone()
+				file_path: module_path.clone()
+				kind: .placeholder
+			}) or {
+				analyzer.void_type
+			}
+		}
+
+		return typ
+	} else {
+		return ss.register_symbol(&Symbol{
 			name: name.clone()
 			file_path: module_path.clone()
 			kind: .placeholder
-		}) or { 
+		}) or {
 			analyzer.void_type
 		}
 	}
 
-	return typ
+	// This shouldn't happen
+	return analyzer.void_type
 }
 
 pub fn (mut ss Store) register_symbol(info &Symbol) ?&Symbol {

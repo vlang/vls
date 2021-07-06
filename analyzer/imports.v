@@ -110,6 +110,10 @@ pub fn (imp &Import) free() {
 	}
 }
 
+pub fn (mut ss Store) register_auto_import(imp Import, to_alias string) {
+	ss.auto_imports[to_alias] = imp.path
+}
+
 pub fn (mut ss Store) find_import_by_position(range C.TSRange) ?&Import {
 	for mut imp in ss.imports[ss.cur_dir] {
 		if ss.cur_file_name in imp.ranges && imp.ranges[ss.cur_file_name].start_point.row == range.start_point.row {
@@ -282,17 +286,22 @@ fn (mut ss Store) scan_imports(tree &C.TSTree, src_text []byte) []&Import {
 	return newly_imported_modules
 }
 
-pub fn (mut store Store) import_modules(tree &C.TSTree, src []byte, lookup_paths []string) {
-	mut parser := tree_sitter.new_parser()
-	parser.set_language(v.language)
-
-	old_active_path := store.cur_file_path.clone()
+pub fn (mut store Store) import_modules_from_tree(tree &C.TSTree, src []byte, lookup_paths []string) {
 	mut imports := store.scan_imports(tree, src)
 	store.inject_paths_of_new_imports(mut imports, lookup_paths)
 	if imports.len == 0 {
 		return
 	}
 
+	store.import_modules(mut imports, lookup_paths)
+}
+
+pub fn (mut store Store) import_modules(mut imports []&Import, lookup_paths []string) {
+	mut parser := tree_sitter.new_parser()
+	parser.set_language(v.language)
+	defer { unsafe { parser.free() } }
+
+	old_active_path := store.cur_file_path.clone()
 	for i, new_import in imports {
 		// skip if import is not resolved or already imported
 		if !new_import.resolved || new_import.imported {
@@ -310,7 +319,7 @@ pub fn (mut store Store) import_modules(tree &C.TSTree, src []byte, lookup_paths
 			content := os.read_bytes(full_path) or { continue }
 			tree_from_import := parser.parse_string(content.bytestr())
 			store.set_active_file_path(full_path)
-			store.import_modules(tree_from_import, content, lookup_paths)
+			store.import_modules_from_tree(tree_from_import, content, lookup_paths)
 			imported++
 
 			mut analyzer := analyzer.Analyzer{ is_import: true }
@@ -329,5 +338,4 @@ pub fn (mut store Store) import_modules(tree &C.TSTree, src []byte, lookup_paths
 		store.set_active_file_path(old_active_path)
 		unsafe { file_paths.free() }
 	}
-	unsafe { parser.free() }
 }

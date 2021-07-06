@@ -24,7 +24,7 @@ fn (mut ls Vls) did_open(_ int, params string) {
 	ls.sources[uri] = src.bytes()
 	ls.trees[uri] = ls.parser.parse_string(src)
 	ls.store.set_active_file_path(uri.path())
-	ls.store.import_modules(ls.trees[uri], ls.sources[uri], [
+	ls.store.import_modules_from_tree(ls.trees[uri], ls.sources[uri], [
 		uri.dir_path(),
 		os.join_path(uri.dir_path(), 'modules'),
 		vlib_path,
@@ -35,8 +35,8 @@ fn (mut ls Vls) did_open(_ int, params string) {
 	ls.store.cleanup_imports()
 
 	ls.show_diagnostics(uri)
-	ls.log_message(ls.store.imports.str(), .info)
-	ls.log_message(ls.store.dependency_tree.str(), .info)
+	// ls.log_message(ls.store.imports.str(), .info)
+	// ls.log_message(ls.store.dependency_tree.str(), .info)
 }
 
 [manualfree]
@@ -129,7 +129,7 @@ fn (mut ls Vls) did_change(_ int, params string) {
 	]
 
 	ls.store.clear_messages()
-	ls.store.import_modules(new_tree, new_src, lookup_paths)
+	ls.store.import_modules_from_tree(new_tree, new_src, lookup_paths)
 	
 	for i := 0; lookup_paths.len != 0; {
 		unsafe { lookup_paths[i].free() }
@@ -152,8 +152,8 @@ fn (mut ls Vls) did_change(_ int, params string) {
 	ls.sources[uri] = new_src
 
 	ls.show_diagnostics(uri)
-	ls.log_message(ls.store.imports.str(), .info)
-	ls.log_message(ls.store.dependency_tree.str(), .info)
+	// ls.log_message(ls.store.imports.str(), .info)
+	// ls.log_message(ls.store.dependency_tree.str(), .info)
 }
 
 [manualfree]
