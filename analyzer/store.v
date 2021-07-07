@@ -224,3 +224,28 @@ pub fn (mut ss Store) delete(dir string, excluded_dir ...string) {
 		}
 	}
 }
+
+pub fn (mut ss Store) get_scope_from_node(node C.TSNode) ?&ScopeTree {
+	if !node.is_null() {	
+		return error('unable to create scope')
+	}
+
+	if node.get_type() == 'source_file' {
+		if ss.cur_file_path !in ss.opened_scopes {
+			ss.opened_scopes[ss.cur_file_path] = &ScopeTree{
+				start_byte: node.start_byte()
+				end_byte: node.end_byte()
+			}
+		}
+
+		return ss.opened_scopes[ss.cur_file_path]
+	} else {
+		ss.opened_scopes[ss.cur_file_path].children << &ScopeTree{
+			start_byte: node.start_byte()
+			end_byte: node.end_byte()
+			parent: ss.opened_scopes[ss.cur_file_path]
+		}
+
+		return ss.opened_scopes[ss.cur_file_path].children.last()
+	}
+}

@@ -31,7 +31,7 @@ fn (mut ls Vls) did_open(_ int, params string) {
 		vmodules_path
 	])
 
-	analyzer.analyze(ls.trees[uri], ls.sources[uri], mut ls.store)
+	ls.store.analyze(ls.trees[uri], ls.sources[uri])
 	ls.store.cleanup_imports()
 
 	ls.show_diagnostics(uri)
@@ -143,7 +143,7 @@ fn (mut ls Vls) did_change(_ int, params string) {
 
 	// TODO: incremental approach to analyzing (analyze only the parts that changed)
 	// using `ts_tree_get_changed_ranges`. Sadly, it hangs at this moment.
-	analyzer.analyze(ls.trees[uri], ls.sources[uri], mut ls.store)
+	ls.store.analyze(ls.trees[uri], ls.sources[uri])
 	ls.store.cleanup_imports()
 
 	unsafe { 

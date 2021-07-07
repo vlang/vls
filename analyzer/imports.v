@@ -322,8 +322,8 @@ pub fn (mut store Store) import_modules(mut imports []&Import, lookup_paths []st
 			store.import_modules_from_tree(tree_from_import, content, lookup_paths)
 			imported++
 
-			mut analyzer := analyzer.Analyzer{ is_import: true }
-			analyzer.analyze(tree_from_import.root_node(), content, mut store)
+			mut an := analyzer.Analyzer{ is_import: true }
+			an.analyze(tree_from_import.root_node(), content, mut store)
 
 			unsafe {
 				content.free()
