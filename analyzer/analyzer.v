@@ -180,7 +180,7 @@ pub fn (mut an Analyzer) find_symbol_by_node(node C.TSNode) &Symbol {
 }
 
 pub fn (mut an Analyzer) get_scope(node C.TSNode) &ScopeTree {
-	if !node.is_null() || !an.is_import {	
+	if !node.is_null() && !an.is_import {	
 		if node.get_type() == 'source_file' {
 			if an.store.cur_file_path !in an.store.opened_scopes {
 				an.store.opened_scopes[an.store.cur_file_path] = &ScopeTree{
@@ -513,6 +513,10 @@ pub fn (mut an Analyzer) top_level_statement() {
 
 			for i in 0 .. fields_len {
 				field_node := fields_list_node.named_child(i)
+				if field_node.is_null() {
+					continue
+				}
+
 				match field_node.get_type() {
 					'interface_field_scope' {
 						// TODO: add if mut: check
