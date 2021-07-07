@@ -128,7 +128,7 @@ pub fn (mut ss Store) find_import_by_position(range C.TSRange) ?&Import {
 fn (mut ss Store) inject_paths_of_new_imports(mut new_imports []&Import, lookup_paths []string) {
 	mut project := ss.dependency_tree.get_node(ss.cur_dir) or {
 		// TODO: inject builtin directly
-		ss.dependency_tree.add({ id: ss.cur_dir })
+		ss.dependency_tree.add(ss.cur_dir)
 	}
 
 	for i, new_import in new_imports {
@@ -178,7 +178,7 @@ fn (mut ss Store) inject_paths_of_new_imports(mut new_imports []&Import, lookup_
 			}
 
 			new_imports[i].set_path(mod_dir)
-			ss.dependency_tree.add({ id: mod_dir })
+			ss.dependency_tree.add(mod_dir)
 			break
 		}
 

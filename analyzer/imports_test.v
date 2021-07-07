@@ -67,7 +67,7 @@ fn test_import_modules_from_tree() ? {
 	assert store.imports[store.cur_dir][0].imported == true
 	assert store.imports[store.cur_dir][1].module_name == 'env'
 	assert store.imports[store.cur_dir][1].resolved == false
-	assert store.dependency_tree.get_nodes().len == 3
+	assert store.dependency_tree.size() == 3
 }
 
 fn test_import_modules_with_edits() ? {
@@ -87,7 +87,7 @@ fn test_import_modules_with_edits() ? {
 	assert store.imports[store.cur_dir][0].module_name == 'os'
 	assert store.imports[store.cur_dir][0].resolved == true
 	assert store.imports[store.cur_dir][0].imported == true
-	assert store.dependency_tree.get_nodes().len == 3
+	assert store.dependency_tree.size() == 3
 	assert store.dependency_tree.has(os.join_path(vexe_path, 'vlib', 'os')) == true
 
 	new_content := '
@@ -109,7 +109,7 @@ fn test_import_modules_with_edits() ? {
 	store.cleanup_imports()
 
 	assert store.imports[store.cur_dir].len == 0
-	assert store.dependency_tree.get_nodes().len == 1
+	assert store.dependency_tree.size() == 1
 	assert store.dependency_tree.has(os.join_path(vexe_path, 'vlib', 'os')) == false
 
 	// go back to old
@@ -131,7 +131,7 @@ fn test_import_modules_with_edits() ? {
 	assert store.imports[store.cur_dir][0].path.len != 0
 	assert store.imports[store.cur_dir][0].resolved == true
 	assert store.imports[store.cur_dir][0].imported == true
-	assert store.dependency_tree.get_nodes().len == 3
+	assert store.dependency_tree.size() == 3
 	// for name, _ in store.dependency_tree.get_nodes() {
 	// 	eprintln('Checking: $name')
 	// 	assert (name in store.imports) == true

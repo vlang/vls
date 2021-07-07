@@ -4,22 +4,61 @@ module depgraph
 // Transpiled to ES6 for readability using Lebab: https://lebab.unibtc.me/editor
 // Credits to: https://github.com/Fordi
 
+[heap]
 pub struct Tree {
 mut:
-	nodes map[string]&Node
+	len int
+	keys []string
+	values []&Node
 }
 
 pub fn (tree &Tree) str() string {
-	return tree.nodes.str()
+	return tree.values.str()
 }
 
 pub fn (tree &Tree) has(id string) bool {
-	return id in tree.nodes
+	return id in tree.keys
+}
+
+pub fn (mut tree Tree) add(id string, dependencies ...string) &Node {
+	new_id := id.clone()
+	tree.keys << new_id
+	tree.values << &Node{ tree, new_id, dependencies }
+	defer { tree.len++ }
+	return tree.values[tree.values.len - 1]
+}
+
+pub fn (mut tree Tree) delete(id string) {
+	idx := tree.keys.index(id)
+	if idx == -1 {
+		return
+	}
+
+	unsafe {
+		tree.keys[idx].free()
+		tree.values[idx].free()
+		tree.keys.delete(idx)
+		tree.values.delete(idx)
+	}
+	
+	tree.len--
+}
+
+pub fn (tree &Tree) get_node(id string) ?&Node {
+	idx := tree.keys.index(id)
+	if idx == -1 {
+		return error('Node not found')
+	}
+	return tree.values[idx] ?
+}
+
+pub fn (tree &Tree) size() int {
+	return tree.len
 }
 
 pub fn (tree &Tree) has_dependents(id string, excluded ...string) bool {
-	for _, node in tree.nodes {
-		if id !in excluded && id in node.dependencies {
+	for node in tree.values {
+		if (excluded.len != 0 && node.id !in excluded) && id in node.dependencies {
 			return true
 		}
 	}
@@ -27,45 +66,12 @@ pub fn (tree &Tree) has_dependents(id string, excluded ...string) bool {
 	return false
 }
 
-pub fn (mut tree Tree) delete(nid string) {
-	mut node := tree.nodes[nid] or { return }
-	for i := 0; node.dependencies.len != 0; {
-		unsafe { node.dependencies[i].free() }
-		node.dependencies.delete(i)
-	}
-
-	unsafe {
-		node.dependencies.free()
-		node.id.free()
-	}
-
-	tree.nodes.delete(nid)
-}
-
-pub fn (mut tree Tree) add(node Node) &Node {
-	tree.nodes[node.id] = &Node{
-		id: node.id.clone()
-		dependencies: node.dependencies.clone()
-		tree: unsafe { tree }
-	} 
-
-	return tree.nodes[node.id]
-}
-
-pub fn (tree &Tree) get_node(id string) ?&Node {
-	return tree.nodes[id] ?
-}
-
-pub fn (tree &Tree) get_nodes() map[string]&Node {
-	return tree.nodes
-}
-
 pub fn (tree &Tree) get_available_nodes(completed ...string) []string {
 	mut ret := []string{}
-	for node_id, node in tree.nodes {
+	for node in tree.values {
 		deps := node.get_all_dependencies(...completed)
-		if deps.len == 0 && node_id !in completed {
-			ret << node_id
+		if deps.len == 0 && node.id !in completed {
+			ret << node.id
 		}
 	}
 
@@ -101,21 +107,28 @@ pub fn (mut node Node) remove_dependency(dep_path string) int {
 }
 
 pub fn (node &Node) get_all_dependencies(completed ...string) []string {
-	mut ret := node.dependencies.clone()
+	mut ret := []string{}
+	for d in node.dependencies {
+		if completed.len == 0 || d !in completed {
+			ret << d
+		}
+	}
 
 	for d in node.dependencies {
-		sub_node := node.tree.get_node(d) or {
+		dep_node := node.tree.get_node(d) or {
 			// eprintln('Node ${d}, referenced as a dependency of ${node.id} does not exist in the tree.')
 			// return error
 			continue
 		}
 
-		other_deps := sub_node.get_all_dependencies()
+		other_deps := dep_node.get_all_dependencies()
 		for other_dep in other_deps {
-			if other_dep !in ret {
-				// push if other_dep is not present in ret
-				ret << other_dep
+			if other_dep in ret || other_dep in completed {
+				continue
 			}
+			
+			// push if other_dep is not present in ret
+			ret << other_dep
 		}
 
 		unsafe { other_deps.free() }
@@ -149,4 +162,16 @@ pub fn (node &Node) get_next_nodes(completed ...string) []string {
 
 	unsafe { available_and_required.free() }
 	return ret
+}
+
+[unsafe]
+pub fn (node &Node) free() {
+	unsafe {
+		// assume id has been freed
+		// since they share the same address
+		for i := 0; node.dependencies.len != 0; {
+			node.dependencies[i].free()
+			node.dependencies.delete(i)
+		}
+	}
 }
