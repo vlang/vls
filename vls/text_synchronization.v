@@ -35,8 +35,11 @@ fn (mut ls Vls) did_open(_ int, params string) {
 	ls.store.cleanup_imports()
 
 	ls.show_diagnostics(uri)
-	// ls.log_message(ls.store.imports.str(), .info)
-	// ls.log_message(ls.store.dependency_tree.str(), .info)
+
+	$if !test {
+		ls.log_message(ls.store.imports.str(), .info)
+		ls.log_message(ls.store.dependency_tree.str(), .info)
+	}
 }
 
 [manualfree]
@@ -152,8 +155,11 @@ fn (mut ls Vls) did_change(_ int, params string) {
 	ls.sources[uri] = new_src
 
 	ls.show_diagnostics(uri)
-	// ls.log_message(ls.store.imports.str(), .info)
-	// ls.log_message(ls.store.dependency_tree.str(), .info)
+
+	$if !test {
+		ls.log_message(ls.store.imports.str(), .info)
+		ls.log_message(ls.store.dependency_tree.str(), .info)
+	}
 }
 
 [manualfree]
@@ -171,7 +177,7 @@ fn (mut ls Vls) did_close(_ int, params string) {
 
 	ls.store.delete(uri.dir_path())
 
-	unsafe { ls.store.opened_scopes[uri.path()].free() }
+	// unsafe { ls.store.opened_scopes[uri.path()].free() }
 	ls.store.opened_scopes.delete(uri.path())
 
 	// NB: The diagnostics will be cleared if:

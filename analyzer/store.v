@@ -188,7 +188,7 @@ pub fn (ss &Store) get_symbols_by_file_path(file_path string) []&Symbol {
 }
 
 pub fn (mut ss Store) delete(dir string, excluded_dir ...string) {
-	mut is_used := ss.dependency_tree.has_dependents(dir, ...excluded_dir)
+	is_used := ss.dependency_tree.has_dependents(dir, ...excluded_dir)
 	if is_used {
 		return
 	}
