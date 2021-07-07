@@ -115,6 +115,9 @@ pub fn new(io ReceiveSender) Vls {
 		parser: parser
 		debug: io.debug
 		logger: log.new(.text)
+		store: analyzer.Store {
+			default_import_paths: [vlib_path, vmodules_path]
+		}
 	}
 }
 

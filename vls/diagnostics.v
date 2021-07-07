@@ -5,9 +5,16 @@ import lsp
 
 // show_diagnostics converts the file ast's errors and warnings and publishes them to the editor
 fn (mut ls Vls) show_diagnostics(uri lsp.DocumentUri) {
+	// TODO: make reports as a map, do not clear it
+	// use 
 	mut diagnostics := []lsp.Diagnostic{}
+	fs_path := uri.path()
 
 	for msg in ls.store.messages {
+		if msg.file_path != fs_path {
+			continue
+		}
+
 		kind := match msg.kind {
 			.error { lsp.DiagnosticSeverity.error }
 			.warning { lsp.DiagnosticSeverity.warning }
