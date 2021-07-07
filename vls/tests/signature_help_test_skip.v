@@ -37,7 +37,7 @@ fn test_signature_help() {
 	}))
 	test_files := testing.load_test_file_paths('signature_help') or {
 		io.bench.fail()
-		eprintln(io.bench.step_message_fail(err))
+		eprintln(io.bench.step_message_fail(err.msg))
 		assert false
 		return
 	}
