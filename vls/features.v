@@ -207,14 +207,7 @@ fn (mut ls Vls) signature_help(id int, params string) {
 	// Build the message to report.
 	// TODO: Add more than variables once the analyzer reports them, which it
 	// does not seem to be the case right now. 
-	title := match symbol.kind {
-		.variable {
-			'${symbol.name}: ${symbol.return_type.name}' 
-		}
-		else {
-			'${symbol.name}'
-		}
-	}
+	title := symbol.str()
 	access := match symbol.access {
 		.private {
 			"Private"

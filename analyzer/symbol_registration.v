@@ -291,7 +291,7 @@ fn (mut sr SymbolRegistration) fn_decl(fn_node C.TSNode) ?&Symbol {
 		mut children := sr.extract_parameter_list(receiver_node)
 		// just use a loop for convinience
 		for i := 0; children.len != 0; {
-			if !isnil(children[i].return_type) {
+			if !isnil(children[i].return_type) && children[i].return_type is Symbol {
 				children[i].return_type.add_child(mut fn_sym) ?
 			}
 			children.delete(i)
