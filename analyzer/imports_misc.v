@@ -109,3 +109,42 @@ fn should_analyze_file(file_name string) bool {
 	// 	}
 	return true
 }
+
+struct ImportPathIterator {
+	start_path string
+	lookup_paths []string
+	fallback_lookup_paths []string
+mut:
+	idx int
+	in_start bool = true
+	in_fallback bool
+}
+
+fn (mut iter ImportPathIterator) next() ?string {
+	if iter.in_start {
+		defer { iter.in_start = false }
+		return iter.start_path
+	}
+	
+	if !iter.in_fallback && iter.idx >= iter.lookup_paths.len {
+		iter.in_fallback = true
+		iter.idx = 0
+	}
+	
+	if iter.in_fallback && iter.idx >= iter.fallback_lookup_paths.len {
+		return error('reached limit')
+	}
+
+	defer { iter.idx++ }
+	return if !iter.in_fallback {
+		iter.lookup_paths[iter.idx]
+	} else {
+		iter.fallback_lookup_paths[iter.idx]
+	}
+}
+
+fn (mut iter ImportPathIterator) reset() {
+	iter.idx = 0
+	iter.in_fallback = false
+	iter.in_start = true
+}

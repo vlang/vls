@@ -27,7 +27,8 @@ git clone https://github.com/nedpals/tree-sitter-v ~/.vmodules/tree_sitter_v
 git clone https://github.com/vlang/vls.git --branch use-tree-sitter vls && cd vls/
 
 ## Build the project
-v cmd/vls
+## NOTE: `-gc boehm` flag is very important or it may cause leaks! 
+v -gc boehm cmd/vls
 # The binary will be created in the subfolder `cmd/vls` by default.
 ```
 

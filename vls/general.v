@@ -101,7 +101,6 @@ fn (mut ls Vls) setup_logger(trace string, client_info lsp.ClientInfo) {
 
 [manualfree]
 fn (mut ls Vls) process_builtin() {
-	lookup_paths := [vlib_path, vmodules_path]
 	mut builtin_import, _ := ls.store.add_import({
 		resolved: true
 		module_name: 'builtin'
@@ -109,7 +108,7 @@ fn (mut ls Vls) process_builtin() {
 	})
 
 	mut imports := [builtin_import]
-	ls.store.import_modules(mut imports, lookup_paths)
+	ls.store.import_modules(mut imports)
 	ls.store.register_auto_import(builtin_import, '')
 }
 

@@ -45,9 +45,7 @@ fn test_inject_paths_of_new_imports() ? {
 	assert imports[0].module_name == 'os'
 	assert imports[1].module_name == 'env'
 
-	store.inject_paths_of_new_imports(mut imports, [
-		os.join_path(vexe_path, 'vlib')
-	])
+	store.inject_paths_of_new_imports(mut imports, os.join_path(vexe_path, 'vlib'))
 
 	assert imports[0].resolved == true
 	assert imports[0].path == os.join_path(vexe_path, 'vlib', 'os')
@@ -56,10 +54,12 @@ fn test_inject_paths_of_new_imports() ? {
 
 fn test_import_modules_from_tree() ? {
 	tree := parse_content()
-	mut store := Store{}
+	mut store := Store{
+		default_import_paths: test_lookup_paths
+	}
 
 	store.set_active_file_path(file_path)
-	store.import_modules_from_tree(tree, sample_content_bytes, test_lookup_paths)
+	store.import_modules_from_tree(tree, sample_content_bytes)
 
 	assert store.imports[store.cur_dir].len == 2
 	assert store.imports[store.cur_dir][0].module_name == 'os'
@@ -78,9 +78,11 @@ fn test_import_modules_with_edits() ? {
 	'
 
 	mut tree := parser.parse_string(sample_content2)
-	mut store := Store{}
+	mut store := Store{
+		default_import_paths: test_lookup_paths
+	}
 	store.set_active_file_path(file_path)
-	store.import_modules_from_tree(tree, sample_content2.bytes(), test_lookup_paths)
+	store.import_modules_from_tree(tree, sample_content2.bytes())
 	store.cleanup_imports()
 
 	assert store.imports[store.cur_dir].len == 1
@@ -105,7 +107,7 @@ fn test_import_modules_with_edits() ? {
 	})
 
 	new_tree := parser.parse_string_with_old_tree(new_content, tree)
-	store.import_modules_from_tree(new_tree, new_content.bytes(), test_lookup_paths)
+	store.import_modules_from_tree(new_tree, new_content.bytes())
 	store.cleanup_imports()
 
 	assert store.imports[store.cur_dir].len == 0
@@ -123,7 +125,7 @@ fn test_import_modules_with_edits() ? {
 	})
 
 	new_new_tree := parser.parse_string_with_old_tree(sample_content2, new_tree)
-	store.import_modules_from_tree(new_new_tree, sample_content2.bytes(), test_lookup_paths)
+	store.import_modules_from_tree(new_new_tree, sample_content2.bytes())
 	store.cleanup_imports()
 	
 	assert store.imports[store.cur_dir].len == 1

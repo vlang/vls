@@ -43,6 +43,11 @@ pub mut:
 	// Scope data for different opened files
 	// map goes: map[<full file path>]&ScopeTree
 	opened_scopes map[string]&ScopeTree 
+
+	// paths to be imported aside from the ones
+	// specified from lookup paths specified from
+	// import_modules_from_tree
+	default_import_paths []string
 }
 
 pub fn (mut ss Store) clear_messages() {
