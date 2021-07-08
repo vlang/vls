@@ -2,7 +2,6 @@ module vls
 
 import json
 import lsp
-import analyzer
 import os
 
 const (
@@ -29,7 +28,7 @@ fn (mut ls Vls) did_open(_ int, params string) {
 		ls.root_uri.path()
 	)
 
-	ls.store.analyze(ls.trees[uri], ls.sources[uri])
+	ls.store.register_symbols_from_tree(ls.trees[uri], ls.sources[uri])
 	ls.store.cleanup_imports()
 
 	ls.show_diagnostics(uri)
@@ -144,7 +143,7 @@ fn (mut ls Vls) did_change(_ int, params string) {
 
 	// TODO: incremental approach to analyzing (analyze only the parts that changed)
 	// using `ts_tree_get_changed_ranges`. Sadly, it hangs at this moment.
-	ls.store.analyze(ls.trees[uri], ls.sources[uri])
+	ls.store.register_symbols_from_tree(ls.trees[uri], ls.sources[uri])
 	ls.store.cleanup_imports()
 
 	unsafe { 

@@ -360,8 +360,7 @@ pub fn (mut store Store) import_modules(mut imports []&Import) {
 			)
 			imported++
 
-			mut an := analyzer.Analyzer{ is_import: true }
-			an.analyze(tree_from_import.root_node(), content, mut store)
+			store.register_symbols_from_tree(tree_from_import, content)
 
 			unsafe {
 				// modules_from_dir.free()

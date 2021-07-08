@@ -84,7 +84,7 @@ pub fn (mut ss Store) set_active_file_path(file_path string) {
 	ss.cur_file_name = os.base(file_path)
 }
 
-pub fn (mut ss Store) get_module_path(module_name string) string {
+pub fn (ss &Store) get_module_path(module_name string) string {
 	import_lists := ss.imports[ss.cur_dir]
 	for imp in import_lists {
 		if imp.module_name == module_name || module_name in imp.aliases {
@@ -96,9 +96,9 @@ pub fn (mut ss Store) get_module_path(module_name string) string {
 	return ss.cur_dir
 }
 
-pub fn (mut ss Store) find_symbol(module_name string, name string) &Symbol {
+pub fn (ss &Store) find_symbol(module_name string, name string) ?&Symbol {
 	if name.len == 0 {
-		return analyzer.void_type
+		return none
 	}
 
 	module_path := ss.get_module_path(module_name)
@@ -107,29 +107,12 @@ pub fn (mut ss Store) find_symbol(module_name string, name string) &Symbol {
 	if typ := ss.symbols[module_path][name] {
 		return typ
 	} else if aliased_path := ss.auto_imports[module_name] {
-		typ := ss.symbols[aliased_path][name] or {
-			ss.register_symbol(&Symbol{
-				name: name.clone()
-				file_path: module_path.clone()
-				kind: .placeholder
-			}) or {
-				analyzer.void_type
-			}
-		}
-
+		typ := ss.symbols[aliased_path][name] ?
 		return typ
-	} else {
-		return ss.register_symbol(&Symbol{
-			name: name.clone()
-			file_path: module_path.clone()
-			kind: .placeholder
-		}) or {
-			analyzer.void_type
-		}
-	}
+	} 
 
 	// This shouldn't happen
-	return analyzer.void_type
+	return none
 }
 
 pub fn (mut ss Store) register_symbol(info &Symbol) ?&Symbol {
@@ -231,7 +214,7 @@ pub fn (mut ss Store) delete(dir string, excluded_dir ...string) {
 }
 
 pub fn (mut ss Store) get_scope_from_node(node C.TSNode) ?&ScopeTree {
-	if !node.is_null() {	
+	if node.is_null() {	
 		return error('unable to create scope')
 	}
 
@@ -253,4 +236,65 @@ pub fn (mut ss Store) get_scope_from_node(node C.TSNode) ?&ScopeTree {
 
 		return ss.opened_scopes[ss.cur_file_path].children.last()
 	}
+}
+
+pub fn (store &Store) find_symbol_by_node(node C.TSNode, src_text []byte) &Symbol {
+	if node.is_null() {
+		return analyzer.void_type
+	}
+
+	mut module_name := ''
+	mut symbol_name := ''
+
+	unsafe { symbol_name.free() }
+	match node.get_type() {
+		'qualified_type' {
+			unsafe { module_name.free() }
+			module_name = node.child_by_field_name('module').get_text(src_text)
+			symbol_name = node.child_by_field_name('name').get_text(src_text)
+		}
+		'pointer_type' {
+			symbol_name = node.child(1).get_text(src_text)
+		}
+		// 'array_type', 'fixed_array_type' {
+			
+		// }
+		// 'generic_type' {
+
+		// }
+		// 'map_type' {}
+		// 'channel_type'
+		else {
+			// type_identifier should go here
+			symbol_name = node.get_text(src_text)
+		}
+	}
+	
+	defer { 
+		unsafe {
+			module_name.free()
+			symbol_name.free()
+		}
+	}
+
+	return store.find_symbol(module_name, symbol_name) or { analyzer.void_type }
+}
+
+pub fn (ss &Store) infer_value_type_from_node(node C.TSNode) &Symbol {
+	if node.is_null() {
+		return analyzer.void_type
+	}
+
+	node_type := node.get_type()
+	// TODO
+	mut typ := match node_type {
+		'true', 'false' { 'bool' }
+		'int_literal' { 'int' }
+		'float_literal' { 'f32' }
+		'rune_literal' { 'byte' }
+		'interpreted_string_literal' { 'string' }
+		else { '' }
+	}
+
+	return ss.find_symbol('', typ) or { analyzer.void_type }
 }

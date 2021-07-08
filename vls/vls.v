@@ -186,7 +186,8 @@ pub fn (mut ls Vls) dispatch(payload string) {
 				ls.completion(request.id, request.params)
 			}
 			'textDocument/hover' {
-				ls.hover(request.id, request.params)
+				// ls.hover(request.id, request.params)
+				ls.send_null(request.id)
 			}
 			'textDocument/foldingRange' {
 				ls.folding_range(request.id, request.params)
