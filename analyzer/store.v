@@ -181,10 +181,10 @@ pub fn (ss &Store) get_symbols_by_file_path(file_path string) []&Symbol {
 	defer { unsafe { dir.free() } }
 
 	mut fetched_symbols := []&Symbol{}
-	if syms := ss.symbols[dir] {
-		for _, sym in syms {
+	if dir in ss.symbols {
+		for name, mut sym in ss.symbols[dir] {
 			if sym.file_path == file_path {
-				fetched_symbols << sym
+				fetched_symbols << ss.symbols[dir][name]
 			}
 		}
 	}

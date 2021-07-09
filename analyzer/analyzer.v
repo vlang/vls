@@ -350,6 +350,7 @@ pub fn (an Analyzer) new_top_level_symbol(identifier_node C.TSNode, access Symbo
 
 	mut symbol := Symbol{
 		access: access
+		file_path: an.store.cur_file_path
 	}
 
 	match id_node_type {
