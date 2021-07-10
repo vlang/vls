@@ -30,6 +30,7 @@ fn (sr &SymbolRegistration) new_top_level_symbol(identifier_node C.TSNode, acces
 
 	mut symbol := Symbol{
 		access: access
+		file_path: sr.store.cur_file_path
 	}
 
 	match id_node_type {
