@@ -137,5 +137,9 @@ fn (mut ls Vls) exit() {
 		// }
 		// ls.base_table.free()
 	}
+
+	// Close the IO.
+	ls.io.close()
+
 	exit(int(ls.status != .shutdown))
 }

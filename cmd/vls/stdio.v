@@ -13,6 +13,10 @@ pub mut:
 	debug bool
 }
 
+pub fn (_ Stdio) initialize() {
+	return
+}
+
 pub fn (_ Stdio) send(output string) {
 	print('Content-Length: $output.len\r\n\r\n$output')
 }
@@ -52,4 +56,8 @@ fn get_raw_input() string {
 		buf.write_b(chr)
 	}
 	return buf.str()
+}
+
+pub fn (_ Stdio) close() {
+	return
 }
