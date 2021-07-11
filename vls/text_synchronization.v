@@ -143,7 +143,7 @@ fn (mut ls Vls) did_change(_ int, params string) {
 
 	// TODO: incremental approach to analyzing (analyze only the parts that changed)
 	// using `ts_tree_get_changed_ranges`. Sadly, it hangs at this moment.
-	ls.store.register_symbols_from_tree(ls.trees[uri], ls.sources[uri])
+	ls.store.register_symbols_from_tree(new_tree, new_src)
 	ls.store.cleanup_imports()
 
 	unsafe { 
