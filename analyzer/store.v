@@ -37,8 +37,8 @@ pub mut:
 	messages []Message 
 
 	// Symbol table
-	// map goes: map[<full dir path>]map[<symbol name>]&Symbol
-	symbols map[string]map[string]&Symbol 
+	// map goes: map[<full dir path>]map[]&Symbol
+	symbols map[string][]&Symbol 
 
 	// Scope data for different opened files
 	// map goes: map[<full file path>]&ScopeTree
@@ -102,12 +102,13 @@ pub fn (ss &Store) find_symbol(module_name string, name string) ?&Symbol {
 	}
 
 	module_path := ss.get_module_path(module_name)
-	// defer { unsafe { module_path.free() } }
-
-	if typ := ss.symbols[module_path][name] {
-		return typ
-	} else if aliased_path := ss.auto_imports[module_name] {
-		typ := ss.symbols[aliased_path][name] ?
+	idx := ss.symbols[module_path].index(name)
+	if idx != -1 {
+		return ss.symbols[module_path][idx]
+	}
+	
+	if aliased_path := ss.auto_imports[module_name] {
+		typ := ss.symbols[aliased_path].get(name) ?
 		return typ
 	} 
 
@@ -115,17 +116,32 @@ pub fn (ss &Store) find_symbol(module_name string, name string) ?&Symbol {
 	return none
 }
 
-pub fn (mut ss Store) register_symbol(info &Symbol) ?&Symbol {
+pub fn (mut ss Store) register_symbol(mut info Symbol) ?&Symbol {
 	dir := os.dir(info.file_path)
-	defer {
-		unsafe { dir.free() }
+	defer { unsafe { dir.free() } }
+
+	existing_idx := ss.symbols[dir].index(info.name)
+	// Replace symbol if symbol already exists
+	if existing_idx != -1 {
+		mut existing_sym := ss.symbols[dir][existing_idx]
+		if existing_sym.kind == .chan_ || existing_sym.kind == .array_ || existing_sym.kind == .map_ || existing_sym.kind == .ref {
+			return existing_sym
+		}
+
+		if existing_sym.kind != .placeholder {
+			return report_error('Symbol already exists. (name="${info.name}")', info.range)
+		}
+
+		if existing_sym.children.len != 0 {
+			unsafe { info.children.free() }
+			info.children = existing_sym.children.clone()
+		}
+
+		unsafe { existing_sym.free() }
+		ss.symbols[dir].delete(existing_idx)
 	}
 
-	if info.name in ss.symbols[dir] {
-		return report_error('Symbol already exists. (name="${info.name}")', info.range)
-	}
-
-	ss.symbols[dir][info.name] = info
+	ss.symbols[dir] << info
 	return info
 }
 
@@ -238,38 +254,91 @@ pub fn (mut ss Store) get_scope_from_node(node C.TSNode) ?&ScopeTree {
 	}
 }
 
-pub fn (store &Store) find_symbol_by_node(node C.TSNode, src_text []byte) &Symbol {
+pub fn symbol_name_from_node(node C.TSNode, src_text []byte) (SymbolKind, string, string) {
 	if node.is_null() {
-		return analyzer.void_type
+		return SymbolKind.typedef, '', 'void'
 	}
 
 	mut module_name := ''
 	mut symbol_name := ''
+	unsafe {
+		module_name.free()
+		symbol_name.free()
+	}
 
-	unsafe { symbol_name.free() }
 	match node.get_type() {
 		'qualified_type' {
-			unsafe { module_name.free() }
 			module_name = node.child_by_field_name('module').get_text(src_text)
 			symbol_name = node.child_by_field_name('name').get_text(src_text)
+			return SymbolKind.placeholder, module_name, symbol_name
 		}
 		'pointer_type' {
-			symbol_name = node.child(1).get_text(src_text)
+			_, module_name, symbol_name = symbol_name_from_node(node.named_child(0), src_text)
+			return SymbolKind.ref, module_name, '&' + symbol_name
 		}
-		// 'array_type', 'fixed_array_type' {
-			
-		// }
-		// 'generic_type' {
+		'array_type', 'fixed_array_type' {
+			mut limit := ''
+			limit_field := node.child_by_field_name('limit')
+			if !limit_field.is_null() {
+				limit = node.get_text(src_text)
+			}
 
-		// }
-		// 'map_type' {}
-		// 'channel_type'
+			_, module_name, symbol_name = symbol_name_from_node(node.child_by_field_name('element'), src_text)
+			return SymbolKind.array_, module_name, '[$limit]' + symbol_name
+		}
+		'map_type' {
+			_, key_module_name, key_symbol_name := symbol_name_from_node(node.child_by_field_name('key'), src_text)
+			_, val_module_name, val_symbol_name := symbol_name_from_node(node.child_by_field_name('value'), src_text)
+			if (key_module_name.len != 0 && val_module_name.len == 0) || (key_module_name == val_module_name) {
+				unsafe { 
+					val_module_name.free()
+					val_symbol_name.free()
+				}
+
+				// if key type uses a custom type, return the symbol in the key's origin module
+				return SymbolKind.map_, key_module_name, 'map[$key_symbol_name]' + node.child_by_field_name('value').get_text(src_text)
+				// if key is builtin type and key type is not, use the module from the value type
+			} else if key_module_name.len == 0 && val_module_name.len != 0 {
+				unsafe { 
+					key_module_name.free()
+					key_symbol_name.free()
+				}
+
+				return SymbolKind.map_, val_module_name, 'map[' + node.child_by_field_name('key').get_text(src_text) +  ']$val_symbol_name'
+			} else {
+				module_name = ''
+			}
+
+			return SymbolKind.map_, '', node.get_text(src_text)
+		}
+		'generic_type' {
+			return symbol_name_from_node(node.named_child(0), src_text)
+		}
+		'channel_type' {
+			_, module_name, symbol_name = symbol_name_from_node(node.named_child(0), src_text)
+			return SymbolKind.chan_, module_name, 'chan ' + symbol_name
+		}
+		'option_type' {
+			_, module_name, symbol_name = symbol_name_from_node(node.named_child(0), src_text)
+			return SymbolKind.optional, module_name, '?' + symbol_name
+		}
 		else {
+			unsafe { symbol_name.free() }
 			// type_identifier should go here
 			symbol_name = node.get_text(src_text)
+			return SymbolKind.placeholder, '', symbol_name
 		}
 	}
-	
+
+	return SymbolKind.typedef, '', 'void'
+}
+
+pub fn (store &Store) find_symbol_by_node(node C.TSNode, src_text []byte) ?&Symbol {
+	if node.is_null() || src_text.len == 0 {
+		return none
+	}
+
+	_, module_name, symbol_name := symbol_name_from_node(node, src_text)
 	defer { 
 		unsafe {
 			module_name.free()
@@ -277,15 +346,19 @@ pub fn (store &Store) find_symbol_by_node(node C.TSNode, src_text []byte) &Symbo
 		}
 	}
 
-	return store.find_symbol(module_name, symbol_name) or { analyzer.void_type }
+	return store.find_symbol(module_name, symbol_name)
 }
 
-pub fn (ss &Store) infer_value_type_from_node(node C.TSNode) &Symbol {
+pub fn (ss &Store) infer_value_type_from_node(node C.TSNode, src_text []byte) &Symbol {
 	if node.is_null() {
 		return analyzer.void_type
 	}
 
 	node_type := node.get_type()
+	if node_type == 'type_initializer' {
+		return ss.find_symbol_by_node(node.child_by_field_name('type'), src_text) or { analyzer.void_type }
+	}
+
 	// TODO
 	mut typ := match node_type {
 		'true', 'false' { 'bool' }

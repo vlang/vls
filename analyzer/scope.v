@@ -5,7 +5,7 @@ pub mut:
 	parent &ScopeTree = &ScopeTree(0)
 	start_byte u32
 	end_byte u32
-	symbols map[string]&Symbol
+	symbols []&Symbol
 	children []&ScopeTree
 }
 
@@ -42,5 +42,11 @@ pub fn (mut scope ScopeTree) register(info &Symbol) {
 		return
 	}
 
-	scope.symbols[info.name] = info
+	existing_idx := scope.symbols.index(info.name)
+	if existing_idx != -1 {
+		unsafe { scope.symbols[existing_idx].free() }
+		scope.symbols.delete(existing_idx)
+	}
+
+	scope.symbols << info
 }

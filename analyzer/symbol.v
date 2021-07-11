@@ -5,24 +5,32 @@ module analyzer
 
 import strings
 
-pub interface ISymbol {
-	str() string
-mut:
-	range C.TSRange
-	parent ISymbol
-}
+// pub interface ISymbol {
+// 	str() string
+// mut:
+// 	range C.TSRange
+// 	parent ISymbol
+// }
 
-pub fn (isym ISymbol) root() &Symbol {
-	if isym is Symbol {
-		return isym
-	} else if isym.parent is Symbol {
-		return isym.parent
-	}
+// pub fn (isym ISymbol) root() &Symbol {
+// 	if isym is Symbol {
+// 		return isym
+// 	} else if isym.parent is Symbol {
+// 		return isym.parent
+// 	}
 
-	return isym.parent.root()
-}
+// 	return isym.parent.root()
+// }
+
+// TODO: From ref to chan_, use interface
 
 pub enum SymbolKind {
+	ref
+	array_
+	map_
+	multi_return
+	optional
+	chan_
 	function
 	struct_
 	enum_
@@ -83,41 +91,68 @@ pub mut:
 	kind SymbolKind
 	access SymbolAccess
 	range C.TSRange
-	parent ISymbol = analyzer.void_type
-	return_type ISymbol = analyzer.void_type
+	parent &Symbol = analyzer.void_type
+	return_type &Symbol = analyzer.void_type
 	language SymbolLanguage = .v
 	generic_placeholder_len int
-	children map[string]&Symbol
+	children []&Symbol
 	file_path string
 }
 
-pub fn (info &Symbol) str() string {
+pub fn (info &Symbol) gen_str() string {
+	if isnil(info) {
+		return 'nil symbol'
+	}
+	
 	mut sb := strings.new_builder(100)
 	defer { unsafe { sb.free() } }
 
 	match info.kind {
-		.function {
-			sb.write_string(info.kind.str())
-			sb.write_string('fn ')
+		.ref {
+			sb.write_string('&')
+			sb.write_string(info.parent.gen_str())
+		}
+		.chan_ {
+			sb.write_string('chan ')
+			sb.write_string(info.children[0].str())
+		}
+		.optional {
+			sb.write_string('?')
+			sb.write_string(info.children[0].gen_str())
+		}
+		.map_, .array_ {
 			sb.write_string(info.name)
+		}
+		// .array_ {
+		// 	sb.write_string('[]')
+		// 	sb.write_string(info.children[0].str())
+		// }
+		.multi_return {
 			sb.write_b(`(`)
-			mut i := 0
-			for _, v in info.children {
-				sb.write_string(v.str())
-				if i < info.children.len - 1 {
-					sb.write_b(`,`)
-					sb.write_b(` `)
+			for v in info.children {
+				if v.kind != .function || v.kind != .variable || v.kind != .field {
+					sb.write_string(v.gen_str())
 				}
 			}
 			sb.write_b(`)`)
-			sb.write_b(` `)
-			sb.write_string(info.return_type.str())
-			return sb.str()
+		}
+		.function {
+			sb.write_string('fn ')
+			sb.write_string(info.name)
+			sb.write_b(`(`)
+			for i, v in info.children {
+				sb.write_string(v.gen_str())
+				if i < info.children.len - 1 {
+					sb.write_string(', ')
+				}
+			}
+			sb.write_string(') ')
+			sb.write_string(info.return_type.gen_str())
 		}
 		.variable, .field {
 			sb.write_string(info.name)
 			sb.write_b(` `)
-			sb.write_string(info.return_type.str())
+			sb.write_string(info.return_type.gen_str())
 		}
 		else { 
 			sb.write_string(info.name) 
@@ -127,23 +162,47 @@ pub fn (info &Symbol) str() string {
 	return sb.str()
 }
 
-pub fn (infos []&Symbol) str() string {
-	return '[' +  infos.map(it.str()).join(', ') + ']'
+pub fn (sym &Symbol) str() string {
+	return sym.gen_str()
 }
 
-pub fn (mut info Symbol) add_child(new_child ISymbol) ? {
-	if new_child is Symbol {
-		mut nc := new_child
-		if nc.name in info.children {
-			return error('child exists. (name="$new_child.name")')
-		}
+pub fn (infos []&Symbol) str() string {
+	return '[' +  infos.map(it.gen_str()).join(', ') + ']'
+}
 
-		nc.parent = info
-		info.children[nc.name] = new_child
-		return
+pub fn (infos []&Symbol) index(name string) int {
+	for i, v in infos {
+		if v.name == name {
+			return i
+		}
 	}
 
-	return error('not a symbol')
+	return -1
+}
+
+pub fn (infos []&Symbol) exists(name string) bool {
+	return infos.index(name) != -1
+}
+
+pub fn (infos []&Symbol) get(name string) ?&Symbol {
+	index := infos.index(name)
+	if index == -1 {
+		return error('Symbol not found')
+	}
+
+	return infos[index] ?
+}
+
+pub fn (mut info Symbol) add_child(mut new_child Symbol, add_as_parent ...bool) ? {
+	if add_as_parent.len == 0 || add_as_parent[0] {
+		new_child.parent = info
+	}
+
+	if info.children.exists(new_child.name) {
+		return error('child exists. (name="$new_child.name")')
+	}
+
+	info.children << new_child
 }
 
 [unsafe]
@@ -151,7 +210,7 @@ pub fn (sym &Symbol) free() {
 	unsafe {
 		sym.name.free()
 		
-		for _, v in sym.children {
+		for v in sym.children {
 			v.free()
 		}
 	
@@ -160,44 +219,48 @@ pub fn (sym &Symbol) free() {
 	}
 }
 
-pub struct ArraySymbol {
-pub mut:
-	range C.TSRange
-	parent ISymbol
-}
+// pub fn (ars ArraySymbol) str() string {
+// 	return 
+// }
 
-pub fn (ars ArraySymbol) str() string {
-	return '[]' + ars.str()
-}
+// pub struct RefSymbol {
+// pub mut:
+// 	ref_count int = 1
+// 	range C.TSRange
+// 	parent ISymbol
+// }
 
-pub struct RefSymbol {
-pub mut:
-	ref_count int = 1
-	range C.TSRange
-	parent ISymbol
-}
+// pub fn (rs RefSymbol) str() string {
+// 	return '&'.repeat(rs.ref_count) + rs.parent.str()
+// }
 
-pub fn (rs RefSymbol) str() string {
-	return '&'.repeat(rs.ref_count) + rs.parent.str()
-}
+// pub struct MapSymbol {
+// pub mut:
+// 	range C.TSRange
+// 	key_parent ISymbol // string in map[string]Foo
+// 	parent ISymbol // Foo in map[string]Foo
+// }
 
-pub struct MapSymbol {
-pub mut:
-	range C.TSRange
-	key_parent ISymbol // string in map[string]Foo
-	parent ISymbol // Foo in map[string]Foo
-}
+// pub fn (ms MapSymbol) str() string {
+// 	return 'map[${ms.key_parent}]${ms.parent}'
+// }
 
-pub fn (ms MapSymbol) str() string {
-	return 'map[${ms.key_parent}]${ms.parent}'
-}
+// pub struct ChanSymbol {
+// pub mut:
+// 	range C.TSRange
+// 	parent ISymbol
+// }
 
-pub struct ChanSymbol {
-pub mut:
-	range C.TSRange
-	parent ISymbol
-}
+// pub fn (cs ChanSymbol) str() string {
+// 	return 'chan ${cs.parent}'
+// }
 
-pub fn (cs ChanSymbol) str() string {
-	return 'chan ${cs.parent}'
-}
+// pub struct OptionSymbol {
+// pub mut:
+// 	range C.TSRange
+// 	parent ISymbol
+// }
+
+// pub fn (opts OptionSymbol) str() string {
+// 	return '?${opts.parent}'
+// }
