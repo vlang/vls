@@ -48,32 +48,113 @@ pub mut:
 	is_import bool
 }
 
-fn report_error(msg string, range C.TSRange) IError {
-	return AnalyzerError{
-		msg: msg
-		code: 0
-		range: range
+fn (mut an Analyzer) report(msg string, node C.TSNode) {
+	an.store.report_error(report_error(msg, node.range()))
+}
+
+fn (mut an Analyzer) import_decl(node C.TSNode) {	
+	// Most of the checking is already done in `import_modules_from_trees`
+	// Check only the symbols if they are available
+	symbols := node.child_by_field_name('symbols')
+	if symbols.is_null() {
+		return
+	}
+
+	module_name_node := node.child_by_field_name('path')
+	module_name := module_name_node.get_text(an.src_text)
+	// defer { unsafe { module_name.free() } }
+
+	module_path := an.store.get_module_path_opt(module_name) or {
+		// `import_modules_from_trees` already reported it
+		return
+	}
+
+	list := symbols.named_child(0)
+	symbols_count := list.named_child_count()
+	for i := u32(0); i < symbols_count; i++ {
+		sym := list.named_child(i)
+		if sym.is_null() {
+			continue
+		}
+
+		symbol_name := sym.get_text(an.src_text)
+		got_sym := an.store.symbols[module_path].get(symbol_name) or {
+			an.report('Symbol `${symbol_name}` not found', sym)
+			// unsafe { symbol_name.free() }
+			continue
+		}
+
+		if int(got_sym.access) < int(SymbolAccess.public) {
+			an.report('Symbol `${symbol_name} not public', sym)
+			// unsafe { symbol_name.free() }
+			continue
+		}
 	}
 }
 
-pub fn (mut an Analyzer) unwrap_error(err IError) {
-	if err is AnalyzerError {
-		an.store.report({ 
-			content: err.msg
-			range: err.range
-			file_path: an.store.cur_file_path.clone()
-		})
+fn (mut an Analyzer) const_decl(node C.TSNode) {
+	
+}
+
+fn (mut an Analyzer) struct_decl(node C.TSNode) {
+
+}
+
+fn (mut an Analyzer) interface_decl(node C.TSNode) {
+
+}
+
+fn (mut an Analyzer) enum_decl(node C.TSNode) {
+
+}
+
+fn (mut an Analyzer) fn_decl(node C.TSNode) {
+
+}
+
+pub fn (mut an Analyzer) top_level_statement() {
+	current_node := an.cursor.current_node()
+	node_type := current_node.get_type()
+	defer { 
+		an.cursor.next()
+		// unsafe { node_type.free() } 
+	}
+
+	match node_type {
+		'import_declaration' {
+			an.import_decl(current_node)
+		}
+		'const_declaration' {
+			an.const_decl(current_node)
+		}
+		'struct_declaration' {
+			an.struct_decl(current_node)
+		}
+		'interface_declaration' {
+			an.interface_decl(current_node)
+		}
+		'enum_declaration' {
+			an.enum_decl(current_node)
+		}
+		'function_declaration' {
+			an.fn_decl(current_node)
+		}
+		else {}
 	}
 }
 
-// pub fn (mut store Store) analyze(tree &C.TSTree, src_text []byte) {
-// 	mut an := analyzer.Analyzer{}
-// 	an.store = unsafe { store }
-// 	an.src_text = src_text
-// 	child_len := int(root_node.child_count())
-// 	an.cursor = TreeCursor{root_node.tree_cursor()}
-// 	for _ in 0 .. child_len {
-// 		an.top_level_statement()
-// 	}
-// 	unsafe { an.cursor.free() }
-// }
+pub fn (mut store Store) analyze(tree &C.TSTree, src_text []byte) {
+	mut an := analyzer.Analyzer{}
+	an.store = unsafe { store }
+	an.src_text = src_text
+	root_node := tree.root_node()
+	child_len := int(root_node.child_count())
+	an.cursor = TreeCursor{root_node.tree_cursor()}
+	an.cursor.to_first_child()
+
+	for _ in 0 .. child_len {
+		an.top_level_statement()
+	}
+
+	unsafe { an.cursor.free() }
+}
