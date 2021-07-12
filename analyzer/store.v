@@ -359,19 +359,38 @@ pub fn (ss &Store) infer_value_type_from_node(node C.TSNode, src_text []byte) &S
 	}
 
 	node_type := node.get_type()
-	if node_type == 'type_initializer' {
-		return ss.find_symbol_by_node(node.child_by_field_name('type'), src_text) or { analyzer.void_type }
-	}
 
 	// TODO
-	mut typ := match node_type {
-		'true', 'false' { 'bool' }
-		'int_literal' { 'int' }
-		'float_literal' { 'f32' }
-		'rune_literal' { 'byte' }
-		'interpreted_string_literal' { 'string' }
-		else { '' }
+	mut module_name := ''
+	mut type_name := ''
+
+	match node_type {
+		'true', 'false' { 
+			type_name = 'bool' 
+		}
+		'int_literal' { 
+			type_name = 'int' 
+		}
+		'float_literal' { 
+			type_name = 'f32' 
+		}
+		'rune_literal' { 
+			type_name = 'byte' 
+		}
+		'interpreted_string_literal' { 
+			type_name = 'string' 
+		}
+		'type_initializer' {
+			_, module_name, type_name = symbol_name_from_node(node.child_by_field_name('type'), src_text)
+		}
+		else {}
 	}
 
-	return ss.find_symbol('', typ) or { analyzer.void_type }
+	got_typ := ss.find_symbol(module_name, type_name) or { 
+		// name := if module_name.len != 0 { module_name + '.' + type_name } else { type_name }
+		// ss.report_error(report_error('Invalid type $name', node.range()))
+		return analyzer.void_type 
+	}
+
+	return got_typ
 }
