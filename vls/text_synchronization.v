@@ -3,6 +3,7 @@ module vls
 import json
 import lsp
 import os
+import analyzer
 
 const (
 	vroot         = os.dir(@VEXE)
@@ -10,6 +11,17 @@ const (
 	vmodules_path = os.join_path(os.home_dir(), '.vmodules')
 	builtin_path  = os.join_path(vlib_path, 'builtin')
 )
+
+fn analyze(mut store analyzer.Store, uri lsp.DocumentUri, root_uri lsp.DocumentUri, tree &C.TSTree, src []byte) {
+	store.set_active_file_path(uri.path())
+	store.import_modules_from_tree(tree, src,
+		os.join_path(uri.dir_path(), 'modules'),
+		root_uri.path()
+	)
+
+	store.register_symbols_from_tree(tree, src)
+	store.cleanup_imports()
+}
 
 fn (mut ls Vls) did_open(_ int, params string) {
 	did_open_params := json.decode(lsp.DidOpenTextDocumentParams, params) or {
@@ -20,23 +32,14 @@ fn (mut ls Vls) did_open(_ int, params string) {
 	src := did_open_params.text_document.text
 	uri := did_open_params.text_document.uri
 
-	ls.sources[uri] = src.bytes()
-	ls.trees[uri] = ls.parser.parse_string(src)
-	ls.store.set_active_file_path(uri.path())
-	ls.store.import_modules_from_tree(ls.trees[uri], ls.sources[uri],
-		os.join_path(uri.dir_path(), 'modules'),
-		ls.root_uri.path()
-	)
+	new_src := src.bytes()
+	new_tree := ls.parser.parse_string(src)
 
-	ls.store.register_symbols_from_tree(ls.trees[uri], ls.sources[uri])
-	ls.store.cleanup_imports()
-
+	analyze(mut ls.store, uri, ls.root_uri, new_tree, new_src)
 	ls.show_diagnostics(uri)
 
-	// $if !test {
-	// 	ls.log_message(ls.store.imports.str(), .info)
-	// 	ls.log_message(ls.store.dependency_tree.str(), .info)
-	// }
+	ls.sources[uri] = new_src
+	ls.trees[uri] = new_tree
 }
 
 [manualfree]
@@ -45,9 +48,8 @@ fn (mut ls Vls) did_change(_ int, params string) {
 		ls.panic(err.msg)
 		return
 	}
-	uri := did_change_params.text_document.uri
-	ls.store.set_active_file_path(uri.path())
 
+	uri := did_change_params.text_document.uri
 	mut new_src := ls.sources[uri].clone()
 	ls.publish_diagnostics(uri, []lsp.Diagnostic{})
 
@@ -121,30 +123,11 @@ fn (mut ls Vls) did_change(_ int, params string) {
 	new_tree := ls.parser.parse_string_with_old_tree(new_src.bytestr(), ls.trees[uri])
 	// ls.log_message('new tree: ${new_tree.root_node().sexpr_str()}', .info)
 
-	mut lookup_paths := [
-		uri.dir_path(),
-		os.join_path(uri.dir_path(), 'modules'),
-		vlib_path,
-		vmodules_path
-	]
-
 	ls.store.clear_messages()
-	ls.store.import_modules_from_tree(ls.trees[uri], ls.sources[uri],
-		os.join_path(uri.dir_path(), 'modules'),
-		ls.root_uri.path()
-	)
-	
-	for i := 0; lookup_paths.len != 0; {
-		unsafe { lookup_paths[i].free() }
-		lookup_paths.delete(i)
-	}
-
-	unsafe { lookup_paths.free() }
 
 	// TODO: incremental approach to analyzing (analyze only the parts that changed)
 	// using `ts_tree_get_changed_ranges`. Sadly, it hangs at this moment.
-	ls.store.register_symbols_from_tree(new_tree, new_src)
-	ls.store.cleanup_imports()
+	analyze(mut ls.store, uri, ls.root_uri, new_tree, new_src)
 
 	unsafe { 
 		ls.trees[uri].free()
