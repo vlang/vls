@@ -267,7 +267,7 @@ fn (mut ss Store) scan_imports(tree &C.TSTree, src_text []byte) []&Import {
 
 	for i in 0 .. named_child_len {
 		node := root_node.named_child(i)
-		if node.get_type() != 'import_declaration' {
+		if node.is_null() || node.get_type() != 'import_declaration' {
 			continue
 		}
 
