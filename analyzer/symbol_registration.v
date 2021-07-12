@@ -298,7 +298,7 @@ fn (mut sr SymbolRegistration) enum_decl(enum_decl_node C.TSNode) ?&Symbol {
 		}
 
 		sym.add_child(mut member_sym) or { 
-			sr.unwrap_error(AnalyzerError{
+			sr.store.report_error(AnalyzerError{
 				msg: err.msg
 				range: member_node.range()
 			})
@@ -497,16 +497,6 @@ fn (mut sr SymbolRegistration) extract_parameter_list(node C.TSNode) []&Symbol {
 	return syms
 }
 
-pub fn (mut sr SymbolRegistration) unwrap_error(err IError) {
-	if err is AnalyzerError {
-		sr.store.report({ 
-			content: err.msg
-			range: err.range
-			file_path: sr.store.cur_file_path.clone()
-		})
-	}
-}
-
 pub fn (mut store Store) register_symbols_from_tree(tree &C.TSTree, src_text []byte) {
 	mut sr := SymbolRegistration{}
 	root_node := tree.root_node()
@@ -516,7 +506,7 @@ pub fn (mut store Store) register_symbols_from_tree(tree &C.TSTree, src_text []b
 	sr.cursor = TreeCursor{root_node.tree_cursor()}
 	for _ in 0 .. child_len {
 		sr.top_level_statement() or {
-			sr.unwrap_error(err)
+			sr.store.report_error(err)
 			continue
 		}
 	}
