@@ -84,7 +84,7 @@ pub fn (mut ss Store) set_active_file_path(file_path string) {
 	ss.cur_file_name = os.base(file_path)
 }
 
-pub fn (ss &Store) get_module_path(module_name string) string {
+pub fn (ss &Store) get_module_path_opt(module_name string) ?string {
 	import_lists := ss.imports[ss.cur_dir]
 	for imp in import_lists {
 		if imp.module_name == module_name || module_name in imp.aliases {
@@ -92,8 +92,12 @@ pub fn (ss &Store) get_module_path(module_name string) string {
 		}
 	}
 
+	return error('Not found')
+}
+
+pub fn (ss &Store) get_module_path(module_name string) string {
 	// empty names should return the dir instead
-	return ss.cur_dir
+	return  ss.get_module_path_opt(module_name) or { ss.cur_dir }
 }
 
 pub fn (ss &Store) find_symbol(module_name string, name string) ?&Symbol {
