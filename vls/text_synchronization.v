@@ -13,6 +13,17 @@ const (
 )
 
 fn analyze(mut store analyzer.Store, uri lsp.DocumentUri, root_uri lsp.DocumentUri, tree &C.TSTree, src []byte) {
+	file_path := uri.path()
+	dir := uri.dir_path()
+
+	// TODO: use LSP's file versioning to avoid redeleting existing symbols
+	for i, _ in store.symbols[dir] {
+		if store.symbols[dir][i].file_path == file_path {
+			unsafe { store.symbols[dir][i].free() }
+			store.symbols[dir].delete(i)
+		}
+	}
+
 	store.set_active_file_path(uri.path())
 	store.import_modules_from_tree(tree, src,
 		os.join_path(uri.dir_path(), 'modules'),
@@ -21,6 +32,7 @@ fn analyze(mut store analyzer.Store, uri lsp.DocumentUri, root_uri lsp.DocumentU
 
 	store.register_symbols_from_tree(tree, src)
 	store.cleanup_imports()
+	store.analyze(tree, src)
 }
 
 fn (mut ls Vls) did_open(_ int, params string) {
