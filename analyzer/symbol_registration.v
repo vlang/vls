@@ -229,19 +229,18 @@ fn (mut sr SymbolRegistration) interface_decl(interface_decl_node C.TSNode) ?&Sy
 			'interface_spec' {
 				param_node := field_node.child_by_field_name('parameters')
 				mut children := sr.extract_parameter_list(param_node)
-				for j := 0; children.len != 0; {
+				for j := 0; j < children.len; j++ {
 					mut child := children[j]
 					sym.add_child(mut child) or { 
 						// eprintln(err) 
 						continue
 					}
-					children.delete(j)
 				}
 				unsafe { children.free() }
 			}
 			'struct_field_declaration' {
 				field_typ := sr.find_symbol_by_node(field_node.child_by_field_name('type'))
-				mut field_sym := &Symbol{
+				mut field_sym := Symbol{
 					name: field_node.child_by_field_name('name').get_text(sr.src_text)
 					kind: .field
 					range: field_node.range()
@@ -279,11 +278,12 @@ fn (mut sr SymbolRegistration) enum_decl(enum_decl_node C.TSNode) ?&Symbol {
 		}
 
 		int_type := sr.store.find_symbol('', 'int') or {
-			sr.store.register_symbol(mut Symbol{
+			mut new_int_symbol := Symbol{
 				name: 'int'
 				file_path: os.join_path(sr.store.auto_imports[''], 'builtin.v')
 				kind: .placeholder
-			}) or {
+			}
+			sr.store.register_symbol(mut new_int_symbol) or {
 				analyzer.void_type
 			}
 		}
@@ -331,11 +331,10 @@ fn (mut sr SymbolRegistration) fn_decl(fn_node C.TSNode) ?&Symbol {
 		is_method = true
 		mut children := sr.extract_parameter_list(receiver_node)
 		// just use a loop for convinience
-		for i := 0; children.len != 0; {
+		for i := 0; i < children.len; i++ {
 			if !isnil(children[i].return_type)  {
 				children[i].return_type.add_child(mut fn_sym) ?
 			}
-			children.delete(i)
 		}
 
 		unsafe { children.free() }
@@ -343,11 +342,10 @@ fn (mut sr SymbolRegistration) fn_decl(fn_node C.TSNode) ?&Symbol {
 
 	// scan params
 	mut params := sr.extract_parameter_list(params_list_node)
-	for i := 0; params.len != 0; {
+	for i := 0; i < params.len; i++ {
 		mut param := params[i]
 		fn_sym.add_child(mut param) or { continue }
 		scope.register(param)
-		params.delete(i)
 	}
 
 	unsafe { params.free() }
@@ -355,9 +353,8 @@ fn (mut sr SymbolRegistration) fn_decl(fn_node C.TSNode) ?&Symbol {
 	// extract function body
 	if !body_node.is_null() && !sr.is_import {
 		mut syms := sr.extract_block(body_node) ?
-		for i := 0; syms.len != 0; {
+		for i := 0; i < syms.len; i++ {
 			scope.register(syms[i])
-			syms.delete(i)
 		}
 
 		unsafe { syms.free() }
@@ -383,7 +380,7 @@ fn (mut sr SymbolRegistration) top_level_statement() ? {
 	match node_type {
 		'const_declaration' {
 			mut const_syms := sr.const_decl(sr.cursor.current_node())
-			for i := 0; const_syms.len != 0; {
+			for i := 0; i < const_syms.len; i++ {
 				mut const_sym := const_syms[i]
 				sr.store.register_symbol(mut const_sym) or {
 					// if err is AnalyzerError {
@@ -395,7 +392,6 @@ fn (mut sr SymbolRegistration) top_level_statement() ? {
 				}	
 
 				global_scope.register(const_sym)
-				const_syms.delete(i)
 			}
 
 			unsafe { const_syms.free() }
