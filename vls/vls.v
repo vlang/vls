@@ -10,6 +10,7 @@ import os
 import tree_sitter
 import tree_sitter_v.bindings.v
 import analyzer
+import time
 
 // These are the list of features available in VLS
 // If the feature is experimental, the value name should have a `exp_` prefix
@@ -62,37 +63,30 @@ interface ReceiveSender {
 	receive() ?string
 }
 
+struct File {
+mut:
+	source []byte
+	version int = 1
+}
+
+[unsafe]
+fn (file &File) free() {
+	unsafe {
+		file.source.free()
+		file.version = 1
+	}
+}
+
 struct Vls {
 mut:
-	// NB: a base table is required since this is where we
-	// are gonna store the information for the builtin types
-	// which are only parsed once.
-	// base_table &ast.Table
 	parser     &C.TSParser
 	store      analyzer.Store
 	status     ServerStatus = .off
-	// TODO: change map key to DocumentUri
-	// files  map[DocumentUri]ast.File
-	// files map[string]ast.File
-	// sources  map[DocumentUri][]byte
-	sources map[string][]byte
+	sources map[string]File
 	trees map[string]&C.TSTree
-	// NB: a separate table is required for each folder in
-	// order to do functions such as typ_to_string or when
-	// some of the features needed additional information
-	// that is mostly stored into the ast.
-	//
-	// A single table is not feasible since files are always
-	// changing and there can be instances that a change might
-	// break another module/project data.
-	// tables  map[DocumentUri]&ast.Table
-	tables                   map[string]&ast.Table
 	root_uri                 lsp.DocumentUri
-	// invalid_imports          map[string][]string // where it stores a list of invalid imports
-	// doc_symbols              map[string][]lsp.SymbolInformation // doc_symbols is used for caching document symbols
-	// builtin_symbols          []string // list of publicly available symbols in builtin
-	// symbol_locations         map[string]map[string]lsp.Location
-	// builtin_symbol_locations map[string]lsp.Location
+	is_typing bool
+	typing_ch chan int
 	enabled_features         []Feature = vls.default_features_list
 	capabilities             lsp.ServerCapabilities
 	logger                   log.Logger
@@ -165,6 +159,7 @@ pub fn (mut ls Vls) dispatch(payload string) {
 				ls.did_open(request.id, request.params)
 			}
 			'textDocument/didChange' {
+				ls.typing_ch <- 1
 				ls.did_change(request.id, request.params)
 			}
 			'textDocument/didClose' {
@@ -260,12 +255,6 @@ fn (mut ls Vls) panic(message string) {
 	}
 }
 
-// table_panic_handler handles the error behavior of the table. replaces panic.
-fn table_panic_handler(t &ast.Table, message string) {
-	mut ls := &Vls(t.panic_userdata)
-	ls.panic(message)
-}
-
 fn (mut ls Vls) send<T>(data T) {
 	str := json.encode(data)
 	ls.logger.response(str, .send)
@@ -293,8 +282,29 @@ fn (mut ls Vls) send_null(id int) {
 	ls.logger.response(str, .receive)
 }
 
+fn monitor_changes(mut ls Vls) {
+	// This is for debouncing/throttling analysis
+	for {
+		select {
+			a := <-ls.typing_ch {
+				ls.is_typing = a != 0
+			}
+			> 150 * time.millisecond {
+				if !ls.is_typing { continue }
+				uri := lsp.document_uri_from_path(ls.store.cur_file_path)
+				analyze(mut ls.store, uri, ls.root_uri, ls.trees[uri], ls.sources[uri])
+				ls.is_typing = false
+				ls.show_diagnostics(uri)
+				unsafe { uri.free() }
+			}
+		}
+	}
+}
+
 // start_loop starts an endless loop which waits for stdin and prints responses to the stdout
 pub fn (mut ls Vls) start_loop() {
+	go monitor_changes(mut ls)
+
 	for {
 		payload := ls.io.receive() or { continue }
 		ls.dispatch(payload)

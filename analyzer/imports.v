@@ -329,6 +329,7 @@ pub fn (mut store Store) import_modules(mut imports []&Import) {
 	parser.set_language(v.language)
 	defer { unsafe { parser.free() } }
 
+	old_version := store.cur_version
 	old_active_path := store.cur_file_path.clone()
 	old_active_dir := store.cur_dir.clone()
 	modules_from_old_dir := os.join_path(old_active_dir, 'modules')
@@ -349,7 +350,7 @@ pub fn (mut store Store) import_modules(mut imports []&Import) {
 			full_path := os.join_path(new_import.path, file_name)
 			content := os.read_bytes(full_path) or { continue }
 			tree_from_import := parser.parse_string(content.bytestr())
-			store.set_active_file_path(full_path)
+			store.set_active_file_path(full_path, 1)
 
 			// Import module but from different lookup oath other than the project
 			modules_from_dir := os.join_path(store.cur_dir, 'modules')
@@ -373,7 +374,7 @@ pub fn (mut store Store) import_modules(mut imports []&Import) {
 			imports[i].imported = true
 		}
 
-		store.set_active_file_path(old_active_path)
+		store.set_active_file_path(old_active_path, old_version)
 		unsafe { file_paths.free() }
 	}
 

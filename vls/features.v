@@ -18,7 +18,7 @@ fn (mut ls Vls) formatting(id int, params string) {
 	}
 
 	uri := formatting_params.text_document.uri
-	source := ls.sources[uri]
+	source := ls.sources[uri].source
 	tree_range := ls.trees[uri].root_node().range()
 	if source.len == 0 {
 		ls.send_null(id)
@@ -189,7 +189,7 @@ fn (mut ls Vls) signature_help(id int, params string) {
 	// Fetch the node requested for completion.
 	uri := signature_params.text_document.uri.str()
 	pos := signature_params.position
-	off := compute_offset(ls.sources[uri], pos.line, pos.character)
+	off := compute_offset(ls.sources[uri].source, pos.line, pos.character)
 	node := ls.trees[uri].root_node().descendant_for_byte_range(u32(off), u32(off + 1))
 	if node.is_null() || node.get_type() != 'identifier' {
 		ls.send_null(id)
@@ -197,7 +197,7 @@ fn (mut ls Vls) signature_help(id int, params string) {
 	}
  
 	// Fetch the symbol and report on it.
-	node_text := node.get_text(ls.sources[uri]) 
+	node_text := node.get_text(ls.sources[uri].source) 
 	symbol := ls.store.find_symbol(uri, node_text) or { analyzer.void_type }
 	if symbol.kind == .placeholder || symbol.name == 'void' {
 		ls.send_null(id)
@@ -1332,7 +1332,7 @@ fn (mut ls Vls) definition(id int, params string) {
 
 	uri := goto_definition_params.text_document.uri
 	pos := goto_definition_params.position
-	source := ls.sources[uri]
+	source := ls.sources[uri].source
 	offset := compute_offset(source, pos.line, pos.character)
 
 	node := ls.trees[uri].root_node().descendant_for_byte_range(u32(offset), u32(offset + 1))
