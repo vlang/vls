@@ -248,7 +248,7 @@ pub fn (sym &Symbol) free() {
 		}
 	
 		sym.children.free()
-		sym.file_path.free()
+		// sym.file_path.free()
 	}
 }
 
