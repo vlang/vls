@@ -8,25 +8,20 @@ pub struct Import {
 mut:
 	// resolved indicates that an import's path has been resolved.
 	resolved bool
-
 	// imported indicates that the files of the modules are already imported.
 	imported bool
 pub mut:
 	// module_name is the name that was declared when imported.
 	module_name string
-
 	// path is the path where the module was located.
 	path string
-
 	// track the location of the import statements
 	// this one uses the full path instead of the usual file name
 	// for error reporting (just in case)
 	ranges map[string]C.TSRange
-
 	// original module_names are not recorded as aliases
 	// e.g {'file.v': 'foo', 'file1.v': 'bar'}
 	aliases map[string]string
-
 	// e.g {'file.v': ['Any', 'decode', 'encode'], 'file2.v': ['foo']}
 	symbols map[string][]string
 }
@@ -129,9 +124,7 @@ pub fn (mut ss Store) find_import_by_position(range C.TSRange) ?&Import {
 
 [manualfree]
 fn (mut ss Store) inject_paths_of_new_imports(mut new_imports []&Import, lookup_paths ...string) {
-	mut project := ss.dependency_tree.get_node(ss.cur_dir) or {
-		ss.dependency_tree.add(ss.cur_dir)
-	}
+	mut project := ss.dependency_tree.get_node(ss.cur_dir) or { ss.dependency_tree.add(ss.cur_dir) }
 
 	// Custom iterator for looping over paths without
 	// allocating a new array with concatenated items
@@ -175,7 +168,7 @@ fn (mut ss Store) inject_paths_of_new_imports(mut new_imports []&Import, lookup_
 					continue
 				}
 
-				// search for files end with v and free 
+				// search for files end with v and free
 				// the contents of the array at the same time
 				for j := 0; files.len != 0; {
 					if !has_v_files {
@@ -193,7 +186,6 @@ fn (mut ss Store) inject_paths_of_new_imports(mut new_imports []&Import, lookup_
 
 				unsafe { files.free() }
 			}
-
 			if has_v_files {
 				new_import.set_path(mod_dir)
 				ss.dependency_tree.add(mod_dir)
@@ -206,15 +198,15 @@ fn (mut ss Store) inject_paths_of_new_imports(mut new_imports []&Import, lookup_
 		// report the unresolved import
 		if !new_import.resolved {
 			for file_path, range in new_import.ranges {
-				ss.report({
-					content: 'Module `${new_import.module_name}` not found'
+				ss.report(
+					content: 'Module `$new_import.module_name` not found'
 					file_path: file_path.clone()
 					range: range
-				})
+				)
 
 				new_import.ranges.delete(file_path)
 			}
-			
+
 			continue
 		} else if new_import.path !in project.dependencies {
 			// append the path if not yet added to the project dependency
@@ -236,14 +228,13 @@ pub fn (mut ss Store) cleanup_imports() int {
 			mut dep_node := ss.dependency_tree.get_node(ss.cur_dir) or {
 				panic('Should not panic. Please file an issue to github.com/vlang/vls.')
 				return deleted
-			}			
+			}
 
 			{
 				// intentionally do not use the variables to the same scope
 				deleted_idx := dep_node.remove_dependency(imp_module.path)
 				assert deleted_idx != -2
 			}
-
 			// delete dir if possible
 			ss.delete(imp_module.path)
 			unsafe { imp_module.free() }
@@ -284,11 +275,11 @@ fn (mut ss Store) scan_imports(tree &C.TSTree, src_text []byte) []&Import {
 			imp_module.untrack_file(ss.cur_file_path)
 		}
 
-		// resolve it later after 
-		mut imp_module, already_imported := ss.add_import({
+		// resolve it later after
+		mut imp_module, already_imported := ss.add_import(
 			resolved: false
 			module_name: import_path_node.get_text(src_text)
-		})
+		)
 
 		import_alias_node := node.child_by_field_name('alias')
 		import_symbols_node := node.child_by_field_name('symbols')
@@ -303,7 +294,7 @@ fn (mut ss Store) scan_imports(tree &C.TSTree, src_text []byte) []&Import {
 
 			imp_module.set_symbols(ss.cur_file_name, ...symbols)
 		}
-		
+
 		if !already_imported {
 			newly_imported_modules << imp_module
 		}
@@ -327,7 +318,9 @@ pub fn (mut store Store) import_modules_from_tree(tree &C.TSTree, src []byte, lo
 pub fn (mut store Store) import_modules(mut imports []&Import) {
 	mut parser := tree_sitter.new_parser()
 	parser.set_language(v.language)
-	defer { unsafe { parser.free() } }
+	defer {
+		unsafe { parser.free() }
+	}
 
 	old_version := store.cur_version
 	old_active_path := store.cur_file_path.clone()
@@ -354,11 +347,8 @@ pub fn (mut store Store) import_modules(mut imports []&Import) {
 
 			// Import module but from different lookup oath other than the project
 			modules_from_dir := os.join_path(store.cur_dir, 'modules')
-			store.import_modules_from_tree(tree_from_import, content,
-				modules_from_dir,
-				old_active_dir,
-				modules_from_old_dir
-			)
+			store.import_modules_from_tree(tree_from_import, content, modules_from_dir,
+				old_active_dir, modules_from_old_dir)
 			imported++
 
 			store.register_symbols_from_tree(tree_from_import, content)

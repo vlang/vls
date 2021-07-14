@@ -2,11 +2,11 @@ module analyzer
 
 pub struct ScopeTree {
 pub mut:
-	parent &ScopeTree = &ScopeTree(0)
+	parent     &ScopeTree = &ScopeTree(0)
 	start_byte u32
-	end_byte u32
-	symbols []&Symbol
-	children []&ScopeTree
+	end_byte   u32
+	symbols    []&Symbol
+	children   []&ScopeTree
 }
 
 [unsafe]

@@ -3,9 +3,9 @@ module analyzer
 import os
 
 const (
-	v_ext = '.v'
-	user_os = os.user_os()
-	c_file_suffixes = [
+	v_ext                           = '.v'
+	user_os                         = os.user_os()
+	c_file_suffixes                 = [
 		'_windows',
 		'_linux',
 		'_macos',
@@ -16,22 +16,22 @@ const (
 		'_openbsd',
 		'_netbsd',
 		'_dragonfly',
-		'_solaris'
+		'_solaris',
 		'_nix',
 		'_native',
 		// '.freestanding'
 	]
 	os_file_specific_suffix_indices = map{
-		'windows': [0],
-		'linux': [1, 11],
-		'macos': [2, 3, 11],
-		'ios': [4, 11],
-		'android': [5, 11],
-		'freebsd': [6, 11],
-		'openbsd': [7, 11],
-		'netbsd': [8, 11],
-		'dragonfly': [9, 11],
-		'solaris': [10, 11]
+		'windows':   [0]
+		'linux':     [1, 11]
+		'macos':     [2, 3, 11]
+		'ios':       [4, 11]
+		'android':   [5, 11]
+		'freebsd':   [6, 11]
+		'openbsd':   [7, 11]
+		'netbsd':    [8, 11]
+		'dragonfly': [9, 11]
+		'solaris':   [10, 11]
 	}
 )
 
@@ -40,11 +40,11 @@ fn should_analyze_file_c(file_name string) bool {
 		return false
 	}
 
-	for os, file_suffix_indices in os_file_specific_suffix_indices {
+	for os, file_suffix_indices in analyzer.os_file_specific_suffix_indices {
 		for i in file_suffix_indices {
-			suffix := c_file_suffixes[i]
+			suffix := analyzer.c_file_suffixes[i]
 			if file_name.ends_with(suffix + '.v') || file_name.ends_with(suffix + '.c.v') {
-				if os != user_os {
+				if os != analyzer.user_os {
 					return false
 				}
 
@@ -111,31 +111,35 @@ fn should_analyze_file(file_name string) bool {
 }
 
 struct ImportPathIterator {
-	start_path string
-	lookup_paths []string
+	start_path            string
+	lookup_paths          []string
 	fallback_lookup_paths []string
 mut:
-	idx int
-	in_start bool = true
+	idx         int
+	in_start    bool = true
 	in_fallback bool
 }
 
 fn (mut iter ImportPathIterator) next() ?string {
 	if iter.in_start {
-		defer { iter.in_start = false }
+		defer {
+			iter.in_start = false
+		}
 		return iter.start_path
 	}
-	
+
 	if !iter.in_fallback && iter.idx >= iter.lookup_paths.len {
 		iter.in_fallback = true
 		iter.idx = 0
 	}
-	
+
 	if iter.in_fallback && iter.idx >= iter.fallback_lookup_paths.len {
 		return error('reached limit')
 	}
 
-	defer { iter.idx++ }
+	defer {
+		iter.idx++
+	}
 	return if !iter.in_fallback {
 		iter.lookup_paths[iter.idx]
 	} else {

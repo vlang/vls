@@ -4,7 +4,7 @@ import json
 import lsp
 import os
 
-// NOTE: skip module_symbols_selector for now, see note in text_synchronization.v#parse_imports 
+// NOTE: skip module_symbols_selector for now, see note in text_synchronization.v#parse_imports
 const completion_inputs = map{
 	'assign.vv':                            lsp.CompletionParams{
 		context: lsp.CompletionContext{.trigger_character, ' '}

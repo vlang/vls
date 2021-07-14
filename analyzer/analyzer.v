@@ -15,7 +15,7 @@ fn (mut tc TreeCursor) next() bool {
 		if !tc.cursor.next() {
 			return false
 		}
-		
+
 		rep++
 	}
 
@@ -38,10 +38,9 @@ fn (tc &TreeCursor) free() {
 pub struct Analyzer {
 pub mut:
 	cur_file_path string
-	cursor  	TreeCursor
-	src_text []byte
-	store &Store = &Store(0)
-
+	cursor        TreeCursor
+	src_text      []byte
+	store         &Store = &Store(0)
 	// skips the local scopes and registers only
 	// the top-level ones regardless of its
 	// visibility
@@ -52,7 +51,7 @@ fn (mut an Analyzer) report(msg string, node C.TSNode) {
 	an.store.report_error(report_error(msg, node.range()))
 }
 
-fn (mut an Analyzer) import_decl(node C.TSNode) {	
+fn (mut an Analyzer) import_decl(node C.TSNode) {
 	// Most of the checking is already done in `import_modules_from_trees`
 	// Check only the symbols if they are available
 	symbols := node.child_by_field_name('symbols')
@@ -79,13 +78,13 @@ fn (mut an Analyzer) import_decl(node C.TSNode) {
 
 		symbol_name := sym.get_text(an.src_text)
 		got_sym := an.store.symbols[module_path].get(symbol_name) or {
-			an.report('Symbol `${symbol_name}` not found', sym)
+			an.report('Symbol `$symbol_name` not found', sym)
 			// unsafe { symbol_name.free() }
 			continue
 		}
 
 		if int(got_sym.access) < int(SymbolAccess.public) {
-			an.report('Symbol `${symbol_name} not public', sym)
+			an.report('Symbol `$symbol_name not public', sym)
 			// unsafe { symbol_name.free() }
 			continue
 		}
@@ -93,31 +92,26 @@ fn (mut an Analyzer) import_decl(node C.TSNode) {
 }
 
 fn (mut an Analyzer) const_decl(node C.TSNode) {
-	
 }
 
 fn (mut an Analyzer) struct_decl(node C.TSNode) {
-
 }
 
 fn (mut an Analyzer) interface_decl(node C.TSNode) {
-
 }
 
 fn (mut an Analyzer) enum_decl(node C.TSNode) {
-
 }
 
 fn (mut an Analyzer) fn_decl(node C.TSNode) {
-
 }
 
 pub fn (mut an Analyzer) top_level_statement() {
 	current_node := an.cursor.current_node()
 	node_type := current_node.get_type()
-	defer { 
+	defer {
 		an.cursor.next()
-		// unsafe { node_type.free() } 
+		// unsafe { node_type.free() }
 	}
 
 	match node_type {
@@ -144,7 +138,7 @@ pub fn (mut an Analyzer) top_level_statement() {
 }
 
 pub fn (mut store Store) analyze(tree &C.TSTree, src_text []byte) {
-	mut an := analyzer.Analyzer{}
+	mut an := Analyzer{}
 	an.store = unsafe { store }
 	an.src_text = src_text
 	root_node := tree.root_node()

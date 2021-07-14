@@ -6,7 +6,7 @@ import lsp
 // show_diagnostics converts the file ast's errors and warnings and publishes them to the editor
 fn (mut ls Vls) show_diagnostics(uri lsp.DocumentUri) {
 	// TODO: make reports as a map, do not clear it
-	// use 
+	// use
 	mut diagnostics := []lsp.Diagnostic{}
 	fs_path := uri.path()
 

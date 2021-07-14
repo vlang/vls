@@ -8,10 +8,10 @@ pub enum MessageKind {
 
 pub struct Message {
 pub:
-	kind MessageKind = .error
+	kind      MessageKind = .error
 	file_path string
-	range C.TSRange
-	content string
+	range     C.TSRange
+	content   string
 }
 
 pub fn (msgs []Message) has_range(range C.TSRange) bool {
@@ -25,15 +25,15 @@ pub fn (msgs []Message) has_range(range C.TSRange) bool {
 }
 
 pub struct AnalyzerError {
-	msg string
-	code int
+	msg   string
+	code  int
 	range C.TSRange
 }
 
 pub fn (info AnalyzerError) str() string {
-	start := '{${info.range.start_point.row}:${info.range.start_point.column}}'
-	end := '{${info.range.end_point.row}:${info.range.end_point.column}}'
-	return '[${start} -> ${end}] ${info.msg} (${info.code})'
+	start := '{$info.range.start_point.row:$info.range.start_point.column}'
+	end := '{$info.range.end_point.row:$info.range.end_point.column}'
+	return '[$start -> $end] $info.msg ($info.code)'
 }
 
 fn report_error(msg string, range C.TSRange) IError {
@@ -46,10 +46,10 @@ fn report_error(msg string, range C.TSRange) IError {
 
 pub fn (mut ss Store) report_error(err IError) {
 	if err is AnalyzerError {
-		ss.report({ 
+		ss.report(
 			content: err.msg
 			range: err.range
 			file_path: ss.cur_file_path.clone()
-		})
+		)
 	}
 }

@@ -65,7 +65,7 @@ interface ReceiveSender {
 
 struct File {
 mut:
-	source []byte
+	source  []byte
 	version int = 1
 }
 
@@ -79,19 +79,19 @@ fn (file &File) free() {
 
 struct Vls {
 mut:
-	parser     &C.TSParser
-	store      analyzer.Store
-	status     ServerStatus = .off
-	sources map[string]File
-	trees map[string]&C.TSTree
-	root_uri                 lsp.DocumentUri
-	is_typing bool
-	typing_ch chan int
-	enabled_features         []Feature = vls.default_features_list
-	capabilities             lsp.ServerCapabilities
-	logger                   log.Logger
-	panic_count              int
-	debug                    bool
+	parser           &C.TSParser
+	store            analyzer.Store
+	status           ServerStatus = .off
+	sources          map[string]File
+	trees            map[string]&C.TSTree
+	root_uri         lsp.DocumentUri
+	is_typing        bool
+	typing_ch        chan int
+	enabled_features []Feature = vls.default_features_list
+	capabilities     lsp.ServerCapabilities
+	logger           log.Logger
+	panic_count      int
+	debug            bool
 	// client_capabilities lsp.ClientCapabilities
 pub mut:
 	// TODO: replace with io.ReadWriter
@@ -109,7 +109,7 @@ pub fn new(io ReceiveSender) Vls {
 		parser: parser
 		debug: io.debug
 		logger: log.new(.text)
-		store: analyzer.Store {
+		store: analyzer.Store{
 			default_import_paths: [vlib_path, vmodules_path]
 		}
 	}
@@ -290,7 +290,9 @@ fn monitor_changes(mut ls Vls) {
 				ls.is_typing = a != 0
 			}
 			> 150 * time.millisecond {
-				if !ls.is_typing { continue }
+				if !ls.is_typing {
+					continue
+				}
 				uri := lsp.document_uri_from_path(ls.store.cur_file_path)
 				analyze(mut ls.store, uri, ls.root_uri, ls.trees[uri], ls.sources[uri])
 				ls.is_typing = false

@@ -15,10 +15,8 @@ const (
 fn analyze(mut store analyzer.Store, uri lsp.DocumentUri, root_uri lsp.DocumentUri, tree &C.TSTree, file File) {
 	store.clear_messages()
 	store.set_active_file_path(uri.path(), file.version)
-	store.import_modules_from_tree(tree, file.source,
-		os.join_path(uri.dir_path(), 'modules'),
-		root_uri.path()
-	)
+	store.import_modules_from_tree(tree, file.source, os.join_path(uri.dir_path(), 'modules'),
+		root_uri.path())
 
 	store.register_symbols_from_tree(tree, file.source)
 	store.cleanup_imports()
@@ -37,7 +35,9 @@ fn (mut ls Vls) did_open(_ int, params string) {
 	new_src := src.bytes()
 	new_tree := ls.parser.parse_string(src)
 
-	ls.sources[uri] = File{source: new_src}
+	ls.sources[uri] = File{
+		source: new_src
+	}
 	ls.trees[uri] = new_tree
 
 	analyze(mut ls.store, uri, ls.root_uri, new_tree, ls.sources[uri])
@@ -74,13 +74,14 @@ fn (mut ls Vls) did_change(_ int, params string) {
 
 		// remove immediately the symbol
 		if content_change.text.len == 0 && diff < 0 {
-			deleted := ls.store.delete_symbol_at_node(ls.trees[uri].root_node(), old_src, {
+			deleted := ls.store.delete_symbol_at_node(ls.trees[uri].root_node(), old_src,
+				
 				start_point: lsp_pos_to_tspoint(start_pos)
 				end_point: lsp_pos_to_tspoint(old_end_pos)
 				start_byte: u32(start_idx)
 				end_byte: u32(old_end_idx)
-			})
-			
+			)
+
 			ls.log_message(deleted.str(), .info)
 		}
 
@@ -124,14 +125,14 @@ fn (mut ls Vls) did_change(_ int, params string) {
 		}
 
 		// edit the tree
-		ls.trees[uri].edit({
+		ls.trees[uri].edit(
 			start_byte: u32(start_idx)
 			old_end_byte: u32(old_end_idx)
 			new_end_byte: u32(new_end_idx)
 			start_point: lsp_pos_to_tspoint(start_pos)
 			old_end_point: lsp_pos_to_tspoint(old_end_pos)
 			new_end_point: lsp_pos_to_tspoint(new_end_pos)
-		})
+		)
 
 		unsafe { content_change.text.free() }
 	}
@@ -139,11 +140,10 @@ fn (mut ls Vls) did_change(_ int, params string) {
 	new_tree := ls.parser.parse_string_with_old_tree(new_src.bytestr(), ls.trees[uri])
 	// ls.log_message('new tree: ${new_tree.root_node().sexpr_str()}', .info)
 
-	unsafe { 
+	unsafe {
 		ls.trees[uri].free()
 		ls.sources[uri].source.free()
 	}
-
 	ls.trees[uri] = new_tree
 	ls.sources[uri].source = new_src
 	ls.sources[uri].version = did_change_params.text_document.version
@@ -166,7 +166,6 @@ fn (mut ls Vls) did_close(_ int, params string) {
 		ls.sources[uri].free()
 		ls.trees[uri].free()
 	}
-
 	ls.store.delete(uri.dir_path())
 
 	// unsafe { ls.store.opened_scopes[uri.path()].free() }

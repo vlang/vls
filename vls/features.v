@@ -195,9 +195,9 @@ fn (mut ls Vls) signature_help(id int, params string) {
 		ls.send_null(id)
 		return
 	}
- 
+
 	// Fetch the symbol and report on it.
-	node_text := node.get_text(ls.sources[uri].source) 
+	node_text := node.get_text(ls.sources[uri].source)
 	symbol := ls.store.find_symbol(uri, node_text) or { analyzer.void_type }
 	if symbol.kind == .placeholder || symbol.name == 'void' {
 		ls.send_null(id)
@@ -206,26 +206,26 @@ fn (mut ls Vls) signature_help(id int, params string) {
 
 	// Build the message to report.
 	// TODO: Add more than variables once the analyzer reports them, which it
-	// does not seem to be the case right now. 
+	// does not seem to be the case right now.
 	title := symbol.str()
 	access := match symbol.access {
 		.private {
-			"Private"
+			'Private'
 		}
 		.private_mutable {
-			"Private and mutable"
+			'Private and mutable'
 		}
 		.public {
-			"Public"
+			'Public'
 		}
 		.public_mutable {
-			"Public and mutable"
+			'Public and mutable'
 		}
 		.global {
-			"Global"
+			'Global'
 		}
 	}
-	description := '*${access} symbol defined in [${symbol.file_path[7..]}](${symbol.file_path})*'
+	description := '*$access symbol defined in [${symbol.file_path[7..]}]($symbol.file_path)*'
 
 	// Send the final message.
 	ls.send(jsonrpc.Response<lsp.SignatureHelp>{
@@ -1198,7 +1198,7 @@ fn (mut ls Vls) folding_range(id int, params string) {
 
 		return
 	}
-	uri  := folding_range_params.text_document.uri
+	uri := folding_range_params.text_document.uri
 	tree := ls.trees[uri]
 
 	root_node := tree.root_node()

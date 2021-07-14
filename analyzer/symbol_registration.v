@@ -3,24 +3,22 @@ module analyzer
 import os
 
 const (
-	mut_struct_keyword = 'mut:'
-	pub_struct_keyword = 'pub:'
+	mut_struct_keyword     = 'mut:'
+	pub_struct_keyword     = 'pub:'
 	pub_mut_struct_keyword = 'pub mut:'
-	global_struct_keyword = '__global:'
+	global_struct_keyword  = '__global:'
 )
 
 struct SymbolRegistration {
 mut:
-	store &Store = &Store(0)
-	cursor TreeCursor
+	store    &Store = &Store(0)
+	cursor   TreeCursor
 	src_text []byte
-
 	// skips the local scopes and registers only
 	// the top-level ones regardless of its
 	// visibility
 	is_import bool
 }
-
 
 fn (sr &SymbolRegistration) new_top_level_symbol(identifier_node C.TSNode, access SymbolAccess) ?&Symbol {
 	id_node_type := identifier_node.get_type()
@@ -48,7 +46,7 @@ fn (sr &SymbolRegistration) new_top_level_symbol(identifier_node C.TSNode, acces
 			// type_identifier, binded_type
 			symbol.name = identifier_node.get_text(sr.src_text)
 			symbol.range = identifier_node.range()
-			
+
 			if id_node_type == 'binded_type' {
 				sym_language := identifier_node.child_by_field_name('language').get_text(sr.src_text)
 				symbol.language = match sym_language {
@@ -57,7 +55,7 @@ fn (sr &SymbolRegistration) new_top_level_symbol(identifier_node C.TSNode, acces
 					else { symbol.language }
 				}
 			}
-			
+
 			// for function names with generic parameters
 			if identifier_node.next_named_sibling().get_type() == 'type_parameters' {
 				symbol.generic_placeholder_len = int(identifier_node.next_named_sibling().named_child_count())
@@ -70,11 +68,11 @@ fn (sr &SymbolRegistration) new_top_level_symbol(identifier_node C.TSNode, acces
 
 fn (mut sr SymbolRegistration) find_symbol_by_node(node C.TSNode) &Symbol {
 	if node.is_null() {
-		return analyzer.void_type
+		return void_type
 	}
 
 	sym_kind, module_name, symbol_name := symbol_name_from_node(node, sr.src_text)
-	defer { 
+	defer {
 		unsafe {
 			module_name.free()
 			symbol_name.free()
@@ -90,21 +88,19 @@ fn (mut sr SymbolRegistration) find_symbol_by_node(node C.TSNode) &Symbol {
 
 		match sym_kind {
 			.array_ {
-				new_sym.add_child(mut sr.find_symbol_by_node(node.child_by_field_name('element'))) or { }
+				new_sym.add_child(mut sr.find_symbol_by_node(node.child_by_field_name('element'))) or {}
 			}
 			.map_ {
-				new_sym.add_child(mut sr.find_symbol_by_node(node.child_by_field_name('key'))) or { }
-				new_sym.add_child(mut sr.find_symbol_by_node(node.child_by_field_name('value'))) or { }
+				new_sym.add_child(mut sr.find_symbol_by_node(node.child_by_field_name('key'))) or {}
+				new_sym.add_child(mut sr.find_symbol_by_node(node.child_by_field_name('value'))) or {}
 			}
 			.chan_, .ref {
-				new_sym.add_child(mut sr.find_symbol_by_node(node.named_child(0))) or { }
+				new_sym.add_child(mut sr.find_symbol_by_node(node.named_child(0))) or {}
 			}
 			else {}
 		}
 
-		sr.store.register_symbol(mut new_sym) or {
-			analyzer.void_type
-		}
+		sr.store.register_symbol(mut new_sym) or { analyzer.void_type }
 	}
 }
 
@@ -132,14 +128,15 @@ fn (mut sr SymbolRegistration) const_decl(const_node C.TSNode) []&Symbol {
 			continue
 		}
 
-		consts << &Symbol{	
+		consts << &Symbol{
 			name: spec_node.child_by_field_name('name').get_text(sr.src_text)
 			kind: .variable
 			access: access
 			range: spec_node.range()
 			file_path: sr.store.cur_file_path
 			file_version: sr.store.cur_version
-			return_type: sr.store.infer_value_type_from_node(spec_node.child_by_field_name('value'), sr.src_text)
+			return_type: sr.store.infer_value_type_from_node(spec_node.child_by_field_name('value'),
+				sr.src_text)
 		}
 	}
 
@@ -151,7 +148,7 @@ fn (mut sr SymbolRegistration) struct_decl(struct_decl_node C.TSNode) ?&Symbol {
 	if struct_decl_node.child(0).get_type() == 'pub' {
 		access = .public
 	}
-	
+
 	mut sym := sr.new_top_level_symbol(struct_decl_node.named_child(0), access) ?
 	sym.kind = .struct_
 
@@ -160,7 +157,7 @@ fn (mut sr SymbolRegistration) struct_decl(struct_decl_node C.TSNode) ?&Symbol {
 
 	mut scope := sr.get_scope(decl_list_node) ?
 	mut field_access := SymbolAccess.private
-	
+
 	for i in 0 .. fields_len {
 		field_node := decl_list_node.named_child(i)
 		field_type := field_node.get_type()
@@ -191,7 +188,7 @@ fn (mut sr SymbolRegistration) struct_decl(struct_decl_node C.TSNode) ?&Symbol {
 					file_version: sr.store.cur_version
 				}
 
-				sym.add_child(mut field_sym) or { 
+				sym.add_child(mut field_sym) or {
 					// eprintln(err)
 				}
 
@@ -211,7 +208,7 @@ fn (mut sr SymbolRegistration) interface_decl(interface_decl_node C.TSNode) ?&Sy
 	if interface_decl_node.child(0).get_type() == 'pub' {
 		access = SymbolAccess.public
 	}
-	
+
 	mut sym := sr.new_top_level_symbol(interface_decl_node.named_child(0), access) ?
 	sym.kind = .interface_
 
@@ -234,8 +231,8 @@ fn (mut sr SymbolRegistration) interface_decl(interface_decl_node C.TSNode) ?&Sy
 				mut children := sr.extract_parameter_list(param_node)
 				for j := 0; j < children.len; j++ {
 					mut child := children[j]
-					sym.add_child(mut child) or { 
-						// eprintln(err) 
+					sym.add_child(mut child) or {
+						// eprintln(err)
 						continue
 					}
 				}
@@ -253,11 +250,13 @@ fn (mut sr SymbolRegistration) interface_decl(interface_decl_node C.TSNode) ?&Sy
 					file_version: sr.store.cur_version
 				}
 
-				sym.add_child(mut field_sym) or { 
+				sym.add_child(mut field_sym) or {
 					// eprintln(err)
 				}
 			}
-			else { continue }
+			else {
+				continue
+			}
 		}
 	}
 
@@ -287,9 +286,7 @@ fn (mut sr SymbolRegistration) enum_decl(enum_decl_node C.TSNode) ?&Symbol {
 				file_path: os.join_path(sr.store.auto_imports[''], 'builtin.v')
 				kind: .placeholder
 			}
-			sr.store.register_symbol(mut new_int_symbol) or {
-				analyzer.void_type
-			}
+			sr.store.register_symbol(mut new_int_symbol) or { analyzer.void_type }
 		}
 
 		mut member_sym := &Symbol{
@@ -302,7 +299,7 @@ fn (mut sr SymbolRegistration) enum_decl(enum_decl_node C.TSNode) ?&Symbol {
 			file_version: sr.store.cur_version
 		}
 
-		sym.add_child(mut member_sym) or { 
+		sym.add_child(mut member_sym) or {
 			sr.store.report_error(AnalyzerError{
 				msg: err.msg
 				range: member_node.range()
@@ -337,7 +334,7 @@ fn (mut sr SymbolRegistration) fn_decl(fn_node C.TSNode) ?&Symbol {
 		mut children := sr.extract_parameter_list(receiver_node)
 		// just use a loop for convinience
 		for i := 0; i < children.len; i++ {
-			if !isnil(children[i].return_type)  {
+			if !isnil(children[i].return_type) {
 				children[i].return_type.add_child(mut fn_sym) ?
 			}
 		}
@@ -373,7 +370,9 @@ fn (mut sr SymbolRegistration) fn_decl(fn_node C.TSNode) ?&Symbol {
 }
 
 fn (mut sr SymbolRegistration) top_level_statement() ? {
-	defer { sr.cursor.next() }
+	defer {
+		sr.cursor.next()
+	}
 
 	mut node_type := sr.cursor.current_node().get_type()
 	if node_type == 'source_file' {
@@ -394,7 +393,7 @@ fn (mut sr SymbolRegistration) top_level_statement() ? {
 					// 	// eprintln('Unknown error')
 					// }
 					continue
-				}	
+				}
 
 				global_scope.register(const_sym)
 			}
@@ -425,7 +424,7 @@ fn (mut sr SymbolRegistration) extract_block(node C.TSNode) ?[]&Symbol {
 	if node.get_type() != 'block' || sr.is_import {
 		return error('node should be a `block` and cannot be used in `is_import` mode.')
 	}
-	
+
 	mut vars := []&Symbol{}
 	body_sym_len := node.named_child_count()
 
