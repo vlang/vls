@@ -130,6 +130,10 @@ pub fn (node C.TSNode) get_text(text []byte) string {
 
 [inline]
 pub fn (node C.TSNode) sexpr_str() string {
+	if node.is_null() {
+		return '<null node>'
+	}
+
 	sexpr := C.ts_node_string(node)
 	return unsafe { sexpr.vstring() }
 }
@@ -171,8 +175,8 @@ pub fn (node C.TSNode) range() C.TSRange {
 	return C.TSRange{
 		start_point: node.start_point()
 		end_point: node.end_point()
-		start_byte: C.ts_node_start_byte(node)
-		end_byte: C.ts_node_end_byte(node)
+		start_byte: node.start_byte()
+		end_byte: node.end_byte()
 	}
 }
 

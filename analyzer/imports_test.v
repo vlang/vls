@@ -28,7 +28,7 @@ fn test_scan_imports() ? {
 	tree := parse_content()
 	mut store := Store{}
 
-	store.set_active_file_path(file_path)
+	store.set_active_file_path(file_path, 1)
 	imports := store.scan_imports(tree, sample_content_bytes)
 	assert imports.len == 2
 	assert imports[0].module_name == 'os'
@@ -39,7 +39,7 @@ fn test_inject_paths_of_new_imports() ? {
 	tree := parse_content()
 	mut store := Store{}
 
-	store.set_active_file_path(file_path)
+	store.set_active_file_path(file_path, 1)
 	mut imports := store.scan_imports(tree, sample_content_bytes)
 	assert imports.len == 2
 	assert imports[0].module_name == 'os'
@@ -58,7 +58,7 @@ fn test_import_modules_from_tree() ? {
 		default_import_paths: test_lookup_paths
 	}
 
-	store.set_active_file_path(file_path)
+	store.set_active_file_path(file_path, 1)
 	store.import_modules_from_tree(tree, sample_content_bytes)
 
 	assert store.imports[store.cur_dir].len == 2
@@ -81,7 +81,7 @@ fn test_import_modules_with_edits() ? {
 	mut store := Store{
 		default_import_paths: test_lookup_paths
 	}
-	store.set_active_file_path(file_path)
+	store.set_active_file_path(file_path, 1)
 	store.import_modules_from_tree(tree, sample_content2.bytes())
 	store.cleanup_imports()
 

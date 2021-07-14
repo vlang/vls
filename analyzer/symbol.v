@@ -97,6 +97,7 @@ pub mut:
 	generic_placeholder_len int
 	children []&Symbol
 	file_path string
+	file_version int = 1
 }
 
 pub fn (info &Symbol) gen_str() string {
@@ -179,6 +180,38 @@ pub fn (infos []&Symbol) index(name string) int {
 
 	return -1
 }
+
+pub fn (infos []&Symbol) index_by_row(row u32) int {
+	for i, v in infos {
+		if v.range.start_point.row == row {
+			return i
+		}
+	}
+
+	return -1
+}
+
+// pub fn (mut infos []&Symbol) remove_symbol_by_range(file_path string, range C.TSRange) {
+// 	mut to_delete_i := -1
+// 	for i, v in infos {
+// 		// not the best solution so far :(
+// 		if v.file_path == file_path {
+// 			eprintln('${v.name} ${v.range}')
+// 		}
+// 		if v.file_path == file_path && v.range.eq(range) {
+// 			eprintln('deleted ${v.name}')
+// 			to_delete_i = i
+// 			break
+// 		}
+// 	}
+
+// 	if to_delete_i == -1 {
+// 		return
+// 	}
+
+// 	unsafe { infos[to_delete_i].free() }
+// 	infos.delete(to_delete_i)
+// }
 
 pub fn (infos []&Symbol) exists(name string) bool {
 	return infos.index(name) != -1

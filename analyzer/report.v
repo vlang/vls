@@ -14,6 +14,16 @@ pub:
 	content string
 }
 
+pub fn (msgs []Message) has_range(range C.TSRange) bool {
+	for m in msgs {
+		if m.range.eq(range) {
+			return true
+		}
+	}
+
+	return false
+}
+
 pub struct AnalyzerError {
 	msg string
 	code int

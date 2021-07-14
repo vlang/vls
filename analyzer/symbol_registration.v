@@ -31,6 +31,7 @@ fn (sr &SymbolRegistration) new_top_level_symbol(identifier_node C.TSNode, acces
 	mut symbol := Symbol{
 		access: access
 		file_path: sr.store.cur_file_path
+		file_version: sr.store.cur_version
 	}
 
 	match id_node_type {
@@ -137,6 +138,7 @@ fn (mut sr SymbolRegistration) const_decl(const_node C.TSNode) []&Symbol {
 			access: access
 			range: spec_node.range()
 			file_path: sr.store.cur_file_path
+			file_version: sr.store.cur_version
 			return_type: sr.store.infer_value_type_from_node(spec_node.child_by_field_name('value'), sr.src_text)
 		}
 	}
@@ -186,6 +188,7 @@ fn (mut sr SymbolRegistration) struct_decl(struct_decl_node C.TSNode) ?&Symbol {
 					access: field_access
 					return_type: field_typ
 					file_path: sr.store.cur_file_path
+					file_version: sr.store.cur_version
 				}
 
 				sym.add_child(mut field_sym) or { 
@@ -247,6 +250,7 @@ fn (mut sr SymbolRegistration) interface_decl(interface_decl_node C.TSNode) ?&Sy
 					access: access
 					return_type: field_typ
 					file_path: sr.store.cur_file_path
+					file_version: sr.store.cur_version
 				}
 
 				sym.add_child(mut field_sym) or { 
@@ -295,6 +299,7 @@ fn (mut sr SymbolRegistration) enum_decl(enum_decl_node C.TSNode) ?&Symbol {
 			access: access
 			return_type: int_type
 			file_path: sr.store.cur_file_path
+			file_version: sr.store.cur_version
 		}
 
 		sym.add_child(mut member_sym) or { 

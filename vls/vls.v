@@ -63,16 +63,26 @@ interface ReceiveSender {
 	receive() ?string
 }
 
+struct File {
+mut:
+	source []byte
+	version int = 1
+}
+
+[unsafe]
+fn (file &File) free() {
+	unsafe {
+		file.source.free()
+		file.version = 1
+	}
+}
+
 struct Vls {
 mut:
-	// NB: a base table is required since this is where we
-	// are gonna store the information for the builtin types
-	// which are only parsed once.
-	// base_table &ast.Table
 	parser     &C.TSParser
 	store      analyzer.Store
 	status     ServerStatus = .off
-	sources map[string][]byte
+	sources map[string]File
 	trees map[string]&C.TSTree
 	root_uri                 lsp.DocumentUri
 	is_typing bool
