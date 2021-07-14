@@ -6,7 +6,6 @@
 #include "api.h"
 #include "./alloc.h"
 #include "./array.h"
-#include "./atomic.h"
 #include "./clock.h"
 #include "./error_costs.h"
 #include "./get_changed_ranges.h"
@@ -18,6 +17,7 @@
 #include "./stack.h"
 #include "./subtree.h"
 #include "./tree.h"
+#include "./ts_atomic.h"
 
 #define LOG(...)                                                                            \
   if (self->lexer.logger.log || self->dot_graph_file) {                                     \
@@ -1426,7 +1426,7 @@ static bool ts_parser__advance(
     }
     if (
       self->operation_count == 0 &&
-      ((self->cancellation_flag && atomic_load(self->cancellation_flag)) ||
+      ((self->cancellation_flag && ts_atomic_load(self->cancellation_flag)) ||
        (!clock_is_null(self->end_clock) && clock_is_gt(clock_now(), self->end_clock)))
     ) {
       ts_subtree_release(&self->tree_pool, lookahead);
