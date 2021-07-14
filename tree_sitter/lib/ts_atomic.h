@@ -39,7 +39,7 @@ static inline uint32_t ts_atomic_dec(volatile uint32_t *p) {
 
 static inline size_t ts_atomic_load(const volatile size_t *p) {
 #ifdef __ATOMIC_RELAXED
-  return __ts_atomic_load_n(p, __ATOMIC_RELAXED);
+  return __atomic_load_n(p, __ATOMIC_RELAXED);
 #else
   return __sync_fetch_and_add((volatile size_t *)p, 0);
 #endif
