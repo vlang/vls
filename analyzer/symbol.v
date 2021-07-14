@@ -102,6 +102,8 @@ pub mut:
 	file_version            int = 1
 }
 
+const kinds_in_multi_return_to_be_excluded = [SymbolKind.function, .variable, .field]
+
 pub fn (info &Symbol) gen_str() string {
 	if isnil(info) {
 		return 'nil symbol'
@@ -135,9 +137,9 @@ pub fn (info &Symbol) gen_str() string {
 		.multi_return {
 			sb.write_b(`(`)
 			for v in info.children {
-				// if v.kind != .function || v.kind != .variable || v.kind != .field {
-				sb.write_string(v.gen_str())
-				//}
+				if v.kind !in kinds_in_multi_return_to_be_excluded {
+					sb.write_string(v.gen_str())
+				}
 			}
 			sb.write_b(`)`)
 		}
