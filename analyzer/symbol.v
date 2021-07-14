@@ -1,8 +1,8 @@
 module analyzer
+
 // it should be imported just to have those C type symbols available
 // import tree_sitter
 // import os
-
 import strings
 
 // pub interface ISymbol {
@@ -82,31 +82,35 @@ pub fn (sa SymbolAccess) str() string {
 	}
 }
 
-pub const void_type = &Symbol{ name: 'void' }
+pub const void_type = &Symbol{
+	name: 'void'
+}
 
 [heap]
 pub struct Symbol {
 pub mut:
-	name string
-	kind SymbolKind
-	access SymbolAccess
-	range C.TSRange
-	parent &Symbol = analyzer.void_type
-	return_type &Symbol = analyzer.void_type
-	language SymbolLanguage = .v
+	name                    string
+	kind                    SymbolKind
+	access                  SymbolAccess
+	range                   C.TSRange
+	parent                  &Symbol        = analyzer.void_type
+	return_type             &Symbol        = analyzer.void_type
+	language                SymbolLanguage = .v
 	generic_placeholder_len int
-	children []&Symbol
-	file_path string
-	file_version int = 1
+	children                []&Symbol
+	file_path               string
+	file_version            int = 1
 }
 
 pub fn (info &Symbol) gen_str() string {
 	if isnil(info) {
 		return 'nil symbol'
 	}
-	
+
 	mut sb := strings.new_builder(100)
-	defer { unsafe { sb.free() } }
+	defer {
+		unsafe { sb.free() }
+	}
 
 	match info.kind {
 		.ref {
@@ -131,9 +135,9 @@ pub fn (info &Symbol) gen_str() string {
 		.multi_return {
 			sb.write_b(`(`)
 			for v in info.children {
-				if v.kind != .function || v.kind != .variable || v.kind != .field {
-					sb.write_string(v.gen_str())
-				}
+				// if v.kind != .function || v.kind != .variable || v.kind != .field {
+				sb.write_string(v.gen_str())
+				//}
 			}
 			sb.write_b(`)`)
 		}
@@ -155,8 +159,8 @@ pub fn (info &Symbol) gen_str() string {
 			sb.write_b(` `)
 			sb.write_string(info.return_type.gen_str())
 		}
-		else { 
-			sb.write_string(info.name) 
+		else {
+			sb.write_string(info.name)
 		}
 	}
 
@@ -168,7 +172,7 @@ pub fn (sym &Symbol) str() string {
 }
 
 pub fn (infos []&Symbol) str() string {
-	return '[' +  infos.map(it.gen_str()).join(', ') + ']'
+	return '[' + infos.map(it.gen_str()).join(', ') + ']'
 }
 
 pub fn (infos []&Symbol) index(name string) int {
@@ -242,18 +246,18 @@ pub fn (mut info Symbol) add_child(mut new_child Symbol, add_as_parent ...bool) 
 pub fn (sym &Symbol) free() {
 	unsafe {
 		sym.name.free()
-		
+
 		for v in sym.children {
 			v.free()
 		}
-	
+
 		sym.children.free()
 		// sym.file_path.free()
 	}
 }
 
 // pub fn (ars ArraySymbol) str() string {
-// 	return 
+// 	return
 // }
 
 // pub struct RefSymbol {
