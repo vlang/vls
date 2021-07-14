@@ -127,15 +127,10 @@ fn (mut ls Vls) shutdown(id int) {
 fn (mut ls Vls) exit() {
 	// saves the log into the disk
 	ls.logger.close()
+	ls.typing_ch.close()
 
 	// move exit to shutdown for now
 	// == .shutdown => 0
 	// != .shutdown => 1
-	unsafe {
-		// for key, _ in ls.tables {
-		// 	ls.free_table(key, '')
-		// }
-		// ls.base_table.free()
-	}
 	exit(int(ls.status != .shutdown))
 }

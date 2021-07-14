@@ -75,7 +75,6 @@ mut:
 	sources map[string][]byte
 	trees map[string]&C.TSTree
 	root_uri                 lsp.DocumentUri
-	// typing_ch chan int
 	is_typing bool
 	typing_ch chan int
 	enabled_features         []Feature = vls.default_features_list
@@ -274,17 +273,20 @@ fn (mut ls Vls) send_null(id int) {
 }
 
 fn monitor_changes(mut ls Vls) {
-	// This is for throttling analysis
-	select {
-		_ := <-ls.typing_ch {
-			ls.is_typing = true
-		}
-		> 500 * time.millisecond {
-			if !ls.is_typing { return }
-			uri := lsp.document_uri_from_path(ls.store.cur_file_path)
-			analyze(mut ls.store, uri, ls.root_uri, ls.trees[uri], ls.sources[uri])
-			ls.is_typing = false
-			unsafe { uri.free() }
+	// This is for debouncing/throttling analysis
+	for {
+		select {
+			a := <-ls.typing_ch {
+				ls.is_typing = a != 0
+			}
+			> 150 * time.millisecond {
+				if !ls.is_typing { continue }
+				uri := lsp.document_uri_from_path(ls.store.cur_file_path)
+				analyze(mut ls.store, uri, ls.root_uri, ls.trees[uri], ls.sources[uri])
+				ls.is_typing = false
+				ls.show_diagnostics(uri)
+				unsafe { uri.free() }
+			}
 		}
 	}
 }
