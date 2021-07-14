@@ -450,7 +450,7 @@ fn search_node_in_children(node C.TSNode, range C.TSRange) ?C.TSNode {
 	return none
 }
 
-pub fn (mut ss Store) delete_symbol_at_node(root_node &C.TSNode, src []byte, at_range C.TSRange) bool {
+pub fn (mut ss Store) delete_symbol_at_node(root_node C.TSNode, src []byte, at_range C.TSRange) bool {
 	node := search_node(root_node, at_range) or {
 		return false
 	}
