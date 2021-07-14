@@ -51,7 +51,7 @@ pub struct C.TSTree {}
 fn C.ts_tree_root_node(tree &C.TSTree) C.TSNode
 fn C.ts_tree_delete(tree &C.TSTree)
 fn C.ts_tree_edit(tree &C.TSTree, edit &C.TSInputEdit)
-fn C.ts_tree_get_changed_ranges(old_tree &C.TSTree, new_tree &C.TSTree, len u32) &C.TSRange
+fn C.ts_tree_get_changed_ranges(old_tree &C.TSTree, new_tree &C.TSTree, count &u32) &C.TSRange
 
 [inline]
 pub fn (tree &C.TSTree) root_node() C.TSNode {
@@ -65,7 +65,8 @@ pub fn (tree &C.TSTree) edit(input_edit &C.TSInputEdit) {
 
 [inline]
 pub fn (old_tree &C.TSTree) get_changed_ranges(new_tree &C.TSTree) &C.TSRange {
-	return C.ts_tree_get_changed_ranges(old_tree, new_tree, u32(0))
+	mut count := u32(0)
+	return C.ts_tree_get_changed_ranges(old_tree, new_tree, &count)
 }
 
 [unsafe]
