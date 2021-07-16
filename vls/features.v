@@ -65,17 +65,43 @@ fn (mut ls Vls) formatting(id int, params string) {
 }
 
 fn (mut ls Vls) workspace_symbol(id int, _ string) {
-	// mut symbols := []lsp.SymbolInformation{}
-	// for file_uri, file in ls.files {
-	// 	if !file_uri.starts_with(ls.root_uri.str()) {
-	// 		continue
-	// 	}
-	// 	symbols << ls.generate_symbols(file, file_uri)
-	// }
-	// ls.send(jsonrpc.Response<[]lsp.SymbolInformation>{
-	// 	id: id
-	// 	result: symbols
-	// })
+	mut workspace_symbols := []lsp.SymbolInformation{}
+
+	for dir, sym_arr in ls.store.symbols {
+		for sym in sym_arr {
+			mut kind := lsp.SymbolKind.null
+			uri := lsp.document_uri_from_path(sym.file_path)
+
+			if uri in ls.trees {
+				match sym.kind {
+						.function { kind = .function }
+						.struct_ { kind = .struct_ }
+						.enum_ { kind = .enum_ }
+						.typedef { kind = .type_parameter }
+						.interface_ { kind = .interface_ }
+						.field { kind = .field }
+						.variable { kind = .variable }
+					else { continue }
+				}
+			}
+			workspace_symbols << lsp.SymbolInformation{
+				name: sym.name
+				kind: kind
+				location: lsp.Location{
+					uri: uri
+					range: tsrange_to_lsp_range(sym.range)
+				}
+			}
+
+			println(sym.file_path)
+			unsafe { uri.free() }
+		}
+	}
+
+	ls.send(jsonrpc.Response<[]lsp.SymbolInformation>{
+		id: id
+		result: workspace_symbols
+	})
 }
 
 fn (mut ls Vls) document_symbol(id int, params string) {
