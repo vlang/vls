@@ -65,112 +65,83 @@ fn (mut ls Vls) formatting(id int, params string) {
 }
 
 fn (mut ls Vls) workspace_symbol(id int, _ string) {
-	// mut symbols := []lsp.SymbolInformation{}
-	// for file_uri, file in ls.files {
-	// 	if !file_uri.starts_with(ls.root_uri.str()) {
-	// 		continue
-	// 	}
-	// 	symbols << ls.generate_symbols(file, file_uri)
-	// }
-	// ls.send(jsonrpc.Response<[]lsp.SymbolInformation>{
-	// 	id: id
-	// 	result: symbols
-	// })
+	mut workspace_symbols := []lsp.SymbolInformation{}
+
+	for dir, sym_arr in ls.store.symbols {
+		for sym in sym_arr {
+			mut kind := lsp.SymbolKind.null
+			uri := lsp.document_uri_from_path(sym.file_path)
+
+			if uri in ls.trees {
+				match sym.kind {
+						.function { kind = .function }
+						.struct_ { kind = .struct_ }
+						.enum_ { kind = .enum_ }
+						.typedef { kind = .type_parameter }
+						.interface_ { kind = .interface_ }
+						.field { kind = .field }
+						.variable { kind = .variable }
+					else { continue }
+				}
+			}
+			workspace_symbols << lsp.SymbolInformation{
+				name: sym.name
+				kind: kind
+				location: lsp.Location{
+					uri: uri
+					range: tsrange_to_lsp_range(sym.range)
+				}
+			}
+
+			println(sym.file_path)
+			unsafe { uri.free() }
+		}
+	}
+
+	ls.send(jsonrpc.Response<[]lsp.SymbolInformation>{
+		id: id
+		result: workspace_symbols
+	})
 }
 
 fn (mut ls Vls) document_symbol(id int, params string) {
-	// document_symbol_params := json.decode(lsp.DocumentSymbolParams, params) or {
-	// 	ls.panic(err.msg)
-	// 	ls.send_null(id)
-	// 	return
-	// }
-	// uri := document_symbol_params.text_document.uri
-	// file := ls.files[uri.str()]
-	// symbols := ls.generate_symbols(file, uri)
-	// ls.send(jsonrpc.Response<[]lsp.SymbolInformation>{
-	// 	id: id
-	// 	result: symbols
-	// })
-}
+	document_symbol_params := json.decode(lsp.DocumentSymbolParams, params) or {
+		ls.panic(err.msg)
+		ls.send_null(id)
+		return
+	}
 
-fn (mut ls Vls) generate_symbols(file ast.File, uri lsp.DocumentUri) []lsp.SymbolInformation {
-	mut symbols := []lsp.SymbolInformation{}
-	// sym_is_cached := uri.str() in ls.doc_symbols
-	// if file.errors.len > 0 && sym_is_cached {
-	// 	return ls.doc_symbols[uri.str()]
-	// }
-	// dir := uri.dir()
-	// // NB: should never happen. just in case
-	// // the requests aren't executed in order
-	// if dir !in ls.tables {
-	// 	return symbols
-	// }
-	// table := ls.tables[dir]
-	// for stmt in file.stmts {
-	// 	mut name := ''
-	// 	mut kind := lsp.SymbolKind.null
-	// 	mut pos := position_to_lsp_range(stmt.pos)
-	// 	match stmt {
-	// 		ast.ConstDecl {
-	// 			for field in stmt.fields {
-	// 				symbols << lsp.SymbolInformation{
-	// 					name: field.name.all_after(file.mod.name + '.')
-	// 					kind: .constant
-	// 					location: lsp.Location{
-	// 						uri: uri
-	// 						range: position_to_lsp_range(field.pos)
-	// 					}
-	// 				}
-	// 			}
-	// 			continue
-	// 		}
-	// 		ast.EnumDecl {
-	// 			name = stmt.name
-	// 			kind = .enum_
-	// 		}
-	// 		ast.StructDecl {
-	// 			name = stmt.name
-	// 			kind = .struct_
-	// 		}
-	// 		ast.InterfaceDecl {
-	// 			name = stmt.name
-	// 			kind = .interface_
-	// 		}
-	// 		ast.TypeDecl {
-	// 			match stmt {
-	// 				ast.AliasTypeDecl, ast.FnTypeDecl, ast.SumTypeDecl {
-	// 					name = stmt.name
-	// 					kind = .type_parameter
-	// 				}
-	// 			}
-	// 		}
-	// 		ast.FnDecl {
-	// 			if pos.start.line == pos.end.line && pos.start.character == pos.end.character {
-	// 				continue
-	// 			}
-	// 			name = stmt.name
-	// 			kind = .function
-	// 			if stmt.is_method && stmt.receiver.typ != 0 {
-	// 				rec_type := table.type_to_str(stmt.receiver.typ)
-	// 				name = rec_type + '.' + name
-	// 				kind = .method
-	// 			}
-	// 		}
-	// 		else {
-	// 			continue
-	// 		}
-	// 	}
-	// 	symbols << lsp.SymbolInformation{
-	// 		name: name.all_after(file.mod.name + '.')
-	// 		kind: kind
-	// 		location: lsp.Location{
-	// 			uri: uri
-	// 			range: pos
-	// 		}
-	// 	}
-	// }
-	// ls.doc_symbols[uri.str()] = symbols
-	return symbols
+	uri := document_symbol_params.text_document.uri
+	retrieved_symbols := ls.store.get_symbols_by_file_path(uri.path())
+	mut document_symbols := []lsp.SymbolInformation{}
+
+	for sym in retrieved_symbols {
+		mut kind := lsp.SymbolKind.null
+		match sym.kind {
+				.function { kind = .function }
+				.struct_ { kind = .struct_ }
+				.enum_ { kind = .enum_ }
+				.typedef { kind = .type_parameter }
+				.interface_ { kind = .interface_ }
+				.field { kind = .field }
+				.variable { kind = .variable }
+			else { continue }
+		}
+
+		document_symbols << lsp.SymbolInformation{
+			name: sym.name
+			kind: kind
+			location: lsp.Location{
+				uri: uri
+				range: tsrange_to_lsp_range(sym.range)
+			}
+		}
+	}
+
+	ls.send(jsonrpc.Response<[]lsp.SymbolInformation>{
+		id: id
+		result: document_symbols
+	})
 }
 
 fn (mut ls Vls) signature_help(id int, params string) {
