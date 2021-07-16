@@ -79,19 +79,11 @@ fn (mut ls Vls) workspace_symbol(id int, _ string) {
 }
 
 fn (mut ls Vls) document_symbol(id int, params string) {
-	// document_symbol_params := json.decode(lsp.DocumentSymbolParams, params) or {
-	// 	ls.panic(err.msg)
-	// 	ls.send_null(id)
-	// 	return
-	// }
-	// uri := document_symbol_params.text_document.uri
-	// file := ls.files[uri.str()]
-	// symbols := ls.generate_symbols(file, uri)
-	// ls.send(jsonrpc.Response<[]lsp.SymbolInformation>{
-	// 	id: id
-	// 	result: symbols
-	// })
-}
+	document_symbol_params := json.decode(lsp.DocumentSymbolParams, params) or {
+		ls.panic(err.msg)
+		ls.send_null(id)
+		return
+	}
 
 fn (mut ls Vls) generate_symbols(file ast.File, uri lsp.DocumentUri) []lsp.SymbolInformation {
 	mut symbols := []lsp.SymbolInformation{}
@@ -171,6 +163,37 @@ fn (mut ls Vls) generate_symbols(file ast.File, uri lsp.DocumentUri) []lsp.Symbo
 	// }
 	// ls.doc_symbols[uri.str()] = symbols
 	return symbols
+	uri := document_symbol_params.text_document.uri
+	retrieved_symbols := ls.store.get_symbols_by_file_path(uri.path())
+	mut document_symbols := []lsp.SymbolInformation{}
+
+	for sym in retrieved_symbols {
+		mut kind := lsp.SymbolKind.null
+		match sym.kind {
+				.function { kind = .function }
+				.struct_ { kind = .struct_ }
+				.enum_ { kind = .enum_ }
+				.typedef { kind = .type_parameter }
+				.interface_ { kind = .interface_ }
+				.field { kind = .field }
+				.variable { kind = .variable }
+			else { continue }
+		}
+
+		document_symbols << lsp.SymbolInformation{
+			name: sym.name
+			kind: kind
+			location: lsp.Location{
+				uri: uri
+				range: tsrange_to_lsp_range(sym.range)
+			}
+		}
+	}
+
+	ls.send(jsonrpc.Response<[]lsp.SymbolInformation>{
+		id: id
+		result: document_symbols
+	})
 }
 
 fn (mut ls Vls) signature_help(id int, params string) {

@@ -47,8 +47,8 @@ pub const (
 	default_features_list = [
 		Feature.diagnostics,
 		.formatting,
-		// .document_symbol,
 		// .workspace_symbol,
+		.document_symbol,
 		.signature_help,
 		// .completion,
 		.hover,
