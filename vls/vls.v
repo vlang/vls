@@ -289,17 +289,14 @@ pub fn (mut ls Vls) start_loop() {
 	}
 }
 
-// new_scope_and_pref returns a new instance of scope and pref based on the given lookup paths
-fn new_scope_and_pref(lookup_paths ...string) (&ast.Scope, &pref.Preferences) {
+// new_pref returns a new of pref based on the given lookup paths
+fn new_pref(lookup_paths ...string) &pref.Preferences {
 	mut lpaths := [vlib_path, vmodules_path]
 	for i := lookup_paths.len - 1; i >= 0; i-- {
 		lookup_path := lookup_paths[i]
 		lpaths.prepend(lookup_path)
 	}
-	scope := &ast.Scope{
-		parent: 0
-	}
-	prefs := &pref.Preferences{
+	res := &pref.Preferences{
 		enable_globals: true
 		output_mode: .silent
 		backend: .c
@@ -307,7 +304,7 @@ fn new_scope_and_pref(lookup_paths ...string) (&ast.Scope, &pref.Preferences) {
 		lookup_path: lpaths
 		is_shared: true
 	}
-	return scope, prefs
+	return res
 }
 
 // insert_files inserts an array file asts onto the ls.files map
@@ -421,6 +418,9 @@ fn (mut ls Vls) free_table(dir_path string, file_path string) {
 fn (ls &Vls) new_table() &ast.Table {
 	mut tbl := &ast.Table{
 		type_symbols: ls.base_table.type_symbols.clone()
+		global_scope: &ast.Scope{
+			parent: 0
+		}
 	}
 	tbl.type_idxs = ls.base_table.type_idxs.clone()
 	tbl.fns = ls.base_table.fns.clone()

@@ -30,9 +30,7 @@ fn (mut ls Vls) formatting(id int, params string) {
 	prefs.output_mode = .silent
 	prefs.is_fmt = true
 	table := ast.new_table()
-	file_ast := parser.parse_text(source, path, table, .parse_comments, prefs, &ast.Scope{
-		parent: 0
-	})
+	file_ast := parser.parse_text(source, path, table, .parse_comments, prefs)
 	if file_ast.errors.len > 0 {
 		ls.send_null(id)
 		return

@@ -81,8 +81,8 @@ fn (mut ls Vls) process_file(source string, uri lsp.DocumentUri) {
 	target_dir := os.dir(file_path)
 	target_dir_uri := uri.dir()
 	// ls.log_message(target_dir, .info)
-	scope, mut pref := new_scope_and_pref(target_dir, os.dir(target_dir), os.join_path(target_dir,
-		'modules'), ls.root_uri.path())
+	mut pref := new_pref(target_dir, os.dir(target_dir), os.join_path(target_dir, 'modules'),
+		ls.root_uri.path())
 	pref.is_test = file_path.ends_with('_test.v') || file_path.ends_with('_test.vv')
 		|| file_path.all_before_last('.v').all_before_last('.').ends_with('_test')
 	pref.is_vsh = file_path.ends_with('.vsh')
@@ -95,10 +95,9 @@ fn (mut ls Vls) process_file(source string, uri lsp.DocumentUri) {
 	mod_dir := os.dir(file_path)
 	cur_mod_files := os.ls(mod_dir) or { [] }
 	other_files := pref.should_compile_filtered_files(mod_dir, cur_mod_files).filter(it != file_path)
-	parsed_files << parser.parse_files(other_files, table, pref, scope)
-	parsed_files << parser.parse_text(source, file_path, table, .skip_comments, pref,
-		scope)
-	imported_files, import_errors := ls.parse_imports(parsed_files, table, pref, scope)
+	parsed_files << parser.parse_files(other_files, table, pref)
+	parsed_files << parser.parse_text(source, file_path, table, .skip_comments, pref)
+	imported_files, import_errors := ls.parse_imports(parsed_files, table, pref)
 	checker.check_files(parsed_files)
 	ls.tables[target_dir_uri] = table
 	ls.insert_files(parsed_files)
@@ -118,7 +117,7 @@ fn (mut ls Vls) process_file(source string, uri lsp.DocumentUri) {
 
 // NOTE: once builder.find_module_path is extracted, simplify parse_imports
 [manualfree]
-fn (mut ls Vls) parse_imports(parsed_files []&ast.File, table &ast.Table, pref &pref.Preferences, scope &ast.Scope) ([]&ast.File, []errors.Error) {
+fn (mut ls Vls) parse_imports(parsed_files []&ast.File, table &ast.Table, pref &pref.Preferences) ([]&ast.File, []errors.Error) {
 	mut newly_parsed_files := []&ast.File{}
 	mut errs := []errors.Error{}
 	mut done_imports := parsed_files.map(it.mod.name)
@@ -149,7 +148,7 @@ fn (mut ls Vls) parse_imports(parsed_files []&ast.File, table &ast.Table, pref &
 					break
 				}
 				found = true
-				mut tmp_new_parsed_files := parser.parse_files(files, table, pref, scope)
+				mut tmp_new_parsed_files := parser.parse_files(files, table, pref)
 				tmp_new_parsed_files = tmp_new_parsed_files.filter(it.mod.name !in done_imports)
 				mut clean_new_files_names := []string{}
 				for index, new_file in tmp_new_parsed_files {
@@ -159,7 +158,7 @@ fn (mut ls Vls) parse_imports(parsed_files []&ast.File, table &ast.Table, pref &
 					}
 				}
 				newly_parsed_files2, errs2 := ls.parse_imports(newly_parsed_files, table,
-					pref, scope)
+					pref)
 				errs << errs2
 				newly_parsed_files << newly_parsed_files2
 				done_imports << imp.mod

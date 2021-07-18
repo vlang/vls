@@ -100,13 +100,13 @@ fn (mut ls Vls) setup_logger(trace string, client_info lsp.ClientInfo) {
 
 [manualfree]
 fn (mut ls Vls) process_builtin() {
-	scope, pref := new_scope_and_pref()
+	pref := new_pref()
 	mut builtin_files := os.ls(builtin_path) or {
 		ls.panic(err.msg)
 		return
 	}
 	builtin_files = pref.should_compile_filtered_files(builtin_path, builtin_files)
-	parsed_files := parser.parse_files(builtin_files, ls.base_table, pref, scope)
+	parsed_files := parser.parse_files(builtin_files, ls.base_table, pref)
 	// This part extracts the symbols for the builtin module
 	// for use in autocompletion. This is disabled in test mode in
 	// order to simplify the testing output in autocompletion test.
