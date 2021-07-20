@@ -117,9 +117,7 @@ fn (mut sr SymbolRegistration) struct_decl(struct_decl_node C.TSNode) ?&Symbol {
 	decl_list_node := struct_decl_node.named_child(1)
 	fields_len := decl_list_node.named_child_count()
 
-	mut scope := sr.get_scope(decl_list_node) ?
 	mut field_access := SymbolAccess.private
-
 	for i in 0 .. fields_len {
 		field_node := decl_list_node.named_child(i)
 		field_type := field_node.get_type()
@@ -153,8 +151,6 @@ fn (mut sr SymbolRegistration) struct_decl(struct_decl_node C.TSNode) ?&Symbol {
 				sym.add_child(mut field_sym) or {
 					// eprintln(err)
 				}
-
-				scope.register(field_sym)
 			}
 			else {
 				continue
