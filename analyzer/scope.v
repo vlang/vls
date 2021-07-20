@@ -11,13 +11,17 @@ pub mut:
 
 [unsafe]
 pub fn (scope &ScopeTree) free() {
-	unsafe {
-		// for _, s in scope.symbols {
-		// 	s.free()
-		// }
+	// TODO: incremental add/delete scope
 
-		for c in scope.children {
-			c.free()
+	unsafe {
+		for i := 0; scope.symbols.len != 0; {
+			scope.symbols[i].free()
+			scope.symbols.delete(i)
+		}
+
+		for i := 0; scope.children.len != 0; {
+			scope.children[i].free()
+			scope.children.delete(i)
 		}
 	}
 }
@@ -26,10 +30,12 @@ pub fn (scope &ScopeTree) contains(pos u32) bool {
 	return pos >= scope.start_byte && pos <= scope.end_byte
 }
 
-pub fn (scope &ScopeTree) innermost(pos u32) &ScopeTree {
-	for child_scope in scope.children {
-		if child_scope.contains(pos) {
-			return child_scope.innermost(pos)
+pub fn (scope &ScopeTree) innermost(start_byte u32, end_byte u32) &ScopeTree {
+	if !isnil(scope) {
+		for mut child_scope in scope.children {
+			if child_scope.contains(start_byte) && child_scope.contains(end_byte) {
+				return child_scope.innermost(start_byte, end_byte)
+			}
 		}
 	}
 
@@ -50,3 +56,13 @@ pub fn (mut scope ScopeTree) register(info &Symbol) {
 
 	scope.symbols << info
 }
+
+// pub fn (mut scope ScopeTree) remove(name string) bool {
+// 	idx := scope.symbols.index(name)
+// 	if idx == -1 {
+// 		return false
+// 	}
+
+// 	scope.symbols.delete(idx)
+// 	return true
+// }
