@@ -401,6 +401,8 @@ pub fn (mut store Store) find_symbol_by_type_node(node C.TSNode, src_text []byte
 		store.register_symbol(mut new_sym) or { analyzer.void_type }
 	}
 }
+
+pub fn (mut ss Store) infer_value_type_from_node(node C.TSNode, src_text []byte) &Symbol {
 	if node.is_null() {
 		return void_type
 	}
@@ -411,7 +413,29 @@ pub fn (mut store Store) find_symbol_by_type_node(node C.TSNode, src_text []byte
 	mut module_name := ''
 	mut type_name := ''
 
+	defer {
+		unsafe {
+			module_name.free()
+			type_name.free()
+		}
+	}
+
 	match node_type {
+		'identifier' {
+			// Identifier symbol finding strategy
+			// Find first in symbols
+			// find the symbol in scopes
+			// return void if none
+			ident_text := node.get_text(src_text)
+			got_sym := ss.find_symbol(module_name, ident_text) or {
+				selected_scope := ss.opened_scopes[ss.cur_file_path].innermost(node.start_byte(), node.end_byte())
+				selected_scope.symbols.get(ident_text) or { 
+					analyzer.void_type
+				}
+			}
+
+			return got_sym
+		}
 		'true', 'false' {
 			type_name = 'bool'
 		}
@@ -431,16 +455,34 @@ pub fn (mut store Store) find_symbol_by_type_node(node C.TSNode, src_text []byte
 			return ss.find_symbol_by_type_node(node.child_by_field_name('type'), src_text) or {
 				return analyzer.void_type
 			}
-		else {}
+		}
+		'type_identifier' {
+			return ss.find_symbol_by_type_node(node, src_text) or { analyzer.void_type }
+		}
+		'selector_expression' {
+			root_sym := ss.infer_value_type_from_node(node.child_by_field_name('operand'), src_text)
+			if root_sym.is_void() {
+				child_sym := root_sym.children.get(node.child_by_field_name('field').get_text(src_text)) or { 
+					return analyzer.void_type 
+				}
+
+				return child_sym
+			}
+
+			module_name = node.child_by_field_name('operand').get_text(src_text)
+			type_name = node.child_by_field_name('field').get_text(src_text)
+		}
+		else {
+			// eprintln(node_type)
+			// return analyzer.void_type
+		}
 	}
 
-	got_typ := ss.find_symbol(module_name, type_name) or {
-		// name := if module_name.len != 0 { module_name + '.' + type_name } else { type_name }
-		// ss.report_error(report_error('Invalid type $name', node.range()))
-		return void_type
+	return ss.find_symbol(module_name, type_name) or {
+		name := if module_name.len != 0 { module_name + '.' + type_name } else { type_name }
+		ss.report_error(report_error('Invalid type $name', node.range()))
+		return analyzer.void_type
 	}
-
-	return got_typ
 }
 
 fn within_range(node C.TSNode, range C.TSRange) bool {
