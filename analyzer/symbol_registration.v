@@ -280,8 +280,8 @@ fn (mut sr SymbolRegistration) fn_decl(fn_node C.TSNode) ?&Symbol {
 	name_node := fn_node.child_by_field_name('name')
 	body_node := fn_node.child_by_field_name('body')
 
-	mut scope := sr.get_scope(body_node) ?
 	mut fn_sym := sr.new_top_level_symbol(name_node, access) ?
+	mut scope := sr.get_scope(body_node) or { &ScopeTree(0) }
 
 	fn_sym.kind = .function
 	fn_sym.return_type = sr.store.find_symbol_by_type_node(fn_node.child_by_field_name('result'), sr.src_text) or { analyzer.void_type }
@@ -292,8 +292,17 @@ fn (mut sr SymbolRegistration) fn_decl(fn_node C.TSNode) ?&Symbol {
 		mut children := sr.extract_parameter_list(receiver_node)
 		// just use a loop for convinience
 		for i := 0; i < children.len; i++ {
-			if !isnil(children[i].return_type) {
-				children[i].return_type.add_child(mut fn_sym) ?
+			mut parent := children[i].return_type
+			if !isnil(parent) && !parent.is_void() {
+				// eprintln('adding ${fn_sym.name} to ${parent.kind} ${parent.gen_str()} ${parent.is_void()}')
+				parent.add_child(mut fn_sym) or {
+					break
+				}
+
+				if parent.range.start_byte == 0 && parent.range.end_byte == 0 && !parent.range.eq(fn_sym.range) {
+					parent.file_path = fn_sym.file_path
+					parent.range = fn_sym.range
+				}
 			}
 		}
 
@@ -312,12 +321,7 @@ fn (mut sr SymbolRegistration) fn_decl(fn_node C.TSNode) ?&Symbol {
 
 	// extract function body
 	if !body_node.is_null() && !sr.is_import {
-		mut syms := sr.extract_block(body_node) ?
-		for i := 0; i < syms.len; i++ {
-			scope.register(syms[i])
-		}
-
-		unsafe { syms.free() }
+		sr.extract_block(body_node, mut scope) ?
 	}
 
 	if is_method {
@@ -358,7 +362,7 @@ fn (mut sr SymbolRegistration) top_level_statement() ? {
 		node_type = sr.cursor.current_node().get_type()
 	}
 
-	mut global_scope := sr.get_scope(sr.cursor.current_node().parent()) ?
+	mut global_scope := sr.get_scope(sr.cursor.current_node().parent()) or { &ScopeTree(0) }
 	match node_type {
 		'const_declaration' {
 			mut const_syms := sr.const_decl(sr.cursor.current_node()) ?
@@ -402,12 +406,11 @@ fn (mut sr SymbolRegistration) top_level_statement() ? {
 	}
 }
 
-fn (mut sr SymbolRegistration) extract_block(node C.TSNode) ?[]&Symbol {
+fn (mut sr SymbolRegistration) extract_block(node C.TSNode, mut scope ScopeTree) ? {
 	if node.get_type() != 'block' || sr.is_import {
 		return error('node should be a `block` and cannot be used in `is_import` mode.')
 	}
 
-	mut vars := []&Symbol{}
 	body_sym_len := node.named_child_count()
 
 	for i := u32(0); i < body_sym_len; i++ {
@@ -436,21 +439,24 @@ fn (mut sr SymbolRegistration) extract_block(node C.TSNode) ?[]&Symbol {
 				}
 
 				right_type := sr.store.infer_value_type_from_node(right, sr.src_text)
-				vars << &Symbol{
+				var := &Symbol{
 					name: left.get_text(sr.src_text)
 					kind: .variable
 					access: var_access
 					range: decl_node.range()
 					return_type: right_type
+					file_path: sr.store.cur_file_path
+					file_version: sr.store.cur_version
 				}
+
+				scope.register(var)
+				unsafe { var.free() }
 			}
 		} else {
 			// TODO: if left_len > right_len
 			// and right_len < left_len
 		}
 	}
-
-	return vars
 }
 
 fn (mut sr SymbolRegistration) extract_parameter_list(node C.TSNode) []&Symbol {
@@ -464,7 +470,7 @@ fn (mut sr SymbolRegistration) extract_parameter_list(node C.TSNode) []&Symbol {
 			access = SymbolAccess.private_mutable
 		}
 
-		param_name := param_node.child_by_field_name('name')
+		param_name_node := param_node.child_by_field_name('name')
 		param_type_node := param_node.child_by_field_name('type')
 		return_type := sr.store.find_symbol_by_type_node(param_type_node, sr.src_text) or { analyzer.void_type }
 		syms << &Symbol{
@@ -482,12 +488,15 @@ fn (mut sr SymbolRegistration) extract_parameter_list(node C.TSNode) []&Symbol {
 }
 
 pub fn (mut store Store) register_symbols_from_tree(tree &C.TSTree, src_text []byte) {
-	mut sr := SymbolRegistration{}
 	root_node := tree.root_node()
-	sr.store = unsafe { store }
-	sr.src_text = src_text
 	child_len := int(root_node.named_child_count())
-	sr.cursor = TreeCursor{root_node.tree_cursor()}
+
+	mut sr := SymbolRegistration{
+		store: unsafe { store }
+		src_text: src_text
+		cursor: TreeCursor{root_node.tree_cursor()}
+	}
+	 
 	for _ in 0 .. child_len {
 		sr.top_level_statement() or {
 			sr.store.report_error(err)
