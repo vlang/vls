@@ -28,7 +28,7 @@ fn (sr &SymbolRegistration) new_top_level_symbol(identifier_node C.TSNode, acces
 
 	mut symbol := &Symbol{
 		access: access
-		file_path: sr.store.cur_file_path
+		file_path: sr.store.cur_file_path.clone()
 		file_version: sr.store.cur_version
 	}
 
@@ -95,7 +95,7 @@ fn (mut sr SymbolRegistration) const_decl(const_node C.TSNode) ?[]&Symbol {
 			kind: .variable
 			access: access
 			range: spec_node.range()
-			file_path: sr.store.cur_file_path
+			file_path: sr.store.cur_file_path.clone()
 			file_version: sr.store.cur_version
 			return_type: sr.store.infer_value_type_from_node(spec_node.child_by_field_name('value'),
 				sr.src_text)
@@ -144,7 +144,7 @@ fn (mut sr SymbolRegistration) struct_decl(struct_decl_node C.TSNode) ?&Symbol {
 					range: field_node.range()
 					access: field_access
 					return_type: field_typ
-					file_path: sr.store.cur_file_path
+					file_path: sr.store.cur_file_path.clone()
 					file_version: sr.store.cur_version
 				}
 
@@ -204,7 +204,7 @@ fn (mut sr SymbolRegistration) interface_decl(interface_decl_node C.TSNode) ?&Sy
 					range: field_node.range()
 					access: access
 					return_type: field_typ
-					file_path: sr.store.cur_file_path
+					file_path: sr.store.cur_file_path.clone()
 					file_version: sr.store.cur_version
 				}
 
@@ -253,7 +253,7 @@ fn (mut sr SymbolRegistration) enum_decl(enum_decl_node C.TSNode) ?&Symbol {
 			range: member_node.range()
 			access: access
 			return_type: int_type
-			file_path: sr.store.cur_file_path
+			file_path: sr.store.cur_file_path.clone()
 			file_version: sr.store.cur_version
 		}
 
@@ -445,7 +445,7 @@ fn (mut sr SymbolRegistration) extract_block(node C.TSNode, mut scope ScopeTree)
 					access: var_access
 					range: decl_node.range()
 					return_type: right_type
-					file_path: sr.store.cur_file_path
+					file_path: sr.store.cur_file_path.clone()
 					file_version: sr.store.cur_version
 				}
 
@@ -479,7 +479,7 @@ fn (mut sr SymbolRegistration) extract_parameter_list(node C.TSNode) []&Symbol {
 			range: param_name_node.range()
 			access: access
 			return_type: return_type
-			file_path: sr.store.cur_file_path
+			file_path: sr.store.cur_file_path.clone()
 			file_version: sr.store.cur_version
 		}
 	}
