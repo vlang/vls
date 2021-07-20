@@ -93,7 +93,6 @@ fn (mut ls Vls) workspace_symbol(id int, _ string) {
 				}
 			}
 
-			println(sym.file_path)
 			unsafe { uri.free() }
 		}
 	}
