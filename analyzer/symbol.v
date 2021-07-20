@@ -192,9 +192,9 @@ pub fn (infos []&Symbol) index(name string) int {
 	return -1
 }
 
-pub fn (infos []&Symbol) index_by_row(row u32) int {
+pub fn (infos []&Symbol) index_by_row(file_path string, row u32) int {
 	for i, v in infos {
-		if v.range.start_point.row == row {
+		if v.file_path == file_path && v.range.start_point.row == row {
 			return i
 		}
 	}

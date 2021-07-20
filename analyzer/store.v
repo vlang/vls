@@ -124,7 +124,7 @@ pub fn (mut ss Store) register_symbol(mut info Symbol) ?&Symbol {
 	mut existing_idx := ss.symbols[dir].index(info.name)
 	if existing_idx == -1 {
 		// find by row
-		existing_idx = ss.symbols[dir].index_by_row(info.range.start_point.row)
+		existing_idx = ss.symbols[dir].index_by_row(info.file_path, info.range.start_point.row)
 	}
 
 	// Replace symbol if symbol already exists
