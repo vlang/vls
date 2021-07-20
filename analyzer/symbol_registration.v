@@ -149,7 +149,7 @@ fn (mut sr SymbolRegistration) struct_decl(struct_decl_node C.TSNode) ?&Symbol {
 		access = .public
 	}
 
-	mut sym := sr.new_top_level_symbol(struct_decl_node.named_child(0), access) ?
+	mut sym := sr.new_top_level_symbol(struct_decl_node.child_by_field_name('name'), access) ?
 	sym.kind = .struct_
 
 	decl_list_node := struct_decl_node.named_child(1)
@@ -209,7 +209,7 @@ fn (mut sr SymbolRegistration) interface_decl(interface_decl_node C.TSNode) ?&Sy
 		access = SymbolAccess.public
 	}
 
-	mut sym := sr.new_top_level_symbol(interface_decl_node.named_child(0), access) ?
+	mut sym := sr.new_top_level_symbol(interface_decl_node.child_by_field_name('name'), access) ?
 	sym.kind = .interface_
 
 	fields_list_node := interface_decl_node.named_child(1)
@@ -269,7 +269,7 @@ fn (mut sr SymbolRegistration) enum_decl(enum_decl_node C.TSNode) ?&Symbol {
 		access = SymbolAccess.public
 	}
 
-	mut sym := sr.new_top_level_symbol(enum_decl_node.named_child(0), access) ?
+	mut sym := sr.new_top_level_symbol(enum_decl_node.child_by_field_name('name'), access) ?
 	sym.kind = .enum_
 
 	member_list_node := enum_decl_node.named_child(1)
