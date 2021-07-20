@@ -74,7 +74,7 @@ fn (mut sr SymbolRegistration) get_scope(node C.TSNode) ?&ScopeTree {
 	return sr.store.get_scope_from_node(node)
 }
 
-fn (mut sr SymbolRegistration) const_decl(const_node C.TSNode) []&Symbol {
+fn (mut sr SymbolRegistration) const_decl(const_node C.TSNode) ?[]&Symbol {
 	mut access := SymbolAccess.private
 	if const_node.child(0).get_type() == 'pub' {
 		access = .public
@@ -365,7 +365,7 @@ fn (mut sr SymbolRegistration) top_level_statement() ? {
 	mut global_scope := sr.get_scope(sr.cursor.current_node().parent()) ?
 	match node_type {
 		'const_declaration' {
-			mut const_syms := sr.const_decl(sr.cursor.current_node())
+			mut const_syms := sr.const_decl(sr.cursor.current_node()) ?
 			for i := 0; i < const_syms.len; i++ {
 				mut const_sym := const_syms[i]
 				sr.store.register_symbol(mut const_sym) or {
