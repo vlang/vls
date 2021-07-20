@@ -3,7 +3,6 @@ module vls
 import lsp
 import json
 import jsonrpc
-import v.ast
 import os
 import analyzer
 
@@ -67,7 +66,7 @@ fn (mut ls Vls) formatting(id int, params string) {
 fn (mut ls Vls) workspace_symbol(id int, _ string) {
 	mut workspace_symbols := []lsp.SymbolInformation{}
 
-	for dir, sym_arr in ls.store.symbols {
+	for _, sym_arr in ls.store.symbols {
 		for sym in sym_arr {
 			mut kind := lsp.SymbolKind.null
 			uri := lsp.document_uri_from_path(sym.file_path)
@@ -83,13 +82,14 @@ fn (mut ls Vls) workspace_symbol(id int, _ string) {
 						.variable { kind = .variable }
 					else { continue }
 				}
-			}
-			workspace_symbols << lsp.SymbolInformation{
-				name: sym.name
-				kind: kind
-				location: lsp.Location{
-					uri: uri
-					range: tsrange_to_lsp_range(sym.range)
+
+				workspace_symbols << lsp.SymbolInformation{
+					name: sym.name
+					kind: kind
+					location: lsp.Location{
+						uri: uri
+						range: tsrange_to_lsp_range(sym.range)
+					}
 				}
 			}
 

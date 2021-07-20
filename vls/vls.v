@@ -1,6 +1,5 @@
 module vls
 
-import v.ast
 import v.pref
 import json
 import jsonrpc
