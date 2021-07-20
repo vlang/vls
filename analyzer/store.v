@@ -107,8 +107,7 @@ pub fn (ss &Store) find_symbol(module_name string, name string) ?&Symbol {
 	}
 
 	if aliased_path := ss.auto_imports[module_name] {
-		typ := ss.symbols[aliased_path].get(name) ?
-		return typ
+		return ss.symbols[aliased_path].get(name)
 	}
 
 	// This shouldn't happen
