@@ -26,7 +26,7 @@ fn (sr &SymbolRegistration) new_top_level_symbol(identifier_node C.TSNode, acces
 		return report_error('Invalid top-level node type `$id_node_type`', identifier_node.range())
 	}
 
-	mut symbol := Symbol{
+	mut symbol := &Symbol{
 		access: access
 		file_path: sr.store.cur_file_path
 		file_version: sr.store.cur_version
@@ -63,9 +63,7 @@ fn (sr &SymbolRegistration) new_top_level_symbol(identifier_node C.TSNode, acces
 		}
 	}
 
-	return &symbol
-}
-
+	return symbol
 }
 
 fn (mut sr SymbolRegistration) get_scope(node C.TSNode) ?&ScopeTree {
