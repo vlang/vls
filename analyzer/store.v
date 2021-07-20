@@ -359,12 +359,12 @@ pub fn symbol_name_from_node(node C.TSNode, src_text []byte) (SymbolKind, string
 	return SymbolKind.typedef, '', 'void'
 }
 
-pub fn (store &Store) find_symbol_by_node(node C.TSNode, src_text []byte) ?&Symbol {
+pub fn (mut store Store) find_symbol_by_type_node(node C.TSNode, src_text []byte) ?&Symbol {
 	if node.is_null() || src_text.len == 0 {
 		return none
 	}
 
-	_, module_name, symbol_name := symbol_name_from_node(node, src_text)
+	sym_kind, module_name, symbol_name := symbol_name_from_node(node, src_text)
 	defer {
 		unsafe {
 			module_name.free()
@@ -372,10 +372,35 @@ pub fn (store &Store) find_symbol_by_node(node C.TSNode, src_text []byte) ?&Symb
 		}
 	}
 
-	return store.find_symbol(module_name, symbol_name)
-}
+	return store.find_symbol(module_name, symbol_name) or {
+		mut new_sym := Symbol{
+			name: symbol_name
+			file_path: os.join_path(store.get_module_path(module_name), 'placeholder.vv')
+			kind: sym_kind
+		}
 
-pub fn (ss &Store) infer_value_type_from_node(node C.TSNode, src_text []byte) &Symbol {
+		match sym_kind {
+			.array_ {
+				mut el_sym := store.find_symbol_by_type_node(node.child_by_field_name('element'), src_text) ?
+				new_sym.add_child(mut el_sym) or {}
+			}
+			.map_ {
+				mut key_sym := store.find_symbol_by_type_node(node.child_by_field_name('key'), src_text) ?
+				new_sym.add_child(mut key_sym) or {}
+				mut val_sym := store.find_symbol_by_type_node(node.child_by_field_name('value'), src_text) ?
+				new_sym.add_child(mut val_sym) or {}
+			}
+			.chan_, .ref, .optional {
+				mut ref_sym := store.find_symbol_by_type_node(node.named_child(0), src_text) ?
+				new_sym.add_child(mut ref_sym) or {}
+			}
+			else {}
+		}
+
+		// eprintln(new_sym)
+		store.register_symbol(mut new_sym) or { analyzer.void_type }
+	}
+}
 	if node.is_null() {
 		return void_type
 	}
@@ -403,9 +428,9 @@ pub fn (ss &Store) infer_value_type_from_node(node C.TSNode, src_text []byte) &S
 			type_name = 'string'
 		}
 		'type_initializer' {
-			_, module_name, type_name = symbol_name_from_node(node.child_by_field_name('type'),
-				src_text)
-		}
+			return ss.find_symbol_by_type_node(node.child_by_field_name('type'), src_text) or {
+				return analyzer.void_type
+			}
 		else {}
 	}
 

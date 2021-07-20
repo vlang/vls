@@ -66,42 +66,6 @@ fn (sr &SymbolRegistration) new_top_level_symbol(identifier_node C.TSNode, acces
 	return &symbol
 }
 
-fn (mut sr SymbolRegistration) find_symbol_by_node(node C.TSNode) &Symbol {
-	if node.is_null() {
-		return void_type
-	}
-
-	sym_kind, module_name, symbol_name := symbol_name_from_node(node, sr.src_text)
-	defer {
-		unsafe {
-			module_name.free()
-			symbol_name.free()
-		}
-	}
-
-	return sr.store.find_symbol(module_name, symbol_name) or {
-		mut new_sym := Symbol{
-			name: symbol_name
-			file_path: os.join_path(sr.store.get_module_path(module_name), 'placeholder.vv')
-			kind: sym_kind
-		}
-
-		match sym_kind {
-			.array_ {
-				new_sym.add_child(mut sr.find_symbol_by_node(node.child_by_field_name('element'))) or {}
-			}
-			.map_ {
-				new_sym.add_child(mut sr.find_symbol_by_node(node.child_by_field_name('key'))) or {}
-				new_sym.add_child(mut sr.find_symbol_by_node(node.child_by_field_name('value'))) or {}
-			}
-			.chan_, .ref {
-				new_sym.add_child(mut sr.find_symbol_by_node(node.named_child(0))) or {}
-			}
-			else {}
-		}
-
-		sr.store.register_symbol(mut new_sym) or { analyzer.void_type }
-	}
 }
 
 fn (mut sr SymbolRegistration) get_scope(node C.TSNode) ?&ScopeTree {
@@ -177,7 +141,7 @@ fn (mut sr SymbolRegistration) struct_decl(struct_decl_node C.TSNode) ?&Symbol {
 				continue
 			}
 			'struct_field_declaration' {
-				field_typ := sr.find_symbol_by_node(field_node.child_by_field_name('type'))
+				field_typ := sr.store.find_symbol_by_type_node(field_node.child_by_field_name('type'), sr.src_text) or { analyzer.void_type }
 				mut field_sym := Symbol{
 					name: field_node.child_by_field_name('name').get_text(sr.src_text)
 					kind: .field
@@ -239,7 +203,7 @@ fn (mut sr SymbolRegistration) interface_decl(interface_decl_node C.TSNode) ?&Sy
 				unsafe { children.free() }
 			}
 			'struct_field_declaration' {
-				field_typ := sr.find_symbol_by_node(field_node.child_by_field_name('type'))
+				field_typ := sr.store.find_symbol_by_type_node(field_node.child_by_field_name('type'), sr.src_text) or { analyzer.void_type }
 				mut field_sym := Symbol{
 					name: field_node.child_by_field_name('name').get_text(sr.src_text)
 					kind: .field
@@ -326,7 +290,7 @@ fn (mut sr SymbolRegistration) fn_decl(fn_node C.TSNode) ?&Symbol {
 	mut fn_sym := sr.new_top_level_symbol(name_node, access) ?
 
 	fn_sym.kind = .function
-	fn_sym.return_type = sr.find_symbol_by_node(fn_node.child_by_field_name('result'))
+	fn_sym.return_type = sr.store.find_symbol_by_type_node(fn_node.child_by_field_name('result'), sr.src_text) or { analyzer.void_type }
 
 	mut is_method := false
 	if !receiver_node.is_null() {
@@ -385,7 +349,7 @@ fn (mut sr SymbolRegistration) type_decl(type_decl_node C.TSNode) ?&Symbol {
 
 	selected_type_node := type_decl_node.child_by_field_name('types').named_child(0)
 	// TODO: support only aliases for now, must add sumtype kind
-	sym.parent = sr.store.find_symbol_by_node(selected_type_node, sr.src_text) ?
+	sym.parent = sr.store.find_symbol_by_type_node(selected_type_node, sr.src_text) ?
 	return sym
 }
 
@@ -508,13 +472,15 @@ fn (mut sr SymbolRegistration) extract_parameter_list(node C.TSNode) []&Symbol {
 
 		param_name := param_node.child_by_field_name('name')
 		param_type_node := param_node.child_by_field_name('type')
-
+		return_type := sr.store.find_symbol_by_type_node(param_type_node, sr.src_text) or { analyzer.void_type }
 		syms << &Symbol{
-			name: param_name.get_text(sr.src_text)
+			name: param_name_node.get_text(sr.src_text)
 			kind: .variable
-			range: param_node.range()
+			range: param_name_node.range()
 			access: access
-			return_type: sr.find_symbol_by_node(param_type_node)
+			return_type: return_type
+			file_path: sr.store.cur_file_path
+			file_version: sr.store.cur_version
 		}
 	}
 
