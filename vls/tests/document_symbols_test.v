@@ -13,7 +13,7 @@ const doc_symbols_result = map{
 			kind: .type_parameter
 			location: lsp.Location{
 				range: lsp.Range{
-					start: lsp.Position{2, 0}
+					start: lsp.Position{2, 5}
 					end: lsp.Position{2, 8}
 				}
 			}
@@ -43,8 +43,8 @@ const doc_symbols_result = map{
 			kind: .enum_
 			location: lsp.Location{
 				range: lsp.Range{
-					start: lsp.Position{9, 0}
-					end: lsp.Position{13, 10}
+					start: lsp.Position{9, 5}
+					end: lsp.Position{9, 10}
 				}
 			}
 		},
@@ -53,8 +53,8 @@ const doc_symbols_result = map{
 			kind: .struct_
 			location: lsp.Location{
 				range: lsp.Range{
-					start: lsp.Position{15, 0}
-					end: lsp.Position{17, 13}
+					start: lsp.Position{15, 7}
+					end: lsp.Position{15, 13}
 				}
 			}
 		},
@@ -63,8 +63,8 @@ const doc_symbols_result = map{
 			kind: .method
 			location: lsp.Location{
 				range: lsp.Range{
-					start: lsp.Position{19, 0}
-					end: lsp.Position{21, 19}
+					start: lsp.Position{19, 14}
+					end: lsp.Position{19, 17}
 				}
 			}
 		},
@@ -73,8 +73,8 @@ const doc_symbols_result = map{
 			kind: .function
 			location: lsp.Location{
 				range: lsp.Range{
-					start: lsp.Position{23, 0}
-					end: lsp.Position{26, 9}
+					start: lsp.Position{23, 3}
+					end: lsp.Position{23, 7}
 				}
 			}
 		},
