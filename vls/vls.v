@@ -292,6 +292,13 @@ fn monitor_changes(mut ls Vls) {
 				if !ls.is_typing {
 					continue
 				}
+				
+				if ls.store.cur_file_path in ls.store.opened_scopes {
+					unsafe {
+						ls.store.opened_scopes[ls.store.cur_file_path].free()
+					}
+				}
+
 				uri := lsp.document_uri_from_path(ls.store.cur_file_path)
 				analyze(mut ls.store, uri, ls.root_uri, ls.trees[uri], ls.sources[uri])
 				ls.is_typing = false

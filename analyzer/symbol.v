@@ -25,6 +25,7 @@ import strings
 // TODO: From ref to chan_, use interface
 
 pub enum SymbolKind {
+	void
 	ref
 	array_
 	map_
@@ -82,8 +83,9 @@ pub fn (sa SymbolAccess) str() string {
 	}
 }
 
-pub const void_type = &Symbol{
+pub const void_type = &Symbol{ 
 	name: 'void'
+	kind: .void 
 }
 
 [heap]
@@ -114,6 +116,8 @@ pub fn (info &Symbol) gen_str() string {
 		unsafe { sb.free() }
 	}
 
+	sb.write_string(info.access.str())
+	
 	match info.kind {
 		.ref {
 			sb.write_string('&')
@@ -125,7 +129,11 @@ pub fn (info &Symbol) gen_str() string {
 		}
 		.optional {
 			sb.write_string('?')
-			sb.write_string(info.children[0].gen_str())
+			if info.children.len >= 1 {
+				sb.write_string(info.children[0].gen_str())
+			} else {
+				sb.write_string('<invalid type>')
+			}
 		}
 		.map_, .array_ {
 			sb.write_string(info.name)
@@ -145,6 +153,14 @@ pub fn (info &Symbol) gen_str() string {
 		}
 		.function {
 			sb.write_string('fn ')
+
+			if !isnil(info.parent) && !info.parent.is_void() {
+				sb.write_b(`(`)
+				sb.write_string(info.parent.gen_str())
+				sb.write_b(`)`)
+				sb.write_b(` `)
+			}
+
 			sb.write_string(info.name)
 			sb.write_b(`(`)
 			for i, v in info.children {
@@ -161,7 +177,14 @@ pub fn (info &Symbol) gen_str() string {
 			sb.write_b(` `)
 			sb.write_string(info.return_type.gen_str())
 		}
+		.typedef {
+			sb.write_string(info.name)
+			sb.write_string(' = ')
+			sb.write_string(info.parent.gen_str())
+		}
 		else {
+			// sb.write_string(info.kind.str())
+			// sb.write_b(` `)
 			sb.write_string(info.name)
 		}
 	}
@@ -187,9 +210,9 @@ pub fn (infos []&Symbol) index(name string) int {
 	return -1
 }
 
-pub fn (infos []&Symbol) index_by_row(row u32) int {
+pub fn (infos []&Symbol) index_by_row(file_path string, row u32) int {
 	for i, v in infos {
-		if v.range.start_point.row == row {
+		if v.file_path == file_path && v.range.start_point.row == row {
 			return i
 		}
 	}
@@ -226,7 +249,7 @@ pub fn (infos []&Symbol) exists(name string) bool {
 pub fn (infos []&Symbol) get(name string) ?&Symbol {
 	index := infos.index(name)
 	if index == -1 {
-		return error('Symbol not found')
+		return error('Symbol `$name` not found')
 	}
 
 	return infos[index] ?
@@ -234,7 +257,7 @@ pub fn (infos []&Symbol) get(name string) ?&Symbol {
 
 pub fn (mut info Symbol) add_child(mut new_child Symbol, add_as_parent ...bool) ? {
 	if add_as_parent.len == 0 || add_as_parent[0] {
-		new_child.parent = info
+		new_child.parent = unsafe { info }
 	}
 
 	if info.children.exists(new_child.name) {
@@ -242,6 +265,14 @@ pub fn (mut info Symbol) add_child(mut new_child Symbol, add_as_parent ...bool) 
 	}
 
 	info.children << new_child
+}
+
+pub fn (sym &Symbol) is_void() bool {
+	if (sym.kind == .ref || sym.kind == .array_) && sym.children.len >= 1 {
+		return sym.children[0].is_void()
+	}
+
+	return sym.kind == .void
 }
 
 [unsafe]
