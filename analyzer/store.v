@@ -91,7 +91,7 @@ pub fn (ss &Store) get_module_path_opt(module_name string) ?string {
 }
 
 pub fn (ss &Store) get_module_path(module_name string) string {
-	// empty names should return the dir instead
+	// empty names should return the current selected dir instead
 	return ss.get_module_path_opt(module_name) or { ss.cur_dir }
 }
 
