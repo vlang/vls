@@ -369,6 +369,26 @@ fn (mut sr SymbolRegistration) fn_decl(fn_node C.TSNode) ?&Symbol {
 	}
 }
 
+fn (mut sr SymbolRegistration) type_decl(type_decl_node C.TSNode) ?&Symbol {
+	mut access := SymbolAccess.private
+	if type_decl_node.child(0).get_type() == 'pub' {
+		access = SymbolAccess.public
+	}
+
+	mut sym := sr.new_top_level_symbol(type_decl_node.child_by_field_name('name'), access) ?
+	sym.kind = .typedef
+
+	// types_count := type_decl_node.child_by_field_name('types').named_child_count()
+	// if types_count == 0 {
+	// 	return none
+	// }
+
+	selected_type_node := type_decl_node.child_by_field_name('types').named_child(0)
+	// TODO: support only aliases for now, must add sumtype kind
+	sym.parent = sr.store.find_symbol_by_node(selected_type_node, sr.src_text) ?
+	return sym
+}
+
 fn (mut sr SymbolRegistration) top_level_statement() ? {
 	defer {
 		sr.cursor.next()
@@ -414,6 +434,10 @@ fn (mut sr SymbolRegistration) top_level_statement() ? {
 		}
 		'function_declaration' {
 			mut sym := sr.fn_decl(sr.cursor.current_node()) ?
+			sr.store.register_symbol(mut sym) ?
+		}
+		'type_declaration' {
+			mut sym := sr.type_decl(sr.cursor.current_node()) ?
 			sr.store.register_symbol(mut sym) ?
 		}
 		else {}

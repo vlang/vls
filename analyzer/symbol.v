@@ -161,6 +161,11 @@ pub fn (info &Symbol) gen_str() string {
 			sb.write_b(` `)
 			sb.write_string(info.return_type.gen_str())
 		}
+		.typedef {
+			sb.write_string(info.name)
+			sb.write_string(' = ')
+			sb.write_string(info.parent.gen_str())
+		}
 		else {
 			sb.write_string(info.name)
 		}
