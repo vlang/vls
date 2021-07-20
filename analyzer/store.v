@@ -514,11 +514,25 @@ fn search_node_in_children(node C.TSNode, range C.TSRange) ?C.TSNode {
 
 pub fn (mut ss Store) delete_symbol_at_node(root_node C.TSNode, src []byte, at_range C.TSRange) bool {
 	node := search_node(root_node, at_range) or { return false }
-
 	node_type := node.get_type()
 	// TODO: parameters, variables, anyhing within the child
+	// eprintln(node_type)
 	if node_type == 'short_var_declaration' {
-		// TODO:
+		// left_expr_lists := node.child_by_field_name('left')
+		// left_child_count := left_expr_lists.named_child_count()
+		// eprintln(left_child_count)
+
+		// root_scope := ss.opened_scopes[ss.cur_file_path] or {
+		// 	return false
+		// }
+
+		// mut scope := root_scope.innermost(at_range.start_byte)
+		// for i in u32(0) .. left_child_count {
+		// 	child_node := node.named_child(i)
+		// 	eprintln('deleting ${child_node.get_text(src)}')
+		// 	scope.remove(child_node.get_text(src))
+		// }
+		// return true
 		return false
 	}
 
@@ -534,9 +548,10 @@ pub fn (mut ss Store) delete_symbol_at_node(root_node C.TSNode, src []byte, at_r
 
 			idx := ss.symbols[ss.cur_dir].index(symbol_name)
 			if idx != -1 {
-				// eprintln('deleted $symbol_name')
 				unsafe { ss.symbols[ss.cur_dir].free() }
 				ss.symbols[ss.cur_dir].delete(idx)
+				// eprintln('deleted $symbol_name at $idx')
+				// eprintln(ss.symbols[ss.cur_dir])
 				return true
 			}
 		}
