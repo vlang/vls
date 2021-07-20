@@ -76,7 +76,7 @@ fn (mut ls Vls) workspace_symbol(id int, _ string) {
 
 			sym_info := symbol_to_symbol_info(uri, sym, '') or { continue }
 			workspace_symbols << sym_info
-			
+			workspace_symbols << methods_to_symbol_infos(uri, sym)
 		}
 	}
 
@@ -109,14 +109,23 @@ fn symbol_to_symbol_info(uri lsp.DocumentUri, sym &analyzer.Symbol, prefix strin
 	}
 }
 
-			unsafe { uri.free() }
+fn methods_to_symbol_infos(uri lsp.DocumentUri, sym &analyzer.Symbol) []lsp.SymbolInformation {
+	mut symbol_infos := []lsp.SymbolInformation{cap: sym.children.len}
+	for child_sym in sym.children {
+		if child_sym.kind != .function {
+			continue
+		}
+
+		method_sym_info := symbol_to_symbol_info(uri, child_sym, '${sym.name}.') or {
+			continue
+		}
+
+		symbol_infos << lsp.SymbolInformation{
+			...method_sym_info,
+			kind: .method
 		}
 	}
-
-	ls.send(jsonrpc.Response<[]lsp.SymbolInformation>{
-		id: id
-		result: workspace_symbols
-	})
+	return symbol_infos
 }
 
 fn (mut ls Vls) document_symbol(id int, params string) {
@@ -132,7 +141,7 @@ fn (mut ls Vls) document_symbol(id int, params string) {
 	for sym in retrieved_symbols {
 		sym_info := symbol_to_symbol_info(uri, sym, '') or { continue }
 		document_symbols << sym_info
-		
+		document_symbols << methods_to_symbol_infos(uri, sym)
 	}
 
 	ls.send(jsonrpc.Response<[]lsp.SymbolInformation>{
