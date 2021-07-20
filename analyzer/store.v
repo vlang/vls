@@ -132,40 +132,37 @@ pub fn (mut ss Store) register_symbol(mut info Symbol) ?&Symbol {
 		mut existing_sym := ss.symbols[dir][existing_idx]
 
 		// Remove this?
-		if existing_sym.kind in kinds_to_be_returned {
-			// unsafe { info.free() }
-			return existing_sym
+		if existing_sym.kind !in kinds_to_be_returned {
+			if existing_sym.kind != .placeholder && existing_sym.file_version >= info.file_version {
+				return report_error('Symbol already exists. (idx=${existing_idx}) (name="$existing_sym.name")', info.range)
+			}
+
+			if existing_sym.name != info.name {
+				// unsafe { existing_sym.name.free() }
+				existing_sym.name = info.name.clone()
+			}
+
+			if existing_sym.children.len != 0 {
+				// unsafe { existing_sym.children.free() }
+				existing_sym.children = info.children.clone()
+				// unsafe { info.children.free() }
+			}
+
+			existing_sym.parent = info.parent
+			existing_sym.return_type = info.parent
+			existing_sym.language = info.language
+			existing_sym.access = info.access
+			existing_sym.kind = info.kind
+			existing_sym.range = info.range
+			existing_sym.generic_placeholder_len = info.generic_placeholder_len
+			existing_sym.file_version = info.file_version
 		}
 
-		if existing_sym.kind != .placeholder && existing_sym.file_version >= info.file_version {
-			// unsafe { info.free() }
-			return report_error('Symbol already exists. (name="$info.name")', info.range)
-		}
-
-		if existing_sym.name != info.name {
-			// unsafe { existing_sym.name.free() }
-			existing_sym.name = info.name.clone()
-		}
-
-		if existing_sym.children.len != 0 {
-			// unsafe { existing_sym.children.free() }
-			existing_sym.children = info.children.clone()
-			// unsafe { info.children.free() }
-		}
-
-		existing_sym.parent = info.parent
-		existing_sym.return_type = info.parent
-		existing_sym.language = info.language
-		existing_sym.access = info.access
-		existing_sym.kind = info.kind
-		existing_sym.range = info.range
-		existing_sym.generic_placeholder_len = info.generic_placeholder_len
-		existing_sym.file_version = info.file_version
 		return existing_sym
 	}
 
 	ss.symbols[dir] << info
-	return info
+	return unsafe { info } 
 }
 
 pub fn (mut ss Store) add_import(imp Import) (&Import, bool) {
