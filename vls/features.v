@@ -68,32 +68,15 @@ fn (mut ls Vls) workspace_symbol(id int, _ string) {
 
 	for _, sym_arr in ls.store.symbols {
 		for sym in sym_arr {
-			mut kind := lsp.SymbolKind.null
 			uri := lsp.document_uri_from_path(sym.file_path)
-
-			if uri in ls.trees {
-				match sym.kind {
-						.function { kind = .function }
-						.struct_ { kind = .struct_ }
-						.enum_ { kind = .enum_ }
-						.typedef { kind = .type_parameter }
-						.interface_ { kind = .interface_ }
-						.field { kind = .field }
-						.variable { kind = .variable }
-					else { continue }
-				}
-
-				workspace_symbols << lsp.SymbolInformation{
-					name: sym.name
-					kind: kind
-					location: lsp.Location{
-						uri: uri
-						range: tsrange_to_lsp_range(sym.range)
-					}
-				}
+			if uri !in ls.trees {
+				unsafe { uri.free() }
+				continue
 			}
 
-			unsafe { uri.free() }
+			sym_info := symbol_to_symbol_info(uri, sym, '') or { continue }
+			workspace_symbols << sym_info
+			workspace_symbols << methods_to_symbol_infos(uri, sym)
 		}
 	}
 
@@ -101,6 +84,48 @@ fn (mut ls Vls) workspace_symbol(id int, _ string) {
 		id: id
 		result: workspace_symbols
 	})
+}
+
+fn symbol_to_symbol_info(uri lsp.DocumentUri, sym &analyzer.Symbol, prefix string) ?lsp.SymbolInformation {
+	mut kind := lsp.SymbolKind.null
+	match sym.kind {
+			.function { kind = .function }
+			.struct_ { kind = .struct_ }
+			.enum_ { kind = .enum_ }
+			.typedef { kind = .type_parameter }
+			.interface_ { kind = .interface_ }
+			.field { kind = .field }
+			.variable { kind = .constant }
+		else { return none }
+	}
+
+	return lsp.SymbolInformation{
+		name: prefix + sym.name
+		kind: kind
+		location: lsp.Location{
+			uri: uri
+			range: tsrange_to_lsp_range(sym.range)
+		}
+	}
+}
+
+fn methods_to_symbol_infos(uri lsp.DocumentUri, sym &analyzer.Symbol) []lsp.SymbolInformation {
+	mut symbol_infos := []lsp.SymbolInformation{cap: sym.children.len}
+	for child_sym in sym.children {
+		if child_sym.kind != .function {
+			continue
+		}
+
+		method_sym_info := symbol_to_symbol_info(uri, child_sym, '${sym.name}.') or {
+			continue
+		}
+
+		symbol_infos << lsp.SymbolInformation{
+			...method_sym_info,
+			kind: .method
+		}
+	}
+	return symbol_infos
 }
 
 fn (mut ls Vls) document_symbol(id int, params string) {
@@ -113,28 +138,10 @@ fn (mut ls Vls) document_symbol(id int, params string) {
 	uri := document_symbol_params.text_document.uri
 	retrieved_symbols := ls.store.get_symbols_by_file_path(uri.path())
 	mut document_symbols := []lsp.SymbolInformation{}
-
 	for sym in retrieved_symbols {
-		mut kind := lsp.SymbolKind.null
-		match sym.kind {
-				.function { kind = .function }
-				.struct_ { kind = .struct_ }
-				.enum_ { kind = .enum_ }
-				.typedef { kind = .type_parameter }
-				.interface_ { kind = .interface_ }
-				.field { kind = .field }
-				.variable { kind = .variable }
-			else { continue }
-		}
-
-		document_symbols << lsp.SymbolInformation{
-			name: sym.name
-			kind: kind
-			location: lsp.Location{
-				uri: uri
-				range: tsrange_to_lsp_range(sym.range)
-			}
-		}
+		sym_info := symbol_to_symbol_info(uri, sym, '') or { continue }
+		document_symbols << sym_info
+		document_symbols << methods_to_symbol_infos(uri, sym)
 	}
 
 	ls.send(jsonrpc.Response<[]lsp.SymbolInformation>{

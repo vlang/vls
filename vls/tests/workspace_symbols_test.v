@@ -13,8 +13,8 @@ const workspace_symbols_result = [
 		location: lsp.Location{
 			uri: lsp.document_uri_from_path(os.join_path(base_dir, 'file1.vv'))
 			range: lsp.Range{
-				start: lsp.Position{2, 0}
-				end: lsp.Position{4, 15}
+				start: lsp.Position{2, 3}
+				end: lsp.Position{2, 6}
 			}
 		}
 	},
@@ -24,8 +24,8 @@ const workspace_symbols_result = [
 		location: lsp.Location{
 			uri: lsp.document_uri_from_path(os.join_path(base_dir, 'file1.vv'))
 			range: lsp.Range{
-				start: lsp.Position{6, 0}
-				end: lsp.Position{8, 9}
+				start: lsp.Position{6, 3}
+				end: lsp.Position{6, 7}
 			}
 		}
 	},
@@ -35,8 +35,8 @@ const workspace_symbols_result = [
 		location: lsp.Location{
 			uri: lsp.document_uri_from_path(os.join_path(base_dir, 'file2.vv'))
 			range: lsp.Range{
-				start: lsp.Position{2, 0}
-				end: lsp.Position{4, 13}
+				start: lsp.Position{2, 7}
+				end: lsp.Position{2, 13}
 			}
 		}
 	},
@@ -46,8 +46,8 @@ const workspace_symbols_result = [
 		location: lsp.Location{
 			uri: lsp.document_uri_from_path(os.join_path(base_dir, 'file2.vv'))
 			range: lsp.Range{
-				start: lsp.Position{6, 0}
-				end: lsp.Position{8, 21}
+				start: lsp.Position{6, 3}
+				end: lsp.Position{6, 8}
 			}
 		}
 	},
