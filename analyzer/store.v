@@ -458,6 +458,10 @@ pub fn (mut ss Store) infer_value_type_from_node(node C.TSNode, src_text []byte)
 				}
 			}
 
+			if got_sym.kind == .variable {
+				return got_sym.return_type
+			}
+
 			return got_sym
 		}
 		'true', 'false' {
