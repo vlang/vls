@@ -304,6 +304,7 @@ fn (mut sr SymbolRegistration) fn_decl(fn_node C.TSNode) ?&Symbol {
 					parent.range = fn_sym.range
 				}
 			}
+			scope.register(children[i])
 		}
 
 		unsafe { children.free() }
