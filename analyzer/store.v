@@ -163,7 +163,7 @@ pub fn (mut ss Store) register_symbol(mut info Symbol) ?&Symbol {
 			}
 
 			existing_sym.parent = info.parent
-			existing_sym.return_type = info.parent
+			existing_sym.return_type = info.return_type
 			existing_sym.language = info.language
 			existing_sym.access = info.access
 			existing_sym.kind = info.kind

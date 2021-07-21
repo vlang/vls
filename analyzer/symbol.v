@@ -92,16 +92,16 @@ pub const void_type = &Symbol{
 pub struct Symbol {
 pub mut:
 	name                    string
-	kind                    SymbolKind
-	access                  SymbolAccess
+	kind                    SymbolKind // see SymbolKind
+	access                  SymbolAccess // see SymbolAccess
 	range                   C.TSRange
-	parent                  &Symbol        = analyzer.void_type
-	return_type             &Symbol        = analyzer.void_type
+	parent                  &Symbol        = analyzer.void_type // parent is for typedefs, aliases
+	return_type             &Symbol        = analyzer.void_type // return_type is for functions and variables
 	language                SymbolLanguage = .v
 	generic_placeholder_len int
-	children                []&Symbol
+	children                []&Symbol // methods, sum types (soon), map types, optionals, struct fields, etc.
 	file_path               string
-	file_version            int = 1
+	file_version            int = 1 // file version when the symbol was registered
 }
 
 const kinds_in_multi_return_to_be_excluded = [SymbolKind.function, .variable, .field]
