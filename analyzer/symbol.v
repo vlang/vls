@@ -117,8 +117,6 @@ pub fn (info &Symbol) gen_str() string {
 	defer {
 		unsafe { sb.free() }
 	}
-
-	sb.write_string(info.access.str())
 	
 	match info.kind {
 		.ref {
@@ -154,6 +152,7 @@ pub fn (info &Symbol) gen_str() string {
 			sb.write_b(`)`)
 		}
 		.function {
+			sb.write_string(info.access.str())
 			sb.write_string('fn ')
 
 			if !isnil(info.parent) && !info.parent.is_void() {
@@ -175,11 +174,20 @@ pub fn (info &Symbol) gen_str() string {
 			sb.write_string(info.return_type.gen_str())
 		}
 		.variable, .field {
+			sb.write_string(info.access.str())
+			if info.kind == .field {
+				sb.write_b(`(`)
+				sb.write_string(info.parent.gen_str())
+				sb.write_b(`)`)
+				sb.write_b(`.`)
+			}
+
 			sb.write_string(info.name)
 			sb.write_b(` `)
 			sb.write_string(info.return_type.gen_str())
 		}
 		.typedef {
+			sb.write_string('type ')
 			sb.write_string(info.name)
 			sb.write_string(' = ')
 			sb.write_string(info.parent.gen_str())
