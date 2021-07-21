@@ -83,19 +83,19 @@ will be in the `cmd/vls` directory. So make to add `cmd/vls/vls`.
 - [ ] `didSave`
 - [x] `didClose`
 ### Diagnostics
-- [ ] `publishDiagnostics`
+- [x] `publishDiagnostics`
 ### Language Features
 - [ ] `completion`
 - [ ] `completion resolve`
 - [ ] `hover`
-- [ ] `signatureHelp`
+- [x] `signatureHelp`
 - [ ] `declaration`
-- [ ] `definition`
+- [x] `definition`
 - [ ] `typeDefinition`
 - [ ] `implementation`
 - [ ] `references`
 - [ ] `documentHighlight`
-- [ ] `documentSymbol`
+- [x] `documentSymbol`
 - [ ] `codeAction`
 - [ ] `codeLens`
 - [ ] `codeLens resolve`
@@ -108,7 +108,7 @@ will be in the `cmd/vls` directory. So make to add `cmd/vls/vls`.
 - [ ] `onTypeFormatting`
 - [ ] `rename`
 - [ ] `prepareRename`
-- [ ] `foldingRange`
+- [x] `foldingRange`
 
 ## Debugging
 > By default, log can only be accessed and saved on server crash.
