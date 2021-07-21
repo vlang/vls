@@ -137,6 +137,7 @@ pub fn (mut an Analyzer) top_level_statement() {
 	}
 }
 
+// analyze analyzes the given tree
 pub fn (mut store Store) analyze(tree &C.TSTree, src_text []byte) {
 	mut an := Analyzer{}
 	an.store = unsafe { store }

@@ -108,10 +108,14 @@ pub fn (imp &Import) free() {
 	}
 }
 
+// register_auto_import registers the import as an auto-import. This
+// is used for most important imports such as "builtin"
 pub fn (mut ss Store) register_auto_import(imp Import, to_alias string) {
 	ss.auto_imports[to_alias] = imp.path
 }
 
+// find_import_by_position locates the import of the current directory
+// based on the given range
 pub fn (mut ss Store) find_import_by_position(range C.TSRange) ?&Import {
 	for mut imp in ss.imports[ss.cur_dir] {
 		if ss.cur_file_path in imp.ranges && imp.ranges[ss.cur_file_path].start_point.row == range.start_point.row {
@@ -122,6 +126,7 @@ pub fn (mut ss Store) find_import_by_position(range C.TSRange) ?&Import {
 	return none
 }
 
+// inject_paths_of_new_imports resolves and injects the path to the Import instance
 [manualfree]
 fn (mut ss Store) inject_paths_of_new_imports(mut new_imports []&Import, lookup_paths ...string) {
 	mut project := ss.dependency_tree.get_node(ss.cur_dir) or { ss.dependency_tree.add(ss.cur_dir) }
@@ -218,6 +223,8 @@ fn (mut ss Store) inject_paths_of_new_imports(mut new_imports []&Import, lookup_
 	}
 }
 
+// cleanup_imports removes the unused imports from the current directory.
+// This should be used after executing `import_modules_from_tree` or `import_modules`.
 pub fn (mut ss Store) cleanup_imports() int {
 	mut deleted := 0
 	orig_len := ss.imports[ss.cur_dir].len
@@ -305,6 +312,7 @@ fn (mut ss Store) scan_imports(tree &C.TSTree, src_text []byte) []&Import {
 	return newly_imported_modules
 }
 
+// import_modules_from_tree scans and imports the modules based from the AST tree
 pub fn (mut store Store) import_modules_from_tree(tree &C.TSTree, src []byte, lookup_paths ...string) {
 	mut imports := store.scan_imports(tree, src)
 	store.inject_paths_of_new_imports(mut imports, ...lookup_paths)
@@ -315,6 +323,8 @@ pub fn (mut store Store) import_modules_from_tree(tree &C.TSTree, src []byte, lo
 	store.import_modules(mut imports)
 }
 
+// import_modules imports the given Import array to the current directory.
+// It also registers the symbols to the store.
 pub fn (mut store Store) import_modules(mut imports []&Import) {
 	mut parser := tree_sitter.new_parser()
 	parser.set_language(v.language)

@@ -43,6 +43,7 @@ pub mut:
 	default_import_paths []string
 }
 
+// clear_messages clears the stored messages
 pub fn (mut ss Store) clear_messages() {
 	for i := 0; ss.messages.len != 0; {
 		msg := ss.messages[i]
@@ -54,14 +55,20 @@ pub fn (mut ss Store) clear_messages() {
 	}
 }
 
+// report inserts the message to the messages array
 pub fn (mut ss Store) report(msg Message) {
 	ss.messages << msg
 }
 
+// is_file_active returns a boolean that checks if the given
+// file_path is the same as the current file path stored in the store
 pub fn (ss &Store) is_file_active(file_path string) bool {
 	return ss.cur_file_path == file_path
 }
 
+// set_active_file_path sets the current path and current version of the file
+// to the store. The `cur_file_path` and its related fields are oftenly used
+// in symbol registration, import location, and etc.
 pub fn (mut ss Store) set_active_file_path(file_path string, version int) {
 	ss.cur_version = version
 
@@ -79,6 +86,8 @@ pub fn (mut ss Store) set_active_file_path(file_path string, version int) {
 	ss.cur_file_name = os.base(file_path)
 }
 
+// get_module_path_opt is a variant of `get_module_path` that returns
+// an optional if not found
 pub fn (ss &Store) get_module_path_opt(module_name string) ?string {
 	import_lists := ss.imports[ss.cur_dir]
 	for imp in import_lists {
@@ -90,11 +99,15 @@ pub fn (ss &Store) get_module_path_opt(module_name string) ?string {
 	return error('Not found')
 }
 
+// get_module_path returns the path of the import/module based
+// on the given module name. If nothing found, it will return
+// the current directory instead.
 pub fn (ss &Store) get_module_path(module_name string) string {
 	// empty names should return the current selected dir instead
 	return ss.get_module_path_opt(module_name) or { ss.cur_dir }
 }
 
+// find_symbol retrieves the symbol based on the given module name and symbol name
 pub fn (ss &Store) find_symbol(module_name string, name string) ?&Symbol {
 	if name.len == 0 {
 		return none
@@ -116,6 +129,7 @@ pub fn (ss &Store) find_symbol(module_name string, name string) ?&Symbol {
 
 const kinds_to_be_returned = [SymbolKind.chan_, .array_, .map_, .ref]
 
+// register_symbol registers the given symbol
 pub fn (mut ss Store) register_symbol(mut info Symbol) ?&Symbol {
 	dir := os.dir(info.file_path)
 	defer {
@@ -165,6 +179,8 @@ pub fn (mut ss Store) register_symbol(mut info Symbol) ?&Symbol {
 	return unsafe { info } 
 }
 
+// add_imports adds/registers the import. it returns a boolean
+// to indicate if the import already exist in the array.
 pub fn (mut ss Store) add_import(imp Import) (&Import, bool) {
 	dir := ss.cur_dir
 	mut idx := -1
@@ -197,6 +213,7 @@ pub fn (mut ss Store) add_import(imp Import) (&Import, bool) {
 	}
 }
 
+// get_symbols_by_file_path retrieves the symbols based on the given file path
 pub fn (ss &Store) get_symbols_by_file_path(file_path string) []&Symbol {
 	dir := os.dir(file_path)
 	defer {
@@ -215,6 +232,9 @@ pub fn (ss &Store) get_symbols_by_file_path(file_path string) []&Symbol {
 	return fetched_symbols
 }
 
+// delete removes the given path of a workspace/project if possible.
+// The directory is only deleted if there are no projects dependent on it.
+// It also removes the dependencies with the same condition
 pub fn (mut ss Store) delete(dir string, excluded_dir ...string) {
 	is_used := ss.dependency_tree.has_dependents(dir, ...excluded_dir)
 	if is_used {
@@ -252,6 +272,7 @@ pub fn (mut ss Store) delete(dir string, excluded_dir ...string) {
 	}
 }
 
+// get_scope_from_node returns a scope based on the given node
 pub fn (mut ss Store) get_scope_from_node(node C.TSNode) ?&ScopeTree {
 	if node.is_null() {
 		return error('unable to create scope')
@@ -277,6 +298,7 @@ pub fn (mut ss Store) get_scope_from_node(node C.TSNode) ?&ScopeTree {
 	}
 }
 
+// symbol_name_from_node extracts the symbol's kind, name, and module name from the given node
 pub fn symbol_name_from_node(node C.TSNode, src_text []byte) (SymbolKind, string, string) {
 	if node.is_null() {
 		return SymbolKind.typedef, '', 'void'
@@ -359,6 +381,7 @@ pub fn symbol_name_from_node(node C.TSNode, src_text []byte) (SymbolKind, string
 	return SymbolKind.typedef, '', 'void'
 }
 
+// find_symbol_by_type_node returns a symbol based on the given type node
 pub fn (mut store Store) find_symbol_by_type_node(node C.TSNode, src_text []byte) ?&Symbol {
 	if node.is_null() || src_text.len == 0 {
 		return none
@@ -402,6 +425,7 @@ pub fn (mut store Store) find_symbol_by_type_node(node C.TSNode, src_text []byte
 	}
 }
 
+// infer_value_type_from_node returns the symbol based on the given node
 pub fn (mut ss Store) infer_value_type_from_node(node C.TSNode, src_text []byte) &Symbol {
 	if node.is_null() {
 		return void_type
@@ -512,6 +536,7 @@ fn search_node_in_children(node C.TSNode, range C.TSRange) ?C.TSNode {
 	return none
 }
 
+// delete_symbol_at_node removes a specific symbol from a specific portion of the node
 pub fn (mut ss Store) delete_symbol_at_node(root_node C.TSNode, src []byte, at_range C.TSRange) bool {
 	node := search_node(root_node, at_range) or { return false }
 	node_type := node.get_type()

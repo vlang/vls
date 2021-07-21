@@ -487,6 +487,7 @@ fn (mut sr SymbolRegistration) extract_parameter_list(node C.TSNode) []&Symbol {
 	return syms
 }
 
+// register_symbols_from_tree scans and registers all the symbols based on the given tree
 pub fn (mut store Store) register_symbols_from_tree(tree &C.TSTree, src_text []byte) {
 	root_node := tree.root_node()
 	child_len := int(root_node.named_child_count())
