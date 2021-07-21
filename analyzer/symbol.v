@@ -118,7 +118,7 @@ pub fn (info &Symbol) gen_str() string {
 		unsafe { sb.free() }
 	}
 
-	sb.write_string(info.access.str())
+	// sb.write_string(info.access.str())
 	
 	match info.kind {
 		.ref {
@@ -175,6 +175,7 @@ pub fn (info &Symbol) gen_str() string {
 			sb.write_string(info.return_type.gen_str())
 		}
 		.variable, .field {
+			sb.write_string(info.access.str())
 			sb.write_string(info.name)
 			sb.write_b(` `)
 			sb.write_string(info.return_type.gen_str())
