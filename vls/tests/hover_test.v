@@ -18,7 +18,7 @@ const hover_inputs = map{
 		position: lsp.Position{2, 18}
 	}
 	'function.vv':             lsp.HoverParams{
-		position: lsp.Position{0, 6}
+		position: lsp.Position{0, 5}
 	}
 	'import.vv':               lsp.HoverParams{
 		position: lsp.Position{0, 8}
@@ -62,44 +62,44 @@ const hover_should_return_null = ['node_error.vv']
 
 const hover_results = map{
 	'call_expr_method.vv':     lsp.Hover{
-		contents: lsp.MarkedString{'v', 'Foo.call() string'}
+		contents: lsp.MarkedString{'v', 'fn (Foo) call() string'}
 		range: lsp.Range{
 			start: lsp.Position{10, 13}
-			end: lsp.Position{10, 19}
+			end: lsp.Position{10, 17}
 		}
 	}
 	'call_expr_simple.vv':     lsp.Hover{
-		contents: lsp.MarkedString{'v', 'greet()'}
+		contents: lsp.MarkedString{'v', 'fn greet(name string) void'}
 		range: lsp.Range{
 			start: lsp.Position{5, 2}
-			end: lsp.Position{5, 14}
+			end: lsp.Position{5, 7}
 		}
 	}
 	'enum.vv':                 lsp.Hover{
-		contents: lsp.MarkedString{'v', 'enum Color'}
+		contents: lsp.MarkedString{'v', 'Color'}
 		range: lsp.Range{
-			start: lsp.Position{0, 0}
-			end: lsp.Position{4, 10}
+			start: lsp.Position{0, 5}
+			end: lsp.Position{0, 10}
 		}
 	}
 	'function_param.vv':       lsp.Hover{
 		contents: lsp.MarkedString{'v', 'mut arr []string'}
 		range: lsp.Range{
 			start: lsp.Position{2, 17}
-			end: lsp.Position{2, 22}
+			end: lsp.Position{2, 20}
 		}
 	}
 	'function.vv':             lsp.Hover{
 		contents: lsp.MarkedString{'v', 'fn foo(param1 string, mut param2 []string) bool'}
 		range: lsp.Range{
-			start: lsp.Position{0, 0}
-			end: lsp.Position{2, 47}
+			start: lsp.Position{0, 3}
+			end: lsp.Position{0, 6}
 		}
 	}
 	'import.vv':               lsp.Hover{
 		contents: lsp.MarkedString{'v', 'import os as os'}
 		range: lsp.Range{
-			start: lsp.Position{0, 0}
+			start: lsp.Position{0, 7}
 			end: lsp.Position{0, 9}
 		}
 	}
@@ -112,37 +112,37 @@ const hover_results = map{
 	}
 	'node_error.vv':           lsp.Hover{}
 	'selector_expr.vv':        lsp.Hover{
-		contents: lsp.MarkedString{'v', 'Person.name string'}
+		contents: lsp.MarkedString{'v', '(Person).name string'}
 		range: lsp.Range{
 			start: lsp.Position{6, 9}
 			end: lsp.Position{6, 13}
 		}
 	}
 	'struct.vv':               lsp.Hover{
-		contents: lsp.MarkedString{'v', 'struct Abc'}
+		contents: lsp.MarkedString{'v', 'Abc'}
 		range: lsp.Range{
-			start: lsp.Position{0, 0}
-			end: lsp.Position{2, 10}
+			start: lsp.Position{0, 7}
+			end: lsp.Position{0, 10}
 		}
 	}
 	'struct_field.vv':         lsp.Hover{
-		contents: lsp.MarkedString{'v', 'bar string'}
+		contents: lsp.MarkedString{'v', '(Foo).bar string'}
 		range: lsp.Range{
 			start: lsp.Position{3, 2}
-			end: lsp.Position{3, 12}
+			end: lsp.Position{3, 5}
 		}
 	}
 	'struct_init.vv':          lsp.Hover{
-		contents: lsp.MarkedString{'v', 'name string'}
+		contents: lsp.MarkedString{'v', '(Person).name string'}
 		range: lsp.Range{
 			start: lsp.Position{8, 4}
-			end: lsp.Position{8, 15}
+			end: lsp.Position{8, 8}
 		}
 	}
 	'type_alias.vv':           lsp.Hover{
 		contents: lsp.MarkedString{'v', 'type Str = string'}
 		range: lsp.Range{
-			start: lsp.Position{0, 0}
+			start: lsp.Position{0, 5}
 			end: lsp.Position{0, 8}
 		}
 	}
