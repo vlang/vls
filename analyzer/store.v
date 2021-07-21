@@ -397,7 +397,7 @@ pub fn (mut store Store) find_symbol_by_type_node(node C.TSNode, src_text []byte
 
 	return store.find_symbol(module_name, symbol_name) or {
 		mut new_sym := Symbol{
-			name: symbol_name
+			name: symbol_name.clone()
 			file_path: os.join_path(store.get_module_path(module_name), 'placeholder.vv')
 			kind: sym_kind
 		}
@@ -434,6 +434,7 @@ pub fn (mut ss Store) infer_symbol_from_node(node C.TSNode, src_text []byte) ?&S
 	}
 
 	node_type := node.get_type()
+	// eprintln(node_type)
 
 	// TODO
 	mut module_name := ''
