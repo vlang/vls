@@ -343,6 +343,10 @@ fn (mut sr SymbolRegistration) type_decl(type_decl_node C.TSNode) ?&Symbol {
 	sym.kind = .typedef
 
 	types_node :=  type_decl_node.child_by_field_name('types')
+	if types_node.is_null() {
+		return none
+	}
+
 	types_count := types_node.named_child_count()
 	if types_count == 0 {
 		return none
