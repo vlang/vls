@@ -138,10 +138,11 @@ fn (mut sr SymbolRegistration) struct_decl(struct_decl_node C.TSNode) ?&Symbol {
 			}
 			'struct_field_declaration' {
 				field_typ := sr.store.find_symbol_by_type_node(field_node.child_by_field_name('type'), sr.src_text) or { analyzer.void_type }
+				field_name_node := field_node.child_by_field_name('name')
 				mut field_sym := Symbol{
-					name: field_node.child_by_field_name('name').get_text(sr.src_text)
+					name: field_name_node.get_text(sr.src_text)
 					kind: .field
-					range: field_node.range()
+					range: field_name_node.range()
 					access: field_access
 					return_type: field_typ
 					file_path: sr.store.cur_file_path.clone()
