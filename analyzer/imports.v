@@ -26,6 +26,7 @@ pub mut:
 	symbols map[string][]string
 }
 
+// set_alias records/changes the alias of the import from the file
 pub fn (mut imp Import) set_alias(file_name string, alias string) {
 	if alias == imp.module_name {
 		return
@@ -38,6 +39,7 @@ pub fn (mut imp Import) set_alias(file_name string, alias string) {
 	imp.aliases[file_name] = alias.clone()
 }
 
+// track_file records the location of the import declaration of a file
 pub fn (mut imp Import) track_file(file_name string, range C.TSRange) {
 	if file_name in imp.ranges && range.eq(imp.ranges[file_name]) {
 		return
@@ -46,36 +48,14 @@ pub fn (mut imp Import) track_file(file_name string, range C.TSRange) {
 	imp.ranges[file_name] = range
 }
 
+// untrack_file removes the location of the import declaration of a file
 pub fn (mut imp Import) untrack_file(file_name string) {
 	if file_name in imp.ranges {
 		imp.ranges.delete(file_name)
 	}
 }
 
-pub fn (mut imp Import) add_symbols(file_name string, symbols ...string) {
-	if file_name !in imp.symbols {
-		imp.symbols[file_name] = []string{}
-	}
-
-	// to avoid duplicate symbols
-	for sym_name in symbols {
-		mut existing_idx := -1
-
-		for j, existing_sym_name in imp.symbols[file_name] {
-			if existing_sym_name == sym_name {
-				existing_idx = j
-				break
-			}
-		}
-
-		if existing_idx == -1 {
-			imp.symbols[file_name] << sym_name
-		} else {
-			continue
-		}
-	}
-}
-
+// set_symbols records/changes the imported symbols on a specific file
 pub fn (mut imp Import) set_symbols(file_name string, symbols ...string) {
 	if file_name in imp.symbols {
 		for i := 0; imp.symbols[file_name].len != 0; {
@@ -88,6 +68,7 @@ pub fn (mut imp Import) set_symbols(file_name string, symbols ...string) {
 	imp.symbols[file_name] = symbols
 }
 
+// set_path changes the path of a given import
 pub fn (mut imp Import) set_path(path string) {
 	if path.len == 0 {
 		return

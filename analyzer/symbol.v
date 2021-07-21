@@ -106,6 +106,8 @@ pub mut:
 
 const kinds_in_multi_return_to_be_excluded = [SymbolKind.function, .variable, .field]
 
+// gen_str returns the string representation of a symbol.
+// Use this since str() has a pointer symbol attached at the beginning.
 pub fn (info &Symbol) gen_str() string {
 	if isnil(info) {
 		return 'nil symbol'
@@ -200,6 +202,7 @@ pub fn (infos []&Symbol) str() string {
 	return '[' + infos.map(it.gen_str()).join(', ') + ']'
 }
 
+// index returns the index based on the given symbol name
 pub fn (infos []&Symbol) index(name string) int {
 	for i, v in infos {
 		if v.name == name {
@@ -210,6 +213,7 @@ pub fn (infos []&Symbol) index(name string) int {
 	return -1
 }
 
+// index_by_row returns the index based on the given file path and row
 pub fn (infos []&Symbol) index_by_row(file_path string, row u32) int {
 	for i, v in infos {
 		if v.file_path == file_path && v.range.start_point.row == row {
@@ -242,10 +246,13 @@ pub fn (infos []&Symbol) index_by_row(file_path string, row u32) int {
 // 	infos.delete(to_delete_i)
 // }
 
+// exists checks if a symbol is present
 pub fn (infos []&Symbol) exists(name string) bool {
 	return infos.index(name) != -1
 }
 
+
+// get retreives the symbol based on the given name
 pub fn (infos []&Symbol) get(name string) ?&Symbol {
 	index := infos.index(name)
 	if index == -1 {
@@ -255,6 +262,7 @@ pub fn (infos []&Symbol) get(name string) ?&Symbol {
 	return infos[index] ?
 }
 
+// add_child registers the symbol as a child of a given parent symbol
 pub fn (mut info Symbol) add_child(mut new_child Symbol, add_as_parent ...bool) ? {
 	if add_as_parent.len == 0 || add_as_parent[0] {
 		new_child.parent = unsafe { info }
@@ -267,6 +275,7 @@ pub fn (mut info Symbol) add_child(mut new_child Symbol, add_as_parent ...bool) 
 	info.children << new_child
 }
 
+// is_void returns true if a symbol is void/invalid
 pub fn (sym &Symbol) is_void() bool {
 	if (sym.kind == .ref || sym.kind == .array_) && sym.children.len >= 1 {
 		return sym.children[0].is_void()

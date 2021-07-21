@@ -26,10 +26,12 @@ pub fn (scope &ScopeTree) free() {
 	}
 }
 
+// contains checks if a given position is within the scope's range
 pub fn (scope &ScopeTree) contains(pos u32) bool {
 	return pos >= scope.start_byte && pos <= scope.end_byte
 }
 
+// innermost returns the scope based on the given byte ranges
 pub fn (scope &ScopeTree) innermost(start_byte u32, end_byte u32) &ScopeTree {
 	if !isnil(scope) {
 		for mut child_scope in scope.children {
@@ -42,6 +44,7 @@ pub fn (scope &ScopeTree) innermost(start_byte u32, end_byte u32) &ScopeTree {
 	return unsafe { scope }
 }
 
+// register registers the symbol to the scope
 pub fn (mut scope ScopeTree) register(info &Symbol) {
 	// Just to ensure that scope is not null
 	if isnil(scope) {

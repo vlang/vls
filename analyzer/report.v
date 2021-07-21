@@ -14,9 +14,10 @@ pub:
 	content   string
 }
 
-pub fn (msgs []Message) has_range(range C.TSRange) bool {
+// has_range checks if there is an existing message from a given path and range
+pub fn (msgs []Message) has_range(file_path string, range C.TSRange) bool {
 	for m in msgs {
-		if m.range.eq(range) {
+		if m.file_path == file_path && m.range.eq(range) {
 			return true
 		}
 	}
