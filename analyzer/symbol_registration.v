@@ -444,14 +444,13 @@ fn (mut sr SymbolRegistration) extract_block(node C.TSNode, mut scope ScopeTree)
 					name: left.get_text(sr.src_text)
 					kind: .variable
 					access: var_access
-					range: decl_node.range()
+					range: left.range()
 					return_type: right_type
 					file_path: sr.store.cur_file_path.clone()
 					file_version: sr.store.cur_version
 				}
 
 				scope.register(var)
-				unsafe { var.free() }
 			}
 		} else {
 			// TODO: if left_len > right_len
