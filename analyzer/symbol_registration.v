@@ -342,12 +342,13 @@ fn (mut sr SymbolRegistration) type_decl(type_decl_node C.TSNode) ?&Symbol {
 	mut sym := sr.new_top_level_symbol(type_decl_node.child_by_field_name('name'), access) ?
 	sym.kind = .typedef
 
-	// types_count := type_decl_node.child_by_field_name('types').named_child_count()
-	// if types_count == 0 {
-	// 	return none
-	// }
+	types_node :=  type_decl_node.child_by_field_name('types')
+	types_count := types_node.named_child_count()
+	if types_count == 0 {
+		return none
+	}
 
-	selected_type_node := type_decl_node.child_by_field_name('types').named_child(0)
+	selected_type_node := types_node.named_child(0)
 	// TODO: support only aliases for now, must add sumtype kind
 	sym.parent = sr.store.find_symbol_by_type_node(selected_type_node, sr.src_text) ?
 	return sym
