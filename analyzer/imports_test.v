@@ -67,7 +67,7 @@ fn test_import_modules_from_tree() ? {
 	assert store.imports[store.cur_dir][0].imported == true
 	assert store.imports[store.cur_dir][1].module_name == 'env'
 	assert store.imports[store.cur_dir][1].resolved == false
-	$if darwin {
+	$if macos {
 		assert store.dependency_tree.size() == 2
 	} $else {
 		assert store.dependency_tree.size() == 3
@@ -93,7 +93,7 @@ fn test_import_modules_with_edits() ? {
 	assert store.imports[store.cur_dir][0].module_name == 'os'
 	assert store.imports[store.cur_dir][0].resolved == true
 	assert store.imports[store.cur_dir][0].imported == true
-	$if darwin {
+	$if macos {
 		assert store.dependency_tree.size() == 2
 	} $else {
 		assert store.dependency_tree.size() == 3
@@ -141,7 +141,7 @@ fn test_import_modules_with_edits() ? {
 	assert store.imports[store.cur_dir][0].path.len != 0
 	assert store.imports[store.cur_dir][0].resolved == true
 	assert store.imports[store.cur_dir][0].imported == true
-	$if darwin {
+	$if macos {
 		assert store.dependency_tree.size() == 2
 	} $else {
 		assert store.dependency_tree.size() == 3
