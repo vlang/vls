@@ -166,54 +166,74 @@ fn (mut ls Vls) signature_help(id int, params string) {
 	// Fetch the node requested for completion.
 	uri := signature_params.text_document.uri.str()
 	pos := signature_params.position
-	off := compute_offset(ls.sources[uri].source, pos.line, pos.character)
-	node := ls.trees[uri].root_node().descendant_for_byte_range(u32(off), u32(off + 1))
-	if node.is_null() || node.get_type() != 'identifier' {
+	ctx := signature_params.context
+	source := ls.sources[uri].source
+	off := compute_offset(source, pos.line, pos.character)
+	mut node := ls.trees[uri].root_node().descendant_for_byte_range(u32(off - 2), u32(off - 2))
+	
+	for node.get_type() in ['identifier', 'selector_expression', 'index_expression'] {
+		node = node.parent()
+	}
+
+	// signature help supports function calls for now
+	// hence checking the node if it's a call_expression node.
+	if node.is_null() || node.get_type() != 'call_expression' {
 		ls.send_null(id)
 		return
 	}
 
-	// Fetch the symbol and report on it.
-	node_text := node.get_text(ls.sources[uri].source)
-	symbol := ls.store.find_symbol(uri, node_text) or { analyzer.void_type }
-	if symbol.kind == .placeholder || symbol.name == 'void' {
+	sym := ls.store.infer_symbol_from_node(node, source) or {
 		ls.send_null(id)
 		return
 	}
 
-	// Build the message to report.
-	// TODO: Add more than variables once the analyzer reports them, which it
-	// does not seem to be the case right now.
-	title := symbol.str()
-	access := match symbol.access {
-		.private {
-			'Private'
+	args_node := node.child_by_field_name('arguments')
+	// for retrigger, it utilizes the current signature help data
+	if ctx.is_retrigger {
+		mut active_sighelp := ctx.active_signature_help
+
+		if ctx.trigger_kind == .content_change {
+			// change the current active param value to the length of the current args.
+			active_sighelp.active_parameter = int(args_node.named_child_count()) - 1
+		} else if ctx.trigger_kind == .trigger_character && ctx.trigger_character == ','
+			&& active_sighelp.signatures.len > 0
+			&& active_sighelp.active_parameter < active_sighelp.signatures[0].parameters.len {
+			// when pressing comma, it must proceed to the next parameter
+			// by incrementing the active parameter.
+			active_sighelp.active_parameter++
 		}
-		.private_mutable {
-			'Private and mutable'
+
+		ls.send(jsonrpc.Response<lsp.SignatureHelp>{
+			id: id
+			result: active_sighelp
+		})
+		return
+	}
+	
+	// create a signature help info based on the
+	// call expr info
+	// TODO: use string concat in the meantime as
+	// the msvc CI fails when using strings.builder
+	// as it produces bad output (in the case of msvc)
+	
+	mut param_infos := []lsp.ParameterInformation{}
+	for child_sym in sym.children {
+		if child_sym.kind != .variable {
+			continue
 		}
-		.public {
-			'Public'
-		}
-		.public_mutable {
-			'Public and mutable'
-		}
-		.global {
-			'Global'
+		
+		param_infos << lsp.ParameterInformation{
+			label: child_sym.gen_str()
 		}
 	}
-	description := '*$access symbol defined in [${symbol.file_path[7..]}]($symbol.file_path)*'
 
-	// Send the final message.
 	ls.send(jsonrpc.Response<lsp.SignatureHelp>{
 		id: id
 		result: lsp.SignatureHelp{
 			signatures: [lsp.SignatureInformation{
-				label: title
-				documentation: lsp.MarkupContent{
-					kind: lsp.markup_kind_markdown
-					value: description
-				}
+				label: sym.gen_str()
+				// documentation: lsp.MarkupContent{}
+				parameters: param_infos
 			}]
 		}
 	})

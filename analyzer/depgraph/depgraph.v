@@ -122,6 +122,10 @@ pub fn (node &Node) get_all_dependencies(completed ...string) []string {
 			continue
 		}
 
+		if isnil(dep_node) || isnil(dep_node.dependencies) {
+			continue
+		}
+
 		other_deps := dep_node.get_all_dependencies()
 		for other_dep in other_deps {
 			if other_dep in ret || other_dep in completed {
