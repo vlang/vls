@@ -1245,6 +1245,12 @@ fn (mut ls Vls) definition(id int, params string) {
 		}
 	}
 
+	// Send null if range has zero-start and end points
+	if target_range.start_point.row == 0 && target_range.start_point.column == 0 && target_range.start_point.eq(target_range.end_point) {
+		ls.send_null(id)
+		return
+	}
+
 	sym := ls.store.infer_symbol_from_node(node, source) or { analyzer.void_type }
 	if isnil(sym) || sym.is_void() {
 		ls.send_null(id)
