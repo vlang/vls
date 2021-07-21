@@ -566,7 +566,7 @@ pub fn (mut ss Store) delete_symbol_at_node(root_node C.TSNode, src []byte, at_r
 		'interface_declaration', 'enum_declaration' {
 			name_node := node.child_by_field_name('name')
 			symbol_name := name_node.get_text(src)
-			if name_node.is_null() || ss.messages.has_range(name_node.range()) {
+			if name_node.is_null() || ss.messages.has_range(ss.cur_file_path, name_node.range()) {
 				// eprintln('ignored')
 				return false
 			}
