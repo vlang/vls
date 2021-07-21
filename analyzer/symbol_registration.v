@@ -138,10 +138,11 @@ fn (mut sr SymbolRegistration) struct_decl(struct_decl_node C.TSNode) ?&Symbol {
 			}
 			'struct_field_declaration' {
 				field_typ := sr.store.find_symbol_by_type_node(field_node.child_by_field_name('type'), sr.src_text) or { analyzer.void_type }
+				field_name_node := field_node.child_by_field_name('name')
 				mut field_sym := Symbol{
-					name: field_node.child_by_field_name('name').get_text(sr.src_text)
+					name: field_name_node.get_text(sr.src_text)
 					kind: .field
-					range: field_node.range()
+					range: field_name_node.range()
 					access: field_access
 					return_type: field_typ
 					file_path: sr.store.cur_file_path.clone()
@@ -304,6 +305,7 @@ fn (mut sr SymbolRegistration) fn_decl(fn_node C.TSNode) ?&Symbol {
 					parent.range = fn_sym.range
 				}
 			}
+			scope.register(children[i])
 		}
 
 		unsafe { children.free() }
@@ -340,12 +342,17 @@ fn (mut sr SymbolRegistration) type_decl(type_decl_node C.TSNode) ?&Symbol {
 	mut sym := sr.new_top_level_symbol(type_decl_node.child_by_field_name('name'), access) ?
 	sym.kind = .typedef
 
-	// types_count := type_decl_node.child_by_field_name('types').named_child_count()
-	// if types_count == 0 {
-	// 	return none
-	// }
+	types_node :=  type_decl_node.child_by_field_name('types')
+	if types_node.is_null() {
+		return none
+	}
 
-	selected_type_node := type_decl_node.child_by_field_name('types').named_child(0)
+	types_count := types_node.named_child_count()
+	if types_count == 0 {
+		return none
+	}
+
+	selected_type_node := types_node.named_child(0)
 	// TODO: support only aliases for now, must add sumtype kind
 	sym.parent = sr.store.find_symbol_by_type_node(selected_type_node, sr.src_text) ?
 	return sym
@@ -443,14 +450,13 @@ fn (mut sr SymbolRegistration) extract_block(node C.TSNode, mut scope ScopeTree)
 					name: left.get_text(sr.src_text)
 					kind: .variable
 					access: var_access
-					range: decl_node.range()
+					range: left.range()
 					return_type: right_type
 					file_path: sr.store.cur_file_path.clone()
 					file_version: sr.store.cur_version
 				}
 
 				scope.register(var)
-				unsafe { var.free() }
 			}
 		} else {
 			// TODO: if left_len > right_len

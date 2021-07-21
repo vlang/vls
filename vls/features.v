@@ -1211,89 +1211,8 @@ fn (mut ls Vls) folding_range(id int, params string) {
 	}
 }
 
-// struct DefinitionConfig {
-// 	uri                      lsp.DocumentUri
-// 	builtin_symbol_locations map[string]lsp.Location
-// 	symbol_locations         map[string]lsp.Location
-// 	table                    &ast.Table
-// 	mod                      string
-// }
-
-// fn (cfg DefinitionConfig) get_symbol_location(pos token.Position, entry_name string) ?lsp.LocationLink {
-// 	loc := cfg.builtin_symbol_locations[entry_name] or { cfg.symbol_locations[entry_name] ? }
-
-// 	// NB: Compiling VLS without gc returns a symbol location data
-// 	// with an empty URI. This is triggered just to make sure.
-// 	if loc.uri.len == 0 {
-// 		return error('empty URI')
-// 	}
-
-// 	return lsp.LocationLink{
-// 		origin_selection_range: position_to_lsp_range(pos)
-// 		target_uri: loc.uri
-// 		target_range: loc.range
-// 		target_selection_range: loc.range
-// 	}
-// }
-
-// fn (cfg DefinitionConfig) definition_from_scope_obj(node ast.Expr, obj ast.ScopeObject) ?lsp.LocationLink {
-// 	match obj {
-// 		ast.Var, ast.ConstField {
-// 			target_range := position_to_lsp_range(obj.pos)
-// 			return lsp.LocationLink{
-// 				origin_selection_range: position_to_lsp_range(node.position())
-// 				target_uri: cfg.uri
-// 				target_range: target_range
-// 				target_selection_range: target_range
-// 			}
-// 		}
-// 		else {
-// 			return none
-// 		}
-// 	}
-// }
-
-// fn (cfg DefinitionConfig) definition_from_expr(node ast.Expr) ?lsp.LocationLink {
-// 	match node {
-// 		ast.Ident {
-// 			return cfg.definition_from_scope_obj(node, node.obj)
-// 		}
-// 		ast.CallExpr {
-// 			name := if node.name in cfg.builtin_symbol_locations {
-// 				node.name
-// 			} else {
-// 				'${cfg.mod}.$node.name'
-// 			}
-// 			return cfg.get_symbol_location(node.name_pos, name)
-// 		}
-// 		ast.SelectorExpr {
-// 			if node.expr_type == ast.Type(0) {
-// 				return none
-// 			}
-
-// 			struct_type_name := cfg.table.type_to_str(node.expr_type)
-// 			return cfg.get_symbol_location(node.pos, '${struct_type_name}.$node.field_name')
-// 		}
-// 		ast.StructInit {
-// 			if node.typ == ast.Type(0) {
-// 				return none
-// 			}
-
-// 			return cfg.get_symbol_location(node.name_pos, cfg.table.type_to_str(node.typ))
-// 		}
-// 		ast.EnumVal {
-// 			if node.typ == ast.Type(0) {
-// 				return none
-// 			}
-
-// 			enum_type_name := cfg.table.type_to_str(node.typ)
-// 			return cfg.get_symbol_location(node.pos, '${enum_type_name}.$node.val')
-// 		}
-// 		else {
-// 			return none
-// 		}
-// 	}
-// }
+const accepted_parent_node_types_in_definition = ['selector_expression', 'call_expression', 'enum_identifier']
+const excluded_parent_node_types_in_definition = ['function_declaration']
 
 fn (mut ls Vls) definition(id int, params string) {
 	goto_definition_params := json.decode(lsp.TextDocumentPositionParams, params) or {
@@ -1311,121 +1230,40 @@ fn (mut ls Vls) definition(id int, params string) {
 	pos := goto_definition_params.position
 	source := ls.sources[uri].source
 	offset := compute_offset(source, pos.line, pos.character)
+	mut node := ls.trees[uri].root_node().descendant_for_byte_range(u32(offset), u32(offset + 1))
+	original_range := node.range()
 
-	node := ls.trees[uri].root_node().descendant_for_byte_range(u32(offset), u32(offset + 1))
+	if node.is_null() || (node.parent().has_error() || node.parent().is_missing()) {
+		ls.send_null(id)
+		return
+	} else if node.get_type() == 'identifier' {
+		if node.parent().get_type() in accepted_parent_node_types_in_definition {
+			node = node.parent()
+		} else if node.parent().get_type() in excluded_parent_node_types_in_definition {
+			ls.send_null(id)
+			return
+		}
+	}
 
-	if node.is_null() || node.get_type() != 'identifier' {
+	sym := ls.store.infer_symbol_from_node(node, source) or { analyzer.void_type }
+	if isnil(sym) || sym.is_void() {
 		ls.send_null(id)
 		return
 	}
 
-	ls.show_message('Selected identifier: ${node.get_text(source)}', .info)
+	// Send null if range has zero-start and end points
+	if sym.range.start_point.row == 0 && sym.range.start_point.column == 0 && sym.range.start_point.eq(sym.range.end_point) {
+		ls.send_null(id)
+		return
+	}
 
 	ls.send(jsonrpc.Response<lsp.LocationLink>{
 		id: id
 		result: lsp.LocationLink{
-			target_uri: uri
-			target_range: tsrange_to_lsp_range(node.range())
-			target_selection_range: tsrange_to_lsp_range(node.range())
+			target_uri: lsp.document_uri_from_path(sym.file_path)
+			target_range: tsrange_to_lsp_range(sym.range)
+			target_selection_range: tsrange_to_lsp_range(sym.range)
+			origin_selection_range: tsrange_to_lsp_range(original_range)
 		}
 	})
-
-	// mut cfg := DefinitionConfig{
-	// 	uri: uri
-	// 	mod: file.mod.short_name
-	// 	builtin_symbol_locations: ls.builtin_symbol_locations
-	// 	symbol_locations: ls.symbol_locations[uri.dir()]
-	// 	table: ls.tables[uri.dir()]
-	// }
-	// mut res := lsp.LocationLink{}
-
-	// // an AST walker will find a node based on the offset
-	// mut node := find_ast_by_pos(ast.Node(file).children(), offset) or {
-	// 	ls.send_null(id)
-	// 	return
-	// }
-
-	// // for CallExpr and SelectorExpr nodes, both of which
-	// // have a special code inside the AST walker, will need to
-	// // have another check if the position is within their children
-	// // before doing another AST traversal
-	// mut should_find_child := false
-	// if mut node is ast.Expr {
-	// 	should_find_child = if mut node is ast.CallExpr {
-	// 		!is_within_pos(offset, node.name_pos)
-	// 	} else if mut node is ast.SelectorExpr {
-	// 		!is_within_pos(offset, node.pos)
-	// 	} else {
-	// 		false
-	// 	}
-	// }
-
-	// if should_find_child {
-	// 	// falls back to the parent node if there's no child node found
-	// 	node = find_ast_by_pos(node.children(), offset) or { node }
-	// }
-
-	// match mut node {
-	// 	ast.Stmt {
-	// 		if mut node is ast.FnDecl {
-	// 			if !is_within_pos(offset, node.return_type_pos) {
-	// 				ls.send_null(id)
-	// 				return
-	// 			}
-
-	// 			type_name := cfg.table.type_to_str(node.return_type)
-	// 			res = cfg.get_symbol_location(node.return_type_pos, type_name) or {
-	// 				ls.send_null(id)
-	// 				return
-	// 			}
-	// 		}
-	// 	}
-	// 	ast.Expr {
-	// 		res = cfg.definition_from_expr(node) or {
-	// 			ls.log_message(err.msg, .info)
-	// 			ls.send_null(id)
-	// 			return
-	// 		}
-	// 	}
-	// 	ast.CallArg {
-	// 		res = cfg.definition_from_expr(node.expr) or {
-	// 			ls.send_null(id)
-	// 			return
-	// 		}
-	// 	}
-	// 	ast.StructInitField {
-	// 		if !is_within_pos(offset, node.name_pos) || node.parent_type == ast.Type(0) {
-	// 			ls.send_null(id)
-	// 			return
-	// 		}
-
-	// 		struct_type_name := cfg.table.type_to_str(node.parent_type)
-	// 		res = cfg.get_symbol_location(node.name_pos, '${struct_type_name}.$node.name') or {
-	// 			ls.send_null(id)
-	// 			return
-	// 		}
-	// 	}
-	// 	ast.Param, ast.StructField {
-	// 		if !is_within_pos(offset, node.type_pos) {
-	// 			ls.send_null(id)
-	// 			return
-	// 		}
-
-	// 		type_name := cfg.table.type_to_str(node.typ)
-	// 		res = cfg.get_symbol_location(node.type_pos, type_name) or {
-	// 			ls.send_null(id)
-	// 			return
-	// 		}
-	// 	}
-	// 	else {
-	// 		// for unsupported nodes, the server will return null.
-	// 		ls.send_null(id)
-	// 		return
-	// 	}
-	// }
-
-	// ls.send(jsonrpc.Response<lsp.LocationLink>{
-	// 	id: id
-	// 	result: res
-	// })
 }
