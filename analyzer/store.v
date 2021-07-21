@@ -425,6 +425,112 @@ pub fn (mut store Store) find_symbol_by_type_node(node C.TSNode, src_text []byte
 	}
 }
 
+// infer_symbol_from_node returns the specified symbol based on the given node.
+// This is different from infer_value_type_from_node as this returns the symbol
+// instead of symbol's return type or parent for example
+pub fn (mut ss Store) infer_symbol_from_node(node C.TSNode, src_text []byte) ?&Symbol {
+	if node.is_null() {
+		return none
+	}
+
+	node_type := node.get_type()
+
+	// TODO
+	mut module_name := ''
+	mut type_name := ''
+
+	defer {
+		unsafe {
+			// node_type.free()
+			module_name.free()
+			type_name.free()
+		}
+	}
+
+	match node_type {
+		'identifier' {
+			// Identifier symbol finding strategy
+			// Find first in symbols
+			// find the symbol in scopes
+			// return void if none
+			ident_text := node.get_text(src_text)
+			return ss.find_symbol(module_name, ident_text) or {
+				selected_scope := ss.opened_scopes[ss.cur_file_path].innermost(node.start_byte(), node.end_byte())
+				selected_scope.symbols.get(ident_text) or { 
+					analyzer.void_type
+				}
+			}
+		}
+		'field_identifier' {
+			mut parent := node.parent()
+			for parent.get_type() in ['keyed_element', 'literal_value'] {
+				parent = parent.parent()
+			}
+
+			parent_sym := ss.infer_symbol_from_node(parent, src_text) or { analyzer.void_type }
+			ident_text := node.get_text(src_text)
+			if !parent_sym.is_void() {
+				if child_sym := parent_sym.children.get(ident_text) {
+					return child_sym
+				}
+			}
+
+			return ss.find_symbol(module_name, ident_text) or {
+				selected_scope := ss.opened_scopes[ss.cur_file_path].innermost(node.start_byte(), node.end_byte())
+				selected_scope.symbols.get(ident_text) or { 
+					analyzer.void_type
+				}
+			}
+		}
+		'enum_identifier' {
+			mut parent := node.parent()
+			// TODO: assignment_declaration
+			// if parent.get_type() != 'literal_value' {
+			// 	parent = parent.parent()
+			// }
+			parent_sym := ss.infer_symbol_from_node(parent, src_text) ?
+			child_sym := parent_sym.children.get(node.named_child(0).get_text(src_text)) ?
+			return child_sym
+		}
+		'type_initializer' {
+			return ss.find_symbol_by_type_node(node.child_by_field_name('type'), src_text)
+		}
+		'type_identifier' {
+			return ss.find_symbol_by_type_node(node, src_text)
+		}
+		'selector_expression' {
+			root_sym := ss.infer_value_type_from_node(node.child_by_field_name('operand'), src_text)
+			if !root_sym.is_void() {
+				child_sym := root_sym.children.get(node.child_by_field_name('field').get_text(src_text)) or { 
+					return analyzer.void_type 
+				}
+				return child_sym
+			}
+
+			module_name = node.child_by_field_name('operand').get_text(src_text)
+			type_name = node.child_by_field_name('field').get_text(src_text)
+		}
+		'keyed_element' {
+			mut parent := node.parent()
+			if parent.get_type() == 'literal_value' {
+				parent = parent.parent()
+			}
+			parent_sym := ss.infer_symbol_from_node(parent, src_text) ?	
+			child_sym := parent_sym.children.get(node.child_by_field_name('key').get_text(src_text)) ?
+			return child_sym.return_type
+		}
+		'call_expression' {
+			return ss.infer_symbol_from_node(node.child_by_field_name('function'), src_text)
+		}
+		else {
+			// eprintln(node_type)
+			// return analyzer.void_type
+		}
+	}
+
+	return ss.find_symbol(module_name, type_name)
+}
+
 // infer_value_type_from_node returns the symbol based on the given node
 pub fn (mut ss Store) infer_value_type_from_node(node C.TSNode, src_text []byte) &Symbol {
 	if node.is_null() {
