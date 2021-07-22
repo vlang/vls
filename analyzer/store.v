@@ -170,7 +170,8 @@ pub fn (mut ss Store) register_symbol(mut info Symbol) ?&Symbol {
 	}
 
 	// Replace symbol if symbol already exists
-	if existing_idx != -1 {
+	// the info.kind condition is used for typedefs with anon fn types
+	if existing_idx != -1 && (info.kind != .typedef && ss.symbols[dir][existing_idx].kind != .function_type) {
 		mut existing_sym := ss.symbols[dir][existing_idx]
 
 		// Remove this?
