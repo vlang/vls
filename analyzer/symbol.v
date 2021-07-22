@@ -156,7 +156,8 @@ pub fn (info &Symbol) gen_str() string {
 			}
 			sb.write_b(`)`)
 		}
-		.function {
+		.function, .function_type {
+			sb.write_string(info.access.str())
 			sb.write_string('fn ')
 
 			if !isnil(info.parent) && !info.parent.is_void() {
@@ -166,7 +167,10 @@ pub fn (info &Symbol) gen_str() string {
 				sb.write_b(` `)
 			}
 
-			sb.write_string(info.name)
+			if !info.name.starts_with(analyzer.anon_fn_prefix) {
+				sb.write_string(info.name)
+			}
+
 			sb.write_b(`(`)
 			for i, v in info.children {
 				sb.write_string(v.gen_str())
@@ -179,14 +183,34 @@ pub fn (info &Symbol) gen_str() string {
 		}
 		.variable, .field {
 			sb.write_string(info.access.str())
+			if info.kind == .field {
+				sb.write_b(`(`)
+				sb.write_string(info.parent.gen_str())
+				sb.write_b(`)`)
+				sb.write_b(`.`)
+			}
+
 			sb.write_string(info.name)
 			sb.write_b(` `)
 			sb.write_string(info.return_type.gen_str())
 		}
-		.typedef {
+		.typedef, .sumtype {
+			sb.write_string('type ')
 			sb.write_string(info.name)
 			sb.write_string(' = ')
-			sb.write_string(info.parent.gen_str())
+			
+			if info.kind == .typedef {
+				sb.write_string(info.parent.gen_str())
+			} else {
+				for i in 0 .. info.sumtype_children_len {
+					sb.write_string(info.children[i].gen_str())
+					if i < info.sumtype_children_len - 1{
+						sb.write_b(` `)
+						sb.write_b(`|`)
+						sb.write_b(` `)
+					}
+				}
+			}
 		}
 		else {
 			// sb.write_string(info.kind.str())
