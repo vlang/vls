@@ -112,21 +112,23 @@ pub fn (ss &Store) get_module_path(module_name string) string {
 // find_symbol retrieves the symbol based on the given module name and symbol name
 pub fn (ss &Store) find_symbol(module_name string, name string) ?&Symbol {
 	if name.len == 0 {
-		return none
+		return error('Name is empty.')
 	}
 
 	module_path := ss.get_module_path(module_name)
-	idx := ss.symbols[module_path]?.index(name)
+	idx := ss.symbols[module_path].index(name)
 	if idx != -1 {
 		return ss.symbols[module_path][idx]
 	}
 
 	if aliased_path := ss.auto_imports[module_name] {
-		return ss.symbols[aliased_path]?.get(name)
+		idx_from_alias := ss.symbols[aliased_path]?.index(name)
+		if idx_from_alias != -1 {
+			return ss.symbols[aliased_path][idx_from_alias]
+		}
 	}
 
-	// This shouldn't happen
-	return none
+	return error('Symbol `$name` not found.')
 }
 
 const anon_fn_prefix = '#anon_'
