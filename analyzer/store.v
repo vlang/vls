@@ -123,7 +123,6 @@ pub fn (ss &Store) find_symbol(module_name string, name string) ?&Symbol {
 		return ss.symbols[aliased_path].get(name)
 	}
 
-	// This shouldn't happen
 	return none
 }
 
@@ -499,7 +498,7 @@ pub fn (mut ss Store) infer_symbol_from_node(node C.TSNode, src_text []byte) ?&S
 			root_sym := ss.infer_value_type_from_node(node.child_by_field_name('operand'), src_text)
 			if !root_sym.is_void() {
 				child_sym := root_sym.children.get(node.child_by_field_name('field').get_text(src_text)) or { 
-					return analyzer.void_type 
+					analyzer.void_type 
 				}
 				return child_sym
 			}
@@ -603,6 +602,13 @@ pub fn (mut ss Store) infer_value_type_from_node(node C.TSNode, src_text []byte)
 			module_name = node.child_by_field_name('operand').get_text(src_text)
 			type_name = node.child_by_field_name('field').get_text(src_text)
 		}
+		// 'call_expression' {
+		// 	sym := ss.infer_value_type_from_node(node.child_by_field_name('function'), src_text) 
+		// 	return sym.return_type
+		// }
+		// 'argument_list' {
+		// 	return ss.infer_value_type_from_node(node.parent(), src_text)
+		// }
 		else {
 			// eprintln(node_type)
 			// return analyzer.void_type
