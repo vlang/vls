@@ -239,20 +239,16 @@ fn (mut ls Vls) signature_help(id int, params string) {
 	})
 }
 
-// struct CompletionItemConfig {
-// mut:
-// 	file                ast.File
-// 	offset              int // position of the cursor. used for finding the AST node
-// 	table               &ast.Table
-// 	show_global         bool = true // for displaying global (project) symbols
-// 	show_only_global_fn bool     // for displaying only the functions of the project
-// 	show_local          bool     = true // for displaying local variables
-// 	filter_type         ast.Type = ast.Type(0) // filters results by type
-// 	fields_only         bool     // for displaying only the struct/enum fields
-// 	modules_aliases     []string // for displaying module symbols or module list
-// 	imports_list        []string // for completion_items_from_dir and import symbols list
-// 	is_mut              bool     // filters results based on the object's mutability state.
-// }
+struct CompletionItemConfig {
+mut:
+	// table               &ast.Table
+	show_global         bool = true // for displaying global (project) symbols
+	show_only_global_fn bool     // for displaying only the functions of the project
+	show_local          bool     = true // for displaying local variables
+	// filter_type         ast.Type = ast.Type(0) // filters results by type
+	fields_only         bool     // for displaying only the struct/enum fields
+	is_mut              bool     // filters results based on the object's mutability state.
+}
 
 // // completion_items_from_stmt returns a list of results from the extracted Stmt node info.
 // fn (mut cfg CompletionItemConfig) completion_items_from_stmt(stmt ast.Stmt) []lsp.CompletionItem {
@@ -649,197 +645,260 @@ fn (mut ls Vls) signature_help(id int, params string) {
 // 	return completion_items
 // }
 
+fn symbol_to_completion_item(sym &analyzer.Symbol, prefix string) ?lsp.CompletionItem {
+	mut kind := lsp.CompletionItemKind.text
+	match sym.kind {
+		.variable { 
+			kind = .variable 
+		}
+		.function {
+			// if function has parent, use method
+			if !sym.parent.is_void() {
+				kind = .method
+			} else {
+				kind = .function 
+			}
+		}
+		.struct_ { 
+			kind = .struct_ 
+		}
+		.field {
+			match sym.parent.kind {
+				.enum_ {
+					kind = .enum_member
+				}
+				.struct_ {
+					kind = .property
+				}
+				else {
+					return none
+				}
+			}
+		}
+		.interface_ {
+			kind = .interface_
+		}
+		.typedef {
+			kind = .type_parameter
+		}
+		else {
+			return none
+		}
+	}
+
+	name := if prefix.len == 0 { sym.name } else { prefix + '.' + sym.name }
+	// TODO:
+	return lsp.CompletionItem{
+		label: name
+		kind: kind
+		insert_text: name
+		detail: sym.gen_str()
+	}
+}
+
 // TODO: make params use lsp.CompletionParams in the future
 [manualfree]
 fn (mut ls Vls) completion(id int, params string) {
-	// if Feature.completion !in ls.enabled_features {
-	// 	return
-	// }
-	// completion_params := json.decode(lsp.CompletionParams, params) or {
-	// 	ls.panic(err.msg)
-	// 	ls.send_null(id)
-	// 	return
-	// }
-	// file_uri := completion_params.text_document.uri
-	// file := ls.files[file_uri.str()]
-	// src := ls.sources[file_uri.str()]
-	// pos := completion_params.position
+	if Feature.completion !in ls.enabled_features {
+		return
+	}
+	completion_params := json.decode(lsp.CompletionParams, params) or {
+		ls.panic(err.msg)
+		ls.send_null(id)
+		return
+	}
 
-	// // The context is used for if and when to trigger autocompletion.
-	// // See comments `cfg` for reason.
-	// mut ctx := completion_params.context
+	uri := completion_params.text_document.uri
+	src := ls.sources[uri].source
+	tree := ls.trees[uri]
+	root_node := tree.root_node()
+	pos := completion_params.position
+	file_path := uri.path()
+	file_dir := uri.dir_path()
+	file_name := os.base(file_path)
+	mut offset := compute_offset(src, pos.line, pos.character)
 
-	// // This is where the items will be pushed and sent to the client.
-	// mut completion_items := []lsp.CompletionItem{}
+	// The context is used for if and when to trigger autocompletion.
+	// See comments `cfg` for reason.
+	mut ctx := completion_params.context
 
-	// // The config is used by all methods for determining the results to be sent
-	// // to the client. See the field comments in CompletionItemConfig for their
-	// // purposes.
-	// //
-	// // Other parsers use line character-based position for determining the AST node.
-	// // The V parser on the other hand, uses a byte offset (line number is supplied
-	// // but for certain cases) hence the need to convert the said positions to byte
-	// // offsets.
-	// //
-	// // NOTE: Transfer it back to struct fields after
-	// // https://github.com/vlang/v/pull/7976 has been merged.
-	// modules_aliases := file.imports.map(it.alias)
-	// imports_list := file.imports.map(it.mod)
-	// mut cfg := CompletionItemConfig{
-	// 	file: file
-	// 	modules_aliases: modules_aliases
-	// 	imports_list: imports_list
-	// 	offset: compute_offset(src, pos.line, pos.character)
-	// 	table: ls.tables[file_uri.dir()]
-	// }
-	// // There are some instances that the user would invoke the autocompletion
-	// // through a combination of shortcuts (like Ctrl/Cmd+Space) and the results
-	// // wouldn't appear even though one of the trigger characters is on the left
-	// // or near the cursor. In that case, the context data would be modified in
-	// // order to satisfy those specific cases.
-	// if ctx.trigger_kind == .invoked && cfg.offset - 1 >= 0 && file.stmts.len > 0 && src.len > 3 {
-	// 	mut prev_idx := cfg.offset
-	// 	mut ctx_changed := false
-	// 	if src[cfg.offset - 1] in [`.`, `:`, `=`, `{`, `,`, `(`] {
-	// 		prev_idx--
-	// 		ctx_changed = true
-	// 	} else if src[cfg.offset - 1] == ` ` && cfg.offset - 2 >= 0
-	// 		&& src[cfg.offset - 2] !in [src[cfg.offset - 1], `.`] {
-	// 		prev_idx -= 2
-	// 		cfg.offset -= 2
-	// 		ctx_changed = true
-	// 	}
+	// This is where the items will be pushed and sent to the client.
+	mut completion_items := []lsp.CompletionItem{}
+	defer { unsafe { completion_items.free() } }
 
-	// 	if ctx_changed {
-	// 		ctx = lsp.CompletionContext{
-	// 			trigger_kind: .trigger_character
-	// 			trigger_character: src[prev_idx].str()
-	// 		}
-	// 	}
-	// }
-	// // The language server uses the `trigger_character` as a sole basis for triggering
-	// // the data extraction and autocompletion. The `trigger_character` kind is only
-	// // received by the server if the user presses one of the server-defined trigger
-	// // characters [dot, parenthesis, curly brace, etc.]
-	// if ctx.trigger_kind == .trigger_character {
-	// 	// NOTE: DO NOT REMOVE YET ~ @ned
-	// 	// // The offset is adjusted and the suggestions for local and global symbols are
-	// 	// // disabled if a period/dot is detected and the character on the left is not a space.
-	// 	// if ctx.trigger_character == '.' && (cfg.offset - 1 >= 0 && src[cfg.offset - 1] != ` `) {
-	// 	// 	cfg.show_global = false
-	// 	// 	cfg.show_local = false
-	// 	// 	cfg.offset -= 2
-	// 	// }
-	// 	if src[cfg.offset - 1] == ` ` {
-	// 		cfg.offset--
-	// 	}
+	// The config is used by all methods for determining the results to be sent
+	// to the client. See the field comments in CompletionItemConfig for their
+	// purposes.
+	//
+	// Other parsers use line character-based position for determining the AST node.
+	// The V parser on the other hand, uses a byte offset (line number is supplied
+	// but for certain cases) hence the need to convert the said positions to byte
+	// offsets.
+	//
+	mut cfg := CompletionItemConfig{}
 
-	// 	// Once the offset has been finalized it will then search for the AST node and
-	// 	// extract it's data using the corresponding methods depending on the node type.
-	// 	node := find_ast_by_pos(file.stmts.map(ast.Node(it)), cfg.offset) or { ast.empty_node() }
-	// 	match node {
-	// 		ast.Stmt {
-	// 			completion_items << cfg.completion_items_from_stmt(node)
-	// 		}
-	// 		ast.Expr {
-	// 			completion_items << cfg.completion_items_from_expr(node)
-	// 		}
-	// 		ast.StructInitField {
-	// 			completion_items << cfg.completion_items_from_struct_init_field(node)
-	// 		}
-	// 		else {}
-	// 	}
+	// There are some instances that the user would invoke the autocompletion
+	// through a combination of shortcuts (like Ctrl/Cmd+Space) and the results
+	// wouldn't appear even though one of the trigger characters is on the left
+	// or near the cursor. In that case, the context data would be modified in
+	// order to satisfy those specific cases.
+	if ctx.trigger_kind == .invoked && offset - 1 >= 0 && root_node.named_child_count() > 0 && src.len > 3 {
+		mut prev_idx := offset
+		mut ctx_changed := false
+		if src[offset - 1] in [`.`, `:`, `=`, `{`, `,`, `(`] {
+			prev_idx--
+			ctx_changed = true
+		} else if src[offset - 1] == ` ` && offset - 2 >= 0 && src[offset - 2] !in [src[offset - 1], `.`] {
+			prev_idx -= 2
+			offset -= 2
+			ctx_changed = true
+		}
+
+		if ctx_changed {
+			ctx = lsp.CompletionContext{
+				trigger_kind: .trigger_character
+				trigger_character: src[prev_idx].str()
+			}
+		}
+	}
+	// The language server uses the `trigger_character` as a sole basis for triggering
+	// the data extraction and autocompletion. The `trigger_character` kind is only
+	// received by the server if the user presses one of the server-defined trigger
+	// characters [dot, parenthesis, curly brace, etc.]
+	if ctx.trigger_kind == .trigger_character {
+		// NOTE: DO NOT REMOVE YET ~ @ned
+		// The offset is adjusted and the suggestions for local and global symbols are
+		// disabled if a period/dot is detected and the character on the left is not a space.
+		if ctx.trigger_character == '.' && (offset - 1 >= 0 && src[offset - 1] != ` `) {
+			cfg.show_global = false
+			cfg.show_local = false
+
+			offset--
+			if src[offset - 1] !in [`)`, `]`] {
+				offset--
+			}
+		}
+
+		for src[offset] == ` ` {
+			offset--
+		}
+
+		// Once the offset has been finalized it will then search for the AST node and
+		// extract it's data using the corresponding methods depending on the node type.
+		mut node := root_node.descendant_for_byte_range(u32(offset), u32(offset))
+		match node.get_type() {
+			'=' {
+				node = node.prev_named_sibling()
+				if node.get_type() == 'expression_list' {
+					node = node.named_child(node.named_child_count() - 1)
+				}
+			}
+			else {
+				for !node.is_named() {
+					node = node.parent()
+				}
+			}
+		}
+		
+		// return_type_sym := ls.store.infer_symbol_from_node(node, src) or { analyzer.void_type }
+		// for child_sym in return_type_sym.children {
+		// 	completion_items << symbol_to_completion_item(child_sym, '') or {
+		// 		continue
+		// 	}
+		// }
+
 	// } else if ctx.trigger_kind == .invoked && (file.stmts.len == 0 || src.len <= 3) {
-	// 	// When a V file is empty, a list of `module $name` suggsestions will be displayed.
-	// 	completion_items << cfg.suggest_mod_names()
-	// } else {
-	// 	// Display only the project's functions if none are satisfied
-	// 	cfg.show_only_global_fn = true
-	// }
+		// When a V file is empty, a list of `module $name` suggsestions will be displayed.
+		// completion_items << cfg.suggest_mod_names()
+	} else {
+		// Display only the project's functions if none are satisfied
+		cfg.show_only_global_fn = true
+	}
 
-	// // Local results. Module names and the scope-based symbols.
-	// if cfg.show_local {
-	// 	// Imported modules. They will be shown to the user if there is no given
-	// 	// type for filtering the results. Invalid imports are excluded.
-	// 	for imp in file.imports {
-	// 		if imp.syms.len == 0 && (cfg.filter_type == ast.Type(0)
-	// 			|| imp.mod !in ls.invalid_imports[file_uri.str()]) {
-	// 			completion_items << lsp.CompletionItem{
-	// 				label: imp.alias
-	// 				kind: .module_
-	// 				insert_text: imp.alias
-	// 			}
-	// 		}
-	// 	}
+	// Local results. Module names and the scope-based symbols.
+	if cfg.show_local {
+		// Imported modules. They will be shown to the user if there is no given
+		// type for filtering the results. Invalid imports are excluded.
+		for imp in ls.store.imports[file_dir] {
+			if file_path in imp.ranges && (file_name !in imp.symbols || imp.symbols[file_name].len == 0) {
+				imp_name := if file_name in imp.aliases { imp.aliases[file_name] } else { imp.module_name }
+				completion_items << lsp.CompletionItem{
+					label: imp_name
+					kind: .module_
+					insert_text: imp_name
+				}
+			}
+		}
 
-	// 	// Scope-based symbols that includes the variables inside
-	// 	// the functions and the constants of the file.
-	// 	inner_scope := file.scope.innermost(cfg.offset)
-	// 	for scope in [file.scope, inner_scope] {
-	// 		for _, obj in scope.objects {
-	// 			mut name := ''
-	// 			match obj {
-	// 				ast.ConstField, ast.Var {
-	// 					if cfg.filter_type != ast.Type(0) && obj.typ != cfg.filter_type {
-	// 						continue
-	// 					}
-	// 					name = obj.name
-	// 				}
-	// 				else {
-	// 					continue
-	// 				}
-	// 			}
-	// 			mut kind := lsp.CompletionItemKind.variable
-	// 			if obj is ast.ConstField {
-	// 				name = name.all_after('${obj.mod}.')
-	// 				kind = .constant
-	// 			}
-	// 			completion_items << lsp.CompletionItem{
-	// 				label: name
-	// 				kind: kind
-	// 				insert_text: name
-	// 			}
-	// 		}
-	// 	}
-	// }
-	// // Global results. This includes all the symbols within the module such as
-	// // the structs, typedefs, enums, and the functions.
-	// if cfg.show_global {
-	// 	mut import_symbols := []string{}
-	// 	for imp in cfg.file.imports {
-	// 		if imp.syms.len == 0 {
-	// 			continue
-	// 		}
-	// 		for sym in imp.syms {
-	// 			import_symbols << imp.mod + '.' + sym.name
-	// 		}
-	// 		completion_items << cfg.completion_items_from_table(imp.mod, ...imp.syms.map(it.name))
-	// 	}
+		// Scope-based symbols that includes the variables inside
+		// the functions and the constants of the file.
+		if file_scope := ls.store.opened_scopes[file_path] {
+			inner_scope := file_scope.innermost(u32(offset), u32(offset))
 
-	// 	// In table, functions are separated from type symbols.
-	// 	completion_items << cfg.completion_items_from_table(file.mod.name)
+			// constants
+			for scope_sym in file_scope.get_all_symbols() {
+				// 	ast.ConstField, ast.Var {
+					// 		if cfg.filter_type != ast.Type(0) && obj.typ != cfg.filter_type {
+					// 			continue
+					// 		}
+				completion_items << lsp.CompletionItem{
+					label: scope_sym.name
+					kind: .constant
+					insert_text: scope_sym.name
+				}
+			}
 
-	// 	// This part will extract the functions from both the builtin module and
-	// 	// within the module (except the main() fn if present.)
-	// 	for _, fnn in cfg.table.fns {
-	// 		if fnn.mod == file.mod.name
-	// 			|| (fnn.mod == 'builtin' && fnn.name in ls.builtin_symbols)
-	// 			|| (fnn.mod in cfg.imports_list && fnn.name in import_symbols) {
-	// 			completion_items << cfg.completion_items_from_fn(fnn, false)
-	// 		}
-	// 	}
-	// 	unsafe { import_symbols.free() }
-	// }
-	// // After that, it will send the list to the client.
-	// ls.send(jsonrpc.Response<[]lsp.CompletionItem>{
-	// 	id: id
-	// 	result: completion_items
-	// })
-	// unsafe {
-	// 	completion_items.free()
-	// 	modules_aliases.free()
-	// 	imports_list.free()
-	// }
+			// variable
+			for scope_sym in inner_scope.get_all_symbols() {
+				completion_items << lsp.CompletionItem{
+					label: scope_sym.name
+					kind: .variable
+					insert_text: scope_sym.name
+				}
+			}
+		}
+	}
+	// Global results. This includes all the symbols within the module such as
+	// the structs, typedefs, enums, and the functions.
+	if cfg.show_global {
+		local_syms := ls.store.get_symbols_by_file_path(file_path)
+		for local_sym in local_syms {
+			if local_sym.is_void() || local_sym.kind in [.placeholder, .variable] {
+				continue
+			}
+			if local_sym.kind == .function && local_sym.name == 'main' {
+				continue
+			}
+			completion_items << symbol_to_completion_item(local_sym, '') or {
+				continue
+			}
+		}
+
+		for imp in ls.store.imports[file_dir] {
+			if file_name in imp.symbols && imp.symbols[file_name].len != 0 {
+				for imp_sym_name in imp.symbols[file_path] {
+					imp_sym := ls.store.symbols[imp.path].get(imp_sym_name) or {
+						continue
+					}
+
+					if int(imp_sym.access) > int(analyzer.SymbolAccess.private_mutable) {
+						completion_items << symbol_to_completion_item(imp_sym, '') or {
+							continue
+						}
+					}
+				}
+			} else {
+				// TODO:
+				continue
+			}
+		}
+	}
+
+	// After that, it will send the list to the client.
+	ls.send(jsonrpc.Response<[]lsp.CompletionItem>{
+		id: id
+		result: completion_items
+	})
 }
 
 // struct HoverConfig {
