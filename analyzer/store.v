@@ -456,10 +456,8 @@ pub fn (mut ss Store) infer_symbol_from_node(node C.TSNode, src_text []byte) ?&S
 			// return void if none
 			ident_text := node.get_text(src_text)
 			return ss.find_symbol(module_name, ident_text) or {
-				selected_scope := ss.opened_scopes[ss.cur_file_path].innermost(node.start_byte(), node.end_byte())
-				selected_scope.symbols.get(ident_text) or { 
-					analyzer.void_type
-				}
+				selected_scope := ss.opened_scopes[ss.cur_file_path]?.innermost(node.start_byte(), node.end_byte())
+				selected_scope.get_symbol(ident_text) ?
 			}
 		}
 		'field_identifier' {
@@ -478,9 +476,7 @@ pub fn (mut ss Store) infer_symbol_from_node(node C.TSNode, src_text []byte) ?&S
 
 			return ss.find_symbol(module_name, ident_text) or {
 				selected_scope := ss.opened_scopes[ss.cur_file_path].innermost(node.start_byte(), node.end_byte())
-				selected_scope.symbols.get(ident_text) or { 
-					analyzer.void_type
-				}
+				selected_scope.get_symbol(ident_text) ?
 			}
 		}
 		'enum_identifier' {

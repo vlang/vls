@@ -1,12 +1,20 @@
 module analyzer
 
 pub struct ScopeTree {
-pub mut:
+mut:
 	parent     &ScopeTree = &ScopeTree(0)
 	start_byte u32
 	end_byte   u32
 	symbols    []&Symbol
 	children   []&ScopeTree
+}
+
+pub fn (scope &ScopeTree) str() string {
+	return if isnil(scope) {
+		'<nil scope>'
+	} else {
+		scope.symbols.str()
+	}
 }
 
 [unsafe]
@@ -58,6 +66,21 @@ pub fn (mut scope ScopeTree) register(info &Symbol) {
 	}
 
 	scope.symbols << info
+}
+
+pub fn (scope &ScopeTree) get_all_symbols() []&Symbol {
+	if isnil(scope) {
+		return []&Symbol{}
+	}
+	return scope.symbols
+}
+
+pub fn (scope &ScopeTree) get_symbol(name string) ?&Symbol {
+	if isnil(scope) {
+		return none
+	}
+
+	return scope.symbols.get(name)
 }
 
 // pub fn (mut scope ScopeTree) remove(name string) bool {
