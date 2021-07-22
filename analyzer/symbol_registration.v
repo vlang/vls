@@ -365,6 +365,7 @@ fn (mut sr SymbolRegistration) type_decl(type_decl_node C.TSNode) ?&Symbol {
 			sym.add_child(mut found_sym, false) or {
 				continue
 			}
+			sym.sumtype_children_len++
 		}
 		sym.kind = .sumtype
 	}

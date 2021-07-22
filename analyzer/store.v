@@ -426,7 +426,7 @@ pub fn (mut store Store) find_symbol_by_type_node(node C.TSNode, src_text []byte
 	}
 
 	if sym_kind == .function_type {
-		parameters := extract_parameter_list(node.child_by_field_name('parameters'), mut store, src_text)
+		mut parameters := extract_parameter_list(node.child_by_field_name('parameters'), mut store, src_text)
 		return_type := store.find_symbol_by_type_node(node.child_by_field_name('result'), src_text) or { analyzer.void_type }
 		return store.find_fn_symbol(module_name, return_type, parameters) or {
 			mut new_sym := Symbol{
@@ -434,7 +434,14 @@ pub fn (mut store Store) find_symbol_by_type_node(node C.TSNode, src_text []byte
 				file_path: store.cur_file_path
 				file_version: store.cur_version
 				kind: sym_kind
+				return_type: return_type
 			}
+
+			for mut param in parameters {
+				new_sym.add_child(mut *param) or {
+					continue
+				}
+			} 
 
 			store.anon_fn_counter++
 			store.register_symbol(mut new_sym) or { analyzer.void_type }
