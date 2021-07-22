@@ -363,13 +363,9 @@ fn (mut sr SymbolRegistration) top_level_statement() ? {
 		sr.cursor.next()
 	}
 
-	mut node_type := sr.cursor.current_node().get_type()
-	if node_type == 'source_file' {
-		sr.cursor.to_first_child()
-		node_type = sr.cursor.current_node().get_type()
-	}
+	mut global_scope := sr.store.opened_scopes[sr.store.cur_file_path]
+	node_type := sr.cursor.current_node().get_type()
 
-	mut global_scope := sr.get_scope(sr.cursor.current_node().parent()) or { &ScopeTree(0) }
 	match node_type {
 		'const_declaration' {
 			mut const_syms := sr.const_decl(sr.cursor.current_node()) ?
@@ -503,7 +499,10 @@ pub fn (mut store Store) register_symbols_from_tree(tree &C.TSTree, src_text []b
 		src_text: src_text
 		cursor: TreeCursor{root_node.tree_cursor()}
 	}
-	 
+
+	sr.get_scope(sr.cursor.current_node().parent()) or {}
+	sr.cursor.to_first_child()
+
 	for _ in 0 .. child_len {
 		sr.top_level_statement() or {
 			sr.store.report_error(err)
