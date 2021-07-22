@@ -12,10 +12,10 @@ const (
 	builtin_path  = os.join_path(vlib_path, 'builtin')
 )
 
-fn analyze(mut store analyzer.Store, uri lsp.DocumentUri, root_uri lsp.DocumentUri, tree &C.TSTree, file File) {
+fn analyze(mut store analyzer.Store, root_uri lsp.DocumentUri, tree &C.TSTree, file File) {
 	store.clear_messages()
-	store.set_active_file_path(uri.path(), file.version)
-	store.import_modules_from_tree(tree, file.source, os.join_path(uri.dir_path(), 'modules'),
+	store.set_active_file_path(file.uri.path(), file.version)
+	store.import_modules_from_tree(tree, file.source, os.join_path(file.uri.dir_path(), 'modules'),
 		root_uri.path())
 
 	store.register_symbols_from_tree(tree, file.source)
@@ -36,11 +36,12 @@ fn (mut ls Vls) did_open(_ int, params string) {
 	new_tree := ls.parser.parse_string(src)
 
 	ls.sources[uri] = File{
+		uri: uri
 		source: new_src
 	}
-	ls.trees[uri] = new_tree
 
-	analyze(mut ls.store, uri, ls.root_uri, new_tree, ls.sources[uri])
+	ls.trees[uri] = new_tree
+	analyze(mut ls.store, ls.root_uri, new_tree, ls.sources[uri])
 	ls.show_diagnostics(uri)
 }
 
