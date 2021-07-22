@@ -26,12 +26,15 @@ fn run_cli(cmd cli.Command) ? {
 	socket_mode := cmd.flags.get_bool('socket') or { false }
 	socket_port := cmd.flags.get_string('port') or { '5007' }
 
-	// Build the language server.
-	mut ls := if socket_mode {
-		vls.new(&Socket{ conn: 0, port: socket_port, debug: debug_mode })
-	} else {
-		vls.new(&Stdio{ debug: debug_mode })
-	}
+	// Setup the comm method and build the language server.
+    mut io := vls.ReceiveSender(Stdio{debug: debug_mode})
+    if socket_mode {
+        mut socket_io := Socket{ conn: 0, port: socket_port, debug: debug_mode }
+        socket_io.initialize()
+        io = socket_io
+    }
+
+    mut ls := vls.new(io)
 	ls.set_features(enable_features, true) ?
 	ls.set_features(disable_features, false) ?
 	ls.start_loop()
@@ -72,12 +75,12 @@ fn main() {
 		cli.Flag{
 			flag: .bool
 			name: 'socket'
-			description: "Use sockets and TCP for interacting with the server"
+			description: "Listens and communicates to the server through a TCP socket."
 		}
 		cli.Flag{
 			flag: .string
 			name: 'port'
-			description: "Port to use for socket communication, by default 5007"
+			description: "Port to use for socket communication. (Default: 5007)"
 		}
 	])
 

@@ -58,7 +58,6 @@ pub const (
 
 interface ReceiveSender {
 	debug bool
-	initialize()
 	send(data string)
 	receive() ?string
 	close()
@@ -111,9 +110,6 @@ pub fn new(io ReceiveSender) Vls {
 	// tbl.is_fmt = false
 	mut parser := tree_sitter.new_parser()
 	parser.set_language(v.language)
-
-	// Initialize the IO method.
-	io.initialize()
 
 	return Vls{
 		io: io

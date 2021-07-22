@@ -14,17 +14,17 @@ pub mut:
 
 pub fn (mut io Socket) initialize() {
 	// Open the connection.
-	io.conn = net.dial_tcp('${base_ip}:${io.port}') or {
-		println(err)
-		exit(1)
+	address := '${base_ip}:${io.port}'
+	io.conn = net.dial_tcp(address) or {
+		panic(err)
 	}
+	print('Established connection over ${address}')
 	// TODO: People say there is a handshake, but which? what is that about?
 }
 
 pub fn (mut io Socket) send(output string) {
 	io.conn.write_string(output) or {
-		println(err)
-		exit(1)
+		panic(err)
 	}
 }
 
@@ -37,7 +37,6 @@ pub fn (mut io Socket) receive() ?string {
 
 pub fn (mut io Socket) close() {
 	io.conn.close() or {
-		println(err)
-		exit(1)
+		panic(err)
 	}
 }
