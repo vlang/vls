@@ -41,6 +41,7 @@ pub enum SymbolKind {
 	field
 	variable
 	sumtype
+	function_type
 }
 
 pub enum SymbolLanguage {
