@@ -4,6 +4,8 @@ import os
 import analyzer.depgraph
 
 pub struct Store {
+mut:
+	anon_fn_counter  int = 1
 pub mut:
 	// The current file used
 	// e.g. /dir/foo.v
@@ -114,16 +116,42 @@ pub fn (ss &Store) find_symbol(module_name string, name string) ?&Symbol {
 	}
 
 	module_path := ss.get_module_path(module_name)
-	idx := ss.symbols[module_path].index(name)
+	idx := ss.symbols[module_path]?.index(name)
 	if idx != -1 {
 		return ss.symbols[module_path][idx]
 	}
 
 	if aliased_path := ss.auto_imports[module_name] {
-		return ss.symbols[aliased_path].get(name)
+		return ss.symbols[aliased_path]?.get(name)
 	}
 
 	// This shouldn't happen
+	return none
+}
+
+const anon_fn_prefix = '#anon_'
+
+// find_fn_symbol finds the function symbol with the appropriate parameters and return type
+pub fn (ss &Store) find_fn_symbol(module_name string, return_type &Symbol, params []&Symbol) ?&Symbol {
+	module_path := ss.get_module_path(module_name)
+	for sym in ss.symbols[module_path]? {
+		if sym.kind == .function_type && sym.name.starts_with(analyzer.anon_fn_prefix) && sym.generic_placeholder_len == 0 {
+			mut params_to_check := params.len
+			for i, child in sym.children {
+				if child.kind == .variable {
+					if child.name == params[i].name && child.return_type.name == params[i].return_type.name {
+						params_to_check--
+						continue
+					}
+					break
+				}
+			}
+			if params_to_check != 0 || sym.return_type.name != return_type.name {
+				continue
+			}
+			return sym
+		}
+	}
 	return none
 }
 
@@ -370,11 +398,13 @@ pub fn symbol_name_from_node(node C.TSNode, src_text []byte) (SymbolKind, string
 			_, module_name, symbol_name = symbol_name_from_node(node.named_child(0), src_text)
 			return SymbolKind.optional, module_name, '?' + symbol_name
 		}
+		'function_type' {
+			return SymbolKind.function_type, module_name, symbol_name
+		}
 		else {
 			unsafe { symbol_name.free() }
 			// type_identifier should go here
-			symbol_name = node.get_text(src_text)
-			return SymbolKind.placeholder, '', symbol_name
+			return SymbolKind.placeholder, module_name, node.get_text(src_text)
 		}
 	}
 
@@ -395,9 +425,25 @@ pub fn (mut store Store) find_symbol_by_type_node(node C.TSNode, src_text []byte
 		}
 	}
 
+	if sym_kind == .function_type {
+		parameters := extract_parameter_list(node.child_by_field_name('parameters'), mut store, src_text)
+		return_type := store.find_symbol_by_type_node(node.child_by_field_name('result'), src_text) or { analyzer.void_type }
+		return store.find_fn_symbol(module_name, return_type, parameters) or {
+			mut new_sym := Symbol{
+				name: analyzer.anon_fn_prefix + store.anon_fn_counter.str()
+				file_path: store.cur_file_path
+				file_version: store.cur_version
+				kind: sym_kind
+			}
+
+			store.anon_fn_counter++
+			store.register_symbol(mut new_sym) or { analyzer.void_type }
+		}
+	}
+
 	return store.find_symbol(module_name, symbol_name) or {
 		mut new_sym := Symbol{
-			name: symbol_name
+			name: symbol_name.clone()
 			file_path: os.join_path(store.get_module_path(module_name), 'placeholder.vv')
 			kind: sym_kind
 		}
@@ -434,6 +480,7 @@ pub fn (mut ss Store) infer_symbol_from_node(node C.TSNode, src_text []byte) ?&S
 	}
 
 	node_type := node.get_type()
+	// eprintln(node_type)
 
 	// TODO
 	mut module_name := ''

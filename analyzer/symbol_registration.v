@@ -187,7 +187,7 @@ fn (mut sr SymbolRegistration) interface_decl(interface_decl_node C.TSNode) ?&Sy
 			}
 			'interface_spec' {
 				param_node := field_node.child_by_field_name('parameters')
-				mut children := sr.extract_parameter_list(param_node)
+				mut children := extract_parameter_list(param_node, mut sr.store, sr.src_text)
 				for j := 0; j < children.len; j++ {
 					mut child := children[j]
 					sym.add_child(mut child) or {
@@ -290,7 +290,7 @@ fn (mut sr SymbolRegistration) fn_decl(fn_node C.TSNode) ?&Symbol {
 	mut is_method := false
 	if !receiver_node.is_null() {
 		is_method = true
-		mut children := sr.extract_parameter_list(receiver_node)
+		mut children := extract_parameter_list(receiver_node, mut sr.store, sr.src_text)
 		// just use a loop for convinience
 		for i := 0; i < children.len; i++ {
 			mut parent := children[i].return_type
@@ -312,7 +312,7 @@ fn (mut sr SymbolRegistration) fn_decl(fn_node C.TSNode) ?&Symbol {
 	}
 
 	// scan params
-	mut params := sr.extract_parameter_list(params_list_node)
+	mut params := extract_parameter_list(params_list_node, mut sr.store, sr.src_text)
 	for i := 0; i < params.len; i++ {
 		mut param := params[i]
 		fn_sym.add_child(mut param) or { continue }
@@ -350,11 +350,25 @@ fn (mut sr SymbolRegistration) type_decl(type_decl_node C.TSNode) ?&Symbol {
 	types_count := types_node.named_child_count()
 	if types_count == 0 {
 		return none
+	} else if types_count == 1 {
+		// alias type
+		selected_type_node := types_node.named_child(0)
+		found_sym := sr.store.find_symbol_by_type_node(selected_type_node, sr.src_text) ?
+		sym.parent = found_sym
+	} else {
+		// sum type
+		for i in 0 .. types_count {
+			selected_type_node := types_node.named_child(i)
+			mut found_sym := sr.store.find_symbol_by_type_node(selected_type_node, sr.src_text) or {
+				continue
+			}
+			sym.add_child(mut found_sym, false) or {
+				continue
+			}
+		}
+		sym.kind = .sumtype
 	}
 
-	selected_type_node := types_node.named_child(0)
-	// TODO: support only aliases for now, must add sumtype kind
-	sym.parent = sr.store.find_symbol_by_type_node(selected_type_node, sr.src_text) ?
 	return sym
 }
 
@@ -465,7 +479,7 @@ fn (mut sr SymbolRegistration) extract_block(node C.TSNode, mut scope ScopeTree)
 	}
 }
 
-fn (mut sr SymbolRegistration) extract_parameter_list(node C.TSNode) []&Symbol {
+fn extract_parameter_list(node C.TSNode, mut store Store, src_text []byte) []&Symbol {
 	params_len := node.named_child_count()
 	mut syms := []&Symbol{cap: int(params_len)}
 
@@ -478,15 +492,15 @@ fn (mut sr SymbolRegistration) extract_parameter_list(node C.TSNode) []&Symbol {
 
 		param_name_node := param_node.child_by_field_name('name')
 		param_type_node := param_node.child_by_field_name('type')
-		return_type := sr.store.find_symbol_by_type_node(param_type_node, sr.src_text) or { analyzer.void_type }
+		return_type := store.find_symbol_by_type_node(param_type_node, src_text) or { analyzer.void_type }
 		syms << &Symbol{
-			name: param_name_node.get_text(sr.src_text)
+			name: param_name_node.get_text(src_text)
 			kind: .variable
 			range: param_name_node.range()
 			access: access
 			return_type: return_type
-			file_path: sr.store.cur_file_path.clone()
-			file_version: sr.store.cur_version
+			file_path: store.cur_file_path.clone()
+			file_version: store.cur_version
 		}
 	}
 

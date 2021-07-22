@@ -287,7 +287,7 @@ fn monitor_changes(mut ls Vls) {
 			a := <-ls.typing_ch {
 				ls.is_typing = a != 0
 			}
-			> 150 * time.millisecond {
+			> 50 * time.millisecond {
 				if !ls.is_typing {
 					continue
 				}
