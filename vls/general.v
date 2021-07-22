@@ -4,8 +4,7 @@ import lsp
 import json
 import jsonrpc
 import os
-// import v.parser
-// import v.ast
+import analyzer
 import v.vmod
 import runtime
 
@@ -108,8 +107,9 @@ fn (mut ls Vls) process_builtin() {
 	)
 
 	mut imports := [builtin_import]
-	ls.store.import_modules(mut imports)
 	ls.store.register_auto_import(builtin_import, '')
+	analyzer.register_builtin_symbols(mut ls.store)
+	ls.store.import_modules(mut imports)
 }
 
 // shutdown sets the state to shutdown but does not exit
