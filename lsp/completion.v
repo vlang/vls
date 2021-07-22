@@ -53,7 +53,7 @@ pub mut:
 	label string
 	kind  CompletionItemKind
 	// TODO: comment the unnecessary fields for now to avoid any errors
-	// detail        string
+	detail        string
 	// documentation string | MarkupContent
 	// documentation MarkupContent
 	// deprecated    bool
