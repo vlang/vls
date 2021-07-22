@@ -353,7 +353,7 @@ fn (mut sr SymbolRegistration) type_decl(type_decl_node C.TSNode) ?&Symbol {
 	} else if types_count == 1 {
 		// alias type
 		selected_type_node := types_node.named_child(0)
-		found_sym := sr.store.find_symbol_by_type_node(selected_type_node, sr.src_text) ?
+		found_sym := sr.store.find_symbol_by_type_node(selected_type_node, sr.src_text) or { analyzer.void_type }
 		sym.parent = found_sym
 	} else {
 		// sum type
