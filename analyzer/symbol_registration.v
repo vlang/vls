@@ -350,11 +350,25 @@ fn (mut sr SymbolRegistration) type_decl(type_decl_node C.TSNode) ?&Symbol {
 	types_count := types_node.named_child_count()
 	if types_count == 0 {
 		return none
+	} else if types_count == 1 {
+		// alias type
+		selected_type_node := types_node.named_child(0)
+		found_sym := sr.store.find_symbol_by_type_node(selected_type_node, sr.src_text) ?
+		sym.parent = found_sym
+	} else {
+		// sum type
+		for i in 0 .. types_count {
+			selected_type_node := types_node.named_child(i)
+			mut found_sym := sr.store.find_symbol_by_type_node(selected_type_node, sr.src_text) or {
+				continue
+			}
+			sym.add_child(mut found_sym, false) or {
+				continue
+			}
+		}
+		sym.kind = .sumtype
 	}
 
-	selected_type_node := types_node.named_child(0)
-	// TODO: support only aliases for now, must add sumtype kind
-	sym.parent = sr.store.find_symbol_by_type_node(selected_type_node, sr.src_text) ?
 	return sym
 }
 

@@ -26,6 +26,7 @@ import strings
 
 pub enum SymbolKind {
 	void
+	placeholder
 	ref
 	array_
 	map_
@@ -38,8 +39,8 @@ pub enum SymbolKind {
 	typedef
 	interface_
 	field
-	placeholder
 	variable
+	sumtype
 }
 
 pub enum SymbolLanguage {
@@ -99,6 +100,7 @@ pub mut:
 	return_type             &Symbol        = analyzer.void_type // return_type is for functions and variables
 	language                SymbolLanguage = .v
 	generic_placeholder_len int
+	sumtype_children_len    int
 	children                []&Symbol // methods, sum types (soon), map types, optionals, struct fields, etc.
 	file_path               string
 	file_version            int = 1 // file version when the symbol was registered
