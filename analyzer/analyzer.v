@@ -11,7 +11,7 @@ fn (mut tc TreeCursor) next() bool {
 	}
 
 	mut rep := 0
-	for (!tc.current_node().is_named() || tc.current_node().has_error()) && rep < 5 {
+	for !tc.current_node().is_named() && rep < 5 {
 		if !tc.cursor.next() {
 			return false
 		}
