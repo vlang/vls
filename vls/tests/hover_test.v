@@ -147,16 +147,16 @@ const hover_results = map{
 		}
 	}
 	'type_fn.vv':              lsp.Hover{
-		contents: lsp.MarkedString{'v', 'type Handler = fn (string) string'}
+		contents: lsp.MarkedString{'v', 'type Handler = fn (test string) string'}
 		range: lsp.Range{
-			start: lsp.Position{0, 0}
+			start: lsp.Position{0, 5}
 			end: lsp.Position{0, 12}
 		}
 	}
 	'type_sum.vv':             lsp.Hover{
 		contents: lsp.MarkedString{'v', 'type Any = int | string'}
 		range: lsp.Range{
-			start: lsp.Position{0, 0}
+			start: lsp.Position{0, 5}
 			end: lsp.Position{0, 8}
 		}
 	}
