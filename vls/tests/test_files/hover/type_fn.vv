@@ -1,1 +1,1 @@
-type Handler = fn (string) string
+type Handler = fn (test string) string

@@ -901,350 +901,87 @@ fn (mut ls Vls) completion(id int, params string) {
 	})
 }
 
-// struct HoverConfig {
-// mut:
-// 	// new tree-sitter fields
-// 	source []byte
-// 	tree   &C.TSTree
+const accepted_parent_node_types_in_hover = ['selector_expression', 'call_expression', 'enum_identifier', 'parameter_declaration']
+fn (mut ls Vls) hover(id int, params string) {
+	hover_params := json.decode(lsp.HoverParams, params) or {
+		ls.panic(err.msg)
+		ls.send_null(id)
+		return
+	}
 
-// 	file   ast.File
-// 	offset int // position of the cursor. used for finding the AST node
-// 	table  &ast.Table
-// }
+	uri := hover_params.text_document.uri
+	pos := hover_params.position
 
-// // hover_from_stmt returns the hover data for a specific ast.Stmt.
-// fn (mut cfg HoverConfig) hover_from_stmt(node ast.Stmt) ?lsp.Hover {
-// 	mut pos := node.pos
-// 	match node {
-// 		ast.Module {
-// 			name := if node.short_name.len > 0 { node.short_name } else { node.name }
+	tree := ls.trees[uri]
+	source := ls.sources[uri].source
+	offset := compute_offset(source, pos.line, pos.character)
+	mut node := tree.root_node().descendant_for_byte_range(u32(offset), u32(offset))
+	original_range := node.range()
 
-// 			return lsp.Hover{
-// 				contents: lsp.v_marked_string('module $name')
-// 				range: tsrange_to_lsp_range(C.TSRange{
-// 					start_point: lsp_pos_to_tspoint(lsp.Position{pos.line_nr, pos.col})
-// 					end_point: lsp_pos_to_tspoint(lsp.Position{node.name_pos.line_nr, node.name_pos.col})
-// 				})
-// 			}
-// 		}
-// 		ast.FnDecl {
-// 			if node.return_type == ast.Type(0) {
-// 				return none
-// 			}
-// 			name := node.name.all_after(cfg.file.mod.short_name + '.')
-// 			return_type_name := cfg.table.type_to_str(node.return_type)
-// 			mut signature := 'fn'
-// 			if node.is_method {
-// 				signature += ' ('
-// 				receiver := node.params[0]
-// 				mut receiver_type_name := cfg.table.type_to_str(receiver.typ)
-// 				if receiver.is_mut {
-// 					signature += 'mut '
-// 					receiver_type_name = receiver_type_name.all_after('&')
-// 				}
-// 				signature += '$receiver.name $receiver_type_name'
-// 				signature += ') '
-// 			}
-// 			signature += ' ${name}('
-// 			for i := int(node.is_method); i < node.params.len; i++ {
-// 				param := node.params[i]
-// 				mut type_name := cfg.table.type_to_str(param.typ)
-// 				if param.is_mut {
-// 					signature += 'mut '
-// 					type_name = type_name.all_after('&')
-// 				}
-// 				signature += '$param.name $type_name'
-// 				if i != node.params.len - 1 {
-// 					signature += ', '
-// 				}
-// 			}
-// 			signature += ') $return_type_name'
-// 			return lsp.Hover{
-// 				contents: lsp.v_marked_string(signature)
-// 				range: tsrange_to_lsp_range(C.TSRange{
-// 					start_point: lsp_pos_to_tspoint(lsp.Position{pos.line_nr, pos.col})
-// 					end_point: lsp_pos_to_tspoint(lsp.Position{pos.line_nr, pos.col})
-// 				})
-// 			}
-// 		}
-// 		ast.StructDecl {
-// 			name := node.name.all_after(cfg.file.mod.short_name + '.')
-// 			return lsp.Hover{
-// 				contents: lsp.v_marked_string('struct $name')
-// 				range: tsrange_to_lsp_range(C.TSRange{
-// 					start_point: lsp_pos_to_tspoint(lsp.Position{pos.line_nr, pos.col})
-// 					end_point: lsp_pos_to_tspoint(lsp.Position{pos.line_nr, pos.col})
-// 				})
-// 			}
-// 		}
-// 		ast.EnumDecl {
-// 			name := node.name.all_after(cfg.file.mod.short_name + '.')
-// 			return lsp.Hover{
-// 				contents: lsp.v_marked_string('enum $name')
-// 				range: tsrange_to_lsp_range(C.TSRange{
-// 					start_point: lsp_pos_to_tspoint(lsp.Position{pos.line_nr, pos.col})
-// 					end_point: lsp_pos_to_tspoint(lsp.Position{pos.line_nr, pos.col})
-// 				})
-// 			}
-// 		}
-// 		ast.TypeDecl {
-// 			mut name := ''
-// 			mut branches := ''
+	if node.is_null() || (node.parent().has_error() || node.parent().is_missing()) {
+		ls.send_null(id)
+		return
+	} else if node.get_type() == 'identifier' {
+		if node.parent().get_type() in accepted_parent_node_types_in_hover {
+			node = node.parent()
+		}
+		//  else if node.parent().get_type() in excluded_parent_node_types_in_definition {
+		// 	ls.send_null(id)
+		// 	return
+		// }
+	} else if node.get_type() == 'module' {
+		node = node.parent()
+	}
+	
+	if node.get_type() == 'module_clause' {
+		ls.send(jsonrpc.Response<lsp.Hover>{
+			id: id
+			result: lsp.Hover {
+				contents: lsp.v_marked_string(node.get_text(source))
+				range: tsrange_to_lsp_range(node.range())
+			}	
+		})
+		return
+	} else if node.get_type() == 'import_path' {
+		found_imp := ls.store.find_import_by_position(node.range()) or {
+			ls.send_null(id)
+			return
+		}
 
-// 			match node {
-// 				ast.AliasTypeDecl {
-// 					if node.parent_type == ast.Type(0) {
-// 						return none
-// 					}
-// 					name = node.name
-// 					branches = cfg.table.type_to_str(node.parent_type)
-// 				}
-// 				ast.FnTypeDecl {
-// 					if node.typ == ast.Type(0) {
-// 						return none
-// 					}
-// 					name = node.name.all_after(cfg.file.mod.short_name + '.')
-// 					branches = cfg.table.type_to_str(node.typ)
-// 				}
-// 				ast.SumTypeDecl {
-// 					name = node.name
-// 					for i, var in node.variants {
-// 						if var.typ == ast.Type(0) {
-// 							return none
-// 						}
-// 						branches += cfg.table.type_to_str(var.typ)
-// 						if i != node.variants.len - 1 {
-// 							branches += ' | '
-// 						}
-// 					}
-// 				}
-// 			}
+		ls.send(jsonrpc.Response<lsp.Hover>{
+			id: id
+			result: lsp.Hover {
+				contents: lsp.v_marked_string('import ${found_imp.module_name} as ' + found_imp.aliases[uri.path()] or { found_imp.module_name })
+				range: tsrange_to_lsp_range(found_imp.ranges[uri.path()])
+			}	
+		})
+		return
+	}
 
-// 			return lsp.Hover{
-// 				contents: lsp.v_marked_string('type $name = $branches')
-// 				range: tsrange_to_lsp_range(C.TSRange{
-// 					start_point: lsp_pos_to_tspoint(lsp.Position{pos.line_nr, pos.col})
-// 					end_point: lsp_pos_to_tspoint(lsp.Position{pos.line_nr, pos.col})
-// 				})
-// 			}
-// 		}
-// 		ast.Return {
-// 			// return and trigger null result for now
-// 			return none
-// 		}
-// 		ast.NodeError {
-// 			return none
-// 		}
-// 		ast.AssignStmt {
-// 			// transfer this code to v.ast module
-// 			mut left_pos := node.left[0].position()
-// 			for i, p in node.left {
-// 				if i == 0 {
-// 					continue
-// 				}
-// 				left_pos = left_pos.extend(p.position())
-// 			}
-// 			pos = left_pos.extend(pos)
-// 		}
-// 		else {}
-// 	}
-// 	return lsp.Hover{
-// 		contents: lsp.v_marked_string(node.str())
-// 		range: tsrange_to_lsp_range(C.TSRange{
-// 			start_point: lsp_pos_to_tspoint(lsp.Position{pos.line_nr, pos.col})
-// 			end_point: lsp_pos_to_tspoint(lsp.Position{pos.line_nr, pos.col})
-// 		})
-// 	}
-// }
+	sym := ls.store.infer_symbol_from_node(node, source) or {
+		eprintln(err)
+		analyzer.void_type
+	}
 
-// // hover_from_stmt returns the hover data for a specific ast.Expr.
-// fn (mut cfg HoverConfig) hover_from_expr(node ast.Expr) ?lsp.Hover {
-// 	match node {
-// 		ast.Ident {
-// 			obj := cfg.file.scope.innermost(cfg.offset)
-// 			obj_node := obj.find_var(node.name) ?
-// 			if obj_node.typ == ast.Type(0) {
-// 				return none
-// 			}
-// 			range := tsrange_to_lsp_range(C.TSRange{
-// 				start_point: lsp_pos_to_tspoint(lsp.Position{node.pos.line_nr, node.pos.col})
-// 				end_point: lsp_pos_to_tspoint(lsp.Position{node.pos.line_nr, node.pos.col})
-// 			})
-// 			// TODO: create a wrapper function that will auto-format type
-// 			// based on the VLS style.
-// 			typ_name := cfg.table.type_to_str(obj_node.typ).all_after('main.')
-// 			prefix := if obj_node.is_mut { 'mut ' } else { '' }
-// 			return lsp.Hover{
-// 				contents: lsp.v_marked_string('$prefix$obj_node.name $typ_name')
-// 				range: range
-// 			}
-// 		}
-// 		ast.CallExpr {
-// 			mut signature := ''
-// 			if node.is_method || node.is_field {
-// 				if node.left_type == ast.Type(0) {
-// 					return none
-// 				}
-// 				parent_type_name := cfg.table.type_to_str(node.left_type).all_after('main.')
-// 				signature += parent_type_name + '.'
-// 			}
+	if isnil(sym) || sym.is_void() {
+		ls.send_null(id)
+		return
+	}
 
-// 			name := node.name.all_after('main.')
-// 			signature += '${name}()'
-// 			if node.return_type.is_full() {
-// 				return_type := cfg.table.type_to_str(node.return_type).all_after('main.')
-// 				signature += ' $return_type'
-// 			}
-// 			range := tsrange_to_lsp_range(C.TSRange{
-// 				start_point: lsp_pos_to_tspoint(lsp.Position{node.pos.line_nr, node.pos.col})
-// 				end_point: lsp_pos_to_tspoint(lsp.Position{node.pos.line_nr, node.pos.col})
-// 			})
+	// Send null if range has zero-start and end points
+	if sym.range.start_point.row == 0 && sym.range.start_point.column == 0 && sym.range.start_point.eq(sym.range.end_point) {
+		ls.send_null(id)
+		return
+	}
 
-// 			return lsp.Hover{
-// 				contents: lsp.v_marked_string(signature)
-// 				range: range
-// 			}
-// 		}
-// 		ast.SelectorExpr {
-// 			if node.expr is ast.Ident || is_within_pos(cfg.offset, node.pos) {
-// 				if node.typ == ast.Type(0) {
-// 					return none
-// 				}
-// 				range := tsrange_to_lsp_range(C.TSRange{
-// 					start_point: lsp_pos_to_tspoint(lsp.Position{node.pos.line_nr, node.pos.col})
-// 					end_point: lsp_pos_to_tspoint(lsp.Position{node.pos.line_nr, node.pos.col})
-// 				})
-// 				typ_name := cfg.table.type_to_str(node.typ).all_after('main.')
-// 				parent_name := if node.expr_type != ast.Type(0) {
-// 					cfg.table.type_to_str(node.expr_type).all_after('main.') + '.'
-// 				} else {
-// 					''
-// 				}
-// 				field_name := '$parent_name$node.field_name'
-// 				prefix := if node.is_mut { 'mut ' } else { '' }
-// 				return lsp.Hover{
-// 					contents: lsp.v_marked_string('$prefix$field_name $typ_name')
-// 					range: range
-// 				}
-// 			}
-// 			return cfg.hover_from_expr(node.expr)
-// 		}
-// 		ast.NodeError {
-// 			return none
-// 		}
-// 		else {
-// 			return lsp.Hover{
-// 				contents: lsp.v_marked_string(node.str())
-// 				range: tsrange_to_lsp_range(C.TSRange{
-// 					start_point: lsp_pos_to_tspoint(lsp.Position{node.position().line_nr, node.position().col})
-// 					end_point: lsp_pos_to_tspoint(lsp.Position{node.position().line_nr, node.position().col})
-// 				})
-// 			}
-// 		}
-// 	}
-// }
-
-// fn (mut ls Vls) hover(id int, params string) {
-// 	hover_params := json.decode(lsp.HoverParams, params) or {
-// 		ls.panic(err.msg)
-// 		ls.send_null(id)
-// 		return
-// 	}
-
-// 	uri := hover_params.text_document.uri
-// 	pos := hover_params.position
-
-// 	mut cfg := HoverConfig{
-// 		source: ls.sources[uri.str()]
-// 		tree: ls.trees[uri.str()]
-// 		offset: compute_offset(ls.sources[uri.str()], pos.line, pos.character)
-// 		table: ls.tables[uri.dir()]
-// 	}
-
-// 	// an AST walker will find a node based on the offset
-// 	node := find_ast_by_pos(cfg.file.stmts.map(ast.Node(it)), cfg.offset) or {
-// 		ls.send_null(id)
-// 		return
-// 	}
-
-// 	mut hover_data := lsp.Hover{}
-
-// 	// the contents of the node will be extracted and be injected
-// 	// into the hover_data variable
-// 	// TODO: simplify == tablt.Type(0) checking in the future
-// 	match node {
-// 		ast.Stmt {
-// 			hover_data = cfg.hover_from_stmt(node) or {
-// 				ls.send_null(id)
-// 				return
-// 			}
-// 		}
-// 		ast.Expr {
-// 			hover_data = cfg.hover_from_expr(node) or {
-// 				ls.send_null(id)
-// 				return
-// 			}
-// 		}
-// 		ast.StructField {
-// 			if node.typ == ast.Type(0) {
-// 				ls.send_null(id)
-// 				return
-// 			}
-// 			range := tsrange_to_lsp_range(C.TSRange{
-// 				start_point: lsp_pos_to_tspoint(lsp.Position{node.pos.line_nr, node.pos.col})
-// 				end_point: lsp_pos_to_tspoint(lsp.Position{node.type_pos.line_nr, node.type_pos.col})
-// 			})
-// 			typ_name := cfg.table.type_to_str(node.typ).all_after('main.')
-// 			hover_data = lsp.Hover{
-// 				contents: lsp.v_marked_string('$node.name $typ_name')
-// 				range: range
-// 			}
-// 		}
-// 		ast.StructInitField {
-// 			if node.expected_type == ast.Type(0) {
-// 				ls.send_null(id)
-// 				return
-// 			}
-// 			range := tsrange_to_lsp_range(C.TSRange{
-// 				start_point: lsp_pos_to_tspoint(lsp.Position{node.pos.line_nr, node.pos.col})
-// 				end_point: lsp_pos_to_tspoint(lsp.Position{node.pos.line_nr, node.pos.col})
-// 			})
-// 			typ_name := cfg.table.type_to_str(node.expected_type).all_after('main.')
-// 			hover_data = lsp.Hover{
-// 				contents: lsp.v_marked_string('$node.name $typ_name')
-// 				range: range
-// 			}
-// 		}
-// 		ast.Param {
-// 			if node.typ == ast.Type(0) {
-// 				ls.send_null(id)
-// 				return
-// 			}
-// 			range := tsrange_to_lsp_range(C.TSRange{
-// 				start_point: lsp_pos_to_tspoint(lsp.Position{node.pos.line_nr, node.pos.col})
-// 				end_point: lsp_pos_to_tspoint(lsp.Position{node.type_pos.line_nr, node.type_pos.col})
-// 			})
-// 			mut type_name := cfg.table.type_to_str(node.typ).all_after('main.')
-// 			if node.is_mut {
-// 				type_name = type_name[1..]
-// 			}
-// 			prefix := if node.is_mut { 'mut ' } else { '' }
-// 			hover_data = lsp.Hover{
-// 				contents: lsp.v_marked_string('$prefix$node.name $type_name')
-// 				range: range
-// 			}
-// 		}
-// 		else {
-// 			// returns a null result for unsupported nodes
-// 			ls.send_null(id)
-// 			return
-// 		}
-// 	}
-// 	ls.send(jsonrpc.Response<lsp.Hover>{
-// 		id: id
-// 		result: hover_data
-// 	})
-// }
+	ls.send(jsonrpc.Response<lsp.Hover>{
+		id: id
+		result: lsp.Hover {
+			contents: lsp.v_marked_string(sym.gen_str())
+			range: tsrange_to_lsp_range(original_range)
+		}	
+	})
+}
 
 [manualfree]
 fn (mut ls Vls) folding_range(id int, params string) {
@@ -1309,7 +1046,7 @@ fn (mut ls Vls) definition(id int, params string) {
 	pos := goto_definition_params.position
 	source := ls.sources[uri].source
 	offset := compute_offset(source, pos.line, pos.character)
-	mut node := ls.trees[uri].root_node().descendant_for_byte_range(u32(offset), u32(offset + 1))
+	mut node := ls.trees[uri].root_node().descendant_for_byte_range(u32(offset), u32(offset))
 	original_range := node.range()
 
 	if node.is_null() || (node.parent().has_error() || node.parent().is_missing()) {
@@ -1336,10 +1073,13 @@ fn (mut ls Vls) definition(id int, params string) {
 		return
 	}
 
+	loc_uri := lsp.document_uri_from_path(sym.file_path)
+	eprintln(loc_uri)
+
 	ls.send(jsonrpc.Response<lsp.LocationLink>{
 		id: id
 		result: lsp.LocationLink{
-			target_uri: lsp.document_uri_from_path(sym.file_path)
+			target_uri: loc_uri
 			target_range: tsrange_to_lsp_range(sym.range)
 			target_selection_range: tsrange_to_lsp_range(sym.range)
 			origin_selection_range: tsrange_to_lsp_range(original_range)
