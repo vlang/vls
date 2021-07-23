@@ -138,17 +138,29 @@ pub fn (ss &Store) find_fn_symbol(module_name string, return_type &Symbol, param
 	module_path := ss.get_module_path(module_name)
 	for sym in ss.symbols[module_path]? {
 		if sym.kind == .function_type && sym.name.starts_with(analyzer.anon_fn_prefix) && sym.generic_placeholder_len == 0 {
-			mut params_to_check := params.len
+			mut params_to_check := []int{cap: sym.children.len}
+			// get a list of indices that are parameters
 			for i, child in sym.children {
-				if child.kind == .variable {
-					if child.name == params[i].name && child.return_type.name == params[i].return_type.name {
-						params_to_check--
-						continue
-					}
-					break
+				if child.kind != .variable {
+					continue
 				}
+				params_to_check << i
 			}
-			if params_to_check != 0 || sym.return_type.name != return_type.name {
+			if params_to_check.len != params.len {
+				continue
+			}
+			mut params_left := params_to_check.len
+			for i, param_idx in params_to_check {
+				param_from_sym := sym.children[param_idx]
+				param_to_compare := params[i]
+				if param_from_sym.name == param_to_compare.name && param_from_sym.return_type.name == param_to_compare.return_type.name {
+					params_left--
+					continue
+				}
+				break
+			}
+			// if loop for checking params stopped or the return type does not match
+			if params_left != 0 || sym.return_type.name != return_type.name {
 				continue
 			}
 			return sym
