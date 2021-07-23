@@ -83,6 +83,20 @@ pub fn (scope &ScopeTree) get_symbol(name string) ?&Symbol {
 	return scope.symbols.get(name)
 }
 
+pub fn (mut scope ScopeTree) new_child(start_byte u32, end_byte u32) ?&ScopeTree {
+	if isnil(scope) {
+		return none
+	}
+
+	scope.children << &ScopeTree{
+		start_byte: start_byte
+		end_byte: end_byte
+		parent: unsafe { scope }
+	}
+
+	return scope.children.last()
+}
+
 // pub fn (mut scope ScopeTree) remove(name string) bool {
 // 	idx := scope.symbols.index(name)
 // 	if idx == -1 {

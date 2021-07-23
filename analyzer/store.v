@@ -319,13 +319,7 @@ pub fn (mut ss Store) get_scope_from_node(node C.TSNode) ?&ScopeTree {
 
 		return ss.opened_scopes[ss.cur_file_path]
 	} else {
-		ss.opened_scopes[ss.cur_file_path].children << &ScopeTree{
-			start_byte: node.start_byte()
-			end_byte: node.end_byte()
-			parent: ss.opened_scopes[ss.cur_file_path]
-		}
-
-		return ss.opened_scopes[ss.cur_file_path].children.last()
+		return ss.opened_scopes[ss.cur_file_path].new_child(node.start_byte(), node.end_byte())
 	}
 }
 
