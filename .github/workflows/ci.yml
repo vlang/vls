@@ -64,8 +64,8 @@ jobs:
     - uses: actions/checkout@v2
       with:
         path: vls
-    - name: Clone tree-sitter-v to ~\.vmodules\tree_sitter_v
-      run: git clone --depth 1 https://github.com/nedpals/tree-sitter-v ~\.vmodules\tree_sitter_v
+    - name: Clone tree-sitter-v to $HOME/.vmodules/tree_sitter_v
+      run: git clone --depth 1 https://github.com/nedpals/tree-sitter-v $HOME/.vmodules/tree_sitter_v
     - name: Build local v
       run: .\make.bat -msvc
     - name: Run tests
