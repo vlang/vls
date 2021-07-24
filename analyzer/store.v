@@ -138,17 +138,29 @@ pub fn (ss &Store) find_fn_symbol(module_name string, return_type &Symbol, param
 	module_path := ss.get_module_path(module_name)
 	for sym in ss.symbols[module_path]? {
 		if sym.kind == .function_type && sym.name.starts_with(analyzer.anon_fn_prefix) && sym.generic_placeholder_len == 0 {
-			mut params_to_check := params.len
+			mut params_to_check := []int{cap: sym.children.len}
+			// get a list of indices that are parameters
 			for i, child in sym.children {
-				if child.kind == .variable {
-					if child.name == params[i].name && child.return_type.name == params[i].return_type.name {
-						params_to_check--
-						continue
-					}
-					break
+				if child.kind != .variable {
+					continue
 				}
+				params_to_check << i
 			}
-			if params_to_check != 0 || sym.return_type.name != return_type.name {
+			if params_to_check.len != params.len {
+				continue
+			}
+			mut params_left := params_to_check.len
+			for i, param_idx in params_to_check {
+				param_from_sym := sym.children[param_idx]
+				param_to_compare := params[i]
+				if param_from_sym.name == param_to_compare.name && param_from_sym.return_type.name == param_to_compare.return_type.name {
+					params_left--
+					continue
+				}
+				break
+			}
+			// if loop for checking params stopped or the return type does not match
+			if params_left != 0 || sym.return_type.name != return_type.name {
 				continue
 			}
 			return sym
@@ -319,13 +331,7 @@ pub fn (mut ss Store) get_scope_from_node(node C.TSNode) ?&ScopeTree {
 
 		return ss.opened_scopes[ss.cur_file_path]
 	} else {
-		ss.opened_scopes[ss.cur_file_path].children << &ScopeTree{
-			start_byte: node.start_byte()
-			end_byte: node.end_byte()
-			parent: ss.opened_scopes[ss.cur_file_path]
-		}
-
-		return ss.opened_scopes[ss.cur_file_path].children.last()
+		return ss.opened_scopes[ss.cur_file_path].new_child(node.start_byte(), node.end_byte())
 	}
 }
 
@@ -490,8 +496,6 @@ pub fn (mut ss Store) infer_symbol_from_node(node C.TSNode, src_text []byte) ?&S
 	}
 
 	node_type := node.get_type()
-	// eprintln(node_type)
-
 	// TODO
 	mut module_name := ''
 	mut type_name := ''
@@ -512,7 +516,7 @@ pub fn (mut ss Store) infer_symbol_from_node(node C.TSNode, src_text []byte) ?&S
 			// return void if none
 			ident_text := node.get_text(src_text)
 			return ss.find_symbol(module_name, ident_text) or {
-				selected_scope := ss.opened_scopes[ss.cur_file_path]?.innermost(node.start_byte(), node.end_byte())
+				selected_scope := ss.opened_scopes[ss.cur_file_path].innermost(node.start_byte(), node.end_byte())
 				selected_scope.get_symbol(ident_text) ?
 			}
 		}
@@ -555,14 +559,18 @@ pub fn (mut ss Store) infer_symbol_from_node(node C.TSNode, src_text []byte) ?&S
 			return ss.find_symbol_by_type_node(node, src_text)
 		}
 		'selector_expression' {
-			root_sym := ss.infer_value_type_from_node(node.child_by_field_name('operand'), src_text)
-			if !root_sym.is_void() {
-				child_sym := root_sym.children.get(node.child_by_field_name('field').get_text(src_text)) or { 
-					analyzer.void_type 
-				}
-				return child_sym
+			operand := node.child_by_field_name('operand')
+			mut root_sym := ss.infer_symbol_from_node(operand, src_text) or {
+				analyzer.void_type
 			}
+			if !root_sym.is_void() {
+				if root_sym.is_returnable() {
+					root_sym = root_sym.return_type
+				}
 
+				child_name := node.child_by_field_name('field').get_text(src_text)
+				return root_sym.children.get(child_name) or { analyzer.void_type }
+			}
 			module_name = node.child_by_field_name('operand').get_text(src_text)
 			type_name = node.child_by_field_name('field').get_text(src_text)
 		}
@@ -616,39 +624,10 @@ pub fn (mut ss Store) infer_value_type_from_node(node C.TSNode, src_text []byte)
 		return void_type
 	}
 
-	node_type := node.get_type()
-
-	// TODO
-	mut module_name := ''
 	mut type_name := ''
-
-	defer {
-		unsafe {
-			module_name.free()
-			type_name.free()
-		}
-	}
-
+	defer { unsafe { type_name.free() } }
+	node_type := node.get_type()
 	match node_type {
-		'identifier' {
-			// Identifier symbol finding strategy
-			// Find first in symbols
-			// find the symbol in scopes
-			// return void if none
-			ident_text := node.get_text(src_text)
-			got_sym := ss.find_symbol(module_name, ident_text) or {
-				selected_scope := ss.opened_scopes[ss.cur_file_path].innermost(node.start_byte(), node.end_byte())
-				selected_scope.symbols.get(ident_text) or { 
-					analyzer.void_type
-				}
-			}
-
-			if got_sym.kind == .variable {
-				return got_sym.return_type
-			}
-
-			return got_sym
-		}
 		'true', 'false' {
 			type_name = 'bool'
 		}
@@ -664,26 +643,14 @@ pub fn (mut ss Store) infer_value_type_from_node(node C.TSNode, src_text []byte)
 		'interpreted_string_literal' {
 			type_name = 'string'
 		}
-		'type_initializer' {
-			return ss.find_symbol_by_type_node(node.child_by_field_name('type'), src_text) or {
-				return analyzer.void_type
+		'identifier' {
+			got_sym := ss.infer_symbol_from_node(node, src_text) or { 
+				return analyzer.void_type 
 			}
-		}
-		'type_identifier' {
-			return ss.find_symbol_by_type_node(node, src_text) or { analyzer.void_type }
-		}
-		'selector_expression' {
-			root_sym := ss.infer_value_type_from_node(node.child_by_field_name('operand'), src_text)
-			if root_sym.is_void() {
-				child_sym := root_sym.children.get(node.child_by_field_name('field').get_text(src_text)) or { 
-					return analyzer.void_type 
-				}
-
-				return child_sym
+			if got_sym.is_returnable() {
+				return got_sym.return_type
 			}
-
-			module_name = node.child_by_field_name('operand').get_text(src_text)
-			type_name = node.child_by_field_name('field').get_text(src_text)
+			return got_sym
 		}
 		// 'call_expression' {
 		// 	sym := ss.infer_value_type_from_node(node.child_by_field_name('function'), src_text) 
@@ -693,14 +660,12 @@ pub fn (mut ss Store) infer_value_type_from_node(node C.TSNode, src_text []byte)
 		// 	return ss.infer_value_type_from_node(node.parent(), src_text)
 		// }
 		else {
-			// eprintln(node_type)
-			// return analyzer.void_type
+			return ss.infer_symbol_from_node(node, src_text) or { analyzer.void_type }
 		}
 	}
 
-	return ss.find_symbol(module_name, type_name) or {
-		name := if module_name.len != 0 { module_name + '.' + type_name } else { type_name }
-		ss.report_error(report_error('Invalid type $name', node.range()))
+	return ss.find_symbol('', type_name) or {
+		ss.report_error(report_error('Invalid type $type_name', node.range()))
 		return analyzer.void_type
 	}
 }
@@ -783,7 +748,6 @@ pub fn (mut ss Store) delete_symbol_at_node(root_node C.TSNode, src []byte, at_r
 		}
 		'source_file' {
 			child_node := search_node_in_children(node, at_range) or { return false }
-
 			return ss.delete_symbol_at_node(child_node, src, child_node.range())
 		}
 		'identifier' {

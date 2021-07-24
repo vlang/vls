@@ -121,7 +121,6 @@ fn (mut sr SymbolRegistration) struct_decl(struct_decl_node C.TSNode) ?&Symbol {
 	for i in 0 .. fields_len {
 		field_node := decl_list_node.named_child(i)
 		field_type := field_node.get_type()
-
 		match field_type {
 			'struct_field_scope' {
 				scope_text := field_node.get_text(sr.src_text)
@@ -132,25 +131,14 @@ fn (mut sr SymbolRegistration) struct_decl(struct_decl_node C.TSNode) ?&Symbol {
 					analyzer.global_struct_keyword { SymbolAccess.global }
 					else { field_access }
 				}
-
 				unsafe { scope_text.free() }
 				continue
 			}
 			'struct_field_declaration' {
-				field_typ := sr.store.find_symbol_by_type_node(field_node.child_by_field_name('type'), sr.src_text) or { analyzer.void_type }
-				field_name_node := field_node.child_by_field_name('name')
-				mut field_sym := Symbol{
-					name: field_name_node.get_text(sr.src_text)
-					kind: .field
-					range: field_name_node.range()
-					access: field_access
-					return_type: field_typ
-					file_path: sr.store.cur_file_path.clone()
-					file_version: sr.store.cur_version
-				}
-
+				mut field_sym := sr.struct_field_decl(field_access, field_node)
 				sym.add_child(mut field_sym) or {
 					// eprintln(err)
+					continue
 				}
 			}
 			else {
@@ -160,6 +148,20 @@ fn (mut sr SymbolRegistration) struct_decl(struct_decl_node C.TSNode) ?&Symbol {
 	}
 
 	return sym
+}
+
+fn (mut sr SymbolRegistration) struct_field_decl(field_access SymbolAccess, field_decl_node C.TSNode) &Symbol {
+	field_typ := sr.store.find_symbol_by_type_node(field_decl_node.child_by_field_name('type'), sr.src_text) or { analyzer.void_type }
+	field_name_node := field_decl_node.child_by_field_name('name')
+	return &Symbol{
+		name: field_name_node.get_text(sr.src_text)
+		kind: .field
+		range: field_name_node.range()
+		access: field_access
+		return_type: field_typ
+		file_path: sr.store.cur_file_path.clone()
+		file_version: sr.store.cur_version
+	}
 }
 
 fn (mut sr SymbolRegistration) interface_decl(interface_decl_node C.TSNode) ?&Symbol {
@@ -198,19 +200,10 @@ fn (mut sr SymbolRegistration) interface_decl(interface_decl_node C.TSNode) ?&Sy
 				unsafe { children.free() }
 			}
 			'struct_field_declaration' {
-				field_typ := sr.store.find_symbol_by_type_node(field_node.child_by_field_name('type'), sr.src_text) or { analyzer.void_type }
-				mut field_sym := Symbol{
-					name: field_node.child_by_field_name('name').get_text(sr.src_text)
-					kind: .field
-					range: field_node.range()
-					access: access
-					return_type: field_typ
-					file_path: sr.store.cur_file_path.clone()
-					file_version: sr.store.cur_version
-				}
-
+				mut field_sym := sr.struct_field_decl(access, field_node)
 				sym.add_child(mut field_sym) or {
 					// eprintln(err)
+					continue
 				}
 			}
 			else {

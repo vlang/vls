@@ -227,7 +227,10 @@ pub fn (mut ss Store) cleanup_imports() int {
 			ss.delete(imp_module.path)
 			unsafe { imp_module.free() }
 
-			ss.imports[ss.cur_dir].delete(i)
+			if i < ss.imports[ss.cur_dir].len {
+				ss.imports[ss.cur_dir].delete(i)
+			}
+			
 			deleted++
 			continue
 		}
