@@ -1,7 +1,7 @@
 module tree_sitter
 
 #include "@VMODROOT/tree_sitter/lib/api.h"
-#flag -I@VMODROOT/tree_sitter/lib/
+#flag -I@VMODROOT/tree_sitter/lib
 #flag @VMODROOT/tree_sitter/lib/lib.o
 
 [typedef]
