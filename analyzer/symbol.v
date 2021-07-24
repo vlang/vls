@@ -312,6 +312,10 @@ pub fn (sym &Symbol) is_void() bool {
 	return sym.kind == .void
 }
 
+pub fn (sym &Symbol) is_returnable() bool {
+	return sym.kind == .variable || sym.kind == .field || sym.kind == .function
+}
+
 [unsafe]
 pub fn (sym &Symbol) free() {
 	unsafe {
