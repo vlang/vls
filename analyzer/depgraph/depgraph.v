@@ -109,6 +109,10 @@ pub fn (mut node Node) remove_dependency(dep_path string) int {
 
 pub fn (node &Node) get_all_dependencies(completed ...string) []string {
 	mut ret := []string{}
+	if isnil(node) {
+		return ret
+	}
+
 	for d in node.dependencies {
 		if completed.len == 0 || d !in completed {
 			ret << d
