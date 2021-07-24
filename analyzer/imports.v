@@ -362,6 +362,7 @@ pub fn (mut store Store) import_modules(mut imports []&Import) {
 				}
 			}
 
+			parser.reset()
 			unsafe {
 				sr.cursor.free()
 				// modules_from_dir.free()

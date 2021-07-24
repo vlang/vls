@@ -29,6 +29,7 @@ fn (mut ls Vls) did_open(_ int, params string) {
 		return
 	}
 
+	ls.parser.reset()
 	src := did_open_params.text_document.text
 	uri := did_open_params.text_document.uri
 
@@ -52,6 +53,10 @@ fn (mut ls Vls) did_change(_ int, params string) {
 	}
 
 	uri := did_change_params.text_document.uri
+	if !ls.store.is_file_active(uri.path()) {
+		ls.parser.reset()
+	}
+
 	ls.store.set_active_file_path(uri.path(), did_change_params.text_document.version)
 
 	mut new_src := ls.sources[uri].source.clone()
