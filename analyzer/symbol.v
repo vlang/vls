@@ -89,6 +89,7 @@ pub fn (sa SymbolAccess) str() string {
 pub const void_type = &Symbol{ 
 	name: 'void'
 	kind: .void 
+	file_path: ''
 }
 
 [heap]
@@ -104,7 +105,7 @@ pub mut:
 	generic_placeholder_len int
 	sumtype_children_len    int
 	children                []&Symbol // methods, sum types (soon), map types, optionals, struct fields, etc.
-	file_path               string
+	file_path               string [required] // required in order to register the symbol at its appropriate directory.
 	file_version            int = 1 // file version when the symbol was registered
 }
 

@@ -1,5 +1,7 @@
 module analyzer
 
+import os
+
 const (
 	mut_struct_keyword     = 'mut:'
 	pub_struct_keyword     = 'pub:'
@@ -226,7 +228,11 @@ fn (mut sr SymbolRegistration) enum_decl(enum_decl_node C.TSNode) ?&Symbol {
 		}
 
 		int_type := sr.store.find_symbol('', 'int') or {
-			mut new_int_symbol := Symbol{name: 'int', kind: .typedef }
+			mut new_int_symbol := Symbol{
+				name: 'int', 
+				kind: .typedef
+				file_path: os.join_path(sr.store.auto_imports[''], 'placeholder.vv')
+			}
 			sr.store.register_symbol(mut new_int_symbol) or { analyzer.void_type }
 		}
 

@@ -450,7 +450,7 @@ pub fn (mut store Store) find_symbol_by_type_node(node C.TSNode, src_text []byte
 		return store.find_fn_symbol(module_name, return_type, parameters) or {
 			mut new_sym := Symbol{
 				name: analyzer.anon_fn_prefix + store.anon_fn_counter.str()
-				file_path: store.cur_file_path
+				file_path: store.cur_file_path.clone()
 				file_version: store.cur_version
 				kind: sym_kind
 				return_type: return_type
@@ -506,7 +506,6 @@ pub fn (mut ss Store) infer_symbol_from_node(node C.TSNode, src_text []byte) ?&S
 	}
 
 	node_type := node.get_type()
-	// TODO
 	mut module_name := ''
 	mut type_name := ''
 
