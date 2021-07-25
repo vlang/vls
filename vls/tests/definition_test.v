@@ -29,7 +29,10 @@ const definition_inputs = map{
 	'var.vv':                     lsp.Position{2, 11}
 }
 
-const definition_should_return_null = ['node_error.vv', 'stmt.vv']
+const definition_should_return_null = [
+	'node_error.vv', 
+	// 'stmt.vv'
+]
 
 const definition_results = map{
 	'call_arg.vv':                lsp.LocationLink{
@@ -66,7 +69,7 @@ const definition_results = map{
 		target_uri: lsp.document_uri_from_path(os.join_path(base_dir, 'enum_val.vv'))
 		origin_selection_range: lsp.Range{
 			start: lsp.Position{7, 9}
-			end: lsp.Position{7, 14}
+			end: lsp.Position{7, 19}
 		}
 		target_range: lsp.Range{
 			start: lsp.Position{3, 2}
@@ -246,7 +249,7 @@ const definition_results = map{
 	'struct_init_field_value.vv': lsp.LocationLink{
 		target_uri: lsp.document_uri_from_path(os.join_path(base_dir, 'struct_init_field_value.vv'))
 		origin_selection_range: lsp.Range{
-			start: lsp.Position{10, 23}
+			start: lsp.Position{10, 22}
 			end: lsp.Position{10, 27}
 		}
 		target_range: lsp.Range{
@@ -271,6 +274,21 @@ const definition_results = map{
 		target_selection_range: lsp.Range{
 			start: lsp.Position{0, 7}
 			end: lsp.Position{0, 14}
+		}
+	}
+	'stmt.vv':        lsp.LocationLink{
+		target_uri: lsp.document_uri_from_path(os.join_path(base_dir, 'stmt.vv'))
+		origin_selection_range: lsp.Range{
+			start: lsp.Position{0, 3}
+			end: lsp.Position{0, 28}
+		}
+		target_range: lsp.Range{
+			start: lsp.Position{0, 3}
+			end: lsp.Position{0, 28}
+		}
+		target_selection_range: lsp.Range{
+			start: lsp.Position{0, 3}
+			end: lsp.Position{0, 28}
 		}
 	}
 	'var_receiver.vv':            lsp.LocationLink{

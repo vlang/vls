@@ -168,10 +168,10 @@ fn (mut ls Vls) signature_help(id int, params string) {
 	pos := signature_params.position
 	ctx := signature_params.context
 	source := ls.sources[uri].source
+	tree := ls.trees[uri]
 	off := compute_offset(source, pos.line, pos.character)
-	mut node := ls.trees[uri].root_node().descendant_for_byte_range(u32(off - 2), u32(off - 2))
-	
-	for node.get_type() in ['identifier', 'selector_expression', 'index_expression'] {
+	mut node := traverse_node(tree.root_node(), u32(off))
+	if node.get_type() == 'argument_list' {
 		node = node.parent()
 	}
 
@@ -842,7 +842,6 @@ fn (mut ls Vls) completion(id int, params string) {
 	// }
 }
 
-const accepted_parent_node_types_in_hover = ['selector_expression', 'call_expression', 'type_selector_expression', 'parameter_declaration']
 fn (mut ls Vls) hover(id int, params string) {
 	hover_params := json.decode(lsp.HoverParams, params) or {
 		ls.panic(err.msg)
@@ -856,25 +855,16 @@ fn (mut ls Vls) hover(id int, params string) {
 	tree := ls.trees[uri]
 	source := ls.sources[uri].source
 	offset := compute_offset(source, pos.line, pos.character)
-	mut node := tree.root_node().descendant_for_byte_range(u32(offset), u32(offset))
-	original_range := node.range()
+	mut node := traverse_node(tree.root_node(), u32(offset))
+	mut original_range := node.range()
+	node_type := node.get_type()
 
-	if node.is_null() || (node.parent().has_error() || node.parent().is_missing()) {
+	if node.is_null() {
 		ls.send_null(id)
 		return
-	} else if node.get_type() == 'identifier' {
-		if node.parent().get_type() in accepted_parent_node_types_in_hover {
-			node = node.parent()
-		}
-		//  else if node.parent().get_type() in excluded_parent_node_types_in_definition {
-		// 	ls.send_null(id)
-		// 	return
-		// }
-	} else if node.get_type() == 'module' {
-		node = node.parent()
 	}
-	
-	if node.get_type() == 'module_clause' {
+
+	if node_type == 'module_clause' {
 		ls.send(jsonrpc.Response<lsp.Hover>{
 			id: id
 			result: lsp.Hover {
@@ -883,7 +873,7 @@ fn (mut ls Vls) hover(id int, params string) {
 			}	
 		})
 		return
-	} else if node.get_type() == 'import_path' {
+	} else if node_type == 'import_path' {
 		found_imp := ls.store.find_import_by_position(node.range()) or {
 			ls.send_null(id)
 			return
@@ -897,6 +887,13 @@ fn (mut ls Vls) hover(id int, params string) {
 			}	
 		})
 		return
+	} else if node.parent().has_error() || node.parent().is_missing() {
+		ls.send_null(id)
+		return
+	}
+
+	if node_type != 'type_selector_expression' && node.named_child_count() != 0 {
+		original_range = node.first_named_child_for_byte(u32(offset)).range()
 	}
 
 	sym := ls.store.infer_symbol_from_node(node, source) or {
@@ -968,9 +965,6 @@ fn (mut ls Vls) folding_range(id int, params string) {
 	}
 }
 
-const accepted_parent_node_types_in_definition = ['selector_expression', 'call_expression', 'type_selector_expression']
-const excluded_parent_node_types_in_definition = ['function_declaration']
-
 fn (mut ls Vls) definition(id int, params string) {
 	goto_definition_params := json.decode(lsp.TextDocumentPositionParams, params) or {
 		ls.panic(err.msg)
@@ -986,28 +980,25 @@ fn (mut ls Vls) definition(id int, params string) {
 	uri := goto_definition_params.text_document.uri
 	pos := goto_definition_params.position
 	source := ls.sources[uri].source
+	tree := ls.trees[uri]
 	offset := compute_offset(source, pos.line, pos.character)
-	mut node := ls.trees[uri].root_node().descendant_for_byte_range(u32(offset), u32(offset))
-	original_range := node.range()
+	mut node := traverse_node(tree.root_node(), u32(offset))
+	mut original_range := node.range()
 	node_type := node.get_type()
 
 	if node.is_null() || (node.parent().has_error() || node.parent().is_missing()) {
 		ls.send_null(id)
 		return
-	} else if node_type == 'identifier' || node_type == 'type_identifier' {
-		parent_node_type := node.parent().get_type()
-		if parent_node_type in accepted_parent_node_types_in_definition {
-			node = node.parent()
-		} else if node_type == 'identifier' && parent_node_type in excluded_parent_node_types_in_definition {
-			ls.send_null(id)
-			return
-		}
 	}
 
 	sym := ls.store.infer_symbol_from_node(node, source) or { analyzer.void_type }
 	if isnil(sym) || sym.is_void() {
 		ls.send_null(id)
 		return
+	}
+
+	if node_type != 'type_selector_expression' && node.named_child_count() != 0 {
+		original_range = node.first_named_child_for_byte(u32(offset)).range()
 	}
 
 	// Send null if range has zero-start and end points
@@ -1017,8 +1008,6 @@ fn (mut ls Vls) definition(id int, params string) {
 	}
 
 	loc_uri := lsp.document_uri_from_path(sym.file_path)
-	eprintln(loc_uri)
-
 	ls.send(jsonrpc.Response<lsp.LocationLink>{
 		id: id
 		result: lsp.LocationLink{
