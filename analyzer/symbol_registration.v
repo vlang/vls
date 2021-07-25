@@ -493,7 +493,7 @@ pub fn (mut store Store) register_symbols_from_tree(tree &C.TSTree, src_text []b
 		cursor: TreeCursor{root_node.tree_cursor()}
 	}
 
-	sr.get_scope(sr.cursor.current_node().parent()) or {}
+	sr.get_scope(sr.cursor.current_node()) or {}
 	sr.cursor.to_first_child()
 
 	for _ in 0 .. child_len {
