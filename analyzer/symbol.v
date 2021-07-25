@@ -33,6 +33,7 @@ pub enum SymbolKind {
 	multi_return
 	optional
 	chan_
+	variadic
 	function
 	struct_
 	enum_
@@ -140,7 +141,7 @@ pub fn (info &Symbol) gen_str() string {
 				sb.write_string('<invalid type>')
 			}
 		}
-		.map_, .array_ {
+		.map_, .array_, .variadic {
 			sb.write_string(info.name)
 		}
 		// .array_ {

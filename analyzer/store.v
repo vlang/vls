@@ -416,6 +416,10 @@ pub fn symbol_name_from_node(node C.TSNode, src_text []byte) (SymbolKind, string
 		'function_type' {
 			return SymbolKind.function_type, module_name, symbol_name
 		}
+		'variadic_type' {
+			_, module_name, symbol_name = symbol_name_from_node(node.named_child(0), src_text)
+			return SymbolKind.variadic, module_name, '...' + symbol_name
+		}
 		else {
 			unsafe { symbol_name.free() }
 			// type_identifier should go here
@@ -481,7 +485,7 @@ pub fn (mut store Store) find_symbol_by_type_node(node C.TSNode, src_text []byte
 				mut val_sym := store.find_symbol_by_type_node(node.child_by_field_name('value'), src_text) ?
 				new_sym.add_child(mut val_sym) or {}
 			}
-			.chan_, .ref, .optional {
+			.chan_, .ref, .optional, .variadic {
 				mut ref_sym := store.find_symbol_by_type_node(node.named_child(0), src_text) ?
 				new_sym.add_child(mut ref_sym) or {}
 			}
