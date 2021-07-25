@@ -192,7 +192,7 @@ pub fn (info &Symbol) gen_str() string {
 
 			sb.write_string(info.name)
 			sb.write_b(` `)
-			sb.write_string(info.return_type.gen_str())
+			sb.write_string(info.return_type.name)
 		}
 		.typedef, .sumtype {
 			sb.write_string('type ')
@@ -200,7 +200,7 @@ pub fn (info &Symbol) gen_str() string {
 			sb.write_string(' = ')
 			
 			if info.kind == .typedef {
-				if info.parent.kind == .function {
+				if info.parent.kind == .function_type {
 					sb.write_string(info.parent.gen_str())
 				} else {
 					sb.write_string(info.parent.name)
