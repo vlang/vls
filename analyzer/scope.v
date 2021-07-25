@@ -66,6 +66,9 @@ pub fn (mut scope ScopeTree) register(info &Symbol) {
 	}
 
 	scope.symbols << info
+	if info.range.start_byte < scope.start_byte {
+		scope.start_byte = info.range.start_byte
+	}
 }
 
 pub fn (scope &ScopeTree) get_all_symbols() []&Symbol {
