@@ -187,8 +187,10 @@ pub fn (node C.TSNode) range() C.TSRange {
 	}
 }
 
-[inline]
 pub fn (node C.TSNode) get_type() string {
+	if node.is_null() {
+		return '<null node>'
+	}
 	c := &char(C.ts_node_type(node))
 	return unsafe { c.vstring() }
 }
@@ -218,8 +220,10 @@ pub fn (node C.TSNode) has_changes() bool {
 	return C.ts_node_has_changes(node)
 }
 
-[inline]
 pub fn (node C.TSNode) has_error() bool {
+	if node.is_null() {
+		return true
+	}
 	return C.ts_node_has_error(node)
 }
 
@@ -243,8 +247,10 @@ pub fn (node C.TSNode) named_child(pos u32) C.TSNode {
 	return C.ts_node_named_child(node, pos)
 }
 
-[inline]
 pub fn (node C.TSNode) named_child_count() u32 {
+	if node.is_null() {
+		return 0
+	}
 	return C.ts_node_named_child_count(node)
 }
 
