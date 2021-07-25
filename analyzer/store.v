@@ -174,11 +174,9 @@ const kinds_to_be_returned = [SymbolKind.chan_, .array_, .map_, .ref]
 // register_symbol registers the given symbol
 pub fn (mut ss Store) register_symbol(mut info Symbol) ?&Symbol {
 	dir := os.dir(info.file_path)
-	defer {
-		unsafe { dir.free() }
-	}
+	defer { unsafe { dir.free() } }
 	mut existing_idx := ss.symbols[dir].index(info.name)
-	if existing_idx == -1 {
+	if existing_idx == -1 && info.kind != .placeholder {
 		// find by row
 		existing_idx = ss.symbols[dir].index_by_row(info.file_path, info.range.start_point.row)
 	}
