@@ -541,21 +541,19 @@ pub fn (mut ss Store) infer_symbol_from_node(node C.TSNode, src_text []byte) ?&S
 				selected_scope.get_symbol(ident_text) ?
 			}
 		}
-		'enum_identifier' {
-			mut parent := node.parent()
+		'type_selector_expression' {
 			// TODO: assignment_declaration
 			// if parent.get_type() != 'literal_value' {
 			// 	parent = parent.parent()
 			// }
-			parent_sym := ss.infer_symbol_from_node(parent, src_text) ?
-			child_sym := parent_sym.children.get(node.named_child(0).get_text(src_text)) ?
+			parent_sym := ss.infer_symbol_from_node(node.child_by_field_name('type'), src_text) ?
+			child_sym := parent_sym.children.get(node.child_by_field_name('field_name').get_text(src_text)) ?
 			return child_sym
 		}
 		'type_initializer' {
 			return ss.find_symbol_by_type_node(node.child_by_field_name('type'), src_text)
 		}
 		'type_identifier' {
-			// eprintln(node.get_text(src_text))
 			return ss.find_symbol_by_type_node(node, src_text)
 		}
 		'selector_expression' {
