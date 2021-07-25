@@ -276,25 +276,16 @@ fn (mut sr SymbolRegistration) fn_decl(fn_node C.TSNode) ?&Symbol {
 	mut is_method := false
 	if !receiver_node.is_null() {
 		is_method = true
-		mut children := extract_parameter_list(receiver_node, mut sr.store, sr.src_text)
-		// just use a loop for convinience
-		for i := 0; i < children.len; i++ {
-			mut parent := children[i].return_type
+		mut receivers := extract_parameter_list(receiver_node, mut sr.store, sr.src_text)
+		if receivers.len != 0 {
+			mut parent := receivers[0].return_type
 			if !isnil(parent) && !parent.is_void() {
 				// eprintln('adding ${fn_sym.name} to ${parent.kind} ${parent.gen_str()} ${parent.is_void()}')
-				parent.add_child(mut fn_sym) or {
-					break
-				}
-
-				if parent.range.start_byte == 0 && parent.range.end_byte == 0 && !parent.range.eq(fn_sym.range) {
-					parent.file_path = fn_sym.file_path
-					parent.range = fn_sym.range
-				}
+				parent.add_child(mut fn_sym) or {}
 			}
-			scope.register(children[i])
+			scope.register(receivers[0])
 		}
-
-		unsafe { children.free() }
+		unsafe { receivers.free() }
 	}
 
 	// scan params
