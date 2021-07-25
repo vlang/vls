@@ -108,7 +108,7 @@ fn (mut ls Vls) process_builtin() {
 
 	mut imports := [builtin_import]
 	ls.store.register_auto_import(builtin_import, '')
-	analyzer.register_builtin_symbols(mut ls.store)
+	analyzer.register_builtin_symbols(mut ls.store, builtin_import)
 	ls.store.import_modules(mut imports)
 }
 
