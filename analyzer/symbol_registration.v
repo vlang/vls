@@ -1,7 +1,5 @@
 module analyzer
 
-import os
-
 const (
 	mut_struct_keyword     = 'mut:'
 	pub_struct_keyword     = 'pub:'
@@ -20,7 +18,7 @@ mut:
 	is_import bool
 }
 
-fn (sr &SymbolRegistration) new_top_level_symbol(identifier_node C.TSNode, access SymbolAccess) ?&Symbol {
+fn (sr &SymbolRegistration) new_top_level_symbol(identifier_node C.TSNode, access SymbolAccess, kind SymbolKind) ?&Symbol {
 	id_node_type := identifier_node.get_type()
 	if id_node_type == 'qualified_type' {
 		return report_error('Invalid top-level node type `$id_node_type`', identifier_node.range())
@@ -28,6 +26,7 @@ fn (sr &SymbolRegistration) new_top_level_symbol(identifier_node C.TSNode, acces
 
 	mut symbol := &Symbol{
 		access: access
+		kind: kind
 		file_path: sr.store.cur_file_path.clone()
 		file_version: sr.store.cur_version
 	}
@@ -39,7 +38,7 @@ fn (sr &SymbolRegistration) new_top_level_symbol(identifier_node C.TSNode, acces
 			}
 
 			unsafe { symbol.free() }
-			symbol = sr.new_top_level_symbol(identifier_node.named_child(0), access) ?
+			symbol = sr.new_top_level_symbol(identifier_node.named_child(0), access, kind) ?
 			symbol.generic_placeholder_len = int(identifier_node.named_child(1).named_child_count())
 		}
 		else {
@@ -111,9 +110,7 @@ fn (mut sr SymbolRegistration) struct_decl(struct_decl_node C.TSNode) ?&Symbol {
 		access = .public
 	}
 
-	mut sym := sr.new_top_level_symbol(struct_decl_node.child_by_field_name('name'), access) ?
-	sym.kind = .struct_
-
+	mut sym := sr.new_top_level_symbol(struct_decl_node.child_by_field_name('name'), access, .struct_) ?
 	decl_list_node := struct_decl_node.named_child(1)
 	fields_len := decl_list_node.named_child_count()
 
@@ -170,9 +167,7 @@ fn (mut sr SymbolRegistration) interface_decl(interface_decl_node C.TSNode) ?&Sy
 		access = SymbolAccess.public
 	}
 
-	mut sym := sr.new_top_level_symbol(interface_decl_node.child_by_field_name('name'), access) ?
-	sym.kind = .interface_
-
+	mut sym := sr.new_top_level_symbol(interface_decl_node.child_by_field_name('name'), access, .interface_) ?
 	fields_list_node := interface_decl_node.named_child(1)
 	fields_len := interface_decl_node.named_child_count()
 
@@ -221,9 +216,7 @@ fn (mut sr SymbolRegistration) enum_decl(enum_decl_node C.TSNode) ?&Symbol {
 		access = SymbolAccess.public
 	}
 
-	mut sym := sr.new_top_level_symbol(enum_decl_node.child_by_field_name('name'), access) ?
-	sym.kind = .enum_
-
+	mut sym := sr.new_top_level_symbol(enum_decl_node.child_by_field_name('name'), access, .enum_) ?
 	member_list_node := enum_decl_node.named_child(1)
 	members_len := member_list_node.named_child_count()
 	for i in 0 .. members_len {
@@ -233,11 +226,7 @@ fn (mut sr SymbolRegistration) enum_decl(enum_decl_node C.TSNode) ?&Symbol {
 		}
 
 		int_type := sr.store.find_symbol('', 'int') or {
-			mut new_int_symbol := Symbol{
-				name: 'int'
-				file_path: os.join_path(sr.store.auto_imports[''], 'builtin.v')
-				kind: .placeholder
-			}
+			mut new_int_symbol := Symbol{name: 'int', kind: .typedef }
 			sr.store.register_symbol(mut new_int_symbol) or { analyzer.void_type }
 		}
 
@@ -274,10 +263,8 @@ fn (mut sr SymbolRegistration) fn_decl(fn_node C.TSNode) ?&Symbol {
 	name_node := fn_node.child_by_field_name('name')
 	body_node := fn_node.child_by_field_name('body')
 
-	mut fn_sym := sr.new_top_level_symbol(name_node, access) ?
+	mut fn_sym := sr.new_top_level_symbol(name_node, access, .function) ?
 	mut scope := sr.get_scope(body_node) or { &ScopeTree(0) }
-
-	fn_sym.kind = .function
 	fn_sym.return_type = sr.store.find_symbol_by_type_node(fn_node.child_by_field_name('result'), sr.src_text) or { analyzer.void_type }
 
 	mut is_method := false
@@ -332,9 +319,7 @@ fn (mut sr SymbolRegistration) type_decl(type_decl_node C.TSNode) ?&Symbol {
 		access = SymbolAccess.public
 	}
 
-	mut sym := sr.new_top_level_symbol(type_decl_node.child_by_field_name('name'), access) ?
-	sym.kind = .typedef
-
+	mut sym := sr.new_top_level_symbol(type_decl_node.child_by_field_name('name'), access, .typedef) ?
 	types_node :=  type_decl_node.child_by_field_name('types')
 	if types_node.is_null() {
 		return none
