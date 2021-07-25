@@ -842,7 +842,7 @@ fn (mut ls Vls) completion(id int, params string) {
 	// }
 }
 
-const accepted_parent_node_types_in_hover = ['selector_expression', 'call_expression', 'enum_identifier', 'parameter_declaration']
+const accepted_parent_node_types_in_hover = ['selector_expression', 'call_expression', 'type_selector_expression', 'parameter_declaration']
 fn (mut ls Vls) hover(id int, params string) {
 	hover_params := json.decode(lsp.HoverParams, params) or {
 		ls.panic(err.msg)
@@ -968,7 +968,7 @@ fn (mut ls Vls) folding_range(id int, params string) {
 	}
 }
 
-const accepted_parent_node_types_in_definition = ['selector_expression', 'call_expression', 'enum_identifier']
+const accepted_parent_node_types_in_definition = ['selector_expression', 'call_expression', 'type_selector_expression']
 const excluded_parent_node_types_in_definition = ['function_declaration']
 
 fn (mut ls Vls) definition(id int, params string) {
@@ -989,14 +989,16 @@ fn (mut ls Vls) definition(id int, params string) {
 	offset := compute_offset(source, pos.line, pos.character)
 	mut node := ls.trees[uri].root_node().descendant_for_byte_range(u32(offset), u32(offset))
 	original_range := node.range()
+	node_type := node.get_type()
 
 	if node.is_null() || (node.parent().has_error() || node.parent().is_missing()) {
 		ls.send_null(id)
 		return
-	} else if node.get_type() == 'identifier' {
-		if node.parent().get_type() in accepted_parent_node_types_in_definition {
+	} else if node_type == 'identifier' || node_type == 'type_identifier' {
+		parent_node_type := node.parent().get_type()
+		if parent_node_type in accepted_parent_node_types_in_definition {
 			node = node.parent()
-		} else if node.parent().get_type() in excluded_parent_node_types_in_definition {
+		} else if node_type == 'identifier' && parent_node_type in excluded_parent_node_types_in_definition {
 			ls.send_null(id)
 			return
 		}
