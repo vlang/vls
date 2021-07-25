@@ -2,10 +2,11 @@ module analyzer
 
 import os
 
-pub fn register_builtin_symbols(mut ss Store) {
-	builtin_path := ss.auto_imports['']
+pub fn register_builtin_symbols(mut ss Store, builtin_import &Import) {
+	builtin_path := builtin_import.path
 	placeholder_file_path := os.join_path(builtin_path, 'placeholder.vv')
 	defer { unsafe { placeholder_file_path.free() } }
+
 	builtin_types := [
 		'voidptr'
 		'byteptr'
@@ -15,6 +16,7 @@ pub fn register_builtin_symbols(mut ss Store) {
 		'int'
 		'i64'
 		'byte'
+		'u8'
 		'u16'
 		'u32'
 		'u64'
@@ -22,7 +24,6 @@ pub fn register_builtin_symbols(mut ss Store) {
 		'f64'
 		'char'
 		'bool'
-		'none'
 		'string'
 		'rune'
 		'array'
@@ -35,6 +36,8 @@ pub fn register_builtin_symbols(mut ss Store) {
 		'IError'
 	]
 
+	should_be_placeholders := ['IError', 'string', 'array', 'map']
+
 	for type_name in builtin_types {
 		mut builtin_sym := Symbol{
 			name: type_name 
@@ -46,6 +49,16 @@ pub fn register_builtin_symbols(mut ss Store) {
 		ss.register_symbol(mut builtin_sym) or {
 			eprintln('$type_name registration is skipped. Reason: $err')
 			continue
+		}
+	}
+
+	for type_name in builtin_types {
+		mut returned_sym := ss.symbols[builtin_path].get(type_name) or {
+			continue
+		}
+
+		if returned_sym.name !in should_be_placeholders {
+			returned_sym.kind = .typedef
 		}
 	}
 }
