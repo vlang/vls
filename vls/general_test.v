@@ -52,7 +52,7 @@ fn test_set_features() {
 		.document_symbol, 
 		.workspace_symbol, 
 		.signature_help,
-		// .completion, 
+		.completion, 
 		.hover, 
 		.folding_range, 
 		.definition
@@ -66,7 +66,7 @@ fn test_set_features() {
 		.document_symbol, 
 		.workspace_symbol, 
 		.signature_help,
-		// .completion, 
+		.completion, 
 		.hover, 
 		.folding_range, 
 		.definition, 
