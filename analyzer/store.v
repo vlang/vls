@@ -79,9 +79,17 @@ pub fn (mut ss Store) set_active_file_path(file_path string, version int) {
 	}
 
 	unsafe {
-		ss.cur_file_path.free()
-		ss.cur_dir.free()
-		ss.cur_file_name.free()
+		if !isnil(ss.cur_file_path) {
+			ss.cur_file_path.free()
+		}
+
+		if !isnil(ss.cur_file_name) {
+			ss.cur_file_name.free()
+		}
+
+		if !isnil(ss.cur_dir) {
+			ss.cur_dir.free()
+		}
 	}
 	ss.cur_file_path = file_path
 	ss.cur_dir = os.dir(file_path)
