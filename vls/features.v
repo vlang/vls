@@ -1057,7 +1057,7 @@ fn (mut ls Vls) definition(id int, params string) {
 		parent_node_type := node.parent().get_type()
 		if parent_node_type in accepted_parent_node_types_in_definition {
 			node = node.parent()
-		} else if parent_node_type in excluded_parent_node_types_in_definition {
+		} else if node_type == 'identifier' && parent_node_type in excluded_parent_node_types_in_definition {
 			ls.send_null(id)
 			return
 		}
