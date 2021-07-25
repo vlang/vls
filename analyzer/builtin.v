@@ -57,6 +57,22 @@ pub fn register_builtin_symbols(mut ss Store, builtin_import &Import) {
 			continue
 		}
 
+		if type_name == 'string' {
+			// register []string
+			mut array_sym := Symbol{
+				name: '[]' + returned_sym.name 
+				kind: .array_
+				access: .public
+				children: [returned_sym]
+				file_path: os.join_path(builtin_path, 'array.vv')
+			}
+
+			ss.register_symbol(mut array_sym) or {
+				eprintln('${array_sym.name} registration is skipped. Reason: $err')
+				continue
+			}
+		}
+
 		if returned_sym.name !in should_be_placeholders {
 			returned_sym.kind = .typedef
 		}
