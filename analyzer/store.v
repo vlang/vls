@@ -285,6 +285,14 @@ pub fn (ss &Store) get_symbols_by_file_path(file_path string) []&Symbol {
 // The directory is only deleted if there are no projects dependent on it.
 // It also removes the dependencies with the same condition
 pub fn (mut ss Store) delete(dir string, excluded_dir ...string) {
+	// do not delete data if dir is an auto import!
+	for _, path in ss.auto_imports {
+		if path == dir {
+			// return immediately if found
+			return
+		}
+	}
+
 	is_used := ss.dependency_tree.has_dependents(dir, ...excluded_dir)
 	if is_used {
 		return
@@ -580,7 +588,7 @@ pub fn (mut ss Store) infer_symbol_from_node(node C.TSNode, src_text []byte) ?&S
 		'type_initializer' {
 			return ss.find_symbol_by_type_node(node.child_by_field_name('type'), src_text)
 		}
-		'type_identifier' {
+		'type_identifier', 'array_type', 'map_type', 'pointer_type', 'variadic_type' {
 			return ss.find_symbol_by_type_node(node, src_text)
 		}
 		'selector_expression' {
@@ -592,7 +600,6 @@ pub fn (mut ss Store) infer_symbol_from_node(node C.TSNode, src_text []byte) ?&S
 				if root_sym.is_returnable() {
 					root_sym = root_sym.return_type
 				}
-
 				child_name := node.child_by_field_name('field').get_text(src_text)
 				return root_sym.children.get(child_name) or { analyzer.void_type }
 			}
@@ -604,9 +611,17 @@ pub fn (mut ss Store) infer_symbol_from_node(node C.TSNode, src_text []byte) ?&S
 			if parent.get_type() == 'literal_value' {
 				parent = parent.parent()
 			}
-			parent_sym := ss.infer_symbol_from_node(parent, src_text) ?	
-			child_sym := parent_sym.children.get(node.child_by_field_name('key').get_text(src_text)) ?
-			return child_sym.return_type
+			mut selected_node := node.child_by_field_name('name')
+			if !selected_node.get_type().ends_with('identifier') {
+				selected_node = node.child_by_field_name('value')
+			}
+			parent_sym := ss.infer_symbol_from_node(parent, src_text) ?
+			return parent_sym.children.get(selected_node.get_text(src_text)) or {
+				if parent_sym.name == 'map' || parent_sym.name == 'array' {
+					return ss.infer_symbol_from_node(selected_node, src_text)
+				}
+				return err
+			}
 		}
 		'call_expression' {
 			return ss.infer_symbol_from_node(node.child_by_field_name('function'), src_text)
