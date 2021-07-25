@@ -544,9 +544,27 @@ pub fn (mut ss Store) infer_symbol_from_node(node C.TSNode, src_text []byte) ?&S
 			// if parent.get_type() != 'literal_value' {
 			// 	parent = parent.parent()
 			// }
-			parent_sym := ss.infer_symbol_from_node(node.child_by_field_name('type'), src_text) ?
-			child_sym := parent_sym.children.get(node.child_by_field_name('field_name').get_text(src_text)) ?
-			return child_sym
+			type_node := node.child_by_field_name('type')
+			field_node := node.child_by_field_name('field_name')
+
+			if !type_node.is_null() {
+				parent_sym := ss.infer_symbol_from_node(type_node, src_text) ?
+				child_sym := parent_sym.children.get(field_node.get_text(src_text)) ?
+
+				return child_sym
+			} else {
+				// for shorhand enum
+				enum_value := field_node.get_text(src_text)
+				for sym in ss.symbols[ss.cur_dir] {
+					if sym.kind != .enum_ {
+						continue
+					}
+					enum_member := sym.children.get(enum_value) or {
+						continue
+					}
+					return enum_member
+				}
+			}
 		}
 		'type_initializer' {
 			return ss.find_symbol_by_type_node(node.child_by_field_name('type'), src_text)
