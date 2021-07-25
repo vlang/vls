@@ -345,26 +345,32 @@ pub fn (mut store Store) import_modules(mut imports []&Import) {
 				old_active_dir, modules_from_old_dir)
 			imported++
 
-			root_node := tree_from_import.root_node()
-			child_len := int(root_node.named_child_count())
+			{
+				root_node := tree_from_import.root_node()
+				child_len := int(root_node.named_child_count())
 
-			mut sr := SymbolRegistration{
-				store: unsafe { store }
-				src_text: content
-				is_import: true
-				cursor: TreeCursor{root_node.tree_cursor()}
-			}
-
-			for _ in 0 .. child_len {
-				sr.top_level_statement() or {
-					sr.store.report_error(err)
-					continue
+				mut sr := SymbolRegistration{
+					store: unsafe { store }
+					src_text: content
+					is_import: true
+					cursor: TreeCursor{root_node.tree_cursor()}
 				}
+
+				sr.get_scope(sr.cursor.current_node()) or {}
+				sr.cursor.to_first_child()
+
+				for _ in 0 .. child_len {
+					sr.top_level_statement() or {
+						sr.store.report_error(err)
+						continue
+					}
+				}
+
+				unsafe { sr.cursor.free() }
 			}
 
 			parser.reset()
 			unsafe {
-				sr.cursor.free()
 				// modules_from_dir.free()
 				content.free()
 				tree_from_import.free()

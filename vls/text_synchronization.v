@@ -28,21 +28,13 @@ fn (mut ls Vls) did_open(_ int, params string) {
 		ls.panic(err.msg)
 		return
 	}
-
 	ls.parser.reset()
 	src := did_open_params.text_document.text
 	uri := did_open_params.text_document.uri
-
-	new_src := src.bytes()
-	new_tree := ls.parser.parse_string(src)
-
-	ls.sources[uri] = File{
-		uri: uri
-		source: new_src
-	}
-
-	ls.trees[uri] = new_tree
-	analyze(mut ls.store, ls.root_uri, new_tree, ls.sources[uri])
+	// ls.log_message('opening $uri ...', .info)
+	ls.sources[uri] = File{ source: src.bytes() }
+	ls.trees[uri] = ls.parser.parse_string(src)
+	analyze(mut ls.store, ls.root_uri, ls.trees[uri], ls.sources[uri])
 	ls.show_diagnostics(uri)
 }
 
@@ -172,9 +164,8 @@ fn (mut ls Vls) did_close(_ int, params string) {
 		ls.sources[uri].free()
 		ls.trees[uri].free()
 	}
-	ls.store.delete(uri.dir_path())
 
-	// unsafe { ls.store.opened_scopes[uri.path()].free() }
+	ls.store.delete(uri.dir_path())
 	ls.store.opened_scopes.delete(uri.path())
 
 	// NB: The diagnostics will be cleared if:

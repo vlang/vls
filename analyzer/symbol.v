@@ -33,6 +33,7 @@ pub enum SymbolKind {
 	multi_return
 	optional
 	chan_
+	variadic
 	function
 	struct_
 	enum_
@@ -88,6 +89,7 @@ pub fn (sa SymbolAccess) str() string {
 pub const void_type = &Symbol{ 
 	name: 'void'
 	kind: .void 
+	file_path: ''
 }
 
 [heap]
@@ -103,7 +105,7 @@ pub mut:
 	generic_placeholder_len int
 	sumtype_children_len    int
 	children                []&Symbol // methods, sum types (soon), map types, optionals, struct fields, etc.
-	file_path               string
+	file_path               string [required] // required in order to register the symbol at its appropriate directory.
 	file_version            int = 1 // file version when the symbol was registered
 }
 
@@ -140,7 +142,7 @@ pub fn (info &Symbol) gen_str() string {
 				sb.write_string('<invalid type>')
 			}
 		}
-		.map_, .array_ {
+		.map_, .array_, .variadic {
 			sb.write_string(info.name)
 		}
 		// .array_ {
