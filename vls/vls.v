@@ -89,7 +89,7 @@ pub fn new(io ReceiveSender) Vls {
 	mut parser := tree_sitter.new_parser()
 	parser.set_language(v.language)
 
-	return Vls{
+	inst := Vls{
 		io: io
 		parser: parser
 		debug: io.debug
@@ -98,6 +98,12 @@ pub fn new(io ReceiveSender) Vls {
 			default_import_paths: [vlib_path, vmodules_path]
 		}
 	}
+
+	$if test {
+		inst.typing_ch.close()	
+	}
+
+	return inst
 }
 
 pub fn (mut ls Vls) dispatch(payload string) {

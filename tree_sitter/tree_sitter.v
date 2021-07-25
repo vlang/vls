@@ -13,10 +13,16 @@ fn C.ts_parser_set_language(parser &C.TSParser, language &C.TSLanguage) bool
 fn C.ts_parser_parse_string(parser &C.TSParser, old_tree &C.TSTree, str &char, len u32) &C.TSTree
 fn C.ts_parser_parse(parser &C.TSParser, old_tree &C.TSTree, input C.TSInput) &C.TSTree
 fn C.ts_parser_delete(tree &C.TSParser)
+fn C.ts_parser_reset(parser &C.TSParser)
 
 [inline]
 pub fn new_parser() &C.TSParser {
 	return C.ts_parser_new()
+}
+
+[inline]
+pub fn (mut parser C.TSParser) reset() {
+	C.ts_parser_reset(parser)
 }
 
 [inline]
