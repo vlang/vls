@@ -122,7 +122,7 @@ pub fn (ss &Store) find_symbol(module_name string, name string) ?&Symbol {
 	}
 
 	if aliased_path := ss.auto_imports[module_name] {
-		idx_from_alias := ss.symbols[aliased_path]?.index(name)
+		idx_from_alias := ss.symbols[aliased_path].index(name)
 		if idx_from_alias != -1 {
 			return ss.symbols[aliased_path][idx_from_alias]
 		}
