@@ -485,17 +485,17 @@ pub fn (mut store Store) find_symbol_by_type_node(node C.TSNode, src_text []byte
 		match sym_kind {
 			.array_ {
 				mut el_sym := store.find_symbol_by_type_node(node.child_by_field_name('element'), src_text) ?
-				new_sym.add_child(mut el_sym) or {}
+				new_sym.add_child(mut el_sym, false) or {}
 			}
 			.map_ {
 				mut key_sym := store.find_symbol_by_type_node(node.child_by_field_name('key'), src_text) ?
-				new_sym.add_child(mut key_sym) or {}
+				new_sym.add_child(mut key_sym, false) or {}
 				mut val_sym := store.find_symbol_by_type_node(node.child_by_field_name('value'), src_text) ?
-				new_sym.add_child(mut val_sym) or {}
+				new_sym.add_child(mut val_sym, false) or {}
 			}
 			.chan_, .ref, .optional, .variadic {
 				mut ref_sym := store.find_symbol_by_type_node(node.named_child(0), src_text) ?
-				new_sym.add_child(mut ref_sym) or {}
+				new_sym.add_child(mut ref_sym, false) or {}
 			}
 			else {}
 		}
