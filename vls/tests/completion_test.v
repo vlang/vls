@@ -36,7 +36,7 @@ const completion_inputs = map{
 	}
 	'import_symbols.vv':                    lsp.CompletionParams{
 		context: lsp.CompletionContext{.trigger_character, ' '}
-		position: lsp.Position{2, 13}
+		position: lsp.Position{2, 12}
 	}
 	'import.vv':                            lsp.CompletionParams{
 		context: lsp.CompletionContext{.trigger_character, ' '}
@@ -108,21 +108,25 @@ const completion_results = map{
 	'enum_val_in_struct.vv':                [
 		lsp.CompletionItem{
 			label: '.golden_retriever'
+			detail: '(Breed).golden_retriever int'
 			kind: .enum_member
 			insert_text: '.golden_retriever'
 		},
 		lsp.CompletionItem{
 			label: '.beagle'
+			detail: '(Breed).beagle int'
 			kind: .enum_member
 			insert_text: '.beagle'
 		},
 		lsp.CompletionItem{
 			label: '.chihuahua'
+			detail: '(Breed).chihuahua int'
 			kind: .enum_member
 			insert_text: '.chihuahua'
 		},
 		lsp.CompletionItem{
 			label: '.dalmatian'
+			detail: '(Breed).dalmatian int'
 			kind: .enum_member
 			insert_text: '.dalmatian'
 		},
@@ -272,12 +276,14 @@ const completion_results = map{
 	'struct_init.vv':                       [
 		lsp.CompletionItem{
 			label: 'name:'
+			detail: '(Person).name string'
 			kind: .field
 			insert_text_format: .snippet
 			insert_text: 'name: \$0'
 		},
 		lsp.CompletionItem{
 			label: 'age:'
+			detail: '(Person).age int'
 			kind: .field
 			insert_text_format: .snippet
 			insert_text: 'age: \$0'
