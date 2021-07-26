@@ -59,13 +59,32 @@ pub fn (mut scope ScopeTree) register(info &Symbol) {
 		return
 	}
 
-	existing_idx := scope.symbols.index(info.name)
-	if existing_idx != -1 {
-		unsafe { scope.symbols[existing_idx].free() }
-		scope.symbols.delete(existing_idx)
+	mut existing_idx := scope.symbols.index(info.name)
+	if existing_idx == -1 {
+		// find by row
+		existing_idx = scope.symbols.index_by_row(info.file_path, info.range.start_point.row)
 	}
 
-	scope.symbols << info
+	if existing_idx != -1 {
+		mut existing_sym := scope.symbols[existing_idx]
+		// unsafe { scope.symbols[existing_idx].free() }
+		if existing_sym.file_version >= info.file_version {
+			eprintln('Symbol already exists. (idx=${existing_idx}) (name="$existing_sym.name")')
+			return
+		}
+
+		if existing_sym.name != info.name {
+			existing_sym.name = info.name.clone()
+		}
+
+		existing_sym.return_type = info.return_type
+		existing_sym.access = info.access
+		existing_sym.range = info.range
+		existing_sym.file_version = info.file_version
+	} else {
+		scope.symbols << info
+	}
+
 	if info.range.start_byte < scope.start_byte {
 		scope.start_byte = info.range.start_byte
 	}
@@ -78,6 +97,7 @@ pub fn (scope &ScopeTree) get_all_symbols() []&Symbol {
 	return scope.symbols
 }
 
+// get_scope retrieves a specified symbol from the scope
 pub fn (scope &ScopeTree) get_symbol(name string) ?&Symbol {
 	if isnil(scope) {
 		return none
@@ -86,26 +106,57 @@ pub fn (scope &ScopeTree) get_symbol(name string) ?&Symbol {
 	return scope.symbols.get(name)
 }
 
+// new_child removes a child scope
 pub fn (mut scope ScopeTree) new_child(start_byte u32, end_byte u32) ?&ScopeTree {
 	if isnil(scope) {
 		return none
 	}
 
-	scope.children << &ScopeTree{
-		start_byte: start_byte
-		end_byte: end_byte
-		parent: unsafe { scope }
+	innermost := scope.innermost(start_byte, end_byte)
+	if innermost == scope {
+		scope.children << &ScopeTree{
+			start_byte: start_byte
+			end_byte: end_byte
+			parent: unsafe { scope }
+		}
+
+		return scope.children.last()
 	}
 
-	return scope.children.last()
+	return innermost
 }
 
-// pub fn (mut scope ScopeTree) remove(name string) bool {
-// 	idx := scope.symbols.index(name)
-// 	if idx == -1 {
-// 		return false
-// 	}
+// remove_child removes a child scope based on the given position
+pub fn (mut scope ScopeTree) remove_child(start_byte u32, end_byte u32) bool {
+	if isnil(scope) {
+		return false
+	}
 
-// 	scope.symbols.delete(idx)
-// 	return true
-// }
+	if start_byte == scope.start_byte && end_byte == scope.end_byte {
+		unsafe { scope.free() }
+		return true
+	}
+
+	for i := 0; i < scope.children.len; i++ {
+		if !scope.children[i].remove_child(start_byte, end_byte) {
+			continue
+		}
+	}
+
+	return false
+}
+
+// remove removes the specified symbol
+pub fn (mut scope ScopeTree) remove(name string) bool {
+	if isnil(scope) {
+		return false
+	}
+
+	idx := scope.symbols.index(name)
+	if idx == -1 {
+		return false
+	}
+
+	scope.symbols.delete(idx)
+	return true
+}

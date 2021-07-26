@@ -703,90 +703,72 @@ pub fn (mut ss Store) infer_value_type_from_node(node C.TSNode, src_text []byte)
 	}
 }
 
-fn within_range(node C.TSNode, range C.TSRange) bool {
-	if node.is_null() {
-		return false
-	}
-
-	return (node.start_byte() >= range.start_byte && node.start_byte() <= range.end_byte)
-		|| (node.end_byte() >= range.start_byte && node.end_byte() <= range.end_byte)
-}
-
-fn search_node(node C.TSNode, range C.TSRange) ?C.TSNode {
-	if within_range(node, range) {
-		return node
-	}
-
-	return search_node_in_children(node, range)
-}
-
-fn search_node_in_children(node C.TSNode, range C.TSRange) ?C.TSNode {
-	child_count := node.named_child_count()
-	for i in u32(0) .. child_count {
-		child := node.named_child(i)
-		return search_node(child, range) or { continue }
-	}
-
-	return none
-}
-
 // delete_symbol_at_node removes a specific symbol from a specific portion of the node
 pub fn (mut ss Store) delete_symbol_at_node(root_node C.TSNode, src []byte, at_range C.TSRange) bool {
-	node := search_node(root_node, at_range) or { return false }
-	node_type := node.get_type()
-	// TODO: parameters, variables, anyhing within the child
-	// eprintln(node_type)
-	if node_type == 'short_var_declaration' {
-		// left_expr_lists := node.child_by_field_name('left')
-		// left_child_count := left_expr_lists.named_child_count()
-		// eprintln(left_child_count)
+	unsafe { ss.opened_scopes[ss.cur_file_path].free() }
+	nodes := get_nodes_within_range(root_node, at_range) or { return false }
+	for node in nodes {
+		node_type := node.get_type()
+		match node_type {
+			'const_spec', 'global_var_spec', 'global_var_initializer', 'function_declaration', 
+			'interface_declaration', 'enum_declaration', 'type_declaration', 'struct_declaration' {
+				name_node := node.child_by_field_name('name')
+				symbol_name := name_node.get_text(src)
+				if name_node.is_null() || ss.messages.has_range(ss.cur_file_path, name_node.range()) {
+					continue
+				}
 
-		// root_scope := ss.opened_scopes[ss.cur_file_path] or {
-		// 	return false
-		// }
+				idx := ss.symbols[ss.cur_dir].index(symbol_name)
+				if idx != -1 && idx < ss.symbols[ss.cur_dir].len {
+					unsafe { ss.symbols[ss.cur_dir].free() }
+					ss.symbols[ss.cur_dir].delete(idx)
+				}
 
-		// mut scope := root_scope.innermost(at_range.start_byte)
-		// for i in u32(0) .. left_child_count {
-		// 	child_node := node.named_child(i)
-		// 	eprintln('deleting ${child_node.get_text(src)}')
-		// 	scope.remove(child_node.get_text(src))
-		// }
-		// return true
-		return false
-	}
+				if node_type == 'function_declaration' {
+					// TODO: find a way to remove scopes and update the position
+					// of adjacent ones
 
-	match node_type {
-		'const_spec', 'function_declaration', 'type_declaration', 'struct_declaration',
-		'interface_declaration', 'enum_declaration' {
-			name_node := node.child_by_field_name('name')
-			symbol_name := name_node.get_text(src)
-			if name_node.is_null() || ss.messages.has_range(ss.cur_file_path, name_node.range()) {
-				// eprintln('ignored')
-				return false
+					// params_list_node := node.child_by_field_name('parameters')
+					// body_node := node.child_by_field_name('body')
+
+					// mut start_byte := body_node.start_byte()
+					// end_byte := body_node.end_byte()
+
+					// param_count := params_list_node.named_child_count()
+					// if param_count != 0 {
+					// 	start_byte = params_list_node.named_child(0).start_byte()
+					// }
+				} else if node_type in ['const_spec', 'global_var_spec', 'global_var_initializer'] {
+					mut innermost := ss.opened_scopes[ss.cur_file_path].innermost(node.start_byte(), node.end_byte())
+					innermost.remove(symbol_name)
+				}
 			}
+			'short_var_declaration' {
+				mut innermost := ss.opened_scopes[ss.cur_file_path].innermost(node.start_byte(), node.end_byte())
+				left_side := node.child_by_field_name('left')
+				left_count := left_side.named_child_count()
+				for i in u32(0) .. left_count {
+					innermost.remove(left_side.named_child(i).get_text(src))
+				}
 
-			idx := ss.symbols[ss.cur_dir].index(symbol_name)
-			if idx != -1 {
-				unsafe { ss.symbols[ss.cur_dir].free() }
-				ss.symbols[ss.cur_dir].delete(idx)
-				// eprintln('deleted $symbol_name at $idx')
-				// eprintln(ss.symbols[ss.cur_dir])
-				return true
+				eprintln(innermost)
 			}
+			'import_declaration' {
+				mut imp_module := ss.find_import_by_position(node.range()) or {
+					continue
+				}
+
+				// if the current import node is not the same as before,
+				// untrack and remove the import entry asap
+				imp_module.untrack_file(ss.cur_file_path)				
+				
+				// let cleanup_imports do the job
+			}
+			'block' {
+				ss.opened_scopes[ss.cur_file_path].remove_child(node.start_byte(), node.end_byte())
+			}
+			else {}
 		}
-		'import_declaration' {
-			mut imp := ss.find_import_by_position(node.range()) or { return false }
-			imp.untrack_file(ss.cur_file_path)
-			// let cleanup_imports do the job
-		}
-		'source_file' {
-			child_node := search_node_in_children(node, at_range) or { return false }
-			return ss.delete_symbol_at_node(child_node, src, child_node.range())
-		}
-		'identifier' {
-			return ss.delete_symbol_at_node(node.parent(), src, node.parent().range())
-		}
-		else {}
 	}
 
 	return false

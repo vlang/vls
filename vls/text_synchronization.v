@@ -72,8 +72,9 @@ fn (mut ls Vls) did_change(_ int, params string) {
 
 		// remove immediately the symbol
 		if content_change.text.len == 0 && diff < 0 {
-			deleted := ls.store.delete_symbol_at_node(ls.trees[uri].root_node(), old_src,
-				
+			deleted := ls.store.delete_symbol_at_node(
+				ls.trees[uri].root_node(), 
+				old_src,
 				start_point: lsp_pos_to_tspoint(start_pos)
 				end_point: lsp_pos_to_tspoint(old_end_pos)
 				start_byte: u32(start_idx)
