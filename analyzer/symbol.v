@@ -197,6 +197,10 @@ pub fn (info &Symbol) gen_str() string {
 			sb.write_string(info.return_type.name)
 		}
 		.typedef, .sumtype {
+			if info.kind == .typedef && info.parent.is_void() {
+				return info.name	
+			}
+
 			sb.write_string('type ')
 			sb.write_string(info.name)
 			sb.write_string(' = ')
