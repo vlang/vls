@@ -281,6 +281,9 @@ fn (mut sr SymbolRegistration) fn_decl(fn_node C.TSNode) ?&Symbol {
 			mut parent := receivers[0].return_type
 			if !isnil(parent) && !parent.is_void() {
 				// eprintln('adding ${fn_sym.name} to ${parent.kind} ${parent.gen_str()} ${parent.is_void()}')
+				if parent.access == .private_mutable {
+					fn_sym.access = if fn_sym.access == .private { parent.access } else { SymbolAccess.public_mutable }
+				}
 				parent.add_child(mut fn_sym) or {}
 			}
 			scope.register(receivers[0])
