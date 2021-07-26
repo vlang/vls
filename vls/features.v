@@ -164,10 +164,11 @@ fn (mut ls Vls) signature_help(id int, params string) {
 	}
 
 	// Fetch the node requested for completion.
-	uri := signature_params.text_document.uri.str()
+	uri := signature_params.text_document.uri
 	pos := signature_params.position
 	ctx := signature_params.context
-	source := ls.sources[uri].source
+	file := ls.sources[uri]
+	source := file.source
 	tree := ls.trees[uri]
 	off := compute_offset(source, pos.line, pos.character)
 	mut node := traverse_node(tree.root_node(), u32(off))
@@ -181,6 +182,8 @@ fn (mut ls Vls) signature_help(id int, params string) {
 		ls.send_null(id)
 		return
 	}
+
+	ls.store.set_active_file_path(uri.path(), file.version)
 
 	sym := ls.store.infer_symbol_from_node(node, source) or {
 		ls.send_null(id)
@@ -853,16 +856,18 @@ fn (mut ls Vls) hover(id int, params string) {
 	pos := hover_params.position
 
 	tree := ls.trees[uri]
-	source := ls.sources[uri].source
+	file := ls.sources[uri]
+	source := file.source
 	offset := compute_offset(source, pos.line, pos.character)
 	mut node := traverse_node(tree.root_node(), u32(offset))
 	mut original_range := node.range()
 	node_type := node.get_type()
-
 	if node.is_null() {
 		ls.send_null(id)
 		return
 	}
+
+	ls.store.set_active_file_path(uri.path(), file.version)
 
 	if node_type == 'module_clause' {
 		ls.send(jsonrpc.Response<lsp.Hover>{
@@ -979,18 +984,19 @@ fn (mut ls Vls) definition(id int, params string) {
 
 	uri := goto_definition_params.text_document.uri
 	pos := goto_definition_params.position
-	source := ls.sources[uri].source
+	file := ls.sources[uri]
+	source := file.source
 	tree := ls.trees[uri]
 	offset := compute_offset(source, pos.line, pos.character)
 	mut node := traverse_node(tree.root_node(), u32(offset))
 	mut original_range := node.range()
 	node_type := node.get_type()
-
 	if node.is_null() || (node.parent().has_error() || node.parent().is_missing()) {
 		ls.send_null(id)
 		return
 	}
 
+	ls.store.set_active_file_path(uri.path(), file.version)
 	sym := ls.store.infer_symbol_from_node(node, source) or { analyzer.void_type }
 	if isnil(sym) || sym.is_void() {
 		ls.send_null(id)
