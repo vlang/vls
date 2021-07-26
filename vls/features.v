@@ -946,7 +946,7 @@ fn (mut ls Vls) hover(id int, params string) {
 			}	
 		})
 		return
-	} else if node.parent().has_error() || node.parent().is_missing() {
+	} else if node.parent().is_error() || node.parent().is_missing() {
 		ls.send_null(id)
 		return
 	}
@@ -1045,7 +1045,7 @@ fn (mut ls Vls) definition(id int, params string) {
 	mut original_range := node.range()
 	node_type := node.get_type()
 
-	if node.is_null() || (node.parent().has_error() || node.parent().is_missing()) {
+	if node.is_null() || (node.parent().is_error() || node.parent().is_missing()) {
 		ls.send_null(id)
 		return
 	}
