@@ -196,7 +196,7 @@ pub fn (mut ss Store) register_symbol(mut info Symbol) ?&Symbol {
 
 		// Remove this?
 		if existing_sym.kind !in kinds_to_be_returned {
-			if existing_sym.kind != .placeholder && existing_sym.file_version >= info.file_version {
+			if (existing_sym.kind != .placeholder && existing_sym.kind == info.kind) && (existing_sym.file_path == info.file_path && existing_sym.file_version >= info.file_version) {
 				return report_error('Symbol already exists. (idx=${existing_idx}) (name="$existing_sym.name")', info.range)
 			}
 
