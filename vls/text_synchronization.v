@@ -32,10 +32,46 @@ fn (mut ls Vls) did_open(_ int, params string) {
 	src := did_open_params.text_document.text
 	uri := did_open_params.text_document.uri
 	// ls.log_message('opening $uri ...', .info)
-	ls.sources[uri] = File{ source: src.bytes() }
-	ls.trees[uri] = ls.parser.parse_string(src)
-	analyze(mut ls.store, uri, ls.root_uri, ls.trees[uri], ls.sources[uri])
-	ls.show_diagnostics(uri)
+	// if project is not opened, analyze all the files available
+	project_dir := uri.dir_path()
+	if project_dir != '.' && !ls.store.dependency_tree.has(project_dir) {
+		mut files := os.ls(project_dir) or { [] }
+		for file_name in files {
+			if !analyzer.should_analyze_file(file_name) {
+				continue
+			}
+
+			full_path := os.join_path(project_dir, file_name)
+			file_uri := lsp.document_uri_from_path(full_path)
+
+			if file_uri != uri {
+				ls.sources[file_uri] = File{ source: os.read_bytes(full_path) or { [] } }
+				source_str := ls.sources[file_uri].source.bytestr()
+				ls.trees[file_uri] = ls.parser.parse_string(source_str)
+				unsafe { source_str.free() }
+			} else {
+				ls.sources[uri] = File{ source: src.bytes() }
+				ls.trees[uri] = ls.parser.parse_string(src)
+			}
+
+			analyze(mut ls.store, file_uri, ls.root_uri, ls.trees[file_uri], ls.sources[file_uri])
+			ls.show_diagnostics(file_uri)
+			
+			unsafe {
+				full_path.free()
+				file_uri.free()
+			}
+		}
+		ls.store.set_active_file_path(uri.path(), ls.sources[uri].version)
+		unsafe { files.free() }
+	} else if uri !in ls.sources && uri !in ls.trees {
+		ls.sources[uri] = File{ source: src.bytes() }
+		ls.trees[uri] = ls.parser.parse_string(src)
+		if !ls.store.dependency_tree.has(project_dir) {
+			analyze(mut ls.store, uri, ls.root_uri, ls.trees[uri], ls.sources[uri])
+		}
+		ls.show_diagnostics(uri)
+	}
 }
 
 [manualfree]

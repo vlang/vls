@@ -56,7 +56,7 @@ fn should_analyze_file_c(file_name string) bool {
 	return true
 }
 
-fn should_analyze_file(file_name string) bool {
+pub fn should_analyze_file(file_name string) bool {
 	if !file_name.ends_with('.v') {
 		return false
 	}

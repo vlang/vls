@@ -13,6 +13,7 @@ struct SymbolRegistration {
 mut:
 	store    &Store = &Store(0)
 	cursor   TreeCursor
+	module_name string
 	src_text []byte
 	// skips the local scopes and registers only
 	// the top-level ones regardless of its
@@ -360,6 +361,11 @@ fn (mut sr SymbolRegistration) top_level_statement() ? {
 	node_type := sr.cursor.current_node().get_type()
 
 	match node_type {
+		// TODO: add module check
+		// 'module_clause' {
+		// 	module_name := os.base(ss.cur_dir)
+		// 	defer { unsafe { module_name.free() } }
+		// }
 		'const_declaration' {
 			mut const_syms := sr.const_decl(sr.cursor.current_node()) ?
 			for i := 0; i < const_syms.len; i++ {
