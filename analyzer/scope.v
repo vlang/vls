@@ -19,8 +19,11 @@ pub fn (scope &ScopeTree) str() string {
 
 [unsafe]
 pub fn (scope &ScopeTree) free() {
-	// TODO: incremental add/delete scope
+	if isnil(scope) {
+		return
+	}
 
+	// TODO: incremental add/delete scope
 	unsafe {
 		for i := 0; scope.symbols.len != 0; {
 			scope.symbols[i].free()
