@@ -34,6 +34,14 @@ fn (mut ls Vls) did_open(_ int, params string) {
 	// ls.log_message('opening $uri ...', .info)
 	ls.sources[uri] = File{ source: src.bytes(), uri: uri }
 	ls.trees[uri] = ls.parser.parse_string(src)
+
+	// V's interop with tree sitter's parse_string is buggy sometimes
+	// especially if the code is incomplete. It reattempts to re-parse
+	// an appropriate tree by reducing decrement the source length by 1
+	if !isnil(ls.trees[uri]) && ls.trees[uri].root_node().get_type() == 'ERROR' {
+		unsafe { ls.trees[uri].free() }
+		ls.trees[uri] = ls.parser.parse_string_with_old_tree_and_len(src, &C.TSTree(0), u32(src.len - 1))
+	}
 	analyze(mut ls.store, ls.root_uri, ls.trees[uri], ls.sources[uri])
 	ls.show_diagnostics(uri)
 }
@@ -135,7 +143,13 @@ fn (mut ls Vls) did_change(_ int, params string) {
 		unsafe { content_change.text.free() }
 	}
 
-	new_tree := ls.parser.parse_string_with_old_tree(new_src.bytestr(), ls.trees[uri])
+	// See comment in `did_open`.
+	mut new_tree := ls.parser.parse_string_with_old_tree(new_src.bytestr(), ls.trees[uri])
+	if !isnil(new_tree) && new_tree.root_node().get_type() == 'ERROR' {
+		unsafe { new_tree.free() }
+		new_tree = ls.parser.parse_string_with_old_tree_and_len(new_src.bytestr(), ls.trees[uri], u32(new_src.len - 1))
+	}
+	
 	// ls.log_message('new tree: ${new_tree.root_node().sexpr_str()}', .info)
 
 	unsafe {

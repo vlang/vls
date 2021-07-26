@@ -45,18 +45,16 @@ fn traverse_node(root_node C.TSNode, offset u32) C.TSNode {
 fn traverse_node2(starting_node C.TSNode, offset u32) C.TSNode {
 	mut root_node := starting_node
 	mut root_type := root_node.get_type()
-	if root_node.is_error() && root_type == 'ERROR' {
-		root_node = root_node.first_child_for_byte(offset)
-		if !root_node.prev_named_sibling().is_null() {
-			root_node = root_node.prev_named_sibling()
-		}
-
-		return root_node
-	}
 
 	direct_named_child := root_node.first_named_child_for_byte(offset)
+	eprintln('$root_type ${root_node.sexpr_str()}')
+
 	child_type := direct_named_child.get_type()
 	if direct_named_child.is_null() {
+		// root_node = root_node.first_child_for_byte(offset)
+		// if !root_node.prev_named_sibling().is_null() {
+		// 	root_node = root_node.prev_named_sibling()
+		// }
 		return root_node
 	}
 
@@ -85,5 +83,9 @@ fn traverse_node2(starting_node C.TSNode, offset u32) C.TSNode {
 		return direct_named_child
 	}
 
-	return traverse_node(direct_named_child, offset)
+	return traverse_node2(direct_named_child, offset)
 }
+
+// fn closest_child_to_offset(starting_node C.TSNode, offset u32) C.TSNode {
+
+// }
