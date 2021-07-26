@@ -32,7 +32,7 @@ fn (mut ls Vls) did_open(_ int, params string) {
 	src := did_open_params.text_document.text
 	uri := did_open_params.text_document.uri
 	// ls.log_message('opening $uri ...', .info)
-	ls.sources[uri] = File{ source: src.bytes() }
+	ls.sources[uri] = File{ source: src.bytes(), uri: uri }
 	ls.trees[uri] = ls.parser.parse_string(src)
 	analyze(mut ls.store, ls.root_uri, ls.trees[uri], ls.sources[uri])
 	ls.show_diagnostics(uri)
