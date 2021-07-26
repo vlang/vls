@@ -164,10 +164,16 @@ fn (mut ls Vls) did_close(_ int, params string) {
 	unsafe {
 		ls.sources[uri].free()
 		ls.trees[uri].free()
+		ls.store.opened_scopes[uri.path()].free()
 	}
 
-	ls.store.delete(uri.dir_path())
+	ls.sources.delete(uri)
+	ls.trees.delete(uri)
 	ls.store.opened_scopes.delete(uri.path())
+
+	if ls.sources.count(uri.dir()) == 0 {
+		ls.store.delete(uri.dir_path())
+	}
 
 	// NB: The diagnostics will be cleared if:
 	// - TODO: If a workspace has opened multiple programs with main() function and one of them is closed.

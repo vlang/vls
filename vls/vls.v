@@ -76,6 +76,16 @@ fn (file &File) free() {
 	}
 }
 
+fn (file_map map[string]File) count(dir string) int {
+	mut file_count := 0
+	for k, _ in file_map {
+		if k.starts_with(dir) {
+			file_count++
+		}
+	}
+	return file_count
+}
+
 struct Vls {
 mut:
 	parser           &C.TSParser
