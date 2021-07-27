@@ -293,7 +293,7 @@ fn (mut sr SymbolRegistration) fn_decl(fn_node C.TSNode) ?&Symbol {
 				}
 				parent.add_child(mut fn_sym) or {}
 			}
-			scope.register(receivers[0])
+			scope.register(receivers[0]) or {}
 		}
 		unsafe { receivers.free() }
 	}
@@ -303,7 +303,7 @@ fn (mut sr SymbolRegistration) fn_decl(fn_node C.TSNode) ?&Symbol {
 	for i := 0; i < params.len; i++ {
 		mut param := params[i]
 		fn_sym.add_child(mut param) or { continue }
-		scope.register(param)
+		scope.register(param) or { continue }
 	}
 
 	unsafe { params.free() }
@@ -385,7 +385,7 @@ fn (mut sr SymbolRegistration) top_level_statement() ? {
 					continue
 				}
 
-				global_scope.register(const_sym)
+				global_scope.register(const_sym) or { continue }
 			}
 
 			unsafe { const_syms.free() }

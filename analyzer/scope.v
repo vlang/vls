@@ -56,7 +56,7 @@ pub fn (scope &ScopeTree) innermost(start_byte u32, end_byte u32) &ScopeTree {
 }
 
 // register registers the symbol to the scope
-pub fn (mut scope ScopeTree) register(info &Symbol) {
+pub fn (mut scope ScopeTree) register(info &Symbol) ? {
 	// Just to ensure that scope is not null
 	if isnil(scope) {
 		return
@@ -72,8 +72,7 @@ pub fn (mut scope ScopeTree) register(info &Symbol) {
 		mut existing_sym := scope.symbols[existing_idx]
 		// unsafe { scope.symbols[existing_idx].free() }
 		if existing_sym.file_version >= info.file_version {
-			eprintln('Symbol already exists. (idx=${existing_idx}) (name="$existing_sym.name")')
-			return
+			return error('Symbol already exists. (Scope Range=${scope.start_byte}-${scope.end_byte}) (idx=${existing_idx}) (name="$existing_sym.name")')
 		}
 
 		if existing_sym.name != info.name {
@@ -83,6 +82,7 @@ pub fn (mut scope ScopeTree) register(info &Symbol) {
 		existing_sym.return_type = info.return_type
 		existing_sym.access = info.access
 		existing_sym.range = info.range
+		existing_sym.file_path = info.file_path
 		existing_sym.file_version = info.file_version
 	} else {
 		scope.symbols << info
