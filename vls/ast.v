@@ -52,3 +52,23 @@ fn traverse_node(root_node C.TSNode, offset u32) C.TSNode {
 
 // 	return traverse_node(direct_named_child, offset)
 // }
+
+const other_symbol_node_types = ['call_expression', 'selector_expression', 'index_expression', 'slice_expression', 'type_initializer', 'module_clause']
+
+// TODO: better naming
+// closest_symbol_node_parent traverse back from child
+// to the nearest node that has a valid, lookup-able symbol node
+// (nodes with names, module name, and etc.)
+fn closest_symbol_node_parent(child_node C.TSNode) C.TSNode {
+	parent_node := child_node.parent()
+	parent_type := parent_node.get_type()
+	if parent_node.is_null() || parent_type == 'source_file' || parent_type == 'block' {
+		return child_node
+	}
+
+	if parent_type.ends_with('_declaration') || parent_type in other_symbol_node_types {
+		return parent_node
+	}
+
+	return closest_symbol_node_parent(parent_node)
+}

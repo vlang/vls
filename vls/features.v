@@ -854,7 +854,6 @@ fn (mut ls Vls) hover(id int, params string) {
 
 	uri := hover_params.text_document.uri
 	pos := hover_params.position
-
 	tree := ls.trees[uri] or { 
 		ls.send_null(id)
 		return
@@ -862,71 +861,64 @@ fn (mut ls Vls) hover(id int, params string) {
 	file := ls.sources[uri]
 	source := file.source
 	offset := compute_offset(source, pos.line, pos.character)
-	mut node := traverse_node(tree.root_node(), u32(offset))
-	mut original_range := node.range()
-	node_type := node.get_type()
-	if node.is_null() {
+	node := traverse_node(tree.root_node(), u32(offset))
+
+	ls.store.set_active_file_path(uri.path(), file.version)
+	hover_data := get_hover_data(mut ls.store, node, uri, source, u32(offset)) or {
 		ls.send_null(id)
 		return
 	}
+	
+	ls.send(jsonrpc.Response<lsp.Hover>{
+		id: id
+		result: hover_data
+	})
+}
 
-	ls.store.set_active_file_path(uri.path(), file.version)
+fn get_hover_data(mut store analyzer.Store, node C.TSNode, uri lsp.DocumentUri, source []byte, offset u32) ?lsp.Hover {
+	node_type := node.get_type()
+	if node.is_null() || node_type == 'comment' {
+		return none
+	}
 
+	mut original_range := node.range()
+	// eprintln('$node_type | ${node.get_text(source)}')
 	if node_type == 'module_clause' {
-		ls.send(jsonrpc.Response<lsp.Hover>{
-			id: id
-			result: lsp.Hover {
-				contents: lsp.v_marked_string(node.get_text(source))
-				range: tsrange_to_lsp_range(node.range())
-			}	
-		})
-		return
-	} else if node_type == 'import_path' {
-		found_imp := ls.store.find_import_by_position(node.range()) or {
-			ls.send_null(id)
-			return
+		return lsp.Hover{
+			contents: lsp.v_marked_string(node.get_text(source))
+			range: tsrange_to_lsp_range(node.range())
 		}
-
-		ls.send(jsonrpc.Response<lsp.Hover>{
-			id: id
-			result: lsp.Hover {
-				contents: lsp.v_marked_string('import ${found_imp.module_name} as ' + found_imp.aliases[uri.path()] or { found_imp.module_name })
-				range: tsrange_to_lsp_range(found_imp.ranges[uri.path()])
-			}	
-		})
-		return
+	} else if node_type == 'import_path' {
+		found_imp := store.find_import_by_position(node.range()) ?
+		return lsp.Hover{
+			contents: lsp.v_marked_string('import ${found_imp.module_name} as ' + found_imp.aliases[uri.path()] or { found_imp.module_name })
+			range: tsrange_to_lsp_range(found_imp.ranges[uri.path()])
+		}	
 	} else if node.parent().has_error() || node.parent().is_missing() {
-		ls.send_null(id)
-		return
+		return none
 	}
 
 	if node_type != 'type_selector_expression' && node.named_child_count() != 0 {
 		original_range = node.first_named_child_for_byte(u32(offset)).range()
 	}
 
-	sym := ls.store.infer_symbol_from_node(node, source) or {
-		eprintln(err)
-		analyzer.void_type
+	mut sym := store.infer_symbol_from_node(node, source) or { analyzer.void_type }
+	if isnil(sym) || sym.is_void() {
+		closest_parent := closest_symbol_node_parent(node)
+		sym = store.infer_symbol_from_node(closest_parent, source) ?
 	}
 
-	if isnil(sym) || sym.is_void() {
-		ls.send_null(id)
-		return
-	}
+	// eprintln('$node_type | ${node.get_text(source)} | $sym')
 
 	// Send null if range has zero-start and end points
 	if sym.range.start_point.row == 0 && sym.range.start_point.column == 0 && sym.range.start_point.eq(sym.range.end_point) {
-		ls.send_null(id)
-		return
+		return none
 	}
 
-	ls.send(jsonrpc.Response<lsp.Hover>{
-		id: id
-		result: lsp.Hover {
-			contents: lsp.v_marked_string(sym.gen_str())
-			range: tsrange_to_lsp_range(original_range)
-		}	
-	})
+	return lsp.Hover{
+		contents: lsp.v_marked_string(sym.gen_str())
+		range: tsrange_to_lsp_range(original_range)
+	}	
 }
 
 [manualfree]

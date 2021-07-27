@@ -674,6 +674,23 @@ pub fn (mut ss Store) infer_symbol_from_node(node C.TSNode, src_text []byte) ?&S
 			child_sym := parent_sym.children.get(node.child_by_field_name('name').get_text(src_text)) ?
 			return child_sym
 		}
+		'function_declaration' {
+			receiver_node := node.child_by_field_name('receiver')
+			name_node := node.child_by_field_name('name')
+			mut receiver_param_count := u32(0)
+			if !receiver_node.is_null() {
+				receiver_param_count = receiver_node.named_child_count()
+			}
+
+			if receiver_param_count != 0 {
+				receiver_param_node := receiver_node.named_child(0)
+				parent_sym := ss.infer_symbol_from_node(receiver_param_node.child_by_field_name('type'), src_text) ?	
+				child_sym := parent_sym.children.get(name_node.get_text(src_text)) ?
+				return child_sym
+			} else {
+				return ss.infer_symbol_from_node(name_node, src_text)
+			}
+		}
 		else {
 			// eprintln(node_type)
 			// eprintln(node.parent().get_type())
