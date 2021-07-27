@@ -44,6 +44,7 @@ pub fn register_builtin_symbols(mut ss Store, builtin_import &Import) {
 			kind: .placeholder
 			access: .public
 			file_path: placeholder_file_path
+			file_version: if type_name in should_be_placeholders { -1 } else { 0 }
 		}
 
 		ss.register_symbol(mut builtin_sym) or {
