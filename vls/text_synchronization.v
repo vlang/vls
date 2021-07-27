@@ -67,7 +67,7 @@ fn (mut ls Vls) did_open(_ int, params string) {
 	} else if uri !in ls.sources && uri !in ls.trees {
 		ls.sources[uri] = File{ source: src.bytes() }
 		ls.trees[uri] = ls.parser.parse_string(src)
-		if !ls.store.has_file_path(uri.path()) {
+		if !ls.store.has_file_path(uri.path()) || uri.path() !in ls.store.opened_scopes {
 			analyze(mut ls.store, uri, ls.root_uri, ls.trees[uri], ls.sources[uri])
 		}
 		ls.show_diagnostics(uri)
