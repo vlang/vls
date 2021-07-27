@@ -258,6 +258,25 @@ pub fn (infos []&Symbol) index_by_row(file_path string, row u32) int {
 	return -1
 }
 
+pub fn (symbols []&Symbol) filter_by_file_path(file_path string) []&Symbol {
+	mut filtered := []&Symbol{}
+	for sym in symbols {
+		if sym.file_path == file_path {
+			filtered << sym
+		}
+
+		filtered_from_children := sym.children.filter_by_file_path(file_path)
+		for child_sym in filtered_from_children {
+			if filtered.exists(child_sym.name) {
+				continue
+			}
+			filtered << child_sym
+		}
+		unsafe{ filtered_from_children.free() }
+	}
+	return filtered
+}
+
 // pub fn (mut infos []&Symbol) remove_symbol_by_range(file_path string, range C.TSRange) {
 // 	mut to_delete_i := -1
 // 	for i, v in infos {

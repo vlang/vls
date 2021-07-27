@@ -269,16 +269,11 @@ pub fn (ss &Store) get_symbols_by_file_path(file_path string) []&Symbol {
 		unsafe { dir.free() }
 	}
 
-	mut fetched_symbols := []&Symbol{}
 	if dir in ss.symbols {
-		for name, mut sym in ss.symbols[dir] {
-			if sym.file_path == file_path {
-				fetched_symbols << ss.symbols[dir][name]
-			}
-		}
+		return ss.symbols[dir].filter_by_file_path(file_path)
 	}
 
-	return fetched_symbols
+	return []
 }
 
 // has_file_path checks if the data of a specific file_path already exists
