@@ -763,8 +763,6 @@ pub fn (mut ss Store) delete_symbol_at_node(root_node C.TSNode, src []byte, at_r
 				for i in u32(0) .. left_count {
 					innermost.remove(left_side.named_child(i).get_text(src))
 				}
-
-				eprintln(innermost)
 			}
 			'import_declaration' {
 				mut imp_module := ss.find_import_by_position(node.range()) or {

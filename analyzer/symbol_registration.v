@@ -480,7 +480,7 @@ fn extract_parameter_list(node C.TSNode, mut store Store, src_text []byte) []&Sy
 		param_name_node := param_node.child_by_field_name('name')
 		param_type_node := param_node.child_by_field_name('type')
 		return_type := store.find_symbol_by_type_node(param_type_node, src_text) or { analyzer.void_type }
-		eprintln('${param_node.get_text(src_text)} -> ${return_type.gen_str()}')
+
 		syms << &Symbol{
 			name: param_name_node.get_text(src_text)
 			kind: .variable
