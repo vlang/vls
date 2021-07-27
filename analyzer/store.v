@@ -602,7 +602,7 @@ pub fn (mut ss Store) infer_symbol_from_node(node C.TSNode, src_text []byte) ?&S
 		'type_initializer' {
 			return ss.find_symbol_by_type_node(node.child_by_field_name('type'), src_text)
 		}
-		'type_identifier', 'array_type', 'map_type', 'pointer_type', 'variadic_type' {
+		'type_identifier', 'array_type', 'map_type', 'pointer_type', 'variadic_type', 'builtin_type' {
 			return ss.find_symbol_by_type_node(node, src_text)
 		}
 		'selector_expression' {
