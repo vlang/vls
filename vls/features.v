@@ -169,7 +169,10 @@ fn (mut ls Vls) signature_help(id int, params string) {
 	ctx := signature_params.context
 	file := ls.sources[uri]
 	source := file.source
-	tree := ls.trees[uri]
+	tree := ls.trees[uri] or { 
+		ls.send_null(id)
+		return
+	}
 	off := compute_offset(source, pos.line, pos.character)
 	mut node := traverse_node(tree.root_node(), u32(off))
 	if node.get_type() == 'argument_list' {
@@ -855,7 +858,10 @@ fn (mut ls Vls) hover(id int, params string) {
 	uri := hover_params.text_document.uri
 	pos := hover_params.position
 
-	tree := ls.trees[uri]
+	tree := ls.trees[uri] or { 
+		ls.send_null(id)
+		return
+	}
 	file := ls.sources[uri]
 	source := file.source
 	offset := compute_offset(source, pos.line, pos.character)
@@ -935,7 +941,10 @@ fn (mut ls Vls) folding_range(id int, params string) {
 		return
 	}
 	uri := folding_range_params.text_document.uri
-	tree := ls.trees[uri]
+	tree := ls.trees[uri] or { 
+		ls.send_null(id)
+		return
+	}
 
 	root_node := tree.root_node()
 
@@ -986,7 +995,10 @@ fn (mut ls Vls) definition(id int, params string) {
 	pos := goto_definition_params.position
 	file := ls.sources[uri]
 	source := file.source
-	tree := ls.trees[uri]
+	tree := ls.trees[uri] or { 
+		ls.send_null(id)
+		return
+	}
 	offset := compute_offset(source, pos.line, pos.character)
 	mut node := traverse_node(tree.root_node(), u32(offset))
 	mut original_range := node.range()

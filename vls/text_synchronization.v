@@ -34,7 +34,7 @@ fn (mut ls Vls) did_open(_ int, params string) {
 	// ls.log_message('opening $uri ...', .info)
 	// if project is not opened, analyze all the files available
 	project_dir := uri.dir_path()
-	if project_dir != '.' && !ls.store.dependency_tree.has(project_dir) {
+	if uri.ends_with('.v') && project_dir != '.' && !ls.store.dependency_tree.has(project_dir) {
 		mut files := os.ls(project_dir) or { [] }
 		for file_name in files {
 			if !analyzer.should_analyze_file(file_name) {
@@ -67,7 +67,7 @@ fn (mut ls Vls) did_open(_ int, params string) {
 	} else if uri !in ls.sources && uri !in ls.trees {
 		ls.sources[uri] = File{ source: src.bytes() }
 		ls.trees[uri] = ls.parser.parse_string(src)
-		if !ls.store.dependency_tree.has(project_dir) {
+		if !ls.store.has_file_path(uri.path()) {
 			analyze(mut ls.store, uri, ls.root_uri, ls.trees[uri], ls.sources[uri])
 		}
 		ls.show_diagnostics(uri)

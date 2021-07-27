@@ -281,6 +281,22 @@ pub fn (ss &Store) get_symbols_by_file_path(file_path string) []&Symbol {
 	return fetched_symbols
 }
 
+// has_file_path checks if the data of a specific file_path already exists
+pub fn (ss &Store) has_file_path(file_path string) bool {
+	dir := os.dir(file_path)
+	defer {
+		unsafe { dir.free() }
+	}
+	if dir in ss.symbols {
+		for name, mut sym in ss.symbols[dir] {
+			if sym.file_path == file_path {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // delete removes the given path of a workspace/project if possible.
 // The directory is only deleted if there are no projects dependent on it.
 // It also removes the dependencies with the same condition
