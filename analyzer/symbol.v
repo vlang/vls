@@ -358,6 +358,16 @@ pub fn (sym &Symbol) free() {
 	}
 }
 
+fn (sym &Symbol) value_sym() &Symbol {
+	if sym.kind == .array_ {
+		return sym.children[0] or { analyzer.void_type }
+	} else if sym.kind == .map_ {
+		return sym.children[1] or { analyzer.void_type }
+	} else {
+		return analyzer.void_type
+	}
+}
+
 // pub fn (ars ArraySymbol) str() string {
 // 	return
 // }

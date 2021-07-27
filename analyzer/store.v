@@ -726,6 +726,10 @@ pub fn (mut ss Store) infer_value_type_from_node(node C.TSNode, src_text []byte)
 		'interpreted_string_literal' {
 			type_name = 'string'
 		}
+		'range' {
+			// TODO: detect starting and ending types
+			type_name = '[]int'
+		}
 		'identifier' {
 			got_sym := ss.infer_symbol_from_node(node, src_text) or { 
 				return analyzer.void_type 
