@@ -288,7 +288,7 @@ pub fn (ss &Store) has_file_path(file_path string) bool {
 		unsafe { dir.free() }
 	}
 	if dir in ss.symbols {
-		for name, mut sym in ss.symbols[dir] {
+		for _, mut sym in ss.symbols[dir] {
 			if sym.file_path == file_path {
 				return true
 			}
