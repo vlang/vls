@@ -49,7 +49,7 @@ fn (sr &SymbolRegistration) new_top_level_symbol(identifier_node C.TSNode, acces
 			symbol.name = identifier_node.get_text(sr.src_text)
 			symbol.range = identifier_node.range()
 
-			if id_node_type == 'binded_type' {
+			if id_node_type == 'binded_type' || id_node_type == 'binded_identifier' {
 				sym_language := identifier_node.child_by_field_name('language').get_text(sr.src_text)
 				symbol.language = match sym_language {
 					'C' { SymbolLanguage.c }
@@ -474,6 +474,7 @@ fn extract_parameter_list(node C.TSNode, mut store Store, src_text []byte) []&Sy
 		param_name_node := param_node.child_by_field_name('name')
 		param_type_node := param_node.child_by_field_name('type')
 		return_type := store.find_symbol_by_type_node(param_type_node, src_text) or { analyzer.void_type }
+		eprintln('${param_node.get_text(src_text)} -> ${return_type.gen_str()}')
 		syms << &Symbol{
 			name: param_name_node.get_text(src_text)
 			kind: .variable
