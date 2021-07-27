@@ -43,6 +43,7 @@ pub fn register_builtin_symbols(mut ss Store, builtin_import &Import) {
 			name: type_name 
 			kind: .placeholder
 			access: .public
+			is_top_level: true
 			file_path: placeholder_file_path
 			file_version: if type_name in should_be_placeholders { -1 } else { 0 }
 		}
@@ -61,9 +62,10 @@ pub fn register_builtin_symbols(mut ss Store, builtin_import &Import) {
 		if type_name == 'string' {
 			// register []string
 			mut array_sym := Symbol{
-				name: '[]' + returned_sym.name 
+				name: '[]' + type_name
 				kind: .array_
 				access: .public
+				is_top_level: true
 				children: [returned_sym]
 				file_path: os.join_path(builtin_path, 'array.vv')
 			}

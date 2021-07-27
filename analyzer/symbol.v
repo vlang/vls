@@ -90,6 +90,7 @@ pub const void_type = &Symbol{
 	name: 'void'
 	kind: .void 
 	file_path: ''
+	is_top_level: true
 }
 
 [heap]
@@ -102,9 +103,10 @@ pub mut:
 	parent                  &Symbol        = analyzer.void_type // parent is for typedefs, aliases
 	return_type             &Symbol        = analyzer.void_type // return_type is for functions and variables
 	language                SymbolLanguage = .v
+	is_top_level						bool [required]
 	generic_placeholder_len int
 	sumtype_children_len    int
-	children                []&Symbol // methods, sum types (soon), map types, optionals, struct fields, etc.
+	children                []&Symbol // methods, sum types, map types, optionals, struct fields, etc.
 	file_path               string [required] // required in order to register the symbol at its appropriate directory.
 	file_version            int = 1 // file version when the symbol was registered
 }

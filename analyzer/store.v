@@ -218,6 +218,7 @@ pub fn (mut ss Store) register_symbol(mut info Symbol) ?&Symbol {
 			existing_sym.kind = info.kind
 			existing_sym.range = info.range
 			existing_sym.generic_placeholder_len = info.generic_placeholder_len
+			existing_sym.file_path = info.file_path
 			existing_sym.file_version = info.file_version
 		}
 
@@ -471,6 +472,7 @@ pub fn (mut store Store) find_symbol_by_type_node(node C.TSNode, src_text []byte
 				name: analyzer.anon_fn_prefix + store.anon_fn_counter.str()
 				file_path: store.cur_file_path.clone()
 				file_version: store.cur_version
+				is_top_level: true
 				kind: sym_kind
 				return_type: return_type
 			}
@@ -489,6 +491,7 @@ pub fn (mut store Store) find_symbol_by_type_node(node C.TSNode, src_text []byte
 	return store.find_symbol(module_name, symbol_name) or {
 		mut new_sym := Symbol{
 			name: symbol_name.clone()
+			is_top_level: true
 			file_path: os.join_path(store.get_module_path(module_name), 'placeholder.vv')
 			kind: sym_kind
 		}

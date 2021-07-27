@@ -30,6 +30,7 @@ fn (sr &SymbolRegistration) new_top_level_symbol(identifier_node C.TSNode, acces
 	mut symbol := &Symbol{
 		access: access
 		kind: kind
+		is_top_level: true
 		file_path: sr.store.cur_file_path.clone()
 		file_version: sr.store.cur_version
 	}
@@ -97,6 +98,7 @@ fn (mut sr SymbolRegistration) const_decl(const_node C.TSNode) ?[]&Symbol {
 			kind: .variable
 			access: access
 			range: spec_node.range()
+			is_top_level: true
 			file_path: sr.store.cur_file_path.clone()
 			file_version: sr.store.cur_version
 			return_type: sr.store.infer_value_type_from_node(spec_node.child_by_field_name('value'),
@@ -159,6 +161,7 @@ fn (mut sr SymbolRegistration) struct_field_decl(field_access SymbolAccess, fiel
 		range: field_name_node.range()
 		access: field_access
 		return_type: field_typ
+		is_top_level: true
 		file_path: sr.store.cur_file_path.clone()
 		file_version: sr.store.cur_version
 	}
@@ -232,6 +235,7 @@ fn (mut sr SymbolRegistration) enum_decl(enum_decl_node C.TSNode) ?&Symbol {
 			mut new_int_symbol := Symbol{
 				name: 'int', 
 				kind: .typedef
+				is_top_level: true
 				file_path: os.join_path(sr.store.auto_imports[''], 'placeholder.vv')
 			}
 			sr.store.register_symbol(mut new_int_symbol) or { analyzer.void_type }
@@ -243,6 +247,7 @@ fn (mut sr SymbolRegistration) enum_decl(enum_decl_node C.TSNode) ?&Symbol {
 			range: member_node.range()
 			access: access
 			return_type: int_type
+			is_top_level: true
 			file_path: sr.store.cur_file_path.clone()
 			file_version: sr.store.cur_version
 		}
@@ -447,6 +452,7 @@ fn (mut sr SymbolRegistration) extract_block(node C.TSNode, mut scope ScopeTree)
 					access: var_access
 					range: left.range()
 					return_type: right_type
+					is_top_level: false
 					file_path: sr.store.cur_file_path.clone()
 					file_version: sr.store.cur_version
 				}
@@ -481,6 +487,7 @@ fn extract_parameter_list(node C.TSNode, mut store Store, src_text []byte) []&Sy
 			range: param_name_node.range()
 			access: access
 			return_type: return_type
+			is_top_level: false
 			file_path: store.cur_file_path.clone()
 			file_version: store.cur_version
 		}
