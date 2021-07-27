@@ -614,7 +614,19 @@ pub fn (mut ss Store) infer_symbol_from_node(node C.TSNode, src_text []byte) ?&S
 					root_sym = root_sym.return_type
 				}
 				child_name := node.child_by_field_name('field').get_text(src_text)
-				return root_sym.children.get(child_name) or { analyzer.void_type }
+				return root_sym.children.get(child_name) or { 
+					if root_sym.kind == .ref || root_sym.kind == .chan_ || root_sym.kind == .optional {
+						root_sym = root_sym.parent
+					} else if root_sym.kind == .array_ {
+						root_sym = ss.find_symbol('', 'array') or { analyzer.void_type }
+					} else if root_sym.kind == .map_ {
+						root_sym = ss.find_symbol('', 'map') or { analyzer.void_type }
+					}
+
+					root_sym.children.get(child_name) or {
+						analyzer.void_type 
+					}
+				}
 			}
 			module_name = node.child_by_field_name('operand').get_text(src_text)
 			type_name = node.child_by_field_name('field').get_text(src_text)
