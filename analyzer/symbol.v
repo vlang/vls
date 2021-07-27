@@ -90,6 +90,7 @@ pub const void_type = &Symbol{
 	name: 'void'
 	kind: .void 
 	file_path: ''
+	file_version: 0
 	is_top_level: true
 }
 
@@ -108,7 +109,7 @@ pub mut:
 	sumtype_children_len    int
 	children                []&Symbol // methods, sum types, map types, optionals, struct fields, etc.
 	file_path               string [required] // required in order to register the symbol at its appropriate directory.
-	file_version            int = 1 // file version when the symbol was registered
+	file_version            int [required]// file version when the symbol was registered
 }
 
 const kinds_in_multi_return_to_be_excluded = [SymbolKind.function, .variable, .field]

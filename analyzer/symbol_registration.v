@@ -237,6 +237,7 @@ fn (mut sr SymbolRegistration) enum_decl(enum_decl_node C.TSNode) ?&Symbol {
 				kind: .typedef
 				is_top_level: true
 				file_path: os.join_path(sr.store.auto_imports[''], 'placeholder.vv')
+				file_version: 0
 			}
 			sr.store.register_symbol(mut new_int_symbol) or { analyzer.void_type }
 		}

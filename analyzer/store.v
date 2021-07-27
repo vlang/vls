@@ -493,6 +493,7 @@ pub fn (mut store Store) find_symbol_by_type_node(node C.TSNode, src_text []byte
 			name: symbol_name.clone()
 			is_top_level: true
 			file_path: os.join_path(store.get_module_path(module_name), 'placeholder.vv')
+			file_version: 0
 			kind: sym_kind
 		}
 

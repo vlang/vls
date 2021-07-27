@@ -68,6 +68,7 @@ pub fn register_builtin_symbols(mut ss Store, builtin_import &Import) {
 				is_top_level: true
 				children: [returned_sym]
 				file_path: os.join_path(builtin_path, 'array.vv')
+				file_version: 0
 			}
 
 			ss.register_symbol(mut array_sym) or {
