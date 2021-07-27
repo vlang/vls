@@ -132,15 +132,11 @@ pub fn (info &Symbol) gen_str() string {
 		}
 		.chan_ {
 			sb.write_string('chan ')
-			sb.write_string(info.children[0].str())
+			sb.write_string(info.parent.gen_str())
 		}
 		.optional {
 			sb.write_string('?')
-			if info.children.len >= 1 {
-				sb.write_string(info.children[0].gen_str())
-			} else {
-				sb.write_string('<invalid type>')
-			}
+			sb.write_string(info.parent.gen_str())
 		}
 		.map_, .array_, .variadic {
 			sb.write_string(info.name)

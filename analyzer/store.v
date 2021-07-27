@@ -177,14 +177,14 @@ pub fn (ss &Store) find_fn_symbol(module_name string, return_type &Symbol, param
 	return none
 }
 
-const kinds_to_be_returned = [SymbolKind.chan_, .array_, .map_, .ref]
+const container_symbol_kinds = [SymbolKind.chan_, .array_, .map_, .ref, .variadic, .optional, .multi_return]
 
 // register_symbol registers the given symbol
 pub fn (mut ss Store) register_symbol(mut info Symbol) ?&Symbol {
 	dir := os.dir(info.file_path)
 	defer { unsafe { dir.free() } }
 	mut existing_idx := ss.symbols[dir].index(info.name)
-	if existing_idx == -1 && info.kind != .placeholder {
+	if existing_idx == -1 && info.kind != .placeholder && info.kind !in container_symbol_kinds {
 		// find by row
 		existing_idx = ss.symbols[dir].index_by_row(info.file_path, info.range.start_point.row)
 	}
@@ -195,7 +195,7 @@ pub fn (mut ss Store) register_symbol(mut info Symbol) ?&Symbol {
 		mut existing_sym := ss.symbols[dir][existing_idx]
 
 		// Remove this?
-		if existing_sym.kind !in kinds_to_be_returned {
+		if existing_sym.kind !in container_symbol_kinds {
 			if (existing_sym.kind != .placeholder && existing_sym.kind == info.kind) && (existing_sym.file_path == info.file_path && existing_sym.file_version >= info.file_version) {
 				return report_error('Symbol already exists. (idx=${existing_idx}) (name="$existing_sym.name")', info.range)
 			}
@@ -499,7 +499,7 @@ pub fn (mut store Store) find_symbol_by_type_node(node C.TSNode, src_text []byte
 		}
 
 		match sym_kind {
-			.array_ {
+			.array_, .variadic {
 				mut el_sym := store.find_symbol_by_type_node(node.child_by_field_name('element'), src_text) ?
 				new_sym.add_child(mut el_sym, false) or {}
 			}
@@ -509,14 +509,13 @@ pub fn (mut store Store) find_symbol_by_type_node(node C.TSNode, src_text []byte
 				mut val_sym := store.find_symbol_by_type_node(node.child_by_field_name('value'), src_text) ?
 				new_sym.add_child(mut val_sym, false) or {}
 			}
-			.chan_, .ref, .optional, .variadic {
+			.chan_, .ref, .optional {
 				mut ref_sym := store.find_symbol_by_type_node(node.named_child(0), src_text) ?
-				new_sym.add_child(mut ref_sym, false) or {}
+				new_sym.parent = ref_sym
 			}
 			else {}
 		}
 
-		// eprintln(new_sym)
 		store.register_symbol(mut new_sym) or { analyzer.void_type }
 	}
 }
