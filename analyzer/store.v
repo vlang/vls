@@ -650,7 +650,13 @@ pub fn (mut ss Store) infer_symbol_from_node(node C.TSNode, src_text []byte) ?&S
 			}
 		}
 		'call_expression' {
-			return ss.infer_symbol_from_node(node.child_by_field_name('function'), src_text)
+			sym := ss.infer_symbol_from_node(node.child_by_field_name('function'), src_text) or {
+				analyzer.void_type
+			}
+			if sym.is_returnable() {
+				return sym.return_type
+			}
+			return sym
 		}
 		'parameter_declaration' {
 			mut parent := node.parent()
