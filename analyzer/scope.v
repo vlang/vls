@@ -63,11 +63,6 @@ pub fn (mut scope ScopeTree) register(info &Symbol) ? {
 	}
 
 	mut existing_idx := scope.symbols.index(info.name)
-	if existing_idx == -1 {
-		// find by row
-		existing_idx = scope.symbols.index_by_row(info.file_path, info.range.start_point.row)
-	}
-
 	if existing_idx != -1 {
 		mut existing_sym := scope.symbols[existing_idx]
 		// unsafe { scope.symbols[existing_idx].free() }
