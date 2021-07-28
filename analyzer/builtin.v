@@ -2,6 +2,8 @@ module analyzer
 
 import os
 
+const numeric_types = ['u8', 'u16', 'u32', 'u64' 'i8', 'i16', 'int', 'i64', 'f32', 'f64']
+
 pub fn register_builtin_symbols(mut ss Store, builtin_import &Import) {
 	builtin_path := builtin_import.path
 	placeholder_file_path := os.join_path(builtin_path, 'placeholder.vv')
@@ -43,7 +45,9 @@ pub fn register_builtin_symbols(mut ss Store, builtin_import &Import) {
 			name: type_name 
 			kind: .placeholder
 			access: .public
+			is_top_level: true
 			file_path: placeholder_file_path
+			file_version: if type_name in should_be_placeholders { -1 } else { 0 }
 		}
 
 		ss.register_symbol(mut builtin_sym) or {
@@ -60,11 +64,13 @@ pub fn register_builtin_symbols(mut ss Store, builtin_import &Import) {
 		if type_name == 'string' {
 			// register []string
 			mut array_sym := Symbol{
-				name: '[]' + returned_sym.name 
+				name: '[]' + type_name
 				kind: .array_
 				access: .public
+				is_top_level: true
 				children: [returned_sym]
 				file_path: os.join_path(builtin_path, 'array.vv')
+				file_version: 0
 			}
 
 			ss.register_symbol(mut array_sym) or {

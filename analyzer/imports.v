@@ -337,7 +337,11 @@ pub fn (mut store Store) import_modules(mut imports []&Import) {
 			full_path := os.join_path(new_import.path, file_name)
 			content := os.read_bytes(full_path) or { continue }
 			tree_from_import := parser.parse_string(content.bytestr())
-			store.set_active_file_path(full_path, 1)
+
+			// Set version to zero so that modules who are already opened
+			// in the editors can register symbols with scopes without
+			// getting "symbol exists" errors
+			store.set_active_file_path(full_path, 0)
 
 			// Import module but from different lookup oath other than the project
 			modules_from_dir := os.join_path(store.cur_dir, 'modules')

@@ -177,14 +177,14 @@ pub fn (ss &Store) find_fn_symbol(module_name string, return_type &Symbol, param
 	return none
 }
 
-const kinds_to_be_returned = [SymbolKind.chan_, .array_, .map_, .ref]
+const container_symbol_kinds = [SymbolKind.chan_, .array_, .map_, .ref, .variadic, .optional, .multi_return]
 
 // register_symbol registers the given symbol
 pub fn (mut ss Store) register_symbol(mut info Symbol) ?&Symbol {
 	dir := os.dir(info.file_path)
 	defer { unsafe { dir.free() } }
 	mut existing_idx := ss.symbols[dir].index(info.name)
-	if existing_idx == -1 && info.kind != .placeholder {
+	if existing_idx == -1 && info.kind != .placeholder && info.kind !in container_symbol_kinds {
 		// find by row
 		existing_idx = ss.symbols[dir].index_by_row(info.file_path, info.range.start_point.row)
 	}
@@ -193,10 +193,13 @@ pub fn (mut ss Store) register_symbol(mut info Symbol) ?&Symbol {
 	// the info.kind condition is used for typedefs with anon fn types
 	if existing_idx != -1 && (info.kind != .typedef && ss.symbols[dir][existing_idx].kind != .function_type) {
 		mut existing_sym := ss.symbols[dir][existing_idx]
+		if existing_sym.file_version == info.file_version && existing_sym.name == info.name && existing_sym.range.eq(info.range) && existing_sym.kind == info.kind {
+			return existing_sym
+		}
 
 		// Remove this?
-		if existing_sym.kind !in kinds_to_be_returned {
-			if existing_sym.kind != .placeholder && existing_sym.file_version >= info.file_version {
+		if existing_sym.kind !in container_symbol_kinds {
+			if (existing_sym.kind != .placeholder && existing_sym.kind == info.kind) && (existing_sym.file_path == info.file_path && existing_sym.file_version >= info.file_version) {
 				return report_error('Symbol already exists. (idx=${existing_idx}) (name="$existing_sym.name")', info.range)
 			}
 
@@ -218,6 +221,7 @@ pub fn (mut ss Store) register_symbol(mut info Symbol) ?&Symbol {
 			existing_sym.kind = info.kind
 			existing_sym.range = info.range
 			existing_sym.generic_placeholder_len = info.generic_placeholder_len
+			existing_sym.file_path = info.file_path
 			existing_sym.file_version = info.file_version
 		}
 
@@ -269,16 +273,27 @@ pub fn (ss &Store) get_symbols_by_file_path(file_path string) []&Symbol {
 		unsafe { dir.free() }
 	}
 
-	mut fetched_symbols := []&Symbol{}
 	if dir in ss.symbols {
-		for name, mut sym in ss.symbols[dir] {
+		return ss.symbols[dir].filter_by_file_path(file_path)
+	}
+
+	return []
+}
+
+// has_file_path checks if the data of a specific file_path already exists
+pub fn (ss &Store) has_file_path(file_path string) bool {
+	dir := os.dir(file_path)
+	defer {
+		unsafe { dir.free() }
+	}
+	if dir in ss.symbols {
+		for _, mut sym in ss.symbols[dir] {
 			if sym.file_path == file_path {
-				fetched_symbols << ss.symbols[dir][name]
+				return true
 			}
 		}
 	}
-
-	return fetched_symbols
+	return false
 }
 
 // delete removes the given path of a workspace/project if possible.
@@ -460,6 +475,7 @@ pub fn (mut store Store) find_symbol_by_type_node(node C.TSNode, src_text []byte
 				name: analyzer.anon_fn_prefix + store.anon_fn_counter.str()
 				file_path: store.cur_file_path.clone()
 				file_version: store.cur_version
+				is_top_level: true
 				kind: sym_kind
 				return_type: return_type
 			}
@@ -478,12 +494,14 @@ pub fn (mut store Store) find_symbol_by_type_node(node C.TSNode, src_text []byte
 	return store.find_symbol(module_name, symbol_name) or {
 		mut new_sym := Symbol{
 			name: symbol_name.clone()
+			is_top_level: true
 			file_path: os.join_path(store.get_module_path(module_name), 'placeholder.vv')
+			file_version: 0
 			kind: sym_kind
 		}
 
 		match sym_kind {
-			.array_ {
+			.array_, .variadic {
 				mut el_sym := store.find_symbol_by_type_node(node.child_by_field_name('element'), src_text) ?
 				new_sym.add_child(mut el_sym, false) or {}
 			}
@@ -493,14 +511,13 @@ pub fn (mut store Store) find_symbol_by_type_node(node C.TSNode, src_text []byte
 				mut val_sym := store.find_symbol_by_type_node(node.child_by_field_name('value'), src_text) ?
 				new_sym.add_child(mut val_sym, false) or {}
 			}
-			.chan_, .ref, .optional, .variadic {
+			.chan_, .ref, .optional {
 				mut ref_sym := store.find_symbol_by_type_node(node.named_child(0), src_text) ?
-				new_sym.add_child(mut ref_sym, false) or {}
+				new_sym.parent = ref_sym
 			}
 			else {}
 		}
 
-		// eprintln(new_sym)
 		store.register_symbol(mut new_sym) or { analyzer.void_type }
 	}
 }
@@ -532,9 +549,8 @@ pub fn (mut ss Store) infer_symbol_from_node(node C.TSNode, src_text []byte) ?&S
 			// find the symbol in scopes
 			// return void if none
 			ident_text := node.get_text(src_text)
-			return ss.find_symbol(module_name, ident_text) or {
-				selected_scope := ss.opened_scopes[ss.cur_file_path].innermost(node.start_byte(), node.end_byte())
-				selected_scope.get_symbol(ident_text) ?
+			return ss.opened_scopes[ss.cur_file_path].get_symbol_with_range(ident_text, node.range()) or {
+				ss.find_symbol(module_name, ident_text) ?
 			}
 		}
 		'field_identifier' {
@@ -554,8 +570,7 @@ pub fn (mut ss Store) infer_symbol_from_node(node C.TSNode, src_text []byte) ?&S
 			}
 
 			return ss.find_symbol(module_name, ident_text) or {
-				selected_scope := ss.opened_scopes[ss.cur_file_path].innermost(node.start_byte(), node.end_byte())
-				selected_scope.get_symbol(ident_text) ?
+				ss.opened_scopes[ss.cur_file_path].get_symbol_with_range(ident_text, node.range()) ?
 			}
 		}
 		'type_selector_expression' {
@@ -588,7 +603,7 @@ pub fn (mut ss Store) infer_symbol_from_node(node C.TSNode, src_text []byte) ?&S
 		'type_initializer' {
 			return ss.find_symbol_by_type_node(node.child_by_field_name('type'), src_text)
 		}
-		'type_identifier', 'array_type', 'map_type', 'pointer_type', 'variadic_type' {
+		'type_identifier', 'array_type', 'map_type', 'pointer_type', 'variadic_type', 'builtin_type' {
 			return ss.find_symbol_by_type_node(node, src_text)
 		}
 		'selector_expression' {
@@ -601,7 +616,19 @@ pub fn (mut ss Store) infer_symbol_from_node(node C.TSNode, src_text []byte) ?&S
 					root_sym = root_sym.return_type
 				}
 				child_name := node.child_by_field_name('field').get_text(src_text)
-				return root_sym.children.get(child_name) or { analyzer.void_type }
+				return root_sym.children.get(child_name) or { 
+					if root_sym.kind == .ref || root_sym.kind == .chan_ || root_sym.kind == .optional {
+						root_sym = root_sym.parent
+					} else if root_sym.kind == .array_ {
+						root_sym = ss.find_symbol('', 'array') or { analyzer.void_type }
+					} else if root_sym.kind == .map_ {
+						root_sym = ss.find_symbol('', 'map') or { analyzer.void_type }
+					}
+
+					root_sym.children.get(child_name) or {
+						analyzer.void_type 
+					}
+				}
 			}
 			module_name = node.child_by_field_name('operand').get_text(src_text)
 			type_name = node.child_by_field_name('field').get_text(src_text)
@@ -648,6 +675,23 @@ pub fn (mut ss Store) infer_symbol_from_node(node C.TSNode, src_text []byte) ?&S
 			child_sym := parent_sym.children.get(node.child_by_field_name('name').get_text(src_text)) ?
 			return child_sym
 		}
+		'function_declaration' {
+			receiver_node := node.child_by_field_name('receiver')
+			name_node := node.child_by_field_name('name')
+			mut receiver_param_count := u32(0)
+			if !receiver_node.is_null() {
+				receiver_param_count = receiver_node.named_child_count()
+			}
+
+			if receiver_param_count != 0 {
+				receiver_param_node := receiver_node.named_child(0)
+				parent_sym := ss.infer_symbol_from_node(receiver_param_node.child_by_field_name('type'), src_text) ?	
+				child_sym := parent_sym.children.get(name_node.get_text(src_text)) ?
+				return child_sym
+			} else {
+				return ss.infer_symbol_from_node(name_node, src_text)
+			}
+		}
 		else {
 			// eprintln(node_type)
 			// eprintln(node.parent().get_type())
@@ -683,10 +727,47 @@ pub fn (mut ss Store) infer_value_type_from_node(node C.TSNode, src_text []byte)
 		'interpreted_string_literal' {
 			type_name = 'string'
 		}
-		'identifier' {
-			got_sym := ss.infer_symbol_from_node(node, src_text) or { 
-				return analyzer.void_type 
+		'range' {
+			// TODO: detect starting and ending types
+			type_name = '[]int'
+		}
+		'binary_expression' {
+			// TODO:
+			left_node := node.child_by_field_name('left')
+			// op_node := node.child_by_field_name('operator')
+			// right_node := node.child_by_field_name('right')
+			mut left_sym := ss.infer_value_type_from_node(left_node, src_text)
+			if left_sym.is_returnable() {
+				left_sym = left_sym.return_type
 			}
+			// right_sym := ss.infer_value_type_from_node(right_node.get_text(src_text))
+			return left_sym
+		}
+		'unary_expression' {
+			operator_node := node.child_by_field_name('operator')
+			operand_node := node.child_by_field_name('operand')
+			mut op_sym := ss.infer_value_type_from_node(operand_node, src_text)
+			if op_sym.is_returnable() {
+				op_sym = op_sym.return_type
+			}
+
+			operator_type := operator_node.get_type()
+			if operator_type in ['+', '-', '~', '^', '*'] && op_sym.name !in analyzer.numeric_types {
+				return analyzer.void_type
+			} else if operator_type == '!' && op_sym.name != 'bool' {
+				return analyzer.void_type
+			} else if operator_type == '*' && op_sym.kind != .ref {
+				return analyzer.void_type
+			} else if operator_type == '&' && op_sym.count_ptr() > 2 {
+				return analyzer.void_type
+			} else if operator_type == '<-' && op_sym.kind != .chan_ {
+				return analyzer.void_type
+			} else {
+				return op_sym
+			}
+		}
+		'identifier', 'call_expression' {
+			got_sym := ss.infer_symbol_from_node(node, src_text) or { analyzer.void_type }
 			if got_sym.is_returnable() {
 				return got_sym.return_type
 			}
@@ -710,90 +791,70 @@ pub fn (mut ss Store) infer_value_type_from_node(node C.TSNode, src_text []byte)
 	}
 }
 
-fn within_range(node C.TSNode, range C.TSRange) bool {
-	if node.is_null() {
-		return false
-	}
-
-	return (node.start_byte() >= range.start_byte && node.start_byte() <= range.end_byte)
-		|| (node.end_byte() >= range.start_byte && node.end_byte() <= range.end_byte)
-}
-
-fn search_node(node C.TSNode, range C.TSRange) ?C.TSNode {
-	if within_range(node, range) {
-		return node
-	}
-
-	return search_node_in_children(node, range)
-}
-
-fn search_node_in_children(node C.TSNode, range C.TSRange) ?C.TSNode {
-	child_count := node.named_child_count()
-	for i in u32(0) .. child_count {
-		child := node.named_child(i)
-		return search_node(child, range) or { continue }
-	}
-
-	return none
-}
-
 // delete_symbol_at_node removes a specific symbol from a specific portion of the node
 pub fn (mut ss Store) delete_symbol_at_node(root_node C.TSNode, src []byte, at_range C.TSRange) bool {
-	node := search_node(root_node, at_range) or { return false }
-	node_type := node.get_type()
-	// TODO: parameters, variables, anyhing within the child
-	// eprintln(node_type)
-	if node_type == 'short_var_declaration' {
-		// left_expr_lists := node.child_by_field_name('left')
-		// left_child_count := left_expr_lists.named_child_count()
-		// eprintln(left_child_count)
+	unsafe { ss.opened_scopes[ss.cur_file_path].free() }
+	nodes := get_nodes_within_range(root_node, at_range) or { return false }
+	for node in nodes {
+		node_type := node.get_type()
+		match node_type {
+			'const_spec', 'global_var_spec', 'global_var_initializer', 'function_declaration', 
+			'interface_declaration', 'enum_declaration', 'type_declaration', 'struct_declaration' {
+				name_node := node.child_by_field_name('name')
+				symbol_name := name_node.get_text(src)
+				if name_node.is_null() || ss.messages.has_range(ss.cur_file_path, name_node.range()) {
+					continue
+				}
 
-		// root_scope := ss.opened_scopes[ss.cur_file_path] or {
-		// 	return false
-		// }
+				idx := ss.symbols[ss.cur_dir].index(symbol_name)
+				if idx != -1 && idx < ss.symbols[ss.cur_dir].len {
+					unsafe { ss.symbols[ss.cur_dir].free() }
+					ss.symbols[ss.cur_dir].delete(idx)
+				}
 
-		// mut scope := root_scope.innermost(at_range.start_byte)
-		// for i in u32(0) .. left_child_count {
-		// 	child_node := node.named_child(i)
-		// 	eprintln('deleting ${child_node.get_text(src)}')
-		// 	scope.remove(child_node.get_text(src))
-		// }
-		// return true
-		return false
-	}
+				if node_type == 'function_declaration' {
+					// TODO: find a way to remove scopes and update the position
+					// of adjacent ones
 
-	match node_type {
-		'const_spec', 'function_declaration', 'type_declaration', 'struct_declaration',
-		'interface_declaration', 'enum_declaration' {
-			name_node := node.child_by_field_name('name')
-			symbol_name := name_node.get_text(src)
-			if name_node.is_null() || ss.messages.has_range(ss.cur_file_path, name_node.range()) {
-				// eprintln('ignored')
-				return false
+					// params_list_node := node.child_by_field_name('parameters')
+					// body_node := node.child_by_field_name('body')
+
+					// mut start_byte := body_node.start_byte()
+					// end_byte := body_node.end_byte()
+
+					// param_count := params_list_node.named_child_count()
+					// if param_count != 0 {
+					// 	start_byte = params_list_node.named_child(0).start_byte()
+					// }
+				} else if node_type in ['const_spec', 'global_var_spec', 'global_var_initializer'] {
+					mut innermost := ss.opened_scopes[ss.cur_file_path].innermost(node.start_byte(), node.end_byte())
+					innermost.remove(symbol_name)
+				}
 			}
-
-			idx := ss.symbols[ss.cur_dir].index(symbol_name)
-			if idx != -1 {
-				unsafe { ss.symbols[ss.cur_dir].free() }
-				ss.symbols[ss.cur_dir].delete(idx)
-				// eprintln('deleted $symbol_name at $idx')
-				// eprintln(ss.symbols[ss.cur_dir])
-				return true
+			'short_var_declaration' {
+				mut innermost := ss.opened_scopes[ss.cur_file_path].innermost(node.start_byte(), node.end_byte())
+				left_side := node.child_by_field_name('left')
+				left_count := left_side.named_child_count()
+				for i in u32(0) .. left_count {
+					innermost.remove(left_side.named_child(i).get_text(src))
+				}
 			}
+			'import_declaration' {
+				mut imp_module := ss.find_import_by_position(node.range()) or {
+					continue
+				}
+
+				// if the current import node is not the same as before,
+				// untrack and remove the import entry asap
+				imp_module.untrack_file(ss.cur_file_path)				
+				
+				// let cleanup_imports do the job
+			}
+			'block' {
+				ss.opened_scopes[ss.cur_file_path].remove_child(node.start_byte(), node.end_byte())
+			}
+			else {}
 		}
-		'import_declaration' {
-			mut imp := ss.find_import_by_position(node.range()) or { return false }
-			imp.untrack_file(ss.cur_file_path)
-			// let cleanup_imports do the job
-		}
-		'source_file' {
-			child_node := search_node_in_children(node, at_range) or { return false }
-			return ss.delete_symbol_at_node(child_node, src, child_node.range())
-		}
-		'identifier' {
-			return ss.delete_symbol_at_node(node.parent(), src, node.parent().range())
-		}
-		else {}
 	}
 
 	return false

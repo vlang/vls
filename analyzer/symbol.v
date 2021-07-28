@@ -90,6 +90,8 @@ pub const void_type = &Symbol{
 	name: 'void'
 	kind: .void 
 	file_path: ''
+	file_version: 0
+	is_top_level: true
 }
 
 [heap]
@@ -102,11 +104,12 @@ pub mut:
 	parent                  &Symbol        = analyzer.void_type // parent is for typedefs, aliases
 	return_type             &Symbol        = analyzer.void_type // return_type is for functions and variables
 	language                SymbolLanguage = .v
+	is_top_level						bool [required]
 	generic_placeholder_len int
 	sumtype_children_len    int
-	children                []&Symbol // methods, sum types (soon), map types, optionals, struct fields, etc.
+	children                []&Symbol // methods, sum types, map types, optionals, struct fields, etc.
 	file_path               string [required] // required in order to register the symbol at its appropriate directory.
-	file_version            int = 1 // file version when the symbol was registered
+	file_version            int [required]// file version when the symbol was registered
 }
 
 const kinds_in_multi_return_to_be_excluded = [SymbolKind.function, .variable, .field]
@@ -132,15 +135,11 @@ pub fn (info &Symbol) gen_str() string {
 		}
 		.chan_ {
 			sb.write_string('chan ')
-			sb.write_string(info.children[0].str())
+			sb.write_string(info.parent.gen_str())
 		}
 		.optional {
 			sb.write_string('?')
-			if info.children.len >= 1 {
-				sb.write_string(info.children[0].gen_str())
-			} else {
-				sb.write_string('<invalid type>')
-			}
+			sb.write_string(info.parent.gen_str())
 		}
 		.map_, .array_, .variadic {
 			sb.write_string(info.name)
@@ -197,6 +196,10 @@ pub fn (info &Symbol) gen_str() string {
 			sb.write_string(info.return_type.name)
 		}
 		.typedef, .sumtype {
+			if info.kind == .typedef && info.parent.is_void() {
+				return info.name	
+			}
+
 			sb.write_string('type ')
 			sb.write_string(info.name)
 			sb.write_string(' = ')
@@ -256,6 +259,25 @@ pub fn (infos []&Symbol) index_by_row(file_path string, row u32) int {
 	}
 
 	return -1
+}
+
+pub fn (symbols []&Symbol) filter_by_file_path(file_path string) []&Symbol {
+	mut filtered := []&Symbol{}
+	for sym in symbols {
+		if sym.file_path == file_path {
+			filtered << sym
+		}
+
+		filtered_from_children := sym.children.filter_by_file_path(file_path)
+		for child_sym in filtered_from_children {
+			if filtered.exists(child_sym.name) {
+				continue
+			}
+			filtered << child_sym
+		}
+		unsafe{ filtered_from_children.free() }
+	}
+	return filtered
 }
 
 // pub fn (mut infos []&Symbol) remove_symbol_by_range(file_path string, range C.TSRange) {
@@ -334,6 +356,25 @@ pub fn (sym &Symbol) free() {
 		sym.children.free()
 		// sym.file_path.free()
 	}
+}
+
+fn (sym &Symbol) value_sym() &Symbol {
+	if sym.kind == .array_ {
+		return sym.children[0] or { analyzer.void_type }
+	} else if sym.kind == .map_ {
+		return sym.children[1] or { analyzer.void_type }
+	} else {
+		return analyzer.void_type
+	}
+}
+
+fn (sym &Symbol) count_ptr() int {
+	mut ptr_count := 0
+	mut starting_sym := sym
+	for !isnil(starting_sym) && starting_sym.kind == .ref {
+		ptr_count++
+	}
+	return ptr_count
 }
 
 // pub fn (ars ArraySymbol) str() string {

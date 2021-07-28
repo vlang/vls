@@ -32,18 +32,62 @@ fn (mut ls Vls) did_open(_ int, params string) {
 	src := did_open_params.text_document.text
 	uri := did_open_params.text_document.uri
 	// ls.log_message('opening $uri ...', .info)
-	ls.sources[uri] = File{ source: src.bytes(), uri: uri }
-	ls.trees[uri] = ls.parser.parse_string(src)
+	// if project is not opened, analyze all the files available
+	project_dir := uri.dir_path()
+	if uri.ends_with('.v') && project_dir != '.' && !ls.store.dependency_tree.has(project_dir) {
+		mut files := os.ls(project_dir) or { [] }
+		for file_name in files {
+			if !analyzer.should_analyze_file(file_name) {
+				continue
+			}
 
-	// V's interop with tree sitter's parse_string is buggy sometimes
-	// especially if the code is incomplete. It reattempts to re-parse
-	// an appropriate tree by reducing decrement the source length by 1
-	if !isnil(ls.trees[uri]) && ls.trees[uri].root_node().get_type() == 'ERROR' {
-		unsafe { ls.trees[uri].free() }
-		ls.trees[uri] = ls.parser.parse_string_with_old_tree_and_len(src, &C.TSTree(0), u32(src.len - 1))
+			full_path := os.join_path(project_dir, file_name)
+			file_uri := lsp.document_uri_from_path(full_path)
+
+			if file_uri != uri {
+				ls.sources[file_uri] = File{ 
+					uri: file_uri.clone(), 
+					source: os.read_bytes(full_path) or { [] } 
+				}
+				source_str := ls.sources[file_uri].source.bytestr()
+				ls.trees[file_uri] = ls.parser.parse_string(source_str)
+				unsafe { source_str.free() }
+			} else {
+				ls.sources[uri] = File{ source: src.bytes(), uri: uri }
+				ls.trees[uri] = ls.parser.parse_string(src)
+			}
+
+			// V's interop with tree sitter's parse_string is buggy sometimes
+			// especially if the code is incomplete. It reattempts to re-parse
+			// an appropriate tree by reducing decrement the source length by 1
+			if !isnil(ls.trees[file_uri]) && ls.trees[file_uri].root_node().get_type() == 'ERROR' {
+				unsafe { ls.trees[file_uri].free() }
+				ls.trees[file_uri] = ls.parser.parse_string_with_old_tree_and_len(src, &C.TSTree(0), u32(src.len - 1))
+			}
+
+			analyze(mut ls.store, ls.root_uri, ls.trees[file_uri], ls.sources[file_uri])
+			ls.show_diagnostics(file_uri)
+			
+			unsafe {
+				full_path.free()
+				file_uri.free()
+			}
+		}
+		ls.store.set_active_file_path(uri.path(), ls.sources[uri].version)
+		unsafe { files.free() }
+	} else if uri !in ls.sources && uri !in ls.trees {
+		ls.sources[uri] = File{ source: src.bytes(), uri: uri }
+		ls.trees[uri] = ls.parser.parse_string(src)
+		if !isnil(ls.trees[uri]) && ls.trees[uri].root_node().get_type() == 'ERROR' {
+			unsafe { ls.trees[uri].free() }
+			ls.trees[uri] = ls.parser.parse_string_with_old_tree_and_len(src, &C.TSTree(0), u32(src.len - 1))
+		}
+
+		if !ls.store.has_file_path(uri.path()) || uri.path() !in ls.store.opened_scopes {
+			analyze(mut ls.store, ls.root_uri, ls.trees[uri], ls.sources[uri])
+		}
+		ls.show_diagnostics(uri)
 	}
-	analyze(mut ls.store, ls.root_uri, ls.trees[uri], ls.sources[uri])
-	ls.show_diagnostics(uri)
 }
 
 [manualfree]
@@ -80,8 +124,9 @@ fn (mut ls Vls) did_change(_ int, params string) {
 
 		// remove immediately the symbol
 		if content_change.text.len == 0 && diff < 0 {
-			deleted := ls.store.delete_symbol_at_node(ls.trees[uri].root_node(), old_src,
-				
+			deleted := ls.store.delete_symbol_at_node(
+				ls.trees[uri].root_node(), 
+				old_src,
 				start_point: lsp_pos_to_tspoint(start_pos)
 				end_point: lsp_pos_to_tspoint(old_end_pos)
 				start_byte: u32(start_idx)
@@ -177,10 +222,16 @@ fn (mut ls Vls) did_close(_ int, params string) {
 	unsafe {
 		ls.sources[uri].free()
 		ls.trees[uri].free()
+		ls.store.opened_scopes[uri.path()].free()
 	}
 
-	ls.store.delete(uri.dir_path())
+	ls.sources.delete(uri)
+	ls.trees.delete(uri)
 	ls.store.opened_scopes.delete(uri.path())
+
+	if ls.sources.count(uri.dir()) == 0 {
+		ls.store.delete(uri.dir_path())
+	}
 
 	// NB: The diagnostics will be cleared if:
 	// - TODO: If a workspace has opened multiple programs with main() function and one of them is closed.

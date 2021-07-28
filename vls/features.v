@@ -69,14 +69,16 @@ fn (mut ls Vls) workspace_symbol(id int, _ string) {
 	for _, sym_arr in ls.store.symbols {
 		for sym in sym_arr {
 			uri := lsp.document_uri_from_path(sym.file_path)
-			if uri !in ls.trees {
+			if uri in ls.trees || uri.dir() == ls.root_uri {
+				sym_info := symbol_to_symbol_info(uri, sym) or { continue }
+				workspace_symbols << sym_info
+				for child_sym in sym.children {
+					child_sym_info := symbol_to_symbol_info(uri, child_sym) or { continue }
+					workspace_symbols << child_sym_info
+				}
+			} else {
 				unsafe { uri.free() }
-				continue
 			}
-
-			sym_info := symbol_to_symbol_info(uri, sym, '') or { continue }
-			workspace_symbols << sym_info
-			workspace_symbols << methods_to_symbol_infos(uri, sym)
 		}
 	}
 
@@ -84,21 +86,36 @@ fn (mut ls Vls) workspace_symbol(id int, _ string) {
 		id: id
 		result: workspace_symbols
 	})
+
+	unsafe{ workspace_symbols.free() }
 }
 
-fn symbol_to_symbol_info(uri lsp.DocumentUri, sym &analyzer.Symbol, prefix string) ?lsp.SymbolInformation {
+fn symbol_to_symbol_info(uri lsp.DocumentUri, sym &analyzer.Symbol) ?lsp.SymbolInformation {
+	if !sym.is_top_level {
+		return none
+	}
+	$if !test ? {
+		if uri.ends_with('.vv') && sym.kind != .function {
+			return none
+		}
+	}
 	mut kind := lsp.SymbolKind.null
 	match sym.kind {
-			.function { kind = .function }
+			.function { 
+				kind = if sym.kind == .function && !sym.parent.is_void() {
+					lsp.SymbolKind.method
+				} else {
+					lsp.SymbolKind.function
+				}
+			}
 			.struct_ { kind = .struct_ }
 			.enum_ { kind = .enum_ }
 			.typedef { kind = .type_parameter }
 			.interface_ { kind = .interface_ }
-			.field { kind = .field }
 			.variable { kind = .constant }
 		else { return none }
-	}
-
+	}	
+	prefix := if sym.kind == .function && !sym.parent.is_void() { sym.parent.name + '.' } else { '' }
 	return lsp.SymbolInformation{
 		name: prefix + sym.name
 		kind: kind
@@ -107,25 +124,6 @@ fn symbol_to_symbol_info(uri lsp.DocumentUri, sym &analyzer.Symbol, prefix strin
 			range: tsrange_to_lsp_range(sym.range)
 		}
 	}
-}
-
-fn methods_to_symbol_infos(uri lsp.DocumentUri, sym &analyzer.Symbol) []lsp.SymbolInformation {
-	mut symbol_infos := []lsp.SymbolInformation{cap: sym.children.len}
-	for child_sym in sym.children {
-		if child_sym.kind != .function {
-			continue
-		}
-
-		method_sym_info := symbol_to_symbol_info(uri, child_sym, '${sym.name}.') or {
-			continue
-		}
-
-		symbol_infos << lsp.SymbolInformation{
-			...method_sym_info,
-			kind: .method
-		}
-	}
-	return symbol_infos
 }
 
 fn (mut ls Vls) document_symbol(id int, params string) {
@@ -139,9 +137,8 @@ fn (mut ls Vls) document_symbol(id int, params string) {
 	retrieved_symbols := ls.store.get_symbols_by_file_path(uri.path())
 	mut document_symbols := []lsp.SymbolInformation{}
 	for sym in retrieved_symbols {
-		sym_info := symbol_to_symbol_info(uri, sym, '') or { continue }
+		sym_info := symbol_to_symbol_info(uri, sym) or { continue }
 		document_symbols << sym_info
-		document_symbols << methods_to_symbol_infos(uri, sym)
 	}
 
 	ls.send(jsonrpc.Response<[]lsp.SymbolInformation>{
@@ -164,30 +161,38 @@ fn (mut ls Vls) signature_help(id int, params string) {
 	}
 
 	// Fetch the node requested for completion.
-	uri := signature_params.text_document.uri.str()
+	uri := signature_params.text_document.uri
 	pos := signature_params.position
 	ctx := signature_params.context
-	source := ls.sources[uri].source
-	tree := ls.trees[uri]
+	file := ls.sources[uri]
+	source := file.source
+	tree := ls.trees[uri] or { 
+		ls.send_null(id)
+		return
+	}
 	off := compute_offset(source, pos.line, pos.character)
 	mut node := traverse_node(tree.root_node(), u32(off))
+	mut parent_node := node
 	if node.get_type() == 'argument_list' {
-		node = node.parent()
+		parent_node = node.parent()
+		node = node.prev_named_sibling()
 	}
 
 	// signature help supports function calls for now
 	// hence checking the node if it's a call_expression node.
-	if node.is_null() || node.get_type() != 'call_expression' {
+	if node.is_null() || parent_node.get_type() != 'call_expression' {
 		ls.send_null(id)
 		return
 	}
+
+	ls.store.set_active_file_path(uri.path(), file.version)
 
 	sym := ls.store.infer_symbol_from_node(node, source) or {
 		ls.send_null(id)
 		return
 	}
 
-	args_node := node.child_by_field_name('arguments')
+	args_node := parent_node.child_by_field_name('arguments')
 	// for retrigger, it utilizes the current signature help data
 	if ctx.is_retrigger {
 		mut active_sighelp := ctx.active_signature_help
@@ -212,10 +217,6 @@ fn (mut ls Vls) signature_help(id int, params string) {
 	
 	// create a signature help info based on the
 	// call expr info
-	// TODO: use string concat in the meantime as
-	// the msvc CI fails when using strings.builder
-	// as it produces bad output (in the case of msvc)
-	
 	mut param_infos := []lsp.ParameterInformation{}
 	for child_sym in sym.children {
 		if child_sym.kind != .variable {
@@ -961,74 +962,71 @@ fn (mut ls Vls) hover(id int, params string) {
 
 	uri := hover_params.text_document.uri
 	pos := hover_params.position
-
-	tree := ls.trees[uri]
-	source := ls.sources[uri].source
-	offset := compute_offset(source, pos.line, pos.character)
-	mut node := traverse_node(tree.root_node(), u32(offset))
-	mut original_range := node.range()
-	node_type := node.get_type()
-
-	if node.is_null() {
+	tree := ls.trees[uri] or { 
 		ls.send_null(id)
 		return
 	}
+	file := ls.sources[uri]
+	source := file.source
+	offset := compute_offset(source, pos.line, pos.character)
+	node := traverse_node(tree.root_node(), u32(offset))
 
-	if node_type == 'module_clause' {
-		ls.send(jsonrpc.Response<lsp.Hover>{
-			id: id
-			result: lsp.Hover {
-				contents: lsp.v_marked_string(node.get_text(source))
-				range: tsrange_to_lsp_range(node.range())
-			}	
-		})
-		return
-	} else if node_type == 'import_path' {
-		found_imp := ls.store.find_import_by_position(node.range()) or {
-			ls.send_null(id)
-			return
-		}
-
-		ls.send(jsonrpc.Response<lsp.Hover>{
-			id: id
-			result: lsp.Hover {
-				contents: lsp.v_marked_string('import ${found_imp.module_name} as ' + found_imp.aliases[uri.path()] or { found_imp.module_name })
-				range: tsrange_to_lsp_range(found_imp.ranges[uri.path()])
-			}	
-		})
-		return
-	} else if node.parent().is_error() || node.parent().is_missing() {
+	ls.store.set_active_file_path(uri.path(), file.version)
+	hover_data := get_hover_data(mut ls.store, node, uri, source, u32(offset)) or {
 		ls.send_null(id)
 		return
+	}
+	
+	ls.send(jsonrpc.Response<lsp.Hover>{
+		id: id
+		result: hover_data
+	})
+}
+
+fn get_hover_data(mut store analyzer.Store, node C.TSNode, uri lsp.DocumentUri, source []byte, offset u32) ?lsp.Hover {
+	node_type := node.get_type()
+	if node.is_null() || node_type == 'comment' {
+		return none
+	}
+
+	mut original_range := node.range()
+	// eprintln('$node_type | ${node.get_text(source)}')
+	if node_type == 'module_clause' {
+		return lsp.Hover{
+			contents: lsp.v_marked_string(node.get_text(source))
+			range: tsrange_to_lsp_range(node.range())
+		}
+	} else if node_type == 'import_path' {
+		found_imp := store.find_import_by_position(node.range()) ?
+		return lsp.Hover{
+			contents: lsp.v_marked_string('import ${found_imp.module_name} as ' + found_imp.aliases[uri.path()] or { found_imp.module_name })
+			range: tsrange_to_lsp_range(found_imp.ranges[uri.path()])
+		}	
+	} else if node.parent().is_error() || node.parent().is_missing() {
+		return none
 	}
 
 	if node_type != 'type_selector_expression' && node.named_child_count() != 0 {
 		original_range = node.first_named_child_for_byte(u32(offset)).range()
 	}
 
-	sym := ls.store.infer_symbol_from_node(node, source) or {
-		eprintln(err)
-		analyzer.void_type
+	mut sym := store.infer_symbol_from_node(node, source) or { analyzer.void_type }
+	if isnil(sym) || sym.is_void() {
+		closest_parent := closest_symbol_node_parent(node)
+		sym = store.infer_symbol_from_node(closest_parent, source) ?
 	}
 
-	if isnil(sym) || sym.is_void() {
-		ls.send_null(id)
-		return
-	}
+	// eprintln('$node_type | ${node.get_text(source)} | $sym')
 
 	// Send null if range has zero-start and end points
 	if sym.range.start_point.row == 0 && sym.range.start_point.column == 0 && sym.range.start_point.eq(sym.range.end_point) {
-		ls.send_null(id)
-		return
+		return none
 	}
 
-	ls.send(jsonrpc.Response<lsp.Hover>{
-		id: id
-		result: lsp.Hover {
-			contents: lsp.v_marked_string(sym.gen_str())
-			range: tsrange_to_lsp_range(original_range)
-		}	
-	})
+	return lsp.Hover{
+		contents: lsp.v_marked_string(sym.gen_str())
+		range: tsrange_to_lsp_range(original_range)
+	}	
 }
 
 [manualfree]
@@ -1040,7 +1038,10 @@ fn (mut ls Vls) folding_range(id int, params string) {
 		return
 	}
 	uri := folding_range_params.text_document.uri
-	tree := ls.trees[uri]
+	tree := ls.trees[uri] or { 
+		ls.send_null(id)
+		return
+	}
 
 	root_node := tree.root_node()
 
@@ -1089,18 +1090,22 @@ fn (mut ls Vls) definition(id int, params string) {
 
 	uri := goto_definition_params.text_document.uri
 	pos := goto_definition_params.position
-	source := ls.sources[uri].source
-	tree := ls.trees[uri]
+	file := ls.sources[uri]
+	source := file.source
+	tree := ls.trees[uri] or { 
+		ls.send_null(id)
+		return
+	}
 	offset := compute_offset(source, pos.line, pos.character)
 	mut node := traverse_node(tree.root_node(), u32(offset))
 	mut original_range := node.range()
 	node_type := node.get_type()
-
 	if node.is_null() || (node.parent().is_error() || node.parent().is_missing()) {
 		ls.send_null(id)
 		return
 	}
 
+	ls.store.set_active_file_path(uri.path(), file.version)
 	sym := ls.store.infer_symbol_from_node(node, source) or { analyzer.void_type }
 	if isnil(sym) || sym.is_void() {
 		ls.send_null(id)

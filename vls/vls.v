@@ -273,7 +273,7 @@ fn (mut ls Vls) send_null(id int) {
 }
 
 fn monitor_changes(mut ls Vls) {
-	// This is for debouncing/throttling analysis
+	// This is for debouncing analysis
 	for {
 		select {
 			a := <-ls.typing_ch {
@@ -282,12 +282,6 @@ fn monitor_changes(mut ls Vls) {
 			50 * time.millisecond {
 				if !ls.is_typing {
 					continue
-				}
-				
-				if ls.store.cur_file_path in ls.store.opened_scopes {
-					unsafe {
-						ls.store.opened_scopes[ls.store.cur_file_path].free()
-					}
 				}
 
 				uri := lsp.document_uri_from_path(ls.store.cur_file_path)
