@@ -648,13 +648,7 @@ pub fn (mut ss Store) infer_symbol_from_node(node C.TSNode, src_text []byte) ?&S
 			}
 		}
 		'call_expression' {
-			sym := ss.infer_symbol_from_node(node.child_by_field_name('function'), src_text) or {
-				analyzer.void_type
-			}
-			if sym.is_returnable() {
-				return sym.return_type
-			}
-			return sym
+			return ss.infer_symbol_from_node(node.child_by_field_name('function'), src_text)
 		}
 		'parameter_declaration' {
 			mut parent := node.parent()
@@ -769,10 +763,8 @@ pub fn (mut ss Store) infer_value_type_from_node(node C.TSNode, src_text []byte)
 				return op_sym
 			}
 		}
-		'identifier' {
-			got_sym := ss.infer_symbol_from_node(node, src_text) or { 
-				return analyzer.void_type 
-			}
+		'identifier', 'call_expression' {
+			got_sym := ss.infer_symbol_from_node(node, src_text) or { analyzer.void_type }
 			if got_sym.is_returnable() {
 				return got_sym.return_type
 			}
