@@ -193,6 +193,9 @@ pub fn (mut ss Store) register_symbol(mut info Symbol) ?&Symbol {
 	// the info.kind condition is used for typedefs with anon fn types
 	if existing_idx != -1 && (info.kind != .typedef && ss.symbols[dir][existing_idx].kind != .function_type) {
 		mut existing_sym := ss.symbols[dir][existing_idx]
+		if existing_sym.file_version == info.file_version && existing_sym.name == info.name && existing_sym.range.eq(info.range) && existing_sym.kind == info.kind {
+			return existing_sym
+		}
 
 		// Remove this?
 		if existing_sym.kind !in container_symbol_kinds {
