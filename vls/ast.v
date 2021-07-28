@@ -4,6 +4,7 @@ module vls
 
 // any node that is separated by a comma or other symbol
 const	list_node_types = ['expression_list', 'identifier_list', 'argument_list', 'array']
+const other_node_types = ['if_expression', 'for_statement', 'return_statement', 'for_in_operator', 'binary_expression', 'unary_expression']
 
 fn traverse_node(root_node C.TSNode, offset u32) C.TSNode {
 	root_type := root_node.get_type()
@@ -14,7 +15,7 @@ fn traverse_node(root_node C.TSNode, offset u32) C.TSNode {
 		return root_node
 	}
 
-	if (!root_type.ends_with('_declaration') && root_type !in list_node_types) && (child_type.ends_with('identifier') || child_type == 'builtin_type') {
+	if (!root_type.ends_with('_declaration') && root_type !in list_node_types && root_type !in other_node_types) && (child_type.ends_with('identifier') || child_type == 'builtin_type') {
 		if root_type == 'selector_expression' {
 			root_children_count := root_node.named_child_count()
 			for i := u32(0); i < root_children_count; i++ {
