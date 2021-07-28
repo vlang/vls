@@ -736,6 +736,41 @@ pub fn (mut ss Store) infer_value_type_from_node(node C.TSNode, src_text []byte)
 			// TODO: detect starting and ending types
 			type_name = '[]int'
 		}
+		'binary_expression' {
+			// TODO:
+			left_node := node.child_by_field_name('left')
+			// op_node := node.child_by_field_name('operator')
+			// right_node := node.child_by_field_name('right')
+			mut left_sym := ss.infer_value_type_from_node(left_node, src_text)
+			if left_sym.is_returnable() {
+				left_sym = left_sym.return_type
+			}
+			// right_sym := ss.infer_value_type_from_node(right_node.get_text(src_text))
+			return left_sym
+		}
+		'unary_expression' {
+			operator_node := node.child_by_field_name('operator')
+			operand_node := node.child_by_field_name('operand')
+			mut op_sym := ss.infer_value_type_from_node(operand_node, src_text)
+			if op_sym.is_returnable() {
+				op_sym = op_sym.return_type
+			}
+
+			operator_type := operator_node.get_type()
+			if operator_type in ['+', '-', '~', '^', '*'] && op_sym.name !in analyzer.numeric_types {
+				return analyzer.void_type
+			} else if operator_type == '!' && op_sym.name != 'bool' {
+				return analyzer.void_type
+			} else if operator_type == '*' && op_sym.kind != .ref {
+				return analyzer.void_type
+			} else if operator_type == '&' && op_sym.count_ptr() > 2 {
+				return analyzer.void_type
+			} else if operator_type == '<-' && op_sym.kind != .chan_ {
+				return analyzer.void_type
+			} else {
+				return op_sym
+			}
+		}
 		'identifier' {
 			got_sym := ss.infer_symbol_from_node(node, src_text) or { 
 				return analyzer.void_type 
