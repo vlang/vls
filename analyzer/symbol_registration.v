@@ -420,16 +420,13 @@ fn (mut sr SymbolRegistration) short_var_decl(var_decl C.TSNode) ?[]&Symbol {
 	left_len := left_expr_lists.named_child_count()
 	right_len := right_expr_lists.named_child_count()
 
-
 	if left_len == right_len {
 		mut vars := []&Symbol{cap: int(left_len)}
-
 		for j in 0 .. left_len {
 			mut var_access := SymbolAccess.private
 
 			left := left_expr_lists.named_child(j)
 			right := right_expr_lists.named_child(j)
-
 			prev_left := left.prev_sibling()
 			if !prev_left.is_null() && prev_left.get_type() == 'mut' {
 				var_access = .private_mutable
@@ -501,7 +498,7 @@ fn (mut sr SymbolRegistration) for_statement(for_stmt_node C.TSNode) ? {
 				}
 
 				mut end_idx := if left_count >= 2 { u32(1) } else { u32(0) }
-				if right_sym.kind == .array_ || right_sym.kind == .map_ {
+				if right_sym.kind == .array_ || right_sym.kind == .map_ || right_sym.name == 'string' {
 					if left_count == 2 {
 						idx_node := left_node.named_child(end_idx - 1)
 						mut return_sym := sr.store.find_symbol('', 'int') or { analyzer.void_type }
@@ -523,12 +520,17 @@ fn (mut sr SymbolRegistration) for_statement(for_stmt_node C.TSNode) ? {
 					}
 
 					value_node := left_node.named_child(end_idx)
+					mut return_type := right_sym.value_sym()
+					if right_sym.name == 'string' {
+						return_type = sr.store.find_symbol('', 'byte') or { analyzer.void_type }
+					}
+					
 					mut value_sym := Symbol{
 						name: value_node.get_text(sr.src_text)
 						kind: .variable
 						range: value_node.range()
 						is_top_level: false
-						return_type: right_sym.value_sym()
+						return_type: return_type
 						file_path: sr.store.cur_file_path
 						file_version: sr.store.cur_version
 					}
