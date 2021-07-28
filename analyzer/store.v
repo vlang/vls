@@ -546,8 +546,7 @@ pub fn (mut ss Store) infer_symbol_from_node(node C.TSNode, src_text []byte) ?&S
 			// find the symbol in scopes
 			// return void if none
 			ident_text := node.get_text(src_text)
-			selected_scope := ss.opened_scopes[ss.cur_file_path].innermost(node.start_byte(), node.end_byte())
-			return selected_scope.get_symbol(ident_text) or {
+			return ss.opened_scopes[ss.cur_file_path].get_symbol_with_range(ident_text, node.range()) or {
 				ss.find_symbol(module_name, ident_text) ?
 			}
 		}
@@ -568,8 +567,7 @@ pub fn (mut ss Store) infer_symbol_from_node(node C.TSNode, src_text []byte) ?&S
 			}
 
 			return ss.find_symbol(module_name, ident_text) or {
-				selected_scope := ss.opened_scopes[ss.cur_file_path].innermost(node.start_byte(), node.end_byte())
-				selected_scope.get_symbol(ident_text) ?
+				ss.opened_scopes[ss.cur_file_path].get_symbol_with_range(ident_text, node.range()) ?
 			}
 		}
 		'type_selector_expression' {

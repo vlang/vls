@@ -158,3 +158,30 @@ pub fn (mut scope ScopeTree) remove(name string) bool {
 	scope.symbols.delete(idx)
 	return true
 }
+
+// get_symbols before returns a list of symbols that are available before
+// the target byte offset
+pub fn (scope &ScopeTree) get_symbols_before(target_byte u32) []&Symbol {
+	mut selected_scope := scope.innermost(target_byte, target_byte)
+	mut symbols := []&Symbol{}
+	for !isnil(selected_scope) {
+		for sym in selected_scope.symbols {
+			if sym.range.start_byte <= target_byte && sym.range.end_byte <= target_byte {
+				symbols << sym
+			}
+		}
+		selected_scope = selected_scope.parent
+	}
+	return symbols
+}
+
+// get_symbol returns a symbol from a specific range
+pub fn (scope &ScopeTree) get_symbol_with_range(name string, range C.TSRange) ?&Symbol {
+	if isnil(scope) {
+		return none
+	}
+
+	symbols := scope.get_symbols_before(range.end_byte)
+	defer { unsafe { symbols.free() } }
+	return symbols.get(name)
+}
