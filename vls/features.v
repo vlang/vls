@@ -172,13 +172,15 @@ fn (mut ls Vls) signature_help(id int, params string) {
 	}
 	off := compute_offset(source, pos.line, pos.character)
 	mut node := traverse_node(tree.root_node(), u32(off))
+	mut parent_node := node
 	if node.get_type() == 'argument_list' {
-		node = node.parent()
+		parent_node = node.parent()
+		node = node.prev_named_sibling()
 	}
 
 	// signature help supports function calls for now
 	// hence checking the node if it's a call_expression node.
-	if node.is_null() || node.get_type() != 'call_expression' {
+	if node.is_null() || parent_node.get_type() != 'call_expression' {
 		ls.send_null(id)
 		return
 	}
@@ -190,7 +192,7 @@ fn (mut ls Vls) signature_help(id int, params string) {
 		return
 	}
 
-	args_node := node.child_by_field_name('arguments')
+	args_node := parent_node.child_by_field_name('arguments')
 	// for retrigger, it utilizes the current signature help data
 	if ctx.is_retrigger {
 		mut active_sighelp := ctx.active_signature_help
@@ -215,10 +217,6 @@ fn (mut ls Vls) signature_help(id int, params string) {
 	
 	// create a signature help info based on the
 	// call expr info
-	// TODO: use string concat in the meantime as
-	// the msvc CI fails when using strings.builder
-	// as it produces bad output (in the case of msvc)
-	
 	mut param_infos := []lsp.ParameterInformation{}
 	for child_sym in sym.children {
 		if child_sym.kind != .variable {
