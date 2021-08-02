@@ -1,7 +1,10 @@
 # Derived from: https://github.com/vlang/v/blob/master/.github/workflows/binary_artifact.yml
 name: Build and release pre-built binaries (Dev build)
 
-on: push
+on: 
+  push:
+    branches:
+      - use-tree-sitter
 
 jobs:
   build-linux-x64:
