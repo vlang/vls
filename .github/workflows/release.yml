@@ -3,13 +3,15 @@ name: Build and release pre-built binaries (Dev build)
 
 on: 
   push:
-    branches:
-      - use-tree-sitter
+    # branches:
+      # - use-tree-sitter
 
 jobs:
   build-linux-x64:
     runs-on: ubuntu-20.04
     timeout-minutes: 30
+    env:
+      VFLAGS: -cc gcc
     steps:
       - name: Checkout V
         uses: actions/checkout@v2
@@ -34,6 +36,8 @@ jobs:
           path: ./vls_linux_x64
   build-macos-x64:
     runs-on: macos-latest
+    env:
+      VFLAGS: -cc clang
     steps:
       - name: Checkout V
         uses: actions/checkout@v2
@@ -84,6 +88,8 @@ jobs:
   build-windows-x64:
     runs-on: ubuntu-20.04
     timeout-minutes: 30
+    env:
+        VFLAGS: -cc gcc
     steps:
       - name: Set up MinGW
         uses: egor-tensin/setup-mingw@v2
