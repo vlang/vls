@@ -1,10 +1,7 @@
 # Derived from: https://github.com/vlang/v/blob/master/.github/workflows/binary_artifact.yml
-name: Build and release pre-built binaries
+name: Build and release pre-built binaries (Dev build)
 
-# on:
-#   push:
-#     tags:
-#       - 0.**
+on: push
 
 jobs:
   build-linux-x64:
@@ -23,7 +20,10 @@ jobs:
       - name: Build local v
         run: make -j4
       - name: Compile VLS
-        run: ./v -prod -gc boehm -cflags -static -o vls_linux_x64 vls/cmd/vls
+        run: |
+          cd vls
+          export VLS_BUILD_COMMIT=$(git rev-parse --short HEAD)
+          ../v -prod -d with_build_commit -gc boehm -cflags -static -o vls_linux_x64 cmd/vls
       - name: Create binary only artifact
         uses: actions/upload-artifact@v2
         with:
@@ -44,7 +44,10 @@ jobs:
       - name: Build local v
         run: make -j4
       - name: Compile VLS
-        run: ./v -prod -gc boehm -cflags -static -o vls_macos_x64 vls/cmd/vls
+        run: | 
+          cd vls
+          export VLS_BUILD_COMMIT=$(git rev-parse --short HEAD)
+          ../v -prod -d with_build_commit -gc boehm -cflags -static -o vls_macos_x64 cmd/vls
       - name: Create binary only artifact
         uses: actions/upload-artifact@v2
         with:
@@ -95,37 +98,19 @@ jobs:
       - name: Build local v
         run: make -j4
       - name: Cross-compile VLS to Windows
-        run: ./v -os windows -gc boehm -cflags -static -o vls_win_x64.exe vls/cmd/vls
+        run: |
+          cd vls
+          export VLS_BUILD_COMMIT=$(git rev-parse --short HEAD)
+          ../v -d with_build_commit -os windows -gc boehm -cflags -static -o vls_win_x64.exe cmd/vls
       - name: Create binary only artifact
         uses: actions/upload-artifact@v2
         with:
           name: windows_x64
           path: ./vls_win_x64.exe
 
-  release:
+  pre-release:
     name: Create Github Release
     needs: [build-linux-x64, build-windows-x64, build-macos-x64]
-    runs-on: ubuntu-20.04
-    steps:
-      - name: Get short tag name
-        uses: jungwinter/split@v1
-        id: split
-        with:
-          msg: ${{ github.ref }}
-          seperator: /
-      - name: Create Release
-        id: create_release
-        uses: ncipollo/release-action@v1
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          tag: ${{ steps.split.outputs._2 }}
-          name: ${{ steps.split.outputs._2 }}
-          commit: ${{ github.sha }}
-          draft: false
-          prerelease: false
-
-  publish:
-    needs: [release]
     runs-on: ubuntu-20.04
     strategy:
       matrix:
@@ -138,26 +123,21 @@ jobs:
         with:
           name: ${{ matrix.version }}
           path: ./${{ matrix.version }}
-      - name: Get short tag name
-        uses: jungwinter/split@v1
-        id: split
+      - uses: "marvinpinto/action-automatic-releases@latest"
+        name: Create Release
+        id: create_release
         with:
-          msg: ${{ github.ref }}
-          seperator: /
-      - name: Get release
-        id: get_release_info
-        uses: leahlundqvist/get-release@v1.3.1
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        with:
-          tag_name: ${{ steps.split.outputs._2 }}
+          repo_token: "${{ secrets.GITHUB_TOKEN }}"
+          automatic_release_tag: "latest"
+          prerelease: true
+          title: "Latest Development Build"
       - name: Upload Release Asset
-        id: upload-release-asset
+        id: upload_release_asset
         uses: actions/upload-release-asset@v1.0.1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          upload_url: ${{ steps.get_release_info.outputs.upload_url }}
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
           asset_path: ./${{ matrix.version }}/${{ matrix.filename }}
-          asset_name: vls_${{ matrix.filename }}
+          asset_name: ${{ matrix.filename }}
           asset_content_type: application/octet-stream
