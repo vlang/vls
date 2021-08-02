@@ -89,17 +89,23 @@ jobs:
           name: windows_x64
           path: ./vls/vls_win_x64.exe
 
+  # Not g
   pre-release:
     name: Create Github Release
     needs: [build-linux-x64, build-windows-x64]
     runs-on: ubuntu-20.04
     steps:
       - uses: actions/checkout@v1
-      - name: Fetch artifacts
+      - name: Fetch linux_x64
         uses: actions/download-artifact@v1
         with:
-          name: ${{ matrix.version }}
-          path: ./${{ matrix.version }}
+          name: linux_x64
+          path: ./linux_x64
+      - name: Fetch windows_x64
+        uses: actions/download-artifact@v1
+        with:
+          name: windows_x64
+          path: ./windows_x64
       - uses: "marvinpinto/action-automatic-releases@latest"
         name: Create Release and Upload Assets
         id: create_release
