@@ -105,20 +105,13 @@ jobs:
           name: ${{ matrix.version }}
           path: ./${{ matrix.version }}
       - uses: "marvinpinto/action-automatic-releases@latest"
-        name: Create Release
+        name: Create Release and Upload Assets
         id: create_release
         with:
           repo_token: "${{ secrets.GITHUB_TOKEN }}"
           automatic_release_tag: "latest"
           prerelease: true
           title: "Latest Development Build"
-      - name: Upload Release Asset
-        id: upload_release_asset
-        uses: actions/upload-release-asset@v1.0.1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./${{ matrix.version }}/${{ matrix.filename }}
-          asset_name: ${{ matrix.filename }}
-          asset_content_type: application/octet-stream
+          files:
+            - ./vls/windows_x64/vls_windows_x64.exe
+            - ./vls/linux_x64/vls_linux_x64.exe
