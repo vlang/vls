@@ -13,22 +13,22 @@ jobs:
     env:
       VFLAGS: -cc gcc
     steps:
-      - name: Checkout V
-        uses: actions/checkout@v2
+      - name: Install Boehm GC
+        run: sudo apt-get install libgc-dev
+      - name: Set up V version latest
+        uses: nocturlab/setup-vlang-action@v1
         with:
-          repository: vlang/v
+          v-version: latest
       - uses: actions/checkout@v2
         with:
           path: vls
       - name: Clone tree-sitter-v to ~/.vmodules/tree_sitter_v
         run: git clone --depth 1 https://github.com/nedpals/tree-sitter-v ~/.vmodules/tree_sitter_v
-      - name: Build local v
-        run: make -j4
       - name: Compile VLS
         run: |
           cd vls
           export VLS_BUILD_COMMIT=$(git rev-parse --short HEAD)
-          ../v -prod -d with_build_commit -gc boehm -cflags -static -o vls_linux_x64 cmd/vls
+          v -prod -d with_build_commit -gc boehm -cflags -static -o vls_linux_x64 cmd/vls
       - name: Create binary only artifact
         uses: actions/upload-artifact@v2
         with:
@@ -38,23 +38,22 @@ jobs:
     runs-on: macos-latest
     env:
       VFLAGS: -cc clang
+      LDFLAGS: -L/usr/lib -lpthread
     steps:
-      - name: Checkout V
-        uses: actions/checkout@v2
+      - name: Set up V version latest
+        uses: nocturlab/setup-vlang-action@v1
         with:
-          repository: vlang/v
+          v-version: latest
       - uses: actions/checkout@v2
         with:
           path: vls
       - name: Clone tree-sitter-v to ~/.vmodules/tree_sitter_v
         run: git clone --depth 1 https://github.com/nedpals/tree-sitter-v ~/.vmodules/tree_sitter_v
-      - name: Build local v
-        run: make -j4
       - name: Compile VLS
         run: | 
           cd vls
           export VLS_BUILD_COMMIT=$(git rev-parse --short HEAD)
-          ../v -prod -d with_build_commit -gc boehm -cflags -static -o vls_macos_x64 cmd/vls
+          v -prod -d with_build_commit -gc boehm -cflags -static -o vls_macos_x64 cmd/vls
       - name: Create binary only artifact
         uses: actions/upload-artifact@v2
         with:
@@ -95,22 +94,20 @@ jobs:
         uses: egor-tensin/setup-mingw@v2
         with:
           platform: x64
-      - name: Checkout V
-        uses: actions/checkout@v2
+      - name: Set up V version latest
+        uses: nocturlab/setup-vlang-action@v1
         with:
-          repository: vlang/v
+          v-version: latest
       - uses: actions/checkout@v2
         with:
           path: vls
       - name: Clone tree-sitter-v to ~/.vmodules/tree_sitter_v
         run: git clone --depth 1 https://github.com/nedpals/tree-sitter-v ~/.vmodules/tree_sitter_v
-      - name: Build local v
-        run: make -j4
       - name: Cross-compile VLS to Windows
         run: |
           cd vls
           export VLS_BUILD_COMMIT=$(git rev-parse --short HEAD)
-          ../v -d with_build_commit -os windows -gc boehm -cflags -static -o vls_win_x64.exe cmd/vls
+          v -d with_build_commit -os windows -gc boehm -cflags -static -o vls_win_x64.exe cmd/vls
       - name: Create binary only artifact
         uses: actions/upload-artifact@v2
         with:
