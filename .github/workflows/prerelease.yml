@@ -1,10 +1,10 @@
 # Derived from: https://github.com/vlang/v/blob/master/.github/workflows/binary_artifact.yml
 name: Build and release pre-built binaries (Dev build)
 
-on: 
+on:
   push:
     # branches:
-      # - use-tree-sitter
+    # - use-tree-sitter
 
 jobs:
   build-linux-x64:
@@ -63,7 +63,7 @@ jobs:
     runs-on: ubuntu-20.04
     timeout-minutes: 30
     env:
-        VFLAGS: -cc gcc
+      VFLAGS: -cc gcc
     steps:
       - name: Set up MinGW
         uses: egor-tensin/setup-mingw@v2
