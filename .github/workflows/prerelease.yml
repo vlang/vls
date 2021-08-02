@@ -87,7 +87,7 @@ jobs:
         uses: actions/upload-artifact@v2
         with:
           name: windows_x64
-          path: ./vls/vls_win_x64.exe
+          path: ./vls/vls_windows_x64.exe
 
   # Not g
   pre-release:
