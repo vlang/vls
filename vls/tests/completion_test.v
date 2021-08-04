@@ -46,6 +46,10 @@ const completion_inputs = map{
 		context: lsp.CompletionContext{.invoked, ''}
 		position: lsp.Position{0, 7}
 	}
+	'incomplete_call_expr_selector.vv': lsp.CompletionParams{
+		context: lsp.CompletionContext{.trigger_character, '.'}
+		position: lsp.Position{11, 20}
+	}
 	'incomplete_nested_selector.vv':        lsp.CompletionParams{
 		context: lsp.CompletionContext{.trigger_character, '.'}
 		position: lsp.Position{14, 10}
@@ -257,6 +261,14 @@ const completion_results = map{
 			// insert_text_format: .snippet
 			insert_text_format: .plain_text
 		},
+	]
+	'incomplete_call_expr_selector.vv':        [
+		lsp.CompletionItem{
+			label: 'len'
+			kind: .property
+			detail: '(Bee).len int'
+			insert_text: 'len'
+		}
 	]
 	'local_results.vv':                     [
 		lsp.CompletionItem{

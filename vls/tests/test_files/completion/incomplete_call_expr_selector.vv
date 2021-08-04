@@ -1,0 +1,13 @@
+module main
+
+struct Bee {
+	len int
+}
+
+fn return_bee() Bee {
+	return Bee{len: 1}
+}
+
+fn main3() string {
+	return_bee('test').
+}

@@ -775,19 +775,18 @@ fn (mut ls Vls) completion(id int, params string) {
 		// Once the offset has been finalized it will then search for the AST node and
 		// extract it's data using the corresponding methods depending on the node type.
 		mut node := traverse_node2(root_node, u32(offset))
-		mut node_type := node.get_type()
-		eprintln(node_type)
 		parent_node := traverse_node(root_node, u32(offset))
 
 		if root_node.is_error() && root_node.get_type() == 'ERROR' {
 			// point to the identifier for assignment statement
 			node = traverse_node(node, node.start_byte())
-			node_type = node.get_type()
-		} else if node_type == 'block' {
+		} else if node.get_type() == 'block' {
 			node = traverse_node2(root_node, u32(offset))
-			node_type = node.get_type()
+		} else if node.is_error() && node.get_type() == 'ERROR' {
+			node = node.prev_named_sibling()
 		}
 
+		node_type := node.get_type()
 		match node_type {
 			'module_clause' {
 				completion_items << cfg.suggest_mod_names(uri.dir())
@@ -879,7 +878,7 @@ fn (mut ls Vls) completion(id int, params string) {
 			else {
 				found_sym := ls.store.infer_symbol_from_node(node, src) or { analyzer.void_type }
 				cfg.filter_return_type = if found_sym.is_returnable() { found_sym.return_type } else { found_sym }
-				is_selector := node.next_sibling().get_text(src) == '.'
+				is_selector := node.next_sibling().get_text(src) == '.' || ctx.trigger_character == '.'
 			
 				if !isnil(cfg.filter_return_type) && !cfg.filter_return_type.is_void() {
 					show_mut_only := parent_node.get_type() == 'block' && is_selector && found_sym.is_mutable()
@@ -917,7 +916,6 @@ fn (mut ls Vls) completion(id int, params string) {
 					imported_path_dir := ls.store.get_module_path(node.get_text(src))
 					imported_syms := ls.store.symbols[imported_path_dir]
 					for imp_sym in imported_syms {
-						// eprintln(imp_sym.gen_str())
 						if int(imp_sym.access) < int(analyzer.SymbolAccess.public) {
 							continue
 						}
@@ -928,14 +926,6 @@ fn (mut ls Vls) completion(id int, params string) {
 				}
 			}
 		}
-
-		// return_type_sym := ls.store.infer_symbol_from_node(node, src) or { analyzer.void_type }
-		// for child_sym in return_type_sym.children {
-		// 	completion_items << symbol_to_completion_item(child_sym, '') or {
-		// 		continue
-		// 	}
-		// }
-
 	} else if ctx.trigger_kind == .invoked && (root_node.named_child_count() == 0 || src.len <= 3) {
 		// When a V file is empty, a list of `module $name` suggsestions will be displayed.
 		completion_items << cfg.suggest_mod_names(uri.dir())
