@@ -28,7 +28,8 @@ git clone https://github.com/vlang/vls.git --branch use-tree-sitter vls && cd vl
 
 ## Build the project
 ## NOTE: `-gc boehm` flag is very important or it may cause leaks! 
-v -gc boehm cmd/vls
+## Compiling it with TCC causes problems with the output of the Tree-sitter parser.
+v -cc gcc -gc boehm cmd/vls
 # The binary will be created in the subfolder `cmd/vls` by default.
 ```
 
