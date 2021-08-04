@@ -395,3 +395,10 @@ pub fn (mut store Store) import_modules(mut imports []&Import) {
 		// old_active_dir.free()
 	}
 }
+
+pub fn (ss &Store) is_module(module_name string) bool {
+	_ = ss.get_module_path_opt(module_name) or {
+		return false
+	}
+	return true
+}

@@ -344,6 +344,10 @@ pub fn (sym &Symbol) is_returnable() bool {
 	return sym.kind == .variable || sym.kind == .field || sym.kind == .function
 }
 
+pub fn (sym &Symbol) is_mutable() bool {
+	return sym.access == .private_mutable || sym.access == .public_mutable || sym.access == .global
+}
+
 [unsafe]
 pub fn (sym &Symbol) free() {
 	unsafe {

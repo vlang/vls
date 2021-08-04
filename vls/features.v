@@ -772,18 +772,65 @@ fn (mut ls Vls) completion(id int, params string) {
 			offset--
 		}
 
-		// eprintln(root_node.sexpr_str())
 		// Once the offset has been finalized it will then search for the AST node and
 		// extract it's data using the corresponding methods depending on the node type.
 		mut node := traverse_node2(root_node, u32(offset))
-		// eprintln(node.get_type())
+		mut node_type := node.get_type()
+		eprintln(node_type)
+		parent_node := traverse_node(root_node, u32(offset))
+
 		if root_node.is_error() && root_node.get_type() == 'ERROR' {
 			// point to the identifier for assignment statement
 			node = traverse_node(node, node.start_byte())
+			node_type = node.get_type()
+		} else if node_type == 'block' {
+			node = traverse_node2(root_node, u32(offset))
+			node_type = node.get_type()
 		}
 
-		node_type := node.get_type()
 		match node_type {
+			'module_clause' {
+				completion_items << cfg.suggest_mod_names(uri.dir())
+			}
+			'import_symbols_list' {
+				import_node := closest_symbol_node_parent(node)
+				import_path_node := import_node.child_by_field_name('path')
+				imported_path_dir := ls.store.get_module_path_opt(import_path_node.get_text(src)) or {
+					ls.send_null(id)
+					return
+				}
+
+				imported_syms := ls.store.symbols[imported_path_dir]
+				for imp_sym in imported_syms {
+					// eprintln(imp_sym.gen_str())
+					if int(imp_sym.access) < int(analyzer.SymbolAccess.public) {
+						continue
+					}
+					completion_items << symbol_to_completion_item(imp_sym, '') or {
+						continue
+					}
+				}
+			}
+			'expression_list' {
+				expr_list_count := node.named_child_count()
+				parent := closest_symbol_node_parent(node)
+				parent_type := parent.get_type()
+				match parent_type {
+					'assignment_statement' {
+						left_node := parent.child_by_field_name('left')
+						left_count := left_node.named_child_count()
+						if expr_list_count == left_count {
+							last_left_node := left_node.named_child(left_count - 1)
+							cfg.filter_return_type = ls.store.infer_value_type_from_node(last_left_node, src)
+							cfg.show_local = true
+						} else {
+							ls.send_null(id)
+							return
+						}
+					}
+					else {}
+				}
+			}
 			'argument_list' {
 				call_expr_arg_cur_idx := node.named_child_count()
 				returned_sym := ls.store.infer_symbol_from_node(node.parent(), src) or { cfg.filter_return_type }
@@ -793,10 +840,9 @@ fn (mut ls Vls) completion(id int, params string) {
 				}
 			}
 			'literal_value' {
-				literals_count := node.named_child_count()
-				if literals_count != 0 {
-					last_key_literal := node.named_child(literals_count - 1)
-					if returned_sym := ls.store.infer_symbol_from_node(last_key_literal, src) { 
+				closest_element_node := closest_named_child(node, u32(offset))
+				if closest_element_node.get_type() == 'keyed_element' {
+					if returned_sym := ls.store.infer_symbol_from_node(closest_element_node, src) { 
 						// if returned_sym.is_returnable() {
 						cfg.filter_return_type = returned_sym.return_type
 						// }
@@ -810,6 +856,7 @@ fn (mut ls Vls) completion(id int, params string) {
 							}
 						}
 					}
+					// eprintln(closest_element_node)
 				} else if returned_sym := ls.store.infer_symbol_from_node(node.parent(), src) {
 					if returned_sym.kind == .struct_ {
 						cfg.show_local = false
@@ -830,21 +877,52 @@ fn (mut ls Vls) completion(id int, params string) {
 				}
 			}
 			else {
-				cfg.filter_return_type = ls.store.infer_symbol_from_node(node, src) or { cfg.filter_return_type }
-				// cfg.show_global = true
-				// cfg.show_local = true
-				if !isnil(cfg.filter_return_type) {
+				found_sym := ls.store.infer_symbol_from_node(node, src) or { analyzer.void_type }
+				cfg.filter_return_type = if found_sym.is_returnable() { found_sym.return_type } else { found_sym }
+				is_selector := node.next_sibling().get_text(src) == '.'
+			
+				if !isnil(cfg.filter_return_type) && !cfg.filter_return_type.is_void() {
+					show_mut_only := parent_node.get_type() == 'block' && is_selector && found_sym.is_mutable()
+
 					for child_sym in cfg.filter_return_type.children {
-						if cfg.filter_return_type.kind in [.enum_, .struct_] && child_sym.kind != .field {
+						if cfg.filter_return_type.kind in [.enum_, .struct_] && child_sym.kind !in [.field, .function] {
 							continue
 						}
 
-						completion_items << lsp.CompletionItem{
-							label: '${child_sym.name}:'
-							kind: .field
-							insert_text: '${child_sym.name}: \$0'
-							insert_text_format: .snippet
-							detail: child_sym.gen_str()
+						if is_selector {
+							if child_sym.kind != .function && show_mut_only && !child_sym.is_mutable() {
+								continue
+							} else if child_sym.kind == .function && !show_mut_only && child_sym.is_mutable() {
+								continue
+							}
+							
+							if existing_completion_item := symbol_to_completion_item(child_sym, '') {
+								completion_items << lsp.CompletionItem{
+									...existing_completion_item
+									label: child_sym.name
+									insert_text: child_sym.name
+								}
+							}
+						} else if child_sym.kind == .field {
+							completion_items << lsp.CompletionItem{
+								label: '${child_sym.name}:'
+								kind: .field
+								insert_text: '${child_sym.name}: \$0'
+								insert_text_format: .snippet
+								detail: child_sym.gen_str()
+							}
+						}
+					}
+				} else if node_type == 'identifier' && is_selector && ls.store.is_module(node.get_text(src)) {
+					imported_path_dir := ls.store.get_module_path(node.get_text(src))
+					imported_syms := ls.store.symbols[imported_path_dir]
+					for imp_sym in imported_syms {
+						// eprintln(imp_sym.gen_str())
+						if int(imp_sym.access) < int(analyzer.SymbolAccess.public) {
+							continue
+						}
+						completion_items << symbol_to_completion_item(imp_sym, '') or {
+							continue
 						}
 					}
 				}
@@ -864,6 +942,7 @@ fn (mut ls Vls) completion(id int, params string) {
 	} else {
 		// Display only the project's functions if none are satisfied
 		cfg.show_only_global_fn = true
+		cfg.show_local = true
 	}
 
 	// Local results. Module names and the scope-based symbols.

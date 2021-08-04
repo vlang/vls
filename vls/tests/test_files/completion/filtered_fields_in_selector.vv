@@ -1,8 +1,18 @@
 module main
 
-import log
+import os
+
+struct Log {
+pub:
+  level         Level
+  output_label  string
+  ofile         os.File
+  output_target LogTarget
+pub mut:
+  output_file_name string
+}
 
 fn main() {
-  logger := log.Log{}
+  mut logger := Log{}
   logger.
 }

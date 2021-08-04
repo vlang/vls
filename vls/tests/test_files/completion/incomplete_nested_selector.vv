@@ -4,7 +4,7 @@ struct Barw {
 	name string
 }
 
-fn (b Bar) theres_a_method() {}
+fn (b Barw) theres_a_method() {}
 
 struct Foow {
 	bar Barw

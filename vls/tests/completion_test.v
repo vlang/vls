@@ -24,7 +24,7 @@ const completion_inputs = map{
 	}
 	'filtered_fields_in_selector.vv':       lsp.CompletionParams{
 		context: lsp.CompletionContext{.trigger_character, '.'}
-		position: lsp.Position{6, 9}
+		position: lsp.Position{16, 9}
 	}
 	'filtered_methods_in_immutable_var.vv': lsp.CompletionParams{
 		context: lsp.CompletionContext{.trigger_character, '.'}
@@ -134,62 +134,64 @@ const completion_results = map{
 	'filtered_fields_in_selector.vv':       [
 		lsp.CompletionItem{
 			label: 'output_file_name'
-			kind: .field
+			detail: 'pub mut (Log).output_file_name string'
+			kind: .property
 			insert_text: 'output_file_name'
-		},
-		lsp.CompletionItem{
-			label: 'log_cli'
-			kind: .method
-			insert_text: 'log_cli(\${1:s}, \${2:level})'
-			insert_text_format: .snippet
 		},
 	]
 	'filtered_methods_in_immutable_var.vv': [
 		lsp.CompletionItem{
 			label: 'lol'
 			kind: .method
-			insert_text: 'lol()'
-			insert_text_format: .snippet
+			detail: 'fn (Foo) lol() string'
+			// insert_text: 'lol()'
+			insert_text: 'lol'
+			insert_text_format: .plain_text
 		},
 	]
 	'filtered_methods_in_mutable_var.vv':   [
 		lsp.CompletionItem{
 			label: 'set_name'
 			kind: .method
-			insert_text: 'set_name(\${1:name})'
-			insert_text_format: .snippet
+			detail: 'mut fn (Foo) set_name(name string) void'
+			insert_text: 'set_name'
+			// insert_text: 'set_name(\${1:name})'
+			// insert_text_format: .snippet
+			insert_text_format: .plain_text
 		},
 		lsp.CompletionItem{
 			label: 'lol'
 			kind: .method
-			insert_text: 'lol()'
-			insert_text_format: .snippet
+			detail: 'fn (Foo) lol() string'
+			insert_text: 'lol'
+			// insert_text: 'lol()'
+			// insert_text_format: .snippet
+			insert_text_format: .plain_text
 		},
 	]
 	'import_symbols.vv':                    [
 		lsp.CompletionItem{
 			label: 'DB'
 			kind: .struct_
+			detail: 'DB'
 			insert_text: 'DB'
 		},
 		lsp.CompletionItem{
 			label: 'Row'
 			kind: .struct_
+			detail: 'Row'
 			insert_text: 'Row'
-		},
-		lsp.CompletionItem{
-			label: 'C.PGResult'
-			kind: .struct_
-			insert_text: 'C.PGResult'
 		},
 		lsp.CompletionItem{
 			label: 'Config'
 			kind: .struct_
+			detail: 'Config'
 			insert_text: 'Config'
 		},
 		lsp.CompletionItem{
 			label: 'connect'
 			kind: .function
+			detail: 'pub fn connect(config Config) ?DB'
 			insert_text: 'connect'
 		},
 	]
@@ -225,27 +227,35 @@ const completion_results = map{
 	'incomplete_nested_selector.vv':        [
 		lsp.CompletionItem{
 			label: 'name'
-			kind: .field
+			kind: .property
+			detail: '(Barw).name string'
 			insert_text: 'name'
 		},
 		lsp.CompletionItem{
 			label: 'theres_a_method'
 			kind: .method
-			insert_text: 'theres_a_method()'
-			insert_text_format: .snippet
+			detail: 'fn (Barw) theres_a_method() void'
+			// insert_text: 'theres_a_method()'
+			// insert_text_format: .snippet
+			insert_text: 'theres_a_method'
+			insert_text_format: .plain_text
 		},
 	]
 	'incomplete_selector.vv':               [
 		lsp.CompletionItem{
 			label: 'name'
-			kind: .field
+			kind: .property
+			detail: '(Foo).name string'
 			insert_text: 'name'
 		},
 		lsp.CompletionItem{
 			label: 'lol'
 			kind: .method
-			insert_text: 'lol()'
-			insert_text_format: .snippet
+			detail: 'fn (Foo) lol() string'
+			// insert_text: 'lol()'
+			insert_text: 'lol'
+			// insert_text_format: .snippet
+			insert_text_format: .plain_text
 		},
 	]
 	'local_results.vv':                     [
@@ -264,13 +274,17 @@ const completion_results = map{
 		lsp.CompletionItem{
 			label: 'Point'
 			kind: .struct_
-			insert_text: 'Point{}'
+			detail: 'Point'
+			insert_text: 'Point'
+			// insert_text: 'Point{}'
 		},
 		lsp.CompletionItem{
 			label: 'this_is_a_function'
 			kind: .function
-			insert_text: 'this_is_a_function()'
-			insert_text_format: .snippet
+			detail: 'pub fn this_is_a_function() string'
+			// insert_text: 'this_is_a_function()'
+			insert_text: 'this_is_a_function'
+			// insert_text_format: .snippet
 		},
 	]
 	'struct_init.vv':                       [

@@ -48,10 +48,13 @@ fn traverse_node2(starting_node C.TSNode, offset u32) C.TSNode {
 	mut root_type := root_node.get_type()
 
 	direct_named_child := root_node.first_named_child_for_byte(offset)
-	eprintln('$root_type ${root_node.sexpr_str()}')
-
 	child_type := direct_named_child.get_type()
-	if direct_named_child.is_null() {
+
+	if child_type.ends_with('_literal') {
+		return root_node
+	}
+
+	if direct_named_child.is_null() || (direct_named_child.is_error() && direct_named_child.is_missing()) {
 		// root_node = root_node.first_child_for_byte(offset)
 		// if !root_node.prev_named_sibling().is_null() {
 		// 	root_node = root_node.prev_named_sibling()
@@ -59,7 +62,7 @@ fn traverse_node2(starting_node C.TSNode, offset u32) C.TSNode {
 		return root_node
 	}
 
-	if (!root_type.ends_with('_declaration') && root_type !in list_node_types) && (child_type.ends_with('identifier') || child_type == 'builtin_type') {
+	if (!root_type.ends_with('_declaration') && root_type !in list_node_types && root_type != 'block') && (child_type.ends_with('identifier') || child_type == 'builtin_type') {
 		if root_type == 'selector_expression' {
 			root_children_count := root_node.named_child_count()
 			for i := u32(0); i < root_children_count; i++ {
@@ -87,12 +90,25 @@ fn traverse_node2(starting_node C.TSNode, offset u32) C.TSNode {
 	return traverse_node2(direct_named_child, offset)
 }
 
-// fn closest_child_to_offset(starting_node C.TSNode, offset u32) C.TSNode {
+fn closest_named_child(starting_node C.TSNode, offset u32) C.TSNode {
+	named_child_count := starting_node.named_child_count()
+	mut selected_node := starting_node
+	if selected_node.start_byte() < offset && selected_node.end_byte() < offset {
+		return selected_node
+	} else {
+		for i in u32(0) .. named_child_count {
+			child_node := selected_node.named_child(i)
+			if !child_node.is_null() && child_node.start_byte() < offset && child_node.end_byte() < offset {
+				selected_node = child_node
+			} else {
+				break
+			}
+		}
+	}
+	return selected_node
+}
 
-// 	return traverse_node(direct_named_child, offset)
-// }
-
-const other_symbol_node_types = ['call_expression', 'selector_expression', 'index_expression', 'slice_expression', 'type_initializer', 'module_clause']
+const other_symbol_node_types = ['assignment_statement', 'call_expression', 'selector_expression', 'index_expression', 'slice_expression', 'type_initializer', 'module_clause']
 
 // TODO: better naming
 // closest_symbol_node_parent traverse back from child

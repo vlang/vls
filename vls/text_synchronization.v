@@ -78,10 +78,6 @@ fn (mut ls Vls) did_open(_ int, params string) {
 	} else if uri !in ls.sources && uri !in ls.trees {
 		ls.sources[uri] = File{ source: src.bytes(), uri: uri }
 		ls.trees[uri] = ls.parser.parse_string(src)
-		if !isnil(ls.trees[uri]) && ls.trees[uri].root_node().get_type() == 'ERROR' {
-			unsafe { ls.trees[uri].free() }
-			ls.trees[uri] = ls.parser.parse_string_with_old_tree_and_len(src, &C.TSTree(0), u32(src.len - 1))
-		}
 
 		if !ls.store.has_file_path(uri.path()) || uri.path() !in ls.store.opened_scopes {
 			analyze(mut ls.store, ls.root_uri, ls.trees[uri], ls.sources[uri])
