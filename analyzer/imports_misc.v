@@ -21,7 +21,7 @@ const (
 		'_native',
 		// '.freestanding'
 	]
-	os_file_specific_suffix_indices = map{
+	os_file_specific_suffix_indices = {
 		'windows':   [0]
 		'linux':     [1, 11]
 		'macos':     [2, 3, 11]
