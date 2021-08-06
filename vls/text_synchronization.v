@@ -120,7 +120,7 @@ fn (mut ls Vls) did_change(_ int, params string) {
 
 		// remove immediately the symbol
 		if content_change.text.len == 0 && diff < 0 {
-			deleted := ls.store.delete_symbol_at_node(
+			ls.store.delete_symbol_at_node(
 				ls.trees[uri].root_node(), 
 				old_src,
 				start_point: lsp_pos_to_tspoint(start_pos)
@@ -128,8 +128,6 @@ fn (mut ls Vls) did_change(_ int, params string) {
 				start_byte: u32(start_idx)
 				end_byte: u32(old_end_idx)
 			)
-
-			ls.log_message(deleted.str(), .info)
 		}
 
 		// This part should move all the characters to their new positions

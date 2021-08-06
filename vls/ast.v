@@ -3,7 +3,7 @@ module vls
 // import tree_sitter
 
 // any node that is separated by a comma or other symbol
-const	list_node_types = ['expression_list', 'identifier_list', 'argument_list', 'array']
+const	list_node_types = ['expression_list', 'identifier_list', 'argument_list', 'array', 'import_symbols_list']
 const other_node_types = ['if_expression', 'for_statement', 'return_statement', 'for_in_operator', 'binary_expression', 'unary_expression']
 
 fn traverse_node(root_node C.TSNode, offset u32) C.TSNode {
@@ -93,16 +93,12 @@ fn traverse_node2(starting_node C.TSNode, offset u32) C.TSNode {
 fn closest_named_child(starting_node C.TSNode, offset u32) C.TSNode {
 	named_child_count := starting_node.named_child_count()
 	mut selected_node := starting_node
-	if selected_node.start_byte() < offset && selected_node.end_byte() < offset {
-		return selected_node
-	} else {
-		for i in u32(0) .. named_child_count {
-			child_node := selected_node.named_child(i)
-			if !child_node.is_null() && child_node.start_byte() < offset && child_node.end_byte() < offset {
-				selected_node = child_node
-			} else {
-				break
-			}
+	for i in u32(0) .. named_child_count {
+		child_node := selected_node.named_child(i)
+		if !child_node.is_null() && child_node.start_byte() <= offset && child_node.end_byte() <= offset {
+			selected_node = child_node
+		} else {
+			break
 		}
 	}
 	return selected_node
