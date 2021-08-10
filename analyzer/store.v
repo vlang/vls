@@ -58,8 +58,8 @@ pub fn (mut ss Store) clear_messages() {
 }
 
 // report inserts the message to the messages array
-pub fn (mut ss Store) report(msg Message) {
-	ss.messages << msg
+pub fn (mut ss Store) report(msg IMessage) {
+	ss.messages << msg.to_message()
 }
 
 // is_file_active returns a boolean that checks if the given
@@ -115,6 +115,16 @@ pub fn (ss &Store) get_module_path_opt(module_name string) ?string {
 pub fn (ss &Store) get_module_path(module_name string) string {
 	// empty names should return the current selected dir instead
 	return ss.get_module_path_opt(module_name) or { ss.cur_dir }
+}
+
+pub fn (store &Store) get_module_name_with_prefix(path string) string {
+	import_lists := store.imports[store.cur_dir]
+	for imp in import_lists {
+		if imp.path == path {
+			return imp.module_name + '.'
+		}
+	}
+	return ''
 }
 
 // find_symbol retrieves the symbol based on the given module name and symbol name
@@ -543,6 +553,9 @@ pub fn (mut ss Store) infer_symbol_from_node(node C.TSNode, src_text []byte) ?&S
 	}
 
 	match node_type {
+		'interpreted_string_literal' {
+			type_name = 'string'
+		}
 		'identifier' {
 			// Identifier symbol finding strategy
 			// Find first in symbols
