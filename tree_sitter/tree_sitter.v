@@ -415,3 +415,12 @@ pub fn (left_range C.TSRange) eq(right_range C.TSRange) bool {
 		&& left_range.start_byte == right_range.start_byte
 		&& left_range.end_byte == right_range.end_byte
 }
+
+pub fn (left_range C.TSRange) extend(right_range C.TSRange) C.TSRange {
+	return C.TSRange{
+		start_point: left_range.start_point
+		end_point: right_range.end_point
+		start_byte: left_range.start_byte
+		end_byte: right_range.end_byte
+	}
+}
