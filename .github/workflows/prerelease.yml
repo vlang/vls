@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      VFLAGS: -cc gcc
+      VFLAGS: -prod -cc gcc -d with_build_commit -gc boehm -cflags -static
     steps:
       - name: Install Boehm GC
         run: sudo apt-get install libgc-dev
@@ -28,7 +28,7 @@ jobs:
         run: |
           cd vls
           export VLS_BUILD_COMMIT=$(git rev-parse --short HEAD)
-          v -prod -d with_build_commit -gc boehm -cflags -static -o vls_linux_x64 cmd/vls
+          v -o vls_linux_x64 cmd/vls
       - name: Create binary only artifact
         uses: actions/upload-artifact@v2
         with:
@@ -39,7 +39,7 @@ jobs:
     runs-on: macos-latest
     timeout-minutes: 30
     env:
-      VFLAGS: -cc clang
+      VFLAGS: -prod -cc clang -d with_build_commit -d static_boehm -gc boehm
     steps:
       - name: Install Boehm GC
         run: brew install bdw-gc
@@ -56,7 +56,7 @@ jobs:
         run: |
           cd vls
           export VLS_BUILD_COMMIT=$(git rev-parse --short HEAD)
-          v -prod -d with_build_commit -d static_boehm -gc boehm -cflags -o vls_macos_x64 cmd/vls
+          v -o vls_macos_x64 cmd/vls
       - name: Create binary only artifact
         uses: actions/upload-artifact@v2
         with:
@@ -67,7 +67,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      VFLAGS: -cc gcc
+      VFLAGS: -prod -cc gcc -d with_build_commit -os windows -gc boehm -cflags -static
     steps:
       - name: Set up MinGW
         uses: egor-tensin/setup-mingw@v2
@@ -86,7 +86,7 @@ jobs:
         run: |
           cd vls
           export VLS_BUILD_COMMIT=$(git rev-parse --short HEAD)
-          v -d with_build_commit -os windows -gc boehm -cflags -static -o vls_windows_x64.exe cmd/vls
+          v -o vls_windows_x64.exe cmd/vls
       - name: Create binary only artifact
         uses: actions/upload-artifact@v2
         with:
