@@ -23,9 +23,9 @@ mut:
 
 fn (sr &SymbolRegistration) new_top_level_symbol(identifier_node C.TSNode, access SymbolAccess, kind SymbolKind) ?&Symbol {
 	id_node_type := identifier_node.get_type()
-	if id_node_type == 'qualified_type' {
-		return report_error('Invalid top-level node type `$id_node_type`', identifier_node.range())
-	}
+	// if id_node_type == 'qualified_type' {
+	// 	return report_error('Invalid top-level node type `$id_node_type`', identifier_node.range())
+	// }
 
 	mut symbol := &Symbol{
 		access: access
@@ -586,7 +586,6 @@ fn (mut sr SymbolRegistration) extract_block(node C.TSNode, mut scope ScopeTree)
 		stmt_node := node.named_child(i)
 		stmt_type := stmt_node.get_type()
 
-		// TODO: further type checks
 		match stmt_type {
 			'short_var_declaration' {
 				vars := sr.short_var_decl(stmt_node) or { continue }
