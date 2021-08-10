@@ -40,6 +40,7 @@ pub enum SymbolKind {
 	typedef
 	interface_
 	field
+	embedded_field
 	variable
 	sumtype
 	function_type
