@@ -153,17 +153,38 @@ fn (mut sr SymbolRegistration) struct_decl(struct_decl_node C.TSNode) ?&Symbol {
 }
 
 fn (mut sr SymbolRegistration) struct_field_decl(field_access SymbolAccess, field_decl_node C.TSNode) &Symbol {
-	field_typ := sr.store.find_symbol_by_type_node(field_decl_node.child_by_field_name('type'), sr.src_text) or { analyzer.void_type }
+	field_type_node := field_decl_node.child_by_field_name('type')
 	field_name_node := field_decl_node.child_by_field_name('name')
-	return &Symbol{
-		name: field_name_node.get_text(sr.src_text)
-		kind: .field
-		range: field_name_node.range()
-		access: field_access
-		return_type: field_typ
-		is_top_level: true
-		file_path: sr.store.cur_file_path.clone()
-		file_version: sr.store.cur_version
+	field_typ := sr.store.find_symbol_by_type_node(field_type_node, sr.src_text) or { analyzer.void_type }
+
+	if field_name_node.is_null() {
+		// struct embedding
+		_, module_name, symbol_name := symbol_name_from_node(field_type_node, sr.src_text) 
+		defer {
+			unsafe { module_name.free() }
+		}
+
+		return &Symbol{
+			name: symbol_name
+			kind: .embedded_field
+			range: field_type_node.range()
+			access: field_access
+			return_type: field_typ
+			is_top_level: true
+			file_path: sr.store.cur_file_path.clone()
+			file_version: sr.store.cur_version
+		}
+	} else {
+		return &Symbol{
+			name: field_name_node.get_text(sr.src_text)
+			kind: .field
+			range: field_name_node.range()
+			access: field_access
+			return_type: field_typ
+			is_top_level: true
+			file_path: sr.store.cur_file_path.clone()
+			file_version: sr.store.cur_version
+		}
 	}
 }
 
