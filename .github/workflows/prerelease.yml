@@ -8,7 +8,7 @@ on:
 
 jobs:
   build-linux-x64:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
       VFLAGS: -cc gcc
@@ -34,33 +34,37 @@ jobs:
         with:
           name: linux_x64
           path: ./vls/vls_linux_x64
-  # build-windows:
-  #   steps:
-  #     - uses: actions/checkout@v1
-  #     - uses: msys2/setup-msys2@v2
-  #     - name: Compile
-  #       run: |
-  #         .\make.bat
-  #         .\v.exe cmd\tools\vup.v
-  #         .\v.exe cmd\tools\vdoctor.v
-  #     - name: Create artifact
-  #       uses: actions/upload-artifact@v2
-  #       with:
-  #         name: windows
-  #         path: |
-  #           .
-  #           ./cmd/tools/vup.exe
-  #           ./cmd/tools/vdoctor.exe
-  #           !./.git
-  #           !./vc
-  #           !./v_old.exe
-  #     - name: Create binary only artifact
-  #       uses: actions/upload-artifact@v2
-  #       with:
-  #         name: windows-binary
-  #         path: ./v.exe
+
+  build-macos-x64:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    env:
+      VFLAGS: -cc clang
+    steps:
+      - name: Install Boehm GC
+        run: brew install bdw-gc
+      - name: Set up V version latest
+        uses: nocturlab/setup-vlang-action@v1
+        with:
+          v-version: latest
+      - uses: actions/checkout@v2
+        with:
+          path: vls
+      - name: Clone tree-sitter-v to ~/.vmodules/tree_sitter_v
+        run: git clone --depth 1 https://github.com/nedpals/tree-sitter-v ~/.vmodules/tree_sitter_v
+      - name: Compile VLS
+        run: |
+          cd vls
+          export VLS_BUILD_COMMIT=$(git rev-parse --short HEAD)
+          v -prod -d with_build_commit -gc boehm -cflags -static -o vls_macos_x64 cmd/vls
+      - name: Create binary only artifact
+        uses: actions/upload-artifact@v2
+        with:
+          name: macos_x64
+          path: ./vls/vls_macos_x64
+
   build-windows-x64:
-    runs-on: ubuntu-20.04
+    runs-on: windows-latest
     timeout-minutes: 30
     env:
       VFLAGS: -cc gcc
@@ -89,10 +93,9 @@ jobs:
           name: windows_x64
           path: ./vls/vls_windows_x64.exe
 
-  # Not g
   pre-release:
     name: Create Github Release
-    needs: [build-linux-x64, build-windows-x64]
+    needs: [build-linux-x64, build-windows-x64, build-macos-x64]
     runs-on: ubuntu-20.04
     steps:
       - uses: actions/checkout@v1
@@ -101,6 +104,11 @@ jobs:
         with:
           name: linux_x64
           path: ./linux_x64
+      - name: Fetch macos_x64
+        uses: actions/download-artifact@v1
+        with:
+          name: macos_x64
+          path: ./macos_x64
       - name: Fetch windows_x64
         uses: actions/download-artifact@v1
         with:
@@ -117,3 +125,4 @@ jobs:
           files: |
             windows_x64/vls_windows_x64.exe
             linux_x64/vls_linux_x64
+            macos_x64/macos_x64
