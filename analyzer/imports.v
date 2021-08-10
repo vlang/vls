@@ -357,7 +357,7 @@ pub fn (mut store Store) import_modules(mut imports []&Import) {
 					store: unsafe { store }
 					src_text: content
 					is_import: true
-					cursor: TreeCursor{root_node.tree_cursor()}
+					cursor: TreeCursor{0, u32(child_len), root_node.tree_cursor()}
 				}
 
 				sr.get_scope(sr.cursor.current_node()) or {}
