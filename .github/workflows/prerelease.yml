@@ -56,7 +56,7 @@ jobs:
         run: |
           cd vls
           export VLS_BUILD_COMMIT=$(git rev-parse --short HEAD)
-          v -prod -d with_build_commit -gc boehm -cflags -static -o vls_macos_x64 cmd/vls
+          v -prod -d with_build_commit -d static_boehm -gc boehm -cflags -o vls_macos_x64 cmd/vls
       - name: Create binary only artifact
         uses: actions/upload-artifact@v2
         with:
@@ -64,7 +64,7 @@ jobs:
           path: ./vls/vls_macos_x64
 
   build-windows-x64:
-    runs-on: windows-latest
+    runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
       VFLAGS: -cc gcc
