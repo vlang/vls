@@ -518,7 +518,7 @@ pub fn (mut store Store) find_symbol_by_type_node(node C.TSNode, src_text []byte
 			else {}
 		}
 
-		store.register_symbol(mut new_sym) or { analyzer.void_type }
+		store.register_symbol(mut new_sym) ?
 	}
 }
 
