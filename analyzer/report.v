@@ -37,6 +37,36 @@ pub fn (msgs []Message) has_range(file_path string, range C.TSRange) bool {
 	return false
 }
 
+const (
+	mismatched_type_error = 100	
+	not_found_error = 101
+	not_public_error = 102
+	invalid_argument_error = 103
+	undefined_operation_error = 104
+	unknown_type_error = 105
+	ambiguous_method_error = 106
+	ambiguous_field_error = 107
+	ambiguous_call_error = 108
+	append_type_mismatch_error = 109
+	array_append_expr_error = 110
+	invalid_array_element_type_error = 111
+)
+
+const error_messages = {
+	analyzer.mismatched_type_error: 'mismatched types `%s` and `%s`'
+	analyzer.not_found_error: 'symbol `%s` not found'
+	analyzer.not_public_error: 'symbol `%s` not public'
+	analyzer.invalid_argument_error: 'cannot use `%s` as `%s` in argument %s to `%s`'
+	analyzer.undefined_operation_error: 'undefined operation `%s` %s `%s`'
+	analyzer.unknown_type_error: 'unknown type `%s`'
+	analyzer.ambiguous_method_error: 'ambiguous method `%s`'
+	analyzer.ambiguous_field_error: 'ambiguous field `%s`'
+	analyzer.ambiguous_call_error: 'ambiguous call to: `%s`, may refer to fn `%s` or variable `%s`'
+	analyzer.append_type_mismatch_error: 'cannot append `%s` to `%s`'
+	analyzer.array_append_expr_error: 'array append cannot be used in an expression'
+	analyzer.invalid_array_element_type_error: 'invalid array element: expected `%s`, not `%s`'
+}
+
 pub struct AnalyzerError {
 	msg   string
 	code  int

@@ -39,6 +39,17 @@ fn inject_builtin(mut store Store) {
 }
 
 const skipped_tests = [
+	'vlib/v/checker/tests/a_test_file_with_0_test_fns_test.vv',
+	'vlib/v/checker/tests/ambiguous_field_method_err.vv',
+	'vlib/v/checker/tests/any_int_float_ban_err.vv',
+	'vlib/v/checker/tests/array_builtin_redefinition.vv',
+	'vlib/v/checker/tests/array_cmp_err.vv',
+	'vlib/v/checker/tests/array_declare_element_a.vv'
+	'vlib/v/checker/tests/array_declare_element_b.vv'
+	'vlib/v/checker/tests/array_declare_element_c.vv'
+	'vlib/v/checker/tests/array_element_type.vv'
+	'vlib/v/checker/tests/array_filter_fn_err.vv'
+	'vlib/v/checker/tests/array_index.vv'
 ]
 
 // test_analyzer_from_v compares the output from V's checker to VLS' analyzer
