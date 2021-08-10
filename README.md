@@ -28,7 +28,9 @@ git clone https://github.com/vlang/vls.git --branch use-tree-sitter vls && cd vl
 
 ## Build the project
 ## NOTE: `-gc boehm` flag is very important or it may cause leaks! 
-v -gc boehm cmd/vls
+## We need to specify the compiler because TCC may cause differences in output.
+## If on MacOS, you might prefer "-cc clang" instead.
+v -gc boehm -cc gcc cmd/vls
 # The binary will be created in the subfolder `cmd/vls` by default.
 ```
 
