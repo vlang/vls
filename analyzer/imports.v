@@ -184,11 +184,11 @@ fn (mut ss Store) inject_paths_of_new_imports(mut new_imports []&Import, lookup_
 		// report the unresolved import
 		if !new_import.resolved {
 			for file_path, range in new_import.ranges {
-				ss.report(
+				ss.report(Message{
 					content: 'Module `$new_import.module_name` not found'
 					file_path: file_path.clone()
 					range: range
-				)
+				})
 
 				new_import.ranges.delete(file_path)
 			}

@@ -51,8 +51,39 @@ pub mut:
 	is_import bool
 }
 
-fn (mut an Analyzer) report(msg string, node C.TSNode) {
-	an.store.report_error(report_error(msg, node.range()))
+const empty_custom_params = map[int]string{}
+const empty_symbols = []&Symbol{}
+
+fn (mut an Analyzer) report(code int, range C.TSRange, symbols []&Symbol) {
+	an.custom_report(code, range, symbols, analyzer.empty_custom_params)
+}
+
+fn (mut an Analyzer) custom_report(code int, range C.TSRange, symbols []&Symbol, custom_params map[int]string) {
+	mut err := AnalyzerError{
+		code: code
+		range: range
+		file_path: an.store.cur_file_path
+		parameters: []string{cap: symbols.len + custom_params.len}
+	}
+
+	for sym in symbols {
+		mod_dir := os.dir(sym.file_path)
+		mod_with_prefix := an.store.get_module_name_with_prefix(mod_dir)
+		err.parameters << sym.gen_str_with_prefix(mod_with_prefix).replace('_literal', ' literal')
+		unsafe { mod_dir.free() }
+	}
+
+	for i, str in custom_params {
+		if i > err.parameters.len {
+			err.parameters << str
+		} else {
+			err.parameters.insert(i, str)
+		}
+	}
+
+	an.store.report_error(err)
+}
+
 }
 
 fn (mut an Analyzer) import_decl(node C.TSNode) {
