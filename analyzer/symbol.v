@@ -115,9 +115,14 @@ pub mut:
 
 const kinds_in_multi_return_to_be_excluded = [SymbolKind.function, .variable, .field]
 
+// pub fn (info &Symbol) full_gen_str() string {
+
+// }
+
 // gen_str returns the string representation of a symbol.
 // Use this since str() has a pointer symbol attached at the beginning.
-pub fn (info &Symbol) gen_str() string {
+// TODO:
+pub fn (info &Symbol) gen_str_with_prefix(prefix string) string {
 	if isnil(info) {
 		return 'nil symbol'
 	}
@@ -201,26 +206,26 @@ pub fn (info &Symbol) gen_str() string {
 				return info.name	
 			}
 
-			sb.write_string('type ')
+			// sb.write_string('type ')
 			sb.write_string(info.name)
-			sb.write_string(' = ')
+			// sb.write_string(' = ')
 			
-			if info.kind == .typedef {
-				if info.parent.kind == .function_type {
-					sb.write_string(info.parent.gen_str())
-				} else {
-					sb.write_string(info.parent.name)
-				}
-			} else {
-				for i in 0 .. info.sumtype_children_len {
-					sb.write_string(info.children[i].name)
-					if i < info.sumtype_children_len - 1{
-						sb.write_b(` `)
-						sb.write_b(`|`)
-						sb.write_b(` `)
-					}
-				}
-			}
+			// if info.kind == .typedef {
+			// 	if info.parent.kind == .function_type {
+			// 		sb.write_string(info.parent.gen_str())
+			// 	} else {
+			// 		sb.write_string(info.parent.name)
+			// 	}
+			// } else {
+			// 	for i in 0 .. info.sumtype_children_len {
+			// 		sb.write_string(info.children[i].name)
+			// 		if i < info.sumtype_children_len - 1{
+			// 			sb.write_b(` `)
+			// 			sb.write_b(`|`)
+			// 			sb.write_b(` `)
+			// 		}
+			// 	}
+			// }
 		}
 		else {
 			// sb.write_string(info.kind.str())
@@ -230,6 +235,10 @@ pub fn (info &Symbol) gen_str() string {
 	}
 
 	return sb.str()
+}
+
+pub fn (info &Symbol) gen_str() string {
+	return info.gen_str_with_prefix('')
 }
 
 pub fn (sym &Symbol) str() string {
