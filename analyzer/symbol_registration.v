@@ -647,7 +647,7 @@ pub fn (mut store Store) register_symbols_from_tree(tree &C.TSTree, src_text []b
 	mut sr := SymbolRegistration{
 		store: unsafe { store }
 		src_text: src_text
-		cursor: TreeCursor{root_node.tree_cursor()}
+		cursor: TreeCursor{0, u32(child_len), root_node.tree_cursor()}
 	}
 
 	sr.get_scope(sr.cursor.current_node()) or {}
