@@ -635,19 +635,23 @@ pub fn (mut ss Store) infer_symbol_from_node(node C.TSNode, src_text []byte) ?&S
 		}
 		'keyed_element' {
 			mut parent := node.parent()
-			if parent.get_type() == 'literal_value' {
+			if parent.get_type() == 'literal_value' || parent.get_type() == 'map' {
 				parent = parent.parent()
 			}
 			mut selected_node := node.child_by_field_name('name')
 			if !selected_node.get_type().ends_with('identifier') {
 				selected_node = node.child_by_field_name('value')
 			}
-			parent_sym := ss.infer_symbol_from_node(parent, src_text) ?
-			return parent_sym.children.get(selected_node.get_text(src_text)) or {
-				if parent_sym.name == 'map' || parent_sym.name == 'array' {
-					return ss.infer_symbol_from_node(selected_node, src_text)
+			if parent.get_type() == 'literal_value' {
+				parent_sym := ss.infer_symbol_from_node(parent, src_text) ?
+				return parent_sym.children.get(selected_node.get_text(src_text)) or {
+					if parent_sym.name == 'map' || parent_sym.name == 'array' {
+						return ss.infer_symbol_from_node(selected_node, src_text)
+					}
+					return err
 				}
-				return err
+			} else {
+				return ss.infer_symbol_from_node(selected_node, src_text)
 			}
 		}
 		'call_expression' {

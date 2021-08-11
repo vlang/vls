@@ -6,7 +6,7 @@ import os
 
 const base_dir = os.join_path(os.dir(@FILE), 'test_files', 'definition')
 
-const definition_inputs = map{
+const definition_inputs = {
 	'call_arg.vv':                lsp.Position{4, 17}
 	'call_expr.vv':               lsp.Position{3, 10}
 	'enum_val.vv':                lsp.Position{7, 12}
@@ -34,7 +34,7 @@ const definition_should_return_null = [
 	// 'stmt.vv'
 ]
 
-const definition_results = map{
+const definition_results = {
 	'call_arg.vv':                lsp.LocationLink{
 		target_uri: lsp.document_uri_from_path(os.join_path(base_dir, 'call_arg.vv'))
 		origin_selection_range: lsp.Range{

@@ -7,12 +7,12 @@ import lsp
 
 // import tree_sitter
 
-const compute_offset_inputs = map{
+const compute_offset_inputs = {
 	'crlf.vv': [3, 22]
 	'lf.vv':   [2, 14]
 }
 
-const compute_offset_results = map{
+const compute_offset_results = {
 	'crlf.vv': 55
 	'lf.vv':   41
 }
@@ -62,12 +62,12 @@ fn test_compute_offset() {
 	bench.stop()
 }
 
-const compute_position_inputs = map{
+const compute_position_inputs = {
 	'crlf.vv': 55
 	'lf.vv':   41
 }
 
-const compute_position_results = map{
+const compute_position_results = {
 	'crlf.vv': lsp.Position{3, 22}
 	'lf.vv':   lsp.Position{2, 14}
 }
@@ -115,14 +115,14 @@ fn test_compute_position() {
 	bench.stop()
 }
 
-const tspoint_to_lsp_pos_inputs = map{
+const tspoint_to_lsp_pos_inputs = {
 	'simple.vv': C.TSPoint{
 		row: 2
 		column: 0
 	}
 }
 
-const tspoint_to_lsp_pos_results = map{
+const tspoint_to_lsp_pos_results = {
 	'simple.vv': lsp.Position{
 		line: 2
 		character: 0
@@ -171,7 +171,7 @@ fn test_tspoint_to_lsp_pos() {
 	bench.stop()
 }
 
-const tsrange_to_lsp_range_inputs = map{
+const tsrange_to_lsp_range_inputs = {
 	'simple.vv':         C.TSRange{
 		start_point: C.TSPoint{2, 0}
 		end_point: C.TSPoint{2, 29}
@@ -182,7 +182,7 @@ const tsrange_to_lsp_range_inputs = map{
 	}
 }
 
-const tsrange_to_lsp_range_results = map{
+const tsrange_to_lsp_range_results = {
 	'simple.vv':         lsp.Range{
 		start: lsp.Position{
 			line: 2

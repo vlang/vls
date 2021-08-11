@@ -1,7 +1,7 @@
 fn main() {
   just_an_age := 39
 
-  ages := map{
+  ages := {
     'Bob': just_an_age
     'Steve': 10
   }
