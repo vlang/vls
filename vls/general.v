@@ -5,7 +5,6 @@ import json
 import jsonrpc
 import os
 import analyzer
-import v.vmod
 import runtime
 
 const (
@@ -76,7 +75,6 @@ fn (mut ls Vls) initialize(id int, params string) {
 }
 
 fn (mut ls Vls) setup_logger(trace string, client_info lsp.ClientInfo) {
-	meta := vmod.decode(@VMOD_FILE) or { vmod.Manifest{} }
 	mut arch := 32
 	if runtime.is_64bit() {
 		arch += 32

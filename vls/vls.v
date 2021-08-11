@@ -10,6 +10,21 @@ import tree_sitter
 import tree_sitter_v.bindings.v
 import analyzer
 import time
+import v.vmod
+
+pub const meta = meta_info()
+fn meta_info() vmod.Manifest {
+	parsed := vmod.decode(@VMOD_FILE) or { panic(err) }
+	build_commit := $if with_build_commit ? {
+		'-' + $env('VLS_BUILD_COMMIT')
+	} $else {
+		''
+	}
+	return vmod.Manifest{
+		...parsed,
+		version: parsed.version + build_commit
+	}
+}
 
 // These are the list of features available in VLS
 // If the feature is experimental, the value name should have a `exp_` prefix

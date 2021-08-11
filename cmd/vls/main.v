@@ -2,17 +2,9 @@ module main
 
 import cli
 import vls
-import v.vmod
 import os
 
 fn C._setmode(int, int)
-
-const meta = meta_info()
-
-fn meta_info() vmod.Manifest {
-	x := vmod.decode(@VMOD_FILE) or { panic(err) }
-	return x
-}
 
 fn run_cli(cmd cli.Command) ? {
 	enable_flag_raw := cmd.flags.get_string('enable') or { '' }
@@ -31,12 +23,6 @@ fn run_cli(cmd cli.Command) ? {
 }
 
 fn main() {
-	build_commit := $if with_build_commit ? {
-		'-' + $env('VLS_BUILD_COMMIT')
-	} $else {
-		''
-	}
-
 	$if windows {
 		// 0x8000 = _O_BINARY from <fcntl.h>
 		// windows replaces \n => \r\n, so \r\n will be replaced to \r\r\n
@@ -45,8 +31,8 @@ fn main() {
 	}
 	mut cmd := cli.Command{
 		name: 'vls'
-		version: meta.version + build_commit
-		description: meta.description
+		version: vls.meta.version
+		description: vls.meta.description
 		execute: run_cli
 	}
 
