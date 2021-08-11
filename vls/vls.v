@@ -1,6 +1,5 @@
 module vls
 
-import v.pref
 import json
 import jsonrpc
 import lsp
@@ -123,8 +122,6 @@ pub mut:
 }
 
 pub fn new(io ReceiveSender) Vls {
-	// mut tbl := ast.new_table()
-	// tbl.is_fmt = false
 	mut parser := tree_sitter.new_parser()
 	parser.set_language(v.language)
 
@@ -341,24 +338,6 @@ pub fn (mut ls Vls) start_loop() {
 		payload := ls.io.receive() or { continue }
 		ls.dispatch(payload)
 	}
-}
-
-// new_pref returns a new of pref based on the given lookup paths
-fn new_pref(lookup_paths ...string) &pref.Preferences {
-	mut lpaths := [vlib_path, vmodules_path]
-	for i := lookup_paths.len - 1; i >= 0; i-- {
-		lookup_path := lookup_paths[i]
-		lpaths.prepend(lookup_path)
-	}
-	res := &pref.Preferences{
-		enable_globals: true
-		output_mode: .silent
-		backend: .c
-		os: ._auto
-		lookup_path: lpaths
-		is_shared: true
-	}
-	return res
 }
 
 // set_features enables or disables a language feature. emits an error if not found
