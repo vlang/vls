@@ -1,10 +1,8 @@
 > ## ⚠️ Warning (Please read this first) ⚠️
 > What you're seeing is the developmental branch of the V Language server
 > that uses the Tree Sitter parser. Language features such as autocompletion
-> and go to definition are being removed and reimplemented at this moment.
->
-> We encourage to use the [legacy "master" branch](https://github.com/vlang/vls/tree/master)
-> if you want to try the last fully-functioning version of VLS.
+> and go to definition are being reimplemented at this moment.
+
 
 # vls
 [![CI](https://github.com/vlang/vls/actions/workflows/ci.yml/badge.svg)](https://github.com/vlang/vls/actions/workflows/ci.yml)
