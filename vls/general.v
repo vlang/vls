@@ -15,6 +15,18 @@ const (
 
 // initialize sends the server capabilities to the client
 fn (mut ls Vls) initialize(id int, params string) {
+	// Set defaults when vroot_path is empty
+	if ls.vroot_path.len == 0 {
+		if found_vroot_path := detect_vroot_path() {
+			ls.set_vroot_path(found_vroot_path)
+			ls.store.default_import_paths << os.join_path(found_vroot_path, 'vlib')
+		} else {
+			ls.show_message("V installation directory was not found. Modules in vlib such as `os` won't be detected.", .error)
+		}
+
+		ls.store.default_import_paths << os.vmodules_dir()
+	}
+
 	// Show message that VLS is not yet ready!
 	ls.show_message('VLS is a work-in-progress, pre-alpha language server. It may not be guaranteed to work reliably due to memory issues and other related factors. We encourage you to submit an issue if you encounter any problems.',
 		.warning)
@@ -94,6 +106,8 @@ fn (mut ls Vls) setup_logger(trace string, client_info lsp.ClientInfo) {
 	} else {
 		ls.log_message('Client / Editor: Unknown', .info)
 	}
+
+	ls.log_message('Using V path (VROOT): ${ls.vroot_path}', .info)
 }
 
 [manualfree]
@@ -101,7 +115,7 @@ fn (mut ls Vls) process_builtin() {
 	mut builtin_import, _ := ls.store.add_import(
 		resolved: true
 		module_name: 'builtin'
-		path: builtin_path
+		path: os.join_path(ls.vroot_path, 'vlib', 'builtin')
 	)
 
 	mut imports := [builtin_import]

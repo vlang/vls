@@ -102,6 +102,7 @@ fn (file_map map[string]File) count(dir string) int {
 
 struct Vls {
 mut:
+	vroot_path       string
 	parser           &C.TSParser
 	store            analyzer.Store
 	status           ServerStatus = .off
@@ -130,9 +131,7 @@ pub fn new(io ReceiveSender) Vls {
 		parser: parser
 		debug: io.debug
 		logger: log.new(.text)
-		store: analyzer.Store{
-			default_import_paths: [vlib_path, vmodules_path]
-		}
+		store: analyzer.Store{}
 	}
 
 	$if test {
@@ -236,6 +235,12 @@ pub fn (mut ls Vls) dispatch(payload string) {
 			}
 		}
 	}
+}
+
+// set_vroot_path changes the path of the V root directory
+pub fn (mut ls Vls) set_vroot_path(new_vroot_path string) {
+	unsafe { ls.vroot_path.free() }
+	ls.vroot_path = new_vroot_path
 }
 
 // set_logger changes the language server's logger
@@ -374,4 +379,52 @@ fn new_error(code int) jsonrpc.Response2<string> {
 	return jsonrpc.Response2<string>{
 		error: jsonrpc.new_response_error(code)
 	}
+}
+
+fn detect_vroot_path() ?string {
+	vroot_env := os.getenv('VROOT')
+	if vroot_env.len != 0 {
+		return vroot_env
+	}
+
+	vexe_path_from_env := os.getenv('VEXE')
+	defer { 
+		unsafe { 
+			vroot_env.free()
+			vexe_path_from_env.free() 
+		} 
+	}
+
+	// Return the directory of VEXE if present
+	if vexe_path_from_env.len != 0 {
+		return os.dir(vexe_path_from_env)
+	}
+
+	// Find the V executable in PATH
+	path_env := os.getenv("PATH")
+	paths := path_env.split(vls.path_list_sep)
+	defer { 
+		unsafe { 
+			vexe_path_from_env.free()
+			paths.free() 
+		} 
+	}
+
+	for path in paths {
+		full_path := os.join_path(path, vls.v_exec_name)
+		if os.exists(full_path) && os.is_executable(full_path) {
+			defer { unsafe { full_path.free() } }
+			if os.is_link(full_path) {
+				// Get the real path of the V executable
+				full_real_path := os.real_path(full_path)
+				defer { unsafe { full_real_path.free() } }
+				return os.dir(full_real_path)
+			} else {
+				return os.dir(full_path)
+			}
+		}
+		unsafe { full_path.free() }
+	}
+
+	return error('V path not found.')
 }

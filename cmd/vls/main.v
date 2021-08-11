@@ -17,6 +17,19 @@ fn run_cli(cmd cli.Command) ? {
 	}
 	debug_mode := cmd.flags.get_bool('debug') or { false }
 	mut ls := vls.new(&Stdio{ debug: debug_mode })
+
+	custom_vroot_path := cmd.flags.get_string('vroot') or { '' }
+	if custom_vroot_path.len != 0 {
+		if !os.exists(custom_vroot_path) {
+			return error('Provided VROOT does not exist.')
+		}
+		if !os.is_dir(custom_vroot_path) {
+			return error('Provided VROOT is not a directory.')
+		} else {
+			ls.set_vroot_path(custom_vroot_path)
+		}
+	}
+
 	ls.set_features(enable_features, true) ?
 	ls.set_features(disable_features, false) ?
 	ls.start_loop()
@@ -54,6 +67,12 @@ fn main() {
 			name: 'debug'
 			description: "Toggles language server's debug mode."
 		},
+		cli.Flag{
+			flag: .string,
+			name: 'vroot'
+			required: false
+			description: 'Path to the V installation directory. By default, it will use the VROOT env variable or the current directory of the V executable.'
+		}
 	])
 
 	cmd.parse(os.args)
