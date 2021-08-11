@@ -5,7 +5,7 @@ import lsp
 import os
 
 // NOTE: skip module_symbols_selector for now, see note in text_synchronization.v#parse_imports
-const completion_inputs = map{
+const completion_inputs = {
 	'assign.vv':                            lsp.CompletionParams{
 		context: lsp.CompletionContext{.trigger_character, ' '}
 		position: lsp.Position{6, 7}
@@ -72,7 +72,7 @@ const completion_inputs = map{
 	}
 }
 
-const completion_results = map{
+const completion_results = {
 	'assign.vv':                            [
 		lsp.CompletionItem{
 			label: 'two'

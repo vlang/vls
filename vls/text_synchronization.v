@@ -5,14 +5,7 @@ import lsp
 import os
 import analyzer
 
-const (
-	vroot         = os.dir(@VEXE)
-	vlib_path     = os.join_path(vroot, 'vlib')
-	vmodules_path = os.join_path(os.home_dir(), '.vmodules')
-	builtin_path  = os.join_path(vlib_path, 'builtin')
-)
-
-fn analyze(mut store analyzer.Store, root_uri lsp.DocumentUri, tree &C.TSTree, file File) {
+fn analyze(mut store analyzer.Store, uri lsp.DocumentUri, root_uri lsp.DocumentUri, tree &C.TSTree, file File) {
 	store.clear_messages()
 	store.set_active_file_path(file.uri.path(), file.version)
 	store.import_modules_from_tree(tree, file.source, os.join_path(file.uri.dir_path(), 'modules'),
