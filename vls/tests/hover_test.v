@@ -4,7 +4,7 @@ import json
 import lsp
 import os
 
-const hover_inputs = map{
+const hover_inputs = {
 	'call_expr_method.vv':     lsp.HoverParams{
 		position: lsp.Position{10, 16}
 	}
@@ -60,7 +60,7 @@ const hover_inputs = map{
 
 const hover_should_return_null = ['node_error.vv']
 
-const hover_results = map{
+const hover_results = {
 	'call_expr_method.vv':     lsp.Hover{
 		contents: lsp.MarkedString{'v', 'fn (Foo) call() string'}
 		range: lsp.Range{

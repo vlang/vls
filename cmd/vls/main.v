@@ -2,17 +2,9 @@ module main
 
 import cli
 import vls
-import v.vmod
 import os
 
 fn C._setmode(int, int)
-
-const meta = meta_info()
-
-fn meta_info() vmod.Manifest {
-	x := vmod.decode(@VMOD_FILE) or { panic(err) }
-	return x
-}
 
 fn run_cli(cmd cli.Command) ? {
 	enable_flag_raw := cmd.flags.get_string('enable') or { '' }
@@ -25,18 +17,25 @@ fn run_cli(cmd cli.Command) ? {
 	}
 	debug_mode := cmd.flags.get_bool('debug') or { false }
 	mut ls := vls.new(&Stdio{ debug: debug_mode })
+
+	custom_vroot_path := cmd.flags.get_string('vroot') or { '' }
+	if custom_vroot_path.len != 0 {
+		if !os.exists(custom_vroot_path) {
+			return error('Provided VROOT does not exist.')
+		}
+		if !os.is_dir(custom_vroot_path) {
+			return error('Provided VROOT is not a directory.')
+		} else {
+			ls.set_vroot_path(custom_vroot_path)
+		}
+	}
+
 	ls.set_features(enable_features, true) ?
 	ls.set_features(disable_features, false) ?
 	ls.start_loop()
 }
 
 fn main() {
-	build_commit := $if with_build_commit ? {
-		'-' + $env('VLS_BUILD_COMMIT')
-	} $else {
-		''
-	}
-
 	$if windows {
 		// 0x8000 = _O_BINARY from <fcntl.h>
 		// windows replaces \n => \r\n, so \r\n will be replaced to \r\r\n
@@ -45,8 +44,8 @@ fn main() {
 	}
 	mut cmd := cli.Command{
 		name: 'vls'
-		version: meta.version + build_commit
-		description: meta.description
+		version: vls.meta.version
+		description: vls.meta.description
 		execute: run_cli
 	}
 
@@ -68,6 +67,12 @@ fn main() {
 			name: 'debug'
 			description: "Toggles language server's debug mode."
 		},
+		cli.Flag{
+			flag: .string,
+			name: 'vroot'
+			required: false
+			description: 'Path to the V installation directory. By default, it will use the VROOT env variable or the current directory of the V executable.'
+		}
 	])
 
 	cmd.parse(os.args)

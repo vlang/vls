@@ -5,7 +5,7 @@ import lsp
 import os
 
 // TODO: enable top level comments support in the future
-const folding_range_results = map{
+const folding_range_results = {
 	'simple.vv':  [
 		lsp.FoldingRange{
 			start_line: 2
