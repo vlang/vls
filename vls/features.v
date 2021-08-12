@@ -484,7 +484,7 @@ fn (mut builder CompletionBuilder) build_local_suggestions() {
 	// the functions and the constants of the file.
 	if file_scope := builder.store.opened_scopes[builder.store.cur_file_path] {
 		mut scope := file_scope.innermost(u32(builder.offset), u32(builder.offset))
-		for !isnil(scope) {
+		for !isnil(scope) && scope != file_scope {
 			// constants
 			for scope_sym in scope.get_all_symbols() {
 				if !isnil(builder.filter_return_type)
@@ -492,15 +492,9 @@ fn (mut builder CompletionBuilder) build_local_suggestions() {
 					continue
 				}
 
-				kind := if isnil(scope.parent) {
-					lsp.CompletionItemKind.constant
-				} else {
-					lsp.CompletionItemKind.variable
-				}
-
 				builder.add(lsp.CompletionItem{
 					label: scope_sym.name
-					kind: kind
+					kind: .variable
 					insert_text: scope_sym.name
 				})
 			}
@@ -513,13 +507,10 @@ fn (mut builder CompletionBuilder) build_local_suggestions() {
 // Global results. This includes all the symbols within the module such as
 // the structs, typedefs, enums, and the functions.
 fn (mut builder CompletionBuilder) build_global_suggestions() {
-	local_syms := builder.store.get_symbols_by_file_path(builder.store.cur_file_path)
-	for local_sym in local_syms {
-		if !local_sym.is_void() && local_sym.kind !in [.placeholder, .variable] {
-			if local_sym.kind == .function && local_sym.name == 'main' {
-				continue
-			}
-			builder.add(symbol_to_completion_item(local_sym, '') or { continue })
+	global_syms := builder.store.symbols[builder.store.cur_dir]
+	for sym in global_syms {
+		if !sym.is_void() && (sym.kind != .placeholder || (sym.kind == .function && sym.name != 'main')) {
+			builder.add(symbol_to_completion_item(sym, '') or { continue })
 		}
 	}
 
