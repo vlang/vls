@@ -370,24 +370,15 @@ fn (mut builder CompletionBuilder) build_suggestions_from_expr(node C.TSNode) {
 			closest_element_node := closest_named_child(node, u32(builder.offset))
 			if closest_element_node.get_type() == 'keyed_element' {
 				builder.build_suggestions_from_expr(closest_element_node)
-			} else if returned_sym := builder.store.infer_symbol_from_node(node.parent(), builder.src) {
-				builder.build_suggestions_from_sym(returned_sym, false)
+			} else if got_sym := builder.store.infer_symbol_from_node(node.parent(), builder.src) {
+				builder.build_suggestions_from_sym(got_sym, false)
 			}
 		}
 		'keyed_element' {
-			if returned_sym := builder.store.infer_symbol_from_node(node, builder.src) { 
-				// if returned_sym.is_returnable() {
-				// builder.filter_return_type = returned_sym.return_type
-				// }
-				// TODO: just duplicating code in order to pass tests. refactors should be done later
-				for child_sym in returned_sym.return_type.children {
-					if returned_sym.kind in [.enum_, .struct_] && child_sym.kind != .field {
-						continue
-					}
-					builder.add(symbol_to_completion_item(child_sym, '') or {
-						continue
-					})
-				}
+			if got_sym := builder.store.infer_symbol_from_node(node, builder.src) { 
+				builder.show_local = true
+				builder.filter_return_type = got_sym.return_type
+				builder.build_suggestions_from_sym(got_sym.return_type, false)
 			}
 		}
 		else {
@@ -421,13 +412,17 @@ fn (mut builder CompletionBuilder) build_suggestions_from_sym(sym &analyzer.Symb
 					insert_text: child_sym.name
 				})
 			}
-		} else if child_sym.kind == .field {
+		} else if child_sym.kind == .field && sym.kind == .struct_ {
 			builder.add(lsp.CompletionItem{
 				label: '${child_sym.name}:'
 				kind: .field
 				insert_text: '${child_sym.name}: \$0'
 				insert_text_format: .snippet
 				detail: child_sym.gen_str()
+			})
+		} else if child_sym.kind == .field && sym.kind == .enum_ {
+			builder.add(symbol_to_completion_item(child_sym, '') or {
+				continue
 			})
 		}
 	}
