@@ -18,7 +18,7 @@ fn (mut tc TreeCursor) next() bool {
 			return false
 		}
 		tc.cur_child_idx++
-		if tc.named_only && tc.current_node().is_named() {
+		if tc.named_only && (tc.current_node().is_named() && !tc.current_node().is_extra()) {
 			break
 		}
 	}
