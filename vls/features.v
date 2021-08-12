@@ -574,7 +574,6 @@ fn symbol_to_completion_item(sym &analyzer.Symbol, prefix string) ?lsp.Completio
 		else { return none }
 	}
 
-	// TODO:
 	return lsp.CompletionItem{
 		label: name
 		kind: kind
@@ -600,7 +599,6 @@ fn (mut ls Vls) completion(id int, params string) {
 	tree := ls.trees[uri]
 	root_node := tree.root_node()
 	pos := completion_params.position
-	// file_path := uri.path()
 	mut offset := compute_offset(src, pos.line, pos.character)
 
 	ls.store.set_active_file_path(uri.path(), file.version)
