@@ -11,11 +11,11 @@ on:
     - cron:  '31 1 * * *'
 
 jobs:
-  ubuntu-tcc:
+  ubuntu-gcc:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      VFLAGS: -cc tcc
+      VFLAGS: -cc gcc
     steps:
     - name: Checkout V
       uses: actions/checkout@v2
