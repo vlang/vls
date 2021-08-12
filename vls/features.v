@@ -242,17 +242,17 @@ fn (mut ls Vls) signature_help(id int, params string) {
 
 struct CompletionBuilder {
 mut:
-	store 							&analyzer.Store
-	src 								[]byte
-	offset              int
-	parent_node         C.TSNode
-	show_global         bool // for displaying global (project) symbols
-	show_local          bool // for displaying local variables
-	filter_return_type  &analyzer.Symbol = &analyzer.Symbol(0) // filters results by type
-	fields_only         bool     // for displaying only the struct/enum fields
-	show_mut_only       bool     // filters results based on the object's mutability state.
-	ctx 								lsp.CompletionContext
-	completion_items    []lsp.CompletionItem = []lsp.CompletionItem{cap: 100}
+	store              &analyzer.Store
+	src                []byte
+	offset             int
+	parent_node        C.TSNode
+	show_global        bool // for displaying global (project) symbols
+	show_local         bool // for displaying local variables
+	filter_return_type &analyzer.Symbol = &analyzer.Symbol(0) // filters results by type
+	fields_only        bool             // for displaying only the struct/enum fields
+	show_mut_only      bool // filters results based on the object's mutability state.
+	ctx                lsp.CompletionContext
+	completion_items   []lsp.CompletionItem = []lsp.CompletionItem{cap: 100}
 }
 
 fn (mut builder CompletionBuilder) add(item lsp.CompletionItem) {
@@ -280,7 +280,7 @@ fn (mut builder CompletionBuilder) build_suggestions(node C.TSNode, offset int) 
 
 fn (mut builder CompletionBuilder) build_suggestions_from_node(node C.TSNode) {
 	node_type := node.get_type()
-	if node_type in vls.list_node_types {
+	if node_type in list_node_types {
 		builder.build_suggestions_from_list(node)
 	} else if node_type == 'module_clause' {
 		builder.build_module_name_suggestions()
@@ -300,7 +300,8 @@ fn (mut builder CompletionBuilder) build_suggestions_from_stmt(node C.TSNode) {
 			left_count := left_node.named_child_count()
 			if expr_list_count == left_count {
 				last_left_node := left_node.named_child(left_count - 1)
-				builder.filter_return_type = builder.store.infer_value_type_from_node(last_left_node, builder.src)
+				builder.filter_return_type = builder.store.infer_value_type_from_node(last_left_node,
+					builder.src)
 				builder.show_local = true
 			}
 		}
@@ -330,7 +331,9 @@ fn (mut builder CompletionBuilder) build_suggestions_from_list(node C.TSNode) {
 		}
 		'argument_list' {
 			call_expr_arg_cur_idx := node.named_child_count()
-			returned_sym := builder.store.infer_symbol_from_node(node.parent(), builder.src) or { builder.filter_return_type }
+			returned_sym := builder.store.infer_symbol_from_node(node.parent(), builder.src) or {
+				builder.filter_return_type
+			}
 			if call_expr_arg_cur_idx < u32(returned_sym.children.len) {
 				builder.filter_return_type = returned_sym.children[int(call_expr_arg_cur_idx)].return_type
 				builder.show_local = true
@@ -355,11 +358,14 @@ fn (mut builder CompletionBuilder) build_suggestions_from_expr(node C.TSNode) {
 			builder.show_local = false
 
 			text := node.get_text(builder.src)
-			defer { unsafe { text.free() } }
+			defer {
+				unsafe { text.free() }
+			}
 
-			if builder.is_selector(node) {	
+			if builder.is_selector(node) {
 				if got_sym := builder.store.infer_symbol_from_node(node, builder.src) {
-					builder.show_mut_only = builder.parent_node.get_type() == 'block' && got_sym.is_mutable()
+					builder.show_mut_only = builder.parent_node.get_type() == 'block'
+						&& got_sym.is_mutable()
 					builder.build_suggestions_from_sym(got_sym.return_type, true)
 				} else if builder.store.is_module(text) {
 					builder.build_suggestions_from_module(text)
@@ -375,7 +381,7 @@ fn (mut builder CompletionBuilder) build_suggestions_from_expr(node C.TSNode) {
 			}
 		}
 		'keyed_element' {
-			if got_sym := builder.store.infer_symbol_from_node(node, builder.src) { 
+			if got_sym := builder.store.infer_symbol_from_node(node, builder.src) {
 				builder.show_local = true
 				builder.filter_return_type = got_sym.return_type
 				builder.build_suggestions_from_sym(got_sym.return_type, false)
@@ -392,7 +398,7 @@ fn (mut builder CompletionBuilder) build_suggestions_from_sym(sym &analyzer.Symb
 	if isnil(sym) || sym.is_void() {
 		return
 	}
-	
+
 	for child_sym in sym.children {
 		if is_selector {
 			if sym.kind in [.enum_, .struct_] && child_sym.kind !in [.field, .function] {
@@ -401,10 +407,11 @@ fn (mut builder CompletionBuilder) build_suggestions_from_sym(sym &analyzer.Symb
 
 			if child_sym.kind != .function && builder.show_mut_only && !child_sym.is_mutable() {
 				continue
-			} else if child_sym.kind == .function && !builder.show_mut_only && child_sym.is_mutable() {
+			} else if child_sym.kind == .function && !builder.show_mut_only
+				&& child_sym.is_mutable() {
 				continue
 			}
-			
+
 			if existing_completion_item := symbol_to_completion_item(child_sym, '') {
 				builder.add(lsp.CompletionItem{
 					...existing_completion_item
@@ -414,16 +421,14 @@ fn (mut builder CompletionBuilder) build_suggestions_from_sym(sym &analyzer.Symb
 			}
 		} else if child_sym.kind == .field && sym.kind == .struct_ {
 			builder.add(lsp.CompletionItem{
-				label: '${child_sym.name}:'
+				label: '$child_sym.name:'
 				kind: .field
-				insert_text: '${child_sym.name}: \$0'
+				insert_text: '$child_sym.name: \$0'
 				insert_text_format: .snippet
 				detail: child_sym.gen_str()
 			})
 		} else if child_sym.kind == .field && sym.kind == .enum_ {
-			builder.add(symbol_to_completion_item(child_sym, '') or {
-				continue
-			})
+			builder.add(symbol_to_completion_item(child_sym, '') or { continue })
 		}
 	}
 }
@@ -436,9 +441,7 @@ fn (mut builder CompletionBuilder) build_suggestions_from_module(name string, in
 			continue
 		}
 		if int(imp_sym.access) >= int(analyzer.SymbolAccess.public) {
-			builder.add(symbol_to_completion_item(imp_sym, '') or {
-				continue
-			})
+			builder.add(symbol_to_completion_item(imp_sym, '') or { continue })
 		}
 	}
 }
@@ -466,7 +469,7 @@ fn (mut builder CompletionBuilder) build_local_suggestions() {
 	// Imported modules. They will be shown to the user if there is no given
 	// type for filtering the results. Invalid imports are excluded.
 	for imp in builder.store.imports[builder.store.cur_dir] {
-		if builder.store.cur_file_path in imp.ranges 
+		if builder.store.cur_file_path in imp.ranges
 			&& (file_name !in imp.symbols || imp.symbols[file_name].len == 0) {
 			imp_name := imp.aliases[file_name] or { imp.module_name }
 			builder.add(lsp.CompletionItem{
@@ -484,12 +487,13 @@ fn (mut builder CompletionBuilder) build_local_suggestions() {
 		for !isnil(scope) {
 			// constants
 			for scope_sym in scope.get_all_symbols() {
-				if !isnil(builder.filter_return_type) && scope_sym.return_type != builder.filter_return_type {
+				if !isnil(builder.filter_return_type)
+					&& scope_sym.return_type != builder.filter_return_type {
 					continue
 				}
 
-				kind := if isnil(scope.parent) { 
-					lsp.CompletionItemKind.constant 
+				kind := if isnil(scope.parent) {
+					lsp.CompletionItemKind.constant
 				} else {
 					lsp.CompletionItemKind.variable
 				}
@@ -500,7 +504,7 @@ fn (mut builder CompletionBuilder) build_local_suggestions() {
 					insert_text: scope_sym.name
 				})
 			}
-			
+
 			scope = scope.parent
 		}
 	}
@@ -515,9 +519,7 @@ fn (mut builder CompletionBuilder) build_global_suggestions() {
 			if local_sym.kind == .function && local_sym.name == 'main' {
 				continue
 			}
-			builder.add(symbol_to_completion_item(local_sym, '') or {
-				continue
-			})
+			builder.add(symbol_to_completion_item(local_sym, '') or { continue })
 		}
 	}
 
@@ -534,30 +536,44 @@ fn symbol_to_completion_item(sym &analyzer.Symbol, prefix string) ?lsp.Completio
 	mut name := if prefix.len == 0 { sym.name } else { prefix + '.' + sym.name }
 	mut insert_text := name
 	match sym.kind {
-		.variable { kind = .variable }
+		.variable {
+			kind = .variable
+		}
 		.function {
 			// if function has parent, use method
 			if !sym.parent.is_void() {
 				kind = .method
 			} else {
-				kind = .function 
+				kind = .function
 			}
 		}
-		.struct_ { kind = .struct_ }
+		.struct_ {
+			kind = .struct_
+		}
 		.field {
 			match sym.parent.kind {
-				.enum_ { 
-					kind = .enum_member 
-					insert_text = '.${sym.name}'
+				.enum_ {
+					kind = .enum_member
+					insert_text = '.$sym.name'
 					name = insert_text
 				}
-				.struct_ { kind = .property }
-				else { return none }
+				.struct_ {
+					kind = .property
+				}
+				else {
+					return none
+				}
 			}
 		}
-		.interface_ { kind = .interface_ }
-		.typedef { kind = .type_parameter }
-		else { return none }
+		.interface_ {
+			kind = .interface_
+		}
+		.typedef {
+			kind = .type_parameter
+		}
+		else {
+			return none
+		}
 	}
 
 	return lsp.CompletionItem{
@@ -606,13 +622,15 @@ fn (mut ls Vls) completion(id int, params string) {
 	// wouldn't appear even though one of the trigger characters is on the left
 	// or near the cursor. In that case, the context data would be modified in
 	// order to satisfy those specific cases.
-	if ctx.trigger_kind == .invoked && offset - 1 >= 0 && root_node.named_child_count() > 0 && src.len > 3 {
+	if ctx.trigger_kind == .invoked && offset - 1 >= 0 && root_node.named_child_count() > 0
+		&& src.len > 3 {
 		mut prev_idx := offset
 		mut ctx_changed := false
 		if src[offset - 1] in [`.`, `:`, `=`, `{`, `,`, `(`] {
 			prev_idx--
 			ctx_changed = true
-		} else if src[offset - 1] == ` ` && offset - 2 >= 0 && src[offset - 2] !in [src[offset - 1], `.`] {
+		} else if src[offset - 1] == ` ` && offset - 2 >= 0
+			&& src[offset - 2] !in [src[offset - 1], `.`] {
 			prev_idx -= 2
 			offset -= 2
 			ctx_changed = true
