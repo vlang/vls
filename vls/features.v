@@ -433,10 +433,13 @@ fn (mut builder CompletionBuilder) build_suggestions_from_sym(sym &analyzer.Symb
 	}
 }
 
-fn (mut builder CompletionBuilder) build_suggestions_from_module(name string) {
+fn (mut builder CompletionBuilder) build_suggestions_from_module(name string, included_list ...string) {
 	imported_path_dir := builder.store.get_module_path(name)
 	imported_syms := builder.store.symbols[imported_path_dir]
 	for imp_sym in imported_syms {
+		if included_list.len != 0 && imp_sym.name in included_list {
+			continue
+		}
 		if int(imp_sym.access) >= int(analyzer.SymbolAccess.public) {
 			builder.add(symbol_to_completion_item(imp_sym, '') or {
 				continue
@@ -513,32 +516,20 @@ fn (mut builder CompletionBuilder) build_local_suggestions() {
 fn (mut builder CompletionBuilder) build_global_suggestions() {
 	local_syms := builder.store.get_symbols_by_file_path(builder.store.cur_file_path)
 	for local_sym in local_syms {
-		if local_sym.is_void() || local_sym.kind in [.placeholder, .variable] {
-			continue
+		if !local_sym.is_void() && local_sym.kind !in [.placeholder, .variable] {
+			if local_sym.kind == .function && local_sym.name == 'main' {
+				continue
+			}
+			builder.add(symbol_to_completion_item(local_sym, '') or {
+				continue
+			})
 		}
-		if local_sym.kind == .function && local_sym.name == 'main' {
-			continue
-		}
-		builder.add(symbol_to_completion_item(local_sym, '') or {
-			continue
-		})
 	}
 
+	file_name := builder.store.cur_file_name
 	for imp in builder.store.imports[builder.store.cur_dir] {
-		if builder.store.cur_file_name in imp.symbols && imp.symbols[builder.store.cur_file_name].len != 0 {
-			for imp_sym_name in imp.symbols[builder.store.cur_file_path] {
-				imp_sym := builder.store.symbols[imp.path].get(imp_sym_name) or {
-					continue
-				}
-				if int(imp_sym.access) > int(analyzer.SymbolAccess.private_mutable) {
-					builder.add(symbol_to_completion_item(imp_sym, '') or {
-						continue
-					})
-				}
-			}
-		} else {
-			// TODO:
-			continue
+		if builder.store.cur_file_name in imp.symbols && imp.symbols[file_name].len != 0 {
+			builder.build_suggestions_from_module(imp.module_name, ...imp.symbols[file_name])
 		}
 	}
 }
