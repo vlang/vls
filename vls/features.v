@@ -283,7 +283,7 @@ fn (mut builder CompletionBuilder) build_suggestions_from_node(node C.TSNode) {
 	if node_type in vls.list_node_types {
 		builder.build_suggestions_from_list(node)
 	} else if node_type == 'module_clause' {
-		builder.build_module_suggestions()
+		builder.build_module_name_suggestions()
 	} else {
 		builder.build_suggestions_from_stmt(node)
 	}
@@ -445,7 +445,7 @@ fn (mut builder CompletionBuilder) build_suggestions_from_module(name string) {
 	}
 }
 
-fn (mut builder CompletionBuilder) build_module_suggestions() {
+fn (mut builder CompletionBuilder) build_module_name_suggestions() {
 	// Explicitly disabling the global and local completion
 	// should never happen but just to make sure.
 	builder.show_global = false
@@ -681,7 +681,7 @@ fn (mut ls Vls) completion(id int, params string) {
 		builder.build_suggestions(node, offset)
 	} else if ctx.trigger_kind == .invoked && (root_node.named_child_count() == 0 || src.len <= 3) {
 		// When a V file is empty, a list of `module $name` suggsestions will be displayed.
-		builder.build_module_suggestions()
+		builder.build_module_name_suggestions()
 	} else {
 		// Display only the project's functions if none are satisfied
 		builder.offset = offset
