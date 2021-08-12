@@ -4,7 +4,6 @@ import json
 import lsp
 import os
 
-// NOTE: skip module_symbols_selector for now, see note in text_synchronization.v#parse_imports
 const completion_inputs = {
 	'assign.vv':                            lsp.CompletionParams{
 		context: lsp.CompletionContext{.trigger_character, ' '}
@@ -148,8 +147,7 @@ const completion_results = {
 			label: 'lol'
 			kind: .method
 			detail: 'fn (Foo) lol() string'
-			// insert_text: 'lol()'
-			insert_text: 'lol'
+			insert_text: 'lol()'
 			insert_text_format: .plain_text
 		},
 	]
@@ -158,18 +156,14 @@ const completion_results = {
 			label: 'set_name'
 			kind: .method
 			detail: 'mut fn (Foo) set_name(name string) void'
-			insert_text: 'set_name'
-			// insert_text: 'set_name(\${1:name})'
-			// insert_text_format: .snippet
-			insert_text_format: .plain_text
+			insert_text: 'set_name(\$0)'
+			insert_text_format: .snippet
 		},
 		lsp.CompletionItem{
 			label: 'lol'
 			kind: .method
 			detail: 'fn (Foo) lol() string'
-			insert_text: 'lol'
-			// insert_text: 'lol()'
-			// insert_text_format: .snippet
+			insert_text: 'lol()'
 			insert_text_format: .plain_text
 		},
 	]
@@ -239,9 +233,7 @@ const completion_results = {
 			label: 'theres_a_method'
 			kind: .method
 			detail: 'fn (Barw) theres_a_method() void'
-			// insert_text: 'theres_a_method()'
-			// insert_text_format: .snippet
-			insert_text: 'theres_a_method'
+			insert_text: 'theres_a_method()'
 			insert_text_format: .plain_text
 		},
 	]
@@ -256,9 +248,7 @@ const completion_results = {
 			label: 'lol'
 			kind: .method
 			detail: 'fn (Foo) lol() string'
-			// insert_text: 'lol()'
-			insert_text: 'lol'
-			// insert_text_format: .snippet
+			insert_text: 'lol()'
 			insert_text_format: .plain_text
 		},
 	]
@@ -287,16 +277,14 @@ const completion_results = {
 			label: 'Point'
 			kind: .struct_
 			detail: 'Point'
-			insert_text: 'Point'
-			// insert_text: 'Point{}'
+			insert_text: 'Point{a:\$0, b:\$1}'
+			insert_text_format: .snippet
 		},
 		lsp.CompletionItem{
 			label: 'this_is_a_function'
 			kind: .function
 			detail: 'pub fn this_is_a_function() string'
-			// insert_text: 'this_is_a_function()'
-			insert_text: 'this_is_a_function'
-			// insert_text_format: .snippet
+			insert_text: 'this_is_a_function()'
 		},
 	]
 	'struct_init.vv':                       [

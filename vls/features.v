@@ -5,6 +5,7 @@ import json
 import jsonrpc
 import os
 import analyzer
+import strings
 
 const temp_formatting_file_path = os.join_path(os.temp_dir(), 'vls_temp_formatting.v')
 
@@ -412,12 +413,8 @@ fn (mut builder CompletionBuilder) build_suggestions_from_sym(sym &analyzer.Symb
 				continue
 			}
 
-			if existing_completion_item := symbol_to_completion_item(child_sym, '') {
-				builder.add(lsp.CompletionItem{
-					...existing_completion_item
-					label: child_sym.name
-					insert_text: child_sym.name
-				})
+			if existing_completion_item := symbol_to_completion_item(child_sym, true) {
+				builder.add(existing_completion_item)
 			}
 		} else if child_sym.kind == .field && sym.kind == .struct_ {
 			builder.add(lsp.CompletionItem{
@@ -428,7 +425,7 @@ fn (mut builder CompletionBuilder) build_suggestions_from_sym(sym &analyzer.Symb
 				detail: child_sym.gen_str()
 			})
 		} else if child_sym.kind == .field && sym.kind == .enum_ {
-			builder.add(symbol_to_completion_item(child_sym, '') or { continue })
+			builder.add(symbol_to_completion_item(child_sym, true) or { continue })
 		}
 	}
 }
@@ -441,7 +438,7 @@ fn (mut builder CompletionBuilder) build_suggestions_from_module(name string, in
 			continue
 		}
 		if int(imp_sym.access) >= int(analyzer.SymbolAccess.public) {
-			builder.add(symbol_to_completion_item(imp_sym, '') or { continue })
+			builder.add(symbol_to_completion_item(imp_sym, builder.ctx.trigger_character == '.') or { continue })
 		}
 	}
 }
@@ -510,7 +507,7 @@ fn (mut builder CompletionBuilder) build_global_suggestions() {
 	global_syms := builder.store.symbols[builder.store.cur_dir]
 	for sym in global_syms {
 		if !sym.is_void() && (sym.kind != .placeholder || (sym.kind == .function && sym.name != 'main')) {
-			builder.add(symbol_to_completion_item(sym, '') or { continue })
+			builder.add(symbol_to_completion_item(sym, true) or { continue })
 		}
 	}
 
@@ -522,34 +519,72 @@ fn (mut builder CompletionBuilder) build_global_suggestions() {
 	}
 }
 
-fn symbol_to_completion_item(sym &analyzer.Symbol, prefix string) ?lsp.CompletionItem {
+fn symbol_to_completion_item(sym &analyzer.Symbol, with_snippet bool) ?lsp.CompletionItem {
 	mut kind := lsp.CompletionItemKind.text
-	mut name := if prefix.len == 0 { sym.name } else { prefix + '.' + sym.name }
-	mut insert_text := name
+	mut name := sym.name
+	mut insert_text_format := lsp.InsertTextFormat.plain_text
+	mut insert_text := strings.new_builder(name.len)
+	defer { unsafe { insert_text.free() } }
+	
 	match sym.kind {
 		.variable {
 			kind = .variable
+			insert_text.write_string(name)
 		}
 		.function {
 			// if function has parent, use method
-			if !sym.parent.is_void() {
-				kind = .method
-			} else {
-				kind = .function
+			kind = if !sym.parent.is_void() { 
+				lsp.CompletionItemKind.method 
+			} else { 
+				lsp.CompletionItemKind.function 
+			}
+			insert_text.write_string(name)
+			if with_snippet {
+				insert_text.write_b(`(`)
+				for i in 0 .. sym.children.len {
+					insert_text.write_b(`$`)
+					insert_text.write_string(i.str())
+					if i < sym.children.len - 1 {
+						insert_text.write_string(', ')
+					} else {
+						insert_text_format = .snippet
+					}
+				}
+				insert_text.write_b(`)`)
 			}
 		}
 		.struct_ {
 			kind = .struct_
+			insert_text.write_string(name)
+			if with_snippet {
+				insert_text.write_b(`{`)
+				mut i := 0
+				for child_sym in sym.children {
+					if child_sym.kind != .field {
+						continue
+					}
+					insert_text.write_string(child_sym.name + ':\$' + i.str())
+					if i < sym.children.len - 1 {
+						insert_text.write_string(', ')
+					} else {
+						insert_text_format = .snippet
+					}
+					i++
+				}
+				insert_text.write_b(`}`)
+			}
 		}
 		.field {
 			match sym.parent.kind {
 				.enum_ {
 					kind = .enum_member
-					insert_text = '.$sym.name'
-					name = insert_text
+					insert_text.write_b(`.`)
+					insert_text.write_string(sym.name)
+					name = insert_text.after(0)
 				}
 				.struct_ {
 					kind = .property
+					insert_text.write_string(name)
 				}
 				else {
 					return none
@@ -558,9 +593,11 @@ fn symbol_to_completion_item(sym &analyzer.Symbol, prefix string) ?lsp.Completio
 		}
 		.interface_ {
 			kind = .interface_
+			insert_text.write_string(name)
 		}
 		.typedef {
 			kind = .type_parameter
+			insert_text.write_string(name)
 		}
 		else {
 			return none
@@ -570,8 +607,9 @@ fn symbol_to_completion_item(sym &analyzer.Symbol, prefix string) ?lsp.Completio
 	return lsp.CompletionItem{
 		label: name
 		kind: kind
-		insert_text: insert_text
 		detail: sym.gen_str()
+		insert_text: insert_text.str()
+		insert_text_format: insert_text_format
 	}
 }
 
