@@ -642,12 +642,15 @@ fn extract_parameter_list(node C.TSNode, mut store Store, src_text []byte) []&Sy
 // register_symbols_from_tree scans and registers all the symbols based on the given tree
 pub fn (mut store Store) register_symbols_from_tree(tree &C.TSTree, src_text []byte) {
 	root_node := tree.root_node()
-	child_len := int(root_node.named_child_count())
+	child_len := int(root_node.child_count())
 
 	mut sr := SymbolRegistration{
 		store: unsafe { store }
 		src_text: src_text
-		cursor: TreeCursor{0, u32(child_len), root_node.tree_cursor()}
+		cursor: TreeCursor{
+			child_count: u32(child_len), 
+			cursor: root_node.tree_cursor()
+		}
 	}
 
 	sr.get_scope(sr.cursor.current_node()) or {}
