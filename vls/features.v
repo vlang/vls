@@ -250,13 +250,21 @@ mut:
 	show_local          bool // for displaying local variables
 	filter_return_type  &analyzer.Symbol = &analyzer.Symbol(0) // filters results by type
 	fields_only         bool     // for displaying only the struct/enum fields
-	is_mut              bool     // filters results based on the object's mutability state.
+	show_mut_only       bool     // filters results based on the object's mutability state.
 	ctx 								lsp.CompletionContext
 	completion_items    []lsp.CompletionItem = []lsp.CompletionItem{cap: 100}
 }
 
 fn (mut builder CompletionBuilder) add(item lsp.CompletionItem) {
 	builder.completion_items << item
+}
+
+fn (mut builder CompletionBuilder) is_triggered(node C.TSNode, chr string) bool {
+	return node.next_sibling().get_text(builder.src) == chr || builder.ctx.trigger_character == chr
+}
+
+fn (mut builder CompletionBuilder) is_selector(node C.TSNode) bool {
+	return builder.is_triggered(node, '.')
 }
 
 fn (mut builder CompletionBuilder) build_suggestions(node C.TSNode, offset int) {
@@ -331,19 +339,8 @@ fn (mut builder CompletionBuilder) build_suggestions_from_list(node C.TSNode) {
 		'import_symbols_list' {
 			import_node := closest_symbol_node_parent(node)
 			import_path_node := import_node.child_by_field_name('path')
-			imported_path_dir := builder.store.get_module_path_opt(import_path_node.get_text(builder.src)) or {
-				return
-			}
-
-			imported_syms := builder.store.symbols[imported_path_dir]
-			for imp_sym in imported_syms {
-				if int(imp_sym.access) < int(analyzer.SymbolAccess.public) {
-					continue
-				}
-				builder.add(symbol_to_completion_item(imp_sym, '') or {
-					continue
-				})
-			}
+			import_path := import_path_node.get_text(builder.src)
+			builder.build_suggestions_from_module(import_path)
 		}
 		else {}
 	}
@@ -351,214 +348,101 @@ fn (mut builder CompletionBuilder) build_suggestions_from_list(node C.TSNode) {
 
 // suggestions_from_expr returns a list of results extracted from the Expr node info.
 fn (mut builder CompletionBuilder) build_suggestions_from_expr(node C.TSNode) {
-	match node.get_type() {
-		// 'identifier' {
-		// 	if builder.ctx.trigger_kind == .trigger_character && builder.trigger_character == '.' {
-				
-		// 	}
-		// 	eprintln(builder.ctx)
-		// }
-		// 'selector_expression' {
+	node_type := node.get_type()
+	match node_type {
+		'identifier', 'selector_expression', 'call_expression', 'index_expression' {
+			builder.show_global = false
+			builder.show_local = false
 
-		// }
-		// 'call_expression' {
+			text := node.get_text(builder.src)
+			defer { unsafe { text.free() } }
 
-		// }
-		'type_initializer' {
-
+			if builder.is_selector(node) {	
+				if got_sym := builder.store.infer_symbol_from_node(node, builder.src) {
+					builder.show_mut_only = builder.parent_node.get_type() == 'block' && got_sym.is_mutable()
+					builder.build_suggestions_from_sym(got_sym.return_type, true)
+				} else if builder.store.is_module(text) {
+					builder.build_suggestions_from_module(text)
+				}
+			}
 		}
 		'literal_value' {
 			closest_element_node := closest_named_child(node, u32(builder.offset))
 			if closest_element_node.get_type() == 'keyed_element' {
-				if returned_sym := builder.store.infer_symbol_from_node(closest_element_node, builder.src) { 
-					// if returned_sym.is_returnable() {
-					builder.filter_return_type = returned_sym.return_type
-					// }
-					// TODO: just duplicating code in order to pass tests. refactors should be done later
-					for child_sym in builder.filter_return_type.children {
-						if returned_sym.kind in [.enum_, .struct_] && child_sym.kind != .field {
-							continue
-						}
-						builder.add(symbol_to_completion_item(child_sym, '') or {
-							continue
-						})
-					}
-				}
-				// eprintln(closest_element_node)
+				builder.build_suggestions_from_expr(closest_element_node)
 			} else if returned_sym := builder.store.infer_symbol_from_node(node.parent(), builder.src) {
-				if returned_sym.kind == .struct_ {
-					builder.show_local = false
-					for child_sym in returned_sym.children {
-						if child_sym.kind != .field {
-							continue
-						}
-
-						builder.add(lsp.CompletionItem{
-							label: '${child_sym.name}:'
-							kind: .field
-							insert_text: '${child_sym.name}: \$0'
-							insert_text_format: .snippet
-							detail: child_sym.gen_str()
-						})
-					}
-				}
+				builder.build_suggestions_from_sym(returned_sym, false)
 			}
 		}
 		'keyed_element' {
-
-		}
-		'element' {
-
-		}
-		else {
-			// eprintln(node.get_text(builder.src))
-			found_sym := builder.store.infer_symbol_from_node(node, builder.src) or { analyzer.void_type }
-			builder.filter_return_type = if found_sym.is_returnable() { found_sym.return_type } else { found_sym }
-			is_selector := node.next_sibling().get_text(builder.src) == '.' || builder.ctx.trigger_character == '.'
-		
-			if !isnil(builder.filter_return_type) && !builder.filter_return_type.is_void() {
-				show_mut_only := builder.parent_node.get_type() == 'block' && is_selector && found_sym.is_mutable()
-
-				for child_sym in builder.filter_return_type.children {
-					if builder.filter_return_type.kind in [.enum_, .struct_] && child_sym.kind !in [.field, .function] {
+			if returned_sym := builder.store.infer_symbol_from_node(node, builder.src) { 
+				// if returned_sym.is_returnable() {
+				// builder.filter_return_type = returned_sym.return_type
+				// }
+				// TODO: just duplicating code in order to pass tests. refactors should be done later
+				for child_sym in returned_sym.return_type.children {
+					if returned_sym.kind in [.enum_, .struct_] && child_sym.kind != .field {
 						continue
 					}
-
-					if is_selector {
-						if child_sym.kind != .function && show_mut_only && !child_sym.is_mutable() {
-							continue
-						} else if child_sym.kind == .function && !show_mut_only && child_sym.is_mutable() {
-							continue
-						}
-						
-						if existing_completion_item := symbol_to_completion_item(child_sym, '') {
-							builder.add(lsp.CompletionItem{
-								...existing_completion_item
-								label: child_sym.name
-								insert_text: child_sym.name
-							})
-						}
-					} else if child_sym.kind == .field {
-						builder.add(lsp.CompletionItem{
-							label: '${child_sym.name}:'
-							kind: .field
-							insert_text: '${child_sym.name}: \$0'
-							insert_text_format: .snippet
-							detail: child_sym.gen_str()
-						})
-					}
-				}
-			} else if node.get_type() == 'identifier' && is_selector && builder.store.is_module(node.get_text(builder.src)) {
-				imported_path_dir := builder.store.get_module_path(node.get_text(builder.src))
-				imported_syms := builder.store.symbols[imported_path_dir]
-
-				for imp_sym in imported_syms {
-					if int(imp_sym.access) >= int(analyzer.SymbolAccess.public) {
-						builder.add(symbol_to_completion_item(imp_sym, '') or {
-							continue
-						})
-					}
+					builder.add(symbol_to_completion_item(child_sym, '') or {
+						continue
+					})
 				}
 			}
 		}
+		else {
+			// found_sym := builder.store.infer_symbol_from_node(node, builder.src) or { analyzer.void_type }
+			// builder.filter_return_type = if found_sym.is_returnable() { found_sym.return_type } else { found_sym }
+		}
 	}
-
-// 	match expr {
-// 		ast.SelectorExpr {
-// 			builder.show_global = false
-// 			builder.show_local = false
-
-// 			// If the expr_type is zero and the ident is a
-// 			// module, then it should include a list of public
-// 			// symbols of that module.
-// 			if expr.expr_type == 0 && expr.expr is ast.Ident {
-// 				if expr.expr.name !in builder.modules_aliases {
-// 					return completion_items
-// 				}
-// 				completion_items << builder.suggestions_from_table(expr.expr.name)
-// 				for _, fnn in builder.table.fns {
-// 					if fnn.mod == expr.expr.name && fnn.is_pub {
-// 						completion_items << builder.suggestions_from_fn(fnn, false)
-// 					}
-// 				}
-// 			} else if expr.expr_type != 0 || expr.typ != 0 {
-// 				selected_typ := if expr.typ != 0 { expr.typ } else { expr.expr_type }
-// 				type_sym := builder.table.get_type_symbol(selected_typ)
-// 				if root := expr.root_ident() {
-// 					if root.obj is ast.Var {
-// 						builder.is_mut = root.obj.is_mut
-// 					}
-// 				}
-
-// 				// Include the list of available struct fields based on the type info
-// 				completion_items << builder.suggestions_from_type_sym('', type_sym, true)
-
-// 				// If the selected type is an array or map type, it should
-// 				// include the fields and methods of map/array type.
-// 				if type_sym.kind == .array || type_sym.kind == .map {
-// 					base_symbol_name := if type_sym.kind == .array { 'array' } else { 'map' }
-// 					if base_type_sym := builder.table.find_type(base_symbol_name) {
-// 						completion_items << builder.suggestions_from_type_sym('', base_type_sym,
-// 							true)
-// 					}
-// 				}
-// 				// Include all the type methods
-// 				for m in type_sym.methods {
-// 					// If SelectorExpr is immutable and the method is mutable,
-// 					// it should be excluded.
-// 					if !builder.is_mut && m.params[0].is_mut {
-// 						continue
-// 					}
-// 					completion_items << builder.suggestions_from_fn(m, true)
-// 				}
-// 			}
-// 			return completion_items
-// 		}
-// 		ast.CallExpr {
-// 			// Filter the list of local symbols based on
-// 			// the current arg's type.
-// 			if expr.args.len < expr.expected_arg_types.len {
-// 				builder.show_local = true
-// 				builder.filter_type = expr.expected_arg_types[expr.args.len]
-// 			} else {
-// 				builder.show_local = false
-// 			}
-// 			builder.show_global = false
-// 			return completion_items
-// 		}
-// 		ast.StructInit {
-// 			builder.show_global = false
-// 			builder.show_local = false
-// 			field_node := find_ast_by_pos(expr.fields.map(ast.Node(it)), builder.offset - 1) or {
-// 				ast.empty_node()
-// 			}
-// 			if field_node is ast.StructInitField {
-// 				completion_items << builder.suggestions_from_struct_init_field(field_node)
-// 			} else {
-// 				// if structinit is empty or not within the field position,
-// 				// it must include the list of missing fields instead
-// 				defined_fields := expr.fields.map(it.name)
-// 				struct_type_sym := builder.table.get_type_symbol(expr.typ)
-// 				struct_type_info := struct_type_sym.info as ast.Struct
-// 				for field in struct_type_info.fields {
-// 					if field.name in defined_fields {
-// 						continue
-// 					}
-// 					completion_items << lsp.CompletionItem{
-// 						label: '$field.name:'
-// 						kind: .field
-// 						insert_text: '$field.name: \$0'
-// 						insert_text_format: .snippet
-// 					}
-// 				}
-// 			}
-// 		}
-// 		else {}
-// 	}
 }
 
-fn (mut builder CompletionBuilder) suggestions_from_module(name string) {
+fn (mut builder CompletionBuilder) build_suggestions_from_sym(sym &analyzer.Symbol, is_selector bool) {
+	if isnil(sym) || sym.is_void() {
+		return
+	}
+	
+	for child_sym in sym.children {
+		if is_selector {
+			if sym.kind in [.enum_, .struct_] && child_sym.kind !in [.field, .function] {
+				continue
+			}
 
+			if child_sym.kind != .function && builder.show_mut_only && !child_sym.is_mutable() {
+				continue
+			} else if child_sym.kind == .function && !builder.show_mut_only && child_sym.is_mutable() {
+				continue
+			}
+			
+			if existing_completion_item := symbol_to_completion_item(child_sym, '') {
+				builder.add(lsp.CompletionItem{
+					...existing_completion_item
+					label: child_sym.name
+					insert_text: child_sym.name
+				})
+			}
+		} else if child_sym.kind == .field {
+			builder.add(lsp.CompletionItem{
+				label: '${child_sym.name}:'
+				kind: .field
+				insert_text: '${child_sym.name}: \$0'
+				insert_text_format: .snippet
+				detail: child_sym.gen_str()
+			})
+		}
+	}
+}
+
+fn (mut builder CompletionBuilder) build_suggestions_from_module(name string) {
+	imported_path_dir := builder.store.get_module_path(name)
+	imported_syms := builder.store.symbols[imported_path_dir]
+	for imp_sym in imported_syms {
+		if int(imp_sym.access) >= int(analyzer.SymbolAccess.public) {
+			builder.add(symbol_to_completion_item(imp_sym, '') or {
+				continue
+			})
+		}
+	}
 }
 
 fn (mut builder CompletionBuilder) build_module_suggestions() {
@@ -580,16 +464,13 @@ fn (mut builder CompletionBuilder) build_module_suggestions() {
 
 // Local results. Module names and the scope-based symbols.
 fn (mut builder CompletionBuilder) build_local_suggestions() {
+	file_name := builder.store.cur_file_name
 	// Imported modules. They will be shown to the user if there is no given
 	// type for filtering the results. Invalid imports are excluded.
 	for imp in builder.store.imports[builder.store.cur_dir] {
 		if builder.store.cur_file_path in imp.ranges 
-			&& (builder.store.cur_file_name !in imp.symbols || imp.symbols[builder.store.cur_file_name].len == 0) {
-			imp_name := if builder.store.cur_file_name in imp.aliases { 
-				imp.aliases[builder.store.cur_file_name] 
-			} else { 
-				imp.module_name 
-			}
+			&& (file_name !in imp.symbols || imp.symbols[file_name].len == 0) {
+			imp_name := imp.aliases[file_name] or { imp.module_name }
 			builder.add(lsp.CompletionItem{
 				label: imp_name
 				kind: .module_
