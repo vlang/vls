@@ -595,10 +595,6 @@ fn symbol_to_completion_item(sym &analyzer.Symbol, with_snippet bool) ?lsp.Compl
 			kind = .interface_
 			insert_text.write_string(name)
 		}
-		.typedef {
-			kind = .type_parameter
-			insert_text.write_string(name)
-		}
 		else {
 			return none
 		}
