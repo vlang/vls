@@ -175,7 +175,11 @@ pub fn (info &Symbol) gen_str() string {
 
 			sb.write_b(`(`)
 			for i, v in info.children {
-				sb.write_string(v.gen_str())
+				if v.name.len != 0 {
+					sb.write_string(v.gen_str())
+				} else {
+					sb.write_string(v.return_type.gen_str())
+				}
 				if i < info.children.len - 1 {
 					sb.write_string(', ')
 				}
