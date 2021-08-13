@@ -5,6 +5,7 @@ import json
 import jsonrpc
 import os
 import analyzer
+import strings
 
 const temp_formatting_file_path = os.join_path(os.temp_dir(), 'vls_temp_formatting.v')
 
@@ -240,607 +241,557 @@ fn (mut ls Vls) signature_help(id int, params string) {
 	})
 }
 
-// struct CompletionItemConfig {
-// mut:
-// 	file                ast.File
-// 	offset              int // position of the cursor. used for finding the AST node
-// 	table               &ast.Table
-// 	show_global         bool = true // for displaying global (project) symbols
-// 	show_only_global_fn bool     // for displaying only the functions of the project
-// 	show_local          bool     = true // for displaying local variables
-// 	filter_type         ast.Type = ast.Type(0) // filters results by type
-// 	fields_only         bool     // for displaying only the struct/enum fields
-// 	modules_aliases     []string // for displaying module symbols or module list
-// 	imports_list        []string // for completion_items_from_dir and import symbols list
-// 	is_mut              bool     // filters results based on the object's mutability state.
-// }
+struct CompletionBuilder {
+mut:
+	store              &analyzer.Store
+	src                []byte
+	offset             int
+	parent_node        C.TSNode
+	show_global        bool // for displaying global (project) symbols
+	show_local         bool // for displaying local variables
+	filter_return_type &analyzer.Symbol = &analyzer.Symbol(0) // filters results by type
+	fields_only        bool             // for displaying only the struct/enum fields
+	show_mut_only      bool // filters results based on the object's mutability state.
+	ctx                lsp.CompletionContext
+	completion_items   []lsp.CompletionItem = []lsp.CompletionItem{cap: 100}
+}
 
-// // completion_items_from_stmt returns a list of results from the extracted Stmt node info.
-// fn (mut cfg CompletionItemConfig) completion_items_from_stmt(stmt ast.Stmt) []lsp.CompletionItem {
-// 	mut completion_items := []lsp.CompletionItem{}
-// 	match stmt {
-// 		ast.ExprStmt {
-// 			completion_items << cfg.completion_items_from_expr(stmt.expr)
-// 		}
-// 		ast.AssignStmt {
-// 			if stmt.op != .decl_assign {
-// 				// When reassigning a new value, the server must display
-// 				// the list of available symbols that have the same type
-// 				// as the variable on the left.
-// 				cfg.show_global = false
-// 				cfg.show_only_global_fn = false
-// 				cfg.filter_type = stmt.left_types[stmt.left_types.len - 1]
-// 			}
-// 		}
-// 		ast.Import {
-// 			cfg.show_global = false
-// 			cfg.show_local = false
-// 			dir := os.dir(cfg.file.path)
-// 			dir_contents := os.ls(dir) or { []string{} }
+fn (mut builder CompletionBuilder) add(item lsp.CompletionItem) {
+	builder.completion_items << item
+}
 
-// 			// Checks the offset if it is within the import symbol section
-// 			// a.k.a import <module_name> { <import symbols> }
-// 			if is_within_pos(cfg.offset, stmt.syms_pos) {
-// 				already_imported := stmt.syms.map(it.name)
+fn (builder CompletionBuilder) is_triggered(node C.TSNode, chr string) bool {
+	return node.next_sibling().get_text(builder.src) == chr || builder.ctx.trigger_character == chr
+}
 
-// 				for _, idx in cfg.table.type_idxs {
-// 					type_sym := unsafe { &cfg.table.type_symbols[idx] }
-// 					name := type_sym.name.all_after(type_sym.mod + '.')
-// 					if type_sym.mod != stmt.mod || name in already_imported {
-// 						continue
-// 					}
-// 					match type_sym.kind {
-// 						.struct_ {
-// 							completion_items << lsp.CompletionItem{
-// 								label: name
-// 								kind: .struct_
-// 								insert_text: name
-// 							}
-// 						}
-// 						.enum_ {
-// 							completion_items << lsp.CompletionItem{
-// 								label: name
-// 								kind: .enum_
-// 								insert_text: name
-// 							}
-// 						}
-// 						.interface_ {
-// 							completion_items << lsp.CompletionItem{
-// 								label: name
-// 								kind: .interface_
-// 								insert_text: name
-// 							}
-// 						}
-// 						.sum_type, .alias {
-// 							completion_items << lsp.CompletionItem{
-// 								label: name
-// 								kind: .type_parameter
-// 								insert_text: name
-// 							}
-// 						}
-// 						else {
-// 							continue
-// 						}
-// 					}
-// 				}
+fn (builder CompletionBuilder) is_selector(node C.TSNode) bool {
+	return builder.is_triggered(node, '.')
+}
 
-// 				for _, fnn in cfg.table.fns {
-// 					name := fnn.name.all_after(fnn.mod + '.')
+fn (builder CompletionBuilder) has_same_return_type(sym &analyzer.Symbol) bool {
+	if sym.is_void() || isnil(builder.filter_return_type) {
+		return true
+	}
+	return sym == builder.filter_return_type
+}
 
-// 					if fnn.mod == stmt.mod && name !in already_imported && fnn.is_pub {
-// 						completion_items << lsp.CompletionItem{
-// 							label: name
-// 							kind: .function
-// 							insert_text: name
-// 						}
-// 					}
-// 				}
-// 			} else {
-// 				// list all folders
-// 				completion_items << cfg.completion_items_from_dir(dir, dir_contents, '')
-// 				// list all vlib
-// 				// TODO: vlib must be computed at once only
-// 			}
-// 		}
-// 		ast.Module {
-// 			completion_items << cfg.suggest_mod_names()
-// 		}
-// 		else {}
-// 	}
-// 	return completion_items
-// }
+fn (mut builder CompletionBuilder) build_suggestions(node C.TSNode, offset int) {
+	builder.offset = offset
+	builder.build_suggestions_from_node(node)
+	if builder.show_local {
+		builder.build_local_suggestions()
+	}
+	if builder.show_global {
+		builder.build_global_suggestions()
+	}
+}
 
-// // completion_items_from_table returns a list of results extracted from the type symbols of the ast.
-// fn (mut cfg CompletionItemConfig) completion_items_from_table(mod_name string, symbols ...string) []lsp.CompletionItem {
-// 	// NB: symbols of the said module does not show the full list
-// 	// unless by pressing cmd/ctrl+space or by pressing escape key
-// 	// + deleting the dot + typing again the dot
-// 	mut completion_items := []lsp.CompletionItem{}
+fn (mut builder CompletionBuilder) build_suggestions_from_node(node C.TSNode) {
+	node_type := node.get_type()
+	if node_type in list_node_types {
+		builder.build_suggestions_from_list(node)
+	} else if node_type == 'module_clause' {
+		builder.build_module_name_suggestions()
+	} else {
+		builder.build_suggestions_from_stmt(node)
+	}
+}
 
-// 	// Do not proceed if the functions the only ones required
-// 	// to be displayed to the client
-// 	if cfg.show_global && cfg.show_only_global_fn {
-// 		return completion_items
-// 	}
+// suggestions_from_stmt returns a list of results from the extracted Stmt node info.
+fn (mut builder CompletionBuilder) build_suggestions_from_stmt(node C.TSNode) {
+	match node.get_type() {
+		'short_var_declaration' {
+			builder.show_local = true
+			builder.show_global = true
+		}
+		'assignment_statement' {
+			right_node := node.child_by_field_name('right')
+			left_node := node.child_by_field_name('left')
+			expr_list_count := right_node.named_child_count()
+			left_count := left_node.named_child_count()
+			if expr_list_count == left_count {
+				last_left_node := left_node.named_child(left_count - 1)
+				builder.filter_return_type = builder.store.infer_value_type_from_node(last_left_node,
+					builder.src)
+				builder.show_local = true
+			}
+		}
+		else {
+			builder.build_suggestions_from_expr(node)
+		}
+	}
+}
 
-// 	for sym_name, idx in cfg.table.type_idxs {
-// 		// Just to make sure, negative type indexes or greater than the type table
-// 		// length are not allowed. Symbols names that does not start with a given
-// 		// module name are also not allowed.
-// 		valid_type := idx >= 0 || idx < cfg.table.type_symbols.len
-// 		sym_part_of_module := mod_name.len > 0 && sym_name.starts_with('${mod_name}.')
-// 		name := sym_name.all_after('${mod_name}.')
-// 		if valid_type || sym_part_of_module || (symbols.len > 0 && name in symbols) {
-// 			type_sym := unsafe { &cfg.table.type_symbols[idx] }
-// 			if type_sym.mod != mod_name {
-// 				continue
-// 			}
-// 			completion_items << cfg.completion_items_from_type_sym(name, type_sym, false)
-// 		}
-// 	}
-// 	return completion_items
-// }
+// suggestions_from_list returns a list of results extracted from the list nodes.
+fn (mut builder CompletionBuilder) build_suggestions_from_list(node C.TSNode) {
+	match node.get_type() {
+		'identifier_list' {
+			parent := closest_symbol_node_parent(node)
+			builder.build_suggestions_from_node(parent)
+		}
+		'expression_list' {
+			// expr_list_count := node.named_child_count()
+			parent := closest_symbol_node_parent(node)
+			parent_type := parent.get_type()
+			match parent_type {
+				'assignment_statement' {
+					builder.build_suggestions_from_stmt(parent)
+				}
+				else {
+					// closest_node := closest_named_child(node, u32(builder.offset))
+					// eprintln(closest_node.get_type())
+				}
+			}
+		}
+		'argument_list' {
+			call_expr_arg_cur_idx := node.named_child_count()
+			returned_sym := builder.store.infer_symbol_from_node(node.parent(), builder.src) or {
+				builder.filter_return_type
+			}
+			if call_expr_arg_cur_idx < u32(returned_sym.children.len) {
+				builder.filter_return_type = returned_sym.children[int(call_expr_arg_cur_idx)].return_type
+				builder.show_local = true
+				builder.show_global = true
+			}
+		}
+		'import_symbols_list' {
+			import_node := closest_symbol_node_parent(node)
+			import_path_node := import_node.child_by_field_name('path')
+			import_path := import_path_node.get_text(builder.src)
+			builder.build_suggestions_from_module(import_path)
+		}
+		else {}
+	}
+}
 
-// completion_items_from_expr returns a list of results extracted from the Expr node info.
-// fn (mut cfg CompletionItemConfig) completion_items_from_expr(expr ast.Expr) []lsp.CompletionItem {
-// 	mut completion_items := []lsp.CompletionItem{}
+// suggestions_from_expr returns a list of results extracted from the Expr node info.
+fn (mut builder CompletionBuilder) build_suggestions_from_expr(node C.TSNode) {
+	node_type := node.get_type()
+	match node_type {
+		'identifier', 'selector_expression', 'call_expression', 'index_expression' {
+			builder.show_global = false
+			builder.show_local = false
 
-// 	match expr {
-// 		ast.SelectorExpr {
-// 			cfg.show_global = false
-// 			cfg.show_local = false
+			text := node.get_text(builder.src)
+			defer {
+				unsafe { text.free() }
+			}
 
-// 			// If the expr_type is zero and the ident is a
-// 			// module, then it should include a list of public
-// 			// symbols of that module.
-// 			if expr.expr_type == 0 && expr.expr is ast.Ident {
-// 				if expr.expr.name !in cfg.modules_aliases {
-// 					return completion_items
-// 				}
-// 				completion_items << cfg.completion_items_from_table(expr.expr.name)
-// 				for _, fnn in cfg.table.fns {
-// 					if fnn.mod == expr.expr.name && fnn.is_pub {
-// 						completion_items << cfg.completion_items_from_fn(fnn, false)
-// 					}
-// 				}
-// 			} else if expr.expr_type != 0 || expr.typ != 0 {
-// 				selected_typ := if expr.typ != 0 { expr.typ } else { expr.expr_type }
-// 				type_sym := cfg.table.get_type_symbol(selected_typ)
-// 				if root := expr.root_ident() {
-// 					if root.obj is ast.Var {
-// 						cfg.is_mut = root.obj.is_mut
-// 					}
-// 				}
+			if builder.is_selector(node) {
+				mut selected_node := node
+				if node_type == 'selector_expression' {
+					operand_node := node.child_by_field_name('operand')
+					if operand_node.get_type() == 'call_expression' {
+						selected_node = node
+					}
+				}
+				if got_sym := builder.store.infer_symbol_from_node(selected_node, builder.src) {
+					builder.show_mut_only = builder.parent_node.get_type() == 'block'
+						&& got_sym.is_mutable()
+					builder.build_suggestions_from_sym(got_sym.return_type, true)
+				} else if builder.store.is_module(text) {
+					builder.build_suggestions_from_module(text)
+				}
+			}
+		}
+		'literal_value' {
+			closest_element_node := closest_named_child(node, u32(builder.offset))
+			if closest_element_node.get_type() == 'keyed_element' {
+				builder.build_suggestions_from_expr(closest_element_node)
+			} else if got_sym := builder.store.infer_symbol_from_node(node.parent(), builder.src) {
+				builder.build_suggestions_from_sym(got_sym, false)
+			}
+		}
+		'keyed_element' {
+			if got_sym := builder.store.infer_symbol_from_node(node, builder.src) {
+				builder.show_local = true
+				builder.filter_return_type = got_sym.return_type
+				builder.build_suggestions_from_sym(got_sym.return_type, false)
+			}
+		}
+		'import_symbols' {
+			builder.build_suggestions_from_node(node.named_child(0))
+		}
+		else {
+			// found_sym := builder.store.infer_symbol_from_node(node, builder.src) or { analyzer.void_type }
+			// builder.filter_return_type = if found_sym.is_returnable() { found_sym.return_type } else { found_sym }
+		}
+	}
+}
 
-// 				// Include the list of available struct fields based on the type info
-// 				completion_items << cfg.completion_items_from_type_sym('', type_sym, true)
+fn (mut builder CompletionBuilder) build_suggestions_from_sym(sym &analyzer.Symbol, is_selector bool) {
+	if isnil(sym) || sym.is_void() {
+		return
+	}
 
-// 				// If the selected type is an array or map type, it should
-// 				// include the fields and methods of map/array type.
-// 				if type_sym.kind == .array || type_sym.kind == .map {
-// 					base_symbol_name := if type_sym.kind == .array { 'array' } else { 'map' }
-// 					if base_type_sym := cfg.table.find_type(base_symbol_name) {
-// 						completion_items << cfg.completion_items_from_type_sym('', base_type_sym,
-// 							true)
-// 					}
-// 				}
-// 				// Include all the type methods
-// 				for m in type_sym.methods {
-// 					// If SelectorExpr is immutable and the method is mutable,
-// 					// it should be excluded.
-// 					if !cfg.is_mut && m.params[0].is_mut {
-// 						continue
-// 					}
-// 					completion_items << cfg.completion_items_from_fn(m, true)
-// 				}
-// 			}
-// 			return completion_items
-// 		}
-// 		ast.CallExpr {
-// 			// Filter the list of local symbols based on
-// 			// the current arg's type.
-// 			if expr.args.len < expr.expected_arg_types.len {
-// 				cfg.show_local = true
-// 				cfg.filter_type = expr.expected_arg_types[expr.args.len]
-// 			} else {
-// 				cfg.show_local = false
-// 			}
-// 			cfg.show_global = false
-// 			return completion_items
-// 		}
-// 		ast.StructInit {
-// 			cfg.show_global = false
-// 			cfg.show_local = false
-// 			field_node := find_ast_by_pos(expr.fields.map(ast.Node(it)), cfg.offset - 1) or {
-// 				ast.empty_node()
-// 			}
-// 			if field_node is ast.StructInitField {
-// 				completion_items << cfg.completion_items_from_struct_init_field(field_node)
-// 			} else {
-// 				// if structinit is empty or not within the field position,
-// 				// it must include the list of missing fields instead
-// 				defined_fields := expr.fields.map(it.name)
-// 				struct_type_sym := cfg.table.get_type_symbol(expr.typ)
-// 				struct_type_info := struct_type_sym.info as ast.Struct
-// 				for field in struct_type_info.fields {
-// 					if field.name in defined_fields {
-// 						continue
-// 					}
-// 					completion_items << lsp.CompletionItem{
-// 						label: '$field.name:'
-// 						kind: .field
-// 						insert_text: '$field.name: \$0'
-// 						insert_text_format: .snippet
-// 					}
-// 				}
-// 			}
-// 		}
-// 		else {}
-// 	}
-// 	return completion_items
-// }
+	for child_sym in sym.children {
+		if is_selector {
+			if (sym.kind in [.enum_, .struct_] || sym.kind in analyzer.container_symbol_kinds) 
+				&& child_sym.kind !in [.field, .function] {
+				continue
+			} else if !child_sym.file_path.starts_with(builder.store.cur_dir)
+				&& int(child_sym.access) < int(analyzer.SymbolAccess.public) {
+				continue
+			}
 
-// // completion_items_from_struct_init_field returns the list of items extracted from the ast.StructInitField information
-// // TODO: move it to a single method once other nodes are supported.
-// fn (mut cfg CompletionItemConfig) completion_items_from_struct_init_field(field ast.StructInitField) []lsp.CompletionItem {
-// 	mut completion_items := []lsp.CompletionItem{}
+			if child_sym.kind != .function && builder.show_mut_only && !child_sym.is_mutable() {
+				continue
+			} else if child_sym.kind == .function && !builder.show_mut_only
+				&& child_sym.is_mutable() {
+				continue
+			}
 
-// 	// NB: enable local results only if the node is a field
-// 	cfg.show_local = true
-// 	cfg.show_global = false
-// 	field_type_sym := cfg.table.get_type_symbol(field.expected_type)
-// 	completion_items << cfg.completion_items_from_type_sym('', field_type_sym, field_type_sym.info is ast.Enum)
-// 	cfg.filter_type = field.expected_type
+			if existing_completion_item := symbol_to_completion_item(child_sym, true) {
+				builder.add(existing_completion_item)
+			}
+		} else if child_sym.kind == .field && sym.kind == .struct_ {
+			builder.add(lsp.CompletionItem{
+				label: '$child_sym.name:'
+				kind: .field
+				insert_text: '$child_sym.name: \$0'
+				insert_text_format: .snippet
+				detail: child_sym.gen_str()
+			})
+		} else if child_sym.kind == .field && sym.kind == .enum_ {
+			builder.add(symbol_to_completion_item(child_sym, true) or { continue })
+		}
+	}
 
-// 	return completion_items
-// }
+	if sym.kind in analyzer.container_symbol_kinds {
+		mut base_symbol_name := ''
+		defer { unsafe { base_symbol_name.free() } }
 
-// // completion_items_from_fn returns the list of items extracted from the table.Fn information
-// fn (mut _ CompletionItemConfig) completion_items_from_fn(fnn ast.Fn, is_method bool) []lsp.CompletionItem {
-// 	mut completion_items := []lsp.CompletionItem{}
+		match sym.kind {
+			.chan_ {
+				base_symbol_name = 'chan'
+			}
+			.array_, .variadic {
+				base_symbol_name = 'array'
+			}
+			.map_ {
+				base_symbol_name = 'map'
+			}
+			else {
+				return
+			}
+		}
+		if base_sym := builder.store.symbols[builder.store.auto_imports['']].get(base_symbol_name) {
+			builder.build_suggestions_from_sym(base_sym, is_selector)
+		}
+	}
+}
 
-// 	if fnn.is_main {
-// 		return completion_items
-// 	}
+fn (mut builder CompletionBuilder) build_suggestions_from_module(name string, included_list ...string) {
+	imported_path_dir := builder.store.get_module_path_opt(name) or { 
+		builder.store.auto_imports[name] or { return }
+	}
 
-// 	fn_name := fnn.name.all_after(fnn.mod + '.')
-// 	// This will create a snippet that will automatically
-// 	// create a call expression based on the information of the function
-// 	mut insert_text := fn_name
-// 	mut i := 0
+	imported_syms := builder.store.symbols[imported_path_dir]
+	for imp_sym in imported_syms {
+		if (included_list.len != 0 && imp_sym.name in included_list) || !builder.has_same_return_type(imp_sym.return_type) {
+			continue
+		}
+		if int(imp_sym.access) >= int(analyzer.SymbolAccess.public) {
+			builder.add(symbol_to_completion_item(imp_sym, builder.ctx.trigger_character == '.') or { continue })
+		}
+	}
+}
 
-// 	kind := if is_method { lsp.CompletionItemKind.method } else { lsp.CompletionItemKind.function }
-// 	if fnn.generic_names.len > 0 {
-// 		insert_text += '<'
-// 		for gi, gn in fnn.generic_names {
-// 			if gi != 0 {
-// 				insert_text += ', '
-// 			}
-// 			insert_text += '\${$i:$gn}'
-// 			i++
-// 		}
-// 		insert_text += '>'
-// 	}
-// 	insert_text += '('
-// 	for j, param in fnn.params {
-// 		if is_method && j == 0 {
-// 			continue
-// 		}
-// 		i++
-// 		insert_text += '\${$i:$param.name}'
-// 		if j < fnn.params.len - 1 {
-// 			insert_text += ', '
-// 		}
-// 	}
-// 	insert_text += ')'
-// 	if fnn.return_type.has_flag(.optional) {
-// 		insert_text += ' or { panic(err.msg) }'
-// 	}
-// 	completion_items << lsp.CompletionItem{
-// 		label: fn_name
-// 		kind: kind
-// 		insert_text_format: .snippet
-// 		insert_text: insert_text
-// 	}
-// 	return completion_items
-// }
+fn (mut builder CompletionBuilder) build_module_name_suggestions() {
+	// Explicitly disabling the global and local completion
+	// should never happen but just to make sure.
+	builder.show_global = false
+	builder.show_local = false
 
-// // completion_items_from_type_sym returns the list of items extracted from the type symbol.
-// fn (mut cfg CompletionItemConfig) completion_items_from_type_sym(name string, type_sym ast.TypeSymbol, fields_only bool) []lsp.CompletionItem {
-// 	type_info := type_sym.info
-// 	mut completion_items := []lsp.CompletionItem{}
-// 	match type_info {
-// 		ast.Struct {
-// 			if fields_only {
-// 				for field in type_info.fields {
-// 					if !field.is_pub && cfg.file.mod.name != type_sym.mod {
-// 						continue
-// 					}
-// 					completion_items << lsp.CompletionItem{
-// 						label: field.name
-// 						kind: .field
-// 						insert_text: field.name
-// 					}
-// 				}
-// 			} else {
-// 				mut insert_text := '$name{\n'
-// 				mut i := type_info.fields.len - 1
-// 				for field in type_info.fields {
-// 					if (!field.is_pub && cfg.file.mod.name != type_sym.mod)
-// 						|| field.has_default_expr {
-// 						continue
-// 					}
-// 					insert_text += '\t$field.name: \$$i\n'
-// 					i--
-// 				}
-// 				insert_text += '}'
-// 				completion_items << lsp.CompletionItem{
-// 					label: '$name{}'
-// 					kind: .struct_
-// 					insert_text: insert_text
-// 					insert_text_format: .snippet
-// 				}
-// 			}
-// 		}
-// 		ast.Enum {
-// 			for val in type_info.vals {
-// 				// Use short enum syntax when reassigning, within
-// 				// struct fields, and etc.
-// 				label := if fields_only { '.$val' } else { '${name}.$val' }
-// 				completion_items << lsp.CompletionItem{
-// 					label: label
-// 					kind: .enum_member
-// 					insert_text: label
-// 				}
-// 			}
-// 		}
-// 		ast.Alias, ast.SumType, ast.FnType, ast.Interface {
-// 			completion_items << lsp.CompletionItem{
-// 				label: name
-// 				kind: .type_parameter
-// 				insert_text: name
-// 			}
-// 		}
-// 		else {}
-// 	}
-// 	return completion_items
-// }
+	folder_name := os.base(builder.store.cur_dir).replace(' ', '_')
+	module_name_suggestions := ['main', folder_name]
+	for module_name in module_name_suggestions {
+		builder.add(lsp.CompletionItem{
+			label: 'module ' + module_name
+			insert_text: 'module ' + module_name
+			kind: .variable
+		})
+	}
+}
 
-// // completion_items_from_dir returns the list of import-able folders for autocompletion.
-// fn (cfg CompletionItemConfig) completion_items_from_dir(dir string, dir_contents []string, prefix string) []lsp.CompletionItem {
-// 	mut completion_items := []lsp.CompletionItem{}
-// 	for name in dir_contents {
-// 		full_path := os.join_path(dir, name)
-// 		if !os.is_dir(full_path) || name in cfg.imports_list || name.starts_with('.') {
-// 			continue
-// 		}
-// 		subdir_contents := os.ls(full_path) or { []string{} }
-// 		mod_name := if prefix.len > 0 { '${prefix}.$name' } else { name }
-// 		if name == 'modules' {
-// 			completion_items << cfg.completion_items_from_dir(full_path, subdir_contents,
-// 				mod_name)
-// 			continue
-// 		}
-// 		completion_items << lsp.CompletionItem{
-// 			label: mod_name
-// 			kind: .folder
-// 			insert_text: mod_name
-// 		}
-// 		completion_items << cfg.completion_items_from_dir(full_path, subdir_contents,
-// 			mod_name)
-// 	}
-// 	return completion_items
-// }
+// Local results. Module names and the scope-based symbols.
+fn (mut builder CompletionBuilder) build_local_suggestions() {
+	file_name := builder.store.cur_file_name
+	// Imported modules. They will be shown to the user if there is no given
+	// type for filtering the results. Invalid imports are excluded.
+	if isnil(builder.filter_return_type) {
+		for imp in builder.store.imports[builder.store.cur_dir] {
+			if builder.store.cur_file_path in imp.ranges
+				&& (file_name !in imp.symbols || imp.symbols[file_name].len == 0) {
+				imp_name := imp.aliases[file_name] or { imp.module_name }
+				builder.add(lsp.CompletionItem{
+					label: imp_name
+					kind: .module_
+					insert_text: imp_name
+				})
+			}
+		}
+	}
 
-// fn (mut cfg CompletionItemConfig) suggest_mod_names() []lsp.CompletionItem {
-// 	mut completion_items := []lsp.CompletionItem{}
-// 	// Explicitly disabling the global and local completion
-// 	// should never happen but just to make sure.
-// 	cfg.show_global = false
-// 	cfg.show_local = false
-// 	folder_name := os.base(os.dir(cfg.file.path)).replace(' ', '_')
-// 	module_name_suggestions := ['module main', 'module $folder_name']
-// 	for sg in module_name_suggestions {
-// 		completion_items << lsp.CompletionItem{
-// 			label: sg
-// 			insert_text: sg
-// 			kind: .variable
-// 		}
-// 	}
-// 	return completion_items
-// }
+	// Scope-based symbols that includes the variables inside
+	// the functions and the constants of the file.
+	if file_scope := builder.store.opened_scopes[builder.store.cur_file_path] {
+		mut scope := file_scope.innermost(u32(builder.offset), u32(builder.offset))
+		for !isnil(scope) && scope != file_scope {
+			// constants
+			for scope_sym in scope.get_all_symbols() {
+				if !builder.has_same_return_type(scope_sym.return_type) {
+					continue
+				}
+
+				builder.add(lsp.CompletionItem{
+					label: scope_sym.name
+					kind: .variable
+					detail: scope_sym.gen_str()
+					insert_text: scope_sym.name
+				})
+			}
+
+			scope = scope.parent
+		}
+	}
+}
+
+// Global results. This includes all the symbols within the module such as
+// the structs, typedefs, enums, and the functions.
+fn (mut builder CompletionBuilder) build_global_suggestions() {
+	global_syms := builder.store.symbols[builder.store.cur_dir]
+	for sym in global_syms {
+		if !sym.is_void() && sym.kind != .placeholder {
+			if (sym.kind == .function && sym.name == 'main') || !builder.has_same_return_type(sym.return_type) {
+				continue
+			}
+			builder.add(symbol_to_completion_item(sym, true) or { continue })
+		}
+	}
+
+	file_name := builder.store.cur_file_name
+	for imp in builder.store.imports[builder.store.cur_dir] {
+		if builder.store.cur_file_name in imp.symbols && imp.symbols[file_name].len != 0 {
+			builder.build_suggestions_from_module(imp.module_name, ...imp.symbols[file_name])
+		}
+	}
+
+	$if !test {
+		// inject builtin symbols
+		builder.build_suggestions_from_module('')
+	}
+}
+
+fn symbol_to_completion_item(sym &analyzer.Symbol, with_snippet bool) ?lsp.CompletionItem {
+	mut kind := lsp.CompletionItemKind.text
+	mut name := sym.name
+	mut insert_text_format := lsp.InsertTextFormat.plain_text
+	mut insert_text := strings.new_builder(name.len)
+	defer { unsafe { insert_text.free() } }
+	
+	match sym.kind {
+		.variable {
+			kind = .variable
+			insert_text.write_string(name)
+		}
+		.function {
+			// if function has parent, use method
+			kind = if !sym.parent.is_void() { 
+				lsp.CompletionItemKind.method 
+			} else { 
+				lsp.CompletionItemKind.function 
+			}
+			insert_text.write_string(name)
+			if with_snippet {
+				insert_text.write_b(`(`)
+				for i in 0 .. sym.children.len {
+					insert_text.write_b(`$`)
+					insert_text.write_string(i.str())
+					if i < sym.children.len - 1 {
+						insert_text.write_string(', ')
+					} else {
+						insert_text_format = .snippet
+					}
+				}
+				insert_text.write_b(`)`)
+			}
+		}
+		.struct_ {
+			kind = .struct_
+			insert_text.write_string(name)
+			if with_snippet {
+				insert_text.write_b(`{`)
+				mut i := 0
+				for child_sym in sym.children {
+					if child_sym.kind != .field {
+						continue
+					}
+					insert_text.write_string(child_sym.name + ':\$' + i.str())
+					if i < sym.children.len - 1 {
+						insert_text.write_string(', ')
+					} else {
+						insert_text_format = .snippet
+					}
+					i++
+				}
+				insert_text.write_b(`}`)
+			}
+		}
+		.field {
+			match sym.parent.kind {
+				.enum_ {
+					kind = .enum_member
+					insert_text.write_b(`.`)
+					insert_text.write_string(sym.name)
+					name = insert_text.after(0)
+				}
+				.struct_ {
+					kind = .property
+					insert_text.write_string(name)
+				}
+				else {
+					return none
+				}
+			}
+		}
+		.interface_ {
+			kind = .interface_
+			insert_text.write_string(name)
+		}
+		else {
+			return none
+		}
+	}
+
+	return lsp.CompletionItem{
+		label: name
+		kind: kind
+		detail: sym.gen_str()
+		insert_text: insert_text.str()
+		insert_text_format: insert_text_format
+	}
+}
 
 // TODO: make params use lsp.CompletionParams in the future
 [manualfree]
 fn (mut ls Vls) completion(id int, params string) {
-	// if Feature.completion !in ls.enabled_features {
-	// 	return
-	// }
-	// completion_params := json.decode(lsp.CompletionParams, params) or {
-	// 	ls.panic(err.msg)
-	// 	ls.send_null(id)
-	// 	return
-	// }
-	// file_uri := completion_params.text_document.uri
-	// file := ls.files[file_uri.str()]
-	// src := ls.sources[file_uri.str()]
-	// pos := completion_params.position
+	if Feature.completion !in ls.enabled_features {
+		return
+	}
+	completion_params := json.decode(lsp.CompletionParams, params) or {
+		ls.panic(err.msg)
+		ls.send_null(id)
+		return
+	}
+	uri := completion_params.text_document.uri
+	file := ls.sources[uri]
+	src := file.source
+	tree := ls.trees[uri]
+	root_node := tree.root_node()
+	pos := completion_params.position
+	mut offset := compute_offset(src, pos.line, pos.character)
 
-	// // The context is used for if and when to trigger autocompletion.
-	// // See comments `cfg` for reason.
-	// mut ctx := completion_params.context
+	ls.store.set_active_file_path(uri.path(), file.version)
 
-	// // This is where the items will be pushed and sent to the client.
-	// mut completion_items := []lsp.CompletionItem{}
+	// The context is used for if and when to trigger autocompletion.
+	// See comments `cfg` for reason.
+	mut ctx := completion_params.context
 
-	// // The config is used by all methods for determining the results to be sent
-	// // to the client. See the field comments in CompletionItemConfig for their
-	// // purposes.
-	// //
-	// // Other parsers use line character-based position for determining the AST node.
-	// // The V parser on the other hand, uses a byte offset (line number is supplied
-	// // but for certain cases) hence the need to convert the said positions to byte
-	// // offsets.
-	// //
-	// // NOTE: Transfer it back to struct fields after
-	// // https://github.com/vlang/v/pull/7976 has been merged.
-	// modules_aliases := file.imports.map(it.alias)
-	// imports_list := file.imports.map(it.mod)
-	// mut cfg := CompletionItemConfig{
-	// 	file: file
-	// 	modules_aliases: modules_aliases
-	// 	imports_list: imports_list
-	// 	offset: compute_offset(src, pos.line, pos.character)
-	// 	table: ls.tables[file_uri.dir()]
-	// }
-	// // There are some instances that the user would invoke the autocompletion
-	// // through a combination of shortcuts (like Ctrl/Cmd+Space) and the results
-	// // wouldn't appear even though one of the trigger characters is on the left
-	// // or near the cursor. In that case, the context data would be modified in
-	// // order to satisfy those specific cases.
-	// if ctx.trigger_kind == .invoked && cfg.offset - 1 >= 0 && file.stmts.len > 0 && src.len > 3 {
-	// 	mut prev_idx := cfg.offset
-	// 	mut ctx_changed := false
-	// 	if src[cfg.offset - 1] in [`.`, `:`, `=`, `{`, `,`, `(`] {
-	// 		prev_idx--
-	// 		ctx_changed = true
-	// 	} else if src[cfg.offset - 1] == ` ` && cfg.offset - 2 >= 0
-	// 		&& src[cfg.offset - 2] !in [src[cfg.offset - 1], `.`] {
-	// 		prev_idx -= 2
-	// 		cfg.offset -= 2
-	// 		ctx_changed = true
-	// 	}
+	// The config is used by all methods for determining the results to be sent
+	// to the client. See the field comments in CompletionBuilder for their
+	// purposes.
+	mut builder := CompletionBuilder{
+		store: &ls.store
+		src: src
+	}
 
-	// 	if ctx_changed {
-	// 		ctx = lsp.CompletionContext{
-	// 			trigger_kind: .trigger_character
-	// 			trigger_character: src[prev_idx].str()
-	// 		}
-	// 	}
-	// }
-	// // The language server uses the `trigger_character` as a sole basis for triggering
-	// // the data extraction and autocompletion. The `trigger_character` kind is only
-	// // received by the server if the user presses one of the server-defined trigger
-	// // characters [dot, parenthesis, curly brace, etc.]
-	// if ctx.trigger_kind == .trigger_character {
-	// 	// NOTE: DO NOT REMOVE YET ~ @ned
-	// 	// // The offset is adjusted and the suggestions for local and global symbols are
-	// 	// // disabled if a period/dot is detected and the character on the left is not a space.
-	// 	// if ctx.trigger_character == '.' && (cfg.offset - 1 >= 0 && src[cfg.offset - 1] != ` `) {
-	// 	// 	cfg.show_global = false
-	// 	// 	cfg.show_local = false
-	// 	// 	cfg.offset -= 2
-	// 	// }
-	// 	if src[cfg.offset - 1] == ` ` {
-	// 		cfg.offset--
-	// 	}
+	// There are some instances that the user would invoke the autocompletion
+	// through a combination of shortcuts (like Ctrl/Cmd+Space) and the results
+	// wouldn't appear even though one of the trigger characters is on the left
+	// or near the cursor. In that case, the context data would be modified in
+	// order to satisfy those specific cases.
+	if ctx.trigger_kind == .invoked && offset - 1 >= 0 && root_node.named_child_count() > 0
+		&& src.len > 3 {
+		mut prev_idx := offset
+		mut ctx_changed := false
+		if src[offset - 1] in [`.`, `:`, `=`, `{`, `,`, `(`] {
+			prev_idx--
+			ctx_changed = true
+		} else if src[offset - 1] == ` ` && offset - 2 >= 0
+			&& src[offset - 2] !in [src[offset - 1], `.`] {
+			prev_idx -= 2
+			offset -= 2
+			ctx_changed = true
+		}
 
-	// 	// Once the offset has been finalized it will then search for the AST node and
-	// 	// extract it's data using the corresponding methods depending on the node type.
-	// 	node := find_ast_by_pos(file.stmts.map(ast.Node(it)), cfg.offset) or { ast.empty_node() }
-	// 	match node {
-	// 		ast.Stmt {
-	// 			completion_items << cfg.completion_items_from_stmt(node)
-	// 		}
-	// 		ast.Expr {
-	// 			completion_items << cfg.completion_items_from_expr(node)
-	// 		}
-	// 		ast.StructInitField {
-	// 			completion_items << cfg.completion_items_from_struct_init_field(node)
-	// 		}
-	// 		else {}
-	// 	}
-	// } else if ctx.trigger_kind == .invoked && (file.stmts.len == 0 || src.len <= 3) {
-	// 	// When a V file is empty, a list of `module $name` suggsestions will be displayed.
-	// 	completion_items << cfg.suggest_mod_names()
-	// } else {
-	// 	// Display only the project's functions if none are satisfied
-	// 	cfg.show_only_global_fn = true
-	// }
+		if ctx_changed {
+			ctx = lsp.CompletionContext{
+				trigger_kind: .trigger_character
+				trigger_character: src[prev_idx].ascii_str()
+			}
+		}
+	}
 
-	// // Local results. Module names and the scope-based symbols.
-	// if cfg.show_local {
-	// 	// Imported modules. They will be shown to the user if there is no given
-	// 	// type for filtering the results. Invalid imports are excluded.
-	// 	for imp in file.imports {
-	// 		if imp.syms.len == 0 && (cfg.filter_type == ast.Type(0)
-	// 			|| imp.mod !in ls.invalid_imports[file_uri.str()]) {
-	// 			completion_items << lsp.CompletionItem{
-	// 				label: imp.alias
-	// 				kind: .module_
-	// 				insert_text: imp.alias
-	// 			}
-	// 		}
-	// 	}
+	// The language server uses the `trigger_character` as a sole basis for triggering
+	// the data extraction and autocompletion. The `trigger_character` kind is only
+	// received by the server if the user presses one of the server-defined trigger
+	// characters [dot, parenthesis, curly brace, etc.]
+	if ctx.trigger_kind == .trigger_character {
+		// NOTE: DO NOT REMOVE YET ~ @ned
+		// The offset is adjusted and the suggestions for local and global symbols are
+		// disabled if a period/dot is detected and the character on the left is not a space.
+		if ctx.trigger_character == '.' && (offset - 1 >= 0 && src[offset - 1] != ` `) {
+			builder.show_global = false
+			builder.show_local = false
 
-	// 	// Scope-based symbols that includes the variables inside
-	// 	// the functions and the constants of the file.
-	// 	inner_scope := file.scope.innermost(cfg.offset)
-	// 	for scope in [file.scope, inner_scope] {
-	// 		for _, obj in scope.objects {
-	// 			mut name := ''
-	// 			match obj {
-	// 				ast.ConstField, ast.Var {
-	// 					if cfg.filter_type != ast.Type(0) && obj.typ != cfg.filter_type {
-	// 						continue
-	// 					}
-	// 					name = obj.name
-	// 				}
-	// 				else {
-	// 					continue
-	// 				}
-	// 			}
-	// 			mut kind := lsp.CompletionItemKind.variable
-	// 			if obj is ast.ConstField {
-	// 				name = name.all_after('${obj.mod}.')
-	// 				kind = .constant
-	// 			}
-	// 			completion_items << lsp.CompletionItem{
-	// 				label: name
-	// 				kind: kind
-	// 				insert_text: name
-	// 			}
-	// 		}
-	// 	}
-	// }
-	// // Global results. This includes all the symbols within the module such as
-	// // the structs, typedefs, enums, and the functions.
-	// if cfg.show_global {
-	// 	mut import_symbols := []string{}
-	// 	for imp in cfg.file.imports {
-	// 		if imp.syms.len == 0 {
-	// 			continue
-	// 		}
-	// 		for sym in imp.syms {
-	// 			import_symbols << imp.mod + '.' + sym.name
-	// 		}
-	// 		completion_items << cfg.completion_items_from_table(imp.mod, ...imp.syms.map(it.name))
-	// 	}
+			offset--
+			if src[offset - 1] !in [`)`, `]`] {
+				offset--
+			}
+		}
 
-	// 	// In table, functions are separated from type symbols.
-	// 	completion_items << cfg.completion_items_from_table(file.mod.name)
+		for src[offset] == ` ` {
+			offset--
+		}
 
-	// 	// This part will extract the functions from both the builtin module and
-	// 	// within the module (except the main() fn if present.)
-	// 	for _, fnn in cfg.table.fns {
-	// 		if fnn.mod == file.mod.name
-	// 			|| (fnn.mod == 'builtin' && fnn.name in ls.builtin_symbols)
-	// 			|| (fnn.mod in cfg.imports_list && fnn.name in import_symbols) {
-	// 			completion_items << cfg.completion_items_from_fn(fnn, false)
-	// 		}
-	// 	}
-	// 	unsafe { import_symbols.free() }
-	// }
-	// // After that, it will send the list to the client.
-	// ls.send(jsonrpc.Response<[]lsp.CompletionItem>{
-	// 	id: id
-	// 	result: completion_items
-	// })
-	// unsafe {
-	// 	completion_items.free()
-	// 	modules_aliases.free()
-	// 	imports_list.free()
-	// }
+		// Once the offset has been finalized it will then search for the AST node and
+		// extract it's data using the corresponding methods depending on the node type.
+		mut node := traverse_node2(root_node, u32(offset))
+		parent_node := traverse_node(root_node, u32(offset))
+
+		if root_node.is_error() && root_node.get_type() == 'ERROR' {
+			// point to the identifier for assignment statement
+			node = traverse_node(node, node.start_byte())
+		} else if node.get_type() == 'block' {
+			node = traverse_node2(root_node, u32(offset))
+		} else if node.is_error() && node.get_type() == 'ERROR' {
+			node = node.prev_named_sibling()
+		} else if node.start_byte() > u32(offset) {
+			node = closest_named_child(closest_symbol_node_parent(node), u32(offset))
+		}
+
+		builder.ctx = ctx
+		builder.parent_node = parent_node
+		builder.build_suggestions(node, offset)
+	} else if ctx.trigger_kind == .invoked && (root_node.named_child_count() == 0 || src.len <= 3) {
+		// When a V file is empty, a list of `module $name` suggsestions will be displayed.
+		builder.build_module_name_suggestions()
+	} else {
+		// Display only the project's functions if none are satisfied
+		builder.offset = offset
+		builder.build_local_suggestions()
+
+		$if !test {
+			builder.build_global_suggestions()
+		}
+	}
+
+	// After that, it will send the list to the client.
+	ls.send(jsonrpc.Response<[]lsp.CompletionItem>{
+		id: id
+		result: builder.completion_items
+	})
 }
 
 fn (mut ls Vls) hover(id int, params string) {
@@ -892,7 +843,7 @@ fn get_hover_data(mut store analyzer.Store, node C.TSNode, uri lsp.DocumentUri, 
 			contents: lsp.v_marked_string('import ${found_imp.module_name} as ' + found_imp.aliases[uri.path()] or { found_imp.module_name })
 			range: tsrange_to_lsp_range(found_imp.ranges[uri.path()])
 		}	
-	} else if node.parent().has_error() || node.parent().is_missing() {
+	} else if node.parent().is_error() || node.parent().is_missing() {
 		return none
 	}
 
@@ -990,7 +941,7 @@ fn (mut ls Vls) definition(id int, params string) {
 	mut node := traverse_node(tree.root_node(), u32(offset))
 	mut original_range := node.range()
 	node_type := node.get_type()
-	if node.is_null() || (node.parent().has_error() || node.parent().is_missing()) {
+	if node.is_null() || (node.parent().is_error() || node.parent().is_missing()) {
 		ls.send_null(id)
 		return
 	}

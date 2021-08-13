@@ -175,7 +175,11 @@ pub fn (info &Symbol) gen_str() string {
 
 			sb.write_b(`(`)
 			for i, v in info.children {
-				sb.write_string(v.gen_str())
+				if v.name.len != 0 {
+					sb.write_string(v.gen_str())
+				} else {
+					sb.write_string(v.return_type.gen_str())
+				}
 				if i < info.children.len - 1 {
 					sb.write_string(', ')
 				}
@@ -194,7 +198,11 @@ pub fn (info &Symbol) gen_str() string {
 
 			sb.write_string(info.name)
 			sb.write_b(` `)
-			sb.write_string(info.return_type.name)
+			if info.return_type.kind == .function_type {
+				sb.write_string(info.return_type.gen_str())
+			} else {
+				sb.write_string(info.return_type.name)
+			}
 		}
 		.typedef, .sumtype {
 			if info.kind == .typedef && info.parent.is_void() {
@@ -343,6 +351,10 @@ pub fn (sym &Symbol) is_void() bool {
 
 pub fn (sym &Symbol) is_returnable() bool {
 	return sym.kind == .variable || sym.kind == .field || sym.kind == .function
+}
+
+pub fn (sym &Symbol) is_mutable() bool {
+	return sym.access == .private_mutable || sym.access == .public_mutable || sym.access == .global
 }
 
 [unsafe]

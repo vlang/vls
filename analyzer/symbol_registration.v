@@ -308,9 +308,9 @@ fn (mut sr SymbolRegistration) fn_decl(fn_node C.TSNode) ?&Symbol {
 		if receivers.len != 0 {
 			mut parent := receivers[0].return_type
 			if !isnil(parent) && !parent.is_void() {
-				// eprintln('adding ${fn_sym.name} to ${parent.kind} ${parent.gen_str()} ${parent.is_void()}')
-				if parent.access == .private_mutable {
-					fn_sym.access = if fn_sym.access == .private { parent.access } else { SymbolAccess.public_mutable }
+				// eprintln('adding ${fn_sym.name} to ${parent.kind} ${parent.gen_str()} ${parent.access} ${parent.is_void()}')
+				if receivers[0].access == .private_mutable {
+					fn_sym.access = if fn_sym.access == .private { receivers[0].access } else { SymbolAccess.public_mutable }
 				}
 				parent.add_child(mut fn_sym) or {}
 			}
@@ -321,13 +321,13 @@ fn (mut sr SymbolRegistration) fn_decl(fn_node C.TSNode) ?&Symbol {
 
 	// scan params
 	mut params := extract_parameter_list(params_list_node, mut sr.store, sr.src_text)
+	defer { unsafe { params.free() } }
+
 	for i := 0; i < params.len; i++ {
 		mut param := params[i]
 		fn_sym.add_child(mut param) or { continue }
 		scope.register(param) or { continue }
 	}
-
-	unsafe { params.free() }
 
 	// extract function body
 	if !body_node.is_null() && !sr.is_import {
@@ -453,7 +453,11 @@ fn (mut sr SymbolRegistration) short_var_decl(var_decl C.TSNode) ?[]&Symbol {
 				var_access = .private_mutable
 			}
 
-			right_type := sr.store.infer_value_type_from_node(right, sr.src_text)
+			mut right_type := sr.store.infer_value_type_from_node(right, sr.src_text)
+			if right_type.is_returnable() {
+				right_type = right_type.return_type
+			}
+
 			vars << &Symbol{
 				name: left.get_text(sr.src_text)
 				kind: .variable

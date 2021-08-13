@@ -177,7 +177,7 @@ pub fn (ss &Store) find_fn_symbol(module_name string, return_type &Symbol, param
 	return none
 }
 
-const container_symbol_kinds = [SymbolKind.chan_, .array_, .map_, .ref, .variadic, .optional, .multi_return]
+pub const container_symbol_kinds = [SymbolKind.chan_, .array_, .map_, .ref, .variadic, .optional, .multi_return]
 
 // register_symbol registers the given symbol
 pub fn (mut ss Store) register_symbol(mut info Symbol) ?&Symbol {
@@ -777,6 +777,13 @@ pub fn (mut ss Store) infer_value_type_from_node(node C.TSNode, src_text []byte)
 			}
 			return got_sym
 		}
+		// 'call_expression' {
+		// 	sym := ss.infer_value_type_from_node(node.child_by_field_name('function'), src_text) 
+		// 	return sym.return_type
+		// }
+		// 'argument_list' {
+		// 	return ss.infer_value_type_from_node(node.parent(), src_text)
+		// }
 		else {
 			return ss.infer_symbol_from_node(node, src_text) or { analyzer.void_type }
 		}

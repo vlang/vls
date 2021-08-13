@@ -63,7 +63,7 @@ pub const (
 		.document_symbol,
 		.workspace_symbol,
 		.signature_help,
-		// .completion,
+		.completion,
 		.hover,
 		.folding_range,
 		.definition,
@@ -74,30 +74,6 @@ interface ReceiveSender {
 	debug bool
 	send(data string)
 	receive() ?string
-}
-
-struct File {
-mut:
-	source  []byte
-	version int = 1
-}
-
-[unsafe]
-fn (file &File) free() {
-	unsafe {
-		file.source.free()
-		file.version = 1
-	}
-}
-
-fn (file_map map[string]File) count(dir string) int {
-	mut file_count := 0
-	for k, _ in file_map {
-		if k.starts_with(dir) {
-			file_count++
-		}
-	}
-	return file_count
 }
 
 struct Vls {
@@ -326,7 +302,7 @@ fn monitor_changes(mut ls Vls) {
 				}
 
 				uri := lsp.document_uri_from_path(ls.store.cur_file_path)
-				analyze(mut ls.store, uri, ls.root_uri, ls.trees[uri], ls.sources[uri])
+				analyze(mut ls.store, ls.root_uri, ls.trees[uri], ls.sources[uri])
 				ls.is_typing = false
 				ls.show_diagnostics(uri)
 				unsafe { uri.free() }

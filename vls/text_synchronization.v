@@ -5,10 +5,10 @@ import lsp
 import os
 import analyzer
 
-fn analyze(mut store analyzer.Store, uri lsp.DocumentUri, root_uri lsp.DocumentUri, tree &C.TSTree, file File) {
+fn analyze(mut store analyzer.Store, root_uri lsp.DocumentUri, tree &C.TSTree, file File) {
 	store.clear_messages()
-	store.set_active_file_path(uri.path(), file.version)
-	store.import_modules_from_tree(tree, file.source, os.join_path(uri.dir_path(), 'modules'),
+	store.set_active_file_path(file.uri.path(), file.version)
+	store.import_modules_from_tree(tree, file.source, os.join_path(file.uri.dir_path(), 'modules'),
 		root_uri.path())
 
 	store.register_symbols_from_tree(tree, file.source)
@@ -38,16 +38,27 @@ fn (mut ls Vls) did_open(_ int, params string) {
 			file_uri := lsp.document_uri_from_path(full_path)
 
 			if file_uri != uri {
-				ls.sources[file_uri] = File{ source: os.read_bytes(full_path) or { [] } }
+				ls.sources[file_uri] = File{ 
+					uri: file_uri.clone(), 
+					source: os.read_bytes(full_path) or { [] } 
+				}
 				source_str := ls.sources[file_uri].source.bytestr()
 				ls.trees[file_uri] = ls.parser.parse_string(source_str)
 				unsafe { source_str.free() }
 			} else {
-				ls.sources[uri] = File{ source: src.bytes() }
+				ls.sources[uri] = File{ source: src.bytes(), uri: uri }
 				ls.trees[uri] = ls.parser.parse_string(src)
 			}
 
-			analyze(mut ls.store, file_uri, ls.root_uri, ls.trees[file_uri], ls.sources[file_uri])
+			// V's interop with tree sitter's parse_string is buggy sometimes
+			// especially if the code is incomplete. It reattempts to re-parse
+			// an appropriate tree by reducing decrement the source length by 1
+			if !isnil(ls.trees[file_uri]) && ls.trees[file_uri].root_node().get_type() == 'ERROR' {
+				unsafe { ls.trees[file_uri].free() }
+				ls.trees[file_uri] = ls.parser.parse_string_with_old_tree_and_len(src, &C.TSTree(0), u32(src.len - 1))
+			}
+
+			analyze(mut ls.store, ls.root_uri, ls.trees[file_uri], ls.sources[file_uri])
 			ls.show_diagnostics(file_uri)
 			
 			unsafe {
@@ -58,10 +69,11 @@ fn (mut ls Vls) did_open(_ int, params string) {
 		ls.store.set_active_file_path(uri.path(), ls.sources[uri].version)
 		unsafe { files.free() }
 	} else if uri !in ls.sources && uri !in ls.trees {
-		ls.sources[uri] = File{ source: src.bytes() }
+		ls.sources[uri] = File{ source: src.bytes(), uri: uri }
 		ls.trees[uri] = ls.parser.parse_string(src)
+
 		if !ls.store.has_file_path(uri.path()) || uri.path() !in ls.store.opened_scopes {
-			analyze(mut ls.store, uri, ls.root_uri, ls.trees[uri], ls.sources[uri])
+			analyze(mut ls.store, ls.root_uri, ls.trees[uri], ls.sources[uri])
 		}
 		ls.show_diagnostics(uri)
 	}
@@ -101,7 +113,7 @@ fn (mut ls Vls) did_change(_ int, params string) {
 
 		// remove immediately the symbol
 		if content_change.text.len == 0 && diff < 0 {
-			deleted := ls.store.delete_symbol_at_node(
+			ls.store.delete_symbol_at_node(
 				ls.trees[uri].root_node(), 
 				old_src,
 				start_point: lsp_pos_to_tspoint(start_pos)
@@ -109,8 +121,6 @@ fn (mut ls Vls) did_change(_ int, params string) {
 				start_byte: u32(start_idx)
 				end_byte: u32(old_end_idx)
 			)
-
-			ls.log_message(deleted.str(), .info)
 		}
 
 		// This part should move all the characters to their new positions
@@ -165,7 +175,13 @@ fn (mut ls Vls) did_change(_ int, params string) {
 		unsafe { content_change.text.free() }
 	}
 
-	new_tree := ls.parser.parse_string_with_old_tree(new_src.bytestr(), ls.trees[uri])
+	// See comment in `did_open`.
+	mut new_tree := ls.parser.parse_string_with_old_tree(new_src.bytestr(), ls.trees[uri])
+	if !isnil(new_tree) && new_tree.root_node().get_type() == 'ERROR' {
+		unsafe { new_tree.free() }
+		new_tree = ls.parser.parse_string_with_old_tree_and_len(new_src.bytestr(), ls.trees[uri], u32(new_src.len - 1))
+	}
+	
 	// ls.log_message('new tree: ${new_tree.root_node().sexpr_str()}', .info)
 
 	unsafe {

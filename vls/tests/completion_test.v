@@ -4,7 +4,6 @@ import json
 import lsp
 import os
 
-// NOTE: skip module_symbols_selector for now, see note in text_synchronization.v#parse_imports
 const completion_inputs = {
 	'assign.vv':                            lsp.CompletionParams{
 		context: lsp.CompletionContext{.trigger_character, ' '}
@@ -24,7 +23,7 @@ const completion_inputs = {
 	}
 	'filtered_fields_in_selector.vv':       lsp.CompletionParams{
 		context: lsp.CompletionContext{.trigger_character, '.'}
-		position: lsp.Position{6, 9}
+		position: lsp.Position{16, 9}
 	}
 	'filtered_methods_in_immutable_var.vv': lsp.CompletionParams{
 		context: lsp.CompletionContext{.trigger_character, '.'}
@@ -36,7 +35,7 @@ const completion_inputs = {
 	}
 	'import_symbols.vv':                    lsp.CompletionParams{
 		context: lsp.CompletionContext{.trigger_character, ' '}
-		position: lsp.Position{2, 13}
+		position: lsp.Position{2, 12}
 	}
 	'import.vv':                            lsp.CompletionParams{
 		context: lsp.CompletionContext{.trigger_character, ' '}
@@ -45,6 +44,10 @@ const completion_inputs = {
 	'incomplete_module.vv':                 lsp.CompletionParams{
 		context: lsp.CompletionContext{.invoked, ''}
 		position: lsp.Position{0, 7}
+	}
+	'incomplete_call_expr_selector.vv': lsp.CompletionParams{
+		context: lsp.CompletionContext{.trigger_character, '.'}
+		position: lsp.Position{11, 20}
 	}
 	'incomplete_nested_selector.vv':        lsp.CompletionParams{
 		context: lsp.CompletionContext{.trigger_character, '.'}
@@ -73,11 +76,13 @@ const completion_results = {
 		lsp.CompletionItem{
 			label: 'two'
 			kind: .variable
+			detail: 'two int'
 			insert_text: 'two'
 		},
 		lsp.CompletionItem{
 			label: 'zero'
 			kind: .variable
+			detail: 'mut zero int'
 			insert_text: 'zero'
 		},
 	]
@@ -97,32 +102,45 @@ const completion_results = {
 		lsp.CompletionItem{
 			label: 'sample_num'
 			kind: .variable
+			detail: 'sample_num int'
 			insert_text: 'sample_num'
 		},
 		lsp.CompletionItem{
 			label: 'sample_num2'
 			kind: .variable
+			detail: 'sample_num2 int'
 			insert_text: 'sample_num2'
 		},
+		lsp.CompletionItem{
+			label: 'add_to_four'
+			kind: .function
+			detail: 'fn add_to_four(num int) int'
+			insert_text: 'add_to_four(\$0)'
+			insert_text_format: .snippet
+		}
 	]
 	'enum_val_in_struct.vv':                [
 		lsp.CompletionItem{
 			label: '.golden_retriever'
+			detail: '(Breed).golden_retriever int'
 			kind: .enum_member
 			insert_text: '.golden_retriever'
 		},
 		lsp.CompletionItem{
 			label: '.beagle'
+			detail: '(Breed).beagle int'
 			kind: .enum_member
 			insert_text: '.beagle'
 		},
 		lsp.CompletionItem{
 			label: '.chihuahua'
+			detail: '(Breed).chihuahua int'
 			kind: .enum_member
 			insert_text: '.chihuahua'
 		},
 		lsp.CompletionItem{
 			label: '.dalmatian'
+			detail: '(Breed).dalmatian int'
 			kind: .enum_member
 			insert_text: '.dalmatian'
 		},
@@ -130,62 +148,59 @@ const completion_results = {
 	'filtered_fields_in_selector.vv':       [
 		lsp.CompletionItem{
 			label: 'output_file_name'
-			kind: .field
+			detail: 'pub mut (Log).output_file_name string'
+			kind: .property
 			insert_text: 'output_file_name'
-		},
-		lsp.CompletionItem{
-			label: 'log_cli'
-			kind: .method
-			insert_text: 'log_cli(\${1:s}, \${2:level})'
-			insert_text_format: .snippet
 		},
 	]
 	'filtered_methods_in_immutable_var.vv': [
 		lsp.CompletionItem{
 			label: 'lol'
 			kind: .method
+			detail: 'fn (Foo) lol() string'
 			insert_text: 'lol()'
-			insert_text_format: .snippet
+			insert_text_format: .plain_text
 		},
 	]
 	'filtered_methods_in_mutable_var.vv':   [
 		lsp.CompletionItem{
 			label: 'set_name'
 			kind: .method
-			insert_text: 'set_name(\${1:name})'
+			detail: 'mut fn (Foo) set_name(name string) void'
+			insert_text: 'set_name(\$0)'
 			insert_text_format: .snippet
 		},
 		lsp.CompletionItem{
 			label: 'lol'
 			kind: .method
+			detail: 'fn (Foo) lol() string'
 			insert_text: 'lol()'
-			insert_text_format: .snippet
+			insert_text_format: .plain_text
 		},
 	]
 	'import_symbols.vv':                    [
 		lsp.CompletionItem{
 			label: 'DB'
 			kind: .struct_
+			detail: 'DB'
 			insert_text: 'DB'
 		},
 		lsp.CompletionItem{
 			label: 'Row'
 			kind: .struct_
+			detail: 'Row'
 			insert_text: 'Row'
-		},
-		lsp.CompletionItem{
-			label: 'C.PGResult'
-			kind: .struct_
-			insert_text: 'C.PGResult'
 		},
 		lsp.CompletionItem{
 			label: 'Config'
 			kind: .struct_
+			detail: 'Config'
 			insert_text: 'Config'
 		},
 		lsp.CompletionItem{
 			label: 'connect'
 			kind: .function
+			detail: 'pub fn connect(config Config) ?DB'
 			insert_text: 'connect'
 		},
 	]
@@ -221,38 +236,52 @@ const completion_results = {
 	'incomplete_nested_selector.vv':        [
 		lsp.CompletionItem{
 			label: 'name'
-			kind: .field
+			kind: .property
+			detail: '(Barw).name string'
 			insert_text: 'name'
 		},
 		lsp.CompletionItem{
 			label: 'theres_a_method'
 			kind: .method
+			detail: 'fn (Barw) theres_a_method() void'
 			insert_text: 'theres_a_method()'
-			insert_text_format: .snippet
+			insert_text_format: .plain_text
 		},
 	]
 	'incomplete_selector.vv':               [
 		lsp.CompletionItem{
 			label: 'name'
-			kind: .field
+			kind: .property
+			detail: '(Foo).name string'
 			insert_text: 'name'
 		},
 		lsp.CompletionItem{
 			label: 'lol'
 			kind: .method
+			detail: 'fn (Foo) lol() string'
 			insert_text: 'lol()'
-			insert_text_format: .snippet
+			insert_text_format: .plain_text
 		},
+	]
+	'incomplete_call_expr_selector.vv':        [
+		lsp.CompletionItem{
+			label: 'len'
+			kind: .property
+			detail: '(Bee).len int'
+			insert_text: 'len'
+		}
 	]
 	'local_results.vv':                     [
 		lsp.CompletionItem{
 			label: 'foo'
 			kind: .variable
+			detail: 'foo string'
 			insert_text: 'foo'
 		},
 		lsp.CompletionItem{
 			label: 'bar'
 			kind: .variable
+			detail: 'bar int'
 			insert_text: 'bar'
 		},
 	]
@@ -260,24 +289,28 @@ const completion_results = {
 		lsp.CompletionItem{
 			label: 'Point'
 			kind: .struct_
-			insert_text: 'Point{}'
+			detail: 'Point'
+			insert_text: 'Point{a:\$0, b:\$1}'
+			insert_text_format: .snippet
 		},
 		lsp.CompletionItem{
 			label: 'this_is_a_function'
 			kind: .function
+			detail: 'pub fn this_is_a_function() string'
 			insert_text: 'this_is_a_function()'
-			insert_text_format: .snippet
 		},
 	]
 	'struct_init.vv':                       [
 		lsp.CompletionItem{
 			label: 'name:'
+			detail: '(Person).name string'
 			kind: .field
 			insert_text_format: .snippet
 			insert_text: 'name: \$0'
 		},
 		lsp.CompletionItem{
 			label: 'age:'
+			detail: '(Person).age int'
 			kind: .field
 			insert_text_format: .snippet
 			insert_text: 'age: \$0'

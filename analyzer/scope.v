@@ -1,8 +1,9 @@
 module analyzer
 
 pub struct ScopeTree {
-mut:
+pub mut:
 	parent     &ScopeTree = &ScopeTree(0)
+mut:
 	start_byte u32
 	end_byte   u32
 	symbols    []&Symbol
