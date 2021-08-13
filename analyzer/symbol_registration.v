@@ -211,15 +211,39 @@ fn (mut sr SymbolRegistration) interface_decl(interface_decl_node C.TSNode) ?&Sy
 			}
 			'interface_spec' {
 				param_node := field_node.child_by_field_name('parameters')
+				name_node := field_node.child_by_field_name('name')
+				result_node := field_node.child_by_field_name('result')
+				method_access := if access == .private_mutable { 
+					SymbolAccess.public_mutable 
+				} else { 
+					SymbolAccess.public 
+				}
+
+				mut method_sym := Symbol{
+					name: name_node.get_text(sr.src_text)
+					kind: .function
+					access: method_access
+					range: name_node.range()
+					return_type: sr.store.find_symbol_by_type_node(result_node, sr.src_text) or { analyzer.void_type }
+					file_path: sr.store.cur_file_path.clone()
+					file_version: sr.store.cur_version
+					is_top_level: true
+				}
+
 				mut children := extract_parameter_list(param_node, mut sr.store, sr.src_text)
 				for j := 0; j < children.len; j++ {
 					mut child := children[j]
-					sym.add_child(mut child) or {
+					method_sym.add_child(mut child) or {
 						// eprintln(err)
 						continue
 					}
 				}
 				unsafe { children.free() }
+				sym.add_child(mut method_sym) or {
+					// eprintln(err)
+					continue
+				}
+				sym.interface_children_len++
 			}
 			'struct_field_declaration' {
 				mut field_sym := sr.struct_field_decl(access, field_node)
@@ -227,6 +251,7 @@ fn (mut sr SymbolRegistration) interface_decl(interface_decl_node C.TSNode) ?&Sy
 					// eprintln(err)
 					continue
 				}
+				sym.interface_children_len++
 			}
 			else {
 				continue
