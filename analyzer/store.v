@@ -177,7 +177,7 @@ pub fn (ss &Store) find_fn_symbol(module_name string, return_type &Symbol, param
 	return none
 }
 
-const container_symbol_kinds = [SymbolKind.chan_, .array_, .map_, .ref, .variadic, .optional, .multi_return]
+pub const container_symbol_kinds = [SymbolKind.chan_, .array_, .map_, .ref, .variadic, .optional, .multi_return]
 
 // register_symbol registers the given symbol
 pub fn (mut ss Store) register_symbol(mut info Symbol) ?&Symbol {

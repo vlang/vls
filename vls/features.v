@@ -435,6 +435,29 @@ fn (mut builder CompletionBuilder) build_suggestions_from_sym(sym &analyzer.Symb
 			builder.add(symbol_to_completion_item(child_sym, true) or { continue })
 		}
 	}
+
+	if sym.kind in analyzer.container_symbol_kinds {
+		mut base_symbol_name := ''
+		defer { unsafe { base_symbol_name.free() } }
+
+		match sym.kind {
+			.chan_ {
+				base_symbol_name = 'chan'
+			}
+			.array_, .variadic {
+				base_symbol_name = 'array'
+			}
+			.map_ {
+				base_symbol_name = 'map'
+			}
+			else {
+				return
+			}
+		}
+		if base_sym := builder.store.symbols[builder.store.auto_imports['']].get(base_symbol_name) {
+			builder.build_suggestions_from_sym(base_sym, is_selector)
+		}
+	}
 }
 
 fn (mut builder CompletionBuilder) build_suggestions_from_module(name string, included_list ...string) {
