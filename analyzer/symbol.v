@@ -198,7 +198,11 @@ pub fn (info &Symbol) gen_str() string {
 
 			sb.write_string(info.name)
 			sb.write_b(` `)
-			sb.write_string(info.return_type.name)
+			if info.return_type.kind == .function_type {
+				sb.write_string(info.return_type.gen_str())
+			} else {
+				sb.write_string(info.return_type.name)
+			}
 		}
 		.typedef, .sumtype {
 			if info.kind == .typedef && info.parent.is_void() {
