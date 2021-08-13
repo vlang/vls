@@ -453,7 +453,11 @@ fn (mut sr SymbolRegistration) short_var_decl(var_decl C.TSNode) ?[]&Symbol {
 				var_access = .private_mutable
 			}
 
-			right_type := sr.store.infer_value_type_from_node(right, sr.src_text)
+			mut right_type := sr.store.infer_value_type_from_node(right, sr.src_text)
+			if right_type.is_returnable() {
+				right_type = right_type.return_type
+			}
+
 			vars << &Symbol{
 				name: left.get_text(sr.src_text)
 				kind: .variable
