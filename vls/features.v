@@ -339,7 +339,7 @@ fn (mut builder CompletionBuilder) build_suggestions_from_list(node C.TSNode) {
 				}
 				else {
 					closest_node := closest_named_child(node, u32(builder.offset))
-					eprintln(closest_node.get_type())
+					// eprintln(closest_node.get_type())
 				}
 			}
 		}
