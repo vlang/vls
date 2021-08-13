@@ -732,6 +732,10 @@ fn (mut ls Vls) completion(id int, params string) {
 		// Display only the project's functions if none are satisfied
 		builder.offset = offset
 		builder.build_local_suggestions()
+
+		$if !test {
+			builder.build_global_suggestions()
+		}
 	}
 
 	// After that, it will send the list to the client.
