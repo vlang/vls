@@ -71,8 +71,8 @@ fn test_set_features() {
 		.hover, 
 		.folding_range, 
 		.definition, 
-		.formatting,
-		.implementation
+		.implementation,
+		.formatting
 	]
 	ls.set_features(['logging'], true) or {
 		assert err.msg == 'feature "logging" not found'
