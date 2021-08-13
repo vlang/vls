@@ -475,15 +475,17 @@ fn (mut builder CompletionBuilder) build_local_suggestions() {
 	file_name := builder.store.cur_file_name
 	// Imported modules. They will be shown to the user if there is no given
 	// type for filtering the results. Invalid imports are excluded.
-	for imp in builder.store.imports[builder.store.cur_dir] {
-		if builder.store.cur_file_path in imp.ranges
-			&& (file_name !in imp.symbols || imp.symbols[file_name].len == 0) {
-			imp_name := imp.aliases[file_name] or { imp.module_name }
-			builder.add(lsp.CompletionItem{
-				label: imp_name
-				kind: .module_
-				insert_text: imp_name
-			})
+	if isnil(builder.filter_return_type) {
+		for imp in builder.store.imports[builder.store.cur_dir] {
+			if builder.store.cur_file_path in imp.ranges
+				&& (file_name !in imp.symbols || imp.symbols[file_name].len == 0) {
+				imp_name := imp.aliases[file_name] or { imp.module_name }
+				builder.add(lsp.CompletionItem{
+					label: imp_name
+					kind: .module_
+					insert_text: imp_name
+				})
+			}
 		}
 	}
 
