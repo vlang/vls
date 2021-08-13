@@ -260,12 +260,19 @@ fn (mut builder CompletionBuilder) add(item lsp.CompletionItem) {
 	builder.completion_items << item
 }
 
-fn (mut builder CompletionBuilder) is_triggered(node C.TSNode, chr string) bool {
+fn (builder CompletionBuilder) is_triggered(node C.TSNode, chr string) bool {
 	return node.next_sibling().get_text(builder.src) == chr || builder.ctx.trigger_character == chr
 }
 
-fn (mut builder CompletionBuilder) is_selector(node C.TSNode) bool {
+fn (builder CompletionBuilder) is_selector(node C.TSNode) bool {
 	return builder.is_triggered(node, '.')
+}
+
+fn (builder CompletionBuilder) has_same_return_type(sym &analyzer.Symbol) bool {
+	if sym.is_void() || isnil(builder.filter_return_type) {
+		return true
+	}
+	return sym == builder.filter_return_type
 }
 
 fn (mut builder CompletionBuilder) build_suggestions(node C.TSNode, offset int) {
@@ -437,7 +444,7 @@ fn (mut builder CompletionBuilder) build_suggestions_from_module(name string, in
 
 	imported_syms := builder.store.symbols[imported_path_dir]
 	for imp_sym in imported_syms {
-		if included_list.len != 0 && imp_sym.name in included_list {
+		if (included_list.len != 0 && imp_sym.name in included_list) || !builder.has_same_return_type(imp_sym.return_type) {
 			continue
 		}
 		if int(imp_sym.access) >= int(analyzer.SymbolAccess.public) {
@@ -487,8 +494,7 @@ fn (mut builder CompletionBuilder) build_local_suggestions() {
 		for !isnil(scope) && scope != file_scope {
 			// constants
 			for scope_sym in scope.get_all_symbols() {
-				if !isnil(builder.filter_return_type)
-					&& scope_sym.return_type != builder.filter_return_type {
+				if !builder.has_same_return_type(scope_sym.return_type) {
 					continue
 				}
 
@@ -509,7 +515,10 @@ fn (mut builder CompletionBuilder) build_local_suggestions() {
 fn (mut builder CompletionBuilder) build_global_suggestions() {
 	global_syms := builder.store.symbols[builder.store.cur_dir]
 	for sym in global_syms {
-		if !sym.is_void() && (sym.kind != .placeholder || (sym.kind == .function && sym.name != 'main')) {
+		if !sym.is_void() && sym.kind != .placeholder {
+			if (sym.kind == .function && sym.name == 'main') || !builder.has_same_return_type(sym.return_type) {
+				continue
+			}
 			builder.add(symbol_to_completion_item(sym, true) or { continue })
 		}
 	}
