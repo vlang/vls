@@ -974,3 +974,113 @@ fn (mut ls Vls) definition(id int, params string) {
 		}
 	})
 }
+
+fn get_implementation_locations_from_syms(symbols []&analyzer.Symbol, got_sym &analyzer.Symbol, original_range C.TSRange, mut locations []lsp.LocationLink) {
+	for sym in symbols {
+		mut interface_sym := analyzer.void_type
+		mut sym_to_check := analyzer.void_type
+		if got_sym.kind == .interface_ && sym.kind != .interface_ {
+			interface_sym = got_sym
+			sym_to_check = sym
+		} else if sym.kind == .interface_ && got_sym.kind != .interface_ {
+			interface_sym = sym
+			sym_to_check = got_sym
+		} else {
+			continue
+		}
+
+		if analyzer.is_interface_satisfied(sym_to_check, interface_sym) {
+			locations << lsp.LocationLink{
+				target_uri: lsp.document_uri_from_path(sym.file_path)
+				target_range: tsrange_to_lsp_range(sym.range)
+				target_selection_range: tsrange_to_lsp_range(sym.range)
+				origin_selection_range: tsrange_to_lsp_range(original_range)
+			}
+		}
+	}
+}
+
+fn (mut ls Vls) implementation(id int, params string) {
+	goto_implementation_params := json.decode(lsp.TextDocumentPositionParams, params) or {
+		ls.panic(err.msg)
+		ls.send_null(id)
+		return
+	}
+
+	if Feature.definition !in ls.enabled_features {
+		ls.send_null(id)
+		return
+	}
+
+	uri := goto_implementation_params.text_document.uri
+	pos := goto_implementation_params.position
+	file := ls.sources[uri]
+	source := file.source
+	tree := ls.trees[uri] or {
+		ls.send_null(id)
+		return
+	}
+
+	offset := file.get_offset(pos.line, pos.character)
+	mut node := traverse_node(tree.root_node(), u32(offset))
+	mut original_range := node.range()
+	node_type := node.get_type()
+	if node.is_null() || (node.parent().is_error() || node.parent().is_missing()) {
+		ls.send_null(id)
+		return
+	}
+
+	ls.store.set_active_file_path(uri.path(), file.version)
+
+	mut got_sym := analyzer.void_type
+	if node.parent().get_type() == 'interface_declaration' {
+		got_sym = ls.store.symbols[ls.store.cur_dir].get(node.get_text(source)) or { got_sym }
+	} else {
+		got_sym = ls.store.infer_value_type_from_node(node, source)
+	}
+
+	if isnil(got_sym) || got_sym.is_void() {
+		ls.send_null(id)
+		return
+	}
+
+	if node_type != 'type_selector_expression' && node.named_child_count() != 0 {
+		original_range = node.first_named_child_for_byte(u32(offset)).range()
+	}
+
+	mut locations := []lsp.LocationLink{cap: 20}
+
+	get_implementation_locations_from_syms(
+		ls.store.symbols[ls.store.cur_dir],
+		got_sym,
+		original_range,
+		mut locations
+	)
+
+	for imp in ls.store.imports[ls.store.cur_dir] {
+		if ls.store.cur_file_path !in imp.ranges {
+			continue
+		}
+
+		get_implementation_locations_from_syms(
+			ls.store.symbols[imp.path],
+			got_sym,
+			original_range,
+			mut locations
+		)
+	}
+
+	for _, auto_import_path in ls.store.auto_imports {
+		get_implementation_locations_from_syms(
+			ls.store.symbols[auto_import_path], 
+			got_sym,
+			original_range,
+			mut locations
+		)
+	}
+
+	ls.send(jsonrpc.Response<[]lsp.LocationLink>{
+		id: id
+		result: locations
+	})	
+}

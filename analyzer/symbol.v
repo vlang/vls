@@ -391,6 +391,34 @@ fn (sym &Symbol) count_ptr() int {
 	return ptr_count
 }
 
+pub fn is_interface_satisfied(sym &Symbol, interface_sym &Symbol) bool {
+	if sym.kind != .struct_ && sym.kind != .typedef && sym.kind != .sumtype {
+		return false
+	} else if interface_sym.kind != .interface_ {
+		return false
+	}
+
+	for i in 0 .. interface_sym.interface_children_len {
+		spec_sym := interface_sym.children[i]
+		selected_child_sym := sym.children.get(spec_sym.name) or {
+			return false
+		}
+		if spec_sym.kind == .field {
+			if selected_child_sym.access != spec_sym.access 
+				|| selected_child_sym.kind != spec_sym.kind 
+				|| selected_child_sym.return_type != spec_sym.return_type {
+				return false
+			}
+		} else if spec_sym.kind == .function {
+			if selected_child_sym.kind != spec_sym.kind
+				|| !compare_params_and_ret_type(selected_child_sym.children, selected_child_sym.return_type, spec_sym, false) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
 // pub fn (ars ArraySymbol) str() string {
 // 	return
 // }
