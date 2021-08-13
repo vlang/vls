@@ -94,8 +94,8 @@ fn closest_named_child(starting_node C.TSNode, offset u32) C.TSNode {
 	named_child_count := starting_node.named_child_count()
 	mut selected_node := starting_node
 	for i in u32(0) .. named_child_count {
-		child_node := selected_node.named_child(i)
-		if !child_node.is_null() && child_node.start_byte() <= offset && child_node.end_byte() <= offset {
+		child_node := starting_node.named_child(i)
+		if !child_node.is_null() && child_node.start_byte() <= offset && (child_node.get_type() == 'import_symbols' || child_node.end_byte() <= offset) {
 			selected_node = child_node
 		} else {
 			break

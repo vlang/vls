@@ -300,7 +300,10 @@ fn (mut builder CompletionBuilder) build_suggestions_from_node(node C.TSNode) {
 // suggestions_from_stmt returns a list of results from the extracted Stmt node info.
 fn (mut builder CompletionBuilder) build_suggestions_from_stmt(node C.TSNode) {
 	match node.get_type() {
-		'short_var_declaration' {}
+		'short_var_declaration' {
+			builder.show_local = true
+			builder.show_global = true
+		}
 		'assignment_statement' {
 			right_node := node.child_by_field_name('right')
 			left_node := node.child_by_field_name('left')
@@ -322,7 +325,10 @@ fn (mut builder CompletionBuilder) build_suggestions_from_stmt(node C.TSNode) {
 // suggestions_from_list returns a list of results extracted from the list nodes.
 fn (mut builder CompletionBuilder) build_suggestions_from_list(node C.TSNode) {
 	match node.get_type() {
-		'identifier_list' {}
+		'identifier_list' {
+			parent := closest_symbol_node_parent(node)
+			builder.build_suggestions_from_node(parent)
+		}
 		'expression_list' {
 			// expr_list_count := node.named_child_count()
 			parent := closest_symbol_node_parent(node)
@@ -345,6 +351,7 @@ fn (mut builder CompletionBuilder) build_suggestions_from_list(node C.TSNode) {
 			if call_expr_arg_cur_idx < u32(returned_sym.children.len) {
 				builder.filter_return_type = returned_sym.children[int(call_expr_arg_cur_idx)].return_type
 				builder.show_local = true
+				builder.show_global = true
 			}
 		}
 		'import_symbols_list' {
@@ -371,7 +378,14 @@ fn (mut builder CompletionBuilder) build_suggestions_from_expr(node C.TSNode) {
 			}
 
 			if builder.is_selector(node) {
-				if got_sym := builder.store.infer_symbol_from_node(node, builder.src) {
+				mut selected_node := node
+				if node_type == 'selector_expression' {
+					operand_node := node.child_by_field_name('operand')
+					if operand_node.get_type() == 'call_expression' {
+						selected_node = node
+					}
+				}
+				if got_sym := builder.store.infer_symbol_from_node(selected_node, builder.src) {
 					builder.show_mut_only = builder.parent_node.get_type() == 'block'
 						&& got_sym.is_mutable()
 					builder.build_suggestions_from_sym(got_sym.return_type, true)
@@ -395,6 +409,9 @@ fn (mut builder CompletionBuilder) build_suggestions_from_expr(node C.TSNode) {
 				builder.build_suggestions_from_sym(got_sym.return_type, false)
 			}
 		}
+		'import_symbols' {
+			builder.build_suggestions_from_node(node.named_child(0))
+		}
 		else {
 			// found_sym := builder.store.infer_symbol_from_node(node, builder.src) or { analyzer.void_type }
 			// builder.filter_return_type = if found_sym.is_returnable() { found_sym.return_type } else { found_sym }
@@ -409,7 +426,11 @@ fn (mut builder CompletionBuilder) build_suggestions_from_sym(sym &analyzer.Symb
 
 	for child_sym in sym.children {
 		if is_selector {
-			if sym.kind in [.enum_, .struct_] && child_sym.kind !in [.field, .function] {
+			if (sym.kind in [.enum_, .struct_] || sym.kind in analyzer.container_symbol_kinds) 
+				&& child_sym.kind !in [.field, .function] {
+				continue
+			} else if !child_sym.file_path.starts_with(builder.store.cur_dir)
+				&& int(child_sym.access) < int(analyzer.SymbolAccess.public) {
 				continue
 			}
 
@@ -526,6 +547,7 @@ fn (mut builder CompletionBuilder) build_local_suggestions() {
 				builder.add(lsp.CompletionItem{
 					label: scope_sym.name
 					kind: .variable
+					detail: scope_sym.gen_str()
 					insert_text: scope_sym.name
 				})
 			}
@@ -745,6 +767,8 @@ fn (mut ls Vls) completion(id int, params string) {
 			node = traverse_node2(root_node, u32(offset))
 		} else if node.is_error() && node.get_type() == 'ERROR' {
 			node = node.prev_named_sibling()
+		} else if node.start_byte() > u32(offset) {
+			node = closest_named_child(closest_symbol_node_parent(node), u32(offset))
 		}
 
 		builder.ctx = ctx

@@ -76,11 +76,13 @@ const completion_results = {
 		lsp.CompletionItem{
 			label: 'two'
 			kind: .variable
+			detail: 'two int'
 			insert_text: 'two'
 		},
 		lsp.CompletionItem{
 			label: 'zero'
 			kind: .variable
+			detail: 'mut zero int'
 			insert_text: 'zero'
 		},
 	]
@@ -100,13 +102,22 @@ const completion_results = {
 		lsp.CompletionItem{
 			label: 'sample_num'
 			kind: .variable
+			detail: 'sample_num int'
 			insert_text: 'sample_num'
 		},
 		lsp.CompletionItem{
 			label: 'sample_num2'
 			kind: .variable
+			detail: 'sample_num2 int'
 			insert_text: 'sample_num2'
 		},
+		lsp.CompletionItem{
+			label: 'add_to_four'
+			kind: .function
+			detail: 'fn add_to_four(num int) int'
+			insert_text: 'add_to_four(\$0)'
+			insert_text_format: .snippet
+		}
 	]
 	'enum_val_in_struct.vv':                [
 		lsp.CompletionItem{
@@ -264,11 +275,13 @@ const completion_results = {
 		lsp.CompletionItem{
 			label: 'foo'
 			kind: .variable
+			detail: 'foo string'
 			insert_text: 'foo'
 		},
 		lsp.CompletionItem{
 			label: 'bar'
 			kind: .variable
+			detail: 'bar int'
 			insert_text: 'bar'
 		},
 	]
