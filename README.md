@@ -85,9 +85,9 @@ will be in the `cmd/vls` directory. So make to add `cmd/vls/vls`.
 ### Diagnostics
 - [x] `publishDiagnostics`
 ### Language Features
-- [ ] `completion`
+- [x] `completion`
 - [ ] `completion resolve`
-- [ ] `hover`
+- [x] `hover`
 - [x] `signatureHelp`
 - [ ] `declaration`
 - [x] `definition`
