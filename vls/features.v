@@ -1049,7 +1049,10 @@ fn (mut ls Vls) implementation(id int, params string) {
 	}
 
 	mut locations := []lsp.LocationLink{cap: 20}
+	defer { unsafe { locations.free() } }
 
+	// check first the possible interfaces implemented by the symbol
+	// at the current directory...
 	get_implementation_locations_from_syms(
 		ls.store.symbols[ls.store.cur_dir],
 		got_sym,
@@ -1057,6 +1060,7 @@ fn (mut ls Vls) implementation(id int, params string) {
 		mut locations
 	)
 
+	// ...afterwards to the imported modules
 	for imp in ls.store.imports[ls.store.cur_dir] {
 		if ls.store.cur_file_path !in imp.ranges {
 			continue
@@ -1070,13 +1074,16 @@ fn (mut ls Vls) implementation(id int, params string) {
 		)
 	}
 
-	for _, auto_import_path in ls.store.auto_imports {
-		get_implementation_locations_from_syms(
-			ls.store.symbols[auto_import_path], 
-			got_sym,
-			original_range,
-			mut locations
-		)
+	// ...and lastly from auto-imported modules such as "builtin"
+	$if !test {
+		for _, auto_import_path in ls.store.auto_imports {
+			get_implementation_locations_from_syms(
+				ls.store.symbols[auto_import_path], 
+				got_sym,
+				original_range,
+				mut locations
+			)
+		}
 	}
 
 	ls.send(jsonrpc.Response<[]lsp.LocationLink>{
