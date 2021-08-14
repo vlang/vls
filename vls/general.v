@@ -55,6 +55,7 @@ fn (mut ls Vls) initialize(id int, params string) {
 		hover_provider: Feature.hover in ls.enabled_features
 		folding_range_provider: Feature.folding_range in ls.enabled_features
 		definition_provider: Feature.definition in ls.enabled_features
+		implementation_provider: Feature.implementation in ls.enabled_features
 	}
 
 	if Feature.completion in ls.enabled_features {

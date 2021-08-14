@@ -146,35 +146,46 @@ pub fn (ss &Store) find_fn_symbol(module_name string, return_type &Symbol, param
 	module_path := ss.get_module_path(module_name)
 	for sym in ss.symbols[module_path]? {
 		if sym.kind == .function_type && sym.name.starts_with(analyzer.anon_fn_prefix) && sym.generic_placeholder_len == 0 {
-			mut params_to_check := []int{cap: sym.children.len}
-			// get a list of indices that are parameters
-			for i, child in sym.children {
-				if child.kind != .variable {
-					continue
-				}
-				params_to_check << i
-			}
-			if params_to_check.len != params.len {
-				continue
-			}
-			mut params_left := params_to_check.len
-			for i, param_idx in params_to_check {
-				param_from_sym := sym.children[param_idx]
-				param_to_compare := params[i]
-				if param_from_sym.name == param_to_compare.name && param_from_sym.return_type.name == param_to_compare.return_type.name {
-					params_left--
-					continue
-				}
-				break
-			}
-			// if loop for checking params stopped or the return type does not match
-			if params_left != 0 || sym.return_type.name != return_type.name {
+			if !compare_params_and_ret_type(params, return_type, sym, true) {
 				continue
 			}
 			return sym
 		}
 	}
 	return none
+}
+
+pub fn compare_params_and_ret_type(params []&Symbol, ret_type &Symbol, fn_to_compare &Symbol, include_param_name bool) bool {
+	mut params_to_check := []int{cap: fn_to_compare.children.len}
+	defer { unsafe { params_to_check.free() } }
+
+	// get a list of indices that are parameters
+	for i, child in fn_to_compare.children {
+		if child.kind != .variable {
+			continue
+		}
+		params_to_check << i
+	}
+	if params.len != params_to_check.len {
+		return false
+	}
+	mut params_left := params_to_check.len
+	for i, param_idx in params_to_check {
+		param_from_sym := fn_to_compare.children[param_idx]
+		param_to_compare := params[i]
+		if param_from_sym.return_type == param_to_compare.return_type {
+			if include_param_name && param_from_sym.name != param_to_compare.name {
+				break
+			}
+			params_left--
+			continue
+		}
+		break
+	}
+	if params_left != 0 || ret_type != fn_to_compare.return_type {
+		return false
+	}
+	return true
 }
 
 pub const container_symbol_kinds = [SymbolKind.chan_, .array_, .map_, .ref, .variadic, .optional, .multi_return]
@@ -670,7 +681,7 @@ pub fn (mut ss Store) infer_symbol_from_node(node C.TSNode, src_text []byte) ?&S
 		}
 		'struct_field_declaration' {
 			mut parent := node.parent()
-			for parent.get_type() != 'struct_declaration' {
+			for parent.get_type() !in ['struct_declaration', 'interface_declaration'] {
 				parent = parent.parent()
 			}
 

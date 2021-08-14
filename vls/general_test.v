@@ -55,7 +55,8 @@ fn test_set_features() {
 		.completion, 
 		.hover, 
 		.folding_range, 
-		.definition
+		.definition,
+		.implementation
 	]
 	ls.set_features(['formatting'], true) or {
 		assert false
@@ -70,6 +71,7 @@ fn test_set_features() {
 		.hover, 
 		.folding_range, 
 		.definition, 
+		.implementation,
 		.formatting
 	]
 	ls.set_features(['logging'], true) or {

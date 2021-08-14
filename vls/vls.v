@@ -37,6 +37,7 @@ pub enum Feature {
 	hover
 	folding_range
 	definition
+	implementation
 }
 
 // feature_from_str returns the Feature-enum value equivalent of the given string.
@@ -67,6 +68,7 @@ pub const (
 		.hover,
 		.folding_range,
 		.definition,
+		.implementation,
 	]
 )
 
@@ -190,6 +192,9 @@ pub fn (mut ls Vls) dispatch(payload string) {
 			}
 			'textDocument/definition' {
 				ls.definition(request.id, request.params)
+			}
+			'textDocument/implementation' {
+				ls.implementation(request.id, request.params)
 			}
 			else {}
 		}

@@ -1,0 +1,20 @@
+interface Speaker {
+	speak() string
+}
+
+interface Tester {
+	random_num int
+	test(num int) int
+}
+
+struct Foo {
+	random_num int
+}
+
+fn (f Foo) speak() string {
+	return 'jk lol'
+}
+
+fn (f Foo) test(f2 int) int {
+	return num + f.random_num
+}
