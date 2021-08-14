@@ -175,7 +175,7 @@ pub fn compare_params_and_ret_type(params []&Symbol, ret_type &Symbol, fn_to_com
 		param_to_compare := params[i]
 		if param_from_sym.return_type == param_to_compare.return_type {
 			if include_param_name && param_from_sym.name != param_to_compare.name {
-				continue
+				break
 			}
 			params_left--
 			continue
