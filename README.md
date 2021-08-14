@@ -9,11 +9,11 @@
 V Language Server (also known as "VLS") is a LSP v3.15-compatible language server for [the V programming language](https://github.com/vlang/v).
 
 # Download / Installation
-### VSCode
-The official [V VSCode extension](https://github.com/vlang/vscode-vlang) provides a way to download/install VLS without manually downloading the source. If you installed the extension for the first time, a message prompt will appear for you to install VLS. Click "Yes" or "Install" and it will automatically do the setup process for you.
-
 ### Pre-built/Precompiled Binaries (Recommended)
 Pre-built binaries for Windows x64, MacOS x64/M1 (via Rosetta), and Linux x64 can be found [here](https://github.com/vlang/vls/releases/latest). 
+
+### VSCode
+The official [V VSCode extension](https://github.com/vlang/vscode-vlang) provides a way to download/install VLS without manually downloading the source. If you installed the extension for the first time, a message prompt will appear for you to install VLS. Click "Yes" or "Install" and it will automatically do the setup process for you.
 
 ### Build from Source
 > **NOTE**: TCC, the default compiler shipped with V, is not recommended ATM due to
