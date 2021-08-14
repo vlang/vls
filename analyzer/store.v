@@ -681,7 +681,7 @@ pub fn (mut ss Store) infer_symbol_from_node(node C.TSNode, src_text []byte) ?&S
 		}
 		'struct_field_declaration' {
 			mut parent := node.parent()
-			for parent.get_type() != 'struct_declaration' {
+			for parent.get_type() !in ['struct_declaration', 'interface_declaration'] {
 				parent = parent.parent()
 			}
 
