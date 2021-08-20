@@ -47,6 +47,7 @@ fn main() {
 		version: vls.meta.version
 		description: vls.meta.description
 		execute: run_cli
+		posix_mode: true
 	}
 
 	cmd.add_flags([
