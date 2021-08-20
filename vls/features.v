@@ -758,7 +758,7 @@ fn (mut ls Vls) completion(id int, params string) {
 			}
 		}
 
-		for src[offset] == ` ` {
+		for offset > src.len || (offset < src.len && src[offset] == ` `) {
 			offset--
 		}
 
