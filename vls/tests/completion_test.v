@@ -61,6 +61,10 @@ const completion_inputs = {
 		context: lsp.CompletionContext{.invoked, ''}
 		position: lsp.Position{5, 2}
 	}
+	'module_selector.vv':                   lsp.CompletionParams{
+		context: lsp.CompletionContext{.invoked, ''}
+		position: lsp.Position{3, 0}
+	}
 	'module_symbols_selector.vv':           lsp.CompletionParams{
 		context: lsp.CompletionContext{.trigger_character, '.'}
 		position: lsp.Position{5, 6}
@@ -287,6 +291,13 @@ const completion_results = {
 			kind: .variable
 			detail: 'bar int'
 			insert_text: 'bar'
+		},
+	]
+	'module_selector.vv':                   [
+		lsp.CompletionItem{
+			label: 'def'
+			kind: .module_
+			insert_text: 'def'
 		},
 	]
 	'module_symbols_selector.vv':           [

@@ -251,7 +251,7 @@ pub fn (mut ss Store) add_import(imp Import) (&Import, bool) {
 	if dir in ss.imports {
 		// check if import has already imported
 		for i, stored_imp in ss.imports[dir] {
-			if imp.module_name == stored_imp.module_name {
+			if imp.absolute_module_name == stored_imp.absolute_module_name {
 				idx = i
 				break
 			}
@@ -261,14 +261,12 @@ pub fn (mut ss Store) add_import(imp Import) (&Import, bool) {
 	}
 
 	if idx == -1 {
-		mut new_import := Import{
+		ss.imports[dir] << Import{
 			...imp
-		}
-		if new_import.path.len != 0 && !new_import.resolved {
-			new_import.resolved = true
+			module_name: imp.absolute_module_name.all_after_last('.')
+			resolved: imp.resolved || imp.path.len != 0
 		}
 
-		ss.imports[dir] << new_import
 		last_idx := ss.imports[dir].len - 1
 		return &ss.imports[dir][last_idx], false
 	} else {

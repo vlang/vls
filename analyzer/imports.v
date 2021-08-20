@@ -11,7 +11,9 @@ mut:
 	// imported indicates that the files of the modules are already imported.
 	imported bool
 pub mut:
-	// module_name is the name that was declared when imported.
+	// absolute_module_name is the name that was declared when imported.
+	absolute_module_name string
+	// module_name is the name to be used for symbol lookups
 	module_name string
 	// path is the path where the module was located.
 	path string
@@ -81,6 +83,7 @@ pub fn (mut imp Import) set_path(path string) {
 [unsafe]
 pub fn (imp &Import) free() {
 	unsafe {
+		imp.absolute_module_name.free()
 		imp.module_name.free()
 		imp.path.free()
 		imp.ranges.free()
@@ -128,7 +131,7 @@ fn (mut ss Store) inject_paths_of_new_imports(mut new_imports []&Import, lookup_
 		}
 
 		// module.submod -> ['module', 'submod']
-		mod_name_arr := new_import.module_name.split('.')
+		mod_name_arr := new_import.absolute_module_name.split('.')
 		for path in import_path_iter {
 			mod_dir := os.join_path(path, ...mod_name_arr)
 
@@ -185,7 +188,7 @@ fn (mut ss Store) inject_paths_of_new_imports(mut new_imports []&Import, lookup_
 		if !new_import.resolved {
 			for file_path, range in new_import.ranges {
 				ss.report(
-					content: 'Module `$new_import.module_name` not found'
+					content: 'Module `$new_import.absolute_module_name` not found'
 					file_path: file_path.clone()
 					range: range
 				)
@@ -257,7 +260,7 @@ fn (mut ss Store) scan_imports(tree &C.TSTree, src_text []byte) []&Import {
 		if found_imp := ss.find_import_by_position(node.range()) {
 			mut imp_module := found_imp
 			mod_name := import_path_node.get_text(src_text)
-			if imp_module.module_name == mod_name {
+			if imp_module.absolute_module_name == mod_name {
 				continue
 			}
 
@@ -269,7 +272,7 @@ fn (mut ss Store) scan_imports(tree &C.TSTree, src_text []byte) []&Import {
 		// resolve it later after
 		mut imp_module, already_imported := ss.add_import(
 			resolved: false
-			module_name: import_path_node.get_text(src_text)
+			absolute_module_name: import_path_node.get_text(src_text)
 		)
 
 		import_alias_node := node.child_by_field_name('alias')

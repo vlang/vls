@@ -31,8 +31,8 @@ fn test_scan_imports() ? {
 	store.set_active_file_path(analyzer.file_path, 1)
 	imports := store.scan_imports(tree, analyzer.sample_content_bytes)
 	assert imports.len == 2
-	assert imports[0].module_name == 'os'
-	assert imports[1].module_name == 'env'
+	assert imports[0].absolute_module_name == 'os'
+	assert imports[1].absolute_module_name == 'env'
 }
 
 fn test_inject_paths_of_new_imports() ? {
@@ -42,8 +42,8 @@ fn test_inject_paths_of_new_imports() ? {
 	store.set_active_file_path(analyzer.file_path, 1)
 	mut imports := store.scan_imports(tree, analyzer.sample_content_bytes)
 	assert imports.len == 2
-	assert imports[0].module_name == 'os'
-	assert imports[1].module_name == 'env'
+	assert imports[0].absolute_module_name == 'os'
+	assert imports[1].absolute_module_name == 'env'
 
 	store.inject_paths_of_new_imports(mut imports, os.join_path(analyzer.vexe_path, 'vlib'))
 
@@ -62,10 +62,10 @@ fn test_import_modules_from_tree() ? {
 	store.import_modules_from_tree(tree, analyzer.sample_content_bytes)
 
 	assert store.imports[store.cur_dir].len == 2
-	assert store.imports[store.cur_dir][0].module_name == 'os'
+	assert store.imports[store.cur_dir][0].absolute_module_name == 'os'
 	assert store.imports[store.cur_dir][0].resolved == true
 	assert store.imports[store.cur_dir][0].imported == true
-	assert store.imports[store.cur_dir][1].module_name == 'env'
+	assert store.imports[store.cur_dir][1].absolute_module_name == 'env'
 	assert store.imports[store.cur_dir][1].resolved == false
 	$if macos {
 		assert store.dependency_tree.size() == 2
@@ -90,7 +90,7 @@ fn test_import_modules_with_edits() ? {
 	store.cleanup_imports()
 
 	assert store.imports[store.cur_dir].len == 1
-	assert store.imports[store.cur_dir][0].module_name == 'os'
+	assert store.imports[store.cur_dir][0].absolute_module_name == 'os'
 	assert store.imports[store.cur_dir][0].resolved == true
 	assert store.imports[store.cur_dir][0].imported == true
 	$if macos {
@@ -137,7 +137,7 @@ fn test_import_modules_with_edits() ? {
 	store.cleanup_imports()
 
 	assert store.imports[store.cur_dir].len == 1
-	assert store.imports[store.cur_dir][0].module_name == 'os'
+	assert store.imports[store.cur_dir][0].absolute_module_name == 'os'
 	assert store.imports[store.cur_dir][0].path.len != 0
 	assert store.imports[store.cur_dir][0].resolved == true
 	assert store.imports[store.cur_dir][0].imported == true
