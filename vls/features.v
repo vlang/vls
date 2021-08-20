@@ -325,7 +325,7 @@ fn (mut builder CompletionBuilder) build_suggestions_from_stmt(node C.TSNode) {
 // suggestions_from_list returns a list of results extracted from the list nodes.
 fn (mut builder CompletionBuilder) build_suggestions_from_list(node C.TSNode) {
 	match node.get_type() {
-		'identifier_list' {
+		'identifier_list', 'assignable_identifier_list' {
 			parent := closest_symbol_node_parent(node)
 			builder.build_suggestions_from_node(parent)
 		}
