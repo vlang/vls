@@ -466,6 +466,7 @@ pub fn is_interface_satisfied(sym &Symbol, interface_sym &Symbol) bool {
 // }
 
 pub struct BaseSymbolLocation {
+pub:
 	module_name string
 	symbol_name string
 	for_kind SymbolKind
