@@ -59,6 +59,9 @@ pub fn (mut ss Store) clear_messages() {
 
 // report inserts the message to the messages array
 pub fn (mut ss Store) report(msg Message) {
+	if ss.messages.has_range(msg.file_path, msg.range) {
+		return
+	}
 	ss.messages << msg
 }
 
@@ -820,11 +823,12 @@ pub fn (mut ss Store) delete_symbol_at_node(root_node C.TSNode, src []byte, at_r
 			'const_spec', 'global_var_spec', 'global_var_initializer', 'function_declaration', 
 			'interface_declaration', 'enum_declaration', 'type_declaration', 'struct_declaration' {
 				name_node := node.child_by_field_name('name')
-				symbol_name := name_node.get_text(src)
-				if name_node.is_null() || ss.messages.has_range(ss.cur_file_path, name_node.range()) {
+				if name_node.is_null() {
+					// || ss.messages.has_range(ss.cur_file_path, name_node.range())
 					continue
 				}
 
+				symbol_name := name_node.get_text(src)
 				idx := ss.symbols[ss.cur_dir].index(symbol_name)
 				if idx != -1 && idx < ss.symbols[ss.cur_dir].len {
 					unsafe { ss.symbols[ss.cur_dir].free() }

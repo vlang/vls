@@ -370,7 +370,7 @@ pub fn (mut store Store) import_modules(mut imports []&Import) {
 				sr.cursor.to_first_child()
 
 				for _ in 0 .. child_len {
-					sr.top_level_statement() or {
+					sr.top_level_decl() or {
 						sr.store.report_error(err)
 						continue
 					}

@@ -19,6 +19,8 @@ mut:
 	// the top-level ones regardless of its
 	// visibility
 	is_import bool
+	is_script bool
+	first_var_decl_pos C.TSRange
 }
 
 fn (sr &SymbolRegistration) new_top_level_symbol(identifier_node C.TSNode, access SymbolAccess, kind SymbolKind) ?&Symbol {
@@ -316,10 +318,17 @@ fn (mut sr SymbolRegistration) fn_decl(fn_node C.TSNode) ?&Symbol {
 		access = SymbolAccess.public
 	}
 
+	name_node := fn_node.child_by_field_name('name')
+	if sr.is_script && fn_node.start_byte() > sr.first_var_decl_pos.end_byte {
+		return IError(AnalyzerError{
+			msg: 'function declarations in script mode should be before all script statements'
+			range: name_node.range()
+		})
+	} 
+
+	body_node := fn_node.child_by_field_name('body')
 	receiver_node := fn_node.child_by_field_name('receiver')
 	params_list_node := fn_node.child_by_field_name('parameters')
-	name_node := fn_node.child_by_field_name('name')
-	body_node := fn_node.child_by_field_name('body')
 
 	mut fn_sym := sr.new_top_level_symbol(name_node, access, .function) ?
 	mut scope := sr.get_scope(body_node) or { &ScopeTree(0) }
@@ -403,7 +412,7 @@ fn (mut sr SymbolRegistration) type_decl(type_decl_node C.TSNode) ?&Symbol {
 	return sym
 }
 
-fn (mut sr SymbolRegistration) top_level_statement() ? {
+fn (mut sr SymbolRegistration) top_level_decl() ? {
 	defer {
 		sr.cursor.next()
 	}
@@ -455,7 +464,23 @@ fn (mut sr SymbolRegistration) top_level_statement() ? {
 			mut sym := sr.type_decl(sr.cursor.current_node()) ?
 			sr.store.register_symbol(mut sym) ?
 		}
-		else {}
+		else {
+			stmt_node := sr.cursor.current_node()
+			if node_type == 'short_var_declaration' {
+				sr.is_script = true
+				sr.first_var_decl_pos = stmt_node.range()
+
+				// Check if main function is present
+				if main_fn_sym := sr.store.symbols[sr.store.cur_dir].get('main') {
+					sr.store.report_error(AnalyzerError{
+						msg: 'function `main` is already defined'
+						range: main_fn_sym.range
+					})
+				}
+			}
+
+			sr.statement(stmt_node, mut global_scope) ?
+		}
 	}
 }
 
@@ -604,6 +629,40 @@ fn (mut sr SymbolRegistration) for_statement(for_stmt_node C.TSNode) ? {
 	sr.extract_block(body_node, mut scope) ?
 }
 
+fn (mut sr SymbolRegistration) expression(node C.TSNode) ? {
+	expr_type := node.get_type()
+	match expr_type {
+		'if_expression' {
+			sr.if_expression(node) ?
+		}
+		else {
+			// TODO: unsafe_expression, defer_expression, anything with block
+		}
+	}
+}
+
+fn (mut sr SymbolRegistration) statement(node C.TSNode, mut scope ScopeTree) ? {
+	stmt_type := node.get_type()
+	match stmt_type {
+		'short_var_declaration' {
+			vars := sr.short_var_decl(node) ?
+			for var in vars {
+				scope.register(var) or { continue }
+			}
+		}
+		'for_declaration' {
+			sr.for_statement(node) ?
+		}
+		'block' {
+			mut local_scope := sr.get_scope(node) or { &ScopeTree(0) }
+			sr.extract_block(node, mut local_scope) ?
+		}
+		else {
+			sr.expression(node) ?
+		}
+	}
+}
+
 fn (mut sr SymbolRegistration) extract_block(node C.TSNode, mut scope ScopeTree) ? {
 	if node.get_type() != 'block' || sr.is_import {
 		return error('node should be a `block` and cannot be used in `is_import` mode.')
@@ -612,27 +671,8 @@ fn (mut sr SymbolRegistration) extract_block(node C.TSNode, mut scope ScopeTree)
 	body_sym_len := node.named_child_count()
 	for i := u32(0); i < body_sym_len; i++ {
 		stmt_node := node.named_child(i)
-		stmt_type := stmt_node.get_type()
-
-		// TODO: further type checks
-		match stmt_type {
-			'short_var_declaration' {
-				vars := sr.short_var_decl(stmt_node) or { continue }
-				for var in vars {
-					scope.register(var) or { continue }
-				}
-			}
-			'for_statement' {
-				sr.for_statement(stmt_node) or { continue }
-			}
-			'if_expression' {
-				sr.if_expression(stmt_node) or { continue }
-			}
-			'block' {
-				mut local_scope := sr.get_scope(stmt_node) or { &ScopeTree(0) }
-				sr.extract_block(stmt_node, mut local_scope) or { continue }
-			}
-			else {}
+		sr.statement(stmt_node, mut scope) or {
+			continue
 		}
 	}
 }
@@ -685,7 +725,7 @@ pub fn (mut store Store) register_symbols_from_tree(tree &C.TSTree, src_text []b
 	sr.cursor.to_first_child()
 
 	for _ in 0 .. child_len {
-		sr.top_level_statement() or {
+		sr.top_level_decl() or {
 			sr.store.report_error(err)
 			continue
 		}
