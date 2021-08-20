@@ -139,7 +139,6 @@ fn (mut sr SymbolRegistration) struct_decl(struct_decl_node C.TSNode) ?&Symbol {
 			'struct_field_declaration' {
 				mut field_sym := sr.struct_field_decl(field_access, field_node)
 				sym.add_child(mut field_sym) or {
-					// eprintln(err)
 					continue
 				}
 			}

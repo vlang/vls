@@ -38,8 +38,11 @@ const hover_inputs = {
 	'struct_field.vv':         lsp.HoverParams{
 		position: lsp.Position{3, 4}
 	}
-	'struct_init.vv':          lsp.HoverParams{
+	'struct_init_a.vv':        lsp.HoverParams{
 		position: lsp.Position{8, 7}
+	}
+	'struct_init_b.vv':        lsp.HoverParams{
+		position: lsp.Position{7, 7}
 	}
 	'type_alias.vv':           lsp.HoverParams{
 		position: lsp.Position{0, 7}
@@ -132,11 +135,18 @@ const hover_results = {
 			end: lsp.Position{3, 5}
 		}
 	}
-	'struct_init.vv':          lsp.Hover{
+	'struct_init_a.vv':        lsp.Hover{
 		contents: lsp.MarkedString{'v', '(Person).name string'}
 		range: lsp.Range{
 			start: lsp.Position{8, 4}
 			end: lsp.Position{8, 8}
+		}
+	}
+	'struct_init_b.vv':        lsp.Hover{
+		contents: lsp.MarkedString{'v', 'pub mut (Command).usage string'}
+		range: lsp.Range{
+			start: lsp.Position{7, 2}
+			end: lsp.Position{7, 20}
 		}
 	}
 	'type_alias.vv':           lsp.Hover{

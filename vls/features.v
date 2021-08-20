@@ -855,7 +855,10 @@ fn get_hover_data(mut store analyzer.Store, node C.TSNode, uri lsp.DocumentUri, 
 	}
 
 	if node_type != 'type_selector_expression' && node.named_child_count() != 0 {
-		original_range = node.first_named_child_for_byte(u32(offset)).range()
+		new_original_range := node.first_named_child_for_byte(u32(offset)).range()
+		if new_original_range.start_byte != 0 && new_original_range.end_byte != 0 {
+			original_range = new_original_range
+		}
 	}
 
 	mut sym := store.infer_symbol_from_node(node, source) or { analyzer.void_type }
