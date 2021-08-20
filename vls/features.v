@@ -406,7 +406,10 @@ fn (mut builder CompletionBuilder) build_suggestions_from_expr(node C.TSNode) {
 			if got_sym := builder.store.infer_symbol_from_node(node, builder.src) {
 				builder.show_local = true
 				builder.filter_return_type = got_sym.return_type
-				builder.build_suggestions_from_sym(got_sym.return_type, false)
+
+				if got_sym.return_type.kind != .struct_ {
+					builder.build_suggestions_from_sym(got_sym.return_type, false)
+				}
 			}
 		}
 		'import_symbols' {
@@ -691,6 +694,10 @@ fn (mut ls Vls) completion(id int, params string) {
 	root_node := tree.root_node()
 	pos := completion_params.position
 	mut offset := compute_offset(src, pos.line, pos.character)
+	if offset == -1 {
+		ls.send_null(id)
+		return
+	}
 
 	ls.store.set_active_file_path(uri.path(), file.version)
 

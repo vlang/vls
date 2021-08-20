@@ -45,7 +45,7 @@ const completion_inputs = {
 		context: lsp.CompletionContext{.invoked, ''}
 		position: lsp.Position{0, 7}
 	}
-	'incomplete_call_expr_selector.vv': lsp.CompletionParams{
+	'incomplete_call_expr_selector.vv':     lsp.CompletionParams{
 		context: lsp.CompletionContext{.trigger_character, '.'}
 		position: lsp.Position{11, 20}
 	}
@@ -68,6 +68,10 @@ const completion_inputs = {
 	'struct_init.vv':                       lsp.CompletionParams{
 		context: lsp.CompletionContext{.trigger_character, '{'}
 		position: lsp.Position{8, 16}
+	}
+	'struct_init_string_field.vv':          lsp.CompletionParams{
+		context: lsp.CompletionContext{.trigger_character, ' '}
+		position: lsp.Position{9, 8}
 	}
 }
 
@@ -117,7 +121,7 @@ const completion_results = {
 			detail: 'fn add_to_four(num int) int'
 			insert_text: 'add_to_four(\$0)'
 			insert_text_format: .snippet
-		}
+		},
 	]
 	'enum_val_in_struct.vv':                [
 		lsp.CompletionItem{
@@ -263,13 +267,13 @@ const completion_results = {
 			insert_text_format: .plain_text
 		},
 	]
-	'incomplete_call_expr_selector.vv':        [
+	'incomplete_call_expr_selector.vv':     [
 		lsp.CompletionItem{
 			label: 'len'
 			kind: .property
 			detail: '(Bee).len int'
 			insert_text: 'len'
-		}
+		},
 	]
 	'local_results.vv':                     [
 		lsp.CompletionItem{
@@ -314,6 +318,20 @@ const completion_results = {
 			kind: .field
 			insert_text_format: .snippet
 			insert_text: 'age: \$0'
+		},
+	]
+	'struct_init_string_field.vv':          [
+		lsp.CompletionItem{
+			label: 'name'
+			kind: .variable
+			detail: 'name string'
+			insert_text: 'name'
+		},
+		lsp.CompletionItem{
+			label: 'another_name'
+			kind: .variable
+			detail: 'another_name string'
+			insert_text: 'another_name'
 		},
 	]
 }
