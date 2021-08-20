@@ -43,6 +43,11 @@ pub mut:
 	// specified from lookup paths specified from
 	// import_modules_from_tree
 	default_import_paths []string
+	// Another hack-free way to get symbol information
+	// from base symbols for specific container kinds.
+	// (e.g. []string should not be looked up only inside
+	// []string but also in builtin's array type as well)
+	base_symbol_locations []BaseSymbolLocation
 }
 
 // clear_messages clears the stored messages
@@ -635,12 +640,18 @@ pub fn (mut ss Store) infer_symbol_from_node(node C.TSNode, src_text []byte) ?&S
 				}
 				child_name := node.child_by_field_name('field').get_text(src_text)
 				return root_sym.children.get(child_name) or { 
-					if root_sym.kind == .ref || root_sym.kind == .chan_ || root_sym.kind == .optional {
+					if root_sym.kind == .ref {
 						root_sym = root_sym.parent
-					} else if root_sym.kind == .array_ {
-						root_sym = ss.find_symbol('', 'array') or { analyzer.void_type }
-					} else if root_sym.kind == .map_ {
-						root_sym = ss.find_symbol('', 'map') or { analyzer.void_type }
+					} else {
+						for base_sym_loc in ss.base_symbol_locations {
+							if base_sym_loc.for_kind == root_sym.kind {
+								root_sym = ss.find_symbol(
+									base_sym_loc.module_name, 
+									base_sym_loc.symbol_name,
+								) or { continue }
+								break
+							}
+						}
 					}
 
 					root_sym.children.get(child_name) or {

@@ -461,25 +461,13 @@ fn (mut builder CompletionBuilder) build_suggestions_from_sym(sym &analyzer.Symb
 	}
 
 	if sym.kind in analyzer.container_symbol_kinds {
-		mut base_symbol_name := ''
-		defer { unsafe { base_symbol_name.free() } }
-
-		match sym.kind {
-			.chan_ {
-				base_symbol_name = 'chan'
+		for base_sym_loc in builder.store.base_symbol_locations {
+			if base_sym_loc.for_kind == sym.kind {
+				base_sym := builder.store.find_symbol(base_sym_loc.module_name, base_sym_loc.symbol_name) or {
+					continue
+				}
+				builder.build_suggestions_from_sym(base_sym, is_selector)
 			}
-			.array_, .variadic {
-				base_symbol_name = 'array'
-			}
-			.map_ {
-				base_symbol_name = 'map'
-			}
-			else {
-				return
-			}
-		}
-		if base_sym := builder.store.symbols[builder.store.auto_imports['']].get(base_symbol_name) {
-			builder.build_suggestions_from_sym(base_sym, is_selector)
 		}
 	}
 }

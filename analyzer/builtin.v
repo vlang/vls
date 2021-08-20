@@ -82,5 +82,36 @@ pub fn register_builtin_symbols(mut ss Store, builtin_import &Import) {
 		if returned_sym.name !in should_be_placeholders {
 			returned_sym.kind = .typedef
 		}
+
+		match returned_sym.name {
+			'array' {
+				ss.base_symbol_locations << BaseSymbolLocation{
+					module_name: '',
+					symbol_name: returned_sym.name,
+					for_kind: .array_
+				}
+
+				ss.base_symbol_locations << BaseSymbolLocation{
+					module_name: '',
+					symbol_name: returned_sym.name,
+					for_kind: .variadic
+				}
+			}
+			'map' {
+				ss.base_symbol_locations << BaseSymbolLocation{
+					module_name: '',
+					symbol_name: returned_sym.name,
+					for_kind: .map_
+				}
+			}
+			'chan' {
+				ss.base_symbol_locations << BaseSymbolLocation{
+					module_name: '',
+					symbol_name: returned_sym.name,
+					for_kind: .chan_
+				}
+			}
+			else {}
+		}
 	}
 }

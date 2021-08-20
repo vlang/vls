@@ -464,3 +464,9 @@ pub fn is_interface_satisfied(sym &Symbol, interface_sym &Symbol) bool {
 // pub fn (opts OptionSymbol) str() string {
 // 	return '?${opts.parent}'
 // }
+
+pub struct BaseSymbolLocation {
+	module_name string
+	symbol_name string
+	for_kind SymbolKind
+}
