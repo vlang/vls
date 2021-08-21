@@ -42,26 +42,44 @@ fn (mut ls Vls) formatting(id int, params string) {
 	}
 
 	temp_file.close()
-	fmt_res := os.execute('v fmt $vls.temp_formatting_file_path')
-	if fmt_res.exit_code > 0 {
-		ls.show_message(fmt_res.output, .info)
+	defer { os.rm(vls.temp_formatting_file_path) or {} }
+
+	mut v_exe_name := 'v'
+	defer { unsafe { v_exe_name.free() } }
+
+	$if windows {
+		v_exe_name += '.exe'
+	}
+
+	mut p := os.new_process(os.join_path(ls.vroot_path, v_exe_name))
+	defer { 
+		p.close() 
+		unsafe { p.free() }
+	}
+
+	p.set_args(['fmt', vls.temp_formatting_file_path])
+	p.set_redirect_stdio()
+	p.wait()
+
+	if p.code > 0 {
+		errors := p.stderr_slurp().trim_space()
+		defer { unsafe { errors.free() } }
+
+		ls.show_message(errors, .info)
 		ls.send_null(id)
 		return
 	}
 
-	resp := jsonrpc.Response<[]lsp.TextEdit>{
+	output := p.stdout_slurp()
+	defer { unsafe { output.free() } }
+
+	ls.send(jsonrpc.Response<[]lsp.TextEdit>{
 		id: id
 		result: [lsp.TextEdit{
 			range: tsrange_to_lsp_range(tree_range)
-			new_text: fmt_res.output
+			new_text: output
 		}]
-	}
-
-	ls.send(resp)
-	os.rm(vls.temp_formatting_file_path) or {}
-	unsafe {
-		fmt_res.output.free()
-	}
+	})
 }
 
 fn (mut ls Vls) workspace_symbol(id int, _ string) {
