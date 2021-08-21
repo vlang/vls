@@ -61,7 +61,7 @@ fn test_formatting() {
 						character: content_lines.last().len
 					}
 				}
-				new_text: exp_content.replace('\r\n', '\n')
+				new_text: exp_content
 			}])
 		}
 		io.bench.ok()
