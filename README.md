@@ -31,12 +31,12 @@ Afterwards, open your operating system's terminal and execute the following:
 ## Install the tree-sitter grammar for V first:
 git clone https://github.com/nedpals/tree-sitter-v ~/.vmodules/tree_sitter_v
 
-## Clone the project at the use-tree-sitter branch:
-git clone https://github.com/vlang/vls.git --branch use-tree-sitter vls && cd vls/
+## Clone the project:
+git clone https://github.com/vlang/vls && cd vls
 
 ## Build the project
-## Use "-cc clang" if you're compiling VLS with Clang.
-v -gc boehm -cc gcc cmd/vls
+## Use "-cc gcc" if you're compiling VLS with GCC.
+v -gc boehm -cc clang cmd/vls
 
 # The binary will be created in the `cmd/vls` subfolder by default.
 ```
