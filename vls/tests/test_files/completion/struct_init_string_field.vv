@@ -1,0 +1,13 @@
+struct Foo {
+	text string
+	num int
+}
+
+fn main() {
+	name := 'bob'
+	another_name := 'lol'
+	foo := Foo {
+		text: 
+		num: 1
+	}
+}

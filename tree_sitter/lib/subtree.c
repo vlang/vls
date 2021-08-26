@@ -5,11 +5,11 @@
 #include <string.h>
 #include <stdio.h>
 #include "./alloc.h"
-#include "./atomic.h"
 #include "./subtree.h"
 #include "./length.h"
 #include "./language.h"
 #include "./error_costs.h"
+#include "./ts_atomic.h"
 #include <stddef.h>
 
 typedef struct {
@@ -568,7 +568,7 @@ Subtree ts_subtree_new_missing_leaf(
 void ts_subtree_retain(Subtree self) {
   if (self.data.is_inline) return;
   assert(self.ptr->ref_count > 0);
-  atomic_inc((volatile uint32_t *)&self.ptr->ref_count);
+  ts_atomic_inc((volatile uint32_t *)&self.ptr->ref_count);
   assert(self.ptr->ref_count != 0);
 }
 
@@ -577,7 +577,7 @@ void ts_subtree_release(SubtreePool *pool, Subtree self) {
   array_clear(&pool->tree_stack);
 
   assert(self.ptr->ref_count > 0);
-  if (atomic_dec((volatile uint32_t *)&self.ptr->ref_count) == 0) {
+  if (ts_atomic_dec((volatile uint32_t *)&self.ptr->ref_count) == 0) {
     array_push(&pool->tree_stack, ts_subtree_to_mut_unsafe(self));
   }
 
@@ -589,7 +589,7 @@ void ts_subtree_release(SubtreePool *pool, Subtree self) {
         Subtree child = children[i];
         if (child.data.is_inline) continue;
         assert(child.ptr->ref_count > 0);
-        if (atomic_dec((volatile uint32_t *)&child.ptr->ref_count) == 0) {
+        if (ts_atomic_dec((volatile uint32_t *)&child.ptr->ref_count) == 0) {
           array_push(&pool->tree_stack, ts_subtree_to_mut_unsafe(child));
         }
       }

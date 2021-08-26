@@ -11,11 +11,11 @@ on:
     - cron:  '31 1 * * *'
 
 jobs:
-  ubuntu-tcc:
+  ubuntu-gcc:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      VFLAGS: -cc tcc
+      VFLAGS: -cc gcc
     steps:
     - name: Checkout V
       uses: actions/checkout@v2
@@ -24,7 +24,6 @@ jobs:
     - uses: actions/checkout@v2
       with:
         path: vls
-        ref: use-tree-sitter
     - name: Clone tree-sitter-v to ~/.vmodules/tree_sitter_v
       run: git clone --depth 1 https://github.com/nedpals/tree-sitter-v ~/.vmodules/tree_sitter_v
     - name: Build local v
@@ -45,7 +44,6 @@ jobs:
     - uses: actions/checkout@v2
       with:
         path: vls
-        ref: use-tree-sitter
     - name: Clone tree-sitter-v to ~/.vmodules/tree_sitter_v
       run: git clone --depth 1 https://github.com/nedpals/tree-sitter-v ~/.vmodules/tree_sitter_v
     - name: Build local v
@@ -53,20 +51,22 @@ jobs:
     - name: Run tests
       run: ./v test vls
 
-  # windows-msvc:
-  #   runs-on: windows-2019
-  #   timeout-minutes: 30
-  #   env:
-  #       VFLAGS: -cc msvc
-  #   steps:
-  #   - name: Checkout V
-  #     uses: actions/checkout@v2
-  #     with:
-  #       repository: vlang/v
-  #   - uses: actions/checkout@v2
-  #     with:
-  #       path: vls
-  #   - name: Build local v
-  #     run: .\make.bat -msvc
-  #   - name: Run tests
-  #     run: .\v.exe test vls
+  windows-msvc:
+    runs-on: windows-2019
+    timeout-minutes: 30
+    env:
+        VFLAGS: -cc msvc
+    steps:
+    - name: Checkout V
+      uses: actions/checkout@v2
+      with:
+        repository: vlang/v
+    - uses: actions/checkout@v2
+      with:
+        path: vls
+    - name: Clone tree-sitter-v to $HOME/.vmodules/tree_sitter_v
+      run: git clone --depth 1 https://github.com/nedpals/tree-sitter-v $HOME/.vmodules/tree_sitter_v
+    - name: Build local v
+      run: .\make.bat -msvc
+    - name: Run tests
+      run: .\v.exe test vls\lsp\ vls\analyzer\ vls\vls\testing\ vls\vls\general_test.v

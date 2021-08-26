@@ -4,9 +4,7 @@ import lsp
 import json
 import jsonrpc
 import os
-// import v.parser
-// import v.ast
-import v.vmod
+import analyzer
 import runtime
 
 const (
@@ -17,6 +15,18 @@ const (
 
 // initialize sends the server capabilities to the client
 fn (mut ls Vls) initialize(id int, params string) {
+	// Set defaults when vroot_path is empty
+	if ls.vroot_path.len == 0 {
+		if found_vroot_path := detect_vroot_path() {
+			ls.set_vroot_path(found_vroot_path)
+			ls.store.default_import_paths << os.join_path(found_vroot_path, 'vlib')
+		} else {
+			ls.show_message("V installation directory was not found. Modules in vlib such as `os` won't be detected.", .error)
+		}
+
+		ls.store.default_import_paths << os.vmodules_dir()
+	}
+
 	// Show message that VLS is not yet ready!
 	ls.show_message('VLS is a work-in-progress, pre-alpha language server. It may not be guaranteed to work reliably due to memory issues and other related factors. We encourage you to submit an issue if you encounter any problems.',
 		.warning)
@@ -45,6 +55,7 @@ fn (mut ls Vls) initialize(id int, params string) {
 		hover_provider: Feature.hover in ls.enabled_features
 		folding_range_provider: Feature.folding_range in ls.enabled_features
 		definition_provider: Feature.definition in ls.enabled_features
+		implementation_provider: Feature.implementation in ls.enabled_features
 	}
 
 	if Feature.completion in ls.enabled_features {
@@ -77,7 +88,6 @@ fn (mut ls Vls) initialize(id int, params string) {
 }
 
 fn (mut ls Vls) setup_logger(trace string, client_info lsp.ClientInfo) {
-	meta := vmod.decode(@VMOD_FILE) or { vmod.Manifest{} }
 	mut arch := 32
 	if runtime.is_64bit() {
 		arch += 32
@@ -97,19 +107,22 @@ fn (mut ls Vls) setup_logger(trace string, client_info lsp.ClientInfo) {
 	} else {
 		ls.log_message('Client / Editor: Unknown', .info)
 	}
+
+	ls.log_message('Using V path (VROOT): ${ls.vroot_path}', .info)
 }
 
 [manualfree]
 fn (mut ls Vls) process_builtin() {
-	mut builtin_import, _ := ls.store.add_import({
+	mut builtin_import, _ := ls.store.add_import(
 		resolved: true
 		module_name: 'builtin'
-		path: builtin_path
-	})
+		path: os.join_path(ls.vroot_path, 'vlib', 'builtin')
+	)
 
 	mut imports := [builtin_import]
-	ls.store.import_modules(mut imports)
 	ls.store.register_auto_import(builtin_import, '')
+	analyzer.register_builtin_symbols(mut ls.store, builtin_import)
+	ls.store.import_modules(mut imports)
 }
 
 // shutdown sets the state to shutdown but does not exit
@@ -127,6 +140,7 @@ fn (mut ls Vls) shutdown(id int) {
 fn (mut ls Vls) exit() {
 	// saves the log into the disk
 	ls.logger.close()
+	ls.typing_ch.close()
 
 	// move exit to shutdown for now
 	// == .shutdown => 0
@@ -140,6 +154,5 @@ fn (mut ls Vls) exit() {
 
 	// Close the IO.
 	ls.io.close()
-
 	exit(int(ls.status != .shutdown))
 }

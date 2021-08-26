@@ -73,7 +73,7 @@ pub fn compute_position(src []byte, target_offset int) lsp.Position {
 		remaining_offset := target_offset - offset
 		return lsp.Position{src_line, src_col + remaining_offset}
 	}
-	
+
 	return lsp.Position{src_line, src_col}
 }
 

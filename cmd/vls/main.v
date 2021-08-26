@@ -2,19 +2,9 @@ module main
 
 import cli
 import vls
-import v.vmod
 import os
 
 fn C._setmode(int, int)
-
-const (
-	meta = meta_info()
-)
-
-fn meta_info() vmod.Manifest {
-	x := vmod.decode(@VMOD_FILE) or { panic(err) }
-	return x
-}
 
 fn run_cli(cmd cli.Command) ? {
 	// Fetch the command-line options.
@@ -23,18 +13,31 @@ fn run_cli(cmd cli.Command) ? {
 	enable_features := if enable_flag_raw.len > 0 { enable_flag_raw.split(',') } else { []string{} }
 	disable_features := if disable_flag_raw.len > 0 { disable_flag_raw.split(',') } else { []string{} }
 	debug_mode := cmd.flags.get_bool('debug') or { false }
-	socket_mode := cmd.flags.get_bool('socket') or { false }
+
+	custom_vroot_path := cmd.flags.get_string('vroot') or { '' }  
+  socket_mode := cmd.flags.get_bool('socket') or { false }
 	socket_port := cmd.flags.get_string('port') or { '5007' }
 
 	// Setup the comm method and build the language server.
-    mut io := vls.ReceiveSender(Stdio{debug: debug_mode})
-    if socket_mode {
-        mut socket_io := Socket{ conn: 0, port: socket_port, debug: debug_mode }
-        socket_io.initialize()
-        io = socket_io
-    }
+  mut io := vls.ReceiveSender(Stdio{debug: debug_mode})
+  if socket_mode {
+      mut socket_io := Socket{ conn: 0, port: socket_port, debug: debug_mode }
+      socket_io.initialize()
+      io = socket_io
+  }
+  
+  if custom_vroot_path.len != 0 {
+		if !os.exists(custom_vroot_path) {
+			return error('Provided VROOT does not exist.')
+		}
+		if !os.is_dir(custom_vroot_path) {
+			return error('Provided VROOT is not a directory.')
+		} else {
+			ls.set_vroot_path(custom_vroot_path)
+		}
+	}
 
-    mut ls := vls.new(io)
+  mut ls := vls.new(io)
 	ls.set_features(enable_features, true) ?
 	ls.set_features(disable_features, false) ?
 	ls.start_loop()
@@ -49,9 +52,10 @@ fn main() {
 	}
 	mut cmd := cli.Command{
 		name: 'vls'
-		version: meta.version
-		description: meta.description
+		version: vls.meta.version
+		description: vls.meta.description
 		execute: run_cli
+		posix_mode: true
 	}
 
 	cmd.add_flags([
@@ -76,11 +80,17 @@ fn main() {
 			flag: .bool
 			name: 'socket'
 			description: "Listens and communicates to the server through a TCP socket."
-		}
+		},
 		cli.Flag{
 			flag: .string
 			name: 'port'
 			description: "Port to use for socket communication. (Default: 5007)"
+    },
+    cli.Flag{
+			flag: .string,
+			name: 'vroot'
+			required: false
+			description: 'Path to the V installation directory. By default, it will use the VROOT env variable or the current directory of the V executable.'
 		}
 	])
 

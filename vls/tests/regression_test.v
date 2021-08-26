@@ -8,8 +8,8 @@ import os
 // to open a file from a test folder and close if no panic or any related
 // "stop-the-process" errors occur.
 //
-// Files are taken from the existing issues. If there is an issue related 
-// to checker / parser that only crashes within VLS, please tag the issue 
+// Files are taken from the existing issues. If there is an issue related
+// to checker / parser that only crashes within VLS, please tag the issue
 // `needs-regression-test` and add the offending code here.
 //
 // This is just an extension of the existing V test suite. If the code also

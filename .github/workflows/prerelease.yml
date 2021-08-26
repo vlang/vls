@@ -1,0 +1,128 @@
+# Derived from: https://github.com/vlang/v/blob/master/.github/workflows/binary_artifact.yml
+name: Build and release pre-built binaries (Dev build)
+
+on:
+  push:
+    branches:
+      - use-tree-sitter
+
+jobs:
+  build-linux-x64:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      VFLAGS: -prod -cc gcc -d with_build_commit -gc boehm -cflags -static
+    steps:
+      - name: Install Boehm GC
+        run: sudo apt-get install libgc-dev
+      - name: Set up V version latest
+        uses: nocturlab/setup-vlang-action@v1
+        with:
+          v-version: latest
+      - uses: actions/checkout@v2
+        with:
+          path: vls
+      - name: Clone tree-sitter-v to ~/.vmodules/tree_sitter_v
+        run: git clone --depth 1 https://github.com/nedpals/tree-sitter-v ~/.vmodules/tree_sitter_v
+      - name: Compile VLS
+        run: |
+          cd vls
+          export VLS_BUILD_COMMIT=$(git rev-parse --short HEAD)
+          v -o vls_linux_x64 cmd/vls
+      - name: Create binary only artifact
+        uses: actions/upload-artifact@v2
+        with:
+          name: linux_x64
+          path: ./vls/vls_linux_x64
+
+  build-macos-x64:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    env:
+      VFLAGS: -prod -cc clang -d with_build_commit -d static_boehm -gc boehm
+    steps:
+      - name: Install Boehm GC
+        run: brew install bdw-gc
+      - name: Set up V version latest
+        uses: nocturlab/setup-vlang-action@v1
+        with:
+          v-version: latest
+      - uses: actions/checkout@v2
+        with:
+          path: vls
+      - name: Clone tree-sitter-v to ~/.vmodules/tree_sitter_v
+        run: git clone --depth 1 https://github.com/nedpals/tree-sitter-v ~/.vmodules/tree_sitter_v
+      - name: Compile VLS
+        run: |
+          cd vls
+          export VLS_BUILD_COMMIT=$(git rev-parse --short HEAD)
+          v -o vls_macos_x64 cmd/vls
+      - name: Create binary only artifact
+        uses: actions/upload-artifact@v2
+        with:
+          name: macos_x64
+          path: ./vls/vls_macos_x64
+
+  build-windows-x64:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      VFLAGS: -prod -cc gcc -d with_build_commit -os windows -gc boehm -cflags -static
+    steps:
+      - name: Set up MinGW
+        uses: egor-tensin/setup-mingw@v2
+        with:
+          platform: x64
+      - name: Set up V version latest
+        uses: nocturlab/setup-vlang-action@v1
+        with:
+          v-version: latest
+      - uses: actions/checkout@v2
+        with:
+          path: vls
+      - name: Clone tree-sitter-v to ~/.vmodules/tree_sitter_v
+        run: git clone --depth 1 https://github.com/nedpals/tree-sitter-v ~/.vmodules/tree_sitter_v
+      - name: Cross-compile VLS to Windows
+        run: |
+          cd vls
+          export VLS_BUILD_COMMIT=$(git rev-parse --short HEAD)
+          v -o vls_windows_x64.exe cmd/vls
+      - name: Create binary only artifact
+        uses: actions/upload-artifact@v2
+        with:
+          name: windows_x64
+          path: ./vls/vls_windows_x64.exe
+
+  pre-release:
+    name: Create Github Release
+    needs: [build-linux-x64, build-windows-x64, build-macos-x64]
+    runs-on: ubuntu-20.04
+    steps:
+      - uses: actions/checkout@v1
+      - name: Fetch linux_x64
+        uses: actions/download-artifact@v1
+        with:
+          name: linux_x64
+          path: ./linux_x64
+      - name: Fetch macos_x64
+        uses: actions/download-artifact@v1
+        with:
+          name: macos_x64
+          path: ./macos_x64
+      - name: Fetch windows_x64
+        uses: actions/download-artifact@v1
+        with:
+          name: windows_x64
+          path: ./windows_x64
+      - uses: "marvinpinto/action-automatic-releases@latest"
+        name: Create Release and Upload Assets
+        id: create_release
+        with:
+          repo_token: "${{ secrets.GITHUB_TOKEN }}"
+          automatic_release_tag: "latest"
+          prerelease: true
+          title: "Latest Development Build"
+          files: |
+            windows_x64/vls_windows_x64.exe
+            linux_x64/vls_linux_x64
+            macos_x64/vls_macos_x64

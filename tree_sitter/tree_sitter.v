@@ -1,7 +1,7 @@
 module tree_sitter
 
 #include "@VMODROOT/tree_sitter/lib/api.h"
-#flag -I@VMODROOT/tree_sitter/lib/
+#flag -I@VMODROOT/tree_sitter/lib
 #flag @VMODROOT/tree_sitter/lib/lib.o
 
 [typedef]
@@ -13,6 +13,7 @@ fn C.ts_parser_set_language(parser &C.TSParser, language &C.TSLanguage) bool
 fn C.ts_parser_parse_string(parser &C.TSParser, old_tree &C.TSTree, str &char, len u32) &C.TSTree
 fn C.ts_parser_parse(parser &C.TSParser, old_tree &C.TSTree, input C.TSInput) &C.TSTree
 fn C.ts_parser_delete(tree &C.TSParser)
+fn C.ts_parser_reset(parser &C.TSParser)
 
 [inline]
 pub fn new_parser() &C.TSParser {
@@ -20,9 +21,14 @@ pub fn new_parser() &C.TSParser {
 }
 
 [inline]
+pub fn (mut parser C.TSParser) reset() {
+	C.ts_parser_reset(parser)
+}
+
+[inline]
 pub fn (mut parser C.TSParser) set_language(language &C.TSLanguage) bool {
 	return C.ts_parser_set_language(parser, language)
-} 
+}
 
 [inline]
 pub fn (mut parser C.TSParser) parse_string(content string) &C.TSTree {
@@ -31,10 +37,15 @@ pub fn (mut parser C.TSParser) parse_string(content string) &C.TSTree {
 
 [inline]
 pub fn (mut parser C.TSParser) parse_string_with_old_tree(content string, old_tree &C.TSTree) &C.TSTree {
-	return C.ts_parser_parse_string(parser, old_tree, &char(content.str), content.len)
+	return parser.parse_string_with_old_tree_and_len(content, &C.TSTree(0), u32(content.len))
 }
 
-[unsafe; inline]
+[inline]
+pub fn (mut parser C.TSParser) parse_string_with_old_tree_and_len(content string, old_tree &C.TSTree, len u32) &C.TSTree {
+	return C.ts_parser_parse_string(parser, old_tree, &char(content.str), len)
+}
+
+[inline; unsafe]
 pub fn (parser &C.TSParser) free() {
 	unsafe {
 		C.ts_parser_delete(parser)
@@ -48,10 +59,10 @@ struct C.TSLanguage {}
 pub struct C.TSTree {}
 
 // Tree
-fn C.ts_tree_root_node(tree &C.TSTree) C.TSNode 
+fn C.ts_tree_root_node(tree &C.TSTree) C.TSNode
 fn C.ts_tree_delete(tree &C.TSTree)
 fn C.ts_tree_edit(tree &C.TSTree, edit &C.TSInputEdit)
-fn C.ts_tree_get_changed_ranges(old_tree &C.TSTree, new_tree &C.TSTree, len u32) &C.TSRange
+fn C.ts_tree_get_changed_ranges(old_tree &C.TSTree, new_tree &C.TSTree, count &u32) &C.TSRange
 
 [inline]
 pub fn (tree &C.TSTree) root_node() C.TSNode {
@@ -61,11 +72,12 @@ pub fn (tree &C.TSTree) root_node() C.TSNode {
 [inline]
 pub fn (tree &C.TSTree) edit(input_edit &C.TSInputEdit) {
 	C.ts_tree_edit(tree, input_edit)
-} 
+}
 
 [inline]
 pub fn (old_tree &C.TSTree) get_changed_ranges(new_tree &C.TSTree) &C.TSRange {
-	return C.ts_tree_get_changed_ranges(old_tree, new_tree, u32(0))
+	mut count := u32(0)
+	return C.ts_tree_get_changed_ranges(old_tree, new_tree, &count)
 }
 
 [unsafe]
@@ -125,11 +137,15 @@ pub fn (node C.TSNode) get_text(text []byte) string {
 		return ''
 	}
 
-	return text[start_index .. end_index].bytestr()
+	return text[start_index..end_index].bytestr()
 }
 
 [inline]
 pub fn (node C.TSNode) sexpr_str() string {
+	if node.is_null() {
+		return '<null node>'
+	}
+
 	sexpr := C.ts_node_string(node)
 	return unsafe { sexpr.vstring() }
 }
@@ -171,14 +187,17 @@ pub fn (node C.TSNode) range() C.TSRange {
 	return C.TSRange{
 		start_point: node.start_point()
 		end_point: node.end_point()
-		start_byte: C.ts_node_start_byte(node)
-		end_byte: C.ts_node_end_byte(node)
+		start_byte: node.start_byte()
+		end_byte: node.end_byte()
 	}
 }
 
-[inline]
 pub fn (node C.TSNode) get_type() string {
-	return unsafe { C.ts_node_type(node).vstring() }
+	if node.is_null() {
+		return '<null node>'
+	}
+	c := &char(C.ts_node_type(node))
+	return unsafe { c.vstring() }
 }
 
 [inline]
@@ -206,14 +225,16 @@ pub fn (node C.TSNode) has_changes() bool {
 	return C.ts_node_has_changes(node)
 }
 
-[inline]
-pub fn (node C.TSNode) has_error() bool {
+pub fn (node C.TSNode) is_error() bool {
+	if node.is_null() {
+		return true
+	}
 	return C.ts_node_has_error(node)
 }
 
 [inline]
 pub fn (node C.TSNode) parent() C.TSNode {
-	return C.ts_node_parent(node)	
+	return C.ts_node_parent(node)
 }
 
 [inline]
@@ -231,8 +252,10 @@ pub fn (node C.TSNode) named_child(pos u32) C.TSNode {
 	return C.ts_node_named_child(node, pos)
 }
 
-[inline]
 pub fn (node C.TSNode) named_child_count() u32 {
+	if node.is_null() {
+		return 0
+	}
 	return C.ts_node_named_child_count(node)
 }
 
@@ -241,7 +264,7 @@ pub fn (node C.TSNode) child_by_field_name(name string) C.TSNode {
 	defer {
 		unsafe { name.free() }
 	}
-	return C.ts_node_child_by_field_name(node, name.str, u32(name.len))
+	return C.ts_node_child_by_field_name(node, &char(name.str), u32(name.len))
 }
 
 [inline]
@@ -308,8 +331,8 @@ pub fn (node C.TSNode) tree_cursor() C.TSTreeCursor {
 
 [typedef]
 pub struct C.TSTreeCursor {
-	tree voidptr
-	id voidptr
+	tree    voidptr
+	id      voidptr
 	context [2]u32
 }
 
@@ -340,7 +363,8 @@ pub fn (cursor &C.TSTreeCursor) current_node() C.TSNode {
 
 [inline]
 pub fn (cursor &C.TSTreeCursor) current_field_name() string {
-	return unsafe { C.ts_tree_cursor_current_field_name(cursor).vstring() }
+	c := &char(C.ts_tree_cursor_current_field_name(cursor))
+	return unsafe { c.vstring() }
 }
 
 [inline]
@@ -363,17 +387,17 @@ pub fn (mut cursor C.TSTreeCursor) to_first_child() bool {
 
 [typedef]
 pub struct C.TSInputEdit {
-	start_byte u32
-	old_end_byte u32
-	new_end_byte u32
-	start_point C.TSPoint
+	start_byte    u32
+	old_end_byte  u32
+	new_end_byte  u32
+	start_point   C.TSPoint
 	old_end_point C.TSPoint
 	new_end_point C.TSPoint
 }
 
 [typedef]
 pub struct C.TSPoint {
-	row u32
+	row    u32
 	column u32
 }
 
@@ -385,8 +409,8 @@ pub fn (left_point C.TSPoint) eq(right_point C.TSPoint) bool {
 pub struct C.TSRange {
 	start_point C.TSPoint
 	end_point   C.TSPoint
-	start_byte u32
-	end_byte u32
+	start_byte  u32
+	end_byte    u32
 }
 
 // change this later if V allows operator overloading on binded types

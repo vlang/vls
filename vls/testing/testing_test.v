@@ -23,7 +23,7 @@ fn test_request() {
 
 fn test_request_with_params() {
 	mut io := Testio{}
-	param := map{
+	param := {
 		'hello': 'world'
 	}
 	payload := io.request_with_params('foo', param)
@@ -33,7 +33,7 @@ fn test_request_with_params() {
 
 fn test_result() {
 	mut io := Testio{}
-	result := map{
+	result := {
 		'hello': 'world'
 	}
 	resp := jsonrpc.Response<map[string]string>{

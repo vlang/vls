@@ -1,7 +1,5 @@
 module vls
 
-import v.ast
-import v.pref
 import json
 import jsonrpc
 import lsp
@@ -10,6 +8,22 @@ import os
 import tree_sitter
 import tree_sitter_v.bindings.v
 import analyzer
+import time
+import v.vmod
+
+pub const meta = meta_info()
+fn meta_info() vmod.Manifest {
+	parsed := vmod.decode(@VMOD_FILE) or { panic(err) }
+	build_commit := $if with_build_commit ? {
+		'-' + $env('VLS_BUILD_COMMIT')
+	} $else {
+		''
+	}
+	return vmod.Manifest{
+		...parsed,
+		version: parsed.version + build_commit
+	}
+}
 
 // These are the list of features available in VLS
 // If the feature is experimental, the value name should have a `exp_` prefix
@@ -23,6 +37,7 @@ pub enum Feature {
 	hover
 	folding_range
 	definition
+	implementation
 }
 
 // feature_from_str returns the Feature-enum value equivalent of the given string.
@@ -46,13 +61,14 @@ pub const (
 	default_features_list = [
 		Feature.diagnostics,
 		.formatting,
-		// .document_symbol,
-		// .workspace_symbol,
+		.document_symbol,
+		.workspace_symbol,
 		.signature_help,
-		// .completion,
+		.completion,
 		.hover,
 		.folding_range,
 		.definition,
+		.implementation,
 	]
 )
 
@@ -65,40 +81,20 @@ interface ReceiveSender {
 
 struct Vls {
 mut:
-	// NB: a base table is required since this is where we
-	// are gonna store the information for the builtin types
-	// which are only parsed once.
-	// base_table &ast.Table
-	parser     &C.TSParser
-	store      analyzer.Store
-	status     ServerStatus = .off
-	// TODO: change map key to DocumentUri
-	// files  map[DocumentUri]ast.File
-	// files map[string]ast.File
-	// sources  map[DocumentUri][]byte
-	sources map[string][]byte
-	trees map[string]&C.TSTree
-	// NB: a separate table is required for each folder in
-	// order to do functions such as typ_to_string or when
-	// some of the features needed additional information
-	// that is mostly stored into the ast.
-	//
-	// A single table is not feasible since files are always
-	// changing and there can be instances that a change might
-	// break another module/project data.
-	// tables  map[DocumentUri]&ast.Table
-	tables                   map[string]&ast.Table
-	root_uri                 lsp.DocumentUri
-	// invalid_imports          map[string][]string // where it stores a list of invalid imports
-	// doc_symbols              map[string][]lsp.SymbolInformation // doc_symbols is used for caching document symbols
-	// builtin_symbols          []string // list of publicly available symbols in builtin
-	// symbol_locations         map[string]map[string]lsp.Location
-	// builtin_symbol_locations map[string]lsp.Location
-	enabled_features         []Feature = vls.default_features_list
-	capabilities             lsp.ServerCapabilities
-	logger                   log.Logger
-	panic_count              int
-	debug                    bool
+	vroot_path       string
+	parser           &C.TSParser
+	store            analyzer.Store
+	status           ServerStatus = .off
+	sources          map[string]File
+	trees            map[string]&C.TSTree
+	root_uri         lsp.DocumentUri
+	is_typing        bool
+	typing_ch        chan int
+	enabled_features []Feature = vls.default_features_list
+	capabilities     lsp.ServerCapabilities
+	logger           log.Logger
+	panic_count      int
+	debug            bool
 	// client_capabilities lsp.ClientCapabilities
 pub mut:
 	// TODO: replace with io.ReadWriter
@@ -106,20 +102,22 @@ pub mut:
 }
 
 pub fn new(io ReceiveSender) Vls {
-	// mut tbl := ast.new_table()
-	// tbl.is_fmt = false
 	mut parser := tree_sitter.new_parser()
 	parser.set_language(v.language)
 
-	return Vls{
+	inst := Vls{
 		io: io
 		parser: parser
 		debug: io.debug
 		logger: log.new(.text)
-		store: analyzer.Store {
-			default_import_paths: [vlib_path, vmodules_path]
-		}
+		store: analyzer.Store{}
 	}
+
+	$if test {
+		inst.typing_ch.close()	
+	}
+
+	return inst
 }
 
 pub fn (mut ls Vls) dispatch(payload string) {
@@ -166,6 +164,7 @@ pub fn (mut ls Vls) dispatch(payload string) {
 				ls.did_open(request.id, request.params)
 			}
 			'textDocument/didChange' {
+				ls.typing_ch <- 1
 				ls.did_change(request.id, request.params)
 			}
 			'textDocument/didClose' {
@@ -195,6 +194,9 @@ pub fn (mut ls Vls) dispatch(payload string) {
 			'textDocument/definition' {
 				ls.definition(request.id, request.params)
 			}
+			'textDocument/implementation' {
+				ls.implementation(request.id, request.params)
+			}
 			else {}
 		}
 	} else {
@@ -215,6 +217,12 @@ pub fn (mut ls Vls) dispatch(payload string) {
 			}
 		}
 	}
+}
+
+// set_vroot_path changes the path of the V root directory
+pub fn (mut ls Vls) set_vroot_path(new_vroot_path string) {
+	unsafe { ls.vroot_path.free() }
+	ls.vroot_path = new_vroot_path
 }
 
 // set_logger changes the language server's logger
@@ -260,12 +268,6 @@ fn (mut ls Vls) panic(message string) {
 	}
 }
 
-// table_panic_handler handles the error behavior of the table. replaces panic.
-fn table_panic_handler(t &ast.Table, message string) {
-	mut ls := &Vls(t.panic_userdata)
-	ls.panic(message)
-}
-
 fn (mut ls Vls) send<T>(data T) {
 	str := json.encode(data)
 	ls.logger.response(str, .send)
@@ -293,33 +295,36 @@ fn (mut ls Vls) send_null(id int) {
 	ls.logger.response(str, .receive)
 }
 
+fn monitor_changes(mut ls Vls) {
+	// This is for debouncing analysis
+	for {
+		select {
+			a := <-ls.typing_ch {
+				ls.is_typing = a != 0
+			}
+			50 * time.millisecond {
+				if !ls.is_typing {
+					continue
+				}
+
+				uri := lsp.document_uri_from_path(ls.store.cur_file_path)
+				analyze(mut ls.store, ls.root_uri, ls.trees[uri], ls.sources[uri])
+				ls.is_typing = false
+				ls.show_diagnostics(uri)
+				unsafe { uri.free() }
+			}
+		}
+	}
+}
+
 // start_loop starts an endless loop which waits for stdin and prints responses to the stdout
 pub fn (mut ls Vls) start_loop() {
+	go monitor_changes(mut ls)
+
 	for {
 		payload := ls.io.receive() or { continue }
 		ls.dispatch(payload)
 	}
-}
-
-// new_scope_and_pref returns a new instance of scope and pref based on the given lookup paths
-fn new_scope_and_pref(lookup_paths ...string) (&ast.Scope, &pref.Preferences) {
-	mut lpaths := [vlib_path, vmodules_path]
-	for i := lookup_paths.len - 1; i >= 0; i-- {
-		lookup_path := lookup_paths[i]
-		lpaths.prepend(lookup_path)
-	}
-	scope := &ast.Scope{
-		parent: 0
-	}
-	prefs := &pref.Preferences{
-		enable_globals: true
-		output_mode: .silent
-		backend: .c
-		os: ._auto
-		lookup_path: lpaths
-		is_shared: true
-	}
-	return scope, prefs
 }
 
 // set_features enables or disables a language feature. emits an error if not found
@@ -356,4 +361,52 @@ fn new_error(code int) jsonrpc.Response2<string> {
 	return jsonrpc.Response2<string>{
 		error: jsonrpc.new_response_error(code)
 	}
+}
+
+fn detect_vroot_path() ?string {
+	vroot_env := os.getenv('VROOT')
+	if vroot_env.len != 0 {
+		return vroot_env
+	}
+
+	vexe_path_from_env := os.getenv('VEXE')
+	defer { 
+		unsafe { 
+			vroot_env.free()
+			vexe_path_from_env.free() 
+		} 
+	}
+
+	// Return the directory of VEXE if present
+	if vexe_path_from_env.len != 0 {
+		return os.dir(vexe_path_from_env)
+	}
+
+	// Find the V executable in PATH
+	path_env := os.getenv("PATH")
+	paths := path_env.split(vls.path_list_sep)
+	defer { 
+		unsafe { 
+			vexe_path_from_env.free()
+			paths.free() 
+		} 
+	}
+
+	for path in paths {
+		full_path := os.join_path(path, vls.v_exec_name)
+		if os.exists(full_path) && os.is_executable(full_path) {
+			defer { unsafe { full_path.free() } }
+			if os.is_link(full_path) {
+				// Get the real path of the V executable
+				full_real_path := os.real_path(full_path)
+				defer { unsafe { full_real_path.free() } }
+				return os.dir(full_real_path)
+			} else {
+				return os.dir(full_path)
+			}
+		}
+		unsafe { full_path.free() }
+	}
+
+	return error('V path not found.')
 }

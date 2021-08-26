@@ -7,8 +7,8 @@ module depgraph
 [heap]
 pub struct Tree {
 mut:
-	len int
-	keys []string
+	len    int
+	keys   []string
 	values []&Node
 }
 
@@ -23,8 +23,10 @@ pub fn (tree &Tree) has(id string) bool {
 pub fn (mut tree Tree) add(id string, dependencies ...string) &Node {
 	new_id := id.clone()
 	tree.keys << new_id
-	tree.values << &Node{ tree, new_id, dependencies }
-	defer { tree.len++ }
+	tree.values << &Node{tree, new_id, dependencies}
+	defer {
+		tree.len++
+	}
 	return tree.values[tree.values.len - 1]
 }
 
@@ -40,7 +42,6 @@ pub fn (mut tree Tree) delete(id string) {
 		tree.keys.delete(idx)
 		tree.values.delete(idx)
 	}
-	
 	tree.len--
 }
 
@@ -83,12 +84,12 @@ pub struct Node {
 mut:
 	tree &Tree = &Tree(0)
 pub mut:
-	id string
+	id           string
 	dependencies []string
 }
 
 pub fn (node &Node) str() string {
-	return '${node.id} -> (${node.dependencies.join(', ')})'
+	return '$node.id -> (${node.dependencies.join(', ')})'
 }
 
 pub fn (mut node Node) remove_dependency(dep_path string) int {
@@ -108,6 +109,10 @@ pub fn (mut node Node) remove_dependency(dep_path string) int {
 
 pub fn (node &Node) get_all_dependencies(completed ...string) []string {
 	mut ret := []string{}
+	if isnil(node) {
+		return ret
+	}
+
 	for d in node.dependencies {
 		if completed.len == 0 || d !in completed {
 			ret << d
@@ -121,12 +126,16 @@ pub fn (node &Node) get_all_dependencies(completed ...string) []string {
 			continue
 		}
 
+		if isnil(dep_node) || isnil(dep_node.dependencies) {
+			continue
+		}
+
 		other_deps := dep_node.get_all_dependencies()
 		for other_dep in other_deps {
 			if other_dep in ret || other_dep in completed {
 				continue
 			}
-			
+
 			// push if other_dep is not present in ret
 			ret << other_dep
 		}
@@ -143,7 +152,7 @@ pub fn (node &Node) get_next_nodes(completed ...string) []string {
 
 	mut available_and_required := map[string]bool{}
 	mut ret := []string{}
-	
+
 	for a in available_nodes {
 		available_and_required[a] = false
 	}

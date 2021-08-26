@@ -6,7 +6,7 @@ import os
 
 const base_dir = os.join_path(os.dir(@FILE), 'test_files', 'definition')
 
-const definition_inputs = map{
+const definition_inputs = {
 	'call_arg.vv':                lsp.Position{4, 17}
 	'call_expr.vv':               lsp.Position{3, 10}
 	'enum_val.vv':                lsp.Position{7, 12}
@@ -29,9 +29,12 @@ const definition_inputs = map{
 	'var.vv':                     lsp.Position{2, 11}
 }
 
-const definition_should_return_null = ['node_error.vv', 'stmt.vv']
+const definition_should_return_null = [
+	'node_error.vv', 
+	// 'stmt.vv'
+]
 
-const definition_results = map{
+const definition_results = {
 	'call_arg.vv':                lsp.LocationLink{
 		target_uri: lsp.document_uri_from_path(os.join_path(base_dir, 'call_arg.vv'))
 		origin_selection_range: lsp.Range{
@@ -54,12 +57,12 @@ const definition_results = map{
 			end: lsp.Position{3, 15}
 		}
 		target_range: lsp.Range{
-			start: lsp.Position{0, 0}
-			end: lsp.Position{0, 18}
+			start: lsp.Position{0, 3}
+			end: lsp.Position{0, 16}
 		}
 		target_selection_range: lsp.Range{
-			start: lsp.Position{0, 0}
-			end: lsp.Position{0, 18}
+			start: lsp.Position{0, 3}
+			end: lsp.Position{0, 16}
 		}
 	}
 	'enum_val.vv':                lsp.LocationLink{
@@ -129,12 +132,12 @@ const definition_results = map{
 			end: lsp.Position{4, 16}
 		}
 		target_range: lsp.Range{
-			start: lsp.Position{0, 0}
-			end: lsp.Position{2, 9}
+			start: lsp.Position{0, 7}
+			end: lsp.Position{0, 9}
 		}
 		target_selection_range: lsp.Range{
-			start: lsp.Position{0, 0}
-			end: lsp.Position{2, 9}
+			start: lsp.Position{0, 7}
+			end: lsp.Position{0, 9}
 		}
 	}
 	'fn_return_type.vv':          lsp.LocationLink{
@@ -144,11 +147,11 @@ const definition_results = map{
 			end: lsp.Position{2, 20}
 		}
 		target_range: lsp.Range{
-			start: lsp.Position{0, 0}
+			start: lsp.Position{0, 5}
 			end: lsp.Position{0, 9}
 		}
 		target_selection_range: lsp.Range{
-			start: lsp.Position{0, 0}
+			start: lsp.Position{0, 5}
 			end: lsp.Position{0, 9}
 		}
 	}
@@ -174,11 +177,11 @@ const definition_results = map{
 			end: lsp.Position{3, 13}
 		}
 		target_range: lsp.Range{
-			start: lsp.Position{0, 0}
+			start: lsp.Position{0, 5}
 			end: lsp.Position{0, 8}
 		}
 		target_selection_range: lsp.Range{
-			start: lsp.Position{0, 0}
+			start: lsp.Position{0, 5}
 			end: lsp.Position{0, 8}
 		}
 	}
@@ -200,16 +203,17 @@ const definition_results = map{
 	'selector_expr.vv':           lsp.LocationLink{
 		target_uri: lsp.document_uri_from_path(os.join_path(base_dir, 'selector_expr.vv'))
 		origin_selection_range: lsp.Range{
+			// TODO:
 			start: lsp.Position{6, 5}
 			end: lsp.Position{6, 12}
 		}
 		target_range: lsp.Range{
 			start: lsp.Position{1, 2}
-			end: lsp.Position{1, 13}
+			end: lsp.Position{1, 9}
 		}
 		target_selection_range: lsp.Range{
 			start: lsp.Position{1, 2}
-			end: lsp.Position{1, 13}
+			end: lsp.Position{1, 9}
 		}
 	}
 	'struct_init_field_name.vv':  lsp.LocationLink{
@@ -220,11 +224,11 @@ const definition_results = map{
 		}
 		target_range: lsp.Range{
 			start: lsp.Position{1, 2}
-			end: lsp.Position{1, 13}
+			end: lsp.Position{1, 6}
 		}
 		target_selection_range: lsp.Range{
 			start: lsp.Position{1, 2}
-			end: lsp.Position{1, 13}
+			end: lsp.Position{1, 6}
 		}
 	}
 	'struct_field_type.vv':       lsp.LocationLink{
@@ -234,11 +238,11 @@ const definition_results = map{
 			end: lsp.Position{3, 9}
 		}
 		target_range: lsp.Range{
-			start: lsp.Position{0, 0}
+			start: lsp.Position{0, 5}
 			end: lsp.Position{0, 8}
 		}
 		target_selection_range: lsp.Range{
-			start: lsp.Position{0, 0}
+			start: lsp.Position{0, 5}
 			end: lsp.Position{0, 8}
 		}
 	}
@@ -264,12 +268,27 @@ const definition_results = map{
 			end: lsp.Position{5, 15}
 		}
 		target_range: lsp.Range{
-			start: lsp.Position{0, 0}
-			end: lsp.Position{2, 14}
+			start: lsp.Position{0, 7}
+			end: lsp.Position{0, 14}
 		}
 		target_selection_range: lsp.Range{
-			start: lsp.Position{0, 0}
-			end: lsp.Position{2, 14}
+			start: lsp.Position{0, 7}
+			end: lsp.Position{0, 14}
+		}
+	}
+	'stmt.vv':        lsp.LocationLink{
+		target_uri: lsp.document_uri_from_path(os.join_path(base_dir, 'stmt.vv'))
+		origin_selection_range: lsp.Range{
+			start: lsp.Position{0, 3}
+			end: lsp.Position{0, 28}
+		}
+		target_range: lsp.Range{
+			start: lsp.Position{0, 3}
+			end: lsp.Position{0, 28}
+		}
+		target_selection_range: lsp.Range{
+			start: lsp.Position{0, 3}
+			end: lsp.Position{0, 28}
 		}
 	}
 	'var_receiver.vv':            lsp.LocationLink{
