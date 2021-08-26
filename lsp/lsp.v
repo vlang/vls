@@ -10,7 +10,9 @@ pub fn (du DocumentUri) dir() string {
 
 pub fn (du DocumentUri) path() string {
 	$if windows {
-		return if du.starts_with('file:///') { du.all_after('file:///').replace('%3A', ':') } else { '' }
+		if du.contains('%3A') {
+			return du.all_after('file:///').replace('%3A', ':')
+		}
 	}
 	return if du.starts_with('file://') { du.all_after('file://') } else { '' }
 }
