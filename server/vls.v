@@ -1,4 +1,4 @@
-module vls
+module server
 
 import json
 import jsonrpc
@@ -87,7 +87,7 @@ mut:
 	root_uri         lsp.DocumentUri
 	is_typing        bool
 	typing_ch        chan int
-	enabled_features []Feature = vls.default_features_list
+	enabled_features []Feature = server.default_features_list
 	capabilities     lsp.ServerCapabilities
 	logger           log.Logger
 	panic_count      int

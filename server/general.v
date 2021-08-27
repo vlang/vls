@@ -1,4 +1,4 @@
-module vls
+module server
 
 import lsp
 import json
@@ -60,13 +60,13 @@ fn (mut ls Vls) initialize(id int, params string) {
 	}
 
 	if Feature.completion in ls.enabled_features {
-		ls.capabilities.completion_provider.trigger_characters = vls.completion_trigger_characters
+		ls.capabilities.completion_provider.trigger_characters = server.completion_trigger_characters
 	}
 
 	if Feature.signature_help in ls.enabled_features {
 		ls.capabilities.signature_help_provider = lsp.SignatureHelpOptions{
-			trigger_characters: vls.signature_help_trigger_characters
-			retrigger_characters: vls.signature_help_retrigger_characters
+			trigger_characters: server.signature_help_trigger_characters
+			retrigger_characters: server.signature_help_retrigger_characters
 		}
 	}
 

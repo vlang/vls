@@ -1,5 +1,5 @@
-import vls
-import vls.testing
+import server
+import server.testing
 import json
 import lsp
 import os
@@ -83,7 +83,7 @@ const doc_symbols_result = {
 
 fn test_document_symbols() {
 	mut io := &testing.Testio{}
-	mut ls := vls.new(io)
+	mut ls := server.new(io)
 	ls.dispatch(io.request('initialize'))
 	test_files := testing.load_test_file_paths('document_symbols') or {
 		io.bench.fail()
