@@ -76,6 +76,7 @@ interface ReceiveSender {
 	debug bool
 	send(data string)
 	receive() ?string
+	close()
 }
 
 struct Vls {

@@ -7,19 +7,27 @@ import os
 fn C._setmode(int, int)
 
 fn run_cli(cmd cli.Command) ? {
+	// Fetch the command-line options.
 	enable_flag_raw := cmd.flags.get_string('enable') or { '' }
 	disable_flag_raw := cmd.flags.get_string('disable') or { '' }
 	enable_features := if enable_flag_raw.len > 0 { enable_flag_raw.split(',') } else { []string{} }
-	disable_features := if disable_flag_raw.len > 0 {
-		disable_flag_raw.split(',')
-	} else {
-		[]string{}
-	}
+	disable_features := if disable_flag_raw.len > 0 { disable_flag_raw.split(',') } else { []string{} }
 	debug_mode := cmd.flags.get_bool('debug') or { false }
-	mut ls := vls.new(&Stdio{ debug: debug_mode })
 
-	custom_vroot_path := cmd.flags.get_string('vroot') or { '' }
-	if custom_vroot_path.len != 0 {
+	custom_vroot_path := cmd.flags.get_string('vroot') or { '' }  
+  socket_mode := cmd.flags.get_bool('socket') or { false }
+	socket_port := cmd.flags.get_string('port') or { '5007' }
+
+	// Setup the comm method and build the language server.
+  mut io := vls.ReceiveSender(Stdio{debug: debug_mode})
+  if socket_mode {
+      mut socket_io := Socket{ conn: 0, port: socket_port, debug: debug_mode }
+      socket_io.initialize()
+      io = socket_io
+  }
+  
+  mut ls := vls.new(io)
+  if custom_vroot_path.len != 0 {
 		if !os.exists(custom_vroot_path) {
 			return error('Provided VROOT does not exist.')
 		}
@@ -69,6 +77,16 @@ fn main() {
 			description: "Toggles language server's debug mode."
 		},
 		cli.Flag{
+			flag: .bool
+			name: 'socket'
+			description: "Listens and communicates to the server through a TCP socket."
+		},
+		cli.Flag{
+			flag: .string
+			name: 'port'
+			description: "Port to use for socket communication. (Default: 5007)"
+    },
+    cli.Flag{
 			flag: .string,
 			name: 'vroot'
 			required: false
