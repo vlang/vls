@@ -1,7 +1,7 @@
 module analyzer
 
 import tree_sitter
-import tree_sitter_v.bindings.v
+import tree_sitter_v as v
 import os
 
 const (

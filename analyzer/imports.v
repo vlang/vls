@@ -2,7 +2,7 @@ module analyzer
 
 import os
 import tree_sitter
-import tree_sitter_v.bindings.v
+import tree_sitter_v as v
 
 pub struct Import {
 mut:
