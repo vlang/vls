@@ -145,5 +145,14 @@ fn (mut ls Vls) exit() {
 	// move exit to shutdown for now
 	// == .shutdown => 0
 	// != .shutdown => 1
+	unsafe {
+		// for key, _ in ls.tables {
+		// 	ls.free_table(key, '')
+		// }
+		// ls.base_table.free()
+	}
+
+	// Close the IO.
+	ls.io.close()
 	exit(int(ls.status != .shutdown))
 }

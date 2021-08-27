@@ -53,3 +53,7 @@ fn get_raw_input() string {
 	}
 	return buf.str()
 }
+
+pub fn (_ Stdio) close() {
+	return
+}
