@@ -1,0 +1,21 @@
+===
+Spread Operator
+===
+
+t := Struct{
+  ...p
+  foo: 1
+}
+
+---
+
+(source_file 
+  (short_var_declaration 
+    (identifier_list (identifier)) 
+    (expression_list 
+      (type_initializer 
+        (type_identifier) 
+        (literal_value 
+          (spread_operator (identifier)) 
+        (keyed_element 
+          (field_identifier) (int_literal)))))))

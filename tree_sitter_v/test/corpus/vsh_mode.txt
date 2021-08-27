@@ -1,0 +1,21 @@
+===
+VSH / Shell Mode Support
+===
+
+module main
+
+fn hello() {}
+
+mut a := 1
+
+---
+
+(source_file
+  (module_clause (module_identifier))
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (block))
+  (short_var_declaration
+    (identifier_list (identifier))
+    (expression_list (int_literal))))

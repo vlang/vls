@@ -1,0 +1,13 @@
+===
+Pseudo-comptime Identifier
+===
+
+println(@VMOD)
+
+---
+
+(source_file
+  (call_expression
+    (identifier)
+    (argument_list 
+      (pseudo_comptime_identifier (identifier)))))

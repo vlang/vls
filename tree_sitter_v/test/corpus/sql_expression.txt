@@ -1,0 +1,20 @@
+===
+SQL Expression
+===
+
+second_oldest := sql db {
+  select from User order by age desc limit 1 offset offs
+}
+
+sql db {
+  delete from User where age == 34
+}
+
+---
+
+(source_file 
+  (short_var_declaration 
+    (identifier_list (identifier)) 
+    (expression_list 
+      (sql_expression (identifier)))) 
+  (sql_expression (identifier)))

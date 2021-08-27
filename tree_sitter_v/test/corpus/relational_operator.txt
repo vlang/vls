@@ -1,0 +1,25 @@
+===
+Relation Operator
+===
+
+foo := hello !in foo 
+if foo in bar {}
+println(boo !is Foo)
+
+---
+
+(source_file 
+  (short_var_declaration 
+    (identifier_list (identifier)) 
+    (expression_list 
+      (in_expression 
+        (identifier) (identifier)))) 
+  (if_expression 
+    (in_expression 
+      (identifier) (identifier)) 
+      (block)) 
+  (call_expression 
+    (identifier) 
+    (argument_list 
+      (is_expression 
+        (identifier) (type_identifier)))))

@@ -1,0 +1,30 @@
+===
+Sum type declaration
+===
+
+type Stmt = StructDecl | EnumDecl | ast.FnDecl
+
+---
+
+(source_file
+  (type_declaration
+    (type_identifier)
+    (type_list
+      (type_identifier)
+      (type_identifier)
+      (qualified_type 
+        (module_identifier) (type_identifier)))))
+
+===
+Builtin type redefinition
+===
+
+type u8 = byte
+
+---
+
+(source_file
+  (type_declaration
+    (builtin_type)
+    (type_list
+      (builtin_type))))

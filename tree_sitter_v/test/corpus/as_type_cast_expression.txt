@@ -1,0 +1,21 @@
+===
+As Cast Expression
+===
+
+fn main() {
+  dummy := hello as ast.Foo
+}
+
+---
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (block
+      (short_var_declaration
+        (identifier_list (identifier))
+        (expression_list
+          (as_type_cast_expression
+            (identifier)
+            (qualified_type (module_identifier) (type_identifier))))))))

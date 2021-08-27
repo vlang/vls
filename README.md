@@ -28,9 +28,6 @@ Linux users are also expected to install the Boehm GC library. (`sudo apt-get in
 
 Afterwards, open your operating system's terminal and execute the following:
 ```
-## Install the tree-sitter grammar for V first:
-git clone https://github.com/nedpals/tree-sitter-v ~/.vmodules/tree_sitter_v
-
 ## Clone the project:
 git clone https://github.com/vlang/vls && cd vls
 

@@ -1,0 +1,10 @@
+===
+C Flag Clause
+===
+
+#flag windows -l shell32
+
+---
+
+(source_file
+  (c_flag_clause (identifier)))

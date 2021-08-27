@@ -1,0 +1,53 @@
+===
+Function Type
+===
+
+type Handler = fn (req Req, res &Res) ?string
+
+fn new(key []byte, data []byte, hash_func fn ([]byte) []byte, blocksize int) []byte {}
+
+fn test() fn(i int) ?(string, int) {}
+
+---
+
+(source_file
+  (type_declaration
+    (type_identifier)
+    (type_list
+      (function_type
+        (parameter_list
+          (parameter_declaration
+            (identifier) (type_identifier))
+          (parameter_declaration
+            (identifier)
+            (pointer_type (type_identifier))))
+        (option_type (builtin_type))))) 
+  (function_declaration 
+    (identifier) 
+    (parameter_list 
+      (parameter_declaration 
+        (identifier) (array_type (builtin_type))) 
+      (parameter_declaration 
+        (identifier) (array_type (builtin_type))) 
+      (parameter_declaration 
+        (identifier) 
+        (function_type 
+          (type_only_parameter_list 
+            (type_parameter_declaration
+              (array_type (builtin_type)))) 
+          (array_type (builtin_type)))) 
+      (parameter_declaration 
+        (identifier) (builtin_type))) 
+    (array_type (builtin_type)) 
+    (block)) 
+  (function_declaration 
+    (identifier)
+    (parameter_list) 
+    (function_type 
+      (parameter_list 
+        (parameter_declaration 
+          (identifier) (builtin_type))) 
+      (option_type 
+        (multi_return_type 
+          (builtin_type) (builtin_type)))) 
+    (block)))

@@ -1,0 +1,13 @@
+===
+Assert Statement
+===
+
+assert a == b
+
+---
+
+(source_file 
+  (assert_statement 
+    (binary_expression 
+      (identifier) 
+      (identifier))))

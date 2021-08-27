@@ -1,0 +1,19 @@
+===
+Function Overload
+===
+
+fn (t Test) == (t Test) Test {}
+
+---
+
+(source_file 
+  (function_declaration 
+    (parameter_list 
+      (parameter_declaration 
+        (identifier) (type_identifier))) 
+    (overloadable_operator)
+    (parameter_list 
+      (parameter_declaration 
+        (identifier) (type_identifier))) 
+    (type_identifier) 
+    (block)))

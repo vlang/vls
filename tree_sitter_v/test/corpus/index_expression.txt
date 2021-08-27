@@ -1,0 +1,40 @@
+===
+Index Expression
+===
+
+fn main() {
+  test := hello[0]
+  opt := hello[1]?
+  opt2 := hello[two] or {
+    return
+  }
+}
+
+---
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (block
+      (short_var_declaration
+        (identifier_list (identifier))
+        (expression_list 
+          (index_expression (identifier) (int_literal))))
+      (short_var_declaration
+        (identifier_list (identifier))
+        (expression_list
+          (index_expression 
+            (identifier)
+            (int_literal)
+            (option_propagator))))
+      (short_var_declaration
+        (identifier_list (identifier))
+        (expression_list
+          (index_expression 
+            (identifier)
+            (identifier)
+            (option_propagator 
+              (or_block
+                (block
+                  (return_statement))))))))))

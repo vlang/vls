@@ -1,0 +1,15 @@
+===
+Public enum declaration
+===
+
+pub enum Color {
+  blue
+}
+
+---
+
+(source_file
+  (enum_declaration
+    (type_identifier)
+    (enum_member_declaration_list
+      (enum_member (identifier)))))

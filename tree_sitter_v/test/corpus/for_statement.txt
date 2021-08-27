@@ -1,0 +1,20 @@
+===
+For Statement
+===
+
+fn main() {
+  for true {
+    // do something
+  }
+}
+
+---
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (block
+      (for_statement 
+        (true)
+        (block (comment))))))

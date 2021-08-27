@@ -1,0 +1,23 @@
+===
+Binded Type Initializer
+===
+
+fn main() {
+  t := C.TSPoint{1, 2}
+}
+
+---
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (block
+      (short_var_declaration
+        (identifier_list (identifier))
+        (expression_list
+          (type_initializer 
+            (binded_type (identifier))
+            (literal_value
+              (element (int_literal))
+              (element (int_literal)))))))))

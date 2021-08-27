@@ -1,0 +1,15 @@
+===
+Interface declaration with struct field
+===
+
+interface Speaker {
+  name string
+}
+
+---
+
+(source_file
+  (interface_declaration
+    (type_identifier)
+    (interface_spec_list 
+      (struct_field_declaration (field_identifier) (builtin_type)))))

@@ -1,0 +1,42 @@
+===
+Assignment Statement
+===
+
+fn main() {
+  a = 1
+  a := 1
+  a, b = 1, 2
+  a, b := 1, 2
+}
+
+---
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (block
+      (assignment_statement
+        (assignable_identifier_list
+          (identifier))
+        (expression_list
+          (int_literal)))
+      (short_var_declaration
+        (identifier_list
+          (identifier))
+        (expression_list
+          (int_literal)))
+      (assignment_statement
+        (assignable_identifier_list
+          (identifier)
+          (identifier))
+        (expression_list
+          (int_literal)
+          (int_literal)))
+      (short_var_declaration
+        (identifier_list
+          (identifier)
+          (identifier))
+        (expression_list
+          (int_literal)
+          (int_literal))))))

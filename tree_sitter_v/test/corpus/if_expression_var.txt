@@ -1,0 +1,25 @@
+===
+If Expression var declaration
+===
+
+fn main() {
+  if foo := opt_fn() {
+    // do something
+  }
+}
+
+---
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (block
+      (if_expression
+        (short_var_declaration
+          (identifier_list (identifier))
+          (expression_list 
+            (call_expression
+              (identifier)
+              (argument_list))))
+        (block (comment))))))

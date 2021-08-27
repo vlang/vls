@@ -1,0 +1,12 @@
+===
+JS typedef struct declaration
+===
+
+struct JS.Document {}
+
+---
+
+(source_file
+  (struct_declaration
+    (binded_type (identifier))
+    (struct_field_declaration_list)))

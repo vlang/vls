@@ -1,0 +1,49 @@
+===
+Interpreted String Literal with Interpolation
+===
+
+const a = 'Hello $world! ${hello.hey} ${path.join('')}'
+
+---
+
+(source_file
+  (const_declaration
+    (const_spec 
+      (identifier) 
+      (interpreted_string_literal
+        (string_interpolation (identifier))
+        (string_interpolation
+          (selector_expression 
+            (identifier) (identifier))) 
+        (string_interpolation 
+          (call_expression 
+            (selector_expression 
+              (identifier) (identifier)) 
+            (argument_list (interpreted_string_literal))))))))
+
+===
+Interpreted String Literal with Escaped Interp Character
+===
+
+exec('docker container rm -f $(docker container ls -aq)') or {}
+
+---
+
+(source_file
+  (call_expression
+    (identifier)
+    (argument_list
+      (interpreted_string_literal))
+    (option_propagator 
+      (or_block (block)))))
+
+===
+Comment inside string Literal
+===
+
+'//'
+
+---
+
+(source_file
+  (interpreted_string_literal))

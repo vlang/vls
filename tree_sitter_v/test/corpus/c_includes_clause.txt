@@ -1,0 +1,10 @@
+===
+C include clause
+===
+
+#include "test.h"
+
+---
+
+(source_file
+  (c_include_clause (interpreted_string_literal)))

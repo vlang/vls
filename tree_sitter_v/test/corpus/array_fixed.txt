@@ -1,0 +1,19 @@
+===
+Fixed Array
+===
+
+fn main() {
+  fixed := [1]!
+}
+
+---
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (block
+      (short_var_declaration
+        (identifier_list (identifier))
+        (expression_list
+          (fixed_array (int_literal)))))))

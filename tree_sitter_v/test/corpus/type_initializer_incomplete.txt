@@ -1,0 +1,24 @@
+===
+Incomplete Type Initializer
+===
+
+fn main() {
+  t := Test{hello: }
+}
+
+---
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (block
+      (short_var_declaration
+        (identifier_list (identifier))
+        (expression_list
+          (type_initializer 
+            (type_identifier)
+            (literal_value
+              (keyed_element 
+                (field_identifier) 
+                (MISSING identifier)))))))))

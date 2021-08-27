@@ -1,0 +1,12 @@
+===
+Labeled Statement
+===
+
+label: for {}
+
+---
+
+(source_file 
+  (labeled_statement 
+    (label_name) 
+    (for_statement (block))))

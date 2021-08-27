@@ -1,0 +1,21 @@
+===
+Empty map Initializer
+===
+
+fn main() {
+  test := map[string]int{}
+}
+
+---
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (block
+      (short_var_declaration
+        (identifier_list (identifier))
+        (expression_list
+          (type_initializer 
+            (map_type (builtin_type) (builtin_type))
+            (literal_value)))))))

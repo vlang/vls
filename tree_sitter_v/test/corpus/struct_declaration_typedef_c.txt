@@ -1,0 +1,12 @@
+===
+C typedef struct declaration
+===
+
+struct C.sqlite3 {}
+
+---
+
+(source_file
+  (struct_declaration
+    (binded_type (identifier))
+    (struct_field_declaration_list)))

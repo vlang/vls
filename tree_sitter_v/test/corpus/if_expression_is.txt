@@ -1,0 +1,20 @@
+===
+If Expression is guard
+===
+
+fn main() {
+  if var is string {
+    // do something
+  }
+}
+
+---
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (block
+      (if_expression
+        (is_expression (identifier) (builtin_type))
+        (block (comment))))))
