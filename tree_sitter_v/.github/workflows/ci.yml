@@ -1,66 +1,40 @@
-# Taken from: https://github.com/tree-sitter/tree-sitter-go/tree/eb306e6e60f393df346cfc8cbfaf52667a37128a/.github/workflows
-name: build/test
+name: mirror
 on:
-  push:
-    branches:
-      - "**"
+  schedule:
+    # Trigger mirrors weekly
+    - cron: 0 0 * * 0
 env:
   EM_VERSION: 1.39.18
   EM_CACHE_FOLDER: "emsdk-cache"
 
 jobs:
-  test:
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: true
-      matrix:
-        os: [macos-latest, ubuntu-latest]
-    steps:
-      - uses: actions/checkout@v2
-      - uses: actions/setup-node@v2
-        with:
-          node-version: 14
-      - run: npm install
-      - run: npm test
-  test_windows:
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v2
-      - uses: actions/setup-node@v2
-        with:
-          node-version: 14
-      - run: npm install
-      - run: npm run-script test
-  vlib_test:
+  mirror-to-repo:
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: true
     steps:
       - uses: actions/checkout@v2
-      - uses: actions/setup-node@v2
-        with:
-          node-version: 14
-      - name: Clone & Build vmaster/v
-        run: |
-          git clone --depth=1 https://github.com/vlang/v vmaster/
-      - run: npm install
-      - name: Run VLib parsing test
-        id: run_vlib_test
+      - name: Clone VLS
+        run: git clone --depth=1 https://github.com/vlang/vls ../vls
+      # Does not matter (for now) if the repo is updated than the one in vls.
+      - name: Diff vls/tree_sitter_v and tree-sitter-v repo
         continue-on-error: true
         run: |
-          node tools/project-checker.js vmaster/vlib/ --hideRanges --json
-          REPORT_JSON=$(cat report.json)
-          REPORT_JSON="${REPORT_JSON//'%'/'%25'}"
-          REPORT_JSON="${REPORT_JSON//$'\n'/'%0A'}"
-          REPORT_JSON="${REPORT_JSON//$'\r'/'%0D'}"
-          echo "::set-output name=report_json::${REPORT_JSON}"
-      - name: Create Report Badge
-        uses: schneegans/dynamic-badges-action@v1.1.0
+          diff -qr ../vls/tree_sitter_v .
+          if (( $? == "1" )); then echo "Differences found. Pushing updates to tree-sitter-v repo..."; else exit 1 fi
+      - name: Copy contents from vls/tree_sitter_v
+        if: ${{ success() }}
+        run: |
+          git rm -rf .
+          git clean -fxd
+          cp -a ../vls/tree_sitter_v/. .
+      - name: Commit changes
+        if: ${{ success() }}
+        uses: EndBug/add-and-commit@v7
         with:
-          auth: ${{ secrets.TEST_REPORT_GIST_SECRET }}
-          gistID: ${{ secrets.TEST_REPORT_GIST_ID }}
-          filename: report-badge-data.json
-          label: parsed from vlib
-          message: ${{ fromJson(steps.run_vlib_test.outputs.report_json).totalPassed }}/${{ fromJson(steps.run_vlib_test.outputs.report_json).totalFail }}
-          color: orange
-          namedLogo: V
+          message: 'Updated parser from https://github.com/vlang/vls repo'
+          add: '.'
+      - name: Push changes
+        if: ${{ success() }}
+        uses: ad-m/github-push-action@master
+        with:
+          github_token: ${{ secrets.GH_TOKEN }}
+          branch: ${{ github.ref }}
