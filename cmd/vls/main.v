@@ -26,6 +26,7 @@ fn run_cli(cmd cli.Command) ? {
       io = socket_io
   }
   
+  mut ls := vls.new(io)
   if custom_vroot_path.len != 0 {
 		if !os.exists(custom_vroot_path) {
 			return error('Provided VROOT does not exist.')
@@ -37,7 +38,6 @@ fn run_cli(cmd cli.Command) ? {
 		}
 	}
 
-  mut ls := vls.new(io)
 	ls.set_features(enable_features, true) ?
 	ls.set_features(disable_features, false) ?
 	ls.start_loop()
