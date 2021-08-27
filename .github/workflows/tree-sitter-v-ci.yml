@@ -11,6 +11,9 @@ env:
 jobs:
   tree_sitter_v_test:
     runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: ./tree_sitter_v
     strategy:
       fail-fast: true
       matrix:
@@ -20,21 +23,25 @@ jobs:
       - uses: actions/setup-node@v2
         with:
           node-version: 14
-      - run: cd tree_sitter_v
       - run: npm install
       - run: npm test
   tree_sitter_v_test_windows:
     runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: ./tree_sitter_v
     steps:
       - uses: actions/checkout@v2
       - uses: actions/setup-node@v2
         with:
           node-version: 14
-      - run: cd tree_sitter_v
       - run: npm install
       - run: npm run-script test
   tree_sitter_v_vlib_test:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./tree_sitter_v
     strategy:
       fail-fast: true
     steps:
@@ -42,7 +49,6 @@ jobs:
       - uses: actions/setup-node@v2
         with:
           node-version: 14
-      - run: cd tree_sitter_v
       - name: Clone & Build vmaster/v
         run: |
           git clone --depth=1 https://github.com/vlang/v vmaster/
