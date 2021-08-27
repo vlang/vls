@@ -21,7 +21,8 @@ fn (mut ls Vls) initialize(id int, params string) {
 			ls.set_vroot_path(found_vroot_path)
 			ls.store.default_import_paths << os.join_path(found_vroot_path, 'vlib')
 		} else {
-			ls.show_message("V installation directory was not found. Modules in vlib such as `os` won't be detected.", .error)
+			ls.show_message("V installation directory was not found. Modules in vlib such as `os` won't be detected.",
+				.error)
 		}
 
 		ls.store.default_import_paths << os.vmodules_dir()
@@ -108,7 +109,7 @@ fn (mut ls Vls) setup_logger(trace string, client_info lsp.ClientInfo) {
 		ls.log_message('Client / Editor: Unknown', .info)
 	}
 
-	ls.log_message('Using V path (VROOT): ${ls.vroot_path}', .info)
+	ls.log_message('Using V path (VROOT): $ls.vroot_path', .info)
 }
 
 [manualfree]

@@ -42,18 +42,22 @@ fn (mut ls Vls) formatting(id int, params string) {
 	}
 
 	temp_file.close()
-	defer { os.rm(vls.temp_formatting_file_path) or {} }
+	defer {
+		os.rm(vls.temp_formatting_file_path) or {}
+	}
 
 	mut v_exe_name := 'v'
-	defer { unsafe { v_exe_name.free() } }
+	defer {
+		unsafe { v_exe_name.free() }
+	}
 
 	$if windows {
 		v_exe_name += '.exe'
 	}
 
 	mut p := os.new_process(os.join_path(ls.vroot_path, v_exe_name))
-	defer { 
-		p.close() 
+	defer {
+		p.close()
 		unsafe { p.free() }
 	}
 
@@ -63,7 +67,9 @@ fn (mut ls Vls) formatting(id int, params string) {
 
 	if p.code > 0 {
 		errors := p.stderr_slurp().trim_space()
-		defer { unsafe { errors.free() } }
+		defer {
+			unsafe { errors.free() }
+		}
 
 		ls.show_message(errors, .info)
 		ls.send_null(id)
@@ -71,7 +77,9 @@ fn (mut ls Vls) formatting(id int, params string) {
 	}
 
 	output := p.stdout_slurp()
-	defer { unsafe { output.free() } }
+	defer {
+		unsafe { output.free() }
+	}
 
 	ls.send(jsonrpc.Response<[]lsp.TextEdit>{
 		id: id
@@ -106,7 +114,7 @@ fn (mut ls Vls) workspace_symbol(id int, _ string) {
 		result: workspace_symbols
 	})
 
-	unsafe{ workspace_symbols.free() }
+	unsafe { workspace_symbols.free() }
 }
 
 fn symbol_to_symbol_info(uri lsp.DocumentUri, sym &analyzer.Symbol) ?lsp.SymbolInformation {
@@ -120,20 +128,32 @@ fn symbol_to_symbol_info(uri lsp.DocumentUri, sym &analyzer.Symbol) ?lsp.SymbolI
 	}
 	mut kind := lsp.SymbolKind.null
 	match sym.kind {
-			.function { 
-				kind = if sym.kind == .function && !sym.parent.is_void() {
-					lsp.SymbolKind.method
-				} else {
-					lsp.SymbolKind.function
-				}
+		.function {
+			kind = if sym.kind == .function && !sym.parent.is_void() {
+				lsp.SymbolKind.method
+			} else {
+				lsp.SymbolKind.function
 			}
-			.struct_ { kind = .struct_ }
-			.enum_ { kind = .enum_ }
-			.typedef { kind = .type_parameter }
-			.interface_ { kind = .interface_ }
-			.variable { kind = .constant }
-		else { return none }
-	}	
+		}
+		.struct_ {
+			kind = .struct_
+		}
+		.enum_ {
+			kind = .enum_
+		}
+		.typedef {
+			kind = .type_parameter
+		}
+		.interface_ {
+			kind = .interface_
+		}
+		.variable {
+			kind = .constant
+		}
+		else {
+			return none
+		}
+	}
 	prefix := if sym.kind == .function && !sym.parent.is_void() { sym.parent.name + '.' } else { '' }
 	return lsp.SymbolInformation{
 		name: prefix + sym.name
@@ -185,7 +205,7 @@ fn (mut ls Vls) signature_help(id int, params string) {
 	ctx := signature_params.context
 	file := ls.sources[uri]
 	source := file.source
-	tree := ls.trees[uri] or { 
+	tree := ls.trees[uri] or {
 		ls.send_null(id)
 		return
 	}
@@ -233,7 +253,7 @@ fn (mut ls Vls) signature_help(id int, params string) {
 		})
 		return
 	}
-	
+
 	// create a signature help info based on the
 	// call expr info
 	mut param_infos := []lsp.ParameterInformation{}
@@ -241,7 +261,7 @@ fn (mut ls Vls) signature_help(id int, params string) {
 		if child_sym.kind != .variable {
 			continue
 		}
-		
+
 		param_infos << lsp.ParameterInformation{
 			label: child_sym.gen_str()
 		}
@@ -447,7 +467,7 @@ fn (mut builder CompletionBuilder) build_suggestions_from_sym(sym &analyzer.Symb
 
 	for child_sym in sym.children {
 		if is_selector {
-			if (sym.kind in [.enum_, .struct_] || sym.kind in analyzer.container_symbol_kinds) 
+			if (sym.kind in [.enum_, .struct_] || sym.kind in analyzer.container_symbol_kinds)
 				&& child_sym.kind !in [.field, .function] {
 				continue
 			} else if !child_sym.file_path.starts_with(builder.store.cur_dir)
@@ -491,17 +511,20 @@ fn (mut builder CompletionBuilder) build_suggestions_from_sym(sym &analyzer.Symb
 }
 
 fn (mut builder CompletionBuilder) build_suggestions_from_module(name string, included_list ...string) {
-	imported_path_dir := builder.store.get_module_path_opt(name) or { 
+	imported_path_dir := builder.store.get_module_path_opt(name) or {
 		builder.store.auto_imports[name] or { return }
 	}
 
 	imported_syms := builder.store.symbols[imported_path_dir]
 	for imp_sym in imported_syms {
-		if (included_list.len != 0 && imp_sym.name in included_list) || !builder.has_same_return_type(imp_sym.return_type) {
+		if (included_list.len != 0 && imp_sym.name in included_list)
+			|| !builder.has_same_return_type(imp_sym.return_type) {
 			continue
 		}
 		if int(imp_sym.access) >= int(analyzer.SymbolAccess.public) {
-			builder.add(symbol_to_completion_item(imp_sym, builder.ctx.trigger_character == '.') or { continue })
+			builder.add(symbol_to_completion_item(imp_sym, builder.ctx.trigger_character == '.') or {
+				continue
+			})
 		}
 	}
 }
@@ -572,7 +595,8 @@ fn (mut builder CompletionBuilder) build_global_suggestions() {
 	global_syms := builder.store.symbols[builder.store.cur_dir]
 	for sym in global_syms {
 		if !sym.is_void() && sym.kind != .placeholder {
-			if (sym.kind == .function && sym.name == 'main') || !builder.has_same_return_type(sym.return_type) {
+			if (sym.kind == .function && sym.name == 'main')
+				|| !builder.has_same_return_type(sym.return_type) {
 				continue
 			}
 			builder.add(symbol_to_completion_item(sym, true) or { continue })
@@ -597,8 +621,10 @@ fn symbol_to_completion_item(sym &analyzer.Symbol, with_snippet bool) ?lsp.Compl
 	mut name := sym.name
 	mut insert_text_format := lsp.InsertTextFormat.plain_text
 	mut insert_text := strings.new_builder(name.len)
-	defer { unsafe { insert_text.free() } }
-	
+	defer {
+		unsafe { insert_text.free() }
+	}
+
 	match sym.kind {
 		.variable {
 			kind = .variable
@@ -606,10 +632,10 @@ fn symbol_to_completion_item(sym &analyzer.Symbol, with_snippet bool) ?lsp.Compl
 		}
 		.function {
 			// if function has parent, use method
-			kind = if !sym.parent.is_void() { 
-				lsp.CompletionItemKind.method 
-			} else { 
-				lsp.CompletionItemKind.function 
+			kind = if !sym.parent.is_void() {
+				lsp.CompletionItemKind.method
+			} else {
+				lsp.CompletionItemKind.function
 			}
 			insert_text.write_string(name)
 			if with_snippet {
@@ -816,7 +842,7 @@ fn (mut ls Vls) hover(id int, params string) {
 
 	uri := hover_params.text_document.uri
 	pos := hover_params.position
-	tree := ls.trees[uri] or { 
+	tree := ls.trees[uri] or {
 		ls.send_null(id)
 		return
 	}
@@ -830,7 +856,7 @@ fn (mut ls Vls) hover(id int, params string) {
 		ls.send_null(id)
 		return
 	}
-	
+
 	ls.send(jsonrpc.Response<lsp.Hover>{
 		id: id
 		result: hover_data
@@ -853,9 +879,11 @@ fn get_hover_data(mut store analyzer.Store, node C.TSNode, uri lsp.DocumentUri, 
 	} else if node_type == 'import_path' {
 		found_imp := store.find_import_by_position(node.range()) ?
 		return lsp.Hover{
-			contents: lsp.v_marked_string('import ${found_imp.absolute_module_name} as ' + found_imp.aliases[uri.path()] or { found_imp.module_name })
+			contents: lsp.v_marked_string('import $found_imp.absolute_module_name as ' + found_imp.aliases[uri.path()] or {
+				found_imp.module_name
+			})
 			range: tsrange_to_lsp_range(found_imp.ranges[uri.path()])
-		}	
+		}
 	} else if node.parent().is_error() || node.parent().is_missing() {
 		return none
 	}
@@ -876,14 +904,15 @@ fn get_hover_data(mut store analyzer.Store, node C.TSNode, uri lsp.DocumentUri, 
 	// eprintln('$node_type | ${node.get_text(source)} | $sym')
 
 	// Send null if range has zero-start and end points
-	if sym.range.start_point.row == 0 && sym.range.start_point.column == 0 && sym.range.start_point.eq(sym.range.end_point) {
+	if sym.range.start_point.row == 0 && sym.range.start_point.column == 0
+		&& sym.range.start_point.eq(sym.range.end_point) {
 		return none
 	}
 
 	return lsp.Hover{
 		contents: lsp.v_marked_string(sym.gen_str())
 		range: tsrange_to_lsp_range(original_range)
-	}	
+	}
 }
 
 [manualfree]
@@ -895,7 +924,7 @@ fn (mut ls Vls) folding_range(id int, params string) {
 		return
 	}
 	uri := folding_range_params.text_document.uri
-	tree := ls.trees[uri] or { 
+	tree := ls.trees[uri] or {
 		ls.send_null(id)
 		return
 	}
@@ -949,7 +978,7 @@ fn (mut ls Vls) definition(id int, params string) {
 	pos := goto_definition_params.position
 	file := ls.sources[uri]
 	source := file.source
-	tree := ls.trees[uri] or { 
+	tree := ls.trees[uri] or {
 		ls.send_null(id)
 		return
 	}
@@ -974,7 +1003,8 @@ fn (mut ls Vls) definition(id int, params string) {
 	}
 
 	// Send null if range has zero-start and end points
-	if sym.range.start_point.row == 0 && sym.range.start_point.column == 0 && sym.range.start_point.eq(sym.range.end_point) {
+	if sym.range.start_point.row == 0 && sym.range.start_point.column == 0
+		&& sym.range.start_point.eq(sym.range.end_point) {
 		ls.send_null(id)
 		return
 	}
@@ -1065,16 +1095,14 @@ fn (mut ls Vls) implementation(id int, params string) {
 	}
 
 	mut locations := []lsp.LocationLink{cap: 20}
-	defer { unsafe { locations.free() } }
+	defer {
+		unsafe { locations.free() }
+	}
 
 	// check first the possible interfaces implemented by the symbol
 	// at the current directory...
-	get_implementation_locations_from_syms(
-		ls.store.symbols[ls.store.cur_dir],
-		got_sym,
-		original_range,
-		mut locations
-	)
+	get_implementation_locations_from_syms(ls.store.symbols[ls.store.cur_dir], got_sym,
+		original_range, mut locations)
 
 	// ...afterwards to the imported modules
 	for imp in ls.store.imports[ls.store.cur_dir] {
@@ -1082,28 +1110,20 @@ fn (mut ls Vls) implementation(id int, params string) {
 			continue
 		}
 
-		get_implementation_locations_from_syms(
-			ls.store.symbols[imp.path],
-			got_sym,
-			original_range,
-			mut locations
-		)
+		get_implementation_locations_from_syms(ls.store.symbols[imp.path], got_sym, original_range, mut
+			locations)
 	}
 
 	// ...and lastly from auto-imported modules such as "builtin"
 	$if !test {
 		for _, auto_import_path in ls.store.auto_imports {
-			get_implementation_locations_from_syms(
-				ls.store.symbols[auto_import_path], 
-				got_sym,
-				original_range,
-				mut locations
-			)
+			get_implementation_locations_from_syms(ls.store.symbols[auto_import_path],
+				got_sym, original_range, mut locations)
 		}
 	}
 
 	ls.send(jsonrpc.Response<[]lsp.LocationLink>{
 		id: id
 		result: locations
-	})	
+	})
 }

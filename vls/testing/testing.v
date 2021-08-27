@@ -87,7 +87,8 @@ pub fn load_test_file_paths(folder_name string) ?[]string {
 	dir := os.ls(target_path) or { return error('error loading test files for "$folder_name"') }
 	mut filtered := []string{}
 	for path in dir {
-		if !path.ends_with('.vv') || path.ends_with('_skip.vv') || path.ends_with('_skip_${current_os}.vv') {
+		if !path.ends_with('.vv') || path.ends_with('_skip.vv')
+			|| path.ends_with('_skip_${current_os}.vv') {
 			continue
 		}
 		filtered << os.join_path(target_path, path)

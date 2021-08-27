@@ -30,7 +30,7 @@ const definition_inputs = {
 }
 
 const definition_should_return_null = [
-	'node_error.vv', 
+	'node_error.vv',
 	// 'stmt.vv'
 ]
 
@@ -276,7 +276,7 @@ const definition_results = {
 			end: lsp.Position{0, 14}
 		}
 	}
-	'stmt.vv':        lsp.LocationLink{
+	'stmt.vv':                    lsp.LocationLink{
 		target_uri: lsp.document_uri_from_path(os.join_path(base_dir, 'stmt.vv'))
 		origin_selection_range: lsp.Range{
 			start: lsp.Position{0, 3}

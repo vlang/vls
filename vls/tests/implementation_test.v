@@ -7,11 +7,11 @@ import os
 const base_dir = os.join_path(os.dir(@FILE), 'test_files', 'implementation')
 
 const implementation_inputs = {
-	'simple.vv':                lsp.Position{9, 8}
+	'simple.vv': lsp.Position{9, 8}
 }
 
 const implementation_results = {
-	'simple.vv':                [
+	'simple.vv': [
 		lsp.LocationLink{
 			target_uri: lsp.document_uri_from_path(os.join_path(base_dir, 'simple.vv'))
 			origin_selection_range: lsp.Range{
@@ -41,7 +41,7 @@ const implementation_results = {
 				start: lsp.Position{4, 10}
 				end: lsp.Position{4, 16}
 			}
-		}
+		},
 	]
 }
 

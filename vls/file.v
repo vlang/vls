@@ -4,7 +4,7 @@ import lsp
 
 struct File {
 mut:
-	uri lsp.DocumentUri
+	uri     lsp.DocumentUri
 	source  []byte
 	version int = 1
 }

@@ -12,15 +12,12 @@ import time
 import v.vmod
 
 pub const meta = meta_info()
+
 fn meta_info() vmod.Manifest {
 	parsed := vmod.decode(@VMOD_FILE) or { panic(err) }
-	build_commit := $if with_build_commit ? {
-		'-' + $env('VLS_BUILD_COMMIT')
-	} $else {
-		''
-	}
+	build_commit := $if with_build_commit ? { '-' + $env('VLS_BUILD_COMMIT') } $else { '' }
 	return vmod.Manifest{
-		...parsed,
+		...parsed
 		version: parsed.version + build_commit
 	}
 }
@@ -114,7 +111,7 @@ pub fn new(io ReceiveSender) Vls {
 	}
 
 	$if test {
-		inst.typing_ch.close()	
+		inst.typing_ch.close()
 	}
 
 	return inst
@@ -370,11 +367,11 @@ fn detect_vroot_path() ?string {
 	}
 
 	vexe_path_from_env := os.getenv('VEXE')
-	defer { 
-		unsafe { 
+	defer {
+		unsafe {
 			vroot_env.free()
-			vexe_path_from_env.free() 
-		} 
+			vexe_path_from_env.free()
+		}
 	}
 
 	// Return the directory of VEXE if present
@@ -383,23 +380,27 @@ fn detect_vroot_path() ?string {
 	}
 
 	// Find the V executable in PATH
-	path_env := os.getenv("PATH")
-	paths := path_env.split(vls.path_list_sep)
-	defer { 
-		unsafe { 
+	path_env := os.getenv('PATH')
+	paths := path_env.split(path_list_sep)
+	defer {
+		unsafe {
 			vexe_path_from_env.free()
-			paths.free() 
-		} 
+			paths.free()
+		}
 	}
 
 	for path in paths {
-		full_path := os.join_path(path, vls.v_exec_name)
+		full_path := os.join_path(path, v_exec_name)
 		if os.exists(full_path) && os.is_executable(full_path) {
-			defer { unsafe { full_path.free() } }
+			defer {
+				unsafe { full_path.free() }
+			}
 			if os.is_link(full_path) {
 				// Get the real path of the V executable
 				full_real_path := os.real_path(full_path)
-				defer { unsafe { full_real_path.free() } }
+				defer {
+					unsafe { full_real_path.free() }
+				}
 				return os.dir(full_real_path)
 			} else {
 				return os.dir(full_path)
