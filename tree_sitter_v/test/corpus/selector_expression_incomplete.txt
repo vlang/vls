@@ -1,0 +1,18 @@
+===
+Incomplete selector expression
+===
+
+fn main() {
+  incomplete.sel.
+}
+
+---
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (block
+      (selector_expression
+          (identifier) (identifier))
+      (ERROR))))

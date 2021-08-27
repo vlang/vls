@@ -1,0 +1,16 @@
+===
+Call Expression (Embed Comptime)
+===
+
+const const_file = $embed_file('v.png')
+
+---
+
+(source_file
+  (const_declaration
+    (const_spec
+      (identifier)
+      (call_expression
+        (comptime_identifier
+          (identifier))
+        (argument_list (interpreted_string_literal))))))

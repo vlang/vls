@@ -1,0 +1,24 @@
+===
+Generic type initializer
+===
+
+fn main() {
+  t := Test<string>{hello: 'world!'}
+}
+
+---
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (block
+      (short_var_declaration
+        (identifier_list (identifier))
+        (expression_list
+          (type_initializer 
+            (generic_type
+              (type_identifier)
+              (type_parameters (builtin_type)))
+            (literal_value
+              (keyed_element (field_identifier) (interpreted_string_literal)))))))))

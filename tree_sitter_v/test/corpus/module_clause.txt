@@ -1,0 +1,17 @@
+=============
+Module clause
+=============
+
+[manualfree][foo]
+module main_123
+
+---
+
+(source_file
+  (module_clause
+    (attribute_list
+      (attribute_declaration 
+        (attribute_spec (identifier))) 
+      (attribute_declaration 
+        (attribute_spec (identifier))))
+    (module_identifier)))

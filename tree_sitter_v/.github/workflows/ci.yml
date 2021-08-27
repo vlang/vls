@@ -1,0 +1,40 @@
+name: mirror
+on:
+  schedule:
+    # Trigger mirrors weekly
+    - cron: 0 0 * * 0
+env:
+  EM_VERSION: 1.39.18
+  EM_CACHE_FOLDER: "emsdk-cache"
+
+jobs:
+  mirror-to-repo:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: Clone VLS
+        run: git clone --depth=1 https://github.com/vlang/vls ../vls
+      # Does not matter (for now) if the repo is updated than the one in vls.
+      - name: Diff vls/tree_sitter_v and tree-sitter-v repo
+        continue-on-error: true
+        run: |
+          diff -qr ../vls/tree_sitter_v .
+          if (( $? == "1" )); then echo "Differences found. Pushing updates to tree-sitter-v repo..."; else exit 1 fi
+      - name: Copy contents from vls/tree_sitter_v
+        if: ${{ success() }}
+        run: |
+          git rm -rf .
+          git clean -fxd
+          cp -a ../vls/tree_sitter_v/. .
+      - name: Commit changes
+        if: ${{ success() }}
+        uses: EndBug/add-and-commit@v7
+        with:
+          message: 'Updated parser from https://github.com/vlang/vls repo'
+          add: '.'
+      - name: Push changes
+        if: ${{ success() }}
+        uses: ad-m/github-push-action@master
+        with:
+          github_token: ${{ secrets.GH_TOKEN }}
+          branch: ${{ github.ref }}

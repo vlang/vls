@@ -1,0 +1,41 @@
+===
+Mutable function argument
+===
+
+block(mut d, mut &a, d.x)
+
+---
+
+(source_file
+  (call_expression
+    (identifier)
+    (argument_list
+      (mutable_expression
+        (identifier))
+      (mutable_expression
+        (unary_expression
+          (identifier)))
+      (selector_expression
+        (identifier)
+        (identifier)))))
+
+===
+Mutable slice expression argument
+===
+
+binary.big_endian_put_u64(mut tmp[8..], len)
+
+
+---
+
+(source_file
+  (call_expression
+    (selector_expression
+      (identifier)
+      (identifier))
+    (argument_list
+      (mutable_expression
+        (slice_expression
+          (identifier)
+          (int_literal)))
+      (identifier))))

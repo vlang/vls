@@ -1,0 +1,29 @@
+===
+C String Literal
+===
+
+println(c'hello $world \r')
+
+---
+
+(source_file
+  (call_expression 
+    (identifier) 
+    (argument_list
+      (c_string_literal
+        (string_interpolation (identifier))
+        (escape_sequence)))))
+
+
+===
+Raw string Literal
+===
+
+println(r'\r\awr')
+
+---
+
+(source_file
+  (call_expression 
+    (identifier) 
+    (argument_list (raw_string_literal))))

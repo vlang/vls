@@ -1,0 +1,21 @@
+===
+Channel type initializer
+===
+
+fn main() {
+  t := chan f64{}
+}
+
+---
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (block
+      (short_var_declaration
+        (identifier_list (identifier))
+        (expression_list
+          (type_initializer 
+            (channel_type (builtin_type))
+            (literal_value)))))))

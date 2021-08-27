@@ -1,0 +1,11 @@
+===
+Single-line const declaration
+===
+
+const name = 'Foo'
+
+---
+
+(source_file
+  (const_declaration 
+    (const_spec (identifier) (interpreted_string_literal))))

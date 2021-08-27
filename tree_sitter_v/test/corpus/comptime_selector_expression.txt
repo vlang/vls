@@ -1,0 +1,17 @@
+===
+Comptime Selector Expression
+===
+
+println(t.$(field.name))
+
+---
+
+(source_file
+  (call_expression
+    (identifier)
+    (argument_list
+      (selector_expression
+        (identifier)
+        (comptime_selector_expression
+          (selector_expression
+            (identifier) (identifier)))))))

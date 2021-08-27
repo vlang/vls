@@ -1,0 +1,16 @@
+===
+Empty Labeled Statement
+===
+
+fn main() {
+  testlabel:
+}
+
+---
+
+(source_file 
+  (function_declaration 
+    (identifier) 
+    (parameter_list) 
+    (block 
+      (empty_labeled_statement (label_name)))))

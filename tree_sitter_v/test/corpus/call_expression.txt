@@ -1,0 +1,98 @@
+===
+Call Expression
+===
+
+fn main() {
+  _likely_(false)
+  _unlikely_(10)
+  typeof('hello')
+  foo(Foo{})
+  dump(a)
+  opt(1) or {
+    return
+  }
+  generic<string>('test')
+  mcache.add(f, vmod_file: '', vmod_folder: f)
+}
+
+---
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (block
+      (call_expression 
+        (identifier)
+        (argument_list (false)))
+      (call_expression
+        (identifier)
+        (argument_list (int_literal)))
+      (call_expression
+        (identifier)
+        (argument_list (interpreted_string_literal)))
+      (call_expression
+        (identifier)
+        (argument_list 
+          (type_initializer (type_identifier) (literal_value))))
+      (call_expression 
+        (identifier) 
+        (argument_list (identifier)))
+      (call_expression
+        (identifier)
+        (argument_list (int_literal))
+        (option_propagator
+          (or_block
+            (block (return_statement)))))
+      (call_expression
+        (identifier)
+        (type_parameters (builtin_type))
+        (argument_list (interpreted_string_literal))) 
+      (call_expression 
+        (selector_expression 
+          (identifier) (identifier)) 
+        (argument_list 
+          (identifier) 
+          (keyed_element 
+            (field_identifier) (interpreted_string_literal)) 
+          (keyed_element 
+            (field_identifier) (identifier)))))))
+
+===
+Special Call Expression
+===
+
+fn main() {
+  sizeof(Foo)
+  __offsetof(Foo, breed)
+  json.decode(Test, "{}") or { eprintln(err) }
+}
+
+---
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (block
+      (special_call_expression 
+        (identifier)
+        (special_argument_list 
+          (type_identifier)))
+      (special_call_expression
+        (identifier)
+        (special_argument_list 
+          (type_identifier)
+          (identifier)))
+      (special_call_expression
+        (selector_expression
+          (identifier) (identifier))
+        (special_argument_list 
+          (type_identifier)
+          (interpreted_string_literal))
+        (option_propagator
+          (or_block 
+            (block
+              (call_expression 
+                (identifier)
+                (argument_list (identifier))))))))))

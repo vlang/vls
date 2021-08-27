@@ -1,0 +1,68 @@
+===
+Lock Statement
+===
+
+lock a, b {
+	a++
+	b--
+}
+
+lock {}
+
+---
+
+(source_file
+  (lock_expression
+    (expression_list
+      (identifier)
+      (identifier))
+    (block
+      (inc_statement
+        (identifier))
+      (dec_statement
+         (identifier)))) 
+    (lock_expression (block)))
+
+===
+Read Lock Statement
+===
+
+rlock a, b {
+	a++
+	b--
+}
+
+---
+
+(source_file
+  (lock_expression
+    (expression_list
+      (identifier)
+      (identifier))
+    (block
+      (inc_statement
+        (identifier))
+      (dec_statement
+        (identifier)))))
+
+===
+Lock Expression
+===
+
+x := rlock a, b { a + b }
+
+---
+
+(source_file
+  (short_var_declaration
+    (identifier_list
+      (identifier))
+    (expression_list
+      (lock_expression
+        (expression_list
+          (identifier)
+          (identifier))
+	(block
+	  (binary_expression
+	    (identifier)
+	    (identifier)))))))

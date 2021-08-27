@@ -1,0 +1,46 @@
+===
+Return Statement
+===
+
+fn foo() int {
+  return 1
+}
+
+---
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (builtin_type)
+    (block
+      (return_statement
+        (expression_list
+          (int_literal))))))
+
+===
+Multi-return statement
+===
+
+fn some_fn() ([]string, ModFileAndFolder) {
+	return []string{}, res
+}
+
+---
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (multi_return_type
+      (array_type
+        (builtin_type))
+      (type_identifier))
+    (block
+      (return_statement
+        (expression_list
+          (type_initializer
+            (array_type
+              (builtin_type))
+            (literal_value))
+          (identifier))))))

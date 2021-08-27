@@ -1,0 +1,43 @@
+===
+Binary Expression
+===
+
+pub fn should_bundle_module(mod string) bool {
+	return mod in util.bundle_modules
+		|| (mod.contains('.') && mod.all_before('.') in util.bundle_modules)
+}
+
+
+---
+
+(source_file 
+  (function_declaration 
+    (identifier) 
+    (parameter_list 
+      (parameter_declaration 
+        (identifier) 
+        (builtin_type))) 
+    (builtin_type) 
+    (block 
+      (return_statement 
+        (expression_list 
+          (binary_expression 
+            (in_expression 
+              (identifier) 
+              (selector_expression 
+                (identifier) (identifier))) 
+          (parenthesized_expression 
+            (binary_expression 
+              (call_expression 
+                (selector_expression 
+                  (identifier) (identifier)) 
+                (argument_list 
+                  (interpreted_string_literal))) 
+                (in_expression 
+                  (call_expression 
+                    (selector_expression 
+                      (identifier) (identifier)) 
+                    (argument_list 
+                      (interpreted_string_literal))) 
+                    (selector_expression 
+                      (identifier) (identifier)))))))))))

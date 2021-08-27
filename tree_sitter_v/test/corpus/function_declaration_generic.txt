@@ -1,0 +1,22 @@
+===
+Generic function Declaration
+===
+
+fn hello_world<T>(mut s []T, i int, words ...Text) ? {}
+
+---
+
+(source_file
+  (function_declaration
+    (identifier)
+    (type_parameters (type_placeholder))
+    (parameter_list
+      (parameter_declaration
+        (identifier) 
+        (array_type (type_placeholder)))
+      (parameter_declaration (identifier) (builtin_type))
+      (parameter_declaration 
+        (identifier) 
+        (variadic_type (type_identifier))))
+    (option_type)
+    (block)))

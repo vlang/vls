@@ -1,0 +1,73 @@
+===
+Match Expression
+===
+
+fn main() {
+  match a {
+    'test', '123' {}
+    'xd' {}
+    else {}
+  }
+
+  match b {
+    int, string {}
+    []Any {}
+    else {}
+  }
+}
+
+---
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (block
+      (match_expression
+        (identifier)
+        (expression_case 
+          (expression_list 
+            (interpreted_string_literal)
+            (interpreted_string_literal))
+          (block))
+        (expression_case 
+          (expression_list 
+            (interpreted_string_literal))
+          (block))
+        (default_case (block))) 
+      (match_expression 
+        (identifier) 
+        (expression_case 
+          (type_list (builtin_type) (builtin_type)) 
+          (block)) 
+        (expression_case 
+          (type_list (array_type (type_identifier))) 
+          (block)) 
+        (default_case (block))))))
+
+===
+Match with range
+===
+
+match b {
+	0 {}
+	32...126 {}
+	else {}
+}
+
+---
+
+(source_file
+  (match_expression
+    (identifier)
+    (expression_case
+      (expression_list
+        (int_literal))
+      (block))
+    (expression_case
+      (range
+        (int_literal)
+        (int_literal))
+      (block))
+    (default_case
+      (block))))

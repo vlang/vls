@@ -1,0 +1,42 @@
+===
+Type Selector Expression / Enum Identifier
+===
+
+fn main() {
+  do_stuff(.red)
+  foo := Foo{value: .blue}
+  mut color := Color.blue
+  color = .yellow
+}
+
+---
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (block
+      (call_expression
+        (identifier)
+        (argument_list 
+          (type_selector_expression (identifier))))
+      (short_var_declaration
+        (identifier_list (identifier))
+        (expression_list
+          (type_initializer
+            (type_identifier)
+            (literal_value
+              (keyed_element
+                (field_identifier) 
+                  (type_selector_expression (identifier)))))))
+      (short_var_declaration
+        (identifier_list
+          (identifier))
+        (expression_list
+          (type_selector_expression
+            (type_identifier)
+            (identifier))))
+      (assignment_statement
+        (assignable_identifier_list (identifier))
+        (expression_list
+          (type_selector_expression (identifier)))))))

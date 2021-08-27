@@ -1,0 +1,14 @@
+===
+Multiple single-line const declaration
+===
+
+const name = 'Foo'
+const num = 100
+
+---
+
+(source_file
+  (const_declaration
+    (const_spec (identifier) (interpreted_string_literal)))
+  (const_declaration
+    (const_spec (identifier) (int_literal))))

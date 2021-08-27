@@ -1,0 +1,41 @@
+===
+Array Initializer
+===
+
+fn main() {
+  test := []int{len: 10, cap: 10, init: 1}
+}
+
+
+---
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (block
+      (short_var_declaration
+        (identifier_list (identifier))
+        (expression_list
+          (type_initializer
+            (array_type (builtin_type))
+            (literal_value
+              (keyed_element (field_identifier) (int_literal))
+              (keyed_element (field_identifier) (int_literal))
+              (keyed_element (field_identifier) (int_literal)))))))))
+
+===
+Fixed Array Initializer
+===
+test := [1]int{}
+
+---
+
+(source_file
+  (short_var_declaration
+    (identifier_list (identifier))
+    (expression_list
+      (type_initializer
+        (fixed_array_type 
+          (int_literal) (builtin_type))
+        (literal_value)))))

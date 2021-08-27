@@ -1,0 +1,40 @@
+===
+Array with Values
+===
+
+fn main() {
+  test := ['hello', 'world!']
+}
+
+---
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (block
+      (short_var_declaration
+        (identifier_list (identifier))
+        (expression_list
+          (array
+            (interpreted_string_literal)
+            (interpreted_string_literal)))))))
+
+===
+Array with no values
+===
+
+fn main() {
+  an = []
+}
+
+---
+
+(source_file 
+  (function_declaration 
+    (identifier) 
+    (parameter_list) 
+    (block 
+      (assignment_statement 
+        (assignable_identifier_list (identifier)) 
+        (expression_list (array))))))

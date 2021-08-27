@@ -1,0 +1,12 @@
+===
+Import declaration with alias
+===
+
+import x.json2 as json
+
+---
+
+(source_file
+  (import_declaration
+      (import_path)
+      (import_alias (module_identifier))))

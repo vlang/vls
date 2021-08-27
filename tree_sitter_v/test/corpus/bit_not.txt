@@ -1,0 +1,15 @@
+===
+Bitwise Not
+===
+
+assert ~4 == -5
+
+---
+
+(source_file
+  (assert_statement
+    (binary_expression
+      (unary_expression
+        (int_literal))
+      (unary_expression
+        (int_literal)))))

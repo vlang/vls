@@ -1,0 +1,47 @@
+===
+Unsafe Statement
+===
+
+fn main() {
+  unsafe {
+    something.free()
+  }
+
+  test := unsafe { 1 }
+  test2 := Foo{
+    field: unsafe { a }
+    field_two: unsafe { 1 }
+  }
+}
+
+---
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (block
+      (unsafe_expression
+        (block
+          (call_expression 
+            (selector_expression (identifier) (identifier)) 
+            (argument_list))))
+      (short_var_declaration
+        (identifier_list (identifier))
+        (expression_list
+          (unsafe_expression
+            (block (int_literal))))) 
+      (short_var_declaration 
+        (identifier_list (identifier)) 
+        (expression_list 
+          (type_initializer 
+            (type_identifier) 
+            (literal_value 
+              (keyed_element 
+                (field_identifier) 
+                (unsafe_expression 
+                  (block (identifier)))) 
+              (keyed_element 
+                (field_identifier) 
+                (unsafe_expression 
+                  (block (int_literal)))))))))))

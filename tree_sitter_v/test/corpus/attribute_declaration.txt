@@ -1,0 +1,67 @@
+===
+Attribute Declaration
+===
+
+[hello]
+[heap]
+struct Foo {}
+
+a := [1]
+
+[hey: 'hello']
+[if foo ?]
+pub fn memdup(src voidptr, sz int) voidptr {}
+
+[test; hello]
+pub enum Color {
+  red
+}
+
+[unsafe]
+interface Speaker {}
+---
+
+(source_file 
+  (struct_declaration 
+    (attribute_list
+      (attribute_declaration 
+        (attribute_spec (identifier))) 
+      (attribute_declaration 
+        (attribute_spec (identifier))))
+    (type_identifier) 
+    (struct_field_declaration_list)) 
+  (short_var_declaration 
+    (identifier_list (identifier)) 
+    (expression_list 
+      (array (int_literal)))) 
+  (function_declaration 
+    (attribute_list
+      (attribute_declaration 
+        (attribute_spec 
+          (identifier)
+          (interpreted_string_literal)))
+      (attribute_declaration 
+        (attribute_spec 
+          (identifier))))
+    (identifier) 
+    (parameter_list 
+      (parameter_declaration 
+        (identifier) (builtin_type)) 
+      (parameter_declaration 
+        (identifier) (builtin_type))) 
+    (builtin_type)
+    (block)) 
+  (enum_declaration 
+    (attribute_list
+      (attribute_declaration 
+        (attribute_spec (identifier)) 
+        (attribute_spec (identifier))))
+    (type_identifier) 
+    (enum_member_declaration_list 
+      (enum_member (identifier)))) 
+    (interface_declaration 
+      (attribute_list
+        (attribute_declaration 
+          (attribute_spec (identifier)))) 
+        (type_identifier) 
+        (interface_spec_list)))
