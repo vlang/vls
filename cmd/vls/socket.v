@@ -20,6 +20,7 @@ pub fn (mut io Socket) init() ? {
 	// Open the connection.
 	address := '${base_ip}:${io.port}'
 	io.listener = net.listen_tcp(.ip, address) ?
+	println('Established connection at ${address}')
 	io.conn = io.listener.accept() or {
 		io.listener.close() or {}
 		return err
@@ -38,7 +39,10 @@ pub fn (mut sck Socket) receive() ?string {
 
 	for {
 		got_header := reader.read_line() ?
-		eprintln('got header : $got_header ${got_header.len}')
+		$if !test {
+			println('[vls] : Received header : $got_header')
+		}
+
 		if got_header.len == 0 {
 			break
 		} else if got_header.starts_with(content_length) {
