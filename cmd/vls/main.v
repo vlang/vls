@@ -19,12 +19,11 @@ fn run_cli(cmd cli.Command) ? {
 	socket_port := cmd.flags.get_string('port') or { '5007' }
 
 	// Setup the comm method and build the language server.
-  mut io := vls.ReceiveSender(Stdio{debug: debug_mode})
-  if socket_mode {
-      mut socket_io := Socket{ conn: 0, port: socket_port, debug: debug_mode }
-      socket_io.initialize()
-      io = socket_io
-  }
+  mut io := if socket_mode {
+		vls.ReceiveSender(Socket{ port: socket_port, debug: debug_mode })
+  } else {
+		vls.ReceiveSender(Stdio{ debug: debug_mode })
+	}
   
   mut ls := vls.new(io)
   if custom_vroot_path.len != 0 {
