@@ -1,5 +1,6 @@
 module main
 
+import term
 import net
 import io
 
@@ -20,6 +21,7 @@ pub fn (mut io Socket) init() ? {
 	// Open the connection.
 	address := '${base_ip}:${io.port}'
 	io.listener = net.listen_tcp(.ip, address) ?
+	println(term.yellow('warning: ') + 'TCP connection is primarily for debugging purposes only and may have performance issues. Use it on your own risk.')
 	println('Established connection at ${address}')
 	io.conn = io.listener.accept() or {
 		io.listener.close() or {}
