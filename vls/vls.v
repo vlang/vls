@@ -318,6 +318,11 @@ fn monitor_changes(mut ls Vls) {
 pub fn (mut ls Vls) start_loop() {
 	go monitor_changes(mut ls)
 	ls.io.init() or { panic(err) }
+
+		// Show message that VLS is not yet ready!
+	ls.show_message('VLS is a work-in-progress, pre-alpha language server. It may not be guaranteed to work reliably due to memory issues and other related factors. We encourage you to submit an issue if you encounter any problems.',
+		.warning)
+
 	for {
 		payload := ls.io.receive() or { continue }
 		ls.dispatch(payload)
@@ -360,7 +365,7 @@ fn new_error(code int) jsonrpc.Response2<string> {
 	}
 }
 
-fn detect_vroot_path() ?string {
+pub fn detect_vroot_path() ?string {
 	vroot_env := os.getenv('VROOT')
 	if vroot_env.len != 0 {
 		return vroot_env
