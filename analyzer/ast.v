@@ -6,6 +6,7 @@ fn within_range(node_range C.TSRange, range C.TSRange) bool {
 }
 
 const excluded_nodes = ['const_declaration', 'global_var_declaration']
+
 const included_nodes = ['const_spec', 'global_var_spec', 'global_var_type_initializer', 'block']
 
 fn get_nodes_within_range(node C.TSNode, range C.TSRange) ?[]C.TSNode {
@@ -15,12 +16,12 @@ fn get_nodes_within_range(node C.TSNode, range C.TSRange) ?[]C.TSNode {
 	for i in u32(0) .. child_count {
 		child := node.named_child(i)
 		child_type := child.get_type()
-		if !child.is_null() && ((child_type.ends_with('_declaration') && child_type !in excluded_nodes) || child_type in included_nodes) && within_range(child.range(), range) {
+		if !child.is_null()
+			&& ((child_type.ends_with('_declaration') && child_type !in analyzer.excluded_nodes)
+			|| child_type in analyzer.included_nodes) && within_range(child.range(), range) {
 			nodes << child
 		} else {
-			nodes << get_nodes_within_range(child, range) or { 
-				continue 
-			}
+			nodes << get_nodes_within_range(child, range) or { continue }
 		}
 	}
 

@@ -30,7 +30,7 @@ const definition_inputs = {
 }
 
 const definition_should_return_null = [
-	'node_error.vv',
+	'node_error.vv'
 	// 'stmt.vv'
 ]
 

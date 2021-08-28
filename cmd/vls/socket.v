@@ -3,11 +3,13 @@ module main
 import net
 import io
 
-const base_ip = '127.0.0.1' // Loopback address.
+const base_ip = '127.0.0.1'
+
+// Loopback address.
 
 struct Socket {
 mut:
-	conn &net.TcpConn = &net.TcpConn(0)
+	conn     &net.TcpConn     = &net.TcpConn(0)
 	listener &net.TcpListener = &net.TcpListener(0)
 pub mut:
 	port  string = '5007'
@@ -25,9 +27,7 @@ pub fn (mut io Socket) init() ? {
 }
 
 pub fn (mut io Socket) send(output string) {
-	io.conn.write_string('Content-Length: $output.len\r\n\r\n$output') or {
-		panic(err)
-	}
+	io.conn.write_string('Content-Length: $output.len\r\n\r\n$output') or { panic(err) }
 }
 
 [manualfree]
@@ -47,9 +47,11 @@ pub fn (mut sck Socket) receive() ?string {
 		}
 		// raw_headers << header_line
 	}
-	
+
 	mut rbody := []byte{len: conlen, init: 0}
-	defer { unsafe { rbody.free() } }
+	defer {
+		unsafe { rbody.free() }
+	}
 
 	if conlen > 0 {
 		mut read_data_len := 0
