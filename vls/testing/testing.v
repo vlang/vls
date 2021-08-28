@@ -39,9 +39,7 @@ pub fn (io Testio) receive() ?string {
 	return ''
 }
 
-pub fn (io Testio) close() {
-	return
-}
+pub fn (io Testio) init() ? {}
 
 // request returns a JSON string of JSON-RPC request with empty parameters.
 pub fn (mut io Testio) request(method string) string {

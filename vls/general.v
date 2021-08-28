@@ -146,7 +146,5 @@ fn (mut ls Vls) exit() {
 	// move exit to shutdown for now
 	// == .shutdown => 0
 	// != .shutdown => 1
-	// Close the IO.
-	ls.io.close()
 	exit(int(ls.status != .shutdown))
 }

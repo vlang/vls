@@ -71,9 +71,9 @@ pub const (
 
 interface ReceiveSender {
 	debug bool
+	init() ?
 	send(data string)
 	receive() ?string
-	close()
 }
 
 struct Vls {
@@ -317,7 +317,7 @@ fn monitor_changes(mut ls Vls) {
 // start_loop starts an endless loop which waits for stdin and prints responses to the stdout
 pub fn (mut ls Vls) start_loop() {
 	go monitor_changes(mut ls)
-
+	ls.io.init() or { panic(err) }
 	for {
 		payload := ls.io.receive() or { continue }
 		ls.dispatch(payload)
