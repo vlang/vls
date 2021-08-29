@@ -3,16 +3,16 @@ module analyzer
 struct TreeCursor {
 mut:
 	cur_child_idx u32
-	named_only bool = true
-	child_count u32 [required]
-	cursor C.TSTreeCursor [required]
+	named_only    bool = true
+	child_count   u32            [required]
+	cursor        C.TSTreeCursor [required]
 }
 
 fn (mut tc TreeCursor) next() bool {
 	if !tc.cursor.next() {
 		return false
 	}
-	
+
 	for tc.cur_child_idx < tc.child_count {
 		if !tc.cursor.next() {
 			return false
@@ -36,8 +36,8 @@ fn (tc &TreeCursor) current_node() C.TSNode {
 
 [unsafe]
 fn (tc &TreeCursor) free() {
-	unsafe { 
-		tc.cursor.free() 
+	unsafe {
+		tc.cursor.free()
 		tc.cur_child_idx = 0
 		tc.child_count = 0
 	}
@@ -153,11 +153,11 @@ pub fn (mut store Store) analyze(tree &C.TSTree, src_text []byte) {
 		store: unsafe { store }
 		src_text: src_text
 		cursor: TreeCursor{
-			child_count: u32(child_len), 
+			child_count: u32(child_len)
 			cursor: root_node.tree_cursor()
 		}
 	}
-	
+
 	an.cursor.to_first_child()
 
 	for _ in 0 .. child_len {

@@ -71,7 +71,7 @@ fn test_import_modules_from_tree() ? {
 		assert store.dependency_tree.size() == 2
 	} $else {
 		assert store.dependency_tree.size() == 3
-	}	
+	}
 }
 
 fn test_import_modules_with_edits() ? {
@@ -97,7 +97,7 @@ fn test_import_modules_with_edits() ? {
 		assert store.dependency_tree.size() == 2
 	} $else {
 		assert store.dependency_tree.size() == 3
-	}	
+	}
 	assert store.dependency_tree.has(os.join_path(analyzer.vexe_path, 'vlib', 'os')) == true
 
 	new_content := '
@@ -145,7 +145,7 @@ fn test_import_modules_with_edits() ? {
 		assert store.dependency_tree.size() == 2
 	} $else {
 		assert store.dependency_tree.size() == 3
-	}	
+	}
 	// for name, _ in store.dependency_tree.get_nodes() {
 	// 	eprintln('Checking: $name')
 	// 	assert (name in store.imports) == true

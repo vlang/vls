@@ -102,7 +102,8 @@ pub fn (mut ss Store) register_auto_import(imp Import, to_alias string) {
 // based on the given range
 pub fn (mut ss Store) find_import_by_position(range C.TSRange) ?&Import {
 	for mut imp in ss.imports[ss.cur_dir] {
-		if ss.cur_file_path in imp.ranges && imp.ranges[ss.cur_file_path].start_point.row == range.start_point.row {
+		if ss.cur_file_path in imp.ranges
+			&& imp.ranges[ss.cur_file_path].start_point.row == range.start_point.row {
 			return unsafe { imp }
 		}
 	}
@@ -233,7 +234,7 @@ pub fn (mut ss Store) cleanup_imports() int {
 			if i < ss.imports[ss.cur_dir].len {
 				ss.imports[ss.cur_dir].delete(i)
 			}
-			
+
 			deleted++
 			continue
 		}
@@ -361,7 +362,7 @@ pub fn (mut store Store) import_modules(mut imports []&Import) {
 					src_text: content
 					is_import: true
 					cursor: TreeCursor{
-						child_count: u32(child_len), 
+						child_count: u32(child_len)
 						cursor: root_node.tree_cursor()
 					}
 				}
@@ -378,7 +379,6 @@ pub fn (mut store Store) import_modules(mut imports []&Import) {
 
 				unsafe { sr.cursor.free() }
 			}
-
 			parser.reset()
 			unsafe {
 				// modules_from_dir.free()
@@ -403,8 +403,6 @@ pub fn (mut store Store) import_modules(mut imports []&Import) {
 }
 
 pub fn (ss &Store) is_module(module_name string) bool {
-	_ = ss.get_module_path_opt(module_name) or {
-		return false
-	}
+	_ = ss.get_module_path_opt(module_name) or { return false }
 	return true
 }
