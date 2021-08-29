@@ -1,4 +1,4 @@
-module vls
+module server
 
 import lsp
 import json
@@ -31,7 +31,7 @@ fn (mut ls Vls) formatting(id int, params string) {
 	// To simplify this, we will make a temporary file and feed it into
 	// the v fmt CLI program since there is no cross-platform way to pipe
 	// raw strings directly into v fmt.
-	mut temp_file := os.open_file(vls.temp_formatting_file_path, 'w') or {
+	mut temp_file := os.open_file(server.temp_formatting_file_path, 'w') or {
 		ls.send_null(id)
 		return
 	}
@@ -43,7 +43,7 @@ fn (mut ls Vls) formatting(id int, params string) {
 
 	temp_file.close()
 	defer {
-		os.rm(vls.temp_formatting_file_path) or {}
+		os.rm(server.temp_formatting_file_path) or {}
 	}
 
 	mut v_exe_name := 'v'
@@ -61,7 +61,7 @@ fn (mut ls Vls) formatting(id int, params string) {
 		unsafe { p.free() }
 	}
 
-	p.set_args(['fmt', vls.temp_formatting_file_path])
+	p.set_args(['fmt', server.temp_formatting_file_path])
 	p.set_redirect_stdio()
 	p.wait()
 

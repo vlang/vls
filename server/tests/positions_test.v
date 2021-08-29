@@ -1,6 +1,6 @@
 import os
-import vls
-import vls.testing
+import server
+import server.testing
 import v.token
 import benchmark
 import lsp
@@ -50,7 +50,7 @@ fn test_compute_offset() {
 		}
 		input := compute_offset_inputs[test_name]
 		expected := compute_offset_results[test_name]
-		result := vls.compute_offset(content, input[0], input[1])
+		result := server.compute_offset(content, input[0], input[1])
 		if result != expected {
 			println('content (for debugging):' + content[..result].str())
 		}
@@ -106,7 +106,7 @@ fn test_compute_position() {
 		}
 		input := compute_position_inputs[test_name]
 		expected := compute_position_results[test_name]
-		result := vls.compute_position(content, input)
+		result := server.compute_position(content, input)
 		assert result == expected
 		bench.ok()
 		println(bench.step_message_ok(test_name))
@@ -162,7 +162,7 @@ fn test_tspoint_to_lsp_pos() {
 		}
 		input := tspoint_to_lsp_pos_inputs[test_name]
 		expected := tspoint_to_lsp_pos_results[test_name]
-		result := vls.tspoint_to_lsp_pos(input)
+		result := server.tspoint_to_lsp_pos(input)
 		assert result == expected
 		bench.ok()
 		println(bench.step_message_ok(test_name))
@@ -238,7 +238,7 @@ fn test_tsrange_to_lsp_range() {
 		}
 		input := tspoint_to_lsp_pos_inputs[test_name]
 		expected := tspoint_to_lsp_pos_results[test_name]
-		result := vls.tspoint_to_lsp_pos(input)
+		result := server.tspoint_to_lsp_pos(input)
 		assert result == expected
 		bench.ok()
 		println(bench.step_message_ok(test_name))

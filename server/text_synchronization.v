@@ -1,4 +1,4 @@
-module vls
+module server
 
 import json
 import lsp
