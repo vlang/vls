@@ -45,7 +45,7 @@ const editor_info_msg = wrap_request('{"jsonrpc":"2.0","method":"window/logMessa
 fn compile_and_start_vls(args ...string) ?&os.Process {
 	vls_path := get_vls_path(vls_cmd_dir)
 	if !os.exists(vls_path) {
-		os.chdir(vls_cmd_dir)
+		os.chdir(vls_cmd_dir) ?
 		vroot_path := vls.detect_vroot_path() ?
 		mut v_build_process := launch_v_tool(vroot_path, '-cc', 'gcc', '-gc', 'boehm', '.')
 		v_build_process.wait()
