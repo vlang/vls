@@ -1,5 +1,5 @@
-import vls
-import vls.testing
+import server
+import server.testing
 import json
 import lsp
 import os
@@ -188,7 +188,7 @@ const hover_results = {
 
 fn test_hover() {
 	mut io := testing.Testio{}
-	mut ls := vls.new(io)
+	mut ls := server.new(io)
 	ls.dispatch(io.request_with_params('initialize', lsp.InitializeParams{
 		root_uri: lsp.document_uri_from_path(os.join_path(os.dir(@FILE), 'test_files',
 			'hover'))

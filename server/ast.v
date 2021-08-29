@@ -1,4 +1,4 @@
-module vls
+module server
 
 // import tree_sitter
 
@@ -17,8 +17,8 @@ fn traverse_node(root_node C.TSNode, offset u32) C.TSNode {
 		return root_node
 	}
 
-	if (!root_type.ends_with('_declaration') && root_type !in vls.list_node_types
-		&& root_type !in vls.other_node_types)
+	if (!root_type.ends_with('_declaration') && root_type !in server.list_node_types
+		&& root_type !in server.other_node_types)
 		&& (child_type.ends_with('identifier') || child_type == 'builtin_type') {
 		if root_type == 'selector_expression' {
 			root_children_count := root_node.named_child_count()
@@ -68,7 +68,7 @@ fn traverse_node2(starting_node C.TSNode, offset u32) C.TSNode {
 		return root_node
 	}
 
-	if (!root_type.ends_with('_declaration') && root_type !in vls.list_node_types
+	if (!root_type.ends_with('_declaration') && root_type !in server.list_node_types
 		&& root_type != 'block')
 		&& (child_type.ends_with('identifier') || child_type == 'builtin_type') {
 		if root_type == 'selector_expression' {
@@ -127,7 +127,7 @@ fn closest_symbol_node_parent(child_node C.TSNode) C.TSNode {
 		return child_node
 	}
 
-	if parent_type.ends_with('_declaration') || parent_type in vls.other_symbol_node_types {
+	if parent_type.ends_with('_declaration') || parent_type in server.other_symbol_node_types {
 		return parent_node
 	}
 

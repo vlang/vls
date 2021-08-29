@@ -1,11 +1,11 @@
-import vls
-import vls.testing
+import server
+import server.testing
 import lsp
 import json
 
 fn test_wrong_first_request() {
 	mut io := &testing.Testio{}
-	mut ls := vls.new(io)
+	mut ls := server.new(io)
 	payload := io.request('shutdown')
 	ls.dispatch(payload)
 	assert ls.status() == .off
@@ -41,8 +41,8 @@ fn test_initialized() {
 // }
 fn test_set_features() {
 	mut io := &testing.Testio{}
-	mut ls := vls.new(io)
-	assert ls.features() == vls.default_features_list
+	mut ls := server.new(io)
+	assert ls.features() == server.default_features_list
 	ls.set_features(['formatting'], false) or {
 		assert false
 		return
@@ -80,9 +80,9 @@ fn test_set_features() {
 	}
 }
 
-fn init_tests() (&testing.Testio, vls.Vls) {
+fn init_tests() (&testing.Testio, server.Vls) {
 	mut io := &testing.Testio{}
-	mut ls := vls.new(io)
+	mut ls := server.new(io)
 	payload := io.request('initialize')
 	ls.dispatch(payload)
 	return io, ls

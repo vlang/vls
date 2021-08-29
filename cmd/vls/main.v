@@ -1,7 +1,7 @@
 module main
 
 import cli
-import vls
+import server
 import os
 
 fn C._setmode(int, int)
@@ -24,12 +24,12 @@ fn run_cli(cmd cli.Command) ? {
 
 	// Setup the comm method and build the language server.
 	mut io := if socket_mode {
-		vls.ReceiveSender(Socket{ port: socket_port, debug: debug_mode })
+		server.ReceiveSender(Socket{ port: socket_port, debug: debug_mode })
   } else {
-		vls.ReceiveSender(Stdio{ debug: debug_mode })
+		server.ReceiveSender(Stdio{ debug: debug_mode })
 	}
 
-	mut ls := vls.new(io)
+	mut ls := server.new(io)
 	if custom_vroot_path.len != 0 {
 		if !os.exists(custom_vroot_path) {
 			return error('Provided VROOT does not exist.')
@@ -55,8 +55,8 @@ fn main() {
 	}
 	mut cmd := cli.Command{
 		name: 'vls'
-		version: vls.meta.version
-		description: vls.meta.description
+		version: server.meta.version
+		description: server.meta.description
 		execute: run_cli
 		posix_mode: true
 	}
