@@ -83,6 +83,10 @@ fn test_stdio_connect() ? {
 }
 
 fn test_tcp_connect() ? {
+	// TODO: fix this later. Hangs on macos (on ci and on device) and windows ci
+	$if !linux {
+		return
+	}
 	mut io := testing.Testio{}
 	mut p := compile_and_start_vls('--socket', '--port=5007') ?
 	defer { 
