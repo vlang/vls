@@ -1,7 +1,6 @@
 import os
 import server
 import server.testing
-import v.token
 import benchmark
 import lsp
 
