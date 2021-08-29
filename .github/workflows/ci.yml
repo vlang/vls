@@ -17,6 +17,8 @@ jobs:
     env:
       VFLAGS: -cc gcc
     steps:
+    - name: Install Boehm GC
+      run: sudo apt-get install libgc-dev
     - name: Checkout V
       uses: actions/checkout@v2
       with:
@@ -35,6 +37,8 @@ jobs:
     env:
       VFLAGS: -cc clang
     steps:
+    - name: Install Boehm GC
+      run: brew install bdw-gc
     - name: Checkout V
       uses: actions/checkout@v2
       with:
