@@ -1,5 +1,5 @@
-import vls
-import vls.testing
+import server
+import server.testing
 import json
 import lsp
 import os
@@ -325,7 +325,7 @@ const definition_results = {
 
 fn test_definition() {
 	mut io := testing.Testio{}
-	mut ls := vls.new(io)
+	mut ls := server.new(io)
 	ls.dispatch(io.request_with_params('initialize', lsp.InitializeParams{
 		root_uri: lsp.document_uri_from_path(base_dir)
 	}))

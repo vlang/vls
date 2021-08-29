@@ -1,5 +1,5 @@
-import vls
-import vls.testing
+import server
+import server.testing
 import json
 import lsp
 import os
@@ -55,7 +55,7 @@ const workspace_symbols_result = [
 
 fn test_workspace_symbols() {
 	mut io := &testing.Testio{}
-	mut ls := vls.new(io)
+	mut ls := server.new(io)
 	ls.dispatch(io.request('initialize'))
 	files := testing.load_test_file_paths('workspace_symbols') or {
 		io.bench.fail()

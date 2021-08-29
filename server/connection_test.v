@@ -1,6 +1,6 @@
-import vls
+import server
 import os
-import vls.testing
+import server.testing
 import net
 
 fn launch_cmd(exec_path string, args ...string) &os.Process {
@@ -46,7 +46,7 @@ fn compile_and_start_vls(args ...string) ?&os.Process {
 	vls_path := get_vls_path(vls_cmd_dir)
 	if !os.exists(vls_path) {
 		os.chdir(vls_cmd_dir) ?
-		vroot_path := vls.detect_vroot_path() ?
+		vroot_path := server.detect_vroot_path() ?
 		mut v_build_process := launch_v_tool(vroot_path, '-cc', 'gcc', '-gc', 'boehm', '.')
 		v_build_process.wait()
 
@@ -68,7 +68,7 @@ fn compile_and_start_vls(args ...string) ?&os.Process {
 fn test_stdio_connect() ? {
 	mut io := testing.Testio{}
 	mut p := compile_and_start_vls() ?
-	defer { 
+	defer {
 		p.close()
 		unsafe { p.free() }
 	}
@@ -89,7 +89,7 @@ fn test_tcp_connect() ? {
 	}
 	mut io := testing.Testio{}
 	mut p := compile_and_start_vls('--socket', '--port=5007') ?
-	defer { 
+	defer {
 		p.close()
 		unsafe { p.free() }
 	}

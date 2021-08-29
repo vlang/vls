@@ -1,4 +1,4 @@
-module vls
+module server
 
 // commenting it here so that it recognizes that
 // TSPoint and TSRange is used from the "tree_sitter" module
