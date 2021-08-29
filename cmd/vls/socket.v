@@ -30,6 +30,9 @@ pub fn (mut io Socket) init() ? {
 }
 
 pub fn (mut io Socket) send(output string) {
+	$if !test {
+		println('[vls] : ${term.red('Sent data')} : Content-Length: ${output.len} | $output')
+	}
 	io.conn.write_string('Content-Length: $output.len\r\n\r\n$output') or { panic(err) }
 }
 
@@ -42,7 +45,7 @@ pub fn (mut sck Socket) receive() ?string {
 	for {
 		got_header := reader.read_line() ?
 		$if !test {
-			println('[vls] : Received header : $got_header')
+			println('[vls] : ${term.green('Received data')} : $got_header')
 		}
 
 		if got_header.len == 0 {
@@ -66,5 +69,8 @@ pub fn (mut sck Socket) receive() ?string {
 		}
 	}
 
+	$if !test {
+		println('[vls] : ${term.green('Received data')} : Content-Length: ${rbody.len} | ${rbody.bytestr()}')
+	}
 	return rbody.bytestr()
 }
