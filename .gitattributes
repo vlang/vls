@@ -1,3 +1,3 @@
 *.v linguist-language=V text=auto eol=lf
-vls/tests/test_files/pos_compute_offset/crlf.vv linguist-language=V text=auto eol=crlf
-vls/tests/test_files/pos_compute_offset/lf.vv linguist-language=V text=auto eol=lf
+server/tests/test_files/pos_compute_offset/crlf.vv linguist-language=V text=auto eol=crlf
+server/tests/test_files/pos_compute_offset/lf.vv linguist-language=V text=auto eol=lf
