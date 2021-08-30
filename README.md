@@ -121,13 +121,7 @@ For other editors, please refer to the plugin's/editor's documentation for instr
 - [x] `foldingRange`
 
 ## Debugging
-> By default, log can only be accessed and saved on server crash.
-To save the log on exit, pass the `--debug` flag to the language server CLI. 
-
-VLS provides a log file (`${workspacePath}/vls.log`) for debugging language server for certain situations (e.g unexpected crash). To read the contents
-of the `vls.log` file, simply upload the file to the [LSP Inspector](https://iwanabethatguy.github.io/language-server-protocol-inspector/) and select `vls.log`.
-
-![LSP Inspector](images/inspector-output.png)
+VLS provides a log file (`${workspacePath}/vls.log`) for debugging the language server incoming requests and outgoing responses / notifications. By default, this can only be saved and accessed on server crash. To save the log on every exit, pass the `--debug` flag to the language server CLI.
 
 # Contributing
 ## Submitting a pull request
