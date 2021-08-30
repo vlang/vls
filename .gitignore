@@ -5,4 +5,6 @@
 cmd/vls/vls
 vls.exe
 vls
+build.exe
+build
 .vscode
