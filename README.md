@@ -32,8 +32,8 @@ Afterwards, open your operating system's terminal and execute the following:
 git clone https://github.com/vlang/vls && cd vls
 
 ## Build the project
-## Use "-cc gcc" if you're compiling VLS with GCC.
-v -gc boehm -cc clang cmd/vls
+## Use " v run build.vsh gcc" if you're compiling VLS with GCC.
+v run build.vsh clang
 
 # The binary will be created in the `cmd/vls` subfolder by default.
 ```
