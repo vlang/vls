@@ -133,10 +133,8 @@ pub fn (mut ls Vls) dispatch(payload string) {
 	// clients such as VSCode used 0 as the first request ID
 	// hence the use of a negative integer).
 	if request.id == -2 {
-		ls.logger.notification(payload, .send)
 		ls.logger.notification(payload, .receive)
 	} else {
-		ls.logger.request(payload, .send)
 		ls.logger.request(payload, .receive)
 	}
 	if ls.status == .initialized {
