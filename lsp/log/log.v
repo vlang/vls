@@ -137,10 +137,9 @@ fn (mut l Log) write(item LogItem) {
 				l.buffer.go_back_to(0)
 			}
 		}
-
-		l.file.writeln(content) or { panic(err) }
+		l.file.write_string(content) or { panic(err) }
 	} else {
-		l.buffer.writeln(content)
+		l.buffer.write_string(content)
 	}
 
 	l.last_timestamp = item.timestamp
