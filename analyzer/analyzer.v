@@ -205,6 +205,11 @@ fn (mut an Analyzer) call_expr(node C.TSNode) &Symbol {
 fn (mut an Analyzer) array(node C.TSNode) &Symbol {
 	items_len := node.named_child_count()
 	if items_len == 0 {
+		an.report(
+			analyzer.untyped_empty_array_error,
+			node.range(),
+			analyzer.empty_symbols
+		)
 		return analyzer.void_type
 	}
 
@@ -340,6 +345,23 @@ fn (mut an Analyzer) type_init(node C.TSNode) &Symbol {
 					{0: el_node.get_text(an.src_text)}
 				)
 			}
+
+			if el_sym.kind == .sumtype {
+				mut range := type_node.range()
+				if type_node.get_type() == 'fixed_array_type' {
+					range = node.range()
+				} else {
+					range = range.extend(type_node.next_sibling().child(0).range())
+				}
+				
+				an.report(analyzer.invalid_sumtype_array_init_error, range, analyzer.empty_symbols)
+			}
+
+			// if type_node.get_type() == 'fixed_array_type' {
+			// 	// limit := type_node.child_by_field_name('limit')
+
+
+			// }
 		}
 		.map_ {
 			// key_node := type_node.child_by_field_name('key')
@@ -393,6 +415,25 @@ fn (mut an Analyzer) type_init(node C.TSNode) &Symbol {
 	}
 }
 
+fn (mut an Analyzer) unary_expr(node C.TSNode) &Symbol {
+	// op_node := node.child_by_field_name('operator')
+	operand_node := node.child_by_field_name('operand')
+	operand_sym := an.expression(operand_node)
+
+	// if an.in_expr {
+		
+
+	// 	match op_node.get_type() {
+	// 		'<-' {
+				
+	// 		}
+	// 		else { return analyzer.void_type }
+	// 	}
+	// }
+
+	return operand_sym
+}
+
 fn (mut an Analyzer) expression(node C.TSNode) &Symbol {
 	node_typ := node.get_type()
 	match node_typ {
@@ -407,6 +448,9 @@ fn (mut an Analyzer) expression(node C.TSNode) &Symbol {
 		}
 		'call_expression' {
 			return an.call_expr(node)
+		}
+		'unary_expression' {
+			return an.unary_expr(node)
 		}
 		'binary_expression' {
 			return an.binary_expr(node)
@@ -493,8 +537,10 @@ fn (mut an Analyzer) assignment_stmt(node C.TSNode) {
 	if left_sym_count == right_sym_count {
 		an.in_expr = true
 		for i in u32(0) .. u32(left_sym_count) {
-			left_sym := an.expression(left_node.named_child(i))
-			right_sym := an.expression(right_node.named_child(i))
+			left_child := left_node.named_child(i)
+			left_sym := an.expression(left_child)
+			right_child := right_node.named_child(i)
+			mut right_sym := an.expression(right_child)
 			
 			if is_multiplicative || is_additive {
 				// has_overloaded_method := left_sym.children.has(op_node.get_type())
@@ -508,6 +554,18 @@ fn (mut an Analyzer) assignment_stmt(node C.TSNode) {
 						{1: op}
 					)
 				}
+			} else if right_child.get_type() == 'unary_expression' && left_sym != right_sym {
+				unary_op_node := right_child.child_by_field_name('operator')
+				if right_sym.kind == .chan_ {
+					right_sym = right_sym.parent
+				}
+				
+				an.custom_report(
+					analyzer.invalid_assignment_error,
+					unary_op_node.range(),
+					[left_sym, right_sym],
+					{0: left_child.get_text(an.src_text)}
+				)
 			} else {
 				// TODO:
 			}
@@ -521,9 +579,50 @@ fn (mut an Analyzer) short_var_decl(node C.TSNode) {
 	right_count := right.named_child_count()
 	an.in_expr = true
 	for i in u32(0) .. right_count {
-		_ = an.expression(right.named_child(i))
+		right_child := right.named_child(i)
+		if right_child.get_type() == 'unary_expression' && right_child.child_by_field_name('operator').get_type() == '<-' {
+			an.report(
+				analyzer.send_operator_in_var_decl_error,
+				right_child.child_by_field_name('operator').range(),
+				analyzer.empty_symbols
+			)
+		} else {
+			_ = an.expression(right_child)
+		}
 	}
 	an.in_expr = false
+}
+
+fn (mut an Analyzer) send_statement(node C.TSNode) {
+	chan_node := node.child_by_field_name('channel')
+	val_node := node.child_by_field_name('value')
+	chan_typ_sym := an.expression(chan_node)
+	val_typ_sym := an.expression(val_node)
+	if chan_typ_sym.kind != .chan_ {
+		an.report(
+			analyzer.send_channel_invalid_chan_type_error,
+			chan_node.range(),
+			[chan_typ_sym]
+		)
+	} else if val_typ_sym != chan_typ_sym.parent {
+		an.report(
+			analyzer.send_channel_invalid_value_type_error,
+			val_node.range(),
+			[val_typ_sym, chan_typ_sym]
+		)
+	}
+}
+
+fn (mut an Analyzer) assert_statement(node C.TSNode) {
+	expr_node := node.named_child(0)
+	expr_typ_sym := an.expression(expr_node)
+	if expr_typ_sym.name != 'bool' {
+		an.report(
+			analyzer.invalid_assert_type_error,
+			expr_node.range(),
+			[expr_typ_sym]
+		)
+	}
 }
 
 fn (mut an Analyzer) block(node C.TSNode) {
@@ -547,6 +646,12 @@ fn (mut an Analyzer) block(node C.TSNode) {
 			}
 			'block' {
 				an.block(stmt_node)
+			}
+			'send_statement' {
+				an.send_statement(stmt_node)
+			}
+			'assert_statement' {
+				an.assert_statement(stmt_node)
 			}
 			else {
 				_ = an.expression(stmt_node)

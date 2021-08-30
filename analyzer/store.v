@@ -240,7 +240,7 @@ pub fn (mut ss Store) register_symbol(mut info Symbol) ?&Symbol {
 		}
 
 		// Remove this?
-		if existing_sym.kind !in analyzer.container_symbol_kinds {
+		if existing_sym.language == .v && existing_sym.kind !in analyzer.container_symbol_kinds {
 			if (existing_sym.kind != .placeholder && existing_sym.kind == info.kind)
 				&& (existing_sym.file_path == info.file_path
 				&& existing_sym.file_version >= info.file_version) {
@@ -652,11 +652,11 @@ pub fn (mut ss Store) infer_symbol_from_node(node C.TSNode, src_text []byte) ?&S
 				}
 			}
 		}
-		'type_initializer' {
+		'type_initializer', 'type_cast_expression' {
 			return ss.find_symbol_by_type_node(node.child_by_field_name('type'), src_text)
 		}
 		'type_identifier', 'array_type', 'map_type', 'pointer_type', 'variadic_type',
-		'builtin_type' {
+		'builtin_type', 'channel_type' {
 			return ss.find_symbol_by_type_node(node, src_text)
 		}
 		'selector_expression' {
@@ -844,6 +844,7 @@ pub fn (mut ss Store) infer_value_type_from_node(node C.TSNode, src_text []byte)
 		// 	return ss.infer_value_type_from_node(node.parent(), src_text)
 		// }
 		else {
+			// eprintln(node.get_type() + ' ' + node.get_text(src_text))
 			return ss.infer_symbol_from_node(node, src_text) or { analyzer.void_type }
 		}
 	}

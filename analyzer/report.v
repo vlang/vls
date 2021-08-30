@@ -50,6 +50,13 @@ const (
 	append_type_mismatch_error = 109
 	array_append_expr_error = 110
 	invalid_array_element_type_error = 111
+	invalid_sumtype_array_init_error = 112
+	send_channel_invalid_chan_type_error = 113
+	invalid_assignment_error = 114
+	send_channel_invalid_value_type_error = 115
+	send_operator_in_var_decl_error = 116
+	invalid_assert_type_error = 117
+	untyped_empty_array_error = 118
 )
 
 const error_messages = {
@@ -65,6 +72,13 @@ const error_messages = {
 	analyzer.append_type_mismatch_error: 'cannot append `%s` to `%s`'
 	analyzer.array_append_expr_error: 'array append cannot be used in an expression'
 	analyzer.invalid_array_element_type_error: 'invalid array element: expected `%s`, not `%s`'
+	analyzer.invalid_sumtype_array_init_error: 'cannot initialize sum type array without default value'
+	analyzer.send_channel_invalid_chan_type_error: 'cannot push on non-channel `%s`'
+	analyzer.invalid_assignment_error: 'cannot assign to `%s`: expected `%s`, not `%s`'
+	analyzer.send_channel_invalid_value_type_error: 'cannot push `%s` on `%s`'
+	analyzer.send_operator_in_var_decl_error: '<- operator can only be used with `chan` types'
+	analyzer.invalid_assert_type_error: 'assert can be used only with `bool` expressions, but found `%s` instead'
+	analyzer.untyped_empty_array_error: 'array_init: no type specified (maybe: `[]Type{}` instead of `[]`)'
 }
 
 pub struct AnalyzerError {
@@ -84,6 +98,8 @@ fn (err AnalyzerError) formatted_message() string {
 pub fn (err AnalyzerError) to_message() Message {
 	err_msg := if err.code == 0 || err.msg.len != 0 { 
 		err.msg 
+	} else if err.parameters.len == 0 {
+		error_messages[err.code]
 	} else { 
 		err.formatted_message() 
 	}
