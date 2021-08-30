@@ -192,7 +192,7 @@ fn (mut ss Store) inject_paths_of_new_imports(mut new_imports []&Import, lookup_
 					content: 'Module `$new_import.absolute_module_name` not found'
 					file_path: file_path.clone()
 					range: range
-				})
+				)
 
 				new_import.ranges.delete(file_path)
 			}

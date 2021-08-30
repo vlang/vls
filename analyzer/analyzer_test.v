@@ -2,7 +2,7 @@ module analyzer
 
 import os
 import tree_sitter
-import tree_sitter_v.bindings.v
+import tree_sitter_v as v
 import benchmark
 import v.util
 import v.token
@@ -54,7 +54,7 @@ const skipped_tests = [
 
 // test_analyzer_from_v compares the output from V's checker to VLS' analyzer
 fn test_analyzer_from_v() ? {
-	os.chdir(os.dir(@VEXE))
+	os.chdir(os.dir(@VEXE)) ?
 
 	input_file_paths := os.glob('vlib/v/checker/tests/*.vv') ?
 	out_file_paths := os.glob('vlib/v/checker/tests/*.out') ?

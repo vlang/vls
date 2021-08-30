@@ -67,7 +67,7 @@ pub fn (mut ss Store) report(msg Message) {
 	if ss.messages.has_range(msg.file_path, msg.range) {
 		return
 	}
-	ss.messages << msg.to_message()
+	ss.messages << msg
 }
 
 // is_file_active returns a boolean that checks if the given

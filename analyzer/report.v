@@ -113,6 +113,6 @@ fn report_error(msg string, range C.TSRange) IError {
 // report_error reports the AnalyzerError to the messages array
 pub fn (mut ss Store) report_error(err IError) {
 	if err is AnalyzerError {
-		ss.report(err)
+		ss.report(err.to_message())
 	}
 }
