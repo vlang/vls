@@ -1,0 +1,83 @@
+===
+Select Expression
+===
+
+fn main() {
+  select {
+		b := <-ch1 {
+			println(b)
+		}
+		> 30 * time.millisecond {
+			println('bad')
+		}
+	}
+
+  // TODO:
+  // for select {
+	// 	b := <-ch2 {
+	// 		h = 0
+	// 	}
+	// } {
+	// 	println('ch2 open')
+	// }
+
+  // if select {
+	// 	b := <-ch2 {
+	// 		h = 0
+	// 	}
+	// 	else {
+	// 		h = 2
+	// 	}
+	// } {
+	// 	panic('channel is still open')
+	// } else {
+	// 	is_open = false
+	// }
+}
+
+---
+
+(source_file 
+  (function_declaration 
+    (identifier) 
+    (parameter_list) 
+    (block 
+      (select_expression 
+        (select_branch 
+          (short_var_declaration 
+            (identifier_list (identifier)) 
+            (expression_list (unary_expression (identifier)))) 
+          (block 
+            (call_expression 
+              (identifier) 
+              (argument_list (identifier))))) 
+        (select_default_branch 
+          (binary_expression 
+            (int_literal) 
+            (selector_expression 
+              (identifier) (identifier))) 
+            (block 
+              (call_expression 
+                (identifier) 
+                (argument_list 
+                   (interpreted_string_literal)))))) 
+                   (comment) 
+                   (comment) 
+                   (comment) 
+                   (comment) 
+                   (comment) 
+                   (comment) 
+                   (comment) 
+                   (comment) 
+                   (comment) 
+                   (comment) 
+                   (comment) 
+                   (comment) 
+                   (comment) 
+                   (comment) 
+                   (comment) 
+                   (comment) 
+                   (comment) 
+                   (comment) 
+                   (comment) 
+                   (comment))))

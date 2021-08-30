@@ -1,0 +1,16 @@
+===
+Import declaration with selected symbols
+===
+
+import json { decode, encode, Any }
+
+---
+
+(source_file
+  (import_declaration
+      (import_path)
+      (import_symbols 
+        (import_symbols_list
+          (identifier) 
+          (identifier) 
+          (identifier)))))

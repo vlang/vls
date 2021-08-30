@@ -1,0 +1,12 @@
+===
+Float Literal
+===
+
+const foo = 100.0
+
+---
+
+(source_file
+  (const_declaration
+    (const_spec 
+      (identifier) (float_literal))))

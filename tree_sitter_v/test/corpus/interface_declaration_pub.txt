@@ -1,0 +1,12 @@
+===
+Public interface declaration
+===
+
+pub interface Speaker {}
+
+---
+
+(source_file
+  (interface_declaration
+    (type_identifier)
+    (interface_spec_list)))

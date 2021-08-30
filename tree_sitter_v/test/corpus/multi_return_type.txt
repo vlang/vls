@@ -1,0 +1,23 @@
+===
+Multi-return type
+===
+
+fn hello() (string, string) {}
+fn hello2() ?(int, f32) {}
+
+---
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (multi_return_type
+      (builtin_type) (builtin_type))
+    (block))
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (option_type
+      (multi_return_type
+        (builtin_type) (builtin_type)))
+    (block)))

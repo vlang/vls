@@ -1,0 +1,44 @@
+===
+Interface declaration
+===
+
+interface Speaker {
+  speak()
+mut:
+  speak_message(name string) string
+}
+
+---
+
+(source_file
+  (interface_declaration
+    (type_identifier)
+    (interface_spec_list
+      (interface_spec (field_identifier) (parameter_list))
+      (interface_field_scope)
+      (interface_spec 
+        (field_identifier)
+        (parameter_list
+          (parameter_declaration (identifier) (builtin_type)))
+        (builtin_type)))))
+
+===
+Generic Interface Declaration
+===
+
+interface Iterator<T> {
+	next() ?T
+}
+
+---
+
+(source_file
+  (interface_declaration
+    (generic_type
+      (type_identifier)
+      (type_parameters (type_placeholder)))
+    (interface_spec_list
+      (interface_spec 
+        (field_identifier) 
+        (parameter_list)
+        (option_type (type_placeholder))))))

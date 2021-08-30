@@ -66,7 +66,8 @@ pub fn should_analyze_file(file_name string) bool {
 		return false
 	}
 
-	if file_name.ends_with('_test.v') || file_name.all_before_last('.v').all_before_last('.').ends_with('_test') {
+	if file_name.ends_with('_test.v')
+		|| file_name.all_before_last('.v').all_before_last('.').ends_with('_test') {
 		return false
 	}
 

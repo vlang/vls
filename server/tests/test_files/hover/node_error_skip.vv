@@ -1,0 +1,7 @@
+module main
+
+struct Foo {
+  a
+
+
+fn (f Foo) greet() {}

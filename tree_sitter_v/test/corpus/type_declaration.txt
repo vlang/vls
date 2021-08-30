@@ -1,0 +1,29 @@
+===
+Type declaration
+===
+
+type Text = string
+
+---
+
+(source_file
+  (type_declaration 
+    (type_identifier) 
+    (type_list (builtin_type))))
+
+===
+Generic Type Declaration
+===
+
+type MyOption<T> = Error | None | T
+
+---
+
+(source_file
+  (type_declaration
+    (type_identifier)
+    (type_parameters (type_placeholder))
+    (type_list
+      (type_identifier)
+      (type_identifier)
+      (type_placeholder))))

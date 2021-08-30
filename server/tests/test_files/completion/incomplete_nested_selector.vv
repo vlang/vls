@@ -1,0 +1,16 @@
+module main
+
+struct Barw {
+	name string
+}
+
+fn (b Barw) theres_a_method() {}
+
+struct Foow {
+	bar Barw
+}
+
+fn main() {
+  foo := Foow{Barw{}}
+  foo.bar.
+}

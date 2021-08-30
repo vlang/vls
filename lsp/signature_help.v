@@ -40,9 +40,9 @@ pub mut:
 
 pub struct SignatureInformation {
 pub mut:
-	label         string
+	label string
 	// documentation MarkupContent
-	parameters    []ParameterInformation
+	parameters []ParameterInformation
 }
 
 pub struct ParameterInformation {

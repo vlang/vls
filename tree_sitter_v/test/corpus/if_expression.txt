@@ -1,0 +1,38 @@
+===
+If Expression
+===
+
+fn main() {
+  if true {
+  } else if !true {
+  } else {
+  }
+}
+
+---
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (block
+      (if_expression 
+        (true) (block)
+        (if_expression
+          (unary_expression (true)) (block)
+          (block))))))
+
+===
+If Expression with Binded identifier
+===
+
+if C.__fo {
+	hello
+}
+
+---
+
+(source_file
+  (if_expression
+    (binded_identifier (identifier))
+    (block (identifier))))

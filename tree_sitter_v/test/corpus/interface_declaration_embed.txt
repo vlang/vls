@@ -1,0 +1,15 @@
+===
+Interface declaration with embed
+===
+
+interface Speaker {
+  Talker
+}
+
+---
+
+(source_file
+  (interface_declaration
+    (type_identifier)
+    (interface_spec_list
+      (struct_field_declaration (type_identifier)))))

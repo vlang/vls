@@ -1,0 +1,24 @@
+===
+Map Initializer with alt syntax
+===
+
+fn main() {
+  test := map{'hello': 'world'}
+}
+
+---
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (block
+      (short_var_declaration
+        (identifier_list (identifier))
+        (expression_list
+          (type_initializer
+            (builtin_type)
+            (literal_value
+              (keyed_element 
+                (interpreted_string_literal) 
+                (interpreted_string_literal)))))))))

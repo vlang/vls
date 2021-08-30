@@ -1,0 +1,37 @@
+{
+  "name": "tree-sitter-v",
+  "version": "1.0.7",
+  "main": "bindings/node",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/nedpals/tree-sitter-v.git"
+  },
+  "scripts": {
+    "test": "tree-sitter test",
+    "generate": "tree-sitter generate",
+    "parse": "tree-sitter parse",
+    "parseg": "tree-sitter parse --debug-graph"
+  },
+  "homepage": "https://github.com/nedpals/tree-sitter-v#readme",
+  "dependencies": {
+    "nan": "^2.14.0"
+  },
+  "devDependencies": {
+    "chalk": "^4.1.1",
+    "glob": "^7.1.7",
+    "minimist": "^1.2.5",
+    "tree-sitter": "^0.19.0",
+    "tree-sitter-cli": "^0.19.4"
+  },
+  "tree-sitter": [
+    {
+      "scope": "source.v",
+      "file-types": [
+        "v",
+        "vsh",
+        "v.mod"
+      ]
+    }
+  ]
+}

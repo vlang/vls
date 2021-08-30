@@ -1,0 +1,8 @@
+fn main() {
+  just_a_name := 'Bob'
+
+  ages := {
+    just_a_name: 20
+    'Steve': 10
+  }
+}

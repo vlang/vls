@@ -1,0 +1,22 @@
+===
+Defer Statement
+===
+
+fn main() {
+  defer {
+    function_call()
+  }
+}
+
+---
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (block
+      (defer_statement
+        (block
+          (call_expression
+            (identifier)
+            (argument_list)))))))

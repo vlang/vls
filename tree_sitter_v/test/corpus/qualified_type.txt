@@ -1,0 +1,31 @@
+===
+Qualified Type
+===
+
+const foo = time.Time{}
+
+fn main() {
+  test := log.Logger{}
+}
+
+---
+
+(source_file
+  (const_declaration
+    (const_spec
+      (identifier)
+      (type_initializer
+        (qualified_type 
+          (module_identifier) (type_identifier))
+        (literal_value))))
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (block
+      (short_var_declaration
+        (identifier_list (identifier))
+        (expression_list 
+          (type_initializer
+            (qualified_type
+              (module_identifier) (type_identifier))
+            (literal_value)))))))

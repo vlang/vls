@@ -1,0 +1,16 @@
+===
+Empty Function
+===
+
+fn abc(i int) f64
+
+---
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list
+      (parameter_declaration
+        (identifier)
+	      (builtin_type))) 
+    (builtin_type)))

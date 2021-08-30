@@ -2,7 +2,7 @@ module analyzer
 
 import os
 import tree_sitter
-import tree_sitter_v.bindings.v
+import tree_sitter_v as v
 
 pub struct Import {
 mut:
@@ -11,7 +11,9 @@ mut:
 	// imported indicates that the files of the modules are already imported.
 	imported bool
 pub mut:
-	// module_name is the name that was declared when imported.
+	// absolute_module_name is the name that was declared when imported.
+	absolute_module_name string
+	// module_name is the name to be used for symbol lookups
 	module_name string
 	// path is the path where the module was located.
 	path string
@@ -81,6 +83,7 @@ pub fn (mut imp Import) set_path(path string) {
 [unsafe]
 pub fn (imp &Import) free() {
 	unsafe {
+		imp.absolute_module_name.free()
 		imp.module_name.free()
 		imp.path.free()
 		imp.ranges.free()
@@ -99,7 +102,8 @@ pub fn (mut ss Store) register_auto_import(imp Import, to_alias string) {
 // based on the given range
 pub fn (mut ss Store) find_import_by_position(range C.TSRange) ?&Import {
 	for mut imp in ss.imports[ss.cur_dir] {
-		if ss.cur_file_path in imp.ranges && imp.ranges[ss.cur_file_path].start_point.row == range.start_point.row {
+		if ss.cur_file_path in imp.ranges
+			&& imp.ranges[ss.cur_file_path].start_point.row == range.start_point.row {
 			return unsafe { imp }
 		}
 	}
@@ -128,7 +132,7 @@ fn (mut ss Store) inject_paths_of_new_imports(mut new_imports []&Import, lookup_
 		}
 
 		// module.submod -> ['module', 'submod']
-		mod_name_arr := new_import.module_name.split('.')
+		mod_name_arr := new_import.absolute_module_name.split('.')
 		for path in import_path_iter {
 			mod_dir := os.join_path(path, ...mod_name_arr)
 
@@ -184,8 +188,8 @@ fn (mut ss Store) inject_paths_of_new_imports(mut new_imports []&Import, lookup_
 		// report the unresolved import
 		if !new_import.resolved {
 			for file_path, range in new_import.ranges {
-				ss.report(Message{
-					content: 'Module `$new_import.module_name` not found'
+				ss.report(
+					content: 'Module `$new_import.absolute_module_name` not found'
 					file_path: file_path.clone()
 					range: range
 				})
@@ -230,7 +234,7 @@ pub fn (mut ss Store) cleanup_imports() int {
 			if i < ss.imports[ss.cur_dir].len {
 				ss.imports[ss.cur_dir].delete(i)
 			}
-			
+
 			deleted++
 			continue
 		}
@@ -257,7 +261,7 @@ fn (mut ss Store) scan_imports(tree &C.TSTree, src_text []byte) []&Import {
 		if found_imp := ss.find_import_by_position(node.range()) {
 			mut imp_module := found_imp
 			mod_name := import_path_node.get_text(src_text)
-			if imp_module.module_name == mod_name {
+			if imp_module.absolute_module_name == mod_name {
 				continue
 			}
 
@@ -269,7 +273,7 @@ fn (mut ss Store) scan_imports(tree &C.TSTree, src_text []byte) []&Import {
 		// resolve it later after
 		mut imp_module, already_imported := ss.add_import(
 			resolved: false
-			module_name: import_path_node.get_text(src_text)
+			absolute_module_name: import_path_node.get_text(src_text)
 		)
 
 		import_alias_node := node.child_by_field_name('alias')
@@ -351,20 +355,23 @@ pub fn (mut store Store) import_modules(mut imports []&Import) {
 
 			{
 				root_node := tree_from_import.root_node()
-				child_len := int(root_node.named_child_count())
+				child_len := int(root_node.child_count())
 
 				mut sr := SymbolRegistration{
 					store: unsafe { store }
 					src_text: content
 					is_import: true
-					cursor: TreeCursor{0, u32(child_len), root_node.tree_cursor()}
+					cursor: TreeCursor{
+						child_count: u32(child_len)
+						cursor: root_node.tree_cursor()
+					}
 				}
 
 				sr.get_scope(sr.cursor.current_node()) or {}
 				sr.cursor.to_first_child()
 
 				for _ in 0 .. child_len {
-					sr.top_level_statement() or {
+					sr.top_level_decl() or {
 						sr.store.report_error(err)
 						continue
 					}
@@ -372,7 +379,6 @@ pub fn (mut store Store) import_modules(mut imports []&Import) {
 
 				unsafe { sr.cursor.free() }
 			}
-
 			parser.reset()
 			unsafe {
 				// modules_from_dir.free()
@@ -394,4 +400,9 @@ pub fn (mut store Store) import_modules(mut imports []&Import) {
 		// old_active_path.free()
 		// old_active_dir.free()
 	}
+}
+
+pub fn (ss &Store) is_module(module_name string) bool {
+	_ = ss.get_module_path_opt(module_name) or { return false }
+	return true
 }

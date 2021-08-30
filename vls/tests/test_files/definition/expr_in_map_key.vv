@@ -1,8 +1,0 @@
-fn main() {
-  just_a_name := 'Bob'
-
-  ages := map{
-    just_a_name: 20
-    'Steve': 10
-  }
-}

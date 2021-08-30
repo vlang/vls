@@ -37,7 +37,12 @@ pub fn (mut parser C.TSParser) parse_string(content string) &C.TSTree {
 
 [inline]
 pub fn (mut parser C.TSParser) parse_string_with_old_tree(content string, old_tree &C.TSTree) &C.TSTree {
-	return C.ts_parser_parse_string(parser, old_tree, &char(content.str), content.len)
+	return parser.parse_string_with_old_tree_and_len(content, &C.TSTree(0), u32(content.len))
+}
+
+[inline]
+pub fn (mut parser C.TSParser) parse_string_with_old_tree_and_len(content string, old_tree &C.TSTree, len u32) &C.TSTree {
+	return C.ts_parser_parse_string(parser, old_tree, &char(content.str), len)
 }
 
 [inline; unsafe]
@@ -220,7 +225,7 @@ pub fn (node C.TSNode) has_changes() bool {
 	return C.ts_node_has_changes(node)
 }
 
-pub fn (node C.TSNode) has_error() bool {
+pub fn (node C.TSNode) is_error() bool {
 	if node.is_null() {
 		return true
 	}

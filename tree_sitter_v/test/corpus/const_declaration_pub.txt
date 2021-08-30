@@ -1,0 +1,15 @@
+===
+Public const declaration
+===
+
+pub const (
+  name = 'Foo'
+  num = 100
+)
+
+---
+
+(source_file
+  (const_declaration
+    (const_spec (identifier) (interpreted_string_literal))
+    (const_spec (identifier) (int_literal))))

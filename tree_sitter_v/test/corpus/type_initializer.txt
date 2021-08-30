@@ -1,0 +1,22 @@
+===
+Type Initializer
+===
+
+fn main() {
+  t := Test{hello: 'world!'}
+}
+
+---
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (block
+      (short_var_declaration
+        (identifier_list (identifier))
+        (expression_list
+          (type_initializer 
+            (type_identifier)
+            (literal_value
+              (keyed_element (field_identifier) (interpreted_string_literal)))))))))

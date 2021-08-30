@@ -1,0 +1,19 @@
+===
+Enum declaration
+===
+
+enum Color {
+  red = 1
+  blue
+  yellow
+}
+
+---
+
+(source_file
+  (enum_declaration
+    (type_identifier)
+    (enum_member_declaration_list
+      (enum_member (identifier) (int_literal))
+      (enum_member (identifier))
+      (enum_member (identifier)))))

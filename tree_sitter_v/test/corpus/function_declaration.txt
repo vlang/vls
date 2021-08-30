@@ -1,0 +1,53 @@
+===
+Function Declaration
+===
+
+fn hello_world(mut s []string, i int, words ...Text) ? {}
+
+---
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list
+      (parameter_declaration
+        (identifier) 
+        (array_type (builtin_type)))
+      (parameter_declaration (identifier) (builtin_type))
+      (parameter_declaration 
+        (identifier) 
+        (variadic_type (type_identifier))))
+    (option_type)
+    (block)))
+
+===
+Function Definition
+===
+
+fn C.PQerrorMessage(voidptr) &byte
+
+---
+
+(source_file 
+  (function_declaration 
+    (binded_identifier (identifier)) 
+    (type_only_parameter_list 
+      (type_parameter_declaration (builtin_type))) 
+    (pointer_type (builtin_type))))
+
+===
+Function Declaration with Closures
+===
+
+fn [foo, bar] hello_world() {}
+
+---
+
+(source_file
+  (function_declaration
+    (exposed_variables_list
+      (identifier_list 
+        (identifier) (identifier)))
+    (identifier)
+    (parameter_list)
+    (block)))

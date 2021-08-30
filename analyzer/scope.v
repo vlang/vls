@@ -1,8 +1,9 @@
 module analyzer
 
 pub struct ScopeTree {
+pub mut:
+	parent &ScopeTree = &ScopeTree(0)
 mut:
-	parent     &ScopeTree = &ScopeTree(0)
 	start_byte u32
 	end_byte   u32
 	symbols    []&Symbol
@@ -10,11 +11,7 @@ mut:
 }
 
 pub fn (scope &ScopeTree) str() string {
-	return if isnil(scope) {
-		'<nil scope>'
-	} else {
-		scope.symbols.str()
-	}
+	return if isnil(scope) { '<nil scope>' } else { scope.symbols.str() }
 }
 
 [unsafe]
@@ -182,6 +179,8 @@ pub fn (scope &ScopeTree) get_symbol_with_range(name string, range C.TSRange) ?&
 	}
 
 	symbols := scope.get_symbols_before(range.end_byte)
-	defer { unsafe { symbols.free() } }
+	defer {
+		unsafe { symbols.free() }
+	}
 	return symbols.get(name)
 }

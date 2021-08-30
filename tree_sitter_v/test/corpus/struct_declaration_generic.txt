@@ -1,0 +1,16 @@
+===
+Generic struct declaration
+===
+
+struct Hello<T, U> {}
+
+---
+
+(source_file
+  (struct_declaration
+    (generic_type 
+      (type_identifier) 
+      (type_parameters 
+        (type_placeholder) 
+        (type_placeholder)))
+    (struct_field_declaration_list)))

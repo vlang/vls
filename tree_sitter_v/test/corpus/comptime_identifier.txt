@@ -1,0 +1,14 @@
+===
+Comptime Identifier (for Comptime Call)
+===
+
+t.$method(1)
+
+---
+
+(source_file
+  (call_expression
+    (selector_expression
+      (identifier)
+      (comptime_identifier (identifier)))
+    (argument_list (int_literal))))

@@ -1,0 +1,30 @@
+===
+Slice Expression
+===
+
+fn main() {
+  hello[0..1]
+  hello[..1]
+  hello[0..]
+  hello[wat+1..]
+}
+
+---
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (block
+      (slice_expression 
+        (identifier) 
+        (int_literal) 
+        (int_literal))
+      (slice_expression 
+        (identifier) (int_literal))
+      (slice_expression 
+        (identifier) (int_literal))
+      (slice_expression 
+        (identifier) 
+        (binary_expression 
+          (identifier) (int_literal))))))

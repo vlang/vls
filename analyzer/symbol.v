@@ -87,9 +87,9 @@ pub fn (sa SymbolAccess) str() string {
 	}
 }
 
-pub const void_type = &Symbol{ 
+pub const void_type = &Symbol{
 	name: 'void'
-	kind: .void 
+	kind: .void
 	file_path: ''
 	file_version: 0
 	is_top_level: true
@@ -99,18 +99,19 @@ pub const void_type = &Symbol{
 pub struct Symbol {
 pub mut:
 	name                    string
-	kind                    SymbolKind // see SymbolKind
+	kind                    SymbolKind   // see SymbolKind
 	access                  SymbolAccess // see SymbolAccess
 	range                   C.TSRange
 	parent                  &Symbol        = analyzer.void_type // parent is for typedefs, aliases
 	return_type             &Symbol        = analyzer.void_type // return_type is for functions and variables
 	language                SymbolLanguage = .v
-	is_top_level						bool [required]
+	is_top_level            bool           [required]
 	generic_placeholder_len int
 	sumtype_children_len    int
+	interface_children_len  int
 	children                []&Symbol // methods, sum types, map types, optionals, struct fields, etc.
-	file_path               string [required] // required in order to register the symbol at its appropriate directory.
-	file_version            int [required]// file version when the symbol was registered
+	file_path               string         [required] // required in order to register the symbol at its appropriate directory.
+	file_version            int            [required] // file version when the symbol was registered
 }
 
 const kinds_in_multi_return_to_be_excluded = [SymbolKind.function, .variable, .field]
@@ -133,7 +134,7 @@ pub fn (info &Symbol) gen_str_with_prefix(prefix string) string {
 	}
 
 	// sb.write_string(info.access.str())
-	
+
 	match info.kind {
 		.ref {
 			sb.write_string('&')
@@ -157,7 +158,7 @@ pub fn (info &Symbol) gen_str_with_prefix(prefix string) string {
 		.multi_return {
 			sb.write_b(`(`)
 			for v in info.children {
-				if v.kind !in kinds_in_multi_return_to_be_excluded {
+				if v.kind !in analyzer.kinds_in_multi_return_to_be_excluded {
 					sb.write_string(v.gen_str())
 				}
 			}
@@ -180,7 +181,11 @@ pub fn (info &Symbol) gen_str_with_prefix(prefix string) string {
 
 			sb.write_b(`(`)
 			for i, v in info.children {
-				sb.write_string(v.gen_str())
+				if v.name.len != 0 {
+					sb.write_string(v.gen_str())
+				} else {
+					sb.write_string(v.return_type.gen_str())
+				}
 				if i < info.children.len - 1 {
 					sb.write_string(', ')
 				}
@@ -199,17 +204,21 @@ pub fn (info &Symbol) gen_str_with_prefix(prefix string) string {
 
 			sb.write_string(info.name)
 			sb.write_b(` `)
-			sb.write_string(info.return_type.name)
+			if info.return_type.kind == .function_type {
+				sb.write_string(info.return_type.gen_str())
+			} else {
+				sb.write_string(info.return_type.name)
+			}
 		}
 		.typedef, .sumtype {
 			if info.kind == .typedef && info.parent.is_void() {
-				return info.name	
+				return info.name
 			}
 
 			// sb.write_string('type ')
 			sb.write_string(info.name)
 			// sb.write_string(' = ')
-			
+
 			// if info.kind == .typedef {
 			// 	if info.parent.kind == .function_type {
 			// 		sb.write_string(info.parent.gen_str())
@@ -219,7 +228,7 @@ pub fn (info &Symbol) gen_str_with_prefix(prefix string) string {
 			// } else {
 			// 	for i in 0 .. info.sumtype_children_len {
 			// 		sb.write_string(info.children[i].name)
-			// 		if i < info.sumtype_children_len - 1{
+			// 		if i < info.sumtype_children_len - 1 {
 			// 			sb.write_b(` `)
 			// 			sb.write_b(`|`)
 			// 			sb.write_b(` `)
@@ -285,7 +294,7 @@ pub fn (symbols []&Symbol) filter_by_file_path(file_path string) []&Symbol {
 			}
 			filtered << child_sym
 		}
-		unsafe{ filtered_from_children.free() }
+		unsafe { filtered_from_children.free() }
 	}
 	return filtered
 }
@@ -316,7 +325,6 @@ pub fn (symbols []&Symbol) filter_by_file_path(file_path string) []&Symbol {
 pub fn (infos []&Symbol) exists(name string) bool {
 	return infos.index(name) != -1
 }
-
 
 // get retreives the symbol based on the given name
 pub fn (infos []&Symbol) get(name string) ?&Symbol {
@@ -354,6 +362,10 @@ pub fn (sym &Symbol) is_returnable() bool {
 	return sym.kind == .variable || sym.kind == .field || sym.kind == .function
 }
 
+pub fn (sym &Symbol) is_mutable() bool {
+	return sym.access == .private_mutable || sym.access == .public_mutable || sym.access == .global
+}
+
 [unsafe]
 pub fn (sym &Symbol) free() {
 	unsafe {
@@ -385,6 +397,32 @@ fn (sym &Symbol) count_ptr() int {
 		ptr_count++
 	}
 	return ptr_count
+}
+
+pub fn is_interface_satisfied(sym &Symbol, interface_sym &Symbol) bool {
+	if sym.kind != .struct_ && sym.kind != .typedef && sym.kind != .sumtype {
+		return false
+	} else if interface_sym.kind != .interface_ {
+		return false
+	}
+
+	for i in 0 .. interface_sym.interface_children_len {
+		spec_sym := interface_sym.children[i]
+		selected_child_sym := sym.children.get(spec_sym.name) or { return false }
+		if spec_sym.kind == .field {
+			if selected_child_sym.access != spec_sym.access
+				|| selected_child_sym.kind != spec_sym.kind
+				|| selected_child_sym.return_type != spec_sym.return_type {
+				return false
+			}
+		} else if spec_sym.kind == .function {
+			if selected_child_sym.kind != spec_sym.kind
+				|| !compare_params_and_ret_type(selected_child_sym.children, selected_child_sym.return_type, spec_sym, false) {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // pub fn (ars ArraySymbol) str() string {
@@ -432,3 +470,10 @@ fn (sym &Symbol) count_ptr() int {
 // pub fn (opts OptionSymbol) str() string {
 // 	return '?${opts.parent}'
 // }
+
+pub struct BaseSymbolLocation {
+pub:
+	module_name string
+	symbol_name string
+	for_kind    SymbolKind
+}

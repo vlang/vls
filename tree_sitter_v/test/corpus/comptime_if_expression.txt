@@ -1,0 +1,26 @@
+===
+Comptime If Expression
+===
+
+$if windows {}
+
+$if gc_boehm ? {} $else $if foo {} $else {}
+
+$if T is Foo {}
+
+---
+
+(source_file 
+  (comptime_if_expression 
+    (identifier) (block)) 
+  (comptime_if_expression 
+    (identifier) 
+    (block) 
+    (comptime_if_expression 
+      (identifier) 
+      (block) 
+      (block))) 
+    (comptime_if_expression 
+      (is_expression 
+        (type_placeholder) (type_identifier)) 
+      (block)))

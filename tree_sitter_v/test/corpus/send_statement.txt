@@ -1,0 +1,20 @@
+===
+Send Statement
+===
+
+ch := chan int{cap: 1}
+ch <- n
+
+---
+
+(source_file 
+  (short_var_declaration 
+    (identifier_list (identifier)) 
+    (expression_list 
+      (type_initializer 
+        (channel_type (builtin_type)) 
+        (literal_value 
+          (keyed_element 
+            (field_identifier) (int_literal))))))
+  (send_statement 
+    (identifier) (identifier)))
