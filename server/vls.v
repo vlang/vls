@@ -267,8 +267,6 @@ fn (mut ls Vls) send<T>(data T) {
 	str := json.encode(data)
 	ls.logger.response(str, .send)
 	ls.io.send(str)
-	// See line 113 for the explanation
-	ls.logger.response(str, .receive)
 }
 
 // TODO: set result param type to jsonrpc.NotificationMessage<T>
@@ -278,8 +276,6 @@ fn (mut ls Vls) notify<T>(data T) {
 	str := json.encode(data)
 	ls.logger.notification(str, .send)
 	ls.io.send(str)
-	// See line 113 for the explanation
-	ls.logger.notification(str, .receive)
 }
 
 // send_null sends a null result to the client
@@ -287,7 +283,6 @@ fn (mut ls Vls) send_null(id int) {
 	str := '{"jsonrpc":"2.0","id":$id,"result":null}'
 	ls.logger.response(str, .send)
 	ls.io.send(str)
-	ls.logger.response(str, .receive)
 }
 
 fn monitor_changes(mut ls Vls) {
