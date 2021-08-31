@@ -20,11 +20,13 @@ fn (mut ls Vls) initialize(id int, params string) {
 		if found_vroot_path := detect_vroot_path() {
 			ls.set_vroot_path(found_vroot_path)
 			ls.store.default_import_paths << os.join_path(found_vroot_path, 'vlib')
+			ls.store.default_import_paths << os.vmodules_dir()
 		} else {
 			ls.show_message("V installation directory was not found. Modules in vlib such as `os` won't be detected.",
 				.error)
 		}
-
+	} else {
+		ls.store.default_import_paths << os.join_path(ls.vroot_path, 'vlib')
 		ls.store.default_import_paths << os.vmodules_dir()
 	}
 
