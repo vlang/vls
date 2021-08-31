@@ -87,12 +87,16 @@ pub fn (sa SymbolAccess) str() string {
 	}
 }
 
-pub const void_type = &Symbol{
-	name: 'void'
-	kind: .void
-	file_path: ''
-	file_version: 0
-	is_top_level: true
+pub const void_type = vtype()
+
+fn vtype() &Symbol {
+	return &Symbol{
+		name: 'void'
+		kind: .void
+		file_path: ''
+		file_version: 0
+		is_top_level: true
+	}
 }
 
 [heap]
@@ -170,7 +174,7 @@ pub fn (info &Symbol) gen_str() string {
 				sb.write_b(` `)
 			}
 
-			if !info.name.starts_with(analyzer.anon_fn_prefix) {
+			if !info.name.starts_with(anon_fn_prefix) {
 				sb.write_string(info.name)
 			}
 
