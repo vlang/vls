@@ -2,6 +2,92 @@ module server
 
 import jsonrpc
 import lsp
+import term
+
+fn (ls Vls) v_msg_to_diagnostic(from_file_path string, msg string) ?lsp.Diagnostic {
+	if msg.len == 0 { 
+		return none 	
+	} else if !msg[0].is_letter() {
+		return error('invalid message')
+	}
+
+	line_colon_idx := msg.index(':') ?
+	file_path := msg[..line_colon_idx]
+	if !from_file_path.ends_with(file_path) {
+		return error('$file_path != $from_file_path')
+	}
+
+	col_colon_idx := msg.index_after(':', line_colon_idx + 1)
+	colon_sep_idx := msg.index_after(':', col_colon_idx + 1)
+	msg_type_colon_idx := msg.index_after(':', colon_sep_idx + 1)
+	if msg_type_colon_idx == -1 || col_colon_idx == -1 || colon_sep_idx == -1 {
+		return error('idx is -1')
+	}
+
+	line_nr := msg[line_colon_idx + 1 .. col_colon_idx].int() - 1
+	col_nr := msg[col_colon_idx + 1 .. colon_sep_idx].int() - 1
+	msg_type := msg[colon_sep_idx + 1 .. msg_type_colon_idx].trim_space()
+	msg_content := msg[msg_type_colon_idx + 1 ..].trim_space()
+
+	diag_kind := match msg_type {
+		'error' { lsp.DiagnosticSeverity.error }
+		'warning' { lsp.DiagnosticSeverity.warning }
+		'notice' { lsp.DiagnosticSeverity.information }
+		else { lsp.DiagnosticSeverity.warning }
+	}
+
+	mut target_range := lsp.Range{
+		start: lsp.Position{line_nr, col_nr}
+		end: lsp.Position{line_nr, col_nr}
+	}
+
+	if tree := ls.trees[from_file_path] {
+		root_node := tree.root_node()
+		node_point := C.TSPoint{ u32(line_nr), u32(col_nr) }
+		target_node := root_node.descendant_for_point_range(node_point, node_point)
+		if !target_node.is_null() {
+			target_range = tsrange_to_lsp_range(target_node.range())
+		}
+	}
+
+	return lsp.Diagnostic{
+		range: target_range
+		severity: diag_kind
+		message: msg_content
+	}
+}
+
+// exec_v_vet_diagnostics returns a list of errors/warnings taken from v vet
+fn (mut ls Vls) exec_v_vet_diagnostics(uri lsp.DocumentUri) ?[]lsp.Diagnostic {
+	file_path := uri.path()
+	mut p := ls.launch_v_tool('vet', '-force', file_path)
+	defer { p.close() }
+	p.wait()
+	if p.code == 0 {
+		return none
+	}
+
+	// out := p.stdout_slurp().split_into_lines()
+	err := p.stderr_slurp().split_into_lines().map(term.strip_ansi(it))
+	eprintln(err)
+
+	mut res := []lsp.Diagnostic{cap: err.len}
+
+	// for line in out {
+	// 	res << ls.v_msg_to_diagnostic(file_path, line) or {
+	// 		continue
+	// 	}
+	// }
+
+	for line in err {
+		res << ls.v_msg_to_diagnostic(file_path, line) or {
+			eprintln(err)
+			continue
+		}
+	}
+
+	return res
+}
 
 // show_diagnostics converts the file ast's errors and warnings and publishes them to the editor
 fn (mut ls Vls) show_diagnostics(uri lsp.DocumentUri) {
@@ -29,6 +115,11 @@ fn (mut ls Vls) show_diagnostics(uri lsp.DocumentUri) {
 	}
 
 	ls.publish_diagnostics(uri, diagnostics)
+
+	// get diagnostic results from v_vet
+	if v_vet_results := ls.exec_v_vet_diagnostics(uri) {
+		ls.publish_diagnostics(uri, v_vet_results)
+	}
 }
 
 // publish_diagnostics sends errors, warnings and other diagnostics to the editor
