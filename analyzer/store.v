@@ -53,7 +53,7 @@ pub mut:
 // clear_messages clears the stored messages
 pub fn (mut ss Store) clear_messages() {
 	for i := 0; ss.messages.len != 0; {
-		msg := ss.messages[i]
+		// msg := ss.messages[i]
 		// unsafe {
 		// 	msg.content.free()
 		// }
