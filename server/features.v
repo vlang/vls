@@ -46,23 +46,8 @@ fn (mut ls Vls) formatting(id int, params string) {
 		os.rm(server.temp_formatting_file_path) or {}
 	}
 
-	mut v_exe_name := 'v'
-	defer {
-		unsafe { v_exe_name.free() }
-	}
-
-	$if windows {
-		v_exe_name += '.exe'
-	}
-
-	mut p := os.new_process(os.join_path(ls.vroot_path, v_exe_name))
-	defer {
-		p.close()
-		unsafe { p.free() }
-	}
-
-	p.set_args(['fmt', server.temp_formatting_file_path])
-	p.set_redirect_stdio()
+	mut p := ls.launch_v_tool('fmt', server.temp_formatting_file_path)
+	defer { p.close() }
 	p.wait()
 
 	if p.code > 0 {
