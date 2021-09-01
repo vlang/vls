@@ -28,6 +28,7 @@ pub fn (mut sck Socket) init() ? {
 		return err
 	}
 	sck.reader = io.new_buffered_reader(reader: sck.conn)
+	sck.conn.set_blocking(true) or {}
 }
 
 pub fn (mut sck Socket) send(output string) {
