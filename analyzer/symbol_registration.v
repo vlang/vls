@@ -159,7 +159,7 @@ fn (mut sr SymbolRegistration) struct_field_decl(field_access SymbolAccess, fiel
 
 	if field_name_node.is_null() {
 		// struct embedding
-		_, module_name, symbol_name := symbol_name_from_node(field_type_node, sr.src_text)
+		_, _, symbol_name := symbol_name_from_node(field_type_node, sr.src_text)
 		// defer {
 		// 	unsafe { module_name.free() }
 		// }
