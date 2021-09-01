@@ -14,17 +14,17 @@ const diagnostics_result = lsp.PublishDiagnosticsParams{
 			severity: .error
 			range: lsp.Range{
 				start: lsp.Position{4, 10}
-				end: lsp.Position{4, 11}
+				end: lsp.Position{4, 10}
 			}
 		},
-		lsp.Diagnostic{
-			message: "module 'os' is imported but never used"
-			severity: .warning
-			range: lsp.Range{
-				start: lsp.Position{2, 7}
-				end: lsp.Position{2, 9}
-			}
-		},
+		// lsp.Diagnostic{
+		// 	message: "module 'os' is imported but never used"
+		// 	severity: .warning
+		// 	range: lsp.Range{
+		// 		start: lsp.Position{2, 7}
+		// 		end: lsp.Position{2, 9}
+		// 	}
+		// },
 	]
 }
 
