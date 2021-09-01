@@ -1,5 +1,5 @@
 > ## ⚠️ Warning (Please read this first) ⚠️
-> What you're seeing is the developmental branch of the V Language server.This means that it may not be guaranteed to work reliably on your system.
+> What you're seeing is the developmental branch of the V Language server. This means that it may not be guaranteed to work reliably on your system.
 >
 > If you are experiencing problems, please consider [filing a bug report](https://github.com/vlang/vls/issues/new).
 
@@ -10,10 +10,10 @@ V Language Server (also known as "VLS") is a LSP v3.15-compatible language serve
 
 # Download / Installation
 ### Pre-built/Precompiled Binaries (Recommended)
-Pre-built binaries for Windows x64, MacOS x64/M1 (via Rosetta), and Linux x64 can be found [here](https://github.com/vlang/vls/releases/latest). 
+Pre-built binaries for Windows (x64), MacOS (x64/M1), and Linux (x64) can be found [here](https://github.com/vlang/vls/releases/latest). 
 
 ### VSCode
-The official [V VSCode extension](https://github.com/vlang/vscode-vlang) provides a way to download/install VLS without manually downloading the source. If you installed the extension for the first time, a message prompt will appear for you to install VLS. Click "Yes" or "Install" and it will automatically do the setup process for you.
+The official [V VSCode extension](https://github.com/vlang/vscode-vlang) provides a way to automatically download and install VLS by checking the "Enable VLS" in the extension settings in which a message prompt will appear for you to install VLS.
 
 ### Build from Source
 > **NOTE**: TCC, the default compiler shipped with V, is not recommended ATM due to
@@ -24,7 +24,9 @@ To build the language server from source, you need to have the following:
 - [Git](https://git-scm.com/download) 
 - [V](https://github.com/vlang/v) (0.2.2 and later).
 
-Linux users are also expected to install the Boehm GC library. (`sudo apt-get install libgc-dev` for Debian/Ubuntu users).
+Linux and MacOS users are also expected to install the Boehm GC library.
+- For Debian/Ubuntu users: `sudo apt-get install libgc-dev`
+- For MacOS (via Homebrew): `brew install bdw-gc`
 
 Afterwards, open your operating system's terminal and execute the following:
 ```
@@ -39,12 +41,12 @@ v run build.vsh clang
 ```
 
 ## Setup / Usage
-To use the language server, you need to have an editor with [LSP](https://microsoft.github.io/language-server-protocol/) support. See [this link](https://microsoft.github.io/language-server-protocol/implementors/tools/) for a full list of supported editors and tools.
+To use the language server, you need to have an editor with [LSP](https://microsoft.github.io/language-server-protocol/) support. See [this link](https://microsoft.github.io/language-server-protocol/implementors/tools/) for a full list of supported editors.
 
-### VSCode, VSCodium, and other VSCode derivatives
+### VSCode, VSCodium, and other derivatives
 > [GitHub Codespaces](https://github.dev) is not supported yet at this moment. See this [issue comment](https://github.com/vlang/vscode-vlang/issues/272#issuecomment-898271911).
 
-For [Visual Studio Code](https://code.visualstudio.com) and other derivatives, all you need is to install 0.1.4 or above versions of the [V VSCode extension](https://github.com/vlang/vscode-vlang). Afterwards, go to settings and scroll to the V extension section. From there, enable VLS by checking the "Enable VLS" box. 
+For [Visual Studio Code](https://code.visualstudio.com) and other derivatives, all you need to do is to install 0.1.4 or above versions of the [V VSCode extension](https://github.com/vlang/vscode-vlang). Afterwards, go to settings and scroll to the V extension section. From there, enable VLS by checking the "Enable VLS" box. 
 
 If you have VLS downloaded in a custom directory, you need to input the absolute path of the `vls` language server executable to the "Custom Path" setting. If you cloned the repository and compiled it from source, the executable will be in the `cmd/vls` directory. So make sure to add `cmd/vls/vls` or `cmd/vls/vls.exe` (for Windows).
 
@@ -137,3 +139,4 @@ VLS provides a log file (`${workspacePath}/vls.log`) for debugging the language 
 - [hungrybluedev](https://github.com/hungrybluedev) - contributor
 - [streaksu](https://github.com/streaksu) - contributor
 - [ylluminarious](https://github.com/ylluminarious) - contributor
+- [yuyi98](https://github.com/yuyi98) - contributor
