@@ -22,16 +22,7 @@ fn (mut ls Vls) show_diagnostics(uri lsp.DocumentUri) {
 		}
 
 		diagnostics << lsp.Diagnostic{
-			range: lsp.Range{
-				start: lsp.Position{
-					line: int(msg.range.start_point.row)
-					character: int(msg.range.start_point.column)
-				}
-				end: lsp.Position{
-					line: int(msg.range.end_point.row)
-					character: int(msg.range.end_point.column)
-				}
-			}
+			range: tsrange_to_lsp_range(msg.range)
 			severity: kind
 			message: msg.content
 		}
