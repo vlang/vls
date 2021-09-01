@@ -36,12 +36,12 @@ pub fn (mut tree Tree) delete(id string) {
 		return
 	}
 
-	unsafe {
-		tree.keys[idx].free()
-		tree.values[idx].free()
+	// unsafe {
+		// tree.keys[idx].free()
+		// tree.values[idx].free()
 		tree.keys.delete(idx)
 		tree.values.delete(idx)
-	}
+	// }
 	tree.len--
 }
 
@@ -140,7 +140,7 @@ pub fn (node &Node) get_all_dependencies(completed ...string) []string {
 			ret << other_dep
 		}
 
-		unsafe { other_deps.free() }
+		// unsafe { other_deps.free() }
 	}
 
 	return ret
@@ -169,7 +169,7 @@ pub fn (node &Node) get_next_nodes(completed ...string) []string {
 		}
 	}
 
-	unsafe { available_and_required.free() }
+	// unsafe { available_and_required.free() }
 	return ret
 }
 
@@ -179,7 +179,7 @@ pub fn (node &Node) free() {
 		// assume id has been freed
 		// since they share the same address
 		for i := 0; node.dependencies.len != 0; {
-			node.dependencies[i].free()
+			// node.dependencies[i].free()
 			node.dependencies.delete(i)
 		}
 	}

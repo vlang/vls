@@ -164,5 +164,5 @@ pub fn (mut store Store) analyze(tree &C.TSTree, src_text []byte) {
 		an.top_level_statement()
 	}
 
-	unsafe { an.cursor.free() }
+	// unsafe { an.cursor.free() }
 }

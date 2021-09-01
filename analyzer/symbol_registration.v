@@ -43,7 +43,7 @@ fn (sr &SymbolRegistration) new_top_level_symbol(identifier_node C.TSNode, acces
 				return error('Invalid top-level generic node type `$id_node_type`')
 			}
 
-			unsafe { symbol.free() }
+			// unsafe { symbol.free() }
 			symbol = sr.new_top_level_symbol(identifier_node.named_child(0), access, kind) ?
 			symbol.generic_placeholder_len = int(identifier_node.named_child(1).named_child_count())
 		}
@@ -136,7 +136,7 @@ fn (mut sr SymbolRegistration) struct_decl(struct_decl_node C.TSNode) ?&Symbol {
 					analyzer.global_struct_keyword { SymbolAccess.global }
 					else { field_access }
 				}
-				unsafe { scope_text.free() }
+				// unsafe { scope_text.free() }
 				continue
 			}
 			'struct_field_declaration' {
@@ -160,9 +160,9 @@ fn (mut sr SymbolRegistration) struct_field_decl(field_access SymbolAccess, fiel
 	if field_name_node.is_null() {
 		// struct embedding
 		_, module_name, symbol_name := symbol_name_from_node(field_type_node, sr.src_text)
-		defer {
-			unsafe { module_name.free() }
-		}
+		// defer {
+		// 	unsafe { module_name.free() }
+		// }
 
 		return &Symbol{
 			name: symbol_name
@@ -241,7 +241,7 @@ fn (mut sr SymbolRegistration) interface_decl(interface_decl_node C.TSNode) ?&Sy
 						continue
 					}
 				}
-				unsafe { children.free() }
+				// unsafe { children.free() }
 				sym.add_child(mut method_sym) or {
 					// eprintln(err)
 					continue
@@ -357,14 +357,14 @@ fn (mut sr SymbolRegistration) fn_decl(fn_node C.TSNode) ?&Symbol {
 			}
 			scope.register(receivers[0]) or {}
 		}
-		unsafe { receivers.free() }
+		// unsafe { receivers.free() }
 	}
 
 	// scan params
 	mut params := extract_parameter_list(params_list_node, mut sr.store, sr.src_text)
-	defer {
-		unsafe { params.free() }
-	}
+	// defer {
+	// 	unsafe { params.free() }
+	// }
 
 	for i := 0; i < params.len; i++ {
 		mut param := params[i]
@@ -453,7 +453,7 @@ fn (mut sr SymbolRegistration) top_level_decl() ? {
 				global_scope.register(const_sym) or { continue }
 			}
 
-			unsafe { const_syms.free() }
+			// unsafe { const_syms.free() }
 		}
 		'struct_declaration' {
 			mut sym := sr.struct_decl(sr.cursor.current_node()) ?
@@ -740,5 +740,5 @@ pub fn (mut store Store) register_symbols_from_tree(tree &C.TSTree, src_text []b
 			continue
 		}
 	}
-	unsafe { sr.cursor.free() }
+	// unsafe { sr.cursor.free() }
 }

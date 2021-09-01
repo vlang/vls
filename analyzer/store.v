@@ -54,9 +54,9 @@ pub mut:
 pub fn (mut ss Store) clear_messages() {
 	for i := 0; ss.messages.len != 0; {
 		msg := ss.messages[i]
-		unsafe {
-			msg.content.free()
-		}
+		// unsafe {
+		// 	msg.content.free()
+		// }
 
 		ss.messages.delete(i)
 	}
@@ -86,21 +86,21 @@ pub fn (mut ss Store) set_active_file_path(file_path string, version int) {
 		return
 	}
 
-	$if !macos {
-		unsafe {
-			if !isnil(ss.cur_file_path) {
-				ss.cur_file_path.free()
-			}
+	// $if !macos {
+	// 	unsafe {
+	// 		if !isnil(ss.cur_file_path) {
+	// 			ss.cur_file_path.free()
+	// 		}
 
-			if !isnil(ss.cur_file_name) {
-				ss.cur_file_name.free()
-			}
+	// 		if !isnil(ss.cur_file_name) {
+	// 			ss.cur_file_name.free()
+	// 		}
 
-			if !isnil(ss.cur_dir) {
-				ss.cur_dir.free()
-			}
-		}
-	}
+	// 		if !isnil(ss.cur_dir) {
+	// 			ss.cur_dir.free()
+	// 		}
+	// 	}
+	// }
 
 	ss.cur_file_path = file_path
 	ss.cur_dir = os.dir(file_path)
@@ -169,9 +169,9 @@ pub fn (ss &Store) find_fn_symbol(module_name string, return_type &Symbol, param
 
 pub fn compare_params_and_ret_type(params []&Symbol, ret_type &Symbol, fn_to_compare &Symbol, include_param_name bool) bool {
 	mut params_to_check := []int{cap: fn_to_compare.children.len}
-	defer {
-		unsafe { params_to_check.free() }
-	}
+	// defer {
+	// 	unsafe { params_to_check.free() }
+	// }
 
 	// get a list of indices that are parameters
 	for i, child in fn_to_compare.children {
@@ -209,9 +209,9 @@ pub const container_symbol_kinds = [SymbolKind.chan_, .array_, .map_, .ref, .var
 // register_symbol registers the given symbol
 pub fn (mut ss Store) register_symbol(mut info Symbol) ?&Symbol {
 	dir := os.dir(info.file_path)
-	defer {
-		unsafe { dir.free() }
-	}
+	// defer {
+	// 	unsafe { dir.free() }
+	// }
 	mut existing_idx := ss.symbols[dir].index(info.name)
 	if existing_idx == -1 && info.kind != .placeholder
 		&& info.kind !in analyzer.container_symbol_kinds {
@@ -300,7 +300,7 @@ pub fn (mut ss Store) add_import(imp Import) (&Import, bool) {
 		last_idx := ss.imports[dir].len - 1
 		return &ss.imports[dir][last_idx], false
 	} else {
-		unsafe { imp.free() }
+		// unsafe { imp.free() }
 		return &ss.imports[dir][idx], true
 	}
 }
@@ -308,9 +308,9 @@ pub fn (mut ss Store) add_import(imp Import) (&Import, bool) {
 // get_symbols_by_file_path retrieves the symbols based on the given file path
 pub fn (ss &Store) get_symbols_by_file_path(file_path string) []&Symbol {
 	dir := os.dir(file_path)
-	defer {
-		unsafe { dir.free() }
-	}
+	// defer {
+	// 	unsafe { dir.free() }
+	// }
 
 	if dir in ss.symbols {
 		return ss.symbols[dir].filter_by_file_path(file_path)
@@ -322,9 +322,9 @@ pub fn (ss &Store) get_symbols_by_file_path(file_path string) []&Symbol {
 // has_file_path checks if the data of a specific file_path already exists
 pub fn (ss &Store) has_file_path(file_path string) bool {
 	dir := os.dir(file_path)
-	defer {
-		unsafe { dir.free() }
-	}
+	// defer {
+	// 	unsafe { dir.free() }
+	// }
 	if dir in ss.symbols {
 		for _, mut sym in ss.symbols[dir] {
 			if sym.file_path == file_path {
@@ -373,11 +373,11 @@ pub fn (mut ss Store) delete(dir string, excluded_dir ...string) {
 			// 	sym.free()
 			// }
 
-			ss.symbols[dir].free()
+			// ss.symbols[dir].free()
 		}
 		ss.symbols.delete(dir)
 		for i := 0; ss.imports[dir].len != 0; {
-			unsafe { ss.imports[dir][i].free() }
+			// unsafe { ss.imports[dir][i].free() }
 			ss.imports[dir].delete(i)
 		}
 	}
@@ -411,10 +411,10 @@ pub fn symbol_name_from_node(node C.TSNode, src_text []byte) (SymbolKind, string
 
 	mut module_name := ''
 	mut symbol_name := ''
-	unsafe {
-		module_name.free()
-		symbol_name.free()
-	}
+	// unsafe {
+	// 	module_name.free()
+	// 	symbol_name.free()
+	// }
 	match node.get_type() {
 		'qualified_type' {
 			module_name = node.child_by_field_name('module').get_text(src_text)
@@ -443,19 +443,19 @@ pub fn symbol_name_from_node(node C.TSNode, src_text []byte) (SymbolKind, string
 				src_text)
 			if (key_module_name.len != 0 && val_module_name.len == 0)
 				|| (key_module_name == val_module_name) {
-				unsafe {
-					val_module_name.free()
-					val_symbol_name.free()
-				}
+				// unsafe {
+				// 	val_module_name.free()
+				// 	val_symbol_name.free()
+				// }
 				// if key type uses a custom type, return the symbol in the key's origin module
 				return SymbolKind.map_, key_module_name, 'map[$key_symbol_name]' +
 					node.child_by_field_name('value').get_text(src_text)
 				// if key is builtin type and key type is not, use the module from the value type
 			} else if key_module_name.len == 0 && val_module_name.len != 0 {
-				unsafe {
-					key_module_name.free()
-					key_symbol_name.free()
-				}
+				// unsafe {
+				// 	key_module_name.free()
+				// 	key_symbol_name.free()
+				// }
 				return SymbolKind.map_, val_module_name, 'map[' +
 					node.child_by_field_name('key').get_text(src_text) + ']$val_symbol_name'
 			} else {
@@ -483,7 +483,7 @@ pub fn symbol_name_from_node(node C.TSNode, src_text []byte) (SymbolKind, string
 			return SymbolKind.variadic, module_name, '...' + symbol_name
 		}
 		else {
-			unsafe { symbol_name.free() }
+			// unsafe { symbol_name.free() }
 			// type_identifier should go here
 			return SymbolKind.placeholder, module_name, node.get_text(src_text)
 		}
@@ -499,12 +499,12 @@ pub fn (mut store Store) find_symbol_by_type_node(node C.TSNode, src_text []byte
 	}
 
 	sym_kind, module_name, symbol_name := symbol_name_from_node(node, src_text)
-	defer {
-		unsafe {
-			module_name.free()
-			symbol_name.free()
-		}
-	}
+	// defer {
+	// 	unsafe {
+	// 		module_name.free()
+	// 		symbol_name.free()
+	// 	}
+	// }
 
 	if sym_kind == .function_type {
 		mut parameters := extract_parameter_list(node.child_by_field_name('parameters'), mut
@@ -576,13 +576,13 @@ pub fn (mut ss Store) infer_symbol_from_node(node C.TSNode, src_text []byte) ?&S
 	mut module_name := ''
 	mut type_name := ''
 
-	defer {
-		unsafe {
-			// node_type.free()
-			module_name.free()
-			type_name.free()
-		}
-	}
+	// defer {
+	// 	unsafe {
+	// 		// node_type.free()
+	// 		module_name.free()
+	// 		type_name.free()
+	// 	}
+	// }
 
 	match node_type {
 		'identifier' {
@@ -757,9 +757,9 @@ pub fn (mut ss Store) infer_value_type_from_node(node C.TSNode, src_text []byte)
 	}
 
 	mut type_name := ''
-	defer {
-		unsafe { type_name.free() }
-	}
+	// defer {
+	// 	unsafe { type_name.free() }
+	// }
 	node_type := node.get_type()
 	match node_type {
 		'true', 'false' {
@@ -859,7 +859,7 @@ pub fn (mut ss Store) delete_symbol_at_node(root_node C.TSNode, src []byte, at_r
 				symbol_name := name_node.get_text(src)
 				idx := ss.symbols[ss.cur_dir].index(symbol_name)
 				if idx != -1 && idx < ss.symbols[ss.cur_dir].len {
-					unsafe { ss.symbols[ss.cur_dir].free() }
+					// unsafe { ss.symbols[ss.cur_dir].free() }
 					ss.symbols[ss.cur_dir].delete(idx)
 				}
 

@@ -26,7 +26,7 @@ fn get_nodes_within_range(node C.TSNode, range C.TSRange) ?[]C.TSNode {
 	}
 
 	if nodes.len == 0 {
-		unsafe { nodes.free() }
+		// unsafe { nodes.free() }
 		return none
 	}
 

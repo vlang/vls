@@ -23,12 +23,12 @@ pub fn (scope &ScopeTree) free() {
 	// TODO: incremental add/delete scope
 	unsafe {
 		for i := 0; scope.symbols.len != 0; {
-			scope.symbols[i].free()
+			// scope.symbols[i].free()
 			scope.symbols.delete(i)
 		}
 
 		for i := 0; scope.children.len != 0; {
-			scope.children[i].free()
+			// scope.children[i].free()
 			scope.children.delete(i)
 		}
 	}
@@ -128,7 +128,7 @@ pub fn (mut scope ScopeTree) remove_child(start_byte u32, end_byte u32) bool {
 	}
 
 	if start_byte == scope.start_byte && end_byte == scope.end_byte {
-		unsafe { scope.free() }
+		// unsafe { scope.free() }
 		return true
 	}
 
@@ -179,8 +179,8 @@ pub fn (scope &ScopeTree) get_symbol_with_range(name string, range C.TSRange) ?&
 	}
 
 	symbols := scope.get_symbols_before(range.end_byte)
-	defer {
-		unsafe { symbols.free() }
-	}
+	// defer {
+	// 	unsafe { symbols.free() }
+	// }
 	return symbols.get(name)
 }

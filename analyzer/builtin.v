@@ -7,9 +7,9 @@ const numeric_types = ['u8', 'u16', 'u32', 'u64', 'i8', 'i16', 'int', 'i64', 'f3
 pub fn register_builtin_symbols(mut ss Store, builtin_import &Import) {
 	builtin_path := builtin_import.path
 	placeholder_file_path := os.join_path(builtin_path, 'placeholder.vv')
-	defer {
-		unsafe { placeholder_file_path.free() }
-	}
+	// defer {
+		// unsafe { placeholder_file_path.free() }
+	// }
 
 	builtin_types := [
 		'voidptr',

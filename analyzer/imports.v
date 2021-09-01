@@ -34,9 +34,9 @@ pub fn (mut imp Import) set_alias(file_name string, alias string) {
 		return
 	}
 
-	if imp.aliases.len == 0 {
-		unsafe { imp.aliases[file_name].free() }
-	}
+	// if imp.aliases.len == 0 {
+	// 	unsafe { imp.aliases[file_name].free() }
+	// }
 
 	imp.aliases[file_name] = alias.clone()
 }
@@ -61,10 +61,10 @@ pub fn (mut imp Import) untrack_file(file_name string) {
 pub fn (mut imp Import) set_symbols(file_name string, symbols ...string) {
 	if file_name in imp.symbols {
 		for i := 0; imp.symbols[file_name].len != 0; {
-			unsafe { imp.symbols[file_name][i].free() }
+			// unsafe { imp.symbols[file_name][i].free() }
 			imp.symbols[file_name].delete(i)
 		}
-		unsafe { imp.symbols[file_name].free() }
+		// unsafe { imp.symbols[file_name].free() }
 	}
 
 	imp.symbols[file_name] = symbols
@@ -144,7 +144,7 @@ fn (mut ss Store) inject_paths_of_new_imports(mut new_imports []&Import, lookup_
 			}
 
 			if !os.exists(mod_dir) {
-				unsafe { mod_dir.free() }
+				// unsafe { mod_dir.free() }
 				continue
 			}
 
@@ -154,7 +154,7 @@ fn (mut ss Store) inject_paths_of_new_imports(mut new_imports []&Import, lookup_
 			// is not used by the code below it
 			{
 				mut files := os.ls(mod_dir) or {
-					unsafe { mod_dir.free() }
+					// unsafe { mod_dir.free() }
 					continue
 				}
 
@@ -167,14 +167,14 @@ fn (mut ss Store) inject_paths_of_new_imports(mut new_imports []&Import, lookup_
 							has_v_files = true
 						}
 
-						unsafe { file_ext.free() }
+						// unsafe { file_ext.free() }
 					}
 
-					unsafe { files[j].free() }
+					// unsafe { files[j].free() }
 					files.delete(j)
 				}
 
-				unsafe { files.free() }
+				// unsafe { files.free() }
 			}
 			if has_v_files {
 				new_import.set_path(mod_dir)
@@ -182,7 +182,7 @@ fn (mut ss Store) inject_paths_of_new_imports(mut new_imports []&Import, lookup_
 				break
 			}
 
-			unsafe { mod_dir.free() }
+			// unsafe { mod_dir.free() }
 		}
 
 		// report the unresolved import
@@ -204,7 +204,7 @@ fn (mut ss Store) inject_paths_of_new_imports(mut new_imports []&Import, lookup_
 		}
 
 		import_path_iter.reset()
-		unsafe { mod_name_arr.free() }
+		// unsafe { mod_name_arr.free() }
 	}
 }
 
@@ -229,7 +229,7 @@ pub fn (mut ss Store) cleanup_imports() int {
 			}
 			// delete dir if possible
 			ss.delete(imp_module.path)
-			unsafe { imp_module.free() }
+			// unsafe { imp_module.free() }
 
 			if i < ss.imports[ss.cur_dir].len {
 				ss.imports[ss.cur_dir].delete(i)
@@ -316,9 +316,9 @@ pub fn (mut store Store) import_modules_from_tree(tree &C.TSTree, src []byte, lo
 pub fn (mut store Store) import_modules(mut imports []&Import) {
 	mut parser := tree_sitter.new_parser()
 	parser.set_language(v.language)
-	defer {
-		unsafe { parser.free() }
-	}
+	// defer {
+	// 	unsafe { parser.free() }
+	// }
 
 	old_version := store.cur_version
 	old_active_path := store.cur_file_path.clone()
@@ -377,14 +377,14 @@ pub fn (mut store Store) import_modules(mut imports []&Import) {
 					}
 				}
 
-				unsafe { sr.cursor.free() }
+				// unsafe { sr.cursor.free() }
 			}
 			parser.reset()
-			unsafe {
+			// unsafe {
 				// modules_from_dir.free()
-				content.free()
-				tree_from_import.free()
-			}
+				// content.free()
+				// tree_from_import.free()
+			// }
 		}
 
 		if imported > 0 {
