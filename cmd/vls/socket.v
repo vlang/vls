@@ -12,7 +12,7 @@ mut:
 	listener &net.TcpListener   = &net.TcpListener(0)
 	reader   &io.BufferedReader = voidptr(0)
 pub mut:
-	port  string = '5007'
+	port  int = 5007
 	debug bool
 }
 
