@@ -132,8 +132,7 @@ fn C.ts_node_eq(node C.TSNode, another_node C.TSNode) bool
 pub fn (node C.TSNode) get_text(text []byte) string {
 	start_index := node.start_byte()
 	end_index := node.end_byte()
-	len := int(end_index - start_index)
-	if len < 1 {
+	if start_index >= end_index || start_index >= u32(text.len) || end_index > u32(text.len) {
 		return ''
 	}
 
