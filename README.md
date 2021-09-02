@@ -10,7 +10,7 @@ V Language Server (also known as "VLS") is a LSP v3.15-compatible language serve
 
 # Download / Installation
 ### Pre-built/Precompiled Binaries (Recommended)
-Pre-built binaries for Windows (x64), MacOS (x64/M1), and Linux (x64) can be found [here](https://github.com/vlang/vls/releases/latest). 
+Pre-built binaries for Windows (x64), MacOS (x64/M1), and Linux (x64) can be found [here](https://github.com/vlang/vls/releases/latest).
 
 ### VSCode
 The official [V VSCode extension](https://github.com/vlang/vscode-vlang) provides a way to automatically download and install VLS by checking the "Enable VLS" in the extension settings in which a message prompt will appear for you to install VLS.
@@ -20,8 +20,8 @@ The official [V VSCode extension](https://github.com/vlang/vscode-vlang) provide
 > some issues in the Tree Sitter's output.
 
 To build the language server from source, you need to have the following:
-- GCC/Clang (Latest), 
-- [Git](https://git-scm.com/download) 
+- GCC/Clang (Latest),
+- [Git](https://git-scm.com/download)
 - [V](https://github.com/vlang/v) (0.2.2 and later).
 
 Linux and MacOS users are also expected to install the Boehm GC library.
@@ -37,7 +37,7 @@ git clone https://github.com/vlang/vls && cd vls
 ## Use " v run build.vsh gcc" if you're compiling VLS with GCC.
 v run build.vsh clang
 
-# The binary will be created in the `cmd/vls` subfolder by default.
+# The binary will be created in the current root directory `vls`.
 ```
 
 ## Setup / Usage
@@ -46,9 +46,9 @@ To use the language server, you need to have an editor with [LSP](https://micros
 ### VSCode, VSCodium, and other derivatives
 > [GitHub Codespaces](https://github.dev) is not supported yet at this moment. See this [issue comment](https://github.com/vlang/vscode-vlang/issues/272#issuecomment-898271911).
 
-For [Visual Studio Code](https://code.visualstudio.com) and other derivatives, all you need to do is to install 0.1.4 or above versions of the [V VSCode extension](https://github.com/vlang/vscode-vlang). Afterwards, go to settings and scroll to the V extension section. From there, enable VLS by checking the "Enable VLS" box. 
+For [Visual Studio Code](https://code.visualstudio.com) and other derivatives, all you need to do is to install 0.1.4 or above versions of the [V VSCode extension](https://github.com/vlang/vscode-vlang). Afterwards, go to settings and scroll to the V extension section. From there, enable VLS by checking the "Enable VLS" box.
 
-If you have VLS downloaded in a custom directory, you need to input the absolute path of the `vls` language server executable to the "Custom Path" setting. If you cloned the repository and compiled it from source, the executable will be in the `cmd/vls` directory. So make sure to add `cmd/vls/vls` or `cmd/vls/vls.exe` (for Windows).
+If you have VLS downloaded in a custom directory, you need to input the absolute path of the `vls` language server executable to the "Custom Path" setting. If you cloned the repository and compiled it from source, the executable will be in the `vls` root directory. So make sure to add `vls/vls` or `vls/vls.exe` (for Windows).
 
 ![Instructions](images/instructions.png)
 
