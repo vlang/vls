@@ -98,7 +98,7 @@ fn test_tcp_connect() ? {
 	assert p.status == .running
 	assert p.pid > 0
 	assert p.is_alive() == true
-	assert p.stdout_read().trim_space() == 'Established connection at 127.0.0.1:5007'
+	assert p.stdout_read().trim_space() == '[vls] : Established connection at 127.0.0.1:5007'
 	mut conn := net.dial_tcp('127.0.0.1:5007') ?
 	// TODO: add init message assertion
 	conn.write_string(wrap_request(io.request('exit'))) ?
