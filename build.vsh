@@ -14,7 +14,7 @@ if os.args.len >= 2 {
 }
 println('> Building VLS...')
 
-ret := system('v -gc boehm -cc $cc cmd/vls -o vls')
+ret := system('v -gc boehm -cg -cc $cc cmd/vls -o vls')
 if ret != 0 {
 	println('Failed building VLS')
 	return
