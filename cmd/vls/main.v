@@ -20,12 +20,12 @@ fn run_cli(cmd cli.Command) ? {
 
 	custom_vroot_path := cmd.flags.get_string('vroot') or { '' }
 	socket_mode := cmd.flags.get_bool('socket') or { false }
-	socket_port := cmd.flags.get_string('port') or { '5007' }
+	socket_port := cmd.flags.get_int('port') or { 5007 }
 
 	// Setup the comm method and build the language server.
 	mut io := if socket_mode {
 		server.ReceiveSender(Socket{ port: socket_port, debug: debug_mode })
-  } else {
+	} else {
 		server.ReceiveSender(Stdio{ debug: debug_mode })
 	}
 
