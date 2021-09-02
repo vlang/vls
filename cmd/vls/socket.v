@@ -20,9 +20,8 @@ pub fn (mut sck Socket) init() ? {
 	// Open the connection.
 	address := '$base_ip:$sck.port'
 	sck.listener = net.listen_tcp(.ip, address) ?
-	eprintln(term.yellow('warning: ') +
-		'TCP connection is used primarily for debugging purposes only and may have performance issues. Use it on your own risk.')
-	println('Established connection at $address')
+	eprintln(term.yellow('Warning: TCP connection is used primarily for debugging purposes only \n\tand may have performance issues. Use it on your own risk.\n'))
+	println('[vls] : Established connection at $address\n')
 	sck.conn = sck.listener.accept() or {
 		sck.listener.close() or {}
 		return err
@@ -33,7 +32,7 @@ pub fn (mut sck Socket) init() ? {
 
 pub fn (mut sck Socket) send(output string) {
 	$if !test {
-		println('[vls] : ${term.red('Sent data')} : Content-Length: $output.len | $output')
+		println('[vls] : ${term.red('Sent data')} : Content-Length: $output.len | $output\n')
 	}
 	sck.conn.write_string('Content-Length: $output.len\r\n\r\n$output') or { panic(err) }
 }
@@ -45,9 +44,9 @@ pub fn (mut sck Socket) receive() ?string {
 	for {
 		// read header line
 		got_header := sck.reader.read_line() ?
-		$if !test {
-			println('[vls] : ${term.green('Received data')} : $got_header')
-		}
+		// $if !test {
+		// 	println('[vls] : ${term.green('Received data')} : $got_header')
+		// }
 
 		if got_header.len == 0 {
 			continue
@@ -72,7 +71,7 @@ pub fn (mut sck Socket) receive() ?string {
 	}
 
 	$if !test {
-		println('[vls] : ${term.green('Received data')} : Content-Length: $rbody.len | $rbody.bytestr()')
+		println('[vls] : ${term.green('Received data')} : Content-Length: $rbody.len | $rbody.bytestr()\n')
 	}
 	return rbody.bytestr()
 }
