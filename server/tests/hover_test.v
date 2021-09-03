@@ -23,6 +23,9 @@ const hover_inputs = {
 	'import.vv':               lsp.HoverParams{
 		position: lsp.Position{0, 8}
 	}
+	'interface_spec_params.vv': lsp.HoverParams{
+		position: lsp.Position{1, 8}
+	}
 	'module.vv':               lsp.HoverParams{
 		position: lsp.Position{0, 5}
 	}
@@ -104,6 +107,13 @@ const hover_results = {
 		range: lsp.Range{
 			start: lsp.Position{0, 7}
 			end: lsp.Position{0, 9}
+		}
+	}
+	'interface_spec_params.vv': lsp.Hover{
+		contents: lsp.MarkedString{'v', 'num int'}
+		range: lsp.Range{
+			start: lsp.Position{1, 6}
+			end: lsp.Position{1, 9}
 		}
 	}
 	'module.vv':               lsp.Hover{
