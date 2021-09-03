@@ -381,6 +381,7 @@ pub enum ServerStatus {
 [inline]
 fn new_error(code int, id string) jsonrpc.Response<string> {
 	return jsonrpc.Response<string>{
+		id: id
 		error: jsonrpc.new_response_error(code)
 	}
 }
