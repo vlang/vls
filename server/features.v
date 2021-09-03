@@ -10,7 +10,7 @@ import strings
 const temp_formatting_file_path = os.join_path(os.temp_dir(), 'vls_temp_formatting.v')
 
 [manualfree]
-fn (mut ls Vls) formatting(id int, params string) {
+fn (mut ls Vls) formatting(id string, params string) {
 	formatting_params := json.decode(lsp.DocumentFormattingParams, params) or {
 		ls.panic(err.msg)
 		ls.send_null(id)
@@ -75,7 +75,7 @@ fn (mut ls Vls) formatting(id int, params string) {
 	})
 }
 
-fn (mut ls Vls) workspace_symbol(id int, _ string) {
+fn (mut ls Vls) workspace_symbol(id string, _ string) {
 	mut workspace_symbols := []lsp.SymbolInformation{}
 
 	for _, sym_arr in ls.store.symbols {
@@ -150,7 +150,7 @@ fn symbol_to_symbol_info(uri lsp.DocumentUri, sym &analyzer.Symbol) ?lsp.SymbolI
 	}
 }
 
-fn (mut ls Vls) document_symbol(id int, params string) {
+fn (mut ls Vls) document_symbol(id string, params string) {
 	document_symbol_params := json.decode(lsp.DocumentSymbolParams, params) or {
 		ls.panic(err.msg)
 		ls.send_null(id)
@@ -171,7 +171,7 @@ fn (mut ls Vls) document_symbol(id int, params string) {
 	})
 }
 
-fn (mut ls Vls) signature_help(id int, params string) {
+fn (mut ls Vls) signature_help(id string, params string) {
 	// Initial checks.
 	signature_params := json.decode(lsp.SignatureHelpParams, params) or {
 		ls.panic(err.msg)
@@ -695,7 +695,7 @@ fn symbol_to_completion_item(sym &analyzer.Symbol, with_snippet bool) ?lsp.Compl
 
 // TODO: make params use lsp.CompletionParams in the future
 [manualfree]
-fn (mut ls Vls) completion(id int, params string) {
+fn (mut ls Vls) completion(id string, params string) {
 	if Feature.completion !in ls.enabled_features {
 		return
 	}
@@ -818,7 +818,7 @@ fn (mut ls Vls) completion(id int, params string) {
 	})
 }
 
-fn (mut ls Vls) hover(id int, params string) {
+fn (mut ls Vls) hover(id string, params string) {
 	hover_params := json.decode(lsp.HoverParams, params) or {
 		ls.panic(err.msg)
 		ls.send_null(id)
@@ -901,7 +901,7 @@ fn get_hover_data(mut store analyzer.Store, node C.TSNode, uri lsp.DocumentUri, 
 }
 
 [manualfree]
-fn (mut ls Vls) folding_range(id int, params string) {
+fn (mut ls Vls) folding_range(id string, params string) {
 	folding_range_params := json.decode(lsp.FoldingRangeParams, params) or {
 		ls.panic(err.msg)
 		ls.send_null(id)
@@ -947,7 +947,7 @@ fn (mut ls Vls) folding_range(id int, params string) {
 	}
 }
 
-fn (mut ls Vls) definition(id int, params string) {
+fn (mut ls Vls) definition(id string, params string) {
 	goto_definition_params := json.decode(lsp.TextDocumentPositionParams, params) or {
 		ls.panic(err.msg)
 		ls.send_null(id)
@@ -1031,7 +1031,7 @@ fn get_implementation_locations_from_syms(symbols []&analyzer.Symbol, got_sym &a
 	}
 }
 
-fn (mut ls Vls) implementation(id int, params string) {
+fn (mut ls Vls) implementation(id string, params string) {
 	goto_implementation_params := json.decode(lsp.TextDocumentPositionParams, params) or {
 		ls.panic(err.msg)
 		ls.send_null(id)

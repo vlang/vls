@@ -16,7 +16,7 @@ fn analyze(mut store analyzer.Store, root_uri lsp.DocumentUri, tree &C.TSTree, f
 	store.analyze(tree, file.source)
 }
 
-fn (mut ls Vls) did_open(_ int, params string) {
+fn (mut ls Vls) did_open(_ string, params string) {
 	did_open_params := json.decode(lsp.DidOpenTextDocumentParams, params) or {
 		ls.panic(err.msg)
 		return
@@ -87,7 +87,7 @@ fn (mut ls Vls) did_open(_ int, params string) {
 }
 
 [manualfree]
-fn (mut ls Vls) did_change(_ int, params string) {
+fn (mut ls Vls) did_change(_ string, params string) {
 	did_change_params := json.decode(lsp.DidChangeTextDocumentParams, params) or {
 		ls.panic(err.msg)
 		return
@@ -205,7 +205,7 @@ fn (mut ls Vls) did_change(_ int, params string) {
 }
 
 [manualfree]
-fn (mut ls Vls) did_close(_ int, params string) {
+fn (mut ls Vls) did_close(_ string, params string) {
 	did_close_params := json.decode(lsp.DidCloseTextDocumentParams, params) or {
 		ls.panic(err.msg)
 		return
