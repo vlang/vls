@@ -700,20 +700,28 @@ pub fn (mut ss Store) infer_symbol_from_node(node C.TSNode, src_text []byte) ?&S
 		}
 		'parameter_declaration' {
 			mut parent := node.parent()
-			for parent.get_type() != 'function_declaration' {
+			for parent.get_type() !in ['function_declaration', 'interface_spec'] {
 				parent = parent.parent()
+				if parent.is_null() {
+					return none
+				}
 			}
 
-			// eprintln(parent.get_type())
-			parent_sym := ss.infer_symbol_from_node(parent.child_by_field_name('name'),
-				src_text) ?
+			if parent.get_type() == 'function_declaration' {
+				parent = parent.child_by_field_name('name')
+			}
+
+			parent_sym := ss.infer_symbol_from_node(parent, src_text) ?
 			child_sym := parent_sym.children.get(node.child_by_field_name('name').get_text(src_text)) ?
 			return child_sym
 		}
-		'struct_field_declaration' {
+		'struct_field_declaration', 'interface_spec' {
 			mut parent := node.parent()
 			for parent.get_type() !in ['struct_declaration', 'interface_declaration'] {
 				parent = parent.parent()
+				if parent.is_null() {
+					return none
+				}
 			}
 
 			// eprintln(parent.get_type())
