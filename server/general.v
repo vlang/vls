@@ -14,7 +14,7 @@ const (
 )
 
 // initialize sends the server capabilities to the client
-fn (mut ls Vls) initialize(id int, params string) {
+fn (mut ls Vls) initialize(id string, params string) {
 	// Set defaults when vroot_path is empty
 	if ls.vroot_path.len == 0 {
 		if found_vroot_path := detect_vroot_path() {
@@ -125,7 +125,7 @@ fn (mut ls Vls) process_builtin() {
 }
 
 // shutdown sets the state to shutdown but does not exit
-fn (mut ls Vls) shutdown(id int) {
+fn (mut ls Vls) shutdown(id string) {
 	ls.status = .shutdown
 	result := jsonrpc.Response<string>{
 		id: id

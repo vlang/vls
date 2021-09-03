@@ -20,7 +20,7 @@ pub const (
 pub struct Request {
 pub mut:
 	jsonrpc string = jsonrpc.version
-	id      int    = -2
+	id      string [raw]
 	method  string
 	params  string [raw]
 }
@@ -28,24 +28,16 @@ pub mut:
 pub struct Response<T> {
 pub:
 	jsonrpc string = jsonrpc.version
-	id      int
+	id      string
 	//	error   ResponseError
 	result T
+	error   ResponseError
 }
 
 pub struct NotificationMessage<T> {
 	jsonrpc string = jsonrpc.version
 	method  string
 	params  T
-}
-
-// with error
-// TODO: must be removed when omitempty JSON is supported
-pub struct Response2<T> {
-	jsonrpc string = jsonrpc.version
-	id      int
-	error   ResponseError
-	result  T
 }
 
 pub struct ResponseError {

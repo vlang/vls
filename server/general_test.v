@@ -3,16 +3,13 @@ import server.testing
 import lsp
 import json
 
-fn test_wrong_first_request() {
+fn test_wrong_first_request() ? {
 	mut io := &testing.Testio{}
 	mut ls := server.new(io)
 	payload := io.request('shutdown')
 	ls.dispatch(payload)
 	assert ls.status() == .off
-	err_code, err_msg := io.response_error() or {
-		assert false
-		return
-	}
+	err_code, err_msg := io.response_error() ?
 	assert err_code == -32002
 	assert err_msg == 'Server not yet initialized.'
 }

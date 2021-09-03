@@ -10,6 +10,7 @@ import tree_sitter_v as v
 import analyzer
 import time
 import v.vmod
+import strings
 
 pub const meta = meta_info()
 
@@ -119,7 +120,7 @@ pub fn new(io ReceiveSender) Vls {
 
 pub fn (mut ls Vls) dispatch(payload string) {
 	request := json.decode(jsonrpc.Request, payload) or {
-		ls.send(new_error(jsonrpc.parse_error))
+		ls.send(new_error(jsonrpc.parse_error, ''))
 		return
 	}
 	// The server will log a send request/notification
@@ -129,10 +130,8 @@ pub fn (mut ls Vls) dispatch(payload string) {
 	//
 	// Notification has no ID attached so the server can detect
 	// if its a notification or a request payload by checking
-	// if the ID is on the default value which is -2. (Some
-	// clients such as VSCode used 0 as the first request ID
-	// hence the use of a negative integer).
-	if request.id == -2 {
+	// if the ID is empty.
+	if request.id.len == 0 {
 		ls.logger.notification(payload, .receive)
 	} else {
 		ls.logger.request(payload, .receive)
@@ -208,7 +207,7 @@ pub fn (mut ls Vls) dispatch(payload string) {
 				} else {
 					jsonrpc.server_not_initialized
 				}
-				ls.send(new_error(err_type))
+				ls.send(new_error(err_type, request.id))
 			}
 		}
 	}
@@ -263,24 +262,36 @@ fn (mut ls Vls) panic(message string) {
 	}
 }
 
-fn (mut ls Vls) send<T>(data T) {
-	str := json.encode(data)
+fn (mut ls Vls) send<T>(resp jsonrpc.Response<T>) {
+	mut resp_wr := strings.new_builder(100)
+	defer { unsafe { resp_wr.free() } }
+	resp_wr.write_string('{"jsonrpc":"${jsonrpc.version}","id":${resp.id}')
+	if resp.id.len == 0 {
+		resp_wr.write_string('null')
+	}
+	if resp.error.code != 0 {
+		err := json.encode(resp.error)
+		resp_wr.write_string(',"error":${err}')
+	} else {
+		res := json.encode(resp.result)
+		resp_wr.write_string(',"result":${res}')
+	}
+	resp_wr.write_b(`}`)
+	str := resp_wr.str()
 	ls.logger.response(str, .send)
 	ls.io.send(str)
 }
 
-// TODO: set result param type to jsonrpc.NotificationMessage<T>
-// merge notify back to send method once compile-time type introspection
-// supports base generic types (e.g $if T is jsonrpc.NotificationMessage)
-fn (mut ls Vls) notify<T>(data T) {
+// notify sends a notification to the client
+fn (mut ls Vls) notify<T>(data jsonrpc.NotificationMessage<T>) {
 	str := json.encode(data)
 	ls.logger.notification(str, .send)
 	ls.io.send(str)
 }
 
 // send_null sends a null result to the client
-fn (mut ls Vls) send_null(id int) {
-	str := '{"jsonrpc":"2.0","id":$id,"result":null}'
+fn (mut ls Vls) send_null(id string) {
+	str := '{"jsonrpc":"${jsonrpc.version}","id":$id,"result":null}'
 	ls.logger.response(str, .send)
 	ls.io.send(str)
 }
@@ -368,8 +379,9 @@ pub enum ServerStatus {
 }
 
 [inline]
-fn new_error(code int) jsonrpc.Response2<string> {
-	return jsonrpc.Response2<string>{
+fn new_error(code int, id string) jsonrpc.Response<string> {
+	return jsonrpc.Response<string>{
+		id: id
 		error: jsonrpc.new_response_error(code)
 	}
 }
