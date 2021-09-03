@@ -119,7 +119,7 @@ pub fn new(io ReceiveSender) Vls {
 
 pub fn (mut ls Vls) dispatch(payload string) {
 	request := json.decode(jsonrpc.Request, payload) or {
-		ls.send(new_error(jsonrpc.parse_error))
+		ls.send(new_error(jsonrpc.parse_error, ''))
 		return
 	}
 	// The server will log a send request/notification
@@ -129,10 +129,8 @@ pub fn (mut ls Vls) dispatch(payload string) {
 	//
 	// Notification has no ID attached so the server can detect
 	// if its a notification or a request payload by checking
-	// if the ID is on the default value which is -2. (Some
-	// clients such as VSCode used 0 as the first request ID
-	// hence the use of a negative integer).
-	if request.id == -2 {
+	// if the ID is empty.
+	if request.id.len == 0 {
 		ls.logger.notification(payload, .receive)
 	} else {
 		ls.logger.request(payload, .receive)
@@ -208,7 +206,7 @@ pub fn (mut ls Vls) dispatch(payload string) {
 				} else {
 					jsonrpc.server_not_initialized
 				}
-				ls.send(new_error(err_type))
+				ls.send(new_error(err_type, request.id))
 			}
 		}
 	}
@@ -368,8 +366,8 @@ pub enum ServerStatus {
 }
 
 [inline]
-fn new_error(code int) jsonrpc.Response2<string> {
-	return jsonrpc.Response2<string>{
+fn new_error(code int, id string) jsonrpc.Response<string> {
+	return jsonrpc.Response<string>{
 		error: jsonrpc.new_response_error(code)
 	}
 }
