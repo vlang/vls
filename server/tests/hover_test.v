@@ -23,6 +23,9 @@ const hover_inputs = {
 	'import.vv':                lsp.HoverParams{
 		position: lsp.Position{0, 8}
 	}
+	'interface_spec.vv':        lsp.HoverParams{
+		position: lsp.Position{1, 10}
+	}
 	'interface_spec_params.vv': lsp.HoverParams{
 		position: lsp.Position{1, 8}
 	}
@@ -107,6 +110,13 @@ const hover_results = {
 		range: lsp.Range{
 			start: lsp.Position{0, 7}
 			end: lsp.Position{0, 9}
+		}
+	}
+	'interface_spec.vv':        lsp.Hover{
+		contents: lsp.MarkedString{'v', 'pub fn (Fooer) random_num() int'}
+		range: lsp.Range{
+			start: lsp.Position{1, 1}
+			end: lsp.Position{1, 11}
 		}
 	}
 	'interface_spec_params.vv': lsp.Hover{

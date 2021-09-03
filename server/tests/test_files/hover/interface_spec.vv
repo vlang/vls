@@ -1,0 +1,3 @@
+interface Fooer {
+	random_num() int
+}
