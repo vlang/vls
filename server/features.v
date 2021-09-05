@@ -184,7 +184,6 @@ fn (mut ls Vls) signature_help(id string, params string) {
 		return
 	}
 
-	// Fetch the node requested for completion.
 	uri := signature_params.text_document.uri
 	pos := signature_params.position
 	ctx := signature_params.context
@@ -273,6 +272,7 @@ mut:
 	show_global        bool // for displaying global (project) symbols
 	show_local         bool // for displaying local variables
 	filter_return_type &analyzer.Symbol = &analyzer.Symbol(0) // filters results by type
+	filter_sym_kinds   []analyzer.SymbolKind
 	fields_only        bool             // for displaying only the struct/enum fields
 	show_mut_only      bool // filters results based on the object's mutability state.
 	ctx                lsp.CompletionContext
@@ -382,6 +382,18 @@ fn (mut builder CompletionBuilder) build_suggestions_from_list(node C.TSNode) {
 			import_path_node := import_node.child_by_field_name('path')
 			import_path := import_path_node.get_text(builder.src)
 			builder.build_suggestions_from_module(import_path)
+		}
+		'type_list' {
+			builder.show_local = false
+			builder.show_global = true
+			builder.filter_sym_kinds = [
+				analyzer.SymbolKind.typedef, 
+				.struct_,
+				.enum_,
+				.interface_,
+				.sumtype,
+				.function_type
+			]
 		}
 		else {}
 	}
@@ -503,7 +515,8 @@ fn (mut builder CompletionBuilder) build_suggestions_from_module(name string, in
 	imported_syms := builder.store.symbols[imported_path_dir]
 	for imp_sym in imported_syms {
 		if (included_list.len != 0 && imp_sym.name in included_list)
-			|| !builder.has_same_return_type(imp_sym.return_type) {
+			|| !builder.has_same_return_type(imp_sym.return_type)
+			|| (builder.filter_sym_kinds.len != 0 && imp_sym.kind !in builder.filter_sym_kinds) {
 			continue
 		}
 		if int(imp_sym.access) >= int(analyzer.SymbolAccess.public) {
@@ -557,7 +570,7 @@ fn (mut builder CompletionBuilder) build_local_suggestions() {
 		for !isnil(scope) && scope != file_scope {
 			// constants
 			for scope_sym in scope.get_all_symbols() {
-				if !builder.has_same_return_type(scope_sym.return_type) {
+				if !builder.has_same_return_type(scope_sym.return_type) || (builder.filter_sym_kinds.len != 0 && scope_sym.kind !in builder.filter_sym_kinds) {
 					continue
 				}
 
@@ -581,10 +594,14 @@ fn (mut builder CompletionBuilder) build_global_suggestions() {
 	for sym in global_syms {
 		if !sym.is_void() && sym.kind != .placeholder {
 			if (sym.kind == .function && sym.name == 'main')
-				|| !builder.has_same_return_type(sym.return_type) {
+				|| !builder.has_same_return_type(sym.return_type)
+				|| (builder.filter_sym_kinds.len != 0 && sym.kind !in builder.filter_sym_kinds) {
 				continue
 			}
-			builder.add(symbol_to_completion_item(sym, true) or { continue })
+			
+			// is_type_decl := false
+			is_type_decl := builder.parent_node.get_type() == 'type_declaration'
+			builder.add(symbol_to_completion_item(sym, !is_type_decl) or { continue })
 		}
 	}
 
@@ -727,7 +744,8 @@ fn (mut ls Vls) completion(id string, params string) {
 	// purposes.
 	mut builder := CompletionBuilder{
 		store: &ls.store
-		src: src
+		src: src,
+		parent_node: root_node
 	}
 
 	// There are some instances that the user would invoke the autocompletion
@@ -782,7 +800,7 @@ fn (mut ls Vls) completion(id string, params string) {
 		// Once the offset has been finalized it will then search for the AST node and
 		// extract it's data using the corresponding methods depending on the node type.
 		mut node := traverse_node2(root_node, u32(offset))
-		parent_node := traverse_node(root_node, u32(offset))
+		mut parent_node := traverse_node(root_node, u32(offset))
 
 		if root_node.is_error() && root_node.get_type() == 'ERROR' {
 			// point to the identifier for assignment statement
@@ -793,6 +811,9 @@ fn (mut ls Vls) completion(id string, params string) {
 			node = node.prev_named_sibling()
 		} else if node.start_byte() > u32(offset) {
 			node = closest_named_child(closest_symbol_node_parent(node), u32(offset))
+		} else if node.get_type() == 'source_file' {
+			parent_node = closest_named_child(node, u32(offset))
+			node = closest_named_child(parent_node, u32(offset))
 		}
 
 		builder.ctx = ctx

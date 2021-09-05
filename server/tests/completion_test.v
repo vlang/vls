@@ -77,6 +77,10 @@ const completion_inputs = {
 		context: lsp.CompletionContext{.trigger_character, ' '}
 		position: lsp.Position{9, 8}
 	}
+	'type_decl.vv': lsp.CompletionParams{
+		context: lsp.CompletionContext{.trigger_character, ' '}
+		position: lsp.Position{3, 12}
+	}
 }
 
 const completion_results = {
@@ -343,6 +347,20 @@ const completion_results = {
 			kind: .variable
 			detail: 'another_name string'
 			insert_text: 'another_name'
+		},
+	],
+	'type_decl.vv': [
+		lsp.CompletionItem{
+			label: 'Foo'
+			kind: .struct_
+			detail: 'Foo'
+			insert_text: 'Foo'
+		},
+		lsp.CompletionItem{
+			label: 'Bar'
+			kind: .struct_
+			detail: 'Bar'
+			insert_text: 'Bar'
 		},
 	]
 }

@@ -4,7 +4,7 @@ module server
 
 // any node that is separated by a comma or other symbol
 const list_node_types = ['expression_list', 'identifier_list', 'assignable_identifier_list',
-	'argument_list', 'array', 'import_symbols_list']
+	'argument_list', 'array', 'import_symbols_list', 'type_list']
 
 const other_node_types = ['if_expression', 'for_statement', 'return_statement', 'for_in_operator',
 	'binary_expression', 'unary_expression']
