@@ -83,8 +83,8 @@ fn test_stdio_connect() ? {
 }
 
 fn test_tcp_connect() ? {
-	// TODO: fix this later. Hangs on macos (on ci and on device) and windows ci
-	$if !linux {
+	// TODO: fix this later. Hangs on windows ci
+	$if windows {
 		return
 	}
 	mut io := testing.Testio{}
