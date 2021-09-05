@@ -47,7 +47,11 @@ fn test_diagnostics() {
 		// open document
 		req, _ := io.open_document(file_path, content)
 		ls.dispatch(req)
+
+		save_req, _ := io.save_document(file_path, content)
+		ls.dispatch(save_req)
 	}
+	
 	method, params := io.notification() or { '', '{}' }
 	diagnostic_params := json.decode(lsp.PublishDiagnosticsParams, params) or {
 		lsp.PublishDiagnosticsParams{}

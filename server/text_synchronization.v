@@ -233,3 +233,16 @@ fn (mut ls Vls) did_close(_ string, params string) {
 		ls.publish_diagnostics(uri, []lsp.Diagnostic{})
 	}
 }
+
+fn (mut ls Vls) did_save(id string, params string) {
+	did_save_params := json.decode(lsp.DidSaveTextDocumentParams, params) or {
+		ls.panic(err.msg)
+		return
+	}
+	uri := did_save_params.text_document.uri
+
+	// get diagnostic results from v_vet
+	if v_vet_results := ls.exec_v_vet_diagnostics(uri) {
+		ls.publish_diagnostics(uri, v_vet_results)
+	}
+}

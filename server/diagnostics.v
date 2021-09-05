@@ -69,8 +69,6 @@ fn (mut ls Vls) exec_v_vet_diagnostics(uri lsp.DocumentUri) ?[]lsp.Diagnostic {
 
 	// out := p.stdout_slurp().split_into_lines()
 	err := p.stderr_slurp().split_into_lines().map(term.strip_ansi(it))
-	eprintln(err)
-
 	mut res := []lsp.Diagnostic{cap: err.len}
 
 	// for line in out {
@@ -115,11 +113,6 @@ fn (mut ls Vls) show_diagnostics(uri lsp.DocumentUri) {
 	}
 
 	ls.publish_diagnostics(uri, diagnostics)
-
-	// get diagnostic results from v_vet
-	if v_vet_results := ls.exec_v_vet_diagnostics(uri) {
-		ls.publish_diagnostics(uri, v_vet_results)
-	}
 }
 
 // publish_diagnostics sends errors, warnings and other diagnostics to the editor

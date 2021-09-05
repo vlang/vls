@@ -103,6 +103,19 @@ pub fn load_test_file_paths(folder_name string) ?[]string {
 	return filtered
 }
 
+// save_document generates and returns the request data for the `textDocument/didSave` request.
+pub fn (mut io Testio) save_document(file_path string, contents string) (string, lsp.TextDocumentIdentifier) {
+	doc_uri := lsp.document_uri_from_path(file_path)
+	docid := lsp.TextDocumentIdentifier{
+		uri: doc_uri
+	}
+	req := io.request_with_params('textDocument/didSave', lsp.DidSaveTextDocumentParams{
+		text_document: docid
+		text: contents
+	})
+	return req, docid
+}
+
 // open_document generates and returns the request data for the `textDocument/didOpen` reqeust.
 pub fn (mut io Testio) open_document(file_path string, contents string) (string, lsp.TextDocumentIdentifier) {
 	doc_uri := lsp.document_uri_from_path(file_path)

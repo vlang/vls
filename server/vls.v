@@ -157,6 +157,9 @@ pub fn (mut ls Vls) dispatch(payload string) {
 			'textDocument/didOpen' {
 				ls.did_open(request.id, request.params)
 			}
+			'textDocument/didSave' {
+				ls.did_save(request.id, request.params)
+			}
 			'textDocument/didChange' {
 				ls.typing_ch <- 1
 				ls.did_change(request.id, request.params)
