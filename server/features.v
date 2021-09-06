@@ -885,10 +885,9 @@ fn get_hover_data(mut store analyzer.Store, node C.TSNode, uri lsp.DocumentUri, 
 	} else if node_type == 'import_path' {
 		found_imp := store.find_import_by_position(node.range()) ?
 		alias := found_imp.aliases[store.cur_file_name] or { found_imp.module_name }
-		eprintln(found_imp)
 		return lsp.Hover{
 			contents: lsp.v_marked_string('import $found_imp.absolute_module_name as ' + alias)
-			range: tsrange_to_lsp_range(found_imp.ranges[store.cur_file_name])
+			range: tsrange_to_lsp_range(found_imp.ranges[store.cur_file_path])
 		}
 	} else if node.parent().is_error() || node.parent().is_missing() {
 		return none
