@@ -113,12 +113,12 @@ pub fn should_analyze_file(file_name string) bool {
 
 struct ImportPathIterator {
 	start_path            string
+	lookup_paths          []string
 	fallback_lookup_paths []string
 mut:
-	lookup_paths []string
-	idx          int
-	in_start     bool = true
-	in_fallback  bool
+	idx         int
+	in_start    bool = true
+	in_fallback bool
 }
 
 fn (mut iter ImportPathIterator) next() ?string {

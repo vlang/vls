@@ -7,9 +7,10 @@ import analyzer
 
 fn analyze(mut store analyzer.Store, root_uri lsp.DocumentUri, tree &C.TSTree, file File) {
 	store.clear_messages()
-	store.set_active_file_path(file.uri.path(), file.version)
+	file_path := file.uri.path()
+	store.set_active_file_path(file_path, file.version)
 	store.import_modules_from_tree(tree, file.source, os.join_path(file.uri.dir_path(),
-		'modules'), root_uri.path())
+		'modules'), root_uri.path(), os.dir(os.dir(file_path)))
 
 	store.register_symbols_from_tree(tree, file.source)
 	store.cleanup_imports()

@@ -125,7 +125,6 @@ fn (mut ss Store) inject_paths_of_new_imports(mut new_imports []&Import, lookup_
 		lookup_paths: lookup_paths
 		fallback_lookup_paths: ss.default_import_paths
 	}
-	import_path_iter.lookup_paths << os.dir(ss.cur_dir)
 
 	for mut new_import in new_imports {
 		if new_import.resolved {
