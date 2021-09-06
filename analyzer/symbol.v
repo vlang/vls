@@ -186,7 +186,7 @@ pub fn (info &Symbol) gen_str() string {
 				}
 			}
 			sb.write_b(`)`)
-			if info.return_type.kind != .void {
+			if !info.return_type.is_void() {
 				sb.write_b(` `)
 				sb.write_string(info.return_type.name)
 			}
