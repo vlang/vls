@@ -185,8 +185,11 @@ pub fn (info &Symbol) gen_str() string {
 					sb.write_string(', ')
 				}
 			}
-			sb.write_string(') ')
-			sb.write_string(info.return_type.name)
+			sb.write_b(`)`)
+			if !info.return_type.is_void() {
+				sb.write_b(` `)
+				sb.write_string(info.return_type.name)
+			}
 		}
 		.variable, .field {
 			sb.write_string(info.access.str())
@@ -481,7 +484,7 @@ fn (locs []BindedSymbolLocation) get_path(sym_name string) ?string {
 		return locs[idx].module_path
 	}
 	return error('not found!')
-} 
+}
 
 fn (locs []BindedSymbolLocation) index(sym_name string) int {
 	for i, bsl in locs {
