@@ -114,7 +114,11 @@ pub fn (mut ss Store) set_active_file_path(file_path string, version int) {
 pub fn (ss &Store) get_module_path_opt(module_name string) ?string {
 	import_lists := ss.imports[ss.cur_dir]
 	for imp in import_lists {
-		if imp.module_name == module_name || imp.aliases[ss.cur_file_name] == module_name {
+		if imp.module_name == module_name {
+			return imp.path
+		}
+
+		if ss.cur_file_name in imp.aliases && imp.aliases[ss.cur_file_name] == module_name {
 			return imp.path
 		}
 	}
