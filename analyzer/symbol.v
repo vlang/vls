@@ -185,9 +185,9 @@ pub fn (info &Symbol) gen_str() string {
 					sb.write_string(', ')
 				}
 			}
-			sb.write_string(')')
+			sb.write_b(`)`)
 			if info.return_type.kind != .void {
-				sb.write_string(' ')
+				sb.write_b(` `)
 				sb.write_string(info.return_type.name)
 			}
 		}
