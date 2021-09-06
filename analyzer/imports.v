@@ -381,9 +381,9 @@ pub fn (mut store Store) import_modules(mut imports []&Import) {
 			}
 			parser.reset()
 			// unsafe {
-				// modules_from_dir.free()
-				// content.free()
-				// tree_from_import.free()
+			// modules_from_dir.free()
+			// content.free()
+			// tree_from_import.free()
 			// }
 		}
 
