@@ -112,7 +112,7 @@ pub fn (mut ss Store) set_active_file_path(file_path string, version int) {
 pub fn (ss &Store) get_module_path_opt(module_name string) ?string {
 	import_lists := ss.imports[ss.cur_dir]
 	for imp in import_lists {
-		if imp.module_name == module_name || module_name in imp.aliases {
+		if imp.module_name == module_name || imp.aliases[ss.cur_file_name] == module_name {
 			return imp.path
 		}
 	}
@@ -671,6 +671,11 @@ pub fn (mut ss Store) infer_symbol_from_node(node C.TSNode, src_text []byte) ?&S
 					root_sym.children.get(child_name) or { analyzer.void_type }
 				}
 			}
+
+			if operand.get_type() != 'identifier' {
+				return none
+			}
+
 			module_name = node.child_by_field_name('operand').get_text(src_text)
 			type_name = node.child_by_field_name('field').get_text(src_text)
 		}
