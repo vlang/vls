@@ -371,6 +371,11 @@ fn (mut builder CompletionBuilder) build_suggestions_from_list(node C.TSNode) {
 			returned_sym := builder.store.infer_symbol_from_node(node.parent(), builder.src) or {
 				builder.filter_return_type
 			}
+
+			if isnil(returned_sym) {
+				return
+			}
+			
 			if call_expr_arg_cur_idx < u32(returned_sym.children.len) {
 				builder.filter_return_type = returned_sym.children[int(call_expr_arg_cur_idx)].return_type
 				builder.show_local = true

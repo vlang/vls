@@ -57,6 +57,10 @@ const completion_inputs = {
 		context: lsp.CompletionContext{.trigger_character, '.'}
 		position: lsp.Position{12, 6}
 	}
+	'invalid_call.vv':                      lsp.CompletionParams{
+		context: lsp.CompletionContext{.trigger_character, '('}
+		position: lsp.Position{0, 4}
+	}
 	'local_results.vv':                     lsp.CompletionParams{
 		context: lsp.CompletionContext{.invoked, ''}
 		position: lsp.Position{5, 2}
@@ -77,7 +81,7 @@ const completion_inputs = {
 		context: lsp.CompletionContext{.trigger_character, ' '}
 		position: lsp.Position{9, 8}
 	}
-	'type_decl.vv': lsp.CompletionParams{
+	'type_decl.vv':                         lsp.CompletionParams{
 		context: lsp.CompletionContext{.trigger_character, ' '}
 		position: lsp.Position{3, 12}
 	}
@@ -283,6 +287,7 @@ const completion_results = {
 			insert_text: 'len'
 		},
 	]
+	'invalid_call.vv':                      []lsp.CompletionItem{}
 	'local_results.vv':                     [
 		lsp.CompletionItem{
 			label: 'foo'
@@ -348,8 +353,8 @@ const completion_results = {
 			detail: 'another_name string'
 			insert_text: 'another_name'
 		},
-	],
-	'type_decl.vv': [
+	]
+	'type_decl.vv':                         [
 		lsp.CompletionItem{
 			label: 'Foo'
 			kind: .struct_
