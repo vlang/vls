@@ -165,9 +165,8 @@ pub fn (info &Symbol) gen_str() string {
 
 			if !isnil(info.parent) && !info.parent.is_void() {
 				sb.write_b(`(`)
-				sb.write_string(info.parent.gen_str())
-				sb.write_b(`)`)
-				sb.write_b(` `)
+				sb.write_string(info.parent.name)
+				sb.write_string(') ')
 			}
 
 			if !info.name.starts_with(analyzer.anon_fn_prefix) {
