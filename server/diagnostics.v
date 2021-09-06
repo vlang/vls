@@ -8,7 +8,7 @@ fn (ls Vls) v_msg_to_diagnostic(from_file_path string, msg string) ?lsp.Diagnost
 	if msg.len == 0 { 
 		return none 	
 	} else if !msg[0].is_letter() {
-		return error('invalid message')
+		return none
 	}
 
 	line_colon_idx := msg.index(':') ?
