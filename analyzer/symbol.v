@@ -231,6 +231,16 @@ pub fn (info &Symbol) gen_str() string {
 				}
 			}
 		}
+		.enum_ {
+			sb.write_string(info.access.str())
+			sb.write_string('enum ')
+			sb.write_string(info.name)
+		}
+		.struct_ {
+			sb.write_string(info.access.str())
+			sb.write_string('struct ')
+			sb.write_string(info.name)
+		}
 		else {
 			// sb.write_string(info.kind.str())
 			// sb.write_b(` `)
@@ -481,7 +491,7 @@ fn (locs []BindedSymbolLocation) get_path(sym_name string) ?string {
 		return locs[idx].module_path
 	}
 	return error('not found!')
-} 
+}
 
 fn (locs []BindedSymbolLocation) index(sym_name string) int {
 	for i, bsl in locs {
