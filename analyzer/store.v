@@ -48,6 +48,8 @@ pub mut:
 	// (e.g. []string should not be looked up only inside
 	// []string but also in builtin's array type as well)
 	base_symbol_locations []BaseSymbolLocation
+	// Locations to the registered binded symbols (a.k.a C.Foo or JS.document)
+	binded_symbol_locations []BindedSymbolLocation
 }
 
 // clear_messages clears the stored messages
@@ -144,6 +146,14 @@ pub fn (ss &Store) find_symbol(module_name string, name string) ?&Symbol {
 		idx_from_alias := ss.symbols[aliased_path].index(name)
 		if idx_from_alias != -1 {
 			return ss.symbols[aliased_path][idx_from_alias]
+		}
+	}
+
+	// Find C.Foo or JS.Foo
+	if binded_module_path := ss.binded_symbol_locations.get_path(name) {
+		idx_from_binded := ss.symbols[binded_module_path].index(name)
+		if idx_from_binded != -1 {
+			return ss.symbols[binded_module_path][idx_from_binded]
 		}
 	}
 
@@ -270,6 +280,13 @@ pub fn (mut ss Store) register_symbol(mut info Symbol) ?&Symbol {
 	}
 
 	ss.symbols[dir] << info
+	if info.language != .v {
+		ss.binded_symbol_locations << BindedSymbolLocation{
+			for_sym_name: info.name,
+			module_path: os.dir(info.file_path)
+		}
+	}
+
 	return unsafe { info }
 }
 
@@ -585,7 +602,7 @@ pub fn (mut ss Store) infer_symbol_from_node(node C.TSNode, src_text []byte) ?&S
 	// }
 
 	match node_type {
-		'identifier' {
+		'identifier', 'binded_identifier' {
 			// Identifier symbol finding strategy
 			// Find first in symbols
 			// find the symbol in scopes
@@ -843,6 +860,14 @@ pub fn (mut ss Store) infer_value_type_from_node(node C.TSNode, src_text []byte)
 		// 'argument_list' {
 		// 	return ss.infer_value_type_from_node(node.parent(), src_text)
 		// }
+		'unsafe_expression' {
+			block_node := node.named_child(0)
+			block_child_len := node.named_child_count()
+			if block_child_len != u32(1) {
+				return analyzer.void_type
+			}
+			return ss.infer_value_type_from_node(block_node.named_child(0), src_text)
+		}
 		else {
 			return ss.infer_symbol_from_node(node, src_text) or { analyzer.void_type }
 		}
@@ -871,7 +896,15 @@ pub fn (mut ss Store) delete_symbol_at_node(root_node C.TSNode, src []byte, at_r
 
 				symbol_name := name_node.get_text(src)
 				idx := ss.symbols[ss.cur_dir].index(symbol_name)
+				language := ss.symbols[ss.cur_dir][idx].language
 				if idx != -1 && idx < ss.symbols[ss.cur_dir].len {
+					if language != .v {
+						binded_location_idx := ss.binded_symbol_locations.index(name)
+						if binded_location_idx != -1 && ss.binded_symbol_locations[binded_location_idx] == ss.cur_dir {
+							ss.binded_symbol_locations.delete(binded_location_idx)
+						}
+					}
+
 					// unsafe { ss.symbols[ss.cur_dir].free() }
 					ss.symbols[ss.cur_dir].delete(idx)
 				}

@@ -468,3 +468,26 @@ pub:
 	symbol_name string
 	for_kind    SymbolKind
 }
+
+pub struct BindedSymbolLocation {
+pub:
+	for_sym_name string
+	module_path string
+}
+
+fn (locs []BindedSymbolLocation) get_path(sym_name string) ?string {
+	idx := locs.index(sym_name)
+	if idx != -1 {
+		return locs[idx].module_path
+	}
+	return error('not found!')
+} 
+
+fn (locs []BindedSymbolLocation) index(sym_name string) int {
+	for i, bsl in locs {
+		if bsl.for_sym_name == sym_name {
+			return i
+		}
+	}
+	return -1
+}
