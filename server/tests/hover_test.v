@@ -78,7 +78,7 @@ const hover_results = {
 		}
 	}
 	'call_expr_simple.vv':      lsp.Hover{
-		contents: lsp.MarkedString{'v', 'fn greet(name string) void'}
+		contents: lsp.MarkedString{'v', 'fn greet(name string)'}
 		range: lsp.Range{
 			start: lsp.Position{5, 2}
 			end: lsp.Position{5, 7}

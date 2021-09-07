@@ -182,7 +182,7 @@ const completion_results = {
 		lsp.CompletionItem{
 			label: 'set_name'
 			kind: .method
-			detail: 'mut fn (Foo) set_name(name string) void'
+			detail: 'mut fn (Foo) set_name(name string)'
 			insert_text: 'set_name(\$0)'
 			insert_text_format: .snippet
 		},
@@ -259,7 +259,7 @@ const completion_results = {
 		lsp.CompletionItem{
 			label: 'theres_a_method'
 			kind: .method
-			detail: 'fn (Barw) theres_a_method() void'
+			detail: 'fn (Barw) theres_a_method()'
 			insert_text: 'theres_a_method()'
 			insert_text_format: .plain_text
 		},
