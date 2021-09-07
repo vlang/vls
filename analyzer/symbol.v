@@ -169,7 +169,7 @@ pub fn (info &Symbol) gen_str() string {
 				sb.write_string(') ')
 			}
 
-			if !info.name.starts_with(analyzer.anon_fn_prefix) {
+			if !info.name.starts_with(anon_fn_prefix) {
 				sb.write_string(info.name)
 			}
 
@@ -200,11 +200,13 @@ pub fn (info &Symbol) gen_str() string {
 			}
 
 			sb.write_string(info.name)
-			sb.write_b(` `)
-			if info.return_type.kind == .function_type {
-				sb.write_string(info.return_type.gen_str())
-			} else {
-				sb.write_string(info.return_type.name)
+			if !info.return_type.is_void() {
+				sb.write_b(` `)
+				if info.return_type.kind == .function_type {
+					sb.write_string(info.return_type.gen_str())
+				} else {
+					sb.write_string(info.return_type.name)
+				}
 			}
 		}
 		.typedef, .sumtype {
@@ -474,7 +476,7 @@ pub:
 pub struct BindedSymbolLocation {
 pub:
 	for_sym_name string
-	module_path string
+	module_path  string
 }
 
 fn (locs []BindedSymbolLocation) get_path(sym_name string) ?string {
