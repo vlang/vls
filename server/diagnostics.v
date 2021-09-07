@@ -61,7 +61,8 @@ fn (ls Vls) v_msg_to_diagnostic(from_file_path string, msg string) ?lsp.Diagnost
 fn (mut ls Vls) exec_v_diagnostics(uri lsp.DocumentUri) ?[]lsp.Diagnostic {
 	dir_path := uri.dir_path()
 	file_path := uri.path()
-	mut p := ls.launch_v_tool('-check', dir_path)
+	input_path := if file_path.ends_with('.vv') { file_path } else { dir_path }
+	mut p := ls.launch_v_tool('-check', input_path)
 	defer { p.close() }
 	p.wait()
 	if p.code == 0 {
