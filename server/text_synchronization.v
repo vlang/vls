@@ -14,7 +14,7 @@ fn analyze(mut store analyzer.Store, root_uri lsp.DocumentUri, tree &C.TSTree, f
 
 	store.register_symbols_from_tree(tree, file.source)
 	store.cleanup_imports()
-	store.analyze(tree, file.source)
+	// store.analyze(tree, file.source)
 }
 
 fn (mut ls Vls) did_open(_ string, params string) {
