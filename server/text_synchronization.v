@@ -66,11 +66,6 @@ fn (mut ls Vls) did_open(_ string, params string) {
 			analyze(mut ls.store, ls.root_uri, ls.trees[file_uri], ls.sources[file_uri])
 			ls.show_diagnostics(file_uri)
 
-			// get diagnostic results from v_vet
-			if v_vet_results := ls.exec_v_diagnostics(uri) {
-				ls.publish_diagnostics(uri, v_vet_results)
-			}
-
 			unsafe {
 				full_path.free()
 				file_uri.free()
@@ -90,11 +85,10 @@ fn (mut ls Vls) did_open(_ string, params string) {
 		}
 
 		ls.show_diagnostics(uri)
+	}
 
-		// get diagnostic results from v_vet
-		if v_vet_results := ls.exec_v_diagnostics(uri) {
-			ls.publish_diagnostics(uri, v_vet_results)
-		}
+	if v_check_results := ls.exec_v_diagnostics(uri) {
+		ls.publish_diagnostics(uri, v_check_results)
 	}
 }
 
@@ -253,8 +247,7 @@ fn (mut ls Vls) did_save(id string, params string) {
 	}
 	uri := did_save_params.text_document.uri
 
-	// get diagnostic results from v_vet
-	if v_vet_results := ls.exec_v_diagnostics(uri) {
-		ls.publish_diagnostics(uri, v_vet_results)
+	if v_check_results := ls.exec_v_diagnostics(uri) {
+		ls.publish_diagnostics(uri, v_check_results)
 	}
 }

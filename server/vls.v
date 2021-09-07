@@ -369,7 +369,8 @@ pub fn (ls Vls) launch_v_tool(args ...string) &os.Process {
 		v_exe_name += '.exe'
 	}
 
-	mut p := os.new_process(os.join_path(ls.vroot_path, v_exe_name))
+	full_v_path := os.join_path(ls.vroot_path, v_exe_name)
+	mut p := os.new_process(full_v_path)
 	p.set_args(args)
 	p.set_redirect_stdio()
 	return p
