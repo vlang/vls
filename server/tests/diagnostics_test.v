@@ -17,14 +17,14 @@ const diagnostics_result = lsp.PublishDiagnosticsParams{
 				end: lsp.Position{4, 10}
 			}
 		},
-		// lsp.Diagnostic{
-		// 	message: "module 'os' is imported but never used"
-		// 	severity: .warning
-		// 	range: lsp.Range{
-		// 		start: lsp.Position{2, 7}
-		// 		end: lsp.Position{2, 9}
-		// 	}
-		// },
+		lsp.Diagnostic{
+			message: "module 'os' is imported but never used"
+			severity: .warning
+			range: lsp.Range{
+				start: lsp.Position{2, 7}
+				end: lsp.Position{2, 7}
+			}
+		},
 	]
 }
 
@@ -47,9 +47,6 @@ fn test_diagnostics() {
 		// open document
 		req, _ := io.open_document(file_path, content)
 		ls.dispatch(req)
-
-		save_req, _ := io.save_document(file_path, content)
-		ls.dispatch(save_req)
 	}
 	
 	method, params := io.notification() or { '', '{}' }
