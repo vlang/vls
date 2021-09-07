@@ -81,7 +81,6 @@ fn (mut ls Vls) exec_v_diagnostics(uri lsp.DocumentUri) ?[]lsp.Diagnostic {
 
 	for line in err {
 		res << ls.v_msg_to_diagnostic(file_path, line) or {
-			eprintln(err)
 			continue
 		}
 	}
