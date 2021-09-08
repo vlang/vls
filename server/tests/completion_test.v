@@ -358,13 +358,13 @@ const completion_results = {
 		lsp.CompletionItem{
 			label: 'Foo'
 			kind: .struct_
-			detail: 'Foo'
+			detail: 'struct Foo'
 			insert_text: 'Foo'
 		},
 		lsp.CompletionItem{
 			label: 'Bar'
 			kind: .struct_
-			detail: 'Bar'
+			detail: 'struct Bar'
 			insert_text: 'Bar'
 		},
 	]
