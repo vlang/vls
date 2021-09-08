@@ -335,6 +335,7 @@ fn (mut sr SymbolRegistration) fn_decl(fn_node C.TSNode) ?&Symbol {
 
 	mut fn_sym := sr.new_top_level_symbol(name_node, access, .function) ?
 	mut scope := sr.get_scope(body_node) or { &ScopeTree(0) }
+	fn_sym.access = access
 	fn_sym.return_type = sr.store.find_symbol_by_type_node(fn_node.child_by_field_name('result'),
 		sr.src_text) or { analyzer.void_type }
 
@@ -345,16 +346,9 @@ fn (mut sr SymbolRegistration) fn_decl(fn_node C.TSNode) ?&Symbol {
 		if receivers.len != 0 {
 			mut parent := receivers[0].return_type
 			if !isnil(parent) && !parent.is_void() {
-				// eprintln('adding ${fn_sym.name} to ${parent.kind} ${parent.gen_str()} ${parent.access} ${parent.is_void()}')
-				if receivers[0].access == .private_mutable {
-					fn_sym.access = if fn_sym.access == .private {
-						receivers[0].access
-					} else {
-						SymbolAccess.public_mutable
-					}
-				}
 				parent.add_child(mut fn_sym) or {}
 			}
+			fn_sym.parent = receivers[0]
 			scope.register(receivers[0]) or {}
 		}
 		// unsafe { receivers.free() }
