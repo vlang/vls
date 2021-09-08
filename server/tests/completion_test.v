@@ -171,6 +171,13 @@ const completion_results = {
 	]
 	'filtered_methods_in_immutable_var.vv': [
 		lsp.CompletionItem{
+			label: 'set_name'
+			kind: .method
+			detail: 'fn (mut f Foo) set_name(name string)'
+			insert_text: 'set_name(\$0)'
+			insert_text_format: .snippet
+		},
+		lsp.CompletionItem{
 			label: 'lol'
 			kind: .method
 			detail: 'fn (f Foo) lol() string'
@@ -259,7 +266,7 @@ const completion_results = {
 		lsp.CompletionItem{
 			label: 'theres_a_method'
 			kind: .method
-			detail: 'fn (Barw) theres_a_method()'
+			detail: 'fn (b Barw) theres_a_method()'
 			insert_text: 'theres_a_method()'
 			insert_text_format: .plain_text
 		},
@@ -274,7 +281,7 @@ const completion_results = {
 		lsp.CompletionItem{
 			label: 'lol'
 			kind: .method
-			detail: 'fn (Foo) lol() string'
+			detail: 'fn (f Foo) lol() string'
 			insert_text: 'lol()'
 			insert_text_format: .plain_text
 		},
