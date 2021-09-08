@@ -313,7 +313,7 @@ const completion_results = {
 		lsp.CompletionItem{
 			label: 'Point'
 			kind: .struct_
-			detail: 'Point'
+			detail: 'pub struct Point'
 			insert_text: 'Point{a:\$0, b:\$1}'
 			insert_text_format: .snippet
 		},
