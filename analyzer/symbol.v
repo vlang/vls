@@ -194,7 +194,7 @@ pub fn (info &Symbol) gen_str() string {
 			sb.write_string(info.access.str())
 			if info.kind == .field {
 				sb.write_b(`(`)
-				sb.write_string(info.parent.gen_str())
+				sb.write_string(info.parent.name)
 				sb.write_b(`)`)
 				sb.write_b(`.`)
 			}
@@ -234,6 +234,16 @@ pub fn (info &Symbol) gen_str() string {
 					}
 				}
 			}
+		}
+		.struct_ {
+			sb.write_string(info.access.str())
+			sb.write_string('struct ')
+			sb.write_string(info.name)
+		}
+		.enum_ {
+			sb.write_string(info.access.str())
+			sb.write_string('enum ')
+			sb.write_string(info.name)
 		}
 		else {
 			// sb.write_string(info.kind.str())
