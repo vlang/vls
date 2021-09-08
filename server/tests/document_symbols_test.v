@@ -59,7 +59,7 @@ const doc_symbols_result = {
 			}
 		},
 		lsp.SymbolInformation{
-			name: 'Person.say'
+			name: 'p.say'
 			kind: .method
 			location: lsp.Location{
 				range: lsp.Range{
