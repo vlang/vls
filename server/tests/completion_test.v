@@ -198,19 +198,19 @@ const completion_results = {
 		lsp.CompletionItem{
 			label: 'DB'
 			kind: .struct_
-			detail: 'DB'
+			detail: 'pub struct DB'
 			insert_text: 'DB'
 		},
 		lsp.CompletionItem{
 			label: 'Row'
 			kind: .struct_
-			detail: 'Row'
+			detail: 'pub struct Row'
 			insert_text: 'Row'
 		},
 		lsp.CompletionItem{
 			label: 'Config'
 			kind: .struct_
-			detail: 'Config'
+			detail: 'pub struct Config'
 			insert_text: 'Config'
 		},
 		lsp.CompletionItem{
@@ -313,7 +313,7 @@ const completion_results = {
 		lsp.CompletionItem{
 			label: 'Point'
 			kind: .struct_
-			detail: 'Point'
+			detail: 'pub struct Point'
 			insert_text: 'Point{a:\$0, b:\$1}'
 			insert_text_format: .snippet
 		},
@@ -358,13 +358,13 @@ const completion_results = {
 		lsp.CompletionItem{
 			label: 'Foo'
 			kind: .struct_
-			detail: 'Foo'
+			detail: 'struct Foo'
 			insert_text: 'Foo'
 		},
 		lsp.CompletionItem{
 			label: 'Bar'
 			kind: .struct_
-			detail: 'Bar'
+			detail: 'struct Bar'
 			insert_text: 'Bar'
 		},
 	]

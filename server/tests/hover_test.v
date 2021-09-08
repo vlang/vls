@@ -85,7 +85,7 @@ const hover_results = {
 		}
 	}
 	'enum.vv':                  lsp.Hover{
-		contents: lsp.MarkedString{'v', 'Color'}
+		contents: lsp.MarkedString{'v', 'enum Color'}
 		range: lsp.Range{
 			start: lsp.Position{0, 5}
 			end: lsp.Position{0, 10}
@@ -142,7 +142,7 @@ const hover_results = {
 		}
 	}
 	'struct.vv':                lsp.Hover{
-		contents: lsp.MarkedString{'v', 'Abc'}
+		contents: lsp.MarkedString{'v', 'struct Abc'}
 		range: lsp.Range{
 			start: lsp.Position{0, 7}
 			end: lsp.Position{0, 10}
