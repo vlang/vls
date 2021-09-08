@@ -198,19 +198,19 @@ const completion_results = {
 		lsp.CompletionItem{
 			label: 'DB'
 			kind: .struct_
-			detail: 'DB'
+			detail: 'pub struct DB'
 			insert_text: 'DB'
 		},
 		lsp.CompletionItem{
 			label: 'Row'
 			kind: .struct_
-			detail: 'Row'
+			detail: 'pub struct Row'
 			insert_text: 'Row'
 		},
 		lsp.CompletionItem{
 			label: 'Config'
 			kind: .struct_
-			detail: 'Config'
+			detail: 'pub struct Config'
 			insert_text: 'Config'
 		},
 		lsp.CompletionItem{
