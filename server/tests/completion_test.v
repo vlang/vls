@@ -164,7 +164,7 @@ const completion_results = {
 	'filtered_fields_in_selector.vv':       [
 		lsp.CompletionItem{
 			label: 'output_file_name'
-			detail: 'pub mut (Log).output_file_name string'
+			detail: 'pub mut Log.output_file_name string'
 			kind: .property
 			insert_text: 'output_file_name'
 		},
