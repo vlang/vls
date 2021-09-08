@@ -173,7 +173,7 @@ const completion_results = {
 		lsp.CompletionItem{
 			label: 'lol'
 			kind: .method
-			detail: 'fn (Foo) lol() string'
+			detail: 'fn (f Foo) lol() string'
 			insert_text: 'lol()'
 			insert_text_format: .plain_text
 		},
@@ -182,14 +182,14 @@ const completion_results = {
 		lsp.CompletionItem{
 			label: 'set_name'
 			kind: .method
-			detail: 'mut fn (Foo) set_name(name string)'
+			detail: 'fn (mut f Foo) set_name(name string)'
 			insert_text: 'set_name(\$0)'
 			insert_text_format: .snippet
 		},
 		lsp.CompletionItem{
 			label: 'lol'
 			kind: .method
-			detail: 'fn (Foo) lol() string'
+			detail: 'fn (f Foo) lol() string'
 			insert_text: 'lol()'
 			insert_text_format: .plain_text
 		},

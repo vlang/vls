@@ -71,7 +71,7 @@ const hover_should_return_null = ['node_error.vv']
 
 const hover_results = {
 	'call_expr_method.vv':      lsp.Hover{
-		contents: lsp.MarkedString{'v', 'fn (Foo) call() string'}
+		contents: lsp.MarkedString{'v', 'fn (foo Foo) call() string'}
 		range: lsp.Range{
 			start: lsp.Position{10, 13}
 			end: lsp.Position{10, 17}
