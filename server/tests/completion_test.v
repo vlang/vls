@@ -138,25 +138,25 @@ const completion_results = {
 	'enum_val_in_struct.vv':                [
 		lsp.CompletionItem{
 			label: '.golden_retriever'
-			detail: '(Breed).golden_retriever int'
+			detail: 'Breed.golden_retriever int'
 			kind: .enum_member
 			insert_text: '.golden_retriever'
 		},
 		lsp.CompletionItem{
 			label: '.beagle'
-			detail: '(Breed).beagle int'
+			detail: 'Breed.beagle int'
 			kind: .enum_member
 			insert_text: '.beagle'
 		},
 		lsp.CompletionItem{
 			label: '.chihuahua'
-			detail: '(Breed).chihuahua int'
+			detail: 'Breed.chihuahua int'
 			kind: .enum_member
 			insert_text: '.chihuahua'
 		},
 		lsp.CompletionItem{
 			label: '.dalmatian'
-			detail: '(Breed).dalmatian int'
+			detail: 'Breed.dalmatian int'
 			kind: .enum_member
 			insert_text: '.dalmatian'
 		},
@@ -164,7 +164,7 @@ const completion_results = {
 	'filtered_fields_in_selector.vv':       [
 		lsp.CompletionItem{
 			label: 'output_file_name'
-			detail: 'pub mut (Log).output_file_name string'
+			detail: 'pub mut Log.output_file_name string'
 			kind: .property
 			insert_text: 'output_file_name'
 		},
@@ -253,7 +253,7 @@ const completion_results = {
 		lsp.CompletionItem{
 			label: 'name'
 			kind: .property
-			detail: '(Barw).name string'
+			detail: 'Barw.name string'
 			insert_text: 'name'
 		},
 		lsp.CompletionItem{
@@ -268,7 +268,7 @@ const completion_results = {
 		lsp.CompletionItem{
 			label: 'name'
 			kind: .property
-			detail: '(Foo).name string'
+			detail: 'Foo.name string'
 			insert_text: 'name'
 		},
 		lsp.CompletionItem{
@@ -283,7 +283,7 @@ const completion_results = {
 		lsp.CompletionItem{
 			label: 'len'
 			kind: .property
-			detail: '(Bee).len int'
+			detail: 'Bee.len int'
 			insert_text: 'len'
 		},
 	]
@@ -327,14 +327,14 @@ const completion_results = {
 	'struct_init.vv':                       [
 		lsp.CompletionItem{
 			label: 'name:'
-			detail: '(Person).name string'
+			detail: 'Person.name string'
 			kind: .field
 			insert_text_format: .snippet
 			insert_text: 'name: \$0'
 		},
 		lsp.CompletionItem{
 			label: 'age:'
-			detail: '(Person).age int'
+			detail: 'Person.age int'
 			kind: .field
 			insert_text_format: .snippet
 			insert_text: 'age: \$0'

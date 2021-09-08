@@ -193,9 +193,7 @@ pub fn (info &Symbol) gen_str() string {
 		.variable, .field {
 			sb.write_string(info.access.str())
 			if info.kind == .field {
-				sb.write_b(`(`)
 				sb.write_string(info.parent.name)
-				sb.write_b(`)`)
 				sb.write_b(`.`)
 			}
 

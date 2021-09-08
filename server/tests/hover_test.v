@@ -135,7 +135,7 @@ const hover_results = {
 	}
 	'node_error.vv':            lsp.Hover{}
 	'selector_expr.vv':         lsp.Hover{
-		contents: lsp.MarkedString{'v', '(Person).name string'}
+		contents: lsp.MarkedString{'v', 'Person.name string'}
 		range: lsp.Range{
 			start: lsp.Position{6, 9}
 			end: lsp.Position{6, 13}
@@ -149,21 +149,21 @@ const hover_results = {
 		}
 	}
 	'struct_field.vv':          lsp.Hover{
-		contents: lsp.MarkedString{'v', '(Foo).bar string'}
+		contents: lsp.MarkedString{'v', 'Foo.bar string'}
 		range: lsp.Range{
 			start: lsp.Position{3, 2}
 			end: lsp.Position{3, 5}
 		}
 	}
 	'struct_init_a.vv':         lsp.Hover{
-		contents: lsp.MarkedString{'v', '(Person).name string'}
+		contents: lsp.MarkedString{'v', 'Person.name string'}
 		range: lsp.Range{
 			start: lsp.Position{8, 4}
 			end: lsp.Position{8, 8}
 		}
 	}
 	'struct_init_b.vv':         lsp.Hover{
-		contents: lsp.MarkedString{'v', 'pub mut (Command).usage string'}
+		contents: lsp.MarkedString{'v', 'pub mut Command.usage string'}
 		range: lsp.Range{
 			start: lsp.Position{7, 2}
 			end: lsp.Position{7, 20}
