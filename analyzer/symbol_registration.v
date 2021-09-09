@@ -449,20 +449,20 @@ fn (mut sr SymbolRegistration) top_level_decl() ? {
 
 			// unsafe { const_syms.free() }
 		}
-		'struct_declaration' {
-			mut sym := sr.struct_decl(sr.cursor.current_node()) ?
-			sr.store.register_symbol(mut sym) ?
-		}
-		'interface_declaration' {
-			mut sym := sr.interface_decl(sr.cursor.current_node()) ?
-			sr.store.register_symbol(mut sym) ?
-		}
 		'enum_declaration' {
 			mut sym := sr.enum_decl(sr.cursor.current_node()) ?
 			sr.store.register_symbol(mut sym) ?
 		}
 		'function_declaration' {
 			mut sym := sr.fn_decl(sr.cursor.current_node()) ?
+			sr.store.register_symbol(mut sym) ?
+		}
+		'interface_declaration' {
+			mut sym := sr.interface_decl(sr.cursor.current_node()) ?
+			sr.store.register_symbol(mut sym) ?
+		}
+		'struct_declaration' {
+			mut sym := sr.struct_decl(sr.cursor.current_node()) ?
 			sr.store.register_symbol(mut sym) ?
 		}
 		'type_declaration' {
