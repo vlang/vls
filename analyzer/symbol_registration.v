@@ -337,17 +337,7 @@ fn (mut sr SymbolRegistration) fn_decl(fn_node C.TSNode) ?&Symbol {
 	mut fn_sym := sr.new_top_level_symbol(name_node, access, .function) ?
 	mut scope := sr.get_scope(body_node) or { &ScopeTree(0) }
 	fn_sym.access = access
-	if return_node.get_text(sr.src_text) == '?' {
-		fn_sym.return_type = &Symbol{
-			name: '?'
-			kind: .optional
-			file_path: ''
-			file_version: 0
-			is_top_level: true
-		}
-	} else {
-		fn_sym.return_type = sr.store.find_symbol_by_type_node(return_node, sr.src_text) or { analyzer.void_type }
-	}
+	fn_sym.return_type = sr.store.find_symbol_by_type_node(return_node, sr.src_text) or { analyzer.void_type }
 
 	mut is_method := false
 	if !receiver_node.is_null() {

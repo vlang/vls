@@ -494,6 +494,9 @@ pub fn symbol_name_from_node(node C.TSNode, src_text []byte) (SymbolKind, string
 		}
 		'option_type' {
 			_, module_name, symbol_name = symbol_name_from_node(node.named_child(0), src_text)
+			if symbol_name == 'void' {
+				symbol_name = ''
+			}
 			return SymbolKind.optional, module_name, '?' + symbol_name
 		}
 		'function_type' {
@@ -575,8 +578,10 @@ pub fn (mut store Store) find_symbol_by_type_node(node C.TSNode, src_text []byte
 				new_sym.add_child(mut val_sym, false) or {}
 			}
 			.chan_, .ref, .optional {
-				mut ref_sym := store.find_symbol_by_type_node(node.named_child(0), src_text) ?
-				new_sym.parent = ref_sym
+				if symbol_name != '?' {
+					mut ref_sym := store.find_symbol_by_type_node(node.named_child(0), src_text) ?
+					new_sym.parent = ref_sym
+				}
 			}
 			else {}
 		}
