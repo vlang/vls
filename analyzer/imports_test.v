@@ -69,6 +69,8 @@ fn test_import_modules_from_tree() ? {
 	assert store.imports[store.cur_dir][1].resolved == false
 	$if macos {
 		assert store.dependency_tree.size() == 2
+	} $else $if msvc {
+		assert store.dependency_tree.size() == 4
 	} $else {
 		assert store.dependency_tree.size() == 3
 	}
@@ -95,6 +97,8 @@ fn test_import_modules_with_edits() ? {
 	assert store.imports[store.cur_dir][0].imported == true
 	$if macos {
 		assert store.dependency_tree.size() == 2
+	} $else $if msvc {
+		assert store.dependency_tree.size() == 4
 	} $else {
 		assert store.dependency_tree.size() == 3
 	}
@@ -143,6 +147,8 @@ fn test_import_modules_with_edits() ? {
 	assert store.imports[store.cur_dir][0].imported == true
 	$if macos {
 		assert store.dependency_tree.size() == 2
+	} $else $if msvc {
+		assert store.dependency_tree.size() == 4
 	} $else {
 		assert store.dependency_tree.size() == 3
 	}
