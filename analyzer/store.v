@@ -495,7 +495,7 @@ pub fn symbol_name_from_node(node C.TSNode, src_text []byte) (SymbolKind, string
 		'option_type' {
 			_, module_name, symbol_name = symbol_name_from_node(node.named_child(0), src_text)
 			if symbol_name == 'void' {
-				symbol_name = ''
+				return SymbolKind.optional, module_name, '?'
 			}
 			return SymbolKind.optional, module_name, '?' + symbol_name
 		}

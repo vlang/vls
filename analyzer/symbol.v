@@ -131,33 +131,18 @@ pub fn (info &Symbol) gen_str() string {
 	// sb.write_string(info.access.str())
 
 	match info.kind {
-		.ref {
-			sb.write_string('&')
-			sb.write_string(info.parent.gen_str())
-		}
-		.chan_ {
-			sb.write_string('chan ')
-			sb.write_string(info.parent.gen_str())
-		}
-		.optional {
-			sb.write_string('?')
-			sb.write_string(info.parent.gen_str())
-		}
-		.map_, .array_, .variadic {
-			sb.write_string(info.name)
-		}
 		// .array_ {
 		// 	sb.write_string('[]')
 		// 	sb.write_string(info.children[0].str())
 		// }
-		.multi_return {
-			sb.write_b(`(`)
-			for v in info.children {
-				if v.kind !in analyzer.kinds_in_multi_return_to_be_excluded {
-					sb.write_string(v.gen_str())
-				}
-			}
-			sb.write_b(`)`)
+		.chan_ {
+			sb.write_string('chan ')
+			sb.write_string(info.parent.gen_str())
+		}
+		.enum_ {
+			sb.write_string(info.access.str())
+			sb.write_string('enum ')
+			sb.write_string(info.name)
 		}
 		.function, .function_type {
 			sb.write_string(info.access.str())
@@ -190,22 +175,30 @@ pub fn (info &Symbol) gen_str() string {
 				sb.write_string(info.return_type.name)
 			}
 		}
-		.variable, .field {
-			sb.write_string(info.access.str())
-			if info.kind == .field {
-				sb.write_string(info.parent.name)
-				sb.write_b(`.`)
-			}
-
+		.map_, .array_, .variadic {
 			sb.write_string(info.name)
-			if !info.return_type.is_void() {
-				sb.write_b(` `)
-				if info.return_type.kind == .function_type {
-					sb.write_string(info.return_type.gen_str())
-				} else {
-					sb.write_string(info.return_type.name)
+		}
+		.multi_return {
+			sb.write_b(`(`)
+			for v in info.children {
+				if v.kind !in analyzer.kinds_in_multi_return_to_be_excluded {
+					sb.write_string(v.gen_str())
 				}
 			}
+			sb.write_b(`)`)
+		}
+		.optional {
+			sb.write_string('?')
+			sb.write_string(info.parent.gen_str())
+		}
+		.ref {
+			sb.write_string('&')
+			sb.write_string(info.parent.gen_str())
+		}
+		.struct_ {
+			sb.write_string(info.access.str())
+			sb.write_string('struct ')
+			sb.write_string(info.name)
 		}
 		.typedef, .sumtype {
 			if info.kind == .typedef && info.parent.is_void() {
@@ -233,15 +226,22 @@ pub fn (info &Symbol) gen_str() string {
 				}
 			}
 		}
-		.struct_ {
+		.variable, .field {
 			sb.write_string(info.access.str())
-			sb.write_string('struct ')
+			if info.kind == .field {
+				sb.write_string(info.parent.name)
+				sb.write_b(`.`)
+			}
+
 			sb.write_string(info.name)
-		}
-		.enum_ {
-			sb.write_string(info.access.str())
-			sb.write_string('enum ')
-			sb.write_string(info.name)
+			if !info.return_type.is_void() {
+				sb.write_b(` `)
+				if info.return_type.kind == .function_type {
+					sb.write_string(info.return_type.gen_str())
+				} else {
+					sb.write_string(info.return_type.name)
+				}
+			}
 		}
 		else {
 			// sb.write_string(info.kind.str())
