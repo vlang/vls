@@ -257,18 +257,7 @@ pub fn (mut ss Store) register_symbol(mut info Symbol) ?&Symbol {
 				existing_sym.name = info.name.clone()
 			}
 
-			if existing_sym.children.len != 0 {
-				// Add children to existing symbol's children
-				// if not empty.
-
-				// unsafe { existing_sym.children.free() }
-				existing_sym.children << info.children
-				// unsafe { info.children.free() }
-			} else {
-				// Replace the content if it is.
-				existing_sym.children = info.children
-			}
-
+			existing_sym.children = info.children
 			existing_sym.parent = info.parent
 			existing_sym.return_type = info.return_type
 			existing_sym.language = info.language
