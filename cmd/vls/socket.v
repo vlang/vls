@@ -26,7 +26,7 @@ pub fn (mut sck Socket) init() ? {
 		sck.listener.close() or {}
 		return err
 	}
-	sck.reader = io.new_buffered_reader(reader: sck.conn)
+	sck.reader = io.new_buffered_reader(reader: sck.conn, cap: 1024 * 1024)
 	sck.conn.set_blocking(true) or {}
 }
 
