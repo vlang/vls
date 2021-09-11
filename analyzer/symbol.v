@@ -373,13 +373,20 @@ pub fn (sym &Symbol) is_mutable() bool {
 pub fn (sym &Symbol) free() {
 	unsafe {
 		sym.name.free()
+		sym.file_path.free()
 
 		for v in sym.children {
 			v.free()
 		}
-
 		sym.children.free()
-		// sym.file_path.free()
+
+		if !isnil(sym.parent) {
+			sym.parent.free()
+		}
+
+		if !isnil(sym.return_type) {
+			sym.return_type.free()
+		}
 	}
 }
 
