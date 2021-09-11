@@ -1088,7 +1088,7 @@ pub fn (mut ss Store) cleanup_imports() int {
 
 			// intentionally do not use the variables to the same scope
 			dep_node.remove_dependency(imp_module.path)
-
+			
 			// delete dir if possible
 			ss.delete(imp_module.path)
 			// unsafe { imp_module.free() }
@@ -1241,11 +1241,11 @@ pub fn (mut store Store) import_modules(mut imports []&Import) {
 				// unsafe { sr.cursor.free() }
 			}
 			parser.reset()
-			unsafe {
-				modules_from_dir.free()
-				content.free()
-				tree_from_import.free()
-			}
+			// unsafe {
+			// modules_from_dir.free()
+			// content.free()
+			// tree_from_import.free()
+			// }
 		}
 
 		if imported > 0 {
