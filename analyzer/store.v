@@ -1177,9 +1177,9 @@ pub fn (mut store Store) import_modules_from_tree(tree &C.TSTree, src []byte, lo
 pub fn (mut store Store) import_modules(mut imports []&Import) {
 	mut parser := tree_sitter.new_parser()
 	parser.set_language(v.language)
-	defer {
-		unsafe { parser.free() }
-	}
+	// defer {
+	// 	unsafe { parser.free() }
+	// }
 
 	old_version := store.cur_version
 	old_active_path := store.cur_file_path.clone()
