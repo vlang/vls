@@ -16,20 +16,19 @@ pub fn (scope &ScopeTree) str() string {
 
 [unsafe]
 pub fn (scope &ScopeTree) free() {
-	if isnil(scope) {
-		return
-	}
+	if !isnil(scope) {
+		unsafe {
+			// symbols
+			for ss in scope.symbols {
+				ss.free()
+			}
+			scope.symbols.free()
 
-	// TODO: incremental add/delete scope
-	unsafe {
-		for i := 0; scope.symbols.len != 0; {
-			// scope.symbols[i].free()
-			scope.symbols.delete(i)
-		}
-
-		for i := 0; scope.children.len != 0; {
-			// scope.children[i].free()
-			scope.children.delete(i)
+			// children
+			for cc in scope.children {
+				cc.free()
+			}
+			scope.children.free()
 		}
 	}
 }

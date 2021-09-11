@@ -379,14 +379,6 @@ pub fn (sym &Symbol) free() {
 			v.free()
 		}
 		sym.children.free()
-
-		if !isnil(sym.parent) {
-			sym.parent.free()
-		}
-
-		if !isnil(sym.return_type) {
-			sym.return_type.free()
-		}
 	}
 }
 
