@@ -1077,7 +1077,6 @@ fn (mut ss Store) inject_paths_of_new_imports(mut new_imports []&Import, lookup_
 // This should be used after executing `import_modules_from_tree` or `import_modules`.
 pub fn (mut ss Store) cleanup_imports() int {
 	mut deleted := 0
-	orig_len := ss.imports[ss.cur_dir].len
 	for i := 0; i < ss.imports[ss.cur_dir].len; {
 		mut imp_module := ss.imports[ss.cur_dir][i]
 		if imp_module.ranges.len == 0 || (!imp_module.resolved || !imp_module.imported) {
@@ -1087,11 +1086,9 @@ pub fn (mut ss Store) cleanup_imports() int {
 				return deleted
 			}
 
-			{
-				// intentionally do not use the variables to the same scope
-				deleted_idx := dep_node.remove_dependency(imp_module.path)
-				assert deleted_idx != -2
-			}
+			// intentionally do not use the variables to the same scope
+			dep_node.remove_dependency(imp_module.path)
+			
 			// delete dir if possible
 			ss.delete(imp_module.path)
 			// unsafe { imp_module.free() }
@@ -1107,7 +1104,6 @@ pub fn (mut ss Store) cleanup_imports() int {
 		i++
 	}
 
-	assert ss.imports[ss.cur_dir].len == orig_len - deleted
 	return deleted
 }
 
