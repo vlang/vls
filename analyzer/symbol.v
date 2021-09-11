@@ -124,9 +124,9 @@ pub fn (info &Symbol) gen_str() string {
 	}
 
 	mut sb := strings.new_builder(100)
-	// defer {
-	// 	unsafe { sb.free() }
-	// }
+	defer {
+		unsafe { sb.free() }
+	}
 
 	// sb.write_string(info.access.str())
 
