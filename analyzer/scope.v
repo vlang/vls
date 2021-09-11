@@ -127,7 +127,7 @@ pub fn (mut scope ScopeTree) remove_child(start_byte u32, end_byte u32) bool {
 	}
 
 	if start_byte == scope.start_byte && end_byte == scope.end_byte {
-		// unsafe { scope.free() }
+		unsafe { scope.free() }
 		return true
 	}
 

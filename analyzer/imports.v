@@ -30,9 +30,9 @@ pub fn (mut imp Import) set_alias(file_name string, alias string) {
 		return
 	}
 
-	// if imp.aliases.len == 0 {
-	// 	unsafe { imp.aliases[file_name].free() }
-	// }
+	if imp.aliases.len == 0 {
+		unsafe { imp.aliases[file_name].free() }
+	}
 
 	imp.aliases[file_name] = alias.clone()
 }
@@ -57,10 +57,10 @@ pub fn (mut imp Import) untrack_file(file_name string) {
 pub fn (mut imp Import) set_symbols(file_name string, symbols ...string) {
 	if file_name in imp.symbols {
 		for i := 0; imp.symbols[file_name].len != 0; {
-			// unsafe { imp.symbols[file_name][i].free() }
+			unsafe { imp.symbols[file_name][i].free() }
 			imp.symbols[file_name].delete(i)
 		}
-		// unsafe { imp.symbols[file_name].free() }
+		unsafe { imp.symbols[file_name].free() }
 	}
 
 	imp.symbols[file_name] = symbols

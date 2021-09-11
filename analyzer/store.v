@@ -1088,10 +1088,10 @@ pub fn (mut ss Store) cleanup_imports() int {
 
 			// intentionally do not use the variables to the same scope
 			dep_node.remove_dependency(imp_module.path)
-			
+
 			// delete dir if possible
 			ss.delete(imp_module.path)
-			// unsafe { imp_module.free() }
+			unsafe { imp_module.free() }
 
 			if i < ss.imports[ss.cur_dir].len {
 				ss.imports[ss.cur_dir].delete(i)
@@ -1177,9 +1177,9 @@ pub fn (mut store Store) import_modules_from_tree(tree &C.TSTree, src []byte, lo
 pub fn (mut store Store) import_modules(mut imports []&Import) {
 	mut parser := tree_sitter.new_parser()
 	parser.set_language(v.language)
-	// defer {
-	// 	unsafe { parser.free() }
-	// }
+	defer {
+		unsafe { parser.free() }
+	}
 
 	old_version := store.cur_version
 	old_active_path := store.cur_file_path.clone()
@@ -1238,14 +1238,14 @@ pub fn (mut store Store) import_modules(mut imports []&Import) {
 					}
 				}
 
-				// unsafe { sr.cursor.free() }
+				unsafe { sr.cursor.free() }
 			}
 			parser.reset()
-			// unsafe {
-			// modules_from_dir.free()
-			// content.free()
-			// tree_from_import.free()
-			// }
+			unsafe {
+				modules_from_dir.free()
+				content.free()
+				tree_from_import.free()
+			}
 		}
 
 		if imported > 0 {
@@ -1257,9 +1257,9 @@ pub fn (mut store Store) import_modules(mut imports []&Import) {
 	}
 
 	unsafe {
-		// modules_from_old_dir.free()
-		// old_active_path.free()
-		// old_active_dir.free()
+		modules_from_old_dir.free()
+		old_active_path.free()
+		old_active_dir.free()
 	}
 }
 

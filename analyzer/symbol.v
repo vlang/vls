@@ -124,9 +124,9 @@ pub fn (info &Symbol) gen_str() string {
 	}
 
 	mut sb := strings.new_builder(100)
-	// defer {
-	// 	unsafe { sb.free() }
-	// }
+	defer {
+		unsafe { sb.free() }
+	}
 
 	// sb.write_string(info.access.str())
 
@@ -297,7 +297,7 @@ pub fn (symbols []&Symbol) filter_by_file_path(file_path string) []&Symbol {
 			}
 			filtered << child_sym
 		}
-		// unsafe { filtered_from_children.free() }
+		unsafe { filtered_from_children.free() }
 	}
 	return filtered
 }
