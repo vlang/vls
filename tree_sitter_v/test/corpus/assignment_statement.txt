@@ -40,3 +40,24 @@ fn main() {
         (expression_list
           (int_literal)
           (int_literal))))))
+
+===
+Pointer Assignment
+===
+
+mut ap := &u64(a)
+*ap = size
+
+---
+
+(source_file 
+  (short_var_declaration 
+    (identifier_list (identifier)) 
+    (expression_list 
+      (type_cast_expression 
+        (pointer_type (builtin_type)) 
+        (identifier)))) 
+    (assignment_statement 
+      (assignable_identifier_list 
+        (unary_expression (identifier))) 
+        (expression_list (identifier))))
