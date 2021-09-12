@@ -4,6 +4,7 @@ import x.json2
 import os
 
 #flag -I @VMODROOT/src
+#flag @VMODROOT/src/scanner.o
 #flag @VMODROOT/src/parser.o
 
 #include "@VMODROOT/bindings/v/bindings.h"
