@@ -205,6 +205,10 @@ module.exports = grammar({
 
   word: ($) => $.identifier,
 
+  externals: ($) => [
+    $._automatic_separator
+  ],
+
   inline: ($) => [
     $._type,
     $._string_literal,
@@ -236,7 +240,7 @@ module.exports = grammar({
       repeat(
         seq(
           choice($._top_level_declaration, $._statement),
-          optional(terminator)
+          optional($._automatic_separator)
         )
       ),
 
@@ -816,7 +820,7 @@ module.exports = grammar({
 
     _field_identifier: ($) => alias($.identifier, $.field_identifier),
 
-    _statement_list: ($) => repeat1($._statement),
+    _statement_list: ($) => repeat1(seq($._statement, optional($._automatic_separator))),
 
     _statement: ($) =>
       choice(
@@ -1129,7 +1133,7 @@ module.exports = grammar({
         "{",
         optional(
           repeat(
-            seq(choice($._statement, $._c_directive), optional(terminator))
+            seq(choice($._statement, $._c_directive), optional($._automatic_separator))
           )
         ),
         "}"
