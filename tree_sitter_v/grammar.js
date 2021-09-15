@@ -884,6 +884,8 @@ module.exports = grammar({
 
     block: ($) => seq("{", optional($._statement_list), "}"),
 
+    expression_block: ($) => seq("{", $.expression_list, "}"),
+
     defer_statement: ($) => seq(defer_keyword, $.block),
 
     unsafe_expression: ($) => seq(unsafe_keyword, $.block),
@@ -1172,11 +1174,11 @@ module.exports = grammar({
           field("condition", $._expression),
           field("initializer", $.short_var_declaration)
         ),
-        field("consequence", $.block),
+        field("consequence", choice($.block, $.expression_block)),
         optional(
           seq(
             else_keyword,
-            field("alternative", choice($.block, $.if_expression))
+            field("alternative", choice($.block, $.expression_block, $.if_expression))
           )
         )
       ),
