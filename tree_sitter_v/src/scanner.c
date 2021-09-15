@@ -1,4 +1,6 @@
 #import <tree_sitter/parser.h>
+#import <ctype.h>
+// #import <stdio.h>
 
 enum TokenType {
     AUTOMATIC_SEPARATOR
@@ -33,8 +35,26 @@ bool tree_sitter_v_external_scanner_scan(void *payload, TSLexer *lexer, bool *va
             lexer->advance(lexer, true);
         }
 
+        lexer->mark_end(lexer);
+
         // true if tab count is 1 or below, false if above 1
         bool needs_to_be_separated = tab_count <= 1;
+
+        // for multi-level blocks. not a good code. should be improved later.
+        if (!needs_to_be_separated) {
+            switch (lexer->lookahead) {
+            case '|':
+            case '&':
+                needs_to_be_separated = false;
+                break;
+            default:
+                if (isalpha(lexer->lookahead) || lexer->lookahead == '_') {
+                    needs_to_be_separated = true;
+                }
+            }
+        }
+
+        // printf("needs_to_be_separated: %d\n", is_newline && needs_to_be_separated);
         return is_newline && needs_to_be_separated;
     }
 
