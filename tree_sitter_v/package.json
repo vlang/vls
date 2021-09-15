@@ -10,7 +10,7 @@
   "scripts": {
     "test": "tree-sitter test",
     "generate-scanner": "v -shared -skip-unused -o src/scanner.c scanner/",
-    "generate": "npm run generate-scanner && tree-sitter generate",
+    "generate": "tree-sitter generate",
     "parse": "tree-sitter parse",
     "parseg": "tree-sitter parse --debug-graph"
   },
