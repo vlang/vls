@@ -44,7 +44,7 @@ v run build.vsh clang
 To use the language server, you need to have an editor with [LSP](https://microsoft.github.io/language-server-protocol/) support. See [this link](https://microsoft.github.io/language-server-protocol/implementors/tools/) for a full list of supported editors.
 
 ### VSCode, VSCodium, and other derivatives
-> [GitHub Codespaces](https://github.dev) is not supported yet at this moment. See this [issue comment](https://github.com/vlang/vscode-vlang/issues/272#issuecomment-898271911).
+> [GitHub Web Editor](https://github.dev) is not supported yet at this moment. See this [issue comment](https://github.com/vlang/vscode-vlang/issues/272#issuecomment-898271911).
 
 For [Visual Studio Code](https://code.visualstudio.com) and other derivatives, all you need to do is to install 0.1.4 or above versions of the [V VSCode extension](https://github.com/vlang/vscode-vlang). Afterwards, go to settings and scroll to the V extension section. From there, enable VLS by checking the "Enable VLS" box.
 
