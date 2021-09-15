@@ -1091,6 +1091,7 @@ module.exports = grammar({
             "field",
             choice(
               $.identifier,
+              $.type_identifier,
               $._reserved_identifier,
               $.comptime_identifier,
               $.comptime_selector_expression

@@ -6190,6 +6190,10 @@
                 },
                 {
                   "type": "SYMBOL",
+                  "name": "type_identifier"
+                },
+                {
+                  "type": "SYMBOL",
                   "name": "_reserved_identifier"
                 },
                 {

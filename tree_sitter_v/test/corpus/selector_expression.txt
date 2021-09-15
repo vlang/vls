@@ -21,3 +21,30 @@ fn main() {
         (expression_list
           (selector_expression
             (identifier) (identifier)))))))
+===
+Embedded Selector Expression
+===
+
+fn main() {
+  test.Foo.hello()
+  hello := world.Bar
+}
+
+---
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (block
+      (call_expression
+        (selector_expression
+          (selector_expression 
+            (identifier) (type_identifier))
+          (identifier))
+        (argument_list))
+      (short_var_declaration
+        (identifier_list (identifier))
+        (expression_list
+          (selector_expression
+            (identifier) (type_identifier)))))))
