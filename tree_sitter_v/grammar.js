@@ -740,7 +740,7 @@ module.exports = grammar({
             // Finalize the syntax with keyed elements (aka struct init fields)
             repeat(
               seq(
-                choice(",", terminator),
+                choice(",", $._automatic_separator),
                 choice(
                   $._empty_literal_value,
                   $._expression,
@@ -750,7 +750,7 @@ module.exports = grammar({
                 )
               )
             ),
-            optional(terminator)
+            optional($._automatic_separator)
           )
         ),
         ")"
