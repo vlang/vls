@@ -397,12 +397,12 @@ pub fn detect_vroot_path() ?string {
 	}
 
 	vexe_path_from_env := os.getenv('VEXE')
-	defer {
-		unsafe {
-			vroot_env.free()
-			vexe_path_from_env.free()
-		}
-	}
+	// defer {
+	// 	unsafe {
+	// 		vroot_env.free()
+	// 		vexe_path_from_env.free()
+	// 	}
+	// }
 
 	// Return the directory of VEXE if present
 	if vexe_path_from_env.len != 0 {
@@ -412,19 +412,19 @@ pub fn detect_vroot_path() ?string {
 	// Find the V executable in PATH
 	path_env := os.getenv('PATH')
 	paths := path_env.split(path_list_sep)
-	defer {
-		unsafe {
-			vexe_path_from_env.free()
-			paths.free()
-		}
-	}
+	// defer {
+	// 	unsafe {
+	// 		vexe_path_from_env.free()
+	// 		paths.free()
+	// 	}
+	// }
 
 	for path in paths {
 		full_path := os.join_path(path, v_exec_name)
 		if os.exists(full_path) && os.is_executable(full_path) {
-			defer {
-				unsafe { full_path.free() }
-			}
+			// defer {
+			// 	unsafe { full_path.free() }
+			// }
 			if os.is_link(full_path) {
 				// Get the real path of the V executable
 				full_real_path := os.real_path(full_path)
@@ -436,7 +436,7 @@ pub fn detect_vroot_path() ?string {
 				return os.dir(full_path)
 			}
 		}
-		unsafe { full_path.free() }
+		// unsafe { full_path.free() }
 	}
 
 	return error('V path not found.')

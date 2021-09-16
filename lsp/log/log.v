@@ -143,7 +143,7 @@ fn (mut l Log) write(item LogItem) {
 	}
 
 	l.last_timestamp = item.timestamp
-	unsafe { content.free() }
+	// unsafe { content.free() }
 }
 
 // request logs a request message.

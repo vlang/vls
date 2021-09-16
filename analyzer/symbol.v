@@ -372,8 +372,8 @@ pub fn (sym &Symbol) is_mutable() bool {
 [unsafe]
 pub fn (sym &Symbol) free() {
 	unsafe {
-		sym.name.free()
-		sym.file_path.free()
+		// sym.name.free()
+		// sym.file_path.free()
 
 		for v in sym.children {
 			v.free()

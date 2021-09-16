@@ -66,10 +66,10 @@ fn (mut ls Vls) did_open(_ string, params string) {
 			analyze(mut ls.store, ls.root_uri, ls.trees[file_uri], ls.sources[file_uri])
 			ls.show_diagnostics(file_uri)
 
-			unsafe {
-				full_path.free()
-				file_uri.free()
-			}
+			// unsafe {
+			// 	full_path.free()
+			// 	file_uri.free()
+			// }
 		}
 		ls.store.set_active_file_path(uri.path(), ls.sources[uri].version)
 		unsafe { files.free() }
@@ -183,7 +183,7 @@ fn (mut ls Vls) did_change(_ string, params string) {
 			new_end_point: lsp_pos_to_tspoint(new_end_pos)
 		)
 
-		unsafe { content_change.text.free() }
+		// unsafe { content_change.text.free() }
 	}
 
 	// See comment in `did_open`.
