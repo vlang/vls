@@ -934,7 +934,7 @@ module.exports = grammar({
     fn_literal: ($) =>
       prec.right(
         seq(
-          "fn",
+          fn_keyword,
           field("exposed_variables", optional($.exposed_variables_list)),
           field("parameters", $.parameter_list),
           field("result", optional($._type)),
