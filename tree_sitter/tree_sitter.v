@@ -260,9 +260,9 @@ pub fn (node C.TSNode) named_child_count() u32 {
 
 [inline]
 pub fn (node C.TSNode) child_by_field_name(name string) C.TSNode {
-	defer {
-		unsafe { name.free() }
-	}
+	// defer {
+	// 	unsafe { name.free() }
+	// }
 	return C.ts_node_child_by_field_name(node, &char(name.str), u32(name.len))
 }
 

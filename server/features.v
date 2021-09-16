@@ -52,9 +52,9 @@ fn (mut ls Vls) formatting(id string, params string) {
 
 	if p.code > 0 {
 		errors := p.stderr_slurp().trim_space()
-		defer {
-			unsafe { errors.free() }
-		}
+		// defer {
+		// 	unsafe { errors.free() }
+		// }
 
 		ls.show_message(errors, .info)
 		ls.send_null(id)
@@ -62,9 +62,9 @@ fn (mut ls Vls) formatting(id string, params string) {
 	}
 
 	output := p.stdout_slurp()
-	defer {
-		unsafe { output.free() }
-	}
+	// defer {
+	// 	unsafe { output.free() }
+	// }
 
 	ls.send(jsonrpc.Response<[]lsp.TextEdit>{
 		id: id
@@ -89,7 +89,7 @@ fn (mut ls Vls) workspace_symbol(id string, _ string) {
 					workspace_symbols << child_sym_info
 				}
 			} else {
-				unsafe { uri.free() }
+				// unsafe { uri.free() }
 			}
 		}
 	}
@@ -375,7 +375,7 @@ fn (mut builder CompletionBuilder) build_suggestions_from_list(node C.TSNode) {
 			if isnil(returned_sym) {
 				return
 			}
-			
+
 			if call_expr_arg_cur_idx < u32(returned_sym.children.len) {
 				builder.filter_return_type = returned_sym.children[int(call_expr_arg_cur_idx)].return_type
 				builder.show_local = true
@@ -392,7 +392,7 @@ fn (mut builder CompletionBuilder) build_suggestions_from_list(node C.TSNode) {
 			builder.show_local = false
 			builder.show_global = true
 			builder.filter_sym_kinds = [
-				analyzer.SymbolKind.typedef, 
+				analyzer.SymbolKind.typedef,
 				.struct_,
 				.enum_,
 				.interface_,
@@ -603,7 +603,7 @@ fn (mut builder CompletionBuilder) build_global_suggestions() {
 				|| (builder.filter_sym_kinds.len != 0 && sym.kind !in builder.filter_sym_kinds) {
 				continue
 			}
-			
+
 			// is_type_decl := false
 			is_type_decl := builder.parent_node.get_type() == 'type_declaration'
 			builder.add(symbol_to_completion_item(sym, !is_type_decl) or { continue })

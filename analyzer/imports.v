@@ -34,7 +34,7 @@ pub fn (mut imp Import) set_alias(file_name string, alias string) {
 	// 	unsafe { imp.aliases[file_name].free() }
 	// }
 
-	imp.aliases[file_name] = alias.clone()
+	imp.aliases[file_name] = alias
 }
 
 // track_file records the location of the import declaration of a file
@@ -73,15 +73,15 @@ pub fn (mut imp Import) set_path(path string) {
 	}
 
 	imp.resolved = true
-	imp.path = path.clone()
+	imp.path = path
 }
 
 [unsafe]
 pub fn (imp &Import) free() {
 	unsafe {
-		imp.absolute_module_name.free()
-		imp.module_name.free()
-		imp.path.free()
+		//imp.absolute_module_name.free()
+		//imp.module_name.free()
+		//imp.path.free()
 		imp.ranges.free()
 		imp.aliases.free()
 		imp.symbols.free()

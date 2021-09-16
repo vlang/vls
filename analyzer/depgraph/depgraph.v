@@ -21,7 +21,7 @@ pub fn (tree &Tree) has(id string) bool {
 }
 
 pub fn (mut tree Tree) add(id string, dependencies ...string) &Node {
-	new_id := id.clone()
+	new_id := id
 	tree.keys << new_id
 	tree.values << &Node{tree, new_id, dependencies}
 	defer {
