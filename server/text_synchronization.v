@@ -40,7 +40,7 @@ fn (mut ls Vls) did_open(_ string, params string) {
 
 			if file_uri != uri {
 				ls.sources[file_uri] = File{
-					uri: file_uri.clone()
+					uri: file_uri
 					source: os.read_bytes(full_path) or { [] }
 				}
 				source_str := ls.sources[file_uri].source.bytestr()
@@ -106,7 +106,7 @@ fn (mut ls Vls) did_change(_ string, params string) {
 
 	ls.store.set_active_file_path(uri.path(), did_change_params.text_document.version)
 
-	mut new_src := ls.sources[uri].source.clone()
+	mut new_src := ls.sources[uri].source
 	ls.publish_diagnostics(uri, []lsp.Diagnostic{})
 
 	for content_change in did_change_params.content_changes {

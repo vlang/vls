@@ -51,7 +51,7 @@ pub fn (mut ss Store) report_error(err IError) {
 		ss.report(
 			content: err.msg
 			range: err.range
-			file_path: ss.cur_file_path.clone()
+			file_path: ss.cur_file_path
 		)
 	}
 }

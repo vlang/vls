@@ -256,7 +256,7 @@ pub fn (mut ss Store) register_symbol(mut info Symbol) ?&Symbol {
 
 			if existing_sym.name != info.name {
 				// unsafe { existing_sym.name.free() }
-				existing_sym.name = info.name.clone()
+				existing_sym.name = info.name
 			}
 
 			existing_sym.children = info.children
@@ -529,7 +529,7 @@ pub fn (mut store Store) find_symbol_by_type_node(node C.TSNode, src_text []byte
 		return store.find_fn_symbol(module_name, return_type, parameters) or {
 			mut new_sym := Symbol{
 				name: analyzer.anon_fn_prefix + store.anon_fn_counter.str()
-				file_path: store.cur_file_path.clone()
+				file_path: store.cur_file_path
 				file_version: store.cur_version
 				is_top_level: true
 				kind: sym_kind
@@ -547,7 +547,7 @@ pub fn (mut store Store) find_symbol_by_type_node(node C.TSNode, src_text []byte
 
 	return store.find_symbol(module_name, symbol_name) or {
 		mut new_sym := Symbol{
-			name: symbol_name.clone()
+			name: symbol_name
 			is_top_level: true
 			file_path: os.join_path(store.get_module_path(module_name), 'placeholder.vv')
 			file_version: 0
@@ -1058,7 +1058,7 @@ fn (mut ss Store) inject_paths_of_new_imports(mut new_imports []&Import, lookup_
 			for file_path, range in new_import.ranges {
 				ss.report(
 					content: 'Module `$new_import.absolute_module_name` not found'
-					file_path: file_path.clone()
+					file_path: file_path
 					range: range
 				)
 
@@ -1185,8 +1185,8 @@ pub fn (mut store Store) import_modules(mut imports []&Import) {
 	// }
 
 	old_version := store.cur_version
-	old_active_path := store.cur_file_path.clone()
-	old_active_dir := store.cur_dir.clone()
+	old_active_path := store.cur_file_path
+	old_active_dir := store.cur_dir
 	modules_from_old_dir := os.join_path(old_active_dir, 'modules')
 
 	for i, new_import in imports {
