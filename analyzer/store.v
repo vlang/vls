@@ -659,7 +659,7 @@ pub fn (mut ss Store) infer_symbol_from_node(node C.TSNode, src_text []byte) ?&S
 		'type_initializer' {
 			return ss.find_symbol_by_type_node(node.child_by_field_name('type'), src_text)
 		}
-		'type_identifier', 'array_type', 'map_type', 'pointer_type', 'variadic_type',
+		'type_identifier', 'array', 'array_type', 'map_type', 'pointer_type', 'variadic_type',
 		'builtin_type' {
 			return ss.find_symbol_by_type_node(node, src_text)
 		}
@@ -810,6 +810,9 @@ pub fn (mut ss Store) infer_value_type_from_node(node C.TSNode, src_text []byte)
 		'range' {
 			// TODO: detect starting and ending types
 			type_name = '[]int'
+		}
+		'array' {
+			type_name = '[]' + ss.infer_value_type_from_node(node.child(1), src_text).name
 		}
 		'binary_expression' {
 			// TODO:
@@ -1088,7 +1091,7 @@ pub fn (mut ss Store) cleanup_imports() int {
 
 			// intentionally do not use the variables to the same scope
 			dep_node.remove_dependency(imp_module.path)
-			
+
 			// delete dir if possible
 			ss.delete(imp_module.path)
 			// unsafe { imp_module.free() }
