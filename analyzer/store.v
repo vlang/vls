@@ -490,7 +490,7 @@ pub fn symbol_name_from_node(node C.TSNode, src_text []byte) (SymbolKind, string
 			}
 			return SymbolKind.optional, module_name, '?' + symbol_name
 		}
-		'function_type' {
+		'function_type', 'fn_literal' {
 			return SymbolKind.function_type, module_name, symbol_name
 		}
 		'variadic_type' {
@@ -660,7 +660,7 @@ pub fn (mut ss Store) infer_symbol_from_node(node C.TSNode, src_text []byte) ?&S
 			return ss.find_symbol_by_type_node(node.child_by_field_name('type'), src_text)
 		}
 		'type_identifier', 'array', 'array_type', 'map_type', 'pointer_type', 'variadic_type',
-		'builtin_type' {
+		'builtin_type', 'fn_literal' {
 			return ss.find_symbol_by_type_node(node, src_text)
 		}
 		'selector_expression' {
