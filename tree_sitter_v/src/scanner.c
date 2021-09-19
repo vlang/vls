@@ -57,8 +57,12 @@ bool tree_sitter_v_external_scanner_scan(void *payload, TSLexer *lexer, bool *va
             case '&':
                 needs_to_be_separated = false;
                 break;
+            case '*':
+            case '_':
+                needs_to_be_separated = true;
+                break;
             default:
-                if (isalpha(lexer->lookahead) || lexer->lookahead == '_') {
+                if (isalpha(lexer->lookahead)) {
                     needs_to_be_separated = true;
                 }
                 break;
