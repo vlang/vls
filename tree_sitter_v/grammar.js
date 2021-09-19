@@ -1410,16 +1410,18 @@ module.exports = grammar({
         "}"
       ),
 
+    case_list: ($) => 
+      comma_sep1(
+        choice(
+          $._expression,
+          $._simple_type,
+          alias($._definite_range, $.range)
+        )
+      ),
+
     expression_case: ($) =>
       seq(
-        field(
-          "value",
-          choice(
-            $.expression_list,
-            $.type_list,
-            alias($._definite_range, $.range)
-          )
-        ),
+        field("value", $.case_list),
         field("consequence", $.block)
       ),
 

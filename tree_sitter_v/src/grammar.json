@@ -7888,6 +7888,67 @@
         }
       ]
     },
+    "case_list": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "CHOICE",
+          "members": [
+            {
+              "type": "SYMBOL",
+              "name": "_expression"
+            },
+            {
+              "type": "SYMBOL",
+              "name": "_simple_type"
+            },
+            {
+              "type": "ALIAS",
+              "content": {
+                "type": "SYMBOL",
+                "name": "_definite_range"
+              },
+              "named": true,
+              "value": "range"
+            }
+          ]
+        },
+        {
+          "type": "REPEAT",
+          "content": {
+            "type": "SEQ",
+            "members": [
+              {
+                "type": "STRING",
+                "value": ","
+              },
+              {
+                "type": "CHOICE",
+                "members": [
+                  {
+                    "type": "SYMBOL",
+                    "name": "_expression"
+                  },
+                  {
+                    "type": "SYMBOL",
+                    "name": "_simple_type"
+                  },
+                  {
+                    "type": "ALIAS",
+                    "content": {
+                      "type": "SYMBOL",
+                      "name": "_definite_range"
+                    },
+                    "named": true,
+                    "value": "range"
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    },
     "expression_case": {
       "type": "SEQ",
       "members": [
@@ -7895,26 +7956,8 @@
           "type": "FIELD",
           "name": "value",
           "content": {
-            "type": "CHOICE",
-            "members": [
-              {
-                "type": "SYMBOL",
-                "name": "expression_list"
-              },
-              {
-                "type": "SYMBOL",
-                "name": "type_list"
-              },
-              {
-                "type": "ALIAS",
-                "content": {
-                  "type": "SYMBOL",
-                  "name": "_definite_range"
-                },
-                "named": true,
-                "value": "range"
-              }
-            ]
+            "type": "SYMBOL",
+            "name": "case_list"
           }
         },
         {
