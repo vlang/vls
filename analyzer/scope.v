@@ -67,7 +67,7 @@ pub fn (mut scope ScopeTree) register(info &Symbol) ? {
 		}
 
 		if existing_sym.name != info.name {
-			existing_sym.name = info.name.clone()
+			existing_sym.name = info.name
 		}
 
 		existing_sym.return_type = info.return_type

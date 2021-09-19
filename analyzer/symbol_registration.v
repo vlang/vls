@@ -33,7 +33,7 @@ fn (sr &SymbolRegistration) new_top_level_symbol(identifier_node C.TSNode, acces
 		access: access
 		kind: kind
 		is_top_level: true
-		file_path: sr.store.cur_file_path.clone()
+		file_path: sr.store.cur_file_path
 		file_version: sr.store.cur_version
 	}
 
@@ -101,7 +101,7 @@ fn (mut sr SymbolRegistration) const_decl(const_node C.TSNode) ?[]&Symbol {
 			access: access
 			range: spec_node.range()
 			is_top_level: true
-			file_path: sr.store.cur_file_path.clone()
+			file_path: sr.store.cur_file_path
 			file_version: sr.store.cur_version
 			return_type: sr.store.infer_value_type_from_node(spec_node.child_by_field_name('value'),
 				sr.src_text)
@@ -171,7 +171,7 @@ fn (mut sr SymbolRegistration) struct_field_decl(field_access SymbolAccess, fiel
 			access: field_access
 			return_type: field_typ
 			is_top_level: true
-			file_path: sr.store.cur_file_path.clone()
+			file_path: sr.store.cur_file_path
 			file_version: sr.store.cur_version
 		}
 	} else {
@@ -182,7 +182,7 @@ fn (mut sr SymbolRegistration) struct_field_decl(field_access SymbolAccess, fiel
 			access: field_access
 			return_type: field_typ
 			is_top_level: true
-			file_path: sr.store.cur_file_path.clone()
+			file_path: sr.store.cur_file_path
 			file_version: sr.store.cur_version
 		}
 	}
@@ -228,7 +228,7 @@ fn (mut sr SymbolRegistration) interface_decl(interface_decl_node C.TSNode) ?&Sy
 					return_type: sr.store.find_symbol_by_type_node(result_node, sr.src_text) or {
 						void_type
 					}
-					file_path: sr.store.cur_file_path.clone()
+					file_path: sr.store.cur_file_path
 					file_version: sr.store.cur_version
 					is_top_level: true
 				}
@@ -299,7 +299,7 @@ fn (mut sr SymbolRegistration) enum_decl(enum_decl_node C.TSNode) ?&Symbol {
 			access: access
 			return_type: int_type
 			is_top_level: true
-			file_path: sr.store.cur_file_path.clone()
+			file_path: sr.store.cur_file_path
 			file_version: sr.store.cur_version
 		}
 
@@ -519,7 +519,7 @@ fn (mut sr SymbolRegistration) short_var_decl(var_decl C.TSNode) ?[]&Symbol {
 				range: left.range()
 				return_type: right_type
 				is_top_level: false
-				file_path: sr.store.cur_file_path.clone()
+				file_path: sr.store.cur_file_path
 				file_version: sr.store.cur_version
 			}
 		}
@@ -703,7 +703,7 @@ fn extract_parameter_list(node C.TSNode, mut store Store, src_text []byte) []&Sy
 			access: access
 			return_type: return_type
 			is_top_level: false
-			file_path: store.cur_file_path.clone()
+			file_path: store.cur_file_path
 			file_version: store.cur_version
 		}
 	}
