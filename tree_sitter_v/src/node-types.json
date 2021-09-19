@@ -1025,6 +1025,29 @@
     }
   },
   {
+    "type": "case_list",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "_expression",
+          "named": true
+        },
+        {
+          "type": "_simple_type",
+          "named": true
+        },
+        {
+          "type": "range",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
     "type": "channel_type",
     "named": true,
     "fields": {
@@ -1414,15 +1437,7 @@
         "required": true,
         "types": [
           {
-            "type": "expression_list",
-            "named": true
-          },
-          {
-            "type": "range",
-            "named": true
-          },
-          {
-            "type": "type_list",
+            "type": "case_list",
             "named": true
           }
         ]
@@ -4009,11 +4024,11 @@
   },
   {
     "type": "float_literal",
-    "named": false
+    "named": true
   },
   {
     "type": "float_literal",
-    "named": true
+    "named": false
   },
   {
     "type": "fn",
@@ -4073,11 +4088,11 @@
   },
   {
     "type": "int_literal",
-    "named": false
+    "named": true
   },
   {
     "type": "int_literal",
-    "named": true
+    "named": false
   },
   {
     "type": "interface",
@@ -4225,6 +4240,10 @@
   },
   {
     "type": "unsafe",
+    "named": false
+  },
+  {
+    "type": "usize",
     "named": false
   },
   {

@@ -22,7 +22,7 @@ fn main() {
       (match_expression
         (identifier)
         (expression_case
-          (expression_list
+          (case_list
             (interpreted_string_literal)
             (interpreted_string_literal))
           (block
@@ -32,7 +32,7 @@ fn main() {
               (expression_list
                 (interpreted_string_literal)))))
         (expression_case
-          (expression_list
+          (case_list
             (interpreted_string_literal))
           (block))
         (default_case (block))))))
@@ -54,7 +54,7 @@ match mut ts.info {
       (identifier)
       (identifier))
     (expression_case
-      (type_list
+      (case_list
         (type_identifier))
       (block))
     (default_case
