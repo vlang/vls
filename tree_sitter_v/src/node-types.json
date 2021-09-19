@@ -2182,6 +2182,10 @@
           {
             "type": "parameter_list",
             "named": true
+          },
+          {
+            "type": "type_only_parameter_list",
+            "named": true
           }
         ]
       },
@@ -3513,7 +3517,7 @@
     "type": "type_selector_expression",
     "named": true,
     "fields": {
-      "field": {
+      "field_name": {
         "multiple": false,
         "required": true,
         "types": [

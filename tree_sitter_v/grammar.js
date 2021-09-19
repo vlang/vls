@@ -1364,7 +1364,7 @@ module.exports = grammar({
       prec.right(
         seq(
           field("name", $._field_identifier),
-          field("parameters", $.parameter_list),
+          field("parameters", choice($.parameter_list, $.type_only_parameter_list)),
           field("result", optional($._type))
         )
       ),

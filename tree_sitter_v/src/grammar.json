@@ -7416,7 +7416,7 @@
         },
         {
           "type": "FIELD",
-          "name": "field",
+          "name": "field_name",
           "content": {
             "type": "CHOICE",
             "members": [
@@ -7589,8 +7589,17 @@
             "type": "FIELD",
             "name": "parameters",
             "content": {
-              "type": "SYMBOL",
-              "name": "parameter_list"
+              "type": "CHOICE",
+              "members": [
+                {
+                  "type": "SYMBOL",
+                  "name": "parameter_list"
+                },
+                {
+                  "type": "SYMBOL",
+                  "name": "type_only_parameter_list"
+                }
+              ]
             }
           },
           {
