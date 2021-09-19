@@ -2059,6 +2059,10 @@
           {
             "type": "parameter_list",
             "named": true
+          },
+          {
+            "type": "type_only_parameter_list",
+            "named": true
           }
         ]
       },
@@ -3842,11 +3846,11 @@
   },
   {
     "type": "float_literal",
-    "named": true
+    "named": false
   },
   {
     "type": "float_literal",
-    "named": false
+    "named": true
   },
   {
     "type": "fn",
@@ -4058,6 +4062,10 @@
   },
   {
     "type": "unsafe",
+    "named": false
+  },
+  {
+    "type": "usize",
     "named": false
   },
   {

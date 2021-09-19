@@ -3501,7 +3501,7 @@
                   },
                   {
                     "type": "STRING",
-                    "value": "size_t"
+                    "value": "usize"
                   },
                   {
                     "type": "STRING",
@@ -4467,7 +4467,7 @@
           },
           {
             "type": "STRING",
-            "value": "size_t"
+            "value": "usize"
           },
           {
             "type": "STRING",
@@ -7517,8 +7517,17 @@
             "type": "FIELD",
             "name": "parameters",
             "content": {
-              "type": "SYMBOL",
-              "name": "parameter_list"
+              "type": "CHOICE",
+              "members": [
+                {
+                  "type": "SYMBOL",
+                  "name": "parameter_list"
+                },
+                {
+                  "type": "SYMBOL",
+                  "name": "type_only_parameter_list"
+                }
+              ]
             }
           },
           {
