@@ -158,7 +158,7 @@ const builtin_type_keywords = [
   "map",
   "chan",
   "size_t",
-  "size_t",
+  "usize",
   "float_literal",
   "int_literal",
   "thread",
