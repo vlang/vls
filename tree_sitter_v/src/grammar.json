@@ -7401,10 +7401,6 @@
                   {
                     "type": "SYMBOL",
                     "name": "type_identifier"
-                  },
-                  {
-                    "type": "SYMBOL",
-                    "name": "qualified_type"
                   }
                 ]
               },
@@ -7420,7 +7416,7 @@
         },
         {
           "type": "FIELD",
-          "name": "field_name",
+          "name": "field",
           "content": {
             "type": "CHOICE",
             "members": [

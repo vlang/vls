@@ -1324,7 +1324,7 @@ module.exports = grammar({
         field(
           "type",
           optional(
-            choice($.type_placeholder, $.type_identifier, $.qualified_type)
+            choice($.type_placeholder, $.type_identifier)
           )
         ),
         ".",

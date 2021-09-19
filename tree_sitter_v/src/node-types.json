@@ -3513,7 +3513,7 @@
     "type": "type_selector_expression",
     "named": true,
     "fields": {
-      "field_name": {
+      "field": {
         "multiple": false,
         "required": true,
         "types": [
@@ -3527,10 +3527,6 @@
         "multiple": false,
         "required": false,
         "types": [
-          {
-            "type": "qualified_type",
-            "named": true
-          },
           {
             "type": "type_identifier",
             "named": true
