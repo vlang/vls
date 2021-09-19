@@ -244,7 +244,6 @@ module.exports = grammar({
       choice(
         $.const_declaration,
         $.global_var_declaration,
-        $._c_directive,
         $.function_declaration,
         $.type_declaration,
         $.struct_declaration,
@@ -834,7 +833,8 @@ module.exports = grammar({
         $.for_statement,
         $.comptime_for_statement,
         $.send_statement,
-        $.block
+        $.block,
+        $.hash_statement
       ),
 
     _simple_statement: ($) =>
@@ -1124,17 +1124,6 @@ module.exports = grammar({
         )
       ),
 
-    _comptime_block: ($) =>
-      seq(
-        "{",
-        optional(
-          repeat(
-            seq(choice($._statement, $._c_directive), optional(terminator))
-          )
-        ),
-        "}"
-      ),
-
     comptime_if_expression: ($) =>
       seq(
         "$" + if_keyword,
@@ -1145,14 +1134,14 @@ module.exports = grammar({
             seq($._expression, optional("?"))
           )
         ),
-        field("consequence", alias($._comptime_block, $.block)),
+        field("consequence", $.block),
         optional(
           seq(
             "$else",
             field(
               "alternative",
               choice(
-                alias($._comptime_block, $.block),
+                $.block,
                 $.comptime_if_expression
               )
             )
@@ -1362,65 +1351,7 @@ module.exports = grammar({
         )
       ),
 
-    _c_directive: ($) =>
-      choice(
-        $.c_include_clause,
-        $.c_flag_clause,
-        $.c_define_clause,
-        $.c_pkgconfig
-      ),
-
-    c_include_clause: ($) =>
-      seq(
-        "#include",
-        field(
-          "path",
-          choice($.interpreted_string_literal, $.c_include_path_string)
-        ),
-        field(
-          "error_message",
-          optional(
-            seq(
-              "#",
-              token(prec(PREC.composite_literal, repeat1(/.|\\\r?\n/))),
-              terminator
-            )
-          )
-        )
-      ),
-
-    // Taken from: https://github.com/tree-sitter/tree-sitter-c/blob/master/grammar.js#L937
-    c_include_path_string: (_) =>
-      token(seq("<", repeat(choice(/[^>\n]/, "\\>")), ">")),
-
-    c_flag_clause: ($) =>
-      seq(
-        "#flag",
-        field("platform", optional($.identifier)),
-        field("flag", optional(seq("-", letter))),
-        field(
-          "value",
-          token(prec(PREC.composite_literal, repeat1(/.|\\\r?\n/)))
-        )
-      ),
-
-    c_define_clause: ($) =>
-      seq(
-        "#define",
-        field("name", alias($._old_identifier, $.identifier)),
-        field(
-          "value",
-          optional(token(prec(PREC.composite_literal, repeat1(/.|\\\r?\n/))))
-        ),
-        terminator
-      ),
-
-    c_pkgconfig: ($) =>
-      seq(
-        "#pkgconfig",
-        token(prec(PREC.composite_literal, repeat1(/.|\\\r?\n/))),
-        terminator
-      ),
+    hash_statement: ($) => seq("#", token.immediate(repeat1(/.|\\\r?\n/)), terminator),
 
     module_clause: ($) =>
       seq(
