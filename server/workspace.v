@@ -12,9 +12,9 @@ fn (mut ls Vls) did_change_watched_files(params string) {
 
 	changes := did_change_watched_params.changes
 	mut is_rename := false
-	
+
 	// NOTE:
-	// 1. Renaming a file returns two events: one "deleted" event for 
+	// 1. Renaming a file returns two events: one "deleted" event for
 	//    the file with old name and one "created" event for the same
 	//    file with new name.
 	// 2. Deleting a folder does not trigger a "deleted" event. Restoring
@@ -27,7 +27,7 @@ fn (mut ls Vls) did_change_watched_files(params string) {
 				if is_rename {
 					prev_uri := changes[i - 1].uri
 					if prev_uri in ls.sources {
-						ls.sources[change.uri] = ls.sources[prev_uri] 
+						ls.sources[change.uri] = ls.sources[prev_uri]
 						ls.sources.delete(prev_uri)
 					}
 
@@ -119,7 +119,7 @@ fn (mut ls Vls) did_change_watched_files(params string) {
 				}
 			}
 		}
-		
+
 		// ls.log_message(change.str(), .info)
 	}
 }
