@@ -218,11 +218,11 @@ fn (mut ls Vls) did_close(_ string, params string) {
 	}
 
 	uri := did_close_params.text_document.uri
-	unsafe {
-		ls.sources[uri].free()
-		ls.trees[uri].free()
-		ls.store.opened_scopes[uri.path()].free()
-	}
+	// unsafe {
+	// 	ls.sources[uri].free()
+	// 	ls.trees[uri].free()
+	// 	ls.store.opened_scopes[uri.path()].free()
+	// }
 	ls.sources.delete(uri)
 	ls.trees.delete(uri)
 	ls.store.opened_scopes.delete(uri.path())

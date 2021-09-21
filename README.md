@@ -83,7 +83,7 @@ For other editors, please refer to the plugin's/editor's documentation for instr
 - [ ] `didChangeWorkspaceFolder`
 - [ ] `didChangeConfiguration`
 - [ ] `configuration`
-- [ ] `didChangeWatchedFiles`
+- [x] `didChangeWatchedFiles`
 - [x] `symbol`
 - [ ] `executeCommand`
 - [ ] `applyEdit`
