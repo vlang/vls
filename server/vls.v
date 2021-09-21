@@ -194,6 +194,9 @@ pub fn (mut ls Vls) dispatch(payload string) {
 			'textDocument/implementation' {
 				ls.implementation(request.id, request.params)
 			}
+			'workspace/didChangeWatchedFiles' {
+				ls.did_change_watched_files(request.params)
+			}
 			else {}
 		}
 	} else {
