@@ -47,7 +47,7 @@ pub:
 pub struct FileEvent {
 pub:
 	uri   DocumentUri
-	@type int
+	typ   FileChangeType [json:'type']
 }
 
 pub enum FileChangeType {
