@@ -47,7 +47,9 @@ fn (mut ls Vls) formatting(id string, params string) {
 	}
 
 	mut p := ls.launch_v_tool('fmt', server.temp_formatting_file_path)
-	defer { p.close() }
+	defer {
+		p.close()
+	}
 	p.wait()
 
 	if p.code > 0 {
@@ -68,10 +70,12 @@ fn (mut ls Vls) formatting(id string, params string) {
 
 	ls.send(jsonrpc.Response<[]lsp.TextEdit>{
 		id: id
-		result: [lsp.TextEdit{
-			range: tsrange_to_lsp_range(tree_range)
-			new_text: output
-		}]
+		result: [
+			lsp.TextEdit{
+				range: tsrange_to_lsp_range(tree_range)
+				new_text: output
+			},
+		]
 	})
 }
 
@@ -254,11 +258,13 @@ fn (mut ls Vls) signature_help(id string, params string) {
 	ls.send(jsonrpc.Response<lsp.SignatureHelp>{
 		id: id
 		result: lsp.SignatureHelp{
-			signatures: [lsp.SignatureInformation{
-				label: sym.gen_str()
-				// documentation: lsp.MarkupContent{}
-				parameters: param_infos
-			}]
+			signatures: [
+				lsp.SignatureInformation{
+					label: sym.gen_str()
+					// documentation: lsp.MarkupContent{}
+					parameters: param_infos
+				},
+			]
 		}
 	})
 }
@@ -397,7 +403,7 @@ fn (mut builder CompletionBuilder) build_suggestions_from_list(node C.TSNode) {
 				.enum_,
 				.interface_,
 				.sumtype,
-				.function_type
+				.function_type,
 			]
 		}
 		else {}
@@ -575,7 +581,9 @@ fn (mut builder CompletionBuilder) build_local_suggestions() {
 		for !isnil(scope) && scope != file_scope {
 			// constants
 			for scope_sym in scope.get_all_symbols() {
-				if !builder.has_same_return_type(scope_sym.return_type) || (builder.filter_sym_kinds.len != 0 && scope_sym.kind !in builder.filter_sym_kinds) {
+				if !builder.has_same_return_type(scope_sym.return_type)
+					|| (builder.filter_sym_kinds.len != 0
+					&& scope_sym.kind !in builder.filter_sym_kinds) {
 					continue
 				}
 
@@ -749,7 +757,7 @@ fn (mut ls Vls) completion(id string, params string) {
 	// purposes.
 	mut builder := CompletionBuilder{
 		store: &ls.store
-		src: src,
+		src: src
 		parent_node: root_node
 	}
 
@@ -889,9 +897,10 @@ fn get_hover_data(mut store analyzer.Store, node C.TSNode, uri lsp.DocumentUri, 
 		}
 	} else if node_type == 'import_path' {
 		found_imp := store.find_import_by_position(node.range()) ?
-		alias := found_imp.aliases[store.cur_file_name] or { found_imp.module_name }
+		alias := found_imp.aliases[store.cur_file_name] or { '' }
 		return lsp.Hover{
-			contents: lsp.v_marked_string('import $found_imp.absolute_module_name as ' + alias)
+			contents: lsp.v_marked_string('import $found_imp.absolute_module_name' +
+				if alias.len > 0 { ' as $alias' } else { '' })
 			range: tsrange_to_lsp_range(found_imp.ranges[store.cur_file_path])
 		}
 	} else if node.parent().is_error() || node.parent().is_missing() {
