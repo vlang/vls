@@ -70,7 +70,7 @@ pub const (
 	]
 )
 
-interface ReceiveSender {
+pub interface ReceiveSender {
 	debug bool
 	init() ?
 	send(data string)
