@@ -15,19 +15,11 @@ fn run_cli(cmd cli.Command) ? {
 	} else {
 		[]string{}
 	}
-	debug_mode := cmd.flags.get_bool('debug') or { false }
 
 	custom_vroot_path := cmd.flags.get_string('vroot') or { '' }
-	socket_mode := cmd.flags.get_bool('socket') or { false }
-	socket_port := cmd.flags.get_int('port') or { 5007 }
 
 	// Setup the comm method and build the language server.
-	mut io := if socket_mode {
-		server.ReceiveSender(Socket{ port: socket_port, debug: debug_mode })
-	} else {
-		server.ReceiveSender(Stdio{ debug: debug_mode })
-	}
-
+	mut io := setup_and_configure_io(cmd)
 	mut ls := server.new(io)
 	if custom_vroot_path.len != 0 {
 		if !os.exists(custom_vroot_path) {
