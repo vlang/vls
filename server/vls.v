@@ -10,7 +10,6 @@ import tree_sitter_v as v
 import analyzer
 import time
 import v.vmod
-import strings
 
 pub const meta = meta_info()
 
@@ -269,28 +268,14 @@ fn (mut ls Vls) panic(message string) {
 }
 
 fn (mut ls Vls) send<T>(resp jsonrpc.Response<T>) {
-	mut resp_wr := strings.new_builder(100)
-	defer { unsafe { resp_wr.free() } }
-	resp_wr.write_string('{"jsonrpc":"${jsonrpc.version}","id":${resp.id}')
-	if resp.id.len == 0 {
-		resp_wr.write_string('null')
-	}
-	if resp.error.code != 0 {
-		err := json.encode(resp.error)
-		resp_wr.write_string(',"error":${err}')
-	} else {
-		res := json.encode(resp.result)
-		resp_wr.write_string(',"result":${res}')
-	}
-	resp_wr.write_b(`}`)
-	str := resp_wr.str()
+	str := resp.json()
 	ls.logger.response(str, .send)
 	ls.io.send(str)
 }
 
 // notify sends a notification to the client
 fn (mut ls Vls) notify<T>(data jsonrpc.NotificationMessage<T>) {
-	str := json.encode(data)
+	str := data.json()
 	ls.logger.notification(str, .send)
 	ls.io.send(str)
 }
