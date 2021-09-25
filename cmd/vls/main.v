@@ -4,8 +4,54 @@ import cli
 import server
 import os
 
-
 fn run_cli(cmd cli.Command) ? {
+	run_as_child := cmd.flags.get_bool('child') or { false }
+	if run_as_child {
+		run_server(cmd) ?
+	} else {
+		flag_discriminator := if cmd.posix_mode { '--' } else { '-' }
+		mut server_args := ['--child']
+		
+		for flag in cmd.flags {
+			match flag.name {
+				'enable', 'disable', 'vroot' {
+					server_args << flag_discriminator + flag.name
+					server_args << cmd.flags.get_string(flag.name) or { '' }
+				}
+				'debug' {
+					// TODO:
+					server_args << flag_discriminator + flag.name
+				}
+				else {}
+			}
+		}
+
+		mut p := os.new_process(os.executable())
+		p.set_args(server_args)
+		p.set_redirect_stdio()
+
+		mut host := VlsHost{
+			io: setup_and_configure_io(cmd)
+			child: p
+		}
+
+		host.run()
+	}
+}
+
+fn setup_and_configure_io(cmd cli.Command) server.ReceiveSender {
+	socket_mode := cmd.flags.get_bool('socket') or { false }
+	socket_port := cmd.flags.get_int('port') or { 5007 }
+	debug_mode := cmd.flags.get_bool('debug') or { false }
+
+	return if socket_mode {
+		server.ReceiveSender(Socket{ port: socket_port, debug: debug_mode })
+	} else {
+		server.ReceiveSender(Stdio{ debug: debug_mode })
+	}
+}
+
+fn run_server(cmd cli.Command) ? {
 	// Fetch the command-line options.
 	enable_flag_raw := cmd.flags.get_string('enable') or { '' }
 	disable_flag_raw := cmd.flags.get_string('disable') or { '' }
@@ -47,6 +93,11 @@ fn main() {
 	}
 
 	cmd.add_flags([
+		cli.Flag{
+			flag: .bool
+			name: 'child',
+			description: 'Runs VLS as a child process.'
+		}
 		cli.Flag{
 			flag: .string
 			name: 'enable'
