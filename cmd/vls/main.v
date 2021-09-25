@@ -96,7 +96,7 @@ fn main() {
 		cli.Flag{
 			flag: .bool
 			name: 'child',
-			description: 'Runs VLS as a child process.'
+			description: 'Runs VLS in child process mode. Beware: using --child directly won\'t trigger features such as error reporting. Use it on your risk.'
 		}
 		cli.Flag{
 			flag: .string
