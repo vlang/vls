@@ -34,7 +34,12 @@ pub fn (mut sck Socket) send(output string) {
 	$if !test {
 		println('[vls] : ${term.red('Sent data')} : Content-Length: $output.len | $output\n')
 	}
-	sck.conn.write_string('Content-Length: $output.len\r\n\r\n$output') or { panic(err) }
+
+	if output.starts_with(content_length) {
+		sck.conn.write_string(output) or { panic(err) }
+	} else {
+		sck.conn.write_string(make_lsp_payload(output)) or { panic(err) }
+	}
 }
 
 [manualfree]
