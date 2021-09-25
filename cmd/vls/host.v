@@ -107,21 +107,27 @@ fn (mut host VlsHost) generate_report() ?string {
 	vdoctor.wait()
 	vdoctor_info := vdoctor.stdout_slurp().trim_space()
 
-	host.child.set_args(['--version'])
-	defer { host.child.close() }
-	host.child.run()
-	host.child.wait()
-	vls_info := host.child.stdout_slurp().trim_space()
+	mut vls_info_proc := new_vls_process('--version')
+	defer { vls_info_proc.close() }
+	vls_info_proc.run()
+	vls_info_proc.wait()
+	vls_info := vls_info_proc.stdout_slurp().trim_space()
 
 	report_file.writeln('## System Information') ?
 	report_file.writeln('### V doctor\n```\n${vdoctor_info}\n```\n') ?
 	report_file.writeln('### VLS info \n```\n${vls_info}\n```\n') ?
+	
+	// Problem Description
 	report_file.writeln('## Problem Description') ?
 	report_file.writeln('<!-- Add your description. What did you do? What file did you open? -->') ?
 	report_file.writeln('<!-- Images, videos, of the demo can be put here -->') ?
+	
+	// Expected Output
 	report_file.writeln('## Expected Output') ?
 	report_file.writeln('<!-- What is the expected output/behavior when executing an action? -->') ?
-	report_file.writeln('## Actual Output\n```\n${host.logger.last_n(host.last_logger_len).trim_space()}\n```\n') ?
+	
+	// Actual Output
+	report_file.writeln('## Actual Output\n```\n${host.stderr_logger.get_last_text()}\n```\n') ?
 	report_file.writeln('## Steps to Reproduce') ?
 	report_file.writeln('<!-- List the steps in order to reproduce the problem -->') ?
 

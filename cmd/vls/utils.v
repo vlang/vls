@@ -28,3 +28,10 @@ fn launch_v_tool(args ...string) ?&os.Process {
 	p.set_redirect_stdio()
 	return p
 }
+
+fn new_vls_process(args ...string) &os.Process {
+	mut p := os.new_process(os.executable())
+	p.set_args(args)
+	p.set_redirect_stdio()
+	return p
+}
