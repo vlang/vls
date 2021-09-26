@@ -147,11 +147,11 @@ pub fn (mut ls Vls) dispatch(payload string) {
 				// or other possible alternatives, the solution for now is to
 				// immediately exit when the server receives a shutdown request.
 				// Freeing extra memory here
-				ls.exit()
-				// ls.shutdown(request.id)
+				ls.shutdown(request.id)
 			}
 			'exit' {
 				// ignore for the reasons stated in the above comment
+				// ls.exit()
 			}
 			'textDocument/didOpen' {
 				ls.did_open(request.id, request.params)
