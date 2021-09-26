@@ -128,9 +128,13 @@ fn (mut host VlsHost) listen_for_output() {
 		mut out := host.child.stdout_read()
 		if out.len == 0 {
 			continue
-		} else if out.len == 4096 {
-			// 4096 is the maximum length for stdout_read
-			out += host.child.stdout_read()
+		} 
+		
+		// 4096 is the maximum length for stdout_read
+		for last_out_len := out.len; last_out_len == 4096; {
+			got := host.child.stdout_read()
+			out += got
+			last_out_len = got.len 
 		}
 
 		host.io.send(out)
