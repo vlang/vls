@@ -12,7 +12,7 @@ fn run_cli(cmd cli.Command) ? {
 		should_generate_report := cmd.flags.get_bool('generate-report') or { false }
 		flag_discriminator := if cmd.posix_mode { '--' } else { '-' }
 		mut server_args := ['--child']
-		
+
 		for flag in cmd.flags {
 			match flag.name {
 				'enable', 'disable', 'vroot' {
@@ -92,9 +92,9 @@ fn main() {
 	cmd.add_flags([
 		cli.Flag{
 			flag: .bool
-			name: 'child',
-			description: 'Runs VLS in child process mode. Beware: using --child directly won\'t trigger features such as error reporting. Use it on your risk.'
-		}
+			name: 'child'
+			description: "Runs VLS in child process mode. Beware: using --child directly won't trigger features such as error reporting. Use it on your risk."
+		},
 		cli.Flag{
 			flag: .string
 			name: 'enable'

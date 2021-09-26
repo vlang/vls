@@ -314,7 +314,7 @@ pub fn (mut ls Vls) start_loop() {
 	go monitor_changes(mut ls)
 	ls.io.init() or { panic(err) }
 
-		// Show message that VLS is not yet ready!
+	// Show message that VLS is not yet ready!
 	ls.show_message('VLS is a work-in-progress, pre-alpha language server. It may not be guaranteed to work reliably due to memory issues and other related factors. We encourage you to submit an issue if you encounter any problems.',
 		.warning)
 

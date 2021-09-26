@@ -11,11 +11,11 @@ const max_stdio_logging_count = 15
 
 struct Logger {
 mut:
-	max_log_count int = max_stdio_logging_count
-	with_timestamp bool = true
+	max_log_count              int  = max_stdio_logging_count
+	with_timestamp             bool = true
 	reset_builder_on_max_count bool
-	log_count int
-	builder strings.Builder = strings.new_builder(10)
+	log_count                  int
+	builder                    strings.Builder = strings.new_builder(10)
 }
 
 fn (mut lg Logger) writeln(content string) int {
@@ -27,7 +27,7 @@ fn (mut lg Logger) writeln(content string) int {
 
 	if lg.max_log_count > 0 && lg.log_count == lg.max_log_count {
 		lg.log_count = 0
-		
+
 		if lg.reset_builder_on_max_count {
 			lg.builder.go_back_to(0)
 		}
@@ -38,8 +38,8 @@ fn (mut lg Logger) writeln(content string) int {
 		if carr_idx != -1 {
 			carr_idx += 4
 		}
-		final_con := if lg.with_timestamp { 
-			'[${time.utc()}] ${content[carr_idx..].trim_space()}\n' 
+		final_con := if lg.with_timestamp {
+			'[$time.utc()] ${content[carr_idx..].trim_space()}\n'
 		} else {
 			content[carr_idx..].trim_space()
 		}
@@ -47,7 +47,7 @@ fn (mut lg Logger) writeln(content string) int {
 		return final_con.len
 	} else {
 		final_con := if lg.with_timestamp {
-			'[${time.utc()}] ${content.trim_space()}'
+			'[$time.utc()] $content.trim_space()'
 		} else {
 			content.trim_space()
 		}
@@ -62,11 +62,18 @@ fn (mut lg Logger) get_text() string {
 
 struct VlsHost {
 mut:
-	io server.ReceiveSender
-	child &os.Process
-	stderr_logger Logger = Logger{max_log_count: 0, with_timestamp: false}
-	stdin_logger Logger = Logger{reset_builder_on_max_count: true}
-	stdout_logger Logger = Logger{reset_builder_on_max_count: true}
+	io            server.ReceiveSender
+	child         &os.Process
+	stderr_logger Logger = Logger{
+		max_log_count: 0
+		with_timestamp: false
+	}
+	stdin_logger Logger = Logger{
+		reset_builder_on_max_count: true
+	}
+	stdout_logger Logger = Logger{
+		reset_builder_on_max_count: true
+	}
 	generate_report bool
 }
 
@@ -93,7 +100,7 @@ fn (mut host VlsHost) run() {
 	go host.listen_for_errors()
 	go host.listen_for_output()
 	go host.listen_for_input()
-	
+
 	host.child.wait()
 	host.child.close()
 	host.handle_exit()
@@ -106,9 +113,7 @@ fn (mut host VlsHost) listen_for_input() {
 		}
 
 		// STDIN
-		content := host.io.receive() or {
-			continue
-		}
+		content := host.io.receive() or { continue }
 
 		final_payload := make_lsp_payload(content)
 		host.child.stdin_write(final_payload)
@@ -142,13 +147,13 @@ fn (mut host VlsHost) listen_for_output() {
 		mut out := host.child.stdout_read()
 		if out.len == 0 {
 			continue
-		} 
-		
+		}
+
 		// 4096 is the maximum length for stdout_read
 		for last_out_len := out.len; last_out_len == 4096; {
 			got := host.child.stdout_read()
 			out += got
-			last_out_len = got.len 
+			last_out_len = got.len
 		}
 
 		host.io.send(out)
@@ -186,17 +191,23 @@ fn (mut host VlsHost) generate_report() ?string {
 	report_file_name := 'vls_report_' + time.utc().unix.str() + '.md'
 	report_file_path := os.join_path(os.home_dir(), report_file_name)
 	mut report_file := os.create(report_file_path) ?
-	defer { report_file.close() }
+	defer {
+		report_file.close()
+	}
 
 	// Get system info first
 	mut vdoctor := launch_v_tool('doctor') ?
-	defer { vdoctor.close() }
+	defer {
+		vdoctor.close()
+	}
 	vdoctor.run()
 	vdoctor.wait()
 	vdoctor_info := vdoctor.stdout_slurp().trim_space()
 
 	mut vls_info_proc := new_vls_process('--version')
-	defer { vls_info_proc.close() }
+	defer {
+		vls_info_proc.close()
+	}
 	vls_info_proc.run()
 	vls_info_proc.wait()
 	vls_info := vls_info_proc.stdout_slurp().trim_space()
@@ -210,7 +221,7 @@ fn (mut host VlsHost) generate_report() ?string {
 	report_file.writeln('## Problem Description') ?
 	report_file.writeln('<!-- Add your description. What did you do? What file did you open? -->') ?
 	report_file.writeln('<!-- Images, videos, of the demo can be put here -->\n') ?
-	
+
 	// Expected Output
 	report_file.writeln('## Expected Output') ?
 	report_file.writeln('<!-- What is the expected output/behavior when executing an action? -->\n') ?

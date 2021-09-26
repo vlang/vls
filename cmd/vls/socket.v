@@ -4,7 +4,9 @@ import term
 import net
 import io
 
-const base_ip = '127.0.0.1' // Loopback address.
+const base_ip = '127.0.0.1'
+
+// Loopback address.
 
 struct Socket {
 mut:
