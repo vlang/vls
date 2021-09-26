@@ -48,7 +48,7 @@ To use the language server, you need to have an editor with [LSP](https://micros
 
 For [Visual Studio Code](https://code.visualstudio.com) and other derivatives, all you need to do is to install 0.1.4 or above versions of the [V VSCode extension](https://github.com/vlang/vscode-vlang). Afterwards, go to settings and scroll to the V extension section. From there, enable VLS by checking the "Enable VLS" box.
 
-If you have VLS downloaded in a custom directory, you need to input the absolute path of the `vls` language server executable to the "Custom Path" setting. If you cloned the repository and compiled it from source, the executable will be in the `vls` root directory. So make sure to add `vls/vls` or `vls/vls.exe` (for Windows).
+If you have VLS downloaded in a custom directory, you need to input the absolute path of the `vls` language server executable to the "Custom Path" setting. If you cloned the repository and compiled it from source, the executable will be in the `vls` root directory. So make sure to add `vls/bin/vls` or `vls/bin/vls.exe` (for Windows).
 
 ![Instructions](images/instructions.png)
 
