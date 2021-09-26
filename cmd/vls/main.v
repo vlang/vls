@@ -9,6 +9,7 @@ fn run_cli(cmd cli.Command) ? {
 	if run_as_child {
 		run_server(cmd) ?
 	} else {
+		should_generate_report := cmd.flags.get_bool('generate-report') or { false }
 		flag_discriminator := if cmd.posix_mode { '--' } else { '-' }
 		mut server_args := ['--child']
 		
@@ -19,7 +20,6 @@ fn run_cli(cmd cli.Command) ? {
 					server_args << cmd.flags.get_string(flag.name) or { '' }
 				}
 				'debug' {
-					// TODO:
 					server_args << flag_discriminator + flag.name
 				}
 				else {}
@@ -29,6 +29,7 @@ fn run_cli(cmd cli.Command) ? {
 		mut host := VlsHost{
 			io: setup_and_configure_io(cmd)
 			child: new_vls_process(...server_args)
+			generate_report: should_generate_report
 		}
 
 		host.run()
@@ -105,6 +106,11 @@ fn main() {
 			name: 'disable'
 			abbrev: 'd'
 			description: 'Disables specific language features.'
+		},
+		cli.Flag{
+			flag: .bool
+			name: 'generate-report'
+			description: "Generates an error report regardless of the language server's output."
 		},
 		cli.Flag{
 			flag: .bool

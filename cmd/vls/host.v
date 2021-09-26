@@ -67,6 +67,7 @@ mut:
 	stderr_logger Logger = Logger{max_log_count: 0, with_timestamp: false}
 	stdin_logger Logger = Logger{reset_builder_on_max_count: true}
 	stdout_logger Logger = Logger{reset_builder_on_max_count: true}
+	generate_report bool
 }
 
 fn (mut host VlsHost) has_child_exited() bool {
@@ -76,6 +77,18 @@ fn (mut host VlsHost) has_child_exited() bool {
 fn (mut host VlsHost) run() {
 	host.io.init() or { panic(err) }
 	host.child.run()
+
+	if host.generate_report {
+		info := jsonrpc.NotificationMessage<lsp.ShowMessageParams>{
+			method: 'window/showMessage'
+			params: lsp.ShowMessageParams{
+				@type: .info
+				message: 'VLS: --generate-report has been enabled. The report file will be generated upon exit.'
+			}
+		}
+
+		host.io.send(info.json())
+	}
 
 	go host.listen_for_errors()
 	go host.listen_for_output()
@@ -144,7 +157,11 @@ fn (mut host VlsHost) listen_for_output() {
 }
 
 fn (mut host VlsHost) handle_exit() {
-	if host.child.code > 0 {
+	if !host.generate_report && host.child.code > 0 {
+		host.generate_report = true
+	}
+
+	if host.generate_report {
 		report_path := host.generate_report() or {
 			// should not happen
 			panic(err)
@@ -199,7 +216,13 @@ fn (mut host VlsHost) generate_report() ?string {
 	report_file.writeln('<!-- What is the expected output/behavior when executing an action? -->\n') ?
 
 	// Actual Output
-	report_file.writeln('## Actual Output\n```\n${host.stderr_logger.get_text()}\n```\n') ?
+	actual_out := host.stderr_logger.get_text()
+	report_file.writeln('## Actual Output') ?
+	if actual_out.len != 0 {
+		report_file.writeln('```\n${actual_out}\n```\n') ?
+	} else {
+		report_file.writeln('N/A\n') ?
+	}
 	report_file.writeln('## Steps to Reproduce') ?
 	report_file.writeln('<!-- List the steps in order to reproduce the problem -->\n') ?
 
