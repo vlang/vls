@@ -65,7 +65,8 @@ mut:
 	io server.ReceiveSender
 	child &os.Process
 	stderr_logger Logger = Logger{max_log_count: 0, with_timestamp: false}
-	stdio_logger Logger = Logger{reset_builder_on_max_count: true}
+	stdin_logger Logger = Logger{reset_builder_on_max_count: true}
+	stdout_logger Logger = Logger{reset_builder_on_max_count: true}
 }
 
 fn (mut host VlsHost) has_child_exited() bool {
@@ -98,7 +99,7 @@ fn (mut host VlsHost) listen_for_input() {
 
 		final_payload := make_lsp_payload(content)
 		host.child.stdin_write(final_payload)
-		host.stdio_logger.writeln(final_payload)
+		host.stdin_logger.writeln(final_payload)
 	}
 }
 
@@ -138,7 +139,7 @@ fn (mut host VlsHost) listen_for_output() {
 		}
 
 		host.io.send(out)
-		host.stdio_logger.writeln(out)
+		host.stdout_logger.writeln(out)
 	}
 }
 
@@ -202,6 +203,8 @@ fn (mut host VlsHost) generate_report() ?string {
 	report_file.writeln('<!-- List the steps in order to reproduce the problem -->') ?
 
 	// Last LSP Requests
-	report_file.writeln('## Last Recorded LSP Requests\n```\n${host.stdio_logger.get_text()}\n```\n') ?
+	report_file.writeln('## Last Recorded LSP Requests') ?
+	report_file.writeln('### Request\n```\n${host.stdin_logger.get_text()}\n```\n') ?
+	report_file.writeln('### Response\n```\n${host.stdout_logger.get_text()}\n```\n') ?
 	return report_file_path
 }
