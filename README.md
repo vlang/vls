@@ -1,7 +1,7 @@
 > ## ⚠️ Warning (Please read this first) ⚠️
 > What you're seeing is the developmental branch of the V Language server. This means that it may not be guaranteed to work reliably on your system.
 >
-> If you are experiencing problems, please consider [filing a bug report](https://github.com/vlang/vls/issues/new).
+> If you are experiencing problems, please consider [filing a bug report](#error-reporting).
 
 # V Language Server
 [![CI](https://github.com/vlang/vls/actions/workflows/ci.yml/badge.svg)](https://github.com/vlang/vls/actions/workflows/ci.yml)
@@ -121,6 +121,11 @@ For other editors, please refer to the plugin's/editor's documentation for instr
 - [ ] `rename`
 - [ ] `prepareRename`
 - [x] `foldingRange`
+
+## Crash Reporting
+When reporting a crash in the language server, you just need to copy the contents of the latest auto-generated error which can be found in the home directory (`C:\Users\<user_name>` for Windows, `/home/<user_name>` for Linux, and `/Users/<user_name>` for MacOS). The contents of the file can be then pasted into the [issue tracker form](https://github.com/vlang/vls/issues/new).
+
+Bugs that are not crashes however can still generate report by passing the `--generate-report` flag to the language server CLI.
 
 ## Debugging
 VLS provides a log file (`${workspacePath}/vls.log`) for debugging the language server incoming requests and outgoing responses / notifications. By default, this can only be saved and accessed on server crash. To save the log on every exit, pass the `--debug` flag to the language server CLI.
