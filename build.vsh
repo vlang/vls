@@ -33,3 +33,4 @@ if ret != 0 {
 }
 
 println('> VLS built successfully!')
+println('Executable saved in: ${real_path(join_path(vls_bin_dir, vls_exec_name))}')
