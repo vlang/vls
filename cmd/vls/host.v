@@ -184,6 +184,7 @@ fn (mut host VlsHost) generate_report() ?string {
 	vls_info_proc.wait()
 	vls_info := vls_info_proc.stdout_slurp().trim_space()
 
+	report_file.writeln('<!-- Copy and paste the contents of this file to https://github.com/vlang/vls/issues/new -->') ?
 	report_file.writeln('## System Information') ?
 	report_file.writeln('### V doctor\n```\n${vdoctor_info}\n```\n') ?
 	report_file.writeln('### VLS info \n```\n${vls_info}\n```\n') ?
@@ -191,16 +192,16 @@ fn (mut host VlsHost) generate_report() ?string {
 	// Problem Description
 	report_file.writeln('## Problem Description') ?
 	report_file.writeln('<!-- Add your description. What did you do? What file did you open? -->') ?
-	report_file.writeln('<!-- Images, videos, of the demo can be put here -->') ?
+	report_file.writeln('<!-- Images, videos, of the demo can be put here -->\n') ?
 	
 	// Expected Output
 	report_file.writeln('## Expected Output') ?
-	report_file.writeln('<!-- What is the expected output/behavior when executing an action? -->') ?
-	
+	report_file.writeln('<!-- What is the expected output/behavior when executing an action? -->\n') ?
+
 	// Actual Output
 	report_file.writeln('## Actual Output\n```\n${host.stderr_logger.get_text()}\n```\n') ?
 	report_file.writeln('## Steps to Reproduce') ?
-	report_file.writeln('<!-- List the steps in order to reproduce the problem -->') ?
+	report_file.writeln('<!-- List the steps in order to reproduce the problem -->\n') ?
 
 	// Last LSP Requests
 	report_file.writeln('## Last Recorded LSP Requests') ?
