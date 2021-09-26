@@ -2,10 +2,7 @@ module main
 
 import strings
 
-const (
-	content_length = 'Content-Length: '
-)
-
+fn C._setmode(int, int)
 fn C.fgetc(stream &C.FILE) int
 
 struct Stdio {
@@ -13,10 +10,21 @@ pub mut:
 	debug bool
 }
 
-pub fn (_ Stdio) init() ? {}
+pub fn (_ Stdio) init() ? {
+	$if windows {
+		// 0x8000 = _O_BINARY from <fcntl.h>
+		// windows replaces \n => \r\n, so \r\n will be replaced to \r\r\n
+		// binary mode prevents this
+		C._setmode(C._fileno(C.stdout), 0x8000)
+	}
+}
 
 pub fn (_ Stdio) send(output string) {
-	print('Content-Length: $output.len\r\n\r\n$output')
+	if output.starts_with(content_length) {
+		print(output)
+	} else {
+		print(make_lsp_payload(output))
+	}
 }
 
 [manualfree]

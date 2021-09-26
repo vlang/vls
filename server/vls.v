@@ -10,7 +10,6 @@ import tree_sitter_v as v
 import analyzer
 import time
 import v.vmod
-import strings
 
 pub const meta = meta_info()
 
@@ -70,7 +69,7 @@ pub const (
 	]
 )
 
-interface ReceiveSender {
+pub interface ReceiveSender {
 	debug bool
 	init() ?
 	send(data string)
@@ -148,11 +147,11 @@ pub fn (mut ls Vls) dispatch(payload string) {
 				// or other possible alternatives, the solution for now is to
 				// immediately exit when the server receives a shutdown request.
 				// Freeing extra memory here
-				ls.exit()
-				// ls.shutdown(request.id)
+				ls.shutdown(request.id)
 			}
 			'exit' {
 				// ignore for the reasons stated in the above comment
+				// ls.exit()
 			}
 			'textDocument/didOpen' {
 				ls.did_open(request.id, request.params)
@@ -269,28 +268,14 @@ fn (mut ls Vls) panic(message string) {
 }
 
 fn (mut ls Vls) send<T>(resp jsonrpc.Response<T>) {
-	mut resp_wr := strings.new_builder(100)
-	defer { unsafe { resp_wr.free() } }
-	resp_wr.write_string('{"jsonrpc":"${jsonrpc.version}","id":${resp.id}')
-	if resp.id.len == 0 {
-		resp_wr.write_string('null')
-	}
-	if resp.error.code != 0 {
-		err := json.encode(resp.error)
-		resp_wr.write_string(',"error":${err}')
-	} else {
-		res := json.encode(resp.result)
-		resp_wr.write_string(',"result":${res}')
-	}
-	resp_wr.write_b(`}`)
-	str := resp_wr.str()
+	str := resp.json()
 	ls.logger.response(str, .send)
 	ls.io.send(str)
 }
 
 // notify sends a notification to the client
 fn (mut ls Vls) notify<T>(data jsonrpc.NotificationMessage<T>) {
-	str := json.encode(data)
+	str := data.json()
 	ls.logger.notification(str, .send)
 	ls.io.send(str)
 }
@@ -329,7 +314,7 @@ pub fn (mut ls Vls) start_loop() {
 	go monitor_changes(mut ls)
 	ls.io.init() or { panic(err) }
 
-		// Show message that VLS is not yet ready!
+	// Show message that VLS is not yet ready!
 	ls.show_message('VLS is a work-in-progress, pre-alpha language server. It may not be guaranteed to work reliably due to memory issues and other related factors. We encourage you to submit an issue if you encounter any problems.',
 		.warning)
 

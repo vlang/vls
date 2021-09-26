@@ -4,9 +4,51 @@ import cli
 import server
 import os
 
-fn C._setmode(int, int)
-
 fn run_cli(cmd cli.Command) ? {
+	run_as_child := cmd.flags.get_bool('child') or { false }
+	if run_as_child {
+		run_server(cmd) ?
+	} else {
+		should_generate_report := cmd.flags.get_bool('generate-report') or { false }
+		flag_discriminator := if cmd.posix_mode { '--' } else { '-' }
+		mut server_args := ['--child']
+
+		for flag in cmd.flags {
+			match flag.name {
+				'enable', 'disable', 'vroot' {
+					server_args << flag_discriminator + flag.name
+					server_args << cmd.flags.get_string(flag.name) or { '' }
+				}
+				'debug' {
+					server_args << flag_discriminator + flag.name
+				}
+				else {}
+			}
+		}
+
+		mut host := VlsHost{
+			io: setup_and_configure_io(cmd)
+			child: new_vls_process(...server_args)
+			generate_report: should_generate_report
+		}
+
+		host.run()
+	}
+}
+
+fn setup_and_configure_io(cmd cli.Command) server.ReceiveSender {
+	socket_mode := cmd.flags.get_bool('socket') or { false }
+	socket_port := cmd.flags.get_int('port') or { 5007 }
+	debug_mode := cmd.flags.get_bool('debug') or { false }
+
+	return if socket_mode {
+		server.ReceiveSender(Socket{ port: socket_port, debug: debug_mode })
+	} else {
+		server.ReceiveSender(Stdio{ debug: debug_mode })
+	}
+}
+
+fn run_server(cmd cli.Command) ? {
 	// Fetch the command-line options.
 	enable_flag_raw := cmd.flags.get_string('enable') or { '' }
 	disable_flag_raw := cmd.flags.get_string('disable') or { '' }
@@ -16,19 +58,11 @@ fn run_cli(cmd cli.Command) ? {
 	} else {
 		[]string{}
 	}
-	debug_mode := cmd.flags.get_bool('debug') or { false }
 
 	custom_vroot_path := cmd.flags.get_string('vroot') or { '' }
-	socket_mode := cmd.flags.get_bool('socket') or { false }
-	socket_port := cmd.flags.get_int('port') or { 5007 }
 
 	// Setup the comm method and build the language server.
-	mut io := if socket_mode {
-		server.ReceiveSender(Socket{ port: socket_port, debug: debug_mode })
-	} else {
-		server.ReceiveSender(Stdio{ debug: debug_mode })
-	}
-
+	mut io := setup_and_configure_io(cmd)
 	mut ls := server.new(io)
 	if custom_vroot_path.len != 0 {
 		if !os.exists(custom_vroot_path) {
@@ -47,12 +81,6 @@ fn run_cli(cmd cli.Command) ? {
 }
 
 fn main() {
-	$if windows {
-		// 0x8000 = _O_BINARY from <fcntl.h>
-		// windows replaces \n => \r\n, so \r\n will be replaced to \r\r\n
-		// binary mode prevents this
-		C._setmode(C._fileno(C.stdout), 0x8000)
-	}
 	mut cmd := cli.Command{
 		name: 'vls'
 		version: server.meta.version
@@ -62,6 +90,11 @@ fn main() {
 	}
 
 	cmd.add_flags([
+		cli.Flag{
+			flag: .bool
+			name: 'child'
+			description: "Runs VLS in child process mode. Beware: using --child directly won't trigger features such as error reporting. Use it on your risk."
+		},
 		cli.Flag{
 			flag: .string
 			name: 'enable'
@@ -73,6 +106,11 @@ fn main() {
 			name: 'disable'
 			abbrev: 'd'
 			description: 'Disables specific language features.'
+		},
+		cli.Flag{
+			flag: .bool
+			name: 'generate-report'
+			description: "Generates an error report regardless of the language server's output."
 		},
 		cli.Flag{
 			flag: .bool

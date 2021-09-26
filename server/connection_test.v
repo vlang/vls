@@ -43,6 +43,9 @@ const init_msg = wrap_request('{"jsonrpc":"2.0","method":"window/showMessage","p
 const editor_info_msg = wrap_request('{"jsonrpc":"2.0","method":"window/logMessage","params":{"type":3,"message":"VLS Version: 0.0.1, OS: linux 64"}}')
 
 fn compile_and_start_vls(args ...string) ?&os.Process {
+	mut final_args := ['--child']
+	final_args << args
+
 	vls_path := get_vls_path(vls_cmd_dir)
 	if !os.exists(vls_path) {
 		os.chdir(vls_cmd_dir) ?
@@ -62,7 +65,7 @@ fn compile_and_start_vls(args ...string) ?&os.Process {
 	}
 
 	assert os.exists(vls_path)
-	return launch_cmd(vls_path, ...args)
+	return launch_cmd(vls_path, ...final_args)
 }
 
 fn test_stdio_connect() ? {

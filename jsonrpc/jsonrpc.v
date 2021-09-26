@@ -1,5 +1,8 @@
 module jsonrpc
 
+import json
+import strings
+
 pub const (
 	// see http://xmlrpc-epi.sourceforge.net/specs/rfc.fault_codes.php
 	version                = '2.0'
@@ -34,10 +37,32 @@ pub:
 	error   ResponseError
 }
 
+pub fn (resp Response<T>) json() string {
+	mut resp_wr := strings.new_builder(100)
+	defer { unsafe { resp_wr.free() } }
+	resp_wr.write_string('{"jsonrpc":"${jsonrpc.version}","id":${resp.id}')
+	if resp.id.len == 0 {
+		resp_wr.write_string('null')
+	}
+	if resp.error.code != 0 {
+		err := json.encode(resp.error)
+		resp_wr.write_string(',"error":${err}')
+	} else {
+		res := json.encode(resp.result)
+		resp_wr.write_string(',"result":${res}')
+	}
+	resp_wr.write_b(`}`)
+	return resp_wr.str()
+}
+
 pub struct NotificationMessage<T> {
 	jsonrpc string = jsonrpc.version
 	method  string
 	params  T
+}
+
+pub fn (notif NotificationMessage<T>) json() string {
+	return json.encode(notif)
 }
 
 pub struct ResponseError {
