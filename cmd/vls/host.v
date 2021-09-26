@@ -162,7 +162,7 @@ fn (mut host VlsHost) handle_exit() {
 
 fn (mut host VlsHost) generate_report() ?string {
 	report_file_name := 'vls_report_' + time.utc().unix.str() + '.md'
-	report_file_path := os.join_path(os.temp_dir(), report_file_name)
+	report_file_path := os.join_path(os.home_dir(), report_file_name)
 	mut report_file := os.create(report_file_path) ?
 	defer { report_file.close() }
 
