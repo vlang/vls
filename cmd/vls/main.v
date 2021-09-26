@@ -26,13 +26,9 @@ fn run_cli(cmd cli.Command) ? {
 			}
 		}
 
-		mut p := os.new_process(os.executable())
-		p.set_args(server_args)
-		p.set_redirect_stdio()
-
 		mut host := VlsHost{
 			io: setup_and_configure_io(cmd)
-			child: p
+			child: new_vls_process(...server_args)
 		}
 
 		host.run()
