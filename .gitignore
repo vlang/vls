@@ -6,6 +6,5 @@
 
 # Other
 cmd/vls/vls
-vls.exe
-vls
 .vscode
+bin/

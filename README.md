@@ -1,7 +1,7 @@
 > ## ⚠️ Warning (Please read this first) ⚠️
 > What you're seeing is the developmental branch of the V Language server. This means that it may not be guaranteed to work reliably on your system.
 >
-> If you are experiencing problems, please consider [filing a bug report](https://github.com/vlang/vls/issues/new).
+> If you are experiencing problems, please consider [filing a bug report](#error-reporting).
 
 # V Language Server
 [![CI](https://github.com/vlang/vls/actions/workflows/ci.yml/badge.svg)](https://github.com/vlang/vls/actions/workflows/ci.yml)
@@ -48,7 +48,7 @@ To use the language server, you need to have an editor with [LSP](https://micros
 
 For [Visual Studio Code](https://code.visualstudio.com) and other derivatives, all you need to do is to install 0.1.4 or above versions of the [V VSCode extension](https://github.com/vlang/vscode-vlang). Afterwards, go to settings and scroll to the V extension section. From there, enable VLS by checking the "Enable VLS" box.
 
-If you have VLS downloaded in a custom directory, you need to input the absolute path of the `vls` language server executable to the "Custom Path" setting. If you cloned the repository and compiled it from source, the executable will be in the `vls` root directory. So make sure to add `vls/vls` or `vls/vls.exe` (for Windows).
+If you have VLS downloaded in a custom directory, you need to input the absolute path of the `vls` language server executable to the "Custom Path" setting. If you cloned the repository and compiled it from source, the executable will be in the `vls` root directory. So make sure to add `vls/bin/vls` or `vls/bin/vls.exe` (for Windows).
 
 ![Instructions](images/instructions.png)
 
@@ -83,7 +83,7 @@ For other editors, please refer to the plugin's/editor's documentation for instr
 - [ ] `didChangeWorkspaceFolder`
 - [ ] `didChangeConfiguration`
 - [ ] `configuration`
-- [ ] `didChangeWatchedFiles`
+- [x] `didChangeWatchedFiles`
 - [x] `symbol`
 - [ ] `executeCommand`
 - [ ] `applyEdit`
@@ -121,6 +121,11 @@ For other editors, please refer to the plugin's/editor's documentation for instr
 - [ ] `rename`
 - [ ] `prepareRename`
 - [x] `foldingRange`
+
+## Crash Reporting
+When reporting a crash in the language server, you just need to copy the contents of the latest auto-generated error which can be found in the home directory (`C:\Users\<user_name>` for Windows, `/home/<user_name>` for Linux, and `/Users/<user_name>` for MacOS). The contents of the file can be then pasted into the [issue tracker form](https://github.com/vlang/vls/issues/new).
+
+Bugs that are not crashes however can still generate report by passing the `--generate-report` flag to the language server CLI.
 
 ## Debugging
 VLS provides a log file (`${workspacePath}/vls.log`) for debugging the language server incoming requests and outgoing responses / notifications. By default, this can only be saved and accessed on server crash. To save the log on every exit, pass the `--debug` flag to the language server CLI.

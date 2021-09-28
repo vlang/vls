@@ -106,7 +106,7 @@ const hover_results = {
 		}
 	}
 	'import.vv':                lsp.Hover{
-		contents: lsp.MarkedString{'v', 'import os as os'}
+		contents: lsp.MarkedString{'v', 'import os'}
 		range: lsp.Range{
 			start: lsp.Position{0, 7}
 			end: lsp.Position{0, 9}

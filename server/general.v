@@ -127,12 +127,13 @@ fn (mut ls Vls) process_builtin() {
 // shutdown sets the state to shutdown but does not exit
 fn (mut ls Vls) shutdown(id string) {
 	ls.status = .shutdown
-	result := jsonrpc.Response<string>{
+	ls.send(jsonrpc.Response<string>{
 		id: id
 		result: 'null'
 		// error: code and message set in case an exception happens during shutdown request
-	}
-	json.encode(result)
+	})
+
+	ls.exit()
 }
 
 // exit stops the process
