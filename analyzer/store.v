@@ -899,8 +899,8 @@ pub fn (mut ss Store) delete_symbol_at_node(root_node C.TSNode, src []byte, at_r
 
 				symbol_name := name_node.get_text(src)
 				idx := ss.symbols[ss.cur_dir].index(symbol_name)
-				language := ss.symbols[ss.cur_dir][idx].language
 				if idx != -1 && idx < ss.symbols[ss.cur_dir].len {
+					language := ss.symbols[ss.cur_dir][idx].language
 					if language != .v {
 						binded_location_idx := ss.binded_symbol_locations.index(symbol_name)
 						if binded_location_idx != -1 && ss.binded_symbol_locations[binded_location_idx].module_path == ss.cur_dir {
