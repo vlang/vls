@@ -26,22 +26,22 @@ fn main() {
       (match_expression
         (identifier)
         (expression_case 
-          (expression_list 
+          (case_list 
             (interpreted_string_literal)
             (interpreted_string_literal))
           (block))
         (expression_case 
-          (expression_list 
+          (case_list 
             (interpreted_string_literal))
           (block))
         (default_case (block))) 
       (match_expression 
         (identifier) 
         (expression_case 
-          (type_list (builtin_type) (builtin_type)) 
+          (case_list (builtin_type) (builtin_type)) 
           (block)) 
         (expression_case 
-          (type_list (array_type (type_identifier))) 
+          (case_list (array_type (type_identifier))) 
           (block)) 
         (default_case (block))))))
 
@@ -61,13 +61,35 @@ match b {
   (match_expression
     (identifier)
     (expression_case
-      (expression_list
+      (case_list
         (int_literal))
       (block))
     (expression_case
-      (range
+      (case_list (range
         (int_literal)
-        (int_literal))
+        (int_literal)))
       (block))
     (default_case
       (block))))
+
+===
+Match with mixed expression and range
+===
+
+match b {
+  33, 35...39, 42 { true }
+  else { false }
+}
+
+---
+
+(source_file
+  (match_expression
+    (identifier)
+    (expression_case
+      (case_list 
+        (int_literal)
+        (range (int_literal) (int_literal))
+        (int_literal))
+      (block (true)))
+    (default_case (block (false)))))

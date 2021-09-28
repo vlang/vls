@@ -9,10 +9,6 @@ mut:
 }
 
 fn (mut tc TreeCursor) next() bool {
-	if !tc.cursor.next() {
-		return false
-	}
-
 	for tc.cur_child_idx < tc.child_count {
 		if !tc.cursor.next() {
 			return false
