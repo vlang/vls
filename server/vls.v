@@ -71,9 +71,10 @@ pub const (
 
 pub interface ReceiveSender {
 	debug bool
-	init() ?
+mut:
 	send(data string)
 	receive() ?string
+	init() ?
 }
 
 struct Vls {
@@ -282,7 +283,7 @@ fn (mut ls Vls) notify<T>(data jsonrpc.NotificationMessage<T>) {
 
 // send_null sends a null result to the client
 fn (mut ls Vls) send_null(id string) {
-	str := '{"jsonrpc":"${jsonrpc.version}","id":$id,"result":null}'
+	str := '{"jsonrpc":"$jsonrpc.version","id":$id,"result":null}'
 	ls.logger.response(str, .send)
 	ls.io.send(str)
 }

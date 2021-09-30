@@ -6,6 +6,7 @@ import json
 import strings
 
 pub interface Logger {
+mut:
 	close()
 	flush()
 	enable()
