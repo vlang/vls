@@ -13,7 +13,7 @@ const definition_inputs = {
 	'expr_in_array.vv':           lsp.Position{2, 19}
 	'expr_in_map_key.vv':         lsp.Position{4, 10}
 	'expr_in_map_value.vv':       lsp.Position{4, 17}
-	'fn_literal.vv': lsp.Position{5, 13}
+	'fn_literal.vv':              lsp.Position{5, 13}
 	'fn_param_type.vv':           lsp.Position{4, 15}
 	'fn_return_type.vv':          lsp.Position{2, 18}
 	'index_expr.vv':              lsp.Position{3, 18}
@@ -126,7 +126,7 @@ const definition_results = {
 			end: lsp.Position{1, 13}
 		}
 	}
-	'fn_literal.vv': lsp.LocationLink{
+	'fn_literal.vv':              lsp.LocationLink{
 		target_uri: lsp.document_uri_from_path(os.join_path(base_dir, 'fn_literal.vv'))
 		origin_selection_range: lsp.Range{
 			start: lsp.Position{5, 12}

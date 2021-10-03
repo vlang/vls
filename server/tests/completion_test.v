@@ -33,7 +33,7 @@ const completion_inputs = {
 		context: lsp.CompletionContext{.trigger_character, '.'}
 		position: lsp.Position{13, 6}
 	}
-	'fn_literal.vv': lsp.CompletionParams{
+	'fn_literal.vv':                        lsp.CompletionParams{
 		context: lsp.CompletionContext{.invoked, '.'}
 		position: lsp.Position{5, 3}
 	}
@@ -205,7 +205,7 @@ const completion_results = {
 			insert_text_format: .plain_text
 		},
 	]
-	'fn_literal.vv': [
+	'fn_literal.vv':                        [
 		lsp.CompletionItem{
 			label: 'cmd'
 			kind: .variable
