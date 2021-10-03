@@ -226,6 +226,7 @@ const completion_results = {
 		},
 	]
 	'fn_literal.vv':                        [
+		c_completion_item,
 		lsp.CompletionItem{
 			label: 'cmd'
 			kind: .variable
