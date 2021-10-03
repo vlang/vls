@@ -672,18 +672,16 @@ fn symbol_to_completion_item(sym &analyzer.Symbol, with_snippet bool) ?lsp.Compl
 			insert_text.write_string(name)
 			if with_snippet {
 				insert_text.write_b(`{`)
-				mut i := 0
-				for child_sym in sym.children {
-					if child_sym.kind != .field {
+				mut insert_count := 1
+				for i, child_sym in sym.children {
+					if child_sym.kind != .field || child_sym.name.len == 0 {
 						continue
-					}
-					insert_text.write_string(child_sym.name + ':\$' + i.str())
-					if i < sym.children.len - 1 {
+					} else if i != 0 && i < sym.children.len {
 						insert_text.write_string(', ')
-					} else {
-						insert_text_format = .snippet
 					}
-					i++
+					insert_text.write_string(child_sym.name + ':\$' + insert_count.str())
+					insert_text_format = .snippet
+					insert_count++
 				}
 				insert_text.write_b(`}`)
 			}
