@@ -16,7 +16,7 @@ const completion_inputs = {
 		context: lsp.CompletionContext{.trigger_character, ' '}
 		position: lsp.Position{6, 7}
 	}
-	'binded_symbol.vv': lsp.CompletionParams{
+	'binded_symbol.vv':                     lsp.CompletionParams{
 		context: lsp.CompletionContext{.invoked, ''}
 		position: lsp.Position{5, 4}
 	}
@@ -113,14 +113,14 @@ const completion_results = {
 			insert_text: 'zero'
 		},
 	]
-	'binded_symbol.vv': [
+	'binded_symbol.vv':                     [
 		lsp.CompletionItem{
 			label: 'C.Foo'
 			kind: .struct_
 			detail: 'struct C.Foo'
 			insert_text: 'Foo{bar:\$1, baz:\$2, data:\$3, count:\$4}'
 			insert_text_format: .snippet
-		}
+		},
 	]
 	'blank.vv':                             [
 		lsp.CompletionItem{
