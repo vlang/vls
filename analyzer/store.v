@@ -278,6 +278,7 @@ pub fn (mut ss Store) register_symbol(mut info Symbol) ?&Symbol {
 	if info.language != .v {
 		ss.binded_symbol_locations << BindedSymbolLocation{
 			for_sym_name: info.name,
+			language: info.language,
 			module_path: os.dir(info.file_path)
 		}
 	}
@@ -1274,4 +1275,26 @@ pub fn (mut store Store) import_modules(mut imports []&Import) {
 pub fn (ss &Store) is_module(module_name string) bool {
 	_ = ss.get_module_path_opt(module_name) or { return false }
 	return true
+}
+
+pub fn (ss &Store) is_imported(path string) bool {
+	if import_lists := ss.imports[ss.cur_dir] {
+		for imp in import_lists {
+			if imp.path != path {
+				continue
+			}
+
+			if ss.cur_file_path in imp.ranges {
+				return true
+			}
+		}
+	}
+
+	for _, imp_path in ss.auto_imports {
+		if imp_path == path {
+			return true
+		}
+	}
+	
+	return false
 }

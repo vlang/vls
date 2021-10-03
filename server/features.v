@@ -414,14 +414,11 @@ fn (mut builder CompletionBuilder) build_suggestions_from_list(node C.TSNode) {
 fn (mut builder CompletionBuilder) build_suggestions_from_expr(node C.TSNode) {
 	node_type := node.get_type()
 	match node_type {
-		'identifier', 'selector_expression', 'call_expression', 'index_expression' {
+		'binded_identifier', 'identifier', 'selector_expression', 'call_expression', 'index_expression' {
 			builder.show_global = false
 			builder.show_local = false
 
 			text := node.get_text(builder.src)
-			defer {
-				unsafe { text.free() }
-			}
 
 			if builder.is_selector(node) {
 				mut selected_node := node
@@ -437,6 +434,18 @@ fn (mut builder CompletionBuilder) build_suggestions_from_expr(node C.TSNode) {
 					builder.build_suggestions_from_sym(got_sym.return_type, true)
 				} else if builder.store.is_module(text) {
 					builder.build_suggestions_from_module(text)
+				} else if text == 'C.' || text == 'JS.' {
+					lang := match text {
+						'C.' { analyzer.SymbolLanguage.c }
+						'JS.' { analyzer.SymbolLanguage.js }
+						else { analyzer.SymbolLanguage.v }
+					}
+
+					if lang == .v {
+						return
+					}
+
+					builder.build_suggestions_from_binded_symbols(lang, builder.ctx.trigger_character == '.')
 				}
 			}
 		}
@@ -518,6 +527,51 @@ fn (mut builder CompletionBuilder) build_suggestions_from_sym(sym &analyzer.Symb
 	}
 }
 
+fn (mut builder CompletionBuilder) build_suggestions_from_binded_symbols(lang analyzer.SymbolLanguage, with_snippet bool) {
+	// just a cache in order to avoid repeated lookups
+	// done by is_imported
+	mut imported_paths := []string{cap: 10}
+	
+	// this is for slicing the string
+	lang_len := match lang {
+		.v, .c { 2 }
+		.js { 3 }
+	}
+	
+	for sym_loc_entry in builder.store.binded_symbol_locations {
+		$if test {
+			if sym_loc_entry.module_path == builder.store.auto_imports[''] {
+				continue
+			}
+		}
+
+		if sym_loc_entry.language != lang {
+			continue
+		}
+
+		module_path := sym_loc_entry.module_path
+		if module_path !in imported_paths {
+			if module_path != builder.store.cur_dir && !builder.store.is_imported(module_path) {
+				continue
+			}
+
+			imported_paths << module_path
+		}
+
+		sym_name := sym_loc_entry.for_sym_name
+		sym := builder.store.symbols[module_path].get(sym_name) or {
+			continue
+		}
+
+		if existing_completion_item := symbol_to_completion_item(sym, with_snippet) {
+			builder.add(lsp.CompletionItem{
+				...existing_completion_item
+				insert_text: existing_completion_item.insert_text[lang_len..]
+			})
+		}
+	}
+}
+
 fn (mut builder CompletionBuilder) build_suggestions_from_module(name string, included_list ...string) {
 	imported_path_dir := builder.store.get_module_path_opt(name) or {
 		builder.store.auto_imports[name] or { return }
@@ -571,6 +625,16 @@ fn (mut builder CompletionBuilder) build_local_suggestions() {
 					insert_text: imp_name
 				})
 			}
+		}
+
+		if builder.store.binded_symbol_locations.len != 0 {
+			// add JS in the future
+			builder.add(lsp.CompletionItem{
+				label: 'C'
+				kind: .module_
+				detail: 'C symbol definitions'
+				insert_text: 'C.'
+			})
 		}
 	}
 
@@ -672,18 +736,16 @@ fn symbol_to_completion_item(sym &analyzer.Symbol, with_snippet bool) ?lsp.Compl
 			insert_text.write_string(name)
 			if with_snippet {
 				insert_text.write_b(`{`)
-				mut i := 0
-				for child_sym in sym.children {
-					if child_sym.kind != .field {
+				mut insert_count := 1
+				for i, child_sym in sym.children {
+					if child_sym.kind != .field || child_sym.name.len == 0 {
 						continue
-					}
-					insert_text.write_string(child_sym.name + ':\$' + i.str())
-					if i < sym.children.len - 1 {
+					} else if i != 0 && i < sym.children.len {
 						insert_text.write_string(', ')
-					} else {
-						insert_text_format = .snippet
 					}
-					i++
+					insert_text.write_string(child_sym.name + ':\$' + insert_count.str())
+					insert_text_format = .snippet
+					insert_count++
 				}
 				insert_text.write_b(`}`)
 			}

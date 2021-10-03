@@ -4,10 +4,21 @@ import json
 import lsp
 import os
 
+const c_completion_item = lsp.CompletionItem{
+	label: 'C'
+	kind: .module_
+	detail: 'C symbol definitions'
+	insert_text: 'C.'
+}
+
 const completion_inputs = {
 	'assign.vv':                            lsp.CompletionParams{
 		context: lsp.CompletionContext{.trigger_character, ' '}
 		position: lsp.Position{6, 7}
+	}
+	'binded_symbol.vv':                     lsp.CompletionParams{
+		context: lsp.CompletionContext{.invoked, ''}
+		position: lsp.Position{5, 4}
 	}
 	'blank.vv':                             lsp.CompletionParams{
 		context: lsp.CompletionContext{.invoked, ''}
@@ -104,6 +115,15 @@ const completion_results = {
 			kind: .variable
 			detail: 'mut zero int'
 			insert_text: 'zero'
+		},
+	]
+	'binded_symbol.vv':                     [
+		lsp.CompletionItem{
+			label: 'C.Foo'
+			kind: .struct_
+			detail: 'struct C.Foo'
+			insert_text: 'Foo{bar:\$1, baz:\$2, data:\$3, count:\$4}'
+			insert_text_format: .snippet
 		},
 	]
 	'blank.vv':                             [
@@ -320,6 +340,7 @@ const completion_results = {
 	]
 	'invalid_call.vv':                      []lsp.CompletionItem{}
 	'local_results.vv':                     [
+		c_completion_item,
 		lsp.CompletionItem{
 			label: 'foo'
 			kind: .variable
@@ -339,13 +360,14 @@ const completion_results = {
 			kind: .module_
 			insert_text: 'def'
 		},
+		c_completion_item,
 	]
 	'module_symbols_selector.vv':           [
 		lsp.CompletionItem{
 			label: 'Point'
 			kind: .struct_
 			detail: 'pub struct Point'
-			insert_text: 'Point{a:\$0, b:\$1}'
+			insert_text: 'Point{a:\$1, b:\$2}'
 			insert_text_format: .snippet
 		},
 		lsp.CompletionItem{
@@ -444,13 +466,21 @@ fn test_completion() {
 			text_document: doc_id
 		}))
 		// compare content
-		println(io.bench.step_message('Testing $test_file_path'))
-		assert io.result() == json.encode(completion_results[test_name])
-		// Delete document
+		received_json := io.result()
+		encoded_json := json.encode(completion_results[test_name])
+
 		ls.dispatch(io.close_document(doc_id))
-		io.bench.ok()
-		println(io.bench.step_message_ok(test_name))
+		if received_json == encoded_json {
+			io.bench.ok()
+			println(io.bench.step_message_ok(test_name))
+		} else {
+			io.bench.fail()
+			println(io.bench.step_message_fail(test_name))
+		}
+
+		assert received_json == encoded_json
 	}
+
 	assert io.bench.nfail == 0
 	io.bench.stop()
 }
