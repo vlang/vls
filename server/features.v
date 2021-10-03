@@ -827,6 +827,8 @@ fn (mut ls Vls) completion(id string, params string) {
 		} else if node.get_type() == 'source_file' {
 			parent_node = closest_named_child(node, u32(offset))
 			node = closest_named_child(parent_node, u32(offset))
+		} else if parent_node.start_byte() > node.start_byte() {
+			node = parent_node
 		}
 
 		builder.ctx = ctx
