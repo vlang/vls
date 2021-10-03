@@ -117,9 +117,10 @@ fn (mut sr SymbolRegistration) struct_decl(struct_decl_node C.TSNode) ?&Symbol {
 		access = .public
 	}
 
+	attrs := struct_decl_node.child_by_field_name('attributes')
 	mut sym := sr.new_top_level_symbol(struct_decl_node.child_by_field_name('name'), access,
 		.struct_) ?
-	decl_list_node := struct_decl_node.named_child(1)
+	decl_list_node := struct_decl_node.named_child(if attrs.is_null() { u32(1) } else { 2 })
 	fields_len := decl_list_node.named_child_count()
 
 	mut field_access := SymbolAccess.private
