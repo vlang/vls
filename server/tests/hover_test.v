@@ -14,6 +14,9 @@ const hover_inputs = {
 	'enum.vv':                  lsp.HoverParams{
 		position: lsp.Position{0, 8}
 	}
+	'fn_literal.vv': lsp.HoverParams{
+		position: lsp.Position{5, 13}
+	}
 	'function_param.vv':        lsp.HoverParams{
 		position: lsp.Position{2, 18}
 	}
@@ -124,6 +127,13 @@ const hover_results = {
 		range: lsp.Range{
 			start: lsp.Position{1, 6}
 			end: lsp.Position{1, 9}
+		}
+	}
+	'fn_literal.vv': lsp.Hover{
+		contents: lsp.MarkedString{'v', 'cmd int'}
+		range: lsp.Range{
+			start: lsp.Position{5, 12}
+			end: lsp.Position{5, 15}
 		}
 	}
 	'module.vv':                lsp.Hover{

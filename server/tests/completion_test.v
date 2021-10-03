@@ -33,6 +33,10 @@ const completion_inputs = {
 		context: lsp.CompletionContext{.trigger_character, '.'}
 		position: lsp.Position{13, 6}
 	}
+	'fn_literal.vv': lsp.CompletionParams{
+		context: lsp.CompletionContext{.invoked, '.'}
+		position: lsp.Position{5, 3}
+	}
 	'import_symbols.vv':                    lsp.CompletionParams{
 		context: lsp.CompletionContext{.trigger_character, ' '}
 		position: lsp.Position{2, 12}
@@ -199,6 +203,26 @@ const completion_results = {
 			detail: 'fn (f Foo) lol() string'
 			insert_text: 'lol()'
 			insert_text_format: .plain_text
+		},
+	]
+	'fn_literal.vv': [
+		lsp.CompletionItem{
+			label: 'cmd'
+			kind: .variable
+			detail: 'cmd int'
+			insert_text: 'cmd'
+		},
+		lsp.CompletionItem{
+			label: 'gs'
+			kind: .variable
+			detail: 'gs string'
+			insert_text: 'gs'
+		},
+		lsp.CompletionItem{
+			label: 'list_exec'
+			kind: .variable
+			detail: 'list_exec fn (cmd int)'
+			insert_text: 'list_exec'
 		},
 	]
 	'import_symbols.vv':                    [
