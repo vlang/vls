@@ -508,6 +508,10 @@ fn (mut sr SymbolRegistration) short_var_decl(var_decl C.TSNode) ?[]&Symbol {
 				var_access = .private_mutable
 			}
 
+			if right.get_type() == 'fn_literal' {
+				sr.fn_literal(right) or { }
+			}
+
 			mut right_type := sr.store.infer_value_type_from_node(right, sr.src_text)
 			if right_type.is_returnable() {
 				right_type = right_type.return_type
@@ -530,6 +534,26 @@ fn (mut sr SymbolRegistration) short_var_decl(var_decl C.TSNode) ?[]&Symbol {
 		// TODO: if left_len > right_len
 		// and right_len < left_len
 		return none
+	}
+}
+
+// TODO: move to analyzer perhaps?
+fn (mut sr SymbolRegistration) fn_literal(fn_node C.TSNode) ? {
+	body_node := fn_node.child_by_field_name('body')
+	params_list_node := fn_node.child_by_field_name('parameters')
+	// return_node := fn_node.child_by_field_name('result')
+
+	mut scope := sr.get_scope(body_node) or { &ScopeTree(0) }
+	mut params := extract_parameter_list(params_list_node, mut sr.store, sr.src_text)
+
+	for i := 0; i < params.len; i++ {
+		mut param := params[i]
+		scope.register(param) or { continue }
+	}
+
+	// extract function body
+	if !body_node.is_null() && !sr.is_import {
+		sr.extract_block(body_node, mut scope) ?
 	}
 }
 
