@@ -5,7 +5,10 @@ import server
 import os
 
 fn run_cli(cmd cli.Command) ? {
-	run_as_child := cmd.flags.get_bool('child') or { false }
+	mut run_as_child := cmd.flags.get_bool('child') or { false }
+	$if windows {
+		run_as_child = true
+	}
 	if run_as_child {
 		run_server(cmd) ?
 	} else {
