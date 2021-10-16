@@ -640,7 +640,8 @@ fn (mut builder CompletionBuilder) build_local_suggestions() {
 
 	// Scope-based symbols that includes the variables inside
 	// the functions and the constants of the file.
-	if file_scope := builder.store.opened_scopes[builder.store.cur_file_path] {
+	if file_scope_ := builder.store.opened_scopes[builder.store.cur_file_path] {
+		mut file_scope := file_scope_
 		mut scope := file_scope.innermost(u32(builder.offset), u32(builder.offset))
 		for !isnil(scope) && scope != file_scope {
 			// constants
