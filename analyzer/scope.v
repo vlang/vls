@@ -39,7 +39,7 @@ pub fn (scope &ScopeTree) contains(pos u32) bool {
 }
 
 // innermost returns the scope based on the given byte ranges
-pub fn (scope &ScopeTree) innermost(start_byte u32, end_byte u32) &ScopeTree {
+pub fn (mut scope ScopeTree) innermost(start_byte u32, end_byte u32) &ScopeTree {
 	if !isnil(scope) {
 		for mut child_scope in scope.children {
 			if child_scope.contains(start_byte) && child_scope.contains(end_byte) {
@@ -157,7 +157,7 @@ pub fn (mut scope ScopeTree) remove(name string) bool {
 
 // get_symbols before returns a list of symbols that are available before
 // the target byte offset
-pub fn (scope &ScopeTree) get_symbols_before(target_byte u32) []&Symbol {
+pub fn (mut scope ScopeTree) get_symbols_before(target_byte u32) []&Symbol {
 	mut selected_scope := scope.innermost(target_byte, target_byte)
 	mut symbols := []&Symbol{}
 	for !isnil(selected_scope) {
@@ -172,7 +172,7 @@ pub fn (scope &ScopeTree) get_symbols_before(target_byte u32) []&Symbol {
 }
 
 // get_symbol returns a symbol from a specific range
-pub fn (scope &ScopeTree) get_symbol_with_range(name string, range C.TSRange) ?&Symbol {
+pub fn (mut scope ScopeTree) get_symbol_with_range(name string, range C.TSRange) ?&Symbol {
 	if isnil(scope) {
 		return none
 	}
