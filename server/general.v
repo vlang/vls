@@ -7,6 +7,8 @@ import os
 import analyzer
 import runtime
 
+const vls_githash = $env('VLS_GITHASH')
+
 const (
 	completion_trigger_characters       = ['=', '.', ':', '{', ',', '(', ' ']
 	signature_help_trigger_characters   = ['(']
@@ -100,8 +102,10 @@ fn (mut ls Vls) setup_logger(trace string, client_info lsp.ClientInfo) {
 	}
 
 	// print important info for reporting
-	ls.log_message('VLS Version: $meta.version, OS: $os.user_os() $arch', .info)
+	ls.log_message('VLS Version: ${meta.version}.$server.vls_githash, OS: $os.user_os() $arch',
+		.info)
 	ls.log_message('VLS executable path: $os.executable()', .info)
+	ls.log_message('VLS build with V ${@VHASH}', .info)
 	if client_info.name.len != 0 {
 		ls.log_message('Client / Editor: $client_info.name $client_info.version', .info)
 	} else {

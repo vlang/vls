@@ -27,6 +27,13 @@ if os.args.len >= 2 {
 }
 println('> Building VLS...')
 
+vls_git_hash := os.execute('git rev-parse --short HEAD')
+if vls_git_hash.exit_code != 0 {
+	println('Please install git')
+	return
+}
+os.setenv('VLS_GITHASH', vls_git_hash.output.trim_space(), true)
+
 ret := system('v -gc boehm -cg -cc $cc cmd/vls -o $full_vls_exec_path')
 if ret != 0 {
 	println('Failed building VLS')
