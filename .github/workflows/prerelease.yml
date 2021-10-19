@@ -84,7 +84,8 @@ jobs:
       - name: Compile VLS for Windows
         run: |
           cd vls
-          for /f "delims=" %%a in ('git rev-parse --short HEAD') do @set VLS_BUILD_COMMIT=%%a
+          $VLS_BUILD_COMMIT = git rev-parse --short HEAD
+          echo $VLS_BUILD_COMMIT
           ..\v.exe -prod -gc boehm -cflags -static -o vls_windows_x64.exe cmd/vls
       - name: Create binary only artifact
         uses: actions/upload-artifact@v2
