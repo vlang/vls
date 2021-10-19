@@ -7,4 +7,9 @@
 # Other
 cmd/vls/vls
 .vscode
-bin/
+
+bin/*
+
+*.so
+
+*.dll
