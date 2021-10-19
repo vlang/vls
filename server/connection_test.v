@@ -13,16 +13,7 @@ fn launch_cmd(exec_path string, args ...string) &os.Process {
 }
 
 fn launch_v_tool(vroot_path string, args ...string) &os.Process {
-	mut v_exe_name := 'v'
-	defer {
-		unsafe { v_exe_name.free() }
-	}
-
-	$if windows {
-		v_exe_name += '.exe'
-	}
-
-	return launch_cmd(os.join_path(vroot_path, v_exe_name), ...args)
+	return launch_cmd(os.join_path(vroot_path, 'v'), ...args)
 }
 
 fn get_vls_path(dir string) string {
