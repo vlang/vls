@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      VFLAGS: -prod -cc gcc -gc boehm -cflags -static
+      VFLAGS: -cg -cc gcc -gc boehm -cflags -static
     steps:
       - name: Install Boehm GC
         run: sudo apt-get install libgc-dev
@@ -40,7 +40,7 @@ jobs:
     runs-on: macos-latest
     timeout-minutes: 30
     env:
-      VFLAGS: -prod -cc clang -d static_boehm -gc boehm
+      VFLAGS: -cg -cc clang -d static_boehm -gc boehm
     steps:
       - name: Install Boehm GC
         run: brew install bdw-gc
@@ -86,7 +86,7 @@ jobs:
           cd vls
           $VLS_BUILD_COMMIT = git rev-parse --short HEAD
           echo $VLS_BUILD_COMMIT
-          ..\v.exe -prod -gc boehm -cflags -static -o vls_windows_x64.exe cmd/vls
+          ..\v.exe -cg -gc boehm -cflags -static -o vls_windows_x64.exe cmd/vls
       - name: Create binary only artifact
         uses: actions/upload-artifact@v2
         with:
