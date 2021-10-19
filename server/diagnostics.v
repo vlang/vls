@@ -5,9 +5,7 @@ import lsp
 import term
 
 fn (ls Vls) v_msg_to_diagnostic(from_file_path string, msg string) ?lsp.Diagnostic {
-	if msg.len == 0 { 
-		return none 	
-	} else if !msg[0].is_letter() {
+	if msg.len == 0 || msg[0].is_space() {
 		return none
 	}
 
