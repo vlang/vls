@@ -66,15 +66,11 @@ jobs:
           path: ./vls/vls_macos_x64
 
   build-windows-x64:
-    runs-on: ubuntu-latest
+    runs-on: windows-2019
     timeout-minutes: 30
     env:
-      VFLAGS: -prod -cc gcc -os windows -gc boehm -cflags -static
+      VFLAGS: -cc gcc
     steps:
-      - name: Set up MinGW
-        uses: egor-tensin/setup-mingw@v2
-        with:
-          platform: x64
       - name: Checkout V
         uses: actions/checkout@v2
         with:
@@ -84,17 +80,18 @@ jobs:
         with:
           path: vls
       - name: Build local V
-        run: make && sudo ./v symlink
-      - name: Cross-compile VLS to Windows
+        run: .\make.bat -gcc
+      - name: Compile VLS for Windows
         run: |
           cd vls
-          export VLS_BUILD_COMMIT=$(git rev-parse --short HEAD)
-          v -o vls_windows_x64.exe cmd/vls
+          for /f "delims=" %%a in ('git rev-parse --short HEAD') do @set VLS_BUILD_COMMIT=%%a
+          ..\v.exe -prod -gc boehm -cflags -static -o vls_windows_x64.exe cmd/vls
       - name: Create binary only artifact
         uses: actions/upload-artifact@v2
         with:
           name: windows_x64
           path: ./vls/vls_windows_x64.exe
+
 
   pre-release:
     name: Create Github Release
