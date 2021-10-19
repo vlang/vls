@@ -414,7 +414,8 @@ fn (mut builder CompletionBuilder) build_suggestions_from_list(node C.TSNode) {
 fn (mut builder CompletionBuilder) build_suggestions_from_expr(node C.TSNode) {
 	node_type := node.get_type()
 	match node_type {
-		'binded_identifier', 'identifier', 'selector_expression', 'call_expression', 'index_expression' {
+		'binded_identifier', 'identifier', 'selector_expression', 'call_expression',
+		'index_expression' {
 			builder.show_global = false
 			builder.show_local = false
 
@@ -531,13 +532,13 @@ fn (mut builder CompletionBuilder) build_suggestions_from_binded_symbols(lang an
 	// just a cache in order to avoid repeated lookups
 	// done by is_imported
 	mut imported_paths := []string{cap: 10}
-	
+
 	// this is for slicing the string
 	lang_len := match lang {
 		.v, .c { 2 }
 		.js { 3 }
 	}
-	
+
 	for sym_loc_entry in builder.store.binded_symbol_locations {
 		$if test {
 			if sym_loc_entry.module_path == builder.store.auto_imports[''] {
@@ -559,9 +560,7 @@ fn (mut builder CompletionBuilder) build_suggestions_from_binded_symbols(lang an
 		}
 
 		sym_name := sym_loc_entry.for_sym_name
-		sym := builder.store.symbols[module_path].get(sym_name) or {
-			continue
-		}
+		sym := builder.store.symbols[module_path].get(sym_name) or { continue }
 
 		if existing_completion_item := symbol_to_completion_item(sym, with_snippet) {
 			builder.add(lsp.CompletionItem{

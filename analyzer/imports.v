@@ -79,9 +79,9 @@ pub fn (mut imp Import) set_path(path string) {
 [unsafe]
 pub fn (imp &Import) free() {
 	unsafe {
-		//imp.absolute_module_name.free()
-		//imp.module_name.free()
-		//imp.path.free()
+		// imp.absolute_module_name.free()
+		// imp.module_name.free()
+		// imp.path.free()
 		imp.ranges.free()
 		imp.aliases.free()
 		imp.symbols.free()

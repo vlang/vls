@@ -483,7 +483,7 @@ pub:
 pub struct BindedSymbolLocation {
 pub:
 	for_sym_name string
-	language SymbolLanguage
+	language     SymbolLanguage
 	module_path  string
 }
 

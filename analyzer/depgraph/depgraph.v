@@ -37,10 +37,10 @@ pub fn (mut tree Tree) delete(id string) {
 	}
 
 	// unsafe {
-		// tree.keys[idx].free()
-		// tree.values[idx].free()
-		tree.keys.delete(idx)
-		tree.values.delete(idx)
+	// tree.keys[idx].free()
+	// tree.values[idx].free()
+	tree.keys.delete(idx)
+	tree.values.delete(idx)
 	// }
 	tree.len--
 }

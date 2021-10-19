@@ -176,7 +176,7 @@ fn (mut host VlsHost) handle_exit() {
 			method: 'window/showMessage'
 			params: lsp.ShowMessageParams{
 				@type: .error
-				message: 'VLS has encountered an error. The error report is saved in ${report_path}'
+				message: 'VLS has encountered an error. The error report is saved in $report_path'
 			}
 		}
 
@@ -214,9 +214,9 @@ fn (mut host VlsHost) generate_report() ?string {
 
 	report_file.writeln('<!-- Copy and paste the contents of this file to https://github.com/vlang/vls/issues/new -->') ?
 	report_file.writeln('## System Information') ?
-	report_file.writeln('### V doctor\n```\n${vdoctor_info}\n```\n') ?
-	report_file.writeln('### VLS info \n```\n${vls_info}\n```\n') ?
-	
+	report_file.writeln('### V doctor\n```\n$vdoctor_info\n```\n') ?
+	report_file.writeln('### VLS info \n```\n$vls_info\n```\n') ?
+
 	// Problem Description
 	report_file.writeln('## Problem Description') ?
 	report_file.writeln('<!-- Add your description. What did you do? What file did you open? -->') ?
@@ -230,7 +230,7 @@ fn (mut host VlsHost) generate_report() ?string {
 	actual_out := host.stderr_logger.get_text()
 	report_file.writeln('## Actual Output') ?
 	if actual_out.len != 0 {
-		report_file.writeln('```\n${actual_out}\n```\n') ?
+		report_file.writeln('```\n$actual_out\n```\n') ?
 	} else {
 		report_file.writeln('N/A\n') ?
 	}
@@ -239,7 +239,7 @@ fn (mut host VlsHost) generate_report() ?string {
 
 	// Last LSP Requests
 	report_file.writeln('## Last Recorded LSP Requests') ?
-	report_file.writeln('### Request\n```\n${host.stdin_logger.get_text()}\n```\n') ?
-	report_file.writeln('### Response\n```\n${host.stdout_logger.get_text()}\n```\n') ?
+	report_file.writeln('### Request\n```\n$host.stdin_logger.get_text()\n```\n') ?
+	report_file.writeln('### Response\n```\n$host.stdout_logger.get_text()\n```\n') ?
 	return report_file_path
 }

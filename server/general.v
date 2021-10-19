@@ -101,7 +101,7 @@ fn (mut ls Vls) setup_logger(trace string, client_info lsp.ClientInfo) {
 
 	// print important info for reporting
 	ls.log_message('VLS Version: $meta.version, OS: $os.user_os() $arch', .info)
-	ls.log_message('VLS executable path: ${os.executable()}', .info)
+	ls.log_message('VLS executable path: $os.executable()', .info)
 	if client_info.name.len != 0 {
 		ls.log_message('Client / Editor: $client_info.name $client_info.version', .info)
 	} else {

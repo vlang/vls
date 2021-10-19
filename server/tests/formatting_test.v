@@ -50,19 +50,21 @@ fn test_formatting() {
 		if test_file_path.ends_with('empty.vv') {
 			assert io.result() == 'null'
 		} else {
-			assert io.result() == json.encode([lsp.TextEdit{
-				range: lsp.Range{
-					start: lsp.Position{
-						line: 0
-						character: 0
+			assert io.result() == json.encode([
+				lsp.TextEdit{
+					range: lsp.Range{
+						start: lsp.Position{
+							line: 0
+							character: 0
+						}
+						end: lsp.Position{
+							line: content_lines.len - 1
+							character: content_lines.last().len
+						}
 					}
-					end: lsp.Position{
-						line: content_lines.len - 1
-						character: content_lines.last().len
-					}
-				}
-				new_text: exp_content
-			}])
+					new_text: exp_content
+				},
+			])
 		}
 		io.bench.ok()
 		println(io.bench.step_message_ok(os.base(test_file_path)))

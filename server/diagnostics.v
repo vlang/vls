@@ -22,10 +22,10 @@ fn (ls Vls) v_msg_to_diagnostic(from_file_path string, msg string) ?lsp.Diagnost
 		return error('idx is -1')
 	}
 
-	line_nr := msg[line_colon_idx + 1 .. col_colon_idx].int() - 1
-	col_nr := msg[col_colon_idx + 1 .. colon_sep_idx].int() - 1
-	msg_type := msg[colon_sep_idx + 1 .. msg_type_colon_idx].trim_space()
-	msg_content := msg[msg_type_colon_idx + 1 ..].trim_space()
+	line_nr := msg[line_colon_idx + 1..col_colon_idx].int() - 1
+	col_nr := msg[col_colon_idx + 1..colon_sep_idx].int() - 1
+	msg_type := msg[colon_sep_idx + 1..msg_type_colon_idx].trim_space()
+	msg_content := msg[msg_type_colon_idx + 1..].trim_space()
 
 	diag_kind := match msg_type {
 		'error' { lsp.DiagnosticSeverity.error }
@@ -41,7 +41,7 @@ fn (ls Vls) v_msg_to_diagnostic(from_file_path string, msg string) ?lsp.Diagnost
 
 	if tree := ls.trees[from_file_path] {
 		root_node := tree.root_node()
-		node_point := C.TSPoint{ u32(line_nr), u32(col_nr) }
+		node_point := C.TSPoint{u32(line_nr), u32(col_nr)}
 		target_node := root_node.descendant_for_point_range(node_point, node_point)
 		if !target_node.is_null() {
 			target_range = tsrange_to_lsp_range(target_node.range())
@@ -61,7 +61,9 @@ fn (mut ls Vls) exec_v_diagnostics(uri lsp.DocumentUri) ?[]lsp.Diagnostic {
 	file_path := uri.path()
 	input_path := if file_path.ends_with('.vv') { file_path } else { dir_path }
 	mut p := ls.launch_v_tool('-shared', '-check', input_path)
-	defer { p.close() }
+	defer {
+		p.close()
+	}
 	p.wait()
 	if p.code == 0 {
 		return none
@@ -78,9 +80,7 @@ fn (mut ls Vls) exec_v_diagnostics(uri lsp.DocumentUri) ?[]lsp.Diagnostic {
 	// }
 
 	for line in err {
-		res << ls.v_msg_to_diagnostic(file_path, line) or {
-			continue
-		}
+		res << ls.v_msg_to_diagnostic(file_path, line) or { continue }
 	}
 
 	return res

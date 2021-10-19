@@ -63,7 +63,7 @@ pub fn (mut scope ScopeTree) register(info &Symbol) ? {
 		mut existing_sym := scope.symbols[existing_idx]
 		// unsafe { scope.symbols[existing_idx].free() }
 		if existing_sym.file_version >= info.file_version {
-			return error('Symbol already exists. (Scope Range=${scope.start_byte}-${scope.end_byte}) (idx=${existing_idx}) (name="$existing_sym.name")')
+			return error('Symbol already exists. (Scope Range=$scope.start_byte-$scope.end_byte) (idx=$existing_idx) (name="$existing_sym.name")')
 		}
 
 		if existing_sym.name != info.name {
