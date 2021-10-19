@@ -11,14 +11,20 @@ import analyzer
 import time
 import v.vmod
 
+pub const vls_build_commit = meta_vls_build_commit()
+
 pub const meta = meta_info()
+
+fn meta_vls_build_commit() string {
+	res := $env('VLS_BUILD_COMMIT')
+	return res
+}
 
 fn meta_info() vmod.Manifest {
 	parsed := vmod.decode(@VMOD_FILE) or { panic(err) }
-	build_commit := $if with_build_commit ? { '-' + $env('VLS_BUILD_COMMIT') } $else { '' }
 	return vmod.Manifest{
 		...parsed
-		version: parsed.version + build_commit
+		version: parsed.version + '.' + server.vls_build_commit
 	}
 }
 

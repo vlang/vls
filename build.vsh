@@ -32,9 +32,11 @@ if vls_git_hash.exit_code != 0 {
 	println('Please install git')
 	return
 }
-os.setenv('VLS_GITHASH', vls_git_hash.output.trim_space(), true)
+os.setenv('VLS_BUILD_COMMIT', vls_git_hash.output.trim_space(), true)
 
-ret := system('v -gc boehm -cg -cc $cc cmd/vls -o $full_vls_exec_path')
+cmd := 'v -gc boehm -cg -cc $cc cmd/vls -o $full_vls_exec_path'
+println(cmd)
+ret := system(cmd)
 if ret != 0 {
 	println('Failed building VLS')
 	return
