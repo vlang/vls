@@ -349,16 +349,7 @@ pub fn (mut ls Vls) set_features(features []string, enable bool) ? {
 }
 
 pub fn (ls Vls) launch_v_tool(args ...string) &os.Process {
-	mut v_exe_name := 'v'
-	defer {
-		unsafe { v_exe_name.free() }
-	}
-
-	$if windows {
-		v_exe_name += '.exe'
-	}
-
-	full_v_path := os.join_path(ls.vroot_path, v_exe_name)
+	full_v_path := os.join_path(ls.vroot_path, 'v')
 	mut p := os.new_process(full_v_path)
 	p.set_args(args)
 	p.set_redirect_stdio()
