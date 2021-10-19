@@ -3,12 +3,12 @@ name: CI
 on:
   push:
     branches:
-    - use-tree-sitter
+      - use-tree-sitter
   pull_request:
     branches:
-    - use-tree-sitter
+      - use-tree-sitter
   schedule:
-    - cron:  '31 1 * * *'
+    - cron: '31 1 * * *'
 
 jobs:
   ubuntu-gcc:
@@ -17,19 +17,22 @@ jobs:
     env:
       VFLAGS: -cc gcc
     steps:
-    - name: Install Boehm GC
-      run: sudo apt-get install libgc-dev
-    - name: Checkout V
-      uses: actions/checkout@v2
-      with:
-        repository: vlang/v
-    - uses: actions/checkout@v2
-      with:
-        path: vls
-    - name: Build local v
-      run: make -j4
-    - name: Run tests
-      run: ./v test vls
+      - name: Install Boehm GC
+        run: sudo apt-get install libgc-dev
+      - name: Checkout V
+        uses: actions/checkout@v2
+        with:
+          repository: vlang/v
+      - name: Checkout VLS
+        uses: actions/checkout@v2
+        with:
+          path: vls
+      - name: Build local V
+        run: make
+      - name: Ensure VLS code is formatted
+        run: ./v fmt -verify vls/
+      - name: Run VLS tests
+        run: ./v test vls
 
   macos-clang:
     runs-on: macOS-latest
@@ -37,34 +40,40 @@ jobs:
     env:
       VFLAGS: -cc clang
     steps:
-    - name: Install Boehm GC
-      run: brew install bdw-gc
-    - name: Checkout V
-      uses: actions/checkout@v2
-      with:
-        repository: vlang/v
-    - uses: actions/checkout@v2
-      with:
-        path: vls
-    - name: Build local v
-      run: make -j4
-    - name: Run tests
-      run: ./v test vls
+      - name: Install Boehm GC
+        run: brew install bdw-gc
+      - name: Checkout V
+        uses: actions/checkout@v2
+        with:
+          repository: vlang/v
+      - name: Checkout VLS
+        uses: actions/checkout@v2
+        with:
+          path: vls
+      - name: Build local v
+        run: make
+      - name: Run tests
+        run: ./v test vls
 
   windows-msvc:
     runs-on: windows-2019
     timeout-minutes: 30
     env:
-        VFLAGS: -cc msvc
+      VFLAGS: -cc msvc
     steps:
-    - name: Checkout V
-      uses: actions/checkout@v2
-      with:
-        repository: vlang/v
-    - uses: actions/checkout@v2
-      with:
-        path: vls
-    - name: Build local v
-      run: .\make.bat -msvc
-    - name: Run tests
-      run: .\v.exe test vls\lsp\ vls\analyzer\ vls\server\testing\ vls\server\general_test.v
+      - name: Checkout V
+        uses: actions/checkout@v2
+        with:
+          repository: vlang/v
+      - name: Checkout VLS
+        uses: actions/checkout@v2
+        with:
+          path: vls
+      - name: Build local v
+        run: .\make.bat -msvc
+      - name: Run tests
+        run: |
+          .\v.exe test vls\lsp\
+          .\v.exe test vls\analyzer\
+          .\v.exe test vls\server\testing\
+          .\v.exe test vls\server\general_test.v
