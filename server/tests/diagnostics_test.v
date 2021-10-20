@@ -6,26 +6,41 @@ import os
 
 const base_dir = os.join_path(os.dir(@FILE), 'test_files', 'diagnostics')
 
-const diagnostics_result = lsp.PublishDiagnosticsParams{
-	uri: lsp.document_uri_from_path(os.join_path(base_dir, 'simple.vv'))
-	diagnostics: [
-		lsp.Diagnostic{
-			message: 'unexpected eof, expecting `}`'
-			severity: .error
-			range: lsp.Range{
-				start: lsp.Position{4, 10}
-				end: lsp.Position{4, 10}
-			}
-		},
-		lsp.Diagnostic{
-			message: "module 'os' is imported but never used"
-			severity: .warning
-			range: lsp.Range{
-				start: lsp.Position{2, 7}
-				end: lsp.Position{2, 7}
-			}
-		},
-	]
+const diagnostics_results = {
+	'simple.vv':          lsp.PublishDiagnosticsParams{
+		uri: lsp.document_uri_from_path(os.join_path(base_dir, 'simple.vv'))
+		diagnostics: [
+			lsp.Diagnostic{
+				message: 'unexpected eof, expecting `}`'
+				severity: .error
+				range: lsp.Range{
+					start: lsp.Position{4, 10}
+					end: lsp.Position{4, 10}
+				}
+			},
+			lsp.Diagnostic{
+				message: "module 'os' is imported but never used"
+				severity: .warning
+				range: lsp.Range{
+					start: lsp.Position{2, 7}
+					end: lsp.Position{2, 7}
+				}
+			},
+		]
+	}
+	'error_highlight.vv': lsp.PublishDiagnosticsParams{
+		uri: lsp.document_uri_from_path(os.join_path(base_dir, 'error_highlight.vv'))
+		diagnostics: [
+			lsp.Diagnostic{
+				message: 'unexpected name `asfasf`'
+				severity: .error
+				range: lsp.Range{
+					start: lsp.Position{1, 1}
+					end: lsp.Position{1, 1}
+				}
+			},
+		]
+	}
 }
 
 fn test_diagnostics() {
@@ -39,6 +54,7 @@ fn test_diagnostics() {
 		return
 	}
 	for file_path in files {
+		test_name := os.base(file_path)
 		content := os.read_file(file_path) or {
 			io.bench.fail()
 			eprintln(io.bench.step_message_fail('file $file_path is missing'))
@@ -47,12 +63,13 @@ fn test_diagnostics() {
 		// open document
 		req, _ := io.open_document(file_path, content)
 		ls.dispatch(req)
-	}
 
-	method, params := io.notification() or { '', '{}' }
-	diagnostic_params := json.decode(lsp.PublishDiagnosticsParams, params) or {
-		lsp.PublishDiagnosticsParams{}
+		method, params := io.notification() or { '', '{}' }
+		diagnostic_params := json.decode(lsp.PublishDiagnosticsParams, params) or {
+			lsp.PublishDiagnosticsParams{}
+		}
+		assert method == 'textDocument/publishDiagnostics'
+		result := diagnostics_results[test_name] or { lsp.PublishDiagnosticsParams{} }
+		assert diagnostic_params == result
 	}
-	assert method == 'textDocument/publishDiagnostics'
-	assert diagnostic_params == diagnostics_result
 }
