@@ -5,11 +5,14 @@ import lsp
 import term
 
 fn (ls Vls) v_msg_to_diagnostic(from_file_path string, msg string) ?lsp.Diagnostic {
-	if msg.len == 0 || msg[0].is_space() {
+	if msg.len < 4 || msg[0].is_space() {
 		return none
 	}
 
-	line_colon_idx := msg.index(':') ?
+	line_colon_idx := msg.index_after(':', 2) // deal with `d:/v/...:2:4: error: ...`
+	if line_colon_idx < 0 {
+		return none
+	}
 	file_path := msg[..line_colon_idx]
 	if !from_file_path.ends_with(file_path) {
 		return error('$file_path != $from_file_path')
