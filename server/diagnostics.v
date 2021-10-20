@@ -58,7 +58,7 @@ fn (ls Vls) v_msg_to_diagnostic(from_file_path string, msg string) ?lsp.Diagnost
 	}
 }
 
-// exec_v_diagnostics returns a list of errors/warnings taken from v vet
+// exec_v_diagnostics returns a list of errors/warnings taken from `v -check`
 fn (mut ls Vls) exec_v_diagnostics(uri lsp.DocumentUri) ?[]lsp.Diagnostic {
 	dir_path := uri.dir_path()
 	file_path := uri.path()
@@ -72,15 +72,8 @@ fn (mut ls Vls) exec_v_diagnostics(uri lsp.DocumentUri) ?[]lsp.Diagnostic {
 		return none
 	}
 
-	// out := p.stdout_slurp().split_into_lines()
 	err := p.stderr_slurp().split_into_lines().map(term.strip_ansi(it))
 	mut res := []lsp.Diagnostic{cap: err.len}
-
-	// for line in out {
-	// 	res << ls.v_msg_to_diagnostic(file_path, line) or {
-	// 		continue
-	// 	}
-	// }
 
 	for line in err {
 		res << ls.v_msg_to_diagnostic(file_path, line) or { continue }
