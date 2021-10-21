@@ -92,7 +92,7 @@ For other editors, please refer to the plugin's/editor's documentation for instr
 - [x] `didChange`
 - [ ] `willSave`
 - [ ] `willSaveWaitUntil`
-- [ ] `didSave`
+- [x] `didSave`
 - [x] `didClose`
 ### Diagnostics
 - [x] `publishDiagnostics`
