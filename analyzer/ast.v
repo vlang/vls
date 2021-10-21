@@ -15,7 +15,7 @@ fn get_nodes_within_range(node C.TSNode, range C.TSRange) ?[]C.TSNode {
 
 	for i in u32(0) .. child_count {
 		child := node.named_child(i)
-		child_type := child.get_type()
+		child_type := child.type_name()
 		if !child.is_null()
 			&& ((child_type.ends_with('_declaration') && child_type !in analyzer.excluded_nodes)
 			|| child_type in analyzer.included_nodes) && within_range(child.range(), range) {
