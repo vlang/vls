@@ -24,7 +24,7 @@ mut:
 }
 
 fn (sr &SymbolRegistration) new_top_level_symbol(identifier_node C.TSNode, access SymbolAccess, kind SymbolKind) ?&Symbol {
-	id_node_type := identifier_node.get_type()
+	id_node_type := identifier_node.type_name()
 	if id_node_type == 'qualified_type' {
 		return report_error('Invalid top-level node type `$id_node_type`', identifier_node.range())
 	}
@@ -39,7 +39,7 @@ fn (sr &SymbolRegistration) new_top_level_symbol(identifier_node C.TSNode, acces
 
 	match id_node_type {
 		'generic_type' {
-			if identifier_node.named_child(0).get_type() == 'generic_type' {
+			if identifier_node.named_child(0).type_name() == 'generic_type' {
 				return error('Invalid top-level generic node type `$id_node_type`')
 			}
 
@@ -62,7 +62,7 @@ fn (sr &SymbolRegistration) new_top_level_symbol(identifier_node C.TSNode, acces
 			}
 
 			// for function names with generic parameters
-			if identifier_node.next_named_sibling().get_type() == 'type_parameters' {
+			if identifier_node.next_named_sibling().type_name() == 'type_parameters' {
 				symbol.generic_placeholder_len = int(identifier_node.next_named_sibling().named_child_count())
 			}
 		}
@@ -81,7 +81,7 @@ fn (mut sr SymbolRegistration) get_scope(node C.TSNode) ?&ScopeTree {
 
 fn (mut sr SymbolRegistration) const_decl(const_node C.TSNode) ?[]&Symbol {
 	mut access := SymbolAccess.private
-	if const_node.child(0).get_type() == 'pub' {
+	if const_node.child(0).type_name() == 'pub' {
 		access = .public
 	}
 
@@ -113,7 +113,7 @@ fn (mut sr SymbolRegistration) const_decl(const_node C.TSNode) ?[]&Symbol {
 
 fn (mut sr SymbolRegistration) struct_decl(struct_decl_node C.TSNode) ?&Symbol {
 	mut access := SymbolAccess.private
-	if struct_decl_node.child(0).get_type() == 'pub' {
+	if struct_decl_node.child(0).type_name() == 'pub' {
 		access = .public
 	}
 
@@ -126,7 +126,7 @@ fn (mut sr SymbolRegistration) struct_decl(struct_decl_node C.TSNode) ?&Symbol {
 	mut field_access := SymbolAccess.private
 	for i in 0 .. fields_len {
 		field_node := decl_list_node.named_child(i)
-		field_type := field_node.get_type()
+		field_type := field_node.type_name()
 		match field_type {
 			'struct_field_scope' {
 				scope_text := field_node.get_text(sr.src_text)
@@ -191,7 +191,7 @@ fn (mut sr SymbolRegistration) struct_field_decl(field_access SymbolAccess, fiel
 
 fn (mut sr SymbolRegistration) interface_decl(interface_decl_node C.TSNode) ?&Symbol {
 	mut access := SymbolAccess.private
-	if interface_decl_node.child(0).get_type() == 'pub' {
+	if interface_decl_node.child(0).type_name() == 'pub' {
 		access = SymbolAccess.public
 	}
 
@@ -206,7 +206,7 @@ fn (mut sr SymbolRegistration) interface_decl(interface_decl_node C.TSNode) ?&Sy
 			continue
 		}
 
-		match field_node.get_type() {
+		match field_node.type_name() {
 			'interface_field_scope' {
 				// TODO: add if mut: check
 				access = .private_mutable
@@ -268,7 +268,7 @@ fn (mut sr SymbolRegistration) interface_decl(interface_decl_node C.TSNode) ?&Sy
 
 fn (mut sr SymbolRegistration) enum_decl(enum_decl_node C.TSNode) ?&Symbol {
 	mut access := SymbolAccess.private
-	if enum_decl_node.child(0).get_type() == 'pub' {
+	if enum_decl_node.child(0).type_name() == 'pub' {
 		access = SymbolAccess.public
 	}
 
@@ -278,7 +278,7 @@ fn (mut sr SymbolRegistration) enum_decl(enum_decl_node C.TSNode) ?&Symbol {
 	members_len := member_list_node.named_child_count()
 	for i in 0 .. members_len {
 		member_node := member_list_node.named_child(i)
-		if member_node.get_type() != 'enum_member' {
+		if member_node.type_name() != 'enum_member' {
 			continue
 		}
 
@@ -318,7 +318,7 @@ fn (mut sr SymbolRegistration) enum_decl(enum_decl_node C.TSNode) ?&Symbol {
 
 fn (mut sr SymbolRegistration) fn_decl(fn_node C.TSNode) ?&Symbol {
 	mut access := SymbolAccess.private
-	if fn_node.child(0).get_type() == 'pub' {
+	if fn_node.child(0).type_name() == 'pub' {
 		access = SymbolAccess.public
 	}
 
@@ -383,7 +383,7 @@ fn (mut sr SymbolRegistration) fn_decl(fn_node C.TSNode) ?&Symbol {
 
 fn (mut sr SymbolRegistration) type_decl(type_decl_node C.TSNode) ?&Symbol {
 	mut access := SymbolAccess.private
-	if type_decl_node.child(0).get_type() == 'pub' {
+	if type_decl_node.child(0).type_name() == 'pub' {
 		access = SymbolAccess.public
 	}
 
@@ -426,7 +426,7 @@ fn (mut sr SymbolRegistration) top_level_decl() ? {
 	}
 
 	mut global_scope := sr.store.opened_scopes[sr.store.cur_file_path]
-	node_type := sr.cursor.current_node().get_type()
+	node_type := sr.cursor.current_node().type_name()
 
 	match node_type {
 		// TODO: add module check
@@ -506,11 +506,11 @@ fn (mut sr SymbolRegistration) short_var_decl(var_decl C.TSNode) ?[]&Symbol {
 			left := left_expr_lists.named_child(j)
 			right := right_expr_lists.named_child(j)
 			prev_left := left.prev_sibling()
-			if !prev_left.is_null() && prev_left.get_type() == 'mut' {
+			if !prev_left.is_null() && prev_left.type_name() == 'mut' {
 				var_access = .private_mutable
 			}
 
-			if right.get_type() == 'fn_literal' {
+			if right.type_name() == 'fn_literal' {
 				sr.fn_literal(right) or {}
 			}
 
@@ -576,7 +576,7 @@ fn (mut sr SymbolRegistration) if_expression(if_stmt_node C.TSNode) ? {
 		return
 	}
 
-	if alternative_node.get_type() == 'block' {
+	if alternative_node.type_name() == 'block' {
 		mut local_scope := sr.get_scope(if_stmt_node) or { &ScopeTree(0) }
 		sr.extract_block(if_stmt_node, mut local_scope) ?
 	} else {
@@ -591,7 +591,7 @@ fn (mut sr SymbolRegistration) for_statement(for_stmt_node C.TSNode) ? {
 
 	if named_child_count == 2 {
 		cond_node := for_stmt_node.named_child(0)
-		cond_node_type := cond_node.get_type()
+		cond_node_type := cond_node.type_name()
 
 		if cond_node_type == 'for_in_operator' {
 			left_node := cond_node.child_by_field_name('left')
@@ -663,7 +663,7 @@ fn (mut sr SymbolRegistration) for_statement(for_stmt_node C.TSNode) ? {
 }
 
 fn (mut sr SymbolRegistration) expression(node C.TSNode) ? {
-	expr_type := node.get_type()
+	expr_type := node.type_name()
 	match expr_type {
 		'if_expression' {
 			sr.if_expression(node) ?
@@ -675,7 +675,7 @@ fn (mut sr SymbolRegistration) expression(node C.TSNode) ? {
 }
 
 fn (mut sr SymbolRegistration) statement(node C.TSNode, mut scope ScopeTree) ? {
-	stmt_type := node.get_type()
+	stmt_type := node.type_name()
 	match stmt_type {
 		'short_var_declaration' {
 			vars := sr.short_var_decl(node) ?
@@ -697,7 +697,7 @@ fn (mut sr SymbolRegistration) statement(node C.TSNode, mut scope ScopeTree) ? {
 }
 
 fn (mut sr SymbolRegistration) extract_block(node C.TSNode, mut scope ScopeTree) ? {
-	if node.get_type() != 'block' || sr.is_import {
+	if node.type_name() != 'block' || sr.is_import {
 		return error('node should be a `block` and cannot be used in `is_import` mode.')
 	}
 
@@ -715,7 +715,7 @@ fn extract_parameter_list(node C.TSNode, mut store Store, src_text []byte) []&Sy
 	for i := u32(0); i < params_len; i++ {
 		mut access := SymbolAccess.private
 		param_node := node.named_child(i)
-		if param_node.child(0).get_type() == 'mut' {
+		if param_node.child(0).type_name() == 'mut' {
 			access = SymbolAccess.private_mutable
 		}
 
