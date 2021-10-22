@@ -10,9 +10,9 @@ const other_node_types = ['if_expression', 'for_statement', 'return_statement', 
 	'binary_expression', 'unary_expression']
 
 fn traverse_node(root_node C.TSNode, offset u32) C.TSNode {
-	root_type := root_node.type_name()
+	root_type := root_node.name()
 	direct_named_child := root_node.first_named_child_for_byte(offset)
-	child_type := direct_named_child.type_name()
+	child_type := direct_named_child.name()
 	if direct_named_child.is_null() {
 		return root_node
 	}
@@ -50,10 +50,10 @@ fn traverse_node(root_node C.TSNode, offset u32) C.TSNode {
 // for auto-completion
 fn traverse_node2(starting_node C.TSNode, offset u32) C.TSNode {
 	mut root_node := starting_node
-	mut root_type := root_node.type_name()
+	mut root_type := root_node.name()
 
 	direct_named_child := root_node.first_named_child_for_byte(offset)
-	child_type := direct_named_child.type_name()
+	child_type := direct_named_child.name()
 
 	if child_type.ends_with('_literal') {
 		return root_node
@@ -104,7 +104,7 @@ fn closest_named_child(starting_node C.TSNode, offset u32) C.TSNode {
 	for i in u32(0) .. named_child_count {
 		child_node := starting_node.named_child(i)
 		if !child_node.is_null() && child_node.start_byte() <= offset
-			&& (child_node.type_name() == 'import_symbols' || child_node.end_byte() <= offset) {
+			&& (child_node.name() == 'import_symbols' || child_node.end_byte() <= offset) {
 			selected_node = child_node
 		} else {
 			break
@@ -122,7 +122,7 @@ const other_symbol_node_types = ['assignment_statement', 'call_expression', 'sel
 // (nodes with names, module name, and etc.)
 fn closest_symbol_node_parent(child_node C.TSNode) C.TSNode {
 	parent_node := child_node.parent()
-	parent_type := parent_node.type_name()
+	parent_type := parent_node.name()
 	if parent_node.is_null() || parent_type == 'source_file' || parent_type == 'block' {
 		return child_node
 	}

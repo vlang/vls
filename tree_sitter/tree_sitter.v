@@ -129,7 +129,7 @@ fn C.ts_node_named_descendant_for_point_range(node C.TSNode, start_point C.TSPoi
 
 fn C.ts_node_eq(node C.TSNode, another_node C.TSNode) bool
 
-pub fn (node C.TSNode) get_text(text []byte) string {
+pub fn (node C.TSNode) code(text []byte) string {
 	start_index := node.start_byte()
 	end_index := node.end_byte()
 	if start_index >= end_index || start_index >= u32(text.len) || end_index > u32(text.len) {
@@ -191,7 +191,7 @@ pub fn (node C.TSNode) range() C.TSRange {
 	}
 }
 
-pub fn (node C.TSNode) type_name() string {
+pub fn (node C.TSNode) name() string {
 	if node.is_null() {
 		return '<null node>'
 	}
