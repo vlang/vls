@@ -112,13 +112,11 @@ fn (mut an Analyzer) fn_decl(node C.TSNode) {
 
 pub fn (mut an Analyzer) top_level_statement() {
 	current_node := an.cursor.current_node()
-	node_type := current_node.name()
 	defer {
 		an.cursor.next()
-		// unsafe { node_type.free() }
 	}
 
-	match node_type {
+	match current_node.type_name() {
 		'import_declaration' {
 			an.import_decl(current_node)
 		}
