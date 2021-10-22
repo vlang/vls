@@ -660,6 +660,9 @@ pub fn (mut ss Store) infer_symbol_from_node(node C.TSNode, src_text []byte) ?&S
 		'builtin_type', 'fn_literal' {
 			return ss.find_symbol_by_type_node(node, src_text)
 		}
+		'const_spec' {
+			return ss.find_symbol_by_type_node(node.child_by_field_name('name'), src_text)
+		}
 		'selector_expression' {
 			operand := node.child_by_field_name('operand')
 			mut root_sym := ss.infer_symbol_from_node(operand, src_text) or { void_type }

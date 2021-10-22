@@ -101,6 +101,7 @@ fn (mut sr SymbolRegistration) const_decl(const_node C.TSNode) ?[]&Symbol {
 			access: access
 			range: spec_node.range()
 			is_top_level: true
+			is_const: true
 			file_path: sr.store.cur_file_path
 			file_version: sr.store.cur_version
 			return_type: sr.store.infer_value_type_from_node(spec_node.child_by_field_name('value'),

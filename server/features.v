@@ -981,7 +981,7 @@ fn get_hover_data(mut store analyzer.Store, node C.TSNode, uri lsp.DocumentUri, 
 	mut sym := store.infer_symbol_from_node(node, source) or { analyzer.void_type }
 	if isnil(sym) || sym.is_void() {
 		closest_parent := closest_symbol_node_parent(node)
-		sym = store.infer_symbol_from_node(closest_parent, source) ?
+		sym = store.infer_symbol_from_node(closest_parent, source) or { analyzer.void_type }
 	}
 
 	// eprintln('$node_type_name | ${node.code(source)} | $sym')
