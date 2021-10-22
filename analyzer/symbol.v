@@ -106,6 +106,7 @@ pub mut:
 	return_type             &Symbol        = analyzer.void_type // return_type is for functions and variables
 	language                SymbolLanguage = .v
 	is_top_level            bool           [required]
+	is_const                bool
 	generic_placeholder_len int
 	sumtype_children_len    int
 	interface_children_len  int
@@ -231,6 +232,9 @@ pub fn (info &Symbol) gen_str() string {
 			if info.kind == .field {
 				sb.write_string(info.parent.name)
 				sb.write_b(`.`)
+			}
+			if info.is_const {
+				sb.write_string('const ')
 			}
 
 			sb.write_string(info.name)
