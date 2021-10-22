@@ -191,7 +191,7 @@ pub fn (node C.TSNode) range() C.TSRange {
 	}
 }
 
-pub fn (node C.TSNode) name() string {
+pub fn (node C.TSNode) type_name() string {
 	if node.is_null() {
 		return '<null node>'
 	}
