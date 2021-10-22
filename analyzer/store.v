@@ -1015,9 +1015,7 @@ fn (mut ss Store) inject_paths_of_new_imports(mut new_imports []&Import, lookup_
 			// files is just for checking so it
 			// is not used by the code below it
 			{
-				mut files := os.ls(mod_dir) or {
-					continue
-				}
+				mut files := os.ls(mod_dir) or { continue }
 
 				// search for files end with v and free
 				// the contents of the array at the same time
