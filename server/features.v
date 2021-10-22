@@ -200,14 +200,14 @@ fn (mut ls Vls) signature_help(id string, params string) {
 	off := compute_offset(source, pos.line, pos.character)
 	mut node := traverse_node(tree.root_node(), u32(off))
 	mut parent_node := node
-	if node.type_name() == 'argument_list' {
+	if node.name() == 'argument_list' {
 		parent_node = node.parent()
 		node = node.prev_named_sibling()
 	}
 
 	// signature help supports function calls for now
 	// hence checking the node if it's a call_expression node.
-	if node.is_null() || parent_node.type_name() != 'call_expression' {
+	if node.is_null() || parent_node.name() != 'call_expression' {
 		ls.send_null(id)
 		return
 	}
@@ -290,7 +290,7 @@ fn (mut builder CompletionBuilder) add(item lsp.CompletionItem) {
 }
 
 fn (builder CompletionBuilder) is_triggered(node C.TSNode, chr string) bool {
-	return node.next_sibling().get_text(builder.src) == chr || builder.ctx.trigger_character == chr
+	return node.next_sibling().code(builder.src) == chr || builder.ctx.trigger_character == chr
 }
 
 fn (builder CompletionBuilder) is_selector(node C.TSNode) bool {
@@ -316,7 +316,7 @@ fn (mut builder CompletionBuilder) build_suggestions(node C.TSNode, offset int) 
 }
 
 fn (mut builder CompletionBuilder) build_suggestions_from_node(node C.TSNode) {
-	node_type := node.type_name()
+	node_type := node.name()
 	if node_type in list_node_types {
 		builder.build_suggestions_from_list(node)
 	} else if node_type == 'module_clause' {
@@ -328,7 +328,7 @@ fn (mut builder CompletionBuilder) build_suggestions_from_node(node C.TSNode) {
 
 // suggestions_from_stmt returns a list of results from the extracted Stmt node info.
 fn (mut builder CompletionBuilder) build_suggestions_from_stmt(node C.TSNode) {
-	match node.type_name() {
+	match node.name() {
 		'short_var_declaration' {
 			builder.show_local = true
 			builder.show_global = true
@@ -353,7 +353,7 @@ fn (mut builder CompletionBuilder) build_suggestions_from_stmt(node C.TSNode) {
 
 // suggestions_from_list returns a list of results extracted from the list nodes.
 fn (mut builder CompletionBuilder) build_suggestions_from_list(node C.TSNode) {
-	match node.type_name() {
+	match node.name() {
 		'identifier_list', 'assignable_identifier_list' {
 			parent := closest_symbol_node_parent(node)
 			builder.build_suggestions_from_node(parent)
@@ -361,14 +361,14 @@ fn (mut builder CompletionBuilder) build_suggestions_from_list(node C.TSNode) {
 		'expression_list' {
 			// expr_list_count := node.named_child_count()
 			parent := closest_symbol_node_parent(node)
-			parent_type := parent.type_name()
+			parent_type := parent.name()
 			match parent_type {
 				'assignment_statement' {
 					builder.build_suggestions_from_stmt(parent)
 				}
 				else {
 					// closest_node := closest_named_child(node, u32(builder.offset))
-					// eprintln(closest_node.type_name())
+					// eprintln(closest_node.name())
 				}
 			}
 		}
@@ -391,7 +391,7 @@ fn (mut builder CompletionBuilder) build_suggestions_from_list(node C.TSNode) {
 		'import_symbols_list' {
 			import_node := closest_symbol_node_parent(node)
 			import_path_node := import_node.child_by_field_name('path')
-			import_path := import_path_node.get_text(builder.src)
+			import_path := import_path_node.code(builder.src)
 			builder.build_suggestions_from_module(import_path)
 		}
 		'type_list' {
@@ -412,25 +412,25 @@ fn (mut builder CompletionBuilder) build_suggestions_from_list(node C.TSNode) {
 
 // suggestions_from_expr returns a list of results extracted from the Expr node info.
 fn (mut builder CompletionBuilder) build_suggestions_from_expr(node C.TSNode) {
-	node_type := node.type_name()
+	node_type := node.name()
 	match node_type {
 		'binded_identifier', 'identifier', 'selector_expression', 'call_expression',
 		'index_expression' {
 			builder.show_global = false
 			builder.show_local = false
 
-			text := node.get_text(builder.src)
+			text := node.code(builder.src)
 
 			if builder.is_selector(node) {
 				mut selected_node := node
 				if node_type == 'selector_expression' {
 					operand_node := node.child_by_field_name('operand')
-					if operand_node.type_name() == 'call_expression' {
+					if operand_node.name() == 'call_expression' {
 						selected_node = node
 					}
 				}
 				if got_sym := builder.store.infer_symbol_from_node(selected_node, builder.src) {
-					builder.show_mut_only = builder.parent_node.type_name() == 'block'
+					builder.show_mut_only = builder.parent_node.name() == 'block'
 						&& got_sym.is_mutable()
 					builder.build_suggestions_from_sym(got_sym.return_type, true)
 				} else if builder.store.is_module(text) {
@@ -452,7 +452,7 @@ fn (mut builder CompletionBuilder) build_suggestions_from_expr(node C.TSNode) {
 		}
 		'literal_value' {
 			closest_element_node := closest_named_child(node, u32(builder.offset))
-			if closest_element_node.type_name() == 'keyed_element' {
+			if closest_element_node.name() == 'keyed_element' {
 				builder.build_suggestions_from_expr(closest_element_node)
 			} else if got_sym := builder.store.infer_symbol_from_node(node.parent(), builder.src) {
 				builder.build_suggestions_from_sym(got_sym, false)
@@ -677,7 +677,7 @@ fn (mut builder CompletionBuilder) build_global_suggestions() {
 			}
 
 			// is_type_decl := false
-			is_type_decl := builder.parent_node.type_name() == 'type_declaration'
+			is_type_decl := builder.parent_node.name() == 'type_declaration'
 			builder.add(symbol_to_completion_item(sym, !is_type_decl) or { continue })
 		}
 	}
@@ -877,16 +877,16 @@ fn (mut ls Vls) completion(id string, params string) {
 		mut node := traverse_node2(root_node, u32(offset))
 		mut parent_node := traverse_node(root_node, u32(offset))
 
-		if root_node.is_error() && root_node.type_name() == 'ERROR' {
+		if root_node.is_error() && root_node.name() == 'ERROR' {
 			// point to the identifier for assignment statement
 			node = traverse_node(node, node.start_byte())
-		} else if node.type_name() == 'block' {
+		} else if node.name() == 'block' {
 			node = traverse_node2(root_node, u32(offset))
-		} else if node.is_error() && node.type_name() == 'ERROR' {
+		} else if node.is_error() && node.name() == 'ERROR' {
 			node = node.prev_named_sibling()
 		} else if node.start_byte() > u32(offset) {
 			node = closest_named_child(closest_symbol_node_parent(node), u32(offset))
-		} else if node.type_name() == 'source_file' {
+		} else if node.name() == 'source_file' {
 			parent_node = closest_named_child(node, u32(offset))
 			node = closest_named_child(parent_node, u32(offset))
 		} else if parent_node.start_byte() > node.start_byte() {
@@ -947,16 +947,16 @@ fn (mut ls Vls) hover(id string, params string) {
 }
 
 fn get_hover_data(mut store analyzer.Store, node C.TSNode, uri lsp.DocumentUri, source []byte, offset u32) ?lsp.Hover {
-	node_type := node.type_name()
+	node_type := node.name()
 	if node.is_null() || node_type == 'comment' {
 		return none
 	}
 
 	mut original_range := node.range()
-	// eprintln('$node_type | ${node.get_text(source)}')
+	// eprintln('$node_type | ${node.code(source)}')
 	if node_type == 'module_clause' {
 		return lsp.Hover{
-			contents: lsp.v_marked_string(node.get_text(source))
+			contents: lsp.v_marked_string(node.code(source))
 			range: tsrange_to_lsp_range(node.range())
 		}
 	} else if node_type == 'import_path' {
@@ -984,7 +984,7 @@ fn get_hover_data(mut store analyzer.Store, node C.TSNode, uri lsp.DocumentUri, 
 		sym = store.infer_symbol_from_node(closest_parent, source) ?
 	}
 
-	// eprintln('$node_type | ${node.get_text(source)} | $sym')
+	// eprintln('$node_type | ${node.code(source)} | $sym')
 
 	// Send null if range has zero-start and end points
 	if sym.range.start_point.row == 0 && sym.range.start_point.column == 0
@@ -1068,7 +1068,7 @@ fn (mut ls Vls) definition(id string, params string) {
 	offset := compute_offset(source, pos.line, pos.character)
 	mut node := traverse_node(tree.root_node(), u32(offset))
 	mut original_range := node.range()
-	node_type := node.type_name()
+	node_type := node.name()
 	if node.is_null() || (node.parent().is_error() || node.parent().is_missing()) {
 		ls.send_null(id)
 		return
@@ -1153,7 +1153,7 @@ fn (mut ls Vls) implementation(id string, params string) {
 	offset := file.get_offset(pos.line, pos.character)
 	mut node := traverse_node(tree.root_node(), u32(offset))
 	mut original_range := node.range()
-	node_type := node.type_name()
+	node_type := node.name()
 	if node.is_null() || (node.parent().is_error() || node.parent().is_missing()) {
 		ls.send_null(id)
 		return
@@ -1162,8 +1162,8 @@ fn (mut ls Vls) implementation(id string, params string) {
 	ls.store.set_active_file_path(uri.path(), file.version)
 
 	mut got_sym := analyzer.void_type
-	if node.parent().type_name() == 'interface_declaration' {
-		got_sym = ls.store.symbols[ls.store.cur_dir].get(node.get_text(source)) or { got_sym }
+	if node.parent().name() == 'interface_declaration' {
+		got_sym = ls.store.symbols[ls.store.cur_dir].get(node.code(source)) or { got_sym }
 	} else {
 		got_sym = ls.store.infer_value_type_from_node(node, source)
 	}
