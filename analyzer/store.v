@@ -595,19 +595,10 @@ pub fn (mut ss Store) infer_symbol_from_node(node C.TSNode, src_text []byte) ?&S
 		return none
 	}
 
-	node_type := node.name()
 	mut module_name := ''
 	mut type_name := ''
 
-	// defer {
-	// 	unsafe {
-	// 		// node_type.free()
-	// 		module_name.free()
-	// 		type_name.free()
-	// 	}
-	// }
-
-	match node_type {
+	match node.name() {
 		'identifier', 'binded_identifier' {
 			// Identifier symbol finding strategy
 			// Find first in symbols
@@ -793,11 +784,8 @@ pub fn (mut ss Store) infer_value_type_from_node(node C.TSNode, src_text []byte)
 	}
 
 	mut type_name := ''
-	// defer {
-	// 	unsafe { type_name.free() }
-	// }
-	node_type := node.name()
-	match node_type {
+
+	match node.name() {
 		'true', 'false' {
 			type_name = 'bool'
 		}
@@ -893,8 +881,8 @@ pub fn (mut ss Store) delete_symbol_at_node(root_node C.TSNode, src []byte, at_r
 	unsafe { ss.opened_scopes[ss.cur_file_path].free() }
 	nodes := get_nodes_within_range(root_node, at_range) or { return false }
 	for node in nodes {
-		node_type := node.name()
-		match node_type {
+		node_name := node.name()
+		match node_name {
 			'const_spec', 'global_var_spec', 'global_var_initializer', 'function_declaration',
 			'interface_declaration', 'enum_declaration', 'type_declaration', 'struct_declaration' {
 				name_node := node.child_by_field_name('name')
@@ -919,7 +907,7 @@ pub fn (mut ss Store) delete_symbol_at_node(root_node C.TSNode, src []byte, at_r
 					ss.symbols[ss.cur_dir].delete(idx)
 				}
 
-				if node_type == 'function_declaration' {
+				if node_name == 'function_declaration' {
 					// TODO: find a way to remove scopes and update the position
 					// of adjacent ones
 
@@ -933,7 +921,7 @@ pub fn (mut ss Store) delete_symbol_at_node(root_node C.TSNode, src []byte, at_r
 					// if param_count != 0 {
 					// 	start_byte = params_list_node.named_child(0).start_byte()
 					// }
-				} else if node_type in ['const_spec', 'global_var_spec', 'global_var_initializer'] {
+				} else if node_name in ['const_spec', 'global_var_spec', 'global_var_initializer'] {
 					mut innermost := ss.opened_scopes[ss.cur_file_path].innermost(node.start_byte(),
 						node.end_byte())
 					innermost.remove(symbol_name)
@@ -1019,7 +1007,6 @@ fn (mut ss Store) inject_paths_of_new_imports(mut new_imports []&Import, lookup_
 			}
 
 			if !os.exists(mod_dir) {
-				// unsafe { mod_dir.free() }
 				continue
 			}
 
@@ -1029,7 +1016,6 @@ fn (mut ss Store) inject_paths_of_new_imports(mut new_imports []&Import, lookup_
 			// is not used by the code below it
 			{
 				mut files := os.ls(mod_dir) or {
-					// unsafe { mod_dir.free() }
 					continue
 				}
 
@@ -1041,23 +1027,15 @@ fn (mut ss Store) inject_paths_of_new_imports(mut new_imports []&Import, lookup_
 						if file_ext == v_ext {
 							has_v_files = true
 						}
-
-						// unsafe { file_ext.free() }
 					}
-
-					// unsafe { files[j].free() }
 					files.delete(j)
 				}
-
-				// unsafe { files.free() }
 			}
 			if has_v_files {
 				new_import.set_path(mod_dir)
 				ss.dependency_tree.add(mod_dir)
 				break
 			}
-
-			// unsafe { mod_dir.free() }
 		}
 
 		// report the unresolved import
@@ -1079,7 +1057,6 @@ fn (mut ss Store) inject_paths_of_new_imports(mut new_imports []&Import, lookup_
 		}
 
 		import_path_iter.reset()
-		// unsafe { mod_name_arr.free() }
 	}
 }
 
@@ -1266,11 +1243,11 @@ pub fn (mut store Store) import_modules(mut imports []&Import) {
 		unsafe { file_paths.free() }
 	}
 
-	unsafe {
-		// modules_from_old_dir.free()
-		// old_active_path.free()
-		// old_active_dir.free()
-	}
+	// unsafe {
+	// 	modules_from_old_dir.free()
+	// 	old_active_path.free()
+	// 	old_active_dir.free()
+	// }
 }
 
 pub fn (ss &Store) is_module(module_name string) bool {
