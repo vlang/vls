@@ -184,13 +184,13 @@ pub fn (ss &Store) find_fn_symbol(module_name string, return_sym &Symbol, params
 }
 
 pub fn compare_params_and_ret_type(params []&Symbol, ret_type &Symbol, fn_to_compare &Symbol, include_param_name bool) bool {
-	mut params_to_check := []int{cap: fn_to_compare.children.len}
+	mut params_to_check := []int{cap: fn_to_compare.children_syms.len}
 	// defer {
 	// 	unsafe { params_to_check.free() }
 	// }
 
 	// get a list of indices that are parameters
-	for i, child in fn_to_compare.children {
+	for i, child in fn_to_compare.children_syms {
 		if child.kind != .variable {
 			continue
 		}
@@ -201,7 +201,7 @@ pub fn compare_params_and_ret_type(params []&Symbol, ret_type &Symbol, fn_to_com
 	}
 	mut params_left := params_to_check.len
 	for i, param_idx in params_to_check {
-		param_from_sym := fn_to_compare.children[param_idx]
+		param_from_sym := fn_to_compare.children_syms[param_idx]
 		param_to_compare := params[i]
 		if param_from_sym.return_sym == param_to_compare.return_sym {
 			if include_param_name && param_from_sym.name != param_to_compare.name {
@@ -258,7 +258,7 @@ pub fn (mut ss Store) register_symbol(mut info Symbol) ?&Symbol {
 				existing_sym.name = info.name
 			}
 
-			existing_sym.children = info.children
+			existing_sym.children_syms = info.children_syms
 			existing_sym.parent_sym = info.parent_sym
 			existing_sym.return_sym = info.return_sym
 			existing_sym.language = info.language
@@ -619,7 +619,7 @@ pub fn (mut ss Store) infer_symbol_from_node(node C.TSNode, src_text []byte) ?&S
 			if !parent_sym.is_void() {
 				if parent.type_name() == 'struct_field_declaration' {
 					return parent_sym
-				} else if child_sym := parent_sym.children.get(ident_text) {
+				} else if child_sym := parent_sym.children_syms.get(ident_text) {
 					return child_sym
 				}
 			}
@@ -638,7 +638,7 @@ pub fn (mut ss Store) infer_symbol_from_node(node C.TSNode, src_text []byte) ?&S
 
 			if !type_node.is_null() {
 				parent_sym := ss.infer_symbol_from_node(type_node, src_text) ?
-				child_sym := parent_sym.children.get(field_node.code(src_text)) ?
+				child_sym := parent_sym.children_syms.get(field_node.code(src_text)) ?
 
 				return child_sym
 			} else {
@@ -648,7 +648,7 @@ pub fn (mut ss Store) infer_symbol_from_node(node C.TSNode, src_text []byte) ?&S
 					if sym.kind != .enum_ {
 						continue
 					}
-					enum_member := sym.children.get(enum_value) or { continue }
+					enum_member := sym.children_syms.get(enum_value) or { continue }
 					return enum_member
 				}
 			}
@@ -671,7 +671,7 @@ pub fn (mut ss Store) infer_symbol_from_node(node C.TSNode, src_text []byte) ?&S
 					root_sym = root_sym.return_sym
 				}
 				child_name := node.child_by_field_name('field').code(src_text)
-				return root_sym.children.get(child_name) or {
+				return root_sym.children_syms.get(child_name) or {
 					if root_sym.kind == .ref {
 						root_sym = root_sym.parent_sym
 					} else {
@@ -685,7 +685,7 @@ pub fn (mut ss Store) infer_symbol_from_node(node C.TSNode, src_text []byte) ?&S
 						}
 					}
 
-					root_sym.children.get(child_name) or { void_sym }
+					root_sym.children_syms.get(child_name) or { void_sym }
 				}
 			}
 
@@ -707,7 +707,7 @@ pub fn (mut ss Store) infer_symbol_from_node(node C.TSNode, src_text []byte) ?&S
 			}
 			if parent.type_name() == 'literal_value' {
 				parent_sym := ss.infer_symbol_from_node(parent, src_text) ?
-				return parent_sym.children.get(selected_node.code(src_text)) or {
+				return parent_sym.children_syms.get(selected_node.code(src_text)) or {
 					if parent_sym.name == 'map' || parent_sym.name == 'array' {
 						return ss.infer_symbol_from_node(selected_node, src_text)
 					}
@@ -734,7 +734,7 @@ pub fn (mut ss Store) infer_symbol_from_node(node C.TSNode, src_text []byte) ?&S
 			}
 
 			parent_sym := ss.infer_symbol_from_node(parent, src_text) ?
-			child_sym := parent_sym.children.get(node.child_by_field_name('name').code(src_text)) ?
+			child_sym := parent_sym.children_syms.get(node.child_by_field_name('name').code(src_text)) ?
 			return child_sym
 		}
 		'struct_field_declaration', 'interface_spec' {
@@ -749,7 +749,7 @@ pub fn (mut ss Store) infer_symbol_from_node(node C.TSNode, src_text []byte) ?&S
 			// eprintln(parent.type_name())
 			parent_sym := ss.infer_symbol_from_node(parent.child_by_field_name('name'),
 				src_text) ?
-			child_sym := parent_sym.children.get(node.child_by_field_name('name').code(src_text)) ?
+			child_sym := parent_sym.children_syms.get(node.child_by_field_name('name').code(src_text)) ?
 			return child_sym
 		}
 		'function_declaration' {
@@ -764,7 +764,7 @@ pub fn (mut ss Store) infer_symbol_from_node(node C.TSNode, src_text []byte) ?&S
 				receiver_param_node := receiver_node.named_child(0)
 				parent_sym := ss.infer_symbol_from_node(receiver_param_node.child_by_field_name('type'),
 					src_text) ?
-				child_sym := parent_sym.children.get(name_node.code(src_text)) ?
+				child_sym := parent_sym.children_syms.get(name_node.code(src_text)) ?
 				return child_sym
 			} else {
 				return ss.infer_symbol_from_node(name_node, src_text)

@@ -608,7 +608,7 @@ fn (mut sr SymbolRegistration) for_statement(for_stmt_node C.TSNode) ? {
 						idx_node := left_node.named_child(end_idx - 1)
 						mut return_sym := sr.store.find_symbol('', 'int') or { void_sym }
 						if right_sym.kind == .map_ {
-							return_sym = right_sym.children[1] or { void_sym }
+							return_sym = right_sym.children_syms[1] or { void_sym }
 						}
 
 						mut idx_sym := Symbol{
