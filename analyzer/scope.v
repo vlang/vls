@@ -70,7 +70,7 @@ pub fn (mut scope ScopeTree) register(info &Symbol) ? {
 			existing_sym.name = info.name
 		}
 
-		existing_sym.return_type = info.return_type
+		existing_sym.return_sym = info.return_sym
 		existing_sym.access = info.access
 		existing_sym.range = info.range
 		existing_sym.file_path = info.file_path

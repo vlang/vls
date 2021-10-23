@@ -169,12 +169,12 @@ pub fn (ss &Store) find_symbol(module_name string, name string) ?&Symbol {
 const anon_fn_prefix = '#anon_'
 
 // find_fn_symbol finds the function symbol with the appropriate parameters and return type
-pub fn (ss &Store) find_fn_symbol(module_name string, return_type &Symbol, params []&Symbol) ?&Symbol {
+pub fn (ss &Store) find_fn_symbol(module_name string, return_sym &Symbol, params []&Symbol) ?&Symbol {
 	module_path := ss.get_module_path(module_name)
 	for sym in ss.symbols[module_path] ? {
 		if sym.kind == .function_type && sym.name.starts_with(analyzer.anon_fn_prefix)
 			&& sym.generic_placeholder_len == 0 {
-			if !compare_params_and_ret_type(params, return_type, sym, true) {
+			if !compare_params_and_ret_type(params, return_sym, sym, true) {
 				continue
 			}
 			return sym
@@ -203,7 +203,7 @@ pub fn compare_params_and_ret_type(params []&Symbol, ret_type &Symbol, fn_to_com
 	for i, param_idx in params_to_check {
 		param_from_sym := fn_to_compare.children[param_idx]
 		param_to_compare := params[i]
-		if param_from_sym.return_type == param_to_compare.return_type {
+		if param_from_sym.return_sym == param_to_compare.return_sym {
 			if include_param_name && param_from_sym.name != param_to_compare.name {
 				break
 			}
@@ -212,7 +212,7 @@ pub fn compare_params_and_ret_type(params []&Symbol, ret_type &Symbol, fn_to_com
 		}
 		break
 	}
-	if params_left != 0 || ret_type != fn_to_compare.return_type {
+	if params_left != 0 || ret_type != fn_to_compare.return_sym {
 		return false
 	}
 	return true
@@ -259,8 +259,8 @@ pub fn (mut ss Store) register_symbol(mut info Symbol) ?&Symbol {
 			}
 
 			existing_sym.children = info.children
-			existing_sym.parent = info.parent
-			existing_sym.return_type = info.return_type
+			existing_sym.parent_sym = info.parent_sym
+			existing_sym.return_sym = info.return_sym
 			existing_sym.language = info.language
 			existing_sym.access = info.access
 			existing_sym.kind = info.kind
@@ -524,16 +524,16 @@ pub fn (mut store Store) find_symbol_by_type_node(node C.TSNode, src_text []byte
 	if sym_kind == .function_type {
 		mut parameters := extract_parameter_list(node.child_by_field_name('parameters'), mut
 			store, src_text)
-		return_type := store.find_symbol_by_type_node(node.child_by_field_name('result'),
-			src_text) or { void_type }
-		return store.find_fn_symbol(module_name, return_type, parameters) or {
+		return_sym := store.find_symbol_by_type_node(node.child_by_field_name('result'),
+			src_text) or { void_sym }
+		return store.find_fn_symbol(module_name, return_sym, parameters) or {
 			mut new_sym := Symbol{
 				name: analyzer.anon_fn_prefix + store.anon_fn_counter.str()
 				file_path: store.cur_file_path
 				file_version: store.cur_version
 				is_top_level: true
 				kind: sym_kind
-				return_type: return_type
+				return_sym: return_sym
 			}
 
 			for mut param in parameters {
@@ -541,7 +541,7 @@ pub fn (mut store Store) find_symbol_by_type_node(node C.TSNode, src_text []byte
 			}
 
 			store.anon_fn_counter++
-			store.register_symbol(mut new_sym) or { void_type }
+			store.register_symbol(mut new_sym) or { void_sym }
 		}
 	}
 
@@ -573,7 +573,7 @@ pub fn (mut store Store) find_symbol_by_type_node(node C.TSNode, src_text []byte
 					mut ref_sym := store.find_symbol_by_type_node(node.named_child(0),
 						src_text) ?
 					if ref_sym.name.len != 0 {
-						new_sym.parent = ref_sym
+						new_sym.parent_sym = ref_sym
 					} else {
 						// TODO:
 						return error('empty ref sym')
@@ -614,7 +614,7 @@ pub fn (mut ss Store) infer_symbol_from_node(node C.TSNode, src_text []byte) ?&S
 				parent = parent.parent()
 			}
 
-			parent_sym := ss.infer_symbol_from_node(parent, src_text) or { void_type }
+			parent_sym := ss.infer_symbol_from_node(parent, src_text) or { void_sym }
 			ident_text := node.code(src_text)
 			if !parent_sym.is_void() {
 				if parent.type_name() == 'struct_field_declaration' {
@@ -665,15 +665,15 @@ pub fn (mut ss Store) infer_symbol_from_node(node C.TSNode, src_text []byte) ?&S
 		}
 		'selector_expression' {
 			operand := node.child_by_field_name('operand')
-			mut root_sym := ss.infer_symbol_from_node(operand, src_text) or { void_type }
+			mut root_sym := ss.infer_symbol_from_node(operand, src_text) or { void_sym }
 			if !root_sym.is_void() {
 				if root_sym.is_returnable() {
-					root_sym = root_sym.return_type
+					root_sym = root_sym.return_sym
 				}
 				child_name := node.child_by_field_name('field').code(src_text)
 				return root_sym.children.get(child_name) or {
 					if root_sym.kind == .ref {
-						root_sym = root_sym.parent
+						root_sym = root_sym.parent_sym
 					} else {
 						for base_sym_loc in ss.base_symbol_locations {
 							if base_sym_loc.for_kind == root_sym.kind {
@@ -685,7 +685,7 @@ pub fn (mut ss Store) infer_symbol_from_node(node C.TSNode, src_text []byte) ?&S
 						}
 					}
 
-					root_sym.children.get(child_name) or { void_type }
+					root_sym.children.get(child_name) or { void_sym }
 				}
 			}
 
@@ -773,7 +773,7 @@ pub fn (mut ss Store) infer_symbol_from_node(node C.TSNode, src_text []byte) ?&S
 		else {
 			// eprintln(node_type)
 			// eprintln(node.parent().type_name())
-			// return analyzer.void_type
+			// return analyzer.void_sym
 		}
 	}
 
@@ -783,7 +783,7 @@ pub fn (mut ss Store) infer_symbol_from_node(node C.TSNode, src_text []byte) ?&S
 // infer_value_type_from_node returns the symbol based on the given node
 pub fn (mut ss Store) infer_value_type_from_node(node C.TSNode, src_text []byte) &Symbol {
 	if node.is_null() {
-		return void_type
+		return void_sym
 	}
 
 	mut type_name := ''
@@ -818,7 +818,7 @@ pub fn (mut ss Store) infer_value_type_from_node(node C.TSNode, src_text []byte)
 			// right_node := node.child_by_field_name('right')
 			mut left_sym := ss.infer_value_type_from_node(left_node, src_text)
 			if left_sym.is_returnable() {
-				left_sym = left_sym.return_type
+				left_sym = left_sym.return_sym
 			}
 			// right_sym := ss.infer_value_type_from_node(right_node.code(src_text))
 			return left_sym
@@ -828,34 +828,34 @@ pub fn (mut ss Store) infer_value_type_from_node(node C.TSNode, src_text []byte)
 			operand_node := node.child_by_field_name('operand')
 			mut op_sym := ss.infer_value_type_from_node(operand_node, src_text)
 			if op_sym.is_returnable() {
-				op_sym = op_sym.return_type
+				op_sym = op_sym.return_sym
 			}
 
 			operator_type_name := operator_node.type_name()
 			if operator_type_name in ['+', '-', '~', '^', '*'] && op_sym.name !in numeric_types {
-				return void_type
+				return void_sym
 			} else if operator_type_name == '!' && op_sym.name != 'bool' {
-				return void_type
+				return void_sym
 			} else if operator_type_name == '*' && op_sym.kind != .ref {
-				return void_type
+				return void_sym
 			} else if operator_type_name == '&' && op_sym.count_ptr() > 2 {
-				return void_type
+				return void_sym
 			} else if operator_type_name == '<-' && op_sym.kind != .chan_ {
-				return void_type
+				return void_sym
 			} else {
 				return op_sym
 			}
 		}
 		'identifier', 'call_expression' {
-			got_sym := ss.infer_symbol_from_node(node, src_text) or { void_type }
+			got_sym := ss.infer_symbol_from_node(node, src_text) or { void_sym }
 			if got_sym.is_returnable() {
-				return got_sym.return_type
+				return got_sym.return_sym
 			}
 			return got_sym
 		}
 		// 'call_expression' {
 		// 	sym := ss.infer_value_type_from_node(node.child_by_field_name('function'), src_text)
-		// 	return sym.return_type
+		// 	return sym.return_sym
 		// }
 		// 'argument_list' {
 		// 	return ss.infer_value_type_from_node(node.parent(), src_text)
@@ -864,18 +864,18 @@ pub fn (mut ss Store) infer_value_type_from_node(node C.TSNode, src_text []byte)
 			block_node := node.named_child(0)
 			block_child_len := node.named_child_count()
 			if block_child_len != u32(1) {
-				return void_type
+				return void_sym
 			}
 			return ss.infer_value_type_from_node(block_node.named_child(0), src_text)
 		}
 		else {
-			return ss.infer_symbol_from_node(node, src_text) or { void_type }
+			return ss.infer_symbol_from_node(node, src_text) or { void_sym }
 		}
 	}
 
 	return ss.find_symbol('', type_name) or {
 		ss.report_error(report_error('Invalid type $type_name', node.range()))
-		return void_type
+		return void_sym
 	}
 }
 
