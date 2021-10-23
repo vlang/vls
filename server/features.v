@@ -118,7 +118,7 @@ fn symbol_to_symbol_info(uri lsp.DocumentUri, sym &analyzer.Symbol) ?lsp.SymbolI
 	mut kind := lsp.SymbolKind.null
 	match sym.kind {
 		.function {
-			kind = if sym.kind == .function && !sym.parent.is_void() {
+			kind = if sym.kind == .function && !sym.parent_sym.is_void() {
 				lsp.SymbolKind.method
 			} else {
 				lsp.SymbolKind.function
@@ -143,7 +143,11 @@ fn symbol_to_symbol_info(uri lsp.DocumentUri, sym &analyzer.Symbol) ?lsp.SymbolI
 			return none
 		}
 	}
-	prefix := if sym.kind == .function && !sym.parent.is_void() { sym.parent.name + '.' } else { '' }
+	prefix := if sym.kind == .function && !sym.parent_sym.is_void() {
+		sym.parent_sym.name + '.'
+	} else {
+		''
+	}
 	return lsp.SymbolInformation{
 		name: prefix + sym.name
 		kind: kind
@@ -382,7 +386,7 @@ fn (mut builder CompletionBuilder) build_suggestions_from_list(node C.TSNode) {
 			}
 
 			if call_expr_arg_cur_idx < u32(returned_sym.children.len) {
-				builder.filter_return_type = returned_sym.children[int(call_expr_arg_cur_idx)].return_type
+				builder.filter_return_type = returned_sym.children[int(call_expr_arg_cur_idx)].return_sym
 				builder.show_local = true
 				builder.show_global = true
 			}
@@ -431,7 +435,7 @@ fn (mut builder CompletionBuilder) build_suggestions_from_expr(node C.TSNode) {
 				if got_sym := builder.store.infer_symbol_from_node(selected_node, builder.src) {
 					builder.show_mut_only = builder.parent_node.type_name() == 'block'
 						&& got_sym.is_mutable()
-					builder.build_suggestions_from_sym(got_sym.return_type, true)
+					builder.build_suggestions_from_sym(got_sym.return_sym, true)
 				} else if builder.store.is_module(text) {
 					builder.build_suggestions_from_module(text)
 				} else if text == 'C.' || text == 'JS.' {
@@ -460,10 +464,10 @@ fn (mut builder CompletionBuilder) build_suggestions_from_expr(node C.TSNode) {
 		'keyed_element' {
 			if got_sym := builder.store.infer_symbol_from_node(node, builder.src) {
 				builder.show_local = true
-				builder.filter_return_type = got_sym.return_type
+				builder.filter_return_type = got_sym.return_sym
 
-				if got_sym.return_type.kind != .struct_ {
-					builder.build_suggestions_from_sym(got_sym.return_type, false)
+				if got_sym.return_sym.kind != .struct_ {
+					builder.build_suggestions_from_sym(got_sym.return_sym, false)
 				}
 			}
 		}
@@ -471,8 +475,8 @@ fn (mut builder CompletionBuilder) build_suggestions_from_expr(node C.TSNode) {
 			builder.build_suggestions_from_node(node.named_child(0))
 		}
 		else {
-			// found_sym := builder.store.infer_symbol_from_node(node, builder.src) or { analyzer.void_type }
-			// builder.filter_return_type = if found_sym.is_returnable() { found_sym.return_type } else { found_sym }
+			// found_sym := builder.store.infer_symbol_from_node(node, builder.src) or { analyzer.void_sym }
+			// builder.filter_return_type = if found_sym.is_returnable() { found_sym.return_sym } else { found_sym }
 		}
 	}
 }
@@ -578,7 +582,7 @@ fn (mut builder CompletionBuilder) build_suggestions_from_module(name string, in
 	imported_syms := builder.store.symbols[imported_path_dir]
 	for imp_sym in imported_syms {
 		if (included_list.len != 0 && imp_sym.name in included_list)
-			|| !builder.has_same_return_type(imp_sym.return_type)
+			|| !builder.has_same_return_type(imp_sym.return_sym)
 			|| (builder.filter_sym_kinds.len != 0 && imp_sym.kind !in builder.filter_sym_kinds) {
 			continue
 		}
@@ -644,7 +648,7 @@ fn (mut builder CompletionBuilder) build_local_suggestions() {
 		for !isnil(scope) && scope != file_scope {
 			// constants
 			for scope_sym in scope.get_all_symbols() {
-				if !builder.has_same_return_type(scope_sym.return_type)
+				if !builder.has_same_return_type(scope_sym.return_sym)
 					|| (builder.filter_sym_kinds.len != 0
 					&& scope_sym.kind !in builder.filter_sym_kinds) {
 					continue
@@ -670,7 +674,7 @@ fn (mut builder CompletionBuilder) build_global_suggestions() {
 	for sym in global_syms {
 		if !sym.is_void() && sym.kind != .placeholder {
 			if (sym.kind == .function && sym.name == 'main')
-				|| !builder.has_same_return_type(sym.return_type)
+				|| !builder.has_same_return_type(sym.return_sym)
 				|| (builder.filter_sym_kinds.len != 0 && sym.kind !in builder.filter_sym_kinds) {
 				continue
 			}
@@ -710,7 +714,7 @@ fn symbol_to_completion_item(sym &analyzer.Symbol, with_snippet bool) ?lsp.Compl
 		}
 		.function {
 			// if function has parent, use method
-			kind = if !sym.parent.is_void() {
+			kind = if !sym.parent_sym.is_void() {
 				lsp.CompletionItemKind.method
 			} else {
 				lsp.CompletionItemKind.function
@@ -750,7 +754,7 @@ fn symbol_to_completion_item(sym &analyzer.Symbol, with_snippet bool) ?lsp.Compl
 			}
 		}
 		.field {
-			match sym.parent.kind {
+			match sym.parent_sym.kind {
 				.enum_ {
 					kind = .enum_member
 					insert_text.write_b(`.`)
@@ -978,10 +982,10 @@ fn get_hover_data(mut store analyzer.Store, node C.TSNode, uri lsp.DocumentUri, 
 		}
 	}
 
-	mut sym := store.infer_symbol_from_node(node, source) or { analyzer.void_type }
+	mut sym := store.infer_symbol_from_node(node, source) or { analyzer.void_sym }
 	if isnil(sym) || sym.is_void() {
 		closest_parent := closest_symbol_node_parent(node)
-		sym = store.infer_symbol_from_node(closest_parent, source) or { analyzer.void_type }
+		sym = store.infer_symbol_from_node(closest_parent, source) or { analyzer.void_sym }
 	}
 
 	// eprintln('$node_type_name | ${node.code(source)} | $sym')
@@ -1075,7 +1079,7 @@ fn (mut ls Vls) definition(id string, params string) {
 	}
 
 	ls.store.set_active_file_path(uri.path(), file.version)
-	sym := ls.store.infer_symbol_from_node(node, source) or { analyzer.void_type }
+	sym := ls.store.infer_symbol_from_node(node, source) or { analyzer.void_sym }
 	if isnil(sym) || sym.is_void() {
 		ls.send_null(id)
 		return
@@ -1106,8 +1110,8 @@ fn (mut ls Vls) definition(id string, params string) {
 
 fn get_implementation_locations_from_syms(symbols []&analyzer.Symbol, got_sym &analyzer.Symbol, original_range C.TSRange, mut locations []lsp.LocationLink) {
 	for sym in symbols {
-		mut interface_sym := analyzer.void_type
-		mut sym_to_check := analyzer.void_type
+		mut interface_sym := analyzer.void_sym
+		mut sym_to_check := analyzer.void_sym
 		if got_sym.kind == .interface_ && sym.kind != .interface_ {
 			interface_sym = got_sym
 			sym_to_check = sym
@@ -1161,7 +1165,7 @@ fn (mut ls Vls) implementation(id string, params string) {
 
 	ls.store.set_active_file_path(uri.path(), file.version)
 
-	mut got_sym := analyzer.void_type
+	mut got_sym := analyzer.void_sym
 	if node.parent().type_name() == 'interface_declaration' {
 		got_sym = ls.store.symbols[ls.store.cur_dir].get(node.code(source)) or { got_sym }
 	} else {

@@ -104,7 +104,7 @@ fn (mut sr SymbolRegistration) const_decl(const_node C.TSNode) ?[]&Symbol {
 			is_const: true
 			file_path: sr.store.cur_file_path
 			file_version: sr.store.cur_version
-			return_type: sr.store.infer_value_type_from_node(spec_node.child_by_field_name('value'),
+			return_sym: sr.store.infer_value_type_from_node(spec_node.child_by_field_name('value'),
 				sr.src_text)
 		}
 	}
@@ -156,7 +156,7 @@ fn (mut sr SymbolRegistration) struct_decl(struct_decl_node C.TSNode) ?&Symbol {
 fn (mut sr SymbolRegistration) struct_field_decl(field_access SymbolAccess, field_decl_node C.TSNode) &Symbol {
 	field_type_node := field_decl_node.child_by_field_name('type')
 	field_name_node := field_decl_node.child_by_field_name('name')
-	field_typ := sr.store.find_symbol_by_type_node(field_type_node, sr.src_text) or { void_type }
+	field_sym := sr.store.find_symbol_by_type_node(field_type_node, sr.src_text) or { void_sym }
 
 	if field_name_node.is_null() {
 		// struct embedding
@@ -170,7 +170,7 @@ fn (mut sr SymbolRegistration) struct_field_decl(field_access SymbolAccess, fiel
 			kind: .embedded_field
 			range: field_type_node.range()
 			access: field_access
-			return_type: field_typ
+			return_sym: field_sym
 			is_top_level: true
 			file_path: sr.store.cur_file_path
 			file_version: sr.store.cur_version
@@ -181,7 +181,7 @@ fn (mut sr SymbolRegistration) struct_field_decl(field_access SymbolAccess, fiel
 			kind: .field
 			range: field_name_node.range()
 			access: field_access
-			return_type: field_typ
+			return_sym: field_sym
 			is_top_level: true
 			file_path: sr.store.cur_file_path
 			file_version: sr.store.cur_version
@@ -226,8 +226,8 @@ fn (mut sr SymbolRegistration) interface_decl(interface_decl_node C.TSNode) ?&Sy
 					kind: .function
 					access: method_access
 					range: name_node.range()
-					return_type: sr.store.find_symbol_by_type_node(result_node, sr.src_text) or {
-						void_type
+					return_sym: sr.store.find_symbol_by_type_node(result_node, sr.src_text) or {
+						void_sym
 					}
 					file_path: sr.store.cur_file_path
 					file_version: sr.store.cur_version
@@ -282,7 +282,7 @@ fn (mut sr SymbolRegistration) enum_decl(enum_decl_node C.TSNode) ?&Symbol {
 			continue
 		}
 
-		int_type := sr.store.find_symbol('', 'int') or {
+		int_sym := sr.store.find_symbol('', 'int') or {
 			mut new_int_symbol := Symbol{
 				name: 'int'
 				kind: .typedef
@@ -290,7 +290,7 @@ fn (mut sr SymbolRegistration) enum_decl(enum_decl_node C.TSNode) ?&Symbol {
 				file_path: os.join_path(sr.store.auto_imports[''], 'placeholder.vv')
 				file_version: 0
 			}
-			sr.store.register_symbol(mut new_int_symbol) or { void_type }
+			sr.store.register_symbol(mut new_int_symbol) or { void_sym }
 		}
 
 		mut member_sym := &Symbol{
@@ -298,7 +298,7 @@ fn (mut sr SymbolRegistration) enum_decl(enum_decl_node C.TSNode) ?&Symbol {
 			kind: .field
 			range: member_node.range()
 			access: access
-			return_type: int_type
+			return_sym: int_sym
 			is_top_level: true
 			file_path: sr.store.cur_file_path
 			file_version: sr.store.cur_version
@@ -338,20 +338,18 @@ fn (mut sr SymbolRegistration) fn_decl(fn_node C.TSNode) ?&Symbol {
 	mut fn_sym := sr.new_top_level_symbol(name_node, access, .function) ?
 	mut scope := sr.get_scope(body_node) or { &ScopeTree(0) }
 	fn_sym.access = access
-	fn_sym.return_type = sr.store.find_symbol_by_type_node(return_node, sr.src_text) or {
-		void_type
-	}
+	fn_sym.return_sym = sr.store.find_symbol_by_type_node(return_node, sr.src_text) or { void_sym }
 
 	mut is_method := false
 	if !receiver_node.is_null() {
 		is_method = true
 		mut receivers := extract_parameter_list(receiver_node, mut sr.store, sr.src_text)
 		if receivers.len != 0 {
-			mut parent := receivers[0].return_type
+			mut parent := receivers[0].return_sym
 			if !isnil(parent) && !parent.is_void() {
 				parent.add_child(mut fn_sym) or {}
 			}
-			fn_sym.parent = receivers[0]
+			fn_sym.parent_sym = receivers[0]
 			scope.register(receivers[0]) or {}
 		}
 		// unsafe { receivers.free() }
@@ -401,9 +399,9 @@ fn (mut sr SymbolRegistration) type_decl(type_decl_node C.TSNode) ?&Symbol {
 		// alias type
 		selected_type_node := types_node.named_child(0)
 		found_sym := sr.store.find_symbol_by_type_node(selected_type_node, sr.src_text) or {
-			void_type
+			void_sym
 		}
-		sym.parent = found_sym
+		sym.parent_sym = found_sym
 	} else {
 		// sum type
 		for i in 0 .. types_count {
@@ -514,9 +512,9 @@ fn (mut sr SymbolRegistration) short_var_decl(var_decl C.TSNode) ?[]&Symbol {
 				sr.fn_literal(right) or {}
 			}
 
-			mut right_type := sr.store.infer_value_type_from_node(right, sr.src_text)
-			if right_type.is_returnable() {
-				right_type = right_type.return_type
+			mut right_sym := sr.store.infer_value_type_from_node(right, sr.src_text)
+			if right_sym.is_returnable() {
+				right_sym = right_sym.return_sym
 			}
 
 			vars << &Symbol{
@@ -524,7 +522,7 @@ fn (mut sr SymbolRegistration) short_var_decl(var_decl C.TSNode) ?[]&Symbol {
 				kind: .variable
 				access: var_access
 				range: left.range()
-				return_type: right_type
+				return_sym: right_sym
 				is_top_level: false
 				file_path: sr.store.cur_file_path
 				file_version: sr.store.cur_version
@@ -600,7 +598,7 @@ fn (mut sr SymbolRegistration) for_statement(for_stmt_node C.TSNode) ? {
 			mut right_sym := sr.store.infer_value_type_from_node(right_node, sr.src_text)
 			if !right_sym.is_void() {
 				if right_sym.is_returnable() {
-					right_sym = right_sym.return_type
+					right_sym = right_sym.return_sym
 				}
 
 				mut end_idx := if left_count >= 2 { u32(1) } else { u32(0) }
@@ -608,9 +606,9 @@ fn (mut sr SymbolRegistration) for_statement(for_stmt_node C.TSNode) ? {
 					|| right_sym.name == 'string' {
 					if left_count == 2 {
 						idx_node := left_node.named_child(end_idx - 1)
-						mut return_sym := sr.store.find_symbol('', 'int') or { void_type }
+						mut return_sym := sr.store.find_symbol('', 'int') or { void_sym }
 						if right_sym.kind == .map_ {
-							return_sym = right_sym.children[1] or { void_type }
+							return_sym = right_sym.children[1] or { void_sym }
 						}
 
 						mut idx_sym := Symbol{
@@ -618,7 +616,7 @@ fn (mut sr SymbolRegistration) for_statement(for_stmt_node C.TSNode) ? {
 							kind: .variable
 							range: idx_node.range()
 							is_top_level: false
-							return_type: return_sym
+							return_sym: return_sym
 							file_path: sr.store.cur_file_path
 							file_version: sr.store.cur_version
 						}
@@ -627,9 +625,9 @@ fn (mut sr SymbolRegistration) for_statement(for_stmt_node C.TSNode) ? {
 					}
 
 					value_node := left_node.named_child(end_idx)
-					mut return_type := right_sym.value_sym()
+					mut return_sym := right_sym.value_sym()
 					if right_sym.name == 'string' {
-						return_type = sr.store.find_symbol('', 'byte') or { void_type }
+						return_sym = sr.store.find_symbol('', 'byte') or { void_sym }
 					}
 
 					mut value_sym := Symbol{
@@ -637,7 +635,7 @@ fn (mut sr SymbolRegistration) for_statement(for_stmt_node C.TSNode) ? {
 						kind: .variable
 						range: value_node.range()
 						is_top_level: false
-						return_type: return_type
+						return_sym: return_sym
 						file_path: sr.store.cur_file_path
 						file_version: sr.store.cur_version
 					}
@@ -719,14 +717,14 @@ fn extract_parameter_list(node C.TSNode, mut store Store, src_text []byte) []&Sy
 
 		param_name_node := param_node.child_by_field_name('name')
 		param_type_node := param_node.child_by_field_name('type')
-		return_type := store.find_symbol_by_type_node(param_type_node, src_text) or { void_type }
+		return_sym := store.find_symbol_by_type_node(param_type_node, src_text) or { void_sym }
 
 		syms << &Symbol{
 			name: param_name_node.code(src_text)
 			kind: .variable
 			range: param_name_node.range()
 			access: access
-			return_type: return_type
+			return_sym: return_sym
 			is_top_level: false
 			file_path: store.cur_file_path
 			file_version: store.cur_version
