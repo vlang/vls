@@ -88,7 +88,7 @@ fn (mut ls Vls) workspace_symbol(id string, _ string) {
 			if uri in ls.trees || uri.dir() == ls.root_uri {
 				sym_info := symbol_to_symbol_info(uri, sym) or { continue }
 				workspace_symbols << sym_info
-				for child_sym in sym.children {
+				for child_sym in sym.children_syms {
 					child_sym_info := symbol_to_symbol_info(uri, child_sym) or { continue }
 					workspace_symbols << child_sym_info
 				}
@@ -249,7 +249,7 @@ fn (mut ls Vls) signature_help(id string, params string) {
 	// create a signature help info based on the
 	// call expr info
 	mut param_infos := []lsp.ParameterInformation{}
-	for child_sym in sym.children {
+	for child_sym in sym.children_syms {
 		if child_sym.kind != .variable {
 			continue
 		}
@@ -385,8 +385,8 @@ fn (mut builder CompletionBuilder) build_suggestions_from_list(node C.TSNode) {
 				return
 			}
 
-			if call_expr_arg_cur_idx < u32(returned_sym.children.len) {
-				builder.filter_return_type = returned_sym.children[int(call_expr_arg_cur_idx)].return_sym
+			if call_expr_arg_cur_idx < u32(returned_sym.children_syms.len) {
+				builder.filter_return_type = returned_sym.children_syms[int(call_expr_arg_cur_idx)].return_sym
 				builder.show_local = true
 				builder.show_global = true
 			}
@@ -486,7 +486,7 @@ fn (mut builder CompletionBuilder) build_suggestions_from_sym(sym &analyzer.Symb
 		return
 	}
 
-	for child_sym in sym.children {
+	for child_sym in sym.children_syms {
 		if is_selector {
 			if (sym.kind in [.enum_, .struct_] || sym.kind in analyzer.container_symbol_kinds)
 				&& child_sym.kind !in [.field, .function] {
@@ -722,10 +722,10 @@ fn symbol_to_completion_item(sym &analyzer.Symbol, with_snippet bool) ?lsp.Compl
 			insert_text.write_string(name)
 			if with_snippet {
 				insert_text.write_b(`(`)
-				for i in 0 .. sym.children.len {
+				for i in 0 .. sym.children_syms.len {
 					insert_text.write_b(`$`)
 					insert_text.write_string(i.str())
-					if i < sym.children.len - 1 {
+					if i < sym.children_syms.len - 1 {
 						insert_text.write_string(', ')
 					} else {
 						insert_text_format = .snippet
@@ -740,10 +740,10 @@ fn symbol_to_completion_item(sym &analyzer.Symbol, with_snippet bool) ?lsp.Compl
 			if with_snippet {
 				insert_text.write_b(`{`)
 				mut insert_count := 1
-				for i, child_sym in sym.children {
+				for i, child_sym in sym.children_syms {
 					if child_sym.kind != .field || child_sym.name.len == 0 {
 						continue
-					} else if i != 0 && i < sym.children.len {
+					} else if i != 0 && i < sym.children_syms.len {
 						insert_text.write_string(', ')
 					}
 					insert_text.write_string(child_sym.name + ':\$' + insert_count.str())

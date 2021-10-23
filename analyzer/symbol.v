@@ -110,7 +110,7 @@ pub mut:
 	generic_placeholder_len int
 	sumtype_children_len    int
 	interface_children_len  int
-	children                []&Symbol // methods, sum types, map types, optionals, struct fields, etc.
+	children_syms           []&Symbol // methods, sum types, map types, optionals, struct fields, etc.
 	file_path               string         [required] // required in order to register the symbol at its appropriate directory.
 	file_version            int            [required] // file version when the symbol was registered
 }
@@ -134,7 +134,7 @@ pub fn (info &Symbol) gen_str() string {
 	match info.kind {
 		// .array_ {
 		// 	sb.write_string('[]')
-		// 	sb.write_string(info.children[0].str())
+		// 	sb.write_string(info.children_syms[0].str())
 		// }
 		.chan_ {
 			sb.write_string('chan ')
@@ -160,13 +160,13 @@ pub fn (info &Symbol) gen_str() string {
 			}
 
 			sb.write_b(`(`)
-			for i, v in info.children {
+			for i, v in info.children_syms {
 				if v.name.len != 0 {
 					sb.write_string(v.gen_str())
 				} else {
 					sb.write_string(v.return_sym.gen_str())
 				}
-				if i < info.children.len - 1 {
+				if i < info.children_syms.len - 1 {
 					sb.write_string(', ')
 				}
 			}
@@ -181,7 +181,7 @@ pub fn (info &Symbol) gen_str() string {
 		}
 		.multi_return {
 			sb.write_b(`(`)
-			for v in info.children {
+			for v in info.children_syms {
 				if v.kind !in analyzer.kinds_in_multi_return_to_be_excluded {
 					sb.write_string(v.gen_str())
 				}
@@ -218,7 +218,7 @@ pub fn (info &Symbol) gen_str() string {
 				}
 			} else {
 				for i in 0 .. info.sumtype_children_len {
-					sb.write_string(info.children[i].name)
+					sb.write_string(info.children_syms[i].name)
 					if i < info.sumtype_children_len - 1 {
 						sb.write_b(` `)
 						sb.write_b(`|`)
@@ -294,7 +294,7 @@ pub fn (symbols []&Symbol) filter_by_file_path(file_path string) []&Symbol {
 			filtered << sym
 		}
 
-		filtered_from_children := sym.children.filter_by_file_path(file_path)
+		filtered_from_children := sym.children_syms.filter_by_file_path(file_path)
 		for child_sym in filtered_from_children {
 			if filtered.exists(child_sym.name) {
 				continue
@@ -344,22 +344,22 @@ pub fn (infos []&Symbol) get(name string) ?&Symbol {
 }
 
 // add_child registers the symbol as a child of a given parent symbol
-pub fn (mut info Symbol) add_child(mut new_child Symbol, add_as_parent ...bool) ? {
+pub fn (mut info Symbol) add_child(mut new_child_sym Symbol, add_as_parent ...bool) ? {
 	if add_as_parent.len == 0 || add_as_parent[0] {
-		new_child.parent_sym = unsafe { info }
+		new_child_sym.parent_sym = unsafe { info }
 	}
 
-	if info.children.exists(new_child.name) {
-		return error('child exists. (name="$new_child.name")')
+	if info.children_syms.exists(new_child_sym.name) {
+		return error('child exists. (name="$new_child_sym.name")')
 	}
 
-	info.children << new_child
+	info.children_syms << new_child_sym
 }
 
 // is_void returns true if a symbol is void/invalid
 pub fn (sym &Symbol) is_void() bool {
-	if (sym.kind == .ref || sym.kind == .array_) && sym.children.len >= 1 {
-		return sym.children[0].is_void()
+	if (sym.kind == .ref || sym.kind == .array_) && sym.children_syms.len >= 1 {
+		return sym.children_syms[0].is_void()
 	}
 
 	return sym.kind == .void
@@ -376,21 +376,18 @@ pub fn (sym &Symbol) is_mutable() bool {
 [unsafe]
 pub fn (sym &Symbol) free() {
 	unsafe {
-		// sym.name.free()
-		// sym.file_path.free()
-
-		for v in sym.children {
+		for v in sym.children_syms {
 			v.free()
 		}
-		sym.children.free()
+		sym.children_syms.free()
 	}
 }
 
 fn (sym &Symbol) value_sym() &Symbol {
 	if sym.kind == .array_ {
-		return sym.children[0] or { analyzer.void_sym }
+		return sym.children_syms[0] or { analyzer.void_sym }
 	} else if sym.kind == .map_ {
-		return sym.children[1] or { analyzer.void_sym }
+		return sym.children_syms[1] or { analyzer.void_sym }
 	} else {
 		return analyzer.void_sym
 	}
@@ -413,8 +410,8 @@ pub fn is_interface_satisfied(sym &Symbol, interface_sym &Symbol) bool {
 	}
 
 	for i in 0 .. interface_sym.interface_children_len {
-		spec_sym := interface_sym.children[i]
-		selected_child_sym := sym.children.get(spec_sym.name) or { return false }
+		spec_sym := interface_sym.children_syms[i]
+		selected_child_sym := sym.children_syms.get(spec_sym.name) or { return false }
 		if spec_sym.kind == .field {
 			if selected_child_sym.access != spec_sym.access
 				|| selected_child_sym.kind != spec_sym.kind
@@ -423,7 +420,7 @@ pub fn is_interface_satisfied(sym &Symbol, interface_sym &Symbol) bool {
 			}
 		} else if spec_sym.kind == .function {
 			if selected_child_sym.kind != spec_sym.kind
-				|| !compare_params_and_ret_type(selected_child_sym.children, selected_child_sym.return_sym, spec_sym, false) {
+				|| !compare_params_and_ret_type(selected_child_sym.children_syms, selected_child_sym.return_sym, spec_sym, false) {
 				return false
 			}
 		}
