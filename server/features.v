@@ -1105,7 +1105,7 @@ fn (mut ls Vls) definition(id string, params string) {
 				target_range: tsrange_to_lsp_range(sym.range)
 				target_selection_range: tsrange_to_lsp_range(sym.range)
 				origin_selection_range: tsrange_to_lsp_range(original_range)
-			}
+			},
 		]
 	})
 }
