@@ -34,22 +34,24 @@ pub:
 	id      string
 	//	error   ResponseError
 	result T
-	error   ResponseError
+	error  ResponseError
 }
 
 pub fn (resp Response<T>) json() string {
 	mut resp_wr := strings.new_builder(100)
-	defer { unsafe { resp_wr.free() } }
-	resp_wr.write_string('{"jsonrpc":"${jsonrpc.version}","id":${resp.id}')
+	defer {
+		unsafe { resp_wr.free() }
+	}
+	resp_wr.write_string('{"jsonrpc":"$jsonrpc.version","id":$resp.id')
 	if resp.id.len == 0 {
 		resp_wr.write_string('null')
 	}
 	if resp.error.code != 0 {
 		err := json.encode(resp.error)
-		resp_wr.write_string(',"error":${err}')
+		resp_wr.write_string(',"error":$err')
 	} else {
 		res := json.encode(resp.result)
-		resp_wr.write_string(',"result":${res}')
+		resp_wr.write_string(',"result":$res')
 	}
 	resp_wr.write_b(`}`)
 	return resp_wr.str()

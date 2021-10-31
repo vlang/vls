@@ -11,14 +11,20 @@ import analyzer
 import time
 import v.vmod
 
+pub const vls_build_commit = meta_vls_build_commit()
+
 pub const meta = meta_info()
+
+fn meta_vls_build_commit() string {
+	res := $env('VLS_BUILD_COMMIT')
+	return res
+}
 
 fn meta_info() vmod.Manifest {
 	parsed := vmod.decode(@VMOD_FILE) or { panic(err) }
-	build_commit := $if with_build_commit ? { '-' + $env('VLS_BUILD_COMMIT') } $else { '' }
 	return vmod.Manifest{
 		...parsed
-		version: parsed.version + build_commit
+		version: parsed.version + '.' + server.vls_build_commit
 	}
 }
 
@@ -71,9 +77,10 @@ pub const (
 
 pub interface ReceiveSender {
 	debug bool
-	init() ?
+mut:
 	send(data string)
 	receive() ?string
+	init() ?
 }
 
 struct Vls {
@@ -282,7 +289,7 @@ fn (mut ls Vls) notify<T>(data jsonrpc.NotificationMessage<T>) {
 
 // send_null sends a null result to the client
 fn (mut ls Vls) send_null(id string) {
-	str := '{"jsonrpc":"${jsonrpc.version}","id":$id,"result":null}'
+	str := '{"jsonrpc":"$jsonrpc.version","id":$id,"result":null}'
 	ls.logger.response(str, .send)
 	ls.io.send(str)
 }
@@ -348,16 +355,7 @@ pub fn (mut ls Vls) set_features(features []string, enable bool) ? {
 }
 
 pub fn (ls Vls) launch_v_tool(args ...string) &os.Process {
-	mut v_exe_name := 'v'
-	defer {
-		unsafe { v_exe_name.free() }
-	}
-
-	$if windows {
-		v_exe_name += '.exe'
-	}
-
-	full_v_path := os.join_path(ls.vroot_path, v_exe_name)
+	full_v_path := os.join_path(ls.vroot_path, 'v')
 	mut p := os.new_process(full_v_path)
 	p.set_args(args)
 	p.set_redirect_stdio()

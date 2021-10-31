@@ -13,16 +13,7 @@ fn launch_v_tool(args ...string) ?&os.Process {
 	// using @VEXEROOT should never happen but will be used
 	// just in case
 	vroot_path := server.detect_vroot_path() or { @VEXEROOT }
-	mut v_exe_name := 'v'
-	defer {
-		unsafe { v_exe_name.free() }
-	}
-
-	$if windows {
-		v_exe_name += '.exe'
-	}
-
-	full_v_path := os.join_path(vroot_path, v_exe_name)
+	full_v_path := os.join_path(vroot_path, 'v')
 	mut p := os.new_process(full_v_path)
 	p.set_args(args)
 	p.set_redirect_stdio()

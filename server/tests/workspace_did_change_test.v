@@ -25,7 +25,7 @@ fn test_workspace_did_change() ? {
 		ls.dispatch(req)
 	}
 
-	method_name := 'workspace/didChangeWatchedFiles' 
+	method_name := 'workspace/didChangeWatchedFiles'
 	assert io.bench.nfail == 0
 
 	// delete
@@ -34,7 +34,7 @@ fn test_workspace_did_change() ? {
 			lsp.FileEvent{
 				uri: lsp.document_uri_from_path(files[1])
 				typ: .deleted
-			}
+			},
 		]
 	})
 
@@ -50,7 +50,7 @@ fn test_workspace_did_change() ? {
 			lsp.FileEvent{
 				uri: lsp.document_uri_from_path(os.join_path(os.dir(files[2]), 'renamed.vv'))
 				typ: .created
-			}
+			},
 		]
 	})
 
@@ -62,7 +62,7 @@ fn test_workspace_did_change() ? {
 			lsp.FileEvent{
 				uri: lsp.document_uri_from_path(files[0])
 				typ: .changed
-			}
+			},
 		]
 	})
 

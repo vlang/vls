@@ -64,7 +64,7 @@ fn (mut an Analyzer) import_decl(node C.TSNode) {
 	}
 
 	module_name_node := node.child_by_field_name('path')
-	module_name := module_name_node.get_text(an.src_text)
+	module_name := module_name_node.code(an.src_text)
 	// defer { unsafe { module_name.free() } }
 
 	module_path := an.store.get_module_path_opt(module_name) or {
@@ -80,7 +80,7 @@ fn (mut an Analyzer) import_decl(node C.TSNode) {
 			continue
 		}
 
-		symbol_name := sym.get_text(an.src_text)
+		symbol_name := sym.code(an.src_text)
 		got_sym := an.store.symbols[module_path].get(symbol_name) or {
 			an.report('Symbol `$symbol_name` not found', sym)
 			// unsafe { symbol_name.free() }
@@ -112,13 +112,11 @@ fn (mut an Analyzer) fn_decl(node C.TSNode) {
 
 pub fn (mut an Analyzer) top_level_statement() {
 	current_node := an.cursor.current_node()
-	node_type := current_node.get_type()
 	defer {
 		an.cursor.next()
-		// unsafe { node_type.free() }
 	}
 
-	match node_type {
+	match current_node.type_name() {
 		'import_declaration' {
 			an.import_decl(current_node)
 		}

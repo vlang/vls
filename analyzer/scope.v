@@ -39,7 +39,7 @@ pub fn (scope &ScopeTree) contains(pos u32) bool {
 }
 
 // innermost returns the scope based on the given byte ranges
-pub fn (scope &ScopeTree) innermost(start_byte u32, end_byte u32) &ScopeTree {
+pub fn (mut scope ScopeTree) innermost(start_byte u32, end_byte u32) &ScopeTree {
 	if !isnil(scope) {
 		for mut child_scope in scope.children {
 			if child_scope.contains(start_byte) && child_scope.contains(end_byte) {
@@ -63,14 +63,14 @@ pub fn (mut scope ScopeTree) register(info &Symbol) ? {
 		mut existing_sym := scope.symbols[existing_idx]
 		// unsafe { scope.symbols[existing_idx].free() }
 		if existing_sym.file_version >= info.file_version {
-			return error('Symbol already exists. (Scope Range=${scope.start_byte}-${scope.end_byte}) (idx=${existing_idx}) (name="$existing_sym.name")')
+			return error('Symbol already exists. (Scope Range=$scope.start_byte-$scope.end_byte) (idx=$existing_idx) (name="$existing_sym.name")')
 		}
 
 		if existing_sym.name != info.name {
 			existing_sym.name = info.name
 		}
 
-		existing_sym.return_type = info.return_type
+		existing_sym.return_sym = info.return_sym
 		existing_sym.access = info.access
 		existing_sym.range = info.range
 		existing_sym.file_path = info.file_path
@@ -157,7 +157,7 @@ pub fn (mut scope ScopeTree) remove(name string) bool {
 
 // get_symbols before returns a list of symbols that are available before
 // the target byte offset
-pub fn (scope &ScopeTree) get_symbols_before(target_byte u32) []&Symbol {
+pub fn (mut scope ScopeTree) get_symbols_before(target_byte u32) []&Symbol {
 	mut selected_scope := scope.innermost(target_byte, target_byte)
 	mut symbols := []&Symbol{}
 	for !isnil(selected_scope) {
@@ -172,7 +172,7 @@ pub fn (scope &ScopeTree) get_symbols_before(target_byte u32) []&Symbol {
 }
 
 // get_symbol returns a symbol from a specific range
-pub fn (scope &ScopeTree) get_symbol_with_range(name string, range C.TSRange) ?&Symbol {
+pub fn (mut scope ScopeTree) get_symbol_with_range(name string, range C.TSRange) ?&Symbol {
 	if isnil(scope) {
 		return none
 	}
