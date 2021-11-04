@@ -874,7 +874,7 @@ pub fn (mut ss Store) infer_value_type_from_node(node C.TSNode, src_text []byte)
 	}
 
 	return ss.find_symbol('', type_name) or {
-		ss.report_error(report_error('Invalid type $type_name', node.range()))
+		// ss.report_error(report_error('Invalid type $type_name', node.range()))
 		return void_sym
 	}
 }
