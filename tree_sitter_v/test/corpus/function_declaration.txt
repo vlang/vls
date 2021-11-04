@@ -11,7 +11,7 @@ fn hello_world(mut s []string, i int, words ...Text) ? {}
     (identifier)
     (parameter_list
       (parameter_declaration
-        (identifier) 
+        (mutable_identifier (identifier)) 
         (array_type (builtin_type)))
       (parameter_declaration (identifier) (builtin_type))
       (parameter_declaration 
@@ -46,7 +46,7 @@ fn [foo, bar] hello_world() {}
 (source_file
   (function_declaration
     (exposed_variables_list
-      (identifier_list 
+      (expression_list 
         (identifier) (identifier)))
     (identifier)
     (parameter_list)

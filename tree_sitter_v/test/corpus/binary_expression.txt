@@ -22,7 +22,7 @@ pub fn should_bundle_module(mod string) bool {
       (return_statement 
         (expression_list 
           (binary_expression 
-            (in_expression 
+            (binary_expression 
               (identifier) 
               (selector_expression 
                 (identifier) (identifier))) 
@@ -33,7 +33,7 @@ pub fn should_bundle_module(mod string) bool {
                   (identifier) (identifier)) 
                 (argument_list 
                   (interpreted_string_literal))) 
-                (in_expression 
+                (binary_expression 
                   (call_expression 
                     (selector_expression 
                       (identifier) (identifier)) 

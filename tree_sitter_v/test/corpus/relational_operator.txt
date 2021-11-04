@@ -10,12 +10,12 @@ println(boo !is Foo)
 
 (source_file 
   (short_var_declaration 
-    (identifier_list (identifier)) 
+    (expression_list (identifier)) 
     (expression_list 
-      (in_expression 
+      (binary_expression 
         (identifier) (identifier)))) 
   (if_expression 
-    (in_expression 
+    (binary_expression 
       (identifier) (identifier)) 
       (block)) 
   (call_expression 

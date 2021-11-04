@@ -15,7 +15,7 @@ fn main() {
     (parameter_list)
     (block
       (short_var_declaration
-        (identifier_list (identifier))
+        (expression_list (identifier))
         (expression_list
           (type_initializer
             (array_type (builtin_type))
@@ -33,7 +33,7 @@ test := [1]int{}
 
 (source_file
   (short_var_declaration
-    (identifier_list (identifier))
+    (expression_list (identifier))
     (expression_list
       (type_initializer
         (fixed_array_type 

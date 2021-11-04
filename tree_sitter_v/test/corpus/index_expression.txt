@@ -18,18 +18,18 @@ fn main() {
     (parameter_list)
     (block
       (short_var_declaration
-        (identifier_list (identifier))
+        (expression_list (identifier))
         (expression_list 
           (index_expression (identifier) (int_literal))))
       (short_var_declaration
-        (identifier_list (identifier))
+        (expression_list (identifier))
         (expression_list
           (index_expression 
             (identifier)
             (int_literal)
             (option_propagator))))
       (short_var_declaration
-        (identifier_list (identifier))
+        (expression_list (identifier))
         (expression_list
           (index_expression 
             (identifier)

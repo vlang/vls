@@ -27,12 +27,12 @@ fn main() {
             (selector_expression (identifier) (identifier)) 
             (argument_list))))
       (short_var_declaration
-        (identifier_list (identifier))
+        (expression_list (identifier))
         (expression_list
           (unsafe_expression
             (block (int_literal))))) 
       (short_var_declaration 
-        (identifier_list (identifier)) 
+        (expression_list (identifier)) 
         (expression_list 
           (type_initializer 
             (type_identifier) 
@@ -65,15 +65,15 @@ Unsafe Expression with Pointer assignment
     (unsafe_expression 
       (block 
         (short_var_declaration 
-          (identifier_list (identifier)) 
+          (expression_list (identifier)) 
           (expression_list 
             (unary_expression 
               (selector_expression 
                 (identifier) (identifier))))) 
         (assignment_statement 
-          (assignable_identifier_list 
+          (expression_list 
             (unary_expression (identifier))) 
           (expression_list (identifier))) 
         (assignment_statement 
-          (assignable_identifier_list (identifier)) 
+          (expression_list (identifier)) 
           (expression_list (identifier)))))))

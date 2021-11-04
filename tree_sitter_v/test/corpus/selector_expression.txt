@@ -17,7 +17,7 @@ fn main() {
       (selector_expression
         (identifier) (identifier))
       (short_var_declaration
-        (identifier_list (identifier))
+        (expression_list (identifier))
         (expression_list
           (selector_expression
             (identifier) (identifier)))))))
@@ -44,7 +44,7 @@ fn main() {
           (identifier))
         (argument_list))
       (short_var_declaration
-        (identifier_list (identifier))
+        (expression_list (identifier))
         (expression_list
           (selector_expression
             (identifier) (type_identifier)))))))

@@ -61,26 +61,46 @@ fn foo() (int, int) {
       (builtin_type) (builtin_type)) 
   (block 
     (short_var_declaration 
-      (identifier_list 
+      (expression_list 
         (identifier) (identifier)) 
       (expression_list 
         (if_expression (identifier) 
-          (expression_block 
+          (block 
             (expression_list 
               (int_literal) (int_literal))) 
-          (expression_block 
+          (block 
             (expression_list 
               (int_literal) (int_literal)))))) 
     (short_var_declaration 
-      (identifier_list 
+      (expression_list 
         (identifier) (identifier)) 
       (expression_list 
         (if_expression 
           (identifier) 
-          (expression_block 
+          (block 
             (expression_list 
               (int_literal) (int_literal))) 
-          (expression_block 
+          (block 
             (expression_list 
               (int_literal) (int_literal)))))) 
     (return_statement (expression_list (identifier) (identifier))))))
+
+===
+Multi-return If Expression
+===
+
+fn main() {
+  expr1, expr2 := if a { exp, exp2 } else { exp3, exp4 }
+}
+
+---
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (block
+      (short_var_declaration
+        (expression_list
+          (identifier)
+          (identifier))))))

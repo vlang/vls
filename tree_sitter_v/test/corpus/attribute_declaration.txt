@@ -31,7 +31,7 @@ interface Speaker {}
     (type_identifier) 
     (struct_field_declaration_list)) 
   (short_var_declaration 
-    (identifier_list (identifier)) 
+    (expression_list (identifier)) 
     (expression_list 
       (array (int_literal)))) 
   (function_declaration 

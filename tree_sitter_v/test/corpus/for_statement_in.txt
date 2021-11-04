@@ -16,16 +16,16 @@ fn main() {
     (block
       (for_statement
         (for_in_operator
-          (identifier_list (identifier))
+          (expression_list (identifier))
           (identifier))
         (block))
       (for_statement
         (for_in_operator
-          (identifier_list (identifier) (identifier))
+          (expression_list (identifier) (identifier))
           (identifier))
           (block))
       (for_statement
         (for_in_operator
-          (identifier_list (identifier))
+          (expression_list (identifier))
           (range (int_literal) (int_literal)))
         (block)))))

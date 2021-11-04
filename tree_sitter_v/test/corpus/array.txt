@@ -14,7 +14,7 @@ fn main() {
     (parameter_list)
     (block
       (short_var_declaration
-        (identifier_list (identifier))
+        (expression_list (identifier))
         (expression_list
           (array
             (interpreted_string_literal)
@@ -36,5 +36,5 @@ fn main() {
     (parameter_list) 
     (block 
       (assignment_statement 
-        (assignable_identifier_list (identifier)) 
+        (expression_list (identifier)) 
         (expression_list (array))))))

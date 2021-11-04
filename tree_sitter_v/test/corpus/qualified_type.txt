@@ -23,7 +23,7 @@ fn main() {
     (parameter_list)
     (block
       (short_var_declaration
-        (identifier_list (identifier))
+        (expression_list (identifier))
         (expression_list 
           (type_initializer
             (qualified_type
