@@ -1097,14 +1097,16 @@ fn (mut ls Vls) definition(id string, params string) {
 	}
 
 	loc_uri := lsp.document_uri_from_path(sym.file_path)
-	ls.send(jsonrpc.Response<lsp.LocationLink>{
+	ls.send(jsonrpc.Response<[]lsp.LocationLink>{
 		id: id
-		result: lsp.LocationLink{
-			target_uri: loc_uri
-			target_range: tsrange_to_lsp_range(sym.range)
-			target_selection_range: tsrange_to_lsp_range(sym.range)
-			origin_selection_range: tsrange_to_lsp_range(original_range)
-		}
+		result: [
+			lsp.LocationLink{
+				target_uri: loc_uri
+				target_range: tsrange_to_lsp_range(sym.range)
+				target_selection_range: tsrange_to_lsp_range(sym.range)
+				origin_selection_range: tsrange_to_lsp_range(original_range)
+			},
+		]
 	})
 }
 
