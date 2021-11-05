@@ -217,7 +217,7 @@ fn (mut host VlsHost) generate_report() ?string {
 	report_file.writeln('<!-- Copy and paste the contents of this file to https://github.com/vlang/vls/issues/new -->') ?
 	report_file.writeln('## System Information') ?
 	report_file.writeln('### V doctor\n```\n$vdoctor_info\n```\n') ?
-	report_file.writeln('### VLS info \n```\n${vls_info}.${vls_hash}\n```\n') ?
+	report_file.writeln('### VLS info \n```\n${vls_info}.$vls_hash\n```\n') ?
 
 	// Problem Description
 	report_file.writeln('## Problem Description') ?
