@@ -944,6 +944,11 @@
     }
   },
   {
+    "type": "comment",
+    "named": true,
+    "fields": {}
+  },
+  {
     "type": "comptime_for_statement",
     "named": true,
     "fields": {
@@ -3766,10 +3771,6 @@
     "named": false
   },
   {
-    "type": "comment",
-    "named": true
-  },
-  {
     "type": "const",
     "named": false
   },
@@ -3875,11 +3876,11 @@
   },
   {
     "type": "int_literal",
-    "named": true
+    "named": false
   },
   {
     "type": "int_literal",
-    "named": false
+    "named": true
   },
   {
     "type": "interface",

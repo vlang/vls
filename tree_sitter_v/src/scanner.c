@@ -13,12 +13,13 @@ enum TokenType {
     STRING_OPENING, // = 6
     STRING_CONTENT,
     STRING_CLOSING,
+    COMMENT,
     NONE
 };
 
 enum StringType {
-    SINGLE_QUOTE = NONE + 1 + 1, // = 9 + 1 + 1 = 11
-    DOUBLE_QUOTE = NONE + 1 + 4, // = 9 + 1 + 4 = 14
+    SINGLE_QUOTE = NONE + 1, // = 9 + 1 + 1 = 11
+    DOUBLE_QUOTE = NONE + 4, // = 9 + 1 + 4 = 14
 };
 
 enum StringTokenType {
@@ -266,6 +267,13 @@ bool scan_automatic_separator(Scanner *scanner, TSLexer *lexer) {
         case '"':
             needs_to_be_separated = true;
             break;
+        case '/':
+            advance(lexer);
+            if (lexer->lookahead == got_char || lexer->lookahead == '*') {
+                needs_to_be_separated = true;
+            } else {
+                needs_to_be_separated = false;
+            }
         default:
             if (isalpha(lexer->lookahead)) {
                 needs_to_be_separated = true;
@@ -353,6 +361,64 @@ bool scan_string_closing(Scanner *scanner, TSLexer *lexer) {
     return false;
 }
 
+bool scan_comment(Scanner *scanner, TSLexer *lexer) {
+    uint8_t got_top = stack_top(scanner->tokens);
+    if (is_type_string(got_top) || lexer->lookahead != '/') {
+        return false;
+    }
+
+    advance(lexer);
+    if (lexer->lookahead != '/' && lexer->lookahead != '*') {
+        return false;
+    }
+
+    bool is_multiline = lexer->lookahead == '*';
+    int nested_multiline_count = 0;
+    advance(lexer);
+
+    while (true) {
+        lexer->mark_end(lexer);
+        if (is_multiline) {
+            if (lexer->lookahead == '/') {
+                // Handles the "nested" comments (e.g. /* /* comment */ */)
+                advance(lexer);
+                if (lexer->lookahead == '*') {
+                    advance(lexer);
+                    lexer->mark_end(lexer);
+                    nested_multiline_count++;
+                }
+
+                continue;
+            } else if (lexer->lookahead == '*') {
+                advance(lexer);
+                if (lexer->lookahead == '/') {
+                    advance(lexer);
+                    lexer->mark_end(lexer);
+                    if (nested_multiline_count == 0) {
+                        break;
+                    } else {
+                        nested_multiline_count--;
+                    }
+                }
+
+                // do mark_end first before advancing
+                continue;
+            }
+        } else if (!is_multiline && (lexer->lookahead == '\r' || lexer->lookahead == '\n')) {
+            break;
+        } 
+        
+        if (lexer->lookahead == '\0') {
+            break;
+        }
+
+        advance(lexer);
+    }
+
+    lexer->result_symbol = COMMENT;
+    return true;
+}
+
 // Tree-Sitter external scanner functions
 void *tree_sitter_v_external_scanner_create() {
     Scanner *scanner = malloc(sizeof(Scanner));
@@ -390,19 +456,22 @@ void tree_sitter_v_external_scanner_deserialize(void *p, const char *buffer, uns
 
 bool tree_sitter_v_external_scanner_scan(void *payload, TSLexer *lexer, const bool *valid_symbols) {
     // printf("EXTERNAL SCANNER \n");
-    if (lexer->lookahead == 0) return false;
+    // printf("EXTERNAL SCANNER lookahead: %c %d %d \n", lexer->lookahead, lexer->lookahead, lexer->get_column(lexer));
+    if (lexer->lookahead == 0) {
+        // advance(lexer);
+        return false;
+    }
     
     Scanner *scanner = (Scanner*) payload;
     bool is_stack_empty = stack_empty(scanner->tokens);
     uint8_t top = stack_top(scanner->tokens);
 
-    // printf("EXTERNAL SCANNER lookahead: %c %d %d \n", lexer->lookahead, lexer->lookahead, lexer->get_column(lexer));
+    // printf("comment: %d\n", valid_symbols[COMMENT]);
     // printf("top = %d\n",top);
     // printf("is_stack_empty: %d\n", is_stack_empty);
     // printf("is_separatable: %d %d\n", is_separatable(lexer->lookahead), valid_symbols[AUTOMATIC_SEPARATOR]);
     // printf("scc: %d, sc: %d, bio: %d, uio: %d, bic: %d\n", valid_symbols[STRING_CLOSING], valid_symbols[STRING_CONTENT], valid_symbols[BRACED_INTERPOLATION_OPENING], valid_symbols[UNBRACED_INTERPOLATION_OPENING], valid_symbols[INTERPOLATION_CLOSING]);
     // printf("cs %d rs %d qs %d\n", valid_symbols[C_STRING_OPENING], valid_symbols[RAW_STRING_OPENING], valid_symbols[STRING_OPENING]); 
-    
     if (is_separatable(lexer->lookahead) && valid_symbols[AUTOMATIC_SEPARATOR] && is_stack_empty) {
         // printf("autosep\n");
         return scan_automatic_separator(scanner, lexer);
@@ -414,6 +483,10 @@ bool tree_sitter_v_external_scanner_scan(void *payload, TSLexer *lexer, const bo
 
         // printf("FINAL EXTERNAL SCANNER lookahead: %c %d %d \n", lexer->lookahead, lexer->lookahead, lexer->get_column(lexer));
         // printf("closing: %c\n", expected_end_char(top));
+    }
+
+    if (!is_type_string(top) && lexer->lookahead == '/' && valid_symbols[COMMENT]) {
+        return scan_comment(scanner, lexer);
     }
 
     if (

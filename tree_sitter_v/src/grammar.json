@@ -866,33 +866,8 @@
       }
     },
     "comment": {
-      "type": "TOKEN",
-      "content": {
-        "type": "CHOICE",
-        "members": [
-          {
-            "type": "PATTERN",
-            "value": "\\/\\/.*"
-          },
-          {
-            "type": "SEQ",
-            "members": [
-              {
-                "type": "STRING",
-                "value": "/*"
-              },
-              {
-                "type": "PATTERN",
-                "value": "[^*]*\\*+([^/*][^*]*\\*+)*"
-              },
-              {
-                "type": "STRING",
-                "value": "/"
-              }
-            ]
-          }
-        ]
-      }
+      "type": "SYMBOL",
+      "name": "_comment"
     },
     "escape_sequence": {
       "type": "TOKEN",
@@ -8071,6 +8046,10 @@
     {
       "type": "SYMBOL",
       "name": "_string_closing"
+    },
+    {
+      "type": "SYMBOL",
+      "name": "_comment"
     }
   ],
   "inline": [
