@@ -36,307 +36,347 @@ const definition_should_return_null = [
 ]
 
 const definition_results = {
-	'call_arg.vv':                lsp.LocationLink{
-		target_uri: lsp.document_uri_from_path(os.join_path(base_dir, 'call_arg.vv'))
-		origin_selection_range: lsp.Range{
-			start: lsp.Position{4, 16}
-			end: lsp.Position{4, 18}
-		}
-		target_range: lsp.Range{
-			start: lsp.Position{3, 2}
-			end: lsp.Position{3, 4}
-		}
-		target_selection_range: lsp.Range{
-			start: lsp.Position{3, 2}
-			end: lsp.Position{3, 4}
-		}
-	}
-	'call_expr.vv':               lsp.LocationLink{
-		target_uri: lsp.document_uri_from_path(os.join_path(base_dir, 'call_expr.vv'))
-		origin_selection_range: lsp.Range{
-			start: lsp.Position{3, 2}
-			end: lsp.Position{3, 15}
-		}
-		target_range: lsp.Range{
-			start: lsp.Position{0, 3}
-			end: lsp.Position{0, 16}
-		}
-		target_selection_range: lsp.Range{
-			start: lsp.Position{0, 3}
-			end: lsp.Position{0, 16}
-		}
-	}
-	'enum_val.vv':                lsp.LocationLink{
-		target_uri: lsp.document_uri_from_path(os.join_path(base_dir, 'enum_val.vv'))
-		origin_selection_range: lsp.Range{
-			start: lsp.Position{7, 9}
-			end: lsp.Position{7, 19}
-		}
-		target_range: lsp.Range{
-			start: lsp.Position{3, 2}
-			end: lsp.Position{3, 6}
-		}
-		target_selection_range: lsp.Range{
-			start: lsp.Position{3, 2}
-			end: lsp.Position{3, 6}
-		}
-	}
-	'expr_in_array.vv':           lsp.LocationLink{
-		target_uri: lsp.document_uri_from_path(os.join_path(base_dir, 'expr_in_array.vv'))
-		origin_selection_range: lsp.Range{
-			start: lsp.Position{2, 12}
-			end: lsp.Position{2, 23}
-		}
-		target_range: lsp.Range{
-			start: lsp.Position{1, 2}
-			end: lsp.Position{1, 13}
-		}
-		target_selection_range: lsp.Range{
-			start: lsp.Position{1, 2}
-			end: lsp.Position{1, 13}
-		}
-	}
-	'expr_in_map_key.vv':         lsp.LocationLink{
-		target_uri: lsp.document_uri_from_path(os.join_path(base_dir, 'expr_in_map_key.vv'))
-		origin_selection_range: lsp.Range{
-			start: lsp.Position{4, 4}
-			end: lsp.Position{4, 15}
-		}
-		target_range: lsp.Range{
-			start: lsp.Position{1, 2}
-			end: lsp.Position{1, 13}
-		}
-		target_selection_range: lsp.Range{
-			start: lsp.Position{1, 2}
-			end: lsp.Position{1, 13}
-		}
-	}
-	'expr_in_map_value.vv':       lsp.LocationLink{
-		target_uri: lsp.document_uri_from_path(os.join_path(base_dir, 'expr_in_map_value.vv'))
-		origin_selection_range: lsp.Range{
-			start: lsp.Position{4, 11}
-			end: lsp.Position{4, 22}
-		}
-		target_range: lsp.Range{
-			start: lsp.Position{1, 2}
-			end: lsp.Position{1, 13}
-		}
-		target_selection_range: lsp.Range{
-			start: lsp.Position{1, 2}
-			end: lsp.Position{1, 13}
-		}
-	}
-	'fn_literal.vv':              lsp.LocationLink{
-		target_uri: lsp.document_uri_from_path(os.join_path(base_dir, 'fn_literal.vv'))
-		origin_selection_range: lsp.Range{
-			start: lsp.Position{5, 12}
-			end: lsp.Position{5, 14}
-		}
-		target_range: lsp.Range{
-			start: lsp.Position{4, 4}
-			end: lsp.Position{4, 6}
-		}
-		target_selection_range: lsp.Range{
-			start: lsp.Position{4, 4}
-			end: lsp.Position{4, 6}
-		}
-	}
-	'fn_param_type.vv':           lsp.LocationLink{
-		target_uri: lsp.document_uri_from_path(os.join_path(base_dir, 'fn_param_type.vv'))
-		origin_selection_range: lsp.Range{
-			start: lsp.Position{4, 14}
-			end: lsp.Position{4, 16}
-		}
-		target_range: lsp.Range{
-			start: lsp.Position{0, 7}
-			end: lsp.Position{0, 9}
-		}
-		target_selection_range: lsp.Range{
-			start: lsp.Position{0, 7}
-			end: lsp.Position{0, 9}
-		}
-	}
-	'fn_return_type.vv':          lsp.LocationLink{
-		target_uri: lsp.document_uri_from_path(os.join_path(base_dir, 'fn_return_type.vv'))
-		origin_selection_range: lsp.Range{
-			start: lsp.Position{2, 16}
-			end: lsp.Position{2, 20}
-		}
-		target_range: lsp.Range{
-			start: lsp.Position{0, 5}
-			end: lsp.Position{0, 9}
-		}
-		target_selection_range: lsp.Range{
-			start: lsp.Position{0, 5}
-			end: lsp.Position{0, 9}
-		}
-	}
-	'index_expr.vv':              lsp.LocationLink{
-		target_uri: lsp.document_uri_from_path(os.join_path(base_dir, 'index_expr.vv'))
-		origin_selection_range: lsp.Range{
-			start: lsp.Position{3, 16}
-			end: lsp.Position{3, 20}
-		}
-		target_range: lsp.Range{
-			start: lsp.Position{2, 2}
-			end: lsp.Position{2, 6}
-		}
-		target_selection_range: lsp.Range{
-			start: lsp.Position{2, 2}
-			end: lsp.Position{2, 6}
-		}
-	}
-	'interface_field.vv':         lsp.LocationLink{
-		target_uri: lsp.document_uri_from_path(os.join_path(base_dir, 'interface_field.vv'))
-		origin_selection_range: lsp.Range{
-			start: lsp.Position{3, 10}
-			end: lsp.Position{3, 13}
-		}
-		target_range: lsp.Range{
-			start: lsp.Position{0, 5}
-			end: lsp.Position{0, 8}
-		}
-		target_selection_range: lsp.Range{
-			start: lsp.Position{0, 5}
-			end: lsp.Position{0, 8}
-		}
-	}
-	'interface_method.vv':        lsp.LocationLink{
-		target_uri: lsp.document_uri_from_path(os.join_path(base_dir, 'interface_method.vv'))
-		origin_selection_range: lsp.Range{
-			start: lsp.Position{5, 10}
-			end: lsp.Position{6, 16}
-		}
-		target_range: lsp.Range{
-			start: lsp.Position{0, 0}
-			end: lsp.Position{2, 11}
-		}
-		target_selection_range: lsp.Range{
-			start: lsp.Position{0, 0}
-			end: lsp.Position{2, 11}
-		}
-	}
-	'selector_expr.vv':           lsp.LocationLink{
-		target_uri: lsp.document_uri_from_path(os.join_path(base_dir, 'selector_expr.vv'))
-		origin_selection_range: lsp.Range{
-			// TODO:
-			start: lsp.Position{6, 5}
-			end: lsp.Position{6, 12}
-		}
-		target_range: lsp.Range{
-			start: lsp.Position{1, 2}
-			end: lsp.Position{1, 9}
-		}
-		target_selection_range: lsp.Range{
-			start: lsp.Position{1, 2}
-			end: lsp.Position{1, 9}
-		}
-	}
-	'struct_init_field_name.vv':  lsp.LocationLink{
-		target_uri: lsp.document_uri_from_path(os.join_path(base_dir, 'struct_init_field_name.vv'))
-		origin_selection_range: lsp.Range{
-			start: lsp.Position{5, 15}
-			end: lsp.Position{5, 19}
-		}
-		target_range: lsp.Range{
-			start: lsp.Position{1, 2}
-			end: lsp.Position{1, 6}
-		}
-		target_selection_range: lsp.Range{
-			start: lsp.Position{1, 2}
-			end: lsp.Position{1, 6}
-		}
-	}
-	'struct_field_type.vv':       lsp.LocationLink{
-		target_uri: lsp.document_uri_from_path(os.join_path(base_dir, 'struct_field_type.vv'))
-		origin_selection_range: lsp.Range{
-			start: lsp.Position{3, 6}
-			end: lsp.Position{3, 9}
-		}
-		target_range: lsp.Range{
-			start: lsp.Position{0, 5}
-			end: lsp.Position{0, 8}
-		}
-		target_selection_range: lsp.Range{
-			start: lsp.Position{0, 5}
-			end: lsp.Position{0, 8}
-		}
-	}
-	'struct_init_field_value.vv': lsp.LocationLink{
-		target_uri: lsp.document_uri_from_path(os.join_path(base_dir, 'struct_init_field_value.vv'))
-		origin_selection_range: lsp.Range{
-			start: lsp.Position{10, 22}
-			end: lsp.Position{10, 27}
-		}
-		target_range: lsp.Range{
-			start: lsp.Position{2, 2}
-			end: lsp.Position{2, 6}
-		}
-		target_selection_range: lsp.Range{
-			start: lsp.Position{2, 2}
-			end: lsp.Position{2, 6}
-		}
-	}
-	'struct_init.vv':             lsp.LocationLink{
-		target_uri: lsp.document_uri_from_path(os.join_path(base_dir, 'struct_init.vv'))
-		origin_selection_range: lsp.Range{
-			start: lsp.Position{5, 8}
-			end: lsp.Position{5, 15}
-		}
-		target_range: lsp.Range{
-			start: lsp.Position{0, 7}
-			end: lsp.Position{0, 14}
-		}
-		target_selection_range: lsp.Range{
-			start: lsp.Position{0, 7}
-			end: lsp.Position{0, 14}
-		}
-	}
-	'stmt.vv':                    lsp.LocationLink{
-		target_uri: lsp.document_uri_from_path(os.join_path(base_dir, 'stmt.vv'))
-		origin_selection_range: lsp.Range{
-			start: lsp.Position{0, 3}
-			end: lsp.Position{0, 28}
-		}
-		target_range: lsp.Range{
-			start: lsp.Position{0, 3}
-			end: lsp.Position{0, 28}
-		}
-		target_selection_range: lsp.Range{
-			start: lsp.Position{0, 3}
-			end: lsp.Position{0, 28}
-		}
-	}
-	'var_receiver.vv':            lsp.LocationLink{
-		target_uri: lsp.document_uri_from_path(os.join_path(base_dir, 'var_receiver.vv'))
-		origin_selection_range: lsp.Range{
-			start: lsp.Position{3, 8}
-			end: lsp.Position{3, 10}
-		}
-		target_range: lsp.Range{
-			start: lsp.Position{2, 4}
-			end: lsp.Position{2, 6}
-		}
-		target_selection_range: lsp.Range{
-			start: lsp.Position{2, 4}
-			end: lsp.Position{2, 6}
-		}
-	}
-	'var.vv':                     lsp.LocationLink{
-		target_uri: lsp.document_uri_from_path(os.join_path(base_dir, 'var.vv'))
-		origin_selection_range: lsp.Range{
-			start: lsp.Position{2, 10}
-			end: lsp.Position{2, 13}
-		}
-		target_range: lsp.Range{
-			start: lsp.Position{1, 2}
-			end: lsp.Position{1, 5}
-		}
-		target_selection_range: lsp.Range{
-			start: lsp.Position{1, 2}
-			end: lsp.Position{1, 5}
-		}
-	}
+	'call_arg.vv':                [
+		lsp.LocationLink{
+			target_uri: lsp.document_uri_from_path(os.join_path(base_dir, 'call_arg.vv'))
+			origin_selection_range: lsp.Range{
+				start: lsp.Position{4, 16}
+				end: lsp.Position{4, 18}
+			}
+			target_range: lsp.Range{
+				start: lsp.Position{3, 2}
+				end: lsp.Position{3, 4}
+			}
+			target_selection_range: lsp.Range{
+				start: lsp.Position{3, 2}
+				end: lsp.Position{3, 4}
+			}
+		},
+	]
+	'call_expr.vv':               [
+		lsp.LocationLink{
+			target_uri: lsp.document_uri_from_path(os.join_path(base_dir, 'call_expr.vv'))
+			origin_selection_range: lsp.Range{
+				start: lsp.Position{3, 2}
+				end: lsp.Position{3, 15}
+			}
+			target_range: lsp.Range{
+				start: lsp.Position{0, 3}
+				end: lsp.Position{0, 16}
+			}
+			target_selection_range: lsp.Range{
+				start: lsp.Position{0, 3}
+				end: lsp.Position{0, 16}
+			}
+		},
+	]
+	'enum_val.vv':                [
+		lsp.LocationLink{
+			target_uri: lsp.document_uri_from_path(os.join_path(base_dir, 'enum_val.vv'))
+			origin_selection_range: lsp.Range{
+				start: lsp.Position{7, 9}
+				end: lsp.Position{7, 19}
+			}
+			target_range: lsp.Range{
+				start: lsp.Position{3, 2}
+				end: lsp.Position{3, 6}
+			}
+			target_selection_range: lsp.Range{
+				start: lsp.Position{3, 2}
+				end: lsp.Position{3, 6}
+			}
+		},
+	]
+	'expr_in_array.vv':           [
+		lsp.LocationLink{
+			target_uri: lsp.document_uri_from_path(os.join_path(base_dir, 'expr_in_array.vv'))
+			origin_selection_range: lsp.Range{
+				start: lsp.Position{2, 12}
+				end: lsp.Position{2, 23}
+			}
+			target_range: lsp.Range{
+				start: lsp.Position{1, 2}
+				end: lsp.Position{1, 13}
+			}
+			target_selection_range: lsp.Range{
+				start: lsp.Position{1, 2}
+				end: lsp.Position{1, 13}
+			}
+		},
+	]
+	'expr_in_map_key.vv':         [
+		lsp.LocationLink{
+			target_uri: lsp.document_uri_from_path(os.join_path(base_dir, 'expr_in_map_key.vv'))
+			origin_selection_range: lsp.Range{
+				start: lsp.Position{4, 4}
+				end: lsp.Position{4, 15}
+			}
+			target_range: lsp.Range{
+				start: lsp.Position{1, 2}
+				end: lsp.Position{1, 13}
+			}
+			target_selection_range: lsp.Range{
+				start: lsp.Position{1, 2}
+				end: lsp.Position{1, 13}
+			}
+		},
+	]
+	'expr_in_map_value.vv':       [
+		lsp.LocationLink{
+			target_uri: lsp.document_uri_from_path(os.join_path(base_dir, 'expr_in_map_value.vv'))
+			origin_selection_range: lsp.Range{
+				start: lsp.Position{4, 11}
+				end: lsp.Position{4, 22}
+			}
+			target_range: lsp.Range{
+				start: lsp.Position{1, 2}
+				end: lsp.Position{1, 13}
+			}
+			target_selection_range: lsp.Range{
+				start: lsp.Position{1, 2}
+				end: lsp.Position{1, 13}
+			}
+		},
+	]
+	'fn_literal.vv':              [
+		lsp.LocationLink{
+			target_uri: lsp.document_uri_from_path(os.join_path(base_dir, 'fn_literal.vv'))
+			origin_selection_range: lsp.Range{
+				start: lsp.Position{5, 12}
+				end: lsp.Position{5, 14}
+			}
+			target_range: lsp.Range{
+				start: lsp.Position{4, 4}
+				end: lsp.Position{4, 6}
+			}
+			target_selection_range: lsp.Range{
+				start: lsp.Position{4, 4}
+				end: lsp.Position{4, 6}
+			}
+		},
+	]
+	'fn_param_type.vv':           [
+		lsp.LocationLink{
+			target_uri: lsp.document_uri_from_path(os.join_path(base_dir, 'fn_param_type.vv'))
+			origin_selection_range: lsp.Range{
+				start: lsp.Position{4, 14}
+				end: lsp.Position{4, 16}
+			}
+			target_range: lsp.Range{
+				start: lsp.Position{0, 7}
+				end: lsp.Position{0, 9}
+			}
+			target_selection_range: lsp.Range{
+				start: lsp.Position{0, 7}
+				end: lsp.Position{0, 9}
+			}
+		},
+	]
+	'fn_return_type.vv':          [
+		lsp.LocationLink{
+			target_uri: lsp.document_uri_from_path(os.join_path(base_dir, 'fn_return_type.vv'))
+			origin_selection_range: lsp.Range{
+				start: lsp.Position{2, 16}
+				end: lsp.Position{2, 20}
+			}
+			target_range: lsp.Range{
+				start: lsp.Position{0, 5}
+				end: lsp.Position{0, 9}
+			}
+			target_selection_range: lsp.Range{
+				start: lsp.Position{0, 5}
+				end: lsp.Position{0, 9}
+			}
+		},
+	]
+	'index_expr.vv':              [
+		lsp.LocationLink{
+			target_uri: lsp.document_uri_from_path(os.join_path(base_dir, 'index_expr.vv'))
+			origin_selection_range: lsp.Range{
+				start: lsp.Position{3, 16}
+				end: lsp.Position{3, 20}
+			}
+			target_range: lsp.Range{
+				start: lsp.Position{2, 2}
+				end: lsp.Position{2, 6}
+			}
+			target_selection_range: lsp.Range{
+				start: lsp.Position{2, 2}
+				end: lsp.Position{2, 6}
+			}
+		},
+	]
+	'interface_field.vv':         [
+		lsp.LocationLink{
+			target_uri: lsp.document_uri_from_path(os.join_path(base_dir, 'interface_field.vv'))
+			origin_selection_range: lsp.Range{
+				start: lsp.Position{3, 10}
+				end: lsp.Position{3, 13}
+			}
+			target_range: lsp.Range{
+				start: lsp.Position{0, 5}
+				end: lsp.Position{0, 8}
+			}
+			target_selection_range: lsp.Range{
+				start: lsp.Position{0, 5}
+				end: lsp.Position{0, 8}
+			}
+		},
+	]
+	'interface_method.vv':        [
+		lsp.LocationLink{
+			target_uri: lsp.document_uri_from_path(os.join_path(base_dir, 'interface_method.vv'))
+			origin_selection_range: lsp.Range{
+				start: lsp.Position{5, 10}
+				end: lsp.Position{6, 16}
+			}
+			target_range: lsp.Range{
+				start: lsp.Position{0, 0}
+				end: lsp.Position{2, 11}
+			}
+			target_selection_range: lsp.Range{
+				start: lsp.Position{0, 0}
+				end: lsp.Position{2, 11}
+			}
+		},
+	]
+	'selector_expr.vv':           [
+		lsp.LocationLink{
+			target_uri: lsp.document_uri_from_path(os.join_path(base_dir, 'selector_expr.vv'))
+			origin_selection_range: lsp.Range{
+				// TODO:
+				start: lsp.Position{6, 5}
+				end: lsp.Position{6, 12}
+			}
+			target_range: lsp.Range{
+				start: lsp.Position{1, 2}
+				end: lsp.Position{1, 9}
+			}
+			target_selection_range: lsp.Range{
+				start: lsp.Position{1, 2}
+				end: lsp.Position{1, 9}
+			}
+		},
+	]
+	'struct_init_field_name.vv':  [
+		lsp.LocationLink{
+			target_uri: lsp.document_uri_from_path(os.join_path(base_dir, 'struct_init_field_name.vv'))
+			origin_selection_range: lsp.Range{
+				start: lsp.Position{5, 15}
+				end: lsp.Position{5, 19}
+			}
+			target_range: lsp.Range{
+				start: lsp.Position{1, 2}
+				end: lsp.Position{1, 6}
+			}
+			target_selection_range: lsp.Range{
+				start: lsp.Position{1, 2}
+				end: lsp.Position{1, 6}
+			}
+		},
+	]
+	'struct_field_type.vv':       [
+		lsp.LocationLink{
+			target_uri: lsp.document_uri_from_path(os.join_path(base_dir, 'struct_field_type.vv'))
+			origin_selection_range: lsp.Range{
+				start: lsp.Position{3, 6}
+				end: lsp.Position{3, 9}
+			}
+			target_range: lsp.Range{
+				start: lsp.Position{0, 5}
+				end: lsp.Position{0, 8}
+			}
+			target_selection_range: lsp.Range{
+				start: lsp.Position{0, 5}
+				end: lsp.Position{0, 8}
+			}
+		},
+	]
+	'struct_init_field_value.vv': [
+		lsp.LocationLink{
+			target_uri: lsp.document_uri_from_path(os.join_path(base_dir, 'struct_init_field_value.vv'))
+			origin_selection_range: lsp.Range{
+				start: lsp.Position{10, 22}
+				end: lsp.Position{10, 27}
+			}
+			target_range: lsp.Range{
+				start: lsp.Position{2, 2}
+				end: lsp.Position{2, 6}
+			}
+			target_selection_range: lsp.Range{
+				start: lsp.Position{2, 2}
+				end: lsp.Position{2, 6}
+			}
+		},
+	]
+	'struct_init.vv':             [
+		lsp.LocationLink{
+			target_uri: lsp.document_uri_from_path(os.join_path(base_dir, 'struct_init.vv'))
+			origin_selection_range: lsp.Range{
+				start: lsp.Position{5, 8}
+				end: lsp.Position{5, 15}
+			}
+			target_range: lsp.Range{
+				start: lsp.Position{0, 7}
+				end: lsp.Position{0, 14}
+			}
+			target_selection_range: lsp.Range{
+				start: lsp.Position{0, 7}
+				end: lsp.Position{0, 14}
+			}
+		},
+	]
+	'stmt.vv':                    [
+		lsp.LocationLink{
+			target_uri: lsp.document_uri_from_path(os.join_path(base_dir, 'stmt.vv'))
+			origin_selection_range: lsp.Range{
+				start: lsp.Position{0, 3}
+				end: lsp.Position{0, 28}
+			}
+			target_range: lsp.Range{
+				start: lsp.Position{0, 3}
+				end: lsp.Position{0, 28}
+			}
+			target_selection_range: lsp.Range{
+				start: lsp.Position{0, 3}
+				end: lsp.Position{0, 28}
+			}
+		},
+	]
+	'var_receiver.vv':            [
+		lsp.LocationLink{
+			target_uri: lsp.document_uri_from_path(os.join_path(base_dir, 'var_receiver.vv'))
+			origin_selection_range: lsp.Range{
+				start: lsp.Position{3, 8}
+				end: lsp.Position{3, 10}
+			}
+			target_range: lsp.Range{
+				start: lsp.Position{2, 4}
+				end: lsp.Position{2, 6}
+			}
+			target_selection_range: lsp.Range{
+				start: lsp.Position{2, 4}
+				end: lsp.Position{2, 6}
+			}
+		},
+	]
+	'var.vv':                     [
+		lsp.LocationLink{
+			target_uri: lsp.document_uri_from_path(os.join_path(base_dir, 'var.vv'))
+			origin_selection_range: lsp.Range{
+				start: lsp.Position{2, 10}
+				end: lsp.Position{2, 13}
+			}
+			target_range: lsp.Range{
+				start: lsp.Position{1, 2}
+				end: lsp.Position{1, 5}
+			}
+			target_selection_range: lsp.Range{
+				start: lsp.Position{1, 2}
+				end: lsp.Position{1, 5}
+			}
+		},
+	]
 }
 
 fn test_definition() {

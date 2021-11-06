@@ -212,10 +212,12 @@ fn (mut host VlsHost) generate_report() ?string {
 	vls_info_proc.wait()
 	vls_info := vls_info_proc.stdout_slurp().trim_space()
 
+	vls_hash := $env('VLS_BUILD_COMMIT')
+
 	report_file.writeln('<!-- Copy and paste the contents of this file to https://github.com/vlang/vls/issues/new -->') ?
 	report_file.writeln('## System Information') ?
 	report_file.writeln('### V doctor\n```\n$vdoctor_info\n```\n') ?
-	report_file.writeln('### VLS info \n```\n$vls_info\n```\n') ?
+	report_file.writeln('### VLS info \n```\n${vls_info}.$vls_hash\n```\n') ?
 
 	// Problem Description
 	report_file.writeln('## Problem Description') ?
