@@ -616,6 +616,9 @@ module.exports = grammar({
           optional($.format_specifier),
           $._interpolation_closing
         ),
+        // NOTE: The "unbraced" version of the string interpolation
+        // after the implementation of a string_content external
+        // token only recognizes identifier for now.
         seq(
           $._unbraced_interpolation_opening,
           choice(
