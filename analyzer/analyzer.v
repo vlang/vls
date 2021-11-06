@@ -14,7 +14,8 @@ fn (mut tc TreeCursor) next() bool {
 			return false
 		}
 		tc.cur_child_idx++
-		if tc.named_only && (tc.current_node().is_named() && !tc.current_node().is_extra()) {
+		cur_node := tc.current_node() or { continue }
+		if tc.named_only && (cur_node.is_named() && !cur_node.is_extra()) {
 			break
 		}
 	}
@@ -26,7 +27,7 @@ fn (mut tc TreeCursor) to_first_child() bool {
 	return tc.cursor.to_first_child()
 }
 
-fn (tc &TreeCursor) current_node() C.TSNode {
+fn (tc &TreeCursor) current_node() ?C.TSNode {
 	return tc.cursor.current_node()
 }
 
@@ -55,15 +56,11 @@ fn (mut an Analyzer) report(msg string, node C.TSNode) {
 	an.store.report_error(report_error(msg, node.range()))
 }
 
-fn (mut an Analyzer) import_decl(node C.TSNode) {
+fn (mut an Analyzer) import_decl(node C.TSNode) ? {
 	// Most of the checking is already done in `import_modules_from_trees`
 	// Check only the symbols if they are available
-	symbols := node.child_by_field_name('symbols')
-	if symbols.is_null() {
-		return
-	}
-
-	module_name_node := node.child_by_field_name('path')
+	symbols := node.child_by_field_name('symbols') ?
+	module_name_node := node.child_by_field_name('path') ?
 	module_name := module_name_node.code(an.src_text)
 	// defer { unsafe { module_name.free() } }
 
@@ -72,10 +69,10 @@ fn (mut an Analyzer) import_decl(node C.TSNode) {
 		return
 	}
 
-	list := symbols.named_child(0)
+	list := symbols.named_child(0) ?
 	symbols_count := list.named_child_count()
 	for i := u32(0); i < symbols_count; i++ {
-		sym := list.named_child(i)
+		sym := list.named_child(i) ?
 		if sym.is_null() {
 			continue
 		}
@@ -111,14 +108,17 @@ fn (mut an Analyzer) fn_decl(node C.TSNode) {
 }
 
 pub fn (mut an Analyzer) top_level_statement() {
-	current_node := an.cursor.current_node()
 	defer {
 		an.cursor.next()
 	}
 
+	current_node := an.cursor.current_node() or {
+		return
+	}
+
 	match current_node.type_name() {
 		'import_declaration' {
-			an.import_decl(current_node)
+			an.import_decl(current_node) or {}
 		}
 		'const_declaration' {
 			an.const_decl(current_node)

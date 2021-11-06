@@ -39,13 +39,13 @@ fn (sr &SymbolRegistration) new_top_level_symbol(identifier_node C.TSNode, acces
 
 	match id_node_type_name {
 		'generic_type' {
-			if identifier_node.named_child(0).type_name() == 'generic_type' {
+			if identifier_node.named_child(0)?.type_name() == 'generic_type' {
 				return error('Invalid top-level generic node type `$id_node_type_name`')
 			}
 
 			// unsafe { symbol.free() }
-			symbol = sr.new_top_level_symbol(identifier_node.named_child(0), access, kind) ?
-			symbol.generic_placeholder_len = int(identifier_node.named_child(1).named_child_count())
+			symbol = sr.new_top_level_symbol(identifier_node.named_child(0) ?, access, kind) ?
+			symbol.generic_placeholder_len = int(identifier_node.named_child(1)?.named_child_count())
 		}
 		else {
 			// type_identifier, binded_type
@@ -53,7 +53,7 @@ fn (sr &SymbolRegistration) new_top_level_symbol(identifier_node C.TSNode, acces
 			symbol.range = identifier_node.range()
 
 			if id_node_type_name in ['binded_type', 'binded_identifier'] {
-				sym_language := identifier_node.child_by_field_name('language').code(sr.src_text)
+				sym_language := identifier_node.child_by_field_name('language')?.code(sr.src_text)
 				symbol.language = match sym_language {
 					'C' { SymbolLanguage.c }
 					'JS' { SymbolLanguage.js }
@@ -62,8 +62,10 @@ fn (sr &SymbolRegistration) new_top_level_symbol(identifier_node C.TSNode, acces
 			}
 
 			// for function names with generic parameters
-			if identifier_node.next_named_sibling().type_name() == 'type_parameters' {
-				symbol.generic_placeholder_len = int(identifier_node.next_named_sibling().named_child_count())
+			if identifier_node.next_named_sibling()?.type_name() == 'type_parameters' {
+				if next_sibling := identifier_node.next_named_sibling() {
+					symbol.generic_placeholder_len = int(next_sibling.named_child_count())
+				}
 			}
 		}
 	}
@@ -81,7 +83,7 @@ fn (mut sr SymbolRegistration) get_scope(node C.TSNode) ?&ScopeTree {
 
 fn (mut sr SymbolRegistration) const_decl(const_node C.TSNode) ?[]&Symbol {
 	mut access := SymbolAccess.private
-	if const_node.child(0).type_name() == 'pub' {
+	if const_node.child(0)?.type_name() == 'pub' {
 		access = .public
 	}
 
@@ -89,14 +91,21 @@ fn (mut sr SymbolRegistration) const_decl(const_node C.TSNode) ?[]&Symbol {
 	mut consts := []&Symbol{cap: int(specs_len)}
 
 	for i in 0 .. specs_len {
-		spec_node := const_node.named_child(i)
+		spec_node := const_node.named_child(i) or {
+			continue
+		}
 		// skip comments
 		if spec_node.is_extra() {
 			continue
 		}
 
+		mut return_sym := void_sym
+		if value_node := spec_node.child_by_field_name('value') {
+			sr.store.infer_value_type_from_node(value_node, sr.src_text)
+		}
+
 		consts << &Symbol{
-			name: spec_node.child_by_field_name('name').code(sr.src_text)
+			name: spec_node.child_by_field_name('name')?.code(sr.src_text)
 			kind: .variable
 			access: access
 			range: spec_node.range()
@@ -104,8 +113,7 @@ fn (mut sr SymbolRegistration) const_decl(const_node C.TSNode) ?[]&Symbol {
 			is_const: true
 			file_path: sr.store.cur_file_path
 			file_version: sr.store.cur_version
-			return_sym: sr.store.infer_value_type_from_node(spec_node.child_by_field_name('value'),
-				sr.src_text)
+			return_sym: return_sym
 		}
 	}
 
@@ -114,19 +122,20 @@ fn (mut sr SymbolRegistration) const_decl(const_node C.TSNode) ?[]&Symbol {
 
 fn (mut sr SymbolRegistration) struct_decl(struct_decl_node C.TSNode) ?&Symbol {
 	mut access := SymbolAccess.private
-	if struct_decl_node.child(0).type_name() == 'pub' {
+	if struct_decl_node.child(0)?.type_name() == 'pub' {
 		access = .public
 	}
 
-	attrs := struct_decl_node.child_by_field_name('attributes')
-	mut sym := sr.new_top_level_symbol(struct_decl_node.child_by_field_name('name'), access,
+	// attrs := struct_decl_node.child_by_field_name('attributes') ?
+	mut sym := sr.new_top_level_symbol(struct_decl_node.child_by_field_name('name') ?, access,
 		.struct_) ?
-	decl_list_node := struct_decl_node.named_child(if attrs.is_null() { u32(1) } else { 2 })
+		// if attrs.is_null() { 1 } else { 2 }
+	decl_list_node := struct_decl_node.named_child(u32(1)) ?
 	fields_len := decl_list_node.named_child_count()
 
 	mut field_access := SymbolAccess.private
 	for i in 0 .. fields_len {
-		field_node := decl_list_node.named_child(i)
+		field_node := decl_list_node.named_child(i) or { continue }
 		match field_node.type_name() {
 			'struct_field_scope' {
 				scope_text := field_node.code(sr.src_text)
@@ -141,7 +150,7 @@ fn (mut sr SymbolRegistration) struct_decl(struct_decl_node C.TSNode) ?&Symbol {
 				continue
 			}
 			'struct_field_declaration' {
-				mut field_sym := sr.struct_field_decl(field_access, field_node)
+				mut field_sym := sr.struct_field_decl(field_access, field_node) or { continue }
 				sym.add_child(mut field_sym) or { continue }
 			}
 			else {
@@ -153,12 +162,10 @@ fn (mut sr SymbolRegistration) struct_decl(struct_decl_node C.TSNode) ?&Symbol {
 	return sym
 }
 
-fn (mut sr SymbolRegistration) struct_field_decl(field_access SymbolAccess, field_decl_node C.TSNode) &Symbol {
-	field_type_node := field_decl_node.child_by_field_name('type')
-	field_name_node := field_decl_node.child_by_field_name('name')
+fn (mut sr SymbolRegistration) struct_field_decl(field_access SymbolAccess, field_decl_node C.TSNode) ?&Symbol {
+	field_type_node := field_decl_node.child_by_field_name('type') ?
 	field_sym := sr.store.find_symbol_by_type_node(field_type_node, sr.src_text) or { void_sym }
-
-	if field_name_node.is_null() {
+	field_name_node := field_decl_node.child_by_field_name('name') or {
 		// struct embedding
 		_, _, symbol_name := symbol_name_from_node(field_type_node, sr.src_text)
 		// defer {
@@ -175,46 +182,42 @@ fn (mut sr SymbolRegistration) struct_field_decl(field_access SymbolAccess, fiel
 			file_path: sr.store.cur_file_path
 			file_version: sr.store.cur_version
 		}
-	} else {
-		return &Symbol{
-			name: field_name_node.code(sr.src_text)
-			kind: .field
-			range: field_name_node.range()
-			access: field_access
-			return_sym: field_sym
-			is_top_level: true
-			file_path: sr.store.cur_file_path
-			file_version: sr.store.cur_version
-		}
+	}
+
+	return &Symbol{
+		name: field_name_node.code(sr.src_text)
+		kind: .field
+		range: field_name_node.range()
+		access: field_access
+		return_sym: field_sym
+		is_top_level: true
+		file_path: sr.store.cur_file_path
+		file_version: sr.store.cur_version
 	}
 }
 
 fn (mut sr SymbolRegistration) interface_decl(interface_decl_node C.TSNode) ?&Symbol {
 	mut access := SymbolAccess.private
-	if interface_decl_node.child(0).type_name() == 'pub' {
+	if interface_decl_node.child(0)?.type_name() == 'pub' {
 		access = SymbolAccess.public
 	}
 
-	mut sym := sr.new_top_level_symbol(interface_decl_node.child_by_field_name('name'),
+	mut sym := sr.new_top_level_symbol(interface_decl_node.child_by_field_name('name') ?,
 		access, .interface_) ?
-	fields_list_node := interface_decl_node.named_child(1)
+	fields_list_node := interface_decl_node.named_child(1) ?
 	fields_len := interface_decl_node.named_child_count()
 
 	for i in 0 .. fields_len {
-		field_node := fields_list_node.named_child(i)
-		if field_node.is_null() {
-			continue
-		}
-
+		field_node := fields_list_node.named_child(i) or { continue }
 		match field_node.type_name() {
 			'interface_field_scope' {
 				// TODO: add if mut: check
 				access = .private_mutable
 			}
 			'interface_spec' {
-				param_node := field_node.child_by_field_name('parameters')
-				name_node := field_node.child_by_field_name('name')
-				result_node := field_node.child_by_field_name('result')
+				param_node := field_node.child_by_field_name('parameters') or { continue }
+				name_node := field_node.child_by_field_name('name') or { continue }
+				result_node := field_node.child_by_field_name('result') or { continue }
 				method_access := if access == .private_mutable {
 					SymbolAccess.public_mutable
 				} else {
@@ -250,7 +253,7 @@ fn (mut sr SymbolRegistration) interface_decl(interface_decl_node C.TSNode) ?&Sy
 				sym.interface_children_len++
 			}
 			'struct_field_declaration' {
-				mut field_sym := sr.struct_field_decl(access, field_node)
+				mut field_sym := sr.struct_field_decl(access, field_node) or { continue }
 				sym.add_child(mut field_sym) or {
 					// eprintln(err)
 					continue
@@ -268,16 +271,16 @@ fn (mut sr SymbolRegistration) interface_decl(interface_decl_node C.TSNode) ?&Sy
 
 fn (mut sr SymbolRegistration) enum_decl(enum_decl_node C.TSNode) ?&Symbol {
 	mut access := SymbolAccess.private
-	if enum_decl_node.child(0).type_name() == 'pub' {
+	if enum_decl_node.child(0)?.type_name() == 'pub' {
 		access = SymbolAccess.public
 	}
 
-	mut sym := sr.new_top_level_symbol(enum_decl_node.child_by_field_name('name'), access,
+	mut sym := sr.new_top_level_symbol(enum_decl_node.child_by_field_name('name') ?, access,
 		.enum_) ?
-	member_list_node := enum_decl_node.named_child(1)
+	member_list_node := enum_decl_node.named_child(1) ?
 	members_len := member_list_node.named_child_count()
 	for i in 0 .. members_len {
-		member_node := member_list_node.named_child(i)
+		member_node := member_list_node.named_child(i) or { continue }
 		if member_node.type_name() != 'enum_member' {
 			continue
 		}
@@ -294,7 +297,7 @@ fn (mut sr SymbolRegistration) enum_decl(enum_decl_node C.TSNode) ?&Symbol {
 		}
 
 		mut member_sym := &Symbol{
-			name: member_node.child_by_field_name('name').code(sr.src_text)
+			name: member_node.child_by_field_name('name')?.code(sr.src_text)
 			kind: .field
 			range: member_node.range()
 			access: access
@@ -318,11 +321,11 @@ fn (mut sr SymbolRegistration) enum_decl(enum_decl_node C.TSNode) ?&Symbol {
 
 fn (mut sr SymbolRegistration) fn_decl(fn_node C.TSNode) ?&Symbol {
 	mut access := SymbolAccess.private
-	if fn_node.child(0).type_name() == 'pub' {
+	if fn_node.child(0)?.type_name() == 'pub' {
 		access = SymbolAccess.public
 	}
 
-	name_node := fn_node.child_by_field_name('name')
+	name_node := fn_node.child_by_field_name('name') ?
 	if sr.is_script && fn_node.start_byte() > sr.first_var_decl_pos.end_byte {
 		return IError(AnalyzerError{
 			msg: 'function declarations in script mode should be before all script statements'
@@ -330,10 +333,10 @@ fn (mut sr SymbolRegistration) fn_decl(fn_node C.TSNode) ?&Symbol {
 		})
 	}
 
-	body_node := fn_node.child_by_field_name('body')
-	receiver_node := fn_node.child_by_field_name('receiver')
-	params_list_node := fn_node.child_by_field_name('parameters')
-	return_node := fn_node.child_by_field_name('result')
+	body_node := fn_node.child_by_field_name('body') ?
+	receiver_node := fn_node.child_by_field_name('receiver') ?
+	params_list_node := fn_node.child_by_field_name('parameters') ?
+	return_node := fn_node.child_by_field_name('result') ?
 
 	mut fn_sym := sr.new_top_level_symbol(name_node, access, .function) ?
 	mut scope := sr.get_scope(body_node) or { &ScopeTree(0) }
@@ -381,31 +384,29 @@ fn (mut sr SymbolRegistration) fn_decl(fn_node C.TSNode) ?&Symbol {
 
 fn (mut sr SymbolRegistration) type_decl(type_decl_node C.TSNode) ?&Symbol {
 	mut access := SymbolAccess.private
-	if type_decl_node.child(0).type_name() == 'pub' {
+	if type_decl_node.child(0)?.type_name() == 'pub' {
 		access = SymbolAccess.public
 	}
 
-	mut sym := sr.new_top_level_symbol(type_decl_node.child_by_field_name('name'), access,
+	mut sym := sr.new_top_level_symbol(type_decl_node.child_by_field_name('name') ?, access,
 		.typedef) ?
-	types_node := type_decl_node.child_by_field_name('types')
-	if types_node.is_null() {
-		return none
-	}
-
+	types_node := type_decl_node.child_by_field_name('types') or { return none }
 	types_count := types_node.named_child_count()
 	if types_count == 0 {
 		return none
 	} else if types_count == 1 {
 		// alias type
-		selected_type_node := types_node.named_child(0)
-		found_sym := sr.store.find_symbol_by_type_node(selected_type_node, sr.src_text) or {
-			void_sym
+		if selected_type_node := types_node.named_child(0) {
+			found_sym := sr.store.find_symbol_by_type_node(selected_type_node, sr.src_text) or {
+				void_sym
+			}
+
+			sym.parent_sym = found_sym
 		}
-		sym.parent_sym = found_sym
 	} else {
 		// sum type
 		for i in 0 .. types_count {
-			selected_type_node := types_node.named_child(i)
+			selected_type_node := types_node.named_child(i) or { continue }
 			mut found_sym := sr.store.find_symbol_by_type_node(selected_type_node, sr.src_text) or {
 				continue
 			}
@@ -424,7 +425,7 @@ fn (mut sr SymbolRegistration) top_level_decl() ? {
 	}
 
 	mut global_scope := sr.store.opened_scopes[sr.store.cur_file_path]
-	node_type_name := sr.cursor.current_node().type_name()
+	node_type_name := sr.cursor.current_node()?.type_name()
 
 	match node_type_name {
 		// TODO: add module check
@@ -433,7 +434,7 @@ fn (mut sr SymbolRegistration) top_level_decl() ? {
 		// 	defer { unsafe { module_name.free() } }
 		// }
 		'const_declaration' {
-			mut const_syms := sr.const_decl(sr.cursor.current_node()) ?
+			mut const_syms := sr.const_decl(sr.cursor.current_node() ?) ?
 			for i := 0; i < const_syms.len; i++ {
 				mut const_sym := const_syms[i]
 				sr.store.register_symbol(mut const_sym) or {
@@ -451,27 +452,27 @@ fn (mut sr SymbolRegistration) top_level_decl() ? {
 			// unsafe { const_syms.free() }
 		}
 		'enum_declaration' {
-			mut sym := sr.enum_decl(sr.cursor.current_node()) ?
+			mut sym := sr.enum_decl(sr.cursor.current_node() ?) ?
 			sr.store.register_symbol(mut sym) ?
 		}
 		'function_declaration' {
-			mut sym := sr.fn_decl(sr.cursor.current_node()) ?
+			mut sym := sr.fn_decl(sr.cursor.current_node() ?) ?
 			sr.store.register_symbol(mut sym) ?
 		}
 		'interface_declaration' {
-			mut sym := sr.interface_decl(sr.cursor.current_node()) ?
+			mut sym := sr.interface_decl(sr.cursor.current_node() ?) ?
 			sr.store.register_symbol(mut sym) ?
 		}
 		'struct_declaration' {
-			mut sym := sr.struct_decl(sr.cursor.current_node()) ?
+			mut sym := sr.struct_decl(sr.cursor.current_node() ?) ?
 			sr.store.register_symbol(mut sym) ?
 		}
 		'type_declaration' {
-			mut sym := sr.type_decl(sr.cursor.current_node()) ?
+			mut sym := sr.type_decl(sr.cursor.current_node() ?) ?
 			sr.store.register_symbol(mut sym) ?
 		}
 		else {
-			stmt_node := sr.cursor.current_node()
+			stmt_node := sr.cursor.current_node() ?
 			if node_type_name == 'short_var_declaration' {
 				sr.is_script = true
 				sr.first_var_decl_pos = stmt_node.range()
@@ -491,8 +492,8 @@ fn (mut sr SymbolRegistration) top_level_decl() ? {
 }
 
 fn (mut sr SymbolRegistration) short_var_decl(var_decl C.TSNode) ?[]&Symbol {
-	left_expr_lists := var_decl.child_by_field_name('left')
-	right_expr_lists := var_decl.child_by_field_name('right')
+	left_expr_lists := var_decl.child_by_field_name('left') ?
+	right_expr_lists := var_decl.child_by_field_name('right') ?
 	left_len := left_expr_lists.named_child_count()
 	right_len := right_expr_lists.named_child_count()
 
@@ -501,11 +502,12 @@ fn (mut sr SymbolRegistration) short_var_decl(var_decl C.TSNode) ?[]&Symbol {
 		for j in 0 .. left_len {
 			mut var_access := SymbolAccess.private
 
-			left := left_expr_lists.named_child(j)
-			right := right_expr_lists.named_child(j)
-			prev_left := left.prev_sibling()
-			if !prev_left.is_null() && prev_left.type_name() == 'mut' {
-				var_access = .private_mutable
+			left := left_expr_lists.named_child(j) or { continue }
+			right := right_expr_lists.named_child(j) or { continue }
+			if prev_left := left.prev_sibling() {
+				if prev_left.type_name() == 'mut' {
+					var_access = .private_mutable
+				}
 			}
 
 			if right.type_name() == 'fn_literal' {
@@ -539,8 +541,8 @@ fn (mut sr SymbolRegistration) short_var_decl(var_decl C.TSNode) ?[]&Symbol {
 
 // TODO: move to analyzer perhaps?
 fn (mut sr SymbolRegistration) fn_literal(fn_node C.TSNode) ? {
-	body_node := fn_node.child_by_field_name('body')
-	params_list_node := fn_node.child_by_field_name('parameters')
+	body_node := fn_node.child_by_field_name('body') ?
+	params_list_node := fn_node.child_by_field_name('parameters') ?
 	// return_node := fn_node.child_by_field_name('result')
 
 	mut scope := sr.get_scope(body_node) or { &ScopeTree(0) }
@@ -558,10 +560,9 @@ fn (mut sr SymbolRegistration) fn_literal(fn_node C.TSNode) ? {
 }
 
 fn (mut sr SymbolRegistration) if_expression(if_stmt_node C.TSNode) ? {
-	body_node := if_stmt_node.child_by_field_name('consequence')
+	body_node := if_stmt_node.child_by_field_name('consequence') ?
 	mut scope := sr.get_scope(body_node) or { &ScopeTree(0) }
-	initializer_node := if_stmt_node.child_by_field_name('initializer')
-	if !initializer_node.is_null() {
+	if initializer_node := if_stmt_node.child_by_field_name('initializer') {
 		if vars := sr.short_var_decl(initializer_node) {
 			for var in vars {
 				scope.register(var) or {}
@@ -569,8 +570,7 @@ fn (mut sr SymbolRegistration) if_expression(if_stmt_node C.TSNode) ? {
 		}
 	}
 
-	alternative_node := if_stmt_node.child_by_field_name('alternative')
-	if alternative_node.is_null() {
+	alternative_node := if_stmt_node.child_by_field_name('alternative') or {
 		return
 	}
 
@@ -584,17 +584,17 @@ fn (mut sr SymbolRegistration) if_expression(if_stmt_node C.TSNode) ? {
 
 fn (mut sr SymbolRegistration) for_statement(for_stmt_node C.TSNode) ? {
 	named_child_count := for_stmt_node.named_child_count()
-	body_node := for_stmt_node.child_by_field_name('body')
+	body_node := for_stmt_node.child_by_field_name('body') ?
 	mut scope := sr.get_scope(body_node) or { &ScopeTree(0) }
 
 	if named_child_count == 2 {
-		cond_node := for_stmt_node.named_child(0)
+		cond_node := for_stmt_node.named_child(0) ?
 		cond_node_type := cond_node.type_name()
 
 		if cond_node_type == 'for_in_operator' {
-			left_node := cond_node.child_by_field_name('left')
+			left_node := cond_node.child_by_field_name('left') ?
 			left_count := left_node.named_child_count()
-			right_node := cond_node.child_by_field_name('right')
+			right_node := cond_node.child_by_field_name('right') ?
 			mut right_sym := sr.store.infer_value_type_from_node(right_node, sr.src_text)
 			if !right_sym.is_void() {
 				if right_sym.is_returnable() {
@@ -605,7 +605,7 @@ fn (mut sr SymbolRegistration) for_statement(for_stmt_node C.TSNode) ? {
 				if right_sym.kind == .array_ || right_sym.kind == .map_
 					|| right_sym.name == 'string' {
 					if left_count == 2 {
-						idx_node := left_node.named_child(end_idx - 1)
+						idx_node := left_node.named_child(end_idx - 1) ?
 						mut return_sym := sr.store.find_symbol('', 'int') or { void_sym }
 						if right_sym.kind == .map_ {
 							return_sym = right_sym.children_syms[1] or { void_sym }
@@ -624,7 +624,7 @@ fn (mut sr SymbolRegistration) for_statement(for_stmt_node C.TSNode) ? {
 						scope.register(idx_sym) or {}
 					}
 
-					value_node := left_node.named_child(end_idx)
+					value_node := left_node.named_child(end_idx) ?
 					mut return_sym := right_sym.value_sym()
 					if right_sym.name == 'string' {
 						return_sym = sr.store.find_symbol('', 'byte') or { void_sym }
@@ -646,12 +646,10 @@ fn (mut sr SymbolRegistration) for_statement(for_stmt_node C.TSNode) ? {
 				}
 			}
 		} else if cond_node_type == 'cstyle_for_clause' {
-			initializer_node := for_stmt_node.child_by_field_name('initializer')
-			if !initializer_node.is_null() {
-				if vars := sr.short_var_decl(initializer_node) {
-					for var in vars {
-						scope.register(var) or { continue }
-					}
+			initializer_node := for_stmt_node.child_by_field_name('initializer') ?
+			if vars := sr.short_var_decl(initializer_node) {
+				for var in vars {
+					scope.register(var) or { continue }
 				}
 			}
 		}
@@ -699,7 +697,7 @@ fn (mut sr SymbolRegistration) extract_block(node C.TSNode, mut scope ScopeTree)
 
 	body_sym_len := node.named_child_count()
 	for i := u32(0); i < body_sym_len; i++ {
-		stmt_node := node.named_child(i)
+		stmt_node := node.named_child(i) or { continue }
 		sr.statement(stmt_node, mut scope) or { continue }
 	}
 }
@@ -710,13 +708,20 @@ fn extract_parameter_list(node C.TSNode, mut store Store, src_text []byte) []&Sy
 
 	for i := u32(0); i < params_len; i++ {
 		mut access := SymbolAccess.private
-		param_node := node.named_child(i)
-		if param_node.child(0).type_name() == 'mut' {
+		param_node := node.named_child(i) or {
+			continue
+		}
+
+		first_node := param_node.child(0) or {
+			continue
+		}
+
+		if first_node.type_name() == 'mut' {
 			access = SymbolAccess.private_mutable
 		}
 
-		param_name_node := param_node.child_by_field_name('name')
-		param_type_node := param_node.child_by_field_name('type')
+		param_name_node := param_node.child_by_field_name('name') or { continue }
+		param_type_node := param_node.child_by_field_name('type') or { continue }
 		return_sym := store.find_symbol_by_type_node(param_type_node, src_text) or { void_sym }
 
 		syms << &Symbol{
@@ -748,7 +753,7 @@ pub fn (mut store Store) register_symbols_from_tree(tree &C.TSTree, src_text []b
 		}
 	}
 
-	sr.get_scope(sr.cursor.current_node()) or {}
+	sr.get_scope(sr.cursor.current_node() or { return }) or {}
 	sr.cursor.to_first_child()
 
 	for _ in 0 .. child_len {

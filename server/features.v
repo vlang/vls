@@ -205,8 +205,15 @@ fn (mut ls Vls) signature_help(id string, params string) {
 	mut node := traverse_node(tree.root_node(), u32(off))
 	mut parent_node := node
 	if node.type_name() == 'argument_list' {
-		parent_node = node.parent()
-		node = node.prev_named_sibling()
+		parent_node = node.parent() or {
+			ls.send_null(id)
+			return
+		}
+
+		node = node.prev_named_sibling() or {
+			ls.send_null(id)
+			return
+		}
 	}
 
 	// signature help supports function calls for now
@@ -217,13 +224,15 @@ fn (mut ls Vls) signature_help(id string, params string) {
 	}
 
 	ls.store.set_active_file_path(uri.path(), file.version)
-
 	sym := ls.store.infer_symbol_from_node(node, source) or {
 		ls.send_null(id)
 		return
 	}
 
-	args_node := parent_node.child_by_field_name('arguments')
+	args_node := parent_node.child_by_field_name('arguments') or {
+		ls.send_null(id)
+		return
+	}
 	// for retrigger, it utilizes the current signature help data
 	if ctx.is_retrigger {
 		mut active_sighelp := ctx.active_signature_help
@@ -294,7 +303,7 @@ fn (mut builder CompletionBuilder) add(item lsp.CompletionItem) {
 }
 
 fn (builder CompletionBuilder) is_triggered(node C.TSNode, chr string) bool {
-	return node.next_sibling().code(builder.src) == chr || builder.ctx.trigger_character == chr
+	return node.next_sibling() or { return false }.code(builder.src) == chr || builder.ctx.trigger_character == chr
 }
 
 fn (builder CompletionBuilder) is_selector(node C.TSNode) bool {
@@ -338,12 +347,12 @@ fn (mut builder CompletionBuilder) build_suggestions_from_stmt(node C.TSNode) {
 			builder.show_global = true
 		}
 		'assignment_statement' {
-			right_node := node.child_by_field_name('right')
-			left_node := node.child_by_field_name('left')
+			right_node := node.child_by_field_name('right') or { return }
+			left_node := node.child_by_field_name('left') or { return }
 			expr_list_count := right_node.named_child_count()
 			left_count := left_node.named_child_count()
 			if expr_list_count == left_count {
-				last_left_node := left_node.named_child(left_count - 1)
+				last_left_node := left_node.named_child(left_count - 1) or { return }
 				builder.filter_return_type = builder.store.infer_value_type_from_node(last_left_node,
 					builder.src)
 				builder.show_local = true
@@ -377,7 +386,8 @@ fn (mut builder CompletionBuilder) build_suggestions_from_list(node C.TSNode) {
 		}
 		'argument_list' {
 			call_expr_arg_cur_idx := node.named_child_count()
-			returned_sym := builder.store.infer_symbol_from_node(node.parent(), builder.src) or {
+			parent := node.parent() or { return }
+			returned_sym := builder.store.infer_symbol_from_node(parent, builder.src) or {
 				builder.filter_return_type
 			}
 
@@ -393,7 +403,7 @@ fn (mut builder CompletionBuilder) build_suggestions_from_list(node C.TSNode) {
 		}
 		'import_symbols_list' {
 			import_node := closest_symbol_node_parent(node)
-			import_path_node := import_node.child_by_field_name('path')
+			import_path_node := import_node.child_by_field_name('path') or { return }
 			import_path := import_path_node.code(builder.src)
 			builder.build_suggestions_from_module(import_path)
 		}
@@ -427,9 +437,10 @@ fn (mut builder CompletionBuilder) build_suggestions_from_expr(node C.TSNode) {
 			if builder.is_selector(node) {
 				mut selected_node := node
 				if node_type_name == 'selector_expression' {
-					operand_node := node.child_by_field_name('operand')
-					if operand_node.type_name() == 'call_expression' {
-						selected_node = node
+					if operand_node := node.child_by_field_name('operand') {
+						if operand_node.type_name() == 'call_expression' {
+							selected_node = node
+						}
 					}
 				}
 				if got_sym := builder.store.infer_symbol_from_node(selected_node, builder.src) {
@@ -457,8 +468,10 @@ fn (mut builder CompletionBuilder) build_suggestions_from_expr(node C.TSNode) {
 			closest_element_node := closest_named_child(node, u32(builder.offset))
 			if closest_element_node.type_name() == 'keyed_element' {
 				builder.build_suggestions_from_expr(closest_element_node)
-			} else if got_sym := builder.store.infer_symbol_from_node(node.parent(), builder.src) {
-				builder.build_suggestions_from_sym(got_sym, false)
+			} else if parent_node := node.parent() {
+				if got_sym := builder.store.infer_symbol_from_node(parent_node, builder.src) {
+					builder.build_suggestions_from_sym(got_sym, false)
+				}
 			}
 		}
 		'keyed_element' {
@@ -472,7 +485,7 @@ fn (mut builder CompletionBuilder) build_suggestions_from_expr(node C.TSNode) {
 			}
 		}
 		'import_symbols' {
-			builder.build_suggestions_from_node(node.named_child(0))
+			builder.build_suggestions_from_node(node.named_child(0) or { return })
 		}
 		else {
 			// found_sym := builder.store.infer_symbol_from_node(node, builder.src) or { analyzer.void_sym }
@@ -887,7 +900,7 @@ fn (mut ls Vls) completion(id string, params string) {
 		} else if node_type_name == 'block' {
 			node = traverse_node2(root_node, u32(offset))
 		} else if node.is_error() && node_type_name == 'ERROR' {
-			node = node.prev_named_sibling()
+			node = node.prev_named_sibling() or { node }
 		} else if node.start_byte() > u32(offset) {
 			node = closest_named_child(closest_symbol_node_parent(node), u32(offset))
 		} else if node_type_name == 'source_file' {
@@ -971,12 +984,12 @@ fn get_hover_data(mut store analyzer.Store, node C.TSNode, uri lsp.DocumentUri, 
 				if alias.len > 0 { ' as $alias' } else { '' })
 			range: tsrange_to_lsp_range(found_imp.ranges[store.cur_file_path])
 		}
-	} else if node.parent().is_error() || node.parent().is_missing() {
+	} else if node.parent()?.is_error() || node.parent()?.is_missing() {
 		return none
 	}
 
 	if node_type_name != 'type_selector_expression' && node.named_child_count() != 0 {
-		new_original_range := node.first_named_child_for_byte(u32(offset)).range()
+		new_original_range := node.first_named_child_for_byte(u32(offset))?.range()
 		if new_original_range.start_byte != 0 && new_original_range.end_byte != 0 {
 			original_range = new_original_range
 		}
@@ -1026,7 +1039,7 @@ fn (mut ls Vls) folding_range(id string, params string) {
 
 	// loop
 	for i := u32(0); i < named_children_len; i++ {
-		named_child := root_node.named_child(i)
+		named_child := root_node.named_child(i) or { continue }
 		folding_ranges << lsp.FoldingRange{
 			start_line: tsrange_to_lsp_range(named_child.range()).start.character
 			start_character: tsrange_to_lsp_range(named_child.range()).start.line
@@ -1073,9 +1086,11 @@ fn (mut ls Vls) definition(id string, params string) {
 	mut node := traverse_node(tree.root_node(), u32(offset))
 	mut original_range := node.range()
 	node_type_name := node.type_name()
-	if node.is_null() || (node.parent().is_error() || node.parent().is_missing()) {
-		ls.send_null(id)
-		return
+	if parent_node := node.parent() {
+		if node.is_null() || (parent_node.is_error() || parent_node.is_missing()) {
+			ls.send_null(id)
+			return
+		}
 	}
 
 	ls.store.set_active_file_path(uri.path(), file.version)
@@ -1086,7 +1101,9 @@ fn (mut ls Vls) definition(id string, params string) {
 	}
 
 	if node_type_name != 'type_selector_expression' && node.named_child_count() != 0 {
-		original_range = node.first_named_child_for_byte(u32(offset)).range()
+		if got_node := node.first_named_child_for_byte(u32(offset)) {
+			original_range = got_node.range()
+		}
 	}
 
 	// Send null if range has zero-start and end points
@@ -1160,7 +1177,14 @@ fn (mut ls Vls) implementation(id string, params string) {
 	mut node := traverse_node(tree.root_node(), u32(offset))
 	mut original_range := node.range()
 	node_type_name := node.type_name()
-	if node.is_null() || (node.parent().is_error() || node.parent().is_missing()) {
+	if parent_node := node.parent() {
+		if parent_node.is_error() || parent_node.is_missing() {
+			ls.send_null(id)
+			return
+		}
+	}
+
+	if node.is_null() {
 		ls.send_null(id)
 		return
 	}
@@ -1168,10 +1192,12 @@ fn (mut ls Vls) implementation(id string, params string) {
 	ls.store.set_active_file_path(uri.path(), file.version)
 
 	mut got_sym := analyzer.void_sym
-	if node.parent().type_name() == 'interface_declaration' {
-		got_sym = ls.store.symbols[ls.store.cur_dir].get(node.code(source)) or { got_sym }
-	} else {
-		got_sym = ls.store.infer_value_type_from_node(node, source)
+	if parent_node := node.parent() {
+		if parent_node.type_name() == 'interface_declaration' {
+			got_sym = ls.store.symbols[ls.store.cur_dir].get(node.code(source)) or { got_sym }
+		} else {
+			got_sym = ls.store.infer_value_type_from_node(node, source)
+		}
 	}
 
 	if isnil(got_sym) || got_sym.is_void() {
@@ -1180,7 +1206,9 @@ fn (mut ls Vls) implementation(id string, params string) {
 	}
 
 	if node_type_name != 'type_selector_expression' && node.named_child_count() != 0 {
-		original_range = node.first_named_child_for_byte(u32(offset)).range()
+		if got_node := node.first_named_child_for_byte(u32(offset)) {
+			original_range = got_node.range()
+		}
 	}
 
 	mut locations := []lsp.LocationLink{cap: 20}
