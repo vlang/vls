@@ -131,6 +131,7 @@ typedef enum {
   TSQueryErrorField,
   TSQueryErrorCapture,
   TSQueryErrorStructure,
+  TSQueryErrorLanguage,
 } TSQueryError;
 
 /********************/
@@ -179,9 +180,7 @@ const TSLanguage *ts_parser_language(const TSParser *self);
  * If `length` is zero, then the entire document will be parsed. Otherwise,
  * the given ranges must be ordered from earliest to latest in the document,
  * and they must not overlap. That is, the following must hold for all
- * `i` < `length - 1`:
- *
- *     ranges[i].end_byte <= ranges[i + 1].start_byte
+ * `i` < `length - 1`: ranges[i].end_byte <= ranges[i + 1].start_byte
  *
  * If this requirement is not satisfied, the operation will fail, the ranges
  * will not be assigned, and this function will return `false`. On success,
@@ -488,6 +487,12 @@ TSNode ts_node_parent(TSNode);
 TSNode ts_node_child(TSNode, uint32_t);
 
 /**
+ * Get the field name for node's child at the given index, where zero represents
+ * the first child. Returns NULL, if no field is found.
+ */
+const char *ts_node_field_name_for_child(TSNode, uint32_t);
+
+/**
  * Get the node's number of children.
  */
 uint32_t ts_node_child_count(TSNode);
@@ -612,7 +617,7 @@ TSNode ts_tree_cursor_current_node(const TSTreeCursor *);
 const char *ts_tree_cursor_current_field_name(const TSTreeCursor *);
 
 /**
- * Get the field name of the tree cursor's current node.
+ * Get the field id of the tree cursor's current node.
  *
  * This returns zero if the current node doesn't have a field.
  * See also `ts_node_child_by_field_id`, `ts_language_field_id_for_name`.
@@ -645,12 +650,13 @@ bool ts_tree_cursor_goto_first_child(TSTreeCursor *);
 
 /**
  * Move the cursor to the first child of its current node that extends beyond
- * the given byte offset.
+ * the given byte offset or point.
  *
  * This returns the index of the child node if one was found, and returns -1
  * if no such child was found.
  */
 int64_t ts_tree_cursor_goto_first_child_for_byte(TSTreeCursor *, uint32_t);
+int64_t ts_tree_cursor_goto_first_child_for_point(TSTreeCursor *, TSPoint);
 
 TSTreeCursor ts_tree_cursor_copy(const TSTreeCursor *);
 
@@ -792,15 +798,19 @@ void ts_query_cursor_delete(TSQueryCursor *);
 void ts_query_cursor_exec(TSQueryCursor *, const TSQuery *, TSNode);
 
 /**
- * Check if this cursor has exceeded its maximum number of in-progress
- * matches.
+ * Manage the maximum number of in-progress matches allowed by this query
+ * cursor.
  *
- * Currently, query cursors have a fixed capacity for storing lists
- * of in-progress captures. If this capacity is exceeded, then the
- * earliest-starting match will silently be dropped to make room for
- * further matches.
+ * Query cursors have an optional maximum capacity for storing lists of
+ * in-progress captures. If this capacity is exceeded, then the
+ * earliest-starting match will silently be dropped to make room for further
+ * matches. This maximum capacity is optional — by default, query cursors allow
+ * any number of pending matches, dynamically allocating new space for them as
+ * needed as the query is executed.
  */
 bool ts_query_cursor_did_exceed_match_limit(const TSQueryCursor *);
+uint32_t ts_query_cursor_match_limit(const TSQueryCursor *);
+void ts_query_cursor_set_match_limit(TSQueryCursor *, uint32_t);
 
 /**
  * Set the range of bytes or (row, column) positions in which the query
