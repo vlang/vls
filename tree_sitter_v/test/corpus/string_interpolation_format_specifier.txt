@@ -14,8 +14,7 @@ String Interpolation with Format Specifiers
   (string_interpolation
     (int_literal)
     (format_specifier
-      (int_literal)
-      (format_flag))))
+      (int_literal))))
 (interpreted_string_literal
   (string_interpolation
     (identifier)
@@ -26,12 +25,10 @@ String Interpolation with Format Specifiers
     (identifier)
     (format_specifier
       (int_literal)
-      (int_literal)
-      (format_flag))))
+      (int_literal))))
 (interpreted_string_literal
   (string_interpolation
     (identifier)
     (format_specifier
       (int_literal)
-      (int_literal)
-      (format_flag)))))
+      (int_literal)))))

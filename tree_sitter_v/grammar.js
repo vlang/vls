@@ -728,6 +728,29 @@ module.exports = grammar({
     expression_list: ($) =>
       prec(PREC.resolve, comma_sep1(choice($._expression, $.mutable_expression))),
 
+    // TODO: any expression on the right that is recognized
+    // as external tokens will be deduced as separate nodes
+    // instead of having under the same expression_list node
+    _expression_list_repeat1: ($) =>
+      prec(
+        PREC.resolve, 
+        seq(
+          choice(
+            $._expression, 
+            $.mutable_expression
+          ), 
+          repeat1(
+            seq(
+              ",", 
+              choice(
+                $._expression, 
+                $.mutable_expression
+              )
+            )
+          )
+        )
+      ),
+
     parameter_declaration: ($) =>
       seq(
         field("name", choice($.mutable_identifier, $.identifier, $._reserved_identifier)),
@@ -902,7 +925,15 @@ module.exports = grammar({
 
     assert_statement: ($) => seq(assert_keyword, $._expression),
 
-    block: ($) => seq("{", seq(optional($._statement_list), optional($.expression_list)), "}"),
+    block: ($) => 
+      seq(
+        "{", 
+        seq(
+          optional($._statement_list), 
+          optional(alias($._expression_list_repeat1, $.expression_list))
+        ), 
+        "}"
+      ),
 
     defer_statement: ($) => seq(defer_keyword, $.block),
 

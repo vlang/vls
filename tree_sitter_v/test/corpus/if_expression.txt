@@ -59,34 +59,34 @@ fn foo() (int, int) {
     (parameter_list) 
     (multi_return_type 
       (builtin_type) (builtin_type)) 
-  (block 
-    (short_var_declaration 
-      (expression_list 
-        (identifier) (identifier)) 
-      (expression_list 
-        (if_expression (identifier) 
-          (block 
-            (expression_list 
-              (int_literal) (int_literal))) 
-          (block 
-            (expression_list 
-              (int_literal) (int_literal)))))) 
-    (short_var_declaration 
-      (expression_list 
-        (identifier) (identifier)) 
-      (expression_list 
-        (if_expression 
-          (identifier) 
-          (block 
-            (expression_list 
-              (int_literal) (int_literal))) 
-          (block 
-            (expression_list 
-              (int_literal) (int_literal)))))) 
-    (return_statement (expression_list (identifier) (identifier))))))
+    (block 
+      (short_var_declaration 
+        (expression_list 
+          (identifier) (identifier)) 
+        (expression_list 
+          (if_expression (identifier) 
+            (block 
+              (expression_list 
+                (int_literal) (int_literal))) 
+            (block 
+              (expression_list 
+                (int_literal) (int_literal)))))) 
+      (short_var_declaration 
+        (expression_list 
+          (identifier) (identifier)) 
+        (expression_list 
+          (if_expression 
+            (identifier) 
+            (block 
+              (expression_list 
+                (int_literal) (int_literal))) 
+            (block 
+              (expression_list 
+                (int_literal) (int_literal)))))) 
+      (return_statement (expression_list (identifier) (identifier))))))
 
 ===
-Multi-return If Expression
+Multi-return If Expression 2
 ===
 
 fn main() {
@@ -103,4 +103,13 @@ fn main() {
       (short_var_declaration
         (expression_list
           (identifier)
-          (identifier))))))
+          (identifier))
+        (expression_list
+          (if_expression
+            (identifier)
+            (block
+              (expression_list
+                (identifier) (identifier)))
+            (block
+              (expression_list
+                (identifier) (identifier)))))))))

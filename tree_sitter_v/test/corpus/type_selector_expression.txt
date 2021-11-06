@@ -31,7 +31,7 @@ fn main() {
                   (type_selector_expression (identifier)))))))
       (short_var_declaration
         (expression_list
-          (identifier))
+          (mutable_expression (identifier)))
         (expression_list
           (type_selector_expression
             (type_identifier)

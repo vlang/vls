@@ -52,7 +52,8 @@ mut ap := &u64(a)
 
 (source_file 
   (short_var_declaration 
-    (expression_list (identifier)) 
+    (expression_list 
+    (mutable_expression (identifier))) 
     (expression_list 
       (type_cast_expression 
         (pointer_type (builtin_type)) 

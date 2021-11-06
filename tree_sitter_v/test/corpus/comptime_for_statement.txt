@@ -11,7 +11,7 @@ $for field in App.fields {
 (source_file
   (comptime_for_statement
     (for_in_operator
-      (expression_list (identifier))
+      (identifier_list (identifier))
       (type_selector_expression (type_identifier) (identifier)))
     (block
       (call_expression
