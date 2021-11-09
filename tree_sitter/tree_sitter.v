@@ -237,7 +237,6 @@ pub fn (node C.TSNode) is_error() bool {
 	return C.ts_node_has_error(node)
 }
 
-[inline]
 pub fn (node C.TSNode) parent() ?C.TSNode {
 	check_tsnode(node) ?
 	parent := C.ts_node_parent(node)
@@ -245,7 +244,6 @@ pub fn (node C.TSNode) parent() ?C.TSNode {
 	return parent
 }
 
-[inline]
 pub fn (node C.TSNode) child(pos u32) ?C.TSNode {
 	check_tsnode(node) ?
 	child := C.ts_node_child(node, pos)
@@ -258,7 +256,6 @@ pub fn (node C.TSNode) child_count() u32 {
 	return C.ts_node_child_count(node)
 }
 
-[inline]
 pub fn (node C.TSNode) named_child(pos u32) ?C.TSNode {
 	check_tsnode(node) ?
 	child := C.ts_node_named_child(node, pos)
@@ -273,7 +270,6 @@ pub fn (node C.TSNode) named_child_count() u32 {
 	return C.ts_node_named_child_count(node)
 }
 
-[inline]
 pub fn (node C.TSNode) child_by_field_name(name string) ?C.TSNode {
 	// defer {
 	// 	unsafe { name.free() }
@@ -284,7 +280,6 @@ pub fn (node C.TSNode) child_by_field_name(name string) ?C.TSNode {
 	return child
 }
 
-[inline]
 pub fn (node C.TSNode) next_sibling() ?C.TSNode {
 	check_tsnode(node) ?
 	sibling := C.ts_node_next_sibling(node)
@@ -292,7 +287,6 @@ pub fn (node C.TSNode) next_sibling() ?C.TSNode {
 	return sibling
 }
 
-[inline]
 pub fn (node C.TSNode) prev_sibling() ?C.TSNode {
 	check_tsnode(node) ?
 	sibling := C.ts_node_prev_sibling(node)
@@ -300,7 +294,6 @@ pub fn (node C.TSNode) prev_sibling() ?C.TSNode {
 	return sibling
 }
 
-[inline]
 pub fn (node C.TSNode) next_named_sibling() ?C.TSNode {
 	check_tsnode(node) ?
 	sibling := C.ts_node_next_named_sibling(node)
@@ -308,7 +301,6 @@ pub fn (node C.TSNode) next_named_sibling() ?C.TSNode {
 	return sibling
 }
 
-[inline]
 pub fn (node C.TSNode) prev_named_sibling() ?C.TSNode {
 	check_tsnode(node) ?
 	sibling := C.ts_node_prev_named_sibling(node)
@@ -316,7 +308,6 @@ pub fn (node C.TSNode) prev_named_sibling() ?C.TSNode {
 	return sibling
 }
 
-[inline]
 pub fn (node C.TSNode) first_child_for_byte(offset u32) ?C.TSNode {
 	check_tsnode(node) ?
 	got_node := C.ts_node_first_child_for_byte(node, offset)
@@ -324,7 +315,6 @@ pub fn (node C.TSNode) first_child_for_byte(offset u32) ?C.TSNode {
 	return got_node
 }
 
-[inline]
 pub fn (node C.TSNode) first_named_child_for_byte(offset u32) ?C.TSNode {
 	check_tsnode(node) ?
 	got_node := C.ts_node_first_named_child_for_byte(node, offset)
@@ -332,7 +322,6 @@ pub fn (node C.TSNode) first_named_child_for_byte(offset u32) ?C.TSNode {
 	return got_node
 }
 
-[inline]
 pub fn (node C.TSNode) descendant_for_byte_range(start_range u32, end_range u32) ?C.TSNode {
 	check_tsnode(node) ?
 	got_node := C.ts_node_descendant_for_byte_range(node, start_range, end_range)
@@ -340,7 +329,6 @@ pub fn (node C.TSNode) descendant_for_byte_range(start_range u32, end_range u32)
 	return got_node
 }
 
-[inline]
 pub fn (node C.TSNode) descendant_for_point_range(start_point C.TSPoint, end_point C.TSPoint) ?C.TSNode {
 	check_tsnode(node) ?
 	got_node := C.ts_node_descendant_for_point_range(node, start_point, end_point)
@@ -348,7 +336,6 @@ pub fn (node C.TSNode) descendant_for_point_range(start_point C.TSPoint, end_poi
 	return got_node
 }
 
-[inline]
 pub fn (node C.TSNode) named_descendant_for_byte_range(start_range u32, end_range u32) ?C.TSNode {
 	check_tsnode(node) ?
 	got_node := C.ts_node_named_descendant_for_byte_range(node, start_range, end_range)
@@ -356,7 +343,6 @@ pub fn (node C.TSNode) named_descendant_for_byte_range(start_range u32, end_rang
 	return got_node
 }
 
-[inline]
 pub fn (node C.TSNode) named_descendant_for_point_range(start_point C.TSPoint, end_point C.TSPoint) ?C.TSNode {
 	check_tsnode(node) ?
 	got_node := C.ts_node_named_descendant_for_point_range(node, start_point, end_point)
