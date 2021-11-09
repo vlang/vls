@@ -130,7 +130,9 @@ fn C.ts_node_named_descendant_for_point_range(node C.TSNode, start_point C.TSPoi
 fn C.ts_node_eq(node C.TSNode, another_node C.TSNode) bool
 
 pub fn check_tsnode(node C.TSNode) ? {
-	check_tsnode(node) ?
+	if node.is_null() {
+		return error('node is null')
+	}
 }
 
 pub fn (node C.TSNode) code(text []byte) string {
