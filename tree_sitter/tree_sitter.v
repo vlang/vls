@@ -129,9 +129,26 @@ fn C.ts_node_named_descendant_for_point_range(node C.TSNode, start_point C.TSPoi
 
 fn C.ts_node_eq(node C.TSNode, another_node C.TSNode) bool
 
+struct NodeError {
+	msg string
+	code int
+	node C.TSNode
+}
+
+[unsafe]
+pub fn unwrap_null_node(err IError) ?C.TSNode {
+	if err is NodeError {
+		return err.node
+	}
+	return none
+}
+
 pub fn check_tsnode(node C.TSNode) ? {
 	if node.is_null() {
-		return error('node is null')
+		return IError(NodeError{
+			node: node
+			msg: 'Node is null'
+		})
 	}
 }
 
