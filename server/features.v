@@ -205,20 +205,13 @@ fn (mut ls Vls) signature_help(id string, params string) {
 	mut node := traverse_node(tree.root_node(), u32(off))
 	mut parent_node := node
 	if node.type_name() == 'argument_list' {
-		parent_node = node.parent() or {
-			ls.send_null(id)
-			return
-		}
-
-		node = node.prev_named_sibling() or {
-			ls.send_null(id)
-			return
-		}
+		parent_node = node.parent() or { node }
+		node = node.prev_named_sibling() or { node }
 	}
 
 	// signature help supports function calls for now
 	// hence checking the node if it's a call_expression node.
-	if node.is_null() || parent_node.type_name() != 'call_expression' {
+	if parent_node.type_name() != 'call_expression' {
 		ls.send_null(id)
 		return
 	}
@@ -970,6 +963,8 @@ fn get_hover_data(mut store analyzer.Store, node C.TSNode, uri lsp.DocumentUri, 
 	}
 
 	mut original_range := node.range()
+	parent_node := node.parent() or { node }
+
 	// eprintln('$node_type_name | ${node.code(source)}')
 	if node_type_name == 'module_clause' {
 		return lsp.Hover{
@@ -984,14 +979,16 @@ fn get_hover_data(mut store analyzer.Store, node C.TSNode, uri lsp.DocumentUri, 
 				if alias.len > 0 { ' as $alias' } else { '' })
 			range: tsrange_to_lsp_range(found_imp.ranges[store.cur_file_path])
 		}
-	} else if node.parent()?.is_error() || node.parent()?.is_missing() {
+	} else if parent_node.is_error() || parent_node.is_missing() {
 		return none
 	}
 
 	if node_type_name != 'type_selector_expression' && node.named_child_count() != 0 {
-		new_original_range := node.first_named_child_for_byte(u32(offset))?.range()
-		if new_original_range.start_byte != 0 && new_original_range.end_byte != 0 {
-			original_range = new_original_range
+		if got_node := node.first_named_child_for_byte(u32(offset)) {
+			new_original_range := got_node.range()
+			if new_original_range.start_byte != 0 && new_original_range.end_byte != 0 {
+				original_range = new_original_range
+			}
 		}
 	}
 
@@ -1087,14 +1084,17 @@ fn (mut ls Vls) definition(id string, params string) {
 	mut original_range := node.range()
 	node_type_name := node.type_name()
 	if parent_node := node.parent() {
-		if node.is_null() || (parent_node.is_error() || parent_node.is_missing()) {
+		if parent_node.is_error() || parent_node.is_missing() {
 			ls.send_null(id)
 			return
 		}
+	} else if node.is_null() {
+		ls.send_null(id)
+		return
 	}
 
 	ls.store.set_active_file_path(uri.path(), file.version)
-	sym := ls.store.infer_symbol_from_node(node, source) or { analyzer.void_sym }
+	sym := ls.store.infer_symbol_from_node(node, source) or { analyzer.void_sym }	
 	if isnil(sym) || sym.is_void() {
 		ls.send_null(id)
 		return

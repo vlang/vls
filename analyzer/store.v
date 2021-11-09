@@ -626,8 +626,12 @@ pub fn (mut ss Store) infer_symbol_from_node(node C.TSNode, src_text []byte) ?&S
 			// find the symbol in scopes
 			// return void if none
 			ident_text := node.code(src_text)
-			return ss.opened_scopes[ss.cur_file_path].get_symbol_with_range(ident_text,
-				node.range()) or { ss.find_symbol(module_name, ident_text) ? }
+			return ss.opened_scopes[ss.cur_file_path].get_symbol_with_range(
+				ident_text,
+				node.range()
+			) or {
+				ss.find_symbol(module_name, ident_text) ?
+			}
 		}
 		'field_identifier' {
 			mut parent := node.parent() ?
@@ -654,10 +658,8 @@ pub fn (mut ss Store) infer_symbol_from_node(node C.TSNode, src_text []byte) ?&S
 			// if parent.type_name() != 'literal_value' {
 			// 	parent = parent.parent()
 			// }
-			type_node := node.child_by_field_name('type') ?
 			field_node := node.child_by_field_name('field_name') ?
-
-			if !type_node.is_null() {
+			if type_node := node.child_by_field_name('type') {
 				parent_sym := ss.infer_symbol_from_node(type_node, src_text) ?
 				child_sym := parent_sym.children_syms.get(field_node.code(src_text)) ?
 
