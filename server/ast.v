@@ -21,9 +21,7 @@ fn traverse_node(root_node C.TSNode, offset u32) C.TSNode {
 		if root_type_name == 'selector_expression' {
 			root_children_count := root_node.named_child_count()
 			for i := u32(0); i < root_children_count; i++ {
-				selected_child_node := root_node.named_child(i) or {
-					continue
-				}
+				selected_child_node := root_node.named_child(i) or { continue }
 
 				if selected_child_node.range().eq(direct_named_child.range()) && i == 0 {
 					return direct_named_child
@@ -54,9 +52,7 @@ fn traverse_node2(starting_node C.TSNode, offset u32) C.TSNode {
 	mut root_node := starting_node
 	mut root_type_name := root_node.type_name()
 
-	direct_named_child := root_node.first_named_child_for_byte(offset) or {
-		return root_node
-	}
+	direct_named_child := root_node.first_named_child_for_byte(offset) or { return root_node }
 
 	child_type_name := direct_named_child.type_name()
 

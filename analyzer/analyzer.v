@@ -112,9 +112,7 @@ pub fn (mut an Analyzer) top_level_statement() {
 		an.cursor.next()
 	}
 
-	current_node := an.cursor.current_node() or {
-		return
-	}
+	current_node := an.cursor.current_node() or { return }
 
 	match current_node.type_name() {
 		'import_declaration' {

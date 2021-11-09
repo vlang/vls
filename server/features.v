@@ -296,7 +296,8 @@ fn (mut builder CompletionBuilder) add(item lsp.CompletionItem) {
 }
 
 fn (builder CompletionBuilder) is_triggered(node C.TSNode, chr string) bool {
-	return node.next_sibling() or { return false }.code(builder.src) == chr || builder.ctx.trigger_character == chr
+	return node.next_sibling() or { return false }.code(builder.src) == chr
+		|| builder.ctx.trigger_character == chr
 }
 
 fn (builder CompletionBuilder) is_selector(node C.TSNode) bool {
@@ -1094,7 +1095,7 @@ fn (mut ls Vls) definition(id string, params string) {
 	}
 
 	ls.store.set_active_file_path(uri.path(), file.version)
-	sym := ls.store.infer_symbol_from_node(node, source) or { analyzer.void_sym }	
+	sym := ls.store.infer_symbol_from_node(node, source) or { analyzer.void_sym }
 	if isnil(sym) || sym.is_void() {
 		ls.send_null(id)
 		return

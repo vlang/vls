@@ -130,7 +130,7 @@ fn C.ts_node_named_descendant_for_point_range(node C.TSNode, start_point C.TSPoi
 fn C.ts_node_eq(node C.TSNode, another_node C.TSNode) bool
 
 struct NodeError {
-	msg string
+	msg  string
 	code int
 	node C.TSNode
 }
@@ -409,7 +409,7 @@ pub fn (mut cursor C.TSTreeCursor) reset(node C.TSNode) {
 [inline]
 pub fn (cursor &C.TSTreeCursor) current_node() ?C.TSNode {
 	got_node := C.ts_tree_cursor_current_node(cursor)
-	check_tsnode(got_node) ?	
+	check_tsnode(got_node) ?
 	return got_node
 }
 
