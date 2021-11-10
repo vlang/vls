@@ -112,13 +112,14 @@ bool stack_empty(Stack *stack) {
     return stack->top == -1;
 }
 
-void stack_serialize(Stack *stack, char *buffer, unsigned *i) {
+void stack_serialize(Stack *stack, char *buffer, unsigned *n) {
     int size = stack->top + 1;
-    buffer[(*i++)] = stack->top;
-    buffer[(*i++)] = stack->init_size;
+    unsigned i = *n;
+    buffer[i++] = stack->top;
+    buffer[i++] = stack->init_size;
     if (size > 0) {
-        memcpy(&buffer[*i], stack->contents, size);
-        (*i) += size;
+        memcpy(&buffer[i], stack->contents, size);
+        i += size;
     }
 }
 
