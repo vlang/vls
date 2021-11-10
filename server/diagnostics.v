@@ -45,8 +45,7 @@ fn (ls Vls) v_msg_to_diagnostic(from_file_path string, msg string) ?lsp.Diagnost
 	if tree := ls.trees[from_file_path] {
 		root_node := tree.root_node()
 		node_point := C.TSPoint{u32(line_nr), u32(col_nr)}
-		target_node := root_node.descendant_for_point_range(node_point, node_point)
-		if !target_node.is_null() {
+		if target_node := root_node.descendant_for_point_range(node_point, node_point) {
 			target_range = tsrange_to_lsp_range(target_node.range())
 		}
 	}
