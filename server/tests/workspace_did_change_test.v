@@ -1,6 +1,5 @@
 import server
 import server.testing
-import json
 import lsp
 import os
 
