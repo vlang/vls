@@ -1,6 +1,6 @@
 module analyzer
 
-pub struct Analyzer {
+pub struct SemanticAnalyzer {
 pub mut:
 	cur_file_path string
 	cursor        TreeCursor
@@ -12,11 +12,11 @@ pub mut:
 	is_import bool
 }
 
-fn (mut an Analyzer) report(msg string, node C.TSNode) {
+fn (mut an SemanticAnalyzer) report(msg string, node C.TSNode) {
 	an.store.report_error(report_error(msg, node.range()))
 }
 
-fn (mut an Analyzer) import_decl(node C.TSNode) ? {
+fn (mut an SemanticAnalyzer) import_decl(node C.TSNode) ? {
 	// Most of the checking is already done in `import_modules_from_trees`
 	// Check only the symbols if they are available
 	symbols := node.child_by_field_name('symbols') ?
@@ -52,22 +52,22 @@ fn (mut an Analyzer) import_decl(node C.TSNode) ? {
 	}
 }
 
-fn (mut an Analyzer) const_decl(node C.TSNode) {
+fn (mut an SemanticAnalyzer) const_decl(node C.TSNode) {
 }
 
-fn (mut an Analyzer) struct_decl(node C.TSNode) {
+fn (mut an SemanticAnalyzer) struct_decl(node C.TSNode) {
 }
 
-fn (mut an Analyzer) interface_decl(node C.TSNode) {
+fn (mut an SemanticAnalyzer) interface_decl(node C.TSNode) {
 }
 
-fn (mut an Analyzer) enum_decl(node C.TSNode) {
+fn (mut an SemanticAnalyzer) enum_decl(node C.TSNode) {
 }
 
-fn (mut an Analyzer) fn_decl(node C.TSNode) {
+fn (mut an SemanticAnalyzer) fn_decl(node C.TSNode) {
 }
 
-pub fn (mut an Analyzer) top_level_statement() {
+pub fn (mut an SemanticAnalyzer) top_level_statement() {
 	current_node := an.cursor.current_node() or { return }
 
 	match current_node.type_name() {
@@ -95,7 +95,7 @@ pub fn (mut an Analyzer) top_level_statement() {
 
 // analyze analyzes the given tree
 pub fn (mut store Store) analyze(tree &C.TSTree, src_text []byte) {
-	mut an := Analyzer{
+	mut an := SemanticAnalyzer{
 		store: unsafe { store }
 		src_text: src_text
 		cursor: new_tree_cursor(tree.root_node())
