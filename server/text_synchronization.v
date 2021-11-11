@@ -12,7 +12,7 @@ fn analyze(mut store analyzer.Store, root_uri lsp.DocumentUri, tree &C.TSTree, f
 	store.import_modules_from_tree(tree, file.source, os.join_path(file.uri.dir_path(),
 		'modules'), root_uri.path(), os.dir(os.dir(file_path)))
 
-	store.register_symbols_from_tree(tree, file.source)
+	store.register_symbols_from_tree(tree, file.source, false)
 	store.cleanup_imports()
 	// store.analyze(tree, file.source)
 }

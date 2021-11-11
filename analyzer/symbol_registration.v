@@ -12,7 +12,7 @@ const (
 
 struct SymbolAnalyzer {
 mut:
-	store       &Store = &Store(0)
+	store       &Store [required]
 	cursor      TreeCursor
 	module_name string
 	src_text    []byte
@@ -428,14 +428,9 @@ fn (mut sr SymbolAnalyzer) type_decl(type_decl_node C.TSNode) ?&Symbol {
 	return sym
 }
 
-fn (mut sr SymbolAnalyzer) top_level_decl() ? {
-	defer {
-		sr.cursor.next()
-	}
-
-	mut global_scope := sr.store.opened_scopes[sr.store.cur_file_path]
-	node_type_name := sr.cursor.current_node() ?.type_name()
-
+fn (mut sr SymbolAnalyzer) top_level_decl(current_node C.TSNode) ?[]&Symbol {
+	// mut global_scope := sr.store.opened_scopes[sr.store.cur_file_path]
+	node_type_name := current_node.type_name()
 	match node_type_name {
 		// TODO: add module check
 		// 'module_clause' {
@@ -443,59 +438,65 @@ fn (mut sr SymbolAnalyzer) top_level_decl() ? {
 		// 	defer { unsafe { module_name.free() } }
 		// }
 		'const_declaration' {
-			mut const_syms := sr.const_decl(sr.cursor.current_node() ?) ?
-			for i := 0; i < const_syms.len; i++ {
-				mut const_sym := const_syms[i]
-				sr.store.register_symbol(mut const_sym) or {
+			return sr.const_decl(current_node)
+			// for i := 0; i < const_syms.len; i++ {
+				// mut const_sym := const_syms[i]
+				// sr.store.register_symbol(mut const_sym) or {
 					// if err is AnalyzerError {
 					// 	// eprintln(err.str())
 					// } else {
 					// 	// eprintln('Unknown error')
 					// }
-					continue
-				}
+					// continue
+				// }
 
-				global_scope.register(const_sym) or { continue }
-			}
+				// global_scope.register(const_sym) or { continue }
+			// }
 
 			// unsafe { const_syms.free() }
 		}
 		'enum_declaration' {
-			mut sym := sr.enum_decl(sr.cursor.current_node() ?) ?
-			sr.store.register_symbol(mut sym) ?
+			sym := sr.enum_decl(current_node) ?
+			return [sym]
+			// sr.store.register_symbol(mut sym) ?
 		}
 		'function_declaration' {
-			mut sym := sr.fn_decl(sr.cursor.current_node() ?) ?
-			sr.store.register_symbol(mut sym) ?
+			sym := sr.fn_decl(current_node) ?
+			return [sym]
+			// sr.store.register_symbol(mut sym) ?
 		}
 		'interface_declaration' {
-			mut sym := sr.interface_decl(sr.cursor.current_node() ?) ?
-			sr.store.register_symbol(mut sym) ?
+			sym := sr.interface_decl(current_node) ?
+			return [sym]
+			// sr.store.register_symbol(mut sym) ?
 		}
 		'struct_declaration' {
-			mut sym := sr.struct_decl(sr.cursor.current_node() ?) ?
-			sr.store.register_symbol(mut sym) ?
+			sym := sr.struct_decl(current_node) ?
+			return [sym]
+			// sr.store.register_symbol(mut sym) ?
 		}
 		'type_declaration' {
-			mut sym := sr.type_decl(sr.cursor.current_node() ?) ?
-			sr.store.register_symbol(mut sym) ?
+			sym := sr.type_decl(current_node) ?
+			return [sym]
+			// sr.store.register_symbol(mut sym) ?
 		}
 		else {
-			stmt_node := sr.cursor.current_node() ?
+			stmt_node := current_node
 			if node_type_name == 'short_var_declaration' {
 				sr.is_script = true
 				sr.first_var_decl_pos = stmt_node.range()
 
 				// Check if main function is present
 				if main_fn_sym := sr.store.symbols[sr.store.cur_dir].get('main') {
-					sr.store.report_error(AnalyzerError{
+					return IError(AnalyzerError{
 						msg: 'function `main` is already defined'
 						range: main_fn_sym.range
 					})
 				}
 			}
 
-			sr.statement(stmt_node, mut global_scope) ?
+			// sr.statement(stmt_node, mut global_scope) ?
+			return []
 		}
 	}
 }
@@ -742,32 +743,45 @@ fn extract_parameter_list(node C.TSNode, mut store Store, src_text []byte) []&Sy
 	return syms
 }
 
-// register_symbols_from_tree scans and registers all the symbols based on the given tree
-pub fn (mut store Store) register_symbols_from_tree(tree &C.TSTree, src_text []byte) {
-	root_node := tree.root_node()
-	child_len := int(root_node.child_count())
-
-	mut sr := SymbolAnalyzer{
-		store: unsafe { store }
-		src_text: src_text
-		cursor: TreeCursor{
-			child_count: u32(child_len)
-			cursor: root_node.tree_cursor()
-		}
-	}
-
+// analyze scans and returns a list of symbols and messages (errors/warnings)
+pub fn (mut sr SymbolAnalyzer) analyze() ([]&Symbol, []Message) {
 	if cur_node := sr.cursor.current_node() {
 		sr.get_scope(cur_node) or {}
 	}
 
-	sr.cursor.to_first_child()
-
-	for _ in 0 .. child_len {
-		sr.top_level_decl() or {
-			eprintln(err)
-			sr.store.report_error(err)
+	mut messages := []Message{cap: 100}
+	mut symbols := []&Symbol{cap: 255}
+	for got_node in sr.cursor {
+		mut syms := sr.top_level_decl(got_node) or {
+			// messages.report(err)
 			continue
 		}
+		for mut sym in syms {
+			sr.store.register_symbol(mut *sym) or {
+				// add error message
+				continue
+			}
+		}
+		symbols << syms
 	}
-	// unsafe { sr.cursor.free() }
+	return symbols, messages
+}
+
+// register_symbols_from_tree scans and registers all the symbols based on the given tree
+pub fn (mut store Store) register_symbols_from_tree(tree &C.TSTree, src_text []byte, is_import bool) {
+	mut sr := new_symbol_analyzer(store, tree.root_node(), src_text, is_import)
+	mut got_symbols, got_messages := sr.analyze()
+	for msg in got_messages {
+		store.report(msg)
+	}
+}
+
+// new_symbol_analyzer creates an instance of SymbolAnalyzer with the given store, tree, source, and is_import.
+pub fn new_symbol_analyzer(store &Store, root_node C.TSNode, src_text []byte, is_import bool) SymbolAnalyzer {
+	return SymbolAnalyzer{
+		store: unsafe { store }
+		src_text: src_text
+		cursor: new_tree_cursor(root_node),
+		is_import: is_import
+	}
 }
