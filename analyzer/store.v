@@ -68,10 +68,7 @@ pub fn (mut ss Store) clear_messages() {
 
 // report inserts the message to the messages array
 pub fn (mut ss Store) report(msg Message) {
-	if ss.messages.has_range(msg.file_path, msg.range) {
-		return
-	}
-	ss.messages << msg
+	ss.messages.report(msg)
 }
 
 // is_file_active returns a boolean that checks if the given

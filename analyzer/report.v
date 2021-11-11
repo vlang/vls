@@ -25,6 +25,13 @@ pub fn (msgs []Message) has_range(file_path string, range C.TSRange) bool {
 	return false
 }
 
+pub fn (mut msgs []Message) report(msg Message) {
+	if msgs.has_range(msg.file_path, msg.range) {
+		return
+	}
+	msgs << msg
+}
+
 pub struct AnalyzerError {
 	msg   string
 	code  int
