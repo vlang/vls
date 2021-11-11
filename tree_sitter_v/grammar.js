@@ -877,7 +877,6 @@ module.exports = grammar({
         $.go_statement,
         $.goto_statement,
         $.labeled_statement,
-        $.empty_labeled_statement,
         $.defer_statement,
         $.for_statement,
         $.comptime_for_statement,
@@ -929,11 +928,19 @@ module.exports = grammar({
 
     block: ($) => 
       seq(
-        "{", 
-        seq(
-          optional($._statement_list), 
-          optional(alias($._expression_list_repeat1, $.expression_list))
-        ), 
+        "{",
+        optional(choice(
+          $._statement_list,
+          alias($._expression_list_repeat1, $.expression_list),
+          alias($.empty_labeled_statement, $.labeled_statement),
+          seq(
+            $._statement_list,
+            choice(
+              alias($._expression_list_repeat1, $.expression_list),
+              alias($.empty_labeled_statement, $.labeled_statement)
+            )
+          )
+        )),
         "}"
       ),
 
@@ -1077,17 +1084,18 @@ module.exports = grammar({
     goto_statement: ($) => seq("goto", alias($.identifier, $.label_name)),
 
     labeled_statement: ($) =>
-      prec.right(
-        PREC.resolve,
-        seq(
-          field("label", alias($.identifier, $.label_name)),
-          ":",
-          $._statement
-        )
+      seq(
+        field("label", alias($.identifier, $.label_name)),
+        ":",
+        $._statement
       ),
 
     empty_labeled_statement: ($) =>
-      seq(field("label", alias($.identifier, $.label_name)), ":"),
+      prec.left(
+        seq(
+          field("label", alias($.identifier, $.label_name)), ":"
+        )
+      ),
 
     for_statement: ($) =>
       seq(
