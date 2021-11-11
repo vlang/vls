@@ -737,20 +737,17 @@ module.exports = grammar({
     // as external tokens will be deduced as separate nodes
     // instead of having under the same expression_list node
     _expression_list_repeat1: ($) =>
-      prec(
-        PREC.resolve, 
-        seq(
-          choice(
-            $._expression, 
-            $.mutable_expression
-          ), 
-          repeat1(
-            seq(
-              ",", 
-              choice(
-                $._expression, 
-                $.mutable_expression
-              )
+      seq(
+        choice(
+          $._expression, 
+          $.mutable_expression
+        ), 
+        repeat1(
+          seq(
+            ",", 
+            choice(
+              $._expression, 
+              $.mutable_expression
             )
           )
         )
