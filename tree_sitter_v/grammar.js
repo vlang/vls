@@ -477,36 +477,41 @@ module.exports = grammar({
     literal_value: ($) =>
       seq(
         "{",
-        choice(
-          repeat(
+        optional(
+          choice(
+            repeat(
+              seq(
+                choice($.spread_operator, $.keyed_element),
+                optional(choice(",", terminator))
+              )
+            ),
+            // For short struct init syntax
             seq(
-              choice($.spread_operator, $.keyed_element),
-              optional(choice(",", terminator))
+              $.element,
+              repeat(seq(",", $.element))
             )
-          ),
-          // For short struct init syntax
-          repeat(seq(alias($._expression, $.element), optional(",")))
+          )
         ),
         "}"
       ),
 
-    keyed_element: ($) => seq($._element_key, field("value", $._expression)),
+    element: ($) => $._expression,
+
+    keyed_element: ($) => seq(
+      field("name", $._element_key), 
+      ":", 
+      field("value", $._expression)
+    ),
 
     _element_key: ($) =>
-      seq(
-        field(
-          "name",
-          choice(
-            $._field_identifier,
-            $._string_literal,
-            $.int_literal,
-            $.call_expression,
-            $.selector_expression,
-            $.type_selector_expression,
-            $.index_expression
-          )
-        ),
-        token.immediate(":")
+      choice(
+        prec(1, $._field_identifier),
+        $._string_literal,
+        $.int_literal,
+        $.call_expression,
+        $.selector_expression,
+        $.type_selector_expression,
+        $.index_expression
       ),
 
     map: ($) =>
