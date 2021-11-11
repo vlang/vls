@@ -1226,7 +1226,7 @@ pub fn (mut store Store) import_modules(mut imports []&Import) {
 				root_node := tree_from_import.root_node()
 				child_len := int(root_node.child_count())
 
-				mut sr := SymbolRegistration{
+				mut sr := SymbolAnalyzer{
 					store: unsafe { store }
 					src_text: content
 					is_import: true
