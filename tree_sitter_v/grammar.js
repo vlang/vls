@@ -264,6 +264,7 @@ module.exports = grammar({
         $.function_declaration,
         $.type_declaration,
         $.struct_declaration,
+        alias($._binded_struct_declaration, $.struct_declaration),
         $.enum_declaration,
         $.interface_declaration,
         $.import_declaration,
@@ -1285,7 +1286,6 @@ module.exports = grammar({
               $.type_identifier,
               // in order to parse builtin
               $.builtin_type,
-              $._binded_type,
               $.generic_type
             )
           )
@@ -1320,7 +1320,7 @@ module.exports = grammar({
       prec.right(
         choice(
           seq(
-            field("name", choice($._field_identifier)),
+            field("name", $._field_identifier),
             field("type", choice($._simple_type, $.option_type)),
             field("attributes", optional($.attribute_declaration)),
             optional(seq("=", field("default_value", $._expression))),
@@ -1333,6 +1333,47 @@ module.exports = grammar({
               optional(terminator)
             )
           )
+        )
+      ),
+
+    _binded_struct_declaration: ($) => 
+      seq(
+        field("attributes", optional($.attribute_list)),
+        optional(pub_keyword),
+        choice(struct_keyword, union_keyword),
+        field("name", prec.dynamic(PREC.composite_literal, $._binded_type)),
+        alias($._binded_struct_field_declaration_list, $.struct_field_declaration_list)
+      ),
+
+    _binded_struct_field_declaration_list: ($) =>
+      seq(
+        "{",
+        repeat(
+          seq(
+            choice(
+              $.struct_field_scope, 
+              alias(
+                $._binded_struct_field_declaration, 
+                $.struct_field_declaration
+              )
+            ),
+            optional(terminator)
+          )
+        ),
+        "}"
+      ),
+
+    _binded_struct_field_declaration: ($) =>
+      prec.right(
+        seq(
+          field("name", choice(
+            $._field_identifier,
+            alias($._old_identifier, $.field_identifier)
+          )),
+          field("type", choice($._simple_type, $.option_type)),
+          field("attributes", optional($.attribute_declaration)),
+          optional(seq("=", field("default_value", $._expression))),
+          optional(terminator)
         )
       ),
 

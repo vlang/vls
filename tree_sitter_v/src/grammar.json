@@ -59,6 +59,15 @@
           "name": "struct_declaration"
         },
         {
+          "type": "ALIAS",
+          "content": {
+            "type": "SYMBOL",
+            "name": "_binded_struct_declaration"
+          },
+          "named": true,
+          "value": "struct_declaration"
+        },
+        {
           "type": "SYMBOL",
           "name": "enum_declaration"
         },
@@ -6012,7 +6021,7 @@
     },
     "for_in_operator": {
       "type": "PREC_LEFT",
-      "value": 1,
+      "value": 7,
       "content": {
         "type": "SEQ",
         "members": [
@@ -6051,14 +6060,6 @@
                   },
                   "named": true,
                   "value": "range"
-                },
-                {
-                  "type": "PREC",
-                  "value": 7,
-                  "content": {
-                    "type": "SYMBOL",
-                    "name": "_reserved_identifier"
-                  }
                 },
                 {
                   "type": "SYMBOL",
@@ -6814,10 +6815,6 @@
                 },
                 {
                   "type": "SYMBOL",
-                  "name": "_binded_type"
-                },
-                {
-                  "type": "SYMBOL",
                   "name": "generic_type"
                 }
               ]
@@ -6944,13 +6941,8 @@
                 "type": "FIELD",
                 "name": "name",
                 "content": {
-                  "type": "CHOICE",
-                  "members": [
-                    {
-                      "type": "SYMBOL",
-                      "name": "_field_identifier"
-                    }
-                  ]
+                  "type": "SYMBOL",
+                  "name": "_field_identifier"
                 }
               },
               {
@@ -7084,6 +7076,251 @@
                 }
               ]
             }
+          }
+        ]
+      }
+    },
+    "_binded_struct_declaration": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "FIELD",
+          "name": "attributes",
+          "content": {
+            "type": "CHOICE",
+            "members": [
+              {
+                "type": "SYMBOL",
+                "name": "attribute_list"
+              },
+              {
+                "type": "BLANK"
+              }
+            ]
+          }
+        },
+        {
+          "type": "CHOICE",
+          "members": [
+            {
+              "type": "STRING",
+              "value": "pub"
+            },
+            {
+              "type": "BLANK"
+            }
+          ]
+        },
+        {
+          "type": "CHOICE",
+          "members": [
+            {
+              "type": "STRING",
+              "value": "struct"
+            },
+            {
+              "type": "STRING",
+              "value": "union"
+            }
+          ]
+        },
+        {
+          "type": "FIELD",
+          "name": "name",
+          "content": {
+            "type": "PREC_DYNAMIC",
+            "value": -1,
+            "content": {
+              "type": "SYMBOL",
+              "name": "_binded_type"
+            }
+          }
+        },
+        {
+          "type": "ALIAS",
+          "content": {
+            "type": "SYMBOL",
+            "name": "_binded_struct_field_declaration_list"
+          },
+          "named": true,
+          "value": "struct_field_declaration_list"
+        }
+      ]
+    },
+    "_binded_struct_field_declaration_list": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "{"
+        },
+        {
+          "type": "REPEAT",
+          "content": {
+            "type": "SEQ",
+            "members": [
+              {
+                "type": "CHOICE",
+                "members": [
+                  {
+                    "type": "SYMBOL",
+                    "name": "struct_field_scope"
+                  },
+                  {
+                    "type": "ALIAS",
+                    "content": {
+                      "type": "SYMBOL",
+                      "name": "_binded_struct_field_declaration"
+                    },
+                    "named": true,
+                    "value": "struct_field_declaration"
+                  }
+                ]
+              },
+              {
+                "type": "CHOICE",
+                "members": [
+                  {
+                    "type": "CHOICE",
+                    "members": [
+                      {
+                        "type": "STRING",
+                        "value": "\n"
+                      },
+                      {
+                        "type": "STRING",
+                        "value": "\r"
+                      },
+                      {
+                        "type": "STRING",
+                        "value": "\r\n"
+                      }
+                    ]
+                  },
+                  {
+                    "type": "BLANK"
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "type": "STRING",
+          "value": "}"
+        }
+      ]
+    },
+    "_binded_struct_field_declaration": {
+      "type": "PREC_RIGHT",
+      "value": 0,
+      "content": {
+        "type": "SEQ",
+        "members": [
+          {
+            "type": "FIELD",
+            "name": "name",
+            "content": {
+              "type": "CHOICE",
+              "members": [
+                {
+                  "type": "SYMBOL",
+                  "name": "_field_identifier"
+                },
+                {
+                  "type": "ALIAS",
+                  "content": {
+                    "type": "SYMBOL",
+                    "name": "_old_identifier"
+                  },
+                  "named": true,
+                  "value": "field_identifier"
+                }
+              ]
+            }
+          },
+          {
+            "type": "FIELD",
+            "name": "type",
+            "content": {
+              "type": "CHOICE",
+              "members": [
+                {
+                  "type": "SYMBOL",
+                  "name": "_simple_type"
+                },
+                {
+                  "type": "SYMBOL",
+                  "name": "option_type"
+                }
+              ]
+            }
+          },
+          {
+            "type": "FIELD",
+            "name": "attributes",
+            "content": {
+              "type": "CHOICE",
+              "members": [
+                {
+                  "type": "SYMBOL",
+                  "name": "attribute_declaration"
+                },
+                {
+                  "type": "BLANK"
+                }
+              ]
+            }
+          },
+          {
+            "type": "CHOICE",
+            "members": [
+              {
+                "type": "SEQ",
+                "members": [
+                  {
+                    "type": "STRING",
+                    "value": "="
+                  },
+                  {
+                    "type": "FIELD",
+                    "name": "default_value",
+                    "content": {
+                      "type": "SYMBOL",
+                      "name": "_expression"
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "BLANK"
+              }
+            ]
+          },
+          {
+            "type": "CHOICE",
+            "members": [
+              {
+                "type": "CHOICE",
+                "members": [
+                  {
+                    "type": "STRING",
+                    "value": "\n"
+                  },
+                  {
+                    "type": "STRING",
+                    "value": "\r"
+                  },
+                  {
+                    "type": "STRING",
+                    "value": "\r\n"
+                  }
+                ]
+              },
+              {
+                "type": "BLANK"
+              }
+            ]
           }
         ]
       }
