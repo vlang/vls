@@ -48,3 +48,23 @@ fn main() {
         (expression_list
           (selector_expression
             (identifier) (type_identifier)))))))
+
+===
+Comptime Selector Expression
+===
+
+{
+  return $vweb.html()
+}
+
+---
+
+(source_file 
+  (block 
+    (return_statement 
+      (expression_list 
+        (call_expression 
+          (selector_expression 
+            (comptime_identifier (identifier)) 
+            (identifier)) 
+          (argument_list))))))

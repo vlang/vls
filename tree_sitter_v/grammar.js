@@ -1155,7 +1155,10 @@ module.exports = grammar({
       prec(
         PREC.primary,
         seq(
-          field("operand", $._expression),
+          field("operand", choice(
+            $._expression,
+            $.comptime_identifier
+          )),
           ".",
           field(
             "field",
