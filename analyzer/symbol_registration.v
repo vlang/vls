@@ -434,46 +434,31 @@ fn (mut sr SymbolAnalyzer) top_level_decl(current_node C.TSNode) ?[]&Symbol {
 		// }
 		'const_declaration' {
 			return sr.const_decl(current_node)
-			// for i := 0; i < const_syms.len; i++ {
-				// mut const_sym := const_syms[i]
-				// sr.store.register_symbol(mut const_sym) or {
-					// if err is AnalyzerError {
-					// 	// eprintln(err.str())
-					// } else {
-					// 	// eprintln('Unknown error')
-					// }
-					// continue
-				// }
-
-				// global_scope.register(const_sym) or { continue }
-			// }
+			for i := 0; i < const_syms.len; i++ {
+				global_scope.register(const_sym) or { continue }
+			}
 
 			// unsafe { const_syms.free() }
 		}
 		'enum_declaration' {
 			sym := sr.enum_decl(current_node) ?
 			return [sym]
-			// sr.store.register_symbol(mut sym) ?
 		}
 		'function_declaration' {
 			sym := sr.fn_decl(current_node) ?
 			return [sym]
-			// sr.store.register_symbol(mut sym) ?
 		}
 		'interface_declaration' {
 			sym := sr.interface_decl(current_node) ?
 			return [sym]
-			// sr.store.register_symbol(mut sym) ?
 		}
 		'struct_declaration' {
 			sym := sr.struct_decl(current_node) ?
 			return [sym]
-			// sr.store.register_symbol(mut sym) ?
 		}
 		'type_declaration' {
 			sym := sr.type_decl(current_node) ?
 			return [sym]
-			// sr.store.register_symbol(mut sym) ?
 		}
 		else {
 			stmt_node := current_node
@@ -490,7 +475,7 @@ fn (mut sr SymbolAnalyzer) top_level_decl(current_node C.TSNode) ?[]&Symbol {
 				}
 			}
 
-			// sr.statement(stmt_node, mut global_scope) ?
+			sr.statement(stmt_node, mut global_scope) ?
 			return []
 		}
 	}
