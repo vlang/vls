@@ -1,0 +1,10 @@
+pub type Text = string
+type Any = string | int | []string
+
+---
+
+(pub typedef Text (parent struct string) [0,9]-[0,13])
+(sumtype Any [1,5]-[1,8]
+    (struct string)
+    (typedef int)
+    (array []string))
