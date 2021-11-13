@@ -1,5 +1,5 @@
 import server
-import server.testing
+import test_utils
 import lsp
 import os
 
@@ -16,13 +16,13 @@ import os
 // applies to the V compiler, it is better to add it there instead.
 
 fn test_regression() {
-	mut io := &testing.Testio{}
+	mut io := &test_utils.Testio{}
 	mut ls := server.new(io)
 	ls.dispatch(io.request_with_params('initialize', lsp.InitializeParams{
 		root_uri: lsp.document_uri_from_path(os.join_path(os.dir(@FILE), 'test_files',
 			'regressions'))
 	}))
-	test_files := testing.load_test_file_paths('regressions') or {
+	test_files := test_utils.load_test_file_paths('regressions') or {
 		io.bench.fail()
 		eprintln(io.bench.step_message_fail(err.msg))
 		assert false
