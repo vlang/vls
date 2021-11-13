@@ -352,9 +352,7 @@ fn (mut sr SymbolAnalyzer) fn_decl(fn_node C.TSNode) ?&Symbol {
 	mut scope := sr.get_scope(body_node) or { &ScopeTree(0) }
 	fn_sym.access = access
 	fn_sym.return_sym = sr.store.find_symbol_by_type_node(return_node, sr.src_text) or { void_sym }
-	mut is_method := false
 	if receiver_node := fn_node.child_by_field_name('receiver') {
-		is_method = true
 		mut receivers := extract_parameter_list(receiver_node, mut sr.store, sr.src_text)
 		if receivers.len != 0 {
 			mut parent := receivers[0].return_sym
@@ -384,11 +382,7 @@ fn (mut sr SymbolAnalyzer) fn_decl(fn_node C.TSNode) ?&Symbol {
 		sr.extract_block(body_node, mut scope) ?
 	}
 
-	if is_method {
-		return none
-	} else {
-		return fn_sym
-	}
+	return fn_sym
 }
 
 fn (mut sr SymbolAnalyzer) type_decl(type_decl_node C.TSNode) ?&Symbol {
@@ -757,6 +751,10 @@ pub fn (mut sr SymbolAnalyzer) analyze() ([]&Symbol, []Message) {
 			continue
 		}
 		for mut sym in syms {
+			if sym.kind == .function && !sym.parent_sym.is_void() {
+				continue
+			}
+
 			sr.store.register_symbol(mut *sym) or {
 				// add error message
 				continue
@@ -770,7 +768,7 @@ pub fn (mut sr SymbolAnalyzer) analyze() ([]&Symbol, []Message) {
 // register_symbols_from_tree scans and registers all the symbols based on the given tree
 pub fn (mut store Store) register_symbols_from_tree(tree &C.TSTree, src_text []byte, is_import bool) {
 	mut sr := new_symbol_analyzer(store, tree.root_node(), src_text, is_import)
-	mut got_symbols, got_messages := sr.analyze()
+	_, got_messages := sr.analyze()
 	for msg in got_messages {
 		store.report(msg)
 	}
