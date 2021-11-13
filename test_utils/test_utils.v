@@ -105,8 +105,8 @@ pub fn load_test_file_paths(test_files_dir string, folder_name string) ?[]string
 	mut filtered := []string{cap: dir.len}
 	skip_os_file_ext := '_skip_${current_os}.vv'
 	for path in dir {
-		if (path.ends_with('.vv') && !path.ends_with('_skip.vv') && !path.ends_with(skip_os_file_ext)) 
-			|| path.ends_with('.test.txt') {
+		if (path.ends_with('.vv') && !path.ends_with('_skip.vv')
+			&& !path.ends_with(skip_os_file_ext)) || path.ends_with('.test.txt') {
 			filtered << os.join_path(target_path, path)
 		}
 	}

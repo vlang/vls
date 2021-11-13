@@ -21,7 +21,7 @@ fn test_symbol_registration() ? {
 	store.register_auto_import(builtin_import, '')
 	register_builtin_symbols(mut store, builtin_import)
 	store.import_modules(mut imports)
-	
+
 	mut sym_analyzer := SymbolAnalyzer{
 		store: store
 		is_test: true

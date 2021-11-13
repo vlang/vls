@@ -2,7 +2,7 @@ module analyzer
 
 struct TreeCursor {
 mut:
-	cur_child_idx int = -1
+	cur_child_idx int  = -1
 	named_only    bool = true
 	child_count   int            [required]
 	cursor        C.TSTreeCursor [required]

@@ -303,7 +303,7 @@ fn (sym &Symbol) sexpr_str_write(mut writer strings.Builder) {
 	if !sym.return_sym.is_void() {
 		writer.write_string(sym.return_sym.name + ' ')
 	}
-	if sym.kind in sym_kinds_allowed_to_print_parent && !sym.parent_sym.is_void() {
+	if sym.kind in analyzer.sym_kinds_allowed_to_print_parent && !sym.parent_sym.is_void() {
 		writer.write_string('(parent ')
 		writer.write_string(sym.parent_sym.kind.str() + ' ')
 		writer.write_string(sym.parent_sym.name)
