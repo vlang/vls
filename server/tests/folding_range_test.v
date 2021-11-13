@@ -50,7 +50,9 @@ const folding_range_results = {
 }
 
 fn test_folding_range() {
-	mut io := test_utils.Testio{ test_files_dir: test_utils.get_test_files_path(@FILE) }
+	mut io := test_utils.Testio{
+		test_files_dir: test_utils.get_test_files_path(@FILE)
+	}
 	mut ls := server.new(io)
 	ls.dispatch(io.request_with_params('initialize', lsp.InitializeParams{
 		root_uri: lsp.document_uri_from_path(os.join_path(os.dir(@FILE), 'test_files',

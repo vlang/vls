@@ -18,7 +18,8 @@ const compute_offset_results = {
 
 fn test_compute_offset() {
 	mut bench := benchmark.new_benchmark()
-	test_files := test_utils.load_test_file_paths(test_utils.get_test_files_path(@FILE), 'pos_compute_offset') or {
+	test_files := test_utils.load_test_file_paths(test_utils.get_test_files_path(@FILE),
+		'pos_compute_offset') or {
 		bench.fail()
 		eprintln(bench.step_message_fail(err.msg))
 		assert false
@@ -74,7 +75,8 @@ const compute_position_results = {
 fn test_compute_position() {
 	mut bench := benchmark.new_benchmark()
 	// TODO:
-	test_files := test_utils.load_test_file_paths(test_utils.get_test_files_path(@FILE), 'pos_compute_offset') or {
+	test_files := test_utils.load_test_file_paths(test_utils.get_test_files_path(@FILE),
+		'pos_compute_offset') or {
 		bench.fail()
 		eprintln(bench.step_message_fail(err.msg))
 		assert false
@@ -130,7 +132,8 @@ const tspoint_to_lsp_pos_results = {
 
 fn test_tspoint_to_lsp_pos() {
 	mut bench := benchmark.new_benchmark()
-	test_files := test_utils.load_test_file_paths(test_utils.get_test_files_path(@FILE), 'pos_to_lsp_pos') or {
+	test_files := test_utils.load_test_file_paths(test_utils.get_test_files_path(@FILE),
+		'pos_to_lsp_pos') or {
 		bench.fail()
 		eprintln(bench.step_message_fail(err.msg))
 		assert false
@@ -206,7 +209,8 @@ const tsrange_to_lsp_range_results = {
 
 fn test_tsrange_to_lsp_range() {
 	mut bench := benchmark.new_benchmark()
-	test_files := test_utils.load_test_file_paths(test_utils.get_test_files_path(@FILE), 'pos_to_lsp_range') or {
+	test_files := test_utils.load_test_file_paths(test_utils.get_test_files_path(@FILE),
+		'pos_to_lsp_range') or {
 		bench.fail()
 		eprintln(bench.step_message_fail(err.msg))
 		assert false

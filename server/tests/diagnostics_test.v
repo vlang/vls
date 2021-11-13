@@ -44,7 +44,9 @@ const diagnostics_results = {
 }
 
 fn test_diagnostics() {
-	mut io := &test_utils.Testio{ test_files_dir: test_utils.get_test_files_path(@FILE) }
+	mut io := &test_utils.Testio{
+		test_files_dir: test_utils.get_test_files_path(@FILE)
+	}
 	mut ls := server.new(io)
 	ls.dispatch(io.request('initialize'))
 	files := io.load_test_file_paths('diagnostics') or {

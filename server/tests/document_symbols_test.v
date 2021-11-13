@@ -82,7 +82,9 @@ const doc_symbols_result = {
 }
 
 fn test_document_symbols() {
-	mut io := &test_utils.Testio{ test_files_dir: test_utils.get_test_files_path(@FILE) }
+	mut io := &test_utils.Testio{
+		test_files_dir: test_utils.get_test_files_path(@FILE)
+	}
 	mut ls := server.new(io)
 	ls.dispatch(io.request('initialize'))
 	test_files := io.load_test_file_paths('document_symbols') or {
