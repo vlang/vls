@@ -101,14 +101,14 @@ fn (mut sr SymbolRegistration) const_decl(const_node C.TSNode) ?[]&Symbol {
 
 		mut return_sym := void_sym
 		if value_node := spec_node.child_by_field_name('value') {
-			sr.store.infer_value_type_from_node(value_node, sr.src_text)
+			return_sym = sr.store.infer_value_type_from_node(value_node, sr.src_text)
 		}
 
 		consts << &Symbol{
-			name: spec_node.child_by_field_name('name') ?.code(sr.src_text)
+			name: spec_node.child_by_field_name('name')?.code(sr.src_text)
 			kind: .variable
 			access: access
-			range: spec_node.range()
+			range: spec_node.child_by_field_name('name')?.range()
 			is_top_level: true
 			is_const: true
 			file_path: sr.store.cur_file_path
@@ -429,7 +429,7 @@ fn (mut sr SymbolRegistration) type_decl(type_decl_node C.TSNode) ?&Symbol {
 }
 
 fn (mut sr SymbolAnalyzer) top_level_decl(current_node C.TSNode) ?[]&Symbol {
-	// mut global_scope := sr.store.opened_scopes[sr.store.cur_file_path]
+	mut global_scope := sr.store.opened_scopes[sr.store.cur_file_path]
 	node_type_name := current_node.type_name()
 	match node_type_name {
 		// TODO: add module check
@@ -439,10 +439,6 @@ fn (mut sr SymbolAnalyzer) top_level_decl(current_node C.TSNode) ?[]&Symbol {
 		// }
 		'const_declaration' {
 			return sr.const_decl(current_node)
-			for i := 0; i < const_syms.len; i++ {
-				global_scope.register(const_sym) or { continue }
-			}
-
 			// unsafe { const_syms.free() }
 		}
 		'enum_declaration' {
@@ -734,6 +730,7 @@ pub fn (mut sr SymbolAnalyzer) analyze() ([]&Symbol, []Message) {
 		sr.get_scope(cur_node) or {}
 	}
 
+	mut global_scope := sr.store.opened_scopes[sr.store.cur_file_path]
 	mut messages := []Message{cap: 100}
 	mut symbols := []&Symbol{cap: 255}
 	for got_node in sr.cursor {
@@ -742,9 +739,17 @@ pub fn (mut sr SymbolAnalyzer) analyze() ([]&Symbol, []Message) {
 			continue
 		}
 		for mut sym in syms {
+			if sym.kind == .function && !sym.parent_sym.is_void() {
+				continue
+			}
+
 			sr.store.register_symbol(mut *sym) or {
 				// add error message
 				continue
+			}
+
+			if sym.kind == .variable {
+				global_scope.register(*sym) or { continue }
 			}
 		}
 		symbols << syms
