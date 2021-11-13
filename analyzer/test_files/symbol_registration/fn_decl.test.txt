@@ -1,0 +1,13 @@
+fn main() {
+
+}
+
+pub fn greet(name string) []string {
+    return ['hello $name!']
+}
+
+---
+
+(function main [0,3]-[0,7])
+(pub function greet []string [4,7]-[4,12]
+    (variable name string [4,13]-[4,17]))

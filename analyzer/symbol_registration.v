@@ -21,6 +21,7 @@ mut:
 	// visibility
 	is_import          bool
 	is_script          bool
+	is_test            bool
 	first_var_decl_pos C.TSRange
 }
 
@@ -76,8 +77,8 @@ fn (sr &SymbolAnalyzer) new_top_level_symbol(identifier_node C.TSNode, access Sy
 }
 
 fn (mut sr SymbolAnalyzer) get_scope(node C.TSNode) ?&ScopeTree {
-	if sr.is_import {
-		return error('Cannot use scope in import mode')
+	if sr.is_import || sr.is_test {
+		return error('Cannot use scope in import or test mode')
 	}
 
 	return sr.store.get_scope_from_node(node)
@@ -352,9 +353,7 @@ fn (mut sr SymbolAnalyzer) fn_decl(fn_node C.TSNode) ?&Symbol {
 	mut scope := sr.get_scope(body_node) or { &ScopeTree(0) }
 	fn_sym.access = access
 	fn_sym.return_sym = sr.store.find_symbol_by_type_node(return_node, sr.src_text) or { void_sym }
-	mut is_method := false
 	if receiver_node := fn_node.child_by_field_name('receiver') {
-		is_method = true
 		mut receivers := extract_parameter_list(receiver_node, mut sr.store, sr.src_text)
 		if receivers.len != 0 {
 			mut parent := receivers[0].return_sym
@@ -380,15 +379,11 @@ fn (mut sr SymbolAnalyzer) fn_decl(fn_node C.TSNode) ?&Symbol {
 	}
 
 	// extract function body
-	if !body_node.is_null() && !sr.is_import {
+	if !body_node.is_null() && !sr.is_import && !sr.is_test {
 		sr.extract_block(body_node, mut scope) ?
 	}
 
-	if is_method {
-		return none
-	} else {
-		return fn_sym
-	}
+	return fn_sym
 }
 
 fn (mut sr SymbolAnalyzer) type_decl(type_decl_node C.TSNode) ?&Symbol {
@@ -680,8 +675,8 @@ fn (mut sr SymbolAnalyzer) statement(node C.TSNode, mut scope ScopeTree) ? {
 }
 
 fn (mut sr SymbolAnalyzer) extract_block(node C.TSNode, mut scope ScopeTree) ? {
-	if node.type_name() != 'block' || sr.is_import {
-		return error('node should be a `block` and cannot be used in `is_import` mode.')
+	if node.type_name() != 'block' || sr.is_import || sr.is_test {
+		return error('node should be a `block` and cannot be used in `is_import` or test mode.')
 	}
 
 	body_sym_len := node.named_child_count()
@@ -738,18 +733,20 @@ pub fn (mut sr SymbolAnalyzer) analyze() ([]&Symbol, []Message) {
 			// messages.report(err)
 			continue
 		}
-		for mut sym in syms {
-			if sym.kind == .function && !sym.parent_sym.is_void() {
-				continue
-			}
+		if !sr.is_test {
+			for mut sym in syms {
+				if sym.kind == .function && !sym.parent_sym.is_void() {
+					continue
+				}
 
-			sr.store.register_symbol(mut *sym) or {
-				// add error message
-				continue
-			}
+				sr.store.register_symbol(mut *sym) or {
+					// add error message
+					continue
+				}
 
-			if sym.kind == .variable {
-				global_scope.register(*sym) or { continue }
+				if sym.kind == .variable {
+					global_scope.register(*sym) or { continue }
+				}
 			}
 		}
 		symbols << syms
@@ -760,7 +757,7 @@ pub fn (mut sr SymbolAnalyzer) analyze() ([]&Symbol, []Message) {
 // register_symbols_from_tree scans and registers all the symbols based on the given tree
 pub fn (mut store Store) register_symbols_from_tree(tree &C.TSTree, src_text []byte, is_import bool) {
 	mut sr := new_symbol_analyzer(store, tree.root_node(), src_text, is_import)
-	mut got_symbols, got_messages := sr.analyze()
+	_, got_messages := sr.analyze()
 	for msg in got_messages {
 		store.report(msg)
 	}
