@@ -24,7 +24,7 @@ const doc_symbols_result = {
 			location: lsp.Location{
 				range: lsp.Range{
 					start: lsp.Position{5, 2}
-					end: lsp.Position{5, 15}
+					end: lsp.Position{5, 6}
 				}
 			}
 		},
@@ -34,7 +34,7 @@ const doc_symbols_result = {
 			location: lsp.Location{
 				range: lsp.Range{
 					start: lsp.Position{6, 2}
-					end: lsp.Position{6, 9}
+					end: lsp.Position{6, 5}
 				}
 			}
 		},
