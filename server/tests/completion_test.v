@@ -1,5 +1,5 @@
 import server
-import server.testing
+import test_utils
 import json
 import lsp
 import os
@@ -425,13 +425,13 @@ const completion_results = {
 }
 
 fn test_completion() {
-	mut io := &testing.Testio{}
+	mut io := &test_utils.Testio{}
 	mut ls := server.new(io)
 	ls.dispatch(io.request_with_params('initialize', lsp.InitializeParams{
 		root_uri: lsp.document_uri_from_path(os.join_path(os.dir(@FILE), 'test_files',
 			'completion'))
 	}))
-	test_files := testing.load_test_file_paths('completion') or {
+	test_files := test_utils.load_test_file_paths('completion') or {
 		io.bench.fail()
 		eprintln(io.bench.step_message_fail(err.msg))
 		assert false

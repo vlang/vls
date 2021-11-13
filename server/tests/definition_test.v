@@ -1,5 +1,5 @@
 import server
-import server.testing
+import test_utils
 import json
 import lsp
 import os
@@ -380,12 +380,12 @@ const definition_results = {
 }
 
 fn test_definition() {
-	mut io := testing.Testio{}
+	mut io := test_utils.Testio{}
 	mut ls := server.new(io)
 	ls.dispatch(io.request_with_params('initialize', lsp.InitializeParams{
 		root_uri: lsp.document_uri_from_path(base_dir)
 	}))
-	test_files := testing.load_test_file_paths('definition') or {
+	test_files := test_utils.load_test_file_paths('definition') or {
 		io.bench.fail()
 		eprintln(io.bench.step_message_fail(err.msg))
 		assert false

@@ -1,5 +1,5 @@
 import server
-import server.testing
+import test_utils
 import json
 import lsp
 import os
@@ -44,10 +44,10 @@ const diagnostics_results = {
 }
 
 fn test_diagnostics() {
-	mut io := &testing.Testio{}
+	mut io := &test_utils.Testio{}
 	mut ls := server.new(io)
 	ls.dispatch(io.request('initialize'))
-	files := testing.load_test_file_paths('diagnostics') or {
+	files := test_utils.load_test_file_paths('diagnostics') or {
 		io.bench.fail()
 		eprintln(io.bench.step_message_fail(err.msg))
 		assert false
