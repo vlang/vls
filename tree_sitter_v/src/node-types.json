@@ -2190,6 +2190,10 @@
             "named": true
           },
           {
+            "type": "type_identifier",
+            "named": true
+          },
+          {
             "type": "type_selector_expression",
             "named": true
           }
@@ -2752,6 +2756,10 @@
         "types": [
           {
             "type": "_expression",
+            "named": true
+          },
+          {
+            "type": "comptime_identifier",
             "named": true
           }
         ]
