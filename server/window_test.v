@@ -1,6 +1,6 @@
 import server
 import lsp
-import server.testing
+import test_utils
 import json
 
 const (
@@ -9,7 +9,7 @@ const (
 )
 
 fn test_log_message_error() {
-	mut io := &testing.Testio{}
+	mut io := &test_utils.Testio{}
 	mut ls := server.new(io)
 	// error
 	ls.log_message('Error!', .error)
@@ -25,7 +25,7 @@ fn test_log_message_error() {
 }
 
 fn test_log_message_warning() {
-	mut io := &testing.Testio{}
+	mut io := &test_utils.Testio{}
 	mut ls := server.new(io)
 	// warning
 	ls.log_message('This is a warning!', .warning)
@@ -41,7 +41,7 @@ fn test_log_message_warning() {
 }
 
 fn test_log_message_info() {
-	mut io := &testing.Testio{}
+	mut io := &test_utils.Testio{}
 	mut ls := server.new(io)
 	// info
 	ls.log_message('Hello World!', .info)
@@ -57,7 +57,7 @@ fn test_log_message_info() {
 }
 
 fn test_log_message_log() {
-	mut io := &testing.Testio{}
+	mut io := &test_utils.Testio{}
 	mut ls := server.new(io)
 	// log
 	ls.log_message('Logged!', .log)
@@ -73,7 +73,7 @@ fn test_log_message_log() {
 }
 
 fn test_show_message_error() {
-	mut io := &testing.Testio{}
+	mut io := &test_utils.Testio{}
 	mut ls := server.new(io)
 	// error
 	ls.show_message('Error!', .error)
@@ -89,7 +89,7 @@ fn test_show_message_error() {
 }
 
 fn test_show_message_warning() {
-	mut io := &testing.Testio{}
+	mut io := &test_utils.Testio{}
 	mut ls := server.new(io)
 	// warning
 	ls.show_message('This is a warning!', .warning)
@@ -105,7 +105,7 @@ fn test_show_message_warning() {
 }
 
 fn test_show_message_info() {
-	mut io := &testing.Testio{}
+	mut io := &test_utils.Testio{}
 	mut ls := server.new(io)
 	// info
 	ls.show_message('Hello World!', .info)
@@ -121,7 +121,7 @@ fn test_show_message_info() {
 }
 
 fn test_show_message_log() {
-	mut io := &testing.Testio{}
+	mut io := &test_utils.Testio{}
 	mut ls := server.new(io)
 	// log
 	ls.show_message('Logged!', .log)
@@ -137,7 +137,7 @@ fn test_show_message_log() {
 }
 
 fn test_show_message_request() {
-	mut io := &testing.Testio{}
+	mut io := &test_utils.Testio{}
 	mut ls := server.new(io)
 	actions := [lsp.MessageActionItem{'Retry'}]
 	ls.show_message_request('Failed!', actions, .info)

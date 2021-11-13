@@ -1,5 +1,5 @@
 import server
-import server.testing
+import test_utils
 import json
 import lsp
 import os
@@ -48,12 +48,14 @@ const implementation_results = {
 const implementation_should_return_null = []string{}
 
 fn test_implementation() {
-	mut io := testing.Testio{}
+	mut io := test_utils.Testio{
+		test_files_dir: test_utils.get_test_files_path(@FILE)
+	}
 	mut ls := server.new(io)
 	ls.dispatch(io.request_with_params('initialize', lsp.InitializeParams{
 		root_uri: lsp.document_uri_from_path(base_dir)
 	}))
-	test_files := testing.load_test_file_paths('implementation') or {
+	test_files := io.load_test_file_paths('implementation') or {
 		io.bench.fail()
 		eprintln(io.bench.step_message_fail(err.msg))
 		assert false
