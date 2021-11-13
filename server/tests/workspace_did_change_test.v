@@ -4,11 +4,11 @@ import lsp
 import os
 
 fn test_workspace_did_change() ? {
-	mut io := &test_utils.Testio{}
+	mut io := &test_utils.Testio{ test_files_dir: test_utils.get_test_files_path(@FILE) }
 	mut ls := server.new(io)
 
 	// TODO: add a mock filesystem
-	files := test_utils.load_test_file_paths('workspace_did_change') or {
+	files := io.load_test_file_paths('workspace_did_change') or {
 		io.bench.fail()
 		eprintln(io.bench.step_message_fail(err.msg))
 		return err

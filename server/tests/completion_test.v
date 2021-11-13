@@ -425,13 +425,13 @@ const completion_results = {
 }
 
 fn test_completion() {
-	mut io := &test_utils.Testio{}
+	mut io := &test_utils.Testio{ test_files_dir: test_utils.get_test_files_path(@FILE) }
 	mut ls := server.new(io)
 	ls.dispatch(io.request_with_params('initialize', lsp.InitializeParams{
 		root_uri: lsp.document_uri_from_path(os.join_path(os.dir(@FILE), 'test_files',
 			'completion'))
 	}))
-	test_files := test_utils.load_test_file_paths('completion') or {
+	test_files := io.load_test_file_paths('completion') or {
 		io.bench.fail()
 		eprintln(io.bench.step_message_fail(err.msg))
 		assert false
