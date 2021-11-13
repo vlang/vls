@@ -12,7 +12,7 @@ const (
 
 struct SymbolAnalyzer {
 mut:
-	store       &Store [required]
+	store       &Store     [required]
 	cursor      TreeCursor
 	module_name string
 	src_text    []byte
@@ -105,10 +105,10 @@ fn (mut sr SymbolAnalyzer) const_decl(const_node C.TSNode) ?[]&Symbol {
 		}
 
 		consts << &Symbol{
-			name: spec_node.child_by_field_name('name')?.code(sr.src_text)
+			name: spec_node.child_by_field_name('name') ?.code(sr.src_text)
 			kind: .variable
 			access: access
-			range: spec_node.child_by_field_name('name')?.range()
+			range: spec_node.child_by_field_name('name') ?.range()
 			is_top_level: true
 			is_const: true
 			file_path: sr.store.cur_file_path
@@ -771,7 +771,7 @@ pub fn new_symbol_analyzer(store &Store, root_node C.TSNode, src_text []byte, is
 	return SymbolAnalyzer{
 		store: unsafe { store }
 		src_text: src_text
-		cursor: new_tree_cursor(root_node),
+		cursor: new_tree_cursor(root_node)
 		is_import: is_import
 	}
 }
