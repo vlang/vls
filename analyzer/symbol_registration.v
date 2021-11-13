@@ -21,6 +21,7 @@ mut:
 	// visibility
 	is_import          bool
 	is_script          bool
+	is_test            bool
 	first_var_decl_pos C.TSRange
 }
 
@@ -76,8 +77,8 @@ fn (sr &SymbolAnalyzer) new_top_level_symbol(identifier_node C.TSNode, access Sy
 }
 
 fn (mut sr SymbolAnalyzer) get_scope(node C.TSNode) ?&ScopeTree {
-	if sr.is_import {
-		return error('Cannot use scope in import mode')
+	if sr.is_import || sr.is_test {
+		return error('Cannot use scope in import or test mode')
 	}
 
 	return sr.store.get_scope_from_node(node)
@@ -378,7 +379,7 @@ fn (mut sr SymbolAnalyzer) fn_decl(fn_node C.TSNode) ?&Symbol {
 	}
 
 	// extract function body
-	if !body_node.is_null() && !sr.is_import {
+	if !body_node.is_null() && !sr.is_import && !sr.is_test {
 		sr.extract_block(body_node, mut scope) ?
 	}
 
@@ -693,8 +694,8 @@ fn (mut sr SymbolAnalyzer) statement(node C.TSNode, mut scope ScopeTree) ? {
 }
 
 fn (mut sr SymbolAnalyzer) extract_block(node C.TSNode, mut scope ScopeTree) ? {
-	if node.type_name() != 'block' || sr.is_import {
-		return error('node should be a `block` and cannot be used in `is_import` mode.')
+	if node.type_name() != 'block' || sr.is_import || sr.is_test {
+		return error('node should be a `block` and cannot be used in `is_import` or test mode.')
 	}
 
 	body_sym_len := node.named_child_count()
@@ -750,14 +751,16 @@ pub fn (mut sr SymbolAnalyzer) analyze() ([]&Symbol, []Message) {
 			// messages.report(err)
 			continue
 		}
-		for mut sym in syms {
-			if sym.kind == .function && !sym.parent_sym.is_void() {
-				continue
-			}
+		if !sr.is_test {
+			for mut sym in syms {
+				if sym.kind == .function && !sym.parent_sym.is_void() {
+					continue
+				}
 
-			sr.store.register_symbol(mut *sym) or {
-				// add error message
-				continue
+				sr.store.register_symbol(mut *sym) or {
+					// add error message
+					continue
+				}
 			}
 		}
 		symbols << syms
