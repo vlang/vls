@@ -560,6 +560,8 @@ module.exports = grammar({
 
     shared_type: ($) => seq(shared_keyword, $._simple_type),
 
+    thread_type: ($) => seq('thread', $._simple_type),
+
     int_literal: ($) => token(int_literal),
 
     float_literal: ($) => token(float_literal),
@@ -822,7 +824,8 @@ module.exports = grammar({
         $.generic_type,
         $.map_type,
         $.channel_type,
-        $.shared_type
+        $.shared_type,
+        $.thread_type
       ),
 
     type_parameters: ($) =>

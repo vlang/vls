@@ -1483,6 +1483,19 @@
         }
       ]
     },
+    "thread_type": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "thread"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "_simple_type"
+        }
+      ]
+    },
     "int_literal": {
       "type": "TOKEN",
       "content": {
@@ -4228,6 +4241,10 @@
         {
           "type": "SYMBOL",
           "name": "shared_type"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "thread_type"
         }
       ]
     },
