@@ -20,3 +20,23 @@ fn main() {
             (type_identifier)
             (literal_value
               (keyed_element (field_identifier) (interpreted_string_literal)))))))))
+
+===
+Type Initializer with Embedded Field
+===
+
+Hello{
+  World: World{}
+}
+
+---
+
+(source_file 
+  (type_initializer 
+    (type_identifier) 
+    (literal_value 
+      (keyed_element 
+        (type_identifier) 
+        (type_initializer 
+          (type_identifier) 
+          (literal_value))))))

@@ -507,6 +507,7 @@ module.exports = grammar({
     _element_key: ($) =>
       choice(
         prec(1, $._field_identifier),
+        $.type_identifier,
         $._string_literal,
         $.int_literal,
         $.call_expression,
