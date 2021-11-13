@@ -596,6 +596,10 @@
         {
           "type": "identifier",
           "named": true
+        },
+        {
+          "type": "interpreted_string_literal",
+          "named": true
         }
       ]
     }

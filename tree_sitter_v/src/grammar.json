@@ -6622,22 +6622,21 @@
             ]
           },
           {
-            "type": "CHOICE",
-            "members": [
-              {
-                "type": "ALIAS",
-                "content": {
-                  "type": "STRING",
-                  "value": "unsafe"
-                },
-                "named": true,
-                "value": "identifier"
-              },
-              {
-                "type": "SYMBOL",
-                "name": "identifier"
-              }
-            ]
+            "type": "ALIAS",
+            "content": {
+              "type": "STRING",
+              "value": "unsafe"
+            },
+            "named": true,
+            "value": "identifier"
+          },
+          {
+            "type": "SYMBOL",
+            "name": "identifier"
+          },
+          {
+            "type": "SYMBOL",
+            "name": "interpreted_string_literal"
           },
           {
             "type": "SEQ",

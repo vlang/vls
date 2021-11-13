@@ -1262,7 +1262,9 @@ module.exports = grammar({
         PREC.attributes,
         choice(
           seq(if_keyword, $.identifier, optional("?")),
-          choice(alias("unsafe", $.identifier), $.identifier),
+          alias("unsafe", $.identifier),
+          $.identifier,
+          $.interpreted_string_literal,
           seq(
             field("name", choice(alias("unsafe", $.identifier), $.identifier)),
             ":",
