@@ -312,10 +312,9 @@ fn monitor_changes(mut ls Vls) {
 				}
 
 				uri := lsp.document_uri_from_path(ls.store.cur_file_path)
-				analyze(mut ls.store, ls.root_uri, ls.trees[uri], ls.sources[uri])
+				ls.analyze_file(ls.trees[uri], ls.sources[uri])
 				ls.is_typing = false
 				ls.show_diagnostics(uri)
-				unsafe { uri.free() }
 			}
 		}
 	}

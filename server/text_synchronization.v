@@ -5,16 +5,18 @@ import lsp
 import os
 import analyzer
 
-fn analyze(mut store analyzer.Store, root_uri lsp.DocumentUri, tree &C.TSTree, file File) {
-	store.clear_messages()
+fn (mut ls Vls) analyze_file(tree &C.TSTree, file File) {
+	ls.store.clear_messages()
 	file_path := file.uri.path()
-	store.set_active_file_path(file_path, file.version)
-	store.import_modules_from_tree(tree, file.source, os.join_path(file.uri.dir_path(),
-		'modules'), root_uri.path(), os.dir(os.dir(file_path)))
+	ls.store.set_active_file_path(file_path, file.version)
+	ls.store.import_modules_from_tree(tree, file.source, os.join_path(file.uri.dir_path(),
+		'modules'), ls.root_uri.path(), os.dir(os.dir(file_path)))
 
-	store.register_symbols_from_tree(tree, file.source, false)
-	store.cleanup_imports()
-	// store.analyze(tree, file.source)
+	ls.store.register_symbols_from_tree(tree, file.source, false)
+	ls.store.cleanup_imports()
+	if Feature.analyzer_diagnostics in ls.enabled_features {
+		ls.store.analyze(tree, file.source)
+	}
 }
 
 fn (mut ls Vls) did_open(_ string, params string) {
@@ -63,7 +65,7 @@ fn (mut ls Vls) did_open(_ string, params string) {
 					&C.TSTree(0), u32(src.len - 1))
 			}
 
-			analyze(mut ls.store, ls.root_uri, ls.trees[file_uri], ls.sources[file_uri])
+			ls.analyze_file(ls.trees[file_uri], ls.sources[file_uri])
 			ls.show_diagnostics(file_uri)
 
 			// unsafe {
@@ -81,7 +83,7 @@ fn (mut ls Vls) did_open(_ string, params string) {
 		ls.trees[uri] = ls.parser.parse_string(src)
 
 		if !ls.store.has_file_path(uri.path()) || uri.path() !in ls.store.opened_scopes {
-			analyze(mut ls.store, ls.root_uri, ls.trees[uri], ls.sources[uri])
+			ls.analyze_file(ls.trees[uri], ls.sources[uri])
 		}
 
 		ls.show_diagnostics(uri)
@@ -246,7 +248,6 @@ fn (mut ls Vls) did_save(id string, params string) {
 		return
 	}
 	uri := did_save_params.text_document.uri
-
 	if v_check_results := ls.exec_v_diagnostics(uri) {
 		ls.publish_diagnostics(uri, v_check_results)
 	}
