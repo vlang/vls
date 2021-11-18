@@ -46,6 +46,7 @@ fn test_set_features() {
 	}
 	assert ls.features() == [
 		.diagnostics,
+		.v_diagnostics,
 		.document_symbol,
 		.workspace_symbol,
 		.signature_help,
@@ -61,6 +62,7 @@ fn test_set_features() {
 	}
 	assert ls.features() == [
 		.diagnostics,
+		.v_diagnostics,
 		.document_symbol,
 		.workspace_symbol,
 		.signature_help,
