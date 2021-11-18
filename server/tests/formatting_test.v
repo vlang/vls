@@ -1,14 +1,16 @@
 import server
-import server.testing
+import test_utils
 import json
 import lsp
 import os
 
 fn test_formatting() {
-	mut io := &testing.Testio{}
+	mut io := &test_utils.Testio{
+		test_files_dir: test_utils.get_test_files_path(@FILE)
+	}
 	mut ls := server.new(io)
 	ls.dispatch(io.request('initialize'))
-	test_files := testing.load_test_file_paths('formatting') or {
+	test_files := io.load_test_file_paths('formatting') or {
 		io.bench.fail()
 		eprintln(io.bench.step_message_fail(err.msg))
 		assert false
@@ -50,19 +52,21 @@ fn test_formatting() {
 		if test_file_path.ends_with('empty.vv') {
 			assert io.result() == 'null'
 		} else {
-			assert io.result() == json.encode([lsp.TextEdit{
-				range: lsp.Range{
-					start: lsp.Position{
-						line: 0
-						character: 0
+			assert io.result() == json.encode([
+				lsp.TextEdit{
+					range: lsp.Range{
+						start: lsp.Position{
+							line: 0
+							character: 0
+						}
+						end: lsp.Position{
+							line: content_lines.len - 1
+							character: content_lines.last().len
+						}
 					}
-					end: lsp.Position{
-						line: content_lines.len - 1
-						character: content_lines.last().len
-					}
-				}
-				new_text: exp_content
-			}])
+					new_text: exp_content
+				},
+			])
 		}
 		io.bench.ok()
 		println(io.bench.step_message_ok(os.base(test_file_path)))

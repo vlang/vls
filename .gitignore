@@ -1,8 +1,15 @@
 # Editor files
 *.code-workspace
 
+# Debugging
+*.dSYM
+
 # Other
 cmd/vls/vls
-vls.exe
-vls
 .vscode
+
+bin/*
+
+*.so
+
+*.dll

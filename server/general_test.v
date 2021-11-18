@@ -1,18 +1,15 @@
 import server
-import server.testing
+import test_utils
 import lsp
 import json
 
-fn test_wrong_first_request() {
-	mut io := &testing.Testio{}
+fn test_wrong_first_request() ? {
+	mut io := &test_utils.Testio{}
 	mut ls := server.new(io)
 	payload := io.request('shutdown')
 	ls.dispatch(payload)
 	assert ls.status() == .off
-	err_code, err_msg := io.response_error() or {
-		assert false
-		return
-	}
+	err_code, err_msg := io.response_error() ?
 	assert err_code == -32002
 	assert err_msg == 'Server not yet initialized.'
 }
@@ -40,7 +37,7 @@ fn test_initialized() {
 // 	assert status == .shutdown
 // }
 fn test_set_features() {
-	mut io := &testing.Testio{}
+	mut io := &test_utils.Testio{}
 	mut ls := server.new(io)
 	assert ls.features() == server.default_features_list
 	ls.set_features(['formatting'], false) or {
@@ -49,6 +46,7 @@ fn test_set_features() {
 	}
 	assert ls.features() == [
 		.diagnostics,
+		.v_diagnostics,
 		.document_symbol,
 		.workspace_symbol,
 		.signature_help,
@@ -64,6 +62,7 @@ fn test_set_features() {
 	}
 	assert ls.features() == [
 		.diagnostics,
+		.v_diagnostics,
 		.document_symbol,
 		.workspace_symbol,
 		.signature_help,
@@ -80,8 +79,8 @@ fn test_set_features() {
 	}
 }
 
-fn init_tests() (&testing.Testio, server.Vls) {
-	mut io := &testing.Testio{}
+fn init_tests() (&test_utils.Testio, server.Vls) {
+	mut io := &test_utils.Testio{}
 	mut ls := server.new(io)
 	payload := io.request('initialize')
 	ls.dispatch(payload)

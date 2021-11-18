@@ -1,51 +1,6 @@
 module analyzer
 
-import os
-
-struct TreeCursor {
-mut:
-	cur_child_idx u32
-	named_only    bool = true
-	child_count   u32            [required]
-	cursor        C.TSTreeCursor [required]
-}
-
-fn (mut tc TreeCursor) next() bool {
-	if !tc.cursor.next() {
-		return false
-	}
-
-	for tc.cur_child_idx < tc.child_count {
-		if !tc.cursor.next() {
-			return false
-		}
-		tc.cur_child_idx++
-		if tc.named_only && (tc.current_node().is_named() && !tc.current_node().is_extra()) {
-			break
-		}
-	}
-
-	return true
-}
-
-fn (mut tc TreeCursor) to_first_child() bool {
-	return tc.cursor.to_first_child()
-}
-
-fn (tc &TreeCursor) current_node() C.TSNode {
-	return tc.cursor.current_node()
-}
-
-[unsafe]
-fn (tc &TreeCursor) free() {
-	unsafe {
-		tc.cursor.free()
-		tc.cur_child_idx = 0
-		tc.child_count = 0
-	}
-}
-
-pub struct Analyzer {
+pub struct SemanticAnalyzer {
 pub mut:
 	cur_file_path string
 	cursor        TreeCursor
@@ -62,11 +17,11 @@ pub mut:
 const empty_custom_params = map[int]string{}
 const empty_symbols = []&Symbol{}
 
-fn (mut an Analyzer) report(code int, range C.TSRange, symbols []&Symbol) {
+fn (mut an SemanticAnalyzer) report(code int, range C.TSRange, symbols []&Symbol) {
 	an.custom_report(code, range, symbols, analyzer.empty_custom_params)
 }
 
-fn (mut an Analyzer) custom_report(code int, range C.TSRange, symbols []&Symbol, custom_params map[int]string) {
+fn (mut an SemanticAnalyzer) custom_report(code int, range C.TSRange, symbols []&Symbol, custom_params map[int]string) {
 	mut err := AnalyzerError{
 		code: code
 		range: range
@@ -98,7 +53,7 @@ const comparative_operators = ["==", "!=", "<", "<=", ">", ">="]
 const and_operators = ["&&"]
 const or_operators = ["||"]
 
-fn (mut an Analyzer) binary_expr(node C.TSNode) &Symbol {
+fn (mut an SemanticAnalyzer) binary_expr(node C.TSNode) &Symbol {
 	op_node := node.child_by_field_name('operator')
 	op := op_node.get_type()
 	is_multiplicative := op in multiplicative_operators
@@ -169,7 +124,7 @@ fn (an &Analyzer) convert_to_lit_type(node C.TSNode) ?&Symbol {
 	return none
 }
 
-fn (mut an Analyzer) call_expr(node C.TSNode) &Symbol {
+fn (mut an SemanticAnalyzer) call_expr(node C.TSNode) &Symbol {
 	fn_node := node.child_by_field_name('function')
 	fn_sym := an.expression(fn_node)
 	arguments_node := node.child_by_field_name('arguments')
@@ -202,7 +157,7 @@ fn (mut an Analyzer) call_expr(node C.TSNode) &Symbol {
 	}
 }
 
-fn (mut an Analyzer) array(node C.TSNode) &Symbol {
+fn (mut an SemanticAnalyzer) array(node C.TSNode) &Symbol {
 	items_len := node.named_child_count()
 	if items_len == 0 {
 		an.report(
@@ -247,7 +202,7 @@ fn (mut an Analyzer) array(node C.TSNode) &Symbol {
 	}
 }
 
-fn (mut an Analyzer) selector_expr(node C.TSNode) &Symbol {
+fn (mut an SemanticAnalyzer) selector_expr(node C.TSNode) &Symbol {
 	operand := node.child_by_field_name('operand')
 	mut root_sym := an.expression(operand)
 	if root_sym.is_void() {
@@ -318,7 +273,7 @@ fn (mut an Analyzer) selector_expr(node C.TSNode) &Symbol {
 	return root_sym
 }
 
-fn (mut an Analyzer) type_init(node C.TSNode) &Symbol {
+fn (mut an SemanticAnalyzer) type_init(node C.TSNode) &Symbol {
 	type_node := node.child_by_field_name('type')
 	// body_node := node.child_by_field_name('body')
 
@@ -415,7 +370,7 @@ fn (mut an Analyzer) type_init(node C.TSNode) &Symbol {
 	}
 }
 
-fn (mut an Analyzer) unary_expr(node C.TSNode) &Symbol {
+fn (mut an SemanticAnalyzer) unary_expr(node C.TSNode) &Symbol {
 	// op_node := node.child_by_field_name('operator')
 	operand_node := node.child_by_field_name('operand')
 	operand_sym := an.expression(operand_node)
@@ -434,7 +389,7 @@ fn (mut an Analyzer) unary_expr(node C.TSNode) &Symbol {
 	return operand_sym
 }
 
-fn (mut an Analyzer) expression(node C.TSNode) &Symbol {
+fn (mut an SemanticAnalyzer) expression(node C.TSNode) &Symbol {
 	node_typ := node.get_type()
 	match node_typ {
 		'type_initializer' {
@@ -488,16 +443,12 @@ fn (mut an Analyzer) expression(node C.TSNode) &Symbol {
 	return analyzer.void_type
 }
 
-fn (mut an Analyzer) import_decl(node C.TSNode) {
+fn (mut an SemanticAnalyzer) import_decl(node C.TSNode) ? {
 	// Most of the checking is already done in `import_modules_from_trees`
 	// Check only the symbols if they are available
-	symbols := node.child_by_field_name('symbols')
-	if symbols.is_null() {
-		return
-	}
-
-	module_name_node := node.child_by_field_name('path')
-	module_name := module_name_node.get_text(an.src_text)
+	symbols := node.child_by_field_name('symbols') ?
+	module_name_node := node.child_by_field_name('path') ?
+	module_name := module_name_node.code(an.src_text)
 	// defer { unsafe { module_name.free() } }
 
 	module_path := an.store.get_module_path_opt(module_name) or {
@@ -505,14 +456,15 @@ fn (mut an Analyzer) import_decl(node C.TSNode) {
 		return
 	}
 
-	list := symbols.named_child(0)
+	list := symbols.named_child(0) ?
 	symbols_count := list.named_child_count()
 	for i := u32(0); i < symbols_count; i++ {
-		sym_ident_node := list.named_child(i)
-		if sym_ident_node.is_null() {
+		sym := list.named_child(i) ?
+		if sym.is_null() {
 			continue
 		}
-		symbol_name := sym_ident_node.get_text(an.src_text)
+
+		symbol_name := sym.code(an.src_text)
 		got_sym := an.store.symbols[module_path].get(symbol_name) or {
 			an.custom_report(analyzer.not_found_error, sym_ident_node.range(), [], {0: symbol_name})
 			continue
@@ -523,7 +475,7 @@ fn (mut an Analyzer) import_decl(node C.TSNode) {
 	}
 }
 
-fn (mut an Analyzer) assignment_stmt(node C.TSNode) {
+fn (mut an SemanticAnalyzer) assignment_stmt(node C.TSNode) {
 	op_node := node.child_by_field_name('operator')
 	op := op_node.get_type()[..1]
 	is_multiplicative := op in multiplicative_operators
@@ -555,9 +507,9 @@ fn (mut an Analyzer) assignment_stmt(node C.TSNode) {
 					)
 				}
 			} else if right_child.get_type() == 'unary_expression' && left_sym != right_sym {
-				unary_op_node := right_child.child_by_field_name('operator')
+				unary_op_node := right_child.child_by_field_name('operator') or { continue }
 				if right_sym.kind == .chan_ {
-					right_sym = right_sym.parent
+					right_sym = right_sym.parent_sym
 				}
 				
 				an.custom_report(
@@ -574,7 +526,7 @@ fn (mut an Analyzer) assignment_stmt(node C.TSNode) {
 	}
 }
 
-fn (mut an Analyzer) short_var_decl(node C.TSNode) {
+fn (mut an SemanticAnalyzer) short_var_decl(node C.TSNode) {
 	right := node.child_by_field_name('right')
 	right_count := right.named_child_count()
 	an.in_expr = true
@@ -593,7 +545,7 @@ fn (mut an Analyzer) short_var_decl(node C.TSNode) {
 	an.in_expr = false
 }
 
-fn (mut an Analyzer) send_statement(node C.TSNode) {
+fn (mut an SemanticAnalyzer) send_statement(node C.TSNode) {
 	chan_node := node.child_by_field_name('channel')
 	val_node := node.child_by_field_name('value')
 	chan_typ_sym := an.expression(chan_node)
@@ -613,7 +565,7 @@ fn (mut an Analyzer) send_statement(node C.TSNode) {
 	}
 }
 
-fn (mut an Analyzer) assert_statement(node C.TSNode) {
+fn (mut an SemanticAnalyzer) assert_statement(node C.TSNode) {
 	expr_node := node.named_child(0)
 	expr_typ_sym := an.expression(expr_node)
 	if expr_typ_sym.name != 'bool' {
@@ -625,7 +577,7 @@ fn (mut an Analyzer) assert_statement(node C.TSNode) {
 	}
 }
 
-fn (mut an Analyzer) block(node C.TSNode) {
+fn (mut an SemanticAnalyzer) block(node C.TSNode) {
 	body_sym_len := node.named_child_count()
 	for i := u32(0); i < body_sym_len; i++ {
 		stmt_node := node.named_child(i)
@@ -660,19 +612,19 @@ fn (mut an Analyzer) block(node C.TSNode) {
 	}
 }
 
-fn (mut an Analyzer) const_decl(node C.TSNode) {
+fn (mut an SemanticAnalyzer) const_decl(node C.TSNode) {
 }
 
-fn (mut an Analyzer) struct_decl(node C.TSNode) {
+fn (mut an SemanticAnalyzer) struct_decl(node C.TSNode) {
 }
 
-fn (mut an Analyzer) interface_decl(node C.TSNode) {
+fn (mut an SemanticAnalyzer) interface_decl(node C.TSNode) {
 }
 
-fn (mut an Analyzer) enum_decl(node C.TSNode) {
+fn (mut an SemanticAnalyzer) enum_decl(node C.TSNode) {
 }
 
-fn (mut an Analyzer) fn_decl(node C.TSNode) {
+fn (mut an SemanticAnalyzer) fn_decl(node C.TSNode) {
 	name_node := node.child_by_field_name('name')
 	an.cur_fn_name = name_node.get_text(an.src_text)
 	body_node := node.child_by_field_name('body')
@@ -680,7 +632,7 @@ fn (mut an Analyzer) fn_decl(node C.TSNode) {
 	an.cur_fn_name = ''
 }
 
-fn (mut an Analyzer) type_decl(node C.TSNode) {
+fn (mut an SemanticAnalyzer) type_decl(node C.TSNode) {
 	types_node :=  node.child_by_field_name('types')
 	types_count := types_node.named_child_count()
 
@@ -701,17 +653,12 @@ fn (mut an Analyzer) type_decl(node C.TSNode) {
 	}
 }
 
-pub fn (mut an Analyzer) top_level_statement() {
-	current_node := an.cursor.current_node()
-	node_type := current_node.get_type()
-	defer {
-		an.cursor.next()
-		// unsafe { node_type.free() }
-	}
+pub fn (mut an SemanticAnalyzer) top_level_statement() {
+	current_node := an.cursor.current_node() or { return }
 
-	match node_type {
+	match current_node.type_name() {
 		'import_declaration' {
-			an.import_decl(current_node)
+			an.import_decl(current_node) or {}
 		}
 		'const_declaration' {
 			an.const_decl(current_node)
@@ -737,22 +684,16 @@ pub fn (mut an Analyzer) top_level_statement() {
 
 // analyze analyzes the given tree
 pub fn (mut store Store) analyze(tree &C.TSTree, src_text []byte) {
-	root_node := tree.root_node()
-	child_len := int(root_node.child_count())
-	mut an := Analyzer{
+	mut an := SemanticAnalyzer{
 		store: unsafe { store }
 		src_text: src_text
-		cursor: TreeCursor{
-			child_count: u32(child_len)
-			cursor: root_node.tree_cursor()
-		}
+		cursor: new_tree_cursor(tree.root_node())
 	}
 
 	an.cursor.to_first_child()
-
-	for _ in 0 .. child_len {
+	for _ in an.cursor {
 		an.top_level_statement()
 	}
 
-	unsafe { an.cursor.free() }
+	// unsafe { an.cursor.free() }
 }

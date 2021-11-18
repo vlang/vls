@@ -1,5 +1,8 @@
 module jsonrpc
 
+import json
+import strings
+
 pub const (
 	// see http://xmlrpc-epi.sourceforge.net/specs/rfc.fault_codes.php
 	version                = '2.0'
@@ -20,7 +23,7 @@ pub const (
 pub struct Request {
 pub mut:
 	jsonrpc string = jsonrpc.version
-	id      int    = -2
+	id      string [raw]
 	method  string
 	params  string [raw]
 }
@@ -28,9 +31,30 @@ pub mut:
 pub struct Response<T> {
 pub:
 	jsonrpc string = jsonrpc.version
-	id      int
+	id      string
 	//	error   ResponseError
 	result T
+	error  ResponseError
+}
+
+pub fn (resp Response<T>) json() string {
+	mut resp_wr := strings.new_builder(100)
+	defer {
+		unsafe { resp_wr.free() }
+	}
+	resp_wr.write_string('{"jsonrpc":"$jsonrpc.version","id":$resp.id')
+	if resp.id.len == 0 {
+		resp_wr.write_string('null')
+	}
+	if resp.error.code != 0 {
+		err := json.encode(resp.error)
+		resp_wr.write_string(',"error":$err')
+	} else {
+		res := json.encode(resp.result)
+		resp_wr.write_string(',"result":$res')
+	}
+	resp_wr.write_b(`}`)
+	return resp_wr.str()
 }
 
 pub struct NotificationMessage<T> {
@@ -39,13 +63,8 @@ pub struct NotificationMessage<T> {
 	params  T
 }
 
-// with error
-// TODO: must be removed when omitempty JSON is supported
-pub struct Response2<T> {
-	jsonrpc string = jsonrpc.version
-	id      int
-	error   ResponseError
-	result  T
+pub fn (notif NotificationMessage<T>) json() string {
+	return json.encode(notif)
 }
 
 pub struct ResponseError {

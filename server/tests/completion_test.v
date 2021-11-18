@@ -1,13 +1,24 @@
 import server
-import server.testing
+import test_utils
 import json
 import lsp
 import os
+
+const c_completion_item = lsp.CompletionItem{
+	label: 'C'
+	kind: .module_
+	detail: 'C symbol definitions'
+	insert_text: 'C.'
+}
 
 const completion_inputs = {
 	'assign.vv':                            lsp.CompletionParams{
 		context: lsp.CompletionContext{.trigger_character, ' '}
 		position: lsp.Position{6, 7}
+	}
+	'binded_symbol.vv':                     lsp.CompletionParams{
+		context: lsp.CompletionContext{.invoked, ''}
+		position: lsp.Position{5, 4}
 	}
 	'blank.vv':                             lsp.CompletionParams{
 		context: lsp.CompletionContext{.invoked, ''}
@@ -33,6 +44,10 @@ const completion_inputs = {
 		context: lsp.CompletionContext{.trigger_character, '.'}
 		position: lsp.Position{13, 6}
 	}
+	'fn_literal.vv':                        lsp.CompletionParams{
+		context: lsp.CompletionContext{.invoked, '.'}
+		position: lsp.Position{5, 3}
+	}
 	'import_symbols.vv':                    lsp.CompletionParams{
 		context: lsp.CompletionContext{.trigger_character, ' '}
 		position: lsp.Position{2, 12}
@@ -57,6 +72,10 @@ const completion_inputs = {
 		context: lsp.CompletionContext{.trigger_character, '.'}
 		position: lsp.Position{12, 6}
 	}
+	'invalid_call.vv':                      lsp.CompletionParams{
+		context: lsp.CompletionContext{.trigger_character, '('}
+		position: lsp.Position{0, 4}
+	}
 	'local_results.vv':                     lsp.CompletionParams{
 		context: lsp.CompletionContext{.invoked, ''}
 		position: lsp.Position{5, 2}
@@ -77,6 +96,10 @@ const completion_inputs = {
 		context: lsp.CompletionContext{.trigger_character, ' '}
 		position: lsp.Position{9, 8}
 	}
+	'type_decl.vv':                         lsp.CompletionParams{
+		context: lsp.CompletionContext{.trigger_character, ' '}
+		position: lsp.Position{3, 12}
+	}
 }
 
 const completion_results = {
@@ -92,6 +115,15 @@ const completion_results = {
 			kind: .variable
 			detail: 'mut zero int'
 			insert_text: 'zero'
+		},
+	]
+	'binded_symbol.vv':                     [
+		lsp.CompletionItem{
+			label: 'C.Foo'
+			kind: .struct_
+			detail: 'struct C.Foo'
+			insert_text: 'Foo{bar:\$1, baz:\$2, data:\$3, count:\$4}'
+			insert_text_format: .snippet
 		},
 	]
 	'blank.vv':                             [
@@ -130,25 +162,25 @@ const completion_results = {
 	'enum_val_in_struct.vv':                [
 		lsp.CompletionItem{
 			label: '.golden_retriever'
-			detail: '(Breed).golden_retriever int'
+			detail: 'Breed.golden_retriever int'
 			kind: .enum_member
 			insert_text: '.golden_retriever'
 		},
 		lsp.CompletionItem{
 			label: '.beagle'
-			detail: '(Breed).beagle int'
+			detail: 'Breed.beagle int'
 			kind: .enum_member
 			insert_text: '.beagle'
 		},
 		lsp.CompletionItem{
 			label: '.chihuahua'
-			detail: '(Breed).chihuahua int'
+			detail: 'Breed.chihuahua int'
 			kind: .enum_member
 			insert_text: '.chihuahua'
 		},
 		lsp.CompletionItem{
 			label: '.dalmatian'
-			detail: '(Breed).dalmatian int'
+			detail: 'Breed.dalmatian int'
 			kind: .enum_member
 			insert_text: '.dalmatian'
 		},
@@ -156,16 +188,23 @@ const completion_results = {
 	'filtered_fields_in_selector.vv':       [
 		lsp.CompletionItem{
 			label: 'output_file_name'
-			detail: 'pub mut (Log).output_file_name string'
+			detail: 'pub mut Log.output_file_name string'
 			kind: .property
 			insert_text: 'output_file_name'
 		},
 	]
 	'filtered_methods_in_immutable_var.vv': [
 		lsp.CompletionItem{
+			label: 'set_name'
+			kind: .method
+			detail: 'fn (mut f Foo) set_name(name string)'
+			insert_text: 'set_name(\$0)'
+			insert_text_format: .snippet
+		},
+		lsp.CompletionItem{
 			label: 'lol'
 			kind: .method
-			detail: 'fn (Foo) lol() string'
+			detail: 'fn (f Foo) lol() string'
 			insert_text: 'lol()'
 			insert_text_format: .plain_text
 		},
@@ -174,35 +213,56 @@ const completion_results = {
 		lsp.CompletionItem{
 			label: 'set_name'
 			kind: .method
-			detail: 'mut fn (Foo) set_name(name string) void'
+			detail: 'fn (mut f Foo) set_name(name string)'
 			insert_text: 'set_name(\$0)'
 			insert_text_format: .snippet
 		},
 		lsp.CompletionItem{
 			label: 'lol'
 			kind: .method
-			detail: 'fn (Foo) lol() string'
+			detail: 'fn (f Foo) lol() string'
 			insert_text: 'lol()'
 			insert_text_format: .plain_text
+		},
+	]
+	'fn_literal.vv':                        [
+		c_completion_item,
+		lsp.CompletionItem{
+			label: 'cmd'
+			kind: .variable
+			detail: 'cmd int'
+			insert_text: 'cmd'
+		},
+		lsp.CompletionItem{
+			label: 'gs'
+			kind: .variable
+			detail: 'gs string'
+			insert_text: 'gs'
+		},
+		lsp.CompletionItem{
+			label: 'list_exec'
+			kind: .variable
+			detail: 'list_exec fn (cmd int)'
+			insert_text: 'list_exec'
 		},
 	]
 	'import_symbols.vv':                    [
 		lsp.CompletionItem{
 			label: 'DB'
 			kind: .struct_
-			detail: 'DB'
+			detail: 'pub struct DB'
 			insert_text: 'DB'
 		},
 		lsp.CompletionItem{
 			label: 'Row'
 			kind: .struct_
-			detail: 'Row'
+			detail: 'pub struct Row'
 			insert_text: 'Row'
 		},
 		lsp.CompletionItem{
 			label: 'Config'
 			kind: .struct_
-			detail: 'Config'
+			detail: 'pub struct Config'
 			insert_text: 'Config'
 		},
 		lsp.CompletionItem{
@@ -245,13 +305,13 @@ const completion_results = {
 		lsp.CompletionItem{
 			label: 'name'
 			kind: .property
-			detail: '(Barw).name string'
+			detail: 'Barw.name string'
 			insert_text: 'name'
 		},
 		lsp.CompletionItem{
 			label: 'theres_a_method'
 			kind: .method
-			detail: 'fn (Barw) theres_a_method() void'
+			detail: 'fn (b Barw) theres_a_method()'
 			insert_text: 'theres_a_method()'
 			insert_text_format: .plain_text
 		},
@@ -260,13 +320,13 @@ const completion_results = {
 		lsp.CompletionItem{
 			label: 'name'
 			kind: .property
-			detail: '(Foo).name string'
+			detail: 'Foo.name string'
 			insert_text: 'name'
 		},
 		lsp.CompletionItem{
 			label: 'lol'
 			kind: .method
-			detail: 'fn (Foo) lol() string'
+			detail: 'fn (f Foo) lol() string'
 			insert_text: 'lol()'
 			insert_text_format: .plain_text
 		},
@@ -275,11 +335,13 @@ const completion_results = {
 		lsp.CompletionItem{
 			label: 'len'
 			kind: .property
-			detail: '(Bee).len int'
+			detail: 'Bee.len int'
 			insert_text: 'len'
 		},
 	]
+	'invalid_call.vv':                      []lsp.CompletionItem{}
 	'local_results.vv':                     [
+		c_completion_item,
 		lsp.CompletionItem{
 			label: 'foo'
 			kind: .variable
@@ -299,13 +361,14 @@ const completion_results = {
 			kind: .module_
 			insert_text: 'def'
 		},
+		c_completion_item,
 	]
 	'module_symbols_selector.vv':           [
 		lsp.CompletionItem{
 			label: 'Point'
 			kind: .struct_
-			detail: 'Point'
-			insert_text: 'Point{a:\$0, b:\$1}'
+			detail: 'pub struct Point'
+			insert_text: 'Point{a:\$1, b:\$2}'
 			insert_text_format: .snippet
 		},
 		lsp.CompletionItem{
@@ -318,14 +381,14 @@ const completion_results = {
 	'struct_init.vv':                       [
 		lsp.CompletionItem{
 			label: 'name:'
-			detail: '(Person).name string'
+			detail: 'Person.name string'
 			kind: .field
 			insert_text_format: .snippet
 			insert_text: 'name: \$0'
 		},
 		lsp.CompletionItem{
 			label: 'age:'
-			detail: '(Person).age int'
+			detail: 'Person.age int'
 			kind: .field
 			insert_text_format: .snippet
 			insert_text: 'age: \$0'
@@ -345,16 +408,32 @@ const completion_results = {
 			insert_text: 'another_name'
 		},
 	]
+	'type_decl.vv':                         [
+		lsp.CompletionItem{
+			label: 'Foo'
+			kind: .struct_
+			detail: 'struct Foo'
+			insert_text: 'Foo'
+		},
+		lsp.CompletionItem{
+			label: 'Bar'
+			kind: .struct_
+			detail: 'struct Bar'
+			insert_text: 'Bar'
+		},
+	]
 }
 
 fn test_completion() {
-	mut io := &testing.Testio{}
+	mut io := &test_utils.Testio{
+		test_files_dir: test_utils.get_test_files_path(@FILE)
+	}
 	mut ls := server.new(io)
 	ls.dispatch(io.request_with_params('initialize', lsp.InitializeParams{
 		root_uri: lsp.document_uri_from_path(os.join_path(os.dir(@FILE), 'test_files',
 			'completion'))
 	}))
-	test_files := testing.load_test_file_paths('completion') or {
+	test_files := io.load_test_file_paths('completion') or {
 		io.bench.fail()
 		eprintln(io.bench.step_message_fail(err.msg))
 		assert false
@@ -390,13 +469,21 @@ fn test_completion() {
 			text_document: doc_id
 		}))
 		// compare content
-		println(io.bench.step_message('Testing $test_file_path'))
-		assert io.result() == json.encode(completion_results[test_name])
-		// Delete document
+		received_json := io.result()
+		encoded_json := json.encode(completion_results[test_name])
+
 		ls.dispatch(io.close_document(doc_id))
-		io.bench.ok()
-		println(io.bench.step_message_ok(test_name))
+		if received_json == encoded_json {
+			io.bench.ok()
+			println(io.bench.step_message_ok(test_name))
+		} else {
+			io.bench.fail()
+			println(io.bench.step_message_fail(test_name))
+		}
+
+		assert received_json == encoded_json
 	}
+
 	assert io.bench.nfail == 0
 	io.bench.stop()
 }

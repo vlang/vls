@@ -6,6 +6,7 @@ import json
 import strings
 
 pub interface Logger {
+mut:
 	close()
 	flush()
 	enable()
@@ -134,17 +135,16 @@ fn (mut l Log) write(item LogItem) {
 		if l.buffer.len != 0 {
 			unsafe {
 				l.file.write_ptr(l.buffer.data, l.buffer.len)
-				l.buffer.free()
+				l.buffer.go_back_to(0)
 			}
 		}
-
-		l.file.writeln(content) or { panic(err) }
+		l.file.write_string(content) or { panic(err) }
 	} else {
-		l.buffer.writeln(content)
+		l.buffer.write_string(content)
 	}
 
 	l.last_timestamp = item.timestamp
-	unsafe { content.free() }
+	// unsafe { content.free() }
 }
 
 // request logs a request message.

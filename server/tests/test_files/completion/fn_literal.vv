@@ -1,0 +1,8 @@
+module main
+
+fn main() {
+  list_exec := fn (cmd int) {
+    gs := 'hello'
+    
+  }
+}

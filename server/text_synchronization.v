@@ -5,18 +5,21 @@ import lsp
 import os
 import analyzer
 
-fn analyze(mut store analyzer.Store, root_uri lsp.DocumentUri, tree &C.TSTree, file File) {
-	store.clear_messages()
-	store.set_active_file_path(file.uri.path(), file.version)
-	store.import_modules_from_tree(tree, file.source, os.join_path(file.uri.dir_path(),
-		'modules'), root_uri.path())
+fn (mut ls Vls) analyze_file(tree &C.TSTree, file File) {
+	ls.store.clear_messages()
+	file_path := file.uri.path()
+	ls.store.set_active_file_path(file_path, file.version)
+	ls.store.import_modules_from_tree(tree, file.source, os.join_path(file.uri.dir_path(),
+		'modules'), ls.root_uri.path(), os.dir(os.dir(file_path)))
 
-	store.register_symbols_from_tree(tree, file.source)
-	store.cleanup_imports()
-	store.analyze(tree, file.source)
+	ls.store.register_symbols_from_tree(tree, file.source, false)
+	ls.store.cleanup_imports()
+	if Feature.analyzer_diagnostics in ls.enabled_features {
+		ls.store.analyze(tree, file.source)
+	}
 }
 
-fn (mut ls Vls) did_open(_ int, params string) {
+fn (mut ls Vls) did_open(_ string, params string) {
 	did_open_params := json.decode(lsp.DidOpenTextDocumentParams, params) or {
 		ls.panic(err.msg)
 		return
@@ -39,7 +42,7 @@ fn (mut ls Vls) did_open(_ int, params string) {
 
 			if file_uri != uri {
 				ls.sources[file_uri] = File{
-					uri: file_uri.clone()
+					uri: file_uri
 					source: os.read_bytes(full_path) or { [] }
 				}
 				source_str := ls.sources[file_uri].source.bytestr()
@@ -56,19 +59,19 @@ fn (mut ls Vls) did_open(_ int, params string) {
 			// V's interop with tree sitter's parse_string is buggy sometimes
 			// especially if the code is incomplete. It reattempts to re-parse
 			// an appropriate tree by reducing decrement the source length by 1
-			if !isnil(ls.trees[file_uri]) && ls.trees[file_uri].root_node().get_type() == 'ERROR' {
+			if !isnil(ls.trees[file_uri]) && ls.trees[file_uri].root_node().type_name() == 'ERROR' {
 				unsafe { ls.trees[file_uri].free() }
 				ls.trees[file_uri] = ls.parser.parse_string_with_old_tree_and_len(src,
 					&C.TSTree(0), u32(src.len - 1))
 			}
 
-			analyze(mut ls.store, ls.root_uri, ls.trees[file_uri], ls.sources[file_uri])
+			ls.analyze_file(ls.trees[file_uri], ls.sources[file_uri])
 			ls.show_diagnostics(file_uri)
 
-			unsafe {
-				full_path.free()
-				file_uri.free()
-			}
+			// unsafe {
+			// 	full_path.free()
+			// 	file_uri.free()
+			// }
 		}
 		ls.store.set_active_file_path(uri.path(), ls.sources[uri].version)
 		unsafe { files.free() }
@@ -80,14 +83,19 @@ fn (mut ls Vls) did_open(_ int, params string) {
 		ls.trees[uri] = ls.parser.parse_string(src)
 
 		if !ls.store.has_file_path(uri.path()) || uri.path() !in ls.store.opened_scopes {
-			analyze(mut ls.store, ls.root_uri, ls.trees[uri], ls.sources[uri])
+			ls.analyze_file(ls.trees[uri], ls.sources[uri])
 		}
+
 		ls.show_diagnostics(uri)
+	}
+
+	if v_check_results := ls.exec_v_diagnostics(uri) {
+		ls.publish_diagnostics(uri, v_check_results)
 	}
 }
 
 [manualfree]
-fn (mut ls Vls) did_change(_ int, params string) {
+fn (mut ls Vls) did_change(_ string, params string) {
 	did_change_params := json.decode(lsp.DidChangeTextDocumentParams, params) or {
 		ls.panic(err.msg)
 		return
@@ -100,7 +108,7 @@ fn (mut ls Vls) did_change(_ int, params string) {
 
 	ls.store.set_active_file_path(uri.path(), did_change_params.text_document.version)
 
-	mut new_src := ls.sources[uri].source.clone()
+	mut new_src := ls.sources[uri].source
 	ls.publish_diagnostics(uri, []lsp.Diagnostic{})
 
 	for content_change in did_change_params.content_changes {
@@ -177,12 +185,12 @@ fn (mut ls Vls) did_change(_ int, params string) {
 			new_end_point: lsp_pos_to_tspoint(new_end_pos)
 		)
 
-		unsafe { content_change.text.free() }
+		// unsafe { content_change.text.free() }
 	}
 
 	// See comment in `did_open`.
 	mut new_tree := ls.parser.parse_string_with_old_tree(new_src.bytestr(), ls.trees[uri])
-	if !isnil(new_tree) && new_tree.root_node().get_type() == 'ERROR' {
+	if !isnil(new_tree) && new_tree.root_node().type_name() == 'ERROR' {
 		unsafe { new_tree.free() }
 		new_tree = ls.parser.parse_string_with_old_tree_and_len(new_src.bytestr(), ls.trees[uri],
 			u32(new_src.len - 1))
@@ -205,18 +213,18 @@ fn (mut ls Vls) did_change(_ int, params string) {
 }
 
 [manualfree]
-fn (mut ls Vls) did_close(_ int, params string) {
+fn (mut ls Vls) did_close(_ string, params string) {
 	did_close_params := json.decode(lsp.DidCloseTextDocumentParams, params) or {
 		ls.panic(err.msg)
 		return
 	}
 
 	uri := did_close_params.text_document.uri
-	unsafe {
-		ls.sources[uri].free()
-		ls.trees[uri].free()
-		ls.store.opened_scopes[uri.path()].free()
-	}
+	// unsafe {
+	// 	ls.sources[uri].free()
+	// 	ls.trees[uri].free()
+	// 	ls.store.opened_scopes[uri.path()].free()
+	// }
 	ls.sources.delete(uri)
 	ls.trees.delete(uri)
 	ls.store.opened_scopes.delete(uri.path())
@@ -231,5 +239,16 @@ fn (mut ls Vls) did_close(_ int, params string) {
 	// - If there are no remaining files opened on a specific folder.
 	if ls.sources.len == 0 || !uri.starts_with(ls.root_uri) {
 		ls.publish_diagnostics(uri, []lsp.Diagnostic{})
+	}
+}
+
+fn (mut ls Vls) did_save(id string, params string) {
+	did_save_params := json.decode(lsp.DidSaveTextDocumentParams, params) or {
+		ls.panic(err.msg)
+		return
+	}
+	uri := did_save_params.text_document.uri
+	if v_check_results := ls.exec_v_diagnostics(uri) {
+		ls.publish_diagnostics(uri, v_check_results)
 	}
 }

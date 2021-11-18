@@ -1,0 +1,12 @@
+enum Color {
+    red
+    blue
+    yellow
+}
+
+---
+
+(enum Color [0,5]-[0,10]
+    (field red int [1,4]-[1,7])
+    (field blue int [2,4]-[2,8])
+    (field yellow int [3,4]-[3,10]))

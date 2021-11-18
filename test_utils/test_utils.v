@@ -1,4 +1,4 @@
-module testing
+module test_utils
 
 import json
 import jsonrpc
@@ -20,6 +20,8 @@ struct TestNotification {
 }
 
 pub struct Testio {
+pub:
+	test_files_dir string
 mut:
 	current_req_id int = 1
 	has_decoded    bool
@@ -79,28 +81,54 @@ fn (mut io Testio) decode_response() ? {
 	}
 }
 
-pub const test_files_dir = os.join_path(os.dir(os.dir(@FILE)), 'tests', 'test_files')
+// get_test_files_path returns the appended location of the test file dir and dir var.
+pub fn get_test_files_path(dir string) string {
+	if os.is_file(dir) {
+		return os.join_path(os.dir(dir), 'test_files')
+	}
+
+	return os.join_path(dir, 'tests', 'test_files')
+}
 
 // load_test_file_paths returns a list of input test file locations.
 [manualfree]
-pub fn load_test_file_paths(folder_name string) ?[]string {
+pub fn (io &Testio) load_test_file_paths(folder_name string) ?[]string {
+	return load_test_file_paths(io.test_files_dir, folder_name)
+}
+
+// load_test_file_paths returns a list of input test file locations.
+[manualfree]
+pub fn load_test_file_paths(test_files_dir string, folder_name string) ?[]string {
 	current_os := os.user_os()
-	target_path := os.join_path(testing.test_files_dir, folder_name)
+	target_path := os.join_path(test_files_dir, folder_name)
 	dir := os.ls(target_path) or { return error('error loading test files for "$folder_name"') }
-	mut filtered := []string{}
+	mut filtered := []string{cap: dir.len}
+	skip_os_file_ext := '_skip_${current_os}.vv'
 	for path in dir {
-		if !path.ends_with('.vv') || path.ends_with('_skip.vv')
-			|| path.ends_with('_skip_${current_os}.vv') {
-			continue
+		if (path.ends_with('.vv') && !path.ends_with('_skip.vv')
+			&& !path.ends_with(skip_os_file_ext)) || path.ends_with('.test.txt') {
+			filtered << os.join_path(target_path, path)
 		}
-		filtered << os.join_path(target_path, path)
 	}
-	unsafe { dir.free() }
-	filtered.sort()
+	// unsafe { dir.free() }
 	if filtered.len == 0 {
 		return error('no test files found for "$folder_name"')
 	}
+	filtered.sort()
 	return filtered
+}
+
+// save_document generates and returns the request data for the `textDocument/didSave` request.
+pub fn (mut io Testio) save_document(file_path string, contents string) (string, lsp.TextDocumentIdentifier) {
+	doc_uri := lsp.document_uri_from_path(file_path)
+	docid := lsp.TextDocumentIdentifier{
+		uri: doc_uri
+	}
+	req := io.request_with_params('textDocument/didSave', lsp.DidSaveTextDocumentParams{
+		text_document: docid
+		text: contents
+	})
+	return req, docid
 }
 
 // open_document generates and returns the request data for the `textDocument/didOpen` reqeust.

@@ -14,17 +14,19 @@ const (
 )
 
 // initialize sends the server capabilities to the client
-fn (mut ls Vls) initialize(id int, params string) {
+fn (mut ls Vls) initialize(id string, params string) {
 	// Set defaults when vroot_path is empty
 	if ls.vroot_path.len == 0 {
 		if found_vroot_path := detect_vroot_path() {
 			ls.set_vroot_path(found_vroot_path)
 			ls.store.default_import_paths << os.join_path(found_vroot_path, 'vlib')
+			ls.store.default_import_paths << os.vmodules_dir()
 		} else {
 			ls.show_message("V installation directory was not found. Modules in vlib such as `os` won't be detected.",
 				.error)
 		}
-
+	} else {
+		ls.store.default_import_paths << os.join_path(ls.vroot_path, 'vlib')
 		ls.store.default_import_paths << os.vmodules_dir()
 	}
 
@@ -99,6 +101,8 @@ fn (mut ls Vls) setup_logger(trace string, client_info lsp.ClientInfo) {
 
 	// print important info for reporting
 	ls.log_message('VLS Version: $meta.version, OS: $os.user_os() $arch', .info)
+	ls.log_message('VLS executable path: $os.executable()', .info)
+	ls.log_message('VLS build with V ${@VHASH}', .info)
 	if client_info.name.len != 0 {
 		ls.log_message('Client / Editor: $client_info.name $client_info.version', .info)
 	} else {
@@ -123,14 +127,15 @@ fn (mut ls Vls) process_builtin() {
 }
 
 // shutdown sets the state to shutdown but does not exit
-fn (mut ls Vls) shutdown(id int) {
+fn (mut ls Vls) shutdown(id string) {
 	ls.status = .shutdown
-	result := jsonrpc.Response<string>{
+	ls.send(jsonrpc.Response<string>{
 		id: id
 		result: 'null'
 		// error: code and message set in case an exception happens during shutdown request
-	}
-	json.encode(result)
+	})
+
+	ls.exit()
 }
 
 // exit stops the process

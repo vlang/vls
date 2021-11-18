@@ -10,7 +10,7 @@ import strings
 const temp_formatting_file_path = os.join_path(os.temp_dir(), 'vls_temp_formatting.v')
 
 [manualfree]
-fn (mut ls Vls) formatting(id int, params string) {
+fn (mut ls Vls) formatting(id string, params string) {
 	formatting_params := json.decode(lsp.DocumentFormattingParams, params) or {
 		ls.panic(err.msg)
 		ls.send_null(id)
@@ -46,30 +46,17 @@ fn (mut ls Vls) formatting(id int, params string) {
 		os.rm(server.temp_formatting_file_path) or {}
 	}
 
-	mut v_exe_name := 'v'
-	defer {
-		unsafe { v_exe_name.free() }
-	}
-
-	$if windows {
-		v_exe_name += '.exe'
-	}
-
-	mut p := os.new_process(os.join_path(ls.vroot_path, v_exe_name))
+	mut p := ls.launch_v_tool('fmt', server.temp_formatting_file_path)
 	defer {
 		p.close()
-		unsafe { p.free() }
 	}
-
-	p.set_args(['fmt', server.temp_formatting_file_path])
-	p.set_redirect_stdio()
 	p.wait()
 
 	if p.code > 0 {
 		errors := p.stderr_slurp().trim_space()
-		defer {
-			unsafe { errors.free() }
-		}
+		// defer {
+		// 	unsafe { errors.free() }
+		// }
 
 		ls.show_message(errors, .info)
 		ls.send_null(id)
@@ -77,20 +64,22 @@ fn (mut ls Vls) formatting(id int, params string) {
 	}
 
 	output := p.stdout_slurp()
-	defer {
-		unsafe { output.free() }
-	}
+	// defer {
+	// 	unsafe { output.free() }
+	// }
 
 	ls.send(jsonrpc.Response<[]lsp.TextEdit>{
 		id: id
-		result: [lsp.TextEdit{
-			range: tsrange_to_lsp_range(tree_range)
-			new_text: output
-		}]
+		result: [
+			lsp.TextEdit{
+				range: tsrange_to_lsp_range(tree_range)
+				new_text: output
+			},
+		]
 	})
 }
 
-fn (mut ls Vls) workspace_symbol(id int, _ string) {
+fn (mut ls Vls) workspace_symbol(id string, _ string) {
 	mut workspace_symbols := []lsp.SymbolInformation{}
 
 	for _, sym_arr in ls.store.symbols {
@@ -99,12 +88,12 @@ fn (mut ls Vls) workspace_symbol(id int, _ string) {
 			if uri in ls.trees || uri.dir() == ls.root_uri {
 				sym_info := symbol_to_symbol_info(uri, sym) or { continue }
 				workspace_symbols << sym_info
-				for child_sym in sym.children {
+				for child_sym in sym.children_syms {
 					child_sym_info := symbol_to_symbol_info(uri, child_sym) or { continue }
 					workspace_symbols << child_sym_info
 				}
 			} else {
-				unsafe { uri.free() }
+				// unsafe { uri.free() }
 			}
 		}
 	}
@@ -129,7 +118,7 @@ fn symbol_to_symbol_info(uri lsp.DocumentUri, sym &analyzer.Symbol) ?lsp.SymbolI
 	mut kind := lsp.SymbolKind.null
 	match sym.kind {
 		.function {
-			kind = if sym.kind == .function && !sym.parent.is_void() {
+			kind = if sym.kind == .function && !sym.parent_sym.is_void() {
 				lsp.SymbolKind.method
 			} else {
 				lsp.SymbolKind.function
@@ -154,7 +143,11 @@ fn symbol_to_symbol_info(uri lsp.DocumentUri, sym &analyzer.Symbol) ?lsp.SymbolI
 			return none
 		}
 	}
-	prefix := if sym.kind == .function && !sym.parent.is_void() { sym.parent.name + '.' } else { '' }
+	prefix := if sym.kind == .function && !sym.parent_sym.is_void() {
+		sym.parent_sym.name + '.'
+	} else {
+		''
+	}
 	return lsp.SymbolInformation{
 		name: prefix + sym.name
 		kind: kind
@@ -165,7 +158,7 @@ fn symbol_to_symbol_info(uri lsp.DocumentUri, sym &analyzer.Symbol) ?lsp.SymbolI
 	}
 }
 
-fn (mut ls Vls) document_symbol(id int, params string) {
+fn (mut ls Vls) document_symbol(id string, params string) {
 	document_symbol_params := json.decode(lsp.DocumentSymbolParams, params) or {
 		ls.panic(err.msg)
 		ls.send_null(id)
@@ -186,7 +179,7 @@ fn (mut ls Vls) document_symbol(id int, params string) {
 	})
 }
 
-fn (mut ls Vls) signature_help(id int, params string) {
+fn (mut ls Vls) signature_help(id string, params string) {
 	// Initial checks.
 	signature_params := json.decode(lsp.SignatureHelpParams, params) or {
 		ls.panic(err.msg)
@@ -199,7 +192,6 @@ fn (mut ls Vls) signature_help(id int, params string) {
 		return
 	}
 
-	// Fetch the node requested for completion.
 	uri := signature_params.text_document.uri
 	pos := signature_params.position
 	ctx := signature_params.context
@@ -212,26 +204,28 @@ fn (mut ls Vls) signature_help(id int, params string) {
 	off := compute_offset(source, pos.line, pos.character)
 	mut node := traverse_node(tree.root_node(), u32(off))
 	mut parent_node := node
-	if node.get_type() == 'argument_list' {
-		parent_node = node.parent()
-		node = node.prev_named_sibling()
+	if node.type_name() == 'argument_list' {
+		parent_node = node.parent() or { node }
+		node = node.prev_named_sibling() or { node }
 	}
 
 	// signature help supports function calls for now
 	// hence checking the node if it's a call_expression node.
-	if node.is_null() || parent_node.get_type() != 'call_expression' {
+	if parent_node.type_name() != 'call_expression' {
 		ls.send_null(id)
 		return
 	}
 
 	ls.store.set_active_file_path(uri.path(), file.version)
-
 	sym := ls.store.infer_symbol_from_node(node, source) or {
 		ls.send_null(id)
 		return
 	}
 
-	args_node := parent_node.child_by_field_name('arguments')
+	args_node := parent_node.child_by_field_name('arguments') or {
+		ls.send_null(id)
+		return
+	}
 	// for retrigger, it utilizes the current signature help data
 	if ctx.is_retrigger {
 		mut active_sighelp := ctx.active_signature_help
@@ -257,7 +251,7 @@ fn (mut ls Vls) signature_help(id int, params string) {
 	// create a signature help info based on the
 	// call expr info
 	mut param_infos := []lsp.ParameterInformation{}
-	for child_sym in sym.children {
+	for child_sym in sym.children_syms {
 		if child_sym.kind != .variable {
 			continue
 		}
@@ -270,11 +264,13 @@ fn (mut ls Vls) signature_help(id int, params string) {
 	ls.send(jsonrpc.Response<lsp.SignatureHelp>{
 		id: id
 		result: lsp.SignatureHelp{
-			signatures: [lsp.SignatureInformation{
-				label: sym.gen_str()
-				// documentation: lsp.MarkupContent{}
-				parameters: param_infos
-			}]
+			signatures: [
+				lsp.SignatureInformation{
+					label: sym.gen_str()
+					// documentation: lsp.MarkupContent{}
+					parameters: param_infos
+				},
+			]
 		}
 	})
 }
@@ -288,6 +284,7 @@ mut:
 	show_global        bool // for displaying global (project) symbols
 	show_local         bool // for displaying local variables
 	filter_return_type &analyzer.Symbol = &analyzer.Symbol(0) // filters results by type
+	filter_sym_kinds   []analyzer.SymbolKind
 	fields_only        bool             // for displaying only the struct/enum fields
 	show_mut_only      bool // filters results based on the object's mutability state.
 	ctx                lsp.CompletionContext
@@ -299,7 +296,8 @@ fn (mut builder CompletionBuilder) add(item lsp.CompletionItem) {
 }
 
 fn (builder CompletionBuilder) is_triggered(node C.TSNode, chr string) bool {
-	return node.next_sibling().get_text(builder.src) == chr || builder.ctx.trigger_character == chr
+	return node.next_sibling() or { return false }.code(builder.src) == chr
+		|| builder.ctx.trigger_character == chr
 }
 
 fn (builder CompletionBuilder) is_selector(node C.TSNode) bool {
@@ -325,10 +323,10 @@ fn (mut builder CompletionBuilder) build_suggestions(node C.TSNode, offset int) 
 }
 
 fn (mut builder CompletionBuilder) build_suggestions_from_node(node C.TSNode) {
-	node_type := node.get_type()
-	if node_type in list_node_types {
+	node_type_name := node.type_name()
+	if node_type_name in list_node_types {
 		builder.build_suggestions_from_list(node)
-	} else if node_type == 'module_clause' {
+	} else if node_type_name == 'module_clause' {
 		builder.build_module_name_suggestions()
 	} else {
 		builder.build_suggestions_from_stmt(node)
@@ -337,18 +335,18 @@ fn (mut builder CompletionBuilder) build_suggestions_from_node(node C.TSNode) {
 
 // suggestions_from_stmt returns a list of results from the extracted Stmt node info.
 fn (mut builder CompletionBuilder) build_suggestions_from_stmt(node C.TSNode) {
-	match node.get_type() {
+	match node.type_name() {
 		'short_var_declaration' {
 			builder.show_local = true
 			builder.show_global = true
 		}
 		'assignment_statement' {
-			right_node := node.child_by_field_name('right')
-			left_node := node.child_by_field_name('left')
+			right_node := node.child_by_field_name('right') or { return }
+			left_node := node.child_by_field_name('left') or { return }
 			expr_list_count := right_node.named_child_count()
 			left_count := left_node.named_child_count()
 			if expr_list_count == left_count {
-				last_left_node := left_node.named_child(left_count - 1)
+				last_left_node := left_node.named_child(left_count - 1) or { return }
 				builder.filter_return_type = builder.store.infer_value_type_from_node(last_left_node,
 					builder.src)
 				builder.show_local = true
@@ -362,7 +360,7 @@ fn (mut builder CompletionBuilder) build_suggestions_from_stmt(node C.TSNode) {
 
 // suggestions_from_list returns a list of results extracted from the list nodes.
 fn (mut builder CompletionBuilder) build_suggestions_from_list(node C.TSNode) {
-	match node.get_type() {
+	match node.type_name() {
 		'identifier_list', 'assignable_identifier_list' {
 			parent := closest_symbol_node_parent(node)
 			builder.build_suggestions_from_node(parent)
@@ -370,33 +368,50 @@ fn (mut builder CompletionBuilder) build_suggestions_from_list(node C.TSNode) {
 		'expression_list' {
 			// expr_list_count := node.named_child_count()
 			parent := closest_symbol_node_parent(node)
-			parent_type := parent.get_type()
-			match parent_type {
+			match parent.type_name() {
 				'assignment_statement' {
 					builder.build_suggestions_from_stmt(parent)
 				}
 				else {
 					// closest_node := closest_named_child(node, u32(builder.offset))
-					// eprintln(closest_node.get_type())
+					// eprintln(closest_node.type_name())
 				}
 			}
 		}
 		'argument_list' {
 			call_expr_arg_cur_idx := node.named_child_count()
-			returned_sym := builder.store.infer_symbol_from_node(node.parent(), builder.src) or {
+			parent := node.parent() or { return }
+			returned_sym := builder.store.infer_symbol_from_node(parent, builder.src) or {
 				builder.filter_return_type
 			}
-			if call_expr_arg_cur_idx < u32(returned_sym.children.len) {
-				builder.filter_return_type = returned_sym.children[int(call_expr_arg_cur_idx)].return_type
+
+			if isnil(returned_sym) {
+				return
+			}
+
+			if call_expr_arg_cur_idx < u32(returned_sym.children_syms.len) {
+				builder.filter_return_type = returned_sym.children_syms[int(call_expr_arg_cur_idx)].return_sym
 				builder.show_local = true
 				builder.show_global = true
 			}
 		}
 		'import_symbols_list' {
 			import_node := closest_symbol_node_parent(node)
-			import_path_node := import_node.child_by_field_name('path')
-			import_path := import_path_node.get_text(builder.src)
+			import_path_node := import_node.child_by_field_name('path') or { return }
+			import_path := import_path_node.code(builder.src)
 			builder.build_suggestions_from_module(import_path)
+		}
+		'type_list' {
+			builder.show_local = false
+			builder.show_global = true
+			builder.filter_sym_kinds = [
+				analyzer.SymbolKind.typedef,
+				.struct_,
+				.enum_,
+				.interface_,
+				.sumtype,
+				.function_type,
+			]
 		}
 		else {}
 	}
@@ -404,58 +419,71 @@ fn (mut builder CompletionBuilder) build_suggestions_from_list(node C.TSNode) {
 
 // suggestions_from_expr returns a list of results extracted from the Expr node info.
 fn (mut builder CompletionBuilder) build_suggestions_from_expr(node C.TSNode) {
-	node_type := node.get_type()
-	match node_type {
-		'identifier', 'selector_expression', 'call_expression', 'index_expression' {
+	node_type_name := node.type_name()
+	match node_type_name {
+		'binded_identifier', 'identifier', 'selector_expression', 'call_expression',
+		'index_expression' {
 			builder.show_global = false
 			builder.show_local = false
 
-			text := node.get_text(builder.src)
-			defer {
-				unsafe { text.free() }
-			}
+			text := node.code(builder.src)
 
 			if builder.is_selector(node) {
 				mut selected_node := node
-				if node_type == 'selector_expression' {
-					operand_node := node.child_by_field_name('operand')
-					if operand_node.get_type() == 'call_expression' {
-						selected_node = node
+				if node_type_name == 'selector_expression' {
+					if operand_node := node.child_by_field_name('operand') {
+						if operand_node.type_name() == 'call_expression' {
+							selected_node = node
+						}
 					}
 				}
 				if got_sym := builder.store.infer_symbol_from_node(selected_node, builder.src) {
-					builder.show_mut_only = builder.parent_node.get_type() == 'block'
+					builder.show_mut_only = builder.parent_node.type_name() == 'block'
 						&& got_sym.is_mutable()
-					builder.build_suggestions_from_sym(got_sym.return_type, true)
+					builder.build_suggestions_from_sym(got_sym.return_sym, true)
 				} else if builder.store.is_module(text) {
 					builder.build_suggestions_from_module(text)
+				} else if text == 'C.' || text == 'JS.' {
+					lang := match text {
+						'C.' { analyzer.SymbolLanguage.c }
+						'JS.' { analyzer.SymbolLanguage.js }
+						else { analyzer.SymbolLanguage.v }
+					}
+
+					if lang == .v {
+						return
+					}
+
+					builder.build_suggestions_from_binded_symbols(lang, builder.ctx.trigger_character == '.')
 				}
 			}
 		}
 		'literal_value' {
 			closest_element_node := closest_named_child(node, u32(builder.offset))
-			if closest_element_node.get_type() == 'keyed_element' {
+			if closest_element_node.type_name() == 'keyed_element' {
 				builder.build_suggestions_from_expr(closest_element_node)
-			} else if got_sym := builder.store.infer_symbol_from_node(node.parent(), builder.src) {
-				builder.build_suggestions_from_sym(got_sym, false)
+			} else if parent_node := node.parent() {
+				if got_sym := builder.store.infer_symbol_from_node(parent_node, builder.src) {
+					builder.build_suggestions_from_sym(got_sym, false)
+				}
 			}
 		}
 		'keyed_element' {
 			if got_sym := builder.store.infer_symbol_from_node(node, builder.src) {
 				builder.show_local = true
-				builder.filter_return_type = got_sym.return_type
+				builder.filter_return_type = got_sym.return_sym
 
-				if got_sym.return_type.kind != .struct_ {
-					builder.build_suggestions_from_sym(got_sym.return_type, false)
+				if got_sym.return_sym.kind != .struct_ {
+					builder.build_suggestions_from_sym(got_sym.return_sym, false)
 				}
 			}
 		}
 		'import_symbols' {
-			builder.build_suggestions_from_node(node.named_child(0))
+			builder.build_suggestions_from_node(node.named_child(0) or { return })
 		}
 		else {
-			// found_sym := builder.store.infer_symbol_from_node(node, builder.src) or { analyzer.void_type }
-			// builder.filter_return_type = if found_sym.is_returnable() { found_sym.return_type } else { found_sym }
+			// found_sym := builder.store.infer_symbol_from_node(node, builder.src) or { analyzer.void_sym }
+			// builder.filter_return_type = if found_sym.is_returnable() { found_sym.return_sym } else { found_sym }
 		}
 	}
 }
@@ -465,7 +493,7 @@ fn (mut builder CompletionBuilder) build_suggestions_from_sym(sym &analyzer.Symb
 		return
 	}
 
-	for child_sym in sym.children {
+	for child_sym in sym.children_syms {
 		if is_selector {
 			if (sym.kind in [.enum_, .struct_] || sym.kind in analyzer.container_symbol_kinds)
 				&& child_sym.kind !in [.field, .function] {
@@ -510,6 +538,49 @@ fn (mut builder CompletionBuilder) build_suggestions_from_sym(sym &analyzer.Symb
 	}
 }
 
+fn (mut builder CompletionBuilder) build_suggestions_from_binded_symbols(lang analyzer.SymbolLanguage, with_snippet bool) {
+	// just a cache in order to avoid repeated lookups
+	// done by is_imported
+	mut imported_paths := []string{cap: 10}
+
+	// this is for slicing the string
+	lang_len := match lang {
+		.v, .c { 2 }
+		.js { 3 }
+	}
+
+	for sym_loc_entry in builder.store.binded_symbol_locations {
+		$if test {
+			if sym_loc_entry.module_path == builder.store.auto_imports[''] {
+				continue
+			}
+		}
+
+		if sym_loc_entry.language != lang {
+			continue
+		}
+
+		module_path := sym_loc_entry.module_path
+		if module_path !in imported_paths {
+			if module_path != builder.store.cur_dir && !builder.store.is_imported(module_path) {
+				continue
+			}
+
+			imported_paths << module_path
+		}
+
+		sym_name := sym_loc_entry.for_sym_name
+		sym := builder.store.symbols[module_path].get(sym_name) or { continue }
+
+		if existing_completion_item := symbol_to_completion_item(sym, with_snippet) {
+			builder.add(lsp.CompletionItem{
+				...existing_completion_item
+				insert_text: existing_completion_item.insert_text[lang_len..]
+			})
+		}
+	}
+}
+
 fn (mut builder CompletionBuilder) build_suggestions_from_module(name string, included_list ...string) {
 	imported_path_dir := builder.store.get_module_path_opt(name) or {
 		builder.store.auto_imports[name] or { return }
@@ -518,7 +589,8 @@ fn (mut builder CompletionBuilder) build_suggestions_from_module(name string, in
 	imported_syms := builder.store.symbols[imported_path_dir]
 	for imp_sym in imported_syms {
 		if (included_list.len != 0 && imp_sym.name in included_list)
-			|| !builder.has_same_return_type(imp_sym.return_type) {
+			|| !builder.has_same_return_type(imp_sym.return_sym)
+			|| (builder.filter_sym_kinds.len != 0 && imp_sym.kind !in builder.filter_sym_kinds) {
 			continue
 		}
 		if int(imp_sym.access) >= int(analyzer.SymbolAccess.public) {
@@ -563,16 +635,29 @@ fn (mut builder CompletionBuilder) build_local_suggestions() {
 				})
 			}
 		}
+
+		if builder.store.binded_symbol_locations.len != 0 {
+			// add JS in the future
+			builder.add(lsp.CompletionItem{
+				label: 'C'
+				kind: .module_
+				detail: 'C symbol definitions'
+				insert_text: 'C.'
+			})
+		}
 	}
 
 	// Scope-based symbols that includes the variables inside
 	// the functions and the constants of the file.
-	if file_scope := builder.store.opened_scopes[builder.store.cur_file_path] {
+	if file_scope_ := builder.store.opened_scopes[builder.store.cur_file_path] {
+		mut file_scope := file_scope_
 		mut scope := file_scope.innermost(u32(builder.offset), u32(builder.offset))
 		for !isnil(scope) && scope != file_scope {
 			// constants
 			for scope_sym in scope.get_all_symbols() {
-				if !builder.has_same_return_type(scope_sym.return_type) {
+				if !builder.has_same_return_type(scope_sym.return_sym)
+					|| (builder.filter_sym_kinds.len != 0
+					&& scope_sym.kind !in builder.filter_sym_kinds) {
 					continue
 				}
 
@@ -596,10 +681,14 @@ fn (mut builder CompletionBuilder) build_global_suggestions() {
 	for sym in global_syms {
 		if !sym.is_void() && sym.kind != .placeholder {
 			if (sym.kind == .function && sym.name == 'main')
-				|| !builder.has_same_return_type(sym.return_type) {
+				|| !builder.has_same_return_type(sym.return_sym)
+				|| (builder.filter_sym_kinds.len != 0 && sym.kind !in builder.filter_sym_kinds) {
 				continue
 			}
-			builder.add(symbol_to_completion_item(sym, true) or { continue })
+
+			// is_type_decl := false
+			is_type_decl := builder.parent_node.type_name() == 'type_declaration'
+			builder.add(symbol_to_completion_item(sym, !is_type_decl) or { continue })
 		}
 	}
 
@@ -632,7 +721,7 @@ fn symbol_to_completion_item(sym &analyzer.Symbol, with_snippet bool) ?lsp.Compl
 		}
 		.function {
 			// if function has parent, use method
-			kind = if !sym.parent.is_void() {
+			kind = if !sym.parent_sym.is_void() {
 				lsp.CompletionItemKind.method
 			} else {
 				lsp.CompletionItemKind.function
@@ -640,10 +729,10 @@ fn symbol_to_completion_item(sym &analyzer.Symbol, with_snippet bool) ?lsp.Compl
 			insert_text.write_string(name)
 			if with_snippet {
 				insert_text.write_b(`(`)
-				for i in 0 .. sym.children.len {
+				for i in 0 .. sym.children_syms.len {
 					insert_text.write_b(`$`)
 					insert_text.write_string(i.str())
-					if i < sym.children.len - 1 {
+					if i < sym.children_syms.len - 1 {
 						insert_text.write_string(', ')
 					} else {
 						insert_text_format = .snippet
@@ -657,24 +746,22 @@ fn symbol_to_completion_item(sym &analyzer.Symbol, with_snippet bool) ?lsp.Compl
 			insert_text.write_string(name)
 			if with_snippet {
 				insert_text.write_b(`{`)
-				mut i := 0
-				for child_sym in sym.children {
-					if child_sym.kind != .field {
+				mut insert_count := 1
+				for i, child_sym in sym.children_syms {
+					if child_sym.kind != .field || child_sym.name.len == 0 {
 						continue
-					}
-					insert_text.write_string(child_sym.name + ':\$' + i.str())
-					if i < sym.children.len - 1 {
+					} else if i != 0 && i < sym.children_syms.len {
 						insert_text.write_string(', ')
-					} else {
-						insert_text_format = .snippet
 					}
-					i++
+					insert_text.write_string(child_sym.name + ':\$' + insert_count.str())
+					insert_text_format = .snippet
+					insert_count++
 				}
 				insert_text.write_b(`}`)
 			}
 		}
 		.field {
-			match sym.parent.kind {
+			match sym.parent_sym.kind {
 				.enum_ {
 					kind = .enum_member
 					insert_text.write_b(`.`)
@@ -710,7 +797,7 @@ fn symbol_to_completion_item(sym &analyzer.Symbol, with_snippet bool) ?lsp.Compl
 
 // TODO: make params use lsp.CompletionParams in the future
 [manualfree]
-fn (mut ls Vls) completion(id int, params string) {
+fn (mut ls Vls) completion(id string, params string) {
 	if Feature.completion !in ls.enabled_features {
 		return
 	}
@@ -743,6 +830,7 @@ fn (mut ls Vls) completion(id int, params string) {
 	mut builder := CompletionBuilder{
 		store: &ls.store
 		src: src
+		parent_node: root_node
 	}
 
 	// There are some instances that the user would invoke the autocompletion
@@ -797,17 +885,23 @@ fn (mut ls Vls) completion(id int, params string) {
 		// Once the offset has been finalized it will then search for the AST node and
 		// extract it's data using the corresponding methods depending on the node type.
 		mut node := traverse_node2(root_node, u32(offset))
-		parent_node := traverse_node(root_node, u32(offset))
+		mut parent_node := traverse_node(root_node, u32(offset))
+		node_type_name := node.type_name()
 
-		if root_node.is_error() && root_node.get_type() == 'ERROR' {
+		if root_node.is_error() && root_node.type_name() == 'ERROR' {
 			// point to the identifier for assignment statement
 			node = traverse_node(node, node.start_byte())
-		} else if node.get_type() == 'block' {
+		} else if node_type_name == 'block' {
 			node = traverse_node2(root_node, u32(offset))
-		} else if node.is_error() && node.get_type() == 'ERROR' {
-			node = node.prev_named_sibling()
+		} else if node.is_error() && node_type_name == 'ERROR' {
+			node = node.prev_named_sibling() or { node }
 		} else if node.start_byte() > u32(offset) {
 			node = closest_named_child(closest_symbol_node_parent(node), u32(offset))
+		} else if node_type_name == 'source_file' {
+			parent_node = closest_named_child(node, u32(offset))
+			node = closest_named_child(parent_node, u32(offset))
+		} else if parent_node.start_byte() > node.start_byte() {
+			node = parent_node
 		}
 
 		builder.ctx = ctx
@@ -833,7 +927,7 @@ fn (mut ls Vls) completion(id int, params string) {
 	})
 }
 
-fn (mut ls Vls) hover(id int, params string) {
+fn (mut ls Vls) hover(id string, params string) {
 	hover_params := json.decode(lsp.HoverParams, params) or {
 		ls.panic(err.msg)
 		ls.send_null(id)
@@ -864,44 +958,48 @@ fn (mut ls Vls) hover(id int, params string) {
 }
 
 fn get_hover_data(mut store analyzer.Store, node C.TSNode, uri lsp.DocumentUri, source []byte, offset u32) ?lsp.Hover {
-	node_type := node.get_type()
-	if node.is_null() || node_type == 'comment' {
+	node_type_name := node.type_name()
+	if node.is_null() || node_type_name == 'comment' {
 		return none
 	}
 
 	mut original_range := node.range()
-	// eprintln('$node_type | ${node.get_text(source)}')
-	if node_type == 'module_clause' {
+	parent_node := node.parent() or { node }
+
+	// eprintln('$node_type_name | ${node.code(source)}')
+	if node_type_name == 'module_clause' {
 		return lsp.Hover{
-			contents: lsp.v_marked_string(node.get_text(source))
+			contents: lsp.v_marked_string(node.code(source))
 			range: tsrange_to_lsp_range(node.range())
 		}
-	} else if node_type == 'import_path' {
+	} else if node_type_name == 'import_path' {
 		found_imp := store.find_import_by_position(node.range()) ?
+		alias := found_imp.aliases[store.cur_file_name] or { '' }
 		return lsp.Hover{
-			contents: lsp.v_marked_string('import $found_imp.absolute_module_name as ' + found_imp.aliases[uri.path()] or {
-				found_imp.module_name
-			})
-			range: tsrange_to_lsp_range(found_imp.ranges[uri.path()])
+			contents: lsp.v_marked_string('import $found_imp.absolute_module_name' +
+				if alias.len > 0 { ' as $alias' } else { '' })
+			range: tsrange_to_lsp_range(found_imp.ranges[store.cur_file_path])
 		}
-	} else if node.parent().is_error() || node.parent().is_missing() {
+	} else if parent_node.is_error() || parent_node.is_missing() {
 		return none
 	}
 
-	if node_type != 'type_selector_expression' && node.named_child_count() != 0 {
-		new_original_range := node.first_named_child_for_byte(u32(offset)).range()
-		if new_original_range.start_byte != 0 && new_original_range.end_byte != 0 {
-			original_range = new_original_range
+	if node_type_name != 'type_selector_expression' && node.named_child_count() != 0 {
+		if got_node := node.first_named_child_for_byte(u32(offset)) {
+			new_original_range := got_node.range()
+			if new_original_range.start_byte != 0 && new_original_range.end_byte != 0 {
+				original_range = new_original_range
+			}
 		}
 	}
 
-	mut sym := store.infer_symbol_from_node(node, source) or { analyzer.void_type }
+	mut sym := store.infer_symbol_from_node(node, source) or { analyzer.void_sym }
 	if isnil(sym) || sym.is_void() {
 		closest_parent := closest_symbol_node_parent(node)
-		sym = store.infer_symbol_from_node(closest_parent, source) ?
+		sym = store.infer_symbol_from_node(closest_parent, source) or { analyzer.void_sym }
 	}
 
-	// eprintln('$node_type | ${node.get_text(source)} | $sym')
+	// eprintln('$node_type_name | ${node.code(source)} | $sym')
 
 	// Send null if range has zero-start and end points
 	if sym.range.start_point.row == 0 && sym.range.start_point.column == 0
@@ -916,7 +1014,7 @@ fn get_hover_data(mut store analyzer.Store, node C.TSNode, uri lsp.DocumentUri, 
 }
 
 [manualfree]
-fn (mut ls Vls) folding_range(id int, params string) {
+fn (mut ls Vls) folding_range(id string, params string) {
 	folding_range_params := json.decode(lsp.FoldingRangeParams, params) or {
 		ls.panic(err.msg)
 		ls.send_null(id)
@@ -939,7 +1037,7 @@ fn (mut ls Vls) folding_range(id int, params string) {
 
 	// loop
 	for i := u32(0); i < named_children_len; i++ {
-		named_child := root_node.named_child(i)
+		named_child := root_node.named_child(i) or { continue }
 		folding_ranges << lsp.FoldingRange{
 			start_line: tsrange_to_lsp_range(named_child.range()).start.character
 			start_character: tsrange_to_lsp_range(named_child.range()).start.line
@@ -962,7 +1060,7 @@ fn (mut ls Vls) folding_range(id int, params string) {
 	}
 }
 
-fn (mut ls Vls) definition(id int, params string) {
+fn (mut ls Vls) definition(id string, params string) {
 	goto_definition_params := json.decode(lsp.TextDocumentPositionParams, params) or {
 		ls.panic(err.msg)
 		ls.send_null(id)
@@ -985,21 +1083,28 @@ fn (mut ls Vls) definition(id int, params string) {
 	offset := compute_offset(source, pos.line, pos.character)
 	mut node := traverse_node(tree.root_node(), u32(offset))
 	mut original_range := node.range()
-	node_type := node.get_type()
-	if node.is_null() || (node.parent().is_error() || node.parent().is_missing()) {
+	node_type_name := node.type_name()
+	if parent_node := node.parent() {
+		if parent_node.is_error() || parent_node.is_missing() {
+			ls.send_null(id)
+			return
+		}
+	} else if node.is_null() {
 		ls.send_null(id)
 		return
 	}
 
 	ls.store.set_active_file_path(uri.path(), file.version)
-	sym := ls.store.infer_symbol_from_node(node, source) or { analyzer.void_type }
+	sym := ls.store.infer_symbol_from_node(node, source) or { analyzer.void_sym }
 	if isnil(sym) || sym.is_void() {
 		ls.send_null(id)
 		return
 	}
 
-	if node_type != 'type_selector_expression' && node.named_child_count() != 0 {
-		original_range = node.first_named_child_for_byte(u32(offset)).range()
+	if node_type_name != 'type_selector_expression' && node.named_child_count() != 0 {
+		if got_node := node.first_named_child_for_byte(u32(offset)) {
+			original_range = got_node.range()
+		}
 	}
 
 	// Send null if range has zero-start and end points
@@ -1010,21 +1115,23 @@ fn (mut ls Vls) definition(id int, params string) {
 	}
 
 	loc_uri := lsp.document_uri_from_path(sym.file_path)
-	ls.send(jsonrpc.Response<lsp.LocationLink>{
+	ls.send(jsonrpc.Response<[]lsp.LocationLink>{
 		id: id
-		result: lsp.LocationLink{
-			target_uri: loc_uri
-			target_range: tsrange_to_lsp_range(sym.range)
-			target_selection_range: tsrange_to_lsp_range(sym.range)
-			origin_selection_range: tsrange_to_lsp_range(original_range)
-		}
+		result: [
+			lsp.LocationLink{
+				target_uri: loc_uri
+				target_range: tsrange_to_lsp_range(sym.range)
+				target_selection_range: tsrange_to_lsp_range(sym.range)
+				origin_selection_range: tsrange_to_lsp_range(original_range)
+			},
+		]
 	})
 }
 
 fn get_implementation_locations_from_syms(symbols []&analyzer.Symbol, got_sym &analyzer.Symbol, original_range C.TSRange, mut locations []lsp.LocationLink) {
 	for sym in symbols {
-		mut interface_sym := analyzer.void_type
-		mut sym_to_check := analyzer.void_type
+		mut interface_sym := analyzer.void_sym
+		mut sym_to_check := analyzer.void_sym
 		if got_sym.kind == .interface_ && sym.kind != .interface_ {
 			interface_sym = got_sym
 			sym_to_check = sym
@@ -1046,7 +1153,7 @@ fn get_implementation_locations_from_syms(symbols []&analyzer.Symbol, got_sym &a
 	}
 }
 
-fn (mut ls Vls) implementation(id int, params string) {
+fn (mut ls Vls) implementation(id string, params string) {
 	goto_implementation_params := json.decode(lsp.TextDocumentPositionParams, params) or {
 		ls.panic(err.msg)
 		ls.send_null(id)
@@ -1070,19 +1177,28 @@ fn (mut ls Vls) implementation(id int, params string) {
 	offset := file.get_offset(pos.line, pos.character)
 	mut node := traverse_node(tree.root_node(), u32(offset))
 	mut original_range := node.range()
-	node_type := node.get_type()
-	if node.is_null() || (node.parent().is_error() || node.parent().is_missing()) {
+	node_type_name := node.type_name()
+	if parent_node := node.parent() {
+		if parent_node.is_error() || parent_node.is_missing() {
+			ls.send_null(id)
+			return
+		}
+	}
+
+	if node.is_null() {
 		ls.send_null(id)
 		return
 	}
 
 	ls.store.set_active_file_path(uri.path(), file.version)
 
-	mut got_sym := analyzer.void_type
-	if node.parent().get_type() == 'interface_declaration' {
-		got_sym = ls.store.symbols[ls.store.cur_dir].get(node.get_text(source)) or { got_sym }
-	} else {
-		got_sym = ls.store.infer_value_type_from_node(node, source)
+	mut got_sym := analyzer.void_sym
+	if parent_node := node.parent() {
+		if parent_node.type_name() == 'interface_declaration' {
+			got_sym = ls.store.symbols[ls.store.cur_dir].get(node.code(source)) or { got_sym }
+		} else {
+			got_sym = ls.store.infer_value_type_from_node(node, source)
+		}
 	}
 
 	if isnil(got_sym) || got_sym.is_void() {
@@ -1090,8 +1206,10 @@ fn (mut ls Vls) implementation(id int, params string) {
 		return
 	}
 
-	if node_type != 'type_selector_expression' && node.named_child_count() != 0 {
-		original_range = node.first_named_child_for_byte(u32(offset)).range()
+	if node_type_name != 'type_selector_expression' && node.named_child_count() != 0 {
+		if got_node := node.first_named_child_for_byte(u32(offset)) {
+			original_range = got_node.range()
+		}
 	}
 
 	mut locations := []lsp.LocationLink{cap: 20}

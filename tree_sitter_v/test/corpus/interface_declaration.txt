@@ -42,3 +42,23 @@ interface Iterator<T> {
         (field_identifier) 
         (parameter_list)
         (option_type (type_placeholder))))))
+
+===
+Interface Decl with Type-Only Param Spec
+===
+
+interface Handler {
+	handle(Request) Response
+}
+
+---
+
+(source_file
+  (interface_declaration
+    (type_identifier)
+    (interface_spec_list
+      (interface_spec
+        (field_identifier)
+        (type_only_parameter_list
+          (type_parameter_declaration (type_identifier)))
+        (type_identifier)))))

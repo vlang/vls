@@ -10,9 +10,7 @@ pub fn (du DocumentUri) dir() string {
 
 pub fn (du DocumentUri) path() string {
 	$if windows {
-		if du.contains('%3A') {
-			return du.all_after('file:///').replace('%3A', ':')
-		}
+		return du.all_after('file:///').replace_each(['/', '\\', '%3A', ':'])
 	}
 	return if du.starts_with('file://') { du.all_after('file://') } else { '' }
 }
@@ -22,6 +20,10 @@ pub fn (du DocumentUri) dir_path() string {
 }
 
 pub fn document_uri_from_path(path string) DocumentUri {
+	$if windows {
+		uri_path := path.replace_each(['\\', '/', ':', '%3A'])
+		return if !path.starts_with('file:///') { 'file:///' + uri_path } else { uri_path }
+	}
 	return if !path.starts_with('file://') { 'file://' + path } else { path }
 }
 

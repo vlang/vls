@@ -8,9 +8,9 @@ const numeric_types_with_any_type = ['u8', 'u16', 'u32', 'u64' 'i8', 'i16', 'int
 pub fn register_builtin_symbols(mut ss Store, builtin_import &Import) {
 	builtin_path := builtin_import.path
 	placeholder_file_path := os.join_path(builtin_path, 'placeholder.vv')
-	defer {
-		unsafe { placeholder_file_path.free() }
-	}
+	// defer {
+	// unsafe { placeholder_file_path.free() }
+	// }
 
 	builtin_types := [
 		'voidptr',
@@ -69,7 +69,7 @@ pub fn register_builtin_symbols(mut ss Store, builtin_import &Import) {
 				kind: .array_
 				access: .public
 				is_top_level: true
-				children: [returned_sym]
+				children_syms: [returned_sym]
 				file_path: os.join_path(builtin_path, 'array.vv')
 				file_version: 0
 			}

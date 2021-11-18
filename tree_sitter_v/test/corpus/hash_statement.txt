@@ -1,0 +1,106 @@
+===
+C Defines Clause
+===
+
+#define Expr_123 'test'
+
+---
+
+(source_file (hash_statement))
+
+===
+Define with optional value
+===
+
+module fontstash
+
+#flag -I @VEXEROOT/thirdparty/fontstash
+#define FONTSTASH_IMPLEMENTATION
+$if gcboehm ? {
+	#define FONTSTASH_MALLOC GC_MALLOC
+	#define FONTSTASH_REALLOC GC_REALLOC
+	#define FONTSTASH_FREE GC_FREE
+}
+#include "fontstash.h"
+#flag -I /usr/local/Cellar/freetype/2.10.2/include/freetype2
+
+---
+
+(source_file
+  (module_clause
+    (module_identifier))
+  (hash_statement)
+  (hash_statement)
+  (comptime_if_expression
+    (identifier)
+    (block
+      (hash_statement)
+      (hash_statement)
+      (hash_statement)))
+  (hash_statement)
+  (hash_statement))
+
+===
+C Flag Clause
+===
+
+#flag windows -l shell32
+
+---
+
+(source_file (hash_statement))
+
+===
+C include clause with traditional syntax
+===
+
+#include <foo.h>
+
+---
+
+(source_file (hash_statement))
+
+===
+C include clause with error message
+===
+
+#include <X11/Xlib.h> # Please install a package with the X11 development headers, for example: `apt-get install libx11-dev`
+
+---
+
+(source_file (hash_statement))
+
+===
+C include clause
+===
+
+#include "test.h"
+
+---
+
+(source_file (hash_statement))
+
+===
+#pkgconfig directive
+===
+
+$if macos {
+	#pkgconfig bdw-gc
+} $else $if openbsd || freebsd {
+	#flag -I/usr/local/include
+	#flag -L/usr/local/lib
+}
+
+---
+
+(source_file
+  (comptime_if_expression
+    (identifier)
+    (block (hash_statement))
+    (comptime_if_expression
+      (binary_expression
+        (identifier)
+        (identifier))
+      (block
+        (hash_statement)
+        (hash_statement)))))

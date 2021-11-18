@@ -1,5 +1,5 @@
 import server
-import server.testing
+import test_utils
 import json
 import lsp
 import os
@@ -29,13 +29,15 @@ const signature_help_results = {
 }
 
 fn test_signature_help() {
-	mut io := testing.Testio{}
+	mut io := test_utils.Testio{
+		test_files_dir: test_utils.get_test_files_path(@FILE)
+	}
 	mut ls := server.new(io)
 	ls.dispatch(io.request_with_params('initialize', lsp.InitializeParams{
 		root_uri: lsp.document_uri_from_path(os.join_path(os.dir(@FILE), 'test_files',
 			'signature_help'))
 	}))
-	test_files := testing.load_test_file_paths('signature_help') or {
+	test_files := io.load_test_file_paths('signature_help') or {
 		io.bench.fail()
 		eprintln(io.bench.step_message_fail(err.msg))
 		assert false

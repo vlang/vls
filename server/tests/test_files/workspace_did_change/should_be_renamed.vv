@@ -1,0 +1,5 @@
+module workspace_did_change
+
+fn what_does_the_fox_say() int {
+	return 1
+}

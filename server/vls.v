@@ -11,14 +11,20 @@ import analyzer
 import time
 import v.vmod
 
+pub const vls_build_commit = meta_vls_build_commit()
+
 pub const meta = meta_info()
+
+fn meta_vls_build_commit() string {
+	res := $env('VLS_BUILD_COMMIT')
+	return res
+}
 
 fn meta_info() vmod.Manifest {
 	parsed := vmod.decode(@VMOD_FILE) or { panic(err) }
-	build_commit := $if with_build_commit ? { '-' + $env('VLS_BUILD_COMMIT') } $else { '' }
 	return vmod.Manifest{
 		...parsed
-		version: parsed.version + build_commit
+		version: parsed.version + '.' + server.vls_build_commit
 	}
 }
 
@@ -26,6 +32,8 @@ fn meta_info() vmod.Manifest {
 // If the feature is experimental, the value name should have a `exp_` prefix
 pub enum Feature {
 	diagnostics
+	v_diagnostics
+	analyzer_diagnostics
 	formatting
 	document_symbol
 	workspace_symbol
@@ -42,6 +50,8 @@ pub enum Feature {
 fn feature_from_str(feature_name string) ?Feature {
 	match feature_name {
 		'diagnostics' { return Feature.diagnostics }
+		'v_diagnostics' { return Feature.v_diagnostics }
+		'analyzer_diagnostics' { return Feature.analyzer_diagnostics }
 		'formatting' { return Feature.formatting }
 		'document_symbol' { return Feature.document_symbol }
 		'workspace_symbol' { return Feature.workspace_symbol }
@@ -57,6 +67,7 @@ fn feature_from_str(feature_name string) ?Feature {
 pub const (
 	default_features_list = [
 		Feature.diagnostics,
+		.v_diagnostics,
 		.formatting,
 		.document_symbol,
 		.workspace_symbol,
@@ -69,11 +80,12 @@ pub const (
 	]
 )
 
-interface ReceiveSender {
+pub interface ReceiveSender {
 	debug bool
-	init() ?
+mut:
 	send(data string)
 	receive() ?string
+	init() ?
 }
 
 struct Vls {
@@ -119,7 +131,7 @@ pub fn new(io ReceiveSender) Vls {
 
 pub fn (mut ls Vls) dispatch(payload string) {
 	request := json.decode(jsonrpc.Request, payload) or {
-		ls.send(new_error(jsonrpc.parse_error))
+		ls.send(new_error(jsonrpc.parse_error, ''))
 		return
 	}
 	// The server will log a send request/notification
@@ -129,14 +141,10 @@ pub fn (mut ls Vls) dispatch(payload string) {
 	//
 	// Notification has no ID attached so the server can detect
 	// if its a notification or a request payload by checking
-	// if the ID is on the default value which is -2. (Some
-	// clients such as VSCode used 0 as the first request ID
-	// hence the use of a negative integer).
-	if request.id == -2 {
-		ls.logger.notification(payload, .send)
+	// if the ID is empty.
+	if request.id.len == 0 {
 		ls.logger.notification(payload, .receive)
 	} else {
-		ls.logger.request(payload, .send)
 		ls.logger.request(payload, .receive)
 	}
 	if ls.status == .initialized {
@@ -151,14 +159,17 @@ pub fn (mut ls Vls) dispatch(payload string) {
 				// or other possible alternatives, the solution for now is to
 				// immediately exit when the server receives a shutdown request.
 				// Freeing extra memory here
-				ls.exit()
-				// ls.shutdown(request.id)
+				ls.shutdown(request.id)
 			}
 			'exit' {
 				// ignore for the reasons stated in the above comment
+				// ls.exit()
 			}
 			'textDocument/didOpen' {
 				ls.did_open(request.id, request.params)
+			}
+			'textDocument/didSave' {
+				ls.did_save(request.id, request.params)
 			}
 			'textDocument/didChange' {
 				ls.typing_ch <- 1
@@ -194,6 +205,9 @@ pub fn (mut ls Vls) dispatch(payload string) {
 			'textDocument/implementation' {
 				ls.implementation(request.id, request.params)
 			}
+			'workspace/didChangeWatchedFiles' {
+				ls.did_change_watched_files(request.params)
+			}
 			else {}
 		}
 	} else {
@@ -210,7 +224,7 @@ pub fn (mut ls Vls) dispatch(payload string) {
 				} else {
 					jsonrpc.server_not_initialized
 				}
-				ls.send(new_error(err_type))
+				ls.send(new_error(err_type, request.id))
 			}
 		}
 	}
@@ -265,31 +279,24 @@ fn (mut ls Vls) panic(message string) {
 	}
 }
 
-fn (mut ls Vls) send<T>(data T) {
-	str := json.encode(data)
+fn (mut ls Vls) send<T>(resp jsonrpc.Response<T>) {
+	str := resp.json()
 	ls.logger.response(str, .send)
 	ls.io.send(str)
-	// See line 113 for the explanation
-	ls.logger.response(str, .receive)
 }
 
-// TODO: set result param type to jsonrpc.NotificationMessage<T>
-// merge notify back to send method once compile-time type introspection
-// supports base generic types (e.g $if T is jsonrpc.NotificationMessage)
-fn (mut ls Vls) notify<T>(data T) {
-	str := json.encode(data)
+// notify sends a notification to the client
+fn (mut ls Vls) notify<T>(data jsonrpc.NotificationMessage<T>) {
+	str := data.json()
 	ls.logger.notification(str, .send)
 	ls.io.send(str)
-	// See line 113 for the explanation
-	ls.logger.notification(str, .receive)
 }
 
 // send_null sends a null result to the client
-fn (mut ls Vls) send_null(id int) {
-	str := '{"jsonrpc":"2.0","id":$id,"result":null}'
+fn (mut ls Vls) send_null(id string) {
+	str := '{"jsonrpc":"$jsonrpc.version","id":$id,"result":null}'
 	ls.logger.response(str, .send)
 	ls.io.send(str)
-	ls.logger.response(str, .receive)
 }
 
 fn monitor_changes(mut ls Vls) {
@@ -305,10 +312,9 @@ fn monitor_changes(mut ls Vls) {
 				}
 
 				uri := lsp.document_uri_from_path(ls.store.cur_file_path)
-				analyze(mut ls.store, ls.root_uri, ls.trees[uri], ls.sources[uri])
+				ls.analyze_file(ls.trees[uri], ls.sources[uri])
 				ls.is_typing = false
 				ls.show_diagnostics(uri)
-				unsafe { uri.free() }
 			}
 		}
 	}
@@ -319,7 +325,7 @@ pub fn (mut ls Vls) start_loop() {
 	go monitor_changes(mut ls)
 	ls.io.init() or { panic(err) }
 
-		// Show message that VLS is not yet ready!
+	// Show message that VLS is not yet ready!
 	ls.show_message('VLS is a work-in-progress, pre-alpha language server. It may not be guaranteed to work reliably due to memory issues and other related factors. We encourage you to submit an issue if you encounter any problems.',
 		.warning)
 
@@ -352,6 +358,14 @@ pub fn (mut ls Vls) set_features(features []string, enable bool) ? {
 	}
 }
 
+pub fn (ls Vls) launch_v_tool(args ...string) &os.Process {
+	full_v_path := os.join_path(ls.vroot_path, 'v')
+	mut p := os.new_process(full_v_path)
+	p.set_args(args)
+	p.set_redirect_stdio()
+	return p
+}
+
 pub enum ServerStatus {
 	off
 	initialized
@@ -359,8 +373,9 @@ pub enum ServerStatus {
 }
 
 [inline]
-fn new_error(code int) jsonrpc.Response2<string> {
-	return jsonrpc.Response2<string>{
+fn new_error(code int, id string) jsonrpc.Response<string> {
+	return jsonrpc.Response<string>{
+		id: id
 		error: jsonrpc.new_response_error(code)
 	}
 }
@@ -372,12 +387,12 @@ pub fn detect_vroot_path() ?string {
 	}
 
 	vexe_path_from_env := os.getenv('VEXE')
-	defer {
-		unsafe {
-			vroot_env.free()
-			vexe_path_from_env.free()
-		}
-	}
+	// defer {
+	// 	unsafe {
+	// 		vroot_env.free()
+	// 		vexe_path_from_env.free()
+	// 	}
+	// }
 
 	// Return the directory of VEXE if present
 	if vexe_path_from_env.len != 0 {
@@ -387,19 +402,19 @@ pub fn detect_vroot_path() ?string {
 	// Find the V executable in PATH
 	path_env := os.getenv('PATH')
 	paths := path_env.split(path_list_sep)
-	defer {
-		unsafe {
-			vexe_path_from_env.free()
-			paths.free()
-		}
-	}
+	// defer {
+	// 	unsafe {
+	// 		vexe_path_from_env.free()
+	// 		paths.free()
+	// 	}
+	// }
 
 	for path in paths {
 		full_path := os.join_path(path, v_exec_name)
 		if os.exists(full_path) && os.is_executable(full_path) {
-			defer {
-				unsafe { full_path.free() }
-			}
+			// defer {
+			// 	unsafe { full_path.free() }
+			// }
 			if os.is_link(full_path) {
 				// Get the real path of the V executable
 				full_real_path := os.real_path(full_path)
@@ -411,7 +426,7 @@ pub fn detect_vroot_path() ?string {
 				return os.dir(full_path)
 			}
 		}
-		unsafe { full_path.free() }
+		// unsafe { full_path.free() }
 	}
 
 	return error('V path not found.')

@@ -4,34 +4,34 @@ module server
 
 // any node that is separated by a comma or other symbol
 const list_node_types = ['expression_list', 'identifier_list', 'assignable_identifier_list',
-	'argument_list', 'array', 'import_symbols_list']
+	'argument_list', 'array', 'import_symbols_list', 'type_list']
 
 const other_node_types = ['if_expression', 'for_statement', 'return_statement', 'for_in_operator',
 	'binary_expression', 'unary_expression']
 
 fn traverse_node(root_node C.TSNode, offset u32) C.TSNode {
-	root_type := root_node.get_type()
-	direct_named_child := root_node.first_named_child_for_byte(offset)
-	child_type := direct_named_child.get_type()
-	if direct_named_child.is_null() {
-		return root_node
-	}
+	// TODO: return root_node for now. function must return ?C.TSNode
+	root_type_name := root_node.type_name()
+	direct_named_child := root_node.first_named_child_for_byte(offset) or { return root_node }
+	child_type_name := direct_named_child.type_name()
 
-	if (!root_type.ends_with('_declaration') && root_type !in server.list_node_types
-		&& root_type !in server.other_node_types)
-		&& (child_type.ends_with('identifier') || child_type == 'builtin_type') {
-		if root_type == 'selector_expression' {
+	if (!root_type_name.ends_with('_declaration') && root_type_name !in server.list_node_types
+		&& root_type_name !in server.other_node_types)
+		&& (child_type_name.ends_with('identifier') || child_type_name == 'builtin_type') {
+		if root_type_name == 'selector_expression' {
 			root_children_count := root_node.named_child_count()
 			for i := u32(0); i < root_children_count; i++ {
-				selected_child_node := root_node.named_child(i)
+				selected_child_node := root_node.named_child(i) or { continue }
+
 				if selected_child_node.range().eq(direct_named_child.range()) && i == 0 {
 					return direct_named_child
 				}
 			}
-		} else if root_type == 'index_expression' {
-			index_node := root_node.child_by_field_name('index')
-			if index_node.range().eq(direct_named_child.range()) {
-				return direct_named_child
+		} else if root_type_name == 'index_expression' {
+			if index_node := root_node.child_by_field_name('index') {
+				if index_node.range().eq(direct_named_child.range()) {
+					return direct_named_child
+				}
 			}
 		}
 
@@ -50,17 +50,17 @@ fn traverse_node(root_node C.TSNode, offset u32) C.TSNode {
 // for auto-completion
 fn traverse_node2(starting_node C.TSNode, offset u32) C.TSNode {
 	mut root_node := starting_node
-	mut root_type := root_node.get_type()
+	mut root_type_name := root_node.type_name()
 
-	direct_named_child := root_node.first_named_child_for_byte(offset)
-	child_type := direct_named_child.get_type()
+	direct_named_child := root_node.first_named_child_for_byte(offset) or { return root_node }
 
-	if child_type.ends_with('_literal') {
+	child_type_name := direct_named_child.type_name()
+
+	if child_type_name.ends_with('_literal') {
 		return root_node
 	}
 
-	if direct_named_child.is_null()
-		|| (direct_named_child.is_error() && direct_named_child.is_missing()) {
+	if direct_named_child.is_error() && direct_named_child.is_missing() {
 		// root_node = root_node.first_child_for_byte(offset)
 		// if !root_node.prev_named_sibling().is_null() {
 		// 	root_node = root_node.prev_named_sibling()
@@ -68,21 +68,22 @@ fn traverse_node2(starting_node C.TSNode, offset u32) C.TSNode {
 		return root_node
 	}
 
-	if (!root_type.ends_with('_declaration') && root_type !in server.list_node_types
-		&& root_type != 'block')
-		&& (child_type.ends_with('identifier') || child_type == 'builtin_type') {
-		if root_type == 'selector_expression' {
+	if (!root_type_name.ends_with('_declaration') && root_type_name !in server.list_node_types
+		&& root_type_name != 'block')
+		&& (child_type_name.ends_with('identifier') || child_type_name == 'builtin_type') {
+		if root_type_name == 'selector_expression' {
 			root_children_count := root_node.named_child_count()
 			for i := u32(0); i < root_children_count; i++ {
-				selected_child_node := root_node.named_child(i)
+				selected_child_node := root_node.named_child(i) or { continue }
 				if selected_child_node.range().eq(direct_named_child.range()) && i == 0 {
 					return direct_named_child
 				}
 			}
-		} else if root_type == 'index_expression' {
-			index_node := root_node.child_by_field_name('index')
-			if index_node.range().eq(direct_named_child.range()) {
-				return direct_named_child
+		} else if root_type_name == 'index_expression' {
+			if index_node := root_node.child_by_field_name('index') {
+				if index_node.range().eq(direct_named_child.range()) {
+					return direct_named_child
+				}
 			}
 		}
 
@@ -102,9 +103,9 @@ fn closest_named_child(starting_node C.TSNode, offset u32) C.TSNode {
 	named_child_count := starting_node.named_child_count()
 	mut selected_node := starting_node
 	for i in u32(0) .. named_child_count {
-		child_node := starting_node.named_child(i)
+		child_node := starting_node.named_child(i) or { continue }
 		if !child_node.is_null() && child_node.start_byte() <= offset
-			&& (child_node.get_type() == 'import_symbols' || child_node.end_byte() <= offset) {
+			&& (child_node.type_name() == 'import_symbols' || child_node.end_byte() <= offset) {
 			selected_node = child_node
 		} else {
 			break
@@ -121,13 +122,14 @@ const other_symbol_node_types = ['assignment_statement', 'call_expression', 'sel
 // to the nearest node that has a valid, lookup-able symbol node
 // (nodes with names, module name, and etc.)
 fn closest_symbol_node_parent(child_node C.TSNode) C.TSNode {
-	parent_node := child_node.parent()
-	parent_type := parent_node.get_type()
-	if parent_node.is_null() || parent_type == 'source_file' || parent_type == 'block' {
+	parent_node := child_node.parent() or { return child_node }
+	parent_type_name := parent_node.type_name()
+	if parent_type_name == 'source_file' || parent_type_name == 'block' {
 		return child_node
 	}
 
-	if parent_type.ends_with('_declaration') || parent_type in server.other_symbol_node_types {
+	if parent_type_name.ends_with('_declaration')
+		|| parent_type_name in server.other_symbol_node_types {
 		return parent_node
 	}
 
