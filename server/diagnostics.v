@@ -59,6 +59,10 @@ fn (ls Vls) v_msg_to_diagnostic(from_file_path string, msg string) ?lsp.Diagnost
 
 // exec_v_diagnostics returns a list of errors/warnings taken from `v -check`
 fn (mut ls Vls) exec_v_diagnostics(uri lsp.DocumentUri) ?[]lsp.Diagnostic {
+	if Feature.v_diagnostics !in ls.enabled_features {
+		return none
+	}
+
 	dir_path := uri.dir_path()
 	file_path := uri.path()
 	input_path := if file_path.ends_with('.vv') { file_path } else { dir_path }
