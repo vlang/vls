@@ -1,0 +1,7 @@
+pub const foo = 1
+const bar = 'hello'
+
+---
+
+(pub variable foo int [0,10]-[0,13])
+(variable bar string [1,6]-[1,9])

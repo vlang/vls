@@ -10,9 +10,9 @@ const (
 	global_struct_keyword  = '__global:'
 )
 
-struct SymbolRegistration {
+struct SymbolAnalyzer {
 mut:
-	store       &Store = &Store(0)
+	store       &Store     [required]
 	cursor      TreeCursor
 	module_name string
 	src_text    []byte
@@ -21,10 +21,11 @@ mut:
 	// visibility
 	is_import          bool
 	is_script          bool
+	is_test            bool
 	first_var_decl_pos C.TSRange
 }
 
-fn (sr &SymbolRegistration) new_top_level_symbol(identifier_node C.TSNode, access SymbolAccess, kind SymbolKind) ?&Symbol {
+fn (sr &SymbolAnalyzer) new_top_level_symbol(identifier_node C.TSNode, access SymbolAccess, kind SymbolKind) ?&Symbol {
 	id_node_type_name := identifier_node.type_name()
 	if id_node_type_name == 'qualified_type' {
 		return report_error('Invalid top-level node type `$id_node_type_name`', identifier_node.range())
@@ -75,15 +76,15 @@ fn (sr &SymbolRegistration) new_top_level_symbol(identifier_node C.TSNode, acces
 	return symbol
 }
 
-fn (mut sr SymbolRegistration) get_scope(node C.TSNode) ?&ScopeTree {
-	if sr.is_import {
-		return error('Cannot use scope in import mode')
+fn (mut sr SymbolAnalyzer) get_scope(node C.TSNode) ?&ScopeTree {
+	if sr.is_import || sr.is_test {
+		return error('Cannot use scope in import or test mode')
 	}
 
 	return sr.store.get_scope_from_node(node)
 }
 
-fn (mut sr SymbolRegistration) const_decl(const_node C.TSNode) ?[]&Symbol {
+fn (mut sr SymbolAnalyzer) const_decl(const_node C.TSNode) ?[]&Symbol {
 	mut access := SymbolAccess.private
 	if const_node.child(0) ?.type_name() == 'pub' {
 		access = .public
@@ -101,14 +102,14 @@ fn (mut sr SymbolRegistration) const_decl(const_node C.TSNode) ?[]&Symbol {
 
 		mut return_sym := void_sym
 		if value_node := spec_node.child_by_field_name('value') {
-			sr.store.infer_value_type_from_node(value_node, sr.src_text)
+			return_sym = sr.store.infer_value_type_from_node(value_node, sr.src_text)
 		}
 
 		consts << &Symbol{
 			name: spec_node.child_by_field_name('name') ?.code(sr.src_text)
 			kind: .variable
 			access: access
-			range: spec_node.range()
+			range: spec_node.child_by_field_name('name') ?.range()
 			is_top_level: true
 			is_const: true
 			file_path: sr.store.cur_file_path
@@ -120,7 +121,7 @@ fn (mut sr SymbolRegistration) const_decl(const_node C.TSNode) ?[]&Symbol {
 	return consts
 }
 
-fn (mut sr SymbolRegistration) struct_decl(struct_decl_node C.TSNode) ?&Symbol {
+fn (mut sr SymbolAnalyzer) struct_decl(struct_decl_node C.TSNode) ?&Symbol {
 	mut access := SymbolAccess.private
 	if struct_decl_node.child(0) ?.type_name() == 'pub' {
 		access = .public
@@ -165,7 +166,7 @@ fn (mut sr SymbolRegistration) struct_decl(struct_decl_node C.TSNode) ?&Symbol {
 	return sym
 }
 
-fn (mut sr SymbolRegistration) struct_field_decl(field_access SymbolAccess, field_decl_node C.TSNode) ?&Symbol {
+fn (mut sr SymbolAnalyzer) struct_field_decl(field_access SymbolAccess, field_decl_node C.TSNode) ?&Symbol {
 	field_type_node := field_decl_node.child_by_field_name('type') ?
 	field_sym := sr.store.find_symbol_by_type_node(field_type_node, sr.src_text) or { void_sym }
 	field_name_node := field_decl_node.child_by_field_name('name') or {
@@ -199,7 +200,7 @@ fn (mut sr SymbolRegistration) struct_field_decl(field_access SymbolAccess, fiel
 	}
 }
 
-fn (mut sr SymbolRegistration) interface_decl(interface_decl_node C.TSNode) ?&Symbol {
+fn (mut sr SymbolAnalyzer) interface_decl(interface_decl_node C.TSNode) ?&Symbol {
 	mut access := SymbolAccess.private
 	if interface_decl_node.child(0) ?.type_name() == 'pub' {
 		access = SymbolAccess.public
@@ -272,7 +273,7 @@ fn (mut sr SymbolRegistration) interface_decl(interface_decl_node C.TSNode) ?&Sy
 	return sym
 }
 
-fn (mut sr SymbolRegistration) enum_decl(enum_decl_node C.TSNode) ?&Symbol {
+fn (mut sr SymbolAnalyzer) enum_decl(enum_decl_node C.TSNode) ?&Symbol {
 	mut access := SymbolAccess.private
 	if enum_decl_node.child(0) ?.type_name() == 'pub' {
 		access = SymbolAccess.public
@@ -328,7 +329,7 @@ fn (mut sr SymbolRegistration) enum_decl(enum_decl_node C.TSNode) ?&Symbol {
 	return sym
 }
 
-fn (mut sr SymbolRegistration) fn_decl(fn_node C.TSNode) ?&Symbol {
+fn (mut sr SymbolAnalyzer) fn_decl(fn_node C.TSNode) ?&Symbol {
 	mut access := SymbolAccess.private
 	if fn_node.child(0) ?.type_name() == 'pub' {
 		access = SymbolAccess.public
@@ -352,9 +353,7 @@ fn (mut sr SymbolRegistration) fn_decl(fn_node C.TSNode) ?&Symbol {
 	mut scope := sr.get_scope(body_node) or { &ScopeTree(0) }
 	fn_sym.access = access
 	fn_sym.return_sym = sr.store.find_symbol_by_type_node(return_node, sr.src_text) or { void_sym }
-	mut is_method := false
 	if receiver_node := fn_node.child_by_field_name('receiver') {
-		is_method = true
 		mut receivers := extract_parameter_list(receiver_node, mut sr.store, sr.src_text)
 		if receivers.len != 0 {
 			mut parent := receivers[0].return_sym
@@ -380,18 +379,14 @@ fn (mut sr SymbolRegistration) fn_decl(fn_node C.TSNode) ?&Symbol {
 	}
 
 	// extract function body
-	if !body_node.is_null() && !sr.is_import {
+	if !body_node.is_null() && !sr.is_import && !sr.is_test {
 		sr.extract_block(body_node, mut scope) ?
 	}
 
-	if is_method {
-		return none
-	} else {
-		return fn_sym
-	}
+	return fn_sym
 }
 
-fn (mut sr SymbolRegistration) type_decl(type_decl_node C.TSNode) ?&Symbol {
+fn (mut sr SymbolAnalyzer) type_decl(type_decl_node C.TSNode) ?&Symbol {
 	mut access := SymbolAccess.private
 	if type_decl_node.child(0) ?.type_name() == 'pub' {
 		access = SymbolAccess.public
@@ -428,14 +423,9 @@ fn (mut sr SymbolRegistration) type_decl(type_decl_node C.TSNode) ?&Symbol {
 	return sym
 }
 
-fn (mut sr SymbolRegistration) top_level_decl() ? {
-	defer {
-		sr.cursor.next()
-	}
-
+fn (mut sr SymbolAnalyzer) top_level_decl(current_node C.TSNode) ?[]&Symbol {
 	mut global_scope := sr.store.opened_scopes[sr.store.cur_file_path]
-	node_type_name := sr.cursor.current_node() ?.type_name()
-
+	node_type_name := current_node.type_name()
 	match node_type_name {
 		// TODO: add module check
 		// 'module_clause' {
@@ -443,52 +433,38 @@ fn (mut sr SymbolRegistration) top_level_decl() ? {
 		// 	defer { unsafe { module_name.free() } }
 		// }
 		'const_declaration' {
-			mut const_syms := sr.const_decl(sr.cursor.current_node() ?) ?
-			for i := 0; i < const_syms.len; i++ {
-				mut const_sym := const_syms[i]
-				sr.store.register_symbol(mut const_sym) or {
-					// if err is AnalyzerError {
-					// 	// eprintln(err.str())
-					// } else {
-					// 	// eprintln('Unknown error')
-					// }
-					continue
-				}
-
-				global_scope.register(const_sym) or { continue }
-			}
-
+			return sr.const_decl(current_node)
 			// unsafe { const_syms.free() }
 		}
 		'enum_declaration' {
-			mut sym := sr.enum_decl(sr.cursor.current_node() ?) ?
-			sr.store.register_symbol(mut sym) ?
+			sym := sr.enum_decl(current_node) ?
+			return [sym]
 		}
 		'function_declaration' {
-			mut sym := sr.fn_decl(sr.cursor.current_node() ?) ?
-			sr.store.register_symbol(mut sym) ?
+			sym := sr.fn_decl(current_node) ?
+			return [sym]
 		}
 		'interface_declaration' {
-			mut sym := sr.interface_decl(sr.cursor.current_node() ?) ?
-			sr.store.register_symbol(mut sym) ?
+			sym := sr.interface_decl(current_node) ?
+			return [sym]
 		}
 		'struct_declaration' {
-			mut sym := sr.struct_decl(sr.cursor.current_node() ?) ?
-			sr.store.register_symbol(mut sym) ?
+			sym := sr.struct_decl(current_node) ?
+			return [sym]
 		}
 		'type_declaration' {
-			mut sym := sr.type_decl(sr.cursor.current_node() ?) ?
-			sr.store.register_symbol(mut sym) ?
+			sym := sr.type_decl(current_node) ?
+			return [sym]
 		}
 		else {
-			stmt_node := sr.cursor.current_node() ?
+			stmt_node := current_node
 			if node_type_name == 'short_var_declaration' {
 				sr.is_script = true
 				sr.first_var_decl_pos = stmt_node.range()
 
 				// Check if main function is present
 				if main_fn_sym := sr.store.symbols[sr.store.cur_dir].get('main') {
-					sr.store.report_error(AnalyzerError{
+					return IError(AnalyzerError{
 						msg: 'function `main` is already defined'
 						range: main_fn_sym.range
 					})
@@ -496,11 +472,12 @@ fn (mut sr SymbolRegistration) top_level_decl() ? {
 			}
 
 			sr.statement(stmt_node, mut global_scope) ?
+			return []
 		}
 	}
 }
 
-fn (mut sr SymbolRegistration) short_var_decl(var_decl C.TSNode) ?[]&Symbol {
+fn (mut sr SymbolAnalyzer) short_var_decl(var_decl C.TSNode) ?[]&Symbol {
 	left_expr_lists := var_decl.child_by_field_name('left') ?
 	right_expr_lists := var_decl.child_by_field_name('right') ?
 	left_len := left_expr_lists.named_child_count()
@@ -547,7 +524,7 @@ fn (mut sr SymbolRegistration) short_var_decl(var_decl C.TSNode) ?[]&Symbol {
 }
 
 // TODO: move to analyzer perhaps?
-fn (mut sr SymbolRegistration) fn_literal(fn_node C.TSNode) ? {
+fn (mut sr SymbolAnalyzer) fn_literal(fn_node C.TSNode) ? {
 	body_node := fn_node.child_by_field_name('body') ?
 	params_list_node := fn_node.child_by_field_name('parameters') ?
 	// return_node := fn_node.child_by_field_name('result')
@@ -566,7 +543,7 @@ fn (mut sr SymbolRegistration) fn_literal(fn_node C.TSNode) ? {
 	}
 }
 
-fn (mut sr SymbolRegistration) if_expression(if_stmt_node C.TSNode) ? {
+fn (mut sr SymbolAnalyzer) if_expression(if_stmt_node C.TSNode) ? {
 	body_node := if_stmt_node.child_by_field_name('consequence') ?
 	mut scope := sr.get_scope(body_node) or { &ScopeTree(0) }
 	if initializer_node := if_stmt_node.child_by_field_name('initializer') {
@@ -587,7 +564,7 @@ fn (mut sr SymbolRegistration) if_expression(if_stmt_node C.TSNode) ? {
 	}
 }
 
-fn (mut sr SymbolRegistration) for_statement(for_stmt_node C.TSNode) ? {
+fn (mut sr SymbolAnalyzer) for_statement(for_stmt_node C.TSNode) ? {
 	named_child_count := for_stmt_node.named_child_count()
 	body_node := for_stmt_node.child_by_field_name('body') ?
 	mut scope := sr.get_scope(body_node) or { &ScopeTree(0) }
@@ -663,7 +640,7 @@ fn (mut sr SymbolRegistration) for_statement(for_stmt_node C.TSNode) ? {
 	sr.extract_block(body_node, mut scope) ?
 }
 
-fn (mut sr SymbolRegistration) expression(node C.TSNode) ? {
+fn (mut sr SymbolAnalyzer) expression(node C.TSNode) ? {
 	match node.type_name() {
 		'if_expression' {
 			sr.if_expression(node) ?
@@ -674,7 +651,7 @@ fn (mut sr SymbolRegistration) expression(node C.TSNode) ? {
 	}
 }
 
-fn (mut sr SymbolRegistration) statement(node C.TSNode, mut scope ScopeTree) ? {
+fn (mut sr SymbolAnalyzer) statement(node C.TSNode, mut scope ScopeTree) ? {
 	match node.type_name() {
 		'short_var_declaration' {
 			vars := sr.short_var_decl(node) ?
@@ -695,9 +672,9 @@ fn (mut sr SymbolRegistration) statement(node C.TSNode, mut scope ScopeTree) ? {
 	}
 }
 
-fn (mut sr SymbolRegistration) extract_block(node C.TSNode, mut scope ScopeTree) ? {
-	if node.type_name() != 'block' || sr.is_import {
-		return error('node should be a `block` and cannot be used in `is_import` mode.')
+fn (mut sr SymbolAnalyzer) extract_block(node C.TSNode, mut scope ScopeTree) ? {
+	if node.type_name() != 'block' || sr.is_import || sr.is_test {
+		return error('node should be a `block` and cannot be used in `is_import` or test mode.')
 	}
 
 	body_sym_len := node.named_child_count()
@@ -740,32 +717,56 @@ fn extract_parameter_list(node C.TSNode, mut store Store, src_text []byte) []&Sy
 	return syms
 }
 
-// register_symbols_from_tree scans and registers all the symbols based on the given tree
-pub fn (mut store Store) register_symbols_from_tree(tree &C.TSTree, src_text []byte) {
-	root_node := tree.root_node()
-	child_len := int(root_node.child_count())
-
-	mut sr := SymbolRegistration{
-		store: unsafe { store }
-		src_text: src_text
-		cursor: TreeCursor{
-			child_count: u32(child_len)
-			cursor: root_node.tree_cursor()
-		}
-	}
-
+// analyze scans and returns a list of symbols and messages (errors/warnings)
+pub fn (mut sr SymbolAnalyzer) analyze() ([]&Symbol, []Message) {
 	if cur_node := sr.cursor.current_node() {
 		sr.get_scope(cur_node) or {}
 	}
 
-	sr.cursor.to_first_child()
-
-	for _ in 0 .. child_len {
-		sr.top_level_decl() or {
-			eprintln(err)
-			sr.store.report_error(err)
+	mut global_scope := sr.store.opened_scopes[sr.store.cur_file_path]
+	mut messages := []Message{cap: 100}
+	mut symbols := []&Symbol{cap: 255}
+	for got_node in sr.cursor {
+		mut syms := sr.top_level_decl(got_node) or {
+			// messages.report(err)
 			continue
 		}
+		if !sr.is_test {
+			for mut sym in syms {
+				if sym.kind == .function && !sym.parent_sym.is_void() {
+					continue
+				}
+
+				sr.store.register_symbol(mut *sym) or {
+					// add error message
+					continue
+				}
+
+				if sym.kind == .variable {
+					global_scope.register(*sym) or { continue }
+				}
+			}
+		}
+		symbols << syms
 	}
-	// unsafe { sr.cursor.free() }
+	return symbols, messages
+}
+
+// register_symbols_from_tree scans and registers all the symbols based on the given tree
+pub fn (mut store Store) register_symbols_from_tree(tree &C.TSTree, src_text []byte, is_import bool) {
+	mut sr := new_symbol_analyzer(store, tree.root_node(), src_text, is_import)
+	_, got_messages := sr.analyze()
+	for msg in got_messages {
+		store.report(msg)
+	}
+}
+
+// new_symbol_analyzer creates an instance of SymbolAnalyzer with the given store, tree, source, and is_import.
+pub fn new_symbol_analyzer(store &Store, root_node C.TSNode, src_text []byte, is_import bool) SymbolAnalyzer {
+	return SymbolAnalyzer{
+		store: unsafe { store }
+		src_text: src_text
+		cursor: new_tree_cursor(root_node)
+		is_import: is_import
+	}
 }

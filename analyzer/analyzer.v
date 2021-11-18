@@ -1,46 +1,6 @@
 module analyzer
 
-struct TreeCursor {
-mut:
-	cur_child_idx u32
-	named_only    bool = true
-	child_count   u32            [required]
-	cursor        C.TSTreeCursor [required]
-}
-
-fn (mut tc TreeCursor) next() bool {
-	for tc.cur_child_idx < tc.child_count {
-		if !tc.cursor.next() {
-			return false
-		}
-		tc.cur_child_idx++
-		cur_node := tc.current_node() or { continue }
-		if tc.named_only && (cur_node.is_named() && !cur_node.is_extra()) {
-			break
-		}
-	}
-
-	return true
-}
-
-fn (mut tc TreeCursor) to_first_child() bool {
-	return tc.cursor.to_first_child()
-}
-
-fn (tc &TreeCursor) current_node() ?C.TSNode {
-	return tc.cursor.current_node()
-}
-
-[unsafe]
-fn (tc &TreeCursor) free() {
-	unsafe {
-		tc.cursor.free()
-		tc.cur_child_idx = 0
-		tc.child_count = 0
-	}
-}
-
-pub struct Analyzer {
+pub struct SemanticAnalyzer {
 pub mut:
 	cur_file_path string
 	cursor        TreeCursor
@@ -52,11 +12,11 @@ pub mut:
 	is_import bool
 }
 
-fn (mut an Analyzer) report(msg string, node C.TSNode) {
+fn (mut an SemanticAnalyzer) report(msg string, node C.TSNode) {
 	an.store.report_error(report_error(msg, node.range()))
 }
 
-fn (mut an Analyzer) import_decl(node C.TSNode) ? {
+fn (mut an SemanticAnalyzer) import_decl(node C.TSNode) ? {
 	// Most of the checking is already done in `import_modules_from_trees`
 	// Check only the symbols if they are available
 	symbols := node.child_by_field_name('symbols') ?
@@ -92,26 +52,22 @@ fn (mut an Analyzer) import_decl(node C.TSNode) ? {
 	}
 }
 
-fn (mut an Analyzer) const_decl(node C.TSNode) {
+fn (mut an SemanticAnalyzer) const_decl(node C.TSNode) {
 }
 
-fn (mut an Analyzer) struct_decl(node C.TSNode) {
+fn (mut an SemanticAnalyzer) struct_decl(node C.TSNode) {
 }
 
-fn (mut an Analyzer) interface_decl(node C.TSNode) {
+fn (mut an SemanticAnalyzer) interface_decl(node C.TSNode) {
 }
 
-fn (mut an Analyzer) enum_decl(node C.TSNode) {
+fn (mut an SemanticAnalyzer) enum_decl(node C.TSNode) {
 }
 
-fn (mut an Analyzer) fn_decl(node C.TSNode) {
+fn (mut an SemanticAnalyzer) fn_decl(node C.TSNode) {
 }
 
-pub fn (mut an Analyzer) top_level_statement() {
-	defer {
-		an.cursor.next()
-	}
-
+pub fn (mut an SemanticAnalyzer) top_level_statement() {
 	current_node := an.cursor.current_node() or { return }
 
 	match current_node.type_name() {
@@ -139,20 +95,14 @@ pub fn (mut an Analyzer) top_level_statement() {
 
 // analyze analyzes the given tree
 pub fn (mut store Store) analyze(tree &C.TSTree, src_text []byte) {
-	root_node := tree.root_node()
-	child_len := int(root_node.child_count())
-	mut an := Analyzer{
+	mut an := SemanticAnalyzer{
 		store: unsafe { store }
 		src_text: src_text
-		cursor: TreeCursor{
-			child_count: u32(child_len)
-			cursor: root_node.tree_cursor()
-		}
+		cursor: new_tree_cursor(tree.root_node())
 	}
 
 	an.cursor.to_first_child()
-
-	for _ in 0 .. child_len {
+	for _ in an.cursor {
 		an.top_level_statement()
 	}
 

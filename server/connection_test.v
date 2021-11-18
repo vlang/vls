@@ -1,6 +1,6 @@
 import server
 import os
-import server.testing
+import test_utils
 import net
 
 fn launch_cmd(exec_path string, args ...string) &os.Process {
@@ -64,7 +64,7 @@ fn compile_and_start_vls(args ...string) ?&os.Process {
 }
 
 fn test_stdio_connect() ? {
-	mut io := testing.Testio{}
+	mut io := test_utils.Testio{}
 	mut p := compile_and_start_vls() ?
 	defer {
 		p.close()
@@ -85,7 +85,7 @@ fn test_tcp_connect() ? {
 	$if windows {
 		return
 	}
-	mut io := testing.Testio{}
+	mut io := test_utils.Testio{}
 	mut p := compile_and_start_vls('--socket', '--port=5007') ?
 	defer {
 		p.close()

@@ -1,0 +1,17 @@
+struct Person {
+    name string
+pub mut:
+    age int
+mut:
+    place string
+__global:
+    gender byte
+}
+
+---
+
+(struct Person [0,7]-[0,13]
+    (field name string [1,4]-[1,8])
+    (pub mut field age int [3,4]-[3,7])
+    (mut field place string [5,4]-[5,9])
+    (__global field gender byte [7,4]-[7,10]))

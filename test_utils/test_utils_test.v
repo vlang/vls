@@ -1,4 +1,4 @@
-module testing
+module test_utils
 
 import json
 import jsonrpc

@@ -1,5 +1,5 @@
 import server
-import server.testing
+import test_utils
 import json
 import lsp
 import os
@@ -24,7 +24,7 @@ const doc_symbols_result = {
 			location: lsp.Location{
 				range: lsp.Range{
 					start: lsp.Position{5, 2}
-					end: lsp.Position{5, 15}
+					end: lsp.Position{5, 6}
 				}
 			}
 		},
@@ -34,7 +34,7 @@ const doc_symbols_result = {
 			location: lsp.Location{
 				range: lsp.Range{
 					start: lsp.Position{6, 2}
-					end: lsp.Position{6, 9}
+					end: lsp.Position{6, 5}
 				}
 			}
 		},
@@ -82,10 +82,12 @@ const doc_symbols_result = {
 }
 
 fn test_document_symbols() {
-	mut io := &testing.Testio{}
+	mut io := &test_utils.Testio{
+		test_files_dir: test_utils.get_test_files_path(@FILE)
+	}
 	mut ls := server.new(io)
 	ls.dispatch(io.request('initialize'))
-	test_files := testing.load_test_file_paths('document_symbols') or {
+	test_files := io.load_test_file_paths('document_symbols') or {
 		io.bench.fail()
 		eprintln(io.bench.step_message_fail(err.msg))
 		assert false

@@ -68,10 +68,7 @@ pub fn (mut ss Store) clear_messages() {
 
 // report inserts the message to the messages array
 pub fn (mut ss Store) report(msg Message) {
-	if ss.messages.has_range(msg.file_path, msg.range) {
-		return
-	}
-	ss.messages << msg
+	ss.messages.report(msg)
 }
 
 // is_file_active returns a boolean that checks if the given
@@ -1221,42 +1218,8 @@ pub fn (mut store Store) import_modules(mut imports []&Import) {
 			store.import_modules_from_tree(tree_from_import, content, modules_from_dir,
 				old_active_dir, modules_from_old_dir)
 			imported++
-
-			{
-				root_node := tree_from_import.root_node()
-				child_len := int(root_node.child_count())
-
-				mut sr := SymbolRegistration{
-					store: unsafe { store }
-					src_text: content
-					is_import: true
-					cursor: TreeCursor{
-						child_count: u32(child_len)
-						cursor: root_node.tree_cursor()
-					}
-				}
-
-				if cur_node := sr.cursor.current_node() {
-					sr.get_scope(cur_node) or {}
-				}
-
-				sr.cursor.to_first_child()
-
-				for _ in 0 .. child_len {
-					sr.top_level_decl() or {
-						sr.store.report_error(err)
-						continue
-					}
-				}
-
-				// unsafe { sr.cursor.free() }
-			}
+			store.register_symbols_from_tree(tree_from_import, content, true)
 			parser.reset()
-			// unsafe {
-			// modules_from_dir.free()
-			// content.free()
-			// tree_from_import.free()
-			// }
 		}
 
 		if imported > 0 {
