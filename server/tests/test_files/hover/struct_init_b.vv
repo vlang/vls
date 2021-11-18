@@ -3,7 +3,7 @@ module main
 import cli
 
 fn main() {
-  mut sub_cmd := cli.Command{
+	mut sub_cmd := cli.Command{
 		name: 'sub'
 		usage: 'arg1 arg2'
 		required_args: 2
