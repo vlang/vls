@@ -1,7 +1,7 @@
-#import <tree_sitter/parser.h>
-#import <ctype.h>
-#import <stdio.h>
-#import <string.h>
+#include <tree_sitter/parser.h>
+#include <ctype.h>
+#include <stdio.h>
+#include <string.h>
 
 enum TokenType {
     AUTOMATIC_SEPARATOR,
@@ -532,8 +532,6 @@ bool tree_sitter_v_external_scanner_scan(void *payload, TSLexer *lexer, const bo
             return scan_string_content(scanner, lexer);
         }
     }
-
-    
 
     return false;
 }
