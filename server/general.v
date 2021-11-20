@@ -81,9 +81,7 @@ fn (mut ls Vls) initialize(id string, params string) {
 	// Create the file either in debug mode or when the client trace is set to verbose.
 	if ls.debug || (!ls.debug && initialize_params.trace == 'verbose') {
 		// set up logger set to the workspace path
-		ls.setup_logger() or {
-			ls.show_message(err.msg, .error)
-		}
+		ls.setup_logger() or { ls.show_message(err.msg, .error) }
 	}
 
 	// print initial info
@@ -103,12 +101,13 @@ fn (mut ls Vls) setup_logger() ?string {
 	ls.logger.set_logpath(log_path) or {
 		sanitized_root_uri := ls.root_uri.path().replace_each(['/', '_', ':', '_'])
 		alt_log_path := os.join_path(os.home_dir(), 'vls__${sanitized_root_uri}.log')
-		ls.show_message('Cannot save log to ${log_path}. Saving log to ${alt_log_path}', .error)
-		
+		ls.show_message('Cannot save log to ${log_path}. Saving log to $alt_log_path',
+			.error)
+
 		// avoid saving log path in test
 		$if !test {
 			ls.logger.set_logpath(alt_log_path) or {
-				return error('Cannot save log to ${alt_log_path}')
+				return error('Cannot save log to $alt_log_path')
 			}
 		}
 
@@ -127,11 +126,11 @@ fn (mut ls Vls) print_info(client_info lsp.ClientInfo) {
 	}
 
 	// print important info for reporting
-	ls.log_message('VLS Version: $meta.version, OS: ${os.user_os()} $arch', .info)
-	ls.log_message('VLS executable path: ${os.executable()}', .info)
+	ls.log_message('VLS Version: $meta.version, OS: $os.user_os() $arch', .info)
+	ls.log_message('VLS executable path: $os.executable()', .info)
 	ls.log_message('VLS build with V ${@VHASH}', .info)
-	ls.log_message('Client / Editor: ${client_name}', .info)
-	ls.log_message('Using V path (VROOT): ${ls.vroot_path}', .info)
+	ls.log_message('Client / Editor: $client_name', .info)
+	ls.log_message('Using V path (VROOT): $ls.vroot_path', .info)
 }
 
 fn (mut ls Vls) process_builtin() {
