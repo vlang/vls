@@ -27,8 +27,11 @@ mut:
 	max_nr_responses int = 1
 	current_req_id   int = 1
 	decoded_resp_idx int = -1
+	response         TestResponse // parsed response data from raw_response
 pub mut:
+	bench         benchmark.Benchmark = benchmark.new_benchmark()
 	raw_responses []string // raw JSON string of the response data
+	debug         bool
 }
 
 pub fn (mut io Testio) send(data string) {
