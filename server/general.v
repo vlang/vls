@@ -99,7 +99,7 @@ fn (mut ls Vls) setup_logger() ?string {
 	}
 
 	ls.logger.set_logpath(log_path) or {
-		sanitized_root_uri := ls.root_uri.path().replace_each(['/', '_', ':', '_'])
+		sanitized_root_uri := ls.root_uri.path().replace_each(['/', '_', ':', '_', '\\', '_'])
 		alt_log_path := os.join_path(os.home_dir(), 'vls__${sanitized_root_uri}.log')
 		ls.show_message('Cannot save log to ${log_path}. Saving log to $alt_log_path',
 			.error)
