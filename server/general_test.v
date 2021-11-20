@@ -95,7 +95,9 @@ fn test_setup_logger() ? {
 	assert method == 'window/showMessage'
 
 	alt_log_filename := 'vls__non_existent_path.log'
-	assert params == '{"type":1,"message":"Cannot save log to non_existent/path/vls.log. Saving log to $os.home_dir()/$alt_log_filename"}'
+	expected_alt_log_path := os.join_path(os.home_dir(), alt_log_filename).replace(r'\',
+		r'\\')
+	assert params == '{"type":1,"message":"Cannot save log to non_existent/path/vls.log. Saving log to $expected_alt_log_path"}'
 }
 
 fn init_tests() (&test_utils.Testio, server.Vls) {
