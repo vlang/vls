@@ -78,38 +78,60 @@ fn (mut ls Vls) initialize(id string, params string) {
 	ls.root_uri = initialize_params.root_uri
 	ls.status = .initialized
 
-	// set up logger set to the workspace path
-	ls.setup_logger(initialize_params.trace, initialize_params.client_info)
+	// Create the file either in debug mode or when the client trace is set to verbose.
+	if ls.debug || (!ls.debug && initialize_params.trace == 'verbose') {
+		// set up logger set to the workspace path
+		ls.setup_logger() or {
+			ls.show_message(err.msg, .error)
+		}
+	}
+
+	// print initial info
+	ls.print_info(initialize_params.client_info)
 
 	// since builtin is used frequently, they should be parsed first and only once
 	ls.process_builtin()
 	ls.send(result)
 }
 
-fn (mut ls Vls) setup_logger(trace string, client_info lsp.ClientInfo) {
-	mut arch := 32
-	if runtime.is_64bit() {
-		arch += 32
+fn (mut ls Vls) setup_logger() ?string {
+	log_path := ls.log_path()
+	if os.exists(log_path) {
+		os.rm(log_path) or {}
 	}
 
-	// Create the file either in debug mode or when the client trace is set to verbose.
-	if ls.debug || (!ls.debug && trace == 'verbose') {
-		log_path := ls.log_path()
-		os.rm(log_path) or {}
-		ls.logger.set_logpath(log_path)
+	ls.logger.set_logpath(log_path) or {
+		sanitized_root_uri := ls.root_uri.path().replace_each(['/', '_', ':', '_'])
+		alt_log_path := os.join_path(os.home_dir(), 'vls__${sanitized_root_uri}.log')
+		ls.show_message('Cannot save log to ${log_path}. Saving log to ${alt_log_path}', .error)
+		
+		// avoid saving log path in test
+		$if !test {
+			ls.logger.set_logpath(alt_log_path) or {
+				return error('Cannot save log to ${alt_log_path}')
+			}
+		}
+
+		return alt_log_path
+	}
+
+	return log_path
+}
+
+fn (mut ls Vls) print_info(client_info lsp.ClientInfo) {
+	arch := if runtime.is_64bit() { 64 } else { 32 }
+	client_name := if client_info.name.len != 0 {
+		'$client_info.name $client_info.version'
+	} else {
+		'Unknown'
 	}
 
 	// print important info for reporting
-	ls.log_message('VLS Version: $meta.version, OS: $os.user_os() $arch', .info)
-	ls.log_message('VLS executable path: $os.executable()', .info)
+	ls.log_message('VLS Version: $meta.version, OS: ${os.user_os()} $arch', .info)
+	ls.log_message('VLS executable path: ${os.executable()}', .info)
 	ls.log_message('VLS build with V ${@VHASH}', .info)
-	if client_info.name.len != 0 {
-		ls.log_message('Client / Editor: $client_info.name $client_info.version', .info)
-	} else {
-		ls.log_message('Client / Editor: Unknown', .info)
-	}
-
-	ls.log_message('Using V path (VROOT): $ls.vroot_path', .info)
+	ls.log_message('Client / Editor: ${client_name}', .info)
+	ls.log_message('Using V path (VROOT): ${ls.vroot_path}', .info)
 }
 
 fn (mut ls Vls) process_builtin() {
