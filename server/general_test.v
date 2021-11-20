@@ -82,7 +82,10 @@ fn test_set_features() {
 
 fn test_setup_logger() ? {
 	println('test_setup_logger')
-	mut io := &test_utils.Testio{ debug: true, max_nr_responses: 10 }
+	mut io := &test_utils.Testio{
+		debug: true
+		max_nr_responses: 10
+	}
 	mut ls := server.new(io)
 	ls.dispatch(io.request_with_params('initialize', lsp.InitializeParams{
 		root_uri: lsp.document_uri_from_path(os.join_path('non_existent', 'path'))
@@ -92,7 +95,7 @@ fn test_setup_logger() ? {
 	assert method == 'window/showMessage'
 
 	alt_log_filename := 'vls__non_existent_path.log'
-	assert params == '{"type":1,"message":"Cannot save log to non_existent/path/vls.log. Saving log to ${os.home_dir()}/${alt_log_filename}"}'
+	assert params == '{"type":1,"message":"Cannot save log to non_existent/path/vls.log. Saving log to $os.home_dir()/$alt_log_filename"}'
 }
 
 fn init_tests() (&test_utils.Testio, server.Vls) {
