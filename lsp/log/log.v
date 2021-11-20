@@ -14,7 +14,7 @@ mut:
 	request(msg string, kind TransportKind)
 	response(msg string, kind TransportKind)
 	notification(msg string, kind TransportKind)
-	set_logpath(path string)
+	set_logpath(path string) ?
 }
 
 pub enum Format {
@@ -84,13 +84,12 @@ pub fn new(format Format) &Log {
 }
 
 // set_logpath sets the filepath of the log file and opens the file.
-pub fn (mut l Log) set_logpath(path string) {
+pub fn (mut l Log) set_logpath(path string) ? {
 	if l.file_opened {
 		l.close()
 	}
 
-	file := os.open_append(os.real_path(path)) or { panic(err) }
-
+	file := os.open_append(os.real_path(path)) ?
 	l.file = file
 	l.file_path = path
 	l.file_opened = true
