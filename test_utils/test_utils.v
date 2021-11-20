@@ -24,7 +24,7 @@ pub:
 	test_files_dir string
 mut:
 	nr_responses     int
-	max_nr_responses int = 1
+	max_nr_responses int = 5
 	current_req_id   int = 1
 	decoded_resp_idx int = -1
 	response         TestResponse // parsed response data from raw_response
