@@ -268,8 +268,11 @@ fn (mut ls Vls) panic(message string) {
 
 	// NB: Would 2 be enough to exit?
 	if ls.panic_count == 2 {
-		log_path := ls.log_path()
-		ls.logger.set_logpath(log_path)
+		log_path := ls.setup_logger() or {
+			ls.show_message(err.msg, .error)
+			return
+		}
+
 		ls.show_message('VLS Panic: ${message}. Log saved to ${os.real_path(log_path)}. Please refer to https://github.com/vlang/vls#error-reporting for more details.',
 			.error)
 		ls.logger.close()
