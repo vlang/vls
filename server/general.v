@@ -112,7 +112,6 @@ fn (mut ls Vls) setup_logger(trace string, client_info lsp.ClientInfo) {
 	ls.log_message('Using V path (VROOT): $ls.vroot_path', .info)
 }
 
-[manualfree]
 fn (mut ls Vls) process_builtin() {
 	mut builtin_import, _ := ls.store.add_import(
 		resolved: true
