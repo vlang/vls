@@ -94,7 +94,8 @@ fn test_setup_logger() ? {
 	method, params := io.notification_at_index(0) ?
 	assert method == 'window/showMessage'
 
-	expected_err_path := os.join_path('non_existent', 'path', 'vls.log')
+	expected_err_path := os.join_path('non_existent', 'path', 'vls.log').replace(r'\',
+		r'\\')
 	alt_log_filename := 'vls__non_existent_path.log'
 	expected_alt_log_path := os.join_path(os.home_dir(), alt_log_filename).replace(r'\',
 		r'\\')
