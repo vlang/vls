@@ -551,6 +551,7 @@ fn (mut sr SymbolAnalyzer) fn_literal(fn_node C.TSNode) ? {
 	}
 }
 
+// TODO: return symbol for short_var_decl for example
 fn (mut sr SymbolAnalyzer) if_expression(if_stmt_node C.TSNode) ? {
 	body_node := if_stmt_node.child_by_field_name('consequence') ?
 	mut if_scope := sr.get_scope(body_node) or { &ScopeTree(0) }
