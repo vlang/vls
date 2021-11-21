@@ -484,43 +484,54 @@ fn (mut sr SymbolAnalyzer) short_var_decl(var_decl C.TSNode) ?[]&Symbol {
 	left_len := left_expr_lists.named_child_count()
 	right_len := right_expr_lists.named_child_count()
 
-	if left_len == right_len {
-		mut vars := []&Symbol{cap: int(left_len)}
-		for j in 0 .. left_len {
-			mut var_access := SymbolAccess.private
-			mut left := left_expr_lists.named_child(j) or { continue }
-			right := right_expr_lists.named_child(j) or { continue }
-			if left.type_name() == 'mutable_expression' {
-				var_access = .private_mutable
-				left = left.named_child(0) or { continue }
-			}
+	mut cur_left := 0
+	mut vars := []&Symbol{cap: int(left_len)}
 
-			if right.type_name() == 'fn_literal' {
-				sr.fn_literal(right) or {}
-			}
-
-			mut right_sym := sr.store.infer_value_type_from_node(right, sr.src_text)
-			if right_sym.is_returnable() {
-				right_sym = right_sym.return_sym
-			}
-
-			vars << &Symbol{
-				name: left.code(sr.src_text)
-				kind: .variable
-				access: var_access
-				range: left.range()
-				return_sym: right_sym
-				is_top_level: false
-				file_path: sr.store.cur_file_path
-				file_version: sr.store.cur_version
-			}
+	for i in 0 .. right_len {
+		right := right_expr_lists.named_child(i) or { break }
+		if right.type_name() == 'fn_literal' {
+			sr.fn_literal(right) or {}
 		}
 
-		return vars
-	} else {
-		// TODO: if left_len > right_len
-		// and right_len < left_len
-		return none
+		mut right_sym := sr.store.infer_value_type_from_node(right, sr.src_text)
+		if right_sym.is_returnable() {
+			right_sym = right_sym.return_sym
+		}
+
+		if right_sym.kind == .multi_return {
+			for mr_sym in right_sym.children_syms {
+				vars << sr.register_variable(mr_sym, left_expr_lists, u32(cur_left)) or {
+					break
+				}
+				cur_left++
+			}
+		} else {
+			vars << sr.register_variable(right_sym, left_expr_lists, u32(cur_left)) or {
+				break
+			}
+			cur_left++
+		}
+	}
+	return vars
+}
+
+fn (mut sr SymbolAnalyzer) register_variable(sym &Symbol, left_expr_lists C.TSNode, left_idx u32) ?&Symbol {
+	mut var_access := SymbolAccess.private
+	mut left := left_expr_lists.named_child(left_idx) ?
+	if left.type_name() == 'mutable_expression' {
+		var_access = .private_mutable
+		left = left.named_child(0) ?
+	}
+
+	return &Symbol{
+		name: left.code(sr.src_text)
+		kind: .variable
+		access: var_access
+		range: left.range()
+		return_sym: sym
+		is_top_level: false
+		file_path: sr.store.cur_file_path
+		file_version: sr.store.cur_version
 	}
 }
 
