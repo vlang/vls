@@ -654,6 +654,11 @@ fn (mut sr SymbolAnalyzer) expression(node C.TSNode) ? {
 		'if_expression' {
 			sr.if_expression(node) ?
 		}
+		'defer_expression', 'unsafe_expression' {
+			block_node := node.named_child(0) ?
+			mut local_scope := sr.get_scope(block_node) or { &ScopeTree(0) }
+			sr.extract_block(block_node, mut local_scope) ?
+		}
 		else {
 			// TODO: unsafe_expression, defer_expression, anything with block
 		}
