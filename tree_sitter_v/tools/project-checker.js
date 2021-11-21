@@ -9,6 +9,7 @@ const argv = require('minimist')(process.argv.slice(2));
 
 const vProject = argv._[0] || null;
 const hideRanges = argv.hideRanges || false; 
+const errorsOnly = argv.errorsOnly || false;
 const shouldExportJson = argv.json || false;
 const parser = new Parser();
 parser.setLanguage(V);
@@ -66,7 +67,10 @@ Promise.all(filesToParse.map(parseAndReportErrors))
     collection.forEach((errors, i) => {
       if (errors.length != 0) {
         errorCount++;
+      } else if (errorsOnly) {
+        return;
       }
+
       if (hideRanges) {
         const outcome = errors.length == 0 ? chalk.green`[Pass ]` : chalk.red`[Error]`;
         const filepath = errors.length == 0 ? path.relative(vProject, filesToParse[i]) : errors[0].file;

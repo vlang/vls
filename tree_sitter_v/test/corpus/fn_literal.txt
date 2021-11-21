@@ -50,7 +50,7 @@ fn main() {
         (argument_list
           (fn_literal
             (exposed_variables_list
-              (identifier_list
+              (expression_list
                 (identifier) (identifier)))
             (parameter_list
               (parameter_declaration

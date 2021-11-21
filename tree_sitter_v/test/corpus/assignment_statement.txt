@@ -17,26 +17,48 @@ fn main() {
     (parameter_list)
     (block
       (assignment_statement
-        (assignable_identifier_list
+        (expression_list
           (identifier))
         (expression_list
           (int_literal)))
       (short_var_declaration
-        (identifier_list
+        (expression_list
           (identifier))
         (expression_list
           (int_literal)))
       (assignment_statement
-        (assignable_identifier_list
+        (expression_list
           (identifier)
           (identifier))
         (expression_list
           (int_literal)
           (int_literal)))
       (short_var_declaration
-        (identifier_list
+        (expression_list
           (identifier)
           (identifier))
         (expression_list
           (int_literal)
           (int_literal))))))
+
+===
+Pointer Assignment
+===
+
+mut ap := &u64(a)
+*ap = size
+
+---
+
+(source_file 
+  (short_var_declaration 
+    (expression_list 
+    (mutable_expression (identifier))) 
+    (expression_list 
+      (type_cast_expression 
+        (pointer_type (builtin_type)) 
+        (identifier)))) 
+    (assignment_statement 
+      (expression_list 
+        (unary_expression (identifier))) 
+        (expression_list (identifier))))

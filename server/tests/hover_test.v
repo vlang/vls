@@ -51,7 +51,7 @@ const hover_inputs = {
 		position: lsp.Position{8, 7}
 	}
 	'struct_init_b.vv':         lsp.HoverParams{
-		position: lsp.Position{7, 7}
+		position: lsp.Position{7, 5}
 	}
 	'type_alias.vv':            lsp.HoverParams{
 		position: lsp.Position{0, 7}
@@ -176,7 +176,7 @@ const hover_results = {
 		contents: lsp.MarkedString{'v', 'pub mut Command.usage string'}
 		range: lsp.Range{
 			start: lsp.Position{7, 2}
-			end: lsp.Position{7, 20}
+			end: lsp.Position{7, 7}
 		}
 	}
 	'type_alias.vv':            lsp.Hover{

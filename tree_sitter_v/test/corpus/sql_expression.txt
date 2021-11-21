@@ -14,7 +14,7 @@ sql db {
 
 (source_file 
   (short_var_declaration 
-    (identifier_list (identifier)) 
+    (expression_list (identifier)) 
     (expression_list 
       (sql_expression (identifier)))) 
   (sql_expression (identifier)))

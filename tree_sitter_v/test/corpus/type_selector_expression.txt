@@ -21,7 +21,7 @@ fn main() {
         (argument_list 
           (type_selector_expression (identifier))))
       (short_var_declaration
-        (identifier_list (identifier))
+        (expression_list (identifier))
         (expression_list
           (type_initializer
             (type_identifier)
@@ -30,13 +30,13 @@ fn main() {
                 (field_identifier) 
                   (type_selector_expression (identifier)))))))
       (short_var_declaration
-        (identifier_list
-          (identifier))
+        (expression_list
+          (mutable_expression (identifier)))
         (expression_list
           (type_selector_expression
             (type_identifier)
             (identifier))))
       (assignment_statement
-        (assignable_identifier_list (identifier))
+        (expression_list (identifier))
         (expression_list
           (type_selector_expression (identifier)))))))

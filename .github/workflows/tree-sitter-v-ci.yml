@@ -53,23 +53,8 @@ jobs:
         run: |
           git clone --depth=1 https://github.com/vlang/v vmaster/
       - run: npm install
-      # - name: Run VLib parsing test
-      #   id: run_vlib_test
-      #   continue-on-error: true
-      #   run: |
-      #     node tools/project-checker.js vmaster/vlib/ --hideRanges --json
-      #     REPORT_JSON=$(cat report.json)
-      #     REPORT_JSON="${REPORT_JSON//'%'/'%25'}"
-      #     REPORT_JSON="${REPORT_JSON//$'\n'/'%0A'}"
-      #     REPORT_JSON="${REPORT_JSON//$'\r'/'%0D'}"
-      #     echo "::set-output name=report_json::${REPORT_JSON}"
-      # - name: Create Report Badge
-      #   uses: schneegans/dynamic-badges-action@v1.1.0
-      #   with:
-      #     auth: ${{ secrets.TEST_REPORT_GIST_SECRET }}
-      #     gistID: ${{ secrets.TEST_REPORT_GIST_ID }}
-      #     filename: report-badge-data.json
-      #     label: parsed from vlib
-      #     message: ${{ fromJson(steps.run_vlib_test.outputs.report_json).totalPassed }}/${{ fromJson(steps.run_vlib_test.outputs.report_json).totalFail }}
-      #     color: orange
-      #     namedLogo: V
+      - name: Run VLib parsing test
+        id: run_vlib_test
+        continue-on-error: true
+        run: |
+          node tools/project-checker.js vmaster/vlib/ --hideRanges --errorsOnly

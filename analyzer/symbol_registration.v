@@ -487,13 +487,11 @@ fn (mut sr SymbolAnalyzer) short_var_decl(var_decl C.TSNode) ?[]&Symbol {
 		mut vars := []&Symbol{cap: int(left_len)}
 		for j in 0 .. left_len {
 			mut var_access := SymbolAccess.private
-
-			left := left_expr_lists.named_child(j) or { continue }
+			mut left := left_expr_lists.named_child(j) or { continue }
 			right := right_expr_lists.named_child(j) or { continue }
-			if prev_left := left.prev_sibling() {
-				if prev_left.type_name() == 'mut' {
-					var_access = .private_mutable
-				}
+			if left.type_name() == 'mutable_expression' {
+				var_access = .private_mutable
+				left = left.named_child(0) or { continue }
 			}
 
 			if right.type_name() == 'fn_literal' {

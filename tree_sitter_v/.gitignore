@@ -4,9 +4,11 @@ node_modules/
 build/
 .vscode
 package-lock.json
+.DS_Store
 
 # Ignore local files used for testing and development
 hello.v
+hello.vv
 hello2.v
 src/binding.v
 wasm/

@@ -13,4 +13,4 @@ fn main() {
     (identifier) 
     (parameter_list) 
     (block 
-      (empty_labeled_statement (label_name)))))
+      (labeled_statement (label_name)))))

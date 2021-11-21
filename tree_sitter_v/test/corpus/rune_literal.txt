@@ -45,12 +45,12 @@ b := `\``
 
 (source_file
   (short_var_declaration
-    (identifier_list
+    (expression_list
       (identifier))
     (expression_list
       (rune_literal)))
   (short_var_declaration
-    (identifier_list
+    (expression_list
       (identifier))
     (expression_list
       (rune_literal))))

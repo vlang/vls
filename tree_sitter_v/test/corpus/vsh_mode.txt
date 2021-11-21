@@ -17,5 +17,5 @@ mut a := 1
     (parameter_list)
     (block))
   (short_var_declaration
-    (identifier_list (identifier))
+    (expression_list (mutable_expression (identifier)))
     (expression_list (int_literal))))

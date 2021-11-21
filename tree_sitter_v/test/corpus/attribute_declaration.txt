@@ -31,7 +31,7 @@ interface Speaker {}
     (type_identifier) 
     (struct_field_declaration_list)) 
   (short_var_declaration 
-    (identifier_list (identifier)) 
+    (expression_list (identifier)) 
     (expression_list 
       (array (int_literal)))) 
   (function_declaration 
@@ -65,3 +65,30 @@ interface Speaker {}
           (attribute_spec (identifier)))) 
         (type_identifier) 
         (interface_spec_list)))
+
+===
+Attribute Declaration with String Literal
+===
+
+['/upload'; post]
+pub fn (mut app App) upload() vweb.Result {}
+
+---
+
+(source_file
+ (function_declaration 
+  (attribute_list 
+    (attribute_declaration 
+      (attribute_spec 
+        (interpreted_string_literal)) 
+      (attribute_spec (identifier)))) 
+  (parameter_list 
+    (parameter_declaration 
+      (mutable_identifier (identifier)) 
+      (type_identifier))) 
+  (identifier) 
+  (parameter_list) 
+  (qualified_type 
+    (module_identifier) 
+    (type_identifier)) 
+  (block)))

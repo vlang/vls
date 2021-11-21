@@ -20,14 +20,15 @@ fn main() {
     (parameter_list)
     (block
       (match_expression
-        (identifier)
+        (mutable_expression 
+          (identifier))
         (expression_case
           (case_list
             (interpreted_string_literal)
             (interpreted_string_literal))
           (block
             (short_var_declaration
-              (identifier_list
+              (expression_list
                 (identifier))
               (expression_list
                 (interpreted_string_literal)))))
@@ -38,7 +39,7 @@ fn main() {
         (default_case (block))))))
 
 ===
-Math expression with mutable struct field
+Match expression with mutable struct field
 ===
 
 match mut ts.info {
@@ -50,9 +51,10 @@ match mut ts.info {
 
 (source_file
   (match_expression
-    (selector_expression
-      (identifier)
-      (identifier))
+    (mutable_expression
+      (selector_expression
+        (identifier)
+        (identifier)))
     (expression_case
       (case_list
         (type_identifier))

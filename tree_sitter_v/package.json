@@ -9,6 +9,7 @@
   },
   "scripts": {
     "test": "tree-sitter test",
+    "generate-scanner": "v -shared -skip-unused -o src/scanner.c scanner/",
     "generate": "tree-sitter generate",
     "parse": "tree-sitter parse",
     "parseg": "tree-sitter parse --debug-graph"
@@ -21,8 +22,8 @@
     "chalk": "^4.1.1",
     "glob": "^7.1.7",
     "minimist": "^1.2.5",
-    "tree-sitter": "^0.19.0",
-    "tree-sitter-cli": "^0.19.4"
+    "tree-sitter": "^0.20.0",
+    "tree-sitter-cli": "^0.20.0"
   },
   "tree-sitter": [
     {

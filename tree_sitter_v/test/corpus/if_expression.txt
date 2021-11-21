@@ -36,3 +36,80 @@ if C.__fo {
   (if_expression
     (binded_identifier (identifier))
     (block (identifier))))
+
+===
+Multi-return If Expression
+===
+
+fn foo() (int, int) {
+  baz, bii := if a { 1, 2 } else{ 1, 3 }
+  bar, boo := if b {
+    1, 2
+  } else {
+    3, 4
+  }
+  return baz, bii
+}
+
+---
+
+(source_file 
+  (function_declaration 
+    (identifier) 
+    (parameter_list) 
+    (multi_return_type 
+      (builtin_type) (builtin_type)) 
+    (block 
+      (short_var_declaration 
+        (expression_list 
+          (identifier) (identifier)) 
+        (expression_list 
+          (if_expression (identifier) 
+            (block 
+              (expression_list 
+                (int_literal) (int_literal))) 
+            (block 
+              (expression_list 
+                (int_literal) (int_literal)))))) 
+      (short_var_declaration 
+        (expression_list 
+          (identifier) (identifier)) 
+        (expression_list 
+          (if_expression 
+            (identifier) 
+            (block 
+              (expression_list 
+                (int_literal) (int_literal))) 
+            (block 
+              (expression_list 
+                (int_literal) (int_literal)))))) 
+      (return_statement (expression_list (identifier) (identifier))))))
+
+===
+Multi-return If Expression 2
+===
+
+fn main() {
+  expr1, expr2 := if a { exp, exp2 } else { exp3, exp4 }
+}
+
+---
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (block
+      (short_var_declaration
+        (expression_list
+          (identifier)
+          (identifier))
+        (expression_list
+          (if_expression
+            (identifier)
+            (block
+              (expression_list
+                (identifier) (identifier)))
+            (block
+              (expression_list
+                (identifier) (identifier)))))))))

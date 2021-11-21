@@ -27,12 +27,12 @@ fn main() {
             (selector_expression (identifier) (identifier)) 
             (argument_list))))
       (short_var_declaration
-        (identifier_list (identifier))
+        (expression_list (identifier))
         (expression_list
           (unsafe_expression
             (block (int_literal))))) 
       (short_var_declaration 
-        (identifier_list (identifier)) 
+        (expression_list (identifier)) 
         (expression_list 
           (type_initializer 
             (type_identifier) 
@@ -45,3 +45,35 @@ fn main() {
                 (field_identifier) 
                 (unsafe_expression 
                   (block (int_literal)))))))))))
+
+===
+Unsafe Expression with Pointer assignment
+===
+
+{
+  unsafe {
+		x := &ui.ctx_ptr
+		*x = ctx
+		_ = x
+	}
+}
+
+---
+
+(source_file 
+  (block 
+    (unsafe_expression 
+      (block 
+        (short_var_declaration 
+          (expression_list (identifier)) 
+          (expression_list 
+            (unary_expression 
+              (selector_expression 
+                (identifier) (identifier))))) 
+        (assignment_statement 
+          (expression_list 
+            (unary_expression (identifier))) 
+          (expression_list (identifier))) 
+        (assignment_statement 
+          (expression_list (identifier)) 
+          (expression_list (identifier)))))))
