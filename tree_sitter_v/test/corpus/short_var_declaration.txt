@@ -1,0 +1,22 @@
+===
+Short Variable Declaration
+===
+
+fn main() {
+    foo, bar := 'foo', 'bar'
+}
+
+---
+
+(source_file
+    (function_declaration
+        (identifier)
+        (parameter_list)
+        (block
+            (short_var_declaration
+                (expression_list
+                    (identifier)
+                    (identifier))
+                (expression_list
+                    (interpreted_string_literal)
+                    (interpreted_string_literal))))))

@@ -137,6 +137,7 @@ pub mut:
 	children_syms           []&Symbol // methods, sum types, map types, optionals, struct fields, etc.
 	file_path               string         [required] // required in order to register the symbol at its appropriate directory.
 	file_version            int            [required] // file version when the symbol was registered
+	scope                   &ScopeTree = &ScopeTree(0)
 }
 
 const kinds_in_multi_return_to_be_excluded = [SymbolKind.function, .variable, .field]
@@ -312,15 +313,19 @@ fn (sym &Symbol) sexpr_str_write(mut writer strings.Builder) {
 	write_ctspoint_sexpr_str(sym.range.start_point, mut writer)
 	writer.write_b(`-`)
 	write_ctspoint_sexpr_str(sym.range.end_point, mut writer)
-	for child in sym.children_syms {
-		writer.write_b(` `)
-		if sym.kind == .typedef || sym.kind == .sumtype {
-			writer.write_b(`(`)
-			writer.write_string(child.kind.str() + ' ')
-			writer.write_string(child.name)
-			writer.write_b(`)`)
-		} else {
-			child.sexpr_str_write(mut writer)
+	if sym.kind == .function {
+		sym.scope.sexpr_str_write(mut writer)
+	} else {
+		for child in sym.children_syms {
+			writer.write_b(` `)
+			if sym.kind == .typedef || sym.kind == .sumtype {
+				writer.write_b(`(`)
+				writer.write_string(child.kind.str() + ' ')
+				writer.write_string(child.name)
+				writer.write_b(`)`)
+			} else {
+				child.sexpr_str_write(mut writer)
+			}
 		}
 	}
 	writer.write_b(`)`)
