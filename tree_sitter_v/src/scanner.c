@@ -456,9 +456,9 @@ bool tree_sitter_v_external_scanner_scan(void *payload, TSLexer *lexer, const bo
     if (is_separatable(lexer->lookahead) && valid_symbols[AUTOMATIC_SEPARATOR] && is_stack_empty) {
         return scan_automatic_separator(scanner, lexer);
     } else if (is_stack_empty || top == BRACED_INTERPOLATION_OPENING) {
-        while (lexer->lookahead == ',' || lexer->lookahead == ' ' || is_separatable(lexer->lookahead)) {
+        while (lexer->lookahead == ' ' || is_separatable(lexer->lookahead)) {
             // skip only if whitespace
-            lexer->advance(lexer, lexer->lookahead != ',');
+            lexer->advance(lexer, true);
         }
     }
 
