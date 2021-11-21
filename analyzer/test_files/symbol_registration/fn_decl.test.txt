@@ -6,8 +6,23 @@ pub fn greet(name string) []string {
     return ['hello $name!']
 }
 
+fn hello() {
+    test := 123
+    name1, name2 := 'Bob', 'John'
+    mut a := 1
+    mut b, c, mut d := 'Foo', 2, 3.14
+}
+
 ---
 
 (function main [0,3]-[0,7])
 (pub function greet []string [4,7]-[4,12]
     (variable name string [4,13]-[4,17]))
+(function hello [8,3]-[8,8]
+    (variable test int [9,4]-[9,8])
+    (variable name1 string [10,4]-[10,9])
+    (variable name2 string [10,11]-[10,16])
+    (mut variable a int [11,8]-[11,9])
+    (mut variable b string [12,8]-[12,9])
+    (variable c int [12,11]-[12,12])
+    (mut variable d f32 [12,18]-[12,19]))
