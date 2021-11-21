@@ -553,22 +553,23 @@ fn (mut sr SymbolAnalyzer) fn_literal(fn_node C.TSNode) ? {
 
 fn (mut sr SymbolAnalyzer) if_expression(if_stmt_node C.TSNode) ? {
 	body_node := if_stmt_node.child_by_field_name('consequence') ?
-	mut scope := sr.get_scope(body_node) or { &ScopeTree(0) }
+	mut if_scope := sr.get_scope(body_node) or { &ScopeTree(0) }
 	if initializer_node := if_stmt_node.child_by_field_name('initializer') {
 		if vars := sr.short_var_decl(initializer_node) {
 			for var in vars {
-				scope.register(var) or {}
+				if_scope.register(var) or {}
 			}
 		}
 	}
 
-	alternative_node := if_stmt_node.child_by_field_name('alternative') or { return }
-
-	if alternative_node.type_name() == 'block' {
-		mut local_scope := sr.get_scope(if_stmt_node) or { &ScopeTree(0) }
-		sr.extract_block(if_stmt_node, mut local_scope) ?
-	} else {
-		sr.if_expression(alternative_node) ?
+	sr.extract_block(body_node, mut if_scope) ?
+	if alternative_node := if_stmt_node.child_by_field_name('alternative') {
+		if alternative_node.type_name() == 'block' {
+			mut else_scope := sr.get_scope(alternative_node) or { &ScopeTree(0) }
+			sr.extract_block(alternative_node, mut else_scope) ?
+		} else if alternative_node.type_name() == 'if_expression' {
+			sr.if_expression(alternative_node) ?
+		}
 	}
 }
 
