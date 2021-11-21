@@ -681,7 +681,6 @@ fn (mut sr SymbolAnalyzer) extract_block(node C.TSNode, mut scope ScopeTree) ? {
 	body_sym_len := node.named_child_count()
 	for i := u32(0); i < body_sym_len; i++ {
 		stmt_node := node.named_child(i) or { continue }
-		eprintln(stmt_node.code(sr.src_text))
 		sr.statement(stmt_node, mut scope) or { continue }
 	}
 }
