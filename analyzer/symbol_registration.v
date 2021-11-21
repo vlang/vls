@@ -77,7 +77,7 @@ fn (sr &SymbolAnalyzer) new_top_level_symbol(identifier_node C.TSNode, access Sy
 }
 
 fn (mut sr SymbolAnalyzer) get_scope(node C.TSNode) ?&ScopeTree {
-	if sr.is_import || sr.is_test {
+	if sr.is_import {
 		return error('Cannot use scope in import or test mode')
 	}
 
@@ -379,10 +379,11 @@ fn (mut sr SymbolAnalyzer) fn_decl(fn_node C.TSNode) ?&Symbol {
 	}
 
 	// extract function body
-	if !body_node.is_null() && !sr.is_import && !sr.is_test {
+	if !body_node.is_null() && !sr.is_import {
 		sr.extract_block(body_node, mut scope) ?
 	}
 
+	fn_sym.scope = scope
 	return fn_sym
 }
 
@@ -673,13 +674,14 @@ fn (mut sr SymbolAnalyzer) statement(node C.TSNode, mut scope ScopeTree) ? {
 }
 
 fn (mut sr SymbolAnalyzer) extract_block(node C.TSNode, mut scope ScopeTree) ? {
-	if node.type_name() != 'block' || sr.is_import || sr.is_test {
+	if node.type_name() != 'block' || sr.is_import {
 		return error('node should be a `block` and cannot be used in `is_import` or test mode.')
 	}
 
 	body_sym_len := node.named_child_count()
 	for i := u32(0); i < body_sym_len; i++ {
 		stmt_node := node.named_child(i) or { continue }
+		eprintln(stmt_node.code(sr.src_text))
 		sr.statement(stmt_node, mut scope) or { continue }
 	}
 }
