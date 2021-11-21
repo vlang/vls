@@ -313,15 +313,19 @@ fn (sym &Symbol) sexpr_str_write(mut writer strings.Builder) {
 	write_ctspoint_sexpr_str(sym.range.start_point, mut writer)
 	writer.write_b(`-`)
 	write_ctspoint_sexpr_str(sym.range.end_point, mut writer)
-	for child in sym.children_syms {
-		writer.write_b(` `)
-		if sym.kind == .typedef || sym.kind == .sumtype {
-			writer.write_b(`(`)
-			writer.write_string(child.kind.str() + ' ')
-			writer.write_string(child.name)
-			writer.write_b(`)`)
-		} else {
-			child.sexpr_str_write(mut writer)
+	if sym.kind == .function {
+		sym.scope.sexpr_str_write(mut writer)
+	} else {
+		for child in sym.children_syms {
+			writer.write_b(` `)
+			if sym.kind == .typedef || sym.kind == .sumtype {
+				writer.write_b(`(`)
+				writer.write_string(child.kind.str() + ' ')
+				writer.write_string(child.name)
+				writer.write_b(`)`)
+			} else {
+				child.sexpr_str_write(mut writer)
+			}
 		}
 	}
 	writer.write_b(`)`)
