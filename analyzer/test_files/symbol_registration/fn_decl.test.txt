@@ -14,6 +14,21 @@ fn hello() {
     e, mut f, g := 1, 2
 }
 
+fn inside_if() {
+    defer {  }
+    name := 'hello'
+
+    if name.ends_with('lo') {
+        test := 123
+        mut bar := 'bar'
+        return
+    }
+
+    unsafe {
+        mut unsafe_var := 1
+    }
+}
+
 ---
 
 (function main [0,3]-[0,7])
@@ -29,3 +44,10 @@ fn hello() {
     (mut variable d f32 [12,18]-[12,19])
     (variable e int [13,4]-[13,5])
     (mut variable f int [13,11]-[13,12]))
+(function inside_if [16,3]-[16,12]
+    (variable name string [18,4]-[18,8])
+    (scope [308]-[375] 
+        (variable test int [21,8]-[21,12])
+        (mut variable bar string [22,12]-[22,15]))
+    (scope [388]-[423]
+        (mut variable unsafe_var int [27,12]-[27,22])))

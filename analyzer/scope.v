@@ -2,6 +2,7 @@ module analyzer
 
 import strings
 
+[heap]
 pub struct ScopeTree {
 pub mut:
 	parent &ScopeTree = &ScopeTree(0)
@@ -50,7 +51,7 @@ pub fn (mut scope ScopeTree) innermost(start_byte u32, end_byte u32) &ScopeTree 
 		}
 	}
 
-	return unsafe { scope }
+	return scope
 }
 
 // register registers the symbol to the scope
@@ -108,18 +109,20 @@ pub fn (mut scope ScopeTree) new_child(start_byte u32, end_byte u32) ?&ScopeTree
 		return none
 	}
 
-	innermost := scope.innermost(start_byte, end_byte)
+	mut innermost := scope.innermost(start_byte, end_byte)
+
 	if innermost == scope {
 		scope.children << &ScopeTree{
 			start_byte: start_byte
 			end_byte: end_byte
 			parent: unsafe { scope }
 		}
-
-		return scope.children.last()
+		return scope.children[scope.children.len - 1]
+	} else if start_byte > innermost.start_byte && end_byte < innermost.end_byte {
+		return innermost.new_child(start_byte, end_byte)
+	} else {
+		return innermost
 	}
-
-	return innermost
 }
 
 // remove_child removes a child scope based on the given position
@@ -196,5 +199,12 @@ fn (scope &ScopeTree) sexpr_str_write(mut writer strings.Builder) {
 		sym.sexpr_str_write(mut writer)
 	}
 
-	// TODO: print children
+	for child in scope.children {
+		if isnil(child) {
+			continue
+		}
+		writer.write_string(' (scope [$child.start_byte]-[$child.end_byte]')
+		child.sexpr_str_write(mut writer)
+		writer.write_b(`)`)
+	}
 }
