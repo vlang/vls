@@ -11,6 +11,7 @@ fn hello() {
     name1, name2 := 'Bob', 'John'
     mut a := 1
     mut b, c, mut d := 'Foo', 2, 3.14
+    e, mut f, g := 1, 2
 }
 
 ---
@@ -25,4 +26,6 @@ fn hello() {
     (mut variable a int [11,8]-[11,9])
     (mut variable b string [12,8]-[12,9])
     (variable c int [12,11]-[12,12])
-    (mut variable d f32 [12,18]-[12,19]))
+    (mut variable d f32 [12,18]-[12,19])
+    (variable e int [13,4]-[13,5])
+    (mut variable f int [13,11]-[13,12]))
