@@ -23,25 +23,34 @@ pub struct Testio {
 pub:
 	test_files_dir string
 mut:
-	current_req_id int = 1
-	has_decoded    bool
-	response       TestResponse // parsed response data from raw_response
+	nr_responses     int
+	max_nr_responses int = 5
+	current_req_id   int = 1
+	decoded_resp_idx int = -1
+	response         TestResponse // parsed response data from raw_response
 pub mut:
-	bench        benchmark.Benchmark = benchmark.new_benchmark()
-	raw_response string // raw JSON string of the response data
-	debug        bool
+	bench         benchmark.Benchmark = benchmark.new_benchmark()
+	raw_responses []string // raw JSON string of the response data
+	debug         bool
 }
 
 pub fn (mut io Testio) send(data string) {
-	io.has_decoded = false
-	io.raw_response = data
+	io.nr_responses++
+	if io.nr_responses > io.max_nr_responses {
+		io.nr_responses = 0
+		io.raw_responses.clear()
+	}
+	io.raw_responses << data
 }
 
 pub fn (io Testio) receive() ?string {
 	return ''
 }
 
-pub fn (io Testio) init() ? {}
+pub fn (mut io Testio) init() ? {
+	io.nr_responses = 0
+	io.raw_responses = []string{cap: io.max_nr_responses}
+}
 
 // request returns a JSON string of JSON-RPC request with empty parameters.
 pub fn (mut io Testio) request(method string) string {
@@ -56,28 +65,33 @@ pub fn (mut io Testio) request_with_params<T>(method string, params T) string {
 	return payload
 }
 
-// result verifies the response result/notification params.
+// result returns the response result/notification params.
 pub fn (mut io Testio) result() string {
-	io.decode_response() or { return '' }
+	io.decode_response_at_index(io.raw_responses.len - 1) or { return '' }
 	return io.response.result
 }
 
-// notification verifies the parameters of the notification.
+// notification returns the parameters of the notification.
 pub fn (io Testio) notification() ?(string, string) {
-	resp := json.decode(TestNotification, io.raw_response) ?
+	return io.notification_at_index(io.raw_responses.len - 1)
+}
+
+// notification verifies the parameters of the notification.
+pub fn (io Testio) notification_at_index(idx int) ?(string, string) {
+	resp := json.decode(TestNotification, io.raw_responses[idx]) ?
 	return resp.method, resp.params
 }
 
-// response_error verifies the error code and message from the response.
+// response_error returns the error code and message from the response.
 pub fn (mut io Testio) response_error() ?(int, string) {
-	io.decode_response() ?
+	io.decode_response_at_index(io.raw_responses.len - 1) ?
 	return io.response.error.code, io.response.error.message
 }
 
-fn (mut io Testio) decode_response() ? {
-	if !io.has_decoded {
-		io.response = json.decode(TestResponse, io.raw_response) ?
-		io.has_decoded = true
+fn (mut io Testio) decode_response_at_index(idx int) ? {
+	if io.decoded_resp_idx != idx {
+		io.response = json.decode(TestResponse, io.raw_responses[idx]) ?
+		io.decoded_resp_idx = idx
 	}
 }
 

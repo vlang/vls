@@ -10,7 +10,7 @@ struct Foo {
 fn test_send() {
 	mut io := Testio{}
 	io.send('request message')
-	assert io.raw_response == 'request message'
+	assert io.raw_responses[0] == 'request message'
 }
 
 fn test_request() {

@@ -32,6 +32,8 @@ fn meta_info() vmod.Manifest {
 // If the feature is experimental, the value name should have a `exp_` prefix
 pub enum Feature {
 	diagnostics
+	v_diagnostics
+	analyzer_diagnostics
 	formatting
 	document_symbol
 	workspace_symbol
@@ -48,6 +50,8 @@ pub enum Feature {
 fn feature_from_str(feature_name string) ?Feature {
 	match feature_name {
 		'diagnostics' { return Feature.diagnostics }
+		'v_diagnostics' { return Feature.v_diagnostics }
+		'analyzer_diagnostics' { return Feature.analyzer_diagnostics }
 		'formatting' { return Feature.formatting }
 		'document_symbol' { return Feature.document_symbol }
 		'workspace_symbol' { return Feature.workspace_symbol }
@@ -63,6 +67,7 @@ fn feature_from_str(feature_name string) ?Feature {
 pub const (
 	default_features_list = [
 		Feature.diagnostics,
+		.v_diagnostics,
 		.formatting,
 		.document_symbol,
 		.workspace_symbol,
@@ -263,8 +268,11 @@ fn (mut ls Vls) panic(message string) {
 
 	// NB: Would 2 be enough to exit?
 	if ls.panic_count == 2 {
-		log_path := ls.log_path()
-		ls.logger.set_logpath(log_path)
+		log_path := ls.setup_logger() or {
+			ls.show_message(err.msg, .error)
+			return
+		}
+
 		ls.show_message('VLS Panic: ${message}. Log saved to ${os.real_path(log_path)}. Please refer to https://github.com/vlang/vls#error-reporting for more details.',
 			.error)
 		ls.logger.close()
@@ -307,10 +315,9 @@ fn monitor_changes(mut ls Vls) {
 				}
 
 				uri := lsp.document_uri_from_path(ls.store.cur_file_path)
-				analyze(mut ls.store, ls.root_uri, ls.trees[uri], ls.sources[uri])
+				ls.analyze_file(ls.trees[uri], ls.sources[uri])
 				ls.is_typing = false
 				ls.show_diagnostics(uri)
-				unsafe { uri.free() }
 			}
 		}
 	}
