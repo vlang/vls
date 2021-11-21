@@ -191,7 +191,7 @@ fn (scope &ScopeTree) sexpr_str_write(mut writer strings.Builder) {
 		return
 	}
 
-	for i, sym in scope.symbols {
+	for sym in scope.symbols {
 		writer.write_b(` `)
 		sym.sexpr_str_write(mut writer)
 	}
