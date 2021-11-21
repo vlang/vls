@@ -85,8 +85,6 @@ Stack *new_stack(int init_size) {
 void stack_push(Stack *stack, uint8_t content) {
     if (stack->top < stack->init_size) {
         stack->contents[++stack->top] = content;
-    } else {
-        // // printf("Stack is full \n.")
     }
 }
 
@@ -125,7 +123,6 @@ void stack_serialize(Stack *stack, char *buffer, unsigned *n) {
 
 void stack_deserialize(Stack *stack, const char *buffer, unsigned *n, unsigned len) {
     if (len == 0) return;
-    // // printf("init size is %d", stack->init_size);
     memset(stack->contents, 0, stack->init_size * sizeof(*stack->contents));
     stack->top = buffer[(*n)++];
     stack->init_size = buffer[(*n)++];
@@ -157,7 +154,6 @@ typedef struct {
 
 void push_type(Scanner *scanner, uint8_t token_type) {
     stack_push(scanner->tokens, token_type);
-    // printf("pushed: %d\n", token_type);
 }
 
 bool scan_interpolation_opening(Scanner *scanner, TSLexer *lexer) {
@@ -213,7 +209,6 @@ bool scan_interpolation_closing(Scanner *scanner, TSLexer *lexer) {
         }
 
         lexer->result_symbol = INTERPOLATION_CLOSING;
-        // printf("interp properly closed.\n");
         return true;
     }
     return false;
@@ -246,11 +241,9 @@ bool scan_automatic_separator(Scanner *scanner, TSLexer *lexer) {
 
     // true if tab count is 1 or below, false if above 1
     bool needs_to_be_separated = tab_count <= 1;
-    // printf("needs_to_be_separated: %d %d\n", is_newline, needs_to_be_separated);
 
     // for multi-level blocks. not a good code. should be improved later.
     if (has_whitespace) {
-        // printf("lookahead: %c %d\n", lexer->lookahead, lexer->lookahead);
         char got_char = lexer->lookahead; 
         switch (got_char) {
         case '|':
@@ -284,7 +277,6 @@ bool scan_automatic_separator(Scanner *scanner, TSLexer *lexer) {
     }
 
     if (is_newline && needs_to_be_separated) {
-        // printf("lookahead: %c\n", lexer->lookahead);
         lexer->result_symbol = AUTOMATIC_SEPARATOR;
         return true;
     }
@@ -312,8 +304,6 @@ bool scan_string_opening(Scanner *scanner, TSLexer *lexer, bool is_quote, bool i
         lexer->mark_end(lexer);
         
         push_type(scanner, lexer->result_symbol + string_type);
-        // printf("final_token_type %d %d \n", lexer->result_symbol, string_type);
-        // printf("top: %d\n", stack_top(scanner->tokens));
 
         return true;
     }
@@ -323,7 +313,6 @@ bool scan_string_opening(Scanner *scanner, TSLexer *lexer, bool is_quote, bool i
 
 bool scan_string_content(Scanner *scanner, TSLexer *lexer) {
     uint8_t got_top = stack_top(scanner->tokens);
-    // printf("[scan_string_content] top: %d %d\n", got_top, is_type_string(got_top));
     if (stack_empty(scanner->tokens) || !is_type_string(got_top)) {
         return false;
     }
@@ -355,7 +344,6 @@ bool scan_string_closing(Scanner *scanner, TSLexer *lexer) {
     if (is_type_string(got_top) && lexer->lookahead == expected_end_char(got_top)) {
         advance(lexer);
         lexer->result_symbol = STRING_CLOSING;
-        // printf("string closed properly\n");
         return true;
     }
 
@@ -456,8 +444,6 @@ void tree_sitter_v_external_scanner_deserialize(void *p, const char *buffer, uns
 }
 
 bool tree_sitter_v_external_scanner_scan(void *payload, TSLexer *lexer, const bool *valid_symbols) {
-    // printf("EXTERNAL SCANNER \n");
-    // printf("EXTERNAL SCANNER lookahead: %c %d %d \n", lexer->lookahead, lexer->lookahead, lexer->get_column(lexer));
     if (lexer->lookahead == 0) {
         // advance(lexer);
         return false;
@@ -467,23 +453,13 @@ bool tree_sitter_v_external_scanner_scan(void *payload, TSLexer *lexer, const bo
     bool is_stack_empty = stack_empty(scanner->tokens);
     uint8_t top = stack_top(scanner->tokens);
 
-    // printf("comment: %d\n", valid_symbols[COMMENT]);
-    // printf("top = %d\n",top);
-    // printf("is_stack_empty: %d\n", is_stack_empty);
-    // printf("is_separatable: %d %d\n", is_separatable(lexer->lookahead), valid_symbols[AUTOMATIC_SEPARATOR]);
-    // printf("scc: %d, sc: %d, bio: %d, uio: %d, bic: %d\n", valid_symbols[STRING_CLOSING], valid_symbols[STRING_CONTENT], valid_symbols[BRACED_INTERPOLATION_OPENING], valid_symbols[UNBRACED_INTERPOLATION_OPENING], valid_symbols[INTERPOLATION_CLOSING]);
-    // printf("cs %d rs %d qs %d\n", valid_symbols[C_STRING_OPENING], valid_symbols[RAW_STRING_OPENING], valid_symbols[STRING_OPENING]); 
     if (is_separatable(lexer->lookahead) && valid_symbols[AUTOMATIC_SEPARATOR] && is_stack_empty) {
-        // printf("autosep\n");
         return scan_automatic_separator(scanner, lexer);
     } else if (is_stack_empty || top == BRACED_INTERPOLATION_OPENING) {
         while (lexer->lookahead == ',' || lexer->lookahead == ' ' || is_separatable(lexer->lookahead)) {
             // skip only if whitespace
             lexer->advance(lexer, lexer->lookahead != ',');
         }
-
-        // printf("FINAL EXTERNAL SCANNER lookahead: %c %d %d \n", lexer->lookahead, lexer->lookahead, lexer->get_column(lexer));
-        // printf("closing: %c\n", expected_end_char(top));
     }
 
     if (!is_type_string(top) && lexer->lookahead == '/' && valid_symbols[COMMENT]) {
@@ -501,7 +477,6 @@ bool tree_sitter_v_external_scanner_scan(void *payload, TSLexer *lexer, const bo
             || valid_symbols[STRING_OPENING]
         )
     ) {
-        // printf("opening\n");
         return scan_string_opening(
             scanner, 
             lexer,
@@ -517,18 +492,14 @@ bool tree_sitter_v_external_scanner_scan(void *payload, TSLexer *lexer, const bo
         if (valid_symbols[STRING_CLOSING] || valid_symbols[STRING_CONTENT] || valid_symbols[BRACED_INTERPOLATION_OPENING] || valid_symbols[UNBRACED_INTERPOLATION_OPENING] || valid_symbols[INTERPOLATION_CLOSING]) {
             if (lexer->lookahead == expected_end_char(top)) {
                 if (valid_symbols[STRING_CLOSING]) {
-                    // printf("closing\n");
                     return scan_string_closing(scanner, lexer);
                 } else if (valid_symbols[INTERPOLATION_CLOSING]) {
-                    // printf("interpolation_closing\n");
                     return scan_interpolation_closing(scanner, lexer);
                 }
             } else if (lexer->lookahead == '$' && (valid_symbols[BRACED_INTERPOLATION_OPENING] || valid_symbols[UNBRACED_INTERPOLATION_OPENING])) {
-                // printf("interpolation_opening: %c\n", lexer->lookahead);
                 return scan_interpolation_opening(scanner, lexer);
             }
 
-            // printf("content\n");
             return scan_string_content(scanner, lexer);
         }
     }
