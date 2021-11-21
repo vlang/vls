@@ -500,15 +500,11 @@ fn (mut sr SymbolAnalyzer) short_var_decl(var_decl C.TSNode) ?[]&Symbol {
 
 		if right_sym.kind == .multi_return {
 			for mr_sym in right_sym.children_syms {
-				vars << sr.register_variable(mr_sym, left_expr_lists, u32(cur_left)) or {
-					break
-				}
+				vars << sr.register_variable(mr_sym, left_expr_lists, u32(cur_left)) or { break }
 				cur_left++
 			}
 		} else {
-			vars << sr.register_variable(right_sym, left_expr_lists, u32(cur_left)) or {
-				break
-			}
+			vars << sr.register_variable(right_sym, left_expr_lists, u32(cur_left)) or { break }
 			cur_left++
 		}
 	}
