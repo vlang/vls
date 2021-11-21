@@ -2,6 +2,7 @@ module analyzer
 
 import strings
 
+[heap]
 pub struct ScopeTree {
 pub mut:
 	parent &ScopeTree = &ScopeTree(0)
@@ -50,7 +51,7 @@ pub fn (mut scope ScopeTree) innermost(start_byte u32, end_byte u32) &ScopeTree 
 		}
 	}
 
-	return unsafe { scope }
+	return scope
 }
 
 // register registers the symbol to the scope
