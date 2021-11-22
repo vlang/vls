@@ -37,6 +37,8 @@ fn test_symbol_registration() ? {
 
 	bench.set_total_expected_steps(test_files.len)
 	for test_file_path in test_files {
+		store.set_active_file_path(test_file_path, 1)
+
 		bench.step()
 		test_name := os.base(test_file_path)
 		content := os.read_file(test_file_path) or {
@@ -62,7 +64,6 @@ fn test_symbol_registration() ? {
 		tree := parser.parse_string(src)
 		sym_analyzer.src_text = src.bytes()
 		sym_analyzer.cursor = new_tree_cursor(tree.root_node())
-
 		symbols, _ := sym_analyzer.analyze()
 		result := symbols.sexpr_str()
 		assert result == expected
@@ -71,6 +72,8 @@ fn test_symbol_registration() ? {
 		unsafe {
 			sym_analyzer.src_text.free()
 		}
+
+		store.delete(test_files_dir)
 	}
 	assert bench.nfail == 0
 	bench.stop()
