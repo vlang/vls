@@ -556,9 +556,11 @@ fn (mut sr SymbolAnalyzer) if_expression(if_stmt_node C.TSNode) ? {
 	body_node := if_stmt_node.child_by_field_name('consequence') ?
 	mut if_scope := sr.get_scope(body_node) or { &ScopeTree(0) }
 	if initializer_node := if_stmt_node.child_by_field_name('initializer') {
-		if vars := sr.short_var_decl(initializer_node) {
-			for var in vars {
-				if_scope.register(var) or {}
+		mut vars := sr.short_var_decl(initializer_node) or { [] }
+		for mut var in vars {
+			if var.return_sym.kind == .optional {
+				var.return_sym = var.return_sym.final_sym()
+				if_scope.register(*var) or {}
 			}
 		}
 	}

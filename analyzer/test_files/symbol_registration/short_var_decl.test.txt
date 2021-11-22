@@ -6,6 +6,8 @@ fn main() {
     test := opt() or { '' }
     a := 1
     b, mut x := 1, 3.14
+
+    if test2 := opt() {}
 }
 
 ---
@@ -16,4 +18,6 @@ fn main() {
     (variable test string [5,4]-[5,8])
     (variable a int [6,4]-[6,5])
     (variable b int [7,4]-[7,5])
-    (mut variable x f32 [7,11]-[7,12]))
+    (mut variable x f32 [7,11]-[7,12])
+    (scope [123]-[140]
+        (variable test2 string [9,7]-[9,12])))
