@@ -493,6 +493,19 @@ fn (sym &Symbol) count_ptr() int {
 	return ptr_count
 }
 
+// final_sym returns the final symbol to be returned
+// from container symbols (optional types, channel types, and etc.)
+pub fn (sym &Symbol) final_sym() &Symbol {
+	match sym.kind {
+		.optional {
+			return sym.parent_sym
+		}
+		else {
+			return sym
+		}
+	}
+}
+
 pub fn is_interface_satisfied(sym &Symbol, interface_sym &Symbol) bool {
 	if sym.kind != .struct_ && sym.kind != .typedef && sym.kind != .sumtype {
 		return false

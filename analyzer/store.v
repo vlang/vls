@@ -736,7 +736,8 @@ pub fn (mut ss Store) infer_symbol_from_node(node C.TSNode, src_text []byte) ?&S
 			}
 		}
 		'call_expression' {
-			return ss.infer_symbol_from_node(node.child_by_field_name('function') ?, src_text)
+			function_node := node.child_by_field_name('function') ?
+			return ss.infer_symbol_from_node(function_node, src_text)
 		}
 		'parameter_declaration' {
 			mut parent := node.parent() ?
@@ -862,17 +863,27 @@ pub fn (mut ss Store) infer_value_type_from_node(node C.TSNode, src_text []byte)
 				return op_sym
 			}
 		}
-		'identifier', 'call_expression' {
+		'identifier' {
 			got_sym := ss.infer_symbol_from_node(node, src_text) or { void_sym }
 			if got_sym.is_returnable() {
 				return got_sym.return_sym
 			}
 			return got_sym
 		}
-		// 'call_expression' {
-		// 	sym := ss.infer_value_type_from_node(node.child_by_field_name('function'), src_text)
-		// 	return sym.return_sym
-		// }
+		'call_expression' {
+			got_sym := ss.infer_symbol_from_node(node, src_text) or { void_sym }
+			node_count := node.named_child_count()
+			if got_sym.is_returnable() {
+				if last_node := node.named_child(node_count - 1) {
+					if got_sym.return_sym.kind == .optional
+						&& last_node.type_name() == 'option_propagator' {
+						return got_sym.return_sym.final_sym()
+					}
+				}
+				return got_sym.return_sym
+			}
+			return got_sym
+		}
 		// 'argument_list' {
 		// 	return ss.infer_value_type_from_node(node.parent(), src_text)
 		// }
