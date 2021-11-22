@@ -1,7 +1,14 @@
 pub const foo = 1
 const bar = 'hello'
 
+fn opt() ?string {
+    return 'test'
+}
+
+const res = opt() or { 'hey' }
 ---
 
 (pub variable foo int [0,10]-[0,13])
 (variable bar string [1,6]-[1,9])
+(function opt ?string [3,3]-[3,6])
+(variable res string [7,6]-[7,9])
