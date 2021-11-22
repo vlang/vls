@@ -746,20 +746,18 @@ pub fn (mut sr SymbolAnalyzer) analyze() ([]&Symbol, []Message) {
 			// messages.report(err)
 			continue
 		}
-		if !sr.is_test {
-			for mut sym in syms {
-				if sym.kind == .function && !sym.parent_sym.is_void() {
-					continue
-				}
+		for mut sym in syms {
+			if sym.kind == .function && !sym.parent_sym.is_void() {
+				continue
+			}
 
-				sr.store.register_symbol(mut *sym) or {
-					// add error message
-					continue
-				}
+			sr.store.register_symbol(mut *sym) or {
+				// add error message
+				continue
+			}
 
-				if sym.kind == .variable {
-					global_scope.register(*sym) or { continue }
-				}
+			if sym.kind == .variable {
+				global_scope.register(*sym) or { continue }
 			}
 		}
 		symbols << syms
