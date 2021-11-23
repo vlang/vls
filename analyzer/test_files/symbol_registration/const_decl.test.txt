@@ -6,9 +6,11 @@ fn opt() ?string {
 }
 
 const res = opt() or { 'hey' }
+const abc = if foo == 1 { 'def' } else { 'ghi' }
 ---
 
 (pub variable foo int [0,10]-[0,13])
 (variable bar string [1,6]-[1,9])
 (function opt ?string [3,3]-[3,6])
 (variable res string [7,6]-[7,9])
+(variable abc string [8,6]-[8,9])
