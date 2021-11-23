@@ -1,0 +1,13 @@
+fn main() {
+    mut names := ['bob', 'foo']
+    for name in names {
+        println(name)
+    }
+}
+
+---
+
+(function main [0,3]-[0,7]
+    (mut variable names []string [1,8]-[1,13])
+    (scope [52]-[95]
+        (variable name string [2,8]-[2,12])))

@@ -73,7 +73,7 @@ fn test_symbol_registration() ? {
 			sym_analyzer.src_text.free()
 		}
 
-		store.delete(test_files_dir)
+		store.delete(store.cur_dir)
 	}
 	assert bench.nfail == 0
 	bench.stop()
