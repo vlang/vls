@@ -102,7 +102,8 @@ fn (mut sr SymbolAnalyzer) const_decl(const_node C.TSNode) ?[]&Symbol {
 
 		mut return_sym := void_sym
 		if value_node := spec_node.child_by_field_name('value') {
-			return_sym = sr.store.infer_value_type_from_node(value_node, sr.src_text)
+			return_syms := sr.expression(value_node) ?
+			return_sym = return_syms[0]
 		}
 
 		consts << &Symbol{
@@ -489,22 +490,14 @@ fn (mut sr SymbolAnalyzer) short_var_decl(var_decl C.TSNode) ?[]&Symbol {
 
 	for i in 0 .. right_len {
 		right := right_expr_lists.named_child(i) or { break }
-		if right.type_name() == 'fn_literal' {
-			sr.fn_literal(right) or {}
+		mut right_syms := sr.expression(right) or { break }
+		if right_syms.len == 1 && right_syms[0].kind == .multi_return {
+			child_syms := right_syms[0].children_syms
+			right_syms.clear()
+			right_syms << child_syms
 		}
-
-		mut right_sym := sr.store.infer_value_type_from_node(right, sr.src_text)
-		if right_sym.is_returnable() {
-			right_sym = right_sym.return_sym
-		}
-
-		if right_sym.kind == .multi_return {
-			for mr_sym in right_sym.children_syms {
-				vars << sr.register_variable(mr_sym, left_expr_lists, u32(cur_left)) or { break }
-				cur_left++
-			}
-		} else {
-			vars << sr.register_variable(right_sym, left_expr_lists, u32(cur_left)) or { break }
+		for mr_sym in right_syms {
+			vars << sr.register_variable(mr_sym, left_expr_lists, u32(cur_left)) or { break }
 			cur_left++
 		}
 	}
@@ -531,14 +524,16 @@ fn (mut sr SymbolAnalyzer) register_variable(sym &Symbol, left_expr_lists C.TSNo
 	}
 }
 
-// TODO: move to analyzer perhaps?
-fn (mut sr SymbolAnalyzer) fn_literal(fn_node C.TSNode) ? {
+fn (mut sr SymbolAnalyzer) fn_literal(fn_node C.TSNode) ?&Symbol {
 	body_node := fn_node.child_by_field_name('body') ?
 	params_list_node := fn_node.child_by_field_name('parameters') ?
-	// return_node := fn_node.child_by_field_name('result')
 
 	mut scope := sr.get_scope(body_node) or { &ScopeTree(0) }
 	mut params := extract_parameter_list(params_list_node, mut sr.store, sr.src_text)
+	mut return_sym := void_sym
+	if result_node := fn_node.child_by_field_name('result') {
+		return_sym = sr.store.find_symbol_by_type_node(result_node, sr.src_text) or { void_sym }
+	}
 
 	for i := 0; i < params.len; i++ {
 		mut param := params[i]
@@ -546,17 +541,37 @@ fn (mut sr SymbolAnalyzer) fn_literal(fn_node C.TSNode) ? {
 	}
 
 	// extract function body
-	if !body_node.is_null() && !sr.is_import {
-		sr.extract_block(body_node, mut scope) ?
+	sr.extract_block(body_node, mut scope) ?
+
+	// Do not use infer_symbol_from_node as this function literal may change
+	// and we dont want to pollute non-permanent function types
+	mut new_sym := &Symbol{
+		name: anon_fn_prefix
+		file_path: sr.store.cur_file_path
+		file_version: sr.store.cur_version
+		is_top_level: true
+		kind: .function_type
+		return_sym: return_sym
 	}
+
+	for mut param in params {
+		new_sym.add_child(mut *param) or { continue }
+	}
+
+	return new_sym
 }
 
-// TODO: return symbol for short_var_decl for example
-fn (mut sr SymbolAnalyzer) if_expression(if_stmt_node C.TSNode) ? {
+fn (mut sr SymbolAnalyzer) if_expression(if_stmt_node C.TSNode) ?[]&Symbol {
 	body_node := if_stmt_node.child_by_field_name('consequence') ?
 	mut if_scope := sr.get_scope(body_node) or { &ScopeTree(0) }
+	mut has_initializer := false
+
 	if initializer_node := if_stmt_node.child_by_field_name('initializer') {
 		mut vars := sr.short_var_decl(initializer_node) or { [] }
+		if vars.len != 0 {
+			has_initializer = true
+		}
+
 		for mut var in vars {
 			if var.return_sym.kind == .optional {
 				var.return_sym = var.return_sym.final_sym()
@@ -565,15 +580,23 @@ fn (mut sr SymbolAnalyzer) if_expression(if_stmt_node C.TSNode) ? {
 		}
 	}
 
-	sr.extract_block(body_node, mut if_scope) ?
+	block_return_sym := sr.extract_block(body_node, mut if_scope) ?
+	mut alt_block_return_sym := unsafe { void_sym_arr }
+
 	if alternative_node := if_stmt_node.child_by_field_name('alternative') {
 		if alternative_node.type_name() == 'block' {
 			mut else_scope := sr.get_scope(alternative_node) or { &ScopeTree(0) }
-			sr.extract_block(alternative_node, mut else_scope) ?
+			alt_block_return_sym = sr.extract_block(alternative_node, mut else_scope) ?
 		} else if alternative_node.type_name() == 'if_expression' {
-			sr.if_expression(alternative_node) ?
+			alt_block_return_sym = sr.if_expression(alternative_node) ?
+		}
+
+		if !has_initializer && block_return_sym == alt_block_return_sym {
+			return block_return_sym
 		}
 	}
+
+	return void_sym_arr
 }
 
 fn (mut sr SymbolAnalyzer) for_statement(for_stmt_node C.TSNode) ? {
@@ -652,23 +675,32 @@ fn (mut sr SymbolAnalyzer) for_statement(for_stmt_node C.TSNode) ? {
 	sr.extract_block(body_node, mut scope) ?
 }
 
-fn (mut sr SymbolAnalyzer) expression(node C.TSNode) ? {
+// NOTE: make array of symbols return a multi-return instead (?)
+fn (mut sr SymbolAnalyzer) expression(node C.TSNode) ?[]&Symbol {
 	match node.type_name() {
 		'if_expression' {
-			sr.if_expression(node) ?
+			return sr.if_expression(node)
 		}
 		'defer_expression', 'unsafe_expression' {
 			block_node := node.named_child(0) ?
 			mut local_scope := sr.get_scope(block_node) or { &ScopeTree(0) }
-			sr.extract_block(block_node, mut local_scope) ?
+			block_return_sym := sr.extract_block(block_node, mut local_scope) ?
+			if node.type_name() == 'unsafe_expression' {
+				return block_return_sym
+			}
+		}
+		'fn_literal' {
+			return [sr.fn_literal(node) or { void_sym }]
 		}
 		else {
-			// TODO: unsafe_expression, defer_expression, anything with block
+			// TODO: anything with block
+			return [sr.store.infer_value_type_from_node(node, sr.src_text)]
 		}
 	}
+	return void_sym_arr
 }
 
-fn (mut sr SymbolAnalyzer) statement(node C.TSNode, mut scope ScopeTree) ? {
+fn (mut sr SymbolAnalyzer) statement(node C.TSNode, mut scope ScopeTree) ?[]&Symbol {
 	match node.type_name() {
 		'short_var_declaration' {
 			vars := sr.short_var_decl(node) ?
@@ -684,21 +716,40 @@ fn (mut sr SymbolAnalyzer) statement(node C.TSNode, mut scope ScopeTree) ? {
 			sr.extract_block(node, mut local_scope) ?
 		}
 		else {
-			sr.expression(node) ?
+			return sr.expression(node)
 		}
 	}
+	return void_sym_arr
 }
 
-fn (mut sr SymbolAnalyzer) extract_block(node C.TSNode, mut scope ScopeTree) ? {
+fn (mut sr SymbolAnalyzer) extract_block(node C.TSNode, mut scope ScopeTree) ?[]&Symbol {
 	if node.type_name() != 'block' || sr.is_import {
-		return error('node should be a `block` and cannot be used in `is_import` or test mode.')
+		return error('node should be a `block` and cannot be used in `is_import`.')
 	}
 
 	body_sym_len := node.named_child_count()
+	mut return_syms := [void_sym]
 	for i := u32(0); i < body_sym_len; i++ {
 		stmt_node := node.named_child(i) or { continue }
-		sr.statement(stmt_node, mut scope) or { continue }
+		if stmt_node.type_name() == 'expression_list' && i == body_sym_len - 1 {
+			list_len := stmt_node.named_child_count()
+			if list_len != 0 {
+				return_syms.clear()
+				return_syms.grow_cap(int(list_len) - return_syms.len)
+			}
+			for j in u32(0) .. list_len {
+				expr_node := stmt_node.named_child(j) or { continue }
+				return_syms << sr.expression(expr_node) or { void_sym_arr }
+			}
+		} else {
+			got_return_sym := sr.statement(stmt_node, mut scope) or { void_sym_arr }
+			if i == body_sym_len - 1 {
+				return_syms[0] = got_return_sym[0]
+			}
+		}
 	}
+
+	return return_syms
 }
 
 fn extract_parameter_list(node C.TSNode, mut store Store, src_text []byte) []&Symbol {

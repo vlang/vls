@@ -200,7 +200,7 @@ fn (scope &ScopeTree) sexpr_str_write(mut writer strings.Builder) {
 	}
 
 	for child in scope.children {
-		if isnil(child) {
+		if isnil(child) || (!isnil(child) && child.symbols.len == 0) {
 			continue
 		}
 		writer.write_string(' (scope [$child.start_byte]-[$child.end_byte]')

@@ -119,6 +119,8 @@ pub const void_sym = &Symbol{
 	is_top_level: true
 }
 
+pub const void_sym_arr = [void_sym]
+
 [heap]
 pub struct Symbol {
 pub mut:
@@ -302,7 +304,11 @@ fn (sym &Symbol) sexpr_str_write(mut writer strings.Builder) {
 	writer.write_string(sym.kind.str() + ' ')
 	writer.write_string(sym.name + ' ')
 	if !sym.return_sym.is_void() {
-		writer.write_string(sym.return_sym.name + ' ')
+		if sym.return_sym.kind == .function_type {
+			writer.write_string(sym.return_sym.gen_str() + ' ')
+		} else {
+			writer.write_string(sym.return_sym.name + ' ')
+		}
 	}
 	if sym.kind in analyzer.sym_kinds_allowed_to_print_parent && !sym.parent_sym.is_void() {
 		writer.write_string('(parent ')
