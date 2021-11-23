@@ -119,6 +119,8 @@ pub const void_sym = &Symbol{
 	is_top_level: true
 }
 
+pub const void_sym_arr = [void_sym]
+
 [heap]
 pub struct Symbol {
 pub mut:
