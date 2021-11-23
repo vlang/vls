@@ -473,7 +473,11 @@ fn (mut sr SymbolAnalyzer) top_level_decl(current_node C.TSNode) ?[]&Symbol {
 				}
 			}
 
-			sr.statement(stmt_node, mut global_scope) ?
+			syms := sr.statement(stmt_node, mut global_scope) ?
+			if node_type_name == 'short_var_declaration' {
+				return syms
+			}
+
 			return []
 		}
 	}
