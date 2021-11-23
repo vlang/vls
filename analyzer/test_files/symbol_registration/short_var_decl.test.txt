@@ -10,7 +10,8 @@ fn main() {
     if test2 := opt() {}
 
     c, e := if a == 1 { 1, 3 } else { 4, 6 }
-    non_a := if b == 22 { a } else { xx } 
+    non_a := if b == 22 { a } else { xx }
+    unsafe_var := unsafe { 2 }
 }
 
 ---
@@ -25,5 +26,6 @@ fn main() {
     (variable c int [11,4]-[11,5])
     (variable e int [11,7]-[11,8])
     (variable non_a [12,4]-[12,9])
+    (variable unsafe_var int [13,4]-[13,14])
     (scope [123]-[140]
         (variable test2 string [9,7]-[9,12])))
