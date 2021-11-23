@@ -546,7 +546,7 @@ fn (mut sr SymbolAnalyzer) fn_literal(fn_node C.TSNode) ?&Symbol {
 	// Do not use infer_symbol_from_node as this function literal may change
 	// and we dont want to pollute non-permanent function types
 	mut new_sym := &Symbol{
-		name: analyzer.anon_fn_prefix
+		name: anon_fn_prefix
 		file_path: sr.store.cur_file_path
 		file_version: sr.store.cur_version
 		is_top_level: true
