@@ -524,13 +524,16 @@ fn (mut sr SymbolAnalyzer) register_variable(sym &Symbol, left_expr_lists C.TSNo
 	}
 }
 
-fn (mut sr SymbolAnalyzer) fn_literal(fn_node C.TSNode) ? {
+fn (mut sr SymbolAnalyzer) fn_literal(fn_node C.TSNode) ?&Symbol {
 	body_node := fn_node.child_by_field_name('body') ?
 	params_list_node := fn_node.child_by_field_name('parameters') ?
-	// return_node := fn_node.child_by_field_name('result')
 
 	mut scope := sr.get_scope(body_node) or { &ScopeTree(0) }
 	mut params := extract_parameter_list(params_list_node, mut sr.store, sr.src_text)
+	mut return_sym := void_sym
+	if result_node := fn_node.child_by_field_name('result') {
+		return_sym = sr.store.find_symbol_by_type_node(result_node, sr.src_text) or { void_sym }
+	}
 
 	for i := 0; i < params.len; i++ {
 		mut param := params[i]
@@ -539,6 +542,23 @@ fn (mut sr SymbolAnalyzer) fn_literal(fn_node C.TSNode) ? {
 
 	// extract function body
 	sr.extract_block(body_node, mut scope) ?
+
+	// Do not use infer_symbol_from_node as this function literal may change
+	// and we dont want to pollute non-permanent function types
+	mut new_sym := &Symbol{
+		name: analyzer.anon_fn_prefix
+		file_path: sr.store.cur_file_path
+		file_version: sr.store.cur_version
+		is_top_level: true
+		kind: .function_type
+		return_sym: return_sym
+	}
+
+	for mut param in params {
+		new_sym.add_child(mut *param) or { continue }
+	}
+
+	return new_sym
 }
 
 fn (mut sr SymbolAnalyzer) if_expression(if_stmt_node C.TSNode) ?[]&Symbol {
@@ -670,7 +690,7 @@ fn (mut sr SymbolAnalyzer) expression(node C.TSNode) ?[]&Symbol {
 			}
 		}
 		'fn_literal' {
-			sr.fn_literal(node) or {}
+			return [sr.fn_literal(node) or { void_sym }]
 		}
 		else {
 			// TODO: anything with block
