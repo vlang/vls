@@ -29,6 +29,8 @@ fn main() {
     (variable non_a [12,4]-[12,9])
     (variable unsafe_var int [13,4]-[13,14])
     (variable fn_var fn (i int) int [14,4]-[14,10])
+    (scope [0]-[79]
+        (variable err IError [0,0]-[0,0]))
     (scope [123]-[140]
         (variable test2 string [9,7]-[9,12]))
     (scope [278]-[301]

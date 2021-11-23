@@ -692,6 +692,28 @@ fn (mut sr SymbolAnalyzer) expression(node C.TSNode) ?[]&Symbol {
 		'fn_literal' {
 			return [sr.fn_literal(node) or { void_sym }]
 		}
+		'call_expression' {
+			return_sym := sr.store.infer_value_type_from_node(node, sr.src_text)
+			if last_node := node.named_child(node.named_child_count() - 1) {
+				if first_optional_node := last_node.named_child(0) {
+					if first_optional_node.type_name() == 'or_block' {
+						block_node := first_optional_node.named_child(first_optional_node.named_child_count() - 1) ?
+						mut or_scope := sr.get_scope(block_node) ?
+						or_scope.register(&Symbol{
+							name: 'err'
+							kind: .variable
+							access: .private
+							return_sym: sr.store.find_symbol('', 'IError') or { void_sym }
+							is_top_level: false
+							file_path: sr.store.cur_file_path
+							file_version: sr.store.cur_version
+						}) ?
+						sr.extract_block(block_node, mut or_scope) ?
+					}
+				}
+			}
+			return [return_sym]
+		}
 		else {
 			// TODO: anything with block
 			return [sr.store.infer_value_type_from_node(node, sr.src_text)]
@@ -707,6 +729,7 @@ fn (mut sr SymbolAnalyzer) statement(node C.TSNode, mut scope ScopeTree) ?[]&Sym
 			for var in vars {
 				scope.register(var) or { continue }
 			}
+			return vars
 		}
 		'for_statement' {
 			sr.for_statement(node) ?
