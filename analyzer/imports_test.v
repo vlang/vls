@@ -67,12 +67,12 @@ fn test_import_modules_from_tree() ? {
 	assert store.imports[store.cur_dir][0].imported == true
 	assert store.imports[store.cur_dir][1].absolute_module_name == 'env'
 	assert store.imports[store.cur_dir][1].resolved == false
-	$if macos {
-		assert store.dependency_tree.size() == 2
-	} $else $if msvc {
-		assert store.dependency_tree.size() == 4
-	} $else {
+
+	eprintln(store.dependency_tree)
+	$if !msvc {
 		assert store.dependency_tree.size() == 3
+	} $else {
+		assert store.dependency_tree.size() == 4
 	}
 }
 
@@ -95,12 +95,10 @@ fn test_import_modules_with_edits() ? {
 	assert store.imports[store.cur_dir][0].absolute_module_name == 'os'
 	assert store.imports[store.cur_dir][0].resolved == true
 	assert store.imports[store.cur_dir][0].imported == true
-	$if macos {
-		assert store.dependency_tree.size() == 2
-	} $else $if msvc {
-		assert store.dependency_tree.size() == 4
-	} $else {
+	$if !msvc {
 		assert store.dependency_tree.size() == 3
+	} $else {
+		assert store.dependency_tree.size() == 4
 	}
 	assert store.dependency_tree.has(os.join_path(analyzer.vexe_path, 'vlib', 'os')) == true
 
@@ -145,12 +143,10 @@ fn test_import_modules_with_edits() ? {
 	assert store.imports[store.cur_dir][0].path.len != 0
 	assert store.imports[store.cur_dir][0].resolved == true
 	assert store.imports[store.cur_dir][0].imported == true
-	$if macos {
-		assert store.dependency_tree.size() == 2
-	} $else $if msvc {
-		assert store.dependency_tree.size() == 4
-	} $else {
+	$if !msvc {
 		assert store.dependency_tree.size() == 3
+	} $else {
+		assert store.dependency_tree.size() == 4
 	}
 	// for name, _ in store.dependency_tree.get_nodes() {
 	// 	eprintln('Checking: $name')
