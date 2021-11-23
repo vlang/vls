@@ -610,14 +610,10 @@ fn (mut sr SymbolAnalyzer) for_statement(for_stmt_node C.TSNode) ? {
 
 		if cond_node_type == 'for_in_operator' {
 			left_node := cond_node.child_by_field_name('left') ?
-			left_count := left_node.named_child_count()
 			right_node := cond_node.child_by_field_name('right') ?
 			mut right_sym := sr.store.infer_value_type_from_node(right_node, sr.src_text)
 			if !right_sym.is_void() {
-				if right_sym.is_returnable() {
-					right_sym = right_sym.return_sym
-				}
-
+				left_count := left_node.named_child_count()
 				mut end_idx := if left_count >= 2 { u32(1) } else { u32(0) }
 				if right_sym.kind == .array_ || right_sym.kind == .map_
 					|| right_sym.name == 'string' {
@@ -708,7 +704,7 @@ fn (mut sr SymbolAnalyzer) statement(node C.TSNode, mut scope ScopeTree) ?[]&Sym
 				scope.register(var) or { continue }
 			}
 		}
-		'for_declaration' {
+		'for_statement' {
 			sr.for_statement(node) ?
 		}
 		'block' {
