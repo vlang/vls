@@ -782,16 +782,13 @@ fn extract_parameter_list(node C.TSNode, mut store Store, src_text []byte) []&Sy
 	for i := u32(0); i < params_len; i++ {
 		mut access := SymbolAccess.private
 		param_node := node.named_child(i) or { continue }
-
-		first_node := param_node.child(0) or { continue }
-
-		if first_node.type_name() == 'mut' {
-			access = SymbolAccess.private_mutable
-		}
-
-		param_name_node := param_node.child_by_field_name('name') or { continue }
+		mut param_name_node := param_node.child_by_field_name('name') or { continue }
 		param_type_node := param_node.child_by_field_name('type') or { continue }
 		return_sym := store.find_symbol_by_type_node(param_type_node, src_text) or { void_sym }
+		if param_name_node.type_name() == 'mutable_identifier' {
+			access = SymbolAccess.private_mutable
+			param_name_node = param_name_node.named_child(0) or { param_name_node }
+		}
 
 		syms << &Symbol{
 			name: param_name_node.code(src_text)

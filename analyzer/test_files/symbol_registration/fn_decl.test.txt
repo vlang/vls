@@ -29,6 +29,8 @@ fn inside_if() {
     }
 }
 
+fn mutate_arr(mut s []string) {}
+
 ---
 
 (function main [0,3]-[0,7])
@@ -51,3 +53,5 @@ fn inside_if() {
         (mut variable bar string [22,12]-[22,15]))
     (scope [388]-[423]
         (mut variable unsafe_var int [27,12]-[27,22])))
+(function mutate_arr [31,3]-[31,13]
+    (mut variable s []string [31,18]-[31,19]))
