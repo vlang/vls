@@ -628,6 +628,10 @@ pub fn (mut ss Store) infer_symbol_from_node(node C.TSNode, src_text []byte) ?&S
 			return ss.opened_scopes[ss.cur_file_path].get_symbol_with_range(ident_text,
 				node.range()) or { ss.find_symbol(module_name, ident_text) ? }
 		}
+		'mutable_identifier' {
+			first_child := node.named_child(0) ?
+			return ss.infer_symbol_from_node(first_child, src_text)
+		}
 		'field_identifier' {
 			mut parent := node.parent() ?
 			for parent.type_name() in ['keyed_element', 'literal_value'] {
