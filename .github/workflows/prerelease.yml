@@ -93,7 +93,6 @@ jobs:
           name: windows_x64
           path: ./vls/vls_windows_x64.exe
 
-
   pre-release:
     name: Create Github Release
     needs: [build-linux-x64, build-windows-x64, build-macos-x64]
@@ -115,6 +114,13 @@ jobs:
         with:
           name: windows_x64
           path: ./windows_x64
+      - name: Generate file checksums
+        run: |
+          sha256sum \
+           ./windows_x64/vls_windows_x64.exe \
+           ./linux_x64/vls_linux_x64 \
+           ./macos_x64/vls_macos_x64 \
+           > checksums.txt
       - uses: "marvinpinto/action-automatic-releases@latest"
         name: Create Release and Upload Assets
         id: create_release
@@ -127,3 +133,4 @@ jobs:
             windows_x64/vls_windows_x64.exe
             linux_x64/vls_linux_x64
             macos_x64/vls_macos_x64
+            checksums.txt
