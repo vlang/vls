@@ -169,11 +169,18 @@ const anon_fn_prefix = '#anon_'
 pub fn (ss &Store) find_fn_symbol(module_name string, return_sym &Symbol, params []&Symbol) ?&Symbol {
 	module_path := ss.get_module_path(module_name)
 	for sym in ss.symbols[module_path] ? {
-		if sym.kind == .function_type && sym.name.starts_with(analyzer.anon_fn_prefix)
+		mut final_sym := sym
+		if sym.kind == .typedef && sym.parent_sym.kind == .function_type {
+			final_sym = sym.parent_sym
+		}
+
+		if final_sym.kind == .function_type && final_sym.name.starts_with(analyzer.anon_fn_prefix)
 			&& sym.generic_placeholder_len == 0 {
-			if !compare_params_and_ret_type(params, return_sym, sym, true) {
+			if !compare_params_and_ret_type(params, return_sym, final_sym, true) {
 				continue
 			}
+
+			// return the typedef'd function type or the anon fn type itself
 			return sym
 		}
 	}
