@@ -5,7 +5,7 @@
 *.dSYM
 
 # Other
-cmd/vls/vls
+cmd/vls
 .vscode
 
 bin/*

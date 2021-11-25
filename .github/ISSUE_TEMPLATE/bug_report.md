@@ -4,7 +4,7 @@ about: Do you encounter a crash or found an unusual bug? Post them here.
 title: ''
 labels: 'bug'
 assignees: ''
-# When updating, make sure to update the template in 'cmd/vls/host.v' too
+# When updating, make sure to update the template in 'cmd/host.v' too
 ---
 <!-- If you have a report file, copy and replace the entire contents of the file here. -->
 ## System Information
@@ -13,7 +13,7 @@ assignees: ''
 Paste the output of 'v doctor' here
 ```
 
-### VLS info 
+### VLS info
 ```
 Paste the output of 'vls --version' here
 ```
