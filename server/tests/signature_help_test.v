@@ -11,6 +11,18 @@ const signature_help_inputs = {
 			trigger_character: '('
 		}
 		position: lsp.Position{7, 8}
+	},
+	'with_content.vv': lsp.SignatureHelpParams{
+		context: lsp.SignatureHelpContext{
+			trigger_kind: .invoked
+		}
+		position: lsp.Position{7,16}
+	},
+	'with_content_b.vv': lsp.SignatureHelpParams{
+		context: lsp.SignatureHelpContext{
+			trigger_kind: .invoked
+		}
+		position: lsp.Position{7,11}
 	}
 }
 
@@ -21,6 +33,30 @@ const signature_help_results = {
 				label: 'fn greet(name string) bool'
 				parameters: [
 					lsp.ParameterInformation{'name string'},
+				]
+			},
+		]
+		active_parameter: 0
+	},
+	'with_content.vv': lsp.SignatureHelp{
+		signatures: [
+			lsp.SignatureInformation{
+				label: 'fn greet(name string, age int) bool'
+				parameters: [
+					lsp.ParameterInformation{'name string'},
+					lsp.ParameterInformation{'age int'}
+				]
+			},
+		]
+		active_parameter: 1
+	},
+	'with_content_b.vv': lsp.SignatureHelp{
+		signatures: [
+			lsp.SignatureInformation{
+				label: 'fn greet(name string, age int) bool'
+				parameters: [
+					lsp.ParameterInformation{'name string'},
+					lsp.ParameterInformation{'age int'}
 				]
 			},
 		]
