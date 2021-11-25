@@ -64,4 +64,4 @@ fn get_nums(nums ...int) {}
 (function fn__arr [33,3]-[33,10]
     (variable handler fn (s int) int [33,11]-[33,18]))
 (function get_nums [37,3]-[37,11]
-    (variable nums ...int [37,13]-[37,17]))
+    (variable nums ...int [37,12]-[37,16]))
