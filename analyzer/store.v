@@ -581,7 +581,7 @@ pub fn (mut store Store) find_symbol_by_type_node(node C.TSNode, src_text []byte
 		}
 
 		match sym_kind {
-			.array_, .variadic {
+			.array_ {
 				el_node := node.child_by_field_name('element') ?
 				mut el_sym := store.find_symbol_by_type_node(el_node, src_text) ?
 				new_sym.add_child(mut el_sym, false) or {}
