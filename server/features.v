@@ -204,7 +204,6 @@ fn (mut ls Vls) signature_help(id string, params string) {
 	off := compute_offset(source, pos.line, pos.character)
 	mut node := traverse_node(tree.root_node(), u32(off))
 	mut parent_node := node
-	closest_parent_node := closest_symbol_node_parent(node)
 
 	if node.type_name() == 'argument_list' {
 		parent_node = node.parent() or { node }
