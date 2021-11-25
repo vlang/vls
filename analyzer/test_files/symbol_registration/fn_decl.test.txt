@@ -31,6 +31,10 @@ fn inside_if() {
 
 fn mutate_arr(mut s []string) {}
 
+fn fn__arr(handler fn (s int) int) {
+    handler(1)
+}
+
 ---
 
 (function main [0,3]-[0,7])
@@ -55,3 +59,5 @@ fn mutate_arr(mut s []string) {}
         (mut variable unsafe_var int [27,12]-[27,22])))
 (function mutate_arr [31,3]-[31,13]
     (mut variable s []string [31,18]-[31,19]))
+(function fn__arr [33,3]-[33,10]
+    (variable handler fn (s int) int [33,11]-[33,18]))

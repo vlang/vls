@@ -66,7 +66,7 @@ fn test_symbol_registration() ? {
 		sym_analyzer.cursor = new_tree_cursor(tree.root_node())
 		symbols, _ := sym_analyzer.analyze()
 		result := symbols.sexpr_str()
-		assert result == expected
+		assert expected == result
 		println(bench.step_message_ok(test_name))
 
 		unsafe {
