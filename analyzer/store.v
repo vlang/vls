@@ -546,7 +546,7 @@ pub fn (mut store Store) find_symbol_by_type_node(node C.TSNode, src_text []byte
 		}
 
 		return store.find_fn_symbol(module_name, return_sym, parameters) or {
-			mut new_sym := Symbol{
+			mut new_sym := &Symbol{
 				name: analyzer.anon_fn_prefix + store.anon_fn_counter.str()
 				file_path: store.cur_file_path
 				file_version: store.cur_version
@@ -560,7 +560,7 @@ pub fn (mut store Store) find_symbol_by_type_node(node C.TSNode, src_text []byte
 			}
 
 			store.anon_fn_counter++
-			store.register_symbol(mut new_sym) or { void_sym }
+			return new_sym
 		}
 	}
 
