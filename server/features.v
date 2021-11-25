@@ -204,9 +204,13 @@ fn (mut ls Vls) signature_help(id string, params string) {
 	off := compute_offset(source, pos.line, pos.character)
 	mut node := traverse_node(tree.root_node(), u32(off))
 	mut parent_node := node
+
 	if node.type_name() == 'argument_list' {
 		parent_node = node.parent() or { node }
 		node = node.prev_named_sibling() or { node }
+	} else if parent_node.type_name() != 'call_expression' {
+		parent_node = closest_symbol_node_parent(node)
+		node = parent_node
 	}
 
 	// signature help supports function calls for now
@@ -226,20 +230,29 @@ fn (mut ls Vls) signature_help(id string, params string) {
 		ls.send_null(id)
 		return
 	}
+
+	// get the nearest parameter based on the position of the cursor
+	args_count := args_node.named_child_count()
+	mut active_parameter_idx := -1
+	for i in u32(0) .. args_count {
+		current_arg_node := args_node.named_child(i) or { continue }
+		if u32(off) >= current_arg_node.start_byte() && u32(off) <= current_arg_node.end_byte() {
+			active_parameter_idx = int(i)
+			break
+		}
+	}
+
+	// go to the first parameter or the last parameter if not found
+	if args_count == 0 {
+		active_parameter_idx = 0
+	} else if active_parameter_idx == -1 {
+		active_parameter_idx = int(args_count) - 1
+	}
+
 	// for retrigger, it utilizes the current signature help data
 	if ctx.is_retrigger {
 		mut active_sighelp := ctx.active_signature_help
-
-		if ctx.trigger_kind == .content_change {
-			// change the current active param value to the length of the current args.
-			active_sighelp.active_parameter = int(args_node.named_child_count()) - 1
-		} else if ctx.trigger_kind == .trigger_character && ctx.trigger_character == ','
-			&& active_sighelp.signatures.len > 0
-			&& active_sighelp.active_parameter < active_sighelp.signatures[0].parameters.len {
-			// when pressing comma, it must proceed to the next parameter
-			// by incrementing the active parameter.
-			active_sighelp.active_parameter++
-		}
+		active_sighelp.active_parameter = active_parameter_idx
 
 		ls.send(jsonrpc.Response<lsp.SignatureHelp>{
 			id: id
@@ -264,6 +277,7 @@ fn (mut ls Vls) signature_help(id string, params string) {
 	ls.send(jsonrpc.Response<lsp.SignatureHelp>{
 		id: id
 		result: lsp.SignatureHelp{
+			active_parameter: active_parameter_idx
 			signatures: [
 				lsp.SignatureInformation{
 					label: sym.gen_str()

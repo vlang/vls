@@ -1,0 +1,7 @@
+module main
+
+fn return_number(a int, b int) int {
+	return a
+}
+
+return_number(10, )

@@ -1,0 +1,9 @@
+module main
+
+fn greet(name string, age int) bool {
+  println(name)
+}
+
+fn main() {
+  greet('Bob', 12)
+}

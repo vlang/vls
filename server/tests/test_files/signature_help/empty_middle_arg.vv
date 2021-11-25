@@ -1,0 +1,3 @@
+fn foo(a int, b f32, c i64) {}
+
+foo(10,, i64(100))
