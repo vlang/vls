@@ -28,7 +28,7 @@ fn wrap_request(payload string) string {
 	return 'Content-Length: $payload.len\r\n\r\n$payload'
 }
 
-const vls_cmd_dir = os.join_path(@VMODROOT, 'cmd', 'vls')
+const vls_cmd_dir = os.join_path(@VMODROOT, 'cmd')
 
 const connection_dir = os.join_path(os.dir(@FILE), 'test_files', 'connection')
 
