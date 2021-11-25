@@ -5,20 +5,32 @@ import lsp
 import os
 
 const signature_help_inputs = {
-	'simple.vv':         lsp.SignatureHelpParams{
+	'empty_middle_arg.vv': lsp.SignatureHelpParams{
+		context: lsp.SignatureHelpContext{
+			trigger_kind: .invoked
+		}
+		position: lsp.Position{2, 7}
+	}
+	'empty_second_arg.vv': lsp.SignatureHelpParams{
+		context: lsp.SignatureHelpContext{
+			trigger_kind: .invoked
+		}
+		position: lsp.Position{6, 18}
+	}
+	'simple.vv':           lsp.SignatureHelpParams{
 		context: lsp.SignatureHelpContext{
 			trigger_kind: .trigger_character
 			trigger_character: '('
 		}
 		position: lsp.Position{7, 8}
 	}
-	'with_content.vv':   lsp.SignatureHelpParams{
+	'with_content.vv':     lsp.SignatureHelpParams{
 		context: lsp.SignatureHelpContext{
 			trigger_kind: .invoked
 		}
 		position: lsp.Position{7, 16}
 	}
-	'with_content_b.vv': lsp.SignatureHelpParams{
+	'with_content_b.vv':   lsp.SignatureHelpParams{
 		context: lsp.SignatureHelpContext{
 			trigger_kind: .invoked
 		}
@@ -27,7 +39,32 @@ const signature_help_inputs = {
 }
 
 const signature_help_results = {
-	'simple.vv':         lsp.SignatureHelp{
+	'empty_middle_arg.vv': lsp.SignatureHelp{
+		signatures: [
+			lsp.SignatureInformation{
+				label: 'fn foo(a int, b f32, c i64)'
+				parameters: [
+					lsp.ParameterInformation{'a int'},
+					lsp.ParameterInformation{'b f32'},
+					lsp.ParameterInformation{'c i64'},
+				]
+			},
+		]
+		active_parameter: 1
+	}
+	'empty_second_arg.vv': lsp.SignatureHelp{
+		signatures: [
+			lsp.SignatureInformation{
+				label: 'fn return_number(a int, b int) int'
+				parameters: [
+					lsp.ParameterInformation{'a int'},
+					lsp.ParameterInformation{'b int'},
+				]
+			},
+		]
+		active_parameter: 1
+	}
+	'simple.vv':           lsp.SignatureHelp{
 		signatures: [
 			lsp.SignatureInformation{
 				label: 'fn greet(name string) bool'
@@ -38,7 +75,7 @@ const signature_help_results = {
 		]
 		active_parameter: 0
 	}
-	'with_content.vv':   lsp.SignatureHelp{
+	'with_content.vv':     lsp.SignatureHelp{
 		signatures: [
 			lsp.SignatureInformation{
 				label: 'fn greet(name string, age int) bool'
@@ -50,7 +87,7 @@ const signature_help_results = {
 		]
 		active_parameter: 1
 	}
-	'with_content_b.vv': lsp.SignatureHelp{
+	'with_content_b.vv':   lsp.SignatureHelp{
 		signatures: [
 			lsp.SignatureInformation{
 				label: 'fn greet(name string, age int) bool'
