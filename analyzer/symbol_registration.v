@@ -581,20 +581,20 @@ fn (mut sr SymbolAnalyzer) match_expression(match_node C.TSNode) ?[]&Symbol {
 	for i in u32(1) .. named_child_count {
 		case_node := match_node.named_child(i) or { continue }
 		if case_node.type_name() == 'expression_case' {
-			case_list_node := case_node.child_by_field_name('value') or {
-				return void_sym_arr
-			}
+			case_list_node := case_node.child_by_field_name('value') or { return void_sym_arr }
 
 			case_list_count := case_list_node.named_child_count()
 			for j in u32(0) .. case_list_count {
 				value_node := case_list_node.named_child(j) or { continue }
-				if cond_value_type.kind == .enum_ && value_node.type_name() == 'type_selector_expression' {
+				if cond_value_type.kind == .enum_
+					&& value_node.type_name() == 'type_selector_expression' {
 					field_node := value_node.child_by_field_name('field_name') or { continue }
 					if !cond_value_type.children_syms.exists(field_node.code(sr.src_text)) {
 						return void_sym_arr
 					}
 				} else {
-					value_node_type := sr.store.infer_value_type_from_node(value_node, sr.src_text)
+					value_node_type := sr.store.infer_value_type_from_node(value_node,
+						sr.src_text)
 					if value_node_type.is_void() || value_node_type != cond_value_type {
 						// return void if no type matches
 						return void_sym_arr
