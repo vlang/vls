@@ -668,7 +668,6 @@ pub fn (mut ss Store) infer_symbol_from_node(node C.TSNode, src_text []byte) ?&S
 			if type_node := node.child_by_field_name('type') {
 				parent_sym := ss.infer_symbol_from_node(type_node, src_text) ?
 				child_sym := parent_sym.children_syms.get(field_node.code(src_text)) ?
-
 				return child_sym
 			} else {
 				// for shorhand enum
@@ -894,6 +893,14 @@ pub fn (mut ss Store) infer_value_type_from_node(node C.TSNode, src_text []byte)
 				return got_sym.return_sym
 			}
 			return got_sym
+		}
+		'type_selector_expression' {
+			if type_node := node.child_by_field_name('type') {
+				if parent_sym := ss.infer_symbol_from_node(type_node, src_text) {
+					return parent_sym
+				}
+			}
+			return void_sym
 		}
 		// 'argument_list' {
 		// 	return ss.infer_value_type_from_node(node.parent(), src_text)
