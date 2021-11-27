@@ -565,6 +565,59 @@ fn (mut sr SymbolAnalyzer) fn_literal(fn_node C.TSNode) ?&Symbol {
 	return new_sym
 }
 
+fn (mut sr SymbolAnalyzer) match_expression(match_node C.TSNode) ?[]&Symbol {
+	mut cond_node := match_node.child_by_field_name('condition') ?
+	if cond_node.type_name() == 'mutable_expression' {
+		cond_node = cond_node.named_child(0) ?
+	}
+
+	cond_value_type := sr.store.infer_value_type_from_node(cond_node, sr.src_text)
+	if cond_value_type.is_void() {
+		return void_sym_arr
+	}
+
+	mut expr_value_type := unsafe { void_sym_arr }
+	named_child_count := match_node.named_child_count()
+	for i in u32(1) .. named_child_count {
+		case_node := match_node.named_child(i) or { continue }
+		if case_node.type_name() == 'expression_case' {
+			case_list_node := case_node.child_by_field_name('value') or {
+				return void_sym_arr
+			}
+
+			case_list_count := case_list_node.named_child_count()
+			for j in u32(0) .. case_list_count {
+				value_node := case_list_node.named_child(j) or { continue }
+				if cond_value_type.kind == .enum_ && value_node.type_name() == 'type_selector_expression' {
+					field_node := value_node.child_by_field_name('field_name') or { continue }
+					if !cond_value_type.children_syms.exists(field_node.code(sr.src_text)) {
+						return void_sym_arr
+					}
+				} else {
+					value_node_type := sr.store.infer_value_type_from_node(value_node, sr.src_text)
+					if value_node_type.is_void() || value_node_type != cond_value_type {
+						// return void if no type matches
+						return void_sym_arr
+					}
+				}
+			}
+		}
+
+		conseq_block := case_node.child_by_field_name('consequence') or { continue }
+		got_block_type := sr.extract_block(conseq_block, mut &ScopeTree(0)) or {
+			return void_sym_arr
+		}
+
+		if i == 1 {
+			expr_value_type = unsafe { got_block_type }
+		} else if got_block_type != expr_value_type {
+			return void_sym_arr
+		}
+	}
+
+	return expr_value_type
+}
+
 fn (mut sr SymbolAnalyzer) if_expression(if_stmt_node C.TSNode) ?[]&Symbol {
 	body_node := if_stmt_node.child_by_field_name('consequence') ?
 	mut if_scope := sr.get_scope(body_node) or { &ScopeTree(0) }
@@ -680,6 +733,9 @@ fn (mut sr SymbolAnalyzer) expression(node C.TSNode) ?[]&Symbol {
 	match node.type_name() {
 		'if_expression' {
 			return sr.if_expression(node)
+		}
+		'match_expression' {
+			return sr.match_expression(node)
 		}
 		'defer_expression', 'unsafe_expression' {
 			block_node := node.named_child(0) ?
