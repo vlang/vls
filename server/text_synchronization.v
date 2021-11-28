@@ -122,13 +122,11 @@ fn (mut ls Vls) did_change(_ string, params string) {
 		old_len := new_src.len
 		new_len := old_len - (old_end_idx - start_idx) + content_change.text.len
 		diff := new_len - old_len
-		old_src := new_src.clone()
-		// the new source should grow or shrink
-		unsafe { new_src.grow_len(diff) }
+		right_text := new_src[old_end_idx ..].clone()
 
 		// remove immediately the symbol
 		if content_change.text.len == 0 && diff < 0 {
-			ls.store.delete_symbol_at_node(ls.trees[uri].root_node(), old_src,
+			ls.store.delete_symbol_at_node(ls.trees[uri].root_node(), new_src,
 				start_point: lsp_pos_to_tspoint(start_pos)
 				end_point: lsp_pos_to_tspoint(old_end_pos)
 				start_byte: u32(start_idx)
@@ -136,43 +134,23 @@ fn (mut ls Vls) did_change(_ string, params string) {
 			)
 		}
 
-		// This part should move all the characters to their new positions
-		// TODO: improve the algo when possible, rename variables, merge two branches into one
-		if new_len > old_len {
-			mut j := 0
-			mut k := old_end_idx
-			for i := new_end_idx; j < old_len - old_end_idx; i++ {
-				// TODO: not sure if its required
-				if k == old_len {
-					break
-				}
+		// the new source should grow or shrink
+		unsafe { new_src.grow_len(diff) }
 
-				new_src[i] = old_src[k]
-				j++
-				k++
-			}
-		} else {
-			mut j := new_end_idx
-			for i := old_end_idx; i < old_src.len; i++ {
-				// all the characters on the right side of the old index
-				// will be transferred to the new index
-				new_src[j] = old_src[i]
-				j++
-			}
+		// copy(new_src[new_end_idx ..], old_src[old_end_idx ..])
+		mut new_idx, mut right_idx := new_end_idx, 0
+		for new_idx < new_src.len && right_idx < right_text.len {
+			new_src[new_idx] = right_text[right_idx]
+			new_idx++
+			right_idx++
 		}
-		unsafe { old_src.free() }
 
 		// add the remaining characters to the remaining items
-		if content_change.text.len > 0 {
-			mut j := 0
-			for i := start_idx; i < new_src.len; i++ {
-				if j == content_change.text.len {
-					break
-				}
-
-				new_src[i] = content_change.text[j]
-				j++
-			}
+		mut insert_idx, mut change_idx := start_idx, 0
+		for insert_idx < new_src.len && change_idx < content_change.text.len {
+			new_src[insert_idx] = content_change.text[change_idx]
+			change_idx++
+			insert_idx++
 		}
 
 		// edit the tree
@@ -184,8 +162,6 @@ fn (mut ls Vls) did_change(_ string, params string) {
 			old_end_point: lsp_pos_to_tspoint(old_end_pos)
 			new_end_point: lsp_pos_to_tspoint(new_end_pos)
 		)
-
-		// unsafe { content_change.text.free() }
 	}
 
 	// See comment in `did_open`.
@@ -197,11 +173,6 @@ fn (mut ls Vls) did_change(_ string, params string) {
 	}
 
 	// ls.log_message('new tree: ${new_tree.root_node().sexpr_str()}', .info)
-
-	unsafe {
-		ls.trees[uri].free()
-		ls.sources[uri].source.free()
-	}
 	ls.trees[uri] = new_tree
 	ls.sources[uri].source = new_src
 	ls.sources[uri].version = did_change_params.text_document.version
