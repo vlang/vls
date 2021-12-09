@@ -154,6 +154,7 @@ fn (mut ls Vls) did_change(_ string, params string) {
 	}
 
 	mut new_tree := ls.parser.parse_string_with_old_tree(new_src.bytestr(), ls.trees[uri])
+	// ls.log_message('${ls.trees[uri].get_changed_ranges(new_tree)}', .info)
 
 	// ls.log_message('new tree: ${new_tree.root_node().sexpr_str()}', .info)
 	ls.trees[uri] = new_tree
