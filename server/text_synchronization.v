@@ -128,18 +128,17 @@ fn (mut ls Vls) did_change(_ string, params string) {
 		unsafe { new_src.grow_len(diff) }
 
 		// copy(new_src[new_end_idx ..], old_src[old_end_idx ..])
-		mut new_idx, mut right_idx := new_end_idx, 0
-		for new_idx < new_src.len && right_idx < right_text.len {
+		mut new_idx := new_end_idx
+		for right_idx := 0; new_idx < new_src.len && right_idx < right_text.len; right_idx++ {
 			new_src[new_idx] = right_text[right_idx]
 			new_idx++
 			right_idx++
 		}
 
 		// add the remaining characters to the remaining items
-		mut insert_idx, mut change_idx := start_idx, 0
-		for insert_idx < new_src.len && change_idx < content_change.text.len {
+		mut insert_idx := start_idx
+		for change_idx := 0; insert_idx < new_src.len && change_idx < content_change.text.len; change_idx++ {
 			new_src[insert_idx] = content_change.text[change_idx]
-			change_idx++
 			insert_idx++
 		}
 
