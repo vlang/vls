@@ -74,10 +74,19 @@ pub fn (tree &C.TSTree) edit(input_edit &C.TSInputEdit) {
 	C.ts_tree_edit(tree, input_edit)
 }
 
-[inline]
-pub fn (old_tree &C.TSTree) get_changed_ranges(new_tree &C.TSTree) &C.TSRange {
-	mut count := u32(0)
-	return C.ts_tree_get_changed_ranges(old_tree, new_tree, &count)
+pub fn (old_tree &C.TSTree) get_changed_ranges(new_tree &C.TSTree) []C.TSRange {
+    mut len := u32(0)
+    buf := C.ts_tree_get_changed_ranges(old_tree, new_tree, &len)
+    e_size := int(sizeof(C.TSRange))
+
+    return unsafe {
+        array{
+            element_size: e_size
+            len: int(len)
+            cap: int(len)
+            data: buf
+        }
+    }
 }
 
 [unsafe]
