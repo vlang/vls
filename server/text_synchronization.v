@@ -24,62 +24,72 @@ fn (mut ls Vls) did_open(_ string, params string) {
 		ls.panic(err.msg)
 		return
 	}
+
 	ls.parser.reset()
 	src := did_open_params.text_document.text
 	uri := did_open_params.text_document.uri
-	// ls.log_message('opening $uri ...', .info)
-	// if project is not opened, analyze all the files available
 	project_dir := uri.dir_path()
+	mut should_scan_whole_dir := false
+
+	// should_scan_whole_dir is toggled if
+	// - it's V file ending with .v format
+	// - the project directory does not end with a dot (.)
+	// - and has not been present in the dependency tree
 	if uri.ends_with('.v') && project_dir != '.' && !ls.store.dependency_tree.has(project_dir) {
-		mut files := os.ls(project_dir) or { [] }
-		for file_name in files {
-			if !analyzer.should_analyze_file(file_name) {
-				continue
-			}
-
-			full_path := os.join_path(project_dir, file_name)
-			file_uri := lsp.document_uri_from_path(full_path)
-
-			if file_uri != uri {
-				ls.sources[file_uri] = File{
-					uri: file_uri
-					source: os.read_bytes(full_path) or { [] }
-				}
-				source_str := ls.sources[file_uri].source.bytestr()
-				ls.trees[file_uri] = ls.parser.parse_string(source_str)
-				unsafe { source_str.free() }
-			} else {
-				ls.sources[uri] = File{
-					source: src.bytes()
-					uri: uri
-				}
-				ls.trees[uri] = ls.parser.parse_string(src)
-			}
-
-			ls.analyze_file(ls.trees[file_uri], ls.sources[file_uri])
-			ls.show_diagnostics(file_uri)
-
-			// unsafe {
-			// 	full_path.free()
-			// 	file_uri.free()
-			// }
-		}
-		ls.store.set_active_file_path(uri.path(), ls.sources[uri].version)
-		unsafe { files.free() }
-	} else if uri !in ls.sources && uri !in ls.trees {
-		ls.sources[uri] = File{
-			source: src.bytes()
-			uri: uri
-		}
-		ls.trees[uri] = ls.parser.parse_string(src)
-
-		if !ls.store.has_file_path(uri.path()) || uri.path() !in ls.store.opened_scopes {
-			ls.analyze_file(ls.trees[uri], ls.sources[uri])
-		}
-
-		ls.show_diagnostics(uri)
+		should_scan_whole_dir = true
 	}
 
+	mut files_to_analyze := if should_scan_whole_dir {
+		os.ls(project_dir) or { [uri.path()] }
+	} else {
+		[uri.path()]
+	}
+
+	for file_name in files_to_analyze {
+		if should_scan_whole_dir && !analyzer.should_analyze_file(file_name) {
+			continue
+		}
+
+		file_uri := lsp.document_uri_from_path(file_name)
+		mut has_source := file_uri in ls.sources
+		mut has_tree := file_uri in ls.trees
+		mut should_be_analyzed := has_source && has_tree
+
+		// Create file only if source does not exist
+		if !has_source {
+			ls.sources[file_uri] = File{
+				uri: file_uri
+				source: if file_uri != uri {
+					os.read_bytes(file_name) or { [] }
+				} else {
+					src.bytes()
+				},
+				version: 1
+			}
+
+			has_source = true
+		}
+
+		// Parse only if tree does not exist
+		if !has_tree {
+			ls.trees[file_uri] = ls.parser.parse_bytes(ls.sources[file_uri].source)
+			has_tree = true
+		}
+
+		// If data about the document/file has recently been created,
+		// mark it as "should_be_analyzed" (hence the variable name).
+		if !should_be_analyzed && (has_source && has_tree) {
+			should_be_analyzed = true
+		}
+
+		// Analyze only if both source and tree exists
+		if should_be_analyzed {
+			ls.analyze_file(ls.trees[file_uri], ls.sources[file_uri])
+			ls.show_diagnostics(file_uri)
+		}
+	}
+
+	ls.store.set_active_file_path(uri.path(), ls.sources[uri].version)
 	if v_check_results := ls.exec_v_diagnostics(uri) {
 		ls.publish_diagnostics(uri, v_check_results)
 	}
@@ -153,7 +163,7 @@ fn (mut ls Vls) did_change(_ string, params string) {
 		)
 	}
 
-	mut new_tree := ls.parser.parse_string_with_old_tree(new_src.bytestr(), ls.trees[uri])
+	mut new_tree := ls.parser.parse_bytes_with_old_tree(new_src, ls.trees[uri])
 	// ls.log_message('${ls.trees[uri].get_changed_ranges(new_tree)}', .info)
 
 	// ls.log_message('new tree: ${new_tree.root_node().sexpr_str()}', .info)
