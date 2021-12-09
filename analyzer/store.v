@@ -272,6 +272,7 @@ pub fn (mut ss Store) register_symbol(mut info Symbol) ?&Symbol {
 			existing_sym.generic_placeholder_len = info.generic_placeholder_len
 			existing_sym.file_path = info.file_path
 			existing_sym.file_version = info.file_version
+			existing_sym.scope = info.scope
 		}
 
 		return existing_sym
