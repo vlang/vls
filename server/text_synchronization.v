@@ -39,8 +39,10 @@ fn (mut ls Vls) did_open(_ string, params string) {
 		should_scan_whole_dir = true
 	}
 
-	mut files_to_analyze := if should_scan_whole_dir { os.ls(project_dir) or { [
-			uri.path()] } } else { [
+	mut files_to_analyze := if should_scan_whole_dir { os.ls(project_dir) or {
+			[
+				uri.path(),
+			]} } else { [
 			uri.path(),
 		] }
 
@@ -49,7 +51,11 @@ fn (mut ls Vls) did_open(_ string, params string) {
 			continue
 		}
 
-		file_uri := lsp.document_uri_from_path(file_name)
+		file_uri := lsp.document_uri_from_path(if file_name.starts_with(project_dir) {
+			file_name
+		} else {
+			os.join_path(project_dir, file_name)
+		})
 		mut has_source := file_uri in ls.sources
 		mut has_tree := file_uri in ls.trees
 		mut should_be_analyzed := has_source && has_tree
