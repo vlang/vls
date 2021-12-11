@@ -2,10 +2,10 @@ module analyzer
 
 pub struct SemanticAnalyzer {
 pub mut:
-	cur_file_path string
 	cursor        TreeCursor
 	src_text      []byte
-	store         &Store = &Store(0)
+	messages      []Message = []Message{cap: 100}
+	store         &Store [required]
 	// skips the local scopes and registers only
 	// the top-level ones regardless of its
 	// visibility
@@ -13,7 +13,12 @@ pub mut:
 }
 
 fn (mut an SemanticAnalyzer) report(msg string, node C.TSNode) {
-	an.store.report_error(report_error(msg, node.range()))
+	an.messages.report(
+		content: msg
+		range: node.range()
+		file_path: an.store.cur_file_path
+	)
+	// an.store.report_error(report_error(msg, node.range()))
 }
 
 fn (mut an SemanticAnalyzer) import_decl(node C.TSNode) ? {
@@ -32,20 +37,16 @@ fn (mut an SemanticAnalyzer) import_decl(node C.TSNode) ? {
 	list := symbols.named_child(0) ?
 	symbols_count := list.named_child_count()
 	for i := u32(0); i < symbols_count; i++ {
-		sym := list.named_child(i) ?
-		if sym.is_null() {
-			continue
-		}
-
-		symbol_name := sym.code(an.src_text)
+		sym_node := list.named_child(i) or { continue }
+		symbol_name := sym_node.code(an.src_text)
 		got_sym := an.store.symbols[module_path].get(symbol_name) or {
-			an.report('Symbol `$symbol_name` not found', sym)
+			an.report('Symbol `$symbol_name` in module `$module_name` not found', sym_node)
 			// unsafe { symbol_name.free() }
 			continue
 		}
 
 		if int(got_sym.access) < int(SymbolAccess.public) {
-			an.report('Symbol `$symbol_name not public', sym)
+			an.report('Symbol `$symbol_name` in module `$module_name` not public', sym_node)
 			// unsafe { symbol_name.free() }
 			continue
 		}
@@ -67,12 +68,12 @@ fn (mut an SemanticAnalyzer) enum_decl(node C.TSNode) {
 fn (mut an SemanticAnalyzer) fn_decl(node C.TSNode) {
 }
 
-pub fn (mut an SemanticAnalyzer) top_level_statement() {
-	current_node := an.cursor.current_node() or { return }
-
+pub fn (mut an SemanticAnalyzer) top_level_statement(current_node C.TSNode) {
 	match current_node.type_name() {
 		'import_declaration' {
-			an.import_decl(current_node) or {}
+			an.import_decl(current_node) or {
+				// an.messages.report(err)
+			}
 		}
 		'const_declaration' {
 			an.const_decl(current_node)
@@ -93,18 +94,20 @@ pub fn (mut an SemanticAnalyzer) top_level_statement() {
 	}
 }
 
+pub fn (mut an SemanticAnalyzer) analyze() []Message {
+	defer { an.messages.clear() }
+	for got_node in an.cursor {
+		an.top_level_statement(got_node)
+	}
+	return an.messages.clone()
+}
+
 // analyze analyzes the given tree
-pub fn (mut store Store) analyze(tree &C.TSTree, src_text []byte) {
+pub fn (mut store Store) analyze(tree &C.TSTree, src_text []byte) []Message {
 	mut an := SemanticAnalyzer{
 		store: unsafe { store }
 		src_text: src_text
 		cursor: new_tree_cursor(tree.root_node())
 	}
-
-	an.cursor.to_first_child()
-	for _ in an.cursor {
-		an.top_level_statement()
-	}
-
-	// unsafe { an.cursor.free() }
+	return an.analyze()
 }
