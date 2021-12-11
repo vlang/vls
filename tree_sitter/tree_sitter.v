@@ -4,6 +4,20 @@ module tree_sitter
 #flag -I@VMODROOT/tree_sitter/lib
 #flag @VMODROOT/tree_sitter/lib/lib.o
 
+// Input
+enum TSVInputEncoding {
+	utf8
+	utf16
+}
+
+[typedef]
+struct C.TSInput {
+mut:
+	payload  voidptr
+	read     fn (payload voidptr, byte_index u32, position C.TSPoint, bytes_read &u32) &char
+	encoding TSVInputEncoding
+}
+
 [typedef]
 struct C.TSParser {}
 
@@ -18,6 +32,11 @@ fn C.ts_parser_reset(parser &C.TSParser)
 [inline]
 pub fn new_parser() &C.TSParser {
 	return C.ts_parser_new()
+}
+
+[inline]
+pub fn (mut parser C.TSParser) parse(old_tree &C.TSTree, input C.TSInput) &C.TSTree {
+	return C.ts_parser_parse(parser, old_tree, input)
 }
 
 [inline]
@@ -43,6 +62,34 @@ pub fn (mut parser C.TSParser) parse_string_with_old_tree(content string, old_tr
 [inline]
 pub fn (mut parser C.TSParser) parse_string_with_old_tree_and_len(content string, old_tree &C.TSTree, len u32) &C.TSTree {
 	return C.ts_parser_parse_string(parser, old_tree, &char(content.str), len)
+}
+
+[inline]
+pub fn (mut parser C.TSParser) parse_bytes(content []byte) &C.TSTree {
+	return parser.parse_bytes_with_old_tree(content, &C.TSTree(0))
+}
+
+fn v_byte_array_input_read(pl voidptr, byte_index u32, position C.TSPoint, bytes_read &u32) &char {
+	payload := *(&[]byte(pl))
+	if byte_index >= u32(payload.len) {
+		unsafe {
+			*bytes_read = 0
+		}
+		return c''
+	} else {
+		unsafe {
+			*bytes_read = u32(payload.len) - byte_index
+		}
+		return unsafe { &char(payload.data) + byte_index }
+	}
+}
+
+pub fn (mut parser C.TSParser) parse_bytes_with_old_tree(content []byte, old_tree &C.TSTree) &C.TSTree {
+	return parser.parse(old_tree,
+		payload: &content
+		read: v_byte_array_input_read
+		encoding: .utf8
+	)
 }
 
 [inline; unsafe]
@@ -74,10 +121,19 @@ pub fn (tree &C.TSTree) edit(input_edit &C.TSInputEdit) {
 	C.ts_tree_edit(tree, input_edit)
 }
 
-[inline]
-pub fn (old_tree &C.TSTree) get_changed_ranges(new_tree &C.TSTree) &C.TSRange {
-	mut count := u32(0)
-	return C.ts_tree_get_changed_ranges(old_tree, new_tree, &count)
+pub fn (old_tree &C.TSTree) get_changed_ranges(new_tree &C.TSTree) []C.TSRange {
+	mut len := u32(0)
+	buf := C.ts_tree_get_changed_ranges(old_tree, new_tree, &len)
+	e_size := int(sizeof(C.TSRange))
+
+	return unsafe {
+		array{
+			element_size: e_size
+			len: int(len)
+			cap: int(len)
+			data: buf
+		}
+	}
 }
 
 [unsafe]
