@@ -272,6 +272,7 @@ pub fn (mut ss Store) register_symbol(mut info Symbol) ?&Symbol {
 			existing_sym.generic_placeholder_len = info.generic_placeholder_len
 			existing_sym.file_path = info.file_path
 			existing_sym.file_version = info.file_version
+			existing_sym.scope = info.scope
 		}
 
 		return existing_sym
@@ -1235,10 +1236,10 @@ pub fn (mut store Store) import_modules(mut imports []&Import) {
 
 			full_path := os.join_path(new_import.path, file_name)
 			content := os.read_bytes(full_path) or { continue }
-			tree_from_import := parser.parse_string(content.bytestr())
+			tree_from_import := parser.parse_bytes(content)
 
-			// Set version to zero so that modules who are already opened
-			// in the editors can register symbols with scopes without
+			// Set version to zero so that modules that are already opened
+			// in the editor can register symbols with scopes without
 			// getting "symbol exists" errors
 			store.set_active_file_path(full_path, 0)
 

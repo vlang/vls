@@ -39,10 +39,8 @@ fn (mut ls Vls) did_open(_ string, params string) {
 		should_scan_whole_dir = true
 	}
 
-	mut files_to_analyze := if should_scan_whole_dir { os.ls(project_dir) or {
-			[
-				uri.path(),
-			]} } else { [
+	mut files_to_analyze := if should_scan_whole_dir { os.ls(project_dir) or { [
+			uri.path()] } } else { [
 			uri.path(),
 		] }
 

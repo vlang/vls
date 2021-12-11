@@ -3,12 +3,7 @@ module server
 // commenting it here so that it recognizes that
 // TSPoint and TSRange is used from the "tree_sitter" module
 // import tree_sitter
-import v.token
 import lsp
-
-pub fn is_within_pos(offset int, pos token.Position) bool {
-	return offset >= pos.pos && offset <= pos.pos + pos.len
-}
 
 // compute_offset returns a byte offset from the given position
 pub fn compute_offset(src []byte, line int, col int) int {
