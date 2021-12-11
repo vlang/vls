@@ -141,7 +141,6 @@ fn (mut ls Vls) did_change(_ string, params string) {
 		for right_idx := 0; new_idx < new_src.len && right_idx < right_text.len; right_idx++ {
 			new_src[new_idx] = right_text[right_idx]
 			new_idx++
-			right_idx++
 		}
 
 		// add the remaining characters to the remaining items
