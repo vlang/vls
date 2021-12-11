@@ -1,10 +1,10 @@
-module analyzer
-
 import os
 import tree_sitter
 import tree_sitter_v as v
 import test_utils
 import benchmark
+import an_test_utils
+import analyzer { Store, SymbolAnalyzer, new_tree_cursor, register_builtin_symbols }
 
 fn test_symbol_registration() ? {
 	mut parser := tree_sitter.new_parser()
@@ -65,8 +65,8 @@ fn test_symbol_registration() ? {
 		sym_analyzer.src_text = src.bytes()
 		sym_analyzer.cursor = new_tree_cursor(tree.root_node())
 		symbols, _ := sym_analyzer.analyze()
-		result := symbols.sexpr_str()
-		assert result == expected
+		result := an_test_utils.sexpr_str_symbol_array(symbols)
+		assert result == test_utils.newlines_to_spaces(expected)
 		println(bench.step_message_ok(test_name))
 
 		unsafe {

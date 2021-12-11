@@ -1,21 +1,24 @@
-module analyzer
-
 import os
 import tree_sitter
 import tree_sitter_v as v
 import test_utils
 import benchmark
+import strings
+import analyzer { Message, Store, SymbolAnalyzer, SemanticAnalyzer, new_tree_cursor, register_builtin_symbols }
+import an_test_utils
 
-fn test_symbol_registration() ? {
+fn test_semantic_analysis() ? {
 	mut parser := tree_sitter.new_parser()
 	parser.set_language(v.language)
+
+	vlib_path := os.join_path(os.dir(os.getenv('VEXE')), 'vlib')
 
 	mut bench := benchmark.new_benchmark()
 	mut store := &Store{}
 	mut builtin_import, _ := store.add_import(
 		resolved: true
 		module_name: 'builtin'
-		path: os.join_path(os.dir(os.getenv('VEXE')), 'vlib', 'builtin')
+		path: os.join_path(vlib_path, 'builtin')
 	)
 	mut imports := [builtin_import]
 	store.register_auto_import(builtin_import, '')
@@ -27,12 +30,15 @@ fn test_symbol_registration() ? {
 		is_test: true
 	}
 
+	mut semantic_analyzer := SemanticAnalyzer{
+		store: store
+	}
+
 	test_files_dir := test_utils.get_test_files_path(@FILE)
 	test_files := test_utils.load_test_file_paths(test_files_dir, 'semantic_analyzer') or {
 		bench.fail()
 		eprintln(bench.step_message_fail(err.msg))
-		assert false
-		return
+		return err
 	}
 
 	bench.set_total_expected_steps(test_files.len)
@@ -62,11 +68,22 @@ fn test_symbol_registration() ? {
 
 		println(bench.step_message('Testing $test_name'))
 		tree := parser.parse_string(src)
-		sym_analyzer.src_text = src.bytes()
-		sym_analyzer.cursor = new_tree_cursor(tree.root_node())
+
+		src_bytes := src.bytes()
+		cursor := new_tree_cursor(tree.root_node())
+		store.import_modules_from_tree(tree, src_bytes, vlib_path)
+
+		sym_analyzer.src_text = src_bytes
+		sym_analyzer.cursor = cursor
+
+		semantic_analyzer.src_text = src_bytes
+		semantic_analyzer.cursor = cursor
+
 		symbols, _ := sym_analyzer.analyze()
-		result := symbols.sexpr_str()
-		assert result == expected
+		messages := semantic_analyzer.analyze()
+		result := an_test_utils.sexpr_str_messages(messages)
+
+		assert result == test_utils.newlines_to_spaces(expected)
 		println(bench.step_message_ok(test_name))
 
 		unsafe {

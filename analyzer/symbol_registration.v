@@ -10,12 +10,13 @@ const (
 	global_struct_keyword  = '__global:'
 )
 
-struct SymbolAnalyzer {
+pub struct SymbolAnalyzer {
+pub mut:
+	src_text    []byte
+	cursor      TreeCursor
 mut:
 	store       &Store     [required]
-	cursor      TreeCursor
 	module_name string
-	src_text    []byte
 	// skips the local scopes and registers only
 	// the top-level ones regardless of its
 	// visibility
