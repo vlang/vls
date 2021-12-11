@@ -3,7 +3,7 @@ import tree_sitter
 import tree_sitter_v as v
 import test_utils
 import benchmark
-import an_test_utils
+import analyzer.an_test_utils
 import analyzer { Store, SymbolAnalyzer, new_tree_cursor, register_builtin_symbols }
 
 fn test_symbol_registration() ? {

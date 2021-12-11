@@ -2,10 +2,10 @@ module analyzer
 
 pub struct SemanticAnalyzer {
 pub mut:
-	cursor        TreeCursor
-	src_text      []byte
-	messages      []Message = []Message{cap: 100}
-	store         &Store [required]
+	cursor   TreeCursor
+	src_text []byte
+	messages []Message = []Message{cap: 100}
+	store    &Store     [required]
 	// skips the local scopes and registers only
 	// the top-level ones regardless of its
 	// visibility
@@ -95,7 +95,9 @@ pub fn (mut an SemanticAnalyzer) top_level_statement(current_node C.TSNode) {
 }
 
 pub fn (mut an SemanticAnalyzer) analyze() []Message {
-	defer { an.messages.clear() }
+	defer {
+		an.messages.clear()
+	}
 	for got_node in an.cursor {
 		an.top_level_statement(got_node)
 	}

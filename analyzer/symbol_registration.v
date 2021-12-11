@@ -12,10 +12,10 @@ const (
 
 pub struct SymbolAnalyzer {
 pub mut:
-	src_text    []byte
-	cursor      TreeCursor
+	src_text []byte
+	cursor   TreeCursor
 mut:
-	store       &Store     [required]
+	store       &Store [required]
 	module_name string
 	// skips the local scopes and registers only
 	// the top-level ones regardless of its

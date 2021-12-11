@@ -4,8 +4,8 @@ import tree_sitter_v as v
 import test_utils
 import benchmark
 import strings
-import analyzer { Message, Store, SymbolAnalyzer, SemanticAnalyzer, new_tree_cursor, register_builtin_symbols }
-import an_test_utils
+import analyzer { SemanticAnalyzer, Store, SymbolAnalyzer, new_tree_cursor, register_builtin_symbols }
+import analyzer.an_test_utils
 
 fn test_semantic_analysis() ? {
 	mut parser := tree_sitter.new_parser()
