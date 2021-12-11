@@ -39,10 +39,11 @@ fn (mut ls Vls) did_open(_ string, params string) {
 		should_scan_whole_dir = true
 	}
 
-	mut files_to_analyze := if should_scan_whole_dir { os.ls(project_dir) or { [
-			uri.path()] } } else { [
-			uri.path(),
-		] }
+	mut files_to_analyze := if should_scan_whole_dir { 
+		os.ls(project_dir) or { [uri.path()] } 
+	} else { 
+		[uri.path()] 
+	}
 
 	for file_name in files_to_analyze {
 		if should_scan_whole_dir && !analyzer.should_analyze_file(file_name) {
@@ -86,6 +87,8 @@ fn (mut ls Vls) did_open(_ string, params string) {
 			ls.analyze_file(ls.trees[file_uri], ls.sources[file_uri])
 			ls.show_diagnostics(file_uri)
 		}
+
+		ls.log_message('${file_uri} | has_tree: $has_tree | has_source: $has_source | should_be_analyzed: $should_be_analyzed', .info)
 	}
 
 	ls.store.set_active_file_path(uri.path(), ls.sources[uri].version)
