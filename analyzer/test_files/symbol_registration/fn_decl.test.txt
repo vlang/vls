@@ -31,6 +31,12 @@ fn inside_if() {
 
 fn mutate_arr(mut s []string) {}
 
+fn fn__arr(handler fn (s int) int) {
+    handler(1)
+}
+
+fn get_nums(nums ...int) {}
+
 ---
 
 (function main [0,3]-[0,7])
@@ -48,10 +54,14 @@ fn mutate_arr(mut s []string) {}
     (mut variable f int [13,11]-[13,12]))
 (function inside_if [16,3]-[16,12]
     (variable name string [18,4]-[18,8])
-    (scope [308]-[375] 
+    (scope [308]-[375]
         (variable test int [21,8]-[21,12])
         (mut variable bar string [22,12]-[22,15]))
     (scope [388]-[423]
         (mut variable unsafe_var int [27,12]-[27,22])))
 (function mutate_arr [31,3]-[31,13]
     (mut variable s []string [31,18]-[31,19]))
+(function fn__arr [33,3]-[33,10]
+    (variable handler fn (s int) int [33,11]-[33,18]))
+(function get_nums [37,3]-[37,11]
+    (variable nums ...int [37,12]-[37,16]))

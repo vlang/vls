@@ -1,5 +1,6 @@
 pub type Text = string
 type Any = string | int | []string
+pub type Handler = fn (a int) int
 
 ---
 
@@ -8,3 +9,4 @@ type Any = string | int | []string
     (struct string)
     (typedef int)
     (array []string))
+(pub typedef Handler (parent function_type fn (a int) int) [2,9]-[2,16])

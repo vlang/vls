@@ -40,7 +40,11 @@ fn sexpr_str_write_symbol(mut writer strings.Builder, sym &Symbol) {
 	if sym.kind in analyzer.sym_kinds_allowed_to_print_parent && !sym.parent_sym.is_void() {
 		writer.write_string('(parent ')
 		writer.write_string(sym.parent_sym.kind.str() + ' ')
-		writer.write_string(sym.parent_sym.name)
+		if sym.parent_sym.kind == .function_type {
+			writer.write_string(sym.parent_sym.gen_str())
+		} else {
+			writer.write_string(sym.parent_sym.name)
+		}
 		writer.write_string(') ')
 	}
 	sexpr_str_write_tspoint(mut writer, sym.range.start_point)

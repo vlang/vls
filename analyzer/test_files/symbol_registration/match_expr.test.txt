@@ -1,0 +1,32 @@
+enum Color {
+    red
+    yellow
+    blue
+}
+
+fn main() {
+    color := Color.red
+    cstr := match color {
+        .red { 'red' }
+        .yellow { 'yellow' }
+        .blue { 'blue' }
+    }
+
+    cstr2 := match color {
+        .red { 2 }
+        .yellow { 'hey' }
+        else { 'what' }
+    }
+}
+
+---
+
+(enum Color [0,5]-[0,10]
+    (field red int [1,4]-[1,7])
+    (field yellow int [2,4]-[2,10])
+    (field blue int [3,4]-[3,8]))
+
+(function main [6,3]-[6,7]
+    (variable color Color [7,4]-[7,9])
+    (variable cstr string [8,4]-[8,8])
+    (variable cstr2 [14,4]-[14,9]))
