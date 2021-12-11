@@ -6,15 +6,15 @@ module tree_sitter
 
 // Input
 enum TSVInputEncoding {
-  utf8
-  utf16
+	utf8
+	utf16
 }
 
 [typedef]
 struct C.TSInput {
 mut:
-	payload voidptr
-	read fn (payload voidptr, byte_index u32, position C.TSPoint, bytes_read &u32) &char
+	payload  voidptr
+	read     fn (payload voidptr, byte_index u32, position C.TSPoint, bytes_read &u32) &char
 	encoding TSVInputEncoding
 }
 
@@ -72,18 +72,22 @@ pub fn (mut parser C.TSParser) parse_bytes(content []byte) &C.TSTree {
 fn v_byte_array_input_read(pl voidptr, byte_index u32, position C.TSPoint, bytes_read &u32) &char {
 	payload := *(&[]byte(pl))
 	if byte_index >= u32(payload.len) {
-		unsafe { *bytes_read = 0 }
+		unsafe {
+			*bytes_read = 0
+		}
 		return c''
 	} else {
-		unsafe { *bytes_read = u32(payload.len) - byte_index }
+		unsafe {
+			*bytes_read = u32(payload.len) - byte_index
+		}
 		return unsafe { &char(payload.data) + byte_index }
 	}
 }
 
 pub fn (mut parser C.TSParser) parse_bytes_with_old_tree(content []byte, old_tree &C.TSTree) &C.TSTree {
 	return parser.parse(old_tree,
-		payload: &content,
-		read: v_byte_array_input_read,
+		payload: &content
+		read: v_byte_array_input_read
 		encoding: .utf8
 	)
 }
@@ -118,18 +122,18 @@ pub fn (tree &C.TSTree) edit(input_edit &C.TSInputEdit) {
 }
 
 pub fn (old_tree &C.TSTree) get_changed_ranges(new_tree &C.TSTree) []C.TSRange {
-    mut len := u32(0)
-    buf := C.ts_tree_get_changed_ranges(old_tree, new_tree, &len)
-    e_size := int(sizeof(C.TSRange))
+	mut len := u32(0)
+	buf := C.ts_tree_get_changed_ranges(old_tree, new_tree, &len)
+	e_size := int(sizeof(C.TSRange))
 
-    return unsafe {
-        array{
-            element_size: e_size
-            len: int(len)
-            cap: int(len)
-            data: buf
-        }
-    }
+	return unsafe {
+		array{
+			element_size: e_size
+			len: int(len)
+			cap: int(len)
+			data: buf
+		}
+	}
 }
 
 [unsafe]

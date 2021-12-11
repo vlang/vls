@@ -39,11 +39,10 @@ fn (mut ls Vls) did_open(_ string, params string) {
 		should_scan_whole_dir = true
 	}
 
-	mut files_to_analyze := if should_scan_whole_dir {
-		os.ls(project_dir) or { [uri.path()] }
-	} else {
-		[uri.path()]
-	}
+	mut files_to_analyze := if should_scan_whole_dir { os.ls(project_dir) or { [
+			uri.path()] } } else { [
+			uri.path(),
+		] }
 
 	for file_name in files_to_analyze {
 		if should_scan_whole_dir && !analyzer.should_analyze_file(file_name) {
@@ -63,7 +62,7 @@ fn (mut ls Vls) did_open(_ string, params string) {
 					os.read_bytes(file_name) or { [] }
 				} else {
 					src.bytes()
-				},
+				}
 				version: 1
 			}
 
@@ -122,7 +121,7 @@ fn (mut ls Vls) did_change(_ string, params string) {
 		old_len := new_src.len
 		new_len := old_len - (old_end_idx - start_idx) + content_change.text.len
 		diff := new_len - old_len
-		right_text := new_src[old_end_idx ..].clone()
+		right_text := new_src[old_end_idx..].clone()
 
 		// remove immediately the symbol
 		if content_change.text.len == 0 && diff < 0 {
