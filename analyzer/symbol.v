@@ -288,62 +288,7 @@ pub fn (sym &Symbol) str() string {
 	return sym.gen_str()
 }
 
-fn write_ctspoint_sexpr_str(point C.TSPoint, mut writer strings.Builder) {
-	writer.write_b(`[`)
-	writer.write_string(point.row.str())
-	writer.write_b(`,`)
-	writer.write_string(point.column.str())
-	writer.write_b(`]`)
-}
-
 const sym_kinds_allowed_to_print_parent = [SymbolKind.typedef, .function]
-
-fn (sym &Symbol) sexpr_str_write(mut writer strings.Builder) {
-	writer.write_b(`(`)
-	writer.write_string(sym.access.str())
-	writer.write_string(sym.kind.str() + ' ')
-	writer.write_string(sym.name + ' ')
-	if !sym.return_sym.is_void() {
-		if sym.return_sym.kind == .function_type {
-			writer.write_string(sym.return_sym.gen_str() + ' ')
-		} else {
-			writer.write_string(sym.return_sym.name + ' ')
-		}
-	}
-	if sym.kind in analyzer.sym_kinds_allowed_to_print_parent && !sym.parent_sym.is_void() {
-		writer.write_string('(parent ')
-		writer.write_string(sym.parent_sym.kind.str() + ' ')
-		writer.write_string(sym.parent_sym.name)
-		writer.write_string(') ')
-	}
-	write_ctspoint_sexpr_str(sym.range.start_point, mut writer)
-	writer.write_b(`-`)
-	write_ctspoint_sexpr_str(sym.range.end_point, mut writer)
-	if sym.kind == .function {
-		sym.scope.sexpr_str_write(mut writer)
-	} else {
-		for child in sym.children_syms {
-			writer.write_b(` `)
-			if sym.kind == .typedef || sym.kind == .sumtype {
-				writer.write_b(`(`)
-				writer.write_string(child.kind.str() + ' ')
-				writer.write_string(child.name)
-				writer.write_b(`)`)
-			} else {
-				child.sexpr_str_write(mut writer)
-			}
-		}
-	}
-	writer.write_b(`)`)
-}
-
-// sexpr_str returns the S expression-like stringified
-// representation of the Symbol.
-pub fn (sym &Symbol) sexpr_str() string {
-	mut sb := strings.new_builder(100)
-	sym.sexpr_str_write(mut sb)
-	return sb.str()
-}
 
 pub fn (infos []&Symbol) str() string {
 	return '[' + infos.map(it.gen_str()).join(', ') + ']'
@@ -388,19 +333,6 @@ pub fn (symbols []&Symbol) filter_by_file_path(file_path string) []&Symbol {
 		// unsafe { filtered_from_children.free() }
 	}
 	return filtered
-}
-
-// sexpr_str returns the S expression-like stringified
-// representation of the []Symbol.
-pub fn (symbols []&Symbol) sexpr_str() string {
-	mut sb := strings.new_builder(200)
-	for i, sym in symbols {
-		sym.sexpr_str_write(mut sb)
-		if i < symbols.len - 1 {
-			sb.write_b(` `)
-		}
-	}
-	return sb.str()
 }
 
 // pub fn (mut infos []&Symbol) remove_symbol_by_range(file_path string, range C.TSRange) {
