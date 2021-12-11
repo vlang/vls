@@ -1,7 +1,5 @@
 module analyzer
 
-import strings
-
 [heap]
 pub struct ScopeTree {
 pub mut:
