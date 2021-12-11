@@ -5,8 +5,7 @@ import strings
 [heap]
 pub struct ScopeTree {
 pub mut:
-	parent &ScopeTree = &ScopeTree(0)
-mut:
+	parent     &ScopeTree = &ScopeTree(0)
 	start_byte u32
 	end_byte   u32
 	symbols    []&Symbol
@@ -187,24 +186,4 @@ pub fn (mut scope ScopeTree) get_symbol_with_range(name string, range C.TSRange)
 	// 	unsafe { symbols.free() }
 	// }
 	return symbols.get(name)
-}
-
-fn (scope &ScopeTree) sexpr_str_write(mut writer strings.Builder) {
-	if isnil(scope) {
-		return
-	}
-
-	for sym in scope.symbols {
-		writer.write_b(` `)
-		sym.sexpr_str_write(mut writer)
-	}
-
-	for child in scope.children {
-		if isnil(child) || (!isnil(child) && child.symbols.len == 0) {
-			continue
-		}
-		writer.write_string(' (scope [$child.start_byte]-[$child.end_byte]')
-		child.sexpr_str_write(mut writer)
-		writer.write_b(`)`)
-	}
 }

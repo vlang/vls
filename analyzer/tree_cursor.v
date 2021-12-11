@@ -8,7 +8,7 @@ mut:
 	cursor        C.TSTreeCursor [required]
 }
 
-fn (mut tc TreeCursor) next() ?C.TSNode {
+pub fn (mut tc TreeCursor) next() ?C.TSNode {
 	for tc.cur_child_idx < tc.child_count {
 		if tc.cur_child_idx == -1 {
 			tc.cursor.to_first_child()
@@ -27,16 +27,16 @@ fn (mut tc TreeCursor) next() ?C.TSNode {
 	return none
 }
 
-fn (mut tc TreeCursor) to_first_child() bool {
+pub fn (mut tc TreeCursor) to_first_child() bool {
 	return tc.cursor.to_first_child()
 }
 
-fn (tc &TreeCursor) current_node() ?C.TSNode {
+pub fn (tc &TreeCursor) current_node() ?C.TSNode {
 	return tc.cursor.current_node()
 }
 
 [unsafe]
-fn (tc &TreeCursor) free() {
+pub fn (tc &TreeCursor) free() {
 	unsafe {
 		tc.cursor.free()
 		tc.cur_child_idx = 0
@@ -44,7 +44,7 @@ fn (tc &TreeCursor) free() {
 	}
 }
 
-fn new_tree_cursor(root_node C.TSNode) TreeCursor {
+pub fn new_tree_cursor(root_node C.TSNode) TreeCursor {
 	return TreeCursor{
 		child_count: int(root_node.child_count())
 		cursor: root_node.tree_cursor()
