@@ -2,6 +2,7 @@ import server
 import os
 import test_utils
 import net
+import time
 
 fn launch_cmd(exec_path string, args ...string) &os.Process {
 	eprintln('executing $exec_path ${args.join(' ')}')
@@ -44,7 +45,7 @@ fn compile_and_start_vls(args ...string) ?&os.Process {
 	if !os.exists(vls_path) {
 		os.chdir(vls_cmd_dir) ?
 		vroot_path := server.detect_vroot_path() ?
-		mut v_build_process := launch_v_tool(vroot_path, '-cc', 'gcc', '-gc', 'boehm',
+		mut v_build_process := launch_v_tool(vroot_path, '-d', 'connection_test', '-cc', 'gcc', '-gc', 'boehm',
 			'.')
 		v_build_process.wait()
 
@@ -103,4 +104,23 @@ fn test_tcp_connect() ? {
 	conn.close() or {}
 	p.wait()
 	assert p.code > 0
+}
+
+fn test_stdio_timeout() ? {
+	mut io := test_utils.Testio{}
+	mut p := compile_and_start_vls('--timeout=1') ?
+	p.run()
+	assert p.status == .running
+	assert p.pid > 0
+	for {
+		if !p.is_alive() {
+			break
+		}
+		time.sleep(1 * time.second)
+	}
+	p.wait()
+	assert p.status == .exited
+	assert p.code == 0
+	p.close()
+	unsafe { p.free() }
 }
