@@ -148,20 +148,17 @@ pub fn (mut ls Vls) dispatch(payload string) {
 	} else {
 		ls.logger.request(payload, .receive)
 	}
-	if ls.status == .initialized {
+
+	if request.method == 'shutdown' {
+		// NB: LSP specification is unclear whether or not
+		// a shutdown request is allowed before server init
+		// but we'll just put it here since we want to formally
+		// shutdown the server after a certain timeout period.
+		ls.shutdown(request.id)
+	} else if ls.status == .initialized {
 		match request.method {
 			// not only requests but also notifications
 			'initialized' {} // does nothing currently
-			'shutdown' {
-				// NB: Some users reported that after closing their text editors,
-				// the vls process isn't properly closed at all and the editor still
-				// continuously sending useless requests during the shutdown phase
-				// which dramatically increases the memory. Unless there is a fix
-				// or other possible alternatives, the solution for now is to
-				// immediately exit when the server receives a shutdown request.
-				// Freeing extra memory here
-				ls.shutdown(request.id)
-			}
 			'exit' {
 				// ignore for the reasons stated in the above comment
 				// ls.exit()
