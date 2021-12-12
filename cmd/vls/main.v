@@ -137,6 +137,13 @@ fn main() {
 			required: false
 			description: 'Path to the V installation directory. By default, it will use the VROOT env variable or the current directory of the V executable.'
 		},
+		cli.Flag{
+			flag: .int,
+			name: 'timeout'
+			required: false
+			default_value: ['15']
+			description: 'Number of minutes to be set for timeout/auto-shutdown. After n number of minutes, VLS will automatically shutdown. Set to 0 to disable it.'
+		}
 	])
 
 	cmd.parse(os.args)
