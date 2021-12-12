@@ -16,7 +16,7 @@ fn run_cli(cmd cli.Command) ? {
 		should_generate_report := cmd.flags.get_bool('generate-report') or { false }
 		timeout_minutes_val := cmd.flags.get_int('timeout') or { 15 }
 		flag_discriminator := if cmd.posix_mode { '--' } else { '-' }
-		mut server_args := ['--child']
+		mut server_args := [flag_discriminator + 'child', flag_discriminator + 'timeout=0']
 
 		for flag in cmd.flags {
 			match flag.name {
