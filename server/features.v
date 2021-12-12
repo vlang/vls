@@ -918,7 +918,8 @@ fn (mut ls Vls) completion(id string, params string) {
 		builder.ctx = ctx
 		builder.parent_node = parent_node
 		builder.build_suggestions(node, offset)
-	} else if ctx.trigger_kind == .invoked && (root_node.named_child_count() == 0 || file.source.len <= 3) {
+	} else if ctx.trigger_kind == .invoked
+		&& (root_node.named_child_count() == 0 || file.source.len <= 3) {
 		// When a V file is empty, a list of `module $name` suggsestions will be displayed.
 		builder.build_module_name_suggestions()
 	} else {

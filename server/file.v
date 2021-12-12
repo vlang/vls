@@ -7,7 +7,7 @@ struct File {
 mut:
 	uri     lsp.DocumentUri
 	source  []byte
-	tree    &C.TSTree [required]
+	tree    &C.TSTree       [required]
 	version int = 1
 }
 

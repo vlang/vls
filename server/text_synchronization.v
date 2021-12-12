@@ -62,11 +62,7 @@ fn (mut ls Vls) did_open(_ string, params string) {
 
 		// Create file only if source does not exist
 		if !has_file {
-			source := if file_uri != uri {
-				os.read_bytes(file_name) or { [] }
-			} else {
-				src.bytes()
-			}
+			source := if file_uri != uri { os.read_bytes(file_name) or { [] } } else { src.bytes() }
 
 			ls.files[file_uri] = File{
 				uri: file_uri

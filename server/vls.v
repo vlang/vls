@@ -94,7 +94,7 @@ mut:
 	parser           &C.TSParser
 	store            analyzer.Store
 	status           ServerStatus = .off
-	files          map[string]File
+	files            map[string]File
 	root_uri         lsp.DocumentUri
 	is_typing        bool
 	typing_ch        chan int
