@@ -62,8 +62,9 @@ fn (mut lg Logger) get_text() string {
 
 struct VlsHost {
 mut:
-	io            server.ReceiveSender
-	child         &os.Process
+	io              server.ReceiveSender
+	child           &os.Process
+	shutdown_timeout time.Duration
 	stderr_logger Logger = Logger{
 		max_log_count: 0
 		with_timestamp: false
@@ -111,10 +112,12 @@ fn (mut host VlsHost) run() {
 
 fn (mut host VlsHost) receive_data() {
 	mut stdout_buffer := strings.new_builder(4096)
+	mut timeout_ms := i64(0)
 
 	for !host.has_child_exited() {
 		select {
 			incoming_stdin := <-host.stdin_chan {
+				timeout_ms = 0
 				final_payload := make_lsp_payload(incoming_stdin)
 				host.child.stdin_write(final_payload)
 				host.stdin_logger.writeln(final_payload)
@@ -133,6 +136,12 @@ fn (mut host VlsHost) receive_data() {
 				// Set the last_len to the length of the latest entry so that
 				// the last stderr output will be logged into the error report.
 				host.stderr_logger.writeln(incoming_stderr)
+			}
+			50 * time.millisecond {
+				timeout_ms += (50 * time.millisecond)
+				if host.shutdown_timeout != 0 && host.shutdown_timeout - timeout_ms <= 0 {
+					host.child.stdin_write(make_lsp_payload('{"jsonrpc":"${jsonrpc.version}","id":1001,"method":"shutdown"}'))
+				}
 			}
 		}
 	}

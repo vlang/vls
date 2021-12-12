@@ -104,6 +104,7 @@ mut:
 	logger           log.Logger
 	panic_count      int
 	debug            bool
+	shutdown_timeout  time.Duration = 15 * time.minute
 	// client_capabilities lsp.ClientCapabilities
 pub mut:
 	// TODO: replace with io.ReadWriter
@@ -303,6 +304,10 @@ fn (mut ls Vls) send_null(id string) {
 }
 
 fn monitor_changes(mut ls Vls) {
+	// number of ms since "else" select clause
+	// was executed
+	mut timeout_ms := i64(0) 
+
 	// This is for debouncing analysis
 	for {
 		select {
@@ -310,13 +315,18 @@ fn monitor_changes(mut ls Vls) {
 				ls.is_typing = a != 0
 			}
 			50 * time.millisecond {
-				if !ls.is_typing {
+				timeout_ms += (50 * time.millisecond)
+				if ls.shutdown_timeout != 0 && ls.shutdown_timeout - timeout_ms <= 0 {
+					ls.status = .shutdown
+					ls.exit()
+				} if !ls.is_typing {
 					continue
 				}
 
 				uri := lsp.document_uri_from_path(ls.store.cur_file_path)
 				ls.analyze_file(ls.trees[uri], ls.sources[uri])
 				ls.is_typing = false
+				timeout_ms = 0
 				ls.show_diagnostics(uri)
 			}
 		}
@@ -367,6 +377,14 @@ pub fn (ls Vls) launch_v_tool(args ...string) &os.Process {
 	p.set_args(args)
 	p.set_redirect_stdio()
 	return p
+}
+
+pub fn (mut ls Vls) set_timeout_val(min_val int) {
+	$if connection_test ? {
+		ls.shutdown_timeout = min_val * time.second
+	} $else {
+		ls.shutdown_timeout = min_val * time.minute
+	}
 }
 
 pub enum ServerStatus {
