@@ -18,8 +18,8 @@ fn (mut ls Vls) formatting(id string, params string) {
 	}
 
 	uri := formatting_params.text_document.uri
-	source := ls.sources[uri].source
-	tree_range := ls.trees[uri].root_node().range()
+	source := ls.files[uri].source
+	tree_range := ls.files[uri].tree.root_node().range()
 	if source.len == 0 {
 		ls.send_null(id)
 		return
@@ -85,7 +85,7 @@ fn (mut ls Vls) workspace_symbol(id string, _ string) {
 	for _, sym_arr in ls.store.symbols {
 		for sym in sym_arr {
 			uri := lsp.document_uri_from_path(sym.file_path)
-			if uri in ls.trees || uri.dir() == ls.root_uri {
+			if uri in ls.files || uri.dir() == ls.root_uri {
 				sym_info := symbol_to_symbol_info(uri, sym) or { continue }
 				workspace_symbols << sym_info
 				for child_sym in sym.children_syms {
@@ -195,14 +195,13 @@ fn (mut ls Vls) signature_help(id string, params string) {
 	uri := signature_params.text_document.uri
 	pos := signature_params.position
 	ctx := signature_params.context
-	file := ls.sources[uri]
-	source := file.source
-	tree := ls.trees[uri] or {
+	file := ls.files[uri] or {
 		ls.send_null(id)
 		return
 	}
-	off := compute_offset(source, pos.line, pos.character)
-	mut node := traverse_node(tree.root_node(), u32(off))
+
+	off := file.get_offset(pos.line, pos.character)
+	mut node := traverse_node(file.tree.root_node(), u32(off))
 	mut parent_node := node
 
 	if node.type_name() == 'argument_list' {
@@ -221,7 +220,7 @@ fn (mut ls Vls) signature_help(id string, params string) {
 	}
 
 	ls.store.set_active_file_path(uri.path(), file.version)
-	sym := ls.store.infer_symbol_from_node(node, source) or {
+	sym := ls.store.infer_symbol_from_node(node, file.source) or {
 		ls.send_null(id)
 		return
 	}
@@ -821,12 +820,10 @@ fn (mut ls Vls) completion(id string, params string) {
 		return
 	}
 	uri := completion_params.text_document.uri
-	file := ls.sources[uri]
-	src := file.source
-	tree := ls.trees[uri]
-	root_node := tree.root_node()
+	file := ls.files[uri]
+	root_node := file.tree.root_node()
 	pos := completion_params.position
-	mut offset := compute_offset(src, pos.line, pos.character)
+	mut offset := file.get_offset(pos.line, pos.character)
 	if offset == -1 {
 		ls.send_null(id)
 		return
@@ -843,7 +840,7 @@ fn (mut ls Vls) completion(id string, params string) {
 	// purposes.
 	mut builder := CompletionBuilder{
 		store: &ls.store
-		src: src
+		src: file.source
 		parent_node: root_node
 	}
 
@@ -853,14 +850,14 @@ fn (mut ls Vls) completion(id string, params string) {
 	// or near the cursor. In that case, the context data would be modified in
 	// order to satisfy those specific cases.
 	if ctx.trigger_kind == .invoked && offset - 1 >= 0 && root_node.named_child_count() > 0
-		&& src.len > 3 {
+		&& file.source.len > 3 {
 		mut prev_idx := offset
 		mut ctx_changed := false
-		if src[offset - 1] in [`.`, `:`, `=`, `{`, `,`, `(`] {
+		if file.source[offset - 1] in [`.`, `:`, `=`, `{`, `,`, `(`] {
 			prev_idx--
 			ctx_changed = true
-		} else if src[offset - 1] == ` ` && offset - 2 >= 0
-			&& src[offset - 2] !in [src[offset - 1], `.`] {
+		} else if file.source[offset - 1] == ` ` && offset - 2 >= 0
+			&& file.source[offset - 2] !in [file.source[offset - 1], `.`] {
 			prev_idx -= 2
 			offset -= 2
 			ctx_changed = true
@@ -869,7 +866,7 @@ fn (mut ls Vls) completion(id string, params string) {
 		if ctx_changed {
 			ctx = lsp.CompletionContext{
 				trigger_kind: .trigger_character
-				trigger_character: src[prev_idx].ascii_str()
+				trigger_character: file.source[prev_idx].ascii_str()
 			}
 		}
 	}
@@ -882,17 +879,17 @@ fn (mut ls Vls) completion(id string, params string) {
 		// NOTE: DO NOT REMOVE YET ~ @ned
 		// The offset is adjusted and the suggestions for local and global symbols are
 		// disabled if a period/dot is detected and the character on the left is not a space.
-		if ctx.trigger_character == '.' && (offset - 1 >= 0 && src[offset - 1] != ` `) {
+		if ctx.trigger_character == '.' && (offset - 1 >= 0 && file.source[offset - 1] != ` `) {
 			builder.show_global = false
 			builder.show_local = false
 
 			offset--
-			if src[offset - 1] !in [`)`, `]`] {
+			if file.source[offset - 1] !in [`)`, `]`] {
 				offset--
 			}
 		}
 
-		for offset > src.len || (offset < src.len && src[offset] == ` `) {
+		for offset > file.source.len || (offset < file.source.len && file.source[offset] == ` `) {
 			offset--
 		}
 
@@ -921,7 +918,7 @@ fn (mut ls Vls) completion(id string, params string) {
 		builder.ctx = ctx
 		builder.parent_node = parent_node
 		builder.build_suggestions(node, offset)
-	} else if ctx.trigger_kind == .invoked && (root_node.named_child_count() == 0 || src.len <= 3) {
+	} else if ctx.trigger_kind == .invoked && (root_node.named_child_count() == 0 || file.source.len <= 3) {
 		// When a V file is empty, a list of `module $name` suggsestions will be displayed.
 		builder.build_module_name_suggestions()
 	} else {
@@ -950,17 +947,15 @@ fn (mut ls Vls) hover(id string, params string) {
 
 	uri := hover_params.text_document.uri
 	pos := hover_params.position
-	tree := ls.trees[uri] or {
+	file := ls.files[uri] or {
 		ls.send_null(id)
 		return
 	}
-	file := ls.sources[uri]
-	source := file.source
-	offset := compute_offset(source, pos.line, pos.character)
-	node := traverse_node(tree.root_node(), u32(offset))
+	offset := file.get_offset(pos.line, pos.character)
+	node := traverse_node(file.tree.root_node(), u32(offset))
 
 	ls.store.set_active_file_path(uri.path(), file.version)
-	hover_data := get_hover_data(mut ls.store, node, uri, source, u32(offset)) or {
+	hover_data := get_hover_data(mut ls.store, node, uri, file.source, u32(offset)) or {
 		ls.send_null(id)
 		return
 	}
@@ -1036,12 +1031,12 @@ fn (mut ls Vls) folding_range(id string, params string) {
 		return
 	}
 	uri := folding_range_params.text_document.uri
-	tree := ls.trees[uri] or {
+	file := ls.files[uri] or {
 		ls.send_null(id)
 		return
 	}
 
-	root_node := tree.root_node()
+	root_node := file.tree.root_node()
 
 	// get the number of named child nodes
 	// named child nodes examples: struct_declaration, enum_declaration, etc.
@@ -1088,14 +1083,13 @@ fn (mut ls Vls) definition(id string, params string) {
 
 	uri := goto_definition_params.text_document.uri
 	pos := goto_definition_params.position
-	file := ls.sources[uri]
-	source := file.source
-	tree := ls.trees[uri] or {
+	file := ls.files[uri] or {
 		ls.send_null(id)
 		return
 	}
+	source := file.source
 	offset := compute_offset(source, pos.line, pos.character)
-	mut node := traverse_node(tree.root_node(), u32(offset))
+	mut node := traverse_node(file.tree.root_node(), u32(offset))
 	mut original_range := node.range()
 	node_type_name := node.type_name()
 	if parent_node := node.parent() {
@@ -1181,15 +1175,13 @@ fn (mut ls Vls) implementation(id string, params string) {
 
 	uri := goto_implementation_params.text_document.uri
 	pos := goto_implementation_params.position
-	file := ls.sources[uri]
-	source := file.source
-	tree := ls.trees[uri] or {
+	file := ls.files[uri] or {
 		ls.send_null(id)
 		return
 	}
-
+	source := file.source
 	offset := file.get_offset(pos.line, pos.character)
-	mut node := traverse_node(tree.root_node(), u32(offset))
+	mut node := traverse_node(file.tree.root_node(), u32(offset))
 	mut original_range := node.range()
 	node_type_name := node.type_name()
 	if parent_node := node.parent() {

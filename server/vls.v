@@ -94,8 +94,7 @@ mut:
 	parser           &C.TSParser
 	store            analyzer.Store
 	status           ServerStatus = .off
-	sources          map[string]File
-	trees            map[string]&C.TSTree
+	files          map[string]File
 	root_uri         lsp.DocumentUri
 	is_typing        bool
 	typing_ch        chan int
@@ -323,7 +322,7 @@ fn monitor_changes(mut ls Vls) {
 				}
 
 				uri := lsp.document_uri_from_path(ls.store.cur_file_path)
-				ls.analyze_file(ls.trees[uri], ls.sources[uri])
+				ls.analyze_file(ls.files[uri])
 				ls.is_typing = false
 				timeout_ms = 0
 				ls.show_diagnostics(uri)
