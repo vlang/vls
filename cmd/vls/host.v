@@ -63,10 +63,10 @@ fn (mut lg Logger) get_text() string {
 
 struct VlsHost {
 mut:
-	io              server.ReceiveSender
-	child           &os.Process
+	io               server.ReceiveSender
+	child            &os.Process
 	shutdown_timeout time.Duration
-	stderr_logger Logger = Logger{
+	stderr_logger    Logger = Logger{
 		max_log_count: 0
 		with_timestamp: false
 	}
@@ -126,9 +126,9 @@ fn (mut host VlsHost) receive_data() {
 				// if incoming_stdin.starts_with(vls_special_request_header) {
 				// 	go host.handle_special_requests(incoming_stdin)
 				// } else {
-					final_payload := make_lsp_payload(incoming_stdin)
-					host.child.stdin_write(final_payload)
-					host.stdin_logger.writeln(final_payload)
+				final_payload := make_lsp_payload(incoming_stdin)
+				host.child.stdin_write(final_payload)
+				host.stdin_logger.writeln(final_payload)
 				// }
 			}
 			incoming_stdout := <-host.stdout_chan {
@@ -149,7 +149,7 @@ fn (mut host VlsHost) receive_data() {
 			50 * time.millisecond {
 				timeout_ms += (50 * time.millisecond)
 				if host.shutdown_timeout != 0 && host.shutdown_timeout - timeout_ms <= 0 {
-					host.child.stdin_write(make_lsp_payload('{"jsonrpc":"${jsonrpc.version}","id":1001,"method":"shutdown"}'))
+					host.child.stdin_write(make_lsp_payload('{"jsonrpc":"$jsonrpc.version","id":1001,"method":"shutdown"}'))
 				}
 			}
 		}

@@ -45,8 +45,8 @@ fn compile_and_start_vls(args ...string) ?&os.Process {
 	if !os.exists(vls_path) {
 		os.chdir(vls_cmd_dir) ?
 		vroot_path := server.detect_vroot_path() ?
-		mut v_build_process := launch_v_tool(vroot_path, '-d', 'connection_test', '-cc', 'gcc', '-gc', 'boehm',
-			'.')
+		mut v_build_process := launch_v_tool(vroot_path, '-d', 'connection_test', '-cc',
+			'gcc', '-gc', 'boehm', '.')
 		v_build_process.wait()
 
 		if v_build_process.code > 0 {

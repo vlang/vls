@@ -104,7 +104,7 @@ mut:
 	logger           log.Logger
 	panic_count      int
 	debug            bool
-	shutdown_timeout  time.Duration = 15 * time.minute
+	shutdown_timeout time.Duration = 15 * time.minute
 	// client_capabilities lsp.ClientCapabilities
 pub mut:
 	// TODO: replace with io.ReadWriter
@@ -303,7 +303,7 @@ fn (mut ls Vls) send_null(id string) {
 fn monitor_changes(mut ls Vls) {
 	// number of ms since "else" select clause
 	// was executed
-	mut timeout_ms := i64(0) 
+	mut timeout_ms := i64(0)
 
 	// This is for debouncing analysis
 	for {
@@ -316,7 +316,9 @@ fn monitor_changes(mut ls Vls) {
 				if ls.shutdown_timeout != 0 && ls.shutdown_timeout - timeout_ms <= 0 {
 					ls.status = .shutdown
 					ls.exit()
-				} if !ls.is_typing {
+				}
+
+				if !ls.is_typing {
 					continue
 				}
 
