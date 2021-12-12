@@ -104,6 +104,7 @@ mut:
 	logger           log.Logger
 	panic_count      int
 	debug            bool
+	shutdown_timeout time.Duration = 15 * time.minute
 	// client_capabilities lsp.ClientCapabilities
 pub mut:
 	// TODO: replace with io.ReadWriter
@@ -147,20 +148,17 @@ pub fn (mut ls Vls) dispatch(payload string) {
 	} else {
 		ls.logger.request(payload, .receive)
 	}
-	if ls.status == .initialized {
+
+	if request.method == 'shutdown' {
+		// NB: LSP specification is unclear whether or not
+		// a shutdown request is allowed before server init
+		// but we'll just put it here since we want to formally
+		// shutdown the server after a certain timeout period.
+		ls.shutdown(request.id)
+	} else if ls.status == .initialized {
 		match request.method {
 			// not only requests but also notifications
 			'initialized' {} // does nothing currently
-			'shutdown' {
-				// NB: Some users reported that after closing their text editors,
-				// the vls process isn't properly closed at all and the editor still
-				// continuously sending useless requests during the shutdown phase
-				// which dramatically increases the memory. Unless there is a fix
-				// or other possible alternatives, the solution for now is to
-				// immediately exit when the server receives a shutdown request.
-				// Freeing extra memory here
-				ls.shutdown(request.id)
-			}
 			'exit' {
 				// ignore for the reasons stated in the above comment
 				// ls.exit()
@@ -303,6 +301,10 @@ fn (mut ls Vls) send_null(id string) {
 }
 
 fn monitor_changes(mut ls Vls) {
+	// number of ms since "else" select clause
+	// was executed
+	mut timeout_ms := i64(0)
+
 	// This is for debouncing analysis
 	for {
 		select {
@@ -310,6 +312,12 @@ fn monitor_changes(mut ls Vls) {
 				ls.is_typing = a != 0
 			}
 			50 * time.millisecond {
+				timeout_ms += (50 * time.millisecond)
+				if ls.shutdown_timeout != 0 && ls.shutdown_timeout - timeout_ms <= 0 {
+					ls.status = .shutdown
+					ls.exit()
+				}
+
 				if !ls.is_typing {
 					continue
 				}
@@ -317,6 +325,7 @@ fn monitor_changes(mut ls Vls) {
 				uri := lsp.document_uri_from_path(ls.store.cur_file_path)
 				ls.analyze_file(ls.trees[uri], ls.sources[uri])
 				ls.is_typing = false
+				timeout_ms = 0
 				ls.show_diagnostics(uri)
 			}
 		}
@@ -367,6 +376,14 @@ pub fn (ls Vls) launch_v_tool(args ...string) &os.Process {
 	p.set_args(args)
 	p.set_redirect_stdio()
 	return p
+}
+
+pub fn (mut ls Vls) set_timeout_val(min_val int) {
+	$if connection_test ? {
+		ls.shutdown_timeout = min_val * time.second
+	} $else {
+		ls.shutdown_timeout = min_val * time.minute
+	}
 }
 
 pub enum ServerStatus {

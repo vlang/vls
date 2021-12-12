@@ -6,6 +6,7 @@ import lsp
 import jsonrpc
 import time
 import strings
+// import json
 
 const max_stdio_logging_count = 15
 
@@ -62,9 +63,10 @@ fn (mut lg Logger) get_text() string {
 
 struct VlsHost {
 mut:
-	io            server.ReceiveSender
-	child         &os.Process
-	stderr_logger Logger = Logger{
+	io               server.ReceiveSender
+	child            &os.Process
+	shutdown_timeout time.Duration
+	stderr_logger    Logger = Logger{
 		max_log_count: 0
 		with_timestamp: false
 	}
@@ -75,6 +77,9 @@ mut:
 		reset_builder_on_max_count: true
 	}
 	generate_report bool
+	stdin_chan      chan string
+	stdout_chan     chan string
+	stderr_chan     chan string
 }
 
 fn (mut host VlsHost) has_child_exited() bool {
@@ -100,64 +105,73 @@ fn (mut host VlsHost) run() {
 	go host.listen_for_errors()
 	go host.listen_for_output()
 	go host.listen_for_input()
-
+	host.receive_data()
 	host.child.wait()
 	host.child.close()
 	host.handle_exit()
 }
 
-fn (mut host VlsHost) listen_for_input() {
-	for {
-		if host.has_child_exited() {
-			break
+// const vls_special_request_header = '{"jsonrpc":"${jsonrpc.version}","method":"vls/'
+
+fn (mut host VlsHost) receive_data() {
+	mut stdout_buffer := strings.new_builder(4096)
+	mut timeout_ms := i64(0)
+
+	for !host.has_child_exited() {
+		select {
+			incoming_stdin := <-host.stdin_chan {
+				timeout_ms = 0
+				// TODO: terminate VLS if client process id
+				// has already shutdown.
+				// if incoming_stdin.starts_with(vls_special_request_header) {
+				// 	go host.handle_special_requests(incoming_stdin)
+				// } else {
+				final_payload := make_lsp_payload(incoming_stdin)
+				host.child.stdin_write(final_payload)
+				host.stdin_logger.writeln(final_payload)
+				// }
+			}
+			incoming_stdout := <-host.stdout_chan {
+				// 4096 is the maximum length for stdout_read
+				stdout_buffer.write_string(incoming_stdout)
+				if incoming_stdout.len < 4096 && stdout_buffer.len != 0 {
+					str := stdout_buffer.str()
+					host.io.send(str)
+					host.stdout_logger.writeln(str)
+					stdout_buffer.go_back_to(0)
+				}
+			}
+			incoming_stderr := <-host.stderr_chan {
+				// Set the last_len to the length of the latest entry so that
+				// the last stderr output will be logged into the error report.
+				host.stderr_logger.writeln(incoming_stderr)
+			}
+			50 * time.millisecond {
+				timeout_ms += (50 * time.millisecond)
+				if host.shutdown_timeout != 0 && host.shutdown_timeout - timeout_ms <= 0 {
+					host.child.stdin_write(make_lsp_payload('{"jsonrpc":"$jsonrpc.version","id":1001,"method":"shutdown"}'))
+				}
+			}
 		}
+	}
+}
 
+fn (mut host VlsHost) listen_for_input() {
+	for !host.has_child_exited() {
 		// STDIN
-		content := host.io.receive() or { continue }
-
-		final_payload := make_lsp_payload(content)
-		host.child.stdin_write(final_payload)
-		host.stdin_logger.writeln(final_payload)
+		host.stdin_chan <- host.io.receive() or { continue }
 	}
 }
 
 fn (mut host VlsHost) listen_for_errors() {
-	for {
-		if host.has_child_exited() {
-			break
-		}
-
-		err := host.child.stderr_read()
-		if err.len == 0 {
-			continue
-		}
-
-		// Set the last_len to the length of the latest entry so that
-		// the last stderr output will be logged into the error report.
-		host.stderr_logger.writeln(err)
+	for !host.has_child_exited() {
+		host.stderr_chan <- host.child.stderr_read()
 	}
 }
 
 fn (mut host VlsHost) listen_for_output() {
-	for {
-		if host.has_child_exited() {
-			break
-		}
-
-		mut out := host.child.stdout_read()
-		if out.len == 0 {
-			continue
-		}
-
-		// 4096 is the maximum length for stdout_read
-		for last_out_len := out.len; last_out_len == 4096; {
-			got := host.child.stdout_read()
-			out += got
-			last_out_len = got.len
-		}
-
-		host.io.send(out)
-		host.stdout_logger.writeln(out)
+	for !host.has_child_exited() {
+		host.stdout_chan <- host.child.stdout_read()
 	}
 }
 
@@ -245,3 +259,14 @@ fn (mut host VlsHost) generate_report() ?string {
 	report_file.writeln('### Response\n```\n$host.stdout_logger.get_text()\n```\n') ?
 	return report_file_path
 }
+
+// TODO: handle internal notifications
+// fn (mut host VlsHost) handle_special_requests(raw_req string) {
+// 	// req := json.decode(jsonrpc.Request, raw_req) or { return }
+// 	// match req.method {
+// 	// 	'vls/setClientProcessId' {
+
+// 	// 	}
+// 	// 	else {}
+// 	// }
+// }

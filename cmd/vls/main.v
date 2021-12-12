@@ -3,6 +3,7 @@ module main
 import cli
 import server
 import os
+import time
 
 fn run_cli(cmd cli.Command) ? {
 	mut run_as_child := cmd.flags.get_bool('child') or { false }
@@ -13,8 +14,9 @@ fn run_cli(cmd cli.Command) ? {
 		run_server(cmd) ?
 	} else {
 		should_generate_report := cmd.flags.get_bool('generate-report') or { false }
+		timeout_minutes_val := cmd.flags.get_int('timeout') or { 15 }
 		flag_discriminator := if cmd.posix_mode { '--' } else { '-' }
-		mut server_args := ['--child']
+		mut server_args := [flag_discriminator + 'child', flag_discriminator + 'timeout=0']
 
 		for flag in cmd.flags {
 			match flag.name {
@@ -33,6 +35,7 @@ fn run_cli(cmd cli.Command) ? {
 			io: setup_and_configure_io(cmd)
 			child: new_vls_process(...server_args)
 			generate_report: should_generate_report
+			shutdown_timeout: timeout_minutes_val * time.minute
 		}
 
 		host.run()
@@ -68,6 +71,15 @@ fn run_server(cmd cli.Command) ? {
 	// Setup the comm method and build the language server.
 	mut io := setup_and_configure_io(cmd)
 	mut ls := server.new(io)
+
+	if timeout_minutes_val := cmd.flags.get_int('timeout') {
+		if timeout_minutes_val < 0 {
+			return error('timeout: should be not less than zero')
+		}
+
+		ls.set_timeout_val(timeout_minutes_val)
+	}
+
 	if custom_vroot_path.len != 0 {
 		if !os.exists(custom_vroot_path) {
 			return error('Provided VROOT does not exist.')
@@ -136,6 +148,13 @@ fn main() {
 			name: 'vroot'
 			required: false
 			description: 'Path to the V installation directory. By default, it will use the VROOT env variable or the current directory of the V executable.'
+		},
+		cli.Flag{
+			flag: .int
+			name: 'timeout'
+			required: false
+			default_value: ['15']
+			description: 'Number of minutes to be set for timeout/auto-shutdown. After n number of minutes, VLS will automatically shutdown. Set to 0 to disable it.'
 		},
 	])
 
