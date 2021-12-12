@@ -1,11 +1,13 @@
 module server
 
+// import tree_sitter
 import lsp
 
 struct File {
 mut:
 	uri     lsp.DocumentUri
 	source  []byte
+	tree    &C.TSTree       [required]
 	version int = 1
 }
 
@@ -14,6 +16,7 @@ fn (file &File) free() {
 	unsafe {
 		file.source.free()
 		file.version = 1
+		file.tree.free()
 	}
 }
 

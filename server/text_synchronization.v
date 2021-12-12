@@ -5,17 +5,17 @@ import lsp
 import os
 import analyzer
 
-fn (mut ls Vls) analyze_file(tree &C.TSTree, file File) {
+fn (mut ls Vls) analyze_file(file File) {
 	ls.store.clear_messages()
 	file_path := file.uri.path()
 	ls.store.set_active_file_path(file_path, file.version)
-	ls.store.import_modules_from_tree(tree, file.source, os.join_path(file.uri.dir_path(),
+	ls.store.import_modules_from_tree(file.tree, file.source, os.join_path(file.uri.dir_path(),
 		'modules'), ls.root_uri.path(), os.dir(os.dir(file_path)))
 
-	ls.store.register_symbols_from_tree(tree, file.source, false)
+	ls.store.register_symbols_from_tree(file.tree, file.source, false)
 	ls.store.cleanup_imports()
 	if Feature.analyzer_diagnostics in ls.enabled_features {
-		ls.store.analyze(tree, file.source)
+		ls.store.analyze(file.tree, file.source)
 	}
 }
 
@@ -56,48 +56,41 @@ fn (mut ls Vls) did_open(_ string, params string) {
 		} else {
 			os.join_path(project_dir, file_name)
 		})
-		mut has_source := file_uri in ls.sources
-		mut has_tree := file_uri in ls.trees
-		mut should_be_analyzed := has_source && has_tree
+
+		mut has_file := file_uri in ls.files
+		mut should_be_analyzed := has_file
 
 		// Create file only if source does not exist
-		if !has_source {
-			ls.sources[file_uri] = File{
+		if !has_file {
+			source := if file_uri != uri { os.read_bytes(file_name) or { [] } } else { src.bytes() }
+
+			ls.files[file_uri] = File{
 				uri: file_uri
-				source: if file_uri != uri {
-					os.read_bytes(file_name) or { [] }
-				} else {
-					src.bytes()
-				}
+				source: source
+				tree: ls.parser.parse_bytes(source)
 				version: 1
 			}
 
-			has_source = true
-		}
-
-		// Parse only if tree does not exist
-		if !has_tree {
-			ls.trees[file_uri] = ls.parser.parse_bytes(ls.sources[file_uri].source)
-			has_tree = true
+			has_file = true
 		}
 
 		// If data about the document/file has recently been created,
 		// mark it as "should_be_analyzed" (hence the variable name).
-		if !should_be_analyzed && (has_source && has_tree) {
+		if !should_be_analyzed && has_file {
 			should_be_analyzed = true
 		}
 
 		// Analyze only if both source and tree exists
 		if should_be_analyzed {
-			ls.analyze_file(ls.trees[file_uri], ls.sources[file_uri])
+			ls.analyze_file(ls.files[file_uri])
 			ls.show_diagnostics(file_uri)
 		}
 
-		// ls.log_message('$file_uri | has_tree: $has_tree | has_source: $has_source | should_be_analyzed: $should_be_analyzed',
+		// ls.log_message('$file_uri | has_file: $has_file | should_be_analyzed: $should_be_analyzed',
 		// 	.info)
 	}
 
-	ls.store.set_active_file_path(uri.path(), ls.sources[uri].version)
+	ls.store.set_active_file_path(uri.path(), ls.files[uri].version)
 	if v_check_results := ls.exec_v_diagnostics(uri) {
 		ls.publish_diagnostics(uri, v_check_results)
 	}
@@ -116,7 +109,7 @@ fn (mut ls Vls) did_change(_ string, params string) {
 
 	ls.store.set_active_file_path(uri.path(), did_change_params.text_document.version)
 
-	mut new_src := ls.sources[uri].source
+	mut new_src := ls.files[uri].source
 	ls.publish_diagnostics(uri, []lsp.Diagnostic{})
 
 	for content_change in did_change_params.content_changes {
@@ -134,7 +127,7 @@ fn (mut ls Vls) did_change(_ string, params string) {
 
 		// remove immediately the symbol
 		if content_change.text.len == 0 && diff < 0 {
-			ls.store.delete_symbol_at_node(ls.trees[uri].root_node(), new_src,
+			ls.store.delete_symbol_at_node(ls.files[uri].tree.root_node(), new_src,
 				start_point: lsp_pos_to_tspoint(start_pos)
 				end_point: lsp_pos_to_tspoint(old_end_pos)
 				start_byte: u32(start_idx)
@@ -160,7 +153,7 @@ fn (mut ls Vls) did_change(_ string, params string) {
 		}
 
 		// edit the tree
-		ls.trees[uri].edit(
+		ls.files[uri].tree.edit(
 			start_byte: u32(start_idx)
 			old_end_byte: u32(old_end_idx)
 			new_end_byte: u32(new_end_idx)
@@ -170,13 +163,13 @@ fn (mut ls Vls) did_change(_ string, params string) {
 		)
 	}
 
-	mut new_tree := ls.parser.parse_bytes_with_old_tree(new_src, ls.trees[uri])
-	// ls.log_message('${ls.trees[uri].get_changed_ranges(new_tree)}', .info)
+	mut new_tree := ls.parser.parse_bytes_with_old_tree(new_src, ls.files[uri].tree)
+	// ls.log_message('${ls.files[uri].tree.get_changed_ranges(new_tree)}', .info)
 
 	// ls.log_message('new tree: ${new_tree.root_node().sexpr_str()}', .info)
-	ls.trees[uri] = new_tree
-	ls.sources[uri].source = new_src
-	ls.sources[uri].version = did_change_params.text_document.version
+	ls.files[uri].tree = new_tree
+	ls.files[uri].source = new_src
+	ls.files[uri].version = did_change_params.text_document.version
 
 	// $if !test {
 	// 	ls.log_message(ls.store.imports.str(), .info)
@@ -193,15 +186,13 @@ fn (mut ls Vls) did_close(_ string, params string) {
 
 	uri := did_close_params.text_document.uri
 	// unsafe {
-	// 	ls.sources[uri].free()
-	// 	ls.trees[uri].free()
+	// 	ls.files[uri].free()
 	// 	ls.store.opened_scopes[uri.path()].free()
 	// }
-	ls.sources.delete(uri)
-	ls.trees.delete(uri)
+	ls.files.delete(uri)
 	ls.store.opened_scopes.delete(uri.path())
 
-	if ls.sources.count(uri.dir()) == 0 {
+	if ls.files.count(uri.dir()) == 0 {
 		ls.store.delete(uri.dir_path())
 	}
 
@@ -209,7 +200,7 @@ fn (mut ls Vls) did_close(_ string, params string) {
 	// - TODO: If a workspace has opened multiple programs with main() function and one of them is closed.
 	// - If a file opened is outside the root path or workspace.
 	// - If there are no remaining files opened on a specific folder.
-	if ls.sources.len == 0 || !uri.starts_with(ls.root_uri) {
+	if ls.files.len == 0 || !uri.starts_with(ls.root_uri) {
 		ls.publish_diagnostics(uri, []lsp.Diagnostic{})
 	}
 }

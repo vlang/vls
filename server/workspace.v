@@ -26,14 +26,9 @@ fn (mut ls Vls) did_change_watched_files(params string) {
 			.created {
 				if is_rename {
 					prev_uri := changes[i - 1].uri
-					if prev_uri in ls.sources {
-						ls.sources[change.uri] = ls.sources[prev_uri]
-						ls.sources.delete(prev_uri)
-					}
-
-					if prev_uri in ls.trees {
-						ls.trees[change.uri] = ls.trees[prev_uri]
-						ls.trees.delete(prev_uri)
+					if prev_uri in ls.files {
+						ls.files[change.uri] = ls.files[prev_uri]
+						ls.files.delete(prev_uri)
 					}
 
 					prev_uri_path := prev_uri.path()
@@ -91,11 +86,10 @@ fn (mut ls Vls) did_change_watched_files(params string) {
 				// TODO: use did_close(?)
 				file_path := change.uri.path()
 
-				ls.sources.delete(change.uri)
-				ls.trees.delete(change.uri)
+				ls.files.delete(change.uri)
 				ls.store.opened_scopes.delete(file_path)
 
-				if ls.sources.count(change.uri.dir()) == 0 {
+				if ls.files.count(change.uri.dir()) == 0 {
 					ls.store.delete(change.uri.dir_path())
 				} else {
 					// delete symbols
