@@ -24,6 +24,10 @@ To build the language server from source, you need to have the following:
 - [Git](https://git-scm.com/download)
 - [V](https://github.com/vlang/v) (0.2.2 and later).
 
+> **NOTE**: If you are downloading V from [Homebrew](https://brew.sh) 
+> and other community-maintained packages, please do `v up` first
+> before proceeding.
+
 Linux and MacOS users are also expected to install the Boehm GC library.
 - For Debian/Ubuntu users: `sudo apt-get install libgc-dev`
 - For MacOS (via Homebrew): `brew install bdw-gc`
