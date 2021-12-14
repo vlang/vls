@@ -134,11 +134,11 @@ void stack_deserialize(Stack *stack, const char *buffer, unsigned *n, unsigned l
 }
 
 // Utils
-void advance(TSLexer *lexer) {
+void tsv_advance(TSLexer *lexer) {
     lexer->advance(lexer, false);
 }
 
-void skip(TSLexer *lexer) {
+void ts_skip(TSLexer *lexer) {
     lexer->advance(lexer, true);
 }
 
@@ -161,7 +161,7 @@ bool scan_interpolation_opening(Scanner *scanner, TSLexer *lexer) {
         return false;
     }
 
-    advance(lexer);
+    tsv_advance(lexer);
     uint8_t got_top = stack_top(scanner->tokens);
     if (is_type_string(got_top) && lexer->lookahead == expected_end_char(got_top)) {
         return false;
@@ -170,7 +170,7 @@ bool scan_interpolation_opening(Scanner *scanner, TSLexer *lexer) {
     bool is_valid = false;
     bool is_braced = false;
     if (lexer->lookahead == '{') {
-        advance(lexer);
+        tsv_advance(lexer);
         is_valid = true;
         is_braced = true;
     } else if (isalpha(lexer->lookahead)) {
@@ -205,7 +205,7 @@ bool scan_interpolation_closing(Scanner *scanner, TSLexer *lexer) {
     bool has_braced_closing = got_top == BRACED_INTERPOLATION_OPENING && lexer->lookahead == expected_end_char(got_top);
     if (has_braced_closing || got_top == UNBRACED_INTERPOLATION_OPENING) {
         if (has_braced_closing) {
-            advance(lexer);
+            tsv_advance(lexer);
         }
 
         lexer->result_symbol = INTERPOLATION_CLOSING;
@@ -225,7 +225,7 @@ bool scan_automatic_separator(Scanner *scanner, TSLexer *lexer) {
         }
 
         if (lexer->lookahead == '\r') {
-            advance(lexer);
+            tsv_advance(lexer);
             lexer->mark_end(lexer);
         }
 
@@ -235,7 +235,7 @@ bool scan_automatic_separator(Scanner *scanner, TSLexer *lexer) {
             tab_count++;
         }
 
-        advance(lexer);
+        tsv_advance(lexer);
         lexer->mark_end(lexer);
     }
 
@@ -248,7 +248,7 @@ bool scan_automatic_separator(Scanner *scanner, TSLexer *lexer) {
         switch (got_char) {
         case '|':
         case '&':
-            advance(lexer);
+            tsv_advance(lexer);
             if (lexer->lookahead == got_char || !isalpha(lexer->lookahead)) {
                 needs_to_be_separated = false;
             } else {
@@ -262,7 +262,7 @@ bool scan_automatic_separator(Scanner *scanner, TSLexer *lexer) {
             needs_to_be_separated = true;
             break;
         case '/':
-            advance(lexer);
+            tsv_advance(lexer);
             if (lexer->lookahead == got_char || lexer->lookahead == '*') {
                 needs_to_be_separated = true;
             } else {
@@ -287,10 +287,10 @@ bool scan_automatic_separator(Scanner *scanner, TSLexer *lexer) {
 bool scan_string_opening(Scanner *scanner, TSLexer *lexer, bool is_quote, bool is_c, bool is_raw) {
     if (is_raw && lexer->lookahead == 'r') {
         lexer->result_symbol = RAW_STRING_OPENING;
-        advance(lexer);
+        tsv_advance(lexer);
     } else if (is_c && lexer->lookahead == 'c') {
         lexer->result_symbol = C_STRING_OPENING;
-        advance(lexer);
+        tsv_advance(lexer);
     } else if (is_quote && (lexer->lookahead == '\'' || lexer->lookahead == '"')) {
         lexer->result_symbol = STRING_OPENING;
     } else {
@@ -300,7 +300,7 @@ bool scan_string_opening(Scanner *scanner, TSLexer *lexer, bool is_quote, bool i
     if (lexer->lookahead == '\'' || lexer->lookahead == '"') {
         uint8_t string_type = lexer->lookahead == '\'' ? SINGLE_QUOTE : DOUBLE_QUOTE;
 
-        advance(lexer);
+        tsv_advance(lexer);
         lexer->mark_end(lexer);
         
         push_type(scanner, lexer->result_symbol + string_type);
@@ -333,7 +333,7 @@ bool scan_string_content(Scanner *scanner, TSLexer *lexer) {
             return has_content;
         }
 
-        advance(lexer);
+        tsv_advance(lexer);
     }
 
     return has_content;
@@ -342,7 +342,7 @@ bool scan_string_content(Scanner *scanner, TSLexer *lexer) {
 bool scan_string_closing(Scanner *scanner, TSLexer *lexer) {
     uint8_t got_top = stack_pop(scanner->tokens);
     if (is_type_string(got_top) && lexer->lookahead == expected_end_char(got_top)) {
-        advance(lexer);
+        tsv_advance(lexer);
         lexer->result_symbol = STRING_CLOSING;
         return true;
     }
@@ -356,32 +356,32 @@ bool scan_comment(Scanner *scanner, TSLexer *lexer) {
         return false;
     }
 
-    advance(lexer);
+    tsv_advance(lexer);
     if (lexer->lookahead != '/' && lexer->lookahead != '*') {
         return false;
     }
 
     bool is_multiline = lexer->lookahead == '*';
     int nested_multiline_count = 0;
-    advance(lexer);
+    tsv_advance(lexer);
 
     while (true) {
         lexer->mark_end(lexer);
         if (is_multiline) {
             if (lexer->lookahead == '/') {
                 // Handles the "nested" comments (e.g. /* /* comment */ */)
-                advance(lexer);
+                tsv_advance(lexer);
                 if (lexer->lookahead == '*') {
-                    advance(lexer);
+                    tsv_advance(lexer);
                     lexer->mark_end(lexer);
                     nested_multiline_count++;
                 }
 
                 continue;
             } else if (lexer->lookahead == '*') {
-                advance(lexer);
+                tsv_advance(lexer);
                 if (lexer->lookahead == '/') {
-                    advance(lexer);
+                    tsv_advance(lexer);
                     lexer->mark_end(lexer);
                     if (nested_multiline_count == 0) {
                         break;
@@ -401,7 +401,7 @@ bool scan_comment(Scanner *scanner, TSLexer *lexer) {
             break;
         }
 
-        advance(lexer);
+        tsv_advance(lexer);
     }
 
     lexer->result_symbol = COMMENT;
@@ -445,7 +445,7 @@ void tree_sitter_v_external_scanner_deserialize(void *p, const char *buffer, uns
 
 bool tree_sitter_v_external_scanner_scan(void *payload, TSLexer *lexer, const bool *valid_symbols) {
     if (lexer->lookahead == 0) {
-        // advance(lexer);
+        // tsv_advance(lexer);
         return false;
     }
     
@@ -486,7 +486,7 @@ bool tree_sitter_v_external_scanner_scan(void *payload, TSLexer *lexer, const bo
         );
     } else {
         while (isspace(lexer->lookahead)) {
-            advance(lexer);
+            tsv_advance(lexer);
         }
         
         if (valid_symbols[STRING_CLOSING] || valid_symbols[STRING_CONTENT] || valid_symbols[BRACED_INTERPOLATION_OPENING] || valid_symbols[UNBRACED_INTERPOLATION_OPENING] || valid_symbols[INTERPOLATION_CLOSING]) {
