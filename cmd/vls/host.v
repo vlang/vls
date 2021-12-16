@@ -218,20 +218,10 @@ fn (mut host VlsHost) generate_report() ?string {
 	vdoctor.wait()
 	vdoctor_info := vdoctor.stdout_slurp().trim_space()
 
-	mut vls_info_proc := new_vls_process('--version')
-	defer {
-		vls_info_proc.close()
-	}
-	vls_info_proc.run()
-	vls_info_proc.wait()
-	vls_info := vls_info_proc.stdout_slurp().trim_space()
-
-	vls_hash := $env('VLS_BUILD_COMMIT')
-
 	report_file.writeln('<!-- Copy and paste the contents of this file to https://github.com/vlang/vls/issues/new -->') ?
 	report_file.writeln('## System Information') ?
 	report_file.writeln('### V doctor\n```\n$vdoctor_info\n```\n') ?
-	report_file.writeln('### VLS info \n```\n${vls_info}.$vls_hash\n```\n') ?
+	report_file.writeln('### VLS info \n```\nvls version: ${server.meta.version}\n```\n') ?
 
 	// Problem Description
 	report_file.writeln('## Problem Description') ?
