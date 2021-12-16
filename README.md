@@ -56,6 +56,22 @@ If you have VLS downloaded in a custom directory, you need to input the absolute
 
 ![Instructions](images/instructions.png)
 
+### Sublime Text (3 and 4)
+For Sublime Text, please install the [LSP extension](https://packagecontrol.io/packages/LSP) via [Package Control](https://packagecontrol.io). Afterwards, open the command palette, select `Preferences: LSP Settings`, and add the following configuration:
+```json
+{
+    "clients": {
+        "vls": {
+            "enabled": true,
+            "command": ["<vls-dir>/vls"],
+            "selector": "source.v"
+        }
+    }
+}
+```
+
+If you cloned the repository and compiled it from source, the executable will be in the `vls` root directory. So make sure to set the `command` array to `vls/bin/vls` or `vls/bin/vls.exe` (for Windows).
+
 ### Other Editors
 > VLS on JetBrain IDEs does not work at this moment. See [issue 52](https://github.com/vlang/vls/issues/52) for more details.
 
