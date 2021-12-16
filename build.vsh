@@ -22,7 +22,7 @@ if os.args.len >= 2 {
 		cc = os.args[1]
 	} else {
 		println('> Usage error: parameter must one of cc, gcc, clang, msvc')
-		return
+		exit(1)
 	}
 }
 println('> Building VLS...')
@@ -30,7 +30,7 @@ println('> Building VLS...')
 vls_git_hash := os.execute('git rev-parse --short HEAD')
 if vls_git_hash.exit_code != 0 {
 	println('Please install git')
-	return
+	exit(vls_git_hash.exit_code)
 }
 os.setenv('VLS_BUILD_COMMIT', vls_git_hash.output.trim_space(), true)
 
@@ -39,7 +39,7 @@ println(cmd)
 ret := system(cmd)
 if ret != 0 {
 	println('Failed building VLS')
-	return
+	exit(ret)
 }
 
 println('> VLS built successfully!')
