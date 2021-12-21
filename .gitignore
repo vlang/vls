@@ -9,6 +9,7 @@
 # Other
 cmd/vls/vls
 .vscode
+vls.log
 
 bin/*
 
