@@ -183,7 +183,7 @@ pub mut:
 	type_definition_provider             bool                            [json: typeDefinitionProvider]
 	implementation_provider              bool                            [json: implementationProvider]
 	references_provider                  bool                            [json: referencesProvider]
-	document_highlight_provider          bool                            [json: documentHightlightProvider]
+	document_highlight_provider          bool                            [json: documentHighlightProvider]
 	document_symbol_provider             bool                            [json: documentSymbolProvider]
 	workspace_symbol_provider            bool                            [json: workspaceSymbolProvider]
 	code_action_provider                 bool                            [json: codeActionProvider]
