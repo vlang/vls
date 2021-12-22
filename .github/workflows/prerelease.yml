@@ -4,7 +4,7 @@ name: Build and release pre-built binaries (Dev build)
 on:
   push:
     branches:
-      - use-tree-sitter
+      - master
 
 jobs:
   build-linux-x64:

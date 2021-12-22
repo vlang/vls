@@ -3,10 +3,10 @@ name: CI
 on:
   push:
     branches:
-      - use-tree-sitter
+      - master
   pull_request:
     branches:
-      - use-tree-sitter
+      - master
   schedule:
     - cron: '31 1 * * *'
 
