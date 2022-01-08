@@ -54,7 +54,7 @@ pub enum FailureHandlingKind {
 }
 
 pub struct ExecuteCommandOptions {
-	commands []string [json: commands]
+	commands []string
 }
 
 pub struct StaticRegistrationOptions {
