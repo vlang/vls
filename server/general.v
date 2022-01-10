@@ -15,6 +15,21 @@ const (
 
 // initialize sends the server capabilities to the client
 fn (mut ls Vls) initialize(id string, params string) {
+	initialize_params := json.decode(lsp.InitializeParams, params) or {
+		ls.panic(err.msg)
+		ls.send_null(id)
+		return
+	}
+
+	// If the parent process is not alive, then the server should exit
+	// (see exit notification) its process.
+	// https://microsoft.github.io/language-server-protocol/specifications/specification-3-15/#initialize
+	if !is_proc_exists(initialize_params.process_id) {
+		ls.exit()
+	}
+
+	ls.client_pid = initialize_params.process_id
+
 	// Set defaults when vroot_path is empty
 	if ls.vroot_path.len == 0 {
 		if found_vroot_path := detect_vroot_path() {
@@ -29,13 +44,6 @@ fn (mut ls Vls) initialize(id string, params string) {
 		ls.store.default_import_paths << os.join_path(ls.vroot_path, 'vlib')
 		ls.store.default_import_paths << os.vmodules_dir()
 	}
-
-	initialize_params := json.decode(lsp.InitializeParams, params) or {
-		ls.panic(err.msg)
-		ls.send_null(id)
-		return
-	}
-	ls.client_pid = initialize_params.process_id
 
 	// TODO: configure capabilities based on client support
 	// ls.client_capabilities = initialize_params.capabilities
@@ -147,12 +155,13 @@ fn (mut ls Vls) process_builtin() {
 [noreturn]
 fn (mut ls Vls) shutdown(id string) {
 	ls.status = .shutdown
-	ls.send(jsonrpc.Response<string>{
-		id: id
-		result: 'null'
-		// error: code and message set in case an exception happens during shutdown request
-	})
-
+	if id.len != 0 {
+		ls.send(jsonrpc.Response<string>{
+			id: id
+			result: 'null'
+			// error: code and message set in case an exception happens during shutdown request
+		})
+	}
 	ls.exit()
 }
 

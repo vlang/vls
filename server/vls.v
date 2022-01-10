@@ -103,6 +103,7 @@ mut:
 	logger           log.Logger
 	panic_count      int
 	debug            bool
+	shutdown_timeout time.Duration = 5 * time.minute
 	client_pid       int
 	// client_capabilities lsp.ClientCapabilities
 pub mut:
@@ -300,32 +301,32 @@ fn (mut ls Vls) send_null(id string) {
 }
 
 fn monitor_changes(mut ls Vls) {
-	// number of ms since "else" select clause
-	// was executed
-	mut timeout_ms := i64(0)
-
-	// This is for debouncing analysis
+	mut timeout_sw := time.new_stopwatch()
+	mut timeout_stopped := false
 	for {
 		select {
+			// This is for debouncing analysis
 			a := <-ls.typing_ch {
 				ls.is_typing = a != 0
 			}
 			50 * time.millisecond {
-				timeout_ms += (50 * time.millisecond)
-				if ls.shutdown_timeout != 0 && ls.shutdown_timeout - timeout_ms <= 0 {
-					ls.status = .shutdown
-					ls.exit()
+				if ls.status != .off && !timeout_stopped {
+					timeout_stopped = true
+					timeout_sw.stop()
+				} else if ls.status == .off && ls.shutdown_timeout != 0 && timeout_sw.elapsed() >= ls.shutdown_timeout {
+					ls.shutdown('')
 				}
 
-				if !ls.is_typing {
+				if ls.client_pid != 0 && !is_proc_exists(ls.client_pid) {
+					ls.shutdown('')
+				} else if !ls.is_typing {
 					continue
 				}
 
 				uri := lsp.document_uri_from_path(ls.store.cur_file_path)
 				ls.analyze_file(ls.files[uri])
-				ls.is_typing = false
-				timeout_ms = 0
 				ls.show_diagnostics(uri)
+				ls.is_typing = false
 			}
 		}
 	}
@@ -406,12 +407,6 @@ pub fn detect_vroot_path() ?string {
 	}
 
 	vexe_path_from_env := os.getenv('VEXE')
-	// defer {
-	// 	unsafe {
-	// 		vroot_env.free()
-	// 		vexe_path_from_env.free()
-	// 	}
-	// }
 
 	// Return the directory of VEXE if present
 	if vexe_path_from_env.len != 0 {
@@ -421,12 +416,6 @@ pub fn detect_vroot_path() ?string {
 	// Find the V executable in PATH
 	path_env := os.getenv('PATH')
 	paths := path_env.split(path_list_sep)
-	// defer {
-	// 	unsafe {
-	// 		vexe_path_from_env.free()
-	// 		paths.free()
-	// 	}
-	// }
 
 	for path in paths {
 		full_path := os.join_path(path, v_exec_name)
