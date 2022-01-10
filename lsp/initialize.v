@@ -4,7 +4,7 @@ module lsp
 // response: InitializeResult
 pub struct InitializeParams {
 pub mut:
-	process_id             int                [json: processId] = -2 
+	process_id             int                [json: processId] = -2
 	client_info            ClientInfo         [json: clientInfo]
 	root_uri               DocumentUri        [json: rootUri]
 	root_path              DocumentUri        [json: rootPath]

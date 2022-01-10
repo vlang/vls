@@ -63,9 +63,9 @@ fn (mut lg Logger) get_text() string {
 
 struct VlsHost {
 mut:
-	io               server.ReceiveSender
-	child            &os.Process
-	stderr_logger    Logger = Logger{
+	io            server.ReceiveSender
+	child         &os.Process
+	stderr_logger Logger = Logger{
 		max_log_count: 0
 		with_timestamp: false
 	}
@@ -204,7 +204,7 @@ fn (mut host VlsHost) generate_report() ?string {
 	report_file.writeln('<!-- Copy and paste the contents of this file to https://github.com/vlang/vls/issues/new -->') ?
 	report_file.writeln('## System Information') ?
 	report_file.writeln('### V doctor\n```\n$vdoctor_info\n```\n') ?
-	report_file.writeln('### VLS info \n```\nvls version: ${server.meta.version}\nvls server arguments: ${host.child.args.join(" ")}\n```\n') ?
+	report_file.writeln('### VLS info \n```\nvls version: $server.meta.version\nvls server arguments: ${host.child.args.join(' ')}\n```\n') ?
 
 	// Problem Description
 	report_file.writeln('## Problem Description') ?

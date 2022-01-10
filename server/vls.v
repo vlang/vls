@@ -313,7 +313,8 @@ fn monitor_changes(mut ls Vls) {
 				if ls.status != .off && !timeout_stopped {
 					timeout_stopped = true
 					timeout_sw.stop()
-				} else if ls.status == .off && ls.shutdown_timeout != 0 && timeout_sw.elapsed() >= ls.shutdown_timeout {
+				} else if ls.status == .off && ls.shutdown_timeout != 0
+					&& timeout_sw.elapsed() >= ls.shutdown_timeout {
 					ls.shutdown('')
 				}
 
