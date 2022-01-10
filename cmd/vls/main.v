@@ -44,15 +44,18 @@ fn run_cli(cmd cli.Command) ? {
 
 fn setup_and_configure_io(cmd cli.Command) server.ReceiveSender {
 	socket_mode := cmd.flags.get_bool('socket') or { false }
-	socket_port := cmd.flags.get_int('port') or { 5007 }
 	debug_mode := cmd.flags.get_bool('debug') or { false }
-
-	return if socket_mode { server.ReceiveSender(Socket{
+	if socket_mode { 
+		socket_port := cmd.flags.get_int('port') or { 5007 }
+		return Socket{
 			port: socket_port
 			debug: debug_mode
-		}) } else { server.ReceiveSender(Stdio{
+		} 
+	} else { 
+		return Stdio{
 			debug: debug_mode
-		}) }
+		}
+	}
 }
 
 fn run_server(cmd cli.Command) ? {
