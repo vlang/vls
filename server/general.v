@@ -35,6 +35,8 @@ fn (mut ls Vls) initialize(id string, params string) {
 		ls.send_null(id)
 		return
 	}
+	ls.client_pid = initialize_params.process_id
+
 	// TODO: configure capabilities based on client support
 	// ls.client_capabilities = initialize_params.capabilities
 

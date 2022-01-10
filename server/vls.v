@@ -103,7 +103,7 @@ mut:
 	logger           log.Logger
 	panic_count      int
 	debug            bool
-	shutdown_timeout time.Duration = 15 * time.minute
+	client_pid       int
 	// client_capabilities lsp.ClientCapabilities
 pub mut:
 	// TODO: replace with io.ReadWriter
