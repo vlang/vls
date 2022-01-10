@@ -3,7 +3,6 @@ module main
 import cli
 import server
 import os
-import time
 
 fn run_cli(cmd cli.Command) ? {
 	mut run_as_child := cmd.flags.get_bool('child') or { false }
@@ -14,10 +13,8 @@ fn run_cli(cmd cli.Command) ? {
 		run_server(cmd) ?
 	} else {
 		should_generate_report := cmd.flags.get_bool('generate-report') or { false }
-		timeout_minutes_val := cmd.flags.get_int('timeout') or { 15 }
 		flag_discriminator := if cmd.posix_mode { '--' } else { '-' }
-		mut server_args := [flag_discriminator + 'child', flag_discriminator + 'timeout=0']
-
+		mut server_args := [flag_discriminator + 'child']
 		for flag in cmd.flags {
 			match flag.name {
 				'enable', 'disable', 'vroot' {
@@ -26,6 +23,13 @@ fn run_cli(cmd cli.Command) ? {
 				}
 				'debug' {
 					server_args << flag_discriminator + flag.name
+				'timeout' {
+					flag_value := cmd.flags.get_int(flag.name) or { continue }
+					if flag_value == 0 {
+						continue
+					}
+					server_args << flag_discriminator + flag.name
+					server_args << flag_value.str()
 				}
 				else {}
 			}
@@ -35,7 +39,6 @@ fn run_cli(cmd cli.Command) ? {
 			io: setup_and_configure_io(cmd)
 			child: new_vls_process(...server_args)
 			generate_report: should_generate_report
-			shutdown_timeout: timeout_minutes_val * time.minute
 		}
 
 		host.run()
