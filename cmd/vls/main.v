@@ -18,11 +18,20 @@ fn run_cli(cmd cli.Command) ? {
 		for flag in cmd.flags {
 			match flag.name {
 				'enable', 'disable', 'vroot' {
+					flag_value := cmd.flags.get_string(flag.name) or { continue }
+					if flag_value.len == 0 {
+						continue
+					}
 					server_args << flag_discriminator + flag.name
-					server_args << cmd.flags.get_string(flag.name) or { '' }
+					server_args << flag_value
 				}
 				'debug' {
+					flag_value := cmd.flags.get_bool(flag.name) or { continue }
+					if !flag_value {
+						continue
+					}
 					server_args << flag_discriminator + flag.name
+				}
 				'timeout' {
 					flag_value := cmd.flags.get_int(flag.name) or { continue }
 					if flag_value == 0 {
