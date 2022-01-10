@@ -147,6 +147,7 @@ fn (mut ls Vls) process_builtin() {
 }
 
 // shutdown sets the state to shutdown but does not exit
+[noreturn]
 fn (mut ls Vls) shutdown(id string) {
 	ls.status = .shutdown
 	ls.send(jsonrpc.Response<string>{
@@ -159,6 +160,7 @@ fn (mut ls Vls) shutdown(id string) {
 }
 
 // exit stops the process
+[noreturn]
 fn (mut ls Vls) exit() {
 	// saves the log into the disk
 	ls.logger.close()
