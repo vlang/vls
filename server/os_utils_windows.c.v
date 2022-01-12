@@ -5,7 +5,7 @@ const (
 	path_list_sep = ';'
 )
 
-fn C.OpenProcess(access int, inherit_handle bool, pid int) HANDLE
+fn C.OpenProcess(access int, inherit_handle bool, pid int) C.HANDLE
 
 fn is_proc_exists(pid int) bool {
 	exit_code := u32(0)
