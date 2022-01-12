@@ -24,7 +24,7 @@ fn (mut ls Vls) initialize(id string, params string) {
 	// If the parent process is not alive, then the server should exit
 	// (see exit notification) its process.
 	// https://microsoft.github.io/language-server-protocol/specifications/specification-3-15/#initialize
-	if !is_proc_exists(initialize_params.process_id) {
+	if initialize_params.process_id != -2 && !is_proc_exists(initialize_params.process_id) {
 		ls.exit()
 	}
 
