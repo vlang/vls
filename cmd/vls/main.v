@@ -3,7 +3,6 @@ module main
 import cli
 import server
 import os
-import time
 
 fn run_cli(cmd cli.Command) ? {
 	mut run_as_child := cmd.flags.get_bool('child') or { false }
@@ -14,18 +13,32 @@ fn run_cli(cmd cli.Command) ? {
 		run_server(cmd) ?
 	} else {
 		should_generate_report := cmd.flags.get_bool('generate-report') or { false }
-		timeout_minutes_val := cmd.flags.get_int('timeout') or { 15 }
 		flag_discriminator := if cmd.posix_mode { '--' } else { '-' }
-		mut server_args := [flag_discriminator + 'child', flag_discriminator + 'timeout=0']
-
+		mut server_args := [flag_discriminator + 'child']
 		for flag in cmd.flags {
 			match flag.name {
 				'enable', 'disable', 'vroot' {
+					flag_value := cmd.flags.get_string(flag.name) or { continue }
+					if flag_value.len == 0 {
+						continue
+					}
 					server_args << flag_discriminator + flag.name
-					server_args << cmd.flags.get_string(flag.name) or { '' }
+					server_args << flag_value
 				}
 				'debug' {
+					flag_value := cmd.flags.get_bool(flag.name) or { continue }
+					if !flag_value {
+						continue
+					}
 					server_args << flag_discriminator + flag.name
+				}
+				'timeout' {
+					flag_value := cmd.flags.get_int(flag.name) or { continue }
+					if flag_value == 0 {
+						continue
+					}
+					server_args << flag_discriminator + flag.name
+					server_args << flag_value.str()
 				}
 				else {}
 			}
@@ -35,7 +48,6 @@ fn run_cli(cmd cli.Command) ? {
 			io: setup_and_configure_io(cmd)
 			child: new_vls_process(...server_args)
 			generate_report: should_generate_report
-			shutdown_timeout: timeout_minutes_val * time.minute
 		}
 
 		host.run()
@@ -44,15 +56,18 @@ fn run_cli(cmd cli.Command) ? {
 
 fn setup_and_configure_io(cmd cli.Command) server.ReceiveSender {
 	socket_mode := cmd.flags.get_bool('socket') or { false }
-	socket_port := cmd.flags.get_int('port') or { 5007 }
 	debug_mode := cmd.flags.get_bool('debug') or { false }
-
-	return if socket_mode { server.ReceiveSender(Socket{
+	if socket_mode {
+		socket_port := cmd.flags.get_int('port') or { 5007 }
+		return Socket{
 			port: socket_port
 			debug: debug_mode
-		}) } else { server.ReceiveSender(Stdio{
+		}
+	} else {
+		return Stdio{
 			debug: debug_mode
-		}) }
+		}
+	}
 }
 
 fn run_server(cmd cli.Command) ? {

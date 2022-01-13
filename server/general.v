@@ -15,6 +15,21 @@ const (
 
 // initialize sends the server capabilities to the client
 fn (mut ls Vls) initialize(id string, params string) {
+	initialize_params := json.decode(lsp.InitializeParams, params) or {
+		ls.panic(err.msg)
+		ls.send_null(id)
+		return
+	}
+
+	// If the parent process is not alive, then the server should exit
+	// (see exit notification) its process.
+	// https://microsoft.github.io/language-server-protocol/specifications/specification-3-15/#initialize
+	if initialize_params.process_id != -2 && !is_proc_exists(initialize_params.process_id) {
+		ls.exit()
+	}
+
+	ls.client_pid = initialize_params.process_id
+
 	// Set defaults when vroot_path is empty
 	if ls.vroot_path.len == 0 {
 		if found_vroot_path := detect_vroot_path() {
@@ -30,16 +45,6 @@ fn (mut ls Vls) initialize(id string, params string) {
 		ls.store.default_import_paths << os.vmodules_dir()
 	}
 
-	// NB: Just to be sure just in case the panic happens
-	// inside the base table.
-	// ls.base_table.panic_handler = table_panic_handler
-	// ls.base_table.panic_userdata = ls
-
-	initialize_params := json.decode(lsp.InitializeParams, params) or {
-		ls.panic(err.msg)
-		ls.send_null(id)
-		return
-	}
 	// TODO: configure capabilities based on client support
 	// ls.client_capabilities = initialize_params.capabilities
 
@@ -85,7 +90,7 @@ fn (mut ls Vls) initialize(id string, params string) {
 	}
 
 	// print initial info
-	ls.print_info(initialize_params.client_info)
+	ls.print_info(initialize_params.process_id, initialize_params.client_info)
 
 	// since builtin is used frequently, they should be parsed first and only once
 	ls.process_builtin()
@@ -117,7 +122,7 @@ fn (mut ls Vls) setup_logger() ?string {
 	return log_path
 }
 
-fn (mut ls Vls) print_info(client_info lsp.ClientInfo) {
+fn (mut ls Vls) print_info(process_id int, client_info lsp.ClientInfo) {
 	arch := if runtime.is_64bit() { 64 } else { 32 }
 	client_name := if client_info.name.len != 0 {
 		'$client_info.name $client_info.version'
@@ -129,7 +134,7 @@ fn (mut ls Vls) print_info(client_info lsp.ClientInfo) {
 	ls.log_message('VLS Version: $meta.version, OS: $os.user_os() $arch', .info)
 	ls.log_message('VLS executable path: $os.executable()', .info)
 	ls.log_message('VLS build with V ${@VHASH}', .info)
-	ls.log_message('Client / Editor: $client_name', .info)
+	ls.log_message('Client / Editor: $client_name (PID: $process_id)', .info)
 	ls.log_message('Using V path (VROOT): $ls.vroot_path', .info)
 }
 
@@ -147,18 +152,21 @@ fn (mut ls Vls) process_builtin() {
 }
 
 // shutdown sets the state to shutdown but does not exit
+[noreturn]
 fn (mut ls Vls) shutdown(id string) {
 	ls.status = .shutdown
-	ls.send(jsonrpc.Response<string>{
-		id: id
-		result: 'null'
-		// error: code and message set in case an exception happens during shutdown request
-	})
-
+	if id.len != 0 {
+		ls.send(jsonrpc.Response<string>{
+			id: id
+			result: 'null'
+			// error: code and message set in case an exception happens during shutdown request
+		})
+	}
 	ls.exit()
 }
 
 // exit stops the process
+[noreturn]
 fn (mut ls Vls) exit() {
 	// saves the log into the disk
 	ls.logger.close()

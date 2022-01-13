@@ -63,10 +63,9 @@ fn (mut lg Logger) get_text() string {
 
 struct VlsHost {
 mut:
-	io               server.ReceiveSender
-	child            &os.Process
-	shutdown_timeout time.Duration
-	stderr_logger    Logger = Logger{
+	io            server.ReceiveSender
+	child         &os.Process
+	stderr_logger Logger = Logger{
 		max_log_count: 0
 		with_timestamp: false
 	}
@@ -105,31 +104,21 @@ fn (mut host VlsHost) run() {
 	go host.listen_for_errors()
 	go host.listen_for_output()
 	go host.listen_for_input()
+
 	host.receive_data()
 	host.child.wait()
 	host.child.close()
 	host.handle_exit()
 }
 
-// const vls_special_request_header = '{"jsonrpc":"${jsonrpc.version}","method":"vls/'
-
 fn (mut host VlsHost) receive_data() {
 	mut stdout_buffer := strings.new_builder(4096)
-	mut timeout_ms := i64(0)
-
 	for !host.has_child_exited() {
 		select {
 			incoming_stdin := <-host.stdin_chan {
-				timeout_ms = 0
-				// TODO: terminate VLS if client process id
-				// has already shutdown.
-				// if incoming_stdin.starts_with(vls_special_request_header) {
-				// 	go host.handle_special_requests(incoming_stdin)
-				// } else {
 				final_payload := make_lsp_payload(incoming_stdin)
 				host.child.stdin_write(final_payload)
 				host.stdin_logger.writeln(final_payload)
-				// }
 			}
 			incoming_stdout := <-host.stdout_chan {
 				// 4096 is the maximum length for stdout_read
@@ -145,12 +134,6 @@ fn (mut host VlsHost) receive_data() {
 				// Set the last_len to the length of the latest entry so that
 				// the last stderr output will be logged into the error report.
 				host.stderr_logger.writeln(incoming_stderr)
-			}
-			50 * time.millisecond {
-				timeout_ms += (50 * time.millisecond)
-				if host.shutdown_timeout != 0 && host.shutdown_timeout - timeout_ms <= 0 {
-					host.child.stdin_write(make_lsp_payload('{"jsonrpc":"$jsonrpc.version","id":1001,"method":"shutdown"}'))
-				}
 			}
 		}
 	}
@@ -221,7 +204,7 @@ fn (mut host VlsHost) generate_report() ?string {
 	report_file.writeln('<!-- Copy and paste the contents of this file to https://github.com/vlang/vls/issues/new -->') ?
 	report_file.writeln('## System Information') ?
 	report_file.writeln('### V doctor\n```\n$vdoctor_info\n```\n') ?
-	report_file.writeln('### VLS info \n```\nvls version: ${server.meta.version}\n```\n') ?
+	report_file.writeln('### VLS info \n```\nvls version: $server.meta.version\nvls server arguments: ${host.child.args.join(' ')}\n```\n') ?
 
 	// Problem Description
 	report_file.writeln('## Problem Description') ?
@@ -249,14 +232,3 @@ fn (mut host VlsHost) generate_report() ?string {
 	report_file.writeln('### Response\n```\n$host.stdout_logger.get_text()\n```\n') ?
 	return report_file_path
 }
-
-// TODO: handle internal notifications
-// fn (mut host VlsHost) handle_special_requests(raw_req string) {
-// 	// req := json.decode(jsonrpc.Request, raw_req) or { return }
-// 	// match req.method {
-// 	// 	'vls/setClientProcessId' {
-
-// 	// 	}
-// 	// 	else {}
-// 	// }
-// }
