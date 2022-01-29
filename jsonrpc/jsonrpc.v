@@ -53,7 +53,7 @@ pub fn (resp Response<T>) json() string {
 		res := json.encode(resp.result)
 		resp_wr.write_string(',"result":$res')
 	}
-	resp_wr.write_b(`}`)
+	resp_wr.write_byte(`}`)
 	return resp_wr.str()
 }
 

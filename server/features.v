@@ -741,9 +741,9 @@ fn symbol_to_completion_item(sym &analyzer.Symbol, with_snippet bool) ?lsp.Compl
 			}
 			insert_text.write_string(name)
 			if with_snippet {
-				insert_text.write_b(`(`)
+				insert_text.write_byte(`(`)
 				for i in 0 .. sym.children_syms.len {
-					insert_text.write_b(`$`)
+					insert_text.write_byte(`$`)
 					insert_text.write_string(i.str())
 					if i < sym.children_syms.len - 1 {
 						insert_text.write_string(', ')
@@ -751,14 +751,14 @@ fn symbol_to_completion_item(sym &analyzer.Symbol, with_snippet bool) ?lsp.Compl
 						insert_text_format = .snippet
 					}
 				}
-				insert_text.write_b(`)`)
+				insert_text.write_byte(`)`)
 			}
 		}
 		.struct_ {
 			kind = .struct_
 			insert_text.write_string(name)
 			if with_snippet {
-				insert_text.write_b(`{`)
+				insert_text.write_byte(`{`)
 				mut insert_count := 1
 				for i, child_sym in sym.children_syms {
 					if child_sym.kind != .field || child_sym.name.len == 0 {
@@ -770,14 +770,14 @@ fn symbol_to_completion_item(sym &analyzer.Symbol, with_snippet bool) ?lsp.Compl
 					insert_text_format = .snippet
 					insert_count++
 				}
-				insert_text.write_b(`}`)
+				insert_text.write_byte(`}`)
 			}
 		}
 		.field {
 			match sym.parent_sym.kind {
 				.enum_ {
 					kind = .enum_member
-					insert_text.write_b(`.`)
+					insert_text.write_byte(`.`)
 					insert_text.write_string(sym.name)
 					name = insert_text.after(0)
 				}

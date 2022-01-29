@@ -177,7 +177,7 @@ pub fn (info &Symbol) gen_str() string {
 			sb.write_string('fn ')
 
 			if !isnil(info.parent_sym) && !info.parent_sym.is_void() {
-				sb.write_b(`(`)
+				sb.write_byte(`(`)
 				sb.write_string(info.parent_sym.gen_str())
 				sb.write_string(') ')
 			}
@@ -186,7 +186,7 @@ pub fn (info &Symbol) gen_str() string {
 				sb.write_string(info.name)
 			}
 
-			sb.write_b(`(`)
+			sb.write_byte(`(`)
 			for i, v in info.children_syms {
 				if v.name.len != 0 {
 					sb.write_string(v.gen_str())
@@ -197,9 +197,9 @@ pub fn (info &Symbol) gen_str() string {
 					sb.write_string(', ')
 				}
 			}
-			sb.write_b(`)`)
+			sb.write_byte(`)`)
 			if !info.return_sym.is_void() {
-				sb.write_b(` `)
+				sb.write_byte(` `)
 				sb.write_string(info.return_sym.name)
 			}
 		}
@@ -207,13 +207,13 @@ pub fn (info &Symbol) gen_str() string {
 			sb.write_string(info.name)
 		}
 		.multi_return {
-			sb.write_b(`(`)
+			sb.write_byte(`(`)
 			for v in info.children_syms {
 				if v.kind !in analyzer.kinds_in_multi_return_to_be_excluded {
 					sb.write_string(v.gen_str())
 				}
 			}
-			sb.write_b(`)`)
+			sb.write_byte(`)`)
 		}
 		.optional {
 			sb.write_string('?')
@@ -247,9 +247,9 @@ pub fn (info &Symbol) gen_str() string {
 				for i in 0 .. info.sumtype_children_len {
 					sb.write_string(info.children_syms[i].name)
 					if i < info.sumtype_children_len - 1 {
-						sb.write_b(` `)
-						sb.write_b(`|`)
-						sb.write_b(` `)
+						sb.write_byte(` `)
+						sb.write_byte(`|`)
+						sb.write_byte(` `)
 					}
 				}
 			}
@@ -258,7 +258,7 @@ pub fn (info &Symbol) gen_str() string {
 			sb.write_string(info.access.str())
 			if info.kind == .field {
 				sb.write_string(info.parent_sym.name)
-				sb.write_b(`.`)
+				sb.write_byte(`.`)
 			}
 			if info.is_const {
 				sb.write_string('const ')
@@ -266,7 +266,7 @@ pub fn (info &Symbol) gen_str() string {
 
 			sb.write_string(info.name)
 			if !info.return_sym.is_void() {
-				sb.write_b(` `)
+				sb.write_byte(` `)
 				if info.return_sym.kind == .function_type {
 					sb.write_string(info.return_sym.gen_str())
 				} else {
@@ -276,7 +276,7 @@ pub fn (info &Symbol) gen_str() string {
 		}
 		else {
 			// sb.write_string(info.kind.str())
-			// sb.write_b(` `)
+			// sb.write_byte(` `)
 			sb.write_string(info.name)
 		}
 	}
