@@ -24,7 +24,7 @@ jobs:
         with:
           path: vls
       - name: Build local V
-        run: make && sudo ./v symlink
+        run: unset VFLAGS; make && sudo ./v symlink
       - name: Compile VLS
         run: |
           cd vls
@@ -54,7 +54,7 @@ jobs:
         with:
           path: vls
       - name: Build local V
-        run: make && sudo ./v symlink
+        run: unset VFLAGS; make && sudo ./v symlink
       - name: Compile VLS
         run: |
           cd vls
@@ -84,7 +84,7 @@ jobs:
       - name: Build local V
         run: .\make.bat -gcc
       - name: Compile VLS for Windows
-        shell: bash	  
+        shell: bash
         run: |
           cd vls
           export VLS_BUILD_COMMIT=$(git rev-parse --short HEAD)
