@@ -152,7 +152,6 @@ fn (mut ls Vls) process_builtin() {
 }
 
 // shutdown sets the state to shutdown but does not exit
-[noreturn]
 fn (mut ls Vls) shutdown(id string) {
 	ls.status = .shutdown
 	if id.len != 0 {
