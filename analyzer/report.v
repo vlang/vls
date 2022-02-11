@@ -33,21 +33,24 @@ pub fn (mut msgs []Message) report(msg Message) {
 }
 
 pub struct AnalyzerError {
+	Error
 	msg   string
-	code  int
 	range C.TSRange
 }
 
-pub fn (info AnalyzerError) str() string {
-	start := '{$info.range.start_point.row:$info.range.start_point.column}'
-	end := '{$info.range.end_point.row:$info.range.end_point.column}'
-	return '[$start -> $end] $info.msg ($info.code)'
+pub fn (err AnalyzerError) msg() string {
+	start := '{$err.range.start_point.row:$err.range.start_point.column}'
+	end := '{$err.range.end_point.row:$err.range.end_point.column}'
+	return '[$start -> $end] $err.msg'
+}
+
+pub fn (err AnalyzerError) str() string {
+	return err.msg()
 }
 
 fn report_error(msg string, range C.TSRange) IError {
 	return AnalyzerError{
 		msg: msg
-		code: 0
 		range: range
 	}
 }

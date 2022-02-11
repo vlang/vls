@@ -186,9 +186,13 @@ fn C.ts_node_named_descendant_for_point_range(node C.TSNode, start_point C.TSPoi
 fn C.ts_node_eq(node C.TSNode, another_node C.TSNode) bool
 
 struct NodeError {
+	Error
 	msg  string
-	code int
 	node C.TSNode
+}
+
+pub fn (err NodeError) msg() string {
+	return '$err.msg: $err.node'
 }
 
 [unsafe]
