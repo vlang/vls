@@ -192,7 +192,7 @@ struct NodeError {
 }
 
 pub fn (err NodeError) msg() string {
-	return '$err.msg: $err.node'
+	return '$err.msg: ${voidptr(err.node.tree)}'
 }
 
 [unsafe]
