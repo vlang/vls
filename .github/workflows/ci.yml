@@ -58,8 +58,6 @@ jobs:
           path: vls
       - name: Build local v
         run: make
-      - name: Symlink VLS to ~/.vmodules/vls
-        run: ln -s $(realpath vls) ~/.vmodules/vls
       - name: Run tests
         run: ./v test vls
       - name: Check VLS compiles
