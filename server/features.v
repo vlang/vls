@@ -12,7 +12,7 @@ const temp_formatting_file_path = os.join_path(os.temp_dir(), 'vls_temp_formatti
 [manualfree]
 fn (mut ls Vls) formatting(id string, params string) {
 	formatting_params := json.decode(lsp.DocumentFormattingParams, params) or {
-		ls.panic(err.msg)
+		ls.panic(err.msg())
 		ls.send_null(id)
 		return
 	}
@@ -160,7 +160,7 @@ fn symbol_to_symbol_info(uri lsp.DocumentUri, sym &analyzer.Symbol) ?lsp.SymbolI
 
 fn (mut ls Vls) document_symbol(id string, params string) {
 	document_symbol_params := json.decode(lsp.DocumentSymbolParams, params) or {
-		ls.panic(err.msg)
+		ls.panic(err.msg())
 		ls.send_null(id)
 		return
 	}
@@ -182,7 +182,7 @@ fn (mut ls Vls) document_symbol(id string, params string) {
 fn (mut ls Vls) signature_help(id string, params string) {
 	// Initial checks.
 	signature_params := json.decode(lsp.SignatureHelpParams, params) or {
-		ls.panic(err.msg)
+		ls.panic(err.msg())
 		ls.send_null(id)
 		return
 	}
@@ -815,7 +815,7 @@ fn (mut ls Vls) completion(id string, params string) {
 		return
 	}
 	completion_params := json.decode(lsp.CompletionParams, params) or {
-		ls.panic(err.msg)
+		ls.panic(err.msg())
 		ls.send_null(id)
 		return
 	}
@@ -941,7 +941,7 @@ fn (mut ls Vls) completion(id string, params string) {
 
 fn (mut ls Vls) hover(id string, params string) {
 	hover_params := json.decode(lsp.HoverParams, params) or {
-		ls.panic(err.msg)
+		ls.panic(err.msg())
 		ls.send_null(id)
 		return
 	}
@@ -1026,7 +1026,7 @@ fn get_hover_data(mut store analyzer.Store, node C.TSNode, uri lsp.DocumentUri, 
 [manualfree]
 fn (mut ls Vls) folding_range(id string, params string) {
 	folding_range_params := json.decode(lsp.FoldingRangeParams, params) or {
-		ls.panic(err.msg)
+		ls.panic(err.msg())
 		ls.send_null(id)
 
 		return
@@ -1072,7 +1072,7 @@ fn (mut ls Vls) folding_range(id string, params string) {
 
 fn (mut ls Vls) definition(id string, params string) {
 	goto_definition_params := json.decode(lsp.TextDocumentPositionParams, params) or {
-		ls.panic(err.msg)
+		ls.panic(err.msg())
 		ls.send_null(id)
 		return
 	}
@@ -1164,7 +1164,7 @@ fn get_implementation_locations_from_syms(symbols []&analyzer.Symbol, got_sym &a
 
 fn (mut ls Vls) implementation(id string, params string) {
 	goto_implementation_params := json.decode(lsp.TextDocumentPositionParams, params) or {
-		ls.panic(err.msg)
+		ls.panic(err.msg())
 		ls.send_null(id)
 		return
 	}

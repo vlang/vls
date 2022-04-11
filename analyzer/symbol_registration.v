@@ -321,7 +321,7 @@ fn (mut sr SymbolAnalyzer) enum_decl(enum_decl_node C.TSNode) ?&Symbol {
 
 		sym.add_child(mut member_sym) or {
 			sr.store.report_error(AnalyzerError{
-				msg: err.msg
+				msg: err.msg()
 				range: member_node.range()
 			})
 			continue

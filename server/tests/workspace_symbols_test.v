@@ -61,7 +61,7 @@ fn test_workspace_symbols() {
 	ls.dispatch(io.request('initialize'))
 	files := io.load_test_file_paths('workspace_symbols') or {
 		io.bench.fail()
-		eprintln(io.bench.step_message_fail(err.msg))
+		eprintln(io.bench.step_message_fail(err.msg()))
 		assert false
 		return
 	}

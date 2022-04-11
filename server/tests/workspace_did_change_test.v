@@ -12,7 +12,7 @@ fn test_workspace_did_change() ? {
 	// TODO: add a mock filesystem
 	files := io.load_test_file_paths('workspace_did_change') or {
 		io.bench.fail()
-		eprintln(io.bench.step_message_fail(err.msg))
+		eprintln(io.bench.step_message_fail(err.msg()))
 		return err
 	}
 

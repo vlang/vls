@@ -75,7 +75,7 @@ fn test_set_features() {
 		.formatting,
 	]
 	ls.set_features(['logging'], true) or {
-		assert err.msg == 'feature "logging" not found'
+		assert err.msg() == 'feature "logging" not found'
 		return
 	}
 }

@@ -30,7 +30,7 @@ fn test_symbol_registration() ? {
 	test_files_dir := test_utils.get_test_files_path(@FILE)
 	test_files := test_utils.load_test_file_paths(test_files_dir, 'symbol_registration') or {
 		bench.fail()
-		eprintln(bench.step_message_fail(err.msg))
+		eprintln(bench.step_message_fail(err.msg()))
 		assert false
 		return
 	}

@@ -389,7 +389,7 @@ fn test_definition() {
 	}))
 	test_files := io.load_test_file_paths('definition') or {
 		io.bench.fail()
-		eprintln(io.bench.step_message_fail(err.msg))
+		eprintln(io.bench.step_message_fail(err.msg()))
 		assert false
 		return
 	}

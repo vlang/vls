@@ -16,7 +16,7 @@ const (
 // initialize sends the server capabilities to the client
 fn (mut ls Vls) initialize(id string, params string) {
 	initialize_params := json.decode(lsp.InitializeParams, params) or {
-		ls.panic(err.msg)
+		ls.panic(err.msg())
 		ls.send_null(id)
 		return
 	}
@@ -86,7 +86,7 @@ fn (mut ls Vls) initialize(id string, params string) {
 	// Create the file either in debug mode or when the client trace is set to verbose.
 	if ls.debug || (!ls.debug && initialize_params.trace == 'verbose') {
 		// set up logger set to the workspace path
-		ls.setup_logger() or { ls.show_message(err.msg, .error) }
+		ls.setup_logger() or { ls.show_message(err.msg(), .error) }
 	}
 
 	// print initial info

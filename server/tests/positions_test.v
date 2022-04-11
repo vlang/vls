@@ -21,7 +21,7 @@ fn test_compute_offset() {
 	test_files := test_utils.load_test_file_paths(test_utils.get_test_files_path(@FILE),
 		'pos_compute_offset') or {
 		bench.fail()
-		eprintln(bench.step_message_fail(err.msg))
+		eprintln(bench.step_message_fail(err.msg()))
 		assert false
 		return
 	}
@@ -78,7 +78,7 @@ fn test_compute_position() {
 	test_files := test_utils.load_test_file_paths(test_utils.get_test_files_path(@FILE),
 		'pos_compute_offset') or {
 		bench.fail()
-		eprintln(bench.step_message_fail(err.msg))
+		eprintln(bench.step_message_fail(err.msg()))
 		assert false
 		return
 	}
@@ -135,7 +135,7 @@ fn test_tspoint_to_lsp_pos() {
 	test_files := test_utils.load_test_file_paths(test_utils.get_test_files_path(@FILE),
 		'pos_to_lsp_pos') or {
 		bench.fail()
-		eprintln(bench.step_message_fail(err.msg))
+		eprintln(bench.step_message_fail(err.msg()))
 		assert false
 		return
 	}
@@ -212,7 +212,7 @@ fn test_tsrange_to_lsp_range() {
 	test_files := test_utils.load_test_file_paths(test_utils.get_test_files_path(@FILE),
 		'pos_to_lsp_range') or {
 		bench.fail()
-		eprintln(bench.step_message_fail(err.msg))
+		eprintln(bench.step_message_fail(err.msg()))
 		assert false
 		return
 	}

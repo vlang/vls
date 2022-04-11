@@ -267,7 +267,7 @@ fn (mut ls Vls) panic(message string) {
 	// NB: Would 2 be enough to exit?
 	if ls.panic_count == 2 {
 		log_path := ls.setup_logger() or {
-			ls.show_message(err.msg, .error)
+			ls.show_message(err.msg(), .error)
 			return
 		}
 

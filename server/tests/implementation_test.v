@@ -57,7 +57,7 @@ fn test_implementation() {
 	}))
 	test_files := io.load_test_file_paths('implementation') or {
 		io.bench.fail()
-		eprintln(io.bench.step_message_fail(err.msg))
+		eprintln(io.bench.step_message_fail(err.msg()))
 		assert false
 		return
 	}

@@ -6,7 +6,7 @@ import os
 
 fn (mut ls Vls) did_change_watched_files(params string) {
 	did_change_watched_params := json.decode(lsp.DidChangeWatchedFilesParams, params) or {
-		ls.panic(err.msg)
+		ls.panic(err.msg())
 		return
 	}
 

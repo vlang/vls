@@ -21,7 +21,7 @@ fn (mut ls Vls) analyze_file(file File) {
 
 fn (mut ls Vls) did_open(_ string, params string) {
 	did_open_params := json.decode(lsp.DidOpenTextDocumentParams, params) or {
-		ls.panic(err.msg)
+		ls.panic(err.msg())
 		return
 	}
 
@@ -98,7 +98,7 @@ fn (mut ls Vls) did_open(_ string, params string) {
 
 fn (mut ls Vls) did_change(_ string, params string) {
 	did_change_params := json.decode(lsp.DidChangeTextDocumentParams, params) or {
-		ls.panic(err.msg)
+		ls.panic(err.msg())
 		return
 	}
 
@@ -180,7 +180,7 @@ fn (mut ls Vls) did_change(_ string, params string) {
 [manualfree]
 fn (mut ls Vls) did_close(_ string, params string) {
 	did_close_params := json.decode(lsp.DidCloseTextDocumentParams, params) or {
-		ls.panic(err.msg)
+		ls.panic(err.msg())
 		return
 	}
 
@@ -207,7 +207,7 @@ fn (mut ls Vls) did_close(_ string, params string) {
 
 fn (mut ls Vls) did_save(id string, params string) {
 	did_save_params := json.decode(lsp.DidSaveTextDocumentParams, params) or {
-		ls.panic(err.msg)
+		ls.panic(err.msg())
 		return
 	}
 	uri := did_save_params.text_document.uri
