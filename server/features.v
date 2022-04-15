@@ -291,7 +291,7 @@ fn (mut ls Vls) signature_help(id string, params string) {
 struct CompletionBuilder {
 mut:
 	store              &analyzer.Store
-	src                []byte
+	src                []u8
 	offset             int
 	parent_node        C.TSNode
 	show_global        bool // for displaying global (project) symbols
@@ -967,7 +967,7 @@ fn (mut ls Vls) hover(id string, params string) {
 	})
 }
 
-fn get_hover_data(mut store analyzer.Store, node C.TSNode, uri lsp.DocumentUri, source []byte, offset u32) ?lsp.Hover {
+fn get_hover_data(mut store analyzer.Store, node C.TSNode, uri lsp.DocumentUri, source []u8, offset u32) ?lsp.Hover {
 	node_type_name := node.type_name()
 	if node.is_null() || node_type_name == 'comment' {
 		return none

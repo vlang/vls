@@ -4,7 +4,7 @@ Function Type
 
 type Handler = fn (req Req, res &Res) ?string
 
-fn new(key []byte, data []byte, hash_func fn ([]byte) []byte, blocksize int) []byte {}
+fn new(key []u8, data []u8, hash_func fn ([]u8) []u8, blocksize int) []u8 {}
 
 fn test() fn(i int) ?(string, int) {}
 

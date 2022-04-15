@@ -101,9 +101,9 @@ pub fn sexpr_str_messages(msgs []Message) string {
 	for i, msg in msgs {
 		writer.write_byte(`(`)
 		writer.write_string(msg.kind.str())
-		writer.write([byte(` `), `"`]) or {}
+		writer.write([u8(` `), `"`]) or {}
 		writer.write_string(msg.content)
-		writer.write([byte(`"`), ` `]) or {}
+		writer.write([u8(`"`), ` `]) or {}
 		sexpr_str_write_tspoint(mut writer, msg.range.start_point)
 		writer.write_byte(`-`)
 		sexpr_str_write_tspoint(mut writer, msg.range.end_point)

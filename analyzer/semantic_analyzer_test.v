@@ -3,7 +3,6 @@ import tree_sitter
 import tree_sitter_v as v
 import test_utils
 import benchmark
-import strings
 import analyzer { SemanticAnalyzer, Store, SymbolAnalyzer, new_tree_cursor, register_builtin_symbols }
 import analyzer.an_test_utils
 

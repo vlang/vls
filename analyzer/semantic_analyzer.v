@@ -3,7 +3,7 @@ module analyzer
 pub struct SemanticAnalyzer {
 pub mut:
 	cursor   TreeCursor
-	src_text []byte
+	src_text []u8
 	messages []Message = []Message{cap: 100}
 	store    &Store     [required]
 	// skips the local scopes and registers only
@@ -105,7 +105,7 @@ pub fn (mut an SemanticAnalyzer) analyze() []Message {
 }
 
 // analyze analyzes the given tree
-pub fn (mut store Store) analyze(tree &C.TSTree, src_text []byte) []Message {
+pub fn (mut store Store) analyze(tree &C.TSTree, src_text []u8) []Message {
 	mut an := SemanticAnalyzer{
 		store: unsafe { store }
 		src_text: src_text

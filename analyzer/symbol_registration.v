@@ -12,7 +12,7 @@ const (
 
 pub struct SymbolAnalyzer {
 pub mut:
-	src_text []byte
+	src_text []u8
 	cursor   TreeCursor
 mut:
 	store       &Store [required]
@@ -832,7 +832,7 @@ fn (mut sr SymbolAnalyzer) extract_block(node C.TSNode, mut scope ScopeTree) ?[]
 	return return_syms
 }
 
-fn extract_parameter_list(node C.TSNode, mut store Store, src_text []byte) []&Symbol {
+fn extract_parameter_list(node C.TSNode, mut store Store, src_text []u8) []&Symbol {
 	params_len := node.named_child_count()
 	mut syms := []&Symbol{cap: int(params_len)}
 
@@ -896,7 +896,7 @@ pub fn (mut sr SymbolAnalyzer) analyze() ([]&Symbol, []Message) {
 }
 
 // register_symbols_from_tree scans and registers all the symbols based on the given tree
-pub fn (mut store Store) register_symbols_from_tree(tree &C.TSTree, src_text []byte, is_import bool) {
+pub fn (mut store Store) register_symbols_from_tree(tree &C.TSTree, src_text []u8, is_import bool) {
 	mut sr := new_symbol_analyzer(store, tree.root_node(), src_text, is_import)
 	_, got_messages := sr.analyze()
 	for msg in got_messages {
@@ -905,7 +905,7 @@ pub fn (mut store Store) register_symbols_from_tree(tree &C.TSTree, src_text []b
 }
 
 // new_symbol_analyzer creates an instance of SymbolAnalyzer with the given store, tree, source, and is_import.
-pub fn new_symbol_analyzer(store &Store, root_node C.TSNode, src_text []byte, is_import bool) SymbolAnalyzer {
+pub fn new_symbol_analyzer(store &Store, root_node C.TSNode, src_text []u8, is_import bool) SymbolAnalyzer {
 	return SymbolAnalyzer{
 		store: unsafe { store }
 		src_text: src_text

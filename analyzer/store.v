@@ -421,7 +421,7 @@ pub fn (mut ss Store) get_scope_from_node(node C.TSNode) ?&ScopeTree {
 }
 
 // symbol_name_from_node extracts the symbol's kind, name, and module name from the given node
-pub fn symbol_name_from_node(node C.TSNode, src_text []byte) (SymbolKind, string, string) {
+pub fn symbol_name_from_node(node C.TSNode, src_text []u8) (SymbolKind, string, string) {
 	// if node.is_null() {
 	// 	return SymbolKind.typedef, '', 'void'
 	// }
@@ -529,7 +529,7 @@ pub fn symbol_name_from_node(node C.TSNode, src_text []byte) (SymbolKind, string
 }
 
 // find_symbol_by_type_node returns a symbol based on the given type node
-pub fn (mut store Store) find_symbol_by_type_node(node C.TSNode, src_text []byte) ?&Symbol {
+pub fn (mut store Store) find_symbol_by_type_node(node C.TSNode, src_text []u8) ?&Symbol {
 	if node.is_null() || src_text.len == 0 {
 		return none
 	}
@@ -618,7 +618,7 @@ pub fn (mut store Store) find_symbol_by_type_node(node C.TSNode, src_text []byte
 // infer_symbol_from_node returns the specified symbol based on the given node.
 // This is different from infer_value_type_from_node as this returns the symbol
 // instead of symbol's return type or parent for example
-pub fn (mut ss Store) infer_symbol_from_node(node C.TSNode, src_text []byte) ?&Symbol {
+pub fn (mut ss Store) infer_symbol_from_node(node C.TSNode, src_text []u8) ?&Symbol {
 	if node.is_null() {
 		return none
 	}
@@ -807,7 +807,7 @@ pub fn (mut ss Store) infer_symbol_from_node(node C.TSNode, src_text []byte) ?&S
 }
 
 // infer_value_type_from_node returns the symbol based on the given node
-pub fn (mut ss Store) infer_value_type_from_node(node C.TSNode, src_text []byte) &Symbol {
+pub fn (mut ss Store) infer_value_type_from_node(node C.TSNode, src_text []u8) &Symbol {
 	if node.is_null() {
 		return void_sym
 	}
@@ -825,7 +825,7 @@ pub fn (mut ss Store) infer_value_type_from_node(node C.TSNode, src_text []byte)
 			type_name = 'f32'
 		}
 		'rune_literal' {
-			type_name = 'byte'
+			type_name = 'u8'
 		}
 		'interpreted_string_literal' {
 			type_name = 'string'
@@ -930,7 +930,7 @@ pub fn (mut ss Store) infer_value_type_from_node(node C.TSNode, src_text []byte)
 }
 
 // delete_symbol_at_node removes a specific symbol from a specific portion of the node
-pub fn (mut ss Store) delete_symbol_at_node(root_node C.TSNode, src []byte, at_range C.TSRange) bool {
+pub fn (mut ss Store) delete_symbol_at_node(root_node C.TSNode, src []u8, at_range C.TSRange) bool {
 	unsafe { ss.opened_scopes[ss.cur_file_path].free() }
 	nodes := get_nodes_within_range(root_node, at_range) or { return false }
 	for node in nodes {
@@ -1141,7 +1141,7 @@ pub fn (mut ss Store) cleanup_imports() int {
 	return deleted
 }
 
-fn (mut ss Store) scan_imports(tree &C.TSTree, src_text []byte) []&Import {
+fn (mut ss Store) scan_imports(tree &C.TSTree, src_text []u8) []&Import {
 	root_node := tree.root_node()
 	named_child_len := root_node.named_child_count()
 	mut newly_imported_modules := []&Import{}
@@ -1197,7 +1197,7 @@ fn (mut ss Store) scan_imports(tree &C.TSTree, src_text []byte) []&Import {
 }
 
 // import_modules_from_tree scans and imports the modules based from the AST tree
-pub fn (mut store Store) import_modules_from_tree(tree &C.TSTree, src []byte, lookup_paths ...string) {
+pub fn (mut store Store) import_modules_from_tree(tree &C.TSTree, src []u8, lookup_paths ...string) {
 	mut imports := store.scan_imports(tree, src)
 	store.inject_paths_of_new_imports(mut imports, ...lookup_paths)
 	if imports.len == 0 {

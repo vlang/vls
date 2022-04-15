@@ -65,12 +65,12 @@ pub fn (mut parser C.TSParser) parse_string_with_old_tree_and_len(content string
 }
 
 [inline]
-pub fn (mut parser C.TSParser) parse_bytes(content []byte) &C.TSTree {
+pub fn (mut parser C.TSParser) parse_bytes(content []u8) &C.TSTree {
 	return parser.parse_bytes_with_old_tree(content, &C.TSTree(0))
 }
 
 fn v_byte_array_input_read(pl voidptr, byte_index u32, position C.TSPoint, bytes_read &u32) &char {
-	payload := *(&[]byte(pl))
+	payload := *(&[]u8(pl))
 	if byte_index >= u32(payload.len) {
 		unsafe {
 			*bytes_read = 0
@@ -84,7 +84,7 @@ fn v_byte_array_input_read(pl voidptr, byte_index u32, position C.TSPoint, bytes
 	}
 }
 
-pub fn (mut parser C.TSParser) parse_bytes_with_old_tree(content []byte, old_tree &C.TSTree) &C.TSTree {
+pub fn (mut parser C.TSParser) parse_bytes_with_old_tree(content []u8, old_tree &C.TSTree) &C.TSTree {
 	return parser.parse(old_tree,
 		payload: &content
 		read: v_byte_array_input_read
@@ -212,7 +212,7 @@ pub fn check_tsnode(node C.TSNode) ? {
 	}
 }
 
-pub fn (node C.TSNode) code(text []byte) string {
+pub fn (node C.TSNode) code(text []u8) string {
 	start_index := node.start_byte()
 	end_index := node.end_byte()
 	if start_index >= end_index || start_index >= u32(text.len) || end_index > u32(text.len) {

@@ -65,7 +65,7 @@ pub fn (mut sck Socket) receive() ?string {
 		}
 	}
 
-	mut rbody := []byte{len: conlen, init: 0}
+	mut rbody := []u8{len: conlen, init: 0}
 	defer {
 		unsafe { rbody.free() }
 	}
