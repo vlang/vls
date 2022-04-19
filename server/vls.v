@@ -43,6 +43,7 @@ pub enum Feature {
 	folding_range
 	definition
 	implementation
+	code_lens
 }
 
 // feature_from_str returns the Feature-enum value equivalent of the given string.
@@ -60,6 +61,7 @@ fn feature_from_str(feature_name string) ?Feature {
 		'hover' { return Feature.hover }
 		'folding_range' { return Feature.folding_range }
 		'definition' { return Feature.definition }
+		'code_lens' { return Feature.code_lens }
 		else { return error('feature "$feature_name" not found') }
 	}
 }
@@ -77,6 +79,7 @@ pub const (
 		.folding_range,
 		.definition,
 		.implementation,
+		.code_lens,
 	]
 )
 
@@ -205,6 +208,9 @@ pub fn (mut ls Vls) dispatch(payload string) {
 			}
 			'workspace/didChangeWatchedFiles' {
 				ls.did_change_watched_files(request.params)
+			}
+			'textDocument/codeLens' {
+				ls.code_lens(request.id, request.params)
 			}
 			else {}
 		}
