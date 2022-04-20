@@ -1023,7 +1023,7 @@ fn get_hover_data(mut store analyzer.Store, node C.TSNode, uri lsp.DocumentUri, 
 	}
 }
 
-[manualfree]
+// [manualfree]
 fn (mut ls Vls) folding_range(id string, params string) {
 	folding_range_params := json.decode(lsp.FoldingRangeParams, params) or {
 		ls.panic(err.msg())
@@ -1039,21 +1039,95 @@ fn (mut ls Vls) folding_range(id string, params string) {
 
 	root_node := file.tree.root_node()
 
-	// get the number of named child nodes
-	// named child nodes examples: struct_declaration, enum_declaration, etc.
-	named_children_len := root_node.named_child_count()
-
 	mut folding_ranges := []lsp.FoldingRange{}
+	mut imports_seen := false
+	mut last_single_comment_range := C.TSRange{
+		start_point: C.TSPoint{
+			row: 4294967295
+		}
+		end_point: C.TSPoint{
+			row: 4294967295
+		}
+	}
 
-	// loop
-	for i := u32(0); i < named_children_len; i++ {
-		named_child := root_node.named_child(i) or { continue }
-		folding_ranges << lsp.FoldingRange{
-			start_line: tsrange_to_lsp_range(named_child.range()).start.character
-			start_character: tsrange_to_lsp_range(named_child.range()).start.line
-			end_line: tsrange_to_lsp_range(named_child.range()).end.line
-			end_character: tsrange_to_lsp_range(named_child.range()).end.character
-			kind: 'region'
+	for node in analyzer.new_tree_walker(root_node) {
+		if !node.is_named() {
+			continue
+		}
+
+		match node.type_name() {
+			'import_declaration' {
+				if imports_seen {
+					continue
+				}
+
+				mut last_import := node
+				mut cnode := node.next_named_sibling() or { continue }
+				for cnode.type_name() in ['import_declaration', 'comment'] {
+					if cnode.type_name() == 'import_declaration' {
+						last_import = cnode
+					}
+					cnode = cnode.next_named_sibling() or { break }
+				}
+
+				imports_range := C.TSRange{
+					start_point: node.range().start_point
+					end_point: last_import.range().end_point
+				}
+
+				folding_ranges << create_fold(imports_range, lsp.folding_range_kind_imports)
+				imports_seen = true
+			}
+			'const_declaration' {
+				// if it's multiline declaration prepare region otherwise ignore
+				// not sure if folding const makes sence tho
+				range := node.range()
+				if range.start_point.row != range.end_point.row {
+					folding_ranges << create_fold(range, lsp.folding_range_kind_region)
+				}
+			}
+			'struct_declaration', 'interface_declaration', 'enum_declaration' {
+				// Assumes first element is identifier, second is a *_list (struct_field_declaration_list, interface_spec_list, enum_member_declaration_list)
+				// Propably it would be better to iterate over childs and filer for _list
+				child := node.named_child(u32(1)) or { continue }
+				folding_ranges << create_fold(child.range(), lsp.folding_range_kind_region)
+			}
+			// 'function_declaration' {
+			// 	body_node := node.child_by_field_name('body') or { continue }
+			// 	folding_ranges << create_fold(body_node.range(), 'region')
+			// }
+			'block' {
+				range := node.range()
+				if range.start_point.row != range.end_point.row {
+					folding_ranges << create_fold(range, lsp.folding_range_kind_region)
+				}
+			}
+			'type_initializer' {
+				body_node := node.child_by_field_name('body') or { continue }
+				folding_ranges << create_fold(body_node.range(), 'region')
+			}
+			'comment' {
+				range := node.range()
+				if range.start_point.row != range.end_point.row {
+					// multi line comment
+					folding_ranges << create_fold(range, lsp.folding_range_kind_comment)
+				} else {
+					// single line comment
+					if last_single_comment_range.end_point.row == range.end_point.row - 1
+						&& last_single_comment_range.start_point.column == range.start_point.column {
+						folding_ranges.pop()
+						new_range := C.TSRange{
+							start_point: last_single_comment_range.start_point
+							end_point: range.end_point
+						}
+						last_single_comment_range = new_range
+					} else {
+						last_single_comment_range = range
+					}
+					folding_ranges << create_fold(last_single_comment_range, lsp.folding_range_kind_comment)
+				}
+			}
+			else {}
 		}
 	}
 
@@ -1065,8 +1139,19 @@ fn (mut ls Vls) folding_range(id string, params string) {
 			result: folding_ranges
 		})
 	}
-	unsafe {
-		folding_ranges.free()
+	// unsafe {
+	// 	folding_ranges.free()
+	// }
+}
+
+fn create_fold(tsrange C.TSRange, kind string) lsp.FoldingRange {
+	range := tsrange_to_lsp_range(tsrange)
+	return lsp.FoldingRange{
+		start_line: range.start.line
+		start_character: range.start.character
+		end_line: range.end.line
+		end_character: range.end.character
+		kind: kind
 	}
 }
 
