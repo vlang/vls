@@ -51,18 +51,19 @@ fn (mut ls Vls) did_open(_ string, params string) {
 			continue
 		}
 
-		file_uri := lsp.document_uri_from_path(if file_name.starts_with(project_dir) {
+		file_path := if file_name.starts_with(project_dir) {
 			file_name
 		} else {
 			os.join_path(project_dir, file_name)
-		})
+		}
+		file_uri := lsp.document_uri_from_path(file_path)
 
 		mut has_file := file_uri in ls.files
 		mut should_be_analyzed := has_file
 
 		// Create file only if source does not exist
 		if !has_file {
-			source := if file_uri != uri { os.read_bytes(file_name) or { [] } } else { src.bytes() }
+			source := if file_uri != uri { os.read_bytes(file_path) or { [] } } else { src.bytes() }
 
 			ls.files[file_uri] = File{
 				uri: file_uri
