@@ -6,6 +6,7 @@ import jsonrpc
 import os
 import analyzer
 import strings
+import math
 
 const temp_formatting_file_path = os.join_path(os.temp_dir(), 'vls_temp_formatting.v')
 
@@ -1043,10 +1044,10 @@ fn (mut ls Vls) folding_range(id string, params string) {
 	mut imports_seen := false
 	mut last_single_comment_range := C.TSRange{
 		start_point: C.TSPoint{
-			row: 4294967295
+			row: math.max_u32
 		}
 		end_point: C.TSPoint{
-			row: 4294967295
+			row: math.max_u32
 		}
 	}
 
@@ -1078,25 +1079,14 @@ fn (mut ls Vls) folding_range(id string, params string) {
 				folding_ranges << create_fold(imports_range, lsp.folding_range_kind_imports)
 				imports_seen = true
 			}
-			'const_declaration' {
-				// if it's multiline declaration prepare region otherwise ignore
-				// not sure if folding const makes sence tho
-				range := node.range()
-				if range.start_point.row != range.end_point.row {
-					folding_ranges << create_fold(range, lsp.folding_range_kind_region)
-				}
-			}
-			'struct_declaration', 'interface_declaration', 'enum_declaration' {
-				// Assumes first element is identifier, second is a *_list (struct_field_declaration_list, interface_spec_list, enum_member_declaration_list)
-				// Propably it would be better to iterate over childs and filer for _list
-				child := node.named_child(u32(1)) or { continue }
-				folding_ranges << create_fold(child.range(), lsp.folding_range_kind_region)
+			'struct_field_declaration_list', 'interface_spec_list', 'enum_member_declaration_list' {
+				folding_ranges << create_fold(node.range(), lsp.folding_range_kind_region)
 			}
 			// 'function_declaration' {
 			// 	body_node := node.child_by_field_name('body') or { continue }
 			// 	folding_ranges << create_fold(body_node.range(), 'region')
 			// }
-			'block' {
+			'block', 'const_declaration' {
 				range := node.range()
 				if range.start_point.row != range.end_point.row {
 					folding_ranges << create_fold(range, lsp.folding_range_kind_region)
@@ -1104,7 +1094,7 @@ fn (mut ls Vls) folding_range(id string, params string) {
 			}
 			'type_initializer' {
 				body_node := node.child_by_field_name('body') or { continue }
-				folding_ranges << create_fold(body_node.range(), 'region')
+				folding_ranges << create_fold(body_node.range(), lsp.folding_range_kind_region)
 			}
 			'comment' {
 				range := node.range()
