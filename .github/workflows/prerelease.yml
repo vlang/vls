@@ -10,8 +10,6 @@ jobs:
   build-linux-x64:
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    env:
-      VFLAGS: -cg -cc gcc -gc boehm -cflags -static
     steps:
       - name: Install Boehm GC
         run: sudo apt-get install libgc-dev
@@ -24,12 +22,12 @@ jobs:
         with:
           path: vls
       - name: Build local V
-        run: unset VFLAGS; make && sudo ./v symlink
+        run: make && sudo ./v symlink
       - name: Compile VLS
         run: |
           cd vls
           export VLS_BUILD_COMMIT=$(git rev-parse --short HEAD)
-          v -o vls_linux_x64 cmd/vls
+          v -g -cc gcc -gc boehm -o vls_linux_x64 cmd/vls
           ./vls_linux_x64 version
       - name: Create binary only artifact
         uses: actions/upload-artifact@v2
@@ -40,8 +38,6 @@ jobs:
   build-macos-x64:
     runs-on: macos-latest
     timeout-minutes: 30
-    env:
-      VFLAGS: -cg -cc clang -d static_boehm -gc boehm
     steps:
       - name: Install Boehm GC
         run: brew install bdw-gc
@@ -54,12 +50,12 @@ jobs:
         with:
           path: vls
       - name: Build local V
-        run: unset VFLAGS; make && sudo ./v symlink
+        run: make && sudo ./v symlink
       - name: Compile VLS
         run: |
           cd vls
           export VLS_BUILD_COMMIT=$(git rev-parse --short HEAD)
-          v -o vls_macos_x64 cmd/vls
+          v -g -cc clang -gc boehm -o vls_macos_x64 cmd/vls
           ./vls_macos_x64 version
       - name: Create binary only artifact
         uses: actions/upload-artifact@v2
@@ -70,8 +66,6 @@ jobs:
   build-windows-x64:
     runs-on: windows-2019
     timeout-minutes: 30
-    env:
-      VFLAGS: -cc gcc
     steps:
       - name: Checkout V
         uses: actions/checkout@v2
@@ -89,7 +83,7 @@ jobs:
           cd vls
           export VLS_BUILD_COMMIT=$(git rev-parse --short HEAD)
           echo $VLS_BUILD_COMMIT
-          ../v.exe -cg -gc boehm -cflags -static -o vls_windows_x64.exe cmd/vls
+          ../v.exe -g -cc gcc -gc boehm -cflags -static -o vls_windows_x64.exe cmd/vls
           ./vls_windows_x64.exe version
       - name: Create binary only artifact
         uses: actions/upload-artifact@v2

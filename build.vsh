@@ -34,7 +34,7 @@ if vls_git_hash.exit_code != 0 {
 }
 os.setenv('VLS_BUILD_COMMIT', vls_git_hash.output.trim_space(), true)
 
-cmd := 'v -gc boehm -keepc -cg -showcc -cc $cc cmd/vls -o $full_vls_exec_path'
+cmd := 'v -g -gc boehm -keepc -cc $cc cmd/vls -o $full_vls_exec_path'
 println(cmd)
 ret := system(cmd)
 if ret != 0 {
