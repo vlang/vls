@@ -27,7 +27,7 @@ jobs:
         run: |
           cd vls
           export VLS_BUILD_COMMIT=$(git rev-parse --short HEAD)
-          v -g -cc gcc -d static_boehm -gc boehm -cflags -static -o vls_linux_x64 cmd/vls
+          v -g -cc gcc -gc boehm -o vls_linux_x64 cmd/vls
           ./vls_linux_x64 version
       - name: Create binary only artifact
         uses: actions/upload-artifact@v2
@@ -55,7 +55,7 @@ jobs:
         run: |
           cd vls
           export VLS_BUILD_COMMIT=$(git rev-parse --short HEAD)
-          v -g -cc clang -d static_boehm -gc boehm -o vls_macos_x64 cmd/vls
+          v -g -cc clang -gc boehm -o vls_macos_x64 cmd/vls
           ./vls_macos_x64 version
       - name: Create binary only artifact
         uses: actions/upload-artifact@v2
@@ -83,7 +83,7 @@ jobs:
           cd vls
           export VLS_BUILD_COMMIT=$(git rev-parse --short HEAD)
           echo $VLS_BUILD_COMMIT
-          ../v.exe -g -cc gcc -d static_boehm -gc boehm -cflags -static -o vls_windows_x64.exe cmd/vls
+          ../v.exe -g -cc gcc -gc boehm -cflags -static -o vls_windows_x64.exe cmd/vls
           ./vls_windows_x64.exe version
       - name: Create binary only artifact
         uses: actions/upload-artifact@v2
