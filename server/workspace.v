@@ -94,7 +94,7 @@ fn (mut ls Vls) did_change_watched_files(params string) {
 				} else {
 					// delete symbols
 					file_dir := change.uri.dir_path()
-					for j := 0; i < ls.store.symbols[file_dir].len; {
+					for j := 0; j < ls.store.symbols[file_dir].len; {
 						sym := ls.store.symbols[file_dir][j]
 						if sym.file_path == file_path {
 							ls.store.symbols[file_dir].delete(j)
