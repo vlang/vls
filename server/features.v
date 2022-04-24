@@ -510,7 +510,7 @@ fn (mut builder CompletionBuilder) build_suggestions_from_sym(sym &analyzer.Symb
 	for child_sym in sym.children_syms {
 		if is_selector {
 			if (sym.kind in [.enum_, .struct_] || sym.kind in analyzer.container_symbol_kinds)
-				&& child_sym.kind !in [.field, .function] {
+				&& child_sym.kind !in [.field, .function, .embedded_field] {
 				continue
 			} else if !child_sym.file_path.starts_with(builder.store.cur_dir)
 				&& int(child_sym.access) < int(analyzer.SymbolAccess.public) {
@@ -522,6 +522,10 @@ fn (mut builder CompletionBuilder) build_suggestions_from_sym(sym &analyzer.Symb
 			} else if child_sym.kind == .function && !builder.show_mut_only
 				&& child_sym.is_mutable() {
 				continue
+			}
+
+			if child_sym.kind == .embedded_field {
+				builder.build_suggestions_from_sym(child_sym.return_sym, is_selector)
 			}
 
 			if existing_completion_item := symbol_to_completion_item(child_sym, true) {
