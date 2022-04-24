@@ -1109,7 +1109,7 @@ fn (mut ls Vls) folding_range(id string, params string) {
 					// single line comment
 					if last_single_comment_range.end_point.row == range.end_point.row - 1
 						&& last_single_comment_range.start_point.column == range.start_point.column {
-						folding_ranges.pop()
+						if folding_ranges.len > 0 { folding_ranges.pop() }
 						new_range := C.TSRange{
 							start_point: last_single_comment_range.start_point
 							end_point: range.end_point
