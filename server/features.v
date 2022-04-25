@@ -1051,7 +1051,8 @@ fn (mut ls Vls) folding_range(id string, params string) {
 			row: math.max_u32
 		}
 		end_point: C.TSPoint{
-			row: math.max_u32
+			// -1 to ensure that a source file that starts with a comment is handled correctly
+			row: math.max_u32 - 1
 		}
 	}
 
@@ -1109,7 +1110,8 @@ fn (mut ls Vls) folding_range(id string, params string) {
 					// single line comment
 					if last_single_comment_range.end_point.row == range.end_point.row - 1
 						&& last_single_comment_range.start_point.column == range.start_point.column {
-						if folding_ranges.len > 0 { folding_ranges.pop() }
+						// if folding_ranges.len > 0 { folding_ranges.pop() }
+						folding_ranges.pop()
 						new_range := C.TSRange{
 							start_point: last_single_comment_range.start_point
 							end_point: range.end_point
