@@ -1,7 +1,7 @@
 module server
 
-import lsp
-import json
+// import lsp
+// import json
 
 fn (mut ls Vls) code_lens(id string, params string) {
 	if Feature.code_lens !in ls.enabled_features {

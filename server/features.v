@@ -1051,7 +1051,8 @@ fn (mut ls Vls) folding_range(id string, params string) {
 			row: math.max_u32
 		}
 		end_point: C.TSPoint{
-			row: math.max_u32
+			// -1 to ensure that a source file that starts with a comment is handled correctly
+			row: math.max_u32 - 1
 		}
 	}
 
