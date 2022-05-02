@@ -9,18 +9,15 @@ fn (ls Vls) v_msg_to_diagnostic(from_file_path string, msg string) ?lsp.Diagnost
 		return none
 	}
 
-	line_colon_idx := msg.index_after(':', 2) // deal with `d:/v/...:2:4: error: ...`
-	if line_colon_idx < 0 {
-		return none
-	}
+	line_colon_idx := msg.index_after(':', 2) ? // deal with `d:/v/...:2:4: error: ...`
 	file_path := msg[..line_colon_idx]
 	if !from_file_path.ends_with(file_path) {
 		return error('$file_path != $from_file_path')
 	}
 
-	col_colon_idx := msg.index_after(':', line_colon_idx + 1)
-	colon_sep_idx := msg.index_after(':', col_colon_idx + 1)
-	msg_type_colon_idx := msg.index_after(':', colon_sep_idx + 1)
+	col_colon_idx := msg.index_after_int(':', line_colon_idx + 1)
+	colon_sep_idx := msg.index_after_int(':', col_colon_idx + 1)
+	msg_type_colon_idx := msg.index_after_int(':', colon_sep_idx + 1)
 	if msg_type_colon_idx == -1 || col_colon_idx == -1 || colon_sep_idx == -1 {
 		return error('idx is -1')
 	}
