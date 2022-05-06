@@ -114,3 +114,40 @@ fn test_server() ? {
 		assert err.msg() == 'Method not found.'
 	}
 }
+
+struct TestInterceptor {
+mut:
+	methods_recv []string
+	messages []string
+}
+
+fn (mut t TestInterceptor) on_request(req &jsonrpc.Request) ? {
+	t.methods_recv << req.method
+}
+
+fn (mut t TestInterceptor) on_encoded_response(resp []u8) {
+	t.messages << 'test!'
+}
+
+fn test_interceptor() ? {
+	mut test_inter := &TestInterceptor{}
+	mut socket := &TestSocket{}
+
+	mut server := &jsonrpc.Server{
+		handler: &TestHandler{}
+		interceptors: [test_inter]
+		socket: socket
+	}
+
+	mut client := TestClient{
+		server: server
+		socket: socket
+	}
+
+	client.send<SumParams, RpcResult<int>>('sum', SumParams{ nums: [1,2,4] }) ?
+
+	assert test_inter.methods_recv.len == 1
+	assert test_inter.methods_recv[0] == 'sum'
+	assert test_inter.messages.len == 1
+	assert test_inter.messages[0] == 'test!'
+}

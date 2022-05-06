@@ -7,6 +7,7 @@ import io
 pub struct Server {
 mut:
 	socket  io.ReaderWriter
+	interceptors []Interceptor
 	handler Handler
 
 	// internal fields
@@ -22,9 +23,7 @@ fn (s Server) process_raw_request(raw_request string) ?Request {
 // for testing purposes only
 pub fn (mut s Server) respond() ? {
 	mut base_rw := ResponseWriter{
-		writer: Writer{
-			read_writer: s.socket
-		}
+		writer: s.writers()
 		sb: s.res_buf
 	}
 
@@ -40,6 +39,12 @@ fn (mut s Server) internal_respond(mut base_rw ResponseWriter) ? {
 	req := s.process_raw_request(s.req_buf.str()) or {
 		base_rw.write_error(response_error(parse_error))
 		return err
+	}
+
+	for mut interceptor in s.interceptors {
+		interceptor.on_request(&req) or {
+			return err
+		}
 	}
 
 	mut rw := ResponseWriter{
@@ -58,11 +63,22 @@ fn (mut s Server) internal_respond(mut base_rw ResponseWriter) ? {
 	}
 }
 
+fn (s &Server) writers() io.Writer {
+	return io.MultiWriter {
+		writers: [
+			InterceptorWriter{
+				interceptors: s.interceptors
+			},
+			Writer{
+				read_writer: s.socket
+			}
+		]
+	}
+}
+
 pub fn (mut s Server) start() {
 	mut base_rw := ResponseWriter{
-		writer: Writer{
-			read_writer: s.socket
-		}
+		writer: s.writers()
 		sb: s.res_buf
 	}
 
@@ -71,6 +87,12 @@ pub fn (mut s Server) start() {
 			continue
 		}
 	}
+}
+
+pub interface Interceptor {
+mut:
+	on_request(req &Request) ?
+	on_encoded_response(resp []u8) // we cant use generic methods without marking the interface as generic
 }
 
 pub interface Handler {
@@ -124,4 +146,22 @@ mut:
 
 fn (mut w Writer) write(byt []u8) ?int {
 	return w.read_writer.write(byt)
+}
+
+struct InterceptorWriter {
+mut:
+	is_conlen bool = true
+	interceptors []Interceptor
+}
+
+fn (mut wr InterceptorWriter) write(buf []u8) ?int {
+	if wr.is_conlen {
+		wr.is_conlen = false
+		return 0
+	}
+
+	for mut interceptor in wr.interceptors {
+		interceptor.on_encoded_response(buf)
+	}
+	return buf.len
 }
