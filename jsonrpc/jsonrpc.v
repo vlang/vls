@@ -2,6 +2,7 @@ module jsonrpc
 
 import json
 import strings
+import io
 
 pub const (
 	// see http://xmlrpc-epi.sourceforge.net/specs/rfc.fault_codes.php
@@ -28,6 +29,14 @@ pub mut:
 	params  string [raw]
 }
 
+pub fn (req Request) json() string {
+	return '{"jsonrpc":"$jsonrpc.version","id":$req.id,"method":"$req.method","params":$req.params}'
+}
+
+pub fn (req Request) decode_params<T>() ?T {
+	return json.decode(T, req.params)
+}
+
 pub struct Response<T> {
 pub:
 	jsonrpc string = jsonrpc.version
@@ -42,19 +51,30 @@ pub fn (resp Response<T>) json() string {
 	defer {
 		unsafe { resp_wr.free() }
 	}
-	resp_wr.write_string('{"jsonrpc":"$jsonrpc.version","id":$resp.id')
+
+	encode_response<T>(resp, mut resp_wr)
+	return resp_wr.str()
+}
+
+const null_in_u8 = 'null'.bytes()
+const error_field_in_u8 = ',"error":'.bytes()
+const result_field_in_u8 = ',"result":'.bytes()
+
+fn encode_response<T>(resp Response<T>, mut writer io.Writer) {
+	writer.write('{"jsonrpc":"$jsonrpc.version","id":$resp.id'.bytes()) or {}
 	if resp.id.len == 0 {
-		resp_wr.write_string('null')
+		writer.write(null_in_u8) or {}
 	}
 	if resp.error.code != 0 {
 		err := json.encode(resp.error)
-		resp_wr.write_string(',"error":$err')
+		writer.write(error_field_in_u8) or {}
+		writer.write(err.bytes()) or {}
 	} else {
 		res := json.encode(resp.result)
-		resp_wr.write_string(',"result":$res')
+		writer.write(result_field_in_u8) or {}
+		writer.write(res.bytes()) or {}
 	}
-	resp_wr.write_byte(`}`)
-	return resp_wr.str()
+	writer.write([u8(`}`)]) or {}
 }
 
 pub struct NotificationMessage<T> {
@@ -74,8 +94,20 @@ pub mut:
 	data    string
 }
 
+pub fn (err ResponseError) code() int {
+	return err.code
+}
+
+pub fn (err ResponseError) msg() string {
+	return err.message
+}
+
+pub fn (e ResponseError) err() IError {
+	return IError(e)
+}
+
 [inline]
-pub fn new_response_error(err_code int) ResponseError {
+pub fn response_error(err_code int) ResponseError {
 	return ResponseError{
 		code: err_code
 		message: err_message(err_code)
