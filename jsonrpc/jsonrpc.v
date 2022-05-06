@@ -1,6 +1,7 @@
 module jsonrpc
 
 import json
+import jsonrpc
 import strings
 import io
 
@@ -20,6 +21,10 @@ pub const (
 	unknown_error          = -32001
 	server_error_end       = -32000
 )
+
+struct Null {}
+
+pub const null = Null{}
 
 pub struct Request {
 pub mut:
@@ -51,7 +56,6 @@ pub fn (resp Response<T>) json() string {
 	defer {
 		unsafe { resp_wr.free() }
 	}
-
 	encode_response<T>(resp, mut resp_wr)
 	return resp_wr.str()
 }
@@ -61,18 +65,24 @@ const error_field_in_u8 = ',"error":'.bytes()
 const result_field_in_u8 = ',"result":'.bytes()
 
 fn encode_response<T>(resp Response<T>, mut writer io.Writer) {
-	writer.write('{"jsonrpc":"$jsonrpc.version","id":$resp.id'.bytes()) or {}
+	writer.write('{"jsonrpc":"$jsonrpc.version","id":'.bytes()) or {}
 	if resp.id.len == 0 {
 		writer.write(null_in_u8) or {}
+	} else {
+		writer.write(resp.id.bytes()) or {}
 	}
 	if resp.error.code != 0 {
 		err := json.encode(resp.error)
 		writer.write(error_field_in_u8) or {}
 		writer.write(err.bytes()) or {}
 	} else {
-		res := json.encode(resp.result)
 		writer.write(result_field_in_u8) or {}
-		writer.write(res.bytes()) or {}
+		if typeof(resp.result).name == 'jsonrpc.Null' {
+			writer.write(null_in_u8) or {}
+		} else {
+			res := json.encode(resp.result)
+			writer.write(res.bytes()) or {}
+		}
 	}
 	writer.write([u8(`}`)]) or {}
 }
@@ -84,7 +94,23 @@ pub struct NotificationMessage<T> {
 }
 
 pub fn (notif NotificationMessage<T>) json() string {
-	return json.encode(notif)
+	mut notif_wr := strings.new_builder(100)
+	defer {
+		unsafe { notif_wr.free() }
+	}
+	encode_notification<T>(notif, mut notif_wr)
+	return notif_wr.str()
+}
+
+fn encode_notification<T>(notif jsonrpc.NotificationMessage<T>, mut writer io.Writer) {
+	writer.write('{"jsonrpc":"$jsonrpc.version","method":"$notif.method","params":'.bytes()) or {}
+	$if notif.params is Null {
+		writer.write(null_in_u8) or {}
+	} $else {
+		res := json.encode(notif.params)
+		writer.write(res.bytes()) or {}
+	}
+	writer.write([u8(`}`)]) or {}
 }
 
 pub struct ResponseError {

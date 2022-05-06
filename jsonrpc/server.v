@@ -12,6 +12,7 @@ mut:
 
 	// internal fields
 	req_buf strings.Builder = strings.new_builder(200)
+	conlen_buf strings.Builder = strings.new_builder(200)
 	res_buf strings.Builder = strings.new_builder(200)
 }
 
@@ -22,11 +23,7 @@ fn (s Server) process_raw_request(raw_request string) ?Request {
 
 // for testing purposes only
 pub fn (mut s Server) respond() ? {
-	mut base_rw := ResponseWriter{
-		writer: s.writers()
-		sb: s.res_buf
-	}
-
+	mut base_rw := s.writer()
 	return s.internal_respond(mut base_rw)
 }
 
@@ -50,6 +47,7 @@ fn (mut s Server) internal_respond(mut base_rw ResponseWriter) ? {
 	mut rw := ResponseWriter{
 		writer: base_rw.writer
 		sb: base_rw.sb
+		clen_sb: base_rw.clen_sb
 		req_id: req.id
 	}
 
@@ -63,27 +61,27 @@ fn (mut s Server) internal_respond(mut base_rw ResponseWriter) ? {
 	}
 }
 
-fn (s &Server) writers() io.Writer {
-	return io.MultiWriter {
-		writers: [
-			InterceptorWriter{
-				interceptors: s.interceptors
-			},
-			Writer{
-				read_writer: s.stream
-			}
-		]
+pub fn (s &Server) writer() ResponseWriter {
+	return ResponseWriter{
+		writer: io.MultiWriter{
+			writers: [
+				InterceptorWriter{
+					interceptors: s.interceptors
+				},
+				Writer{
+					read_writer: s.stream
+				}
+			]
+		}
+		sb: s.res_buf
+		clen_sb: s.conlen_buf
 	}
 }
 
 pub fn (mut s Server) start() {
-	mut base_rw := ResponseWriter{
-		writer: s.writers()
-		sb: s.res_buf
-	}
-
+	mut rw := s.writer()
 	for {
-		s.internal_respond(mut base_rw) or {
+		s.internal_respond(mut rw) or {
 			continue
 		}
 	}
@@ -102,41 +100,46 @@ mut:
 
 pub struct ResponseWriter {
 	req_id string = 'null' // raw JSON
-	writer io.Writer
+mut:
+	clen_sb strings.Builder
 	sb     strings.Builder
+pub mut:
+	writer io.Writer
 }
 
-pub fn (rw ResponseWriter) write<T>(payload T) {
+fn (mut rw ResponseWriter) close() {
+	rw.clen_sb.write_string('Content-Length: $rw.sb.len\r\n\r\n')
+	rw.clen_sb.write(rw.sb) or {}
+	rw.writer.write(rw.clen_sb) or {}
+	rw.sb.go_back_to(0)
+	rw.clen_sb.go_back_to(0)
+}
+
+pub fn (mut rw ResponseWriter) write<T>(payload T) {
 	final_resp := jsonrpc.Response<T>{
 		id: rw.req_id
 		result: payload
 	}
-
-	mut wr := rw.writer
-	mut builder := rw.sb
-	defer { unsafe { builder.free() } }
-
-	encode_response<T>(final_resp, mut builder)
-	write_response(builder.clone(), mut wr)
+	encode_response<T>(final_resp, mut rw.sb)
+	rw.close()
 }
 
-pub fn write_response(buf []u8, mut wr io.Writer) {
-	wr.write('Content-Length: $buf.len\r\n\r\n'.bytes()) or {}
-	wr.write(buf) or {}
+pub fn (mut rw ResponseWriter) write_notify<T>(method string, params T) {
+	notif := jsonrpc.NotificationMessage<T>{
+		method: method
+		params: params
+	}
+	encode_notification<T>(notif, mut rw.sb)
+	rw.close()
 }
 
-pub fn (rw ResponseWriter) write_error(err &ResponseError) {
+pub fn (mut rw ResponseWriter) write_error(err &ResponseError) {
 	final_resp := jsonrpc.Response<string>{
 		id: rw.req_id
 		error: err
 	}
-
-	mut wr := rw.writer
-	mut builder := rw.sb
-	defer { unsafe { builder.free() } }
-
-	encode_response<string>(final_resp, mut builder)
-	write_response(builder, mut wr)
+	encode_response<string>(final_resp, mut rw.sb)
+	rw.close()
 }
 
 struct Writer {
@@ -150,16 +153,10 @@ fn (mut w Writer) write(byt []u8) ?int {
 
 struct InterceptorWriter {
 mut:
-	is_conlen bool = true
 	interceptors []Interceptor
 }
 
 fn (mut wr InterceptorWriter) write(buf []u8) ?int {
-	if wr.is_conlen {
-		wr.is_conlen = false
-		return 0
-	}
-
 	for mut interceptor in wr.interceptors {
 		interceptor.on_encoded_response(buf)
 	}
