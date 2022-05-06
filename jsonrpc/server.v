@@ -6,7 +6,7 @@ import io
 
 pub struct Server {
 mut:
-	socket  io.ReaderWriter
+	stream  io.ReaderWriter
 	interceptors []Interceptor
 	handler Handler
 
@@ -31,7 +31,7 @@ pub fn (mut s Server) respond() ? {
 }
 
 fn (mut s Server) internal_respond(mut base_rw ResponseWriter) ? {
-	s.socket.read(mut s.req_buf) or {
+	s.stream.read(mut s.req_buf) or {
 		unsafe { s.req_buf.free() }
 		return err
 	}
@@ -70,7 +70,7 @@ fn (s &Server) writers() io.Writer {
 				interceptors: s.interceptors
 			},
 			Writer{
-				read_writer: s.socket
+				read_writer: s.stream
 			}
 		]
 	}

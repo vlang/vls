@@ -5,13 +5,13 @@ import datatypes
 struct TestClient {
 mut:
 	id int
-	socket &TestSocket
+	stream &TestStream
 	server &jsonrpc.Server
 }
 
 fn (mut tc TestClient) send<T,U>(method string, params T) ?U {
-	if tc.socket.resp_buf.len != 0 {
-		tc.socket.resp_buf.clear()
+	if tc.stream.resp_buf.len != 0 {
+		tc.stream.resp_buf.clear()
 	}
 
 	params_json := json.encode(params)
@@ -21,9 +21,9 @@ fn (mut tc TestClient) send<T,U>(method string, params T) ?U {
 		params: params_json
 	}
 
-	tc.socket.send(req)
+	tc.stream.send(req)
 	tc.server.respond() ?
-	raw_resp := tc.socket.response_text()
+	raw_resp := tc.stream.response_text()
 	if raw_resp.len == 0 {
 		return none
 	}
@@ -34,29 +34,29 @@ fn (mut tc TestClient) send<T,U>(method string, params T) ?U {
 	return resp
 }
 
-struct TestSocket {
+struct TestStream {
 mut:
 	resp_buf []u8
 	req_buf datatypes.Queue<[]u8>
 }
 
-fn (mut rw TestSocket) read(mut buf []u8) ?int {
+fn (mut rw TestStream) read(mut buf []u8) ?int {
 	req := rw.req_buf.pop() ?
 	buf << req
 	return req.len
 }
 
-fn (mut rw TestSocket) write(buf []u8) ?int {
+fn (mut rw TestStream) write(buf []u8) ?int {
 	rw.resp_buf << buf
 	return buf.len
 }
 
-fn (mut rw TestSocket) send(req jsonrpc.Request) {
+fn (mut rw TestStream) send(req jsonrpc.Request) {
 	req_json := req.json()
 	rw.req_buf.push('Content-Length: $req_json.len\r\n\r\n$req_json'.bytes())
 }
 
-fn (mut rw TestSocket) response_text() string {
+fn (mut rw TestStream) response_text() string {
 	return rw.resp_buf.bytestr()
 }
 
@@ -93,15 +93,15 @@ fn (mut h TestHandler) handle_jsonrpc(req &jsonrpc.Request, mut wr jsonrpc.Respo
 }
 
 fn test_server() ? {
-	mut socket := &TestSocket{}
+	mut stream := &TestStream{}
 	mut server := &jsonrpc.Server{
 		handler: &TestHandler{}
-		socket: socket
+		stream: stream
 	}
 
 	mut client := TestClient{
 		server: server
-		socket: socket
+		stream: stream
 	}
 
 	sum_result := client.send<SumParams, RpcResult<int>>('sum', SumParams{ nums: [1,2,4] }) ?
@@ -131,17 +131,17 @@ fn (mut t TestInterceptor) on_encoded_response(resp []u8) {
 
 fn test_interceptor() ? {
 	mut test_inter := &TestInterceptor{}
-	mut socket := &TestSocket{}
+	mut stream := &TestStream{}
 
 	mut server := &jsonrpc.Server{
 		handler: &TestHandler{}
 		interceptors: [test_inter]
-		socket: socket
+		stream: stream
 	}
 
 	mut client := TestClient{
 		server: server
-		socket: socket
+		stream: stream
 	}
 
 	client.send<SumParams, RpcResult<int>>('sum', SumParams{ nums: [1,2,4] }) ?
