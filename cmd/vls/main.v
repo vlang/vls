@@ -3,70 +3,71 @@ module main
 import cli
 import server
 import os
+import io
+import jsonrpc
 
 fn run_cli(cmd cli.Command) ? {
-	mut run_as_child := cmd.flags.get_bool('child') or { false }
+	// mut run_as_child := cmd.flags.get_bool('child') or { false }
+	mut run_as_child := true
 	$if windows {
 		run_as_child = true
 	}
 	if run_as_child {
 		run_server(cmd) ?
 	} else {
-		should_generate_report := cmd.flags.get_bool('generate-report') or { false }
-		flag_discriminator := if cmd.posix_mode { '--' } else { '-' }
-		mut server_args := [flag_discriminator + 'child']
-		for flag in cmd.flags {
-			match flag.name {
-				'enable', 'disable', 'vroot' {
-					flag_value := cmd.flags.get_string(flag.name) or { continue }
-					if flag_value.len == 0 {
-						continue
-					}
-					server_args << flag_discriminator + flag.name
-					server_args << flag_value
-				}
-				'debug' {
-					flag_value := cmd.flags.get_bool(flag.name) or { continue }
-					if !flag_value {
-						continue
-					}
-					server_args << flag_discriminator + flag.name
-				}
-				'timeout' {
-					flag_value := cmd.flags.get_int(flag.name) or { continue }
-					if flag_value == 0 {
-						continue
-					}
-					server_args << flag_discriminator + flag.name
-					server_args << flag_value.str()
-				}
-				else {}
-			}
-		}
+		// TODO: make vlshost a jsonrpc handler
+		// should_generate_report := cmd.flags.get_bool('generate-report') or { false }
+		// flag_discriminator := if cmd.posix_mode { '--' } else { '-' }
+		// mut server_args := [flag_discriminator + 'child']
+		// for flag in cmd.flags {
+		// 	match flag.name {
+		// 		'enable', 'disable', 'vroot' {
+		// 			flag_value := cmd.flags.get_string(flag.name) or { continue }
+		// 			if flag_value.len == 0 {
+		// 				continue
+		// 			}
+		// 			server_args << flag_discriminator + flag.name
+		// 			server_args << flag_value
+		// 		}
+		// 		'debug' {
+		// 			flag_value := cmd.flags.get_bool(flag.name) or { continue }
+		// 			if !flag_value {
+		// 				continue
+		// 			}
+		// 			server_args << flag_discriminator + flag.name
+		// 		}
+		// 		'timeout' {
+		// 			flag_value := cmd.flags.get_int(flag.name) or { continue }
+		// 			if flag_value == 0 {
+		// 				continue
+		// 			}
+		// 			server_args << flag_discriminator + flag.name
+		// 			server_args << flag_value.str()
+		// 		}
+		// 		else {}
+		// 	}
+		// }
 
-		mut host := VlsHost{
-			io: setup_and_configure_io(cmd)
-			child: new_vls_process(...server_args)
-			generate_report: should_generate_report
-		}
+		// io := setup_and_configure_io(cmd) ?
 
-		host.run()
+		// mut host := VlsHost{
+		// 	io: io
+		// 	child: new_vls_process(...server_args)
+		// 	generate_report: should_generate_report
+		// }
+
+		// host.run()
 	}
 }
 
-fn setup_and_configure_io(cmd cli.Command) server.ReceiveSender {
+fn setup_and_configure_io(cmd cli.Command) ?io.ReaderWriter {
 	socket_mode := cmd.flags.get_bool('socket') or { false }
-	debug_mode := cmd.flags.get_bool('debug') or { false }
+	// debug_mode := cmd.flags.get_bool('debug') or { false }
 	if socket_mode {
 		socket_port := cmd.flags.get_int('port') or { 5007 }
-		return Socket{
-			port: socket_port
-			debug: debug_mode
-		}
+		return new_socket_stream(socket_port)
 	} else {
-		return Stdio{
-			debug: debug_mode
-		}
+		return new_stdio_stream()
 	}
 }
 
@@ -84,8 +85,12 @@ fn run_server(cmd cli.Command) ? {
 	custom_vroot_path := cmd.flags.get_string('vroot') or { '' }
 
 	// Setup the comm method and build the language server.
-	mut io := setup_and_configure_io(cmd)
-	mut ls := server.new(io)
+	mut io := setup_and_configure_io(cmd) ?
+	mut ls := server.new()
+	mut jrpc_server := jsonrpc.Server{
+		stream: io
+		handler: ls
+	}
 
 	if timeout_minutes_val := cmd.flags.get_int('timeout') {
 		if timeout_minutes_val < 0 {
@@ -108,7 +113,14 @@ fn run_server(cmd cli.Command) ? {
 
 	ls.set_features(enable_features, true) ?
 	ls.set_features(disable_features, false) ?
-	ls.start_loop()
+
+	mut rw := server.ResponseWriter(jrpc_server.writer())
+
+	// Show message that VLS is not yet ready!
+	rw.show_message('VLS is a work-in-progress, pre-alpha language server. It may not be guaranteed to work reliably due to memory issues and other related factors. We encourage you to submit an issue if you encounter any problems.',
+		.warning)
+
+	jrpc_server.start()
 }
 
 fn main() {

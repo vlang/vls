@@ -1,6 +1,5 @@
 module server
 
-import jsonrpc
 import lsp
 import term
 
@@ -86,7 +85,7 @@ fn (mut ls Vls) exec_v_diagnostics(uri lsp.DocumentUri) ?[]lsp.Diagnostic {
 }
 
 // show_diagnostics converts the file ast's errors and warnings and publishes them to the editor
-fn (mut ls Vls) show_diagnostics(uri lsp.DocumentUri) {
+fn (mut ls Vls) show_diagnostics(uri lsp.DocumentUri, mut wr ResponseWriter) {
 	// TODO: make reports as a map, do not clear it
 	// use
 	mut diagnostics := []lsp.Diagnostic{}
@@ -110,20 +109,16 @@ fn (mut ls Vls) show_diagnostics(uri lsp.DocumentUri) {
 		}
 	}
 
-	ls.publish_diagnostics(uri, diagnostics)
+	publish_diagnostics(uri, diagnostics, mut wr)
 }
 
 // publish_diagnostics sends errors, warnings and other diagnostics to the editor
-fn (mut ls Vls) publish_diagnostics(uri lsp.DocumentUri, diagnostics []lsp.Diagnostic) {
-	if Feature.diagnostics !in ls.enabled_features {
-		return
-	}
-
-	ls.notify(jsonrpc.NotificationMessage<lsp.PublishDiagnosticsParams>{
-		method: 'textDocument/publishDiagnostics'
-		params: lsp.PublishDiagnosticsParams{
-			uri: uri
-			diagnostics: diagnostics
-		}
+fn publish_diagnostics(uri lsp.DocumentUri, diagnostics []lsp.Diagnostic, mut wr ResponseWriter) {
+	// if Feature.diagnostics !in wr.enabled_features {
+	// 	return
+	// }
+	wr.write_notify('textDocument/publishDiagnostics', lsp.PublishDiagnosticsParams{
+		uri: uri
+		diagnostics: diagnostics
 	})
 }

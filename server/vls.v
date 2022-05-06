@@ -1,6 +1,5 @@
 module server
 
-import json
 import jsonrpc
 import lsp
 import lsp.log
@@ -109,19 +108,14 @@ mut:
 	shutdown_timeout time.Duration = 5 * time.minute
 	client_pid       int
 	// client_capabilities lsp.ClientCapabilities
-pub mut:
-	// TODO: replace with io.ReadWriter
-	io ReceiveSender
 }
 
-pub fn new(io ReceiveSender) Vls {
+pub fn new() Vls {
 	mut parser := tree_sitter.new_parser()
 	parser.set_language(v.language)
 
 	inst := Vls{
-		io: io
 		parser: parser
-		debug: io.debug
 		logger: log.new(.text)
 		store: analyzer.Store{}
 	}
@@ -133,11 +127,7 @@ pub fn new(io ReceiveSender) Vls {
 	return inst
 }
 
-pub fn (mut ls Vls) dispatch(payload string) {
-	request := json.decode(jsonrpc.Request, payload) or {
-		ls.send(new_error(jsonrpc.parse_error, ''))
-		return
-	}
+pub fn (mut ls Vls) handle_jsonrpc(request &jsonrpc.Request, mut wr jsonrpc.ResponseWriter) ? {
 	// The server will log a send request/notification
 	// log based on the the received payload since the spec
 	// doesn't indicate a way to log on the client side and
@@ -147,9 +137,9 @@ pub fn (mut ls Vls) dispatch(payload string) {
 	// if its a notification or a request payload by checking
 	// if the ID is empty.
 	if request.id.len == 0 {
-		ls.logger.notification(payload, .receive)
+		// ls.logger.notification(payload, .receive)
 	} else {
-		ls.logger.request(payload, .receive)
+		// ls.logger.request(payload, .receive)
 	}
 
 	if request.method == 'shutdown' {
@@ -157,7 +147,7 @@ pub fn (mut ls Vls) dispatch(payload string) {
 		// a shutdown request is allowed before server init
 		// but we'll just put it here since we want to formally
 		// shutdown the server after a certain timeout period.
-		ls.shutdown(request.id)
+		ls.shutdown(request.id, mut wr)
 	} else if ls.status == .initialized {
 		match request.method {
 			// not only requests but also notifications
@@ -167,52 +157,54 @@ pub fn (mut ls Vls) dispatch(payload string) {
 				// ls.exit()
 			}
 			'textDocument/didOpen' {
-				ls.did_open(request.id, request.params)
+				ls.did_open(request.id, request.params, mut wr)
 			}
 			'textDocument/didSave' {
-				ls.did_save(request.id, request.params)
+				ls.did_save(request.id, request.params, mut wr)
 			}
 			'textDocument/didChange' {
 				ls.typing_ch <- 1
-				ls.did_change(request.id, request.params)
+				ls.did_change(request.id, request.params, mut wr)
 			}
 			'textDocument/didClose' {
-				ls.did_close(request.id, request.params)
+				ls.did_close(request.id, request.params, mut wr)
 			}
 			'textDocument/formatting' {
-				ls.formatting(request.id, request.params)
+				ls.formatting(request.id, request.params, mut wr)
 			}
 			'textDocument/documentSymbol' {
-				ls.document_symbol(request.id, request.params)
+				ls.document_symbol(request.id, request.params, mut wr)
 			}
 			'workspace/symbol' {
-				ls.workspace_symbol(request.id, request.params)
+				ls.workspace_symbol(request.id, request.params, mut wr)
 			}
 			'textDocument/signatureHelp' {
-				ls.signature_help(request.id, request.params)
+				ls.signature_help(request.id, request.params, mut wr)
 			}
 			'textDocument/completion' {
-				ls.completion(request.id, request.params)
+				ls.completion(request.id, request.params, mut wr)
 			}
 			'textDocument/hover' {
-				ls.hover(request.id, request.params)
+				ls.hover(request.id, request.params, mut wr)
 			}
 			'textDocument/foldingRange' {
-				ls.folding_range(request.id, request.params)
+				ls.folding_range(request.id, request.params, mut wr)
 			}
 			'textDocument/definition' {
-				ls.definition(request.id, request.params)
+				ls.definition(request.id, request.params, mut wr)
 			}
 			'textDocument/implementation' {
-				ls.implementation(request.id, request.params)
+				ls.implementation(request.id, request.params, mut wr)
 			}
 			'workspace/didChangeWatchedFiles' {
-				ls.did_change_watched_files(request.params)
+				ls.did_change_watched_files(request.params, mut wr)
 			}
 			'textDocument/codeLens' {
-				ls.code_lens(request.id, request.params)
+				ls.code_lens(request.id, request.params, mut wr)
 			}
-			else {}
+			else {
+				return jsonrpc.response_error(jsonrpc.method_not_found).err()
+			}
 		}
 	} else {
 		match request.method {
@@ -220,7 +212,7 @@ pub fn (mut ls Vls) dispatch(payload string) {
 				ls.exit()
 			}
 			'initialize' {
-				ls.initialize(request.id, request.params)
+				ls.initialize(request.id, request.params, mut wr)
 			}
 			else {
 				err_type := if ls.status == .shutdown {
@@ -228,7 +220,7 @@ pub fn (mut ls Vls) dispatch(payload string) {
 				} else {
 					jsonrpc.server_not_initialized
 				}
-				ls.send(new_error(err_type, request.id))
+				return jsonrpc.response_error(err_type).err()
 			}
 		}
 	}
@@ -267,44 +259,26 @@ fn (ls Vls) log_path() string {
 }
 
 // panic generates a log report and exits the language server.
-fn (mut ls Vls) panic(message string) {
+fn (mut ls Vls) panic(message string, mut wr ResponseWriter) {
 	ls.panic_count++
 
 	// NB: Would 2 be enough to exit?
 	if ls.panic_count == 2 {
 		log_path := ls.setup_logger() or {
-			ls.show_message(err.msg(), .error)
+			wr.show_message(err.msg(), .error)
 			return
 		}
 
-		ls.show_message('VLS Panic: ${message}. Log saved to ${os.real_path(log_path)}. Please refer to https://github.com/vlang/vls#error-reporting for more details.',
+		wr.show_message('VLS Panic: ${message}. Log saved to ${os.real_path(log_path)}. Please refer to https://github.com/vlang/vls#error-reporting for more details.',
 			.error)
 		ls.logger.close()
 		ls.exit()
 	} else {
-		ls.log_message('VLS: An error occurred. Message: $message', .error)
+		wr.log_message('VLS: An error occurred. Message: $message', .error)
 	}
 }
 
-fn (mut ls Vls) send<T>(resp jsonrpc.Response<T>) {
-	str := resp.json()
-	ls.logger.response(str, .send)
-	ls.io.send(str)
-}
-
-// notify sends a notification to the client
-fn (mut ls Vls) notify<T>(data jsonrpc.NotificationMessage<T>) {
-	str := data.json()
-	ls.logger.notification(str, .send)
-	ls.io.send(str)
-}
-
-// send_null sends a null result to the client
-fn (mut ls Vls) send_null(id string) {
-	str := '{"jsonrpc":"$jsonrpc.version","id":$id,"result":null}'
-	ls.logger.response(str, .send)
-	ls.io.send(str)
-}
+pub type ResponseWriter = jsonrpc.ResponseWriter
 
 fn monitor_changes(mut ls Vls) {
 	mut timeout_sw := time.new_stopwatch()
@@ -321,36 +295,21 @@ fn monitor_changes(mut ls Vls) {
 					timeout_sw.stop()
 				} else if ls.status == .off && ls.shutdown_timeout != 0
 					&& timeout_sw.elapsed() >= ls.shutdown_timeout {
-					ls.shutdown('')
+					// ls.shutdown('', mut resp_wr)
 				}
 
 				if ls.client_pid != 0 && !is_proc_exists(ls.client_pid) {
-					ls.shutdown('')
+					// ls.shutdown('', mut resp_wr)
 				} else if !ls.is_typing {
 					continue
 				}
 
 				uri := lsp.document_uri_from_path(ls.store.cur_file_path)
 				ls.analyze_file(ls.files[uri])
-				ls.show_diagnostics(uri)
+				// ls.show_diagnostics(uri)
 				ls.is_typing = false
 			}
 		}
-	}
-}
-
-// start_loop starts an endless loop which waits for stdin and prints responses to the stdout
-pub fn (mut ls Vls) start_loop() {
-	go monitor_changes(mut ls)
-	ls.io.init() or { panic(err) }
-
-	// Show message that VLS is not yet ready!
-	ls.show_message('VLS is a work-in-progress, pre-alpha language server. It may not be guaranteed to work reliably due to memory issues and other related factors. We encourage you to submit an issue if you encounter any problems.',
-		.warning)
-
-	for {
-		payload := ls.io.receive() or { continue }
-		ls.dispatch(payload)
 	}
 }
 
@@ -397,14 +356,6 @@ pub enum ServerStatus {
 	off
 	initialized
 	shutdown
-}
-
-[inline]
-fn new_error(code int, id string) jsonrpc.Response<string> {
-	return jsonrpc.Response<string>{
-		id: id
-		error: jsonrpc.new_response_error(code)
-	}
 }
 
 pub fn detect_vroot_path() ?string {

@@ -2,8 +2,9 @@ module server
 
 // import lsp
 // import json
+import jsonrpc
 
-fn (mut ls Vls) code_lens(id string, params string) {
+fn (mut ls Vls) code_lens(id string, params string, mut wr ResponseWriter) {
 	if Feature.code_lens !in ls.enabled_features {
 		return
 	}
@@ -14,5 +15,5 @@ fn (mut ls Vls) code_lens(id string, params string) {
 	// }
 
 	// TODO: compute codelenses, for now return empty result
-	ls.send_null(id)
+	wr.write(jsonrpc.null)
 }
