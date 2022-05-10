@@ -1,0 +1,24 @@
+struct Foo {
+mut:
+    names []string
+}
+
+fn (f &Foo) get_all_names() []string {
+    return f.names
+}
+
+fn (mut f Foo) insert_name() []string {
+    f.names << 'test'
+    names := f.get_all_names()
+    return names
+}
+
+---
+
+(struct Foo [0,7]-[0,10] 
+    (mut field names []string [2,4]-[2,9]) 
+    (function get_all_names []string [5,12]-[5,25] 
+        (variable f &Foo [5,4]-[5,5]))
+    (function insert_name []string [9,15]-[9,26] 
+        (mut variable f Foo [9,8]-[9,9])
+        (variable names []string [11,4]-[11,9])))

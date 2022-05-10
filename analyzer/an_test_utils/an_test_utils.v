@@ -37,7 +37,7 @@ fn sexpr_str_write_symbol(mut writer strings.Builder, sym &Symbol) {
 			writer.write_string(sym.return_sym.name + ' ')
 		}
 	}
-	if sym.kind in analyzer.sym_kinds_allowed_to_print_parent && !sym.parent_sym.is_void() {
+	if sym.kind in analyzer.sym_kinds_allowed_to_print_parent && !sym.parent_sym.is_void() && sym.parent_sym.kind != .variable {
 		writer.write_string('(parent ')
 		writer.write_string(sym.parent_sym.kind.str() + ' ')
 		if sym.parent_sym.kind == .function_type {
