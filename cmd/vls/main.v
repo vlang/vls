@@ -5,12 +5,10 @@ import server
 import os
 import io
 import jsonrpc
+import net
 
 fn run_cli(cmd cli.Command) ? {
-	mut run_as_child := cmd.flags.get_bool('child') or { false }
-	$if windows {
-		run_as_child = true
-	}
+	run_as_child := cmd.flags.get_bool('child') or { false }
 	if run_as_child {
 		run_server(cmd) ?
 	} else {
@@ -22,7 +20,9 @@ fn run_host(cmd cli.Command) ? {
 	// TODO: make vlshost a jsonrpc handler
 	should_generate_report := cmd.flags.get_bool('generate-report') or { false }
 	flag_discriminator := if cmd.posix_mode { '--' } else { '-' }
-	mut server_args := [flag_discriminator + 'child']
+	mut server_args := [flag_discriminator + 'child', flag_discriminator + 'socket']
+	mut client_port := 5007
+
 	for flag in cmd.flags {
 		match flag.name {
 			'enable', 'disable', 'vroot' {
@@ -48,6 +48,13 @@ fn run_host(cmd cli.Command) ? {
 				server_args << flag_discriminator + flag.name
 				server_args << flag_value.str()
 			}
+			'port' {
+				client_port = cmd.flags.get_int(flag.name) or { client_port }
+				client_port++
+
+				server_args << flag_discriminator + flag.name
+				server_args << client_port.str()
+			}
 			else {}
 		}
 	}
@@ -63,6 +70,8 @@ fn run_host(cmd cli.Command) ? {
 		server: jrpc_server
 		writer: server.ResponseWriter(jrpc_server.writer())
 		child: new_vls_process(...server_args)
+		client: &net.TcpConn(0)
+		client_port: client_port
 		generate_report: should_generate_report
 	}
 
@@ -75,7 +84,7 @@ fn setup_and_configure_io(cmd cli.Command) ?io.ReaderWriter {
 	// debug_mode := cmd.flags.get_bool('debug') or { false }
 	if socket_mode {
 		socket_port := cmd.flags.get_int('port') or { 5007 }
-		return new_socket_stream(socket_port)
+		return new_socket_stream_server(socket_port)
 	} else {
 		return new_stdio_stream()
 	}

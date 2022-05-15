@@ -83,12 +83,14 @@ fn get_raw_input(file &C.FILE, mut buf []u8) ?int {
 const base_ip = '127.0.0.1'
 
 // Loopback address.
-fn new_socket_stream(port int) ?io.ReaderWriter {
+fn new_socket_stream_server(port int) ?io.ReaderWriter {
+	server_label := 'vls-server'
+
 	// Open the connection.
 	address := '$base_ip:$port'
 	mut listener := net.listen_tcp(.ip, address) ?
 	eprintln(term.yellow('Warning: TCP connection is used primarily for debugging purposes only \n\tand may have performance issues. Use it on your own risk.\n'))
-	println('[vls] : Established connection at $address\n')
+	println('[$server_label] : Established connection at $address\n')
 
 	mut conn := listener.accept() or {
 		listener.close() or {}
@@ -99,19 +101,35 @@ fn new_socket_stream(port int) ?io.ReaderWriter {
 	conn.set_blocking(true) or {}
 
 	mut stream := &SocketStream{
+		log_label: server_label
 		port: port
 		conn: conn
-		listener: listener
 		reader: reader
 	}
 
 	return stream
 }
 
+fn new_socket_stream_client(port int) ?io.ReaderWriter {
+	// Open the connection.
+	address := '$base_ip:$port'
+	mut conn := net.dial_tcp(address) ?
+	mut reader := io.new_buffered_reader(reader: conn, cap: 1024 * 1024)
+	conn.set_blocking(true) or {}
+
+	mut stream := &SocketStream{
+		log_label: 'vls-client'
+		port: port
+		conn: conn
+		reader: reader
+	}
+	return stream
+}
+
 struct SocketStream {
+	log_label string = 'vls'
 mut:
 	conn     &net.TcpConn       = &net.TcpConn(0)
-	listener &net.TcpListener   = &net.TcpListener(0)
 	reader   &io.BufferedReader = voidptr(0)
 pub mut:
 	port  int = 5007
@@ -121,7 +139,7 @@ pub mut:
 pub fn (mut sck SocketStream) write(buf []u8) ?int {
 	// TODO: should be an interceptor
 	$if !test {
-		println('[vls] : ${term.red('Sent data')} : $buf.bytestr()\n')
+		println('[$sck.log_label] : ${term.red('Sent data')} : $buf.bytestr()\n')
 	}
 
 	// if output.starts_with(content_length) {
@@ -145,7 +163,7 @@ pub fn (mut sck SocketStream) read(mut buf []u8) ?int {
 		buf << got_header.bytes()
 		buf << newlines
 		// $if !test {
-		// 	println('[vls] : ${term.green('Received data')} : $got_header')
+		// 	println('[$sck.log_label] : ${term.green('Received data')} : $got_header')
 		// }
 
 		if got_header.len == 0 {
@@ -175,7 +193,7 @@ pub fn (mut sck SocketStream) read(mut buf []u8) ?int {
 	}
 
 	$if !test {
-		println('[vls] : ${term.green('Received data')} : $buf.bytestr()\n')
+		println('[$sck.log_label] : ${term.green('Received data')} : $buf.bytestr()\n')
 	}
 	return conlen + header_len
 }

@@ -5,6 +5,7 @@ import server
 import jsonrpc
 import time
 import strings
+import io
 
 // TODO: fix payloads on single data when sending back to client
 
@@ -66,6 +67,8 @@ mut:
 	server        &jsonrpc.Server
 	writer        server.ResponseWriter
 	child         &os.Process
+	client        io.ReaderWriter
+	client_port   int
 	stderr_logger Logger = Logger{
 		max_log_count: 0
 		with_timestamp: false
@@ -78,7 +81,7 @@ mut:
 	}
 	generate_report bool
 	stdin_chan      chan []u8
-	stdout_chan     chan string
+	stdout_chan     chan []u8
 	stderr_chan     chan string
 }
 
@@ -88,7 +91,14 @@ fn (mut host VlsHost) has_child_exited() bool {
 
 fn (mut host VlsHost) listen() {
 	host.child.run()
+	defer {
+		host.child.wait()
+		host.child.close()
+		host.handle_exit()
+	}
 
+	time.sleep(100 * time.millisecond)
+	host.client = new_socket_stream_client(host.client_port) or { panic(err) }
 	if host.generate_report {
 		host.writer.show_message('VLS: --generate-report has been enabled. The report file will be generated upon exit.', .info)
 	}
@@ -96,37 +106,13 @@ fn (mut host VlsHost) listen() {
 	go host.listen_for_errors()
 	go host.listen_for_output()
 	go host.listen_for_input()
-
 	host.receive_data()
-	host.child.wait()
-	host.child.close()
-	host.handle_exit()
 }
 
 fn (mut host VlsHost) receive_data() {
-	mut stdout_buffer := strings.new_builder(4096)
+	// mut stdout_buffer := strings.new_builder(4096)
 	for !host.has_child_exited() {
 		select {
-			incoming_stdin := <-host.stdin_chan {
-				host.child.stdin_write(incoming_stdin.bytestr())
-				host.server.intercept_raw_request(incoming_stdin) or {
-					host.writer.log_message('[$err.code()] $err.msg()', .error)
-					// do nothing
-				}
-				// host.stdin_logger.writeln(final_payload)
-			}
-			incoming_stdout := <-host.stdout_chan {
-				// 4096 is the maximum length for stdout_read
-				len := stdout_buffer.write(incoming_stdout) or { 0 }
-				if len < 4096 && stdout_buffer.len != 0 {
-
-
-					host.server.stream.write(incoming_stdout) or {}
-					host.server.intercept_encoded_response(incoming_stdout)
-					// host.stdout_logger.writeln(str)
-					stdout_buffer.go_back_to(0)
-				}
-			}
 			incoming_stderr := <-host.stderr_chan {
 				// Set the last_len to the length of the latest entry so that
 				// the last stderr output will be logged into the error report.
@@ -136,20 +122,21 @@ fn (mut host VlsHost) receive_data() {
 	}
 }
 
+
 fn (mut host VlsHost) listen_for_input() {
-	mut buf := []u8{}
+	mut buf := strings.new_builder(1024 * 1024)
 	for !host.has_child_exited() {
 		// STDIN
-		len := host.server.stream.read(mut buf) or {
-			if buf.len != 0 {
-				unsafe { buf.free() }
+		if _ := host.server.stream.read(mut buf) {
+			host.client.write(buf) or {}
+			host.server.intercept_raw_request(buf) or {
+				host.writer.log_message('[$err.code()] $err.msg()', .error)
+				// do nothing
 			}
-			continue
+			// TODO:
+			// host.stdin_logger.writeln(buf)
 		}
-		host.stdin_chan <- buf
-		if len != 0 {
-			unsafe { buf.free() }
-		}
+		buf.go_back_to(0)
 	}
 }
 
@@ -160,8 +147,14 @@ fn (mut host VlsHost) listen_for_errors() {
 }
 
 fn (mut host VlsHost) listen_for_output() {
+	mut buf := strings.new_builder(1024 * 1024)
 	for !host.has_child_exited() {
-		host.stdout_chan <- host.child.stdout_read()
+		if _ := host.client.read(mut buf) {
+			host.server.stream.write(buf) or {}
+			host.server.intercept_encoded_response(buf)
+			// host.stdout_logger.writeln(str)
+		}
+		buf.go_back_to(0)
 	}
 }
 
