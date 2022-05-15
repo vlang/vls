@@ -7,8 +7,6 @@ import time
 import strings
 import io
 
-// TODO: fix payloads on single data when sending back to client
-
 const max_stdio_logging_count = 15
 
 struct Logger {
@@ -133,8 +131,8 @@ fn (mut host VlsHost) listen_for_input() {
 				host.writer.log_message('[$err.code()] $err.msg()', .error)
 				// do nothing
 			}
-			// TODO:
-			// host.stdin_logger.writeln(buf)
+			// TODO: move as interceptor
+			host.stdin_logger.writeln(buf.bytestr())
 		}
 		buf.go_back_to(0)
 	}
@@ -152,7 +150,7 @@ fn (mut host VlsHost) listen_for_output() {
 		if _ := host.client.read(mut buf) {
 			host.server.stream.write(buf) or {}
 			host.server.intercept_encoded_response(buf)
-			// host.stdout_logger.writeln(str)
+			host.stdout_logger.writeln(buf.bytestr())
 		}
 		buf.go_back_to(0)
 	}
