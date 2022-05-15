@@ -154,7 +154,8 @@ fn main() {
 			description: 'Listens and communicates to the server through a TCP socket.'
 		},
 		cli.Flag{
-			flag: .string
+			flag: .int
+			default_value: ['5007'],
 			name: 'port'
 			description: 'Port to use for socket communication. (Default: 5007)'
 		},
@@ -167,7 +168,6 @@ fn main() {
 		cli.Flag{
 			flag: .int
 			name: 'timeout'
-			required: false
 			default_value: ['15']
 			description: 'Number of minutes to be set for timeout/auto-shutdown. After n number of minutes, VLS will automatically shutdown. Set to 0 to disable it.'
 		},
