@@ -121,6 +121,8 @@ mut:
 	messages []string
 }
 
+fn (mut t TestInterceptor) on_raw_request(req []u8) ? {}
+
 fn (mut t TestInterceptor) on_request(req &jsonrpc.Request) ? {
 	t.methods_recv << req.method
 }

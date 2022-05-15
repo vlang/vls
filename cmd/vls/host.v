@@ -2,11 +2,11 @@ module main
 
 import os
 import server
-import lsp
 import jsonrpc
 import time
 import strings
-// import json
+
+// TODO: fix payloads on single data when sending back to client
 
 const max_stdio_logging_count = 15
 
@@ -63,7 +63,8 @@ fn (mut lg Logger) get_text() string {
 
 struct VlsHost {
 mut:
-	io            server.ReceiveSender
+	server        &jsonrpc.Server
+	writer        server.ResponseWriter
 	child         &os.Process
 	stderr_logger Logger = Logger{
 		max_log_count: 0
@@ -76,7 +77,7 @@ mut:
 		reset_builder_on_max_count: true
 	}
 	generate_report bool
-	stdin_chan      chan string
+	stdin_chan      chan []u8
 	stdout_chan     chan string
 	stderr_chan     chan string
 }
@@ -85,20 +86,11 @@ fn (mut host VlsHost) has_child_exited() bool {
 	return !host.child.is_alive() || host.child.status in [.exited, .aborted, .closed]
 }
 
-fn (mut host VlsHost) run() {
-	host.io.init() or { panic(err) }
+fn (mut host VlsHost) listen() {
 	host.child.run()
 
 	if host.generate_report {
-		info := jsonrpc.NotificationMessage<lsp.ShowMessageParams>{
-			method: 'window/showMessage'
-			params: lsp.ShowMessageParams{
-				@type: .info
-				message: 'VLS: --generate-report has been enabled. The report file will be generated upon exit.'
-			}
-		}
-
-		host.io.send(info.json())
+		host.writer.show_message('VLS: --generate-report has been enabled. The report file will be generated upon exit.', .info)
 	}
 
 	go host.listen_for_errors()
@@ -116,17 +108,22 @@ fn (mut host VlsHost) receive_data() {
 	for !host.has_child_exited() {
 		select {
 			incoming_stdin := <-host.stdin_chan {
-				final_payload := make_lsp_payload(incoming_stdin)
-				host.child.stdin_write(final_payload)
-				host.stdin_logger.writeln(final_payload)
+				host.child.stdin_write(incoming_stdin.bytestr())
+				host.server.intercept_raw_request(incoming_stdin) or {
+					host.writer.log_message('[$err.code()] $err.msg()', .error)
+					// do nothing
+				}
+				// host.stdin_logger.writeln(final_payload)
 			}
 			incoming_stdout := <-host.stdout_chan {
 				// 4096 is the maximum length for stdout_read
-				stdout_buffer.write_string(incoming_stdout)
-				if incoming_stdout.len < 4096 && stdout_buffer.len != 0 {
-					str := stdout_buffer.str()
-					host.io.send(str)
-					host.stdout_logger.writeln(str)
+				len := stdout_buffer.write(incoming_stdout) or { 0 }
+				if len < 4096 && stdout_buffer.len != 0 {
+
+
+					host.server.stream.write(incoming_stdout) or {}
+					host.server.intercept_encoded_response(incoming_stdout)
+					// host.stdout_logger.writeln(str)
 					stdout_buffer.go_back_to(0)
 				}
 			}
@@ -140,9 +137,19 @@ fn (mut host VlsHost) receive_data() {
 }
 
 fn (mut host VlsHost) listen_for_input() {
+	mut buf := []u8{}
 	for !host.has_child_exited() {
 		// STDIN
-		host.stdin_chan <- host.io.receive() or { continue }
+		len := host.server.stream.read(mut buf) or {
+			if buf.len != 0 {
+				unsafe { buf.free() }
+			}
+			continue
+		}
+		host.stdin_chan <- buf
+		if len != 0 {
+			unsafe { buf.free() }
+		}
 	}
 }
 
@@ -169,15 +176,7 @@ fn (mut host VlsHost) handle_exit() {
 			panic(err)
 		}
 
-		prompt := jsonrpc.NotificationMessage<lsp.ShowMessageParams>{
-			method: 'window/showMessage'
-			params: lsp.ShowMessageParams{
-				@type: .error
-				message: 'VLS has encountered an error. The error report is saved in $report_path'
-			}
-		}
-
-		host.io.send(prompt.json())
+		host.writer.show_message('VLS has encountered an error. The error report is saved in $report_path', .error)
 	}
 
 	ecode := if host.child.code > 0 { 1 } else { 0 }

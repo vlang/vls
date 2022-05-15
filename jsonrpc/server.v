@@ -6,14 +6,32 @@ import io
 
 pub struct Server {
 mut:
-	stream  io.ReaderWriter
-	interceptors []Interceptor
-	handler Handler
-
 	// internal fields
 	req_buf strings.Builder = strings.new_builder(200)
 	conlen_buf strings.Builder = strings.new_builder(200)
 	res_buf strings.Builder = strings.new_builder(200)
+pub mut:
+	stream  io.ReaderWriter
+	interceptors []Interceptor
+	handler Handler
+}
+
+pub fn (mut s Server) intercept_raw_request(req []u8) ? {
+	for mut interceptor in s.interceptors {
+		interceptor.on_raw_request(req) ?
+	}
+}
+
+pub fn (mut s Server) intercept_request(req &Request) ? {
+	for mut interceptor in s.interceptors {
+		interceptor.on_request(&req) ?
+	}
+}
+
+pub fn (mut s Server) intercept_encoded_response(resp []u8) {
+	for mut interceptor in s.interceptors {
+		interceptor.on_encoded_response(resp)
+	}
 }
 
 fn (s Server) process_raw_request(raw_request string) ?Request {
@@ -38,10 +56,9 @@ fn (mut s Server) internal_respond(mut base_rw ResponseWriter) ? {
 		return err
 	}
 
-	for mut interceptor in s.interceptors {
-		interceptor.on_request(&req) or {
-			return err
-		}
+	s.intercept_request(&req) or {
+		base_rw.write_error(response_error(err.code()))
+		return err
 	}
 
 	mut rw := ResponseWriter{
@@ -62,6 +79,10 @@ fn (mut s Server) internal_respond(mut base_rw ResponseWriter) ? {
 }
 
 pub fn (s &Server) writer() ResponseWriter {
+	// NOTE: writing content lengths should be an interceptor
+	// since there are some situations that a payload is only
+	// passthrough between processes and does not need a
+	// "repackaging" of the outgoing data
 	return ResponseWriter{
 		writer: io.MultiWriter{
 			writers: [
@@ -89,6 +110,7 @@ pub fn (mut s Server) start() {
 
 pub interface Interceptor {
 mut:
+	on_raw_request(req []u8) ?
 	on_request(req &Request) ?
 	on_encoded_response(resp []u8) // we cant use generic methods without marking the interface as generic
 }
@@ -162,3 +184,7 @@ fn (mut wr InterceptorWriter) write(buf []u8) ?int {
 	}
 	return buf.len
 }
+
+pub struct PassiveHandler {}
+
+fn (mut h PassiveHandler) handle_jsonrpc(req &Request, mut rw ResponseWriter) ? {}

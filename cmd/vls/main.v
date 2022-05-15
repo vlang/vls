@@ -7,61 +7,71 @@ import io
 import jsonrpc
 
 fn run_cli(cmd cli.Command) ? {
-	// mut run_as_child := cmd.flags.get_bool('child') or { false }
-	mut run_as_child := true
+	mut run_as_child := cmd.flags.get_bool('child') or { false }
 	$if windows {
 		run_as_child = true
 	}
 	if run_as_child {
 		run_server(cmd) ?
 	} else {
-		// TODO: make vlshost a jsonrpc handler
-		// should_generate_report := cmd.flags.get_bool('generate-report') or { false }
-		// flag_discriminator := if cmd.posix_mode { '--' } else { '-' }
-		// mut server_args := [flag_discriminator + 'child']
-		// for flag in cmd.flags {
-		// 	match flag.name {
-		// 		'enable', 'disable', 'vroot' {
-		// 			flag_value := cmd.flags.get_string(flag.name) or { continue }
-		// 			if flag_value.len == 0 {
-		// 				continue
-		// 			}
-		// 			server_args << flag_discriminator + flag.name
-		// 			server_args << flag_value
-		// 		}
-		// 		'debug' {
-		// 			flag_value := cmd.flags.get_bool(flag.name) or { continue }
-		// 			if !flag_value {
-		// 				continue
-		// 			}
-		// 			server_args << flag_discriminator + flag.name
-		// 		}
-		// 		'timeout' {
-		// 			flag_value := cmd.flags.get_int(flag.name) or { continue }
-		// 			if flag_value == 0 {
-		// 				continue
-		// 			}
-		// 			server_args << flag_discriminator + flag.name
-		// 			server_args << flag_value.str()
-		// 		}
-		// 		else {}
-		// 	}
-		// }
-
-		// io := setup_and_configure_io(cmd) ?
-
-		// mut host := VlsHost{
-		// 	io: io
-		// 	child: new_vls_process(...server_args)
-		// 	generate_report: should_generate_report
-		// }
-
-		// host.run()
+		run_host(cmd) ?
 	}
+}
+
+fn run_host(cmd cli.Command) ? {
+	// TODO: make vlshost a jsonrpc handler
+	should_generate_report := cmd.flags.get_bool('generate-report') or { false }
+	flag_discriminator := if cmd.posix_mode { '--' } else { '-' }
+	mut server_args := [flag_discriminator + 'child']
+	for flag in cmd.flags {
+		match flag.name {
+			'enable', 'disable', 'vroot' {
+				flag_value := cmd.flags.get_string(flag.name) or { continue }
+				if flag_value.len == 0 {
+					continue
+				}
+				server_args << flag_discriminator + flag.name
+				server_args << flag_value
+			}
+			'debug' {
+				flag_value := cmd.flags.get_bool(flag.name) or { continue }
+				if !flag_value {
+					continue
+				}
+				server_args << flag_discriminator + flag.name
+			}
+			'timeout' {
+				flag_value := cmd.flags.get_int(flag.name) or { continue }
+				if flag_value == 0 {
+					continue
+				}
+				server_args << flag_discriminator + flag.name
+				server_args << flag_value.str()
+			}
+			else {}
+		}
+	}
+
+	// Setup the comm method and build the language server.
+	mut io := setup_and_configure_io(cmd) ?
+	mut jrpc_server := &jsonrpc.Server{
+		stream: io
+		handler: &jsonrpc.PassiveHandler{}
+	}
+
+	mut host := VlsHost{
+		server: jrpc_server
+		writer: server.ResponseWriter(jrpc_server.writer())
+		child: new_vls_process(...server_args)
+		generate_report: should_generate_report
+	}
+
+	host.listen()
 }
 
 fn setup_and_configure_io(cmd cli.Command) ?io.ReaderWriter {
 	socket_mode := cmd.flags.get_bool('socket') or { false }
+	// TODO:
 	// debug_mode := cmd.flags.get_bool('debug') or { false }
 	if socket_mode {
 		socket_port := cmd.flags.get_int('port') or { 5007 }
