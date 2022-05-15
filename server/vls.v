@@ -110,11 +110,11 @@ mut:
 	// client_capabilities lsp.ClientCapabilities
 }
 
-pub fn new() Vls {
+pub fn new() &Vls {
 	mut parser := tree_sitter.new_parser()
 	parser.set_language(v.language)
 
-	inst := Vls{
+	inst := &Vls{
 		parser: parser
 		logger: log.new(.text)
 		store: analyzer.Store{}
@@ -280,7 +280,8 @@ fn (mut ls Vls) panic(message string, mut wr ResponseWriter) {
 
 pub type ResponseWriter = jsonrpc.ResponseWriter
 
-fn monitor_changes(mut ls Vls) {
+// TODO: replace resp_wr
+pub fn monitor_changes(mut ls Vls, mut resp_wr ResponseWriter) {
 	mut timeout_sw := time.new_stopwatch()
 	mut timeout_stopped := false
 	for {
@@ -295,11 +296,11 @@ fn monitor_changes(mut ls Vls) {
 					timeout_sw.stop()
 				} else if ls.status == .off && ls.shutdown_timeout != 0
 					&& timeout_sw.elapsed() >= ls.shutdown_timeout {
-					// ls.shutdown('', mut resp_wr)
+					ls.shutdown('', mut resp_wr)
 				}
 
 				if ls.client_pid != 0 && !is_proc_exists(ls.client_pid) {
-					// ls.shutdown('', mut resp_wr)
+					ls.shutdown('', mut resp_wr)
 				} else if !ls.is_typing {
 					continue
 				}

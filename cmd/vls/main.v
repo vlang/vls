@@ -120,6 +120,8 @@ fn run_server(cmd cli.Command) ? {
 	rw.show_message('VLS is a work-in-progress, pre-alpha language server. It may not be guaranteed to work reliably due to memory issues and other related factors. We encourage you to submit an issue if you encounter any problems.',
 		.warning)
 
+	go server.monitor_changes(mut ls, mut &rw)
+
 	jrpc_server.start()
 }
 
