@@ -10,7 +10,7 @@ import net
 fn run_cli(cmd cli.Command) ? {
 	run_as_child := cmd.flags.get_bool('child') or { false }
 	if run_as_child {
-		run_server(cmd) ?
+		run_server(cmd, run_as_child) ?
 	} else {
 		run_host(cmd) ?
 	}
@@ -60,7 +60,7 @@ fn run_host(cmd cli.Command) ? {
 	}
 
 	// Setup the comm method and build the language server.
-	mut io := setup_and_configure_io(cmd) ?
+	mut io := setup_and_configure_io(cmd, false) ?
 	mut jrpc_server := &jsonrpc.Server{
 		stream: io
 		handler: &jsonrpc.PassiveHandler{}
@@ -78,19 +78,19 @@ fn run_host(cmd cli.Command) ? {
 	host.listen()
 }
 
-fn setup_and_configure_io(cmd cli.Command) ?io.ReaderWriter {
+fn setup_and_configure_io(cmd cli.Command, is_child bool) ?io.ReaderWriter {
 	socket_mode := cmd.flags.get_bool('socket') or { false }
 	// TODO:
 	// debug_mode := cmd.flags.get_bool('debug') or { false }
 	if socket_mode {
 		socket_port := cmd.flags.get_int('port') or { 5007 }
-		return new_socket_stream_server(socket_port)
+		return new_socket_stream_server(socket_port, !is_child)
 	} else {
 		return new_stdio_stream()
 	}
 }
 
-fn run_server(cmd cli.Command) ? {
+fn run_server(cmd cli.Command, is_child bool) ? {
 	// Fetch the command-line options.
 	enable_flag_raw := cmd.flags.get_string('enable') or { '' }
 	disable_flag_raw := cmd.flags.get_string('disable') or { '' }
@@ -104,7 +104,7 @@ fn run_server(cmd cli.Command) ? {
 	custom_vroot_path := cmd.flags.get_string('vroot') or { '' }
 
 	// Setup the comm method and build the language server.
-	mut io := setup_and_configure_io(cmd) ?
+	mut io := setup_and_configure_io(cmd, is_child) ?
 	mut ls := server.new()
 	mut jrpc_server := jsonrpc.Server{
 		stream: io

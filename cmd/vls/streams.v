@@ -83,14 +83,17 @@ fn get_raw_input(file &C.FILE, mut buf []u8) ?int {
 const base_ip = '127.0.0.1'
 
 // Loopback address.
-fn new_socket_stream_server(port int) ?io.ReaderWriter {
+fn new_socket_stream_server(port int, log bool) ?io.ReaderWriter {
 	server_label := 'vls-server'
 
 	// Open the connection.
 	address := '$base_ip:$port'
 	mut listener := net.listen_tcp(.ip, address) ?
-	eprintln(term.yellow('Warning: TCP connection is used primarily for debugging purposes only \n\tand may have performance issues. Use it on your own risk.\n'))
-	println('[$server_label] : Established connection at $address\n')
+
+	if log {
+		eprintln(term.yellow('Warning: TCP connection is used primarily for debugging purposes only \n\tand may have performance issues. Use it on your own risk.\n'))
+		println('[$server_label] : Established connection at $address\n')
+	}
 
 	mut conn := listener.accept() or {
 		listener.close() or {}
@@ -102,6 +105,7 @@ fn new_socket_stream_server(port int) ?io.ReaderWriter {
 
 	mut stream := &SocketStream{
 		log_label: server_label
+		log: log
 		port: port
 		conn: conn
 		reader: reader
@@ -128,6 +132,7 @@ fn new_socket_stream_client(port int) ?io.ReaderWriter {
 
 struct SocketStream {
 	log_label string = 'vls'
+	log       bool = true
 mut:
 	conn     &net.TcpConn       = &net.TcpConn(0)
 	reader   &io.BufferedReader = voidptr(0)
