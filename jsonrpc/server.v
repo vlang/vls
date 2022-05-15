@@ -57,7 +57,7 @@ fn (mut s Server) internal_respond(mut base_rw ResponseWriter) ? {
 	}
 
 	s.intercept_request(&req) or {
-		base_rw.write_error(response_error(err.code()))
+		base_rw.write_error(response_error(err))
 		return err
 	}
 

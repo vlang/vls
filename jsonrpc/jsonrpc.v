@@ -6,20 +6,20 @@ import strings
 import io
 
 pub const (
-	// see http://xmlrpc-epi.sourceforge.net/specs/rfc.fault_codes.php
+	// see https://www.jsonrpc.org/specification#error_object
 	version                = '2.0'
-	parse_error            = -32700
+	parse_error            = error_with_code('Invalid JSON.', -32700)
 	//
-	invalid_request        = -32600
-	method_not_found       = -32601
-	invalid_params         = -32602
+	invalid_request        = error_with_code('Invalid request.', -32600)
+	method_not_found       = error_with_code('Method not found.', -32601)
+	invalid_params         = error_with_code('Invalid params', -32602)
 	//
-	internal_error         = -32693
+	internal_error         = error_with_code('Internal error.', -32693)
 	//
-	server_error_start     = -32099
-	server_not_initialized = -32002
-	unknown_error          = -32001
-	server_error_end       = -32000
+	server_error_start     = error_with_code('Error occurred when starting server.', -32099)
+	server_not_initialized = error_with_code('Server not initialized.', -32002)
+	unknown_error          = error_with_code('Unknown error.', -32001)
+	server_error_end       = error_with_code('Error occurred when stopping the server.', -32000)
 )
 
 struct Null {}
@@ -133,29 +133,9 @@ pub fn (e ResponseError) err() IError {
 }
 
 [inline]
-pub fn response_error(err_code int) ResponseError {
+pub fn response_error(err IError) ResponseError {
 	return ResponseError{
-		code: err_code
-		message: err_message(err_code)
+		code: err.code()
+		message: err.msg()
 	}
-}
-
-pub fn err_message(err_code int) string {
-	// can't use error consts in match
-	if err_code == jsonrpc.parse_error {
-		return 'Invalid JSON.'
-	} else if err_code == jsonrpc.invalid_params {
-		return 'Invalid params.'
-	} else if err_code == jsonrpc.invalid_request {
-		return 'Invalid request.'
-	} else if err_code == jsonrpc.method_not_found {
-		return 'Method not found.'
-	} else if err_code == jsonrpc.server_error_start {
-		return 'An error occurred while starting the server.'
-	} else if err_code == jsonrpc.server_error_end {
-		return 'An error occurred while stopping the server.'
-	} else if err_code == jsonrpc.server_not_initialized {
-		return 'Server not yet initialized.'
-	}
-	return 'Unknown error.'
 }
