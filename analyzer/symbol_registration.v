@@ -360,6 +360,9 @@ fn (mut sr SymbolAnalyzer) fn_decl(fn_node C.TSNode) ?&Symbol {
 		if receivers.len != 0 {
 			mut parent := receivers[0].return_sym
 			if !isnil(parent) && !parent.is_void() {
+				if parent.kind == .ref {
+					parent = parent.parent_sym
+				}
 				parent.add_child(mut fn_sym) or {}
 			}
 			fn_sym.parent_sym = receivers[0]
@@ -876,7 +879,7 @@ pub fn (mut sr SymbolAnalyzer) analyze() ([]&Symbol, []Message) {
 			// messages.report(err)
 			continue
 		}
-		for mut sym in syms {
+		for i, mut sym in syms {
 			if sym.kind == .function && !sym.parent_sym.is_void() {
 				continue
 			}
@@ -889,8 +892,9 @@ pub fn (mut sr SymbolAnalyzer) analyze() ([]&Symbol, []Message) {
 			if sym.kind == .variable {
 				global_scope.register(*sym) or { continue }
 			}
+			
+			symbols << syms[i]
 		}
-		symbols << syms
 	}
 	return symbols, messages
 }
