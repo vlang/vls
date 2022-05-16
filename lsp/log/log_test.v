@@ -7,7 +7,7 @@ struct TestLogItem {
 	message string
 }
 
-fn test_notification_send() {
+fn test_notification_send() ? {
 	mut lg := new()
 
 	lg.notification('"Hello!"', .send)
@@ -18,7 +18,7 @@ fn test_notification_send() {
 	assert result.message == 'Hello!'
 }
 
-fn test_notification_receive() {
+fn test_notification_receive() ? {
 	mut lg := new()
 
 	lg.notification('"Received!"', .receive)
@@ -29,7 +29,7 @@ fn test_notification_receive() {
 	assert result.message == 'Received!'
 }
 
-fn test_request_send() {
+fn test_request_send() ? {
 	mut lg := new()
 
 	lg.request('"Request sent."', .send)
@@ -40,7 +40,7 @@ fn test_request_send() {
 	assert result.message == 'Request sent.'
 }
 
-fn test_request_receive() {
+fn test_request_receive() ? {
 	mut lg := new()
 
 	lg.request('"Request received."', .receive)
@@ -51,7 +51,7 @@ fn test_request_receive() {
 	assert result.message == 'Request received.'
 }
 
-fn test_response_send() {
+fn test_response_send() ? {
 	mut lg := new()
 
 	lg.response('"Response sent."', .send)
