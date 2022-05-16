@@ -86,6 +86,10 @@ fn (mut h TestHandler) handle_jsonrpc(req &jsonrpc.Request, mut wr jsonrpc.Respo
 		'hello' {
 			wr.write(RpcResult<string>{'Hello world!'})
 		}
+		'trigger' {
+			wr.server.dispatch_event('record', 'dispatched!') ?
+			wr.write(RpcResult<string>{'triggered'})
+		}
 		else {
 			return jsonrpc.response_error(jsonrpc.method_not_found).err()
 		}
@@ -121,6 +125,12 @@ mut:
 	messages []string
 }
 
+fn (mut t TestInterceptor) on_event(name string, data jsonrpc.InterceptorData) ? {
+	if name == 'record' && data is string {
+		t.messages << data
+	}
+}
+
 fn (mut t TestInterceptor) on_raw_request(req []u8) ? {}
 
 fn (mut t TestInterceptor) on_request(req &jsonrpc.Request) ? {
@@ -147,9 +157,13 @@ fn test_interceptor() ? {
 	}
 
 	client.send<SumParams, RpcResult<int>>('sum', SumParams{ nums: [1,2,4] }) ?
-
 	assert test_inter.methods_recv.len == 1
 	assert test_inter.methods_recv[0] == 'sum'
 	assert test_inter.messages.len == 1
-	assert test_inter.messages[0] == 'test!'
+
+	client.send<string, RpcResult<string>>('trigger', '') ?
+	assert test_inter.methods_recv.len == 2
+	assert test_inter.methods_recv[1] == 'trigger'
+	assert test_inter.messages.len == 3
+	assert test_inter.messages[1] == 'dispatched!'
 }

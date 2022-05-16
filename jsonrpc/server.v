@@ -4,6 +4,7 @@ import json
 import strings
 import io
 
+[heap]
 pub struct Server {
 mut:
 	// internal fields
@@ -24,13 +25,21 @@ pub fn (mut s Server) intercept_raw_request(req []u8) ? {
 
 pub fn (mut s Server) intercept_request(req &Request) ? {
 	for mut interceptor in s.interceptors {
-		interceptor.on_request(&req) ?
+		interceptor.on_request(req) ?
 	}
 }
 
 pub fn (mut s Server) intercept_encoded_response(resp []u8) {
 	for mut interceptor in s.interceptors {
 		interceptor.on_encoded_response(resp)
+	}
+}
+
+pub interface InterceptorData {}
+
+pub fn (mut s Server) dispatch_event(event_name string, data InterceptorData) ? {
+	for mut i in s.interceptors {
+		i.on_event(event_name, data) ?
 	}
 }
 
@@ -62,6 +71,7 @@ fn (mut s Server) internal_respond(mut base_rw ResponseWriter) ? {
 	}
 
 	mut rw := ResponseWriter{
+		server: s
 		writer: base_rw.writer
 		sb: base_rw.sb
 		clen_sb: base_rw.clen_sb
@@ -84,6 +94,7 @@ pub fn (s &Server) writer() ResponseWriter {
 	// passthrough between processes and does not need a
 	// "repackaging" of the outgoing data
 	return ResponseWriter{
+		server: s
 		writer: io.MultiWriter{
 			writers: [
 				InterceptorWriter{
@@ -110,6 +121,7 @@ pub fn (mut s Server) start() {
 
 pub interface Interceptor {
 mut:
+	on_event(name string, data InterceptorData) ?
 	on_raw_request(req []u8) ?
 	on_request(req &Request) ?
 	on_encoded_response(resp []u8) // we cant use generic methods without marking the interface as generic
@@ -126,6 +138,7 @@ mut:
 	clen_sb strings.Builder
 	sb     strings.Builder
 pub mut:
+	server  &Server
 	writer io.Writer
 }
 
