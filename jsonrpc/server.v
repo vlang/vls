@@ -74,7 +74,6 @@ fn (mut s Server) internal_respond(mut base_rw ResponseWriter) ? {
 		server: s
 		writer: base_rw.writer
 		sb: base_rw.sb
-		clen_sb: base_rw.clen_sb
 		req_id: req.id
 	}
 
@@ -89,10 +88,6 @@ fn (mut s Server) internal_respond(mut base_rw ResponseWriter) ? {
 }
 
 pub fn (s &Server) writer() ResponseWriter {
-	// NOTE: writing content lengths should be an interceptor
-	// since there are some situations that a payload is only
-	// passthrough between processes and does not need a
-	// "repackaging" of the outgoing data
 	return ResponseWriter{
 		server: s
 		writer: io.MultiWriter{
@@ -100,13 +95,17 @@ pub fn (s &Server) writer() ResponseWriter {
 				InterceptorWriter{
 					interceptors: s.interceptors
 				},
+				// NOTE: writing content lengths should be an interceptor
+				// since there are some situations that a payload is only
+				// passthrough between processes and does not need a
+				// "repackaging" of the outgoing data
 				Writer{
+					clen_sb: s.conlen_buf
 					read_writer: s.stream
 				}
 			]
 		}
 		sb: s.res_buf
-		clen_sb: s.conlen_buf
 	}
 }
 
@@ -135,7 +134,6 @@ mut:
 pub struct ResponseWriter {
 	req_id string = 'null' // raw JSON
 mut:
-	clen_sb strings.Builder
 	sb     strings.Builder
 pub mut:
 	server  &Server
@@ -143,11 +141,8 @@ pub mut:
 }
 
 fn (mut rw ResponseWriter) close() {
-	rw.clen_sb.write_string('Content-Length: $rw.sb.len\r\n\r\n')
-	rw.clen_sb.write(rw.sb) or {}
-	rw.writer.write(rw.clen_sb) or {}
+	rw.writer.write(rw.sb) or {}
 	rw.sb.go_back_to(0)
-	rw.clen_sb.go_back_to(0)
 }
 
 pub fn (mut rw ResponseWriter) write<T>(payload T) {
@@ -179,11 +174,15 @@ pub fn (mut rw ResponseWriter) write_error(err &ResponseError) {
 
 struct Writer {
 mut:
+	clen_sb     strings.Builder
 	read_writer io.ReaderWriter
 }
 
 fn (mut w Writer) write(byt []u8) ?int {
-	return w.read_writer.write(byt)
+	defer { w.clen_sb.go_back_to(0) }
+	w.clen_sb.write_string('Content-Length: $byt.len\r\n\r\n')
+	w.clen_sb.write(byt) or {}
+	return w.read_writer.write(w.clen_sb)
 }
 
 struct InterceptorWriter {
