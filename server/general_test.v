@@ -102,7 +102,7 @@ fn test_setup_logger() ? {
 	assert params == '{"type":1,"message":"Cannot save log to ${expected_err_path}. Saving log to $expected_alt_log_path"}'
 }
 
-fn init_tests() (&test_utils.Testio, server.Vls) {
+fn init_tests() (&test_utils.Testio, &server.Vls) {
 	mut io := &test_utils.Testio{}
 	mut ls := server.new(io)
 	payload := io.request('initialize')

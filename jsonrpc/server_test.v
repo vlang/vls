@@ -1,74 +1,11 @@
 import jsonrpc
-import json
-import datatypes
-
-struct TestClient {
-mut:
-	id int
-	stream &TestStream
-	server &jsonrpc.Server
-}
-
-fn (mut tc TestClient) send<T,U>(method string, params T) ?U {
-	if tc.stream.resp_buf.len != 0 {
-		tc.stream.resp_buf.clear()
-	}
-
-	params_json := json.encode(params)
-	req := jsonrpc.Request{
-		id: '$tc.id'
-		method: method
-		params: params_json
-	}
-
-	tc.stream.send(req)
-	tc.server.respond() ?
-	raw_resp := tc.stream.response_text()
-	if raw_resp.len == 0 {
-		return none
-	}
-
-	mut raw_json_content := raw_resp.all_after('"result":')
-	raw_json_content = raw_json_content[..raw_json_content.len - 1]
-	resp := json.decode(U, raw_json_content) ?
-	return resp
-}
-
-struct TestStream {
-mut:
-	resp_buf []u8
-	req_buf datatypes.Queue<[]u8>
-}
-
-fn (mut rw TestStream) read(mut buf []u8) ?int {
-	req := rw.req_buf.pop() ?
-	buf << req
-	return req.len
-}
-
-fn (mut rw TestStream) write(buf []u8) ?int {
-	rw.resp_buf << buf
-	return buf.len
-}
-
-fn (mut rw TestStream) send(req jsonrpc.Request) {
-	req_json := req.json()
-	rw.req_buf.push('Content-Length: $req_json.len\r\n\r\n$req_json'.bytes())
-}
-
-fn (mut rw TestStream) response_text() string {
-	return rw.resp_buf.bytestr()
-}
+import jsonrpc.server_test_utils { TestClient, TestStream, RpcResult }
 
 struct TestHandler {}
 
 struct SumParams {
 mut:
 	nums []int
-}
-
-struct RpcResult<T> {
-	result T
 }
 
 fn (mut h TestHandler) handle_jsonrpc(req &jsonrpc.Request, mut wr jsonrpc.ResponseWriter) ? {
