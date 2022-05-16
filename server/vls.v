@@ -102,9 +102,7 @@ mut:
 	typing_ch        chan int
 	enabled_features []Feature = server.default_features_list
 	capabilities     lsp.ServerCapabilities
-	logger           log.Logger
 	panic_count      int
-	debug            bool
 	shutdown_timeout time.Duration = 5 * time.minute
 	client_pid       int
 	// client_capabilities lsp.ClientCapabilities
@@ -116,7 +114,6 @@ pub fn new() &Vls {
 
 	inst := &Vls{
 		parser: parser
-		logger: log.new(.text)
 		store: analyzer.Store{}
 	}
 
@@ -136,12 +133,6 @@ pub fn (mut ls Vls) handle_jsonrpc(request &jsonrpc.Request, mut wr jsonrpc.Resp
 	// Notification has no ID attached so the server can detect
 	// if its a notification or a request payload by checking
 	// if the ID is empty.
-	if request.id.len == 0 {
-		// ls.logger.notification(payload, .receive)
-	} else {
-		// ls.logger.request(payload, .receive)
-	}
-
 	if request.method == 'shutdown' {
 		// NB: LSP specification is unclear whether or not
 		// a shutdown request is allowed before server init
@@ -209,7 +200,7 @@ pub fn (mut ls Vls) handle_jsonrpc(request &jsonrpc.Request, mut wr jsonrpc.Resp
 	} else {
 		match request.method {
 			'exit' {
-				ls.exit()
+				ls.exit(mut wr)
 			}
 			'initialize' {
 				ls.initialize(request.id, request.params, mut wr)
@@ -230,12 +221,6 @@ pub fn (mut ls Vls) handle_jsonrpc(request &jsonrpc.Request, mut wr jsonrpc.Resp
 pub fn (mut ls Vls) set_vroot_path(new_vroot_path string) {
 	unsafe { ls.vroot_path.free() }
 	ls.vroot_path = new_vroot_path
-}
-
-// set_logger changes the language server's logger
-pub fn (mut ls Vls) set_logger(logger log.Logger) {
-	ls.logger.close()
-	ls.logger = logger
 }
 
 // capabilities returns the current server capabilities
@@ -264,15 +249,15 @@ fn (mut ls Vls) panic(message string, mut wr ResponseWriter) {
 
 	// NB: Would 2 be enough to exit?
 	if ls.panic_count == 2 {
-		log_path := ls.setup_logger() or {
+		log_path := ls.setup_logger(mut wr) or {
 			wr.show_message(err.msg(), .error)
 			return
 		}
 
 		wr.show_message('VLS Panic: ${message}. Log saved to ${os.real_path(log_path)}. Please refer to https://github.com/vlang/vls#error-reporting for more details.',
 			.error)
-		ls.logger.close()
-		ls.exit()
+		wr.server.dispatch_event(log.close_event, '') or {}
+		ls.exit(mut wr)
 	} else {
 		wr.log_message('VLS: An error occurred. Message: $message', .error)
 	}

@@ -6,6 +6,7 @@ import os
 import io
 import jsonrpc
 import net
+import lsp.log { LogRecorder }
 
 fn run_cli(cmd cli.Command) ? {
 	run_as_child := cmd.flags.get_bool('child') or { false }
@@ -80,14 +81,24 @@ fn run_host(cmd cli.Command) ? {
 
 fn setup_and_configure_io(cmd cli.Command, is_child bool) ?io.ReaderWriter {
 	socket_mode := cmd.flags.get_bool('socket') or { false }
-	// TODO:
-	// debug_mode := cmd.flags.get_bool('debug') or { false }
 	if socket_mode {
 		socket_port := cmd.flags.get_int('port') or { 5007 }
 		return new_socket_stream_server(socket_port, !is_child)
 	} else {
 		return new_stdio_stream()
 	}
+}
+
+fn setup_logger(cmd cli.Command) jsonrpc.Interceptor {
+	debug_mode := cmd.flags.get_bool('debug') or { false }
+	mut logger := &LogRecorder{
+		filter_kinds: [.recv_request, .send_response]
+	}
+	if !debug_mode {
+		logger.disable()
+	}
+
+	return logger
 }
 
 fn run_server(cmd cli.Command, is_child bool) ? {
@@ -106,8 +117,11 @@ fn run_server(cmd cli.Command, is_child bool) ? {
 	// Setup the comm method and build the language server.
 	mut io := setup_and_configure_io(cmd, is_child) ?
 	mut ls := server.new()
-	mut jrpc_server := jsonrpc.Server{
+	mut jrpc_server := &jsonrpc.Server{
 		stream: io
+		interceptors: [
+			setup_logger(cmd)
+		]
 		handler: ls
 	}
 

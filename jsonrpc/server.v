@@ -201,3 +201,12 @@ fn (mut wr InterceptorWriter) write(buf []u8) ?int {
 pub struct PassiveHandler {}
 
 fn (mut h PassiveHandler) handle_jsonrpc(req &Request, mut rw ResponseWriter) ? {}
+
+pub fn is_interceptor_enabled<T>(server &Server) bool {
+	for inter in server.interceptors {
+		if inter is T {
+			return true
+		}
+	}
+	return false
+}
