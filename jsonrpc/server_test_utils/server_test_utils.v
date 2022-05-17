@@ -26,8 +26,8 @@ struct TestResponse {
 pub struct TestClient {
 mut:
 	id int
-	server &jsonrpc.Server
 pub mut:
+	server &jsonrpc.Server
 	stream &TestStream
 }
 
