@@ -1,6 +1,6 @@
 import server
 import test_utils
-import json
+import jsonrpc.server_test_utils { new_test_client }
 import lsp
 import os
 
@@ -53,29 +53,23 @@ const workspace_symbols_result = [
 	},
 ]
 
-fn test_workspace_symbols() {
-	mut io := &test_utils.Testio{
+fn test_workspace_symbols() ? {
+	mut t := &test_utils.Tester{
 		test_files_dir: test_utils.get_test_files_path(@FILE)
+		folder_name: 'workspace_symbols'
+		client: new_test_client(server.new())
 	}
-	mut ls := server.new(io)
-	ls.dispatch(io.request('initialize'))
-	files := io.load_test_file_paths('workspace_symbols') or {
-		io.bench.fail()
-		eprintln(io.bench.step_message_fail(err.msg()))
-		assert false
-		return
-	}
-	for file_path in files {
-		content := os.read_file(file_path) or {
-			io.bench.fail()
+
+	test_files := t.initialize() ?
+	for file in test_files {
+		// open document
+		t.open_document(file) or {
+			t.fail(file, err.msg())
 			continue
 		}
-		// open document
-		req, _ := io.open_document(file_path, content)
-		ls.dispatch(req)
 	}
-	assert io.bench.nfail == 0
-	ls.dispatch(io.request_with_params('workspace/symbol', lsp.WorkspaceSymbolParams{}))
-	assert io.result() == json.encode(workspace_symbols_result)
-	io.bench.stop()
+
+	assert t.is_ok()
+	symbols := t.client.send<lsp.WorkspaceSymbolParams, []lsp.SymbolInformation>('workspace/symbol', lsp.WorkspaceSymbolParams{}) ?
+	assert symbols == workspace_symbols_result
 }
