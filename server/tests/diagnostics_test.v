@@ -1,6 +1,6 @@
 import server
 import test_utils
-import json
+import jsonrpc.server_test_utils { new_test_client }
 import lsp
 import os
 
@@ -43,35 +43,28 @@ const diagnostics_results = {
 	}
 }
 
-fn test_diagnostics() {
-	mut io := &test_utils.Testio{
+fn test_diagnostics() ? {
+	mut t := &test_utils.Tester{
 		test_files_dir: test_utils.get_test_files_path(@FILE)
+		folder_name: 'diagnostics'
+		client: new_test_client(server.new())
 	}
-	mut ls := server.new(io)
-	ls.dispatch(io.request('initialize'))
-	files := io.load_test_file_paths('diagnostics') or {
-		io.bench.fail()
-		eprintln(io.bench.step_message_fail(err.msg()))
-		assert false
-		return
-	}
-	for file_path in files {
-		test_name := os.base(file_path)
-		content := os.read_file(file_path) or {
-			io.bench.fail()
-			eprintln(io.bench.step_message_fail('file $file_path is missing'))
+
+	test_files := t.initialize() ?
+	for file in test_files {
+		doc_id := t.open_document(file) or {
+			t.fail(file, err.msg())
 			continue
 		}
-		// open document
-		req, _ := io.open_document(file_path, content)
-		ls.dispatch(req)
 
-		method, params := io.notification() or { '', '{}' }
-		diagnostic_params := json.decode(lsp.PublishDiagnosticsParams, params) or {
-			lsp.PublishDiagnosticsParams{}
+		diagnostic_params := t.diagnostics() ?
+		if diagnostic_params.uri.path() != file.file_path {
+			t.fail(file, 'no diagnostics found')
+			continue
 		}
-		assert method == 'textDocument/publishDiagnostics'
-		result := diagnostics_results[test_name] or { lsp.PublishDiagnosticsParams{} }
-		assert diagnostic_params == result
+
+		expected := diagnostics_results[file.file_name] or { lsp.PublishDiagnosticsParams{} }
+		assert diagnostic_params == expected
 	}
+	assert t.is_ok()
 }
