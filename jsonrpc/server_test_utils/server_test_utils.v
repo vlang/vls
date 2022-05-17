@@ -18,6 +18,11 @@ pub fn new_test_client(handler jsonrpc.Handler, interceptors ...jsonrpc.Intercep
 	}
 }
 
+struct TestResponse {
+	raw_id string [raw; json:id]
+	raw_result string [raw; json:result]
+}
+
 pub struct TestClient {
 mut:
 	id int
@@ -36,15 +41,11 @@ pub fn (mut tc TestClient) send<T,U>(method string, params T) ?U {
 
 	tc.stream.send(req)
 	tc.server.respond() ?
-	raw_resp := tc.stream.response_text()
-	if raw_resp.len == 0 {
+	raw_json_content := tc.stream.response_text(req.id)
+	if raw_json_content.len == 0 {
 		return none
 	}
-
-	mut raw_json_content := raw_resp.all_after('"result":')
-	raw_json_content = raw_json_content[..raw_json_content.len - 1]
-	resp := json.decode(U, raw_json_content) ?
-	return resp
+	return json.decode(U, raw_json_content)
 }
 
 pub fn (mut tc TestClient) notify<T>(method string, params T) ? {
@@ -61,8 +62,9 @@ pub fn (mut tc TestClient) notify<T>(method string, params T) ? {
 
 pub struct TestStream {
 mut:
-	resp_idx int
-	resp_buf [][]u8 = [][]u8{cap: 10, len: 10}
+	notif_idx int
+	notif_buf [][]u8 = [][]u8{cap: 10, len: 10}
+	resp_buf  map[string]TestResponse
 	req_buf datatypes.Queue<[]u8>
 }
 
@@ -73,12 +75,20 @@ pub fn (mut rw TestStream) read(mut buf []u8) ?int {
 }
 
 pub fn (mut rw TestStream) write(buf []u8) ?int {
-	idx := rw.resp_idx % 10
-	if rw.resp_buf[idx].len != 0 {
-		rw.resp_buf[idx].clear()
+	raw_json_content := buf.bytestr().all_after('\r\n\r\n')
+	if raw_json_content.contains('"result":') {
+		resp := json.decode(TestResponse, raw_json_content) ?
+		rw.resp_buf[resp.raw_id] = resp
+	} else if raw_json_content.contains('"params":') {
+		idx := rw.notif_idx % 10
+		if rw.notif_buf[idx].len != 0 {
+			rw.notif_buf[idx].clear()
+		}
+		rw.notif_buf[idx] << buf
+		rw.notif_idx++
+	} else {
+		return none
 	}
-	rw.resp_buf[idx] << buf
-	rw.resp_idx++
 	return buf.len
 }
 
@@ -87,12 +97,12 @@ pub fn (mut rw TestStream) send(req jsonrpc.Request) {
 	rw.req_buf.push('Content-Length: $req_json.len\r\n\r\n$req_json'.bytes())
 }
 
-pub fn (mut rw TestStream) response_text() string {
-	return rw.resp_buf[(rw.resp_idx - 1) % 10].bytestr()
+pub fn (rw &TestStream) response_text(raw_id string) string {
+	return rw.resp_buf[raw_id].raw_result
 }
 
-pub fn (mut rw TestStream) notification_at<T>(idx int) ?jsonrpc.NotificationMessage<T> {
-	raw_json_content := rw.resp_buf[idx].bytestr().all_after('\r\n\r\n')
+pub fn (rw &TestStream) notification_at<T>(idx int) ?jsonrpc.NotificationMessage<T> {
+	raw_json_content := rw.notif_buf[idx].bytestr().all_after('\r\n\r\n')
 	return json.decode(jsonrpc.NotificationMessage<T>, raw_json_content)
 }
 
