@@ -106,6 +106,20 @@ pub fn (rw &TestStream) notification_at<T>(idx int) ?jsonrpc.NotificationMessage
 	return json.decode(jsonrpc.NotificationMessage<T>, raw_json_content)
 }
 
+pub fn (rw &TestStream) last_notification_at_method<T>(method_name string) ?jsonrpc.NotificationMessage<T> {
+	for i := rw.notif_buf.len - 1; i >= 0; i-- {
+		raw_notif_content := rw.notif_buf[i]
+		if raw_notif_content.len == 0 {
+			continue
+		}
+
+		if raw_notif_content.bytestr().contains('"method":"$method_name"') {
+			return rw.notification_at<T>(i)
+		}
+	}
+	return none
+}
+
 // for primitive types
 pub struct RpcResult<T> {
 	result T
