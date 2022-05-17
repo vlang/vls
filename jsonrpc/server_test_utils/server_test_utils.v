@@ -4,18 +4,29 @@ import jsonrpc
 import json
 import datatypes
 
+pub fn new_test_client(handler jsonrpc.Handler, interceptors ...jsonrpc.Interceptor) &TestClient {
+	mut stream := &TestStream{}
+	mut server := &jsonrpc.Server{
+		handler: handler
+		interceptors: interceptors
+		stream: stream
+	}
+
+	return &TestClient{
+		server: server
+		stream: stream
+	}
+}
+
 pub struct TestClient {
 mut:
 	id int
-	stream &TestStream
 	server &jsonrpc.Server
+pub mut:
+	stream &TestStream
 }
 
 pub fn (mut tc TestClient) send<T,U>(method string, params T) ?U {
-	if tc.stream.resp_buf.len != 0 {
-		tc.stream.resp_buf.clear()
-	}
-
 	params_json := json.encode(params)
 	req := jsonrpc.Request{
 		id: '$tc.id'
@@ -36,9 +47,22 @@ pub fn (mut tc TestClient) send<T,U>(method string, params T) ?U {
 	return resp
 }
 
+pub fn (mut tc TestClient) notify<T>(method string, params T) ? {
+	params_json := json.encode(params)
+	req := jsonrpc.Request{
+		id: ''
+		method: method
+		params: params_json
+	}
+
+	tc.stream.send(req)
+	tc.server.respond() ?
+}
+
 pub struct TestStream {
 mut:
-	resp_buf []u8
+	resp_idx int
+	resp_buf [][]u8 = [][]u8{cap: 10, len: 10}
 	req_buf datatypes.Queue<[]u8>
 }
 
@@ -49,7 +73,12 @@ pub fn (mut rw TestStream) read(mut buf []u8) ?int {
 }
 
 pub fn (mut rw TestStream) write(buf []u8) ?int {
-	rw.resp_buf << buf
+	idx := rw.resp_idx % 10
+	if rw.resp_buf[idx].len != 0 {
+		rw.resp_buf[idx].clear()
+	}
+	rw.resp_buf[idx] << buf
+	rw.resp_idx++
 	return buf.len
 }
 
@@ -59,7 +88,12 @@ pub fn (mut rw TestStream) send(req jsonrpc.Request) {
 }
 
 pub fn (mut rw TestStream) response_text() string {
-	return rw.resp_buf.bytestr()
+	return rw.resp_buf[(rw.resp_idx - 1) % 10].bytestr()
+}
+
+pub fn (mut rw TestStream) notification_at<T>(idx int) ?jsonrpc.NotificationMessage<T> {
+	raw_json_content := rw.resp_buf[idx].bytestr().all_after('\r\n\r\n')
+	return json.decode(jsonrpc.NotificationMessage<T>, raw_json_content)
 }
 
 // for primitive types

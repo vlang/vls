@@ -35,7 +35,9 @@ pub mut:
 }
 
 pub fn (req Request) json() string {
-	return '{"jsonrpc":"$jsonrpc.version","id":$req.id,"method":"$req.method","params":$req.params}'
+	// NOTE: make request act as a notification for server_test_utils
+	id_payload := if req.id.len != 0 { ',"id":$req.id,' } else { ',' }
+	return '{"jsonrpc":"$jsonrpc.version"$id_payload"method":"$req.method","params":$req.params}'
 }
 
 pub fn (req Request) decode_params<T>() ?T {
@@ -88,6 +90,7 @@ fn encode_response<T>(resp Response<T>, mut writer io.Writer) {
 }
 
 pub struct NotificationMessage<T> {
+pub:
 	jsonrpc string = jsonrpc.version
 	method  string
 	params  T
