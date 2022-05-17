@@ -1,6 +1,6 @@
 import server
 import test_utils
-import json
+import jsonrpc.server_test_utils { new_test_client }
 import lsp
 import os
 
@@ -379,63 +379,54 @@ const definition_results = {
 	]
 }
 
-fn test_definition() {
-	mut io := test_utils.Testio{
+fn test_definition() ? {
+	mut t := &test_utils.Tester{
 		test_files_dir: test_utils.get_test_files_path(@FILE)
+		folder_name: 'definition'
+		client: new_test_client(server.new())
 	}
-	mut ls := server.new(io)
-	ls.dispatch(io.request_with_params('initialize', lsp.InitializeParams{
-		root_uri: lsp.document_uri_from_path(base_dir)
-	}))
-	test_files := io.load_test_file_paths('definition') or {
-		io.bench.fail()
-		eprintln(io.bench.step_message_fail(err.msg()))
-		assert false
-		return
-	}
-	io.bench.set_total_expected_steps(test_files.len)
-	for test_file_path in test_files {
-		io.bench.step()
-		test_name := os.base(test_file_path)
-		err_msg := if test_name !in definition_results
-			&& test_name !in definition_should_return_null {
-			'missing results for $test_name'
+
+	test_files := t.initialize() ?
+	for file in test_files {
+		test_name := file.file_name
+		err_msg := if test_name !in definition_results {
+			'missing results'
 		} else if test_name !in definition_inputs {
-			'missing input data for $test_name'
+			'missing input data'
 		} else {
 			''
 		}
 		if err_msg.len != 0 {
-			io.bench.fail()
-			eprintln(io.bench.step_message_fail(err_msg))
+			t.fail(file, err_msg)
 			continue
 		}
-		content := os.read_file(test_file_path) or {
-			io.bench.fail()
-			eprintln(io.bench.step_message_fail('file $test_file_path is missing'))
-			continue
-		}
+
 		// open document
-		req, doc_id := io.open_document(test_file_path, content)
-		ls.dispatch(req)
-		// initiate hover request
-		ls.dispatch(io.request_with_params('textDocument/definition', lsp.TextDocumentPositionParams{
+		doc_id := t.open_document(file) or {
+			t.fail(file, err.msg())
+			continue
+		}
+		// initiate definition request
+		actual := t.client.send<lsp.TextDocumentPositionParams, []lsp.LocationLink>('textDocument/definition', lsp.TextDocumentPositionParams{
 			text_document: doc_id
 			position: definition_inputs[test_name]
-		}))
+		}) ?
+
 		// compare content
-		println(io.bench.step_message('Testing $test_file_path'))
-		result := io.result()
 		if test_name in definition_should_return_null {
-			assert result == 'null'
+			// assert result == 'null'
+			assert false
 		} else {
-			assert result == json.encode(definition_results[test_name])
+			assert actual == definition_results[test_name]
 		}
+
 		// Delete document
-		ls.dispatch(io.close_document(doc_id))
-		io.bench.ok()
-		println(io.bench.step_message_ok(test_name))
+		t.close_document(doc_id) or {
+			t.fail(file, err.msg())
+			continue
+		}
+
+		t.ok(file)
 	}
-	assert io.bench.nfail == 0
-	io.bench.stop()
+	assert t.is_ok()
 }
