@@ -55,7 +55,7 @@ pub fn (t &Tester) is_ok() bool {
 // open_document generates and returns the request data for the `textDocument/didOpen` reqeust.
 pub fn (mut t Tester) open_document(file TestFile) ?lsp.TextDocumentIdentifier {
 	doc_uri := lsp.document_uri_from_path(file.file_path)
-	t.client.send<lsp.DidOpenTextDocumentParams, jsonrpc.Null>('textDocument/didOpen', lsp.DidOpenTextDocumentParams{
+	t.client.notify('textDocument/didOpen', lsp.DidOpenTextDocumentParams{
 		text_document: lsp.TextDocumentItem{
 			uri: doc_uri
 			language_id: 'v'
@@ -70,7 +70,7 @@ pub fn (mut t Tester) open_document(file TestFile) ?lsp.TextDocumentIdentifier {
 
 // close_document generates and returns the request data for the `textDocument/didClose` reqeust.
 pub fn (mut t Tester) close_document(doc_id lsp.TextDocumentIdentifier) ? {
-	t.client.send<lsp.DidCloseTextDocumentParams, jsonrpc.Null>('textDocument/didClose', lsp.DidCloseTextDocumentParams{
+	t.client.notify('textDocument/didClose', lsp.DidCloseTextDocumentParams{
 		text_document: doc_id
 	}) ?
 }
