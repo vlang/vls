@@ -52,6 +52,27 @@ pub fn (t &Tester) is_ok() bool {
 	return t.bench.nfail == 0
 }
 
+pub fn (mut t Tester) diagnostics() ?lsp.PublishDiagnosticsParams {
+	got := t.client.stream.last_notification_at_method<lsp.PublishDiagnosticsParams>('textDocument/publishDiagnostics') ?
+	return got.params
+}
+
+pub fn (mut t Tester) count_errors(file TestFile) int {
+	params := t.diagnostics() or { return 0 }
+	if params.uri.path() != file.file_path {
+		return 0
+	}
+
+	mut count := 0
+	for diag in params.diagnostics {
+		eprintln(diag)
+		if diag.severity == .error {
+			count++
+		}
+	}
+	return count
+}
+
 // open_document generates and returns the request data for the `textDocument/didOpen` reqeust.
 pub fn (mut t Tester) open_document(file TestFile) ?lsp.TextDocumentIdentifier {
 	doc_uri := lsp.document_uri_from_path(file.file_path)
