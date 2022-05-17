@@ -1,7 +1,7 @@
+import jsonrpc
+import jsonrpc.server_test_utils { new_test_client }
 import server
 import test_utils
-import lsp
-import os
 
 // REGRESSION TEST
 // NB: This is a simple implementation for now. What this test does is
@@ -15,37 +15,27 @@ import os
 // This is just an extension of the existing V test suite. If the code also
 // applies to the V compiler, it is better to add it there instead.
 
-fn test_regression() {
-	mut io := &test_utils.Testio{
+fn test_regression() ? {
+	mut t := &test_utils.Tester{
 		test_files_dir: test_utils.get_test_files_path(@FILE)
+		folder_name: 'regressions'
+		client: new_test_client(server.new())
 	}
-	mut ls := server.new(io)
-	ls.dispatch(io.request_with_params('initialize', lsp.InitializeParams{
-		root_uri: lsp.document_uri_from_path(os.join_path(os.dir(@FILE), 'test_files',
-			'regressions'))
-	}))
-	test_files := io.load_test_file_paths('regressions') or {
-		io.bench.fail()
-		eprintln(io.bench.step_message_fail(err.msg()))
-		assert false
-		return
-	}
-	io.bench.set_total_expected_steps(test_files.len)
-	for test_file_path in test_files {
-		io.bench.step()
-		content := os.read_file(test_file_path) or {
-			io.bench.fail()
-			eprintln(io.bench.step_message_fail('file $test_file_path is missing'))
+
+	test_files := t.initialize() ?
+	for file in test_files {
+		doc_id := t.open_document(file) or {
+			t.fail(file, err.msg())
 			continue
 		}
 
-		println(io.bench.step_message('Testing $test_file_path'))
-		req, doc_id := io.open_document(test_file_path, content)
-		ls.dispatch(req)
+		t.close_document(doc_id) or {
+			t.fail(file, err.msg())
+			continue
+		}
 
-		io.bench.ok()
-		ls.dispatch(io.close_document(doc_id))
+		t.ok(file)
 	}
 
-	io.bench.stop()
+	assert t.is_ok()
 }
