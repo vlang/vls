@@ -58,6 +58,10 @@ fn (ls Vls) v_msg_to_diagnostic(from_file_path string, msg string) ?lsp.Diagnost
 
 // exec_v_diagnostics returns a list of errors/warnings taken from `v -check`
 fn (mut ls Vls) exec_v_diagnostics(uri lsp.DocumentUri) ?[]lsp.Diagnostic {
+	$if test {
+		return none
+	}
+
 	if Feature.v_diagnostics !in ls.enabled_features {
 		return none
 	}
