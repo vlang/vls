@@ -194,7 +194,7 @@ pub mut:
 	document_link_provider               bool                            [json: documentLinkProvider]
 	color_provider                       bool                            [json: colorProvider]
 	declaration_provider                 bool                            [json: declarationProvider]
-	execute_command_provder              string                          [json: executeCommandProvider; raw]
+	execute_command_provider             string                          [json: executeCommandProvider]
 	folding_range_provider               bool                            [json: foldingRangeProvider]
 	experimental                         map[string]bool
 }
