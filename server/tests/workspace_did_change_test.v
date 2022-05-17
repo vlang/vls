@@ -1,71 +1,60 @@
 import server
+import jsonrpc.server_test_utils { new_test_client }
 import test_utils
 import lsp
 import os
 
 fn test_workspace_did_change() ? {
-	mut io := &test_utils.Testio{
+	mut t := &test_utils.Tester{
 		test_files_dir: test_utils.get_test_files_path(@FILE)
+		folder_name: 'workspace_did_change'
+		client: new_test_client(server.new())
 	}
-	mut ls := server.new(io)
 
 	// TODO: add a mock filesystem
-	files := io.load_test_file_paths('workspace_did_change') or {
-		io.bench.fail()
-		eprintln(io.bench.step_message_fail(err.msg()))
-		return err
-	}
-
-	for file_path in files {
-		content := os.read_file(file_path) or {
-			io.bench.fail()
+	test_files := t.initialize() ?
+	for file in test_files {
+		// open document
+		t.open_document(file) or {
+			t.fail(file, err.msg())
 			continue
 		}
-		// open document
-		req, _ := io.open_document(file_path, content)
-		ls.dispatch(req)
 	}
 
 	method_name := 'workspace/didChangeWatchedFiles'
-	assert io.bench.nfail == 0
+	assert t.is_ok()
 
 	// delete
-	delete_ev := io.request_with_params(method_name, lsp.DidChangeWatchedFilesParams{
+	t.client.notify(method_name, lsp.DidChangeWatchedFilesParams{
 		changes: [
 			lsp.FileEvent{
-				uri: lsp.document_uri_from_path(files[1])
+				uri: lsp.document_uri_from_path(test_files.get(1)?.file_path)
 				typ: .deleted
 			},
 		]
-	})
-
-	ls.dispatch(delete_ev)
+	}) ?
 
 	// rename
-	rename_ev := io.request_with_params(method_name, lsp.DidChangeWatchedFilesParams{
+	t.client.notify(method_name, lsp.DidChangeWatchedFilesParams{
 		changes: [
 			lsp.FileEvent{
-				uri: lsp.document_uri_from_path(files[2])
+				uri: lsp.document_uri_from_path(test_files.get(2)?.file_path)
 				typ: .deleted
 			},
 			lsp.FileEvent{
-				uri: lsp.document_uri_from_path(os.join_path(os.dir(files[2]), 'renamed.vv'))
+				uri: lsp.document_uri_from_path(os.join_path(os.dir(test_files.get(2)?.file_path), 'renamed.vv'))
 				typ: .created
 			},
 		]
-	})
-
-	ls.dispatch(rename_ev)
+	}) ?
 
 	// on save
-	changed_ev := io.request_with_params(method_name, lsp.DidChangeWatchedFilesParams{
+	t.client.notify(method_name, lsp.DidChangeWatchedFilesParams{
 		changes: [
 			lsp.FileEvent{
-				uri: lsp.document_uri_from_path(files[0])
+				uri: lsp.document_uri_from_path(test_files.get(0)?.file_path)
 				typ: .changed
 			},
 		]
-	})
-
-	ls.dispatch(changed_ev)
+	}) ?
 }

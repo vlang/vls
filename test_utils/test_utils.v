@@ -85,8 +85,20 @@ pub:
 pub struct TestFilesIterator {
 mut:
 	tester &Tester
-	file_paths []string
 	idx int = -1
+pub mut:
+	file_paths []string
+}
+
+pub fn (iter &TestFilesIterator) get(idx int) ?TestFile {
+	test_file_path := iter.file_paths[idx]
+	test_file_name := os.base(test_file_path)
+	content := os.read_file(test_file_path) ?
+	return TestFile{
+		file_name: test_file_name
+		file_path: test_file_path
+		contents: content
+	}
 }
 
 pub fn (mut iter TestFilesIterator) next() ?TestFile {
@@ -97,21 +109,18 @@ pub fn (mut iter TestFilesIterator) next() ?TestFile {
 	}
 
 	iter.tester.bench.step()
-	test_file_path := iter.file_paths[iter.idx]
-	test_file_name := os.base(test_file_path)
-	test_file := TestFile{
-		file_name: test_file_name
-		file_path: test_file_path
-	}
-	content := os.read_file(test_file_path) or {
-		iter.tester.fail(test_file, 'file is missing')
+	test_file := iter.get(iter.idx) or {
+		iter.tester.fail(
+			TestFile{
+				file_name: os.base(iter.file_paths[iter.idx])
+				file_path: ''
+			},
+			'file is missing',
+		)
 		return iter.next()
 	}
 
-	return TestFile{
-		...test_file
-		contents: content
-	}
+	return test_file
 }
 
 pub struct Testio {
