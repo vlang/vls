@@ -5,10 +5,13 @@ import lsp
 import os
 
 fn test_formatting() ? {
+	mut ls := server.new()
+	ls.set_features(['v_diagnostics'], false) ?
+
 	mut t := &test_utils.Tester{
 		test_files_dir: test_utils.get_test_files_path(@FILE)
 		folder_name: 'formatting'
-		client: new_test_client(server.new())
+		client: new_test_client(ls)
 	}
 
 	test_files := t.initialize() ?
