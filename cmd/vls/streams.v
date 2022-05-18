@@ -123,6 +123,7 @@ fn new_socket_stream_client(port int) ?io.ReaderWriter {
 
 	mut stream := &SocketStream{
 		log_label: 'vls-client'
+		log: false
 		port: port
 		conn: conn
 		reader: reader
@@ -144,7 +145,9 @@ pub mut:
 pub fn (mut sck SocketStream) write(buf []u8) ?int {
 	// TODO: should be an interceptor
 	$if !test {
-		println('[$sck.log_label] : ${term.red('Sent data')} : $buf.bytestr()\n')
+		if sck.log {
+			println('[$sck.log_label] : ${term.red('Sent data')} : $buf.bytestr()\n')
+		}
 	}
 
 	// if output.starts_with(content_length) {
@@ -198,7 +201,9 @@ pub fn (mut sck SocketStream) read(mut buf []u8) ?int {
 	}
 
 	$if !test {
-		println('[$sck.log_label] : ${term.green('Received data')} : $buf.bytestr()\n')
+		if sck.log {
+			println('[$sck.log_label] : ${term.green('Received data')} : $buf.bytestr()\n')
+		}
 	}
 	return conlen + header_len
 }
