@@ -1,8 +1,6 @@
 module server
 
 import lsp
-import json
-import jsonrpc
 import os
 import analyzer
 import strings
@@ -11,19 +9,12 @@ import math
 const temp_formatting_file_path = os.join_path(os.temp_dir(), 'vls_temp_formatting.v')
 
 [manualfree]
-fn (mut ls Vls) formatting(id string, params string, mut wr ResponseWriter) {
-	formatting_params := json.decode(lsp.DocumentFormattingParams, params) or {
-		ls.panic(err.msg(), mut wr)
-		wr.write(jsonrpc.null)
-		return
-	}
-
-	uri := formatting_params.text_document.uri
+pub fn (mut ls Vls) formatting(params lsp.DocumentFormattingParams, mut wr ResponseWriter) ?[]lsp.TextEdit {
+	uri := params.text_document.uri
 	source := ls.files[uri].source
 	tree_range := ls.files[uri].tree.root_node().range()
 	if source.len == 0 {
-		wr.write(jsonrpc.null)
-		return
+		return none
 	}
 
 	// We don't integrate v.fmt and it's dependencies anymore to lessen
@@ -32,16 +23,8 @@ fn (mut ls Vls) formatting(id string, params string, mut wr ResponseWriter) {
 	// To simplify this, we will make a temporary file and feed it into
 	// the v fmt CLI program since there is no cross-platform way to pipe
 	// raw strings directly into v fmt.
-	mut temp_file := os.open_file(server.temp_formatting_file_path, 'w') or {
-		wr.write(jsonrpc.null)
-		return
-	}
-
-	temp_file.write(source) or {
-		wr.write(jsonrpc.null)
-		return
-	}
-
+	mut temp_file := os.open_file(server.temp_formatting_file_path, 'w') ?
+	temp_file.write(source) ?
 	temp_file.close()
 	defer {
 		os.rm(server.temp_formatting_file_path) or {}
@@ -55,29 +38,20 @@ fn (mut ls Vls) formatting(id string, params string, mut wr ResponseWriter) {
 
 	if p.code > 0 {
 		errors := p.stderr_slurp().trim_space()
-		// defer {
-		// 	unsafe { errors.free() }
-		// }
-
 		wr.show_message(errors, .info)
-		wr.write(jsonrpc.null)
-		return
+		return none
 	}
 
 	output := p.stdout_slurp()
-	// defer {
-	// 	unsafe { output.free() }
-	// }
-
-	wr.write([
+	return [
 		lsp.TextEdit{
 			range: tsrange_to_lsp_range(tree_range)
 			new_text: output
 		},
-	])
+	]
 }
 
-fn (mut ls Vls) workspace_symbol(id string, _ string, mut wr ResponseWriter) {
+pub fn (mut ls Vls) workspace_symbol(params lsp.WorkspaceSymbolParams, mut wr ResponseWriter) []lsp.SymbolInformation {
 	mut workspace_symbols := []lsp.SymbolInformation{}
 
 	for _, sym_arr in ls.store.symbols {
@@ -96,9 +70,7 @@ fn (mut ls Vls) workspace_symbol(id string, _ string, mut wr ResponseWriter) {
 		}
 	}
 
-	wr.write(workspace_symbols)
-
-	unsafe { workspace_symbols.free() }
+	return workspace_symbols
 }
 
 fn symbol_to_symbol_info(uri lsp.DocumentUri, sym &analyzer.Symbol) ?lsp.SymbolInformation {
@@ -153,49 +125,29 @@ fn symbol_to_symbol_info(uri lsp.DocumentUri, sym &analyzer.Symbol) ?lsp.SymbolI
 	}
 }
 
-fn (mut ls Vls) document_symbol(id string, params string, mut wr ResponseWriter) {
-	document_symbol_params := json.decode(lsp.DocumentSymbolParams, params) or {
-		ls.panic(err.msg(), mut wr)
-		wr.write(jsonrpc.null)
-		return
-	}
-
-	uri := document_symbol_params.text_document.uri
+fn (mut ls Vls) document_symbol(params lsp.DocumentSymbolParams, mut wr ResponseWriter) ?[]lsp.SymbolInformation {
+	uri := params.text_document.uri
 	retrieved_symbols := ls.store.get_symbols_by_file_path(uri.path())
 	mut document_symbols := []lsp.SymbolInformation{}
 	for sym in retrieved_symbols {
 		sym_info := symbol_to_symbol_info(uri, sym) or { continue }
 		document_symbols << sym_info
 	}
-
-	wr.write(document_symbols)
+	return document_symbols
 }
 
-fn (mut ls Vls) signature_help(id string, params string, mut wr ResponseWriter) {
-	// Initial checks.
-	signature_params := json.decode(lsp.SignatureHelpParams, params) or {
-		ls.panic(err.msg(), mut wr)
-		wr.write(jsonrpc.null)
-		return
-	}
-
+fn (mut ls Vls) signature_help(params lsp.SignatureHelpParams, mut wr ResponseWriter) ?lsp.SignatureHelp {
 	if Feature.signature_help !in ls.enabled_features {
-		wr.write(jsonrpc.null)
-		return
+		return none
 	}
 
-	uri := signature_params.text_document.uri
-	pos := signature_params.position
-	ctx := signature_params.context
-	file := ls.files[uri] or {
-		wr.write(jsonrpc.null)
-		return
-	}
-
+	uri := params.text_document.uri
+	pos := params.position
+	ctx := params.context
+	file := ls.files[uri] or { return none }
 	off := file.get_offset(pos.line, pos.character)
 	mut node := traverse_node(file.tree.root_node(), u32(off))
 	mut parent_node := node
-
 	if node.type_name() == 'argument_list' {
 		parent_node = node.parent() or { node }
 		node = node.prev_named_sibling() or { node }
@@ -207,19 +159,16 @@ fn (mut ls Vls) signature_help(id string, params string, mut wr ResponseWriter) 
 	// signature help supports function calls for now
 	// hence checking the node if it's a call_expression node.
 	if parent_node.type_name() != 'call_expression' {
-		wr.write(jsonrpc.null)
-		return
+		return none
 	}
 
 	ls.store.set_active_file_path(uri.path(), file.version)
 	sym := ls.store.infer_symbol_from_node(node, file.source) or {
-		wr.write(jsonrpc.null)
-		return
+		return none
 	}
 
 	args_node := parent_node.child_by_field_name('arguments') or {
-		wr.write(jsonrpc.null)
-		return
+		return none
 	}
 
 	// get the nearest parameter based on the position of the cursor
@@ -244,9 +193,7 @@ fn (mut ls Vls) signature_help(id string, params string, mut wr ResponseWriter) 
 	if ctx.is_retrigger {
 		mut active_sighelp := ctx.active_signature_help
 		active_sighelp.active_parameter = active_parameter_idx
-
-		wr.write(active_sighelp)
-		return
+		return active_sighelp
 	}
 
 	// create a signature help info based on the
@@ -262,7 +209,7 @@ fn (mut ls Vls) signature_help(id string, params string, mut wr ResponseWriter) 
 		}
 	}
 
-	wr.write(lsp.SignatureHelp{
+	return lsp.SignatureHelp{
 		active_parameter: active_parameter_idx
 		signatures: [
 			lsp.SignatureInformation{
@@ -271,7 +218,7 @@ fn (mut ls Vls) signature_help(id string, params string, mut wr ResponseWriter) 
 				parameters: param_infos
 			},
 		]
-	})
+	}
 }
 
 struct CompletionBuilder {
@@ -798,32 +745,25 @@ fn symbol_to_completion_item(sym &analyzer.Symbol, with_snippet bool) ?lsp.Compl
 	}
 }
 
-// TODO: make params use lsp.CompletionParams in the future
-[manualfree]
-fn (mut ls Vls) completion(id string, params string, mut wr ResponseWriter) {
+pub fn (mut ls Vls) completion(params lsp.CompletionParams, mut wr ResponseWriter) ?[]lsp.CompletionItem {
 	if Feature.completion !in ls.enabled_features {
-		return
+		return none
 	}
-	completion_params := json.decode(lsp.CompletionParams, params) or {
-		ls.panic(err.msg(), mut wr)
-		wr.write(jsonrpc.null)
-		return
-	}
-	uri := completion_params.text_document.uri
+
+	uri := params.text_document.uri
 	file := ls.files[uri]
 	root_node := file.tree.root_node()
-	pos := completion_params.position
+	pos := params.position
 	mut offset := file.get_offset(pos.line, pos.character)
 	if offset == -1 {
-		wr.write(jsonrpc.null)
-		return
+		return none
 	}
 
 	ls.store.set_active_file_path(uri.path(), file.version)
 
 	// The context is used for if and when to trigger autocompletion.
 	// See comments `cfg` for reason.
-	mut ctx := completion_params.context
+	mut ctx := params.context
 
 	// The config is used by all methods for determining the results to be sent
 	// to the client. See the field comments in CompletionBuilder for their
@@ -923,32 +863,17 @@ fn (mut ls Vls) completion(id string, params string, mut wr ResponseWriter) {
 	}
 
 	// After that, it will send the list to the client.
-	wr.write(builder.completion_items)
+	return builder.completion_items
 }
 
-fn (mut ls Vls) hover(id string, params string, mut wr ResponseWriter) {
-	hover_params := json.decode(lsp.HoverParams, params) or {
-		ls.panic(err.msg(), mut wr)
-		wr.write(jsonrpc.null)
-		return
-	}
-
-	uri := hover_params.text_document.uri
-	pos := hover_params.position
-	file := ls.files[uri] or {
-		wr.write(jsonrpc.null)
-		return
-	}
+pub fn (mut ls Vls) hover(params lsp.HoverParams, mut wr ResponseWriter) ?lsp.Hover {
+	uri := params.text_document.uri
+	pos := params.position
+	file := ls.files[uri] or { return none }
 	offset := file.get_offset(pos.line, pos.character)
 	node := traverse_node(file.tree.root_node(), u32(offset))
-
 	ls.store.set_active_file_path(uri.path(), file.version)
-	hover_data := get_hover_data(mut ls.store, node, uri, file.source, u32(offset)) or {
-		wr.write(jsonrpc.null)
-		return
-	}
-
-	wr.write(hover_data)
+	return get_hover_data(mut ls.store, node, uri, file.source, u32(offset))
 }
 
 fn get_hover_data(mut store analyzer.Store, node C.TSNode, uri lsp.DocumentUri, source []u8, offset u32) ?lsp.Hover {
@@ -1008,19 +933,9 @@ fn get_hover_data(mut store analyzer.Store, node C.TSNode, uri lsp.DocumentUri, 
 }
 
 // [manualfree]
-fn (mut ls Vls) folding_range(id string, params string, mut wr ResponseWriter) {
-	folding_range_params := json.decode(lsp.FoldingRangeParams, params) or {
-		ls.panic(err.msg(), mut wr)
-		wr.write(jsonrpc.null)
-
-		return
-	}
-	uri := folding_range_params.text_document.uri
-	file := ls.files[uri] or {
-		wr.write(jsonrpc.null)
-		return
-	}
-
+pub fn (mut ls Vls) folding_range(params lsp.FoldingRangeParams, mut wr ResponseWriter) ?[]lsp.FoldingRange {
+	uri := params.text_document.uri
+	file := ls.files[uri] or { return none }
 	root_node := file.tree.root_node()
 
 	mut folding_ranges := []lsp.FoldingRange{}
@@ -1104,15 +1019,7 @@ fn (mut ls Vls) folding_range(id string, params string, mut wr ResponseWriter) {
 			else {}
 		}
 	}
-
-	if folding_ranges.len == 0 {
-		wr.write(jsonrpc.null)
-	} else {
-		wr.write(folding_ranges)
-	}
-	// unsafe {
-	// 	folding_ranges.free()
-	// }
+	return folding_ranges
 }
 
 fn create_fold(tsrange C.TSRange, kind string) lsp.FoldingRange {
@@ -1126,24 +1033,14 @@ fn create_fold(tsrange C.TSRange, kind string) lsp.FoldingRange {
 	}
 }
 
-fn (mut ls Vls) definition(id string, params string, mut wr ResponseWriter) {
-	goto_definition_params := json.decode(lsp.TextDocumentPositionParams, params) or {
-		ls.panic(err.msg(), mut wr)
-		wr.write(jsonrpc.null)
-		return
-	}
-
+pub fn (mut ls Vls) definition(params lsp.TextDocumentPositionParams, mut wr ResponseWriter) ?[]lsp.LocationLink {
 	if Feature.definition !in ls.enabled_features {
-		wr.write(jsonrpc.null)
-		return
+		return none
 	}
 
-	uri := goto_definition_params.text_document.uri
-	pos := goto_definition_params.position
-	file := ls.files[uri] or {
-		wr.write(jsonrpc.null)
-		return
-	}
+	uri := params.text_document.uri
+	pos := params.position
+	file := ls.files[uri] or { return none }
 	source := file.source
 	offset := compute_offset(source, pos.line, pos.character)
 	mut node := traverse_node(file.tree.root_node(), u32(offset))
@@ -1151,19 +1048,16 @@ fn (mut ls Vls) definition(id string, params string, mut wr ResponseWriter) {
 	node_type_name := node.type_name()
 	if parent_node := node.parent() {
 		if parent_node.is_error() || parent_node.is_missing() {
-			wr.write(jsonrpc.null)
-			return
+			return none
 		}
 	} else if node.is_null() {
-		wr.write(jsonrpc.null)
-		return
+		return none
 	}
 
 	ls.store.set_active_file_path(uri.path(), file.version)
 	sym := ls.store.infer_symbol_from_node(node, source) or { analyzer.void_sym }
 	if isnil(sym) || sym.is_void() {
-		wr.write(jsonrpc.null)
-		return
+		return none
 	}
 
 	if node_type_name != 'type_selector_expression' && node.named_child_count() != 0 {
@@ -1175,19 +1069,18 @@ fn (mut ls Vls) definition(id string, params string, mut wr ResponseWriter) {
 	// Send null if range has zero-start and end points
 	if sym.range.start_point.row == 0 && sym.range.start_point.column == 0
 		&& sym.range.start_point.eq(sym.range.end_point) {
-		wr.write(jsonrpc.null)
-		return
+		return none
 	}
 
 	loc_uri := lsp.document_uri_from_path(sym.file_path)
-	wr.write([
+	return [
 		lsp.LocationLink{
 			target_uri: loc_uri
 			target_range: tsrange_to_lsp_range(sym.range)
 			target_selection_range: tsrange_to_lsp_range(sym.range)
 			origin_selection_range: tsrange_to_lsp_range(original_range)
 		},
-	])
+	]
 }
 
 fn get_implementation_locations_from_syms(symbols []&analyzer.Symbol, got_sym &analyzer.Symbol, original_range C.TSRange, mut locations []lsp.LocationLink) {
@@ -1215,24 +1108,14 @@ fn get_implementation_locations_from_syms(symbols []&analyzer.Symbol, got_sym &a
 	}
 }
 
-fn (mut ls Vls) implementation(id string, params string, mut wr ResponseWriter) {
-	goto_implementation_params := json.decode(lsp.TextDocumentPositionParams, params) or {
-		ls.panic(err.msg(), mut wr)
-		wr.write(jsonrpc.null)
-		return
-	}
-
+pub fn (mut ls Vls) implementation(params lsp.TextDocumentPositionParams, mut wr ResponseWriter) ?[]lsp.LocationLink {
 	if Feature.definition !in ls.enabled_features {
-		wr.write(jsonrpc.null)
-		return
+		return none
 	}
 
-	uri := goto_implementation_params.text_document.uri
-	pos := goto_implementation_params.position
-	file := ls.files[uri] or {
-		wr.write(jsonrpc.null)
-		return
-	}
+	uri := params.text_document.uri
+	pos := params.position
+	file := ls.files[uri] or { return none }
 	source := file.source
 	offset := file.get_offset(pos.line, pos.character)
 	mut node := traverse_node(file.tree.root_node(), u32(offset))
@@ -1240,14 +1123,12 @@ fn (mut ls Vls) implementation(id string, params string, mut wr ResponseWriter) 
 	node_type_name := node.type_name()
 	if parent_node := node.parent() {
 		if parent_node.is_error() || parent_node.is_missing() {
-			wr.write(jsonrpc.null)
-			return
+			return none
 		}
 	}
 
 	if node.is_null() {
-		wr.write(jsonrpc.null)
-		return
+		return none
 	}
 
 	ls.store.set_active_file_path(uri.path(), file.version)
@@ -1262,8 +1143,7 @@ fn (mut ls Vls) implementation(id string, params string, mut wr ResponseWriter) 
 	}
 
 	if isnil(got_sym) || got_sym.is_void() {
-		wr.write(jsonrpc.null)
-		return
+		return none
 	}
 
 	if node_type_name != 'type_selector_expression' && node.named_child_count() != 0 {
@@ -1273,9 +1153,6 @@ fn (mut ls Vls) implementation(id string, params string, mut wr ResponseWriter) 
 	}
 
 	mut locations := []lsp.LocationLink{cap: 20}
-	defer {
-		unsafe { locations.free() }
-	}
 
 	// check first the possible interfaces implemented by the symbol
 	// at the current directory...
@@ -1300,5 +1177,5 @@ fn (mut ls Vls) implementation(id string, params string, mut wr ResponseWriter) 
 		}
 	}
 
-	wr.write(locations)
+	return locations
 }
