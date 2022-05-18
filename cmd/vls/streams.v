@@ -26,7 +26,7 @@ mut:
 	stdout os.File = os.stdout()
 }
 
-fn (mut stream StdioStream) stdin_file() &C.FILE {
+fn (stream &StdioStream) stdin_file() &C.FILE {
 	// TODO:
 	// return &C.FILE(stream.stdin.cfile)
 	return &C.FILE(C.stdin)
