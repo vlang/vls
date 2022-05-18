@@ -85,5 +85,6 @@ jobs:
         run: |
           .\v.exe test vls\lsp\
           .\v.exe test vls\analyzer\
-          .\v.exe test vls\server\testing\
+          .\v.exe test vls\server\tests\
           .\v.exe test vls\server\general_test.v
+          .\v.exe test vls\server\window_test.v
