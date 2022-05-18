@@ -1,9 +1,14 @@
+// Copyright (c) 2022 Ned Palacios. All rights reserved.
+// Use of this source code is governed by an MIT license
+// that can be found in the LICENSE file.
 module server_test_utils
 
 import jsonrpc
 import json
 import datatypes
 
+// new_test_client creates a test client to be used for observing responses
+// and notifications from the given handler and interceptors
 pub fn new_test_client(handler jsonrpc.Handler, interceptors ...jsonrpc.Interceptor) &TestClient {
 	mut stream := &TestStream{}
 	mut server := &jsonrpc.Server{
@@ -18,11 +23,16 @@ pub fn new_test_client(handler jsonrpc.Handler, interceptors ...jsonrpc.Intercep
 	}
 }
 
+// TestResponse is a version of jsonrpc.Response<T> that decodes
+// incoming JSON as raw JSON string.
 struct TestResponse {
 	raw_id string [raw; json:id]
 	raw_result string [raw; json:result]
 }
 
+// TestClient is a JSONRPC Client used for simulating communication between client and
+// JSONRPC server. This exposes the JSONRPC server and a test stream for sending data
+// as a server or as a client
 pub struct TestClient {
 mut:
 	id int
@@ -31,6 +41,7 @@ pub mut:
 	stream &TestStream
 }
 
+// send<T,U> sends a request and receives a decoded response result.
 pub fn (mut tc TestClient) send<T,U>(method string, params T) ?U {
 	params_json := json.encode(params)
 	req := jsonrpc.Request{
@@ -48,6 +59,9 @@ pub fn (mut tc TestClient) send<T,U>(method string, params T) ?U {
 	return json.decode(U, raw_json_content)
 }
 
+// notify is a version of send but instead of returning a response,
+// it only notifies the server. Effectively sending a request as a 
+// notification.
 pub fn (mut tc TestClient) notify<T>(method string, params T) ? {
 	params_json := json.encode(params)
 	req := jsonrpc.Request{
@@ -60,6 +74,10 @@ pub fn (mut tc TestClient) notify<T>(method string, params T) ? {
 	tc.server.respond() ?
 }
 
+// TestStream is a io.ReadWriter-compliant stream for sending
+// and receiving responses from between the client and the server.
+// Aside from being a ReaderWriter, it exposes additional methods
+// for decoding JSONRPC response and notifications.
 pub struct TestStream {
 mut:
 	notif_idx int
@@ -68,12 +86,14 @@ mut:
 	req_buf datatypes.Queue<[]u8>
 }
 
+// read receives the incoming request buffer.
 pub fn (mut rw TestStream) read(mut buf []u8) ?int {
 	req := rw.req_buf.pop() ?
 	buf << req
 	return req.len
 }
 
+// write receives the outgoing response/notification buffer.
 pub fn (mut rw TestStream) write(buf []u8) ?int {
 	raw_json_content := buf.bytestr().all_after('\r\n\r\n')
 	if raw_json_content.contains('"result":') {
@@ -92,20 +112,24 @@ pub fn (mut rw TestStream) write(buf []u8) ?int {
 	return buf.len
 }
 
+// send stringifies and dispatches the jsonrpc.Request into the request queue.
 pub fn (mut rw TestStream) send(req jsonrpc.Request) {
 	req_json := req.json()
 	rw.req_buf.push('Content-Length: $req_json.len\r\n\r\n$req_json'.bytes())
 }
 
+// response_text returns the raw response result of the given request id.
 pub fn (rw &TestStream) response_text(raw_id string) string {
 	return rw.resp_buf[raw_id].raw_result
 }
 
+// notification_at returns the jsonrpc.Notification<T> in a given index.
 pub fn (rw &TestStream) notification_at<T>(idx int) ?jsonrpc.NotificationMessage<T> {
 	raw_json_content := rw.notif_buf[idx].bytestr().all_after('\r\n\r\n')
 	return json.decode(jsonrpc.NotificationMessage<T>, raw_json_content)
 }
 
+// last_notification_at_method returns the last jsonrpc.Notification<T> from the given method name.
 pub fn (rw &TestStream) last_notification_at_method<T>(method_name string) ?jsonrpc.NotificationMessage<T> {
 	for i := rw.notif_buf.len - 1; i >= 0; i-- {
 		raw_notif_content := rw.notif_buf[i]
@@ -120,7 +144,7 @@ pub fn (rw &TestStream) last_notification_at_method<T>(method_name string) ?json
 	return none
 }
 
-// for primitive types
+// RpcResult<T> is a result form used for primitive types.
 pub struct RpcResult<T> {
 	result T
 }

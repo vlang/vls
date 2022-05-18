@@ -1,9 +1,15 @@
+// Copyright (c) 2022 Ned Palacios. All rights reserved.
+// Use of this source code is governed by an MIT license
+// that can be found in the LICENSE file.
 module jsonrpc
 
 import json
 import strings
 import io
 
+// Server represents a JSONRPC server that sends/receives data
+// from a stream (an io.ReaderWriter, inspects data with interceptors
+// and hands over the decoded request to a Handler.
 [heap]
 pub struct Server {
 mut:
@@ -17,18 +23,24 @@ pub mut:
 	handler Handler
 }
 
+// intercept_raw_request intercepts the incoming raw request buffer
+// to the interceptors.
 pub fn (mut s Server) intercept_raw_request(req []u8) ? {
 	for mut interceptor in s.interceptors {
 		interceptor.on_raw_request(req) ?
 	}
 }
 
+// intercept_raw_request intercepts the incoming decoded JSONRPC Request
+// to the interceptors.
 pub fn (mut s Server) intercept_request(req &Request) ? {
 	for mut interceptor in s.interceptors {
 		interceptor.on_request(req) ?
 	}
 }
 
+// intercept_raw_request intercepts the outgoing raw response buffer
+// to the interceptors.
 pub fn (mut s Server) intercept_encoded_response(resp []u8) {
 	for mut interceptor in s.interceptors {
 		interceptor.on_encoded_response(resp)
@@ -37,18 +49,21 @@ pub fn (mut s Server) intercept_encoded_response(resp []u8) {
 
 pub interface InterceptorData {}
 
+// dispatch_event sends a custom event to the interceptors.
 pub fn (mut s Server) dispatch_event(event_name string, data InterceptorData) ? {
 	for mut i in s.interceptors {
 		i.on_event(event_name, data) ?
 	}
 }
 
+// process_raw_request decodes the raw request string into JSONRPC request.
 fn (s Server) process_raw_request(raw_request string) ?Request {
 	json_payload := raw_request.all_after('\r\n\r\n')
 	return json.decode(Request, json_payload)
 }
 
-// for testing purposes only
+// respond executes the incoming request into a response.
+// for testing purposes only.
 pub fn (mut s Server) respond() ? {
 	mut base_rw := s.writer()
 	return s.internal_respond(mut base_rw)
@@ -87,6 +102,7 @@ fn (mut s Server) internal_respond(mut base_rw ResponseWriter) ? {
 	}
 }
 
+// writer returns the Server's current ResponseWriter
 pub fn (s &Server) writer() ResponseWriter {
 	return ResponseWriter{
 		server: s
@@ -109,6 +125,7 @@ pub fn (s &Server) writer() ResponseWriter {
 	}
 }
 
+// start executes a loop and observes the incoming request from the stream.
 pub fn (mut s Server) start() {
 	mut rw := s.writer()
 	for {
@@ -118,6 +135,8 @@ pub fn (mut s Server) start() {
 	}
 }
 
+// Interceptor is an interface that observes and inspects the data
+// before handing over to the Handler.
 pub interface Interceptor {
 mut:
 	on_event(name string, data InterceptorData) ?
@@ -126,11 +145,14 @@ mut:
 	on_encoded_response(resp []u8) // we cant use generic methods without marking the interface as generic
 }
 
+// Handler is an interface that handles the JSONRPC request and
+// returns a response data via a ResponseWriter.
 pub interface Handler {
 mut:
 	handle_jsonrpc(req &Request, mut wr ResponseWriter) ?
 }
 
+// ResponseWriter constructs and sends a JSONRPC response to the stream.
 pub struct ResponseWriter {
 	req_id string = 'null' // raw JSON
 mut:
@@ -145,6 +167,7 @@ fn (mut rw ResponseWriter) close() {
 	rw.sb.go_back_to(0)
 }
 
+// write sends the given payload to the stream.
 pub fn (mut rw ResponseWriter) write<T>(payload T) {
 	final_resp := jsonrpc.Response<T>{
 		id: rw.req_id
@@ -154,6 +177,8 @@ pub fn (mut rw ResponseWriter) write<T>(payload T) {
 	rw.close()
 }
 
+// write_notify sends the given method and params as
+// a server notification to the stream.
 pub fn (mut rw ResponseWriter) write_notify<T>(method string, params T) {
 	notif := jsonrpc.NotificationMessage<T>{
 		method: method
@@ -163,6 +188,7 @@ pub fn (mut rw ResponseWriter) write_notify<T>(method string, params T) {
 	rw.close()
 }
 
+// write_error sends a ResponseError to the stream.
 pub fn (mut rw ResponseWriter) write_error(err &ResponseError) {
 	final_resp := jsonrpc.Response<string>{
 		id: rw.req_id
@@ -172,6 +198,9 @@ pub fn (mut rw ResponseWriter) write_error(err &ResponseError) {
 	rw.close()
 }
 
+// Writer is an internal representation of a raw response writer.
+// It adds a Content-Length header to the response before handing
+// over to the io.ReaderWriter.
 struct Writer {
 mut:
 	clen_sb     strings.Builder
@@ -197,10 +226,13 @@ fn (mut wr InterceptorWriter) write(buf []u8) ?int {
 	return buf.len
 }
 
+// PassiveHandler is an implementation of a Handler
+// used as a default value for Server.handler 
 pub struct PassiveHandler {}
 
 fn (mut h PassiveHandler) handle_jsonrpc(req &Request, mut rw ResponseWriter) ? {}
 
+// is_intercepter_enabled checks if the given T is enabled in a Server.
 pub fn is_interceptor_enabled<T>(server &Server) bool {
 	for inter in server.interceptors {
 		if inter is T {
