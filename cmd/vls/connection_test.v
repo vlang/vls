@@ -122,5 +122,5 @@ fn test_stdio_timeout() ? {
 	assert p.status == .exited
 	assert p.code == 0
 	p.close()
-	unsafe { p.free() }
+	os.rm(p.filename) ?
 }
