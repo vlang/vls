@@ -15,7 +15,7 @@ fn new_stdio_stream() ?io.ReaderWriter {
 		// 0x8000 = _O_BINARY from <fcntl.h>
 		// windows replaces \n => \r\n, so \r\n will be replaced to \r\r\n
 		// binary mode prevents this
-		C._setmode(C._fileno(stream.stdin_file(), 0x8000))
+		C._setmode(C._fileno(stream.stdin_file()), 0x8000)
 	}
 	return stream
 }
