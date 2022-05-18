@@ -93,7 +93,9 @@ fn (mut s Server) internal_respond(mut base_rw ResponseWriter) ? {
 	}
 
 	s.handler.handle_jsonrpc(&req, mut rw) or {
-		if err is ResponseError {
+		if err is none {
+			rw.write(null)
+		} else if err is ResponseError {
 			rw.write_error(err)
 		} else {
 			rw.write_error(response_error(unknown_error))
