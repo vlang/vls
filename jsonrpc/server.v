@@ -8,9 +8,9 @@ import io
 pub struct Server {
 mut:
 	// internal fields
-	req_buf strings.Builder = strings.new_builder(200)
-	conlen_buf strings.Builder = strings.new_builder(200)
-	res_buf strings.Builder = strings.new_builder(200)
+	req_buf strings.Builder = strings.new_builder(4096)
+	conlen_buf strings.Builder = strings.new_builder(4096)
+	res_buf strings.Builder = strings.new_builder(4096)
 pub mut:
 	stream  io.ReaderWriter
 	interceptors []Interceptor
