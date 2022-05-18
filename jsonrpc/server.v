@@ -156,10 +156,10 @@ mut:
 
 // ResponseWriter constructs and sends a JSONRPC response to the stream.
 pub struct ResponseWriter {
-	req_id string = 'null' // raw JSON
 mut:
 	sb     strings.Builder
 pub mut:
+	req_id string = 'null' // raw JSON
 	server  &Server
 	writer io.Writer
 }
