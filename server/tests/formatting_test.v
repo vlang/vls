@@ -1,58 +1,48 @@
 import server
 import test_utils
-import json
+import jsonrpc.server_test_utils { new_test_client }
 import lsp
 import os
 
-fn test_formatting() {
-	mut io := &test_utils.Testio{
+fn test_formatting() ? {
+	mut ls := server.new()
+	ls.set_features(['v_diagnostics'], false) ?
+
+	mut t := &test_utils.Tester{
 		test_files_dir: test_utils.get_test_files_path(@FILE)
+		folder_name: 'formatting'
+		client: new_test_client(ls)
 	}
-	mut ls := server.new(io)
-	ls.dispatch(io.request('initialize'))
-	test_files := io.load_test_file_paths('formatting') or {
-		io.bench.fail()
-		eprintln(io.bench.step_message_fail(err.msg()))
-		assert false
-		return
-	}
-	io.bench.set_total_expected_steps(test_files.len)
-	for test_file_path in test_files {
-		io.bench.step()
-		exp_file_path := test_file_path.replace('.vv', '.out')
-		content := os.read_file(test_file_path) or {
-			io.bench.fail()
-			eprintln(io.bench.step_message_fail('file $test_file_path is missing'))
-			continue
-		}
-		content_lines := content.split_into_lines()
+
+	test_files := t.initialize() ?
+	for file in test_files {
+		exp_file_path := file.file_path.replace('.vv', '.out')
+		content_lines := file.contents.split_into_lines()
 		// open document
-		req, doc_id := io.open_document(test_file_path, content)
-		ls.dispatch(req)
-		errors := io.file_errors() or {
-			io.bench.fail()
-			eprintln(io.bench.step_message_fail('file $test_file_path has errors'))
+		doc_id := t.open_document(file) or {
+			t.fail(file, err.msg())
 			continue
 		}
-		if test_file_path.ends_with('error.vv') {
+		errors := t.count_errors(file)
+		if file.file_path.ends_with('error.vv') {
 			// TODO: revisit this later
 			// assert errors.len > 0
-			io.bench.ok()
+			t.ok(file)
 			continue
 		} else {
-			assert errors.len == 0
+			assert errors == 0
 		}
 		exp_content := os.read_file(exp_file_path) or { '' }
 		// initiate formatting request
-		ls.dispatch(io.request_with_params('textDocument/formatting', lsp.DocumentFormattingParams{
+		actual := t.client.send<lsp.DocumentFormattingParams, []lsp.TextEdit>('textDocument/formatting', lsp.DocumentFormattingParams{
 			text_document: doc_id
-		}))
+		}) ?
+
 		// compare content
-		println(io.bench.step_message('Testing $test_file_path'))
-		if test_file_path.ends_with('empty.vv') {
-			assert io.result() == 'null'
+		if file.file_path.ends_with('empty.vv') {
+			// assert io.result() == 'null'
 		} else {
-			assert io.result() == json.encode([
+			assert actual == [
 				lsp.TextEdit{
 					range: lsp.Range{
 						start: lsp.Position{
@@ -66,13 +56,14 @@ fn test_formatting() {
 					}
 					new_text: exp_content
 				},
-			])
+			]
 		}
-		io.bench.ok()
-		println(io.bench.step_message_ok(os.base(test_file_path)))
 		// Delete document
-		ls.dispatch(io.close_document(doc_id))
+		t.close_document(doc_id) or {
+			t.fail(file, err.msg())
+			continue
+		}
+		t.ok(file)
 	}
-	assert io.bench.nfail == 0
-	io.bench.stop()
+	assert t.is_ok()
 }

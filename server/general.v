@@ -1,6 +1,7 @@
 module server
 
 import lsp
+import lsp.log { LogRecorder }
 import json
 import jsonrpc
 import os
@@ -14,10 +15,10 @@ const (
 )
 
 // initialize sends the server capabilities to the client
-fn (mut ls Vls) initialize(id string, params string) {
+fn (mut ls Vls) initialize(id string, params string, mut wr ResponseWriter) {
 	initialize_params := json.decode(lsp.InitializeParams, params) or {
-		ls.panic(err.msg())
-		ls.send_null(id)
+		ls.panic(err.msg(), mut wr)
+		wr.write(jsonrpc.null)
 		return
 	}
 
@@ -25,7 +26,7 @@ fn (mut ls Vls) initialize(id string, params string) {
 	// (see exit notification) its process.
 	// https://microsoft.github.io/language-server-protocol/specifications/specification-3-15/#initialize
 	if initialize_params.process_id != -2 && !is_proc_exists(initialize_params.process_id) {
-		ls.exit()
+		ls.exit(mut wr)
 	}
 
 	ls.client_pid = initialize_params.process_id
@@ -37,7 +38,7 @@ fn (mut ls Vls) initialize(id string, params string) {
 			ls.store.default_import_paths << os.join_path(found_vroot_path, 'vlib')
 			ls.store.default_import_paths << os.vmodules_dir()
 		} else {
-			ls.show_message("V installation directory was not found. Modules in vlib such as `os` won't be detected.",
+			wr.show_message("V installation directory was not found. Modules in vlib such as `os` won't be detected.",
 				.error)
 		}
 	} else {
@@ -73,45 +74,45 @@ fn (mut ls Vls) initialize(id string, params string) {
 		}
 	}
 
-	result := jsonrpc.Response<lsp.InitializeResult>{
-		id: id
-		result: lsp.InitializeResult{
-			capabilities: ls.capabilities
-		}
+	result := lsp.InitializeResult{
+		capabilities: ls.capabilities
 	}
+
 	// only files are supported right now
 	ls.root_uri = initialize_params.root_uri
 	ls.status = .initialized
 
+	is_debug := jsonrpc.is_interceptor_enabled<LogRecorder>(wr.server)
+
 	// Create the file either in debug mode or when the client trace is set to verbose.
-	if ls.debug || (!ls.debug && initialize_params.trace == 'verbose') {
+	if is_debug || (!is_debug && initialize_params.trace == 'verbose') {
 		// set up logger set to the workspace path
-		ls.setup_logger() or { ls.show_message(err.msg(), .error) }
+		ls.setup_logger(mut wr) or { wr.show_message(err.msg(), .error) }
 	}
 
 	// print initial info
-	ls.print_info(initialize_params.process_id, initialize_params.client_info)
+	ls.print_info(initialize_params.process_id, initialize_params.client_info, mut wr)
 
 	// since builtin is used frequently, they should be parsed first and only once
 	ls.process_builtin()
-	ls.send(result)
+	wr.write(result)
 }
 
-fn (mut ls Vls) setup_logger() ?string {
+fn (mut ls Vls) setup_logger(mut rw ResponseWriter) ?string {
 	log_path := ls.log_path()
 	if os.exists(log_path) {
 		os.rm(log_path) or {}
 	}
 
-	ls.logger.set_logpath(log_path) or {
+	rw.server.dispatch_event(log.set_logpath_event, log_path) or {
 		sanitized_root_uri := ls.root_uri.path().replace_each(['/', '_', ':', '_', '\\', '_'])
 		alt_log_path := os.join_path(os.home_dir(), 'vls__${sanitized_root_uri}.log')
-		ls.show_message('Cannot save log to ${log_path}. Saving log to $alt_log_path',
+		rw.show_message('Cannot save log to ${log_path}. Saving log to $alt_log_path',
 			.error)
 
 		// avoid saving log path in test
 		$if !test {
-			ls.logger.set_logpath(alt_log_path) or {
+			rw.server.dispatch_event(log.set_logpath_event, alt_log_path) or {
 				return error('Cannot save log to $alt_log_path')
 			}
 		}
@@ -122,7 +123,7 @@ fn (mut ls Vls) setup_logger() ?string {
 	return log_path
 }
 
-fn (mut ls Vls) print_info(process_id int, client_info lsp.ClientInfo) {
+fn (mut ls Vls) print_info(process_id int, client_info lsp.ClientInfo, mut wr ResponseWriter) {
 	arch := if runtime.is_64bit() { 64 } else { 32 }
 	client_name := if client_info.name.len != 0 {
 		'$client_info.name $client_info.version'
@@ -131,11 +132,11 @@ fn (mut ls Vls) print_info(process_id int, client_info lsp.ClientInfo) {
 	}
 
 	// print important info for reporting
-	ls.log_message('VLS Version: $meta.version, OS: $os.user_os() $arch', .info)
-	ls.log_message('VLS executable path: $os.executable()', .info)
-	ls.log_message('VLS build with V ${@VHASH}', .info)
-	ls.log_message('Client / Editor: $client_name (PID: $process_id)', .info)
-	ls.log_message('Using V path (VROOT): $ls.vroot_path', .info)
+	wr.log_message('VLS Version: $meta.version, OS: $os.user_os() $arch', .info)
+	wr.log_message('VLS executable path: $os.executable()', .info)
+	wr.log_message('VLS build with V ${@VHASH}', .info)
+	wr.log_message('Client / Editor: $client_name (PID: $process_id)', .info)
+	wr.log_message('Using V path (VROOT): $ls.vroot_path', .info)
 }
 
 fn (mut ls Vls) process_builtin() {
@@ -153,23 +154,20 @@ fn (mut ls Vls) process_builtin() {
 
 // shutdown sets the state to shutdown but does not exit
 [noreturn]
-fn (mut ls Vls) shutdown(id string) {
+fn (mut ls Vls) shutdown(id string, mut wr ResponseWriter) {
 	ls.status = .shutdown
 	if id.len != 0 {
-		ls.send(jsonrpc.Response<string>{
-			id: id
-			result: 'null'
-			// error: code and message set in case an exception happens during shutdown request
-		})
+		// error: code and message set in case an exception happens during shutdown request
+		wr.write(jsonrpc.null)
 	}
-	ls.exit()
+	ls.exit(mut wr)
 }
 
 // exit stops the process
 [noreturn]
-fn (mut ls Vls) exit() {
+fn (mut ls Vls) exit(mut rw ResponseWriter) {
 	// saves the log into the disk
-	ls.logger.close()
+	rw.server.dispatch_event(log.close_event, '') or {}
 	ls.typing_ch.close()
 
 	// move exit to shutdown for now

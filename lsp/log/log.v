@@ -3,6 +3,8 @@ module log
 import os
 import time
 import json
+import io
+import jsonrpc
 import strings
 
 pub interface Logger {
@@ -17,15 +19,19 @@ mut:
 	set_logpath(path string) ?
 }
 
-pub enum Format {
-	json
-	text
-}
+const default_log_kind_filter = [
+	LogKind.send_notification,
+	.recv_notification,
+	.send_request,
+	.recv_request,
+	.send_response,
+	.recv_response
+]
 
-pub struct Log {
+pub struct LogRecorder {
+	filter_kinds   []LogKind = log.default_log_kind_filter
 mut:
 	file           os.File
-	format         Format = .json
 	buffer         strings.Builder
 	file_opened    bool
 	enabled        bool
@@ -47,7 +53,7 @@ struct Payload {
 	params string [raw]
 }
 
-enum LogKind {
+pub enum LogKind {
 	send_notification
 	recv_notification
 	send_request
@@ -69,22 +75,28 @@ pub fn (lk LogKind) str() string {
 
 pub struct LogItem {
 	kind      LogKind
-	message   string
+	message   []u8
 	method    string
-	timestamp time.Time // unix timestamp
+	timestamp time.Time = time.now()
 }
 
-pub fn new(format Format) &Log {
-	return &Log{
-		format: format
+// json is a JSON string representation of the log item.
+pub fn (li LogItem) encode_json(mut wr io.Writer) ? {
+	wr.write('{"kind":"$li.kind","message":'.bytes()) ?
+	wr.write(li.message) ?
+	wr.write(',"timestamp":$li.timestamp.unix}'.bytes()) ?
+}
+
+pub fn new() &LogRecorder {
+	return &LogRecorder{
 		file_opened: false
 		enabled: true
-		buffer: strings.new_builder(20)
+		buffer: strings.new_builder(4096)
 	}
 }
 
 // set_logpath sets the filepath of the log file and opens the file.
-pub fn (mut l Log) set_logpath(path string) ? {
+pub fn (mut l LogRecorder) set_logpath(path string) ? {
 	if l.file_opened {
 		l.close()
 	}
@@ -97,12 +109,12 @@ pub fn (mut l Log) set_logpath(path string) ? {
 }
 
 // flush flushes the contents of the log file into the disk.
-pub fn (mut l Log) flush() {
+pub fn (mut l LogRecorder) flush() {
 	l.file.flush()
 }
 
 // close closes the log file.
-pub fn (mut l Log) close() {
+pub fn (mut l LogRecorder) close() {
 	if !l.file_opened {
 		return
 	}
@@ -112,24 +124,24 @@ pub fn (mut l Log) close() {
 }
 
 // enable enables/starts the logging.
-pub fn (mut l Log) enable() {
+pub fn (mut l LogRecorder) enable() {
 	l.enabled = true
 }
 
 // disable disables/stops the logging.
-pub fn (mut l Log) disable() {
+pub fn (mut l LogRecorder) disable() {
 	l.enabled = false
 }
+
+const newline = [u8(`\n`)]
 
 // write writes the log item into the log file or in the
 // buffer if the file is not opened yet.
 [manualfree]
-fn (mut l Log) write(item LogItem) {
-	if !l.enabled {
+fn (mut l LogRecorder) write(item LogItem) {
+	if !l.enabled || item.kind !in l.filter_kinds {
 		return
 	}
-
-	content := item.encode(l.format, l.last_timestamp)
 	if l.file_opened {
 		if l.buffer.len != 0 {
 			unsafe {
@@ -137,9 +149,11 @@ fn (mut l Log) write(item LogItem) {
 				l.buffer.go_back_to(0)
 			}
 		}
-		l.file.write_string(content) or { panic(err) }
+		item.encode_json(mut l.file) or { eprintln(err) }
+		l.file.write(newline) or {}
 	} else {
-		l.buffer.write_string(content)
+		item.encode_json(mut l.buffer) or { eprintln(err) }
+		l.buffer.write(newline) or {}
 	}
 
 	l.last_timestamp = item.timestamp
@@ -147,7 +161,7 @@ fn (mut l Log) write(item LogItem) {
 }
 
 // request logs a request message.
-pub fn (mut l Log) request(msg string, kind TransportKind) {
+pub fn (mut l LogRecorder) request(msg string, kind TransportKind) {
 	req_kind := match kind {
 		.send { LogKind.send_request }
 		.receive { LogKind.recv_request }
@@ -160,11 +174,21 @@ pub fn (mut l Log) request(msg string, kind TransportKind) {
 		req_method = payload.method
 	}
 
-	l.write(kind: req_kind, message: msg, method: req_method, timestamp: time.now())
+	l.write(kind: req_kind, message: msg.bytes(), method: req_method)
+}
+
+// notification logs a notification message.
+pub fn (mut l LogRecorder) notification(msg string, kind TransportKind) {
+	notif_kind := match kind {
+		.send { LogKind.send_notification }
+		.receive { LogKind.recv_notification }
+	}
+
+	l.write(kind: notif_kind, message: msg.bytes())
 }
 
 // response logs a response message.
-pub fn (mut l Log) response(msg string, kind TransportKind) {
+pub fn (mut l LogRecorder) response(msg string, kind TransportKind) {
 	resp_kind := match kind {
 		.send { LogKind.send_response }
 		.receive { LogKind.recv_response }
@@ -177,56 +201,44 @@ pub fn (mut l Log) response(msg string, kind TransportKind) {
 		l.cur_requests.delete(payload.id)
 	}
 
-	l.write(kind: resp_kind, message: msg, method: resp_method, timestamp: time.now())
+	l.write(kind: resp_kind, message: msg.bytes(), method: resp_method)
 }
 
-// notification logs a notification message.
-pub fn (mut l Log) notification(msg string, kind TransportKind) {
-	notif_kind := match kind {
-		.send { LogKind.send_notification }
-		.receive { LogKind.recv_notification }
-	}
+// as a JSON-RPC interceptor
+const event_prefix = 'lspLogger'
 
-	l.write(kind: notif_kind, message: msg, timestamp: time.now())
+pub const set_logpath_event = '$event_prefix/setLogpath'
+pub const close_event = '$event_prefix/close'
+pub const state_event = '$event_prefix/state'
+
+pub fn (mut l LogRecorder) on_event(name string, data jsonrpc.InterceptorData) ? {
+	if name == log.set_logpath_event && data is string {
+		l.set_logpath(data) ?
+	} else if name == log.close_event {
+		l.close()
+	} else if name == log.state_event && data is bool {
+		if data {
+			l.enable()
+		} else {
+			l.disable()
+		}
+	}
 }
 
-// encode returns the string representation of the format
-// based on the given format
-fn (li LogItem) encode(format Format, last_timestamp time.Time) string {
-	match format {
-		.json { return li.json() }
-		.text { return li.text(last_timestamp) }
+pub fn (l &LogRecorder) on_raw_request(req []u8) ? {}
+
+pub fn (l &LogRecorder) on_raw_response(raw_resp []u8) ? {}
+
+pub fn (mut l LogRecorder) on_request(req &jsonrpc.Request) ? {
+	mut log_kind := LogKind.recv_request
+	mut req_method := req.method
+	if req.id.len == 0 {
+		req_method = ''
+		log_kind = .recv_notification
 	}
+	l.write(kind: log_kind, message: req.json().bytes(), method: req_method)
 }
 
-// json is a JSON string representation of the log item.
-pub fn (li LogItem) json() string {
-	return '{"kind":"$li.kind","message":$li.message,"timestamp":$li.timestamp.unix}'
-}
-
-// text is the standard LSP text log representation of the log item.
-// TODO: ignore this for now
-pub fn (li LogItem) text(last_timestamp time.Time) string {
-	payload := json.decode(Payload, li.message) or { Payload{} }
-	elapsed := li.timestamp - last_timestamp
-	elapsed_ms := elapsed.milliseconds()
-
-	method := if li.method.len != 0 { li.method } else { payload.method }
-	message := match li.kind {
-		.send_notification { 'Sending notification \'$method\'.' }
-		.recv_notification { 'Received notification \'$method\'.' }
-		.send_request { 'Sending request \'$method - ($payload.id)\'.' }
-		.recv_request { 'Received request \'$method - ($payload.id)\'.' }
-		.send_response { 'Sending response \'$method - ($payload.id)\' took ${elapsed_ms}ms' }
-		.recv_response { 'Received response \'$method - ($payload.id)\' in ${elapsed_ms}ms' }
-	}
-
-	params_msg := if li.message == 'null' {
-		'No result returned.'
-	} else if li.kind == .send_response || li.kind == .recv_response {
-		'Result: ' + li.message
-	} else {
-		'Params: ' + li.message
-	}
-	return '[Trace - $li.timestamp.hhmmss()] $message\n$params_msg\n\n'
+pub fn (mut l LogRecorder) on_encoded_response(resp []u8) {
+	l.response(resp.bytestr(), .send)
 }

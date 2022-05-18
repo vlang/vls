@@ -2,6 +2,7 @@ module test_utils
 
 import json
 import jsonrpc
+import jsonrpc.server_test_utils
 import os
 import lsp
 import benchmark
@@ -17,6 +18,130 @@ struct TestNotification {
 	jsonrpc string = jsonrpc.version
 	method  string
 	params  string [raw]
+}
+
+pub struct Tester {
+pub:
+	test_files_dir string [required]
+	folder_name    string
+pub mut:
+	bench  benchmark.Benchmark = benchmark.new_benchmark()
+	client &server_test_utils.TestClient
+}
+
+pub fn (mut t Tester) initialize() ?TestFilesIterator {
+	t.client.send<lsp.InitializeParams, lsp.InitializeResult>('initialize', lsp.InitializeParams{
+		root_uri: lsp.document_uri_from_path(os.join_path(t.test_files_dir, t.folder_name))
+	}) ?
+
+	files := load_test_file_paths(t.test_files_dir, t.folder_name) ?
+	t.bench.set_total_expected_steps(files.len)
+	return TestFilesIterator{file_paths: files, tester: unsafe { t }}
+}
+
+pub fn (mut t Tester) fail(file TestFile, msg string) {
+	final_msg := if msg.len == 0 { '<unknown error>' } else { msg }
+	println(t.bench.step_message_fail('$file.file_name: $final_msg'))
+}
+
+pub fn (mut t Tester) ok(file TestFile) {
+	println(t.bench.step_message_ok(file.file_name))
+}
+
+pub fn (t &Tester) is_ok() bool {
+	return t.bench.nfail == 0
+}
+
+pub fn (mut t Tester) diagnostics() ?lsp.PublishDiagnosticsParams {
+	got := t.client.stream.last_notification_at_method<lsp.PublishDiagnosticsParams>('textDocument/publishDiagnostics') ?
+	return got.params
+}
+
+pub fn (mut t Tester) count_errors(file TestFile) int {
+	params := t.diagnostics() or { return 0 }
+	if params.uri.path() != file.file_path {
+		return 0
+	}
+
+	mut count := 0
+	for diag in params.diagnostics {
+		eprintln(diag)
+		if diag.severity == .error {
+			count++
+		}
+	}
+	return count
+}
+
+// open_document generates and returns the request data for the `textDocument/didOpen` reqeust.
+pub fn (mut t Tester) open_document(file TestFile) ?lsp.TextDocumentIdentifier {
+	doc_uri := lsp.document_uri_from_path(file.file_path)
+	t.client.notify('textDocument/didOpen', lsp.DidOpenTextDocumentParams{
+		text_document: lsp.TextDocumentItem{
+			uri: doc_uri
+			language_id: 'v'
+			version: 1
+			text: file.contents
+		}
+	}) ?
+	return lsp.TextDocumentIdentifier{
+		uri: doc_uri
+	}
+}
+
+// close_document generates and returns the request data for the `textDocument/didClose` reqeust.
+pub fn (mut t Tester) close_document(doc_id lsp.TextDocumentIdentifier) ? {
+	t.client.notify('textDocument/didClose', lsp.DidCloseTextDocumentParams{
+		text_document: doc_id
+	}) ?
+}
+
+pub struct TestFile {
+pub:
+	file_name string [required]
+	file_path string [required]
+	contents   string
+}
+
+pub struct TestFilesIterator {
+mut:
+	tester &Tester
+	idx int = -1
+pub mut:
+	file_paths []string
+}
+
+pub fn (iter &TestFilesIterator) get(idx int) ?TestFile {
+	test_file_path := iter.file_paths[idx]
+	test_file_name := os.base(test_file_path)
+	content := os.read_file(test_file_path) ?
+	return TestFile{
+		file_name: test_file_name
+		file_path: test_file_path
+		contents: content
+	}
+}
+
+pub fn (mut iter TestFilesIterator) next() ?TestFile {
+	iter.idx++
+	if iter.idx >= iter.file_paths.len {
+		iter.tester.bench.stop()
+		return none
+	}
+
+	iter.tester.bench.step()
+	test_file := iter.get(iter.idx) or {
+		iter.tester.fail(
+			TestFile{
+				file_name: os.base(iter.file_paths[iter.idx])
+				file_path: ''
+			},
+			'file is missing',
+		)
+		return iter.next()
+	}
+
+	return test_file
 }
 
 pub struct Testio {

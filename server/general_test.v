@@ -1,45 +1,43 @@
+import jsonrpc.server_test_utils { new_test_client, RpcResult, TestClient }
+import jsonrpc
 import server
-import test_utils
 import lsp
-import json
+import lsp.log { LogRecorder }
 import os
 
 fn test_wrong_first_request() ? {
-	mut io := &test_utils.Testio{}
-	mut ls := server.new(io)
-	payload := io.request('shutdown')
-	ls.dispatch(payload)
+	mut ls := server.new()
+	mut io := new_test_client(ls)
+
 	assert ls.status() == .off
-	err_code, err_msg := io.response_error() ?
-	assert err_code == -32002
-	assert err_msg == 'Server not yet initialized.'
+	io.send<lsp.CodeLensParams, jsonrpc.Null>('textDocument/codeLens', lsp.CodeLensParams{}) or {
+		assert err.code() == jsonrpc.server_not_initialized.code()
+		assert err.msg() == jsonrpc.server_not_initialized.msg()
+		return
+	}
+	assert false
 }
 
-fn test_initialize_with_capabilities() {
-	mut io, mut ls := init_tests()
+fn test_initialize_with_capabilities() ? {
+	mut ls := server.new()
+	mut io := new_test_client(ls)
+	result := io.send<map[string]string, lsp.InitializeResult>('initialize', map[string]string{}) ?
+
 	assert ls.status() == .initialized
-	assert io.result() == json.encode(lsp.InitializeResult{
+	assert result == lsp.InitializeResult{
 		capabilities: ls.capabilities()
-	})
+	}
 }
 
-fn test_initialized() {
-	mut io, mut ls := init_tests()
-	payload := io.request('initialized')
-	ls.dispatch(payload)
+fn test_initialized() ? {
+	mut io, mut ls := init_tests() ?
+	io.notify('initialized', map[string]string{}) ?
 	assert ls.status() == .initialized
 }
 
-// fn test_shutdown() {
-// 	payload := '{"jsonrpc":"2.0","method":"shutdown","params":{}}'
-// 	mut ls := init_tests()
-// 	ls.dispatch(payload)
-// 	status := ls.status()
-// 	assert status == .shutdown
-// }
 fn test_set_features() {
-	mut io := &test_utils.Testio{}
-	mut ls := server.new(io)
+	mut ls := server.new()
+	mut io := new_test_client(ls)
 	assert ls.features() == server.default_features_list
 	ls.set_features(['formatting'], false) or {
 		assert false
@@ -56,6 +54,7 @@ fn test_set_features() {
 		.folding_range,
 		.definition,
 		.implementation,
+		.code_lens
 	]
 	ls.set_features(['formatting'], true) or {
 		assert false
@@ -72,6 +71,7 @@ fn test_set_features() {
 		.folding_range,
 		.definition,
 		.implementation,
+		.code_lens,
 		.formatting,
 	]
 	ls.set_features(['logging'], true) or {
@@ -82,30 +82,25 @@ fn test_set_features() {
 
 fn test_setup_logger() ? {
 	println('test_setup_logger')
-	mut io := &test_utils.Testio{
-		debug: true
-		max_nr_responses: 10
-	}
-	mut ls := server.new(io)
-	ls.dispatch(io.request_with_params('initialize', lsp.InitializeParams{
+	mut io := new_test_client(server.new(), &LogRecorder{})
+	io.send<lsp.InitializeParams, lsp.InitializeResult>('initialize', lsp.InitializeParams{
 		root_uri: lsp.document_uri_from_path(os.join_path('non_existent', 'path'))
-	}))
+	}) ?
 
-	method, params := io.notification_at_index(0) ?
-	assert method == 'window/showMessage'
+	notif := io.stream.notification_at<lsp.ShowMessageParams>(0) ?
+	assert notif.method == 'window/showMessage'
 
-	expected_err_path := os.join_path('non_existent', 'path', 'vls.log').replace(r'\',
-		r'\\')
-	alt_log_filename := 'vls__non_existent_path.log'
-	expected_alt_log_path := os.join_path(os.home_dir(), alt_log_filename).replace(r'\',
-		r'\\')
-	assert params == '{"type":1,"message":"Cannot save log to ${expected_err_path}. Saving log to $expected_alt_log_path"}'
+	expected_err_path := os.join_path('non_existent', 'path', 'vls.log').replace(r'\', r'\\')
+	expected_alt_log_path := os.join_path(os.home_dir(), 'vls__non_existent_path.log').replace(r'\', r'\\')
+	assert notif.params == lsp.ShowMessageParams{
+		@type: .error
+		message: 'Cannot save log to ${expected_err_path}. Saving log to $expected_alt_log_path'
+	}
 }
 
-fn init_tests() (&test_utils.Testio, server.Vls) {
-	mut io := &test_utils.Testio{}
-	mut ls := server.new(io)
-	payload := io.request('initialize')
-	ls.dispatch(payload)
+fn init_tests() ?(&TestClient, &server.Vls) {
+	mut ls := server.new()
+	mut io := new_test_client(ls)
+	io.send<map[string]string, lsp.InitializeResult>('initialize', map[string]string{}) ?
 	return io, ls
 }

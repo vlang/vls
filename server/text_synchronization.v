@@ -19,9 +19,9 @@ fn (mut ls Vls) analyze_file(file File) {
 	}
 }
 
-fn (mut ls Vls) did_open(_ string, params string) {
+fn (mut ls Vls) did_open(_ string, params string, mut wr ResponseWriter) {
 	did_open_params := json.decode(lsp.DidOpenTextDocumentParams, params) or {
-		ls.panic(err.msg())
+		ls.panic(err.msg(), mut wr)
 		return
 	}
 
@@ -84,22 +84,22 @@ fn (mut ls Vls) did_open(_ string, params string) {
 		// Analyze only if both source and tree exists
 		if should_be_analyzed {
 			ls.analyze_file(ls.files[file_uri])
-			ls.show_diagnostics(file_uri)
+			// ls.show_diagnostics(file_uri)
 		}
 
-		// ls.log_message('$file_uri | has_file: $has_file | should_be_analyzed: $should_be_analyzed',
+		// wr.log_message('$file_uri | has_file: $has_file | should_be_analyzed: $should_be_analyzed',
 		// 	.info)
 	}
 
 	ls.store.set_active_file_path(uri.path(), ls.files[uri].version)
 	if v_check_results := ls.exec_v_diagnostics(uri) {
-		ls.publish_diagnostics(uri, v_check_results)
+		publish_diagnostics(uri, v_check_results, mut wr)
 	}
 }
 
-fn (mut ls Vls) did_change(_ string, params string) {
+fn (mut ls Vls) did_change(_ string, params string, mut wr ResponseWriter) {
 	did_change_params := json.decode(lsp.DidChangeTextDocumentParams, params) or {
-		ls.panic(err.msg())
+		ls.panic(err.msg(), mut wr)
 		return
 	}
 
@@ -111,7 +111,7 @@ fn (mut ls Vls) did_change(_ string, params string) {
 	ls.store.set_active_file_path(uri.path(), did_change_params.text_document.version)
 
 	mut new_src := ls.files[uri].source
-	ls.publish_diagnostics(uri, []lsp.Diagnostic{})
+	publish_diagnostics(uri, []lsp.Diagnostic{}, mut wr)
 
 	for content_change in did_change_params.content_changes {
 		start_idx := compute_offset(new_src, content_change.range.start.line, content_change.range.start.character)
@@ -165,23 +165,23 @@ fn (mut ls Vls) did_change(_ string, params string) {
 	}
 
 	mut new_tree := ls.parser.parse_bytes_with_old_tree(new_src, ls.files[uri].tree)
-	// ls.log_message('${ls.files[uri].tree.get_changed_ranges(new_tree)}', .info)
+	// wr.log_message('${ls.files[uri].tree.get_changed_ranges(new_tree)}', .info)
 
-	// ls.log_message('new tree: ${new_tree.root_node().sexpr_str()}', .info)
+	// wr.log_message('new tree: ${new_tree.root_node().sexpr_str()}', .info)
 	ls.files[uri].tree = new_tree
 	ls.files[uri].source = new_src
 	ls.files[uri].version = did_change_params.text_document.version
 
 	// $if !test {
-	// 	ls.log_message(ls.store.imports.str(), .info)
-	// 	ls.log_message(ls.store.dependency_tree.str(), .info)
+	// 	wr.log_message(ls.store.imports.str(), .info)
+	// 	wr.log_message(ls.store.dependency_tree.str(), .info)
 	// }
 }
 
 [manualfree]
-fn (mut ls Vls) did_close(_ string, params string) {
+fn (mut ls Vls) did_close(_ string, params string, mut wr ResponseWriter) {
 	did_close_params := json.decode(lsp.DidCloseTextDocumentParams, params) or {
-		ls.panic(err.msg())
+		ls.panic(err.msg(), mut wr)
 		return
 	}
 
@@ -202,17 +202,17 @@ fn (mut ls Vls) did_close(_ string, params string) {
 	// - If a file opened is outside the root path or workspace.
 	// - If there are no remaining files opened on a specific folder.
 	if ls.files.len == 0 || !uri.starts_with(ls.root_uri) {
-		ls.publish_diagnostics(uri, []lsp.Diagnostic{})
+		publish_diagnostics(uri, []lsp.Diagnostic{}, mut wr)
 	}
 }
 
-fn (mut ls Vls) did_save(id string, params string) {
+fn (mut ls Vls) did_save(id string, params string, mut wr ResponseWriter) {
 	did_save_params := json.decode(lsp.DidSaveTextDocumentParams, params) or {
-		ls.panic(err.msg())
+		ls.panic(err.msg(), mut wr)
 		return
 	}
 	uri := did_save_params.text_document.uri
 	if v_check_results := ls.exec_v_diagnostics(uri) {
-		ls.publish_diagnostics(uri, v_check_results)
+		publish_diagnostics(uri, v_check_results, mut wr)
 	}
 }
