@@ -15,7 +15,7 @@ fn new_stdio_stream() ?io.ReaderWriter {
 		// 0x8000 = _O_BINARY from <fcntl.h>
 		// windows replaces \n => \r\n, so \r\n will be replaced to \r\r\n
 		// binary mode prevents this
-		C._setmode(C._fileno(stream.stdin_file()), 0x8000)
+		C._setmode(C._fileno(C.stdout), 0x8000)
 	}
 	return stream
 }
@@ -26,7 +26,7 @@ mut:
 	stdout os.File = os.stdout()
 }
 
-fn (mut stream StdioStream) stdin_file() &C.FILE {
+fn (stream &StdioStream) stdin_file() &C.FILE {
 	// TODO:
 	// return &C.FILE(stream.stdin.cfile)
 	return &C.FILE(C.stdin)
