@@ -1,16 +1,10 @@
 module server
 
 import lsp
-import json
 import os
 
-fn (mut ls Vls) did_change_watched_files(params string, mut wr ResponseWriter) {
-	did_change_watched_params := json.decode(lsp.DidChangeWatchedFilesParams, params) or {
-		ls.panic(err.msg(), mut wr)
-		return
-	}
-
-	changes := did_change_watched_params.changes
+pub fn (mut ls Vls) did_change_watched_files(params lsp.DidChangeWatchedFilesParams, mut wr ResponseWriter) {
+	changes := params.changes
 	mut is_rename := false
 
 	// NOTE:

@@ -2,7 +2,6 @@ module server
 
 import lsp
 import lsp.log { LogRecorder }
-import json
 import jsonrpc
 import os
 import analyzer
@@ -15,21 +14,15 @@ const (
 )
 
 // initialize sends the server capabilities to the client
-fn (mut ls Vls) initialize(id string, params string, mut wr ResponseWriter) {
-	initialize_params := json.decode(lsp.InitializeParams, params) or {
-		ls.panic(err.msg(), mut wr)
-		wr.write(jsonrpc.null)
-		return
-	}
-
+pub fn (mut ls Vls) initialize(params lsp.InitializeParams, mut wr ResponseWriter) lsp.InitializeResult {
 	// If the parent process is not alive, then the server should exit
 	// (see exit notification) its process.
 	// https://microsoft.github.io/language-server-protocol/specifications/specification-3-15/#initialize
-	if initialize_params.process_id != -2 && !is_proc_exists(initialize_params.process_id) {
+	if params.process_id != -2 && !is_proc_exists(params.process_id) {
 		ls.exit(mut wr)
 	}
 
-	ls.client_pid = initialize_params.process_id
+	ls.client_pid = params.process_id
 
 	// Set defaults when vroot_path is empty
 	if ls.vroot_path.len == 0 {
@@ -47,7 +40,7 @@ fn (mut ls Vls) initialize(id string, params string, mut wr ResponseWriter) {
 	}
 
 	// TODO: configure capabilities based on client support
-	// ls.client_capabilities = initialize_params.capabilities
+	// ls.client_capabilities = params.capabilities
 
 	ls.capabilities = lsp.ServerCapabilities{
 		text_document_sync: .incremental
@@ -74,28 +67,26 @@ fn (mut ls Vls) initialize(id string, params string, mut wr ResponseWriter) {
 		}
 	}
 
-	result := lsp.InitializeResult{
-		capabilities: ls.capabilities
-	}
-
 	// only files are supported right now
-	ls.root_uri = initialize_params.root_uri
+	ls.root_uri = params.root_uri
 	ls.status = .initialized
 
 	is_debug := jsonrpc.is_interceptor_enabled<LogRecorder>(wr.server)
 
 	// Create the file either in debug mode or when the client trace is set to verbose.
-	if is_debug || (!is_debug && initialize_params.trace == 'verbose') {
+	if is_debug || (!is_debug && params.trace == 'verbose') {
 		// set up logger set to the workspace path
 		ls.setup_logger(mut wr) or { wr.show_message(err.msg(), .error) }
 	}
 
 	// print initial info
-	ls.print_info(initialize_params.process_id, initialize_params.client_info, mut wr)
+	ls.print_info(params.process_id, params.client_info, mut wr)
 
 	// since builtin is used frequently, they should be parsed first and only once
 	ls.process_builtin()
-	wr.write(result)
+	return lsp.InitializeResult{
+		capabilities: ls.capabilities
+	}
 }
 
 fn (mut ls Vls) setup_logger(mut rw ResponseWriter) ?string {
@@ -154,9 +145,9 @@ fn (mut ls Vls) process_builtin() {
 
 // shutdown sets the state to shutdown but does not exit
 [noreturn]
-fn (mut ls Vls) shutdown(id string, mut wr ResponseWriter) {
+pub fn (mut ls Vls) shutdown(mut wr ResponseWriter) {
 	ls.status = .shutdown
-	if id.len != 0 {
+	if wr.req_id.len != 0 {
 		// error: code and message set in case an exception happens during shutdown request
 		wr.write(jsonrpc.null)
 	}
@@ -165,7 +156,7 @@ fn (mut ls Vls) shutdown(id string, mut wr ResponseWriter) {
 
 // exit stops the process
 [noreturn]
-fn (mut ls Vls) exit(mut rw ResponseWriter) {
+pub fn (mut ls Vls) exit(mut rw ResponseWriter) {
 	// saves the log into the disk
 	rw.server.dispatch_event(log.close_event, '') or {}
 	ls.typing_ch.close()

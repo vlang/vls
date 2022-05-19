@@ -49,12 +49,13 @@ const folding_range_results = {
 }
 
 fn test_folding_range() ? {
+	mut ls := server.new()
 	mut t := &test_utils.Tester{
 		test_files_dir: test_utils.get_test_files_path(@FILE)
 		folder_name: 'folding_range'
-		client: new_test_client(server.new())
+		client: new_test_client(ls)
 	}
-
+	mut writer := t.client.server.writer()
 	test_files := t.initialize() or {
 		// TODO: skip for now
 		if err.msg() == 'no test files found for "folding_range"' {
@@ -81,9 +82,9 @@ fn test_folding_range() ? {
 		}
 
 		// initiate folding range request
-		actual := t.client.send<lsp.FoldingRangeParams, []lsp.FoldingRange>('textDocument/foldingRange', lsp.FoldingRangeParams{
+		actual := ls.folding_range(lsp.FoldingRangeParams{
 			text_document: doc_id
-		}) ?
+		}, mut writer) ?
 
 		// compare content
 		assert actual == folding_range_results[test_name]

@@ -48,12 +48,13 @@ const implementation_results = {
 const implementation_should_return_null = []string{}
 
 fn test_implementation() ? {
+	mut ls := server.new()
 	mut t := &test_utils.Tester{
 		test_files_dir: test_utils.get_test_files_path(@FILE)
 		folder_name: 'implementation'
-		client: new_test_client(server.new())
+		client: new_test_client(ls)
 	}
-
+	mut writer := t.client.server.writer()
 	test_files := t.initialize() ?
 	for file in test_files {
 		test_name := file.file_name
@@ -74,16 +75,17 @@ fn test_implementation() ? {
 			continue
 		}
 		// initiate implementation request
-		actual := t.client.send<lsp.TextDocumentPositionParams, []lsp.LocationLink>('textDocument/implementation', lsp.TextDocumentPositionParams{
+		if actual := ls.implementation(lsp.TextDocumentPositionParams{
 			text_document: doc_id
 			position: implementation_inputs[test_name]
-		}) ?
-		// compare content
-		// if test_name in implementation_should_return_null {
-		// 	assert result == 'null'
-		// } else {
+		}, mut writer) {
+			// compare content
 			assert actual == implementation_results[test_name]
-		// }
+		} else {
+			if test_name in implementation_should_return_null {
+				assert err is none
+			}
+		}
 		// Delete document
 		t.close_document(doc_id) or {
 			t.fail(file, err.msg())

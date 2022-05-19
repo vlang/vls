@@ -1,19 +1,12 @@
 module server
 
-// import lsp
-// import json
-import jsonrpc
+import lsp
 
-fn (mut ls Vls) code_lens(id string, params string, mut wr ResponseWriter) {
+pub fn (mut ls Vls) code_lens(params lsp.CodeLensParams, mut wr ResponseWriter) ?[]lsp.CodeLens {
 	if Feature.code_lens !in ls.enabled_features {
-		return
+		return none
 	}
 
-	// json.decode(lsp.CodeLensParams, params) or {
-	// 	ls.panic(err.msg())
-	// 	return
-	// }
-
 	// TODO: compute codelenses, for now return empty result
-	wr.write(jsonrpc.null)
+	return none
 }

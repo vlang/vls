@@ -1,6 +1,5 @@
 module server
 
-import json
 import lsp
 import os
 import analyzer
@@ -19,15 +18,10 @@ fn (mut ls Vls) analyze_file(file File) {
 	}
 }
 
-fn (mut ls Vls) did_open(_ string, params string, mut wr ResponseWriter) {
-	did_open_params := json.decode(lsp.DidOpenTextDocumentParams, params) or {
-		ls.panic(err.msg(), mut wr)
-		return
-	}
-
+pub fn (mut ls Vls) did_open(params lsp.DidOpenTextDocumentParams, mut wr ResponseWriter) {
 	ls.parser.reset()
-	src := did_open_params.text_document.text
-	uri := did_open_params.text_document.uri
+	src := params.text_document.text
+	uri := params.text_document.uri
 	project_dir := uri.dir_path()
 	mut should_scan_whole_dir := false
 
@@ -97,23 +91,18 @@ fn (mut ls Vls) did_open(_ string, params string, mut wr ResponseWriter) {
 	}
 }
 
-fn (mut ls Vls) did_change(_ string, params string, mut wr ResponseWriter) {
-	did_change_params := json.decode(lsp.DidChangeTextDocumentParams, params) or {
-		ls.panic(err.msg(), mut wr)
-		return
-	}
-
-	uri := did_change_params.text_document.uri
+pub fn (mut ls Vls) did_change(params lsp.DidChangeTextDocumentParams, mut wr ResponseWriter) {
+	uri := params.text_document.uri
 	if !ls.store.is_file_active(uri.path()) {
 		ls.parser.reset()
 	}
 
-	ls.store.set_active_file_path(uri.path(), did_change_params.text_document.version)
+	ls.store.set_active_file_path(uri.path(), params.text_document.version)
 
 	mut new_src := ls.files[uri].source
 	publish_diagnostics(uri, []lsp.Diagnostic{}, mut wr)
 
-	for content_change in did_change_params.content_changes {
+	for content_change in params.content_changes {
 		start_idx := compute_offset(new_src, content_change.range.start.line, content_change.range.start.character)
 		old_end_idx := compute_offset(new_src, content_change.range.end.line, content_change.range.end.character)
 		new_end_idx := start_idx + content_change.text.len
@@ -170,7 +159,7 @@ fn (mut ls Vls) did_change(_ string, params string, mut wr ResponseWriter) {
 	// wr.log_message('new tree: ${new_tree.root_node().sexpr_str()}', .info)
 	ls.files[uri].tree = new_tree
 	ls.files[uri].source = new_src
-	ls.files[uri].version = did_change_params.text_document.version
+	ls.files[uri].version = params.text_document.version
 
 	// $if !test {
 	// 	wr.log_message(ls.store.imports.str(), .info)
@@ -178,14 +167,8 @@ fn (mut ls Vls) did_change(_ string, params string, mut wr ResponseWriter) {
 	// }
 }
 
-[manualfree]
-fn (mut ls Vls) did_close(_ string, params string, mut wr ResponseWriter) {
-	did_close_params := json.decode(lsp.DidCloseTextDocumentParams, params) or {
-		ls.panic(err.msg(), mut wr)
-		return
-	}
-
-	uri := did_close_params.text_document.uri
+pub fn (mut ls Vls) did_close(params lsp.DidCloseTextDocumentParams, mut wr ResponseWriter) {
+	uri := params.text_document.uri
 	// unsafe {
 	// 	ls.files[uri].free()
 	// 	ls.store.opened_scopes[uri.path()].free()
@@ -206,13 +189,8 @@ fn (mut ls Vls) did_close(_ string, params string, mut wr ResponseWriter) {
 	}
 }
 
-fn (mut ls Vls) did_save(id string, params string, mut wr ResponseWriter) {
-	did_save_params := json.decode(lsp.DidSaveTextDocumentParams, params) or {
-		ls.panic(err.msg(), mut wr)
-		return
-	}
-	uri := did_save_params.text_document.uri
-	if v_check_results := ls.exec_v_diagnostics(uri) {
-		publish_diagnostics(uri, v_check_results, mut wr)
+pub fn (mut ls Vls) did_save(params lsp.DidSaveTextDocumentParams, mut wr ResponseWriter) {
+	if v_check_results := ls.exec_v_diagnostics(params.text_document.uri) {
+		publish_diagnostics(params.text_document.uri, v_check_results, mut wr)
 	}
 }

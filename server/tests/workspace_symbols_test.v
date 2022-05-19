@@ -54,12 +54,13 @@ const workspace_symbols_result = [
 ]
 
 fn test_workspace_symbols() ? {
+	mut ls := server.new()
 	mut t := &test_utils.Tester{
 		test_files_dir: test_utils.get_test_files_path(@FILE)
 		folder_name: 'workspace_symbols'
-		client: new_test_client(server.new())
+		client: new_test_client(ls)
 	}
-
+	mut writer := t.client.server.writer()
 	test_files := t.initialize() ?
 	for file in test_files {
 		// open document
@@ -70,6 +71,6 @@ fn test_workspace_symbols() ? {
 	}
 
 	assert t.is_ok()
-	symbols := t.client.send<lsp.WorkspaceSymbolParams, []lsp.SymbolInformation>('workspace/symbol', lsp.WorkspaceSymbolParams{}) ?
+	symbols := ls.workspace_symbol(lsp.WorkspaceSymbolParams{}, mut writer)
 	assert symbols == workspace_symbols_result
 }

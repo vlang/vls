@@ -1,5 +1,6 @@
 module server
 
+import json
 import jsonrpc
 import lsp
 import lsp.log
@@ -96,7 +97,6 @@ mut:
 	parser           &C.TSParser
 	store            analyzer.Store
 	status           ServerStatus = .off
-	files            map[string]File
 	root_uri         lsp.DocumentUri
 	is_typing        bool
 	typing_ch        chan int
@@ -106,6 +106,8 @@ mut:
 	shutdown_timeout time.Duration = 5 * time.minute
 	client_pid       int
 	// client_capabilities lsp.ClientCapabilities
+pub mut:
+	files            map[string]File
 }
 
 pub fn new() &Vls {
@@ -124,7 +126,17 @@ pub fn new() &Vls {
 	return inst
 }
 
-pub fn (mut ls Vls) handle_jsonrpc(request &jsonrpc.Request, mut wr jsonrpc.ResponseWriter) ? {
+fn (mut wr ResponseWriter) wrap_error(err IError) IError {
+	if err is none {
+		return err
+	}
+	wr.log_message(err.msg(), .error)
+	return none
+}
+
+pub fn (mut ls Vls) handle_jsonrpc(request &jsonrpc.Request, mut rw jsonrpc.ResponseWriter) ? {
+	mut w := unsafe { &ResponseWriter(rw) }
+
 	// The server will log a send request/notification
 	// log based on the the received payload since the spec
 	// doesn't indicate a way to log on the client side and
@@ -138,7 +150,7 @@ pub fn (mut ls Vls) handle_jsonrpc(request &jsonrpc.Request, mut wr jsonrpc.Resp
 		// a shutdown request is allowed before server init
 		// but we'll just put it here since we want to formally
 		// shutdown the server after a certain timeout period.
-		ls.shutdown(request.id, mut wr)
+		ls.shutdown(mut rw)
 	} else if ls.status == .initialized {
 		match request.method {
 			// not only requests but also notifications
@@ -148,70 +160,123 @@ pub fn (mut ls Vls) handle_jsonrpc(request &jsonrpc.Request, mut wr jsonrpc.Resp
 				// ls.exit()
 			}
 			'textDocument/didOpen' {
-				ls.did_open(request.id, request.params, mut wr)
+				params := json.decode(lsp.DidOpenTextDocumentParams, request.params) ?
+				ls.did_open(params, mut rw)
 			}
 			'textDocument/didSave' {
-				ls.did_save(request.id, request.params, mut wr)
+				params := json.decode(lsp.DidSaveTextDocumentParams, request.params) ?
+				ls.did_save(params, mut rw)
 			}
 			'textDocument/didChange' {
+				params := json.decode(lsp.DidChangeTextDocumentParams, request.params) ?
 				ls.typing_ch <- 1
-				ls.did_change(request.id, request.params, mut wr)
+				ls.did_change(params, mut rw)
 			}
 			'textDocument/didClose' {
-				ls.did_close(request.id, request.params, mut wr)
+				params := json.decode(lsp.DidCloseTextDocumentParams, request.params) ?
+				ls.did_close(params, mut rw)
 			}
 			'textDocument/formatting' {
-				ls.formatting(request.id, request.params, mut wr)
+				params := json.decode(lsp.DocumentFormattingParams, request.params) or {
+					return w.wrap_error(err)
+				}
+				w.write(ls.formatting(params, mut rw) or {
+					return w.wrap_error(err)
+				})
 			}
 			'textDocument/documentSymbol' {
-				ls.document_symbol(request.id, request.params, mut wr)
+				params := json.decode(lsp.DocumentSymbolParams, request.params) or {
+					return w.wrap_error(err)
+				}
+				w.write(ls.document_symbol(params, mut rw) or {
+					return w.wrap_error(err)
+				})
 			}
 			'workspace/symbol' {
-				ls.workspace_symbol(request.id, request.params, mut wr)
+				// params := json.decode(lsp.WorkspaceSymbolParams, request.params) or {
+				// 	return w.wrap_error(err)
+				// }
+				ls.workspace_symbol(lsp.WorkspaceSymbolParams{}, mut rw)
 			}
 			'textDocument/signatureHelp' {
-				ls.signature_help(request.id, request.params, mut wr)
+				params := json.decode(lsp.SignatureHelpParams, request.params) or {
+					return w.wrap_error(err)
+				}
+				w.write(ls.signature_help(params, mut rw) or {
+					return w.wrap_error(err)
+				})
 			}
 			'textDocument/completion' {
-				ls.completion(request.id, request.params, mut wr)
+				params := json.decode(lsp.CompletionParams, request.params) or {
+					return w.wrap_error(err)
+				}
+				w.write(ls.completion(params, mut rw) or {
+					return w.wrap_error(err)
+				})
 			}
 			'textDocument/hover' {
-				ls.hover(request.id, request.params, mut wr)
+				params := json.decode(lsp.HoverParams, request.params) or {
+					return w.wrap_error(err)
+				}
+				w.write(ls.hover(params, mut rw) or {
+					return w.wrap_error(err)
+				})
 			}
 			'textDocument/foldingRange' {
-				ls.folding_range(request.id, request.params, mut wr)
+				params := json.decode(lsp.FoldingRangeParams, request.params) or {
+					return w.wrap_error(err)
+				}
+				w.write(ls.folding_range(params, mut rw) or {
+					return w.wrap_error(err)
+				})
 			}
 			'textDocument/definition' {
-				ls.definition(request.id, request.params, mut wr)
+				params := json.decode(lsp.TextDocumentPositionParams, request.params) or {
+					return w.wrap_error(err)
+				}
+				w.write(ls.definition(params, mut rw) or {
+					return w.wrap_error(err)
+				})
 			}
 			'textDocument/implementation' {
-				ls.implementation(request.id, request.params, mut wr)
+				params := json.decode(lsp.TextDocumentPositionParams, request.params) or {
+					return w.wrap_error(err)
+				}
+				w.write(ls.implementation(params, mut rw) or {
+					return w.wrap_error(err)
+				})
 			}
 			'workspace/didChangeWatchedFiles' {
-				ls.did_change_watched_files(request.params, mut wr)
+				params := json.decode(lsp.DidChangeWatchedFilesParams, request.params) ?
+				ls.did_change_watched_files(params, mut rw)
 			}
 			'textDocument/codeLens' {
-				ls.code_lens(request.id, request.params, mut wr)
+				// params := json.decode(lsp.CodeLensParams, request.params) or {
+				// 	return w.wrap_error(err)
+				// }
+				w.write(ls.code_lens(lsp.CodeLensParams{}, mut rw) or {
+					return w.wrap_error(err)
+				})
 			}
 			else {
-				return jsonrpc.response_error(jsonrpc.method_not_found).err()
+				return jsonrpc.method_not_found
 			}
 		}
 	} else {
 		match request.method {
 			'exit' {
-				ls.exit(mut wr)
+				ls.exit(mut rw)
 			}
 			'initialize' {
-				ls.initialize(request.id, request.params, mut wr)
+				params := json.decode(lsp.InitializeParams, request.params) ?
+				w.write(ls.initialize(params, mut rw))
 			}
 			else {
-				err_type := if ls.status == .shutdown {
-					jsonrpc.invalid_request
+				if ls.status == .shutdown {
+					return jsonrpc.invalid_request
 				} else {
-					jsonrpc.server_not_initialized
+					return jsonrpc.server_not_initialized
 				}
-				return jsonrpc.response_error(err_type).err()
 			}
 		}
 	}
@@ -281,11 +346,11 @@ pub fn monitor_changes(mut ls Vls, mut resp_wr ResponseWriter) {
 					timeout_sw.stop()
 				} else if ls.status == .off && ls.shutdown_timeout != 0
 					&& timeout_sw.elapsed() >= ls.shutdown_timeout {
-					ls.shutdown('', mut resp_wr)
+					ls.shutdown(mut resp_wr)
 				}
 
 				if ls.client_pid != 0 && !is_proc_exists(ls.client_pid) {
-					ls.shutdown('', mut resp_wr)
+					ls.shutdown(mut resp_wr)
 				} else if !ls.is_typing {
 					continue
 				}
