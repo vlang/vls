@@ -97,7 +97,6 @@ mut:
 	parser           &C.TSParser
 	store            analyzer.Store
 	status           ServerStatus = .off
-	files            map[string]File
 	root_uri         lsp.DocumentUri
 	is_typing        bool
 	typing_ch        chan int
@@ -107,6 +106,8 @@ mut:
 	shutdown_timeout time.Duration = 5 * time.minute
 	client_pid       int
 	// client_capabilities lsp.ClientCapabilities
+pub mut:
+	files            map[string]File
 }
 
 pub fn new() &Vls {
