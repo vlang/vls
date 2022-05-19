@@ -79,7 +79,7 @@ fn (mut ls Vls) did_change_watched_files(params string, mut wr ResponseWriter) {
 				if next_change := changes[i + 1] {
 					// is_rename is set to true if next change event is created
 					// and the same as the current uri
-					is_rename = next_change.typ == .created && next_change.uri == change.uri
+					is_rename = next_change.typ == .created
 					continue
 				}
 
