@@ -250,10 +250,10 @@ pub fn (mut ls Vls) handle_jsonrpc(request &jsonrpc.Request, mut rw jsonrpc.Resp
 				ls.did_change_watched_files(params, mut rw)
 			}
 			'textDocument/codeLens' {
-				params := json.decode(lsp.CodeLensParams, request.params) or {
-					return w.wrap_error(err)
-				}
-				w.write(ls.code_lens(params, mut rw) or {
+				// params := json.decode(lsp.CodeLensParams, request.params) or {
+				// 	return w.wrap_error(err)
+				// }
+				w.write(ls.code_lens(lsp.CodeLensParams{}, mut rw) or {
 					return w.wrap_error(err)
 				})
 			}
