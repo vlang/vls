@@ -380,12 +380,14 @@ const definition_results = {
 }
 
 fn test_definition() ? {
+	mut ls := server.new()
 	mut t := &test_utils.Tester{
 		test_files_dir: test_utils.get_test_files_path(@FILE)
 		folder_name: 'definition'
-		client: new_test_client(server.new())
+		client: new_test_client(ls)
 	}
 
+	mut writer := t.client.server.writer()
 	test_files := t.initialize() ?
 	for file in test_files {
 		test_name := file.file_name
@@ -407,10 +409,10 @@ fn test_definition() ? {
 			continue
 		}
 		// initiate definition request
-		actual := t.client.send<lsp.TextDocumentPositionParams, []lsp.LocationLink>('textDocument/definition', lsp.TextDocumentPositionParams{
+		actual := ls.definition(lsp.TextDocumentPositionParams{
 			text_document: doc_id
 			position: definition_inputs[test_name]
-		}) ?
+		}, mut writer) ?
 
 		// compare content
 		if test_name in definition_should_return_null {

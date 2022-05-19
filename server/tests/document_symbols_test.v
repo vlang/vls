@@ -81,12 +81,13 @@ const doc_symbols_result = {
 }
 
 fn test_document_symbols() ? {
+	mut ls := server.new()
 	mut t := &test_utils.Tester{
 		test_files_dir: test_utils.get_test_files_path(@FILE)
 		folder_name: 'document_symbols'
-		client: new_test_client(server.new())
+		client: new_test_client(ls)
 	}
-
+	mut writer := t.client.server.writer()
 	test_files := t.initialize() ?
 	for file in test_files {
 		// open document
@@ -96,9 +97,9 @@ fn test_document_symbols() ? {
 		}
 
 		// initiate formatting request
-		actual := t.client.send<lsp.DocumentSymbolParams, []lsp.SymbolInformation>('textDocument/documentSymbol', lsp.DocumentSymbolParams{
+		actual := ls.document_symbol(lsp.DocumentSymbolParams{
 			text_document: doc_id
-		}) ?
+		}, mut writer) ?
 
 		// compare content
 		expected := doc_symbols_result[file.file_name].map(lsp.SymbolInformation{

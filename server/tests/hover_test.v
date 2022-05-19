@@ -216,12 +216,13 @@ const hover_results = {
 }
 
 fn test_hover() ? {
+	mut ls := server.new()
 	mut t := &test_utils.Tester{
 		test_files_dir: test_utils.get_test_files_path(@FILE)
 		folder_name: 'hover'
-		client: new_test_client(server.new())
+		client: new_test_client(ls)
 	}
-
+	mut writer := t.client.server.writer()
 	test_files := t.initialize() ?
 	for file in test_files {
 		test_name := file.file_name
@@ -242,17 +243,16 @@ fn test_hover() ? {
 			continue
 		}
 		// initiate hover request
-		actual := t.client.send<lsp.HoverParams, lsp.Hover>('textDocument/hover', lsp.HoverParams{
+		if actual := ls.hover(lsp.HoverParams{
 			...hover_inputs[test_name]
 			text_document: doc_id
-		}) ?
-
-		// compare content
-		if test_name in hover_should_return_null {
-		// TODO: assert result == 'null'
-			assert false
-		} else {
+		}, mut writer) {
+			// compare content
 			assert actual == hover_results[test_name]
+		} else {
+			if test_name in hover_should_return_null {
+				assert err is none
+			}
 		}
 		// Delete document
 		t.close_document(doc_id) or {

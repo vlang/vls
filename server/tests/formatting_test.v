@@ -13,7 +13,7 @@ fn test_formatting() ? {
 		folder_name: 'formatting'
 		client: new_test_client(ls)
 	}
-
+	mut writer := t.client.server.writer()
 	test_files := t.initialize() ?
 	for file in test_files {
 		exp_file_path := file.file_path.replace('.vv', '.out')
@@ -34,14 +34,10 @@ fn test_formatting() ? {
 		}
 		exp_content := os.read_file(exp_file_path) or { '' }
 		// initiate formatting request
-		actual := t.client.send<lsp.DocumentFormattingParams, []lsp.TextEdit>('textDocument/formatting', lsp.DocumentFormattingParams{
+		if actual := ls.formatting(lsp.DocumentFormattingParams{
 			text_document: doc_id
-		}) ?
-
-		// compare content
-		if file.file_path.ends_with('empty.vv') {
-			// assert io.result() == 'null'
-		} else {
+		}, mut writer) {
+			// compare content
 			assert actual == [
 				lsp.TextEdit{
 					range: lsp.Range{
@@ -57,6 +53,10 @@ fn test_formatting() ? {
 					new_text: exp_content
 				},
 			]
+		} else {
+			if file.file_path.ends_with('empty.vv') {
+				assert err is none
+			}
 		}
 		// Delete document
 		t.close_document(doc_id) or {

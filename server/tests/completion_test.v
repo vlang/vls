@@ -424,12 +424,14 @@ const completion_results = {
 }
 
 fn test_completion() ? {
+	mut ls := server.new()
 	mut t := &test_utils.Tester{
 		test_files_dir: test_utils.get_test_files_path(@FILE)
 		folder_name: 'completion'
-		client: new_test_client(server.new())
+		client: new_test_client(ls)
 	}
 
+	mut writer := t.client.server.writer()
 	test_files := t.initialize() ?
 	for file in test_files {
 		test_name := file.file_name
@@ -449,11 +451,13 @@ fn test_completion() ? {
 			t.fail(file, err.msg())
 			continue
 		}
+
 		// initiate completion request
-		actual := t.client.send<lsp.CompletionParams, []lsp.CompletionItem>('textDocument/completion', lsp.CompletionParams{
+		actual := ls.completion(lsp.CompletionParams{
 			...completion_inputs[test_name]
 			text_document: doc_id
-		}) ?
+		}, mut writer) ?
+
 		// compare content
 		expected := completion_results[test_name]
 		assert actual == expected
