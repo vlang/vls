@@ -8,6 +8,8 @@ import strings
 import io
 
 const max_stdio_logging_count = 15
+const start_template_marker = '<!-- If you have a report file, copy and replace the entire contents of the file here. -->\n'
+const bug_issue_template = $embed_file('../../.github/ISSUE_TEMPLATE/bug_report.md').to_string().all_after_last(start_template_marker)
 
 struct Logger {
 mut:
@@ -191,34 +193,26 @@ fn (mut host VlsHost) generate_report() ?string {
 	vdoctor.wait()
 	vdoctor_info := vdoctor.stdout_slurp().trim_space()
 
-	report_file.writeln('<!-- Copy and paste the contents of this file to https://github.com/vlang/vls/issues/new -->') ?
-	report_file.writeln('## System Information') ?
-	report_file.writeln('### V doctor\n```\n$vdoctor_info\n```\n') ?
-	report_file.writeln('### VLS info \n```\nvls version: $server.meta.version\nvls server arguments: ${host.child.args.join(' ')}\n```\n') ?
-
-	// Problem Description
-	report_file.writeln('## Problem Description') ?
-	report_file.writeln('<!-- Add your description. What did you do? What file did you open? -->') ?
-	report_file.writeln('<!-- Images, videos, of the demo can be put here -->\n') ?
-
-	// Expected Output
-	report_file.writeln('## Expected Output') ?
-	report_file.writeln('<!-- What is the expected output/behavior when executing an action? -->\n') ?
-
 	// Actual Output
 	actual_out := host.stderr_logger.get_text()
-	report_file.writeln('## Actual Output') ?
-	if actual_out.len != 0 {
-		report_file.writeln('```\n$actual_out\n```\n') ?
+	final_err_out := if actual_out.len != 0 {
+		'```\n$actual_out\n```'
 	} else {
-		report_file.writeln('N/A\n') ?
+		'N/A'
 	}
-	report_file.writeln('## Steps to Reproduce') ?
-	report_file.writeln('<!-- List the steps in order to reproduce the problem -->\n') ?
 
 	// Last LSP Requests
-	report_file.writeln('## Last Recorded LSP Requests') ?
-	report_file.writeln('### Request\n```\n$host.stdin_logger.get_text()\n```\n') ?
-	report_file.writeln('### Response\n```\n$host.stdout_logger.get_text()\n```\n') ?
+	mut lsp_logs_section := ''
+	lsp_logs_section += '### Request\n```\n$host.stdin_logger.get_text()\n```\n'
+	lsp_logs_section += '### Response\n```\n$host.stdout_logger.get_text()\n```\n'
+
+	// Final output
+	final_output := bug_issue_template
+		.replace("Paste the output of 'v doctor' here", vdoctor_info)
+		.replace("Paste the output of 'vls --version' here", 'vls version: $server.meta.version\nvls server arguments: ${host.child.args.join(' ')}')
+		.replace('<!-- What is the actual output displayed in the console/editor? -->', final_err_out)
+		.replace('<!-- If you have a copy vls.log, you can drag them here. -->', lsp_logs_section)
+
+	report_file.writeln(final_output) ?
 	return report_file_path
 }
