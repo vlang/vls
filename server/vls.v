@@ -106,7 +106,7 @@ mut:
 	shutdown_timeout time.Duration = 5 * time.minute
 	client_pid       int
 	// client_capabilities lsp.ClientCapabilities
-	reporter         analyzer.Reporter
+	reporter         &DiagnosticReporter
 pub mut:
 	files            map[string]File
 }
@@ -114,9 +114,7 @@ pub mut:
 pub fn new() &Vls {
 	mut parser := tree_sitter.new_parser()
 	parser.set_language(v.language)
-
-	mut reporter := analyzer.Collector{} 
-
+	reporter := &DiagnosticReporter{} 
 	inst := &Vls{
 		parser: parser
 		reporter: reporter
@@ -363,7 +361,6 @@ pub fn monitor_changes(mut ls Vls, mut resp_wr ResponseWriter) {
 
 				uri := lsp.document_uri_from_path(ls.store.cur_file_path)
 				ls.analyze_file(ls.files[uri])
-				// ls.show_diagnostics(uri)
 				ls.is_typing = false
 			}
 		}

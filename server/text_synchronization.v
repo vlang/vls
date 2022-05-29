@@ -5,7 +5,7 @@ import os
 import analyzer
 
 fn (mut ls Vls) analyze_file(file File) {
-	// ls.store.clear_messages()
+	ls.reporter.clear(file.uri)
 	file_path := file.uri.path()
 	ls.store.set_active_file_path(file_path, file.version)
 	ls.store.import_modules_from_tree(file.tree, file.source, os.join_path(file.uri.dir_path(),
@@ -78,7 +78,6 @@ pub fn (mut ls Vls) did_open(params lsp.DidOpenTextDocumentParams, mut wr Respon
 		// Analyze only if both source and tree exists
 		if should_be_analyzed {
 			ls.analyze_file(ls.files[file_uri])
-			// ls.show_diagnostics(file_uri)
 		}
 
 		// wr.log_message('$file_uri | has_file: $has_file | should_be_analyzed: $should_be_analyzed',
@@ -86,9 +85,8 @@ pub fn (mut ls Vls) did_open(params lsp.DidOpenTextDocumentParams, mut wr Respon
 	}
 
 	ls.store.set_active_file_path(uri.path(), ls.files[uri].version)
-	if v_check_results := ls.exec_v_diagnostics(uri) {
-		publish_diagnostics(uri, v_check_results, mut wr)
-	}
+	ls.exec_v_diagnostics(uri) or {}
+	ls.reporter.publish(mut wr, uri)
 }
 
 pub fn (mut ls Vls) did_change(params lsp.DidChangeTextDocumentParams, mut wr ResponseWriter) {
@@ -100,7 +98,6 @@ pub fn (mut ls Vls) did_change(params lsp.DidChangeTextDocumentParams, mut wr Re
 	ls.store.set_active_file_path(uri.path(), params.text_document.version)
 
 	mut new_src := ls.files[uri].source
-	publish_diagnostics(uri, []lsp.Diagnostic{}, mut wr)
 
 	for content_change in params.content_changes {
 		start_idx := compute_offset(new_src, content_change.range.start.line, content_change.range.start.character)
@@ -169,10 +166,6 @@ pub fn (mut ls Vls) did_change(params lsp.DidChangeTextDocumentParams, mut wr Re
 
 pub fn (mut ls Vls) did_close(params lsp.DidCloseTextDocumentParams, mut wr ResponseWriter) {
 	uri := params.text_document.uri
-	// unsafe {
-	// 	ls.files[uri].free()
-	// 	ls.store.opened_scopes[uri.path()].free()
-	// }
 	ls.files.delete(uri)
 	ls.store.opened_scopes.delete(uri.path())
 
@@ -185,12 +178,14 @@ pub fn (mut ls Vls) did_close(params lsp.DidCloseTextDocumentParams, mut wr Resp
 	// - If a file opened is outside the root path or workspace.
 	// - If there are no remaining files opened on a specific folder.
 	if ls.files.len == 0 || !uri.starts_with(ls.root_uri) {
-		publish_diagnostics(uri, []lsp.Diagnostic{}, mut wr)
+		wr.publish_diagnostics(uri: uri, diagnostics: empty_diagnostic)
+		ls.reporter.clear(uri)
 	}
 }
 
 pub fn (mut ls Vls) did_save(params lsp.DidSaveTextDocumentParams, mut wr ResponseWriter) {
-	if v_check_results := ls.exec_v_diagnostics(params.text_document.uri) {
-		publish_diagnostics(params.text_document.uri, v_check_results, mut wr)
-	}
+	uri := params.text_document.uri
+	ls.reporter.clear(uri)
+	ls.exec_v_diagnostics(uri) or {}
+	ls.reporter.publish(mut wr, uri)
 }
