@@ -70,12 +70,10 @@ pub fn (mut s Server) respond() ? {
 }
 
 fn (mut s Server) internal_respond(mut base_rw ResponseWriter) ? {
-	s.stream.read(mut s.req_buf) or {
-		unsafe { s.req_buf.free() }
-		return err
-	}
+	defer { s.req_buf.go_back_to(0) }
+	s.stream.read(mut s.req_buf) ?
 
-	req := s.process_raw_request(s.req_buf.str()) or {
+	req := s.process_raw_request(s.req_buf.after(0)) or {
 		base_rw.write_error(response_error(parse_error))
 		return err
 	}
