@@ -1,6 +1,6 @@
 module analyzer
 
-pub enum Kind {
+pub enum ReportKind {
 	error
 	warning
 	notice
@@ -8,7 +8,7 @@ pub enum Kind {
 
 pub struct Report {
 pub:
-	kind      Kind
+	kind      ReportKind
 	message   string
 	file_path string
 	source    string
