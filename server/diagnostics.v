@@ -89,25 +89,25 @@ fn (mut ls Vls) show_diagnostics(uri lsp.DocumentUri, mut wr ResponseWriter) {
 	// TODO: make reports as a map, do not clear it
 	// use
 	mut diagnostics := []lsp.Diagnostic{}
-	fs_path := uri.path()
+	// fs_path := uri.path()
 
-	for msg in ls.store.messages {
-		if msg.file_path != fs_path {
-			continue
-		}
+	// for msg in ls.store.messages {
+	// 	if msg.file_path != fs_path {
+	// 		continue
+	// 	}
 
-		kind := match msg.kind {
-			.error { lsp.DiagnosticSeverity.error }
-			.warning { lsp.DiagnosticSeverity.warning }
-			.notice { lsp.DiagnosticSeverity.information }
-		}
+	// 	kind := match msg.kind {
+	// 		.error { lsp.DiagnosticSeverity.error }
+	// 		.warning { lsp.DiagnosticSeverity.warning }
+	// 		.notice { lsp.DiagnosticSeverity.information }
+	// 	}
 
-		diagnostics << lsp.Diagnostic{
-			range: tsrange_to_lsp_range(msg.range)
-			severity: kind
-			message: msg.content
-		}
-	}
+	// 	diagnostics << lsp.Diagnostic{
+	// 		range: tsrange_to_lsp_range(msg.range)
+	// 		severity: kind
+	// 		message: msg.content
+	// 	}
+	// }
 
 	publish_diagnostics(uri, diagnostics, mut wr)
 }

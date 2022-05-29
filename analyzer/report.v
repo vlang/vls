@@ -59,7 +59,8 @@ fn report_error(msg string, range C.TSRange) IError {
 pub fn (mut ss Store) report_error(err IError) {
 	if err is AnalyzerError {
 		ss.report(
-			content: err.msg
+			kind: .error
+			message: err.msg
 			range: err.range
 			file_path: ss.cur_file_path
 		)

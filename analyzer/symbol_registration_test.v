@@ -4,18 +4,23 @@ import tree_sitter_v as v
 import test_utils
 import benchmark
 import analyzer.an_test_utils
-import analyzer { Store, SymbolAnalyzer, new_tree_cursor, register_builtin_symbols }
+import analyzer { Collector, Store, SymbolAnalyzer, new_tree_cursor, register_builtin_symbols }
 
 fn test_symbol_registration() ? {
 	mut parser := tree_sitter.new_parser()
 	parser.set_language(v.language)
 
 	mut bench := benchmark.new_benchmark()
-	mut store := &Store{}
+	vlib_path := os.join_path(os.dir(os.getenv('VEXE')), 'vlib')
+	mut reporter := &Collector{}
+	mut store := &Store{
+		reporter: reporter
+		default_import_paths: [vlib_path]
+	}
 	mut builtin_import, _ := store.add_import(
 		resolved: true
 		module_name: 'builtin'
-		path: os.join_path(os.dir(os.getenv('VEXE')), 'vlib', 'builtin')
+		path: os.join_path(vlib_path, 'builtin')
 	)
 	mut imports := [builtin_import]
 	store.register_auto_import(builtin_import, '')
@@ -64,7 +69,7 @@ fn test_symbol_registration() ? {
 		tree := parser.parse_string(src)
 		sym_analyzer.src_text = src.bytes()
 		sym_analyzer.cursor = new_tree_cursor(tree.root_node())
-		symbols, _ := sym_analyzer.analyze()
+		symbols := sym_analyzer.analyze()
 		result := an_test_utils.sexpr_str_symbol_array(symbols)
 		assert test_utils.newlines_to_spaces(expected) == result
 		println(bench.step_message_ok(test_name))

@@ -106,6 +106,7 @@ mut:
 	shutdown_timeout time.Duration = 5 * time.minute
 	client_pid       int
 	// client_capabilities lsp.ClientCapabilities
+	reporter         analyzer.Reporter
 pub mut:
 	files            map[string]File
 }
@@ -114,9 +115,14 @@ pub fn new() &Vls {
 	mut parser := tree_sitter.new_parser()
 	parser.set_language(v.language)
 
+	mut reporter := analyzer.Collector{} 
+
 	inst := &Vls{
 		parser: parser
-		store: analyzer.Store{}
+		reporter: reporter
+		store: analyzer.Store{
+			reporter: reporter
+		}
 	}
 
 	$if test {

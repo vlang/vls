@@ -26,7 +26,9 @@ fn parse_content() &C.TSTree {
 
 fn test_scan_imports() ? {
 	tree := parse_content()
-	mut store := Store{}
+	mut store := &Store{
+		reporter: &Collector{}
+	}
 
 	store.set_active_file_path(analyzer.file_path, 1)
 	imports := store.scan_imports(tree, analyzer.sample_content_bytes)
@@ -37,7 +39,9 @@ fn test_scan_imports() ? {
 
 fn test_inject_paths_of_new_imports() ? {
 	tree := parse_content()
-	mut store := Store{}
+	mut store := &Store{
+		reporter: &Collector{}
+	}
 
 	store.set_active_file_path(analyzer.file_path, 1)
 	mut imports := store.scan_imports(tree, analyzer.sample_content_bytes)
@@ -54,7 +58,8 @@ fn test_inject_paths_of_new_imports() ? {
 
 fn test_import_modules_from_tree() ? {
 	tree := parse_content()
-	mut store := Store{
+	mut store := &Store{
+		reporter: &Collector{}
 		default_import_paths: analyzer.test_lookup_paths
 	}
 
@@ -84,7 +89,8 @@ fn test_import_modules_with_edits() ? {
 	'
 
 	mut tree := parser.parse_string(sample_content2)
-	mut store := Store{
+	mut store := &Store{
+		reporter: &Collector{}
 		default_import_paths: analyzer.test_lookup_paths
 	}
 	store.set_active_file_path(analyzer.file_path, 1)

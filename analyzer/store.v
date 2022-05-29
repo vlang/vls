@@ -9,6 +9,9 @@ pub struct Store {
 mut:
 	anon_fn_counter int = 1
 pub mut:
+	// Default reporter to be used
+	// Used for diagnostics
+	reporter      Reporter
 	// The current file used
 	// e.g. /dir/foo.v
 	cur_file_path string
@@ -33,8 +36,6 @@ pub mut:
 	// as basis for removing symbols/scopes/imports
 	// tree goes: tree[<full dir path>][]<full dir path>
 	dependency_tree depgraph.Tree
-	// Used for diagnostics
-	messages []Message
 	// Symbol table
 	// map goes: map[<full dir path>]map[]&Symbol
 	symbols map[string][]&Symbol
@@ -54,21 +55,9 @@ pub mut:
 	binded_symbol_locations []BindedSymbolLocation
 }
 
-// clear_messages clears the stored messages
-pub fn (mut ss Store) clear_messages() {
-	for i := 0; ss.messages.len != 0; {
-		// msg := ss.messages[i]
-		// unsafe {
-		// 	msg.content.free()
-		// }
-
-		ss.messages.delete(i)
-	}
-}
-
-// report inserts the message to the messages array
-pub fn (mut ss Store) report(msg Message) {
-	ss.messages.report(msg)
+// report inserts the report to the reporter
+pub fn (mut ss Store) report(report Report) {
+	ss.reporter.report(report)
 }
 
 // is_file_active returns a boolean that checks if the given
@@ -1089,7 +1078,7 @@ fn (mut ss Store) inject_paths_of_new_imports(mut new_imports []&Import, lookup_
 		if !new_import.resolved {
 			for file_path, range in new_import.ranges {
 				ss.report(
-					content: 'Module `$new_import.absolute_module_name` not found'
+					message: 'Module `$new_import.absolute_module_name` not found'
 					file_path: file_path
 					range: range
 				)

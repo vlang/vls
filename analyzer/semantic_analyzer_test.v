@@ -3,7 +3,7 @@ import tree_sitter
 import tree_sitter_v as v
 import test_utils
 import benchmark
-import analyzer { SemanticAnalyzer, Store, SymbolAnalyzer, new_tree_cursor, register_builtin_symbols }
+import analyzer { Collector, SemanticAnalyzer, Store, SymbolAnalyzer, new_tree_cursor, register_builtin_symbols }
 import analyzer.an_test_utils
 
 fn test_semantic_analysis() ? {
@@ -13,7 +13,11 @@ fn test_semantic_analysis() ? {
 	vlib_path := os.join_path(os.dir(os.getenv('VEXE')), 'vlib')
 
 	mut bench := benchmark.new_benchmark()
-	mut store := &Store{}
+	mut reporter := &Collector{}
+	mut store := &Store{
+		reporter: reporter
+		default_import_paths: [vlib_path]
+	}
 	mut builtin_import, _ := store.add_import(
 		resolved: true
 		module_name: 'builtin'
@@ -78,9 +82,9 @@ fn test_semantic_analysis() ? {
 		semantic_analyzer.src_text = src_bytes
 		semantic_analyzer.cursor = cursor
 
-		symbols, _ := sym_analyzer.analyze()
-		messages := semantic_analyzer.analyze()
-		result := an_test_utils.sexpr_str_messages(messages)
+		symbols := sym_analyzer.analyze()
+		semantic_analyzer.analyze()
+		result := an_test_utils.sexpr_str_reporter(reporter)
 
 		assert result == test_utils.newlines_to_spaces(expected)
 		println(bench.step_message_ok(test_name))

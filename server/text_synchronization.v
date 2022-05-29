@@ -5,7 +5,7 @@ import os
 import analyzer
 
 fn (mut ls Vls) analyze_file(file File) {
-	ls.store.clear_messages()
+	// ls.store.clear_messages()
 	file_path := file.uri.path()
 	ls.store.set_active_file_path(file_path, file.version)
 	ls.store.import_modules_from_tree(file.tree, file.source, os.join_path(file.uri.dir_path(),

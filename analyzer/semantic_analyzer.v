@@ -4,7 +4,6 @@ pub struct SemanticAnalyzer {
 pub mut:
 	cursor   TreeCursor
 	src_text []u8
-	messages []Message = []Message{cap: 100}
 	store    &Store     [required]
 	// skips the local scopes and registers only
 	// the top-level ones regardless of its
@@ -13,12 +12,12 @@ pub mut:
 }
 
 fn (mut an SemanticAnalyzer) report(msg string, node C.TSNode) {
-	an.messages.report(
-		content: msg
+	an.store.report(
+		kind: .error
+		message: msg
 		range: node.range()
 		file_path: an.store.cur_file_path
 	)
-	// an.store.report_error(report_error(msg, node.range()))
 }
 
 fn (mut an SemanticAnalyzer) import_decl(node C.TSNode) ? {
@@ -41,13 +40,11 @@ fn (mut an SemanticAnalyzer) import_decl(node C.TSNode) ? {
 		symbol_name := sym_node.code(an.src_text)
 		got_sym := an.store.symbols[module_path].get(symbol_name) or {
 			an.report('Symbol `$symbol_name` in module `$module_name` not found', sym_node)
-			// unsafe { symbol_name.free() }
 			continue
 		}
 
 		if int(got_sym.access) < int(SymbolAccess.public) {
 			an.report('Symbol `$symbol_name` in module `$module_name` not public', sym_node)
-			// unsafe { symbol_name.free() }
 			continue
 		}
 	}
@@ -94,22 +91,18 @@ pub fn (mut an SemanticAnalyzer) top_level_statement(current_node C.TSNode) {
 	}
 }
 
-pub fn (mut an SemanticAnalyzer) analyze() []Message {
-	defer {
-		an.messages.clear()
-	}
+pub fn (mut an SemanticAnalyzer) analyze() {
 	for got_node in an.cursor {
 		an.top_level_statement(got_node)
 	}
-	return an.messages.clone()
 }
 
 // analyze analyzes the given tree
-pub fn (mut store Store) analyze(tree &C.TSTree, src_text []u8) []Message {
+pub fn (mut store Store) analyze(tree &C.TSTree, src_text []u8) {
 	mut an := SemanticAnalyzer{
 		store: unsafe { store }
 		src_text: src_text
 		cursor: new_tree_cursor(tree.root_node())
 	}
-	return an.analyze()
+	an.analyze()
 }
