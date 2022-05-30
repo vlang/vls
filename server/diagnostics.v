@@ -122,6 +122,13 @@ fn (mut ls Vls) exec_v_diagnostics(uri lsp.DocumentUri) ?int {
 	mut count := 0
 	for line in err {
 		mut report := parse_v_diagnostic(line) or { continue }
+		if file_path.ends_with(report.file_path) {
+			report = Report{
+				...report
+				file_path: file_path
+			}
+		}
+
 		if file := ls.files[report.file_path] {
 			root_node := file.tree.root_node()
 			node_point := report.range.start_point
