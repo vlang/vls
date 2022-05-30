@@ -81,7 +81,7 @@ pub fn (mut tc TestClient) notify<T>(method string, params T) ? {
 pub struct TestStream {
 mut:
 	notif_idx int
-	notif_buf [][]u8 = [][]u8{cap: 10, len: 10}
+	notif_buf [][]u8 = [][]u8{cap: 20, len: 20}
 	resp_buf  map[string]TestResponse
 	req_buf datatypes.Queue<[]u8>
 }
@@ -100,10 +100,12 @@ pub fn (mut rw TestStream) write(buf []u8) ?int {
 		resp := json.decode(TestResponse, raw_json_content) ?
 		rw.resp_buf[resp.raw_id] = resp
 	} else if raw_json_content.contains('"params":') {
-		idx := rw.notif_idx % 10
-		if rw.notif_buf[idx].len != 0 {
-			rw.notif_buf[idx].clear()
-		}
+		idx := rw.notif_idx % 20
+		for i := idx + 1; i < rw.notif_buf.len; i++ {
+			if rw.notif_buf[i].len != 0 {
+				rw.notif_buf[idx].clear()
+			}
+		} 
 		rw.notif_buf[idx] << buf
 		rw.notif_idx++
 	} else {
