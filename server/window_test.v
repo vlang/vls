@@ -9,7 +9,7 @@ const (
 	show_message_method = 'window/showMessage'
 )
 
-fn new_client() (&TestClient, server.ResponseWriter) {
+fn new_client() (&TestClient, &server.ResponseWriter) {
 	client := new_test_client(server.new())
 	return client, client.server.writer()
 }

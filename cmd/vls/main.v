@@ -69,7 +69,7 @@ fn run_host(cmd cli.Command) ? {
 
 	mut host := VlsHost{
 		server: jrpc_server
-		writer: server.ResponseWriter(jrpc_server.writer())
+		writer: jrpc_server.writer(own_buffer: true)
 		child: new_vls_process(...server_args)
 		client: &net.TcpConn(0)
 		client_port: client_port
@@ -147,13 +147,13 @@ fn run_server(cmd cli.Command, is_child bool) ? {
 	ls.set_features(enable_features, true) ?
 	ls.set_features(disable_features, false) ?
 
-	mut rw := server.ResponseWriter(jrpc_server.writer())
+	mut rw := unsafe { &server.ResponseWriter(jrpc_server.writer(own_buffer: true)) }
 
 	// Show message that VLS is not yet ready!
 	rw.show_message('VLS is a work-in-progress, pre-alpha language server. It may not be guaranteed to work reliably due to memory issues and other related factors. We encourage you to submit an issue if you encounter any problems.',
 		.warning)
 
-	go server.monitor_changes(mut ls, mut &rw)
+	go server.monitor_changes(mut ls, mut rw)
 
 	jrpc_server.start()
 }
