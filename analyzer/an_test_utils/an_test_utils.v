@@ -1,7 +1,7 @@
 module an_test_utils
 
 import strings
-import analyzer { Message, ScopeTree, Symbol, Collector, Report }
+import analyzer { ScopeTree, Symbol, Collector, Report }
 // import tree_sitter
 
 // sexpr_str returns the S expression-like stringified
