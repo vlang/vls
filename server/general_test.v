@@ -90,8 +90,8 @@ fn test_setup_logger() ? {
 	notif := io.stream.notification_at<lsp.ShowMessageParams>(0) ?
 	assert notif.method == 'window/showMessage'
 
-	expected_err_path := os.join_path('non_existent', 'path', 'vls.log').replace(r'\', r'\\')
-	expected_alt_log_path := os.join_path(os.home_dir(), 'vls__non_existent_path.log').replace(r'\', r'\\')
+	expected_err_path := os.join_path('non_existent', 'path', 'vls.log')
+	expected_alt_log_path := os.join_path(os.home_dir(), 'vls__non_existent_path.log')
 	assert notif.params == lsp.ShowMessageParams{
 		@type: .error
 		message: 'Cannot save log to ${expected_err_path}. Saving log to $expected_alt_log_path'
