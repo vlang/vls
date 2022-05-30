@@ -102,9 +102,14 @@ fn (mut s Server) internal_respond(mut base_rw ResponseWriter) ? {
 	}
 }
 
+[params]
+pub struct NewWriterConfig {
+	own_buffer bool
+}
+
 // writer returns the Server's current ResponseWriter
-pub fn (s &Server) writer() ResponseWriter {
-	return ResponseWriter{
+pub fn (s &Server) writer(cfg NewWriterConfig) &ResponseWriter {
+	return &ResponseWriter{
 		server: s
 		writer: io.MultiWriter{
 			writers: [
@@ -116,12 +121,12 @@ pub fn (s &Server) writer() ResponseWriter {
 				// passthrough between processes and does not need a
 				// "repackaging" of the outgoing data
 				Writer{
-					clen_sb: s.conlen_buf
+					clen_sb: if cfg.own_buffer { s.conlen_buf.clone() } else { s.conlen_buf }
 					read_writer: s.stream
 				}
 			]
 		}
-		sb: s.res_buf
+		sb: if cfg.own_buffer { s.res_buf.clone() } else { s.res_buf }
 	}
 }
 
