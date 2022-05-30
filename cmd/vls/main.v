@@ -117,9 +117,6 @@ fn validate_options(cmd cli.Command) ? {
 			if !os.is_dir(custom_vroot_path) {
 				return error('Provided VROOT is not a directory.')
 			}
-		} else {
-			// those who set --vroot without an accompanied string argument
-			return error('Provided VROOT is empty.')
 		}
 	}
 }
