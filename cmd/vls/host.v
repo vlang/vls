@@ -65,7 +65,7 @@ fn (mut lg Logger) get_text() string {
 struct VlsHost {
 mut:
 	server        &jsonrpc.Server
-	writer        server.ResponseWriter
+	writer        &server.ResponseWriter
 	child         &os.Process
 	client        io.ReaderWriter
 	client_port   int
