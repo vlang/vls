@@ -107,6 +107,7 @@ mut:
 	client_pid       int
 	// client_capabilities lsp.ClientCapabilities
 	reporter         &DiagnosticReporter
+	writer           &ResponseWriter = &ResponseWriter(0)
 pub mut:
 	files            map[string]File
 }
@@ -139,6 +140,11 @@ fn (mut wr ResponseWriter) wrap_error(err IError) IError {
 }
 
 pub fn (mut ls Vls) handle_jsonrpc(request &jsonrpc.Request, mut rw jsonrpc.ResponseWriter) ? {
+	// initialize writer upon receiving the first request
+	if isnil(ls.writer) {
+		ls.writer = rw.server.writer(own_buffer: true)
+	}	
+	
 	mut w := unsafe { &ResponseWriter(rw) }
 
 	// The server will log a send request/notification
