@@ -866,13 +866,12 @@ fn extract_parameter_list(node C.TSNode, mut store Store, src_text []u8) []&Symb
 }
 
 // analyze scans and returns a list of symbols and messages (errors/warnings)
-pub fn (mut sr SymbolAnalyzer) analyze() ([]&Symbol, []Message) {
+pub fn (mut sr SymbolAnalyzer) analyze() []&Symbol {
 	if cur_node := sr.cursor.current_node() {
 		sr.get_scope(cur_node) or {}
 	}
 
 	mut global_scope := sr.store.opened_scopes[sr.store.cur_file_path]
-	mut messages := []Message{cap: 100}
 	mut symbols := []&Symbol{cap: 255}
 	for got_node in sr.cursor {
 		mut syms := sr.top_level_decl(got_node) or {
@@ -896,16 +895,13 @@ pub fn (mut sr SymbolAnalyzer) analyze() ([]&Symbol, []Message) {
 			symbols << syms[i]
 		}
 	}
-	return symbols, messages
+	return symbols
 }
 
 // register_symbols_from_tree scans and registers all the symbols based on the given tree
 pub fn (mut store Store) register_symbols_from_tree(tree &C.TSTree, src_text []u8, is_import bool) {
 	mut sr := new_symbol_analyzer(store, tree.root_node(), src_text, is_import)
-	_, got_messages := sr.analyze()
-	for msg in got_messages {
-		store.report(msg)
-	}
+	sr.analyze()
 }
 
 // new_symbol_analyzer creates an instance of SymbolAnalyzer with the given store, tree, source, and is_import.

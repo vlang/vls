@@ -106,6 +106,8 @@ mut:
 	shutdown_timeout time.Duration = 5 * time.minute
 	client_pid       int
 	// client_capabilities lsp.ClientCapabilities
+	reporter         &DiagnosticReporter
+	writer           &ResponseWriter = &ResponseWriter(0)
 pub mut:
 	files            map[string]File
 }
@@ -113,10 +115,13 @@ pub mut:
 pub fn new() &Vls {
 	mut parser := tree_sitter.new_parser()
 	parser.set_language(v.language)
-
+	reporter := &DiagnosticReporter{} 
 	inst := &Vls{
 		parser: parser
-		store: analyzer.Store{}
+		reporter: reporter
+		store: analyzer.Store{
+			reporter: reporter
+		}
 	}
 
 	$if test {
@@ -135,6 +140,11 @@ fn (mut wr ResponseWriter) wrap_error(err IError) IError {
 }
 
 pub fn (mut ls Vls) handle_jsonrpc(request &jsonrpc.Request, mut rw jsonrpc.ResponseWriter) ? {
+	// initialize writer upon receiving the first request
+	if isnil(ls.writer) {
+		ls.writer = rw.server.writer(own_buffer: true)
+	}	
+	
 	mut w := unsafe { &ResponseWriter(rw) }
 
 	// The server will log a send request/notification
@@ -357,7 +367,6 @@ pub fn monitor_changes(mut ls Vls, mut resp_wr ResponseWriter) {
 
 				uri := lsp.document_uri_from_path(ls.store.cur_file_path)
 				ls.analyze_file(ls.files[uri])
-				// ls.show_diagnostics(uri)
 				ls.is_typing = false
 			}
 		}
