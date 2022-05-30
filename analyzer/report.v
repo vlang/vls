@@ -1,37 +1,5 @@
 module analyzer
 
-pub enum MessageKind {
-	error
-	warning
-	notice
-}
-
-pub struct Message {
-pub:
-	kind      MessageKind = .error
-	file_path string
-	range     C.TSRange
-	content   string
-}
-
-// has_range checks if there is an existing message from a given path and range
-pub fn (msgs []Message) has_range(file_path string, range C.TSRange) bool {
-	for m in msgs {
-		if m.file_path == file_path && m.range.eq(range) {
-			return true
-		}
-	}
-
-	return false
-}
-
-pub fn (mut msgs []Message) report(msg Message) {
-	if msgs.has_range(msg.file_path, msg.range) {
-		return
-	}
-	msgs << msg
-}
-
 pub struct AnalyzerError {
 	Error
 	msg   string
