@@ -16,6 +16,7 @@ fn (mut ls Vls) analyze_file(file File) {
 	if Feature.analyzer_diagnostics in ls.enabled_features {
 		ls.store.analyze(file.tree, file.source)
 	}
+	ls.reporter.publish(mut ls.writer, file.uri)
 }
 
 pub fn (mut ls Vls) did_open(params lsp.DidOpenTextDocumentParams, mut wr ResponseWriter) {
