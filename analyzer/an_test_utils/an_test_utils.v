@@ -1,7 +1,7 @@
 module an_test_utils
 
 import strings
-import analyzer { ScopeTree, Symbol }
+import analyzer { Message, ScopeTree, Symbol, Collector, Report }
 // import tree_sitter
 
 // sexpr_str returns the S expression-like stringified
@@ -94,4 +94,35 @@ pub fn sexpr_str_write_scopetree(mut writer strings.Builder, scope &ScopeTree) {
 		sexpr_str_write_scopetree(mut writer, child)
 		writer.write_byte(`)`)
 	}
+}
+
+pub fn sexpr_str_reports(reports []Report, mut writer strings.Builder) {
+	for i, report in reports {
+		writer.write_byte(`(`)
+		writer.write_string(report.kind.str())
+		writer.write([u8(` `), `"`]) or {}
+		writer.write_string(report.message)
+		writer.write([u8(`"`), ` `]) or {}
+		sexpr_str_write_tspoint(mut writer, report.range.start_point)
+		writer.write_byte(`-`)
+		sexpr_str_write_tspoint(mut writer, report.range.end_point)
+		writer.write_byte(`)`)
+		if i < reports.len - 1 {
+			writer.write_byte(` `)
+		}
+	}
+}
+
+pub fn sexpr_str_reporter(collector Collector) string {
+	mut writer := strings.new_builder(200)
+	sexpr_str_reports(collector.notices, mut writer)
+	if collector.notices.len != 0 {
+		writer.write_byte(` `)
+	}
+	sexpr_str_reports(collector.warnings, mut writer)
+	if collector.warnings.len != 0 {
+		writer.write_byte(` `)
+	}
+	sexpr_str_reports(collector.errors, mut writer)
+	return writer.str()
 }
