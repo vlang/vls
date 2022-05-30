@@ -21,7 +21,7 @@ pub fn (du DocumentUri) dir_path() string {
 
 pub fn document_uri_from_path(path string) DocumentUri {
 	$if windows {
-		uri_path := path.replace_each(['\\', '/', ':', '%3A'])
+		uri_path := path.replace_each(['file:///', 'file:///', '\\', '/', ':', '%3A'])
 		return if !path.starts_with('file:///') { 'file:///' + uri_path } else { uri_path }
 	}
 	return if !path.starts_with('file://') { 'file://' + path } else { path }
