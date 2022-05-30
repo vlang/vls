@@ -10,6 +10,7 @@ import lsp.log { LogRecorder }
 
 fn run_cli(cmd cli.Command) ? {
 	run_as_child := cmd.flags.get_bool('child') or { false }
+	validate_options(cmd) ?
 	if run_as_child {
 		run_server(cmd, run_as_child) ?
 	} else {
@@ -101,6 +102,28 @@ fn setup_logger(cmd cli.Command) jsonrpc.Interceptor {
 	return logger
 }
 
+fn validate_options(cmd cli.Command) ? {
+	if timeout_minutes_val := cmd.flags.get_int('timeout') {
+		if timeout_minutes_val < 0 {
+			return error('timeout: should be not less than zero')
+		}
+	}
+
+	if custom_vroot_path := cmd.flags.get_string('vroot') {
+		if custom_vroot_path.len != 0 {
+			if !os.exists(custom_vroot_path) {
+				return error('Provided VROOT does not exist.')
+			}
+			if !os.is_dir(custom_vroot_path) {
+				return error('Provided VROOT is not a directory.')
+			}
+		} else {
+			// those who set --vroot without an accompanied string argument
+			return error('Provided VROOT is empty.')
+		}
+	}
+}
+
 fn run_server(cmd cli.Command, is_child bool) ? {
 	// Fetch the command-line options.
 	enable_flag_raw := cmd.flags.get_string('enable') or { '' }
@@ -125,25 +148,12 @@ fn run_server(cmd cli.Command, is_child bool) ? {
 		handler: ls
 	}
 
+	if custom_vroot_path.len != 0 {
+		ls.set_vroot_path(custom_vroot_path)
+	}
 	if timeout_minutes_val := cmd.flags.get_int('timeout') {
-		if timeout_minutes_val < 0 {
-			return error('timeout: should be not less than zero')
-		}
-
 		ls.set_timeout_val(timeout_minutes_val)
 	}
-
-	if custom_vroot_path.len != 0 {
-		if !os.exists(custom_vroot_path) {
-			return error('Provided VROOT does not exist.')
-		}
-		if !os.is_dir(custom_vroot_path) {
-			return error('Provided VROOT is not a directory.')
-		} else {
-			ls.set_vroot_path(custom_vroot_path)
-		}
-	}
-
 	ls.set_features(enable_features, true) ?
 	ls.set_features(disable_features, false) ?
 
