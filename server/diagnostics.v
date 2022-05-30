@@ -3,6 +3,7 @@ module server
 import lsp
 import term
 import analyzer { ReporterPreferences, Report, ReportKind }
+import os
 
 struct DiagnosticReporter {
 mut:
@@ -122,10 +123,10 @@ fn (mut ls Vls) exec_v_diagnostics(uri lsp.DocumentUri) ?int {
 	mut count := 0
 	for line in err {
 		mut report := parse_v_diagnostic(line) or { continue }
-		if file_path.ends_with(report.file_path) {
+		if start_idx := dir_path.index(os.dir(report.file_path)) {
 			report = Report{
 				...report
-				file_path: file_path
+				file_path: dir_path[..start_idx] + report.file_path
 			}
 		}
 
