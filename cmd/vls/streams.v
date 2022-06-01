@@ -57,6 +57,10 @@ pub fn (mut stream StdioStream) read(mut buf []u8) ?int {
 			if c == 10 || c == `\r` {
 				continue
 			}
+		} $else {
+			if c == 10 {
+				continue
+			}
 		}
 		buf << u8(c)
 		remaining--
