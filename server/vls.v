@@ -455,5 +455,14 @@ pub fn detect_vroot_path() ?string {
 		// unsafe { full_path.free() }
 	}
 
+	$if windows {
+		// for some reason, PATH env in getenv only gives the system one
+		// and not the user one V uses when symlinking
+		result := os.execute('where v')
+		if result.exit_code == 0 {
+			return os.dir(os.dir(result.output.trim_space()))
+		}
+	}
+
 	return error('V path not found.')
 }

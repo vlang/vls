@@ -13,6 +13,8 @@ const (
 	signature_help_retrigger_characters = [',', ' ']
 )
 
+const features_require_v_tool = ['v_diagnostics', 'formatting']
+
 // initialize sends the server capabilities to the client
 pub fn (mut ls Vls) initialize(params lsp.InitializeParams, mut wr ResponseWriter) lsp.InitializeResult {
 	// If the parent process is not alive, then the server should exit
@@ -31,7 +33,9 @@ pub fn (mut ls Vls) initialize(params lsp.InitializeParams, mut wr ResponseWrite
 			ls.store.default_import_paths << os.join_path(found_vroot_path, 'vlib')
 			ls.store.default_import_paths << os.vmodules_dir()
 		} else {
-			wr.show_message("V installation directory was not found. Modules in vlib such as `os` won't be detected.",
+			// avoid process launch fails when VROOT does not exist
+			ls.set_features(features_require_v_tool, false) or {}
+			wr.show_message("V installation directory was not found. Some of the features won't work properly.",
 				.error)
 		}
 	} else {
