@@ -75,10 +75,22 @@ fn test_stdio_connect() ? {
 	p.run()
 	assert p.status == .running
 	assert p.pid > 0
+	$if windows {
+		time.sleep(100 * time.millisecond)
+	}
 	assert p.stdout_read() == init_msg
-	p.stdin_write(wrap_request(io.request('exit')))
+	$if !windows {
+		// NOTE: Process.stdin_write is not supported on windows yet
+		p.stdin_write(wrap_request(io.request('exit')))
+	} $else {
+		p.close()
+	}
 	p.wait()
-	assert p.code > 0
+	$if !windows {
+		assert p.code > 0
+	} $else {
+		assert p.code < 0
+	}
 }
 
 fn test_tcp_connect() ? {
@@ -97,6 +109,9 @@ fn test_tcp_connect() ? {
 	mut conn := net.dial_tcp('127.0.0.1:5007') ?
 	// TODO: add init message assertion
 	conn.write_string(wrap_request(io.request('exit'))) ?
+	$if windows {
+		time.sleep(100 * time.millisecond)
+	}
 	conn.close() or {}
 	p.wait()
 	assert p.code > 0
@@ -118,5 +133,10 @@ fn test_stdio_timeout() ? {
 	assert p.status == .exited
 	assert p.code == 0
 	p.close()
-	os.rm(p.filename) ?
+	$if windows {
+		p.signal_kill()
+		time.sleep(100 * time.millisecond)
+	} $else {
+		os.rm(p.filename) ?
+	}
 }
