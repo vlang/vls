@@ -212,14 +212,14 @@ pub fn check_tsnode(node C.TSNode) ? {
 	}
 }
 
-pub fn (node C.TSNode) code(text []u8) string {
+pub fn (node C.TSNode) code(text []rune) string {
 	start_index := node.start_byte()
 	end_index := node.end_byte()
 	if start_index >= end_index || start_index >= u32(text.len) || end_index > u32(text.len) {
 		return ''
 	}
 
-	return text[start_index..end_index].bytestr()
+	return text[start_index..end_index].string()
 }
 
 [inline]
