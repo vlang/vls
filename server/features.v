@@ -24,7 +24,7 @@ pub fn (mut ls Vls) formatting(params lsp.DocumentFormattingParams, mut wr Respo
 	// the v fmt CLI program since there is no cross-platform way to pipe
 	// raw strings directly into v fmt.
 	mut temp_file := os.open_file(server.temp_formatting_file_path, 'w') ?
-	temp_file.write(source) ?
+	temp_file.write_string(source.string()) ?
 	temp_file.close()
 	defer {
 		os.rm(server.temp_formatting_file_path) or {}
@@ -796,7 +796,7 @@ pub fn (mut ls Vls) completion(params lsp.CompletionParams, mut wr ResponseWrite
 		if ctx_changed {
 			ctx = lsp.CompletionContext{
 				trigger_kind: .trigger_character
-				trigger_character: file.source[prev_idx].ascii_str()
+				trigger_character: file.source[prev_idx].str()
 			}
 		}
 	}

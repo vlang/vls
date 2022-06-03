@@ -58,12 +58,13 @@ pub fn (mut ls Vls) did_open(params lsp.DidOpenTextDocumentParams, mut wr Respon
 
 		// Create file only if source does not exist
 		if !has_file {
-			source := if file_uri != uri { (os.read_file(file_path) or { '' }).runes() } else { src.runes() }
+			source_str := if file_uri != uri { os.read_file(file_path) or { '' } } else { src }
+			source := source_str.runes()
 
 			ls.files[file_uri] = File{
 				uri: file_uri
 				source: source
-				tree: ls.parser.parse_bytes(source)
+				tree: ls.parser.parse_string(source_str)
 				version: 1
 			}
 
@@ -151,7 +152,7 @@ pub fn (mut ls Vls) did_change(params lsp.DidChangeTextDocumentParams, mut wr Re
 		)
 	}
 
-	mut new_tree := ls.parser.parse_bytes_with_old_tree(new_src, ls.files[uri].tree)
+	mut new_tree := ls.parser.parse_string_with_old_tree(new_src.string(), ls.files[uri].tree)
 	// wr.log_message('${ls.files[uri].tree.get_changed_ranges(new_tree)}', .info)
 
 	// wr.log_message('new tree: ${new_tree.root_node().sexpr_str()}', .info)
