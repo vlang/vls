@@ -1224,8 +1224,8 @@ pub fn (mut store Store) import_modules(mut imports []&Import) {
 			}
 
 			full_path := os.join_path(new_import.path, file_name)
-			content := os.read_bytes(full_path) or { continue }
-			tree_from_import := parser.parse_bytes(content)
+			content := (os.read_file(full_path) or { continue }).runes()
+			tree_from_import := parser.parse_string(content.string())
 
 			// Set version to zero so that modules that are already opened
 			// in the editor can register symbols with scopes without
