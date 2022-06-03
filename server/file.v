@@ -6,7 +6,7 @@ import lsp
 struct File {
 mut:
 	uri     lsp.DocumentUri
-	source  []u8
+	source  []rune
 	tree    &C.TSTree       [required]
 	version int = 1
 }

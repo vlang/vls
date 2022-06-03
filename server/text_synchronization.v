@@ -58,7 +58,7 @@ pub fn (mut ls Vls) did_open(params lsp.DidOpenTextDocumentParams, mut wr Respon
 
 		// Create file only if source does not exist
 		if !has_file {
-			source := if file_uri != uri { os.read_bytes(file_path) or { [] } } else { src.bytes() }
+			source := if file_uri != uri { (os.read_file(file_path) or { '' }).runes() } else { src.runes() }
 
 			ls.files[file_uri] = File{
 				uri: file_uri
