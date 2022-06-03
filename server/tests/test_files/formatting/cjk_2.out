@@ -1,0 +1,5 @@
+module main
+
+fn main() {
+	println('test') //这是中文注释，新内容
+}
