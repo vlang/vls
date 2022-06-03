@@ -24,7 +24,7 @@ pub fn (mut ls Vls) formatting(params lsp.DocumentFormattingParams, mut wr Respo
 	// the v fmt CLI program since there is no cross-platform way to pipe
 	// raw strings directly into v fmt.
 	mut temp_file := os.open_file(server.temp_formatting_file_path, 'w') ?
-	temp_file.write(source) ?
+	temp_file.write_string(source.string()) ?
 	temp_file.close()
 	defer {
 		os.rm(server.temp_formatting_file_path) or {}
@@ -224,7 +224,7 @@ fn (mut ls Vls) signature_help(params lsp.SignatureHelpParams, mut wr ResponseWr
 struct CompletionBuilder {
 mut:
 	store              &analyzer.Store
-	src                []u8
+	src                []rune
 	offset             int
 	parent_node        C.TSNode
 	show_global        bool // for displaying global (project) symbols
@@ -796,7 +796,7 @@ pub fn (mut ls Vls) completion(params lsp.CompletionParams, mut wr ResponseWrite
 		if ctx_changed {
 			ctx = lsp.CompletionContext{
 				trigger_kind: .trigger_character
-				trigger_character: file.source[prev_idx].ascii_str()
+				trigger_character: file.source[prev_idx].str()
 			}
 		}
 	}
@@ -876,7 +876,7 @@ pub fn (mut ls Vls) hover(params lsp.HoverParams, mut wr ResponseWriter) ?lsp.Ho
 	return get_hover_data(mut ls.store, node, uri, file.source, u32(offset))
 }
 
-fn get_hover_data(mut store analyzer.Store, node C.TSNode, uri lsp.DocumentUri, source []u8, offset u32) ?lsp.Hover {
+fn get_hover_data(mut store analyzer.Store, node C.TSNode, uri lsp.DocumentUri, source []rune, offset u32) ?lsp.Hover {
 	node_type_name := node.type_name()
 	if node.is_null() || node_type_name == 'comment' {
 		return none

@@ -6,7 +6,7 @@ module server
 import lsp
 
 // compute_offset returns a byte offset from the given position
-pub fn compute_offset(src []u8, line int, col int) int {
+pub fn compute_offset(src []rune, line int, col int) int {
 	mut offset := 0
 	mut src_line := 0
 	mut src_col := 0
@@ -38,7 +38,7 @@ pub fn compute_offset(src []u8, line int, col int) int {
 	return offset
 }
 
-pub fn compute_position(src []u8, target_offset int) lsp.Position {
+pub fn compute_position(src []rune, target_offset int) lsp.Position {
 	mut offset := 0
 	mut src_line := 0
 	mut src_col := 0

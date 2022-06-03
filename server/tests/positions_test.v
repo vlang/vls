@@ -43,14 +43,14 @@ fn test_compute_offset() {
 			continue
 		}
 		println(bench.step_message('Testing $test_name'))
-		content := os.read_bytes(test_file_path) or {
+		content := os.read_file(test_file_path) or {
 			bench.fail()
 			eprintln(bench.step_message_fail('file $test_file_path is missing'))
 			continue
 		}
 		input := compute_offset_inputs[test_name]
 		expected := compute_offset_results[test_name]
-		result := server.compute_offset(content, input[0], input[1])
+		result := server.compute_offset(content.runes(), input[0], input[1])
 		if result != expected {
 			println('content (for debugging):' + content[..result].str())
 		}
@@ -100,14 +100,14 @@ fn test_compute_position() {
 			continue
 		}
 		println(bench.step_message('Testing $test_name'))
-		content := os.read_bytes(test_file_path) or {
+		content := os.read_file(test_file_path) or {
 			bench.fail()
 			eprintln(bench.step_message_fail('file $test_file_path is missing'))
 			continue
 		}
 		input := compute_position_inputs[test_name]
 		expected := compute_position_results[test_name]
-		result := server.compute_position(content, input)
+		result := server.compute_position(content.runes(), input)
 		assert result == expected
 		bench.ok()
 		println(bench.step_message_ok(test_name))
@@ -157,7 +157,7 @@ fn test_tspoint_to_lsp_pos() {
 			continue
 		}
 		println(bench.step_message('Testing $test_name'))
-		content := os.read_bytes(test_file_path) or {
+		content := os.read_file(test_file_path) or {
 			bench.fail()
 			eprintln(bench.step_message_fail('file $test_file_path is missing'))
 			continue
@@ -234,7 +234,7 @@ fn test_tsrange_to_lsp_range() {
 			continue
 		}
 		println(bench.step_message('Testing $test_name'))
-		content := os.read_bytes(test_file_path) or {
+		content := os.read_file(test_file_path) or {
 			bench.fail()
 			eprintln(bench.step_message_fail('file $test_file_path is missing'))
 			continue

@@ -67,7 +67,7 @@ fn test_symbol_registration() ? {
 
 		println(bench.step_message('Testing $test_name'))
 		tree := parser.parse_string(src)
-		sym_analyzer.src_text = src.bytes()
+		sym_analyzer.src_text = src.runes()
 		sym_analyzer.cursor = new_tree_cursor(tree.root_node())
 		symbols := sym_analyzer.analyze()
 		result := an_test_utils.sexpr_str_symbol_array(symbols)

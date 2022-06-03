@@ -58,12 +58,13 @@ pub fn (mut ls Vls) did_open(params lsp.DidOpenTextDocumentParams, mut wr Respon
 
 		// Create file only if source does not exist
 		if !has_file {
-			source := if file_uri != uri { os.read_bytes(file_path) or { [] } } else { src.bytes() }
+			source_str := if file_uri != uri { os.read_file(file_path) or { '' } } else { src }
+			source := source_str.runes()
 
 			ls.files[file_uri] = File{
 				uri: file_uri
 				source: source
-				tree: ls.parser.parse_bytes(source)
+				tree: ls.parser.parse_string(source_str)
 				version: 1
 			}
 
@@ -101,20 +102,21 @@ pub fn (mut ls Vls) did_change(params lsp.DidChangeTextDocumentParams, mut wr Re
 	mut new_src := ls.files[uri].source
 
 	for content_change in params.content_changes {
+		change_text := content_change.text.runes()
 		start_idx := compute_offset(new_src, content_change.range.start.line, content_change.range.start.character)
 		old_end_idx := compute_offset(new_src, content_change.range.end.line, content_change.range.end.character)
-		new_end_idx := start_idx + content_change.text.len
+		new_end_idx := start_idx + change_text.len
 		start_pos := content_change.range.start
 		old_end_pos := content_change.range.end
 		new_end_pos := compute_position(new_src, new_end_idx)
 
 		old_len := new_src.len
-		new_len := old_len - (old_end_idx - start_idx) + content_change.text.len
+		new_len := old_len - (old_end_idx - start_idx) + change_text.len
 		diff := new_len - old_len
 		right_text := new_src[old_end_idx..].clone()
 
 		// remove immediately the symbol
-		if content_change.text.len == 0 && diff < 0 {
+		if change_text.len == 0 && diff < 0 {
 			ls.store.delete_symbol_at_node(ls.files[uri].tree.root_node(), new_src,
 				start_point: lsp_pos_to_tspoint(start_pos)
 				end_point: lsp_pos_to_tspoint(old_end_pos)
@@ -135,8 +137,8 @@ pub fn (mut ls Vls) did_change(params lsp.DidChangeTextDocumentParams, mut wr Re
 
 		// add the remaining characters to the remaining items
 		mut insert_idx := start_idx
-		for change_idx := 0; insert_idx < new_src.len && change_idx < content_change.text.len; change_idx++ {
-			new_src[insert_idx] = content_change.text[change_idx]
+		for change_idx := 0; insert_idx < new_src.len && change_idx < change_text.len; change_idx++ {
+			new_src[insert_idx] = change_text[change_idx]
 			insert_idx++
 		}
 
@@ -151,7 +153,7 @@ pub fn (mut ls Vls) did_change(params lsp.DidChangeTextDocumentParams, mut wr Re
 		)
 	}
 
-	mut new_tree := ls.parser.parse_bytes_with_old_tree(new_src, ls.files[uri].tree)
+	mut new_tree := ls.parser.parse_string_with_old_tree(new_src.string(), ls.files[uri].tree)
 	// wr.log_message('${ls.files[uri].tree.get_changed_ranges(new_tree)}', .info)
 
 	// wr.log_message('new tree: ${new_tree.root_node().sexpr_str()}', .info)
