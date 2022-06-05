@@ -4,7 +4,7 @@ import tree_sitter_v as v
 import test_utils
 import benchmark
 import analyzer.an_test_utils
-import analyzer { Collector, Store, SymbolAnalyzer, new_tree_cursor, register_builtin_symbols }
+import analyzer { Collector, Store, SymbolAnalyzer, setup_builtin, new_tree_cursor }
 
 fn test_symbol_registration() ? {
 	mut parser := tree_sitter.new_parser()
@@ -17,15 +17,8 @@ fn test_symbol_registration() ? {
 		reporter: reporter
 		default_import_paths: [vlib_path]
 	}
-	mut builtin_import, _ := store.add_import(
-		resolved: true
-		module_name: 'builtin'
-		path: os.join_path(vlib_path, 'builtin')
-	)
-	mut imports := [builtin_import]
-	store.register_auto_import(builtin_import, '')
-	register_builtin_symbols(mut store, builtin_import)
-	store.import_modules(mut imports)
+
+	setup_builtin(mut store, os.join_path(vlib_path, 'builtin'))
 
 	mut sym_analyzer := SymbolAnalyzer{
 		store: store

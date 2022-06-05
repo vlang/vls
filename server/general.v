@@ -87,7 +87,8 @@ pub fn (mut ls Vls) initialize(params lsp.InitializeParams, mut wr ResponseWrite
 	ls.print_info(params.process_id, params.client_info, mut wr)
 
 	// since builtin is used frequently, they should be parsed first and only once
-	ls.process_builtin()
+	analyzer.setup_builtin(mut ls.store, os.join_path(ls.vroot_path, 'vlib', 'builtin'))
+
 	return lsp.InitializeResult{
 		capabilities: ls.capabilities
 	}
@@ -132,19 +133,6 @@ fn (mut ls Vls) print_info(process_id int, client_info lsp.ClientInfo, mut wr Re
 	wr.log_message('VLS build with V ${@VHASH}', .info)
 	wr.log_message('Client / Editor: $client_name (PID: $process_id)', .info)
 	wr.log_message('Using V path (VROOT): $ls.vroot_path', .info)
-}
-
-fn (mut ls Vls) process_builtin() {
-	mut builtin_import, _ := ls.store.add_import(
-		resolved: true
-		module_name: 'builtin'
-		path: os.join_path(ls.vroot_path, 'vlib', 'builtin')
-	)
-
-	mut imports := [builtin_import]
-	ls.store.register_auto_import(builtin_import, '')
-	analyzer.register_builtin_symbols(mut ls.store, builtin_import)
-	ls.store.import_modules(mut imports)
 }
 
 // shutdown sets the state to shutdown but does not exit
