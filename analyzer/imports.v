@@ -4,9 +4,15 @@ import os
 import tree_sitter
 import tree_sitter_v as v
 
+pub type ImportsMap = map[string][]Import
+
 pub struct Importer {
 mut:
 	store &Store [required]
+}
+
+pub fn (mut imp Importer) imports() ImportsMap {
+	return imp.store.imports
 }
 
 pub fn (mut imp Importer) scan_imports(tree &C.TSTree, src_text []rune) []&Import {
@@ -22,7 +28,7 @@ pub fn (mut imp Importer) scan_imports(tree &C.TSTree, src_text []rune) []&Impor
 
 		import_path_node := node.child_by_field_name('path') or { continue }
 
-		if found_imp := imp.store.find_import_by_position(node.range()) {
+		if found_imp := imp.imports().find_by_position(imp.store.cur_file_path, node.range()) {
 			mut imp_module := found_imp
 			mod_name := import_path_node.code(src_text)
 			if imp_module.absolute_module_name == mod_name {
@@ -369,4 +375,18 @@ pub fn (imp &Import) free() {
 		imp.aliases.free()
 		imp.symbols.free()
 	}
+}
+
+// find_by_position locates the import of the current directory
+// based on the given range
+pub fn (imports ImportsMap) find_by_position(file_path string, range C.TSRange) ?&Import {
+	dir := os.dir(file_path)
+	for mut imp in imports[dir] {
+		if file_path !in imp.ranges {
+			continue
+		} else if imp.ranges[file_path].start_point.row == range.start_point.row {
+			return unsafe { imp }
+		}
+	}
+	return none
 }

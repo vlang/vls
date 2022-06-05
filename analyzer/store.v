@@ -23,7 +23,7 @@ pub mut:
 	cur_version int
 	// List of imports per directory
 	// map goes: map[<full dir path>][]Import
-	imports map[string][]Import
+	imports ImportsMap
 	// Hack-free way for auto-injected dependencies
 	// to get referenced. This uses module name instead of
 	// full path since the most common autoinjected modules
@@ -941,7 +941,7 @@ pub fn (mut ss Store) delete_symbol_at_node(root_node C.TSNode, src []rune, at_r
 				}
 			}
 			'import_declaration' {
-				mut imp_module := ss.find_import_by_position(node.range()) or { continue }
+				mut imp_module := ss.imports.find_by_position(ss.cur_file_path, node.range()) or { continue }
 
 				// if the current import node is not the same as before,
 				// untrack and remove the import entry asap
@@ -963,19 +963,6 @@ pub fn (mut ss Store) delete_symbol_at_node(root_node C.TSNode, src []rune, at_r
 // is used for most important imports such as "builtin"
 pub fn (mut ss Store) register_auto_import(imp Import, to_alias string) {
 	ss.auto_imports[to_alias] = imp.path
-}
-
-// find_import_by_position locates the import of the current directory
-// based on the given range
-pub fn (mut ss Store) find_import_by_position(range C.TSRange) ?&Import {
-	for mut imp in ss.imports[ss.cur_dir] {
-		if ss.cur_file_path in imp.ranges
-			&& imp.ranges[ss.cur_file_path].start_point.row == range.start_point.row {
-			return unsafe { imp }
-		}
-	}
-
-	return none
 }
 
 pub fn (ss &Store) is_module(module_name string) bool {
