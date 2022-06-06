@@ -1,14 +1,16 @@
 module analyzer
 
-struct TreeCursor {
+import tree_sitter
+
+struct TreeCursor<T> {
 mut:
 	cur_child_idx int  = -1
 	named_only    bool = true
-	child_count   int            [required]
-	cursor        C.TSTreeCursor [required]
+	child_count   int                       [required]
+	cursor        tree_sitter.TreeCursor<T> [required]
 }
 
-pub fn (mut tc TreeCursor) next() ?C.TSNode {
+pub fn (mut tc TreeCursor<T>) next() ?tree_sitter.Node<T> {
 	for tc.cur_child_idx < tc.child_count {
 		if tc.cur_child_idx == -1 {
 			tc.cursor.to_first_child()
@@ -27,25 +29,25 @@ pub fn (mut tc TreeCursor) next() ?C.TSNode {
 	return none
 }
 
-pub fn (mut tc TreeCursor) to_first_child() bool {
+pub fn (mut tc TreeCursor<T>) to_first_child() bool {
 	return tc.cursor.to_first_child()
 }
 
-pub fn (tc &TreeCursor) current_node() ?C.TSNode {
+pub fn (tc &TreeCursor<T>) current_node() ?tree_sitter.Node<T> {
 	return tc.cursor.current_node()
 }
 
 [unsafe]
-pub fn (tc &TreeCursor) free() {
+pub fn (tc &TreeCursor<T>) free() {
 	unsafe {
-		tc.cursor.free()
+		tc.cursor.raw_cursor.free()
 		tc.cur_child_idx = 0
 		tc.child_count = 0
 	}
 }
 
-pub fn new_tree_cursor(root_node C.TSNode) TreeCursor {
-	return TreeCursor{
+pub fn new_tree_cursor<T>(root_node tree_sitter.Node<T>) TreeCursor<T> {
+	return TreeCursor<T>{
 		child_count: int(root_node.child_count())
 		cursor: root_node.tree_cursor()
 	}
