@@ -14,7 +14,7 @@ const (
 pub struct SymbolAnalyzer {
 pub mut:
 	src_text []rune
-	cursor   TreeCursor<v.NodeType>
+	cursor   TreeCursor
 mut:
 	store       &Store [required]
 	module_name string

@@ -5,7 +5,7 @@ import tree_sitter_v as v
 
 pub struct SemanticAnalyzer {
 pub mut:
-	cursor   TreeCursor<v.NodeType>
+	cursor   TreeCursor
 	src_text []rune
 	store    &Store     [required]
 	// skips the local scopes and registers only
