@@ -30,7 +30,7 @@ fn C.ts_parser_delete(tree &C.TSParser)
 fn C.ts_parser_reset(parser &C.TSParser)
 
 [inline]
-pub fn new_parser() &C.TSParser {
+pub fn new_ts_parser() &C.TSParser {
 	return C.ts_parser_new()
 }
 
@@ -196,9 +196,9 @@ pub fn (err NodeError) msg() string {
 }
 
 [unsafe]
-pub fn unwrap_null_node(err IError) ?C.TSNode {
+pub fn unwrap_null_node<T>(factory NodeTypeFactory<T>, err IError) ?Node<T> {
 	if err is NodeError {
-		return err.node
+		return new_node<T>(factory, err.node)
 	}
 	return none
 }
@@ -528,4 +528,263 @@ pub fn (left_range C.TSRange) eq(right_range C.TSRange) bool {
 		&& left_range.end_point.eq(right_range.end_point)
 		&& left_range.start_byte == right_range.start_byte
 		&& left_range.end_byte == right_range.end_byte
+}
+
+// V Types
+pub struct Parser<T> {
+mut:
+	raw_parser   &C.TSParser [required]
+	type_factory NodeTypeFactory<T> [required]
+}
+
+[inline]
+pub fn (mut p Parser<T>) reset() {
+	p.raw_parser.reset()
+}
+
+[params]
+pub struct ParserParseConfig {
+	source string [required]
+	tree   &C.TSTree = &C.TSTree(0)
+}
+
+pub fn (mut p Parser<T>) parse_string(cfg ParserParseConfig) &Tree<T> {
+	tree := p.raw_parser.parse_string_with_old_tree(cfg.source, cfg.tree)
+	return &Tree<T>{
+		raw_tree: tree
+		type_factory: p.type_factory
+	}
+}
+
+pub fn new_parser<T>(language C.TSLanguage, type_factory NodeTypeFactory<T>) &Parser<T> {
+	mut parser := new_ts_parser()
+	parser.set_language(language)
+
+	return &Parser<T>{
+		raw_parser: parser
+		type_factory: type_factory
+	}
+}
+
+pub interface NodeTypeFactory<T> {
+	get_type(type_name string) T
+}
+
+pub struct Tree<T> {
+	type_factory   NodeTypeFactory<T> [required]
+pub:
+	raw_tree       &C.TSTree [required]
+}
+
+pub fn (tree Tree<T>) root_node() Node<T> {
+	return new_node<T>(tree.type_factory, tree.raw_tree.root_node())
+}
+
+fn new_node<T>(factory NodeTypeFactory<T>, node C.TSNode) Node<T> {
+	return Node<T>{
+		raw_node: node
+		type_factory: factory
+		type_name: factory.get_type(node.type_name())
+	}
+}
+
+pub struct Node<T> {
+	type_factory NodeTypeFactory<T> [required]
+pub:
+	raw_node     C.TSNode           [required]
+	type_name    T                  [required]
+}
+
+pub fn (node Node<T>) code(text []rune) string {
+	return node.raw_node.code(text)
+}
+
+[inline]
+pub fn (node Node<T>) str() string {
+	return node.raw_node.sexpr_str()
+}
+
+[inline]
+pub fn (node Node<T>) start_point() C.TSPoint {
+	return node.raw_node.start_point()
+}
+
+[inline]
+pub fn (node Node<T>) end_point() C.TSPoint {
+	return node.raw_node.end_point()
+}
+
+[inline]
+pub fn (node Node<T>) start_byte() u32 {
+	return node.raw_node.start_byte()
+}
+
+[inline]
+pub fn (node Node<T>) end_byte() u32 {
+	return node.raw_node.end_byte()
+}
+
+[inline]
+pub fn (node Node<T>) range() C.TSRange {
+	return node.raw_node.range()
+}
+
+[inline]
+pub fn (node Node<T>) is_null() bool {
+	return node.raw_node.is_null()
+}
+
+[inline]
+pub fn (node Node<T>) is_named() bool {
+	return node.raw_node.is_named()
+}
+
+[inline]
+pub fn (node Node<T>) is_missing() bool {
+	return node.raw_node.is_missing()
+}
+
+[inline]
+pub fn (node Node<T>) is_extra() bool {
+	return node.raw_node.is_extra()
+}
+
+[inline]
+pub fn (node Node<T>) has_changes() bool {
+	return node.raw_node.has_changes()
+}
+
+[inline]
+pub fn (node Node<T>) is_error() bool {
+	return node.raw_node.is_error()
+}
+
+pub fn (node Node<T>) parent() ?Node<T> {
+	parent := node.raw_node.parent()?
+	return new_node<T>(node.type_factory, parent)
+}
+
+pub fn (node Node<T>) child(pos u32) ?Node<T> {
+	child := node.raw_node.child(pos)?
+	return new_node<T>(node.type_factory, child)
+}
+
+[inline]
+pub fn (node Node<T>) child_count() u32 {
+	return node.raw_node.child_count()
+}
+
+pub fn (node Node<T>) named_child(pos u32) ?Node<T> {
+	child := node.raw_node.named_child(pos)?
+	return new_node<T>(node.type_factory, child)
+}
+
+[inline]
+pub fn (node Node<T>) named_child_count() u32 {
+	return node.raw_node.named_child_count()
+}
+
+pub fn (node Node<T>) child_by_field_name(name string) ?Node<T> {
+	child := node.raw_node.child_by_field_name(name)?
+	return new_node<T>(node.type_factory, child)
+}
+
+pub fn (node Node<T>) next_sibling() ?Node<T> {
+	sibling := node.raw_node.next_sibling()?
+	return new_node<T>(node.type_factory, sibling)
+}
+
+pub fn (node Node<T>) prev_sibling() ?Node<T> {
+	sibling := node.raw_node.prev_sibling()?
+	return new_node<T>(node.type_factory, sibling)
+}
+
+pub fn (node Node<T>) next_named_sibling() ?Node<T> {
+	sibling := node.raw_node.next_named_sibling()?
+	return new_node<T>(node.type_factory, sibling)
+}
+
+pub fn (node Node<T>) prev_named_sibling() ?Node<T> {
+	sibling := node.raw_node.prev_named_sibling()?
+	return new_node<T>(node.type_factory, sibling)
+}
+
+pub fn (node Node<T>) first_child_for_byte(offset u32) ?Node<T> {
+	child := node.raw_node.first_child_for_byte(offset)?
+	return new_node<T>(node.type_factory, child)
+}
+
+pub fn (node Node<T>) first_named_child_for_byte(offset u32) ?Node<T> {
+	child := node.raw_node.first_named_child_for_byte(offset)?
+	return new_node<T>(node.type_factory, child)
+}
+
+pub fn (node Node<T>) descendant_for_byte_range(start_range u32, end_range u32) ?Node<T> {
+	desc := node.raw_node.descendant_for_byte_range(start_range, end_range)?
+	return new_node<T>(node.type_factory, desc)
+}
+
+pub fn (node Node<T>) descendant_for_point_range(start_point C.TSPoint, end_point C.TSPoint) ?Node<T> {
+	desc := node.raw_node.descendant_for_point_range(start_point, end_point)?
+	return new_node<T>(node.type_factory, desc)
+}
+
+pub fn (node Node<T>) named_descendant_for_byte_range(start_range u32, end_range u32) ?Node<T> {
+	desc := node.raw_node.named_descendant_for_byte_range(start_range, end_range)?
+	return new_node<T>(node.type_factory, desc)
+}
+
+pub fn (node Node<T>) named_descendant_for_point_range(start_point C.TSPoint, end_point C.TSPoint) ?Node<T> {
+	desc := node.raw_node.named_descendant_for_point_range(start_point, end_point)?
+	return new_node<T>(node.type_factory, desc)
+}
+
+[inline]
+pub fn (node Node<T>) == (other_node Node<T>) bool {
+	return node.raw_node == other_node.raw_node
+}
+
+[inline]
+pub fn (node Node<T>) tree_cursor() TreeCursor<T> {
+	return TreeCursor<T>{
+		type_factory: node.type_factory
+		raw_cursor: node.raw_node.tree_cursor()
+	}
+}
+
+pub struct TreeCursor<T> {
+	type_factory NodeTypeFactory<T> [required]
+pub mut:
+	raw_cursor   C.TSTreeCursor     [required]
+}
+
+[inline]
+pub fn (mut cursor TreeCursor<T>) reset(node Node<T>) {
+	cursor.raw_cursor.reset(node.raw_node)
+}
+
+[inline]
+pub fn (cursor TreeCursor<T>) current_node() ?Node<T> {
+	got_node := cursor.raw_cursor.current_node()?
+	return new_node<T>(cursor.type_factory, got_node)
+}
+
+[inline]
+pub fn (cursor TreeCursor<T>) current_field_name() string {
+	return cursor.raw_cursor.current_field_name()
+}
+
+[inline]
+pub fn (mut cursor TreeCursor<T>) to_parent() bool {
+	return cursor.raw_cursor.to_parent()
+}
+
+[inline]
+pub fn (mut cursor TreeCursor<T>) next() bool {
+	return cursor.raw_cursor.next()
+}
+
+[inline]
+pub fn (mut cursor TreeCursor<T>) to_first_child() bool {
+	return cursor.raw_cursor.to_first_child()
 }
