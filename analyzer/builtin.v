@@ -4,7 +4,24 @@ import os
 
 const numeric_types = ['u8', 'u16', 'u32', 'u64', 'i8', 'i16', 'int', 'i64', 'f32', 'f64']
 
-pub fn register_builtin_symbols(mut ss Store, builtin_import &Import) {
+pub fn setup_builtin(mut store Store, builtin_path string) {
+	mut importer := Importer{
+		store: unsafe { store }
+	}
+	
+	mut builtin_import, _ := store.add_import(
+		resolved: true
+		module_name: 'builtin'
+		path: builtin_path
+	)
+
+	mut imports := [builtin_import]
+	store.register_auto_import(builtin_import, '')
+	register_builtin_symbols(mut store, builtin_import)
+	importer.import_modules(mut imports)
+}
+
+fn register_builtin_symbols(mut ss Store, builtin_import &Import) {
 	builtin_path := builtin_import.path
 	placeholder_file_path := os.join_path(builtin_path, 'placeholder.vv')
 	// defer {

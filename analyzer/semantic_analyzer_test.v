@@ -3,7 +3,7 @@ import tree_sitter
 import tree_sitter_v as v
 import test_utils
 import benchmark
-import analyzer { Collector, SemanticAnalyzer, Store, SymbolAnalyzer, new_tree_cursor, register_builtin_symbols }
+import analyzer { Collector, SemanticAnalyzer, Store, SymbolAnalyzer, new_tree_cursor, setup_builtin }
 import analyzer.an_test_utils
 
 fn test_semantic_analysis() ? {
@@ -18,15 +18,8 @@ fn test_semantic_analysis() ? {
 		reporter: reporter
 		default_import_paths: [vlib_path]
 	}
-	mut builtin_import, _ := store.add_import(
-		resolved: true
-		module_name: 'builtin'
-		path: os.join_path(vlib_path, 'builtin')
-	)
-	mut imports := [builtin_import]
-	store.register_auto_import(builtin_import, '')
-	register_builtin_symbols(mut store, builtin_import)
-	store.import_modules(mut imports)
+
+	setup_builtin(mut store, os.join_path(vlib_path, 'builtin'))
 
 	mut sym_analyzer := SymbolAnalyzer{
 		store: store
