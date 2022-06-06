@@ -7,6 +7,7 @@ import lsp.log
 import os
 import tree_sitter
 import tree_sitter_v as v
+import parser
 import analyzer
 import time
 import v.vmod
@@ -94,7 +95,7 @@ mut:
 struct Vls {
 mut:
 	vroot_path       string
-	parser           &C.TSParser
+	parser           &tree_sitter.Parser<v.NodeType>
 	store            analyzer.Store
 	status           ServerStatus = .off
 	root_uri         lsp.DocumentUri
@@ -113,11 +114,9 @@ pub mut:
 }
 
 pub fn new() &Vls {
-	mut parser := tree_sitter.new_parser()
-	parser.set_language(v.language)
 	reporter := &DiagnosticReporter{} 
 	inst := &Vls{
-		parser: parser
+		parser: parser.new() 
 		reporter: reporter
 		store: analyzer.Store{
 			reporter: reporter
