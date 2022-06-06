@@ -242,7 +242,7 @@ pub fn (mut ss Store) add_import(imp Import) (&Import, bool) {
 }
 
 // import_modules_from_tree scans and imports the modules based from the AST tree
-pub fn (mut store Store) import_modules_from_tree(tree &tree_sitter<v.NodeType>, src []rune, lookup_paths ...string) {
+pub fn (mut store Store) import_modules_from_tree(tree &tree_sitter.Tree<v.NodeType>, src []rune, lookup_paths ...string) {
 	mut importer := Importer{
 		store: unsafe { store }
 	}
