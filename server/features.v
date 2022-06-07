@@ -831,12 +831,12 @@ pub fn (mut ls Vls) completion(params lsp.CompletionParams, mut wr ResponseWrite
 		mut parent_node := traverse_node(root_node, u32(offset))
 		node_type_name := node.type_name
 
-		if root_node.is_error() {
+		if root_node.is_error() && root_node.type_name == .error {
 			// point to the identifier for assignment statement
 			node = traverse_node(node, node.start_byte())
 		} else if node_type_name == .block {
 			node = traverse_node2(root_node, u32(offset))
-		} else if node.is_error() {
+		} else if node.is_error() && node_type_name == .error {
 			node = node.prev_named_sibling() or { node }
 		} else if node.start_byte() > u32(offset) {
 			node = closest_named_child(closest_symbol_node_parent(node), u32(offset))
