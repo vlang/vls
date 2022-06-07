@@ -56,7 +56,7 @@ pub fn (mut parser C.TSParser) parse_string(content string) &C.TSTree {
 
 [inline]
 pub fn (mut parser C.TSParser) parse_string_with_old_tree(content string, old_tree &C.TSTree) &C.TSTree {
-	return parser.parse_string_with_old_tree_and_len(content, &C.TSTree(0), u32(content.len))
+	return parser.parse_string_with_old_tree_and_len(content, old_tree, u32(content.len))
 }
 
 [inline]
