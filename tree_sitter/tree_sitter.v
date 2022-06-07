@@ -556,7 +556,7 @@ pub fn (mut p Parser<T>) parse_string(cfg ParserParseConfig) &Tree<T> {
 	}
 }
 
-pub fn new_parser<T>(language C.TSLanguage, type_factory NodeTypeFactory<T>) &Parser<T> {
+pub fn new_parser<T>(language &C.TSLanguage, type_factory NodeTypeFactory<T>) &Parser<T> {
 	mut parser := new_ts_parser()
 	parser.set_language(language)
 
