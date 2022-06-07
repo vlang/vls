@@ -4,7 +4,6 @@ import os
 import analyzer.depgraph
 import tree_sitter
 import tree_sitter_v as v
-import parser
 
 pub struct Store {
 mut:

@@ -157,12 +157,7 @@ pub fn (mut imp Importer) inject_paths_of_new_imports(mut new_imports []&Import,
 // import_modules imports the given Import array to the current directory.
 // It also registers the symbols to the store.
 pub fn (mut imp Importer) import_modules(mut imports []&Import) {
-	mut parser := tree_sitter.new_parser()
-	parser.set_language(v.language)
-	// defer {
-	// 	unsafe { parser.free() }
-	// }
-
+	mut parser := parser.new()
 	old_version := imp.store.cur_version
 	old_active_path := imp.store.cur_file_path
 	old_active_dir := imp.store.cur_dir
@@ -184,7 +179,7 @@ pub fn (mut imp Importer) import_modules(mut imports []&Import) {
 			full_path := os.join_path(new_import.path, file_name)
 			content_str := os.read_file(full_path) or { continue }
 			content := content_str.runes()
-			tree_from_import := parser.parse_string(content_str)
+			tree_from_import := parser.parse_string(source: content_str)
 
 			// Set version to zero so that modules that are already opened
 			// in the editor can register symbols with scopes without
