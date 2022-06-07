@@ -1,15 +1,12 @@
 import os
-import tree_sitter
-import tree_sitter_v as v
+import parser
 import test_utils
 import benchmark
 import analyzer { Collector, SemanticAnalyzer, Store, SymbolAnalyzer, new_tree_cursor, setup_builtin }
 import analyzer.an_test_utils
 
 fn test_semantic_analysis() ? {
-	mut parser := tree_sitter.new_parser()
-	parser.set_language(v.language)
-
+	mut p := parser.new()
 	vlib_path := os.join_path(os.dir(os.getenv('VEXE')), 'vlib')
 
 	mut bench := benchmark.new_benchmark()
@@ -63,8 +60,7 @@ fn test_semantic_analysis() ? {
 		}
 
 		println(bench.step_message('Testing $test_name'))
-		tree := parser.parse_string(src)
-
+		tree := p.parse_string(source: src)
 		src_runes := src.runes()
 		cursor := new_tree_cursor(tree.root_node())
 		store.import_modules_from_tree(tree, src_runes, vlib_path)
