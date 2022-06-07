@@ -741,7 +741,7 @@ pub fn (node Node<T>) named_descendant_for_point_range(start_point C.TSPoint, en
 
 [inline]
 pub fn (node Node<T>) == (other_node Node<T>) bool {
-	return node.raw_node == other_node.raw_node
+	return C.ts_node_eq(node.raw_node, other_node.raw_node)
 }
 
 [inline]
