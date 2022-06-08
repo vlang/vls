@@ -15,7 +15,7 @@ pub:
 	file_path string
 	source    string
 	range     C.TSRange
-	data      ReportData = 0
+	data      ReportData = 1
 }
 
 pub struct ReporterPreferences {
