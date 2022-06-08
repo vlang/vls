@@ -10,6 +10,7 @@
   "scripts": {
     "test": "tree-sitter test",
     "generate-scanner": "v -shared -skip-unused -o src/scanner.c scanner/",
+    "generate-types": "v generate_types.vsh",
     "generate": "tree-sitter generate",
     "parse": "tree-sitter parse",
     "parseg": "tree-sitter parse --debug-graph"

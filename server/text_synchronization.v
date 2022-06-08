@@ -64,7 +64,7 @@ pub fn (mut ls Vls) did_open(params lsp.DidOpenTextDocumentParams, mut wr Respon
 			ls.files[file_uri] = File{
 				uri: file_uri
 				source: source
-				tree: ls.parser.parse_string(source_str)
+				tree: ls.parser.parse_string(source: source_str)
 				version: 1
 			}
 
@@ -143,7 +143,7 @@ pub fn (mut ls Vls) did_change(params lsp.DidChangeTextDocumentParams, mut wr Re
 		}
 
 		// edit the tree
-		ls.files[uri].tree.edit(
+		ls.files[uri].tree.raw_tree.edit(
 			start_byte: u32(start_idx)
 			old_end_byte: u32(old_end_idx)
 			new_end_byte: u32(new_end_idx)
@@ -153,7 +153,7 @@ pub fn (mut ls Vls) did_change(params lsp.DidChangeTextDocumentParams, mut wr Re
 		)
 	}
 
-	mut new_tree := ls.parser.parse_string_with_old_tree(new_src.string(), ls.files[uri].tree)
+	mut new_tree := ls.parser.parse_string(source: new_src.string(), tree: ls.files[uri].tree.raw_tree)
 	// wr.log_message('${ls.files[uri].tree.get_changed_ranges(new_tree)}', .info)
 
 	// wr.log_message('new tree: ${new_tree.root_node().sexpr_str()}', .info)

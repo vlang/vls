@@ -257,6 +257,7 @@ module.exports = grammar({
         )
       ),
 
+    // TODO: make it supertype
     _top_level_declaration: ($) =>
       choice(
         $.const_declaration,

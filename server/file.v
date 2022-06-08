@@ -1,23 +1,15 @@
 module server
 
-// import tree_sitter
+import tree_sitter
+import tree_sitter_v as v
 import lsp
 
 struct File {
 mut:
 	uri     lsp.DocumentUri
 	source  []rune
-	tree    &C.TSTree       [required]
+	tree    &tree_sitter.Tree<v.NodeType> [required]
 	version int = 1
-}
-
-[unsafe]
-fn (file &File) free() {
-	unsafe {
-		file.source.free()
-		file.version = 1
-		file.tree.free()
-	}
 }
 
 fn (file &File) get_offset(line int, col int) int {

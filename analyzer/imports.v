@@ -3,6 +3,7 @@ module analyzer
 import os
 import tree_sitter
 import tree_sitter_v as v
+import parser
 
 pub type ImportsMap = map[string][]Import
 
@@ -15,14 +16,14 @@ pub fn (mut imp Importer) imports() ImportsMap {
 	return imp.store.imports
 }
 
-pub fn (mut imp Importer) scan_imports(tree &C.TSTree, src_text []rune) []&Import {
+pub fn (mut imp Importer) scan_imports(tree &tree_sitter.Tree<v.NodeType>, src_text []rune) []&Import {
 	root_node := tree.root_node()
 	named_child_len := root_node.named_child_count()
 	mut newly_imported_modules := []&Import{}
 
 	for i in 0 .. named_child_len {
 		node := root_node.named_child(i) or { continue }
-		if node.type_name() != 'import_declaration' {
+		if node.type_name != .import_declaration {
 			continue
 		}
 
@@ -156,12 +157,7 @@ pub fn (mut imp Importer) inject_paths_of_new_imports(mut new_imports []&Import,
 // import_modules imports the given Import array to the current directory.
 // It also registers the symbols to the store.
 pub fn (mut imp Importer) import_modules(mut imports []&Import) {
-	mut parser := tree_sitter.new_parser()
-	parser.set_language(v.language)
-	// defer {
-	// 	unsafe { parser.free() }
-	// }
-
+	mut parser := parser.new()
 	old_version := imp.store.cur_version
 	old_active_path := imp.store.cur_file_path
 	old_active_dir := imp.store.cur_dir
@@ -183,7 +179,7 @@ pub fn (mut imp Importer) import_modules(mut imports []&Import) {
 			full_path := os.join_path(new_import.path, file_name)
 			content_str := os.read_file(full_path) or { continue }
 			content := content_str.runes()
-			tree_from_import := parser.parse_string(content_str)
+			tree_from_import := parser.parse_string(source: content_str)
 
 			// Set version to zero so that modules that are already opened
 			// in the editor can register symbols with scopes without
@@ -241,7 +237,7 @@ pub fn (mut ss Store) add_import(imp Import) (&Import, bool) {
 }
 
 // import_modules_from_tree scans and imports the modules based from the AST tree
-pub fn (mut store Store) import_modules_from_tree(tree &C.TSTree, src []rune, lookup_paths ...string) {
+pub fn (mut store Store) import_modules_from_tree(tree &tree_sitter.Tree<v.NodeType>, src []rune, lookup_paths ...string) {
 	mut importer := Importer{
 		store: unsafe { store }
 	}

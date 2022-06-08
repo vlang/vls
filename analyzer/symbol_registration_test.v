@@ -1,15 +1,12 @@
 import os
-import tree_sitter
-import tree_sitter_v as v
+import parser
 import test_utils
 import benchmark
 import analyzer.an_test_utils
 import analyzer { Collector, Store, SymbolAnalyzer, setup_builtin, new_tree_cursor }
 
 fn test_symbol_registration() ? {
-	mut parser := tree_sitter.new_parser()
-	parser.set_language(v.language)
-
+	mut p := parser.new()
 	mut bench := benchmark.new_benchmark()
 	vlib_path := os.join_path(os.dir(os.getenv('VEXE')), 'vlib')
 	mut reporter := &Collector{}
@@ -59,7 +56,7 @@ fn test_symbol_registration() ? {
 		}
 
 		println(bench.step_message('Testing $test_name'))
-		tree := parser.parse_string(src)
+		tree := p.parse_string(source: src)
 		sym_analyzer.src_text = src.runes()
 		sym_analyzer.cursor = new_tree_cursor(tree.root_node())
 		symbols := sym_analyzer.analyze()
