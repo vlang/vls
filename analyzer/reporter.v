@@ -1,5 +1,7 @@
 module analyzer
 
+pub interface ReportData{}
+
 pub enum ReportKind {
 	error
 	warning
@@ -13,6 +15,7 @@ pub:
 	file_path string
 	source    string
 	range     C.TSRange
+	data      ReportData = 1
 }
 
 pub struct ReporterPreferences {
