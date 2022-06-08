@@ -11,6 +11,7 @@ pub enum ReportKind {
 pub struct Report {
 pub:
 	kind      ReportKind
+	code      string
 	message   string
 	file_path string
 	source    string

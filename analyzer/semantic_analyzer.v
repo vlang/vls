@@ -1,5 +1,7 @@
 module analyzer
 
+import strconv
+import errors
 import tree_sitter as ts
 import tree_sitter_v as v
 
@@ -14,13 +16,55 @@ pub mut:
 	is_import bool
 }
 
-fn (mut an SemanticAnalyzer) report(msg string, node ts.Node<v.NodeType>) {
-	an.store.report(
+struct SemanticAnalyzerContext {
+	params []ReportData
+}
+
+fn (mut an SemanticAnalyzer) report(node ts.Node<v.NodeType>, code_or_msg string, data ...ReportData) IError {
+	mut is_msg_code := false
+	if code_or_msg in errors.message_templates {
+		is_msg_code = true
+	}
+
+	return error(an.format_report(
 		kind: .error
-		message: msg
+		message: if is_msg_code { errors.message_templates[code_or_msg] } else { code_or_msg }
 		range: node.range()
 		file_path: an.store.cur_file_path
-	)
+		code: if is_msg_code { code_or_msg } else { '' }
+		data: SemanticAnalyzerContext{data}
+	))
+}
+
+fn (mut an SemanticAnalyzer) format_report(report Report) string {
+	if report.data is SemanticAnalyzerContext {
+		if report.data.params.len != 0 {
+			mut final_params := []string{cap: report.data.params.len}
+			for d in report.data.params {
+				if d is string {
+					final_params << d
+				} else if d is Symbol {
+					final_params << d.gen_str()
+				} else {
+					// final_params << d.str()
+					final_params << 'unknown'
+				}
+			}
+
+			ptrs := unsafe { report.data.params.pointers() }
+			final_report := Report{
+				...report
+				message: strconv.v_sprintf(report.message, ...ptrs)
+				data: 0
+			}
+
+			an.store.report(final_report)
+			return final_report.message
+		}
+	}
+
+	an.store.report(report)
+	return report.message
 }
 
 fn (mut an SemanticAnalyzer) import_decl(node ts.Node<v.NodeType>) ? {
@@ -42,12 +86,12 @@ fn (mut an SemanticAnalyzer) import_decl(node ts.Node<v.NodeType>) ? {
 		sym_node := list.named_child(i) or { continue }
 		symbol_name := sym_node.code(an.src_text)
 		got_sym := an.store.symbols[module_path].get(symbol_name) or {
-			an.report('Symbol `$symbol_name` in module `$module_name` not found', sym_node)
+			an.report(sym_node, 'Symbol `$symbol_name` in module `$module_name` not found')
 			continue
 		}
 
 		if int(got_sym.access) < int(SymbolAccess.public) {
-			an.report('Symbol `$symbol_name` in module `$module_name` not public', sym_node)
+			an.report(sym_node, 'Symbol `$symbol_name` in module `$module_name` not public')
 			continue
 		}
 	}
