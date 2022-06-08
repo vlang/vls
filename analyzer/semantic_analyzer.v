@@ -1,6 +1,6 @@
 module analyzer
 
-import tree_sitter
+import tree_sitter as ts
 import tree_sitter_v as v
 
 pub struct SemanticAnalyzer {
@@ -14,7 +14,7 @@ pub mut:
 	is_import bool
 }
 
-fn (mut an SemanticAnalyzer) report(msg string, node tree_sitter.Node<v.NodeType>) {
+fn (mut an SemanticAnalyzer) report(msg string, node ts.Node<v.NodeType>) {
 	an.store.report(
 		kind: .error
 		message: msg
@@ -23,7 +23,7 @@ fn (mut an SemanticAnalyzer) report(msg string, node tree_sitter.Node<v.NodeType
 	)
 }
 
-fn (mut an SemanticAnalyzer) import_decl(node tree_sitter.Node<v.NodeType>) ? {
+fn (mut an SemanticAnalyzer) import_decl(node ts.Node<v.NodeType>) ? {
 	// Most of the checking is already done in `import_modules_from_trees`
 	// Check only the symbols if they are available
 	symbols := node.child_by_field_name('symbols') ?
@@ -53,22 +53,22 @@ fn (mut an SemanticAnalyzer) import_decl(node tree_sitter.Node<v.NodeType>) ? {
 	}
 }
 
-fn (mut an SemanticAnalyzer) const_decl(node tree_sitter.Node<v.NodeType>) {
+fn (mut an SemanticAnalyzer) const_decl(node ts.Node<v.NodeType>) {
 }
 
-fn (mut an SemanticAnalyzer) struct_decl(node tree_sitter.Node<v.NodeType>) {
+fn (mut an SemanticAnalyzer) struct_decl(node ts.Node<v.NodeType>) {
 }
 
-fn (mut an SemanticAnalyzer) interface_decl(node tree_sitter.Node<v.NodeType>) {
+fn (mut an SemanticAnalyzer) interface_decl(node ts.Node<v.NodeType>) {
 }
 
-fn (mut an SemanticAnalyzer) enum_decl(node tree_sitter.Node<v.NodeType>) {
+fn (mut an SemanticAnalyzer) enum_decl(node ts.Node<v.NodeType>) {
 }
 
-fn (mut an SemanticAnalyzer) fn_decl(node tree_sitter.Node<v.NodeType>) {
+fn (mut an SemanticAnalyzer) fn_decl(node ts.Node<v.NodeType>) {
 }
 
-pub fn (mut an SemanticAnalyzer) top_level_statement(current_node tree_sitter.Node<v.NodeType>) {
+pub fn (mut an SemanticAnalyzer) top_level_statement(current_node ts.Node<v.NodeType>) {
 	match current_node.type_name {
 		.import_declaration {
 			an.import_decl(current_node) or {
@@ -101,7 +101,7 @@ pub fn (mut an SemanticAnalyzer) analyze() {
 }
 
 // analyze analyzes the given tree
-pub fn (mut store Store) analyze(tree &tree_sitter.Tree<v.NodeType>, src_text []rune) {
+pub fn (mut store Store) analyze(tree &ts.Tree<v.NodeType>, src_text []rune) {
 	mut an := SemanticAnalyzer{
 		store: unsafe { store }
 		src_text: src_text
