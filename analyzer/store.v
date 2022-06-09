@@ -584,6 +584,9 @@ pub fn (mut ss Store) infer_symbol_from_node(node tree_sitter.Node<v.NodeType>, 
 	mut type_name := ''
 
 	match node.type_name {
+		.interpreted_string_literal {
+			type_name = 'string'
+		}
 		.identifier, .binded_identifier {
 			// Identifier symbol finding strategy
 			// Find first in symbols
