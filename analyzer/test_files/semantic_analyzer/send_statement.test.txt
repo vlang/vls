@@ -9,4 +9,4 @@ fn main() {
 ---
 
 (error "cannot push on non-channel `int`" [2,4]-[2,12])
-(error "cannot push `string` on `chan int`" [5,4]-[5,12])
+(error "cannot push `string` on `chan int`" [5,16]-[5,22])

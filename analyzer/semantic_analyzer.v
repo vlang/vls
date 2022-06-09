@@ -242,7 +242,7 @@ pub fn (mut an SemanticAnalyzer) send_statement(node ts.Node<v.NodeType>) ? {
 	if chan_typ_sym.kind != .chan_ {
 		an.report(chan_node, errors.send_channel_invalid_chan_type_error, chan_typ_sym)
 	} else if val_typ_sym != chan_typ_sym.parent_sym {
-		an.report(chan_node, errors.send_channel_invalid_value_type_error, val_typ_sym, chan_typ_sym)
+		an.report(val_node, errors.send_channel_invalid_value_type_error, val_typ_sym, chan_typ_sym)
 	}
 }
 
