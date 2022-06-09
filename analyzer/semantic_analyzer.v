@@ -314,6 +314,83 @@ pub fn (mut an SemanticAnalyzer) binary_expression(node ts.Node<v.NodeType>, cfg
 	return left_sym
 }
 
+fn (an &SemanticAnalyzer) check_if_type_field_exists(node ts.Node<v.NodeType>, name string) bool {
+	if node.type_name != .literal_value {
+		return false
+	}
+
+	mut cursor := new_tree_cursor(node)
+	for child_node in cursor {
+		if child_node.type_name == .keyed_element {
+			key_node := child_node.child_by_field_name('name') or { continue }
+			if key_node.code(an.src_text) == name {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+pub fn (mut an SemanticAnalyzer) type_initializer(node ts.Node<v.NodeType>) ?&Symbol {
+	type_node := node.child_by_field_name('type')?
+	sym_kind, module_name, symbol_name := symbol_name_from_node(type_node, an.src_text)
+
+	match sym_kind {
+		.array_, .variadic {
+			el_node := type_node.child_by_field_name('element')?
+			el_sym := an.store.find_symbol_by_type_node(el_node, an.src_text) or { analyzer.void_sym }
+			if el_sym.is_void() || el_sym.kind == .placeholder {
+				return an.report(el_node, errors.unknown_type_error, el_node.code(an.src_text))
+			} else if el_sym.kind == .sumtype {
+				if type_node.type_name == .fixed_array_type {
+					return an.report(node, errors.invalid_sumtype_array_init_error)
+				} else if body_node := node.child_by_field_name('body') {
+					// trigger error only if len field exists since setting the len
+					// field will allocate and insert default values into the array
+					// which the sumtype array cannot since the value is ambiguous and
+					// null is not allowed
+					if an.check_if_type_field_exists(body_node, 'len') {
+						return an.report(type_node, errors.invalid_sumtype_array_init_error)
+					}
+				}
+			}
+		}
+		.map_ {
+			key_node := type_node.child_by_field_name('key')?
+			key_sym := an.store.find_symbol_by_type_node(key_node, an.src_text) or {
+				analyzer.void_sym
+			}
+
+			if key_sym.is_void() || key_sym.kind == .placeholder {
+				an.report(key_node, errors.unknown_type_error, key_node.code(an.src_text))
+			}
+
+			val_node := type_node.child_by_field_name('value')?
+			val_sym := an.store.find_symbol_by_type_node(val_node, an.src_text) or {
+				analyzer.void_sym
+			}
+
+			if val_sym.is_void() || val_sym.kind == .placeholder {
+				an.report(val_node, errors.unknown_type_error, val_node.code(an.src_text))
+			}
+		}
+		.chan_, .ref, .optional {
+			el_node := type_node.named_child(0)?
+			el_sym := an.store.find_symbol_by_type_node(el_node, an.src_text) or {
+				analyzer.void_sym
+			}
+
+			if el_sym.is_void() || el_sym.kind == .placeholder {
+				an.report(el_node, errors.unknown_type_error, el_node.code(an.src_text))
+			}
+		}
+		else {}
+	}
+
+	return an.store.find_symbol(module_name, symbol_name)
+}
+
 [params]
 pub struct SemanticExpressionAnalyzeConfig {
 	as_value bool
@@ -321,6 +398,9 @@ pub struct SemanticExpressionAnalyzeConfig {
 
 pub fn (mut an SemanticAnalyzer) expression(node ts.Node<v.NodeType>, cfg SemanticExpressionAnalyzeConfig) ?&Symbol {
 	match node.type_name {
+		.type_initializer {
+			return an.type_initializer(node)
+		}
 		.binary_expression {
 			return an.binary_expression(node, cfg)
 		}
