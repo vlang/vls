@@ -150,10 +150,19 @@ pub fn (mut an SemanticAnalyzer) block(node ts.Node<v.NodeType>) {
 	}
 }
 
+pub fn (mut an SemanticAnalyzer) short_var_declaration(node ts.Node<v.NodeType>) ? {
+	right := node.child_by_field_name('right')?
+	right_count := right.named_child_count()
+	for i in u32(0) .. right_count {
+		right_child := right.named_child(i) or { continue }
+		an.expression(right_child, as_value: true) or { continue }
+	}
+}
+
 pub fn (mut an SemanticAnalyzer) statement(node ts.Node<v.NodeType>) {
 	match node.type_name {
 		.short_var_declaration {
-			// an.short_var_declaration(node) or {}
+			an.short_var_declaration(node) or {}
 		}
 		.block {
 			an.block(node)
