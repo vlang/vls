@@ -4,6 +4,7 @@ import strconv
 import errors
 import tree_sitter as ts
 import tree_sitter_v as v
+import os
 
 pub struct SemanticAnalyzer {
 pub mut:
@@ -465,6 +466,42 @@ pub fn (mut an SemanticAnalyzer) selector_expression(node ts.Node<v.NodeType>) ?
 	return root_sym
 }
 
+pub fn (mut an SemanticAnalyzer) array(node ts.Node<v.NodeType>) ?&Symbol {
+	items_len := node.named_child_count()
+	if items_len == 0 {
+		return an.report(node, errors.untyped_empty_array_error)
+	}
+
+	first_item_node := node.named_child(0)?
+	mut expected_sym := an.expression(first_item_node) or { analyzer.void_sym }
+	if expected_sym.is_void() {
+		return expected_sym
+	} else if items_len > 1 {
+		for i in u32(1) .. items_len {
+			item_child_node := node.named_child(i) or { continue }
+			returned_item_sym := an.expression(item_child_node) or { analyzer.void_sym }
+			if returned_item_sym != expected_sym {
+				an.report(item_child_node, errors.invalid_array_element_type_error, expected_sym, returned_item_sym)
+				continue
+			}
+		}
+	}
+
+	symbol_name := '[]' + expected_sym.gen_str(with_kind: false, with_access: false, with_contents: false)
+	return an.store.find_symbol('', symbol_name) or {
+		mut new_sym := Symbol{
+			name: symbol_name.clone()
+			is_top_level: true
+			file_path: os.join_path(an.store.cur_dir, 'placeholder.vv')
+			file_version: 0
+			kind: .array_
+		}
+
+		new_sym.add_child(mut expected_sym, false) or {}
+		an.store.register_symbol(mut new_sym) or { analyzer.void_sym }
+	}
+}
+
 [params]
 pub struct SemanticExpressionAnalyzeConfig {
 	as_value bool
@@ -472,6 +509,9 @@ pub struct SemanticExpressionAnalyzeConfig {
 
 pub fn (mut an SemanticAnalyzer) expression(node ts.Node<v.NodeType>, cfg SemanticExpressionAnalyzeConfig) ?&Symbol {
 	match node.type_name {
+		.array {
+			return an.array(node)
+		}
 		.selector_expression {
 			return an.selector_expression(node)
 		}
