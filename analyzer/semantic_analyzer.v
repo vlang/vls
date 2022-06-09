@@ -45,7 +45,7 @@ fn (mut an SemanticAnalyzer) format_report(report Report) string {
 				if d is string {
 					final_params << d
 				} else if d is Symbol {
-					final_params << d.gen_str(with_access: false, with_kind: false).replace_each(['int_literal', 'int literal', 'float_literal', 'float literal'])
+					final_params << d.gen_str(with_access: false, with_kind: false, with_contents: false).replace_each(['int_literal', 'int literal', 'float_literal', 'float literal'])
 				} else {
 					// final_params << d.str()
 					final_params << 'unknown'
@@ -186,7 +186,7 @@ pub fn (mut an SemanticAnalyzer) assignment_statement(node ts.Node<v.NodeType>) 
 				if left_sym.name in analyzer.numeric_types_with_any_type || right_sym.name in analyzer.numeric_types_with_any_type {
 					an.report(node, errors.mismatched_type_error, left_sym, right_sym)
 				} else {
-					an.report(node, errors.undefined_operation_error, left_sym, op, right_sym)
+					an.report(op_node, errors.undefined_operation_error, left_sym, op, right_sym)
 				}
 			} else if right_child.type_name == .unary_expression && left_sym != right_sym {
 				unary_op_node := right_child.child_by_field_name('operator') or { continue }

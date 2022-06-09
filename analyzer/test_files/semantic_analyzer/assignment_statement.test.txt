@@ -11,6 +11,6 @@ fn main() {
 ---
 
 (error "cannot assign to `str`: expected `string`, not `int`" [2,4]-[2,11])
-(error "undefined operation `string` * `string`" [3,4]-[3,18])
+(error "undefined operation `string` * `string`" [3,8]-[3,10])
 (error "mismatched types `int` and `string`" [6,4]-[6,18])
 (error "cannot assign to `num`: expected `int`, not `void`" [7,10]-[7,11])
