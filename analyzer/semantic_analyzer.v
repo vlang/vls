@@ -159,8 +159,19 @@ pub fn (mut an SemanticAnalyzer) short_var_declaration(node ts.Node<v.NodeType>)
 	}
 }
 
+pub fn (mut an SemanticAnalyzer) assert_statement(node ts.Node<v.NodeType>) ? {
+	expr_node := node.named_child(0)?
+	expr_typ_sym := an.expression(expr_node, as_value: true) or { analyzer.void_sym }
+	if expr_typ_sym.name != 'bool' {
+		an.report(expr_node, errors.invalid_assert_type_error, expr_typ_sym)
+	}
+}
+
 pub fn (mut an SemanticAnalyzer) statement(node ts.Node<v.NodeType>) {
 	match node.type_name {
+		.assert_statement {
+			an.assert_statement(node) or {}
+		}
 		.short_var_declaration {
 			an.short_var_declaration(node) or {}
 		}
