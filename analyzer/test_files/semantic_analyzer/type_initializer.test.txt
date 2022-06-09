@@ -1,0 +1,19 @@
+type Foo = string | int
+
+fn main() {
+    mut foo := [10]Foo{}
+    mut foo2 := []Foo{len: 10}
+
+    mp := map[Uri]string{}
+    mp2 := map[string]Baz{}
+
+    chn := chan Boo{}
+}
+
+---
+
+(error "cannot initialize sum type array without default value" [3,15]-[3,24])
+(error "cannot initialize sum type array without default value" [4,16]-[4,21])
+(error "unknown type `Uri`" [6,14]-[6,17])
+(error "unknown type `Baz`" [7,22]-[7,25])
+(error "unknown type `Boo`" [9,16]-[9,19])

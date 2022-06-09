@@ -4,6 +4,7 @@ import strconv
 import errors
 import tree_sitter as ts
 import tree_sitter_v as v
+import os
 
 pub struct SemanticAnalyzer {
 pub mut:
@@ -314,6 +315,230 @@ pub fn (mut an SemanticAnalyzer) binary_expression(node ts.Node<v.NodeType>, cfg
 	return left_sym
 }
 
+fn (an &SemanticAnalyzer) check_if_type_field_exists(node ts.Node<v.NodeType>, name string) bool {
+	if node.type_name != .literal_value {
+		return false
+	}
+
+	mut cursor := new_tree_cursor(node)
+	for child_node in cursor {
+		if child_node.type_name == .keyed_element {
+			key_node := child_node.child_by_field_name('name') or { continue }
+			if key_node.code(an.src_text) == name {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+pub fn (mut an SemanticAnalyzer) type_initializer(node ts.Node<v.NodeType>) ?&Symbol {
+	type_node := node.child_by_field_name('type')?
+	sym_kind, module_name, symbol_name := symbol_name_from_node(type_node, an.src_text)
+
+	match sym_kind {
+		.array_, .variadic {
+			el_node := type_node.child_by_field_name('element')?
+			el_sym := an.store.find_symbol_by_type_node(el_node, an.src_text) or { analyzer.void_sym }
+			if el_sym.is_void() || el_sym.kind == .placeholder {
+				return an.report(el_node, errors.unknown_type_error, el_node.code(an.src_text))
+			} else if el_sym.kind == .sumtype {
+				if type_node.type_name == .fixed_array_type {
+					return an.report(node, errors.invalid_sumtype_array_init_error)
+				} else if body_node := node.child_by_field_name('body') {
+					// trigger error only if len field exists since setting the len
+					// field will allocate and insert default values into the array
+					// which the sumtype array cannot since the value is ambiguous and
+					// null is not allowed
+					if an.check_if_type_field_exists(body_node, 'len') {
+						return an.report(type_node, errors.invalid_sumtype_array_init_error)
+					}
+				}
+			}
+		}
+		.map_ {
+			key_node := type_node.child_by_field_name('key')?
+			key_sym := an.store.find_symbol_by_type_node(key_node, an.src_text) or {
+				analyzer.void_sym
+			}
+
+			if key_sym.is_void() || key_sym.kind == .placeholder {
+				an.report(key_node, errors.unknown_type_error, key_node.code(an.src_text))
+			}
+
+			val_node := type_node.child_by_field_name('value')?
+			val_sym := an.store.find_symbol_by_type_node(val_node, an.src_text) or {
+				analyzer.void_sym
+			}
+
+			if val_sym.is_void() || val_sym.kind == .placeholder {
+				an.report(val_node, errors.unknown_type_error, val_node.code(an.src_text))
+			}
+		}
+		.chan_, .ref, .optional {
+			el_node := type_node.named_child(0)?
+			el_sym := an.store.find_symbol_by_type_node(el_node, an.src_text) or {
+				analyzer.void_sym
+			}
+
+			if el_sym.is_void() || el_sym.kind == .placeholder {
+				an.report(el_node, errors.unknown_type_error, el_node.code(an.src_text))
+			}
+		}
+		else {}
+	}
+
+	return an.store.find_symbol(module_name, symbol_name)
+}
+
+pub fn (mut an SemanticAnalyzer) selector_expression(node ts.Node<v.NodeType>) ?&Symbol {
+	operand := node.child_by_field_name('operand')?
+	mut root_sym := an.expression(operand) or {
+		an.store.infer_symbol_from_node(operand, an.src_text) or { analyzer.void_sym }
+	}
+
+	if !root_sym.is_void() {
+		if root_sym.is_returnable() {
+			root_sym = root_sym.return_sym
+		}
+
+		field_node := node.child_by_field_name('field')?
+		child_name := field_node.code(an.src_text)
+		got_child_sym := root_sym.children_syms.get(child_name) or {
+			mut base_root_sym := root_sym
+			if root_sym.kind in [.ref, .chan_, .optional] {
+				base_root_sym = root_sym.parent_sym
+			} else if root_sym.kind == .array_ {
+				base_root_sym = an.store.find_symbol('', 'array') or { analyzer.void_sym }
+			} else if root_sym.kind == .map_ {
+				base_root_sym = an.store.find_symbol('', 'map') or { analyzer.void_sym }
+			}
+			base_root_sym.children_syms.get(child_name) or { void_sym }
+		}
+
+		// NOTE: transfer this to `store.infer_symbol_from_node` if possible
+		mut got_sym_kind_from_embed := SymbolKind.void
+		mut method_or_field_sym := analyzer.void_sym
+		mut method_or_field_typ_idx := -1
+
+		for child_sym_idx, child_sym in root_sym.children_syms {
+			if child_sym.kind != .embedded_field {
+				continue
+			}
+
+			returned_sym := child_sym.return_sym.children_syms.get(child_name) or {
+				continue
+			}
+
+			if method_or_field_typ_idx == -1 {
+				method_or_field_sym = returned_sym
+				method_or_field_typ_idx = child_sym_idx
+				got_sym_kind_from_embed = returned_sym.kind
+			} else {
+				err_code := if got_sym_kind_from_embed == .function {
+					errors.ambiguous_method_error
+				} else {
+					errors.ambiguous_field_error
+				}
+
+				mut in_parent := false
+				if parent := node.parent() {
+					if parent.type_name == .call_expression {
+						in_parent = true
+						an.report(parent, err_code, child_name)
+					}
+				}
+
+				if !in_parent {
+					an.report(field_node, err_code, child_name)
+				}
+			}
+		}	
+
+		return if method_or_field_sym.is_void() {
+			got_child_sym
+		} else {
+			method_or_field_sym
+		}
+	}
+
+	return root_sym
+}
+
+pub fn (mut an SemanticAnalyzer) array(node ts.Node<v.NodeType>) ?&Symbol {
+	items_len := node.named_child_count()
+	if items_len == 0 {
+		return an.report(node, errors.untyped_empty_array_error)
+	}
+
+	first_item_node := node.named_child(0)?
+	mut expected_sym := an.expression(first_item_node) or { analyzer.void_sym }
+	if expected_sym.is_void() {
+		return expected_sym
+	} else if items_len > 1 {
+		for i in u32(1) .. items_len {
+			item_child_node := node.named_child(i) or { continue }
+			returned_item_sym := an.expression(item_child_node) or { analyzer.void_sym }
+			if returned_item_sym != expected_sym {
+				an.report(item_child_node, errors.invalid_array_element_type_error, expected_sym, returned_item_sym)
+				continue
+			}
+		}
+	}
+
+	symbol_name := '[]' + expected_sym.gen_str(with_kind: false, with_access: false, with_contents: false)
+	return an.store.find_symbol('', symbol_name) or {
+		mut new_sym := Symbol{
+			name: symbol_name.clone()
+			is_top_level: true
+			file_path: os.join_path(an.store.cur_dir, 'placeholder.vv')
+			file_version: 0
+			kind: .array_
+		}
+
+		new_sym.add_child(mut expected_sym, false) or {}
+		an.store.register_symbol(mut new_sym) or { analyzer.void_sym }
+	}
+}
+
+pub fn (mut an SemanticAnalyzer) call_expression(node ts.Node<v.NodeType>) ?&Symbol {
+	fn_node := node.child_by_field_name('function')?
+	arguments_node := node.child_by_field_name('arguments')?
+	fn_sym := an.expression(fn_node) or { analyzer.void_sym }
+	if fn_sym.is_void() {
+		return an.report(node, errors.unknown_function_error, fn_node.code(an.src_text))
+	}
+
+	// check arguments
+	for i, _ in fn_sym.children_syms {
+		arg_node := arguments_node.named_child(u32(i)) or { continue }
+		// TODO:
+		// mut returned_sym := an.expression(arg_node)
+		// if returned_sym.is_returnable() {
+		// 	returned_sym = arg_sym.return_sym
+		// }
+
+		// if returned_sym != arg_sym.return_sym {
+		// 	an.custom_report(
+		// 		analyzer.invalid_argument_error, 
+		// 		arg_node, 
+		// 		[returned_sym, arg_sym.return_sym],
+		// 		{2: i.str(), 3: fn_sym.name}
+		// 	)
+		// }
+		an.expression(arg_node) or {}
+	}
+
+	// TODO: or block checking
+
+	if fn_sym.is_returnable() {
+		return fn_sym.return_sym
+	} else {
+		return fn_sym
+	}
+}
+
 [params]
 pub struct SemanticExpressionAnalyzeConfig {
 	as_value bool
@@ -321,11 +546,26 @@ pub struct SemanticExpressionAnalyzeConfig {
 
 pub fn (mut an SemanticAnalyzer) expression(node ts.Node<v.NodeType>, cfg SemanticExpressionAnalyzeConfig) ?&Symbol {
 	match node.type_name {
+		.call_expression {
+			return an.call_expression(node)
+		}
+		.array {
+			return an.array(node)
+		}
+		.selector_expression {
+			return an.selector_expression(node)
+		}
+		.type_initializer {
+			return an.type_initializer(node)
+		}
 		.binary_expression {
 			return an.binary_expression(node, cfg)
 		}
 		.int_literal, .float_literal {
 			return an.store.infer_value_type_from_node(node, an.src_text)
+		}
+		.parenthesized_expression {
+			return an.expression(node.named_child(0)?, cfg)
 		}
 		else {
 			sym := an.store.infer_symbol_from_node(node, an.src_text) or { void_sym }

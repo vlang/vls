@@ -1,0 +1,7 @@
+fn main() {
+    foo(3)
+}
+
+---
+
+(error "unknown function: foo" [1,4]-[1,10])

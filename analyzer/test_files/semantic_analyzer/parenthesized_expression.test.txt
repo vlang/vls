@@ -1,0 +1,7 @@
+fn main() {
+    (1 * 'test')
+}
+
+---
+
+(error "mismatched types `int` and `string`" [1,5]-[1,15])

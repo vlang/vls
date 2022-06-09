@@ -1,0 +1,7 @@
+fn main() {
+    ['tes', 2]
+}
+
+---
+
+(error "invalid array element: expected `string`, not `int`" [1,12]-[1,13])
