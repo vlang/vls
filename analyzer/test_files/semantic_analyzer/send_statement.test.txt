@@ -1,0 +1,12 @@
+fn main() {
+    not_chan := 2
+    not_chan <- 3
+
+    num_chan := chan int{}
+    num_chan <- 'test'
+}
+
+---
+
+(error "cannot push on non-channel `int`" [2,4]-[2,12])
+(error "cannot push `string` on `chan int`" [5,4]-[5,12])

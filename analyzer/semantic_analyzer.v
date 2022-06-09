@@ -162,6 +162,45 @@ pub fn (mut an SemanticAnalyzer) top_level_statement(current_node ts.Node<v.Node
 	}
 }
 
+pub fn (mut an SemanticAnalyzer) assignment_statement(node ts.Node<v.NodeType>) ? {
+	op_node := node.child_by_field_name('operator')?
+	op := op_node.raw_node.type_name()[0].ascii_str()
+	is_multiplicative := op in multiplicative_operators
+	is_additive := op in additive_operators
+
+	left_node := node.child_by_field_name('left')?
+	right_node := node.child_by_field_name('right')?
+	left_sym_count := left_node.named_child_count()
+	right_sym_count := right_node.named_child_count()
+
+	if left_sym_count == right_sym_count {
+		for i in u32(0) .. u32(left_sym_count) {
+			left_child := left_node.named_child(i) or { continue }
+			right_child := right_node.named_child(i) or { continue }
+
+			left_sym := an.expression(left_child, as_value: true) or { analyzer.void_sym }
+			mut right_sym := an.expression(right_child, as_value: true) or { analyzer.void_sym }
+
+			if is_multiplicative || is_additive {
+				if left_sym.name in analyzer.numeric_types_with_any_type || right_sym.name in analyzer.numeric_types_with_any_type {
+					an.report(node, errors.mismatched_type_error, left_sym, right_sym)
+				} else {
+					an.report(node, errors.undefined_operation_error, left_sym, op, right_sym)
+				}
+			} else if right_child.type_name == .unary_expression && left_sym != right_sym {
+				unary_op_node := right_child.child_by_field_name('operator') or { continue }
+				if right_sym.kind == .chan_ {
+					right_sym = right_sym.parent_sym
+				}
+
+				an.report(unary_op_node, errors.invalid_assignment_error, left_child.code(an.src_text), left_sym, right_sym)
+			} else if left_sym != right_sym {
+				an.report(node, errors.invalid_assignment_error, left_child.code(an.src_text), left_sym, right_sym)
+			}
+		}
+	}
+}
+
 pub fn (mut an SemanticAnalyzer) block(node ts.Node<v.NodeType>) {
 	mut cursor := new_tree_cursor(node)
 	for got_node in cursor {
@@ -178,8 +217,37 @@ pub fn (mut an SemanticAnalyzer) short_var_declaration(node ts.Node<v.NodeType>)
 	}
 }
 
+pub fn (mut an SemanticAnalyzer) assert_statement(node ts.Node<v.NodeType>) ? {
+	expr_node := node.named_child(0)?
+	expr_typ_sym := an.expression(expr_node, as_value: true) or { analyzer.void_sym }
+	if expr_typ_sym.name != 'bool' {
+		an.report(expr_node, errors.invalid_assert_type_error, expr_typ_sym)
+	}
+}
+
+pub fn (mut an SemanticAnalyzer) send_statement(node ts.Node<v.NodeType>) ? {
+	chan_node := node.child_by_field_name('channel')?
+	val_node := node.child_by_field_name('value')?
+	chan_typ_sym := an.expression(chan_node) or { analyzer.void_sym }
+	val_typ_sym := an.expression(val_node) or { analyzer.void_sym }
+	if chan_typ_sym.kind != .chan_ {
+		an.report(chan_node, errors.send_channel_invalid_chan_type_error, chan_typ_sym)
+	} else if val_typ_sym != chan_typ_sym.parent_sym {
+		an.report(chan_node, errors.send_channel_invalid_value_type_error, val_typ_sym, chan_typ_sym)
+	}
+}
+
 pub fn (mut an SemanticAnalyzer) statement(node ts.Node<v.NodeType>) {
 	match node.type_name {
+		.assignment_statement {
+			an.assignment_statement(node) or {}
+		}
+		.assert_statement {
+			an.assert_statement(node) or {}
+		}
+		.send_statement {
+			an.send_statement(node) or {}
+		}
 		.short_var_declaration {
 			an.short_var_declaration(node) or {}
 		}
@@ -255,6 +323,9 @@ pub fn (mut an SemanticAnalyzer) expression(node ts.Node<v.NodeType>, cfg Semant
 	match node.type_name {
 		.binary_expression {
 			return an.binary_expression(node, cfg)
+		}
+		.int_literal, .float_literal {
+			return an.store.infer_value_type_from_node(node, an.src_text)
 		}
 		else {
 			sym := an.store.infer_symbol_from_node(node, an.src_text) or { void_sym }

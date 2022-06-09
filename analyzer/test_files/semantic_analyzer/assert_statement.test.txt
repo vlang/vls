@@ -1,0 +1,11 @@
+fn test_assert() {
+    expected := 1
+    assert expected == 'test'
+    assert 1 + 1
+}
+
+---
+
+(error "mismatched types `int` and `string`" [2,11]-[2,29])
+(error "assert can be used only with `bool` expressions, but found `void` instead" [2,11]-[2,29])
+(error "assert can be used only with `bool` expressions, but found `int` instead" [3,11]-[3,16])
