@@ -110,6 +110,9 @@ fn (mut an SemanticAnalyzer) enum_decl(node ts.Node<v.NodeType>) {
 }
 
 fn (mut an SemanticAnalyzer) fn_decl(node ts.Node<v.NodeType>) {
+	// TODO: set cur_fn_name
+	body_node := node.child_by_field_name('body') or { return }
+	an.block(body_node)
 }
 
 pub fn (mut an SemanticAnalyzer) top_level_statement(current_node ts.Node<v.NodeType>) {
@@ -134,7 +137,65 @@ pub fn (mut an SemanticAnalyzer) top_level_statement(current_node ts.Node<v.Node
 		.function_declaration {
 			an.fn_decl(current_node)
 		}
-		else {}
+		else {
+			an.statement(current_node)
+		}
+	}
+}
+
+pub fn (mut an SemanticAnalyzer) block(node ts.Node<v.NodeType>) {
+	mut cursor := new_tree_cursor(node)
+	for got_node in cursor {
+		an.statement(got_node)
+	}
+}
+
+pub fn (mut an SemanticAnalyzer) statement(node ts.Node<v.NodeType>) {
+	match node.type_name {
+		.short_var_declaration {
+			// an.short_var_declaration(node) or {}
+		}
+		.block {
+			an.block(node)
+		}
+		else {
+			an.expression(node) or {}
+		}
+	}
+}
+
+[params]
+pub struct SemanticExpressionAnalyzeConfig {
+	as_value bool
+}
+
+pub fn (mut an SemanticAnalyzer) expression(node ts.Node<v.NodeType>, cfg SemanticExpressionAnalyzeConfig) ?&Symbol {
+	match node.type_name {
+		.binary_expression {
+			//return an.binary_expression(node, cfg)
+		}
+		else {
+			sym := an.store.infer_symbol_from_node(node, an.src_text) or { void_sym }
+			if sym.kind == .variable || sym.kind == .field {
+				// if sym.name == an.cur_fn_name && sym.kind == .variable {
+				// 	parent := node.parent()?
+				// 	if parent.type_name == .call_expression {
+				// 		an.report(parent, errors.ambiguous_call_error,
+				// 			'', // an.cur_fn_name
+				// 			'', // an.cur_fn_name
+				// 			'', // an.cur_fn_name
+				// 		)
+				// 	}
+				// 	return void_sym
+				// }
+
+				return sym.return_sym
+			} else {
+				return sym
+			}
+
+			// return an.report(node, errors.unknown_node_type_error, node.raw_node.type_name())
+		}
 	}
 }
 
