@@ -569,6 +569,10 @@ pub fn (mut an SemanticAnalyzer) expression(node ts.Node<v.NodeType>, cfg Semant
 		.binary_expression {
 			return an.binary_expression(node, cfg)
 		}
+		.unary_expression {
+			// TODO: temporary fix
+			return an.store.infer_value_type_from_node(node, an.src_text)
+		}
 		.int_literal, .float_literal {
 			return an.store.infer_value_type_from_node(node, an.src_text)
 		}

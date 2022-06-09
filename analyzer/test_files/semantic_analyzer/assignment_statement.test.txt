@@ -7,6 +7,10 @@ fn main() {
     num /= 'wrong'
     num = -'welp'
     _ = 2
+
+    ch := chan string{}
+    mut obj := 9
+    obj = <-ch
 }
 
 ---
@@ -15,3 +19,4 @@ fn main() {
 (error "undefined operation `string` * `string`" [3,8]-[3,10])
 (error "mismatched types `int` and `string`" [6,4]-[6,18])
 (error "cannot assign to `num`: expected `int`, not `void`" [7,10]-[7,11])
+(error "cannot assign to `obj`: expected `int`, not `string`" [12,10]-[12,12])
