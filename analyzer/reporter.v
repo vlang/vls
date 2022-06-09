@@ -44,6 +44,12 @@ pub mut:
 	notices  []Report
 }
 
+pub fn (mut c Collector) clear() {
+	c.errors.clear()
+	c.warnings.clear()
+	c.notices.clear()
+}
+
 pub fn (mut c Collector) report(r Report) {
 	match r.kind {
 		.error {

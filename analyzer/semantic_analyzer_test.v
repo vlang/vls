@@ -82,6 +82,7 @@ fn test_semantic_analysis() ? {
 			sym_analyzer.src_text.free()
 		}
 
+		reporter.clear()
 		store.delete(store.cur_dir)
 	}
 	assert bench.nfail == 0
