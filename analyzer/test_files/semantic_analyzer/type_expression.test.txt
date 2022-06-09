@@ -1,0 +1,7 @@
+type Foo = Bar
+type Text = string | Baz
+
+---
+
+(error "unknown type `Bar`" [0,11]-[0,14])
+(error "unknown type `Baz`" [1,21]-[1,24])

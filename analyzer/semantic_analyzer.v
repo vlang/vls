@@ -115,6 +115,22 @@ fn (mut an SemanticAnalyzer) fn_decl(node ts.Node<v.NodeType>) {
 	an.block(body_node)
 }
 
+fn (mut an SemanticAnalyzer) type_decl(node ts.Node<v.NodeType>) ? {
+	types_node := node.child_by_field_name('types')?
+	types_count := types_node.named_child_count()
+	
+	for i in u32(0) .. types_count {
+		type_node := types_node.named_child(i) or { continue }
+		got_sym := an.store.find_symbol_by_type_node(type_node, an.src_text) or {
+			continue
+		}
+
+		if got_sym.is_void() || got_sym.kind == .placeholder {
+			an.report(type_node, errors.unknown_type_error, type_node.code(an.src_text))
+		}
+	}
+}
+
 pub fn (mut an SemanticAnalyzer) top_level_statement(current_node ts.Node<v.NodeType>) {
 	match current_node.type_name {
 		.import_declaration {
@@ -136,6 +152,9 @@ pub fn (mut an SemanticAnalyzer) top_level_statement(current_node ts.Node<v.Node
 		}
 		.function_declaration {
 			an.fn_decl(current_node)
+		}
+		.type_declaration {
+			an.type_decl(current_node) or {}
 		}
 		else {
 			an.statement(current_node)
