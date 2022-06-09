@@ -44,7 +44,7 @@ fn (mut an SemanticAnalyzer) format_report(report Report) string {
 				if d is string {
 					final_params << d
 				} else if d is Symbol {
-					final_params << d.gen_str()
+					final_params << d.gen_str(with_access: false, with_kind: false).replace_each(['int_literal', 'int', 'float_literal', 'float'])
 				} else {
 					// final_params << d.str()
 					final_params << 'unknown'
