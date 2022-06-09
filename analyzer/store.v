@@ -646,7 +646,7 @@ pub fn (mut ss Store) infer_symbol_from_node(node tree_sitter.Node<v.NodeType>, 
 			return ss.find_symbol_by_type_node(node.child_by_field_name('type') ?, src_text)
 		}
 		.type_identifier, .array, .array_type, .map_type, .pointer_type, .variadic_type,
-		.builtin_type, .fn_literal {
+		.builtin_type, .channel_type, .fn_literal {
 			return ss.find_symbol_by_type_node(node, src_text)
 		}
 		.const_spec {
