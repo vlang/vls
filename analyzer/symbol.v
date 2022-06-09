@@ -192,7 +192,7 @@ pub fn (info &Symbol) gen_str(cfg SymbolGenStrConfig) string {
 
 			if !isnil(info.parent_sym) && !info.parent_sym.is_void() {
 				sb.write_byte(`(`)
-				sb.write_string(info.parent_sym.gen_str(child_cfg))
+				sb.write_string(info.parent_sym.gen_str(with_kind: false, with_contents: false))
 				sb.write_string(') ')
 			}
 
@@ -203,9 +203,9 @@ pub fn (info &Symbol) gen_str(cfg SymbolGenStrConfig) string {
 			sb.write_byte(`(`)
 			for i, v in info.children_syms {
 				if v.name.len != 0 {
-					sb.write_string(v.gen_str(child_cfg))
+					sb.write_string(v.gen_str(with_kind: false, with_contents: false))
 				} else {
-					sb.write_string(v.return_sym.gen_str(child_cfg))
+					sb.write_string(v.return_sym.gen_str(with_kind: false, with_contents: false))
 				}
 				if i < info.children_syms.len - 1 {
 					sb.write_string(', ')
