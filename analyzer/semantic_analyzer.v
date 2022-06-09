@@ -51,7 +51,7 @@ fn (mut an SemanticAnalyzer) format_report(report Report) string {
 				}
 			}
 
-			ptrs := unsafe { report.data.params.pointers() }
+			ptrs := unsafe { final_params.pointers() }
 			final_report := Report{
 				...report
 				message: strconv.v_sprintf(report.message, ...ptrs)
