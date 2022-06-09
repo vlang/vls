@@ -394,7 +394,7 @@ pub fn (mut an SemanticAnalyzer) type_initializer(node ts.Node<v.NodeType>) ?&Sy
 
 pub fn (mut an SemanticAnalyzer) selector_expression(node ts.Node<v.NodeType>) ?&Symbol {
 	operand := node.child_by_field_name('operand')?
-	mut root_sym := an.expression(operand) or {
+	mut root_sym := an.expression(operand, as_value: true) or {
 		an.store.infer_symbol_from_node(operand, an.src_text) or { analyzer.void_sym }
 	}
 

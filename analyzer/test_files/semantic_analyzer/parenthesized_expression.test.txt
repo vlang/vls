@@ -1,7 +1,9 @@
 fn main() {
     (1 * 'test')
+    an := ([1] << 2).len
 }
 
 ---
 
 (error "mismatched types `int literal` and `string`" [1,5]-[1,15])
+(error "array append cannot be used in an expression" [2,15]-[2,17])
