@@ -855,7 +855,7 @@ pub fn (mut ss Store) infer_value_type_from_node(node tree_sitter.Node<v.NodeTyp
 			}
 			return got_sym
 		}
-		.type_selector_expression {
+		.type_selector_expression, .type_cast_expression {
 			if type_node := node.child_by_field_name('type') {
 				if parent_sym := ss.infer_symbol_from_node(type_node, src_text) {
 					return parent_sym
