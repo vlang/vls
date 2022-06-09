@@ -391,6 +391,80 @@ pub fn (mut an SemanticAnalyzer) type_initializer(node ts.Node<v.NodeType>) ?&Sy
 	return an.store.find_symbol(module_name, symbol_name)
 }
 
+pub fn (mut an SemanticAnalyzer) selector_expression(node ts.Node<v.NodeType>) ?&Symbol {
+	operand := node.child_by_field_name('operand')?
+	mut root_sym := an.expression(operand) or {
+		an.store.infer_symbol_from_node(operand, an.src_text) or { analyzer.void_sym }
+	}
+
+	if !root_sym.is_void() {
+		if root_sym.is_returnable() {
+			root_sym = root_sym.return_sym
+		}
+
+		field_node := node.child_by_field_name('field')?
+		child_name := field_node.code(an.src_text)
+		got_child_sym := root_sym.children_syms.get(child_name) or {
+			mut base_root_sym := root_sym
+			if root_sym.kind in [.ref, .chan_, .optional] {
+				base_root_sym = root_sym.parent_sym
+			} else if root_sym.kind == .array_ {
+				base_root_sym = an.store.find_symbol('', 'array') or { analyzer.void_sym }
+			} else if root_sym.kind == .map_ {
+				base_root_sym = an.store.find_symbol('', 'map') or { analyzer.void_sym }
+			}
+			base_root_sym.children_syms.get(child_name) or { void_sym }
+		}
+
+		// NOTE: transfer this to `store.infer_symbol_from_node` if possible
+		mut got_sym_kind_from_embed := SymbolKind.void
+		mut method_or_field_sym := analyzer.void_sym
+		mut method_or_field_typ_idx := -1
+
+		for child_sym_idx, child_sym in root_sym.children_syms {
+			if child_sym.kind != .embedded_field {
+				continue
+			}
+
+			returned_sym := child_sym.return_sym.children_syms.get(child_name) or {
+				continue
+			}
+
+			if method_or_field_typ_idx == -1 {
+				method_or_field_sym = returned_sym
+				method_or_field_typ_idx = child_sym_idx
+				got_sym_kind_from_embed = returned_sym.kind
+			} else {
+				err_code := if got_sym_kind_from_embed == .function {
+					errors.ambiguous_method_error
+				} else {
+					errors.ambiguous_field_error
+				}
+
+				mut in_parent := false
+				if parent := node.parent() {
+					if parent.type_name == .call_expression {
+						in_parent = true
+						an.report(parent, err_code, child_name)
+					}
+				}
+
+				if !in_parent {
+					an.report(field_node, err_code, child_name)
+				}
+			}
+		}	
+
+		return if method_or_field_sym.is_void() {
+			got_child_sym
+		} else {
+			method_or_field_sym
+		}
+	}
+
+	return root_sym
+}
+
 [params]
 pub struct SemanticExpressionAnalyzeConfig {
 	as_value bool
@@ -398,6 +472,9 @@ pub struct SemanticExpressionAnalyzeConfig {
 
 pub fn (mut an SemanticAnalyzer) expression(node ts.Node<v.NodeType>, cfg SemanticExpressionAnalyzeConfig) ?&Symbol {
 	match node.type_name {
+		.selector_expression {
+			return an.selector_expression(node)
+		}
 		.type_initializer {
 			return an.type_initializer(node)
 		}
