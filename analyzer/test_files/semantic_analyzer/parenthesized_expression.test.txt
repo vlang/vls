@@ -4,4 +4,4 @@ fn main() {
 
 ---
 
-(error "mismatched types `int` and `string`" [1,5]-[1,15])
+(error "mismatched types `int literal` and `string`" [1,5]-[1,15])

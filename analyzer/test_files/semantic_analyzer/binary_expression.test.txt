@@ -13,8 +13,8 @@ fn main() {
 
 (error "cannot append `string` to `[]int`" [2,10]-[2,16])
 (error "array append cannot be used in an expression" [3,14]-[3,16])
-(error "mismatched types `int` and `string`" [4,4]-[4,13])
-(error "mismatched types `string` and `int`" [5,14]-[5,25])
+(error "mismatched types `int literal` and `string`" [4,4]-[4,13])
+(error "mismatched types `string` and `int literal`" [5,14]-[5,25])
 (error "undefined operation `string` * `string`" [6,4]-[6,19])
-(error "mismatched types `int` and `string`" [7,18]-[7,29])
-(error "mismatched types `int` and `int`" [8,18]-[8,24])
+(error "mismatched types `int literal` and `string`" [7,18]-[7,29])
+(error "mismatched types `int literal` and `int literal`" [8,18]-[8,24])

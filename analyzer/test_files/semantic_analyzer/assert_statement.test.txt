@@ -8,4 +8,4 @@ fn test_assert() {
 
 (error "mismatched types `int` and `string`" [2,11]-[2,29])
 (error "assert can be used only with `bool` expressions, but found `void` instead" [2,11]-[2,29])
-(error "assert can be used only with `bool` expressions, but found `int` instead" [3,11]-[3,16])
+(error "assert can be used only with `bool` expressions, but found `int literal` instead" [3,11]-[3,16])
