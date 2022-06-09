@@ -167,10 +167,25 @@ pub fn (mut an SemanticAnalyzer) assert_statement(node ts.Node<v.NodeType>) ? {
 	}
 }
 
+pub fn (mut an SemanticAnalyzer) send_statement(node ts.Node<v.NodeType>) ? {
+	chan_node := node.child_by_field_name('channel')?
+	val_node := node.child_by_field_name('value')?
+	chan_typ_sym := an.expression(chan_node) or { analyzer.void_sym }
+	val_typ_sym := an.expression(val_node) or { analyzer.void_sym }
+	if chan_typ_sym.kind != .chan_ {
+		an.report(chan_node, errors.send_channel_invalid_chan_type_error, chan_typ_sym)
+	} else if val_typ_sym != chan_typ_sym.parent_sym {
+		an.report(chan_node, errors.send_channel_invalid_value_type_error, val_typ_sym, chan_typ_sym)
+	}
+}
+
 pub fn (mut an SemanticAnalyzer) statement(node ts.Node<v.NodeType>) {
 	match node.type_name {
 		.assert_statement {
 			an.assert_statement(node) or {}
+		}
+		.send_statement {
+			an.send_statement(node) or {}
 		}
 		.short_var_declaration {
 			an.short_var_declaration(node) or {}
