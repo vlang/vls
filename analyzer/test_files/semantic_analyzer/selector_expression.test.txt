@@ -25,4 +25,5 @@ fn main() {
 
 ---
 
+(error "ambiguous method `test`" [21,1]-[21,9])
 (error "ambiguous field `name`" [22,8]-[22,12])
