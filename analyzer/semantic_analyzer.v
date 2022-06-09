@@ -407,6 +407,9 @@ pub fn (mut an SemanticAnalyzer) expression(node ts.Node<v.NodeType>, cfg Semant
 		.int_literal, .float_literal {
 			return an.store.infer_value_type_from_node(node, an.src_text)
 		}
+		.parenthesized_expression {
+			return an.expression(node.named_child(0)?, cfg)
+		}
 		else {
 			sym := an.store.infer_symbol_from_node(node, an.src_text) or { void_sym }
 			if sym.kind == .variable || sym.kind == .field {
