@@ -144,20 +144,28 @@ pub mut:
 
 const kinds_in_multi_return_to_be_excluded = [SymbolKind.function, .variable, .field]
 
+[params]
+pub struct SymbolGenStrConfig {
+	module_prefix string
+	with_kind     bool = true
+	with_access   bool = true
+	with_contents bool = true
+}
+
+const child_cfg = SymbolGenStrConfig{
+	with_kind: false
+	with_access: false
+	with_contents: false
+}
+
 // gen_str returns the string representation of a symbol.
 // Use this since str() has a pointer symbol attached at the beginning.
-pub fn (info &Symbol) gen_str() string {
+pub fn (info &Symbol) gen_str(cfg SymbolGenStrConfig) string {
 	if isnil(info) {
 		return 'nil symbol'
 	}
 
-	mut sb := strings.new_builder(100)
-	// defer {
-	// 	unsafe { sb.free() }
-	// }
-
-	// sb.write_string(info.access.str())
-
+	mut sb := strings.new_builder(info.name.len)
 	match info.kind {
 		// .array_ {
 		// 	sb.write_string('[]')
@@ -165,20 +173,26 @@ pub fn (info &Symbol) gen_str() string {
 		// }
 		.chan_ {
 			sb.write_string('chan ')
-			sb.write_string(info.parent_sym.gen_str())
+			sb.write_string(info.parent_sym.gen_str(child_cfg))
 		}
 		.enum_ {
-			sb.write_string(info.access.str())
-			sb.write_string('enum ')
+			if cfg.with_access {
+				sb.write_string(info.access.str())
+			}
+			if cfg.with_kind {
+				sb.write_string('enum ')
+			}
 			sb.write_string(info.name)
 		}
 		.function, .function_type {
-			sb.write_string(info.access.str())
+			if cfg.with_access {
+				sb.write_string(info.access.str())
+			}
 			sb.write_string('fn ')
 
 			if !isnil(info.parent_sym) && !info.parent_sym.is_void() {
 				sb.write_byte(`(`)
-				sb.write_string(info.parent_sym.gen_str())
+				sb.write_string(info.parent_sym.gen_str(child_cfg))
 				sb.write_string(') ')
 			}
 
@@ -189,9 +203,9 @@ pub fn (info &Symbol) gen_str() string {
 			sb.write_byte(`(`)
 			for i, v in info.children_syms {
 				if v.name.len != 0 {
-					sb.write_string(v.gen_str())
+					sb.write_string(v.gen_str(child_cfg))
 				} else {
-					sb.write_string(v.return_sym.gen_str())
+					sb.write_string(v.return_sym.gen_str(child_cfg))
 				}
 				if i < info.children_syms.len - 1 {
 					sb.write_string(', ')
@@ -210,54 +224,63 @@ pub fn (info &Symbol) gen_str() string {
 			sb.write_byte(`(`)
 			for v in info.children_syms {
 				if v.kind !in analyzer.kinds_in_multi_return_to_be_excluded {
-					sb.write_string(v.gen_str())
+					sb.write_string(v.gen_str(with_kind: false, with_access: false))
 				}
 			}
 			sb.write_byte(`)`)
 		}
 		.optional {
 			sb.write_string('?')
-			sb.write_string(info.parent_sym.gen_str())
+			sb.write_string(info.parent_sym.gen_str(with_kind: false, with_access: false))
 		}
 		.ref {
 			sb.write_string('&')
-			sb.write_string(info.parent_sym.gen_str())
+			sb.write_string(info.parent_sym.gen_str(with_kind: false, with_access: false))
 		}
 		.struct_ {
-			sb.write_string(info.access.str())
-			sb.write_string('struct ')
+			if cfg.with_access {
+				sb.write_string(info.access.str())
+			}
+			if cfg.with_kind {
+				sb.write_string('struct ')
+			}
 			sb.write_string(info.name)
 		}
 		.typedef, .sumtype {
+			if cfg.with_access {
+				sb.write_string(info.access.str())
+			}
 			if info.kind == .typedef && info.parent_sym.is_void() {
 				return info.name
 			}
-
-			sb.write_string('type ')
+			if cfg.with_kind {
+				sb.write_string('type ')
+			}
 			sb.write_string(info.name)
-			sb.write_string(' = ')
 
-			if info.kind == .typedef {
-				if info.parent_sym.kind == .function_type {
-					sb.write_string(info.parent_sym.gen_str())
+			if cfg.with_contents {
+				sb.write_string(' = ')
+
+				if info.kind == .typedef {
+					sb.write_string(info.parent_sym.gen_str(child_cfg))
 				} else {
-					sb.write_string(info.parent_sym.name)
-				}
-			} else {
-				for i in 0 .. info.sumtype_children_len {
-					sb.write_string(info.children_syms[i].name)
-					if i < info.sumtype_children_len - 1 {
-						sb.write_byte(` `)
-						sb.write_byte(`|`)
-						sb.write_byte(` `)
+					for i in 0 .. info.sumtype_children_len {
+						sb.write_string(info.children_syms[i].gen_str(child_cfg))
+						if i < info.sumtype_children_len - 1 {
+							sb.write_byte(` `)
+							sb.write_byte(`|`)
+							sb.write_byte(` `)
+						}
 					}
 				}
 			}
 		}
 		.variable, .field {
-			sb.write_string(info.access.str())
+			if cfg.with_access {
+				sb.write_string(info.access.str())
+			}
 			if info.kind == .field {
-				sb.write_string(info.parent_sym.name)
+				sb.write_string(info.parent_sym.gen_str(child_cfg))
 				sb.write_byte(`.`)
 			}
 			if info.is_const {
