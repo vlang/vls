@@ -6,6 +6,7 @@ fn main() {
     mut num := 1
     num /= 'wrong'
     num = -'welp'
+    _ = 2
 }
 
 ---

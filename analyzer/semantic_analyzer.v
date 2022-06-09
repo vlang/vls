@@ -177,6 +177,12 @@ pub fn (mut an SemanticAnalyzer) assignment_statement(node ts.Node<v.NodeType>) 
 	if left_sym_count == right_sym_count {
 		for i in u32(0) .. u32(left_sym_count) {
 			left_child := left_node.named_child(i) or { continue }
+			mut is_imaginary := false
+			if left_child.code(an.src_text) == '_' {
+				// ignore _ variables in invalid assignment errors
+				is_imaginary = true
+			}
+
 			right_child := right_node.named_child(i) or { continue }
 
 			left_sym := an.expression(left_child, as_value: true) or { analyzer.void_sym }
@@ -188,15 +194,17 @@ pub fn (mut an SemanticAnalyzer) assignment_statement(node ts.Node<v.NodeType>) 
 				} else {
 					an.report(op_node, errors.undefined_operation_error, left_sym, op, right_sym)
 				}
-			} else if right_child.type_name == .unary_expression && left_sym != right_sym {
-				unary_op_node := right_child.child_by_field_name('operator') or { continue }
-				if right_sym.kind == .chan_ {
-					right_sym = right_sym.parent_sym
-				}
+			} else if !is_imaginary {
+				if right_child.type_name == .unary_expression && left_sym != right_sym {
+					unary_op_node := right_child.child_by_field_name('operator') or { continue }
+					if right_sym.kind == .chan_ {
+						right_sym = right_sym.parent_sym
+					}
 
-				an.report(unary_op_node, errors.invalid_assignment_error, left_child.code(an.src_text), left_sym, right_sym)
-			} else if left_sym != right_sym {
-				an.report(node, errors.invalid_assignment_error, left_child.code(an.src_text), left_sym, right_sym)
+					an.report(unary_op_node, errors.invalid_assignment_error, left_child.code(an.src_text), left_sym, right_sym)
+				} else if left_sym != right_sym {
+					an.report(node, errors.invalid_assignment_error, left_child.code(an.src_text), left_sym, right_sym)
+				}
 			}
 		}
 	}
