@@ -173,6 +173,60 @@ pub fn (mut an SemanticAnalyzer) statement(node ts.Node<v.NodeType>) {
 	}
 }
 
+const multiplicative_operators = ["*", "/", "%", "<<", ">>", "&", "&^"]
+const additive_operators = ["+", "-", "|", "^"]
+const comparative_operators = ["==", "!=", "<", "<=", ">", ">="]
+const and_operators = ["&&"]
+const or_operators = ["||"]
+
+fn (an &SemanticAnalyzer) convert_to_lit_type(node ts.Node<v.NodeType>) ?&Symbol {
+	node_type := node.type_name
+	if node_type == .float_literal || (node_type == .int_literal && node.code(an.src_text).int() < 17) {
+		return an.store.find_symbol('', node.raw_node.type_name())
+	}
+	return none
+}
+
+pub fn (mut an SemanticAnalyzer) binary_expression(node ts.Node<v.NodeType>, cfg SemanticExpressionAnalyzeConfig) ?&Symbol {
+	left_node := node.child_by_field_name('left')?
+	right_node := node.child_by_field_name('right')?
+	op_node := node.child_by_field_name('operator')?
+	op := op_node.raw_node.type_name()
+	is_multiplicative := op in multiplicative_operators
+	is_additive := op in additive_operators
+	is_comparative := op in comparative_operators
+	// is_and := op in and_operators
+	// is_or := op in or_operators
+	left_sym := an.convert_to_lit_type(left_node) or { an.expression(left_node) or { analyzer.void_sym } }
+	right_sym := an.convert_to_lit_type(right_node) or { an.expression(right_node) or { analyzer.void_sym } }
+
+	if op == '<<' {
+		if cfg.as_value {
+			return an.report(op_node, errors.array_append_expr_error)
+		} else if left_sym.kind == .array_ && left_sym.children_syms[0] != right_sym {
+			return an.report(right_node, errors.append_type_mismatch_error, right_sym, left_sym)
+		} else {
+			return an.report(node, errors.undefined_operation_error, left_sym, op, right_sym)
+		}
+	} else if is_multiplicative || is_additive {
+		// check if left and right are both numeric types
+		if left_sym.name !in analyzer.numeric_types_with_any_type || right_sym.name !in analyzer.numeric_types_with_any_type {
+			if left_sym.name in analyzer.numeric_types_with_any_type || right_sym.name in analyzer.numeric_types_with_any_type {
+				an.report(node, errors.mismatched_type_error, left_sym, right_sym)
+			} else {
+				an.report(node, errors.undefined_operation_error, left_sym, op, right_sym)
+			}
+			return analyzer.void_sym
+		}
+	} else if is_comparative && left_sym != right_sym {
+		return an.report(node, errors.mismatched_type_error, left_sym, right_sym)
+	} else if left_sym.name != 'bool' || right_sym.name != 'bool' {
+		// check if left and right are both numeric types
+		return an.report(node, errors.mismatched_type_error, left_sym, right_sym)
+	}
+	return left_sym
+}
+
 [params]
 pub struct SemanticExpressionAnalyzeConfig {
 	as_value bool
@@ -181,7 +235,7 @@ pub struct SemanticExpressionAnalyzeConfig {
 pub fn (mut an SemanticAnalyzer) expression(node ts.Node<v.NodeType>, cfg SemanticExpressionAnalyzeConfig) ?&Symbol {
 	match node.type_name {
 		.binary_expression {
-			//return an.binary_expression(node, cfg)
+			return an.binary_expression(node, cfg)
 		}
 		else {
 			sym := an.store.infer_symbol_from_node(node, an.src_text) or { void_sym }
