@@ -502,6 +502,43 @@ pub fn (mut an SemanticAnalyzer) array(node ts.Node<v.NodeType>) ?&Symbol {
 	}
 }
 
+pub fn (mut an SemanticAnalyzer) call_expression(node ts.Node<v.NodeType>) ?&Symbol {
+	fn_node := node.child_by_field_name('function')?
+	arguments_node := node.child_by_field_name('arguments')?
+	fn_sym := an.expression(fn_node) or { analyzer.void_sym }
+	if fn_sym.is_void() {
+		return an.report(node, errors.unknown_function_error, fn_node.code(an.src_text))
+	}
+
+	// check arguments
+	for i, _ in fn_sym.children_syms {
+		arg_node := arguments_node.named_child(u32(i)) or { continue }
+		// TODO:
+		// mut returned_sym := an.expression(arg_node)
+		// if returned_sym.is_returnable() {
+		// 	returned_sym = arg_sym.return_sym
+		// }
+
+		// if returned_sym != arg_sym.return_sym {
+		// 	an.custom_report(
+		// 		analyzer.invalid_argument_error, 
+		// 		arg_node, 
+		// 		[returned_sym, arg_sym.return_sym],
+		// 		{2: i.str(), 3: fn_sym.name}
+		// 	)
+		// }
+		an.expression(arg_node) or {}
+	}
+
+	// TODO: or block checking
+
+	if fn_sym.is_returnable() {
+		return fn_sym.return_sym
+	} else {
+		return fn_sym
+	}
+}
+
 [params]
 pub struct SemanticExpressionAnalyzeConfig {
 	as_value bool
@@ -509,6 +546,9 @@ pub struct SemanticExpressionAnalyzeConfig {
 
 pub fn (mut an SemanticAnalyzer) expression(node ts.Node<v.NodeType>, cfg SemanticExpressionAnalyzeConfig) ?&Symbol {
 	match node.type_name {
+		.call_expression {
+			return an.call_expression(node)
+		}
 		.array {
 			return an.array(node)
 		}
