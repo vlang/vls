@@ -34,7 +34,8 @@ if vls_git_hash.exit_code != 0 {
 }
 os.setenv('VLS_BUILD_COMMIT', vls_git_hash.output.trim_space(), true)
 
-cmd := 'v -g -gc boehm -d use_libbacktrace -cc $cc cmd/vls -o $full_vls_exec_path'
+use_libbacktrace_flag := if cc == 'msvc' { '' } else { '-d use_libbacktrace' }
+cmd := 'v -g -gc boehm $use_libbacktrace_flag -cc $cc cmd/vls -o $full_vls_exec_path'
 println(cmd)
 ret := system(cmd)
 if ret != 0 {
