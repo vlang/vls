@@ -17,18 +17,19 @@ mkdir(full_vls_bin_dir) or {}
 
 // use system default C compiler if found
 mut cc := 'cc'
-$if windows {
-	if cc == 'cc' {
-		eprintln('> Usage error: for Windows, you must need to specify the compiler to use (either gcc, clang, or msvc)')
-		exit(1)
-	}
-}
 
 if os.args.len >= 2 {
 	if os.args[1] in ['cc', 'gcc', 'clang', 'msvc'] {
 		cc = os.args[1]
 	} else {
 		println('> Usage error: parameter must one of cc, gcc, clang, msvc')
+		exit(1)
+	}
+}
+
+$if windows {
+	if cc == 'cc' {
+		eprintln('> Usage error: for Windows, you must need to specify the compiler to use (either gcc, clang, or msvc)')
 		exit(1)
 	}
 }
