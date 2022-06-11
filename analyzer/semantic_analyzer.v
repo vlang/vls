@@ -339,6 +339,14 @@ pub fn (mut an SemanticAnalyzer) binary_expression(node ts.Node<v.NodeType>, cfg
 			return analyzer.void_sym
 		}
 	} else if is_comparative && left_sym != right_sym {
+		if (left_sym.kind == .optional && left_sym.parent_sym == right_sym) || (right_sym.kind == .optional && right_sym.parent_sym == left_sym) {
+			if left_sym.kind == .optional {
+				return an.report(left_node, errors.unwrapped_option_binary_expr_error)
+			} else if right_sym.kind == .optional {
+				return an.report(right_node, errors.unwrapped_option_binary_expr_error)
+			}
+		}
+
 		return an.report(node, errors.mismatched_type_error, left_sym, right_sym)
 	} else if left_sym.name != 'bool' || right_sym.name != 'bool' {
 		// check if left and right are both numeric types

@@ -23,6 +23,7 @@ pub const (
 	invalid_assert_type_error = 'invalid_assert_type_error'
 	untyped_empty_array_error = 'untyped_empty_array_error'
 	unused_expression_error = 'unused_identifier_error'
+	unwrapped_option_binary_expr_error = 'unwrapped_option_binary_expr_error'
 	wrong_error_propagation_error = 'wrong_error_propagation_error'
 )
 
@@ -49,5 +50,6 @@ pub const message_templates = {
 	errors.invalid_assert_type_error: 'assert can be used only with `bool` expressions, but found `%s` instead'
 	errors.untyped_empty_array_error: 'array_init: no type specified (maybe: `[]Type{}` instead of `[]`)'
 	errors.unused_expression_error: '`%s` evaluated but not used'
+	errors.unwrapped_option_binary_expr_error: 'unwrapped optional cannot be used in an infix expression'
 	errors.wrong_error_propagation_error: 'to propagate the optional call, `%s` must return an optional'
 }
