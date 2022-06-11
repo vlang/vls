@@ -1,9 +1,14 @@
 fn main() {
     foo(3)
+    a := ret_zero()?
 }
 
 fn ret_none() ?int {
 	return none
+}
+
+fn ret_zero() int {
+	return 0
 }
 
 fn opt_call() int {
@@ -14,4 +19,5 @@ fn opt_call() int {
 ---
 
 (error "unknown function: foo" [1,4]-[1,10])
-(error "to propagate the optional call, `opt_call` must return an optional" [9,16]-[9,17])
+(error "unexpected `?`, the function `ret_zero` does neither return an optional nor a result" [2,19]-[2,20]) 
+(error "to propagate the optional call, `opt_call` must return an optional" [14,16]-[14,17])

@@ -607,8 +607,12 @@ pub fn (mut an SemanticAnalyzer) call_expression(node ts.Node<v.NodeType>) ?&Sym
 	// NOTE: this opt check is madness but whatever
 	if opt_propagator := node.last_node_by_type(v.NodeType.option_propagator) {
 		if child_opt_node := opt_propagator.child(0) {
-			if child_opt_node.raw_node.type_name() == '?' && (an.in_function() && an.parent_sym.name != 'main' && an.parent_sym.return_sym.kind != .optional) {
-				an.report(child_opt_node, errors.wrong_error_propagation_error, an.parent_sym.name)
+			if child_opt_node.raw_node.type_name() == '?' {
+				if an.in_function() && an.parent_sym.name != 'main' && an.parent_sym.return_sym.kind != .optional {
+					an.report(child_opt_node, errors.wrong_error_propagation_error, an.parent_sym.name)
+				} else if fn_sym.return_sym.kind != .optional {
+					an.report(child_opt_node, errors.invalid_option_propagate_call_error, fn_node.code(an.src_text))
+				}
 			}
 		}
 	}
