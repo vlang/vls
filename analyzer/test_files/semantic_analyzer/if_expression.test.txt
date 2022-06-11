@@ -1,0 +1,5 @@
+if (1 == 1) {}
+
+---
+
+(error "unnecessary `()` in `if` condition, use `if expr {` instead of `if (expr) {`" [0,3]-[0,11])

@@ -602,6 +602,18 @@ pub fn (mut an SemanticAnalyzer) call_expression(node ts.Node<v.NodeType>) ?&Sym
 	}
 }
 
+pub fn (mut an SemanticAnalyzer) if_expression(node ts.Node<v.NodeType>, cfg SemanticExpressionAnalyzeConfig) ?&Symbol {
+	if cond_node := node.child_by_field_name('condition') {
+		if cond_node.type_name == .parenthesized_expression {
+			return an.report(cond_node, errors.unnecessary_if_parenthesis_error)
+		}
+	} else if _ := node.child_by_field_name('initializer') {
+		// TODO: opt if expr check
+	}
+	// TODO: infer value type if as_value
+	return analyzer.void_sym
+}
+
 [params]
 pub struct SemanticExpressionAnalyzeConfig {
 	as_value bool
@@ -633,6 +645,9 @@ pub fn (mut an SemanticAnalyzer) expression(node ts.Node<v.NodeType>, cfg Semant
 		}
 		.parenthesized_expression {
 			return an.expression(node.named_child(0)?, cfg)
+		}
+		.if_expression {
+			return an.if_expression(node, cfg)
 		}
 		else {
 			sym := an.store.infer_symbol_from_node(node, an.src_text) or { void_sym }
