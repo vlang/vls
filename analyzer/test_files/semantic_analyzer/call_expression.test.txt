@@ -2,6 +2,16 @@ fn main() {
     foo(3)
 }
 
+fn ret_none() ?int {
+	return none
+}
+
+fn opt_call() int {
+	a := ret_none()?
+	return a
+}
+
 ---
 
 (error "unknown function: foo" [1,4]-[1,10])
+(error "to propagate the optional call, `opt_call` must return an optional" [9,16]-[9,17])

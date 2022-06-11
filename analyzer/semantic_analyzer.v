@@ -8,12 +8,22 @@ import os
 
 pub struct SemanticAnalyzer {
 pub mut:
-	src_text []rune
-	store    &Store     [required]
+	src_text   []rune
+	store      &Store     [required]
+	parent_sym &Symbol = analyzer.void_sym
 	// skips the local scopes and registers only
 	// the top-level ones regardless of its
 	// visibility
 	is_import bool
+}
+
+fn (an &SemanticAnalyzer) with_symbol(sym &Symbol) &SemanticAnalyzer {
+	return &SemanticAnalyzer{
+		src_text: an.src_text
+		store: an.store
+		parent_sym: sym
+		is_import: an.is_import
+	}
 }
 
 struct SemanticAnalyzerContext {
@@ -110,8 +120,15 @@ fn (mut an SemanticAnalyzer) enum_decl(node ts.Node<v.NodeType>) {
 }
 
 fn (mut an SemanticAnalyzer) fn_decl(node ts.Node<v.NodeType>) {
-	// TODO: set cur_fn_name
 	body_node := node.child_by_field_name('body') or { return }
+	if name_node := node.child_by_field_name('name') {
+		fn_name := name_node.code(an.src_text)
+		if sym := an.store.find_symbol('', fn_name) {
+			mut inst := an.with_symbol(sym)
+			inst.block(body_node)
+			return
+		}
+	}
 	an.block(body_node)
 }
 
@@ -537,7 +554,14 @@ pub fn (mut an SemanticAnalyzer) call_expression(node ts.Node<v.NodeType>) ?&Sym
 		an.expression(arg_node) or {}
 	}
 
-	// TODO: or block checking
+	// NOTE: this opt check is madness but whatever
+	if opt_propagator := node.last_node_by_type(v.NodeType.option_propagator) {
+		if child_opt_node := opt_propagator.child(0) {
+			if child_opt_node.raw_node.type_name() == '?' && (an.parent_sym.kind == .function && an.parent_sym.name != 'main' && an.parent_sym.return_sym.kind != .optional) {
+				an.report(child_opt_node, errors.wrong_error_propagation_error, an.parent_sym.name)
+			}
+		}
+	}
 
 	if fn_sym.is_returnable() {
 		return fn_sym.return_sym
