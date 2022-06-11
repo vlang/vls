@@ -113,22 +113,20 @@ for supertype_name, supertype_node_types in supertype_node_groups {
 	wr.writeln(')'.repeat(super_type_members.len))
 }
 
-wr.writeln('\npub fn (typ $node_type_enum_name) group() $super_type_enum_name {')
+wr.write_string('\npub fn (typ $node_type_enum_name) group() $super_type_enum_name {\n\treturn ')
 mut if_i := 0
-for supertype_name, _ in supertype_node_groups {
-	if if_i == 0 {
-		wr.write_u8(`\t`)
+supertype_ordered_names := ['top_level_declaration', 'statement', 'simple_statement', 'expression', 'expression_with_blocks', 'type', 'simple_type', 'unknown']
+for supertype_name in supertype_ordered_names {
+	if if_i < supertype_ordered_names.len - 1 {
+		wr.write_string('if typ in supertype__${supertype_name}_nodes ')
 	}
-	wr.writeln('if typ in supertype_${supertype_name}_nodes {')
-	wr.write_string('\t\treturn ')
-	write_enum_member(mut wr, super_type_enum_name, supertype_name[1..])
-	wr.write_u8(`\n`)
-	wr.write_string('\t}')
-	wr.write_string(' else ')
-	if if_i == supertype_node_groups.len - 1 {
-		wr.writeln('{')
-		wr.writeln('\t\treturn ${super_type_enum_name}.unknown')
-		wr.writeln('\t}')
+	wr.write_string('{\n\t\t')
+	write_enum_member(mut wr, super_type_enum_name, supertype_name)
+	wr.write_string('\n\t}')
+	if if_i < supertype_ordered_names.len - 1 {
+		wr.write_string(' else ')
+	} else {
+		wr.write_u8(`\n`)
 	}
 	if_i++
 }
