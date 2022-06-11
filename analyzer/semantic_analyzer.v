@@ -604,7 +604,18 @@ pub fn (mut an SemanticAnalyzer) expression(node ts.Node<v.NodeType>, cfg Semant
 }
 
 pub fn (mut an SemanticAnalyzer) analyze(node ts.Node<v.NodeType>) {
-	an.top_level_statement(node)
+	match node.type_name.group() {
+		.top_level_declaration {
+			an.top_level_statement(node)
+		}
+		.statement, .simple_statement {
+			an.statement(node)
+		}
+		.expression, .expression_with_blocks {
+			an.expression(node) or {}
+		}
+		else {}
+	}
 }
 
 pub fn (mut an SemanticAnalyzer) analyze_from_cursor(mut cursor TreeCursor) {

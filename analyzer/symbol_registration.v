@@ -872,7 +872,21 @@ fn extract_parameter_list(node ts.Node<v.NodeType>, mut store Store, src_text []
 
 // analyze scans and returns a list of symbols and messages (errors/warnings)
 pub fn (mut sr SymbolAnalyzer) analyze(node ts.Node<v.NodeType>) ?[]&Symbol {
-	return sr.top_level_decl(node)
+	match node.type_name.group() {
+		.top_level_declaration {
+			return sr.top_level_decl(node)
+		}
+		.statement, .simple_statement {
+			return sr.statement(node, mut sr.get_scope(node)?)
+		}
+		.expression, .expression_with_blocks {
+			return sr.expression(node)
+		}
+		else {
+			// return error('unsupported node `$node.type_name`')
+			return none
+		}
+	}
 }
 
 pub fn (mut sr SymbolAnalyzer) analyze_from_cursor(mut cursor TreeCursor) []&Symbol {
