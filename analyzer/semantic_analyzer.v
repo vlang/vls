@@ -232,8 +232,21 @@ pub fn (mut an SemanticAnalyzer) assignment_statement(node ts.Node<v.NodeType>) 
 
 pub fn (mut an SemanticAnalyzer) block(node ts.Node<v.NodeType>) {
 	mut cursor := new_tree_cursor(node)
+	mut return_pos_byte := u32(0)
+	mut has_return := false
+
 	for got_node in cursor {
-		an.statement(got_node)
+		if got_node.type_name == .return_statement {
+			return_pos_byte = got_node.start_byte()
+			has_return = true
+		}
+
+		if an.in_function() && has_return && got_node.start_byte() > return_pos_byte {
+			an.report(got_node, errors.unreachable_code_error)
+			break
+		} else {
+			an.statement(got_node)
+		}
 	}
 }
 
@@ -279,6 +292,9 @@ pub fn (mut an SemanticAnalyzer) statement(node ts.Node<v.NodeType>) {
 		}
 		.short_var_declaration {
 			an.short_var_declaration(node) or {}
+		}
+		.return_statement {
+			an.expression(node.child(0) or { return }) or {}
 		}
 		.block {
 			an.block(node)
