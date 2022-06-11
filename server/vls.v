@@ -12,6 +12,20 @@ import analyzer
 import time
 import v.vmod
 
+const vls_folder_path = os.join_path(os.home_dir(), '.vls')
+
+pub fn get_folder_path() string {
+	if os.is_file(vls_folder_path) {
+		os.rm(vls_folder_path) or {}
+	}
+	
+	if !os.exists(vls_folder_path) {
+		os.mkdir(vls_folder_path) or {}
+	}
+
+	return vls_folder_path
+}
+
 pub const vls_build_commit = meta_vls_build_commit()
 
 pub const meta = meta_info()

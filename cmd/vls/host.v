@@ -177,8 +177,13 @@ fn (mut host VlsHost) handle_exit() {
 }
 
 fn (mut host VlsHost) generate_report() ?string {
+	reports_dir_path := os.join_path(server.get_folder_path(), 'reports')
+	if !os.exists(reports_dir_path) {
+		os.mkdir(reports_dir_path)?
+	}
+
 	report_file_name := 'vls_report_' + time.utc().unix.str() + '.md'
-	report_file_path := os.join_path(os.home_dir(), report_file_name)
+	report_file_path := os.join_path(reports_dir_path, report_file_name)
 	mut report_file := os.create(report_file_path) ?
 	defer {
 		report_file.close()
