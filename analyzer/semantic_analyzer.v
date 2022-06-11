@@ -512,7 +512,19 @@ pub fn (mut an SemanticAnalyzer) selector_expression(node ts.Node<v.NodeType>) ?
 					an.report(field_node, err_code, child_name)
 				}
 			}
-		}	
+		}
+
+		if got_child_sym.is_void() && method_or_field_sym.is_void() {
+			mut in_call_expr := false
+			if parent_node := node.parent() {
+				if parent_node.type_name == .call_expression {
+					in_call_expr = true
+				}
+			} 
+			
+			err_code := if in_call_expr { errors.unknown_method_or_field_error } else { errors.unknown_field_error }
+			return an.report(node, err_code, root_sym.gen_str(with_kind: false, with_access: false, with_contents: false), field_node.code(an.src_text))
+		}
 
 		return if method_or_field_sym.is_void() {
 			got_child_sym
@@ -565,6 +577,10 @@ pub fn (mut an SemanticAnalyzer) call_expression(node ts.Node<v.NodeType>) ?&Sym
 	arguments_node := node.child_by_field_name('arguments')?
 	fn_sym := an.expression(fn_node) or { analyzer.void_sym }
 	if fn_sym.is_void() {
+		if fn_node.type_name == .selector_expression {
+			return none
+		}
+
 		return an.report(node, errors.unknown_function_error, fn_node.code(an.src_text))
 	}
 
