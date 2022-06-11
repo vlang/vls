@@ -318,6 +318,48 @@
     ]
   },
   {
+    "type": "_top_level_declaration",
+    "named": true,
+    "subtypes": [
+      {
+        "type": "const_declaration",
+        "named": true
+      },
+      {
+        "type": "enum_declaration",
+        "named": true
+      },
+      {
+        "type": "function_declaration",
+        "named": true
+      },
+      {
+        "type": "global_var_declaration",
+        "named": true
+      },
+      {
+        "type": "import_declaration",
+        "named": true
+      },
+      {
+        "type": "interface_declaration",
+        "named": true
+      },
+      {
+        "type": "module_clause",
+        "named": true
+      },
+      {
+        "type": "struct_declaration",
+        "named": true
+      },
+      {
+        "type": "type_declaration",
+        "named": true
+      }
+    ]
+  },
+  {
     "type": "_type",
     "named": true,
     "subtypes": [
@@ -2890,39 +2932,7 @@
           "named": true
         },
         {
-          "type": "const_declaration",
-          "named": true
-        },
-        {
-          "type": "enum_declaration",
-          "named": true
-        },
-        {
-          "type": "function_declaration",
-          "named": true
-        },
-        {
-          "type": "global_var_declaration",
-          "named": true
-        },
-        {
-          "type": "import_declaration",
-          "named": true
-        },
-        {
-          "type": "interface_declaration",
-          "named": true
-        },
-        {
-          "type": "module_clause",
-          "named": true
-        },
-        {
-          "type": "struct_declaration",
-          "named": true
-        },
-        {
-          "type": "type_declaration",
+          "type": "_top_level_declaration",
           "named": true
         }
       ]
