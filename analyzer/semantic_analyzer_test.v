@@ -62,17 +62,14 @@ fn test_semantic_analysis() ? {
 		println(bench.step_message('Testing $test_name'))
 		tree := p.parse_string(source: src)
 		src_runes := src.runes()
-		cursor := new_tree_cursor(tree.root_node())
+		mut cursor := new_tree_cursor(tree.root_node())
 		store.import_modules_from_tree(tree, src_runes, vlib_path)
 
 		sym_analyzer.src_text = src_runes
-		sym_analyzer.cursor = cursor
-
 		semantic_analyzer.src_text = src_runes
-		semantic_analyzer.cursor = cursor
 
-		symbols := sym_analyzer.analyze()
-		semantic_analyzer.analyze()
+		symbols := sym_analyzer.analyze_from_cursor(mut cursor)
+		semantic_analyzer.analyze_from_cursor(mut cursor)
 		result := an_test_utils.sexpr_str_reporter(reporter)
 
 		assert result == test_utils.newlines_to_spaces(expected)

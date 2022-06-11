@@ -8,7 +8,6 @@ import os
 
 pub struct SemanticAnalyzer {
 pub mut:
-	cursor   TreeCursor
 	src_text []rune
 	store    &Store     [required]
 	// skips the local scopes and registers only
@@ -604,9 +603,14 @@ pub fn (mut an SemanticAnalyzer) expression(node ts.Node<v.NodeType>, cfg Semant
 	}
 }
 
-pub fn (mut an SemanticAnalyzer) analyze() {
-	for got_node in an.cursor {
-		an.top_level_statement(got_node)
+pub fn (mut an SemanticAnalyzer) analyze(node ts.Node<v.NodeType>) {
+	an.top_level_statement(node)
+}
+
+pub fn (mut an SemanticAnalyzer) analyze_from_cursor(mut cursor TreeCursor) {
+	defer { cursor.reset() }
+	for got_node in cursor {
+		an.analyze(got_node)
 	}
 }
 
@@ -615,7 +619,8 @@ pub fn (mut store Store) analyze(tree &ts.Tree<v.NodeType>, src_text []rune) {
 	mut an := SemanticAnalyzer{
 		store: unsafe { store }
 		src_text: src_text
-		cursor: new_tree_cursor(tree.root_node())
 	}
-	an.analyze()
+
+	mut cursor := new_tree_cursor(tree.root_node())
+	an.analyze_from_cursor(mut cursor)
 }
