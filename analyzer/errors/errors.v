@@ -22,6 +22,7 @@ pub const (
 	send_operator_in_var_decl_error = 'send_operator_in_var_decl_error'
 	invalid_assert_type_error = 'invalid_assert_type_error'
 	untyped_empty_array_error = 'untyped_empty_array_error'
+	unused_expression_error = 'unused_identifier_error'
 	wrong_error_propagation_error = 'wrong_error_propagation_error'
 )
 
@@ -47,5 +48,6 @@ pub const message_templates = {
 	errors.send_operator_in_var_decl_error: '<- operator can only be used with `chan` types'
 	errors.invalid_assert_type_error: 'assert can be used only with `bool` expressions, but found `%s` instead'
 	errors.untyped_empty_array_error: 'array_init: no type specified (maybe: `[]Type{}` instead of `[]`)'
+	errors.unused_expression_error: '`%s` evaluated but not used'
 	errors.wrong_error_propagation_error: 'to propagate the optional call, `%s` must return an optional'
 }

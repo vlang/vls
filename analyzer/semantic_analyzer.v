@@ -17,6 +17,10 @@ pub mut:
 	is_import bool
 }
 
+fn (an &SemanticAnalyzer) in_function() bool {
+	return !isnil(an) && an.parent_sym.kind == .function
+}
+
 fn (an &SemanticAnalyzer) with_symbol(sym &Symbol) &SemanticAnalyzer {
 	return &SemanticAnalyzer{
 		src_text: an.src_text
@@ -280,7 +284,11 @@ pub fn (mut an SemanticAnalyzer) statement(node ts.Node<v.NodeType>) {
 			an.block(node)
 		}
 		else {
-			an.expression(node) or {}
+			if _ := an.expression(node) {
+				if an.in_function() && node.type_name == .identifier {
+					an.report(node, errors.unused_expression_error, node.code(an.src_text))
+				}
+			}
 		}
 	}
 }
@@ -557,7 +565,7 @@ pub fn (mut an SemanticAnalyzer) call_expression(node ts.Node<v.NodeType>) ?&Sym
 	// NOTE: this opt check is madness but whatever
 	if opt_propagator := node.last_node_by_type(v.NodeType.option_propagator) {
 		if child_opt_node := opt_propagator.child(0) {
-			if child_opt_node.raw_node.type_name() == '?' && (an.parent_sym.kind == .function && an.parent_sym.name != 'main' && an.parent_sym.return_sym.kind != .optional) {
+			if child_opt_node.raw_node.type_name() == '?' && (an.in_function() && an.parent_sym.name != 'main' && an.parent_sym.return_sym.kind != .optional) {
 				an.report(child_opt_node, errors.wrong_error_propagation_error, an.parent_sym.name)
 			}
 		}

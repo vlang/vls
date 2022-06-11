@@ -1,0 +1,11 @@
+fn something(a int) {
+    a
+    {
+        a
+    }
+}
+
+---
+
+(error "`a` evaluated but not used" [1,4]-[1,5])
+(error "`a` evaluated but not used" [3,8]-[3,9])
