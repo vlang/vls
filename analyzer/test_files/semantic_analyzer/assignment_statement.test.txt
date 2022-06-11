@@ -11,6 +11,8 @@ fn main() {
     ch := chan string{}
     mut obj := 9
     obj = <-ch
+
+    xy = 2
 }
 
 ---
@@ -20,3 +22,4 @@ fn main() {
 (error "mismatched types `int` and `string`" [6,4]-[6,18])
 (error "cannot assign to `num`: expected `int`, not `void`" [7,10]-[7,11])
 (error "cannot assign to `obj`: expected `int`, not `string`" [12,10]-[12,12])
+(error "undefined ident: `xy` (use `:=` to declare a variable)" [14,4]-[14,6])

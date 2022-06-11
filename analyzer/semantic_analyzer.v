@@ -215,7 +215,9 @@ pub fn (mut an SemanticAnalyzer) assignment_statement(node ts.Node<v.NodeType>) 
 					an.report(op_node, errors.undefined_operation_error, left_sym, op, right_sym)
 				}
 			} else if !is_imaginary {
-				if right_child.type_name == .unary_expression && left_sym != right_sym {
+				if left_sym.is_void() && op == '=' {
+					an.report(left_child, errors.undefined_ident_assignment_error, left_child.code(an.src_text))
+				} else if right_child.type_name == .unary_expression && left_sym != right_sym {
 					unary_op_node := right_child.child_by_field_name('operator') or { continue }
 					if right_sym.kind == .chan_ {
 						right_sym = right_sym.parent_sym
