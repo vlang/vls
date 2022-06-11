@@ -276,6 +276,22 @@ pub fn (typ NodeType) group() SuperType {
 	}
 }
 
+const declaration_node_types = [
+	NodeType.attribute_declaration,
+	.const_declaration,
+	.enum_declaration,
+	.function_declaration,
+	.global_var_declaration,
+	.import_declaration,
+	.interface_declaration,
+	.parameter_declaration,
+	.short_var_declaration,
+	.struct_declaration,
+	.struct_field_declaration,
+	.type_declaration,
+	.type_parameter_declaration
+]
+
 const identifier_node_types = [
 	NodeType.binded_identifier,
 	.comptime_identifier,
@@ -297,7 +313,7 @@ const literal_node_types = [
 	.rune_literal
 ]
 
-pub fn (typ NodeType) is_declaration() bool { return typ.group() == .top_level_declaration }
+pub fn (typ NodeType) is_declaration() bool { return typ in declaration_node_types }
 pub fn (typ NodeType) is_identifier() bool { return typ in identifier_node_types }
 pub fn (typ NodeType) is_literal() bool { return typ in literal_node_types }
 

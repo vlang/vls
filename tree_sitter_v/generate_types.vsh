@@ -84,6 +84,7 @@ wr.writeln('}\n')
 wr.writeln('pub enum $node_type_enum_name {')
 wr.writeln('\tunknown\n\terror')
 
+mut declaration_node_types := []string{cap: 100}
 mut identifier_node_types := []string{cap: 100}
 mut literal_node_types := []string{cap: 100}
 
@@ -93,7 +94,9 @@ for ntype in node_types {
 		continue
 	}
 
-	if ntype.name == 'identifier' || ntype.name.ends_with('_identifier') {
+	if ntype.name.ends_with('_declaration') {
+		declaration_node_types << ntype.name
+	} else if ntype.name == 'identifier' || ntype.name.ends_with('_identifier') {
 		identifier_node_types << ntype.name
 	} else if ntype.name.ends_with('_literal') {
 		literal_node_types << ntype.name
@@ -133,10 +136,11 @@ for supertype_name in supertype_ordered_names {
 wr.writeln('}')
 
 // write consts
+write_const_enum_array(mut wr, 'declaration_node_types', node_type_enum_name, declaration_node_types)
 write_const_enum_array(mut wr, 'identifier_node_types', node_type_enum_name, identifier_node_types)
 write_const_enum_array(mut wr, 'literal_node_types', node_type_enum_name, literal_node_types)
 
-wr.writeln('\npub fn (typ $node_type_enum_name) is_declaration() bool { return typ.group() == .top_level_declaration }')
+wr.writeln('\npub fn (typ $node_type_enum_name) is_declaration() bool { return typ in declaration_node_types }')
 wr.writeln('pub fn (typ $node_type_enum_name) is_identifier() bool { return typ in identifier_node_types }')
 wr.writeln('pub fn (typ $node_type_enum_name) is_literal() bool { return typ in literal_node_types }')
 
