@@ -143,7 +143,7 @@ For other editors, please refer to the plugin's/editor's documentation for instr
 - [x] `foldingRange`
 
 ## Crash Reporting
-When reporting a crash in the language server, you just need to copy the contents of the latest auto-generated error which can be found in the home directory (`C:\Users\<user_name>` for Windows, `/home/<user_name>` for Linux, and `/Users/<user_name>` for MacOS). The contents of the file can be then pasted into the [issue tracker form](https://github.com/vlang/vls/issues/new).
+When reporting a crash in the language server, you just need to copy the contents of the latest auto-generated error which can be found in the home directory (`C:\Users\<user_name>\.vls\reports` for Windows, `/home/<user_name>/.vls/reports` for Linux, and `/Users/<user_name>/.vls/reports` for MacOS). The contents of the file can be then pasted into the [issue tracker form](https://github.com/vlang/vls/issues/new).
 
 Bugs that are not crashes however can still generate report by passing the `--generate-report` flag to the language server CLI.
 
