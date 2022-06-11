@@ -58,8 +58,8 @@ fn test_symbol_registration() ? {
 		println(bench.step_message('Testing $test_name'))
 		tree := p.parse_string(source: src)
 		sym_analyzer.src_text = src.runes()
-		sym_analyzer.cursor = new_tree_cursor(tree.root_node())
-		symbols := sym_analyzer.analyze()
+		mut cursor := new_tree_cursor(tree.root_node())
+		symbols := sym_analyzer.analyze_from_cursor(mut cursor)
 		result := an_test_utils.sexpr_str_symbol_array(symbols)
 		assert test_utils.newlines_to_spaces(expected) == result
 		println(bench.step_message_ok(test_name))

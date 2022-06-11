@@ -14,7 +14,6 @@ const (
 pub struct SymbolAnalyzer {
 pub mut:
 	src_text []rune
-	cursor   TreeCursor
 mut:
 	store       &Store [required]
 	module_name string
@@ -872,15 +871,20 @@ fn extract_parameter_list(node ts.Node<v.NodeType>, mut store Store, src_text []
 }
 
 // analyze scans and returns a list of symbols and messages (errors/warnings)
-pub fn (mut sr SymbolAnalyzer) analyze() []&Symbol {
-	if cur_node := sr.cursor.current_node() {
+pub fn (mut sr SymbolAnalyzer) analyze(node ts.Node<v.NodeType>) ?[]&Symbol {
+	return sr.top_level_decl(node)
+}
+
+pub fn (mut sr SymbolAnalyzer) analyze_from_cursor(mut cursor TreeCursor) []&Symbol {
+	defer { cursor.reset() }
+	if cur_node := cursor.current_node() {
 		sr.get_scope(cur_node) or {}
 	}
 
 	mut global_scope := sr.store.opened_scopes[sr.store.cur_file_path]
 	mut symbols := []&Symbol{cap: 255}
-	for got_node in sr.cursor {
-		mut syms := sr.top_level_decl(got_node) or {
+	for got_node in cursor {
+		mut syms := sr.analyze(got_node) or {
 			// messages.report(err)
 			continue
 		}
@@ -906,16 +910,16 @@ pub fn (mut sr SymbolAnalyzer) analyze() []&Symbol {
 
 // register_symbols_from_tree scans and registers all the symbols based on the given tree
 pub fn (mut store Store) register_symbols_from_tree(tree &ts.Tree<v.NodeType>, src_text []rune, is_import bool) {
-	mut sr := new_symbol_analyzer(store, tree.root_node(), src_text, is_import)
-	sr.analyze()
+	mut sr := new_symbol_analyzer(store, src_text, is_import)
+	mut cursor := new_tree_cursor(tree.root_node())
+	sr.analyze_from_cursor(mut cursor)
 }
 
 // new_symbol_analyzer creates an instance of SymbolAnalyzer with the given store, tree, source, and is_import.
-pub fn new_symbol_analyzer(store &Store, root_node ts.Node<v.NodeType>, src_text []rune, is_import bool) SymbolAnalyzer {
+pub fn new_symbol_analyzer(store &Store, src_text []rune, is_import bool) SymbolAnalyzer {
 	return SymbolAnalyzer{
 		store: unsafe { store }
 		src_text: src_text
-		cursor: new_tree_cursor(root_node)
 		is_import: is_import
 	}
 }

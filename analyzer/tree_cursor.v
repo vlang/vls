@@ -30,6 +30,11 @@ pub fn (mut tc TreeCursor) next() ?tree_sitter.Node<v.NodeType> {
 	return none
 }
 
+pub fn (mut tc TreeCursor) reset() {
+	tc.cursor.to_parent()
+	tc.cur_child_idx = -1
+}
+
 pub fn (mut tc TreeCursor) to_first_child() bool {
 	return tc.cursor.to_first_child()
 }
