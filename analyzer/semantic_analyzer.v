@@ -680,6 +680,20 @@ pub fn (mut an SemanticAnalyzer) if_expression(node ast.Node, cfg SemanticExpres
 	return analyzer.void_sym
 }
 
+pub fn (mut an SemanticAnalyzer) type_cast_expression(node ast.Node) ?&Symbol {
+	type_node := node.child_by_field_name('type')?
+	operand_node := node.child_by_field_name('operand')?
+
+	type_sym := an.store.find_symbol_by_type_node(type_node, an.src_text) or { analyzer.void_sym }
+	operand_sym := an.expression(operand_node, as_value: true) or { analyzer.void_sym }
+
+	if operand_sym.is_void() || operand_sym.kind == .placeholder {
+		return an.report(operand_node, errors.void_symbol_casting_error)
+	}
+
+	return type_sym
+}
+
 [params]
 pub struct SemanticExpressionAnalyzeConfig {
 	as_value bool
@@ -714,6 +728,9 @@ pub fn (mut an SemanticAnalyzer) expression(node ast.Node, cfg SemanticExpressio
 		}
 		.if_expression {
 			return an.if_expression(node, cfg)
+		}
+		.type_cast_expression {
+			return an.type_cast_expression(node)
 		}
 		else {
 			sym := an.store.infer_symbol_from_node(node, an.src_text) or { void_sym }

@@ -1,0 +1,6 @@
+num := int(print(''))
+println(num)
+
+---
+
+(error "expression does not return a value so it cannot be cast" [0,11]-[0,20])
