@@ -123,7 +123,11 @@ fn (mut an SemanticAnalyzer) import_decl(node ast.Node) ? {
 
 		if int(got_sym.access) < int(SymbolAccess.public) {
 			an.report(sym_node, 'Symbol `$symbol_name` in module `$module_name` not public')
-			continue
+		} else if got_sym.kind == .variable && got_sym.is_const {
+			an.report(sym_node, errors.selective_const_import_error, {
+				'module': module_name
+				'var': sym_node.code(an.src_text),
+			})
 		}
 	}
 }

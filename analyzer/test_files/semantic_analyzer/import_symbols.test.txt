@@ -1,6 +1,7 @@
-import os { non_existing_method, f_ok }
+import os { non_existing_method, executable_fallback, max_path_len }
 
 ---
 
-(error "Symbol `non_existing_method` in module `os` not found" [0,12]-[0,31])
-(error "Symbol `f_ok` in module `os` not public" [0,33]-[0,37])
+(error "Symbol `non_existing_method` in module `os` not found" [0,12]-[0,31]) 
+(error "Symbol `executable_fallback` in module `os` not public" [0,33]-[0,52]) 
+(error "cannot selective import constant `max_path_len` from `os`, import `os` and use `os.max_path_len` instead" [0,54]-[0,66])
