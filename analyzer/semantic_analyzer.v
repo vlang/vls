@@ -462,6 +462,10 @@ pub fn (mut an SemanticAnalyzer) selector_expression(node ast.Node) ?&Symbol {
 		}
 
 		field_node := node.child_by_field_name('field')?
+		if root_sym.kind == .optional {
+			return an.report(field_node, errors.unhandled_optional_selector_error)
+		}
+
 		child_name := field_node.code(an.src_text)
 		got_child_sym := root_sym.children_syms.get(child_name) or {
 			mut base_root_sym := root_sym

@@ -23,6 +23,15 @@ fn main() {
 	n := b.name
 	println(b.sdd())
 	println(b.ada)
+	println(abc().status_code)
+}
+
+struct HttpResult {
+	status_code int
+}
+
+fn abc() ?HttpResult {
+	return HttpResult{}
 }
 
 ---
@@ -31,3 +40,4 @@ fn main() {
 (error "ambiguous field `name`" [22,8]-[22,12])
 (error "unknown method or field: `Bar.sdd`" [23,9]-[23,14])
 (error "type `Bar` has no field named `ada`" [24,9]-[24,14])
+(error "cannot access fields of an optional, handle the error with `or {...}` or propagate it with `?`" [25,15]-[25,26])
