@@ -689,6 +689,8 @@ pub fn (mut an SemanticAnalyzer) type_cast_expression(node ast.Node) ?&Symbol {
 
 	if operand_sym.is_void() || operand_sym.kind == .placeholder {
 		return an.report(operand_node, errors.void_symbol_casting_error)
+	} else if type_sym.kind == .enum_ && operand_node.type_name == .int_literal {
+		return an.report(operand_node, errors.invalid_enum_casting_error, operand_node.code(an.src_text).int().str(), type_sym.name)
 	}
 
 	return type_sym
