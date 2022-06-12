@@ -607,13 +607,32 @@ pub fn (mut an SemanticAnalyzer) call_expression(node ast.Node) ?&Symbol {
 	// NOTE: this opt check is madness but whatever
 	if opt_propagator := node.last_node_by_type(v.NodeType.option_propagator) {
 		if child_opt_node := opt_propagator.child(0) {
+			mut should_unwrap := true
 			if child_opt_node.raw_node.type_name() == '?' {
 				if an.in_function() && an.parent_sym.name != 'main' && an.parent_sym.return_sym.kind != .optional {
 					an.report(child_opt_node, errors.wrong_error_propagation_error, an.parent_sym.name)
+					should_unwrap = false
 				} else if fn_sym.return_sym.kind != .optional {
 					an.report(child_opt_node, errors.invalid_option_propagate_call_error, fn_node.code(an.src_text))
+					should_unwrap = false
 				}
 			}
+
+			if should_unwrap {
+				return fn_sym.return_sym.parent_sym
+			}
+		}
+	} else if fn_sym.return_sym.kind == .optional {
+		// let parent node handle the error
+		mut should_report := true
+		if parent := node.parent() {
+			if parent.type_name.group() == .expression {
+				should_report = false
+			}
+		}
+
+		if should_report {
+			return an.report(node, errors.unhandled_optional_fn_call_error, fn_node.code(an.src_text))
 		}
 	}
 
