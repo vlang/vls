@@ -143,7 +143,7 @@ fn (mut an SemanticAnalyzer) type_decl(node ast.Node) ? {
 	for i in u32(0) .. types_count {
 		type_node := types_node.named_child(i) or { continue }
 		got_sym := an.store.find_symbol_by_type_node(type_node, an.src_text) or {
-			continue
+			analyzer.void_sym
 		}
 
 		if got_sym.is_void() || got_sym.kind == .placeholder {

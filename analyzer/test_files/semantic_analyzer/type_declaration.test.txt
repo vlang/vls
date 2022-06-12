@@ -1,0 +1,8 @@
+type Miscellaneous = Inexistant | Nope | int
+type Text = Strign
+
+---
+
+(error "unknown type `Inexistant`" [0,21]-[0,31]) 
+(error "unknown type `Nope`" [0,34]-[0,38])
+(error "unknown type `Strign`" [1,12]-[1,18])
