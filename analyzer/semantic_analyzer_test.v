@@ -1,12 +1,12 @@
 import os
-import parser
+import ast
 import test_utils
 import benchmark
 import analyzer { Collector, SemanticAnalyzer, Store, SymbolAnalyzer, new_tree_cursor, setup_builtin }
 import analyzer.an_test_utils
 
 fn test_semantic_analysis() ? {
-	mut p := parser.new()
+	mut p := ast.new_parser()
 	vlib_path := os.join_path(os.dir(os.getenv('VEXE')), 'vlib')
 
 	mut bench := benchmark.new_benchmark()

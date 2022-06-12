@@ -1,12 +1,12 @@
 import os
-import parser
+import ast
 import test_utils
 import benchmark
 import analyzer.an_test_utils
 import analyzer { Collector, Store, SymbolAnalyzer, setup_builtin, new_tree_cursor }
 
 fn test_symbol_registration() ? {
-	mut p := parser.new()
+	mut p := ast.new_parser()
 	mut bench := benchmark.new_benchmark()
 	vlib_path := os.join_path(os.dir(os.getenv('VEXE')), 'vlib')
 	mut reporter := &Collector{}

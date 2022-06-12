@@ -1,7 +1,7 @@
 module server
 
-import tree_sitter
 import tree_sitter_v as v
+import ast
 
 // any node that is separated by a comma or other symbol
 const list_node_types = [v.NodeType.expression_list, .identifier_list, .argument_list, 
@@ -10,8 +10,8 @@ const list_node_types = [v.NodeType.expression_list, .identifier_list, .argument
 const other_node_types = [v.NodeType.if_expression, .for_statement, .return_statement, .for_in_operator,
 	.binary_expression, .unary_expression]
 
-fn traverse_node(root_node tree_sitter.Node<v.NodeType>, offset u32) tree_sitter.Node<v.NodeType> {
-	// TODO: return root_node for now. function must return ?tree_sitter.Node<v.NodeType>
+fn traverse_node(root_node ast.Node, offset u32) ast.Node {
+	// TODO: return root_node for now. function must return ?ast.Node
 	root_type_name := root_node.type_name
 	direct_named_child := root_node.first_named_child_for_byte(offset) or { return root_node }
 	child_type_name := direct_named_child.type_name
@@ -49,7 +49,7 @@ fn traverse_node(root_node tree_sitter.Node<v.NodeType>, offset u32) tree_sitter
 }
 
 // for auto-completion
-fn traverse_node2(starting_node tree_sitter.Node<v.NodeType>, offset u32) tree_sitter.Node<v.NodeType> {
+fn traverse_node2(starting_node ast.Node, offset u32) ast.Node {
 	mut root_node := starting_node
 	mut root_type_name := root_node.type_name
 
@@ -99,7 +99,7 @@ fn traverse_node2(starting_node tree_sitter.Node<v.NodeType>, offset u32) tree_s
 	return traverse_node2(direct_named_child, offset)
 }
 
-fn closest_named_child(starting_node tree_sitter.Node<v.NodeType>, offset u32) tree_sitter.Node<v.NodeType> {
+fn closest_named_child(starting_node ast.Node, offset u32) ast.Node {
 	named_child_count := starting_node.named_child_count()
 	mut selected_node := starting_node
 	for i in u32(0) .. named_child_count {
@@ -121,7 +121,7 @@ const other_symbol_node_types = [v.NodeType.assignment_statement, .call_expressi
 // closest_symbol_node_parent traverse back from child
 // to the nearest node that has a valid, lookup-able symbol node
 // (nodes with names, module name, and etc.)
-fn closest_symbol_node_parent(child_node tree_sitter.Node<v.NodeType>) tree_sitter.Node<v.NodeType> {
+fn closest_symbol_node_parent(child_node ast.Node) ast.Node {
 	parent_node := child_node.parent() or { return child_node }
 	parent_type_name := parent_node.type_name
 	if parent_type_name == .source_file || parent_type_name == .block {

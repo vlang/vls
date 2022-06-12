@@ -1,14 +1,13 @@
 module server
 
-import tree_sitter
-import tree_sitter_v as v
+import ast
 import lsp
 
 struct File {
 mut:
 	uri     lsp.DocumentUri
 	source  []rune
-	tree    &tree_sitter.Tree<v.NodeType> [required]
+	tree    &ast.Tree [required]
 	version int = 1
 }
 

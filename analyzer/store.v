@@ -2,8 +2,7 @@ module analyzer
 
 import os
 import analyzer.depgraph
-import tree_sitter
-import tree_sitter_v as v
+import ast
 
 pub struct Store {
 mut:
@@ -358,7 +357,7 @@ pub fn (mut ss Store) delete(dir string, excluded_dir ...string) {
 }
 
 // get_scope_from_node returns a scope based on the given node
-pub fn (mut ss Store) get_scope_from_node(node tree_sitter.Node<v.NodeType>) ?&ScopeTree {
+pub fn (mut ss Store) get_scope_from_node(node ast.Node) ?&ScopeTree {
 	if node.is_null() {
 		return error('unable to create scope')
 	}
@@ -378,7 +377,7 @@ pub fn (mut ss Store) get_scope_from_node(node tree_sitter.Node<v.NodeType>) ?&S
 }
 
 // symbol_name_from_node extracts the symbol's kind, name, and module name from the given node
-pub fn symbol_name_from_node(node tree_sitter.Node<v.NodeType>, src_text []rune) (SymbolKind, string, string) {
+pub fn symbol_name_from_node(node ast.Node, src_text []rune) (SymbolKind, string, string) {
 	// if node.is_null() {
 	// 	return SymbolKind.typedef, '', 'void'
 	// }
@@ -486,7 +485,7 @@ pub fn symbol_name_from_node(node tree_sitter.Node<v.NodeType>, src_text []rune)
 }
 
 // find_symbol_by_type_node returns a symbol based on the given type node
-pub fn (mut store Store) find_symbol_by_type_node(node tree_sitter.Node<v.NodeType>, src_text []rune) ?&Symbol {
+pub fn (mut store Store) find_symbol_by_type_node(node ast.Node, src_text []rune) ?&Symbol {
 	if node.is_null() || src_text.len == 0 {
 		return none
 	}
@@ -575,7 +574,7 @@ pub fn (mut store Store) find_symbol_by_type_node(node tree_sitter.Node<v.NodeTy
 // infer_symbol_from_node returns the specified symbol based on the given node.
 // This is different from infer_value_type_from_node as this returns the symbol
 // instead of symbol's return type or parent for example
-pub fn (mut ss Store) infer_symbol_from_node(node tree_sitter.Node<v.NodeType>, src_text []rune) ?&Symbol {
+pub fn (mut ss Store) infer_symbol_from_node(node ast.Node, src_text []rune) ?&Symbol {
 	if node.is_null() {
 		return none
 	}
@@ -767,7 +766,7 @@ pub fn (mut ss Store) infer_symbol_from_node(node tree_sitter.Node<v.NodeType>, 
 }
 
 // infer_value_type_from_node returns the symbol based on the given node
-pub fn (mut ss Store) infer_value_type_from_node(node tree_sitter.Node<v.NodeType>, src_text []rune) &Symbol {
+pub fn (mut ss Store) infer_value_type_from_node(node ast.Node, src_text []rune) &Symbol {
 	if node.is_null() {
 		return void_sym
 	}
@@ -890,7 +889,7 @@ pub fn (mut ss Store) infer_value_type_from_node(node tree_sitter.Node<v.NodeTyp
 }
 
 // delete_symbol_at_node removes a specific symbol from a specific portion of the node
-pub fn (mut ss Store) delete_symbol_at_node(root_node tree_sitter.Node<v.NodeType>, src []rune, at_range C.TSRange) bool {
+pub fn (mut ss Store) delete_symbol_at_node(root_node ast.Node, src []rune, at_range C.TSRange) bool {
 	unsafe { ss.opened_scopes[ss.cur_file_path].free() }
 	nodes := get_nodes_within_range(root_node, at_range) or { return false }
 	for node in nodes {

@@ -2,8 +2,8 @@ module analyzer
 
 import strconv
 import errors
-import tree_sitter as ts
 import tree_sitter_v as v
+import ast
 import os
 
 pub struct SemanticAnalyzer {
@@ -34,7 +34,7 @@ struct SemanticAnalyzerContext {
 	params []ReportData
 }
 
-fn (mut an SemanticAnalyzer) report(node ts.Node<v.NodeType>, code_or_msg string, data ...ReportData) IError {
+fn (mut an SemanticAnalyzer) report(node ast.Node, code_or_msg string, data ...ReportData) IError {
 	mut is_msg_code := false
 	if code_or_msg in errors.message_templates {
 		is_msg_code = true
@@ -81,7 +81,7 @@ fn (mut an SemanticAnalyzer) format_report(report Report) string {
 	return report.message
 }
 
-fn (mut an SemanticAnalyzer) import_decl(node ts.Node<v.NodeType>) ? {
+fn (mut an SemanticAnalyzer) import_decl(node ast.Node) ? {
 	// Most of the checking is already done in `import_modules_from_trees`
 	// Check only the symbols if they are available
 	symbols := node.child_by_field_name('symbols') ?
@@ -111,19 +111,19 @@ fn (mut an SemanticAnalyzer) import_decl(node ts.Node<v.NodeType>) ? {
 	}
 }
 
-fn (mut an SemanticAnalyzer) const_decl(node ts.Node<v.NodeType>) {
+fn (mut an SemanticAnalyzer) const_decl(node ast.Node) {
 }
 
-fn (mut an SemanticAnalyzer) struct_decl(node ts.Node<v.NodeType>) {
+fn (mut an SemanticAnalyzer) struct_decl(node ast.Node) {
 }
 
-fn (mut an SemanticAnalyzer) interface_decl(node ts.Node<v.NodeType>) {
+fn (mut an SemanticAnalyzer) interface_decl(node ast.Node) {
 }
 
-fn (mut an SemanticAnalyzer) enum_decl(node ts.Node<v.NodeType>) {
+fn (mut an SemanticAnalyzer) enum_decl(node ast.Node) {
 }
 
-fn (mut an SemanticAnalyzer) fn_decl(node ts.Node<v.NodeType>) {
+fn (mut an SemanticAnalyzer) fn_decl(node ast.Node) {
 	body_node := node.child_by_field_name('body') or { return }
 	if name_node := node.child_by_field_name('name') {
 		fn_name := name_node.code(an.src_text)
@@ -136,7 +136,7 @@ fn (mut an SemanticAnalyzer) fn_decl(node ts.Node<v.NodeType>) {
 	an.block(body_node)
 }
 
-fn (mut an SemanticAnalyzer) type_decl(node ts.Node<v.NodeType>) ? {
+fn (mut an SemanticAnalyzer) type_decl(node ast.Node) ? {
 	types_node := node.child_by_field_name('types')?
 	types_count := types_node.named_child_count()
 	
@@ -152,7 +152,7 @@ fn (mut an SemanticAnalyzer) type_decl(node ts.Node<v.NodeType>) ? {
 	}
 }
 
-pub fn (mut an SemanticAnalyzer) top_level_statement(current_node ts.Node<v.NodeType>) {
+pub fn (mut an SemanticAnalyzer) top_level_statement(current_node ast.Node) {
 	match current_node.type_name {
 		.import_declaration {
 			an.import_decl(current_node) or {
@@ -183,7 +183,7 @@ pub fn (mut an SemanticAnalyzer) top_level_statement(current_node ts.Node<v.Node
 	}
 }
 
-pub fn (mut an SemanticAnalyzer) assignment_statement(node ts.Node<v.NodeType>) ? {
+pub fn (mut an SemanticAnalyzer) assignment_statement(node ast.Node) ? {
 	op_node := node.child_by_field_name('operator')?
 	op := op_node.raw_node.type_name()[0].ascii_str()
 	is_multiplicative := op in multiplicative_operators
@@ -232,7 +232,7 @@ pub fn (mut an SemanticAnalyzer) assignment_statement(node ts.Node<v.NodeType>) 
 	}
 }
 
-pub fn (mut an SemanticAnalyzer) block(node ts.Node<v.NodeType>) {
+pub fn (mut an SemanticAnalyzer) block(node ast.Node) {
 	mut cursor := new_tree_cursor(node)
 	mut return_pos_byte := u32(0)
 	mut has_return := false
@@ -252,7 +252,7 @@ pub fn (mut an SemanticAnalyzer) block(node ts.Node<v.NodeType>) {
 	}
 }
 
-pub fn (mut an SemanticAnalyzer) short_var_declaration(node ts.Node<v.NodeType>) ? {
+pub fn (mut an SemanticAnalyzer) short_var_declaration(node ast.Node) ? {
 	right := node.child_by_field_name('right')?
 	right_count := right.named_child_count()
 	for i in u32(0) .. right_count {
@@ -261,7 +261,7 @@ pub fn (mut an SemanticAnalyzer) short_var_declaration(node ts.Node<v.NodeType>)
 	}
 }
 
-pub fn (mut an SemanticAnalyzer) assert_statement(node ts.Node<v.NodeType>) ? {
+pub fn (mut an SemanticAnalyzer) assert_statement(node ast.Node) ? {
 	expr_node := node.named_child(0)?
 	expr_typ_sym := an.expression(expr_node, as_value: true) or { analyzer.void_sym }
 	if expr_typ_sym.name != 'bool' {
@@ -269,7 +269,7 @@ pub fn (mut an SemanticAnalyzer) assert_statement(node ts.Node<v.NodeType>) ? {
 	}
 }
 
-pub fn (mut an SemanticAnalyzer) send_statement(node ts.Node<v.NodeType>) ? {
+pub fn (mut an SemanticAnalyzer) send_statement(node ast.Node) ? {
 	chan_node := node.child_by_field_name('channel')?
 	val_node := node.child_by_field_name('value')?
 	chan_typ_sym := an.expression(chan_node) or { analyzer.void_sym }
@@ -281,7 +281,7 @@ pub fn (mut an SemanticAnalyzer) send_statement(node ts.Node<v.NodeType>) ? {
 	}
 }
 
-pub fn (mut an SemanticAnalyzer) statement(node ts.Node<v.NodeType>) {
+pub fn (mut an SemanticAnalyzer) statement(node ast.Node) {
 	match node.type_name {
 		.assignment_statement {
 			an.assignment_statement(node) or {}
@@ -317,7 +317,7 @@ const comparative_operators = ["==", "!=", "<", "<=", ">", ">="]
 const and_operators = ["&&"]
 const or_operators = ["||"]
 
-fn (an &SemanticAnalyzer) convert_to_lit_type(node ts.Node<v.NodeType>) ?&Symbol {
+fn (an &SemanticAnalyzer) convert_to_lit_type(node ast.Node) ?&Symbol {
 	node_type := node.type_name
 	if node_type == .float_literal || (node_type == .int_literal && node.code(an.src_text).int() < 17) {
 		return an.store.find_symbol('', node.raw_node.type_name())
@@ -325,7 +325,7 @@ fn (an &SemanticAnalyzer) convert_to_lit_type(node ts.Node<v.NodeType>) ?&Symbol
 	return none
 }
 
-pub fn (mut an SemanticAnalyzer) binary_expression(node ts.Node<v.NodeType>, cfg SemanticExpressionAnalyzeConfig) ?&Symbol {
+pub fn (mut an SemanticAnalyzer) binary_expression(node ast.Node, cfg SemanticExpressionAnalyzeConfig) ?&Symbol {
 	left_node := node.child_by_field_name('left')?
 	right_node := node.child_by_field_name('right')?
 	op_node := node.child_by_field_name('operator')?
@@ -373,7 +373,7 @@ pub fn (mut an SemanticAnalyzer) binary_expression(node ts.Node<v.NodeType>, cfg
 	return left_sym
 }
 
-fn (an &SemanticAnalyzer) check_if_type_field_exists(node ts.Node<v.NodeType>, name string) bool {
+fn (an &SemanticAnalyzer) check_if_type_field_exists(node ast.Node, name string) bool {
 	if node.type_name != .literal_value {
 		return false
 	}
@@ -391,7 +391,7 @@ fn (an &SemanticAnalyzer) check_if_type_field_exists(node ts.Node<v.NodeType>, n
 	return false
 }
 
-pub fn (mut an SemanticAnalyzer) type_initializer(node ts.Node<v.NodeType>) ?&Symbol {
+pub fn (mut an SemanticAnalyzer) type_initializer(node ast.Node) ?&Symbol {
 	type_node := node.child_by_field_name('type')?
 	sym_kind, module_name, symbol_name := symbol_name_from_node(type_node, an.src_text)
 
@@ -450,7 +450,7 @@ pub fn (mut an SemanticAnalyzer) type_initializer(node ts.Node<v.NodeType>) ?&Sy
 	return an.store.find_symbol(module_name, symbol_name)
 }
 
-pub fn (mut an SemanticAnalyzer) selector_expression(node ts.Node<v.NodeType>) ?&Symbol {
+pub fn (mut an SemanticAnalyzer) selector_expression(node ast.Node) ?&Symbol {
 	operand := node.child_by_field_name('operand')?
 	mut root_sym := an.expression(operand, as_value: true) or {
 		an.store.infer_symbol_from_node(operand, an.src_text) or { analyzer.void_sym }
@@ -536,7 +536,7 @@ pub fn (mut an SemanticAnalyzer) selector_expression(node ts.Node<v.NodeType>) ?
 	return root_sym
 }
 
-pub fn (mut an SemanticAnalyzer) array(node ts.Node<v.NodeType>) ?&Symbol {
+pub fn (mut an SemanticAnalyzer) array(node ast.Node) ?&Symbol {
 	items_len := node.named_child_count()
 	if items_len == 0 {
 		return an.report(node, errors.untyped_empty_array_error)
@@ -572,7 +572,7 @@ pub fn (mut an SemanticAnalyzer) array(node ts.Node<v.NodeType>) ?&Symbol {
 	}
 }
 
-pub fn (mut an SemanticAnalyzer) call_expression(node ts.Node<v.NodeType>) ?&Symbol {
+pub fn (mut an SemanticAnalyzer) call_expression(node ast.Node) ?&Symbol {
 	fn_node := node.child_by_field_name('function')?
 	arguments_node := node.child_by_field_name('arguments')?
 	fn_sym := an.expression(fn_node) or { analyzer.void_sym }
@@ -624,7 +624,7 @@ pub fn (mut an SemanticAnalyzer) call_expression(node ts.Node<v.NodeType>) ?&Sym
 	}
 }
 
-pub fn (mut an SemanticAnalyzer) if_expression(node ts.Node<v.NodeType>, cfg SemanticExpressionAnalyzeConfig) ?&Symbol {
+pub fn (mut an SemanticAnalyzer) if_expression(node ast.Node, cfg SemanticExpressionAnalyzeConfig) ?&Symbol {
 	if cond_node := node.child_by_field_name('condition') {
 		if cond_node.type_name == .parenthesized_expression {
 			return an.report(cond_node, errors.unnecessary_if_parenthesis_error)
@@ -641,7 +641,7 @@ pub struct SemanticExpressionAnalyzeConfig {
 	as_value bool
 }
 
-pub fn (mut an SemanticAnalyzer) expression(node ts.Node<v.NodeType>, cfg SemanticExpressionAnalyzeConfig) ?&Symbol {
+pub fn (mut an SemanticAnalyzer) expression(node ast.Node, cfg SemanticExpressionAnalyzeConfig) ?&Symbol {
 	match node.type_name {
 		.call_expression {
 			return an.call_expression(node)
@@ -696,7 +696,7 @@ pub fn (mut an SemanticAnalyzer) expression(node ts.Node<v.NodeType>, cfg Semant
 	}
 }
 
-pub fn (mut an SemanticAnalyzer) analyze(node ts.Node<v.NodeType>) {
+pub fn (mut an SemanticAnalyzer) analyze(node ast.Node) {
 	match node.type_name.group() {
 		.top_level_declaration {
 			an.top_level_statement(node)
@@ -719,7 +719,7 @@ pub fn (mut an SemanticAnalyzer) analyze_from_cursor(mut cursor TreeCursor) {
 }
 
 // analyze analyzes the given tree
-pub fn (mut store Store) analyze(tree &ts.Tree<v.NodeType>, src_text []rune) {
+pub fn (mut store Store) analyze(tree &ast.Tree, src_text []rune) {
 	mut an := SemanticAnalyzer{
 		store: unsafe { store }
 		src_text: src_text

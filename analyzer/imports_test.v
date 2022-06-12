@@ -2,7 +2,7 @@ module analyzer
 
 import tree_sitter
 import tree_sitter_v as v
-import parser
+import ast
 import os
 
 const (
@@ -20,7 +20,7 @@ const (
 )
 
 fn parse_content() &tree_sitter.Tree<v.NodeType> {
-	mut p := parser.new()
+	mut p := ast.new_parser()
 	return p.parse_string(source: analyzer.sample_content)
 }
 
@@ -90,7 +90,7 @@ fn test_import_modules_from_tree() ? {
 }
 
 fn test_import_modules_with_edits() ? {
-	mut p := parser.new()
+	mut p := ast.new_parser()
 	sample_content2 := '
 	import os
 	'
