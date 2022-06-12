@@ -1,5 +1,5 @@
 import os
-import parser
+import ast
 import analyzer { Collector, SemanticAnalyzer, Store, SymbolAnalyzer, new_tree_cursor, setup_builtin }
 import benchmark
 import v.util { formatted_error }
@@ -41,7 +41,7 @@ const skipped_tests = [
 
 // test_analyzer_from_v compares the output from V's checker to VLS' analyzer
 fn test_analyzer_from_v() ? {
-	mut p := parser.new()
+	mut p := ast.new_parser()
 	os.chdir(os.dir(@VEXE)) ?
 
 	input_file_paths := os.glob('vlib/v/checker/tests/*.vv') ?

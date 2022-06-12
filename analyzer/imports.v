@@ -3,7 +3,7 @@ module analyzer
 import os
 import tree_sitter
 import tree_sitter_v as v
-import parser
+import ast
 
 pub type ImportsMap = map[string][]Import
 
@@ -157,7 +157,7 @@ pub fn (mut imp Importer) inject_paths_of_new_imports(mut new_imports []&Import,
 // import_modules imports the given Import array to the current directory.
 // It also registers the symbols to the store.
 pub fn (mut imp Importer) import_modules(mut imports []&Import) {
-	mut parser := parser.new()
+	mut parser := ast.new_parser()
 	old_version := imp.store.cur_version
 	old_active_path := imp.store.cur_file_path
 	old_active_dir := imp.store.cur_dir

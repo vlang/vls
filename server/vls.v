@@ -7,7 +7,7 @@ import lsp.log
 import os
 import tree_sitter
 import tree_sitter_v as v
-import parser
+import ast
 import analyzer
 import time
 import v.vmod
@@ -116,7 +116,7 @@ pub mut:
 pub fn new() &Vls {
 	reporter := &DiagnosticReporter{} 
 	inst := &Vls{
-		parser: parser.new() 
+		parser: ast.new_parser() 
 		reporter: reporter
 		store: analyzer.Store{
 			reporter: reporter
