@@ -2,6 +2,7 @@ module errors
 
 pub const (
 	unknown_node_type_error = 'unknown_node_type_error'
+	float_modulo_error = 'float_modulo_error'
 	mismatched_type_error = 'mismatched_type_error'
 	not_found_error = 'not_found_error'
 	not_public_error = 'not_public_error'
@@ -40,6 +41,7 @@ pub const (
 
 pub const message_templates = {
 	errors.unknown_node_type_error: 'unknown node `%s`'
+	errors.float_modulo_error: 'float modulo not allowed, use math.fmod() instead'
 	errors.mismatched_type_error: 'mismatched types `%s` and `%s`'
 	errors.not_found_error: 'symbol `%s` not found'
 	errors.not_public_error: 'symbol `%s` not public'

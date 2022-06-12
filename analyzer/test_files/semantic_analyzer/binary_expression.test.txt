@@ -9,6 +9,9 @@ fn main() {
     invalid_or := 1 && 3
 
     x2 := test() == ""
+
+    println(3.0 % 2.0)
+    println(f32(3.0) % f32(2.0))
 }
 
 fn test() ?string {
@@ -25,3 +28,4 @@ fn test() ?string {
 (error "mismatched types `int literal` and `string`" [7,18]-[7,29])
 (error "mismatched types `int literal` and `int literal`" [8,18]-[8,24])
 (error "unwrapped optional cannot be used in an infix expression" [10,10]-[10,16])
+(error "float modulo not allowed, use math.fmod() instead" [13,12]-[13,20])

@@ -376,7 +376,9 @@ pub fn (mut an SemanticAnalyzer) binary_expression(node ast.Node, cfg SemanticEx
 				an.report(node, errors.undefined_operation_error, left_sym, op, right_sym)
 			}
 			return analyzer.void_sym
-		}
+		} else if op == '%' && ((left_sym.name == 'f32' && right_sym.name == 'f32') || (left_sym.name == 'f64' && right_sym.name == 'f64')) {
+			an.report(left_node, errors.float_modulo_error)
+		} 
 	} else if is_comparative && left_sym != right_sym {
 		if (left_sym.kind == .optional && left_sym.parent_sym == right_sym) || (right_sym.kind == .optional && right_sym.parent_sym == left_sym) {
 			if left_sym.kind == .optional {
