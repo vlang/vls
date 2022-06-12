@@ -118,7 +118,7 @@ for supertype_name, supertype_node_types in supertype_node_groups {
 
 wr.write_string('\npub fn (typ $node_type_enum_name) group() $super_type_enum_name {\n\treturn ')
 mut if_i := 0
-supertype_ordered_names := ['top_level_declaration', 'statement', 'simple_statement', 'expression', 'expression_with_blocks', 'type', 'simple_type', 'unknown']
+supertype_ordered_names := ['top_level_declaration', 'type', 'simple_type', 'expression', 'expression_with_blocks', 'statement', 'simple_statement', 'unknown']
 for supertype_name in supertype_ordered_names {
 	if if_i < supertype_ordered_names.len - 1 {
 		wr.write_string('if typ in supertype__${supertype_name}_nodes ')

@@ -259,18 +259,18 @@ const supertype__type_nodes = merge(supertype__simple_type_nodes, [
 pub fn (typ NodeType) group() SuperType {
 	return if typ in supertype__top_level_declaration_nodes {
 		SuperType.top_level_declaration
-	} else if typ in supertype__statement_nodes {
-		SuperType.statement
-	} else if typ in supertype__simple_statement_nodes {
-		SuperType.simple_statement
-	} else if typ in supertype__expression_nodes {
-		SuperType.expression
-	} else if typ in supertype__expression_with_blocks_nodes {
-		SuperType.expression_with_blocks
 	} else if typ in supertype__type_nodes {
 		SuperType.type_
 	} else if typ in supertype__simple_type_nodes {
 		SuperType.simple_type
+	} else if typ in supertype__expression_nodes {
+		SuperType.expression
+	} else if typ in supertype__expression_with_blocks_nodes {
+		SuperType.expression_with_blocks
+	} else if typ in supertype__statement_nodes {
+		SuperType.statement
+	} else if typ in supertype__simple_statement_nodes {
+		SuperType.simple_statement
 	} else {
 		SuperType.unknown
 	}
