@@ -2,7 +2,6 @@ module analyzer
 
 import strconv
 import errors
-import tree_sitter as ts
 import tree_sitter_v as v
 import ast
 import os
@@ -720,7 +719,7 @@ pub fn (mut an SemanticAnalyzer) analyze_from_cursor(mut cursor TreeCursor) {
 }
 
 // analyze analyzes the given tree
-pub fn (mut store Store) analyze(tree &ts.Tree<v.NodeType>, src_text []rune) {
+pub fn (mut store Store) analyze(tree &ast.Tree, src_text []rune) {
 	mut an := SemanticAnalyzer{
 		store: unsafe { store }
 		src_text: src_text

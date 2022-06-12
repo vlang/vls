@@ -1,8 +1,6 @@
 module analyzer
 
 import os
-import tree_sitter
-import tree_sitter_v as v
 import ast
 
 pub type ImportsMap = map[string][]Import
@@ -16,7 +14,7 @@ pub fn (mut imp Importer) imports() ImportsMap {
 	return imp.store.imports
 }
 
-pub fn (mut imp Importer) scan_imports(tree &tree_sitter.Tree<v.NodeType>, src_text []rune) []&Import {
+pub fn (mut imp Importer) scan_imports(tree &ast.Tree, src_text []rune) []&Import {
 	root_node := tree.root_node()
 	named_child_len := root_node.named_child_count()
 	mut newly_imported_modules := []&Import{}
@@ -237,7 +235,7 @@ pub fn (mut ss Store) add_import(imp Import) (&Import, bool) {
 }
 
 // import_modules_from_tree scans and imports the modules based from the AST tree
-pub fn (mut store Store) import_modules_from_tree(tree &tree_sitter.Tree<v.NodeType>, src []rune, lookup_paths ...string) {
+pub fn (mut store Store) import_modules_from_tree(tree &ast.Tree, src []rune, lookup_paths ...string) {
 	mut importer := Importer{
 		store: unsafe { store }
 	}
