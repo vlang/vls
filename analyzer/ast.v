@@ -1,6 +1,6 @@
 module analyzer
 
-import tree_sitter
+import ast
 import tree_sitter_v as v
 
 fn within_range(node_range C.TSRange, range C.TSRange) bool {
@@ -12,9 +12,9 @@ const excluded_nodes = [v.NodeType.const_declaration, .global_var_declaration]
 
 const included_nodes = [v.NodeType.const_spec, .global_var_spec, .global_var_type_initializer, .block]
 
-fn get_nodes_within_range(node tree_sitter.Node<v.NodeType>, range C.TSRange) ?[]tree_sitter.Node<v.NodeType> {
+fn get_nodes_within_range(node ast.Node, range C.TSRange) ?[]ast.Node {
 	child_count := node.named_child_count()
-	mut nodes := []tree_sitter.Node<v.NodeType>{cap: int(child_count)}
+	mut nodes := []ast.Node{cap: int(child_count)}
 
 	for i in u32(0) .. child_count {
 		child := node.named_child(i) or { continue }

@@ -5,8 +5,7 @@ import os
 import analyzer
 import strings
 import math
-import tree_sitter
-import tree_sitter_v as v
+import ast
 
 const temp_formatting_file_path = os.join_path(os.temp_dir(), 'vls_temp_formatting.v')
 
@@ -228,7 +227,7 @@ mut:
 	store              &analyzer.Store
 	src                []rune
 	offset             int
-	parent_node        tree_sitter.Node<v.NodeType>
+	parent_node        ast.Node
 	show_global        bool // for displaying global (project) symbols
 	show_local         bool // for displaying local variables
 	filter_return_type &analyzer.Symbol = &analyzer.Symbol(0) // filters results by type
@@ -243,12 +242,12 @@ fn (mut builder CompletionBuilder) add(item lsp.CompletionItem) {
 	builder.completion_items << item
 }
 
-fn (builder CompletionBuilder) is_triggered(node tree_sitter.Node<v.NodeType>, chr string) bool {
+fn (builder CompletionBuilder) is_triggered(node ast.Node, chr string) bool {
 	return node.next_sibling() or { return false }.code(builder.src) == chr
 		|| builder.ctx.trigger_character == chr
 }
 
-fn (builder CompletionBuilder) is_selector(node tree_sitter.Node<v.NodeType>) bool {
+fn (builder CompletionBuilder) is_selector(node ast.Node) bool {
 	return builder.is_triggered(node, '.')
 }
 
@@ -259,7 +258,7 @@ fn (builder CompletionBuilder) has_same_return_type(sym &analyzer.Symbol) bool {
 	return sym == builder.filter_return_type
 }
 
-fn (mut builder CompletionBuilder) build_suggestions(node tree_sitter.Node<v.NodeType>, offset int) {
+fn (mut builder CompletionBuilder) build_suggestions(node ast.Node, offset int) {
 	builder.offset = offset
 	builder.build_suggestions_from_node(node)
 	if builder.show_local {
@@ -270,7 +269,7 @@ fn (mut builder CompletionBuilder) build_suggestions(node tree_sitter.Node<v.Nod
 	}
 }
 
-fn (mut builder CompletionBuilder) build_suggestions_from_node(node tree_sitter.Node<v.NodeType>) {
+fn (mut builder CompletionBuilder) build_suggestions_from_node(node ast.Node) {
 	node_type_name := node.type_name
 	if node_type_name in list_node_types {
 		builder.build_suggestions_from_list(node)
@@ -282,7 +281,7 @@ fn (mut builder CompletionBuilder) build_suggestions_from_node(node tree_sitter.
 }
 
 // suggestions_from_stmt returns a list of results from the extracted Stmt node info.
-fn (mut builder CompletionBuilder) build_suggestions_from_stmt(node tree_sitter.Node<v.NodeType>) {
+fn (mut builder CompletionBuilder) build_suggestions_from_stmt(node ast.Node) {
 	match node.type_name {
 		.short_var_declaration {
 			builder.show_local = true
@@ -307,7 +306,7 @@ fn (mut builder CompletionBuilder) build_suggestions_from_stmt(node tree_sitter.
 }
 
 // suggestions_from_list returns a list of results extracted from the list nodes.
-fn (mut builder CompletionBuilder) build_suggestions_from_list(node tree_sitter.Node<v.NodeType>) {
+fn (mut builder CompletionBuilder) build_suggestions_from_list(node ast.Node) {
 	match node.type_name {
 		.identifier_list {
 			parent := closest_symbol_node_parent(node)
@@ -366,7 +365,7 @@ fn (mut builder CompletionBuilder) build_suggestions_from_list(node tree_sitter.
 }
 
 // suggestions_from_expr returns a list of results extracted from the Expr node info.
-fn (mut builder CompletionBuilder) build_suggestions_from_expr(node tree_sitter.Node<v.NodeType>) {
+fn (mut builder CompletionBuilder) build_suggestions_from_expr(node ast.Node) {
 	node_type_name := node.type_name
 	match node_type_name {
 		.binded_identifier, .identifier, .selector_expression, .call_expression,
@@ -878,7 +877,7 @@ pub fn (mut ls Vls) hover(params lsp.HoverParams, mut wr ResponseWriter) ?lsp.Ho
 	return get_hover_data(mut ls.store, node, uri, file.source, u32(offset))
 }
 
-fn get_hover_data(mut store analyzer.Store, node tree_sitter.Node<v.NodeType>, uri lsp.DocumentUri, source []rune, offset u32) ?lsp.Hover {
+fn get_hover_data(mut store analyzer.Store, node ast.Node, uri lsp.DocumentUri, source []rune, offset u32) ?lsp.Hover {
 	node_type_name := node.type_name
 	if node.is_null() || node_type_name == .comment {
 		return none
