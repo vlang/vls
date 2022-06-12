@@ -50,25 +50,42 @@ fn (mut an SemanticAnalyzer) report(node ast.Node, code_or_msg string, data ...R
 	))
 }
 
+fn (an &SemanticAnalyzer) format_report_data(d ReportData) string {
+	if d is string {
+		return *d
+	} else if d is Symbol {
+		return d.gen_str(with_access: false, with_kind: false, with_contents: false).replace_each(['int_literal', 'int literal', 'float_literal', 'float literal'])
+	} else {
+		// final_params << d.str()
+		return 'unknown'
+	}
+}
+
 fn (mut an SemanticAnalyzer) format_report(report Report) string {
 	if report.data is SemanticAnalyzerContext {
 		if report.data.params.len != 0 {
 			mut final_params := []string{cap: report.data.params.len}
+			mut final_msg := report.message
 			for d in report.data.params {
-				if d is string {
-					final_params << d
-				} else if d is Symbol {
-					final_params << d.gen_str(with_access: false, with_kind: false, with_contents: false).replace_each(['int_literal', 'int literal', 'float_literal', 'float literal'])
+				// maps are used for accepting named parameters in error messages
+				// e.g. "cannot selectively import {{var}} from {{mod}}. use {{mod}}.{{var}} instead"
+				if d is map[string]ReportData {
+					for var_name, val in d {
+						final_msg = final_msg.replace('{{$var_name}}', an.format_report_data(val))
+					}
+				} else if d is map[string]string {
+					for var_name, val in d {
+						final_msg = final_msg.replace('{{$var_name}}', an.format_report_data(unsafe { val }))
+					}
 				} else {
-					// final_params << d.str()
-					final_params << 'unknown'
+					final_params << an.format_report_data(d)
 				}
 			}
 
 			ptrs := unsafe { final_params.pointers() }
 			final_report := Report{
 				...report
-				message: strconv.v_sprintf(report.message, ...ptrs)
+				message: strconv.v_sprintf(final_msg, ...ptrs)
 				data: 0
 			}
 
