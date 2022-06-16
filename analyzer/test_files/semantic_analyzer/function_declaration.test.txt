@@ -10,8 +10,18 @@ fn unreachable() {
     a := 2
 }
 
+fn opt() ? {}
+
+fn thing() ?string {
+	defer {
+		opt()
+	}
+	return 'ok'
+}
+
 ---
 
 (error "`a` evaluated but not used" [1,4]-[1,5])
 (error "`a` evaluated but not used" [3,8]-[3,9])
 (error "unreachable code" [9,4]-[9,10])
+(error "opt() returns an option, so it should have either an `or {}` block, or `?` at the end" [16,2]-[16,7])
