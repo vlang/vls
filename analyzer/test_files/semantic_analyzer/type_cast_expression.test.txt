@@ -12,9 +12,14 @@ println(Color(-10))
 println(Permissions(0b101))
 println(Permissions(0b1010))
 println(Permissions(-1))
+
+println(string(true))
+println(string(false))
 ---
 
-(error "expression does not return a value so it cannot be cast" [5,11]-[5,20]) 
-(error "0 does not represent a value of enum Color" [8,14]-[8,15]) 
-(error "5 does not represent a value of enum Permissions" [11,20]-[11,25]) 
+(error "expression does not return a value so it cannot be cast" [5,11]-[5,20])
+(error "0 does not represent a value of enum Color" [8,14]-[8,15])
+(error "5 does not represent a value of enum Permissions" [11,20]-[11,25])
 (error "10 does not represent a value of enum Permissions" [12,20]-[12,26])
+(error "cannot cast type `bool` to string, use `true.str()` instead." [15,8]-[15,20])
+(error "cannot cast type `bool` to string, use `false.str()` instead." [16,8]-[16,21])

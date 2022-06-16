@@ -716,7 +716,9 @@ pub fn (mut an SemanticAnalyzer) type_cast_expression(node ast.Node) ?&Symbol {
 	type_sym := an.store.find_symbol_by_type_node(type_node, an.src_text) or { analyzer.void_sym }
 	operand_sym := an.expression(operand_node, as_value: true) or { analyzer.void_sym }
 
-	if operand_sym.is_void() || operand_sym.kind == .placeholder {
+	if operand_sym.name == 'bool' && type_sym.name == 'string' {
+		return an.report(node, errors.bool_string_cast_error, operand_node.code(an.src_text))
+	} else if operand_sym.is_void() || operand_sym.kind == .placeholder {
 		return an.report(operand_node, errors.void_symbol_casting_error)
 	} else if type_sym.kind == .enum_ && operand_node.type_name == .int_literal {
 		return an.report(operand_node, errors.invalid_enum_casting_error, operand_node.code(an.src_text).int().str(), type_sym.name)
@@ -732,6 +734,9 @@ pub struct SemanticExpressionAnalyzeConfig {
 
 pub fn (mut an SemanticAnalyzer) expression(node ast.Node, cfg SemanticExpressionAnalyzeConfig) ?&Symbol {
 	match node.type_name {
+		.true_, .false_ {
+			return an.store.infer_value_type_from_node(node, an.src_text)
+		}
 		.call_expression {
 			return an.call_expression(node)
 		}
