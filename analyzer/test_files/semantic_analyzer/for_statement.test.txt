@@ -1,0 +1,9 @@
+for true {
+  defer {
+    break
+  }
+}
+
+---
+
+(error "`break` is not allowed in defer statements" [2,4]-[2,9])

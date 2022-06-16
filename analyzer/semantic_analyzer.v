@@ -7,8 +7,8 @@ import ast
 import os
 
 struct SemanticAnalyzerError {
-	code int
-	typ  string
+	code    int
+	typ     string
 	content string
 }
 
@@ -335,6 +335,47 @@ pub fn (mut an SemanticAnalyzer) send_statement(node ast.Node) ? {
 	}
 }
 
+pub fn (mut an SemanticAnalyzer) for_statement(node ast.Node) {
+	body_node := node.child_by_field_name('body') or { return }
+	an.block(body_node)
+}
+
+pub fn (mut an SemanticAnalyzer) break_statement(node ast.Node) {
+	mut in_loop := false
+	mut in_defer := false
+	if parent := parent_by_depth(node, 2) {
+		if parent.type_name == .defer_statement {
+			in_defer = true
+			if defer_parent := parent_by_depth(parent, 2) {
+				if defer_parent.type_name == .for_statement {
+					in_loop = true
+				}
+			}
+		} else if parent.type_name == .for_statement {
+			in_loop = true
+		}
+	}
+
+	if in_defer {
+		an.report(node, errors.defer_break_error)
+	} if !in_loop {
+		an.report(node, errors.nonloop_break_error)
+	}
+}
+
+fn parent_by_depth(node ast.Node, depth int) ?ast.Node {
+	mut cur_node := node
+	for _ in 0 .. depth {
+		cur_node = cur_node.parent() or {
+			if cur_node == node {
+				return err
+			}
+			return cur_node
+		}
+	}
+	return cur_node
+}
+
 pub fn (mut an SemanticAnalyzer) statement(node ast.Node) {
 	match node.type_name {
 		.assignment_statement {
@@ -350,20 +391,13 @@ pub fn (mut an SemanticAnalyzer) statement(node ast.Node) {
 			an.short_var_declaration(node) or {}
 		}
 		.break_statement {
-			mut in_loop := false
-			if parent := node.parent() {
-				if parent.type_name == .block {
-					if block_parent := parent.parent() {
-						if block_parent.type_name == .for_statement {
-							in_loop = true
-						}
-					}
-				}
-			}
-
-			if !in_loop {
-				an.report(node, errors.nonloop_break_error)
-			}
+			an.break_statement(node)
+		}
+		.for_statement {
+			an.for_statement(node)
+		}
+		.defer_statement {
+			an.statement(node.named_child(0) or { return })
 		}
 		.return_statement {
 			an.expression(node.child(0) or { return }) or {}
