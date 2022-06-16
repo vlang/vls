@@ -427,11 +427,6 @@ pub fn (node C.TSNode) named_descendant_for_point_range(start_point C.TSPoint, e
 	return got_node
 }
 
-[inline]
-pub fn (node C.TSNode) == (other_node C.TSNode) bool {
-	return C.ts_node_eq(node, other_node)
-}
-
 fn C.ts_tree_cursor_new(node C.TSNode) C.TSTreeCursor
 
 [inline]
