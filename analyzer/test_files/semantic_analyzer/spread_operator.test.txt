@@ -1,0 +1,7 @@
+fn varargs(a ...int) { println(a) }
+
+varargs(...123)
+
+---
+
+(error "decomposition can only be used on arrays" [2,11]-[2,14])

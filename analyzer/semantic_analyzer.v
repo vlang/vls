@@ -760,6 +760,15 @@ pub fn (mut an SemanticAnalyzer) type_cast_expression(node ast.Node) ?&Symbol {
 	return type_sym
 }
 
+pub fn (mut an SemanticAnalyzer) spread_operator(node ast.Node) ?&Symbol {
+	expr_node := node.named_child(0)?
+	expr_sym := an.expression(expr_node, as_value: true)?
+	if expr_sym.kind != .array_ {
+		return an.report(expr_node, errors.decomposition_error)
+	}
+	return expr_sym.parent_sym
+}
+
 [params]
 pub struct SemanticExpressionAnalyzeConfig {
 	as_value bool
@@ -800,6 +809,9 @@ pub fn (mut an SemanticAnalyzer) expression(node ast.Node, cfg SemanticExpressio
 		}
 		.type_cast_expression {
 			return an.type_cast_expression(node)
+		}
+		.spread_operator {
+			return an.spread_operator(node)
 		}
 		else {
 			sym := an.store.infer_symbol_from_node(node, an.src_text) or { void_sym }
