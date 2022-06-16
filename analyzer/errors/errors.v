@@ -2,6 +2,8 @@ module errors
 
 pub const (
 	unknown_node_type_error = 'unknown_node_type_error'
+	unexpected_argument_error_single = 'unexpected_argument_error_single'
+	unexpected_argument_error_plural = 'unexpected_argument_error_plural'
 	float_modulo_error = 'float_modulo_error'
 	mismatched_type_error = 'mismatched_type_error'
 	not_found_error = 'not_found_error'
@@ -41,6 +43,8 @@ pub const (
 
 pub const message_templates = {
 	errors.unknown_node_type_error: 'unknown node `%s`'
+	errors.unexpected_argument_error_plural: 'expected %s arguments, but got %s'
+	errors.unexpected_argument_error_single: 'expected %s argument, but got %s'
 	errors.float_modulo_error: 'float modulo not allowed, use math.fmod() instead'
 	errors.mismatched_type_error: 'mismatched types `%s` and `%s`'
 	errors.not_found_error: 'symbol `%s` not found'

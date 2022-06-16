@@ -160,7 +160,7 @@ fn (mut an SemanticAnalyzer) fn_decl(node ast.Node) {
 fn (mut an SemanticAnalyzer) type_decl(node ast.Node) ? {
 	types_node := node.child_by_field_name('types')?
 	types_count := types_node.named_child_count()
-	
+
 	for i in u32(0) .. types_count {
 		type_node := types_node.named_child(i) or { continue }
 		got_sym := an.store.find_symbol_by_type_node(type_node, an.src_text) or {
@@ -378,7 +378,7 @@ pub fn (mut an SemanticAnalyzer) binary_expression(node ast.Node, cfg SemanticEx
 			return analyzer.void_sym
 		} else if op == '%' && ((left_sym.name == 'f32' && right_sym.name == 'f32') || (left_sym.name == 'f64' && right_sym.name == 'f64')) {
 			an.report(left_node, errors.float_modulo_error)
-		} 
+		}
 	} else if is_comparative && left_sym != right_sym {
 		if (left_sym.kind == .optional && left_sym.parent_sym == right_sym) || (right_sym.kind == .optional && right_sym.parent_sym == left_sym) {
 			if left_sym.kind == .optional {
@@ -547,8 +547,8 @@ pub fn (mut an SemanticAnalyzer) selector_expression(node ast.Node) ?&Symbol {
 				if parent_node.type_name == .call_expression {
 					in_call_expr = true
 				}
-			} 
-			
+			}
+
 			err_code := if in_call_expr { errors.unknown_method_or_field_error } else { errors.unknown_field_error }
 			return an.report(node, err_code, root_sym.gen_str(with_kind: false, with_access: false, with_contents: false), field_node.code(an.src_text))
 		}
@@ -611,6 +611,17 @@ pub fn (mut an SemanticAnalyzer) call_expression(node ast.Node) ?&Symbol {
 		return an.report(node, errors.unknown_function_error, fn_node.code(an.src_text))
 	}
 
+	arguments_count := arguments_node.named_child_count()
+	expected_arg_count := fn_sym.children_syms.len
+	if arguments_count != expected_arg_count {
+		err_code := if expected_arg_count == 1 {
+			errors.unexpected_argument_error_single
+		} else {
+			errors.unexpected_argument_error_plural
+		}
+		return an.report(node, err_code, expected_arg_count.str(), arguments_count.str())
+	}
+
 	// check arguments
 	for i, _ in fn_sym.children_syms {
 		arg_node := arguments_node.named_child(u32(i)) or { continue }
@@ -622,8 +633,8 @@ pub fn (mut an SemanticAnalyzer) call_expression(node ast.Node) ?&Symbol {
 
 		// if returned_sym != arg_sym.return_sym {
 		// 	an.custom_report(
-		// 		analyzer.invalid_argument_error, 
-		// 		arg_node, 
+		// 		analyzer.invalid_argument_error,
+		// 		arg_node,
 		// 		[returned_sym, arg_sym.return_sym],
 		// 		{2: i.str(), 3: fn_sym.name}
 		// 	)

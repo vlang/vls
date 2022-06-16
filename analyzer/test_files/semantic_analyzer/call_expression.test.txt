@@ -17,9 +17,22 @@ fn opt_call() int {
 	return a
 }
 
+fn multi_print(inp int, inp2 int) {
+	print(inp)
+	print(inp2)
+}
+
+fn main2() {
+	ret_zero(1)
+	multi_print(3,4,5)
+	print(1,2)
+}
 ---
 
 (error "unknown function: foo" [1,4]-[1,10])
-(error "unexpected `?`, the function `ret_zero` does neither return an optional nor a result" [2,19]-[2,20]) 
+(error "unexpected `?`, the function `ret_zero` does neither return an optional nor a result" [2,19]-[2,20])
 (error "ret_none() returns an option, so it should have either an `or {}` block, or `?` at the end" [3,9]-[3,19])
 (error "to propagate the optional call, `opt_call` must return an optional" [15,16]-[15,17])
+(error "expected 0 arguments, but got 1" [25,1]-[25,12])
+(error "expected 2 arguments, but got 3" [26,1]-[26,19])
+(error "expected 1 argument, but got 2" [27,1]-[27,11])
