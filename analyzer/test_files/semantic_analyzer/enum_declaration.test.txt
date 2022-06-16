@@ -4,9 +4,12 @@ enum Color {
   green = 'green'
   blue
   green
+  yellow = 2147483647
+  red
 }
 ---
 
 (error "enum cannot be empty" [0,5]-[0,10])
 (error "default value for enum has to be an integer" [3,10]-[3,17])
 (error "field name `green` duplicate" [5,2]-[5,7])
+(error "enum value overflows" [7,2]-[7,5])

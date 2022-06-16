@@ -167,6 +167,8 @@ fn (mut an SemanticAnalyzer) struct_decl(node ast.Node) {
 fn (mut an SemanticAnalyzer) interface_decl(node ast.Node) {
 }
 
+const max_int_value = '2147483647'
+
 fn (mut an SemanticAnalyzer) enum_decl(node ast.Node) ? {
 	name_node := node.child_by_field_name('name')?
 	decl_list_node := node.last_node_by_type(v.NodeType.enum_member_declaration_list)?
@@ -174,6 +176,7 @@ fn (mut an SemanticAnalyzer) enum_decl(node ast.Node) ? {
 	if member_count == 0 {
 		return an.report(name_node, errors.empty_enum_error)
 	} else {
+		mut value_overflowed := false
 		mut member_names := []string{cap: int(member_count)}
 		for i in 0 .. member_count {
 			member_node := decl_list_node.named_child(i) or {
@@ -195,7 +198,11 @@ fn (mut an SemanticAnalyzer) enum_decl(node ast.Node) ? {
 				val_sym := an.expression(member_value_node, as_value: true) or { analyzer.void_sym }
 				if val_sym.name != 'int' {
 					an.report(member_value_node, errors.enum_default_value_error)
+				} else if member_value_node.type_name == .int_literal && member_value_node.code(an.src_text) == max_int_value {
+					value_overflowed = true
 				}
+			} else if value_overflowed {
+				an.report(member_name_node, errors.enum_value_overflow_error)
 			}
 		}
 	}
