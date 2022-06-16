@@ -916,7 +916,7 @@ pub fn (mut sr SymbolAnalyzer) analyze_from_cursor(mut cursor TreeCursor) []&Sym
 			if sym.kind == .variable {
 				global_scope.register(*sym) or { continue }
 			}
-			
+
 			symbols << syms[i]
 		}
 	}

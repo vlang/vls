@@ -3,6 +3,7 @@ module errors
 pub const (
 	unknown_node_type_error = 'unknown_node_type_error'
 	bool_string_cast_error = 'bool_string_cast_error'
+	constant_mutation_error = 'constant_mutation_error'
 	unexpected_argument_error_single = 'unexpected_argument_error_single'
 	unexpected_argument_error_plural = 'unexpected_argument_error_plural'
 	float_modulo_error = 'float_modulo_error'
@@ -47,6 +48,7 @@ pub const (
 pub const message_templates = {
 	errors.unknown_node_type_error: 'unknown node `%s`'
 	errors.bool_string_cast_error: 'cannot cast type `bool` to string, use `%s.str()` instead.'
+	errors.constant_mutation_error: 'cannot modify constant `%s`'
 	errors.unexpected_argument_error_plural: 'expected %s arguments, but got %s'
 	errors.unexpected_argument_error_single: 'expected %s argument, but got %s'
 	errors.float_modulo_error: 'float modulo not allowed, use math.fmod() instead'

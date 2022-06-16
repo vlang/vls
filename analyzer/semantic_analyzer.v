@@ -6,6 +6,29 @@ import tree_sitter_v as v
 import ast
 import os
 
+struct SemanticAnalyzerError {
+	code int
+	typ  string
+	content string
+}
+
+fn (err &SemanticAnalyzerError) code() int {
+	return 0
+}
+
+fn (err &SemanticAnalyzerError) msg() string {
+	return err.content
+}
+
+fn error_is(err IError, err_code string) bool {
+	if err is SemanticAnalyzerError {
+		if err.typ == err_code {
+			return true
+		}
+	}
+	return false
+}
+
 pub struct SemanticAnalyzer {
 pub mut:
 	src_text   []rune
@@ -40,14 +63,17 @@ fn (mut an SemanticAnalyzer) report(node ast.Node, code_or_msg string, data ...R
 		is_msg_code = true
 	}
 
-	return error(an.format_report(
-		kind: .error
-		message: if is_msg_code { errors.message_templates[code_or_msg] } else { code_or_msg }
-		range: node.range()
-		file_path: an.store.cur_file_path
-		code: if is_msg_code { code_or_msg } else { '' }
-		data: SemanticAnalyzerContext{data}
-	))
+	return SemanticAnalyzerError{
+		typ: if is_msg_code { code_or_msg } else { 'custom_error' }
+		content: an.format_report(
+			kind: .error
+			message: if is_msg_code { errors.message_templates[code_or_msg] } else { code_or_msg }
+			range: node.range()
+			file_path: an.store.cur_file_path
+			code: if is_msg_code { code_or_msg } else { '' }
+			data: SemanticAnalyzerContext{data}
+		)
+	}
 }
 
 fn (an &SemanticAnalyzer) format_report_data(d ReportData) string {
@@ -226,7 +252,12 @@ pub fn (mut an SemanticAnalyzer) assignment_statement(node ast.Node) ? {
 
 			right_child := right_node.named_child(i) or { continue }
 
-			left_sym := an.expression(left_child, as_value: true) or { analyzer.void_sym }
+			left_sym := an.expression(left_child, as_value: true) or {
+				if error_is(err, errors.constant_mutation_error) {
+					continue
+				}
+				analyzer.void_sym
+			}
 			mut right_sym := an.expression(right_child, as_value: true) or { analyzer.void_sym }
 
 			if is_imaginary && op != '=' {
@@ -784,7 +815,14 @@ pub fn (mut an SemanticAnalyzer) expression(node ast.Node, cfg SemanticExpressio
 				// 	}
 				// 	return void_sym
 				// }
-
+				if parent := node.parent() {
+					// expression_list
+					if grandparent := parent.parent() {
+						if grandparent.type_name == .assignment_statement && sym.is_const {
+							return an.report(node, errors.constant_mutation_error, sym.name)
+						}
+					}
+				}
 				return sym.return_sym
 			} else {
 				return sym
