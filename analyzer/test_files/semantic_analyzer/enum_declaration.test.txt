@@ -1,5 +1,9 @@
 enum Empty {}
 
+enum Color {
+  green = 'green'
+}
 ---
 
 (error "enum cannot be empty" [0,5]-[0,10])
+(error "default value for enum has to be an integer" [3,10]-[3,17])

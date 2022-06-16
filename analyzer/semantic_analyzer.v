@@ -173,6 +173,23 @@ fn (mut an SemanticAnalyzer) enum_decl(node ast.Node) ? {
 	member_count := decl_list_node.named_child_count()
 	if member_count == 0 {
 		return an.report(name_node, errors.empty_enum_error)
+	} else {
+		for i in 0 .. member_count {
+			member_node := decl_list_node.named_child(i) or {
+				continue
+			}
+
+			member_name_node := member_node.child_by_field_name('name') or {
+				continue
+			}
+
+			if member_value_node := member_node.child_by_field_name('value') {
+				val_sym := an.expression(member_value_node, as_value: true) or { analyzer.void_sym }
+				if val_sym.name != 'int' {
+					an.report(member_value_node, errors.enum_default_value_error)
+				}
+			}
+		}
 	}
 }
 
