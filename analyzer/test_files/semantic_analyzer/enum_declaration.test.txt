@@ -6,6 +6,8 @@ enum Color {
   green
   yellow = 2147483647
   red
+  alpha = 1
+  purple = 1
 }
 ---
 
@@ -13,3 +15,5 @@ enum Color {
 (error "default value for enum has to be an integer" [3,10]-[3,17])
 (error "field name `green` duplicate" [5,2]-[5,7])
 (error "enum value overflows" [7,2]-[7,5])
+(error "enum value `1` already exists" [9,11]-[9,12])
+

@@ -178,6 +178,8 @@ fn (mut an SemanticAnalyzer) enum_decl(node ast.Node) ? {
 	} else {
 		mut value_overflowed := false
 		mut member_names := []string{cap: int(member_count)}
+		mut member_values := []string{len: int(member_count)}
+
 		for i in 0 .. member_count {
 			member_node := decl_list_node.named_child(i) or {
 				continue
@@ -200,6 +202,13 @@ fn (mut an SemanticAnalyzer) enum_decl(node ast.Node) ? {
 					an.report(member_value_node, errors.enum_default_value_error)
 				} else if member_value_node.type_name == .int_literal && member_value_node.code(an.src_text) == max_int_value {
 					value_overflowed = true
+				}
+
+				member_value_lit := member_value_node.code(an.src_text)
+				if member_value_lit in member_values {
+					an.report(member_value_node, errors.enum_duplicate_value_error, member_value_lit)
+				} else {
+					member_values[i] = member_value_lit
 				}
 			} else if value_overflowed {
 				an.report(member_name_node, errors.enum_value_overflow_error)
