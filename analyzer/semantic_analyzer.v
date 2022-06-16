@@ -167,7 +167,13 @@ fn (mut an SemanticAnalyzer) struct_decl(node ast.Node) {
 fn (mut an SemanticAnalyzer) interface_decl(node ast.Node) {
 }
 
-fn (mut an SemanticAnalyzer) enum_decl(node ast.Node) {
+fn (mut an SemanticAnalyzer) enum_decl(node ast.Node) ? {
+	name_node := node.child_by_field_name('name')?
+	decl_list_node := node.last_node_by_type(v.NodeType.enum_member_declaration_list)?
+	member_count := decl_list_node.named_child_count()
+	if member_count == 0 {
+		return an.report(name_node, errors.empty_enum_error)
+	}
 }
 
 fn (mut an SemanticAnalyzer) fn_decl(node ast.Node) {
@@ -216,7 +222,7 @@ pub fn (mut an SemanticAnalyzer) top_level_statement(current_node ast.Node) {
 			an.interface_decl(current_node)
 		}
 		.enum_declaration {
-			an.enum_decl(current_node)
+			an.enum_decl(current_node) or {}
 		}
 		.function_declaration {
 			an.fn_decl(current_node)
