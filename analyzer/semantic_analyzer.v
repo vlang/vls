@@ -550,6 +550,15 @@ pub fn (mut an SemanticAnalyzer) type_initializer(node ast.Node) ?&Symbol {
 				an.report(el_node, errors.unknown_type_error, el_node.code(an.src_text))
 			}
 		}
+		.placeholder {
+			typ_sym := an.store.find_symbol_by_type_node(type_node, an.src_text)?
+			if typ_sym.kind == .typedef && typ_sym.parent_sym.kind == .map_ {
+				return an.report(node, errors.typedef_map_init_error, {
+					'type_name': typ_sym.gen_str(with_kind: false, with_contents: false, with_access: false)
+					'map_type': typ_sym.parent_sym.gen_str()
+				})
+			}
+		}
 		else {}
 	}
 

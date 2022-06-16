@@ -1,8 +1,14 @@
 type Miscellaneous = Inexistant | Nope | int
 type Text = Strign
+type WordSet = map[string]bool
+
+fn main() {
+	_ := WordSet{}
+}
 
 ---
 
-(error "unknown type `Inexistant`" [0,21]-[0,31]) 
+(error "unknown type `Inexistant`" [0,21]-[0,31])
 (error "unknown type `Nope`" [0,34]-[0,38])
 (error "unknown type `Strign`" [1,12]-[1,18])
+(error "direct map alias init is not possible, use `WordSet(map[string]bool{})` instead" [5,6]-[5,15])
