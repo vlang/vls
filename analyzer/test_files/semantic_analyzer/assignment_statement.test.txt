@@ -13,6 +13,8 @@ fn main() {
     obj = <-ch
 
     xy = 2
+
+    _ += 1
 }
 
 ---
@@ -23,3 +25,4 @@ fn main() {
 (error "cannot assign to `num`: expected `int`, not `void`" [7,10]-[7,11])
 (error "cannot assign to `obj`: expected `int`, not `string`" [12,10]-[12,12])
 (error "undefined ident: `xy` (use `:=` to declare a variable)" [14,4]-[14,6])
+(error "cannot modify blank `_` identifier" [16,4]-[16,5])

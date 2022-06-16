@@ -229,7 +229,9 @@ pub fn (mut an SemanticAnalyzer) assignment_statement(node ast.Node) ? {
 			left_sym := an.expression(left_child, as_value: true) or { analyzer.void_sym }
 			mut right_sym := an.expression(right_child, as_value: true) or { analyzer.void_sym }
 
-			if is_multiplicative || is_additive {
+			if is_imaginary && op != '=' {
+				an.report(left_child, errors.imaginary_mutation_error)
+			} else if is_multiplicative || is_additive {
 				if left_sym.name in analyzer.numeric_types_with_any_type || right_sym.name in analyzer.numeric_types_with_any_type {
 					an.report(node, errors.mismatched_type_error, left_sym, right_sym)
 				} else {
