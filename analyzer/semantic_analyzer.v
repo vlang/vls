@@ -174,6 +174,7 @@ fn (mut an SemanticAnalyzer) enum_decl(node ast.Node) ? {
 	if member_count == 0 {
 		return an.report(name_node, errors.empty_enum_error)
 	} else {
+		mut member_names := []string{cap: int(member_count)}
 		for i in 0 .. member_count {
 			member_node := decl_list_node.named_child(i) or {
 				continue
@@ -181,6 +182,13 @@ fn (mut an SemanticAnalyzer) enum_decl(node ast.Node) ? {
 
 			member_name_node := member_node.child_by_field_name('name') or {
 				continue
+			}
+
+			member_name := member_name_node.code(an.src_text)
+			if member_name in member_names {
+				an.report(member_name_node, errors.enum_duplicate_member_error, member_name)
+			} else {
+				member_names << member_name
 			}
 
 			if member_value_node := member_node.child_by_field_name('value') {
