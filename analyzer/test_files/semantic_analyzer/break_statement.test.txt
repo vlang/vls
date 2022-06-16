@@ -1,0 +1,7 @@
+fn main() {
+  break
+}
+
+---
+
+(error "break statement not within a loop" [1,2]-[1,7])

@@ -316,6 +316,22 @@ pub fn (mut an SemanticAnalyzer) statement(node ast.Node) {
 		.short_var_declaration {
 			an.short_var_declaration(node) or {}
 		}
+		.break_statement {
+			mut in_loop := false
+			if parent := node.parent() {
+				if parent.type_name == .block {
+					if block_parent := parent.parent() {
+						if block_parent.type_name == .for_statement {
+							in_loop = true
+						}
+					}
+				}
+			}
+
+			if !in_loop {
+				an.report(node, errors.nonloop_break_error)
+			}
+		}
 		.return_statement {
 			an.expression(node.child(0) or { return }) or {}
 		}
