@@ -10,7 +10,7 @@ import io
 
 pub const version = '2.0'
 
-// see 
+// see
 // - https://www.jsonrpc.org/specification#error_object
 // - http://xmlrpc-epi.sourceforge.net/specs/rfc.fault_codes.php
 pub const (
@@ -33,7 +33,7 @@ pub const (
 )
 
 // Null represents the null value in JSON.
-struct Null {}
+pub struct Null {}
 
 pub const null = Null{}
 
@@ -107,11 +107,11 @@ fn encode_response<T>(resp Response<T>, mut writer io.Writer) {
 	writer.write([u8(`}`)]) or {}
 }
 
-// NotificationMessage is a Request object without the ID. A Request object that is a 
-// Notification signifies the Client's lack of interest in the corresponding Response object, 
-// and as such no Response object needs to be returned to the client. The Server MUST NOT reply 
+// NotificationMessage is a Request object without the ID. A Request object that is a
+// Notification signifies the Client's lack of interest in the corresponding Response object,
+// and as such no Response object needs to be returned to the client. The Server MUST NOT reply
 // to a Notification, including those that are within a batch request.
-// 
+//
 // Notifications are not confirmable by definition, since they do not have a Response object to be
 // returned. As such, the Client would not be aware of any errors (like e.g. "Invalid params","Internal error").
 // https://www.jsonrpc.org/specification#notification
@@ -143,7 +143,7 @@ fn encode_notification<T>(notif jsonrpc.NotificationMessage<T>, mut writer io.Wr
 	writer.write([u8(`}`)]) or {}
 }
 
-// ResponseError is a representation of an error when a rpc call encounters an error. 
+// ResponseError is a representation of an error when a rpc call encounters an error.
 //When a rpc call encounters an error, the Response Object MUST contain the error member
 // with a value that is a Object with the following members:
 // https://www.jsonrpc.org/specification#error_object
