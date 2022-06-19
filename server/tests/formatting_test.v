@@ -33,10 +33,7 @@ fn test_formatting() ? {
 		} else {
 			assert errors == 0
 		}
-		mut exp_content := os.read_file(exp_file_path) or { '' }
-		$if windows {
-			exp_content = exp_content.replace('\n', '\r\n')
-		}
+		exp_content := os.read_file(exp_file_path) or { '' }
 
 		// initiate formatting request
 		if actual := ls.formatting(lsp.DocumentFormattingParams{
