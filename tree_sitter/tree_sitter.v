@@ -100,7 +100,7 @@ pub fn (parser &C.TSParser) free() {
 }
 
 [typedef]
-struct C.TSLanguage {}
+pub struct C.TSLanguage {}
 
 [typedef]
 pub struct C.TSTree {}
