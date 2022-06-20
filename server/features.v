@@ -43,7 +43,11 @@ pub fn (mut ls Vls) formatting(params lsp.DocumentFormattingParams, mut wr Respo
 		return none
 	}
 
-	output := p.stdout_slurp()
+	mut output := p.stdout_slurp()
+	$if windows {
+		output = output.replace('\r\r', '\r')
+	}
+
 	return [
 		lsp.TextEdit{
 			range: tsrange_to_lsp_range(tree_range)
