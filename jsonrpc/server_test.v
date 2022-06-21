@@ -1,5 +1,5 @@
 import jsonrpc
-import jsonrpc.server_test_utils { TestClient, TestStream, RpcResult }
+import jsonrpc.server_test_utils as stu
 
 struct TestHandler {}
 
@@ -11,21 +11,21 @@ mut:
 fn (mut h TestHandler) handle_jsonrpc(req &jsonrpc.Request, mut wr jsonrpc.ResponseWriter) ? {
 	match req.method {
 		'sum' {
-			params := req.decode_params<SumParams>() ?
+			params := req.decode_params<SumParams>()?
 
 			mut res := 0
 			for n in params.nums {
 				res += n
 			}
 
-			wr.write(RpcResult<int>{ result: res })
+			wr.write(stu.RpcResult<int>{ result: res })
 		}
 		'hello' {
-			wr.write(RpcResult<string>{'Hello world!'})
+			wr.write(stu.RpcResult<string>{'Hello world!'})
 		}
 		'trigger' {
-			wr.server.dispatch_event('record', 'dispatched!') ?
-			wr.write(RpcResult<string>{'triggered'})
+			wr.server.dispatch_event('record', 'dispatched!')?
+			wr.write(stu.RpcResult<string>{'triggered'})
 		}
 		else {
 			return jsonrpc.response_error(jsonrpc.method_not_found).err()
@@ -34,24 +34,30 @@ fn (mut h TestHandler) handle_jsonrpc(req &jsonrpc.Request, mut wr jsonrpc.Respo
 }
 
 fn test_server() ? {
-	mut stream := &TestStream{}
+	mut stream := &stu.TestStream{}
 	mut server := &jsonrpc.Server{
 		handler: &TestHandler{}
 		stream: stream
 	}
 
-	mut client := TestClient{
+	mut client := stu.TestClient{
 		server: server
 		stream: stream
 	}
 
-	sum_result := client.send<SumParams, RpcResult<int>>('sum', SumParams{ nums: [1,2,4] }) ?
+	sum_result := client.send<SumParams, stu.RpcResult<int>>('sum', SumParams{
+		nums: [
+			1,
+			2,
+			4,
+		]
+	})?
 	assert sum_result.result == 7
 
-	hello_result := client.send<string, RpcResult<string>>('hello', '') ?
+	hello_result := client.send<string, stu.RpcResult<string>>('hello', '')?
 	assert hello_result.result == 'Hello world!'
 
-	client.send<string, RpcResult<int>>('multiply', 'test') or {
+	client.send<string, stu.RpcResult<int>>('multiply', 'test') or {
 		assert err.msg() == 'Method not found.'
 	}
 }
@@ -59,7 +65,7 @@ fn test_server() ? {
 struct TestInterceptor {
 mut:
 	methods_recv []string
-	messages []string
+	messages     []string
 }
 
 fn (mut t TestInterceptor) on_event(name string, data jsonrpc.InterceptorData) ? {
@@ -80,7 +86,7 @@ fn (mut t TestInterceptor) on_encoded_response(resp []u8) {
 
 fn test_interceptor() ? {
 	mut test_inter := &TestInterceptor{}
-	mut stream := &TestStream{}
+	mut stream := &stu.TestStream{}
 
 	mut server := &jsonrpc.Server{
 		handler: &TestHandler{}
@@ -88,17 +94,17 @@ fn test_interceptor() ? {
 		stream: stream
 	}
 
-	mut client := TestClient{
+	mut client := stu.TestClient{
 		server: server
 		stream: stream
 	}
 
-	client.send<SumParams, RpcResult<int>>('sum', SumParams{ nums: [1,2,4] }) ?
+	client.send<SumParams, stu.RpcResult<int>>('sum', SumParams{ nums: [1, 2, 4] })?
 	assert test_inter.methods_recv.len == 1
 	assert test_inter.methods_recv[0] == 'sum'
 	assert test_inter.messages.len == 1
 
-	client.send<string, RpcResult<string>>('trigger', '') ?
+	client.send<string, stu.RpcResult<string>>('trigger', '')?
 	assert test_inter.methods_recv.len == 2
 	assert test_inter.methods_recv[1] == 'trigger'
 	assert test_inter.messages.len == 3
