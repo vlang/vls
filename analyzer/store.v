@@ -157,7 +157,7 @@ const anon_fn_prefix = '#anon_'
 pub fn (ss &Store) find_fn_symbol(module_name string, return_sym &Symbol, params []&Symbol) ?&Symbol {
 	module_path := ss.get_module_path(module_name)
 	for sym in ss.symbols[module_path] ? {
-		mut final_sym := sym
+		mut final_sym := unsafe { sym }
 		if sym.kind == .typedef && sym.parent_sym.kind == .function_type {
 			final_sym = sym.parent_sym
 		}
@@ -504,7 +504,7 @@ pub fn (mut store Store) find_symbol_by_type_node(node ast.Node, src_text []rune
 			parameters << extract_parameter_list(param_node, mut store, src_text)
 		}
 
-		mut return_sym := void_sym
+		mut return_sym := unsafe { void_sym }
 		if result_node := node.child_by_field_name('result') {
 			return_sym = store.find_symbol_by_type_node(result_node, src_text) or { void_sym }
 		}

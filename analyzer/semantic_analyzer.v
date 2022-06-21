@@ -643,7 +643,7 @@ pub fn (mut an SemanticAnalyzer) selector_expression(node ast.Node) ?&Symbol {
 
 		// NOTE: transfer this to `store.infer_symbol_from_node` if possible
 		mut got_sym_kind_from_embed := SymbolKind.void
-		mut method_or_field_sym := analyzer.void_sym
+		mut method_or_field_sym := unsafe { analyzer.void_sym }
 		mut method_or_field_typ_idx := -1
 
 		for child_sym_idx, child_sym in root_sym.children_syms {

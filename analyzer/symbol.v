@@ -447,7 +447,7 @@ fn (sym &Symbol) value_sym() &Symbol {
 
 fn (sym &Symbol) count_ptr() int {
 	mut ptr_count := 0
-	mut starting_sym := sym
+	mut starting_sym := unsafe { sym }
 	for !isnil(starting_sym) && starting_sym.kind == .ref {
 		ptr_count++
 	}

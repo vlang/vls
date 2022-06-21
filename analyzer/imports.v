@@ -28,7 +28,7 @@ pub fn (mut imp Importer) scan_imports(tree &ast.Tree, src_text []rune) []&Impor
 		import_path_node := node.child_by_field_name('path') or { continue }
 
 		if found_imp := imp.imports().find_by_position(imp.store.cur_file_path, node.range()) {
-			mut imp_module := found_imp
+			mut imp_module := unsafe { found_imp }
 			mod_name := import_path_node.code(src_text)
 			if imp_module.absolute_module_name == mod_name {
 				continue

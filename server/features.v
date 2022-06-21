@@ -605,7 +605,7 @@ fn (mut builder CompletionBuilder) build_local_suggestions() {
 	// Scope-based symbols that includes the variables inside
 	// the functions and the constants of the file.
 	if file_scope_ := builder.store.opened_scopes[builder.store.cur_file_path] {
-		mut file_scope := file_scope_
+		mut file_scope := unsafe { file_scope_ }
 		mut scope := file_scope.innermost(u32(builder.offset), u32(builder.offset))
 		for !isnil(scope) && scope != file_scope {
 			// constants
@@ -1090,8 +1090,8 @@ pub fn (mut ls Vls) definition(params lsp.TextDocumentPositionParams, mut wr Res
 
 fn get_implementation_locations_from_syms(symbols []&analyzer.Symbol, got_sym &analyzer.Symbol, original_range C.TSRange, mut locations []lsp.LocationLink) {
 	for sym in symbols {
-		mut interface_sym := analyzer.void_sym
-		mut sym_to_check := analyzer.void_sym
+		mut interface_sym := unsafe { analyzer.void_sym }
+		mut sym_to_check := unsafe { analyzer.void_sym }
 		if got_sym.kind == .interface_ && sym.kind != .interface_ {
 			interface_sym = got_sym
 			sym_to_check = sym
@@ -1138,7 +1138,7 @@ pub fn (mut ls Vls) implementation(params lsp.TextDocumentPositionParams, mut wr
 
 	ls.store.set_active_file_path(uri.path(), file.version)
 
-	mut got_sym := analyzer.void_sym
+	mut got_sym := unsafe { analyzer.void_sym }
 	if parent_node := node.parent() {
 		if parent_node.type_name == .interface_declaration {
 			got_sym = ls.store.symbols[ls.store.cur_dir].get(node.code(source)) or { got_sym }
