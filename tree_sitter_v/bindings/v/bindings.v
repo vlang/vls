@@ -14,7 +14,7 @@ pub const language = unsafe { C.tree_sitter_v() }
 
 // load_node_types reads the node-types.json file for static analysis.
 pub fn load_node_types() ?[]json2.Any {
-	contents := os.read_file(os.join_path(@VMODROOT, 'src', 'node-types.json')) ?
-	list := json2.raw_decode(contents) ?
+	contents := os.read_file(os.join_path(@VMODROOT, 'src', 'node-types.json'))?
+	list := json2.raw_decode(contents)?
 	return list.arr()
 }

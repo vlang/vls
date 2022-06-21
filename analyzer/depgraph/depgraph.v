@@ -50,7 +50,7 @@ pub fn (tree &Tree) get_node(id string) ?&Node {
 	if idx == -1 {
 		return error('Node not found')
 	}
-	return tree.values[idx] ?
+	return tree.values[idx]?
 }
 
 pub fn (tree &Tree) size() int {

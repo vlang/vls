@@ -3,15 +3,12 @@
 import os
 
 mut vls_exec_name := 'vls'
-$if windows {
-	vls_exec_name += '.exe'
-}
 
 project_folder := dir(executable())
 full_vls_bin_dir := real_path(join_path(project_folder, 'bin'))
 full_vls_exec_path := real_path(join_path(full_vls_bin_dir, vls_exec_name))
 
-chdir(project_folder) ?
+chdir(project_folder)?
 
 mkdir(full_vls_bin_dir) or {}
 
@@ -27,12 +24,6 @@ if os.args.len >= 2 {
 	}
 }
 
-$if windows {
-	if cc == 'cc' {
-		eprintln('> Usage error: for Windows, you must need to specify the compiler to use (either gcc, clang, or msvc)')
-		exit(1)
-	}
-}
 println('> Building VLS...')
 
 vls_git_hash := os.execute('git rev-parse --short HEAD')

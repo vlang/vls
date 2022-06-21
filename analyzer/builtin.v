@@ -3,13 +3,15 @@ module analyzer
 import os
 
 const numeric_types = ['u8', 'u16', 'u32', 'u64', 'i8', 'i16', 'int', 'i64', 'f32', 'f64']
-const numeric_types_with_any_type = ['u8', 'u16', 'u32', 'u64' 'i8', 'i16', 'int', 'i64', 'f32', 'f64', 'int_literal', 'float_literal']
+
+const numeric_types_with_any_type = ['u8', 'u16', 'u32', 'u64', 'i8', 'i16', 'int', 'i64', 'f32',
+	'f64', 'int_literal', 'float_literal']
 
 pub fn setup_builtin(mut store Store, builtin_path string) {
 	mut importer := Importer{
 		store: unsafe { store }
 	}
-	
+
 	mut builtin_import, _ := store.add_import(
 		resolved: true
 		module_name: 'builtin'

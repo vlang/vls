@@ -1,6 +1,6 @@
 module analyzer
 
-pub interface ReportData{}
+pub interface ReportData {}
 
 pub enum ReportKind {
 	error
@@ -21,14 +21,14 @@ pub:
 
 pub struct ReporterPreferences {
 mut:
-	limit              int = 100
-	warns_are_errors   bool
+	limit            int = 100
+	warns_are_errors bool
 }
 
 pub interface Reporter {
 	count() int
 mut:
-	prefs   ReporterPreferences
+	prefs ReporterPreferences
 	report(r Report)
 }
 

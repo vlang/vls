@@ -34,7 +34,7 @@ pub fn (mut ls Vls) initialize(params lsp.InitializeParams, mut wr ResponseWrite
 			ls.store.default_import_paths << os.vmodules_dir()
 		} else {
 			// avoid process launch fails when VROOT does not exist
-			ls.set_features(features_require_v_tool, false) or {}
+			ls.set_features(server.features_require_v_tool, false) or {}
 			wr.show_message("V installation directory was not found. Some of the features won't work properly.",
 				.error)
 		}

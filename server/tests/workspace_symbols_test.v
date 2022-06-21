@@ -61,7 +61,7 @@ fn test_workspace_symbols() ? {
 		client: new_test_client(ls)
 	}
 	mut writer := t.client.server.writer()
-	test_files := t.initialize() ?
+	test_files := t.initialize()?
 	for file in test_files {
 		// open document
 		t.open_document(file) or {

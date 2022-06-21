@@ -50,14 +50,14 @@ fn test_diagnostics() ? {
 		client: new_test_client(server.new())
 	}
 
-	test_files := t.initialize() ?
+	test_files := t.initialize()?
 	for file in test_files {
 		doc_id := t.open_document(file) or {
 			t.fail(file, err.msg())
 			continue
 		}
 
-		diagnostic_params := t.diagnostics() ?
+		diagnostic_params := t.diagnostics()?
 		if diagnostic_params.uri.path() != file.file_path {
 			t.fail(file, 'no diagnostics found')
 			continue

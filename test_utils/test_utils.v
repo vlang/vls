@@ -32,11 +32,14 @@ pub mut:
 pub fn (mut t Tester) initialize() ?TestFilesIterator {
 	t.client.send<lsp.InitializeParams, lsp.InitializeResult>('initialize', lsp.InitializeParams{
 		root_uri: lsp.document_uri_from_path(os.join_path(t.test_files_dir, t.folder_name))
-	}) ?
+	})?
 
-	files := load_test_file_paths(t.test_files_dir, t.folder_name) ?
+	files := load_test_file_paths(t.test_files_dir, t.folder_name)?
 	t.bench.set_total_expected_steps(files.len)
-	return TestFilesIterator{file_paths: files, tester: unsafe { t }}
+	return TestFilesIterator{
+		file_paths: files
+		tester: unsafe { t }
+	}
 }
 
 pub fn (mut t Tester) fail(file TestFile, msg string) {
@@ -53,7 +56,7 @@ pub fn (t &Tester) is_ok() bool {
 }
 
 pub fn (mut t Tester) diagnostics() ?lsp.PublishDiagnosticsParams {
-	got := t.client.stream.last_notification_at_method<lsp.PublishDiagnosticsParams>('textDocument/publishDiagnostics') ?
+	got := t.client.stream.last_notification_at_method<lsp.PublishDiagnosticsParams>('textDocument/publishDiagnostics')?
 	return got.params
 }
 
@@ -83,7 +86,7 @@ pub fn (mut t Tester) open_document(file TestFile) ?lsp.TextDocumentIdentifier {
 			version: 1
 			text: file.contents
 		}
-	}) ?
+	})?
 	return lsp.TextDocumentIdentifier{
 		uri: doc_uri
 	}
@@ -93,20 +96,20 @@ pub fn (mut t Tester) open_document(file TestFile) ?lsp.TextDocumentIdentifier {
 pub fn (mut t Tester) close_document(doc_id lsp.TextDocumentIdentifier) ? {
 	t.client.notify('textDocument/didClose', lsp.DidCloseTextDocumentParams{
 		text_document: doc_id
-	}) ?
+	})?
 }
 
 pub struct TestFile {
 pub:
 	file_name string [required]
 	file_path string [required]
-	contents   string
+	contents  string
 }
 
 pub struct TestFilesIterator {
 mut:
 	tester &Tester
-	idx int = -1
+	idx    int = -1
 pub mut:
 	file_paths []string
 }
@@ -114,7 +117,7 @@ pub mut:
 pub fn (iter &TestFilesIterator) get(idx int) ?TestFile {
 	test_file_path := iter.file_paths[idx]
 	test_file_name := os.base(test_file_path)
-	content := os.read_file(test_file_path) ?
+	content := os.read_file(test_file_path)?
 	return TestFile{
 		file_name: test_file_name
 		file_path: test_file_path
@@ -131,13 +134,10 @@ pub fn (mut iter TestFilesIterator) next() ?TestFile {
 
 	iter.tester.bench.step()
 	test_file := iter.get(iter.idx) or {
-		iter.tester.fail(
-			TestFile{
-				file_name: os.base(iter.file_paths[iter.idx])
-				file_path: ''
-			},
-			'file is missing',
-		)
+		iter.tester.fail(TestFile{
+			file_name: os.base(iter.file_paths[iter.idx])
+			file_path: ''
+		}, 'file is missing')
 		return iter.next()
 	}
 
@@ -203,19 +203,19 @@ pub fn (io Testio) notification() ?(string, string) {
 
 // notification verifies the parameters of the notification.
 pub fn (io Testio) notification_at_index(idx int) ?(string, string) {
-	resp := json.decode(TestNotification, io.raw_responses[idx]) ?
+	resp := json.decode(TestNotification, io.raw_responses[idx])?
 	return resp.method, resp.params
 }
 
 // response_error returns the error code and message from the response.
 pub fn (mut io Testio) response_error() ?(int, string) {
-	io.decode_response_at_index(io.raw_responses.len - 1) ?
+	io.decode_response_at_index(io.raw_responses.len - 1)?
 	return io.response.error.code, io.response.error.message
 }
 
 fn (mut io Testio) decode_response_at_index(idx int) ? {
 	if io.decoded_resp_idx != idx {
-		io.response = json.decode(TestResponse, io.raw_responses[idx]) ?
+		io.response = json.decode(TestResponse, io.raw_responses[idx])?
 		io.decoded_resp_idx = idx
 	}
 }
@@ -298,8 +298,8 @@ pub fn (mut io Testio) close_document(doc_id lsp.TextDocumentIdentifier) string 
 // from the server after executing the `textDocument/didOpen` request.
 pub fn (mut io Testio) file_errors() ?[]lsp.Diagnostic {
 	mut errors := []lsp.Diagnostic{}
-	_, diag_params := io.notification() ?
-	diag_info := json.decode(lsp.PublishDiagnosticsParams, diag_params) ?
+	_, diag_params := io.notification()?
+	diag_info := json.decode(lsp.PublishDiagnosticsParams, diag_params)?
 	for diag in diag_info.diagnostics {
 		if diag.severity != .error {
 			continue
