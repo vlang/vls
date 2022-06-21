@@ -84,7 +84,7 @@ fn test_folding_range() ? {
 		// initiate folding range request
 		actual := ls.folding_range(lsp.FoldingRangeParams{
 			text_document: doc_id
-		}, mut writer)?
+		}, mut writer) ?
 
 		// compare content
 		assert actual == folding_range_results[test_name]

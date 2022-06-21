@@ -88,7 +88,7 @@ fn test_document_symbols() ? {
 		client: new_test_client(ls)
 	}
 	mut writer := t.client.server.writer()
-	test_files := t.initialize()?
+	test_files := t.initialize() ?
 	for file in test_files {
 		// open document
 		doc_id := t.open_document(file) or {
@@ -99,7 +99,7 @@ fn test_document_symbols() ? {
 		// initiate formatting request
 		actual := ls.document_symbol(lsp.DocumentSymbolParams{
 			text_document: doc_id
-		}, mut writer)?
+		}, mut writer) ?
 
 		// compare content
 		expected := doc_symbols_result[file.file_name].map(lsp.SymbolInformation{

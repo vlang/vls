@@ -51,7 +51,7 @@ fn test_notification() ? {
 		params: 'just a log'
 	})
 	io.send(request)
-	method, params := io.notification()?
+	method, params := io.notification() ?
 	assert method == 'log'
 	assert params == '"just a log"'
 }
@@ -63,7 +63,7 @@ fn test_response_error() ? {
 	}
 	request := json.encode(payload)
 	io.send(request)
-	err_code, err_message := io.response_error()?
+	err_code, err_message := io.response_error() ?
 	assert err_code == jsonrpc.method_not_found.code()
 	assert err_message == jsonrpc.method_not_found.msg()
 }

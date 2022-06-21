@@ -173,7 +173,7 @@ pub fn (info &Symbol) gen_str(cfg SymbolGenStrConfig) string {
 		// }
 		.chan_ {
 			sb.write_string('chan ')
-			sb.write_string(info.parent_sym.gen_str(analyzer.child_cfg))
+			sb.write_string(info.parent_sym.gen_str(child_cfg))
 		}
 		.enum_ {
 			if cfg.with_access {
@@ -262,10 +262,10 @@ pub fn (info &Symbol) gen_str(cfg SymbolGenStrConfig) string {
 				sb.write_string(' = ')
 
 				if info.kind == .typedef {
-					sb.write_string(info.parent_sym.gen_str(analyzer.child_cfg))
+					sb.write_string(info.parent_sym.gen_str(child_cfg))
 				} else {
 					for i in 0 .. info.sumtype_children_len {
-						sb.write_string(info.children_syms[i].gen_str(analyzer.child_cfg))
+						sb.write_string(info.children_syms[i].gen_str(child_cfg))
 						if i < info.sumtype_children_len - 1 {
 							sb.write_byte(` `)
 							sb.write_byte(`|`)
@@ -280,7 +280,7 @@ pub fn (info &Symbol) gen_str(cfg SymbolGenStrConfig) string {
 				sb.write_string(info.access.str())
 			}
 			if info.kind == .field {
-				sb.write_string(info.parent_sym.gen_str(analyzer.child_cfg))
+				sb.write_string(info.parent_sym.gen_str(child_cfg))
 				sb.write_byte(`.`)
 			}
 			if info.is_const {
@@ -392,7 +392,7 @@ pub fn (infos []&Symbol) get(name string) ?&Symbol {
 		return error('Symbol `$name` not found')
 	}
 
-	return infos[index]?
+	return infos[index] ?
 }
 
 // add_child registers the symbol as a child of a given parent symbol

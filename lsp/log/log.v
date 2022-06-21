@@ -25,11 +25,11 @@ const default_log_kind_filter = [
 	.send_request,
 	.recv_request,
 	.send_response,
-	.recv_response,
+	.recv_response
 ]
 
 pub struct LogRecorder {
-	filter_kinds []LogKind = log.default_log_kind_filter
+	filter_kinds   []LogKind = log.default_log_kind_filter
 mut:
 	file           os.File
 	buffer         strings.Builder
@@ -82,9 +82,9 @@ pub struct LogItem {
 
 // json is a JSON string representation of the log item.
 pub fn (li LogItem) encode_json(mut wr io.Writer) ? {
-	wr.write('{"kind":"$li.kind","message":'.bytes())?
-	wr.write(li.message)?
-	wr.write(',"timestamp":$li.timestamp.unix}'.bytes())?
+	wr.write('{"kind":"$li.kind","message":'.bytes()) ?
+	wr.write(li.message) ?
+	wr.write(',"timestamp":$li.timestamp.unix}'.bytes()) ?
 }
 
 pub fn new() &LogRecorder {
@@ -101,7 +101,7 @@ pub fn (mut l LogRecorder) set_logpath(path string) ? {
 		l.close()
 	}
 
-	file := os.open_append(os.real_path(path))?
+	file := os.open_append(os.real_path(path)) ?
 	l.file = file
 	l.file_path = path
 	l.file_opened = true
@@ -150,10 +150,10 @@ fn (mut l LogRecorder) write(item LogItem) {
 			}
 		}
 		item.encode_json(mut l.file) or { eprintln(err) }
-		l.file.write(log.newline) or {}
+		l.file.write(newline) or {}
 	} else {
 		item.encode_json(mut l.buffer) or { eprintln(err) }
-		l.buffer.write(log.newline) or {}
+		l.buffer.write(newline) or {}
 	}
 
 	l.last_timestamp = item.timestamp
@@ -208,14 +208,12 @@ pub fn (mut l LogRecorder) response(msg string, kind TransportKind) {
 const event_prefix = 'lspLogger'
 
 pub const set_logpath_event = '$event_prefix/setLogpath'
-
 pub const close_event = '$event_prefix/close'
-
 pub const state_event = '$event_prefix/state'
 
 pub fn (mut l LogRecorder) on_event(name string, data jsonrpc.InterceptorData) ? {
 	if name == log.set_logpath_event && data is string {
-		l.set_logpath(data)?
+		l.set_logpath(data) ?
 	} else if name == log.close_event {
 		l.close()
 	} else if name == log.state_event && data is bool {

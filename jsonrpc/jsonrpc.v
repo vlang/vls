@@ -29,8 +29,7 @@ pub const (
 	server_error_start     = error_with_code('Error occurred when starting server.', -32099)
 	server_not_initialized = error_with_code('Server not initialized.', -32002)
 	unknown_error          = error_with_code('Unknown error.', -32001)
-	server_error_end       = error_with_code('Error occurred when stopping the server.',
-		-32000)
+	server_error_end       = error_with_code('Error occurred when stopping the server.', -32000)
 )
 
 // Null represents the null value in JSON.
@@ -82,26 +81,24 @@ pub fn (resp Response<T>) json() string {
 }
 
 const null_in_u8 = 'null'.bytes()
-
 const error_field_in_u8 = ',"error":'.bytes()
-
 const result_field_in_u8 = ',"result":'.bytes()
 
 fn encode_response<T>(resp Response<T>, mut writer io.Writer) {
 	writer.write('{"jsonrpc":"$jsonrpc.version","id":'.bytes()) or {}
 	if resp.id.len == 0 {
-		writer.write(jsonrpc.null_in_u8) or {}
+		writer.write(null_in_u8) or {}
 	} else {
 		writer.write(resp.id.bytes()) or {}
 	}
 	if resp.error.code != 0 {
 		err := json.encode(resp.error)
-		writer.write(jsonrpc.error_field_in_u8) or {}
+		writer.write(error_field_in_u8) or {}
 		writer.write(err.bytes()) or {}
 	} else {
-		writer.write(jsonrpc.result_field_in_u8) or {}
+		writer.write(result_field_in_u8) or {}
 		if typeof(resp.result).name == 'jsonrpc.Null' {
-			writer.write(jsonrpc.null_in_u8) or {}
+			writer.write(null_in_u8) or {}
 		} else {
 			res := json.encode(resp.result)
 			writer.write(res.bytes()) or {}
@@ -135,10 +132,10 @@ pub fn (notif NotificationMessage<T>) json() string {
 	return notif_wr.str()
 }
 
-fn encode_notification<T>(notif NotificationMessage<T>, mut writer io.Writer) {
+fn encode_notification<T>(notif jsonrpc.NotificationMessage<T>, mut writer io.Writer) {
 	writer.write('{"jsonrpc":"$jsonrpc.version","method":"$notif.method","params":'.bytes()) or {}
 	$if notif.params is Null {
-		writer.write(jsonrpc.null_in_u8) or {}
+		writer.write(null_in_u8) or {}
 	} $else {
 		res := json.encode(notif.params)
 		writer.write(res.bytes()) or {}
@@ -147,7 +144,7 @@ fn encode_notification<T>(notif NotificationMessage<T>, mut writer io.Writer) {
 }
 
 // ResponseError is a representation of an error when a rpc call encounters an error.
-// When a rpc call encounters an error, the Response Object MUST contain the error member
+//When a rpc call encounters an error, the Response Object MUST contain the error member
 // with a value that is a Object with the following members:
 // https://www.jsonrpc.org/specification#error_object
 pub struct ResponseError {

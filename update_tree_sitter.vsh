@@ -40,9 +40,9 @@ version_file_path := join_path(tree_sitter_dir, 'ts_version.json')
 mut got_version := ''
 
 if exists(version_file_path) {
-	version_file_contents := read_file(version_file_path)?
-	version_obj := json2.fast_raw_decode(version_file_contents)?.as_map()
-	got_version = version_obj['version']?.str()
+	version_file_contents := read_file(version_file_path) ?
+	version_obj := json2.fast_raw_decode(version_file_contents) ?.as_map()
+	got_version = version_obj['version'] ?.str()
 } else {
 	println('Version file not found. Proceeding...')
 }
@@ -52,7 +52,7 @@ clone_dir := join_path(temp_dir(), 'tree_sitter')
 
 if exists(clone_dir) {
 	walk(clone_dir, rm_rf)
-	rmdir_all(clone_dir)?
+	rmdir_all(clone_dir) ?
 }
 
 // clone tree-sitter repository to temp directory
@@ -81,17 +81,17 @@ if got_version == curr_version_cmd_out.output.trim_space() {
 }
 
 // remove old tree-sitter if cloning is success
-rmdir_all(lib_dir)?
+rmdir_all(lib_dir) ?
 
 // copy lib to $VLS_FOLDER/tree_sitter/lib
 ts_lib_src_dir := join_path(clone_dir, 'lib', 'src')
-cp_all(ts_lib_src_dir, lib_dir, true)?
+cp_all(ts_lib_src_dir, lib_dir, true) ?
 
 // copy tree_sitter/api.h and tree_sitter/parser.h
 ts_lib_include_dir := join_path(clone_dir, 'lib', 'include', 'tree_sitter')
 
-cp(join_path(ts_lib_include_dir, 'api.h'), join_path(lib_dir, 'api.h'))?
-cp(join_path(ts_lib_include_dir, 'parser.h'), join_path(lib_dir, 'parser.h'))?
+cp(join_path(ts_lib_include_dir, 'api.h'), join_path(lib_dir, 'api.h')) ?
+cp(join_path(ts_lib_include_dir, 'parser.h'), join_path(lib_dir, 'parser.h')) ?
 
 // patch files to avoid conflicts
 mut includes_to_replace := []string{cap: 5 * 2}
@@ -106,22 +106,22 @@ for file_name in files_to_rename {
 	}
 
 	new_file_name := join_path(lib_dir, file_name[1])
-	mv(old_file_name, new_file_name)?
+	mv(old_file_name, new_file_name) ?
 	includes_to_replace << ['./${file_name[0]}', './${file_name[1]}']
 }
 
-patch_file(join_path(lib_dir, 'ts_atomic.h'), ['atomic_', 'ts_atomic_'])?
-patch_file(join_path(lib_dir, 'ts_atomic.h'), ['__ts_atomic_load_n', '__atomic_load_n'])?
+patch_file(join_path(lib_dir, 'ts_atomic.h'), ['atomic_', 'ts_atomic_']) ?
+patch_file(join_path(lib_dir, 'ts_atomic.h'), ['__ts_atomic_load_n', '__atomic_load_n']) ?
 
-patch_file(join_path(lib_dir, 'parser.c'), ['atomic_', 'ts_atomic_'])?
-patch_file(join_path(lib_dir, 'subtree.c'), ['atomic_', 'ts_atomic_'])?
+patch_file(join_path(lib_dir, 'parser.c'), ['atomic_', 'ts_atomic_']) ?
+patch_file(join_path(lib_dir, 'subtree.c'), ['atomic_', 'ts_atomic_']) ?
 
 patch_includes(glob(join_path(lib_dir, '*.h')) or { []string{} }, includes_to_replace)
 patch_includes(glob(join_path(lib_dir, '*.c')) or { []string{} }, includes_to_replace)
 
 // add txt file for tree-sitter version
-write_file(version_file_path, '{"version": "$curr_version_cmd_out.output.trim_space()"}')?
+write_file(version_file_path, '{"version": "$curr_version_cmd_out.output.trim_space()"}') ?
 
 // remove temp clone dir
 walk(clone_dir, rm_rf)
-rmdir_all(clone_dir)?
+rmdir_all(clone_dir) ?

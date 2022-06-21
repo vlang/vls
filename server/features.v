@@ -24,8 +24,8 @@ pub fn (mut ls Vls) formatting(params lsp.DocumentFormattingParams, mut wr Respo
 	// To simplify this, we will make a temporary file and feed it into
 	// the v fmt CLI program since there is no cross-platform way to pipe
 	// raw strings directly into v fmt.
-	mut temp_file := os.open_file(server.temp_formatting_file_path, 'w')?
-	temp_file.write_string(source.string())?
+	mut temp_file := os.open_file(server.temp_formatting_file_path, 'w') ?
+	temp_file.write_string(source.string()) ?
 	temp_file.close()
 	defer {
 		os.rm(server.temp_formatting_file_path) or {}
@@ -168,9 +168,13 @@ fn (mut ls Vls) signature_help(params lsp.SignatureHelpParams, mut wr ResponseWr
 	}
 
 	ls.store.set_active_file_path(uri.path(), file.version)
-	sym := ls.store.infer_symbol_from_node(node, file.source) or { return none }
+	sym := ls.store.infer_symbol_from_node(node, file.source) or {
+		return none
+	}
 
-	args_node := parent_node.child_by_field_name('arguments') or { return none }
+	args_node := parent_node.child_by_field_name('arguments') or {
+		return none
+	}
 
 	// get the nearest parameter based on the position of the cursor
 	args_count := args_node.named_child_count()
@@ -368,7 +372,8 @@ fn (mut builder CompletionBuilder) build_suggestions_from_list(node ast.Node) {
 fn (mut builder CompletionBuilder) build_suggestions_from_expr(node ast.Node) {
 	node_type_name := node.type_name
 	match node_type_name {
-		.binded_identifier, .identifier, .selector_expression, .call_expression, .index_expression {
+		.binded_identifier, .identifier, .selector_expression, .call_expression,
+		.index_expression {
 			builder.show_global = false
 			builder.show_local = false
 
@@ -892,7 +897,7 @@ fn get_hover_data(mut store analyzer.Store, node ast.Node, uri lsp.DocumentUri, 
 			range: tsrange_to_lsp_range(node.range())
 		}
 	} else if node_type_name == .import_path {
-		found_imp := store.imports.find_by_position(store.cur_file_path, node.range())?
+		found_imp := store.imports.find_by_position(store.cur_file_path, node.range()) ?
 		alias := found_imp.aliases[store.cur_file_name] or { '' }
 		return lsp.Hover{
 			contents: lsp.v_marked_string('import $found_imp.absolute_module_name' +

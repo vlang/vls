@@ -14,7 +14,7 @@ fn test_workspace_did_change() ? {
 
 	// TODO: add a mock filesystem
 	mut writer := t.client.server.writer()
-	test_files := t.initialize()?
+	test_files := t.initialize() ?
 	for file in test_files {
 		// open document
 		t.open_document(file) or {
@@ -34,12 +34,11 @@ fn test_workspace_did_change() ? {
 		]
 	}, mut writer)
 	assert ls.files.keys().index(first_file_uri) == -1
-	t.ok(test_files.get(1)?)
+	t.ok(test_files.get(1) ?)
 
 	// rename
 	second_file_uri_old := lsp.document_uri_from_path(test_files.get(2)?.file_path)
-	second_file_uri_new := lsp.document_uri_from_path(os.join_path(os.dir(test_files.get(2)?.file_path),
-		'renamed.vv'))
+	second_file_uri_new := lsp.document_uri_from_path(os.join_path(os.dir(test_files.get(2)?.file_path), 'renamed.vv'))
 	ls.did_change_watched_files(lsp.DidChangeWatchedFilesParams{
 		changes: [
 			lsp.FileEvent{
@@ -54,7 +53,7 @@ fn test_workspace_did_change() ? {
 	}, mut writer)
 	assert ls.files.keys().index(second_file_uri_old) == -1
 	assert ls.files.keys().index(second_file_uri_new) != -1
-	t.ok(test_files.get(2)?)
+	t.ok(test_files.get(2) ?)
 
 	// on save
 	ls.did_change_watched_files(lsp.DidChangeWatchedFilesParams{
@@ -65,7 +64,7 @@ fn test_workspace_did_change() ? {
 			},
 		]
 	}, mut writer)
-	t.ok(test_files.get(2)?)
+	t.ok(test_files.get(2) ?)
 
 	assert t.is_ok()
 }

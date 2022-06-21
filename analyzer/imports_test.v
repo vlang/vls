@@ -47,7 +47,7 @@ fn test_inject_paths_of_new_imports() ? {
 		reporter: &Collector{}
 	}
 
-	mut imp := Importer{
+	mut imp := Importer {
 		store: unsafe { store }
 	}
 

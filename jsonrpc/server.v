@@ -14,20 +14,20 @@ import io
 pub struct Server {
 mut:
 	// internal fields
-	req_buf    strings.Builder = strings.new_builder(4096)
+	req_buf strings.Builder = strings.new_builder(4096)
 	conlen_buf strings.Builder = strings.new_builder(4096)
-	res_buf    strings.Builder = strings.new_builder(4096)
+	res_buf strings.Builder = strings.new_builder(4096)
 pub mut:
-	stream       io.ReaderWriter
+	stream  io.ReaderWriter
 	interceptors []Interceptor
-	handler      Handler
+	handler Handler
 }
 
 // intercept_raw_request intercepts the incoming raw request buffer
 // to the interceptors.
 pub fn (mut s Server) intercept_raw_request(req []u8) ? {
 	for mut interceptor in s.interceptors {
-		interceptor.on_raw_request(req)?
+		interceptor.on_raw_request(req) ?
 	}
 }
 
@@ -35,7 +35,7 @@ pub fn (mut s Server) intercept_raw_request(req []u8) ? {
 // to the interceptors.
 pub fn (mut s Server) intercept_request(req &Request) ? {
 	for mut interceptor in s.interceptors {
-		interceptor.on_request(req)?
+		interceptor.on_request(req) ?
 	}
 }
 
@@ -52,7 +52,7 @@ pub interface InterceptorData {}
 // dispatch_event sends a custom event to the interceptors.
 pub fn (mut s Server) dispatch_event(event_name string, data InterceptorData) ? {
 	for mut i in s.interceptors {
-		i.on_event(event_name, data)?
+		i.on_event(event_name, data) ?
 	}
 }
 
@@ -70,10 +70,8 @@ pub fn (mut s Server) respond() ? {
 }
 
 fn (mut s Server) internal_respond(mut base_rw ResponseWriter) ? {
-	defer {
-		s.req_buf.go_back_to(0)
-	}
-	s.stream.read(mut s.req_buf)?
+	defer { s.req_buf.go_back_to(0) }
+	s.stream.read(mut s.req_buf) ?
 
 	req := s.process_raw_request(s.req_buf.after(0)) or {
 		base_rw.write_error(response_error(parse_error))
@@ -125,7 +123,7 @@ pub fn (s &Server) writer(cfg NewWriterConfig) &ResponseWriter {
 				Writer{
 					clen_sb: if cfg.own_buffer { s.conlen_buf.clone() } else { s.conlen_buf }
 					read_writer: s.stream
-				},
+				}
 			]
 		}
 		sb: if cfg.own_buffer { s.res_buf.clone() } else { s.res_buf }
@@ -136,7 +134,9 @@ pub fn (s &Server) writer(cfg NewWriterConfig) &ResponseWriter {
 pub fn (mut s Server) start() {
 	mut rw := s.writer()
 	for {
-		s.internal_respond(mut rw) or { continue }
+		s.internal_respond(mut rw) or {
+			continue
+		}
 	}
 }
 
@@ -160,10 +160,10 @@ mut:
 // ResponseWriter constructs and sends a JSONRPC response to the stream.
 pub struct ResponseWriter {
 mut:
-	sb strings.Builder
+	sb     strings.Builder
 pub mut:
 	req_id string = 'null' // raw JSON
-	server &Server
+	server  &Server
 	writer io.Writer
 }
 
@@ -174,7 +174,7 @@ fn (mut rw ResponseWriter) close() {
 
 // write sends the given payload to the stream.
 pub fn (mut rw ResponseWriter) write<T>(payload T) {
-	final_resp := Response<T>{
+	final_resp := jsonrpc.Response<T>{
 		id: rw.req_id
 		result: payload
 	}
@@ -185,7 +185,7 @@ pub fn (mut rw ResponseWriter) write<T>(payload T) {
 // write_notify sends the given method and params as
 // a server notification to the stream.
 pub fn (mut rw ResponseWriter) write_notify<T>(method string, params T) {
-	notif := NotificationMessage<T>{
+	notif := jsonrpc.NotificationMessage<T>{
 		method: method
 		params: params
 	}
@@ -195,7 +195,7 @@ pub fn (mut rw ResponseWriter) write_notify<T>(method string, params T) {
 
 // write_error sends a ResponseError to the stream.
 pub fn (mut rw ResponseWriter) write_error(err &ResponseError) {
-	final_resp := Response<string>{
+	final_resp := jsonrpc.Response<string>{
 		id: rw.req_id
 		error: err
 	}
@@ -213,9 +213,7 @@ mut:
 }
 
 fn (mut w Writer) write(byt []u8) ?int {
-	defer {
-		w.clen_sb.go_back_to(0)
-	}
+	defer { w.clen_sb.go_back_to(0) }
 	w.clen_sb.write_string('Content-Length: $byt.len\r\n\r\n')
 	w.clen_sb.write(byt) or {}
 	return w.read_writer.write(w.clen_sb)
@@ -234,7 +232,7 @@ fn (mut wr InterceptorWriter) write(buf []u8) ?int {
 }
 
 // PassiveHandler is an implementation of a Handler
-// used as a default value for Server.handler
+// used as a default value for Server.handler 
 pub struct PassiveHandler {}
 
 fn (mut h PassiveHandler) handle_jsonrpc(req &Request, mut rw ResponseWriter) ? {}

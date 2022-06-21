@@ -15,15 +15,15 @@ import v.vmod
 const vls_folder_path = os.join_path(os.home_dir(), '.vls')
 
 pub fn get_folder_path() string {
-	if os.is_file(server.vls_folder_path) {
-		os.rm(server.vls_folder_path) or {}
+	if os.is_file(vls_folder_path) {
+		os.rm(vls_folder_path) or {}
+	}
+	
+	if !os.exists(vls_folder_path) {
+		os.mkdir(vls_folder_path) or {}
 	}
 
-	if !os.exists(server.vls_folder_path) {
-		os.mkdir(server.vls_folder_path) or {}
-	}
-
-	return server.vls_folder_path
+	return vls_folder_path
 }
 
 pub const vls_build_commit = meta_vls_build_commit()
@@ -121,16 +121,16 @@ mut:
 	shutdown_timeout time.Duration = 5 * time.minute
 	client_pid       int
 	// client_capabilities lsp.ClientCapabilities
-	reporter &DiagnosticReporter
-	writer   &ResponseWriter = &ResponseWriter(0)
+	reporter         &DiagnosticReporter
+	writer           &ResponseWriter = &ResponseWriter(0)
 pub mut:
-	files map[string]File
+	files            map[string]File
 }
 
 pub fn new() &Vls {
-	reporter := &DiagnosticReporter{}
+	reporter := &DiagnosticReporter{} 
 	inst := &Vls{
-		parser: ast.new_parser()
+		parser: ast.new_parser() 
 		reporter: reporter
 		store: analyzer.Store{
 			reporter: reporter
@@ -156,8 +156,8 @@ pub fn (mut ls Vls) handle_jsonrpc(request &jsonrpc.Request, mut rw jsonrpc.Resp
 	// initialize writer upon receiving the first request
 	if isnil(ls.writer) {
 		ls.writer = rw.server.writer(own_buffer: true)
-	}
-
+	}	
+	
 	mut w := unsafe { &ResponseWriter(rw) }
 
 	// The server will log a send request/notification
@@ -183,33 +183,37 @@ pub fn (mut ls Vls) handle_jsonrpc(request &jsonrpc.Request, mut rw jsonrpc.Resp
 				// ls.exit()
 			}
 			'textDocument/didOpen' {
-				params := json.decode(lsp.DidOpenTextDocumentParams, request.params)?
+				params := json.decode(lsp.DidOpenTextDocumentParams, request.params) ?
 				ls.did_open(params, mut rw)
 			}
 			'textDocument/didSave' {
-				params := json.decode(lsp.DidSaveTextDocumentParams, request.params)?
+				params := json.decode(lsp.DidSaveTextDocumentParams, request.params) ?
 				ls.did_save(params, mut rw)
 			}
 			'textDocument/didChange' {
-				params := json.decode(lsp.DidChangeTextDocumentParams, request.params)?
+				params := json.decode(lsp.DidChangeTextDocumentParams, request.params) ?
 				ls.typing_ch <- 1
 				ls.did_change(params, mut rw)
 			}
 			'textDocument/didClose' {
-				params := json.decode(lsp.DidCloseTextDocumentParams, request.params)?
+				params := json.decode(lsp.DidCloseTextDocumentParams, request.params) ?
 				ls.did_close(params, mut rw)
 			}
 			'textDocument/formatting' {
 				params := json.decode(lsp.DocumentFormattingParams, request.params) or {
 					return w.wrap_error(err)
 				}
-				w.write(ls.formatting(params, mut rw) or { return w.wrap_error(err) })
+				w.write(ls.formatting(params, mut rw) or {
+					return w.wrap_error(err)
+				})
 			}
 			'textDocument/documentSymbol' {
 				params := json.decode(lsp.DocumentSymbolParams, request.params) or {
 					return w.wrap_error(err)
 				}
-				w.write(ls.document_symbol(params, mut rw) or { return w.wrap_error(err) })
+				w.write(ls.document_symbol(params, mut rw) or {
+					return w.wrap_error(err)
+				})
 			}
 			'workspace/symbol' {
 				// params := json.decode(lsp.WorkspaceSymbolParams, request.params) or {
@@ -221,47 +225,61 @@ pub fn (mut ls Vls) handle_jsonrpc(request &jsonrpc.Request, mut rw jsonrpc.Resp
 				params := json.decode(lsp.SignatureHelpParams, request.params) or {
 					return w.wrap_error(err)
 				}
-				w.write(ls.signature_help(params, mut rw) or { return w.wrap_error(err) })
+				w.write(ls.signature_help(params, mut rw) or {
+					return w.wrap_error(err)
+				})
 			}
 			'textDocument/completion' {
 				params := json.decode(lsp.CompletionParams, request.params) or {
 					return w.wrap_error(err)
 				}
-				w.write(ls.completion(params, mut rw) or { return w.wrap_error(err) })
+				w.write(ls.completion(params, mut rw) or {
+					return w.wrap_error(err)
+				})
 			}
 			'textDocument/hover' {
 				params := json.decode(lsp.HoverParams, request.params) or {
 					return w.wrap_error(err)
 				}
-				w.write(ls.hover(params, mut rw) or { return w.wrap_error(err) })
+				w.write(ls.hover(params, mut rw) or {
+					return w.wrap_error(err)
+				})
 			}
 			'textDocument/foldingRange' {
 				params := json.decode(lsp.FoldingRangeParams, request.params) or {
 					return w.wrap_error(err)
 				}
-				w.write(ls.folding_range(params, mut rw) or { return w.wrap_error(err) })
+				w.write(ls.folding_range(params, mut rw) or {
+					return w.wrap_error(err)
+				})
 			}
 			'textDocument/definition' {
 				params := json.decode(lsp.TextDocumentPositionParams, request.params) or {
 					return w.wrap_error(err)
 				}
-				w.write(ls.definition(params, mut rw) or { return w.wrap_error(err) })
+				w.write(ls.definition(params, mut rw) or {
+					return w.wrap_error(err)
+				})
 			}
 			'textDocument/implementation' {
 				params := json.decode(lsp.TextDocumentPositionParams, request.params) or {
 					return w.wrap_error(err)
 				}
-				w.write(ls.implementation(params, mut rw) or { return w.wrap_error(err) })
+				w.write(ls.implementation(params, mut rw) or {
+					return w.wrap_error(err)
+				})
 			}
 			'workspace/didChangeWatchedFiles' {
-				params := json.decode(lsp.DidChangeWatchedFilesParams, request.params)?
+				params := json.decode(lsp.DidChangeWatchedFilesParams, request.params) ?
 				ls.did_change_watched_files(params, mut rw)
 			}
 			'textDocument/codeLens' {
 				// params := json.decode(lsp.CodeLensParams, request.params) or {
 				// 	return w.wrap_error(err)
 				// }
-				w.write(ls.code_lens(lsp.CodeLensParams{}, mut rw) or { return w.wrap_error(err) })
+				w.write(ls.code_lens(lsp.CodeLensParams{}, mut rw) or {
+					return w.wrap_error(err)
+				})
 			}
 			else {
 				return jsonrpc.method_not_found
@@ -273,7 +291,7 @@ pub fn (mut ls Vls) handle_jsonrpc(request &jsonrpc.Request, mut rw jsonrpc.Resp
 				ls.exit(mut rw)
 			}
 			'initialize' {
-				params := json.decode(lsp.InitializeParams, request.params)?
+				params := json.decode(lsp.InitializeParams, request.params) ?
 				w.write(ls.initialize(params, mut rw))
 			}
 			else {
@@ -371,7 +389,7 @@ pub fn monitor_changes(mut ls Vls, mut resp_wr ResponseWriter) {
 // set_features enables or disables a language feature. emits an error if not found
 pub fn (mut ls Vls) set_features(features []string, enable bool) ? {
 	for feature_name in features {
-		feature_val := feature_from_str(feature_name)?
+		feature_val := feature_from_str(feature_name) ?
 		if feature_val !in ls.enabled_features && !enable {
 			return error('feature "$feature_name" is already disabled')
 		} else if feature_val in ls.enabled_features && enable {

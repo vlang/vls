@@ -55,7 +55,7 @@ fn test_implementation() ? {
 		client: new_test_client(ls)
 	}
 	mut writer := t.client.server.writer()
-	test_files := t.initialize()?
+	test_files := t.initialize() ?
 	for file in test_files {
 		test_name := file.file_name
 		err_msg := if test_name !in implementation_results {
@@ -78,8 +78,7 @@ fn test_implementation() ? {
 		if actual := ls.implementation(lsp.TextDocumentPositionParams{
 			text_document: doc_id
 			position: implementation_inputs[test_name]
-		}, mut writer)
-		{
+		}, mut writer) {
 			// compare content
 			assert actual == implementation_results[test_name]
 		} else {

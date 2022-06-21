@@ -3,7 +3,7 @@ import ast
 import test_utils
 import benchmark
 import analyzer.an_test_utils
-import analyzer { Collector, Store, SymbolAnalyzer, new_tree_cursor, setup_builtin }
+import analyzer { Collector, Store, SymbolAnalyzer, setup_builtin, new_tree_cursor }
 
 fn test_symbol_registration() ? {
 	mut p := ast.new_parser()

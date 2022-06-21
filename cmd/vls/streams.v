@@ -22,7 +22,7 @@ fn new_stdio_stream() ?io.ReaderWriter {
 
 struct StdioStream {
 mut:
-	stdin  os.File = os.stdin()
+	stdin os.File = os.stdin()
 	stdout os.File = os.stdout()
 }
 
@@ -33,15 +33,13 @@ fn (stream &StdioStream) stdin_file() &C.FILE {
 }
 
 pub fn (mut stream StdioStream) write(buf []u8) ?int {
-	defer {
-		stream.stdout.flush()
-	}
+	defer { stream.stdout.flush() }
 	return stream.stdout.write(buf)
 }
 
 pub fn (mut stream StdioStream) read(mut buf []u8) ?int {
 	stdin_file := stream.stdin_file()
-	initial_len := get_raw_input(stdin_file, mut buf)?
+	initial_len := get_raw_input(stdin_file, mut buf) ?
 	if buf.len < 1 || !buf.bytestr().starts_with(content_length) {
 		return error('content length is missing')
 	}
@@ -94,7 +92,7 @@ fn new_socket_stream_server(port int, log bool) ?io.ReaderWriter {
 
 	// Open the connection.
 	address := '$base_ip:$port'
-	mut listener := net.listen_tcp(.ip, address)?
+	mut listener := net.listen_tcp(.ip, address) ?
 
 	if log {
 		eprintln(term.yellow('Warning: TCP connection is used primarily for debugging purposes only \n\tand may have performance issues. Use it on your own risk.\n'))
@@ -123,7 +121,7 @@ fn new_socket_stream_server(port int, log bool) ?io.ReaderWriter {
 fn new_socket_stream_client(port int) ?io.ReaderWriter {
 	// Open the connection.
 	address := '$base_ip:$port'
-	mut conn := net.dial_tcp(address)?
+	mut conn := net.dial_tcp(address) ?
 	mut reader := io.new_buffered_reader(reader: conn, cap: 1024 * 1024)
 	conn.set_blocking(true) or {}
 
@@ -139,10 +137,10 @@ fn new_socket_stream_client(port int) ?io.ReaderWriter {
 
 struct SocketStream {
 	log_label string = 'vls'
-	log       bool   = true
+	log       bool = true
 mut:
-	conn   &net.TcpConn       = &net.TcpConn(0)
-	reader &io.BufferedReader = voidptr(0)
+	conn     &net.TcpConn       = &net.TcpConn(0)
+	reader   &io.BufferedReader = voidptr(0)
 pub mut:
 	port  int = 5007
 	debug bool
@@ -157,14 +155,14 @@ pub fn (mut sck SocketStream) write(buf []u8) ?int {
 	}
 
 	// if output.starts_with(content_length) {
-	// sck.conn.write_string(output) or { panic(err) }
+		// sck.conn.write_string(output) or { panic(err) }
 	// } else {
-	// sck.conn.write_string(make_lsp_payload(output)) or { panic(err) }
+		// sck.conn.write_string(make_lsp_payload(output)) or { panic(err) }
 	// }
 	return sck.conn.write(buf)
 }
 
-const newlines = [u8(`\r`), `\n`]
+const newlines = [u8(`\r`),`\n`]
 
 [manualfree]
 pub fn (mut sck SocketStream) read(mut buf []u8) ?int {
@@ -173,7 +171,7 @@ pub fn (mut sck SocketStream) read(mut buf []u8) ?int {
 
 	for {
 		// read header line
-		got_header := sck.reader.read_line()?
+		got_header := sck.reader.read_line() ?
 		buf << got_header.bytes()
 		buf << newlines
 		// $if !test {
@@ -185,7 +183,7 @@ pub fn (mut sck SocketStream) read(mut buf []u8) ?int {
 		} else if got_header.starts_with(content_length) {
 			conlen = got_header.all_after(content_length).int()
 			// read blank line
-			empty := sck.reader.read_line()?
+			empty := sck.reader.read_line() ?
 			buf << empty.bytes()
 			buf << newlines
 			header_len = got_header.len + 4
@@ -197,12 +195,10 @@ pub fn (mut sck SocketStream) read(mut buf []u8) ?int {
 
 	if conlen > 0 {
 		mut rbody := []u8{len: conlen}
-		defer {
-			unsafe { rbody.free() }
-		}
+		defer { unsafe { rbody.free() } }
 
 		for read_data_len := 0; read_data_len != conlen; {
-			read_data_len = sck.reader.read(mut rbody)?
+			read_data_len = sck.reader.read(mut rbody) ?
 		}
 
 		buf << rbody

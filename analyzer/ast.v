@@ -10,8 +10,7 @@ fn within_range(node_range C.TSRange, range C.TSRange) bool {
 
 const excluded_nodes = [v.NodeType.const_declaration, .global_var_declaration]
 
-const included_nodes = [v.NodeType.const_spec, .global_var_spec, .global_var_type_initializer,
-	.block]
+const included_nodes = [v.NodeType.const_spec, .global_var_spec, .global_var_type_initializer, .block]
 
 fn get_nodes_within_range(node ast.Node, range C.TSRange) ?[]ast.Node {
 	child_count := node.named_child_count()
