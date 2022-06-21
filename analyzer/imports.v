@@ -71,7 +71,9 @@ pub fn (mut imp Importer) scan_imports(tree &ast.Tree, src_text []rune) []&Impor
 
 // inject_paths_of_new_imports resolves and injects the path to the Import instance
 pub fn (mut imp Importer) inject_paths_of_new_imports(mut new_imports []&Import, lookup_paths ...string) {
-	mut project := imp.store.dependency_tree.get_node(imp.store.cur_dir) or { imp.store.dependency_tree.add(imp.store.cur_dir) }
+	mut project := imp.store.dependency_tree.get_node(imp.store.cur_dir) or {
+		imp.store.dependency_tree.add(imp.store.cur_dir)
+	}
 
 	// Custom iterator for looping over paths without
 	// allocating a new array with concatenated items

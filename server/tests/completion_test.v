@@ -432,7 +432,7 @@ fn test_completion() ? {
 	}
 
 	mut writer := t.client.server.writer()
-	test_files := t.initialize() ?
+	test_files := t.initialize()?
 	for file in test_files {
 		test_name := file.file_name
 		err_msg := if test_name !in completion_results {
@@ -456,7 +456,7 @@ fn test_completion() ? {
 		actual := ls.completion(lsp.CompletionParams{
 			...completion_inputs[test_name]
 			text_document: doc_id
-		}, mut writer) ?
+		}, mut writer)?
 
 		// compare content
 		expected := completion_results[test_name]

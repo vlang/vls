@@ -4,11 +4,11 @@ import tree_sitter_v as v
 import ast
 
 // any node that is separated by a comma or other symbol
-const list_node_types = [v.NodeType.expression_list, .identifier_list, .argument_list, 
-	.array, .import_symbols_list, .type_list]
+const list_node_types = [v.NodeType.expression_list, .identifier_list, .argument_list, .array,
+	.import_symbols_list, .type_list]
 
-const other_node_types = [v.NodeType.if_expression, .for_statement, .return_statement, .for_in_operator,
-	.binary_expression, .unary_expression]
+const other_node_types = [v.NodeType.if_expression, .for_statement, .return_statement,
+	.for_in_operator, .binary_expression, .unary_expression]
 
 fn traverse_node(root_node ast.Node, offset u32) ast.Node {
 	// TODO: return root_node for now. function must return ?ast.Node
@@ -114,8 +114,8 @@ fn closest_named_child(starting_node ast.Node, offset u32) ast.Node {
 	return selected_node
 }
 
-const other_symbol_node_types = [v.NodeType.assignment_statement, .call_expression, .selector_expression,
-	.index_expression, .slice_expression, .type_initializer, .module_clause]
+const other_symbol_node_types = [v.NodeType.assignment_statement, .call_expression,
+	.selector_expression, .index_expression, .slice_expression, .type_initializer, .module_clause]
 
 // TODO: better naming
 // closest_symbol_node_parent traverse back from child
@@ -128,8 +128,7 @@ fn closest_symbol_node_parent(child_node ast.Node) ast.Node {
 		return child_node
 	}
 
-	if parent_type_name.is_declaration()
-		|| parent_type_name in server.other_symbol_node_types {
+	if parent_type_name.is_declaration() || parent_type_name in server.other_symbol_node_types {
 		return parent_node
 	}
 

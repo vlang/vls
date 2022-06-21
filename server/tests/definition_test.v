@@ -388,7 +388,7 @@ fn test_definition() ? {
 	}
 
 	mut writer := t.client.server.writer()
-	test_files := t.initialize() ?
+	test_files := t.initialize()?
 	for file in test_files {
 		test_name := file.file_name
 		err_msg := if test_name !in definition_results {
@@ -412,7 +412,7 @@ fn test_definition() ? {
 		actual := ls.definition(lsp.TextDocumentPositionParams{
 			text_document: doc_id
 			position: definition_inputs[test_name]
-		}, mut writer) ?
+		}, mut writer)?
 
 		// compare content
 		if test_name in definition_should_return_null {

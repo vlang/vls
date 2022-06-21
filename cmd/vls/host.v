@@ -8,7 +8,9 @@ import strings
 import io
 
 const max_stdio_logging_count = 15
+
 const start_template_marker = '<!-- If you have a report file, copy and replace the entire contents of the file here. -->\n'
+
 const bug_issue_template = $embed_file('../../.github/ISSUE_TEMPLATE/bug_report.md').to_string().all_after_last(start_template_marker)
 
 struct Logger {
@@ -100,7 +102,8 @@ fn (mut host VlsHost) listen() {
 	time.sleep(100 * time.millisecond)
 	host.client = new_socket_stream_client(host.client_port) or { panic(err) }
 	if host.generate_report {
-		host.writer.show_message('VLS: --generate-report has been enabled. The report file will be generated upon exit.', .info)
+		host.writer.show_message('VLS: --generate-report has been enabled. The report file will be generated upon exit.',
+			.info)
 	}
 
 	go host.listen_for_errors()
@@ -121,7 +124,6 @@ fn (mut host VlsHost) receive_data() {
 		}
 	}
 }
-
 
 fn (mut host VlsHost) listen_for_input() {
 	mut buf := strings.new_builder(1024 * 1024)
@@ -169,7 +171,8 @@ fn (mut host VlsHost) handle_exit() {
 			panic(err)
 		}
 
-		host.writer.show_message('VLS has encountered an error. The error report is saved in $report_path', .error)
+		host.writer.show_message('VLS has encountered an error. The error report is saved in $report_path',
+			.error)
 	}
 
 	ecode := if host.child.code > 0 { 1 } else { 0 }
@@ -184,13 +187,13 @@ fn (mut host VlsHost) generate_report() ?string {
 
 	report_file_name := 'vls_report_' + time.utc().unix.str() + '.md'
 	report_file_path := os.join_path(reports_dir_path, report_file_name)
-	mut report_file := os.create(report_file_path) ?
+	mut report_file := os.create(report_file_path)?
 	defer {
 		report_file.close()
 	}
 
 	// Get system info first
-	mut vdoctor := launch_v_tool('doctor') ?
+	mut vdoctor := launch_v_tool('doctor')?
 	defer {
 		vdoctor.close()
 	}
@@ -215,9 +218,10 @@ fn (mut host VlsHost) generate_report() ?string {
 	final_output := bug_issue_template
 		.replace("Paste the output of 'v doctor' here", vdoctor_info)
 		.replace("Paste the output of 'vls --version' here", 'vls version: $server.meta.version\nvls server arguments: ${host.child.args.join(' ')}')
-		.replace('<!-- What is the actual output displayed in the console/editor? -->', final_err_out)
+		.replace('<!-- What is the actual output displayed in the console/editor? -->',
+			final_err_out)
 		.replace('<!-- If you have a copy vls.log, you can drag them here. -->', lsp_logs_section)
 
-	report_file.writeln(final_output) ?
+	report_file.writeln(final_output)?
 	return report_file_path
 }

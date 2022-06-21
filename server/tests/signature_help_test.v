@@ -107,7 +107,7 @@ fn test_signature_help() ? {
 		client: new_test_client(server.new())
 	}
 
-	test_files := t.initialize() ?
+	test_files := t.initialize()?
 	for file in test_files {
 		test_name := file.file_name
 		err_msg := if test_name !in signature_help_results {
@@ -127,10 +127,11 @@ fn test_signature_help() ? {
 			continue
 		}
 		// initiate signature_help request
-		actual := t.client.send<lsp.SignatureHelpParams, lsp.SignatureHelp>('textDocument/signatureHelp', lsp.SignatureHelpParams{
+		actual := t.client.send<lsp.SignatureHelpParams, lsp.SignatureHelp>('textDocument/signatureHelp',
+			lsp.SignatureHelpParams{
 			...signature_help_inputs[test_name]
 			text_document: doc_id
-		}) ?
+		})?
 		// compare content
 		assert actual == signature_help_results[test_name]
 		// Delete document

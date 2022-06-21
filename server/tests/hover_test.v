@@ -223,7 +223,7 @@ fn test_hover() ? {
 		client: new_test_client(ls)
 	}
 	mut writer := t.client.server.writer()
-	test_files := t.initialize() ?
+	test_files := t.initialize()?
 	for file in test_files {
 		test_name := file.file_name
 		err_msg := if test_name !in hover_results {
@@ -246,7 +246,8 @@ fn test_hover() ? {
 		if actual := ls.hover(lsp.HoverParams{
 			...hover_inputs[test_name]
 			text_document: doc_id
-		}, mut writer) {
+		}, mut writer)
+		{
 			// compare content
 			assert actual == hover_results[test_name]
 		} else {

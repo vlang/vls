@@ -7,7 +7,7 @@ import json
 
 fn test_formatting() ? {
 	mut ls := server.new()
-	ls.set_features(['v_diagnostics'], false) ?
+	ls.set_features(['v_diagnostics'], false)?
 
 	mut t := &test_utils.Tester{
 		test_files_dir: test_utils.get_test_files_path(@FILE)
@@ -15,7 +15,7 @@ fn test_formatting() ? {
 		client: new_test_client(ls)
 	}
 	mut writer := t.client.server.writer()
-	test_files := t.initialize() ?
+	test_files := t.initialize()?
 	for file in test_files {
 		exp_file_path := file.file_path.replace('.vv', '.out')
 		content_lines := file.contents.split_into_lines()
@@ -41,7 +41,8 @@ fn test_formatting() ? {
 		// initiate formatting request
 		if actual := ls.formatting(lsp.DocumentFormattingParams{
 			text_document: doc_id
-		}, mut writer) {
+		}, mut writer)
+		{
 			// compare content
 			assert json.encode(actual) == json.encode([
 				lsp.TextEdit{
