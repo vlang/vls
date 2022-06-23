@@ -4,6 +4,7 @@ import test_utils
 import benchmark
 import analyzer { Collector, SemanticAnalyzer, Store, SymbolAnalyzer, new_tree_cursor, setup_builtin }
 import analyzer.an_test_utils
+import term
 
 fn test_semantic_analysis() ? {
 	mut p := ast.new_parser()
@@ -30,7 +31,7 @@ fn test_semantic_analysis() ? {
 	test_files_dir := test_utils.get_test_files_path(@FILE)
 	test_files := test_utils.load_test_file_paths(test_files_dir, 'semantic_analyzer') or {
 		bench.fail()
-		eprintln(bench.step_message_fail(err.msg()))
+		println(bench.step_message_fail(err.msg()))
 		return err
 	}
 
@@ -42,7 +43,7 @@ fn test_semantic_analysis() ? {
 		test_name := os.base(test_file_path)
 		content := os.read_file(test_file_path) or {
 			bench.fail()
-			eprintln(bench.step_message_fail('file $test_file_path is missing'))
+			println(bench.step_message_fail('file $test_file_path is missing'))
 			continue
 		}
 
@@ -55,7 +56,7 @@ fn test_semantic_analysis() ? {
 
 		if err_msg.len != 0 || src.len == 0 {
 			bench.fail()
-			eprintln(bench.step_message_fail(err_msg))
+			println(bench.step_message_fail(err_msg))
 			continue
 		}
 
@@ -71,9 +72,19 @@ fn test_semantic_analysis() ? {
 		symbols := sym_analyzer.analyze_from_cursor(mut cursor)
 		semantic_analyzer.analyze_from_cursor(mut cursor)
 		result := an_test_utils.sexpr_str_reporter(reporter)
-
-		assert result == test_utils.newlines_to_spaces(expected)
-		println(bench.step_message_ok(test_name))
+		expected_trimmed := test_utils.newlines_to_spaces(expected)
+		term.clear_previous_line()
+		if result != expected_trimmed {
+			if diff_cmd.len != 0 {
+				bench.fail()
+				println(bench.step_message_fail(test_name))
+				println(diff.color_compare_strings(diff_cmd, 'vls_semantic_analyzer_test', expected_trimmed, result))
+			} else {
+				assert result == expected_trimmed
+			}
+		} else {
+			println(bench.step_message_ok(test_name))
+		}
 
 		unsafe {
 			sym_analyzer.src_text.free()

@@ -4,8 +4,11 @@ import test_utils
 import benchmark
 import analyzer.an_test_utils
 import analyzer { Collector, Store, SymbolAnalyzer, setup_builtin, new_tree_cursor }
+import v.util.diff
+import term
 
 fn test_symbol_registration() ? {
+	diff_cmd := diff.find_working_diff_command() or { '' }
 	mut p := ast.new_parser()
 	mut bench := benchmark.new_benchmark()
 	vlib_path := os.join_path(os.dir(os.getenv('VEXE')), 'vlib')
@@ -25,7 +28,7 @@ fn test_symbol_registration() ? {
 	test_files_dir := test_utils.get_test_files_path(@FILE)
 	test_files := test_utils.load_test_file_paths(test_files_dir, 'symbol_registration') or {
 		bench.fail()
-		eprintln(bench.step_message_fail(err.msg()))
+		println(bench.step_message_fail(err.msg()))
 		assert false
 		return
 	}
@@ -38,7 +41,7 @@ fn test_symbol_registration() ? {
 		test_name := os.base(test_file_path)
 		content := os.read_file(test_file_path) or {
 			bench.fail()
-			eprintln(bench.step_message_fail('file $test_file_path is missing'))
+			println(bench.step_message_fail('file $test_file_path is missing'))
 			continue
 		}
 
@@ -61,8 +64,19 @@ fn test_symbol_registration() ? {
 		mut cursor := new_tree_cursor(tree.root_node())
 		symbols := sym_analyzer.analyze_from_cursor(mut cursor)
 		result := an_test_utils.sexpr_str_symbol_array(symbols)
-		assert test_utils.newlines_to_spaces(expected) == result
-		println(bench.step_message_ok(test_name))
+		expected_trimmed := test_utils.newlines_to_spaces(expected)
+		term.clear_previous_line()
+		if result != expected_trimmed {
+			if diff_cmd.len != 0 {
+				bench.fail()
+				println(bench.step_message_fail(test_name))
+				println(diff.color_compare_strings(diff_cmd, 'vls_symbol_registration_test', expected_trimmed, result))
+			} else {
+				assert result == expected_trimmed
+			}
+		} else {
+			println(bench.step_message_ok(test_name))
+		}
 
 		unsafe {
 			sym_analyzer.src_text.free()
