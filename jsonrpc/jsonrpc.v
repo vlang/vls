@@ -97,9 +97,9 @@ fn encode_response<T>(resp Response<T>, mut writer io.Writer) {
 		writer.write(err.bytes()) or {}
 	} else {
 		writer.write(result_field_in_u8) or {}
-		if typeof(resp.result).name == 'jsonrpc.Null' {
+		$if T is Null {
 			writer.write(null_in_u8) or {}
-		} else {
+		} $else {
 			res := json.encode(resp.result)
 			writer.write(res.bytes()) or {}
 		}
@@ -134,7 +134,7 @@ pub fn (notif NotificationMessage<T>) json() string {
 
 fn encode_notification<T>(notif jsonrpc.NotificationMessage<T>, mut writer io.Writer) {
 	writer.write('{"jsonrpc":"$jsonrpc.version","method":"$notif.method","params":'.bytes()) or {}
-	$if notif.params is Null {
+	$if T is Null {
 		writer.write(null_in_u8) or {}
 	} $else {
 		res := json.encode(notif.params)

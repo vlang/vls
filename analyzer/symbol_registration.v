@@ -102,7 +102,7 @@ fn (mut sr SymbolAnalyzer) const_decl(const_node ast.Node) ?[]&Symbol {
 			continue
 		}
 
-		mut return_sym := void_sym
+		mut return_sym := unsafe { void_sym }
 		if value_node := spec_node.child_by_field_name('value') {
 			return_syms := sr.expression(value_node) ?
 			return_sym = return_syms[0]
@@ -539,7 +539,7 @@ fn (mut sr SymbolAnalyzer) fn_literal(fn_node ast.Node) ?&Symbol {
 
 	mut scope := sr.get_scope(body_node) or { &ScopeTree(0) }
 	mut params := extract_parameter_list(params_list_node, mut sr.store, sr.src_text)
-	mut return_sym := void_sym
+	mut return_sym := unsafe { void_sym }
 	if result_node := fn_node.child_by_field_name('result') {
 		return_sym = sr.store.find_symbol_by_type_node(result_node, sr.src_text) or { void_sym }
 	}

@@ -53,7 +53,7 @@ pub fn (mut tc TestClient) send<T,U>(method string, params T) ?U {
 	tc.stream.send(req)
 	tc.server.respond() ?
 	raw_json_content := tc.stream.response_text(req.id)
-	if raw_json_content.len == 0 {
+	if raw_json_content.len == 0 || raw_json_content == 'null' {
 		return none
 	}
 	return json.decode(U, raw_json_content)
