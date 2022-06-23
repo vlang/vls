@@ -14,7 +14,7 @@ pub fn (mut ls Vls) formatting(params lsp.DocumentFormattingParams, mut wr Respo
 	uri := params.text_document.uri
 	source := ls.files[uri].source
 	tree_range := ls.files[uri].tree.root_node().range()
-	if source.len == 0 {
+	if source.len() == 0 {
 		return none
 	}
 
@@ -168,7 +168,7 @@ fn (mut ls Vls) signature_help(params lsp.SignatureHelpParams, mut wr ResponseWr
 	}
 
 	ls.store.set_active_file_path(uri.path(), file.version)
-	sym := ls.store.infer_symbol_from_node(node, file.source) or {
+	sym := ls.store.infer_symbol_from_node(node, file.source.runes()) or {
 		return none
 	}
 
@@ -775,7 +775,7 @@ pub fn (mut ls Vls) completion(params lsp.CompletionParams, mut wr ResponseWrite
 	// purposes.
 	mut builder := CompletionBuilder{
 		store: &ls.store
-		src: file.source
+		src: file.source.runes()
 		parent_node: root_node
 	}
 
@@ -785,14 +785,14 @@ pub fn (mut ls Vls) completion(params lsp.CompletionParams, mut wr ResponseWrite
 	// or near the cursor. In that case, the context data would be modified in
 	// order to satisfy those specific cases.
 	if ctx.trigger_kind == .invoked && offset - 1 >= 0 && root_node.named_child_count() > 0
-		&& file.source.len > 3 {
+		&& file.source.len() > 3 {
 		mut prev_idx := offset
 		mut ctx_changed := false
-		if file.source[offset - 1] in [`.`, `:`, `=`, `{`, `,`, `(`] {
+		if file.source.at(offset - 1) in [`.`, `:`, `=`, `{`, `,`, `(`] {
 			prev_idx--
 			ctx_changed = true
-		} else if file.source[offset - 1] == ` ` && offset - 2 >= 0
-			&& file.source[offset - 2] !in [file.source[offset - 1], `.`] {
+		} else if file.source.at(offset - 1) == ` ` && offset - 2 >= 0
+			&& file.source.at(offset - 2) !in [file.source.at(offset - 1), `.`] {
 			prev_idx -= 2
 			offset -= 2
 			ctx_changed = true
@@ -801,7 +801,7 @@ pub fn (mut ls Vls) completion(params lsp.CompletionParams, mut wr ResponseWrite
 		if ctx_changed {
 			ctx = lsp.CompletionContext{
 				trigger_kind: .trigger_character
-				trigger_character: file.source[prev_idx].str()
+				trigger_character: file.source.at(prev_idx).str()
 			}
 		}
 	}
@@ -814,17 +814,17 @@ pub fn (mut ls Vls) completion(params lsp.CompletionParams, mut wr ResponseWrite
 		// NOTE: DO NOT REMOVE YET ~ @ned
 		// The offset is adjusted and the suggestions for local and global symbols are
 		// disabled if a period/dot is detected and the character on the left is not a space.
-		if ctx.trigger_character == '.' && (offset - 1 >= 0 && file.source[offset - 1] != ` `) {
+		if ctx.trigger_character == '.' && (offset - 1 >= 0 && file.source.at(offset - 1) != ` `) {
 			builder.show_global = false
 			builder.show_local = false
 
 			offset--
-			if file.source[offset - 1] !in [`)`, `]`] {
+			if file.source.at(offset - 1) !in [`)`, `]`] {
 				offset--
 			}
 		}
 
-		for offset > file.source.len || (offset < file.source.len && file.source[offset] == ` `) {
+		for offset > file.source.len() || (offset < file.source.len() && file.source.at(offset) == ` `) {
 			offset--
 		}
 
@@ -854,7 +854,7 @@ pub fn (mut ls Vls) completion(params lsp.CompletionParams, mut wr ResponseWrite
 		builder.parent_node = parent_node
 		builder.build_suggestions(node, offset)
 	} else if ctx.trigger_kind == .invoked
-		&& (root_node.named_child_count() == 0 || file.source.len <= 3) {
+		&& (root_node.named_child_count() == 0 || file.source.len() <= 3) {
 		// When a V file is empty, a list of `module $name` suggsestions will be displayed.
 		builder.build_module_name_suggestions()
 	} else {
@@ -878,7 +878,7 @@ pub fn (mut ls Vls) hover(params lsp.HoverParams, mut wr ResponseWriter) ?lsp.Ho
 	offset := file.get_offset(pos.line, pos.character)
 	node := traverse_node(file.tree.root_node(), u32(offset))
 	ls.store.set_active_file_path(uri.path(), file.version)
-	return get_hover_data(mut ls.store, node, uri, file.source, u32(offset))
+	return get_hover_data(mut ls.store, node, uri, file.source.runes(), u32(offset))
 }
 
 fn get_hover_data(mut store analyzer.Store, node ast.Node, uri lsp.DocumentUri, source []rune, offset u32) ?lsp.Hover {
@@ -1046,7 +1046,7 @@ pub fn (mut ls Vls) definition(params lsp.TextDocumentPositionParams, mut wr Res
 	uri := params.text_document.uri
 	pos := params.position
 	file := ls.files[uri] or { return none }
-	source := file.source
+	source := file.source.runes()
 	offset := compute_offset(source, pos.line, pos.character)
 	mut node := traverse_node(file.tree.root_node(), u32(offset))
 	mut original_range := node.range()
@@ -1121,7 +1121,7 @@ pub fn (mut ls Vls) implementation(params lsp.TextDocumentPositionParams, mut wr
 	uri := params.text_document.uri
 	pos := params.position
 	file := ls.files[uri] or { return none }
-	source := file.source
+	source := file.source.runes()
 	offset := file.get_offset(pos.line, pos.character)
 	mut node := traverse_node(file.tree.root_node(), u32(offset))
 	mut original_range := node.range()
