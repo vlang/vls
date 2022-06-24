@@ -47,7 +47,7 @@ pub fn (r &Rope) runes() []rune {
 
 // at is v equiv of rope.Index(idx)
 pub fn (r &Rope) at(idx int) rune {
-	if idx < 1 || idx > r.length {
+	if idx < 0 || idx >= r.length {
 		panic('index out of bounds $idx/$r.length')
 	}
 
