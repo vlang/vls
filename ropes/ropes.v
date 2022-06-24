@@ -150,6 +150,10 @@ pub fn (r &Rope) report(idx int, len int) []rune {
 }
 
 fn (r &Rope) internal_report(idx int, len int, mut res []rune) {
+	if isnil(r) {
+		return
+	}
+
 	if idx > r.weight {
 		r.right.internal_report(idx - r.weight, len, mut res)
 	} else if r.weight >= idx + len - 1 {
