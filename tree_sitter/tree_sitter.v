@@ -212,14 +212,13 @@ pub fn check_tsnode(node C.TSNode) ? {
 	}
 }
 
-pub fn (node C.TSNode) code(text []rune) string {
+pub fn (node C.TSNode) text(text SourceText) string {
 	start_index := node.start_byte()
 	end_index := node.end_byte()
-	if start_index >= end_index || start_index >= u32(text.len) || end_index > u32(text.len) {
+	if start_index >= end_index || start_index >= u32(text.len()) || end_index > u32(text.len()) {
 		return ''
 	}
-
-	return text[start_index..end_index].string()
+	return text.substr(int(start_index), int(end_index))
 }
 
 [inline]
@@ -590,8 +589,8 @@ pub:
 	type_name    T                  [required]
 }
 
-pub fn (node Node<T>) code(text []rune) string {
-	return node.raw_node.code(text)
+pub fn (node Node<T>) text(text SourceText) string {
+	return node.raw_node.text(text)
 }
 
 [inline]
@@ -796,4 +795,10 @@ pub fn (mut cursor TreeCursor<T>) next() bool {
 [inline]
 pub fn (mut cursor TreeCursor<T>) to_first_child() bool {
 	return cursor.raw_cursor.to_first_child()
+}
+
+pub interface SourceText {
+	len() int
+	at(idx int) rune
+	substr(start int, end int) string
 }
