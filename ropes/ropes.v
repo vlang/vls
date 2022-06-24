@@ -52,7 +52,7 @@ pub fn (r &Rope) at(idx int) rune {
 	}
 
 	if r.is_leaf() {
-		return r.value[idx - 1]
+		return r.value[idx]
 	} else if idx > r.weight {
 		return r.right.at(idx - r.weight)
 	} else {
