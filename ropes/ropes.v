@@ -142,7 +142,7 @@ pub fn (r &Rope) delete(idx int, len int) &Rope {
 
 pub fn (r &Rope) report(idx int, len int) []rune {
 	if isnil(r) {
-		return []
+		return []rune{len: 0}
 	}
 	mut res := []rune{len: len}
 	r.internal_report(idx, len, mut res)
