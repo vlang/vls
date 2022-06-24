@@ -2,7 +2,7 @@ import os
 import ast
 import test_utils
 import benchmark
-import analyzer { Collector, SemanticAnalyzer, Store, SymbolAnalyzer, new_tree_cursor, setup_builtin }
+import analyzer { Collector, SemanticAnalyzer, Store, SymbolAnalyzer, new_tree_cursor, setup_builtin, Runes }
 import analyzer.an_test_utils
 import v.util.diff
 import term
@@ -64,7 +64,7 @@ fn test_semantic_analysis() ? {
 
 		println(bench.step_message('Testing $test_name'))
 		tree := p.parse_string(source: src)
-		src_runes := src.runes()
+		src_runes := Runes(src.runes())
 		mut cursor := new_tree_cursor(tree.root_node())
 		store.import_modules_from_tree(tree, src_runes, vlib_path)
 
@@ -86,10 +86,6 @@ fn test_semantic_analysis() ? {
 			}
 		} else {
 			println(bench.step_message_ok(test_name))
-		}
-
-		unsafe {
-			sym_analyzer.src_text.free()
 		}
 
 		reporter.clear()

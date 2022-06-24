@@ -13,11 +13,11 @@ mut:
 }
 
 fn (file &File) get_offset(line int, col int) int {
-	return compute_offset(file.source.runes(), line, col)
+	return compute_offset(file.source, line, col)
 }
 
 fn (file &File) get_position(offset int) lsp.Position {
-	return compute_position(file.source.runes(), offset)
+	return compute_position(file.source, offset)
 }
 
 fn (file_map map[string]File) count(dir string) int {

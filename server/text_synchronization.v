@@ -8,15 +8,14 @@ import ropes
 fn (mut ls Vls) analyze_file(file File) {
 	ls.reporter.clear(file.uri)
 	file_path := file.uri.path()
-	src := file.source.runes()
 	ls.store.set_active_file_path(file_path, file.version)
-	ls.store.import_modules_from_tree(file.tree, src, os.join_path(file.uri.dir_path(),
+	ls.store.import_modules_from_tree(file.tree, file.source, os.join_path(file.uri.dir_path(),
 		'modules'), ls.root_uri.path(), os.dir(os.dir(file_path)))
 
-	ls.store.register_symbols_from_tree(file.tree, src, false)
+	ls.store.register_symbols_from_tree(file.tree, file.source, false)
 	ls.store.cleanup_imports()
 	if Feature.analyzer_diagnostics in ls.enabled_features {
-		ls.store.analyze(file.tree, src)
+		ls.store.analyze(file.tree, file.source)
 	}
 	ls.reporter.publish(mut ls.writer, file.uri)
 }
@@ -103,13 +102,12 @@ pub fn (mut ls Vls) did_change(params lsp.DidChangeTextDocumentParams, mut wr Re
 
 	for content_change in params.content_changes {
 		change_text := content_change.text
-		new_src_runes := new_src.runes()
-		start_idx := compute_offset(new_src_runes, content_change.range.start.line, content_change.range.start.character)
-		old_end_idx := compute_offset(new_src_runes, content_change.range.end.line, content_change.range.end.character)
+		start_idx := compute_offset(new_src, content_change.range.start.line, content_change.range.start.character)
+		old_end_idx := compute_offset(new_src, content_change.range.end.line, content_change.range.end.character)
 		new_end_idx := start_idx + change_text.len
 		start_pos := content_change.range.start
 		old_end_pos := content_change.range.end
-		new_end_pos := compute_position(new_src_runes, new_end_idx)
+		new_end_pos := compute_position(new_src, new_end_idx)
 
 		old_len := new_src.len()
 		new_len := old_len - (old_end_idx - start_idx) + change_text.len
@@ -117,7 +115,7 @@ pub fn (mut ls Vls) did_change(params lsp.DidChangeTextDocumentParams, mut wr Re
 
 		// remove immediately the symbol
 		if change_text.len == 0 && diff < 0 {
-			ls.store.delete_symbol_at_node(ls.files[uri].tree.root_node(), new_src_runes,
+			ls.store.delete_symbol_at_node(ls.files[uri].tree.root_node(), new_src,
 				start_point: lsp_pos_to_tspoint(start_pos)
 				end_point: lsp_pos_to_tspoint(old_end_pos)
 				start_byte: u32(start_idx)

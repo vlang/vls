@@ -6,6 +6,7 @@ import analyzer
 import strings
 import math
 import ast
+import tree_sitter
 
 const temp_formatting_file_path = os.join_path(os.temp_dir(), 'vls_temp_formatting.v')
 
@@ -168,7 +169,7 @@ fn (mut ls Vls) signature_help(params lsp.SignatureHelpParams, mut wr ResponseWr
 	}
 
 	ls.store.set_active_file_path(uri.path(), file.version)
-	sym := ls.store.infer_symbol_from_node(node, file.source.runes()) or {
+	sym := ls.store.infer_symbol_from_node(node, file.source) or {
 		return none
 	}
 
@@ -229,7 +230,7 @@ fn (mut ls Vls) signature_help(params lsp.SignatureHelpParams, mut wr ResponseWr
 struct CompletionBuilder {
 mut:
 	store              &analyzer.Store
-	src                []rune
+	src                tree_sitter.SourceText
 	offset             int
 	parent_node        ast.Node
 	show_global        bool // for displaying global (project) symbols
@@ -247,7 +248,7 @@ fn (mut builder CompletionBuilder) add(item lsp.CompletionItem) {
 }
 
 fn (builder CompletionBuilder) is_triggered(node ast.Node, chr string) bool {
-	return node.next_sibling() or { return false }.code(builder.src) == chr
+	return node.next_sibling() or { return false }.text(builder.src) == chr
 		|| builder.ctx.trigger_character == chr
 }
 
@@ -349,7 +350,7 @@ fn (mut builder CompletionBuilder) build_suggestions_from_list(node ast.Node) {
 		.import_symbols_list {
 			import_node := closest_symbol_node_parent(node)
 			import_path_node := import_node.child_by_field_name('path') or { return }
-			import_path := import_path_node.code(builder.src)
+			import_path := import_path_node.text(builder.src)
 			builder.build_suggestions_from_module(import_path)
 		}
 		.type_list {
@@ -377,7 +378,7 @@ fn (mut builder CompletionBuilder) build_suggestions_from_expr(node ast.Node) {
 			builder.show_global = false
 			builder.show_local = false
 
-			text := node.code(builder.src)
+			text := node.text(builder.src)
 
 			if builder.is_selector(node) {
 				mut selected_node := node
@@ -775,7 +776,7 @@ pub fn (mut ls Vls) completion(params lsp.CompletionParams, mut wr ResponseWrite
 	// purposes.
 	mut builder := CompletionBuilder{
 		store: &ls.store
-		src: file.source.runes()
+		src: file.source
 		parent_node: root_node
 	}
 
@@ -878,10 +879,10 @@ pub fn (mut ls Vls) hover(params lsp.HoverParams, mut wr ResponseWriter) ?lsp.Ho
 	offset := file.get_offset(pos.line, pos.character)
 	node := traverse_node(file.tree.root_node(), u32(offset))
 	ls.store.set_active_file_path(uri.path(), file.version)
-	return get_hover_data(mut ls.store, node, uri, file.source.runes(), u32(offset))
+	return get_hover_data(mut ls.store, node, uri, file.source, u32(offset))
 }
 
-fn get_hover_data(mut store analyzer.Store, node ast.Node, uri lsp.DocumentUri, source []rune, offset u32) ?lsp.Hover {
+fn get_hover_data(mut store analyzer.Store, node ast.Node, uri lsp.DocumentUri, source tree_sitter.SourceText, offset u32) ?lsp.Hover {
 	node_type_name := node.type_name
 	if node.is_null() || node_type_name == .comment {
 		return none
@@ -890,10 +891,10 @@ fn get_hover_data(mut store analyzer.Store, node ast.Node, uri lsp.DocumentUri, 
 	mut original_range := node.range()
 	parent_node := node.parent() or { node }
 
-	// eprintln('$node_type_name | ${node.code(source)}')
+	// eprintln('$node_type_name | ${node.text(source)}')
 	if node_type_name == .module_clause {
 		return lsp.Hover{
-			contents: lsp.v_marked_string(node.code(source))
+			contents: lsp.v_marked_string(node.text(source))
 			range: tsrange_to_lsp_range(node.range())
 		}
 	} else if node_type_name == .import_path {
@@ -923,7 +924,7 @@ fn get_hover_data(mut store analyzer.Store, node ast.Node, uri lsp.DocumentUri, 
 		sym = store.infer_symbol_from_node(closest_parent, source) or { analyzer.void_sym }
 	}
 
-	// eprintln('$node_type_name | ${node.code(source)} | $sym')
+	// eprintln('$node_type_name | ${node.text(source)} | $sym')
 
 	// Send null if range has zero-start and end points
 	if sym.range.start_point.row == 0 && sym.range.start_point.column == 0
@@ -1046,7 +1047,7 @@ pub fn (mut ls Vls) definition(params lsp.TextDocumentPositionParams, mut wr Res
 	uri := params.text_document.uri
 	pos := params.position
 	file := ls.files[uri] or { return none }
-	source := file.source.runes()
+	source := file.source
 	offset := compute_offset(source, pos.line, pos.character)
 	mut node := traverse_node(file.tree.root_node(), u32(offset))
 	mut original_range := node.range()
@@ -1121,7 +1122,7 @@ pub fn (mut ls Vls) implementation(params lsp.TextDocumentPositionParams, mut wr
 	uri := params.text_document.uri
 	pos := params.position
 	file := ls.files[uri] or { return none }
-	source := file.source.runes()
+	source := file.source
 	offset := file.get_offset(pos.line, pos.character)
 	mut node := traverse_node(file.tree.root_node(), u32(offset))
 	mut original_range := node.range()
@@ -1141,7 +1142,7 @@ pub fn (mut ls Vls) implementation(params lsp.TextDocumentPositionParams, mut wr
 	mut got_sym := unsafe { analyzer.void_sym }
 	if parent_node := node.parent() {
 		if parent_node.type_name == .interface_declaration {
-			got_sym = ls.store.symbols[ls.store.cur_dir].get(node.code(source)) or { got_sym }
+			got_sym = ls.store.symbols[ls.store.cur_dir].get(node.text(source)) or { got_sym }
 		} else {
 			got_sym = ls.store.infer_value_type_from_node(node, source)
 		}

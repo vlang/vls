@@ -3,6 +3,7 @@ import server
 import test_utils
 import benchmark
 import lsp
+import ropes
 
 // import tree_sitter
 
@@ -50,7 +51,7 @@ fn test_compute_offset() {
 		}
 		input := compute_offset_inputs[test_name]
 		expected := compute_offset_results[test_name]
-		result := server.compute_offset(content.runes(), input[0], input[1])
+		result := server.compute_offset(ropes.new(content), input[0], input[1])
 		if result != expected {
 			println('content (for debugging):' + content[..result].str())
 		}
@@ -107,7 +108,7 @@ fn test_compute_position() {
 		}
 		input := compute_position_inputs[test_name]
 		expected := compute_position_results[test_name]
-		result := server.compute_position(content.runes(), input)
+		result := server.compute_position(ropes.new(content), input)
 		assert result == expected
 		bench.ok()
 		println(bench.step_message_ok(test_name))
