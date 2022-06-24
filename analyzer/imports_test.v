@@ -10,7 +10,7 @@ const (
 	import os
 	import env
 	'
-	sample_content_bytes = sample_content.runes()
+	sample_content_bytes = analyzer.Runes(sample_content.runes())
 	vexe_path            = os.dir(os.getenv('VEXE'))
 	// not a real path
 	file_path            = '@TEST/hello.v'
@@ -101,7 +101,7 @@ fn test_import_modules_with_edits() ? {
 		default_import_paths: analyzer.test_lookup_paths
 	}
 	store.set_active_file_path(analyzer.file_path, 1)
-	store.import_modules_from_tree(tree, sample_content2.runes())
+	store.import_modules_from_tree(tree, Runes(sample_content2.runes()))
 	store.cleanup_imports()
 
 	assert store.imports[store.cur_dir].len == 1
@@ -130,7 +130,7 @@ fn test_import_modules_with_edits() ? {
 	)
 
 	new_tree := p.parse_string(source: new_content, tree: tree.raw_tree)
-	store.import_modules_from_tree(new_tree, new_content.runes())
+	store.import_modules_from_tree(new_tree, analyzer.Runes(new_content.runes()))
 	store.cleanup_imports()
 
 	assert store.imports[store.cur_dir].len == 0
@@ -148,7 +148,7 @@ fn test_import_modules_with_edits() ? {
 	)
 
 	new_new_tree := p.parse_string(source: sample_content2, tree: new_tree.raw_tree)
-	store.import_modules_from_tree(new_new_tree, sample_content2.runes())
+	store.import_modules_from_tree(new_new_tree, analyzer.Runes(sample_content2.runes()))
 	store.cleanup_imports()
 
 	assert store.imports[store.cur_dir].len == 1
