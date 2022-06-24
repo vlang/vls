@@ -174,14 +174,15 @@ fn (r &Rope) internal_report(idx int, len int, mut res []rune) {
 	}
 }
 
-pub fn (r &Rope) substr(idx int, len int) &Rope {
-	if idx < 1 {
+pub fn (r &Rope) substr(start int, end int) string {
+	len := end - start
+	if start < 1 {
 		r.report(1, len)
 	}
-	if idx + len - 1 > r.length {
-		r.report(idx, r.length - idx + 1)
+	if start + len - 1 > r.length {
+		r.report(start, r.length - start + 1)
 	}
-	_, r1 := r.split(idx - 1)
+	_, r1 := r.split(start)
 	r2, _ := r1.split(len)
-	return r2
+	return r2.string()
 }

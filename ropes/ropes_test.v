@@ -31,3 +31,8 @@ fn test_rope_split() ? {
 
 	assert r.delete(1, 4).string() == 'af'
 }
+
+fn test_rope_substr() {
+	r := ropes.new('abcdef')
+	assert r.substr(0, 4) == 'abcd'
+}
