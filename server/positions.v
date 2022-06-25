@@ -12,7 +12,7 @@ pub fn compute_offset(src tree_sitter.SourceText, line int, col int) int {
 	for i := 0; i < src_len; i++ {
 		byt := src.at(i)
 		is_lf := byt == `\n`
-		is_crlf := i != src_len - 1 && unsafe { byt == `\r` && src.at(i + 1) == `\n` }
+		is_crlf := i + 1 < src_len && unsafe { byt == `\r` && src.at(i + 1) == `\n` }
 		is_eol := is_lf || is_crlf
 		if src_line == line && src_col == col {
 			return offset
@@ -45,7 +45,7 @@ pub fn compute_position(src tree_sitter.SourceText, target_offset int) lsp.Posit
 	for i := 0; i < src_len; i++ {
 		byt := src.at(i)
 		is_lf := byt == `\n`
-		is_crlf := i != src_len - 1 && unsafe { byt == `\r` && src.at(i + 1) == `\n` }
+		is_crlf := i + 1 < src_len && unsafe { byt == `\r` && src.at(i + 1) == `\n` }
 		is_eol := is_lf || is_crlf
 		if offset == target_offset {
 			break
