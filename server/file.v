@@ -2,11 +2,12 @@ module server
 
 import ast
 import lsp
+import ropes
 
 struct File {
 mut:
 	uri     lsp.DocumentUri
-	source  []rune
+	source  &ropes.Rope
 	tree    &ast.Tree [required]
 	version int = 1
 }

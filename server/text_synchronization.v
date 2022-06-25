@@ -3,6 +3,7 @@ module server
 import lsp
 import os
 import analyzer
+import ropes
 
 fn (mut ls Vls) analyze_file(file File) {
 	ls.reporter.clear(file.uri)
@@ -59,11 +60,9 @@ pub fn (mut ls Vls) did_open(params lsp.DidOpenTextDocumentParams, mut wr Respon
 		// Create file only if source does not exist
 		if !has_file {
 			source_str := if file_uri != uri { os.read_file(file_path) or { '' } } else { src }
-			source := source_str.runes()
-
 			ls.files[file_uri] = File{
 				uri: file_uri
-				source: source
+				source: ropes.new(source_str)
 				tree: ls.parser.parse_string(source: source_str)
 				version: 1
 			}
@@ -102,7 +101,7 @@ pub fn (mut ls Vls) did_change(params lsp.DidChangeTextDocumentParams, mut wr Re
 	mut new_src := ls.files[uri].source
 
 	for content_change in params.content_changes {
-		change_text := content_change.text.runes()
+		change_text := content_change.text
 		start_idx := compute_offset(new_src, content_change.range.start.line, content_change.range.start.character)
 		old_end_idx := compute_offset(new_src, content_change.range.end.line, content_change.range.end.character)
 		new_end_idx := start_idx + change_text.len
@@ -110,10 +109,9 @@ pub fn (mut ls Vls) did_change(params lsp.DidChangeTextDocumentParams, mut wr Re
 		old_end_pos := content_change.range.end
 		new_end_pos := compute_position(new_src, new_end_idx)
 
-		old_len := new_src.len
+		old_len := new_src.len()
 		new_len := old_len - (old_end_idx - start_idx) + change_text.len
 		diff := new_len - old_len
-		right_text := new_src[old_end_idx..].clone()
 
 		// remove immediately the symbol
 		if change_text.len == 0 && diff < 0 {
@@ -123,24 +121,12 @@ pub fn (mut ls Vls) did_change(params lsp.DidChangeTextDocumentParams, mut wr Re
 				start_byte: u32(start_idx)
 				end_byte: u32(old_end_idx)
 			)
+
+			// shrink rope
+			new_src = new_src.delete(start_idx, old_end_idx - start_idx)
 		}
 
-		// the new source should grow or shrink
-		unsafe { new_src.grow_len(diff) }
-
-		// copy(new_src[new_end_idx ..], old_src[old_end_idx ..])
-		mut new_idx := new_end_idx
-		for right_idx := 0; new_idx < new_src.len && right_idx < right_text.len; right_idx++ {
-			new_src[new_idx] = right_text[right_idx]
-			new_idx++
-		}
-
-		// add the remaining characters to the remaining items
-		mut insert_idx := start_idx
-		for change_idx := 0; insert_idx < new_src.len && change_idx < change_text.len; change_idx++ {
-			new_src[insert_idx] = change_text[change_idx]
-			insert_idx++
-		}
+		new_src = new_src.insert(start_idx, change_text)
 
 		// edit the tree
 		ls.files[uri].tree.raw_tree.edit(

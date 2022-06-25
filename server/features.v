@@ -6,6 +6,7 @@ import analyzer
 import strings
 import math
 import ast
+import tree_sitter
 
 const temp_formatting_file_path = os.join_path(os.temp_dir(), 'vls_temp_formatting.v')
 
@@ -14,7 +15,7 @@ pub fn (mut ls Vls) formatting(params lsp.DocumentFormattingParams, mut wr Respo
 	uri := params.text_document.uri
 	source := ls.files[uri].source
 	tree_range := ls.files[uri].tree.root_node().range()
-	if source.len == 0 {
+	if source.len() == 0 {
 		return none
 	}
 
@@ -229,7 +230,7 @@ fn (mut ls Vls) signature_help(params lsp.SignatureHelpParams, mut wr ResponseWr
 struct CompletionBuilder {
 mut:
 	store              &analyzer.Store
-	src                []rune
+	src                tree_sitter.SourceText
 	offset             int
 	parent_node        ast.Node
 	show_global        bool // for displaying global (project) symbols
@@ -247,7 +248,7 @@ fn (mut builder CompletionBuilder) add(item lsp.CompletionItem) {
 }
 
 fn (builder CompletionBuilder) is_triggered(node ast.Node, chr string) bool {
-	return node.next_sibling() or { return false }.code(builder.src) == chr
+	return node.next_sibling() or { return false }.text(builder.src) == chr
 		|| builder.ctx.trigger_character == chr
 }
 
@@ -349,7 +350,7 @@ fn (mut builder CompletionBuilder) build_suggestions_from_list(node ast.Node) {
 		.import_symbols_list {
 			import_node := closest_symbol_node_parent(node)
 			import_path_node := import_node.child_by_field_name('path') or { return }
-			import_path := import_path_node.code(builder.src)
+			import_path := import_path_node.text(builder.src)
 			builder.build_suggestions_from_module(import_path)
 		}
 		.type_list {
@@ -377,7 +378,7 @@ fn (mut builder CompletionBuilder) build_suggestions_from_expr(node ast.Node) {
 			builder.show_global = false
 			builder.show_local = false
 
-			text := node.code(builder.src)
+			text := node.text(builder.src)
 
 			if builder.is_selector(node) {
 				mut selected_node := node
@@ -785,14 +786,14 @@ pub fn (mut ls Vls) completion(params lsp.CompletionParams, mut wr ResponseWrite
 	// or near the cursor. In that case, the context data would be modified in
 	// order to satisfy those specific cases.
 	if ctx.trigger_kind == .invoked && offset - 1 >= 0 && root_node.named_child_count() > 0
-		&& file.source.len > 3 {
+		&& file.source.len() > 3 {
 		mut prev_idx := offset
 		mut ctx_changed := false
-		if file.source[offset - 1] in [`.`, `:`, `=`, `{`, `,`, `(`] {
+		if file.source.at(offset - 1) in [`.`, `:`, `=`, `{`, `,`, `(`] {
 			prev_idx--
 			ctx_changed = true
-		} else if file.source[offset - 1] == ` ` && offset - 2 >= 0
-			&& file.source[offset - 2] !in [file.source[offset - 1], `.`] {
+		} else if file.source.at(offset - 1) == ` ` && offset - 2 >= 0
+			&& file.source.at(offset - 2) !in [file.source.at(offset - 1), `.`] {
 			prev_idx -= 2
 			offset -= 2
 			ctx_changed = true
@@ -801,7 +802,7 @@ pub fn (mut ls Vls) completion(params lsp.CompletionParams, mut wr ResponseWrite
 		if ctx_changed {
 			ctx = lsp.CompletionContext{
 				trigger_kind: .trigger_character
-				trigger_character: file.source[prev_idx].str()
+				trigger_character: file.source.at(prev_idx).str()
 			}
 		}
 	}
@@ -814,17 +815,17 @@ pub fn (mut ls Vls) completion(params lsp.CompletionParams, mut wr ResponseWrite
 		// NOTE: DO NOT REMOVE YET ~ @ned
 		// The offset is adjusted and the suggestions for local and global symbols are
 		// disabled if a period/dot is detected and the character on the left is not a space.
-		if ctx.trigger_character == '.' && (offset - 1 >= 0 && file.source[offset - 1] != ` `) {
+		if ctx.trigger_character == '.' && (offset - 1 >= 0 && file.source.at(offset - 1) != ` `) {
 			builder.show_global = false
 			builder.show_local = false
 
 			offset--
-			if file.source[offset - 1] !in [`)`, `]`] {
+			if file.source.at(offset - 1) !in [`)`, `]`] {
 				offset--
 			}
 		}
 
-		for offset > file.source.len || (offset < file.source.len && file.source[offset] == ` `) {
+		for offset > file.source.len() || (offset < file.source.len() && file.source.at(offset) == ` `) {
 			offset--
 		}
 
@@ -854,7 +855,7 @@ pub fn (mut ls Vls) completion(params lsp.CompletionParams, mut wr ResponseWrite
 		builder.parent_node = parent_node
 		builder.build_suggestions(node, offset)
 	} else if ctx.trigger_kind == .invoked
-		&& (root_node.named_child_count() == 0 || file.source.len <= 3) {
+		&& (root_node.named_child_count() == 0 || file.source.len() <= 3) {
 		// When a V file is empty, a list of `module $name` suggsestions will be displayed.
 		builder.build_module_name_suggestions()
 	} else {
@@ -881,7 +882,7 @@ pub fn (mut ls Vls) hover(params lsp.HoverParams, mut wr ResponseWriter) ?lsp.Ho
 	return get_hover_data(mut ls.store, node, uri, file.source, u32(offset))
 }
 
-fn get_hover_data(mut store analyzer.Store, node ast.Node, uri lsp.DocumentUri, source []rune, offset u32) ?lsp.Hover {
+fn get_hover_data(mut store analyzer.Store, node ast.Node, uri lsp.DocumentUri, source tree_sitter.SourceText, offset u32) ?lsp.Hover {
 	node_type_name := node.type_name
 	if node.is_null() || node_type_name == .comment {
 		return none
@@ -890,10 +891,10 @@ fn get_hover_data(mut store analyzer.Store, node ast.Node, uri lsp.DocumentUri, 
 	mut original_range := node.range()
 	parent_node := node.parent() or { node }
 
-	// eprintln('$node_type_name | ${node.code(source)}')
+	// eprintln('$node_type_name | ${node.text(source)}')
 	if node_type_name == .module_clause {
 		return lsp.Hover{
-			contents: lsp.v_marked_string(node.code(source))
+			contents: lsp.v_marked_string(node.text(source))
 			range: tsrange_to_lsp_range(node.range())
 		}
 	} else if node_type_name == .import_path {
@@ -923,7 +924,7 @@ fn get_hover_data(mut store analyzer.Store, node ast.Node, uri lsp.DocumentUri, 
 		sym = store.infer_symbol_from_node(closest_parent, source) or { analyzer.void_sym }
 	}
 
-	// eprintln('$node_type_name | ${node.code(source)} | $sym')
+	// eprintln('$node_type_name | ${node.text(source)} | $sym')
 
 	// Send null if range has zero-start and end points
 	if sym.range.start_point.row == 0 && sym.range.start_point.column == 0
@@ -1141,7 +1142,7 @@ pub fn (mut ls Vls) implementation(params lsp.TextDocumentPositionParams, mut wr
 	mut got_sym := unsafe { analyzer.void_sym }
 	if parent_node := node.parent() {
 		if parent_node.type_name == .interface_declaration {
-			got_sym = ls.store.symbols[ls.store.cur_dir].get(node.code(source)) or { got_sym }
+			got_sym = ls.store.symbols[ls.store.cur_dir].get(node.text(source)) or { got_sym }
 		} else {
 			got_sym = ls.store.infer_value_type_from_node(node, source)
 		}

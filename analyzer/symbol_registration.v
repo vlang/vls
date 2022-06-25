@@ -14,7 +14,7 @@ const (
 
 pub struct SymbolAnalyzer {
 pub mut:
-	src_text []rune
+	src_text    ts.SourceText = Runes([]rune{len: 0})
 mut:
 	store       &Store [required]
 	module_name string
@@ -54,11 +54,11 @@ fn (sr &SymbolAnalyzer) new_top_level_symbol(identifier_node ast.Node, access Sy
 		}
 		else {
 			// type_identifier, binded_type
-			symbol.name = identifier_node.code(sr.src_text)
+			symbol.name = identifier_node.text(sr.src_text)
 			symbol.range = identifier_node.range()
 
 			if id_node_type_name in [.binded_type, .binded_identifier] {
-				sym_language := identifier_node.child_by_field_name('language')?.code(sr.src_text)
+				sym_language := identifier_node.child_by_field_name('language')?.text(sr.src_text)
 				symbol.language = match sym_language {
 					'C' { SymbolLanguage.c }
 					'JS' { SymbolLanguage.js }
@@ -109,7 +109,7 @@ fn (mut sr SymbolAnalyzer) const_decl(const_node ast.Node) ?[]&Symbol {
 		}
 
 		consts << &Symbol{
-			name: spec_node.child_by_field_name('name') ?.code(sr.src_text)
+			name: spec_node.child_by_field_name('name') ?.text(sr.src_text)
 			kind: .variable
 			access: access
 			range: spec_node.child_by_field_name('name') ?.range()
@@ -145,7 +145,7 @@ fn (mut sr SymbolAnalyzer) struct_decl(struct_decl_node ast.Node) ?&Symbol {
 		field_node := decl_list_node.named_child(i) or { continue }
 		match field_node.type_name {
 			.struct_field_scope {
-				scope_text := field_node.code(sr.src_text)
+				scope_text := field_node.text(sr.src_text)
 				field_access = match scope_text {
 					analyzer.mut_struct_keyword { SymbolAccess.private_mutable }
 					analyzer.pub_struct_keyword { SymbolAccess.public }
@@ -192,7 +192,7 @@ fn (mut sr SymbolAnalyzer) struct_field_decl(field_access SymbolAccess, field_de
 	}
 
 	return &Symbol{
-		name: field_name_node.code(sr.src_text)
+		name: field_name_node.text(sr.src_text)
 		kind: .field
 		range: field_name_node.range()
 		access: field_access
@@ -232,7 +232,7 @@ fn (mut sr SymbolAnalyzer) interface_decl(interface_decl_node ast.Node) ?&Symbol
 				}
 
 				mut method_sym := Symbol{
-					name: name_node.code(sr.src_text)
+					name: name_node.text(sr.src_text)
 					kind: .function
 					access: method_access
 					range: name_node.range()
@@ -310,7 +310,7 @@ fn (mut sr SymbolAnalyzer) enum_decl(enum_decl_node ast.Node) ?&Symbol {
 
 		member_name_node := member_node.child_by_field_name('name') or { continue }
 		mut member_sym := &Symbol{
-			name: member_name_node.code(sr.src_text)
+			name: member_name_node.text(sr.src_text)
 			kind: .field
 			range: member_node.range()
 			access: access
@@ -522,7 +522,7 @@ fn (mut sr SymbolAnalyzer) register_variable(sym &Symbol, left_expr_lists ast.No
 	}
 
 	return &Symbol{
-		name: left.code(sr.src_text)
+		name: left.text(sr.src_text)
 		kind: .variable
 		access: var_access
 		range: left.range()
@@ -594,7 +594,7 @@ fn (mut sr SymbolAnalyzer) match_expression(match_node ast.Node) ?[]&Symbol {
 				if cond_value_type.kind == .enum_
 					&& value_node.type_name == .type_selector_expression {
 					field_node := value_node.child_by_field_name('field_name') or { continue }
-					if !cond_value_type.children_syms.exists(field_node.code(sr.src_text)) {
+					if !cond_value_type.children_syms.exists(field_node.text(sr.src_text)) {
 						return void_sym_arr
 					}
 				} else {
@@ -687,7 +687,7 @@ fn (mut sr SymbolAnalyzer) for_statement(for_stmt_node ast.Node) ? {
 						}
 
 						mut idx_sym := Symbol{
-							name: idx_node.code(sr.src_text)
+							name: idx_node.text(sr.src_text)
 							kind: .variable
 							range: idx_node.range()
 							is_top_level: false
@@ -706,7 +706,7 @@ fn (mut sr SymbolAnalyzer) for_statement(for_stmt_node ast.Node) ? {
 					}
 
 					mut value_sym := Symbol{
-						name: value_node.code(sr.src_text)
+						name: value_node.text(sr.src_text)
 						kind: .variable
 						range: value_node.range()
 						is_top_level: false
@@ -841,7 +841,7 @@ fn (mut sr SymbolAnalyzer) extract_block(node ast.Node, mut scope ScopeTree) ?[]
 	return return_syms
 }
 
-fn extract_parameter_list(node ast.Node, mut store Store, src_text []rune) []&Symbol {
+fn extract_parameter_list(node ast.Node, mut store Store, src_text ts.SourceText) []&Symbol {
 	params_len := node.named_child_count()
 	mut syms := []&Symbol{cap: int(params_len)}
 
@@ -857,7 +857,7 @@ fn extract_parameter_list(node ast.Node, mut store Store, src_text []rune) []&Sy
 		}
 
 		syms << &Symbol{
-			name: param_name_node.code(src_text)
+			name: param_name_node.text(src_text)
 			kind: .variable
 			range: param_name_node.range()
 			access: access
@@ -924,14 +924,14 @@ pub fn (mut sr SymbolAnalyzer) analyze_from_cursor(mut cursor TreeCursor) []&Sym
 }
 
 // register_symbols_from_tree scans and registers all the symbols based on the given tree
-pub fn (mut store Store) register_symbols_from_tree(tree &ast.Tree, src_text []rune, is_import bool) {
+pub fn (mut store Store) register_symbols_from_tree(tree &ast.Tree, src_text ts.SourceText, is_import bool) {
 	mut sr := new_symbol_analyzer(store, src_text, is_import)
 	mut cursor := new_tree_cursor(tree.root_node())
 	sr.analyze_from_cursor(mut cursor)
 }
 
 // new_symbol_analyzer creates an instance of SymbolAnalyzer with the given store, tree, source, and is_import.
-pub fn new_symbol_analyzer(store &Store, src_text []rune, is_import bool) SymbolAnalyzer {
+pub fn new_symbol_analyzer(store &Store, src_text ts.SourceText, is_import bool) SymbolAnalyzer {
 	return SymbolAnalyzer{
 		store: unsafe { store }
 		src_text: src_text

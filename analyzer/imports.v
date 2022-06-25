@@ -2,6 +2,7 @@ module analyzer
 
 import os
 import ast
+import tree_sitter
 
 pub type ImportsMap = map[string][]Import
 
@@ -14,7 +15,7 @@ pub fn (mut imp Importer) imports() ImportsMap {
 	return imp.store.imports
 }
 
-pub fn (mut imp Importer) scan_imports(tree &ast.Tree, src_text []rune) []&Import {
+pub fn (mut imp Importer) scan_imports(tree &ast.Tree, src_text tree_sitter.SourceText) []&Import {
 	root_node := tree.root_node()
 	named_child_len := root_node.named_child_count()
 	mut newly_imported_modules := []&Import{}
@@ -29,7 +30,7 @@ pub fn (mut imp Importer) scan_imports(tree &ast.Tree, src_text []rune) []&Impor
 
 		if found_imp := imp.imports().find_by_position(imp.store.cur_file_path, node.range()) {
 			mut imp_module := unsafe { found_imp }
-			mod_name := import_path_node.code(src_text)
+			mod_name := import_path_node.text(src_text)
 			if imp_module.absolute_module_name == mod_name {
 				continue
 			}
@@ -42,18 +43,18 @@ pub fn (mut imp Importer) scan_imports(tree &ast.Tree, src_text []rune) []&Impor
 		// resolve it later after
 		mut imp_module, already_imported := imp.store.add_import(
 			resolved: false
-			absolute_module_name: import_path_node.code(src_text)
+			absolute_module_name: import_path_node.text(src_text)
 		)
 
 		if import_alias_node := node.child_by_field_name('alias') {
 			if ident_node := import_alias_node.named_child(0) {
-				imp_module.set_alias(imp.store.cur_file_name, ident_node.code(src_text))
+				imp_module.set_alias(imp.store.cur_file_name, ident_node.text(src_text))
 			}
 		} else if import_symbols_node := node.child_by_field_name('symbols') {
 			symbols_len := import_symbols_node.named_child_count()
 			mut symbols := []string{len: int(symbols_len)}
 			for j := u32(0); j < symbols_len; j++ {
-				symbols[j] = import_symbols_node.named_child(j) or { continue }.code(src_text)
+				symbols[j] = import_symbols_node.named_child(j) or { continue }.text(src_text)
 			}
 
 			imp_module.set_symbols(imp.store.cur_file_name, ...symbols)
@@ -176,7 +177,7 @@ pub fn (mut imp Importer) import_modules(mut imports []&Import) {
 
 			full_path := os.join_path(new_import.path, file_name)
 			content_str := os.read_file(full_path) or { continue }
-			content := content_str.runes()
+			content := Runes(content_str.runes())
 			tree_from_import := parser.parse_string(source: content_str)
 
 			// Set version to zero so that modules that are already opened
@@ -235,7 +236,7 @@ pub fn (mut ss Store) add_import(imp Import) (&Import, bool) {
 }
 
 // import_modules_from_tree scans and imports the modules based from the AST tree
-pub fn (mut store Store) import_modules_from_tree(tree &ast.Tree, src []rune, lookup_paths ...string) {
+pub fn (mut store Store) import_modules_from_tree(tree &ast.Tree, src tree_sitter.SourceText, lookup_paths ...string) {
 	mut importer := Importer{
 		store: unsafe { store }
 	}

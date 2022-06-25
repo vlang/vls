@@ -1,19 +1,18 @@
 module server
 
-// commenting it here so that it recognizes that
-// TSPoint and TSRange is used from the "tree_sitter" module
-// import tree_sitter
+import tree_sitter
 import lsp
 
 // compute_offset returns a byte offset from the given position
-pub fn compute_offset(src []rune, line int, col int) int {
+pub fn compute_offset(src tree_sitter.SourceText, line int, col int) int {
 	mut offset := 0
 	mut src_line := 0
 	mut src_col := 0
-	for i := 0; i < src.len; i++ {
-		byt := src[i]
+	src_len := src.len()
+	for i := 0; i < src_len; i++ {
+		byt := src.at(i)
 		is_lf := byt == `\n`
-		is_crlf := i != src.len - 1 && unsafe { byt == `\r` && src[i + 1] == `\n` }
+		is_crlf := i != src_len - 1 && unsafe { byt == `\r` && src.at(i + 1) == `\n` }
 		is_eol := is_lf || is_crlf
 		if src_line == line && src_col == col {
 			return offset
@@ -38,14 +37,15 @@ pub fn compute_offset(src []rune, line int, col int) int {
 	return offset
 }
 
-pub fn compute_position(src []rune, target_offset int) lsp.Position {
+pub fn compute_position(src tree_sitter.SourceText, target_offset int) lsp.Position {
 	mut offset := 0
 	mut src_line := 0
 	mut src_col := 0
-	for i := 0; i < src.len; i++ {
-		byt := src[i]
+	src_len := src.len()
+	for i := 0; i < src_len; i++ {
+		byt := src.at(i)
 		is_lf := byt == `\n`
-		is_crlf := i != src.len - 1 && unsafe { byt == `\r` && src[i + 1] == `\n` }
+		is_crlf := i != src_len - 1 && unsafe { byt == `\r` && src.at(i + 1) == `\n` }
 		is_eol := is_lf || is_crlf
 		if offset == target_offset {
 			break
