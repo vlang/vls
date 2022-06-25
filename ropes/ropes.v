@@ -47,12 +47,14 @@ pub fn (r &Rope) runes() []rune {
 
 // at is v equiv of rope.Index(idx)
 pub fn (r &Rope) at(idx int) rune {
-	if idx < 0 || idx >= r.length {
+	if idx < 0 || idx >= r.len() {
 		panic('index out of bounds $idx/$r.length')
 	}
 
 	if r.is_leaf() {
 		return r.value[idx]
+	} else if idx >= r.left.len() {
+		return r.right.at(idx - r.left.len())
 	} else if idx > r.weight {
 		return r.right.at(idx - r.weight)
 	} else {
