@@ -146,6 +146,7 @@ pub fn new() &Vls {
 
 fn (mut wr ResponseWriter) wrap_error(err IError) IError {
 	if err is none {
+		wr.write(jsonrpc.null)
 		return err
 	}
 	wr.log_message(err.msg(), .error)
@@ -282,7 +283,7 @@ pub fn (mut ls Vls) handle_jsonrpc(request &jsonrpc.Request, mut rw jsonrpc.Resp
 				})
 			}
 			else {
-				return jsonrpc.method_not_found
+				return jsonrpc.response_error(error: jsonrpc.method_not_found, data: request.method).err()
 			}
 		}
 	} else {
