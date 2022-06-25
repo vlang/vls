@@ -36,7 +36,7 @@ fn (mut h TestHandler) handle_jsonrpc(req &jsonrpc.Request, mut wr jsonrpc.Respo
 			wr.write(RpcResult<string>{'triggered'})
 		}
 		else {
-			return jsonrpc.response_error(jsonrpc.method_not_found).err()
+			return jsonrpc.response_error(error: jsonrpc.method_not_found).err()
 		}
 	}
 }

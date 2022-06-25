@@ -59,7 +59,7 @@ fn test_notification() ? {
 fn test_response_error() ? {
 	mut io := Testio{}
 	payload := jsonrpc.Response<map[string]string>{
-		error: jsonrpc.response_error(jsonrpc.method_not_found)
+		error: jsonrpc.response_error(error: jsonrpc.method_not_found)
 	}
 	request := json.encode(payload)
 	io.send(request)

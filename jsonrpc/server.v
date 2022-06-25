@@ -74,12 +74,12 @@ fn (mut s Server) internal_respond(mut base_rw ResponseWriter) ? {
 	s.stream.read(mut s.req_buf) ?
 
 	req := s.process_raw_request(s.req_buf.after(0)) or {
-		base_rw.write_error(response_error(parse_error))
+		base_rw.write_error(response_error(error: parse_error))
 		return err
 	}
 
 	s.intercept_request(&req) or {
-		base_rw.write_error(response_error(err))
+		base_rw.write_error(response_error(error: err))
 		return err
 	}
 
@@ -91,12 +91,17 @@ fn (mut s Server) internal_respond(mut base_rw ResponseWriter) ? {
 	}
 
 	s.handler.handle_jsonrpc(&req, mut rw) or {
-		if err is none {
-			rw.write(null)
-		} else if err is ResponseError {
-			rw.write_error(err)
-		} else {
-			rw.write_error(response_error(unknown_error))
+		// do not send response error if request is a notification
+		if req.id.len != 0 {
+			if err is none {
+				rw.write(null)
+			} else if err is ResponseError {
+				rw.write_error(err)
+			} else if err.code() !in jsonrpc.error_codes {
+				rw.write_error(response_error(error: unknown_error))
+			} else {
+				rw.write_error(response_error(error: err))
+			}
 		}
 		return err
 	}

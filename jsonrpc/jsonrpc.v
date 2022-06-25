@@ -30,6 +30,17 @@ pub const (
 	server_not_initialized = error_with_code('Server not initialized.', -32002)
 	unknown_error          = error_with_code('Unknown error.', -32001)
 	server_error_end       = error_with_code('Error occurred when stopping the server.', -32000)
+	error_codes            = [
+		parse_error.code(), 
+		invalid_request.code(), 
+		method_not_found.code(), 
+		invalid_params.code(), 
+		internal_error.code(),
+		server_error_start.code(),
+		server_not_initialized.code(),
+		server_error_end.code(),
+		unknown_error.code()
+	]
 )
 
 // Null represents the null value in JSON.
@@ -167,11 +178,18 @@ pub fn (e ResponseError) err() IError {
 	return IError(e)
 }
 
+[params]
+pub struct ResponseErrorGeneratorParams {
+	error IError [required]
+	data  string
+}
+
 // response_error creates a ResponseError from the given IError.
 [inline]
-pub fn response_error(err IError) ResponseError {
+pub fn response_error(params ResponseErrorGeneratorParams) ResponseError {
 	return ResponseError{
-		code: err.code()
-		message: err.msg()
+		code: params.error.code()
+		message: params.error.msg()
+		data: params.data
 	}
 }
