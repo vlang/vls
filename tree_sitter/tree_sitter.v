@@ -106,10 +106,16 @@ pub struct C.TSLanguage {}
 pub struct C.TSTree {}
 
 // Tree
+fn C.ts_tree_copy(tree &C.TSTree) &C.TSTree
 fn C.ts_tree_root_node(tree &C.TSTree) C.TSNode
 fn C.ts_tree_delete(tree &C.TSTree)
 fn C.ts_tree_edit(tree &C.TSTree, edit &C.TSInputEdit)
 fn C.ts_tree_get_changed_ranges(old_tree &C.TSTree, new_tree &C.TSTree, count &u32) &C.TSRange
+
+[inline]
+pub fn (tree &C.TSTree) copy() &C.TSTree {
+	return C.ts_tree_copy(tree)
+}
 
 [inline]
 pub fn (tree &C.TSTree) root_node() C.TSNode {
