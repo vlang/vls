@@ -35,20 +35,24 @@ pub fn (scope &ScopeTree) free() {
 
 // contains checks if a given position is within the scope's range
 pub fn (scope &ScopeTree) contains(pos u32) bool {
+	if isnil(scope) {
+		return false
+	}
 	return pos >= scope.start_byte && pos <= scope.end_byte
 }
 
 // innermost returns the scope based on the given byte ranges
-pub fn (mut scope ScopeTree) innermost(start_byte u32, end_byte u32) &ScopeTree {
+pub fn (scope &ScopeTree) innermost(start_byte u32, end_byte u32) ?&ScopeTree {
 	if !isnil(scope) {
-		for mut child_scope in scope.children {
+		for child_scope in scope.children {
 			if child_scope.contains(start_byte) && child_scope.contains(end_byte) {
-				return child_scope.innermost(start_byte, end_byte)
+				return child_scope.innermost(start_byte, end_byte) or {
+					return child_scope
+				}
 			}
 		}
 	}
-
-	return scope
+	return none
 }
 
 // register registers the symbol to the scope
@@ -105,17 +109,15 @@ pub fn (mut scope ScopeTree) new_child(start_byte u32, end_byte u32) ?&ScopeTree
 	if isnil(scope) {
 		return none
 	}
-
-	mut innermost := scope.innermost(start_byte, end_byte)
-
-	if innermost == scope {
+	mut innermost := scope.innermost(start_byte, end_byte) or {
 		scope.children << &ScopeTree{
 			start_byte: start_byte
 			end_byte: end_byte
 			parent: unsafe { scope }
 		}
 		return scope.children[scope.children.len - 1]
-	} else if start_byte > innermost.start_byte && end_byte < innermost.end_byte {
+	}
+	if start_byte > innermost.start_byte && end_byte < innermost.end_byte {
 		return innermost.new_child(start_byte, end_byte)
 	} else {
 		return innermost
@@ -160,8 +162,10 @@ pub fn (mut scope ScopeTree) remove(name string) bool {
 // get_symbols before returns a list of symbols that are available before
 // the target byte offset
 pub fn (mut scope ScopeTree) get_symbols_before(target_byte u32) []&Symbol {
-	mut selected_scope := scope.innermost(target_byte, target_byte)
 	mut symbols := []&Symbol{}
+	mut selected_scope := scope.innermost(target_byte, target_byte) or {
+		return symbols
+	}
 	for !isnil(selected_scope) {
 		for sym in selected_scope.symbols {
 			if sym.range.start_byte <= target_byte && sym.range.end_byte <= target_byte {
