@@ -104,6 +104,7 @@ pub fn (mut ls Vls) did_change(params lsp.DidChangeTextDocumentParams, mut wr Re
 	mut new_tree := ls.files[uri].tree.raw_tree.copy()
 
 	for content_change in params.content_changes {
+		eprintln(content_change)
 		change_text := content_change.text
 		start_idx := compute_offset(new_src, content_change.range.start.line, content_change.range.start.character)
 		old_end_idx := compute_offset(new_src, content_change.range.end.line, content_change.range.end.character)
@@ -119,7 +120,7 @@ pub fn (mut ls Vls) did_change(params lsp.DidChangeTextDocumentParams, mut wr Re
 		// remove immediately the symbol
 		if (change_text.len == 0 && diff < 0) || new_end_idx < old_end_idx {
 			new_src = new_src.delete(start_idx, old_end_idx - start_idx)
-		} else if old_end_idx < new_end_idx {
+		} else if start_idx != old_end_idx && old_end_idx < new_end_idx {
 			new_src = new_src.delete(start_idx, new_end_idx - old_end_idx)
 		}
 
