@@ -141,7 +141,7 @@ pub fn (mut ls Vls) did_change(params lsp.DidChangeTextDocumentParams, mut wr Re
 		)
 	}
 
-	mut new_tree := ls.parser.parse_string(source: new_src.string(), tree: ls.files[uri].tree.raw_tree)
+	new_src.rebalance()
 	// wr.log_message('${ls.files[uri].tree.get_changed_ranges(new_tree)}', .info)
 
 	// wr.log_message('new tree: ${new_tree.root_node().sexpr_str()}', .info)
