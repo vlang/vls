@@ -48,6 +48,4 @@ fn test_rope_balance() {
 	r = r.rebalance()
 	assert r.str() == 'abcdef'
 	assert r.len() == 6
-	assert r.left.str() == 'abc'
-	assert r.right.str() == 'def'
 }
