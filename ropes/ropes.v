@@ -17,7 +17,10 @@ fn (r &Rope) is_leaf() bool {
 
 // new returns a new rope initialized with given string.
 pub fn new(bootstrap string) &Rope {
-	rn := bootstrap.runes()
+	return new_from_runes(bootstrap.runes())
+}
+
+pub fn new_from_runes(rn []rune) &Rope {
 	return &Rope{
 		value: rn
 		weight: rn.len
@@ -187,4 +190,39 @@ pub fn (r &Rope) substr(start int, end int) string {
 	_, r1 := r.split(start)
 	r2, _ := r1.split(len)
 	return r2.string()
+}
+
+// taken from https://github.com/zyedidia/rope/blob/master/rope.go
+const rebalance_ratio = 1.2
+const split_len = 4096 * 4
+// const join_len = split_len / 2
+
+fn (r &Rope) rebuild() &Rope {
+	if isnil(r) || r.is_leaf() {
+		return r
+	}
+
+	mut new_value := []rune{cap: r.left.len() + r.right.len()}
+	new_value << r.left.runes()
+	new_value << r.right.runes()
+	new_rope := new_from_runes(new_value)
+	if new_rope.len() > split_len {
+		middle := new_value.len / 2
+		left, right := new_rope.split(middle)
+		return left.concat(right)
+	}
+	return new_rope
+}
+
+pub fn (r &Rope) rebalance() &Rope {
+	if isnil(r) || r.is_leaf() {
+		return r
+	}
+	left_ratio := f64(r.left.len()) / f64(r.right.len())
+	right_ratio := f64(r.right.len()) / f64(r.left.len())
+	if left_ratio > rebalance_ratio || right_ratio > rebalance_ratio {
+		return r.rebuild()
+	} else {
+		return r.left.rebalance().concat(r.right.rebalance())
+	}
 }
