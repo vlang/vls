@@ -6,7 +6,9 @@ import analyzer
 import ropes
 
 fn (mut ls Vls) analyze_file(file File) {
-	ls.reporter.clear(file.uri)
+	if Feature.v_diagnostics in ls.enabled_features {
+		ls.reporter.clear(file.uri)
+	}
 	file_path := file.uri.path()
 	ls.store.set_active_file_path(file_path, file.version)
 	ls.store.import_modules_from_tree(file.tree, file.source, os.join_path(file.uri.dir_path(),
@@ -148,6 +150,14 @@ pub fn (mut ls Vls) did_change(params lsp.DidChangeTextDocumentParams, mut wr Re
 	ls.files[uri].tree = ls.parser.parse_string(source: new_src.string(), tree: new_tree)
 	ls.files[uri].source = new_src
 	ls.files[uri].version = params.text_document.version
+
+	if Feature.v_diagnostics !in ls.enabled_features {
+		ls.reporter.clear_from_range(
+			uri, 
+			u32(params.content_changes.first().range.start.line), 
+			u32(params.content_changes.last().range.start.line)
+		)
+	}
 
 	// $if !test {
 	// 	wr.log_message(ls.store.imports.str(), .info)
