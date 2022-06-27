@@ -124,24 +124,49 @@ pub fn (mut scope ScopeTree) new_child(start_byte u32, end_byte u32) ?&ScopeTree
 	}
 }
 
-// remove_child removes a child scope based on the given position
-pub fn (mut scope ScopeTree) remove_child(start_byte u32, end_byte u32) bool {
+pub fn (mut scope ScopeTree) remove_symbols_by_line(start_line u32, end_line u32) bool {
 	if isnil(scope) {
 		return false
 	}
 
-	if start_byte == scope.start_byte && end_byte == scope.end_byte {
-		// unsafe { scope.free() }
-		return true
+	mut del_count := 0
+	old_len := scope.symbols.len
+
+	for i := 0; i < scope.symbols.len; {
+		if within_range(scope.symbols[i].range, start_line, end_line) {
+			scope.symbols.delete(i)
+			del_count++
+			continue
+		}
+		i++
 	}
 
-	for i := 0; i < scope.children.len; i++ {
-		if !scope.children[i].remove_child(start_byte, end_byte) {
-			continue
+	for i := 0; i < scope.children.len; {
+		start_byte := scope.children[i].start_byte
+		end_byte := scope.children[i].start_byte
+		should_delete := scope.children[i].remove_symbols_by_line(start_line, end_line)
+		if should_delete {
+			scope.remove_child(start_byte, end_byte)
+		} else {
+			i++
 		}
 	}
 
-	return false
+	return del_count == old_len
+}
+
+// remove_child removes a child scope based on the given position
+pub fn (mut scope ScopeTree) remove_child(start_byte u32, end_byte u32) {
+	for i := 0; i < scope.children.len; i++ {
+		child_start_byte := scope.children[i].start_byte
+		child_end_byte := scope.children[i].start_byte
+		if child_start_byte == start_byte && child_end_byte == end_byte {
+			scope.children.delete(i)
+		} else {
+			scope.children[i].remove_child(start_byte, end_byte)
+			i++
+		}
+	}
 }
 
 // remove removes the specified symbol
