@@ -114,7 +114,7 @@ pub fn (mut ls Vls) did_change(params lsp.DidChangeTextDocumentParams, mut wr Re
 		diff := new_len - old_len
 
 		// remove immediately the symbol
-		if change_text.len == 0 && diff < 0 {
+		if (change_text.len == 0 && diff < 0) || new_end_idx < old_end_idx {
 			ls.store.delete_symbol_at_node(ls.files[uri].tree.root_node(), new_src,
 				start_point: lsp_pos_to_tspoint(start_pos)
 				end_point: lsp_pos_to_tspoint(old_end_pos)
@@ -122,8 +122,9 @@ pub fn (mut ls Vls) did_change(params lsp.DidChangeTextDocumentParams, mut wr Re
 				end_byte: u32(old_end_idx)
 			)
 
-			// shrink rope
 			new_src = new_src.delete(start_idx, old_end_idx - start_idx)
+		} else if old_end_idx < new_end_idx {
+			new_src = new_src.delete(start_idx, new_end_idx - old_end_idx)
 		}
 
 		new_src = new_src.insert(start_idx, change_text)
