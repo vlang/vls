@@ -80,8 +80,6 @@ mut:
 		reset_builder_on_max_count: true
 	}
 	generate_report bool
-	stdin_chan      chan []u8
-	stdout_chan     chan []u8
 	stderr_chan     chan string
 }
 
