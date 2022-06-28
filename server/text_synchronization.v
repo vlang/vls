@@ -100,11 +100,17 @@ pub fn (mut ls Vls) did_change(params lsp.DidChangeTextDocumentParams, mut wr Re
 
 	ls.store.set_active_file_path(uri.path(), params.text_document.version)
 
+	ls.store.delete_symbol_at_node(
+		ls.files[uri].tree.root_node(), 
+		ls.files[uri].source,
+		u32(params.content_changes.first().range.start.line), 
+		u32(params.content_changes.last().range.start.line)
+	)
+
 	mut new_src := ls.files[uri].source
 	mut new_tree := ls.files[uri].tree.raw_tree.copy()
 
 	for content_change in params.content_changes {
-		eprintln(content_change)
 		change_text := content_change.text
 		start_idx := compute_offset(new_src, content_change.range.start.line, content_change.range.start.character)
 		old_end_idx := compute_offset(new_src, content_change.range.end.line, content_change.range.end.character)
@@ -137,15 +143,7 @@ pub fn (mut ls Vls) did_change(params lsp.DidChangeTextDocumentParams, mut wr Re
 		)
 	}
 
-	new_src.rebalance()
-
-	ls.store.delete_symbol_at_node(
-		ls.files[uri].tree.root_node(), 
-		ls.files[uri].source,
-		u32(params.content_changes.first().range.start.line), 
-		u32(params.content_changes.last().range.start.line)
-	)
-
+	new_src = new_src.rebalance()
 	// wr.log_message('${ls.files[uri].tree.get_changed_ranges(new_tree)}', .info)
 
 	// wr.log_message('new tree: ${new_tree.root_node().sexpr_str()}', .info)
