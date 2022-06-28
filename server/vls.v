@@ -364,7 +364,7 @@ pub fn monitor_changes(mut ls Vls, mut resp_wr ResponseWriter) {
 			a := <-ls.typing_ch {
 				ls.is_typing = a != 0
 			}
-			50 * time.millisecond {
+			350 * time.millisecond {
 				if ls.status != .off && !timeout_stopped {
 					timeout_stopped = true
 					timeout_sw.stop()
