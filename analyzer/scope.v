@@ -60,6 +60,8 @@ pub fn (mut scope ScopeTree) register(info &Symbol) ? {
 	// Just to ensure that scope is not null
 	if isnil(scope) {
 		return
+	} else if info.kind == .variable && info.return_sym.is_void() {
+		return
 	}
 
 	mut existing_idx := scope.symbols.index(info.name)
