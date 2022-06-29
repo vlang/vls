@@ -845,7 +845,7 @@ pub fn (mut an SemanticAnalyzer) if_expression(node ast.Node, cfg SemanticExpres
 					}
 				}
 			} else {
-				if err.msg() == 'got_return_statement' {
+				if err.msg() == 'got_return_statement' || err.msg() == 'empty_expression' {
 					return an.report(node, errors.if_no_expression_value_error)
 				}
 			}
@@ -889,6 +889,10 @@ pub fn (mut an SemanticAnalyzer) spread_operator(node ast.Node) ?&Symbol {
 
 pub fn (mut an SemanticAnalyzer) block_expression(node ast.Node, cfg SemanticExpressionAnalyzeConfig) ?&Symbol {
 	child_count := node.named_child_count()
+	if child_count == 0 {
+		return error('empty_expression')
+	}
+
 	last_child := node.named_child(child_count - 1)?
 
 	if cfg.as_value {
