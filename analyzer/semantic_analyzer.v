@@ -82,6 +82,8 @@ fn (an &SemanticAnalyzer) format_report_data(d ReportData) string {
 		return *d
 	} else if d is Symbol {
 		return d.gen_str(with_access: false, with_kind: false, with_contents: false).replace_each(['int_literal', 'int literal', 'float_literal', 'float literal'])
+	} else if d is []string {
+		return d.join(', ')
 	} else {
 		// final_params << d.str()
 		return 'unknown'
@@ -908,6 +910,115 @@ pub fn (mut an SemanticAnalyzer) block_expression(node ast.Node, cfg SemanticExp
 	return analyzer.void_sym
 }
 
+// TODO: tests for match sumtypes is missing
+pub fn (mut an SemanticAnalyzer) match_expression(node ast.Node, cfg SemanticExpressionAnalyzeConfig) ?&Symbol {
+	cond_node := node.child_by_field_name('condition')?
+	cond_sym := an.expression(cond_node)?
+	case_count := node.named_child_count()
+	mut expected_value_sym := unsafe { analyzer.void_sym }
+	mut mismatch_count := 0
+	mut expecting_types := false
+	mut existing_case_values := []string{cap: int(case_count)}
+	mut has_default_case := false
+
+	if cond_sym.kind == .sumtype {
+		expecting_types = true
+	}
+
+	for i in u32(1) .. case_count {
+		case_node := node.named_child(i) or { continue }
+		if case_node.type_name !in [.expression_case, .default_case] {
+			// TODO:
+			break
+		} else if case_node.type_name == .expression_case {
+			value_list := case_node.child_by_field_name('value') or {
+				continue
+			}
+
+			case_list_len := value_list.named_child_count()
+
+			for case_value_i in u32(0) .. case_list_len {
+				case_value_node := value_list.named_child(case_value_i) or {
+					continue
+				}
+
+				value_text := case_value_node.text(an.src_text)
+				if value_text in existing_case_values {
+					an.report(case_value_node, errors.match_duplicate_branch_error, value_text)
+				}
+
+				if case_value_node.type_name.group() == .type_ {
+					if !cond_sym.children_syms.exists(value_text) {
+						an.report(case_value_node, errors.match_invalid_sumtype_variant_error, cond_sym, value_text)
+					} else {
+						existing_case_values << value_text
+					}
+				} else if case_value_node.type_name == .range {
+					start_node := case_value_node.child_by_field_name('start') or { continue }
+					end_node := case_value_node.child_by_field_name('end') or { continue }
+					start_sym := an.expression(start_node) or { analyzer.void_sym }
+					end_sym := an.expression(end_node) or { analyzer.void_sym }
+
+					if start_sym != cond_sym {
+						an.report(start_node, errors.match_range_value_type_mismatch)
+					} else if end_sym != end_sym {
+						an.report(end_node, errors.match_range_value_type_mismatch)
+					} else {
+						existing_case_values << value_text 
+					}
+				} else {
+					case_sym := an.expression(case_value_node) or {
+						analyzer.void_sym
+					}
+
+					if cond_sym != case_sym {
+						an.report(case_value_node, errors.match_invalid_case_value_error, cond_sym, case_sym)
+					} else {
+						existing_case_values << value_text 
+					}
+				}
+			}
+		} else if case_node.type_name == .default_case {
+			has_default_case = true
+		}
+
+		conseq_node := case_node.child_by_field_name('consequence') or {
+			continue
+		}
+
+		if cfg.as_value {
+			if block_sym := an.block_expression(conseq_node, cfg) {
+				if i == 1 {
+					expected_value_sym = block_sym
+				} else if block_sym != expected_value_sym {
+					an.report(case_node, errors.match_expr_value_type_mismatch, expected_value_sym)
+					mismatch_count++
+				}
+			} else {
+				if err.msg() == 'got_return_statement' || err.msg() == 'empty_expression' {
+					an.report(case_node, errors.match_expr_no_expression_value_error)
+				}
+			}
+		} else {
+			an.block(conseq_node)
+		}
+	}
+
+	// check match's exhaustiveness if no default case found
+	if expecting_types && !has_default_case {
+		missing_types := cond_sym.children_syms.filter(it.name !in existing_case_values).map('`${it.name}`')
+		if missing_types.len != 0 {
+			return an.report(node, errors.match_sumtype_not_exhaustive_error, missing_types)
+		}
+	}
+
+	if mismatch_count != 0 {
+		return none
+	}
+
+	return expected_value_sym
+}
+
 [params]
 pub struct SemanticExpressionAnalyzeConfig {
 	as_value bool
@@ -952,6 +1063,9 @@ pub fn (mut an SemanticAnalyzer) expression(node ast.Node, cfg SemanticExpressio
 				return got_sym.return_sym.parent_sym
 			}
 			return got_sym.return_sym
+		}
+		.match_expression {
+			return an.match_expression(node, cfg)
 		}
 		.if_expression {
 			return an.if_expression(node, cfg)
