@@ -939,6 +939,16 @@ pub fn (mut an SemanticAnalyzer) expression(node ast.Node, cfg SemanticExpressio
 		.parenthesized_expression {
 			return an.expression(node.named_child(0)?, cfg)
 		}
+		.mutable_expression {
+			expr_node := node.named_child(0)?
+			got_sym := an.expression(expr_node, cfg)
+			if got_sym.kind == .variable && !got_sym.is_mutable() {
+				return an.report(expr_node, errors.immutable_variable_error, got_sym.name)
+			} else if got_sym.return_sym.kind == .ref {
+				return got_sym.return_sym.parent_sym
+			}
+			return got_sym.return_sym
+		}
 		.if_expression {
 			return an.if_expression(node, cfg)
 		}
