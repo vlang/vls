@@ -846,7 +846,7 @@ pub fn (mut an SemanticAnalyzer) if_expression(node ast.Node, cfg SemanticExpres
 				}
 			} else {
 				if err.msg() == 'got_return_statement' {
-					return an.report(node, errors.if_no_expresssion_value_error)
+					return an.report(node, errors.if_no_expression_value_error)
 				}
 			}
 		} else {
