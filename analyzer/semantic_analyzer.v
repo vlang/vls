@@ -945,7 +945,7 @@ pub fn (mut an SemanticAnalyzer) expression(node ast.Node, cfg SemanticExpressio
 		}
 		.mutable_expression {
 			expr_node := node.named_child(0)?
-			got_sym := an.expression(expr_node, cfg)
+			got_sym := an.expression(expr_node, cfg)?
 			if got_sym.kind == .variable && !got_sym.is_mutable() {
 				return an.report(expr_node, errors.immutable_variable_error, got_sym.name)
 			} else if got_sym.return_sym.kind == .ref {
