@@ -1,5 +1,16 @@
 if (1 == 1) {}
 
+a := 1
+b := 2
+c := if a == 1 { a } else { 'a' }
+d := if a { a } else { b }
+e := if true { 0 }
+
 ---
 
 (error "unnecessary `()` in `if` condition, use `if expr {` instead of `if (expr) {`" [0,3]-[0,11])
+(error "mismatched types `int literal` and `int literal`" [0,4]-[0,10]) (error "non-bool type `void` used as if condition" [0,3]-[0,11]) 
+(error "mismatched types `int` and `int literal`" [4,8]-[4,14]) 
+(error "non-bool type `void` used as if condition" [4,8]-[4,14]) 
+(error "non-bool type `int` used as if condition" [5,8]-[5,9])
+(error "`if` expression needs `else` clause" [6,5]-[6,18])

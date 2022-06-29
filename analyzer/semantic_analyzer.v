@@ -822,15 +822,42 @@ pub fn (mut an SemanticAnalyzer) call_expression(node ast.Node) ?&Symbol {
 }
 
 pub fn (mut an SemanticAnalyzer) if_expression(node ast.Node, cfg SemanticExpressionAnalyzeConfig) ?&Symbol {
+	conseq_node := node.child_by_field_name('consequence')?
 	if cond_node := node.child_by_field_name('condition') {
 		if cond_node.type_name == .parenthesized_expression {
-			return an.report(cond_node, errors.unnecessary_if_parenthesis_error)
+			an.report(cond_node, errors.unnecessary_if_parenthesis_error)
+		}
+
+		cond_sym := an.expression(cond_node, as_value: true) or { analyzer.void_sym }
+		if cond_sym.name != 'bool' {
+			return an.report(cond_node, errors.if_expr_non_bool_cond_error, cond_sym)
+		}
+
+		if cfg.as_value {
+			if expected_sym := an.block_expression(conseq_node) {
+				else_node := node.child_by_field_name('alternative') or {
+					return an.report(node, errors.if_expr_no_else_error)
+				}
+
+				if else_sym := an.block_expression(else_node) {
+					if else_sym != expected_sym {
+						return an.report(node, errors.mismatched_type_error, expected_sym, else_sym)
+					}
+				}
+			} else {
+				if err.msg() == 'got_return_statement' {
+					return an.report(node, errors.if_no_expresssion_value_error)
+				}
+			}
+		} else {
+			an.block(conseq_node)
 		}
 	} else if _ := node.child_by_field_name('initializer') {
 		// TODO: opt if expr check
+		an.block(conseq_node)
 	}
-	// TODO: infer value type if as_value
-	return analyzer.void_sym
+
+	return none
 }
 
 pub fn (mut an SemanticAnalyzer) type_cast_expression(node ast.Node) ?&Symbol {
@@ -858,6 +885,23 @@ pub fn (mut an SemanticAnalyzer) spread_operator(node ast.Node) ?&Symbol {
 		return an.report(expr_node, errors.decomposition_error)
 	}
 	return expr_sym.parent_sym
+}
+
+pub fn (mut an SemanticAnalyzer) block_expression(node ast.Node, cfg SemanticExpressionAnalyzeConfig) ?&Symbol {
+	child_count := node.named_child_count()
+	last_child := node.named_child(child_count - 1)?
+
+	if cfg.as_value {
+		if last_child.type_name.group() != .expression {
+			// TODO: this error is for if expression only
+			return error('got_return_statement')
+		} else {
+			return an.expression(last_child, cfg)
+		}
+	} 
+
+	// TODO:
+	return analyzer.void_sym
 }
 
 [params]
