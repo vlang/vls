@@ -28,5 +28,4 @@ fn main() {
 
 (function main [6,3]-[6,7]
     (variable color Color [7,4]-[7,9])
-    (variable cstr string [8,4]-[8,8])
-    (variable cstr2 [14,4]-[14,9]))
+    (variable cstr string [8,4]-[8,8]))
