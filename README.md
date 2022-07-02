@@ -72,6 +72,9 @@ For Sublime Text, please install the [LSP extension](https://packagecontrol.io/p
 
 If you cloned the repository and compiled it from source, the executable will be in the `vls` root directory. So make sure to set the `command` array to `vls/bin/vls` or `vls/bin/vls.exe` (for Windows).
 
+### Vim
+For Vim, please install [vim-lsp](https://github.com/prabirshrestha/vim-lsp) and [vim-lsp-settings](https://github.com/mattn/vim-lsp-settings). Afterwards, open any `.v` file, and execute `:LspInstallServer`.
+
 ### Other Editors
 > VLS on JetBrain IDEs does not work at this moment. See [issue 52](https://github.com/vlang/vls/issues/52) for more details.
 
