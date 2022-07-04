@@ -32,11 +32,11 @@ fn test_notification_receive() ? {
 fn test_request_send() ? {
 	mut lg := new()
 
-	lg.log(kind: .send_request, payload: '"Request sent."'.bytes())
+	lg.log(kind: .recv_request, payload: '"Request sent."'.bytes())
 	buf := lg.buffer.str()
 	result := json.decode(TestLogItem, buf) ?
 
-	assert result.kind == 'send-request'
+	assert result.kind == 'recv-request'
 	assert result.payload == 'Request sent.'
 }
 
@@ -65,10 +65,10 @@ fn test_response_send() ? {
 fn test_response_receive() ? {
 	mut lg := new()
 
-	lg.log(kind: .recv_response, payload: '"Response received."'.bytes())
+	lg.log(kind: .send_response, payload: '"Response received."'.bytes())
 	buf := lg.buffer.str()
 	result := json.decode(TestLogItem, buf) ?
 
-	assert result.kind == 'recv-response'
+	assert result.kind == 'send-response'
 	assert result.payload == 'Response received.'
 }
