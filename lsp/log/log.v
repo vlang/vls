@@ -40,10 +40,8 @@ pub fn (lk LogKind) str() string {
 	return match lk {
 		.send_notification { 'send-notification' }
 		.recv_notification { 'recv-notification' }
-		.send_request { 'send-request' }
 		.recv_request { 'recv-request' }
 		.send_response { 'send-response' }
-		.recv_response { 'recv-response' }
 	}
 }
 
