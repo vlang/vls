@@ -2,7 +2,6 @@ module log
 
 import os
 import time
-import json
 import io
 import jsonrpc
 import strings
@@ -107,7 +106,7 @@ pub fn (mut l LogRecorder) disable() {
 // buffer if the file is not opened yet.
 [manualfree]
 fn (mut l LogRecorder) log(item LogItem) {
-	if !l.enabled || item.kind !in l.filter_kinds {
+	if !l.enabled {
 		return
 	} else if l.file_opened {
 		if l.buffer.len != 0 {
