@@ -6,6 +6,7 @@ import ast
 
 struct TreeCursor {
 mut:
+	start_line_nr u32
 	cur_child_idx int  = -1
 	named_only    bool = true
 	child_count   int                                [required]
@@ -22,7 +23,7 @@ pub fn (mut tc TreeCursor) next() ?ast.Node {
 
 		tc.cur_child_idx++
 		if cur_node := tc.current_node() {
-			if tc.named_only && (cur_node.is_named() && !cur_node.is_extra()) {
+			if tc.named_only && cur_node.raw_node.start_point().row >= tc.start_line_nr && (cur_node.is_named() && !cur_node.is_extra()) {
 				return cur_node
 			}
 		}
@@ -54,9 +55,15 @@ pub fn (tc &TreeCursor) free() {
 	}
 }
 
-pub fn new_tree_cursor(root_node ast.Node) TreeCursor {
+[params]
+pub struct NewTreeCursorConfig {
+	start_line_nr u32
+}
+
+pub fn new_tree_cursor(root_node ast.Node, cfg NewTreeCursorConfig) TreeCursor {	
 	return TreeCursor{
 		child_count: int(root_node.child_count())
 		cursor: root_node.tree_cursor()
+		start_line_nr: cfg.start_line_nr
 	}
 }
