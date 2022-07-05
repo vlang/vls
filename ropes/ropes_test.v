@@ -42,8 +42,7 @@ fn test_rope_balance() {
 
 	r = r.insert(4, 'ef')
 	assert r.str() == 'abcdef'
-	assert r.left.str() == 'abcd'
-	assert r.right.str() == 'ef'
+	assert r.is_leaf()
 
 	r = r.rebalance()
 	assert r.str() == 'abcdef'
