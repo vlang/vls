@@ -104,22 +104,7 @@ fn (mut host VlsHost) listen() {
 	go host.listen_for_errors()
 	go host.listen_for_output()
 	go host.listen_for_input()
-	host.receive_data()
 }
-
-fn (mut host VlsHost) receive_data() {
-	// mut stdout_buffer := strings.new_builder(4096)
-	for !host.has_child_exited() {
-		select {
-			incoming_stderr := <-host.stderr_chan {
-				// Set the last_len to the length of the latest entry so that
-				// the last stderr output will be logged into the error report.
-				host.stderr_logger.writeln(incoming_stderr)
-			}
-		}
-	}
-}
-
 
 fn (mut host VlsHost) listen_for_input() {
 	mut buf := strings.new_builder(1024 * 1024)
