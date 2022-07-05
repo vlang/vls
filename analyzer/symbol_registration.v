@@ -924,9 +924,9 @@ pub fn (mut sr SymbolAnalyzer) analyze_from_cursor(mut cursor TreeCursor) []&Sym
 }
 
 // register_symbols_from_tree scans and registers all the symbols based on the given tree
-pub fn (mut store Store) register_symbols_from_tree(tree &ast.Tree, src_text ts.SourceText, is_import bool) {
+pub fn (mut store Store) register_symbols_from_tree(tree &ast.Tree, src_text ts.SourceText, is_import bool, cfg NewTreeCursorConfig) {
 	mut sr := new_symbol_analyzer(store, src_text, is_import)
-	mut cursor := new_tree_cursor(tree.root_node())
+	mut cursor := new_tree_cursor(tree.root_node(), cfg)
 	sr.analyze_from_cursor(mut cursor)
 }
 

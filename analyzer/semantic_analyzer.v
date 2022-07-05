@@ -1131,12 +1131,12 @@ pub fn (mut an SemanticAnalyzer) analyze_from_cursor(mut cursor TreeCursor) {
 }
 
 // analyze analyzes the given tree
-pub fn (mut store Store) analyze(tree &ast.Tree, src_text tree_sitter.SourceText) {
+pub fn (mut store Store) analyze(tree &ast.Tree, src_text tree_sitter.SourceText, cfg NewTreeCursorConfig) {
 	mut an := SemanticAnalyzer{
 		store: unsafe { store }
 		src_text: src_text
 	}
 
-	mut cursor := new_tree_cursor(tree.root_node())
+	mut cursor := new_tree_cursor(tree.root_node(), cfg)
 	an.analyze_from_cursor(mut cursor)
 }

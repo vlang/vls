@@ -108,23 +108,25 @@ mut:
 
 struct Vls {
 mut:
-	vroot_path       string
-	parser           &tree_sitter.Parser<v.NodeType>
-	store            analyzer.Store
-	status           ServerStatus = .off
-	root_uri         lsp.DocumentUri
-	is_typing        bool
-	typing_ch        chan int
-	enabled_features []Feature = server.default_features_list
-	capabilities     lsp.ServerCapabilities
-	panic_count      int
-	shutdown_timeout time.Duration = 5 * time.minute
-	client_pid       int
+	vroot_path         string
+	parser             &tree_sitter.Parser<v.NodeType>
+	store              analyzer.Store
+	status             ServerStatus = .off
+	root_uri           lsp.DocumentUri
+	last_modified_line u32 // for did_change
+	last_affected_node v.NodeType = v.NodeType.unknown
+	is_typing          bool
+	typing_ch          chan int
+	enabled_features   []Feature = server.default_features_list
+	capabilities       lsp.ServerCapabilities
+	panic_count        int
+	shutdown_timeout   time.Duration = 5 * time.minute
+	client_pid         int
 	// client_capabilities lsp.ClientCapabilities
-	reporter         &DiagnosticReporter
-	writer           &ResponseWriter = &ResponseWriter(0)
+	reporter           &DiagnosticReporter
+	writer             &ResponseWriter = &ResponseWriter(0)
 pub mut:
-	files            map[string]File
+	files              map[string]File
 }
 
 pub fn new() &Vls {
@@ -380,7 +382,9 @@ pub fn monitor_changes(mut ls Vls, mut resp_wr ResponseWriter) {
 				}
 
 				uri := lsp.document_uri_from_path(ls.store.cur_file_path)
-				ls.analyze_file(ls.files[uri])
+				ls.analyze_file(ls.files[uri], ls.last_affected_node, ls.last_modified_line)
+				ls.last_modified_line = 0
+				ls.last_affected_node = .unknown
 				ls.is_typing = false
 			}
 		}
