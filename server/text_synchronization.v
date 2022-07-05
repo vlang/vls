@@ -123,11 +123,17 @@ pub fn (mut ls Vls) did_change(params lsp.DidChangeTextDocumentParams, mut wr Re
 		new_len := old_len - (old_end_idx - start_idx) + change_text.len
 		diff := new_len - old_len
 
-		// remove immediately the symbol
 		if (change_text.len == 0 && diff < 0) || new_end_idx < old_end_idx {
 			new_src = new_src.delete(start_idx, old_end_idx - start_idx)
 		} else if start_idx != old_end_idx && old_end_idx < new_end_idx {
-			new_src = new_src.delete(start_idx, new_end_idx - old_end_idx)
+			if new_end_idx < new_src.len() {
+				new_src = new_src.delete(start_idx, new_end_idx - old_end_idx)
+			} else {
+				// this is for situations where the inserted text is greater
+				// than the length of the buffer in general. (e.g. suggestions
+				// that replace the incomplete text with a complete yet longer one)
+				new_src = new_src.delete(start_idx, old_end_idx - start_idx)
+			}
 		}
 
 		new_src = new_src.insert(start_idx, change_text)
