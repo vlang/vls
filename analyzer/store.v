@@ -900,6 +900,10 @@ pub fn (mut ss Store) delete_symbol_at_node(root_node ast.Node, src tree_sitter.
 	mut cursor := new_tree_cursor(root_node, start_line_nr: start_line)
 
 	for node in cursor {
+		if !within_range(node.range(), start_line, end_line) {
+			break
+		}
+
 		match node.type_name {
 			.const_spec, .global_var_spec, .global_var_declaration, .function_declaration,
 			.interface_declaration, .enum_declaration, .type_declaration, .struct_declaration {
