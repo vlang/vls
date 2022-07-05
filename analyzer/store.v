@@ -239,10 +239,11 @@ pub fn (mut ss Store) register_symbol(mut info Symbol) ?&Symbol {
 
 		// Remove this?
 		if existing_sym.kind !in analyzer.container_symbol_kinds  {
-			if info.range.start_point.row > existing_sym.range.start_point.row 
-				|| ((existing_sym.kind != .placeholder && existing_sym.kind == info.kind)
+			if existing_sym.kind != .placeholder 
+				&& (info.range.start_point.row > existing_sym.range.start_point.row 
+				|| (existing_sym.kind == info.kind
 				&& (existing_sym.file_path == info.file_path
-				&& existing_sym.file_version >= info.file_version)) {
+				&& existing_sym.file_version >= info.file_version))) {
 				return report_error('Symbol already exists. (idx=$existing_idx) (name="$existing_sym.name")',
 					info.range)
 			}
