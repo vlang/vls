@@ -148,7 +148,8 @@ pub fn (mut scope ScopeTree) remove_symbols_by_line(start_line u32, end_line u32
 		end_byte := scope.children[i].start_byte
 		should_delete := scope.children[i].remove_symbols_by_line(start_line, end_line)
 		if should_delete {
-			scope.remove_child(start_byte, end_byte)
+			scope.children[i].remove_child(start_byte, end_byte)
+			scope.children.delete(i)
 		} else {
 			i++
 		}
