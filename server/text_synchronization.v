@@ -149,7 +149,7 @@ pub fn (mut ls Vls) did_change(params lsp.DidChangeTextDocumentParams, mut wr Re
 		)
 	}
 
-	new_src = new_src.rebalance()
+	new_src = new_src.rebalance_if_needed()
 	// wr.log_message('${ls.files[uri].tree.get_changed_ranges(new_tree)}', .info)
 
 	// wr.log_message('new tree: ${new_tree.root_node().sexpr_str()}', .info)
