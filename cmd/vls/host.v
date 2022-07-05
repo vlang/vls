@@ -144,11 +144,7 @@ fn (mut host VlsHost) listen_for_output() {
 }
 
 fn (mut host VlsHost) handle_exit() {
-	if !host.generate_report && host.child.code > 0 {
-		host.generate_report = true
-	}
-
-	if host.generate_report {
+	if host.generate_report || host.child.code != 0 {
 		report_path := host.generate_report() or {
 			// should not happen
 			panic(err)
