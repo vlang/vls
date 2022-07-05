@@ -1,6 +1,5 @@
 module analyzer
 
-import tree_sitter_v as v
 import datatypes { Stack }
 
 fn within_range(node_range C.TSRange, start_line u32, end_line u32) bool {
