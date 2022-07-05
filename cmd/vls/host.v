@@ -80,7 +80,6 @@ mut:
 		reset_builder_on_max_count: true
 	}
 	generate_report bool
-	stderr_chan     chan string
 }
 
 fn (mut host VlsHost) has_child_exited() bool {
@@ -125,7 +124,10 @@ fn (mut host VlsHost) listen_for_input() {
 
 fn (mut host VlsHost) listen_for_errors() {
 	for !host.has_child_exited() {
-		host.stderr_chan <- host.child.stderr_read()
+		buf := host.child.stderr_slurp()
+		if buf.len != 0 {
+			host.stderr_logger.writeln(buf)
+		}
 	}
 }
 
