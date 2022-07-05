@@ -24,8 +24,8 @@ fn (mut ls Vls) analyze_file(file File, affected_node_type v.NodeType, affected_
 	}
 
 	ls.store.register_symbols_from_tree(file.tree, file.source, false, start_line_nr: affected_line)
-	if Feature.analyzer_diagnostics in ls.enabled_features {
-		ls.store.analyze(file.tree, file.source)
+	if !is_import && Feature.analyzer_diagnostics in ls.enabled_features {
+		ls.store.analyze(file.tree, file.source, start_line_nr: affected_line)
 	}
 
 	ls.reporter.publish(mut ls.writer, file.uri)
