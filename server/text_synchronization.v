@@ -14,12 +14,13 @@ fn (mut ls Vls) analyze_file(file File) {
 	ls.store.import_modules_from_tree(file.tree, file.source, os.join_path(file.uri.dir_path(),
 		'modules'), ls.root_uri.path(), os.dir(os.dir(file_path)))
 
-	ls.store.register_symbols_from_tree(file.tree, file.source, false)
+	ls.store.register_symbols_from_tree(file.tree, file.source, false, start_line_nr: ls.last_modified_line)
 	ls.store.cleanup_imports()
 	if Feature.analyzer_diagnostics in ls.enabled_features {
 		ls.store.analyze(file.tree, file.source)
 	}
 	ls.reporter.publish(mut ls.writer, file.uri)
+	ls.last_modified_line = 0
 }
 
 pub fn (mut ls Vls) did_open(params lsp.DidOpenTextDocumentParams, mut wr ResponseWriter) {
@@ -109,8 +110,9 @@ pub fn (mut ls Vls) did_change(params lsp.DidChangeTextDocumentParams, mut wr Re
 
 	mut new_src := ls.files[uri].source
 	mut new_tree := ls.files[uri].tree.raw_tree.copy()
+	mut first_affected_start_offset := u32(0)
 
-	for content_change in params.content_changes {
+	for change_i, content_change in params.content_changes {
 		change_text := content_change.text
 		start_idx := compute_offset(new_src, content_change.range.start.line, content_change.range.start.character)
 		old_end_idx := compute_offset(new_src, content_change.range.end.line, content_change.range.end.character)
@@ -118,6 +120,10 @@ pub fn (mut ls Vls) did_change(params lsp.DidChangeTextDocumentParams, mut wr Re
 		start_pos := content_change.range.start
 		old_end_pos := content_change.range.end
 		new_end_pos := compute_position(new_src, new_end_idx)
+
+		if change_i == 0 {
+			first_affected_start_offset = u32(start_idx)
+		}
 
 		old_len := new_src.len()
 		new_len := old_len - (old_end_idx - start_idx) + change_text.len
@@ -156,6 +162,13 @@ pub fn (mut ls Vls) did_change(params lsp.DidChangeTextDocumentParams, mut wr Re
 	ls.files[uri].tree = ls.parser.parse_string(source: new_src.string(), tree: new_tree)
 	ls.files[uri].source = new_src
 	ls.files[uri].version = params.text_document.version
+
+	// record last first content change line for partial analysis
+	if first_affected_direct_node := ls.files[uri].tree.root_node().first_named_child_for_byte(first_affected_start_offset) {
+		ls.last_modified_line = first_affected_direct_node.raw_node.start_point().row
+	} else {
+		ls.last_modified_line = u32(params.content_changes[0].range.start.line)
+	}
 
 	if Feature.v_diagnostics !in ls.enabled_features {
 		ls.reporter.clear_from_range(
