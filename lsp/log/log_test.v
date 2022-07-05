@@ -4,71 +4,71 @@ import json
 
 struct TestLogItem {
 	kind    string
-	message string
+	payload string
 }
 
 fn test_notification_send() ? {
 	mut lg := new()
 
-	lg.notification('"Hello!"', .send)
+	lg.log(kind: .send_notification, payload: '"Hello!"'.bytes())
 	buf := lg.buffer.str()
 	result := json.decode(TestLogItem, buf) ?
 
 	assert result.kind == 'send-notification'
-	assert result.message == 'Hello!'
+	assert result.payload == 'Hello!'
 }
 
 fn test_notification_receive() ? {
 	mut lg := new()
 
-	lg.notification('"Received!"', .receive)
+	lg.log(kind: .recv_notification, payload: '"Received!"'.bytes())
 	buf := lg.buffer.str()
 	result := json.decode(TestLogItem, buf) ?
 
 	assert result.kind == 'recv-notification'
-	assert result.message == 'Received!'
+	assert result.payload == 'Received!'
 }
 
 fn test_request_send() ? {
 	mut lg := new()
 
-	lg.request('"Request sent."', .send)
+	lg.log(kind: .recv_request, payload: '"Request sent."'.bytes())
 	buf := lg.buffer.str()
 	result := json.decode(TestLogItem, buf) ?
 
-	assert result.kind == 'send-request'
-	assert result.message == 'Request sent.'
+	assert result.kind == 'recv-request'
+	assert result.payload == 'Request sent.'
 }
 
 fn test_request_receive() ? {
 	mut lg := new()
 
-	lg.request('"Request received."', .receive)
+	lg.log(kind: .recv_request, payload: '"Request received."'.bytes())
 	buf := lg.buffer.str()
 	result := json.decode(TestLogItem, buf) ?
 
 	assert result.kind == 'recv-request'
-	assert result.message == 'Request received.'
+	assert result.payload == 'Request received.'
 }
 
 fn test_response_send() ? {
 	mut lg := new()
 
-	lg.response('"Response sent."', .send)
+	lg.log(kind: .send_response, payload: '"Response sent."'.bytes())
 	buf := lg.buffer.str()
 	result := json.decode(TestLogItem, buf) ?
 
 	assert result.kind == 'send-response'
-	assert result.message == 'Response sent.'
+	assert result.payload == 'Response sent.'
 }
 
 fn test_response_receive() ? {
 	mut lg := new()
 
-	lg.response('"Response received."', .receive)
+	lg.log(kind: .send_response, payload: '"Response received."'.bytes())
 	buf := lg.buffer.str()
 	result := json.decode(TestLogItem, buf) ?
 
-	assert result.kind == 'recv-response'
-	assert result.message == 'Response received.'
+	assert result.kind == 'send-response'
+	assert result.payload == 'Response received.'
 }
