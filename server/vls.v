@@ -382,7 +382,9 @@ pub fn monitor_changes(mut ls Vls, mut resp_wr ResponseWriter) {
 				}
 
 				uri := lsp.document_uri_from_path(ls.store.cur_file_path)
-				ls.analyze_file(ls.files[uri])
+				ls.analyze_file(ls.files[uri], ls.last_affected_node, ls.last_modified_line)
+				ls.last_modified_line = 0
+				ls.last_affected_node = .unknown
 				ls.is_typing = false
 			}
 		}

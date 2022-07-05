@@ -4,28 +4,31 @@ import lsp
 import os
 import analyzer
 import ropes
+import tree_sitter_v as v
 
-fn (mut ls Vls) analyze_file(file File) {
+fn (mut ls Vls) analyze_file(file File, affected_node_type v.NodeType, affected_line u32) {
 	if Feature.v_diagnostics in ls.enabled_features {
 		ls.reporter.clear(file.uri)
 	}
+
+	is_import := affected_node_type == .import_declaration
 	file_path := file.uri.path()
 	ls.store.set_active_file_path(file_path, file.version)
 
 	// skip analyzing imports when affected is not an import declaration
-	if ls.last_affected_node == .import_declaration || ls.last_affected_node == .unknown {
+	if is_import || affected_line == 0 {
 		ls.store.import_modules_from_tree(file.tree, file.source, os.join_path(file.uri.dir_path(),
 			'modules'), ls.root_uri.path(), os.dir(os.dir(file_path)))
 
 		ls.store.cleanup_imports()
 	}
 
-	ls.store.register_symbols_from_tree(file.tree, file.source, false, start_line_nr: ls.last_modified_line)
+	ls.store.register_symbols_from_tree(file.tree, file.source, false, start_line_nr: affected_line)
 	if Feature.analyzer_diagnostics in ls.enabled_features {
 		ls.store.analyze(file.tree, file.source)
 	}
+
 	ls.reporter.publish(mut ls.writer, file.uri)
-	ls.last_modified_line = 0
 }
 
 pub fn (mut ls Vls) did_open(params lsp.DidOpenTextDocumentParams, mut wr ResponseWriter) {
@@ -86,7 +89,7 @@ pub fn (mut ls Vls) did_open(params lsp.DidOpenTextDocumentParams, mut wr Respon
 
 		// Analyze only if both source and tree exists
 		if should_be_analyzed {
-			ls.analyze_file(ls.files[file_uri])
+			ls.analyze_file(ls.files[file_uri], .unknown, 0)
 		}
 
 		// wr.log_message('$file_uri | has_file: $has_file | should_be_analyzed: $should_be_analyzed',
