@@ -114,6 +114,7 @@ mut:
 	status             ServerStatus = .off
 	root_uri           lsp.DocumentUri
 	last_modified_line u32 // for did_change
+	last_affected_node v.NodeType = v.NodeType.unknown
 	is_typing          bool
 	typing_ch          chan int
 	enabled_features   []Feature = server.default_features_list

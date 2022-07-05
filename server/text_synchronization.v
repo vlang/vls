@@ -11,11 +11,16 @@ fn (mut ls Vls) analyze_file(file File) {
 	}
 	file_path := file.uri.path()
 	ls.store.set_active_file_path(file_path, file.version)
-	ls.store.import_modules_from_tree(file.tree, file.source, os.join_path(file.uri.dir_path(),
-		'modules'), ls.root_uri.path(), os.dir(os.dir(file_path)))
+
+	// skip analyzing imports when affected is not an import declaration
+	if ls.last_affected_node == .import_declaration || ls.last_affected_node == .unknown {
+		ls.store.import_modules_from_tree(file.tree, file.source, os.join_path(file.uri.dir_path(),
+			'modules'), ls.root_uri.path(), os.dir(os.dir(file_path)))
+
+		ls.store.cleanup_imports()
+	}
 
 	ls.store.register_symbols_from_tree(file.tree, file.source, false, start_line_nr: ls.last_modified_line)
-	ls.store.cleanup_imports()
 	if Feature.analyzer_diagnostics in ls.enabled_features {
 		ls.store.analyze(file.tree, file.source)
 	}
@@ -166,8 +171,10 @@ pub fn (mut ls Vls) did_change(params lsp.DidChangeTextDocumentParams, mut wr Re
 	// record last first content change line for partial analysis
 	if first_affected_direct_node := ls.files[uri].tree.root_node().first_named_child_for_byte(first_affected_start_offset) {
 		ls.last_modified_line = first_affected_direct_node.raw_node.start_point().row
+		ls.last_affected_node = first_affected_direct_node.type_name
 	} else {
 		ls.last_modified_line = u32(params.content_changes[0].range.start.line)
+		ls.last_affected_node = .unknown
 	}
 
 	if Feature.v_diagnostics !in ls.enabled_features {
