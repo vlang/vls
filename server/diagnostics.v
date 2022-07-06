@@ -131,7 +131,7 @@ fn (mut ls Vls) exec_v_diagnostics(uri lsp.DocumentUri) ?int {
 	defer {
 		p.close()
 	}
-	p.wait()
+	p.run()
 	if p.code == 0 {
 		return none
 	}
