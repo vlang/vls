@@ -1,7 +1,7 @@
 module analyzer
 
 import os
-import analyzer.depgraph
+import structures.depgraph
 import tree_sitter
 import ast
 
