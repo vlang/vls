@@ -3,7 +3,7 @@ module server
 import lsp
 import os
 import analyzer
-import ropes
+import structures.ropes
 import tree_sitter_v as v
 
 fn (mut ls Vls) analyze_file(file File, affected_node_type v.NodeType, affected_line u32) {

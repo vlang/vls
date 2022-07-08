@@ -1,5 +1,5 @@
 // a v port of the https://github.com/vinzmay/go-rope/blob/master/rope_test.go test file
-import ropes
+import structures.ropes
 
 fn test_rope_creation() ? {
 	r := ropes.new('test')
