@@ -59,6 +59,7 @@ pub enum Feature {
 	definition
 	implementation
 	code_lens
+	document_link
 }
 
 // feature_from_str returns the Feature-enum value equivalent of the given string.
@@ -77,6 +78,7 @@ fn feature_from_str(feature_name string) ?Feature {
 		'folding_range' { return Feature.folding_range }
 		'definition' { return Feature.definition }
 		'code_lens' { return Feature.code_lens }
+		'document_link' { return Feature.document_link }
 		else { return error('feature "$feature_name" not found') }
 	}
 }
@@ -95,6 +97,7 @@ pub const (
 		.definition,
 		.implementation,
 		.code_lens,
+		.document_link,
 	]
 )
 
@@ -281,6 +284,14 @@ pub fn (mut ls Vls) handle_jsonrpc(request &jsonrpc.Request, mut rw jsonrpc.Resp
 				// 	return w.wrap_error(err)
 				// }
 				w.write(ls.code_lens(lsp.CodeLensParams{}, mut rw) or {
+					return w.wrap_error(err)
+				})
+			}
+			'textDocument/documentLink' {
+				// params := json.decode(lsp.DocumentLinkParams, request.params) or {
+				// 	return w.wrap_error(err)
+				// }
+				w.write(ls.document_link(lsp.DocumentLinkParams{}, mut rw) or {
 					return w.wrap_error(err)
 				})
 			}
