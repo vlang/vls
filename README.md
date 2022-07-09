@@ -8,6 +8,11 @@
 
 V Language Server (also known as "VLS") is a LSP v3.15-compatible language server for [the V programming language](https://github.com/vlang/v).
 
+## What is a language server?
+A language server is a software that understands the code provided by the user and provides information to supported text editors and IDEs. Think of it as a compiler that does not emit an executable but a format that your text editor can use in order for you to work on a project better and faster.
+
+Some of the commonly used features such as autocompletion / IntelliSense, go to definition, and diagnostics are directly handled by the language server itself and not by the dedicated language extensions.
+
 # Download / Installation
 ### Pre-built/Precompiled Binaries (Recommended)
 Pre-built binaries for Windows (x64), MacOS (x64/M1), and Linux (x64) can be found [here](https://github.com/vlang/vls/releases/latest).
