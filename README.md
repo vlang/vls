@@ -13,14 +13,18 @@ A language server is a software that understands the code provided by the user a
 
 Some of the commonly used features such as autocompletion / IntelliSense, go to definition, and diagnostics are directly handled by the language server itself and not by the dedicated language extensions.
 
-# Download / Installation
-### Pre-built/Precompiled Binaries (Recommended)
+# Installation
+You can get the V language server on a variety of methods.
+
+## Pre-built/Precompiled Binaries (Recommended)
 Pre-built binaries for Windows (x64), MacOS (x64/M1), and Linux (x64) can be found [here](https://github.com/vlang/vls/releases/latest).
 
-### VSCode
-The official [V VSCode extension](https://github.com/vlang/vscode-vlang) provides a way to automatically download and install VLS by checking the "Enable VLS" in the extension settings in which a message prompt will appear for you to install VLS.
+## VSCode
+The official [V VSCode extension](https://github.com/vlang/vscode-vlang) provides built-in support for VLS. To install VLS, go to the V section of your editor's settings and check the "Enable VLS" setting. This will look for any existing installation of VLS and will download a copy if there's none.
 
-### Build from Source
+If you want to use an existing copy of VLS, please refer to this [guide](#vscode-vscodium-and-other-derivatives).
+
+## Build from Source
 > **NOTE**: TCC, the default compiler shipped with V, is not recommended ATM due to
 > some issues in the Tree Sitter's output.
 
@@ -45,11 +49,11 @@ v run build.vsh clang
 # The binary will be created in the `bin` directory inside the vls folder.
 ```
 
-## Setup / Usage
+# Usage
 To use the language server, you need to have an editor with [LSP](https://microsoft.github.io/language-server-protocol/) support. See [this link](https://microsoft.github.io/language-server-protocol/implementors/tools/) for a full list of supported editors.
 
-### VSCode, VSCodium, and other derivatives
-> [GitHub Web Editor](https://github.dev) is not supported yet at this moment. See this [issue comment](https://github.com/vlang/vscode-vlang/issues/272#issuecomment-898271911).
+## VSCode, VSCodium, and other derivatives
+> [GitHub Web Editor](https://github.dev) and [VSCode Online](https://vscode.dev) are not supported yet at this moment. See this [issue comment](https://github.com/vlang/vscode-vlang/issues/272#issuecomment-898271911).
 
 For [Visual Studio Code](https://code.visualstudio.com) and other derivatives, all you need to do is to install 0.1.4 or above versions of the [V VSCode extension](https://github.com/vlang/vscode-vlang). Afterwards, go to settings and scroll to the V extension section. From there, enable VLS by checking the "Enable VLS" box.
 
@@ -57,7 +61,7 @@ If you have VLS downloaded in a custom directory, you need to input the absolute
 
 ![Instructions](images/instructions.png)
 
-### Sublime Text (3 and 4)
+## Sublime Text (3 and 4)
 For Sublime Text, please install the [LSP extension](https://packagecontrol.io/packages/LSP) via [Package Control](https://packagecontrol.io). Afterwards, open the command palette, select `Preferences: LSP Settings`, and add the following configuration:
 ```json
 {
@@ -73,12 +77,13 @@ For Sublime Text, please install the [LSP extension](https://packagecontrol.io/p
 
 If you cloned the repository and compiled it from source, the executable will be in the `vls` root directory. So make sure to set the `command` array to `vls/bin/vls` or `vls/bin/vls.exe` (for Windows).
 
-### Vim
+## Vim
 For Vim, please install [vim-lsp](https://github.com/prabirshrestha/vim-lsp) and [vim-lsp-settings](https://github.com/mattn/vim-lsp-settings). Afterwards, open any `.v` file, and execute `:LspInstallServer`.
 
-### Other Editors
-> VLS on JetBrain IDEs does not work at this moment. See [issue 52](https://github.com/vlang/vls/issues/52) for more details.
+## IntelliJ IDEA, GoLand, and other derivatives
+VLS on JetBrain / IntelliJ-based IDEs does not work at this moment. See [issue 52](https://github.com/vlang/vls/issues/52) for more details.
 
+## Other Editors
 For other editors, please refer to the plugin's/editor's documentation for instructions on how to setup an LSP server connection.
 
 ## Roadmap
