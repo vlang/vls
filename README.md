@@ -151,12 +151,12 @@ For other editors, please refer to the plugin's/editor's documentation for instr
 - [ ] `prepareRename`
 - [x] `foldingRange`
 
-## Crash Reporting
-When reporting a crash in the language server, you just need to copy the contents of the latest auto-generated error which can be found in the home directory (`C:\Users\<user_name>\.vls\reports` for Windows, `/home/<user_name>/.vls/reports` for Linux, and `/Users/<user_name>/.vls/reports` for MacOS). The contents of the file can be then pasted into the [issue tracker form](https://github.com/vlang/vls/issues/new).
+## Crash Reports
+VLS generates a report and notifies the user by default when something is wrong. These crash reports are accessible which can be found inside `C:\Users\<user_name\.vls\reports` for Windows and `~/.vls/reports` for both Linux and MacOS. The contents of the file can be then pasted into the [issue tracker form](https://github.com/vlang/vls/issues/new).
 
-Bugs that are not crashes however can still generate report by passing the `--generate-report` flag to the language server CLI.
+Bugs that are not crashes however can still generate reports by passing the `--generate-report` flag to the language server CLI.
 
-## Debugging
+## Logging
 VLS provides a log file (`${workspacePath}/vls.log`) for debugging the language server incoming requests and outgoing responses / notifications. By default, this can only be saved and accessed on server crash. To save the log on every exit, pass the `--debug` flag to the language server CLI.
 
 # Contributing
