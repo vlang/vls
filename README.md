@@ -13,6 +13,32 @@ A language server is a software that understands the code provided by the user a
 
 Some of the commonly used features such as autocompletion / IntelliSense, go to definition, and diagnostics are directly handled by the language server itself and not by the dedicated language extensions.
 
+## What does it support?
+Currently, VLS supports the following language features:
+
+| **Feature Name** | **Supported?** | **Notes** |
+|------------------|----------------|-----------|
+| Diagnostics | ✅ | Via `v -check` |
+| Completion | ✅ | Needs polish |
+| Hover | ✅ | |
+| Signature Help | ✅ | |
+| Go to Declaration | ❌ | |
+| Go to Definition | ✅ | |
+| Go to Implementation | ✅ | Limited to interfaces for now. |
+| References | ❌ | |
+| Document Highlight | ❌ | |
+| Code Action | ❌ | |
+| Document Symbol / Outline | ✅ | |
+| Workspace Symbols | ✅ | Limited to opened documents. |
+| Document Link | ✅ | Stub implementation |
+| Formatting | ✅| Via `v fmt` |
+| Range Formatting | ❌ | |
+| Type Formatting | ❌ | |
+| Rename | ❌ | |
+| Folding Range | ✅ | |
+
+For a full list of features/methods VLS supports, see[CAPABILITIES.md](CAPABILITIES.md).
+
 # Installation
 You can get the V language server on a variety of methods.
 
@@ -85,71 +111,6 @@ VLS on JetBrain / IntelliJ-based IDEs does not work at this moment. See [issue 5
 
 ## Other Editors
 For other editors, please refer to the plugin's/editor's documentation for instructions on how to setup an LSP server connection.
-
-## Roadmap
-- [ ] Queue support (support for cancelling requests)
-
-### General
-- [x] `initialize` (Activates features based on VSCode's capabilities for now.)
-- [x] `initialized`
-- [x] `shutdown`
-- [x] `exit`
-- [ ] `$/cancelRequest`
-<!-- - [ ] `$/progress` -->
-### Window
-- [x] `showMessage`
-- [x] `showMessageRequest`
-- [x] `logMessage`
-- [ ] `progress/create`
-- [ ] `progress/cancel`
-### Telemetry
-- [ ] `event` (Implemented but not usable)
-### Client
-- [ ] `registerCapability`
-- [ ] `unregisterCapability`
-### Workspace
-- [ ] `workspaceFolders`
-- [ ] `didChangeWorkspaceFolder`
-- [ ] `didChangeConfiguration`
-- [ ] `configuration`
-- [x] `didChangeWatchedFiles`
-- [x] `symbol`
-- [ ] `executeCommand`
-- [ ] `applyEdit`
-### Text Synchronization
-- [x] `didOpen`
-- [x] `didChange`
-- [ ] `willSave`
-- [ ] `willSaveWaitUntil`
-- [x] `didSave`
-- [x] `didClose`
-### Diagnostics
-- [x] `publishDiagnostics`
-### Language Features
-- [x] `completion`
-- [ ] `completion resolve`
-- [x] `hover`
-- [x] `signatureHelp`
-- [ ] `declaration`
-- [x] `definition`
-- [ ] `typeDefinition`
-- [x] `implementation`
-- [ ] `references`
-- [ ] `documentHighlight`
-- [x] `documentSymbol`
-- [ ] `codeAction`
-- [x] `codeLens` (**stub**)
-- [ ] `codeLens resolve`
-- [x] `documentLink` (**stub**)
-- [ ] `documentLink resolve`
-- [ ] `documentColor`
-- [ ] `colorPresentation`
-- [x] `formatting`
-- [ ] `rangeFormatting`
-- [ ] `onTypeFormatting`
-- [ ] `rename`
-- [ ] `prepareRename`
-- [x] `foldingRange`
 
 ## Crash Reports
 VLS generates a report and notifies the user by default when something is wrong. These crash reports are accessible which can be found inside `C:\Users\<user_name\.vls\reports` for Windows and `~/.vls/reports` for both Linux and MacOS. The contents of the file can be then pasted into the [issue tracker form](https://github.com/vlang/vls/issues/new).
