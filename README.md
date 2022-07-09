@@ -132,9 +132,9 @@ For other editors, please refer to the plugin's/editor's documentation for instr
 - [ ] `documentHighlight`
 - [x] `documentSymbol`
 - [ ] `codeAction`
-- [ ] `codeLens`
+- [x] `codeLens` (**stub**)
 - [ ] `codeLens resolve`
-- [ ] `documentLink`
+- [x] `documentLink` (**stub**)
 - [ ] `documentLink resolve`
 - [ ] `documentColor`
 - [ ] `colorPresentation`
