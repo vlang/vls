@@ -33,20 +33,16 @@ To build the language server from source, you need to have the following:
 > and other community-maintained packages, please do `v up` first
 > before proceeding.
 
-Linux and MacOS users are also expected to install the Boehm GC library.
-- For Debian/Ubuntu users: `sudo apt-get install libgc-dev`
-- For MacOS (via Homebrew): `brew install bdw-gc`
-
 Afterwards, open your operating system's terminal and execute the following:
 ```
 ## Clone the project:
 git clone https://github.com/vlang/vls && cd vls
 
 ## Build the project
-## Use " v run build.vsh gcc" if you're compiling VLS with GCC.
+## Use "v run build.vsh gcc" if you're compiling VLS with GCC.
 v run build.vsh clang
 
-# The binary will be created in the current root directory `vls`.
+# The binary will be created in the `bin` directory inside the vls folder.
 ```
 
 ## Setup / Usage
