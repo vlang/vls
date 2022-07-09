@@ -54,7 +54,8 @@ fn test_set_features() {
 		.folding_range,
 		.definition,
 		.implementation,
-		.code_lens
+		.code_lens,
+		.document_link
 	]
 	ls.set_features(['formatting'], true) or {
 		assert false
@@ -72,6 +73,7 @@ fn test_set_features() {
 		.definition,
 		.implementation,
 		.code_lens,
+		.document_link,
 		.formatting,
 	]
 	ls.set_features(['logging'], true) or {
