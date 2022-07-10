@@ -93,7 +93,7 @@ fn setup_and_configure_io(cmd cli.Command, is_child bool) ?io.ReaderWriter {
 fn setup_logger(cmd cli.Command) jsonrpc.Interceptor {
 	debug_mode := cmd.flags.get_bool('debug') or { false }
 	return &LogRecorder{
-		enabled: !debug_mode
+		enabled: debug_mode
 	}
 }
 
