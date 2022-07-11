@@ -116,6 +116,7 @@ mut:
 	store              analyzer.Store
 	status             ServerStatus = .off
 	root_uri           lsp.DocumentUri
+	current_file_uri   lsp.DocumentUri
 	last_modified_line u32 // for did_change
 	last_affected_node v.NodeType = v.NodeType.unknown
 	is_typing          bool
@@ -392,8 +393,7 @@ pub fn monitor_changes(mut ls Vls, mut resp_wr ResponseWriter) {
 					continue
 				}
 
-				uri := lsp.document_uri_from_path(ls.store.cur_file_path)
-				ls.analyze_file(ls.files[uri], ls.last_affected_node, ls.last_modified_line)
+				ls.analyze_file(ls.files[ls.current_file_uri], ls.last_affected_node, ls.last_modified_line)
 				ls.last_modified_line = 0
 				ls.last_affected_node = .unknown
 				ls.is_typing = false

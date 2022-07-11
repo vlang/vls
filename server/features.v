@@ -167,8 +167,7 @@ fn (mut ls Vls) signature_help(params lsp.SignatureHelpParams, mut wr ResponseWr
 		return none
 	}
 
-	ls.store.set_active_file_path(uri.path(), file.version)
-	sym := ls.store.infer_symbol_from_node(node, file.source) or {
+	sym := ls.store.infer_symbol_from_node(uri.path(), node, file.source) or {
 		return none
 	}
 
@@ -232,12 +231,13 @@ pub fn (mut ls Vls) hover(params lsp.HoverParams, mut wr ResponseWriter) ?lsp.Ho
 	file := ls.files[uri] or { return none }
 	offset := file.get_offset(pos.line, pos.character)
 	node := traverse_node(file.tree.root_node(), u32(offset))
-	ls.store.set_active_file_path(uri.path(), file.version)
 	return get_hover_data(mut ls.store, node, uri, file.source, u32(offset))
 }
 
 fn get_hover_data(mut store analyzer.Store, node ast.Node, uri lsp.DocumentUri, source tree_sitter.SourceText, offset u32) ?lsp.Hover {
 	node_type_name := node.type_name
+	file_path := uri.path()
+
 	if node.is_null() || node_type_name == .comment {
 		return none
 	}
@@ -252,12 +252,13 @@ fn get_hover_data(mut store analyzer.Store, node ast.Node, uri lsp.DocumentUri, 
 			range: tsrange_to_lsp_range(node.range())
 		}
 	} else if node_type_name == .import_path {
-		found_imp := store.imports.find_by_position(store.cur_file_path, node.range()) ?
-		alias := found_imp.aliases[store.cur_file_name] or { '' }
+		file_name := os.base(file_path)
+		found_imp := store.imports.find_by_position(file_path, node.range()) ?
+		alias := found_imp.aliases[file_name] or { '' }
 		return lsp.Hover{
 			contents: lsp.v_marked_string('import $found_imp.absolute_module_name' +
 				if alias.len > 0 { ' as $alias' } else { '' })
-			range: tsrange_to_lsp_range(found_imp.ranges[store.cur_file_path])
+			range: tsrange_to_lsp_range(found_imp.ranges[file_path])
 		}
 	} else if parent_node.is_error() || parent_node.is_missing() {
 		return none
@@ -272,10 +273,10 @@ fn get_hover_data(mut store analyzer.Store, node ast.Node, uri lsp.DocumentUri, 
 		}
 	}
 
-	mut sym := store.infer_symbol_from_node(node, source) or { analyzer.void_sym }
+	mut sym := store.infer_symbol_from_node(file_path, node, source) or { analyzer.void_sym }
 	if isnil(sym) || sym.is_void() {
 		closest_parent := closest_symbol_node_parent(node)
-		sym = store.infer_symbol_from_node(closest_parent, source) or { analyzer.void_sym }
+		sym = store.infer_symbol_from_node(file_path, closest_parent, source) or { analyzer.void_sym }
 	}
 
 	// eprintln('$node_type_name | ${node.text(source)} | $sym')
@@ -414,8 +415,7 @@ pub fn (mut ls Vls) definition(params lsp.TextDocumentPositionParams, mut wr Res
 		return none
 	}
 
-	ls.store.set_active_file_path(uri.path(), file.version)
-	sym := ls.store.infer_symbol_from_node(node, source) or { analyzer.void_sym }
+	sym := ls.store.infer_symbol_from_node(uri.path(), node, source) or { analyzer.void_sym }
 	if isnil(sym) || sym.is_void() {
 		return none
 	}
@@ -474,6 +474,8 @@ pub fn (mut ls Vls) implementation(params lsp.TextDocumentPositionParams, mut wr
 	}
 
 	uri := params.text_document.uri
+	file_path := uri.path()
+	file_dir := uri.dir_path()
 	pos := params.position
 	file := ls.files[uri] or { return none }
 	source := file.source
@@ -491,14 +493,12 @@ pub fn (mut ls Vls) implementation(params lsp.TextDocumentPositionParams, mut wr
 		return none
 	}
 
-	ls.store.set_active_file_path(uri.path(), file.version)
-
 	mut got_sym := unsafe { analyzer.void_sym }
 	if parent_node := node.parent() {
 		if parent_node.type_name == .interface_declaration {
-			got_sym = ls.store.symbols[ls.store.cur_dir].get(node.text(source)) or { got_sym }
+			got_sym = ls.store.symbols[file_dir].get(node.text(source)) or { got_sym }
 		} else {
-			got_sym = ls.store.infer_value_type_from_node(node, source)
+			got_sym = ls.store.infer_value_type_from_node(uri.path(), node, source)
 		}
 	}
 
@@ -516,12 +516,12 @@ pub fn (mut ls Vls) implementation(params lsp.TextDocumentPositionParams, mut wr
 
 	// check first the possible interfaces implemented by the symbol
 	// at the current directory...
-	get_implementation_locations_from_syms(ls.store.symbols[ls.store.cur_dir], got_sym,
+	get_implementation_locations_from_syms(ls.store.symbols[file_dir], got_sym,
 		original_range, mut locations)
 
 	// ...afterwards to the imported modules
-	for imp in ls.store.imports[ls.store.cur_dir] {
-		if ls.store.cur_file_path !in imp.ranges {
+	for imp in ls.store.imports[file_dir] {
+		if file_path !in imp.ranges {
 			continue
 		}
 

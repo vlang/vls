@@ -8,9 +8,11 @@ const numeric_types_with_any_type = ['u8', 'u16', 'u32', 'u64' 'i8', 'i16', 'int
 pub fn setup_builtin(mut store Store, builtin_path string) {
 	mut importer := Importer{
 		store: unsafe { store }
+		file_path: ''
 	}
 	
 	mut builtin_import, _ := store.add_import(
+		'',
 		resolved: true
 		module_name: 'builtin'
 		path: builtin_path

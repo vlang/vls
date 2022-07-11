@@ -13,19 +13,18 @@ fn (mut ls Vls) analyze_file(file File, affected_node_type v.NodeType, affected_
 
 	is_import := affected_node_type == .import_declaration
 	file_path := file.uri.path()
-	ls.store.set_active_file_path(file_path, file.version)
 
 	// skip analyzing imports when affected is not an import declaration
 	if is_import || affected_line == 0 {
-		ls.store.import_modules_from_tree(file.tree, file.source, os.join_path(file.uri.dir_path(),
+		ls.store.import_modules_from_tree(file_path, file.tree, file.source, os.join_path(file.uri.dir_path(),
 			'modules'), ls.root_uri.path(), os.dir(os.dir(file_path)))
 
-		ls.store.cleanup_imports()
+		ls.store.cleanup_imports(file.uri.dir_path())
 	}
 
-	ls.store.register_symbols_from_tree(file.tree, file.source, false, start_line_nr: affected_line)
+	ls.store.register_symbols_from_tree(file_path, file.version, file.tree, file.source, false, start_line_nr: affected_line)
 	if !is_import && Feature.analyzer_diagnostics in ls.enabled_features {
-		ls.store.analyze(file.tree, file.source, start_line_nr: affected_line)
+		ls.store.analyze(file_path, file.tree, file.source, start_line_nr: affected_line)
 	}
 
 	ls.reporter.publish(mut ls.writer, file.uri)
@@ -96,20 +95,19 @@ pub fn (mut ls Vls) did_open(params lsp.DidOpenTextDocumentParams, mut wr Respon
 		// 	.info)
 	}
 
-	ls.store.set_active_file_path(uri.path(), ls.files[uri].version)
 	ls.exec_v_diagnostics(uri) or {}
 	ls.reporter.publish(mut wr, uri)
 }
 
 pub fn (mut ls Vls) did_change(params lsp.DidChangeTextDocumentParams, mut wr ResponseWriter) {
 	uri := params.text_document.uri
-	if !ls.store.is_file_active(uri.path()) {
+	if ls.current_file_uri != uri {
+		ls.current_file_uri = uri
 		ls.parser.reset()
 	}
 
-	ls.store.set_active_file_path(uri.path(), params.text_document.version)
-
 	ls.store.delete_symbol_at_node(
+		uri.path(),
 		ls.files[uri].tree.root_node(), 
 		ls.files[uri].source,
 		u32(params.content_changes.first().range.start.line), 

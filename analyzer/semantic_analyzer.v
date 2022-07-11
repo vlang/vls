@@ -34,6 +34,7 @@ pub struct SemanticAnalyzer {
 pub mut:
 	src_text   tree_sitter.SourceText = Runes([]rune{len: 0})
 	store      &Store     [required]
+	file_path  string     [required]
 	parent_sym &Symbol = analyzer.void_sym
 	// skips the local scopes and registers only
 	// the top-level ones regardless of its
@@ -48,6 +49,7 @@ fn (an &SemanticAnalyzer) in_function() bool {
 fn (an &SemanticAnalyzer) with_symbol(sym &Symbol) &SemanticAnalyzer {
 	return &SemanticAnalyzer{
 		src_text: an.src_text
+		file_path: an.file_path
 		store: an.store
 		parent_sym: sym
 		is_import: an.is_import
@@ -70,7 +72,7 @@ fn (mut an SemanticAnalyzer) report(node ast.Node, code_or_msg string, data ...R
 			kind: .error
 			message: if is_msg_code { errors.message_templates[code_or_msg] } else { code_or_msg }
 			range: node.range()
-			file_path: an.store.cur_file_path
+			file_path: an.file_path
 			code: if is_msg_code { code_or_msg } else { '' }
 			data: SemanticAnalyzerContext{data}
 		)
@@ -135,7 +137,7 @@ fn (mut an SemanticAnalyzer) import_decl(node ast.Node) ? {
 	module_name := module_name_node.text(an.src_text)
 	// defer { unsafe { module_name.free() } }
 
-	module_path := an.store.get_module_path_opt(module_name) or {
+	module_path := an.store.get_module_path_opt(module_name, os.base(an.file_path)) or {
 		// `import_modules_from_trees` already reported it
 		return
 	}
@@ -224,7 +226,7 @@ fn (mut an SemanticAnalyzer) fn_decl(node ast.Node) {
 	body_node := node.child_by_field_name('body') or { return }
 	if name_node := node.child_by_field_name('name') {
 		fn_name := name_node.text(an.src_text)
-		if sym := an.store.find_symbol('', fn_name) {
+		if sym := an.store.find_symbol(an.file_path, '', fn_name) {
 			mut inst := an.with_symbol(sym)
 			inst.block(body_node)
 			return
@@ -239,7 +241,7 @@ fn (mut an SemanticAnalyzer) type_decl(node ast.Node) ? {
 
 	for i in u32(0) .. types_count {
 		type_node := types_node.named_child(i) or { continue }
-		got_sym := an.store.find_symbol_by_type_node(type_node, an.src_text) or {
+		got_sym := an.store.find_symbol_by_type_node(an.file_path, type_node, an.src_text) or {
 			analyzer.void_sym
 		}
 
@@ -474,7 +476,7 @@ const or_operators = ["||"]
 fn (an &SemanticAnalyzer) convert_to_lit_type(node ast.Node) ?&Symbol {
 	node_type := node.type_name
 	if node_type == .float_literal || (node_type == .int_literal && node.text(an.src_text).int() < 17) {
-		return an.store.find_symbol('', node.raw_node.type_name())
+		return an.store.find_symbol(an.file_path, '', node.raw_node.type_name())
 	}
 	return none
 }
@@ -554,7 +556,7 @@ pub fn (mut an SemanticAnalyzer) type_initializer(node ast.Node) ?&Symbol {
 	match sym_kind {
 		.array_, .variadic {
 			el_node := type_node.child_by_field_name('element')?
-			el_sym := an.store.find_symbol_by_type_node(el_node, an.src_text) or { analyzer.void_sym }
+			el_sym := an.store.find_symbol_by_type_node(an.file_path, el_node, an.src_text) or { analyzer.void_sym }
 			if el_sym.is_void() || el_sym.kind == .placeholder {
 				return an.report(el_node, errors.unknown_type_error, el_node.text(an.src_text))
 			} else if el_sym.kind == .sumtype {
@@ -573,7 +575,7 @@ pub fn (mut an SemanticAnalyzer) type_initializer(node ast.Node) ?&Symbol {
 		}
 		.map_ {
 			key_node := type_node.child_by_field_name('key')?
-			key_sym := an.store.find_symbol_by_type_node(key_node, an.src_text) or {
+			key_sym := an.store.find_symbol_by_type_node(an.file_path, key_node, an.src_text) or {
 				analyzer.void_sym
 			}
 
@@ -582,7 +584,7 @@ pub fn (mut an SemanticAnalyzer) type_initializer(node ast.Node) ?&Symbol {
 			}
 
 			val_node := type_node.child_by_field_name('value')?
-			val_sym := an.store.find_symbol_by_type_node(val_node, an.src_text) or {
+			val_sym := an.store.find_symbol_by_type_node(an.file_path, val_node, an.src_text) or {
 				analyzer.void_sym
 			}
 
@@ -592,7 +594,7 @@ pub fn (mut an SemanticAnalyzer) type_initializer(node ast.Node) ?&Symbol {
 		}
 		.chan_, .ref, .optional {
 			el_node := type_node.named_child(0)?
-			el_sym := an.store.find_symbol_by_type_node(el_node, an.src_text) or {
+			el_sym := an.store.find_symbol_by_type_node(an.file_path, el_node, an.src_text) or {
 				analyzer.void_sym
 			}
 
@@ -601,7 +603,7 @@ pub fn (mut an SemanticAnalyzer) type_initializer(node ast.Node) ?&Symbol {
 			}
 		}
 		.placeholder {
-			typ_sym := an.store.find_symbol_by_type_node(type_node, an.src_text)?
+			typ_sym := an.store.find_symbol_by_type_node(an.file_path, type_node, an.src_text)?
 			if typ_sym.kind == .typedef && typ_sym.parent_sym.kind == .map_ {
 				return an.report(node, errors.typedef_map_init_error, {
 					'type_name': typ_sym.gen_str(with_kind: false, with_contents: false, with_access: false)
@@ -612,13 +614,13 @@ pub fn (mut an SemanticAnalyzer) type_initializer(node ast.Node) ?&Symbol {
 		else {}
 	}
 
-	return an.store.find_symbol(module_name, symbol_name)
+	return an.store.find_symbol(an.file_path, module_name, symbol_name)
 }
 
 pub fn (mut an SemanticAnalyzer) selector_expression(node ast.Node) ?&Symbol {
 	operand := node.child_by_field_name('operand')?
 	mut root_sym := an.expression(operand, as_value: true) or {
-		an.store.infer_symbol_from_node(operand, an.src_text) or { analyzer.void_sym }
+		an.store.infer_symbol_from_node(an.file_path, operand, an.src_text) or { analyzer.void_sym }
 	}
 
 	if !root_sym.is_void() {
@@ -637,9 +639,9 @@ pub fn (mut an SemanticAnalyzer) selector_expression(node ast.Node) ?&Symbol {
 			if root_sym.kind in [.ref, .chan_, .optional] {
 				base_root_sym = root_sym.parent_sym
 			} else if root_sym.kind == .array_ {
-				base_root_sym = an.store.find_symbol('', 'array') or { analyzer.void_sym }
+				base_root_sym = an.store.find_symbol(an.file_path, '', 'array') or { analyzer.void_sym }
 			} else if root_sym.kind == .map_ {
-				base_root_sym = an.store.find_symbol('', 'map') or { analyzer.void_sym }
+				base_root_sym = an.store.find_symbol(an.file_path, '', 'map') or { analyzer.void_sym }
 			}
 			base_root_sym.children_syms.get(child_name) or { void_sym }
 		}
@@ -727,11 +729,11 @@ pub fn (mut an SemanticAnalyzer) array(node ast.Node) ?&Symbol {
 	}
 
 	symbol_name := '[]' + expected_sym.gen_str(with_kind: false, with_access: false, with_contents: false)
-	return an.store.find_symbol('', symbol_name) or {
+	return an.store.find_symbol(an.file_path, '', symbol_name) or {
 		mut new_sym := Symbol{
 			name: symbol_name.clone()
 			is_top_level: true
-			file_path: os.join_path(an.store.cur_dir, 'placeholder.vv')
+			file_path: os.join_path(os.dir(an.file_path), 'placeholder.vv')
 			file_version: 0
 			kind: .array_
 		}
@@ -866,7 +868,7 @@ pub fn (mut an SemanticAnalyzer) type_cast_expression(node ast.Node) ?&Symbol {
 	type_node := node.child_by_field_name('type')?
 	operand_node := node.child_by_field_name('operand')?
 
-	type_sym := an.store.find_symbol_by_type_node(type_node, an.src_text) or { analyzer.void_sym }
+	type_sym := an.store.find_symbol_by_type_node(an.file_path, type_node, an.src_text) or { analyzer.void_sym }
 	operand_sym := an.expression(operand_node, as_value: true) or { analyzer.void_sym }
 
 	if operand_sym.name == 'bool' && type_sym.name == 'string' {
@@ -1027,7 +1029,7 @@ pub struct SemanticExpressionAnalyzeConfig {
 pub fn (mut an SemanticAnalyzer) expression(node ast.Node, cfg SemanticExpressionAnalyzeConfig) ?&Symbol {
 	match node.type_name {
 		.true_, .false_ {
-			return an.store.infer_value_type_from_node(node, an.src_text)
+			return an.store.infer_value_type_from_node(an.file_path, node, an.src_text)
 		}
 		.call_expression {
 			return an.call_expression(node)
@@ -1046,10 +1048,10 @@ pub fn (mut an SemanticAnalyzer) expression(node ast.Node, cfg SemanticExpressio
 		}
 		.unary_expression {
 			// TODO: temporary fix
-			return an.store.infer_value_type_from_node(node, an.src_text)
+			return an.store.infer_value_type_from_node(an.file_path, node, an.src_text)
 		}
 		.int_literal, .float_literal {
-			return an.store.infer_value_type_from_node(node, an.src_text)
+			return an.store.infer_value_type_from_node(an.file_path, node, an.src_text)
 		}
 		.parenthesized_expression {
 			return an.expression(node.named_child(0)?, cfg)
@@ -1077,7 +1079,7 @@ pub fn (mut an SemanticAnalyzer) expression(node ast.Node, cfg SemanticExpressio
 			return an.spread_operator(node)
 		}
 		else {
-			sym := an.store.infer_symbol_from_node(node, an.src_text) or { void_sym }
+			sym := an.store.infer_symbol_from_node(an.file_path, node, an.src_text) or { void_sym }
 			if sym.kind == .variable || sym.kind == .field {
 				// if sym.name == an.cur_fn_name && sym.kind == .variable {
 				// 	parent := node.parent()?
@@ -1131,10 +1133,11 @@ pub fn (mut an SemanticAnalyzer) analyze_from_cursor(mut cursor TreeCursor) {
 }
 
 // analyze analyzes the given tree
-pub fn (mut store Store) analyze(tree &ast.Tree, src_text tree_sitter.SourceText, cfg NewTreeCursorConfig) {
+pub fn (mut store Store) analyze(file_path string, tree &ast.Tree, src_text tree_sitter.SourceText, cfg NewTreeCursorConfig) {
 	mut an := SemanticAnalyzer{
 		store: unsafe { store }
 		src_text: src_text
+		file_path: file_path
 	}
 
 	mut cursor := new_tree_cursor(tree.root_node(), cfg)

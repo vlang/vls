@@ -24,10 +24,13 @@ fn test_semantic_analysis() ? {
 	mut sym_analyzer := SymbolAnalyzer{
 		store: store
 		is_test: true
+		file_path: ''
+		file_version: 1
 	}
 
 	mut semantic_analyzer := SemanticAnalyzer{
 		store: store
+		file_path: ''
 	}
 
 	test_files_dir := test_utils.get_test_files_path(@FILE)
@@ -39,8 +42,6 @@ fn test_semantic_analysis() ? {
 
 	bench.set_total_expected_steps(test_files.len)
 	for test_file_path in test_files {
-		store.set_active_file_path(test_file_path, 1)
-
 		bench.step()
 		test_name := os.base(test_file_path)
 		content := os.read_file(test_file_path) or {
@@ -49,6 +50,8 @@ fn test_semantic_analysis() ? {
 			continue
 		}
 
+		semantic_analyzer.file_path = test_file_path
+		sym_analyzer.file_path = test_file_path
 		src, expected := test_utils.parse_test_file_content(content)
 		err_msg := if src.len == 0 || content.len == 0 {
 			'file $test_name has empty content'
@@ -66,7 +69,7 @@ fn test_semantic_analysis() ? {
 		tree := p.parse_string(source: src)
 		src_runes := Runes(src.runes())
 		mut cursor := new_tree_cursor(tree.root_node())
-		store.import_modules_from_tree(tree, src_runes, vlib_path)
+		store.import_modules_from_tree(test_file_path, tree, src_runes, vlib_path)
 
 		sym_analyzer.src_text = src_runes
 		semantic_analyzer.src_text = src_runes
@@ -89,7 +92,7 @@ fn test_semantic_analysis() ? {
 		}
 
 		reporter.clear()
-		store.delete(store.cur_dir)
+		store.delete(os.dir(test_file_path))
 	}
 	assert bench.nfail == 0
 	bench.stop()

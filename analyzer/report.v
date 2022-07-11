@@ -2,8 +2,9 @@ module analyzer
 
 pub struct AnalyzerError {
 	Error
-	msg   string
-	range C.TSRange
+	msg       string
+	file_path string
+	range     C.TSRange
 }
 
 pub fn (err AnalyzerError) msg() string {
@@ -30,7 +31,7 @@ pub fn (mut ss Store) report_error(err IError) {
 			kind: .error
 			message: err.msg
 			range: err.range
-			file_path: ss.cur_file_path
+			file_path: err.file_path
 		)
 	}
 }

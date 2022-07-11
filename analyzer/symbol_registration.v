@@ -15,9 +15,11 @@ const (
 pub struct SymbolAnalyzer {
 pub mut:
 	src_text    ts.SourceText = Runes([]rune{len: 0})
+	file_path    string [required]
+	file_version int    [required]
 mut:
-	store       &Store [required]
-	module_name string
+	store        &Store [required]
+	module_name  string
 	// skips the local scopes and registers only
 	// the top-level ones regardless of its
 	// visibility
@@ -37,8 +39,8 @@ fn (sr &SymbolAnalyzer) new_top_level_symbol(identifier_node ast.Node, access Sy
 		access: access
 		kind: kind
 		is_top_level: true
-		file_path: sr.store.cur_file_path
-		file_version: sr.store.cur_version
+		file_path: sr.file_path
+		file_version: sr.file_version
 	}
 
 	match id_node_type_name {
@@ -83,7 +85,7 @@ fn (mut sr SymbolAnalyzer) get_scope(node ast.Node) ?&ScopeTree {
 		return error('Cannot use scope in import or test mode')
 	}
 
-	return sr.store.get_scope_from_node(node)
+	return sr.store.get_scope_from_node(sr.file_path, node)
 }
 
 fn (mut sr SymbolAnalyzer) const_decl(const_node ast.Node) ?[]&Symbol {
@@ -115,8 +117,8 @@ fn (mut sr SymbolAnalyzer) const_decl(const_node ast.Node) ?[]&Symbol {
 			range: spec_node.child_by_field_name('name') ?.range()
 			is_top_level: true
 			is_const: true
-			file_path: sr.store.cur_file_path
-			file_version: sr.store.cur_version
+			file_path: sr.file_path
+			file_version: sr.file_version
 			return_sym: return_sym
 		}
 	}
@@ -171,7 +173,7 @@ fn (mut sr SymbolAnalyzer) struct_decl(struct_decl_node ast.Node) ?&Symbol {
 
 fn (mut sr SymbolAnalyzer) struct_field_decl(field_access SymbolAccess, field_decl_node ast.Node) ?&Symbol {
 	field_type_node := field_decl_node.child_by_field_name('type') ?
-	field_sym := sr.store.find_symbol_by_type_node(field_type_node, sr.src_text) or { void_sym }
+	field_sym := sr.store.find_symbol_by_type_node(sr.file_path, field_type_node, sr.src_text) or { void_sym }
 	field_name_node := field_decl_node.child_by_field_name('name') or {
 		// struct embedding
 		_, _, symbol_name := symbol_name_from_node(field_type_node, sr.src_text)
@@ -186,8 +188,8 @@ fn (mut sr SymbolAnalyzer) struct_field_decl(field_access SymbolAccess, field_de
 			access: field_access
 			return_sym: field_sym
 			is_top_level: true
-			file_path: sr.store.cur_file_path
-			file_version: sr.store.cur_version
+			file_path: sr.file_path
+			file_version: sr.file_version
 		}
 	}
 
@@ -198,8 +200,8 @@ fn (mut sr SymbolAnalyzer) struct_field_decl(field_access SymbolAccess, field_de
 		access: field_access
 		return_sym: field_sym
 		is_top_level: true
-		file_path: sr.store.cur_file_path
-		file_version: sr.store.cur_version
+		file_path: sr.file_path
+		file_version: sr.file_version
 	}
 }
 
@@ -236,15 +238,15 @@ fn (mut sr SymbolAnalyzer) interface_decl(interface_decl_node ast.Node) ?&Symbol
 					kind: .function
 					access: method_access
 					range: name_node.range()
-					return_sym: sr.store.find_symbol_by_type_node(result_node, sr.src_text) or {
+					return_sym: sr.store.find_symbol_by_type_node(sr.file_path, result_node, sr.src_text) or {
 						void_sym
 					}
-					file_path: sr.store.cur_file_path
-					file_version: sr.store.cur_version
+					file_path: sr.file_path
+					file_version: sr.file_version
 					is_top_level: true
 				}
 
-				mut children := extract_parameter_list(param_node, mut sr.store, sr.src_text)
+				mut children := extract_parameter_list(sr.file_path, param_node, mut sr.store, sr.src_text)
 				for j := 0; j < children.len; j++ {
 					mut child := children[j]
 					method_sym.add_child(mut child) or {
@@ -297,7 +299,7 @@ fn (mut sr SymbolAnalyzer) enum_decl(enum_decl_node ast.Node) ?&Symbol {
 			continue
 		}
 
-		int_sym := sr.store.find_symbol('', 'int') or {
+		int_sym := sr.store.find_symbol(sr.file_path, '', 'int') or {
 			mut new_int_symbol := Symbol{
 				name: 'int'
 				kind: .typedef
@@ -316,8 +318,8 @@ fn (mut sr SymbolAnalyzer) enum_decl(enum_decl_node ast.Node) ?&Symbol {
 			access: access
 			return_sym: int_sym
 			is_top_level: true
-			file_path: sr.store.cur_file_path
-			file_version: sr.store.cur_version
+			file_path: sr.file_path
+			file_version: sr.file_version
 		}
 
 		sym.add_child(mut member_sym) or {
@@ -355,9 +357,9 @@ fn (mut sr SymbolAnalyzer) fn_decl(fn_node ast.Node) ?&Symbol {
 	mut fn_sym := sr.new_top_level_symbol(name_node, access, .function) ?
 	mut scope := sr.get_scope(body_node) or { &ScopeTree(0) }
 	fn_sym.access = access
-	fn_sym.return_sym = sr.store.find_symbol_by_type_node(return_node, sr.src_text) or { void_sym }
+	fn_sym.return_sym = sr.store.find_symbol_by_type_node(sr.file_path, return_node, sr.src_text) or { void_sym }
 	if receiver_node := fn_node.child_by_field_name('receiver') {
-		mut receivers := extract_parameter_list(receiver_node, mut sr.store, sr.src_text)
+		mut receivers := extract_parameter_list(sr.file_path, receiver_node, mut sr.store, sr.src_text)
 		if receivers.len != 0 {
 			mut parent := receivers[0].return_sym
 			if !isnil(parent) && !parent.is_void() {
@@ -373,7 +375,7 @@ fn (mut sr SymbolAnalyzer) fn_decl(fn_node ast.Node) ?&Symbol {
 	}
 
 	// scan params
-	mut params := extract_parameter_list(params_list_node, mut sr.store, sr.src_text)
+	mut params := extract_parameter_list(sr.file_path, params_list_node, mut sr.store, sr.src_text)
 	// defer {
 	// 	unsafe { params.free() }
 	// }
@@ -408,7 +410,7 @@ fn (mut sr SymbolAnalyzer) type_decl(type_decl_node ast.Node) ?&Symbol {
 	} else if types_count == 1 {
 		// alias type
 		if selected_type_node := types_node.named_child(0) {
-			found_sym := sr.store.find_symbol_by_type_node(selected_type_node, sr.src_text) or {
+			found_sym := sr.store.find_symbol_by_type_node(sr.file_path, selected_type_node, sr.src_text) or {
 				void_sym
 			}
 
@@ -418,7 +420,7 @@ fn (mut sr SymbolAnalyzer) type_decl(type_decl_node ast.Node) ?&Symbol {
 		// sum type
 		for i in 0 .. types_count {
 			selected_type_node := types_node.named_child(i) or { continue }
-			mut found_sym := sr.store.find_symbol_by_type_node(selected_type_node, sr.src_text) or {
+			mut found_sym := sr.store.find_symbol_by_type_node(sr.file_path, selected_type_node, sr.src_text) or {
 				continue
 			}
 			sym.add_child(mut found_sym, false) or { continue }
@@ -431,7 +433,7 @@ fn (mut sr SymbolAnalyzer) type_decl(type_decl_node ast.Node) ?&Symbol {
 }
 
 fn (mut sr SymbolAnalyzer) top_level_decl(current_node ast.Node) ?[]&Symbol {
-	mut global_scope := sr.store.opened_scopes[sr.store.cur_file_path]
+	mut global_scope := sr.store.opened_scopes[sr.file_path]
 	node_type_name := current_node.type_name
 	match node_type_name {
 		// TODO: add module check
@@ -470,7 +472,7 @@ fn (mut sr SymbolAnalyzer) top_level_decl(current_node ast.Node) ?[]&Symbol {
 				sr.first_var_decl_pos = stmt_node.range()
 
 				// Check if main function is present
-				if main_fn_sym := sr.store.symbols[sr.store.cur_dir].get('main') {
+				if main_fn_sym := sr.store.symbols[os.dir(sr.file_path)].get('main') {
 					return IError(AnalyzerError{
 						msg: 'function `main` is already defined'
 						range: main_fn_sym.range
@@ -528,8 +530,8 @@ fn (mut sr SymbolAnalyzer) register_variable(sym &Symbol, left_expr_lists ast.No
 		range: left.range()
 		return_sym: sym
 		is_top_level: false
-		file_path: sr.store.cur_file_path
-		file_version: sr.store.cur_version
+		file_path: sr.file_path
+		file_version: sr.file_version
 	}
 }
 
@@ -538,10 +540,10 @@ fn (mut sr SymbolAnalyzer) fn_literal(fn_node ast.Node) ?&Symbol {
 	params_list_node := fn_node.child_by_field_name('parameters') ?
 
 	mut scope := sr.get_scope(body_node) or { &ScopeTree(0) }
-	mut params := extract_parameter_list(params_list_node, mut sr.store, sr.src_text)
+	mut params := extract_parameter_list(sr.file_path, params_list_node, mut sr.store, sr.src_text)
 	mut return_sym := unsafe { void_sym }
 	if result_node := fn_node.child_by_field_name('result') {
-		return_sym = sr.store.find_symbol_by_type_node(result_node, sr.src_text) or { void_sym }
+		return_sym = sr.store.find_symbol_by_type_node(sr.file_path, result_node, sr.src_text) or { void_sym }
 	}
 
 	for i := 0; i < params.len; i++ {
@@ -556,8 +558,8 @@ fn (mut sr SymbolAnalyzer) fn_literal(fn_node ast.Node) ?&Symbol {
 	// and we dont want to pollute non-permanent function types
 	mut new_sym := &Symbol{
 		name: anon_fn_prefix
-		file_path: sr.store.cur_file_path
-		file_version: sr.store.cur_version
+		file_path: sr.file_path
+		file_version: sr.file_version
 		is_top_level: true
 		kind: .function_type
 		return_sym: return_sym
@@ -576,7 +578,7 @@ fn (mut sr SymbolAnalyzer) match_expression(match_node ast.Node) ?[]&Symbol {
 		cond_node = cond_node.named_child(0) ?
 	}
 
-	cond_value_type := sr.store.infer_value_type_from_node(cond_node, sr.src_text)
+	cond_value_type := sr.store.infer_value_type_from_node(sr.file_path, cond_node, sr.src_text)
 	if cond_value_type.is_void() {
 		return void_sym_arr
 	}
@@ -598,7 +600,7 @@ fn (mut sr SymbolAnalyzer) match_expression(match_node ast.Node) ?[]&Symbol {
 						return void_sym_arr
 					}
 				} else {
-					value_node_type := sr.store.infer_value_type_from_node(value_node,
+					value_node_type := sr.store.infer_value_type_from_node(sr.file_path, value_node,
 						sr.src_text)
 					if value_node_type.is_void() || value_node_type != cond_value_type {
 						// return void if no type matches
@@ -673,7 +675,7 @@ fn (mut sr SymbolAnalyzer) for_statement(for_stmt_node ast.Node) ? {
 		if cond_node_type == .for_in_operator {
 			left_node := cond_node.child_by_field_name('left') ?
 			right_node := cond_node.child_by_field_name('right') ?
-			mut right_sym := sr.store.infer_value_type_from_node(right_node, sr.src_text)
+			mut right_sym := sr.store.infer_value_type_from_node(sr.file_path, right_node, sr.src_text)
 			if !right_sym.is_void() {
 				left_count := left_node.named_child_count()
 				mut end_idx := if left_count >= 2 { u32(1) } else { u32(0) }
@@ -681,7 +683,7 @@ fn (mut sr SymbolAnalyzer) for_statement(for_stmt_node ast.Node) ? {
 					|| right_sym.name == 'string' {
 					if left_count == 2 {
 						idx_node := left_node.named_child(end_idx - 1) ?
-						mut return_sym := sr.store.find_symbol('', 'int') or { void_sym }
+						mut return_sym := sr.store.find_symbol(sr.file_path, '', 'int') or { void_sym }
 						if right_sym.kind == .map_ {
 							return_sym = right_sym.children_syms[1] or { void_sym }
 						}
@@ -692,8 +694,8 @@ fn (mut sr SymbolAnalyzer) for_statement(for_stmt_node ast.Node) ? {
 							range: idx_node.range()
 							is_top_level: false
 							return_sym: return_sym
-							file_path: sr.store.cur_file_path
-							file_version: sr.store.cur_version
+							file_path: sr.file_path
+							file_version: sr.file_version
 						}
 
 						scope.register(idx_sym) or {}
@@ -702,7 +704,7 @@ fn (mut sr SymbolAnalyzer) for_statement(for_stmt_node ast.Node) ? {
 					value_node := left_node.named_child(end_idx) ?
 					mut return_sym := right_sym.value_sym()
 					if right_sym.name == 'string' {
-						return_sym = sr.store.find_symbol('', 'byte') or { void_sym }
+						return_sym = sr.store.find_symbol(sr.file_path, '', 'byte') or { void_sym }
 					}
 
 					mut value_sym := Symbol{
@@ -711,8 +713,8 @@ fn (mut sr SymbolAnalyzer) for_statement(for_stmt_node ast.Node) ? {
 						range: value_node.range()
 						is_top_level: false
 						return_sym: return_sym
-						file_path: sr.store.cur_file_path
-						file_version: sr.store.cur_version
+						file_path: sr.file_path
+						file_version: sr.file_version
 					}
 
 					scope.register(value_sym) or {}
@@ -754,7 +756,7 @@ fn (mut sr SymbolAnalyzer) expression(node ast.Node) ?[]&Symbol {
 			return [sr.fn_literal(node) or { void_sym }]
 		}
 		.call_expression {
-			return_sym := sr.store.infer_value_type_from_node(node, sr.src_text)
+			return_sym := sr.store.infer_value_type_from_node(sr.file_path, node, sr.src_text)
 			if last_node := node.named_child(node.named_child_count() - 1) {
 				if first_optional_node := last_node.named_child(0) {
 					if first_optional_node.type_name == .or_block {
@@ -764,10 +766,10 @@ fn (mut sr SymbolAnalyzer) expression(node ast.Node) ?[]&Symbol {
 							name: 'err'
 							kind: .variable
 							access: .private
-							return_sym: sr.store.find_symbol('', 'IError') or { void_sym }
+							return_sym: sr.store.find_symbol(sr.file_path, '', 'IError') or { void_sym }
 							is_top_level: false
-							file_path: sr.store.cur_file_path
-							file_version: sr.store.cur_version
+							file_path: sr.file_path
+							file_version: sr.file_version
 						}) ?
 						sr.extract_block(block_node, mut or_scope) ?
 					}
@@ -777,7 +779,7 @@ fn (mut sr SymbolAnalyzer) expression(node ast.Node) ?[]&Symbol {
 		}
 		else {
 			// TODO: anything with block
-			return [sr.store.infer_value_type_from_node(node, sr.src_text)]
+			return [sr.store.infer_value_type_from_node(sr.file_path, node, sr.src_text)]
 		}
 	}
 	return void_sym_arr
@@ -841,7 +843,7 @@ fn (mut sr SymbolAnalyzer) extract_block(node ast.Node, mut scope ScopeTree) ?[]
 	return return_syms
 }
 
-fn extract_parameter_list(node ast.Node, mut store Store, src_text ts.SourceText) []&Symbol {
+fn extract_parameter_list(file_path string, node ast.Node, mut store Store, src_text ts.SourceText) []&Symbol {
 	params_len := node.named_child_count()
 	mut syms := []&Symbol{cap: int(params_len)}
 
@@ -850,7 +852,7 @@ fn extract_parameter_list(node ast.Node, mut store Store, src_text ts.SourceText
 		param_node := node.named_child(i) or { continue }
 		mut param_name_node := param_node.child_by_field_name('name') or { continue }
 		param_type_node := param_node.child_by_field_name('type') or { continue }
-		return_sym := store.find_symbol_by_type_node(param_type_node, src_text) or { void_sym }
+		return_sym := store.find_symbol_by_type_node(file_path, param_type_node, src_text) or { void_sym }
 		if param_name_node.type_name == .mutable_identifier {
 			access = SymbolAccess.private_mutable
 			param_name_node = param_name_node.named_child(0) or { param_name_node }
@@ -863,7 +865,7 @@ fn extract_parameter_list(node ast.Node, mut store Store, src_text ts.SourceText
 			access: access
 			return_sym: return_sym
 			is_top_level: false
-			file_path: store.cur_file_path
+			file_path: file_path
 			file_version: store.cur_version
 		}
 	}
@@ -896,7 +898,7 @@ pub fn (mut sr SymbolAnalyzer) analyze_from_cursor(mut cursor TreeCursor) []&Sym
 		sr.get_scope(cur_node) or {}
 	}
 
-	mut global_scope := sr.store.opened_scopes[sr.store.cur_file_path]
+	mut global_scope := sr.store.opened_scopes[sr.file_path]
 	mut symbols := []&Symbol{cap: 255}
 	for got_node in cursor {
 		mut syms := sr.analyze(got_node) or {
@@ -924,16 +926,18 @@ pub fn (mut sr SymbolAnalyzer) analyze_from_cursor(mut cursor TreeCursor) []&Sym
 }
 
 // register_symbols_from_tree scans and registers all the symbols based on the given tree
-pub fn (mut store Store) register_symbols_from_tree(tree &ast.Tree, src_text ts.SourceText, is_import bool, cfg NewTreeCursorConfig) {
-	mut sr := new_symbol_analyzer(store, src_text, is_import)
+pub fn (mut store Store) register_symbols_from_tree(file_path string, version int, tree &ast.Tree, src_text ts.SourceText, is_import bool, cfg NewTreeCursorConfig) {
+	mut sr := new_symbol_analyzer(store, file_path, version, src_text, is_import)
 	mut cursor := new_tree_cursor(tree.root_node(), cfg)
 	sr.analyze_from_cursor(mut cursor)
 }
 
 // new_symbol_analyzer creates an instance of SymbolAnalyzer with the given store, tree, source, and is_import.
-pub fn new_symbol_analyzer(store &Store, src_text ts.SourceText, is_import bool) SymbolAnalyzer {
+pub fn new_symbol_analyzer(store &Store, file_path string, version int, src_text ts.SourceText, is_import bool) SymbolAnalyzer {
 	return SymbolAnalyzer{
 		store: unsafe { store }
+		file_path: file_path,
+		file_version: version
 		src_text: src_text
 		is_import: is_import
 	}

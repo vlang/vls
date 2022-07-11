@@ -23,6 +23,8 @@ fn test_symbol_registration() ? {
 	mut sym_analyzer := SymbolAnalyzer{
 		store: store
 		is_test: true
+		file_path: ''
+		file_version: 1
 	}
 
 	test_files_dir := test_utils.get_test_files_path(@FILE)
@@ -35,8 +37,6 @@ fn test_symbol_registration() ? {
 
 	bench.set_total_expected_steps(test_files.len)
 	for test_file_path in test_files {
-		store.set_active_file_path(test_file_path, 1)
-
 		bench.step()
 		test_name := os.base(test_file_path)
 		content := os.read_file(test_file_path) or {
@@ -45,6 +45,7 @@ fn test_symbol_registration() ? {
 			continue
 		}
 
+		sym_analyzer.file_path = test_file_path
 		src, expected := test_utils.parse_test_file_content(content)
 		err_msg := if src.len == 0 || content.len == 0 {
 			'file $test_name has empty content'
@@ -78,7 +79,7 @@ fn test_symbol_registration() ? {
 			println(bench.step_message_ok(test_name))
 		}
 
-		store.delete(store.cur_dir)
+		store.delete(os.dir(test_file_path))
 	}
 	assert bench.nfail == 0
 	bench.stop()
