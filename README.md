@@ -27,6 +27,7 @@ Currently, VLS supports the following language features:
 | Go to Implementation | ✅ | Limited to interfaces for now. |
 | References | ❌ | |
 | Document Highlight | ❌ | |
+| Code Lens | ✅ | Stub implementation |
 | Code Action | ❌ | |
 | Document Symbol / Outline | ✅ | |
 | Workspace Symbols | ✅ | Limited to opened documents. |
