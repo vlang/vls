@@ -205,6 +205,10 @@ pub fn (mut ls Vls) handle_jsonrpc(request &jsonrpc.Request, mut rw jsonrpc.Resp
 				params := json.decode(lsp.DidCloseTextDocumentParams, request.params) ?
 				ls.did_close(params, mut rw)
 			}
+			'textDocument/willSave' {
+				params := json.decode(lsp.WillSaveTextDocumentParams, request.params) ?
+				ls.did_save(params, mut rw)
+			}
 			'textDocument/formatting' {
 				params := json.decode(lsp.DocumentFormattingParams, request.params) or {
 					return w.wrap_error(err)

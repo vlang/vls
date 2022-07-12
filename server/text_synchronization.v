@@ -219,3 +219,5 @@ pub fn (mut ls Vls) did_save(params lsp.DidSaveTextDocumentParams, mut wr Respon
 	ls.exec_v_diagnostics(uri) or {}
 	ls.reporter.publish(mut wr, uri)
 }
+
+pub fn (mut ls Vls) will_save(params lsp.WillSaveTextDocumentParams, mut wr ResponseWriter) {}
