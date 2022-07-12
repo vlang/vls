@@ -13,18 +13,19 @@ fn (mut ls Vls) analyze_file(file File, affected_node_type v.NodeType, affected_
 
 	is_import := affected_node_type == .import_declaration
 	file_path := file.uri.path()
+	context := ls.store.with(file_path: file_path, file_version: file.version, text: file.source)
 
 	// skip analyzing imports when affected is not an import declaration
 	if is_import || affected_line == 0 {
-		ls.store.import_modules_from_tree(file_path, file.tree, file.source, os.join_path(file.uri.dir_path(),
+		ls.store.import_modules_from_tree(context, file.tree, os.join_path(file.uri.dir_path(),
 			'modules'), ls.root_uri.path(), os.dir(os.dir(file_path)))
 
 		ls.store.cleanup_imports(file.uri.dir_path())
 	}
 
-	ls.store.register_symbols_from_tree(file_path, file.version, file.tree, file.source, false, start_line_nr: affected_line)
+	ls.store.register_symbols_from_tree(context, file.tree, false, start_line_nr: affected_line)
 	if !is_import && Feature.analyzer_diagnostics in ls.enabled_features {
-		ls.store.analyze(file_path, file.tree, file.source, start_line_nr: affected_line)
+		ls.store.analyze(context, file.tree, start_line_nr: affected_line)
 	}
 
 	ls.reporter.publish(mut ls.writer, file.uri)

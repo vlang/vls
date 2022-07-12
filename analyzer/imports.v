@@ -2,25 +2,23 @@ module analyzer
 
 import os
 import ast
-import tree_sitter
 
 pub type ImportsMap = map[string][]Import
 
 pub struct Importer {
 mut:
-	store     &Store [required]
-	file_path string [required]
+	context AnalyzerContext
 }
 
 pub fn (mut imp Importer) imports() ImportsMap {
-	return imp.store.imports
+	return imp.context.store.imports
 }
 
-pub fn (mut imp Importer) scan_imports(tree &ast.Tree, src_text tree_sitter.SourceText) []&Import {
+pub fn (mut imp Importer) scan_imports(tree &ast.Tree) []&Import {
 	root_node := tree.root_node()
 	named_child_len := root_node.named_child_count()
-	file_name := os.base(imp.file_path)
-	file_dir := os.dir(imp.file_path)
+	file_name := os.base(imp.context.file_path)
+	file_dir := os.dir(imp.context.file_path)
 
 	mut newly_imported_modules := []&Import{}
 
@@ -32,34 +30,34 @@ pub fn (mut imp Importer) scan_imports(tree &ast.Tree, src_text tree_sitter.Sour
 
 		import_path_node := node.child_by_field_name('path') or { continue }
 
-		if found_imp := imp.imports().find_by_position(imp.file_path, node.range()) {
+		if found_imp := imp.imports().find_by_position(imp.context.file_path, node.range()) {
 			mut imp_module := unsafe { found_imp }
-			mod_name := import_path_node.text(src_text)
+			mod_name := import_path_node.text(imp.context.text)
 			if imp_module.absolute_module_name == mod_name {
 				continue
 			}
 
 			// if the current import node is not the same as before,
 			// untrack and remove the import entry asap
-			imp_module.untrack_file(imp.file_path)
+			imp_module.untrack_file(imp.context.file_path)
 		}
 
 		// resolve it later after
-		mut imp_module, already_imported := imp.store.add_import(
+		mut imp_module, already_imported := imp.context.store.add_import(
 			file_dir,
 			resolved: false
-			absolute_module_name: import_path_node.text(src_text)
+			absolute_module_name: import_path_node.text(imp.context.text)
 		)
 
 		if import_alias_node := node.child_by_field_name('alias') {
 			if ident_node := import_alias_node.named_child(0) {
-				imp_module.set_alias(file_name, ident_node.text(src_text))
+				imp_module.set_alias(file_name, ident_node.text(imp.context.text))
 			}
 		} else if import_symbols_node := node.child_by_field_name('symbols') {
 			symbols_len := import_symbols_node.named_child_count()
 			mut symbols := []string{len: int(symbols_len)}
 			for j := u32(0); j < symbols_len; j++ {
-				symbols[j] = import_symbols_node.named_child(j) or { continue }.text(src_text)
+				symbols[j] = import_symbols_node.named_child(j) or { continue }.text(imp.context.text)
 			}
 
 			imp_module.set_symbols(file_name, ...symbols)
@@ -69,7 +67,7 @@ pub fn (mut imp Importer) scan_imports(tree &ast.Tree, src_text tree_sitter.Sour
 			newly_imported_modules << imp_module
 		}
 
-		imp_module.track_file(imp.file_path, import_path_node.range())
+		imp_module.track_file(imp.context.file_path, import_path_node.range())
 	}
 
 	return newly_imported_modules
@@ -77,8 +75,8 @@ pub fn (mut imp Importer) scan_imports(tree &ast.Tree, src_text tree_sitter.Sour
 
 // inject_paths_of_new_imports resolves and injects the path to the Import instance
 pub fn (mut imp Importer) inject_paths_of_new_imports(mut new_imports []&Import, lookup_paths ...string) {
-	dir := os.dir(imp.file_path)
-	mut project := imp.store.dependency_tree.get_node(dir) or { imp.store.dependency_tree.add(dir) }
+	dir := os.dir(imp.context.file_path)
+	mut project := imp.context.store.dependency_tree.get_node(dir) or { imp.context.store.dependency_tree.add(dir) }
 
 	// Custom iterator for looping over paths without
 	// allocating a new array with concatenated items
@@ -87,7 +85,7 @@ pub fn (mut imp Importer) inject_paths_of_new_imports(mut new_imports []&Import,
 	mut import_path_iter := ImportPathIterator{
 		start_path: dir
 		lookup_paths: lookup_paths
-		fallback_lookup_paths: imp.store.default_import_paths
+		fallback_lookup_paths: imp.context.store.default_import_paths
 	}
 
 	for mut new_import in new_imports {
@@ -102,7 +100,7 @@ pub fn (mut imp Importer) inject_paths_of_new_imports(mut new_imports []&Import,
 
 			// if the directory is already present in the
 			// dependency tree, inject it directly
-			if imp.store.dependency_tree.has(mod_dir) {
+			if imp.context.store.dependency_tree.has(mod_dir) {
 				new_import.set_path(mod_dir)
 				break
 			}
@@ -132,7 +130,7 @@ pub fn (mut imp Importer) inject_paths_of_new_imports(mut new_imports []&Import,
 			}
 			if has_v_files {
 				new_import.set_path(mod_dir)
-				imp.store.dependency_tree.add(mod_dir)
+				imp.context.store.dependency_tree.add(mod_dir)
 				break
 			}
 		}
@@ -140,7 +138,7 @@ pub fn (mut imp Importer) inject_paths_of_new_imports(mut new_imports []&Import,
 		// report the unresolved import
 		if !new_import.resolved {
 			for file_path, range in new_import.ranges {
-				imp.store.report(
+				imp.context.store.report(
 					message: 'Module `$new_import.absolute_module_name` not found'
 					file_path: file_path
 					range: range
@@ -163,8 +161,8 @@ pub fn (mut imp Importer) inject_paths_of_new_imports(mut new_imports []&Import,
 // It also registers the symbols to the store.
 pub fn (mut imp Importer) import_modules(mut imports []&Import) {
 	mut parser := ast.new_parser()
-	dir := os.dir(imp.file_path)
-	modules_from_old_dir := os.join_path(imp.file_path, 'modules')
+	dir := imp.context.file_dir
+	modules_from_old_dir := os.join_path(imp.context.file_path, 'modules')
 
 	for i, new_import in imports {
 		// skip if import is not resolved or already imported
@@ -181,19 +179,19 @@ pub fn (mut imp Importer) import_modules(mut imports []&Import) {
 
 			full_path := os.join_path(new_import.path, file_name)
 			content_str := os.read_file(full_path) or { continue }
-			content := Runes(content_str.runes())
 			tree_from_import := parser.parse_string(source: content_str)
+			context := imp.context.store.with(file_path: full_path, text: Runes(content_str.runes()))
 
 			// Import module but from different lookup oath other than the project
 			modules_from_dir := os.join_path(dir, 'modules')
-			imp.store.import_modules_from_tree(full_path, tree_from_import, content, modules_from_dir,
-				imp.file_path, modules_from_old_dir)
+			imp.context.store.import_modules_from_tree(context, tree_from_import, modules_from_dir,
+				imp.context.file_path, modules_from_old_dir)
 			imported++
 
 			// Set version to zero so that modules that are already opened
 			// in the editor can register symbols with scopes without
 			// getting "symbol exists" errors
-			imp.store.register_symbols_from_tree(full_path, 0, tree_from_import, content, true)
+			imp.context.store.register_symbols_from_tree(context, tree_from_import, true)
 			parser.reset()
 		}
 
@@ -237,13 +235,12 @@ pub fn (mut ss Store) add_import(to_dir string, imp Import) (&Import, bool) {
 }
 
 // import_modules_from_tree scans and imports the modules based from the AST tree
-pub fn (mut store Store) import_modules_from_tree(file_path string, tree &ast.Tree, src tree_sitter.SourceText, lookup_paths ...string) {
+pub fn (mut store Store) import_modules_from_tree(context AnalyzerContext, tree &ast.Tree, lookup_paths ...string) {
 	mut importer := Importer{
-		store: unsafe { store }
-		file_path: file_path
+		context: context
 	}
 
-	mut imports := importer.scan_imports(tree, src)
+	mut imports := importer.scan_imports(tree)
 	importer.inject_paths_of_new_imports(mut imports, ...lookup_paths)
 	if imports.len == 0 {
 		return

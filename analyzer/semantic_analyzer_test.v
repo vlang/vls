@@ -21,16 +21,13 @@ fn test_semantic_analysis() ? {
 
 	setup_builtin(mut store, os.join_path(vlib_path, 'builtin'))
 
+	mut context := store.default_context()
 	mut sym_analyzer := SymbolAnalyzer{
-		store: store
+		context: context
 		is_test: true
-		file_path: ''
-		file_version: 1
 	}
-
 	mut semantic_analyzer := SemanticAnalyzer{
-		store: store
-		file_path: ''
+		context: context
 	}
 
 	test_files_dir := test_utils.get_test_files_path(@FILE)
@@ -50,8 +47,6 @@ fn test_semantic_analysis() ? {
 			continue
 		}
 
-		semantic_analyzer.file_path = test_file_path
-		sym_analyzer.file_path = test_file_path
 		src, expected := test_utils.parse_test_file_content(content)
 		err_msg := if src.len == 0 || content.len == 0 {
 			'file $test_name has empty content'
@@ -69,11 +64,11 @@ fn test_semantic_analysis() ? {
 		tree := p.parse_string(source: src)
 		src_runes := Runes(src.runes())
 		mut cursor := new_tree_cursor(tree.root_node())
-		store.import_modules_from_tree(test_file_path, tree, src_runes, vlib_path)
 
-		sym_analyzer.src_text = src_runes
-		semantic_analyzer.src_text = src_runes
+		context.replace_file_path(test_file_path)
+		context.text = src_runes
 
+		store.import_modules_from_tree(context, tree, src_runes, vlib_path)
 		symbols := sym_analyzer.analyze_from_cursor(mut cursor)
 		semantic_analyzer.analyze_from_cursor(mut cursor)
 		result := an_test_utils.sexpr_str_reporter(reporter)

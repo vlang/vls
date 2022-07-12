@@ -46,6 +46,17 @@ pub mut:
 	binded_symbol_locations []BindedSymbolLocation
 }
 
+pub fn (mut ss Store) with(params AnalyzerContextParams) AnalyzerContext {
+	return new_context(AnalyzerContextParams{
+		...params
+		store: unsafe { ss }
+	})
+}
+
+pub fn (mut ss Store) default_context() AnalyzerContext {
+	return ss.with(file_path: '')
+}
+
 // report inserts the report to the reporter
 pub fn (mut ss Store) report(report Report) {
 	ss.reporter.report(report)
@@ -453,7 +464,8 @@ pub fn (mut store Store) find_symbol_by_type_node(file_path string, node ast.Nod
 	if sym_kind == .function_type {
 		mut parameters := []&Symbol{}
 		if param_node := node.child_by_field_name('parameters') {
-			parameters << extract_parameter_list(file_path, param_node, mut store, src_text)
+			mut ctx := new_context(store: store, file_path: file_path, text: src_text)
+			parameters << extract_parameter_list(mut ctx, param_node)
 		}
 
 		mut return_sym := unsafe { void_sym }
