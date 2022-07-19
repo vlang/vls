@@ -65,6 +65,10 @@ pub fn new() &LogRecorder {
 	}
 }
 
+pub fn (l &LogRecorder) is_enabled() bool {
+	return l.enabled
+}
+
 // set_logpath sets the filepath of the log file and opens the file.
 pub fn (mut l LogRecorder) set_logpath(path string) ? {
 	if l.file_opened {
