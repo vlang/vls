@@ -245,9 +245,9 @@ fn (mut h PassiveHandler) handle_jsonrpc(req &Request, mut rw ResponseWriter) ? 
 // is_intercepter_enabled checks if the given T is enabled in a Server.
 pub fn is_interceptor_enabled<T>(server &Server) bool {
 	get_interceptor<T>(server) or {
-		return true
+		return false
 	}
-	return false
+	return true
 }
 
 pub fn get_interceptor<T>(server &Server) ?&T {
