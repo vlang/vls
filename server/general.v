@@ -75,16 +75,36 @@ pub fn (mut ls Vls) initialize(params lsp.InitializeParams, mut wr ResponseWrite
 	ls.root_uri = params.root_uri
 	ls.status = .initialized
 
-	is_debug := jsonrpc.is_interceptor_enabled<LogRecorder>(wr.server)
+	// logging
+	mut is_logger_installed := false
+	mut is_logger_enabled := false
+	if logger := jsonrpc.get_interceptor<LogRecorder>(wr.server) {
+		is_logger_installed = true
+
+		// override the --debug flag earlier set in the CLI
+		// if params.trace is set to 'verbose'
+		if params.trace == 'verbose' {
+			wr.server.dispatch_event(log.state_event, true) or {
+				wr.show_message('Unable to activate request logging.', .error)
+			}
+		}
+
+		if logger.is_enabled() {
+			is_logger_enabled = true
+		}
+	}
 
 	// Create the file either in debug mode or when the client trace is set to verbose.
-	if is_debug || (!is_debug && params.trace == 'verbose') {
+	if is_logger_installed && is_logger_enabled {
 		// set up logger set to the workspace path
 		ls.setup_logger(mut wr) or { wr.show_message(err.msg(), .error) }
 	}
 
 	// print initial info
 	ls.print_info(params.process_id, params.client_info, mut wr)
+
+	// print debug options info to avoid general_test failing
+	wr.log_message('is_logger_installed: $is_logger_installed | is_logger_enabled: $is_logger_enabled | params.trace: ${params.trace}', .info)
 
 	// since builtin is used frequently, they should be parsed first and only once
 	analyzer.setup_builtin(mut ls.store, os.join_path(ls.vroot_path, 'vlib', 'builtin'))

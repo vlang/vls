@@ -237,17 +237,24 @@ fn (mut wr InterceptorWriter) write(buf []u8) ?int {
 }
 
 // PassiveHandler is an implementation of a Handler
-// used as a default value for Server.handler 
+// used as a default value for Server.handler
 pub struct PassiveHandler {}
 
 fn (mut h PassiveHandler) handle_jsonrpc(req &Request, mut rw ResponseWriter) ? {}
 
 // is_intercepter_enabled checks if the given T is enabled in a Server.
 pub fn is_interceptor_enabled<T>(server &Server) bool {
-	for inter in server.interceptors {
-		if inter is T {
-			return true
-		}
+	get_interceptor<T>(server) or {
+		return true
 	}
 	return false
+}
+
+pub fn get_interceptor<T>(server &Server) ?&T {
+	for inter in server.interceptors {
+		if inter is T {
+			return inter
+		}
+	}
+	return none
 }
