@@ -222,13 +222,10 @@ fn (mut an SemanticAnalyzer) enum_decl(node ast.Node) ? {
 
 fn (mut an SemanticAnalyzer) fn_decl(node ast.Node) {
 	body_node := node.child_by_field_name('body') or { return }
-	if name_node := node.child_by_field_name('name') {
-		fn_name := name_node.text(an.src_text)
-		if sym := an.store.find_symbol('', fn_name) {
-			mut inst := an.with_symbol(sym)
-			inst.block(body_node)
-			return
-		}
+	if sym := an.store.infer_symbol_from_node(node, an.src_text) {
+		mut inst := an.with_symbol(sym)
+		inst.block(body_node)
+		return
 	}
 	an.block(body_node)
 }
@@ -670,7 +667,7 @@ pub fn (mut an SemanticAnalyzer) selector_expression(node ast.Node) ?&Symbol {
 		}
 
 		child_name := field_node.text(an.src_text)
-		got_child_sym := root_sym.children_syms.get(child_name) or {
+		mut got_child_sym := root_sym.children_syms.get(child_name) or {
 			mut base_root_sym := root_sym
 			if root_sym.kind in [.ref, .chan_, .optional] {
 				base_root_sym = root_sym.parent_sym
@@ -721,16 +718,18 @@ pub fn (mut an SemanticAnalyzer) selector_expression(node ast.Node) ?&Symbol {
 			}
 		}
 
-		if got_child_sym.is_void() && method_or_field_sym.is_void() {
-			mut in_call_expr := false
-			if parent_node := node.parent() {
-				if parent_node.type_name == .call_expression {
-					in_call_expr = true
-				}
+		mut in_call_expr := false
+		if parent_node := node.parent() {
+			if parent_node.type_name == .call_expression {
+				in_call_expr = true
 			}
+		}
 
+		if got_child_sym.is_void() && method_or_field_sym.is_void() {
 			err_code := if in_call_expr { errors.unknown_method_or_field_error } else { errors.unknown_field_error }
 			return an.report(node, err_code, root_sym.gen_str(with_kind: false, with_access: false, with_contents: false), field_node.text(an.src_text))
+		} else if !in_call_expr && got_child_sym.is_returnable() {
+			got_child_sym = got_child_sym.return_sym
 		}
 
 		return if method_or_field_sym.is_void() {

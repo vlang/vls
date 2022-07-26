@@ -34,6 +34,15 @@ fn number2() {
 fn number3() int {
     return
 }
+
+struct Triangle {
+	base   int
+	height int
+}
+
+fn (t Triangle) area() {
+	return t.base * t.height / 2
+}
 ---
 
 (error "`a` evaluated but not used" [1,4]-[1,5])
@@ -44,3 +53,4 @@ fn number3() int {
 (error "cannot use `bool` as type `int` in return argument" [26,4]-[26,16])
 (error "unexpected argument, current function does not return anything" [30,11]-[30,12])
 (error "expected `int` argument" [34,4]-[34,10])
+(error "unexpected argument, current function does not return anything" [43,8]-[43,29])
