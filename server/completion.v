@@ -307,7 +307,7 @@ fn (mut builder CompletionBuilder) build_suggestions_from_binded_symbols(lang an
 
 		module_path := sym_loc_entry.module_path
 		if module_path !in imported_paths {
-			if module_path != builder.cur_dir() && !builder.store.is_imported(builder.cur_dir(), module_path) {
+			if module_path != builder.cur_dir() && !builder.store.is_imported(builder.file_path, module_path) {
 				continue
 			}
 
