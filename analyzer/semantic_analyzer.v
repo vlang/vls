@@ -1026,7 +1026,7 @@ pub struct SemanticExpressionAnalyzeConfig {
 
 pub fn (mut an SemanticAnalyzer) expression(node ast.Node, cfg SemanticExpressionAnalyzeConfig) ?&Symbol {
 	match node.type_name {
-		.true_, .false_ {
+		.true_, .false_, .none_ {
 			return an.store.infer_value_type_from_node(node, an.src_text)
 		}
 		.call_expression {
