@@ -80,9 +80,6 @@ mut:
 		reset_builder_on_max_count: true
 	}
 	generate_report bool
-	stdin_chan      chan []u8
-	stdout_chan     chan []u8
-	stderr_chan     chan string
 }
 
 fn (mut host VlsHost) has_child_exited() bool {
@@ -106,22 +103,7 @@ fn (mut host VlsHost) listen() {
 	go host.listen_for_errors()
 	go host.listen_for_output()
 	go host.listen_for_input()
-	host.receive_data()
 }
-
-fn (mut host VlsHost) receive_data() {
-	// mut stdout_buffer := strings.new_builder(4096)
-	for !host.has_child_exited() {
-		select {
-			incoming_stderr := <-host.stderr_chan {
-				// Set the last_len to the length of the latest entry so that
-				// the last stderr output will be logged into the error report.
-				host.stderr_logger.writeln(incoming_stderr)
-			}
-		}
-	}
-}
-
 
 fn (mut host VlsHost) listen_for_input() {
 	mut buf := strings.new_builder(1024 * 1024)
@@ -142,7 +124,10 @@ fn (mut host VlsHost) listen_for_input() {
 
 fn (mut host VlsHost) listen_for_errors() {
 	for !host.has_child_exited() {
-		host.stderr_chan <- host.child.stderr_read()
+		buf := host.child.stderr_slurp()
+		if buf.len != 0 {
+			host.stderr_logger.writeln(buf)
+		}
 	}
 }
 
@@ -159,11 +144,7 @@ fn (mut host VlsHost) listen_for_output() {
 }
 
 fn (mut host VlsHost) handle_exit() {
-	if !host.generate_report && host.child.code > 0 {
-		host.generate_report = true
-	}
-
-	if host.generate_report {
+	if host.generate_report || host.child.code != 0 {
 		report_path := host.generate_report() or {
 			// should not happen
 			panic(err)

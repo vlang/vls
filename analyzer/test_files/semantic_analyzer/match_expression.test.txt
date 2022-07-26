@@ -1,0 +1,27 @@
+match 1 {
+    `0`..`9` {}
+}
+
+match 'test' {
+    1 {}
+}
+
+a := match 1 {
+    2 {}
+    3 { return 0 }
+}
+
+b := match 2 {
+    2 { 'a' }
+    3 { 0 }
+    3 { 'b' }
+}
+
+---
+
+(error "mismatched range types" [1,4]-[1,7])
+(error "cannot match `string` with `int`" [5,4]-[5,5])
+(error "`match` expression requires an expression as the last statement of every branch" [9,4]-[9,8])
+(error "`match` expression requires an expression as the last statement of every branch" [10,4]-[10,18])
+(error "return type mismatch, it should be `string`" [15,4]-[15,11])
+(error "match case `3` is handled more than once" [16,4]-[16,5])

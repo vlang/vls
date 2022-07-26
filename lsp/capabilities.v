@@ -183,7 +183,7 @@ pub mut:
 	type_definition_provider             bool                            [json: typeDefinitionProvider]
 	implementation_provider              bool                            [json: implementationProvider]
 	references_provider                  bool                            [json: referencesProvider]
-	document_highlight_provider          bool                            [json: documentHightlightProvider]
+	document_highlight_provider          bool                            [json: documentHighlightProvider]
 	document_symbol_provider             bool                            [json: documentSymbolProvider]
 	workspace_symbol_provider            bool                            [json: workspaceSymbolProvider]
 	code_action_provider                 bool                            [json: codeActionProvider]
@@ -191,10 +191,10 @@ pub mut:
 	document_formatting_provider         bool                            [json: documentFormattingProvider]
 	document_on_type_formatting_provider DocumentOnTypeFormattingOptions [json: documentOnTypeFormattingProvider]
 	rename_provider                      bool                            [json: renameProvider]
-	document_link_provider               bool                            [json: documentLinkProvider]
+	document_link_provider               DocumentLinkOptions             [json: documentLinkProvider]
 	color_provider                       bool                            [json: colorProvider]
 	declaration_provider                 bool                            [json: declarationProvider]
-	execute_command_provider             string                          [json: executeCommandProvider]
+	execute_command_provider             ExecuteCommandOptions           [json: executeCommandProvider]
 	folding_range_provider               bool                            [json: foldingRangeProvider]
 	experimental                         map[string]bool
 }

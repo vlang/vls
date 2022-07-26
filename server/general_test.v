@@ -54,7 +54,8 @@ fn test_set_features() {
 		.folding_range,
 		.definition,
 		.implementation,
-		.code_lens
+		.code_lens,
+		.document_link
 	]
 	ls.set_features(['formatting'], true) or {
 		assert false
@@ -72,6 +73,7 @@ fn test_set_features() {
 		.definition,
 		.implementation,
 		.code_lens,
+		.document_link,
 		.formatting,
 	]
 	ls.set_features(['logging'], true) or {
@@ -84,6 +86,7 @@ fn test_setup_logger() ? {
 	println('test_setup_logger')
 	mut io := new_test_client(server.new(), &LogRecorder{})
 	io.send<lsp.InitializeParams, lsp.InitializeResult>('initialize', lsp.InitializeParams{
+		trace: 'verbose'
 		root_uri: lsp.document_uri_from_path(os.join_path('non_existent', 'path'))
 	}) ?
 

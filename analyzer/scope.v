@@ -35,26 +35,32 @@ pub fn (scope &ScopeTree) free() {
 
 // contains checks if a given position is within the scope's range
 pub fn (scope &ScopeTree) contains(pos u32) bool {
+	if isnil(scope) {
+		return false
+	}
 	return pos >= scope.start_byte && pos <= scope.end_byte
 }
 
 // innermost returns the scope based on the given byte ranges
-pub fn (mut scope ScopeTree) innermost(start_byte u32, end_byte u32) &ScopeTree {
+pub fn (scope &ScopeTree) innermost(start_byte u32, end_byte u32) ?&ScopeTree {
 	if !isnil(scope) {
-		for mut child_scope in scope.children {
+		for child_scope in scope.children {
 			if child_scope.contains(start_byte) && child_scope.contains(end_byte) {
-				return child_scope.innermost(start_byte, end_byte)
+				return child_scope.innermost(start_byte, end_byte) or {
+					return child_scope
+				}
 			}
 		}
 	}
-
-	return scope
+	return none
 }
 
 // register registers the symbol to the scope
 pub fn (mut scope ScopeTree) register(info &Symbol) ? {
 	// Just to ensure that scope is not null
 	if isnil(scope) {
+		return
+	} else if info.kind == .variable && info.return_sym.is_void() {
 		return
 	}
 
@@ -105,41 +111,65 @@ pub fn (mut scope ScopeTree) new_child(start_byte u32, end_byte u32) ?&ScopeTree
 	if isnil(scope) {
 		return none
 	}
-
-	mut innermost := scope.innermost(start_byte, end_byte)
-
-	if innermost == scope {
+	mut innermost := scope.innermost(start_byte, end_byte) or {
 		scope.children << &ScopeTree{
 			start_byte: start_byte
 			end_byte: end_byte
 			parent: unsafe { scope }
 		}
 		return scope.children[scope.children.len - 1]
-	} else if start_byte > innermost.start_byte && end_byte < innermost.end_byte {
+	}
+	if start_byte > innermost.start_byte && end_byte < innermost.end_byte {
 		return innermost.new_child(start_byte, end_byte)
 	} else {
 		return innermost
 	}
 }
 
-// remove_child removes a child scope based on the given position
-pub fn (mut scope ScopeTree) remove_child(start_byte u32, end_byte u32) bool {
+pub fn (mut scope ScopeTree) remove_symbols_by_line(start_line u32, end_line u32) bool {
 	if isnil(scope) {
 		return false
 	}
 
-	if start_byte == scope.start_byte && end_byte == scope.end_byte {
-		// unsafe { scope.free() }
-		return true
+	mut del_count := 0
+	old_len := scope.symbols.len
+
+	for i := 0; i < scope.symbols.len; {
+		if within_range(scope.symbols[i].range, start_line, end_line) {
+			scope.symbols.delete(i)
+			del_count++
+			continue
+		}
+		i++
 	}
 
-	for i := 0; i < scope.children.len; i++ {
-		if !scope.children[i].remove_child(start_byte, end_byte) {
-			continue
+	for i := 0; i < scope.children.len; {
+		start_byte := scope.children[i].start_byte
+		end_byte := scope.children[i].start_byte
+		should_delete := scope.children[i].remove_symbols_by_line(start_line, end_line)
+		if should_delete {
+			scope.children[i].remove_child(start_byte, end_byte)
+			scope.children.delete(i)
+		} else {
+			i++
 		}
 	}
 
-	return false
+	return del_count == old_len
+}
+
+// remove_child removes a child scope based on the given position
+pub fn (mut scope ScopeTree) remove_child(start_byte u32, end_byte u32) {
+	for i := 0; i < scope.children.len; i++ {
+		child_start_byte := scope.children[i].start_byte
+		child_end_byte := scope.children[i].start_byte
+		if child_start_byte == start_byte && child_end_byte == end_byte {
+			scope.children.delete(i)
+		} else {
+			scope.children[i].remove_child(start_byte, end_byte)
+			i++
+		}
+	}
 }
 
 // remove removes the specified symbol
@@ -160,8 +190,10 @@ pub fn (mut scope ScopeTree) remove(name string) bool {
 // get_symbols before returns a list of symbols that are available before
 // the target byte offset
 pub fn (mut scope ScopeTree) get_symbols_before(target_byte u32) []&Symbol {
-	mut selected_scope := scope.innermost(target_byte, target_byte)
 	mut symbols := []&Symbol{}
+	mut selected_scope := scope.innermost(target_byte, target_byte) or {
+		return symbols
+	}
 	for !isnil(selected_scope) {
 		for sym in selected_scope.symbols {
 			if sym.range.start_byte <= target_byte && sym.range.end_byte <= target_byte {

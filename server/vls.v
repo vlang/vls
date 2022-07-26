@@ -59,6 +59,7 @@ pub enum Feature {
 	definition
 	implementation
 	code_lens
+	document_link
 }
 
 // feature_from_str returns the Feature-enum value equivalent of the given string.
@@ -77,6 +78,7 @@ fn feature_from_str(feature_name string) ?Feature {
 		'folding_range' { return Feature.folding_range }
 		'definition' { return Feature.definition }
 		'code_lens' { return Feature.code_lens }
+		'document_link' { return Feature.document_link }
 		else { return error('feature "$feature_name" not found') }
 	}
 }
@@ -95,6 +97,7 @@ pub const (
 		.definition,
 		.implementation,
 		.code_lens,
+		.document_link,
 	]
 )
 
@@ -108,23 +111,25 @@ mut:
 
 struct Vls {
 mut:
-	vroot_path       string
-	parser           &tree_sitter.Parser<v.NodeType>
-	store            analyzer.Store
-	status           ServerStatus = .off
-	root_uri         lsp.DocumentUri
-	is_typing        bool
-	typing_ch        chan int
-	enabled_features []Feature = server.default_features_list
-	capabilities     lsp.ServerCapabilities
-	panic_count      int
-	shutdown_timeout time.Duration = 5 * time.minute
-	client_pid       int
+	vroot_path         string
+	parser             &tree_sitter.Parser<v.NodeType>
+	store              analyzer.Store
+	status             ServerStatus = .off
+	root_uri           lsp.DocumentUri
+	last_modified_line u32 // for did_change
+	last_affected_node v.NodeType = v.NodeType.unknown
+	is_typing          bool
+	typing_ch          chan int
+	enabled_features   []Feature = server.default_features_list
+	capabilities       lsp.ServerCapabilities
+	panic_count        int
+	shutdown_timeout   time.Duration = 5 * time.minute
+	client_pid         int
 	// client_capabilities lsp.ClientCapabilities
-	reporter         &DiagnosticReporter
-	writer           &ResponseWriter = &ResponseWriter(0)
+	reporter           &DiagnosticReporter
+	writer             &ResponseWriter = &ResponseWriter(0)
 pub mut:
-	files            map[string]File
+	files              map[string]File
 }
 
 pub fn new() &Vls {
@@ -199,6 +204,10 @@ pub fn (mut ls Vls) handle_jsonrpc(request &jsonrpc.Request, mut rw jsonrpc.Resp
 			'textDocument/didClose' {
 				params := json.decode(lsp.DidCloseTextDocumentParams, request.params) ?
 				ls.did_close(params, mut rw)
+			}
+			'textDocument/willSave' {
+				params := json.decode(lsp.WillSaveTextDocumentParams, request.params) ?
+				ls.will_save(params, mut rw)
 			}
 			'textDocument/formatting' {
 				params := json.decode(lsp.DocumentFormattingParams, request.params) or {
@@ -279,6 +288,14 @@ pub fn (mut ls Vls) handle_jsonrpc(request &jsonrpc.Request, mut rw jsonrpc.Resp
 				// 	return w.wrap_error(err)
 				// }
 				w.write(ls.code_lens(lsp.CodeLensParams{}, mut rw) or {
+					return w.wrap_error(err)
+				})
+			}
+			'textDocument/documentLink' {
+				// params := json.decode(lsp.DocumentLinkParams, request.params) or {
+				// 	return w.wrap_error(err)
+				// }
+				w.write(ls.document_link(lsp.DocumentLinkParams{}, mut rw) or {
 					return w.wrap_error(err)
 				})
 			}
@@ -364,7 +381,7 @@ pub fn monitor_changes(mut ls Vls, mut resp_wr ResponseWriter) {
 			a := <-ls.typing_ch {
 				ls.is_typing = a != 0
 			}
-			50 * time.millisecond {
+			350 * time.millisecond {
 				if ls.status != .off && !timeout_stopped {
 					timeout_stopped = true
 					timeout_sw.stop()
@@ -380,7 +397,9 @@ pub fn monitor_changes(mut ls Vls, mut resp_wr ResponseWriter) {
 				}
 
 				uri := lsp.document_uri_from_path(ls.store.cur_file_path)
-				ls.analyze_file(ls.files[uri])
+				ls.analyze_file(ls.files[uri], ls.last_affected_node, ls.last_modified_line)
+				ls.last_modified_line = 0
+				ls.last_affected_node = .unknown
 				ls.is_typing = false
 			}
 		}

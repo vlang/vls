@@ -36,7 +36,7 @@ fn run_host(cmd cli.Command) ? {
 				server_args << flag_value
 			}
 			'debug' {
-				flag_value := cmd.flags.get_bool(flag.name) or { continue }
+				flag_value := cmd.flags.get_bool(flag.name) or { false }
 				if !flag_value {
 					continue
 				}
@@ -92,14 +92,9 @@ fn setup_and_configure_io(cmd cli.Command, is_child bool) ?io.ReaderWriter {
 
 fn setup_logger(cmd cli.Command) jsonrpc.Interceptor {
 	debug_mode := cmd.flags.get_bool('debug') or { false }
-	mut logger := &LogRecorder{
-		filter_kinds: [.recv_request, .send_response]
+	return &LogRecorder{
+		enabled: debug_mode
 	}
-	if !debug_mode {
-		logger.disable()
-	}
-
-	return logger
 }
 
 fn validate_options(cmd cli.Command) ? {

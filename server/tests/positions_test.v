@@ -3,7 +3,7 @@ import server
 import test_utils
 import benchmark
 import lsp
-import ropes
+import structures.ropes
 
 // import tree_sitter
 

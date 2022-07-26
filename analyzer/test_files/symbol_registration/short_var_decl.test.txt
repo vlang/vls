@@ -26,7 +26,6 @@ fn main() {
     (mut variable x f32 [7,11]-[7,12])
     (variable c int [11,4]-[11,5])
     (variable e int [11,7]-[11,8])
-    (variable non_a [12,4]-[12,9])
     (variable unsafe_var int [13,4]-[13,14])
     (variable fn_var fn (i int) int [14,4]-[14,10])
     (scope [0]-[79]

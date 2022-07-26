@@ -1,7 +1,7 @@
 module analyzer
 
 import os
-import analyzer.depgraph
+import structures.depgraph
 import tree_sitter
 import ast
 
@@ -238,10 +238,12 @@ pub fn (mut ss Store) register_symbol(mut info Symbol) ?&Symbol {
 		}
 
 		// Remove this?
-		if existing_sym.kind !in analyzer.container_symbol_kinds {
-			if (existing_sym.kind != .placeholder && existing_sym.kind == info.kind)
+		if existing_sym.kind !in analyzer.container_symbol_kinds  {
+			if existing_sym.kind != .placeholder
+				&& (info.range.start_point.row > existing_sym.range.start_point.row
+				|| (existing_sym.kind == info.kind
 				&& (existing_sym.file_path == info.file_path
-				&& existing_sym.file_version >= info.file_version) {
+				&& existing_sym.file_version >= info.file_version))) {
 				return report_error('Symbol already exists. (idx=$existing_idx) (name="$existing_sym.name")',
 					info.range)
 			}
@@ -890,12 +892,19 @@ pub fn (mut ss Store) infer_value_type_from_node(node ast.Node, src_text tree_si
 }
 
 // delete_symbol_at_node removes a specific symbol from a specific portion of the node
-pub fn (mut ss Store) delete_symbol_at_node(root_node ast.Node, src tree_sitter.SourceText, at_range C.TSRange) bool {
-	unsafe { ss.opened_scopes[ss.cur_file_path].free() }
-	nodes := get_nodes_within_range(root_node, at_range) or { return false }
-	for node in nodes {
-		node_type_name := node.type_name
-		match node_type_name {
+pub fn (mut ss Store) delete_symbol_at_node(root_node ast.Node, src tree_sitter.SourceText, start_line u32, end_line u32) bool {
+	// remove by scope
+	ss.opened_scopes[ss.cur_file_path].remove_symbols_by_line(start_line, end_line)
+
+	// remove by node
+	mut cursor := new_tree_cursor(root_node, start_line_nr: start_line)
+
+	for node in cursor {
+		if !within_range(node.range(), start_line, end_line) {
+			break
+		}
+
+		match node.type_name {
 			.const_spec, .global_var_spec, .global_var_declaration, .function_declaration,
 			.interface_declaration, .enum_declaration, .type_declaration, .struct_declaration {
 				name_node := node.child_by_field_name('name') or { continue }
@@ -910,40 +919,17 @@ pub fn (mut ss Store) delete_symbol_at_node(root_node ast.Node, src tree_sitter.
 							ss.binded_symbol_locations.delete(binded_location_idx)
 						}
 					}
-
-					// unsafe { ss.symbols[ss.cur_dir].free() }
+					if node.type_name == .function_declaration {
+						ss.symbols[ss.cur_dir][idx].scope.remove_symbols_by_line(start_line, end_line)
+					}
 					ss.symbols[ss.cur_dir].delete(idx)
 				}
 
-				if node_type_name == .function_declaration {
-					// TODO: find a way to remove scopes and update the position
-					// of adjacent ones
-
-					// params_list_node := node.child_by_field_name('parameters')
-					// body_node := node.child_by_field_name('body')
-
-					// mut start_byte := body_node.start_byte()
-					// end_byte := body_node.end_byte()
-
-					// param_count := params_list_node.named_child_count()
-					// if param_count != 0 {
-					// 	start_byte = params_list_node.named_child(0).start_byte()
-					// }
-				} else if node_type_name in [.const_spec, .global_var_spec,
-					.global_var_declaration] {
-					mut innermost := ss.opened_scopes[ss.cur_file_path].innermost(node.start_byte(),
-						node.end_byte())
-					innermost.remove(symbol_name)
-				}
-			}
-			.short_var_declaration {
-				mut innermost := ss.opened_scopes[ss.cur_file_path].innermost(node.start_byte(),
-					node.end_byte())
-				left_side := node.child_by_field_name('left') or { continue }
-				left_count := left_side.named_child_count()
-				for i in u32(0) .. left_count {
-					innermost.remove(left_side.named_child(i) or { continue }.text(src))
-				}
+				// if node.type_name in [.const_spec, .global_var_spec, .global_var_declaration] {
+				// 	mut innermost := ss.opened_scopes[ss.cur_file_path].innermost(node.start_byte(),
+				// 		node.end_byte())
+				// 	innermost.remove(symbol_name)
+				// }
 			}
 			.import_declaration {
 				mut imp_module := ss.imports.find_by_position(ss.cur_file_path, node.range()) or { continue }
@@ -954,7 +940,7 @@ pub fn (mut ss Store) delete_symbol_at_node(root_node ast.Node, src tree_sitter.
 				// let cleanup_imports do the job
 			}
 			.block {
-				ss.opened_scopes[ss.cur_file_path].remove_child(node.start_byte(), node.end_byte())
+				// ss.opened_scopes[ss.cur_file_path].remove_child(node.start_byte(), node.end_byte())
 			}
 			else {}
 		}
