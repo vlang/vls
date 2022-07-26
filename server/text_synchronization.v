@@ -17,7 +17,7 @@ fn (mut ls Vls) analyze_file(file File, affected_node_type v.NodeType, affected_
 
 	// skip analyzing imports when affected is not an import declaration
 	if is_import || affected_line == 0 {
-		import_modules_from_tree(context, file.tree, os.join_path(file.uri.dir_path(),
+		analyzer.import_modules_from_tree(context, file.tree, os.join_path(file.uri.dir_path(),
 			'modules'), ls.root_uri.path(), os.dir(os.dir(file_path)))
 
 		ls.store.cleanup_imports(file.uri.dir_path())
