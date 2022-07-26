@@ -230,7 +230,9 @@ fn (mut builder CompletionBuilder) build_suggestions_from_sym(sym &analyzer.Symb
 			if (sym.kind in [.enum_, .struct_] || sym.kind in analyzer.container_symbol_kinds)
 				&& child_sym.kind !in [.field, .function, .embedded_field] {
 				continue
-			} else if !child_sym.file_path.starts_with(builder.store.cur_dir)
+			} 
+
+			if os.dir(child_sym.file_path) != builder.store.cur_dir
 				&& int(child_sym.access) < int(analyzer.SymbolAccess.public) {
 				continue
 			}
