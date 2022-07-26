@@ -17,9 +17,6 @@ pub fn (mut imp Importer) imports() ImportsMap {
 pub fn (mut imp Importer) scan_imports(tree &ast.Tree) []&Import {
 	root_node := tree.root_node()
 	named_child_len := root_node.named_child_count()
-	file_name := os.base(imp.context.file_path)
-	file_dir := os.dir(imp.context.file_path)
-
 	mut newly_imported_modules := []&Import{}
 
 	for i in 0 .. named_child_len {
@@ -44,14 +41,14 @@ pub fn (mut imp Importer) scan_imports(tree &ast.Tree) []&Import {
 
 		// resolve it later after
 		mut imp_module, already_imported := imp.context.store.add_import(
-			file_dir,
+			imp.context.file_dir,
 			resolved: false
 			absolute_module_name: import_path_node.text(imp.context.text)
 		)
 
 		if import_alias_node := node.child_by_field_name('alias') {
 			if ident_node := import_alias_node.named_child(0) {
-				imp_module.set_alias(file_name, ident_node.text(imp.context.text))
+				imp_module.set_alias(imp.context.file_name, ident_node.text(imp.context.text))
 			}
 		} else if import_symbols_node := node.child_by_field_name('symbols') {
 			symbols_len := import_symbols_node.named_child_count()
@@ -60,7 +57,7 @@ pub fn (mut imp Importer) scan_imports(tree &ast.Tree) []&Import {
 				symbols[j] = import_symbols_node.named_child(j) or { continue }.text(imp.context.text)
 			}
 
-			imp_module.set_symbols(file_name, ...symbols)
+			imp_module.set_symbols(imp.context.file_name, ...symbols)
 		}
 
 		if !already_imported {

@@ -132,7 +132,7 @@ fn (mut an SemanticAnalyzer) import_decl(node ast.Node) ? {
 	module_name := module_name_node.text(an.context.text)
 	// defer { unsafe { module_name.free() } }
 
-	module_path := an.context.store.get_module_path_opt(module_name, os.base(an.context.file_path)) or {
+	module_path := an.context.store.get_module_path_opt(module_name, an.context.file_name) or {
 		// `import_modules_from_trees` already reported it
 		return
 	}
