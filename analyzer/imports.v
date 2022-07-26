@@ -184,7 +184,7 @@ pub fn (mut imp Importer) import_modules(mut imports []&Import) {
 
 			// Import module but from different lookup oath other than the project
 			modules_from_dir := os.join_path(dir, 'modules')
-			imp.context.store.import_modules_from_tree(context, tree_from_import, modules_from_dir,
+			import_modules_from_tree(context, tree_from_import, modules_from_dir,
 				imp.context.file_path, modules_from_old_dir)
 			imported++
 
@@ -235,7 +235,7 @@ pub fn (mut ss Store) add_import(to_dir string, imp Import) (&Import, bool) {
 }
 
 // import_modules_from_tree scans and imports the modules based from the AST tree
-pub fn (mut store Store) import_modules_from_tree(context AnalyzerContext, tree &ast.Tree, lookup_paths ...string) {
+pub fn import_modules_from_tree(context AnalyzerContext, tree &ast.Tree, lookup_paths ...string) {
 	mut importer := Importer{
 		context: context
 	}

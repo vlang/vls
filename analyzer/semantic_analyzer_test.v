@@ -2,7 +2,7 @@ import os
 import ast
 import test_utils
 import benchmark
-import analyzer { Collector, SemanticAnalyzer, Store, SymbolAnalyzer, new_tree_cursor, setup_builtin, Runes }
+import analyzer { Collector, SemanticAnalyzer, Store, SymbolAnalyzer, new_tree_cursor, import_modules_from_tree, setup_builtin, Runes }
 import analyzer.an_test_utils
 import v.util.diff
 import term
@@ -62,13 +62,12 @@ fn test_semantic_analysis() ? {
 
 		println(bench.step_message('Testing $test_name'))
 		tree := p.parse_string(source: src)
-		src_runes := Runes(src.runes())
 		mut cursor := new_tree_cursor(tree.root_node())
 
 		context.replace_file_path(test_file_path)
-		context.text = src_runes
+		context.text = Runes(src.runes())
 
-		store.import_modules_from_tree(context, tree, src_runes, vlib_path)
+		import_modules_from_tree(context, tree, vlib_path)
 		symbols := sym_analyzer.analyze_from_cursor(mut cursor)
 		semantic_analyzer.analyze_from_cursor(mut cursor)
 		result := an_test_utils.sexpr_str_reporter(reporter)

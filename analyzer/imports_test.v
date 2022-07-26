@@ -1,4 +1,4 @@
-import analyzer { Store, Runes, Collector, Importer }
+import analyzer { Store, Runes, Collector, Importer, import_modules_from_tree }
 import tree_sitter
 import tree_sitter_v as v
 import ast
@@ -31,11 +31,10 @@ fn test_scan_imports() ? {
 	}
 
 	mut imp := Importer{
-		store: unsafe { store }
-		file_path: file_path
+		context: store.with(file_path: file_path, text: sample_content_bytes)
 	}
 
-	imports := imp.scan_imports(tree, sample_content_bytes)
+	imports := imp.scan_imports(tree)
 	assert imports.len == 2
 	assert imports[0].absolute_module_name == 'os'
 	assert imports[1].absolute_module_name == 'env'
@@ -48,11 +47,10 @@ fn test_inject_paths_of_new_imports() ? {
 	}
 
 	mut imp := Importer {
-		store: unsafe { store }
-		file_path: file_path
+		context: store.with(file_path: file_path, text: sample_content_bytes)
 	}
 
-	mut imports := imp.scan_imports(tree, sample_content_bytes)
+	mut imports := imp.scan_imports(tree)
 	assert imports.len == 2
 	assert imports[0].absolute_module_name == 'os'
 	assert imports[1].absolute_module_name == 'env'
@@ -71,7 +69,8 @@ fn test_import_modules_from_tree() ? {
 		default_import_paths: test_lookup_paths
 	}
 
-	store.import_modules_from_tree(file_path, tree, sample_content_bytes)
+	context := store.with(file_path: file_path, text: sample_content_bytes)
+	import_modules_from_tree(context, tree)
 
 	assert store.imports[file_dir].len == 2
 	assert store.imports[file_dir][0].absolute_module_name == 'os'
@@ -99,7 +98,9 @@ fn test_import_modules_with_edits() ? {
 		reporter: &Collector{}
 		default_import_paths: test_lookup_paths
 	}
-	store.import_modules_from_tree(file_path, tree, Runes(sample_content2.runes()))
+
+	mut context := store.with(file_path: file_path, text: Runes(sample_content2.runes()))
+	import_modules_from_tree(context, tree)
 	store.cleanup_imports(file_dir)
 
 	assert store.imports[file_dir].len == 1
@@ -128,7 +129,8 @@ fn test_import_modules_with_edits() ? {
 	)
 
 	new_tree := p.parse_string(source: new_content, tree: tree.raw_tree)
-	store.import_modules_from_tree(file_path, new_tree, Runes(new_content.runes()))
+	context.text = Runes(new_content.runes())
+	import_modules_from_tree(context, new_tree)
 	store.cleanup_imports(file_dir)
 
 	assert store.imports[file_dir].len == 0
@@ -146,7 +148,9 @@ fn test_import_modules_with_edits() ? {
 	)
 
 	new_new_tree := p.parse_string(source: sample_content2, tree: new_tree.raw_tree)
-	store.import_modules_from_tree(file_path, new_new_tree, Runes(sample_content2.runes()))
+	context.text = Runes(sample_content2.runes())
+
+	import_modules_from_tree(context, new_new_tree)
 	store.cleanup_imports(file_dir)
 
 	assert store.imports[file_dir].len == 1
