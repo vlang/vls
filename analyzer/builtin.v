@@ -7,10 +7,7 @@ const numeric_types_with_any_type = ['u8', 'u16', 'u32', 'u64' 'i8', 'i16', 'int
 
 pub fn setup_builtin(mut store Store, builtin_path string) {
 	mut importer := Importer{
-		context: AnalyzerContext{
-			file_path: ''
-			store: unsafe { store }
-		}
+		context: store.default_context()
 	}
 	
 	mut builtin_import, _ := store.add_import(
