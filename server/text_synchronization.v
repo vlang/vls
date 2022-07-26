@@ -173,10 +173,8 @@ pub fn (mut ls Vls) did_change(params lsp.DidChangeTextDocumentParams, mut wr Re
 	}
 
 	if Feature.v_diagnostics !in ls.enabled_features {
-		ls.reporter.clear_from_range(
-			uri, 
-			u32(params.content_changes.first().range.start.line), 
-			u32(params.content_changes.last().range.start.line)
+		ls.reporter.clear_from_line(
+			uri, u32(params.content_changes.first().range.start.line)
 		)
 	}
 

@@ -918,11 +918,11 @@ pub fn (mut ss Store) delete_symbol_at_node(root_node ast.Node, src tree_sitter.
 			.const_spec, .global_var_spec, .global_var_declaration, .function_declaration,
 			.interface_declaration, .enum_declaration, .type_declaration, .struct_declaration {
 				name_node := node.child_by_field_name('name') or { continue }
-				symbol_name := name_node.text(src)
-				idx := ss.symbols[ss.cur_dir].index(symbol_name)
+				idx := ss.symbols[ss.cur_dir].index_by_row(ss.cur_file_path, node.start_point().row)
 				if idx != -1 && idx < ss.symbols[ss.cur_dir].len {
 					language := ss.symbols[ss.cur_dir][idx].language
 					if language != .v {
+						symbol_name := name_node.text(src)
 						binded_location_idx := ss.binded_symbol_locations.index(symbol_name)
 						if binded_location_idx != -1
 							&& ss.binded_symbol_locations[binded_location_idx].module_path == ss.cur_dir {
@@ -933,6 +933,16 @@ pub fn (mut ss Store) delete_symbol_at_node(root_node ast.Node, src tree_sitter.
 						ss.symbols[ss.cur_dir][idx].scope.remove_symbols_by_line(start_line, end_line)
 					}
 					ss.symbols[ss.cur_dir].delete(idx)
+				} else if node.type_name == .function_declaration {
+					// for methods
+					fn_sym := ss.infer_symbol_from_node(node, src) or { analyzer.void_sym }
+					if !fn_sym.is_void() {
+						mut parent_sym := unsafe { fn_sym.parent_sym.return_sym }
+						child_idx := parent_sym.children_syms.index_by_row(ss.cur_file_path, node.start_point().row)
+						if child_idx != -1 {
+							parent_sym.children_syms.delete(child_idx)
+						}
+					}
 				}
 
 				// if node.type_name in [.const_spec, .global_var_spec, .global_var_declaration] {
