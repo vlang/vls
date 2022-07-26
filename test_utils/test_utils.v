@@ -6,6 +6,9 @@ import jsonrpc.server_test_utils
 import os
 import lsp
 import benchmark
+import v.util.diff
+
+const diff_cmd = diff.find_working_diff_command() or { '' }
 
 struct TestResponse {
 	jsonrpc string = jsonrpc.version
@@ -42,10 +45,27 @@ pub fn (mut t Tester) initialize() ?TestFilesIterator {
 pub fn (mut t Tester) fail(file TestFile, msg string) {
 	final_msg := if msg.len == 0 { '<unknown error>' } else { msg }
 	println(t.bench.step_message_fail('$file.file_name: $final_msg'))
+	t.bench.fail()
 }
 
 pub fn (mut t Tester) ok(file TestFile) {
 	println(t.bench.step_message_ok(file.file_name))
+	t.bench.ok()
+}
+
+pub fn (mut t Tester) is_equal<T>(expected T, actual T) ? {
+	if expected != actual {
+		println(diff.color_compare_strings(diff_cmd, 'vls_symbol_registration_test', expected.str(), actual.str()))
+		return error('actual != expected')
+	}
+}
+
+pub fn (mut t Tester) is_null(file TestFile, fail_criteria bool, err IError) {
+	if fail_criteria && err is none {
+		t.ok(file)
+	} else {
+		t.fail(file, err.msg())
+	}
 }
 
 pub fn (t &Tester) is_ok() bool {

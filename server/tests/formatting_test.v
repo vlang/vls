@@ -3,7 +3,6 @@ import test_utils
 import jsonrpc.server_test_utils { new_test_client }
 import lsp
 import os
-import json
 
 fn test_formatting() ? {
 	mut ls := server.new()
@@ -43,7 +42,7 @@ fn test_formatting() ? {
 			text_document: doc_id
 		}, mut writer) {
 			// compare content
-			assert json.encode(actual) == json.encode([
+			expected := [
 				lsp.TextEdit{
 					range: lsp.Range{
 						start: lsp.Position{
@@ -57,18 +56,21 @@ fn test_formatting() ? {
 					}
 					new_text: exp_content
 				},
-			])
-		} else {
-			if file.file_path.ends_with('empty.vv') {
-				assert err is none
+			]
+
+			if _ := t.is_equal(expected, actual) {
+				t.ok(file)
+			} else {
+				t.fail(file, err.msg())
 			}
+		} else {
+			t.is_null(file, file.file_path.ends_with('empty.vv'), err)
 		}
 		// Delete document
 		t.close_document(doc_id) or {
 			t.fail(file, err.msg())
 			continue
 		}
-		t.ok(file)
 	}
 	assert t.is_ok()
 }

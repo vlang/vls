@@ -82,20 +82,24 @@ fn test_folding_range() ? {
 		}
 
 		// initiate folding range request
-		actual := ls.folding_range(lsp.FoldingRangeParams{
+		if actual := ls.folding_range(lsp.FoldingRangeParams{
 			text_document: doc_id
-		}, mut writer) ?
-
-		// compare content
-		assert actual == folding_range_results[test_name]
+		}, mut writer) {
+			// compare content
+			if _ := t.is_equal(folding_range_results[test_name], actual) {
+				t.ok(file)
+			} else {
+				t.fail(file, err.msg())
+			}
+		} else {
+			t.fail(file, err.msg())
+		}
 
 		// Delete document
 		t.close_document(doc_id) or {
 			t.fail(file, err.msg())
 			continue
 		}
-
-		t.ok(file)
 	}
 	assert t.is_ok()
 }

@@ -23,17 +23,15 @@ fn test_code_lens() ? {
 		if _ := ls.document_link(lsp.DocumentLinkParams{
 			text_document: doc_id
 		}, mut writer) {
-			assert false
+			t.fail(file, 'should not return a result')
 		} else {
-			assert err is none
+			t.is_null(file, true, err)
+		}
 
-			// Delete document
-			t.close_document(doc_id) or {
-				t.fail(file, err.msg())
-				continue
-			}
-
-			t.ok(file)
+		// Delete document
+		t.close_document(doc_id) or {
+			t.fail(file, err.msg())
+			continue
 		}
 	}
 
