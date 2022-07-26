@@ -21,15 +21,6 @@ fn test_semantic_analysis() ? {
 
 	setup_builtin(mut store, os.join_path(vlib_path, 'builtin'))
 
-	mut sym_analyzer := SymbolAnalyzer{
-		context: store.default_context()
-		is_test: true
-	}
-
-	mut semantic_analyzer := SemanticAnalyzer{
-		context: store.default_context()
-	}
-
 	test_files_dir := test_utils.get_test_files_path(@FILE)
 	test_files := test_utils.load_test_file_paths(test_files_dir, 'semantic_analyzer') or {
 		bench.fail()
@@ -60,17 +51,27 @@ fn test_semantic_analysis() ? {
 			continue
 		}
 
-		println(bench.step_message('Testing $test_name'))
-		tree := p.parse_string(source: src)
 		context := store.with(file_path: test_file_path, text: Runes(src.runes()))
+		mut sym_analyzer := SymbolAnalyzer{
+			context: context
+			is_test: true
+		}
+
+		mut semantic_analyzer := SemanticAnalyzer{
+			context: context
+		}
+
+		tree := p.parse_string(source: src)
 		mut cursor := new_tree_cursor(tree.root_node())
-		sym_analyzer.context = context
-		semantic_analyzer.context = context
+
 		import_modules_from_tree(context, tree, vlib_path)
+
 		sym_analyzer.analyze_from_cursor(mut cursor)
 		semantic_analyzer.analyze_from_cursor(mut cursor)
+		
 		result := an_test_utils.sexpr_str_reporter(reporter)
 		expected_trimmed := test_utils.newlines_to_spaces(expected)
+
 		term.clear_previous_line()
 		if result != expected_trimmed {
 			if diff_cmd.len != 0 {
