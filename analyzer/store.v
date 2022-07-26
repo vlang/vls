@@ -781,6 +781,12 @@ pub fn (mut ss Store) infer_value_type_from_node(node ast.Node, src_text tree_si
 	mut type_name := ''
 
 	match node.type_name {
+		.none_ {
+			// TODO: None is already registered in builtin.v but
+			// haven't done interface checking yet
+			// type_name = 'none'
+			type_name = 'IError'
+		}
 		.true_, .false_ {
 			type_name = 'bool'
 		}
