@@ -19,9 +19,28 @@ fn thing() ?string {
 	return 'ok'
 }
 
+fn whoops() string {
+    return println('hello')
+}
+
+fn number() int {
+    return false
+}
+
+fn number2() {
+    return 1
+}
+
+fn number3() int {
+    return
+}
 ---
 
 (error "`a` evaluated but not used" [1,4]-[1,5])
 (error "`a` evaluated but not used" [3,8]-[3,9])
 (error "unreachable code" [9,4]-[9,10])
 (error "opt() returns an option, so it should have either an `or {}` block, or `?` at the end" [16,2]-[16,7])
+(error "`println('hello')` used as value" [22,4]-[22,27]) 
+(error "cannot use `bool` as type `int` in return argument" [26,4]-[26,16])
+(error "unexpected argument, current function does not return anything" [30,11]-[30,12])
+(error "expected `int` argument" [34,4]-[34,10])

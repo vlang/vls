@@ -413,6 +413,44 @@ pub fn (mut an SemanticAnalyzer) break_statement(node ast.Node) {
 	}
 }
 
+pub fn (mut an SemanticAnalyzer) return_statement(node ast.Node) {
+	if !an.in_function() {
+		// TODO:
+		return
+	}
+
+	mut expr_node := node.named_child(0) or { 
+		if !an.parent_sym.return_sym.is_void() {
+			an.report(node, errors.invalid_void_return_error, an.parent_sym.return_sym)
+		}
+		return 
+	}
+	mut expected_sym := an.parent_sym.return_sym
+	// TODO: support multi-return type checks
+	if expr_node.type_name == .expression_list {
+		expr_node = expr_node.named_child(0) or { expr_node }
+		expr_sym := an.expression(expr_node) or { analyzer.void_sym }
+
+		if expected_sym.kind == .optional {
+			// TODO: use proper checking in the future
+			// for interfaces not limited to IError
+			if expr_sym.name == 'IError' {
+				expected_sym = expr_sym 
+			} else {
+				expected_sym = expected_sym.final_sym()
+			}
+		}
+
+		if expected_sym.is_void() && !expr_sym.is_void() {
+			an.report(expr_node, errors.unexpected_return_error)
+		} else if expr_sym.is_void() {
+			an.report(node, errors.void_value_return_error, expr_node.text(an.src_text))
+		} else if expr_sym != expected_sym {
+			an.report(node, errors.invalid_return_error, expr_sym, an.parent_sym.return_sym)
+		}
+	}
+}
+
 fn parent_by_depth(node ast.Node, depth int) ?ast.Node {
 	mut cur_node := node
 	for _ in 0 .. depth {
@@ -450,7 +488,7 @@ pub fn (mut an SemanticAnalyzer) statement(node ast.Node) {
 			an.statement(node.named_child(0) or { return })
 		}
 		.return_statement {
-			an.expression(node.child(0) or { return }) or {}
+			an.return_statement(node)
 		}
 		.block {
 			an.block(node)
