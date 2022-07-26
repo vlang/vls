@@ -132,24 +132,16 @@ pub fn (mut ls Vls) did_change(params lsp.DidChangeTextDocumentParams, mut wr Re
 			first_affected_start_offset = u32(start_idx)
 		}
 
-		old_len := new_src.len()
-		new_len := old_len - (old_end_idx - start_idx) + change_text.len
-		diff := new_len - old_len
-
-		if (change_text.len == 0 && diff < 0) || new_end_idx < old_end_idx {
-			new_src = new_src.delete(start_idx, old_end_idx - start_idx)
-		} else if start_idx != old_end_idx && old_end_idx < new_end_idx {
-			if new_end_idx < new_src.len() {
-				new_src = new_src.delete(start_idx, new_end_idx - old_end_idx)
-			} else {
-				// this is for situations where the inserted text is greater
-				// than the length of the buffer in general. (e.g. suggestions
-				// that replace the incomplete text with a complete yet longer one)
-				new_src = new_src.delete(start_idx, old_end_idx - start_idx)
-			}
-		}
-
-		new_src = new_src.insert(start_idx, change_text)
+		// NOTES ON REMOVING TEXT:
+		// remove the specific portion of a document's source text if:
+		// - there's no text to be added (remove/delete only)
+		// - a specific portion of the text is replaced with another text
+		//   regardless of the length (e.g. completion, formatting)
+		// 
+		// NOTES ON INSERTING TEXT:
+		// insert only on the starting index if the to-be-inserted text
+		// has content.
+		new_src = new_src.delete(start_idx, old_end_idx - start_idx).insert(start_idx, change_text)
 
 		// edit the tree
 		new_tree.edit(
@@ -218,3 +210,5 @@ pub fn (mut ls Vls) did_save(params lsp.DidSaveTextDocumentParams, mut wr Respon
 	ls.exec_v_diagnostics(uri) or {}
 	ls.reporter.publish(mut wr, uri)
 }
+
+pub fn (mut ls Vls) will_save(params lsp.WillSaveTextDocumentParams, mut wr ResponseWriter) {}

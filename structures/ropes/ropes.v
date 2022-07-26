@@ -134,7 +134,9 @@ pub fn (r &Rope) insert(idx int, str string) &Rope {
 }
 
 pub fn (r &Rope) delete(idx int, len int) &Rope {
-	if isnil(r) {
+	if len == 0 {
+		return r
+	} else if isnil(r) {
 		panic('operation not permitted - rope is nil')
 	}
 	r1, r2 := r.split(idx)

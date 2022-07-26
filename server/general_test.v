@@ -86,6 +86,7 @@ fn test_setup_logger() ? {
 	println('test_setup_logger')
 	mut io := new_test_client(server.new(), &LogRecorder{})
 	io.send<lsp.InitializeParams, lsp.InitializeResult>('initialize', lsp.InitializeParams{
+		trace: 'verbose'
 		root_uri: lsp.document_uri_from_path(os.join_path('non_existent', 'path'))
 	}) ?
 

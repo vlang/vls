@@ -33,7 +33,7 @@ As of this moment, VLS does not provide all the methods as described in the Lang
 ### Text Synchronization
 - [x] `didOpen`
 - [x] `didChange`
-- [ ] `willSave`
+- [x] `willSave` (**stub**)
 - [ ] `willSaveWaitUntil`
 - [x] `didSave`
 - [x] `didClose`

@@ -36,7 +36,7 @@ fn run_host(cmd cli.Command) ? {
 				server_args << flag_value
 			}
 			'debug' {
-				flag_value := cmd.flags.get_bool(flag.name) or { continue }
+				flag_value := cmd.flags.get_bool(flag.name) or { false }
 				if !flag_value {
 					continue
 				}

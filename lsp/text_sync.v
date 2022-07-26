@@ -43,13 +43,13 @@ pub struct TextDocumentChangeRegistrationOptions {
 // notification
 pub struct WillSaveTextDocumentParams {
 	text_document TextDocumentIdentifier [json: textDocument]
-	reason        int
+	reason        TextDocumentSaveReason
 }
 
 pub enum TextDocumentSaveReason {
 	manual = 1
 	after_delay = 2
-	focusout = 3
+	focus_out = 3
 }
 
 // ‘textDocument/willSaveWaitUntil’
