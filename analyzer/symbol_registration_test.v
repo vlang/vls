@@ -20,9 +20,8 @@ fn test_symbol_registration() ? {
 
 	setup_builtin(mut store, os.join_path(vlib_path, 'builtin'))
 
-	mut context := store.default_context()
 	mut sym_analyzer := SymbolAnalyzer{
-		context: context
+		context: store.default_context()
 		is_test: true
 	}
 
@@ -60,8 +59,7 @@ fn test_symbol_registration() ? {
 		println(bench.step_message('Testing $test_name'))
 		tree := p.parse_string(source: src)
 		mut cursor := new_tree_cursor(tree.root_node())
-		context.replace_file_path(test_file_path)
-		context.text = Runes(src.runes())
+		sym_analyzer.context = store.with(file_path: test_file_path, text: Runes(src.runes()))
 		symbols := sym_analyzer.analyze_from_cursor(mut cursor)
 		result := an_test_utils.sexpr_str_symbol_array(symbols)
 		expected_trimmed := test_utils.newlines_to_spaces(expected)

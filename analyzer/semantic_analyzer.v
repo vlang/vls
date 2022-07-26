@@ -1122,7 +1122,7 @@ pub fn (mut an SemanticAnalyzer) analyze(node ast.Node) {
 
 pub fn (mut an SemanticAnalyzer) analyze_from_cursor(mut cursor TreeCursor) {
 	defer { cursor.reset() }
-	for got_node in cursor {
+	for i, got_node in cursor {
 		an.analyze(got_node)
 	}
 }
