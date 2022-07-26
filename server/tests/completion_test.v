@@ -87,6 +87,10 @@ const completion_inputs = {
 		context: lsp.CompletionContext{.trigger_character, '.'}
 		position: lsp.Position{5, 6}
 	}
+	'self_reference_var_in_struct_field.vv':                lsp.CompletionParams{
+		context: lsp.CompletionContext{.invoked, ''}
+		position: lsp.Position{6, 9}
+	}
 	'struct_init.vv':                       lsp.CompletionParams{
 		context: lsp.CompletionContext{.trigger_character, '{'}
 		position: lsp.Position{8, 16}
@@ -376,6 +380,14 @@ const completion_results = {
 			detail: 'pub fn this_is_a_function() string'
 			insert_text: 'this_is_a_function()'
 		},
+	]
+	'self_reference_var_in_struct_field.vv':                [
+		lsp.CompletionItem{
+			label: 'test'
+			kind: .variable
+			detail: 'test &Command'
+			insert_text: 'test'
+		}
 	]
 	'struct_init.vv':                       [
 		lsp.CompletionItem{

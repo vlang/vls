@@ -696,8 +696,12 @@ pub fn (mut ss Store) infer_symbol_from_node(node ast.Node, src_text tree_sitter
 			if !selected_node.type_name.is_identifier() {
 				selected_node = node.child_by_field_name('value') ?
 			}
-			if parent.type_name == .literal_value {
-				parent_sym := ss.infer_symbol_from_node(parent, src_text) ?
+			if parent.type_name == .literal_value || parent.type_name == .type_initializer {
+				mut parent_sym := ss.infer_symbol_from_node(parent, src_text) ?
+				if parent_sym.kind == .ref {
+					parent_sym = parent_sym.parent_sym
+				}
+
 				return parent_sym.children_syms.get(selected_node.text(src_text)) or {
 					if parent_sym.name == 'map' || parent_sym.name == 'array' {
 						return ss.infer_symbol_from_node(selected_node, src_text)
