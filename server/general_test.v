@@ -1,4 +1,4 @@
-import jsonrpc.server_test_utils { new_test_client, RpcResult, TestClient }
+import jsonrpc.server_test_utils { new_test_client }
 import jsonrpc
 import server
 import lsp
@@ -21,7 +21,9 @@ fn test_wrong_first_request() ? {
 fn test_initialize_with_capabilities() ? {
 	mut ls := server.new()
 	mut io := new_test_client(ls)
-	result := io.send<map[string]string, lsp.InitializeResult>('initialize', map[string]string{}) ?
+	result := io.send<map[string]string, lsp.InitializeResult>('initialize', map[string]string{}) or {
+		return err
+	}
 
 	assert ls.status() == .initialized
 	assert result == lsp.InitializeResult{
@@ -30,8 +32,8 @@ fn test_initialize_with_capabilities() ? {
 }
 
 fn test_initialized() ? {
-	mut io, mut ls := init_tests() ?
-	io.notify('initialized', map[string]string{}) ?
+	mut io, mut ls := init_tests()?
+	io.notify('initialized', map[string]string{})?
 	assert ls.status() == .initialized
 }
 
@@ -55,7 +57,7 @@ fn test_set_features() {
 		.definition,
 		.implementation,
 		.code_lens,
-		.document_link
+		.document_link,
 	]
 	ls.set_features(['formatting'], true) or {
 		assert false
@@ -88,9 +90,9 @@ fn test_setup_logger() ? {
 	io.send<lsp.InitializeParams, lsp.InitializeResult>('initialize', lsp.InitializeParams{
 		trace: 'verbose'
 		root_uri: lsp.document_uri_from_path(os.join_path('non_existent', 'path'))
-	}) ?
+	}) or { return err }
 
-	notif := io.stream.notification_at<lsp.ShowMessageParams>(0) ?
+	notif := io.stream.notification_at<lsp.ShowMessageParams>(0)?
 	assert notif.method == 'window/showMessage'
 
 	expected_err_path := os.join_path('non_existent', 'path', 'vls.log')
@@ -104,6 +106,8 @@ fn test_setup_logger() ? {
 fn init_tests() ?(&TestClient, &server.Vls) {
 	mut ls := server.new()
 	mut io := new_test_client(ls)
-	io.send<map[string]string, lsp.InitializeResult>('initialize', map[string]string{}) ?
+	io.send<map[string]string, lsp.InitializeResult>('initialize', map[string]string{}) or {
+		return err
+	}
 	return io, ls
 }

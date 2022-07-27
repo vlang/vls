@@ -1,5 +1,5 @@
 import jsonrpc
-import jsonrpc.server_test_utils { TestClient, TestStream, RpcResult }
+import jsonrpc.server_test_utils { RpcResult, TestClient, TestStream }
 
 struct TestHandler {}
 
@@ -11,7 +11,7 @@ mut:
 fn (mut h TestHandler) handle_jsonrpc(req &jsonrpc.Request, mut wr jsonrpc.ResponseWriter) ? {
 	match req.method {
 		'sum' {
-			params := req.decode_params<SumParams>() ?
+			params := req.decode_params<SumParams>()?
 
 			mut res := 0
 			for n in params.nums {
@@ -32,7 +32,7 @@ fn (mut h TestHandler) handle_jsonrpc(req &jsonrpc.Request, mut wr jsonrpc.Respo
 			wr.write(RpcResult<string>{'Hello world!'})
 		}
 		'trigger' {
-			wr.server.dispatch_event('record', 'dispatched!') ?
+			wr.server.dispatch_event('record', 'dispatched!')?
 			wr.write(RpcResult<string>{'triggered'})
 		}
 		else {
@@ -53,25 +53,25 @@ fn test_server() ? {
 		stream: stream
 	}
 
-	sum_result := client.send<SumParams, RpcResult<int>>('sum', SumParams{ nums: [1,2,4] }) ?
+	sum_result := client.send<SumParams, RpcResult<int>>('sum', SumParams{ nums: [1, 2, 4] }) or {
+		return err
+	}
 	assert sum_result.result == 7
 
-	hello_result := client.send<string, RpcResult<string>>('hello', '') ?
+	hello_result := client.send<string, RpcResult<string>>('hello', '') or { return err }
 	assert hello_result.result == 'Hello world!'
 
 	client.send<string, RpcResult<int>>('multiply', 'test') or {
 		assert err.msg() == 'Method not found.'
 	}
 
-	client.send<[]string, RpcResult<string>>('mirror', ['0']) or {
-		assert err is none
-	}
+	client.send<[]string, RpcResult<string>>('mirror', ['0']) or { assert err is none }
 }
 
 struct TestInterceptor {
 mut:
 	methods_recv []string
-	messages []string
+	messages     []string
 }
 
 fn (mut t TestInterceptor) on_event(name string, data jsonrpc.InterceptorData) ? {
@@ -105,12 +105,12 @@ fn test_interceptor() ? {
 		stream: stream
 	}
 
-	client.send<SumParams, RpcResult<int>>('sum', SumParams{ nums: [1,2,4] }) ?
+	client.send<SumParams, RpcResult<int>>('sum', SumParams{ nums: [1, 2, 4] }) or { return err }
 	assert test_inter.methods_recv.len == 1
 	assert test_inter.methods_recv[0] == 'sum'
 	assert test_inter.messages.len == 1
 
-	client.send<string, RpcResult<string>>('trigger', '') ?
+	client.send<string, RpcResult<string>>('trigger', '') or { return err }
 	assert test_inter.methods_recv.len == 2
 	assert test_inter.methods_recv[1] == 'trigger'
 	assert test_inter.messages.len == 3

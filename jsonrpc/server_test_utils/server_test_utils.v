@@ -6,6 +6,7 @@ module server_test_utils
 import jsonrpc
 import json
 import datatypes
+import io
 
 // new_test_client creates a test client to be used for observing responses
 // and notifications from the given handler and interceptors
@@ -26,8 +27,8 @@ pub fn new_test_client(handler jsonrpc.Handler, interceptors ...jsonrpc.Intercep
 // TestResponse is a version of jsonrpc.Response<T> that decodes
 // incoming JSON as raw JSON string.
 struct TestResponse {
-	raw_id string [raw; json:id]
-	raw_result string [raw; json:result]
+	raw_id     string [json: id; raw]
+	raw_result string [json: result; raw]
 }
 
 // TestClient is a JSONRPC Client used for simulating communication between client and
@@ -42,7 +43,7 @@ pub mut:
 }
 
 // send<T,U> sends a request and receives a decoded response result.
-pub fn (mut tc TestClient) send<T,U>(method string, params T) ?U {
+pub fn (mut tc TestClient) send<T, U>(method string, params T) !U {
 	params_json := json.encode(params)
 	req := jsonrpc.Request{
 		id: '$tc.id'
@@ -51,16 +52,18 @@ pub fn (mut tc TestClient) send<T,U>(method string, params T) ?U {
 	}
 
 	tc.stream.send(req)
-	tc.server.respond() ?
+	tc.server.respond() or { return IError(io.Eof{}) }
 	raw_json_content := tc.stream.response_text(req.id)
 	if raw_json_content.len == 0 || raw_json_content == 'null' {
-		return none
+		return IError(io.Eof{})
 	}
-	return json.decode(U, raw_json_content)
+	return json.decode(U, raw_json_content) or {
+		return error('unexpected error during json.decode')
+	}
 }
 
 // notify is a version of send but instead of returning a response,
-// it only notifies the server. Effectively sending a request as a 
+// it only notifies the server. Effectively sending a request as a
 // notification.
 pub fn (mut tc TestClient) notify<T>(method string, params T) ? {
 	params_json := json.encode(params)
@@ -71,7 +74,7 @@ pub fn (mut tc TestClient) notify<T>(method string, params T) ? {
 	}
 
 	tc.stream.send(req)
-	tc.server.respond() ?
+	tc.server.respond()?
 }
 
 // TestStream is a io.ReadWriter-compliant stream for sending
@@ -81,14 +84,14 @@ pub fn (mut tc TestClient) notify<T>(method string, params T) ? {
 pub struct TestStream {
 mut:
 	notif_idx int
-	notif_buf [][]u8 = [][]u8{cap: 20, len: 20}
+	notif_buf [][]u8 = [][]u8{len: 20, cap: 20}
 	resp_buf  map[string]TestResponse
-	req_buf datatypes.Queue<[]u8>
+	req_buf   datatypes.Queue<[]u8>
 }
 
 // read receives the incoming request buffer.
-pub fn (mut rw TestStream) read(mut buf []u8) ?int {
-	req := rw.req_buf.pop() ?
+pub fn (mut rw TestStream) read(mut buf []u8) !int {
+	req := rw.req_buf.pop() or { return IError(io.Eof{}) }
 	buf << req
 	return req.len
 }
@@ -97,7 +100,7 @@ pub fn (mut rw TestStream) read(mut buf []u8) ?int {
 pub fn (mut rw TestStream) write(buf []u8) ?int {
 	raw_json_content := buf.bytestr().all_after('\r\n\r\n')
 	if raw_json_content.contains('"result":') {
-		resp := json.decode(TestResponse, raw_json_content) ?
+		resp := json.decode(TestResponse, raw_json_content)?
 		rw.resp_buf[resp.raw_id] = resp
 	} else if raw_json_content.contains('"params":') {
 		idx := rw.notif_idx % 20
@@ -105,7 +108,7 @@ pub fn (mut rw TestStream) write(buf []u8) ?int {
 			if rw.notif_buf[i].len != 0 {
 				rw.notif_buf[idx].clear()
 			}
-		} 
+		}
 		rw.notif_buf[idx] << buf
 		rw.notif_idx++
 	} else {
