@@ -755,23 +755,27 @@ fn (mut sr SymbolAnalyzer) expression(node ast.Node) ?[]&Symbol {
 		}
 		.call_expression {
 			return_sym := sr.store.infer_value_type_from_node(node, sr.src_text)
-			if last_node := node.named_child(node.named_child_count() - 1) {
-				if first_optional_node := last_node.named_child(0) {
-					if first_optional_node.type_name == .or_block {
-						block_node := first_optional_node.named_child(first_optional_node.named_child_count() - 1) ?
-						mut or_scope := sr.get_scope(block_node) ?
-						or_scope.register(&Symbol{
-							name: 'err'
-							kind: .variable
-							access: .private
-							return_sym: sr.store.find_symbol('', 'IError') or { void_sym }
-							is_top_level: false
-							file_path: sr.store.cur_file_path
-							file_version: sr.store.cur_version
-						}) ?
-						sr.extract_block(block_node, mut or_scope) ?
-					}
+			if opt_propagator := node.last_node_by_type(v.NodeType.option_propagator) {
+				if or_block_node := opt_propagator.last_node_by_type(v.NodeType.or_block) {
+					block_node := or_block_node.last_node_by_type(v.NodeType.block)?
+					mut or_scope := sr.get_scope(block_node)?
+					or_scope.register(&Symbol{
+						name: 'err'
+						kind: .variable
+						access: .private
+						return_sym: sr.store.find_symbol('', 'IError') or { void_sym }
+						is_top_level: false
+						range: C.TSRange{
+							start_point: block_node.start_point()
+							end_point: block_node.start_point()
+							start_byte: block_node.start_byte()
+							end_byte: block_node.start_byte()
+						}
+						file_path: sr.store.cur_file_path
+						file_version: sr.store.cur_version
+					})?
 				}
+			}
 			}
 			return [return_sym]
 		}
