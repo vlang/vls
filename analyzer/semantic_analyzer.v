@@ -1063,7 +1063,7 @@ pub struct SemanticExpressionAnalyzeConfig {
 
 pub fn (mut an SemanticAnalyzer) expression(node ast.Node, cfg SemanticExpressionAnalyzeConfig) ?&Symbol {
 	match node.type_name {
-		.true_, .false_, .none_ {
+		.true_, .false_, .none_, .int_literal, .float_literal {
 			return an.store.infer_value_type_from_node(node, an.src_text)
 		}
 		.call_expression {
@@ -1083,9 +1083,6 @@ pub fn (mut an SemanticAnalyzer) expression(node ast.Node, cfg SemanticExpressio
 		}
 		.unary_expression {
 			// TODO: temporary fix
-			return an.store.infer_value_type_from_node(node, an.src_text)
-		}
-		.int_literal, .float_literal {
 			return an.store.infer_value_type_from_node(node, an.src_text)
 		}
 		.parenthesized_expression {
