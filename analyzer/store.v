@@ -478,6 +478,9 @@ pub fn symbol_name_from_node(node ast.Node, src_text tree_sitter.SourceText) (Sy
 			}
 			return SymbolKind.variadic, module_name, '...' + symbol_name
 		}
+		.multi_return_type {
+			return SymbolKind.multi_return, '', node.text(src_text)
+		}
 		else {
 			// type_identifier should go here
 			return SymbolKind.placeholder, module_name, node.text(src_text)
@@ -494,13 +497,6 @@ pub fn (mut store Store) find_symbol_by_type_node(node ast.Node, src_text tree_s
 	}
 
 	sym_kind, module_name, symbol_name := symbol_name_from_node(node, src_text)
-	// defer {
-	// 	unsafe {
-	// 		module_name.free()
-	// 		symbol_name.free()
-	// 	}
-	// }
-
 	if sym_kind == .function_type {
 		mut parameters := []&Symbol{}
 		if param_node := node.child_by_field_name('parameters') {
@@ -564,6 +560,17 @@ pub fn (mut store Store) find_symbol_by_type_node(node ast.Node, src_text tree_s
 					} else {
 						// TODO:
 						return error('empty ref sym')
+					}
+				}
+			}
+			.multi_return {
+				types_len := node.named_child_count()
+				new_sym.children_syms = []&Symbol{cap: int(types_len)}
+				for i in u32(0) .. types_len {
+					type_node := node.named_child(i) or { continue }
+					mut type_sym := store.find_symbol_by_type_node(type_node, src_text) or { continue }
+					if !type_sym.is_void() {
+						new_sym.children_syms << type_sym
 					}
 				}
 			}
