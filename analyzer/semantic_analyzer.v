@@ -416,35 +416,53 @@ pub fn (mut an SemanticAnalyzer) return_statement(node ast.Node) {
 		return
 	}
 
-	mut expr_node := node.named_child(0) or { 
-		if !an.parent_sym.return_sym.is_void() {
-			an.report(node, errors.invalid_void_return_error, an.parent_sym.return_sym)
+	if expr_list_node := node.named_child(0) {
+		expected_syms := if an.parent_sym.return_sym.kind == .multi_return {
+			an.parent_sym.return_sym.children_syms
+		} else {
+			[an.parent_sym.return_sym]
 		}
-		return 
-	}
-	mut expected_sym := an.parent_sym.return_sym
-	// TODO: support multi-return type checks
-	if expr_node.type_name == .expression_list {
-		expr_node = expr_node.named_child(0) or { expr_node }
-		expr_sym := an.expression(expr_node) or { analyzer.void_sym }
 
-		if expected_sym.kind == .optional {
-			// TODO: use proper checking in the future
-			// for interfaces not limited to IError
-			if expr_sym.name == 'IError' {
-				expected_sym = expr_sym 
-			} else {
-				expected_sym = expected_sym.final_sym()
+		expected_return_count := expected_syms.len
+		mut got_return_count := int(expr_list_node.named_child_count())
+		for i := 0; i < expected_return_count; i++ {
+			expr_node := expr_list_node.named_child(u32(i)) or { continue }
+			expr_sym := an.expression(expr_node) or { analyzer.void_sym }
+			if expr_sym.kind == .multi_return {
+				// got return count = existing number of nodes + multi return type size
+				got_return_count += expr_sym.children_syms.len - 1
+			}
+
+			mut expected_sym := expected_syms[i]
+			if expected_sym.kind == .optional {
+				// TODO: use proper checking in the future
+				// for interfaces not limited to IError
+				if expr_sym.name == 'IError' {
+					expected_sym = expr_sym 
+				} else {
+					expected_sym = expected_sym.final_sym()
+				}
+			}
+
+			if expected_sym.is_void() && !expr_sym.is_void() {
+				an.report(expr_node, errors.unexpected_return_error)
+			} else if expr_sym.is_void() {
+				an.report(node, errors.void_value_return_error, expr_node.text(an.src_text))
+			} else if expr_sym != expected_sym {
+				an.report(node, errors.invalid_return_error, expr_sym, expected_sym)
 			}
 		}
 
-		if expected_sym.is_void() && !expr_sym.is_void() {
-			an.report(expr_node, errors.unexpected_return_error)
-		} else if expr_sym.is_void() {
-			an.report(node, errors.void_value_return_error, expr_node.text(an.src_text))
-		} else if expr_sym != expected_sym {
-			an.report(node, errors.invalid_return_error, expr_sym, an.parent_sym.return_sym)
+		if expected_return_count != got_return_count {
+			error_code := if expected_return_count == 1 {
+				errors.unexpected_argument_error_single
+			} else {
+				errors.unexpected_argument_error_plural
+			}
+			an.report(expr_list_node, error_code, expected_return_count.str(), got_return_count.str())
 		}
+	} else if !an.parent_sym.return_sym.is_void() {
+		an.report(node, errors.invalid_void_return_error, an.parent_sym.return_sym)
 	}
 }
 

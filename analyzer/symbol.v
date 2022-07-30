@@ -222,9 +222,12 @@ pub fn (info &Symbol) gen_str(cfg SymbolGenStrConfig) string {
 		}
 		.multi_return {
 			sb.write_byte(`(`)
-			for v in info.children_syms {
+			for i, v in info.children_syms {
 				if v.kind !in analyzer.kinds_in_multi_return_to_be_excluded {
 					sb.write_string(v.gen_str(with_kind: false, with_access: false))
+					if i < info.children_syms.len - 1 {
+						sb.write_string(', ')
+					}
 				}
 			}
 			sb.write_byte(`)`)

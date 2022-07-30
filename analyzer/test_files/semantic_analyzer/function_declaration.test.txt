@@ -43,6 +43,29 @@ struct Triangle {
 fn (t Triangle) area() {
 	return t.base * t.height / 2
 }
+
+fn separate_name(name string) (string, string) {
+    splitted := name.split(' ')
+    return splitted[0]
+}
+
+fn separate_name2(name string) (string, string) {
+    splitted := name.split(' ')
+    return splitted[0], splitted[1], splitted[2]
+}
+
+fn separate_name3(name string) string {
+    splitted := name.split(' ')
+    return splitted[0], splitted[1], splitted[2]
+}
+
+fn separate_name4(name string) string {
+    return separate_name('foo bar')
+}
+
+fn separate_name5(name string) (string, string) {
+    return separate_name3('foo bar')
+}
 ---
 
 (error "`a` evaluated but not used" [1,4]-[1,5])
@@ -54,3 +77,9 @@ fn (t Triangle) area() {
 (error "unexpected argument, current function does not return anything" [30,11]-[30,12])
 (error "expected `int` argument" [34,4]-[34,10])
 (error "unexpected argument, current function does not return anything" [43,8]-[43,29])
+(error "expected 2 arguments, but got 1" [48,11]-[48,22])
+(error "expected 2 arguments, but got 3" [53,11]-[53,48])
+(error "expected 1 argument, but got 3" [58,11]-[58,48])
+(error "cannot use `(string, string)` as type `string` in return argument" [62,4]-[62,35])
+(error "expected 1 argument, but got 2" [62,11]-[62,35])
+(error "expected 2 arguments, but got 1" [66,11]-[66,36])
