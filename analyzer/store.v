@@ -897,6 +897,26 @@ pub fn (mut ss Store) infer_value_type_from_node(node ast.Node, src_text tree_si
 				}
 			}
 		}
+		.index_expression {
+			// TODO: transfer this to semantic analyzer
+			if operand_node := node.child_by_field_name('operand') {
+				operand_sym := ss.infer_value_type_from_node(operand_node, src_text)
+				if operand_sym.is_void() {
+					return void_sym
+				} 
+				
+				if index_node := node.child_by_field_name('index') {
+					index_sym := ss.infer_value_type_from_node(index_node, src_text)
+					if index_sym.name != 'int' {
+						return void_sym
+					}
+
+					return operand_sym.children_syms[0]
+				}
+			}
+
+			return void_sym
+		}
 		else {
 			return ss.infer_symbol_from_node(node, src_text) or { void_sym }
 		}
