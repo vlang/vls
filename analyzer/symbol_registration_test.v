@@ -63,8 +63,8 @@ fn test_symbol_registration() ? {
 		sym_analyzer.src_text = Runes(src.runes())
 		mut cursor := new_tree_cursor(tree.root_node())
 		symbols := sym_analyzer.analyze_from_cursor(mut cursor)
-		result := an_test_utils.sexpr_str_symbol_array(symbols)
-		expected_trimmed := test_utils.newlines_to_spaces(expected)
+		result := an_test_utils.sexpr_str_symbol_array(symbols).replace(') (', ')\n(')
+		expected_trimmed := test_utils.newlines_to_spaces(expected).replace(') (', ')\n(')
 		term.clear_previous_line()
 		if result != expected_trimmed {
 			if diff_cmd.len != 0 {
