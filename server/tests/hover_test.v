@@ -248,19 +248,19 @@ fn test_hover() ? {
 			text_document: doc_id
 		}, mut writer) {
 			// compare content
-			assert actual == hover_results[test_name]
-		} else {
-			if test_name in hover_should_return_null {
-				assert err is none
+			if _ := t.is_equal(hover_results[test_name], actual) {
+				t.ok(file)
+			} else {
+				t.fail(file, err.msg())
 			}
+		} else {
+			t.is_null(file, test_name in hover_should_return_null, err)
 		}
 		// Delete document
 		t.close_document(doc_id) or {
 			t.fail(file, err.msg())
 			continue
 		}
-
-		t.ok(file)
 	}
 	assert t.is_ok()
 }

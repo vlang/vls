@@ -657,8 +657,12 @@ pub fn (mut ss Store) infer_symbol_from_node(file_path string, node ast.Node, sr
 			if !selected_node.type_name.is_identifier() {
 				selected_node = node.child_by_field_name('value') ?
 			}
-			if parent.type_name == .literal_value {
-				parent_sym := ss.infer_symbol_from_node(file_path, parent, src_text) ?
+			if parent.type_name == .literal_value || parent.type_name == .type_initializer {
+				mut parent_sym := ss.infer_symbol_from_node(file_path, parent, src_text) ?
+				if parent_sym.kind == .ref {
+					parent_sym = parent_sym.parent_sym
+				}
+
 				return parent_sym.children_syms.get(selected_node.text(src_text)) or {
 					if parent_sym.name == 'map' || parent_sym.name == 'array' {
 						return ss.infer_symbol_from_node(file_path, selected_node, src_text)
@@ -738,6 +742,12 @@ pub fn (mut ss Store) infer_value_type_from_node(file_path string, node ast.Node
 	mut type_name := ''
 
 	match node.type_name {
+		.none_ {
+			// TODO: None is already registered in builtin.v but
+			// haven't done interface checking yet
+			// type_name = 'none'
+			type_name = 'IError'
+		}
 		.true_, .false_ {
 			type_name = 'bool'
 		}
@@ -871,11 +881,11 @@ pub fn (mut ss Store) delete_symbol_at_node(file_path string, root_node ast.Node
 			.const_spec, .global_var_spec, .global_var_declaration, .function_declaration,
 			.interface_declaration, .enum_declaration, .type_declaration, .struct_declaration {
 				name_node := node.child_by_field_name('name') or { continue }
-				symbol_name := name_node.text(src)
-				idx := ss.symbols[dir].index(symbol_name)
+				idx := ss.symbols[dir].index_by_row(file_path, node.start_point().row)
 				if idx != -1 && idx < ss.symbols[dir].len {
 					language := ss.symbols[dir][idx].language
 					if language != .v {
+						symbol_name := name_node.text(src)
 						binded_location_idx := ss.binded_symbol_locations.index(symbol_name)
 						if binded_location_idx != -1
 							&& ss.binded_symbol_locations[binded_location_idx].module_path == dir {
@@ -886,6 +896,16 @@ pub fn (mut ss Store) delete_symbol_at_node(file_path string, root_node ast.Node
 						ss.symbols[dir][idx].scope.remove_symbols_by_line(start_line, end_line)
 					}
 					ss.symbols[dir].delete(idx)
+				} else if node.type_name == .function_declaration {
+					// for methods
+					fn_sym := ss.infer_symbol_from_node(file_path, node, src) or { analyzer.void_sym }
+					if !fn_sym.is_void() {
+						mut parent_sym := unsafe { fn_sym.parent_sym.return_sym }
+						child_idx := parent_sym.children_syms.index_by_row(file_path, node.start_point().row)
+						if child_idx != -1 {
+							parent_sym.children_syms.delete(child_idx)
+						}
+					}
 				}
 			}
 			.import_declaration {

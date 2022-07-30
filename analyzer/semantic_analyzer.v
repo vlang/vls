@@ -219,13 +219,10 @@ fn (mut an SemanticAnalyzer) enum_decl(node ast.Node) ? {
 
 fn (mut an SemanticAnalyzer) fn_decl(node ast.Node) {
 	body_node := node.child_by_field_name('body') or { return }
-	if name_node := node.child_by_field_name('name') {
-		fn_name := name_node.text(an.context.text)
-		if sym := an.context.find_symbol('', fn_name) {
-			mut inst := an.with_symbol(sym)
-			inst.block(body_node)
-			return
-		}
+	if sym := an.context.infer_symbol_from_node(node) {
+		mut inst := an.with_symbol(sym)
+		inst.block(body_node)
+		return
 	}
 	an.block(body_node)
 }
@@ -410,6 +407,44 @@ pub fn (mut an SemanticAnalyzer) break_statement(node ast.Node) {
 	}
 }
 
+pub fn (mut an SemanticAnalyzer) return_statement(node ast.Node) {
+	if !an.in_function() {
+		// TODO:
+		return
+	}
+
+	mut expr_node := node.named_child(0) or { 
+		if !an.parent_sym.return_sym.is_void() {
+			an.report(node, errors.invalid_void_return_error, an.parent_sym.return_sym)
+		}
+		return 
+	}
+	mut expected_sym := an.parent_sym.return_sym
+	// TODO: support multi-return type checks
+	if expr_node.type_name == .expression_list {
+		expr_node = expr_node.named_child(0) or { expr_node }
+		expr_sym := an.expression(expr_node) or { analyzer.void_sym }
+
+		if expected_sym.kind == .optional {
+			// TODO: use proper checking in the future
+			// for interfaces not limited to IError
+			if expr_sym.name == 'IError' {
+				expected_sym = expr_sym 
+			} else {
+				expected_sym = expected_sym.final_sym()
+			}
+		}
+
+		if expected_sym.is_void() && !expr_sym.is_void() {
+			an.report(expr_node, errors.unexpected_return_error)
+		} else if expr_sym.is_void() {
+			an.report(node, errors.void_value_return_error, expr_node.text(an.context.text))
+		} else if expr_sym != expected_sym {
+			an.report(node, errors.invalid_return_error, expr_sym, an.parent_sym.return_sym)
+		}
+	}
+}
+
 fn parent_by_depth(node ast.Node, depth int) ?ast.Node {
 	mut cur_node := node
 	for _ in 0 .. depth {
@@ -447,7 +482,7 @@ pub fn (mut an SemanticAnalyzer) statement(node ast.Node) {
 			an.statement(node.named_child(0) or { return })
 		}
 		.return_statement {
-			an.expression(node.child(0) or { return }) or {}
+			an.return_statement(node)
 		}
 		.block {
 			an.block(node)
@@ -629,7 +664,7 @@ pub fn (mut an SemanticAnalyzer) selector_expression(node ast.Node) ?&Symbol {
 		}
 
 		child_name := field_node.text(an.context.text)
-		got_child_sym := root_sym.children_syms.get(child_name) or {
+		mut got_child_sym := root_sym.children_syms.get(child_name) or {
 			mut base_root_sym := root_sym
 			if root_sym.kind in [.ref, .chan_, .optional] {
 				base_root_sym = root_sym.parent_sym
@@ -680,16 +715,18 @@ pub fn (mut an SemanticAnalyzer) selector_expression(node ast.Node) ?&Symbol {
 			}
 		}
 
-		if got_child_sym.is_void() && method_or_field_sym.is_void() {
-			mut in_call_expr := false
-			if parent_node := node.parent() {
-				if parent_node.type_name == .call_expression {
-					in_call_expr = true
-				}
+		mut in_call_expr := false
+		if parent_node := node.parent() {
+			if parent_node.type_name == .call_expression {
+				in_call_expr = true
 			}
+		}
 
+		if got_child_sym.is_void() && method_or_field_sym.is_void() {
 			err_code := if in_call_expr { errors.unknown_method_or_field_error } else { errors.unknown_field_error }
 			return an.report(node, err_code, root_sym.gen_str(with_kind: false, with_access: false, with_contents: false), field_node.text(an.context.text))
+		} else if !in_call_expr && got_child_sym.is_returnable() {
+			got_child_sym = got_child_sym.return_sym
 		}
 
 		return if method_or_field_sym.is_void() {
@@ -1023,7 +1060,7 @@ pub struct SemanticExpressionAnalyzeConfig {
 
 pub fn (mut an SemanticAnalyzer) expression(node ast.Node, cfg SemanticExpressionAnalyzeConfig) ?&Symbol {
 	match node.type_name {
-		.true_, .false_ {
+		.true_, .false_, .none_ {
 			return an.context.infer_value_type_from_node(node)
 		}
 		.call_expression {

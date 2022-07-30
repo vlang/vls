@@ -87,6 +87,10 @@ const completion_inputs = {
 		context: lsp.CompletionContext{.trigger_character, '.'}
 		position: lsp.Position{5, 6}
 	}
+	'self_reference_var_in_struct_field.vv':                lsp.CompletionParams{
+		context: lsp.CompletionContext{.invoked, ''}
+		position: lsp.Position{6, 9}
+	}
 	'struct_init.vv':                       lsp.CompletionParams{
 		context: lsp.CompletionContext{.trigger_character, '{'}
 		position: lsp.Position{8, 16}
@@ -377,6 +381,14 @@ const completion_results = {
 			insert_text: 'this_is_a_function()'
 		},
 	]
+	'self_reference_var_in_struct_field.vv':                [
+		lsp.CompletionItem{
+			label: 'test'
+			kind: .variable
+			detail: 'test &Command'
+			insert_text: 'test'
+		}
+	]
 	'struct_init.vv':                       [
 		lsp.CompletionItem{
 			label: 'name:'
@@ -453,22 +465,26 @@ fn test_completion() ? {
 		}
 
 		// initiate completion request
-		actual := ls.completion(lsp.CompletionParams{
+		if actual := ls.completion(lsp.CompletionParams{
 			...completion_inputs[test_name]
 			text_document: doc_id
-		}, mut writer) ?
-
-		// compare content
-		expected := completion_results[test_name]
-		assert actual == expected
+		}, mut writer) {
+			// compare content
+			expected := completion_results[test_name]
+			if _ := t.is_equal(expected, actual) {
+				t.ok(file)
+			} else {
+				t.fail(file, err.msg())
+			}
+		} else {
+			t.fail(file, err.msg())
+		}
 
 		// Delete document
 		t.close_document(doc_id) or {
 			t.fail(file, err.msg())
 			continue
 		}
-
-		t.ok(file)
 	}
 
 	assert t.is_ok()

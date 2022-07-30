@@ -1,0 +1,9 @@
+struct Command {
+  cmd &Command
+}
+
+fn main() {
+  test := &Command{
+    cmd: 
+  }
+}

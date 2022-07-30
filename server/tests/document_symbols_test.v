@@ -97,29 +97,33 @@ fn test_document_symbols() ? {
 		}
 
 		// initiate formatting request
-		actual := ls.document_symbol(lsp.DocumentSymbolParams{
+		if actual := ls.document_symbol(lsp.DocumentSymbolParams{
 			text_document: doc_id
-		}, mut writer) ?
+		}, mut writer) {
+			// compare content
+			expected := doc_symbols_result[file.file_name].map(lsp.SymbolInformation{
+				name: it.name
+				kind: it.kind
+				location: lsp.Location{
+					uri: doc_id.uri
+					range: it.location.range
+				}
+			})
 
-		// compare content
-		expected := doc_symbols_result[file.file_name].map(lsp.SymbolInformation{
-			name: it.name
-			kind: it.kind
-			location: lsp.Location{
-				uri: doc_id.uri
-				range: it.location.range
+			if _ := t.is_equal(actual, expected) {
+				t.ok(file)
+			} else {
+				t.fail(file, err.msg())
 			}
-		})
-
-		assert actual == expected
+		} else {
+			t.fail(file, err.msg())
+		}
 
 		// Delete document
 		t.close_document(doc_id) or {
 			t.fail(file, err.msg())
 			continue
 		}
-
-		t.ok(file)
 	}
 	assert t.is_ok()
 }

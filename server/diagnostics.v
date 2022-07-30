@@ -20,18 +20,16 @@ fn (r &DiagnosticReporter) count() int {
 	return count
 }
 
-fn (mut r DiagnosticReporter) clear_from_range(uri lsp.DocumentUri, start_line u32, end_line u32) {
+fn (mut r DiagnosticReporter) clear_from_line(uri lsp.DocumentUri, start_line u32) {
 	if uri !in r.reports || r.reports[uri].len == 0 {
 		return
 	}
 
 	for i := 0; i < r.reports[uri].len; {
 		report := r.reports[uri][i]
-		if report.range.start.line >= start_line && report.range.start.line <= end_line {
-			if report.range.end.line >= start_line && report.range.end.line <= end_line {
-				r.reports[uri].delete(i)
-				continue
-			}
+		if report.range.start.line >= start_line {
+			r.reports[uri].delete(i)
+			continue
 		}
 		i++
 	}

@@ -21,6 +21,34 @@ pub fn setup_builtin(mut store Store, builtin_path string) {
 	store.register_auto_import(builtin_import, '')
 	register_builtin_symbols(mut store, builtin_import)
 	importer.import_modules(mut imports)
+	register_none(mut store, builtin_import)
+}
+
+fn register_none(mut ss Store, builtin_import &Import) {
+	registered_none_sym := ss.symbols[builtin_import.path].get('None__') or {
+		return
+	}
+
+	mut none_sym := Symbol{
+		name: 'none'
+		kind: .typedef
+		access: .public
+		parent_sym: &Symbol{
+			name: '&' + registered_none_sym.name
+			is_top_level: true
+			file_path: registered_none_sym.file_path
+			parent_sym: registered_none_sym
+			kind: .ref
+			file_version: 0
+		}
+		is_top_level: true
+		file_path: registered_none_sym.file_path
+		file_version: 0
+	}
+
+	ss.register_symbol(mut none_sym) or {
+		eprintln('none registration is skipped. Reason: $err')
+	}
 }
 
 fn register_builtin_symbols(mut ss Store, builtin_import &Import) {
@@ -128,6 +156,13 @@ fn register_builtin_symbols(mut ss Store, builtin_import &Import) {
 					module_name: ''
 					symbol_name: returned_sym.name
 					for_kind: .chan_
+				}
+			}
+			'IError' {
+				ss.base_symbol_locations << BaseSymbolLocation{
+					module_name: ''
+					symbol_name: returned_sym.name
+					for_kind: .optional
 				}
 			}
 			else {}

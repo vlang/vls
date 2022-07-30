@@ -391,7 +391,7 @@ fn test_definition() ? {
 	test_files := t.initialize() ?
 	for file in test_files {
 		test_name := file.file_name
-		err_msg := if test_name !in definition_results {
+		err_msg := if test_name !in definition_should_return_null && test_name !in definition_results {
 			'missing results'
 		} else if test_name !in definition_inputs {
 			'missing input data'
@@ -409,17 +409,18 @@ fn test_definition() ? {
 			continue
 		}
 		// initiate definition request
-		actual := ls.definition(lsp.TextDocumentPositionParams{
+		if actual := ls.definition(lsp.TextDocumentPositionParams{
 			text_document: doc_id
 			position: definition_inputs[test_name]
-		}, mut writer) ?
-
-		// compare content
-		if test_name in definition_should_return_null {
-			// assert result == 'null'
-			assert false
+		}, mut writer) {
+			// compare content
+			if _ := t.is_equal(definition_results[test_name], actual) {
+				t.ok(file)
+			} else {
+				t.fail(file, err.msg())
+			}
 		} else {
-			assert actual == definition_results[test_name]
+			t.is_null(file, test_name in definition_should_return_null, err)
 		}
 
 		// Delete document
@@ -427,8 +428,6 @@ fn test_definition() ? {
 			t.fail(file, err.msg())
 			continue
 		}
-
-		t.ok(file)
 	}
 	assert t.is_ok()
 }

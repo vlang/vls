@@ -101,10 +101,11 @@ const signature_help_results = {
 }
 
 fn test_signature_help() ? {
+	mut ls := server.new()
 	mut t := &test_utils.Tester{
 		test_files_dir: test_utils.get_test_files_path(@FILE)
 		folder_name: 'signature_help'
-		client: new_test_client(server.new())
+		client: new_test_client(ls)
 	}
 
 	test_files := t.initialize() ?
@@ -126,20 +127,27 @@ fn test_signature_help() ? {
 			t.fail(file, err.msg())
 			continue
 		}
+
 		// initiate signature_help request
-		actual := t.client.send<lsp.SignatureHelpParams, lsp.SignatureHelp>('textDocument/signatureHelp', lsp.SignatureHelpParams{
+		if actual := ls.signature_help(lsp.SignatureHelpParams{
 			...signature_help_inputs[test_name]
 			text_document: doc_id
-		}) ?
-		// compare content
-		assert actual == signature_help_results[test_name]
+		}, mut t.client.server.writer()) {
+			// compare content
+			if _ := t.is_equal(signature_help_results[test_name], actual) {
+				t.ok(file)
+			} else {
+				t.fail(file, err.msg())
+			}
+		} else {
+			t.fail(file, err.msg())
+		}
+
 		// Delete document
 		t.close_document(doc_id) or {
 			t.fail(file, err.msg())
 			continue
 		}
-
-		t.ok(file)
 	}
 
 	assert t.is_ok()
