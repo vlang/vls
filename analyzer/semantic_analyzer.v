@@ -1081,7 +1081,7 @@ pub fn (mut an SemanticAnalyzer) expression(node ast.Node, cfg SemanticExpressio
 		.binary_expression {
 			return an.binary_expression(node, cfg)
 		}
-		.unary_expression {
+		.unary_expression, .index_expression {
 			// TODO: temporary fix
 			return an.store.infer_value_type_from_node(node, an.src_text)
 		}
