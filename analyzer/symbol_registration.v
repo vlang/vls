@@ -374,10 +374,6 @@ fn (mut sr SymbolAnalyzer) fn_decl(fn_node ast.Node) ?&Symbol {
 
 	// scan params
 	mut params := extract_parameter_list(params_list_node, mut sr.store, sr.src_text)
-	// defer {
-	// 	unsafe { params.free() }
-	// }
-
 	for i := 0; i < params.len; i++ {
 		mut param := params[i]
 		fn_sym.add_child(mut param) or { continue }
@@ -500,11 +496,6 @@ fn (mut sr SymbolAnalyzer) short_var_decl(var_decl ast.Node) ?[]&Symbol {
 	for i in 0 .. right_len {
 		right := right_expr_lists.named_child(i) or { break }
 		mut right_syms := sr.expression(right) or { break }
-		if right_syms.len == 1 && right_syms[0].kind == .multi_return {
-			child_syms := right_syms[0].children_syms
-			right_syms.clear()
-			right_syms << child_syms
-		}
 		for mr_sym in right_syms {
 			vars << sr.register_variable(mr_sym, left_expr_lists, u32(cur_left)) or { break }
 			cur_left++
@@ -776,8 +767,12 @@ fn (mut sr SymbolAnalyzer) expression(node ast.Node) ?[]&Symbol {
 					})?
 				}
 			}
+
+			if return_sym.kind == .multi_return {
+				return return_sym.children_syms
+			} else {
+				return [return_sym]
 			}
-			return [return_sym]
 		}
 		else {
 			// TODO: anything with block
