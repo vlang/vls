@@ -22,9 +22,9 @@ fn main() {
 ---
 
 (enum Color [0,5]-[0,10]
-    (field red int [1,4]-[1,7])
-    (field yellow int [2,4]-[2,10])
-    (field blue int [3,4]-[3,8]))
+    (field red Color [1,4]-[1,7])
+    (field yellow Color [2,4]-[2,10])
+    (field blue Color [3,4]-[3,8]))
 
 (function main [6,3]-[6,7]
     (variable color Color [7,4]-[7,9])
