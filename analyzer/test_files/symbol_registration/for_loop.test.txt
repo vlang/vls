@@ -3,6 +3,34 @@ fn main() {
     for name in names {
         println(name)
     }
+
+    for i, name in names {}
+}
+
+struct Point {
+    x int
+    y int
+}
+
+fn main2() {
+    mut points := [&Point{1, 2}, &Point{2, 3}]
+
+    for mut p in points {
+        println(p)
+    }
+
+    for i, mut p2 in points {}
+}
+
+struct Iterator {}
+
+fn (i Iterator) next() ?f32 { return 1.2 }
+
+fn main3() {
+    i := Iterator{}
+    for num in i {}
+
+    for j := 0; j < 3; j++ {}
 }
 
 ---
@@ -10,4 +38,30 @@ fn main() {
 (function main [0,3]-[0,7]
     (mut variable names []string [1,8]-[1,13])
     (scope [52]-[95]
-        (variable name string [2,8]-[2,12])))
+        (variable name string [2,8]-[2,12]))
+    (scope [105]-[124]
+        (variable i int [6,8]-[6,9])
+        (variable name string [6,11]-[6,15])))
+
+(struct Point [9,7]-[9,12]
+    (field x int [10,4]-[10,5])
+    (field y int [11,4]-[11,5]))
+
+(function main2 [14,3]-[14,8]
+    (mut variable points []&Point [15,8]-[15,14])
+    (scope [239]-[277]
+        (mut variable p Point [17,12]-[17,13]))
+    (scope [287]-[309]
+        (variable i int [21,8]-[21,9])
+        (mut variable p2 Point [21,15]-[21,17])))
+
+(struct Iterator [24,7]-[24,15] 
+    (function next ?f32 [26,16]-[26,20] 
+        (variable i Iterator [26,4]-[26,5])))
+
+(function main3 [28,3]-[28,8] 
+    (variable i Iterator [29,4]-[29,5])
+    (scope [418]-[429] 
+        (variable num f32 [30,8]-[30,11]))
+    (scope [439]-[460] 
+        (mut variable j int [32,8]-[32,9])))

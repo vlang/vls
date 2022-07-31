@@ -652,25 +652,40 @@ fn (mut sr SymbolAnalyzer) for_statement(for_stmt_node ast.Node) ? {
 		if cond_node_type == .for_in_operator {
 			left_node := cond_node.child_by_field_name('left') ?
 			right_node := cond_node.child_by_field_name('right') ?
-			mut right_sym := sr.store.infer_value_type_from_node(right_node, sr.src_text)
+			right_sym := sr.store.infer_symbol_from_node(right_node, sr.src_text) or { void_sym }
+
 			if !right_sym.is_void() {
+				right_return_sym := if right_sym.is_returnable() {
+					right_sym.return_sym
+				} else {
+					right_sym.value_sym()
+				}
+
 				left_count := left_node.named_child_count()
-				mut end_idx := if left_count >= 2 { u32(1) } else { u32(0) }
-				if right_sym.kind == .array_ || right_sym.kind == .map_
-					|| right_sym.name == 'string' {
-					if left_count == 2 {
-						idx_node := left_node.named_child(end_idx - 1) ?
-						mut return_sym := sr.store.find_symbol('', 'int') or { void_sym }
-						if right_sym.kind == .map_ {
-							return_sym = right_sym.children_syms[1] or { void_sym }
+				mut has_idx_variable := false
+				if left_count >= 2 {
+					has_idx_variable = true
+				}
+
+				last_idx := if has_idx_variable { u32(1) } else { u32(0) }
+
+				if right_return_sym.kind == .array_ || right_return_sym.kind == .map_ || 
+					right_return_sym.name == 'string' {
+					if has_idx_variable {
+						mut key_sym := sr.store.find_symbol('', 'int') or { void_sym }
+						if right_return_sym.kind == .map_ {
+							key_sym = right_return_sym.children_syms[0] or {
+								sr.store.find_symbol('', 'string') or { void_sym }
+							}
 						}
 
+						idx_node := left_node.named_child(last_idx - 1)?
 						mut idx_sym := Symbol{
 							name: idx_node.text(sr.src_text)
 							kind: .variable
 							range: idx_node.range()
 							is_top_level: false
-							return_sym: return_sym
+							return_sym: key_sym
 							file_path: sr.store.cur_file_path
 							file_version: sr.store.cur_version
 						}
@@ -678,10 +693,23 @@ fn (mut sr SymbolAnalyzer) for_statement(for_stmt_node ast.Node) ? {
 						scope.register(idx_sym) or {}
 					}
 
-					value_node := left_node.named_child(end_idx) ?
-					mut return_sym := right_sym.value_sym()
-					if right_sym.name == 'string' {
-						return_sym = sr.store.find_symbol('', 'byte') or { void_sym }
+					mut value_node := left_node.named_child(last_idx)?
+					mut symbol_access := SymbolAccess.private
+					mut return_sym := if right_sym.name == 'string' {
+						sr.store.find_symbol('', 'rune') or { void_sym }
+					} else {
+						right_return_sym.value_sym()
+					}
+
+					if value_node.type_name == .mutable_identifier {
+						value_node = value_node.named_child(0)?
+						if right_sym.is_mutable() {
+							if return_sym.kind == .ref {
+								return_sym = return_sym.parent_sym
+							}
+
+							symbol_access = .private_mutable
+						}
 					}
 
 					mut value_sym := Symbol{
@@ -690,20 +718,44 @@ fn (mut sr SymbolAnalyzer) for_statement(for_stmt_node ast.Node) ? {
 						range: value_node.range()
 						is_top_level: false
 						return_sym: return_sym
+						access: symbol_access
 						file_path: sr.store.cur_file_path
 						file_version: sr.store.cur_version
 					}
 
 					scope.register(value_sym) or {}
-				} else {
-					// TODO: structs with next()
+				} else if iter_next_method := right_return_sym.children_syms.get('next') {
+					// Iterators
+					if iter_next_method.return_sym.kind == .optional && !iter_next_method.return_sym.parent_sym.is_void() {
+						// TODO: merge code with existing branch
+						mut value_node := left_node.named_child(0)?
+						// NOTE: can returned iterator values be mutable?
+						if value_node.type_name == .mutable_identifier {
+							value_node = value_node.named_child(0)?
+						}
+
+						mut value_sym := Symbol{
+							name: value_node.text(sr.src_text)
+							kind: .variable
+							range: value_node.range()
+							is_top_level: false
+							return_sym: iter_next_method.return_sym.parent_sym
+							file_path: sr.store.cur_file_path
+							file_version: sr.store.cur_version
+						}
+
+						scope.register(value_sym) or {}
+					}
 				}
 			}
 		} else if cond_node_type == .cstyle_for_clause {
-			initializer_node := for_stmt_node.child_by_field_name('initializer') ?
+			initializer_node := cond_node.child_by_field_name('initializer') ?
 			if vars := sr.short_var_decl(initializer_node) {
 				for var in vars {
-					scope.register(var) or { continue }
+					scope.register(&Symbol{
+						...(*var)
+						access: .private_mutable
+					}) or { continue }
 				}
 			}
 		}
