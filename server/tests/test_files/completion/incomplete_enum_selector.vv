@@ -1,0 +1,14 @@
+struct Color {
+  red
+  blue
+  yellow
+}
+
+fn (c Color) print() {
+  println(c.str())
+}
+
+fn main() {
+  foo := Color.red
+  foo.
+}

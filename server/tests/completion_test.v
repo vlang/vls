@@ -29,7 +29,7 @@ const completion_inputs = {
 	}
 	'enum_val_in_struct.vv':                lsp.CompletionParams{
 		context: lsp.CompletionContext{.trigger_character, ' '}
-		position: lsp.Position{14, 20}
+		position: lsp.Position{18, 20}
 	}
 	'filtered_fields_in_selector.vv':       lsp.CompletionParams{
 		context: lsp.CompletionContext{.trigger_character, '.'}
@@ -54,6 +54,10 @@ const completion_inputs = {
 	'import.vv':                            lsp.CompletionParams{
 		context: lsp.CompletionContext{.trigger_character, ' '}
 		position: lsp.Position{2, 7}
+	}
+	'incomplete_enum_selector.vv':          lsp.CompletionParams{
+		context: lsp.CompletionContext{.trigger_character, '.'}
+		position: lsp.Position{12, 6}
 	}
 	'incomplete_module.vv':                 lsp.CompletionParams{
 		context: lsp.CompletionContext{.invoked, ''}
@@ -165,25 +169,25 @@ const completion_results = {
 	'enum_val_in_struct.vv':                [
 		lsp.CompletionItem{
 			label: '.golden_retriever'
-			detail: 'Breed.golden_retriever int'
+			detail: 'Breed.golden_retriever Breed'
 			kind: .enum_member
 			insert_text: '.golden_retriever'
 		},
 		lsp.CompletionItem{
 			label: '.beagle'
-			detail: 'Breed.beagle int'
+			detail: 'Breed.beagle Breed'
 			kind: .enum_member
 			insert_text: '.beagle'
 		},
 		lsp.CompletionItem{
 			label: '.chihuahua'
-			detail: 'Breed.chihuahua int'
+			detail: 'Breed.chihuahua Breed'
 			kind: .enum_member
 			insert_text: '.chihuahua'
 		},
 		lsp.CompletionItem{
 			label: '.dalmatian'
-			detail: 'Breed.dalmatian int'
+			detail: 'Breed.dalmatian Breed'
 			kind: .enum_member
 			insert_text: '.dalmatian'
 		},
@@ -291,6 +295,15 @@ const completion_results = {
 			kind: .folder
 			insert_text: 'abc.def.ghi'
 		},
+	]
+	'incomplete_enum_selector.vv':          [
+		lsp.CompletionItem{
+			label: 'print'
+			kind: .method
+			detail: 'fn (c Color) print()'
+			insert_text: 'print()'
+			insert_text_format: .plain_text
+		}
 	]
 	'incomplete_module.vv':                 [
 		lsp.CompletionItem{

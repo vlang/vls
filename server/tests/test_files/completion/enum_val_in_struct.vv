@@ -7,6 +7,10 @@ enum Breed {
   dalmatian
 }
 
+fn (b Breed) print() {
+  println(b.str())
+}
+
 struct Dog {
   breed Breed
 }
