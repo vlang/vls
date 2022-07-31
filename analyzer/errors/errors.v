@@ -100,7 +100,7 @@ pub const message_templates = {
 	errors.if_expr_no_else_error: '`if` expression needs `else` clause'
 	errors.if_no_expression_value_error: '`if` expression requires an expression as the last statement of every branch'
 	errors.imaginary_mutation_error: 'cannot modify blank `_` identifier'
-	errors.immutable_variable_error: '`i` is immutable, declare it with `mut` to make it mutable'
+	errors.immutable_variable_error: '`%s` is immutable, declare it with `mut` to make it mutable'
 	errors.invalid_argument_error: 'cannot use `%s` as `%s` in argument %s to `%s`'
 	errors.invalid_option_propagate_call_error: 'unexpected `?`, the function `%s` does neither return an optional nor a result'
 	errors.undefined_ident_assignment_error: 'undefined ident: `%s` (use `:=` to declare a variable)'

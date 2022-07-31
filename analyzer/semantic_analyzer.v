@@ -512,6 +512,9 @@ pub fn (mut an SemanticAnalyzer) statement(node ast.Node) {
 		.block {
 			an.block(node)
 		}
+		.inc_statement, .dec_statement {
+			an.expression(node.named_child(0) or { return }) or {}
+		}
 		else {
 			if _ := an.expression(node) {
 				if an.in_function() && node.type_name == .identifier {
@@ -1182,10 +1185,20 @@ pub fn (mut an SemanticAnalyzer) expression(node ast.Node, cfg SemanticExpressio
 				// 	return void_sym
 				// }
 				if parent := node.parent() {
-					// expression_list
-					if grandparent := parent.parent() {
-						if grandparent.type_name == .assignment_statement && sym.is_const {
+					if parent.type_name in [.inc_statement, .dec_statement] {
+						if sym.is_const {
 							return an.report(node, errors.constant_mutation_error, sym.name)
+						} else if sym.kind == .variable && !sym.is_mutable() {
+							an.report(node, errors.immutable_variable_error, sym.name)
+						}
+					} else if grandparent := parent.parent() {
+						// expression_list
+						if grandparent.type_name == .assignment_statement {
+							if sym.is_const {
+								return an.report(node, errors.constant_mutation_error, sym.name)
+							} else if sym.kind == .variable && !sym.is_mutable() {
+								an.report(node, errors.immutable_variable_error, sym.name)
+							}
 						}
 					}
 				}
