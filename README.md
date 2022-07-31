@@ -1,7 +1,7 @@
 > ## ⚠️ Warning (Please read this first) ⚠️
-> What you're seeing is the developmental branch of the V Language server. This means that it may not be guaranteed to work reliably on your system.
+> VLS is early software. It may not be guaranteed to work reliably on your system.
 >
-> If you are experiencing problems, please consider [filing a bug report](#error-reporting).
+> If you are experiencing problems, please [report the issue](#error-reporting).
 
 # V Language Server
 [![CI](https://github.com/vlang/vls/actions/workflows/ci.yml/badge.svg)](https://github.com/vlang/vls/actions/workflows/ci.yml)

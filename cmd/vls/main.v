@@ -152,7 +152,7 @@ fn run_server(cmd cli.Command, is_child bool) ? {
 	mut rw := unsafe { &server.ResponseWriter(jrpc_server.writer(own_buffer: true)) }
 
 	// Show message that VLS is not yet ready!
-	rw.show_message('VLS is a work-in-progress, pre-alpha language server. It may not be guaranteed to work reliably due to memory issues and other related factors. We encourage you to submit an issue if you encounter any problems.',
+	rw.show_message('VLS is early software. Please report your issue to github.com/vlang/vls if you encounter any problems.', 
 		.warning)
 
 	go server.monitor_changes(mut ls, mut rw)
