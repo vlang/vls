@@ -814,8 +814,25 @@ pub fn (mut ss Store) infer_value_type_from_node(node ast.Node, src_text tree_si
 			type_name = '[]int'
 		}
 		.array {
-			if child_type_node := node.child(1) {
-				type_name = '[]' + ss.infer_value_type_from_node(child_type_node, src_text).name
+			if child_type_node := node.named_child(0) {
+				inferred_value_sym := ss.infer_value_type_from_node(child_type_node, src_text)
+				type_name = '[]' + inferred_value_sym.name
+				return ss.find_symbol('', type_name) or {
+					mut new_array_sym := &Symbol{
+						name: type_name
+						is_top_level: true
+						file_path: os.join_path(ss.get_module_path(''), 'placeholder.vv')
+						file_version: 0
+						kind: .array_
+						children_syms: [inferred_value_sym]
+					}
+
+					ss.register_symbol(mut new_array_sym) or {
+						return void_sym
+					}
+
+					return new_array_sym
+				}
 			}
 		}
 		.binary_expression {
