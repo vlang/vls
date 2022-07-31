@@ -1,6 +1,5 @@
 module analyzer
 
-import os
 import tree_sitter as ts
 import tree_sitter_v as v
 import ast
@@ -297,24 +296,13 @@ fn (mut sr SymbolAnalyzer) enum_decl(enum_decl_node ast.Node) ?&Symbol {
 			continue
 		}
 
-		int_sym := sr.store.find_symbol('', 'int') or {
-			mut new_int_symbol := Symbol{
-				name: 'int'
-				kind: .typedef
-				is_top_level: true
-				file_path: os.join_path(sr.store.auto_imports[''], 'placeholder.vv')
-				file_version: 0
-			}
-			sr.store.register_symbol(mut new_int_symbol) or { void_sym }
-		}
-
 		member_name_node := member_node.child_by_field_name('name') or { continue }
 		mut member_sym := &Symbol{
 			name: member_name_node.text(sr.src_text)
 			kind: .field
 			range: member_node.range()
 			access: access
-			return_sym: int_sym
+			return_sym: sym
 			is_top_level: true
 			file_path: sr.store.cur_file_path
 			file_version: sr.store.cur_version
