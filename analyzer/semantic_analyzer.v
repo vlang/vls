@@ -665,6 +665,41 @@ pub fn (mut an SemanticAnalyzer) type_initializer(node ast.Node) ?&Symbol {
 					'map_type': typ_sym.parent_sym.gen_str()
 				})
 			}
+
+			body_node := node.child_by_field_name('body')?
+			body_len := body_node.named_child_count()
+			mut declared_fields := []string{cap: typ_sym.children_syms.len}
+
+			for i in u32(0) .. body_len {
+				element_node := body_node.named_child(i) or {
+					continue
+				}
+
+				match element_node.type_name {
+					.keyed_element {
+						if name_node := element_node.child_by_field_name('name') {
+							declared_fields << name_node.text(an.src_text)
+						}
+					}
+					// .element {}
+					// .spread_operator {}
+					else {
+						// TODO: error
+					}
+				}
+			}
+
+			for child_sym in typ_sym.children_syms {
+				if child_sym.kind != .field {
+					continue
+				} else if child_sym.name in declared_fields {
+					continue
+				}
+
+				if child_sym.return_sym.kind == .ref {
+					an.report(node, errors.uninitialized_reference_field_error, typ_sym.name, child_sym.name)
+				}
+			}
 		}
 		else {}
 	}
