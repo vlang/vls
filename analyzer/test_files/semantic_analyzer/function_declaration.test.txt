@@ -66,6 +66,10 @@ fn separate_name4(name string) string {
 fn separate_name5(name string) (string, string) {
     return separate_name3('foo bar')
 }
+
+fn return_ref() &Triangle {
+    return Triangle{100, 10}
+}
 ---
 
 (error "`a` evaluated but not used" [1,4]-[1,5])
@@ -83,3 +87,4 @@ fn separate_name5(name string) (string, string) {
 (error "cannot use `(string, string)` as type `string` in return argument" [62,4]-[62,35])
 (error "expected 1 argument, but got 2" [62,11]-[62,35])
 (error "expected 2 arguments, but got 1" [66,11]-[66,36])
+(error "fn `return_ref` expects you to return a reference type `&Triangle`, but you are returning `Triangle` instead" [70,11]-[70,28])

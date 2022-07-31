@@ -449,7 +449,11 @@ pub fn (mut an SemanticAnalyzer) return_statement(node ast.Node) {
 			} else if expr_sym.is_void() {
 				an.report(node, errors.void_value_return_error, expr_node.text(an.src_text))
 			} else if expr_sym != expected_sym {
-				an.report(node, errors.invalid_return_error, expr_sym, expected_sym)
+				if expected_sym.kind == .ref && expected_sym.parent_sym == expr_sym {
+					an.report(expr_node, errors.non_reference_return_error, an.parent_sym.name, expected_sym, expr_sym)
+				} else {
+					an.report(node, errors.invalid_return_error, expr_sym, expected_sym)
+				}
 			}
 		}
 
