@@ -8,6 +8,10 @@ __global:
     gender byte
 }
 
+struct Node {
+    child &Node
+}
+
 ---
 
 (struct Person [0,7]-[0,13]
@@ -15,3 +19,6 @@ __global:
     (pub mut field age int [3,4]-[3,7])
     (mut field place string [5,4]-[5,9])
     (__global field gender byte [7,4]-[7,10]))
+
+(struct Node [10,7]-[10,11] 
+    (field child &Node [11,4]-[11,9]))
