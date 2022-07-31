@@ -1,7 +1,7 @@
 > ## ⚠️ Warning (Please read this first) ⚠️
 > VLS is early software. It may not be guaranteed to work reliably on your system.
 >
-> If you are experiencing problems, please [report the issue](#error-reporting).
+> If you are experiencing problems, please [report the issue](https://github.com/vlang/vls/issues/new).
 
 # V Language Server
 [![CI](https://github.com/vlang/vls/actions/workflows/ci.yml/badge.svg)](https://github.com/vlang/vls/actions/workflows/ci.yml)
