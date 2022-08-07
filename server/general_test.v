@@ -4,6 +4,8 @@ import server
 import lsp
 import lsp.log { LogRecorder }
 import os
+import io
+
 
 fn test_wrong_first_request() ? {
 	mut ls := server.new()
@@ -21,7 +23,12 @@ fn test_wrong_first_request() ? {
 fn test_initialize_with_capabilities() ? {
 	mut ls := server.new()
 	mut io := new_test_client(ls)
-	result := io.send<map[string]string, lsp.InitializeResult>('initialize', map[string]string{}) ?
+	result := io.send<map[string]string, lsp.InitializeResult>('initialize', map[string]string{}) or {
+		if err is io.Eof {
+			return
+		}
+		return err
+	}
 
 	assert ls.status() == .initialized
 	assert result == lsp.InitializeResult{
@@ -88,7 +95,12 @@ fn test_setup_logger() ? {
 	io.send<lsp.InitializeParams, lsp.InitializeResult>('initialize', lsp.InitializeParams{
 		trace: 'verbose'
 		root_uri: lsp.document_uri_from_path(os.join_path('non_existent', 'path'))
-	}) ?
+	}) or {
+		if err is io.Eof {
+			return
+		}
+		return err
+	}
 
 	notif := io.stream.notification_at<lsp.ShowMessageParams>(0) ?
 	assert notif.method == 'window/showMessage'
@@ -104,6 +116,10 @@ fn test_setup_logger() ? {
 fn init_tests() ?(&TestClient, &server.Vls) {
 	mut ls := server.new()
 	mut io := new_test_client(ls)
-	io.send<map[string]string, lsp.InitializeResult>('initialize', map[string]string{}) ?
+	io.send<map[string]string, lsp.InitializeResult>('initialize', map[string]string{}) or {
+		if err !is io.Eof {
+			return err
+		}
+	}
 	return io, ls
 }

@@ -3,6 +3,7 @@
 // that can be found in the LICENSE file.
 module server_test_utils
 
+import io
 import jsonrpc
 import json
 import datatypes
@@ -42,7 +43,7 @@ pub mut:
 }
 
 // send<T,U> sends a request and receives a decoded response result.
-pub fn (mut tc TestClient) send<T,U>(method string, params T) ?U {
+pub fn (mut tc TestClient) send<T,U>(method string, params T) !U {
 	params_json := json.encode(params)
 	req := jsonrpc.Request{
 		id: '$tc.id'
@@ -51,16 +52,18 @@ pub fn (mut tc TestClient) send<T,U>(method string, params T) ?U {
 	}
 
 	tc.stream.send(req)
-	tc.server.respond() ?
+	tc.server.respond() or {
+		return err
+	}
 	raw_json_content := tc.stream.response_text(req.id)
 	if raw_json_content.len == 0 || raw_json_content == 'null' {
-		return none
+		return IError(io.Eof{})
 	}
-	return json.decode(U, raw_json_content)
+	return json.decode(U, raw_json_content)!
 }
 
 // notify is a version of send but instead of returning a response,
-// it only notifies the server. Effectively sending a request as a 
+// it only notifies the server. Effectively sending a request as a
 // notification.
 pub fn (mut tc TestClient) notify<T>(method string, params T) ? {
 	params_json := json.encode(params)
@@ -87,8 +90,10 @@ mut:
 }
 
 // read receives the incoming request buffer.
-pub fn (mut rw TestStream) read(mut buf []u8) ?int {
-	req := rw.req_buf.pop() ?
+pub fn (mut rw TestStream) read(mut buf []u8) !int {
+	req := rw.req_buf.pop() or {
+		return IError(io.Eof{})
+	}
 	buf << req
 	return req.len
 }
@@ -105,7 +110,7 @@ pub fn (mut rw TestStream) write(buf []u8) ?int {
 			if rw.notif_buf[i].len != 0 {
 				rw.notif_buf[idx].clear()
 			}
-		} 
+		}
 		rw.notif_buf[idx] << buf
 		rw.notif_idx++
 	} else {

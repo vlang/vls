@@ -37,9 +37,11 @@ pub fn (mut stream StdioStream) write(buf []u8) ?int {
 	return stream.stdout.write(buf)
 }
 
-pub fn (mut stream StdioStream) read(mut buf []u8) ?int {
+pub fn (mut stream StdioStream) read(mut buf []u8) !int {
 	stdin_file := stream.stdin_file()
-	initial_len := get_raw_input(stdin_file, mut buf) ?
+	initial_len := get_raw_input(stdin_file, mut buf) or {
+		return IError(io.Eof{})
+	}
 	if buf.len < 1 || !buf.bytestr().starts_with(content_length) {
 		return error('content length is missing')
 	}
@@ -165,13 +167,15 @@ pub fn (mut sck SocketStream) write(buf []u8) ?int {
 const newlines = [u8(`\r`),`\n`]
 
 [manualfree]
-pub fn (mut sck SocketStream) read(mut buf []u8) ?int {
+pub fn (mut sck SocketStream) read(mut buf []u8) !int {
 	mut conlen := 0
 	mut header_len := 0
 
 	for {
 		// read header line
-		got_header := sck.reader.read_line() ?
+		got_header := sck.reader.read_line() or {
+			return IError(io.Eof{})
+		}
 		buf << got_header.bytes()
 		buf << newlines
 		// $if !test {
@@ -183,7 +187,9 @@ pub fn (mut sck SocketStream) read(mut buf []u8) ?int {
 		} else if got_header.starts_with(content_length) {
 			conlen = got_header.all_after(content_length).int()
 			// read blank line
-			empty := sck.reader.read_line() ?
+			empty := sck.reader.read_line() or {
+				return IError(io.Eof{})
+			}
 			buf << empty.bytes()
 			buf << newlines
 			header_len = got_header.len + 4
@@ -198,7 +204,9 @@ pub fn (mut sck SocketStream) read(mut buf []u8) ?int {
 		defer { unsafe { rbody.free() } }
 
 		for read_data_len := 0; read_data_len != conlen; {
-			read_data_len = sck.reader.read(mut rbody) ?
+			read_data_len = sck.reader.read(mut rbody) or {
+				return IError(io.Eof{})
+			}
 		}
 
 		buf << rbody
