@@ -9,7 +9,9 @@ import os
 
 struct CompletionBuilder {
 mut:
-	store              &analyzer.Store
+	store              &analyzer.Store [required]
+	file_path          string          [required]
+	file_dir           string
 	src                tree_sitter.SourceText
 	offset             int
 	parent_node        ast.Node
@@ -21,6 +23,13 @@ mut:
 	show_mut_only      bool // filters results based on the object's mutability state.
 	ctx                lsp.CompletionContext
 	completion_items   []lsp.CompletionItem = []lsp.CompletionItem{cap: 100}
+}
+
+fn (mut builder CompletionBuilder) cur_dir() string {
+	if builder.file_dir.len == 0 {
+		builder.file_dir = os.dir(builder.file_path)
+	}
+	return builder.file_dir
 }
 
 fn (mut builder CompletionBuilder) add(item lsp.CompletionItem) {
@@ -79,7 +88,7 @@ fn (mut builder CompletionBuilder) build_suggestions_from_stmt(node ast.Node) {
 			left_count := left_node.named_child_count()
 			if expr_list_count == left_count {
 				last_left_node := left_node.named_child(left_count - 1) or { return }
-				builder.filter_return_type = builder.store.infer_value_type_from_node(last_left_node,
+				builder.filter_return_type = builder.store.infer_value_type_from_node(builder.file_path, last_left_node,
 					builder.src)
 				builder.show_local = true
 			}
@@ -113,7 +122,7 @@ fn (mut builder CompletionBuilder) build_suggestions_from_list(node ast.Node) {
 		.argument_list {
 			call_expr_arg_cur_idx := node.named_child_count()
 			parent := node.parent() or { return }
-			returned_sym := builder.store.infer_symbol_from_node(parent, builder.src) or {
+			returned_sym := builder.store.infer_symbol_from_node(builder.file_path, parent, builder.src) or {
 				builder.filter_return_type
 			}
 
@@ -170,7 +179,7 @@ fn (mut builder CompletionBuilder) build_suggestions_from_expr(node ast.Node) {
 					}
 				}
 
-				if got_sym := builder.store.infer_symbol_from_node(selected_node, builder.src) {
+				if got_sym := builder.store.infer_symbol_from_node(builder.file_path, selected_node, builder.src) {
 					builder.show_mut_only = builder.parent_node.type_name == .block
 						&& got_sym.is_mutable()
 					if got_sym.kind == .enum_ || (got_sym.kind == .field && got_sym.parent_sym.kind == .enum_) {
@@ -178,7 +187,7 @@ fn (mut builder CompletionBuilder) build_suggestions_from_expr(node ast.Node) {
 					} else {
 						builder.build_suggestions_from_sym(got_sym.return_sym, is_selector: true)
 					}
-				} else if builder.store.is_module(text) {
+				} else if builder.store.is_module(builder.file_path, text) {
 					builder.build_suggestions_from_module(text)
 				} else if text == 'C.' || text == 'JS.' {
 					lang := match text {
@@ -200,7 +209,7 @@ fn (mut builder CompletionBuilder) build_suggestions_from_expr(node ast.Node) {
 			if closest_element_node.type_name == .keyed_element {
 				builder.build_suggestions_from_expr(closest_element_node)
 			} else if parent_node := node.parent() {
-				if got_sym := builder.store.infer_symbol_from_node(parent_node, builder.src) {
+				if got_sym := builder.store.infer_symbol_from_node(builder.file_path, parent_node, builder.src) {
 					builder.build_suggestions_from_sym(got_sym, BuildSuggestionsFromSymParams{
 						filter_kinds: if got_sym.kind == .enum_ { [.field] } else { []analyzer.SymbolKind{} }
 						prefix: if got_sym.kind in [.enum_, .field] { '.' } else { '' }
@@ -209,7 +218,7 @@ fn (mut builder CompletionBuilder) build_suggestions_from_expr(node ast.Node) {
 			}
 		}
 		.keyed_element {
-			if got_sym := builder.store.infer_symbol_from_node(node, builder.src) {
+			if got_sym := builder.store.infer_symbol_from_node(builder.file_path, node, builder.src) {
 				builder.show_local = true
 				builder.filter_return_type = got_sym.return_sym
 
@@ -225,7 +234,7 @@ fn (mut builder CompletionBuilder) build_suggestions_from_expr(node ast.Node) {
 			builder.build_suggestions_from_node(node.named_child(0) or { return })
 		}
 		else {
-			// found_sym := builder.store.infer_symbol_from_node(node, builder.src) or { analyzer.void_sym }
+			// found_sym := builder.store.infer_symbol_from_node(builder.file_path, node, builder.src) or { analyzer.void_sym }
 			// builder.filter_return_type = if found_sym.is_returnable() { found_sym.return_sym } else { found_sym }
 		}
 	}
@@ -262,7 +271,7 @@ fn (mut builder CompletionBuilder) build_suggestions_from_sym(sym &analyzer.Symb
 				continue
 			}
 
-			if os.dir(child_sym.file_path) != builder.store.cur_dir
+			if os.dir(child_sym.file_path) != builder.cur_dir()
 				&& int(child_sym.access) < int(analyzer.SymbolAccess.public) {
 				continue
 			}
@@ -300,7 +309,7 @@ fn (mut builder CompletionBuilder) build_suggestions_from_sym(sym &analyzer.Symb
 	if sym.kind in analyzer.container_symbol_kinds {
 		for base_sym_loc in builder.store.base_symbol_locations {
 			if base_sym_loc.for_kind == sym.kind {
-				base_sym := builder.store.find_symbol(base_sym_loc.module_name, base_sym_loc.symbol_name) or {
+				base_sym := builder.store.find_symbol(builder.file_path, base_sym_loc.module_name, base_sym_loc.symbol_name) or {
 					continue
 				}
 				builder.build_suggestions_from_sym(base_sym, params)
@@ -333,7 +342,7 @@ fn (mut builder CompletionBuilder) build_suggestions_from_binded_symbols(lang an
 
 		module_path := sym_loc_entry.module_path
 		if module_path !in imported_paths {
-			if module_path != builder.store.cur_dir && !builder.store.is_imported(module_path) {
+			if module_path != builder.cur_dir() && !builder.store.is_imported(builder.file_path, module_path) {
 				continue
 			}
 
@@ -353,7 +362,7 @@ fn (mut builder CompletionBuilder) build_suggestions_from_binded_symbols(lang an
 }
 
 fn (mut builder CompletionBuilder) build_suggestions_from_module(name string, included_list ...string) {
-	imported_path_dir := builder.store.get_module_path_opt(name) or {
+	imported_path_dir := builder.store.get_module_path_opt(builder.file_path, name) or {
 		builder.store.auto_imports[name] or { return }
 	}
 
@@ -391,7 +400,7 @@ fn (mut builder CompletionBuilder) build_module_name_suggestions() {
 	builder.show_global = false
 	builder.show_local = false
 
-	folder_name := os.base(builder.store.cur_dir).replace(' ', '_')
+	folder_name := os.base(builder.cur_dir()).replace(' ', '_')
 	module_name_suggestions := ['main', folder_name]
 	for module_name in module_name_suggestions {
 		builder.add(lsp.CompletionItem{
@@ -404,12 +413,12 @@ fn (mut builder CompletionBuilder) build_module_name_suggestions() {
 
 // Local results. Module names and the scope-based symbols.
 fn (mut builder CompletionBuilder) build_local_suggestions() {
-	file_name := builder.store.cur_file_name
+	file_name := os.base(builder.file_path)
 	// Imported modules. They will be shown to the user if there is no given
 	// type for filtering the results. Invalid imports are excluded.
 	if isnil(builder.filter_return_type) {
-		for imp in builder.store.imports[builder.store.cur_dir] {
-			if builder.store.cur_file_path in imp.ranges
+		for imp in builder.store.imports[builder.cur_dir()] {
+			if builder.file_path in imp.ranges
 				&& (file_name !in imp.symbols || imp.symbols[file_name].len == 0) {
 				imp_name := imp.aliases[file_name] or { imp.module_name }
 				builder.add(lsp.CompletionItem{
@@ -433,7 +442,7 @@ fn (mut builder CompletionBuilder) build_local_suggestions() {
 
 	// Scope-based symbols that includes the variables inside
 	// the functions and the constants of the file.
-	if file_scope_ := builder.store.opened_scopes[builder.store.cur_file_path] {
+	if file_scope_ := builder.store.opened_scopes[builder.file_path] {
 		mut file_scope := unsafe { file_scope_ }
 		mut scope := file_scope.innermost(u32(builder.offset), u32(builder.offset)) or { file_scope }
 		for !isnil(scope) && scope != file_scope {
@@ -461,7 +470,7 @@ fn (mut builder CompletionBuilder) build_local_suggestions() {
 // Global results. This includes all the symbols within the module such as
 // the structs, typedefs, enums, and the functions.
 fn (mut builder CompletionBuilder) build_global_suggestions() {
-	global_syms := builder.store.symbols[builder.store.cur_dir]
+	global_syms := builder.store.symbols[builder.cur_dir()]
 	for sym in global_syms {
 		if !sym.is_void() && sym.kind != .placeholder {
 			if (sym.kind == .function && sym.name == 'main')
@@ -476,9 +485,9 @@ fn (mut builder CompletionBuilder) build_global_suggestions() {
 		}
 	}
 
-	file_name := builder.store.cur_file_name
-	for imp in builder.store.imports[builder.store.cur_dir] {
-		if builder.store.cur_file_name in imp.symbols && imp.symbols[file_name].len != 0 {
+	file_name := os.base(builder.file_path)
+	for imp in builder.store.imports[builder.cur_dir()] {
+		if file_name in imp.symbols && imp.symbols[file_name].len != 0 {
 			builder.build_suggestions_from_module(imp.module_name, ...imp.symbols[file_name])
 		}
 	}
@@ -611,8 +620,6 @@ pub fn (mut ls Vls) completion(params lsp.CompletionParams, mut wr ResponseWrite
 		return none
 	}
 
-	ls.store.set_active_file_path(uri.path(), file.version)
-
 	// The context is used for if and when to trigger autocompletion.
 	// See comments `cfg` for reason.
 	mut ctx := params.context
@@ -621,6 +628,7 @@ pub fn (mut ls Vls) completion(params lsp.CompletionParams, mut wr ResponseWrite
 	// to the client. See the field comments in CompletionBuilder for their
 	// purposes.
 	mut builder := CompletionBuilder{
+		file_path: uri.path()
 		store: &ls.store
 		src: file.source
 		parent_node: root_node

@@ -21,7 +21,7 @@ fn test_symbol_registration() ? {
 	setup_builtin(mut store, os.join_path(vlib_path, 'builtin'))
 
 	mut sym_analyzer := SymbolAnalyzer{
-		store: store
+		context: store.default_context()
 		is_test: true
 	}
 
@@ -35,8 +35,6 @@ fn test_symbol_registration() ? {
 
 	bench.set_total_expected_steps(test_files.len)
 	for test_file_path in test_files {
-		store.set_active_file_path(test_file_path, 1)
-
 		bench.step()
 		test_name := os.base(test_file_path)
 		content := os.read_file(test_file_path) or {
@@ -60,8 +58,8 @@ fn test_symbol_registration() ? {
 
 		println(bench.step_message('Testing $test_name'))
 		tree := p.parse_string(source: src)
-		sym_analyzer.src_text = Runes(src.runes())
 		mut cursor := new_tree_cursor(tree.root_node())
+		sym_analyzer.context = store.with(file_path: test_file_path, text: Runes(src.runes()))
 		symbols := sym_analyzer.analyze_from_cursor(mut cursor)
 		result := an_test_utils.sexpr_str_symbol_array(symbols).replace(') (', ')\n(')
 		expected_trimmed := test_utils.newlines_to_spaces(expected).replace(') (', ')\n(')
@@ -78,7 +76,7 @@ fn test_symbol_registration() ? {
 			println(bench.step_message_ok(test_name))
 		}
 
-		store.delete(store.cur_dir)
+		store.delete(os.dir(test_file_path))
 	}
 	assert bench.nfail == 0
 	bench.stop()

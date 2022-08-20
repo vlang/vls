@@ -189,7 +189,7 @@ pub fn (mut scope ScopeTree) remove(name string) bool {
 
 // get_symbols before returns a list of symbols that are available before
 // the target byte offset
-pub fn (mut scope ScopeTree) get_symbols_before(target_byte u32) []&Symbol {
+pub fn (scope &ScopeTree) get_symbols_before(target_byte u32) []&Symbol {
 	mut symbols := []&Symbol{}
 	mut selected_scope := scope.innermost(target_byte, target_byte) or {
 		return symbols
@@ -206,7 +206,7 @@ pub fn (mut scope ScopeTree) get_symbols_before(target_byte u32) []&Symbol {
 }
 
 // get_symbol returns a symbol from a specific range
-pub fn (mut scope ScopeTree) get_symbol_with_range(name string, range C.TSRange) ?&Symbol {
+pub fn (scope &ScopeTree) get_symbol_with_range(name string, range C.TSRange) ?&Symbol {
 	if isnil(scope) {
 		return none
 	}
