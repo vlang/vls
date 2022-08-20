@@ -274,12 +274,15 @@ fn (mut builder CompletionBuilder) build_suggestions_from_sym(sym &analyzer.Symb
 				continue
 			}
 
-			if child_sym.kind == .embedded_field {
-				builder.build_suggestions_from_sym(child_sym.return_sym, is_selector)
-			}
-
 			if existing_completion_item := symbol_to_completion_item(child_sym, with_snippet: true, prefix: params.prefix) {
 				builder.add(existing_completion_item)
+			}
+
+			if child_sym.kind == .embedded_field {
+				builder.build_suggestions_from_sym(child_sym.return_sym, BuildSuggestionsFromSymParams{
+					...params
+					prefix: params.prefix + child_sym.name + '.'
+				})
 			}
 		} else if child_sym.kind == .field && sym.kind == .struct_ {
 			builder.add(lsp.CompletionItem{

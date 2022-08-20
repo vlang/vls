@@ -1,6 +1,7 @@
 module abc
 
 pub struct Point {
+pub:
 	a int
 	b int
 }

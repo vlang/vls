@@ -27,6 +27,10 @@ const completion_inputs = {
 		context: lsp.CompletionContext{.invoked, ''}
 		position: lsp.Position{10, 14}
 	}
+	'embedded_struct_field.vv':             lsp.CompletionParams{
+		context: lsp.CompletionContext{.trigger_character, '.'}
+		position: lsp.Position{15, 15}
+	}
 	'enum_method.vv':                       lsp.CompletionParams{
 		context: lsp.CompletionContext{.trigger_character, '.'}
 		position: lsp.Position{5, 27}
@@ -169,6 +173,40 @@ const completion_results = {
 			insert_text: 'add_to_four(\$0)'
 			insert_text_format: .snippet
 		},
+	]
+	'embedded_struct_field.vv':             [
+		lsp.CompletionItem{
+			label: 'Point'
+			kind: .property
+			detail: 'Point'
+			insert_text: 'Point'
+		},
+		lsp.CompletionItem{
+			label: 'Point.a'
+			kind: .property
+			detail: 'pub Point.a int'
+			insert_text: 'Point.a'
+		},
+		lsp.CompletionItem{
+			label: 'Point.b'
+			kind: .property
+			detail: 'pub Point.b int'
+			insert_text: 'Point.b'
+		},
+		lsp.CompletionItem{
+			label: 'z'
+			kind: .property
+			detail: 'ThreeDPoint.z int'
+			insert_text: 'z'
+		},
+	]
+	'enum_method.vv':                       [
+		lsp.CompletionItem{
+			label: 'print'
+			kind: .method
+			detail: 'pub fn (code KeyCode) print()'
+			insert_text: 'print()'
+		}
 	]
 	'enum_val_in_struct.vv':                [
 		lsp.CompletionItem{
