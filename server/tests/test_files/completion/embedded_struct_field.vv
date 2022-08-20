@@ -1,0 +1,17 @@
+module main
+
+import abc
+
+pub struct ThreeDPoint {
+	abc.Point
+	z int
+}
+
+fn main() {
+	point := ThreeDPoint{
+		Point: Point{1,2}
+		z: 3
+	}
+
+	println(point.)
+}

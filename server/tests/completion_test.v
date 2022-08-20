@@ -27,6 +27,18 @@ const completion_inputs = {
 		context: lsp.CompletionContext{.invoked, ''}
 		position: lsp.Position{10, 14}
 	}
+	'embedded_struct_field.vv':             lsp.CompletionParams{
+		context: lsp.CompletionContext{.trigger_character, '.'}
+		position: lsp.Position{15, 15}
+	}
+	'enum_member.vv':                       lsp.CompletionParams{
+		context: lsp.CompletionContext{.trigger_character, '.'}
+		position: lsp.Position{5, 20}
+	}
+	'enum_method.vv':                       lsp.CompletionParams{
+		context: lsp.CompletionContext{.trigger_character, '.'}
+		position: lsp.Position{5, 27}
+	}
 	'enum_val_in_struct.vv':                lsp.CompletionParams{
 		context: lsp.CompletionContext{.trigger_character, ' '}
 		position: lsp.Position{18, 20}
@@ -166,6 +178,54 @@ const completion_results = {
 			insert_text_format: .snippet
 		},
 	]
+	'embedded_struct_field.vv':             [
+		lsp.CompletionItem{
+			label: 'Point'
+			kind: .property
+			detail: 'Point'
+			insert_text: 'Point'
+		},
+		lsp.CompletionItem{
+			label: 'Point.a'
+			kind: .property
+			detail: 'pub Point.a int'
+			insert_text: 'Point.a'
+		},
+		lsp.CompletionItem{
+			label: 'Point.b'
+			kind: .property
+			detail: 'pub Point.b int'
+			insert_text: 'Point.b'
+		},
+		lsp.CompletionItem{
+			label: 'z'
+			kind: .property
+			detail: 'ThreeDPoint.z int'
+			insert_text: 'z'
+		},
+	]
+	'enum_member.vv':                       [
+		lsp.CompletionItem{
+			label: 'shift'
+			kind: .enum_member
+			detail: 'pub KeyCode.shift KeyCode'
+			insert_text: 'shift'
+		},
+		lsp.CompletionItem{
+			label: 'control'
+			kind: .enum_member
+			detail: 'pub KeyCode.control KeyCode'
+			insert_text: 'control'
+		}
+	]
+	'enum_method.vv':                       [
+		lsp.CompletionItem{
+			label: 'print'
+			kind: .method
+			detail: 'pub fn (code KeyCode) print()'
+			insert_text: 'print()'
+		}
+	]
 	'enum_val_in_struct.vv':                [
 		lsp.CompletionItem{
 			label: '.golden_retriever'
@@ -278,6 +338,12 @@ const completion_results = {
 			detail: 'pub fn connect(config Config) ?DB'
 			insert_text: 'connect'
 		},
+		lsp.CompletionItem{
+			label: 'Oid'
+			kind: .enum_
+			detail: 'pub enum Oid'
+			insert_text: 'Oid'
+		}
 	]
 	'import.vv':                            [
 		lsp.CompletionItem{
@@ -393,6 +459,24 @@ const completion_results = {
 			detail: 'pub fn this_is_a_function() string'
 			insert_text: 'this_is_a_function()'
 		},
+		lsp.CompletionItem{
+			label: 'KeyCode'
+			kind: .enum_
+			detail: 'pub enum KeyCode'
+			insert_text: 'KeyCode'
+		},
+		lsp.CompletionItem{
+			label: 'KeyCode.shift'
+			kind: .enum_member
+			detail: 'pub KeyCode.shift KeyCode'
+			insert_text: 'KeyCode.shift'
+		},
+		lsp.CompletionItem{
+			label: 'KeyCode.control'
+			kind: .enum_member
+			detail: 'pub KeyCode.control KeyCode'
+			insert_text: 'KeyCode.control'
+		}
 	]
 	'self_reference_var_in_struct_field.vv':                [
 		lsp.CompletionItem{
