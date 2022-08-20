@@ -2,6 +2,11 @@ fn opt() ?string {
     return 'test'
 }
 
+fn separate_name(name string) (string, string) {
+    splitted := name.split(' ')
+    return splitted[0], splitted[1]
+}
+
 fn main() {
     test := opt() or { '' }
     a := 1
@@ -13,24 +18,31 @@ fn main() {
     non_a := if b == 22 { a } else { xx }
     unsafe_var := unsafe { 2 }
     fn_var := fn (i int) int { return i }
+    first_name, last_name := separate_name('John Doe')
 }
 
 ---
 
 (function opt ?string [0,3]-[0,6])
 
-(function main [4,3]-[4,7]
-    (variable test string [5,4]-[5,8])
-    (variable a int [6,4]-[6,5])
-    (variable b int [7,4]-[7,5])
-    (mut variable x f32 [7,11]-[7,12])
-    (variable c int [11,4]-[11,5])
-    (variable e int [11,7]-[11,8])
-    (variable unsafe_var int [13,4]-[13,14])
-    (variable fn_var fn (i int) int [14,4]-[14,10])
-    (scope [0]-[79]
-        (variable err IError [0,0]-[0,0]))
-    (scope [123]-[140]
-        (variable test2 string [9,7]-[9,12]))
-    (scope [278]-[301]
-        (variable i int [14,18]-[14,19])))
+(function separate_name (string, string) [4,3]-[4,16]
+    (variable name string [4,17]-[4,21])
+    (variable splitted []string [5,4]-[5,12]))
+
+(function main [9,3]-[9,7]
+    (variable test string [10,4]-[10,8])
+    (variable a int [11,4]-[11,5])
+    (variable b int [12,4]-[12,5])
+    (mut variable x f32 [12,11]-[12,12])
+    (variable c int [16,4]-[16,5])
+    (variable e int [16,7]-[16,8])
+    (variable unsafe_var int [18,4]-[18,14])
+    (variable fn_var fn (i int) int [19,4]-[19,10])
+    (variable first_name string [20,4]-[20,14])
+    (variable last_name string [20,16]-[20,25])
+    (scope [193]-[199]
+        (variable err IError [10,21]-[10,21]))
+    (scope [243]-[260]
+        (variable test2 string [14,7]-[14,12]))
+    (scope [398]-[421]
+        (variable i int [19,18]-[19,19])))

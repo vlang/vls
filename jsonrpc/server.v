@@ -71,7 +71,12 @@ pub fn (mut s Server) respond() ? {
 
 fn (mut s Server) internal_respond(mut base_rw ResponseWriter) ? {
 	defer { s.req_buf.go_back_to(0) }
-	s.stream.read(mut s.req_buf) ?
+	s.stream.read(mut s.req_buf) or {
+		if err is io.Eof {
+			return
+		}
+		return err
+	}
 
 	req := s.process_raw_request(s.req_buf.after(0)) or {
 		base_rw.write_error(response_error(error: parse_error))

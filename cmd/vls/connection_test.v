@@ -33,7 +33,7 @@ const vls_cmd_dir = os.join_path(@VMODROOT, 'cmd', 'vls')
 
 const connection_dir = os.join_path(os.dir(@FILE), 'test_files', 'connection')
 
-const init_msg = wrap_request('{"jsonrpc":"2.0","method":"window/showMessage","params":{"type":2,"message":"VLS is a work-in-progress, pre-alpha language server. It may not be guaranteed to work reliably due to memory issues and other related factors. We encourage you to submit an issue if you encounter any problems."}}')
+const init_msg = wrap_request('{"jsonrpc":"2.0","method":"window/showMessage","params":{"type":2,"message":"VLS is early software. Please report your issue to github.com/vlang/vls if you encounter any problems."}}')
 
 const editor_info_msg = wrap_request('{"jsonrpc":"2.0","method":"window/logMessage","params":{"type":3,"message":"VLS Version: 0.0.1, OS: linux 64"}}')
 

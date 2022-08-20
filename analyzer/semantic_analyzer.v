@@ -413,35 +413,57 @@ pub fn (mut an SemanticAnalyzer) return_statement(node ast.Node) {
 		return
 	}
 
-	mut expr_node := node.named_child(0) or { 
-		if !an.parent_sym.return_sym.is_void() {
-			an.report(node, errors.invalid_void_return_error, an.parent_sym.return_sym)
+	if expr_list_node := node.named_child(0) {
+		expected_syms := if an.parent_sym.return_sym.kind == .multi_return {
+			an.parent_sym.return_sym.children_syms
+		} else {
+			[an.parent_sym.return_sym]
 		}
-		return 
-	}
-	mut expected_sym := an.parent_sym.return_sym
-	// TODO: support multi-return type checks
-	if expr_node.type_name == .expression_list {
-		expr_node = expr_node.named_child(0) or { expr_node }
-		expr_sym := an.expression(expr_node) or { analyzer.void_sym }
 
-		if expected_sym.kind == .optional {
-			// TODO: use proper checking in the future
-			// for interfaces not limited to IError
-			if expr_sym.name == 'IError' {
-				expected_sym = expr_sym 
-			} else {
-				expected_sym = expected_sym.final_sym()
+		expected_return_count := expected_syms.len
+		mut got_return_count := int(expr_list_node.named_child_count())
+		for i := 0; i < expected_return_count; i++ {
+			expr_node := expr_list_node.named_child(u32(i)) or { continue }
+			expr_sym := an.expression(expr_node) or { analyzer.void_sym }
+			if expr_sym.kind == .multi_return {
+				// got return count = existing number of nodes + multi return type size
+				got_return_count += expr_sym.children_syms.len - 1
+			}
+
+			mut expected_sym := expected_syms[i]
+			if expected_sym.kind == .optional {
+				// TODO: use proper checking in the future
+				// for interfaces not limited to IError
+				if expr_sym.name == 'IError' {
+					expected_sym = expr_sym
+				} else {
+					expected_sym = expected_sym.final_sym()
+				}
+			}
+
+			if expected_sym.is_void() && !expr_sym.is_void() {
+				an.report(expr_node, errors.unexpected_return_error)
+			} else if expr_sym.is_void() {
+				an.report(node, errors.void_value_return_error, expr_node.text(an.context.text))
+			} else if expr_sym != expected_sym {
+				if expected_sym.kind == .ref && expected_sym.parent_sym == expr_sym {
+					an.report(expr_node, errors.non_reference_return_error, an.parent_sym.name, expected_sym, expr_sym)
+				} else {
+					an.report(node, errors.invalid_return_error, expr_sym, expected_sym)
+				}
 			}
 		}
 
-		if expected_sym.is_void() && !expr_sym.is_void() {
-			an.report(expr_node, errors.unexpected_return_error)
-		} else if expr_sym.is_void() {
-			an.report(node, errors.void_value_return_error, expr_node.text(an.context.text))
-		} else if expr_sym != expected_sym {
-			an.report(node, errors.invalid_return_error, expr_sym, an.parent_sym.return_sym)
+		if expected_return_count != got_return_count {
+			error_code := if expected_return_count == 1 {
+				errors.unexpected_argument_error_single
+			} else {
+				errors.unexpected_argument_error_plural
+			}
+			an.report(expr_list_node, error_code, expected_return_count.str(), got_return_count.str())
 		}
+	} else if !an.parent_sym.return_sym.is_void() {
+		an.report(node, errors.invalid_void_return_error, an.parent_sym.return_sym)
 	}
 }
 
@@ -486,6 +508,9 @@ pub fn (mut an SemanticAnalyzer) statement(node ast.Node) {
 		}
 		.block {
 			an.block(node)
+		}
+		.inc_statement, .dec_statement {
+			an.expression(node.named_child(0) or { return }) or {}
 		}
 		else {
 			if _ := an.expression(node) {
@@ -639,6 +664,41 @@ pub fn (mut an SemanticAnalyzer) type_initializer(node ast.Node) ?&Symbol {
 					'type_name': typ_sym.gen_str(with_kind: false, with_contents: false, with_access: false)
 					'map_type': typ_sym.parent_sym.gen_str()
 				})
+			}
+
+			body_node := node.child_by_field_name('body')?
+			body_len := body_node.named_child_count()
+			mut declared_fields := []string{cap: typ_sym.children_syms.len}
+
+			for i in u32(0) .. body_len {
+				element_node := body_node.named_child(i) or {
+					continue
+				}
+
+				match element_node.type_name {
+					.keyed_element {
+						if name_node := element_node.child_by_field_name('name') {
+							declared_fields << name_node.text(an.context.text)
+						}
+					}
+					// .element {}
+					// .spread_operator {}
+					else {
+						// TODO: error
+					}
+				}
+			}
+
+			for child_sym in typ_sym.children_syms {
+				if child_sym.kind != .field {
+					continue
+				} else if child_sym.name in declared_fields {
+					continue
+				}
+
+				if child_sym.return_sym.kind == .ref {
+					an.report(node, errors.uninitialized_reference_field_error, typ_sym.name, child_sym.name)
+				}
 			}
 		}
 		else {}
@@ -938,7 +998,7 @@ pub fn (mut an SemanticAnalyzer) block_expression(node ast.Node, cfg SemanticExp
 		} else {
 			return an.expression(last_child, cfg)
 		}
-	} 
+	}
 
 	// TODO:
 	return analyzer.void_sym
@@ -998,7 +1058,7 @@ pub fn (mut an SemanticAnalyzer) match_expression(node ast.Node, cfg SemanticExp
 					} else if end_sym != end_sym {
 						an.report(end_node, errors.match_range_value_type_mismatch)
 					} else {
-						existing_case_values << value_text 
+						existing_case_values << value_text
 					}
 				} else {
 					case_sym := an.expression(case_value_node) or {
@@ -1008,7 +1068,7 @@ pub fn (mut an SemanticAnalyzer) match_expression(node ast.Node, cfg SemanticExp
 					if cond_sym != case_sym {
 						an.report(case_value_node, errors.match_invalid_case_value_error, cond_sym, case_sym)
 					} else {
-						existing_case_values << value_text 
+						existing_case_values << value_text
 					}
 				}
 			}
@@ -1078,7 +1138,7 @@ pub fn (mut an SemanticAnalyzer) expression(node ast.Node, cfg SemanticExpressio
 		.binary_expression {
 			return an.binary_expression(node, cfg)
 		}
-		.unary_expression {
+		.unary_expression, .index_expression {
 			// TODO: temporary fix
 			return an.context.infer_value_type_from_node(node)
 		}
@@ -1125,10 +1185,20 @@ pub fn (mut an SemanticAnalyzer) expression(node ast.Node, cfg SemanticExpressio
 				// 	return void_sym
 				// }
 				if parent := node.parent() {
-					// expression_list
-					if grandparent := parent.parent() {
-						if grandparent.type_name == .assignment_statement && sym.is_const {
+					if parent.type_name in [.inc_statement, .dec_statement] {
+						if sym.is_const {
 							return an.report(node, errors.constant_mutation_error, sym.name)
+						} else if sym.kind == .variable && !sym.is_mutable() {
+							an.report(node, errors.immutable_variable_error, sym.name)
+						}
+					} else if grandparent := parent.parent() {
+						// expression_list
+						if grandparent.type_name == .assignment_statement {
+							if sym.is_const {
+								return an.report(node, errors.constant_mutation_error, sym.name)
+							} else if sym.kind == .variable && !sym.is_mutable() {
+								an.report(node, errors.immutable_variable_error, sym.name)
+							}
 						}
 					}
 				}

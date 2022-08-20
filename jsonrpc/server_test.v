@@ -1,3 +1,4 @@
+import io
 import jsonrpc
 import jsonrpc.server_test_utils { TestClient, TestStream, RpcResult }
 
@@ -53,18 +54,24 @@ fn test_server() ? {
 		stream: stream
 	}
 
-	sum_result := client.send<SumParams, RpcResult<int>>('sum', SumParams{ nums: [1,2,4] }) ?
+	sum_result := client.send<SumParams, RpcResult<int>>('sum', SumParams{ nums: [1,2,4] }) or {
+		return err
+	}
 	assert sum_result.result == 7
 
-	hello_result := client.send<string, RpcResult<string>>('hello', '') ?
+	hello_result := client.send<string, RpcResult<string>>('hello', '') or {
+		return err
+	}
 	assert hello_result.result == 'Hello world!'
 
 	client.send<string, RpcResult<int>>('multiply', 'test') or {
-		assert err.msg() == 'Method not found.'
+		if err !is io.Eof {
+			assert err.msg() == 'Method not found.'
+		}
 	}
 
 	client.send<[]string, RpcResult<string>>('mirror', ['0']) or {
-		assert err is none
+		assert err is io.Eof
 	}
 }
 
@@ -105,12 +112,16 @@ fn test_interceptor() ? {
 		stream: stream
 	}
 
-	client.send<SumParams, RpcResult<int>>('sum', SumParams{ nums: [1,2,4] }) ?
+	client.send<SumParams, RpcResult<int>>('sum', SumParams{ nums: [1,2,4] }) or {
+		return err
+	}
 	assert test_inter.methods_recv.len == 1
 	assert test_inter.methods_recv[0] == 'sum'
 	assert test_inter.messages.len == 1
 
-	client.send<string, RpcResult<string>>('trigger', '') ?
+	client.send<string, RpcResult<string>>('trigger', '') or {
+		return err
+	}
 	assert test_inter.methods_recv.len == 2
 	assert test_inter.methods_recv[1] == 'trigger'
 	assert test_inter.messages.len == 3

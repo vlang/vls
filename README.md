@@ -1,7 +1,7 @@
 > ## ⚠️ Warning (Please read this first) ⚠️
-> What you're seeing is the developmental branch of the V Language server. This means that it may not be guaranteed to work reliably on your system.
+> VLS is early software. It may not be guaranteed to work reliably on your system.
 >
-> If you are experiencing problems, please consider [filing a bug report](#error-reporting).
+> If you are experiencing problems, please [report the issue](https://github.com/vlang/vls/issues/new).
 
 # V Language Server
 [![CI](https://github.com/vlang/vls/actions/workflows/ci.yml/badge.svg)](https://github.com/vlang/vls/actions/workflows/ci.yml)
@@ -96,19 +96,20 @@ If you have VLS downloaded in a custom directory, you need to input the absolute
 
 ## Sublime Text (3 and 4)
 For Sublime Text, please install the [LSP extension](https://packagecontrol.io/packages/LSP) via [Package Control](https://packagecontrol.io). Afterwards, open the command palette, select `Preferences: LSP Settings`, and add the following configuration:
-```json
+```jsonc
 {
     "clients": {
         "vls": {
             "enabled": true,
-            "command": ["<vls-dir>/vls"],
+            "command": ["v", "ls", "--socket"], // or ["<path-to-vls>", "--socket"] if you downloaded / compiled it manually
+            "tcp_port": 5007,
             "selector": "source.v"
         }
     }
 }
 ```
 
-If you cloned the repository and compiled it from source, the executable will be in the `vls` root directory. So make sure to set the `command` array to `vls/bin/vls` or `vls/bin/vls.exe` (for Windows).
+Be sure to install the [Sublime V Plugin](https://github.com/elliotchance/vlang-sublime) first in order for the language server to start properly.
 
 ## Vim
 For Vim, please install [vim-lsp](https://github.com/prabirshrestha/vim-lsp) and [vim-lsp-settings](https://github.com/mattn/vim-lsp-settings). Afterwards, open any `.v` file, and execute `:LspInstallServer`.

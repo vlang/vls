@@ -9,6 +9,12 @@ enum Color {
   alpha = 1
   purple = 1
 }
+
+mut foo := 1
+foo = Color.red
+
+mut foo2 := Color.blue
+foo2 = 1
 ---
 
 (error "enum cannot be empty" [0,5]-[0,10])
@@ -16,4 +22,5 @@ enum Color {
 (error "field name `green` duplicate" [5,2]-[5,7])
 (error "enum value overflows" [7,2]-[7,5])
 (error "enum value `1` already exists" [9,11]-[9,12])
-
+(error "cannot assign to `foo`: expected `int`, not `Color`" [13,0]-[13,15])
+(error "cannot assign to `foo2`: expected `Color`, not `int`" [16,0]-[16,8])

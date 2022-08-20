@@ -4,6 +4,7 @@ import json
 import jsonrpc
 import jsonrpc.server_test_utils
 import os
+import io
 import lsp
 import benchmark
 import v.util.diff
@@ -35,7 +36,12 @@ pub mut:
 pub fn (mut t Tester) initialize() ?TestFilesIterator {
 	t.client.send<lsp.InitializeParams, lsp.InitializeResult>('initialize', lsp.InitializeParams{
 		root_uri: lsp.document_uri_from_path(os.join_path(t.test_files_dir, t.folder_name))
-	}) ?
+	}) or {
+		if err is io.Eof {
+			return none
+		}
+		return err
+	}
 
 	files := load_test_file_paths(t.test_files_dir, t.folder_name) ?
 	t.bench.set_total_expected_steps(files.len)

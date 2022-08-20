@@ -10,6 +10,14 @@ fn main() {
     chn := chan Boo{}
 }
 
+struct Node {
+    child &Node
+}
+
+fn return_node() Node {
+    return Node{}
+}
+
 ---
 
 (error "cannot initialize sum type array without default value" [3,15]-[3,24])
@@ -17,3 +25,4 @@ fn main() {
 (error "unknown type `Uri`" [6,14]-[6,17])
 (error "unknown type `Baz`" [7,22]-[7,25])
 (error "unknown type `Boo`" [9,16]-[9,19])
+(error "reference field `Node.child` must be initialized" [17,11]-[17,17])

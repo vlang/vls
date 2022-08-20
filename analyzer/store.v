@@ -445,6 +445,9 @@ pub fn symbol_name_from_node(node ast.Node, src_text tree_sitter.SourceText) (Sy
 			}
 			return SymbolKind.variadic, module_name, '...' + symbol_name
 		}
+		.multi_return_type {
+			return SymbolKind.multi_return, '', node.text(src_text)
+		}
 		else {
 			// type_identifier should go here
 			return SymbolKind.placeholder, module_name, node.text(src_text)
@@ -525,6 +528,17 @@ pub fn (mut store Store) find_symbol_by_type_node(file_path string, node ast.Nod
 					} else {
 						// TODO:
 						return error('empty ref sym')
+					}
+				}
+			}
+			.multi_return {
+				types_len := node.named_child_count()
+				new_sym.children_syms = []&Symbol{cap: int(types_len)}
+				for i in u32(0) .. types_len {
+					type_node := node.named_child(i) or { continue }
+					mut type_sym := store.find_symbol_by_type_node(file_path, type_node, src_text) or { continue }
+					if !type_sym.is_void() {
+						new_sym.children_syms << type_sym
 					}
 				}
 			}
@@ -768,8 +782,25 @@ pub fn (mut ss Store) infer_value_type_from_node(file_path string, node ast.Node
 			type_name = '[]int'
 		}
 		.array {
-			if child_type_node := node.child(1) {
-				type_name = '[]' + ss.infer_value_type_from_node(file_path, child_type_node, src_text).name
+			if child_type_node := node.named_child(0) {
+				inferred_value_sym := ss.infer_value_type_from_node(file_path, child_type_node, src_text)
+				type_name = '[]' + inferred_value_sym.name
+				return ss.find_symbol(file_path, '', type_name) or {
+					mut new_array_sym := &Symbol{
+						name: type_name
+						is_top_level: true
+						file_path: os.join_path(ss.get_module_path(file_path, ''), 'placeholder.vv')
+						file_version: 0
+						kind: .array_
+						children_syms: [inferred_value_sym]
+					}
+
+					ss.register_symbol(mut new_array_sym) or {
+						return void_sym
+					}
+
+					return new_array_sym
+				}
 			}
 		}
 		.binary_expression {
@@ -850,6 +881,28 @@ pub fn (mut ss Store) infer_value_type_from_node(file_path string, node ast.Node
 					return ss.infer_value_type_from_node(file_path, first_node, src_text)
 				}
 			}
+
+			return void_sym
+		}
+		.index_expression {
+			// TODO: transfer this to semantic analyzer
+			if operand_node := node.child_by_field_name('operand') {
+				operand_sym := ss.infer_value_type_from_node(file_path, operand_node, src_text)
+				if operand_sym.is_void() {
+					return void_sym
+				}
+
+				if index_node := node.child_by_field_name('index') {
+					index_sym := ss.infer_value_type_from_node(file_path, index_node, src_text)
+					if index_sym.name != 'int' {
+						return void_sym
+					}
+
+					return operand_sym.children_syms[0]
+				}
+			}
+
+			return void_sym
 		}
 		else {
 			return ss.infer_symbol_from_node(file_path, node, src_text) or { void_sym }
