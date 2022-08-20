@@ -8,38 +8,6 @@
 
 V Language Server (also known as "VLS") is a LSP v3.15-compatible language server for [the V programming language](https://github.com/vlang/v).
 
-## What is a language server?
-A language server is a software that understands the code provided by the user and provides information to supported text editors and IDEs. Think of it as a compiler that does not emit an executable but a format that your text editor can use in order for you to work on a project better and faster.
-
-Some of the commonly used features such as autocompletion / IntelliSense, go to definition, and diagnostics are directly handled by the language server itself and not by the dedicated language extensions.
-
-## What does it support?
-Currently, VLS supports the following language features:
-
-| **Feature Name** | **Supported?** | **Notes** |
-|------------------|----------------|-----------|
-| Diagnostics | ✅ | Via `v -check` |
-| Completion | ✅ | Needs polish |
-| Hover | ✅ | |
-| Signature Help | ✅ | |
-| Go to Declaration | ❌ | |
-| Go to Definition | ✅ | |
-| Go to Implementation | ✅ | Limited to interfaces for now. |
-| References | ❌ | |
-| Document Highlight | ❌ | |
-| Code Lens | ✅ | Stub implementation |
-| Code Action | ❌ | |
-| Document Symbol / Outline | ✅ | |
-| Workspace Symbols | ✅ | Limited to opened documents. |
-| Document Link | ✅ | Stub implementation |
-| Formatting | ✅| Via `v fmt` |
-| Range Formatting | ❌ | |
-| Type Formatting | ❌ | |
-| Rename | ❌ | |
-| Folding Range | ✅ | |
-
-For a full list of features/methods VLS supports, see [CAPABILITIES.md](CAPABILITIES.md).
-
 # Installation
 You can get the V language server on a variety of methods.
 
@@ -58,17 +26,14 @@ The official [V VSCode extension](https://github.com/vlang/vscode-vlang) provide
 If you want to use an existing copy of VLS, please refer to this [guide](#vscode-vscodium-and-other-derivatives).
 
 ## Build from Source
-> **NOTE**: TCC, the default compiler shipped with V, is not recommended ATM due to
-> some issues in the Tree Sitter's output.
+> **NOTE**: TCC, the default compiler shipped with V, is not recommended ATM due to some issues in the Tree Sitter's output.
 
 To build the language server from source, you need to have the following:
 - GCC/Clang (Latest),
 - [Git](https://git-scm.com/download)
 - [V](https://github.com/vlang/v) (0.2.2 and later).
 
-> **NOTE**: If you are downloading V from [Homebrew](https://brew.sh) 
-> and other community-maintained packages, please do `v up` first
-> before proceeding.
+> **NOTE**: If you are downloading V from [Homebrew](https://brew.sh) and other community-maintained packages, please do `v up` first before proceeding.
 
 Afterwards, open your operating system's terminal and execute the following:
 ```
@@ -127,6 +92,39 @@ Bugs that are not crashes however can still generate reports by passing the `--g
 
 ## Logging
 VLS provides a log file (`${workspacePath}/vls.log`) for debugging the language server incoming requests and outgoing responses / notifications. By default, this can only be saved and accessed on server crash. To save the log on every exit, pass the `--debug` flag to the language server CLI.
+
+# Frequently Asked Questions
+## What is a language server?
+A language server is a software that understands the code provided by the user and provides information to supported text editors and IDEs. Think of it as a compiler that does not emit an executable but a format that your text editor can use in order for you to work on a project better and faster.
+
+Some of the commonly used features such as autocompletion / IntelliSense, go to definition, and diagnostics are directly handled by the language server itself and not by the dedicated language extensions.
+
+## What does it support?
+Currently, VLS supports the following language features:
+
+| **Feature Name** | **Supported?** | **Notes** |
+|------------------|----------------|-----------|
+| Diagnostics | ✅ | Via `v -check` |
+| Completion | ✅ | Needs polish |
+| Hover | ✅ | |
+| Signature Help | ✅ | |
+| Go to Declaration | ❌ | |
+| Go to Definition | ✅ | |
+| Go to Implementation | ✅ | Limited to interfaces for now. |
+| References | ❌ | |
+| Document Highlight | ❌ | |
+| Code Lens | ✅ | Stub implementation |
+| Code Action | ❌ | |
+| Document Symbol / Outline | ✅ | |
+| Workspace Symbols | ✅ | Limited to opened documents. |
+| Document Link | ✅ | Stub implementation |
+| Formatting | ✅| Via `v fmt` |
+| Range Formatting | ❌ | |
+| Type Formatting | ❌ | |
+| Rename | ❌ | |
+| Folding Range | ✅ | |
+
+For a full list of features/methods VLS supports, see [CAPABILITIES.md](CAPABILITIES.md).
 
 # Contributing
 ## Submitting a pull request
