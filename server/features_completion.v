@@ -169,10 +169,15 @@ fn (mut builder CompletionBuilder) build_suggestions_from_expr(node ast.Node) {
 						}
 					}
 				}
+
 				if got_sym := builder.store.infer_symbol_from_node(selected_node, builder.src) {
 					builder.show_mut_only = builder.parent_node.type_name == .block
 						&& got_sym.is_mutable()
-					builder.build_suggestions_from_sym(got_sym.return_sym, true)
+					if got_sym.kind == .enum_ || (got_sym.kind == .field && got_sym.parent_sym.kind == .enum_) {
+						builder.build_suggestions_from_sym(got_sym, is_selector: true, filter_kinds: [.field])
+					} else {
+						builder.build_suggestions_from_sym(got_sym.return_sym, is_selector: true)
+					}
 				} else if builder.store.is_module(text) {
 					builder.build_suggestions_from_module(text)
 				} else if text == 'C.' || text == 'JS.' {
@@ -196,7 +201,10 @@ fn (mut builder CompletionBuilder) build_suggestions_from_expr(node ast.Node) {
 				builder.build_suggestions_from_expr(closest_element_node)
 			} else if parent_node := node.parent() {
 				if got_sym := builder.store.infer_symbol_from_node(parent_node, builder.src) {
-					builder.build_suggestions_from_sym(got_sym, false)
+					builder.build_suggestions_from_sym(got_sym, BuildSuggestionsFromSymParams{
+						filter_kinds: if got_sym.kind == .enum_ { [.field] } else { []analyzer.SymbolKind{} }
+						prefix: if got_sym.kind in [.enum_, .field] { '.' } else { '' }
+					})
 				}
 			}
 		}
@@ -206,7 +214,10 @@ fn (mut builder CompletionBuilder) build_suggestions_from_expr(node ast.Node) {
 				builder.filter_return_type = got_sym.return_sym
 
 				if got_sym.return_sym.kind != .struct_ {
-					builder.build_suggestions_from_sym(got_sym.return_sym, false)
+					builder.build_suggestions_from_sym(got_sym.return_sym, BuildSuggestionsFromSymParams{
+						filter_kinds: if got_sym.return_sym.kind == .enum_ { [.field] } else { []analyzer.SymbolKind{} }
+						prefix: if got_sym.return_sym.kind in [.enum_, .field] { '.' } else { '' }
+					})
 				}
 			}
 		}
@@ -220,17 +231,36 @@ fn (mut builder CompletionBuilder) build_suggestions_from_expr(node ast.Node) {
 	}
 }
 
-fn (mut builder CompletionBuilder) build_suggestions_from_sym(sym &analyzer.Symbol, is_selector bool) {
+[params]
+struct BuildSuggestionsFromSymParams {
+	is_selector  bool
+	filter_kinds []analyzer.SymbolKind // for enums
+	from_value   bool
+	prefix       string
+}
+
+fn (mut builder CompletionBuilder) build_suggestions_from_sym(sym &analyzer.Symbol, params BuildSuggestionsFromSymParams) {
 	if isnil(sym) || sym.is_void() {
 		return
 	}
 
+	if sym.kind == .field && sym.parent_sym.kind == .enum_ && sym.parent_sym == sym.return_sym {
+		builder.build_suggestions_from_sym(sym.return_sym, BuildSuggestionsFromSymParams{
+			...params
+			filter_kinds: [.function]
+			from_value: true
+		})
+		return
+	}
+
 	for child_sym in sym.children_syms {
-		if is_selector {
-			if (sym.kind in [.enum_, .struct_] || sym.kind in analyzer.container_symbol_kinds)
+		if params.is_selector {
+			if params.filter_kinds.len != 0 && child_sym.kind !in params.filter_kinds {
+				continue
+			} else if (sym.kind in [.enum_, .struct_] || sym.kind in analyzer.container_symbol_kinds)
 				&& child_sym.kind !in [.field, .function, .embedded_field] {
 				continue
-			} 
+			}
 
 			if os.dir(child_sym.file_path) != builder.store.cur_dir
 				&& int(child_sym.access) < int(analyzer.SymbolAccess.public) {
@@ -248,7 +278,7 @@ fn (mut builder CompletionBuilder) build_suggestions_from_sym(sym &analyzer.Symb
 				builder.build_suggestions_from_sym(child_sym.return_sym, is_selector)
 			}
 
-			if existing_completion_item := symbol_to_completion_item(child_sym, true) {
+			if existing_completion_item := symbol_to_completion_item(child_sym, with_snippet: true, prefix: params.prefix) {
 				builder.add(existing_completion_item)
 			}
 		} else if child_sym.kind == .field && sym.kind == .struct_ {
@@ -259,8 +289,8 @@ fn (mut builder CompletionBuilder) build_suggestions_from_sym(sym &analyzer.Symb
 				insert_text_format: .snippet
 				detail: child_sym.gen_str()
 			})
-		} else if child_sym.kind == .field && sym.kind == .enum_ {
-			builder.add(symbol_to_completion_item(child_sym, true) or { continue })
+		} else if (child_sym.kind == .field || (child_sym.kind == .function && params.from_value)) && sym.kind == .enum_ {
+			builder.add(symbol_to_completion_item(child_sym, with_snippet: true, prefix: params.prefix) or { continue })
 		}
 	}
 
@@ -270,7 +300,7 @@ fn (mut builder CompletionBuilder) build_suggestions_from_sym(sym &analyzer.Symb
 				base_sym := builder.store.find_symbol(base_sym_loc.module_name, base_sym_loc.symbol_name) or {
 					continue
 				}
-				builder.build_suggestions_from_sym(base_sym, is_selector)
+				builder.build_suggestions_from_sym(base_sym, params)
 			}
 		}
 	}
@@ -310,7 +340,7 @@ fn (mut builder CompletionBuilder) build_suggestions_from_binded_symbols(lang an
 		sym_name := sym_loc_entry.for_sym_name
 		sym := builder.store.symbols[module_path].get(sym_name) or { continue }
 
-		if existing_completion_item := symbol_to_completion_item(sym, with_snippet) {
+		if existing_completion_item := symbol_to_completion_item(sym, with_snippet: with_snippet) {
 			builder.add(lsp.CompletionItem{
 				...existing_completion_item
 				insert_text: existing_completion_item.insert_text[lang_len..]
@@ -331,10 +361,23 @@ fn (mut builder CompletionBuilder) build_suggestions_from_module(name string, in
 			|| (builder.filter_sym_kinds.len != 0 && imp_sym.kind !in builder.filter_sym_kinds) {
 			continue
 		}
+
 		if int(imp_sym.access) >= int(analyzer.SymbolAccess.public) {
-			builder.add(symbol_to_completion_item(imp_sym, builder.ctx.trigger_character == '.') or {
+			builder.add(symbol_to_completion_item(imp_sym, with_snippet: builder.ctx.trigger_character == '.') or {
 				continue
 			})
+
+			if imp_sym.kind == .enum_ && imp_sym.children_syms.len <= 10 {
+				for child_sym in imp_sym.children_syms {
+					if child_sym.kind == .function {
+						continue
+					}
+
+					builder.add(symbol_to_completion_item(child_sym, with_snippet: false) or {
+						continue
+					})
+				}
+			}
 		}
 	}
 }
@@ -426,7 +469,7 @@ fn (mut builder CompletionBuilder) build_global_suggestions() {
 
 			// is_type_decl := false
 			is_type_decl := builder.parent_node.type_name == .type_declaration
-			builder.add(symbol_to_completion_item(sym, !is_type_decl) or { continue })
+			builder.add(symbol_to_completion_item(sym, with_snippet: !is_type_decl) or { continue })
 		}
 	}
 
@@ -443,7 +486,13 @@ fn (mut builder CompletionBuilder) build_global_suggestions() {
 	}
 }
 
-fn symbol_to_completion_item(sym &analyzer.Symbol, with_snippet bool) ?lsp.CompletionItem {
+[config]
+struct SymbolToCompletionItemParams {
+	with_snippet bool
+	prefix       string
+}
+
+fn symbol_to_completion_item(sym &analyzer.Symbol, params SymbolToCompletionItemParams) ?lsp.CompletionItem {
 	mut kind := lsp.CompletionItemKind.text
 	mut name := sym.name
 	mut insert_text_format := lsp.InsertTextFormat.plain_text
@@ -465,7 +514,7 @@ fn symbol_to_completion_item(sym &analyzer.Symbol, with_snippet bool) ?lsp.Compl
 				lsp.CompletionItemKind.function
 			}
 			insert_text.write_string(name)
-			if with_snippet {
+			if params.with_snippet {
 				insert_text.write_byte(`(`)
 				for i in 0 .. sym.children_syms.len {
 					insert_text.write_byte(`$`)
@@ -482,7 +531,7 @@ fn symbol_to_completion_item(sym &analyzer.Symbol, with_snippet bool) ?lsp.Compl
 		.struct_ {
 			kind = .struct_
 			insert_text.write_string(name)
-			if with_snippet {
+			if params.with_snippet {
 				insert_text.write_byte(`{`)
 				mut insert_count := 1
 				for i, child_sym in sym.children_syms {
@@ -498,17 +547,25 @@ fn symbol_to_completion_item(sym &analyzer.Symbol, with_snippet bool) ?lsp.Compl
 				insert_text.write_byte(`}`)
 			}
 		}
-		.field {
+		.field, .embedded_field {
 			match sym.parent_sym.kind {
 				.enum_ {
 					kind = .enum_member
-					insert_text.write_byte(`.`)
-					insert_text.write_string(sym.name)
+					if params.with_snippet {
+						insert_text.write_string(params.prefix)
+						insert_text.write_string(sym.name)
+					} else {
+						insert_text.write_string(sym.parent_sym.name)
+						insert_text.write_byte(`.`)
+						insert_text.write_string(sym.name)
+					}
 					name = insert_text.after(0)
 				}
 				.struct_ {
 					kind = .property
-					insert_text.write_string(name)
+					insert_text.write_string(params.prefix)
+					insert_text.write_string(sym.name)
+					name = insert_text.after(0)
 				}
 				else {
 					return none
@@ -517,6 +574,10 @@ fn symbol_to_completion_item(sym &analyzer.Symbol, with_snippet bool) ?lsp.Compl
 		}
 		.interface_ {
 			kind = .interface_
+			insert_text.write_string(name)
+		}
+		.enum_ {
+			kind = .enum_
 			insert_text.write_string(name)
 		}
 		else {
