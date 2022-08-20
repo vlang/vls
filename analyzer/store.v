@@ -884,6 +884,33 @@ pub fn (mut ss Store) infer_value_type_from_node(file_path string, node ast.Node
 
 			return void_sym
 		}
+		.slice_expression {
+			// TODO: transfer this to semantic analyzer
+			if operand_node := node.child_by_field_name('operand') {
+				operand_sym := ss.infer_value_type_from_node(file_path, operand_node, src_text)
+				if operand_sym.is_void() || (operand_sym.name != 'string' && operand_sym.kind != .array_) {
+					return void_sym
+				}
+
+				if start_node := node.child_by_field_name('start') {
+					start_sym := ss.infer_value_type_from_node(file_path, start_node, src_text)
+					if start_sym.name != 'int' {
+						return void_sym
+					}
+
+					if end_node := node.child_by_field_name('end') {
+						end_sym := ss.infer_value_type_from_node(file_path, end_node, src_text)
+						if end_sym.name != 'int' {
+							return void_sym
+						}
+
+						return operand_sym
+					}
+				}
+			}
+
+			return void_sym
+		}
 		.index_expression {
 			// TODO: transfer this to semantic analyzer
 			if operand_node := node.child_by_field_name('operand') {
