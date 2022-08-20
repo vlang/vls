@@ -31,6 +31,10 @@ const completion_inputs = {
 		context: lsp.CompletionContext{.trigger_character, '.'}
 		position: lsp.Position{15, 15}
 	}
+	'enum_member.vv':                       lsp.CompletionParams{
+		context: lsp.CompletionContext{.trigger_character, '.'}
+		position: lsp.Position{5, 20}
+	}
 	'enum_method.vv':                       lsp.CompletionParams{
 		context: lsp.CompletionContext{.trigger_character, '.'}
 		position: lsp.Position{5, 27}
@@ -199,6 +203,20 @@ const completion_results = {
 			detail: 'ThreeDPoint.z int'
 			insert_text: 'z'
 		},
+	]
+	'enum_member.vv':                       [
+		lsp.CompletionItem{
+			label: 'shift'
+			kind: .enum_member
+			detail: 'pub KeyCode.shift KeyCode'
+			insert_text: 'shift'
+		},
+		lsp.CompletionItem{
+			label: 'control'
+			kind: .enum_member
+			detail: 'pub KeyCode.control KeyCode'
+			insert_text: 'control'
+		}
 	]
 	'enum_method.vv':                       [
 		lsp.CompletionItem{
