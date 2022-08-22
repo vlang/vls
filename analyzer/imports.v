@@ -91,18 +91,15 @@ pub fn (mut imp Importer) inject_paths_of_new_imports(mut new_imports []&Import,
 		}
 
 		// module.submod -> ['module', 'submod']
-		mod_name_arr := new_import.absolute_module_name.split('.')
-		for path in import_path_iter {
-			mod_dir := os.join_path(path, ...mod_name_arr)
+		import_path_iter.mod_names = new_import.absolute_module_name.split('.')
 
+		for mod_dir in import_path_iter {
 			// if the directory is already present in the
 			// dependency tree, inject it directly
 			if imp.context.store.dependency_tree.has(mod_dir) {
 				new_import.set_path(mod_dir)
 				break
-			}
-
-			if !os.exists(mod_dir) {
+			} else if !os.exists(mod_dir) {
 				continue
 			}
 
