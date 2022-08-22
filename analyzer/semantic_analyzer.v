@@ -86,7 +86,7 @@ fn (mut an SemanticAnalyzer) format_report(report Report) string {
 		final_report := Report{
 			...report
 			message: errors.format(unsafe { an.format_report_data }, report.message, ...report.data.params)
-			data: unsafe { nil }
+			data: 0
 		}
 
 		an.context.store.report(final_report)
