@@ -72,6 +72,7 @@ pub fn (mut imp Importer) scan_imports(tree &ast.Tree) []&Import {
 
 // inject_paths_of_new_imports resolves and injects the path to the Import instance
 pub fn (mut imp Importer) inject_paths_of_new_imports(mut new_imports []&Import, lookup_paths ...string) {
+	dir := imp.context.file_dir
 	mut project := imp.context.store.dependency_tree.get_node(dir) or { imp.context.store.dependency_tree.add(dir) }
 
 	// Custom iterator for looping over paths without
@@ -178,7 +179,7 @@ pub fn (mut imp Importer) import_modules(mut imports []&Import) {
 			context := imp.context.store.with(file_path: full_path, text: Runes(content_str.runes()))
 
 			// Import module but from different lookup oath other than the project
-			modules_from_dir := os.join_path(dir, 'modules')
+			modules_from_dir := os.join_path(context.file_dir, 'modules')
 			import_modules_from_tree(context, tree_from_import, modules_from_dir,
 				imp.context.file_dir, modules_from_old_dir)
 			imported++
