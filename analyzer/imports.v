@@ -70,6 +70,45 @@ pub fn (mut imp Importer) scan_imports(tree &ast.Tree) []&Import {
 	return newly_imported_modules
 }
 
+fn (mut imp Importer) is_import_path_valid(path string, mod_names ...string) (bool, bool) {
+	mod_dir := os.join_path(path, ...mod_names)
+	// if the directory is already present in the
+	// dependency tree, inject it directly
+	if imp.context.store.dependency_tree.has(mod_dir) {
+		return true, true
+	} else if !os.exists(mod_dir) {
+		return false, false
+	}
+
+	mut has_v_files := false
+
+	// files is just for checking so it
+	// is not used by the code below it
+	if dir_files := os.ls(mod_dir) {
+		for file in dir_files {
+			if os.file_ext(file) == v_ext {
+				has_v_files = true
+				break
+			}
+		}
+
+		if !has_v_files {
+			// directory exists so is valid
+			// but may have the possibility that the
+			// source is stored in `src` so the
+			// first return is set to false
+			return false, true
+		}
+	}
+
+	if !has_v_files {
+		return false, false
+	}
+
+	imp.context.store.dependency_tree.add(mod_dir)
+	return true, true
+}
+
 // inject_paths_of_new_imports resolves and injects the path to the Import instance
 pub fn (mut imp Importer) inject_paths_of_new_imports(mut new_imports []&Import, lookup_paths ...string) {
 	dir := imp.context.file_dir
@@ -91,42 +130,25 @@ pub fn (mut imp Importer) inject_paths_of_new_imports(mut new_imports []&Import,
 		}
 
 		// module.submod -> ['module', 'submod']
-		import_path_iter.mod_names = new_import.absolute_module_name.split('.')
+		mod_names := new_import.absolute_module_name.split('.')
 
-		for mod_dir in import_path_iter {
-			// if the directory is already present in the
-			// dependency tree, inject it directly
-			if imp.context.store.dependency_tree.has(mod_dir) {
-				new_import.set_path(mod_dir)
-				break
-			} else if !os.exists(mod_dir) {
+		for path in import_path_iter {
+			mut has_v_files, mut is_valid := imp.is_import_path_valid(path, ...mod_names)
+			if is_valid {
+				new_import.set_path(os.join_path(path, ...mod_names))
+			} else if is_valid && !has_v_files {
+				mod_names_with_src := mod_names.map(os.join_path(it, 'src'))
+				has_v_files, is_valid = imp.is_import_path_valid(path, ...mod_names_with_src)
+				if !has_v_files {
+					continue
+				}
+
+				new_import.set_path(os.join_path(path, ...mod_names_with_src))
+				eprintln(new_import.path)
+			} else {
 				continue
 			}
-
-			mut has_v_files := false
-
-			// files is just for checking so it
-			// is not used by the code below it
-			{
-				mut files := os.ls(mod_dir) or { continue }
-
-				// search for files end with v and free
-				// the contents of the array at the same time
-				for j := 0; files.len != 0; {
-					if !has_v_files {
-						file_ext := os.file_ext(files[j])
-						if file_ext == v_ext {
-							has_v_files = true
-						}
-					}
-					files.delete(j)
-				}
-			}
-			if has_v_files {
-				new_import.set_path(mod_dir)
-				imp.context.store.dependency_tree.add(mod_dir)
-				break
-			}
+			break
 		}
 
 		// report the unresolved import
@@ -164,6 +186,8 @@ pub fn (mut imp Importer) import_modules(mut imports []&Import) {
 		}
 
 		file_paths := os.ls(new_import.path) or { continue }
+		eprintln(new_import)
+
 		mut imported := 0
 		for file_name in file_paths {
 			if !should_analyze_file(file_name) {
@@ -191,8 +215,6 @@ pub fn (mut imp Importer) import_modules(mut imports []&Import) {
 		if imported > 0 {
 			imports[i].imported = true
 		}
-
-		unsafe { file_paths.free() }
 	}
 }
 

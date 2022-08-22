@@ -116,9 +116,7 @@ struct ImportPathIterator {
 	lookup_paths          []string
 	fallback_lookup_paths []string
 mut:
-	mod_names             []string
 	idx         int
-	in_src      bool
 	in_start    bool = true
 	in_fallback bool
 }
@@ -126,18 +124,10 @@ mut:
 fn (mut iter ImportPathIterator) next() ?string {
 	if iter.in_start {
 		defer {
-			if iter.in_src {
-				iter.in_start = false
-			}
-			iter.in_src = !iter.in_src
+			iter.in_start = false
 		}
 
-		imp_start_path := os.join_path(iter.start_path, ...iter.mod_names)
-		return if iter.in_src {
-			os.join_path(imp_start_path, 'src')
-		} else {
-			imp_start_path
-		}
+		return iter.start_path
 	}
 
 	if !iter.in_fallback && iter.idx >= iter.lookup_paths.len {
@@ -150,19 +140,13 @@ fn (mut iter ImportPathIterator) next() ?string {
 	}
 
 	defer {
-		if iter.in_src {
-			iter.idx++
-		}
-		iter.in_src = !iter.in_src
+		iter.idx++
 	}
 
-	base_imp_path := if !iter.in_fallback { iter.lookup_paths[iter.idx] } else { iter.fallback_lookup_paths[iter.idx] }
-	imp_path := os.join_path(base_imp_path, ...iter.mod_names)
-
-	return if iter.in_src {
-		os.join_path(imp_path, 'src')
-	} else {
-		imp_path
+	return if !iter.in_fallback { 
+		iter.lookup_paths[iter.idx] 
+	} else { 
+		iter.fallback_lookup_paths[iter.idx] 
 	}
 }
 
