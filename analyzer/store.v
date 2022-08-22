@@ -979,8 +979,10 @@ pub fn (mut ss Store) delete_symbol_at_node(file_path string, root_node ast.Node
 				} else if node.type_name == .function_declaration {
 					// for methods
 					fn_sym := ss.infer_symbol_from_node(file_path, node, src) or { analyzer.void_sym }
-					if !fn_sym.is_void() {
-						mut parent_sym := unsafe { fn_sym.parent_sym.return_sym }
+
+					// delete the method if and only if method is not void (nor null)
+					if !fn_sym.is_void() && !fn_sym.parent_sym.is_void() {
+						mut parent_sym := unsafe { fn_sym.parent_sym }
 						child_idx := parent_sym.children_syms.index_by_row(file_path, node.start_point().row)
 						if child_idx != -1 {
 							parent_sym.children_syms.delete(child_idx)
