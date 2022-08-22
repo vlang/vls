@@ -1,0 +1,7 @@
+import def
+import def.ghi
+
+---
+
+(def "./def/src" [0,7]-[0,10])
+(ghi "./def/src/ghi/src" [1,7]-[1,14])
