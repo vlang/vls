@@ -1,8 +1,9 @@
 module an_test_utils
 
 import strings
-import analyzer { ScopeTree, Symbol, Collector, Report }
+import analyzer { ScopeTree, Symbol, Collector, Report, Import }
 // import tree_sitter
+import os
 
 // sexpr_str returns the S expression-like stringified
 // representation of the []Symbol.
@@ -124,5 +125,42 @@ pub fn sexpr_str_reporter(collector Collector) string {
 		writer.write_byte(` `)
 	}
 	sexpr_str_reports(collector.errors, mut writer)
+	return writer.str()
+}
+
+pub fn sexpr_str_import(file_path string, imp Import, mut writer strings.Builder) {
+	file_name := os.base(file_path)
+	writer.write_byte(`(`)
+	if file_name in imp.aliases {
+		writer.write_string(imp.aliases[file_name])
+	} else {
+		writer.write_string(imp.module_name)
+	}
+	writer.write_byte(` `)
+	writer.write_byte(`"`)
+	writer.write_string(imp.path)
+	writer.write_byte(`"`)
+	writer.write_byte(` `)
+	sexpr_str_write_tspoint(mut writer, imp.ranges[file_path].start_point)
+	writer.write_byte(`-`)
+	sexpr_str_write_tspoint(mut writer, imp.ranges[file_path].end_point)
+	writer.write_byte(`)`)
+}
+
+pub fn sexpr_str_imports(file_path string, imports []Import) string {
+	mut writer := strings.new_builder(200)
+
+	for i, imp in imports {
+		if file_path !in imp.ranges {
+			continue
+		}
+
+		sexpr_str_import(file_path, imp, mut writer)
+
+		if i < imports.len - 1 {
+			writer.write_byte(` `)
+		}
+	}
+
 	return writer.str()
 }

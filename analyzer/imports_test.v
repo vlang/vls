@@ -3,6 +3,11 @@ import tree_sitter
 import tree_sitter_v as v
 import ast
 import os
+import v.util.diff
+import test_utils
+import benchmark
+import analyzer.an_test_utils
+import term
 
 const (
 	sample_content = '
@@ -167,4 +172,63 @@ fn test_import_modules_with_edits() ? {
 	// 	eprintln('Checking: $name')
 	// 	assert (name in store.imports) == true
 	// }
+}
+
+fn test_other_import_cases() ? {
+	diff_cmd := diff.find_working_diff_command() or { '' }
+	mut p := ast.new_parser()
+	mut bench := benchmark.new_benchmark()
+	mut store := &Store{
+		reporter: &Collector{}
+		default_import_paths: test_lookup_paths
+	}
+
+	test_files_dir := test_utils.get_test_files_path(@FILE)
+	test_files := test_utils.load_test_file_paths(test_files_dir, 'imports')?
+	bench.set_total_expected_steps(test_files.len)
+
+	for test_file_path in test_files {
+		bench.step()
+		test_name := os.base(test_file_path)
+		content := os.read_file(test_file_path) or {
+			bench.fail()
+			println(bench.step_message_fail('file $test_file_path is missing'))
+			continue
+		}
+
+		src, expected := test_utils.parse_test_file_content(content)
+		if src.len == 0 || content.len == 0 {
+			bench.fail()
+			eprintln(bench.step_message_fail('file $test_name has empty content'))
+			continue
+		}
+
+		println(bench.step_message('Testing $test_name'))
+		tree := p.parse_string(source: src)
+		mut context := store.with(file_path: test_file_path, text: Runes(src.runes()))
+		import_modules_from_tree(context, tree)
+
+		imports := store.imports[context.file_dir]
+		result := an_test_utils.sexpr_str_imports(context.file_path, imports).replace(') (', ')\n(').replace(test_lookup_paths[0], "\$VLIB").replace(context.file_dir, ".")
+		expected_trimmed := test_utils.newlines_to_spaces(expected).replace(') (', ')\n(')
+		
+		term.clear_previous_line()
+		
+		if result != expected_trimmed {
+			if diff_cmd.len != 0 {
+				bench.fail()
+				println(bench.step_message_fail(test_name))
+				println(diff.color_compare_strings(diff_cmd, 'vls_imports_test', expected_trimmed, result))
+			} else {
+				assert result == expected_trimmed
+			}
+		} else {
+			println(bench.step_message_ok(test_name))
+		}
+
+		store.cleanup_imports(test_file_path)
+		store.delete(os.dir(test_file_path))
+	}
+	assert bench.nfail == 0
+	bench.stop()
 }
