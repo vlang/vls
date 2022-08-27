@@ -81,6 +81,21 @@ pub fn (ss &Store) get_module_path_opt(file_path string, module_name string) ?st
 	return error('Not found')
 }
 
+pub fn (ss &Store) get_module_path_from_sym(file_path string, symbol_name string) ?string {
+	file_name := os.base(file_path)
+	if import_lists := ss.imports[os.dir(file_path)] {
+		for imp in import_lists {
+			if file_name !in imp.symbols || symbol_name !in imp.symbols[file_name] {
+				continue
+			}
+
+			return imp.path
+		}
+	}
+
+	return error('Not found')
+}
+
 // get_module_path returns the path of the import/module based
 // on the given module name. If nothing found, it will return
 // the current directory instead.
@@ -113,6 +128,14 @@ pub fn (ss &Store) find_symbol(file_path string, module_name string, name string
 		idx_from_binded := ss.symbols[binded_module_path].index(name)
 		if idx_from_binded != -1 {
 			return ss.symbols[binded_module_path][idx_from_binded]
+		}
+	}
+
+	// Find symbol if it selectively imported from module
+	if mod_path := ss.get_module_path_from_sym(file_path, name) {
+		idx_from_selective := ss.symbols[mod_path].index(name)
+		if idx_from_selective != -1 {
+			return ss.symbols[mod_path][idx_from_selective]
 		}
 	}
 

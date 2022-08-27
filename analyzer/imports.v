@@ -52,12 +52,20 @@ pub fn (mut imp Importer) scan_imports(tree &ast.Tree) []int {
 			}
 		} else if import_symbols_node := node.child_by_field_name('symbols') {
 			symbols_len := import_symbols_node.named_child_count()
+			mut found := 0
 			mut symbols := []string{len: int(symbols_len)}
 			for j := u32(0); j < symbols_len; j++ {
-				symbols[j] = import_symbols_node.named_child(j) or { continue }.text(imp.context.text)
+				sym_name := import_symbols_node.named_child(j) or { continue }.text(imp.context.text)
+				if sym_name.len == 0 {
+					continue
+				}
+				symbols[j] = sym_name
+				found++
 			}
 
-			imp_module.set_symbols(imp.context.file_name, ...symbols)
+			if found != 0 {
+				imp_module.set_symbols(imp.context.file_name, ...symbols)
+			}
 		}
 
 		if !already_imported {
@@ -364,6 +372,10 @@ pub fn (mut imp Import) untrack_file(file_name string) {
 
 // set_symbols records/changes the imported symbols on a specific file
 pub fn (mut imp Import) set_symbols(file_name string, symbols ...string) {
+	if symbols.len == 0 {
+		return
+	}
+
 	if file_name in imp.symbols {
 		for i := 0; imp.symbols[file_name].len != 0; {
 			// unsafe { imp.symbols[file_name][i].free() }
