@@ -19,7 +19,7 @@ pub fn setup_builtin(mut store Store, builtin_path string) {
 
 	store.register_auto_import(builtin_import, '')
 	register_builtin_symbols(mut store, builtin_import)
-	importer.import_modules(mut importer.context.store.imports[importer.context.file_dir], [builtin_idx])
+	importer.import_modules(mut store.imports[importer.context.file_dir], [builtin_idx])
 	register_none(mut store, builtin_import)
 }
 
