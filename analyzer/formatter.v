@@ -203,7 +203,7 @@ pub fn (mut fmt SymbolFormatter) format_with_builder(sym &Symbol, mut builder st
 			}
 		}
 		.variable, .field {
-			fmt.write_access(sym, mut builder, sym)
+			fmt.write_access(sym, mut builder, cfg)
 
 			if sym.kind == .field {
 				fmt.format_with_builder(sym.parent_sym, mut builder, child_types_format_cfg)
@@ -218,7 +218,6 @@ pub fn (mut fmt SymbolFormatter) format_with_builder(sym &Symbol, mut builder st
 			if !sym.return_sym.is_void() {
 				builder.write_byte(` `)
 
-				fmt.format_with_builder(sym, mut builder, child_types_format_cfg)
 				if sym.return_sym.kind == .function_type {
 					fmt.format_with_builder(sym.return_sym, mut builder, cfg)
 				} else {
