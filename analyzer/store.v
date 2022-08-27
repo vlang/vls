@@ -531,7 +531,7 @@ pub fn (mut store Store) find_symbol_by_type_node(file_path string, node ast.Nod
 					}
 				}
 			}
-			.multi_return {
+			.multi_return, .variadic {
 				types_len := node.named_child_count()
 				new_sym.children_syms = []&Symbol{cap: int(types_len)}
 				for i in u32(0) .. types_len {
