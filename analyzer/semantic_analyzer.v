@@ -32,6 +32,7 @@ pub struct SemanticAnalyzer {
 pub mut:
 	context    AnalyzerContext
 	parent_sym &Symbol = analyzer.void_sym
+	formatter  SymbolFormatter [required]
 	// skips the local scopes and registers only
 	// the top-level ones regardless of its
 	// visibility
@@ -45,6 +46,7 @@ fn (an &SemanticAnalyzer) in_function() bool {
 fn (an &SemanticAnalyzer) with_symbol(sym &Symbol) &SemanticAnalyzer {
 	return &SemanticAnalyzer{
 		context: an.context
+		formatter: an.formatter
 		parent_sym: sym
 		is_import: an.is_import
 	}
@@ -68,11 +70,11 @@ fn (mut an SemanticAnalyzer) report(node ast.Node, code_or_msg string, data ...e
 	}
 }
 
-fn (an &SemanticAnalyzer) format_report_data(d errors.ErrorData) string {
+fn (mut an SemanticAnalyzer) format_report_data(d errors.ErrorData) string {
 	if d is string {
 		return *d
 	} else if d is Symbol {
-		return d.gen_str(with_access: false, with_kind: false, with_contents: false).replace_each(['int_literal', 'int literal', 'float_literal', 'float literal'])
+		return an.formatter.format(d, analyzer.child_types_format_cfg)
 	} else if d is []string {
 		return d.join(', ')
 	} else {
@@ -634,8 +636,8 @@ pub fn (mut an SemanticAnalyzer) type_initializer(node ast.Node) ?&Symbol {
 			typ_sym := an.context.find_symbol_by_type_node(type_node)?
 			if typ_sym.kind == .typedef && typ_sym.parent_sym.kind == .map_ {
 				return an.report(node, errors.typedef_map_init_error, {
-					'type_name': typ_sym.gen_str(with_kind: false, with_contents: false, with_access: false)
-					'map_type': typ_sym.parent_sym.gen_str()
+					'type_name': an.formatter.format(typ_sym, analyzer.child_types_format_cfg)
+					'map_type': an.formatter.format(typ_sym.parent_sym)
 				})
 			}
 
@@ -757,7 +759,7 @@ pub fn (mut an SemanticAnalyzer) selector_expression(node ast.Node) ?&Symbol {
 
 		if got_child_sym.is_void() && method_or_field_sym.is_void() {
 			err_code := if in_call_expr { errors.unknown_method_or_field_error } else { errors.unknown_field_error }
-			return an.report(node, err_code, root_sym.gen_str(with_kind: false, with_access: false, with_contents: false), field_node.text(an.context.text))
+			return an.report(node, err_code, root_sym, field_node.text(an.context.text))
 		} else if !in_call_expr && got_child_sym.is_returnable() {
 			got_child_sym = got_child_sym.return_sym
 		}
@@ -793,7 +795,7 @@ pub fn (mut an SemanticAnalyzer) array(node ast.Node) ?&Symbol {
 		}
 	}
 
-	symbol_name := '[]' + expected_sym.gen_str(with_kind: false, with_access: false, with_contents: false)
+	symbol_name := '[]' + an.formatter.format(expected_sym, analyzer.child_types_format_cfg)
 	return an.context.find_symbol('', symbol_name) or {
 		mut new_sym := Symbol{
 			name: symbol_name.clone()
@@ -1211,6 +1213,7 @@ pub fn (mut an SemanticAnalyzer) analyze_from_cursor(mut cursor TreeCursor) {
 pub fn (mut store Store) analyze(context AnalyzerContext, tree &ast.Tree, cfg NewTreeCursorConfig) {
 	mut an := SemanticAnalyzer{
 		context: context
+		formatter: context.symbol_formatter(true)
 	}
 
 	mut cursor := new_tree_cursor(tree.root_node(), cfg)
