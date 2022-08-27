@@ -43,6 +43,10 @@ fn (fmt &SymbolFormatter) get_module_name(from_file_path string) string {
 			for imp in import_lists {
 				if !from_file_path.starts_with(imp.path) || fmt.context.file_path !in imp.ranges {
 					continue
+				} else if fmt.context.file_name in imp.symbols && imp.symbols[fmt.context.file_name].len != 0 {
+					eprintln(imp.symbols[fmt.context.file_name])
+					// DO NOT PREFIX SELECTIVELY-IMPORTED SYMBOLS!
+					return ''
 				}
 				return imp.aliases[fmt.context.file_name] or { imp.module_name }
 			}

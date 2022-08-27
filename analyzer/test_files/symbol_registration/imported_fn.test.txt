@@ -1,10 +1,17 @@
 import abc
+import efg { Vector }
 
 fn hello(def &abc.Def) &abc.Def {
     return def
 }
 
+fn vector(vec Vector) Vector {
+    return vec
+}
+
 ---
 
-(function hello &abc.Def [2,3]-[2,8]
-    (variable def &abc.Def [2,9]-[2,12]))
+(function hello &abc.Def [3,3]-[3,8]
+    (variable def &abc.Def [3,9]-[3,12]))
+(function vector Vector [7,3]-[7,9]
+    (variable vec Vector [7,10]-[7,13]))
