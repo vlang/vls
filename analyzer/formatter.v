@@ -4,7 +4,7 @@ import strings
 
 pub struct SymbolFormatter {
 mut:
-	context Context
+	context   AnalyzerContext
 }
 
 [params]
