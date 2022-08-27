@@ -28,8 +28,8 @@ pub fn new_context(params AnalyzerContextParams) AnalyzerContext {
 		store: params.store
 		file_path: params.file_path
 		file_version: params.file_version
-		file_name: os.base(params.file_path)
-		file_dir: os.dir(params.file_path)
+		file_name: if params.file_path.len != 0 { os.base(params.file_path) } else { '' }
+		file_dir: if params.file_path.len != 0 { os.dir(params.file_path) } else { '' }
 		text: params.text
 	}
 }
