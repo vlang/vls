@@ -38,21 +38,25 @@ pub fn (mut fmt SymbolFormatter) format(sym &Symbol, cfg SymbolFormatterConfig) 
 }
 
 fn (fmt &SymbolFormatter) get_module_name(from_file_path string) string {
-	if import_lists := fmt.store.imports[fmt.context.file_dir] {
-		for imp in import_lists {
-			if !from_file_path.starts_with(imp.path) || fmt.context.file_name !in imp.ranges {
+	if from_file_path.len != 0 {
+		if import_lists := fmt.context.store.imports[fmt.context.file_dir] {
+			for imp in import_lists {
+				if !from_file_path.starts_with(imp.path) || fmt.context.file_name !in imp.ranges {
+					continue
+				}
+				return imp.aliases[fmt.context.file_name] or { imp.module_name }
+			}
+		}
+
+		for auto_import_module, imp_path in fmt.context.store.auto_imports {
+			if !from_file_path.starts_with(imp_path) {
 				continue
 			}
-			return imp.aliases[fmt.context.file_name] or { imp.module_name }
+			return auto_import_module
 		}
 	}
 
-	for auto_import_module, imp_path in ss.auto_imports {
-		if !from_file_path.starts_with(imp_path) {
-			continue
-		}
-		return auto_import_module
-	}
+	return ''
 }
 
 fn (mut fmt SymbolFormatter) write_name(sym &Symbol, mut builder strings.Builder) {
