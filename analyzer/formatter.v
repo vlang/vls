@@ -61,11 +61,12 @@ fn (mut fmt SymbolFormatter) write_name(sym &Symbol, mut builder strings.Builder
 		return
 	}
 
-	if sym.language == .c {
-		builder.write_string('C.')
-	} else if sym.language == .js {
-		builder.write_string('JS.')
-	} else {
+	// if sym.language == .c {
+	// 	builder.write_string('C.')
+	// } else if sym.language == .js {
+	// 	builder.write_string('JS.')
+	// } else {
+	if sym.language == .v {
 		module_name := fmt.get_module_name(sym.file_path)
 		if module_name.len != 0 {
 			builder.write_string(module_name + '.')
