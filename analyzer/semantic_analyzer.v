@@ -1,6 +1,5 @@
 module analyzer
 
-import strconv
 import errors
 import tree_sitter_v as v
 import ast
@@ -52,29 +51,24 @@ fn (an &SemanticAnalyzer) with_symbol(sym &Symbol) &SemanticAnalyzer {
 }
 
 struct SemanticAnalyzerContext {
-	params []ReportData
+	params []errors.ErrorData
 }
 
-fn (mut an SemanticAnalyzer) report(node ast.Node, code_or_msg string, data ...ReportData) IError {
-	mut is_msg_code := false
-	if code_or_msg in errors.message_templates {
-		is_msg_code = true
-	}
-
+fn (mut an SemanticAnalyzer) report(node ast.Node, code_or_msg string, data ...errors.ErrorData) IError {
 	return SemanticAnalyzerError{
-		typ: if is_msg_code { code_or_msg } else { 'custom_error' }
+		typ: if code_or_msg in errors.message_templates { code_or_msg } else { 'custom_error' }
 		content: an.format_report(
 			kind: .error
-			message: if is_msg_code { errors.message_templates[code_or_msg] } else { code_or_msg }
+			message: code_or_msg
 			range: node.range()
 			file_path: an.context.file_path
-			code: if is_msg_code { code_or_msg } else { '' }
+			code: if code_or_msg in errors.message_templates { code_or_msg } else { '' }
 			data: SemanticAnalyzerContext{data}
 		)
 	}
 }
 
-fn (an &SemanticAnalyzer) format_report_data(d ReportData) string {
+fn (an &SemanticAnalyzer) format_report_data(d errors.ErrorData) string {
 	if d is string {
 		return *d
 	} else if d is Symbol {
@@ -89,35 +83,14 @@ fn (an &SemanticAnalyzer) format_report_data(d ReportData) string {
 
 fn (mut an SemanticAnalyzer) format_report(report Report) string {
 	if report.data is SemanticAnalyzerContext {
-		if report.data.params.len != 0 {
-			mut final_params := []string{cap: report.data.params.len}
-			mut final_msg := report.message
-			for d in report.data.params {
-				// maps are used for accepting named parameters in error messages
-				// e.g. "cannot selectively import {{var}} from {{mod}}. use {{mod}}.{{var}} instead"
-				if d is map[string]ReportData {
-					for var_name, val in d {
-						final_msg = final_msg.replace('{{$var_name}}', an.format_report_data(val))
-					}
-				} else if d is map[string]string {
-					for var_name, val in d {
-						final_msg = final_msg.replace('{{$var_name}}', an.format_report_data(unsafe { val }))
-					}
-				} else {
-					final_params << an.format_report_data(d)
-				}
-			}
-
-			ptrs := unsafe { final_params.pointers() }
-			final_report := Report{
-				...report
-				message: strconv.v_sprintf(final_msg, ...ptrs)
-				data: 0
-			}
-
-			an.context.store.report(final_report)
-			return final_report.message
+		final_report := Report{
+			...report
+			message: errors.format(unsafe { an.format_report_data }, report.message, ...report.data.params)
+			data: 0
 		}
+
+		an.context.store.report(final_report)
+		return final_report.message
 	}
 
 	an.context.store.report(report)
