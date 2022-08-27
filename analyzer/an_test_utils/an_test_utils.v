@@ -1,16 +1,16 @@
 module an_test_utils
 
 import strings
-import analyzer { ScopeTree, Symbol, Collector, Report, Import }
+import analyzer { ScopeTree, Symbol, Collector, Report, Import, SymbolFormatter }
 // import tree_sitter
 import os
 
 // sexpr_str returns the S expression-like stringified
 // representation of the []Symbol.
-pub fn sexpr_str_symbol_array(symbols []&Symbol) string {
+pub fn sexpr_str_symbol_array(mut symbol_formatter SymbolFormatter, symbols []&Symbol) string {
 	mut sb := strings.new_builder(200)
 	for i, sym in symbols {
-		sexpr_str_write_symbol(mut sb, sym)
+		sexpr_str_write_symbol(mut sb, mut symbol_formatter, sym)
 		if i < symbols.len - 1 {
 			sb.write_byte(` `)
 		}
@@ -18,22 +18,15 @@ pub fn sexpr_str_symbol_array(symbols []&Symbol) string {
 	return sb.str()
 }
 
-// sexpr_str returns the S expression-like stringified
-// representation of the Symbol.
-pub fn sexpr_str_symbol(sym &Symbol) string {
-	mut sb := strings.new_builder(100)
-	sexpr_str_write_symbol(mut sb, sym)
-	return sb.str()
-}
-
-fn sexpr_str_write_symbol(mut writer strings.Builder, sym &Symbol) {
+fn sexpr_str_write_symbol(mut writer strings.Builder, mut symbol_formatter SymbolFormatter, sym &Symbol) {
 	writer.write_byte(`(`)
 	writer.write_string(sym.access.str())
 	writer.write_string(sym.kind.str() + ' ')
 	writer.write_string(sym.name + ' ')
 	if !sym.return_sym.is_void() {
 		if sym.return_sym.kind == .function_type {
-			writer.write_string(sym.return_sym.gen_str() + ' ')
+			symbol_formatter.format_with_builder(sym.return_sym, mut writer)
+			writer.write_u8(` `)
 		} else {
 			writer.write_string(sym.return_sym.name + ' ')
 		}
@@ -42,7 +35,7 @@ fn sexpr_str_write_symbol(mut writer strings.Builder, sym &Symbol) {
 		writer.write_string('(parent ')
 		writer.write_string(sym.parent_sym.kind.str() + ' ')
 		if sym.parent_sym.kind == .function_type {
-			writer.write_string(sym.parent_sym.gen_str())
+			symbol_formatter.format_with_builder(sym.parent_sym, mut writer)
 		} else {
 			writer.write_string(sym.parent_sym.name)
 		}
@@ -52,7 +45,7 @@ fn sexpr_str_write_symbol(mut writer strings.Builder, sym &Symbol) {
 	writer.write_byte(`-`)
 	sexpr_str_write_tspoint(mut writer, sym.range.end_point)
 	if sym.kind == .function {
-		sexpr_str_write_scopetree(mut writer, sym.scope)
+		sexpr_str_write_scopetree(mut writer, mut symbol_formatter, sym.scope)
 	} else {
 		for child in sym.children_syms {
 			writer.write_byte(` `)
@@ -62,7 +55,7 @@ fn sexpr_str_write_symbol(mut writer strings.Builder, sym &Symbol) {
 				writer.write_string(child.name)
 				writer.write_byte(`)`)
 			} else {
-				sexpr_str_write_symbol(mut writer, child)
+				sexpr_str_write_symbol(mut writer, mut symbol_formatter, child)
 			}
 		}
 	}
@@ -77,14 +70,14 @@ pub fn sexpr_str_write_tspoint(mut writer strings.Builder, point C.TSPoint) {
 	writer.write_byte(`]`)
 }
 
-pub fn sexpr_str_write_scopetree(mut writer strings.Builder, scope &ScopeTree) {
+pub fn sexpr_str_write_scopetree(mut writer strings.Builder, mut symbol_formatter SymbolFormatter, scope &ScopeTree) {
 	if isnil(scope) {
 		return
 	}
 
 	for sym in scope.symbols {
 		writer.write_byte(` `)
-		sexpr_str_write_symbol(mut writer, sym)
+		sexpr_str_write_symbol(mut writer, mut symbol_formatter, sym)
 	}
 
 	for child in scope.children {
@@ -92,7 +85,7 @@ pub fn sexpr_str_write_scopetree(mut writer strings.Builder, scope &ScopeTree) {
 			continue
 		}
 		writer.write_string(' (scope [$child.start_byte]-[$child.end_byte]')
-		sexpr_str_write_scopetree(mut writer, child)
+		sexpr_str_write_scopetree(mut writer, mut symbol_formatter, child)
 		writer.write_byte(`)`)
 	}
 }
