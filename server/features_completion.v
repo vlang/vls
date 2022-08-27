@@ -11,6 +11,7 @@ struct CompletionBuilder {
 mut:
 	store              &analyzer.Store [required]
 	file_path          string          [required]
+	symbol_formatter   analyzer.SymbolFormatter [required]
 	file_dir           string
 	src                tree_sitter.SourceText
 	offset             int
@@ -283,7 +284,7 @@ fn (mut builder CompletionBuilder) build_suggestions_from_sym(sym &analyzer.Symb
 				continue
 			}
 
-			if existing_completion_item := symbol_to_completion_item(child_sym, with_snippet: true, prefix: params.prefix) {
+			if existing_completion_item := symbol_to_completion_item(child_sym, mut builder.symbol_formatter, with_snippet: true, prefix: params.prefix) {
 				builder.add(existing_completion_item)
 			}
 
@@ -299,10 +300,10 @@ fn (mut builder CompletionBuilder) build_suggestions_from_sym(sym &analyzer.Symb
 				kind: .field
 				insert_text: '$child_sym.name: \$0'
 				insert_text_format: .snippet
-				detail: child_sym.gen_str()
+				detail: builder.symbol_formatter.format(child_sym)
 			})
 		} else if (child_sym.kind == .field || (child_sym.kind == .function && params.from_value)) && sym.kind == .enum_ {
-			builder.add(symbol_to_completion_item(child_sym, with_snippet: true, prefix: params.prefix) or { continue })
+			builder.add(symbol_to_completion_item(child_sym, mut builder.symbol_formatter, with_snippet: true, prefix: params.prefix) or { continue })
 		}
 	}
 
@@ -352,7 +353,7 @@ fn (mut builder CompletionBuilder) build_suggestions_from_binded_symbols(lang an
 		sym_name := sym_loc_entry.for_sym_name
 		sym := builder.store.symbols[module_path].get(sym_name) or { continue }
 
-		if existing_completion_item := symbol_to_completion_item(sym, with_snippet: with_snippet) {
+		if existing_completion_item := symbol_to_completion_item(sym, mut builder.symbol_formatter, with_snippet: with_snippet) {
 			builder.add(lsp.CompletionItem{
 				...existing_completion_item
 				insert_text: existing_completion_item.insert_text[lang_len..]
@@ -375,7 +376,7 @@ fn (mut builder CompletionBuilder) build_suggestions_from_module(name string, in
 		}
 
 		if int(imp_sym.access) >= int(analyzer.SymbolAccess.public) {
-			builder.add(symbol_to_completion_item(imp_sym, with_snippet: builder.ctx.trigger_character == '.') or {
+			builder.add(symbol_to_completion_item(imp_sym, mut builder.symbol_formatter, with_snippet: builder.ctx.trigger_character == '.') or {
 				continue
 			})
 
@@ -385,7 +386,7 @@ fn (mut builder CompletionBuilder) build_suggestions_from_module(name string, in
 						continue
 					}
 
-					builder.add(symbol_to_completion_item(child_sym, with_snippet: false) or {
+					builder.add(symbol_to_completion_item(child_sym, mut builder.symbol_formatter, with_snippet: false) or {
 						continue
 					})
 				}
@@ -457,7 +458,7 @@ fn (mut builder CompletionBuilder) build_local_suggestions() {
 				builder.add(lsp.CompletionItem{
 					label: scope_sym.name
 					kind: .variable
-					detail: scope_sym.gen_str()
+					detail: builder.symbol_formatter.format(scope_sym)
 					insert_text: scope_sym.name
 				})
 			}
@@ -481,7 +482,7 @@ fn (mut builder CompletionBuilder) build_global_suggestions() {
 
 			// is_type_decl := false
 			is_type_decl := builder.parent_node.type_name == .type_declaration
-			builder.add(symbol_to_completion_item(sym, with_snippet: !is_type_decl) or { continue })
+			builder.add(symbol_to_completion_item(sym, mut builder.symbol_formatter, with_snippet: !is_type_decl) or { continue })
 		}
 	}
 
@@ -504,7 +505,7 @@ struct SymbolToCompletionItemParams {
 	prefix       string
 }
 
-fn symbol_to_completion_item(sym &analyzer.Symbol, params SymbolToCompletionItemParams) ?lsp.CompletionItem {
+fn symbol_to_completion_item(sym &analyzer.Symbol, mut formatter analyzer.SymbolFormatter, params SymbolToCompletionItemParams) ?lsp.CompletionItem {
 	mut kind := lsp.CompletionItemKind.text
 	mut name := sym.name
 	mut insert_text_format := lsp.InsertTextFormat.plain_text
@@ -600,7 +601,7 @@ fn symbol_to_completion_item(sym &analyzer.Symbol, params SymbolToCompletionItem
 	return lsp.CompletionItem{
 		label: name
 		kind: kind
-		detail: sym.gen_str()
+		detail: formatter.format(sym)
 		insert_text: insert_text.str()
 		insert_text_format: insert_text_format
 	}
@@ -629,6 +630,7 @@ pub fn (mut ls Vls) completion(params lsp.CompletionParams, mut wr ResponseWrite
 	// purposes.
 	mut builder := CompletionBuilder{
 		file_path: uri.path()
+		symbol_formatter: ls.store.with(file_path: uri.path()).symbol_formatter(false)
 		store: &ls.store
 		src: file.source
 		parent_node: root_node

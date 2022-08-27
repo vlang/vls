@@ -56,3 +56,10 @@ pub fn (mut ctx AnalyzerContext) find_symbol_by_type_node(node ast.Node) ?&Symbo
 pub fn (ctx AnalyzerContext) find_symbol(module_name string, name string) ?&Symbol {
 	return ctx.store.find_symbol(ctx.file_path, module_name, name)
 }
+
+pub fn (ctx AnalyzerContext) symbol_formatter(from_semantic bool) SymbolFormatter {
+	return SymbolFormatter{
+		context: ctx
+		replacers: if from_semantic { ['int_literal', 'int literal', 'float_literal', 'float literal'] } else { []string{} }
+	}
+}

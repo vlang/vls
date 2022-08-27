@@ -3,7 +3,6 @@ module analyzer
 // it should be imported just to have those C type symbols available
 // import tree_sitter
 // import os
-import strings
 
 // pub interface ISymbol {
 // 	str() string
@@ -158,166 +157,18 @@ const child_cfg = SymbolGenStrConfig{
 	with_contents: false
 }
 
-// gen_str returns the string representation of a symbol.
-// Use this since str() has a pointer symbol attached at the beginning.
-pub fn (info &Symbol) gen_str(cfg SymbolGenStrConfig) string {
-	if isnil(info) {
+pub fn (sym &Symbol) str() string {
+	if isnil(sym) {
 		return 'nil symbol'
 	}
 
-	mut sb := strings.new_builder(info.name.len)
-	match info.kind {
-		// .array_ {
-		// 	sb.write_string('[]')
-		// 	sb.write_string(info.children_syms[0].str())
-		// }
-		.chan_ {
-			sb.write_string('chan ')
-			sb.write_string(info.parent_sym.gen_str(child_cfg))
-		}
-		.enum_ {
-			if cfg.with_access {
-				sb.write_string(info.access.str())
-			}
-			if cfg.with_kind {
-				sb.write_string('enum ')
-			}
-			sb.write_string(info.name)
-		}
-		.function, .function_type {
-			if cfg.with_access {
-				sb.write_string(info.access.str())
-			}
-			sb.write_string('fn ')
-
-			if !isnil(info.parent_sym) && !info.parent_sym.is_void() {
-				sb.write_byte(`(`)
-				sb.write_string(info.parent_sym.gen_str(with_kind: false, with_contents: false))
-				sb.write_string(') ')
-			}
-
-			if !info.name.starts_with(anon_fn_prefix) {
-				sb.write_string(info.name)
-			}
-
-			sb.write_byte(`(`)
-			for i, v in info.children_syms {
-				if v.name.len != 0 {
-					sb.write_string(v.gen_str(with_kind: false, with_contents: false))
-				} else {
-					sb.write_string(v.return_sym.gen_str(with_kind: false, with_contents: false))
-				}
-				if i < info.children_syms.len - 1 {
-					sb.write_string(', ')
-				}
-			}
-			sb.write_byte(`)`)
-			if !info.return_sym.is_void() {
-				sb.write_byte(` `)
-				sb.write_string(info.return_sym.name)
-			}
-		}
-		.map_, .array_, .variadic {
-			sb.write_string(info.name)
-		}
-		.multi_return {
-			sb.write_byte(`(`)
-			for i, v in info.children_syms {
-				if v.kind !in analyzer.kinds_in_multi_return_to_be_excluded {
-					sb.write_string(v.gen_str(with_kind: false, with_access: false))
-					if i < info.children_syms.len - 1 {
-						sb.write_string(', ')
-					}
-				}
-			}
-			sb.write_byte(`)`)
-		}
-		.optional {
-			sb.write_string('?')
-			sb.write_string(info.parent_sym.gen_str(with_kind: false, with_access: false))
-		}
-		.ref {
-			sb.write_string('&')
-			sb.write_string(info.parent_sym.gen_str(with_kind: false, with_access: false))
-		}
-		.struct_ {
-			if cfg.with_access {
-				sb.write_string(info.access.str())
-			}
-			if cfg.with_kind {
-				sb.write_string('struct ')
-			}
-			sb.write_string(info.name)
-		}
-		.typedef, .sumtype {
-			if cfg.with_access {
-				sb.write_string(info.access.str())
-			}
-			if info.kind == .typedef && info.parent_sym.is_void() {
-				return info.name
-			}
-			if cfg.with_kind {
-				sb.write_string('type ')
-			}
-			sb.write_string(info.name)
-
-			if cfg.with_contents {
-				sb.write_string(' = ')
-
-				if info.kind == .typedef {
-					sb.write_string(info.parent_sym.gen_str(child_cfg))
-				} else {
-					for i in 0 .. info.sumtype_children_len {
-						sb.write_string(info.children_syms[i].gen_str(child_cfg))
-						if i < info.sumtype_children_len - 1 {
-							sb.write_byte(` `)
-							sb.write_byte(`|`)
-							sb.write_byte(` `)
-						}
-					}
-				}
-			}
-		}
-		.variable, .field {
-			if cfg.with_access {
-				sb.write_string(info.access.str())
-			}
-			if info.kind == .field {
-				sb.write_string(info.parent_sym.gen_str(child_cfg))
-				sb.write_byte(`.`)
-			}
-			if info.is_const {
-				sb.write_string('const ')
-			}
-
-			sb.write_string(info.name)
-			if !info.return_sym.is_void() {
-				sb.write_byte(` `)
-				if info.return_sym.kind == .function_type {
-					sb.write_string(info.return_sym.gen_str())
-				} else {
-					sb.write_string(info.return_sym.name)
-				}
-			}
-		}
-		else {
-			// sb.write_string(info.kind.str())
-			// sb.write_byte(` `)
-			sb.write_string(info.name)
-		}
-	}
-
-	return sb.str()
-}
-
-pub fn (sym &Symbol) str() string {
-	return sym.gen_str()
+	return sym.name
 }
 
 const sym_kinds_allowed_to_print_parent = [SymbolKind.typedef, .function]
 
 pub fn (infos []&Symbol) str() string {
-	return '[' + infos.map(it.gen_str()).join(', ') + ']'
+	return '[' + infos.map(it.str()).join(', ') + ']'
 }
 
 // index returns the index based on the given symbol name
