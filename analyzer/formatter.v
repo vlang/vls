@@ -31,7 +31,7 @@ const child_types_format_cfg = SymbolFormatterConfig{
 	with_contents: false
 }
 
-pub fn (mut fmt SymbolFormatter) format(sym &analyzer.Symbol, cfg SymbolFormatterConfig) string {
+pub fn (mut fmt SymbolFormatter) format(sym &Symbol, cfg SymbolFormatterConfig) string {
 	mut sb := strings.new_builder(300)
 	sym.format(sym, mut sb, cfg) or {}
 	return sb.str()
@@ -55,7 +55,7 @@ fn (fmt &SymbolFormatter) get_module_name(from_file_path string) string {
 	}
 }
 
-fn (mut fmt SymbolFormatter) write_name(sym &analyzer.Symbol, mut builder strings.Builder) {
+fn (mut fmt SymbolFormatter) write_name(sym &Symbol, mut builder strings.Builder) {
 	if isnil(sym) {
 		builder.write_string('invalid symbol')
 		return
@@ -75,7 +75,7 @@ fn (mut fmt SymbolFormatter) write_name(sym &analyzer.Symbol, mut builder string
 	builder.write_string(sym.name.replace_each(fmt.replacers))
 }
 
-fn (fmt &SymbolFormatter) write_access(sym &analyzer.Symbol, mut builder strings.Builder, cfg SymbolFormatterConfig) {
+fn (fmt &SymbolFormatter) write_access(sym &Symbol, mut builder strings.Builder, cfg SymbolFormatterConfig) {
 	if cfg.with_access {
 		builder.write_string(sym.access.str())
 	}
@@ -88,7 +88,7 @@ fn (fmt &SymbolFormatter) write_kind(kind string, mut builder strings.Builder, c
 	}
 }
 
-pub fn (mut fmt SymbolFormatter) format_with_builder(sym &analyzer.Symbol, mut builder strings.Builder, cfg SymbolFormatterConfig) ? {
+pub fn (mut fmt SymbolFormatter) format_with_builder(sym &Symbol, mut builder strings.Builder, cfg SymbolFormatterConfig) {
 	if isnil(sym) {
 		builder.write_string('invalid symbol')
 		return
