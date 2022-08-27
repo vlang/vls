@@ -149,9 +149,6 @@ pub fn (mut fmt SymbolFormatter) format_with_builder(sym &Symbol, mut builder st
 				fmt.format_with_builder(sym.return_sym, mut builder, types_format_cfg)
 			}
 		}
-		.map_, .array_, .variadic {
-			builder.write_string(sym.name) // TODO:
-		}
 		.multi_return {
 			builder.write_byte(`(`)
 			for i, type_sym in sym.children_syms {
