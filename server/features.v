@@ -175,6 +175,8 @@ fn (mut ls Vls) signature_help(params lsp.SignatureHelpParams, mut wr ResponseWr
 		return none
 	}
 
+	mut formatter := ls.store.with(file_path: uri.path()).symbol_formatter(false)
+
 	// get the nearest parameter based on the position of the cursor
 	args_count := args_node.named_child_count()
 	mut active_parameter_idx := -1
@@ -209,7 +211,7 @@ fn (mut ls Vls) signature_help(params lsp.SignatureHelpParams, mut wr ResponseWr
 		}
 
 		param_infos << lsp.ParameterInformation{
-			label: child_sym.gen_str()
+			label: formatter.format(child_sym, analyzer.params_format_cfg)
 		}
 	}
 
@@ -217,7 +219,7 @@ fn (mut ls Vls) signature_help(params lsp.SignatureHelpParams, mut wr ResponseWr
 		active_parameter: active_parameter_idx
 		signatures: [
 			lsp.SignatureInformation{
-				label: sym.gen_str()
+				label: formatter.format(sym)
 				// documentation: lsp.MarkupContent{}
 				parameters: param_infos
 			},
@@ -287,8 +289,10 @@ fn get_hover_data(mut store analyzer.Store, node ast.Node, uri lsp.DocumentUri, 
 		return none
 	}
 
+	mut formatter := store.with(file_path: file_path).symbol_formatter(false)
+
 	return lsp.Hover{
-		contents: lsp.v_marked_string(sym.gen_str())
+		contents: lsp.v_marked_string(formatter.format(sym))
 		range: tsrange_to_lsp_range(original_range)
 	}
 }
