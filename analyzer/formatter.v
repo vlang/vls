@@ -89,7 +89,8 @@ fn (fmt &SymbolFormatter) write_kind(kind string, mut builder strings.Builder, c
 
 pub fn (mut fmt SymbolFormatter) format_with_builder(sym &analyzer.Symbol, mut builder strings.Builder, cfg SymbolFormatterConfig) ? {
 	if isnil(sym) {
-		return 'invalid symbol'
+		builder.write_string('invalid symbol')
+		return
 	}
 
 	match sym.kind {
