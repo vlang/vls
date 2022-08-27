@@ -188,13 +188,13 @@ const completion_results = {
 		lsp.CompletionItem{
 			label: 'Point.a'
 			kind: .property
-			detail: 'pub Point.a int'
+			detail: 'pub abc.Point.a int'
 			insert_text: 'Point.a'
 		},
 		lsp.CompletionItem{
 			label: 'Point.b'
 			kind: .property
-			detail: 'pub Point.b int'
+			detail: 'pub abc.Point.b int'
 			insert_text: 'Point.b'
 		},
 		lsp.CompletionItem{
@@ -208,13 +208,13 @@ const completion_results = {
 		lsp.CompletionItem{
 			label: 'shift'
 			kind: .enum_member
-			detail: 'pub KeyCode.shift KeyCode'
+			detail: 'pub abc.KeyCode.shift abc.KeyCode'
 			insert_text: 'shift'
 		},
 		lsp.CompletionItem{
 			label: 'control'
 			kind: .enum_member
-			detail: 'pub KeyCode.control KeyCode'
+			detail: 'pub abc.KeyCode.control abc.KeyCode'
 			insert_text: 'control'
 		}
 	]
@@ -222,7 +222,7 @@ const completion_results = {
 		lsp.CompletionItem{
 			label: 'print'
 			kind: .method
-			detail: 'pub fn (code KeyCode) print()'
+			detail: 'pub fn (code abc.KeyCode) print()'
 			insert_text: 'print()'
 		}
 	]
@@ -317,31 +317,31 @@ const completion_results = {
 		lsp.CompletionItem{
 			label: 'DB'
 			kind: .struct_
-			detail: 'pub struct DB'
+			detail: 'pub struct pg.DB'
 			insert_text: 'DB'
 		},
 		lsp.CompletionItem{
 			label: 'Row'
 			kind: .struct_
-			detail: 'pub struct Row'
+			detail: 'pub struct pg.Row'
 			insert_text: 'Row'
 		},
 		lsp.CompletionItem{
 			label: 'Config'
 			kind: .struct_
-			detail: 'pub struct Config'
+			detail: 'pub struct pg.Config'
 			insert_text: 'Config'
 		},
 		lsp.CompletionItem{
 			label: 'connect'
 			kind: .function
-			detail: 'pub fn connect(config Config) ?DB'
+			detail: 'pub fn pg.connect(config pg.Config) ?pg.DB'
 			insert_text: 'connect'
 		},
 		lsp.CompletionItem{
 			label: 'Oid'
 			kind: .enum_
-			detail: 'pub enum Oid'
+			detail: 'pub enum pg.Oid'
 			insert_text: 'Oid'
 		}
 	]
@@ -449,32 +449,32 @@ const completion_results = {
 		lsp.CompletionItem{
 			label: 'Point'
 			kind: .struct_
-			detail: 'pub struct Point'
+			detail: 'pub struct abc.Point'
 			insert_text: 'Point{a:\$1, b:\$2}'
 			insert_text_format: .snippet
 		},
 		lsp.CompletionItem{
 			label: 'this_is_a_function'
 			kind: .function
-			detail: 'pub fn this_is_a_function() string'
+			detail: 'pub fn abc.this_is_a_function() string'
 			insert_text: 'this_is_a_function()'
 		},
 		lsp.CompletionItem{
 			label: 'KeyCode'
 			kind: .enum_
-			detail: 'pub enum KeyCode'
+			detail: 'pub enum abc.KeyCode'
 			insert_text: 'KeyCode'
 		},
 		lsp.CompletionItem{
 			label: 'KeyCode.shift'
 			kind: .enum_member
-			detail: 'pub KeyCode.shift KeyCode'
+			detail: 'pub abc.KeyCode.shift abc.KeyCode'
 			insert_text: 'KeyCode.shift'
 		},
 		lsp.CompletionItem{
 			label: 'KeyCode.control'
 			kind: .enum_member
-			detail: 'pub KeyCode.control KeyCode'
+			detail: 'pub abc.KeyCode.control abc.KeyCode'
 			insert_text: 'KeyCode.control'
 		}
 	]

@@ -172,7 +172,7 @@ const hover_results = {
 		}
 	}
 	'struct_init_b.vv':         lsp.Hover{
-		contents: lsp.MarkedString{'v', 'pub mut Command.usage string'}
+		contents: lsp.MarkedString{'v', 'pub mut cli.Command.usage string'}
 		range: lsp.Range{
 			start: lsp.Position{7, 2}
 			end: lsp.Position{7, 7}
