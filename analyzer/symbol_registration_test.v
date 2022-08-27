@@ -3,7 +3,7 @@ import ast
 import test_utils
 import benchmark
 import analyzer.an_test_utils
-import analyzer { Collector, Store, SymbolAnalyzer, setup_builtin, new_tree_cursor, Runes }
+import analyzer { Collector, Store, SymbolAnalyzer, setup_builtin, new_tree_cursor, import_modules_from_tree, Runes }
 import v.util.diff
 import term
 
@@ -60,6 +60,7 @@ fn test_symbol_registration() ? {
 		tree := p.parse_string(source: src)
 		mut cursor := new_tree_cursor(tree.root_node())
 		sym_analyzer.context = store.with(file_path: test_file_path, text: Runes(src.runes()))
+		import_modules_from_tree(sym_analyzer.context, tree, vlib_path)
 		symbols := sym_analyzer.analyze_from_cursor(mut cursor)
 		result := an_test_utils.sexpr_str_symbol_array(symbols).replace(') (', ')\n(')
 		expected_trimmed := test_utils.newlines_to_spaces(expected).replace(') (', ')\n(')
