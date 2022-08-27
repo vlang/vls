@@ -41,7 +41,7 @@ fn (fmt &SymbolFormatter) get_module_name(from_file_path string) string {
 	if from_file_path.len != 0 {
 		if import_lists := fmt.context.store.imports[fmt.context.file_dir] {
 			for imp in import_lists {
-				if !from_file_path.starts_with(imp.path) || fmt.context.file_name !in imp.ranges {
+				if !from_file_path.starts_with(imp.path) || fmt.context.file_path !in imp.ranges {
 					continue
 				}
 				return imp.aliases[fmt.context.file_name] or { imp.module_name }
