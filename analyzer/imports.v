@@ -134,20 +134,32 @@ pub fn (mut imp Importer) inject_paths_of_new_imports(mut new_imports []Import, 
 
 		for path in import_path_iter {
 			mut has_v_files, mut is_valid := imp.is_import_path_valid(path, ...mod_names)
-			if is_valid {
-				new_import.set_path(os.join_path(path, ...mod_names))
-			} else if is_valid && !has_v_files {
-				mod_names_with_src := mod_names.map(os.join_path(it, 'src'))
-				has_v_files, is_valid = imp.is_import_path_valid(path, ...mod_names_with_src)
-				if !has_v_files {
-					continue
-				}
+			if mod_names.len > 1 || (is_valid && !has_v_files) {
+				for mod_name_idx in 0 .. mod_names.len {
+					mut mod_names_with_src := mod_names[..mod_name_idx + 1].map(os.join_path(it, 'src'))
+					if mod_names.len > 1 || mod_name_idx == mod_names.len - 1 {
+						mod_names_with_src << mod_names[mod_name_idx + 1..]
+					} 
 
-				new_import.set_path(os.join_path(path, ...mod_names_with_src))
-				eprintln(new_import.path)
-			} else {
+					is_subdir_has_v_files, is_subdir_valid := imp.is_import_path_valid(path, ...mod_names_with_src)
+					if is_subdir_valid && !is_subdir_has_v_files {
+						continue
+					} else if is_subdir_has_v_files {
+						has_v_files, is_valid = is_subdir_has_v_files, is_subdir_valid
+						mod_names = mod_names_with_src.clone()
+					}
+					// break if found or does not exist
+					break
+				}
+			} 
+			
+			// make it a separate if branch so that
+			// it can be "reusable" with the if branch above
+			if !is_valid {
 				continue
 			}
+
+			new_imports[import_idx].set_path(os.join_path(path, ...mod_names))
 			break
 		}
 
