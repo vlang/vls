@@ -5,6 +5,7 @@ import strings
 pub struct SymbolFormatter {
 mut:
 	context   AnalyzerContext
+	replacers []string
 }
 
 [params]
@@ -71,7 +72,7 @@ fn (mut fmt SymbolFormatter) write_name(sym &analyzer.Symbol, mut builder string
 		}
 	}
 
-	builder.write_string(sym.name)
+	builder.write_string(sym.name.replace_each(fmt.replacers))
 }
 
 fn (fmt &SymbolFormatter) write_access(sym &analyzer.Symbol, mut builder strings.Builder, cfg SymbolFormatterConfig) {

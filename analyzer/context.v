@@ -60,5 +60,6 @@ pub fn (ctx AnalyzerContext) find_symbol(module_name string, name string) ?&Symb
 pub fn (ctx AnalyzerContext) symbol_formatter(from_semantic bool) SymbolFormatter {
 	return SymbolFormatter{
 		context: ctx
+		replacers: if from_semantic { ['int_literal', 'int literal', 'float_literal', 'float literal'] } else { []string{} }
 	}
 }
