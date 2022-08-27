@@ -94,13 +94,23 @@ pub fn (mut fmt SymbolFormatter) format_with_builder(sym &analyzer.Symbol, mut b
 	}
 
 	match sym.kind {
-		// .array_ {
-		// 	sb.write_string('[]')
-		// 	sb.write_string(sym.children_syms[0].str())
-		// }
+		.array_ {
+			builder.write_string('[]')
+			fmt.write_name(sym.children_syms[0] or { void_sym }, mut builder)
+		}
+		.variadic {
+			builder.write_string('...')
+			fmt.write_name(sym.children_syms[0] or { void_sym }, mut builder)
+		}
+		.map_ {
+			builder.write_string('map[')
+			fmt.write_name(sym.children_syms[0] or { void_sym }, mut builder)
+			builder.write_u8(`]`)
+			fmt.write_name(sym.children_syms[1] or { void_sym }, mut builder)
+		}
 		.chan_ {
 			builder.write_string('chan ')
-			fmt.write_name(sym, mut builder)
+			fmt.write_name(sym.parent_sym, mut builder)
 		}
 		.enum_ {
 			fmt.write_access(sym, mut builder, cfg)
