@@ -61,7 +61,7 @@ pub fn (mut t Tester) ok(file TestFile) {
 
 pub fn (mut t Tester) is_equal<T>(expected T, actual T) ? {
 	if expected != actual {
-		println(diff.color_compare_strings(diff_cmd, 'vls_symbol_registration_test', expected.str(), actual.str()))
+		println(diff.color_compare_strings(diff_cmd, 'vls_${t.folder_name}_test', expected.str(), actual.str()))
 		return error('actual != expected')
 	}
 }
