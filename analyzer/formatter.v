@@ -15,7 +15,7 @@ pub struct SymbolFormatterConfig {
 	with_contents bool = true
 }
 
-const params_format_cfg = SymbolFormatterConfig{
+pub const params_format_cfg = SymbolFormatterConfig{
 	with_kind: false
 	with_contents: false
 }
