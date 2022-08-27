@@ -26,10 +26,10 @@ fn sexpr_str_write_symbol(mut writer strings.Builder, mut symbol_formatter Symbo
 	if !sym.return_sym.is_void() {
 		if sym.return_sym.kind == .function_type {
 			symbol_formatter.format_with_builder(sym.return_sym, mut writer)
-			writer.write_u8(` `)
 		} else {
-			writer.write_string(sym.return_sym.name + ' ')
+			symbol_formatter.format_with_builder(sym.return_sym, mut writer, with_contents: false, with_access: false, with_kind: false)
 		}
+		writer.write_u8(` `)
 	}
 	if sym.kind in analyzer.sym_kinds_allowed_to_print_parent && !sym.parent_sym.is_void() && sym.parent_sym.kind != .variable {
 		writer.write_string('(parent ')
@@ -37,7 +37,7 @@ fn sexpr_str_write_symbol(mut writer strings.Builder, mut symbol_formatter Symbo
 		if sym.parent_sym.kind == .function_type {
 			symbol_formatter.format_with_builder(sym.parent_sym, mut writer)
 		} else {
-			writer.write_string(sym.parent_sym.name)
+			symbol_formatter.format_with_builder(sym.parent_sym, mut writer, with_contents: false, with_access: false, with_kind: false)
 		}
 		writer.write_string(') ')
 	}
