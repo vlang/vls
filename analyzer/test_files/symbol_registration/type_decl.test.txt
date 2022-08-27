@@ -1,12 +1,16 @@
+import abc
+
 pub type Text = string
 type Any = string | int | []string
 pub type Handler = fn (a int) int
+pub type Logger = abc.Def
 
 ---
 
-(pub typedef Text (parent struct string) [0,9]-[0,13])
-(sumtype Any [1,5]-[1,8]
+(pub typedef Text (parent struct string) [2,9]-[2,13])
+(sumtype Any [3,5]-[3,8]
     (struct string)
     (typedef int)
     (array []string))
-(pub typedef Handler (parent function_type fn (a int) int) [2,9]-[2,16])
+(pub typedef Handler (parent function_type fn (a int) int) [4,9]-[4,16])
+(pub typedef Logger (parent struct abc.Def) [5,9]-[5,15])

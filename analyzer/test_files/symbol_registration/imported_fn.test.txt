@@ -1,0 +1,10 @@
+import abc
+
+fn hello(def &abc.Def) &abc.Def {
+    return def
+}
+
+---
+
+(function hello &abc.Def [2,3]-[2,8]
+    (variable def &abc.Def [2,9]-[2,12]))
