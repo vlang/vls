@@ -33,7 +33,7 @@ const child_types_format_cfg = SymbolFormatterConfig{
 
 pub fn (mut fmt SymbolFormatter) format(sym &Symbol, cfg SymbolFormatterConfig) string {
 	mut sb := strings.new_builder(300)
-	sym.format(sym, mut sb, cfg) or {}
+	fmt.format_with_builder(sym, mut sb, cfg)
 	return sb.str()
 }
 
