@@ -131,9 +131,8 @@ pub fn (mut fmt SymbolFormatter) format_with_builder(sym &Symbol, mut builder st
 				builder.write_byte(`(`)
 				fmt.format_with_builder(sym.parent_sym, mut builder, params_format_cfg)
 				builder.write_string(') ')
-			}
-
-			if !sym.name.starts_with(anon_fn_prefix) {
+				builder.write_string(sym.name)
+			} else if !sym.name.starts_with(anon_fn_prefix) {
 				fmt.write_name(sym, mut builder)
 			}
 
