@@ -141,10 +141,10 @@ fn (mut iter ImportPathIterator) next() ?string {
 	defer {
 		iter.idx++
 	}
-	return if !iter.in_fallback {
-		iter.lookup_paths[iter.idx]
-	} else {
-		iter.fallback_lookup_paths[iter.idx]
+	return if !iter.in_fallback { 
+		iter.lookup_paths[iter.idx] 
+	} else { 
+		iter.fallback_lookup_paths[iter.idx] 
 	}
 }
 

@@ -14,10 +14,10 @@ pub fn (mut imp Importer) imports() ImportsMap {
 	return imp.context.store.imports
 }
 
-pub fn (mut imp Importer) scan_imports(tree &ast.Tree) []&Import {
+pub fn (mut imp Importer) scan_imports(tree &ast.Tree) []int {
 	root_node := tree.root_node()
 	named_child_len := root_node.named_child_count()
-	mut newly_imported_modules := []&Import{}
+	mut newly_imported_modules_idx := []int{}
 
 	for i in 0 .. named_child_len {
 		node := root_node.named_child(i) or { continue }
@@ -40,7 +40,7 @@ pub fn (mut imp Importer) scan_imports(tree &ast.Tree) []&Import {
 		}
 
 		// resolve it later after
-		mut imp_module, already_imported := imp.context.store.add_import(
+		mut imp_module, import_entry_idx, already_imported := imp.context.store.add_import(
 			imp.context.file_dir,
 			resolved: false
 			absolute_module_name: import_path_node.text(imp.context.text)
@@ -61,17 +61,56 @@ pub fn (mut imp Importer) scan_imports(tree &ast.Tree) []&Import {
 		}
 
 		if !already_imported {
-			newly_imported_modules << imp_module
+			newly_imported_modules_idx << import_entry_idx
 		}
 
 		imp_module.track_file(imp.context.file_path, import_path_node.range())
 	}
 
-	return newly_imported_modules
+	return newly_imported_modules_idx
+}
+
+fn (mut imp Importer) is_import_path_valid(path string, mod_names ...string) (bool, bool) {
+	mod_dir := os.join_path(path, ...mod_names)
+	// if the directory is already present in the
+	// dependency tree, inject it directly
+	if imp.context.store.dependency_tree.has(mod_dir) {
+		return true, true
+	} else if !os.exists(mod_dir) {
+		return false, false
+	}
+
+	mut has_v_files := false
+
+	// files is just for checking so it
+	// is not used by the code below it
+	if dir_files := os.ls(mod_dir) {
+		for file in dir_files {
+			if os.file_ext(file) == v_ext {
+				has_v_files = true
+				break
+			}
+		}
+
+		if !has_v_files {
+			// directory exists so is valid
+			// but may have the possibility that the
+			// source is stored in `src` so the
+			// first return is set to false
+			return false, true
+		}
+	}
+
+	if !has_v_files {
+		return false, false
+	}
+
+	imp.context.store.dependency_tree.add(mod_dir)
+	return true, true
 }
 
 // inject_paths_of_new_imports resolves and injects the path to the Import instance
-pub fn (mut imp Importer) inject_paths_of_new_imports(mut new_imports []&Import, lookup_paths ...string) {
+pub fn (mut imp Importer) inject_paths_of_new_imports(mut new_imports []Import, import_idxs []int, lookup_paths ...string) {
 	dir := imp.context.file_dir
 	mut project := imp.context.store.dependency_tree.get_node(dir) or { imp.context.store.dependency_tree.add(dir) }
 
@@ -85,69 +124,61 @@ pub fn (mut imp Importer) inject_paths_of_new_imports(mut new_imports []&Import,
 		fallback_lookup_paths: imp.context.store.default_import_paths
 	}
 
-	for mut new_import in new_imports {
-		if new_import.resolved {
+	for import_idx in import_idxs {
+		if import_idx >= new_imports.len || new_imports[import_idx].resolved {
 			continue
 		}
 
 		// module.submod -> ['module', 'submod']
-		mod_name_arr := new_import.absolute_module_name.split('.')
+		mut mod_names := new_imports[import_idx].absolute_module_name.split('.')
+
 		for path in import_path_iter {
-			mod_dir := os.join_path(path, ...mod_name_arr)
+			mut has_v_files, mut is_valid := imp.is_import_path_valid(path, ...mod_names)
+			if mod_names.len > 1 || (is_valid && !has_v_files) {
+				for mod_name_idx in 0 .. mod_names.len {
+					mut mod_names_with_src := mod_names[..mod_name_idx + 1].map(os.join_path(it, 'src'))
+					if mod_names.len > 1 || mod_name_idx == mod_names.len - 1 {
+						mod_names_with_src << mod_names[mod_name_idx + 1..]
+					} 
 
-			// if the directory is already present in the
-			// dependency tree, inject it directly
-			if imp.context.store.dependency_tree.has(mod_dir) {
-				new_import.set_path(mod_dir)
-				break
-			}
-
-			if !os.exists(mod_dir) {
+					is_subdir_has_v_files, is_subdir_valid := imp.is_import_path_valid(path, ...mod_names_with_src)
+					if is_subdir_valid && !is_subdir_has_v_files {
+						continue
+					} else if is_subdir_has_v_files {
+						has_v_files, is_valid = is_subdir_has_v_files, is_subdir_valid
+						mod_names = mod_names_with_src.clone()
+					}
+					// break if found or does not exist
+					break
+				}
+			} 
+			
+			// make it a separate if branch so that
+			// it can be "reusable" with the if branch above
+			if !is_valid {
 				continue
 			}
 
-			mut has_v_files := false
-
-			// files is just for checking so it
-			// is not used by the code below it
-			{
-				mut files := os.ls(mod_dir) or { continue }
-
-				// search for files end with v and free
-				// the contents of the array at the same time
-				for j := 0; files.len != 0; {
-					if !has_v_files {
-						file_ext := os.file_ext(files[j])
-						if file_ext == v_ext {
-							has_v_files = true
-						}
-					}
-					files.delete(j)
-				}
-			}
-			if has_v_files {
-				new_import.set_path(mod_dir)
-				imp.context.store.dependency_tree.add(mod_dir)
-				break
-			}
+			new_imports[import_idx].set_path(os.join_path(path, ...mod_names))
+			break
 		}
 
 		// report the unresolved import
-		if !new_import.resolved {
-			for file_path, range in new_import.ranges {
+		if !new_imports[import_idx].resolved {
+			for file_path, range in new_imports[import_idx].ranges {
 				imp.context.store.report(
-					message: 'Module `$new_import.absolute_module_name` not found'
+					message: 'Module `$new_imports[import_idx].absolute_module_name` not found'
 					file_path: file_path
 					range: range
 				)
 
-				new_import.ranges.delete(file_path)
+				new_imports[import_idx].ranges.delete(file_path)
 			}
 
 			continue
-		} else if new_import.path !in project.dependencies {
+		} else if new_imports[import_idx].path !in project.dependencies {
 			// append the path if not yet added to the project dependency
-			project.dependencies << new_import.path
+			project.dependencies << new_imports[import_idx].path
 		}
 
 		import_path_iter.reset()
@@ -156,17 +187,19 @@ pub fn (mut imp Importer) inject_paths_of_new_imports(mut new_imports []&Import,
 
 // import_modules imports the given Import array to the current directory.
 // It also registers the symbols to the store.
-pub fn (mut imp Importer) import_modules(mut imports []&Import) {
+pub fn (mut imp Importer) import_modules(mut imports []Import, import_idxs []int) {
 	mut parser := ast.new_parser()
 	modules_from_old_dir := os.join_path(imp.context.file_dir, 'modules')
 
-	for i, new_import in imports {
+	for import_idx in import_idxs {
 		// skip if import is not resolved or already imported
-		if !new_import.resolved || new_import.imported {
+		if import_idx >= imports.len || !imports[import_idx].resolved || imports[import_idx].imported {
 			continue
 		}
 
+		new_import := imports[import_idx]
 		file_paths := os.ls(new_import.path) or { continue }
+
 		mut imported := 0
 		for file_name in file_paths {
 			if !should_analyze_file(file_name) {
@@ -192,16 +225,14 @@ pub fn (mut imp Importer) import_modules(mut imports []&Import) {
 		}
 
 		if imported > 0 {
-			imports[i].imported = true
+			imports[import_idx].imported = true
 		}
-
-		unsafe { file_paths.free() }
 	}
 }
 
 // add_imports adds/registers the import. it returns a boolean
 // to indicate if the import already exist in the array.
-pub fn (mut ss Store) add_import(to_dir string, imp Import) (&Import, bool) {
+pub fn (mut ss Store) add_import(to_dir string, imp Import) (&Import, int, bool) {
 	mut idx := -1
 	if to_dir in ss.imports {
 		// check if import has already imported
@@ -223,10 +254,10 @@ pub fn (mut ss Store) add_import(to_dir string, imp Import) (&Import, bool) {
 		}
 
 		last_idx := ss.imports[to_dir].len - 1
-		return &ss.imports[to_dir][last_idx], false
+		return &ss.imports[to_dir][last_idx], last_idx, false
 	} else {
 		// unsafe { imp.free() }
-		return &ss.imports[to_dir][idx], true
+		return &ss.imports[to_dir][idx], idx, true
 	}
 }
 
@@ -236,13 +267,13 @@ pub fn import_modules_from_tree(context AnalyzerContext, tree &ast.Tree, lookup_
 		context: context
 	}
 
-	mut imports := importer.scan_imports(tree)
-	importer.inject_paths_of_new_imports(mut imports, ...lookup_paths)
-	if imports.len == 0 {
+	import_idxs := importer.scan_imports(tree)
+	if import_idxs.len == 0 {
 		return
 	}
 
-	importer.import_modules(mut imports)
+	importer.inject_paths_of_new_imports(mut importer.context.store.imports[context.file_dir], import_idxs, ...lookup_paths)
+	importer.import_modules(mut importer.context.store.imports[context.file_dir], import_idxs)
 }
 
 // cleanup_imports removes the unused imports from the current directory.

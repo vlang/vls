@@ -10,17 +10,16 @@ pub fn setup_builtin(mut store Store, builtin_path string) {
 		context: store.default_context()
 	}
 	
-	mut builtin_import, _ := store.add_import(
+	mut builtin_import, builtin_idx, _ := store.add_import(
 		'',
 		resolved: true
 		module_name: 'builtin'
 		path: builtin_path
 	)
 
-	mut imports := [builtin_import]
 	store.register_auto_import(builtin_import, '')
 	register_builtin_symbols(mut store, builtin_import)
-	importer.import_modules(mut imports)
+	importer.import_modules(mut store.imports[importer.context.file_dir], [builtin_idx])
 	register_none(mut store, builtin_import)
 }
 

@@ -39,10 +39,12 @@ fn test_scan_imports() ? {
 		context: store.with(file_path: file_path, text: sample_content_bytes)
 	}
 
-	imports := imp.scan_imports(tree)
+	import_idxs := imp.scan_imports(tree)
+	imports := store.imports[file_dir]
+
 	assert imports.len == 2
-	assert imports[0].absolute_module_name == 'os'
-	assert imports[1].absolute_module_name == 'env'
+	assert imports[import_idxs[0]].absolute_module_name == 'os'
+	assert imports[import_idxs[1]].absolute_module_name == 'env'
 }
 
 fn test_inject_paths_of_new_imports() ? {
@@ -55,16 +57,18 @@ fn test_inject_paths_of_new_imports() ? {
 		context: store.with(file_path: file_path, text: sample_content_bytes)
 	}
 
-	mut imports := imp.scan_imports(tree)
-	assert imports.len == 2
-	assert imports[0].absolute_module_name == 'os'
-	assert imports[1].absolute_module_name == 'env'
+	import_idxs := imp.scan_imports(tree)
+	mut imports := store.imports[file_dir]?
 
-	imp.inject_paths_of_new_imports(mut imports, os.join_path(vexe_path, 'vlib'))
+	assert import_idxs.len == 2
+	assert imports[import_idxs[0]].absolute_module_name == 'os'
+	assert imports[import_idxs[1]].absolute_module_name == 'env'
 
-	assert imports[0].resolved == true
-	assert imports[0].path == os.join_path(vexe_path, 'vlib', 'os')
-	assert imports[1].resolved == false
+	imp.inject_paths_of_new_imports(mut store.imports[file_dir], import_idxs, os.join_path(vexe_path, 'vlib'))
+
+	assert imports[import_idxs[0]].resolved == true
+	assert imports[import_idxs[0]].path == os.join_path(vexe_path, 'vlib', 'os')
+	assert imports[import_idxs[1]].resolved == false
 }
 
 fn test_import_modules_from_tree() ? {
