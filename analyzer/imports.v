@@ -72,7 +72,7 @@ pub fn (mut imp Importer) scan_imports(tree &ast.Tree) []&Import {
 
 // inject_paths_of_new_imports resolves and injects the path to the Import instance
 pub fn (mut imp Importer) inject_paths_of_new_imports(mut new_imports []&Import, lookup_paths ...string) {
-	dir := os.dir(imp.context.file_path)
+	dir := imp.context.file_dir
 	mut project := imp.context.store.dependency_tree.get_node(dir) or { imp.context.store.dependency_tree.add(dir) }
 
 	// Custom iterator for looping over paths without
@@ -80,7 +80,7 @@ pub fn (mut imp Importer) inject_paths_of_new_imports(mut new_imports []&Import,
 	// Might be "smart" but I'm just testing my hypothesis
 	// if it will be better for the memory consumption ~ Ned
 	mut import_path_iter := ImportPathIterator{
-		start_path: dir
+		start_path: imp.context.file_dir
 		lookup_paths: lookup_paths
 		fallback_lookup_paths: imp.context.store.default_import_paths
 	}
@@ -158,8 +158,7 @@ pub fn (mut imp Importer) inject_paths_of_new_imports(mut new_imports []&Import,
 // It also registers the symbols to the store.
 pub fn (mut imp Importer) import_modules(mut imports []&Import) {
 	mut parser := ast.new_parser()
-	dir := imp.context.file_dir
-	modules_from_old_dir := os.join_path(imp.context.file_path, 'modules')
+	modules_from_old_dir := os.join_path(imp.context.file_dir, 'modules')
 
 	for i, new_import in imports {
 		// skip if import is not resolved or already imported
@@ -180,9 +179,9 @@ pub fn (mut imp Importer) import_modules(mut imports []&Import) {
 			context := imp.context.store.with(file_path: full_path, text: Runes(content_str.runes()))
 
 			// Import module but from different lookup oath other than the project
-			modules_from_dir := os.join_path(dir, 'modules')
+			modules_from_dir := os.join_path(context.file_dir, 'modules')
 			import_modules_from_tree(context, tree_from_import, modules_from_dir,
-				imp.context.file_path, modules_from_old_dir)
+				imp.context.file_dir, modules_from_old_dir)
 			imported++
 
 			// Set version to zero so that modules that are already opened
