@@ -59,6 +59,7 @@ fn test_semantic_analysis() ? {
 
 		mut semantic_analyzer := SemanticAnalyzer{
 			context: context
+			formatter: context.symbol_formatter(true)
 		}
 
 		tree := p.parse_string(source: src)
