@@ -1,4 +1,4 @@
-module analyzer
+module ast
 
 import tree_sitter
 import tree_sitter_v as v

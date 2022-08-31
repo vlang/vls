@@ -315,7 +315,7 @@ pub fn (mut ls Vls) folding_range(params lsp.FoldingRangeParams, mut wr Response
 		}
 	}
 
-	for node in analyzer.new_tree_walker(root_node) {
+	for node in ast.new_tree_walker(root_node) {
 		if !node.is_named() {
 			continue
 		}
