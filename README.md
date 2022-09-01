@@ -12,7 +12,7 @@ V Language Server (also known as "VLS") is a LSP v3.15-compatible language serve
 You can get the V language server on a variety of methods.
 
 ## Via V CLI (Recommended)
-Starting with V 0.3 235ef23, you can now install and update VLS via the V CLI by simply executing the following command:
+Starting with V 0.3.1, you can now install and update VLS via the V CLI by simply executing the following command:
 ```
 v ls --install
 ```
