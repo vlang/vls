@@ -79,6 +79,9 @@ Be sure to install the [Sublime V Plugin](https://github.com/elliotchance/vlang-
 ## Vim
 For Vim, please install [vim-lsp](https://github.com/prabirshrestha/vim-lsp) and [vim-lsp-settings](https://github.com/mattn/vim-lsp-settings). Afterwards, open any `.v` file, and execute `:LspInstallServer`.
 
+## [Panic Nova](https://nova.app/)
+See the [VLS extension](https://extensions.panic.com/extensions/louis77/louis77.vlang-vls/) for detailed instructions on how to install VLS on Panic Nova.
+
 ## IntelliJ IDEA, GoLand, and other derivatives
 VLS on JetBrain / IntelliJ-based IDEs does not work at this moment. See [issue 52](https://github.com/vlang/vls/issues/52) for more details.
 
