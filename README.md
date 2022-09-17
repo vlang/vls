@@ -76,6 +76,11 @@ For Sublime Text, please install the [LSP extension](https://packagecontrol.io/p
 
 Be sure to install the [Sublime V Plugin](https://github.com/elliotchance/vlang-sublime) first in order for the language server to start properly.
 
+## NeoVim
+For NeoVim, install [nvim-lspconfig](https://github.com/neovim/nvim-lspconfig) and install vls on your system.
+Then, you open your lsp configuration and add the following to enable the usage of the vls `require('lspconfig').vls.setup{}`.
+Afterwards, just paste the following line into your neovim configuration `vim.cmd([[au BufNewFile,BufRead *.v set filetype=vlang]])`.
+
 ## Vim
 For Vim, please install [vim-lsp](https://github.com/prabirshrestha/vim-lsp) and [vim-lsp-settings](https://github.com/mattn/vim-lsp-settings). Afterwards, open any `.v` file, and execute `:LspInstallServer`.
 
