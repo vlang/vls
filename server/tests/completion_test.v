@@ -588,10 +588,13 @@ fn test_completion() ? {
 		}, mut writer) {
 			// compare content
 			mut expected := completion_results[test_name].clone()
-			expected.sort_with_compare(sort_completion_item)
-
 			mut aactual := actual.clone()
-			aactual.sort_with_compare(sort_completion_item)
+
+			// sort results only if test case is flaky
+			if test_name in flaky_tests {
+				expected.sort_with_compare(sort_completion_item)
+				aactual.sort_with_compare(sort_completion_item)
+			}
 
 			if _ := t.is_equal(expected, aactual) {
 				t.ok(file)
