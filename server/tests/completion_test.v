@@ -539,6 +539,15 @@ const completion_results = {
 	]
 }
 
+fn sort_completion_item(a &lsp.CompletionItem, b &lsp.CompletionItem) int {
+	if int(a.kind) < int(b.kind) {
+		return 1
+	} else if int(a.kind) > int(b.kind) {
+		return -1
+	}
+	return 0
+}
+
 fn test_completion() ? {
 	mut ls := server.new()
 	mut t := &test_utils.Tester{
@@ -578,8 +587,13 @@ fn test_completion() ? {
 			text_document: doc_id
 		}, mut writer) {
 			// compare content
-			expected := completion_results[test_name]
-			if _ := t.is_equal(expected, actual) {
+			mut expected := completion_results[test_name].clone()
+			expected.sort_with_compare(sort_completion_item)
+
+			mut aactual := actual.clone()
+			aactual.sort_with_compare(sort_completion_item)
+
+			if _ := t.is_equal(expected, aactual) {
 				t.ok(file)
 			} else {
 				t.fail(file, err.msg())
