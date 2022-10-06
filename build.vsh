@@ -16,7 +16,7 @@ chdir(project_folder) ?
 mkdir(full_vls_bin_dir) or {}
 
 // use system default C compiler if found
-mut cc := 'cc'
+mut cc := ''
 
 if os.args.len >= 2 {
 	if os.args[1] in ['cc', 'gcc', 'clang', 'msvc'] {
@@ -28,7 +28,7 @@ if os.args.len >= 2 {
 }
 
 $if windows {
-	if cc == 'cc' {
+	if cc == '' {
 		eprintln('> Usage error: for Windows, you must need to specify the compiler to use (either gcc, clang, or msvc)')
 		exit(1)
 	}
@@ -42,8 +42,8 @@ if vls_git_hash.exit_code != 0 {
 }
 os.setenv('VLS_BUILD_COMMIT', vls_git_hash.output.trim_space(), true)
 
-use_libbacktrace_flag := if cc == 'msvc' { '' } else { '-d use_libbacktrace' }
-cmd := 'v -g -gc boehm $use_libbacktrace_flag -cc $cc cmd/vls -o $full_vls_exec_path'
+cc_flag := if cc != '' { '-cc $cc' } else { '' }
+cmd := 'v -g $cc_flag cmd/vls -o $full_vls_exec_path'
 println(cmd)
 ret := system(cmd)
 if ret != 0 {
