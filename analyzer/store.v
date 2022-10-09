@@ -948,7 +948,7 @@ pub fn (mut ss Store) infer_value_type_from_node(file_path string, node ast.Node
 						return void_sym
 					}
 
-					return operand_sym.children_syms[0]
+					return operand_sym.children_syms[0] or { void_sym }
 				}
 			}
 
