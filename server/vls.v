@@ -437,12 +437,9 @@ pub fn (ls Vls) launch_v_tool(args ...string) &os.Process {
 	return p
 }
 
+// set the timeout in SECONDS, after which the server will commit seppuku, in order to not shame itself by lingering in the process list
 pub fn (mut ls Vls) set_timeout_val(min_val int) {
-	$if connection_test ? {
-		ls.shutdown_timeout = min_val * time.second
-	} $else {
-		ls.shutdown_timeout = min_val * time.minute
-	}
+	ls.shutdown_timeout = min_val * time.second
 }
 
 pub enum ServerStatus {

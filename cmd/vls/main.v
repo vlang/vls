@@ -99,8 +99,8 @@ fn setup_logger(cmd cli.Command) jsonrpc.Interceptor {
 }
 
 fn validate_options(cmd cli.Command) ! {
-	if timeout_minutes_val := cmd.flags.get_int('timeout') {
-		if timeout_minutes_val < 0 {
+	if timeout_seconds_val := cmd.flags.get_int('timeout') {
+		if timeout_seconds_val < 0 {
 			return error('timeout: should be not less than zero')
 		}
 	}
@@ -144,8 +144,8 @@ fn run_server(cmd cli.Command, is_child bool) ! {
 	if custom_vroot_path.len != 0 {
 		ls.set_vroot_path(custom_vroot_path)
 	}
-	if timeout_minutes_val := cmd.flags.get_int('timeout') {
-		ls.set_timeout_val(timeout_minutes_val)
+	if timeout_seconds_val := cmd.flags.get_int('timeout') {
+		ls.set_timeout_val(timeout_seconds_val)
 	}
 	ls.set_features(enable_features, true) !
 	ls.set_features(disable_features, false) !
@@ -219,7 +219,7 @@ fn main() {
 			flag: .int
 			name: 'timeout'
 			default_value: ['15']
-			description: 'Number of minutes to be set for timeout/auto-shutdown. After n number of minutes, VLS will automatically shutdown. Set to 0 to disable it.'
+			description: 'Number of SECONDS to be set for timeout/auto-shutdown. After n number of SECONDS, VLS will automatically shutdown. Set to 0 to disable it.'
 		},
 	])
 

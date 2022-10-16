@@ -37,16 +37,15 @@ const init_msg = wrap_request('{"jsonrpc":"2.0","method":"window/showMessage","p
 
 const editor_info_msg = wrap_request('{"jsonrpc":"2.0","method":"window/logMessage","params":{"type":3,"message":"VLS Version: 0.0.1, OS: linux 64"}}')
 
-fn compile_and_start_vls(args ...string) ?&os.Process {
+fn compile_and_start_vls(args ...string) !&os.Process {
 	mut final_args := ['--child']
 	final_args << args
 
 	vls_path := get_vls_path(vls_cmd_dir)
 	if !os.exists(vls_path) {
-		os.chdir(vls_cmd_dir) ?
-		vroot_path := server.detect_vroot_path() ?
-		mut v_build_process := launch_v_tool(vroot_path, '-d', 'connection_test', '-cc',
-			'gcc', '-gc', 'boehm', '.')
+		os.chdir(vls_cmd_dir)!
+		vroot_path := server.detect_vroot_path()!
+		mut v_build_process := launch_v_tool(vroot_path, '-cc', 'gcc', '.')
 		v_build_process.wait()
 
 		if v_build_process.code > 0 {
@@ -64,9 +63,9 @@ fn compile_and_start_vls(args ...string) ?&os.Process {
 	return launch_cmd(vls_path, ...final_args)
 }
 
-fn test_stdio_connect() ? {
+fn test_stdio_connect() {
 	mut io := test_utils.Testio{}
-	mut p := compile_and_start_vls() ?
+	mut p := compile_and_start_vls()!
 	defer {
 		p.close()
 		unsafe { p.free() }
@@ -93,9 +92,9 @@ fn test_stdio_connect() ? {
 	}
 }
 
-fn test_tcp_connect() ? {
+fn test_tcp_connect() {
 	mut io := test_utils.Testio{}
-	mut p := compile_and_start_vls('--socket', '--port=5007') ?
+	mut p := compile_and_start_vls('--socket', '--port=5007')!
 	defer {
 		p.close()
 		unsafe { p.free() }
@@ -106,9 +105,9 @@ fn test_tcp_connect() ? {
 	assert p.pid > 0
 	assert p.is_alive() == true
 	time.sleep(100 * time.millisecond)
-	mut conn := net.dial_tcp('127.0.0.1:5007') ?
+	mut conn := net.dial_tcp('127.0.0.1:5007')!
 	// TODO: add init message assertion
-	conn.write_string(wrap_request(io.request('exit'))) ?
+	conn.write_string(wrap_request(io.request('exit')))!
 	$if windows {
 		time.sleep(100 * time.millisecond)
 	}
@@ -117,9 +116,10 @@ fn test_tcp_connect() ? {
 	assert p.code > 0
 }
 
-fn test_stdio_timeout() ? {
+fn test_stdio_timeout() {
 	mut io := test_utils.Testio{}
-	mut p := compile_and_start_vls('--timeout=1') ?
+	// just 2 SECONDS *should be enough* for testing in CI and for `v test .` ... A whole minute is *very unreasonable*.
+	mut p := compile_and_start_vls('--timeout=2')!
 	p.run()
 	assert p.status == .running
 	assert p.pid > 0
@@ -137,6 +137,6 @@ fn test_stdio_timeout() ? {
 		p.signal_kill()
 		time.sleep(100 * time.millisecond)
 	} $else {
-		os.rm(p.filename) ?
+		os.rm(p.filename)!
 	}
 }
