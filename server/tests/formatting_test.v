@@ -4,9 +4,9 @@ import jsonrpc.server_test_utils { new_test_client }
 import lsp
 import os
 
-fn test_formatting() ? {
+fn test_formatting() {
 	mut ls := server.new()
-	ls.set_features(['v_diagnostics'], false) ?
+	ls.set_features(['v_diagnostics'], false) !
 
 	mut t := &test_utils.Tester{
 		test_files_dir: test_utils.get_test_files_path(@FILE)

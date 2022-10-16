@@ -65,7 +65,7 @@ pub fn (mut tc TestClient) send<T,U>(method string, params T) !U {
 // notify is a version of send but instead of returning a response,
 // it only notifies the server. Effectively sending a request as a
 // notification.
-pub fn (mut tc TestClient) notify<T>(method string, params T) ? {
+pub fn (mut tc TestClient) notify<T>(method string, params T) ! {
 	params_json := json.encode(params)
 	req := jsonrpc.Request{
 		id: ''
@@ -74,7 +74,7 @@ pub fn (mut tc TestClient) notify<T>(method string, params T) ? {
 	}
 
 	tc.stream.send(req)
-	tc.server.respond() ?
+	tc.server.respond() !
 }
 
 // TestStream is a io.ReadWriter-compliant stream for sending
@@ -99,10 +99,10 @@ pub fn (mut rw TestStream) read(mut buf []u8) !int {
 }
 
 // write receives the outgoing response/notification buffer.
-pub fn (mut rw TestStream) write(buf []u8) ?int {
+pub fn (mut rw TestStream) write(buf []u8) !int {
 	raw_json_content := buf.bytestr().all_after('\r\n\r\n')
 	if raw_json_content.contains('"result":') {
-		resp := json.decode(TestResponse, raw_json_content) ?
+		resp := json.decode(TestResponse, raw_json_content) or { return err }
 		rw.resp_buf[resp.raw_id] = resp
 	} else if raw_json_content.contains('"params":') {
 		idx := rw.notif_idx % 20
@@ -114,7 +114,7 @@ pub fn (mut rw TestStream) write(buf []u8) ?int {
 		rw.notif_buf[idx] << buf
 		rw.notif_idx++
 	} else {
-		return none
+		return error('none')
 	}
 	return buf.len
 }

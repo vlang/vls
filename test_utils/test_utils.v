@@ -67,7 +67,7 @@ pub fn (mut t Tester) is_equal<T>(expected T, actual T) ? {
 }
 
 pub fn (mut t Tester) is_null(file TestFile, fail_criteria bool, err IError) {
-	if fail_criteria && err is none {
+	if fail_criteria && (err is none || err.str() == 'none') {
 		t.ok(file)
 	} else {
 		t.fail(file, err.msg())
@@ -100,7 +100,7 @@ pub fn (mut t Tester) count_errors(file TestFile) int {
 }
 
 // open_document generates and returns the request data for the `textDocument/didOpen` reqeust.
-pub fn (mut t Tester) open_document(file TestFile) ?lsp.TextDocumentIdentifier {
+pub fn (mut t Tester) open_document(file TestFile) !lsp.TextDocumentIdentifier {
 	doc_uri := lsp.document_uri_from_path(file.file_path)
 	t.client.notify('textDocument/didOpen', lsp.DidOpenTextDocumentParams{
 		text_document: lsp.TextDocumentItem{
@@ -109,17 +109,17 @@ pub fn (mut t Tester) open_document(file TestFile) ?lsp.TextDocumentIdentifier {
 			version: 1
 			text: file.contents
 		}
-	}) ?
+	}) !
 	return lsp.TextDocumentIdentifier{
 		uri: doc_uri
 	}
 }
 
 // close_document generates and returns the request data for the `textDocument/didClose` reqeust.
-pub fn (mut t Tester) close_document(doc_id lsp.TextDocumentIdentifier) ? {
+pub fn (mut t Tester) close_document(doc_id lsp.TextDocumentIdentifier) ! {
 	t.client.notify('textDocument/didClose', lsp.DidCloseTextDocumentParams{
 		text_document: doc_id
-	}) ?
+	}) !
 }
 
 pub struct TestFile {
@@ -137,10 +137,10 @@ pub mut:
 	file_paths []string
 }
 
-pub fn (iter &TestFilesIterator) get(idx int) ?TestFile {
+pub fn (iter &TestFilesIterator) get(idx int) !TestFile {
 	test_file_path := iter.file_paths[idx]
 	test_file_name := os.base(test_file_path)
-	content := os.read_file(test_file_path) ?
+	content := os.read_file(test_file_path) !
 	return TestFile{
 		file_name: test_file_name
 		file_path: test_file_path
