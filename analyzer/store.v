@@ -78,7 +78,7 @@ pub fn (ss &Store) get_module_path_opt(file_path string, module_name string) ?st
 		}
 	}
 
-	return error('Not found')
+	return none
 }
 
 pub fn (ss &Store) get_module_path_from_sym(file_path string, symbol_name string) ?string {
@@ -93,7 +93,7 @@ pub fn (ss &Store) get_module_path_from_sym(file_path string, symbol_name string
 		}
 	}
 
-	return error('Not found')
+	return none
 }
 
 // get_module_path returns the path of the import/module based

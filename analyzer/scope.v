@@ -215,5 +215,5 @@ pub fn (scope &ScopeTree) get_symbol_with_range(name string, range C.TSRange) ?&
 	// defer {
 	// 	unsafe { symbols.free() }
 	// }
-	return symbols.get(name)
+	return symbols.get(name) or { return none }
 }

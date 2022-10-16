@@ -243,14 +243,13 @@ pub fn (infos []&Symbol) exists(name string) bool {
 pub fn (infos []&Symbol) get(name string) ?&Symbol {
 	index := infos.index(name)
 	if index == -1 {
-		return error('Symbol `$name` not found')
+		return none
 	}
-
-	return infos[index] ?
+	return infos[index]?
 }
 
 // add_child registers the symbol as a child of a given parent symbol
-pub fn (mut info Symbol) add_child(mut new_child_sym Symbol, add_as_parent ...bool) ? {
+pub fn (mut info Symbol) add_child(mut new_child_sym Symbol, add_as_parent ...bool) ! {
 	if add_as_parent.len == 0 || add_as_parent[0] {
 		new_child_sym.parent_sym = unsafe { info }
 	}
@@ -390,7 +389,7 @@ pub fn is_interface_satisfied(sym &Symbol, interface_sym &Symbol) bool {
 // }
 
 // pub fn (opts OptionSymbol) str() string {
-// 	return '?${opts.parent}'
+// 	return '!${opts.parent}'
 // }
 
 pub struct BaseSymbolLocation {
@@ -407,7 +406,7 @@ pub:
 	module_path  string
 }
 
-fn (locs []BindedSymbolLocation) get_path(sym_name string) ?string {
+fn (locs []BindedSymbolLocation) get_path(sym_name string) !string {
 	idx := locs.index(sym_name)
 	if idx != -1 {
 		return locs[idx].module_path
