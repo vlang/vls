@@ -25,17 +25,17 @@ pub mut:
 
 // intercept_raw_request intercepts the incoming raw request buffer
 // to the interceptors.
-pub fn (mut s Server) intercept_raw_request(req []u8) ? {
+pub fn (mut s Server) intercept_raw_request(req []u8) ! {
 	for mut interceptor in s.interceptors {
-		interceptor.on_raw_request(req) ?
+		interceptor.on_raw_request(req) !
 	}
 }
 
 // intercept_raw_request intercepts the incoming decoded JSONRPC Request
 // to the interceptors.
-pub fn (mut s Server) intercept_request(req &Request) ? {
+pub fn (mut s Server) intercept_request(req &Request) ! {
 	for mut interceptor in s.interceptors {
-		interceptor.on_request(req) ?
+		interceptor.on_request(req) !
 	}
 }
 
@@ -50,26 +50,26 @@ pub fn (mut s Server) intercept_encoded_response(resp []u8) {
 pub interface InterceptorData {}
 
 // dispatch_event sends a custom event to the interceptors.
-pub fn (mut s Server) dispatch_event(event_name string, data InterceptorData) ? {
+pub fn (mut s Server) dispatch_event(event_name string, data InterceptorData) ! {
 	for mut i in s.interceptors {
-		i.on_event(event_name, data) ?
+		i.on_event(event_name, data) !
 	}
 }
 
 // process_raw_request decodes the raw request string into JSONRPC request.
-fn (s Server) process_raw_request(raw_request string) ?Request {
+fn (s Server) process_raw_request(raw_request string) !Request {
 	json_payload := raw_request.all_after('\r\n\r\n')
-	return json.decode(Request, json_payload)
+	return json.decode(Request, json_payload) or { return err }
 }
 
 // respond executes the incoming request into a response.
 // for testing purposes only.
-pub fn (mut s Server) respond() ? {
+pub fn (mut s Server) respond() ! {
 	mut base_rw := s.writer()
 	return s.internal_respond(mut base_rw)
 }
 
-fn (mut s Server) internal_respond(mut base_rw ResponseWriter) ? {
+fn (mut s Server) internal_respond(mut base_rw ResponseWriter) ! {
 	defer { s.req_buf.go_back_to(0) }
 	s.stream.read(mut s.req_buf) or {
 		if err is io.Eof {
@@ -154,9 +154,9 @@ pub fn (mut s Server) start() {
 // before handing over to the Handler.
 pub interface Interceptor {
 mut:
-	on_event(name string, data InterceptorData) ?
-	on_raw_request(req []u8) ?
-	on_request(req &Request) ?
+	on_event(name string, data InterceptorData) !
+	on_raw_request(req []u8) !
+	on_request(req &Request) !
 	on_encoded_response(resp []u8) // we cant use generic methods without marking the interface as generic
 }
 
@@ -164,7 +164,7 @@ mut:
 // returns a response data via a ResponseWriter.
 pub interface Handler {
 mut:
-	handle_jsonrpc(req &Request, mut wr ResponseWriter) ?
+	handle_jsonrpc(req &Request, mut wr ResponseWriter) !
 }
 
 // ResponseWriter constructs and sends a JSONRPC response to the stream.
@@ -222,7 +222,7 @@ mut:
 	read_writer io.ReaderWriter
 }
 
-fn (mut w Writer) write(byt []u8) ?int {
+fn (mut w Writer) write(byt []u8) !int {
 	defer { w.clen_sb.go_back_to(0) }
 	w.clen_sb.write_string('Content-Length: $byt.len\r\n\r\n')
 	w.clen_sb.write(byt) or {}
@@ -234,7 +234,7 @@ mut:
 	interceptors []Interceptor
 }
 
-fn (mut wr InterceptorWriter) write(buf []u8) ?int {
+fn (mut wr InterceptorWriter) write(buf []u8) !int {
 	for mut interceptor in wr.interceptors {
 		interceptor.on_encoded_response(buf)
 	}
@@ -245,7 +245,7 @@ fn (mut wr InterceptorWriter) write(buf []u8) ?int {
 // used as a default value for Server.handler
 pub struct PassiveHandler {}
 
-fn (mut h PassiveHandler) handle_jsonrpc(req &Request, mut rw ResponseWriter) ? {}
+fn (mut h PassiveHandler) handle_jsonrpc(req &Request, mut rw ResponseWriter) ! {}
 
 // is_intercepter_enabled checks if the given T is enabled in a Server.
 pub fn is_interceptor_enabled<T>(server &Server) bool {

@@ -157,21 +157,21 @@ fn (mut host VlsHost) handle_exit() {
 	exit(ecode)
 }
 
-fn (mut host VlsHost) generate_report() ?string {
+fn (mut host VlsHost) generate_report() !string {
 	reports_dir_path := os.join_path(server.get_folder_path(), 'reports')
 	if !os.exists(reports_dir_path) {
-		os.mkdir(reports_dir_path)?
+		os.mkdir(reports_dir_path)!
 	}
 
 	report_file_name := 'vls_report_' + time.utc().unix.str() + '.md'
 	report_file_path := os.join_path(reports_dir_path, report_file_name)
-	mut report_file := os.create(report_file_path) ?
+	mut report_file := os.create(report_file_path) !
 	defer {
 		report_file.close()
 	}
 
 	// Get system info first
-	mut vdoctor := launch_v_tool('doctor') ?
+	mut vdoctor := launch_v_tool('doctor') !
 	defer {
 		vdoctor.close()
 	}
@@ -199,6 +199,6 @@ fn (mut host VlsHost) generate_report() ?string {
 		.replace('<!-- What is the actual output displayed in the console/editor? -->', final_err_out)
 		.replace('<!-- If you have a copy vls.log, you can drag them here. -->', lsp_logs_section)
 
-	report_file.writeln(final_output) ?
+	report_file.writeln(final_output) !
 	return report_file_path
 }

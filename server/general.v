@@ -114,7 +114,7 @@ pub fn (mut ls Vls) initialize(params lsp.InitializeParams, mut wr ResponseWrite
 	}
 }
 
-fn (mut ls Vls) setup_logger(mut rw ResponseWriter) ?string {
+fn (mut ls Vls) setup_logger(mut rw ResponseWriter) !string {
 	log_path := ls.log_path()
 	if os.exists(log_path) {
 		os.rm(log_path) or {}
@@ -124,7 +124,7 @@ fn (mut ls Vls) setup_logger(mut rw ResponseWriter) ?string {
 		sanitized_root_uri := ls.root_uri.path().replace_each(['/', '_', ':', '_', '\\', '_'])
 		logs_dir_path := os.join_path(get_folder_path(), 'logs')
 		if !os.exists(logs_dir_path) {
-			os.mkdir(logs_dir_path)?
+			os.mkdir(logs_dir_path)!
 		}
 
 		alt_log_path := os.join_path(logs_dir_path, 'vls__${sanitized_root_uri}.log')

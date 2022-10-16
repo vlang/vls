@@ -10,12 +10,12 @@ import tree_sitter
 const temp_formatting_file_path = os.join_path(os.temp_dir(), 'vls_temp_formatting.v')
 
 [manualfree]
-pub fn (mut ls Vls) formatting(params lsp.DocumentFormattingParams, mut wr ResponseWriter) ?[]lsp.TextEdit {
+pub fn (mut ls Vls) formatting(params lsp.DocumentFormattingParams, mut wr ResponseWriter) ![]lsp.TextEdit {
 	uri := params.text_document.uri
 	source := ls.files[uri].source
 	tree_range := ls.files[uri].tree.root_node().range()
 	if source.len() == 0 {
-		return none
+		return error('none')
 	}
 
 	// We don't integrate v.fmt and it's dependencies anymore to lessen
@@ -24,8 +24,8 @@ pub fn (mut ls Vls) formatting(params lsp.DocumentFormattingParams, mut wr Respo
 	// To simplify this, we will make a temporary file and feed it into
 	// the v fmt CLI program since there is no cross-platform way to pipe
 	// raw strings directly into v fmt.
-	mut temp_file := os.open_file(server.temp_formatting_file_path, 'w') ?
-	temp_file.write_string(source.string()) ?
+	mut temp_file := os.open_file(server.temp_formatting_file_path, 'w') !
+	temp_file.write_string(source.string()) !
 	temp_file.close()
 	defer {
 		os.rm(server.temp_formatting_file_path) or {}
@@ -40,7 +40,7 @@ pub fn (mut ls Vls) formatting(params lsp.DocumentFormattingParams, mut wr Respo
 	if p.code > 0 {
 		errors := p.stderr_slurp().trim_space()
 		wr.show_message(errors, .info)
-		return none
+		return error('none')
 	}
 
 	mut output := p.stdout_slurp()
@@ -130,7 +130,7 @@ fn symbol_to_symbol_info(uri lsp.DocumentUri, sym &analyzer.Symbol) ?lsp.SymbolI
 	}
 }
 
-fn (mut ls Vls) document_symbol(params lsp.DocumentSymbolParams, mut wr ResponseWriter) ?[]lsp.SymbolInformation {
+fn (mut ls Vls) document_symbol(params lsp.DocumentSymbolParams, mut wr ResponseWriter) ![]lsp.SymbolInformation {
 	uri := params.text_document.uri
 	retrieved_symbols := ls.store.get_symbols_by_file_path(uri.path())
 	mut document_symbols := []lsp.SymbolInformation{}

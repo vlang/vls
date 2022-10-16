@@ -9,7 +9,7 @@ fn make_lsp_payload(output string) string {
 	return 'Content-Length: $output.len\r\n\r\n$output'
 }
 
-fn launch_v_tool(args ...string) ?&os.Process {
+fn launch_v_tool(args ...string) !&os.Process {
 	// using @VEXEROOT should never happen but will be used
 	// just in case
 	vroot_path := server.detect_vroot_path() or { @VEXEROOT }

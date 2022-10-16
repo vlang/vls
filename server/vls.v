@@ -64,7 +64,7 @@ pub enum Feature {
 
 // feature_from_str returns the Feature-enum value equivalent of the given string.
 // used internally for Vls.set_features method only.
-fn feature_from_str(feature_name string) ?Feature {
+fn feature_from_str(feature_name string) !Feature {
 	match feature_name {
 		'diagnostics' { return Feature.diagnostics }
 		'v_diagnostics' { return Feature.v_diagnostics }
@@ -159,7 +159,7 @@ fn (mut wr ResponseWriter) wrap_error(err IError) IError {
 	return none
 }
 
-pub fn (mut ls Vls) handle_jsonrpc(request &jsonrpc.Request, mut rw jsonrpc.ResponseWriter) ? {
+pub fn (mut ls Vls) handle_jsonrpc(request &jsonrpc.Request, mut rw jsonrpc.ResponseWriter) ! {
 	// initialize writer upon receiving the first request
 	if isnil(ls.writer) {
 		ls.writer = rw.server.writer(own_buffer: true)
@@ -190,24 +190,24 @@ pub fn (mut ls Vls) handle_jsonrpc(request &jsonrpc.Request, mut rw jsonrpc.Resp
 				// ls.exit()
 			}
 			'textDocument/didOpen' {
-				params := json.decode(lsp.DidOpenTextDocumentParams, request.params) ?
+				params := json.decode(lsp.DidOpenTextDocumentParams, request.params) or { return err }
 				ls.did_open(params, mut rw)
 			}
 			'textDocument/didSave' {
-				params := json.decode(lsp.DidSaveTextDocumentParams, request.params) ?
+				params := json.decode(lsp.DidSaveTextDocumentParams, request.params) or { return err }
 				ls.did_save(params, mut rw)
 			}
 			'textDocument/didChange' {
-				params := json.decode(lsp.DidChangeTextDocumentParams, request.params) ?
+				params := json.decode(lsp.DidChangeTextDocumentParams, request.params) or { return err }
 				ls.typing_ch <- 1
 				ls.did_change(params, mut rw)
 			}
 			'textDocument/didClose' {
-				params := json.decode(lsp.DidCloseTextDocumentParams, request.params) ?
+				params := json.decode(lsp.DidCloseTextDocumentParams, request.params) or { return err }
 				ls.did_close(params, mut rw)
 			}
 			'textDocument/willSave' {
-				params := json.decode(lsp.WillSaveTextDocumentParams, request.params) ?
+				params := json.decode(lsp.WillSaveTextDocumentParams, request.params) or { return err} 
 				ls.will_save(params, mut rw)
 			}
 			'textDocument/formatting' {
@@ -281,7 +281,7 @@ pub fn (mut ls Vls) handle_jsonrpc(request &jsonrpc.Request, mut rw jsonrpc.Resp
 				})
 			}
 			'workspace/didChangeWatchedFiles' {
-				params := json.decode(lsp.DidChangeWatchedFilesParams, request.params) ?
+				params := json.decode(lsp.DidChangeWatchedFilesParams, request.params) or { return err }
 				ls.did_change_watched_files(params, mut rw)
 			}
 			'textDocument/codeLens' {
@@ -310,7 +310,7 @@ pub fn (mut ls Vls) handle_jsonrpc(request &jsonrpc.Request, mut rw jsonrpc.Resp
 				ls.exit(mut rw)
 			}
 			'initialize' {
-				params := json.decode(lsp.InitializeParams, request.params) ?
+				params := json.decode(lsp.InitializeParams, request.params) or { return err }
 				w.write(ls.initialize(params, mut rw))
 			}
 			else {
@@ -407,9 +407,9 @@ pub fn monitor_changes(mut ls Vls, mut resp_wr ResponseWriter) {
 }
 
 // set_features enables or disables a language feature. emits an error if not found
-pub fn (mut ls Vls) set_features(features []string, enable bool) ? {
+pub fn (mut ls Vls) set_features(features []string, enable bool) ! {
 	for feature_name in features {
-		feature_val := feature_from_str(feature_name) ?
+		feature_val := feature_from_str(feature_name) !
 		if feature_val !in ls.enabled_features && !enable {
 			return error('feature "$feature_name" is already disabled')
 		} else if feature_val in ls.enabled_features && enable {
@@ -451,7 +451,7 @@ pub enum ServerStatus {
 	shutdown
 }
 
-pub fn detect_vroot_path() ?string {
+pub fn detect_vroot_path() !string {
 	vroot_env := os.getenv('VROOT')
 	if vroot_env.len != 0 {
 		return vroot_env

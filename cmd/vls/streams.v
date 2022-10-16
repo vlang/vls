@@ -9,7 +9,7 @@ fn C._setmode(int, int)
 fn C.fgetc(stream &C.FILE) int
 
 // Stdin
-fn new_stdio_stream() ?io.ReaderWriter {
+fn new_stdio_stream() !io.ReaderWriter {
 	stream := &StdioStream{}
 	$if windows {
 		// 0x8000 = _O_BINARY from <fcntl.h>
@@ -32,7 +32,7 @@ fn (stream &StdioStream) stdin_file() &C.FILE {
 	return &C.FILE(C.stdin)
 }
 
-pub fn (mut stream StdioStream) write(buf []u8) ?int {
+pub fn (mut stream StdioStream) write(buf []u8) !int {
 	defer { stream.stdout.flush() }
 	return stream.stdout.write(buf)
 }
@@ -89,12 +89,12 @@ fn get_raw_input(file &C.FILE, mut buf []u8) ?int {
 const base_ip = '127.0.0.1'
 
 // Loopback address.
-fn new_socket_stream_server(port int, log bool) ?io.ReaderWriter {
+fn new_socket_stream_server(port int, log bool) !io.ReaderWriter {
 	server_label := 'vls-server'
 
 	// Open the connection.
 	address := '$base_ip:$port'
-	mut listener := net.listen_tcp(.ip, address) ?
+	mut listener := net.listen_tcp(.ip, address) !
 
 	if log {
 		eprintln(term.yellow('Warning: TCP connection is used primarily for debugging purposes only \n\tand may have performance issues. Use it on your own risk.\n'))
@@ -120,10 +120,10 @@ fn new_socket_stream_server(port int, log bool) ?io.ReaderWriter {
 	return stream
 }
 
-fn new_socket_stream_client(port int) ?io.ReaderWriter {
+fn new_socket_stream_client(port int) !io.ReaderWriter {
 	// Open the connection.
 	address := '$base_ip:$port'
-	mut conn := net.dial_tcp(address) ?
+	mut conn := net.dial_tcp(address) !
 	mut reader := io.new_buffered_reader(reader: conn, cap: 1024 * 1024)
 	conn.set_blocking(true) or {}
 
@@ -148,7 +148,7 @@ pub mut:
 	debug bool
 }
 
-pub fn (mut sck SocketStream) write(buf []u8) ?int {
+pub fn (mut sck SocketStream) write(buf []u8) !int {
 	// TODO: should be an interceptor
 	$if !test {
 		if sck.log {

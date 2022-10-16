@@ -51,10 +51,10 @@ pub struct LogItem {
 }
 
 // json is a JSON string representation of the log item.
-pub fn (li LogItem) encode_json(mut wr io.Writer) ? {
-	wr.write('{"kind":"$li.kind","timestamp":$li.timestamp.unix,"payload":'.bytes()) ?
-	wr.write(li.payload) ?
-	wr.write('}\n'.bytes()) ?
+pub fn (li LogItem) encode_json(mut wr io.Writer) ! {
+	wr.write('{"kind":"$li.kind","timestamp":$li.timestamp.unix,"payload":'.bytes()) !
+	wr.write(li.payload) !
+	wr.write('}\n'.bytes()) !
 }
 
 pub fn new() &LogRecorder {
@@ -70,12 +70,12 @@ pub fn (l &LogRecorder) is_enabled() bool {
 }
 
 // set_logpath sets the filepath of the log file and opens the file.
-pub fn (mut l LogRecorder) set_logpath(path string) ? {
+pub fn (mut l LogRecorder) set_logpath(path string) ! {
 	if l.file_opened {
 		l.close()
 	}
 
-	l.file = os.open_append(os.real_path(path)) ?
+	l.file = os.open_append(os.real_path(path)) !
 	l.file_path = path
 	l.file_opened = true
 	l.enabled = true
@@ -133,9 +133,9 @@ pub const set_logpath_event = '$event_prefix/setPath'
 pub const close_event = '$event_prefix/close'
 pub const state_event = '$event_prefix/state'
 
-pub fn (mut l LogRecorder) on_event(name string, data jsonrpc.InterceptorData) ? {
+pub fn (mut l LogRecorder) on_event(name string, data jsonrpc.InterceptorData) ! {
 	if name == log.set_logpath_event && data is string {
-		l.set_logpath(data) ?
+		l.set_logpath(data) !
 	} else if name == log.close_event {
 		l.close()
 	} else if name == log.state_event && data is bool {
@@ -147,11 +147,11 @@ pub fn (mut l LogRecorder) on_event(name string, data jsonrpc.InterceptorData) ?
 	}
 }
 
-pub fn (l &LogRecorder) on_raw_request(req []u8) ? {}
+pub fn (l &LogRecorder) on_raw_request(req []u8) ! {}
 
-pub fn (l &LogRecorder) on_raw_response(raw_resp []u8) ? {}
+pub fn (l &LogRecorder) on_raw_response(raw_resp []u8) ! {}
 
-pub fn (mut l LogRecorder) on_request(req &jsonrpc.Request) ? {
+pub fn (mut l LogRecorder) on_request(req &jsonrpc.Request) ! {
 	log_kind := if req.id.len == 0 {
 		LogKind.recv_notification
 	} else {

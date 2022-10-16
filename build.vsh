@@ -11,7 +11,7 @@ project_folder := dir(executable())
 full_vls_bin_dir := real_path(join_path(project_folder, 'bin'))
 full_vls_exec_path := real_path(join_path(full_vls_bin_dir, vls_exec_name))
 
-chdir(project_folder) ?
+chdir(project_folder) !
 
 mkdir(full_vls_bin_dir) or {}
 

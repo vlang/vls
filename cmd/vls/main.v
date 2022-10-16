@@ -8,17 +8,18 @@ import jsonrpc
 import net
 import lsp.log { LogRecorder }
 
+// TODO: make this return !, after `cli` is changed too
 fn run_cli(cmd cli.Command) ? {
 	run_as_child := cmd.flags.get_bool('child') or { false }
-	validate_options(cmd) ?
+	validate_options(cmd) or { return err }
 	if run_as_child {
-		run_server(cmd, run_as_child) ?
+		run_server(cmd, run_as_child) or { return err }
 	} else {
-		run_host(cmd) ?
+		run_host(cmd) or { return err }
 	}
 }
 
-fn run_host(cmd cli.Command) ? {
+fn run_host(cmd cli.Command) ! {
 	// TODO: make vlshost a jsonrpc handler
 	should_generate_report := cmd.flags.get_bool('generate-report') or { false }
 	flag_discriminator := if cmd.posix_mode { '--' } else { '-' }
@@ -62,7 +63,7 @@ fn run_host(cmd cli.Command) ? {
 	}
 
 	// Setup the comm method and build the language server.
-	mut io := setup_and_configure_io(cmd, false) ?
+	mut io := setup_and_configure_io(cmd, false) !
 	mut jrpc_server := &jsonrpc.Server{
 		stream: io
 		handler: &jsonrpc.PassiveHandler{}
@@ -80,7 +81,7 @@ fn run_host(cmd cli.Command) ? {
 	host.listen()
 }
 
-fn setup_and_configure_io(cmd cli.Command, is_child bool) ?io.ReaderWriter {
+fn setup_and_configure_io(cmd cli.Command, is_child bool) !io.ReaderWriter {
 	socket_mode := cmd.flags.get_bool('socket') or { false }
 	if socket_mode {
 		socket_port := cmd.flags.get_int('port') or { 5007 }
@@ -97,7 +98,7 @@ fn setup_logger(cmd cli.Command) jsonrpc.Interceptor {
 	}
 }
 
-fn validate_options(cmd cli.Command) ? {
+fn validate_options(cmd cli.Command) ! {
 	if timeout_minutes_val := cmd.flags.get_int('timeout') {
 		if timeout_minutes_val < 0 {
 			return error('timeout: should be not less than zero')
@@ -116,7 +117,7 @@ fn validate_options(cmd cli.Command) ? {
 	}
 }
 
-fn run_server(cmd cli.Command, is_child bool) ? {
+fn run_server(cmd cli.Command, is_child bool) ! {
 	// Fetch the command-line options.
 	enable_flag_raw := cmd.flags.get_string('enable') or { '' }
 	disable_flag_raw := cmd.flags.get_string('disable') or { '' }
@@ -130,7 +131,7 @@ fn run_server(cmd cli.Command, is_child bool) ? {
 	custom_vroot_path := cmd.flags.get_string('vroot') or { '' }
 
 	// Setup the comm method and build the language server.
-	mut io := setup_and_configure_io(cmd, is_child) ?
+	mut io := setup_and_configure_io(cmd, is_child) !
 	mut ls := server.new()
 	mut jrpc_server := &jsonrpc.Server{
 		stream: io
@@ -146,8 +147,8 @@ fn run_server(cmd cli.Command, is_child bool) ? {
 	if timeout_minutes_val := cmd.flags.get_int('timeout') {
 		ls.set_timeout_val(timeout_minutes_val)
 	}
-	ls.set_features(enable_features, true) ?
-	ls.set_features(disable_features, false) ?
+	ls.set_features(enable_features, true) !
+	ls.set_features(disable_features, false) !
 
 	mut rw := unsafe { &server.ResponseWriter(jrpc_server.writer(own_buffer: true)) }
 
