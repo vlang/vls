@@ -66,8 +66,8 @@ pub fn (req Request) json() string {
 }
 
 // decode_params decodes the parameters of a Request.
-pub fn (req Request) decode_params<T>() ?T {
-	return json.decode(T, req.params)
+pub fn (req Request) decode_params<T>() !T {
+	return json.decode(T, req.params) or { return err }
 }
 
 // Response is a representation of server reply after an rpc call was made.
