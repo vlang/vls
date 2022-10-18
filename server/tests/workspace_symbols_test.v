@@ -53,7 +53,7 @@ const workspace_symbols_result = [
 	},
 ]
 
-fn test_workspace_symbols() ? {
+fn test_workspace_symbols() {
 	mut ls := server.new()
 	mut t := &test_utils.Tester{
 		test_files_dir: test_utils.get_test_files_path(@FILE)
@@ -61,7 +61,7 @@ fn test_workspace_symbols() ? {
 		client: new_test_client(ls)
 	}
 	mut writer := t.client.server.writer()
-	test_files := t.initialize() ?
+	test_files := t.initialize()?
 	for file in test_files {
 		// open document
 		t.open_document(file) or {

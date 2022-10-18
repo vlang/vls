@@ -7,7 +7,7 @@ import analyzer.an_test_utils
 import v.util.diff
 import term
 
-fn test_semantic_analysis() ? {
+fn test_semantic_analysis() {
 	diff_cmd := diff.find_working_diff_command() or { '' }
 	mut p := ast.new_parser()
 	vlib_path := os.join_path(os.dir(os.getenv('VEXE')), 'vlib')

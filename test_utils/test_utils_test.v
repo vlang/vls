@@ -44,7 +44,7 @@ fn test_result() {
 	assert io.result() == json.encode(result)
 }
 
-fn test_notification() ? {
+fn test_notification() {
 	mut io := Testio{}
 	request := json.encode(jsonrpc.NotificationMessage<string>{
 		method: 'log'
@@ -56,7 +56,7 @@ fn test_notification() ? {
 	assert params == '"just a log"'
 }
 
-fn test_response_error() ? {
+fn test_response_error() {
 	mut io := Testio{}
 	payload := jsonrpc.Response<map[string]string>{
 		error: jsonrpc.response_error(error: jsonrpc.method_not_found)

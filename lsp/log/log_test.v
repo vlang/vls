@@ -7,7 +7,7 @@ struct TestLogItem {
 	payload string
 }
 
-fn test_notification_send() ? {
+fn test_notification_send() {
 	mut lg := new()
 
 	lg.log(kind: .send_notification, payload: '"Hello!"'.bytes())
@@ -18,7 +18,7 @@ fn test_notification_send() ? {
 	assert result.payload == 'Hello!'
 }
 
-fn test_notification_receive() ? {
+fn test_notification_receive() {
 	mut lg := new()
 
 	lg.log(kind: .recv_notification, payload: '"Received!"'.bytes())
@@ -29,7 +29,7 @@ fn test_notification_receive() ? {
 	assert result.payload == 'Received!'
 }
 
-fn test_request_send() ? {
+fn test_request_send() {
 	mut lg := new()
 
 	lg.log(kind: .recv_request, payload: '"Request sent."'.bytes())
@@ -40,7 +40,7 @@ fn test_request_send() ? {
 	assert result.payload == 'Request sent.'
 }
 
-fn test_request_receive() ? {
+fn test_request_receive() {
 	mut lg := new()
 
 	lg.log(kind: .recv_request, payload: '"Request received."'.bytes())
@@ -51,7 +51,7 @@ fn test_request_receive() ? {
 	assert result.payload == 'Request received.'
 }
 
-fn test_response_send() ? {
+fn test_response_send() {
 	mut lg := new()
 
 	lg.log(kind: .send_response, payload: '"Response sent."'.bytes())
@@ -62,7 +62,7 @@ fn test_response_send() ? {
 	assert result.payload == 'Response sent.'
 }
 
-fn test_response_receive() ? {
+fn test_response_receive() {
 	mut lg := new()
 
 	lg.log(kind: .send_response, payload: '"Response received."'.bytes())

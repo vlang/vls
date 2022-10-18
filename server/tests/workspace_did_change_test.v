@@ -4,7 +4,7 @@ import test_utils
 import lsp
 import os
 
-fn test_workspace_did_change() ? {
+fn test_workspace_did_change() {
 	mut ls := server.new()
 	mut t := &test_utils.Tester{
 		test_files_dir: test_utils.get_test_files_path(@FILE)
@@ -14,7 +14,7 @@ fn test_workspace_did_change() ? {
 
 	// TODO: add a mock filesystem
 	mut writer := t.client.server.writer()
-	test_files := t.initialize() ?
+	test_files := t.initialize()?
 	for file in test_files {
 		// open document
 		t.open_document(file) or {

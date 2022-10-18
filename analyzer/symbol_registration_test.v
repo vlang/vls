@@ -7,7 +7,7 @@ import analyzer { Collector, Store, SymbolAnalyzer, setup_builtin, new_tree_curs
 import v.util.diff
 import term
 
-fn test_symbol_registration() ? {
+fn test_symbol_registration() {
 	diff_cmd := diff.find_working_diff_command() or { '' }
 	mut p := ast.new_parser()
 	mut bench := benchmark.new_benchmark()

@@ -100,7 +100,7 @@ const signature_help_results = {
 	}
 }
 
-fn test_signature_help() ? {
+fn test_signature_help() {
 	mut ls := server.new()
 	mut t := &test_utils.Tester{
 		test_files_dir: test_utils.get_test_files_path(@FILE)
@@ -108,7 +108,7 @@ fn test_signature_help() ? {
 		client: new_test_client(ls)
 	}
 
-	test_files := t.initialize() ?
+	test_files := t.initialize()?
 	for file in test_files {
 		test_name := file.file_name
 		err_msg := if test_name !in signature_help_results {

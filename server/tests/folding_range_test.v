@@ -48,7 +48,7 @@ const folding_range_results = {
 	]
 }
 
-fn test_folding_range() ? {
+fn test_folding_range() {
 	mut ls := server.new()
 	mut t := &test_utils.Tester{
 		test_files_dir: test_utils.get_test_files_path(@FILE)

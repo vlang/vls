@@ -245,7 +245,7 @@ pub fn (infos []&Symbol) get(name string) ?&Symbol {
 	if index == -1 {
 		return none
 	}
-	return infos[index]?
+	return infos[index] or { none }
 }
 
 // add_child registers the symbol as a child of a given parent symbol

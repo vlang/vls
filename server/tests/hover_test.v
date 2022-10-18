@@ -215,7 +215,7 @@ const hover_results = {
 	}
 }
 
-fn test_hover() ? {
+fn test_hover() {
 	mut ls := server.new()
 	mut t := &test_utils.Tester{
 		test_files_dir: test_utils.get_test_files_path(@FILE)
@@ -223,7 +223,7 @@ fn test_hover() ? {
 		client: new_test_client(ls)
 	}
 	mut writer := t.client.server.writer()
-	test_files := t.initialize() ?
+	test_files := t.initialize()?
 	for file in test_files {
 		test_name := file.file_name
 		err_msg := if test_name !in hover_results {
