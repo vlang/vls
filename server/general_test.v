@@ -99,7 +99,7 @@ fn test_setup_logger() {
 		if err is io.Eof {
 			return
 		}
-		return err
+		return
 	}
 
 	notif := io.stream.notification_at<lsp.ShowMessageParams>(0) ?
