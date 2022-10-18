@@ -147,7 +147,8 @@ const anon_fn_prefix = '#anon_'
 // find_fn_symbol finds the function symbol with the appropriate parameters and return type
 pub fn (ss &Store) find_fn_symbol(file_path string, module_name string, return_sym &Symbol, params []&Symbol) ?&Symbol {
 	module_path := ss.get_module_path(file_path, module_name)
-	for sym in ss.symbols[module_path] ? {
+	symbols := ss.symbols[module_path] or { return none }
+	for sym in symbols {
 		mut final_sym := unsafe { sym }
 		if sym.kind == .typedef && sym.parent_sym.kind == .function_type {
 			final_sym = sym.parent_sym
