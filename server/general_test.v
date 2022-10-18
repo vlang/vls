@@ -7,7 +7,7 @@ import os
 import io
 
 
-fn test_wrong_first_request() ? {
+fn test_wrong_first_request() {
 	mut ls := server.new()
 	mut io := new_test_client(ls)
 
@@ -20,14 +20,14 @@ fn test_wrong_first_request() ? {
 	assert false
 }
 
-fn test_initialize_with_capabilities() ? {
+fn test_initialize_with_capabilities() {
 	mut ls := server.new()
 	mut io := new_test_client(ls)
 	result := io.send<map[string]string, lsp.InitializeResult>('initialize', map[string]string{}) or {
 		if err is io.Eof {
 			return
 		}
-		return err
+		return
 	}
 
 	assert ls.status() == .initialized
@@ -36,9 +36,9 @@ fn test_initialize_with_capabilities() ? {
 	}
 }
 
-fn test_initialized() ? {
-	mut io, mut ls := init_tests() ?
-	io.notify('initialized', map[string]string{}) ?
+fn test_initialized() {
+	mut io, mut ls := init_tests()!
+	io.notify('initialized', map[string]string{})!
 	assert ls.status() == .initialized
 }
 
@@ -89,7 +89,7 @@ fn test_set_features() {
 	}
 }
 
-fn test_setup_logger() ? {
+fn test_setup_logger() {
 	println('test_setup_logger')
 	mut io := new_test_client(server.new(), &LogRecorder{})
 	io.send<lsp.InitializeParams, lsp.InitializeResult>('initialize', lsp.InitializeParams{
@@ -99,7 +99,7 @@ fn test_setup_logger() ? {
 		if err is io.Eof {
 			return
 		}
-		return err
+		return
 	}
 
 	notif := io.stream.notification_at<lsp.ShowMessageParams>(0) ?
@@ -113,7 +113,7 @@ fn test_setup_logger() ? {
 	}
 }
 
-fn init_tests() ?(&TestClient, &server.Vls) {
+fn init_tests() !(&TestClient, &server.Vls) {
 	mut ls := server.new()
 	mut io := new_test_client(ls)
 	io.send<map[string]string, lsp.InitializeResult>('initialize', map[string]string{}) or {

@@ -1,13 +1,13 @@
 // a v port of the https://github.com/vinzmay/go-rope/blob/master/rope_test.go test file
 import structures.ropes
 
-fn test_rope_creation() ? {
+fn test_rope_creation() {
 	r := ropes.new('test')
 	assert r.str() == 'test'
 	assert r.len() == 4
 }
 
-fn test_rope_concat() ? {
+fn test_rope_concat() {
 	r := ropes.new('abcdef')
 	r2 := ropes.new('ghilmno')
 	r3 := r.concat(r2)
@@ -19,7 +19,7 @@ fn test_rope_concat() ? {
 	assert r3.len() == 13
 }
 
-fn test_rope_split() ? {
+fn test_rope_split() {
 	r := ropes.new('abcdef')
 	r1, r2 := r.split(4)
 	assert r.str() == 'abcdef'

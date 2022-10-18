@@ -7,7 +7,7 @@ import analyzer.an_test_utils
 import v.util.diff
 import term
 
-fn test_semantic_analysis() ? {
+fn test_semantic_analysis() {
 	diff_cmd := diff.find_working_diff_command() or { '' }
 	mut p := ast.new_parser()
 	vlib_path := os.join_path(os.dir(os.getenv('VEXE')), 'vlib')
@@ -25,7 +25,7 @@ fn test_semantic_analysis() ? {
 	test_files := test_utils.load_test_file_paths(test_files_dir, 'semantic_analyzer') or {
 		bench.fail()
 		println(bench.step_message_fail(err.msg()))
-		return err
+		return
 	}
 
 	bench.set_total_expected_steps(test_files.len)

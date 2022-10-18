@@ -40,12 +40,12 @@ const skipped_tests = [
 ]
 
 // test_analyzer_from_v compares the output from V's checker to VLS' analyzer
-fn test_analyzer_from_v() ? {
+fn test_analyzer_from_v() {
 	mut p := ast.new_parser()
-	os.chdir(os.dir(@VEXE)) ?
+	os.chdir(os.dir(@VEXE))!
 
-	input_file_paths := os.glob('vlib/v/checker/tests/*.vv') ?
-	out_file_paths := os.glob('vlib/v/checker/tests/*.out') ?
+	input_file_paths := os.glob('vlib/v/checker/tests/*.vv')!
+	out_file_paths := os.glob('vlib/v/checker/tests/*.out')!
 
 	vlib_path := os.join_path(os.getwd(), 'vlib')
 	mut reporter := &Collector{}
@@ -87,8 +87,8 @@ fn test_analyzer_from_v() ? {
 		}
 
 		modules_dir := os.join_path(os.dir(input_file_path), 'modules')
-		input_file_content := os.read_file(input_file_path) ?
-		out_file_content := clean_line_endings(os.read_file(out_file_path) ?)
+		input_file_content := os.read_file(input_file_path)!
+		out_file_content := clean_line_endings(os.read_file(out_file_path)!)
 
 		input_file_runes := input_file_content.runes()
 		tree := p.parse_string(source: input_file_content)

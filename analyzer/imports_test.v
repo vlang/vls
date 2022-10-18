@@ -29,7 +29,7 @@ fn parse_content() &tree_sitter.Tree<v.NodeType> {
 	return p.parse_string(source: sample_content)
 }
 
-fn test_scan_imports() ? {
+fn test_scan_imports() {
 	tree := parse_content()
 	mut store := &Store{
 		reporter: &Collector{}
@@ -47,7 +47,7 @@ fn test_scan_imports() ? {
 	assert imports[import_idxs[1]].absolute_module_name == 'env'
 }
 
-fn test_inject_paths_of_new_imports() ? {
+fn test_inject_paths_of_new_imports() {
 	tree := parse_content()
 	mut store := &Store{
 		reporter: &Collector{}
@@ -58,7 +58,7 @@ fn test_inject_paths_of_new_imports() ? {
 	}
 
 	import_idxs := imp.scan_imports(tree)
-	mut imports := store.imports[file_dir]?
+	mut imports := store.imports[file_dir] or { return }
 
 	assert import_idxs.len == 2
 	assert imports[import_idxs[0]].absolute_module_name == 'os'
@@ -71,7 +71,7 @@ fn test_inject_paths_of_new_imports() ? {
 	assert imports[import_idxs[1]].resolved == false
 }
 
-fn test_import_modules_from_tree() ? {
+fn test_import_modules_from_tree() {
 	tree := parse_content()
 	mut store := &Store{
 		reporter: &Collector{}
@@ -96,7 +96,7 @@ fn test_import_modules_from_tree() ? {
 	}
 }
 
-fn test_import_modules_with_edits() ? {
+fn test_import_modules_with_edits() {
 	mut p := ast.new_parser()
 	sample_content2 := '
 	import os
@@ -178,7 +178,7 @@ fn test_import_modules_with_edits() ? {
 	// }
 }
 
-fn test_other_import_cases() ? {
+fn test_other_import_cases() {
 	diff_cmd := diff.find_working_diff_command() or { '' }
 	mut p := ast.new_parser()
 	mut bench := benchmark.new_benchmark()

@@ -80,7 +80,7 @@ const doc_symbols_result = {
 	]
 }
 
-fn test_document_symbols() ? {
+fn test_document_symbols() {
 	mut ls := server.new()
 	mut t := &test_utils.Tester{
 		test_files_dir: test_utils.get_test_files_path(@FILE)
@@ -88,7 +88,7 @@ fn test_document_symbols() ? {
 		client: new_test_client(ls)
 	}
 	mut writer := t.client.server.writer()
-	test_files := t.initialize() ?
+	test_files := t.initialize()?
 	for file in test_files {
 		// open document
 		doc_id := t.open_document(file) or {

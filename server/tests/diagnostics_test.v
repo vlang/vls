@@ -43,14 +43,14 @@ const diagnostics_results = {
 	}
 }
 
-fn test_diagnostics() ? {
+fn test_diagnostics() {
 	mut t := &test_utils.Tester{
 		test_files_dir: test_utils.get_test_files_path(@FILE)
 		folder_name: 'diagnostics'
 		client: new_test_client(server.new())
 	}
 
-	test_files := t.initialize() ?
+	test_files := t.initialize()?
 	for file in test_files {
 		doc_id := t.open_document(file) or {
 			t.fail(file, err.msg())
