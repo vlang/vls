@@ -27,6 +27,7 @@ fn test_initialize_with_capabilities() {
 		if err is io.Eof {
 			return
 		}
+		assert false
 		return
 	}
 
@@ -99,6 +100,7 @@ fn test_setup_logger() {
 		if err is io.Eof {
 			return
 		}
+		assert false
 		return
 	}
 
