@@ -1077,7 +1077,7 @@ pub fn (mut an SemanticAnalyzer) match_expression(node ast.Node, cfg SemanticExp
 	if expecting_types && !has_default_case {
 		missing_types := cond_sym.children_syms.filter(it.name !in existing_case_values).map('`${it.name}`')
 		if missing_types.len != 0 {
-			return an.report(node, errors.match_sumtype_not_exhaustive_error, missing_types)
+			return an.report(node, errors.match_sumtype_not_exhaustive_error, ...missing_types)
 		}
 	}
 
