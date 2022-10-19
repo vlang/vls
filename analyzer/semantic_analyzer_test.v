@@ -25,6 +25,7 @@ fn test_semantic_analysis() {
 	test_files := test_utils.load_test_file_paths(test_files_dir, 'semantic_analyzer') or {
 		bench.fail()
 		println(bench.step_message_fail(err.msg()))
+		assert false
 		return
 	}
 

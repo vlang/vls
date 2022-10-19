@@ -61,6 +61,7 @@ fn test_folding_range() {
 		if err.msg() == 'no test files found for "folding_range"' {
 			return
 		}
+		assert false
 		return
 	}
 
