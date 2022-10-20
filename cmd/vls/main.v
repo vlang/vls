@@ -9,13 +9,13 @@ import net
 import lsp.log { LogRecorder }
 
 // TODO: make this return !, after `cli` is changed too
-fn run_cli(cmd cli.Command) ? {
+fn run_cli(cmd cli.Command) ! {
 	run_as_child := cmd.flags.get_bool('child') or { false }
-	validate_options(cmd) or { return err }
+	validate_options(cmd)!
 	if run_as_child {
-		run_server(cmd, run_as_child) or { return err }
+		run_server(cmd, run_as_child)!
 	} else {
-		run_host(cmd) or { return err }
+		run_host(cmd)!
 	}
 }
 
@@ -63,7 +63,7 @@ fn run_host(cmd cli.Command) ! {
 	}
 
 	// Setup the comm method and build the language server.
-	mut io := setup_and_configure_io(cmd, false) !
+	mut io := setup_and_configure_io(cmd, false)!
 	mut jrpc_server := &jsonrpc.Server{
 		stream: io
 		handler: &jsonrpc.PassiveHandler{}
@@ -131,12 +131,12 @@ fn run_server(cmd cli.Command, is_child bool) ! {
 	custom_vroot_path := cmd.flags.get_string('vroot') or { '' }
 
 	// Setup the comm method and build the language server.
-	mut io := setup_and_configure_io(cmd, is_child) !
+	mut io := setup_and_configure_io(cmd, is_child)!
 	mut ls := server.new()
 	mut jrpc_server := &jsonrpc.Server{
 		stream: io
 		interceptors: [
-			setup_logger(cmd)
+			setup_logger(cmd),
 		]
 		handler: ls
 	}
@@ -147,13 +147,13 @@ fn run_server(cmd cli.Command, is_child bool) ! {
 	if timeout_seconds_val := cmd.flags.get_int('timeout') {
 		ls.set_timeout_val(timeout_seconds_val)
 	}
-	ls.set_features(enable_features, true) !
-	ls.set_features(disable_features, false) !
+	ls.set_features(enable_features, true)!
+	ls.set_features(disable_features, false)!
 
 	mut rw := unsafe { &server.ResponseWriter(jrpc_server.writer(own_buffer: true)) }
 
 	// Show message that VLS is not yet ready!
-	rw.show_message('VLS is early software. Please report your issue to github.com/vlang/vls if you encounter any problems.', 
+	rw.show_message('VLS is early software. Please report your issue to github.com/vlang/vls if you encounter any problems.',
 		.warning)
 
 	go server.monitor_changes(mut ls, mut rw)
@@ -205,7 +205,7 @@ fn main() {
 		},
 		cli.Flag{
 			flag: .int
-			default_value: ['5007'],
+			default_value: ['5007']
 			name: 'port'
 			description: 'Port to use for socket communication. (Default: 5007)'
 		},
