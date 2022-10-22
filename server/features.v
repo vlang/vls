@@ -24,8 +24,8 @@ pub fn (mut ls Vls) formatting(params lsp.DocumentFormattingParams, mut wr Respo
 	// To simplify this, we will make a temporary file and feed it into
 	// the v fmt CLI program since there is no cross-platform way to pipe
 	// raw strings directly into v fmt.
-	mut temp_file := os.open_file(server.temp_formatting_file_path, 'w') !
-	temp_file.write_string(source.string()) !
+	mut temp_file := os.open_file(server.temp_formatting_file_path, 'w')!
+	temp_file.write_string(source.string())!
 	temp_file.close()
 	defer {
 		os.rm(server.temp_formatting_file_path) or {}
@@ -167,13 +167,9 @@ fn (mut ls Vls) signature_help(params lsp.SignatureHelpParams, mut wr ResponseWr
 		return none
 	}
 
-	sym := ls.store.infer_symbol_from_node(uri.path(), node, file.source) or {
-		return none
-	}
+	sym := ls.store.infer_symbol_from_node(uri.path(), node, file.source) or { return none }
 
-	args_node := parent_node.child_by_field_name('arguments') or {
-		return none
-	}
+	args_node := parent_node.child_by_field_name('arguments') or { return none }
 
 	mut formatter := ls.store.with(file_path: uri.path()).symbol_formatter(false)
 
@@ -255,7 +251,7 @@ fn get_hover_data(mut store analyzer.Store, node ast.Node, uri lsp.DocumentUri, 
 		}
 	} else if node_type_name == .import_path {
 		file_name := os.base(file_path)
-		found_imp := store.imports.find_by_position(file_path, node.range()) ?
+		found_imp := store.imports.find_by_position(file_path, node.range())?
 		alias := found_imp.aliases[file_name] or { '' }
 		return lsp.Hover{
 			contents: lsp.v_marked_string('import $found_imp.absolute_module_name' +
@@ -278,7 +274,9 @@ fn get_hover_data(mut store analyzer.Store, node ast.Node, uri lsp.DocumentUri, 
 	mut sym := store.infer_symbol_from_node(file_path, node, source) or { analyzer.void_sym }
 	if isnil(sym) || sym.is_void() {
 		closest_parent := closest_symbol_node_parent(node)
-		sym = store.infer_symbol_from_node(file_path, closest_parent, source) or { analyzer.void_sym }
+		sym = store.infer_symbol_from_node(file_path, closest_parent, source) or {
+			analyzer.void_sym
+		}
 	}
 
 	// eprintln('$node_type_name | ${node.text(source)} | $sym')
@@ -520,8 +518,8 @@ pub fn (mut ls Vls) implementation(params lsp.TextDocumentPositionParams, mut wr
 
 	// check first the possible interfaces implemented by the symbol
 	// at the current directory...
-	get_implementation_locations_from_syms(ls.store.symbols[file_dir], got_sym,
-		original_range, mut locations)
+	get_implementation_locations_from_syms(ls.store.symbols[file_dir], got_sym, original_range, mut
+		locations)
 
 	// ...afterwards to the imported modules
 	for imp in ls.store.imports[file_dir] {

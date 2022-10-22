@@ -1,7 +1,7 @@
 module an_test_utils
 
 import strings
-import analyzer { ScopeTree, Symbol, Collector, Report, Import, SymbolFormatter }
+import analyzer { Collector, Import, Report, ScopeTree, Symbol, SymbolFormatter }
 // import tree_sitter
 import os
 
@@ -27,17 +27,26 @@ fn sexpr_str_write_symbol(mut writer strings.Builder, mut symbol_formatter Symbo
 		if sym.return_sym.kind == .function_type {
 			symbol_formatter.format_with_builder(sym.return_sym, mut writer)
 		} else {
-			symbol_formatter.format_with_builder(sym.return_sym, mut writer, with_contents: false, with_access: false, with_kind: false)
+			symbol_formatter.format_with_builder(sym.return_sym, mut writer,
+				with_contents: false
+				with_access: false
+				with_kind: false
+			)
 		}
 		writer.write_u8(` `)
 	}
-	if sym.kind in analyzer.sym_kinds_allowed_to_print_parent && !sym.parent_sym.is_void() && sym.parent_sym.kind != .variable {
+	if sym.kind in analyzer.sym_kinds_allowed_to_print_parent && !sym.parent_sym.is_void()
+		&& sym.parent_sym.kind != .variable {
 		writer.write_string('(parent ')
 		writer.write_string(sym.parent_sym.kind.str() + ' ')
 		if sym.parent_sym.kind == .function_type {
 			symbol_formatter.format_with_builder(sym.parent_sym, mut writer)
 		} else {
-			symbol_formatter.format_with_builder(sym.parent_sym, mut writer, with_contents: false, with_access: false, with_kind: false)
+			symbol_formatter.format_with_builder(sym.parent_sym, mut writer,
+				with_contents: false
+				with_access: false
+				with_kind: false
+			)
 		}
 		writer.write_string(') ')
 	}

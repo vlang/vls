@@ -43,7 +43,8 @@ fn (fmt &SymbolFormatter) get_module_name(from_file_path string) string {
 			for imp in import_lists {
 				if !from_file_path.starts_with(imp.path) || fmt.context.file_path !in imp.ranges {
 					continue
-				} else if fmt.context.file_name in imp.symbols && imp.symbols[fmt.context.file_name].len != 0 {
+				} else if fmt.context.file_name in imp.symbols
+					&& imp.symbols[fmt.context.file_name].len != 0 {
 					eprintln(imp.symbols[fmt.context.file_name])
 					// DO NOT PREFIX SELECTIVELY-IMPORTED SYMBOLS!
 					return ''
@@ -133,7 +134,7 @@ pub fn (mut fmt SymbolFormatter) format_with_builder(sym &Symbol, mut builder st
 
 			if !isnil(sym.parent_sym) && !sym.parent_sym.is_void() {
 				builder.write_byte(`(`)
-				fmt.format_with_builder(sym.parent_sym, mut builder, params_format_cfg)
+				fmt.format_with_builder(sym.parent_sym, mut builder, analyzer.params_format_cfg)
 				builder.write_string(') ')
 				builder.write_string(sym.name)
 			} else if !sym.name.starts_with(anon_fn_prefix) {
@@ -143,9 +144,9 @@ pub fn (mut fmt SymbolFormatter) format_with_builder(sym &Symbol, mut builder st
 			builder.write_byte(`(`)
 			for i, parameter_sym in sym.children_syms {
 				if parameter_sym.name.len != 0 {
-					fmt.format_with_builder(parameter_sym, mut builder, params_format_cfg)
+					fmt.format_with_builder(parameter_sym, mut builder, analyzer.params_format_cfg)
 				} else {
-					fmt.format_with_builder(parameter_sym.return_sym, mut builder, params_format_cfg)
+					fmt.format_with_builder(parameter_sym.return_sym, mut builder, analyzer.params_format_cfg)
 				}
 				if i < sym.children_syms.len - 1 {
 					builder.write_string(', ')
@@ -154,17 +155,17 @@ pub fn (mut fmt SymbolFormatter) format_with_builder(sym &Symbol, mut builder st
 			builder.write_byte(`)`)
 			if !sym.return_sym.is_void() {
 				builder.write_byte(` `)
-				fmt.format_with_builder(sym.return_sym, mut builder, types_format_cfg)
+				fmt.format_with_builder(sym.return_sym, mut builder, analyzer.types_format_cfg)
 			}
 		}
 		.multi_return {
 			builder.write_byte(`(`)
 			for i, type_sym in sym.children_syms {
-				if type_sym.kind in analyzer.kinds_in_multi_return_to_be_excluded {
+				if type_sym.kind in kinds_in_multi_return_to_be_excluded {
 					continue
 				}
 
-				fmt.format_with_builder(type_sym, mut builder, types_format_cfg)
+				fmt.format_with_builder(type_sym, mut builder, analyzer.types_format_cfg)
 				if i < sym.children_syms.len - 1 {
 					builder.write_string(', ')
 				}
@@ -173,11 +174,11 @@ pub fn (mut fmt SymbolFormatter) format_with_builder(sym &Symbol, mut builder st
 		}
 		.optional {
 			builder.write_string('?')
-			fmt.format_with_builder(sym.parent_sym, mut builder, types_format_cfg)
+			fmt.format_with_builder(sym.parent_sym, mut builder, analyzer.types_format_cfg)
 		}
 		.ref {
 			builder.write_string('&')
-			fmt.format_with_builder(sym.parent_sym, mut builder, types_format_cfg)
+			fmt.format_with_builder(sym.parent_sym, mut builder, analyzer.types_format_cfg)
 		}
 		.struct_ {
 			fmt.write_access(sym, mut builder, cfg)
@@ -198,10 +199,10 @@ pub fn (mut fmt SymbolFormatter) format_with_builder(sym &Symbol, mut builder st
 				builder.write_string(' = ')
 
 				if sym.kind == .typedef {
-					fmt.format_with_builder(sym.parent_sym, mut builder, child_types_format_cfg)
+					fmt.format_with_builder(sym.parent_sym, mut builder, analyzer.child_types_format_cfg)
 				} else {
 					for i in 0 .. sym.sumtype_children_len {
-						fmt.format_with_builder(sym.children_syms[i], mut builder, child_types_format_cfg)
+						fmt.format_with_builder(sym.children_syms[i], mut builder, analyzer.child_types_format_cfg)
 
 						if i < sym.sumtype_children_len - 1 {
 							builder.write_string(' | ')
@@ -214,7 +215,7 @@ pub fn (mut fmt SymbolFormatter) format_with_builder(sym &Symbol, mut builder st
 			fmt.write_access(sym, mut builder, cfg)
 
 			if sym.kind == .field {
-				fmt.format_with_builder(sym.parent_sym, mut builder, child_types_format_cfg)
+				fmt.format_with_builder(sym.parent_sym, mut builder, analyzer.child_types_format_cfg)
 				builder.write_byte(`.`)
 			}
 
@@ -240,4 +241,3 @@ pub fn (mut fmt SymbolFormatter) format_with_builder(sym &Symbol, mut builder st
 		}
 	}
 }
-

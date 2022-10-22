@@ -3,15 +3,16 @@ module analyzer
 import os
 
 const numeric_types = ['u8', 'u16', 'u32', 'u64', 'i8', 'i16', 'int', 'i64', 'f32', 'f64']
-const numeric_types_with_any_type = ['u8', 'u16', 'u32', 'u64' 'i8', 'i16', 'int', 'i64', 'f32', 'f64', 'int_literal', 'float_literal']
+
+const numeric_types_with_any_type = ['u8', 'u16', 'u32', 'u64', 'i8', 'i16', 'int', 'i64', 'f32',
+	'f64', 'int_literal', 'float_literal']
 
 pub fn setup_builtin(mut store Store, builtin_path string) {
 	mut importer := Importer{
 		context: store.default_context()
 	}
-	
-	mut builtin_import, builtin_idx, _ := store.add_import(
-		'',
+
+	mut builtin_import, builtin_idx, _ := store.add_import('',
 		resolved: true
 		module_name: 'builtin'
 		path: builtin_path
@@ -19,14 +20,14 @@ pub fn setup_builtin(mut store Store, builtin_path string) {
 
 	store.register_auto_import(builtin_import, '')
 	register_builtin_symbols(mut store, builtin_import)
-	importer.import_modules(mut store.imports[importer.context.file_dir], [builtin_idx])
+	importer.import_modules(mut store.imports[importer.context.file_dir], [
+		builtin_idx,
+	])
 	register_none(mut store, builtin_import)
 }
 
 fn register_none(mut ss Store, builtin_import &Import) {
-	registered_none_sym := ss.symbols[builtin_import.path].get('None__') or {
-		return
-	}
+	registered_none_sym := ss.symbols[builtin_import.path].get('None__') or { return }
 
 	mut none_sym := Symbol{
 		name: 'none'
@@ -45,9 +46,7 @@ fn register_none(mut ss Store, builtin_import &Import) {
 		file_version: 0
 	}
 
-	ss.register_symbol(mut none_sym) or {
-		eprintln('none registration is skipped. Reason: $err')
-	}
+	ss.register_symbol(mut none_sym) or { eprintln('none registration is skipped. Reason: $err') }
 }
 
 fn register_builtin_symbols(mut ss Store, builtin_import &Import) {

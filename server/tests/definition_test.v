@@ -391,7 +391,8 @@ fn test_definition() {
 	test_files := t.initialize()?
 	for file in test_files {
 		test_name := file.file_name
-		err_msg := if test_name !in definition_should_return_null && test_name !in definition_results {
+		err_msg := if test_name !in definition_should_return_null
+			&& test_name !in definition_results {
 			'missing results'
 		} else if test_name !in definition_inputs {
 			'missing input data'
@@ -412,7 +413,8 @@ fn test_definition() {
 		if actual := ls.definition(lsp.TextDocumentPositionParams{
 			text_document: doc_id
 			position: definition_inputs[test_name]
-		}, mut writer) {
+		}, mut writer)
+		{
 			// compare content
 			if _ := t.is_equal(definition_results[test_name], actual) {
 				t.ok(file)

@@ -2,14 +2,14 @@ module server
 
 import lsp
 import term
-import analyzer { ReporterPreferences, Report, ReportKind }
+import analyzer { Report, ReportKind, ReporterPreferences }
 import os
 
 struct DiagnosticReporter {
 mut:
-	prefs           ReporterPreferences
-	version         int
-	reports         map[string][]lsp.Diagnostic = map[string][]lsp.Diagnostic{}
+	prefs   ReporterPreferences
+	version int
+	reports map[string][]lsp.Diagnostic = map[string][]lsp.Diagnostic{}
 }
 
 fn (r &DiagnosticReporter) count() int {
@@ -65,7 +65,7 @@ fn (mut r DiagnosticReporter) report(report Report) {
 const empty_diagnostic = []lsp.Diagnostic{}
 
 fn (mut r DiagnosticReporter) publish(mut wr ResponseWriter, uri lsp.DocumentUri) {
-	wr.publish_diagnostics(uri: uri, diagnostics: empty_diagnostic)
+	wr.publish_diagnostics(uri: uri, diagnostics: server.empty_diagnostic)
 	if uri !in r.reports {
 		return
 	}

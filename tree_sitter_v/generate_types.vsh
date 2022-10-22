@@ -2,7 +2,6 @@ import json
 import strings
 
 /*
-
 This is a script file which creates static type declarations
 for tree-sitter-v's node types by using the information found
 in node-types.json and turn it into a pseudo-sum type using enums
@@ -11,7 +10,6 @@ into respective NodeType enum. Anonymous nodes are automatically identified
 as NodeType.unknown.
 
 See: https://tree-sitter.github.io/tree-sitter/using-parsers#static-node-types
-
 */
 
 const to_be_escaped = ['none', 'true', 'false', 'map', 'type']
@@ -47,7 +45,7 @@ fn write_const_enum_array(mut wr strings.Builder, var_name string, enum_type_nam
 }
 
 struct NodeType {
-	name     string [json:'type']
+	name     string     [json: 'type']
 	named    bool
 	subtypes []NodeType
 	// children TypeChildren
@@ -118,7 +116,8 @@ for supertype_name, supertype_node_types in supertype_node_groups {
 
 wr.write_string('\npub fn (typ $node_type_enum_name) group() $super_type_enum_name {\n\treturn ')
 mut if_i := 0
-supertype_ordered_names := ['top_level_declaration', 'type', 'simple_type', 'expression', 'expression_with_blocks', 'statement', 'simple_statement', 'unknown']
+supertype_ordered_names := ['top_level_declaration', 'type', 'simple_type', 'expression',
+	'expression_with_blocks', 'statement', 'simple_statement', 'unknown']
 for supertype_name in supertype_ordered_names {
 	if if_i < supertype_ordered_names.len - 1 {
 		wr.write_string('if typ in supertype__${supertype_name}_nodes ')

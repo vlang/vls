@@ -9,8 +9,8 @@ import os
 
 struct CompletionBuilder {
 mut:
-	store              &analyzer.Store [required]
-	file_path          string          [required]
+	store              &analyzer.Store          [required]
+	file_path          string                   [required]
 	symbol_formatter   analyzer.SymbolFormatter [required]
 	file_dir           string
 	src                tree_sitter.SourceText
@@ -89,8 +89,8 @@ fn (mut builder CompletionBuilder) build_suggestions_from_stmt(node ast.Node) {
 			left_count := left_node.named_child_count()
 			if expr_list_count == left_count {
 				last_left_node := left_node.named_child(left_count - 1) or { return }
-				builder.filter_return_type = builder.store.infer_value_type_from_node(builder.file_path, last_left_node,
-					builder.src)
+				builder.filter_return_type = builder.store.infer_value_type_from_node(builder.file_path,
+					last_left_node, builder.src)
 				builder.show_local = true
 			}
 		}
@@ -123,9 +123,8 @@ fn (mut builder CompletionBuilder) build_suggestions_from_list(node ast.Node) {
 		.argument_list {
 			call_expr_arg_cur_idx := node.named_child_count()
 			parent := node.parent() or { return }
-			returned_sym := builder.store.infer_symbol_from_node(builder.file_path, parent, builder.src) or {
-				builder.filter_return_type
-			}
+			returned_sym := builder.store.infer_symbol_from_node(builder.file_path, parent,
+				builder.src) or { builder.filter_return_type }
 
 			if isnil(returned_sym) {
 				return
@@ -163,8 +162,7 @@ fn (mut builder CompletionBuilder) build_suggestions_from_list(node ast.Node) {
 fn (mut builder CompletionBuilder) build_suggestions_from_expr(node ast.Node) {
 	node_type_name := node.type_name
 	match node_type_name {
-		.binded_identifier, .identifier, .selector_expression, .call_expression,
-		.index_expression {
+		.binded_identifier, .identifier, .selector_expression, .call_expression, .index_expression {
 			builder.show_global = false
 			builder.show_local = false
 
@@ -180,11 +178,19 @@ fn (mut builder CompletionBuilder) build_suggestions_from_expr(node ast.Node) {
 					}
 				}
 
-				if got_sym := builder.store.infer_symbol_from_node(builder.file_path, selected_node, builder.src) {
+				if got_sym := builder.store.infer_symbol_from_node(builder.file_path,
+					selected_node, builder.src)
+				{
 					builder.show_mut_only = builder.parent_node.type_name == .block
 						&& got_sym.is_mutable()
-					if got_sym.kind == .enum_ || (got_sym.kind == .field && got_sym.parent_sym.kind == .enum_) {
-						builder.build_suggestions_from_sym(got_sym, is_selector: true, filter_kinds: [.field])
+					if got_sym.kind == .enum_
+						|| (got_sym.kind == .field && got_sym.parent_sym.kind == .enum_) {
+						builder.build_suggestions_from_sym(got_sym,
+							is_selector: true
+							filter_kinds: [
+								.field,
+							]
+						)
 					} else {
 						builder.build_suggestions_from_sym(got_sym.return_sym, is_selector: true)
 					}
@@ -210,22 +216,34 @@ fn (mut builder CompletionBuilder) build_suggestions_from_expr(node ast.Node) {
 			if closest_element_node.type_name == .keyed_element {
 				builder.build_suggestions_from_expr(closest_element_node)
 			} else if parent_node := node.parent() {
-				if got_sym := builder.store.infer_symbol_from_node(builder.file_path, parent_node, builder.src) {
+				if got_sym := builder.store.infer_symbol_from_node(builder.file_path,
+					parent_node, builder.src)
+				{
 					builder.build_suggestions_from_sym(got_sym, BuildSuggestionsFromSymParams{
-						filter_kinds: if got_sym.kind == .enum_ { [.field] } else { []analyzer.SymbolKind{} }
+						filter_kinds: if got_sym.kind == .enum_ {
+							[.field]
+						} else {
+							[]analyzer.SymbolKind{}
+						}
 						prefix: if got_sym.kind in [.enum_, .field] { '.' } else { '' }
 					})
 				}
 			}
 		}
 		.keyed_element {
-			if got_sym := builder.store.infer_symbol_from_node(builder.file_path, node, builder.src) {
+			if got_sym := builder.store.infer_symbol_from_node(builder.file_path, node,
+				builder.src)
+			{
 				builder.show_local = true
 				builder.filter_return_type = got_sym.return_sym
 
 				if got_sym.return_sym.kind != .struct_ {
 					builder.build_suggestions_from_sym(got_sym.return_sym, BuildSuggestionsFromSymParams{
-						filter_kinds: if got_sym.return_sym.kind == .enum_ { [.field] } else { []analyzer.SymbolKind{} }
+						filter_kinds: if got_sym.return_sym.kind == .enum_ {
+							[.field]
+						} else {
+							[]analyzer.SymbolKind{}
+						}
 						prefix: if got_sym.return_sym.kind in [.enum_, .field] { '.' } else { '' }
 					})
 				}
@@ -267,7 +285,8 @@ fn (mut builder CompletionBuilder) build_suggestions_from_sym(sym &analyzer.Symb
 		if params.is_selector {
 			if params.filter_kinds.len != 0 && child_sym.kind !in params.filter_kinds {
 				continue
-			} else if (sym.kind in [.enum_, .struct_] || sym.kind in analyzer.container_symbol_kinds)
+			} else if
+				(sym.kind in [.enum_, .struct_] || sym.kind in analyzer.container_symbol_kinds)
 				&& child_sym.kind !in [.field, .function, .embedded_field] {
 				continue
 			}
@@ -284,7 +303,9 @@ fn (mut builder CompletionBuilder) build_suggestions_from_sym(sym &analyzer.Symb
 				continue
 			}
 
-			if existing_completion_item := symbol_to_completion_item(child_sym, mut builder.symbol_formatter, with_snippet: true, prefix: params.prefix) {
+			if existing_completion_item := symbol_to_completion_item(child_sym, mut builder.symbol_formatter,
+				with_snippet: true, prefix: params.prefix)
+			{
 				builder.add(existing_completion_item)
 			}
 
@@ -302,17 +323,18 @@ fn (mut builder CompletionBuilder) build_suggestions_from_sym(sym &analyzer.Symb
 				insert_text_format: .snippet
 				detail: builder.symbol_formatter.format(child_sym)
 			})
-		} else if (child_sym.kind == .field || (child_sym.kind == .function && params.from_value)) && sym.kind == .enum_ {
-			builder.add(symbol_to_completion_item(child_sym, mut builder.symbol_formatter, with_snippet: true, prefix: params.prefix) or { continue })
+		} else if (child_sym.kind == .field || (child_sym.kind == .function && params.from_value))
+			&& sym.kind == .enum_ {
+			builder.add(symbol_to_completion_item(child_sym, mut builder.symbol_formatter,
+				with_snippet: true, prefix: params.prefix) or { continue })
 		}
 	}
 
 	if sym.kind in analyzer.container_symbol_kinds {
 		for base_sym_loc in builder.store.base_symbol_locations {
 			if base_sym_loc.for_kind == sym.kind {
-				base_sym := builder.store.find_symbol(builder.file_path, base_sym_loc.module_name, base_sym_loc.symbol_name) or {
-					continue
-				}
+				base_sym := builder.store.find_symbol(builder.file_path, base_sym_loc.module_name,
+					base_sym_loc.symbol_name) or { continue }
 				builder.build_suggestions_from_sym(base_sym, params)
 			}
 		}
@@ -343,7 +365,8 @@ fn (mut builder CompletionBuilder) build_suggestions_from_binded_symbols(lang an
 
 		module_path := sym_loc_entry.module_path
 		if module_path !in imported_paths {
-			if module_path != builder.cur_dir() && !builder.store.is_imported(builder.file_path, module_path) {
+			if module_path != builder.cur_dir()
+				&& !builder.store.is_imported(builder.file_path, module_path) {
 				continue
 			}
 
@@ -353,7 +376,9 @@ fn (mut builder CompletionBuilder) build_suggestions_from_binded_symbols(lang an
 		sym_name := sym_loc_entry.for_sym_name
 		sym := builder.store.symbols[module_path].get(sym_name) or { continue }
 
-		if existing_completion_item := symbol_to_completion_item(sym, mut builder.symbol_formatter, with_snippet: with_snippet) {
+		if existing_completion_item := symbol_to_completion_item(sym, mut builder.symbol_formatter,
+			with_snippet: with_snippet)
+		{
 			builder.add(lsp.CompletionItem{
 				...existing_completion_item
 				insert_text: existing_completion_item.insert_text[lang_len..]
@@ -376,9 +401,8 @@ fn (mut builder CompletionBuilder) build_suggestions_from_module(name string, in
 		}
 
 		if int(imp_sym.access) >= int(analyzer.SymbolAccess.public) {
-			builder.add(symbol_to_completion_item(imp_sym, mut builder.symbol_formatter, with_snippet: builder.ctx.trigger_character == '.') or {
-				continue
-			})
+			builder.add(symbol_to_completion_item(imp_sym, mut builder.symbol_formatter,
+				with_snippet: builder.ctx.trigger_character == '.') or { continue })
 
 			if imp_sym.kind == .enum_ && imp_sym.children_syms.len <= 10 {
 				for child_sym in imp_sym.children_syms {
@@ -386,9 +410,8 @@ fn (mut builder CompletionBuilder) build_suggestions_from_module(name string, in
 						continue
 					}
 
-					builder.add(symbol_to_completion_item(child_sym, mut builder.symbol_formatter, with_snippet: false) or {
-						continue
-					})
+					builder.add(symbol_to_completion_item(child_sym, mut builder.symbol_formatter,
+						with_snippet: false) or { continue })
 				}
 			}
 		}
@@ -445,7 +468,9 @@ fn (mut builder CompletionBuilder) build_local_suggestions() {
 	// the functions and the constants of the file.
 	if file_scope_ := builder.store.opened_scopes[builder.file_path] {
 		mut file_scope := unsafe { file_scope_ }
-		mut scope := file_scope.innermost(u32(builder.offset), u32(builder.offset)) or { file_scope }
+		mut scope := file_scope.innermost(u32(builder.offset), u32(builder.offset)) or {
+			file_scope
+		}
 		for !isnil(scope) && scope != file_scope {
 			// constants
 			for scope_sym in scope.get_all_symbols() {
@@ -482,7 +507,9 @@ fn (mut builder CompletionBuilder) build_global_suggestions() {
 
 			// is_type_decl := false
 			is_type_decl := builder.parent_node.type_name == .type_declaration
-			builder.add(symbol_to_completion_item(sym, mut builder.symbol_formatter, with_snippet: !is_type_decl) or { continue })
+			builder.add(symbol_to_completion_item(sym, mut builder.symbol_formatter,
+				with_snippet: !is_type_decl
+			) or { continue })
 		}
 	}
 
@@ -681,7 +708,8 @@ pub fn (mut ls Vls) completion(params lsp.CompletionParams, mut wr ResponseWrite
 			}
 		}
 
-		for offset > file.source.len() || (offset < file.source.len() && file.source.at(offset) == ` `) {
+		for offset > file.source.len() || (offset < file.source.len()
+			&& file.source.at(offset) == ` `) {
 			offset--
 		}
 

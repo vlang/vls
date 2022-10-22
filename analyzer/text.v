@@ -11,5 +11,5 @@ pub fn (r Runes) len() int {
 }
 
 pub fn (r Runes) substr(start_index int, end_index int) string {
-	return r[start_index .. end_index].string()
+	return r[start_index..end_index].string()
 }

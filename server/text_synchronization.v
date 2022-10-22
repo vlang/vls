@@ -107,13 +107,8 @@ pub fn (mut ls Vls) did_change(params lsp.DidChangeTextDocumentParams, mut wr Re
 		ls.parser.reset()
 	}
 
-	ls.store.delete_symbol_at_node(
-		uri.path(),
-		ls.files[uri].tree.root_node(), 
-		ls.files[uri].source,
-		u32(params.content_changes.first().range.start.line), 
-		u32(params.content_changes.last().range.start.line)
-	)
+	ls.store.delete_symbol_at_node(uri.path(), ls.files[uri].tree.root_node(), ls.files[uri].source,
+		u32(params.content_changes.first().range.start.line), u32(params.content_changes.last().range.start.line))
 
 	mut new_src := ls.files[uri].source
 	mut new_tree := ls.files[uri].tree.raw_tree.copy()
@@ -137,11 +132,12 @@ pub fn (mut ls Vls) did_change(params lsp.DidChangeTextDocumentParams, mut wr Re
 		// - there's no text to be added (remove/delete only)
 		// - a specific portion of the text is replaced with another text
 		//   regardless of the length (e.g. completion, formatting)
-		// 
+		//
 		// NOTES ON INSERTING TEXT:
 		// insert only on the starting index if the to-be-inserted text
 		// has content.
-		new_src = new_src.delete(start_idx, old_end_idx - start_idx).insert(start_idx, change_text)
+		new_src = new_src.delete(start_idx, old_end_idx - start_idx).insert(start_idx,
+			change_text)
 
 		// edit the tree
 		new_tree.edit(
@@ -172,9 +168,7 @@ pub fn (mut ls Vls) did_change(params lsp.DidChangeTextDocumentParams, mut wr Re
 	}
 
 	if Feature.v_diagnostics !in ls.enabled_features {
-		ls.reporter.clear_from_line(
-			uri, u32(params.content_changes.first().range.start.line)
-		)
+		ls.reporter.clear_from_line(uri, u32(params.content_changes.first().range.start.line))
 	}
 
 	// $if !test {

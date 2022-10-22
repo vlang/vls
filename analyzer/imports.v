@@ -40,8 +40,8 @@ pub fn (mut imp Importer) scan_imports(tree &ast.Tree) []int {
 		}
 
 		// resolve it later after
-		mut imp_module, import_entry_idx, already_imported := imp.context.store.add_import(
-			imp.context.file_dir,
+		mut imp_module, import_entry_idx, already_imported := imp.context.store.add_import(imp.context.file_dir,
+			
 			resolved: false
 			absolute_module_name: import_path_node.text(imp.context.text)
 		)
@@ -120,7 +120,9 @@ fn (mut imp Importer) is_import_path_valid(path string, mod_names ...string) (bo
 // inject_paths_of_new_imports resolves and injects the path to the Import instance
 pub fn (mut imp Importer) inject_paths_of_new_imports(mut new_imports []Import, import_idxs []int, lookup_paths ...string) {
 	dir := imp.context.file_dir
-	mut project := imp.context.store.dependency_tree.get_node(dir) or { imp.context.store.dependency_tree.add(dir) }
+	mut project := imp.context.store.dependency_tree.get_node(dir) or {
+		imp.context.store.dependency_tree.add(dir)
+	}
 
 	// Custom iterator for looping over paths without
 	// allocating a new array with concatenated items
@@ -144,12 +146,14 @@ pub fn (mut imp Importer) inject_paths_of_new_imports(mut new_imports []Import, 
 			mut has_v_files, mut is_valid := imp.is_import_path_valid(path, ...mod_names)
 			if mod_names.len > 1 || (is_valid && !has_v_files) {
 				for mod_name_idx in 0 .. mod_names.len {
-					mut mod_names_with_src := mod_names[..mod_name_idx + 1].map(os.join_path(it, 'src'))
+					mut mod_names_with_src := mod_names[..mod_name_idx + 1].map(os.join_path(it,
+						'src'))
 					if mod_names.len > 1 || mod_name_idx == mod_names.len - 1 {
 						mod_names_with_src << mod_names[mod_name_idx + 1..]
-					} 
+					}
 
-					is_subdir_has_v_files, is_subdir_valid := imp.is_import_path_valid(path, ...mod_names_with_src)
+					is_subdir_has_v_files, is_subdir_valid := imp.is_import_path_valid(path,
+						...mod_names_with_src)
 					if is_subdir_valid && !is_subdir_has_v_files {
 						continue
 					} else if is_subdir_has_v_files {
@@ -159,8 +163,8 @@ pub fn (mut imp Importer) inject_paths_of_new_imports(mut new_imports []Import, 
 					// break if found or does not exist
 					break
 				}
-			} 
-			
+			}
+
 			// make it a separate if branch so that
 			// it can be "reusable" with the if branch above
 			if !is_valid {
@@ -201,7 +205,8 @@ pub fn (mut imp Importer) import_modules(mut imports []Import, import_idxs []int
 
 	for import_idx in import_idxs {
 		// skip if import is not resolved or already imported
-		if import_idx >= imports.len || !imports[import_idx].resolved || imports[import_idx].imported {
+		if import_idx >= imports.len || !imports[import_idx].resolved
+			|| imports[import_idx].imported {
 			continue
 		}
 
@@ -221,8 +226,8 @@ pub fn (mut imp Importer) import_modules(mut imports []Import, import_idxs []int
 
 			// Import module but from different lookup oath other than the project
 			modules_from_dir := os.join_path(context.file_dir, 'modules')
-			import_modules_from_tree(context, tree_from_import, modules_from_dir,
-				imp.context.file_dir, modules_from_old_dir)
+			import_modules_from_tree(context, tree_from_import, modules_from_dir, imp.context.file_dir,
+				modules_from_old_dir)
 			imported++
 
 			// Set version to zero so that modules that are already opened
@@ -280,7 +285,8 @@ pub fn import_modules_from_tree(context AnalyzerContext, tree &ast.Tree, lookup_
 		return
 	}
 
-	importer.inject_paths_of_new_imports(mut importer.context.store.imports[context.file_dir], import_idxs, ...lookup_paths)
+	importer.inject_paths_of_new_imports(mut importer.context.store.imports[context.file_dir],
+		import_idxs, ...lookup_paths)
 	importer.import_modules(mut importer.context.store.imports[context.file_dir], import_idxs)
 }
 

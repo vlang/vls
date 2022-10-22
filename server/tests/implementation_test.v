@@ -78,7 +78,8 @@ fn test_implementation() {
 		if actual := ls.implementation(lsp.TextDocumentPositionParams{
 			text_document: doc_id
 			position: implementation_inputs[test_name]
-		}, mut writer) {
+		}, mut writer)
+		{
 			// compare content
 			if _ := t.is_equal(implementation_results[test_name], actual) {
 				t.ok(file)

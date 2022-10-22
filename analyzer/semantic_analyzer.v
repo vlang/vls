@@ -1,6 +1,6 @@
 module analyzer
 
-import errors
+import analyzer.errors
 import tree_sitter_v as v
 import ast
 import os
@@ -31,7 +31,7 @@ fn error_is(err IError, err_code string) bool {
 pub struct SemanticAnalyzer {
 pub mut:
 	context    AnalyzerContext
-	parent_sym &Symbol = analyzer.void_sym
+	parent_sym &Symbol = void_sym
 	formatter  SymbolFormatter [required]
 	// skips the local scopes and registers only
 	// the top-level ones regardless of its
@@ -74,7 +74,7 @@ fn (mut an SemanticAnalyzer) format_report_data(d errors.ErrorData) string {
 	if d is string {
 		return *d
 	} else if d is Symbol {
-		return an.formatter.format(d, analyzer.child_types_format_cfg)
+		return an.formatter.format(d, child_types_format_cfg)
 	} else if d is []string {
 		return d.join(', ')
 	} else {
@@ -102,8 +102,8 @@ fn (mut an SemanticAnalyzer) format_report(report Report) string {
 fn (mut an SemanticAnalyzer) import_decl(node ast.Node) ? {
 	// Most of the checking is already done in `import_modules_from_trees`
 	// Check only the symbols if they are available
-	symbols := node.child_by_field_name('symbols') ?
-	module_name_node := node.child_by_field_name('path') ?
+	symbols := node.child_by_field_name('symbols')?
+	module_name_node := node.child_by_field_name('path')?
 	module_name := module_name_node.text(an.context.text)
 	// defer { unsafe { module_name.free() } }
 
@@ -112,7 +112,7 @@ fn (mut an SemanticAnalyzer) import_decl(node ast.Node) ? {
 		return
 	}
 
-	list := symbols.named_child(0) ?
+	list := symbols.named_child(0)?
 	symbols_count := list.named_child_count()
 	for i := u32(0); i < symbols_count; i++ {
 		sym_node := list.named_child(i) or { continue }
@@ -127,7 +127,7 @@ fn (mut an SemanticAnalyzer) import_decl(node ast.Node) ? {
 		} else if got_sym.kind == .variable && got_sym.is_const {
 			an.report(sym_node, errors.selective_const_import_error, {
 				'module': module_name
-				'var': sym_node.text(an.context.text),
+				'var':    sym_node.text(an.context.text)
 			})
 		}
 	}
@@ -156,13 +156,9 @@ fn (mut an SemanticAnalyzer) enum_decl(node ast.Node) ? {
 		mut member_values := []string{len: int(member_count)}
 
 		for i in 0 .. member_count {
-			member_node := decl_list_node.named_child(i) or {
-				continue
-			}
+			member_node := decl_list_node.named_child(i) or { continue }
 
-			member_name_node := member_node.child_by_field_name('name') or {
-				continue
-			}
+			member_name_node := member_node.child_by_field_name('name') or { continue }
 
 			member_name := member_name_node.text(an.context.text)
 			if member_name in member_names {
@@ -172,10 +168,11 @@ fn (mut an SemanticAnalyzer) enum_decl(node ast.Node) ? {
 			}
 
 			if member_value_node := member_node.child_by_field_name('value') {
-				val_sym := an.expression(member_value_node, as_value: true) or { analyzer.void_sym }
+				val_sym := an.expression(member_value_node, as_value: true) or { void_sym }
 				if val_sym.name != 'int' {
 					an.report(member_value_node, errors.enum_default_value_error)
-				} else if member_value_node.type_name == .int_literal && member_value_node.text(an.context.text) == max_int_value {
+				} else if member_value_node.type_name == .int_literal
+					&& member_value_node.text(an.context.text) == analyzer.max_int_value {
 					value_overflowed = true
 				}
 
@@ -208,9 +205,7 @@ fn (mut an SemanticAnalyzer) type_decl(node ast.Node) ? {
 
 	for i in u32(0) .. types_count {
 		type_node := types_node.named_child(i) or { continue }
-		got_sym := an.context.find_symbol_by_type_node(type_node) or {
-			analyzer.void_sym
-		}
+		got_sym := an.context.find_symbol_by_type_node(type_node) or { void_sym }
 
 		if got_sym.is_void() || got_sym.kind == .placeholder {
 			an.report(type_node, errors.unknown_type_error, type_node.text(an.context.text))
@@ -252,8 +247,8 @@ pub fn (mut an SemanticAnalyzer) top_level_statement(current_node ast.Node) {
 pub fn (mut an SemanticAnalyzer) assignment_statement(node ast.Node) ? {
 	op_node := node.child_by_field_name('operator')?
 	op := op_node.raw_node.type_name()[0].ascii_str()
-	is_multiplicative := op in multiplicative_operators
-	is_additive := op in additive_operators
+	is_multiplicative := op in analyzer.multiplicative_operators
+	is_additive := op in analyzer.additive_operators
 
 	left_node := node.child_by_field_name('left')?
 	right_node := node.child_by_field_name('right')?
@@ -275,17 +270,19 @@ pub fn (mut an SemanticAnalyzer) assignment_statement(node ast.Node) ? {
 				if error_is(err, errors.constant_mutation_error) {
 					continue
 				}
-				analyzer.void_sym
+				void_sym
 			}
-			mut right_sym := an.expression(right_child, as_value: true) or { analyzer.void_sym }
+			mut right_sym := an.expression(right_child, as_value: true) or { void_sym }
 
 			if is_imaginary && op != '=' {
 				an.report(left_child, errors.imaginary_mutation_error)
 			} else if is_multiplicative || is_additive {
-				if left_sym.name in analyzer.numeric_types_with_any_type || right_sym.name in analyzer.numeric_types_with_any_type {
+				if left_sym.name in numeric_types_with_any_type
+					|| right_sym.name in numeric_types_with_any_type {
 					an.report(node, errors.mismatched_type_error, left_sym, right_sym)
 				} else {
-					an.report(op_node, errors.undefined_operation_error, left_sym, op, right_sym)
+					an.report(op_node, errors.undefined_operation_error, left_sym, op,
+						right_sym)
 				}
 			} else if !is_imaginary {
 				if left_sym.is_void() && op == '=' {
@@ -296,9 +293,11 @@ pub fn (mut an SemanticAnalyzer) assignment_statement(node ast.Node) ? {
 						right_sym = right_sym.parent_sym
 					}
 
-					an.report(unary_op_node, errors.invalid_assignment_error, left_child.text(an.context.text), left_sym, right_sym)
+					an.report(unary_op_node, errors.invalid_assignment_error, left_child.text(an.context.text),
+						left_sym, right_sym)
 				} else if left_sym != right_sym {
-					an.report(node, errors.invalid_assignment_error, left_child.text(an.context.text), left_sym, right_sym)
+					an.report(node, errors.invalid_assignment_error, left_child.text(an.context.text),
+						left_sym, right_sym)
 				}
 			}
 		}
@@ -336,7 +335,7 @@ pub fn (mut an SemanticAnalyzer) short_var_declaration(node ast.Node) ? {
 
 pub fn (mut an SemanticAnalyzer) assert_statement(node ast.Node) ? {
 	expr_node := node.named_child(0)?
-	expr_typ_sym := an.expression(expr_node, as_value: true) or { analyzer.void_sym }
+	expr_typ_sym := an.expression(expr_node, as_value: true) or { void_sym }
 	if expr_typ_sym.name != 'bool' {
 		an.report(expr_node, errors.invalid_assert_type_error, expr_typ_sym)
 	}
@@ -345,12 +344,13 @@ pub fn (mut an SemanticAnalyzer) assert_statement(node ast.Node) ? {
 pub fn (mut an SemanticAnalyzer) send_statement(node ast.Node) ? {
 	chan_node := node.child_by_field_name('channel')?
 	val_node := node.child_by_field_name('value')?
-	chan_typ_sym := an.expression(chan_node) or { analyzer.void_sym }
-	val_typ_sym := an.expression(val_node) or { analyzer.void_sym }
+	chan_typ_sym := an.expression(chan_node) or { void_sym }
+	val_typ_sym := an.expression(val_node) or { void_sym }
 	if chan_typ_sym.kind != .chan_ {
 		an.report(chan_node, errors.send_channel_invalid_chan_type_error, chan_typ_sym)
 	} else if val_typ_sym != chan_typ_sym.parent_sym {
-		an.report(val_node, errors.send_channel_invalid_value_type_error, val_typ_sym, chan_typ_sym)
+		an.report(val_node, errors.send_channel_invalid_value_type_error, val_typ_sym,
+			chan_typ_sym)
 	}
 }
 
@@ -377,7 +377,8 @@ pub fn (mut an SemanticAnalyzer) break_statement(node ast.Node) {
 
 	if in_defer {
 		an.report(node, errors.defer_break_error)
-	} if !in_loop {
+	}
+	if !in_loop {
 		an.report(node, errors.nonloop_break_error)
 	}
 }
@@ -399,7 +400,7 @@ pub fn (mut an SemanticAnalyzer) return_statement(node ast.Node) {
 		mut got_return_count := int(expr_list_node.named_child_count())
 		for i := 0; i < expected_return_count; i++ {
 			expr_node := expr_list_node.named_child(u32(i)) or { continue }
-			expr_sym := an.expression(expr_node) or { analyzer.void_sym }
+			expr_sym := an.expression(expr_node) or { void_sym }
 			if expr_sym.kind == .multi_return {
 				// got return count = existing number of nodes + multi return type size
 				got_return_count += expr_sym.children_syms.len - 1
@@ -422,7 +423,8 @@ pub fn (mut an SemanticAnalyzer) return_statement(node ast.Node) {
 				an.report(node, errors.void_value_return_error, expr_node.text(an.context.text))
 			} else if expr_sym != expected_sym {
 				if expected_sym.kind == .ref && expected_sym.parent_sym == expr_sym {
-					an.report(expr_node, errors.non_reference_return_error, an.parent_sym.name, expected_sym, expr_sym)
+					an.report(expr_node, errors.non_reference_return_error, an.parent_sym.name,
+						expected_sym, expr_sym)
 				} else {
 					an.report(node, errors.invalid_return_error, expr_sym, expected_sym)
 				}
@@ -497,15 +499,20 @@ pub fn (mut an SemanticAnalyzer) statement(node ast.Node) {
 	}
 }
 
-const multiplicative_operators = ["*", "/", "%", "<<", ">>", "&", "&^"]
-const additive_operators = ["+", "-", "|", "^"]
-const comparative_operators = ["==", "!=", "<", "<=", ">", ">="]
-const and_operators = ["&&"]
-const or_operators = ["||"]
+const multiplicative_operators = ['*', '/', '%', '<<', '>>', '&', '&^']
+
+const additive_operators = ['+', '-', '|', '^']
+
+const comparative_operators = ['==', '!=', '<', '<=', '>', '>=']
+
+const and_operators = ['&&']
+
+const or_operators = ['||']
 
 fn (an &SemanticAnalyzer) convert_to_lit_type(node ast.Node) ?&Symbol {
 	node_type := node.type_name
-	if node_type == .float_literal || (node_type == .int_literal && node.text(an.context.text).int() < 17) {
+	if node_type == .float_literal
+		|| (node_type == .int_literal && node.text(an.context.text).int() < 17) {
 		return an.context.find_symbol('', node.raw_node.type_name())
 	}
 	return none
@@ -516,36 +523,41 @@ pub fn (mut an SemanticAnalyzer) binary_expression(node ast.Node, cfg SemanticEx
 	right_node := node.child_by_field_name('right')?
 	op_node := node.child_by_field_name('operator')?
 	op := op_node.raw_node.type_name()
-	is_multiplicative := op in multiplicative_operators
-	is_additive := op in additive_operators
-	is_comparative := op in comparative_operators
+	is_multiplicative := op in analyzer.multiplicative_operators
+	is_additive := op in analyzer.additive_operators
+	is_comparative := op in analyzer.comparative_operators
 	// is_and := op in and_operators
 	// is_or := op in or_operators
-	left_sym := an.convert_to_lit_type(left_node) or { an.expression(left_node) or { analyzer.void_sym } }
-	right_sym := an.convert_to_lit_type(right_node) or { an.expression(right_node) or { analyzer.void_sym } }
+	left_sym := an.convert_to_lit_type(left_node) or { an.expression(left_node) or { void_sym } }
+	right_sym := an.convert_to_lit_type(right_node) or { an.expression(right_node) or { void_sym } }
 
 	if op == '<<' {
 		if cfg.as_value {
 			return an.report(op_node, errors.array_append_expr_error)
 		} else if left_sym.kind == .array_ && left_sym.children_syms[0] != right_sym {
-			return an.report(right_node, errors.append_type_mismatch_error, right_sym, left_sym)
+			return an.report(right_node, errors.append_type_mismatch_error, right_sym,
+				left_sym)
 		} else {
 			return an.report(node, errors.undefined_operation_error, left_sym, op, right_sym)
 		}
 	} else if is_multiplicative || is_additive {
 		// check if left and right are both numeric types
-		if left_sym.name !in analyzer.numeric_types_with_any_type || right_sym.name !in analyzer.numeric_types_with_any_type {
-			if left_sym.name in analyzer.numeric_types_with_any_type || right_sym.name in analyzer.numeric_types_with_any_type {
+		if left_sym.name !in numeric_types_with_any_type
+			|| right_sym.name !in numeric_types_with_any_type {
+			if left_sym.name in numeric_types_with_any_type
+				|| right_sym.name in numeric_types_with_any_type {
 				an.report(node, errors.mismatched_type_error, left_sym, right_sym)
 			} else {
 				an.report(node, errors.undefined_operation_error, left_sym, op, right_sym)
 			}
-			return analyzer.void_sym
-		} else if op == '%' && ((left_sym.name == 'f32' && right_sym.name == 'f32') || (left_sym.name == 'f64' && right_sym.name == 'f64')) {
+			return void_sym
+		} else if op == '%' && ((left_sym.name == 'f32' && right_sym.name == 'f32')
+			|| (left_sym.name == 'f64' && right_sym.name == 'f64')) {
 			an.report(left_node, errors.float_modulo_error)
 		}
 	} else if is_comparative && left_sym != right_sym {
-		if (left_sym.kind == .optional && left_sym.parent_sym == right_sym) || (right_sym.kind == .optional && right_sym.parent_sym == left_sym) {
+		if (left_sym.kind == .optional && left_sym.parent_sym == right_sym)
+			|| (right_sym.kind == .optional && right_sym.parent_sym == left_sym) {
 			if left_sym.kind == .optional {
 				return an.report(left_node, errors.unwrapped_option_binary_expr_error)
 			} else if right_sym.kind == .optional {
@@ -586,7 +598,7 @@ pub fn (mut an SemanticAnalyzer) type_initializer(node ast.Node) ?&Symbol {
 	match sym_kind {
 		.array_, .variadic {
 			el_node := type_node.child_by_field_name('element')?
-			el_sym := an.context.find_symbol_by_type_node(el_node) or { analyzer.void_sym }
+			el_sym := an.context.find_symbol_by_type_node(el_node) or { void_sym }
 			if el_sym.is_void() || el_sym.kind == .placeholder {
 				return an.report(el_node, errors.unknown_type_error, el_node.text(an.context.text))
 			} else if el_sym.kind == .sumtype {
@@ -605,18 +617,14 @@ pub fn (mut an SemanticAnalyzer) type_initializer(node ast.Node) ?&Symbol {
 		}
 		.map_ {
 			key_node := type_node.child_by_field_name('key')?
-			key_sym := an.context.find_symbol_by_type_node(key_node) or {
-				analyzer.void_sym
-			}
+			key_sym := an.context.find_symbol_by_type_node(key_node) or { void_sym }
 
 			if key_sym.is_void() || key_sym.kind == .placeholder {
 				an.report(key_node, errors.unknown_type_error, key_node.text(an.context.text))
 			}
 
 			val_node := type_node.child_by_field_name('value')?
-			val_sym := an.context.find_symbol_by_type_node(val_node) or {
-				analyzer.void_sym
-			}
+			val_sym := an.context.find_symbol_by_type_node(val_node) or { void_sym }
 
 			if val_sym.is_void() || val_sym.kind == .placeholder {
 				an.report(val_node, errors.unknown_type_error, val_node.text(an.context.text))
@@ -624,9 +632,7 @@ pub fn (mut an SemanticAnalyzer) type_initializer(node ast.Node) ?&Symbol {
 		}
 		.chan_, .ref, .optional {
 			el_node := type_node.named_child(0)?
-			el_sym := an.context.find_symbol_by_type_node(el_node) or {
-				analyzer.void_sym
-			}
+			el_sym := an.context.find_symbol_by_type_node(el_node) or { void_sym }
 
 			if el_sym.is_void() || el_sym.kind == .placeholder {
 				an.report(el_node, errors.unknown_type_error, el_node.text(an.context.text))
@@ -636,8 +642,8 @@ pub fn (mut an SemanticAnalyzer) type_initializer(node ast.Node) ?&Symbol {
 			typ_sym := an.context.find_symbol_by_type_node(type_node)?
 			if typ_sym.kind == .typedef && typ_sym.parent_sym.kind == .map_ {
 				return an.report(node, errors.typedef_map_init_error, {
-					'type_name': an.formatter.format(typ_sym, analyzer.child_types_format_cfg)
-					'map_type': an.formatter.format(typ_sym.parent_sym)
+					'type_name': an.formatter.format(typ_sym, child_types_format_cfg)
+					'map_type':  an.formatter.format(typ_sym.parent_sym)
 				})
 			}
 
@@ -646,9 +652,7 @@ pub fn (mut an SemanticAnalyzer) type_initializer(node ast.Node) ?&Symbol {
 			mut declared_fields := []string{cap: typ_sym.children_syms.len}
 
 			for i in u32(0) .. body_len {
-				element_node := body_node.named_child(i) or {
-					continue
-				}
+				element_node := body_node.named_child(i) or { continue }
 
 				match element_node.type_name {
 					.keyed_element {
@@ -672,7 +676,8 @@ pub fn (mut an SemanticAnalyzer) type_initializer(node ast.Node) ?&Symbol {
 				}
 
 				if child_sym.return_sym.kind == .ref {
-					an.report(node, errors.uninitialized_reference_field_error, typ_sym.name, child_sym.name)
+					an.report(node, errors.uninitialized_reference_field_error, typ_sym.name,
+						child_sym.name)
 				}
 			}
 		}
@@ -685,7 +690,7 @@ pub fn (mut an SemanticAnalyzer) type_initializer(node ast.Node) ?&Symbol {
 pub fn (mut an SemanticAnalyzer) selector_expression(node ast.Node) ?&Symbol {
 	operand := node.child_by_field_name('operand')?
 	mut root_sym := an.expression(operand, as_value: true) or {
-		an.context.infer_symbol_from_node(operand) or { analyzer.void_sym }
+		an.context.infer_symbol_from_node(operand) or { void_sym }
 	}
 
 	if !root_sym.is_void() {
@@ -704,16 +709,16 @@ pub fn (mut an SemanticAnalyzer) selector_expression(node ast.Node) ?&Symbol {
 			if root_sym.kind in [.ref, .chan_, .optional] {
 				base_root_sym = root_sym.parent_sym
 			} else if root_sym.kind == .array_ {
-				base_root_sym = an.context.find_symbol('', 'array') or { analyzer.void_sym }
+				base_root_sym = an.context.find_symbol('', 'array') or { void_sym }
 			} else if root_sym.kind == .map_ {
-				base_root_sym = an.context.find_symbol('', 'map') or { analyzer.void_sym }
+				base_root_sym = an.context.find_symbol('', 'map') or { void_sym }
 			}
 			base_root_sym.children_syms.get(child_name) or { void_sym }
 		}
 
 		// NOTE: transfer this to `store.infer_symbol_from_node` if possible
 		mut got_sym_kind_from_embed := SymbolKind.void
-		mut method_or_field_sym := unsafe { analyzer.void_sym }
+		mut method_or_field_sym := unsafe { void_sym }
 		mut method_or_field_typ_idx := -1
 
 		for child_sym_idx, child_sym in root_sym.children_syms {
@@ -721,9 +726,7 @@ pub fn (mut an SemanticAnalyzer) selector_expression(node ast.Node) ?&Symbol {
 				continue
 			}
 
-			returned_sym := child_sym.return_sym.children_syms.get(child_name) or {
-				continue
-			}
+			returned_sym := child_sym.return_sym.children_syms.get(child_name) or { continue }
 
 			if method_or_field_typ_idx == -1 {
 				method_or_field_sym = returned_sym
@@ -758,7 +761,11 @@ pub fn (mut an SemanticAnalyzer) selector_expression(node ast.Node) ?&Symbol {
 		}
 
 		if got_child_sym.is_void() && method_or_field_sym.is_void() {
-			err_code := if in_call_expr { errors.unknown_method_or_field_error } else { errors.unknown_field_error }
+			err_code := if in_call_expr {
+				errors.unknown_method_or_field_error
+			} else {
+				errors.unknown_field_error
+			}
 			return an.report(node, err_code, root_sym, field_node.text(an.context.text))
 		} else if !in_call_expr && got_child_sym.is_returnable() {
 			got_child_sym = got_child_sym.return_sym
@@ -781,21 +788,22 @@ pub fn (mut an SemanticAnalyzer) array(node ast.Node) ?&Symbol {
 	}
 
 	first_item_node := node.named_child(0)?
-	mut expected_sym := an.expression(first_item_node) or { analyzer.void_sym }
+	mut expected_sym := an.expression(first_item_node) or { void_sym }
 	if expected_sym.is_void() {
 		return expected_sym
 	} else if items_len > 1 {
 		for i in u32(1) .. items_len {
 			item_child_node := node.named_child(i) or { continue }
-			returned_item_sym := an.expression(item_child_node) or { analyzer.void_sym }
+			returned_item_sym := an.expression(item_child_node) or { void_sym }
 			if returned_item_sym != expected_sym {
-				an.report(item_child_node, errors.invalid_array_element_type_error, expected_sym, returned_item_sym)
+				an.report(item_child_node, errors.invalid_array_element_type_error, expected_sym,
+					returned_item_sym)
 				continue
 			}
 		}
 	}
 
-	symbol_name := '[]' + an.formatter.format(expected_sym, analyzer.child_types_format_cfg)
+	symbol_name := '[]' + an.formatter.format(expected_sym, child_types_format_cfg)
 	return an.context.find_symbol('', symbol_name) or {
 		mut new_sym := Symbol{
 			name: symbol_name.clone()
@@ -806,14 +814,14 @@ pub fn (mut an SemanticAnalyzer) array(node ast.Node) ?&Symbol {
 		}
 
 		new_sym.add_child(mut expected_sym, false) or {}
-		an.context.store.register_symbol(mut new_sym) or { analyzer.void_sym }
+		an.context.store.register_symbol(mut new_sym) or { void_sym }
 	}
 }
 
 pub fn (mut an SemanticAnalyzer) call_expression(node ast.Node) ?&Symbol {
 	fn_node := node.child_by_field_name('function')?
 	arguments_node := node.child_by_field_name('arguments')?
-	fn_sym := an.expression(fn_node) or { analyzer.void_sym }
+	fn_sym := an.expression(fn_node) or { void_sym }
 	if fn_sym.is_void() {
 		if fn_node.type_name == .selector_expression {
 			return none
@@ -858,11 +866,13 @@ pub fn (mut an SemanticAnalyzer) call_expression(node ast.Node) ?&Symbol {
 		if child_opt_node := opt_propagator.child(0) {
 			mut should_unwrap := true
 			if child_opt_node.raw_node.type_name() == '?' {
-				if an.in_function() && an.parent_sym.name != 'main' && an.parent_sym.return_sym.kind != .optional {
+				if an.in_function() && an.parent_sym.name != 'main'
+					&& an.parent_sym.return_sym.kind != .optional {
 					an.report(child_opt_node, errors.wrong_error_propagation_error, an.parent_sym.name)
 					should_unwrap = false
 				} else if fn_sym.return_sym.kind != .optional {
-					an.report(child_opt_node, errors.invalid_option_propagate_call_error, fn_node.text(an.context.text))
+					an.report(child_opt_node, errors.invalid_option_propagate_call_error,
+						fn_node.text(an.context.text))
 					should_unwrap = false
 				}
 			}
@@ -899,7 +909,7 @@ pub fn (mut an SemanticAnalyzer) if_expression(node ast.Node, cfg SemanticExpres
 			an.report(cond_node, errors.unnecessary_if_parenthesis_error)
 		}
 
-		cond_sym := an.expression(cond_node, as_value: true) or { analyzer.void_sym }
+		cond_sym := an.expression(cond_node, as_value: true) or { void_sym }
 		if cond_sym.name != 'bool' {
 			return an.report(cond_node, errors.if_expr_non_bool_cond_error, cond_sym)
 		}
@@ -912,7 +922,8 @@ pub fn (mut an SemanticAnalyzer) if_expression(node ast.Node, cfg SemanticExpres
 
 				if else_sym := an.block_expression(else_node) {
 					if else_sym != expected_sym {
-						return an.report(node, errors.mismatched_type_error, expected_sym, else_sym)
+						return an.report(node, errors.mismatched_type_error, expected_sym,
+							else_sym)
 					}
 				}
 			} else {
@@ -935,15 +946,16 @@ pub fn (mut an SemanticAnalyzer) type_cast_expression(node ast.Node) ?&Symbol {
 	type_node := node.child_by_field_name('type')?
 	operand_node := node.child_by_field_name('operand')?
 
-	type_sym := an.context.find_symbol_by_type_node(type_node) or { analyzer.void_sym }
-	operand_sym := an.expression(operand_node, as_value: true) or { analyzer.void_sym }
+	type_sym := an.context.find_symbol_by_type_node(type_node) or { void_sym }
+	operand_sym := an.expression(operand_node, as_value: true) or { void_sym }
 
 	if operand_sym.name == 'bool' && type_sym.name == 'string' {
 		return an.report(node, errors.bool_string_cast_error, operand_node.text(an.context.text))
 	} else if operand_sym.is_void() || operand_sym.kind == .placeholder {
 		return an.report(operand_node, errors.void_symbol_casting_error)
 	} else if type_sym.kind == .enum_ && operand_node.type_name == .int_literal {
-		return an.report(operand_node, errors.invalid_enum_casting_error, operand_node.text(an.context.text).int().str(), type_sym.name)
+		return an.report(operand_node, errors.invalid_enum_casting_error, operand_node.text(an.context.text).int().str(),
+			type_sym.name)
 	}
 
 	return type_sym
@@ -976,7 +988,7 @@ pub fn (mut an SemanticAnalyzer) block_expression(node ast.Node, cfg SemanticExp
 	}
 
 	// TODO:
-	return analyzer.void_sym
+	return void_sym
 }
 
 // TODO: tests for match sumtypes is missing
@@ -984,7 +996,7 @@ pub fn (mut an SemanticAnalyzer) match_expression(node ast.Node, cfg SemanticExp
 	cond_node := node.child_by_field_name('condition')?
 	cond_sym := an.expression(cond_node)?
 	case_count := node.named_child_count()
-	mut expected_value_sym := unsafe { analyzer.void_sym }
+	mut expected_value_sym := unsafe { void_sym }
 	mut mismatch_count := 0
 	mut expecting_types := false
 	mut existing_case_values := []string{cap: int(case_count)}
@@ -1000,16 +1012,12 @@ pub fn (mut an SemanticAnalyzer) match_expression(node ast.Node, cfg SemanticExp
 			// TODO:
 			break
 		} else if case_node.type_name == .expression_case {
-			value_list := case_node.child_by_field_name('value') or {
-				continue
-			}
+			value_list := case_node.child_by_field_name('value') or { continue }
 
 			case_list_len := value_list.named_child_count()
 
 			for case_value_i in u32(0) .. case_list_len {
-				case_value_node := value_list.named_child(case_value_i) or {
-					continue
-				}
+				case_value_node := value_list.named_child(case_value_i) or { continue }
 
 				value_text := case_value_node.text(an.context.text)
 				if value_text in existing_case_values {
@@ -1018,15 +1026,16 @@ pub fn (mut an SemanticAnalyzer) match_expression(node ast.Node, cfg SemanticExp
 
 				if case_value_node.type_name.group() == .type_ {
 					if !cond_sym.children_syms.exists(value_text) {
-						an.report(case_value_node, errors.match_invalid_sumtype_variant_error, cond_sym, value_text)
+						an.report(case_value_node, errors.match_invalid_sumtype_variant_error,
+							cond_sym, value_text)
 					} else {
 						existing_case_values << value_text
 					}
 				} else if case_value_node.type_name == .range {
 					start_node := case_value_node.child_by_field_name('start') or { continue }
 					end_node := case_value_node.child_by_field_name('end') or { continue }
-					start_sym := an.expression(start_node) or { analyzer.void_sym }
-					end_sym := an.expression(end_node) or { analyzer.void_sym }
+					start_sym := an.expression(start_node) or { void_sym }
+					end_sym := an.expression(end_node) or { void_sym }
 
 					if start_sym != cond_sym {
 						an.report(start_node, errors.match_range_value_type_mismatch)
@@ -1036,12 +1045,11 @@ pub fn (mut an SemanticAnalyzer) match_expression(node ast.Node, cfg SemanticExp
 						existing_case_values << value_text
 					}
 				} else {
-					case_sym := an.expression(case_value_node) or {
-						analyzer.void_sym
-					}
+					case_sym := an.expression(case_value_node) or { void_sym }
 
 					if cond_sym != case_sym {
-						an.report(case_value_node, errors.match_invalid_case_value_error, cond_sym, case_sym)
+						an.report(case_value_node, errors.match_invalid_case_value_error,
+							cond_sym, case_sym)
 					} else {
 						existing_case_values << value_text
 					}
@@ -1051,9 +1059,7 @@ pub fn (mut an SemanticAnalyzer) match_expression(node ast.Node, cfg SemanticExp
 			has_default_case = true
 		}
 
-		conseq_node := case_node.child_by_field_name('consequence') or {
-			continue
-		}
+		conseq_node := case_node.child_by_field_name('consequence') or { continue }
 
 		if cfg.as_value {
 			if block_sym := an.block_expression(conseq_node, cfg) {
@@ -1075,7 +1081,7 @@ pub fn (mut an SemanticAnalyzer) match_expression(node ast.Node, cfg SemanticExp
 
 	// check match's exhaustiveness if no default case found
 	if expecting_types && !has_default_case {
-		missing_types := cond_sym.children_syms.filter(it.name !in existing_case_values).map('`${it.name}`')
+		missing_types := cond_sym.children_syms.filter(it.name !in existing_case_values).map('`$it.name`')
 		if missing_types.len != 0 {
 			return an.report(node, errors.match_sumtype_not_exhaustive_error, ...missing_types)
 		}
@@ -1170,7 +1176,8 @@ pub fn (mut an SemanticAnalyzer) expression(node ast.Node, cfg SemanticExpressio
 						// expression_list
 						if grandparent.type_name == .assignment_statement {
 							if sym.is_const {
-								return an.report(node, errors.constant_mutation_error, sym.name)
+								return an.report(node, errors.constant_mutation_error,
+									sym.name)
 							} else if sym.kind == .variable && !sym.is_mutable() {
 								an.report(node, errors.immutable_variable_error, sym.name)
 							}
@@ -1203,7 +1210,9 @@ pub fn (mut an SemanticAnalyzer) analyze(node ast.Node) {
 }
 
 pub fn (mut an SemanticAnalyzer) analyze_from_cursor(mut cursor TreeCursor) {
-	defer { cursor.reset() }
+	defer {
+		cursor.reset()
+	}
 	for got_node in cursor {
 		an.analyze(got_node)
 	}

@@ -246,7 +246,8 @@ fn test_hover() {
 		if actual := ls.hover(lsp.HoverParams{
 			...hover_inputs[test_name]
 			text_document: doc_id
-		}, mut writer) {
+		}, mut writer)
+		{
 			// compare content
 			if _ := t.is_equal(hover_results[test_name], actual) {
 				t.ok(file)

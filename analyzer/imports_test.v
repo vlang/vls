@@ -1,4 +1,4 @@
-import analyzer { Store, Runes, Collector, Importer, import_modules_from_tree }
+import analyzer { Collector, Importer, Runes, Store, import_modules_from_tree }
 import tree_sitter
 import tree_sitter_v as v
 import ast
@@ -53,7 +53,7 @@ fn test_inject_paths_of_new_imports() {
 		reporter: &Collector{}
 	}
 
-	mut imp := Importer {
+	mut imp := Importer{
 		context: store.with(file_path: file_path, text: sample_content_bytes)
 	}
 
@@ -64,7 +64,8 @@ fn test_inject_paths_of_new_imports() {
 	assert imports[import_idxs[0]].absolute_module_name == 'os'
 	assert imports[import_idxs[1]].absolute_module_name == 'env'
 
-	imp.inject_paths_of_new_imports(mut store.imports[file_dir], import_idxs, os.join_path(vexe_path, 'vlib'))
+	imp.inject_paths_of_new_imports(mut store.imports[file_dir], import_idxs, os.join_path(vexe_path,
+		'vlib'))
 
 	assert imports[import_idxs[0]].resolved == true
 	assert imports[import_idxs[0]].path == os.join_path(vexe_path, 'vlib', 'os')
@@ -213,16 +214,19 @@ fn test_other_import_cases() {
 		import_modules_from_tree(context, tree)
 
 		imports := store.imports[context.file_dir]
-		result := an_test_utils.sexpr_str_imports(context.file_path, imports).replace(') (', ')\n(').replace(test_lookup_paths[0], "\$VLIB").replace(context.file_dir, ".")
+		result := an_test_utils.sexpr_str_imports(context.file_path, imports).replace(') (',
+			')\n(').replace(test_lookup_paths[0], '\$VLIB').replace(context.file_dir,
+			'.')
 		expected_trimmed := test_utils.newlines_to_spaces(expected).replace(') (', ')\n(')
-		
+
 		term.clear_previous_line()
-		
+
 		if result != expected_trimmed {
 			if diff_cmd.len != 0 {
 				bench.fail()
 				println(bench.step_message_fail(test_name))
-				println(diff.color_compare_strings(diff_cmd, 'vls_imports_test', expected_trimmed, result))
+				println(diff.color_compare_strings(diff_cmd, 'vls_imports_test', expected_trimmed,
+					result))
 			} else {
 				assert result == expected_trimmed
 			}

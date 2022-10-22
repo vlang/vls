@@ -7,20 +7,20 @@ import tree_sitter { SourceText }
 [params]
 pub struct AnalyzerContext {
 pub mut:
-	store        &Store [required]
-	file_path    string [required]
+	store        &Store     [required]
+	file_path    string     [required]
 	file_version int
 	file_name    string
 	file_dir     string
-	text         SourceText  = Runes([]rune{len: 0})
+	text         SourceText = Runes([]rune{len: 0})
 }
 
 [params]
 pub struct AnalyzerContextParams {
-	file_path string [required]
+	file_path    string     [required]
 	file_version int
-	store     &Store = &Store(0)
-	text      SourceText = Runes([]rune{len: 0})
+	store        &Store     = &Store(0)
+	text         SourceText = Runes([]rune{len: 0})
 }
 
 pub fn new_context(params AnalyzerContextParams) AnalyzerContext {
@@ -34,7 +34,7 @@ pub fn new_context(params AnalyzerContextParams) AnalyzerContext {
 	}
 }
 
-pub fn (mut ctx AnalyzerContext) replace_file_path(new_file_path string) AnalyzerContext{
+pub fn (mut ctx AnalyzerContext) replace_file_path(new_file_path string) AnalyzerContext {
 	ctx.file_path = new_file_path
 	ctx.file_name = os.base(new_file_path)
 	ctx.file_dir = os.dir(new_file_path)
@@ -60,6 +60,10 @@ pub fn (ctx AnalyzerContext) find_symbol(module_name string, name string) ?&Symb
 pub fn (ctx AnalyzerContext) symbol_formatter(from_semantic bool) SymbolFormatter {
 	return SymbolFormatter{
 		context: ctx
-		replacers: if from_semantic { ['int_literal', 'int literal', 'float_literal', 'float literal'] } else { []string{} }
+		replacers: if from_semantic {
+			['int_literal', 'int literal', 'float_literal', 'float literal']
+		} else {
+			[]string{}
+		}
 	}
 }
