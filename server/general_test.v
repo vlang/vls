@@ -1,4 +1,4 @@
-import jsonrpc.server_test_utils { new_test_client }
+import jsonrpc.server_test_utils { new_test_client, RpcResult, TestClient  }
 import jsonrpc
 import server
 import lsp
