@@ -132,7 +132,8 @@ fn test_signature_help() {
 		if actual := ls.signature_help(lsp.SignatureHelpParams{
 			...signature_help_inputs[test_name]
 			text_document: doc_id
-		}, mut t.client.server.writer()) {
+		}, mut t.client.server.writer())
+		{
 			// compare content
 			if _ := t.is_equal(signature_help_results[test_name], actual) {
 				t.ok(file)

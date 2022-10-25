@@ -82,7 +82,7 @@ pub fn (r &Rope) concat(other &Rope) &Rope {
 		return other
 	} else if isnil(other) || other.len() == 0 {
 		return r
-	} else if r.len() + other.len() <= max_leaf_size {
+	} else if r.len() + other.len() <= ropes.max_leaf_size {
 		return new(r.string() + other.string())
 	}
 
@@ -192,7 +192,7 @@ pub fn (r &Rope) substr(start int, end int) string {
 }
 
 pub fn (r &Rope) rebalance_if_needed() &Rope {
-	if r.is_balanced() || (r.left.safe_depth() - r.right.safe_depth()) < max_depth {
+	if r.is_balanced() || (r.left.safe_depth() - r.right.safe_depth()) < ropes.max_depth {
 		return r
 	}
 	return r.rebalance()
@@ -237,23 +237,25 @@ fn get_all_leaves(r &Rope, mut leaves []&Rope) {
 pub fn (r &Rope) is_balanced() bool {
 	if r.is_leaf() {
 		return true
-	} else if r.depth >= fibonnaci.len - 2 {
+	} else if r.depth >= ropes.fibonnaci.len - 2 {
 		return false
 	} else {
-		return fibonnaci[r.depth + 2] <= r.length
+		return ropes.fibonnaci[r.depth + 2] <= r.length
 	}
 }
 
 // based on https://github.com/deadpixi/rope/blob/main/rope.go
 const max_depth = 64
+
 const max_leaf_size = 4096
+
 const fibonnaci = build_fib()
 
 fn build_fib() []int {
-	mut fib := []int{len: max_depth + 3}
+	mut fib := []int{len: ropes.max_depth + 3}
 	mut first := 0
 	mut second := 1
-	for c := 0; c < max_depth + 3; c++ {
+	for c := 0; c < ropes.max_depth + 3; c++ {
 		mut next := 0
 		if c <= 1 {
 			next = c

@@ -18,118 +18,118 @@ const c_completion_item = lsp.CompletionItem{
 }
 
 const completion_inputs = {
-	'assign.vv':                            lsp.CompletionParams{
+	'assign.vv':                             lsp.CompletionParams{
 		context: lsp.CompletionContext{.trigger_character, ' '}
 		position: lsp.Position{6, 7}
 	}
-	'binded_symbol.vv':                     lsp.CompletionParams{
+	'binded_symbol.vv':                      lsp.CompletionParams{
 		context: lsp.CompletionContext{.invoked, ''}
 		position: lsp.Position{5, 4}
 	}
-	'blank.vv':                             lsp.CompletionParams{
+	'blank.vv':                              lsp.CompletionParams{
 		context: lsp.CompletionContext{.invoked, ''}
 		position: lsp.Position{0, 0}
 	}
-	'call_args.vv':                         lsp.CompletionParams{
+	'call_args.vv':                          lsp.CompletionParams{
 		context: lsp.CompletionContext{.invoked, ''}
 		position: lsp.Position{10, 14}
 	}
-	'embedded_struct_field.vv':             lsp.CompletionParams{
+	'embedded_struct_field.vv':              lsp.CompletionParams{
 		context: lsp.CompletionContext{.trigger_character, '.'}
 		position: lsp.Position{15, 15}
 	}
-	'enum_member.vv':                       lsp.CompletionParams{
+	'enum_member.vv':                        lsp.CompletionParams{
 		context: lsp.CompletionContext{.trigger_character, '.'}
 		position: lsp.Position{5, 20}
 	}
-	'enum_method.vv':                       lsp.CompletionParams{
+	'enum_method.vv':                        lsp.CompletionParams{
 		context: lsp.CompletionContext{.trigger_character, '.'}
 		position: lsp.Position{5, 27}
 	}
-	'enum_val_in_struct.vv':                lsp.CompletionParams{
+	'enum_val_in_struct.vv':                 lsp.CompletionParams{
 		context: lsp.CompletionContext{.trigger_character, ' '}
 		position: lsp.Position{18, 20}
 	}
-	'filtered_fields_in_selector.vv':       lsp.CompletionParams{
+	'filtered_fields_in_selector.vv':        lsp.CompletionParams{
 		context: lsp.CompletionContext{.trigger_character, '.'}
 		position: lsp.Position{16, 9}
 	}
-	'filtered_methods_in_immutable_var.vv': lsp.CompletionParams{
+	'filtered_methods_in_immutable_var.vv':  lsp.CompletionParams{
 		context: lsp.CompletionContext{.trigger_character, '.'}
 		position: lsp.Position{13, 6}
 	}
-	'filtered_methods_in_mutable_var.vv':   lsp.CompletionParams{
+	'filtered_methods_in_mutable_var.vv':    lsp.CompletionParams{
 		context: lsp.CompletionContext{.trigger_character, '.'}
 		position: lsp.Position{13, 6}
 	}
-	'fn_literal.vv':                        lsp.CompletionParams{
+	'fn_literal.vv':                         lsp.CompletionParams{
 		context: lsp.CompletionContext{.invoked, '.'}
 		position: lsp.Position{5, 3}
 	}
-	'import_symbols.vv':                    lsp.CompletionParams{
+	'import_symbols.vv':                     lsp.CompletionParams{
 		context: lsp.CompletionContext{.trigger_character, ' '}
 		position: lsp.Position{2, 12}
 	}
-	'import.vv':                            lsp.CompletionParams{
+	'import.vv':                             lsp.CompletionParams{
 		context: lsp.CompletionContext{.trigger_character, ' '}
 		position: lsp.Position{2, 7}
 	}
-	'incomplete_enum_selector.vv':          lsp.CompletionParams{
+	'incomplete_enum_selector.vv':           lsp.CompletionParams{
 		context: lsp.CompletionContext{.trigger_character, '.'}
 		position: lsp.Position{12, 6}
 	}
-	'incomplete_module.vv':                 lsp.CompletionParams{
+	'incomplete_module.vv':                  lsp.CompletionParams{
 		context: lsp.CompletionContext{.invoked, ''}
 		position: lsp.Position{0, 7}
 	}
-	'incomplete_call_expr_selector.vv':     lsp.CompletionParams{
+	'incomplete_call_expr_selector.vv':      lsp.CompletionParams{
 		context: lsp.CompletionContext{.trigger_character, '.'}
 		position: lsp.Position{11, 20}
 	}
-	'incomplete_nested_selector.vv':        lsp.CompletionParams{
+	'incomplete_nested_selector.vv':         lsp.CompletionParams{
 		context: lsp.CompletionContext{.trigger_character, '.'}
 		position: lsp.Position{14, 10}
 	}
-	'incomplete_selector.vv':               lsp.CompletionParams{
+	'incomplete_selector.vv':                lsp.CompletionParams{
 		context: lsp.CompletionContext{.trigger_character, '.'}
 		position: lsp.Position{12, 6}
 	}
-	'invalid_call.vv':                      lsp.CompletionParams{
+	'invalid_call.vv':                       lsp.CompletionParams{
 		context: lsp.CompletionContext{.trigger_character, '('}
 		position: lsp.Position{0, 4}
 	}
-	'local_results.vv':                     lsp.CompletionParams{
+	'local_results.vv':                      lsp.CompletionParams{
 		context: lsp.CompletionContext{.invoked, ''}
 		position: lsp.Position{5, 2}
 	}
-	'module_selector.vv':                   lsp.CompletionParams{
+	'module_selector.vv':                    lsp.CompletionParams{
 		context: lsp.CompletionContext{.invoked, ''}
 		position: lsp.Position{3, 0}
 	}
-	'module_symbols_selector.vv':           lsp.CompletionParams{
+	'module_symbols_selector.vv':            lsp.CompletionParams{
 		context: lsp.CompletionContext{.trigger_character, '.'}
 		position: lsp.Position{5, 6}
 	}
-	'self_reference_var_in_struct_field.vv':                lsp.CompletionParams{
+	'self_reference_var_in_struct_field.vv': lsp.CompletionParams{
 		context: lsp.CompletionContext{.invoked, ''}
 		position: lsp.Position{6, 9}
 	}
-	'struct_init.vv':                       lsp.CompletionParams{
+	'struct_init.vv':                        lsp.CompletionParams{
 		context: lsp.CompletionContext{.trigger_character, '{'}
 		position: lsp.Position{8, 16}
 	}
-	'struct_init_string_field.vv':          lsp.CompletionParams{
+	'struct_init_string_field.vv':           lsp.CompletionParams{
 		context: lsp.CompletionContext{.trigger_character, ' '}
 		position: lsp.Position{9, 8}
 	}
-	'type_decl.vv':                         lsp.CompletionParams{
+	'type_decl.vv':                          lsp.CompletionParams{
 		context: lsp.CompletionContext{.trigger_character, ' '}
 		position: lsp.Position{3, 12}
 	}
 }
 
 const completion_results = {
-	'assign.vv':                            [
+	'assign.vv':                             [
 		lsp.CompletionItem{
 			label: 'two'
 			kind: .variable
@@ -143,7 +143,7 @@ const completion_results = {
 			insert_text: 'zero'
 		},
 	]
-	'binded_symbol.vv':                     [
+	'binded_symbol.vv':                      [
 		lsp.CompletionItem{
 			label: 'C.Foo'
 			kind: .struct_
@@ -152,7 +152,7 @@ const completion_results = {
 			insert_text_format: .snippet
 		},
 	]
-	'blank.vv':                             [
+	'blank.vv':                              [
 		lsp.CompletionItem{
 			label: 'module main'
 			kind: .variable
@@ -164,7 +164,7 @@ const completion_results = {
 			insert_text: 'module completion'
 		},
 	]
-	'call_args.vv':                         [
+	'call_args.vv':                          [
 		lsp.CompletionItem{
 			label: 'sample_num'
 			kind: .variable
@@ -185,7 +185,7 @@ const completion_results = {
 			insert_text_format: .snippet
 		},
 	]
-	'embedded_struct_field.vv':             [
+	'embedded_struct_field.vv':              [
 		lsp.CompletionItem{
 			label: 'Point'
 			kind: .property
@@ -211,7 +211,7 @@ const completion_results = {
 			insert_text: 'z'
 		},
 	]
-	'enum_member.vv':                       [
+	'enum_member.vv':                        [
 		lsp.CompletionItem{
 			label: 'shift'
 			kind: .enum_member
@@ -223,17 +223,17 @@ const completion_results = {
 			kind: .enum_member
 			detail: 'pub abc.KeyCode.control abc.KeyCode'
 			insert_text: 'control'
-		}
+		},
 	]
-	'enum_method.vv':                       [
+	'enum_method.vv':                        [
 		lsp.CompletionItem{
 			label: 'print'
 			kind: .method
 			detail: 'pub fn (code abc.KeyCode) print()'
 			insert_text: 'print()'
-		}
+		},
 	]
-	'enum_val_in_struct.vv':                [
+	'enum_val_in_struct.vv':                 [
 		lsp.CompletionItem{
 			label: '.golden_retriever'
 			detail: 'Breed.golden_retriever Breed'
@@ -259,7 +259,7 @@ const completion_results = {
 			insert_text: '.dalmatian'
 		},
 	]
-	'filtered_fields_in_selector.vv':       [
+	'filtered_fields_in_selector.vv':        [
 		lsp.CompletionItem{
 			label: 'output_file_name'
 			detail: 'pub mut Log.output_file_name string'
@@ -267,7 +267,7 @@ const completion_results = {
 			insert_text: 'output_file_name'
 		},
 	]
-	'filtered_methods_in_immutable_var.vv': [
+	'filtered_methods_in_immutable_var.vv':  [
 		lsp.CompletionItem{
 			label: 'set_name'
 			kind: .method
@@ -283,7 +283,7 @@ const completion_results = {
 			insert_text_format: .plain_text
 		},
 	]
-	'filtered_methods_in_mutable_var.vv':   [
+	'filtered_methods_in_mutable_var.vv':    [
 		lsp.CompletionItem{
 			label: 'set_name'
 			kind: .method
@@ -299,7 +299,7 @@ const completion_results = {
 			insert_text_format: .plain_text
 		},
 	]
-	'fn_literal.vv':                        [
+	'fn_literal.vv':                         [
 		c_completion_item,
 		lsp.CompletionItem{
 			label: 'cmd'
@@ -320,7 +320,7 @@ const completion_results = {
 			insert_text: 'list_exec'
 		},
 	]
-	'import_symbols.vv':                    [
+	'import_symbols.vv':                     [
 		lsp.CompletionItem{
 			label: 'DB'
 			kind: .struct_
@@ -350,9 +350,9 @@ const completion_results = {
 			kind: .enum_
 			detail: 'pub enum pg.Oid'
 			insert_text: 'Oid'
-		}
+		},
 	]
-	'import.vv':                            [
+	'import.vv':                             [
 		lsp.CompletionItem{
 			label: 'abc'
 			kind: .folder
@@ -369,16 +369,16 @@ const completion_results = {
 			insert_text: 'abc.def.ghi'
 		},
 	]
-	'incomplete_enum_selector.vv':          [
+	'incomplete_enum_selector.vv':           [
 		lsp.CompletionItem{
 			label: 'print'
 			kind: .method
 			detail: 'fn (c Color) print()'
 			insert_text: 'print()'
 			insert_text_format: .plain_text
-		}
+		},
 	]
-	'incomplete_module.vv':                 [
+	'incomplete_module.vv':                  [
 		lsp.CompletionItem{
 			label: 'module main'
 			kind: .variable
@@ -390,7 +390,7 @@ const completion_results = {
 			insert_text: 'module completion'
 		},
 	]
-	'incomplete_nested_selector.vv':        [
+	'incomplete_nested_selector.vv':         [
 		lsp.CompletionItem{
 			label: 'name'
 			kind: .property
@@ -405,7 +405,7 @@ const completion_results = {
 			insert_text_format: .plain_text
 		},
 	]
-	'incomplete_selector.vv':               [
+	'incomplete_selector.vv':                [
 		lsp.CompletionItem{
 			label: 'name'
 			kind: .property
@@ -420,7 +420,7 @@ const completion_results = {
 			insert_text_format: .plain_text
 		},
 	]
-	'incomplete_call_expr_selector.vv':     [
+	'incomplete_call_expr_selector.vv':      [
 		lsp.CompletionItem{
 			label: 'len'
 			kind: .property
@@ -428,8 +428,8 @@ const completion_results = {
 			insert_text: 'len'
 		},
 	]
-	'invalid_call.vv':                      []lsp.CompletionItem{}
-	'local_results.vv':                     [
+	'invalid_call.vv':                       []lsp.CompletionItem{}
+	'local_results.vv':                      [
 		c_completion_item,
 		lsp.CompletionItem{
 			label: 'foo'
@@ -444,7 +444,7 @@ const completion_results = {
 			insert_text: 'bar'
 		},
 	]
-	'module_selector.vv':                   [
+	'module_selector.vv':                    [
 		lsp.CompletionItem{
 			label: 'def'
 			kind: .module_
@@ -452,7 +452,7 @@ const completion_results = {
 		},
 		c_completion_item,
 	]
-	'module_symbols_selector.vv':           [
+	'module_symbols_selector.vv':            [
 		lsp.CompletionItem{
 			label: 'Point'
 			kind: .struct_
@@ -483,17 +483,17 @@ const completion_results = {
 			kind: .enum_member
 			detail: 'pub abc.KeyCode.control abc.KeyCode'
 			insert_text: 'KeyCode.control'
-		}
+		},
 	]
-	'self_reference_var_in_struct_field.vv':                [
+	'self_reference_var_in_struct_field.vv': [
 		lsp.CompletionItem{
 			label: 'test'
 			kind: .variable
 			detail: 'test &Command'
 			insert_text: 'test'
-		}
+		},
 	]
-	'struct_init.vv':                       [
+	'struct_init.vv':                        [
 		lsp.CompletionItem{
 			label: 'name:'
 			detail: 'Person.name string'
@@ -509,7 +509,7 @@ const completion_results = {
 			insert_text: 'age: \$0'
 		},
 	]
-	'struct_init_string_field.vv':          [
+	'struct_init_string_field.vv':           [
 		lsp.CompletionItem{
 			label: 'name'
 			kind: .variable
@@ -523,7 +523,7 @@ const completion_results = {
 			insert_text: 'another_name'
 		},
 	]
-	'type_decl.vv':                         [
+	'type_decl.vv':                          [
 		lsp.CompletionItem{
 			label: 'Foo'
 			kind: .struct_
@@ -585,7 +585,8 @@ fn test_completion() {
 		if actual := ls.completion(lsp.CompletionParams{
 			...completion_inputs[test_name]
 			text_document: doc_id
-		}, mut writer) {
+		}, mut writer)
+		{
 			// compare content
 			mut expected := completion_results[test_name].clone()
 			mut aactual := actual.clone()

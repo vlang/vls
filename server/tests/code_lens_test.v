@@ -22,7 +22,8 @@ fn test_code_lens() {
 
 		if _ := ls.code_lens(lsp.CodeLensParams{
 			text_document: doc_id
-		}, mut writer) {
+		}, mut writer)
+		{
 			t.fail(file, 'should not return a result')
 		} else {
 			t.is_null(file, true, err)

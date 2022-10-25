@@ -1,11 +1,10 @@
-import jsonrpc.server_test_utils { new_test_client, RpcResult, TestClient }
+import jsonrpc.server_test_utils { new_test_client, RpcResult, TestClient  }
 import jsonrpc
 import server
 import lsp
 import lsp.log { LogRecorder }
 import os
 import io
-
 
 fn test_wrong_first_request() {
 	mut ls := server.new()
@@ -63,7 +62,7 @@ fn test_set_features() {
 		.definition,
 		.implementation,
 		.code_lens,
-		.document_link
+		.document_link,
 	]
 	ls.set_features(['formatting'], true) or {
 		assert false
@@ -104,7 +103,7 @@ fn test_setup_logger() {
 		return
 	}
 
-	notif := io.stream.notification_at<lsp.ShowMessageParams>(0) ?
+	notif := io.stream.notification_at<lsp.ShowMessageParams>(0)?
 	assert notif.method == 'window/showMessage'
 
 	expected_err_path := os.join_path('non_existent', 'path', 'vls.log')

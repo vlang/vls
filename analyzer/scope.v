@@ -46,9 +46,7 @@ pub fn (scope &ScopeTree) innermost(start_byte u32, end_byte u32) ?&ScopeTree {
 	if !isnil(scope) {
 		for child_scope in scope.children {
 			if child_scope.contains(start_byte) && child_scope.contains(end_byte) {
-				return child_scope.innermost(start_byte, end_byte) or {
-					return child_scope
-				}
+				return child_scope.innermost(start_byte, end_byte) or { return child_scope }
 			}
 		}
 	}
@@ -191,9 +189,7 @@ pub fn (mut scope ScopeTree) remove(name string) bool {
 // the target byte offset
 pub fn (scope &ScopeTree) get_symbols_before(target_byte u32) []&Symbol {
 	mut symbols := []&Symbol{}
-	mut selected_scope := scope.innermost(target_byte, target_byte) or {
-		return symbols
-	}
+	mut selected_scope := scope.innermost(target_byte, target_byte) or { return symbols }
 	for !isnil(selected_scope) {
 		for sym in selected_scope.symbols {
 			if sym.range.start_byte <= target_byte && sym.range.end_byte <= target_byte {

@@ -8,12 +8,12 @@ import strings
 
 pub struct LogRecorder {
 mut:
-	file           os.File
-	buffer         strings.Builder
-	file_opened    bool
-	enabled        bool
+	file        os.File
+	buffer      strings.Builder
+	file_opened bool
+	enabled     bool
 pub mut:
-	file_path    string
+	file_path string
 }
 
 pub enum TransportKind {
@@ -52,9 +52,9 @@ pub struct LogItem {
 
 // json is a JSON string representation of the log item.
 pub fn (li LogItem) encode_json(mut wr io.Writer) ! {
-	wr.write('{"kind":"$li.kind","timestamp":$li.timestamp.unix,"payload":'.bytes()) !
-	wr.write(li.payload) !
-	wr.write('}\n'.bytes()) !
+	wr.write('{"kind":"$li.kind","timestamp":$li.timestamp.unix,"payload":'.bytes())!
+	wr.write(li.payload)!
+	wr.write('}\n'.bytes())!
 }
 
 pub fn new() &LogRecorder {
@@ -75,7 +75,7 @@ pub fn (mut l LogRecorder) set_logpath(path string) ! {
 		l.close()
 	}
 
-	l.file = os.open_append(os.real_path(path)) !
+	l.file = os.open_append(os.real_path(path))!
 	l.file_path = path
 	l.file_opened = true
 	l.enabled = true
@@ -130,12 +130,14 @@ fn (mut l LogRecorder) log(item LogItem) {
 const event_prefix = '$/lspLogger'
 
 pub const set_logpath_event = '$event_prefix/setPath'
+
 pub const close_event = '$event_prefix/close'
+
 pub const state_event = '$event_prefix/state'
 
 pub fn (mut l LogRecorder) on_event(name string, data jsonrpc.InterceptorData) ! {
 	if name == log.set_logpath_event && data is string {
-		l.set_logpath(data) !
+		l.set_logpath(data)!
 	} else if name == log.close_event {
 		l.close()
 	} else if name == log.state_event && data is bool {

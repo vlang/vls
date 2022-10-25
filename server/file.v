@@ -8,7 +8,7 @@ struct File {
 mut:
 	uri     lsp.DocumentUri
 	source  &ropes.Rope
-	tree    &ast.Tree [required]
+	tree    &ast.Tree       [required]
 	version int = 1
 }
 

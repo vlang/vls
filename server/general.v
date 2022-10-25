@@ -34,7 +34,7 @@ pub fn (mut ls Vls) initialize(params lsp.InitializeParams, mut wr ResponseWrite
 			ls.store.default_import_paths << os.vmodules_dir()
 		} else {
 			// avoid process launch fails when VROOT does not exist
-			ls.set_features(features_require_v_tool, false) or {}
+			ls.set_features(server.features_require_v_tool, false) or {}
 			wr.show_message("V installation directory was not found. Some of the features won't work properly.",
 				.error)
 		}
@@ -104,7 +104,8 @@ pub fn (mut ls Vls) initialize(params lsp.InitializeParams, mut wr ResponseWrite
 	ls.print_info(params.process_id, params.client_info, mut wr)
 
 	// print debug options info to avoid general_test failing
-	wr.log_message('is_logger_installed: $is_logger_installed | is_logger_enabled: $is_logger_enabled | params.trace: ${params.trace}', .info)
+	wr.log_message('is_logger_installed: $is_logger_installed | is_logger_enabled: $is_logger_enabled | params.trace: $params.trace',
+		.info)
 
 	// since builtin is used frequently, they should be parsed first and only once
 	analyzer.setup_builtin(mut ls.store, os.join_path(ls.vroot_path, 'vlib', 'builtin'))

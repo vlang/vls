@@ -2,7 +2,7 @@ import os
 import ast
 import test_utils
 import benchmark
-import analyzer { Collector, SemanticAnalyzer, Store, SymbolAnalyzer, new_tree_cursor, import_modules_from_tree, setup_builtin, Runes }
+import analyzer { Collector, Runes, SemanticAnalyzer, Store, SymbolAnalyzer, import_modules_from_tree, new_tree_cursor, setup_builtin }
 import analyzer.an_test_utils
 import v.util.diff
 import term
@@ -77,7 +77,8 @@ fn test_semantic_analysis() {
 			if diff_cmd.len != 0 {
 				bench.fail()
 				println(bench.step_message_fail(test_name))
-				println(diff.color_compare_strings(diff_cmd, 'vls_semantic_analyzer_test', expected_trimmed, result))
+				println(diff.color_compare_strings(diff_cmd, 'vls_semantic_analyzer_test',
+					expected_trimmed, result))
 			} else {
 				assert result == expected_trimmed
 			}

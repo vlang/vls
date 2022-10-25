@@ -57,7 +57,7 @@ fn test_diagnostics() {
 			continue
 		}
 
-		diagnostic_params := t.diagnostics() ?
+		diagnostic_params := t.diagnostics()?
 		if diagnostic_params.uri.path() != file.file_path {
 			t.fail(file, 'no diagnostics found')
 			continue

@@ -1,6 +1,6 @@
 import server
 import lsp
-import jsonrpc.server_test_utils { new_test_client, TestClient }
+import jsonrpc.server_test_utils { new_test_client, TestClient  }
 
 const (
 	log_message_method  = 'window/logMessage'

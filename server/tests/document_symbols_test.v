@@ -99,7 +99,8 @@ fn test_document_symbols() {
 		// initiate formatting request
 		if actual := ls.document_symbol(lsp.DocumentSymbolParams{
 			text_document: doc_id
-		}, mut writer) {
+		}, mut writer)
+		{
 			// compare content
 			expected := doc_symbols_result[file.file_name].map(lsp.SymbolInformation{
 				name: it.name

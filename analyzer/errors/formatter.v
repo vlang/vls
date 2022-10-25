@@ -5,12 +5,12 @@ import strings
 
 pub interface ErrorData {}
 
-pub type DataFormatterFn = fn (ErrorData) string 
+pub type DataFormatterFn = fn (ErrorData) string
 
 pub fn format(data_formatter_fn DataFormatterFn, code_or_msg string, datum ...ErrorData) string {
 	mut error_template := code_or_msg
-	if code_or_msg in errors.message_templates {
-		error_template = errors.message_templates[code_or_msg]
+	if code_or_msg in message_templates {
+		error_template = message_templates[code_or_msg]
 	}
 
 	if datum.len == 0 {
@@ -18,11 +18,15 @@ pub fn format(data_formatter_fn DataFormatterFn, code_or_msg string, datum ...Er
 	}
 
 	mut scanner := textscanner.new(error_template)
-	defer { unsafe { scanner.free() } }
+	defer {
+		unsafe { scanner.free() }
+	}
 
 	mut builder := strings.new_builder(error_template.len)
 	mut var_name := strings.new_builder(100)
-	defer { unsafe { var_name.free() } }
+	defer {
+		unsafe { var_name.free() }
+	}
 
 	mut cur_data_idx := 0
 	for scanner.remaining() != 0 {
@@ -32,7 +36,8 @@ pub fn format(data_formatter_fn DataFormatterFn, code_or_msg string, datum ...Er
 			cur_data_idx++
 
 			scanner.skip_n(1)
-		} else if chr == `{` && scanner.peek() == chr && (datum.last() is map[string]ErrorData || datum.last() is map[string]string) {
+		} else if chr == `{` && scanner.peek() == chr
+			&& (datum.last() is map[string]ErrorData || datum.last() is map[string]string) {
 			// maps are used for accepting named parameters in error messages
 			// e.g. "cannot selectively import {{var}} from {{mod}}. use {{mod}}.{{var}} instead"
 			scanner.skip_n(1)
