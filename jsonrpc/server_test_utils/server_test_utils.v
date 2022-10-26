@@ -127,9 +127,9 @@ pub fn (rw &TestStream) response_text(raw_id string) string {
 }
 
 // notification_at returns the jsonrpc.Notification<T> in a given index.
-pub fn (rw &TestStream) notification_at<T>(idx int) ?jsonrpc.NotificationMessage<T> {
+pub fn (rw &TestStream) notification_at<T>(idx int) !jsonrpc.NotificationMessage<T> {
 	raw_json_content := rw.notif_buf[idx].bytestr().all_after('\r\n\r\n')
-	return json.decode(jsonrpc.NotificationMessage<T>, raw_json_content)
+	return json.decode(jsonrpc.NotificationMessage<T>, raw_json_content)!
 }
 
 // last_notification_at_method returns the last jsonrpc.Notification<T> from the given method name.
@@ -141,7 +141,7 @@ pub fn (rw &TestStream) last_notification_at_method<T>(method_name string) ?json
 		}
 
 		if raw_notif_content.bytestr().contains('"method":"$method_name"') {
-			return rw.notification_at<T>(i)
+			return rw.notification_at<T>(i) or { return err }
 		}
 	}
 	return none
