@@ -224,25 +224,25 @@ pub fn (mut io Testio) result() string {
 }
 
 // notification returns the parameters of the notification.
-pub fn (io Testio) notification() ?(string, string) {
+pub fn (io Testio) notification() !(string, string) {
 	return io.notification_at_index(io.raw_responses.len - 1)
 }
 
 // notification verifies the parameters of the notification.
-pub fn (io Testio) notification_at_index(idx int) ?(string, string) {
-	resp := json.decode(TestNotification, io.raw_responses[idx])?
+pub fn (io Testio) notification_at_index(idx int) !(string, string) {
+	resp := json.decode(TestNotification, io.raw_responses[idx])!
 	return resp.method, resp.params
 }
 
 // response_error returns the error code and message from the response.
-pub fn (mut io Testio) response_error() ?(int, string) {
-	io.decode_response_at_index(io.raw_responses.len - 1)?
+pub fn (mut io Testio) response_error() !(int, string) {
+	io.decode_response_at_index(io.raw_responses.len - 1)!
 	return io.response.error.code, io.response.error.message
 }
 
-fn (mut io Testio) decode_response_at_index(idx int) ? {
+fn (mut io Testio) decode_response_at_index(idx int) ! {
 	if io.decoded_resp_idx != idx {
-		io.response = json.decode(TestResponse, io.raw_responses[idx])?
+		io.response = json.decode(TestResponse, io.raw_responses[idx])!
 		io.decoded_resp_idx = idx
 	}
 }
@@ -323,10 +323,10 @@ pub fn (mut io Testio) close_document(doc_id lsp.TextDocumentIdentifier) string 
 
 // file_errors parses and returns the list of file errors received
 // from the server after executing the `textDocument/didOpen` request.
-pub fn (mut io Testio) file_errors() ?[]lsp.Diagnostic {
+pub fn (mut io Testio) file_errors() ![]lsp.Diagnostic {
 	mut errors := []lsp.Diagnostic{}
-	_, diag_params := io.notification()?
-	diag_info := json.decode(lsp.PublishDiagnosticsParams, diag_params)?
+	_, diag_params := io.notification()!
+	diag_info := json.decode(lsp.PublishDiagnosticsParams, diag_params)!
 	for diag in diag_info.diagnostics {
 		if diag.severity != .error {
 			continue
