@@ -148,7 +148,7 @@ const completion_results = {
 			label: 'C.Foo'
 			kind: .struct_
 			detail: 'struct C.Foo'
-			insert_text: 'Foo{bar: \$1, baz: \$2, data: \$3, count: \$4}'
+			insert_text: 'Foo\{bar:\$1, baz:\$2, data:\$3, count:\$4}'
 			insert_text_format: .snippet
 		},
 	]
@@ -458,7 +458,7 @@ const completion_results = {
 			label: 'Point'
 			kind: .struct_
 			detail: 'pub struct abc.Point'
-			insert_text: 'Point{a: \$1, b: \$2}'
+			insert_text: 'Point\{a:\$1, b:\$2}'
 			insert_text_format: .snippet
 		},
 		lsp.CompletionItem{
