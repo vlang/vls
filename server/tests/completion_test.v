@@ -347,6 +347,13 @@ const completion_results = {
 		//			insert_text: 'connect'
 		//		},
 		lsp.CompletionItem{
+			label: 'ConnStatusType'
+			kind: .enum_
+			detail: 'pub enum pg.ConnStatusType'
+			insert_text: 'ConnStatusType'
+			insert_text_format: .plain_text
+		},
+		lsp.CompletionItem{
 			label: 'Oid'
 			kind: .enum_
 			detail: 'pub enum pg.Oid'

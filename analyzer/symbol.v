@@ -200,7 +200,9 @@ pub fn (symbols []&Symbol) filter_by_file_path(file_path string) []&Symbol {
 			filtered << sym
 		}
 
-		filtered_from_children := sym.children_syms.filter_by_file_path(file_path)
+		filtered_from_children := sym.children_syms
+			.filter(!symbols.exists(it.name))
+			.filter_by_file_path(file_path)
 		for child_sym in filtered_from_children {
 			if filtered.exists(child_sym.name) {
 				continue

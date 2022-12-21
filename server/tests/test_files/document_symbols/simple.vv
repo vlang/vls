@@ -25,3 +25,5 @@ fn main() {
   per := Person{}
   per.say()
 }
+
+type Recursive = []Recursive | int
