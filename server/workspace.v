@@ -16,19 +16,20 @@ pub fn (mut ls Vls) did_change_watched_files(params lsp.DidChangeWatchedFilesPar
 	// 3. Renaming a folder triggers the "created" event for each file
 	//    but with no "deleted" event prior to it.
 	for i, change in changes {
+		change_uri := change.uri.normalize()
 		match change.typ {
 			.created {
 				if is_rename {
-					prev_uri := changes[i - 1].uri
+					prev_uri := changes[i - 1].uri.normalize()
 					if prev_uri in ls.files {
-						ls.files[change.uri] = ls.files[prev_uri]
+						ls.files[change_uri] = ls.files[prev_uri]
 						ls.files.delete(prev_uri)
 					}
 
 					prev_uri_path := prev_uri.path()
 					prev_uri_dir := prev_uri.dir_path()
 					prev_uri_file_name := os.base(prev_uri_path)
-					new_uri_path := change.uri.path()
+					new_uri_path := change_uri.path()
 					new_uri_file_name := os.base(new_uri_path)
 					if prev_uri_path in ls.store.opened_scopes {
 						ls.store.opened_scopes[new_uri_path] = ls.store.opened_scopes[prev_uri_path]
@@ -78,16 +79,16 @@ pub fn (mut ls Vls) did_change_watched_files(params lsp.DidChangeWatchedFilesPar
 				}
 
 				// TODO: use did_close(?)
-				file_path := change.uri.path()
+				file_path := change_uri.path()
 
-				ls.files.delete(change.uri)
+				ls.files.delete(change_uri)
 				ls.store.opened_scopes.delete(file_path)
 
-				if ls.files.count(change.uri.dir()) == 0 {
-					ls.store.delete(change.uri.dir_path())
+				if ls.files.count(change_uri.dir()) == 0 {
+					ls.store.delete(change_uri.dir_path())
 				} else {
 					// delete symbols
-					file_dir := change.uri.dir_path()
+					file_dir := change_uri.dir_path()
 					for j := 0; j < ls.store.symbols[file_dir].len; {
 						sym := ls.store.symbols[file_dir][j]
 						if sym.file_path == file_path {

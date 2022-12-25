@@ -53,6 +53,10 @@ pub fn (du DocumentUri) dir_path() string {
 	return os.dir(du.path())
 }
 
+pub fn (du DocumentUri) normalize() DocumentUri {
+	return document_uri_from_path(du.path())
+}
+
 fn escape(s string) string {
 	byte_array := s.bytes()
 

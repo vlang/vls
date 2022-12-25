@@ -34,7 +34,7 @@ fn (mut ls Vls) analyze_file(file File, affected_node_type v.NodeType, affected_
 pub fn (mut ls Vls) did_open(params lsp.DidOpenTextDocumentParams, mut wr ResponseWriter) {
 	ls.parser.reset()
 	src := params.text_document.text
-	uri := params.text_document.uri
+	uri := params.text_document.uri.normalize()
 	project_dir := uri.dir_path()
 	mut should_scan_whole_dir := false
 
@@ -101,7 +101,7 @@ pub fn (mut ls Vls) did_open(params lsp.DidOpenTextDocumentParams, mut wr Respon
 }
 
 pub fn (mut ls Vls) did_change(params lsp.DidChangeTextDocumentParams, mut wr ResponseWriter) {
-	uri := params.text_document.uri
+	uri := params.text_document.uri.normalize()
 	if ls.current_file_uri != uri {
 		ls.current_file_uri = uri
 		ls.parser.reset()
@@ -178,7 +178,7 @@ pub fn (mut ls Vls) did_change(params lsp.DidChangeTextDocumentParams, mut wr Re
 }
 
 pub fn (mut ls Vls) did_close(params lsp.DidCloseTextDocumentParams, mut wr ResponseWriter) {
-	uri := params.text_document.uri
+	uri := params.text_document.uri.normalize()
 	ls.files.delete(uri)
 	ls.store.opened_scopes.delete(uri.path())
 
@@ -197,7 +197,7 @@ pub fn (mut ls Vls) did_close(params lsp.DidCloseTextDocumentParams, mut wr Resp
 }
 
 pub fn (mut ls Vls) did_save(params lsp.DidSaveTextDocumentParams, mut wr ResponseWriter) {
-	uri := params.text_document.uri
+	uri := params.text_document.uri.normalize()
 	ls.reporter.clear(uri)
 	ls.exec_v_diagnostics(uri) or {}
 	ls.reporter.publish(mut wr, uri)
