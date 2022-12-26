@@ -142,10 +142,20 @@ fn (mut ls Vls) exec_v_diagnostics(uri lsp.DocumentUri) ?int {
 	mut count := 0
 	for line in err {
 		mut report := parse_v_diagnostic(line) or { continue }
-		if is_module && !report.file_path.starts_with(input_path) {
+		file_dir_path := os.dir(report.file_path)
+
+		if os.is_abs_path(file_dir_path) {
+			// do nothing
+		} else if file_dir_path == '.' {
 			report = Report{
 				...report
-				file_path: os.join_path_single(input_path, report.file_path)
+				file_path: os.join_path_single(dir_path, report.file_path)
+			}
+		} else if start_idx := dir_path.last_index(file_dir_path) {
+			// reported file appears to be in a subdirectory of dir_path
+			report = Report{
+				...report
+				file_path: dir_path[..start_idx] + report.file_path
 			}
 		}
 
