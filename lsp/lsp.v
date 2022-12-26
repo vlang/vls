@@ -39,11 +39,7 @@ pub fn (du DocumentUri) path() string {
 
 		result = result.replace('/', '\\')
 	} $else {
-		if authority != '' && path != '' {
-			result = '//${authority}/${path}'
-		} else {
-			result = '/' + path
-		}
+		result = '/' + path
 	}
 
 	return result

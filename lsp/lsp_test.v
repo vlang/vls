@@ -43,7 +43,7 @@ fn test_document_uri_unicode() {
 		expected << 'file:///c%3A/files/C%253A%255Cfiles'
 	} $else {
 		expected << 'file:///usr/home/%E4%BD%A0%E5%A5%BD%E4%B8%96%E7%95%8C'
-		expected << 'file://C%3A/files/C%253A%255Cfiles'
+		expected << 'file:///C%3A/files/C%253A%255Cfiles'
 	}
 
 	for i in 0 .. input.len {
