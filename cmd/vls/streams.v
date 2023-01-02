@@ -176,23 +176,17 @@ pub fn (mut sck SocketStream) read(mut buf []u8) !int {
 		got_header := sck.reader.read_line() or { return IError(io.Eof{}) }
 		buf << got_header.bytes()
 		buf << newlines
+		header_len = got_header.len + 2
 		// $if !test {
 		// 	println('[$sck.log_label] : ${term.green('Received data')} : $got_header')
 		// }
 
 		if got_header.len == 0 {
-			continue
+			// encounter empty line ('\r\n') in header, header end
+			break
 		} else if got_header.starts_with(content_length) {
 			conlen = got_header.all_after(content_length).int()
-			// read blank line
-			empty := sck.reader.read_line() or { return IError(io.Eof{}) }
-			buf << empty.bytes()
-			buf << newlines
-			header_len = got_header.len + 4
-			break
 		}
-
-		header_len = got_header.len + 2
 	}
 
 	if conlen > 0 {
