@@ -639,7 +639,7 @@ pub fn (mut ls Vls) completion(params lsp.CompletionParams, mut wr ResponseWrite
 		return none
 	}
 
-	uri := params.text_document.uri
+	uri := params.text_document.uri.normalize()
 	file := ls.files[uri]
 	root_node := file.tree.root_node()
 	pos := params.position

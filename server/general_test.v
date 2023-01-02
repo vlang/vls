@@ -94,7 +94,7 @@ fn test_setup_logger() {
 	mut io := new_test_client(server.new(), &LogRecorder{})
 	io.send<lsp.InitializeParams, lsp.InitializeResult>('initialize', lsp.InitializeParams{
 		trace: 'verbose'
-		root_uri: lsp.document_uri_from_path(os.join_path('non_existent', 'path'))
+		root_uri: lsp.document_uri_from_path(os.join_path('/non_existent', 'path'))
 	}) or {
 		if err is io.Eof {
 			return
@@ -103,11 +103,11 @@ fn test_setup_logger() {
 		return
 	}
 
-	notif := io.stream.notification_at<lsp.ShowMessageParams>(0)?
+	notif := io.stream.notification_at<lsp.ShowMessageParams>(0)!
 	assert notif.method == 'window/showMessage'
 
-	expected_err_path := os.join_path('non_existent', 'path', 'vls.log')
-	expected_alt_log_path := os.join_path(server.get_folder_path(), 'logs', 'vls__non_existent_path.log')
+	expected_err_path := os.join_path('/non_existent', 'path', 'vls.log')
+	expected_alt_log_path := os.join_path(server.get_folder_path(), 'logs', 'vls___non_existent_path.log')
 	assert notif.params == lsp.ShowMessageParams{
 		@type: .error
 		message: 'Cannot save log to ${expected_err_path}. Saving log to $expected_alt_log_path'

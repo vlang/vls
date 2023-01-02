@@ -11,7 +11,7 @@ const temp_formatting_file_path = os.join_path(os.temp_dir(), 'vls_temp_formatti
 
 [manualfree]
 pub fn (mut ls Vls) formatting(params lsp.DocumentFormattingParams, mut wr ResponseWriter) ![]lsp.TextEdit {
-	uri := params.text_document.uri
+	uri := params.text_document.uri.normalize()
 	source := ls.files[uri].source
 	tree_range := ls.files[uri].tree.root_node().range()
 	if source.len() == 0 {
@@ -131,7 +131,7 @@ fn symbol_to_symbol_info(uri lsp.DocumentUri, sym &analyzer.Symbol) ?lsp.SymbolI
 }
 
 fn (mut ls Vls) document_symbol(params lsp.DocumentSymbolParams, mut wr ResponseWriter) ![]lsp.SymbolInformation {
-	uri := params.text_document.uri
+	uri := params.text_document.uri.normalize()
 	retrieved_symbols := ls.store.get_symbols_by_file_path(uri.path())
 	mut document_symbols := []lsp.SymbolInformation{}
 	for sym in retrieved_symbols {
@@ -146,7 +146,7 @@ fn (mut ls Vls) signature_help(params lsp.SignatureHelpParams, mut wr ResponseWr
 		return none
 	}
 
-	uri := params.text_document.uri
+	uri := params.text_document.uri.normalize()
 	pos := params.position
 	ctx := params.context
 	file := ls.files[uri] or { return none }
@@ -224,7 +224,7 @@ fn (mut ls Vls) signature_help(params lsp.SignatureHelpParams, mut wr ResponseWr
 }
 
 pub fn (mut ls Vls) hover(params lsp.HoverParams, mut wr ResponseWriter) ?lsp.Hover {
-	uri := params.text_document.uri
+	uri := params.text_document.uri.normalize()
 	pos := params.position
 	file := ls.files[uri] or { return none }
 	offset := file.get_offset(pos.line, pos.character)
@@ -297,7 +297,7 @@ fn get_hover_data(mut store analyzer.Store, node ast.Node, uri lsp.DocumentUri, 
 
 // [manualfree]
 pub fn (mut ls Vls) folding_range(params lsp.FoldingRangeParams, mut wr ResponseWriter) ?[]lsp.FoldingRange {
-	uri := params.text_document.uri
+	uri := params.text_document.uri.normalize()
 	file := ls.files[uri] or { return none }
 	root_node := file.tree.root_node()
 
@@ -401,7 +401,7 @@ pub fn (mut ls Vls) definition(params lsp.TextDocumentPositionParams, mut wr Res
 		return none
 	}
 
-	uri := params.text_document.uri
+	uri := params.text_document.uri.normalize()
 	pos := params.position
 	file := ls.files[uri] or { return none }
 	source := file.source
@@ -475,7 +475,7 @@ pub fn (mut ls Vls) implementation(params lsp.TextDocumentPositionParams, mut wr
 		return none
 	}
 
-	uri := params.text_document.uri
+	uri := params.text_document.uri.normalize()
 	file_path := uri.path()
 	file_dir := uri.dir_path()
 	pos := params.position

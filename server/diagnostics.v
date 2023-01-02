@@ -81,7 +81,10 @@ fn parse_v_diagnostic(msg string) ?Report {
 	if line_colon_idx < 0 {
 		return none
 	}
-	file_path := msg[..line_colon_idx]
+	mut file_path := msg[..line_colon_idx]
+	$if windows {
+		file_path = file_path.replace('/', '\\')
+	}
 	col_colon_idx := msg.index_after(':', line_colon_idx + 1)
 	colon_sep_idx := msg.index_after(':', col_colon_idx + 1)
 	msg_type_colon_idx := msg.index_after(':', colon_sep_idx + 1)
@@ -124,7 +127,8 @@ fn (mut ls Vls) exec_v_diagnostics(uri lsp.DocumentUri) ?int {
 
 	dir_path := uri.dir_path()
 	file_path := uri.path()
-	input_path := if file_path.ends_with('.vv') { file_path } else { dir_path }
+	is_module := !file_path.ends_with('.vv')
+	input_path := if is_module { dir_path } else { file_path }
 	mut p := ls.launch_v_tool('-enable-globals', '-shared', '-check', input_path)
 	defer {
 		p.close()
@@ -138,7 +142,17 @@ fn (mut ls Vls) exec_v_diagnostics(uri lsp.DocumentUri) ?int {
 	mut count := 0
 	for line in err {
 		mut report := parse_v_diagnostic(line) or { continue }
-		if start_idx := dir_path.index(os.dir(report.file_path)) {
+		file_dir_path := os.dir(report.file_path)
+
+		if os.is_abs_path(file_dir_path) {
+			// do nothing
+		} else if file_dir_path == '.' {
+			report = Report{
+				...report
+				file_path: os.join_path_single(dir_path, report.file_path)
+			}
+		} else if start_idx := dir_path.last_index(file_dir_path) {
+			// reported file appears to be in a subdirectory of dir_path
 			report = Report{
 				...report
 				file_path: dir_path[..start_idx] + report.file_path
