@@ -40,12 +40,10 @@ pub fn (mut stream StdioStream) write(buf []u8) !int {
 }
 
 pub fn (mut stream StdioStream) read(mut buf []u8) !int {
-	stdin_file := stream.stdin_file()
-
 	mut header_len := 0
 	mut conlen := 0
 	for {
-		len := read_line(stdin_file, mut buf) or { return IError(io.Eof{}) }
+		len := read_line(stream.stdin, mut buf) or { return err }
 		st := buf.len - len
 		line := buf[st..].bytestr()
 
@@ -61,39 +59,40 @@ pub fn (mut stream StdioStream) read(mut buf []u8) !int {
 		}
 	}
 
-	eof := C.EOF
-	for _ in 0 .. conlen {
-		c := C.fgetc(stdin_file)
-		if c == eof {
-			return IError(io.Eof{})
-		}
-		buf << u8(c)
+	mut body := []u8{len: conlen}
+	read_cnt :=  stream.stdin.read(mut body) or { return err }
+	if read_cnt != conlen {
+		return IError(io.Eof{})
 	}
+	buf << body
+
 	return header_len + conlen
 }
 
-fn read_line(file &C.FILE, mut buf []u8) !int {
-	eof := C.EOF
+fn read_line(file &os.File, mut buf []u8) !int {
 	mut len := 0
+	mut temp := []u8{len: 256, cap: 256}
 	for {
-		c := C.fgetc(file)
-		chr := u8(c)
-		if c == eof {
+		read_cnt := file.read_bytes_into_newline(mut temp) or { return err }
+		len += read_cnt
+		buf << temp[0..read_cnt]
+		if read_cnt == 0 {
 			return if len == 0 {
-				error('none')
+				IError(io.Eof{})
 			} else {
 				len
 			}
-		} else if chr == `\n` {
+		}
+		if buf.len > 0 && buf.last() == `\n` {
+			buf.pop()
+			len--
 			// check is it just '\n' or '\r\n'
-			if len > 0 && buf[len - 1] == `\r` {
+			if len > 0 && buf.last() == `\r` {
 				buf.pop()
 				len--
 			}
 			break
 		}
-		buf << chr
-		len++
 	}
 	return len
 }
