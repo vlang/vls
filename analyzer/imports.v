@@ -179,7 +179,7 @@ pub fn (mut imp Importer) inject_paths_of_new_imports(mut new_imports []Import, 
 		if !new_imports[import_idx].resolved {
 			for file_path, range in new_imports[import_idx].ranges {
 				imp.context.store.report(
-					message: 'Module `$new_imports[import_idx].absolute_module_name` not found'
+					message: 'Module `${new_imports[import_idx].absolute_module_name}` not found'
 					file_path: file_path
 					range: range
 				)
