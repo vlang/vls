@@ -41,42 +41,55 @@ pub fn (mut stream StdioStream) write(buf []u8) !int {
 
 pub fn (mut stream StdioStream) read(mut buf []u8) !int {
 	stdin_file := stream.stdin_file()
-	initial_len := get_raw_input(stdin_file, mut buf) or { return IError(io.Eof{}) }
-	if buf.len < 1 || !buf.bytestr().starts_with(content_length) {
-		return error('content length is missing')
-	}
-	mut conlen := buf[content_length.len..].bytestr().int()
 
-	// just add \r\n\r\n
-	for i := 0; i < 2; i++ {
+	mut header_len := 0
+	mut conlen := 0
+	for {
+		len := read_line(stdin_file, mut buf) or { return IError(io.Eof{}) }
+		st := buf.len - len
+		line := buf[st..].bytestr()
+
 		buf << `\r`
 		buf << `\n`
+		header_len = len + 2
+
+		if len == 0 {
+			// encounter empty line ('\r\n') in header, header end
+			break
+		} else if line.starts_with(content_length) {
+			conlen = line.all_after(content_length).int()
+		}
 	}
 
-	for remaining := conlen; remaining != 0; {
+	eof := C.EOF
+	for _ in 0 .. conlen {
 		c := C.fgetc(stdin_file)
-		$if !windows {
-			if c == 10 || c == `\r` {
-				continue
-			}
-		} $else {
-			if c == 10 {
-				continue
-			}
+		if c == eof {
+			return IError(io.Eof{})
 		}
 		buf << u8(c)
-		remaining--
 	}
-	return initial_len + conlen
+	return header_len + conlen
 }
 
-fn get_raw_input(file &C.FILE, mut buf []u8) ?int {
+fn read_line(file &C.FILE, mut buf []u8) !int {
 	eof := C.EOF
 	mut len := 0
 	for {
 		c := C.fgetc(file)
 		chr := u8(c)
-		if buf.len > 2 && (c == eof || chr in [`\r`, `\n`]) {
+		if c == eof {
+			return if len == 0 {
+				error('none')
+			} else {
+				len
+			}
+		} else if chr == `\n` {
+			// check is it just '\n' or '\r\n'
+			if len > 0 && buf[len - 1] == `\r` {
+				buf.pop()
+				len--
+			}
 			break
 		}
 		buf << chr
