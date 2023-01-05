@@ -45,7 +45,7 @@ pub enum SymbolKind {
 	function_type
 }
 
-fn (kind SymbolKind) str() string {
+pub fn (kind SymbolKind) str() string {
 	match kind {
 		.void { return 'void' }
 		.placeholder { return 'placeholder' }
