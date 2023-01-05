@@ -130,7 +130,7 @@ fn symbol_to_symbol_info(uri lsp.DocumentUri, sym &analyzer.Symbol) ?lsp.SymbolI
 	}
 }
 
-fn (mut ls Vls) document_symbol(params lsp.DocumentSymbolParams, mut wr ResponseWriter) ![]lsp.SymbolInformation {
+pub fn (mut ls Vls) document_symbol(params lsp.DocumentSymbolParams, mut wr ResponseWriter) ![]lsp.SymbolInformation {
 	uri := params.text_document.uri.normalize()
 	retrieved_symbols := ls.store.get_symbols_by_file_path(uri.path())
 	mut document_symbols := []lsp.SymbolInformation{}
@@ -141,7 +141,7 @@ fn (mut ls Vls) document_symbol(params lsp.DocumentSymbolParams, mut wr Response
 	return document_symbols
 }
 
-fn (mut ls Vls) signature_help(params lsp.SignatureHelpParams, mut wr ResponseWriter) ?lsp.SignatureHelp {
+pub fn (mut ls Vls) signature_help(params lsp.SignatureHelpParams, mut wr ResponseWriter) ?lsp.SignatureHelp {
 	if Feature.signature_help !in ls.enabled_features {
 		return none
 	}
