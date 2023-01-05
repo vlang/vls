@@ -12,7 +12,7 @@ pub mut:
 	right  &Rope = &Rope(0)
 }
 
-fn (r &Rope) is_leaf() bool {
+pub fn (r &Rope) is_leaf() bool {
 	return isnil(r.left)
 }
 
@@ -99,7 +99,7 @@ pub fn (r &Rope) concat(other &Rope) &Rope {
 	}
 }
 
-fn (r &Rope) split(idx int) (&Rope, &Rope) {
+pub fn (r &Rope) split(idx int) (&Rope, &Rope) {
 	if isnil(r) {
 		panic('operation not permitted - rope is nil')
 	} else if idx < 0 || idx > r.len() {
