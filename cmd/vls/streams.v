@@ -40,47 +40,59 @@ pub fn (mut stream StdioStream) write(buf []u8) !int {
 }
 
 pub fn (mut stream StdioStream) read(mut buf []u8) !int {
-	stdin_file := stream.stdin_file()
-	initial_len := get_raw_input(stdin_file, mut buf) or { return IError(io.Eof{}) }
-	if buf.len < 1 || !buf.bytestr().starts_with(content_length) {
-		return error('content length is missing')
-	}
-	mut conlen := buf[content_length.len..].bytestr().int()
+	mut header_len := 0
+	mut conlen := 0
+	for {
+		len := read_line(stream.stdin, mut buf) or { return err }
+		st := buf.len - len
+		line := buf[st..].bytestr()
 
-	// just add \r\n\r\n
-	for i := 0; i < 2; i++ {
 		buf << `\r`
 		buf << `\n`
+		header_len = len + 2
+
+		if len == 0 {
+			// encounter empty line ('\r\n') in header, header end
+			break
+		} else if line.starts_with(content_length) {
+			conlen = line.all_after(content_length).int()
+		}
 	}
 
-	for remaining := conlen; remaining != 0; {
-		c := C.fgetc(stdin_file)
-		$if !windows {
-			if c == 10 || c == `\r` {
-				continue
-			}
-		} $else {
-			if c == 10 {
-				continue
-			}
-		}
-		buf << u8(c)
-		remaining--
+	mut body := []u8{len: conlen}
+	read_cnt :=  stream.stdin.read(mut body) or { return err }
+	if read_cnt != conlen {
+		return IError(io.Eof{})
 	}
-	return initial_len + conlen
+	buf << body
+
+	return header_len + conlen
 }
 
-fn get_raw_input(file &C.FILE, mut buf []u8) ?int {
-	eof := C.EOF
+fn read_line(file &os.File, mut buf []u8) !int {
 	mut len := 0
+	mut temp := []u8{len: 256, cap: 256}
 	for {
-		c := C.fgetc(file)
-		chr := u8(c)
-		if buf.len > 2 && (c == eof || chr in [`\r`, `\n`]) {
+		read_cnt := file.read_bytes_into_newline(mut temp) or { return err }
+		len += read_cnt
+		buf << temp[0..read_cnt]
+		if read_cnt == 0 {
+			return if len == 0 {
+				IError(io.Eof{})
+			} else {
+				len
+			}
+		}
+		if buf.len > 0 && buf.last() == `\n` {
+			buf.pop()
+			len--
+			// check is it just '\n' or '\r\n'
+			if len > 0 && buf.last() == `\r` {
+				buf.pop()
+				len--
+			}
 			break
 		}
-		buf << chr
-		len++
 	}
 	return len
 }
