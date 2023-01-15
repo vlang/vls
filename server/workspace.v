@@ -32,7 +32,9 @@ pub fn (mut ls Vls) did_change_watched_files(params lsp.DidChangeWatchedFilesPar
 					new_uri_path := change_uri.path()
 					new_uri_file_name := os.base(new_uri_path)
 					if prev_uri_path in ls.store.opened_scopes {
-						ls.store.opened_scopes[new_uri_path] = ls.store.opened_scopes[prev_uri_path]
+						unsafe {
+							ls.store.opened_scopes[new_uri_path] = ls.store.opened_scopes[prev_uri_path]
+						}
 						ls.store.opened_scopes.delete(prev_uri_path)
 					}
 
