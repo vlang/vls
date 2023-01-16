@@ -357,12 +357,9 @@ pub fn (mut ss Store) get_scope_from_node(file_path string, node ast.Node) ?&Sco
 
 	if node.type_name == .source_file {
 		if file_path !in ss.opened_scopes {
-			// XTODO unsafe not needed
-			unsafe {
-				ss.opened_scopes[file_path] = &ScopeTree{
-					start_byte: node.start_byte()
-					end_byte: node.end_byte()
-				}
+			ss.opened_scopes[file_path] = &ScopeTree{
+				start_byte: node.start_byte()
+				end_byte: node.end_byte()
 			}
 		}
 
