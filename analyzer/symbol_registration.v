@@ -29,7 +29,7 @@ mut:
 fn (sr &SymbolAnalyzer) new_top_level_symbol(identifier_node ast.Node, access SymbolAccess, kind SymbolKind) ?&Symbol {
 	id_node_type_name := identifier_node.type_name
 	if id_node_type_name == .qualified_type {
-		return report_error('Invalid top-level node type `$id_node_type_name`', identifier_node.range())
+		return report_error('Invalid top-level node type `${id_node_type_name}`', identifier_node.range())
 	}
 
 	mut symbol := &Symbol{
@@ -43,7 +43,7 @@ fn (sr &SymbolAnalyzer) new_top_level_symbol(identifier_node ast.Node, access Sy
 	match id_node_type_name {
 		.generic_type {
 			if identifier_node.named_child(0)?.type_name == .generic_type {
-				return error('Invalid top-level generic node type `$id_node_type_name`')
+				return error('Invalid top-level generic node type `${id_node_type_name}`')
 			}
 
 			// unsafe { symbol.free() }
@@ -335,7 +335,7 @@ fn (mut sr SymbolAnalyzer) fn_decl(fn_node ast.Node) ?&Symbol {
 	body_node := fn_node.child_by_field_name('body')?
 	params_list_node := fn_node.child_by_field_name('parameters')?
 	return_node := fn_node.child_by_field_name('result') or {
-		unsafe { ts.unwrap_null_node<v.NodeType>(v.type_factory, err)? }
+		unsafe { ts.unwrap_null_node[v.NodeType](v.type_factory, err)? }
 	}
 
 	mut fn_sym := sr.new_top_level_symbol(name_node, access, .function)?
@@ -932,7 +932,7 @@ pub fn (mut sr SymbolAnalyzer) analyze_from_cursor(mut cursor TreeCursor) []&Sym
 		sr.get_scope(cur_node) or {}
 	}
 
-	mut global_scope := sr.context.store.opened_scopes[sr.context.file_path]
+	mut global_scope := unsafe { sr.context.store.opened_scopes[sr.context.file_path] }
 	mut symbols := []&Symbol{cap: 255}
 	for got_node in cursor {
 		mut syms := sr.analyze(got_node) or {
