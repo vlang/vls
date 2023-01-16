@@ -468,30 +468,32 @@ fn (mut builder CompletionBuilder) build_local_suggestions() {
 	// the functions and the constants of the file.
 	//
 	// TODO unsafe is not needed here, it's a bug in V
-	if file_scope_ := unsafe { builder.store.opened_scopes[builder.file_path] } {
-		// mut file_scope := unsafe { file_scope_ }
-		mut file_scope := file_scope_
-		mut scope := file_scope.innermost(u32(builder.offset), u32(builder.offset)) or {
-			file_scope
-		}
-		for !isnil(scope) && scope != file_scope {
-			// constants
-			for scope_sym in scope.get_all_symbols() {
-				if !builder.has_same_return_type(scope_sym.return_sym)
-					|| (builder.filter_sym_kinds.len != 0
-					&& scope_sym.kind !in builder.filter_sym_kinds) {
-					continue
+	unsafe {
+		if file_scope_ := builder.store.opened_scopes[builder.file_path] {
+			// mut file_scope := unsafe { file_scope_ }
+			mut file_scope := file_scope_
+			mut scope := file_scope.innermost(u32(builder.offset), u32(builder.offset)) or {
+				file_scope
+			}
+			for !isnil(scope) && scope != file_scope {
+				// constants
+				for scope_sym in scope.get_all_symbols() {
+					if !builder.has_same_return_type(scope_sym.return_sym)
+						|| (builder.filter_sym_kinds.len != 0
+						&& scope_sym.kind !in builder.filter_sym_kinds) {
+						continue
+					}
+
+					builder.add(lsp.CompletionItem{
+						label: scope_sym.name
+						kind: .variable
+						detail: builder.symbol_formatter.format(scope_sym)
+						insert_text: scope_sym.name
+					})
 				}
 
-				builder.add(lsp.CompletionItem{
-					label: scope_sym.name
-					kind: .variable
-					detail: builder.symbol_formatter.format(scope_sym)
-					insert_text: scope_sym.name
-				})
+				scope = scope.parent
 			}
-
-			scope = scope.parent
 		}
 	}
 }
