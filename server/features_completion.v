@@ -468,7 +468,7 @@ fn (mut builder CompletionBuilder) build_local_suggestions() {
 	// the functions and the constants of the file.
 	//
 	if file_scope_ := builder.store.opened_scopes[builder.file_path] {
-		mut file_scope := file_scope_
+		mut file_scope := unsafe { file_scope_ }
 		mut scope := file_scope.innermost(u32(builder.offset), u32(builder.offset)) or {
 			file_scope
 		}
