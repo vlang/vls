@@ -409,7 +409,7 @@ fn (mut sr SymbolAnalyzer) type_decl(type_decl_node ast.Node) ?&Symbol {
 }
 
 fn (mut sr SymbolAnalyzer) top_level_decl(current_node ast.Node) ?[]&Symbol {
-	mut global_scope := sr.context.store.opened_scopes[sr.context.file_path] or { return none }
+	mut global_scope := unsafe { sr.context.store.opened_scopes[sr.context.file_path] }
 	node_type_name := current_node.type_name
 	match node_type_name {
 		// TODO: add module check
