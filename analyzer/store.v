@@ -139,7 +139,7 @@ pub fn (ss &Store) find_symbol(file_path string, module_name string, name string
 		}
 	}
 
-	return error('Symbol `$name` not found.')
+	return error('Symbol `${name}` not found.')
 }
 
 const anon_fn_prefix = '#anon_'
@@ -234,7 +234,7 @@ pub fn (mut ss Store) register_symbol(mut info Symbol) ?&Symbol {
 				&& (info.range.start_point.row > existing_sym.range.start_point.row
 				|| (existing_sym.kind == info.kind && (existing_sym.file_path == info.file_path
 				&& existing_sym.file_version >= info.file_version))) {
-				return report_error('Symbol already exists. (idx=$existing_idx) (name="$existing_sym.name")',
+				return report_error('Symbol already exists. (idx=${existing_idx}) (name="${existing_sym.name}")',
 					info.range)
 			}
 
@@ -366,9 +366,9 @@ pub fn (mut ss Store) get_scope_from_node(file_path string, node ast.Node) ?&Sco
 			}
 		}
 
-		return ss.opened_scopes[file_path]
+		return unsafe { ss.opened_scopes[file_path] }
 	} else {
-		return ss.opened_scopes[file_path].new_child(node.start_byte(), node.end_byte())
+		return unsafe { ss.opened_scopes[file_path].new_child(node.start_byte(), node.end_byte()) }
 	}
 }
 
@@ -408,7 +408,7 @@ pub fn symbol_name_from_node(node ast.Node, src_text tree_sitter.SourceText) (Sy
 			if el_node := node.child_by_field_name('element') {
 				_, module_name, symbol_name = symbol_name_from_node(el_node, src_text)
 			}
-			return SymbolKind.array_, module_name, '[$limit]' + symbol_name
+			return SymbolKind.array_, module_name, '[${limit}]' + symbol_name
 		}
 		.map_type {
 			mut key_module_name := ''
@@ -432,10 +432,10 @@ pub fn symbol_name_from_node(node ast.Node, src_text tree_sitter.SourceText) (Sy
 			if (key_module_name.len != 0 && val_module_name.len == 0)
 				|| (key_module_name == val_module_name) {
 				// if key type uses a custom type, return the symbol in the key's origin module
-				return SymbolKind.map_, key_module_name, 'map[$key_symbol_name]$value_symbol_text'
+				return SymbolKind.map_, key_module_name, 'map[${key_symbol_name}]${value_symbol_text}'
 			} else if key_module_name.len == 0 && val_module_name.len != 0 {
 				// if key is builtin type and key type is not, use the module from the value type
-				return SymbolKind.map_, val_module_name, 'map[$key_symbol_text]$val_symbol_name'
+				return SymbolKind.map_, val_module_name, 'map[${key_symbol_text}]${val_symbol_name}'
 			} else {
 				module_name = ''
 			}
@@ -600,8 +600,10 @@ pub fn (mut ss Store) infer_symbol_from_node(file_path string, node ast.Node, sr
 			// find the symbol in scopes
 			// return void if none
 			ident_text := node.text(src_text)
-			return ss.opened_scopes[file_path].get_symbol_with_range(ident_text, node.range()) or {
-				ss.find_symbol(file_path, module_name, ident_text)?
+			return unsafe {
+				ss.opened_scopes[file_path].get_symbol_with_range(ident_text, node.range()) or {
+					ss.find_symbol(file_path, module_name, ident_text)?
+				}
 			}
 		}
 		.mutable_identifier {
@@ -625,7 +627,9 @@ pub fn (mut ss Store) infer_symbol_from_node(file_path string, node ast.Node, sr
 			}
 
 			return ss.find_symbol(file_path, module_name, ident_text) or {
-				ss.opened_scopes[file_path].get_symbol_with_range(ident_text, node.range())?
+				unsafe {
+					ss.opened_scopes[file_path].get_symbol_with_range(ident_text, node.range())?
+				}
 			}
 		}
 		.type_selector_expression {
@@ -982,7 +986,9 @@ pub fn (mut ss Store) infer_value_type_from_node(file_path string, node ast.Node
 // delete_symbol_at_node removes a specific symbol from a specific portion of the node
 pub fn (mut ss Store) delete_symbol_at_node(file_path string, root_node ast.Node, src tree_sitter.SourceText, start_line u32, end_line u32) bool {
 	// remove by scope
-	ss.opened_scopes[file_path].remove_symbols_by_line(start_line, end_line)
+	unsafe {
+		ss.opened_scopes[file_path].remove_symbols_by_line(start_line, end_line)
+	}
 
 	// remove by node
 	mut cursor := new_tree_cursor(root_node, start_line_nr: start_line)
