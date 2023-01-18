@@ -390,7 +390,7 @@ module.exports = grammar({
     comptime_selector_expression: ($) =>
       comp_time(seq("(", $.selector_expression, ")")),
 
-    option_propagator: ($) => prec.right(choice(token("?"), $.or_block)),
+    option_propagator: ($) => prec.right(choice("?", "!", $.or_block)),
 
     or_block: ($) => seq("or", $.block),
 
@@ -800,11 +800,16 @@ module.exports = grammar({
         ")"
       ),
 
-    _type: ($) => choice($._simple_type, $.option_type, $.multi_return_type),
+    _type: ($) => choice($._simple_type, $.option_type, $.result_type, $.multi_return_type),
 
     option_type: ($) =>
       prec.right(
         seq("?", optional(choice($._simple_type, $.multi_return_type)))
+      ),
+
+    result_type: ($) =>
+      prec.right(
+        seq("!", optional(choice($._simple_type, $.multi_return_type)))
       ),
 
     multi_return_type: ($) => seq("(", comma_sep1($._simple_type), ")"),
