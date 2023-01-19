@@ -183,33 +183,37 @@ fn (mut rw ResponseWriter) close() {
 }
 
 // write sends the given payload to the stream.
-pub fn (mut rw ResponseWriter) write<T>(payload T) {
-	final_resp := Response<T>{
+pub fn (mut rw ResponseWriter) write[T](payload T) {
+	final_resp := Response[T]{
 		id: rw.req_id
 		result: payload
 	}
-	encode_response<T>(final_resp, mut rw.sb)
+	encode_response[T](final_resp, mut rw.sb)
 	rw.close()
+}
+
+pub fn (mut rw ResponseWriter) write_empty() {
+	rw.write[Null](null)
 }
 
 // write_notify sends the given method and params as
 // a server notification to the stream.
-pub fn (mut rw ResponseWriter) write_notify<T>(method string, params T) {
-	notif := NotificationMessage<T>{
+pub fn (mut rw ResponseWriter) write_notify[T](method string, params T) {
+	notif := NotificationMessage[T]{
 		method: method
 		params: params
 	}
-	encode_notification<T>(notif, mut rw.sb)
+	encode_notification[T](notif, mut rw.sb)
 	rw.close()
 }
 
 // write_error sends a ResponseError to the stream.
 pub fn (mut rw ResponseWriter) write_error(err &ResponseError) {
-	final_resp := Response<string>{
+	final_resp := Response[string]{
 		id: rw.req_id
 		error: err
 	}
-	encode_response<string>(final_resp, mut rw.sb)
+	encode_response[string](final_resp, mut rw.sb)
 	rw.close()
 }
 
@@ -226,7 +230,7 @@ fn (mut w Writer) write(byt []u8) !int {
 	defer {
 		w.clen_sb.go_back_to(0)
 	}
-	w.clen_sb.write_string('Content-Length: $byt.len\r\n\r\n')
+	w.clen_sb.write_string('Content-Length: ${byt.len}\r\n\r\n')
 	w.clen_sb.write(byt) or {}
 	return w.read_writer.write(w.clen_sb)
 }
@@ -250,12 +254,12 @@ pub struct PassiveHandler {}
 fn (mut h PassiveHandler) handle_jsonrpc(req &Request, mut rw ResponseWriter) ! {}
 
 // is_intercepter_enabled checks if the given T is enabled in a Server.
-pub fn is_interceptor_enabled<T>(server &Server) bool {
-	get_interceptor<T>(server) or { return false }
+pub fn is_interceptor_enabled[T](server &Server) bool {
+	get_interceptor[T](server) or { return false }
 	return true
 }
 
-pub fn get_interceptor<T>(server &Server) ?&T {
+pub fn get_interceptor[T](server &Server) ?&T {
 	for inter in server.interceptors {
 		if inter is T {
 			return inter
