@@ -33,17 +33,17 @@ pub mut:
 	client &server_test_utils.TestClient
 }
 
-pub fn (mut t Tester) initialize() ?TestFilesIterator {
-	t.client.send<lsp.InitializeParams, lsp.InitializeResult>('initialize', lsp.InitializeParams{
+pub fn (mut t Tester) initialize() !TestFilesIterator {
+	t.client.send[lsp.InitializeParams, lsp.InitializeResult]('initialize', lsp.InitializeParams{
 		root_uri: lsp.document_uri_from_path(os.join_path(t.test_files_dir, t.folder_name))
 	}) or {
 		if err is io.Eof {
-			return none
+			return error('')
 		}
 		return err
 	}
 
-	files := load_test_file_paths(t.test_files_dir, t.folder_name)?
+	files := load_test_file_paths(t.test_files_dir, t.folder_name)!
 	t.bench.set_total_expected_steps(files.len)
 	return TestFilesIterator{
 		file_paths: files
@@ -53,7 +53,7 @@ pub fn (mut t Tester) initialize() ?TestFilesIterator {
 
 pub fn (mut t Tester) fail(file TestFile, msg string) {
 	final_msg := if msg.len == 0 { '<unknown error>' } else { msg }
-	println(t.bench.step_message_fail('$file.file_name: $final_msg'))
+	println(t.bench.step_message_fail('${file.file_name}: ${final_msg}'))
 	t.bench.fail()
 }
 
@@ -62,7 +62,7 @@ pub fn (mut t Tester) ok(file TestFile) {
 	t.bench.ok()
 }
 
-pub fn (mut t Tester) is_equal<T>(expected T, actual T) ? {
+pub fn (mut t Tester) is_equal[T](expected T, actual T) ! {
 	if expected != actual {
 		println(diff.color_compare_strings(test_utils.diff_cmd, 'vls_${t.folder_name}_test',
 			expected.str(), actual.str()))
@@ -82,8 +82,8 @@ pub fn (t &Tester) is_ok() bool {
 	return t.bench.nfail == 0
 }
 
-pub fn (mut t Tester) diagnostics() ?lsp.PublishDiagnosticsParams {
-	got := t.client.stream.last_notification_at_method<lsp.PublishDiagnosticsParams>('textDocument/publishDiagnostics')?
+pub fn (mut t Tester) diagnostics() !lsp.PublishDiagnosticsParams {
+	got := t.client.stream.last_notification_at_method[lsp.PublishDiagnosticsParams]('textDocument/publishDiagnostics')!
 	return got.params
 }
 
@@ -210,9 +210,9 @@ pub fn (mut io Testio) request(method string) string {
 }
 
 // request_with_params returns a JSON string of JSON-RPC request with parameters.
-pub fn (mut io Testio) request_with_params<T>(method string, params T) string {
+pub fn (mut io Testio) request_with_params[T](method string, params T) string {
 	enc_params := json.encode(params)
-	payload := '{"jsonrpc":"$jsonrpc.version","id":$io.current_req_id,"method":"$method","params":$enc_params}'
+	payload := '{"jsonrpc":"${jsonrpc.version}","id":${io.current_req_id},"method":"${method}","params":${enc_params}}'
 	io.current_req_id++
 	return payload
 }
@@ -258,16 +258,16 @@ pub fn get_test_files_path(dir string) string {
 
 // load_test_file_paths returns a list of input test file locations.
 [manualfree]
-pub fn (io &Testio) load_test_file_paths(folder_name string) ?[]string {
+pub fn (io &Testio) load_test_file_paths(folder_name string) ![]string {
 	return load_test_file_paths(io.test_files_dir, folder_name)
 }
 
 // load_test_file_paths returns a list of input test file locations.
 [manualfree]
-pub fn load_test_file_paths(test_files_dir string, folder_name string) ?[]string {
+pub fn load_test_file_paths(test_files_dir string, folder_name string) ![]string {
 	current_os := os.user_os()
 	target_path := os.join_path(test_files_dir, folder_name)
-	dir := os.ls(target_path) or { return error('error loading test files for "$folder_name"') }
+	dir := os.ls(target_path) or { return error('error loading test files for "${folder_name}"') }
 	mut filtered := []string{cap: dir.len}
 	skip_os_file_ext := '_skip_${current_os}.vv'
 	for path in dir {
@@ -278,7 +278,7 @@ pub fn load_test_file_paths(test_files_dir string, folder_name string) ?[]string
 	}
 	// unsafe { dir.free() }
 	if filtered.len == 0 {
-		return error('no test files found for "$folder_name"')
+		return error('no test files found for "${folder_name}"')
 	}
 	filtered.sort()
 	return filtered

@@ -6,7 +6,7 @@ import tree_sitter_v as v
 struct TreeWalker {
 mut:
 	already_visited_children bool
-	cursor                   tree_sitter.TreeCursor<v.NodeType> [required]
+	cursor                   tree_sitter.TreeCursor[v.NodeType] [required]
 }
 
 pub fn (mut tw TreeWalker) next() ?Node {
@@ -17,7 +17,7 @@ pub fn (mut tw TreeWalker) next() ?Node {
 			tw.already_visited_children = false
 		} else {
 			if !tw.cursor.to_parent() {
-				return error('')
+				return none
 			}
 			tw.already_visited_children = true
 			return tw.next()
@@ -27,7 +27,7 @@ pub fn (mut tw TreeWalker) next() ?Node {
 			tw.already_visited_children = false
 		} else {
 			if !tw.cursor.to_parent() {
-				return error('')
+				return none
 			}
 			return tw.next()
 		}

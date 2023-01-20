@@ -45,15 +45,15 @@ pub fn (mut ctx AnalyzerContext) infer_value_type_from_node(node ast.Node) &Symb
 	return ctx.store.infer_value_type_from_node(ctx.file_path, node, ctx.text)
 }
 
-pub fn (mut ctx AnalyzerContext) infer_symbol_from_node(node ast.Node) ?&Symbol {
+pub fn (mut ctx AnalyzerContext) infer_symbol_from_node(node ast.Node) !&Symbol {
 	return ctx.store.infer_symbol_from_node(ctx.file_path, node, ctx.text)
 }
 
-pub fn (mut ctx AnalyzerContext) find_symbol_by_type_node(node ast.Node) ?&Symbol {
+pub fn (mut ctx AnalyzerContext) find_symbol_by_type_node(node ast.Node) !&Symbol {
 	return ctx.store.find_symbol_by_type_node(ctx.file_path, node, ctx.text)
 }
 
-pub fn (ctx AnalyzerContext) find_symbol(module_name string, name string) ?&Symbol {
+pub fn (ctx AnalyzerContext) find_symbol(module_name string, name string) !&Symbol {
 	return ctx.store.find_symbol(ctx.file_path, module_name, name)
 }
 

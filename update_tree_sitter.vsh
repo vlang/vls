@@ -11,7 +11,7 @@ fn rm_rf(path string) {
 	}
 }
 
-fn patch_file(file_path string, texts_to_replace []string) ? {
+fn patch_file(file_path string, texts_to_replace []string) ! {
 	file_contents := read_file(file_path) or {
 		return error('Cannot read file ${file_path}. Reason: $err')
 	}

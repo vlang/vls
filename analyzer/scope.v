@@ -54,7 +54,7 @@ pub fn (scope &ScopeTree) innermost(start_byte u32, end_byte u32) ?&ScopeTree {
 }
 
 // register registers the symbol to the scope
-pub fn (mut scope ScopeTree) register(info &Symbol) ? {
+pub fn (mut scope ScopeTree) register(info &Symbol) ! {
 	// Just to ensure that scope is not null
 	if isnil(scope) {
 		return
