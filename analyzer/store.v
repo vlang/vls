@@ -203,7 +203,7 @@ pub fn compare_params_and_ret_type(params []&Symbol, ret_type &Symbol, fn_to_com
 }
 
 pub const container_symbol_kinds = [SymbolKind.chan_, .array_, .map_, .ref, .variadic, .optional,
-	.multi_return]
+	.result, .multi_return]
 
 // register_symbol registers the given symbol
 pub fn (mut ss Store) register_symbol(mut info Symbol) ?&Symbol {
