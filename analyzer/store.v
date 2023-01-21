@@ -459,6 +459,15 @@ pub fn symbol_name_from_node(node ast.Node, src_text tree_sitter.SourceText) (Sy
 			}
 			return SymbolKind.optional, module_name, '?' + symbol_name
 		}
+		.result_type {
+			if child_type_node := node.named_child(0) {
+				_, module_name, symbol_name = symbol_name_from_node(child_type_node, src_text)
+			}
+			if symbol_name == 'void' {
+				symbol_name = ''
+			}
+			return SymbolKind.result, module_name, '!' + symbol_name
+		}
 		.function_type, .fn_literal {
 			return SymbolKind.function_type, module_name, symbol_name
 		}
@@ -544,8 +553,8 @@ pub fn (mut store Store) find_symbol_by_type_node(file_path string, node ast.Nod
 				mut val_sym := store.find_symbol_by_type_node(file_path, value_node, src_text)?
 				new_sym.add_child(mut val_sym, false) or {}
 			}
-			.chan_, .ref, .optional {
-				if symbol_name != '?' {
+			.chan_, .ref, .optional, .result {
+				if symbol_name !in ['?', '!'] {
 					child_type_node := node.named_child(0)?
 					mut ref_sym := store.find_symbol_by_type_node(file_path, child_type_node,
 						src_text)?

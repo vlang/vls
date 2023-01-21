@@ -321,6 +321,12 @@ const completion_results = {
 		},
 	]
 	'import_symbols.vv':                     [
+		lsp.CompletionItem {
+			label: 'connect'
+			kind: .function
+			detail: 'pub fn pg.connect(config pg.Config) !pg.DB'
+			insert_text: 'connect'
+		},
 		lsp.CompletionItem{
 			label: 'DB'
 			kind: .struct_
@@ -551,6 +557,10 @@ fn sort_completion_item(a &lsp.CompletionItem, b &lsp.CompletionItem) int {
 	if int(a.kind) < int(b.kind) {
 		return 1
 	} else if int(a.kind) > int(b.kind) {
+		return -1
+	} else if a.label < b.label {
+		return 1
+	} else if a.label > b.label {
 		return -1
 	}
 	return 0

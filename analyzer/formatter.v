@@ -176,6 +176,10 @@ pub fn (mut fmt SymbolFormatter) format_with_builder(sym &Symbol, mut builder st
 			builder.write_string('?')
 			fmt.format_with_builder(sym.parent_sym, mut builder, analyzer.types_format_cfg)
 		}
+		.result {
+			builder.write_string('!')
+			fmt.format_with_builder(sym.parent_sym, mut builder, analyzer.types_format_cfg)
+		}
 		.ref {
 			builder.write_string('&')
 			fmt.format_with_builder(sym.parent_sym, mut builder, analyzer.types_format_cfg)
