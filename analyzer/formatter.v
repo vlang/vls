@@ -10,9 +10,10 @@ mut:
 
 [params]
 pub struct SymbolFormatterConfig {
-	with_kind     bool = true
-	with_access   bool = true
-	with_contents bool = true
+	with_kind                bool = true
+	with_access              bool = true
+	with_contents            bool = true
+	docstring_line_len_limit int  = 80
 }
 
 pub const params_format_cfg = SymbolFormatterConfig{
@@ -139,14 +140,15 @@ fn check_is_horizontal_rule(line string) bool {
 	return is_hr
 }
 
-fn (fmt &SymbolFormatter) write_docstrings(docstrings []string, mut builder strings.Builder) {
+fn (fmt &SymbolFormatter) write_docstrings_with_line_concate(docstrings []string, mut builder strings.Builder, cfg SymbolFormatterConfig) {
 	if docstrings.len == 0 {
 		return
 	}
 
 	builder.write_byte(`\n`)
 
-	mut need_newline := true
+	line_limit := cfg.docstring_line_len_limit
+	mut need_newline, mut offset := true, 0
 	for ds in docstrings {
 		trimed_line := ds.trim_space()
 
@@ -165,17 +167,67 @@ fn (fmt &SymbolFormatter) write_docstrings(docstrings []string, mut builder stri
 		// doc content
 		if need_newline {
 			builder.write_byte(`\n`)
+			offset = 0
 		} else {
 			builder.write_byte(` `)
+			offset += 1
 		}
 
-		builder.write_string(ds)
+		mut bound := line_limit - offset
+		if bound > ds.len {
+			bound = ds.len
+			offset += bound
+		}
+		builder.write_string(ds[0..bound])
+
+		for i := bound; i < ds.len; i += line_limit {
+			bound = i + line_limit
+			if bound >= ds.len {
+				bound = ds.len
+				offset = bound - i
+			}
+			builder.write_byte(`\n`)
+			builder.write_string(ds[i..bound])
+		}
 
 		// append newline check
 		need_newline = false
 		if ds.ends_with('.') || ds.ends_with('|') || is_header || is_hr {
 			need_newline = true
 			continue
+		}
+	}
+}
+
+fn (fmt &SymbolFormatter) write_docstrings(docstrings []string, mut builder strings.Builder, cfg SymbolFormatterConfig) {
+	if docstrings.len == 0 {
+		return
+	}
+
+	builder.write_byte(`\n`)
+
+	line_limit := cfg.docstring_line_len_limit
+	for ds in docstrings {
+		trimed_line := ds.trim_space()
+		if trimed_line.len == 0 {
+			continue
+		}
+
+		builder.write_byte(`\n`)
+
+		mut bound := line_limit
+		if bound > ds.len {
+			bound = ds.len
+		}
+		builder.write_string(ds[0..bound])
+
+		for i := bound; i < ds.len; i += line_limit {
+			bound = i + line_limit
+			if bound >= ds.len {
+				bound = ds.len
+			}
+			builder.write_byte(`\n`)
+			builder.write_string(ds[i..bound])
 		}
 	}
 }
@@ -240,7 +292,7 @@ pub fn (mut fmt SymbolFormatter) format_with_builder(sym &Symbol, mut builder st
 				fmt.format_with_builder(sym.return_sym, mut builder, analyzer.types_format_cfg)
 			}
 
-			fmt.write_docstrings(sym.docstrings, mut builder)
+			fmt.write_docstrings(sym.docstrings, mut builder, cfg)
 		}
 		.multi_return {
 			builder.write_byte(`(`)
