@@ -98,6 +98,88 @@ fn (fmt &SymbolFormatter) write_kind(kind string, mut builder strings.Builder, c
 	}
 }
 
+fn check_is_header_line(line string) bool {
+	if line.len == 0 {
+		return false
+	}
+
+	if line[0] != `#` {
+		return false
+	}
+
+	mut is_header := false
+	for byt in line {
+		if byt != `#` {
+			is_header = byt == ` `
+			break
+		}
+	}
+
+	return is_header
+}
+
+fn check_is_horizontal_rule(line string) bool {
+	if line.len < 3 {
+		return false
+	}
+
+	first_byt := line[0]
+	if first_byt !in [`-`, `=`, `_`, `*`, `~`] {
+		return false
+	}
+
+	mut is_hr := true
+	for byt in line {
+		if byt != first_byt {
+			is_hr = false
+			break
+		}
+	}
+
+	return is_hr
+}
+
+fn (fmt &SymbolFormatter) write_docstrings(docstrings []string, mut builder strings.Builder) {
+	if docstrings.len == 0 {
+		return
+	}
+
+	builder.write_byte(`\n`)
+
+	mut need_newline := true
+	for ds in docstrings {
+		trimed_line := ds.trim_space()
+
+		if trimed_line.len == 0 {
+			need_newline = true
+			continue
+		}
+
+		// prepend newline check
+		is_header := check_is_header_line(trimed_line)
+		is_hr := check_is_horizontal_rule(trimed_line)
+		if ds.starts_with('- ') || ds.starts_with('|') || is_header || is_hr {
+			need_newline = true
+		}
+
+		// doc content
+		if need_newline {
+			builder.write_byte(`\n`)
+		} else {
+			builder.write_byte(` `)
+		}
+
+		builder.write_string(ds)
+
+		// append newline check
+		need_newline = false
+		if ds.ends_with('.') || ds.ends_with('|') || is_header || is_hr {
+			need_newline = true
+			continue
+		}
+	}
+}
+
 pub fn (mut fmt SymbolFormatter) format_with_builder(sym &Symbol, mut builder strings.Builder, cfg SymbolFormatterConfig) {
 	if isnil(sym) {
 		builder.write_string('invalid symbol')
@@ -157,6 +239,8 @@ pub fn (mut fmt SymbolFormatter) format_with_builder(sym &Symbol, mut builder st
 				builder.write_byte(` `)
 				fmt.format_with_builder(sym.return_sym, mut builder, analyzer.types_format_cfg)
 			}
+
+			fmt.write_docstrings(sym.docstrings, mut builder)
 		}
 		.multi_return {
 			builder.write_byte(`(`)

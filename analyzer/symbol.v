@@ -139,6 +139,7 @@ pub mut:
 	file_path               string         [required] // required in order to register the symbol at its appropriate directory.
 	file_version            int            [required] // file version when the symbol was registered
 	scope                   &ScopeTree = &ScopeTree(0)
+	docstrings              []string
 }
 
 const kinds_in_multi_return_to_be_excluded = [SymbolKind.function, .variable, .field]
@@ -258,7 +259,7 @@ pub fn (mut info Symbol) add_child(mut new_child_sym Symbol, add_as_parent ...bo
 	}
 
 	if info.children_syms.exists(new_child_sym.name) {
-		return error('child exists. (name="$new_child_sym.name")')
+		return error('child exists. (name="${new_child_sym.name}")')
 	}
 
 	info.children_syms << new_child_sym

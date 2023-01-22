@@ -372,6 +372,7 @@ fn (mut sr SymbolAnalyzer) fn_decl(fn_node ast.Node) ?&Symbol {
 	}
 
 	fn_sym.scope = scope
+	fn_sym.docstrings = sr.context.get_docstring(fn_node)
 	return fn_sym
 }
 
