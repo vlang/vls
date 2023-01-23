@@ -14,9 +14,11 @@ pub:
 	position      Position
 }
 
+type HoverResponseContent = MarkedString | []MarkedString | MarkupContent
+
 pub struct Hover {
 pub:
-	contents MarkedString
+	contents HoverResponseContent
 	range    Range
 }
 

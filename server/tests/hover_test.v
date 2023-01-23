@@ -20,7 +20,7 @@ const hover_inputs = {
 		position: lsp.Position{2, 18}
 	}
 	'function.vv':              lsp.HoverParams{
-		position: lsp.Position{0, 5}
+		position: lsp.Position{1, 5}
 	}
 	'import.vv':                lsp.HoverParams{
 		position: lsp.Position{0, 8}
@@ -101,10 +101,13 @@ const hover_results = {
 		}
 	}
 	'function.vv':              lsp.Hover{
-		contents: lsp.MarkedString{'v', 'fn foo(param1 string, mut param2 []string) bool'}
+		contents: lsp.MarkupContent{
+			kind: lsp.markup_kind_markdown,
+			value: '```v\nfn foo(param1 string, mut param2 []string) bool\n```\n\n---\n\nthis is docstring'
+		}
 		range: lsp.Range{
-			start: lsp.Position{0, 3}
-			end: lsp.Position{0, 6}
+			start: lsp.Position{1, 3}
+			end: lsp.Position{1, 6}
 		}
 	}
 	'import.vv':                lsp.Hover{

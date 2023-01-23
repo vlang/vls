@@ -254,8 +254,8 @@ fn get_hover_data(mut store analyzer.Store, node ast.Node, uri lsp.DocumentUri, 
 		found_imp := store.imports.find_by_position(file_path, node.range())?
 		alias := found_imp.aliases[file_name] or { '' }
 		return lsp.Hover{
-			contents: lsp.v_marked_string('import $found_imp.absolute_module_name' +
-				if alias.len > 0 { ' as $alias' } else { '' })
+			contents: lsp.v_marked_string('import ${found_imp.absolute_module_name}' +
+				if alias.len > 0 { ' as ${alias}' } else { '' })
 			range: tsrange_to_lsp_range(found_imp.ranges[file_path])
 		}
 	} else if parent_node.is_error() || parent_node.is_missing() {
@@ -290,8 +290,17 @@ fn get_hover_data(mut store analyzer.Store, node ast.Node, uri lsp.DocumentUri, 
 	mut formatter := store.with(file_path: file_path).symbol_formatter(false)
 
 	return lsp.Hover{
-		contents: lsp.v_marked_string(formatter.format(sym))
 		range: tsrange_to_lsp_range(original_range)
+		contents: if sym.docstrings.len == 0 {
+			lsp.v_marked_string(formatter.format(sym))
+		} else {
+			signature := formatter.format(sym)
+			docstring := formatter.write_docstrings(sym)
+			lsp.MarkupContent{
+				kind: lsp.markup_kind_markdown
+				value: '```v\n${signature}\n```\n\n---\n\n${docstring}'
+			}
+		}
 	}
 }
 

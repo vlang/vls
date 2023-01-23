@@ -13,7 +13,7 @@ pub struct SymbolFormatterConfig {
 	with_kind                bool = true
 	with_access              bool = true
 	with_contents            bool = true
-	docstring_line_len_limit int  = 80
+	docstring_line_len_limit int
 }
 
 pub const params_format_cfg = SymbolFormatterConfig{
@@ -99,139 +99,6 @@ fn (fmt &SymbolFormatter) write_kind(kind string, mut builder strings.Builder, c
 	}
 }
 
-fn check_is_header_line(line string) bool {
-	if line.len == 0 {
-		return false
-	}
-
-	if line[0] != `#` {
-		return false
-	}
-
-	mut is_header := false
-	for byt in line {
-		if byt != `#` {
-			is_header = byt == ` `
-			break
-		}
-	}
-
-	return is_header
-}
-
-fn check_is_horizontal_rule(line string) bool {
-	if line.len < 3 {
-		return false
-	}
-
-	first_byt := line[0]
-	if first_byt !in [`-`, `=`, `_`, `*`, `~`] {
-		return false
-	}
-
-	mut is_hr := true
-	for byt in line {
-		if byt != first_byt {
-			is_hr = false
-			break
-		}
-	}
-
-	return is_hr
-}
-
-fn (fmt &SymbolFormatter) write_docstrings_with_line_concate(docstrings []string, mut builder strings.Builder, cfg SymbolFormatterConfig) {
-	if docstrings.len == 0 {
-		return
-	}
-
-	builder.write_byte(`\n`)
-
-	line_limit := cfg.docstring_line_len_limit
-	mut need_newline, mut offset := true, 0
-	for ds in docstrings {
-		trimed_line := ds.trim_space()
-
-		if trimed_line.len == 0 {
-			need_newline = true
-			continue
-		}
-
-		// prepend newline check
-		is_header := check_is_header_line(trimed_line)
-		is_hr := check_is_horizontal_rule(trimed_line)
-		if ds.starts_with('- ') || ds.starts_with('|') || is_header || is_hr {
-			need_newline = true
-		}
-
-		// doc content
-		if need_newline {
-			builder.write_byte(`\n`)
-			offset = 0
-		} else {
-			builder.write_byte(` `)
-			offset += 1
-		}
-
-		mut bound := line_limit - offset
-		if bound > ds.len {
-			bound = ds.len
-			offset += bound
-		}
-		builder.write_string(ds[0..bound])
-
-		for i := bound; i < ds.len; i += line_limit {
-			bound = i + line_limit
-			if bound >= ds.len {
-				bound = ds.len
-				offset = bound - i
-			}
-			builder.write_byte(`\n`)
-			builder.write_string(ds[i..bound])
-		}
-
-		// append newline check
-		need_newline = false
-		if ds.ends_with('.') || ds.ends_with('|') || is_header || is_hr {
-			need_newline = true
-			continue
-		}
-	}
-}
-
-fn (fmt &SymbolFormatter) write_docstrings(docstrings []string, mut builder strings.Builder, cfg SymbolFormatterConfig) {
-	if docstrings.len == 0 {
-		return
-	}
-
-	builder.write_byte(`\n`)
-
-	line_limit := cfg.docstring_line_len_limit
-	for ds in docstrings {
-		trimed_line := ds.trim_space()
-		if trimed_line.len == 0 {
-			continue
-		}
-
-		builder.write_byte(`\n`)
-
-		mut bound := line_limit
-		if bound > ds.len {
-			bound = ds.len
-		}
-		builder.write_string(ds[0..bound])
-
-		for i := bound; i < ds.len; i += line_limit {
-			bound = i + line_limit
-			if bound >= ds.len {
-				bound = ds.len
-			}
-			builder.write_byte(`\n`)
-			builder.write_string(ds[i..bound])
-		}
-	}
-}
-
 pub fn (mut fmt SymbolFormatter) format_with_builder(sym &Symbol, mut builder strings.Builder, cfg SymbolFormatterConfig) {
 	if isnil(sym) {
 		builder.write_string('invalid symbol')
@@ -291,8 +158,6 @@ pub fn (mut fmt SymbolFormatter) format_with_builder(sym &Symbol, mut builder st
 				builder.write_byte(` `)
 				fmt.format_with_builder(sym.return_sym, mut builder, analyzer.types_format_cfg)
 			}
-
-			fmt.write_docstrings(sym.docstrings, mut builder, cfg)
 		}
 		.multi_return {
 			builder.write_byte(`(`)
@@ -376,4 +241,151 @@ pub fn (mut fmt SymbolFormatter) format_with_builder(sym &Symbol, mut builder st
 			fmt.write_name(sym, mut builder)
 		}
 	}
+}
+
+fn check_is_header_line(line string) bool {
+	if line.len == 0 {
+		return false
+	}
+
+	if line[0] != `#` {
+		return false
+	}
+
+	mut is_header := false
+	for byt in line {
+		if byt != `#` {
+			is_header = byt == ` `
+			break
+		}
+	}
+
+	return is_header
+}
+
+fn check_is_horizontal_rule(line string) bool {
+	if line.len < 3 {
+		return false
+	}
+
+	first_byt := line[0]
+	if first_byt !in [`-`, `=`, `_`, `*`, `~`] {
+		return false
+	}
+
+	mut is_hr := true
+	for byt in line {
+		if byt != first_byt {
+			is_hr = false
+			break
+		}
+	}
+
+	return is_hr
+}
+
+fn write_line_with_wrapping(mut builder strings.Builder, line string, line_limit int, init_offset int) int {
+	if line_limit <= 0 {
+		builder.write_string(line)
+		return line.len
+	}
+
+	mut offset := init_offset
+	mut bound := line_limit - offset
+	if bound > line.len {
+		bound = line.len
+		offset += bound
+	}
+	builder.write_string(line[0..bound])
+
+	for i := bound; i < line.len; i += line_limit {
+		bound = i + line_limit
+		if bound >= line.len {
+			bound = line.len
+			offset = bound - i
+		}
+		builder.write_byte(`\n`)
+		builder.write_string(line[i..bound])
+	}
+
+	return offset
+}
+
+// write_docstrings_with_line_concate get docstring for symbol, using newline
+// concatenate rule described in [v doc](https://github.com/vlang/v/blob/master/doc/docs.md#newlines-in-documentation-comments).
+pub fn (fmt &SymbolFormatter) write_docstrings_with_line_concate(sym &Symbol, cfg SymbolFormatterConfig) string {
+	if sym.docstrings.len == 0 {
+		return ""
+	}
+
+	mut builder := strings.new_builder(300)
+
+	line_limit := cfg.docstring_line_len_limit
+	mut is_first, mut need_newline, mut offset := true, true, 0
+	for ds in sym.docstrings {
+		trimed_line := ds.trim_space()
+
+		if trimed_line.len == 0 {
+			need_newline = true
+			continue
+		}
+
+		// prepend newline check
+		is_header := check_is_header_line(trimed_line)
+		is_hr := check_is_horizontal_rule(trimed_line)
+		if ds.starts_with('- ') || ds.starts_with('|') || is_header || is_hr {
+			need_newline = true
+		}
+
+		// doc content
+		if is_first {
+			is_first = false
+		} else if need_newline {
+			builder.write_byte(`\n`)
+			offset = 0
+		} else {
+			builder.write_byte(` `)
+			offset += 1
+		}
+
+		offset = write_line_with_wrapping(mut builder, ds, line_limit, offset)
+
+		// append newline check
+		need_newline = false
+		if ds.ends_with('.') || ds.ends_with('|') || is_header || is_hr {
+			need_newline = true
+			continue
+		}
+	}
+
+	return builder.str()
+}
+
+// write_docstrings get docstring for symbol, all newline in original docstring
+// comment will be presented as is.
+pub fn (fmt &SymbolFormatter) write_docstrings(sym &Symbol, cfg SymbolFormatterConfig) string {
+	if sym.docstrings.len == 0 {
+		return ""
+	}
+
+	mut builder := strings.new_builder(300)
+
+	mut is_first := true
+	line_limit := cfg.docstring_line_len_limit
+	for ds in sym.docstrings {
+		trimed_line := ds.trim_space()
+		if trimed_line.len == 0 {
+			continue
+		}
+
+		if is_first {
+			is_first = false
+		} else {
+			builder.write_byte(`\n`)
+		}
+
+		write_line_with_wrapping(mut builder, ds, line_limit, 0)
+	}
+
+	return builder.str()
 }
