@@ -314,6 +314,10 @@
       {
         "type": "send_statement",
         "named": true
+      },
+      {
+        "type": "spawn_statement",
+        "named": true
       }
     ]
   },
@@ -2962,6 +2966,21 @@
     }
   },
   {
+    "type": "spawn_statement",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "_expression",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
     "type": "special_argument_list",
     "named": true,
     "fields": {},
@@ -4027,6 +4046,10 @@
   },
   {
     "type": "size_t",
+    "named": false
+  },
+  {
+    "type": "spawn",
     "named": false
   },
   {

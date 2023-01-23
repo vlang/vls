@@ -48,6 +48,7 @@
  "for"
  "$for"
  "go"
+ "spawn"
  "goto"
  "if"
  "$if"

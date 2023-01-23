@@ -119,6 +119,7 @@ pub enum NodeType {
 	short_var_declaration
 	slice_expression
 	source_file
+	spawn_statement
 	special_argument_list
 	special_call_expression
 	spread_operator
@@ -237,7 +238,8 @@ const supertype__statement_nodes = merge(supertype__simple_statement_nodes, [
 	.hash_statement,
 	.labeled_statement,
 	.return_statement,
-	.send_statement
+	.send_statement,
+	.spawn_statement
 ])
 
 const supertype__top_level_declaration_nodes = [
@@ -429,6 +431,7 @@ pub fn (nf VNodeTypeFactory) get_type(type_name string) NodeType {
 		'short_var_declaration' { NodeType.short_var_declaration }
 		'slice_expression' { NodeType.slice_expression }
 		'source_file' { NodeType.source_file }
+		'spawn_statement' { NodeType.spawn_statement }
 		'special_argument_list' { NodeType.special_argument_list }
 		'special_call_expression' { NodeType.special_call_expression }
 		'spread_operator' { NodeType.spread_operator }

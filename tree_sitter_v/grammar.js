@@ -117,6 +117,7 @@ const fn_keyword = "fn";
 const assert_keyword = "assert";
 const as_keyword = "as";
 const go_keyword = "go";
+const spawn_keyword = "spawn";
 const asm_keyword = "asm";
 const return_keyword = "return";
 const type_keyword = "type";
@@ -182,6 +183,7 @@ const all_keywords = [
   assert_keyword,
   as_keyword,
   go_keyword,
+  spawn_keyword,
   asm_keyword,
   return_keyword,
   type_keyword,
@@ -886,6 +888,7 @@ module.exports = grammar({
         $.return_statement,
         $.asm_statement,
         $.go_statement,
+        $.spawn_statement,
         $.goto_statement,
         $.labeled_statement,
         $.defer_statement,
@@ -1091,6 +1094,8 @@ module.exports = grammar({
     sum_type_list: ($) => seq($._simple_type, repeat(seq("|", $._simple_type))),
 
     go_statement: ($) => seq(go_keyword, $._expression),
+
+    spawn_statement: ($) => seq(spawn_keyword, $._expression),
 
     goto_statement: ($) => seq("goto", alias($.identifier, $.label_name)),
 
