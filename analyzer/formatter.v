@@ -314,15 +314,19 @@ fn write_line_with_wrapping(mut builder strings.Builder, line string, line_limit
 // write_docstrings_with_line_concate get docstring for symbol, using newline
 // concatenate rule described in [v doc](https://github.com/vlang/v/blob/master/doc/docs.md#newlines-in-documentation-comments).
 pub fn (fmt &SymbolFormatter) write_docstrings_with_line_concate(sym &Symbol, cfg SymbolFormatterConfig) string {
-	if sym.docstrings.len == 0 {
-		return ""
+	len := sym.docstrings.len
+	if len == 0 {
+		return ''
+	} else if len == 1 {
+		return sym.docstrings[0]
 	}
 
 	mut builder := strings.new_builder(300)
-
 	line_limit := cfg.docstring_line_len_limit
-	mut is_first, mut need_newline, mut offset := true, true, 0
-	for ds in sym.docstrings {
+	mut need_newline, mut offset := true, 0
+
+	offset = write_line_with_wrapping(mut builder, sym.docstrings[0], line_limit, offset)
+	for ds in sym.docstrings[1..] {
 		trimed_line := ds.trim_space()
 
 		if trimed_line.len == 0 {
@@ -338,9 +342,7 @@ pub fn (fmt &SymbolFormatter) write_docstrings_with_line_concate(sym &Symbol, cf
 		}
 
 		// doc content
-		if is_first {
-			is_first = false
-		} else if need_newline {
+		if need_newline {
 			builder.write_byte(`\n`)
 			offset = 0
 		} else {
@@ -364,26 +366,24 @@ pub fn (fmt &SymbolFormatter) write_docstrings_with_line_concate(sym &Symbol, cf
 // write_docstrings get docstring for symbol, all newline in original docstring
 // comment will be presented as is.
 pub fn (fmt &SymbolFormatter) write_docstrings(sym &Symbol, cfg SymbolFormatterConfig) string {
-	if sym.docstrings.len == 0 {
-		return ""
+	len := sym.docstrings.len
+	if len == 0 {
+		return ''
+	} else if len == 1 {
+		return sym.docstrings[0]
 	}
 
 	mut builder := strings.new_builder(300)
-
-	mut is_first := true
 	line_limit := cfg.docstring_line_len_limit
-	for ds in sym.docstrings {
+
+	write_line_with_wrapping(mut builder, sym.docstrings[0], line_limit, 0)
+	for ds in sym.docstrings[1..] {
 		trimed_line := ds.trim_space()
 		if trimed_line.len == 0 {
 			continue
 		}
 
-		if is_first {
-			is_first = false
-		} else {
-			builder.write_byte(`\n`)
-		}
-
+		builder.write_byte(`\n`)
 		write_line_with_wrapping(mut builder, ds, line_limit, 0)
 	}
 
