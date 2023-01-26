@@ -158,7 +158,7 @@ pub fn (mut fmt SymbolFormatter) format_with_builder(sym &Symbol, mut builder st
 			builder.write_byte(`)`)
 			if !sym.return_sym.is_void() {
 				builder.write_byte(` `)
-				fmt.format_with_builder(sym.return_sym, mut builder, analyzer.types_format_cfg)
+				fmt.format_with_builder(sym.return_sym, mut builder, analyzer.child_types_format_cfg)
 			}
 		}
 		.multi_return {

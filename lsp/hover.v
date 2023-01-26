@@ -14,7 +14,7 @@ pub:
 	position      Position
 }
 
-type HoverResponseContent = MarkedString | []MarkedString | MarkupContent
+type HoverResponseContent = MarkedString | MarkupContent | []MarkedString | string
 
 pub struct Hover {
 pub:
@@ -28,9 +28,16 @@ pub struct MarkedString {
 	value    string
 }
 
-pub fn v_marked_string(text string) MarkedString {
-	return MarkedString{
+pub fn hover_v_marked_string(text string) HoverResponseContent {
+	return HoverResponseContent(MarkedString{
 		language: 'v'
 		value: text
-	}
+	})
+}
+
+pub fn hover_markdown_string(text string) HoverResponseContent {
+	return HoverResponseContent(MarkupContent{
+		kind: markup_kind_markdown
+		value: text
+	})
 }

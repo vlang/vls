@@ -234,71 +234,12 @@ pub fn (mut ls Vls) hover(params lsp.HoverParams, mut wr ResponseWriter) ?lsp.Ho
 
 fn get_hover_data(mut store analyzer.Store, node ast.Node, uri lsp.DocumentUri, source tree_sitter.SourceText, offset u32) ?lsp.Hover {
 	node_type_name := node.type_name
+	parent_node := node.parent() or { node }
 	file_path := uri.path()
 
-	if node.is_null() || node_type_name == .comment {
+	if node.is_null() || node_type_name == .comment || parent_node.is_error()
+		|| parent_node.is_missing() {
 		return none
-	}
-
-	mut original_range := node.range()
-	parent_node := node.parent() or { node }
-
-	mut formatter := store.with(file_path: file_path).symbol_formatter(false)
-
-	// eprintln('$node_type_name | ${node.text(source)}')
-	if node_type_name == .module_clause {
-		return lsp.Hover{
-			contents: lsp.v_marked_string(node.text(source))
-			range: tsrange_to_lsp_range(node.range())
-		}
-	} else if node_type_name == .import_path {
-		file_name := os.base(file_path)
-		found_imp := store.imports.find_by_position(file_path, node.range())?
-		alias := found_imp.aliases[file_name] or { '' }
-		return lsp.Hover{
-			contents: lsp.v_marked_string('import ${found_imp.absolute_module_name}' +
-				if alias.len > 0 { ' as ${alias}' } else { '' })
-			range: tsrange_to_lsp_range(found_imp.ranges[file_path])
-		}
-	} else if node_type_name == .identifier {
-		sym := store.infer_symbol_from_node(file_path, node, source) or { return none }
-		return_sym := sym.return_sym
-		if isnil(sym) || sym.is_void() {
-			return none
-		}
-
-		mut contents := []string{}
-
-		contents << '```v\n'
-		contents << formatter.write_type_definition(return_sym)
-		contents << '\n```'
-
-		if method_str := formatter.write_methods(return_sym) {
-			contents << '\n\n---\n\n'
-			contents << '## Methods\n\n'
-			contents << '```v\n'
-			contents << method_str
-			contents << '\n```'
-		}
-		
-		return lsp.Hover{
-			contents: lsp.MarkupContent{
-				kind: lsp.markup_kind_markdown
-				value: contents.join('')
-			}
-			range: tsrange_to_lsp_range(node.range())
-		}
-	} else if parent_node.is_error() || parent_node.is_missing() {
-		return none
-	}
-
-	if node_type_name != .type_selector_expression && node.named_child_count() != 0 {
-		if got_node := node.first_named_child_for_byte(u32(offset)) {
-			new_original_range := got_node.range()
-			if new_original_range.start_byte != 0 && new_original_range.end_byte != 0 {
-				original_range = new_original_range
-			}
-		}
 	}
 
 	mut sym := store.infer_symbol_from_node(file_path, node, source) or { analyzer.void_sym }
@@ -308,28 +249,116 @@ fn get_hover_data(mut store analyzer.Store, node ast.Node, uri lsp.DocumentUri, 
 			analyzer.void_sym
 		}
 	}
-
-	// eprintln('$node_type_name | ${node.text(source)} | $sym')
-
-	// Send null if range has zero-start and end points
-	if sym.range.start_point.row == 0 && sym.range.start_point.column == 0
-		&& sym.range.start_point.eq(sym.range.end_point) {
+	if node_type_name !in [.module_clause, .import_path] && sym.range.start_point.row == 0
+		&& sym.range.start_point.column == 0 && sym.range.start_point.eq(sym.range.end_point) {
 		return none
 	}
 
-	return lsp.Hover{
-		range: tsrange_to_lsp_range(original_range)
-		contents: if sym.docstrings.len == 0 {
-			lsp.v_marked_string(formatter.format(sym))
+	mut range := node.range()
+	mut hover_range := if node_type_name == .type_selector_expression
+		|| node.named_child_count() != 0 {
+		tsrange_to_lsp_range(range)
+	} else if got_node := node.first_named_child_for_byte(u32(offset)) {
+		new_range := got_node.range()
+		if new_range.start_byte != 0 && new_range.end_byte != 0 {
+			tsrange_to_lsp_range(new_range)
 		} else {
-			signature := formatter.format(sym)
-			docstring := formatter.write_docstrings(sym)
-			lsp.MarkupContent{
-				kind: lsp.markup_kind_markdown
-				value: '```v\n${signature}\n```\n\n---\n\n${docstring}'
+			tsrange_to_lsp_range(range)
+		}
+	} else {
+		tsrange_to_lsp_range(range)
+	}
+
+	mut contents := lsp.HoverResponseContent('')
+
+	mut fmt := store.with(file_path: file_path).symbol_formatter(false)
+
+	contents, hover_range = match node_type_name {
+		.module_clause {
+			result := lsp.hover_v_marked_string(node.text(source))
+			result, hover_range
+		}
+		.import_path {
+			file_name := os.base(file_path)
+			found_imp := store.imports.find_by_position(file_path, range)?
+
+			mut buffer := []string{}
+
+			mut import_text := 'import ${found_imp.absolute_module_name}'
+			if alias := found_imp.aliases[file_name] {
+				import_text += ' as ${alias}'
 			}
+
+			buffer << '```v'
+			buffer << import_text
+			buffer << '```'
+			buffer << '\n---\n'
+			buffer << 'Found at ${found_imp.path}'
+
+			result := lsp.hover_markdown_string(buffer.join('\n'))
+			result, tsrange_to_lsp_range(found_imp.ranges[file_path])
+		}
+		.identifier {
+			result := match sym.kind {
+				.variable {
+					detail := get_type_detail(sym.return_sym, mut fmt)?
+					lsp.hover_markdown_string(detail)
+				}
+				else {
+					get_signature_with_docstring(sym, mut fmt)
+				}
+			}
+
+			result, hover_range
+		}
+		else {
+			result := if sym.docstrings.len == 0 {
+				lsp.hover_v_marked_string(fmt.format(sym))
+			} else {
+				lsp.hover_markdown_string(get_signature_with_docstring(sym, mut fmt))
+			}
+			result, hover_range
 		}
 	}
+
+	return lsp.Hover{
+		contents: contents
+		range: hover_range
+	}
+}
+
+fn get_type_detail(sym &analyzer.Symbol, mut fmt analyzer.SymbolFormatter) ?string {
+	if isnil(sym) || sym.is_void() {
+		return none
+	}
+
+	mut buffer := []string{}
+
+	buffer << '```v'
+	buffer << fmt.write_type_definition(sym)
+	buffer << '```'
+
+	if method_str := fmt.write_methods(sym) {
+		buffer << '\n---\n'
+		buffer << '## Methods\n'
+		buffer << '```v'
+		buffer << method_str
+		buffer << '```'
+	}
+	return buffer.join('\n')
+}
+
+fn get_signature_with_docstring(sym &analyzer.Symbol, mut fmt analyzer.SymbolFormatter) string {
+	mut buffer := [
+		'```v',
+		fmt.format(sym),
+		'```',
+	]
+	if sym.docstrings.len > 0 {
+		buffer << '\n---\n'
+		buffer << fmt.write_docstrings(sym)
+	}
+	return buffer.join('\n')
 }
 
 // [manualfree]
