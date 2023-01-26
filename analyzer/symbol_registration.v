@@ -406,7 +406,6 @@ fn (mut sr SymbolAnalyzer) type_decl(type_decl_node ast.Node) ?&Symbol {
 			selected_type_node := types_node.named_child(i) or { continue }
 			mut found_sym := sr.context.find_symbol_by_type_node(selected_type_node) or { continue }
 			sym.add_child(mut found_sym, false) or { continue }
-			sym.sumtype_children_len++
 		}
 		sym.kind = .sumtype
 	}

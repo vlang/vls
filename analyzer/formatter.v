@@ -204,12 +204,11 @@ pub fn (mut fmt SymbolFormatter) format_with_builder(sym &Symbol, mut builder st
 				if sym.kind == .typedef {
 					fmt.format_with_builder(sym.parent_sym, mut builder, analyzer.child_types_format_cfg)
 				} else {
-					for i in 0 .. sym.sumtype_children_len {
-						fmt.format_with_builder(sym.children_syms[i], mut builder, analyzer.child_types_format_cfg)
-
-						if i < sym.sumtype_children_len - 1 {
+					for i, child in sym.children_syms {
+						if i != 0 {
 							builder.write_string(' | ')
 						}
+						fmt.format_with_builder(child, mut builder, analyzer.child_types_format_cfg)
 					}
 				}
 			}
@@ -448,7 +447,7 @@ pub fn (mut fmt SymbolFormatter) write_fields(sym &Symbol, cfg SymbolFormatterCo
 		is_dirty = true
 		if field.access != last_access {
 			last_access = field.access
-			builder.write_string('${last_access.trim_space()}: \n')
+			builder.write_string('${last_access.str().trim_space()}: \n')
 		}
 		fmt.write_field(field, mut builder, cfg)
 	}
