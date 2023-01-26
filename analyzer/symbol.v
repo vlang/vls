@@ -288,6 +288,17 @@ pub fn (sym &Symbol) is_type_defining_kind() bool {
 	return sym.kind in analyzer.type_defining_sym_kinds
 }
 
+// get_type_def_keyworkd return keyword corressponding to type definition used by
+// kind of symbol.
+pub fn (sym &Symbol) get_type_def_keyword() ?string {
+	return match sym.kind {
+		.interface_ { 'interface' }
+		.struct_ { 'struct' }
+		.sumtype, .typedef { 'type' }
+		else { none }
+	}
+}
+
 [unsafe]
 pub fn (sym &Symbol) free() {
 	unsafe {
@@ -330,7 +341,7 @@ pub fn (sym &Symbol) final_sym() &Symbol {
 	}
 }
 
-fn sort_syms(a &&Symbol, b &&Symbol) int {
+fn sort_syms_by_name(a &&Symbol, b &&Symbol) int {
 	if a.name < b.name {
 		return -1
 	} else if a.name > b.name {
@@ -338,6 +349,16 @@ fn sort_syms(a &&Symbol, b &&Symbol) int {
 	}
 
 	return 0
+}
+
+fn sort_syms_by_access_and_name(a &&Symbol, b &&Symbol) int {
+	if int(a.access) < int(b.access) {
+		return -1
+	} else if int(a.access) > int(b.access) {
+		return 1
+	}
+
+	return sort_syms_by_name(a, b)
 }
 
 pub fn (sym &Symbol) get_fields() ?[]&Symbol {
@@ -357,7 +378,7 @@ pub fn (sym &Symbol) get_fields() ?[]&Symbol {
 		return none
 	}
 
-	syms.sort_with_compare(sort_syms)
+	syms.sort_with_compare(sort_syms_by_access_and_name)
 	return syms
 }
 
@@ -378,7 +399,7 @@ pub fn (sym &Symbol) get_methods() ?[]&Symbol {
 		return none
 	}
 
-	syms.sort_with_compare(sort_syms)
+	syms.sort_with_compare(sort_syms_by_name)
 	return syms
 }
 

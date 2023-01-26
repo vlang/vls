@@ -267,15 +267,15 @@ fn get_hover_data(mut store analyzer.Store, node ast.Node, uri lsp.DocumentUri, 
 			return none
 		}
 
-		mut contents := [formatter.write_identifier(sym)]
+		mut contents := []string{}
 
-		if field_str := formatter.write_fields(return_sym) {
-			contents << ' {\n'
-			contents << field_str
-			contents << '\n}'
-		}
+		contents << '```v\n'
+		contents << formatter.write_type_definition(return_sym)
+		contents << '\n```'
+
 		if method_str := formatter.write_methods(return_sym) {
 			contents << '\n\n---\n\n'
+			contents << '## Methods\n\n'
 			contents << '```v\n'
 			contents << method_str
 			contents << '\n```'

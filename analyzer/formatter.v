@@ -392,19 +392,33 @@ pub fn (fmt &SymbolFormatter) write_docstrings(sym &Symbol, cfg SymbolFormatterC
 	return builder.str()
 }
 
-pub fn (mut fmt SymbolFormatter) write_identifier(sym &Symbol, cfg SymbolFormatterConfig) string {
-	if isnil(sym) {
+pub fn (mut fmt SymbolFormatter) write_type_definition(sym &Symbol, cfg SymbolFormatterConfig) string {
+	if isnil(sym) || sym.is_void() {
 		return 'invalid symbol'
 	}
 
-	mut builder := strings.new_builder(20)
+	mut builder := strings.new_builder(50)
 
-	if sym.is_mutable() {
-		builder.write_string('mut ')
+	if keywrod := sym.get_type_def_keyword() {
+		builder.write_string('${keywrod} ')
 	}
-	builder.write_string(sym.name)
-	builder.write_string(': ')
-	fmt.format_with_builder(sym.return_sym, mut builder, analyzer.types_format_cfg)
+
+	match sym.kind {
+		.interface_, .struct_ {
+			fmt.format_with_builder(sym, mut builder, analyzer.types_format_cfg)
+			if field_str := fmt.write_fields(sym) {
+				builder.write_string('{\n')
+				builder.write_string(field_str)
+				builder.write_string('\n}')
+			}
+		}
+		.sumtype, .typedef {
+			fmt.format_with_builder(sym, mut builder, analyzer.types_format_cfg)
+		}
+		else {
+			fmt.format_with_builder(sym, mut builder, analyzer.types_format_cfg)
+		}
+	}
 
 	return builder.str()
 }
@@ -413,24 +427,34 @@ pub fn (mut fmt SymbolFormatter) write_field(sym &Symbol, mut builder strings.Bu
 	builder.write_string(cfg.field_indent)
 	builder.write_string(sym.name)
 	builder.write_rune(` `)
-	fmt.format_with_builder(sym.return_sym, mut builder, analyzer.types_format_cfg)
+	fmt.format_with_builder(sym.return_sym, mut builder, analyzer.child_types_format_cfg)
 }
 
 pub fn (mut fmt SymbolFormatter) write_fields(sym &Symbol, cfg SymbolFormatterConfig) ?string {
 	field_syms := sym.get_fields() or { return none }
 
 	mut builder := strings.new_builder(100)
+	mut last_access := SymbolAccess.private
 
-	fmt.write_field(field_syms[0], mut builder, cfg)	
-
-	for field in field_syms[1..] {
+	mut is_dirty := false
+	for field in field_syms {
 		if os.dir(field.file_path) != fmt.context.file_dir
-			&& int(field.access) < int(analyzer.SymbolAccess.public) {
+			&& int(field.access) < int(SymbolAccess.public) {
 			continue
+		} else if is_dirty {
+			builder.write_byte(`\n`)
 		}
 
-		builder.write_byte(`\n`)
-		fmt.write_field(field, mut builder, cfg)	
+		is_dirty = true
+		if field.access != last_access {
+			last_access = field.access
+			builder.write_string('${last_access.trim_space()}: \n')
+		}
+		fmt.write_field(field, mut builder, cfg)
+	}
+
+	if !is_dirty {
+		return none
 	}
 
 	return builder.str()
@@ -441,16 +465,21 @@ pub fn (mut fmt SymbolFormatter) write_methods(sym &Symbol, cfg SymbolFormatterC
 
 	mut builder := strings.new_builder(100)
 
-	fmt.format_with_builder(method_syms[0], mut builder, analyzer.types_format_cfg)
-
-	for method in method_syms[1..] {
+	mut is_dirty := false
+	for method in method_syms {
 		if os.dir(method.file_path) != fmt.context.file_dir
-			&& int(method.access) < int(analyzer.SymbolAccess.public) {
+			&& int(method.access) < int(SymbolAccess.public) {
 			continue
+		} else if is_dirty {
+			builder.write_string('\n\n')
 		}
 
-		builder.write_string('\n\n')
+		is_dirty = true
 		fmt.format_with_builder(method, mut builder, analyzer.types_format_cfg)
+	}
+
+	if !is_dirty {
+		return none
 	}
 
 	return builder.str()
