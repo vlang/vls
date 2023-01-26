@@ -320,7 +320,12 @@ fn (mut sr SymbolAnalyzer) enum_decl(enum_decl_node ast.Node) ?&Symbol {
 
 fn (mut sr SymbolAnalyzer) fn_decl(fn_node ast.Node) ?&Symbol {
 	mut access := SymbolAccess.private
-	if fn_node.child(0)?.raw_node.type_name() == 'pub' {
+	modifier_node := if attr_node := fn_node.child_by_field_name('attributes') {
+		attr_node.next_sibling()?
+	} else {
+		fn_node.child(0)?
+	}
+	if modifier_node.raw_node.type_name() == 'pub' {
 		access = SymbolAccess.public
 	}
 
