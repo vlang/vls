@@ -143,6 +143,7 @@ pub mut:
 }
 
 const kinds_in_multi_return_to_be_excluded = [SymbolKind.function, .variable, .field]
+const type_defining_sym_kinds = [SymbolKind.struct_, .enum_, .typedef, .interface_, .sumtype]
 
 [params]
 pub struct SymbolGenStrConfig {
@@ -282,6 +283,11 @@ pub fn (sym &Symbol) is_mutable() bool {
 	return sym.access == .private_mutable || sym.access == .public_mutable || sym.access == .global
 }
 
+// is_type check if a symbol defines a type (struct, enum, etc.).
+pub fn (sym &Symbol) is_type_defining_kind() bool {
+	return sym.kind in analyzer.type_defining_sym_kinds
+}
+
 [unsafe]
 pub fn (sym &Symbol) free() {
 	unsafe {
@@ -322,6 +328,58 @@ pub fn (sym &Symbol) final_sym() &Symbol {
 			return sym
 		}
 	}
+}
+
+fn sort_syms(a &&Symbol, b &&Symbol) int {
+	if a.name < b.name {
+		return -1
+	} else if a.name > b.name {
+		return 1
+	}
+
+	return 0
+}
+
+pub fn (sym &Symbol) get_fields() ?[]&Symbol {
+	if !sym.is_type_defining_kind() {
+		return none
+	}
+
+	mut syms := []&Symbol{}
+
+	for child in sym.children_syms {
+		if child.kind != .function {
+			syms << child
+		}
+	}
+
+	if syms.len == 0 {
+		return none
+	}
+
+	syms.sort_with_compare(sort_syms)
+	return syms
+}
+
+pub fn (sym &Symbol) get_methods() ?[]&Symbol {
+	if !sym.is_type_defining_kind() {
+		return none
+	}
+
+	mut syms := []&Symbol{}
+
+	for child in sym.children_syms {
+		if child.kind == .function {
+			syms << child
+		}
+	}
+
+	if syms.len == 0 {
+		return none
+	}
+
+	syms.sort_with_compare(sort_syms)
+	return syms
 }
 
 pub fn is_interface_satisfied(sym &Symbol, interface_sym &Symbol) bool {

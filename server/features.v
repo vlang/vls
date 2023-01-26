@@ -243,6 +243,8 @@ fn get_hover_data(mut store analyzer.Store, node ast.Node, uri lsp.DocumentUri, 
 	mut original_range := node.range()
 	parent_node := node.parent() or { node }
 
+	mut formatter := store.with(file_path: file_path).symbol_formatter(false)
+
 	// eprintln('$node_type_name | ${node.text(source)}')
 	if node_type_name == .module_clause {
 		return lsp.Hover{
@@ -257,6 +259,34 @@ fn get_hover_data(mut store analyzer.Store, node ast.Node, uri lsp.DocumentUri, 
 			contents: lsp.v_marked_string('import ${found_imp.absolute_module_name}' +
 				if alias.len > 0 { ' as ${alias}' } else { '' })
 			range: tsrange_to_lsp_range(found_imp.ranges[file_path])
+		}
+	} else if node_type_name == .identifier {
+		sym := store.infer_symbol_from_node(file_path, node, source) or { return none }
+		return_sym := sym.return_sym
+		if isnil(sym) || sym.is_void() {
+			return none
+		}
+
+		mut contents := [formatter.write_identifier(sym)]
+
+		if field_str := formatter.write_fields(return_sym) {
+			contents << ' {\n'
+			contents << field_str
+			contents << '\n}'
+		}
+		if method_str := formatter.write_methods(return_sym) {
+			contents << '\n\n---\n\n'
+			contents << '```v\n'
+			contents << method_str
+			contents << '\n```'
+		}
+		
+		return lsp.Hover{
+			contents: lsp.MarkupContent{
+				kind: lsp.markup_kind_markdown
+				value: contents.join('')
+			}
+			range: tsrange_to_lsp_range(node.range())
 		}
 	} else if parent_node.is_error() || parent_node.is_missing() {
 		return none
@@ -286,8 +316,6 @@ fn get_hover_data(mut store analyzer.Store, node ast.Node, uri lsp.DocumentUri, 
 		&& sym.range.start_point.eq(sym.range.end_point) {
 		return none
 	}
-
-	mut formatter := store.with(file_path: file_path).symbol_formatter(false)
 
 	return lsp.Hover{
 		range: tsrange_to_lsp_range(original_range)

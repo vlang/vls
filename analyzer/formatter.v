@@ -1,5 +1,6 @@
 module analyzer
 
+import os
 import strings
 
 pub struct SymbolFormatter {
@@ -14,6 +15,7 @@ pub struct SymbolFormatterConfig {
 	with_access              bool = true
 	with_contents            bool = true
 	docstring_line_len_limit int
+	field_indent             string = '\t'
 }
 
 pub const params_format_cfg = SymbolFormatterConfig{
@@ -385,6 +387,70 @@ pub fn (fmt &SymbolFormatter) write_docstrings(sym &Symbol, cfg SymbolFormatterC
 
 		builder.write_byte(`\n`)
 		write_line_with_wrapping(mut builder, ds, line_limit, 0)
+	}
+
+	return builder.str()
+}
+
+pub fn (mut fmt SymbolFormatter) write_identifier(sym &Symbol, cfg SymbolFormatterConfig) string {
+	if isnil(sym) {
+		return 'invalid symbol'
+	}
+
+	mut builder := strings.new_builder(20)
+
+	if sym.is_mutable() {
+		builder.write_string('mut ')
+	}
+	builder.write_string(sym.name)
+	builder.write_string(': ')
+	fmt.format_with_builder(sym.return_sym, mut builder, analyzer.types_format_cfg)
+
+	return builder.str()
+}
+
+pub fn (mut fmt SymbolFormatter) write_field(sym &Symbol, mut builder strings.Builder, cfg SymbolFormatterConfig) {
+	builder.write_string(cfg.field_indent)
+	builder.write_string(sym.name)
+	builder.write_rune(` `)
+	fmt.format_with_builder(sym.return_sym, mut builder, analyzer.types_format_cfg)
+}
+
+pub fn (mut fmt SymbolFormatter) write_fields(sym &Symbol, cfg SymbolFormatterConfig) ?string {
+	field_syms := sym.get_fields() or { return none }
+
+	mut builder := strings.new_builder(100)
+
+	fmt.write_field(field_syms[0], mut builder, cfg)	
+
+	for field in field_syms[1..] {
+		if os.dir(field.file_path) != fmt.context.file_dir
+			&& int(field.access) < int(analyzer.SymbolAccess.public) {
+			continue
+		}
+
+		builder.write_byte(`\n`)
+		fmt.write_field(field, mut builder, cfg)	
+	}
+
+	return builder.str()
+}
+
+pub fn (mut fmt SymbolFormatter) write_methods(sym &Symbol, cfg SymbolFormatterConfig) ?string {
+	method_syms := sym.get_methods() or { return none }
+
+	mut builder := strings.new_builder(100)
+
+	fmt.format_with_builder(method_syms[0], mut builder, analyzer.types_format_cfg)
+
+	for method in method_syms[1..] {
+		if os.dir(method.file_path) != fmt.context.file_dir
+			&& int(method.access) < int(analyzer.SymbolAccess.public) {
+			continue
+		}
+
+		builder.write_string('\n\n')
+		fmt.format_with_builder(method, mut builder, analyzer.types_format_cfg)
 	}
 
 	return builder.str()
