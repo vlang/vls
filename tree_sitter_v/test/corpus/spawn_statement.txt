@@ -1,0 +1,17 @@
+===
+Spawn Statement
+===
+
+fn main() {
+  spawn do_something()
+}
+
+---
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (block
+      (spawn_statement
+        (call_expression (identifier) (argument_list))))))

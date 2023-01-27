@@ -109,6 +109,7 @@ pub enum NodeType {
 	qualified_type
 	range
 	raw_string_literal
+	result_type
 	return_statement
 	select_branch
 	select_default_branch
@@ -119,6 +120,7 @@ pub enum NodeType {
 	short_var_declaration
 	slice_expression
 	source_file
+	spawn_statement
 	special_argument_list
 	special_call_expression
 	spread_operator
@@ -238,6 +240,7 @@ const supertype__statement_nodes = merge(supertype__simple_statement_nodes, [
 	.labeled_statement,
 	.return_statement,
 	.send_statement,
+	.spawn_statement,
 ])
 
 const supertype__top_level_declaration_nodes = [
@@ -255,6 +258,7 @@ const supertype__top_level_declaration_nodes = [
 const supertype__type_nodes = merge(supertype__simple_type_nodes, [
 	NodeType.multi_return_type,
 	.option_type,
+	.result_type,
 ])
 
 pub fn (typ NodeType) group() SuperType {
@@ -425,6 +429,7 @@ pub fn (nf VNodeTypeFactory) get_type(type_name string) NodeType {
 		'qualified_type' { NodeType.qualified_type }
 		'range' { NodeType.range }
 		'raw_string_literal' { NodeType.raw_string_literal }
+		'result_type' { NodeType.result_type }
 		'return_statement' { NodeType.return_statement }
 		'select_branch' { NodeType.select_branch }
 		'select_default_branch' { NodeType.select_default_branch }
@@ -435,6 +440,7 @@ pub fn (nf VNodeTypeFactory) get_type(type_name string) NodeType {
 		'short_var_declaration' { NodeType.short_var_declaration }
 		'slice_expression' { NodeType.slice_expression }
 		'source_file' { NodeType.source_file }
+		'spawn_statement' { NodeType.spawn_statement }
 		'special_argument_list' { NodeType.special_argument_list }
 		'special_call_expression' { NodeType.special_call_expression }
 		'spread_operator' { NodeType.spread_operator }
