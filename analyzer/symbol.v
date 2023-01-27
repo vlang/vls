@@ -31,6 +31,7 @@ pub enum SymbolKind {
 	map_
 	multi_return
 	optional
+	result
 	chan_
 	variadic
 	function
@@ -54,6 +55,7 @@ pub fn (kind SymbolKind) str() string {
 		.map_ { return 'map' }
 		.multi_return { return 'multi_return' }
 		.optional { return 'optional' }
+		.result { return 'result' }
 		.chan_ { return 'chan' }
 		.variadic { return 'variadic' }
 		.function { return 'function' }
@@ -314,7 +316,7 @@ fn (sym &Symbol) count_ptr() int {
 // from container symbols (optional types, channel types, and etc.)
 pub fn (sym &Symbol) final_sym() &Symbol {
 	match sym.kind {
-		.optional {
+		.optional, .result {
 			return sym.parent_sym
 		}
 		else {
