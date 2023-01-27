@@ -339,13 +339,12 @@ const completion_results = {
 			detail: 'pub struct pg.Config'
 			insert_text: 'Config'
 		}
-		// TODO: investigate why VLS stops at the first fn declaration returning !Type :-|
-		//		lsp.CompletionItem{
-		//			label: 'connect'
-		//			kind: .function
-		//			detail: 'pub fn pg.connect(config pg.Config) !pg.DB'
-		//			insert_text: 'connect'
-		//		},
+		lsp.CompletionItem{
+			label: 'connect'
+			kind: .function
+			detail: 'pub fn pg.connect(config pg.Config) !pg.DB'
+			insert_text: 'connect'
+		},
 		lsp.CompletionItem{
 			label: 'ConnStatusType'
 			kind: .enum_
@@ -551,6 +550,10 @@ fn sort_completion_item(a &lsp.CompletionItem, b &lsp.CompletionItem) int {
 	if int(a.kind) < int(b.kind) {
 		return 1
 	} else if int(a.kind) > int(b.kind) {
+		return -1
+	} else if a.label < b.label {
+		return 1
+	} else if a.label > b.label {
 		return -1
 	}
 	return 0
