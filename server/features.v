@@ -335,10 +335,10 @@ fn get_type_detail(sym &analyzer.Symbol, mut fmt analyzer.SymbolFormatter) ?stri
 	mut buffer := []string{}
 
 	buffer << '```v'
-	buffer << fmt.write_type_definition(sym)
+	buffer << fmt.format_type_definition(sym)
 	buffer << '```'
 
-	if method_str := fmt.write_methods(sym) {
+	if method_str := fmt.format_methods(sym) {
 		buffer << '\n---\n'
 		buffer << '## Methods\n'
 		buffer << '```v'
@@ -356,7 +356,7 @@ fn get_signature_with_docstring(sym &analyzer.Symbol, mut fmt analyzer.SymbolFor
 	]
 	if sym.docstrings.len > 0 {
 		buffer << '\n---\n'
-		buffer << fmt.write_docstrings(sym)
+		buffer << fmt.format_docstrings(sym)
 	}
 	return buffer.join('\n')
 }

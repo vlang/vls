@@ -244,6 +244,8 @@ pub fn (mut fmt SymbolFormatter) format_with_builder(sym &Symbol, mut builder st
 	}
 }
 
+// check_is_header_line check if a line starts with at least `#` and followed by
+// space.
 fn check_is_header_line(line string) bool {
 	if line.len == 0 {
 		return false
@@ -264,6 +266,8 @@ fn check_is_header_line(line string) bool {
 	return is_header
 }
 
+// check_is_horizontal_rule check if a line contains only
+// `-, =, _, *, ~` (any one of them), and with length of at least 3.
 fn check_is_horizontal_rule(line string) bool {
 	if line.len < 3 {
 		return false
@@ -285,6 +289,8 @@ fn check_is_horizontal_rule(line string) bool {
 	return is_hr
 }
 
+// write_line_with_wrapping write string to builder, string will be wrapped into
+// multiple lines if needed. This function returns length of the last written line.
 fn write_line_with_wrapping(mut builder strings.Builder, line string, line_limit int, init_offset int) int {
 	if line_limit <= 0 {
 		builder.write_string(line)
@@ -314,7 +320,7 @@ fn write_line_with_wrapping(mut builder strings.Builder, line string, line_limit
 
 // write_docstrings_with_line_concate get docstring for symbol, using newline
 // concatenate rule described in [v doc](https://github.com/vlang/v/blob/master/doc/docs.md#newlines-in-documentation-comments).
-pub fn (fmt &SymbolFormatter) write_docstrings_with_line_concate(sym &Symbol, cfg SymbolFormatterConfig) string {
+pub fn (fmt &SymbolFormatter) format_docstrings_with_line_concate(sym &Symbol, cfg SymbolFormatterConfig) string {
 	len := sym.docstrings.len
 	if len == 0 {
 		return ''
@@ -366,7 +372,7 @@ pub fn (fmt &SymbolFormatter) write_docstrings_with_line_concate(sym &Symbol, cf
 
 // write_docstrings get docstring for symbol, all newline in original docstring
 // comment will be presented as is.
-pub fn (fmt &SymbolFormatter) write_docstrings(sym &Symbol, cfg SymbolFormatterConfig) string {
+pub fn (fmt &SymbolFormatter) format_docstrings(sym &Symbol, cfg SymbolFormatterConfig) string {
 	len := sym.docstrings.len
 	if len == 0 {
 		return ''
@@ -391,7 +397,7 @@ pub fn (fmt &SymbolFormatter) write_docstrings(sym &Symbol, cfg SymbolFormatterC
 	return builder.str()
 }
 
-pub fn (mut fmt SymbolFormatter) write_type_definition(sym &Symbol, cfg SymbolFormatterConfig) string {
+pub fn (mut fmt SymbolFormatter) format_type_definition(sym &Symbol, cfg SymbolFormatterConfig) string {
 	if isnil(sym) || sym.is_void() {
 		return 'invalid symbol'
 	}
@@ -405,7 +411,7 @@ pub fn (mut fmt SymbolFormatter) write_type_definition(sym &Symbol, cfg SymbolFo
 	match sym.kind {
 		.interface_, .struct_ {
 			fmt.format_with_builder(sym, mut builder, analyzer.types_format_cfg)
-			if field_str := fmt.write_fields(sym) {
+			if field_str := fmt.format_fields(sym) {
 				builder.write_string('{\n')
 				builder.write_string(field_str)
 				builder.write_string('\n}')
@@ -429,7 +435,7 @@ pub fn (mut fmt SymbolFormatter) write_field(sym &Symbol, mut builder strings.Bu
 	fmt.format_with_builder(sym.return_sym, mut builder, analyzer.child_types_format_cfg)
 }
 
-pub fn (mut fmt SymbolFormatter) write_fields(sym &Symbol, cfg SymbolFormatterConfig) ?string {
+pub fn (mut fmt SymbolFormatter) format_fields(sym &Symbol, cfg SymbolFormatterConfig) ?string {
 	field_syms := sym.get_fields() or { return none }
 
 	mut builder := strings.new_builder(100)
@@ -459,7 +465,7 @@ pub fn (mut fmt SymbolFormatter) write_fields(sym &Symbol, cfg SymbolFormatterCo
 	return builder.str()
 }
 
-pub fn (mut fmt SymbolFormatter) write_methods(sym &Symbol, cfg SymbolFormatterConfig) ?string {
+pub fn (mut fmt SymbolFormatter) format_methods(sym &Symbol, cfg SymbolFormatterConfig) ?string {
 	method_syms := sym.get_methods() or { return none }
 
 	mut builder := strings.new_builder(100)

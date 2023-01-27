@@ -68,6 +68,7 @@ pub fn (ctx AnalyzerContext) symbol_formatter(from_semantic bool) SymbolFormatte
 	}
 }
 
+// get_docstring find all single-line comments immediately preceding given node.
 pub fn (ctx AnalyzerContext) get_docstring(node ast.Node) []string {
 	mut docstrings := []string{}
 	mut cur := node
