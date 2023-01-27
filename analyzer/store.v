@@ -603,7 +603,7 @@ pub fn (mut ss Store) infer_symbol_from_node(file_path string, node ast.Node, sr
 				}
 			}
 		}
-		.mutable_identifier {
+		.mutable_identifier, .mutable_expression {
 			first_child := node.named_child(0)?
 			return ss.infer_symbol_from_node(file_path, first_child, src_text)
 		}
