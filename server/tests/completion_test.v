@@ -321,12 +321,6 @@ const completion_results = {
 		},
 	]
 	'import_symbols.vv':                     [
-		lsp.CompletionItem {
-			label: 'connect'
-			kind: .function
-			detail: 'pub fn pg.connect(config pg.Config) !pg.DB'
-			insert_text: 'connect'
-		},
 		lsp.CompletionItem{
 			label: 'DB'
 			kind: .struct_
@@ -345,13 +339,12 @@ const completion_results = {
 			detail: 'pub struct pg.Config'
 			insert_text: 'Config'
 		}
-		// TODO: investigate why VLS stops at the first fn declaration returning !Type :-|
-		//		lsp.CompletionItem{
-		//			label: 'connect'
-		//			kind: .function
-		//			detail: 'pub fn pg.connect(config pg.Config) !pg.DB'
-		//			insert_text: 'connect'
-		//		},
+		lsp.CompletionItem{
+			label: 'connect'
+			kind: .function
+			detail: 'pub fn pg.connect(config pg.Config) !pg.DB'
+			insert_text: 'connect'
+		},
 		lsp.CompletionItem{
 			label: 'ConnStatusType'
 			kind: .enum_
