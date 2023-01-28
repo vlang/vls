@@ -45,12 +45,12 @@ pub fn (mut tree Tree) delete(id string) {
 	tree.len--
 }
 
-pub fn (tree &Tree) get_node(id string) ?&Node {
+pub fn (tree &Tree) get_node(id string) !&Node {
 	idx := tree.keys.index(id)
 	if idx == -1 {
 		return error('Node not found')
 	}
-	value := tree.values[idx] or { return none }
+	value := tree.values[idx] or { return error('') }
 	return value
 }
 
@@ -90,7 +90,7 @@ pub mut:
 }
 
 pub fn (node &Node) str() string {
-	return '$node.id -> (${node.dependencies.join(', ')})'
+	return '${node.id} -> (${node.dependencies.join(', ')})'
 }
 
 pub fn (mut node Node) remove_dependency(dep_path string) int {

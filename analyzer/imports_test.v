@@ -189,7 +189,7 @@ fn test_other_import_cases() {
 	}
 
 	test_files_dir := test_utils.get_test_files_path(@FILE)
-	test_files := test_utils.load_test_file_paths(test_files_dir, 'imports')?
+	test_files := test_utils.load_test_file_paths(test_files_dir, 'imports')!
 	bench.set_total_expected_steps(test_files.len)
 
 	for test_file_path in test_files {
