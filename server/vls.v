@@ -254,7 +254,11 @@ pub fn (mut ls Vls) handle_jsonrpc(request &jsonrpc.Request, mut rw jsonrpc.Resp
 				params := json.decode(lsp.HoverParams, request.params) or {
 					return w.wrap_error(err)
 				}
-				w.write(ls.hover(params, mut rw) or { return w.wrap_error(err) })
+				hover_data := ls.hover(params, mut rw) or {
+					w.write_empty()
+					return
+				}
+				w.write(hover_data)
 			}
 			'textDocument/foldingRange' {
 				params := json.decode(lsp.FoldingRangeParams, request.params) or {
