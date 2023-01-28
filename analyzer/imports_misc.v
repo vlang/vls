@@ -135,7 +135,7 @@ fn (mut iter ImportPathIterator) next() ?string {
 	}
 
 	if iter.in_fallback && iter.idx >= iter.fallback_lookup_paths.len {
-		return error('reached limit')
+		return none
 	}
 
 	defer {

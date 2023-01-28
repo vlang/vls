@@ -43,10 +43,10 @@ pub mut:
 }
 
 // send<T,U> sends a request and receives a decoded response result.
-pub fn (mut tc TestClient) send<T, U>(method string, params T) !U {
+pub fn (mut tc TestClient) send[T, U](method string, params T) !U {
 	params_json := json.encode(params)
 	req := jsonrpc.Request{
-		id: '$tc.id'
+		id: '${tc.id}'
 		method: method
 		params: params_json
 	}
@@ -63,7 +63,7 @@ pub fn (mut tc TestClient) send<T, U>(method string, params T) !U {
 // notify is a version of send but instead of returning a response,
 // it only notifies the server. Effectively sending a request as a
 // notification.
-pub fn (mut tc TestClient) notify<T>(method string, params T) ! {
+pub fn (mut tc TestClient) notify[T](method string, params T) ! {
 	params_json := json.encode(params)
 	req := jsonrpc.Request{
 		id: ''
@@ -84,7 +84,7 @@ mut:
 	notif_idx int
 	notif_buf [][]u8 = [][]u8{len: 20, cap: 20}
 	resp_buf  map[string]TestResponse
-	req_buf   datatypes.Queue<[]u8>
+	req_buf   datatypes.Queue[[]u8]
 }
 
 // read receives the incoming request buffer.
@@ -118,7 +118,7 @@ pub fn (mut rw TestStream) write(buf []u8) !int {
 // send stringifies and dispatches the jsonrpc.Request into the request queue.
 pub fn (mut rw TestStream) send(req jsonrpc.Request) {
 	req_json := req.json()
-	rw.req_buf.push('Content-Length: $req_json.len\r\n\r\n$req_json'.bytes())
+	rw.req_buf.push('Content-Length: ${req_json.len}\r\n\r\n${req_json}'.bytes())
 }
 
 // response_text returns the raw response result of the given request id.
@@ -127,27 +127,27 @@ pub fn (rw &TestStream) response_text(raw_id string) string {
 }
 
 // notification_at returns the jsonrpc.Notification<T> in a given index.
-pub fn (rw &TestStream) notification_at<T>(idx int) !jsonrpc.NotificationMessage<T> {
+pub fn (rw &TestStream) notification_at[T](idx int) !jsonrpc.NotificationMessage[T] {
 	raw_json_content := rw.notif_buf[idx].bytestr().all_after('\r\n\r\n')
-	return json.decode(jsonrpc.NotificationMessage<T>, raw_json_content)!
+	return json.decode(jsonrpc.NotificationMessage[T], raw_json_content)!
 }
 
 // last_notification_at_method returns the last jsonrpc.Notification<T> from the given method name.
-pub fn (rw &TestStream) last_notification_at_method<T>(method_name string) ?jsonrpc.NotificationMessage<T> {
+pub fn (rw &TestStream) last_notification_at_method[T](method_name string) !jsonrpc.NotificationMessage[T] {
 	for i := rw.notif_buf.len - 1; i >= 0; i-- {
 		raw_notif_content := rw.notif_buf[i]
 		if raw_notif_content.len == 0 {
 			continue
 		}
 
-		if raw_notif_content.bytestr().contains('"method":"$method_name"') {
-			return rw.notification_at<T>(i) or { return err }
+		if raw_notif_content.bytestr().contains('"method":"${method_name}"') {
+			return rw.notification_at[T](i) or { return err }
 		}
 	}
-	return none
+	return error('')
 }
 
 // RpcResult<T> is a result form used for primitive types.
-pub struct RpcResult<T> {
+pub struct RpcResult[T] {
 	result T
 }

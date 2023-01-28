@@ -72,14 +72,14 @@ fn (mut r DiagnosticReporter) publish(mut wr ResponseWriter, uri lsp.DocumentUri
 	wr.publish_diagnostics(uri: uri, diagnostics: r.reports[uri])
 }
 
-fn parse_v_diagnostic(msg string) ?Report {
+fn parse_v_diagnostic(msg string) !Report {
 	if msg.len < 4 || msg[0].is_space() {
-		return none
+		return error('')
 	}
 
 	line_colon_idx := msg.index_after(':', 2) // deal with `d:/v/...:2:4: error: ...`
 	if line_colon_idx < 0 {
-		return none
+		return error('')
 	}
 	mut file_path := msg[..line_colon_idx]
 	$if windows {
