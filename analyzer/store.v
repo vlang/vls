@@ -891,7 +891,7 @@ pub fn (mut ss Store) infer_value_type_from_node(file_path string, node ast.Node
 			node_count := node.named_child_count()
 			if got_sym.is_returnable() {
 				if last_node := node.named_child(node_count - 1) {
-					if got_sym.return_sym.kind == .optional
+					if got_sym.return_sym.kind in [.optional, .result]
 						&& last_node.type_name == .option_propagator {
 						return got_sym.return_sym.final_sym()
 					}
