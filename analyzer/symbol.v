@@ -289,6 +289,10 @@ pub fn (sym &Symbol) is_type_defining_kind() bool {
 	return sym.kind in analyzer.type_defining_sym_kinds
 }
 
+pub fn (sym &Symbol) is_reference() bool {
+	return sym.kind == .ref
+}
+
 // get_type_def_keyworkd return keyword corressponding to type definition used by
 // kind of symbol.
 pub fn (sym &Symbol) get_type_def_keyword() ?string {
@@ -402,6 +406,39 @@ pub fn (sym &Symbol) get_methods() ?[]&Symbol {
 
 	syms.sort_with_compare(sort_syms_by_name)
 	return syms
+}
+
+// deref returns internal symbol of a reference symbol, return none on a non-reference
+// symbol
+pub fn (sym &Symbol) deref() ?&Symbol {
+	if !sym.is_reference() {
+		return none
+	}
+
+	return if isnil(sym.parent_sym) {
+		none
+	} else {
+		sym.parent_sym
+	}
+}
+
+// deref_all deref a symbol until it's no longer a reference, returns extracted
+// internal symbol. Returns none if a symbol is not a reference.
+pub fn (sym &Symbol) deref_all() ?&Symbol {
+	if !sym.is_reference() {
+		return none
+	}
+
+	mut target := sym.parent_sym
+	for !isnil(target) && target.kind == .ref {
+		target = target.parent_sym
+	}
+
+	return if isnil(target) {
+		none
+	} else {
+		sym.parent_sym
+	}
 }
 
 pub fn is_interface_satisfied(sym &Symbol, interface_sym &Symbol) bool {

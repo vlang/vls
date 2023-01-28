@@ -140,11 +140,20 @@ fn get_type_detail(sym &analyzer.Symbol, mut fmt analyzer.SymbolFormatter) ?stri
 
 	mut buffer := []string{}
 
+	if sym.is_reference() {
+		buffer << '```v'
+		buffer << fmt.format_type_definition(sym)
+		buffer << '```'
+		buffer << '\n---\n'
+	}
+
+	target := sym.deref_all() or { sym }
+
 	buffer << '```v'
-	buffer << fmt.format_type_definition(sym)
+	buffer << fmt.format_type_definition(target)
 	buffer << '```'
 
-	if method_str := fmt.format_methods(sym) {
+	if method_str := fmt.format_methods(target) {
 		buffer << '\n---\n'
 		buffer << '## Methods\n'
 		buffer << '```v'
