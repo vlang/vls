@@ -786,11 +786,12 @@
         "type": "CHOICE",
         "members": [
           {
-            "type": "TOKEN",
-            "content": {
-              "type": "STRING",
-              "value": "?"
-            }
+            "type": "STRING",
+            "value": "?"
+          },
+          {
+            "type": "STRING",
+            "value": "!"
           },
           {
             "type": "SYMBOL",
@@ -3121,6 +3122,13 @@
                     "type": "IMMEDIATE_TOKEN",
                     "content": {
                       "type": "STRING",
+                      "value": "spawn"
+                    }
+                  },
+                  {
+                    "type": "IMMEDIATE_TOKEN",
+                    "content": {
+                      "type": "STRING",
                       "value": "asm"
                     }
                   },
@@ -4086,6 +4094,10 @@
         },
         {
           "type": "SYMBOL",
+          "name": "result_type"
+        },
+        {
+          "type": "SYMBOL",
           "name": "multi_return_type"
         }
       ]
@@ -4099,6 +4111,40 @@
           {
             "type": "STRING",
             "value": "?"
+          },
+          {
+            "type": "CHOICE",
+            "members": [
+              {
+                "type": "CHOICE",
+                "members": [
+                  {
+                    "type": "SYMBOL",
+                    "name": "_simple_type"
+                  },
+                  {
+                    "type": "SYMBOL",
+                    "name": "multi_return_type"
+                  }
+                ]
+              },
+              {
+                "type": "BLANK"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "result_type": {
+      "type": "PREC_RIGHT",
+      "value": 0,
+      "content": {
+        "type": "SEQ",
+        "members": [
+          {
+            "type": "STRING",
+            "value": "!"
           },
           {
             "type": "CHOICE",
@@ -4619,6 +4665,10 @@
         {
           "type": "SYMBOL",
           "name": "go_statement"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "spawn_statement"
         },
         {
           "type": "SYMBOL",
@@ -5900,6 +5950,19 @@
         {
           "type": "STRING",
           "value": "go"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "_expression"
+        }
+      ]
+    },
+    "spawn_statement": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "spawn"
         },
         {
           "type": "SYMBOL",
