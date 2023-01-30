@@ -945,7 +945,7 @@ fn (mut sr SymbolAnalyzer) extract_block(node ast.Node, mut scope ScopeTree) ![]
 	if node.type_name != .block {
 		return report_error('expected a `block` node', node.range())
 	} else if sr.is_import {
-		return report_error('cannot be used in `is_import` mode', node.range())
+		return error('cannot be used in `is_import` mode')
 	}
 
 	body_sym_len := node.named_child_count()
@@ -963,7 +963,7 @@ fn (mut sr SymbolAnalyzer) extract_block(node ast.Node, mut scope ScopeTree) ![]
 				return_syms << sr.expression(expr_node) or { void_sym_arr }
 			}
 		} else {
-			got_return_sym := sr.statement(stmt_node, mut scope) or { void_sym_arr }
+			got_return_sym := sr.statement(stmt_node, mut scope)!
 			if i == body_sym_len - 1 {
 				return_syms[0] = got_return_sym[0]
 			}
