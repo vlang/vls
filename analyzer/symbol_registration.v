@@ -1029,11 +1029,12 @@ pub fn (mut sr SymbolAnalyzer) analyze_from_cursor(mut cursor TreeCursor) []&Sym
 		sr.get_scope(cur_node) or {}
 	}
 
+	file_path := sr.context.file_path
 	mut global_scope := unsafe { sr.context.store.opened_scopes[sr.context.file_path] }
 	mut symbols := []&Symbol{cap: 255}
 	for got_node in cursor {
 		mut syms := sr.analyze(got_node) or {
-			sr.context.store.report_error(err)
+			sr.context.store.report_error_with_path(err, file_path)
 			continue
 		}
 		for i, mut sym in syms {

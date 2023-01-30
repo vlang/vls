@@ -35,3 +35,14 @@ pub fn (mut ss Store) report_error(err IError) {
 		)
 	}
 }
+
+pub fn (mut ss Store) report_error_with_path(err IError, file_path string) {
+	if err is AnalyzerError {
+		ss.report(
+			kind: .error
+			message: err.msg
+			range: err.range
+			file_path: file_path
+		)
+	}
+}
