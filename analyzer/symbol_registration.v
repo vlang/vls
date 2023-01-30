@@ -42,15 +42,18 @@ fn (sr &SymbolAnalyzer) new_top_level_symbol(identifier_node ast.Node, access Sy
 
 	match id_node_type_name {
 		.generic_type {
-			type_node := identifier_node.named_child(0) or { return error('empty identifier node') }
+			type_node := identifier_node.named_child(0) or {
+				return report_error('type identifier not found', identifier_node.range())
+			}
 			if type_node.type_name == .generic_type {
-				return error('Invalid top-level generic node type `${id_node_type_name}`')
+				return report_error('Invalid top-level node type `${id_node_type_name}`',
+					identifier_node.range())
 			}
 
 			// unsafe { symbol.free() }
 			symbol = sr.new_top_level_symbol(type_node, access, kind)!
 			parameters_node := identifier_node.named_child(1) or {
-				return error('empty parameter list')
+				return report_error('type parameters not found', identifier_node.range())
 			}
 			symbol.generic_placeholder_len = int(parameters_node.named_child_count())
 		}
@@ -61,7 +64,7 @@ fn (sr &SymbolAnalyzer) new_top_level_symbol(identifier_node ast.Node, access Sy
 
 			if id_node_type_name in [.binded_type, .binded_identifier] {
 				language_node := identifier_node.child_by_field_name('language') or {
-					return error('no language identifier found')
+					return report_error('no language identifier found', identifier_node.range())
 				}
 				sym_language := language_node.text(sr.context.text)
 				symbol.language = match sym_language {
@@ -71,9 +74,11 @@ fn (sr &SymbolAnalyzer) new_top_level_symbol(identifier_node ast.Node, access Sy
 				}
 			}
 
-			// for function names with generic parameters
-			next_sibling := identifier_node.next_named_sibling() or { return error('') }
+			next_sibling := identifier_node.next_named_sibling() or {
+				return report_error('definition body not found', identifier_node.range())
+			}
 			if next_sibling.type_name == .type_parameters {
+				// for function names with generic parameters
 				symbol.generic_placeholder_len = int(next_sibling.named_child_count())
 			}
 		}
@@ -92,7 +97,9 @@ fn (mut sr SymbolAnalyzer) get_scope(node ast.Node) !&ScopeTree {
 
 fn (mut sr SymbolAnalyzer) const_decl(const_node ast.Node) ![]&Symbol {
 	mut access := SymbolAccess.private
-	child := const_node.child(0) or { return error('empty const declaration node') }
+	child := const_node.child(0) or {
+		return report_error('empty const declaration node', const_node.range())
+	}
 	if child.raw_node.type_name() == 'pub' {
 		access = .public
 	}
@@ -114,7 +121,7 @@ fn (mut sr SymbolAnalyzer) const_decl(const_node ast.Node) ![]&Symbol {
 		}
 
 		name_node := spec_node.child_by_field_name('name') or {
-			return error('no name node found in declaration')
+			return report_error('name node not found', spec_node.range())
 		}
 		consts << &Symbol{
 			name: name_node.text(sr.context.text)
@@ -134,7 +141,9 @@ fn (mut sr SymbolAnalyzer) const_decl(const_node ast.Node) ![]&Symbol {
 
 fn (mut sr SymbolAnalyzer) struct_decl(struct_decl_node ast.Node) !&Symbol {
 	mut access := SymbolAccess.private
-	child_node := struct_decl_node.child(0) or { return error('empty struct declaration node') }
+	child_node := struct_decl_node.child(0) or {
+		return report_error('empty struct declaration node', struct_decl_node.range())
+	}
 	if child_node.raw_node.type_name() == 'pub' {
 		access = .public
 	}
@@ -145,11 +154,11 @@ fn (mut sr SymbolAnalyzer) struct_decl(struct_decl_node ast.Node) !&Symbol {
 	}
 
 	name_node := struct_decl_node.child_by_field_name('name') or {
-		return error('no name node found in declaration')
+		return report_error('name node not found', struct_decl_node.range())
 	}
 	mut sym := sr.new_top_level_symbol(name_node, access, .struct_)!
 	decl_list_node := struct_decl_node.named_child(u32(attrs_idx)) or {
-		return error('no declaration list found')
+		return report_error('field declaration not found', struct_decl_node.range())
 	}
 	fields_len := decl_list_node.named_child_count()
 
@@ -219,18 +228,18 @@ fn (mut sr SymbolAnalyzer) struct_field_decl(field_access SymbolAccess, field_de
 fn (mut sr SymbolAnalyzer) interface_decl(interface_decl_node ast.Node) !&Symbol {
 	mut access := SymbolAccess.private
 	child_node := interface_decl_node.child(0) or {
-		return error('empty interface declaration node')
+		return report_error('empty interface declaration node', interface_decl_node.range())
 	}
 	if child_node.raw_node.type_name() == 'pub' {
 		access = SymbolAccess.public
 	}
 
 	decl_name_node := interface_decl_node.child_by_field_name('name') or {
-		return error('no name node found in declaration')
+		return report_error('name node not found', interface_decl_node.range())
 	}
 	mut sym := sr.new_top_level_symbol(decl_name_node, access, .interface_)!
 	fields_list_node := interface_decl_node.named_child(1) or {
-		return error('no field list found in declaration')
+		return report_error('field declaration not found', interface_decl_node.range())
 	}
 	fields_len := interface_decl_node.named_child_count()
 
@@ -296,7 +305,9 @@ fn (mut sr SymbolAnalyzer) interface_decl(interface_decl_node ast.Node) !&Symbol
 
 fn (mut sr SymbolAnalyzer) enum_decl(enum_decl_node ast.Node) !&Symbol {
 	mut access := SymbolAccess.private
-	child_node := enum_decl_node.child(0) or { return error('empty enum declaration node') }
+	child_node := enum_decl_node.child(0) or {
+		return report_error('empty enum declaration node', enum_decl_node.range())
+	}
 	if child_node.raw_node.type_name() == 'pub' {
 		access = SymbolAccess.public
 	}
@@ -307,11 +318,11 @@ fn (mut sr SymbolAnalyzer) enum_decl(enum_decl_node ast.Node) !&Symbol {
 	}
 
 	name_node := enum_decl_node.child_by_field_name('name') or {
-		return error('no name node found in declaration')
+		return report_error('name node not found', enum_decl_node.range())
 	}
 	mut sym := sr.new_top_level_symbol(name_node, access, .enum_)!
 	member_list_node := enum_decl_node.named_child(u32(attrs_idx)) or {
-		return error('no member list found in declaration')
+		return report_error('member declaration not found', enum_decl_node.range())
 	}
 	members_len := member_list_node.named_child_count()
 	for i in 0 .. members_len {
@@ -346,26 +357,26 @@ fn (mut sr SymbolAnalyzer) enum_decl(enum_decl_node ast.Node) !&Symbol {
 
 fn (mut sr SymbolAnalyzer) fn_decl(fn_node ast.Node) !&Symbol {
 	mut access := SymbolAccess.private
-	child_node := fn_node.child(0) or { return error('empty function declaration node') }
+	child_node := fn_node.child(0) or {
+		return report_error('empty function declaration node', fn_node.range())
+	}
 	if child_node.raw_node.type_name() == 'pub' {
 		access = SymbolAccess.public
 	}
 
 	name_node := fn_node.child_by_field_name('name') or {
-		return error('no name node found in declaration')
+		return report_error('name node not found', fn_node.range())
 	}
 	if sr.is_script && fn_node.start_byte() > sr.first_var_decl_pos.end_byte {
-		return IError(AnalyzerError{
-			msg: 'function declarations in script mode should be before all script statements'
-			range: name_node.range()
-		})
+		return report_error('in script mode, functions should be declaraed before any other statements',
+			name_node.range())
 	}
 
 	body_node := fn_node.child_by_field_name('body') or {
-		return error('no body node found in declaration')
+		return report_error('functoin body not found', fn_node.range())
 	}
 	params_list_node := fn_node.child_by_field_name('parameters') or {
-		return error('no parameter list found in declaration')
+		return report_error('parameter list not found', fn_node.range())
 	}
 	return_node := fn_node.child_by_field_name('result') or {
 		unsafe {
@@ -412,21 +423,23 @@ fn (mut sr SymbolAnalyzer) fn_decl(fn_node ast.Node) !&Symbol {
 
 fn (mut sr SymbolAnalyzer) type_decl(type_decl_node ast.Node) !&Symbol {
 	mut access := SymbolAccess.private
-	child_node := type_decl_node.child(0) or { return error('empty type declaration node') }
+	child_node := type_decl_node.child(0) or {
+		return report_error('empty type declaration node', type_decl_node.range())
+	}
 	if child_node.raw_node.type_name() == 'pub' {
 		access = SymbolAccess.public
 	}
 
 	name_node := type_decl_node.child_by_field_name('name') or {
-		return error('no name node found in declaration')
+		return report_error('name node not found', type_decl_node.range())
 	}
 	mut sym := sr.new_top_level_symbol(name_node, access, .typedef)!
 	types_node := type_decl_node.child_by_field_name('types') or {
-		return error('no type node found in declaration')
+		return report_error('type list not found on the right hand side', type_decl_node.range())
 	}
 	types_count := types_node.named_child_count()
 	if types_count == 0 {
-		return error('')
+		return report_error('empty type list', types_node.range())
 	} else if types_count == 1 {
 		// alias type
 		if selected_type_node := types_node.named_child(0) {
@@ -489,10 +502,7 @@ fn (mut sr SymbolAnalyzer) top_level_decl(current_node ast.Node) ![]&Symbol {
 
 				// Check if main function is present
 				if main_fn_sym := sr.context.store.symbols[os.dir(sr.context.file_path)].get('main') {
-					return IError(AnalyzerError{
-						msg: 'function `main` is already defined'
-						range: main_fn_sym.range
-					})
+					return report_error('function `main` is already defined', main_fn_sym.range)
 				}
 			}
 
@@ -508,10 +518,10 @@ fn (mut sr SymbolAnalyzer) top_level_decl(current_node ast.Node) ![]&Symbol {
 
 fn (mut sr SymbolAnalyzer) short_var_decl(var_decl ast.Node) ![]&Symbol {
 	left_expr_lists := var_decl.child_by_field_name('left') or {
-		return error('missing left part of declaration')
+		return report_error('left hand side not found', var_decl.range())
 	}
 	right_expr_lists := var_decl.child_by_field_name('right') or {
-		return error('missing right part of declaration')
+		return report_error('right hand side not found', var_decl.range())
 	}
 	left_len := left_expr_lists.named_child_count()
 	right_len := right_expr_lists.named_child_count()
@@ -520,22 +530,28 @@ fn (mut sr SymbolAnalyzer) short_var_decl(var_decl ast.Node) ![]&Symbol {
 	mut vars := []&Symbol{cap: int(left_len)}
 
 	for i in 0 .. right_len {
-		right := right_expr_lists.named_child(i) or { break }
-		mut right_syms := sr.expression(right) or { break }
+		right := right_expr_lists.named_child(i) or {
+			return report_error('rhs[${i}] not found', right_expr_lists.range())
+		}
+		mut right_syms := sr.expression(right)!
 		for mr_sym in right_syms {
-			vars << sr.register_variable(mr_sym, left_expr_lists, u32(cur_left)) or { break }
+			vars << sr.register_variable(mr_sym, left_expr_lists, u32(cur_left))!
 			cur_left++
 		}
 	}
 	return vars
 }
 
-fn (mut sr SymbolAnalyzer) register_variable(sym &Symbol, left_expr_lists ast.Node, left_idx u32) ?&Symbol {
+fn (mut sr SymbolAnalyzer) register_variable(sym &Symbol, left_expr_lists ast.Node, left_idx u32) !&Symbol {
 	mut var_access := SymbolAccess.private
-	mut left := left_expr_lists.named_child(left_idx)?
+	mut left := left_expr_lists.named_child(left_idx) or {
+		return report_error('lhs[${left_idx}] not found', left_expr_lists.range())
+	}
 	if left.type_name == .mutable_expression {
 		var_access = .private_mutable
-		left = left.named_child(0)?
+		left = left.named_child(0) or {
+			return report_error('identifier not found in lhs[${left_idx}]', left_expr_lists.range())
+		}
 	}
 
 	return &Symbol{
@@ -552,10 +568,10 @@ fn (mut sr SymbolAnalyzer) register_variable(sym &Symbol, left_expr_lists ast.No
 
 fn (mut sr SymbolAnalyzer) fn_literal(fn_node ast.Node) !&Symbol {
 	body_node := fn_node.child_by_field_name('body') or {
-		return error('no body found in literal node')
+		return report_error('functoin body not found', fn_node.range())
 	}
 	params_list_node := fn_node.child_by_field_name('parameters') or {
-		return error('no parameter list found in literal node')
+		return report_error('parameter list not found', fn_node.range())
 	}
 
 	mut scope := sr.get_scope(body_node) or { &ScopeTree(0) }
@@ -593,10 +609,12 @@ fn (mut sr SymbolAnalyzer) fn_literal(fn_node ast.Node) !&Symbol {
 
 fn (mut sr SymbolAnalyzer) match_expression(match_node ast.Node) ![]&Symbol {
 	mut cond_node := match_node.child_by_field_name('condition') or {
-		return error('no condition node found in expression')
+		return report_error('condition node not found', match_node.range())
 	}
 	if cond_node.type_name == .mutable_expression {
-		cond_node = cond_node.named_child(0) or { return error('empty mutable expression') }
+		cond_node = cond_node.named_child(0) or {
+			return report_error('empty mutable expression node', cond_node.range())
+		}
 	}
 
 	cond_value_type := sr.context.infer_value_type_from_node(cond_node)
@@ -648,7 +666,7 @@ fn (mut sr SymbolAnalyzer) match_expression(match_node ast.Node) ![]&Symbol {
 
 fn (mut sr SymbolAnalyzer) if_expression(if_stmt_node ast.Node) ![]&Symbol {
 	body_node := if_stmt_node.child_by_field_name('consequence') or {
-		return error('no body found in expression')
+		return report_error('expression body not found', if_stmt_node.range())
 	}
 	mut if_scope := sr.get_scope(body_node) or { &ScopeTree(0) }
 	mut has_initializer := false
@@ -689,17 +707,23 @@ fn (mut sr SymbolAnalyzer) if_expression(if_stmt_node ast.Node) ![]&Symbol {
 fn (mut sr SymbolAnalyzer) for_statement(for_stmt_node ast.Node) ! {
 	named_child_count := for_stmt_node.named_child_count()
 	body_node := for_stmt_node.child_by_field_name('body') or {
-		return error('no body found in statement node')
+		return report_error('loop body not found', for_stmt_node.range())
 	}
 	mut scope := sr.get_scope(body_node) or { &ScopeTree(0) }
 
 	if named_child_count == 2 {
-		cond_node := for_stmt_node.named_child(0) or { return error('') }
+		cond_node := for_stmt_node.named_child(0) or {
+			return report_error('empty loop condition node', for_stmt_node.range())
+		}
 		cond_node_type := cond_node.type_name
 
 		if cond_node_type == .for_in_operator {
-			left_node := cond_node.child_by_field_name('left') or { return error('') }
-			right_node := cond_node.child_by_field_name('right') or { return error('') }
+			left_node := cond_node.child_by_field_name('left') or {
+				return report_error('identifier is missing', cond_node.range())
+			}
+			right_node := cond_node.child_by_field_name('right') or {
+				return report_error('iterator is missing', cond_node.range())
+			}
 			right_sym := sr.context.infer_symbol_from_node(right_node) or { void_sym }
 
 			if !right_sym.is_void() {
@@ -727,7 +751,9 @@ fn (mut sr SymbolAnalyzer) for_statement(for_stmt_node ast.Node) ! {
 							}
 						}
 
-						idx_node := left_node.named_child(last_idx - 1) or { return error('') }
+						idx_node := left_node.named_child(last_idx - 1) or {
+							return report_error('index/key identifier not found', left_node.range())
+						}
 						mut idx_sym := Symbol{
 							name: idx_node.text(sr.context.text)
 							kind: .variable
@@ -741,7 +767,9 @@ fn (mut sr SymbolAnalyzer) for_statement(for_stmt_node ast.Node) ! {
 						scope.register(idx_sym) or {}
 					}
 
-					mut value_node := left_node.named_child(last_idx) or { return error('') }
+					mut value_node := left_node.named_child(last_idx) or {
+						return report_error('value identifier not found', left_node.range())
+					}
 					mut symbol_access := SymbolAccess.private
 					mut return_sym := if right_sym.name == 'string' {
 						sr.context.find_symbol('', 'rune') or { void_sym }
@@ -750,7 +778,9 @@ fn (mut sr SymbolAnalyzer) for_statement(for_stmt_node ast.Node) ! {
 					}
 
 					if value_node.type_name == .mutable_identifier {
-						value_node = value_node.named_child(0) or { return error('') }
+						value_node = value_node.named_child(0) or {
+							return report_error('mutable identifier not found', value_node.range())
+						}
 						if right_sym.is_mutable() {
 							if return_sym.kind == .ref {
 								return_sym = return_sym.parent_sym
@@ -777,10 +807,14 @@ fn (mut sr SymbolAnalyzer) for_statement(for_stmt_node ast.Node) ! {
 					if iter_next_method.return_sym.kind == .optional
 						&& !iter_next_method.return_sym.parent_sym.is_void() {
 						// TODO: merge code with existing branch
-						mut value_node := left_node.named_child(0) or { return error('') }
+						mut value_node := left_node.named_child(0) or {
+							return report_error('value identifier not found', left_node.range())
+						}
 						// NOTE: can returned iterator values be mutable?
 						if value_node.type_name == .mutable_identifier {
-							value_node = value_node.named_child(0) or { return error('') }
+							value_node = value_node.named_child(0) or {
+								return report_error('mutable identifier not found', value_node.range())
+							}
 						}
 
 						mut value_sym := Symbol{
@@ -798,7 +832,9 @@ fn (mut sr SymbolAnalyzer) for_statement(for_stmt_node ast.Node) ! {
 				}
 			}
 		} else if cond_node_type == .cstyle_for_clause {
-			initializer_node := cond_node.child_by_field_name('initializer') or { return error('') }
+			initializer_node := cond_node.child_by_field_name('initializer') or {
+				return report_error('initializer not found', cond_node.range())
+			}
 			if vars := sr.short_var_decl(initializer_node) {
 				for var in vars {
 					scope.register(&Symbol{
@@ -823,7 +859,9 @@ fn (mut sr SymbolAnalyzer) expression(node ast.Node) ![]&Symbol {
 			return sr.match_expression(node)
 		}
 		.unsafe_expression {
-			block_node := node.named_child(0) or { return error('empty unsafe expressioin node') }
+			block_node := node.named_child(0) or {
+				return report_error('statement body not found', node.range())
+			}
 			mut local_scope := sr.get_scope(block_node) or { &ScopeTree(0) }
 			block_return_sym := sr.extract_block(block_node, mut local_scope)!
 			if node.type_name == .unsafe_expression {
@@ -838,7 +876,7 @@ fn (mut sr SymbolAnalyzer) expression(node ast.Node) ![]&Symbol {
 			if opt_propagator := node.last_node_by_type(v.NodeType.option_propagator) {
 				if or_block_node := opt_propagator.last_node_by_type(v.NodeType.or_block) {
 					block_node := or_block_node.last_node_by_type(v.NodeType.block) or {
-						return error('no block node found in or block')
+						return report_error('or block body not found', or_block_node.range())
 					}
 					mut or_scope := sr.get_scope(block_node)!
 					or_scope.register(&Symbol{
@@ -877,7 +915,7 @@ fn (mut sr SymbolAnalyzer) statement(node ast.Node, mut scope ScopeTree) ![]&Sym
 	match node.type_name {
 		.defer_statement {
 			block_node := node.named_child(0) or {
-				return error('node block node found in statement')
+				return report_error('statement body not found', node.range())
 			}
 			mut local_scope := sr.get_scope(block_node) or { &ScopeTree(0) }
 			sr.extract_block(block_node, mut local_scope)!
@@ -904,8 +942,10 @@ fn (mut sr SymbolAnalyzer) statement(node ast.Node, mut scope ScopeTree) ![]&Sym
 }
 
 fn (mut sr SymbolAnalyzer) extract_block(node ast.Node, mut scope ScopeTree) ![]&Symbol {
-	if node.type_name != .block || sr.is_import {
-		return error('node should be a `block` and cannot be used in `is_import`.')
+	if node.type_name != .block {
+		return report_error('expected a `block` node', node.range())
+	} else if sr.is_import {
+		return report_error('cannot be used in `is_import` mode', node.range())
 	}
 
 	body_sym_len := node.named_child_count()
@@ -976,8 +1016,7 @@ pub fn (mut sr SymbolAnalyzer) analyze(node ast.Node) ![]&Symbol {
 			return sr.expression(node)
 		}
 		else {
-			// return error('unsupported node `$node.type_name`')
-			return error('')
+			return report_error('unsupported node type: `${node.type_name}`', node.range())
 		}
 	}
 }
@@ -994,7 +1033,7 @@ pub fn (mut sr SymbolAnalyzer) analyze_from_cursor(mut cursor TreeCursor) []&Sym
 	mut symbols := []&Symbol{cap: 255}
 	for got_node in cursor {
 		mut syms := sr.analyze(got_node) or {
-			// messages.report(err)
+			sr.context.store.report_error(err)
 			continue
 		}
 		for i, mut sym in syms {
