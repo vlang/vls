@@ -178,7 +178,7 @@ fn (r &Rope) internal_report(idx int, len int, mut res []rune) {
 	}
 }
 
-fn (r &Rope) internal_report_with_byte_index(cur_offset int, start int, end int, mut res []rune) (int, int) {
+fn (r &Rope) b_internal_report(cur_offset int, start int, end int, mut res []rune) (int, int) {
 	if isnil(r) || end <= start {
 		return 0, cur_offset
 	}
@@ -195,8 +195,8 @@ fn (r &Rope) internal_report_with_byte_index(cur_offset int, start int, end int,
 		}
 		read_cnt = offset - cur_offset
 	} else {
-		left_cnt, l_offset := r.left.internal_report_with_byte_index(offset, start, end, mut res)
-		right_cnt, r_offset := r.right.internal_report_with_byte_index(l_offset, start + left_cnt, end, mut res)
+		left_cnt, l_offset := r.left.b_internal_report(offset, start, end, mut res)
+		right_cnt, r_offset := r.right.b_internal_report(l_offset, start + left_cnt, end, mut res)
 		read_cnt += left_cnt + right_cnt
 		offset = r_offset
 	}
@@ -204,19 +204,19 @@ fn (r &Rope) internal_report_with_byte_index(cur_offset int, start int, end int,
 	return read_cnt, offset
 }
 
-fn (r &Rope) report_with_byte_index(start int, end int) []rune {
+fn (r &Rope) b_report(start int, end int) []rune {
 	mut res := []rune{}
 	if end <= start {
 		return res
 	}
 
-	r.internal_report_with_byte_index(0, start, end, mut res)
+	r.b_internal_report(0, start, end, mut res)
 
 	return res
 }
 
 pub fn (r &Rope) substr(start int, end int) string {
-	res := r.report_with_byte_index(start, end)
+	res := r.b_report(start, end)
 	return res.string()
 }
 
