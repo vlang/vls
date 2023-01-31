@@ -10,7 +10,7 @@ pub struct AnalyzerError {
 pub fn (err AnalyzerError) msg() string {
 	start := '${err.range.start_point.row}:${err.range.start_point.column}'
 	end := '${err.range.end_point.row}:${err.range.end_point.column}'
-	return '[$start -> $end] $err.msg'
+	return '[${start} -> ${end}] ${err.msg}'
 }
 
 pub fn (err AnalyzerError) str() string {

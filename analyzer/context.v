@@ -36,7 +36,7 @@ pub fn new_context(params AnalyzerContextParams) AnalyzerContext {
 
 pub fn (mut ctx AnalyzerContext) trace_report(report Report) {
 	$if trace ? {
-		r := Report {
+		r := Report{
 			...report
 			file_path: ctx.file_path
 		}
