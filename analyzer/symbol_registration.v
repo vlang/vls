@@ -182,7 +182,7 @@ fn (mut sr SymbolAnalyzer) struct_decl(struct_decl_node ast.Node) !&Symbol {
 	for i in 0 .. fields_len {
 		field_node := decl_list_node.named_child(i) or {
 			sr.trace_report(
-				message: 'failed to get field ${i}',
+				message: 'failed to get field ${i}'
 				range: decl_list_node.range()
 			)
 			continue
@@ -268,7 +268,7 @@ fn (mut sr SymbolAnalyzer) interface_decl(interface_decl_node ast.Node) !&Symbol
 	for i in 0 .. fields_len {
 		field_node := fields_list_node.named_child(i) or {
 			sr.trace_report(
-				message: 'failed to get field ${i}',
+				message: 'failed to get field ${i}'
 				range: fields_list_node.range()
 			)
 			continue
@@ -356,7 +356,7 @@ fn (mut sr SymbolAnalyzer) enum_decl(enum_decl_node ast.Node) !&Symbol {
 	for i in 0 .. members_len {
 		member_node := member_list_node.named_child(i) or {
 			sr.trace_report(
-				message: 'failed to get member ${i}',
+				message: 'failed to get member ${i}'
 				range: member_list_node.range()
 			)
 			continue
@@ -367,7 +367,7 @@ fn (mut sr SymbolAnalyzer) enum_decl(enum_decl_node ast.Node) !&Symbol {
 
 		member_name_node := member_node.child_by_field_name('name') or {
 			sr.trace_report(
-				message: 'name not found in member ${i}',
+				message: 'name not found in member ${i}'
 				range: member_node.range()
 			)
 			continue
@@ -492,7 +492,7 @@ fn (mut sr SymbolAnalyzer) type_decl(type_decl_node ast.Node) !&Symbol {
 		for i in 0 .. types_count {
 			selected_type_node := types_node.named_child(i) or {
 				sr.trace_report(
-					message: 'failed to get type ${i}',
+					message: 'failed to get type ${i}'
 					range: types_node.range()
 				)
 				continue
@@ -500,7 +500,7 @@ fn (mut sr SymbolAnalyzer) type_decl(type_decl_node ast.Node) !&Symbol {
 			mut found_sym := sr.context.find_symbol_by_type_node(selected_type_node) or {
 				name := selected_type_node.text(sr.context.text)
 				sr.trace_report(
-					message: 'invalid type ${name}',
+					message: 'invalid type ${name}'
 					range: selected_type_node.range()
 				)
 				continue
@@ -685,7 +685,7 @@ fn (mut sr SymbolAnalyzer) match_expression(match_node ast.Node) ![]&Symbol {
 	for i in u32(1) .. named_child_count {
 		case_node := match_node.named_child(i) or {
 			sr.trace_report(
-				message: 'failed to get case ${i}',
+				message: 'failed to get case ${i}'
 				range: match_node.range()
 			)
 			continue
@@ -697,7 +697,7 @@ fn (mut sr SymbolAnalyzer) match_expression(match_node ast.Node) ![]&Symbol {
 			for j in u32(0) .. case_list_count {
 				value_node := case_list_node.named_child(j) or {
 					sr.trace_report(
-						message: 'failed to get value ${j} in case',
+						message: 'failed to get value ${j} in case'
 						range: case_list_node.range()
 					)
 					continue
@@ -706,7 +706,7 @@ fn (mut sr SymbolAnalyzer) match_expression(match_node ast.Node) ![]&Symbol {
 					&& value_node.type_name == .type_selector_expression {
 					field_node := value_node.child_by_field_name('field_name') or {
 						sr.trace_report(
-							message: 'failed to get enum field name in value ${j}',
+							message: 'failed to get enum field name in value ${j}'
 							range: value_node.range()
 						)
 						continue
@@ -727,7 +727,7 @@ fn (mut sr SymbolAnalyzer) match_expression(match_node ast.Node) ![]&Symbol {
 
 		conseq_block := case_node.child_by_field_name('consequence') or {
 			sr.trace_report(
-				message: 'case body not found for case ${i}',
+				message: 'case body not found for case ${i}'
 				range: case_node.range()
 			)
 			continue
@@ -1036,7 +1036,7 @@ fn (mut sr SymbolAnalyzer) extract_block(node ast.Node, mut scope ScopeTree) ![]
 	for i := u32(0); i < body_sym_len; i++ {
 		stmt_node := node.named_child(i) or {
 			sr.trace_report(
-				message: 'failed to get child ${i} in block',
+				message: 'failed to get child ${i} in block'
 				range: node.range()
 			)
 			continue
@@ -1050,7 +1050,7 @@ fn (mut sr SymbolAnalyzer) extract_block(node ast.Node, mut scope ScopeTree) ![]
 			for j in u32(0) .. list_len {
 				expr_node := stmt_node.named_child(j) or {
 					sr.trace_report(
-						message: 'failed to get child ${j} in statement',
+						message: 'failed to get child ${j} in statement'
 						range: stmt_node.range()
 					)
 					continue
@@ -1132,7 +1132,8 @@ pub fn (mut sr SymbolAnalyzer) analyze(node ast.Node) ![]&Symbol {
 			return sr.expression(node)
 		}
 		else {
-			/* return report_error('unsupported node type: `${node.type_name}`', node.range()) */
+			// return report_error('unsupported node type: `${node.type_name}`', node.range())
+			return error('')
 		}
 	}
 }

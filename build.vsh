@@ -56,4 +56,4 @@ if ret != 0 {
 }
 
 println('> VLS built successfully!')
-println('Executable saved in: $full_vls_exec_path')
+println('Executable saved in: ${full_vls_exec_path}')
