@@ -36,6 +36,8 @@ pub fn (mut ss Store) report_error(err IError) {
 	}
 }
 
+// report_error_with_path reports AnalyzerError to the messages array, and allow
+// you to specify file path of this error with an argument.
 pub fn (mut ss Store) report_error_with_path(err IError, file_path string) {
 	if err is AnalyzerError {
 		ss.report(
