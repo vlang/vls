@@ -1132,6 +1132,17 @@ pub fn (mut sr SymbolAnalyzer) debug_report_error(err IError) {
 	}
 }
 
+pub fn (mut sr SymbolAnalyzer) debug_report_log(msg string, range C.TSRange) {
+	$if debug {
+		sr.context.store.report(
+			kind: .notice
+			message: msg
+			range: range
+			file_path: sr.context.file_path
+		)
+	}
+}
+
 fn debug_report_error(mut ctx AnalyzerContext, err IError) {
 	$if debug {
 		ctx.store.report_error_with_path(err, ctx.file_path)
