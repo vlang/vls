@@ -1132,7 +1132,7 @@ pub fn (mut sr SymbolAnalyzer) analyze(node ast.Node) ![]&Symbol {
 			return sr.expression(node)
 		}
 		else {
-			return report_error('unsupported node type: `${node.type_name}`', node.range())
+			/* return report_error('unsupported node type: `${node.type_name}`', node.range()) */
 		}
 	}
 }
