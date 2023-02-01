@@ -140,7 +140,7 @@ pub fn (mut imp Importer) inject_paths_of_new_imports(mut new_imports []Import, 
 		// module.submod -> ['module', 'submod']
 		mut mod_names := new_imports[import_idx].absolute_module_name.split('.')
 		mod_names_with_src := mod_names.map(os.join_path(it, 'src'))
-		mut path_segments := []string{len: mod_names.len, cap: mod_names.len}
+		mut path_segments := []string{len: mod_names.len}
 
 		// try to resolve import path
 		import_path_iter.reset()
