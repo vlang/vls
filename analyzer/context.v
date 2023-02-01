@@ -34,6 +34,22 @@ pub fn new_context(params AnalyzerContextParams) AnalyzerContext {
 	}
 }
 
+pub fn (mut ctx AnalyzerContext) trace_report(report Report) {
+	$if trace ? {
+		r := Report{
+			...report
+			file_path: ctx.file_path
+		}
+		ctx.store.trace_report(r)
+	}
+}
+
+pub fn (mut ctx AnalyzerContext) trace_report_error(err IError) {
+	$if trace ? {
+		ctx.store.report_error_with_path(err, ctx.file_path)
+	}
+}
+
 pub fn (mut ctx AnalyzerContext) replace_file_path(new_file_path string) AnalyzerContext {
 	ctx.file_path = new_file_path
 	ctx.file_name = os.base(new_file_path)
