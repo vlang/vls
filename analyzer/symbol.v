@@ -297,7 +297,7 @@ pub fn (sym &Symbol) is_mutable() bool {
 	return sym.access == .private_mutable || sym.access == .public_mutable || sym.access == .global
 }
 
-// is_type check if a symbol defines a type (struct, enum, etc.).
+// is_type_defining_kind checks if a symbol defines a type (struct, enum, etc.).
 pub fn (sym &Symbol) is_type_defining_kind() bool {
 	return sym.kind in analyzer.type_defining_sym_kinds
 }
