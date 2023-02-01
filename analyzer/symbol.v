@@ -306,7 +306,7 @@ pub fn (sym &Symbol) is_reference() bool {
 	return sym.kind == .ref
 }
 
-// get_type_def_keyworkd return keyword corressponding to type definition used by
+// get_type_def_keyword returns a keyword corresponding to type definition used by
 // kind of symbol.
 pub fn (sym &Symbol) get_type_def_keyword() ?string {
 	return match sym.kind {
