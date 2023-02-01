@@ -33,7 +33,7 @@ if vls_git_hash.exit_code != 0 {
 }
 os.setenv('VLS_BUILD_COMMIT', vls_git_hash.output.trim_space(), true)
 
-mut buffer := ['v', 'cmd/vls']
+mut buffer := ['v']
 buffer << '-g'
 buffer << ['-o', full_vls_exec_path]
 buffer << ['-gc', 'boehm']
@@ -46,6 +46,8 @@ index_extra := os.args.index('--')
 if index_extra > 0 {
 	buffer << os.args[index_extra + 1..]
 }
+
+buffer << 'cmd/vls'
 
 cmd := buffer.join(' ')
 println(cmd)
