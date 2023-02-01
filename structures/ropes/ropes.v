@@ -178,17 +178,46 @@ fn (r &Rope) internal_report(idx int, len int, mut res []rune) {
 	}
 }
 
+fn (r &Rope) b_internal_report(cur_offset int, start int, end int, mut res []rune) (int, int) {
+	if isnil(r) || end <= start {
+		return 0, cur_offset
+	}
+
+	mut read_cnt, mut offset := 0, cur_offset
+	if r.is_leaf() {
+		for v in r.value {
+			if offset >= end {
+				break
+			} else if offset >= start {
+				res << v
+			}
+			offset += v.length_in_bytes()
+		}
+		read_cnt = offset - cur_offset
+	} else {
+		left_cnt, l_offset := r.left.b_internal_report(offset, start, end, mut res)
+		right_cnt, r_offset := r.right.b_internal_report(l_offset, start + left_cnt, end, mut res)
+		read_cnt += left_cnt + right_cnt
+		offset = r_offset
+	}
+
+	return read_cnt, offset
+}
+
+fn (r &Rope) b_report(start int, end int) []rune {
+	mut res := []rune{}
+	if end <= start {
+		return res
+	}
+
+	r.b_internal_report(0, start, end, mut res)
+
+	return res
+}
+
 pub fn (r &Rope) substr(start int, end int) string {
-	len := end - start
-	if start < 1 {
-		r.report(1, len)
-	}
-	if start + len - 1 > r.length {
-		r.report(start, r.length - start + 1)
-	}
-	_, r1 := r.split(start)
-	r2, _ := r1.split(len)
-	return r2.string()
+	res := r.b_report(start, end)
+	return res.string()
 }
 
 pub fn (r &Rope) rebalance_if_needed() &Rope {
