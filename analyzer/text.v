@@ -11,7 +11,7 @@ pub fn (r Runes) len() int {
 }
 
 pub fn (r Runes) substr(start_index int, end_index int) string {
-	mut st, mut ed := -1, 0
+	mut st, mut ed := -1, -1
 	mut offset := 0
 	for i, v in r {
 		if offset >= end_index {
@@ -21,6 +21,10 @@ pub fn (r Runes) substr(start_index int, end_index int) string {
 			st = i
 		}
 		offset += v.length_in_bytes()
+	}
+
+	if ed < 0 {
+		ed = r.len
 	}
 
 	return r[st..ed].string()
