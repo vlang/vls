@@ -6,7 +6,6 @@ import analyzer
 import ast
 import tree_sitter
 
-
 pub fn (mut ls Vls) hover(params lsp.HoverParams, mut wr ResponseWriter) ?lsp.Hover {
 	uri := params.text_document.uri.normalize()
 	pos := params.position
@@ -75,11 +74,9 @@ fn get_hovered_symbol_from_node(mut store analyzer.Store, node ast.Node, file_pa
 	}
 
 	// TODO: make sure infer_symbol_from_node doesn't return nil reference.
-	mut sym := store.infer_symbol_from_node(file_path, node, source) or  {
+	mut sym := store.infer_symbol_from_node(file_path, node, source) or {
 		closest_parent := closest_symbol_node_parent(node)
-		store.infer_symbol_from_node(file_path, closest_parent, source) or {
-			analyzer.void_sym
-		}
+		store.infer_symbol_from_node(file_path, closest_parent, source) or { analyzer.void_sym }
 	}
 
 	if sym.is_void() {
@@ -125,8 +122,11 @@ fn get_module_detail(mut store analyzer.Store, file_path string, node_range C.TS
 	buffer << '```v'
 	buffer << import_text
 	buffer << '```'
-	buffer << '\n---\n'
-	buffer << 'Found at ${found_imp.path}'
+	$if !test {
+		// local module path is difficult to test.
+		buffer << '\n---\n'
+		buffer << 'Found at ${found_imp.path}'
+	}
 
 	result := lsp.hover_markdown_string(buffer.join('\n'))
 	hover_range := tsrange_to_lsp_range(found_imp.ranges[file_path])
@@ -153,13 +153,16 @@ fn get_type_detail(sym &analyzer.Symbol, mut fmt analyzer.SymbolFormatter) ?stri
 	buffer << fmt.format_type_definition(target)
 	buffer << '```'
 
-	if method_str := fmt.format_methods(target) {
-		buffer << '\n---\n'
-		buffer << '## Methods\n'
-		buffer << '```v'
-		buffer << method_str
-		buffer << '```'
+	$if trace ? {
+		if method_str := fmt.format_methods(target) {
+			buffer << '\n---\n'
+			buffer << '## Methods\n'
+			buffer << '```v'
+			buffer << method_str
+			buffer << '```'
+		}
 	}
+
 	return buffer.join('\n')
 }
 
@@ -175,4 +178,3 @@ fn get_signature_with_docstring(sym &analyzer.Symbol, mut fmt analyzer.SymbolFor
 	}
 	return buffer.join('\n')
 }
-

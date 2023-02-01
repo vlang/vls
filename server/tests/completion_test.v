@@ -494,6 +494,13 @@ const completion_results = {
 	]
 	'self_reference_var_in_struct_field.vv': [
 		lsp.CompletionItem{
+			label: 'cmd:'
+			kind: .field
+			insert_text: 'cmd: \$0'
+			insert_text_format: .snippet
+			detail: 'Command.cmd &Command'
+		},
+		lsp.CompletionItem{
 			label: 'test'
 			kind: .variable
 			detail: 'test &Command'

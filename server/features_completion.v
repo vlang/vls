@@ -320,9 +320,9 @@ fn (mut builder CompletionBuilder) build_suggestions_from_sym(sym &analyzer.Symb
 			}
 		} else if child_sym.kind == .field && sym.kind == .struct_ {
 			builder.add(lsp.CompletionItem{
-				label: '$child_sym.name:'
+				label: '${child_sym.name}:'
 				kind: .field
-				insert_text: '$child_sym.name: \$0'
+				insert_text: '${child_sym.name}: \$0'
 				insert_text_format: .snippet
 				detail: builder.symbol_formatter.format(child_sym)
 			})

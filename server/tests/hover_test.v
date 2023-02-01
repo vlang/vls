@@ -94,7 +94,10 @@ const hover_results = {
 		}
 	}
 	'function_param.vv':        lsp.Hover{
-		contents: lsp.MarkedString{'v', 'mut arr []string'}
+		contents: lsp.MarkupContent{
+			kind: 'markdown'
+			value: '```v\n[]string\n```'
+		}
 		range: lsp.Range{
 			start: lsp.Position{2, 17}
 			end: lsp.Position{2, 20}
@@ -111,7 +114,10 @@ const hover_results = {
 		}
 	}
 	'import.vv':                lsp.Hover{
-		contents: lsp.MarkedString{'v', 'import os'}
+		contents: lsp.MarkupContent{
+			kind: 'markdown'
+			value: '```v\nimport os\n```'
+		}
 		range: lsp.Range{
 			start: lsp.Position{0, 7}
 			end: lsp.Position{0, 9}
@@ -125,14 +131,20 @@ const hover_results = {
 		}
 	}
 	'interface_spec_params.vv': lsp.Hover{
-		contents: lsp.MarkedString{'v', 'num int'}
+		contents: lsp.MarkupContent{
+			kind: 'markdown'
+			value: '```v\ntype int\n```'
+		}
 		range: lsp.Range{
 			start: lsp.Position{1, 6}
 			end: lsp.Position{1, 9}
 		}
 	}
 	'fn_literal.vv':            lsp.Hover{
-		contents: lsp.MarkedString{'v', 'cmd int'}
+		contents: lsp.MarkupContent{
+			kind: 'markdown'
+			value: '```v\ntype int\n```'
+		}
 		range: lsp.Range{
 			start: lsp.Position{5, 12}
 			end: lsp.Position{5, 15}
@@ -141,7 +153,7 @@ const hover_results = {
 	'module.vv':                lsp.Hover{
 		contents: lsp.MarkedString{'v', 'module foo'}
 		range: lsp.Range{
-			start: lsp.Position{0, 0}
+			start: lsp.Position{0, 7}
 			end: lsp.Position{0, 10}
 		}
 	}
@@ -203,14 +215,20 @@ const hover_results = {
 		}
 	}
 	'variable.vv':              lsp.Hover{
-		contents: lsp.MarkedString{'v', 'num int'}
+		contents: lsp.MarkupContent{
+			kind: 'markdown'
+			value: '```v\ntype int\n```'
+		}
 		range: lsp.Range{
 			start: lsp.Position{2, 10}
 			end: lsp.Position{2, 13}
 		}
 	}
 	'with_call_expr_below.vv':  lsp.Hover{
-		contents: lsp.MarkedString{'v', 'test int'}
+		contents: lsp.MarkupContent{
+			kind: 'markdown'
+			value: '```v\ntype int\n```'
+		}
 		range: lsp.Range{
 			start: lsp.Position{3, 1}
 			end: lsp.Position{3, 5}
@@ -226,7 +244,7 @@ fn test_hover() {
 		client: new_test_client(ls)
 	}
 	mut writer := t.client.server.writer()
-	test_files := t.initialize()?
+	test_files := t.initialize()!
 	for file in test_files {
 		test_name := file.file_name
 		err_msg := if test_name !in hover_results {
