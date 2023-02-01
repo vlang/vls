@@ -1,3 +1,4 @@
+import os
 import server
 import test_utils
 import jsonrpc.server_test_utils { new_test_client }
@@ -116,7 +117,7 @@ const hover_results = {
 	'import.vv':                lsp.Hover{
 		contents: lsp.MarkupContent{
 			kind: 'markdown'
-			value: '```v\nimport os\n```'
+			value: '```v\nimport os\n```\n\n---\n\nFound at ${os.join_path(@VEXEROOT, 'vlib', 'os')}'
 		}
 		range: lsp.Range{
 			start: lsp.Position{0, 7}

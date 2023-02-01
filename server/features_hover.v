@@ -122,13 +122,8 @@ fn get_module_detail(mut store analyzer.Store, file_path string, node_range C.TS
 	buffer << '```v'
 	buffer << import_text
 	buffer << '```'
-	$if !test {
-		// TODO: make a proper test case for this hover message
-		// Module path is highly realated to the environment. Need a way to get
-		// module path of every import test, even when running tests on github.
-		buffer << '\n---\n'
-		buffer << 'Found at ${found_imp.path}'
-	}
+	buffer << '\n---\n'
+	buffer << 'Found at ${found_imp.path}'
 
 	result := lsp.hover_markdown_string(buffer.join('\n'))
 	hover_range := tsrange_to_lsp_range(found_imp.ranges[file_path])
