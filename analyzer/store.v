@@ -62,6 +62,12 @@ pub fn (mut ss Store) report(report Report) {
 	ss.reporter.report(report)
 }
 
+pub fn (mut ss Store) trace_report(report Report) {
+	$if trace ? {
+		ss.reporter.report(report)
+	}
+}
+
 // get_module_path_opt is a variant of `get_module_path` that returns
 // an optional if not found
 pub fn (ss &Store) get_module_path_opt(file_path string, module_name string) ?string {
@@ -793,7 +799,9 @@ pub fn (mut ss Store) infer_symbol_from_node(file_path string, node ast.Node, sr
 				return error('no name node found')
 			}
 			parent_sym := ss.infer_symbol_from_node(file_path, parent_name_node, src_text)!
-			child_name_node := node.child_by_field_name('name') or { return error('no name node found')}
+			child_name_node := node.child_by_field_name('name') or {
+				return error('no name node found')
+			}
 			return parent_sym.children_syms.get(child_name_node.text(src_text)) or {
 				error('no symbol found')
 			}

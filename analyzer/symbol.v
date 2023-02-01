@@ -260,7 +260,7 @@ pub fn (mut info Symbol) add_child(mut new_child_sym Symbol, add_as_parent ...bo
 	}
 
 	if info.children_syms.exists(new_child_sym.name) {
-		return error('child exists. (name="$new_child_sym.name")')
+		return error('child exists. (name="${new_child_sym.name}")')
 	}
 
 	info.children_syms << new_child_sym

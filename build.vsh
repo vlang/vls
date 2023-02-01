@@ -33,8 +33,21 @@ if vls_git_hash.exit_code != 0 {
 }
 os.setenv('VLS_BUILD_COMMIT', vls_git_hash.output.trim_space(), true)
 
-use_libbacktrace_flag := if cc == 'msvc' { '' } else { '-d use_libbacktrace' }
-cmd := 'v -g -gc boehm $use_libbacktrace_flag -cc $cc cmd/vls -o $full_vls_exec_path'
+mut buffer := ['v', 'cmd/vls']
+buffer << '-g'
+buffer << ['-o', full_vls_exec_path]
+buffer << ['-gc', 'boehm']
+buffer << ['-cc', cc]
+if cc != 'msvc' {
+	buffer << ['-d', 'use_libbacktrace']
+}
+
+index_extra := os.args.index('--')
+if index_extra > 0 {
+	buffer << os.args[index_extra + 1..]
+}
+
+cmd := buffer.join(' ')
 println(cmd)
 ret := system(cmd)
 if ret != 0 {
@@ -43,4 +56,4 @@ if ret != 0 {
 }
 
 println('> VLS built successfully!')
-println('Executable saved in: $full_vls_exec_path')
+println('Executable saved in: ${full_vls_exec_path}')
