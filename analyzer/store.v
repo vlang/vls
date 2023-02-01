@@ -62,10 +62,9 @@ pub fn (mut ss Store) report(report Report) {
 	ss.reporter.report(report)
 }
 
+[if trace ?]
 pub fn (mut ss Store) trace_report(report Report) {
-	$if trace ? {
-		ss.reporter.report(report)
-	}
+	ss.reporter.report(report)
 }
 
 // get_module_path_opt is a variant of `get_module_path` that returns

@@ -87,20 +87,18 @@ fn (sr &SymbolAnalyzer) new_top_level_symbol(identifier_node ast.Node, access Sy
 	return symbol
 }
 
+[if trace ?]
 pub fn (mut sr SymbolAnalyzer) trace_report(report Report) {
-	$if trace ? {
-		r := Report{
-			...report
-			file_path: sr.context.file_path
-		}
-		sr.context.store.report(r)
+	r := Report{
+		...report
+		file_path: sr.context.file_path
 	}
+	sr.context.store.report(r)
 }
 
+[if trace ?]
 pub fn (mut sr SymbolAnalyzer) trace_report_error(err IError) {
-	$if trace ? {
-		sr.context.store.report_error_with_path(err, sr.context.file_path)
-	}
+	sr.context.store.report_error_with_path(err, sr.context.file_path)
 }
 
 fn (mut sr SymbolAnalyzer) get_scope(node ast.Node) !&ScopeTree {
