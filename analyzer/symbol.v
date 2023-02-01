@@ -144,6 +144,7 @@ pub mut:
 }
 
 const kinds_in_multi_return_to_be_excluded = [SymbolKind.function, .variable, .field]
+
 const type_defining_sym_kinds = [SymbolKind.struct_, .enum_, .typedef, .interface_, .sumtype]
 
 [params]
@@ -254,19 +255,29 @@ pub fn (infos []&Symbol) get(name string) ?&Symbol {
 	return info
 }
 
-// add_child registers the symbol as a child of a given parent symbol
-pub fn (mut info Symbol) add_child(mut new_child_sym Symbol, add_as_parent ...bool) ! {
+// add_child registers the symbol as child of given parent symbol returns
+// error when parent symbol already has a child with the same name.
+pub fn (mut sym Symbol) add_child(mut new_child_sym Symbol, add_as_parent ...bool) ! {
 	if add_as_parent.len == 0 || add_as_parent[0] {
-		new_child_sym.parent_sym = unsafe { info }
+		new_child_sym.parent_sym = unsafe { sym }
 	}
 
-	/*
-	if info.children_syms.exists(new_child_sym.name) {
+	// preventing duplicate field/variant in struct, enum, etc.
+	if sym.children_syms.exists(new_child_sym.name) {
 		return error('child exists. (name="${new_child_sym.name}")')
 	}
-	*/
 
-	info.children_syms << new_child_sym
+	sym.children_syms << new_child_sym
+}
+
+// add_child_allow_duplicated register then symbol as child of given symbol even
+// if parent symbol already has a child with the same name.
+pub fn (mut sym Symbol) add_child_allow_duplicated(mut new_child_sym Symbol, add_as_parent ...bool) {
+	if add_as_parent.len == 0 || add_as_parent[0] {
+		new_child_sym.parent_sym = unsafe { sym }
+	}
+
+	sym.children_syms << new_child_sym
 }
 
 // is_void returns true if a symbol is void/invalid
