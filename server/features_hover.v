@@ -123,7 +123,9 @@ fn get_module_detail(mut store analyzer.Store, file_path string, node_range C.TS
 	buffer << import_text
 	buffer << '```'
 	$if !test {
-		// local module path is difficult to test.
+		// TODO: make a proper test case for this hover message
+		// Module path is highly realated to the environment. Need a way to get
+		// module path of every import test, even when running tests on github.
 		buffer << '\n---\n'
 		buffer << 'Found at ${found_imp.path}'
 	}
