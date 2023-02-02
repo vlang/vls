@@ -23,7 +23,7 @@ fn test_initialize_with_capabilities() {
 	mut ls := server.new()
 	mut io_ := new_test_client(ls)
 	result := io_.send<map[string]string, lsp.InitializeResult>('initialize', map[string]string{}) or {
-		if err is io_.Eof {
+		if err is io.Eof {
 			return
 		}
 		assert false
