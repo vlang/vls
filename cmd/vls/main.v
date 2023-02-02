@@ -63,9 +63,9 @@ fn run_host(cmd cli.Command) ! {
 	}
 
 	// Setup the comm method and build the language server.
-	mut io := setup_and_configure_io(cmd, false)!
+	mut io_ := setup_and_configure_io(cmd, false)!
 	mut jrpc_server := &jsonrpc.Server{
-		stream: io
+		stream: io_
 		handler: &jsonrpc.PassiveHandler{}
 	}
 
@@ -131,10 +131,10 @@ fn run_server(cmd cli.Command, is_child bool) ! {
 	custom_vroot_path := cmd.flags.get_string('vroot') or { '' }
 
 	// Setup the comm method and build the language server.
-	mut io := setup_and_configure_io(cmd, is_child)!
+	mut io_ := setup_and_configure_io(cmd, is_child)!
 	mut ls := server.new()
 	mut jrpc_server := &jsonrpc.Server{
-		stream: io
+		stream: io_
 		interceptors: [
 			setup_logger(cmd),
 		]
