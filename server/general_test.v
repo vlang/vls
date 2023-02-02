@@ -21,9 +21,9 @@ fn test_wrong_first_request() {
 
 fn test_initialize_with_capabilities() {
 	mut ls := server.new()
-	mut io := new_test_client(ls)
-	result := io.send<map[string]string, lsp.InitializeResult>('initialize', map[string]string{}) or {
-		if err is io.Eof {
+	mut io_ := new_test_client(ls)
+	result := io_.send<map[string]string, lsp.InitializeResult>('initialize', map[string]string{}) or {
+		if err is io_.Eof {
 			return
 		}
 		assert false
@@ -37,14 +37,14 @@ fn test_initialize_with_capabilities() {
 }
 
 fn test_initialized() {
-	mut io, mut ls := init_tests()!
-	io.notify('initialized', map[string]string{})!
+	mut io_, mut ls := init_tests()!
+	io_.notify('initialized', map[string]string{})!
 	assert ls.status() == .initialized
 }
 
 fn test_set_features() {
 	mut ls := server.new()
-	mut io := new_test_client(ls)
+	mut io_ := new_test_client(ls)
 	assert ls.features() == server.default_features_list
 	ls.set_features(['formatting'], false) or {
 		assert false
@@ -91,8 +91,8 @@ fn test_set_features() {
 
 fn test_setup_logger() {
 	println('test_setup_logger')
-	mut io := new_test_client(server.new(), &LogRecorder{})
-	io.send<lsp.InitializeParams, lsp.InitializeResult>('initialize', lsp.InitializeParams{
+	mut io_ := new_test_client(server.new(), &LogRecorder{})
+	io_.send<lsp.InitializeParams, lsp.InitializeResult>('initialize', lsp.InitializeParams{
 		trace: 'verbose'
 		root_uri: lsp.document_uri_from_path(os.join_path('/non_existent', 'path'))
 	}) or {
@@ -103,7 +103,7 @@ fn test_setup_logger() {
 		return
 	}
 
-	notif := io.stream.notification_at<lsp.ShowMessageParams>(0)!
+	notif := io_.stream.notification_at<lsp.ShowMessageParams>(0)!
 	assert notif.method == 'window/showMessage'
 
 	expected_err_path := os.join_path('/non_existent', 'path', 'vls.log')
@@ -116,11 +116,11 @@ fn test_setup_logger() {
 
 fn init_tests() !(&TestClient, &server.Vls) {
 	mut ls := server.new()
-	mut io := new_test_client(ls)
-	io.send<map[string]string, lsp.InitializeResult>('initialize', map[string]string{}) or {
+	mut io_ := new_test_client(ls)
+	io_.send<map[string]string, lsp.InitializeResult>('initialize', map[string]string{}) or {
 		if err !is io.Eof {
 			return err
 		}
 	}
-	return io, ls
+	return io_, ls
 }
