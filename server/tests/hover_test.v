@@ -1,3 +1,4 @@
+import os
 import server
 import test_utils
 import jsonrpc.server_test_utils { new_test_client }
@@ -20,7 +21,7 @@ const hover_inputs = {
 		position: lsp.Position{2, 18}
 	}
 	'function.vv':              lsp.HoverParams{
-		position: lsp.Position{0, 5}
+		position: lsp.Position{1, 5}
 	}
 	'import.vv':                lsp.HoverParams{
 		position: lsp.Position{0, 8}
@@ -94,21 +95,30 @@ const hover_results = {
 		}
 	}
 	'function_param.vv':        lsp.Hover{
-		contents: lsp.MarkedString{'v', 'mut arr []string'}
+		contents: lsp.MarkupContent{
+			kind: 'markdown'
+			value: '```v\n[]string\n```'
+		}
 		range: lsp.Range{
 			start: lsp.Position{2, 17}
 			end: lsp.Position{2, 20}
 		}
 	}
 	'function.vv':              lsp.Hover{
-		contents: lsp.MarkedString{'v', 'fn foo(param1 string, mut param2 []string) bool'}
+		contents: lsp.MarkupContent{
+			kind: lsp.markup_kind_markdown,
+			value: '```v\nfn foo(param1 string, mut param2 []string) bool\n```\n\n---\n\nthis is docstring'
+		}
 		range: lsp.Range{
-			start: lsp.Position{0, 3}
-			end: lsp.Position{0, 6}
+			start: lsp.Position{1, 3}
+			end: lsp.Position{1, 6}
 		}
 	}
 	'import.vv':                lsp.Hover{
-		contents: lsp.MarkedString{'v', 'import os'}
+		contents: lsp.MarkupContent{
+			kind: 'markdown'
+			value: '```v\nimport os\n```\n\n---\n\nFound at ${os.join_path(@VEXEROOT, 'vlib', 'os')}'
+		}
 		range: lsp.Range{
 			start: lsp.Position{0, 7}
 			end: lsp.Position{0, 9}
@@ -122,14 +132,20 @@ const hover_results = {
 		}
 	}
 	'interface_spec_params.vv': lsp.Hover{
-		contents: lsp.MarkedString{'v', 'num int'}
+		contents: lsp.MarkupContent{
+			kind: 'markdown'
+			value: '```v\ntype int\n```'
+		}
 		range: lsp.Range{
 			start: lsp.Position{1, 6}
 			end: lsp.Position{1, 9}
 		}
 	}
 	'fn_literal.vv':            lsp.Hover{
-		contents: lsp.MarkedString{'v', 'cmd int'}
+		contents: lsp.MarkupContent{
+			kind: 'markdown'
+			value: '```v\ntype int\n```'
+		}
 		range: lsp.Range{
 			start: lsp.Position{5, 12}
 			end: lsp.Position{5, 15}
@@ -138,7 +154,7 @@ const hover_results = {
 	'module.vv':                lsp.Hover{
 		contents: lsp.MarkedString{'v', 'module foo'}
 		range: lsp.Range{
-			start: lsp.Position{0, 0}
+			start: lsp.Position{0, 7}
 			end: lsp.Position{0, 10}
 		}
 	}
@@ -200,14 +216,20 @@ const hover_results = {
 		}
 	}
 	'variable.vv':              lsp.Hover{
-		contents: lsp.MarkedString{'v', 'num int'}
+		contents: lsp.MarkupContent{
+			kind: 'markdown'
+			value: '```v\ntype int\n```'
+		}
 		range: lsp.Range{
 			start: lsp.Position{2, 10}
 			end: lsp.Position{2, 13}
 		}
 	}
 	'with_call_expr_below.vv':  lsp.Hover{
-		contents: lsp.MarkedString{'v', 'test int'}
+		contents: lsp.MarkupContent{
+			kind: 'markdown'
+			value: '```v\ntype int\n```'
+		}
 		range: lsp.Range{
 			start: lsp.Position{3, 1}
 			end: lsp.Position{3, 5}
@@ -223,7 +245,7 @@ fn test_hover() {
 		client: new_test_client(ls)
 	}
 	mut writer := t.client.server.writer()
-	test_files := t.initialize()?
+	test_files := t.initialize()!
 	for file in test_files {
 		test_name := file.file_name
 		err_msg := if test_name !in hover_results {

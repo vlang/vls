@@ -10,6 +10,12 @@ mut:
 	context AnalyzerContext
 }
 
+enum ImportCheckResult {
+	ok
+	not_found
+	no_v_file
+}
+
 pub fn (mut imp Importer) imports() ImportsMap {
 	return imp.context.store.imports
 }
@@ -78,20 +84,18 @@ pub fn (mut imp Importer) scan_imports(tree &ast.Tree) []int {
 	return newly_imported_modules_idx
 }
 
-fn (mut imp Importer) is_import_path_valid(path string, mod_names ...string) (bool, bool) {
+fn (mut imp Importer) is_import_path_valid(path string, mod_names ...string) ImportCheckResult {
 	mod_dir := os.join_path(path, ...mod_names)
 	// if the directory is already present in the
 	// dependency tree, inject it directly
 	if imp.context.store.dependency_tree.has(mod_dir) {
-		return true, true
+		return .ok
 	} else if !os.exists(mod_dir) {
-		return false, false
+		return .not_found
 	}
 
 	mut has_v_files := false
 
-	// files is just for checking so it
-	// is not used by the code below it
 	if dir_files := os.ls(mod_dir) {
 		for file in dir_files {
 			if os.file_ext(file) == v_ext {
@@ -99,22 +103,16 @@ fn (mut imp Importer) is_import_path_valid(path string, mod_names ...string) (bo
 				break
 			}
 		}
-
-		if !has_v_files {
-			// directory exists so is valid
-			// but may have the possibility that the
-			// source is stored in `src` so the
-			// first return is set to false
-			return false, true
-		}
+	} else {
+		return .not_found
 	}
 
 	if !has_v_files {
-		return false, false
+		return .no_v_file
 	}
 
 	imp.context.store.dependency_tree.add(mod_dir)
-	return true, true
+	return .ok
 }
 
 // inject_paths_of_new_imports resolves and injects the path to the Import instance
@@ -141,38 +139,37 @@ pub fn (mut imp Importer) inject_paths_of_new_imports(mut new_imports []Import, 
 
 		// module.submod -> ['module', 'submod']
 		mut mod_names := new_imports[import_idx].absolute_module_name.split('.')
+		mod_names_with_src := mod_names.map(os.join_path(it, 'src'))
+		mut path_segments := []string{len: mod_names.len}
 
+		// try to resolve import path
+		import_path_iter.reset()
 		for path in import_path_iter {
-			mut has_v_files, mut is_valid := imp.is_import_path_valid(path, ...mod_names)
-			if mod_names.len > 1 || (is_valid && !has_v_files) {
-				for mod_name_idx in 0 .. mod_names.len {
-					mut mod_names_with_src := mod_names[..mod_name_idx + 1].map(os.join_path(it,
-						'src'))
-					if mod_names.len > 1 || mod_name_idx == mod_names.len - 1 {
-						mod_names_with_src << mod_names[mod_name_idx + 1..]
-					}
+			// search again with `src` directory inserted, e.g. for module
+			// `foo.bar.buz`, target paths should be:
+			// - foo/bar/buz (which has been checked earlier)
+			// - foo/src/bar/buz
+			// - foo/src/bar/src/buz
+			// - foo/src/bar/src/buz/src
+			mut check_result := ImportCheckResult.not_found
+			for idx in 0 .. mod_names.len + 1 {
+				for i in 0 .. idx {
+					path_segments[i] = mod_names_with_src[i]
+				}
+				for i in idx .. mod_names.len {
+					path_segments[i] = mod_names[i]
+				}
 
-					is_subdir_has_v_files, is_subdir_valid := imp.is_import_path_valid(path,
-						...mod_names_with_src)
-					if is_subdir_valid && !is_subdir_has_v_files {
-						continue
-					} else if is_subdir_has_v_files {
-						has_v_files, is_valid = is_subdir_has_v_files, is_subdir_valid
-						mod_names = mod_names_with_src.clone()
-					}
-					// break if found or does not exist
+				if imp.is_import_path_valid(path, ...path_segments) == .ok {
+					check_result = .ok
 					break
 				}
 			}
 
-			// make it a separate if branch so that
-			// it can be "reusable" with the if branch above
-			if !is_valid {
-				continue
+			if check_result == .ok {
+				new_imports[import_idx].set_path(os.join_path(path, ...path_segments))
+				break
 			}
-
-			new_imports[import_idx].set_path(os.join_path(path, ...mod_names))
-			break
 		}
 
 		// report the unresolved import
@@ -192,8 +189,6 @@ pub fn (mut imp Importer) inject_paths_of_new_imports(mut new_imports []Import, 
 			// append the path if not yet added to the project dependency
 			project.dependencies << new_imports[import_idx].path
 		}
-
-		import_path_iter.reset()
 	}
 }
 

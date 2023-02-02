@@ -135,15 +135,17 @@ pub mut:
 	is_top_level            bool           [required]
 	is_const                bool
 	generic_placeholder_len int
-	sumtype_children_len    int
 	interface_children_len  int
 	children_syms           []&Symbol // methods, sum types, map types, optionals, struct fields, etc.
 	file_path               string         [required] // required in order to register the symbol at its appropriate directory.
 	file_version            int            [required] // file version when the symbol was registered
 	scope                   &ScopeTree = &ScopeTree(0)
+	docstrings              []string
 }
 
 const kinds_in_multi_return_to_be_excluded = [SymbolKind.function, .variable, .field]
+
+const type_defining_sym_kinds = [SymbolKind.struct_, .enum_, .typedef, .interface_, .sumtype]
 
 [params]
 pub struct SymbolGenStrConfig {
@@ -253,17 +255,29 @@ pub fn (infos []&Symbol) get(name string) ?&Symbol {
 	return info
 }
 
-// add_child registers the symbol as a child of a given parent symbol
-pub fn (mut info Symbol) add_child(mut new_child_sym Symbol, add_as_parent ...bool) ! {
+// add_child registers the symbol as child of given parent symbol returns
+// error when parent symbol already has a child with the same name.
+pub fn (mut sym Symbol) add_child(mut new_child_sym Symbol, add_as_parent ...bool) ! {
 	if add_as_parent.len == 0 || add_as_parent[0] {
-		new_child_sym.parent_sym = unsafe { info }
+		new_child_sym.parent_sym = unsafe { sym }
 	}
 
-	if info.children_syms.exists(new_child_sym.name) {
+	// preventing duplicate field/variant in struct, enum, etc.
+	if sym.children_syms.exists(new_child_sym.name) {
 		return error('child exists. (name="${new_child_sym.name}")')
 	}
 
-	info.children_syms << new_child_sym
+	sym.children_syms << new_child_sym
+}
+
+// add_child_allow_duplicated register then symbol as child of given symbol even
+// if parent symbol already has a child with the same name.
+pub fn (mut sym Symbol) add_child_allow_duplicated(mut new_child_sym Symbol, add_as_parent ...bool) {
+	if add_as_parent.len == 0 || add_as_parent[0] {
+		new_child_sym.parent_sym = unsafe { sym }
+	}
+
+	sym.children_syms << new_child_sym
 }
 
 // is_void returns true if a symbol is void/invalid
@@ -281,6 +295,26 @@ pub fn (sym &Symbol) is_returnable() bool {
 
 pub fn (sym &Symbol) is_mutable() bool {
 	return sym.access == .private_mutable || sym.access == .public_mutable || sym.access == .global
+}
+
+// is_type_defining_kind checks if a symbol defines a type (struct, enum, etc.).
+pub fn (sym &Symbol) is_type_defining_kind() bool {
+	return sym.kind in analyzer.type_defining_sym_kinds
+}
+
+pub fn (sym &Symbol) is_reference() bool {
+	return sym.kind == .ref
+}
+
+// get_type_def_keyword returns a keyword corresponding to type definition used by
+// kind of symbol.
+pub fn (sym &Symbol) get_type_def_keyword() ?string {
+	return match sym.kind {
+		.interface_ { 'interface' }
+		.struct_ { 'struct' }
+		.sumtype, .typedef { 'type' }
+		else { none }
+	}
 }
 
 [unsafe]
@@ -322,6 +356,101 @@ pub fn (sym &Symbol) final_sym() &Symbol {
 		else {
 			return sym
 		}
+	}
+}
+
+fn sort_syms_by_name(a &&Symbol, b &&Symbol) int {
+	if a.name < b.name {
+		return -1
+	} else if a.name > b.name {
+		return 1
+	}
+
+	return 0
+}
+
+fn sort_syms_by_access_and_name(a &&Symbol, b &&Symbol) int {
+	if int(a.access) < int(b.access) {
+		return -1
+	} else if int(a.access) > int(b.access) {
+		return 1
+	}
+
+	return sort_syms_by_name(a, b)
+}
+
+pub fn (sym &Symbol) get_fields() ?[]&Symbol {
+	if !sym.is_type_defining_kind() {
+		return none
+	}
+
+	mut syms := []&Symbol{}
+
+	for child in sym.children_syms {
+		if child.kind != .function {
+			syms << child
+		}
+	}
+
+	if syms.len == 0 {
+		return none
+	}
+
+	syms.sort_with_compare(sort_syms_by_access_and_name)
+	return syms
+}
+
+pub fn (sym &Symbol) get_methods() ?[]&Symbol {
+	if !sym.is_type_defining_kind() {
+		return none
+	}
+
+	mut syms := []&Symbol{}
+
+	for child in sym.children_syms {
+		if child.kind == .function {
+			syms << child
+		}
+	}
+
+	if syms.len == 0 {
+		return none
+	}
+
+	syms.sort_with_compare(sort_syms_by_name)
+	return syms
+}
+
+// deref returns internal symbol of a reference symbol, return none on a non-reference
+// symbol
+pub fn (sym &Symbol) deref() ?&Symbol {
+	if !sym.is_reference() {
+		return none
+	}
+
+	return if isnil(sym.parent_sym) {
+		none
+	} else {
+		sym.parent_sym
+	}
+}
+
+// deref_all deref a symbol until it's no longer a reference, returns extracted
+// internal symbol. Returns none if a symbol is not a reference.
+pub fn (sym &Symbol) deref_all() ?&Symbol {
+	if !sym.is_reference() {
+		return none
+	}
+
+	mut target := sym.parent_sym
+	for !isnil(target) && target.kind == .ref {
+		target = target.parent_sym
+	}
+
+	return if isnil(target) {
+		none
+	} else {
+		sym.parent_sym
 	}
 }
 

@@ -15,3 +15,5 @@ bin/*
 *.so
 
 *.dll
+
+vls.log

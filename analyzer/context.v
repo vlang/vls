@@ -34,20 +34,18 @@ pub fn new_context(params AnalyzerContextParams) AnalyzerContext {
 	}
 }
 
+[if trace ?]
 pub fn (mut ctx AnalyzerContext) trace_report(report Report) {
-	$if trace ? {
-		r := Report{
-			...report
-			file_path: ctx.file_path
-		}
-		ctx.store.trace_report(r)
+	r := Report{
+		...report
+		file_path: ctx.file_path
 	}
+	ctx.store.trace_report(r)
 }
 
+[if trace ?]
 pub fn (mut ctx AnalyzerContext) trace_report_error(err IError) {
-	$if trace ? {
-		ctx.store.report_error_with_path(err, ctx.file_path)
-	}
+	ctx.store.report_error_with_path(err, ctx.file_path)
 }
 
 pub fn (mut ctx AnalyzerContext) replace_file_path(new_file_path string) AnalyzerContext {
@@ -82,4 +80,50 @@ pub fn (ctx AnalyzerContext) symbol_formatter(from_semantic bool) SymbolFormatte
 			[]string{}
 		}
 	}
+}
+
+// get_docstring find all single-line comments immediately preceding given node.
+pub fn (ctx AnalyzerContext) get_docstring(node ast.Node) []string {
+	mut docstrings := []string{}
+	mut cur := node
+	mut last_line := node.start_point().row
+	mut min_space_cnt := -1
+	for {
+		cur = cur.prev_sibling() or { break }
+		if cur.type_name != .comment {
+			break
+		}
+
+		st, ed := cur.start_point(), cur.end_point()
+		if st.row != ed.row {
+			// multi-line comment
+			break
+		} else if last_line - ed.row > 1 {
+			break
+		}
+		last_line = st.row
+
+		s := cur.text(ctx.text).all_after('//')
+		for i := 0; i < s.len; i++ {
+			if s[i] != ` ` {
+				if i < min_space_cnt || min_space_cnt < 0 {
+					min_space_cnt = i
+				}
+				break
+			}
+		}
+		docstrings << s
+	}
+
+	if min_space_cnt > 0 {
+		for i := 0; i < docstrings.len; i++ {
+			if docstrings[i].len > 0 {
+				docstrings[i] = docstrings[i][min_space_cnt..]
+			}
+		}
+	}
+
+	docstrings.reverse_in_place()
+
+	return docstrings
 }

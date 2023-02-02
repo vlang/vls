@@ -1,3 +1,4 @@
+// this is docstring
 fn foo(param1 string, mut param2 []string) bool {
   return false
 }

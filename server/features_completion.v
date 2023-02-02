@@ -270,6 +270,9 @@ struct BuildSuggestionsFromSymParams {
 fn (mut builder CompletionBuilder) build_suggestions_from_sym(sym &analyzer.Symbol, params BuildSuggestionsFromSymParams) {
 	if isnil(sym) || sym.is_void() {
 		return
+	} else if sym.is_reference() {
+		inner := sym.deref() or { return }
+		builder.build_suggestions_from_sym(inner, params)
 	}
 
 	if sym.kind == .field && sym.parent_sym.kind == .enum_ && sym.parent_sym == sym.return_sym {
@@ -317,9 +320,9 @@ fn (mut builder CompletionBuilder) build_suggestions_from_sym(sym &analyzer.Symb
 			}
 		} else if child_sym.kind == .field && sym.kind == .struct_ {
 			builder.add(lsp.CompletionItem{
-				label: '$child_sym.name:'
+				label: '${child_sym.name}:'
 				kind: .field
-				insert_text: '$child_sym.name: \$0'
+				insert_text: '${child_sym.name}: \$0'
 				insert_text_format: .snippet
 				detail: builder.symbol_formatter.format(child_sym)
 			})

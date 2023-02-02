@@ -1,5 +1,6 @@
 module analyzer
 
+import os
 import strings
 
 pub struct SymbolFormatter {
@@ -10,9 +11,11 @@ mut:
 
 [params]
 pub struct SymbolFormatterConfig {
-	with_kind     bool = true
-	with_access   bool = true
-	with_contents bool = true
+	with_kind                bool = true
+	with_access              bool = true
+	with_contents            bool = true
+	docstring_line_len_limit int
+	field_indent             string = '\t'
 }
 
 pub const params_format_cfg = SymbolFormatterConfig{
@@ -155,7 +158,7 @@ pub fn (mut fmt SymbolFormatter) format_with_builder(sym &Symbol, mut builder st
 			builder.write_byte(`)`)
 			if !sym.return_sym.is_void() {
 				builder.write_byte(` `)
-				fmt.format_with_builder(sym.return_sym, mut builder, analyzer.types_format_cfg)
+				fmt.format_with_builder(sym.return_sym, mut builder, analyzer.child_types_format_cfg)
 			}
 		}
 		.multi_return {
@@ -209,12 +212,11 @@ pub fn (mut fmt SymbolFormatter) format_with_builder(sym &Symbol, mut builder st
 				if sym.kind == .typedef {
 					fmt.format_with_builder(sym.parent_sym, mut builder, analyzer.child_types_format_cfg)
 				} else {
-					for i in 0 .. sym.sumtype_children_len {
-						fmt.format_with_builder(sym.children_syms[i], mut builder, analyzer.child_types_format_cfg)
-
-						if i < sym.sumtype_children_len - 1 {
+					for i, child in sym.children_syms {
+						if i != 0 {
 							builder.write_string(' | ')
 						}
+						fmt.format_with_builder(child, mut builder, analyzer.child_types_format_cfg)
 					}
 				}
 			}
@@ -248,4 +250,250 @@ pub fn (mut fmt SymbolFormatter) format_with_builder(sym &Symbol, mut builder st
 			fmt.write_name(sym, mut builder)
 		}
 	}
+}
+
+// check_is_header_line check if a line starts with at least `#` and followed by
+// space.
+fn check_is_header_line(line string) bool {
+	if line.len == 0 {
+		return false
+	}
+
+	if line[0] != `#` {
+		return false
+	}
+
+	mut is_header := false
+	for byt in line {
+		if byt != `#` {
+			is_header = byt == ` `
+			break
+		}
+	}
+
+	return is_header
+}
+
+// check_is_horizontal_rule check if a line contains only
+// `-, =, _, *, ~` (any one of them), and with length of at least 3.
+fn check_is_horizontal_rule(line string) bool {
+	if line.len < 3 {
+		return false
+	}
+
+	first_byt := line[0]
+	if first_byt !in [`-`, `=`, `_`, `*`, `~`] {
+		return false
+	}
+
+	mut is_hr := true
+	for byt in line {
+		if byt != first_byt {
+			is_hr = false
+			break
+		}
+	}
+
+	return is_hr
+}
+
+// write_line_with_wrapping write string to builder, string will be wrapped into
+// multiple lines if needed. This function returns length of the last written line.
+fn write_line_with_wrapping(mut builder strings.Builder, line string, line_limit int, init_offset int) int {
+	if line_limit <= 0 {
+		builder.write_string(line)
+		return line.len
+	}
+
+	mut offset := init_offset
+	mut bound := line_limit - offset
+	if bound > line.len {
+		bound = line.len
+		offset += bound
+	}
+	builder.write_string(line[0..bound])
+
+	for i := bound; i < line.len; i += line_limit {
+		bound = i + line_limit
+		if bound >= line.len {
+			bound = line.len
+			offset = bound - i
+		}
+		builder.write_byte(`\n`)
+		builder.write_string(line[i..bound])
+	}
+
+	return offset
+}
+
+// write_docstrings_with_line_concate get docstring for symbol, using newline
+// concatenate rule described in [v doc](https://github.com/vlang/v/blob/master/doc/docs.md#newlines-in-documentation-comments).
+pub fn (fmt &SymbolFormatter) format_docstrings_with_line_concate(sym &Symbol, cfg SymbolFormatterConfig) string {
+	len := sym.docstrings.len
+	if len == 0 {
+		return ''
+	} else if len == 1 {
+		return sym.docstrings[0]
+	}
+
+	mut builder := strings.new_builder(300)
+	line_limit := cfg.docstring_line_len_limit
+	mut need_newline, mut offset := true, 0
+
+	offset = write_line_with_wrapping(mut builder, sym.docstrings[0], line_limit, offset)
+	for ds in sym.docstrings[1..] {
+		trimed_line := ds.trim_space()
+
+		if trimed_line.len == 0 {
+			need_newline = true
+			continue
+		}
+
+		// prepend newline check
+		is_header := check_is_header_line(trimed_line)
+		is_hr := check_is_horizontal_rule(trimed_line)
+		if ds.starts_with('- ') || ds.starts_with('|') || is_header || is_hr {
+			need_newline = true
+		}
+
+		// doc content
+		if need_newline {
+			builder.write_byte(`\n`)
+			offset = 0
+		} else {
+			builder.write_byte(` `)
+			offset += 1
+		}
+
+		offset = write_line_with_wrapping(mut builder, ds, line_limit, offset)
+
+		// append newline check
+		need_newline = false
+		if ds.ends_with('.') || ds.ends_with('|') || is_header || is_hr {
+			need_newline = true
+			continue
+		}
+	}
+
+	return builder.str()
+}
+
+// write_docstrings get docstring for symbol, all newline in original docstring
+// comment will be presented as is.
+pub fn (fmt &SymbolFormatter) format_docstrings(sym &Symbol, cfg SymbolFormatterConfig) string {
+	len := sym.docstrings.len
+	if len == 0 {
+		return ''
+	} else if len == 1 {
+		return sym.docstrings[0]
+	}
+
+	mut builder := strings.new_builder(300)
+	line_limit := cfg.docstring_line_len_limit
+
+	write_line_with_wrapping(mut builder, sym.docstrings[0], line_limit, 0)
+	for ds in sym.docstrings[1..] {
+		trimed_line := ds.trim_space()
+		if trimed_line.len == 0 {
+			continue
+		}
+
+		builder.write_byte(`\n`)
+		write_line_with_wrapping(mut builder, ds, line_limit, 0)
+	}
+
+	return builder.str()
+}
+
+pub fn (mut fmt SymbolFormatter) format_type_definition(sym &Symbol, cfg SymbolFormatterConfig) string {
+	if isnil(sym) || sym.is_void() {
+		return 'invalid symbol'
+	}
+
+	mut builder := strings.new_builder(50)
+
+	if keywrod := sym.get_type_def_keyword() {
+		builder.write_string('${keywrod} ')
+	}
+
+	match sym.kind {
+		.interface_, .struct_ {
+			fmt.format_with_builder(sym, mut builder, analyzer.types_format_cfg)
+			if field_str := fmt.format_fields(sym) {
+				builder.write_string('{\n')
+				builder.write_string(field_str)
+				builder.write_string('\n}')
+			}
+		}
+		.sumtype, .typedef {
+			fmt.format_with_builder(sym, mut builder, analyzer.types_format_cfg)
+		}
+		else {
+			fmt.format_with_builder(sym, mut builder, analyzer.types_format_cfg)
+		}
+	}
+
+	return builder.str()
+}
+
+pub fn (mut fmt SymbolFormatter) write_field(sym &Symbol, mut builder strings.Builder, cfg SymbolFormatterConfig) {
+	builder.write_string(cfg.field_indent)
+	builder.write_string(sym.name)
+	builder.write_rune(` `)
+	fmt.format_with_builder(sym.return_sym, mut builder, analyzer.child_types_format_cfg)
+}
+
+pub fn (mut fmt SymbolFormatter) format_fields(sym &Symbol, cfg SymbolFormatterConfig) ?string {
+	field_syms := sym.get_fields() or { return none }
+
+	mut builder := strings.new_builder(100)
+	mut last_access := SymbolAccess.private
+
+	mut is_dirty := false
+	for field in field_syms {
+		if os.dir(field.file_path) != fmt.context.file_dir
+			&& int(field.access) < int(SymbolAccess.public) {
+			continue
+		} else if is_dirty {
+			builder.write_byte(`\n`)
+		}
+
+		is_dirty = true
+		if field.access != last_access {
+			last_access = field.access
+			builder.write_string('${last_access.str().trim_space()}: \n')
+		}
+		fmt.write_field(field, mut builder, cfg)
+	}
+
+	if !is_dirty {
+		return none
+	}
+
+	return builder.str()
+}
+
+pub fn (mut fmt SymbolFormatter) format_methods(sym &Symbol, cfg SymbolFormatterConfig) ?string {
+	method_syms := sym.get_methods() or { return none }
+
+	mut builder := strings.new_builder(100)
+
+	mut is_dirty := false
+	for method in method_syms {
+		if os.dir(method.file_path) != fmt.context.file_dir
+			&& int(method.access) < int(SymbolAccess.public) {
+			continue
+		} else if is_dirty {
+			builder.write_string('\n\n')
+		}
+
+		is_dirty = true
+		fmt.format_with_builder(method, mut builder, analyzer.types_format_cfg)
+	}
+
+	if !is_dirty {
+		return none
+	}
+
+	return builder.str()
 }

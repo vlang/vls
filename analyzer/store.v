@@ -62,10 +62,9 @@ pub fn (mut ss Store) report(report Report) {
 	ss.reporter.report(report)
 }
 
+[if trace ?]
 pub fn (mut ss Store) trace_report(report Report) {
-	$if trace ? {
-		ss.reporter.report(report)
-	}
+	ss.reporter.report(report)
 }
 
 // get_module_path_opt is a variant of `get_module_path` that returns
@@ -557,11 +556,11 @@ pub fn (mut store Store) find_symbol_by_type_node(file_path string, node ast.Nod
 			.map_ {
 				key_node := node.child_by_field_name('key') or { return error('') }
 				mut key_sym := store.find_symbol_by_type_node(file_path, key_node, src_text)!
-				new_sym.add_child(mut key_sym, false) or {}
+				new_sym.add_child_allow_duplicated(mut key_sym, false)
 
 				value_node := node.child_by_field_name('value') or { return error('') }
 				mut val_sym := store.find_symbol_by_type_node(file_path, value_node, src_text)!
-				new_sym.add_child(mut val_sym, false) or {}
+				new_sym.add_child_allow_duplicated(mut val_sym, false)
 			}
 			.chan_, .ref, .optional, .result {
 				if symbol_name !in ['?', '!'] {
@@ -622,7 +621,7 @@ pub fn (mut ss Store) infer_symbol_from_node(file_path string, node ast.Node, sr
 				}
 			}
 		}
-		.mutable_identifier {
+		.mutable_identifier, .mutable_expression {
 			first_child := node.named_child(0) or { return error('empty node') }
 			return ss.infer_symbol_from_node(file_path, first_child, src_text)
 		}
@@ -940,7 +939,7 @@ pub fn (mut ss Store) infer_value_type_from_node(file_path string, node ast.Node
 			node_count := node.named_child_count()
 			if got_sym.is_returnable() {
 				if last_node := node.named_child(node_count - 1) {
-					if got_sym.return_sym.kind == .optional
+					if got_sym.return_sym.kind in [.optional, .result]
 						&& last_node.type_name == .option_propagator {
 						return got_sym.return_sym.final_sym()
 					}

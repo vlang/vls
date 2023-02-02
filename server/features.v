@@ -5,7 +5,6 @@ import os
 import analyzer
 import math
 import ast
-import tree_sitter
 
 const temp_formatting_file_path = os.join_path(os.temp_dir(), 'vls_temp_formatting.v')
 
@@ -220,78 +219,6 @@ pub fn (mut ls Vls) signature_help(params lsp.SignatureHelpParams, mut wr Respon
 				parameters: param_infos
 			},
 		]
-	}
-}
-
-pub fn (mut ls Vls) hover(params lsp.HoverParams, mut wr ResponseWriter) ?lsp.Hover {
-	uri := params.text_document.uri.normalize()
-	pos := params.position
-	file := ls.files[uri] or { return none }
-	offset := file.get_offset(pos.line, pos.character)
-	node := traverse_node(file.tree.root_node(), u32(offset))
-	return get_hover_data(mut ls.store, node, uri, file.source, u32(offset))
-}
-
-fn get_hover_data(mut store analyzer.Store, node ast.Node, uri lsp.DocumentUri, source tree_sitter.SourceText, offset u32) ?lsp.Hover {
-	node_type_name := node.type_name
-	file_path := uri.path()
-
-	if node.is_null() || node_type_name == .comment {
-		return none
-	}
-
-	mut original_range := node.range()
-	parent_node := node.parent() or { node }
-
-	// eprintln('$node_type_name | ${node.text(source)}')
-	if node_type_name == .module_clause {
-		return lsp.Hover{
-			contents: lsp.v_marked_string(node.text(source))
-			range: tsrange_to_lsp_range(node.range())
-		}
-	} else if node_type_name == .import_path {
-		file_name := os.base(file_path)
-		found_imp := store.imports.find_by_position(file_path, node.range())?
-		alias := found_imp.aliases[file_name] or { '' }
-		return lsp.Hover{
-			contents: lsp.v_marked_string('import ${found_imp.absolute_module_name}' +
-				if alias.len > 0 { ' as ${alias}' } else { '' })
-			range: tsrange_to_lsp_range(found_imp.ranges[file_path])
-		}
-	} else if parent_node.is_error() || parent_node.is_missing() {
-		return none
-	}
-
-	if node_type_name != .type_selector_expression && node.named_child_count() != 0 {
-		if got_node := node.first_named_child_for_byte(u32(offset)) {
-			new_original_range := got_node.range()
-			if new_original_range.start_byte != 0 && new_original_range.end_byte != 0 {
-				original_range = new_original_range
-			}
-		}
-	}
-
-	mut sym := store.infer_symbol_from_node(file_path, node, source) or { analyzer.void_sym }
-	if isnil(sym) || sym.is_void() {
-		closest_parent := closest_symbol_node_parent(node)
-		sym = store.infer_symbol_from_node(file_path, closest_parent, source) or {
-			analyzer.void_sym
-		}
-	}
-
-	// eprintln('$node_type_name | ${node.text(source)} | $sym')
-
-	// Send null if range has zero-start and end points
-	if sym.range.start_point.row == 0 && sym.range.start_point.column == 0
-		&& sym.range.start_point.eq(sym.range.end_point) {
-		return none
-	}
-
-	mut formatter := store.with(file_path: file_path).symbol_formatter(false)
-
-	return lsp.Hover{
-		contents: lsp.v_marked_string(formatter.format(sym))
-		range: tsrange_to_lsp_range(original_range)
 	}
 }
 
