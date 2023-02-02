@@ -8,10 +8,10 @@ import io
 
 fn test_wrong_first_request() {
 	mut ls := server.new()
-	mut io := new_test_client(ls)
+	mut io_ := new_test_client(ls)
 
 	assert ls.status() == .off
-	io.send<lsp.CodeLensParams, jsonrpc.Null>('textDocument/codeLens', lsp.CodeLensParams{}) or {
+	io_.send<lsp.CodeLensParams, jsonrpc.Null>('textDocument/codeLens', lsp.CodeLensParams{}) or {
 		assert err.code() == jsonrpc.server_not_initialized.code()
 		assert err.msg() == jsonrpc.server_not_initialized.msg()
 		return
