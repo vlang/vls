@@ -90,7 +90,11 @@ For Vim, please install [vim-lsp](https://github.com/prabirshrestha/vim-lsp) and
 See the [VLS extension](https://extensions.panic.com/extensions/louis77/louis77.vlang-vls/) for detailed instructions on how to install VLS on Panic Nova.
 
 ## IntelliJ IDEA, GoLand, and other derivatives
-VLS on JetBrain / IntelliJ-based IDEs does not work at this moment. See [issue 52](https://github.com/vlang/vls/issues/52) for more details.
+
+VLS on JetBrains / IntelliJ-based IDEs does not work at this moment. 
+See [issue 52](https://github.com/vlang/vls/issues/52) for more details.
+
+You can use IntelliJ V plugin instead: https://intellij-v.github.io
 
 ## Other Editors
 For other editors, please refer to the plugin's/editor's documentation for instructions on how to setup an LSP server connection.
