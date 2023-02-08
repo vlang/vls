@@ -186,64 +186,64 @@ pub mut:
 	debug         bool
 }
 
-pub fn (mut io Testio) send(data string) {
-	io.nr_responses++
-	if io.nr_responses > io.max_nr_responses {
-		io.nr_responses = 0
-		io.raw_responses.clear()
+pub fn (mut i Testio) send(data string) {
+	i.nr_responses++
+	if i.nr_responses > i.max_nr_responses {
+		i.nr_responses = 0
+		i.raw_responses.clear()
 	}
-	io.raw_responses << data
+	i.raw_responses << data
 }
 
-pub fn (io Testio) receive() ?string {
+pub fn (i Testio) receive() ?string {
 	return ''
 }
 
-pub fn (mut io Testio) init() ? {
-	io.nr_responses = 0
-	io.raw_responses = []string{cap: io.max_nr_responses}
+pub fn (mut i Testio) init() ? {
+	i.nr_responses = 0
+	i.raw_responses = []string{cap: i.max_nr_responses}
 }
 
 // request returns a JSON string of JSON-RPC request with empty parameters.
-pub fn (mut io Testio) request(method string) string {
-	return io.request_with_params(method, map[string]string{})
+pub fn (mut i Testio) request(method string) string {
+	return i.request_with_params(method, map[string]string{})
 }
 
 // request_with_params returns a JSON string of JSON-RPC request with parameters.
-pub fn (mut io Testio) request_with_params[T](method string, params T) string {
+pub fn (mut i Testio) request_with_params[T](method string, params T) string {
 	enc_params := json.encode(params)
-	payload := '{"jsonrpc":"${jsonrpc.version}","id":${io.current_req_id},"method":"${method}","params":${enc_params}}'
-	io.current_req_id++
+	payload := '{"jsonrpc":"${jsonrpc.version}","id":${i.current_req_id},"method":"${method}","params":${enc_params}}'
+	i.current_req_id++
 	return payload
 }
 
 // result returns the response result/notification params.
-pub fn (mut io Testio) result() string {
-	io.decode_response_at_index(io.raw_responses.len - 1) or { return '' }
-	return io.response.result
+pub fn (mut i Testio) result() string {
+	i.decode_response_at_index(i.raw_responses.len - 1) or { return '' }
+	return i.response.result
 }
 
 // notification returns the parameters of the notification.
-pub fn (io Testio) notification() !(string, string) {
-	return io.notification_at_index(io.raw_responses.len - 1)
+pub fn (i Testio) notification() !(string, string) {
+	return i.notification_at_index(i.raw_responses.len - 1)
 }
 
 // notification verifies the parameters of the notification.
-pub fn (io Testio) notification_at_index(idx int) !(string, string) {
-	resp := json.decode(TestNotification, io.raw_responses[idx])!
+pub fn (i Testio) notification_at_index(idx int) !(string, string) {
+	resp := json.decode(TestNotification, i.raw_responses[idx])!
 	return resp.method, resp.params
 }
 
 // response_error returns the error code and message from the response.
-pub fn (mut io Testio) response_error() !(int, string) {
-	io.decode_response_at_index(io.raw_responses.len - 1)!
-	return io.response.error.code, io.response.error.message
+pub fn (mut i Testio) response_error() !(int, string) {
+	i.decode_response_at_index(i.raw_responses.len - 1)!
+	return i.response.error.code, i.response.error.message
 }
 
-fn (mut io Testio) decode_response_at_index(idx int) ! {
-	if io.decoded_resp_idx != idx {
-		io.response = json.decode(TestResponse, io.raw_responses[idx])!
-		io.decoded_resp_idx = idx
+fn (mut i Testio) decode_response_at_index(idx int) ! {
+	if i.decoded_resp_idx != idx {
+		i.response = json.decode(TestResponse, i.raw_responses[idx])!
+		i.decoded_resp_idx = idx
 	}
 }
 
@@ -258,8 +258,8 @@ pub fn get_test_files_path(dir string) string {
 
 // load_test_file_paths returns a list of input test file locations.
 [manualfree]
-pub fn (io &Testio) load_test_file_paths(folder_name string) ![]string {
-	return load_test_file_paths(io.test_files_dir, folder_name)
+pub fn (i &Testio) load_test_file_paths(folder_name string) ![]string {
+	return load_test_file_paths(i.test_files_dir, folder_name)
 }
 
 // load_test_file_paths returns a list of input test file locations.
@@ -285,12 +285,12 @@ pub fn load_test_file_paths(test_files_dir string, folder_name string) ![]string
 }
 
 // save_document generates and returns the request data for the `textDocument/didSave` request.
-pub fn (mut io Testio) save_document(file_path string, contents string) (string, lsp.TextDocumentIdentifier) {
+pub fn (mut i Testio) save_document(file_path string, contents string) (string, lsp.TextDocumentIdentifier) {
 	doc_uri := lsp.document_uri_from_path(file_path)
 	docid := lsp.TextDocumentIdentifier{
 		uri: doc_uri
 	}
-	req := io.request_with_params('textDocument/didSave', lsp.DidSaveTextDocumentParams{
+	req := i.request_with_params('textDocument/didSave', lsp.DidSaveTextDocumentParams{
 		text_document: docid
 		text: contents
 	})
@@ -298,9 +298,9 @@ pub fn (mut io Testio) save_document(file_path string, contents string) (string,
 }
 
 // open_document generates and returns the request data for the `textDocument/didOpen` reqeust.
-pub fn (mut io Testio) open_document(file_path string, contents string) (string, lsp.TextDocumentIdentifier) {
+pub fn (mut i Testio) open_document(file_path string, contents string) (string, lsp.TextDocumentIdentifier) {
 	doc_uri := lsp.document_uri_from_path(file_path)
-	req := io.request_with_params('textDocument/didOpen', lsp.DidOpenTextDocumentParams{
+	req := i.request_with_params('textDocument/didOpen', lsp.DidOpenTextDocumentParams{
 		text_document: lsp.TextDocumentItem{
 			uri: doc_uri
 			language_id: 'v'
@@ -315,17 +315,17 @@ pub fn (mut io Testio) open_document(file_path string, contents string) (string,
 }
 
 // close_document generates and returns the request data for the `textDocument/didClose` reqeust.
-pub fn (mut io Testio) close_document(doc_id lsp.TextDocumentIdentifier) string {
-	return io.request_with_params('textDocument/didClose', lsp.DidCloseTextDocumentParams{
+pub fn (mut i Testio) close_document(doc_id lsp.TextDocumentIdentifier) string {
+	return i.request_with_params('textDocument/didClose', lsp.DidCloseTextDocumentParams{
 		text_document: doc_id
 	})
 }
 
 // file_errors parses and returns the list of file errors received
 // from the server after executing the `textDocument/didOpen` request.
-pub fn (mut io Testio) file_errors() ![]lsp.Diagnostic {
+pub fn (mut i Testio) file_errors() ![]lsp.Diagnostic {
 	mut errors := []lsp.Diagnostic{}
-	_, diag_params := io.notification()!
+	_, diag_params := i.notification()!
 	diag_info := json.decode(lsp.PublishDiagnosticsParams, diag_params)!
 	for diag in diag_info.diagnostics {
 		if diag.severity != .error {
