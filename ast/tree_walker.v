@@ -9,7 +9,7 @@ mut:
 	cursor                   tree_sitter.TreeCursor[v.NodeType] [required]
 }
 
-pub fn (mut tw TreeWalker) next() !Node {
+pub fn (mut tw TreeWalker) next() ?Node {
 	if !tw.already_visited_children {
 		if tw.cursor.to_first_child() {
 			tw.already_visited_children = false
@@ -17,7 +17,7 @@ pub fn (mut tw TreeWalker) next() !Node {
 			tw.already_visited_children = false
 		} else {
 			if !tw.cursor.to_parent() {
-				return error('none')
+				return none
 			}
 			tw.already_visited_children = true
 			return tw.next()
@@ -27,12 +27,12 @@ pub fn (mut tw TreeWalker) next() !Node {
 			tw.already_visited_children = false
 		} else {
 			if !tw.cursor.to_parent() {
-				return error('none')
+				return none
 			}
 			return tw.next()
 		}
 	}
-	node := tw.cursor.current_node()!
+	node := tw.cursor.current_node() or { return none }
 	return node
 }
 

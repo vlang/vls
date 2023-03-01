@@ -211,8 +211,8 @@ fn (mut sr SymbolAnalyzer) struct_decl(struct_decl_node ast.Node) !&Symbol {
 	return sym
 }
 
-fn (mut sr SymbolAnalyzer) struct_field_decl(field_access SymbolAccess, field_decl_node ast.Node) ?&Symbol {
-	field_type_node := field_decl_node.child_by_field_name('type')?
+fn (mut sr SymbolAnalyzer) struct_field_decl(field_access SymbolAccess, field_decl_node ast.Node) !&Symbol {
+	field_type_node := field_decl_node.child_by_field_name('type')!
 	field_sym := sr.context.find_symbol_by_type_node(field_type_node) or { void_sym }
 	field_name_node := field_decl_node.child_by_field_name('name') or {
 		// struct embedding
