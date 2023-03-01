@@ -42,8 +42,8 @@ pub fn (mut tc TreeCursor) to_first_child() bool {
 	return tc.cursor.to_first_child()
 }
 
-pub fn (tc &TreeCursor) current_node() ?ast.Node {
-	node := tc.cursor.current_node()?
+pub fn (tc &TreeCursor) current_node() !ast.Node {
+	node := tc.cursor.current_node()!
 	return node
 }
 
