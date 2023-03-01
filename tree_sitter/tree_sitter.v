@@ -209,7 +209,7 @@ pub fn unwrap_null_node<T>(factory NodeTypeFactory<T>, err IError) ?Node<T> {
 	return none
 }
 
-pub fn check_tsnode(node C.TSNode) ? {
+pub fn check_tsnode(node C.TSNode) ! {
 	if node.is_null() {
 		return IError(NodeError{
 			node: node
