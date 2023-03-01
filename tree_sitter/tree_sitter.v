@@ -202,16 +202,19 @@ pub fn (err NodeError) msg() string {
 }
 
 [unsafe]
-pub fn unwrap_null_node<T>(factory NodeTypeFactory<T>, err IError) ?Node<T> {
+pub fn unwrap_null_node<T>(factory NodeTypeFactory<T>, err IError) !Node<T> {
 	if err is NodeError {
 		return new_node<T>(factory, err.node)
 	}
-	return none
+	return error('')
 }
 
-pub fn check_tsnode(node C.TSNode) ? {
+pub fn check_tsnode(node C.TSNode) ! {
 	if node.is_null() {
-		return none
+		return IError(NodeError{
+			node: node
+			msg: 'Node is null'
+		})
 	}
 }
 
@@ -316,17 +319,17 @@ pub fn (node C.TSNode) is_error() bool {
 	return C.ts_node_has_error(node)
 }
 
-pub fn (node C.TSNode) parent() ?C.TSNode {
-	check_tsnode(node)?
+pub fn (node C.TSNode) parent() !C.TSNode {
+	check_tsnode(node)!
 	parent := C.ts_node_parent(node)
-	check_tsnode(parent)?
+	check_tsnode(parent)!
 	return parent
 }
 
-pub fn (node C.TSNode) child(pos u32) ?C.TSNode {
-	check_tsnode(node)?
+pub fn (node C.TSNode) child(pos u32) !C.TSNode {
+	check_tsnode(node)!
 	child := C.ts_node_child(node, pos)
-	check_tsnode(child)?
+	check_tsnode(child)!
 	return child
 }
 
@@ -335,10 +338,10 @@ pub fn (node C.TSNode) child_count() u32 {
 	return C.ts_node_child_count(node)
 }
 
-pub fn (node C.TSNode) named_child(pos u32) ?C.TSNode {
-	check_tsnode(node)?
+pub fn (node C.TSNode) named_child(pos u32) !C.TSNode {
+	check_tsnode(node)!
 	child := C.ts_node_named_child(node, pos)
-	check_tsnode(child)?
+	check_tsnode(child)!
 	return child
 }
 
@@ -349,83 +352,83 @@ pub fn (node C.TSNode) named_child_count() u32 {
 	return C.ts_node_named_child_count(node)
 }
 
-pub fn (node C.TSNode) child_by_field_name(name string) ?C.TSNode {
+pub fn (node C.TSNode) child_by_field_name(name string) !C.TSNode {
 	// defer {
 	// 	unsafe { name.free() }
 	// }
-	check_tsnode(node)?
+	check_tsnode(node)!
 	child := C.ts_node_child_by_field_name(node, &char(name.str), u32(name.len))
-	check_tsnode(child)?
+	check_tsnode(child)!
 	return child
 }
 
-pub fn (node C.TSNode) next_sibling() ?C.TSNode {
-	check_tsnode(node)?
+pub fn (node C.TSNode) next_sibling() !C.TSNode {
+	check_tsnode(node)!
 	sibling := C.ts_node_next_sibling(node)
-	check_tsnode(sibling)?
+	check_tsnode(sibling)!
 	return sibling
 }
 
-pub fn (node C.TSNode) prev_sibling() ?C.TSNode {
-	check_tsnode(node)?
+pub fn (node C.TSNode) prev_sibling() !C.TSNode {
+	check_tsnode(node)!
 	sibling := C.ts_node_prev_sibling(node)
-	check_tsnode(sibling)?
+	check_tsnode(sibling)!
 	return sibling
 }
 
-pub fn (node C.TSNode) next_named_sibling() ?C.TSNode {
-	check_tsnode(node)?
+pub fn (node C.TSNode) next_named_sibling() !C.TSNode {
+	check_tsnode(node)!
 	sibling := C.ts_node_next_named_sibling(node)
-	check_tsnode(sibling)?
+	check_tsnode(sibling)!
 	return sibling
 }
 
-pub fn (node C.TSNode) prev_named_sibling() ?C.TSNode {
-	check_tsnode(node)?
+pub fn (node C.TSNode) prev_named_sibling() !C.TSNode {
+	check_tsnode(node)!
 	sibling := C.ts_node_prev_named_sibling(node)
-	check_tsnode(sibling)?
+	check_tsnode(sibling)!
 	return sibling
 }
 
-pub fn (node C.TSNode) first_child_for_byte(offset u32) ?C.TSNode {
-	check_tsnode(node)?
+pub fn (node C.TSNode) first_child_for_byte(offset u32) !C.TSNode {
+	check_tsnode(node)!
 	got_node := C.ts_node_first_child_for_byte(node, offset)
-	check_tsnode(got_node)?
+	check_tsnode(got_node)!
 	return got_node
 }
 
-pub fn (node C.TSNode) first_named_child_for_byte(offset u32) ?C.TSNode {
-	check_tsnode(node)?
+pub fn (node C.TSNode) first_named_child_for_byte(offset u32) !C.TSNode {
+	check_tsnode(node)!
 	got_node := C.ts_node_first_named_child_for_byte(node, offset)
-	check_tsnode(got_node)?
+	check_tsnode(got_node)!
 	return got_node
 }
 
-pub fn (node C.TSNode) descendant_for_byte_range(start_range u32, end_range u32) ?C.TSNode {
-	check_tsnode(node)?
+pub fn (node C.TSNode) descendant_for_byte_range(start_range u32, end_range u32) !C.TSNode {
+	check_tsnode(node)!
 	got_node := C.ts_node_descendant_for_byte_range(node, start_range, end_range)
-	check_tsnode(got_node)?
+	check_tsnode(got_node)!
 	return got_node
 }
 
-pub fn (node C.TSNode) descendant_for_point_range(start_point C.TSPoint, end_point C.TSPoint) ?C.TSNode {
-	check_tsnode(node)?
+pub fn (node C.TSNode) descendant_for_point_range(start_point C.TSPoint, end_point C.TSPoint) !C.TSNode {
+	check_tsnode(node)!
 	got_node := C.ts_node_descendant_for_point_range(node, start_point, end_point)
-	check_tsnode(got_node)?
+	check_tsnode(got_node)!
 	return got_node
 }
 
-pub fn (node C.TSNode) named_descendant_for_byte_range(start_range u32, end_range u32) ?C.TSNode {
-	check_tsnode(node)?
+pub fn (node C.TSNode) named_descendant_for_byte_range(start_range u32, end_range u32) !C.TSNode {
+	check_tsnode(node)!
 	got_node := C.ts_node_named_descendant_for_byte_range(node, start_range, end_range)
-	check_tsnode(got_node)?
+	check_tsnode(got_node)!
 	return got_node
 }
 
-pub fn (node C.TSNode) named_descendant_for_point_range(start_point C.TSPoint, end_point C.TSPoint) ?C.TSNode {
-	check_tsnode(node)?
+pub fn (node C.TSNode) named_descendant_for_point_range(start_point C.TSPoint, end_point C.TSPoint) !C.TSNode {
+	check_tsnode(node)!
 	got_node := C.ts_node_named_descendant_for_point_range(node, start_point, end_point)
-	check_tsnode(got_node)?
+	check_tsnode(got_node)!
 	return got_node
 }
 
@@ -464,9 +467,9 @@ pub fn (mut cursor C.TSTreeCursor) reset(node C.TSNode) {
 }
 
 [inline]
-pub fn (cursor &C.TSTreeCursor) current_node() ?C.TSNode {
+pub fn (cursor &C.TSTreeCursor) current_node() !C.TSNode {
 	got_node := C.ts_tree_cursor_current_node(cursor)
-	check_tsnode(got_node)?
+	check_tsnode(got_node)!
 	return got_node
 }
 
@@ -656,13 +659,13 @@ pub fn (node Node<T>) is_error() bool {
 	return node.raw_node.is_error()
 }
 
-pub fn (node Node<T>) parent() ?Node<T> {
-	parent := node.raw_node.parent()?
+pub fn (node Node<T>) parent() !Node<T> {
+	parent := node.raw_node.parent()!
 	return new_node<T>(node.type_factory, parent)
 }
 
-pub fn (node Node<T>) child(pos u32) ?Node<T> {
-	child := node.raw_node.child(pos)?
+pub fn (node Node<T>) child(pos u32) !Node<T> {
+	child := node.raw_node.child(pos)!
 	return new_node<T>(node.type_factory, child)
 }
 
@@ -671,8 +674,8 @@ pub fn (node Node<T>) child_count() u32 {
 	return node.raw_node.child_count()
 }
 
-pub fn (node Node<T>) named_child(pos u32) ?Node<T> {
-	child := node.raw_node.named_child(pos)?
+pub fn (node Node<T>) named_child(pos u32) !Node<T> {
+	child := node.raw_node.named_child(pos)!
 	return new_node<T>(node.type_factory, child)
 }
 
@@ -681,71 +684,71 @@ pub fn (node Node<T>) named_child_count() u32 {
 	return node.raw_node.named_child_count()
 }
 
-pub fn (node Node<T>) child_by_field_name(name string) ?Node<T> {
-	child := node.raw_node.child_by_field_name(name)?
+pub fn (node Node<T>) child_by_field_name(name string) !Node<T> {
+	child := node.raw_node.child_by_field_name(name)!
 	return new_node<T>(node.type_factory, child)
 }
 
-pub fn (node Node<T>) next_sibling() ?Node<T> {
-	sibling := node.raw_node.next_sibling()?
+pub fn (node Node<T>) next_sibling() !Node<T> {
+	sibling := node.raw_node.next_sibling()!
 	return new_node<T>(node.type_factory, sibling)
 }
 
-pub fn (node Node<T>) prev_sibling() ?Node<T> {
-	sibling := node.raw_node.prev_sibling()?
+pub fn (node Node<T>) prev_sibling() !Node<T> {
+	sibling := node.raw_node.prev_sibling()!
 	return new_node<T>(node.type_factory, sibling)
 }
 
-pub fn (node Node<T>) next_named_sibling() ?Node<T> {
-	sibling := node.raw_node.next_named_sibling()?
+pub fn (node Node<T>) next_named_sibling() !Node<T> {
+	sibling := node.raw_node.next_named_sibling()!
 	return new_node<T>(node.type_factory, sibling)
 }
 
-pub fn (node Node<T>) prev_named_sibling() ?Node<T> {
-	sibling := node.raw_node.prev_named_sibling()?
+pub fn (node Node<T>) prev_named_sibling() !Node<T> {
+	sibling := node.raw_node.prev_named_sibling()!
 	return new_node<T>(node.type_factory, sibling)
 }
 
-pub fn (node Node<T>) first_child_for_byte(offset u32) ?Node<T> {
-	child := node.raw_node.first_child_for_byte(offset)?
+pub fn (node Node<T>) first_child_for_byte(offset u32) !Node<T> {
+	child := node.raw_node.first_child_for_byte(offset)!
 	return new_node<T>(node.type_factory, child)
 }
 
-pub fn (node Node<T>) first_named_child_for_byte(offset u32) ?Node<T> {
-	child := node.raw_node.first_named_child_for_byte(offset)?
+pub fn (node Node<T>) first_named_child_for_byte(offset u32) !Node<T> {
+	child := node.raw_node.first_named_child_for_byte(offset)!
 	return new_node<T>(node.type_factory, child)
 }
 
-pub fn (node Node<T>) descendant_for_byte_range(start_range u32, end_range u32) ?Node<T> {
-	desc := node.raw_node.descendant_for_byte_range(start_range, end_range)?
+pub fn (node Node<T>) descendant_for_byte_range(start_range u32, end_range u32) !Node<T> {
+	desc := node.raw_node.descendant_for_byte_range(start_range, end_range)!
 	return new_node<T>(node.type_factory, desc)
 }
 
-pub fn (node Node<T>) descendant_for_point_range(start_point C.TSPoint, end_point C.TSPoint) ?Node<T> {
-	desc := node.raw_node.descendant_for_point_range(start_point, end_point)?
+pub fn (node Node<T>) descendant_for_point_range(start_point C.TSPoint, end_point C.TSPoint) !Node<T> {
+	desc := node.raw_node.descendant_for_point_range(start_point, end_point)!
 	return new_node<T>(node.type_factory, desc)
 }
 
-pub fn (node Node<T>) named_descendant_for_byte_range(start_range u32, end_range u32) ?Node<T> {
-	desc := node.raw_node.named_descendant_for_byte_range(start_range, end_range)?
+pub fn (node Node<T>) named_descendant_for_byte_range(start_range u32, end_range u32) !Node<T> {
+	desc := node.raw_node.named_descendant_for_byte_range(start_range, end_range)!
 	return new_node<T>(node.type_factory, desc)
 }
 
-pub fn (node Node<T>) named_descendant_for_point_range(start_point C.TSPoint, end_point C.TSPoint) ?Node<T> {
-	desc := node.raw_node.named_descendant_for_point_range(start_point, end_point)?
+pub fn (node Node<T>) named_descendant_for_point_range(start_point C.TSPoint, end_point C.TSPoint) !Node<T> {
+	desc := node.raw_node.named_descendant_for_point_range(start_point, end_point)!
 	return new_node<T>(node.type_factory, desc)
 }
 
-pub fn (node Node<T>) last_node_by_type(type_name T) ?Node<T> {
+pub fn (node Node<T>) last_node_by_type(type_name T) !Node<T> {
 	len := node.named_child_count()
-	mut named_child := node.named_child(len - 1)?
+	mut named_child := node.named_child(len - 1)!
 	for i := int(len - 1); i >= 0; i-- {
 		if named_child.type_name == type_name {
 			return named_child
 		}
 		named_child = named_child.prev_named_sibling() or { continue }
 	}
-	return none
+	return error('none')
 }
 
 [inline]
@@ -773,8 +776,8 @@ pub fn (mut cursor TreeCursor<T>) reset(node Node<T>) {
 }
 
 [inline]
-pub fn (cursor TreeCursor<T>) current_node() ?Node<T> {
-	got_node := cursor.raw_cursor.current_node()?
+pub fn (cursor TreeCursor<T>) current_node() !Node<T> {
+	got_node := cursor.raw_cursor.current_node()!
 	return new_node<T>(cursor.type_factory, got_node)
 }
 
