@@ -99,11 +99,11 @@ fn (mut an SemanticAnalyzer) format_report(report Report) string {
 	return report.message
 }
 
-fn (mut an SemanticAnalyzer) import_decl(node ast.Node) ? {
+fn (mut an SemanticAnalyzer) import_decl(node ast.Node) ! {
 	// Most of the checking is already done in `import_modules_from_trees`
 	// Check only the symbols if they are available
-	symbols := node.child_by_field_name('symbols')?
-	module_name_node := node.child_by_field_name('path')?
+	symbols := node.child_by_field_name('symbols')!
+	module_name_node := node.child_by_field_name('path')!
 	module_name := module_name_node.text(an.context.text)
 	// defer { unsafe { module_name.free() } }
 
@@ -112,7 +112,7 @@ fn (mut an SemanticAnalyzer) import_decl(node ast.Node) ? {
 		return
 	}
 
-	list := symbols.named_child(0)?
+	list := symbols.named_child(0)!
 	symbols_count := list.named_child_count()
 	for i := u32(0); i < symbols_count; i++ {
 		sym_node := list.named_child(i) or { continue }
@@ -246,14 +246,14 @@ pub fn (mut an SemanticAnalyzer) top_level_statement(current_node ast.Node) {
 	}
 }
 
-pub fn (mut an SemanticAnalyzer) assignment_statement(node ast.Node) ? {
-	op_node := node.child_by_field_name('operator')?
+pub fn (mut an SemanticAnalyzer) assignment_statement(node ast.Node) ! {
+	op_node := node.child_by_field_name('operator')!
 	op := op_node.raw_node.type_name()[0].ascii_str()
 	is_multiplicative := op in analyzer.multiplicative_operators
 	is_additive := op in analyzer.additive_operators
 
-	left_node := node.child_by_field_name('left')?
-	right_node := node.child_by_field_name('right')?
+	left_node := node.child_by_field_name('left')!
+	right_node := node.child_by_field_name('right')!
 	left_sym_count := left_node.named_child_count()
 	right_sym_count := right_node.named_child_count()
 
@@ -326,8 +326,8 @@ pub fn (mut an SemanticAnalyzer) block(node ast.Node) {
 	}
 }
 
-pub fn (mut an SemanticAnalyzer) short_var_declaration(node ast.Node) ? {
-	right := node.child_by_field_name('right')?
+pub fn (mut an SemanticAnalyzer) short_var_declaration(node ast.Node) ! {
+	right := node.child_by_field_name('right')!
 	right_count := right.named_child_count()
 	for i in u32(0) .. right_count {
 		right_child := right.named_child(i) or { continue }
@@ -335,17 +335,17 @@ pub fn (mut an SemanticAnalyzer) short_var_declaration(node ast.Node) ? {
 	}
 }
 
-pub fn (mut an SemanticAnalyzer) assert_statement(node ast.Node) ? {
-	expr_node := node.named_child(0)?
+pub fn (mut an SemanticAnalyzer) assert_statement(node ast.Node) ! {
+	expr_node := node.named_child(0)!
 	expr_typ_sym := an.expression(expr_node, as_value: true) or { void_sym }
 	if expr_typ_sym.name != 'bool' {
 		an.report(expr_node, errors.invalid_assert_type_error, expr_typ_sym)
 	}
 }
 
-pub fn (mut an SemanticAnalyzer) send_statement(node ast.Node) ? {
-	chan_node := node.child_by_field_name('channel')?
-	val_node := node.child_by_field_name('value')?
+pub fn (mut an SemanticAnalyzer) send_statement(node ast.Node) ! {
+	chan_node := node.child_by_field_name('channel')!
+	val_node := node.child_by_field_name('value')!
 	chan_typ_sym := an.expression(chan_node) or { void_sym }
 	val_typ_sym := an.expression(val_node) or { void_sym }
 	if chan_typ_sym.kind != .chan_ {

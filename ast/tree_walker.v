@@ -32,7 +32,7 @@ pub fn (mut tw TreeWalker) next() ?Node {
 			return tw.next()
 		}
 	}
-	node := tw.cursor.current_node()?
+	node := tw.cursor.current_node() or { return none }
 	return node
 }
 
