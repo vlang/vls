@@ -123,9 +123,9 @@ fn (mut ls Vls) setup_logger(mut rw ResponseWriter) !string {
 
 	rw.server.dispatch_event(log.set_logpath_event, log_path) or {
 		sanitized_root_uri := ls.root_uri.path().replace_each(['/', '_', ':', '_', '\\', '_'])
-		logs_dir_path := os.join_path(get_folder_path(), 'logs')
+		logs_dir_path := os.join_path(os.cache_dir(), 'vls', 'logs')
 		if !os.exists(logs_dir_path) {
-			os.mkdir(logs_dir_path)!
+			os.mkdir_all(logs_dir_path)!
 		}
 
 		alt_log_path := os.join_path(logs_dir_path, 'vls__${sanitized_root_uri}.log')
