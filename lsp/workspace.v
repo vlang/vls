@@ -50,6 +50,7 @@ pub:
 	typ FileChangeType [json: 'type']
 }
 
+[json_as_number]
 pub enum FileChangeType {
 	created = 1
 	changed = 2
@@ -73,6 +74,7 @@ pub struct FileSystemWatcher {
 	kind         int
 }
 
+[json_as_number]
 pub enum WatchKind {
 	create = 1
 	change = 2

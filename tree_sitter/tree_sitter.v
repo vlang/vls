@@ -5,6 +5,7 @@ module tree_sitter
 #flag @VMODROOT/tree_sitter/lib/lib.o
 
 // Input
+[json_as_number]
 enum TSVInputEncoding {
 	utf8
 	utf16

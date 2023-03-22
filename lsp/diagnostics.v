@@ -10,6 +10,7 @@ pub mut:
 	related_information []DiagnosticRelatedInformation [json: relatedInformation]
 }
 
+[json_as_number]
 pub enum DiagnosticSeverity {
 	error = 1
 	warning = 2

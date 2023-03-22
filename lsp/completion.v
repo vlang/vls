@@ -25,6 +25,7 @@ pub:
 	context       CompletionContext
 }
 
+[json_as_number]
 pub enum CompletionTriggerKind {
 	invoked = 1
 	trigger_character = 2
@@ -43,6 +44,7 @@ pub:
 	items         []CompletionItem
 }
 
+[json_as_number]
 pub enum InsertTextFormat {
 	plain_text = 1
 	snippet = 2
@@ -69,6 +71,7 @@ pub mut:
 	// data string [raw]
 }
 
+[json_as_number]
 pub enum CompletionItemKind {
 	text = 1
 	method = 2

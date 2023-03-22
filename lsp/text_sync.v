@@ -46,6 +46,7 @@ pub struct WillSaveTextDocumentParams {
 	reason        TextDocumentSaveReason
 }
 
+[json_as_number]
 pub enum TextDocumentSaveReason {
 	manual = 1
 	after_delay = 2

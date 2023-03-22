@@ -16,6 +16,7 @@ pub mut:
 	file_path string
 }
 
+[json_as_number]
 pub enum TransportKind {
 	send
 	receive
@@ -28,6 +29,7 @@ struct Payload {
 	params string [raw]
 }
 
+[json_as_number]
 pub enum LogKind {
 	send_notification
 	recv_notification

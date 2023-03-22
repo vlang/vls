@@ -10,6 +10,7 @@ mut:
 	context AnalyzerContext
 }
 
+[json_as_number]
 enum ImportCheckResult {
 	ok
 	not_found

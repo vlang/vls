@@ -45,6 +45,7 @@ fn meta_info() vmod.Manifest {
 
 // These are the list of features available in VLS
 // If the feature is experimental, the value name should have a `exp_` prefix
+[json_as_number]
 pub enum Feature {
 	diagnostics
 	v_diagnostics
@@ -441,6 +442,7 @@ pub fn (mut ls Vls) set_timeout_val(min_val int) {
 	ls.shutdown_timeout = min_val * time.second
 }
 
+[json_as_number]
 pub enum ServerStatus {
 	off
 	initialized

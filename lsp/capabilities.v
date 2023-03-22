@@ -166,6 +166,7 @@ pub mut:
 	work_done_progress bool [json: workDoneProgress]
 }
 
+[json_as_number]
 pub enum TextDocumentSyncKind {
 	none_ = 0
 	full = 1

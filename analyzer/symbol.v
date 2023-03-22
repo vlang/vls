@@ -23,6 +23,7 @@ module analyzer
 
 // TODO: From ref to chan_, use interface
 
+[json_as_number]
 pub enum SymbolKind {
 	void
 	placeholder
@@ -71,12 +72,14 @@ pub fn (kind SymbolKind) str() string {
 	}
 }
 
+[json_as_number]
 pub enum SymbolLanguage {
 	c
 	js
 	v
 }
 
+// [json_as_number]
 // pub enum Platform {
 // 	auto
 // 	ios
@@ -94,6 +97,7 @@ pub enum SymbolLanguage {
 // 	cross
 // }
 
+[json_as_number]
 pub enum SymbolAccess {
 	private
 	private_mutable

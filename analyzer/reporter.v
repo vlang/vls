@@ -2,6 +2,7 @@ module analyzer
 
 pub interface ReportData {}
 
+[json_as_number]
 pub enum ReportKind {
 	error
 	warning

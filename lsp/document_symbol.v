@@ -7,6 +7,7 @@ pub:
 	text_document TextDocumentIdentifier [json: textDocument]
 }
 
+[json_as_number]
 pub enum SymbolKind {
 	file = 1
 	module_ = 2

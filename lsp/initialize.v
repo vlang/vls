@@ -27,6 +27,7 @@ pub struct InitializeResult {
 // method: ‘initialized’
 // notification
 // pub struct InitializedParams {}
+[json_as_number]
 pub enum InitializeErrorCode {
 	unknown_protocol_version = 1
 }
@@ -39,12 +40,14 @@ pub struct InitializeError {
 *
  * The kind of resource operations supported by the client.
 */
+[json_as_number]
 pub enum ResourceOperationKind {
 	create
 	rename
 	delete
 }
 
+[json_as_number]
 pub enum FailureHandlingKind {
 	abort
 	transactional
