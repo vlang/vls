@@ -106,7 +106,7 @@ const hover_results = {
 	}
 	'function.vv':              lsp.Hover{
 		contents: lsp.MarkupContent{
-			kind: lsp.markup_kind_markdown,
+			kind: lsp.markup_kind_markdown
 			value: '```v\nfn foo(param1 string, mut param2 []string) bool\n```\n\n---\n\nthis is docstring'
 		}
 		range: lsp.Range{
@@ -117,7 +117,8 @@ const hover_results = {
 	'import.vv':                lsp.Hover{
 		contents: lsp.MarkupContent{
 			kind: 'markdown'
-			value: '```v\nimport os\n```\n\n---\n\nFound at ${os.join_path(@VEXEROOT, 'vlib', 'os')}'
+			value: '```v\nimport os\n```\n\n---\n\nFound at ${os.join_path(@VEXEROOT,
+				'vlib', 'os')}'
 		}
 		range: lsp.Range{
 			start: lsp.Position{0, 7}

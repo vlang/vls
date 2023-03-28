@@ -338,7 +338,7 @@ const completion_results = {
 			kind: .struct_
 			detail: 'pub struct pg.Config'
 			insert_text: 'Config'
-		}
+		},
 		lsp.CompletionItem{
 			label: 'connect'
 			kind: .function
@@ -579,7 +579,7 @@ fn test_completion() {
 	for file in test_files {
 		test_name := file.file_name
 		if github_job == 'v-apps-compile' && test_name in flaky_tests {
-			eprintln('> skipping flaky `$test_name` on the `v-apps-compile` CI job')
+			eprintln('> skipping flaky `${test_name}` on the `v-apps-compile` CI job')
 			continue
 		}
 		err_msg := if test_name !in completion_results {

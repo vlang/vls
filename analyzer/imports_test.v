@@ -24,7 +24,7 @@ const (
 	]
 )
 
-fn parse_content() &tree_sitter.Tree<v.NodeType> {
+fn parse_content() &tree_sitter.Tree[v.NodeType] {
 	mut p := ast.new_parser()
 	return p.parse_string(source: sample_content)
 }
@@ -185,18 +185,18 @@ fn test_other_import_cases() {
 		test_name := os.base(test_file_path)
 		content := os.read_file(test_file_path) or {
 			bench.fail()
-			println(bench.step_message_fail('file $test_file_path is missing'))
+			println(bench.step_message_fail('file ${test_file_path} is missing'))
 			continue
 		}
 
 		src, expected := test_utils.parse_test_file_content(content)
 		if src.len == 0 || content.len == 0 {
 			bench.fail()
-			eprintln(bench.step_message_fail('file $test_name has empty content'))
+			eprintln(bench.step_message_fail('file ${test_name} has empty content'))
 			continue
 		}
 
-		println(bench.step_message('Testing $test_name'))
+		println(bench.step_message('Testing ${test_name}'))
 		tree := p.parse_string(source: src)
 		mut context := store.with(file_path: test_file_path, text: Runes(src.runes()))
 		import_modules_from_tree(context, tree)
