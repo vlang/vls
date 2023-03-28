@@ -88,7 +88,7 @@ fn test_document_symbols() {
 		client: new_test_client(ls)
 	}
 	mut writer := t.client.server.writer()
-	test_files := t.initialize()?
+	test_files := t.initialize()!
 	for file in test_files {
 		// open document
 		doc_id := t.open_document(file) or {
@@ -111,11 +111,11 @@ fn test_document_symbols() {
 				}
 			})
 
-			if _ := t.is_equal(actual, expected) {
-				t.ok(file)
-			} else {
+			t.is_equal(actual, expected) or {
 				t.fail(file, err.msg())
+				continue
 			}
+			t.ok(file)
 		} else {
 			t.fail(file, err.msg())
 		}

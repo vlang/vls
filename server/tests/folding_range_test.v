@@ -88,11 +88,11 @@ fn test_folding_range() {
 		}, mut writer)
 		{
 			// compare content
-			if _ := t.is_equal(folding_range_results[test_name], actual) {
-				t.ok(file)
-			} else {
+			t.is_equal(folding_range_results[test_name], actual) or {
 				t.fail(file, err.msg())
+				continue
 			}
+			t.ok(file)
 		} else {
 			t.fail(file, err.msg())
 		}

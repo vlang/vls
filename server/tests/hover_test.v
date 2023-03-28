@@ -271,11 +271,11 @@ fn test_hover() {
 		}, mut writer)
 		{
 			// compare content
-			if _ := t.is_equal(hover_results[test_name], actual) {
-				t.ok(file)
-			} else {
+			t.is_equal(hover_results[test_name], actual) or {
 				t.fail(file, err.msg())
+				continue
 			}
+			t.ok(file)
 		} else {
 			t.is_null(file, test_name in hover_should_return_null, err)
 		}

@@ -575,7 +575,7 @@ fn test_completion() {
 	}
 
 	mut writer := t.client.server.writer()
-	test_files := t.initialize()?
+	test_files := t.initialize()!
 	for file in test_files {
 		test_name := file.file_name
 		if github_job == 'v-apps-compile' && test_name in flaky_tests {
@@ -615,11 +615,11 @@ fn test_completion() {
 				aactual.sort_with_compare(sort_completion_item)
 			}
 
-			if _ := t.is_equal(expected, aactual) {
-				t.ok(file)
-			} else {
+			t.is_equal(expected, aactual) or {
 				t.fail(file, err.msg())
+				continue
 			}
+			t.ok(file)
 		} else {
 			t.fail(file, err.msg())
 		}

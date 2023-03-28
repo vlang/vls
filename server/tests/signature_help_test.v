@@ -108,7 +108,7 @@ fn test_signature_help() {
 		client: new_test_client(ls)
 	}
 
-	test_files := t.initialize()?
+	test_files := t.initialize()!
 	for file in test_files {
 		test_name := file.file_name
 		err_msg := if test_name !in signature_help_results {
@@ -135,11 +135,11 @@ fn test_signature_help() {
 		}, mut t.client.server.writer())
 		{
 			// compare content
-			if _ := t.is_equal(signature_help_results[test_name], actual) {
-				t.ok(file)
-			} else {
+			t.is_equal(signature_help_results[test_name], actual) or {
 				t.fail(file, err.msg())
+				continue
 			}
+			t.ok(file)
 		} else {
 			t.fail(file, err.msg())
 		}
