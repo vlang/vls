@@ -162,9 +162,9 @@ fn (mut host VlsHost) handle_exit() {
 }
 
 fn (mut host VlsHost) generate_report() !string {
-	reports_dir_path := os.join_path(server.get_folder_path(), 'reports')
+	reports_dir_path := os.join_path(os.cache_dir(), 'vls', 'reports')
 	if !os.exists(reports_dir_path) {
-		os.mkdir(reports_dir_path)!
+		os.mkdir_all(reports_dir_path)!
 	}
 
 	report_file_name := 'vls_report_' + time.utc().unix.str() + '.md'
