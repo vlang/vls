@@ -14,7 +14,7 @@ fn test_formatting() {
 		client: new_test_client(ls)
 	}
 	mut writer := t.client.server.writer()
-	test_files := t.initialize()?
+	test_files := t.initialize()!
 	for file in test_files {
 		exp_file_path := file.file_path.replace('.vv', '.out')
 		content_lines := file.contents.split_into_lines()
@@ -59,11 +59,11 @@ fn test_formatting() {
 				},
 			]
 
-			if _ := t.is_equal(expected, actual) {
-				t.ok(file)
-			} else {
+			t.is_equal(expected, actual) or {
 				t.fail(file, err.msg())
+				continue
 			}
+			t.ok(file)
 		} else {
 			t.is_null(file, file.file_path.ends_with('empty.vv'), err)
 		}

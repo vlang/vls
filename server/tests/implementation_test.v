@@ -55,7 +55,7 @@ fn test_implementation() {
 		client: new_test_client(ls)
 	}
 	mut writer := t.client.server.writer()
-	test_files := t.initialize()?
+	test_files := t.initialize()!
 	for file in test_files {
 		test_name := file.file_name
 		err_msg := if test_name !in implementation_results {
@@ -81,11 +81,11 @@ fn test_implementation() {
 		}, mut writer)
 		{
 			// compare content
-			if _ := t.is_equal(implementation_results[test_name], actual) {
-				t.ok(file)
-			} else {
+			t.is_equal(implementation_results[test_name], actual) or {
 				t.fail(file, err.msg())
+				continue
 			}
+			t.ok(file)
 		} else {
 			t.is_null(file, test_name in implementation_should_return_null, err)
 		}
