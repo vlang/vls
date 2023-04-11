@@ -8,8 +8,8 @@ pub mut:
 	depth  int
 	weight int
 	length int
-	left   &Rope = &Rope(0)
-	right  &Rope = &Rope(0)
+	left   &Rope = &Rope(unsafe { nil })
+	right  &Rope = &Rope(unsafe { nil })
 }
 
 pub fn (r &Rope) is_leaf() bool {

@@ -19,7 +19,7 @@ pub mut:
 pub struct AnalyzerContextParams {
 	file_path    string     [required]
 	file_version int
-	store        &Store     = &Store(0)
+	store        &Store     = &Store(unsafe { nil })
 	text         SourceText = Runes([]rune{len: 0})
 }
 

@@ -129,7 +129,7 @@ mut:
 	client_pid         int
 	// client_capabilities lsp.ClientCapabilities
 	reporter &DiagnosticReporter
-	writer   &ResponseWriter = &ResponseWriter(0)
+	writer   &ResponseWriter = &ResponseWriter(unsafe { nil })
 pub mut:
 	files map[string]File
 }

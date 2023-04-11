@@ -52,7 +52,7 @@ pub fn (mut parser C.TSParser) set_language(language &C.TSLanguage) bool {
 
 [inline]
 pub fn (mut parser C.TSParser) parse_string(content string) &C.TSTree {
-	return parser.parse_string_with_old_tree(content, &C.TSTree(0))
+	return parser.parse_string_with_old_tree(content, &C.TSTree(unsafe { nil }))
 }
 
 [inline]
@@ -67,7 +67,7 @@ pub fn (mut parser C.TSParser) parse_string_with_old_tree_and_len(content string
 
 [inline]
 pub fn (mut parser C.TSParser) parse_bytes(content []u8) &C.TSTree {
-	return parser.parse_bytes_with_old_tree(content, &C.TSTree(0))
+	return parser.parse_bytes_with_old_tree(content, &C.TSTree(unsafe { nil }))
 }
 
 fn v_byte_array_input_read(pl voidptr, byte_index u32, position C.TSPoint, bytes_read &u32) &char {
@@ -546,7 +546,7 @@ pub fn (mut p Parser<T>) reset() {
 [params]
 pub struct ParserParseConfig {
 	source string    [required]
-	tree   &C.TSTree = &C.TSTree(0)
+	tree   &C.TSTree = &C.TSTree(unsafe { nil })
 }
 
 pub fn (mut p Parser<T>) parse_string(cfg ParserParseConfig) &Tree<T> {
