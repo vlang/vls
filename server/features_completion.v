@@ -18,7 +18,7 @@ mut:
 	parent_node        ast.Node
 	show_global        bool // for displaying global (project) symbols
 	show_local         bool // for displaying local variables
-	filter_return_type &analyzer.Symbol = &analyzer.Symbol(0) // filters results by type
+	filter_return_type &analyzer.Symbol = &analyzer.Symbol(unsafe { nil }) // filters results by type
 	filter_sym_kinds   []analyzer.SymbolKind
 	fields_only        bool             // for displaying only the struct/enum fields
 	show_mut_only      bool // filters results based on the object's mutability state.

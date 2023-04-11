@@ -73,7 +73,7 @@ fn run_host(cmd cli.Command) ! {
 		server: jrpc_server
 		writer: jrpc_server.writer(own_buffer: true)
 		child: new_vls_process(...server_args)
-		client: &net.TcpConn(0)
+		client: &net.TcpConn(unsafe { nil })
 		client_port: client_port
 		generate_report: should_generate_report
 	}

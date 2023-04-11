@@ -153,7 +153,7 @@ struct SocketStream {
 	log_label string = 'vls'
 	log       bool   = true
 mut:
-	conn   &net.TcpConn       = &net.TcpConn(0)
+	conn   &net.TcpConn       = &net.TcpConn(unsafe { nil })
 	reader &io.BufferedReader = unsafe { nil }
 pub mut:
 	port  int = 5007

@@ -83,7 +83,7 @@ pub fn (tree &Tree) get_available_nodes(completed ...string) []string {
 [heap]
 pub struct Node {
 mut:
-	tree &Tree = &Tree(0)
+	tree &Tree = &Tree(unsafe { nil })
 pub mut:
 	id           string
 	dependencies []string

@@ -429,7 +429,7 @@ fn (mut sr SymbolAnalyzer) fn_decl(fn_node ast.Node) !&Symbol {
 	}
 
 	mut fn_sym := sr.new_top_level_symbol(name_node, access, .function)!
-	mut scope := sr.get_scope(body_node) or { &ScopeTree(0) }
+	mut scope := sr.get_scope(body_node) or { &ScopeTree(unsafe { nil }) }
 	fn_sym.access = access
 	fn_sym.return_sym = sr.context.find_symbol_by_type_node(return_node) or { void_sym }
 	if receiver_node := fn_node.child_by_field_name('receiver') {
@@ -636,7 +636,7 @@ fn (mut sr SymbolAnalyzer) fn_literal(fn_node ast.Node) !&Symbol {
 		return report_error('parameter list not found', fn_node.range())
 	}
 
-	mut scope := sr.get_scope(body_node) or { &ScopeTree(0) }
+	mut scope := sr.get_scope(body_node) or { &ScopeTree(unsafe { nil }) }
 	mut params := extract_parameter_list(mut sr.context, params_list_node)
 	mut return_sym := unsafe { void_sym }
 	if result_node := fn_node.child_by_field_name('result') {
@@ -736,7 +736,7 @@ fn (mut sr SymbolAnalyzer) match_expression(match_node ast.Node) ![]&Symbol {
 			)
 			continue
 		}
-		got_block_type := sr.extract_block(conseq_block, mut &ScopeTree(0)) or {
+		got_block_type := sr.extract_block(conseq_block, mut &ScopeTree(unsafe { nil })) or {
 			return void_sym_arr
 		}
 
@@ -754,7 +754,7 @@ fn (mut sr SymbolAnalyzer) if_expression(if_stmt_node ast.Node) ![]&Symbol {
 	body_node := if_stmt_node.child_by_field_name('consequence') or {
 		return report_error('expression body not found', if_stmt_node.range())
 	}
-	mut if_scope := sr.get_scope(body_node) or { &ScopeTree(0) }
+	mut if_scope := sr.get_scope(body_node) or { &ScopeTree(unsafe { nil }) }
 	mut has_initializer := false
 
 	if initializer_node := if_stmt_node.child_by_field_name('initializer') {
@@ -776,7 +776,7 @@ fn (mut sr SymbolAnalyzer) if_expression(if_stmt_node ast.Node) ![]&Symbol {
 
 	if alternative_node := if_stmt_node.child_by_field_name('alternative') {
 		if alternative_node.type_name == .block {
-			mut else_scope := sr.get_scope(alternative_node) or { &ScopeTree(0) }
+			mut else_scope := sr.get_scope(alternative_node) or { &ScopeTree(unsafe { nil }) }
 			alt_block_return_sym = sr.extract_block(alternative_node, mut else_scope)!
 		} else if alternative_node.type_name == .if_expression {
 			alt_block_return_sym = sr.if_expression(alternative_node)!
@@ -795,7 +795,7 @@ fn (mut sr SymbolAnalyzer) for_statement(for_stmt_node ast.Node) ! {
 	body_node := for_stmt_node.child_by_field_name('body') or {
 		return report_error('loop body not found', for_stmt_node.range())
 	}
-	mut scope := sr.get_scope(body_node) or { &ScopeTree(0) }
+	mut scope := sr.get_scope(body_node) or { &ScopeTree(unsafe { nil }) }
 
 	if named_child_count == 2 {
 		cond_node := for_stmt_node.named_child(0) or {
@@ -949,7 +949,7 @@ fn (mut sr SymbolAnalyzer) expression(node ast.Node) ![]&Symbol {
 			block_node := node.named_child(0) or {
 				return report_error('statement body not found', node.range())
 			}
-			mut local_scope := sr.get_scope(block_node) or { &ScopeTree(0) }
+			mut local_scope := sr.get_scope(block_node) or { &ScopeTree(unsafe { nil }) }
 			block_return_sym := sr.extract_block(block_node, mut local_scope)!
 			if node.type_name == .unsafe_expression {
 				return block_return_sym
@@ -1004,7 +1004,7 @@ fn (mut sr SymbolAnalyzer) statement(node ast.Node, mut scope ScopeTree) ![]&Sym
 			block_node := node.named_child(0) or {
 				return report_error('statement body not found', node.range())
 			}
-			mut local_scope := sr.get_scope(block_node) or { &ScopeTree(0) }
+			mut local_scope := sr.get_scope(block_node) or { &ScopeTree(unsafe { nil }) }
 			sr.extract_block(block_node, mut local_scope)!
 		}
 		.short_var_declaration {
@@ -1018,7 +1018,7 @@ fn (mut sr SymbolAnalyzer) statement(node ast.Node, mut scope ScopeTree) ![]&Sym
 			sr.for_statement(node)!
 		}
 		.block {
-			mut local_scope := sr.get_scope(node) or { &ScopeTree(0) }
+			mut local_scope := sr.get_scope(node) or { &ScopeTree(unsafe { nil }) }
 			sr.extract_block(node, mut local_scope)!
 		}
 		else {
