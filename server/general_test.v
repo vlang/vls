@@ -114,7 +114,7 @@ fn test_setup_logger() {
 	}
 }
 
-fn init_tests() !(&TestClient, &server.Vls) {
+fn init_tests() !(&server_test_utils.TestClient, &server.Vls) {
 	mut ls := server.new()
 	mut io_ := new_test_client(ls)
 	io_.send[map[string]string, lsp.InitializeResult]('initialize', map[string]string{}) or {
