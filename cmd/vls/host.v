@@ -43,7 +43,7 @@ fn (mut lg Logger) writeln(content string) int {
 			carr_idx += 4
 		}
 		final_con := if lg.with_timestamp {
-			'[$time.utc()] ${content[carr_idx..].trim_space()}\n'
+			'[${time.utc()}] ${content[carr_idx..].trim_space()}\n'
 		} else {
 			content[carr_idx..].trim_space()
 		}
@@ -51,7 +51,7 @@ fn (mut lg Logger) writeln(content string) int {
 		return final_con.len
 	} else {
 		final_con := if lg.with_timestamp {
-			'[$time.utc()] $content.trim_space()'
+			'[${time.utc()}] ${content.trim_space()}'
 		} else {
 			content.trim_space()
 		}
@@ -115,7 +115,7 @@ fn (mut host VlsHost) listen_for_input() {
 		if _ := host.server.stream.read(mut buf) {
 			host.client.write(buf) or {}
 			host.server.intercept_raw_request(buf) or {
-				host.writer.log_message('[$err.code()] $err.msg()', .error)
+				host.writer.log_message('[${err.code()}] ${err.msg()}', .error)
 				// do nothing
 			}
 			// TODO: move as interceptor
@@ -153,7 +153,7 @@ fn (mut host VlsHost) handle_exit() {
 			panic(err)
 		}
 
-		host.writer.show_message('VLS has encountered an error. The error report is saved in $report_path',
+		host.writer.show_message('VLS has encountered an error. The error report is saved in ${report_path}',
 			.error)
 	}
 
@@ -186,20 +186,20 @@ fn (mut host VlsHost) generate_report() !string {
 	// Actual Output
 	actual_out := host.stderr_logger.get_text()
 	final_err_out := if actual_out.len != 0 {
-		'```\n$actual_out\n```'
+		'```\n${actual_out}\n```'
 	} else {
 		'N/A'
 	}
 
 	// Last LSP Requests
 	mut lsp_logs_section := ''
-	lsp_logs_section += '### Request\n```\n$host.stdin_logger.get_text()\n```\n'
-	lsp_logs_section += '### Response\n```\n$host.stdout_logger.get_text()\n```\n'
+	lsp_logs_section += '### Request\n```\n${host.stdin_logger.get_text()}\n```\n'
+	lsp_logs_section += '### Response\n```\n${host.stdout_logger.get_text()}\n```\n'
 
 	// Final output
 	final_output := bug_issue_template
 		.replace("Paste the output of 'v doctor' here", vdoctor_info)
-		.replace("Paste the output of 'vls --version' here", 'vls version: $server.meta.version\nvls server arguments: ${host.child.args.join(' ')}')
+		.replace("Paste the output of 'vls --version' here", 'vls version: ${server.meta.version}\nvls server arguments: ${host.child.args.join(' ')}')
 		.replace('<!-- What is the actual output displayed in the console/editor? -->',
 			final_err_out)
 		.replace('<!-- If you have a copy vls.log, you can drag them here. -->', lsp_logs_section)

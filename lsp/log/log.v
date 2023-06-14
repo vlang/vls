@@ -54,7 +54,7 @@ pub struct LogItem {
 
 // json is a JSON string representation of the log item.
 pub fn (li LogItem) encode_json(mut wr io.Writer) ! {
-	wr.write('{"kind":"$li.kind","timestamp":$li.timestamp.unix,"payload":'.bytes())!
+	wr.write('{"kind":"${li.kind}","timestamp":${li.timestamp.unix},"payload":'.bytes())!
 	wr.write(li.payload)!
 	wr.write('}\n'.bytes())!
 }
@@ -131,11 +131,11 @@ fn (mut l LogRecorder) log(item LogItem) {
 // as a JSON-RPC interceptor
 const event_prefix = '$/lspLogger'
 
-pub const set_logpath_event = '$event_prefix/setPath'
+pub const set_logpath_event = '${event_prefix}/setPath'
 
-pub const close_event = '$event_prefix/close'
+pub const close_event = '${event_prefix}/close'
 
-pub const state_event = '$event_prefix/state'
+pub const state_event = '${event_prefix}/state'
 
 pub fn (mut l LogRecorder) on_event(name string, data jsonrpc.InterceptorData) ! {
 	if name == log.set_logpath_event && data is string {

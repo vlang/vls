@@ -5,7 +5,7 @@ import net
 import time
 
 fn launch_cmd(exec_path string, args ...string) &os.Process {
-	eprintln('executing $exec_path ${args.join(' ')}')
+	eprintln('executing ${exec_path} ${args.join(' ')}')
 
 	mut p := os.new_process(exec_path)
 	p.set_args(args)
@@ -26,7 +26,7 @@ fn get_vls_path(dir string) string {
 }
 
 fn wrap_request(payload string) string {
-	return 'Content-Length: $payload.len\r\n\r\n$payload'
+	return 'Content-Length: ${payload.len}\r\n\r\n${payload}'
 }
 
 const vls_cmd_dir = os.join_path(@VMODROOT, 'cmd', 'vls')

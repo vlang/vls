@@ -35,13 +35,13 @@ fn test_semantic_analysis() {
 		test_name := os.base(test_file_path)
 		content := os.read_file(test_file_path) or {
 			bench.fail()
-			println(bench.step_message_fail('file $test_file_path is missing'))
+			println(bench.step_message_fail('file ${test_file_path} is missing'))
 			continue
 		}
 
 		src, expected := test_utils.parse_test_file_content(content)
 		err_msg := if src.len == 0 || content.len == 0 {
-			'file $test_name has empty content'
+			'file ${test_name} has empty content'
 		} else {
 			''
 		}

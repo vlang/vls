@@ -62,7 +62,7 @@ pub fn (r &Rope) runes() []rune {
 // at is v equiv of rope.Index(idx)
 pub fn (r &Rope) at(idx int) rune {
 	if idx < 0 || idx >= r.len() {
-		panic('index out of bounds $idx/$r.length')
+		panic('index out of bounds ${idx}/${r.length}')
 	}
 
 	if r.is_leaf() {
@@ -103,7 +103,7 @@ pub fn (r &Rope) split(idx int) (&Rope, &Rope) {
 	if isnil(r) {
 		panic('operation not permitted - rope is nil')
 	} else if idx < 0 || idx > r.len() {
-		panic('rope split out of bounds $idx/$r.len()')
+		panic('rope split out of bounds ${idx}/${r.len()}')
 	}
 
 	if r.is_leaf() {
@@ -196,7 +196,8 @@ fn (r &Rope) b_internal_report(cur_offset int, start int, end int, mut res []run
 		read_cnt = offset - cur_offset
 	} else {
 		left_cnt, l_offset := r.left.b_internal_report(offset, start, end, mut res)
-		right_cnt, r_offset := r.right.b_internal_report(l_offset, start + left_cnt, end, mut res)
+		right_cnt, r_offset := r.right.b_internal_report(l_offset, start + left_cnt, end, mut
+			res)
 		read_cnt += left_cnt + right_cnt
 		offset = r_offset
 	}

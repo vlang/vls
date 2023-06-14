@@ -93,7 +93,7 @@ pub fn sexpr_str_write_scopetree(mut writer strings.Builder, mut symbol_formatte
 		if isnil(child) || (!isnil(child) && child.symbols.len == 0) {
 			continue
 		}
-		writer.write_string(' (scope [$child.start_byte]-[$child.end_byte]')
+		writer.write_string(' (scope [${child.start_byte}]-[${child.end_byte}]')
 		sexpr_str_write_scopetree(mut writer, mut symbol_formatter, child)
 		writer.write_byte(`)`)
 	}

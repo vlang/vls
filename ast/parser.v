@@ -4,17 +4,17 @@ import strings
 import tree_sitter
 import tree_sitter_v as v
 
-pub type Node = tree_sitter.Node<v.NodeType>
-pub type Tree = tree_sitter.Tree<v.NodeType>
+pub type Node = tree_sitter.Node[v.NodeType]
+pub type Tree = tree_sitter.Tree[v.NodeType]
 
-pub fn new_parser() &tree_sitter.Parser<v.NodeType> {
-	return tree_sitter.new_parser<v.NodeType>(v.language, v.type_factory)
+pub fn new_parser() &tree_sitter.Parser[v.NodeType] {
+	return tree_sitter.new_parser[v.NodeType](v.language, v.type_factory)
 }
 
 fn (n Node) str() string {
 	mut cursor := n.tree_cursor()
 	if !cursor.to_first_child() {
-		return ""
+		return ''
 	}
 
 	mut builder := strings.new_builder(0)

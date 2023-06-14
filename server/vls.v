@@ -80,7 +80,7 @@ fn feature_from_str(feature_name string) !Feature {
 		'definition' { return Feature.definition }
 		'code_lens' { return Feature.code_lens }
 		'document_link' { return Feature.document_link }
-		else { return error('feature "$feature_name" not found') }
+		else { return error('feature "${feature_name}" not found') }
 	}
 }
 
@@ -113,7 +113,7 @@ mut:
 struct Vls {
 mut:
 	vroot_path         string
-	parser             &tree_sitter.Parser<v.NodeType>
+	parser             &tree_sitter.Parser[v.NodeType]
 	store              analyzer.Store
 	status             ServerStatus = .off
 	root_uri           lsp.DocumentUri
@@ -365,7 +365,7 @@ fn (mut ls Vls) panic(message string, mut wr ResponseWriter) {
 		wr.server.dispatch_event(log.close_event, '') or {}
 		ls.exit(mut wr)
 	} else {
-		wr.log_message('VLS: An error occurred. Message: $message', .error)
+		wr.log_message('VLS: An error occurred. Message: ${message}', .error)
 	}
 }
 
@@ -411,9 +411,9 @@ pub fn (mut ls Vls) set_features(features []string, enable bool) ! {
 	for feature_name in features {
 		feature_val := feature_from_str(feature_name)!
 		if feature_val !in ls.enabled_features && !enable {
-			return error('feature "$feature_name" is already disabled')
+			return error('feature "${feature_name}" is already disabled')
 		} else if feature_val in ls.enabled_features && enable {
-			return error('feature "$feature_name" is already enabled')
+			return error('feature "${feature_name}" is already enabled')
 		} else if feature_val !in ls.enabled_features && enable {
 			ls.enabled_features << feature_val
 		} else {

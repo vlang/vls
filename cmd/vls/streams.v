@@ -60,7 +60,7 @@ pub fn (mut stream StdioStream) read(mut buf []u8) !int {
 	}
 
 	mut body := []u8{len: conlen}
-	read_cnt :=  stream.stdin.read(mut body) or { return err }
+	read_cnt := stream.stdin.read(mut body) or { return err }
 	if read_cnt != conlen {
 		return IError(io.Eof{})
 	}
@@ -105,12 +105,12 @@ fn new_socket_stream_server(port int, log bool) !io.ReaderWriter {
 	server_label := 'vls-server'
 
 	// Open the connection.
-	address := '$base_ip:$port'
+	address := '${base_ip}:${port}'
 	mut listener := net.listen_tcp(.ip, address)!
 
 	if log {
 		eprintln(term.yellow('Warning: TCP connection is used primarily for debugging purposes only \n\tand may have performance issues. Use it on your own risk.\n'))
-		println('[$server_label] : Established connection at $address\n')
+		println('[${server_label}] : Established connection at ${address}\n')
 	}
 
 	mut conn := listener.accept() or {
@@ -134,7 +134,7 @@ fn new_socket_stream_server(port int, log bool) !io.ReaderWriter {
 
 fn new_socket_stream_client(port int) !io.ReaderWriter {
 	// Open the connection.
-	address := '$base_ip:$port'
+	address := '${base_ip}:${port}'
 	mut conn := net.dial_tcp(address)!
 	mut reader := io.new_buffered_reader(reader: conn, cap: 1024 * 1024)
 	conn.set_blocking(true) or {}
@@ -164,7 +164,7 @@ pub fn (mut sck SocketStream) write(buf []u8) !int {
 	// TODO: should be an interceptor
 	$if !test {
 		if sck.log {
-			println('[$sck.log_label] : ${term.red('Sent data')} : $buf.bytestr()\n')
+			println('[${sck.log_label}] : ${term.red('Sent data')} : ${buf.bytestr()}\n')
 		}
 	}
 
@@ -216,7 +216,7 @@ pub fn (mut sck SocketStream) read(mut buf []u8) !int {
 
 	$if !test {
 		if sck.log {
-			println('[$sck.log_label] : ${term.green('Received data')} : $buf.bytestr()\n')
+			println('[${sck.log_label}] : ${term.green('Received data')} : ${buf.bytestr()}\n')
 		}
 	}
 	return conlen + header_len

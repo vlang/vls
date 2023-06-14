@@ -78,7 +78,7 @@ pub fn (mut ls Vls) initialize(params lsp.InitializeParams, mut wr ResponseWrite
 	// logging
 	mut is_logger_installed := false
 	mut is_logger_enabled := false
-	if logger := jsonrpc.get_interceptor<LogRecorder>(wr.server) {
+	if logger := jsonrpc.get_interceptor[LogRecorder](wr.server) {
 		is_logger_installed = true
 
 		// override the --debug flag earlier set in the CLI
@@ -104,7 +104,7 @@ pub fn (mut ls Vls) initialize(params lsp.InitializeParams, mut wr ResponseWrite
 	ls.print_info(params.process_id, params.client_info, mut wr)
 
 	// print debug options info to avoid general_test failing
-	wr.log_message('is_logger_installed: $is_logger_installed | is_logger_enabled: $is_logger_enabled | params.trace: $params.trace',
+	wr.log_message('is_logger_installed: ${is_logger_installed} | is_logger_enabled: ${is_logger_enabled} | params.trace: ${params.trace}',
 		.info)
 
 	// since builtin is used frequently, they should be parsed first and only once
@@ -129,13 +129,13 @@ fn (mut ls Vls) setup_logger(mut rw ResponseWriter) !string {
 		}
 
 		alt_log_path := os.join_path(logs_dir_path, 'vls__${sanitized_root_uri}.log')
-		rw.show_message('Cannot save log to ${log_path}. Saving log to $alt_log_path',
+		rw.show_message('Cannot save log to ${log_path}. Saving log to ${alt_log_path}',
 			.error)
 
 		// avoid saving log path in test
 		$if !test {
 			rw.server.dispatch_event(log.set_logpath_event, alt_log_path) or {
-				return error('Cannot save log to $alt_log_path')
+				return error('Cannot save log to ${alt_log_path}')
 			}
 		}
 
@@ -148,17 +148,17 @@ fn (mut ls Vls) setup_logger(mut rw ResponseWriter) !string {
 fn (mut ls Vls) print_info(process_id int, client_info lsp.ClientInfo, mut wr ResponseWriter) {
 	arch := if runtime.is_64bit() { 64 } else { 32 }
 	client_name := if client_info.name.len != 0 {
-		'$client_info.name $client_info.version'
+		'${client_info.name} ${client_info.version}'
 	} else {
 		'Unknown'
 	}
 
 	// print important info for reporting
-	wr.log_message('VLS Version: $meta.version, OS: $os.user_os() $arch', .info)
-	wr.log_message('VLS executable path: $os.executable()', .info)
+	wr.log_message('VLS Version: ${meta.version}, OS: ${os.user_os()} ${arch}', .info)
+	wr.log_message('VLS executable path: ${os.executable()}', .info)
 	wr.log_message('VLS build with V ${@VHASH}', .info)
-	wr.log_message('Client / Editor: $client_name (PID: $process_id)', .info)
-	wr.log_message('Using V path (VROOT): $ls.vroot_path', .info)
+	wr.log_message('Client / Editor: ${client_name} (PID: ${process_id})', .info)
+	wr.log_message('Using V path (VROOT): ${ls.vroot_path}', .info)
 }
 
 // shutdown sets the state to shutdown but does not exit

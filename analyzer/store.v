@@ -436,7 +436,7 @@ pub fn symbol_name_from_node(node ast.Node, src_text tree_sitter.SourceText) (Sy
 			}
 
 			if (key_module_name.len != 0 && val_module_name.len == 0)
-				|| (key_module_name == val_module_name) {
+				|| key_module_name == val_module_name {
 				// if key type uses a custom type, return the symbol in the key's origin module
 				return SymbolKind.map_, key_module_name, 'map[${key_symbol_name}]${value_symbol_text}'
 			} else if key_module_name.len == 0 && val_module_name.len != 0 {
