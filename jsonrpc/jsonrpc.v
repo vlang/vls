@@ -4,7 +4,6 @@
 module jsonrpc
 
 import json
-import jsonrpc
 import strings
 import io
 
