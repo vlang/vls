@@ -418,9 +418,7 @@ void *tree_sitter_v_external_scanner_create() {
 
 void tree_sitter_v_external_scanner_destroy(void *p) {
     Scanner *scanner = (Scanner*) p;
-    if (scanner->tokens->top + 1 > 0) {
-        free(scanner->tokens->contents);
-    }
+    free(scanner->tokens->contents);
     free(scanner->tokens);
     free(scanner);
 }
