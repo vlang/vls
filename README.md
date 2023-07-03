@@ -1,3 +1,6 @@
+# Archived
+A new better version of the language server for V is being developed on https://github.com/v-analyzer/v-analyzer
+
 > ## ⚠️ Warning (Please read this first) ⚠️
 > VLS is early software. It may not be guaranteed to work reliably on your system.
 >
