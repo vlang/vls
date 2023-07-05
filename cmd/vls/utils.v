@@ -6,7 +6,7 @@ import server
 const content_length = 'Content-Length: '
 
 fn make_lsp_payload(output string) string {
-	return 'Content-Length: $output.len\r\n\r\n$output'
+	return 'Content-Length: ${output.len}\r\n\r\n${output}'
 }
 
 fn launch_v_tool(args ...string) !&os.Process {

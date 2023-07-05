@@ -32,9 +32,9 @@ fn test_compute_offset() {
 		bench.step()
 		test_name := os.base(test_file_path)
 		err_msg := if test_name !in compute_offset_results {
-			'missing results for $test_name'
+			'missing results for ${test_name}'
 		} else if test_name !in compute_offset_inputs {
-			'missing input data for $test_name'
+			'missing input data for ${test_name}'
 		} else {
 			''
 		}
@@ -43,10 +43,10 @@ fn test_compute_offset() {
 			eprintln(bench.step_message_fail(err_msg))
 			continue
 		}
-		println(bench.step_message('Testing $test_name'))
+		println(bench.step_message('Testing ${test_name}'))
 		content := os.read_file(test_file_path) or {
 			bench.fail()
-			eprintln(bench.step_message_fail('file $test_file_path is missing'))
+			eprintln(bench.step_message_fail('file ${test_file_path} is missing'))
 			continue
 		}
 		input := compute_offset_inputs[test_name]
@@ -89,9 +89,9 @@ fn test_compute_position() {
 		bench.step()
 		test_name := os.base(test_file_path)
 		err_msg := if test_name !in compute_offset_results {
-			'missing results for $test_name'
+			'missing results for ${test_name}'
 		} else if test_name !in compute_offset_inputs {
-			'missing input data for $test_name'
+			'missing input data for ${test_name}'
 		} else {
 			''
 		}
@@ -100,10 +100,10 @@ fn test_compute_position() {
 			eprintln(bench.step_message_fail(err_msg))
 			continue
 		}
-		println(bench.step_message('Testing $test_name'))
+		println(bench.step_message('Testing ${test_name}'))
 		content := os.read_file(test_file_path) or {
 			bench.fail()
-			eprintln(bench.step_message_fail('file $test_file_path is missing'))
+			eprintln(bench.step_message_fail('file ${test_file_path} is missing'))
 			continue
 		}
 		input := compute_position_inputs[test_name]
@@ -146,9 +146,9 @@ fn test_tspoint_to_lsp_pos() {
 		bench.step()
 		test_name := os.base(test_file_path)
 		err_msg := if test_name !in tspoint_to_lsp_pos_inputs {
-			'missing results for $test_name'
+			'missing results for ${test_name}'
 		} else if test_name !in tspoint_to_lsp_pos_results {
-			'missing input data for $test_name'
+			'missing input data for ${test_name}'
 		} else {
 			''
 		}
@@ -157,10 +157,10 @@ fn test_tspoint_to_lsp_pos() {
 			eprintln(bench.step_message_fail(err_msg))
 			continue
 		}
-		println(bench.step_message('Testing $test_name'))
+		println(bench.step_message('Testing ${test_name}'))
 		content := os.read_file(test_file_path) or {
 			bench.fail()
-			eprintln(bench.step_message_fail('file $test_file_path is missing'))
+			eprintln(bench.step_message_fail('file ${test_file_path} is missing'))
 			continue
 		}
 		input := tspoint_to_lsp_pos_inputs[test_name]
@@ -223,9 +223,9 @@ fn test_tsrange_to_lsp_range() {
 		bench.step()
 		test_name := os.base(test_file_path)
 		err_msg := if test_name !in tsrange_to_lsp_range_inputs {
-			'missing results for $test_name'
+			'missing results for ${test_name}'
 		} else if test_name !in tsrange_to_lsp_range_results {
-			'missing input data for $test_name'
+			'missing input data for ${test_name}'
 		} else {
 			''
 		}
@@ -234,10 +234,10 @@ fn test_tsrange_to_lsp_range() {
 			eprintln(bench.step_message_fail(err_msg))
 			continue
 		}
-		println(bench.step_message('Testing $test_name'))
+		println(bench.step_message('Testing ${test_name}'))
 		content := os.read_file(test_file_path) or {
 			bench.fail()
-			eprintln(bench.step_message_fail('file $test_file_path is missing'))
+			eprintln(bench.step_message_fail('file ${test_file_path} is missing'))
 			continue
 		}
 		input := tspoint_to_lsp_pos_inputs[test_name]

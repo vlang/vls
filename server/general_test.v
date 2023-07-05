@@ -1,4 +1,4 @@
-import jsonrpc.server_test_utils { new_test_client, RpcResult, TestClient  }
+import jsonrpc.server_test_utils { new_test_client }
 import jsonrpc
 import server
 import lsp
@@ -11,7 +11,7 @@ fn test_wrong_first_request() {
 	mut io_ := new_test_client(ls)
 
 	assert ls.status() == .off
-	io_.send<lsp.CodeLensParams, jsonrpc.Null>('textDocument/codeLens', lsp.CodeLensParams{}) or {
+	io_.send[lsp.CodeLensParams, jsonrpc.Null]('textDocument/codeLens', lsp.CodeLensParams{}) or {
 		assert err.code() == jsonrpc.server_not_initialized.code()
 		assert err.msg() == jsonrpc.server_not_initialized.msg()
 		return
@@ -22,7 +22,7 @@ fn test_wrong_first_request() {
 fn test_initialize_with_capabilities() {
 	mut ls := server.new()
 	mut io_ := new_test_client(ls)
-	result := io_.send<map[string]string, lsp.InitializeResult>('initialize', map[string]string{}) or {
+	result := io_.send[map[string]string, lsp.InitializeResult]('initialize', map[string]string{}) or {
 		if err is io.Eof {
 			return
 		}
@@ -92,7 +92,7 @@ fn test_set_features() {
 fn test_setup_logger() {
 	println('test_setup_logger')
 	mut io_ := new_test_client(server.new(), &LogRecorder{})
-	io_.send<lsp.InitializeParams, lsp.InitializeResult>('initialize', lsp.InitializeParams{
+	io_.send[lsp.InitializeParams, lsp.InitializeResult]('initialize', lsp.InitializeParams{
 		trace: 'verbose'
 		root_uri: lsp.document_uri_from_path(os.join_path('/non_existent', 'path'))
 	}) or {
@@ -103,21 +103,21 @@ fn test_setup_logger() {
 		return
 	}
 
-	notif := io_.stream.notification_at<lsp.ShowMessageParams>(0)!
+	notif := io_.stream.notification_at[lsp.ShowMessageParams](0)!
 	assert notif.method == 'window/showMessage'
 
 	expected_err_path := os.join_path('/non_existent', 'path', 'vls.log')
 	expected_alt_log_path := os.join_path(os.cache_dir(), 'vls', 'logs', 'vls___non_existent_path.log')
 	assert notif.params == lsp.ShowMessageParams{
 		@type: .error
-		message: 'Cannot save log to ${expected_err_path}. Saving log to $expected_alt_log_path'
+		message: 'Cannot save log to ${expected_err_path}. Saving log to ${expected_alt_log_path}'
 	}
 }
 
-fn init_tests() !(&TestClient, &server.Vls) {
+fn init_tests() !(&server_test_utils.TestClient, &server.Vls) {
 	mut ls := server.new()
 	mut io_ := new_test_client(ls)
-	io_.send<map[string]string, lsp.InitializeResult>('initialize', map[string]string{}) or {
+	io_.send[map[string]string, lsp.InitializeResult]('initialize', map[string]string{}) or {
 		if err !is io.Eof {
 			return err
 		}

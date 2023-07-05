@@ -35,7 +35,7 @@ fn test_document_uri_from_path_windows() {
 fn test_document_uri_unicode() {
 	input := [
 		'/usr/home/你好世界',
-		r'C:/files/C%3A%5Cfiles'
+		r'C:/files/C%3A%5Cfiles',
 	]
 	mut expected := []string{}
 	$if windows {

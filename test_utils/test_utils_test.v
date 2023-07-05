@@ -36,7 +36,7 @@ fn test_result() {
 	result := {
 		'hello': 'world'
 	}
-	resp := jsonrpc.Response<map[string]string>{
+	resp := jsonrpc.Response[map[string]string]{
 		id: '1'
 		result: result
 	}
@@ -46,7 +46,7 @@ fn test_result() {
 
 fn test_notification() {
 	mut io := Testio{}
-	request := json.encode(jsonrpc.NotificationMessage<string>{
+	request := json.encode(jsonrpc.NotificationMessage[string]{
 		method: 'log'
 		params: 'just a log'
 	})
@@ -58,7 +58,7 @@ fn test_notification() {
 
 fn test_response_error() {
 	mut io := Testio{}
-	payload := jsonrpc.Response<map[string]string>{
+	payload := jsonrpc.Response[map[string]string]{
 		error: jsonrpc.response_error(error: jsonrpc.method_not_found)
 	}
 	request := json.encode(payload)

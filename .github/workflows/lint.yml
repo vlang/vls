@@ -1,0 +1,21 @@
+name: Lint
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+    branches:
+      - master
+
+jobs:
+  fmt:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Setup V
+        uses: vlang/setup-v@v1.3
+
+      - uses: actions/checkout@v3
+
+      - name: Check Formatting
+        run: v fmt -verify .

@@ -4,7 +4,7 @@ fn simple_data_formatter(data errors.ErrorData) string {
 	if data is string {
 		return *data
 	} else {
-		return '$data'
+		return '${data}'
 	}
 }
 

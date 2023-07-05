@@ -10,7 +10,7 @@ mut:
 	cur_child_idx int  = -1
 	named_only    bool = true
 	child_count   int                                [required]
-	cursor        tree_sitter.TreeCursor<v.NodeType> [required]
+	cursor        tree_sitter.TreeCursor[v.NodeType] [required]
 }
 
 pub fn (mut tc TreeCursor) next() ?ast.Node {

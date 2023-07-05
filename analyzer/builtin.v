@@ -46,7 +46,7 @@ fn register_none(mut ss Store, builtin_import &Import) {
 		file_version: 0
 	}
 
-	ss.register_symbol(mut none_sym) or { eprintln('none registration is skipped. Reason: $err') }
+	ss.register_symbol(mut none_sym) or { eprintln('none registration is skipped. Reason: ${err}') }
 }
 
 fn register_builtin_symbols(mut ss Store, builtin_import &Import) {
@@ -98,7 +98,7 @@ fn register_builtin_symbols(mut ss Store, builtin_import &Import) {
 		}
 
 		ss.register_symbol(mut builtin_sym) or {
-			eprintln('$type_name registration is skipped. Reason: $err')
+			eprintln('${type_name} registration is skipped. Reason: ${err}')
 			continue
 		}
 	}
@@ -119,7 +119,7 @@ fn register_builtin_symbols(mut ss Store, builtin_import &Import) {
 			}
 
 			ss.register_symbol(mut array_sym) or {
-				eprintln('$array_sym.name registration is skipped. Reason: $err')
+				eprintln('${array_sym.name} registration is skipped. Reason: ${err}')
 				continue
 			}
 		}

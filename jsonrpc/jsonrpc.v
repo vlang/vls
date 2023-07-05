@@ -61,18 +61,18 @@ pub mut:
 // json returns the JSON string form of the Request.
 pub fn (req Request) json() string {
 	// NOTE: make request act as a notification for server_test_utils
-	id_payload := if req.id.len != 0 { ',"id":$req.id,' } else { ',' }
-	return '{"jsonrpc":"$jsonrpc.version"$id_payload"method":"$req.method","params":$req.params}'
+	id_payload := if req.id.len != 0 { ',"id":${req.id},' } else { ',' }
+	return '{"jsonrpc":"${jsonrpc.version}"${id_payload}"method":"${req.method}","params":${req.params}}'
 }
 
 // decode_params decodes the parameters of a Request.
-pub fn (req Request) decode_params<T>() !T {
+pub fn (req Request) decode_params[T]() !T {
 	return json.decode(T, req.params) or { return err }
 }
 
 // Response is a representation of server reply after an rpc call was made.
 // https://www.jsonrpc.org/specification#response_object
-pub struct Response<T> {
+pub struct Response[T] {
 pub:
 	jsonrpc string = jsonrpc.version
 	id      string
@@ -82,12 +82,12 @@ pub:
 }
 
 // json returns the JSON string form of the Response<T>
-pub fn (resp Response<T>) json() string {
+pub fn (resp Response[T]) json() string {
 	mut resp_wr := strings.new_builder(100)
 	defer {
 		unsafe { resp_wr.free() }
 	}
-	encode_response<T>(resp, mut resp_wr)
+	encode_response[T](resp, mut resp_wr)
 	return resp_wr.str()
 }
 
@@ -97,8 +97,8 @@ const error_field_in_u8 = ',"error":'.bytes()
 
 const result_field_in_u8 = ',"result":'.bytes()
 
-fn encode_response<T>(resp Response<T>, mut writer io.Writer) {
-	writer.write('{"jsonrpc":"$jsonrpc.version","id":'.bytes()) or {}
+fn encode_response[T](resp Response[T], mut writer io.Writer) {
+	writer.write('{"jsonrpc":"${jsonrpc.version}","id":'.bytes()) or {}
 	if resp.id.len == 0 {
 		writer.write(jsonrpc.null_in_u8) or {}
 	} else {
@@ -128,7 +128,7 @@ fn encode_response<T>(resp Response<T>, mut writer io.Writer) {
 // Notifications are not confirmable by definition, since they do not have a Response object to be
 // returned. As such, the Client would not be aware of any errors (like e.g. "Invalid params","Internal error").
 // https://www.jsonrpc.org/specification#notification
-pub struct NotificationMessage<T> {
+pub struct NotificationMessage[T] {
 pub:
 	jsonrpc string = jsonrpc.version
 	method  string
@@ -136,17 +136,17 @@ pub:
 }
 
 // json returns the JSON string form of the NotificationMessage.
-pub fn (notif NotificationMessage<T>) json() string {
+pub fn (notif NotificationMessage[T]) json() string {
 	mut notif_wr := strings.new_builder(100)
 	defer {
 		unsafe { notif_wr.free() }
 	}
-	encode_notification<T>(notif, mut notif_wr)
+	encode_notification[T](notif, mut notif_wr)
 	return notif_wr.str()
 }
 
-fn encode_notification<T>(notif NotificationMessage<T>, mut writer io.Writer) {
-	writer.write('{"jsonrpc":"$jsonrpc.version","method":"$notif.method","params":'.bytes()) or {}
+fn encode_notification[T](notif NotificationMessage[T], mut writer io.Writer) {
+	writer.write('{"jsonrpc":"${jsonrpc.version}","method":"${notif.method}","params":'.bytes()) or {}
 	$if T is Null {
 		writer.write(jsonrpc.null_in_u8) or {}
 	} $else {

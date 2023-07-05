@@ -13,16 +13,16 @@ fn rm_rf(path string) {
 
 fn patch_file(file_path string, texts_to_replace []string) ! {
 	file_contents := read_file(file_path) or {
-		return error('Cannot read file ${file_path}. Reason: $err')
+		return error('Cannot read file ${file_path}. Reason: ${err}')
 	}
 
 	write_file(file_path, file_contents.replace_each(texts_to_replace)) or {
-		return error('Cannot write file ${file_path}. Reason: $err')
+		return error('Cannot write file ${file_path}. Reason: ${err}')
 	}
 }
 
 fn patch_includes(lib_files []string, includes_to_replace []string) {
-	mapped_includes_to_replace := includes_to_replace.map('#include "$it"')
+	mapped_includes_to_replace := includes_to_replace.map('#include "${it}"')
 	for file_path in lib_files {
 		patch_file(file_path, mapped_includes_to_replace) or {
 			eprintln(err)
@@ -56,8 +56,8 @@ if exists(clone_dir) {
 }
 
 // clone tree-sitter repository to temp directory
-git_clone_cmd := 'git clone --depth 1 https://github.com/tree-sitter/tree-sitter.git $clone_dir'
-println('Executing: $git_clone_cmd')
+git_clone_cmd := 'git clone --depth 1 https://github.com/tree-sitter/tree-sitter.git ${clone_dir}'
+println('Executing: ${git_clone_cmd}')
 git_clone_cmd_out := execute(git_clone_cmd)
 if git_clone_cmd_out.exit_code != 0 {
 	eprintln('Failed to clone tree-sitter.')
@@ -66,8 +66,8 @@ if git_clone_cmd_out.exit_code != 0 {
 }
 
 // get ts current git commit hash
-git_curr_version_cmd := 'git -C $clone_dir rev-parse HEAD'
-println('Executing: $git_curr_version_cmd')
+git_curr_version_cmd := 'git -C ${clone_dir} rev-parse HEAD'
+println('Executing: ${git_curr_version_cmd}')
 curr_version_cmd_out := execute(git_curr_version_cmd)
 if curr_version_cmd_out.exit_code != 0 {
 	eprintln('Failed to obtain tree-sitter version.')
@@ -102,7 +102,7 @@ files_to_rename := [['atomic.h', 'ts_atomic.h']]
 for file_name in files_to_rename {
 	old_file_name := join_path(lib_dir, file_name[0])
 	if !exists(old_file_name) {
-		println('$old_file_name does not exist. Skip renaming...')
+		println('${old_file_name} does not exist. Skip renaming...')
 	}
 
 	new_file_name := join_path(lib_dir, file_name[1])
@@ -120,7 +120,7 @@ patch_includes(glob(join_path(lib_dir, '*.h')) or { []string{} }, includes_to_re
 patch_includes(glob(join_path(lib_dir, '*.c')) or { []string{} }, includes_to_replace)
 
 // add txt file for tree-sitter version
-write_file(version_file_path, '{"version": "$curr_version_cmd_out.output.trim_space()"}')!
+write_file(version_file_path, '{"version": "${curr_version_cmd_out.output.trim_space()}"}')!
 
 // remove temp clone dir
 walk(clone_dir, rm_rf)
