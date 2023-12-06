@@ -23,7 +23,7 @@ pub fn (mut ls Vls) formatting(params lsp.DocumentFormattingParams, mut wr Respo
 	// To simplify this, we will make a temporary file and feed it into
 	// the v fmt CLI program since there is no cross-platform way to pipe
 	// raw strings directly into v fmt.
-	mut temp_file := os.open_file(server.temp_formatting_file_path, 'w')!
+	mut temp_file := os.open_file(server.temp_formatting_file_path, 'wb')!
 	temp_file.write_string(source.string())!
 	temp_file.close()
 	defer {
