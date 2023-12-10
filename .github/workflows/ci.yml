@@ -82,9 +82,4 @@ jobs:
       - name: Build local v
         run: .\make.bat -msvc
       - name: Run tests
-        run: |
-          .\v.exe test vls\lsp\
-          .\v.exe test vls\analyzer\
-          .\v.exe test vls\server\tests\
-          .\v.exe test vls\server\general_test.v
-          .\v.exe test vls\server\window_test.v
+        run: .\v.exe test vls\
