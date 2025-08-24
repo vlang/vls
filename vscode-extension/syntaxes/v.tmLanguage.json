@@ -1,0 +1,9 @@
+{
+  "scopeName": "source.v",
+  "fileTypes": ["v"],
+  "patterns": [
+    {
+      "include": "source.v"
+    }
+  ]
+}

@@ -1,0 +1,77 @@
+{
+  "name": "vls",
+  "displayName": "vls",
+  "description": "vls",
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "^1.95.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [],
+  "main": "./out/extension.js",
+  "repository": "https://github.com/vlang/vls2",
+  "contributes": {
+    "languages": [
+      {
+        "id": "v",
+        "aliases": [
+          "V",
+          "v"
+        ],
+        "extensions": [
+          ".v"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "v",
+        "scopeName": "source.v",
+        "path": "./syntaxes/v.tmLanguage.json"
+      }
+    ],
+    "configuration": {
+      "type": "object",
+      "title": "V Language Server",
+      "properties": {
+        "vls.command": {
+          "type": "string",
+          "default": "/tmp/vls2",
+          "description": "Path to the V language server binary."
+        },
+        "vls.args": {
+          "type": "array",
+          "default": [],
+          "description": "Arguments to pass to the V language server."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "npx tsc -p ./",
+    "watch": "npx tsc -watch -p ./",
+    "pretest": "npm run compile && npm run lint",
+    "lint": "npx eslint src",
+    "test": "vscode-test",
+    "build": "npx vsce package"
+  },
+  "devDependencies": {
+    "@types/mocha": "^10.0.10",
+    "@types/node": "20.x",
+    "@types/vscode": "^1.95.0",
+    "@typescript-eslint/eslint-plugin": "^8.17.0",
+    "@typescript-eslint/parser": "^8.17.0",
+    "@vscode/test-cli": "^0.0.10",
+    "@vscode/test-electron": "^2.4.1",
+    "@vscode/vsce": "^3.6.0",
+    "eslint": "^9.16.0",
+    "typescript": "^5.9.2"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  }
+}
