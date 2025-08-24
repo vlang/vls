@@ -20,6 +20,8 @@ You should get a `vls-{version}.vsix` file.
 
 Or download the `vsix` file from here:
 
+https://github.com/vlang/vls/releases/download/0.1/vls-0.0.1.vsix
+
 In VS Code run `Extensions: Install from VSIX...`
 
 
