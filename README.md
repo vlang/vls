@@ -29,24 +29,24 @@ In VS Code run `Extensions: Install from VSIX...`
 
 #### Instant errors
 
-<img width="966" height="216" alt="image" src="https://github.com/user-attachments/assets/9db4b884-befe-4578-b844-9bcca537d9e5" />
+<img width="1932" height="432" alt="image" src="https://github.com/user-attachments/assets/a842e103-b3c2-427f-956f-fffff07970dc" />
 
 #### Go to definition
 
-https://github.com/user-attachments/assets/8a0f12cd-bbc2-472c-a3dc-d4b0b3745295
+https://github.com/user-attachments/assets/fb4ee6ff-4765-46b7-a21e-267691253d8e
 
 
 #### Autocomplete for module functions
 
-<img width="623" height="296" alt="image" src="https://github.com/user-attachments/assets/31174738-705e-4579-bbf6-45e6e8c45d29" />
+<img width="1246" height="592" alt="image" src="https://github.com/user-attachments/assets/0d4e1849-2e6c-47f8-9a45-322fe25d9bef" />
 
 #### Information about function parameters
 
-<img width="747" height="225" alt="image" src="https://github.com/user-attachments/assets/4cb16c6a-0784-4938-809d-f7b4770930a9" />
+<img width="1494" height="450" alt="image" src="https://github.com/user-attachments/assets/46cc391b-fcdc-4083-ab62-97edd815ddd9" />
 
 #### Autocomplete for struct fields and methods
 
-<img width="902" height="196" alt="image" src="https://github.com/user-attachments/assets/c7ffb3e7-e92c-44be-bf6d-dc4c9e52eaaf" />
+<img width="1804" height="392" alt="image" src="https://github.com/user-attachments/assets/478bfd20-201a-476f-88cd-583fad52d6cc" />
 
 
 
