@@ -1,0 +1,13 @@
+#General
+vls
+
+#MacOS
+.DS_Store
+*.dSYM/
+
+#Intellij IDEA
+.idea/
+*.iml
+
+#VSCode
+.vscode/
