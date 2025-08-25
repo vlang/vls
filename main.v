@@ -20,7 +20,7 @@ const v_prefs = pref.Preferences{
 fn log(s string) {
 	eprintln(s)
 	temp_dir := os.temp_dir()
-	mut output := os.open_append('${temp_dir}/vls_out.txt') or { panic(err) }
+	mut output := os.open_append(os.join_path(temp_dir', 'vls_out.txt') or { panic(err) }
 	output.writeln(s) or { panic(err) }
 	output.close()
 }
