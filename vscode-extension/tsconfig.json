@@ -1,9 +1,35 @@
 {
 	"compilerOptions": {
-		"module": "commonjs",
-		"target": "es6",
+		"module": "CommonJS",
+		"moduleResolution": "node",
+		"target": "ES6",
+		"lib": [
+			"ES2022",
+			"DOM"
+		],
+		"baseUrl": "src",
 		"outDir": "out",
 		"rootDir": "src",
+		"allowJs": true,
+		"diagnostics": false,
+		"esModuleInterop": true,
+		"incremental": true,
+		"noFallthroughCasesInSwitch": true,
+		"noImplicitAny": true,
+		"noImplicitOverride": true,
+		"noImplicitReturns": true,
+		"noImplicitThis": true,
+		"noUncheckedIndexedAccess": true,
+		"noUnusedLocals": false,
+		"noUnusedParameters": false,
+		"sourceMap": false,
+		"stripInternal": true
 	},
-	"exclude": ["node_modules", ".vscode-test"]
+	"include": [
+		"src/**/*.ts"
+	],
+	"exclude": [
+		"node_modules",
+		"scripts"
+	]
 }
