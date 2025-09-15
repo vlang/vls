@@ -11,7 +11,7 @@
   ],
   "activationEvents": [],
   "main": "./out/extension.js",
-  "repository": "https://github.com/vlang/vls2",
+  "repository": "https://github.com/vlang/vls",
   "contributes": {
     "languages": [
       {

@@ -11,3 +11,9 @@ vls
 
 #VSCode
 .vscode/
+
+#Node
+**/node_modules/
+**/out/
+**/*.tsbuildinfo
+**/*.vsix
