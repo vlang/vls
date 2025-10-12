@@ -204,10 +204,16 @@ struct JsonError {
 }
 
 struct JsonVarAC {
-	name    string
-	type    string
-	fields  []string // "name:type" strings
-	methods []string // "name:type" strings
+	name       string
+	type       string
+	methods    []string // "name:type" strings
+	functions  []string // "name:type" strings
+	fields     []string // "name:type" strings
+	type_alias []string // "name" strings
+	interfaces []string // "name" strings
+	enums      []string // "name" strings
+	constants  []string // "name:type" strings
+	structs    []string // "name" strings
 }
 
 fn v_error_to_lsp_diagnostic(e JsonError) LSPDiagnostic {
