@@ -11,7 +11,9 @@ fn (mut app App) run_v_check(path string, text string) []JsonError {
 	log('WRITING FILE ${time.now()} ${path}')
 	os.write_file(tmppath, text) or { panic(err) }
 	log('running v.exe check')
-	x := os.execute('v -w -vls-mode -check -json-errors "${tmppath}"')
+	cmd := 'v -w -vls-mode -check -json-errors "${tmppath}"'
+	log('cmd=${cmd}')
+	x := os.execute(cmd)
 	log('RUN RES ${x}')
 	js := x.output
 	log('js=${js}')

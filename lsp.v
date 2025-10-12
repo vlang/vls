@@ -63,15 +63,22 @@ struct LSPRange {
 }
 
 enum DetailKind {
-	method = 2
-	field  = 5
+	text       = 1
+	method     = 2
+	function   = 3
+	field      = 5
+	type_alias = 7
+	interface  = 8
+	enum       = 13
+	constant   = 21
+	struct     = 22
 }
 
 struct Detail {
-	kind               DetailKind // The type of item (e.g., Method, Function, Field)
-	label              string     // The name of the completion item
-	detail             string     // Additional info like the function signature or return type
-	documentation      string     // The documentation for the item
+	kind               int    // The type of item (e.g., Method, Function, Field)
+	label              string // The name of the completion item
+	detail             string // Additional info like the function signature or return type
+	documentation      string // The documentation for the item
 	insert_text        ?string @[json: 'insertText']
 	insert_text_format ?int    @[json: 'insertTextFormat'] // 1 for PlainText, 2 for Snippet
 }
