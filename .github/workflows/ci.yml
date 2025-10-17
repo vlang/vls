@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+    paths-ignore:
+      - "**.md"
+  pull_request:
+    paths-ignore:
+      - "**.md"
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+      fail-fast: false
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout V
+        uses: actions/checkout@v4
+        with:
+          repository: vlang/v
+      - name: Checkout VLS
+        uses: actions/checkout@v4
+        with:
+          path: vls
+
+      - name: Build V
+        if: runner.os != 'Windows'
+        run: make -j4 && ./v symlink
+      - name: Build V (Windows)
+        if: runner.os == 'Windows'
+        run: ./make.bat && ./v symlink
+
+      - name: Check formatting
+        run: v fmt -verify vls/
+
+      - name: Run tests
+        run: v test vls/
