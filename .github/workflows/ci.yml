@@ -18,11 +18,11 @@ jobs:
 
     steps:
       - name: Checkout V
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: vlang/v
       - name: Checkout VLS
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           path: vls
 
