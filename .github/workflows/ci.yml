@@ -38,3 +38,6 @@ jobs:
 
       - name: Run tests
         run: v test vls/
+
+      - name: Compile project
+        run: v vls/
