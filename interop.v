@@ -33,7 +33,7 @@ fn (mut app App) run_v_line_info(path string, line_nr int, col int) JsonVarAC {
 	log('WRITING FILE ${time.now()} ${path}')
 	os.write_file(tmppath, app.text) or { panic(err) }
 	log('running v.exe line info!')
-	cmd := 'v -check -json-errors -nocolor -vls-mode -line-info "${tmppath}:${line_nr}:${col}" ${tmppath}'
+	cmd := 'v -check -json-errors -nocolor -vls-mode -line-info "${tmppath}|${line_nr}|${col}" ${tmppath}'
 	log('cmd=${cmd}')
 	x := os.execute(cmd)
 	log('RUN RES ${x}')
@@ -58,7 +58,7 @@ fn (mut app App) run_v_go_to_definition(path string, line_nr int, expr string) L
 	os.write_file(tmppath, app.text) or { panic(err) }
 	log('running v.exe definition lookup!')
 	// This uses the expression instead of line/col
-	cmd := 'v -check -json-errors -nocolor -vls-mode -line-info "${tmppath}:${line_nr}:gd^${expr}" ${tmppath}'
+	cmd := 'v -check -json-errors -nocolor -vls-mode -line-info "${tmppath}|${line_nr}|gd^${expr}" ${tmppath}'
 	log('cmd=${cmd}')
 	x := os.execute(cmd)
 	log('RUN RES ${x}')
@@ -96,7 +96,7 @@ fn (mut app App) run_v_fn_sig(path string, line_nr int, expr string) FnSignature
 	log('WRITING FILE ${time.now()} ${path}')
 	os.write_file(tmppath, app.text) or { panic(err) }
 	log('running v.exe sig!')
-	cmd := 'v -check -json-errors -nocolor -vls-mode -line-info "${tmppath}:${line_nr}:${expr}" ${tmppath}'
+	cmd := 'v -check -json-errors -nocolor -vls-mode -line-info "${tmppath}|${line_nr}|${expr}" ${tmppath}'
 	log('cmd=${cmd}')
 	x := os.execute(cmd)
 	log('RUN RES ${x}')
