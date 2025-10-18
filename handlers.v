@@ -11,73 +11,9 @@ fn (mut app App) completion(request Request) Response {
 	col := request.params.position.char
 	var_ac := app.run_v_line_info(path, line_nr, col)
 	log('var_ac=${var_ac}')
-	mut details := []Detail{cap: 3}
-
-	$for f in var_ac.fields {
-		kind := $match f.name {
-			'methods' {
-				DetailKind.method
-			}
-			'functions' {
-				.function
-			}
-			'fields' {
-				.field
-			}
-			'type_alias' {
-				.type_alias
-			}
-			'interfaces' {
-				.interface
-			}
-			'enums' {
-				.enum
-			}
-			'constants' {
-				.constant
-			}
-			'structs' {
-				.struct
-			}
-			'name', 'type' {
-				.text
-			}
-			$else {
-				log('unsupport JsonVarAC field')
-				DetailKind.text
-			}
-		}
-		kind_int := int(kind)
-		for field in var_ac.$(f.name) {
-			$match f.name {
-				'methods', 'functions', 'fields', 'constants' {
-					if !field.contains(':') {
-						continue
-					}
-					vals := field.split(':')
-					field_name := vals[0]
-					typ := vals[1]
-					details << Detail{
-						detail:        typ // app.type_to_str(field.typ)
-						kind:          kind_int
-						label:         field_name // field.name
-						documentation: 'MY DOCS'  // TODO fetch docs
-					}
-				}
-				'type_alias', 'interfaces', 'enums', 'structs' {
-					details << Detail{
-						kind:          kind_int
-						label:         field
-						documentation: 'MY DOCS'
-					}
-				}
-				$else {}
-			}
-		}
-	}
 	resp := Response{
 		id:     request.id
-		result: details
+		result: var_ac.details
 	}
 	return resp
 }

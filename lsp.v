@@ -62,18 +62,6 @@ struct LSPRange {
 	end   Position
 }
 
-enum DetailKind {
-	text       = 1
-	method     = 2
-	function   = 3
-	field      = 5
-	type_alias = 7
-	interface  = 8
-	enum       = 13
-	constant   = 21
-	struct     = 22
-}
-
 struct Detail {
 	kind               int    // The type of item (e.g., Method, Function, Field)
 	label              string // The name of the completion item
