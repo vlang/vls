@@ -6,12 +6,12 @@ let client: LanguageClient;
 export async function activate(context: vscode.ExtensionContext) {
   // Get the configuration for our server.
   const config = vscode.workspace.getConfiguration('vls');
-  const vlsPath = '/tmp/vls2';//config.get<string>('path');
+  const vlsPath = config.get<string>('command');
 
   // Check if the path to the VLS executable is configured.
   if (!vlsPath) {
     vscode.window.showErrorMessage(
-      'The path to the Go2 VLS executable is not set. Please set "vls.path" in your settings.'
+      'The path to the V language server binary is not set. Please set "vls.command" in your settings.'
     );
     return;
   }
