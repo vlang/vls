@@ -1,5 +1,6 @@
 {
   "name": "vls",
+  "publisher": "vlang",
   "displayName": "vls",
   "description": "vls",
   "version": "0.0.1",

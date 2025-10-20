@@ -177,7 +177,12 @@ fn write_response(response Response) {
 	content = content.replace('"_type":"ParameterInformation",', '')
 	content = content.replace(',"_type":"Location"', '')
 	content = content.replace('"_type":"Location",', '')
-	headers := 'Content-Length: ${content.len}\r\n\r\n'
+	headers := $if windows {
+		// windows text stdio will output `\r\n` for every `\n`
+		'Content-Length: ${content.len}\n\n'
+	} $else {
+		'Content-Length: ${content.len}\r\n\r\n'
+	}
 	full_message := '${headers}${content}'
 	log('SEND: ${full_message}')
 	print(full_message)
@@ -188,7 +193,12 @@ fn write_notification(notification Notification) {
 	mut content := json.encode(notification)
 	content = content.replace(',"_type":"LSPDiagnostic"', '')
 	content = content.replace('"_type":"LSPDiagnostic",', '')
-	headers := 'Content-Length: ${content.len}\r\n\r\n'
+	headers := $if windows {
+		// windows text stdio will output `\r\n` for every `\n`
+		'Content-Length: ${content.len}\n\n'
+	} $else {
+		'Content-Length: ${content.len}\r\n\r\n'
+	}
 	full_message := '${headers}${content}'
 	log('SEND: ${full_message}')
 	print(full_message)
