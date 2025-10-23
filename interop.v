@@ -95,7 +95,7 @@ fn (mut app App) run_v_fn_sig(path string, line_nr int, char_pos int) SignatureH
 	log('cmd=${cmd}')
 	x := os.execute(cmd)
 	log('RUN RES ${x}')
-	s := x.output.trim_space()
+	s := x.output
 	log('s=${s}')
 	json_errors := json.decode(SignatureHelp, x.output) or {
 		log('failed to parse json ${err}')
