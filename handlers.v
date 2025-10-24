@@ -58,7 +58,7 @@ fn (mut app App) signature_help(request Request) Response {
 	path := request.params.text_document.uri
 	lines := app.text.split('\n')
 	line_nr := request.params.position.line
-	// char_pos := request.params.position.char
+	char_pos := request.params.position.char
 	if line_nr >= lines.len {
 		return Response{
 			id:     request.id
@@ -67,25 +67,7 @@ fn (mut app App) signature_help(request Request) Response {
 	}
 	line_text := lines[line_nr]
 	log('SIG LINE TEXT=${line_text}')
-	mut active_parameter := 0
-	fn_sig := app.run_v_fn_sig(path, line_nr, line_text)
-	mut param_infos := []ParameterInformation{}
-	for _, param in fn_sig.params {
-		param_infos << ParameterInformation{
-			label: param
-			//				label: '${param.name} ${app.type_to_str(param.typ)}'
-		}
-	}
-	signature_info := SignatureInformation{
-		// label:      'method(param1 param1.typ, param2 param2.typ)'// app.fn_to_str(method)
-		label:      '${fn_sig.name}(${fn_sig.params.join(',')})'
-		parameters: param_infos
-	}
-	signature_help := SignatureHelp{
-		signatures:       [signature_info]
-		active_signature: 0
-		active_parameter: active_parameter
-	}
+	signature_help := app.run_v_fn_sig(path, line_nr, char_pos)
 	return Response{
 		id:     request.id
 		result: signature_help

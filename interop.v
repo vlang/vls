@@ -84,28 +84,24 @@ fn (mut app App) run_v_go_to_definition(path string, line_nr int, expr string) L
 	}
 }
 
-struct FnSignature {
-	name   string
-	params []string
-}
-
-fn (mut app App) run_v_fn_sig(path string, line_nr int, expr string) FnSignature {
+fn (mut app App) run_v_fn_sig(path string, line_nr int, char_pos int) SignatureHelp {
 	tmpdir := os.temp_dir()
 	name := path.all_after_last('/')
 	tmppath := tmpdir + '/' + name
 	log('WRITING FILE ${time.now()} ${path}')
 	os.write_file(tmppath, app.text) or { panic(err) }
 	log('running v.exe sig!')
-	cmd := 'v -check -json-errors -nocolor -vls-mode -line-info "${tmppath}:${line_nr}:${expr}" ${tmppath}'
+	cmd := 'v -check -json-errors -nocolor -vls-mode -line-info "${tmppath}:${line_nr}:fn^${char_pos}" ${tmppath}'
 	log('cmd=${cmd}')
 	x := os.execute(cmd)
 	log('RUN RES ${x}')
 	s := x.output
 	log('s=${s}')
-	fn_name := s.before('(')
-	params := s.after('(').split(',')
-	return FnSignature{
-		name:   fn_name
-		params: params
+	json_errors := json.decode(SignatureHelp, x.output) or {
+		log('failed to parse json ${err}')
+		return SignatureHelp{}
 	}
+	log('json2:')
+	log('${json_errors}')
+	return json_errors
 }
