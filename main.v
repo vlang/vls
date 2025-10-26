@@ -188,6 +188,10 @@ struct JsonError {
 	len     int
 }
 
+struct JsonVarAC {
+	details []Detail
+}
+
 fn v_error_to_lsp_diagnostic(e JsonError) LSPDiagnostic {
 	start_line := e.line_nr - 1 // LSP is 0-indexed, V parser is 1-indexed
 	start_char := e.col - 1 // LSP is 0-indexed, V parser is 1-indexed

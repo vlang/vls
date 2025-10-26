@@ -36,13 +36,34 @@ fn (mut app App) run_v_line_info(method Method, path string, line_info string) R
 	mut result := ResponseResult{}
 	match method {
 		.completion {
-			result = json.decode([]Detail, x.output) or { [] }
+			result_tmp := json.decode(JsonVarAC, x.output) or { JsonVarAC{} }
+			result = result_tmp.details
 		}
 		.signature_help {
 			result = json.decode(SignatureHelp, x.output) or { SignatureHelp{} }
 		}
 		.definition {
-			result = json.decode(Location, x.output) or { Location{} }
+			// file.v:line:col => Location
+			fields := x.output.trim_space().split(':')
+			if fields.len < 3 {
+				result = Location{}
+			} else {
+				line_nr := fields[fields.len - 2].int() - 1
+				col := fields[fields.len - 1].int()
+				result = Location{
+					uri:   fields[..fields.len - 2].join(':')
+					range: LSPRange{
+						start: Position{
+							line: line_nr
+							char: col
+						}
+						end:   Position{
+							line: line_nr
+							char: col
+						}
+					}
+				}
+			}
 		}
 		else {}
 	}

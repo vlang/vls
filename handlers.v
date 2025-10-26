@@ -2,7 +2,7 @@
 // Use of this source code is governed by a GPL license that can be found in the LICENSE file.
 
 fn (mut app App) operation_at_pos(method Method, request Request) Response {
-	line_nr := request.params.position.line
+	line_nr := request.params.position.line + 1
 	col := request.params.position.char
 	path := request.params.text_document.uri
 	line_info := match method {
