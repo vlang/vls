@@ -97,19 +97,8 @@ fn (mut app App) handle_stdio_requests(mut reader io.BufferedReader) {
 		method := Method.from_string(request.method)
 		log('1method="${method}" request.method="${request.method}" kek${method == .completion}')
 		match method {
-			.completion {
-				log('RUNNING COMPLETION')
-				resp := app.completion(request)
-				write_response(resp)
-			}
-			.signature_help {
-				log('SIG HELP')
-				resp := app.signature_help(request)
-				write_response(resp)
-			}
-			.definition {
-				log('GO TO DEFINITION')
-				resp := app.go_to_definition(request)
+			.completion, .signature_help, .definition {
+				resp := app.operation_at_pos(method, request)
 				write_response(resp)
 			}
 			.did_change {
@@ -164,19 +153,7 @@ fn (mut app App) handle_stdio_requests(mut reader io.BufferedReader) {
 }
 
 fn write_response(response Response) {
-	mut content := json.encode(response)
-	// These replaces are needed because V's json encoder adds a `_type` field for union variants.
-	// TODO make it cleaner
-	content = content.replace(',"_type":"Detail"', '')
-	content = content.replace('"_type":"Detail",', '')
-	content = content.replace(',"_type":"LSPDiagnostic"', '')
-	content = content.replace('"_type":"LSPDiagnostic",', '')
-	content = content.replace(',"_type":"SignatureInformation"', '')
-	content = content.replace('"_type":"SignatureInformation",', '')
-	content = content.replace(',"_type":"ParameterInformation"', '')
-	content = content.replace('"_type":"ParameterInformation",', '')
-	content = content.replace(',"_type":"Location"', '')
-	content = content.replace('"_type":"Location",', '')
+	content := json.encode(response)
 	headers := $if windows {
 		// windows text stdio will output `\r\n` for every `\n`
 		'Content-Length: ${content.len}\n\n'
@@ -190,9 +167,7 @@ fn write_response(response Response) {
 }
 
 fn write_notification(notification Notification) {
-	mut content := json.encode(notification)
-	content = content.replace(',"_type":"LSPDiagnostic"', '')
-	content = content.replace('"_type":"LSPDiagnostic",', '')
+	content := json.encode(notification)
 	headers := $if windows {
 		// windows text stdio will output `\r\n` for every `\n`
 		'Content-Length: ${content.len}\n\n'
@@ -211,10 +186,6 @@ struct JsonError {
 	line_nr int
 	col     int
 	len     int
-}
-
-struct JsonVarAC {
-	details []Detail
 }
 
 fn v_error_to_lsp_diagnostic(e JsonError) LSPDiagnostic {
