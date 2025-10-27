@@ -1,21 +1,30 @@
 // Copyright (c) 2025 Alexander Medvednikov. All rights reserved.
 // Use of this source code is governed by a GPL license that can be found in the LICENSE file.
 
-// `user. ...` fields and methods
-fn (mut app App) completion(request Request) Response {
-	log('completion')
-	log('request=${request}')
-	// app.text = request.params.content_changes[0].text
-	path := request.params.text_document.uri
+fn (mut app App) operation_at_pos(method Method, request Request) Response {
 	line_nr := request.params.position.line + 1
 	col := request.params.position.char
-	var_ac := app.run_v_line_info(path, line_nr, col)
-	log('var_ac=${var_ac}')
-	resp := Response{
-		id:     request.id
-		result: var_ac.details
+	path := request.params.text_document.uri
+	line_info := match method {
+		.completion {
+			'${line_nr}:${col}'
+		}
+		.signature_help {
+			'${line_nr}:fn^${col}'
+		}
+		.definition {
+			'${line_nr}:gd^${col}'
+		}
+		else {
+			''
+		}
 	}
-	return resp
+	result := app.run_v_line_info(method, path, line_info)
+	log(result.str())
+	return Response{
+		id:     request.id
+		result: result
+	}
 }
 
 // Returns instant red wavy errors
@@ -49,102 +58,4 @@ fn (mut app App) on_did_change(request Request) ?Notification {
 	}
 	log('returning notification: ${notification}')
 	return notification
-}
-
-// Autocomplete for `os.create(...`
-// Function parameters, with currently typed parameter being highlighted
-fn (mut app App) signature_help(request Request) Response {
-	// For signature help, the file must be up-to-date.
-	path := request.params.text_document.uri
-	lines := app.text.split('\n')
-	line_nr := request.params.position.line
-	char_pos := request.params.position.char
-	if line_nr >= lines.len {
-		return Response{
-			id:     request.id
-			result: 'null'
-		}
-	}
-	line_text := lines[line_nr]
-	log('SIG LINE TEXT=${line_text}')
-	signature_help := app.run_v_fn_sig(path, line_nr, char_pos)
-	return Response{
-		id:     request.id
-		result: signature_help
-	}
-}
-
-// Finds the word/expression at a given cursor position in the document.
-fn (app &App) get_expression_at_cursor(line_nr int, col int) string {
-	log('get_expression_at_cursor line_nr=${line_nr} col=${col}')
-	lines := app.text.split('\n')
-	if line_nr < 0 || line_nr >= lines.len {
-		return ''
-	}
-	line := lines[line_nr].trim_space()
-	log('EXPR LINE="${line}"')
-	if col < 0 || col > line.len {
-		return ''
-	}
-	mut start := col
-	mut end := col
-	// Find the start of the expression (scan backwards)
-	// Stop before the start of the line or if the character is not part of an identifier.
-	for start > 0 {
-		c := line[start - 1]
-		if c.is_letter() || c.is_digit() || c == `_` || c == `.` {
-			start--
-		} else {
-			break
-		}
-	}
-	// Find the end of the expression (scan forwards)
-	// Stop at the end of the line or if the character is not part of an identifier.
-	for end < line.len {
-		c := line[end]
-		if c.is_letter() || c.is_digit() || c == `_` || c == `.` {
-			end++
-		} else {
-			break
-		}
-	}
-	if start >= end {
-		return ''
-	}
-	return line[start..end]
-}
-
-fn (mut app App) go_to_definition(request Request) Response {
-	log('go_to_definition')
-	path := request.params.text_document.uri
-	// LSP line is 0-based, V compiler is 1-based
-	line_nr_0based := request.params.position.line
-	line_nr_1based := line_nr_0based + 1
-	col := request.params.position.char
-	// Get the expression under the cursor.
-	expression := app.get_expression_at_cursor(line_nr_0based, col)
-	log('found expression for definition: "${expression}"')
-	if expression == '' {
-		return Response{
-			id:     request.id
-			result: 'null'
-		}
-	}
-	// Call the new interop function that uses the `gd^` prefix.
-	location := app.run_v_go_to_definition(path, line_nr_1based, expression)
-	log('location for definition=${location}')
-	// Check if the V compiler provided a definition location
-	if location.uri == '' {
-		log('no definition info found from V compiler')
-		return Response{
-			id:     request.id
-			result: 'null'
-		}
-	}
-	resp := Response{
-		id:     request.id
-		result: location
-	}
-	log('sending definition response: ${resp}')
-	return resp
 }

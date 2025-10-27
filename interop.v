@@ -5,9 +5,7 @@ import os
 import time
 
 fn (mut app App) run_v_check(path string, text string) []JsonError {
-	tmpdir := os.temp_dir()
-	name := path.all_after_last('/')
-	tmppath := tmpdir + '/' + name
+	tmppath := os.join_path(os.temp_dir(), os.file_name(path))
 	log('WRITING FILE ${time.now()} ${path}')
 	os.write_file(tmppath, text) or { panic(err) }
 	log('running v.exe check')
@@ -26,82 +24,48 @@ fn (mut app App) run_v_check(path string, text string) []JsonError {
 	return json_errors
 }
 
-fn (mut app App) run_v_line_info(path string, line_nr int, col int) JsonVarAC {
-	tmpdir := os.temp_dir()
-	name := path.all_after_last('/')
-	tmppath := tmpdir + '/' + name
+fn (mut app App) run_v_line_info(method Method, path string, line_info string) ResponseResult {
+	tmppath := os.join_path(os.temp_dir(), os.file_name(path))
 	log('WRITING FILE ${time.now()} ${path}')
 	os.write_file(tmppath, app.text) or { panic(err) }
 	log('running v.exe line info!')
-	cmd := 'v -check -json-errors -nocolor -vls-mode -line-info "${tmppath}:${line_nr}:${col}" ${tmppath}'
+	cmd := 'v -w -check -json-errors -nocolor -vls-mode -line-info "${tmppath}:${line_info}" ${tmppath}'
 	log('cmd=${cmd}')
 	x := os.execute(cmd)
 	log('RUN RES ${x}')
-	js := x.output
-	log('js=${js}')
-	json_errors := json.decode(JsonVarAC, x.output) or {
-		log('failed to parse json ${err}')
-		return JsonVarAC{}
-	}
-	log('json2:')
-	log('${json_errors}')
-	return json_errors
-}
-
-// In this mode V returns `/path/to/file.v:line:col`, not json
-// So simply return `Location`
-fn (mut app App) run_v_go_to_definition(path string, line_nr int, expr string) Location {
-	tmpdir := os.temp_dir()
-	name := path.all_after_last('/')
-	tmppath := tmpdir + '/' + name
-	log('WRITING FILE ${time.now()} ${path}')
-	os.write_file(tmppath, app.text) or { panic(err) }
-	log('running v.exe definition lookup!')
-	// This uses the expression instead of line/col
-	cmd := 'v -check -json-errors -nocolor -vls-mode -line-info "${tmppath}:${line_nr}:gd^${expr}" ${tmppath}'
-	log('cmd=${cmd}')
-	x := os.execute(cmd)
-	log('RUN RES ${x}')
-	vals := x.output.split(':')
-	if vals.len != 3 {
-		log('gotodef vals.len != 3 vals:${vals}')
-		return Location{}
-	}
-	line := vals[1].int()
-	col := vals[2].int()
-	return Location{
-		uri:   'file://' + vals[0]
-		range: LSPRange{
-			start: Position{
-				line: line
-				char: col
-			}
-			end:   Position{
-				line: line
-				char: col
+	mut result := ResponseResult{}
+	match method {
+		.completion {
+			result_tmp := json.decode(JsonVarAC, x.output) or { JsonVarAC{} }
+			result = result_tmp.details
+		}
+		.signature_help {
+			result = json.decode(SignatureHelp, x.output) or { SignatureHelp{} }
+		}
+		.definition {
+			// file.v:line:col => Location
+			fields := x.output.trim_space().split(':')
+			if fields.len < 3 {
+				result = Location{}
+			} else {
+				line_nr := fields[fields.len - 2].int() - 1
+				col := fields[fields.len - 1].int()
+				result = Location{
+					uri:   fields[..fields.len - 2].join(':')
+					range: LSPRange{
+						start: Position{
+							line: line_nr
+							char: col
+						}
+						end:   Position{
+							line: line_nr
+							char: col
+						}
+					}
+				}
 			}
 		}
+		else {}
 	}
-}
-
-fn (mut app App) run_v_fn_sig(path string, line_nr int, char_pos int) SignatureHelp {
-	tmpdir := os.temp_dir()
-	name := path.all_after_last('/')
-	tmppath := tmpdir + '/' + name
-	log('WRITING FILE ${time.now()} ${path}')
-	os.write_file(tmppath, app.text) or { panic(err) }
-	log('running v.exe sig!')
-	cmd := 'v -check -json-errors -nocolor -vls-mode -line-info "${tmppath}:${line_nr}:fn^${char_pos}" ${tmppath}'
-	log('cmd=${cmd}')
-	x := os.execute(cmd)
-	log('RUN RES ${x}')
-	s := x.output
-	log('s=${s}')
-	json_errors := json.decode(SignatureHelp, x.output) or {
-		log('failed to parse json ${err}')
-		return SignatureHelp{}
-	}
-	log('json2:')
-	log('${json_errors}')
-	return json_errors
+	return result
 }
