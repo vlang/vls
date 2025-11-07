@@ -50,8 +50,10 @@ fn (mut app App) run_v_line_info(method Method, path string, line_info string) R
 			} else {
 				line_nr := fields[fields.len - 2].int() - 1
 				col := fields[fields.len - 1].int()
+				uri_path := os.to_slash(fields[..fields.len - 2].join(':'))
+				uri_header := if uri_path.starts_with('/') { 'file://' } else { 'file:///' }
 				result = Location{
-					uri:   fields[..fields.len - 2].join(':')
+					uri:   uri_header + uri_path
 					range: LSPRange{
 						start: Position{
 							line: line_nr
