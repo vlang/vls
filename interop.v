@@ -6,10 +6,12 @@ import time
 
 fn (mut app App) run_v_check(path string, text string) []JsonError {
 	tmppath := os.join_path(os.temp_dir(), os.file_name(path))
+	src_file := path.all_after('file://')
+	src_path := os.dir(src_file)
 	log('WRITING FILE ${time.now()} ${path}')
 	os.write_file(tmppath, text) or { panic(err) }
 	log('running v.exe check')
-	cmd := 'v -w -vls-mode -check -json-errors "${tmppath}"'
+	cmd := 'v -w -vls-mode -check -json-errors "${tmppath}" -path "${src_path}|@vlib|@vmodules" -exclude "${src_file}"'
 	log('cmd=${cmd}')
 	x := os.execute(cmd)
 	log('RUN RES ${x}')
@@ -26,10 +28,12 @@ fn (mut app App) run_v_check(path string, text string) []JsonError {
 
 fn (mut app App) run_v_line_info(method Method, path string, line_info string) ResponseResult {
 	tmppath := os.join_path(os.temp_dir(), os.file_name(path))
+	src_file := path.all_after('file://')
+	src_path := os.dir(src_file)
 	log('WRITING FILE ${time.now()} ${path}')
 	os.write_file(tmppath, app.text) or { panic(err) }
 	log('running v.exe line info!')
-	cmd := 'v -w -check -json-errors -nocolor -vls-mode -line-info "${tmppath}:${line_info}" ${tmppath}'
+	cmd := 'v -w -check -json-errors -nocolor -vls-mode -line-info "${tmppath}:${line_info}" ${tmppath} -path "${src_path}|@vlib|@vmodules" -exclude "${src_file}"'
 	log('cmd=${cmd}')
 	x := os.execute(cmd)
 	log('RUN RES ${x}')
