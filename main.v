@@ -10,11 +10,40 @@ pub struct App {
 	cur_mod string = 'main'
 	exit    bool   = os.args.contains('exit')
 mut:
-	text string
+	text              string
+	workspace_folders map[string]string // Maps file URI -> workspace root directory
 }
 
 const v_prefs = pref.Preferences{
 	is_vls: true
+}
+
+fn find_workspace_root(file_path string) string {
+	cleaned_path := file_path.replace('file://', '').replace('file:///', '/')
+	mut dir := os.dir(cleaned_path)
+	for {
+		if os.exists(os.join_path(dir, 'v.mod')) {
+			return dir
+		}
+		if os.exists(os.join_path(dir, 'vpkg.json')) {
+			return dir
+		}
+		parent := os.dir(dir)
+		if parent == dir {
+			return os.dir(cleaned_path)
+		}
+		dir = parent
+	}
+	return os.dir(cleaned_path)
+}
+
+fn (mut app App) get_workspace_for_file(file_uri string) string {
+	if file_uri in app.workspace_folders {
+		return app.workspace_folders[file_uri]
+	}
+	workspace := find_workspace_root(file_uri)
+	app.workspace_folders[file_uri] = workspace
+	return workspace
 }
 
 fn log(s string) {

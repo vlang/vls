@@ -5,11 +5,12 @@ import os
 import time
 
 fn (mut app App) run_v_check(path string, text string) []JsonError {
+	workspace := app.get_workspace_for_file(path)
 	tmppath := os.join_path(os.temp_dir(), os.file_name(path))
 	log('WRITING FILE ${time.now()} ${path}')
 	os.write_file(tmppath, text) or { panic(err) }
 	log('running v.exe check')
-	cmd := 'v -w -vls-mode -check -json-errors "${tmppath}"'
+	cmd := 'v -w -vls-mode -check -json-errors "${workspace}"'
 	log('cmd=${cmd}')
 	x := os.execute(cmd)
 	log('RUN RES ${x}')
@@ -19,17 +20,31 @@ fn (mut app App) run_v_check(path string, text string) []JsonError {
 		log('failed to parse json ${err}')
 		return []
 	}
+	has_multiple_mains := json_errors.any(it.message.contains('multiple `main` functions detected'))
+	if has_multiple_mains {
+		cmd_single := 'v -w -vls-mode -check -json-errors "${tmppath}"'
+		x_single := os.execute(cmd_single)
+		json_errors_single := json.decode([]JsonError, x_single.output) or {
+			log('failed to parse json ${err}')
+			return []
+		}
+		return json_errors_single
+	}
+	original_path := path.replace('file://', '').replace('file:///', '/')
+	filtered_errors := json_errors.filter(it.path == os.file_name(original_path)
+		|| it.path == original_path)
 	log('json2:')
-	log('${json_errors}')
-	return json_errors
+	log('${filtered_errors}')
+	return filtered_errors
 }
 
 fn (mut app App) run_v_line_info(method Method, path string, line_info string) ResponseResult {
+	workspace := app.get_workspace_for_file(path)
 	tmppath := os.join_path(os.temp_dir(), os.file_name(path))
 	log('WRITING FILE ${time.now()} ${path}')
 	os.write_file(tmppath, app.text) or { panic(err) }
 	log('running v.exe line info!')
-	cmd := 'v -w -check -json-errors -nocolor -vls-mode -line-info "${tmppath}:${line_info}" ${tmppath}'
+	cmd := 'v -w -check -json-errors -nocolor -vls-mode -line-info "${tmppath}:${line_info}" ${workspace}'
 	log('cmd=${cmd}')
 	x := os.execute(cmd)
 	log('RUN RES ${x}')
