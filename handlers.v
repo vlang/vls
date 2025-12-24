@@ -1,5 +1,6 @@
 // Copyright (c) 2025 Alexander Medvednikov. All rights reserved.
 // Use of this source code is governed by a GPL license that can be found in the LICENSE file.
+module main
 
 fn (mut app App) operation_at_pos(method Method, request Request) Response {
 	line_nr := request.params.position.line + 1
