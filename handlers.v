@@ -2,6 +2,8 @@
 // Use of this source code is governed by a GPL license that can be found in the LICENSE file.
 module main
 
+import os
+
 fn (mut app App) operation_at_pos(method Method, request Request) Response {
 	line_nr := request.params.position.line + 1
 	col := request.params.position.char
@@ -28,6 +30,19 @@ fn (mut app App) operation_at_pos(method Method, request Request) Response {
 	}
 }
 
+fn (mut app App) on_did_open(request Request) {
+	uri := request.params.text_document.uri
+	log('on_did_open: ${uri}')
+	real_path := uri_to_path(uri)
+	content := os.read_file(real_path) or {
+		log('Failed to read file ${real_path}: ${err}')
+		return
+	}
+	app.open_files[uri] = content
+	app.text = content
+	log('STORED CONTENT for uri=${uri}, FILE COUNT: ${app.open_files.len}')
+}
+
 // Returns instant red wavy errors
 fn (mut app App) on_did_change(request Request) ?Notification {
 	log('on did change(len=${request.params.content_changes.len})')
@@ -35,8 +50,11 @@ fn (mut app App) on_did_change(request Request) ?Notification {
 		log('on_did_change() no params')
 		return none
 	}
-	app.text = request.params.content_changes[0].text
-	path := request.params.text_document.uri
+	uri := request.params.text_document.uri
+	content := request.params.content_changes[0].text
+	app.text = content
+	app.open_files[uri] = content // Update tracked file
+	path := uri
 	v_errors := app.run_v_check(path, app.text)
 	log('run_v_check errors:${v_errors}')
 	mut diagnostics := []LSPDiagnostic{}
