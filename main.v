@@ -12,7 +12,9 @@ pub struct App {
 	cur_mod string = 'main'
 	exit    bool   = os.args.contains('exit')
 mut:
-	text string
+	text       string            // Current file content
+	open_files map[string]string // Map of file URI to file content
+	temp_dir   string            // Temporary directory for multi-file compilation
 }
 
 const v_prefs = pref.Preferences{
@@ -29,12 +31,17 @@ fn log(s string) {
 
 fn main() {
 	log('VLS (stdio mode) started. Reading from stdin...')
+	temp_dir := os.join_path(os.temp_dir(), 'vls_${os.getpid()}')
+	os.mkdir_all(temp_dir) or { panic('Failed to create temp directory: ${err}') }
 	mut app := &App{
-		text: ''
+		text:       ''
+		open_files: map[string]string{}
+		temp_dir:   temp_dir
 	}
 	mut reader := io.new_buffered_reader(reader: os.stdin(), cap: 1)
 	app.handle_stdio_requests(mut reader)
 	log('VLS exiting.')
+	os.rmdir_all(temp_dir) or { log('Failed to clean up temp directory: ${err}') }
 }
 
 fn read_request(mut reader io.BufferedReader) !string {
@@ -97,7 +104,7 @@ fn (mut app App) handle_stdio_requests(mut reader io.BufferedReader) {
 		pretty := json.encode_pretty(request)
 		log('\n\nRECV (pretty): ${pretty}')
 		method := Method.from_string(request.method)
-		log('1method="${method}" request.method="${request.method}" kek${method == .completion}')
+		log('method="${method}" request.method="${request.method}" ${method == .completion}')
 		match method {
 			.completion, .signature_help, .definition {
 				resp := app.operation_at_pos(method, request)
@@ -132,7 +139,11 @@ fn (mut app App) handle_stdio_requests(mut reader io.BufferedReader) {
 				}
 				write_response(response)
 			}
-			.initialized, .did_open, .set_trace, .cancel_request {
+			.did_open {
+				log('DID_OPEN')
+				app.on_did_open(request)
+			}
+			.initialized, .set_trace, .cancel_request {
 				log('Received and ignored method: ${request.method}')
 			}
 			.shutdown {
