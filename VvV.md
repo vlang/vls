@@ -2,7 +2,7 @@
 
 Early alpha.
 
-Build with: `v .`
+Build with: `volkanTR .`
 
 Copy the binary to `/tmp/vls2`. Later it will be configurable via the extension settings.
 
