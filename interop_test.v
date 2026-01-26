@@ -249,8 +249,14 @@ fn test_position_struct_zero() {
 
 fn test_lsp_range_struct() {
 	r := LSPRange{
-		start: Position{line: 0, char: 0}
-		end:   Position{line: 0, char: 10}
+		start: Position{
+			line: 0
+			char: 0
+		}
+		end:   Position{
+			line: 0
+			char: 10
+		}
 	}
 	assert r.start.line == 0
 	assert r.end.char == 10
@@ -258,8 +264,14 @@ fn test_lsp_range_struct() {
 
 fn test_lsp_range_multiline() {
 	r := LSPRange{
-		start: Position{line: 5, char: 10}
-		end:   Position{line: 10, char: 5}
+		start: Position{
+			line: 5
+			char: 10
+		}
+		end:   Position{
+			line: 10
+			char: 5
+		}
 	}
 	assert r.start.line < r.end.line
 }
@@ -267,8 +279,14 @@ fn test_lsp_range_multiline() {
 fn test_lsp_diagnostic_struct() {
 	diag := LSPDiagnostic{
 		range:    LSPRange{
-			start: Position{line: 5, char: 0}
-			end:   Position{line: 5, char: 10}
+			start: Position{
+				line: 5
+				char: 0
+			}
+			end:   Position{
+				line: 5
+				char: 10
+			}
 		}
 		message:  'test error'
 		severity: 1
@@ -295,8 +313,14 @@ fn test_location_struct() {
 	loc := Location{
 		uri:   'file:///test/file.v'
 		range: LSPRange{
-			start: Position{line: 10, char: 5}
-			end:   Position{line: 10, char: 15}
+			start: Position{
+				line: 10
+				char: 5
+			}
+			end:   Position{
+				line: 10
+				char: 15
+			}
 		}
 	}
 	assert loc.uri == 'file:///test/file.v'
@@ -325,7 +349,10 @@ fn test_detail_kinds() {
 	// Test various completion item kinds
 	kinds := [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] // Text, Method, Function, etc.
 	for k in kinds {
-		detail := Detail{kind: k, label: 'test'}
+		detail := Detail{
+			kind:  k
+			label: 'test'
+		}
 		assert detail.kind == k
 	}
 }
@@ -358,8 +385,12 @@ fn test_signature_help_struct() {
 			SignatureInformation{
 				label:      'fn my_func(a int, b string) bool'
 				parameters: [
-					ParameterInformation{label: 'a int'},
-					ParameterInformation{label: 'b string'},
+					ParameterInformation{
+						label: 'a int'
+					},
+					ParameterInformation{
+						label: 'b string'
+					},
 				]
 			},
 		]
@@ -374,9 +405,15 @@ fn test_signature_help_struct() {
 fn test_signature_help_multiple_signatures() {
 	sig := SignatureHelp{
 		signatures:       [
-			SignatureInformation{label: 'fn overload1(a int)'},
-			SignatureInformation{label: 'fn overload2(a int, b int)'},
-			SignatureInformation{label: 'fn overload3(a int, b int, c int)'},
+			SignatureInformation{
+				label: 'fn overload1(a int)'
+			},
+			SignatureInformation{
+				label: 'fn overload2(a int, b int)'
+			},
+			SignatureInformation{
+				label: 'fn overload3(a int, b int, c int)'
+			},
 		]
 		active_signature: 1
 		active_parameter: 0
@@ -430,8 +467,13 @@ fn test_request_struct() {
 		method:  'textDocument/completion'
 		jsonrpc: '2.0'
 		params:  Params{
-			position:      Position{line: 5, char: 10}
-			text_document: TextDocumentIdentifier{uri: 'file:///test.v'}
+			position:      Position{
+				line: 5
+				char: 10
+			}
+			text_document: TextDocumentIdentifier{
+				uri: 'file:///test.v'
+			}
 		}
 	}
 	assert req.id == 1
@@ -827,7 +869,9 @@ fn test_json_error_negative_values() {
 }
 
 fn test_text_document_identifier() {
-	doc := TextDocumentIdentifier{uri: 'file:///test.v'}
+	doc := TextDocumentIdentifier{
+		uri: 'file:///test.v'
+	}
 	assert doc.uri == 'file:///test.v'
 }
 
@@ -838,9 +882,16 @@ fn test_text_document_identifier_empty() {
 
 fn test_params_struct_complete() {
 	params := Params{
-		content_changes: [ContentChange{text: 'test'}]
-		position:        Position{line: 5, char: 10}
-		text_document:   TextDocumentIdentifier{uri: 'file:///test.v'}
+		content_changes: [ContentChange{
+			text: 'test'
+		}]
+		position:        Position{
+			line: 5
+			char: 10
+		}
+		text_document:   TextDocumentIdentifier{
+			uri: 'file:///test.v'
+		}
 	}
 	assert params.content_changes.len == 1
 	assert params.position.line == 5
@@ -881,7 +932,9 @@ fn test_text_document_sync_incremental() {
 }
 
 fn test_parameter_information() {
-	param := ParameterInformation{label: 'x int'}
+	param := ParameterInformation{
+		label: 'x int'
+	}
 	assert param.label == 'x int'
 }
 
@@ -889,9 +942,15 @@ fn test_signature_information_with_params() {
 	sig := SignatureInformation{
 		label:      'fn test(a int, b string, c bool)'
 		parameters: [
-			ParameterInformation{label: 'a int'},
-			ParameterInformation{label: 'b string'},
-			ParameterInformation{label: 'c bool'},
+			ParameterInformation{
+				label: 'a int'
+			},
+			ParameterInformation{
+				label: 'b string'
+			},
+			ParameterInformation{
+				label: 'c bool'
+			},
 		]
 	}
 	assert sig.parameters.len == 3

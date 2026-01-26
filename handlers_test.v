@@ -46,7 +46,9 @@ fn test_on_did_open_tracks_file() {
 		method:  'textDocument/didOpen'
 		jsonrpc: '2.0'
 		params:  Params{
-			text_document: TextDocumentIdentifier{uri: uri}
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
 		}
 	}
 
@@ -80,10 +82,18 @@ fn test_on_did_open_multiple_files() {
 	uri2 := path_to_uri(test_file2)
 
 	app.on_did_open(Request{
-		params: Params{text_document: TextDocumentIdentifier{uri: uri1}}
+		params: Params{
+			text_document: TextDocumentIdentifier{
+				uri: uri1
+			}
+		}
 	})
 	app.on_did_open(Request{
-		params: Params{text_document: TextDocumentIdentifier{uri: uri2}}
+		params: Params{
+			text_document: TextDocumentIdentifier{
+				uri: uri2
+			}
+		}
 	})
 
 	assert app.open_files.len == 2
@@ -113,13 +123,21 @@ fn test_on_did_open_updates_current_text() {
 
 	// Open first file
 	app.on_did_open(Request{
-		params: Params{text_document: TextDocumentIdentifier{uri: uri1}}
+		params: Params{
+			text_document: TextDocumentIdentifier{
+				uri: uri1
+			}
+		}
 	})
 	assert app.text == content1
 
 	// Open second file - app.text should update to second file's content
 	app.on_did_open(Request{
-		params: Params{text_document: TextDocumentIdentifier{uri: uri2}}
+		params: Params{
+			text_document: TextDocumentIdentifier{
+				uri: uri2
+			}
+		}
 	})
 	assert app.text == content2
 }
@@ -135,7 +153,11 @@ fn test_on_did_open_nonexistent_file() {
 	uri := path_to_uri(nonexistent)
 
 	app.on_did_open(Request{
-		params: Params{text_document: TextDocumentIdentifier{uri: uri}}
+		params: Params{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+		}
 	})
 
 	// File should not be tracked if it doesn't exist
@@ -155,7 +177,11 @@ fn test_on_did_open_empty_file() {
 
 	uri := path_to_uri(test_file)
 	app.on_did_open(Request{
-		params: Params{text_document: TextDocumentIdentifier{uri: uri}}
+		params: Params{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+		}
 	})
 
 	assert uri in app.open_files
@@ -179,7 +205,11 @@ fn test_on_did_open_reopen_same_file() {
 
 	uri := path_to_uri(test_file)
 	app.on_did_open(Request{
-		params: Params{text_document: TextDocumentIdentifier{uri: uri}}
+		params: Params{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+		}
 	})
 	assert app.open_files[uri] == content1
 
@@ -189,7 +219,11 @@ fn test_on_did_open_reopen_same_file() {
 
 	// Reopen the file - should get new content
 	app.on_did_open(Request{
-		params: Params{text_document: TextDocumentIdentifier{uri: uri}}
+		params: Params{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+		}
 	})
 	assert app.open_files[uri] == content2
 }
@@ -214,7 +248,11 @@ fn test_on_did_change_updates_content() {
 
 	// First open the file
 	app.on_did_open(Request{
-		params: Params{text_document: TextDocumentIdentifier{uri: uri}}
+		params: Params{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+		}
 	})
 
 	// Then change it
@@ -224,8 +262,12 @@ fn test_on_did_change_updates_content() {
 		method:  'textDocument/didChange'
 		jsonrpc: '2.0'
 		params:  Params{
-			text_document:   TextDocumentIdentifier{uri: uri}
-			content_changes: [ContentChange{text: new_content}]
+			text_document:   TextDocumentIdentifier{
+				uri: uri
+			}
+			content_changes: [ContentChange{
+				text: new_content
+			}]
 		}
 	}
 
@@ -261,7 +303,9 @@ fn test_on_did_change_empty_text() {
 	// Request with empty text should return none
 	request := Request{
 		params: Params{
-			content_changes: [ContentChange{text: ''}]
+			content_changes: [ContentChange{
+				text: ''
+			}]
 		}
 	}
 
@@ -283,13 +327,21 @@ fn test_on_did_change_returns_notification() {
 
 	uri := path_to_uri(test_file)
 	app.on_did_open(Request{
-		params: Params{text_document: TextDocumentIdentifier{uri: uri}}
+		params: Params{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+		}
 	})
 
 	request := Request{
 		params: Params{
-			text_document:   TextDocumentIdentifier{uri: uri}
-			content_changes: [ContentChange{text: content}]
+			text_document:   TextDocumentIdentifier{
+				uri: uri
+			}
+			content_changes: [ContentChange{
+				text: content
+			}]
 		}
 	}
 
@@ -315,7 +367,11 @@ fn test_on_did_change_multiple_changes() {
 
 	uri := path_to_uri(test_file)
 	app.on_did_open(Request{
-		params: Params{text_document: TextDocumentIdentifier{uri: uri}}
+		params: Params{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+		}
 	})
 
 	// Simulate multiple sequential changes
@@ -328,8 +384,12 @@ fn test_on_did_change_multiple_changes() {
 	for change in changes {
 		request := Request{
 			params: Params{
-				text_document:   TextDocumentIdentifier{uri: uri}
-				content_changes: [ContentChange{text: change}]
+				text_document:   TextDocumentIdentifier{
+					uri: uri
+				}
+				content_changes: [ContentChange{
+					text: change
+				}]
 			}
 		}
 		app.on_did_change(request)
@@ -353,7 +413,11 @@ fn test_on_did_change_updates_tracked_file() {
 
 	// Open file
 	app.on_did_open(Request{
-		params: Params{text_document: TextDocumentIdentifier{uri: uri}}
+		params: Params{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+		}
 	})
 
 	// Verify initial state
@@ -363,8 +427,12 @@ fn test_on_did_change_updates_tracked_file() {
 	new_content := 'modified content'
 	app.on_did_change(Request{
 		params: Params{
-			text_document:   TextDocumentIdentifier{uri: uri}
-			content_changes: [ContentChange{text: new_content}]
+			text_document:   TextDocumentIdentifier{
+				uri: uri
+			}
+			content_changes: [ContentChange{
+				text: new_content
+			}]
 		}
 	})
 
@@ -386,7 +454,7 @@ fn test_operation_at_pos_completion_line_info() {
 	test_dir := os.join_path(app.temp_dir, 'project')
 	os.mkdir_all(test_dir) or { panic(err) }
 	test_file := os.join_path(test_dir, 'test.v')
-	content := "module main\n\nfn main() {\n\tos.\n}\n"
+	content := 'module main\n\nfn main() {\n\tos.\n}\n'
 	os.write_file(test_file, content) or { panic(err) }
 
 	uri := path_to_uri(test_file)
@@ -397,8 +465,13 @@ fn test_operation_at_pos_completion_line_info() {
 		id:     1
 		method: 'textDocument/completion'
 		params: Params{
-			text_document: TextDocumentIdentifier{uri: uri}
-			position:      Position{line: 3, char: 4}
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			position:      Position{
+				line: 3
+				char: 4
+			}
 		}
 	}
 
@@ -415,7 +488,7 @@ fn test_operation_at_pos_definition_line_info() {
 	test_dir := os.join_path(app.temp_dir, 'project')
 	os.mkdir_all(test_dir) or { panic(err) }
 	test_file := os.join_path(test_dir, 'test.v')
-	content := "module main\n\nfn helper() {}\n\nfn main() {\n\thelper()\n}\n"
+	content := 'module main\n\nfn helper() {}\n\nfn main() {\n\thelper()\n}\n'
 	os.write_file(test_file, content) or { panic(err) }
 
 	uri := path_to_uri(test_file)
@@ -426,8 +499,13 @@ fn test_operation_at_pos_definition_line_info() {
 		id:     2
 		method: 'textDocument/definition'
 		params: Params{
-			text_document: TextDocumentIdentifier{uri: uri}
-			position:      Position{line: 5, char: 2}
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			position:      Position{
+				line: 5
+				char: 2
+			}
 		}
 	}
 
@@ -444,7 +522,7 @@ fn test_operation_at_pos_signature_help_line_info() {
 	test_dir := os.join_path(app.temp_dir, 'project')
 	os.mkdir_all(test_dir) or { panic(err) }
 	test_file := os.join_path(test_dir, 'test.v')
-	content := "module main\n\nfn greet(name string) {}\n\nfn main() {\n\tgreet(\n}\n"
+	content := 'module main\n\nfn greet(name string) {}\n\nfn main() {\n\tgreet(\n}\n'
 	os.write_file(test_file, content) or { panic(err) }
 
 	uri := path_to_uri(test_file)
@@ -455,8 +533,13 @@ fn test_operation_at_pos_signature_help_line_info() {
 		id:     3
 		method: 'textDocument/signatureHelp'
 		params: Params{
-			text_document: TextDocumentIdentifier{uri: uri}
-			position:      Position{line: 5, char: 7}
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			position:      Position{
+				line: 5
+				char: 7
+			}
 		}
 	}
 
@@ -473,7 +556,7 @@ fn test_operation_at_pos_preserves_request_id() {
 	test_dir := os.join_path(app.temp_dir, 'project')
 	os.mkdir_all(test_dir) or { panic(err) }
 	test_file := os.join_path(test_dir, 'test.v')
-	content := "module main\n\nfn main() {}\n"
+	content := 'module main\n\nfn main() {}\n'
 	os.write_file(test_file, content) or { panic(err) }
 
 	uri := path_to_uri(test_file)
@@ -486,8 +569,13 @@ fn test_operation_at_pos_preserves_request_id() {
 		request := Request{
 			id:     id
 			params: Params{
-				text_document: TextDocumentIdentifier{uri: uri}
-				position:      Position{line: 2, char: 0}
+				text_document: TextDocumentIdentifier{
+					uri: uri
+				}
+				position:      Position{
+					line: 2
+					char: 0
+				}
 			}
 		}
 		response := app.operation_at_pos(.completion, request)
@@ -564,8 +652,14 @@ fn test_json_encode_location_response() {
 		result: Location{
 			uri:   'file:///test/main.v'
 			range: LSPRange{
-				start: Position{line: 10, char: 5}
-				end:   Position{line: 10, char: 15}
+				start: Position{
+					line: 10
+					char: 5
+				}
+				end:   Position{
+					line: 10
+					char: 15
+				}
 			}
 		}
 	}
@@ -582,8 +676,12 @@ fn test_json_encode_signature_help_response() {
 				SignatureInformation{
 					label:      'fn test(a int, b string)'
 					parameters: [
-						ParameterInformation{label: 'a int'},
-						ParameterInformation{label: 'b string'},
+						ParameterInformation{
+							label: 'a int'
+						},
+						ParameterInformation{
+							label: 'b string'
+						},
 					]
 				},
 			]
@@ -605,8 +703,14 @@ fn test_json_encode_notification() {
 			diagnostics: [
 				LSPDiagnostic{
 					range:    LSPRange{
-						start: Position{line: 5, char: 0}
-						end:   Position{line: 5, char: 10}
+						start: Position{
+							line: 5
+							char: 0
+						}
+						end:   Position{
+							line: 5
+							char: 10
+						}
 					}
 					message:  'undefined identifier'
 					severity: 1
@@ -675,9 +779,21 @@ fn test_diagnostics_deduplication() {
 	mut seen_positions := map[string]bool{}
 
 	errors := [
-		JsonError{line_nr: 5, col: 10, message: 'error 1'},
-		JsonError{line_nr: 5, col: 10, message: 'error 2'}, // duplicate position
-		JsonError{line_nr: 6, col: 5, message: 'error 3'},
+		JsonError{
+			line_nr: 5
+			col:     10
+			message: 'error 1'
+		},
+		JsonError{
+			line_nr: 5
+			col:     10
+			message: 'error 2'
+		}, // duplicate position
+		JsonError{
+			line_nr: 6
+			col:     5
+			message: 'error 3'
+		},
 	]
 
 	mut count := 0
@@ -697,9 +813,21 @@ fn test_diagnostics_deduplication_same_line_different_col() {
 	mut seen_positions := map[string]bool{}
 
 	errors := [
-		JsonError{line_nr: 5, col: 1, message: 'error 1'},
-		JsonError{line_nr: 5, col: 10, message: 'error 2'},
-		JsonError{line_nr: 5, col: 20, message: 'error 3'},
+		JsonError{
+			line_nr: 5
+			col:     1
+			message: 'error 1'
+		},
+		JsonError{
+			line_nr: 5
+			col:     10
+			message: 'error 2'
+		},
+		JsonError{
+			line_nr: 5
+			col:     20
+			message: 'error 3'
+		},
 	]
 
 	mut count := 0
@@ -747,7 +875,10 @@ fn test_response_result_string() {
 
 fn test_response_result_details() {
 	details := [
-		Detail{kind: 6, label: 'test'},
+		Detail{
+			kind:  6
+			label: 'test'
+		},
 	]
 	result := ResponseResult(details)
 	if result is []Detail {
@@ -894,7 +1025,7 @@ fn test_v_error_to_lsp_diagnostic_preserves_message() {
 	messages := [
 		'undefined identifier `foo`',
 		'expected `;` after expression',
-		"cannot use `string` as `int`",
+		'cannot use `string` as `int`',
 		'function `test` redeclared',
 		'',
 	]
@@ -943,7 +1074,11 @@ fn test_multifile_tracking() {
 		os.write_file(path, 'module main\n\nfn ${file}() {}') or { panic(err) }
 		uri := path_to_uri(path)
 		app.on_did_open(Request{
-			params: Params{text_document: TextDocumentIdentifier{uri: uri}}
+			params: Params{
+				text_document: TextDocumentIdentifier{
+					uri: uri
+				}
+			}
 		})
 	}
 
@@ -969,15 +1104,31 @@ fn test_multifile_change_single_file() {
 	utils_uri := path_to_uri(utils_file)
 
 	// Open both files
-	app.on_did_open(Request{params: Params{text_document: TextDocumentIdentifier{uri: main_uri}}})
-	app.on_did_open(Request{params: Params{text_document: TextDocumentIdentifier{uri: utils_uri}}})
+	app.on_did_open(Request{
+		params: Params{
+			text_document: TextDocumentIdentifier{
+				uri: main_uri
+			}
+		}
+	})
+	app.on_did_open(Request{
+		params: Params{
+			text_document: TextDocumentIdentifier{
+				uri: utils_uri
+			}
+		}
+	})
 
 	// Change only main.v
 	new_content := 'module main\n\nfn main() { changed }'
 	app.on_did_change(Request{
 		params: Params{
-			text_document:   TextDocumentIdentifier{uri: main_uri}
-			content_changes: [ContentChange{text: new_content}]
+			text_document:   TextDocumentIdentifier{
+				uri: main_uri
+			}
+			content_changes: [ContentChange{
+				text: new_content
+			}]
 		}
 	})
 

@@ -131,7 +131,9 @@ fn test_integration_document_lifecycle() {
 		method:  'textDocument/didOpen'
 		jsonrpc: '2.0'
 		params:  Params{
-			text_document: TextDocumentIdentifier{uri: uri}
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
 		}
 	}
 	app.on_did_open(open_request)
@@ -146,8 +148,12 @@ fn test_integration_document_lifecycle() {
 		method:  'textDocument/didChange'
 		jsonrpc: '2.0'
 		params:  Params{
-			text_document:   TextDocumentIdentifier{uri: uri}
-			content_changes: [ContentChange{text: new_content}]
+			text_document:   TextDocumentIdentifier{
+				uri: uri
+			}
+			content_changes: [ContentChange{
+				text: new_content
+			}]
 		}
 	}
 	app.on_did_change(change_request)
@@ -170,7 +176,11 @@ fn test_integration_document_open_close_cycle() {
 
 	// Open
 	app.on_did_open(Request{
-		params: Params{text_document: TextDocumentIdentifier{uri: uri}}
+		params: Params{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+		}
 	})
 	assert app.open_files.len == 1
 
@@ -180,7 +190,11 @@ fn test_integration_document_open_close_cycle() {
 	uri2 := path_to_uri(test_file2)
 
 	app.on_did_open(Request{
-		params: Params{text_document: TextDocumentIdentifier{uri: uri2}}
+		params: Params{
+			text_document: TextDocumentIdentifier{
+				uri: uri2
+			}
+		}
 	})
 	assert app.open_files.len == 2
 }
@@ -199,7 +213,7 @@ fn test_integration_multifile_project() {
 	main_file := os.join_path(project_dir, 'main.v')
 	utils_file := os.join_path(project_dir, 'utils.v')
 
-	main_content := "module main\n\nfn main() {\n\thelper()\n}\n"
+	main_content := 'module main\n\nfn main() {\n\thelper()\n}\n'
 	utils_content := "module main\n\nfn helper() {\n\tprintln('helper')\n}\n"
 
 	os.write_file(main_file, main_content) or { panic(err) }
@@ -210,10 +224,18 @@ fn test_integration_multifile_project() {
 
 	// Open both files
 	app.on_did_open(Request{
-		params: Params{text_document: TextDocumentIdentifier{uri: main_uri}}
+		params: Params{
+			text_document: TextDocumentIdentifier{
+				uri: main_uri
+			}
+		}
 	})
 	app.on_did_open(Request{
-		params: Params{text_document: TextDocumentIdentifier{uri: utils_uri}}
+		params: Params{
+			text_document: TextDocumentIdentifier{
+				uri: utils_uri
+			}
+		}
 	})
 
 	assert app.open_files.len == 2
@@ -241,8 +263,20 @@ fn test_integration_multifile_cross_file_reference() {
 	helper_uri := path_to_uri(helper_file)
 
 	// Open both files
-	app.on_did_open(Request{params: Params{text_document: TextDocumentIdentifier{uri: main_uri}}})
-	app.on_did_open(Request{params: Params{text_document: TextDocumentIdentifier{uri: helper_uri}}})
+	app.on_did_open(Request{
+		params: Params{
+			text_document: TextDocumentIdentifier{
+				uri: main_uri
+			}
+		}
+	})
+	app.on_did_open(Request{
+		params: Params{
+			text_document: TextDocumentIdentifier{
+				uri: helper_uri
+			}
+		}
+	})
 
 	// Verify both files are tracked
 	assert app.open_files.len == 2
@@ -269,8 +303,20 @@ fn test_integration_multifile_nested_directories() {
 	main_uri := path_to_uri(main_file)
 	lib_uri := path_to_uri(lib_file)
 
-	app.on_did_open(Request{params: Params{text_document: TextDocumentIdentifier{uri: main_uri}}})
-	app.on_did_open(Request{params: Params{text_document: TextDocumentIdentifier{uri: lib_uri}}})
+	app.on_did_open(Request{
+		params: Params{
+			text_document: TextDocumentIdentifier{
+				uri: main_uri
+			}
+		}
+	})
+	app.on_did_open(Request{
+		params: Params{
+			text_document: TextDocumentIdentifier{
+				uri: lib_uri
+			}
+		}
+	})
 
 	assert app.open_files.len == 2
 }
@@ -295,14 +341,22 @@ fn test_integration_diagnostics_syntax_error() {
 
 	// Open the file
 	app.on_did_open(Request{
-		params: Params{text_document: TextDocumentIdentifier{uri: uri}}
+		params: Params{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+		}
 	})
 
 	// Trigger change to get diagnostics
 	change_request := Request{
 		params: Params{
-			text_document:   TextDocumentIdentifier{uri: uri}
-			content_changes: [ContentChange{text: error_content}]
+			text_document:   TextDocumentIdentifier{
+				uri: uri
+			}
+			content_changes: [ContentChange{
+				text: error_content
+			}]
 		}
 	}
 
@@ -330,13 +384,21 @@ fn test_integration_diagnostics_valid_code() {
 	uri := path_to_uri(test_file)
 
 	app.on_did_open(Request{
-		params: Params{text_document: TextDocumentIdentifier{uri: uri}}
+		params: Params{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+		}
 	})
 
 	change_request := Request{
 		params: Params{
-			text_document:   TextDocumentIdentifier{uri: uri}
-			content_changes: [ContentChange{text: valid_content}]
+			text_document:   TextDocumentIdentifier{
+				uri: uri
+			}
+			content_changes: [ContentChange{
+				text: valid_content
+			}]
 		}
 	}
 
@@ -355,9 +417,21 @@ fn test_integration_diagnostics_deduplication() {
 
 	// Simulate errors from V compiler
 	errors := [
-		JsonError{line_nr: 5, col: 10, message: 'first error'},
-		JsonError{line_nr: 5, col: 10, message: 'duplicate error'}, // Same position
-		JsonError{line_nr: 6, col: 1, message: 'different position'},
+		JsonError{
+			line_nr: 5
+			col:     10
+			message: 'first error'
+		},
+		JsonError{
+			line_nr: 5
+			col:     10
+			message: 'duplicate error'
+		}, // Same position
+		JsonError{
+			line_nr: 6
+			col:     1
+			message: 'different position'
+		},
 	]
 
 	mut diagnostics := []LSPDiagnostic{}
@@ -385,14 +459,22 @@ fn test_integration_diagnostics_empty_file() {
 	uri := path_to_uri(test_file)
 
 	app.on_did_open(Request{
-		params: Params{text_document: TextDocumentIdentifier{uri: uri}}
+		params: Params{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+		}
 	})
 
 	// Empty content should return none
 	result := app.on_did_change(Request{
 		params: Params{
-			text_document:   TextDocumentIdentifier{uri: uri}
-			content_changes: [ContentChange{text: ''}]
+			text_document:   TextDocumentIdentifier{
+				uri: uri
+			}
+			content_changes: [ContentChange{
+				text: ''
+			}]
 		}
 	})
 
@@ -410,13 +492,17 @@ fn test_integration_completion_request() {
 	}
 
 	test_file := os.join_path(project_dir, 'completion.v')
-	content := "module main\n\nfn main() {\n\tos.\n}\n"
+	content := 'module main\n\nfn main() {\n\tos.\n}\n'
 	os.write_file(test_file, content) or { panic(err) }
 
 	uri := path_to_uri(test_file)
 
 	app.on_did_open(Request{
-		params: Params{text_document: TextDocumentIdentifier{uri: uri}}
+		params: Params{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+		}
 	})
 	app.text = content
 	app.open_files[uri] = content
@@ -427,8 +513,13 @@ fn test_integration_completion_request() {
 		method:  'textDocument/completion'
 		jsonrpc: '2.0'
 		params:  Params{
-			text_document: TextDocumentIdentifier{uri: uri}
-			position:      Position{line: 3, char: 4} // After "os."
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			position:      Position{
+				line: 3
+				char: 4
+			} // After "os."
 		}
 	}
 
@@ -456,8 +547,13 @@ fn test_integration_completion_request_id_preserved() {
 		request := Request{
 			id:     id
 			params: Params{
-				text_document: TextDocumentIdentifier{uri: uri}
-				position:      Position{line: 2, char: 0}
+				text_document: TextDocumentIdentifier{
+					uri: uri
+				}
+				position:      Position{
+					line: 2
+					char: 0
+				}
 			}
 		}
 		response := app.operation_at_pos(.completion, request)
@@ -472,7 +568,7 @@ fn test_integration_completion_at_function_call() {
 	}
 
 	test_file := os.join_path(project_dir, 'test.v')
-	content := "module main\n\nfn main() {\n\tprintln(\n}\n"
+	content := 'module main\n\nfn main() {\n\tprintln(\n}\n'
 	os.write_file(test_file, content) or { panic(err) }
 
 	uri := path_to_uri(test_file)
@@ -482,8 +578,13 @@ fn test_integration_completion_at_function_call() {
 	request := Request{
 		id:     1
 		params: Params{
-			text_document: TextDocumentIdentifier{uri: uri}
-			position:      Position{line: 3, char: 9}
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			position:      Position{
+				line: 3
+				char: 9
+			}
 		}
 	}
 
@@ -502,13 +603,17 @@ fn test_integration_definition_request() {
 	}
 
 	test_file := os.join_path(project_dir, 'definition.v')
-	content := "module main\n\nfn helper() {}\n\nfn main() {\n\thelper()\n}\n"
+	content := 'module main\n\nfn helper() {}\n\nfn main() {\n\thelper()\n}\n'
 	os.write_file(test_file, content) or { panic(err) }
 
 	uri := path_to_uri(test_file)
 
 	app.on_did_open(Request{
-		params: Params{text_document: TextDocumentIdentifier{uri: uri}}
+		params: Params{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+		}
 	})
 	app.text = content
 	app.open_files[uri] = content
@@ -519,8 +624,13 @@ fn test_integration_definition_request() {
 		method:  'textDocument/definition'
 		jsonrpc: '2.0'
 		params:  Params{
-			text_document: TextDocumentIdentifier{uri: uri}
-			position:      Position{line: 5, char: 2} // At "helper()"
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			position:      Position{
+				line: 5
+				char: 2
+			} // At "helper()"
 		}
 	}
 
@@ -538,7 +648,7 @@ fn test_integration_definition_multifile() {
 	main_file := os.join_path(project_dir, 'main.v')
 	utils_file := os.join_path(project_dir, 'utils.v')
 
-	main_content := "module main\n\nfn main() {\n\thelper()\n}\n"
+	main_content := 'module main\n\nfn main() {\n\thelper()\n}\n'
 	utils_content := "module main\n\nfn helper() {\n\tprintln('helper')\n}\n"
 
 	os.write_file(main_file, main_content) or { panic(err) }
@@ -548,8 +658,20 @@ fn test_integration_definition_multifile() {
 	utils_uri := path_to_uri(utils_file)
 
 	// Open both files
-	app.on_did_open(Request{params: Params{text_document: TextDocumentIdentifier{uri: main_uri}}})
-	app.on_did_open(Request{params: Params{text_document: TextDocumentIdentifier{uri: utils_uri}}})
+	app.on_did_open(Request{
+		params: Params{
+			text_document: TextDocumentIdentifier{
+				uri: main_uri
+			}
+		}
+	})
+	app.on_did_open(Request{
+		params: Params{
+			text_document: TextDocumentIdentifier{
+				uri: utils_uri
+			}
+		}
+	})
 	app.text = main_content
 	app.open_files[main_uri] = main_content
 	app.open_files[utils_uri] = utils_content
@@ -558,8 +680,13 @@ fn test_integration_definition_multifile() {
 	request := Request{
 		id:     3
 		params: Params{
-			text_document: TextDocumentIdentifier{uri: main_uri}
-			position:      Position{line: 3, char: 2}
+			text_document: TextDocumentIdentifier{
+				uri: main_uri
+			}
+			position:      Position{
+				line: 3
+				char: 2
+			}
 		}
 	}
 
@@ -578,13 +705,17 @@ fn test_integration_signature_help_request() {
 	}
 
 	test_file := os.join_path(project_dir, 'signature.v')
-	content := "module main\n\nfn greet(name string, age int) {}\n\nfn main() {\n\tgreet(\n}\n"
+	content := 'module main\n\nfn greet(name string, age int) {}\n\nfn main() {\n\tgreet(\n}\n'
 	os.write_file(test_file, content) or { panic(err) }
 
 	uri := path_to_uri(test_file)
 
 	app.on_did_open(Request{
-		params: Params{text_document: TextDocumentIdentifier{uri: uri}}
+		params: Params{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+		}
 	})
 	app.text = content
 	app.open_files[uri] = content
@@ -595,8 +726,13 @@ fn test_integration_signature_help_request() {
 		method:  'textDocument/signatureHelp'
 		jsonrpc: '2.0'
 		params:  Params{
-			text_document: TextDocumentIdentifier{uri: uri}
-			position:      Position{line: 5, char: 7} // After "greet("
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			position:      Position{
+				line: 5
+				char: 7
+			} // After "greet("
 		}
 	}
 
@@ -611,7 +747,7 @@ fn test_integration_signature_help_with_params() {
 	}
 
 	test_file := os.join_path(project_dir, 'sig.v')
-	content := "module main\n\nfn add(a int, b int) int { return a + b }\n\nfn main() {\n\tadd(1, \n}\n"
+	content := 'module main\n\nfn add(a int, b int) int { return a + b }\n\nfn main() {\n\tadd(1, \n}\n'
 	os.write_file(test_file, content) or { panic(err) }
 
 	uri := path_to_uri(test_file)
@@ -622,8 +758,13 @@ fn test_integration_signature_help_with_params() {
 	request := Request{
 		id:     4
 		params: Params{
-			text_document: TextDocumentIdentifier{uri: uri}
-			position:      Position{line: 5, char: 7}
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			position:      Position{
+				line: 5
+				char: 7
+			}
 		}
 	}
 
@@ -642,14 +783,18 @@ fn test_integration_temp_file_single() {
 	}
 
 	test_file := os.join_path(project_dir, 'single.v')
-	content := "module main\n\nfn main() {}\n"
+	content := 'module main\n\nfn main() {}\n'
 	os.write_file(test_file, content) or { panic(err) }
 
 	uri := path_to_uri(test_file)
 
 	// Only one file open - should use single file mode
 	app.on_did_open(Request{
-		params: Params{text_document: TextDocumentIdentifier{uri: uri}}
+		params: Params{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+		}
 	})
 
 	assert app.open_files.len == 1
@@ -664,17 +809,25 @@ fn test_integration_temp_file_multifile() {
 	file1 := os.join_path(project_dir, 'a.v')
 	file2 := os.join_path(project_dir, 'b.v')
 
-	os.write_file(file1, "module main\n\nfn a() {}\n") or { panic(err) }
-	os.write_file(file2, "module main\n\nfn b() {}\n") or { panic(err) }
+	os.write_file(file1, 'module main\n\nfn a() {}\n') or { panic(err) }
+	os.write_file(file2, 'module main\n\nfn b() {}\n') or { panic(err) }
 
 	uri1 := path_to_uri(file1)
 	uri2 := path_to_uri(file2)
 
 	app.on_did_open(Request{
-		params: Params{text_document: TextDocumentIdentifier{uri: uri1}}
+		params: Params{
+			text_document: TextDocumentIdentifier{
+				uri: uri1
+			}
+		}
 	})
 	app.on_did_open(Request{
-		params: Params{text_document: TextDocumentIdentifier{uri: uri2}}
+		params: Params{
+			text_document: TextDocumentIdentifier{
+				uri: uri2
+			}
+		}
 	})
 
 	// Multiple files - should use multi-file mode
@@ -688,10 +841,10 @@ fn test_integration_write_tracked_files() {
 	}
 
 	file1 := os.join_path(project_dir, 'main.v')
-	os.write_file(file1, "module main\n\nfn main() {}\n") or { panic(err) }
+	os.write_file(file1, 'module main\n\nfn main() {}\n') or { panic(err) }
 
 	uri1 := path_to_uri(file1)
-	app.open_files[uri1] = "module main\n\nfn main() { changed }\n"
+	app.open_files[uri1] = 'module main\n\nfn main() { changed }\n'
 
 	temp_project := app.write_tracked_files_to_temp(project_dir) or {
 		assert false, 'Failed to write tracked files: ${err}'
@@ -796,8 +949,14 @@ fn test_integration_notification_encoding() {
 			diagnostics: [
 				LSPDiagnostic{
 					range:    LSPRange{
-						start: Position{line: 0, char: 0}
-						end:   Position{line: 0, char: 5}
+						start: Position{
+							line: 0
+							char: 0
+						}
+						end:   Position{
+							line: 0
+							char: 5
+						}
 					}
 					message:  'test error'
 					severity: 1
@@ -816,8 +975,16 @@ fn test_integration_notification_encoding() {
 
 fn test_integration_completion_response_encoding() {
 	details := [
-		Detail{kind: 6, label: 'println', detail: 'fn println(s string)'},
-		Detail{kind: 6, label: 'print', detail: 'fn print(s string)'},
+		Detail{
+			kind:   6
+			label:  'println'
+			detail: 'fn println(s string)'
+		},
+		Detail{
+			kind:   6
+			label:  'print'
+			detail: 'fn print(s string)'
+		},
 	]
 
 	response := Response{
@@ -836,8 +1003,14 @@ fn test_integration_location_response_encoding() {
 		result: Location{
 			uri:   'file:///test/main.v'
 			range: LSPRange{
-				start: Position{line: 10, char: 5}
-				end:   Position{line: 10, char: 15}
+				start: Position{
+					line: 10
+					char: 5
+				}
+				end:   Position{
+					line: 10
+					char: 15
+				}
 			}
 		}
 	}
@@ -855,8 +1028,12 @@ fn test_integration_signature_help_response_encoding() {
 				SignatureInformation{
 					label:      'fn test(a int, b string)'
 					parameters: [
-						ParameterInformation{label: 'a int'},
-						ParameterInformation{label: 'b string'},
+						ParameterInformation{
+							label: 'a int'
+						},
+						ParameterInformation{
+							label: 'b string'
+						},
 					]
 				},
 			]
@@ -882,7 +1059,7 @@ fn test_integration_request_id_preserved() {
 	}
 
 	test_file := os.join_path(project_dir, 'test.v')
-	content := "module main\n\nfn main() {}\n"
+	content := 'module main\n\nfn main() {}\n'
 	os.write_file(test_file, content) or { panic(err) }
 
 	uri := path_to_uri(test_file)
@@ -895,8 +1072,13 @@ fn test_integration_request_id_preserved() {
 			id:     id
 			method: 'textDocument/completion'
 			params: Params{
-				text_document: TextDocumentIdentifier{uri: uri}
-				position:      Position{line: 2, char: 0}
+				text_document: TextDocumentIdentifier{
+					uri: uri
+				}
+				position:      Position{
+					line: 2
+					char: 0
+				}
 			}
 		}
 
@@ -923,17 +1105,17 @@ fn test_integration_method_unknown_handling() {
 fn test_integration_method_all_supported() {
 	// Verify all supported methods are recognized
 	supported := {
-		'initialize':                   Method.initialize
-		'initialized':                  Method.initialized
-		'textDocument/didOpen':         Method.did_open
-		'textDocument/didChange':       Method.did_change
-		'textDocument/completion':      Method.completion
-		'textDocument/definition':      Method.definition
-		'textDocument/signatureHelp':   Method.signature_help
-		'shutdown':                     Method.shutdown
-		'exit':                         Method.exit
-		r'$/setTrace':                  Method.set_trace
-		r'$/cancelRequest':             Method.cancel_request
+		'initialize':                 Method.initialize
+		'initialized':                Method.initialized
+		'textDocument/didOpen':       Method.did_open
+		'textDocument/didChange':     Method.did_change
+		'textDocument/completion':    Method.completion
+		'textDocument/definition':    Method.definition
+		'textDocument/signatureHelp': Method.signature_help
+		'shutdown':                   Method.shutdown
+		'exit':                       Method.exit
+		r'$/setTrace':                Method.set_trace
+		r'$/cancelRequest':           Method.cancel_request
 	}
 
 	for method_str, expected in supported {
@@ -991,31 +1173,48 @@ fn test_integration_full_lifecycle() {
 
 	// 1. Create test file
 	test_file := os.join_path(project_dir, 'lifecycle.v')
-	initial_content := "module main\n\nfn main() {\n\t// initial\n}\n"
+	initial_content := 'module main\n\nfn main() {\n\t// initial\n}\n'
 	os.write_file(test_file, initial_content) or { panic(err) }
 	uri := path_to_uri(test_file)
 
 	// 2. Simulate initialize (verify capabilities)
 	caps := Capabilities{
 		capabilities: Capability{
-			text_document_sync:      TextDocumentSyncOptions{open_close: true, change: 1}
-			completion_provider:     CompletionProvider{trigger_characters: ['.']}
-			signature_help_provider: SignatureHelpOptions{trigger_characters: ['(', ',']}
+			text_document_sync:      TextDocumentSyncOptions{
+				open_close: true
+				change:     1
+			}
+			completion_provider:     CompletionProvider{
+				trigger_characters: ['.']
+			}
+			signature_help_provider: SignatureHelpOptions{
+				trigger_characters: ['(', ',']
+			}
 			definition_provider:     true
 		}
 	}
 	assert caps.capabilities.definition_provider == true
 
 	// 3. Open document
-	app.on_did_open(Request{params: Params{text_document: TextDocumentIdentifier{uri: uri}}})
+	app.on_did_open(Request{
+		params: Params{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+		}
+	})
 	assert uri in app.open_files
 
 	// 4. Make changes
-	modified_content := "module main\n\nfn helper() {}\n\nfn main() {\n\thelper()\n}\n"
+	modified_content := 'module main\n\nfn helper() {}\n\nfn main() {\n\thelper()\n}\n'
 	app.on_did_change(Request{
 		params: Params{
-			text_document:   TextDocumentIdentifier{uri: uri}
-			content_changes: [ContentChange{text: modified_content}]
+			text_document:   TextDocumentIdentifier{
+				uri: uri
+			}
+			content_changes: [ContentChange{
+				text: modified_content
+			}]
 		}
 	})
 	assert app.text == modified_content
@@ -1024,8 +1223,13 @@ fn test_integration_full_lifecycle() {
 	comp_response := app.operation_at_pos(.completion, Request{
 		id:     1
 		params: Params{
-			text_document: TextDocumentIdentifier{uri: uri}
-			position:      Position{line: 5, char: 2}
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			position:      Position{
+				line: 5
+				char: 2
+			}
 		}
 	})
 	assert comp_response.id == 1
@@ -1034,8 +1238,13 @@ fn test_integration_full_lifecycle() {
 	def_response := app.operation_at_pos(.definition, Request{
 		id:     2
 		params: Params{
-			text_document: TextDocumentIdentifier{uri: uri}
-			position:      Position{line: 5, char: 2}
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			position:      Position{
+				line: 5
+				char: 2
+			}
 		}
 	})
 	assert def_response.id == 2

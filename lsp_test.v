@@ -166,13 +166,19 @@ fn test_position_default_values() {
 }
 
 fn test_position_with_values() {
-	pos := Position{line: 42, char: 15}
+	pos := Position{
+		line: 42
+		char: 15
+	}
 	assert pos.line == 42
 	assert pos.char == 15
 }
 
 fn test_position_json_encoding() {
-	pos := Position{line: 10, char: 5}
+	pos := Position{
+		line: 10
+		char: 5
+	}
 	encoded := json.encode(pos)
 	assert encoded.contains('"line":10')
 	assert encoded.contains('"character":5')
@@ -200,8 +206,14 @@ fn test_lsp_range_default_values() {
 
 fn test_lsp_range_same_line() {
 	r := LSPRange{
-		start: Position{line: 5, char: 10}
-		end:   Position{line: 5, char: 20}
+		start: Position{
+			line: 5
+			char: 10
+		}
+		end:   Position{
+			line: 5
+			char: 20
+		}
 	}
 	assert r.start.line == r.end.line
 	assert r.end.char > r.start.char
@@ -209,16 +221,28 @@ fn test_lsp_range_same_line() {
 
 fn test_lsp_range_multi_line() {
 	r := LSPRange{
-		start: Position{line: 5, char: 0}
-		end:   Position{line: 10, char: 15}
+		start: Position{
+			line: 5
+			char: 0
+		}
+		end:   Position{
+			line: 10
+			char: 15
+		}
 	}
 	assert r.end.line > r.start.line
 }
 
 fn test_lsp_range_json_encoding() {
 	r := LSPRange{
-		start: Position{line: 1, char: 2}
-		end:   Position{line: 3, char: 4}
+		start: Position{
+			line: 1
+			char: 2
+		}
+		end:   Position{
+			line: 3
+			char: 4
+		}
 	}
 	encoded := json.encode(r)
 	assert encoded.contains('"start"')
@@ -228,12 +252,16 @@ fn test_lsp_range_json_encoding() {
 // --- TextDocumentIdentifier tests ---
 
 fn test_text_document_identifier() {
-	doc := TextDocumentIdentifier{uri: 'file:///test/file.v'}
+	doc := TextDocumentIdentifier{
+		uri: 'file:///test/file.v'
+	}
 	assert doc.uri == 'file:///test/file.v'
 }
 
 fn test_text_document_identifier_json_encoding() {
-	doc := TextDocumentIdentifier{uri: 'file:///path/to/file.v'}
+	doc := TextDocumentIdentifier{
+		uri: 'file:///path/to/file.v'
+	}
 	encoded := json.encode(doc)
 	assert encoded.contains('"uri":"file:///path/to/file.v"')
 }
@@ -246,12 +274,16 @@ fn test_content_change_empty() {
 }
 
 fn test_content_change_with_text() {
-	change := ContentChange{text: 'fn main() {}'}
+	change := ContentChange{
+		text: 'fn main() {}'
+	}
 	assert change.text == 'fn main() {}'
 }
 
 fn test_content_change_multiline() {
-	change := ContentChange{text: 'fn main() {\n\tprintln("hello")\n}'}
+	change := ContentChange{
+		text: 'fn main() {\n\tprintln("hello")\n}'
+	}
 	assert change.text.contains('\n')
 }
 
@@ -266,7 +298,10 @@ fn test_params_empty() {
 
 fn test_params_with_position() {
 	params := Params{
-		position: Position{line: 10, char: 5}
+		position: Position{
+			line: 10
+			char: 5
+		}
 	}
 	assert params.position.line == 10
 	assert params.position.char == 5
@@ -274,7 +309,9 @@ fn test_params_with_position() {
 
 fn test_params_with_content_changes() {
 	params := Params{
-		content_changes: [ContentChange{text: 'test'}]
+		content_changes: [ContentChange{
+			text: 'test'
+		}]
 	}
 	assert params.content_changes.len == 1
 	assert params.content_changes[0].text == 'test'
@@ -346,12 +383,18 @@ fn test_request_json_decoding_initialize() {
 // --- Response struct tests ---
 
 fn test_response_default_jsonrpc() {
-	resp := Response{id: 1, result: 'null'}
+	resp := Response{
+		id:     1
+		result: 'null'
+	}
 	assert resp.jsonrpc == '2.0'
 }
 
 fn test_response_json_encoding() {
-	resp := Response{id: 42, result: 'null'}
+	resp := Response{
+		id:     42
+		result: 'null'
+	}
 	encoded := json.encode(resp)
 	assert encoded.contains('"id":42')
 	assert encoded.contains('"jsonrpc":"2.0"')
@@ -404,8 +447,14 @@ fn test_lsp_diagnostic_warning_severity() {
 fn test_lsp_diagnostic_json_encoding() {
 	diag := LSPDiagnostic{
 		range:    LSPRange{
-			start: Position{line: 5, char: 0}
-			end:   Position{line: 5, char: 10}
+			start: Position{
+				line: 5
+				char: 0
+			}
+			end:   Position{
+				line: 5
+				char: 10
+			}
 		}
 		message:  'undefined identifier'
 		severity: 1
@@ -466,8 +515,14 @@ fn test_location_basic() {
 	loc := Location{
 		uri:   'file:///test/file.v'
 		range: LSPRange{
-			start: Position{line: 10, char: 5}
-			end:   Position{line: 10, char: 15}
+			start: Position{
+				line: 10
+				char: 5
+			}
+			end:   Position{
+				line: 10
+				char: 15
+			}
 		}
 	}
 	assert loc.uri == 'file:///test/file.v'
@@ -478,8 +533,14 @@ fn test_location_json_encoding() {
 	loc := Location{
 		uri:   'file:///path/to/file.v'
 		range: LSPRange{
-			start: Position{line: 0, char: 0}
-			end:   Position{line: 0, char: 5}
+			start: Position{
+				line: 0
+				char: 0
+			}
+			end:   Position{
+				line: 0
+				char: 5
+			}
 		}
 	}
 	encoded := json.encode(loc)
@@ -502,8 +563,12 @@ fn test_signature_help_with_signature() {
 			SignatureInformation{
 				label:      'fn test(a int, b string)'
 				parameters: [
-					ParameterInformation{label: 'a int'},
-					ParameterInformation{label: 'b string'},
+					ParameterInformation{
+						label: 'a int'
+					},
+					ParameterInformation{
+						label: 'b string'
+					},
 				]
 			},
 		]
@@ -626,7 +691,10 @@ fn test_response_result_string() {
 
 fn test_response_result_details() {
 	details := [
-		Detail{kind: 6, label: 'test'},
+		Detail{
+			kind:  6
+			label: 'test'
+		},
 	]
 	result := ResponseResult(details)
 	if result is []Detail {
@@ -753,8 +821,14 @@ fn test_json_var_ac_empty() {
 fn test_json_var_ac_with_details() {
 	ac := JsonVarAC{
 		details: [
-			Detail{kind: 6, label: 'fn1'},
-			Detail{kind: 6, label: 'fn2'},
+			Detail{
+				kind:  6
+				label: 'fn1'
+			},
+			Detail{
+				kind:  6
+				label: 'fn2'
+			},
 		]
 	}
 	assert ac.details.len == 2
