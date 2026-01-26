@@ -35,7 +35,7 @@ fn (mut app App) run_v_check(path string, text string) []JsonError {
 	log('running v.exe check for ${real_path}')
 	log('Open files count: ${app.open_files.len}')
 
-	if app.open_files.len > 1 {
+	if app.open_files.len > 1 || has_sibling_v_files(working_dir, real_path) {
 		// Write all tracked files to temp directory
 		temp_project_dir = app.write_tracked_files_to_temp(working_dir) or {
 			log('Failed to write tracked files: ${err}')
@@ -174,6 +174,16 @@ fn (mut app App) write_tracked_files_to_temp(working_dir string) !string {
 	return temp_project_dir
 }
 
+fn has_sibling_v_files(working_dir string, current_file string) bool {
+	v_files := os.walk_ext(working_dir, '.v')
+	for v_file in v_files {
+		if v_file != current_file {
+			return true
+		}
+	}
+	return false
+}
+
 fn symlink_untracked_files(working_dir string, temp_dir string, tracked_files map[string]string) ! {
 	log('SYMLINKING FROM ${working_dir} TO ${temp_dir}')
 
@@ -221,7 +231,7 @@ fn (mut app App) run_v_line_info(method Method, path string, line_info string) R
 
 	if method == .definition {
 		log('OPEN FILES COUNT: ${app.open_files.len}')
-		if app.open_files.len > 1 {
+		if app.open_files.len > 1 || has_sibling_v_files(working_dir, real_path) {
 			temp_project_dir = app.write_tracked_files_to_temp(working_dir) or {
 				log('Failed to write tracked files: ${err}')
 				''
@@ -247,7 +257,7 @@ fn (mut app App) run_v_line_info(method Method, path string, line_info string) R
 		log('MULTIFILE for method=${method}')
 		log('OPEN FILES COUNT: ${app.open_files.len}')
 
-		if app.open_files.len > 1 {
+		if app.open_files.len > 1 || has_sibling_v_files(working_dir, real_path) {
 			temp_project_dir = app.write_tracked_files_to_temp(working_dir) or {
 				log('Failed to write tracked files: ${err}')
 				''
