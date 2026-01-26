@@ -57,15 +57,23 @@ fn test_method_from_string_exit() {
 fn test_method_from_string_unknown() {
 	assert Method.from_string('unknown_method') == .unknown
 	assert Method.from_string('') == .unknown
-	assert Method.from_string('textDocument/hover') == .unknown
+}
+
+fn test_method_from_string_hover() {
+	assert Method.from_string('textDocument/hover') == .hover
+}
+
+fn test_method_from_string_references() {
+	assert Method.from_string('textDocument/references') == .references
+}
+
+fn test_method_from_string_rename() {
+	assert Method.from_string('textDocument/rename') == .rename
 }
 
 fn test_method_from_string_unsupported_methods() {
 	// These are valid LSP methods but not supported by VLS
 	unsupported := [
-		'textDocument/hover',
-		'textDocument/references',
-		'textDocument/rename',
 		'textDocument/formatting',
 		'textDocument/rangeFormatting',
 		'textDocument/codeAction',
@@ -117,6 +125,18 @@ fn test_method_str_signature_help() {
 	assert Method.signature_help.str() == 'textDocument/signatureHelp'
 }
 
+fn test_method_str_hover() {
+	assert Method.hover.str() == 'textDocument/hover'
+}
+
+fn test_method_str_references() {
+	assert Method.references.str() == 'textDocument/references'
+}
+
+fn test_method_str_rename() {
+	assert Method.rename.str() == 'textDocument/rename'
+}
+
 fn test_method_str_set_trace() {
 	assert Method.set_trace.str() == '$/setTrace'
 }
@@ -141,8 +161,9 @@ fn test_method_str_unknown() {
 
 fn test_method_roundtrip() {
 	methods := [Method.initialize, Method.initialized, Method.did_open, Method.did_change,
-		Method.definition, Method.completion, Method.signature_help, Method.set_trace,
-		Method.cancel_request, Method.shutdown, Method.exit]
+		Method.definition, Method.completion, Method.signature_help, Method.hover,
+		Method.references, Method.rename, Method.set_trace, Method.cancel_request,
+		Method.shutdown, Method.exit]
 	for m in methods {
 		assert Method.from_string(m.str()) == m
 	}

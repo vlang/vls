@@ -106,8 +106,16 @@ fn (mut app App) handle_stdio_requests(mut reader io.BufferedReader) {
 		method := Method.from_string(request.method)
 		log('method="${method}" request.method="${request.method}" ${method == .completion}')
 		match method {
-			.completion, .signature_help, .definition {
+			.completion, .signature_help, .definition, .hover {
 				resp := app.operation_at_pos(method, request)
+				write_response(resp)
+			}
+			.references {
+				resp := app.find_references(request)
+				write_response(resp)
+			}
+			.rename {
+				resp := app.handle_rename(request)
 				write_response(resp)
 			}
 			.did_change {
@@ -134,6 +142,9 @@ fn (mut app App) handle_stdio_requests(mut reader io.BufferedReader) {
 								trigger_characters: ['(', ',']
 							}
 							definition_provider:     true
+							hover_provider:          true
+							references_provider:     true
+							rename_provider:         true
 						}
 					}
 				}

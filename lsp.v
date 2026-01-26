@@ -19,9 +19,10 @@ struct TextDocumentIdentifier {
 }
 
 struct Params {
-	content_changes []ContentChange @[json: 'contentChanges']
+	content_changes []ContentChange        @[json: 'contentChanges']
 	position        Position
 	text_document   TextDocumentIdentifier @[json: 'textDocument']
+	new_name        string                 @[json: 'newName']
 }
 
 struct ContentChange {
@@ -40,7 +41,7 @@ struct Location {
 	range LSPRange
 }
 
-type ResponseResult = string | []Detail | Capabilities | SignatureHelp | Location
+type ResponseResult = string | []Detail | Capabilities | SignatureHelp | Location | Hover | []Location | WorkspaceEdit
 
 struct Notification {
 	method  string
@@ -82,6 +83,9 @@ struct Capability {
 	text_document_sync      TextDocumentSyncOptions @[json: 'textDocumentSync']
 	signature_help_provider SignatureHelpOptions    @[json: 'signatureHelpProvider']
 	definition_provider     bool                    @[json: 'definitionProvider']
+	hover_provider          bool                    @[json: 'hoverProvider']
+	references_provider     bool                    @[json: 'referencesProvider']
+	rename_provider         bool                    @[json: 'renameProvider']
 }
 
 struct CompletionItemCapability {
@@ -117,6 +121,25 @@ struct ParameterInformation {
 	label string
 }
 
+struct Hover {
+	contents MarkupContent
+	range    ?LSPRange
+}
+
+struct MarkupContent {
+	kind  string // "plaintext" or "markdown"
+	value string
+}
+
+struct WorkspaceEdit {
+	changes map[string][]TextEdit
+}
+
+struct TextEdit {
+	range    LSPRange
+	new_text string @[json: 'newText']
+}
+
 enum Method {
 	unknown         @['unknown']
 	initialize      @['initialize']
@@ -126,6 +149,9 @@ enum Method {
 	definition      @['textDocument/definition']
 	completion      @['textDocument/completion']
 	signature_help  @['textDocument/signatureHelp']
+	hover           @['textDocument/hover']
+	references      @['textDocument/references']
+	rename          @['textDocument/rename']
 	set_trace       @['$/setTrace']
 	cancel_request  @['$/cancelRequest']
 	shutdown        @['shutdown']

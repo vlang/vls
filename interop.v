@@ -329,6 +329,26 @@ fn (mut app App) run_v_line_info(method Method, path string, line_info string) R
 		.signature_help {
 			result = json.decode(SignatureHelp, x.output) or { SignatureHelp{} }
 		}
+		.hover {
+			result_tmp := json.decode(JsonVarAC, x.output) or { JsonVarAC{} }
+			if result_tmp.details.len > 0 {
+				detail := result_tmp.details[0]
+				mut content := '```v\n${detail.detail}\n```'
+				if detail.documentation != '' {
+					content += '\n\n${detail.documentation}'
+				}
+				result = Hover{
+					contents: MarkupContent{
+						kind:  'markdown'
+						value: content
+					}
+				}
+			} else {
+				result = Hover{
+					contents: MarkupContent{kind: 'plaintext', value: ''}
+				}
+			}
+		}
 		.definition {
 			// file.v:line:col => Location
 			fields := x.output.trim_space().split(':')
