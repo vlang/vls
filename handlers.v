@@ -88,14 +88,20 @@ fn (mut app App) find_references(request Request) Response {
 	// Get symbol name at cursor
 	symbol := app.get_word_at_position(real_path, line, col)
 	if symbol == '' {
-		return Response{id: request.id, result: []Location{}}
+		return Response{
+			id:     request.id
+			result: []Location{}
+		}
 	}
 
 	// Search all .v files in working directory
 	working_dir := os.dir(real_path)
 	locations := app.search_symbol_in_project(working_dir, symbol)
 
-	return Response{id: request.id, result: locations}
+	return Response{
+		id:     request.id
+		result: locations
+	}
 }
 
 fn (mut app App) handle_rename(request Request) Response {
@@ -108,7 +114,10 @@ fn (mut app App) handle_rename(request Request) Response {
 	// Get symbol name at cursor
 	symbol := app.get_word_at_position(real_path, line, col)
 	if symbol == '' {
-		return Response{id: request.id, result: WorkspaceEdit{}}
+		return Response{
+			id:     request.id
+			result: WorkspaceEdit{}
+		}
 	}
 
 	// Find all references
@@ -121,7 +130,10 @@ fn (mut app App) handle_rename(request Request) Response {
 		edit := TextEdit{
 			range:    LSPRange{
 				start: loc.range.start
-				end:   Position{line: loc.range.start.line, char: loc.range.start.char + symbol.len}
+				end:   Position{
+					line: loc.range.start.line
+					char: loc.range.start.char + symbol.len
+				}
 			}
 			new_text: new_name
 		}
@@ -132,7 +144,12 @@ fn (mut app App) handle_rename(request Request) Response {
 		}
 	}
 
-	return Response{id: request.id, result: WorkspaceEdit{changes: changes}}
+	return Response{
+		id:     request.id
+		result: WorkspaceEdit{
+			changes: changes
+		}
+	}
 }
 
 fn (app &App) get_word_at_position(file_path string, line int, col int) string {
@@ -174,9 +191,7 @@ fn (mut app App) search_symbol_in_project(working_dir string, symbol string) []L
 	v_files := os.walk_ext(working_dir, '.v')
 
 	for v_file in v_files {
-		content := app.open_files[path_to_uri(v_file)] or {
-			os.read_file(v_file) or { continue }
-		}
+		content := app.open_files[path_to_uri(v_file)] or { os.read_file(v_file) or { continue } }
 		lines := content.split_into_lines()
 
 		for line_idx, line_text in lines {
@@ -187,14 +202,21 @@ fn (mut app App) search_symbol_in_project(working_dir string, symbol string) []L
 
 				// Check it's a whole word (not part of larger identifier)
 				before_ok := pos == 0 || !is_ident_char(line_text[pos - 1])
-				after_ok := pos + symbol.len >= line_text.len || !is_ident_char(line_text[pos + symbol.len])
+				after_ok := pos + symbol.len >= line_text.len
+					|| !is_ident_char(line_text[pos + symbol.len])
 
 				if before_ok && after_ok {
 					locations << Location{
 						uri:   path_to_uri(v_file)
 						range: LSPRange{
-							start: Position{line: line_idx, char: pos}
-							end:   Position{line: line_idx, char: pos + symbol.len}
+							start: Position{
+								line: line_idx
+								char: pos
+							}
+							end:   Position{
+								line: line_idx
+								char: pos + symbol.len
+							}
 						}
 					}
 				}

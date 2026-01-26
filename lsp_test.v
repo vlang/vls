@@ -161,9 +161,8 @@ fn test_method_str_unknown() {
 
 fn test_method_roundtrip() {
 	methods := [Method.initialize, Method.initialized, Method.did_open, Method.did_change,
-		Method.definition, Method.completion, Method.signature_help, Method.hover,
-		Method.references, Method.rename, Method.set_trace, Method.cancel_request,
-		Method.shutdown, Method.exit]
+		Method.definition, Method.completion, Method.signature_help, Method.hover, Method.references,
+		Method.rename, Method.set_trace, Method.cancel_request, Method.shutdown, Method.exit]
 	for m in methods {
 		assert Method.from_string(m.str()) == m
 	}

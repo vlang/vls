@@ -355,7 +355,10 @@ fn (mut app App) run_v_line_info(method Method, path string, line_info string) R
 				}
 			} else {
 				result = Hover{
-					contents: MarkupContent{kind: 'plaintext', value: ''}
+					contents: MarkupContent{
+						kind:  'plaintext'
+						value: ''
+					}
 				}
 			}
 		}

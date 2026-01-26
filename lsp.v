@@ -19,7 +19,7 @@ struct TextDocumentIdentifier {
 }
 
 struct Params {
-	content_changes []ContentChange        @[json: 'contentChanges']
+	content_changes []ContentChange @[json: 'contentChanges']
 	position        Position
 	text_document   TextDocumentIdentifier @[json: 'textDocument']
 	new_name        string                 @[json: 'newName']
@@ -41,7 +41,14 @@ struct Location {
 	range LSPRange
 }
 
-type ResponseResult = string | []Detail | Capabilities | SignatureHelp | Location | Hover | []Location | WorkspaceEdit
+type ResponseResult = string
+	| []Detail
+	| Capabilities
+	| SignatureHelp
+	| Location
+	| Hover
+	| []Location
+	| WorkspaceEdit
 
 struct Notification {
 	method  string
