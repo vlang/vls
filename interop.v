@@ -143,14 +143,18 @@ fn (mut app App) write_tracked_files_to_temp(working_dir string) !string {
 	for uri, content in app.open_files {
 		real_path := uri_to_path(uri)
 
+		// Normalize slashes for comparison
+		normalized_real := real_path.replace('\\', '/')
+		normalized_working := working_dir.replace('\\', '/')
+
 		// skip not in working dir
-		if !real_path.starts_with(working_dir) {
+		if !normalized_real.starts_with(normalized_working) {
 			log('SKIPPING FILE: ${real_path}')
 			continue
 		}
 
 		// calc rel path
-		mut rel_path := real_path.replace(working_dir, '').trim_string_left('/')
+		mut rel_path := normalized_real.replace(normalized_working, '').trim_string_left('/').trim_string_left('\\')
 		if rel_path == '' {
 			rel_path = os.file_name(real_path)
 		}
