@@ -49,6 +49,7 @@ type ResponseResult = string
 	| Hover
 	| []Location
 	| WorkspaceEdit
+	| []TextEdit
 
 struct Notification {
 	method  string
@@ -86,13 +87,14 @@ struct Capabilities {
 }
 
 struct Capability {
-	completion_provider     CompletionProvider      @[json: 'completionProvider']
-	text_document_sync      TextDocumentSyncOptions @[json: 'textDocumentSync']
-	signature_help_provider SignatureHelpOptions    @[json: 'signatureHelpProvider']
-	definition_provider     bool                    @[json: 'definitionProvider']
-	hover_provider          bool                    @[json: 'hoverProvider']
-	references_provider     bool                    @[json: 'referencesProvider']
-	rename_provider         bool                    @[json: 'renameProvider']
+	completion_provider          CompletionProvider      @[json: 'completionProvider']
+	text_document_sync           TextDocumentSyncOptions @[json: 'textDocumentSync']
+	signature_help_provider      SignatureHelpOptions    @[json: 'signatureHelpProvider']
+	definition_provider          bool                    @[json: 'definitionProvider']
+	hover_provider               bool                    @[json: 'hoverProvider']
+	references_provider          bool                    @[json: 'referencesProvider']
+	rename_provider              bool                    @[json: 'renameProvider']
+	document_formatting_provider bool                    @[json: 'documentFormattingProvider']
 }
 
 struct CompletionItemCapability {
@@ -159,6 +161,7 @@ enum Method {
 	hover           @['textDocument/hover']
 	references      @['textDocument/references']
 	rename          @['textDocument/rename']
+	formatting      @['textDocument/formatting']
 	set_trace       @['$/setTrace']
 	cancel_request  @['$/cancelRequest']
 	shutdown        @['shutdown']

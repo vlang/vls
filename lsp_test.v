@@ -74,7 +74,6 @@ fn test_method_from_string_rename() {
 fn test_method_from_string_unsupported_methods() {
 	// These are valid LSP methods but not supported by VLS
 	unsupported := [
-		'textDocument/formatting',
 		'textDocument/rangeFormatting',
 		'textDocument/codeAction',
 		'textDocument/codeLens',

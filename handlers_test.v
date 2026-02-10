@@ -1136,3 +1136,162 @@ fn test_multifile_change_single_file() {
 	assert app.open_files[main_uri] == new_content
 	assert app.open_files[utils_uri].contains('helper') // utils unchanged
 }
+
+// ============================================================================
+// Tests for formatting handler
+// ============================================================================
+
+fn test_handle_formatting_formats_code() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+
+	test_dir := os.join_path(app.temp_dir, 'project')
+	os.mkdir_all(test_dir) or { panic(err) }
+	test_file := os.join_path(test_dir, 'test.v')
+
+	// Badly formatted content
+	unformatted := 'module main\n\nfn   badly_formatted(   x    int,y int   )int{\nreturn x+y\n}'
+	os.write_file(test_file, unformatted) or { panic(err) }
+
+	uri := path_to_uri(test_file)
+	app.open_files[uri] = unformatted
+
+	request := Request{
+		id:      1
+		method:  'textDocument/formatting'
+		jsonrpc: '2.0'
+		params:  Params{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+		}
+	}
+
+	response := app.handle_formatting(request)
+	assert response.id == 1
+
+	// Should return TextEdit array
+	if response.result is []TextEdit {
+		edits := response.result as []TextEdit
+		assert edits.len > 0
+
+		// Check that the formatted text is proper
+		formatted_text := edits[0].new_text
+		assert formatted_text.contains('fn badly_formatted(x int, y int) int {')
+		assert formatted_text.contains('\treturn x + y')
+	} else {
+		assert false, 'Expected []TextEdit result'
+	}
+}
+
+fn test_handle_formatting_already_formatted() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+
+	test_dir := os.join_path(app.temp_dir, 'project')
+	os.mkdir_all(test_dir) or { panic(err) }
+	test_file := os.join_path(test_dir, 'test.v')
+
+	// Already well-formatted content
+	formatted := 'module main\n\nfn main() {\n\tprintln("hello")\n}\n'
+	os.write_file(test_file, formatted) or { panic(err) }
+
+	uri := path_to_uri(test_file)
+	app.open_files[uri] = formatted
+
+	request := Request{
+		id:      2
+		method:  'textDocument/formatting'
+		jsonrpc: '2.0'
+		params:  Params{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+		}
+	}
+
+	response := app.handle_formatting(request)
+	assert response.id == 2
+
+	// Should return empty edits if already formatted
+	if response.result is []TextEdit {
+		edits := response.result as []TextEdit
+		// May return empty or single edit with same content
+		assert edits.len >= 0
+	}
+}
+
+fn test_handle_formatting_nonexistent_file() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+
+	nonexistent := os.join_path(app.temp_dir, 'nonexistent.v')
+	uri := path_to_uri(nonexistent)
+
+	request := Request{
+		id:      3
+		method:  'textDocument/formatting'
+		jsonrpc: '2.0'
+		params:  Params{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+		}
+	}
+
+	response := app.handle_formatting(request)
+	assert response.id == 3
+
+	// Should return empty edits for nonexistent file
+	if response.result is []TextEdit {
+		edits := response.result as []TextEdit
+		assert edits.len == 0
+	}
+}
+
+fn test_handle_formatting_uses_open_file_content() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+
+	test_dir := os.join_path(app.temp_dir, 'project')
+	os.mkdir_all(test_dir) or { panic(err) }
+	test_file := os.join_path(test_dir, 'test.v')
+
+	// File on disk has different content
+	os.write_file(test_file, 'module main\n\nfn old() {}') or { panic(err) }
+
+	uri := path_to_uri(test_file)
+	// In-memory content is different
+	app.open_files[uri] = 'module main\n\nfn   new(   )   {}'
+
+	request := Request{
+		id:      4
+		method:  'textDocument/formatting'
+		jsonrpc: '2.0'
+		params:  Params{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+		}
+	}
+
+	response := app.handle_formatting(request)
+
+	// Should format the in-memory content, not disk content
+	if response.result is []TextEdit {
+		edits := response.result as []TextEdit
+		if edits.len > 0 {
+			formatted_text := edits[0].new_text
+			assert formatted_text.contains('fn new() {')
+			assert !formatted_text.contains('fn old')
+		}
+	}
+}

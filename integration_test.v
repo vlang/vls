@@ -1093,7 +1093,7 @@ fn test_integration_request_id_preserved() {
 
 fn test_integration_method_unknown_handling() {
 	// Verify unknown methods are handled gracefully
-	unknown_methods := ['workspace/symbol', 'textDocument/formatting', '']
+	unknown_methods := ['workspace/symbol', 'textDocument/rangeFormatting', '']
 
 	for method_str in unknown_methods {
 		method := Method.from_string(method_str)

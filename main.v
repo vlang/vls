@@ -118,6 +118,10 @@ fn (mut app App) handle_stdio_requests(mut reader io.BufferedReader) {
 				resp := app.handle_rename(request)
 				write_response(resp)
 			}
+			.formatting {
+				resp := app.handle_formatting(request)
+				write_response(resp)
+			}
 			.did_change {
 				log('DID_CHANGE')
 				notification := app.on_did_change(request) or { continue }
@@ -128,23 +132,24 @@ fn (mut app App) handle_stdio_requests(mut reader io.BufferedReader) {
 					id:     request.id
 					result: Capabilities{
 						capabilities: Capability{
-							text_document_sync:      TextDocumentSyncOptions{
+							text_document_sync:           TextDocumentSyncOptions{
 								open_close: true
 								change:     1 // 1 = Full sync
 							}
-							completion_provider:     CompletionProvider{
+							completion_provider:          CompletionProvider{
 								trigger_characters: ['.']
 								completion_item:    CompletionItemCapability{
 									snippet_support: true
 								}
 							}
-							signature_help_provider: SignatureHelpOptions{
+							signature_help_provider:      SignatureHelpOptions{
 								trigger_characters: ['(', ',']
 							}
-							definition_provider:     true
-							hover_provider:          true
-							references_provider:     true
-							rename_provider:         true
+							definition_provider:          true
+							hover_provider:               true
+							references_provider:          true
+							rename_provider:              true
+							document_formatting_provider: true
 						}
 					}
 				}

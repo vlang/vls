@@ -186,6 +186,80 @@ fn is_ident_char(c u8) bool {
 	return (c >= `a` && c <= `z`) || (c >= `A` && c <= `Z`) || (c >= `0` && c <= `9`) || c == `_`
 }
 
+fn (mut app App) handle_formatting(request Request) Response {
+	path := request.params.text_document.uri
+	real_path := uri_to_path(path)
+
+	// Get the current content of the file
+	content := app.open_files[path] or {
+		os.read_file(real_path) or {
+			log('Failed to read file for formatting: ${err}')
+			return Response{
+				id:     request.id
+				result: []TextEdit{}
+			}
+		}
+	}
+
+	// Write content to a temp file
+	temp_file := os.join_path(os.temp_dir(), 'vls_fmt_${os.getpid()}_${os.file_name(real_path)}')
+	os.write_file(temp_file, content) or {
+		log('Failed to write temp file for formatting: ${err}')
+		return Response{
+			id:     request.id
+			result: []TextEdit{}
+		}
+	}
+
+	// Run fmt
+	result := os.execute('v fmt -inprocess "${temp_file}"')
+
+	// Clean up temp file
+	os.rm(temp_file) or { log('Failed to remove temp file: ${err}') }
+
+	// Check for errors
+	if result.exit_code != 0 {
+		log('v fmt failed with code ${result.exit_code}: ${result.output}')
+		return Response{
+			id:     request.id
+			result: []TextEdit{}
+		}
+	}
+
+	// If content is unchanged, return empty edits
+	if result.output == content {
+		return Response{
+			id:     request.id
+			result: []TextEdit{}
+		}
+	}
+
+	// Calculate the range of the entire document
+	lines := content.split_into_lines()
+	last_line := lines.len - 1
+	last_char := if lines.len > 0 { lines[last_line].len } else { 0 }
+
+	// Return a single TextEdit that replaces the entire document
+	edit := TextEdit{
+		range:    LSPRange{
+			start: Position{
+				line: 0
+				char: 0
+			}
+			end:   Position{
+				line: last_line
+				char: last_char
+			}
+		}
+		new_text: result.output
+	}
+
+	return Response{
+		id:     request.id
+		result: [edit]
+	}
+}
+
 fn (mut app App) search_symbol_in_project(working_dir string, symbol string) []Location {
 	mut locations := []Location{}
 	v_files := os.walk_ext(working_dir, '.v')
