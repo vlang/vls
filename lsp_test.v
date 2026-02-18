@@ -77,7 +77,6 @@ fn test_method_from_string_unsupported_methods() {
 		'textDocument/rangeFormatting',
 		'textDocument/codeAction',
 		'textDocument/codeLens',
-		'textDocument/documentSymbol',
 		'workspace/symbol',
 		'workspace/executeCommand',
 	]
@@ -861,4 +860,242 @@ fn test_json_var_ac_json_decoding() {
 	}
 	assert ac.details.len == 1
 	assert ac.details[0].label == 'test'
+}
+
+// ============================================================================
+// Tests for DocumentSymbol and sym_kind_* constants
+// ============================================================================
+
+fn test_document_symbol_default_values() {
+	sym := DocumentSymbol{}
+	assert sym.name == ''
+	assert sym.kind == 0
+	assert sym.children.len == 0
+}
+
+fn test_document_symbol_with_values() {
+	sym := DocumentSymbol{
+		name: 'greet'
+		kind: sym_kind_function
+		range: LSPRange{
+			start: Position{ line: 2, char: 0 }
+			end:   Position{ line: 2, char: 20 }
+		}
+		selection_range: LSPRange{
+			start: Position{ line: 2, char: 3 }
+			end:   Position{ line: 2, char: 8 }
+		}
+		children: []DocumentSymbol{}
+	}
+	assert sym.name == 'greet'
+	assert sym.kind == sym_kind_function
+	assert sym.range.start.line == 2
+	assert sym.selection_range.start.char == 3
+}
+
+fn test_document_symbol_json_encoding() {
+	sym := DocumentSymbol{
+		name: 'Person'
+		kind: sym_kind_struct
+		range: LSPRange{
+			start: Position{ line: 5, char: 0 }
+			end:   Position{ line: 5, char: 14 }
+		}
+		selection_range: LSPRange{
+			start: Position{ line: 5, char: 7 }
+			end:   Position{ line: 5, char: 13 }
+		}
+		children: []DocumentSymbol{}
+	}
+	encoded := json.encode(sym)
+	assert encoded.contains('"name":"Person"')
+	assert encoded.contains('"kind":${sym_kind_struct}')
+	assert encoded.contains('"selectionRange"')
+	assert encoded.contains('"children"')
+}
+
+fn test_document_symbol_json_decoding() {
+	json_str := '{"name":"Color","kind":10,"range":{"start":{"line":8,"character":0},"end":{"line":8,"character":11}},"selectionRange":{"start":{"line":8,"character":5},"end":{"line":8,"character":10}},"children":[]}'
+	sym := json.decode(DocumentSymbol, json_str) or {
+		assert false, 'Failed to decode DocumentSymbol: ${err}'
+		return
+	}
+	assert sym.name == 'Color'
+	assert sym.kind == sym_kind_enum
+	assert sym.range.start.line == 8
+	assert sym.selection_range.start.char == 5
+}
+
+fn test_document_symbol_with_children() {
+	sym := DocumentSymbol{
+		name: 'App'
+		kind: sym_kind_struct
+		range: LSPRange{}
+		selection_range: LSPRange{}
+		children: [
+			DocumentSymbol{
+				name:            'run'
+				kind:            sym_kind_method
+				range:           LSPRange{}
+				selection_range: LSPRange{}
+				children:        []DocumentSymbol{}
+			},
+		]
+	}
+	assert sym.children.len == 1
+	assert sym.children[0].name == 'run'
+	assert sym.children[0].kind == sym_kind_method
+}
+
+fn test_sym_kind_constants_values() {
+	// LSP SymbolKind spec values
+	assert sym_kind_file == 1
+	assert sym_kind_module == 2
+	assert sym_kind_namespace == 3
+	assert sym_kind_package == 4
+	assert sym_kind_class == 5
+	assert sym_kind_method == 6
+	assert sym_kind_property == 7
+	assert sym_kind_field == 8
+	assert sym_kind_enum == 10
+	assert sym_kind_interface == 11
+	assert sym_kind_function == 12
+	assert sym_kind_variable == 13
+	assert sym_kind_constant == 14
+	assert sym_kind_string == 15
+	assert sym_kind_enum_member == 22
+	assert sym_kind_struct == 23
+	assert sym_kind_type_parameter == 26
+}
+
+fn test_sym_kind_constants_are_distinct() {
+	kinds := [
+		sym_kind_file, sym_kind_module, sym_kind_namespace, sym_kind_package,
+		sym_kind_class, sym_kind_method, sym_kind_property, sym_kind_field,
+		sym_kind_enum, sym_kind_interface, sym_kind_function, sym_kind_variable,
+		sym_kind_constant, sym_kind_string, sym_kind_enum_member, sym_kind_struct,
+		sym_kind_type_parameter,
+	]
+	// Check no two constants are the same value
+	mut seen := map[int]bool{}
+	for k in kinds {
+		assert k !in seen, 'sym_kind constant ${k} is duplicated'
+		seen[k] = true
+	}
+}
+
+// --- Method enum round-trip for document_symbols ---
+
+fn test_method_from_string_document_symbols() {
+	assert Method.from_string('textDocument/documentSymbol') == .document_symbols
+}
+
+fn test_method_str_document_symbols() {
+	assert Method.document_symbols.str() == 'textDocument/documentSymbol'
+}
+
+fn test_method_roundtrip_document_symbols() {
+	m := Method.document_symbols
+	assert Method.from_string(m.str()) == m
+}
+
+fn test_method_from_string_unsupported_methods_updated() {
+	// textDocument/documentSymbol is now supported – it must NOT be unknown
+	assert Method.from_string('textDocument/documentSymbol') != .unknown
+	// Other unsupported methods still return unknown
+	assert Method.from_string('workspace/symbol') == .unknown
+	assert Method.from_string('textDocument/codeAction') == .unknown
+}
+
+// --- ResponseResult with []DocumentSymbol ---
+
+fn test_response_result_document_symbols_empty() {
+	result := ResponseResult([]DocumentSymbol{})
+	if result is []DocumentSymbol {
+		assert result.len == 0
+	} else {
+		assert false, 'Expected []DocumentSymbol result'
+	}
+}
+
+fn test_response_result_document_symbols_with_data() {
+	syms := [
+		DocumentSymbol{
+			name:            'main'
+			kind:            sym_kind_function
+			range:           LSPRange{}
+			selection_range: LSPRange{}
+			children:        []DocumentSymbol{}
+		},
+		DocumentSymbol{
+			name:            'App'
+			kind:            sym_kind_struct
+			range:           LSPRange{}
+			selection_range: LSPRange{}
+			children:        []DocumentSymbol{}
+		},
+	]
+	result := ResponseResult(syms)
+	if result is []DocumentSymbol {
+		assert result.len == 2
+		assert result[0].name == 'main'
+		assert result[0].kind == sym_kind_function
+		assert result[1].name == 'App'
+		assert result[1].kind == sym_kind_struct
+	} else {
+		assert false, 'Expected []DocumentSymbol result'
+	}
+}
+
+fn test_response_with_document_symbols_json_encoding() {
+	syms := [
+		DocumentSymbol{
+			name:            'greet'
+			kind:            sym_kind_function
+			range:           LSPRange{
+				start: Position{ line: 2, char: 0 }
+				end:   Position{ line: 2, char: 25 }
+			}
+			selection_range: LSPRange{
+				start: Position{ line: 2, char: 3 }
+				end:   Position{ line: 2, char: 8 }
+			}
+			children:        []DocumentSymbol{}
+		},
+	]
+	resp := Response{
+		id:     7
+		result: syms
+	}
+	encoded := json.encode(resp)
+	assert encoded.contains('"id":7')
+	assert encoded.contains('"name":"greet"')
+	assert encoded.contains('"kind":${sym_kind_function}')
+	assert encoded.contains('"selectionRange"')
+}
+
+// --- Capability.document_symbol_provider ---
+
+fn test_capability_document_symbol_provider_true() {
+	cap := Capability{
+		document_symbol_provider: true
+	}
+	assert cap.document_symbol_provider == true
+}
+
+fn test_capability_document_symbol_provider_false_by_default() {
+	cap := Capability{}
+	assert cap.document_symbol_provider == false
+}
+
+fn test_capability_document_symbol_provider_json_encoding() {
+	caps := Capabilities{
+		capabilities: Capability{
+			document_symbol_provider: true
+			definition_provider:      true
+		}
+	}
+	encoded := json.encode(caps)
+	assert encoded.contains('"documentSymbolProvider":true')
+	assert encoded.contains('"definitionProvider":true')
 }
