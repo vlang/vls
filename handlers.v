@@ -260,6 +260,165 @@ fn (mut app App) handle_formatting(request Request) Response {
 	}
 }
 
+// handle_document_symbols parses the current file's text using a simple
+// line-by-line token scan and returns top-level declaration symbols so the
+// editor can populate its Outline / breadcrumbs view.
+fn (mut app App) handle_document_symbols(request Request) Response {
+	uri := request.params.text_document.uri
+	content := app.open_files[uri] or { '' }
+	symbols := parse_document_symbols(content)
+	return Response{
+		id:     request.id
+		result: symbols
+	}
+}
+
+// parse_document_symbols scans `content` line by line and extracts top-level
+// V declarations: functions, methods, structs, enums, interfaces, constants,
+// and type aliases. It is intentionally simple – the goal is to get the
+// Outline view working quickly, not to replicate a full parser.
+fn parse_document_symbols(content string) []DocumentSymbol {
+	lines := content.split_into_lines()
+	mut symbols := []DocumentSymbol{}
+
+	for i, raw_line in lines {
+		line := raw_line.trim_space()
+
+		// Skip blank lines and pure comment lines
+		if line == '' || line.starts_with('//') {
+			continue
+		}
+
+		// Collect an optional leading `pub ` so we can strip it for name extraction
+		stripped := if line.starts_with('pub ') { line[4..] } else { line }
+
+		if stripped.starts_with('fn ') {
+			name := extract_fn_name(stripped[3..])
+			if name == '' {
+				continue
+			}
+			kind := if name.contains(') ') {
+				// receiver present → method
+				sym_kind_method
+			} else {
+				sym_kind_function
+			}
+			symbols << make_symbol(name, kind, i, raw_line)
+		} else if stripped.starts_with('struct ') {
+			name := first_word(stripped[7..])
+			if name != '' {
+				symbols << make_symbol(name, sym_kind_struct, i, raw_line)
+			}
+		} else if stripped.starts_with('enum ') {
+			name := first_word(stripped[5..])
+			if name != '' {
+				symbols << make_symbol(name, sym_kind_enum, i, raw_line)
+			}
+		} else if stripped.starts_with('interface ') {
+			name := first_word(stripped[10..])
+			if name != '' {
+				symbols << make_symbol(name, sym_kind_interface, i, raw_line)
+			}
+		} else if stripped.starts_with('const ') {
+			name := extract_const_name(stripped[6..])
+			if name != '' {
+				symbols << make_symbol(name, sym_kind_constant, i, raw_line)
+			}
+		} else if stripped.starts_with('type ') {
+			name := first_word(stripped[5..])
+			if name != '' {
+				symbols << make_symbol(name, sym_kind_class, i, raw_line)
+			}
+		}
+	}
+
+	return symbols
+}
+
+// make_symbol builds a DocumentSymbol covering the single line `line_idx`.
+fn make_symbol(name string, kind int, line_idx int, raw_line string) DocumentSymbol {
+	col_start := raw_line.index(name) or { 0 }
+	col_end := col_start + name.len
+	line_range := LSPRange{
+		start: Position{
+			line: line_idx
+			char: 0
+		}
+		end:   Position{
+			line: line_idx
+			char: raw_line.len
+		}
+	}
+	sel_range := LSPRange{
+		start: Position{
+			line: line_idx
+			char: col_start
+		}
+		end:   Position{
+			line: line_idx
+			char: col_end
+		}
+	}
+	return DocumentSymbol{
+		name:            name
+		kind:            kind
+		range:           line_range
+		selection_range: sel_range
+		children:        []DocumentSymbol{}
+	}
+}
+
+// extract_fn_name returns the function/method name including a receiver if
+// present, e.g. "(mut App) foo" → "(mut App) foo", "main" → "main".
+// The input is everything after the leading `fn ` (and optional `pub `).
+fn extract_fn_name(after_fn string) string {
+	t := after_fn.trim_space()
+	if t == '' {
+		return ''
+	}
+	if t.starts_with('(') {
+		// method: (recv) name(params...
+		close := t.index(')') or { return '' }
+		rest := t[close + 1..].trim_space()
+		name := first_word_paren(rest)
+		if name == '' {
+			return ''
+		}
+		receiver := t[1..close]
+		return '(${receiver}) ${name}'
+	}
+	return first_word_paren(t)
+}
+
+// first_word returns the first space/tab-delimited token (stops at whitespace).
+fn first_word(s string) string {
+	mut end := 0
+	for end < s.len && s[end] != ` ` && s[end] != `\t` && s[end] != `{` {
+		end++
+	}
+	return s[..end].trim_space()
+}
+
+// first_word_paren returns the identifier before the first `(`, e.g.
+// "foo(a int) string" → "foo".
+fn first_word_paren(s string) string {
+	mut end := 0
+	for end < s.len && s[end] != `(` && s[end] != ` ` && s[end] != `\t` {
+		end++
+	}
+	return s[..end].trim_space()
+}
+
+// extract_const_name handles both `const name = ...` and `const (` blocks
+// by returning the identifier on the same line if available.
+fn extract_const_name(after_const string) string {
+	t := after_const.trim_space()
+	if t == '' || t == '(' {
+		return ''
+	}
+	return first_word(t)
+}
+
 fn (mut app App) search_symbol_in_project(working_dir string, symbol string) []Location {
 	mut locations := []Location{}
 	v_files := os.walk_ext(working_dir, '.v')

@@ -1295,3 +1295,433 @@ fn test_handle_formatting_uses_open_file_content() {
 		}
 	}
 }
+
+// ============================================================================
+// Tests for parse_document_symbols
+// ============================================================================
+
+fn test_parse_document_symbols_empty_content() {
+	syms := parse_document_symbols('')
+	assert syms.len == 0
+}
+
+fn test_parse_document_symbols_only_comments() {
+	content := '// Copyright notice\n// module main\n\n// just a comment'
+	syms := parse_document_symbols(content)
+	assert syms.len == 0
+}
+
+fn test_parse_document_symbols_single_function() {
+	content := 'module main\n\nfn greet(name string) string {\n\treturn name\n}'
+	syms := parse_document_symbols(content)
+	assert syms.len == 1
+	assert syms[0].name == 'greet'
+	assert syms[0].kind == sym_kind_function
+}
+
+fn test_parse_document_symbols_pub_function() {
+	content := 'module main\n\npub fn greet(name string) string {\n\treturn name\n}'
+	syms := parse_document_symbols(content)
+	assert syms.len == 1
+	assert syms[0].name == 'greet'
+	assert syms[0].kind == sym_kind_function
+}
+
+fn test_parse_document_symbols_method() {
+	content := 'module main\n\nstruct App {}\n\nfn (mut app App) run() {\n}'
+	syms := parse_document_symbols(content)
+	// Should find struct and method
+	names := syms.map(it.name)
+	assert 'App' in names
+	method_sym := syms.filter(it.kind == sym_kind_method)
+	assert method_sym.len == 1
+	assert method_sym[0].name.contains('run')
+}
+
+fn test_parse_document_symbols_struct() {
+	content := 'module main\n\nstruct Person {\n\tname string\n\tage  int\n}'
+	syms := parse_document_symbols(content)
+	assert syms.len == 1
+	assert syms[0].name == 'Person'
+	assert syms[0].kind == sym_kind_struct
+}
+
+fn test_parse_document_symbols_pub_struct() {
+	content := 'module main\n\npub struct Config {\n\tdebug bool\n}'
+	syms := parse_document_symbols(content)
+	assert syms.len == 1
+	assert syms[0].name == 'Config'
+	assert syms[0].kind == sym_kind_struct
+}
+
+fn test_parse_document_symbols_enum() {
+	content := 'module main\n\nenum Color {\n\tred\n\tgreen\n\tblue\n}'
+	syms := parse_document_symbols(content)
+	assert syms.len == 1
+	assert syms[0].name == 'Color'
+	assert syms[0].kind == sym_kind_enum
+}
+
+fn test_parse_document_symbols_interface() {
+	content := 'module main\n\ninterface Writer {\n\twrite(s string)\n}'
+	syms := parse_document_symbols(content)
+	assert syms.len == 1
+	assert syms[0].name == 'Writer'
+	assert syms[0].kind == sym_kind_interface
+}
+
+fn test_parse_document_symbols_const() {
+	content := 'module main\n\nconst max_size = 100'
+	syms := parse_document_symbols(content)
+	assert syms.len == 1
+	assert syms[0].name == 'max_size'
+	assert syms[0].kind == sym_kind_constant
+}
+
+fn test_parse_document_symbols_type_alias() {
+	content := 'module main\n\ntype MyInt = int'
+	syms := parse_document_symbols(content)
+	assert syms.len == 1
+	assert syms[0].name == 'MyInt'
+	assert syms[0].kind == sym_kind_class
+}
+
+fn test_parse_document_symbols_multiple_declarations() {
+	content := 'module main
+
+pub fn greet(name string) string {
+	return name
+}
+
+struct Person {
+	name string
+	age  int
+}
+
+enum Color {
+	red
+	green
+	blue
+}
+
+fn (p Person) say_hello() string {
+	return greet(p.name)
+}
+
+const max_age = 120
+'
+	syms := parse_document_symbols(content)
+	names := syms.map(it.name)
+	assert 'greet' in names
+	assert 'Person' in names
+	assert 'Color' in names
+	assert 'max_age' in names
+	// method should be present
+	assert syms.any(it.kind == sym_kind_method)
+}
+
+fn test_parse_document_symbols_correct_line_numbers() {
+	content := 'module main\n\nfn alpha() {}\n\nfn beta() {}'
+	// line 0: 'module main'
+	// line 1: ''
+	// line 2: 'fn alpha() {}'
+	// line 3: ''
+	// line 4: 'fn beta() {}'
+	syms := parse_document_symbols(content)
+	assert syms.len == 2
+	alpha := syms.filter(it.name == 'alpha')
+	beta := syms.filter(it.name == 'beta')
+	assert alpha.len == 1
+	assert beta.len == 1
+	assert alpha[0].range.start.line == 2
+	assert beta[0].range.start.line == 4
+}
+
+fn test_parse_document_symbols_const_block_paren_skipped() {
+	// `const (` alone should not produce a symbol with name '('
+	content := 'module main\n\nconst (\n\ta = 1\n\tb = 2\n)'
+	syms := parse_document_symbols(content)
+	for sym in syms {
+		assert sym.name != '('
+	}
+}
+
+fn test_parse_document_symbols_selection_range_points_to_name() {
+	content := 'module main\n\nfn my_func() {}'
+	syms := parse_document_symbols(content)
+	assert syms.len == 1
+	sym := syms[0]
+	// The selection range should start where the name begins in the raw line
+	line := 'fn my_func() {}'
+	expected_col := line.index('my_func') or { -1 }
+	assert expected_col >= 0
+	assert sym.selection_range.start.char == expected_col
+	assert sym.selection_range.end.char == expected_col + 'my_func'.len
+}
+
+// ============================================================================
+// Tests for extract_fn_name helper
+// ============================================================================
+
+fn test_extract_fn_name_simple() {
+	assert extract_fn_name('main() {}') == 'main'
+}
+
+fn test_extract_fn_name_with_params() {
+	assert extract_fn_name('greet(name string) string') == 'greet'
+}
+
+fn test_extract_fn_name_method_with_receiver() {
+	name := extract_fn_name('(mut app App) run()')
+	assert name.contains('run')
+	assert name.contains('mut app App')
+}
+
+fn test_extract_fn_name_method_immutable_receiver() {
+	name := extract_fn_name('(p Person) say_hello() string')
+	assert name.contains('say_hello')
+	assert name.contains('p Person')
+}
+
+fn test_extract_fn_name_empty_string() {
+	assert extract_fn_name('') == ''
+}
+
+fn test_extract_fn_name_whitespace_only() {
+	assert extract_fn_name('   ') == ''
+}
+
+// ============================================================================
+// Tests for first_word helper
+// ============================================================================
+
+fn test_first_word_simple() {
+	assert first_word('Person {}') == 'Person'
+}
+
+fn test_first_word_with_tab() {
+	assert first_word('Color\t{') == 'Color'
+}
+
+fn test_first_word_stops_at_brace() {
+	assert first_word('Writer{') == 'Writer'
+}
+
+fn test_first_word_single_token() {
+	assert first_word('MyType') == 'MyType'
+}
+
+fn test_first_word_empty() {
+	assert first_word('') == ''
+}
+
+// ============================================================================
+// Tests for first_word_paren helper
+// ============================================================================
+
+fn test_first_word_paren_simple() {
+	assert first_word_paren('foo(a int) string') == 'foo'
+}
+
+fn test_first_word_paren_no_paren() {
+	assert first_word_paren('main') == 'main'
+}
+
+fn test_first_word_paren_empty() {
+	assert first_word_paren('') == ''
+}
+
+fn test_first_word_paren_stops_at_space() {
+	assert first_word_paren('bar baz') == 'bar'
+}
+
+// ============================================================================
+// Tests for extract_const_name helper
+// ============================================================================
+
+fn test_extract_const_name_simple() {
+	assert extract_const_name('max_size = 100') == 'max_size'
+}
+
+fn test_extract_const_name_open_paren() {
+	// const ( block opening — should return empty
+	assert extract_const_name('(') == ''
+}
+
+fn test_extract_const_name_empty() {
+	assert extract_const_name('') == ''
+}
+
+fn test_extract_const_name_whitespace_only() {
+	assert extract_const_name('   ') == ''
+}
+
+// ============================================================================
+// Tests for handle_document_symbols handler
+// ============================================================================
+
+fn test_handle_document_symbols_empty_file() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+
+	uri := 'file:///tmp/empty.v'
+	app.open_files[uri] = ''
+
+	request := Request{
+		id:     10
+		method: 'textDocument/documentSymbol'
+		params: Params{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+		}
+	}
+
+	response := app.handle_document_symbols(request)
+	assert response.id == 10
+	if response.result is []DocumentSymbol {
+		assert response.result.len == 0
+	} else {
+		assert false, 'Expected []DocumentSymbol'
+	}
+}
+
+fn test_handle_document_symbols_no_tracked_file() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+
+	// URI not in open_files — should still return an empty symbol list, not crash
+	request := Request{
+		id:     11
+		method: 'textDocument/documentSymbol'
+		params: Params{
+			text_document: TextDocumentIdentifier{
+				uri: 'file:///tmp/not_tracked.v'
+			}
+		}
+	}
+
+	response := app.handle_document_symbols(request)
+	assert response.id == 11
+	if response.result is []DocumentSymbol {
+		assert response.result.len == 0
+	} else {
+		assert false, 'Expected []DocumentSymbol'
+	}
+}
+
+fn test_handle_document_symbols_returns_correct_symbols() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+
+	uri := 'file:///tmp/test_sym.v'
+	app.open_files[uri] = 'module main\n\nfn hello() {}\n\nstruct Config {}\n\nenum Mode { on off }\n\nconst version = 1\n'
+
+	request := Request{
+		id:     12
+		method: 'textDocument/documentSymbol'
+		params: Params{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+		}
+	}
+
+	response := app.handle_document_symbols(request)
+	assert response.id == 12
+
+	if response.result is []DocumentSymbol {
+		syms := response.result
+		names := syms.map(it.name)
+		assert 'hello' in names
+		assert 'Config' in names
+		assert 'Mode' in names
+		assert 'version' in names
+	} else {
+		assert false, 'Expected []DocumentSymbol'
+	}
+}
+
+fn test_handle_document_symbols_preserves_request_id() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+
+	uri := 'file:///tmp/id_test.v'
+	app.open_files[uri] = 'module main\n\nfn foo() {}\n'
+
+	for id in [1, 99, 1000, 0] {
+		request := Request{
+			id:     id
+			method: 'textDocument/documentSymbol'
+			params: Params{
+				text_document: TextDocumentIdentifier{
+					uri: uri
+				}
+			}
+		}
+		response := app.handle_document_symbols(request)
+		assert response.id == id
+	}
+}
+
+fn test_handle_document_symbols_kinds_are_correct() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+
+	uri := 'file:///tmp/kinds_test.v'
+	app.open_files[uri] = 'module main
+
+fn plain_fn() {}
+
+struct MyStruct {}
+
+enum MyEnum { a b }
+
+interface MyInterface { run() }
+
+type MyType = int
+
+const my_const = 42
+'
+
+	request := Request{
+		id:     20
+		method: 'textDocument/documentSymbol'
+		params: Params{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+		}
+	}
+
+	response := app.handle_document_symbols(request)
+
+	if response.result is []DocumentSymbol {
+		syms := response.result
+		fn_sym := syms.filter(it.name == 'plain_fn')
+		struct_sym := syms.filter(it.name == 'MyStruct')
+		enum_sym := syms.filter(it.name == 'MyEnum')
+		iface_sym := syms.filter(it.name == 'MyInterface')
+		type_sym := syms.filter(it.name == 'MyType')
+		const_sym := syms.filter(it.name == 'my_const')
+
+		assert fn_sym.len == 1 && fn_sym[0].kind == sym_kind_function
+		assert struct_sym.len == 1 && struct_sym[0].kind == sym_kind_struct
+		assert enum_sym.len == 1 && enum_sym[0].kind == sym_kind_enum
+		assert iface_sym.len == 1 && iface_sym[0].kind == sym_kind_interface
+		assert type_sym.len == 1 && type_sym[0].kind == sym_kind_class
+		assert const_sym.len == 1 && const_sym[0].kind == sym_kind_constant
+	} else {
+		assert false, 'Expected []DocumentSymbol'
+	}
+}

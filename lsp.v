@@ -50,6 +50,34 @@ type ResponseResult = string
 	| []Location
 	| WorkspaceEdit
 	| []TextEdit
+	| []DocumentSymbol
+
+struct DocumentSymbol {
+	name            string           @[json: 'name']
+	kind            int              @[json: 'kind']
+	range           LSPRange         @[json: 'range']
+	selection_range LSPRange         @[json: 'selectionRange']
+	children        []DocumentSymbol @[json: 'children']
+}
+
+// LSP SymbolKind constants for the most common V declarations
+const sym_kind_file = 1
+const sym_kind_module = 2
+const sym_kind_namespace = 3
+const sym_kind_package = 4
+const sym_kind_class = 5
+const sym_kind_method = 6
+const sym_kind_property = 7
+const sym_kind_field = 8
+const sym_kind_enum = 10
+const sym_kind_interface = 11
+const sym_kind_function = 12
+const sym_kind_variable = 13
+const sym_kind_constant = 14
+const sym_kind_string = 15
+const sym_kind_struct = 23
+const sym_kind_enum_member = 22
+const sym_kind_type_parameter = 26
 
 struct Notification {
 	method  string
@@ -95,6 +123,7 @@ struct Capability {
 	references_provider          bool                    @[json: 'referencesProvider']
 	rename_provider              bool                    @[json: 'renameProvider']
 	document_formatting_provider bool                    @[json: 'documentFormattingProvider']
+	document_symbol_provider     bool                    @[json: 'documentSymbolProvider']
 }
 
 struct CompletionItemCapability {
@@ -150,22 +179,23 @@ struct TextEdit {
 }
 
 enum Method {
-	unknown         @['unknown']
-	initialize      @['initialize']
-	initialized     @['initialized']
-	did_open        @['textDocument/didOpen']
-	did_change      @['textDocument/didChange']
-	definition      @['textDocument/definition']
-	completion      @['textDocument/completion']
-	signature_help  @['textDocument/signatureHelp']
-	hover           @['textDocument/hover']
-	references      @['textDocument/references']
-	rename          @['textDocument/rename']
-	formatting      @['textDocument/formatting']
-	set_trace       @['$/setTrace']
-	cancel_request  @['$/cancelRequest']
-	shutdown        @['shutdown']
-	exit            @['exit']
+	unknown           @['unknown']
+	initialize        @['initialize']
+	initialized       @['initialized']
+	did_open          @['textDocument/didOpen']
+	did_change        @['textDocument/didChange']
+	definition        @['textDocument/definition']
+	completion        @['textDocument/completion']
+	signature_help    @['textDocument/signatureHelp']
+	hover             @['textDocument/hover']
+	references        @['textDocument/references']
+	rename            @['textDocument/rename']
+	formatting        @['textDocument/formatting']
+	document_symbols  @['textDocument/documentSymbol']
+	set_trace         @['$/setTrace']
+	cancel_request    @['$/cancelRequest']
+	shutdown          @['shutdown']
+	exit              @['exit']
 }
 
 fn Method.from_string(s string) Method {
