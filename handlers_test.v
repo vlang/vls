@@ -1500,7 +1500,7 @@ fn test_first_word_simple() {
 }
 
 fn test_first_word_with_tab() {
-	assert first_word("Color\t{") == 'Color'
+	assert first_word('Color\t{') == 'Color'
 }
 
 fn test_first_word_stops_at_brace() {

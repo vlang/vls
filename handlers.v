@@ -340,12 +340,24 @@ fn make_symbol(name string, kind int, line_idx int, raw_line string) DocumentSym
 	col_start := raw_line.index(name) or { 0 }
 	col_end := col_start + name.len
 	line_range := LSPRange{
-		start: Position{ line: line_idx, char: 0 }
-		end:   Position{ line: line_idx, char: raw_line.len }
+		start: Position{
+			line: line_idx
+			char: 0
+		}
+		end:   Position{
+			line: line_idx
+			char: raw_line.len
+		}
 	}
 	sel_range := LSPRange{
-		start: Position{ line: line_idx, char: col_start }
-		end:   Position{ line: line_idx, char: col_end }
+		start: Position{
+			line: line_idx
+			char: col_start
+		}
+		end:   Position{
+			line: line_idx
+			char: col_end
+		}
 	}
 	return DocumentSymbol{
 		name:            name

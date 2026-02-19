@@ -875,17 +875,29 @@ fn test_document_symbol_default_values() {
 
 fn test_document_symbol_with_values() {
 	sym := DocumentSymbol{
-		name: 'greet'
-		kind: sym_kind_function
-		range: LSPRange{
-			start: Position{ line: 2, char: 0 }
-			end:   Position{ line: 2, char: 20 }
+		name:            'greet'
+		kind:            sym_kind_function
+		range:           LSPRange{
+			start: Position{
+				line: 2
+				char: 0
+			}
+			end:   Position{
+				line: 2
+				char: 20
+			}
 		}
 		selection_range: LSPRange{
-			start: Position{ line: 2, char: 3 }
-			end:   Position{ line: 2, char: 8 }
+			start: Position{
+				line: 2
+				char: 3
+			}
+			end:   Position{
+				line: 2
+				char: 8
+			}
 		}
-		children: []DocumentSymbol{}
+		children:        []DocumentSymbol{}
 	}
 	assert sym.name == 'greet'
 	assert sym.kind == sym_kind_function
@@ -895,17 +907,29 @@ fn test_document_symbol_with_values() {
 
 fn test_document_symbol_json_encoding() {
 	sym := DocumentSymbol{
-		name: 'Person'
-		kind: sym_kind_struct
-		range: LSPRange{
-			start: Position{ line: 5, char: 0 }
-			end:   Position{ line: 5, char: 14 }
+		name:            'Person'
+		kind:            sym_kind_struct
+		range:           LSPRange{
+			start: Position{
+				line: 5
+				char: 0
+			}
+			end:   Position{
+				line: 5
+				char: 14
+			}
 		}
 		selection_range: LSPRange{
-			start: Position{ line: 5, char: 7 }
-			end:   Position{ line: 5, char: 13 }
+			start: Position{
+				line: 5
+				char: 7
+			}
+			end:   Position{
+				line: 5
+				char: 13
+			}
 		}
-		children: []DocumentSymbol{}
+		children:        []DocumentSymbol{}
 	}
 	encoded := json.encode(sym)
 	assert encoded.contains('"name":"Person"')
@@ -928,11 +952,11 @@ fn test_document_symbol_json_decoding() {
 
 fn test_document_symbol_with_children() {
 	sym := DocumentSymbol{
-		name: 'App'
-		kind: sym_kind_struct
-		range: LSPRange{}
+		name:            'App'
+		kind:            sym_kind_struct
+		range:           LSPRange{}
 		selection_range: LSPRange{}
-		children: [
+		children:        [
 			DocumentSymbol{
 				name:            'run'
 				kind:            sym_kind_method
@@ -970,10 +994,22 @@ fn test_sym_kind_constants_values() {
 
 fn test_sym_kind_constants_are_distinct() {
 	kinds := [
-		sym_kind_file, sym_kind_module, sym_kind_namespace, sym_kind_package,
-		sym_kind_class, sym_kind_method, sym_kind_property, sym_kind_field,
-		sym_kind_enum, sym_kind_interface, sym_kind_function, sym_kind_variable,
-		sym_kind_constant, sym_kind_string, sym_kind_enum_member, sym_kind_struct,
+		sym_kind_file,
+		sym_kind_module,
+		sym_kind_namespace,
+		sym_kind_package,
+		sym_kind_class,
+		sym_kind_method,
+		sym_kind_property,
+		sym_kind_field,
+		sym_kind_enum,
+		sym_kind_interface,
+		sym_kind_function,
+		sym_kind_variable,
+		sym_kind_constant,
+		sym_kind_string,
+		sym_kind_enum_member,
+		sym_kind_struct,
 		sym_kind_type_parameter,
 	]
 	// Check no two constants are the same value
@@ -1053,12 +1089,24 @@ fn test_response_with_document_symbols_json_encoding() {
 			name:            'greet'
 			kind:            sym_kind_function
 			range:           LSPRange{
-				start: Position{ line: 2, char: 0 }
-				end:   Position{ line: 2, char: 25 }
+				start: Position{
+					line: 2
+					char: 0
+				}
+				end:   Position{
+					line: 2
+					char: 25
+				}
 			}
 			selection_range: LSPRange{
-				start: Position{ line: 2, char: 3 }
-				end:   Position{ line: 2, char: 8 }
+				start: Position{
+					line: 2
+					char: 3
+				}
+				end:   Position{
+					line: 2
+					char: 8
+				}
 			}
 			children:        []DocumentSymbol{}
 		},
