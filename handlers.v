@@ -186,6 +186,207 @@ fn is_ident_char(c u8) bool {
 	return (c >= `a` && c <= `z`) || (c >= `A` && c <= `Z`) || (c >= `0` && c <= `9`) || c == `_`
 }
 
+// get_word_at_col extracts the identifier at column `col` within a single line.
+// Returns '' if the character at `col` is not an identifier character.
+fn get_word_at_col(line string, col int) string {
+	if col >= line.len {
+		return ''
+	}
+	if !is_ident_char(line[col]) {
+		return ''
+	}
+	mut start := col
+	mut end := col
+	for start > 0 && is_ident_char(line[start - 1]) {
+		start--
+	}
+	for end < line.len && is_ident_char(line[end]) {
+		end++
+	}
+	if start == end {
+		return ''
+	}
+	return line[start..end]
+}
+
+// find_declaration_line searches `lines` for a top-level declaration whose name
+// exactly matches `symbol` and returns its 0-based line index, or -1 if not found.
+fn find_declaration_line(lines []string, symbol string) int {
+	for i, raw_line in lines {
+		line := raw_line.trim_space()
+		stripped := if line.starts_with('pub ') { line[4..] } else { line }
+		decl_prefixes := ['fn ', 'struct ', 'enum ', 'interface ', 'type ', 'const ']
+		for prefix in decl_prefixes {
+			if stripped.starts_with(prefix) {
+				rest := stripped[prefix.len..]
+				// Handle method receivers: fn (recv) name(
+				actual_rest := if rest.starts_with('(') {
+					close := rest.index(')') or { break }
+					rest[close + 1..].trim_space()
+				} else {
+					rest
+				}
+				name := first_word_paren(actual_rest)
+				if name == symbol {
+					return i
+				}
+				break
+			}
+		}
+	}
+	return -1
+}
+
+// extract_doc_comment walks backward from `decl_line` collecting consecutive
+// `//` comment lines (V's vdoc convention) and returns them joined with newlines.
+fn extract_doc_comment(lines []string, decl_line int) string {
+	mut comments := []string{}
+	mut i := decl_line - 1
+	for i >= 0 {
+		trimmed := lines[i].trim_space()
+		if trimmed.starts_with('//') {
+			comments << trimmed[2..].trim_space()
+			i--
+		} else {
+			break
+		}
+	}
+	if comments.len == 0 {
+		return ''
+	}
+	comments = comments.reverse()
+	// Use Markdown hard line breaks (two trailing spaces + newline) so each
+	// comment line renders on its own line in the hover popup.
+	return comments.join('  \n')
+}
+
+// parse_imports extracts the module paths from `import` statements in `content`.
+// Returns a list of module paths, e.g. ['os', 'math', 'v.util'].
+fn parse_imports(content string) []string {
+	mut imports := []string{}
+	for line in content.split_into_lines() {
+		trimmed := line.trim_space()
+		if !trimmed.starts_with('import ') {
+			continue
+		}
+		rest := trimmed[7..].trim_space()
+		// Strip optional `as alias` suffix
+		module_path := rest.split(' ')[0].trim_space()
+		if module_path != '' {
+			imports << module_path
+		}
+	}
+	return imports
+}
+
+// find_doc_comment_for_symbol searches for the vdoc comment for `symbol` across
+// multiple sources in priority order:
+//  1. current file lines (already split)
+//  2. other open files in app.open_files
+//  3. all .v files in the project working directory
+//  4. vlib/builtin/ (always, for built-in functions like println)
+//  5. vlib/<module>/ for each module imported in the current file
+fn (app &App) find_doc_comment_for_symbol(symbol string, current_lines []string, current_file_uri string, vroot string) string {
+	// 1. Current file
+	decl_line := find_declaration_line(current_lines, symbol)
+	if decl_line >= 0 {
+		doc := extract_doc_comment(current_lines, decl_line)
+		if doc != '' {
+			return doc
+		}
+	}
+
+	// 2 & 3. Other open files then all project .v files
+	working_dir := os.dir(uri_to_path(current_file_uri))
+	mut searched_uris := map[string]bool{}
+	searched_uris[current_file_uri] = true
+
+	// Search open files first (in memory, no disk I/O)
+	for uri, content in app.open_files {
+		if uri in searched_uris {
+			continue
+		}
+		searched_uris[uri] = true
+		lines := content.split_into_lines()
+		dl := find_declaration_line(lines, symbol)
+		if dl >= 0 {
+			doc := extract_doc_comment(lines, dl)
+			if doc != '' {
+				return doc
+			}
+		}
+	}
+
+	// Search remaining .v files on disk in the working directory
+	for v_file in os.walk_ext(working_dir, '.v') {
+		uri := path_to_uri(v_file)
+		if uri in searched_uris {
+			continue
+		}
+		searched_uris[uri] = true
+		content := os.read_file(v_file) or { continue }
+		lines := content.split_into_lines()
+		dl := find_declaration_line(lines, symbol)
+		if dl >= 0 {
+			doc := extract_doc_comment(lines, dl)
+			if doc != '' {
+				return doc
+			}
+		}
+	}
+
+	if vroot == '' {
+		return ''
+	}
+
+	// 4. vlib/builtin/ — always search for built-in symbols
+	builtin_dir := os.join_path(vroot, 'vlib', 'builtin')
+	if os.is_dir(builtin_dir) {
+		doc := search_doc_in_vlib_dir(builtin_dir, symbol)
+		if doc != '' {
+			return doc
+		}
+	}
+
+	// 5. Imported stdlib modules
+	current_content := app.open_files[current_file_uri] or { '' }
+	for module_path in parse_imports(current_content) {
+		// Convert 'v.util' → 'v/util', 'os' → 'os'
+		module_rel := module_path.replace('.', os.path_separator)
+		module_dir := os.join_path(vroot, 'vlib', module_rel)
+		if !os.is_dir(module_dir) {
+			continue
+		}
+		doc := search_doc_in_vlib_dir(module_dir, symbol)
+		if doc != '' {
+			return doc
+		}
+	}
+
+	return ''
+}
+
+// search_doc_in_vlib_dir searches all non-test .v files in `dir` for a
+// declaration of `symbol` and returns its vdoc comment, or '' if not found.
+fn search_doc_in_vlib_dir(dir string, symbol string) string {
+	for v_file in os.walk_ext(dir, '.v') {
+		// Skip test files to avoid false positives and improve performance
+		if v_file.ends_with('_test.v') {
+			continue
+		}
+		content := os.read_file(v_file) or { continue }
+		lines := content.split_into_lines()
+		dl := find_declaration_line(lines, symbol)
+		if dl >= 0 {
+			doc := extract_doc_comment(lines, dl)
+			if doc != '' {
+				return doc
+			}
+		}
+	}
+	return ''
+}
+
 fn (mut app App) handle_formatting(request Request) Response {
 	path := request.params.text_document.uri
 	real_path := uri_to_path(path)

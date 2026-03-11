@@ -1725,3 +1725,203 @@ const my_const = 42
 		assert false, 'Expected []DocumentSymbol'
 	}
 }
+
+// ============================================================================
+// Tests for extract_doc_comment helper
+// ============================================================================
+
+fn test_extract_doc_comment_single_line() {
+	lines := ['// greet says hello', 'fn greet() {}']
+	comment := extract_doc_comment(lines, 1)
+	assert comment == 'greet says hello'
+}
+
+fn test_extract_doc_comment_multi_line() {
+	lines := [
+		'// copy_all recursively copies all elements of the array by their value,',
+		'// if `dupes` is false all duplicate values are eliminated in the process.',
+		'fn copy_all(dupes bool) {}',
+	]
+	comment := extract_doc_comment(lines, 2)
+	assert comment == 'copy_all recursively copies all elements of the array by their value,  \nif `dupes` is false all duplicate values are eliminated in the process.'
+}
+
+fn test_extract_doc_comment_no_comment() {
+	lines := ['', 'fn no_docs() {}']
+	comment := extract_doc_comment(lines, 1)
+	assert comment == ''
+}
+
+fn test_extract_doc_comment_stops_at_blank_line() {
+	lines := ['// unrelated', '', '// greet says hello', 'fn greet() {}']
+	comment := extract_doc_comment(lines, 3)
+	assert comment == 'greet says hello'
+}
+
+fn test_extract_doc_comment_stops_at_non_comment() {
+	lines := ['fn other() {}', '// greet says hello', 'fn greet() {}']
+	comment := extract_doc_comment(lines, 2)
+	assert comment == 'greet says hello'
+}
+
+fn test_extract_doc_comment_at_first_line() {
+	lines := ['fn greet() {}']
+	comment := extract_doc_comment(lines, 0)
+	assert comment == ''
+}
+
+// ============================================================================
+// Tests for find_declaration_line helper
+// ============================================================================
+
+fn test_find_declaration_line_function() {
+	lines := ['module main', '', 'fn my_func() {}']
+	idx := find_declaration_line(lines, 'my_func')
+	assert idx == 2
+}
+
+fn test_find_declaration_line_pub_function() {
+	lines := ['module main', '', 'pub fn exported() {}']
+	idx := find_declaration_line(lines, 'exported')
+	assert idx == 2
+}
+
+fn test_find_declaration_line_struct() {
+	lines := ['module main', '', 'struct MyStruct {', '}']
+	idx := find_declaration_line(lines, 'MyStruct')
+	assert idx == 2
+}
+
+fn test_find_declaration_line_enum() {
+	lines := ['module main', '', 'enum Color { red green blue }']
+	idx := find_declaration_line(lines, 'Color')
+	assert idx == 2
+}
+
+fn test_find_declaration_line_method() {
+	lines := ['module main', '', 'fn (mut app App) run() {}']
+	idx := find_declaration_line(lines, 'run')
+	assert idx == 2
+}
+
+fn test_find_declaration_line_const() {
+	lines := ['module main', '', 'const max_retries = 3']
+	idx := find_declaration_line(lines, 'max_retries')
+	assert idx == 2
+}
+
+fn test_find_declaration_line_not_found() {
+	lines := ['module main', '', 'fn foo() {}']
+	idx := find_declaration_line(lines, 'bar')
+	assert idx == -1
+}
+
+// ============================================================================
+// Tests for get_word_at_col helper
+// ============================================================================
+
+fn test_get_word_at_col_middle_of_word() {
+	line := 'fn my_func() {}'
+	word := get_word_at_col(line, 4)
+	assert word == 'my_func'
+}
+
+fn test_get_word_at_col_start_of_word() {
+	line := 'fn my_func() {}'
+	word := get_word_at_col(line, 3)
+	assert word == 'my_func'
+}
+
+fn test_get_word_at_col_on_space() {
+	line := 'fn my_func() {}'
+	word := get_word_at_col(line, 2)
+	assert word == ''
+}
+
+fn test_get_word_at_col_beyond_end() {
+	line := 'fn foo()'
+	word := get_word_at_col(line, 100)
+	assert word == ''
+}
+
+// ============================================================================
+// Tests for parse_imports helper
+// ============================================================================
+
+fn test_parse_imports_single() {
+	content := 'module main\n\nimport os\n\nfn main() {}'
+	imports := parse_imports(content)
+	assert imports == ['os']
+}
+
+fn test_parse_imports_multiple() {
+	content := 'module main\n\nimport os\nimport math\nimport strings\n'
+	imports := parse_imports(content)
+	assert imports == ['os', 'math', 'strings']
+}
+
+fn test_parse_imports_with_alias() {
+	content := 'module main\n\nimport os as operating_system\n'
+	imports := parse_imports(content)
+	assert imports == ['os']
+}
+
+fn test_parse_imports_dotted_module() {
+	content := 'module main\n\nimport v.util\n'
+	imports := parse_imports(content)
+	assert imports == ['v.util']
+}
+
+fn test_parse_imports_none() {
+	content := 'module main\n\nfn main() {}'
+	imports := parse_imports(content)
+	assert imports == []
+}
+
+// ============================================================================
+// Tests for find_doc_comment_for_symbol (cross-file search)
+// ============================================================================
+
+fn test_find_doc_comment_for_symbol_current_file() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	content := 'module main\n\n// greet says hello\nfn greet() {}'
+	uri := 'file:///tmp/test_greet.v'
+	app.open_files[uri] = content
+	lines := content.split_into_lines()
+	doc := app.find_doc_comment_for_symbol('greet', lines, uri, '')
+	assert doc == 'greet says hello'
+}
+
+fn test_find_doc_comment_for_symbol_other_open_file() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	other_content := 'module main\n\n// helper does the thing\nfn helper() {}'
+	other_uri := 'file:///tmp/other.v'
+	app.open_files[other_uri] = other_content
+
+	current_content := 'module main\n\nfn main() { helper() }'
+	current_uri := 'file:///tmp/main.v'
+	app.open_files[current_uri] = current_content
+	current_lines := current_content.split_into_lines()
+
+	doc := app.find_doc_comment_for_symbol('helper', current_lines, current_uri, '')
+	assert doc == 'helper does the thing'
+}
+
+fn test_find_doc_comment_for_symbol_not_found() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	content := 'module main\n\nfn main() {}'
+	uri := 'file:///tmp/main.v'
+	app.open_files[uri] = content
+	lines := content.split_into_lines()
+	doc := app.find_doc_comment_for_symbol('nonexistent', lines, uri, '')
+	assert doc == ''
+}
