@@ -21,7 +21,6 @@ const v_prefs = pref.Preferences{
 	is_vls: true
 }
 
-// log writes a message to stderr and also appends it to a log file in the temp directory.
 fn log(s string) {
 	eprintln(s)
 	temp_dir := os.temp_dir()
