@@ -459,8 +459,7 @@ fn infer_type_from_literal(rhs string) string {
 		}
 	}
 	// Integer literal: hex (0x), octal (0o), binary (0b), or plain digits
-	if r.starts_with('0x') || r.starts_with('0X') || r.starts_with('0o')
-		|| r.starts_with('0b') {
+	if r.starts_with('0x') || r.starts_with('0X') || r.starts_with('0o') || r.starts_with('0b') {
 		return 'int'
 	}
 	mut is_int := true

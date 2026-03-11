@@ -159,7 +159,7 @@ fn (mut app App) handle_stdio_requests(mut reader io.BufferedReader) {
 							rename_provider:              true
 							document_formatting_provider: true
 							document_symbol_provider:     true
-				inlay_hint_provider:          true
+							inlay_hint_provider:          true
 						}
 					}
 				}

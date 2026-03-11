@@ -1797,15 +1797,15 @@ fn test_handle_inlay_hints_basic() {
 	}
 
 	uri := 'file:///test_inlay.v'
-	content := 'module main
+	content := "module main
 
 fn main() {
 	x := 42
-	name := \'hello\'
+	name := 'hello'
 	flag := true
 	ratio := 3.14
 	obj := MyStruct{}
-}'
+}"
 	app.open_files[uri] = content
 
 	request := Request{
@@ -1815,9 +1815,15 @@ fn main() {
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-			range: LSPRange{
-				start: Position{ line: 0, char: 0 }
-				end:   Position{ line: 9, char: 0 }
+			range:         LSPRange{
+				start: Position{
+					line: 0
+					char: 0
+				}
+				end:   Position{
+					line: 9
+					char: 0
+				}
 			}
 		}
 	}
@@ -1859,9 +1865,15 @@ fn main() {
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-			range: LSPRange{
-				start: Position{ line: 0, char: 0 }
-				end:   Position{ line: 4, char: 0 }
+			range:         LSPRange{
+				start: Position{
+					line: 0
+					char: 0
+				}
+				end:   Position{
+					line: 4
+					char: 0
+				}
 			}
 		}
 	}
@@ -1898,9 +1910,15 @@ fn test_handle_inlay_hints_empty_file() {
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-			range: LSPRange{
-				start: Position{ line: 0, char: 0 }
-				end:   Position{ line: 0, char: 0 }
+			range:         LSPRange{
+				start: Position{
+					line: 0
+					char: 0
+				}
+				end:   Position{
+					line: 0
+					char: 0
+				}
 			}
 		}
 	}
@@ -1933,9 +1951,15 @@ fn test_handle_inlay_hints_mut_var() {
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-			range: LSPRange{
-				start: Position{ line: 0, char: 0 }
-				end:   Position{ line: 2, char: 0 }
+			range:         LSPRange{
+				start: Position{
+					line: 0
+					char: 0
+				}
+				end:   Position{
+					line: 2
+					char: 0
+				}
 			}
 		}
 	}
@@ -1958,23 +1982,31 @@ fn test_handle_inlay_hints_single_const() {
 	}
 
 	uri := 'file:///test_inlay_const_single.v'
-	content := 'module main
+	content := "module main
 
 const pi = 3.14
-const greeting = \'hello\'
+const greeting = 'hello'
 const max_count = 100
 const is_debug = false
-'
+"
 	app.open_files[uri] = content
 
 	request := Request{
 		id:     34
 		method: 'textDocument/inlayHint'
 		params: Params{
-			text_document: TextDocumentIdentifier{ uri: uri }
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
 			range:         LSPRange{
-				start: Position{ line: 0, char: 0 }
-				end:   Position{ line: 7, char: 0 }
+				start: Position{
+					line: 0
+					char: 0
+				}
+				end:   Position{
+					line: 7
+					char: 0
+				}
 			}
 		}
 	}
@@ -2001,25 +2033,33 @@ fn test_handle_inlay_hints_const_block() {
 	}
 
 	uri := 'file:///test_inlay_const_block.v'
-	content := 'module main
+	content := "module main
 
 const (
 	pi        = 3.14
-	app_name  = \'vls\'
+	app_name  = 'vls'
 	max_items = 50
 	enabled   = true
 )
-'
+"
 	app.open_files[uri] = content
 
 	request := Request{
 		id:     35
 		method: 'textDocument/inlayHint'
 		params: Params{
-			text_document: TextDocumentIdentifier{ uri: uri }
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
 			range:         LSPRange{
-				start: Position{ line: 0, char: 0 }
-				end:   Position{ line: 9, char: 0 }
+				start: Position{
+					line: 0
+					char: 0
+				}
+				end:   Position{
+					line: 9
+					char: 0
+				}
 			}
 		}
 	}
@@ -2042,160 +2082,191 @@ const (
 // ─── parse_imports ────────────────────────────────────────────────────────────
 
 fn test_parse_imports_basic() {
-content := 'module main\n\nimport os\nimport math\nimport strings\n'
-mods := parse_imports(content)
-assert 'os' in mods
-assert 'math' in mods
-assert 'strings' in mods
-assert mods.len == 3
+	content := 'module main\n\nimport os\nimport math\nimport strings\n'
+	mods := parse_imports(content)
+	assert 'os' in mods
+	assert 'math' in mods
+	assert 'strings' in mods
+	assert mods.len == 3
 }
 
 fn test_parse_imports_aliased() {
-mods := parse_imports('import os as operating_system')
-assert 'os' in mods
+	mods := parse_imports('import os as operating_system')
+	assert 'os' in mods
 }
 
 fn test_parse_imports_submodule() {
-mods := parse_imports('import math.big')
-assert 'math.big' in mods
+	mods := parse_imports('import math.big')
+	assert 'math.big' in mods
 }
 
 fn test_parse_imports_empty() {
-mods := parse_imports('module main\n\nfn main() {}')
-assert mods.len == 0
+	mods := parse_imports('module main\n\nfn main() {}')
+	assert mods.len == 0
 }
 
 // ─── extract_fn_call ──────────────────────────────────────────────────────────
 
 fn test_extract_fn_call_qualified() {
-mod_name, fn_name := extract_fn_call('os.temp_dir()')
-assert mod_name == 'os'
-assert fn_name == 'temp_dir'
+	mod_name, fn_name := extract_fn_call('os.temp_dir()')
+	assert mod_name == 'os'
+	assert fn_name == 'temp_dir'
 }
 
 fn test_extract_fn_call_plain() {
-mod_name, fn_name := extract_fn_call('get_value()')
-assert mod_name == ''
-assert fn_name == 'get_value'
+	mod_name, fn_name := extract_fn_call('get_value()')
+	assert mod_name == ''
+	assert fn_name == 'get_value'
 }
 
 fn test_extract_fn_call_with_args() {
-mod_name, fn_name := extract_fn_call('os.join_path(a, b)')
-assert mod_name == 'os'
-assert fn_name == 'join_path'
+	mod_name, fn_name := extract_fn_call('os.join_path(a, b)')
+	assert mod_name == 'os'
+	assert fn_name == 'join_path'
 }
 
 fn test_extract_fn_call_not_a_call() {
-mod_name, fn_name := extract_fn_call('42')
-assert mod_name == ''
-assert fn_name == ''
+	mod_name, fn_name := extract_fn_call('42')
+	assert mod_name == ''
+	assert fn_name == ''
 }
 
 fn test_extract_fn_call_literal_not_a_call() {
-mod_name, fn_name := extract_fn_call("'hello'")
-assert mod_name == ''
-assert fn_name == ''
+	mod_name, fn_name := extract_fn_call("'hello'")
+	assert mod_name == ''
+	assert fn_name == ''
 }
 
 // ─── build_fn_index ───────────────────────────────────────────────────────────
 
 fn test_build_fn_index_basic() {
-mut app := create_test_app()
-defer { cleanup_test_app(app) }
+	mut app := create_test_app()
+	defer { cleanup_test_app(app) }
 
-src := 'module mymod\n\nfn get_value() int {\n\treturn 42\n}\n\npub fn get_name() string {\n\treturn "vls"\n}\n\nfn (mut app App) handle() string {\n\treturn ""\n}\n\nfn do_nothing() {\n}\n'
-fpath := os.join_path(app.temp_dir, 'mymod.v')
-os.write_file(fpath, src) or { assert false, 'write failed' }
+	src := 'module mymod\n\nfn get_value() int {\n\treturn 42\n}\n\npub fn get_name() string {\n\treturn "vls"\n}\n\nfn (mut app App) handle() string {\n\treturn ""\n}\n\nfn do_nothing() {\n}\n'
+	fpath := os.join_path(app.temp_dir, 'mymod.v')
+	os.write_file(fpath, src) or { assert false, 'write failed' }
 
-index := build_fn_index([fpath])
-assert index['get_value'] == 'int'
-assert index['get_name'] == 'string'
-assert 'handle' !in index
-assert 'do_nothing' !in index
+	index := build_fn_index([fpath])
+	assert index['get_value'] == 'int'
+	assert index['get_name'] == 'string'
+	assert 'handle' !in index
+	assert 'do_nothing' !in index
 }
 
 // ─── lookup_fn_return_type ────────────────────────────────────────────────────
 
 fn test_lookup_fn_return_type_qualified() {
-index := {'os.temp_dir': 'string', 'temp_dir': 'string'}
-assert lookup_fn_return_type('os.temp_dir()', index) == 'string'
+	index := {
+		'os.temp_dir': 'string'
+		'temp_dir':    'string'
+	}
+	assert lookup_fn_return_type('os.temp_dir()', index) == 'string'
 }
 
 fn test_lookup_fn_return_type_plain() {
-index := {'get_value': 'int'}
-assert lookup_fn_return_type('get_value()', index) == 'int'
+	index := {
+		'get_value': 'int'
+	}
+	assert lookup_fn_return_type('get_value()', index) == 'int'
 }
 
 fn test_lookup_fn_return_type_not_found() {
-index := map[string]string{}
-assert lookup_fn_return_type('unknown_fn()', index) == ''
+	index := map[string]string{}
+	assert lookup_fn_return_type('unknown_fn()', index) == ''
 }
 
 // ─── handle_inlay_hints with fn calls ─────────────────────────────────────────
 
 fn test_handle_inlay_hints_local_fn_call() {
-mut app := create_test_app()
-defer { cleanup_test_app(app) }
+	mut app := create_test_app()
+	defer { cleanup_test_app(app) }
 
-helper_src := 'module main\n\nfn get_greeting() string {\n\treturn "hello"\n}\n'
-os.write_file(os.join_path(app.temp_dir, 'helper.v'), helper_src) or { assert false, 'write failed' }
+	helper_src := 'module main\n\nfn get_greeting() string {\n\treturn "hello"\n}\n'
+	os.write_file(os.join_path(app.temp_dir, 'helper.v'), helper_src) or {
+		assert false, 'write failed'
+	}
 
-uri := path_to_uri(os.join_path(app.temp_dir, 'main.v'))
-app.open_files[uri] = 'module main\n\nfn main() {\n\tmsg := get_greeting()\n}\n'
+	uri := path_to_uri(os.join_path(app.temp_dir, 'main.v'))
+	app.open_files[uri] = 'module main\n\nfn main() {\n\tmsg := get_greeting()\n}\n'
 
-request := Request{
-id: 40
-method: 'textDocument/inlayHint'
-params: Params{
-text_document: TextDocumentIdentifier{ uri: uri }
-range: LSPRange{ start: Position{ line: 0, char: 0 }, end: Position{ line: 5, char: 0 } }
-}
-}
-response := app.handle_inlay_hints(request)
-if response.result is []InlayHint {
-hints := response.result
-assert hints.len == 1
-assert hints[0].label == ': string'
-} else {
-assert false, 'Expected []InlayHint'
-}
+	request := Request{
+		id:     40
+		method: 'textDocument/inlayHint'
+		params: Params{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			range:         LSPRange{
+				start: Position{
+					line: 0
+					char: 0
+				}
+				end:   Position{
+					line: 5
+					char: 0
+				}
+			}
+		}
+	}
+	response := app.handle_inlay_hints(request)
+	if response.result is []InlayHint {
+		hints := response.result
+		assert hints.len == 1
+		assert hints[0].label == ': string'
+	} else {
+		assert false, 'Expected []InlayHint'
+	}
 }
 
 fn test_handle_inlay_hints_error_result_fn() {
-mut app := create_test_app()
-defer { cleanup_test_app(app) }
+	mut app := create_test_app()
+	defer { cleanup_test_app(app) }
 
-helper_src := 'module main\n\nfn read_data() !string {\n\treturn "data"\n}\n'
-os.write_file(os.join_path(app.temp_dir, 'reader.v'), helper_src) or { assert false, 'write failed' }
+	helper_src := 'module main\n\nfn read_data() !string {\n\treturn "data"\n}\n'
+	os.write_file(os.join_path(app.temp_dir, 'reader.v'), helper_src) or {
+		assert false, 'write failed'
+	}
 
-uri := path_to_uri(os.join_path(app.temp_dir, 'main2.v'))
-app.open_files[uri] = 'module main\n\nfn main() {\n\tdata := read_data() or { return }\n}\n'
+	uri := path_to_uri(os.join_path(app.temp_dir, 'main2.v'))
+	app.open_files[uri] = 'module main\n\nfn main() {\n\tdata := read_data() or { return }\n}\n'
 
-request := Request{
-id: 41
-method: 'textDocument/inlayHint'
-params: Params{
-text_document: TextDocumentIdentifier{ uri: uri }
-range: LSPRange{ start: Position{ line: 0, char: 0 }, end: Position{ line: 5, char: 0 } }
-}
-}
-response := app.handle_inlay_hints(request)
-if response.result is []InlayHint {
-hints := response.result
-assert hints.len == 1
-assert hints[0].label == ': string'
-} else {
-assert false, 'Expected []InlayHint'
-}
+	request := Request{
+		id:     41
+		method: 'textDocument/inlayHint'
+		params: Params{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			range:         LSPRange{
+				start: Position{
+					line: 0
+					char: 0
+				}
+				end:   Position{
+					line: 5
+					char: 0
+				}
+			}
+		}
+	}
+	response := app.handle_inlay_hints(request)
+	if response.result is []InlayHint {
+		hints := response.result
+		assert hints.len == 1
+		assert hints[0].label == ': string'
+	} else {
+		assert false, 'Expected []InlayHint'
+	}
 }
 
 fn test_handle_inlay_hints_same_file_fn_call() {
-mut app := create_test_app()
-defer { cleanup_test_app(app) }
+	mut app := create_test_app()
+	defer { cleanup_test_app(app) }
 
-// Function defined and called in the same open file
-uri := 'file:///test_same_file.v'
-content := 'module main
+	// Function defined and called in the same open file
+	uri := 'file:///test_same_file.v'
+	content := 'module main
 
 fn get_greeting() string {
 return "hello"
@@ -2205,22 +2276,33 @@ fn main() {
 greeting := get_greeting()
 }
 '
-app.open_files[uri] = content
+	app.open_files[uri] = content
 
-request := Request{
-id: 50
-method: 'textDocument/inlayHint'
-params: Params{
-text_document: TextDocumentIdentifier{ uri: uri }
-range: LSPRange{ start: Position{ line: 0, char: 0 }, end: Position{ line: 9, char: 0 } }
-}
-}
-response := app.handle_inlay_hints(request)
-if response.result is []InlayHint {
-hints := response.result
-assert hints.len == 1
-assert hints[0].label == ': string'
-} else {
-assert false, 'Expected []InlayHint'
-}
+	request := Request{
+		id:     50
+		method: 'textDocument/inlayHint'
+		params: Params{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			range:         LSPRange{
+				start: Position{
+					line: 0
+					char: 0
+				}
+				end:   Position{
+					line: 9
+					char: 0
+				}
+			}
+		}
+	}
+	response := app.handle_inlay_hints(request)
+	if response.result is []InlayHint {
+		hints := response.result
+		assert hints.len == 1
+		assert hints[0].label == ': string'
+	} else {
+		assert false, 'Expected []InlayHint'
+	}
 }
