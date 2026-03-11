@@ -1725,3 +1725,502 @@ const my_const = 42
 		assert false, 'Expected []DocumentSymbol'
 	}
 }
+
+// ─── infer_type_from_literal ─────────────────────────────────────────────────
+
+fn test_infer_type_integer() {
+	assert infer_type_from_literal('42') == 'int'
+}
+
+fn test_infer_type_negative_integer() {
+	assert infer_type_from_literal('-7') == 'int'
+}
+
+fn test_infer_type_hex() {
+	assert infer_type_from_literal('0xff') == 'int'
+}
+
+fn test_infer_type_octal() {
+	assert infer_type_from_literal('0o77') == 'int'
+}
+
+fn test_infer_type_binary() {
+	assert infer_type_from_literal('0b1010') == 'int'
+}
+
+fn test_infer_type_float() {
+	assert infer_type_from_literal('3.14') == 'f64'
+}
+
+fn test_infer_type_string_single_quote() {
+	assert infer_type_from_literal("'hello'") == 'string'
+}
+
+fn test_infer_type_string_double_quote() {
+	assert infer_type_from_literal('"world"') == 'string'
+}
+
+fn test_infer_type_bool_true() {
+	assert infer_type_from_literal('true') == 'bool'
+}
+
+fn test_infer_type_bool_false() {
+	assert infer_type_from_literal('false') == 'bool'
+}
+
+fn test_infer_type_struct_init_skipped() {
+	assert infer_type_from_literal('MyStruct{}') == ''
+}
+
+fn test_infer_type_array_init_skipped() {
+	assert infer_type_from_literal('[]int{}') == ''
+}
+
+fn test_infer_type_function_call_skipped() {
+	assert infer_type_from_literal('get_value()') == ''
+}
+
+fn test_infer_type_identifier_skipped() {
+	assert infer_type_from_literal('other_var') == ''
+}
+
+fn test_infer_type_empty_skipped() {
+	assert infer_type_from_literal('') == ''
+}
+
+// ─── handle_inlay_hints ──────────────────────────────────────────────────────
+
+fn test_handle_inlay_hints_basic() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+
+	uri := 'file:///test_inlay.v'
+	content := 'module main
+
+fn main() {
+	x := 42
+	name := \'hello\'
+	flag := true
+	ratio := 3.14
+	obj := MyStruct{}
+}'
+	app.open_files[uri] = content
+
+	request := Request{
+		id:     30
+		method: 'textDocument/inlayHint'
+		params: Params{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			range: LSPRange{
+				start: Position{ line: 0, char: 0 }
+				end:   Position{ line: 9, char: 0 }
+			}
+		}
+	}
+
+	response := app.handle_inlay_hints(request)
+
+	if response.result is []InlayHint {
+		hints := response.result
+		// Should find int, string, bool, f64 but NOT obj (struct init)
+		assert hints.len == 4
+		labels := hints.map(it.label)
+		assert ': int' in labels
+		assert ': string' in labels
+		assert ': bool' in labels
+		assert ': f64' in labels
+	} else {
+		assert false, 'Expected []InlayHint'
+	}
+}
+
+fn test_handle_inlay_hints_hint_position() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+
+	uri := 'file:///test_inlay_pos.v'
+	content := 'module main
+
+fn main() {
+	x := 99
+}'
+	app.open_files[uri] = content
+
+	request := Request{
+		id:     31
+		method: 'textDocument/inlayHint'
+		params: Params{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			range: LSPRange{
+				start: Position{ line: 0, char: 0 }
+				end:   Position{ line: 4, char: 0 }
+			}
+		}
+	}
+
+	response := app.handle_inlay_hints(request)
+
+	if response.result is []InlayHint {
+		hints := response.result
+		assert hints.len == 1
+		hint := hints[0]
+		assert hint.label == ': int'
+		assert hint.kind == 1
+		assert hint.position.line == 3
+		// 'x' appears at column 1 (after tab), hint after 'x' = col 2
+		assert hint.position.char == 2
+	} else {
+		assert false, 'Expected []InlayHint'
+	}
+}
+
+fn test_handle_inlay_hints_empty_file() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+
+	uri := 'file:///test_inlay_empty.v'
+	app.open_files[uri] = ''
+
+	request := Request{
+		id:     32
+		method: 'textDocument/inlayHint'
+		params: Params{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			range: LSPRange{
+				start: Position{ line: 0, char: 0 }
+				end:   Position{ line: 0, char: 0 }
+			}
+		}
+	}
+
+	response := app.handle_inlay_hints(request)
+
+	if response.result is []InlayHint {
+		assert response.result.len == 0
+	} else {
+		assert false, 'Expected []InlayHint'
+	}
+}
+
+fn test_handle_inlay_hints_mut_var() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+
+	uri := 'file:///test_inlay_mut.v'
+	content := 'fn main() {
+	mut count := 0
+}'
+	app.open_files[uri] = content
+
+	request := Request{
+		id:     33
+		method: 'textDocument/inlayHint'
+		params: Params{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			range: LSPRange{
+				start: Position{ line: 0, char: 0 }
+				end:   Position{ line: 2, char: 0 }
+			}
+		}
+	}
+
+	response := app.handle_inlay_hints(request)
+
+	if response.result is []InlayHint {
+		hints := response.result
+		assert hints.len == 1
+		assert hints[0].label == ': int'
+	} else {
+		assert false, 'Expected []InlayHint'
+	}
+}
+
+fn test_handle_inlay_hints_single_const() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+
+	uri := 'file:///test_inlay_const_single.v'
+	content := 'module main
+
+const pi = 3.14
+const greeting = \'hello\'
+const max_count = 100
+const is_debug = false
+'
+	app.open_files[uri] = content
+
+	request := Request{
+		id:     34
+		method: 'textDocument/inlayHint'
+		params: Params{
+			text_document: TextDocumentIdentifier{ uri: uri }
+			range:         LSPRange{
+				start: Position{ line: 0, char: 0 }
+				end:   Position{ line: 7, char: 0 }
+			}
+		}
+	}
+
+	response := app.handle_inlay_hints(request)
+
+	if response.result is []InlayHint {
+		hints := response.result
+		assert hints.len == 4
+		labels := hints.map(it.label)
+		assert ': f64' in labels
+		assert ': string' in labels
+		assert ': int' in labels
+		assert ': bool' in labels
+	} else {
+		assert false, 'Expected []InlayHint'
+	}
+}
+
+fn test_handle_inlay_hints_const_block() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+
+	uri := 'file:///test_inlay_const_block.v'
+	content := 'module main
+
+const (
+	pi        = 3.14
+	app_name  = \'vls\'
+	max_items = 50
+	enabled   = true
+)
+'
+	app.open_files[uri] = content
+
+	request := Request{
+		id:     35
+		method: 'textDocument/inlayHint'
+		params: Params{
+			text_document: TextDocumentIdentifier{ uri: uri }
+			range:         LSPRange{
+				start: Position{ line: 0, char: 0 }
+				end:   Position{ line: 9, char: 0 }
+			}
+		}
+	}
+
+	response := app.handle_inlay_hints(request)
+
+	if response.result is []InlayHint {
+		hints := response.result
+		assert hints.len == 4
+		labels := hints.map(it.label)
+		assert ': f64' in labels
+		assert ': string' in labels
+		assert ': int' in labels
+		assert ': bool' in labels
+	} else {
+		assert false, 'Expected []InlayHint'
+	}
+}
+
+// ─── parse_imports ────────────────────────────────────────────────────────────
+
+fn test_parse_imports_basic() {
+content := 'module main\n\nimport os\nimport math\nimport strings\n'
+mods := parse_imports(content)
+assert 'os' in mods
+assert 'math' in mods
+assert 'strings' in mods
+assert mods.len == 3
+}
+
+fn test_parse_imports_aliased() {
+mods := parse_imports('import os as operating_system')
+assert 'os' in mods
+}
+
+fn test_parse_imports_submodule() {
+mods := parse_imports('import math.big')
+assert 'math.big' in mods
+}
+
+fn test_parse_imports_empty() {
+mods := parse_imports('module main\n\nfn main() {}')
+assert mods.len == 0
+}
+
+// ─── extract_fn_call ──────────────────────────────────────────────────────────
+
+fn test_extract_fn_call_qualified() {
+mod_name, fn_name := extract_fn_call('os.temp_dir()')
+assert mod_name == 'os'
+assert fn_name == 'temp_dir'
+}
+
+fn test_extract_fn_call_plain() {
+mod_name, fn_name := extract_fn_call('get_value()')
+assert mod_name == ''
+assert fn_name == 'get_value'
+}
+
+fn test_extract_fn_call_with_args() {
+mod_name, fn_name := extract_fn_call('os.join_path(a, b)')
+assert mod_name == 'os'
+assert fn_name == 'join_path'
+}
+
+fn test_extract_fn_call_not_a_call() {
+mod_name, fn_name := extract_fn_call('42')
+assert mod_name == ''
+assert fn_name == ''
+}
+
+fn test_extract_fn_call_literal_not_a_call() {
+mod_name, fn_name := extract_fn_call("'hello'")
+assert mod_name == ''
+assert fn_name == ''
+}
+
+// ─── build_fn_index ───────────────────────────────────────────────────────────
+
+fn test_build_fn_index_basic() {
+mut app := create_test_app()
+defer { cleanup_test_app(app) }
+
+src := 'module mymod\n\nfn get_value() int {\n\treturn 42\n}\n\npub fn get_name() string {\n\treturn "vls"\n}\n\nfn (mut app App) handle() string {\n\treturn ""\n}\n\nfn do_nothing() {\n}\n'
+fpath := os.join_path(app.temp_dir, 'mymod.v')
+os.write_file(fpath, src) or { assert false, 'write failed' }
+
+index := build_fn_index([fpath])
+assert index['get_value'] == 'int'
+assert index['get_name'] == 'string'
+assert 'handle' !in index
+assert 'do_nothing' !in index
+}
+
+// ─── lookup_fn_return_type ────────────────────────────────────────────────────
+
+fn test_lookup_fn_return_type_qualified() {
+index := {'os.temp_dir': 'string', 'temp_dir': 'string'}
+assert lookup_fn_return_type('os.temp_dir()', index) == 'string'
+}
+
+fn test_lookup_fn_return_type_plain() {
+index := {'get_value': 'int'}
+assert lookup_fn_return_type('get_value()', index) == 'int'
+}
+
+fn test_lookup_fn_return_type_not_found() {
+index := map[string]string{}
+assert lookup_fn_return_type('unknown_fn()', index) == ''
+}
+
+// ─── handle_inlay_hints with fn calls ─────────────────────────────────────────
+
+fn test_handle_inlay_hints_local_fn_call() {
+mut app := create_test_app()
+defer { cleanup_test_app(app) }
+
+helper_src := 'module main\n\nfn get_greeting() string {\n\treturn "hello"\n}\n'
+os.write_file(os.join_path(app.temp_dir, 'helper.v'), helper_src) or { assert false, 'write failed' }
+
+uri := path_to_uri(os.join_path(app.temp_dir, 'main.v'))
+app.open_files[uri] = 'module main\n\nfn main() {\n\tmsg := get_greeting()\n}\n'
+
+request := Request{
+id: 40
+method: 'textDocument/inlayHint'
+params: Params{
+text_document: TextDocumentIdentifier{ uri: uri }
+range: LSPRange{ start: Position{ line: 0, char: 0 }, end: Position{ line: 5, char: 0 } }
+}
+}
+response := app.handle_inlay_hints(request)
+if response.result is []InlayHint {
+hints := response.result
+assert hints.len == 1
+assert hints[0].label == ': string'
+} else {
+assert false, 'Expected []InlayHint'
+}
+}
+
+fn test_handle_inlay_hints_error_result_fn() {
+mut app := create_test_app()
+defer { cleanup_test_app(app) }
+
+helper_src := 'module main\n\nfn read_data() !string {\n\treturn "data"\n}\n'
+os.write_file(os.join_path(app.temp_dir, 'reader.v'), helper_src) or { assert false, 'write failed' }
+
+uri := path_to_uri(os.join_path(app.temp_dir, 'main2.v'))
+app.open_files[uri] = 'module main\n\nfn main() {\n\tdata := read_data() or { return }\n}\n'
+
+request := Request{
+id: 41
+method: 'textDocument/inlayHint'
+params: Params{
+text_document: TextDocumentIdentifier{ uri: uri }
+range: LSPRange{ start: Position{ line: 0, char: 0 }, end: Position{ line: 5, char: 0 } }
+}
+}
+response := app.handle_inlay_hints(request)
+if response.result is []InlayHint {
+hints := response.result
+assert hints.len == 1
+assert hints[0].label == ': string'
+} else {
+assert false, 'Expected []InlayHint'
+}
+}
+
+fn test_handle_inlay_hints_same_file_fn_call() {
+mut app := create_test_app()
+defer { cleanup_test_app(app) }
+
+// Function defined and called in the same open file
+uri := 'file:///test_same_file.v'
+content := 'module main
+
+fn get_greeting() string {
+return "hello"
+}
+
+fn main() {
+greeting := get_greeting()
+}
+'
+app.open_files[uri] = content
+
+request := Request{
+id: 50
+method: 'textDocument/inlayHint'
+params: Params{
+text_document: TextDocumentIdentifier{ uri: uri }
+range: LSPRange{ start: Position{ line: 0, char: 0 }, end: Position{ line: 9, char: 0 } }
+}
+}
+response := app.handle_inlay_hints(request)
+if response.result is []InlayHint {
+hints := response.result
+assert hints.len == 1
+assert hints[0].label == ': string'
+} else {
+assert false, 'Expected []InlayHint'
+}
+}
