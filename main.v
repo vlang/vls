@@ -126,6 +126,10 @@ fn (mut app App) handle_stdio_requests(mut reader io.BufferedReader) {
 				resp := app.handle_document_symbols(request)
 				write_response(resp)
 			}
+			.inlay_hint {
+				resp := app.handle_inlay_hints(request)
+				write_response(resp)
+			}
 			.did_change {
 				log('DID_CHANGE')
 				notification := app.on_did_change(request) or { continue }
@@ -155,6 +159,7 @@ fn (mut app App) handle_stdio_requests(mut reader io.BufferedReader) {
 							rename_provider:              true
 							document_formatting_provider: true
 							document_symbol_provider:     true
+							inlay_hint_provider:          true
 						}
 					}
 				}

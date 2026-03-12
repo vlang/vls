@@ -21,6 +21,7 @@ struct TextDocumentIdentifier {
 struct Params {
 	content_changes []ContentChange @[json: 'contentChanges']
 	position        Position
+	range           LSPRange
 	text_document   TextDocumentIdentifier @[json: 'textDocument']
 	new_name        string                 @[json: 'newName']
 }
@@ -51,6 +52,7 @@ type ResponseResult = string
 	| WorkspaceEdit
 	| []TextEdit
 	| []DocumentSymbol
+	| []InlayHint
 
 struct DocumentSymbol {
 	name            string           @[json: 'name']
@@ -124,6 +126,7 @@ struct Capability {
 	rename_provider              bool                    @[json: 'renameProvider']
 	document_formatting_provider bool                    @[json: 'documentFormattingProvider']
 	document_symbol_provider     bool                    @[json: 'documentSymbolProvider']
+	inlay_hint_provider          bool                    @[json: 'inlayHintProvider']
 }
 
 struct CompletionItemCapability {
@@ -178,6 +181,16 @@ struct TextEdit {
 	new_text string @[json: 'newText']
 }
 
+// InlayHintKind 1 = Type hint, 2 = Parameter hint
+const inlay_hint_kind_type = 1
+
+struct InlayHint {
+	position     Position
+	label        string
+	kind         int  @[json: 'kind']
+	padding_left bool @[json: 'paddingLeft']
+}
+
 enum Method {
 	unknown           @['unknown']
 	initialize        @['initialize']
@@ -192,6 +205,7 @@ enum Method {
 	rename            @['textDocument/rename']
 	formatting        @['textDocument/formatting']
 	document_symbols  @['textDocument/documentSymbol']
+	inlay_hint        @['textDocument/inlayHint']
 	set_trace         @['$/setTrace']
 	cancel_request    @['$/cancelRequest']
 	shutdown          @['shutdown']

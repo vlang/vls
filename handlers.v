@@ -474,6 +474,323 @@ fn (mut app App) handle_document_symbols(request Request) Response {
 	}
 }
 
+// handle_inlay_hints returns type inlay hints for `:=` declarations within the
+// requested range whose RHS is a recognizable literal (int, f64, string, bool).
+fn (mut app App) handle_inlay_hints(request Request) Response {
+	uri := request.params.text_document.uri
+	content := app.open_files[uri] or { '' }
+	lines := content.split_into_lines()
+
+	start_line := request.params.range.start.line
+	end_line := request.params.range.end.line
+
+	// Build fn index lazily: current file + open files + vlib modules imported in this file
+	file_path := uri_to_path(uri)
+	working_dir := os.dir(file_path)
+	mut index_files := []string{}
+
+	// Collect all open file paths
+	for open_uri, _ in app.open_files {
+		p := uri_to_path(open_uri)
+		if p != '' && p != file_path {
+			index_files << p
+		}
+	}
+
+	// Only scan project directory if working_dir is a real, accessible directory.
+	// Guard against fake URIs (e.g. tests using file:///test.v) which resolve
+	// working_dir to '/' and would cause a full filesystem walk.
+	if working_dir != '' && working_dir != '/' && os.is_dir(working_dir) {
+		project_files := os.walk_ext(working_dir, '.v')
+		for pf in project_files {
+			if !pf.ends_with('_test.v') && pf != file_path {
+				index_files << pf
+			}
+		}
+
+		// Add vlib modules imported by this file
+		vroot := find_vroot()
+		if vroot != '' {
+			imported_mods := parse_imports(content)
+			for mod in imported_mods {
+				mod_path := mod.replace('.', '/')
+				vlib_mod_dir := os.join_path(vroot, 'vlib', mod_path)
+				if os.is_dir(vlib_mod_dir) {
+					vlib_files := os.walk_ext(vlib_mod_dir, '.v')
+					for vf in vlib_files {
+						if !vf.ends_with('_test.v') {
+							index_files << vf
+						}
+					}
+				}
+			}
+		}
+	}
+
+	mut fn_index := build_fn_index(index_files)
+	// Also index functions defined in the current file (in-memory content).
+	parse_fn_signatures_into(content, '', mut fn_index)
+
+	mut hints := []InlayHint{}
+	mut in_const_block := false
+	for line_idx in start_line .. (end_line + 1) {
+		if line_idx >= lines.len {
+			break
+		}
+		raw := lines[line_idx]
+		trimmed := raw.trim_space()
+
+		// Skip comments and blank lines
+		if trimmed == '' || trimmed.starts_with('//') {
+			continue
+		}
+
+		// Track const block boundaries
+		if trimmed == 'const (' {
+			in_const_block = true
+			continue
+		}
+		if in_const_block && trimmed == ')' {
+			in_const_block = false
+			continue
+		}
+
+		mut var_name := ''
+		mut rhs := ''
+
+		if in_const_block {
+			// Inside `const (` block: lines look like `name = value`
+			eq_idx := trimmed.index(' = ') or { continue }
+			var_name = trimmed[..eq_idx].trim_space()
+			rhs = trimmed[eq_idx + 3..].trim_space()
+		} else if trimmed.starts_with('const ') && trimmed.contains(' = ') {
+			// Single-line const: `const name = value`
+			after_const := trimmed[6..]
+			eq_idx := after_const.index(' = ') or { continue }
+			var_name = after_const[..eq_idx].trim_space()
+			rhs = after_const[eq_idx + 3..].trim_space()
+		} else {
+			// Short variable declaration: `name := value` or `mut name := value`
+			assign_idx := trimmed.index(' := ') or { continue }
+			lhs := trimmed[..assign_idx].trim_space()
+			rhs = trimmed[assign_idx + 4..].trim_space()
+			var_name = lhs
+			if lhs.starts_with('mut ') {
+				var_name = lhs[4..].trim_space()
+			}
+		}
+
+		// Skip multi-assignment or invalid identifiers
+		if var_name.contains(' ') || var_name.contains(',') || var_name == '' {
+			continue
+		}
+
+		// Strip error-handling suffix from RHS: `os.read_file(p) or { [] }` → `os.read_file(p)`
+		mut clean_rhs := rhs
+		if or_idx := rhs.index(' or ') {
+			clean_rhs = rhs[..or_idx].trim_space()
+		}
+		if q_idx := rhs.index(' ?') {
+			_ = q_idx // optional chaining — leave as is
+		}
+
+		// Try literal inference first, then fn index lookup
+		mut inferred := infer_type_from_literal(clean_rhs)
+		if inferred == '' {
+			inferred = lookup_fn_return_type(clean_rhs, fn_index)
+			// Strip result/optional prefix for display: `!string` → `string`, `?string` → `?string`
+			if inferred.starts_with('!') {
+				inferred = inferred[1..]
+			}
+		}
+		if inferred == '' {
+			continue
+		}
+
+		// Position the hint right after the variable name in the raw line
+		name_col := raw.index(var_name) or { continue }
+		hints << InlayHint{
+			position:     Position{
+				line: line_idx
+				char: name_col + var_name.len
+			}
+			label:        ': ${inferred}'
+			kind:         inlay_hint_kind_type
+			padding_left: false
+		}
+	}
+
+	return Response{
+		id:     request.id
+		result: hints
+	}
+}
+
+// infer_type_from_literal returns the V type name for a simple literal RHS value,
+// or '' if the type cannot be determined without compiler assistance.
+fn infer_type_from_literal(rhs string) string {
+	r := rhs.trim_space()
+	if r == '' {
+		return ''
+	}
+	// Boolean
+	if r == 'true' || r == 'false' {
+		return 'bool'
+	}
+	// String literals: single-quote, double-quote, or backtick
+	first := r[0]
+	if first == `'` || first == `"` || first == '`'[0] {
+		return 'string'
+	}
+	// Already explicitly typed (struct/array/map init): skip
+	if r.contains('{') || r.contains('[') {
+		return ''
+	}
+	// Float literal: contains a '.' and digits only
+	if r.contains('.') {
+		mut is_float := true
+		for c in r {
+			if !((c >= `0` && c <= `9`) || c == `.` || c == `-` || c == `_`) {
+				is_float = false
+				break
+			}
+		}
+		if is_float {
+			return 'f64'
+		}
+	}
+	// Integer literal: hex (0x), octal (0o), binary (0b), or plain digits
+	if r.starts_with('0x') || r.starts_with('0X') || r.starts_with('0o') || r.starts_with('0b') {
+		return 'int'
+	}
+	mut is_int := true
+	for c in r {
+		if !((c >= `0` && c <= `9`) || c == `-` || c == `_`) {
+			is_int = false
+			break
+		}
+	}
+	if is_int && r.len > 0 {
+		return 'int'
+	}
+	return ''
+}
+
+// extract_fn_call parses a RHS expression like `os.temp_dir()` or `get_value()`
+// and returns (module_name, fn_name). Returns ('', '') if not a simple call.
+// Skips method calls on receivers (e.g. `obj.method()`).
+fn extract_fn_call(rhs string) (string, string) {
+	r := rhs.trim_space()
+	// Must end with `)` (allowing trailing comments stripped by caller)
+	if !r.ends_with(')') {
+		return '', ''
+	}
+	// Find the opening paren
+	paren_idx := r.index('(') or { return '', '' }
+	call_part := r[..paren_idx]
+
+	if call_part.contains('.') {
+		// Could be `module.fn` or `receiver.method` — only handle one dot
+		dot_idx := call_part.last_index('.') or { return '', '' }
+		mod_part := call_part[..dot_idx]
+		fn_part := call_part[dot_idx + 1..]
+		// Skip if module part looks like a variable (lowercase first char only heuristic
+		// won't work reliably, so we allow both and let the index miss on methods)
+		if mod_part == '' || fn_part == '' {
+			return '', ''
+		}
+		return mod_part, fn_part
+	}
+	// Plain call: `get_value()`
+	if call_part == '' {
+		return '', ''
+	}
+	return '', call_part
+}
+
+// parse_fn_signatures_into scans V source `content` for simple fn declarations
+// and populates `index` with fn_name → return_type and mod_name.fn_name → return_type.
+// Only captures non-method, non-multi-return, non-void signatures.
+fn parse_fn_signatures_into(content string, mod_name string, mut index map[string]string) {
+	for line in content.split_into_lines() {
+		trimmed := line.trim_space()
+		// Match `fn name(` or `pub fn name(`
+		mut after_fn := ''
+		if trimmed.starts_with('pub fn ') {
+			after_fn = trimmed[7..]
+		} else if trimmed.starts_with('fn ') {
+			after_fn = trimmed[3..]
+		} else {
+			continue
+		}
+		// Skip method receivers: `(mut app App) name(`
+		if after_fn.starts_with('(') {
+			continue
+		}
+		paren_idx := after_fn.index('(') or { continue }
+		fn_name := after_fn[..paren_idx].trim_space()
+		if fn_name == '' || fn_name.contains(' ') || fn_name.contains('[') {
+			continue
+		}
+		// Find closing paren to locate return type
+		close_paren := after_fn.index(')') or { continue }
+		after_params := after_fn[close_paren + 1..].trim_space()
+		// after_params could be: `string {`, `!string {`, `?string {`,
+		// `(string, int) {` (multi-return — skip), ` {` (void — skip)
+		if after_params == '' || after_params.starts_with('{') {
+			continue
+		}
+		// Multi-return: starts with `(`
+		if after_params.starts_with('(') {
+			continue
+		}
+		// Strip trailing ` {` or just `{`
+		ret := after_params.all_before('{').trim_space()
+		if ret == '' {
+			continue
+		}
+		index[fn_name] = ret
+		if mod_name != '' {
+			index['${mod_name}.${fn_name}'] = ret
+		}
+	}
+}
+
+// build_fn_index scans the given V source files and returns a map of
+// fn_name → return_type and module_prefix.fn_name → return_type.
+// Only captures simple (non-method, non-multi-return) signatures.
+fn build_fn_index(files []string) map[string]string {
+	mut index := map[string]string{}
+	for fpath in files {
+		content := os.read_file(fpath) or { continue }
+		mod_name := os.file_name(fpath).replace('.v', '')
+		parse_fn_signatures_into(content, mod_name, mut index)
+	}
+	return index
+}
+
+// lookup_fn_return_type looks up the return type of a function call RHS in the
+// provided index. For qualified calls like `os.temp_dir()`, it checks both
+// `os.temp_dir` and just `temp_dir`.
+fn lookup_fn_return_type(rhs string, index map[string]string) string {
+	mod_name, fn_name := extract_fn_call(rhs)
+	if fn_name == '' {
+		return ''
+	}
+	// Strip any error handling suffix from RHS for lookup: `os.read_file(p) or { ... }`
+	// extract_fn_call already handles plain `)` endings; but callers may pass full line
+	if mod_name != '' {
+		qualified := '${mod_name}.${fn_name}'
+		if qualified in index {
+			return index[qualified]
+		}
+	}
+	if fn_name in index {
+		return index[fn_name]
+	}
+	return ''
+}
+
 // parse_document_symbols scans `content` line by line and extracts top-level
 // V declarations: functions, methods, structs, enums, interfaces, constants,
 // and type aliases. It is intentionally simple – the goal is to get the
