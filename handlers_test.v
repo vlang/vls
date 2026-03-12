@@ -1726,7 +1726,209 @@ const my_const = 42
 	}
 }
 
-// ─── infer_type_from_literal ─────────────────────────────────────────────────
+// ============================================================================
+// Tests for extract_doc_comment helper
+// ============================================================================
+
+fn test_extract_doc_comment_single_line() {
+	lines := ['// greet says hello', 'fn greet() {}']
+	comment := extract_doc_comment(lines, 1)
+	assert comment == 'greet says hello'
+}
+
+fn test_extract_doc_comment_multi_line() {
+	lines := [
+		'// copy_all recursively copies all elements of the array by their value,',
+		'// if `dupes` is false all duplicate values are eliminated in the process.',
+		'fn copy_all(dupes bool) {}',
+	]
+	comment := extract_doc_comment(lines, 2)
+	assert comment == 'copy_all recursively copies all elements of the array by their value,  \nif `dupes` is false all duplicate values are eliminated in the process.'
+}
+
+fn test_extract_doc_comment_no_comment() {
+	lines := ['', 'fn no_docs() {}']
+	comment := extract_doc_comment(lines, 1)
+	assert comment == ''
+}
+
+fn test_extract_doc_comment_stops_at_blank_line() {
+	lines := ['// unrelated', '', '// greet says hello', 'fn greet() {}']
+	comment := extract_doc_comment(lines, 3)
+	assert comment == 'greet says hello'
+}
+
+fn test_extract_doc_comment_stops_at_non_comment() {
+	lines := ['fn other() {}', '// greet says hello', 'fn greet() {}']
+	comment := extract_doc_comment(lines, 2)
+	assert comment == 'greet says hello'
+}
+
+fn test_extract_doc_comment_at_first_line() {
+	lines := ['fn greet() {}']
+	comment := extract_doc_comment(lines, 0)
+	assert comment == ''
+}
+
+// ============================================================================
+// Tests for find_declaration_line helper
+// ============================================================================
+
+fn test_find_declaration_line_function() {
+	lines := ['module main', '', 'fn my_func() {}']
+	idx := find_declaration_line(lines, 'my_func')
+	assert idx == 2
+}
+
+fn test_find_declaration_line_pub_function() {
+	lines := ['module main', '', 'pub fn exported() {}']
+	idx := find_declaration_line(lines, 'exported')
+	assert idx == 2
+}
+
+fn test_find_declaration_line_struct() {
+	lines := ['module main', '', 'struct MyStruct {', '}']
+	idx := find_declaration_line(lines, 'MyStruct')
+	assert idx == 2
+}
+
+fn test_find_declaration_line_enum() {
+	lines := ['module main', '', 'enum Color { red green blue }']
+	idx := find_declaration_line(lines, 'Color')
+	assert idx == 2
+}
+
+fn test_find_declaration_line_method() {
+	lines := ['module main', '', 'fn (mut app App) run() {}']
+	idx := find_declaration_line(lines, 'run')
+	assert idx == 2
+}
+
+fn test_find_declaration_line_const() {
+	lines := ['module main', '', 'const max_retries = 3']
+	idx := find_declaration_line(lines, 'max_retries')
+	assert idx == 2
+}
+
+fn test_find_declaration_line_not_found() {
+	lines := ['module main', '', 'fn foo() {}']
+	idx := find_declaration_line(lines, 'bar')
+	assert idx == -1
+}
+
+// ============================================================================
+// Tests for get_word_at_col helper
+// ============================================================================
+
+fn test_get_word_at_col_middle_of_word() {
+	line := 'fn my_func() {}'
+	word := get_word_at_col(line, 4)
+	assert word == 'my_func'
+}
+
+fn test_get_word_at_col_start_of_word() {
+	line := 'fn my_func() {}'
+	word := get_word_at_col(line, 3)
+	assert word == 'my_func'
+}
+
+fn test_get_word_at_col_on_space() {
+	line := 'fn my_func() {}'
+	word := get_word_at_col(line, 2)
+	assert word == ''
+}
+
+fn test_get_word_at_col_beyond_end() {
+	line := 'fn foo()'
+	word := get_word_at_col(line, 100)
+	assert word == ''
+}
+
+// ============================================================================
+// Tests for parse_imports helper
+// ============================================================================
+
+fn test_parse_imports_single() {
+	content := 'module main\n\nimport os\n\nfn main() {}'
+	imports := parse_imports(content)
+	assert imports == ['os']
+}
+
+fn test_parse_imports_multiple() {
+	content := 'module main\n\nimport os\nimport math\nimport strings\n'
+	imports := parse_imports(content)
+	assert imports == ['os', 'math', 'strings']
+}
+
+fn test_parse_imports_with_alias() {
+	content := 'module main\n\nimport os as operating_system\n'
+	imports := parse_imports(content)
+	assert imports == ['os']
+}
+
+fn test_parse_imports_dotted_module() {
+	content := 'module main\n\nimport v.util\n'
+	imports := parse_imports(content)
+	assert imports == ['v.util']
+}
+
+fn test_parse_imports_none() {
+	content := 'module main\n\nfn main() {}'
+	imports := parse_imports(content)
+	assert imports == []
+}
+
+// ============================================================================
+// Tests for find_doc_comment_for_symbol (cross-file search)
+// ============================================================================
+
+fn test_find_doc_comment_for_symbol_current_file() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	content := 'module main\n\n// greet says hello\nfn greet() {}'
+	uri := 'file:///tmp/test_greet.v'
+	app.open_files[uri] = content
+	lines := content.split_into_lines()
+	doc := app.find_doc_comment_for_symbol('greet', lines, uri, '')
+	assert doc == 'greet says hello'
+}
+
+fn test_find_doc_comment_for_symbol_other_open_file() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	other_content := 'module main\n\n// helper does the thing\nfn helper() {}'
+	other_uri := 'file:///tmp/other.v'
+	app.open_files[other_uri] = other_content
+
+	current_content := 'module main\n\nfn main() { helper() }'
+	current_uri := 'file:///tmp/main.v'
+	app.open_files[current_uri] = current_content
+	current_lines := current_content.split_into_lines()
+
+	doc := app.find_doc_comment_for_symbol('helper', current_lines, current_uri, '')
+	assert doc == 'helper does the thing'
+}
+
+fn test_find_doc_comment_for_symbol_not_found() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	content := 'module main\n\nfn main() {}'
+	uri := 'file:///tmp/main.v'
+	app.open_files[uri] = content
+	lines := content.split_into_lines()
+	doc := app.find_doc_comment_for_symbol('nonexistent', lines, uri, '')
+	assert doc == ''
+}
+
+// ============================================================================
+// Tests for infer_type_from_literal
+// ============================================================================
 
 fn test_infer_type_integer() {
 	assert infer_type_from_literal('42') == 'int'
@@ -1788,7 +1990,88 @@ fn test_infer_type_empty_skipped() {
 	assert infer_type_from_literal('') == ''
 }
 
-// ─── handle_inlay_hints ──────────────────────────────────────────────────────
+// ============================================================================
+// Tests for extract_fn_call
+// ============================================================================
+
+fn test_extract_fn_call_qualified() {
+	mod_name, fn_name := extract_fn_call('os.temp_dir()')
+	assert mod_name == 'os'
+	assert fn_name == 'temp_dir'
+}
+
+fn test_extract_fn_call_plain() {
+	mod_name, fn_name := extract_fn_call('get_value()')
+	assert mod_name == ''
+	assert fn_name == 'get_value'
+}
+
+fn test_extract_fn_call_with_args() {
+	mod_name, fn_name := extract_fn_call('os.join_path(a, b)')
+	assert mod_name == 'os'
+	assert fn_name == 'join_path'
+}
+
+fn test_extract_fn_call_not_a_call() {
+	mod_name, fn_name := extract_fn_call('42')
+	assert mod_name == ''
+	assert fn_name == ''
+}
+
+fn test_extract_fn_call_literal_not_a_call() {
+	mod_name, fn_name := extract_fn_call("'hello'")
+	assert mod_name == ''
+	assert fn_name == ''
+}
+
+// ============================================================================
+// Tests for build_fn_index
+// ============================================================================
+
+fn test_build_fn_index_basic() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+
+	src := 'module mymod\n\nfn get_value() int {\n\treturn 42\n}\n\npub fn get_name() string {\n\treturn "vls"\n}\n\nfn (mut app App) handle() string {\n\treturn ""\n}\n\nfn do_nothing() {\n}\n'
+	fpath := os.join_path(app.temp_dir, 'mymod.v')
+	os.write_file(fpath, src) or { assert false, 'write failed' }
+
+	index := build_fn_index([fpath])
+	assert index['get_value'] == 'int'
+	assert index['get_name'] == 'string'
+	assert 'handle' !in index
+	assert 'do_nothing' !in index
+}
+
+// ============================================================================
+// Tests for lookup_fn_return_type
+// ============================================================================
+
+fn test_lookup_fn_return_type_qualified() {
+	index := {
+		'os.temp_dir': 'string'
+		'temp_dir':    'string'
+	}
+	assert lookup_fn_return_type('os.temp_dir()', index) == 'string'
+}
+
+fn test_lookup_fn_return_type_plain() {
+	index := {
+		'get_value': 'int'
+	}
+	assert lookup_fn_return_type('get_value()', index) == 'int'
+}
+
+fn test_lookup_fn_return_type_not_found() {
+	index := map[string]string{}
+	assert lookup_fn_return_type('unknown_fn()', index) == ''
+}
+
+// ============================================================================
+// Tests for handle_inlay_hints
+// ============================================================================
 
 fn test_handle_inlay_hints_basic() {
 	mut app := create_test_app()
@@ -1800,11 +2083,11 @@ fn test_handle_inlay_hints_basic() {
 	content := "module main
 
 fn main() {
-	x := 42
-	name := 'hello'
-	flag := true
-	ratio := 3.14
-	obj := MyStruct{}
+x := 42
+name := 'hello'
+flag := true
+ratio := 3.14
+obj := MyStruct{}
 }"
 	app.open_files[uri] = content
 
@@ -1832,7 +2115,6 @@ fn main() {
 
 	if response.result is []InlayHint {
 		hints := response.result
-		// Should find int, string, bool, f64 but NOT obj (struct init)
 		assert hints.len == 4
 		labels := hints.map(it.label)
 		assert ': int' in labels
@@ -1854,7 +2136,7 @@ fn test_handle_inlay_hints_hint_position() {
 	content := 'module main
 
 fn main() {
-	x := 99
+x := 99
 }'
 	app.open_files[uri] = content
 
@@ -1887,8 +2169,8 @@ fn main() {
 		assert hint.label == ': int'
 		assert hint.kind == 1
 		assert hint.position.line == 3
-		// 'x' appears at column 1 (after tab), hint after 'x' = col 2
-		assert hint.position.char == 2
+		// 'x' appears at column 0, hint after 'x' = col 1
+		assert hint.position.char == 1
 	} else {
 		assert false, 'Expected []InlayHint'
 	}
@@ -1940,7 +2222,7 @@ fn test_handle_inlay_hints_mut_var() {
 
 	uri := 'file:///test_inlay_mut.v'
 	content := 'fn main() {
-	mut count := 0
+mut count := 0
 }'
 	app.open_files[uri] = content
 
@@ -2036,10 +2318,10 @@ fn test_handle_inlay_hints_const_block() {
 	content := "module main
 
 const (
-	pi        = 3.14
-	app_name  = 'vls'
-	max_items = 50
-	enabled   = true
+pi        = 3.14
+app_name  = 'vls'
+max_items = 50
+enabled   = true
 )
 "
 	app.open_files[uri] = content
@@ -2079,108 +2361,11 @@ const (
 	}
 }
 
-// ─── parse_imports ────────────────────────────────────────────────────────────
-
-fn test_parse_imports_basic() {
-	content := 'module main\n\nimport os\nimport math\nimport strings\n'
-	mods := parse_imports(content)
-	assert 'os' in mods
-	assert 'math' in mods
-	assert 'strings' in mods
-	assert mods.len == 3
-}
-
-fn test_parse_imports_aliased() {
-	mods := parse_imports('import os as operating_system')
-	assert 'os' in mods
-}
-
-fn test_parse_imports_submodule() {
-	mods := parse_imports('import math.big')
-	assert 'math.big' in mods
-}
-
-fn test_parse_imports_empty() {
-	mods := parse_imports('module main\n\nfn main() {}')
-	assert mods.len == 0
-}
-
-// ─── extract_fn_call ──────────────────────────────────────────────────────────
-
-fn test_extract_fn_call_qualified() {
-	mod_name, fn_name := extract_fn_call('os.temp_dir()')
-	assert mod_name == 'os'
-	assert fn_name == 'temp_dir'
-}
-
-fn test_extract_fn_call_plain() {
-	mod_name, fn_name := extract_fn_call('get_value()')
-	assert mod_name == ''
-	assert fn_name == 'get_value'
-}
-
-fn test_extract_fn_call_with_args() {
-	mod_name, fn_name := extract_fn_call('os.join_path(a, b)')
-	assert mod_name == 'os'
-	assert fn_name == 'join_path'
-}
-
-fn test_extract_fn_call_not_a_call() {
-	mod_name, fn_name := extract_fn_call('42')
-	assert mod_name == ''
-	assert fn_name == ''
-}
-
-fn test_extract_fn_call_literal_not_a_call() {
-	mod_name, fn_name := extract_fn_call("'hello'")
-	assert mod_name == ''
-	assert fn_name == ''
-}
-
-// ─── build_fn_index ───────────────────────────────────────────────────────────
-
-fn test_build_fn_index_basic() {
-	mut app := create_test_app()
-	defer { cleanup_test_app(app) }
-
-	src := 'module mymod\n\nfn get_value() int {\n\treturn 42\n}\n\npub fn get_name() string {\n\treturn "vls"\n}\n\nfn (mut app App) handle() string {\n\treturn ""\n}\n\nfn do_nothing() {\n}\n'
-	fpath := os.join_path(app.temp_dir, 'mymod.v')
-	os.write_file(fpath, src) or { assert false, 'write failed' }
-
-	index := build_fn_index([fpath])
-	assert index['get_value'] == 'int'
-	assert index['get_name'] == 'string'
-	assert 'handle' !in index
-	assert 'do_nothing' !in index
-}
-
-// ─── lookup_fn_return_type ────────────────────────────────────────────────────
-
-fn test_lookup_fn_return_type_qualified() {
-	index := {
-		'os.temp_dir': 'string'
-		'temp_dir':    'string'
-	}
-	assert lookup_fn_return_type('os.temp_dir()', index) == 'string'
-}
-
-fn test_lookup_fn_return_type_plain() {
-	index := {
-		'get_value': 'int'
-	}
-	assert lookup_fn_return_type('get_value()', index) == 'int'
-}
-
-fn test_lookup_fn_return_type_not_found() {
-	index := map[string]string{}
-	assert lookup_fn_return_type('unknown_fn()', index) == ''
-}
-
-// ─── handle_inlay_hints with fn calls ─────────────────────────────────────────
-
 fn test_handle_inlay_hints_local_fn_call() {
 	mut app := create_test_app()
-	defer { cleanup_test_app(app) }
+	defer {
+		cleanup_test_app(app)
+	}
 
 	helper_src := 'module main\n\nfn get_greeting() string {\n\treturn "hello"\n}\n'
 	os.write_file(os.join_path(app.temp_dir, 'helper.v'), helper_src) or {
@@ -2221,7 +2406,9 @@ fn test_handle_inlay_hints_local_fn_call() {
 
 fn test_handle_inlay_hints_error_result_fn() {
 	mut app := create_test_app()
-	defer { cleanup_test_app(app) }
+	defer {
+		cleanup_test_app(app)
+	}
 
 	helper_src := 'module main\n\nfn read_data() !string {\n\treturn "data"\n}\n'
 	os.write_file(os.join_path(app.temp_dir, 'reader.v'), helper_src) or {
@@ -2262,9 +2449,10 @@ fn test_handle_inlay_hints_error_result_fn() {
 
 fn test_handle_inlay_hints_same_file_fn_call() {
 	mut app := create_test_app()
-	defer { cleanup_test_app(app) }
+	defer {
+		cleanup_test_app(app)
+	}
 
-	// Function defined and called in the same open file
 	uri := 'file:///test_same_file.v'
 	content := 'module main
 

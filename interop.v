@@ -24,6 +24,17 @@ fn path_to_uri(path string) string {
 	return uri_header + normalized
 }
 
+// find_vroot locates the V installation directory by finding the `v` executable
+// and returning its parent directory, provided a `vlib/` subdirectory exists there.
+fn find_vroot() string {
+	v_exe := os.find_abs_path_of_executable('v') or { return '' }
+	candidate := os.dir(v_exe)
+	if os.is_dir(os.join_path(candidate, 'vlib')) {
+		return candidate
+	}
+	return ''
+}
+
 fn (mut app App) run_v_check(path string, text string) []JsonError {
 	real_path := uri_to_path(path)
 	working_dir := os.dir(real_path)
@@ -345,16 +356,47 @@ fn (mut app App) run_v_line_info(method Method, path string, line_info string) R
 		}
 		.hover {
 			result_tmp := json.decode(JsonVarAC, x.output) or { JsonVarAC{} }
+			// Extract vdoc comment via cross-file search (current file → open files
+			// → project dir → vlib/builtin → imported stdlib modules).
+			mut doc := ''
+			file_content := app.open_files[path] or { app.text }
+			file_lines := file_content.split_into_lines()
+			// line_info format for hover is "line:col" (1-based line, 0-based col)
+			info_parts := line_info.split(':')
+			if info_parts.len >= 2 {
+				cursor_line := info_parts[0].int() - 1
+				cursor_col := info_parts[1].int()
+				if cursor_line >= 0 && cursor_line < file_lines.len {
+					symbol := get_word_at_col(file_lines[cursor_line], cursor_col)
+					if symbol != '' {
+						vroot := find_vroot()
+						doc = app.find_doc_comment_for_symbol(symbol, file_lines, path,
+							vroot)
+					}
+				}
+			}
 			if result_tmp.details.len > 0 {
 				detail := result_tmp.details[0]
-				mut content := '```v\n${detail.detail}\n```'
+				// Prefer compiler-provided documentation over our extracted vdoc
 				if detail.documentation != '' {
-					content += '\n\n${detail.documentation}'
+					doc = detail.documentation
+				}
+				mut content := '```v\n${detail.detail}\n```'
+				if doc != '' {
+					content += '\n\n${doc}'
 				}
 				result = Hover{
 					contents: MarkupContent{
 						kind:  'markdown'
 						value: content
+					}
+				}
+			} else if doc != '' {
+				// Compiler returned no type info but we found a vdoc comment
+				result = Hover{
+					contents: MarkupContent{
+						kind:  'markdown'
+						value: doc
 					}
 				}
 			} else {
