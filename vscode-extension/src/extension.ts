@@ -53,12 +53,25 @@ export async function activate(context: vscode.ExtensionContext) {
     clientOptions
   );
 
-  // Refresh inlay hints when the toggle setting changes.
+  // A standalone provider whose sole purpose is to fire onDidChangeInlayHints so
+  // that VS Code immediately re-requests hints from all providers (including the
+  // LSP one above) whenever the toggle setting changes.
+  const inlayHintsEmitter = new vscode.EventEmitter<void>();
+  context.subscriptions.push(inlayHintsEmitter);
+  context.subscriptions.push(
+    vscode.languages.registerInlayHintsProvider(
+      { scheme: 'file', language: 'v' },
+      {
+        onDidChangeInlayHints: inlayHintsEmitter.event,
+        provideInlayHints: () => [],
+      }
+    )
+  );
+
   context.subscriptions.push(
     vscode.workspace.onDidChangeConfiguration((e) => {
       if (e.affectsConfiguration('vls.inlayHints.enabled')) {
-        const feature = client.getFeature('textDocument/inlayHint') as any;
-        feature?.refresh?.();
+        inlayHintsEmitter.fire();
       }
     })
   );
