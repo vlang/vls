@@ -3,6 +3,10 @@ import { LanguageClient, LanguageClientOptions, ServerOptions } from 'vscode-lan
 
 let client: LanguageClient;
 
+function isInlayHintsEnabled(): boolean {
+  return vscode.workspace.getConfiguration('vls').get<boolean>('inlayHints.enabled', true);
+}
+
 export async function activate(context: vscode.ExtensionContext) {
   // Get the configuration for our server.
   const config = vscode.workspace.getConfiguration('vls');
@@ -31,6 +35,14 @@ export async function activate(context: vscode.ExtensionContext) {
     synchronize: {
       fileEvents: vscode.workspace.createFileSystemWatcher('**/*.v'),
     },
+    middleware: {
+      provideInlayHints: async (document, range, token, next) => {
+        if (!isInlayHintsEnabled()) {
+          return [];
+        }
+        return next(document, range, token);
+      },
+    },
   };
 
   // Create the language client.
@@ -39,6 +51,29 @@ export async function activate(context: vscode.ExtensionContext) {
     'V Language Server',
     serverOptions,
     clientOptions
+  );
+
+  // A standalone provider whose sole purpose is to fire onDidChangeInlayHints so
+  // that VS Code immediately re-requests hints from all providers (including the
+  // LSP one above) whenever the toggle setting changes.
+  const inlayHintsEmitter = new vscode.EventEmitter<void>();
+  context.subscriptions.push(inlayHintsEmitter);
+  context.subscriptions.push(
+    vscode.languages.registerInlayHintsProvider(
+      { scheme: 'file', language: 'v' },
+      {
+        onDidChangeInlayHints: inlayHintsEmitter.event,
+        provideInlayHints: () => [],
+      }
+    )
+  );
+
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeConfiguration((e) => {
+      if (e.affectsConfiguration('vls.inlayHints.enabled')) {
+        inlayHintsEmitter.fire();
+      }
+    })
   );
 
   // Start the client. This will also launch the server.
