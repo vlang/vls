@@ -47,6 +47,11 @@
           "type": "array",
           "default": [],
           "description": "Arguments to pass to the V language server."
+        },
+        "vls.inlayHints.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable or disable inlay hints for V files."
         }
       }
     }

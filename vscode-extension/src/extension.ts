@@ -3,6 +3,10 @@ import { LanguageClient, LanguageClientOptions, ServerOptions } from 'vscode-lan
 
 let client: LanguageClient;
 
+function isInlayHintsEnabled(): boolean {
+  return vscode.workspace.getConfiguration('vls').get<boolean>('inlayHints.enabled', true);
+}
+
 export async function activate(context: vscode.ExtensionContext) {
   // Get the configuration for our server.
   const config = vscode.workspace.getConfiguration('vls');
@@ -31,6 +35,14 @@ export async function activate(context: vscode.ExtensionContext) {
     synchronize: {
       fileEvents: vscode.workspace.createFileSystemWatcher('**/*.v'),
     },
+    middleware: {
+      provideInlayHints: async (document, range, token, next) => {
+        if (!isInlayHintsEnabled()) {
+          return [];
+        }
+        return next(document, range, token);
+      },
+    },
   };
 
   // Create the language client.
@@ -39,6 +51,16 @@ export async function activate(context: vscode.ExtensionContext) {
     'V Language Server',
     serverOptions,
     clientOptions
+  );
+
+  // Refresh inlay hints when the toggle setting changes.
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeConfiguration((e) => {
+      if (e.affectsConfiguration('vls.inlayHints.enabled')) {
+        const feature = client.getFeature('textDocument/inlayHint') as any;
+        feature?.refresh?.();
+      }
+    })
   );
 
   // Start the client. This will also launch the server.
