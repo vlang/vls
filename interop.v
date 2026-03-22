@@ -24,7 +24,6 @@ fn path_to_uri(path string) string {
 	return uri_header + normalized
 }
 
-
 fn (mut app App) run_v_check(path string, text string) []JsonError {
 	real_path := uri_to_path(path)
 	working_dir := os.dir(real_path)
