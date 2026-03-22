@@ -2736,6 +2736,34 @@ fn test_collect_module_fn_completions_skips_current_file() {
 	assert 'current_fn' !in labels
 }
 
+fn test_collect_module_fn_completions_skips_test_files() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+
+	test_dir := os.join_path(app.temp_dir, 'project')
+	os.mkdir_all(test_dir) or { panic(err) }
+
+	current_file := os.join_path(test_dir, 'main.v')
+	test_file := os.join_path(test_dir, 'main_test.v')
+
+	os.write_file(current_file, 'module main\n\nfn main() {}\n') or { panic(err) }
+	os.write_file(test_file, 'module main\n\nfn test_something() {}\n') or { panic(err) }
+
+	current_uri := path_to_uri(current_file)
+	test_uri := path_to_uri(test_file)
+
+	// Simulate both files open in the editor
+	app.open_files[current_uri] = 'module main\n\nfn main() {}\n'
+	app.open_files[test_uri] = 'module main\n\nfn test_something() {}\n'
+
+	items := app.collect_module_fn_completions(current_uri, test_dir)
+	labels := items.map(it.label)
+	// test fn from _test.v must NOT appear in completions
+	assert 'test_something' !in labels
+}
+
 fn test_collect_module_fn_completions_prefers_open_files() {
 	mut app := create_test_app()
 	defer {

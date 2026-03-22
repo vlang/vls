@@ -1155,6 +1155,9 @@ fn (app &App) collect_module_fn_completions(current_file_uri string, working_dir
 		if uri in searched_uris {
 			continue
 		}
+		if uri.ends_with('_test.v') {
+			continue
+		}
 		searched_uris[uri] = true
 		if current_module != '' && get_module_name(content) != current_module {
 			continue
