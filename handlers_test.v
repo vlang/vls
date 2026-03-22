@@ -2871,3 +2871,71 @@ fn test_collect_module_fn_completions_excludes_different_module_in_memory() {
 	labels := items.map(it.label)
 	assert 'lib_fn' !in labels
 }
+
+// ============================================================================
+// Real-time module name change tests
+// ============================================================================
+
+fn test_collect_module_fn_completions_current_file_module_changed() {
+	// Simulates: user edits the current file's module declaration from `module main`
+	// to `module bar`. Completions should only show functions from files that
+	// also declare `module bar`.
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+
+	test_dir := os.join_path(app.temp_dir, 'project')
+	os.mkdir_all(test_dir) or { panic(err) }
+
+	current_file := os.join_path(test_dir, 'main.v')
+	sibling_file := os.join_path(test_dir, 'utils.v')
+	bar_file := os.join_path(test_dir, 'bar_utils.v')
+
+	os.write_file(current_file, 'module main\n') or { panic(err) }
+	os.write_file(sibling_file, 'module main\n\npub fn main_fn() {}\n') or { panic(err) }
+	os.write_file(bar_file, 'module bar\n\npub fn bar_fn() {}\n') or { panic(err) }
+
+	current_uri := path_to_uri(current_file)
+
+	// User changes current file's module declaration to `bar` (unsaved)
+	app.open_files[current_uri] = 'module bar\n'
+
+	items := app.collect_module_fn_completions(current_uri, test_dir)
+	labels := items.map(it.label)
+	// bar_fn belongs to `module bar` → should appear
+	assert 'bar_fn' in labels
+	// main_fn belongs to `module main` → must NOT appear
+	assert 'main_fn' !in labels
+}
+
+fn test_collect_module_fn_completions_sibling_module_changed() {
+	// Simulates: sibling file's module declaration is changed in memory to a
+	// different module. Its functions must no longer appear in the current
+	// file's completions.
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+
+	test_dir := os.join_path(app.temp_dir, 'project')
+	os.mkdir_all(test_dir) or { panic(err) }
+
+	current_file := os.join_path(test_dir, 'main.v')
+	sibling_file := os.join_path(test_dir, 'utils.v')
+
+	os.write_file(current_file, 'module main\n') or { panic(err) }
+	os.write_file(sibling_file, 'module main\n\npub fn sibling_fn() {}\n') or { panic(err) }
+
+	current_uri := path_to_uri(current_file)
+	sibling_uri := path_to_uri(sibling_file)
+
+	app.open_files[current_uri] = 'module main\n'
+	// User edits sibling's module declaration to `other` (unsaved)
+	app.open_files[sibling_uri] = 'module other\n\npub fn sibling_fn() {}\n'
+
+	items := app.collect_module_fn_completions(current_uri, test_dir)
+	labels := items.map(it.label)
+	// sibling_fn now belongs to `module other` → must NOT appear
+	assert 'sibling_fn' !in labels
+}
