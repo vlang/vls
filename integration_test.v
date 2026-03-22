@@ -1315,7 +1315,7 @@ fn test_integration_completion_includes_sibling_pub_fn() {
 	assert 'helper_from_sibling' in labels
 }
 
-fn test_integration_completion_excludes_private_sibling_fn() {
+fn test_integration_completion_includes_private_sibling_fn() {
 	mut app, project_dir := create_integration_test_env()
 	defer {
 		cleanup_integration_test_env(app, project_dir)
@@ -1325,7 +1325,7 @@ fn test_integration_completion_excludes_private_sibling_fn() {
 	utils_file := os.join_path(project_dir, 'utils.v')
 
 	main_content := 'module main\n\nfn main() {\n\tpr\n}\n'
-	// Only a private fn — should NOT appear as a pub fn completion from sibling
+	// Plain fn (no pub) — should appear because it belongs to the same module
 	utils_content := 'module main\n\nfn private_sibling() {}\n'
 
 	os.write_file(main_file, main_content) or { panic(err) }
@@ -1356,5 +1356,5 @@ fn test_integration_completion_excludes_private_sibling_fn() {
 	assert result is []Detail
 	details := result as []Detail
 	labels := details.map(it.label)
-	assert 'private_sibling' !in labels
+	assert 'private_sibling' in labels
 }

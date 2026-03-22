@@ -2659,47 +2659,58 @@ fn test_import_completions_local_module() {
 }
 
 // ============================================================================
-// Tests for collect_module_pub_fn_completions / parse_pub_fn_completions
+// Tests for collect_module_fn_completions / parse_module_fn_completions
 // ============================================================================
 
-fn test_parse_pub_fn_completions_basic() {
+fn test_parse_module_fn_completions_basic() {
 	content := 'module main\n\npub fn helper(name string) string {\n\treturn name\n}\n\nfn private_fn() {}\n'
-	items := parse_pub_fn_completions(content)
+	items := parse_module_fn_completions(content)
 	labels := items.map(it.label)
 	// pub fn should be present
 	assert 'helper' in labels
-	// private fn should NOT be present
-	assert 'private_fn' !in labels
+	// plain fn should also be present (same-module functions are all accessible)
+	assert 'private_fn' in labels
 }
 
-fn test_parse_pub_fn_completions_skips_methods() {
-	content := 'module main\n\npub fn (r App) method_name() {}\n\npub fn free_fn() {}\n'
-	items := parse_pub_fn_completions(content)
+fn test_parse_module_fn_completions_private_included() {
+	// Plain fn (no pub) must appear as a completion item
+	content := 'module main\n\nfn internal_helper(x int) int {\n\treturn x * 2\n}\n'
+	items := parse_module_fn_completions(content)
 	labels := items.map(it.label)
-	// method receiver should be skipped
-	assert 'method_name' !in labels
-	// free function should be included
-	assert 'free_fn' in labels
+	assert 'internal_helper' in labels
 }
 
-fn test_parse_pub_fn_completions_detail_string() {
+fn test_parse_module_fn_completions_skips_methods() {
+	content := 'module main\n\npub fn (r App) method_name() {}\n\nfn (mut app App) other_method() {}\n\npub fn free_fn() {}\n\nfn plain_free() {}\n'
+	items := parse_module_fn_completions(content)
+	labels := items.map(it.label)
+	// method receivers should be skipped (both pub and plain)
+	assert 'method_name' !in labels
+	assert 'other_method' !in labels
+	// free functions (pub and plain) should be included
+	assert 'free_fn' in labels
+	assert 'plain_free' in labels
+}
+
+fn test_parse_module_fn_completions_detail_string() {
 	content := 'module main\n\npub fn add(a int, b int) int {\n\treturn a + b\n}\n'
-	items := parse_pub_fn_completions(content)
+	items := parse_module_fn_completions(content)
 	assert items.len == 1
 	assert items[0].label == 'add'
 	assert items[0].detail == 'pub fn add(a int, b int) int'
 	assert items[0].kind == 3
 }
 
-fn test_parse_pub_fn_completions_void_fn() {
-	// Void pub fn (no return type) should be included
-	content := 'module main\n\npub fn greet(name string) {\n\tprintln(name)\n}\n'
-	items := parse_pub_fn_completions(content)
+fn test_parse_module_fn_completions_void_fn() {
+	// Void fn (no return type) should be included — covers both pub fn and plain fn
+	content := 'module main\n\npub fn greet(name string) {\n\tprintln(name)\n}\n\nfn log_msg(msg string) {\n\teprintln(msg)\n}\n'
+	items := parse_module_fn_completions(content)
 	labels := items.map(it.label)
 	assert 'greet' in labels
+	assert 'log_msg' in labels
 }
 
-fn test_collect_module_pub_fn_completions_skips_current_file() {
+fn test_collect_module_fn_completions_skips_current_file() {
 	mut app := create_test_app()
 	defer {
 		cleanup_test_app(app)
@@ -2717,7 +2728,7 @@ fn test_collect_module_pub_fn_completions_skips_current_file() {
 	current_uri := path_to_uri(current_file)
 	app.open_files[current_uri] = 'module main\n\npub fn current_fn() {}\n'
 
-	items := app.collect_module_pub_fn_completions(current_uri, test_dir)
+	items := app.collect_module_fn_completions(current_uri, test_dir)
 	labels := items.map(it.label)
 	// sibling pub fn should appear
 	assert 'sibling_fn' in labels
@@ -2725,7 +2736,7 @@ fn test_collect_module_pub_fn_completions_skips_current_file() {
 	assert 'current_fn' !in labels
 }
 
-fn test_collect_module_pub_fn_completions_prefers_open_files() {
+fn test_collect_module_fn_completions_prefers_open_files() {
 	mut app := create_test_app()
 	defer {
 		cleanup_test_app(app)
@@ -2748,7 +2759,7 @@ fn test_collect_module_pub_fn_completions_prefers_open_files() {
 	app.open_files[current_uri] = 'module main\n'
 	app.open_files[sibling_uri] = 'module main\n\npub fn memory_fn() {}\n'
 
-	items := app.collect_module_pub_fn_completions(current_uri, test_dir)
+	items := app.collect_module_fn_completions(current_uri, test_dir)
 	labels := items.map(it.label)
 	// In-memory version is used (sibling_uri already in searched_uris after open_files scan)
 	assert 'memory_fn' in labels
@@ -2781,7 +2792,7 @@ fn test_get_module_name_ignores_comments() {
 // Cross-module filtering tests
 // ============================================================================
 
-fn test_collect_module_pub_fn_completions_excludes_different_module() {
+fn test_collect_module_fn_completions_excludes_different_module() {
 	mut app := create_test_app()
 	defer {
 		cleanup_test_app(app)
@@ -2800,13 +2811,13 @@ fn test_collect_module_pub_fn_completions_excludes_different_module() {
 	current_uri := path_to_uri(current_file)
 	app.open_files[current_uri] = 'module main\n\nfn main() {}\n'
 
-	items := app.collect_module_pub_fn_completions(current_uri, test_dir)
+	items := app.collect_module_fn_completions(current_uri, test_dir)
 	labels := items.map(it.label)
 	// other module's pub fn must NOT appear
 	assert 'other_fn' !in labels
 }
 
-fn test_collect_module_pub_fn_completions_excludes_different_module_in_memory() {
+fn test_collect_module_fn_completions_excludes_different_module_in_memory() {
 	mut app := create_test_app()
 	defer {
 		cleanup_test_app(app)
@@ -2828,7 +2839,7 @@ fn test_collect_module_pub_fn_completions_excludes_different_module_in_memory() 
 	app.open_files[current_uri] = 'module main\n'
 	app.open_files[other_uri] = 'module lib\n\npub fn lib_fn() {}\n'
 
-	items := app.collect_module_pub_fn_completions(current_uri, test_dir)
+	items := app.collect_module_fn_completions(current_uri, test_dir)
 	labels := items.map(it.label)
 	assert 'lib_fn' !in labels
 }

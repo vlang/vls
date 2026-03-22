@@ -68,10 +68,10 @@ fn (mut app App) operation_at_pos(method Method, request Request) Response {
 				details = result as []Detail
 			}
 			details << make_keyword_completions()
-			// Augment with pub fn completions from sibling files in the same module.
+			// Augment with fn completions from sibling files in the same module.
 			working_dir := os.dir(uri_to_path(path))
 			if working_dir != '' {
-				module_fns := app.collect_module_pub_fn_completions(path, working_dir)
+				module_fns := app.collect_module_fn_completions(path, working_dir)
 				mut seen_labels := map[string]bool{}
 				for d in details {
 					seen_labels[d.label] = true
@@ -1133,12 +1133,12 @@ fn (mut app App) search_symbol_in_project(working_dir string, symbol string) []L
 	return locations
 }
 
-// collect_module_pub_fn_completions scans sibling .v files in `working_dir` for
-// `pub fn` free-function declarations and returns them as completion items.
+// collect_module_fn_completions scans sibling .v files in `working_dir` for
+// free-function declarations (both `pub fn` and `fn`) and returns them as completion items.
 // It checks in-memory open files first, then falls back to on-disk files,
 // skipping the current file (`current_file_uri`) to avoid duplicates.
 // Only files that declare the same module as the current file are included.
-fn (app &App) collect_module_pub_fn_completions(current_file_uri string, working_dir string) []Detail {
+fn (app &App) collect_module_fn_completions(current_file_uri string, working_dir string) []Detail {
 	mut items := []Detail{}
 	mut searched_uris := map[string]bool{}
 	searched_uris[current_file_uri] = true
@@ -1159,7 +1159,7 @@ fn (app &App) collect_module_pub_fn_completions(current_file_uri string, working
 		if current_module != '' && get_module_name(content) != current_module {
 			continue
 		}
-		items << parse_pub_fn_completions(content)
+		items << parse_module_fn_completions(content)
 	}
 
 	// 2. Scan on-disk .v files in the working directory not yet processed
@@ -1176,23 +1176,28 @@ fn (app &App) collect_module_pub_fn_completions(current_file_uri string, working
 		if current_module != '' && get_module_name(content) != current_module {
 			continue
 		}
-		items << parse_pub_fn_completions(content)
+		items << parse_module_fn_completions(content)
 	}
 
 	return items
 }
 
-// parse_pub_fn_completions extracts `pub fn` free-function declarations from V source
-// content and returns them as completion Detail items.
-fn parse_pub_fn_completions(content string) []Detail {
+// parse_module_fn_completions extracts free-function declarations (`pub fn` and `fn`)
+// from V source content and returns them as completion Detail items.
+// Method receivers (e.g. `fn (r Recv) method()`) are skipped.
+fn parse_module_fn_completions(content string) []Detail {
 	mut items := []Detail{}
 	for line in content.split_into_lines() {
 		trimmed := line.trim_space()
-		if !trimmed.starts_with('pub fn ') {
+		mut after_fn := ''
+		if trimmed.starts_with('pub fn ') {
+			after_fn = trimmed[7..]
+		} else if trimmed.starts_with('fn ') {
+			after_fn = trimmed[3..]
+		} else {
 			continue
 		}
-		after_fn := trimmed[7..]
-		// Skip method receivers: `pub fn (recv Recv) method_name(`
+		// Skip method receivers: `fn (recv Recv) method_name(`
 		if after_fn.starts_with('(') {
 			continue
 		}
