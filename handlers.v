@@ -323,6 +323,21 @@ fn extract_doc_comment(lines []string, decl_line int) string {
 	return comments.join('  \n')
 }
 
+// get_module_name extracts the module name declared in V source content.
+// Returns '' if no module declaration is found.
+fn get_module_name(content string) string {
+	for line in content.split_into_lines() {
+		trimmed := line.trim_space()
+		if trimmed.starts_with('module ') {
+			name := trimmed[7..].trim_space()
+			if name != '' {
+				return name
+			}
+		}
+	}
+	return ''
+}
+
 // parse_imports extracts the module paths from `import` statements in `content`.
 // Returns a list of module paths, e.g. ['os', 'math', 'v.util'].
 fn parse_imports(content string) []string {
@@ -1122,10 +1137,18 @@ fn (mut app App) search_symbol_in_project(working_dir string, symbol string) []L
 // `pub fn` free-function declarations and returns them as completion items.
 // It checks in-memory open files first, then falls back to on-disk files,
 // skipping the current file (`current_file_uri`) to avoid duplicates.
+// Only files that declare the same module as the current file are included.
 fn (app &App) collect_module_pub_fn_completions(current_file_uri string, working_dir string) []Detail {
 	mut items := []Detail{}
 	mut searched_uris := map[string]bool{}
 	searched_uris[current_file_uri] = true
+
+	// Determine the current file's module so we only include same-module siblings.
+	current_content := app.open_files[current_file_uri] or {
+		content := os.read_file(uri_to_path(current_file_uri)) or { '' }
+		content
+	}
+	current_module := get_module_name(current_content)
 
 	// 1. Scan in-memory open files
 	for uri, content in app.open_files {
@@ -1133,6 +1156,9 @@ fn (app &App) collect_module_pub_fn_completions(current_file_uri string, working
 			continue
 		}
 		searched_uris[uri] = true
+		if current_module != '' && get_module_name(content) != current_module {
+			continue
+		}
 		items << parse_pub_fn_completions(content)
 	}
 
@@ -1147,6 +1173,9 @@ fn (app &App) collect_module_pub_fn_completions(current_file_uri string, working
 		}
 		searched_uris[uri] = true
 		content := os.read_file(v_file) or { continue }
+		if current_module != '' && get_module_name(content) != current_module {
+			continue
+		}
 		items << parse_pub_fn_completions(content)
 	}
 

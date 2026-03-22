@@ -2755,3 +2755,80 @@ fn test_collect_module_pub_fn_completions_prefers_open_files() {
 	// disk_fn should NOT appear because the URI was already visited via open_files
 	assert 'disk_fn' !in labels
 }
+
+// ============================================================================
+// Tests for get_module_name
+// ============================================================================
+
+fn test_get_module_name_basic() {
+	assert get_module_name('module main\n\nfn main() {}\n') == 'main'
+	assert get_module_name('module foo\n') == 'foo'
+	assert get_module_name('module mypackage\n') == 'mypackage'
+}
+
+fn test_get_module_name_no_declaration() {
+	assert get_module_name('') == ''
+	assert get_module_name('fn main() {}\n') == ''
+}
+
+fn test_get_module_name_ignores_comments() {
+	// module keyword inside a comment is not a declaration
+	content := '// module notthis\nmodule real\n'
+	assert get_module_name(content) == 'real'
+}
+
+// ============================================================================
+// Cross-module filtering tests
+// ============================================================================
+
+fn test_collect_module_pub_fn_completions_excludes_different_module() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+
+	test_dir := os.join_path(app.temp_dir, 'project')
+	os.mkdir_all(test_dir) or { panic(err) }
+
+	current_file := os.join_path(test_dir, 'main.v')
+	other_file := os.join_path(test_dir, 'other.v')
+
+	os.write_file(current_file, 'module main\n\nfn main() {}\n') or { panic(err) }
+	// other.v belongs to a different module
+	os.write_file(other_file, 'module other\n\npub fn other_fn() {}\n') or { panic(err) }
+
+	current_uri := path_to_uri(current_file)
+	app.open_files[current_uri] = 'module main\n\nfn main() {}\n'
+
+	items := app.collect_module_pub_fn_completions(current_uri, test_dir)
+	labels := items.map(it.label)
+	// other module's pub fn must NOT appear
+	assert 'other_fn' !in labels
+}
+
+fn test_collect_module_pub_fn_completions_excludes_different_module_in_memory() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+
+	test_dir := os.join_path(app.temp_dir, 'project')
+	os.mkdir_all(test_dir) or { panic(err) }
+
+	current_file := os.join_path(test_dir, 'main.v')
+	other_file := os.join_path(test_dir, 'lib.v')
+
+	os.write_file(current_file, 'module main\n') or { panic(err) }
+	os.write_file(other_file, 'module lib\n') or { panic(err) }
+
+	current_uri := path_to_uri(current_file)
+	other_uri := path_to_uri(other_file)
+
+	// User changed the module of lib.v in memory — now it's a different module
+	app.open_files[current_uri] = 'module main\n'
+	app.open_files[other_uri] = 'module lib\n\npub fn lib_fn() {}\n'
+
+	items := app.collect_module_pub_fn_completions(current_uri, test_dir)
+	labels := items.map(it.label)
+	assert 'lib_fn' !in labels
+}
