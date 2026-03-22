@@ -8,6 +8,28 @@ fn (mut app App) operation_at_pos(method Method, request Request) Response {
 	line_nr := request.params.position.line + 1
 	col := request.params.position.char
 	path := request.params.text_document.uri
+
+	// Intercept completion on import lines
+	if method == .completion {
+		if content := app.open_files[path] {
+			lines := content.split_into_lines()
+			if line_nr - 1 < lines.len {
+				current_line := lines[line_nr - 1]
+				if current_line.trim_space().starts_with('import') {
+					vroot := find_vroot()
+					work_dir := os.dir(uri_to_path(path))
+					completions := get_import_completions(current_line, vroot, work_dir)
+					if completions.len > 0 {
+						return Response{
+							id:     request.id
+							result: completions
+						}
+					}
+				}
+			}
+		}
+	}
+
 	line_info := match method {
 		.completion, .hover {
 			'${line_nr}:${col}'
@@ -277,6 +299,90 @@ fn parse_imports(content string) []string {
 		}
 	}
 	return imports
+}
+
+// get_import_completions returns completion items for an `import` line.
+// It lists vlib modules and local project modules matching the typed prefix.
+fn get_import_completions(line string, vroot string, work_dir string) []Detail {
+	trimmed := line.trim_space()
+	if !trimmed.starts_with('import') {
+		return []
+	}
+	// typed is everything after 'import', e.g. '', 'enc', 'encoding', 'encoding.'
+	typed := if trimmed.len > 7 { trimmed[7..].trim_space() } else { '' }
+
+	mut results := []Detail{}
+
+	// Split on '.' to determine nesting level.
+	// e.g. 'encoding.' → parts = ['encoding', ''], base = ['encoding'], prefix = ''
+	// e.g. 'encoding.b' → parts = ['encoding', 'b'], base = ['encoding'], prefix = 'b'
+	// e.g. 'enc' → parts = ['enc'], base = [], prefix = 'enc'
+	parts := typed.split('.')
+	base_path_parts := parts[..parts.len - 1] // all but last
+	prefix := parts.last() // filter on last segment
+
+	// Build vlib search path
+	vlib_dir := os.join_path(vroot, 'vlib')
+	search_dir := if base_path_parts.len > 0 {
+		os.join_path(vlib_dir, base_path_parts.join(os.path_separator))
+	} else {
+		vlib_dir
+	}
+
+	// List matching subdirectories in vlib
+	if vroot != '' && os.is_dir(search_dir) {
+		entries := os.ls(search_dir) or { [] }
+		for entry in entries {
+			if !entry.starts_with(prefix) {
+				continue
+			}
+			full_path := os.join_path(search_dir, entry)
+			if !os.is_dir(full_path) {
+				continue
+			}
+			// Include dirs that contain at least one non-test .v file directly,
+			// or that contain subdirectories (namespaces like encoding/).
+			children := os.ls(full_path) or { [] }
+			has_v := children.any(it.ends_with('.v') && !it.ends_with('_test.v'))
+			has_subdir := children.any(os.is_dir(os.join_path(full_path, it)))
+			if !has_v && !has_subdir {
+				continue
+			}
+			results << Detail{
+				kind:        9 // CompletionItemKind.Module
+				label:       entry
+				detail:      'V stdlib module'
+				insert_text: entry
+			}
+		}
+	}
+
+	// Also add local project modules (top-level only, when no dots typed yet)
+	if work_dir != '' && base_path_parts.len == 0 {
+		entries := os.ls(work_dir) or { [] }
+		for entry in entries {
+			if !entry.starts_with(prefix) || entry.starts_with('.') {
+				continue
+			}
+			full_path := os.join_path(work_dir, entry)
+			if !os.is_dir(full_path) {
+				continue
+			}
+			v_files := os.ls(full_path) or { [] }
+			has_v := v_files.any(it.ends_with('.v') && !it.ends_with('_test.v'))
+			if !has_v {
+				continue
+			}
+			results << Detail{
+				kind:        9
+				label:       entry
+				detail:      'Local module'
+				insert_text: entry
+			}
+		}
+	}
+
+	return results
 }
 
 // find_doc_comment_for_symbol searches for the vdoc comment for `symbol` across
