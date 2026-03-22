@@ -2657,3 +2657,101 @@ fn test_import_completions_local_module() {
 	assert local_results[0].detail == 'Local module'
 	assert local_results[0].insert_text or { '' } == 'mymod'
 }
+
+// ============================================================================
+// Tests for collect_module_pub_fn_completions / parse_pub_fn_completions
+// ============================================================================
+
+fn test_parse_pub_fn_completions_basic() {
+	content := 'module main\n\npub fn helper(name string) string {\n\treturn name\n}\n\nfn private_fn() {}\n'
+	items := parse_pub_fn_completions(content)
+	labels := items.map(it.label)
+	// pub fn should be present
+	assert 'helper' in labels
+	// private fn should NOT be present
+	assert 'private_fn' !in labels
+}
+
+fn test_parse_pub_fn_completions_skips_methods() {
+	content := 'module main\n\npub fn (r App) method_name() {}\n\npub fn free_fn() {}\n'
+	items := parse_pub_fn_completions(content)
+	labels := items.map(it.label)
+	// method receiver should be skipped
+	assert 'method_name' !in labels
+	// free function should be included
+	assert 'free_fn' in labels
+}
+
+fn test_parse_pub_fn_completions_detail_string() {
+	content := 'module main\n\npub fn add(a int, b int) int {\n\treturn a + b\n}\n'
+	items := parse_pub_fn_completions(content)
+	assert items.len == 1
+	assert items[0].label == 'add'
+	assert items[0].detail == 'pub fn add(a int, b int) int'
+	assert items[0].kind == 3
+}
+
+fn test_parse_pub_fn_completions_void_fn() {
+	// Void pub fn (no return type) should be included
+	content := 'module main\n\npub fn greet(name string) {\n\tprintln(name)\n}\n'
+	items := parse_pub_fn_completions(content)
+	labels := items.map(it.label)
+	assert 'greet' in labels
+}
+
+fn test_collect_module_pub_fn_completions_skips_current_file() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+
+	test_dir := os.join_path(app.temp_dir, 'project')
+	os.mkdir_all(test_dir) or { panic(err) }
+
+	current_file := os.join_path(test_dir, 'main.v')
+	sibling_file := os.join_path(test_dir, 'utils.v')
+
+	os.write_file(current_file, 'module main\n\npub fn current_fn() {}\n') or { panic(err) }
+	os.write_file(sibling_file, 'module main\n\npub fn sibling_fn() {}\n') or { panic(err) }
+
+	current_uri := path_to_uri(current_file)
+	app.open_files[current_uri] = 'module main\n\npub fn current_fn() {}\n'
+
+	items := app.collect_module_pub_fn_completions(current_uri, test_dir)
+	labels := items.map(it.label)
+	// sibling pub fn should appear
+	assert 'sibling_fn' in labels
+	// current file's pub fn should NOT appear (avoid duplicates)
+	assert 'current_fn' !in labels
+}
+
+fn test_collect_module_pub_fn_completions_prefers_open_files() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+
+	test_dir := os.join_path(app.temp_dir, 'project')
+	os.mkdir_all(test_dir) or { panic(err) }
+
+	current_file := os.join_path(test_dir, 'main.v')
+	sibling_file := os.join_path(test_dir, 'utils.v')
+
+	// Write an old version to disk
+	os.write_file(current_file, 'module main\n') or { panic(err) }
+	os.write_file(sibling_file, 'module main\n\npub fn disk_fn() {}\n') or { panic(err) }
+
+	current_uri := path_to_uri(current_file)
+	sibling_uri := path_to_uri(sibling_file)
+
+	// In-memory version of sibling has a different (newer) function
+	app.open_files[current_uri] = 'module main\n'
+	app.open_files[sibling_uri] = 'module main\n\npub fn memory_fn() {}\n'
+
+	items := app.collect_module_pub_fn_completions(current_uri, test_dir)
+	labels := items.map(it.label)
+	// In-memory version is used (sibling_uri already in searched_uris after open_files scan)
+	assert 'memory_fn' in labels
+	// disk_fn should NOT appear because the URI was already visited via open_files
+	assert 'disk_fn' !in labels
+}

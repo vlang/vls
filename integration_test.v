@@ -1264,3 +1264,97 @@ fn test_integration_shutdown_response() {
 	assert encoded.contains('"result":"null"')
 	assert encoded.contains('"jsonrpc":"2.0"')
 }
+
+// ============================================================================
+// Same-module pub fn completion tests
+// ============================================================================
+
+fn test_integration_completion_includes_sibling_pub_fn() {
+	mut app, project_dir := create_integration_test_env()
+	defer {
+		cleanup_integration_test_env(app, project_dir)
+	}
+
+	// Two files in the same module: main.v triggers completion, utils.v has a pub fn
+	main_file := os.join_path(project_dir, 'main.v')
+	utils_file := os.join_path(project_dir, 'utils.v')
+
+	main_content := 'module main\n\nfn main() {\n\thelper\n}\n'
+	utils_content := 'module main\n\npub fn helper_from_sibling(x int) string {\n\treturn x.str()\n}\n'
+
+	os.write_file(main_file, main_content) or { panic(err) }
+	os.write_file(utils_file, utils_content) or { panic(err) }
+
+	main_uri := path_to_uri(main_file)
+	utils_uri := path_to_uri(utils_file)
+
+	// Simulate both files being open in the editor
+	app.open_files[main_uri] = main_content
+	app.open_files[utils_uri] = utils_content
+	app.text = main_content
+
+	// Request completion at `helper` on line 3, col 1 (not after '.')
+	response := app.operation_at_pos(.completion, Request{
+		id:     1
+		params: Params{
+			text_document: TextDocumentIdentifier{
+				uri: main_uri
+			}
+			position:      Position{
+				line: 3
+				char: 1
+			}
+		}
+	})
+
+	assert response.id == 1
+	result := response.result
+	assert result is []Detail
+	details := result as []Detail
+	labels := details.map(it.label)
+	assert 'helper_from_sibling' in labels
+}
+
+fn test_integration_completion_excludes_private_sibling_fn() {
+	mut app, project_dir := create_integration_test_env()
+	defer {
+		cleanup_integration_test_env(app, project_dir)
+	}
+
+	main_file := os.join_path(project_dir, 'main.v')
+	utils_file := os.join_path(project_dir, 'utils.v')
+
+	main_content := 'module main\n\nfn main() {\n\tpr\n}\n'
+	// Only a private fn — should NOT appear as a pub fn completion from sibling
+	utils_content := 'module main\n\nfn private_sibling() {}\n'
+
+	os.write_file(main_file, main_content) or { panic(err) }
+	os.write_file(utils_file, utils_content) or { panic(err) }
+
+	main_uri := path_to_uri(main_file)
+	utils_uri := path_to_uri(utils_file)
+
+	app.open_files[main_uri] = main_content
+	app.open_files[utils_uri] = utils_content
+	app.text = main_content
+
+	response := app.operation_at_pos(.completion, Request{
+		id:     1
+		params: Params{
+			text_document: TextDocumentIdentifier{
+				uri: main_uri
+			}
+			position:      Position{
+				line: 3
+				char: 2
+			}
+		}
+	})
+
+	assert response.id == 1
+	result := response.result
+	assert result is []Detail
+	details := result as []Detail
+	labels := details.map(it.label)
+	assert 'private_sibling' !in labels
+}

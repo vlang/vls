@@ -68,6 +68,21 @@ fn (mut app App) operation_at_pos(method Method, request Request) Response {
 				details = result as []Detail
 			}
 			details << make_keyword_completions()
+			// Augment with pub fn completions from sibling files in the same module.
+			working_dir := os.dir(uri_to_path(path))
+			if working_dir != '' {
+				module_fns := app.collect_module_pub_fn_completions(path, working_dir)
+				mut seen_labels := map[string]bool{}
+				for d in details {
+					seen_labels[d.label] = true
+				}
+				for d in module_fns {
+					if d.label !in seen_labels {
+						details << d
+						seen_labels[d.label] = true
+					}
+				}
+			}
 			result = details
 		}
 	}
@@ -1101,6 +1116,71 @@ fn (mut app App) search_symbol_in_project(working_dir string, symbol string) []L
 		}
 	}
 	return locations
+}
+
+// collect_module_pub_fn_completions scans sibling .v files in `working_dir` for
+// `pub fn` free-function declarations and returns them as completion items.
+// It checks in-memory open files first, then falls back to on-disk files,
+// skipping the current file (`current_file_uri`) to avoid duplicates.
+fn (app &App) collect_module_pub_fn_completions(current_file_uri string, working_dir string) []Detail {
+	mut items := []Detail{}
+	mut searched_uris := map[string]bool{}
+	searched_uris[current_file_uri] = true
+
+	// 1. Scan in-memory open files
+	for uri, content in app.open_files {
+		if uri in searched_uris {
+			continue
+		}
+		searched_uris[uri] = true
+		items << parse_pub_fn_completions(content)
+	}
+
+	// 2. Scan on-disk .v files in the working directory not yet processed
+	for v_file in os.walk_ext(working_dir, '.v') {
+		if v_file.ends_with('_test.v') {
+			continue
+		}
+		uri := path_to_uri(v_file)
+		if uri in searched_uris {
+			continue
+		}
+		searched_uris[uri] = true
+		content := os.read_file(v_file) or { continue }
+		items << parse_pub_fn_completions(content)
+	}
+
+	return items
+}
+
+// parse_pub_fn_completions extracts `pub fn` free-function declarations from V source
+// content and returns them as completion Detail items.
+fn parse_pub_fn_completions(content string) []Detail {
+	mut items := []Detail{}
+	for line in content.split_into_lines() {
+		trimmed := line.trim_space()
+		if !trimmed.starts_with('pub fn ') {
+			continue
+		}
+		after_fn := trimmed[7..]
+		// Skip method receivers: `pub fn (recv Recv) method_name(`
+		if after_fn.starts_with('(') {
+			continue
+		}
+		paren_idx := after_fn.index('(') or { continue }
+		fn_name := after_fn[..paren_idx].trim_space()
+		if fn_name == '' || fn_name.contains(' ') || fn_name.contains('[') {
+			continue
+		}
+		// Build the detail string: full signature up to (but not including) ` {`
+		detail_str := trimmed.all_before('{').trim_space()
+		items << Detail{
+			kind:   3 // CompletionItemKind.Function
+			label:  fn_name
+			detail: detail_str
+		}
+	}
+	return items
 }
 
 const v_keywords = ['asm', 'as', 'assert', 'atomic', 'break', 'const', 'continue', 'defer', 'dump',
