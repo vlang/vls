@@ -145,7 +145,7 @@ fn (mut app App) handle_stdio_requests(mut reader io.BufferedReader) {
 								change:     1 // 1 = Full sync
 							}
 							completion_provider:          CompletionProvider{
-								trigger_characters: ['.']
+								trigger_characters: ['.', ' ']
 								completion_item:    CompletionItemCapability{
 									snippet_support: true
 								}

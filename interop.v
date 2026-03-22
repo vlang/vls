@@ -24,17 +24,6 @@ fn path_to_uri(path string) string {
 	return uri_header + normalized
 }
 
-// find_vroot locates the V installation directory by finding the `v` executable
-// and returning its parent directory, provided a `vlib/` subdirectory exists there.
-fn find_vroot() string {
-	v_exe := os.find_abs_path_of_executable('v') or { return '' }
-	candidate := os.dir(v_exe)
-	if os.is_dir(os.join_path(candidate, 'vlib')) {
-		return candidate
-	}
-	return ''
-}
-
 fn (mut app App) run_v_check(path string, text string) []JsonError {
 	real_path := uri_to_path(path)
 	working_dir := os.dir(real_path)
@@ -369,9 +358,7 @@ fn (mut app App) run_v_line_info(method Method, path string, line_info string) R
 				if cursor_line >= 0 && cursor_line < file_lines.len {
 					symbol := get_word_at_col(file_lines[cursor_line], cursor_col)
 					if symbol != '' {
-						vroot := find_vroot()
-						doc = app.find_doc_comment_for_symbol(symbol, file_lines, path,
-							vroot)
+						doc = app.find_doc_comment_for_symbol(symbol, file_lines, path)
 					}
 				}
 			}

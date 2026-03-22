@@ -1891,7 +1891,7 @@ fn test_find_doc_comment_for_symbol_current_file() {
 	uri := 'file:///tmp/test_greet.v'
 	app.open_files[uri] = content
 	lines := content.split_into_lines()
-	doc := app.find_doc_comment_for_symbol('greet', lines, uri, '')
+	doc := app.find_doc_comment_for_symbol('greet', lines, uri)
 	assert doc == 'greet says hello'
 }
 
@@ -1909,7 +1909,7 @@ fn test_find_doc_comment_for_symbol_other_open_file() {
 	app.open_files[current_uri] = current_content
 	current_lines := current_content.split_into_lines()
 
-	doc := app.find_doc_comment_for_symbol('helper', current_lines, current_uri, '')
+	doc := app.find_doc_comment_for_symbol('helper', current_lines, current_uri)
 	assert doc == 'helper does the thing'
 }
 
@@ -1922,7 +1922,7 @@ fn test_find_doc_comment_for_symbol_not_found() {
 	uri := 'file:///tmp/main.v'
 	app.open_files[uri] = content
 	lines := content.split_into_lines()
-	doc := app.find_doc_comment_for_symbol('nonexistent', lines, uri, '')
+	doc := app.find_doc_comment_for_symbol('nonexistent', lines, uri)
 	assert doc == ''
 }
 
@@ -2590,4 +2590,70 @@ fn test_make_keyword_completions_contains_error_with_code() {
 	items := make_keyword_completions()
 	labels := items.map(it.label)
 	assert 'error_with_code' in labels
+}
+
+// Tests for get_import_completions
+// ============================================================================
+
+fn test_import_completions_non_import_line() {
+	results := get_import_completions('fn main() {', '')
+	assert results.len == 0
+}
+
+fn test_import_completions_empty_prefix() {
+	results := get_import_completions('import ', '')
+	// Should return all vlib top-level modules (non-empty)
+	assert results.len > 0
+	// All results should have kind 9 (Module)
+	for r in results {
+		assert r.kind == 9
+	}
+}
+
+fn test_import_completions_partial_prefix() {
+	results := get_import_completions('import enc', '')
+	// Should return only modules starting with 'enc' (e.g. 'encoding')
+	assert results.len > 0
+	for r in results {
+		assert r.label.starts_with('enc')
+	}
+}
+
+fn test_import_completions_nested() {
+	encoding_dir := os.join_path(@VEXEROOT, 'vlib', 'encoding')
+	if !os.is_dir(encoding_dir) {
+		return
+	}
+	results := get_import_completions('import encoding.', '')
+	// Should return submodules of encoding/
+	assert results.len > 0
+	for r in results {
+		// insert_text is just the segment (e.g. 'base64'), not the full path,
+		// so the editor inserts it after the dot the user already typed.
+		it := r.insert_text or { '' }
+		assert !it.contains('.')
+		assert r.detail == 'V stdlib module'
+	}
+}
+
+fn test_import_completions_local_module() {
+	temp_dir := os.join_path(os.temp_dir(), 'vls_import_test_${os.getpid()}')
+	os.mkdir_all(temp_dir) or { panic(err) }
+	defer {
+		os.rmdir_all(temp_dir) or {}
+	}
+
+	// Create a local module directory with a .v file
+	mymod_dir := os.join_path(temp_dir, 'mymod')
+	os.mkdir_all(mymod_dir) or { panic(err) }
+	os.write_file(os.join_path(mymod_dir, 'mymod.v'), 'module mymod\n') or { panic(err) }
+
+	results := get_import_completions('import ', temp_dir)
+	labels := results.map(it.label)
+	assert 'mymod' in labels
+
+	local_results := results.filter(it.label == 'mymod')
+	assert local_results.len == 1
+	assert local_results[0].detail == 'Local module'
+	assert local_results[0].insert_text or { '' } == 'mymod'
 }

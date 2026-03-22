@@ -8,6 +8,27 @@ fn (mut app App) operation_at_pos(method Method, request Request) Response {
 	line_nr := request.params.position.line + 1
 	col := request.params.position.char
 	path := request.params.text_document.uri
+
+	// Intercept completion on import lines
+	if method == .completion {
+		if content := app.open_files[path] {
+			lines := content.split_into_lines()
+			if line_nr - 1 < lines.len {
+				current_line := lines[line_nr - 1]
+				if current_line.trim_space().starts_with('import') {
+					work_dir := os.dir(uri_to_path(path))
+					completions := get_import_completions(current_line, work_dir)
+					if completions.len > 0 {
+						return Response{
+							id:     request.id
+							result: completions
+						}
+					}
+				}
+			}
+		}
+	}
+
 	line_info := match method {
 		.completion, .hover {
 			'${line_nr}:${col}'
@@ -306,6 +327,90 @@ fn parse_imports(content string) []string {
 	return imports
 }
 
+// get_import_completions returns completion items for an `import` line.
+// It lists vlib modules and local project modules matching the typed prefix.
+fn get_import_completions(line string, work_dir string) []Detail {
+	trimmed := line.trim_space()
+	if !trimmed.starts_with('import') {
+		return []
+	}
+	// typed is everything after 'import', e.g. '', 'enc', 'encoding', 'encoding.'
+	typed := if trimmed.len > 7 { trimmed[7..].trim_space() } else { '' }
+
+	mut results := []Detail{}
+
+	// Split on '.' to determine nesting level.
+	// e.g. 'encoding.' → parts = ['encoding', ''], base = ['encoding'], prefix = ''
+	// e.g. 'encoding.b' → parts = ['encoding', 'b'], base = ['encoding'], prefix = 'b'
+	// e.g. 'enc' → parts = ['enc'], base = [], prefix = 'enc'
+	parts := typed.split('.')
+	base_path_parts := parts[..parts.len - 1] // all but last
+	prefix := parts.last() // filter on last segment
+
+	// Build vlib search path
+	vlib_dir := os.join_path(@VEXEROOT, 'vlib')
+	search_dir := if base_path_parts.len > 0 {
+		os.join_path(vlib_dir, base_path_parts.join(os.path_separator))
+	} else {
+		vlib_dir
+	}
+
+	// List matching subdirectories in vlib
+	if os.is_dir(search_dir) {
+		entries := os.ls(search_dir) or { [] }
+		for entry in entries {
+			if !entry.starts_with(prefix) {
+				continue
+			}
+			full_path := os.join_path(search_dir, entry)
+			if !os.is_dir(full_path) {
+				continue
+			}
+			// Include dirs that contain at least one non-test .v file directly,
+			// or that contain subdirectories (namespaces like encoding/).
+			children := os.ls(full_path) or { [] }
+			has_v := children.any(it.ends_with('.v') && !it.ends_with('_test.v'))
+			has_subdir := children.any(os.is_dir(os.join_path(full_path, it)))
+			if !has_v && !has_subdir {
+				continue
+			}
+			results << Detail{
+				kind:        9 // CompletionItemKind.Module
+				label:       entry
+				detail:      'V stdlib module'
+				insert_text: entry
+			}
+		}
+	}
+
+	// Also add local project modules (top-level only, when no dots typed yet)
+	if work_dir != '' && base_path_parts.len == 0 {
+		entries := os.ls(work_dir) or { [] }
+		for entry in entries {
+			if !entry.starts_with(prefix) || entry.starts_with('.') {
+				continue
+			}
+			full_path := os.join_path(work_dir, entry)
+			if !os.is_dir(full_path) {
+				continue
+			}
+			v_files := os.ls(full_path) or { [] }
+			has_v := v_files.any(it.ends_with('.v') && !it.ends_with('_test.v'))
+			if !has_v {
+				continue
+			}
+			results << Detail{
+				kind:        9
+				label:       entry
+				detail:      'Local module'
+				insert_text: entry
+			}
+		}
+	}
+
+	return results
+}
+
 // find_doc_comment_for_symbol searches for the vdoc comment for `symbol` across
 // multiple sources in priority order:
 //  1. current file lines (already split)
@@ -313,7 +418,7 @@ fn parse_imports(content string) []string {
 //  3. all .v files in the project working directory
 //  4. vlib/builtin/ (always, for built-in functions like println)
 //  5. vlib/<module>/ for each module imported in the current file
-fn (app &App) find_doc_comment_for_symbol(symbol string, current_lines []string, current_file_uri string, vroot string) string {
+fn (app &App) find_doc_comment_for_symbol(symbol string, current_lines []string, current_file_uri string) string {
 	// 1. Current file
 	decl_line := find_declaration_line(current_lines, symbol)
 	if decl_line >= 0 {
@@ -362,12 +467,8 @@ fn (app &App) find_doc_comment_for_symbol(symbol string, current_lines []string,
 		}
 	}
 
-	if vroot == '' {
-		return ''
-	}
-
 	// 4. vlib/builtin/ — always search for built-in symbols
-	builtin_dir := os.join_path(vroot, 'vlib', 'builtin')
+	builtin_dir := os.join_path(@VEXEROOT, 'vlib', 'builtin')
 	if os.is_dir(builtin_dir) {
 		doc := search_doc_in_vlib_dir(builtin_dir, symbol)
 		if doc != '' {
@@ -380,7 +481,7 @@ fn (app &App) find_doc_comment_for_symbol(symbol string, current_lines []string,
 	for module_path in parse_imports(current_content) {
 		// Convert 'v.util' → 'v/util', 'os' → 'os'
 		module_rel := module_path.replace('.', os.path_separator)
-		module_dir := os.join_path(vroot, 'vlib', module_rel)
+		module_dir := os.join_path(@VEXEROOT, 'vlib', module_rel)
 		if !os.is_dir(module_dir) {
 			continue
 		}
@@ -536,18 +637,15 @@ fn (mut app App) handle_inlay_hints(request Request) Response {
 		}
 
 		// Add vlib modules imported by this file
-		vroot := find_vroot()
-		if vroot != '' {
-			imported_mods := parse_imports(content)
-			for mod in imported_mods {
-				mod_path := mod.replace('.', '/')
-				vlib_mod_dir := os.join_path(vroot, 'vlib', mod_path)
-				if os.is_dir(vlib_mod_dir) {
-					vlib_files := os.walk_ext(vlib_mod_dir, '.v')
-					for vf in vlib_files {
-						if !vf.ends_with('_test.v') {
-							index_files << vf
-						}
+		imported_mods := parse_imports(content)
+		for mod in imported_mods {
+			mod_path := mod.replace('.', '/')
+			vlib_mod_dir := os.join_path(@VEXEROOT, 'vlib', mod_path)
+			if os.is_dir(vlib_mod_dir) {
+				vlib_files := os.walk_ext(vlib_mod_dir, '.v')
+				for vf in vlib_files {
+					if !vf.ends_with('_test.v') {
+						index_files << vf
 					}
 				}
 			}
