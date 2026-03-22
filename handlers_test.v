@@ -1891,7 +1891,7 @@ fn test_find_doc_comment_for_symbol_current_file() {
 	uri := 'file:///tmp/test_greet.v'
 	app.open_files[uri] = content
 	lines := content.split_into_lines()
-	doc := app.find_doc_comment_for_symbol('greet', lines, uri, '')
+	doc := app.find_doc_comment_for_symbol('greet', lines, uri)
 	assert doc == 'greet says hello'
 }
 
@@ -1909,7 +1909,7 @@ fn test_find_doc_comment_for_symbol_other_open_file() {
 	app.open_files[current_uri] = current_content
 	current_lines := current_content.split_into_lines()
 
-	doc := app.find_doc_comment_for_symbol('helper', current_lines, current_uri, '')
+	doc := app.find_doc_comment_for_symbol('helper', current_lines, current_uri)
 	assert doc == 'helper does the thing'
 }
 
@@ -1922,7 +1922,7 @@ fn test_find_doc_comment_for_symbol_not_found() {
 	uri := 'file:///tmp/main.v'
 	app.open_files[uri] = content
 	lines := content.split_into_lines()
-	doc := app.find_doc_comment_for_symbol('nonexistent', lines, uri, '')
+	doc := app.find_doc_comment_for_symbol('nonexistent', lines, uri)
 	assert doc == ''
 }
 
