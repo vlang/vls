@@ -2494,3 +2494,100 @@ greeting := get_greeting()
 		assert false, 'Expected []InlayHint'
 	}
 }
+
+// ============================================================================
+// Tests for keyword/builtin completion augmentation
+// ============================================================================
+
+fn test_make_keyword_completions_not_empty() {
+	items := make_keyword_completions()
+	assert items.len > 0
+}
+
+fn test_make_keyword_completions_contains_fn_keyword() {
+	items := make_keyword_completions()
+	labels := items.map(it.label)
+	assert 'fn' in labels
+}
+
+fn test_make_keyword_completions_fn_has_keyword_kind() {
+	items := make_keyword_completions()
+	fn_items := items.filter(it.label == 'fn')
+	assert fn_items.len > 0
+	assert fn_items[0].kind == 14 // Keyword
+}
+
+fn test_make_keyword_completions_contains_println_builtin() {
+	items := make_keyword_completions()
+	labels := items.map(it.label)
+	assert 'println' in labels
+}
+
+fn test_make_keyword_completions_println_has_function_kind() {
+	items := make_keyword_completions()
+	println_items := items.filter(it.label == 'println')
+	assert println_items.len > 0
+	assert println_items[0].kind == 3 // Function
+}
+
+fn test_make_keyword_completions_contains_struct_keyword() {
+	items := make_keyword_completions()
+	labels := items.map(it.label)
+	assert 'struct' in labels
+}
+
+fn test_make_keyword_completions_contains_for_keyword() {
+	items := make_keyword_completions()
+	labels := items.map(it.label)
+	assert 'for' in labels
+}
+
+fn test_make_keyword_completions_contains_mut_keyword() {
+	items := make_keyword_completions()
+	labels := items.map(it.label)
+	assert 'mut' in labels
+}
+
+fn test_make_keyword_completions_contains_atomic() {
+	items := make_keyword_completions()
+	labels := items.map(it.label)
+	assert 'atomic' in labels
+}
+
+fn test_make_keyword_completions_dump_is_keyword_kind() {
+	items := make_keyword_completions()
+	dump_items := items.filter(it.label == 'dump')
+	assert dump_items.len > 0
+	assert dump_items[0].kind == 14 // Keyword, not Function
+}
+
+fn test_make_keyword_completions_sizeof_is_keyword_kind() {
+	items := make_keyword_completions()
+	sizeof_items := items.filter(it.label == 'sizeof')
+	assert sizeof_items.len > 0
+	assert sizeof_items[0].kind == 14 // Keyword
+}
+
+fn test_make_keyword_completions_no_len() {
+	items := make_keyword_completions()
+	labels := items.map(it.label)
+	assert 'len' !in labels
+}
+
+fn test_make_keyword_completions_no_cap() {
+	items := make_keyword_completions()
+	labels := items.map(it.label)
+	assert 'cap' !in labels
+}
+
+fn test_make_keyword_completions_no_delete() {
+	items := make_keyword_completions()
+	labels := items.map(it.label)
+	assert 'delete' !in labels
+}
+
+fn test_make_keyword_completions_contains_error_with_code() {
+	items := make_keyword_completions()
+	labels := items.map(it.label)
+	assert 'error_with_code' in labels
+}

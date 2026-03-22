@@ -22,7 +22,34 @@ fn (mut app App) operation_at_pos(method Method, request Request) Response {
 			''
 		}
 	}
-	result := app.run_v_line_info(method, path, line_info)
+	mut result := app.run_v_line_info(method, path, line_info)
+	if method == .completion {
+		// Check the character immediately before the cursor.
+		// If it is not '.', the user is not doing member access, so augment
+		// the compiler result with V keywords and builtins.
+		cursor_line := request.params.position.line
+		content := app.open_files[path] or { '' }
+		lines := content.split_into_lines()
+		trigger_char := if cursor_line < lines.len && col > 0 {
+			line := lines[cursor_line]
+			char_col := col - 1
+			if char_col < line.len {
+				line[char_col].ascii_str()
+			} else {
+				''
+			}
+		} else {
+			''
+		}
+		if trigger_char != '.' {
+			mut details := []Detail{}
+			if result is []Detail {
+				details = result as []Detail
+			}
+			details << make_keyword_completions()
+			result = details
+		}
+	}
 	log(result.str())
 	return Response{
 		id:     request.id
@@ -976,4 +1003,32 @@ fn (mut app App) search_symbol_in_project(working_dir string, symbol string) []L
 		}
 	}
 	return locations
+}
+
+const v_keywords = ['asm', 'as', 'assert', 'atomic', 'break', 'const', 'continue', 'defer', 'dump',
+	'else', 'enum', 'false', 'fn', 'for', 'go', 'goto', 'if', 'ilike', 'implements', 'import',
+	'in', 'interface', 'is', 'isreftype', 'like', 'lock', 'match', 'module', 'mut', 'nil', 'none',
+	'or', 'pub', 'return', 'rlock', 'select', 'shared', 'sizeof', 'spawn', 'static', 'struct',
+	'true', 'type', 'typeof', 'union', 'unsafe', 'volatile']
+
+const v_builtins = ['close', 'copy', 'eprintln', 'eprint', 'error', 'error_with_code', 'exit',
+	'flush_stderr', 'flush_stdout', 'free', 'isnil', 'panic', 'print', 'println']
+
+fn make_keyword_completions() []Detail {
+	mut items := []Detail{}
+	for kw in v_keywords {
+		items << Detail{
+			kind:   14 // Keyword
+			label:  kw
+			detail: kw
+		}
+	}
+	for b in v_builtins {
+		items << Detail{
+			kind:   3 // Function
+			label:  b
+			detail: b
+		}
+	}
+	return items
 }
