@@ -2500,21 +2500,12 @@ greeting := get_greeting()
 // ============================================================================
 
 fn test_import_completions_non_import_line() {
-	results := get_import_completions('fn main() {', '', '')
-	assert results.len == 0
-}
-
-fn test_import_completions_no_vroot() {
-	results := get_import_completions('import os', '', '')
+	results := get_import_completions('fn main() {', '')
 	assert results.len == 0
 }
 
 fn test_import_completions_empty_prefix() {
-	vroot := find_vroot()
-	if vroot == '' {
-		return
-	}
-	results := get_import_completions('import ', vroot, '')
+	results := get_import_completions('import ', '')
 	// Should return all vlib top-level modules (non-empty)
 	assert results.len > 0
 	// All results should have kind 9 (Module)
@@ -2524,11 +2515,7 @@ fn test_import_completions_empty_prefix() {
 }
 
 fn test_import_completions_partial_prefix() {
-	vroot := find_vroot()
-	if vroot == '' {
-		return
-	}
-	results := get_import_completions('import enc', vroot, '')
+	results := get_import_completions('import enc', '')
 	// Should return only modules starting with 'enc' (e.g. 'encoding')
 	assert results.len > 0
 	for r in results {
@@ -2537,15 +2524,11 @@ fn test_import_completions_partial_prefix() {
 }
 
 fn test_import_completions_nested() {
-	vroot := find_vroot()
-	if vroot == '' {
-		return
-	}
-	encoding_dir := os.join_path(vroot, 'vlib', 'encoding')
+	encoding_dir := os.join_path(@VEXEROOT, 'vlib', 'encoding')
 	if !os.is_dir(encoding_dir) {
 		return
 	}
-	results := get_import_completions('import encoding.', vroot, '')
+	results := get_import_completions('import encoding.', '')
 	// Should return submodules of encoding/
 	assert results.len > 0
 	for r in results {
@@ -2569,8 +2552,7 @@ fn test_import_completions_local_module() {
 	os.mkdir_all(mymod_dir) or { panic(err) }
 	os.write_file(os.join_path(mymod_dir, 'mymod.v'), 'module mymod\n') or { panic(err) }
 
-	vroot := find_vroot()
-	results := get_import_completions('import ', vroot, temp_dir)
+	results := get_import_completions('import ', temp_dir)
 	labels := results.map(it.label)
 	assert 'mymod' in labels
 
