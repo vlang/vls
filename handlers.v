@@ -68,19 +68,30 @@ fn (mut app App) operation_at_pos(method Method, request Request) Response {
 				details = result as []Detail
 			}
 			details << make_keyword_completions()
-			// Augment with fn completions from sibling files in the same module.
+			// Build dedup map from compiler + keyword results.
+			mut seen_labels := map[string]bool{}
+			for d in details {
+				seen_labels[d.label] = true
+			}
 			working_dir := os.dir(uri_to_path(path))
+			// Augment with fn completions from sibling files in the same module.
 			if working_dir != '' {
 				module_fns := app.collect_module_fn_completions(path, working_dir)
-				mut seen_labels := map[string]bool{}
-				for d in details {
-					seen_labels[d.label] = true
-				}
 				for d in module_fns {
 					if d.label !in seen_labels {
 						details << d
 						seen_labels[d.label] = true
 					}
+				}
+			}
+			// Also include functions declared in the current file itself.
+			// The compiler's -line-info does not always return all local functions
+			// (e.g. at the start of a function body or when syntax errors exist).
+			current_content := app.open_files[path] or { '' }
+			for d in parse_module_fn_completions(current_content) {
+				if d.label !in seen_labels {
+					details << d
+					seen_labels[d.label] = true
 				}
 			}
 			result = details

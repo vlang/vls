@@ -1358,3 +1358,40 @@ fn test_integration_completion_includes_private_sibling_fn() {
 	labels := details.map(it.label)
 	assert 'private_sibling' in labels
 }
+
+fn test_integration_completion_includes_current_file_fns() {
+	mut app, project_dir := create_integration_test_env()
+	defer {
+		cleanup_integration_test_env(app, project_dir)
+	}
+
+	test_file := os.join_path(project_dir, 'main.v')
+	// File defines helper_local before main — trigger completion inside main
+	content := 'module main\n\nfn helper_local() {}\n\nfn main() {\n\the\n}\n'
+
+	os.write_file(test_file, content) or { panic(err) }
+	uri := path_to_uri(test_file)
+	app.open_files[uri] = content
+	app.text = content
+
+	response := app.operation_at_pos(.completion, Request{
+		id:     1
+		params: Params{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			position:      Position{
+				line: 5 // inside fn main, after `he`
+				char: 2
+			}
+		}
+	})
+
+	assert response.id == 1
+	result := response.result
+	assert result is []Detail
+	details := result as []Detail
+	labels := details.map(it.label)
+	// helper_local is defined in the same file and must appear
+	assert 'helper_local' in labels
+}

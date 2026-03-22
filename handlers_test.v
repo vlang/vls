@@ -2939,3 +2939,44 @@ fn test_collect_module_fn_completions_sibling_module_changed() {
 	// sibling_fn now belongs to `module other` → must NOT appear
 	assert 'sibling_fn' !in labels
 }
+
+fn test_operation_at_pos_completion_includes_current_file_fns() {
+	// Functions declared in the currently-edited file must appear in completions
+	// even when the V compiler's -line-info doesn't return them.
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+
+	test_dir := os.join_path(app.temp_dir, 'project')
+	os.mkdir_all(test_dir) or { panic(err) }
+
+	test_file := os.join_path(test_dir, 'main.v')
+	content := 'module main\n\nfn local_helper() {}\n\nfn main() {\n\tlo\n}\n'
+	os.write_file(test_file, content) or { panic(err) }
+
+	uri := path_to_uri(test_file)
+	app.open_files[uri] = content
+	app.text = content
+
+	request := Request{
+		id:     1
+		params: Params{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			position:      Position{
+				line: 5 // inside fn main, typing `lo`
+				char: 2
+			}
+		}
+	}
+
+	response := app.operation_at_pos(.completion, request)
+	assert response.id == 1
+	result := response.result
+	assert result is []Detail
+	details := result as []Detail
+	labels := details.map(it.label)
+	assert 'local_helper' in labels
+}
