@@ -352,18 +352,25 @@ fn (mut app App) run_v_line_info(method Method, path string, line_info string) R
 			file_lines := file_content.split_into_lines()
 			// line_info format for hover is "line:col" (1-based line, 0-based col)
 			info_parts := line_info.split(':')
+			mut cursor_symbol := ''
 			if info_parts.len >= 2 {
 				cursor_line := info_parts[0].int() - 1
 				cursor_col := info_parts[1].int()
 				if cursor_line >= 0 && cursor_line < file_lines.len {
-					symbol := get_word_at_col(file_lines[cursor_line], cursor_col)
-					if symbol != '' {
-						doc = app.find_doc_comment_for_symbol(symbol, file_lines, path)
+					cursor_symbol = get_word_at_col(file_lines[cursor_line], cursor_col)
+					if cursor_symbol != '' {
+						doc = app.find_doc_comment_for_symbol(cursor_symbol, file_lines, path)
 					}
 				}
 			}
 			if result_tmp.details.len > 0 {
 				detail := result_tmp.details[0]
+				// When the compiler returned a named symbol (e.g. hovering over the `fn`
+				// keyword resolves to the function's label), re-run the doc search using
+				// the compiler's label so we pick up the correct vdoc comment.
+				if doc == '' && detail.label != '' && detail.label != cursor_symbol {
+					doc = app.find_doc_comment_for_symbol(detail.label, file_lines, path)
+				}
 				// Prefer compiler-provided documentation over our extracted vdoc
 				if detail.documentation != '' {
 					doc = detail.documentation
