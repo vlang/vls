@@ -345,8 +345,8 @@ fn (mut app App) run_v_line_info(method Method, path string, line_info string) R
 		}
 		.hover {
 			result_tmp := json.decode(JsonVarAC, x.output) or { JsonVarAC{} }
-			// Extract vdoc comment via cross-file search (current file → open files
-			// → project dir → vlib/builtin → imported stdlib modules).
+			// Extract vdoc comment via cross-file search as a fallback when the
+			// compiler does not provide documentation.
 			mut doc := ''
 			file_content := app.open_files[path] or { app.text }
 			file_lines := file_content.split_into_lines()
@@ -368,9 +368,15 @@ fn (mut app App) run_v_line_info(method Method, path string, line_info string) R
 				if detail.documentation != '' {
 					doc = detail.documentation
 				}
-				mut content := '```v\n${detail.detail}\n```'
+				// Use the full declaration from the compiler when available;
+				// fall back to detail (return type) if declaration is absent.
+				sig := if detail.declaration != '' { detail.declaration } else { detail.detail }
+				mut content := if sig != '' { '```v\n${sig}\n```' } else { '' }
 				if doc != '' {
-					content += '\n\n${doc}'
+					if content != '' {
+						content += '\n\n'
+					}
+					content += doc
 				}
 				result = Hover{
 					contents: MarkupContent{

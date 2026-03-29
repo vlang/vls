@@ -107,6 +107,7 @@ struct Detail {
 	kind               int    // The type of item (e.g., Method, Function, Field)
 	label              string // The name of the completion item
 	detail             string // Additional info like the function signature or return type
+	declaration        string // Full fn declaration, e.g. "fn greet(name string) string"
 	documentation      string // The documentation for the item
 	insert_text        ?string @[json: 'insertText']
 	insert_text_format ?int    @[json: 'insertTextFormat'] // 1 for PlainText, 2 for Snippet
