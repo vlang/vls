@@ -43,6 +43,9 @@ fn (mut app App) run_v_check(path string, text string) []JsonError {
 		}
 
 		if temp_project_dir != '' {
+			// Resolve symlinks so compiler output paths (e.g. /private/tmp on macOS)
+			// match temp_project_dir when remapping paths back to real locations.
+			temp_project_dir = os.real_path(temp_project_dir)
 			symlink_untracked_files(working_dir, temp_project_dir, app.open_files) or {
 				log('Failed to symlink untracked files: ${err}')
 			}
@@ -242,6 +245,9 @@ fn (mut app App) run_v_line_info(method Method, path string, line_info string) R
 			}
 
 			if temp_project_dir != '' {
+				// Resolve symlinks so compiler output paths (e.g. /private/tmp on macOS)
+				// match temp_project_dir when remapping paths back to real locations.
+				temp_project_dir = os.real_path(temp_project_dir)
 				symlink_untracked_files(working_dir, temp_project_dir, app.open_files) or {
 					log('Failed to symlink untracked files: ${err}')
 				}
@@ -267,6 +273,9 @@ fn (mut app App) run_v_line_info(method Method, path string, line_info string) R
 				''
 			}
 			if temp_project_dir != '' {
+				// Resolve symlinks so compiler output paths (e.g. /private/tmp on macOS)
+				// match temp_project_dir when remapping paths back to real locations.
+				temp_project_dir = os.real_path(temp_project_dir)
 				symlink_untracked_files(working_dir, temp_project_dir, app.open_files) or {
 					log('Failed to symlink untracked files: ${err}')
 				}
