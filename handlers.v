@@ -30,8 +30,11 @@ fn (mut app App) operation_at_pos(method Method, request Request) Response {
 	}
 
 	line_info := match method {
-		.completion, .hover {
+		.completion {
 			'${line_nr}:${col}'
+		}
+		.hover {
+			'${line_nr}:hv^${col}'
 		}
 		.signature_help {
 			'${line_nr}:fn^${col}'
