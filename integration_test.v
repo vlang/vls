@@ -514,7 +514,7 @@ fn test_integration_diagnostics_empty_file() {
 		})
 	})
 
-	// Empty content should return none
+	// Empty content should be processed and return diagnostics for the empty file
 	result := app.on_did_change(Request{
 		params: json.encode(Params{
 			text_document:   TextDocumentIdentifier{
@@ -526,7 +526,12 @@ fn test_integration_diagnostics_empty_file() {
 		})
 	})
 
-	assert result == none
+	if notif := result {
+		assert notif.method == 'textDocument/publishDiagnostics'
+		assert notif.params.uri == uri
+	} else {
+		assert false, 'expected a notification for empty file'
+	}
 }
 
 fn test_integration_completion_request() {

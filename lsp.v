@@ -647,9 +647,11 @@ struct SaveOptions {
 
 // TextDocumentSyncOptions describes document synchronization options.
 struct TextDocumentSyncOptions {
-	open_close bool @[json: 'openClose']
-	change     int         // 1 for Full, 2 for Incremental
-	save       SaveOptions // emit {"includeText":true} to receive text in didSave
+	open_close           bool @[json: 'openClose']
+	change               int         // 1 for Full, 2 for Incremental
+	save                 SaveOptions // emit {"includeText":true} to receive text in didSave
+	will_save            bool @[json: 'willSave']
+	will_save_wait_until bool @[json: 'willSaveWaitUntil']
 }
 
 // SignatureHelpOptions describes signature help trigger characters.
@@ -829,20 +831,22 @@ enum Method {
 	selection_range                         @['textDocument/selectionRange']
 	semantic_tokens_range                   @['textDocument/semanticTokens/range']
 	range_formatting                        @['textDocument/rangeFormatting']
-	did_change_watched_files                @['workspace/didChangeWatchedFiles']
-	code_lens             @['textDocument/codeLens']
-	code_lens_resolve     @['codeLens/resolve']
-	execute_command       @['workspace/executeCommand']
-	inline_value          @['textDocument/inlineValue']
-	linked_editing_range  @['textDocument/linkedEditingRange']
-	will_create_files     @['workspace/willCreateFiles']
-	will_rename_files     @['workspace/willRenameFiles']
-	will_delete_files     @['workspace/willDeleteFiles']
-	on_type_formatting    @['textDocument/onTypeFormatting']
-	set_trace             @['$/setTrace']
-	cancel_request        @['$/cancelRequest']
-	shutdown              @['shutdown']
-	exit                  @['exit']
+	will_save                 @['textDocument/willSave']
+	will_save_wait_until      @['textDocument/willSaveWaitUntil']
+	did_change_watched_files  @['workspace/didChangeWatchedFiles']
+	code_lens                 @['textDocument/codeLens']
+	code_lens_resolve         @['codeLens/resolve']
+	execute_command           @['workspace/executeCommand']
+	inline_value              @['textDocument/inlineValue']
+	linked_editing_range      @['textDocument/linkedEditingRange']
+	will_create_files         @['workspace/willCreateFiles']
+	will_rename_files         @['workspace/willRenameFiles']
+	will_delete_files         @['workspace/willDeleteFiles']
+	on_type_formatting        @['textDocument/onTypeFormatting']
+	set_trace                 @['$/setTrace']
+	cancel_request            @['$/cancelRequest']
+	shutdown                  @['shutdown']
+	exit                      @['exit']
 }
 
 // TextDocumentPositionParams for position-based requests
@@ -880,6 +884,13 @@ struct DidCloseTextDocumentParams {
 struct DidSaveTextDocumentParams {
 	text_document TextDocumentIdentifier @[json: 'textDocument']
 	text          ?string
+}
+
+// WillSaveTextDocumentParams for willSave/willSaveWaitUntil.
+// Reason: 1 = Manual, 2 = AfterDelay, 3 = FocusOut.
+struct WillSaveTextDocumentParams {
+	text_document TextDocumentIdentifier @[json: 'textDocument']
+	reason        int
 }
 
 // ReferenceContext carries the includeDeclaration flag for references requests.

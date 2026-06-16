@@ -40,8 +40,10 @@ fn ensure_stderr_captured(cmd string) string {
 }
 
 fn shell_quote(s string) string {
-	escaped := s.replace("'", '\'"\'"\'')
-	return "'${escaped}'"
+	// Use double quotes for cross-platform compatibility.
+	// Windows CMD does not treat single quotes as string delimiters.
+	escaped := s.replace('"', '\\"')
+	return '"${escaped}"'
 }
 
 fn build_v_check_cmd_single(file_to_check string) string {
@@ -62,7 +64,7 @@ fn build_v_line_info_cmd_single(file_to_check string, line_info string, compile_
 }
 
 fn build_v_fmt_cmd(temp_file string) string {
-	return 'v fmt -inprocess ${shell_quote(temp_file)}'
+	return 'v fmt -inprocess -w ${shell_quote(temp_file)}'
 }
 
 fn execute_in_dir(dir string, cmd string) os.Result {

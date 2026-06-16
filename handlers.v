@@ -455,11 +455,6 @@ fn (mut app App) on_did_change(request Request) ?Notification {
 		log('on_did_change() no params')
 		return none
 	}
-	// If the first content change is an empty text, treat as no-op
-	if params.content_changes.len > 0 && params.content_changes[0].text == '' {
-		log('on_did_change() empty text')
-		return none
-	}
 	uri := params.text_document.uri
 	mut content := app.open_files[uri] or { '' }
 	for change in params.content_changes {
@@ -495,24 +490,54 @@ fn (mut app App) on_did_save(request Request) ?Notification {
 	}
 	uri := params.text_document.uri
 	mut content := app.open_files[uri] or { '' }
-	if text := params.text {
-		content = text
-		app.open_files[uri] = text
-		app.text = text
-		app.open_files_generation++
-	}
 	if content == '' {
-		real_path := uri_to_path(uri)
-		content = os.read_file(real_path) or {
-			$if debug { log('on_did_save: failed to read file ${real_path}: ${err}') }
-			return none
+		if text := params.text {
+			content = text
+			app.open_files[uri] = text
+			app.text = text
+			app.open_files_generation++
+		} else {
+			real_path := uri_to_path(uri)
+			content = os.read_file(real_path) or {
+				$if debug { log('on_did_save: failed to read file ${real_path}: ${err}') }
+				return none
+			}
+			app.open_files[uri] = content
+			app.text = content
+			app.open_files_generation++
 		}
-		app.open_files[uri] = content
-		app.text = content
-		app.open_files_generation++
 	}
 	notification := app.build_diagnostics_notification(uri, content)
 	return notification
+}
+
+// on_will_save_wait_until handles willSaveWaitUntil by formatting the document
+// before it is saved, returning the edits to apply atomically with the save.
+fn (mut app App) on_will_save_wait_until(request Request) Response {
+	params := json.decode(WillSaveTextDocumentParams, request.params) or {
+		$if debug { log('Failed to decode WillSaveTextDocumentParams: ${err}') }
+		return Response{
+			id:     request.id
+			result: []TextEdit{}
+		}
+	}
+	uri := params.text_document.uri
+	content := app.open_files[uri] or {
+		return Response{
+			id:     request.id
+			result: []TextEdit{}
+		}
+	}
+	edits, formatted := app.format_content(uri, content)
+	if formatted != '' {
+		app.open_files[uri] = formatted
+		app.text = formatted
+		app.open_files_generation++
+	}
+	return Response{
+		id:     request.id
+		result: edits
+	}
 }
 
 // handle_prepare_rename handles textDocument/prepareRename by returning the range
@@ -1311,6 +1336,58 @@ fn search_doc_in_vlib_dir(dir string, symbol string) string {
 	return ''
 }
 
+// format_content formats the given content via v fmt and returns the TextEdits
+// needed to replace the document with its formatted version, plus the formatted
+// text. Returns empty edits if the content is already properly formatted.
+fn (mut app App) format_content(uri string, content string) ([]TextEdit, string) {
+	real_path := uri_to_path(uri)
+
+	temp_file := os.join_path(os.temp_dir(), 'vls_fmt_${os.getpid()}_${os.file_name(real_path)}')
+	os.write_file(temp_file, content) or {
+		log('Failed to write temp file for formatting: ${err}')
+		return []TextEdit{}, ''
+	}
+
+	// With -w flag, v fmt writes the formatted content back to the temp file.
+	// Read from there instead of relying on stdout capture, which is
+	// unreliable on Windows MSYS2.
+	result := os.execute(ensure_stderr_captured(build_v_fmt_cmd(temp_file)))
+
+	mut formatted := os.read_file(temp_file) or { result.output }
+
+	os.rm(temp_file) or {
+		$if debug { log('Failed to remove temp file: ${err}') }
+	}
+
+	if result.exit_code != 0 {
+		$if debug { log('v fmt failed with code ${result.exit_code}: ${result.output}') }
+		return []TextEdit{}, ''
+	}
+
+	if formatted == '' || formatted == content {
+		return []TextEdit{}, ''
+	}
+
+	lines := content.split_into_lines()
+	last_line := lines.len - 1
+	last_char := if lines.len > 0 { lines[last_line].len } else { 0 }
+
+	edit := TextEdit{
+		range:    LSPRange{
+			start: Position{
+				line: 0
+				char: 0
+			}
+			end:   Position{
+				line: last_line
+				char: last_char
+			}
+		}
+		new_text: formatted
+	}
+	return [edit], formatted
+}
+
 // handle_formatting handles the LSP formatting request, returning edits to format the document.
 fn (mut app App) handle_formatting(request Request) Response {
 	params := json.decode(DocumentFormattingParams, request.params) or {
@@ -1323,7 +1400,6 @@ fn (mut app App) handle_formatting(request Request) Response {
 	path := params.text_document.uri
 	real_path := uri_to_path(path)
 
-	// Get the current content of the file
 	content := app.open_files[path] or {
 		os.read_file(real_path) or {
 			log('Failed to read file for formatting: ${err}')
@@ -1334,64 +1410,10 @@ fn (mut app App) handle_formatting(request Request) Response {
 		}
 	}
 
-	// Write content to a temp file
-	temp_file := os.join_path(os.temp_dir(), 'vls_fmt_${os.getpid()}_${os.file_name(real_path)}')
-	os.write_file(temp_file, content) or {
-		log('Failed to write temp file for formatting: ${err}')
-		return Response{
-			id:     request.id
-			result: []TextEdit{}
-		}
-	}
-
-	// Run fmt
-	result := os.execute(ensure_stderr_captured(build_v_fmt_cmd(temp_file)))
-
-	// Clean up temp file
-	os.rm(temp_file) or {
-		$if debug { log('Failed to remove temp file: ${err}') }
-	}
-
-	// Check for errors
-	if result.exit_code != 0 {
-		$if debug { log('v fmt failed with code ${result.exit_code}: ${result.output}') }
-		return Response{
-			id:     request.id
-			result: []TextEdit{}
-		}
-	}
-
-	// If content is unchanged, return empty edits
-	if result.output == content {
-		return Response{
-			id:     request.id
-			result: []TextEdit{}
-		}
-	}
-
-	// Calculate the range of the entire document
-	lines := content.split_into_lines()
-	last_line := lines.len - 1
-	last_char := if lines.len > 0 { lines[last_line].len } else { 0 }
-
-	// Return a single TextEdit that replaces the entire document
-	edit := TextEdit{
-		range:    LSPRange{
-			start: Position{
-				line: 0
-				char: 0
-			}
-			end:   Position{
-				line: last_line
-				char: last_char
-			}
-		}
-		new_text: result.output
-	}
-
+	edits, _ := app.format_content(path, content)
 	return Response{
 		id:     request.id
-		result: [edit]
+		result: edits
 	}
 }
 

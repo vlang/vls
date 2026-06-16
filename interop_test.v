@@ -204,8 +204,13 @@ fn test_execute_in_dir_restores_working_directory() {
 		os.rmdir_all(work_dir) or {}
 	}
 
-	result := execute_in_dir(work_dir, 'pwd')
-	assert result.output.trim_space() == work_dir
+	mut result := execute_in_dir(work_dir, 'pwd')
+	$if windows {
+		// On Windows, os.execute uses cmd.exe which understands echo %cd%
+		result = execute_in_dir(work_dir, 'echo %cd%')
+	}
+	// Use real_path to resolve symlinks (e.g. /tmp -> /private/tmp on macOS)
+	assert os.real_path(result.output.trim_space()) == os.real_path(work_dir)
 	assert os.getwd() == original
 }
 
@@ -221,18 +226,18 @@ fn test_execute_in_dir_returns_error_when_directory_missing() {
 
 fn test_shell_quote_handles_single_quotes() {
 	quoted := shell_quote("a'b")
-	assert quoted == '\'a\'"\'"\'b\''
+	assert quoted == '"a\'b"'
 }
 
 fn test_build_v_check_cmd_single_quotes_path() {
 	cmd := build_v_check_cmd_single('/tmp/a b/test.v')
-	assert cmd.contains("'/tmp/a b/test.v'")
+	assert cmd.contains('"/tmp/a b/test.v"')
 	assert cmd.contains('-vls-mode')
 }
 
 fn test_build_v_fmt_cmd_quotes_temp_file() {
 	cmd := build_v_fmt_cmd('/tmp/fmt file.v')
-	assert cmd == "v fmt -inprocess '/tmp/fmt file.v'"
+	assert cmd == 'v fmt -inprocess -w "/tmp/fmt file.v"'
 }
 
 // ============================================================================

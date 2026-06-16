@@ -371,11 +371,13 @@ fn (mut app App) handle_requests(mut reader io.BufferedReader) {
 					result: Capabilities{
 						capabilities: Capability{
 							text_document_sync:                 TextDocumentSyncOptions{
-								open_close: true
-								change:     2 // Incremental
-								save:       SaveOptions{
+								open_close:           true
+								change:               2 // Incremental
+								save:                 SaveOptions{
 									include_text: true
 								}
+								will_save:            true
+								will_save_wait_until: true
 							}
 							completion_provider:                CompletionProvider{
 								trigger_characters: ['.', ' ']
@@ -474,6 +476,10 @@ fn (mut app App) handle_requests(mut reader io.BufferedReader) {
 			.did_save {
 				notification := app.on_did_save(request) or { continue }
 				app.write_notification(notification)
+			}
+			.will_save_wait_until {
+				resp := app.on_will_save_wait_until(request)
+				app.write_response_or_cancelled(request.id, resp)
 			}
 			.initialized {
 				log('Received initialized notification.')

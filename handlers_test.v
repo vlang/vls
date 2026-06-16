@@ -352,7 +352,7 @@ fn test_on_did_change_empty_text() {
 		cleanup_test_app(app)
 	}
 
-	// Request with empty text should return none
+	// Request with empty text (deletion) should be processed and return diagnostics
 	request := Request{
 		params: json.encode(Params{
 			content_changes: [ContentChange{
@@ -362,7 +362,13 @@ fn test_on_did_change_empty_text() {
 	}
 
 	result := app.on_did_change(request)
-	assert result == none
+	if notif := result {
+		assert notif.method == 'textDocument/publishDiagnostics'
+		assert notif.params.uri == ''
+		assert notif.params.diagnostics.len == 0
+	} else {
+		assert false, 'expected a notification'
+	}
 }
 
 fn test_on_did_change_returns_notification() {
