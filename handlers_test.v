@@ -3296,7 +3296,7 @@ fn test_semantic_tokens_returns_data_for_known_content() {
 	assert tokens.data.len > 0
 }
 
-fn test_semantic_tokens_returns_null_for_empty_file() {
+fn test_semantic_tokens_returns_empty_object_for_empty_file() {
 	mut app := create_test_app()
 	defer {
 		cleanup_test_app(app)
@@ -3317,11 +3317,13 @@ fn test_semantic_tokens_returns_null_for_empty_file() {
 	})
 
 	assert resp.id == 801
-	assert resp.result is string
-	assert (resp.result as string) == 'null'
+	// An empty document returns an empty token set, not null (P2-01).
+	assert resp.result is SemanticTokens
+	tokens := resp.result as SemanticTokens
+	assert tokens.data.len == 0
 }
 
-fn test_semantic_tokens_range_returns_null_for_invalid_params() {
+fn test_semantic_tokens_range_returns_empty_for_missing_document() {
 	mut app := create_test_app()
 	defer {
 		cleanup_test_app(app)
@@ -3334,8 +3336,11 @@ fn test_semantic_tokens_range_returns_null_for_invalid_params() {
 	})
 
 	assert resp.id == 802
-	assert resp.result is string
-	assert (resp.result as string) == 'null'
+	// Empty params decode to an empty (untracked) document, which has an empty
+	// token set rather than null (P2-01).
+	assert resp.result is SemanticTokens
+	tokens := resp.result as SemanticTokens
+	assert tokens.data.len == 0
 }
 
 // ── code lens ────────────────────────────────────────────────────────────────

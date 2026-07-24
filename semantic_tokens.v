@@ -272,6 +272,32 @@ fn classify_v_identifier(word string) int {
 	return -1
 }
 
+// convert_tokens_to_encoding rewrites each token's byte-based `start`/`length`
+// into the client's negotiated position encoding, so semantic-token positions
+// are consistent with the advertised encoding for non-ASCII lines (P2-01).
+fn convert_tokens_to_encoding(tokens []SemToken, lines []string, enc PositionEncoding) []SemToken {
+	if enc == .utf8 {
+		// The tokenizer already works in byte offsets.
+		return tokens
+	}
+	mut out := []SemToken{cap: tokens.len}
+	for tok in tokens {
+		if tok.line < 0 || tok.line >= lines.len {
+			out << tok
+			continue
+		}
+		line := lines[tok.line]
+		enc_start := byte_to_encoded_col(line, tok.start, enc)
+		enc_end := byte_to_encoded_col(line, tok.start + tok.length, enc)
+		out << SemToken{
+			...tok
+			start:  enc_start
+			length: enc_end - enc_start
+		}
+	}
+	return out
+}
+
 // encode_semantic_tokens converts absolute-position SemTokens into the
 // delta-encoded integer array required by the LSP SemanticTokens protocol.
 // Tokens must already be ordered by (line, start) ascending.
@@ -306,12 +332,17 @@ fn (mut app App) handle_semantic_tokens(request Request) Response {
 	uri := params.text_document.uri
 	content := app.open_files[uri] or { os.read_file(uri_to_path(uri)) or { '' } }
 	if content == '' {
+		// An empty document has an empty token set, not a null result (P2-01).
 		return Response{
 			id:     request.id
-			result: 'null'
+			result: SemanticTokens{
+				data: []
+			}
 		}
 	}
-	raw_tokens := tokenize_v_source(content)
+	lines := content.split_into_lines()
+	raw_tokens := convert_tokens_to_encoding(tokenize_v_source(content), lines,
+		app.position_encoding)
 	encoded := encode_semantic_tokens(raw_tokens)
 	return Response{
 		id:     request.id
@@ -337,10 +368,14 @@ fn (mut app App) handle_semantic_tokens_range(request Request) Response {
 	if content == '' {
 		return Response{
 			id:     request.id
-			result: 'null'
+			result: SemanticTokens{
+				data: []
+			}
 		}
 	}
-	raw_tokens := tokenize_v_source(content)
+	lines := content.split_into_lines()
+	raw_tokens := convert_tokens_to_encoding(tokenize_v_source(content), lines,
+		app.position_encoding)
 	start_line := params.range.start.line
 	end_line := params.range.end.line
 	range_tokens := raw_tokens.filter(it.line >= start_line && it.line <= end_line)
