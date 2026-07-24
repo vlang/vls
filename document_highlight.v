@@ -2,14 +2,14 @@
 // Use of this source code is governed by a GPL license that can be found in the LICENSE file.
 module main
 
-import json
+import json2
 import os
 
 // handle_document_highlight handles textDocument/documentHighlight.
 // It finds all occurrences of the identifier under the cursor within the current
 // document and returns them as a DocumentHighlight list.
 fn (mut app App) handle_document_highlight(request Request) Response {
-	params := json.decode(DocumentHighlightParams, request.params) or {
+	params := json2.decode[DocumentHighlightParams](request.params) or {
 		$if debug { log('Failed to decode DocumentHighlightParams: ${err}') }
 		return Response{
 			id:     request.id

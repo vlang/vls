@@ -2,7 +2,7 @@
 // Use of this source code is governed by a GPL license that can be found in the LICENSE file.
 module main
 
-import json
+import json2
 import os
 
 // Semantic token type indices — must match the order returned by semantic_token_types().
@@ -296,7 +296,7 @@ fn encode_semantic_tokens(raw_tokens []SemToken) []int {
 // handle_semantic_tokens handles the textDocument/semanticTokens/full LSP request,
 // returning semantic highlighting data for the entire document.
 fn (mut app App) handle_semantic_tokens(request Request) Response {
-	params := json.decode(SemanticTokensParams, request.params) or {
+	params := json2.decode[SemanticTokensParams](request.params) or {
 		$if debug { log('Failed to decode SemanticTokensParams: ${err}') }
 		return Response{
 			id:     request.id
@@ -325,7 +325,7 @@ fn (mut app App) handle_semantic_tokens(request Request) Response {
 // It tokenizes the full document but only encodes tokens within the requested range,
 // which reduces payload size for large files.
 fn (mut app App) handle_semantic_tokens_range(request Request) Response {
-	params := json.decode(SemanticTokensRangeParams, request.params) or {
+	params := json2.decode[SemanticTokensRangeParams](request.params) or {
 		$if debug { log('Failed to decode SemanticTokensRangeParams: ${err}') }
 		return Response{
 			id:     request.id

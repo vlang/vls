@@ -2,7 +2,7 @@
 // Use of this source code is governed by a GPL license that can be found in the LICENSE file.
 module main
 
-import json
+import json2
 import io
 import os
 
@@ -192,14 +192,14 @@ fn test_position_json_encoding() {
 		line: 10
 		char: 5
 	}
-	encoded := json.encode(pos)
+	encoded := json2.encode(pos, escape_unicode: true)
 	assert encoded.contains('"line":10')
 	assert encoded.contains('"character":5')
 }
 
 fn test_position_json_decoding() {
 	json_str := '{"line":20,"character":8}'
-	pos := json.decode(Position, json_str) or {
+	pos := json2.decode[Position](json_str) or {
 		assert false, 'Failed to decode Position: ${err}'
 		return
 	}
@@ -216,7 +216,7 @@ fn test_make_cancelled_error_response_fields() {
 
 fn test_error_response_json_encoding() {
 	err := make_cancelled_error_response(7)
-	encoded := json.encode(err)
+	encoded := json2.encode(err, escape_unicode: true)
 	assert encoded.contains('"id":7')
 	assert encoded.contains('"code":-32800')
 	assert encoded.contains('"message":"Request cancelled"')
@@ -439,7 +439,7 @@ fn test_lsp_range_json_encoding() {
 			char: 4
 		}
 	}
-	encoded := json.encode(r)
+	encoded := json2.encode(r, escape_unicode: true)
 	assert encoded.contains('"start"')
 	assert encoded.contains('"end"')
 }
@@ -455,7 +455,7 @@ fn test_text_document_identifier_json_encoding() {
 	doc := TextDocumentIdentifier{
 		uri: 'file:///path/to/file.v'
 	}
-	encoded := json.encode(doc)
+	encoded := json2.encode(doc, escape_unicode: true)
 	assert encoded.contains('"uri":"file:///path/to/file.v"')
 }
 
@@ -508,7 +508,7 @@ fn test_params_with_content_changes() {
 
 fn test_params_json_decoding() {
 	json_str := '{"textDocument":{"uri":"file:///test.v"},"position":{"line":5,"character":10}}'
-	params := json.decode(Params, json_str) or {
+	params := json2.decode[Params](json_str) or {
 		assert false, 'Failed to decode Params: ${err}'
 		return
 	}
@@ -537,13 +537,13 @@ fn test_request_with_values() {
 
 fn test_request_json_decoding_completion() {
 	json_str := '{"id":1,"method":"textDocument/completion","jsonrpc":"2.0","params":{"textDocument":{"uri":"file:///test.v"},"position":{"line":5,"character":10}}}'
-	req := json.decode(Request, json_str) or {
+	req := json2.decode[Request](json_str) or {
 		assert false, 'Failed to decode Request: \\${err}'
 		return
 	}
 	assert req.id == 1
 	assert req.method == 'textDocument/completion'
-	params := json.decode(Params, req.params.str()) or {
+	params := json2.decode[Params](req.params.str()) or {
 		assert false, 'Failed to decode Params: \\${err}'
 		return
 	}
@@ -552,12 +552,12 @@ fn test_request_json_decoding_completion() {
 
 fn test_request_json_decoding_did_change() {
 	json_str := '{"id":2,"method":"textDocument/didChange","jsonrpc":"2.0","params":{"textDocument":{"uri":"file:///test.v"},"contentChanges":[{"text":"fn main() {}"}]}}'
-	req := json.decode(Request, json_str) or {
+	req := json2.decode[Request](json_str) or {
 		assert false, 'Failed to decode Request: \\${err}'
 		return
 	}
 	assert req.method == 'textDocument/didChange'
-	params := json.decode(Params, req.params.str()) or {
+	params := json2.decode[Params](req.params.str()) or {
 		assert false, 'Failed to decode Params: \\${err}'
 		return
 	}
@@ -567,7 +567,7 @@ fn test_request_json_decoding_did_change() {
 
 fn test_request_json_decoding_initialize() {
 	json_str := '{"id":0,"method":"initialize","jsonrpc":"2.0","params":{}}'
-	req := json.decode(Request, json_str) or {
+	req := json2.decode[Request](json_str) or {
 		assert false, 'Failed to decode Request: ${err}'
 		return
 	}
@@ -588,7 +588,7 @@ fn test_response_json_encoding() {
 		id:     42
 		result: 'null'
 	}
-	encoded := json.encode(resp)
+	encoded := json2.encode(resp, escape_unicode: true)
 	assert encoded.contains('"id":42')
 	assert encoded.contains('"jsonrpc":"2.0"')
 }
@@ -806,7 +806,7 @@ fn test_notification_json_encoding() {
 			diagnostics: []
 		}
 	}
-	encoded := json.encode(notif)
+	encoded := json2.encode(notif, escape_unicode: true)
 	assert encoded.contains('"method":"textDocument/publishDiagnostics"')
 	assert encoded.contains('"jsonrpc":"2.0"')
 }
@@ -845,7 +845,7 @@ fn test_lsp_diagnostic_json_encoding() {
 		message:  'undefined identifier'
 		severity: 1
 	}
-	encoded := json.encode(diag)
+	encoded := json2.encode(diag, escape_unicode: true)
 	assert encoded.contains('"message":"undefined identifier"')
 	assert encoded.contains('"severity":1')
 }
@@ -888,7 +888,7 @@ fn test_detail_json_encoding() {
 		kind:  6
 		label: 'test_fn'
 	}
-	encoded := json.encode(detail)
+	encoded := json2.encode(detail, escape_unicode: true)
 	assert encoded.contains('"kind":6')
 	assert encoded.contains('"label":"test_fn"')
 }
@@ -925,7 +925,7 @@ fn test_location_json_encoding() {
 			}
 		}
 	}
-	encoded := json.encode(loc)
+	encoded := json2.encode(loc, escape_unicode: true)
 	assert encoded.contains('"uri":"file:///path/to/file.v"')
 	assert encoded.contains('"range"')
 }
@@ -970,7 +970,7 @@ fn test_signature_help_json_encoding() {
 		active_signature: 0
 		active_parameter: 0
 	}
-	encoded := json.encode(sig)
+	encoded := json2.encode(sig, escape_unicode: true)
 	assert encoded.contains('"activeSignature":0')
 	assert encoded.contains('"activeParameter":0')
 }
@@ -1003,7 +1003,7 @@ fn test_capabilities_json_encoding() {
 			definition_provider: true
 		}
 	}
-	encoded := json.encode(caps)
+	encoded := json2.encode(caps, escape_unicode: true)
 	assert encoded.contains('"definitionProvider":true')
 }
 
@@ -1155,7 +1155,7 @@ fn test_json_error_struct() {
 
 fn test_json_error_json_decoding() {
 	json_str := '{"path":"/test/file.v","message":"error","line_nr":5,"col":10,"len":2}'
-	err := json.decode(JsonError, json_str) or {
+	err := json2.decode[JsonError](json_str) or {
 		assert false, 'Failed to decode JsonError: ${err}'
 		return
 	}
@@ -1165,7 +1165,7 @@ fn test_json_error_json_decoding() {
 
 fn test_json_error_array_decoding() {
 	json_str := '[{"path":"/a.v","message":"err1","line_nr":1,"col":1,"len":1},{"path":"/b.v","message":"err2","line_nr":2,"col":2,"len":2}]'
-	errors := json.decode([]JsonError, json_str) or {
+	errors := json2.decode[[]JsonError](json_str) or {
 		assert false, 'Failed to decode JsonError array: ${err}'
 		return
 	}
@@ -1197,7 +1197,7 @@ fn test_json_var_ac_with_details() {
 
 fn test_json_var_ac_json_decoding() {
 	json_str := '{"details":[{"kind":6,"label":"test","detail":"","documentation":""}]}'
-	ac := json.decode(JsonVarAC, json_str) or {
+	ac := json2.decode[JsonVarAC](json_str) or {
 		assert false, 'Failed to decode JsonVarAC: ${err}'
 		return
 	}
@@ -1274,7 +1274,7 @@ fn test_document_symbol_json_encoding() {
 		}
 		children:        []DocumentSymbol{}
 	}
-	encoded := json.encode(sym)
+	encoded := json2.encode(sym, escape_unicode: true)
 	assert encoded.contains('"name":"Person"')
 	assert encoded.contains('"kind":${sym_kind_struct}')
 	assert encoded.contains('"selectionRange"')
@@ -1283,7 +1283,7 @@ fn test_document_symbol_json_encoding() {
 
 fn test_document_symbol_json_decoding() {
 	json_str := '{"name":"Color","kind":10,"range":{"start":{"line":8,"character":0},"end":{"line":8,"character":11}},"selectionRange":{"start":{"line":8,"character":5},"end":{"line":8,"character":10}},"children":[]}'
-	sym := json.decode(DocumentSymbol, json_str) or {
+	sym := json2.decode[DocumentSymbol](json_str) or {
 		assert false, 'Failed to decode DocumentSymbol: ${err}'
 		return
 	}
@@ -1495,7 +1495,7 @@ fn test_response_with_document_symbols_json_encoding() {
 		id:     7
 		result: syms
 	}
-	encoded := json.encode(resp)
+	encoded := json2.encode(resp, escape_unicode: true)
 	assert encoded.contains('"id":7')
 	assert encoded.contains('"name":"greet"')
 	assert encoded.contains('"kind":${sym_kind_function}')
@@ -1521,7 +1521,7 @@ fn test_capability_document_symbol_provider_json_encoding() {
 			definition_provider:      true
 		}
 	}
-	encoded := json.encode(caps)
+	encoded := json2.encode(caps, escape_unicode: true)
 	assert encoded.contains('"documentSymbolProvider":true')
 	assert encoded.contains('"definitionProvider":true')
 }
@@ -1532,7 +1532,7 @@ fn test_capability_code_lens_provider_json_encoding_object_shape() {
 			code_lens_provider: CodeLensOptions{}
 		}
 	}
-	encoded := json.encode(caps)
+	encoded := json2.encode(caps, escape_unicode: true)
 	assert encoded.contains('"codeLensProvider":{}')
 	assert !encoded.contains('"codeLensProvider":true')
 }

@@ -2,13 +2,13 @@
 // Use of this source code is governed by a GPL license that can be found in the LICENSE file.
 module main
 
-import json
+import json2
 import os
 
 // handle_folding_range handles the textDocument/foldingRange LSP request,
 // returning all collapsible regions for the document.
 fn (mut app App) handle_folding_range(request Request) Response {
-	params := json.decode(FoldingRangeParams, request.params) or {
+	params := json2.decode[FoldingRangeParams](request.params) or {
 		$if debug { log('Failed to decode FoldingRangeParams: ${err}') }
 		return Response{
 			id:     request.id

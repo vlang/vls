@@ -10,6 +10,16 @@ struct Request {
 	params  string // raw JSON for method-specific params
 }
 
+// RequestBody decodes an inbound message WITHOUT the `id` field. json2 aborts
+// the entire decode if a string id lands in an int field, so the id is parsed
+// separately (see extract_raw_id / raw_id_to_int) and this struct captures only
+// the id-independent members.
+struct RequestBody {
+	method  string
+	jsonrpc string
+	params  string // raw JSON for method-specific params
+}
+
 // Position represents a position in a text document (zero-based line and character).
 struct Position {
 	line int
@@ -768,6 +778,29 @@ struct DocumentHighlightParams {
 struct SelectionRange {
 	range  LSPRange
 	parent ?&SelectionRange
+}
+
+// to_json is a custom json2 encoder for SelectionRange. json2's compile-time
+// encoder cannot derive an encoder for the self-referential `?&SelectionRange`
+// parent field, so we serialize the recursive parent chain by hand. Implementing
+// the JsonEncoder interface makes json2 call this instead of generating code.
+pub fn (s SelectionRange) to_json() string {
+	mut out := '{"range":${lsprange_to_json(s.range)}'
+	if p := s.parent {
+		out += ',"parent":${p.to_json()}'
+	}
+	out += '}'
+	return out
+}
+
+// position_to_json and lsprange_to_json encode Position/LSPRange without pulling
+// a json dependency into the (otherwise pure) type-definition file.
+fn position_to_json(p Position) string {
+	return '{"line":${p.line},"character":${p.char}}'
+}
+
+fn lsprange_to_json(r LSPRange) string {
+	return '{"start":${position_to_json(r.start)},"end":${position_to_json(r.end)}}'
 }
 
 // SelectionRangeParams holds parameters for textDocument/selectionRange.
