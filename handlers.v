@@ -3178,7 +3178,19 @@ fn normalize_workspace_root(path string) ?string {
 	return normalized
 }
 
+// max_cancelled_ids bounds the cancellation maps so a client that sends
+// $/cancelRequest for ids that never correspond to an in-flight request cannot
+// grow them without limit (P0-04). Cancellation is best-effort, so dropping the
+// oldest tracked ids when the bound is exceeded is safe.
+const max_cancelled_ids = 4096
+
 fn (mut app App) on_cancel_request(request Request) {
+	if app.cancelled_raw_ids.len >= max_cancelled_ids {
+		app.cancelled_raw_ids.clear()
+	}
+	if app.cancelled_requests.len >= max_cancelled_ids {
+		app.cancelled_requests.clear()
+	}
 	// Capture the exact raw id first: json2 aborts decoding CancelRequestParams
 	// when the id is a string, but string ids must still be cancellable
 	// (P0-02/P0-03).
