@@ -42,6 +42,10 @@ fn (mut app App) operation_at_pos(method Method, request Request) Response {
 	line_nr := params.position.line + 1
 	col := params.position.char
 	path := params.text_document.uri
+	// The V compiler consumes byte columns, so convert the client's character
+	// offset (in the negotiated encoding) to a byte offset within the cursor line
+	// before building the -line-info string (P0-01).
+	byte_col := app.client_col_to_byte_col(path, params.position.line, col)
 
 	// Intercept completion on import lines
 	if method == .completion {
@@ -68,16 +72,16 @@ fn (mut app App) operation_at_pos(method Method, request Request) Response {
 
 	line_info := match method {
 		.completion {
-			'${line_nr}:${col}'
+			'${line_nr}:${byte_col}'
 		}
 		.hover {
-			'${line_nr}:hv^${col}'
+			'${line_nr}:hv^${byte_col}'
 		}
 		.signature_help {
-			'${line_nr}:fn^${col}'
+			'${line_nr}:fn^${byte_col}'
 		}
 		.definition, .declaration, .type_definition, .implementation {
-			'${line_nr}:gd^${col}'
+			'${line_nr}:gd^${byte_col}'
 		}
 		else {
 			''
@@ -94,9 +98,9 @@ fn (mut app App) operation_at_pos(method Method, request Request) Response {
 		lines := content.split_into_lines()
 		trigger_char := if cursor_line < lines.len && col > 0 {
 			line := lines[cursor_line]
-			byte_col := utf8_char_to_byte_index(line, col - 1)
-			if byte_col < line.len {
-				line[byte_col].ascii_str()
+			trigger_byte_col := encoded_col_to_byte(line, col - 1, app.position_encoding)
+			if trigger_byte_col < line.len {
+				line[trigger_byte_col].ascii_str()
 			} else {
 				''
 			}
@@ -151,7 +155,7 @@ fn (mut app App) operation_at_pos(method Method, request Request) Response {
 		}
 		if cursor_line < lines.len && col > 0 {
 			line := lines[cursor_line]
-			module_alias := get_word_before_dot(line, col - 1)
+			module_alias := get_word_before_dot(line, col - 1, app.position_encoding)
 			if module_alias != '' {
 				module_aliases := parse_import_aliases(content)
 				if module_path := module_aliases[module_alias] {
@@ -192,12 +196,12 @@ struct ImportedModuleBinding {
 }
 
 // get_word_before_dot returns the identifier immediately before a '.' character.
-// `dot_col` is the character index of the dot itself.
-fn get_word_before_dot(line string, dot_col int) string {
+// `dot_col` is the character index of the dot itself (in `enc` units).
+fn get_word_before_dot(line string, dot_col int, enc PositionEncoding) string {
 	if line == '' || dot_col < 0 {
 		return ''
 	}
-	dot_byte := utf8_char_to_byte_index(line, dot_col)
+	dot_byte := encoded_col_to_byte(line, dot_col, enc)
 	if dot_byte >= line.len || line[dot_byte] != `.` {
 		return ''
 	}
@@ -499,7 +503,7 @@ fn (mut app App) on_did_change(request Request) ?Notification {
 				continue
 			}
 
-			content = apply_incremental_change(content, rng, change.text)
+			content = apply_incremental_change(content, rng, change.text, app.position_encoding)
 		} else {
 			// Full text replacement.
 			content = change.text
@@ -604,14 +608,14 @@ fn (mut app App) handle_prepare_rename(request Request) Response {
 		}
 	}
 	line_text := lines[params.position.line]
-	start, end := find_word_bounds_at_col(line_text, params.position.char)
+	start, end := find_word_bounds_at_col(line_text, params.position.char, app.position_encoding)
 	if start < 0 || end <= start {
 		return Response{
 			id:     request.id
 			result: 'null'
 		}
 	}
-	symbol := substr_by_char_bounds(line_text, start, end)
+	symbol := substr_by_char_bounds(line_text, start, end, app.position_encoding)
 	if symbol == '' {
 		return Response{
 			id:     request.id
@@ -673,24 +677,24 @@ fn add_workspace_symbol(mut results []WorkspaceSymbol, mut seen_symbols map[stri
 // offsets first, so the slice can never land in the middle of a multi-byte
 // UTF-8 sequence. Callers that receive character offsets (e.g. from
 // find_word_bounds_at_col) must use this instead of raw byte slicing (P0-01).
-fn substr_by_char_bounds(line string, char_start int, char_end int) string {
-	bs := utf8_char_to_byte_index(line, char_start)
-	be := utf8_char_to_byte_index(line, char_end)
+fn substr_by_char_bounds(line string, char_start int, char_end int, enc PositionEncoding) string {
+	bs := encoded_col_to_byte(line, char_start, enc)
+	be := encoded_col_to_byte(line, char_end, enc)
 	if bs > be || be > line.len {
 		return ''
 	}
 	return line[bs..be]
 }
 
-// find_word_bounds_at_col returns [start, end) character bounds for the
-// identifier at `col`. If `col` is just after an identifier, it still resolves
-// that identifier. The returned bounds are character (code point) offsets;
-// slice the line via substr_by_char_bounds, never raw byte indexing.
-fn find_word_bounds_at_col(line string, col int) (int, int) {
+// find_word_bounds_at_col returns [start, end) character bounds (in the client's
+// `enc` units) for the identifier at `col`. If `col` is just after an
+// identifier, it still resolves that identifier. Slice the line via
+// substr_by_char_bounds, never raw byte indexing (P0-01).
+fn find_word_bounds_at_col(line string, col int, enc PositionEncoding) (int, int) {
 	if line == '' {
 		return -1, -1
 	}
-	mut c := utf8_char_to_byte_index(line, col)
+	mut c := encoded_col_to_byte(line, col, enc)
 	if c >= line.len {
 		c = line.len - 1
 	}
@@ -712,7 +716,7 @@ fn find_word_bounds_at_col(line string, col int) (int, int) {
 	for end < line.len && is_ident_char(line[end]) {
 		end++
 	}
-	return utf8_byte_to_char_index(line, start), utf8_byte_to_char_index(line, end)
+	return byte_to_encoded_col(line, start, enc), byte_to_encoded_col(line, end, enc)
 }
 
 // handle_workspace_symbol searches all tracked and on-disk .v files in the
@@ -869,7 +873,7 @@ fn line_text_without_terminator(content string, starts []int, line int) string {
 // offset within `content`. Positions past the end of a line clamp to the line's
 // content end (before its terminator); positions past the last line clamp to
 // the content length.
-fn position_to_byte_offset(content string, starts []int, line int, character int) int {
+fn position_to_byte_offset(content string, starts []int, line int, character int, enc PositionEncoding) int {
 	if line < 0 {
 		return 0
 	}
@@ -877,7 +881,7 @@ fn position_to_byte_offset(content string, starts []int, line int, character int
 		return content.len
 	}
 	lt := line_text_without_terminator(content, starts, line)
-	byte_in_line := utf8_char_to_byte_index(lt, character)
+	byte_in_line := encoded_col_to_byte(lt, character, enc)
 	return starts[line] + byte_in_line
 }
 
@@ -886,7 +890,7 @@ fn position_to_byte_offset(content string, starts []int, line int, character int
 // (CRLF, CR, LF, and a final-newline distinction) are preserved exactly
 // (P0-07). Returns the original content unchanged for an invalid/reversed
 // range rather than corrupting the buffer.
-fn apply_incremental_change(content string, range LSPRange, new_text string) string {
+fn apply_incremental_change(content string, range LSPRange, new_text string, enc PositionEncoding) string {
 	if range.start.line < 0 || range.start.char < 0 || range.end.line < 0 || range.end.char < 0 {
 		return content
 	}
@@ -895,8 +899,8 @@ fn apply_incremental_change(content string, range LSPRange, new_text string) str
 		return content
 	}
 	starts := line_start_offsets(content)
-	start_byte := position_to_byte_offset(content, starts, range.start.line, range.start.char)
-	end_byte := position_to_byte_offset(content, starts, range.end.line, range.end.char)
+	start_byte := position_to_byte_offset(content, starts, range.start.line, range.start.char, enc)
+	end_byte := position_to_byte_offset(content, starts, range.end.line, range.end.char, enc)
 	if start_byte > end_byte || start_byte > content.len || end_byte > content.len {
 		return content
 	}
@@ -1015,7 +1019,7 @@ fn (mut app App) handle_rename(request Request) Response {
 		end_char := if loc.range.end.char > loc.range.start.char {
 			loc.range.end.char
 		} else {
-			loc.range.start.char + utf8_byte_to_char_index(symbol, symbol.len)
+			loc.range.start.char + byte_to_encoded_col(symbol, symbol.len, app.position_encoding)
 		}
 		edit := TextEdit{
 			range:    LSPRange{
@@ -1058,6 +1062,31 @@ fn (mut app App) handle_rename(request Request) Response {
 	}
 }
 
+// client_col_to_byte_col converts a client `character` offset (in the negotiated
+// encoding) on `line` of the document at `uri` to a byte column, which is the
+// unit the V compiler's -line-info expects. Falls back to the raw column when
+// the document/line is unavailable.
+fn (app &App) client_col_to_byte_col(uri string, line int, col int) int {
+	content := app.open_files[uri] or { os.read_file(uri_to_path(uri)) or { return col } }
+	lines := content.split_into_lines()
+	if line < 0 || line >= lines.len {
+		return col
+	}
+	return encoded_col_to_byte(lines[line], col, app.position_encoding)
+}
+
+// byte_col_to_client_col converts a byte column reported by the compiler (for
+// the document at `uri`, on 0-based `line`) back to the client's negotiated
+// encoding. Falls back to the raw column when the document/line is unavailable.
+fn (app &App) byte_col_to_client_col(uri string, line int, byte_col int) int {
+	content := app.open_files[uri] or { os.read_file(uri_to_path(uri)) or { return byte_col } }
+	lines := content.split_into_lines()
+	if line < 0 || line >= lines.len {
+		return byte_col
+	}
+	return byte_to_encoded_col(lines[line], byte_col, app.position_encoding)
+}
+
 fn (app &App) get_word_at_position(file_path string, line int, col int) string {
 	content := app.open_files[path_to_uri(file_path)] or {
 		os.read_file(file_path) or { return '' }
@@ -1068,7 +1097,7 @@ fn (app &App) get_word_at_position(file_path string, line int, col int) string {
 	}
 
 	text := lines[line]
-	byte_col := utf8_char_to_byte_index(text, col)
+	byte_col := encoded_col_to_byte(text, col, app.position_encoding)
 	if byte_col >= text.len {
 		return ''
 	}
@@ -1091,6 +1120,115 @@ fn (app &App) get_word_at_position(file_path string, line int, col int) string {
 
 fn is_ident_char(c u8) bool {
 	return (c >= `a` && c <= `z`) || (c >= `A` && c <= `Z`) || (c >= `0` && c <= `9`) || c == `_`
+}
+
+// PositionEncoding is the unit the client uses for LSP `character` offsets.
+// LSP defaults to utf16; utf8 (byte offsets) and utf32 (code points) are only
+// used when negotiated via the client's `general.positionEncodings`.
+enum PositionEncoding {
+	utf16
+	utf8
+	utf32
+}
+
+// parse_position_encoding maps an LSP encoding string to a PositionEncoding.
+fn parse_position_encoding(s string) ?PositionEncoding {
+	return match s {
+		'utf-16' { PositionEncoding.utf16 }
+		'utf-8' { PositionEncoding.utf8 }
+		'utf-32' { PositionEncoding.utf32 }
+		else { none }
+	}
+}
+
+// position_encoding_string is the LSP wire string for a PositionEncoding.
+fn position_encoding_string(e PositionEncoding) string {
+	return match e {
+		.utf16 { 'utf-16' }
+		.utf8 { 'utf-8' }
+		.utf32 { 'utf-32' }
+	}
+}
+
+// utf8_seq_len returns the number of bytes in the UTF-8 sequence whose lead
+// byte is `b` (1 for invalid lead bytes, so we always make progress).
+@[inline]
+fn utf8_seq_len(b u8) int {
+	return if (b & 0x80) == 0 {
+		1
+	} else if (b & 0xe0) == 0xc0 {
+		2
+	} else if (b & 0xf0) == 0xe0 {
+		3
+	} else if (b & 0xf8) == 0xf0 {
+		4
+	} else {
+		1
+	}
+}
+
+// encoded_col_to_byte converts an LSP `character` offset expressed in `enc`
+// units into a byte offset within `line`. This is the inbound half of the
+// PositionCodec: every client-supplied character position must pass through it
+// before indexing bytes (P0-01). Non-BMP characters count as two UTF-16 units.
+fn encoded_col_to_byte(line string, col int, enc PositionEncoding) int {
+	if col <= 0 {
+		return 0
+	}
+	match enc {
+		.utf8 {
+			return if col >= line.len { line.len } else { col }
+		}
+		.utf32 {
+			return utf8_char_to_byte_index(line, col)
+		}
+		.utf16 {
+			mut units := 0
+			mut i := 0
+			for i < line.len {
+				if units >= col {
+					return i
+				}
+				size := utf8_seq_len(line[i])
+				u := if size == 4 { 2 } else { 1 }
+				if units + u > col {
+					// col lands in the middle of a surrogate pair; clamp to the
+					// start of this character.
+					return i
+				}
+				units += u
+				i += size
+			}
+			return line.len
+		}
+	}
+}
+
+// byte_to_encoded_col converts a byte offset within `line` into an LSP
+// `character` offset in `enc` units. This is the outbound half of the codec:
+// every character position returned to the client must pass through it.
+fn byte_to_encoded_col(line string, byte_idx int, enc PositionEncoding) int {
+	if byte_idx <= 0 {
+		return 0
+	}
+	match enc {
+		.utf8 {
+			return if byte_idx >= line.len { line.len } else { byte_idx }
+		}
+		.utf32 {
+			return utf8_byte_to_char_index(line, byte_idx)
+		}
+		.utf16 {
+			mut units := 0
+			mut i := 0
+			for i < line.len && i < byte_idx {
+				size := utf8_seq_len(line[i])
+				units += if size == 4 { 2 } else { 1 }
+				i += size
+			}
+			return units
+		}
+	}
 }
 
 fn utf8_char_to_byte_index(s string, char_idx int) int {
@@ -1144,10 +1282,11 @@ fn utf8_byte_to_char_index(s string, byte_idx int) int {
 	return char_count
 }
 
-// get_word_at_col extracts the identifier at column `col` within a single line.
-// Returns '' if the character at `col` is not an identifier character.
-fn get_word_at_col(line string, col int) string {
-	byte_col := utf8_char_to_byte_index(line, col)
+// get_word_at_col extracts the identifier at column `col` (in `enc` units)
+// within a single line. Returns '' if the character at `col` is not an
+// identifier character.
+fn get_word_at_col(line string, col int, enc PositionEncoding) string {
+	byte_col := encoded_col_to_byte(line, col, enc)
 	if byte_col >= line.len {
 		return ''
 	}
@@ -2135,8 +2274,9 @@ fn (mut app App) search_symbol_in_dirs(search_dirs []string, symbol string, requ
 							col++
 						}
 						if line_text[start..col] == symbol {
-							start_char := utf8_byte_to_char_index(line_text, start)
-							end_char := utf8_byte_to_char_index(line_text, col)
+							start_char := byte_to_encoded_col(line_text, start,
+								app.position_encoding)
+							end_char := byte_to_encoded_col(line_text, col, app.position_encoding)
 							locations << Location{
 								uri:   path_to_uri(v_file)
 								range: LSPRange{
@@ -2277,7 +2417,7 @@ fn (mut app App) search_symbol_in_dirs_semantic(search_dirs []string, symbol str
 							continue
 						}
 						candidate_tokens++
-						start_char := utf8_byte_to_char_index(line_text, start)
+						start_char := byte_to_encoded_col(line_text, start, app.position_encoding)
 						anchor_lookups++
 						if resolved := app.resolve_symbol_anchor_cached(uri, line_idx, start_char, mut
 							anchor_cache)
@@ -2285,7 +2425,7 @@ fn (mut app App) search_symbol_in_dirs_semantic(search_dirs []string, symbol str
 							if !same_anchor_location(resolved, anchor) {
 								continue
 							}
-							end_char := utf8_byte_to_char_index(line_text, col)
+							end_char := byte_to_encoded_col(line_text, col, app.position_encoding)
 							locations << Location{
 								uri:   uri
 								range: LSPRange{
@@ -2766,7 +2906,7 @@ fn (mut app App) handle_selection_range(request Request) Response {
 				char: line_text.len
 			}
 		}
-		start, end := find_word_bounds_at_col(line_text, pos.char)
+		start, end := find_word_bounds_at_col(line_text, pos.char, app.position_encoding)
 		if start < 0 || end <= start {
 			results << SelectionRange{
 				range: line_range
@@ -2903,15 +3043,42 @@ fn (mut app App) on_initialize(request Request) ?string {
 	if app.supports_work_done_progress {
 		log('VLS: client supports workDoneProgress')
 	}
-	// Log client-advertised position encodings for diagnostics.
+	// Negotiate the position encoding (P0-01). LSP defaults to UTF-16, which we
+	// always support. If the client advertises UTF-8 we prefer it, because the V
+	// compiler works in byte offsets, so UTF-8 needs no per-line conversion.
+	// UTF-32 (code points) is chosen only if it is the client's sole option.
+	app.position_encoding = negotiate_position_encoding(params)
+	log('VLS: negotiated positionEncoding=${position_encoding_string(app.position_encoding)}')
+	return none
+}
+
+// negotiate_position_encoding selects the server's position encoding from the
+// client's advertised `general.positionEncodings`, preferring UTF-8, then the
+// mandatory UTF-16, then UTF-32.
+fn negotiate_position_encoding(params InitializeParams) PositionEncoding {
 	if caps := params.capabilities {
 		if general := caps.general {
 			if encodings := general.position_encodings {
-				log('VLS: client positionEncodings=${encodings}')
+				mut has_utf16 := false
+				mut has_utf32 := false
+				for e in encodings {
+					match e {
+						'utf-8' { return PositionEncoding.utf8 }
+						'utf-16' { has_utf16 = true }
+						'utf-32' { has_utf32 = true }
+						else {}
+					}
+				}
+				if has_utf16 {
+					return PositionEncoding.utf16
+				}
+				if has_utf32 {
+					return PositionEncoding.utf32
+				}
 			}
 		}
 	}
-	return none
+	return PositionEncoding.utf16
 }
 
 fn client_supports_dynamic_watched_files_registration(params InitializeParams) bool {
@@ -3217,14 +3384,14 @@ fn (mut app App) handle_linked_editing_range(request Request) Response {
 		}
 	}
 	line_text := lines[params.position.line]
-	start, end := find_word_bounds_at_col(line_text, params.position.char)
+	start, end := find_word_bounds_at_col(line_text, params.position.char, app.position_encoding)
 	if start < 0 || end <= start {
 		return Response{
 			id:     request.id
 			result: 'null'
 		}
 	}
-	symbol := substr_by_char_bounds(line_text, start, end)
+	symbol := substr_by_char_bounds(line_text, start, end, app.position_encoding)
 	// Collect all occurrences of the symbol on this line.
 	mut ranges := []LSPRange{}
 	mut col := 0
@@ -3234,8 +3401,8 @@ fn (mut app App) handle_linked_editing_range(request Request) Response {
 		before_ok := abs == 0 || !is_ident_char(line_text[abs - 1])
 		after_ok := abs + symbol.len >= line_text.len || !is_ident_char(line_text[abs + symbol.len])
 		if before_ok && after_ok {
-			sc := utf8_byte_to_char_index(line_text, abs)
-			ec := utf8_byte_to_char_index(line_text, abs + symbol.len)
+			sc := byte_to_encoded_col(line_text, abs, app.position_encoding)
+			ec := byte_to_encoded_col(line_text, abs + symbol.len, app.position_encoding)
 			ranges << LSPRange{
 				start: Position{
 					line: params.position.line

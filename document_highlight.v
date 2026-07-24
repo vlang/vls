@@ -32,14 +32,14 @@ fn (mut app App) handle_document_highlight(request Request) Response {
 		}
 	}
 	line_text := lines[params.position.line]
-	start, end := find_word_bounds_at_col(line_text, params.position.char)
+	start, end := find_word_bounds_at_col(line_text, params.position.char, app.position_encoding)
 	if start < 0 || end <= start {
 		return Response{
 			id:     request.id
 			result: []DocumentHighlight{}
 		}
 	}
-	symbol := substr_by_char_bounds(line_text, start, end)
+	symbol := substr_by_char_bounds(line_text, start, end, app.position_encoding)
 	if symbol == '' {
 		return Response{
 			id:     request.id
@@ -85,8 +85,8 @@ fn (mut app App) handle_document_highlight(request Request) Response {
 					col++
 				}
 				if line[start_byte..col] == symbol {
-					start_char := utf8_byte_to_char_index(line, start_byte)
-					end_char := utf8_byte_to_char_index(line, col)
+					start_char := byte_to_encoded_col(line, start_byte, app.position_encoding)
+					end_char := byte_to_encoded_col(line, col, app.position_encoding)
 					if a := anchor {
 						if resolved := app.resolve_symbol_anchor_cached(uri, line_idx, start_char, mut
 							anchor_cache)

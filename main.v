@@ -32,10 +32,11 @@ mut:
 	cancelled_requests                          map[int]bool              // Request ids cancelled via $/cancelRequest
 	cancelled_raw_ids                           map[string]bool           // String/raw request ids cancelled via $/cancelRequest
 	current_request_raw_id                      string                    // Raw JSON id of the request being processed (echoed verbatim)
-	tcp_conn                                    ?&net.TcpConn             // Non-nil when serving a TCP client
-	is_shutdown                                 bool                      // True after shutdown request was acknowledged
-	exit_was_requested                          bool                      // True when the exit notification was received
-	received_initialize                         bool                      // True after initialize request was processed
+	position_encoding                           PositionEncoding = .utf16 // Negotiated LSP position encoding (default UTF-16)
+	tcp_conn                                    ?&net.TcpConn // Non-nil when serving a TCP client
+	is_shutdown                                 bool          // True after shutdown request was acknowledged
+	exit_was_requested                          bool          // True when the exit notification was received
+	received_initialize                         bool          // True after initialize request was processed
 	next_request_id                             int = 1 // Counter for server-initiated request ids
 }
 
@@ -539,6 +540,7 @@ fn (mut app App) handle_requests(mut reader io.BufferedReader) {
 							document_highlight_provider:        true
 							selection_range_provider:           true
 							document_range_formatting_provider: true
+							position_encoding:                  position_encoding_string(app.position_encoding)
 							workspace:                          WorkspaceCapability{
 								workspace_folders: WorkspaceFoldersServerCapability{
 									supported:            true
@@ -554,6 +556,13 @@ fn (mut app App) handle_requests(mut reader io.BufferedReader) {
 				}
 				app.write_response(response)
 				app.received_initialize = true
+				// Surface a clearly actionable message if the V compiler is not
+				// available, instead of silently returning empty diagnostics,
+				// completion, and navigation for every request (P1-03).
+				if !compiler_is_available() {
+					app.send_show_message('vls: the V compiler (`v`) was not found on PATH. Diagnostics, completion, and navigation will not work until `v` is installed and on PATH.',
+						1)
+				}
 			}
 			.did_open {
 				app.on_did_open(request)
