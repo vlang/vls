@@ -20,7 +20,7 @@ fn test_smoke_incremental_edit_is_lossless() {
 			line: 0
 			char: 1
 		}
-	}, 'X')
+	}, 'X', .utf16)
 	// The CRLF terminators must be preserved exactly.
 	assert updated == 'aX\r\nb\r\n'
 }

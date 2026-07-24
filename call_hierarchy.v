@@ -26,14 +26,14 @@ fn (mut app App) handle_prepare_call_hierarchy(request Request) Response {
 		}
 	}
 	line_text := lines[params.position.line]
-	start, end := find_word_bounds_at_col(line_text, params.position.char)
+	start, end := find_word_bounds_at_col(line_text, params.position.char, app.position_encoding)
 	if start < 0 || end <= start {
 		return Response{
 			id:     request.id
 			result: 'null'
 		}
 	}
-	word := substr_by_char_bounds(line_text, start, end)
+	word := substr_by_char_bounds(line_text, start, end, app.position_encoding)
 	if word == '' {
 		return Response{
 			id:     request.id

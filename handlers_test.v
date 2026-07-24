@@ -553,7 +553,7 @@ fn test_apply_incremental_change_handles_utf8_columns() {
 			char: 2
 		}
 	}
-	updated := apply_incremental_change(content, range, 'X')
+	updated := apply_incremental_change(content, range, 'X', .utf16)
 	// The trailing newline must be preserved: incremental edits are lossless and
 	// must not normalize line endings (P0-07 item 4).
 	assert updated == 'aXz\n'
@@ -572,7 +572,7 @@ fn test_apply_incremental_change_preserves_crlf() {
 			char: 3
 		}
 	}
-	updated := apply_incremental_change(content, range, 'XYZ')
+	updated := apply_incremental_change(content, range, 'XYZ', .utf16)
 	assert updated == 'abc\r\nXYZ\r\nghi\r\n'
 }
 
@@ -589,7 +589,7 @@ fn test_apply_incremental_change_rejects_reversed_range() {
 		}
 	}
 	// A reversed range is invalid; the content must be returned unchanged.
-	updated := apply_incremental_change(content, range, 'X')
+	updated := apply_incremental_change(content, range, 'X', .utf16)
 	assert updated == content
 }
 
@@ -605,7 +605,7 @@ fn test_apply_incremental_change_handles_multiline_ranges() {
 			char: 2
 		}
 	}
-	updated := apply_incremental_change(content, range, '_\n_')
+	updated := apply_incremental_change(content, range, '_\n_', .utf16)
 	assert updated == 'a_\n_f\nghi'
 }
 
@@ -2053,25 +2053,25 @@ fn test_find_declaration_line_not_found() {
 
 fn test_get_word_at_col_middle_of_word() {
 	line := 'fn my_func() {}'
-	word := get_word_at_col(line, 4)
+	word := get_word_at_col(line, 4, .utf16)
 	assert word == 'my_func'
 }
 
 fn test_get_word_at_col_start_of_word() {
 	line := 'fn my_func() {}'
-	word := get_word_at_col(line, 3)
+	word := get_word_at_col(line, 3, .utf16)
 	assert word == 'my_func'
 }
 
 fn test_get_word_at_col_on_space() {
 	line := 'fn my_func() {}'
-	word := get_word_at_col(line, 2)
+	word := get_word_at_col(line, 2, .utf16)
 	assert word == ''
 }
 
 fn test_get_word_at_col_beyond_end() {
 	line := 'fn foo()'
-	word := get_word_at_col(line, 100)
+	word := get_word_at_col(line, 100, .utf16)
 	assert word == ''
 }
 
@@ -3897,4 +3897,117 @@ fn test_code_action_kind_wanted_respects_only_filter() {
 	assert code_action_kind_wanted(['source.organizeImports'], 'source.organizeImports')
 	assert !code_action_kind_wanted(['quickfix'], 'source.organizeImports')
 	assert !code_action_kind_wanted(['source.organizeImports'], 'quickfix')
+}
+
+// --- P0-01: PositionCodec (UTF-16 / UTF-8 / UTF-32) ---
+
+fn test_encoded_col_to_byte_ascii() {
+	line := 'hello'
+	for enc in [PositionEncoding.utf16, .utf8, .utf32] {
+		assert encoded_col_to_byte(line, 0, enc) == 0
+		assert encoded_col_to_byte(line, 3, enc) == 3
+		assert encoded_col_to_byte(line, 5, enc) == 5
+		// Beyond end of line clamps to length.
+		assert encoded_col_to_byte(line, 99, enc) == 5
+	}
+}
+
+fn test_encoded_col_to_byte_bmp() {
+	// 'é' is 2 UTF-8 bytes, 1 code point, 1 UTF-16 unit.
+	line := 'aéb'
+	// utf16 and utf32 agree for BMP.
+	assert encoded_col_to_byte(line, 1, .utf16) == 1
+	assert encoded_col_to_byte(line, 2, .utf16) == 3 // after 'é'
+	assert encoded_col_to_byte(line, 3, .utf16) == 4
+	assert encoded_col_to_byte(line, 2, .utf32) == 3
+	// utf8 treats columns as raw byte offsets.
+	assert encoded_col_to_byte(line, 3, .utf8) == 3
+}
+
+fn test_encoded_col_to_byte_non_bmp() {
+	// '🚀' (U+1F680) is 4 UTF-8 bytes, 1 code point, 2 UTF-16 units.
+	line := 'a🚀b'
+	// UTF-16: a=1 unit, 🚀=2 units, b=1 unit.
+	assert encoded_col_to_byte(line, 1, .utf16) == 1 // after 'a'
+	assert encoded_col_to_byte(line, 2, .utf16) == 1 // inside surrogate pair -> clamp to char start
+	assert encoded_col_to_byte(line, 3, .utf16) == 5 // after '🚀'
+	assert encoded_col_to_byte(line, 4, .utf16) == 6 // after 'b'
+	// UTF-32: 🚀 is a single code point.
+	assert encoded_col_to_byte(line, 2, .utf32) == 5
+	assert encoded_col_to_byte(line, 3, .utf32) == 6
+}
+
+fn test_byte_to_encoded_col_non_bmp() {
+	line := 'a🚀b'
+	assert byte_to_encoded_col(line, 0, .utf16) == 0
+	assert byte_to_encoded_col(line, 1, .utf16) == 1
+	assert byte_to_encoded_col(line, 5, .utf16) == 3 // a(1) + 🚀(2)
+	assert byte_to_encoded_col(line, 6, .utf16) == 4
+	assert byte_to_encoded_col(line, 5, .utf32) == 2 // a(1) + 🚀(1)
+	assert byte_to_encoded_col(line, 5, .utf8) == 5
+}
+
+fn test_position_codec_roundtrip() {
+	for line in ['plain', 'aéb', 'a🚀b', 'éx', '🚀🚀'] {
+		for enc in [PositionEncoding.utf16, .utf8, .utf32] {
+			// Round-trip a byte offset at each character boundary.
+			mut b := 0
+			for b <= line.len {
+				col := byte_to_encoded_col(line, b, enc)
+				back := encoded_col_to_byte(line, col, enc)
+				// Converting back must not exceed the original boundary.
+				assert back <= line.len
+				b++
+			}
+		}
+	}
+}
+
+fn test_combining_mark_counts_as_separate_unit() {
+	// 'e' + U+0301 (combining acute): 3 bytes, 2 code points, 2 UTF-16 units.
+	line := 'éz'
+	assert encoded_col_to_byte(line, 1, .utf16) == 1 // after 'e'
+	assert encoded_col_to_byte(line, 2, .utf16) == 3 // after the combining mark
+	assert byte_to_encoded_col(line, 3, .utf16) == 2
+}
+
+fn test_apply_incremental_change_non_bmp_utf16() {
+	// Replace the 'b' after an emoji using UTF-16 columns.
+	content := 'a🚀b\n'
+	range := LSPRange{
+		start: Position{
+			line: 0
+			char: 3 // after 🚀 in UTF-16 units (a=1, 🚀=2)
+		}
+		end:   Position{
+			line: 0
+			char: 4
+		}
+	}
+	updated := apply_incremental_change(content, range, 'X', .utf16)
+	assert updated == 'a🚀X\n'
+}
+
+fn test_negotiate_position_encoding_prefers_utf8() {
+	params := InitializeParams{
+		capabilities: ClientCapabilities{
+			general: GeneralClientCapabilities{
+				position_encodings: ['utf-16', 'utf-8']
+			}
+		}
+	}
+	assert negotiate_position_encoding(params) == .utf8
+}
+
+fn test_negotiate_position_encoding_defaults_utf16() {
+	// No advertised encodings -> mandatory UTF-16.
+	assert negotiate_position_encoding(InitializeParams{}) == .utf16
+	params := InitializeParams{
+		capabilities: ClientCapabilities{
+			general: GeneralClientCapabilities{
+				position_encodings: ['utf-32']
+			}
+		}
+	}
+	assert negotiate_position_encoding(params) == .utf32
 }

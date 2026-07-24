@@ -16,6 +16,14 @@ fn resolve_v_compiler_exe() string {
 	return os.find_abs_path_of_executable('v') or { 'v' }
 }
 
+// compiler_is_available reports whether the V compiler was resolved to a real
+// executable path at startup. When false, compiler-backed features cannot work
+// and the failure should be surfaced to the user rather than masked as empty
+// results (P1-03).
+fn compiler_is_available() bool {
+	return v_compiler_exe != 'v' && os.exists(v_compiler_exe)
+}
+
 // hex_nibble returns the numeric value of a single hex digit, or none.
 fn hex_nibble(c u8) ?u8 {
 	return match c {
@@ -205,11 +213,32 @@ fn build_v_fmt_args(temp_file string) []string {
 	return ['fmt', '-inprocess', '-w', temp_file]
 }
 
+// Sentinel exit code returned when a compiler invocation is killed for
+// exceeding compiler_timeout_ms. 124 matches the coreutils `timeout` convention.
+const compiler_exit_timeout = 124
+
+// compiler_timeout_ms bounds how long any single compiler/formatter invocation
+// may run before it is force-killed, so a hung or runaway `v` process can never
+// freeze the server indefinitely (partial P0-04). Overridable via VLS_TIMEOUT_MS.
+const compiler_timeout_ms = resolve_compiler_timeout_ms()
+
+fn resolve_compiler_timeout_ms() i64 {
+	env := os.getenv('VLS_TIMEOUT_MS')
+	if env != '' {
+		n := env.i64()
+		if n > 0 {
+			return n
+		}
+	}
+	return 30_000
+}
+
 // run_v_argv executes the V compiler with the given argument vector in
 // `work_folder` (set on the child process, never via a process-global chdir),
 // capturing stdout. stderr is captured separately and only logged, so it can
-// never corrupt the JSON the compiler writes to stdout. This is the single,
-// shell-free entry point for all compiler invocations.
+// never corrupt the JSON the compiler writes to stdout. The child is killed if
+// it exceeds compiler_timeout_ms. This is the single, shell-free entry point for
+// all compiler invocations.
 fn run_v_argv(args []string, work_folder string) os.Result {
 	if work_folder != '' && !os.is_dir(work_folder) {
 		msg := 'Working dir does not exist: ${work_folder}'
@@ -228,14 +257,29 @@ fn run_v_argv(args []string, work_folder string) os.Result {
 	p.run()
 	mut out := strings.new_builder(1024)
 	mut errb := strings.new_builder(256)
+	start_ms := time.now().unix_milli()
+	mut timed_out := false
 	// Drain both pipes while the child runs so a large output cannot deadlock
-	// the child against a full pipe buffer.
+	// the child against a full pipe buffer, and enforce the timeout.
 	for p.is_alive() {
+		mut got_data := false
 		if chunk := p.pipe_read(.stdout) {
 			out.write_string(chunk)
+			got_data = true
 		}
 		if chunk := p.pipe_read(.stderr) {
 			errb.write_string(chunk)
+			got_data = true
+		}
+		if time.now().unix_milli() - start_ms > compiler_timeout_ms {
+			log('v invocation exceeded ${compiler_timeout_ms}ms; killing child')
+			p.signal_kill()
+			timed_out = true
+			break
+		}
+		if !got_data {
+			// Avoid busy-spinning while the child is compiling.
+			time.sleep(time.millisecond)
 		}
 	}
 	out.write_string(p.stdout_slurp())
@@ -246,6 +290,12 @@ fn run_v_argv(args []string, work_folder string) os.Result {
 	stderr_text := errb.str()
 	if stderr_text.trim_space() != '' {
 		log('v stderr: ${stderr_text}')
+	}
+	if timed_out {
+		return os.Result{
+			exit_code: compiler_exit_timeout
+			output:    ''
+		}
 	}
 	return os.Result{
 		exit_code: code
@@ -685,9 +735,11 @@ fn (mut app App) run_v_line_info(method Method, path string, line_info string) R
 			mut cursor_symbol := ''
 			if info_parts.len >= 2 {
 				cursor_line := info_parts[0].int() - 1
+				// cursor_col comes from the compiler line-info, which is a byte
+				// column, so treat it as a byte offset (utf8) here.
 				cursor_col := info_parts[1].all_after('hv^').int()
 				if cursor_line >= 0 && cursor_line < file_lines.len {
-					cursor_symbol = get_word_at_col(file_lines[cursor_line], cursor_col)
+					cursor_symbol = get_word_at_col(file_lines[cursor_line], cursor_col, .utf8)
 					if cursor_symbol != '' {
 						doc = app.find_doc_comment_for_symbol(cursor_symbol, file_lines, path)
 					}
@@ -749,16 +801,20 @@ fn (mut app App) run_v_line_info(method Method, path string, line_info string) R
 					log('MAPPED TO uri_path=${uri_path}')
 				}
 				uri_header := if uri_path.starts_with('/') { 'file://' } else { 'file:///' }
+				// The compiler reports a byte column; convert it to the client's
+				// encoding using the target file's line (P0-01).
+				target_uri := uri_header + uri_path
+				client_col := app.byte_col_to_client_col(target_uri, line_nr, col)
 				result = Location{
-					uri:   uri_header + uri_path
+					uri:   target_uri
 					range: LSPRange{
 						start: Position{
 							line: line_nr
-							char: col
+							char: client_col
 						}
 						end:   Position{
 							line: line_nr
-							char: col
+							char: client_col
 						}
 					}
 				}
