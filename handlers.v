@@ -31,6 +31,14 @@ fn (mut app App) operation_at_pos(method Method, request Request) Response {
 			result: 'null'
 		}
 	}
+	// LSP positions are non-negative; reject malformed negative positions rather
+	// than indexing arrays with negative values (P1-09).
+	if params.position.line < 0 || params.position.char < 0 {
+		return Response{
+			id:     request.id
+			result: 'null'
+		}
+	}
 	line_nr := params.position.line + 1
 	col := params.position.char
 	path := params.text_document.uri
@@ -381,12 +389,15 @@ fn (mut app App) on_did_open(request Request) {
 	if version := params.text_document.version {
 		app.open_files_versions[uri] = version
 	}
-	app.open_files_generation++
+	app.bump_generation(uri)
 	app.text = content
 	$if debug { log('STORED CONTENT for uri=${uri}, FILE COUNT: ${app.open_files.len}') }
 }
 
-// on_did_close handles the LSP didClose notification by removing the file from tracked state.
+// on_did_close handles the LSP didClose notification by removing the file from
+// tracked state. It also clears the diagnostic cache for the document so stale
+// problems do not linger after close (P0-07). The dispatcher publishes an empty
+// diagnostic set to clear editor markers.
 fn (mut app App) on_did_close(request Request) {
 	params := json.decode(DidCloseTextDocumentParams, request.params) or {
 		$if debug { log('Failed to decode DidCloseTextDocumentParams: ${err}') }
@@ -395,10 +406,13 @@ fn (mut app App) on_did_close(request Request) {
 	uri := params.text_document.uri
 	if uri in app.open_files {
 		app.open_files.delete(uri)
-		app.open_files_generation++
+		app.bump_generation(uri)
 	}
 	if uri in app.open_files_versions {
 		app.open_files_versions.delete(uri)
+	}
+	if uri in app.diag_cache {
+		app.diag_cache.delete(uri)
 	}
 }
 
@@ -422,7 +436,10 @@ fn (mut app App) build_diagnostics_notification(uri string, content string) Noti
 	mut diagnostics := []LSPDiagnostic{}
 	mut seen_positions := map[string]bool{}
 	for v_err in v_errors {
-		pos_key := '${v_err.line_nr}:${v_err.col}'
+		// Include the message and length in the dedup key so two genuinely
+		// different diagnostics at the same line/column are both retained
+		// (P1-06). Only exact duplicates are dropped.
+		pos_key := '${v_err.line_nr}:${v_err.col}:${v_err.len}:${v_err.level}:${v_err.message}'
 		if pos_key in seen_positions {
 			continue
 		}
@@ -456,10 +473,27 @@ fn (mut app App) on_did_change(request Request) ?Notification {
 		return none
 	}
 	uri := params.text_document.uri
+	// Enforce monotonic versions: reject stale or out-of-order changes so an
+	// old buffer state can never overwrite newer text (P0-07).
+	if new_version := params.text_document.version {
+		if old_version := app.open_files_versions[uri] {
+			if new_version <= old_version {
+				log('on_did_change: ignoring stale version ${new_version} <= ${old_version} for ${uri}')
+				return none
+			}
+		}
+	}
+	is_open := uri in app.open_files
 	mut content := app.open_files[uri] or { '' }
 	for change in params.content_changes {
 		if change.range != none {
-			// Incremental change
+			// Incremental change. If the document was never opened we have no
+			// base text to apply the edit against; applying it against '' would
+			// silently corrupt state, so require a full-text sync instead.
+			if !is_open {
+				log('on_did_change: incremental change for unopened document ${uri}; ignoring (client should re-sync)')
+				return none
+			}
 			rng := change.range or {
 				$if debug { log('Skipping malformed incremental change with missing range') }
 				continue
@@ -467,7 +501,7 @@ fn (mut app App) on_did_change(request Request) ?Notification {
 
 			content = apply_incremental_change(content, rng, change.text)
 		} else {
-			// Full text replacement
+			// Full text replacement.
 			content = change.text
 		}
 	}
@@ -476,7 +510,7 @@ fn (mut app App) on_did_change(request Request) ?Notification {
 	if version := params.text_document.version {
 		app.open_files_versions[uri] = version
 	}
-	app.open_files_generation++
+	app.bump_generation(uri)
 	notification := app.build_diagnostics_notification(uri, content)
 	$if debug { log('returning notification: ${notification}') }
 	return notification
@@ -489,23 +523,33 @@ fn (mut app App) on_did_save(request Request) ?Notification {
 		return none
 	}
 	uri := params.text_document.uri
-	mut content := app.open_files[uri] or { '' }
-	if content == '' {
+	// A valid empty open buffer ('') must not be confused with an absent
+	// document. Only fall back to didSave text / disk when the document is not
+	// tracked as open (P0-07 item 6). When the client includes save text and
+	// the document is open, prefer the client's text as the new source of truth.
+	mut content := ''
+	if existing := app.open_files[uri] {
+		content = existing
 		if text := params.text {
 			content = text
 			app.open_files[uri] = text
 			app.text = text
-			app.open_files_generation++
-		} else {
-			real_path := uri_to_path(uri)
-			content = os.read_file(real_path) or {
-				$if debug { log('on_did_save: failed to read file ${real_path}: ${err}') }
-				return none
-			}
-			app.open_files[uri] = content
-			app.text = content
-			app.open_files_generation++
+			app.bump_generation(uri)
 		}
+	} else if text := params.text {
+		content = text
+		app.open_files[uri] = text
+		app.text = text
+		app.bump_generation(uri)
+	} else {
+		real_path := uri_to_path(uri)
+		content = os.read_file(real_path) or {
+			$if debug { log('on_did_save: failed to read file ${real_path}: ${err}') }
+			return none
+		}
+		app.open_files[uri] = content
+		app.text = content
+		app.bump_generation(uri)
 	}
 	notification := app.build_diagnostics_notification(uri, content)
 	return notification
@@ -528,12 +572,11 @@ fn (mut app App) on_will_save_wait_until(request Request) Response {
 			result: []TextEdit{}
 		}
 	}
-	edits, formatted := app.format_content(uri, content)
-	if formatted != '' {
-		app.open_files[uri] = formatted
-		app.text = formatted
-		app.open_files_generation++
-	}
+	// Return the edits only. We must NOT mutate the server's document state here:
+	// the client may cancel, reject, or transform the edit, and it will send the
+	// authoritative new content via a subsequent didChange/didSave. Mutating now
+	// would desynchronize the server from the editor (P0-07 item 7).
+	edits, _ := app.format_content(uri, content)
 	return Response{
 		id:     request.id
 		result: edits
@@ -554,7 +597,7 @@ fn (mut app App) handle_prepare_rename(request Request) Response {
 	real_path := uri_to_path(params.text_document.uri)
 	content := app.open_files[params.text_document.uri] or { os.read_file(real_path) or { '' } }
 	lines := content.split_into_lines()
-	if params.position.line >= lines.len {
+	if params.position.line < 0 || params.position.line >= lines.len {
 		return Response{
 			id:     request.id
 			result: 'null'
@@ -568,7 +611,7 @@ fn (mut app App) handle_prepare_rename(request Request) Response {
 			result: 'null'
 		}
 	}
-	symbol := line_text[start..end]
+	symbol := substr_by_char_bounds(line_text, start, end)
 	if symbol == '' {
 		return Response{
 			id:     request.id
@@ -625,8 +668,24 @@ fn add_workspace_symbol(mut results []WorkspaceSymbol, mut seen_symbols map[stri
 	}
 }
 
-// find_word_bounds_at_col returns [start, end) bounds for the identifier at `col`.
-// If `col` is just after an identifier, it still resolves that identifier.
+// substr_by_char_bounds returns the substring of `line` between the given
+// character (code point) boundaries. It converts the character offsets to byte
+// offsets first, so the slice can never land in the middle of a multi-byte
+// UTF-8 sequence. Callers that receive character offsets (e.g. from
+// find_word_bounds_at_col) must use this instead of raw byte slicing (P0-01).
+fn substr_by_char_bounds(line string, char_start int, char_end int) string {
+	bs := utf8_char_to_byte_index(line, char_start)
+	be := utf8_char_to_byte_index(line, char_end)
+	if bs > be || be > line.len {
+		return ''
+	}
+	return line[bs..be]
+}
+
+// find_word_bounds_at_col returns [start, end) character bounds for the
+// identifier at `col`. If `col` is just after an identifier, it still resolves
+// that identifier. The returned bounds are character (code point) offsets;
+// slice the line via substr_by_char_bounds, never raw byte indexing.
 fn find_word_bounds_at_col(line string, col int) (int, int) {
 	if line == '' {
 		return -1, -1
@@ -763,42 +822,85 @@ fn (mut app App) handle_workspace_symbol(request Request) Response {
 }
 
 // Helper to apply an incremental change to the document content
+// line_start_offsets returns the byte offset at which each line begins,
+// treating \n, \r\n, and \r as line terminators (LSP §3 treats all three as
+// valid). The returned slice always has at least one entry (offset 0).
+fn line_start_offsets(content string) []int {
+	mut offsets := [0]
+	mut i := 0
+	for i < content.len {
+		c := content[i]
+		if c == `\n` {
+			offsets << i + 1
+			i++
+		} else if c == `\r` {
+			if i + 1 < content.len && content[i + 1] == `\n` {
+				offsets << i + 2
+				i += 2
+			} else {
+				offsets << i + 1
+				i++
+			}
+		} else {
+			i++
+		}
+	}
+	return offsets
+}
+
+// line_text_without_terminator returns the text of `line` with any trailing
+// \n, \r\n, or \r stripped, so character offsets map onto line content only.
+fn line_text_without_terminator(content string, starts []int, line int) string {
+	line_start := starts[line]
+	seg_end := if line + 1 < starts.len { starts[line + 1] } else { content.len }
+	mut e := seg_end
+	if e > line_start && content[e - 1] == `\n` {
+		e--
+		if e > line_start && content[e - 1] == `\r` {
+			e--
+		}
+	} else if e > line_start && content[e - 1] == `\r` {
+		e--
+	}
+	return content[line_start..e]
+}
+
+// position_to_byte_offset maps an LSP (line, character) position to a byte
+// offset within `content`. Positions past the end of a line clamp to the line's
+// content end (before its terminator); positions past the last line clamp to
+// the content length.
+fn position_to_byte_offset(content string, starts []int, line int, character int) int {
+	if line < 0 {
+		return 0
+	}
+	if line >= starts.len {
+		return content.len
+	}
+	lt := line_text_without_terminator(content, starts, line)
+	byte_in_line := utf8_char_to_byte_index(lt, character)
+	return starts[line] + byte_in_line
+}
+
+// apply_incremental_change applies one incremental edit against `content`,
+// splicing the raw string by byte offset so that existing line terminators
+// (CRLF, CR, LF, and a final-newline distinction) are preserved exactly
+// (P0-07). Returns the original content unchanged for an invalid/reversed
+// range rather than corrupting the buffer.
 fn apply_incremental_change(content string, range LSPRange, new_text string) string {
-	lines := content.split_into_lines()
-	if lines.len == 0 {
-		return new_text
-	}
-	start := range.start
-	mut end_line := range.end.line
-	mut end_char := range.end.char
-	if start.line < 0 || end_line < 0 || start.line >= lines.len {
+	if range.start.line < 0 || range.start.char < 0 || range.end.line < 0 || range.end.char < 0 {
 		return content
 	}
-	if end_line >= lines.len {
-		end_line = lines.len - 1
-		end_char = utf8_byte_to_char_index(lines[end_line], lines[end_line].len)
-	}
-	start_byte := utf8_char_to_byte_index(lines[start.line], start.char)
-	end_byte := utf8_char_to_byte_index(lines[end_line], end_char)
-	if end_line < start.line || (end_line == start.line && end_byte < start_byte) {
+	if range.end.line < range.start.line
+		|| (range.end.line == range.start.line && range.end.char < range.start.char) {
 		return content
 	}
-	mut before := []string{}
-	mut after := []string{}
-	if start.line > 0 {
-		before = lines[..start.line].clone()
+	starts := line_start_offsets(content)
+	start_byte := position_to_byte_offset(content, starts, range.start.line, range.start.char)
+	end_byte := position_to_byte_offset(content, starts, range.end.line, range.end.char)
+	if start_byte > end_byte || start_byte > content.len || end_byte > content.len {
+		return content
 	}
-	if end_line + 1 < lines.len {
-		after = lines[end_line + 1..].clone()
-	}
-	prefix := lines[start.line][..start_byte]
-	suffix := lines[end_line][end_byte..]
-	replacement := prefix + new_text + suffix
-	mut result_lines := []string{}
-	result_lines << before
-	result_lines << replacement.split('\n')
-	result_lines << after
-	return result_lines.join('\n')
+	return content[..start_byte] + new_text + content[end_byte..]
 }
 
 // find_references handles the LSP references request, returning all locations of a symbol.
@@ -884,18 +986,21 @@ fn (mut app App) handle_rename(request Request) Response {
 		}
 	}
 
-	// Find all references
+	// Rename is destructive, so it must be driven by a stable semantic symbol
+	// identity. If we cannot resolve the symbol under the cursor to a compiler
+	// definition anchor, we refuse rather than fall back to lexical same-name
+	// matching, which would rename unrelated symbols in other scopes/modules
+	// (P1-04).
 	working_dir := os.dir(real_path)
 	search_dirs := app.workspace_search_dirs(working_dir)
-	anchor := app.resolve_symbol_anchor(path, line, col)
-	mut locations := if a := anchor {
-		app.search_symbol_in_dirs_semantic(search_dirs, symbol, a, request.id)
-	} else {
-		app.search_symbol_in_dirs(search_dirs, symbol, request.id)
+	anchor := app.resolve_symbol_anchor(path, line, col) or {
+		log('rename: could not resolve a semantic anchor for "${symbol}"; refusing lexical rename (P1-04)')
+		return Response{
+			id:     request.id
+			result: 'null'
+		}
 	}
-	if locations.len == 0 {
-		locations = app.search_symbol_in_dirs(search_dirs, symbol, request.id)
-	}
+	locations := app.search_symbol_in_dirs_semantic(search_dirs, symbol, anchor, request.id)
 	if locations.len == 0 {
 		return Response{
 			id:     request.id
@@ -958,7 +1063,7 @@ fn (app &App) get_word_at_position(file_path string, line int, col int) string {
 		os.read_file(file_path) or { return '' }
 	}
 	lines := content.split_into_lines()
-	if line >= lines.len {
+	if line < 0 || line >= lines.len {
 		return ''
 	}
 
@@ -1342,7 +1447,7 @@ fn search_doc_in_vlib_dir(dir string, symbol string) string {
 fn (mut app App) format_content(uri string, content string) ([]TextEdit, string) {
 	real_path := uri_to_path(uri)
 
-	temp_file := os.join_path(os.temp_dir(), 'vls_fmt_${os.getpid()}_${os.file_name(real_path)}')
+	temp_file := make_unique_temp_path('vls_fmt', real_path)
 	os.write_file(temp_file, content) or {
 		log('Failed to write temp file for formatting: ${err}')
 		return []TextEdit{}, ''
@@ -1351,7 +1456,7 @@ fn (mut app App) format_content(uri string, content string) ([]TextEdit, string)
 	// With -w flag, v fmt writes the formatted content back to the temp file.
 	// Read from there instead of relying on stdout capture, which is
 	// unreliable on Windows MSYS2.
-	result := os.execute(ensure_stderr_captured(build_v_fmt_cmd(temp_file)))
+	result := run_v_argv(build_v_fmt_args(temp_file), '')
 
 	mut formatted := os.read_file(temp_file) or { result.output }
 
@@ -2221,125 +2326,151 @@ fn (mut app App) handle_code_action(request Request) Response {
 	content := app.open_files[uri] or { '' }
 	lines := content.split_into_lines()
 	diagnostics := params.context.diagnostics
-
-	$if debug {
-		log('handle_code_action called for uri: ${uri}')
-		log('diagnostics count: ${diagnostics.len}')
-		for i, diag in diagnostics {
-			log('diagnostics[${i}]: message=${diag.message}, range=${diag.range}')
-		}
-	}
+	only := params.context.only or { []string{} }
 
 	mut actions := []CodeAction{}
 
-	$if debug { log('Top-level types in handlers.v: App, ...') }
-	// 1. Quick fixes for diagnostics
-	for diag in diagnostics {
-		$if debug {
-			log('Checking diagnostic: message=' + diag.message + ', range.start.line=' +
-				diag.range.start.line.str())
-		}
-		if diag.message.contains('unknown module') {
-			line_nr := diag.range.start.line
-			$if debug {
-				log('unknown module diagnostic at line_nr=' + line_nr.str())
-				if line_nr < lines.len {
-					log('line content: ' + lines[line_nr])
-				}
-			}
-			if line_nr < lines.len && lines[line_nr].trim_space().starts_with('import ') {
-				$if debug { log('Matched import line for quickfix') }
-				edit := WorkspaceEdit{
-					changes: {
-						uri: [
-							TextEdit{
-								range:    LSPRange{
-									start: Position{
-										line: line_nr
-										char: 0
+	// 1. Quick fixes for diagnostics.
+	if code_action_kind_wanted(only, code_action_kind_quickfix) {
+		for diag in diagnostics {
+			if diag.message.contains('unknown module') {
+				line_nr := diag.range.start.line
+				if line_nr >= 0 && line_nr < lines.len
+					&& lines[line_nr].trim_space().starts_with('import ') {
+					// Remove the whole line including its trailing newline by
+					// deleting the range [line_nr,0)..[line_nr+1,0). Ending the
+					// range at the previous line length would leave a blank line
+					// behind (P0-09).
+					edit := WorkspaceEdit{
+						changes: {
+							uri: [
+								TextEdit{
+									range:    LSPRange{
+										start: Position{
+											line: line_nr
+											char: 0
+										}
+										end:   Position{
+											line: line_nr + 1
+											char: 0
+										}
 									}
-									end:   Position{
-										line: line_nr
-										char: lines[line_nr].len
-									}
-								}
-								new_text: ''
-							},
-						]
+									new_text: ''
+								},
+							]
+						}
+					}
+					actions << CodeAction{
+						title:        'Remove unknown import'
+						kind:         code_action_kind_quickfix
+						is_preferred: true
+						edit:         edit
+						diagnostics:  [diag]
 					}
 				}
-				actions << CodeAction{
-					title:        'Remove unknown import'
-					kind:         code_action_kind_quickfix
-					is_preferred: true
-					edit:         edit
-					diagnostics:  [diag]
-				}
-				$if debug { log('Added quickfix action for line_nr=' + line_nr.str()) }
 			}
 		}
 	}
 
-	// 2. Organize Imports (sort and deduplicate)
-	mut import_lines := []int{}
-	for i, line in lines {
-		if line.trim_space().starts_with('import ') {
-			import_lines << i
-		}
-	}
-	if import_lines.len > 0 {
-		mut imports := []string{}
-		for i in import_lines {
-			imports << lines[i].trim_space()
-		}
-		// Deduplicate and sort
-		mut seen := map[string]bool{}
-		mut unique_imports := []string{}
-		for imp in imports {
-			if !seen[imp] {
-				unique_imports << imp
-				seen[imp] = true
-			}
-		}
-		unique_imports.sort()
-		if unique_imports.len > 0 {
-			edit := WorkspaceEdit{
-				changes: {
-					uri: [
-						TextEdit{
-							range:    LSPRange{
-								start: Position{
-									line: import_lines.first()
-									char: 0
-								}
-								end:   Position{
-									line: import_lines.last()
-									char: lines[import_lines.last()].len
-								}
-							}
-							new_text: unique_imports.join('\n')
-						},
-					]
-				}
-			}
-			actions << CodeAction{
-				title: 'Organize Imports'
-				kind:  code_action_kind_source_organize_imports
-				edit:  edit
-			}
-		}
-	}
-
-	$if debug {
-		log('actions count before return: ' + actions.len.str())
-		for i, act in actions {
-			log('actions[' + i.str() + ']: title=' + act.title + ', kind=' + act.kind)
+	// 2. Organize Imports — only safe when every import line forms a single
+	// contiguous block. If imports are separated by any other code or comments
+	// we refuse the action rather than delete the intervening text (P0-09).
+	if code_action_kind_wanted(only, code_action_kind_source_organize_imports) {
+		if action := build_safe_organize_imports_action(uri, lines) {
+			actions << action
 		}
 	}
 
 	return Response{
 		id:     request.id
 		result: actions
+	}
+}
+
+// code_action_kind_wanted reports whether an action of `kind` should be offered
+// given the client's requested `only` filter. An empty filter means "any".
+// A requested kind matches if it equals or is a prefix of the action kind
+// (LSP treats kinds hierarchically, e.g. 'source' covers 'source.organizeImports').
+fn code_action_kind_wanted(only []string, kind string) bool {
+	if only.len == 0 {
+		return true
+	}
+	for want in only {
+		if want == kind || kind.starts_with(want + '.') || kind == want {
+			return true
+		}
+		if kind.starts_with(want) && (want.ends_with('.') || kind.len == want.len) {
+			return true
+		}
+	}
+	return false
+}
+
+// build_safe_organize_imports_action returns an Organize Imports action that is
+// guaranteed to leave all non-import text byte-for-byte unchanged, or none when
+// the imports are not a single contiguous block.
+fn build_safe_organize_imports_action(uri string, lines []string) ?CodeAction {
+	mut import_lines := []int{}
+	for i, line in lines {
+		if line.trim_space().starts_with('import ') {
+			import_lines << i
+		}
+	}
+	if import_lines.len == 0 {
+		return none
+	}
+	first := import_lines.first()
+	last := import_lines.last()
+	// Contiguity check: the imports must occupy every line in [first, last].
+	if last - first + 1 != import_lines.len {
+		log('organize imports: imports are non-contiguous; refusing to edit to avoid deleting intervening code (P0-09)')
+		return none
+	}
+	// Sort + dedup the (trimmed) import lines.
+	mut seen := map[string]bool{}
+	mut unique_imports := []string{}
+	for i in import_lines {
+		imp := lines[i].trim_space()
+		if !seen[imp] {
+			unique_imports << imp
+			seen[imp] = true
+		}
+	}
+	unique_imports.sort()
+	new_text := unique_imports.join('\n')
+	// If nothing would change, don't offer a no-op edit.
+	mut original := []string{}
+	for i in first .. last + 1 {
+		original << lines[i]
+	}
+	if original.join('\n') == new_text {
+		return none
+	}
+	// Postcondition guard: the replaced block contains only import lines, so no
+	// other text can be affected. Replace [first,0)..[last,eol_of_last).
+	edit := WorkspaceEdit{
+		changes: {
+			uri: [
+				TextEdit{
+					range:    LSPRange{
+						start: Position{
+							line: first
+							char: 0
+						}
+						end:   Position{
+							line: last
+							char: utf8_byte_to_char_index(lines[last], lines[last].len)
+						}
+					}
+					new_text: new_text
+				},
+			]
+		}
+	}
+	return CodeAction{
+		title: 'Organize Imports'
+		kind:  code_action_kind_source_organize_imports
+		edit:  edit
 	}
 }
 
@@ -2511,7 +2642,11 @@ fn (mut app App) handle_range_formatting(request Request) Response {
 			}
 		}
 	}
-	temp_file := os.join_path(os.temp_dir(), 'vls_rfmt_${os.getpid()}_${os.file_name(real_path)}')
+	// v fmt formats whole files, so we format the full document, then compute the
+	// minimal changed line hunk (common prefix/suffix). We only emit an edit when
+	// that hunk is fully contained inside the requested range; otherwise we return
+	// no edits rather than risk touching text outside the requested range.
+	temp_file := make_unique_temp_path('vls_rfmt', real_path)
 	os.write_file(temp_file, content) or {
 		log('Failed to write temp file for range formatting: ${err}')
 		return Response{
@@ -2519,51 +2654,73 @@ fn (mut app App) handle_range_formatting(request Request) Response {
 			result: []TextEdit{}
 		}
 	}
-	result := os.execute(ensure_stderr_captured(build_v_fmt_cmd(temp_file)))
+	// With -w, v fmt rewrites the temp file in place; read the file, not stdout.
+	result := run_v_argv(build_v_fmt_args(temp_file), '')
+	formatted := os.read_file(temp_file) or {
+		os.rm(temp_file) or {}
+		return Response{
+			id:     request.id
+			result: []TextEdit{}
+		}
+	}
 	os.rm(temp_file) or {
 		$if debug { log('Failed to remove temp file for range formatting: ${err}') }
 	}
-	if result.exit_code != 0 || result.output == content {
+	if result.exit_code != 0 || formatted == '' || formatted == content {
 		return Response{
 			id:     request.id
 			result: []TextEdit{}
 		}
 	}
 	original_lines := content.split_into_lines()
-	formatted_lines := result.output.split_into_lines()
-	start_line := params.range.start.line
-	mut end_line := params.range.end.line
-	if end_line >= original_lines.len {
-		end_line = original_lines.len - 1
+	formatted_lines := formatted.split_into_lines()
+	req_start := if params.range.start.line < 0 { 0 } else { params.range.start.line }
+	mut req_end := params.range.end.line
+	if req_end >= original_lines.len {
+		req_end = original_lines.len - 1
 	}
-	if start_line >= original_lines.len || start_line >= formatted_lines.len {
+	if req_start >= original_lines.len || req_start > req_end {
 		return Response{
 			id:     request.id
 			result: []TextEdit{}
 		}
 	}
-	safe_end := if end_line < formatted_lines.len { end_line } else { formatted_lines.len - 1 }
-	formatted_slice := formatted_lines[start_line..safe_end + 1].join('\n')
-	original_slice := original_lines[start_line..end_line + 1].join('\n')
-	if formatted_slice == original_slice {
+	// Common prefix length (number of identical leading lines).
+	mut pre := 0
+	for pre < original_lines.len && pre < formatted_lines.len
+		&& original_lines[pre] == formatted_lines[pre] {
+		pre++
+	}
+	// Common suffix length, not overlapping the prefix.
+	mut suf := 0
+	for suf < original_lines.len - pre && suf < formatted_lines.len - pre
+		&& original_lines[original_lines.len - 1 - suf] == formatted_lines[formatted_lines.len - 1 - suf] {
+		suf++
+	}
+	orig_hunk_start := pre
+	orig_hunk_end := original_lines.len - suf // exclusive
+	// The changed hunk must lie fully within the requested line range.
+	if orig_hunk_start < req_start || orig_hunk_end - 1 > req_end {
+		log('range formatting: changed hunk [${orig_hunk_start}..${orig_hunk_end}) outside requested range [${req_start}..${req_end}]; returning no edits')
 		return Response{
 			id:     request.id
 			result: []TextEdit{}
 		}
 	}
-	last_char := original_lines[end_line].len
+	fmt_hunk_end := formatted_lines.len - suf // exclusive
+	new_text := formatted_lines[orig_hunk_start..fmt_hunk_end].join('\n') + '\n'
 	edit := TextEdit{
 		range:    LSPRange{
 			start: Position{
-				line: start_line
+				line: orig_hunk_start
 				char: 0
 			}
 			end:   Position{
-				line: end_line
-				char: last_char
+				line: orig_hunk_end
+				char: 0
 			}
 		}
-		new_text: formatted_slice
+		new_text: new_text
 	}
 	return Response{
 		id:     request.id
@@ -2588,7 +2745,7 @@ fn (mut app App) handle_selection_range(request Request) Response {
 	lines := content.split_into_lines()
 	mut results := []SelectionRange{}
 	for pos in params.positions {
-		if pos.line >= lines.len {
+		if pos.line < 0 || pos.char < 0 || pos.line >= lines.len {
 			results << SelectionRange{
 				range: LSPRange{
 					start: pos
@@ -2818,6 +2975,11 @@ fn (mut app App) on_cancel_request(request Request) {
 		return
 	}
 	app.cancelled_requests[params.id] = true
+	// Cancellation ids may be strings; capture the exact raw id so string-id
+	// requests can be cancelled too (P0-02/P0-03).
+	if raw := extract_raw_id(request.params) {
+		app.cancelled_raw_ids[raw] = true
+	}
 	log('VLS: request ${params.id} marked as cancelled')
 }
 
@@ -3044,7 +3206,7 @@ fn (mut app App) handle_linked_editing_range(request Request) Response {
 	uri := params.text_document.uri
 	content := app.open_files[uri] or { os.read_file(uri_to_path(uri)) or { '' } }
 	lines := content.split_into_lines()
-	if params.position.line >= lines.len {
+	if params.position.line < 0 || params.position.line >= lines.len {
 		return Response{
 			id:     request.id
 			result: 'null'
@@ -3058,7 +3220,7 @@ fn (mut app App) handle_linked_editing_range(request Request) Response {
 			result: 'null'
 		}
 	}
-	symbol := line_text[start..end]
+	symbol := substr_by_char_bounds(line_text, start, end)
 	// Collect all occurrences of the symbol on this line.
 	mut ranges := []LSPRange{}
 	mut col := 0

@@ -25,7 +25,7 @@ fn (mut app App) handle_document_highlight(request Request) Response {
 		}
 	}
 	lines := content.split_into_lines()
-	if params.position.line >= lines.len {
+	if params.position.line < 0 || params.position.line >= lines.len {
 		return Response{
 			id:     request.id
 			result: []DocumentHighlight{}
@@ -39,7 +39,7 @@ fn (mut app App) handle_document_highlight(request Request) Response {
 			result: []DocumentHighlight{}
 		}
 	}
-	symbol := line_text[start..end]
+	symbol := substr_by_char_bounds(line_text, start, end)
 	if symbol == '' {
 		return Response{
 			id:     request.id

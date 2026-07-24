@@ -263,14 +263,14 @@ struct Capability {
 	hover_provider                     bool                     @[json: 'hoverProvider']
 	references_provider                bool                     @[json: 'referencesProvider']
 	rename_provider                    RenameOptions            @[json: 'renameProvider']
-	execute_command_provider           ExecuteCommandOptions    @[json: 'executeCommandProvider']
+	execute_command_provider           ?ExecuteCommandOptions   @[json: 'executeCommandProvider']
 	document_formatting_provider       bool                     @[json: 'documentFormattingProvider']
 	document_range_formatting_provider bool                     @[json: 'documentRangeFormattingProvider']
 	document_symbol_provider           bool                     @[json: 'documentSymbolProvider']
 	workspace_symbol_provider          bool                     @[json: 'workspaceSymbolProvider']
 	inlay_hint_provider                bool                     @[json: 'inlayHintProvider']
 	code_action_provider               bool                     @[json: 'codeActionProvider']
-	code_lens_provider                 CodeLensOptions          @[json: 'codeLensProvider']
+	code_lens_provider                 ?CodeLensOptions         @[json: 'codeLensProvider']
 	inline_value_provider              bool                     @[json: 'inlineValueProvider']
 	linked_editing_range_provider      bool                     @[json: 'linkedEditingRangeProvider']
 	on_type_formatting_provider        ?OnTypeFormattingOptions @[json: 'documentOnTypeFormattingProvider']
@@ -742,8 +742,12 @@ struct CodeActionParams {
 }
 
 // CodeActionContext contains context for a code action request.
+// `only` restricts the kinds of actions the client wants; `trigger_kind`
+// is 1 = Invoked, 2 = Automatic (LSP §3.17 CodeActionContext).
 struct CodeActionContext {
-	diagnostics []LSPDiagnostic
+	diagnostics  []LSPDiagnostic
+	only         ?[]string @[json: 'only']
+	trigger_kind ?int      @[json: 'triggerKind']
 }
 
 // DocumentHighlight represents a highlighted occurrence of a symbol in a document.

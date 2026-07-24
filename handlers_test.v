@@ -512,7 +512,43 @@ fn test_apply_incremental_change_handles_utf8_columns() {
 		}
 	}
 	updated := apply_incremental_change(content, range, 'X')
-	assert updated == 'aXz'
+	// The trailing newline must be preserved: incremental edits are lossless and
+	// must not normalize line endings (P0-07 item 4).
+	assert updated == 'aXz\n'
+}
+
+fn test_apply_incremental_change_preserves_crlf() {
+	// CRLF line endings outside the edited span must be preserved exactly.
+	content := 'abc\r\ndef\r\nghi\r\n'
+	range := LSPRange{
+		start: Position{
+			line: 1
+			char: 0
+		}
+		end:   Position{
+			line: 1
+			char: 3
+		}
+	}
+	updated := apply_incremental_change(content, range, 'XYZ')
+	assert updated == 'abc\r\nXYZ\r\nghi\r\n'
+}
+
+fn test_apply_incremental_change_rejects_reversed_range() {
+	content := 'abcdef'
+	range := LSPRange{
+		start: Position{
+			line: 0
+			char: 4
+		}
+		end:   Position{
+			line: 0
+			char: 2
+		}
+	}
+	// A reversed range is invalid; the content must be returned unchanged.
+	updated := apply_incremental_change(content, range, 'X')
+	assert updated == content
 }
 
 fn test_apply_incremental_change_handles_multiline_ranges() {
@@ -3656,4 +3692,75 @@ fn test_call_hierarchy_incoming_returns_callers() {
 	assert resp.result is []CallHierarchyIncomingCall
 	calls := resp.result as []CallHierarchyIncomingCall
 	assert calls.any(it.from.name == 'main')
+}
+
+// --- P0-09: Organize Imports must never delete non-import code ---
+
+fn test_organize_imports_refuses_non_contiguous_block() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	uri := 'file:///tmp/oi_noncontig.v'
+	// Imports separated by a function: organizing must NOT delete `helper`.
+	app.open_files[uri] = 'import os\n\nfn helper() {}\n\nimport time\n'
+	params := CodeActionParams{
+		text_document: TextDocumentIdentifier{
+			uri: uri
+		}
+		range:         LSPRange{}
+		context:       CodeActionContext{}
+	}
+	resp := app.handle_code_action(Request{
+		id:     1
+		params: json.encode(params)
+	})
+	assert resp.result is []CodeAction
+	actions := resp.result as []CodeAction
+	for a in actions {
+		assert a.kind != code_action_kind_source_organize_imports, 'organize imports must not be offered for non-contiguous imports'
+	}
+}
+
+fn test_organize_imports_sorts_contiguous_block() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	uri := 'file:///tmp/oi_contig.v'
+	app.open_files[uri] = 'import time\nimport os\nimport os\n'
+	params := CodeActionParams{
+		text_document: TextDocumentIdentifier{
+			uri: uri
+		}
+		range:         LSPRange{}
+		context:       CodeActionContext{}
+	}
+	resp := app.handle_code_action(Request{
+		id:     2
+		params: json.encode(params)
+	})
+	assert resp.result is []CodeAction
+	actions := resp.result as []CodeAction
+	mut found := false
+	for a in actions {
+		if a.kind == code_action_kind_source_organize_imports {
+			found = true
+			edit := a.edit or { continue }
+			edits := edit.changes[uri]
+			assert edits.len == 1
+			// Sorted + deduplicated.
+			assert edits[0].new_text == 'import os\nimport time'
+		}
+	}
+	assert found, 'organize imports should be offered for a contiguous import block'
+}
+
+fn test_code_action_kind_wanted_respects_only_filter() {
+	assert code_action_kind_wanted([], 'quickfix')
+	assert code_action_kind_wanted(['quickfix'], 'quickfix')
+	assert code_action_kind_wanted(['source'], 'source.organizeImports')
+	assert code_action_kind_wanted(['source.organizeImports'], 'source.organizeImports')
+	assert !code_action_kind_wanted(['quickfix'], 'source.organizeImports')
+	assert !code_action_kind_wanted(['source.organizeImports'], 'quickfix')
 }
