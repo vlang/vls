@@ -2,7 +2,7 @@
 // Use of this source code is governed by a GPL license that can be found in the LICENSE file.
 module main
 
-import json
+import json2
 import os
 import strings
 import time
@@ -332,7 +332,7 @@ fn (mut app App) run_v_check(path string, text string) []JsonError {
 
 	cleanup_compilation_temp(temp_project_dir, singlefile_tmppath)
 
-	json_errors := json.decode([]JsonError, x.output) or {
+	json_errors := json2.decode[[]JsonError](x.output) or {
 		log('failed to parse json ${err}')
 		return []
 	}
@@ -496,7 +496,7 @@ fn symlink_untracked_files(working_dir string, temp_dir string, tracked_files ma
 // When an externally tracked file is created, changed, or deleted on disk,
 // this notification keeps the in-memory open_files map consistent.
 fn (mut app App) on_did_change_watched_files(request Request) {
-	params := json.decode(DidChangeWatchedFilesParams, request.params) or {
+	params := json2.decode[DidChangeWatchedFilesParams](request.params) or {
 		$if debug { log('Failed to decode DidChangeWatchedFilesParams: ${err}') }
 		return
 	}
@@ -659,11 +659,11 @@ fn (mut app App) run_v_line_info(method Method, path string, line_info string) R
 	mut result := ResponseResult('null')
 	match method {
 		.completion {
-			result_tmp := json.decode(JsonVarAC, x.output) or { JsonVarAC{} }
+			result_tmp := json2.decode[JsonVarAC](x.output) or { JsonVarAC{} }
 			result = result_tmp.details
 		}
 		.signature_help {
-			sig := json.decode(SignatureHelp, x.output) or { SignatureHelp{} }
+			sig := json2.decode[SignatureHelp](x.output) or { SignatureHelp{} }
 			// Return null when the compiler found no active signature so editors do not show
 			// empty signature popups (LSP spec: SignatureHelp | null).
 			if sig.signatures.len == 0 {
@@ -674,7 +674,7 @@ fn (mut app App) run_v_line_info(method Method, path string, line_info string) R
 		}
 		.hover {
 			// Decode the Hover JSON emitted by the compiler's hv^ mode.
-			hover_result := json.decode(Hover, x.output) or { Hover{} }
+			hover_result := json2.decode[Hover](x.output) or { Hover{} }
 			// Extract vdoc comment via cross-file search as a fallback when the
 			// compiler does not provide documentation.
 			mut doc := ''

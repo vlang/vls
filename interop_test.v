@@ -3,7 +3,7 @@
 module main
 
 import os
-import json
+import json2
 import time
 
 fn interop_test_must_mkdir_all(path string) {
@@ -597,7 +597,7 @@ fn test_request_struct() {
 		id:      1
 		method:  'textDocument/completion'
 		jsonrpc: '2.0'
-		params:  json.encode(Params{
+		params:  json2.encode(Params{
 			position:      Position{
 				line: 5
 				char: 10
@@ -605,11 +605,13 @@ fn test_request_struct() {
 			text_document: TextDocumentIdentifier{
 				uri: 'file:///test.v'
 			}
-		})
+		},
+			escape_unicode: true
+		)
 	}
 	assert req.id == 1
 	assert req.method == 'textDocument/completion'
-	params := json.decode(Params, req.params.str()) or {
+	params := json2.decode[Params](req.params.str()) or {
 		assert false, 'decode failed: ${err}'
 		return
 	}
@@ -618,7 +620,7 @@ fn test_request_struct() {
 
 fn test_request_params_decode_malformed_returns_error() {
 	malformed := '{"textDocument":{"uri":"file:///test.v"},"position":{"line":5,"character":}}'
-	if _ := json.decode(Params, malformed) {
+	if _ := json2.decode[Params](malformed) {
 		assert false, 'Expected malformed params JSON to fail decoding'
 	} else {
 		assert true

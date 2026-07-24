@@ -3,7 +3,7 @@
 module main
 
 import os
-import json
+import json2
 import io
 
 fn integration_test_must_mkdir_all(path string) {
@@ -89,7 +89,7 @@ fn test_integration_initialize_response_structure() {
 		}
 	}
 
-	encoded := json.encode(response)
+	encoded := json2.encode(response, escape_unicode: true)
 	assert encoded.contains('"id":0')
 	assert encoded.contains('"jsonrpc":"2.0"')
 	assert encoded.contains('"result"')
@@ -109,7 +109,7 @@ fn test_integration_initialize_does_not_advertise_client_snippet_support() {
 		}
 	}
 
-	encoded := json.encode(response)
+	encoded := json2.encode(response, escape_unicode: true)
 	assert !encoded.contains('"snippetSupport"')
 }
 
@@ -160,7 +160,7 @@ fn test_integration_initialize_workspace_capabilities() {
 		}
 	}
 
-	encoded := json.encode(response)
+	encoded := json2.encode(response, escape_unicode: true)
 	assert encoded.contains('"executeCommandProvider":{"commands":["vls.runFile","vls.runTests"]}')
 	assert encoded.contains('"workspaceFolders":{"supported":true,"changeNotifications":true}')
 	assert encoded.contains('"fileOperations":{"willCreate"')
@@ -186,11 +186,13 @@ fn test_integration_document_lifecycle() {
 		id:      1
 		method:  'textDocument/didOpen'
 		jsonrpc: '2.0'
-		params:  json.encode(Params{
+		params:  json2.encode(Params{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-		})
+		},
+			escape_unicode: true
+		)
 	}
 	app.on_did_open(open_request)
 
@@ -203,14 +205,16 @@ fn test_integration_document_lifecycle() {
 		id:      2
 		method:  'textDocument/didChange'
 		jsonrpc: '2.0'
-		params:  json.encode(Params{
+		params:  json2.encode(Params{
 			text_document:   TextDocumentIdentifier{
 				uri: uri
 			}
 			content_changes: [ContentChange{
 				text: new_content
 			}]
-		})
+		},
+			escape_unicode: true
+		)
 	}
 	app.on_did_change(change_request)
 
@@ -232,11 +236,13 @@ fn test_integration_document_open_close_cycle() {
 
 	// Open
 	app.on_did_open(Request{
-		params: json.encode(Params{
+		params: json2.encode(Params{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-		})
+		},
+			escape_unicode: true
+		)
 	})
 	assert app.open_files.len == 1
 
@@ -246,11 +252,13 @@ fn test_integration_document_open_close_cycle() {
 	uri2 := path_to_uri(test_file2)
 
 	app.on_did_open(Request{
-		params: json.encode(Params{
+		params: json2.encode(Params{
 			text_document: TextDocumentIdentifier{
 				uri: uri2
 			}
-		})
+		},
+			escape_unicode: true
+		)
 	})
 	assert app.open_files.len == 2
 }
@@ -276,18 +284,22 @@ fn test_integration_multifile_project() {
 
 	// Open both files
 	app.on_did_open(Request{
-		params: json.encode(Params{
+		params: json2.encode(Params{
 			text_document: TextDocumentIdentifier{
 				uri: main_uri
 			}
-		})
+		},
+			escape_unicode: true
+		)
 	})
 	app.on_did_open(Request{
-		params: json.encode(Params{
+		params: json2.encode(Params{
 			text_document: TextDocumentIdentifier{
 				uri: utils_uri
 			}
-		})
+		},
+			escape_unicode: true
+		)
 	})
 
 	assert app.open_files.len == 2
@@ -316,18 +328,22 @@ fn test_integration_multifile_cross_file_reference() {
 
 	// Open both files
 	app.on_did_open(Request{
-		params: json.encode(Params{
+		params: json2.encode(Params{
 			text_document: TextDocumentIdentifier{
 				uri: main_uri
 			}
-		})
+		},
+			escape_unicode: true
+		)
 	})
 	app.on_did_open(Request{
-		params: json.encode(Params{
+		params: json2.encode(Params{
 			text_document: TextDocumentIdentifier{
 				uri: helper_uri
 			}
-		})
+		},
+			escape_unicode: true
+		)
 	})
 
 	// Verify both files are tracked
@@ -356,18 +372,22 @@ fn test_integration_multifile_nested_directories() {
 	lib_uri := path_to_uri(lib_file)
 
 	app.on_did_open(Request{
-		params: json.encode(Params{
+		params: json2.encode(Params{
 			text_document: TextDocumentIdentifier{
 				uri: main_uri
 			}
-		})
+		},
+			escape_unicode: true
+		)
 	})
 	app.on_did_open(Request{
-		params: json.encode(Params{
+		params: json2.encode(Params{
 			text_document: TextDocumentIdentifier{
 				uri: lib_uri
 			}
-		})
+		},
+			escape_unicode: true
+		)
 	})
 
 	assert app.open_files.len == 2
@@ -389,23 +409,27 @@ fn test_integration_diagnostics_syntax_error() {
 
 	// Open the file
 	app.on_did_open(Request{
-		params: json.encode(Params{
+		params: json2.encode(Params{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-		})
+		},
+			escape_unicode: true
+		)
 	})
 
 	// Trigger change to get diagnostics
 	change_request := Request{
-		params: json.encode(Params{
+		params: json2.encode(Params{
 			text_document:   TextDocumentIdentifier{
 				uri: uri
 			}
 			content_changes: [ContentChange{
 				text: error_content
 			}]
-		})
+		},
+			escape_unicode: true
+		)
 	}
 
 	result := app.on_did_change(change_request)
@@ -432,22 +456,26 @@ fn test_integration_diagnostics_valid_code() {
 	uri := path_to_uri(test_file)
 
 	app.on_did_open(Request{
-		params: json.encode(Params{
+		params: json2.encode(Params{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-		})
+		},
+			escape_unicode: true
+		)
 	})
 
 	change_request := Request{
-		params: json.encode(Params{
+		params: json2.encode(Params{
 			text_document:   TextDocumentIdentifier{
 				uri: uri
 			}
 			content_changes: [ContentChange{
 				text: valid_content
 			}]
-		})
+		},
+			escape_unicode: true
+		)
 	}
 
 	result := app.on_did_change(change_request)
@@ -507,23 +535,27 @@ fn test_integration_diagnostics_empty_file() {
 	uri := path_to_uri(test_file)
 
 	app.on_did_open(Request{
-		params: json.encode(Params{
+		params: json2.encode(Params{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-		})
+		},
+			escape_unicode: true
+		)
 	})
 
 	// Empty content should be processed and return diagnostics for the empty file
 	result := app.on_did_change(Request{
-		params: json.encode(Params{
+		params: json2.encode(Params{
 			text_document:   TextDocumentIdentifier{
 				uri: uri
 			}
 			content_changes: [ContentChange{
 				text: ''
 			}]
-		})
+		},
+			escape_unicode: true
+		)
 	})
 
 	if notif := result {
@@ -547,11 +579,13 @@ fn test_integration_completion_request() {
 	uri := path_to_uri(test_file)
 
 	app.on_did_open(Request{
-		params: json.encode(Params{
+		params: json2.encode(Params{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-		})
+		},
+			escape_unicode: true
+		)
 	})
 	app.text = content
 	app.open_files[uri] = content
@@ -561,7 +595,7 @@ fn test_integration_completion_request() {
 		id:      1
 		method:  'textDocument/completion'
 		jsonrpc: '2.0'
-		params:  json.encode(Params{
+		params:  json2.encode(Params{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
@@ -569,7 +603,9 @@ fn test_integration_completion_request() {
 				line: 3
 				char: 4
 			} // After "os."
-		})
+		},
+			escape_unicode: true
+		)
 	}
 
 	response := app.operation_at_pos(.completion, request)
@@ -595,7 +631,7 @@ fn test_integration_completion_request_id_preserved() {
 	for id in [1, 42, 100, 999] {
 		request := Request{
 			id:     id
-			params: json.encode(Params{
+			params: json2.encode(Params{
 				text_document: TextDocumentIdentifier{
 					uri: uri
 				}
@@ -603,7 +639,9 @@ fn test_integration_completion_request_id_preserved() {
 					line: 2
 					char: 0
 				}
-			})
+			},
+				escape_unicode: true
+			)
 		}
 		response := app.operation_at_pos(.completion, request)
 		assert response.id == id
@@ -626,7 +664,7 @@ fn test_integration_completion_at_function_call() {
 
 	request := Request{
 		id:     1
-		params: json.encode(Params{
+		params: json2.encode(Params{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
@@ -634,7 +672,9 @@ fn test_integration_completion_at_function_call() {
 				line: 3
 				char: 9
 			}
-		})
+		},
+			escape_unicode: true
+		)
 	}
 
 	response := app.operation_at_pos(.completion, request)
@@ -654,11 +694,13 @@ fn test_integration_definition_request() {
 	uri := path_to_uri(test_file)
 
 	app.on_did_open(Request{
-		params: json.encode(Params{
+		params: json2.encode(Params{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-		})
+		},
+			escape_unicode: true
+		)
 	})
 	app.text = content
 	app.open_files[uri] = content
@@ -668,7 +710,7 @@ fn test_integration_definition_request() {
 		id:      2
 		method:  'textDocument/definition'
 		jsonrpc: '2.0'
-		params:  json.encode(Params{
+		params:  json2.encode(Params{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
@@ -676,7 +718,9 @@ fn test_integration_definition_request() {
 				line: 5
 				char: 2
 			} // At "helper()"
-		})
+		},
+			escape_unicode: true
+		)
 	}
 
 	response := app.operation_at_pos(.definition, request)
@@ -704,18 +748,22 @@ fn test_integration_definition_multifile() {
 
 	// Open both files
 	app.on_did_open(Request{
-		params: json.encode(Params{
+		params: json2.encode(Params{
 			text_document: TextDocumentIdentifier{
 				uri: main_uri
 			}
-		})
+		},
+			escape_unicode: true
+		)
 	})
 	app.on_did_open(Request{
-		params: json.encode(Params{
+		params: json2.encode(Params{
 			text_document: TextDocumentIdentifier{
 				uri: utils_uri
 			}
-		})
+		},
+			escape_unicode: true
+		)
 	})
 	app.text = main_content
 	app.open_files[main_uri] = main_content
@@ -724,7 +772,7 @@ fn test_integration_definition_multifile() {
 	// Request definition from main file
 	request := Request{
 		id:     3
-		params: json.encode(Params{
+		params: json2.encode(Params{
 			text_document: TextDocumentIdentifier{
 				uri: main_uri
 			}
@@ -732,7 +780,9 @@ fn test_integration_definition_multifile() {
 				line: 3
 				char: 2
 			}
-		})
+		},
+			escape_unicode: true
+		)
 	}
 
 	response := app.operation_at_pos(.definition, request)
@@ -752,11 +802,13 @@ fn test_integration_signature_help_request() {
 	uri := path_to_uri(test_file)
 
 	app.on_did_open(Request{
-		params: json.encode(Params{
+		params: json2.encode(Params{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-		})
+		},
+			escape_unicode: true
+		)
 	})
 	app.text = content
 	app.open_files[uri] = content
@@ -766,7 +818,7 @@ fn test_integration_signature_help_request() {
 		id:      3
 		method:  'textDocument/signatureHelp'
 		jsonrpc: '2.0'
-		params:  json.encode(Params{
+		params:  json2.encode(Params{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
@@ -774,7 +826,9 @@ fn test_integration_signature_help_request() {
 				line: 5
 				char: 7
 			} // After "greet("
-		})
+		},
+			escape_unicode: true
+		)
 	}
 
 	response := app.operation_at_pos(.signature_help, request)
@@ -798,7 +852,7 @@ fn test_integration_signature_help_with_params() {
 	// At second parameter position
 	request := Request{
 		id:     4
-		params: json.encode(Params{
+		params: json2.encode(Params{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
@@ -806,7 +860,9 @@ fn test_integration_signature_help_with_params() {
 				line: 5
 				char: 7
 			}
-		})
+		},
+			escape_unicode: true
+		)
 	}
 
 	response := app.operation_at_pos(.signature_help, request)
@@ -827,11 +883,13 @@ fn test_integration_temp_file_single() {
 
 	// Only one file open - should use single file mode
 	app.on_did_open(Request{
-		params: json.encode(Params{
+		params: json2.encode(Params{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-		})
+		},
+			escape_unicode: true
+		)
 	})
 
 	assert app.open_files.len == 1
@@ -853,18 +911,22 @@ fn test_integration_temp_file_multifile() {
 	uri2 := path_to_uri(file2)
 
 	app.on_did_open(Request{
-		params: json.encode(Params{
+		params: json2.encode(Params{
 			text_document: TextDocumentIdentifier{
 				uri: uri1
 			}
-		})
+		},
+			escape_unicode: true
+		)
 	})
 	app.on_did_open(Request{
-		params: json.encode(Params{
+		params: json2.encode(Params{
 			text_document: TextDocumentIdentifier{
 				uri: uri2
 			}
-		})
+		},
+			escape_unicode: true
+		)
 	})
 
 	// Multiple files - should use multi-file mode
@@ -906,7 +968,7 @@ fn test_integration_json_error_parsing() {
 	// Test parsing of V compiler JSON error output
 	json_output := '[{"path":"/test/file.v","message":"undefined identifier `foo`","line_nr":10,"col":5,"len":3}]'
 
-	errors := json.decode([]JsonError, json_output) or {
+	errors := json2.decode[[]JsonError](json_output) or {
 		assert false, 'Failed to parse JSON errors: ${err}'
 		return
 	}
@@ -922,7 +984,7 @@ fn test_integration_json_error_parsing() {
 fn test_integration_json_error_parsing_empty() {
 	json_output := '[]'
 
-	errors := json.decode([]JsonError, json_output) or {
+	errors := json2.decode[[]JsonError](json_output) or {
 		assert false, 'Failed to parse empty JSON errors: ${err}'
 		return
 	}
@@ -933,7 +995,7 @@ fn test_integration_json_error_parsing_empty() {
 fn test_integration_json_error_parsing_multiple() {
 	json_output := '[{"path":"/test/a.v","message":"error 1","line_nr":1,"col":1,"len":1},{"path":"/test/b.v","message":"error 2","line_nr":2,"col":2,"len":2}]'
 
-	errors := json.decode([]JsonError, json_output) or {
+	errors := json2.decode[[]JsonError](json_output) or {
 		assert false, 'Failed to parse multiple JSON errors: ${err}'
 		return
 	}
@@ -946,7 +1008,7 @@ fn test_integration_json_error_parsing_multiple() {
 fn test_integration_json_error_with_special_chars() {
 	json_output := '[{"path":"/test/file.v","message":"cannot use `string` as `int` in argument","line_nr":5,"col":10,"len":6}]'
 
-	errors := json.decode([]JsonError, json_output) or {
+	errors := json2.decode[[]JsonError](json_output) or {
 		assert false, 'Failed to parse JSON errors with special chars: ${err}'
 		return
 	}
@@ -994,7 +1056,7 @@ fn test_integration_notification_encoding() {
 		}
 	}
 
-	encoded := json.encode(notification)
+	encoded := json2.encode(notification, escape_unicode: true)
 
 	assert encoded.contains('"method":"textDocument/publishDiagnostics"')
 	assert encoded.contains('"jsonrpc":"2.0"')
@@ -1053,7 +1115,7 @@ fn test_integration_completion_response_encoding() {
 		result: details
 	}
 
-	encoded := json.encode(response)
+	encoded := json2.encode(response, escape_unicode: true)
 	assert encoded.contains('"label":"println"')
 	assert encoded.contains('"label":"print"')
 }
@@ -1076,7 +1138,7 @@ fn test_integration_location_response_encoding() {
 		}
 	}
 
-	encoded := json.encode(response)
+	encoded := json2.encode(response, escape_unicode: true)
 	assert encoded.contains('"uri":"file:///test/main.v"')
 	assert encoded.contains('"line":10')
 }
@@ -1103,7 +1165,7 @@ fn test_integration_signature_help_response_encoding() {
 		}
 	}
 
-	encoded := json.encode(response)
+	encoded := json2.encode(response, escape_unicode: true)
 	assert encoded.contains('"activeSignature":0')
 	assert encoded.contains('"activeParameter":1')
 	assert encoded.contains('"label":"fn test(a int, b string)"')
@@ -1128,7 +1190,7 @@ fn test_integration_request_id_preserved() {
 		request := Request{
 			id:     id
 			method: 'textDocument/completion'
-			params: json.encode(Params{
+			params: json2.encode(Params{
 				text_document: TextDocumentIdentifier{
 					uri: uri
 				}
@@ -1136,7 +1198,9 @@ fn test_integration_request_id_preserved() {
 					line: 2
 					char: 0
 				}
-			})
+			},
+				escape_unicode: true
+			)
 		}
 
 		response := app.operation_at_pos(.completion, request)
@@ -1260,32 +1324,36 @@ fn test_integration_full_lifecycle() {
 
 	// 3. Open document
 	app.on_did_open(Request{
-		params: json.encode(Params{
+		params: json2.encode(Params{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-		})
+		},
+			escape_unicode: true
+		)
 	})
 	assert uri in app.open_files
 
 	// 4. Make changes
 	modified_content := 'module main\n\nfn helper() {}\n\nfn main() {\n\thelper()\n}\n'
 	app.on_did_change(Request{
-		params: json.encode(Params{
+		params: json2.encode(Params{
 			text_document:   TextDocumentIdentifier{
 				uri: uri
 			}
 			content_changes: [ContentChange{
 				text: modified_content
 			}]
-		})
+		},
+			escape_unicode: true
+		)
 	})
 	assert app.text == modified_content
 
 	// 5. Request completion
 	comp_response := app.operation_at_pos(.completion, Request{
 		id:     1
-		params: json.encode(Params{
+		params: json2.encode(Params{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
@@ -1293,14 +1361,16 @@ fn test_integration_full_lifecycle() {
 				line: 5
 				char: 2
 			}
-		})
+		},
+			escape_unicode: true
+		)
 	})
 	assert comp_response.id == 1
 
 	// 6. Request definition
 	def_response := app.operation_at_pos(.definition, Request{
 		id:     2
-		params: json.encode(Params{
+		params: json2.encode(Params{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
@@ -1308,7 +1378,9 @@ fn test_integration_full_lifecycle() {
 				line: 5
 				char: 2
 			}
-		})
+		},
+			escape_unicode: true
+		)
 	})
 	assert def_response.id == 2
 
@@ -1323,7 +1395,7 @@ fn test_integration_shutdown_response() {
 		result: 'null'
 	}
 
-	encoded := json.encode(shutdown_resp)
+	encoded := json2.encode(shutdown_resp, escape_unicode: true)
 	assert encoded.contains('"id":1')
 	assert encoded.contains('"result":"null"')
 	assert encoded.contains('"jsonrpc":"2.0"')
@@ -1787,7 +1859,7 @@ fn test_integration_completion_includes_sibling_pub_fn() {
 	// Request completion at `helper` on line 3, col 1 (not after '.')
 	response := app.operation_at_pos(.completion, Request{
 		id:     1
-		params: json.encode(Params{
+		params: json2.encode(Params{
 			text_document: TextDocumentIdentifier{
 				uri: main_uri
 			}
@@ -1795,7 +1867,9 @@ fn test_integration_completion_includes_sibling_pub_fn() {
 				line: 3
 				char: 1
 			}
-		})
+		},
+			escape_unicode: true
+		)
 	})
 
 	assert response.id == 1
@@ -1831,7 +1905,7 @@ fn test_integration_completion_includes_private_sibling_fn() {
 
 	response := app.operation_at_pos(.completion, Request{
 		id:     1
-		params: json.encode(Params{
+		params: json2.encode(Params{
 			text_document: TextDocumentIdentifier{
 				uri: main_uri
 			}
@@ -1839,7 +1913,9 @@ fn test_integration_completion_includes_private_sibling_fn() {
 				line: 3
 				char: 2
 			}
-		})
+		},
+			escape_unicode: true
+		)
 	})
 
 	assert response.id == 1
@@ -1868,7 +1944,7 @@ fn test_integration_completion_includes_current_file_fns() {
 
 	response := app.operation_at_pos(.completion, Request{
 		id:     1
-		params: json.encode(Params{
+		params: json2.encode(Params{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
@@ -1876,7 +1952,9 @@ fn test_integration_completion_includes_current_file_fns() {
 				line: 5 // inside fn main, after `he`
 				char: 2
 			}
-		})
+		},
+			escape_unicode: true
+		)
 	})
 
 	assert response.id == 1
@@ -1900,20 +1978,24 @@ fn test_integration_did_close_removes_tracked_file() {
 	uri := path_to_uri(test_file)
 
 	app.on_did_open(Request{
-		params: json.encode(Params{
+		params: json2.encode(Params{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-		})
+		},
+			escape_unicode: true
+		)
 	})
 	assert uri in app.open_files
 
 	app.on_did_close(Request{
-		params: json.encode(DidCloseTextDocumentParams{
+		params: json2.encode(DidCloseTextDocumentParams{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-		})
+		},
+			escape_unicode: true
+		)
 	})
 
 	assert uri !in app.open_files
@@ -1932,11 +2014,13 @@ fn test_integration_did_save_returns_diagnostics_notification() {
 	app.open_files[uri] = content
 
 	notification := app.on_did_save(Request{
-		params: json.encode(DidSaveTextDocumentParams{
+		params: json2.encode(DidSaveTextDocumentParams{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-		})
+		},
+			escape_unicode: true
+		)
 	}) or {
 		assert false, 'Expected didSave to produce diagnostics notification'
 		return
@@ -1961,7 +2045,7 @@ fn test_integration_prepare_rename_returns_symbol_range() {
 	response := app.handle_prepare_rename(Request{
 		id:     301
 		method: 'textDocument/prepareRename'
-		params: json.encode(TextDocumentPositionParams{
+		params: json2.encode(TextDocumentPositionParams{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
@@ -1969,7 +2053,9 @@ fn test_integration_prepare_rename_returns_symbol_range() {
 				line: 4
 				char: 12
 			}
-		})
+		},
+			escape_unicode: true
+		)
 	})
 
 	assert response.id == 301
@@ -1994,9 +2080,11 @@ fn test_integration_workspace_symbol_query_matches() {
 	response := app.handle_workspace_symbol(Request{
 		id:     302
 		method: 'workspace/symbol'
-		params: json.encode(WorkspaceSymbolParams{
+		params: json2.encode(WorkspaceSymbolParams{
 			query: 'name'
-		})
+		},
+			escape_unicode: true
+		)
 	})
 
 	assert response.id == 302
@@ -2026,7 +2114,7 @@ fn test_integration_alias_navigation_methods_preserve_id() {
 		resp := app.operation_at_pos(m, Request{
 			id:     request_id
 			method: m.str()
-			params: json.encode(TextDocumentPositionParams{
+			params: json2.encode(TextDocumentPositionParams{
 				text_document: TextDocumentIdentifier{
 					uri: uri
 				}
@@ -2034,7 +2122,9 @@ fn test_integration_alias_navigation_methods_preserve_id() {
 					line: 5
 					char: 2
 				}
-			})
+			},
+				escape_unicode: true
+			)
 		})
 		assert resp.id == request_id
 		request_id++
@@ -2059,9 +2149,11 @@ fn test_integration_capability_flags_for_new_features() {
 		workspace_symbol_provider: true
 	}
 
-	encoded := json.encode(Capabilities{
+	encoded := json2.encode(Capabilities{
 		capabilities: caps
-	})
+	},
+		escape_unicode: true
+	)
 
 	assert encoded.contains('"save":{"includeText":true}')
 	assert encoded.contains('"declarationProvider":true')

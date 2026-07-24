@@ -2,14 +2,14 @@
 // Use of this source code is governed by a GPL license that can be found in the LICENSE file.
 module main
 
-import json
+import json2
 import os
 
 // handle_prepare_call_hierarchy handles textDocument/prepareCallHierarchy.
 // It resolves the function or method at the given cursor position and returns
 // a CallHierarchyItem that can be used for subsequent incoming/outgoing queries.
 fn (mut app App) handle_prepare_call_hierarchy(request Request) Response {
-	params := json.decode(PrepareCallHierarchyParams, request.params) or {
+	params := json2.decode[PrepareCallHierarchyParams](request.params) or {
 		$if debug { log('Failed to decode PrepareCallHierarchyParams: ${err}') }
 		return Response{
 			id:     request.id
@@ -63,7 +63,7 @@ fn (mut app App) handle_prepare_call_hierarchy(request Request) Response {
 // For each .v file reachable from the item's working directory it scans for
 // calls to the queried function and groups them by the enclosing caller.
 fn (mut app App) handle_call_hierarchy_incoming(request Request) Response {
-	params := json.decode(CallHierarchyIncomingCallsParams, request.params) or {
+	params := json2.decode[CallHierarchyIncomingCallsParams](request.params) or {
 		$if debug { log('Failed to decode CallHierarchyIncomingCallsParams: ${err}') }
 		return Response{
 			id:     request.id
@@ -129,7 +129,7 @@ fn (mut app App) handle_call_hierarchy_incoming(request Request) Response {
 // handle_call_hierarchy_outgoing handles callHierarchy/outgoingCalls.
 // It identifies every function called within the body of the queried function.
 fn (mut app App) handle_call_hierarchy_outgoing(request Request) Response {
-	params := json.decode(CallHierarchyOutgoingCallsParams, request.params) or {
+	params := json2.decode[CallHierarchyOutgoingCallsParams](request.params) or {
 		$if debug { log('Failed to decode CallHierarchyOutgoingCallsParams: ${err}') }
 		return Response{
 			id:     request.id

@@ -2,7 +2,7 @@
 // Use of this source code is governed by a GPL license that can be found in the LICENSE file.
 module main
 
-import json
+import json2
 import net
 import os
 import time
@@ -374,13 +374,22 @@ fn (mut app App) handle_requests(mut reader io.BufferedReader) {
 		// Preserve the exact id (numeric or string) so responses echo it
 		// verbatim; string ids would otherwise collapse to 0 (P0-02).
 		app.current_request_raw_id = extract_raw_id(content) or { '' }
-		request := json.decode(Request, content) or {
+		// Decode the body WITHOUT the id field: json2 aborts the whole decode on
+		// a string value in an int field, which would otherwise make every
+		// string-id request undecodable. The numeric id is derived from the raw
+		// id (0 for non-numeric ids), while the exact id is echoed via the raw id.
+		body := json2.decode[RequestBody](content) or {
 			log('Failed to decode JSON request: ${err.msg()}. Content: "${content}"')
 			app.write_error_response(make_parse_error_response(err.msg()))
 			continue
 		}
-		pretty := json.encode_pretty(request)
-		log('\n\nRECV (pretty): ${pretty}')
+		request := Request{
+			id:      raw_id_to_int(app.current_request_raw_id)
+			method:  body.method
+			jsonrpc: body.jsonrpc
+			params:  body.params
+		}
+		log('\n\nRECV (pretty): ${content}')
 		method := Method.from_string(request.method)
 		log('method="${method}" request.method="${request.method}" ${method == .completion}')
 		// Enforce request/notification direction (P0-03): a message with an id
@@ -549,7 +558,7 @@ fn (mut app App) handle_requests(mut reader io.BufferedReader) {
 			.did_open {
 				app.on_did_open(request)
 				// Publish diagnostics immediately on open (P0-07 item 10).
-				if params := json.decode(DidOpenTextDocumentParams, request.params) {
+				if params := json2.decode[DidOpenTextDocumentParams](request.params) {
 					uri := params.text_document.uri
 					if doc_content := app.open_files[uri] {
 						app.write_notification(app.build_diagnostics_notification(uri, doc_content))
@@ -559,7 +568,7 @@ fn (mut app App) handle_requests(mut reader io.BufferedReader) {
 			.did_close {
 				app.on_did_close(request)
 				// Clear published diagnostics for the closed document (P0-07 item 9).
-				if params := json.decode(DidCloseTextDocumentParams, request.params) {
+				if params := json2.decode[DidCloseTextDocumentParams](request.params) {
 					app.write_notification(Notification{
 						method: 'textDocument/publishDiagnostics'
 						params: PublishDiagnosticsParams{
@@ -699,6 +708,16 @@ fn (mut app App) handle_requests(mut reader io.BufferedReader) {
 
 fn request_content_has_id(content string) bool {
 	return extract_raw_id(content) != none
+}
+
+// raw_id_to_int converts a raw JSON id token to an int for internal use. String
+// ids (and absent ids) collapse to 0; the exact id is preserved separately via
+// the raw id and echoed verbatim in responses.
+fn raw_id_to_int(raw string) int {
+	if raw == '' || raw.starts_with('"') {
+		return 0
+	}
+	return raw.int()
 }
 
 // json_is_ws reports whether a byte is JSON insignificant whitespace.
@@ -899,7 +918,7 @@ fn (mut app App) write_response(response Response) {
 }
 
 fn encode_response_payload(response Response) string {
-	mut content := json.encode(response)
+	mut content := json2.encode(response, escape_unicode: true)
 	content = strip_response_sum_type_tags(content)
 	if response.result is string {
 		if (response.result as string) == 'null' {
@@ -922,7 +941,7 @@ fn strip_response_sum_type_tags(content string) string {
 }
 
 fn (mut app App) write_notification(notification Notification) {
-	content := json.encode(notification)
+	content := json2.encode(notification, escape_unicode: true)
 	headers := $if windows {
 		// windows text stdio will output `\r\n` for every `\n`
 		'Content-Length: ${content.len}\n\n'
@@ -953,7 +972,7 @@ fn (mut app App) write_error_response(response ErrorResponse) {
 }
 
 fn encode_error_response_payload(response ErrorResponse) string {
-	content := json.encode(response)
+	content := json2.encode(response, escape_unicode: true)
 	if response.error.code == jsonrpc_err_parse_error {
 		return content.replace('"id":0', '"id":null')
 	}
@@ -1164,7 +1183,7 @@ fn make_internal_error_response(id int, message string) ErrorResponse {
 fn validate_request_params(method Method, params_json string) ?string {
 	return match method {
 		.initialize {
-			params := json.decode(InitializeParams, params_json) or {
+			params := json2.decode[InitializeParams](params_json) or {
 				return 'Invalid initialize params: ${err.msg()}'
 			}
 			if folders := params.workspace_folders {
@@ -1178,7 +1197,7 @@ fn validate_request_params(method Method, params_json string) ?string {
 		}
 		.completion, .signature_help, .definition, .hover, .declaration, .type_definition,
 		.implementation, .prepare_rename, .document_highlight {
-			params := json.decode(TextDocumentPositionParams, params_json) or {
+			params := json2.decode[TextDocumentPositionParams](params_json) or {
 				return 'Invalid textDocument/position params: ${err.msg()}'
 			}
 			if params.text_document.uri == '' {
@@ -1187,7 +1206,7 @@ fn validate_request_params(method Method, params_json string) ?string {
 			none
 		}
 		.references {
-			params := json.decode(ReferenceParams, params_json) or {
+			params := json2.decode[ReferenceParams](params_json) or {
 				return 'Invalid references params: ${err.msg()}'
 			}
 			if params.text_document.uri == '' {
@@ -1196,7 +1215,7 @@ fn validate_request_params(method Method, params_json string) ?string {
 			none
 		}
 		.rename {
-			params := json.decode(RenameParams, params_json) or {
+			params := json2.decode[RenameParams](params_json) or {
 				return 'Invalid rename params: ${err.msg()}'
 			}
 			if params.text_document.uri == '' {
@@ -1208,13 +1227,13 @@ fn validate_request_params(method Method, params_json string) ?string {
 			none
 		}
 		.workspace_symbol {
-			json.decode(WorkspaceSymbolParams, params_json) or {
+			json2.decode[WorkspaceSymbolParams](params_json) or {
 				return 'Invalid workspace/symbol params: ${err.msg()}'
 			}
 			none
 		}
 		.formatting {
-			params := json.decode(DocumentFormattingParams, params_json) or {
+			params := json2.decode[DocumentFormattingParams](params_json) or {
 				return 'Invalid formatting params: ${err.msg()}'
 			}
 			if params.text_document.uri == '' {
@@ -1223,7 +1242,7 @@ fn validate_request_params(method Method, params_json string) ?string {
 			none
 		}
 		.document_symbols {
-			params := json.decode(DocumentSymbolParams, params_json) or {
+			params := json2.decode[DocumentSymbolParams](params_json) or {
 				return 'Invalid documentSymbol params: ${err.msg()}'
 			}
 			if params.text_document.uri == '' {
@@ -1232,7 +1251,7 @@ fn validate_request_params(method Method, params_json string) ?string {
 			none
 		}
 		.inlay_hint {
-			params := json.decode(InlayHintParams, params_json) or {
+			params := json2.decode[InlayHintParams](params_json) or {
 				return 'Invalid inlayHint params: ${err.msg()}'
 			}
 			if params.text_document.uri == '' {
@@ -1241,7 +1260,7 @@ fn validate_request_params(method Method, params_json string) ?string {
 			none
 		}
 		.code_action {
-			params := json.decode(CodeActionParams, params_json) or {
+			params := json2.decode[CodeActionParams](params_json) or {
 				return 'Invalid codeAction params: ${err.msg()}'
 			}
 			if params.text_document.uri == '' {
@@ -1250,7 +1269,7 @@ fn validate_request_params(method Method, params_json string) ?string {
 			none
 		}
 		.semantic_tokens {
-			params := json.decode(SemanticTokensParams, params_json) or {
+			params := json2.decode[SemanticTokensParams](params_json) or {
 				return 'Invalid semanticTokens/full params: ${err.msg()}'
 			}
 			if params.text_document.uri == '' {
@@ -1259,7 +1278,7 @@ fn validate_request_params(method Method, params_json string) ?string {
 			none
 		}
 		.folding_range {
-			params := json.decode(FoldingRangeParams, params_json) or {
+			params := json2.decode[FoldingRangeParams](params_json) or {
 				return 'Invalid foldingRange params: ${err.msg()}'
 			}
 			if params.text_document.uri == '' {
@@ -1268,7 +1287,7 @@ fn validate_request_params(method Method, params_json string) ?string {
 			none
 		}
 		.callhierarchy_prepare {
-			params := json.decode(PrepareCallHierarchyParams, params_json) or {
+			params := json2.decode[PrepareCallHierarchyParams](params_json) or {
 				return 'Invalid prepareCallHierarchy params: ${err.msg()}'
 			}
 			if params.text_document.uri == '' {
@@ -1277,7 +1296,7 @@ fn validate_request_params(method Method, params_json string) ?string {
 			none
 		}
 		.callhierarchy_incoming {
-			params := json.decode(CallHierarchyIncomingCallsParams, params_json) or {
+			params := json2.decode[CallHierarchyIncomingCallsParams](params_json) or {
 				return 'Invalid incomingCalls params: ${err.msg()}'
 			}
 			if params.item.uri == '' {
@@ -1286,7 +1305,7 @@ fn validate_request_params(method Method, params_json string) ?string {
 			none
 		}
 		.callhierarchy_outgoing {
-			params := json.decode(CallHierarchyOutgoingCallsParams, params_json) or {
+			params := json2.decode[CallHierarchyOutgoingCallsParams](params_json) or {
 				return 'Invalid outgoingCalls params: ${err.msg()}'
 			}
 			if params.item.uri == '' {
@@ -1295,7 +1314,7 @@ fn validate_request_params(method Method, params_json string) ?string {
 			none
 		}
 		.selection_range {
-			params := json.decode(SelectionRangeParams, params_json) or {
+			params := json2.decode[SelectionRangeParams](params_json) or {
 				return 'Invalid selectionRange params: ${err.msg()}'
 			}
 			if params.text_document.uri == '' {
@@ -1304,7 +1323,7 @@ fn validate_request_params(method Method, params_json string) ?string {
 			none
 		}
 		.semantic_tokens_range {
-			params := json.decode(SemanticTokensRangeParams, params_json) or {
+			params := json2.decode[SemanticTokensRangeParams](params_json) or {
 				return 'Invalid semanticTokens/range params: ${err.msg()}'
 			}
 			if params.text_document.uri == '' {
@@ -1313,7 +1332,7 @@ fn validate_request_params(method Method, params_json string) ?string {
 			none
 		}
 		.range_formatting {
-			params := json.decode(DocumentRangeFormattingParams, params_json) or {
+			params := json2.decode[DocumentRangeFormattingParams](params_json) or {
 				return 'Invalid rangeFormatting params: ${err.msg()}'
 			}
 			if params.text_document.uri == '' {
@@ -1322,7 +1341,7 @@ fn validate_request_params(method Method, params_json string) ?string {
 			none
 		}
 		.linked_editing_range {
-			params := json.decode(TextDocumentPositionParams, params_json) or {
+			params := json2.decode[TextDocumentPositionParams](params_json) or {
 				return 'Invalid linkedEditingRange params: ${err.msg()}'
 			}
 			if params.text_document.uri == '' {
@@ -1331,7 +1350,7 @@ fn validate_request_params(method Method, params_json string) ?string {
 			none
 		}
 		.inline_value {
-			params := json.decode(InlineValueParams, params_json) or {
+			params := json2.decode[InlineValueParams](params_json) or {
 				return 'Invalid inlineValue params: ${err.msg()}'
 			}
 			if params.text_document.uri == '' {
@@ -1340,7 +1359,7 @@ fn validate_request_params(method Method, params_json string) ?string {
 			none
 		}
 		.code_lens {
-			params := json.decode(CodeLensParams, params_json) or {
+			params := json2.decode[CodeLensParams](params_json) or {
 				return 'Invalid codeLens params: ${err.msg()}'
 			}
 			if params.text_document.uri == '' {
@@ -1349,19 +1368,19 @@ fn validate_request_params(method Method, params_json string) ?string {
 			none
 		}
 		.code_lens_resolve {
-			json.decode(CodeLens, params_json) or {
+			json2.decode[CodeLens](params_json) or {
 				return 'Invalid codeLens/resolve params: ${err.msg()}'
 			}
 			none
 		}
 		.execute_command {
-			json.decode(ExecuteCommandParams, params_json) or {
+			json2.decode[ExecuteCommandParams](params_json) or {
 				return 'Invalid executeCommand params: ${err.msg()}'
 			}
 			none
 		}
 		.on_type_formatting {
-			params := json.decode(OnTypeFormattingParams, params_json) or {
+			params := json2.decode[OnTypeFormattingParams](params_json) or {
 				return 'Invalid onTypeFormatting params: ${err.msg()}'
 			}
 			if params.text_document.uri == '' {
@@ -1378,7 +1397,7 @@ fn validate_request_params(method Method, params_json string) ?string {
 fn validate_notification_params(method Method, params_json string) ?string {
 	return match method {
 		.did_open {
-			params := json.decode(DidOpenTextDocumentParams, params_json) or {
+			params := json2.decode[DidOpenTextDocumentParams](params_json) or {
 				return 'Invalid didOpen params: ${err.msg()}'
 			}
 			if params.text_document.uri == '' {
@@ -1387,7 +1406,7 @@ fn validate_notification_params(method Method, params_json string) ?string {
 			none
 		}
 		.did_change {
-			params := json.decode(DidChangeTextDocumentParams, params_json) or {
+			params := json2.decode[DidChangeTextDocumentParams](params_json) or {
 				return 'Invalid didChange params: ${err.msg()}'
 			}
 			if params.text_document.uri == '' {
@@ -1396,7 +1415,7 @@ fn validate_notification_params(method Method, params_json string) ?string {
 			none
 		}
 		.did_close {
-			params := json.decode(DidCloseTextDocumentParams, params_json) or {
+			params := json2.decode[DidCloseTextDocumentParams](params_json) or {
 				return 'Invalid didClose params: ${err.msg()}'
 			}
 			if params.text_document.uri == '' {
@@ -1405,7 +1424,7 @@ fn validate_notification_params(method Method, params_json string) ?string {
 			none
 		}
 		.did_save {
-			params := json.decode(DidSaveTextDocumentParams, params_json) or {
+			params := json2.decode[DidSaveTextDocumentParams](params_json) or {
 				return 'Invalid didSave params: ${err.msg()}'
 			}
 			if params.text_document.uri == '' {
@@ -1414,7 +1433,7 @@ fn validate_notification_params(method Method, params_json string) ?string {
 			none
 		}
 		.did_change_watched_files {
-			params := json.decode(DidChangeWatchedFilesParams, params_json) or {
+			params := json2.decode[DidChangeWatchedFilesParams](params_json) or {
 				return 'Invalid didChangeWatchedFiles params: ${err.msg()}'
 			}
 			for change in params.changes {
@@ -1493,7 +1512,7 @@ fn (mut app App) send_show_message(msg string, level int) {
 		type_:   level
 		message: msg
 	}
-	app.write_raw_notification('window/showMessage', json.encode(params))
+	app.write_raw_notification('window/showMessage', json2.encode(params, escape_unicode: true))
 }
 
 // send_log_message pushes a window/logMessage notification to the client.
@@ -1503,7 +1522,7 @@ fn (mut app App) send_log_message(msg string, level int) {
 		type_:   level
 		message: msg
 	}
-	app.write_raw_notification('window/logMessage', json.encode(params))
+	app.write_raw_notification('window/logMessage', json2.encode(params, escape_unicode: true))
 }
 
 // begin_progress sends window/workDoneProgress/create to the client and then
@@ -1519,14 +1538,15 @@ fn (mut app App) begin_progress(title string) string {
 	create_params := ProgressCreateParams{
 		token: token
 	}
-	app.write_raw_request(app.next_request_id, 'window/workDoneProgress/create',
-		json.encode(create_params))
+	app.write_raw_request(app.next_request_id, 'window/workDoneProgress/create', json2.encode(create_params,
+		escape_unicode: true
+	))
 	app.next_request_id++
 	// Send the begin payload.
 	begin := WorkDoneProgressBegin{
 		title: title
 	}
-	progress_json := '{"token":"${token}","value":${json.encode(begin)}}'
+	progress_json := '{"token":"${token}","value":${json2.encode(begin, escape_unicode: true)}}'
 	app.write_raw_notification('$/progress', progress_json)
 	return token
 }
@@ -1540,7 +1560,7 @@ fn (mut app App) report_progress(token string, message string, percentage int) {
 		message:    message
 		percentage: percentage
 	}
-	progress_json := '{"token":"${token}","value":${json.encode(report)}}'
+	progress_json := '{"token":"${token}","value":${json2.encode(report, escape_unicode: true)}}'
 	app.write_raw_notification('$/progress', progress_json)
 }
 
@@ -1552,7 +1572,7 @@ fn (mut app App) end_progress(token string, message string) {
 	end := WorkDoneProgressEnd{
 		message: message
 	}
-	progress_json := '{"token":"${token}","value":${json.encode(end)}}'
+	progress_json := '{"token":"${token}","value":${json2.encode(end, escape_unicode: true)}}'
 	app.write_raw_notification('$/progress', progress_json)
 }
 
@@ -1586,7 +1606,7 @@ fn (mut app App) on_initialized(_ Request) {
 		}
 	}
 	app.next_request_id++
-	content := json.encode(reg)
+	content := json2.encode(reg, escape_unicode: true)
 	headers := $if windows {
 		'Content-Length: ${content.len}\n\n'
 	} $else {

@@ -3,7 +3,7 @@
 module main
 
 import os
-import json
+import json2
 import time
 
 const v_keywords = ['asm', 'as', 'assert', 'atomic', 'break', 'const', 'continue', 'defer', 'dump',
@@ -17,7 +17,7 @@ const v_builtins = ['close', 'copy', 'eprintln', 'eprint', 'error', 'error_with_
 
 // operation_at_pos handles LSP requests at a given position (completion, hover, signature, definition).
 fn (mut app App) operation_at_pos(method Method, request Request) Response {
-	params := json.decode(TextDocumentPositionParams, request.params) or {
+	params := json2.decode[TextDocumentPositionParams](request.params) or {
 		$if debug { log('Failed to decode TextDocumentPositionParams: ${err}') }
 		return Response{
 			id:     request.id
@@ -368,7 +368,7 @@ fn parse_public_module_member_completions(content string) []Detail {
 
 // on_did_open handles the LSP didOpen notification, loading file content into the server state.
 fn (mut app App) on_did_open(request Request) {
-	params := json.decode(DidOpenTextDocumentParams, request.params) or {
+	params := json2.decode[DidOpenTextDocumentParams](request.params) or {
 		$if debug { log('Failed to decode DidOpenTextDocumentParams: ${err}') }
 		return
 	}
@@ -399,7 +399,7 @@ fn (mut app App) on_did_open(request Request) {
 // problems do not linger after close (P0-07). The dispatcher publishes an empty
 // diagnostic set to clear editor markers.
 fn (mut app App) on_did_close(request Request) {
-	params := json.decode(DidCloseTextDocumentParams, request.params) or {
+	params := json2.decode[DidCloseTextDocumentParams](request.params) or {
 		$if debug { log('Failed to decode DidCloseTextDocumentParams: ${err}') }
 		return
 	}
@@ -463,7 +463,7 @@ fn (mut app App) build_diagnostics_notification(uri string, content string) Noti
 
 // Returns instant red wavy errors
 fn (mut app App) on_did_change(request Request) ?Notification {
-	params := json.decode(DidChangeTextDocumentParams, request.params) or {
+	params := json2.decode[DidChangeTextDocumentParams](request.params) or {
 		$if debug { log('Failed to decode DidChangeTextDocumentParams: ${err}') }
 		return none
 	}
@@ -518,7 +518,7 @@ fn (mut app App) on_did_change(request Request) ?Notification {
 
 // on_did_save handles didSave by re-running diagnostics for the saved document.
 fn (mut app App) on_did_save(request Request) ?Notification {
-	params := json.decode(DidSaveTextDocumentParams, request.params) or {
+	params := json2.decode[DidSaveTextDocumentParams](request.params) or {
 		$if debug { log('Failed to decode DidSaveTextDocumentParams: ${err}') }
 		return none
 	}
@@ -558,7 +558,7 @@ fn (mut app App) on_did_save(request Request) ?Notification {
 // on_will_save_wait_until handles willSaveWaitUntil by formatting the document
 // before it is saved, returning the edits to apply atomically with the save.
 fn (mut app App) on_will_save_wait_until(request Request) Response {
-	params := json.decode(WillSaveTextDocumentParams, request.params) or {
+	params := json2.decode[WillSaveTextDocumentParams](request.params) or {
 		$if debug { log('Failed to decode WillSaveTextDocumentParams: ${err}') }
 		return Response{
 			id:     request.id
@@ -587,7 +587,7 @@ fn (mut app App) on_will_save_wait_until(request Request) Response {
 // and placeholder text for the identifier under the cursor, or an empty result
 // when the cursor is not on a renameable symbol.
 fn (mut app App) handle_prepare_rename(request Request) Response {
-	params := json.decode(TextDocumentPositionParams, request.params) or {
+	params := json2.decode[TextDocumentPositionParams](request.params) or {
 		$if debug { log('Failed to decode TextDocumentPositionParams for prepareRename: ${err}') }
 		return Response{
 			id:     request.id
@@ -719,7 +719,7 @@ fn find_word_bounds_at_col(line string, col int) (int, int) {
 // open project for symbols whose names contain the query string (case-insensitive)
 // and returns them as WorkspaceSymbol items.
 fn (mut app App) handle_workspace_symbol(request Request) Response {
-	params := json.decode(WorkspaceSymbolParams, request.params) or {
+	params := json2.decode[WorkspaceSymbolParams](request.params) or {
 		$if debug { log('Failed to decode WorkspaceSymbolParams: ${err}') }
 		return Response{
 			id:     request.id
@@ -905,7 +905,7 @@ fn apply_incremental_change(content string, range LSPRange, new_text string) str
 
 // find_references handles the LSP references request, returning all locations of a symbol.
 fn (mut app App) find_references(request Request) Response {
-	params := json.decode(ReferenceParams, request.params) or {
+	params := json2.decode[ReferenceParams](request.params) or {
 		$if debug { log('Failed to decode ReferenceParams: ${err}') }
 		return Response{
 			id:     request.id
@@ -964,7 +964,7 @@ fn (mut app App) find_references(request Request) Response {
 
 // handle_rename handles the LSP rename request, returning edits to rename a symbol.
 fn (mut app App) handle_rename(request Request) Response {
-	params := json.decode(RenameParams, request.params) or {
+	params := json2.decode[RenameParams](request.params) or {
 		$if debug { log('Failed to decode RenameParams: ${err}') }
 		return Response{
 			id:     request.id
@@ -1495,7 +1495,7 @@ fn (mut app App) format_content(uri string, content string) ([]TextEdit, string)
 
 // handle_formatting handles the LSP formatting request, returning edits to format the document.
 fn (mut app App) handle_formatting(request Request) Response {
-	params := json.decode(DocumentFormattingParams, request.params) or {
+	params := json2.decode[DocumentFormattingParams](request.params) or {
 		log('Failed to decode DocumentFormattingParams: ${err}')
 		return Response{
 			id:     request.id
@@ -1524,7 +1524,7 @@ fn (mut app App) handle_formatting(request Request) Response {
 
 // handle_document_symbols handles the LSP documentSymbol request, returning top-level symbols.
 fn (mut app App) handle_document_symbols(request Request) Response {
-	params := json.decode(DocumentSymbolParams, request.params) or {
+	params := json2.decode[DocumentSymbolParams](request.params) or {
 		log('Failed to decode DocumentSymbolParams: ${err}')
 		return Response{
 			id:     request.id
@@ -1548,7 +1548,7 @@ fn (mut app App) handle_inlay_hints(request Request) Response {
 			result: []InlayHint{}
 		}
 	}
-	params := json.decode(InlayHintParams, request.params) or {
+	params := json2.decode[InlayHintParams](request.params) or {
 		log('Failed to decode InlayHintParams: ${err}')
 		return Response{
 			id:     request.id
@@ -2315,7 +2315,7 @@ fn (mut app App) search_symbol_in_dirs_semantic(search_dirs []string, symbol str
 
 // handle_code_action handles the LSP codeAction request, returning quick fixes and organize imports.
 fn (mut app App) handle_code_action(request Request) Response {
-	params := json.decode(CodeActionParams, request.params) or {
+	params := json2.decode[CodeActionParams](request.params) or {
 		$if debug { log('Failed to decode CodeActionParams: ${err}') }
 		return Response{
 			id:     request.id
@@ -2624,7 +2624,7 @@ fn make_keyword_completions() []Detail {
 // handle_range_formatting handles textDocument/rangeFormatting.
 // It formats the whole file via `v fmt` and returns edits only for the requested range.
 fn (mut app App) handle_range_formatting(request Request) Response {
-	params := json.decode(DocumentRangeFormattingParams, request.params) or {
+	params := json2.decode[DocumentRangeFormattingParams](request.params) or {
 		log('Failed to decode DocumentRangeFormattingParams: ${err}')
 		return Response{
 			id:     request.id
@@ -2733,7 +2733,7 @@ fn (mut app App) handle_range_formatting(request Request) Response {
 // the identifier under the cursor as the inner range, and the enclosing line
 // as the outer (parent) range.  Clients expand the selection incrementally.
 fn (mut app App) handle_selection_range(request Request) Response {
-	params := json.decode(SelectionRangeParams, request.params) or {
+	params := json2.decode[SelectionRangeParams](request.params) or {
 		$if debug { log('Failed to decode SelectionRangeParams: ${err}') }
 		return Response{
 			id:     request.id
@@ -2830,7 +2830,7 @@ fn resolve_workspace_settings(params_json string) ResolvedWorkspaceSettings {
 	mut resolved := ResolvedWorkspaceSettings{}
 
 	// 1) Preferred shape: settings.vls.{inlayHints, diagnostics}
-	sectioned := json.decode(DidChangeConfigurationParams, params_json) or {
+	sectioned := json2.decode[DidChangeConfigurationParams](params_json) or {
 		DidChangeConfigurationParams{}
 	}
 	if enabled := sectioned.settings.vls.inlay_hints {
@@ -2843,7 +2843,7 @@ fn resolve_workspace_settings(params_json string) ResolvedWorkspaceSettings {
 	}
 
 	// 2) Direct shape: settings.{inlayHints, diagnostics}
-	direct := json.decode(DidChangeConfigurationDirectParams, params_json) or {
+	direct := json2.decode[DidChangeConfigurationDirectParams](params_json) or {
 		DidChangeConfigurationDirectParams{}
 	}
 	if !resolved.has_inlay_hints {
@@ -2860,7 +2860,7 @@ fn resolve_workspace_settings(params_json string) ResolvedWorkspaceSettings {
 	}
 
 	// 3) Nested compatibility shapes, used only when flat values are absent.
-	sectioned_nested := json.decode(DidChangeConfigurationParamsCompat, params_json) or {
+	sectioned_nested := json2.decode[DidChangeConfigurationParamsCompat](params_json) or {
 		DidChangeConfigurationParamsCompat{}
 	}
 	if !resolved.has_inlay_hints {
@@ -2870,7 +2870,7 @@ fn resolve_workspace_settings(params_json string) ResolvedWorkspaceSettings {
 		}
 	}
 
-	direct_nested := json.decode(DidChangeConfigurationDirectParamsCompat, params_json) or {
+	direct_nested := json2.decode[DidChangeConfigurationDirectParamsCompat](params_json) or {
 		DidChangeConfigurationDirectParamsCompat{}
 	}
 	if !resolved.has_inlay_hints {
@@ -2884,7 +2884,7 @@ fn resolve_workspace_settings(params_json string) ResolvedWorkspaceSettings {
 }
 
 fn (mut app App) on_initialize(request Request) ?string {
-	params := json.decode(InitializeParams, request.params) or {
+	params := json2.decode[InitializeParams](request.params) or {
 		msg := 'Invalid initialize params: ${err.msg()}'
 		$if debug { log(msg) }
 		return msg
@@ -2970,23 +2970,27 @@ fn normalize_workspace_root(path string) ?string {
 }
 
 fn (mut app App) on_cancel_request(request Request) {
-	params := json.decode(CancelRequestParams, request.params) or {
-		$if debug { log('Failed to decode CancelRequestParams: ${err}') }
-		return
-	}
-	app.cancelled_requests[params.id] = true
-	// Cancellation ids may be strings; capture the exact raw id so string-id
-	// requests can be cancelled too (P0-02/P0-03).
+	// Capture the exact raw id first: json2 aborts decoding CancelRequestParams
+	// when the id is a string, but string ids must still be cancellable
+	// (P0-02/P0-03).
 	if raw := extract_raw_id(request.params) {
 		app.cancelled_raw_ids[raw] = true
+		app.cancelled_requests[raw_id_to_int(raw)] = true
+		log('VLS: request ${raw} marked as cancelled')
+		return
 	}
-	log('VLS: request ${params.id} marked as cancelled')
+	if params := json2.decode[CancelRequestParams](request.params) {
+		app.cancelled_requests[params.id] = true
+		log('VLS: request ${params.id} marked as cancelled')
+	} else {
+		$if debug { log('Failed to decode CancelRequestParams') }
+	}
 }
 
 // on_did_change_workspace_folders handles workspace/didChangeWorkspaceFolders by
 // updating the server's list of workspace roots when the client adds or removes folders.
 fn (mut app App) on_did_change_workspace_folders(request Request) {
-	params := json.decode(DidChangeWorkspaceFoldersParams, request.params) or {
+	params := json2.decode[DidChangeWorkspaceFoldersParams](request.params) or {
 		$if debug { log('Failed to decode DidChangeWorkspaceFoldersParams: ${err}') }
 		return
 	}
@@ -3020,7 +3024,7 @@ fn (mut app App) on_did_change_workspace_folders(request Request) {
 // handle_code_lens handles textDocument/codeLens requests.
 // Returns run/test lens items for fn main() and fn test_* declarations.
 fn (mut app App) handle_code_lens(request Request) Response {
-	params := json.decode(CodeLensParams, request.params) or {
+	params := json2.decode[CodeLensParams](request.params) or {
 		$if debug { log('Failed to decode CodeLensParams: ${err}') }
 		return Response{
 			id:     request.id
@@ -3091,7 +3095,7 @@ fn (mut app App) handle_code_lens(request Request) Response {
 // handle_code_lens_resolve handles codeLens/resolve.
 // The lens is already fully resolved at creation time so this is a pass-through.
 fn (mut app App) handle_code_lens_resolve(request Request) Response {
-	lens := json.decode(CodeLens, request.params) or {
+	lens := json2.decode[CodeLens](request.params) or {
 		$if debug { log('Failed to decode CodeLens for resolve: ${err}') }
 		return Response{
 			id:     request.id
@@ -3107,7 +3111,7 @@ fn (mut app App) handle_code_lens_resolve(request Request) Response {
 // handle_execute_command handles workspace/executeCommand.
 // Currently supports vls.runFile and vls.runTests by echoing a log message.
 fn (mut app App) handle_execute_command(request Request) Response {
-	params := json.decode(ExecuteCommandParams, request.params) or {
+	params := json2.decode[ExecuteCommandParams](request.params) or {
 		$if debug { log('Failed to decode ExecuteCommandParams: ${err}') }
 		return Response{
 			id:     request.id
@@ -3139,7 +3143,7 @@ fn (mut app App) handle_execute_command(request Request) Response {
 // handle_inline_value handles textDocument/inlineValue.
 // Returns inline text values for simple variable := literal assignments in the range.
 fn (mut app App) handle_inline_value(request Request) Response {
-	params := json.decode(InlineValueParams, request.params) or {
+	params := json2.decode[InlineValueParams](request.params) or {
 		$if debug { log('Failed to decode InlineValueParams: ${err}') }
 		return Response{
 			id:     request.id
@@ -3194,7 +3198,7 @@ fn (mut app App) handle_inline_value(request Request) Response {
 // Returns ranges for all occurrences of the identifier under the cursor in the
 // same line (identifier and its declaration) for linked editing.
 fn (mut app App) handle_linked_editing_range(request Request) Response {
-	params := json.decode(TextDocumentPositionParams, request.params) or {
+	params := json2.decode[TextDocumentPositionParams](request.params) or {
 		$if debug {
 			log('Failed to decode TextDocumentPositionParams for linkedEditingRange: ${err}')
 		}
