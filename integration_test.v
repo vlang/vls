@@ -1361,7 +1361,9 @@ fn test_integration_malformed_json_request_writes_parse_error_response() {
 	assert outbound.contains('"id":null')
 }
 
-fn test_integration_non_default_charset_content_type_header_is_accepted() {
+fn test_integration_non_default_charset_content_type_header_is_rejected() {
+	// LSP content must be UTF-8. A declared utf-16 charset is rejected with a
+	// parse error rather than silently misdecoded (P0-11).
 	mut app, project_dir := create_integration_test_env()
 	defer {
 		cleanup_integration_test_env(app, project_dir)
@@ -1386,8 +1388,8 @@ fn test_integration_non_default_charset_content_type_header_is_accepted() {
 
 	assert app.captured_output.len >= 1
 	outbound := app.captured_output[0]
-	assert outbound.contains('"id":99')
-	assert outbound.contains('"result"')
+	assert outbound.contains('"code":-32700')
+	assert outbound.contains('"id":null')
 }
 
 fn test_integration_pre_initialize_request_rejected_with_server_not_initialized() {
@@ -1560,7 +1562,7 @@ fn test_integration_post_initialize_notification_updates_state() {
 		cleanup_integration_test_env(app, project_dir)
 	}
 
-	uri := 'file:///tmp/postinit.v'
+	uri := path_to_uri(os.join_path(project_dir, 'postinit.v'))
 	content := 'module main\n\nfn main() {}\n'
 	initialize := '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}'
 	did_open_after_init := '{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"${uri}","text":"${content}"}}}'
@@ -1585,9 +1587,13 @@ fn test_integration_post_initialize_notification_updates_state() {
 	assert uri in app.open_files
 	assert app.open_files[uri] == content
 	assert app.text == content
-	assert app.captured_output.len == 1
+	// initialize response, then a publishDiagnostics notification emitted on
+	// didOpen (P0-07 item 10).
+	assert app.captured_output.len == 2
 	assert app.captured_output[0].contains('"id":1')
 	assert app.captured_output[0].contains('"result"')
+	assert app.captured_output[1].contains('textDocument/publishDiagnostics')
+	assert app.captured_output[1].contains(uri)
 }
 
 fn test_integration_pre_initialize_cancel_request_is_ignored() {
@@ -2063,4 +2069,90 @@ fn test_integration_capability_flags_for_new_features() {
 	assert encoded.contains('"implementationProvider":true')
 	assert encoded.contains('"renameProvider":{"prepareProvider":true}')
 	assert encoded.contains('"workspaceSymbolProvider":true')
+}
+
+// --- P0-02 / P0-03: string ids, client responses, direction (end to end) ---
+
+fn integration_run_frames(mut app App, project_dir string, name string, payloads []string) []string {
+	mut framed := ''
+	for p in payloads {
+		framed += integration_test_frame_message(p)
+	}
+	input_path := os.join_path(project_dir, '${name}_input.txt')
+	integration_test_must_write_file(input_path, framed)
+	mut input := os.open(input_path) or {
+		assert false, 'Failed to open ${name} input: ${err}'
+		return []string{}
+	}
+	defer {
+		input.close()
+	}
+	app.capture_output = true
+	mut reader := io.new_buffered_reader(reader: input, cap: 1)
+	app.handle_requests(mut reader)
+	return app.captured_output
+}
+
+fn test_integration_string_request_id_is_echoed() {
+	mut app, project_dir := create_integration_test_env()
+	defer {
+		cleanup_integration_test_env(app, project_dir)
+	}
+	out := integration_run_frames(mut app, project_dir, 'string_id', [
+		'{"jsonrpc":"2.0","id":"init-abc","method":"initialize","params":{}}',
+	])
+	assert out.len == 1
+	// The exact string id must be echoed, not collapsed to 0.
+	assert out[0].contains('"id":"init-abc"')
+	assert !out[0].contains('"id":0')
+	assert out[0].contains('"result"')
+}
+
+fn test_integration_client_response_is_consumed_not_dispatched() {
+	mut app, project_dir := create_integration_test_env()
+	defer {
+		cleanup_integration_test_env(app, project_dir)
+	}
+	out := integration_run_frames(mut app, project_dir, 'client_resp', [
+		'{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}',
+		// A response to a server-initiated request: no method. Must be consumed
+		// silently, never answered with MethodNotFound.
+		'{"jsonrpc":"2.0","id":2,"result":null}',
+	])
+	// Only the initialize response should be emitted.
+	assert out.len == 1
+	assert out[0].contains('"id":1')
+	assert !out.any(it.contains('-32601'))
+}
+
+fn test_integration_notification_shaped_shutdown_is_dropped() {
+	mut app, project_dir := create_integration_test_env()
+	defer {
+		cleanup_integration_test_env(app, project_dir)
+	}
+	out := integration_run_frames(mut app, project_dir, 'notif_shutdown', [
+		'{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}',
+		// shutdown is request-only; sent without an id it must be dropped, never
+		// answered with a bogus id:0 response.
+		'{"jsonrpc":"2.0","method":"shutdown"}',
+	])
+	assert out.len == 1
+	assert out[0].contains('"id":1')
+	assert !app.is_shutdown
+}
+
+fn test_integration_request_to_notification_only_method_is_invalid_request() {
+	mut app, project_dir := create_integration_test_env()
+	defer {
+		cleanup_integration_test_env(app, project_dir)
+	}
+	out := integration_run_frames(mut app, project_dir, 'req_to_notif', [
+		'{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}',
+		// didOpen is a notification; sending it as a request (with id) must yield
+		// an InvalidRequest error.
+		'{"jsonrpc":"2.0","id":42,"method":"textDocument/didOpen","params":{"textDocument":{"uri":"file:///tmp/x.v","text":"module main"}}}',
+	])
+	assert out.len == 2
+	assert out[1].contains('"id":42')
+	assert out[1].contains('${jsonrpc_err_invalid_request}')
 }

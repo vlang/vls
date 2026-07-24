@@ -28,7 +28,10 @@ mut:
 	diagnostics_enabled                         bool = true // toggled via workspace/didChangeConfiguration
 	diag_cache                                  map[string]DiagCacheEntry // Per-URI cached diagnostics
 	open_files_generation                       int                       // Incremented on every workspace file mutation
+	project_generations                         map[string]int            // Per-project-dir revision, for scoped cache invalidation
 	cancelled_requests                          map[int]bool              // Request ids cancelled via $/cancelRequest
+	cancelled_raw_ids                           map[string]bool           // String/raw request ids cancelled via $/cancelRequest
+	current_request_raw_id                      string                    // Raw JSON id of the request being processed (echoed verbatim)
 	tcp_conn                                    ?&net.TcpConn             // Non-nil when serving a TCP client
 	is_shutdown                                 bool                      // True after shutdown request was acknowledged
 	exit_was_requested                          bool                      // True when the exit notification was received
@@ -47,10 +50,6 @@ struct JsonError {
 
 struct JsonVarAC {
 	details []Detail
-}
-
-struct RequestIdEnvelope {
-	id ?int
 }
 
 // DiagCacheEntry stores a cached diagnostic result for one file.
@@ -75,10 +74,21 @@ fn find_v_dir() string {
 	return os.dir(os.real_path(v_exe))
 }
 
+// logging_enabled gates all diagnostic logging. Logging is OFF by default:
+// the old behavior wrote every received/sent JSON payload (which can contain
+// full source text and secrets) to stderr AND re-opened/appended/closed a
+// shared unrotated file on every one of the ~160 call sites (P1-13). Set the
+// VLS_LOG environment variable to any non-empty value to enable logging to
+// ${TMPDIR}/vls_out.txt for debugging.
+const logging_enabled = os.getenv('VLS_LOG') != ''
+const log_file_path = os.join_path(os.temp_dir(), 'vls_out.txt')
+
 fn log(s string) {
+	if !logging_enabled {
+		return
+	}
 	eprintln(s)
-	temp_dir := os.temp_dir()
-	mut output := os.open_append(os.join_path(temp_dir, 'vls_out.txt')) or { return }
+	mut output := os.open_append(log_file_path) or { return }
 	output.writeln(s) or {
 		output.close()
 		return
@@ -91,16 +101,33 @@ fn main() {
 	log('VLS preferences: is_vls=${v_prefs.is_vls}')
 
 	// Check for --port PORT argument to start as a TCP multi-client server.
+	// TCP binds to loopback (127.0.0.1) by default; binding to any other
+	// interface requires the explicit --unsafe-allow-remote opt-in because the
+	// transport is unauthenticated (P0-06).
 	args := os.args
 	mut port := ''
+	mut host := '127.0.0.1'
+	mut allow_remote := false
 	for i, arg in args {
-		if arg == '--port' && i + 1 < args.len {
-			port = args[i + 1]
-			break
+		match arg {
+			'--port' {
+				if i + 1 < args.len {
+					port = args[i + 1]
+				}
+			}
+			'--host' {
+				if i + 1 < args.len {
+					host = args[i + 1]
+				}
+			}
+			'--unsafe-allow-remote' {
+				allow_remote = true
+			}
+			else {}
 		}
 	}
 	if port != '' {
-		run_tcp_server(port)
+		run_tcp_server(host, port, allow_remote)
 		return
 	}
 
@@ -115,7 +142,7 @@ fn main() {
 		open_files: map[string]string{}
 		temp_dir:   temp_dir
 	}
-	mut reader := io.new_buffered_reader(reader: os.stdin(), cap: 1)
+	mut reader := io.new_buffered_reader(reader: os.stdin(), cap: transport_buffer_cap)
 	app.handle_requests(mut reader)
 	log('VLS exiting.')
 	os.rmdir_all(temp_dir) or {
@@ -127,16 +154,32 @@ fn main() {
 	}
 }
 
-// run_tcp_server listens on the given TCP port and spawns a goroutine for each
+// is_loopback_host reports whether `host` refers to the local machine only.
+fn is_loopback_host(host string) bool {
+	return host in ['127.0.0.1', '::1', 'localhost', '']
+}
+
+// run_tcp_server listens on the given host/port and spawns a goroutine for each
 // incoming client connection.  Each client gets its own App instance so all
-// state is fully isolated.
-fn run_tcp_server(port string) {
-	log('VLS TCP server starting on :${port}...')
-	mut listener := net.listen_tcp(.ip, ':${port}') or {
-		log('Failed to start TCP listener on port ${port}: ${err}')
+// state is fully isolated.  Non-loopback binds require an explicit opt-in
+// because the transport has no authentication or TLS (P0-06).
+fn run_tcp_server(host string, port string, allow_remote bool) {
+	if !is_loopback_host(host) && !allow_remote {
+		msg :=
+			'VLS: refusing to bind TCP to non-loopback host "${host}" without --unsafe-allow-remote. ' +
+			'The TCP transport is unauthenticated and unencrypted; exposing it on a network is unsafe.'
+		log(msg)
+		eprintln(msg)
 		return
 	}
-	log('VLS TCP server listening on :${port}')
+	bind_host := if host == '' { '127.0.0.1' } else { host }
+	addr := '${bind_host}:${port}'
+	log('VLS TCP server starting on ${addr}...')
+	mut listener := net.listen_tcp(.ip, addr) or {
+		log('Failed to start TCP listener on ${addr}: ${err}')
+		return
+	}
+	log('VLS TCP server listening on ${addr}')
 	for {
 		mut conn := listener.accept() or {
 			log('TCP accept error: ${err}')
@@ -162,7 +205,7 @@ fn handle_tcp_client(mut conn net.TcpConn) {
 		temp_dir:   temp_dir
 		tcp_conn:   &conn
 	}
-	mut reader := io.new_buffered_reader(reader: conn, cap: 1)
+	mut reader := io.new_buffered_reader(reader: conn, cap: transport_buffer_cap)
 	app.handle_requests(mut reader)
 	log('TCP client disconnected')
 	os.rmdir_all(temp_dir) or {
@@ -186,9 +229,17 @@ fn (mut app App) write_data(data string) {
 	}
 }
 
+// Transport framing limits (P0-11). These bound how much memory an untrusted
+// client (local or over TCP) can force the server to allocate.
+const transport_buffer_cap = 64 * 1024 // buffered reader capacity
+const max_content_length = 64 * 1024 * 1024 // 64 MiB max JSON-RPC body
+const max_header_bytes = 64 * 1024 // total header section size cap
+const max_charset = 'utf-8' // LSP content is always UTF-8
+
 fn read_request(mut reader io.BufferedReader) !string {
 	mut len := -1
 	mut header_error := ''
+	mut header_bytes := 0
 	for {
 		line := reader.read_line() or {
 			if err is io.Eof {
@@ -196,6 +247,10 @@ fn read_request(mut reader io.BufferedReader) !string {
 			}
 			$if debug { log('read_request: error reading header line: ${err}') }
 			return err
+		}
+		header_bytes += line.len + 2 // account for the stripped CRLF
+		if header_bytes > max_header_bytes {
+			return error('invalid header: header section exceeds ${max_header_bytes} bytes')
 		}
 		trimmed_line := line.trim_space()
 		if trimmed_line == '' {
@@ -209,6 +264,10 @@ fn read_request(mut reader io.BufferedReader) !string {
 				header_error = 'invalid header: invalid Content-Length'
 				continue
 			}
+			if parsed_len > max_content_length {
+				header_error = 'invalid header: Content-Length ${parsed_len} exceeds maximum ${max_content_length}'
+				continue
+			}
 			if len != -1 && len != parsed_len {
 				header_error = 'invalid header: conflicting Content-Length headers'
 				continue
@@ -216,6 +275,20 @@ fn read_request(mut reader io.BufferedReader) !string {
 			len = parsed_len
 			continue
 		}
+		if lower.starts_with('content-type:') {
+			// LSP content is always UTF-8. Reject any explicitly declared
+			// non-UTF-8 charset instead of silently misdecoding bytes.
+			if charset_is_unsupported(trimmed_line.all_after(':')) {
+				header_error = 'invalid header: unsupported charset (only ${max_charset} is allowed)'
+				continue
+			}
+			continue
+		}
+	}
+	// Surface a header error before doing anything else, so a malformed
+	// Content-Length can never silently desynchronize the stream.
+	if header_error != '' {
+		return error(header_error)
 	}
 	if len < 0 {
 		return ''
@@ -233,10 +306,17 @@ fn read_request(mut reader io.BufferedReader) !string {
 		}
 		total_bytes_read += bytes_read_now
 	}
-	if header_error != '' {
-		return error(header_error)
-	}
 	return buf.bytestr()
+}
+
+// charset_is_unsupported reports whether a Content-Type header value declares a
+// charset other than UTF-8. LSP §3 mandates UTF-8 for all message content; the
+// historical `utf8` spelling is also accepted.
+fn charset_is_unsupported(content_type string) bool {
+	lower := content_type.to_lower()
+	idx := lower.index('charset=') or { return false }
+	charset := lower[idx + 'charset='.len..].trim_space().trim_right(';').trim_space()
+	return charset != 'utf-8' && charset != 'utf8'
 }
 
 fn parse_content_length_header(s string) !int {
@@ -249,16 +329,23 @@ fn parse_content_length_header(s string) !int {
 			return error('non-numeric Content-Length')
 		}
 	}
-	n := t.int()
-	if n < 0 {
-		return error('negative Content-Length')
+	// Guard against overflow of the 32-bit int parse before using the value.
+	if t.len > 18 {
+		return error('Content-Length too large')
 	}
-	return n
+	n := t.i64()
+	if n < 0 || n > max_content_length {
+		return error('Content-Length out of range')
+	}
+	return int(n)
 }
 
 // handle_requests is the main request handler loop for both stdio and TCP modes.
 fn (mut app App) handle_requests(mut reader io.BufferedReader) {
 	for {
+		// Reset the per-request raw id so a stale id can never leak into an
+		// error response emitted before a new message is fully read.
+		app.current_request_raw_id = ''
 		content := read_request(mut reader) or {
 			if err is io.Eof {
 				log('Client closed connection. Exiting.')
@@ -275,7 +362,18 @@ fn (mut app App) handle_requests(mut reader io.BufferedReader) {
 			continue
 		}
 		log('\n\nRECV: ${content}')
+		// A message with an id + result/error but no method is a response to a
+		// server-initiated request (progress create, capability registration).
+		// Consume it without dispatching so it never hits the method router or
+		// produces a spurious MethodNotFound error (P0-02).
+		if is_client_response_message(content) {
+			log('Consumed client response to a server-initiated request: ${content}')
+			continue
+		}
 		has_id := request_content_has_id(content)
+		// Preserve the exact id (numeric or string) so responses echo it
+		// verbatim; string ids would otherwise collapse to 0 (P0-02).
+		app.current_request_raw_id = extract_raw_id(content) or { '' }
 		request := json.decode(Request, content) or {
 			log('Failed to decode JSON request: ${err.msg()}. Content: "${content}"')
 			app.write_error_response(make_parse_error_response(err.msg()))
@@ -285,7 +383,20 @@ fn (mut app App) handle_requests(mut reader io.BufferedReader) {
 		log('\n\nRECV (pretty): ${pretty}')
 		method := Method.from_string(request.method)
 		log('method="${method}" request.method="${request.method}" ${method == .completion}')
-		if method_requires_response(method) && request.id in app.cancelled_requests {
+		// Enforce request/notification direction (P0-03): a message with an id
+		// sent to a notification-only method is an InvalidRequest; a message
+		// without an id sent to a request-only method is dropped rather than
+		// processed into a response with a bogus id.
+		if has_id && method_is_notification_only(method) {
+			app.write_error_response(make_invalid_request_error_response(request.id,
+				'Method ${request.method} is a notification and cannot be sent as a request'))
+			continue
+		}
+		if !has_id && method_requires_response(method) {
+			log('Dropping notification-shaped message for request-only method ${request.method}')
+			continue
+		}
+		if method_requires_response(method) && app.request_is_cancelled(request.id) {
 			app.write_error_response(make_cancelled_error_response(request.id))
 			app.consume_cancelled_request(request.id)
 			continue
@@ -370,17 +481,24 @@ fn (mut app App) handle_requests(mut reader io.BufferedReader) {
 					id:     request.id
 					result: Capabilities{
 						capabilities: Capability{
+							// NOTE: Placeholder/stub capabilities are intentionally NOT
+							// advertised (P1-07 / Stage 0): on-type formatting (always
+							// empty), inline values (wrong abstraction), linked editing
+							// (wrong abstraction), file-operation hooks (no-ops), the
+							// run/test executeCommand + codeLens stubs, and willSave
+							// (never dispatched). Advertising only working features gives
+							// a better editor experience than exposing broken UI.
 							text_document_sync:                 TextDocumentSyncOptions{
 								open_close:           true
 								change:               2 // Incremental
 								save:                 SaveOptions{
 									include_text: true
 								}
-								will_save:            true
+								will_save:            false
 								will_save_wait_until: true
 							}
 							completion_provider:                CompletionProvider{
-								trigger_characters: ['.', ' ']
+								trigger_characters: ['.']
 							}
 							signature_help_provider:            SignatureHelpOptions{
 								trigger_characters: ['(', ',']
@@ -394,21 +512,11 @@ fn (mut app App) handle_requests(mut reader io.BufferedReader) {
 							rename_provider:                    RenameOptions{
 								prepare_provider: true
 							}
-							execute_command_provider:           ExecuteCommandOptions{
-								commands: ['vls.runFile', 'vls.runTests']
-							}
 							document_formatting_provider:       true
 							document_symbol_provider:           true
 							workspace_symbol_provider:          true
 							inlay_hint_provider:                true
 							code_action_provider:               true
-							code_lens_provider:                 CodeLensOptions{}
-							inline_value_provider:              true
-							linked_editing_range_provider:      true
-							on_type_formatting_provider:        OnTypeFormattingOptions{
-								first_trigger_character: '}'
-								more_trigger_characters: ['\n']
-							}
 							semantic_tokens_provider:           SemanticTokensOptions{
 								legend: SemanticTokensLegend{
 									token_types:     semantic_token_types()
@@ -423,35 +531,6 @@ fn (mut app App) handle_requests(mut reader io.BufferedReader) {
 							selection_range_provider:           true
 							document_range_formatting_provider: true
 							workspace:                          WorkspaceCapability{
-								file_operations:   WorkspaceFileOperations{
-									will_create: FileOperationRegistrationOptions{
-										filters: [
-											FileOperationFilter{
-												pattern: FileOperationPattern{
-													glob: '**/*.v'
-												}
-											},
-										]
-									}
-									will_rename: FileOperationRegistrationOptions{
-										filters: [
-											FileOperationFilter{
-												pattern: FileOperationPattern{
-													glob: '**/*.v'
-												}
-											},
-										]
-									}
-									will_delete: FileOperationRegistrationOptions{
-										filters: [
-											FileOperationFilter{
-												pattern: FileOperationPattern{
-													glob: '**/*.v'
-												}
-											},
-										]
-									}
-								}
 								workspace_folders: WorkspaceFoldersServerCapability{
 									supported:            true
 									change_notifications: true
@@ -469,9 +548,26 @@ fn (mut app App) handle_requests(mut reader io.BufferedReader) {
 			}
 			.did_open {
 				app.on_did_open(request)
+				// Publish diagnostics immediately on open (P0-07 item 10).
+				if params := json.decode(DidOpenTextDocumentParams, request.params) {
+					uri := params.text_document.uri
+					if doc_content := app.open_files[uri] {
+						app.write_notification(app.build_diagnostics_notification(uri, doc_content))
+					}
+				}
 			}
 			.did_close {
 				app.on_did_close(request)
+				// Clear published diagnostics for the closed document (P0-07 item 9).
+				if params := json.decode(DidCloseTextDocumentParams, request.params) {
+					app.write_notification(Notification{
+						method: 'textDocument/publishDiagnostics'
+						params: PublishDiagnosticsParams{
+							uri:         params.text_document.uri
+							diagnostics: []
+						}
+					})
+				}
 			}
 			.did_save {
 				notification := app.on_did_save(request) or { continue }
@@ -602,15 +698,195 @@ fn (mut app App) handle_requests(mut reader io.BufferedReader) {
 }
 
 fn request_content_has_id(content string) bool {
-	envelope := json.decode(RequestIdEnvelope, content) or {
-		// Fallback for malformed payloads where full decode is impossible.
-		return content.contains('"id":')
+	return extract_raw_id(content) != none
+}
+
+// json_is_ws reports whether a byte is JSON insignificant whitespace.
+fn json_is_ws(c u8) bool {
+	return c == ` ` || c == `\t` || c == `\n` || c == `\r`
+}
+
+// read_json_string_token reads a JSON string starting at `content[i]` (which
+// must be a double quote) and returns the decoded key text plus the index just
+// past the closing quote.
+fn read_json_string_token(content string, start int) (string, int) {
+	mut i := start + 1 // past opening quote
+	mut sb := []u8{}
+	for i < content.len {
+		c := content[i]
+		if c == `\\` && i + 1 < content.len {
+			nxt := content[i + 1]
+			esc := match nxt {
+				`n` { u8(`\n`) }
+				`t` { u8(`\t`) }
+				`r` { u8(`\r`) }
+				else { nxt }
+			}
+			sb << esc
+			i += 2
+			continue
+		}
+		if c == `"` {
+			return sb.bytestr(), i + 1
+		}
+		sb << c
+		i++
 	}
-	return envelope.id != none
+	return sb.bytestr(), i
+}
+
+// skip_json_value returns the index just past a complete JSON value beginning at
+// `content[i]` (object, array, string, number, or keyword).
+fn skip_json_value(content string, start int) int {
+	mut i := start
+	n := content.len
+	if i >= n {
+		return i
+	}
+	c := content[i]
+	if c == `"` {
+		_, next := read_json_string_token(content, i)
+		return next
+	}
+	if c == `{` || c == `[` {
+		mut depth := 0
+		for i < n {
+			ch := content[i]
+			if ch == `"` {
+				_, next := read_json_string_token(content, i)
+				i = next
+				continue
+			}
+			if ch == `{` || ch == `[` {
+				depth++
+			} else if ch == `}` || ch == `]` {
+				depth--
+				if depth == 0 {
+					return i + 1
+				}
+			}
+			i++
+		}
+		return i
+	}
+	// number / true / false / null
+	for i < n && content[i] != `,` && content[i] != `}` && content[i] != `]`
+		&& !json_is_ws(content[i]) {
+		i++
+	}
+	return i
+}
+
+// extract_raw_id returns the raw JSON representation of the top-level `id`
+// member (e.g. `5` or `"abc"`), preserving its exact type so it can be echoed
+// verbatim in the response. Returns none when `id` is absent or JSON null.
+// This is how the server supports both numeric and string request/cancellation
+// IDs (P0-02) even though the typed decoder collapses string ids to 0.
+fn extract_raw_id(content string) ?string {
+	mut i := content.index('{') or { return none }
+	i++
+	n := content.len
+	for i < n {
+		for i < n && (json_is_ws(content[i]) || content[i] == `,`) {
+			i++
+		}
+		if i >= n || content[i] == `}` {
+			break
+		}
+		if content[i] != `"` {
+			break
+		}
+		key, after_key := read_json_string_token(content, i)
+		i = after_key
+		for i < n && json_is_ws(content[i]) {
+			i++
+		}
+		if i >= n || content[i] != `:` {
+			break
+		}
+		i++
+		for i < n && json_is_ws(content[i]) {
+			i++
+		}
+		if key == 'id' {
+			if content[i..].starts_with('null') {
+				return none
+			}
+			end := skip_json_value(content, i)
+			return content[i..end].trim_space()
+		}
+		i = skip_json_value(content, i)
+	}
+	return none
+}
+
+// content_has_member reports whether the top-level JSON object declares `member`.
+fn content_has_member(content string, member string) bool {
+	mut i := content.index('{') or { return false }
+	i++
+	n := content.len
+	for i < n {
+		for i < n && (json_is_ws(content[i]) || content[i] == `,`) {
+			i++
+		}
+		if i >= n || content[i] == `}` {
+			break
+		}
+		if content[i] != `"` {
+			break
+		}
+		key, after_key := read_json_string_token(content, i)
+		i = after_key
+		for i < n && json_is_ws(content[i]) {
+			i++
+		}
+		if i >= n || content[i] != `:` {
+			break
+		}
+		i++
+		for i < n && json_is_ws(content[i]) {
+			i++
+		}
+		if key == member {
+			return true
+		}
+		i = skip_json_value(content, i)
+	}
+	return false
+}
+
+// is_client_response_message reports whether an inbound message is a response to
+// a server-initiated request: it carries an `id` and a `result` or `error`
+// member but no `method`. Such messages must be consumed, not dispatched as
+// method calls (P0-02).
+fn is_client_response_message(content string) bool {
+	if content_has_member(content, 'method') {
+		return false
+	}
+	has_id := content.contains('"id"')
+	return has_id && (content_has_member(content, 'result') || content_has_member(content, 'error'))
+}
+
+// inject_raw_id rewrites the first `"id":<value>` in an encoded response so the
+// response echoes the request's id with its original type. For numeric ids this
+// is a no-op; for string ids it replaces the placeholder `0` written by the
+// typed encoder with the quoted string.
+fn inject_raw_id(encoded string, raw_id string) string {
+	if raw_id == '' {
+		return encoded
+	}
+	key := '"id":'
+	idx := encoded.index(key) or { return encoded }
+	val_start := idx + key.len
+	mut val_end := val_start
+	for val_end < encoded.len && encoded[val_end] != `,` && encoded[val_end] != `}` {
+		val_end++
+	}
+	return encoded[..val_start] + raw_id + encoded[val_end..]
 }
 
 fn (mut app App) write_response(response Response) {
-	content := encode_response_payload(response)
+	content := inject_raw_id(encode_response_payload(response), app.current_request_raw_id)
 	headers := $if windows {
 		// windows text stdio will output `\r\n` for every `\n`
 		'Content-Length: ${content.len}\n\n'
@@ -659,7 +935,12 @@ fn (mut app App) write_notification(notification Notification) {
 }
 
 fn (mut app App) write_error_response(response ErrorResponse) {
-	content := encode_error_response_payload(response)
+	// Parse errors have a null id per spec; never echo a (possibly stale) raw id
+	// for those. Other errors echo the request's id verbatim.
+	mut content := encode_error_response_payload(response)
+	if response.error.code != jsonrpc_err_parse_error {
+		content = inject_raw_id(content, app.current_request_raw_id)
+	}
 	headers := $if windows {
 		// windows text stdio will output `\r\n` for every `\n`
 		'Content-Length: ${content.len}\n\n'
@@ -680,9 +961,13 @@ fn encode_error_response_payload(response ErrorResponse) string {
 }
 
 fn v_error_to_lsp_diagnostic(e JsonError) LSPDiagnostic {
-	start_line := e.line_nr - 1 // LSP is 0-indexed, V parser is 1-indexed
-	start_char := e.col - 1 // LSP is 0-indexed, V parser is 1-indexed
-	end_char := start_char + e.len
+	// LSP is 0-indexed, the V parser is 1-indexed. LSP positions must be
+	// non-negative, so clamp values the compiler may report as 0/negative
+	// instead of emitting invalid negative positions (P1-09).
+	start_line := if e.line_nr - 1 > 0 { e.line_nr - 1 } else { 0 }
+	start_char := if e.col - 1 > 0 { e.col - 1 } else { 0 }
+	len := if e.len > 0 { e.len } else { 0 }
+	end_char := start_char + len
 	severity := match e.level {
 		'warning' { 2 }
 		'notice' { 3 }
@@ -749,6 +1034,46 @@ fn method_requires_response(method Method) bool {
 		}
 		else {
 			false
+		}
+	}
+}
+
+// method_is_notification_only reports whether `method` is a client→server
+// notification that must never receive a response (LSP method contract). `exit`
+// is deliberately excluded so the shutdown/exit lifecycle stays robust
+// regardless of whether a client mistakenly attaches an id.
+fn method_is_notification_only(method Method) bool {
+	return match method {
+		.initialized, .did_open, .did_change, .did_close, .did_save, .did_change_watched_files,
+		.workspace_did_change_configuration, .workspace_did_change_workspace_folders, .set_trace,
+		.cancel_request, .will_save {
+			true
+		}
+		else {
+			false
+		}
+	}
+}
+
+// request_is_cancelled reports whether the request currently being processed was
+// cancelled, checking both numeric and string/raw ids.
+fn (app &App) request_is_cancelled(id int) bool {
+	if id in app.cancelled_requests {
+		return true
+	}
+	if app.current_request_raw_id != '' && app.current_request_raw_id in app.cancelled_raw_ids {
+		return true
+	}
+	return false
+}
+
+fn make_invalid_request_error_response(id int, message string) ErrorResponse {
+	msg := if message != '' { message } else { 'Invalid request' }
+	return ErrorResponse{
+		id:    id
+		error: ResponseError{
+			code:    jsonrpc_err_invalid_request
+			message: msg
 		}
 	}
 }
@@ -1290,9 +1615,32 @@ fn (mut app App) write_response_or_cancelled(id int, response Response) {
 }
 
 fn (mut app App) consume_cancelled_request(id int) bool {
+	mut was_cancelled := false
 	if id in app.cancelled_requests {
 		app.cancelled_requests.delete(id)
-		return true
+		was_cancelled = true
 	}
-	return false
+	if app.current_request_raw_id != '' && app.current_request_raw_id in app.cancelled_raw_ids {
+		app.cancelled_raw_ids.delete(app.current_request_raw_id)
+		was_cancelled = true
+	}
+	return was_cancelled
+}
+
+// bump_generation records a mutation to `uri`, advancing both the global
+// counter and the per-project-directory revision. Diagnostic caching keys off
+// the per-project revision so that editing one file only invalidates cached
+// diagnostics for files in the same project directory, not every open document
+// (P1-06).
+fn (mut app App) bump_generation(uri string) {
+	app.open_files_generation++
+	dir := os.dir(uri_to_path(uri))
+	app.project_generations[dir] = app.project_generations[dir] + 1
+}
+
+// project_generation returns the current revision for the project directory
+// that owns `uri`.
+fn (app &App) project_generation(uri string) int {
+	dir := os.dir(uri_to_path(uri))
+	return app.project_generations[dir]
 }

@@ -19,7 +19,7 @@ fn (mut app App) handle_prepare_call_hierarchy(request Request) Response {
 	uri := params.text_document.uri
 	content := app.open_files[uri] or { os.read_file(uri_to_path(uri)) or { '' } }
 	lines := content.split_into_lines()
-	if params.position.line >= lines.len {
+	if params.position.line < 0 || params.position.line >= lines.len {
 		return Response{
 			id:     request.id
 			result: 'null'
@@ -33,7 +33,7 @@ fn (mut app App) handle_prepare_call_hierarchy(request Request) Response {
 			result: 'null'
 		}
 	}
-	word := line_text[start..end]
+	word := substr_by_char_bounds(line_text, start, end)
 	if word == '' {
 		return Response{
 			id:     request.id

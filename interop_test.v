@@ -56,9 +56,33 @@ fn test_uri_to_path_no_prefix() {
 }
 
 fn test_uri_to_path_special_characters() {
-	// Paths with spaces or special chars
+	// Percent-encoded spaces must be decoded to real spaces (P0-10).
 	result := uri_to_path('file:///home/user/my%20project/test.v')
-	assert result.contains('my%20project') || result.contains('my project')
+	assert result == '/home/user/my project/test.v'
+}
+
+fn test_uri_to_path_percent_encoded_hash_and_percent() {
+	// %23 -> '#', %25 -> '%' must round back to the literal characters.
+	assert uri_to_path('file:///home/user/a%23b.v') == '/home/user/a#b.v'
+	assert uri_to_path('file:///home/user/100%25.v') == '/home/user/100%.v'
+}
+
+fn test_uri_to_path_drops_fragment_and_query() {
+	assert uri_to_path('file:///home/user/test.v#L10') == '/home/user/test.v'
+	assert uri_to_path('file:///home/user/test.v?rev=2') == '/home/user/test.v'
+}
+
+fn test_uri_path_roundtrip_with_spaces_and_hash() {
+	for original in ['/home/user/my project/a#b.v', '/tmp/weird %name%.v', '/a/plus+file.v'] {
+		uri := path_to_uri(original)
+		// The URI must not contain a raw space.
+		assert !uri.contains(' ')
+		assert uri_to_path(uri) == original
+	}
+}
+
+fn test_path_to_uri_encodes_space() {
+	assert path_to_uri('/home/user/my project/a.v') == 'file:///home/user/my%20project/a.v'
 }
 
 fn test_uri_to_path_empty_string() {
@@ -95,9 +119,12 @@ fn test_path_to_uri_relative() {
 }
 
 fn test_path_to_uri_with_backslashes() {
-	// Backslashes should be converted to forward slashes
-	result := path_to_uri('/home/user\\project\\main.v')
-	assert result.contains('/home/user/project/main.v') || result.contains('\\')
+	// On POSIX a backslash is a valid, literal filename character. It must be
+	// percent-encoded in the URI (never left raw) and must round-trip exactly.
+	original := '/home/user\\project\\main.v'
+	result := path_to_uri(original)
+	assert !result.contains('\\')
+	assert uri_to_path(result) == original
 }
 
 fn test_path_to_uri_empty() {
@@ -186,58 +213,51 @@ fn test_cleanup_compilation_temp_removes_project_dir() {
 	assert !os.exists(project_dir)
 }
 
-fn test_ensure_stderr_captured_appends_redirect() {
-	cmd := ensure_stderr_captured('echo hello')
-	assert cmd.ends_with('2>&1')
+// Compiler invocation is now argv-based (no shell). These tests assert that
+// filenames — including ones containing shell metacharacters — are passed as
+// single, literal argument-vector elements, so command injection is impossible.
+
+fn test_build_v_check_args_single_passes_path_literally() {
+	args := build_v_check_args_single('/tmp/a b/test.v')
+	assert '/tmp/a b/test.v' in args
+	assert '-vls-mode' in args
+	assert '-check' in args
 }
 
-fn test_ensure_stderr_captured_keeps_existing_redirect() {
-	cmd := ensure_stderr_captured('echo hello 2>&1')
-	assert cmd == 'echo hello 2>&1'
-}
-
-fn test_execute_in_dir_restores_working_directory() {
-	original := os.getwd()
-	work_dir := os.join_path(os.temp_dir(), 'vls_exec_dir_${os.getpid()}_${time.now().unix_nano()}')
-	interop_test_must_mkdir_all(work_dir)
-	defer {
-		os.rmdir_all(work_dir) or {}
+fn test_build_v_check_args_single_no_shell_injection() {
+	// A path containing command substitution must remain one literal argv element.
+	malicious := '/tmp/$(touch /tmp/pwned)/x.v'
+	args := build_v_check_args_single(malicious)
+	assert malicious in args
+	// The dangerous text is never split or interpreted; it is exactly one element.
+	mut count := 0
+	for a in args {
+		if a == malicious {
+			count++
+		}
 	}
-
-	mut result := execute_in_dir(work_dir, 'pwd')
-	$if windows {
-		// On Windows, os.execute uses cmd.exe which understands echo %cd%
-		result = execute_in_dir(work_dir, 'echo %cd%')
-	}
-	// Use real_path to resolve symlinks (e.g. /tmp -> /private/tmp on macOS)
-	assert os.real_path(result.output.trim_space()) == os.real_path(work_dir)
-	assert os.getwd() == original
+	assert count == 1
 }
 
-fn test_execute_in_dir_returns_error_when_directory_missing() {
-	original := os.getwd()
+fn test_build_v_fmt_args_passes_temp_file_literally() {
+	args := build_v_fmt_args('/tmp/fmt file.v')
+	assert args == ['fmt', '-inprocess', '-w', '/tmp/fmt file.v']
+}
+
+fn test_build_v_line_info_args_single_embeds_line_info() {
+	args := build_v_line_info_args_single('/tmp/a.v', '10:gd^5', '/tmp/a.v')
+	assert '/tmp/a.v:10:gd^5' in args
+	assert '-line-info' in args
+}
+
+fn test_run_v_argv_reports_missing_working_dir() {
 	missing_dir := os.join_path(os.temp_dir(),
 		'vls_missing_dir_${os.getpid()}_${time.now().unix_nano()}')
-	result := execute_in_dir(missing_dir, 'pwd')
+	original := os.getwd()
+	result := run_v_argv(build_v_check_args_multifile(), missing_dir)
 	assert result.exit_code != 0
-	assert result.output.contains('Failed to change to working dir')
+	// The parent process working directory must never be mutated.
 	assert os.getwd() == original
-}
-
-fn test_shell_quote_handles_single_quotes() {
-	quoted := shell_quote("a'b")
-	assert quoted == '"a\'b"'
-}
-
-fn test_build_v_check_cmd_single_quotes_path() {
-	cmd := build_v_check_cmd_single('/tmp/a b/test.v')
-	assert cmd.contains('"/tmp/a b/test.v"')
-	assert cmd.contains('-vls-mode')
-}
-
-fn test_build_v_fmt_cmd_quotes_temp_file() {
-	cmd := build_v_fmt_cmd('/tmp/fmt file.v')
-	assert cmd == 'v fmt -inprocess -w "/tmp/fmt file.v"'
 }
 
 // ============================================================================
@@ -953,15 +973,19 @@ fn test_json_error_defaults() {
 }
 
 fn test_json_error_negative_values() {
-	// Negative values shouldn't crash, though they're invalid
+	// LSP positions must be non-negative. Invalid compiler values are clamped
+	// to 0 rather than emitted as negative positions (P1-09).
 	err := JsonError{
 		line_nr: -1
 		col:     -1
 		len:     -1
 	}
 	diag := v_error_to_lsp_diagnostic(err)
-	// Should still produce a diagnostic (values will be negative but won't crash)
 	assert diag.severity == 1
+	assert diag.range.start.line == 0
+	assert diag.range.start.char == 0
+	assert diag.range.end.line == 0
+	assert diag.range.end.char == 0
 }
 
 fn test_text_document_identifier() {

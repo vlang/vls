@@ -682,11 +682,40 @@ fn test_parse_content_length_header_rejects_non_numeric() {
 	assert false, 'expected parse_content_length_header to fail for non-numeric input'
 }
 
-fn test_read_request_accepts_any_content_type_charset_header() {
+fn test_read_request_rejects_non_utf8_charset_header() {
+	// LSP content is always UTF-8; a declared utf-16 charset must be rejected
+	// rather than silently misdecoded (P0-11).
 	payload := '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}'
 	framed := 'Content-Length: ${payload.len}\r\nContent-Type: application/vscode-jsonrpc; charset=utf-16\r\n\r\n${payload}'
-	tmp := os.join_path(os.temp_dir(),
-		'vls_read_request_any_charset_content_type_${os.getpid()}.txt')
+	tmp := os.join_path(os.temp_dir(), 'vls_read_request_non_utf8_charset_${os.getpid()}.txt')
+	os.write_file(tmp, framed) or {
+		assert false, 'Failed to write temp request file: ${err}'
+		return
+	}
+	defer {
+		os.rm(tmp) or {}
+	}
+	mut f := os.open(tmp) or {
+		assert false, 'Failed to open temp request file: ${err}'
+		return
+	}
+	defer {
+		f.close()
+	}
+	mut reader := io.new_buffered_reader(reader: f, cap: 1)
+	if _ := read_request(mut reader) {
+		assert false, 'expected read_request to reject non-UTF-8 charset'
+	} else {
+		assert err.msg().starts_with('invalid header:')
+		assert err.msg().contains('charset')
+	}
+}
+
+fn test_read_request_accepts_utf8_charset_header() {
+	// An explicit UTF-8 charset is fine and must not be rejected.
+	payload := '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}'
+	framed := 'Content-Length: ${payload.len}\r\nContent-Type: application/vscode-jsonrpc; charset=utf-8\r\n\r\n${payload}'
+	tmp := os.join_path(os.temp_dir(), 'vls_read_request_utf8_charset_${os.getpid()}.txt')
 	os.write_file(tmp, framed) or {
 		assert false, 'Failed to write temp request file: ${err}'
 		return
@@ -707,6 +736,32 @@ fn test_read_request_accepts_any_content_type_charset_header() {
 		return
 	}
 	assert decoded == payload
+}
+
+fn test_read_request_rejects_oversized_content_length() {
+	// A huge Content-Length must be refused before allocating (P0-11).
+	framed := 'Content-Length: 999999999999\r\n\r\n'
+	tmp := os.join_path(os.temp_dir(), 'vls_read_request_oversized_${os.getpid()}.txt')
+	os.write_file(tmp, framed) or {
+		assert false, 'Failed to write temp request file: ${err}'
+		return
+	}
+	defer {
+		os.rm(tmp) or {}
+	}
+	mut f := os.open(tmp) or {
+		assert false, 'Failed to open temp request file: ${err}'
+		return
+	}
+	defer {
+		f.close()
+	}
+	mut reader := io.new_buffered_reader(reader: f, cap: 1)
+	if _ := read_request(mut reader) {
+		assert false, 'expected read_request to reject oversized Content-Length'
+	} else {
+		assert err.msg().starts_with('invalid header:')
+	}
 }
 
 fn test_read_request_rejects_conflicting_content_length_headers() {
@@ -1480,4 +1535,64 @@ fn test_capability_code_lens_provider_json_encoding_object_shape() {
 	encoded := json.encode(caps)
 	assert encoded.contains('"codeLensProvider":{}')
 	assert !encoded.contains('"codeLensProvider":true')
+}
+
+// --- P0-02 / P0-03: JSON-RPC envelope, string ids, direction ---
+
+fn test_extract_raw_id_numeric() {
+	id := extract_raw_id('{"id":5,"method":"x"}') or {
+		assert false, 'expected id'
+		return
+	}
+	assert id == '5'
+}
+
+fn test_extract_raw_id_string_preserves_quotes() {
+	id := extract_raw_id('{"jsonrpc":"2.0","id":"abc-1","method":"x"}') or {
+		assert false, 'expected id'
+		return
+	}
+	assert id == '"abc-1"'
+}
+
+fn test_extract_raw_id_null_is_none() {
+	assert extract_raw_id('{"id":null,"method":"x"}') == none
+}
+
+fn test_extract_raw_id_ignores_nested_id() {
+	// An "id" inside params must not be mistaken for the top-level id.
+	id := extract_raw_id('{"method":"x","params":{"id":99},"id":7}') or {
+		assert false, 'expected id'
+		return
+	}
+	assert id == '7'
+}
+
+fn test_extract_raw_id_absent_is_none() {
+	assert extract_raw_id('{"method":"x","params":{}}') == none
+}
+
+fn test_is_client_response_message_detection() {
+	assert is_client_response_message('{"jsonrpc":"2.0","id":2,"result":null}')
+	assert is_client_response_message('{"jsonrpc":"2.0","id":2,"error":{"code":-1,"message":"x"}}')
+	assert !is_client_response_message('{"jsonrpc":"2.0","id":2,"method":"initialize","params":{}}')
+	assert !is_client_response_message('{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{}}')
+}
+
+fn test_inject_raw_id_restores_string_id() {
+	assert inject_raw_id('{"id":0,"result":null,"jsonrpc":"2.0"}', '"abc"') == '{"id":"abc","result":null,"jsonrpc":"2.0"}'
+}
+
+fn test_inject_raw_id_numeric_is_noop() {
+	assert inject_raw_id('{"id":5,"result":null}', '5') == '{"id":5,"result":null}'
+}
+
+fn test_method_is_notification_only_contract() {
+	assert method_is_notification_only(.did_open)
+	assert method_is_notification_only(.did_change)
+	assert method_is_notification_only(.cancel_request)
+	assert !method_is_notification_only(.completion)
+	assert !method_is_notification_only(.shutdown)
+	// exit is excluded so the shutdown/exit lifecycle stays robust.
+	assert !method_is_notification_only(.exit)
 }
