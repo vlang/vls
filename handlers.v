@@ -437,6 +437,7 @@ fn (mut app App) build_diagnostics_notification(uri string, content string) Noti
 	}
 	v_errors := app.run_v_check(uri, content)
 	log('run_v_check errors:${v_errors}')
+	lines := content.split_into_lines()
 	mut diagnostics := []LSPDiagnostic{}
 	mut seen_positions := map[string]bool{}
 	for v_err in v_errors {
@@ -448,7 +449,9 @@ fn (mut app App) build_diagnostics_notification(uri string, content string) Noti
 			continue
 		}
 		seen_positions[pos_key] = true
-		diagnostics << v_error_to_lsp_diagnostic(v_err)
+		// The compiler reports byte columns; re-encode the diagnostic range in
+		// the client's negotiated encoding (P0-01).
+		diagnostics << app.encode_diagnostic_range(v_error_to_lsp_diagnostic(v_err), lines)
 	}
 	pd_params := PublishDiagnosticsParams{
 		uri:         uri
@@ -518,6 +521,37 @@ fn (mut app App) on_did_change(request Request) ?Notification {
 	notification := app.build_diagnostics_notification(uri, content)
 	$if debug { log('returning notification: ${notification}') }
 	return notification
+}
+
+// encode_diagnostic_range re-encodes a diagnostic's byte-based character
+// offsets (as produced from compiler output) into the client's negotiated
+// position encoding, using the document `lines`.
+fn (app &App) encode_diagnostic_range(diag LSPDiagnostic, lines []string) LSPDiagnostic {
+	start_line := diag.range.start.line
+	end_line := diag.range.end.line
+	start_char := if start_line >= 0 && start_line < lines.len {
+		byte_to_encoded_col(lines[start_line], diag.range.start.char, app.position_encoding)
+	} else {
+		diag.range.start.char
+	}
+	end_char := if end_line >= 0 && end_line < lines.len {
+		byte_to_encoded_col(lines[end_line], diag.range.end.char, app.position_encoding)
+	} else {
+		diag.range.end.char
+	}
+	return LSPDiagnostic{
+		...diag
+		range: LSPRange{
+			start: Position{
+				line: start_line
+				char: start_char
+			}
+			end:   Position{
+				line: end_line
+				char: end_char
+			}
+		}
+	}
 }
 
 // on_did_save handles didSave by re-running diagnostics for the saved document.
@@ -1614,7 +1648,13 @@ fn (mut app App) format_content(uri string, content string) ([]TextEdit, string)
 
 	lines := content.split_into_lines()
 	last_line := lines.len - 1
-	last_char := if lines.len > 0 { lines[last_line].len } else { 0 }
+	// The end position's character must be in the client's encoding, not raw
+	// bytes, for a correct full-document replace range (P0-01).
+	last_char := if lines.len > 0 {
+		byte_to_encoded_col(lines[last_line], lines[last_line].len, app.position_encoding)
+	} else {
+		0
+	}
 
 	edit := TextEdit{
 		range:    LSPRange{
@@ -1820,12 +1860,13 @@ fn (mut app App) handle_inlay_hints(request Request) Response {
 			continue
 		}
 
-		// Position the hint right after the variable name in the raw line
+		// Position the hint right after the variable name in the raw line. The
+		// byte offset is re-encoded into the client's encoding (P0-01/P2-07).
 		name_col := raw.index(var_name) or { continue }
 		hints << InlayHint{
 			position:     Position{
 				line: line_idx
-				char: name_col + var_name.len
+				char: byte_to_encoded_col(raw, name_col + var_name.len, app.position_encoding)
 			}
 			label:        ': ${inferred}'
 			kind:         inlay_hint_kind_type
@@ -2895,7 +2936,8 @@ fn (mut app App) handle_selection_range(request Request) Response {
 			continue
 		}
 		line_text := lines[pos.line]
-		// Outermost: full line range.
+		// Outermost: full line range. The end char is the line length in the
+		// client's encoding, not raw bytes (P0-01/P2-09).
 		line_range := LSPRange{
 			start: Position{
 				line: pos.line
@@ -2903,7 +2945,7 @@ fn (mut app App) handle_selection_range(request Request) Response {
 			}
 			end:   Position{
 				line: pos.line
-				char: line_text.len
+				char: byte_to_encoded_col(line_text, line_text.len, app.position_encoding)
 			}
 		}
 		start, end := find_word_bounds_at_col(line_text, pos.char, app.position_encoding)
