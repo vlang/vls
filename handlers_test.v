@@ -4027,3 +4027,43 @@ fn test_classify_highlight_kind_read_write() {
 	assert classify_highlight_kind('foo(x)', 3) == doc_highlight_read
 	assert classify_highlight_kind('return x', 8) == doc_highlight_read
 }
+
+fn test_on_did_change_invalid_range_does_not_advance_version() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	uri := 'file:///tmp/inv.v'
+	app.open_files[uri] = 'module main\n'
+	app.open_files_versions[uri] = 1
+	// A reversed range is invalid: the change must be refused and the version
+	// must NOT advance (P0-07).
+	app.on_did_change(Request{
+		params: json2.encode(DidChangeTextDocumentParams{
+			text_document:   VersionedTextDocumentIdentifier{
+				uri:     uri
+				version: 2
+			}
+			content_changes: [
+				ContentChange{
+					text:  'X'
+					range: LSPRange{
+						start: Position{
+							line: 0
+							char: 5
+						}
+						end:   Position{
+							line: 0
+							char: 2
+						}
+					}
+				},
+			]
+		},
+			escape_unicode: true
+		)
+	}) or {}
+	// Content unchanged, version still 1.
+	assert app.open_files[uri] == 'module main\n'
+	assert app.open_files_versions[uri] == 1
+}

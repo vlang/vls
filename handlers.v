@@ -510,6 +510,13 @@ fn (mut app App) on_did_change(request Request) ?Notification {
 				continue
 			}
 
+			// An invalid range must not be silently dropped while the version is
+			// advanced (that desynchronizes the buffer). Refuse the whole change
+			// and keep the last-good content and version (P0-07).
+			if !incremental_change_is_valid(content, rng, app.position_encoding) {
+				log('on_did_change: invalid incremental range for ${uri}; refusing change without advancing version')
+				return none
+			}
 			content = apply_incremental_change(content, rng, change.text, app.position_encoding)
 		} else {
 			// Full text replacement.
@@ -864,6 +871,25 @@ fn apply_incremental_change(content string, range LSPRange, new_text string, enc
 		return content
 	}
 	return content[..start_byte] + new_text + content[end_byte..]
+}
+
+// incremental_change_is_valid reports whether `range` maps to an applicable byte
+// span in `content` (non-negative, non-reversed, in bounds). on_did_change uses
+// this to detect an edit it cannot apply, so it can refuse the change WITHOUT
+// advancing the document version — dropping the edit while bumping the version
+// would silently desynchronize the buffer (P0-07).
+fn incremental_change_is_valid(content string, range LSPRange, enc PositionEncoding) bool {
+	if range.start.line < 0 || range.start.char < 0 || range.end.line < 0 || range.end.char < 0 {
+		return false
+	}
+	if range.end.line < range.start.line
+		|| (range.end.line == range.start.line && range.end.char < range.start.char) {
+		return false
+	}
+	starts := line_start_offsets(content)
+	start_byte := position_to_byte_offset(content, starts, range.start.line, range.start.char, enc)
+	end_byte := position_to_byte_offset(content, starts, range.end.line, range.end.char, enc)
+	return start_byte <= end_byte && start_byte <= content.len && end_byte <= content.len
 }
 
 // find_references handles the LSP references request, returning all locations of a symbol.
