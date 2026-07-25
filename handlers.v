@@ -578,23 +578,23 @@ fn (mut app App) on_did_save(request Request) ?Notification {
 			app.open_files[uri] = text
 			app.text = text
 			app.bump_generation(uri)
+			app.invalidate_index_uri(uri)
 		}
-	} else if text := params.text {
-		content = text
-		app.open_files[uri] = text
-		app.text = text
-		app.bump_generation(uri)
 	} else {
-		real_path := uri_to_path(uri)
-		content = os.read_file(real_path) or {
-			$if debug { log('on_did_save: failed to read file ${real_path}: ${err}') }
-			return none
+		// didSave for a document that is NOT open. Do not insert it into
+		// open_files — that would leave it logically open (and editor-owned)
+		// forever. Just compute diagnostics from the saved text or, failing that,
+		// the on-disk content.
+		if text := params.text {
+			content = text
+		} else {
+			real_path := uri_to_path(uri)
+			content = os.read_file(real_path) or {
+				$if debug { log('on_did_save: failed to read file ${real_path}: ${err}') }
+				return none
+			}
 		}
-		app.open_files[uri] = content
-		app.text = content
-		app.bump_generation(uri)
 	}
-	app.invalidate_index_uri(uri)
 	notification := app.build_diagnostics_notification(uri, content)
 	return notification
 }
