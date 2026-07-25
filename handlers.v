@@ -1682,6 +1682,7 @@ fn (mut app App) handle_inlay_hints(request Request) Response {
 	// Only scan project directory if working_dir is a real, accessible directory.
 	// Guard against fake URIs (e.g. tests using file:///test.v) which resolve
 	// working_dir to '/' and would cause a full filesystem walk.
+	mut imported_mods := []string{}
 	if working_dir != '' && working_dir != '/' && os.is_dir(working_dir) {
 		project_files := os.walk_ext(working_dir, '.v')
 		for pf in project_files {
@@ -1689,24 +1690,16 @@ fn (mut app App) handle_inlay_hints(request Request) Response {
 				index_files << pf
 			}
 		}
-
-		// Add vlib modules imported by this file
-		imported_mods := parse_imports(content)
-		for mod in imported_mods {
-			mod_path := mod.replace('.', '/')
-			vlib_mod_dir := os.join_path(v_dir, 'vlib', mod_path)
-			if os.is_dir(vlib_mod_dir) {
-				vlib_files := os.walk_ext(vlib_mod_dir, '.v')
-				for vf in vlib_files {
-					if !vf.ends_with('_test.v') {
-						index_files << vf
-					}
-				}
-			}
-		}
+		imported_mods = parse_imports(content)
 	}
 
+	// Project/open files are re-read live (they may change mid-session). vlib
+	// module indexes are merged from a session cache below — walking and parsing
+	// vlib on every inlayHint request was the dominant, needlessly repeated cost.
 	mut fn_index := build_fn_index(index_files)
+	for mod in imported_mods {
+		app.merge_vlib_module_fns(mod, mut fn_index)
+	}
 	// Also index functions defined in the current file (in-memory content).
 	parse_fn_signatures_into(content, '', mut fn_index)
 
@@ -1947,6 +1940,31 @@ fn build_fn_index(files []string) map[string]string {
 		parse_fn_signatures_into(content, mod_name, mut index)
 	}
 	return index
+}
+
+// merge_vlib_module_fns merges the fn→return-type index for a vlib module into
+// `index`, building and caching it on first use. vlib source does not change
+// during a session, so the walk+read+parse is done once per module rather than
+// on every inlayHint request.
+fn (mut app App) merge_vlib_module_fns(mod string, mut index map[string]string) {
+	if mod !in app.vlib_fn_cache {
+		mut built := map[string]string{}
+		mod_path := mod.replace('.', '/')
+		vlib_mod_dir := os.join_path(v_dir, 'vlib', mod_path)
+		if os.is_dir(vlib_mod_dir) {
+			mut vfiles := []string{}
+			for vf in os.walk_ext(vlib_mod_dir, '.v') {
+				if !vf.ends_with('_test.v') {
+					vfiles << vf
+				}
+			}
+			built = build_fn_index(vfiles)
+		}
+		app.vlib_fn_cache[mod] = built.move()
+	}
+	for name, ret in app.vlib_fn_cache[mod] {
+		index[name] = ret
+	}
 }
 
 // lookup_fn_return_type looks up the return type of a function call RHS in the

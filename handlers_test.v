@@ -4073,3 +4073,20 @@ fn test_on_did_change_invalid_range_does_not_advance_version() {
 	assert app.open_files[uri] == 'module main\n'
 	assert app.open_files_versions[uri] == 1
 }
+
+fn test_merge_vlib_module_fns_caches_per_module() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	mut idx := map[string]string{}
+	// A module with no matching vlib directory caches an empty index so it is
+	// never re-walked on subsequent inlayHint requests.
+	app.merge_vlib_module_fns('no_such_vlib_module_xyz', mut idx)
+	assert 'no_such_vlib_module_xyz' in app.vlib_fn_cache
+	assert app.vlib_fn_cache['no_such_vlib_module_xyz'].len == 0
+	assert idx.len == 0
+	// Second call is served from the cache and still merges nothing new.
+	app.merge_vlib_module_fns('no_such_vlib_module_xyz', mut idx)
+	assert idx.len == 0
+}
