@@ -255,8 +255,11 @@ fn run_v_argv(args []string, work_folder string) os.Result {
 	}
 	p.set_redirect_stdio()
 	p.run()
+	// The V compiler writes its `-json-errors` / `-line-info` output to STDERR,
+	// so both streams are captured into one combined buffer (equivalent to the
+	// shell `2>&1` the previous implementation relied on). Returning stdout alone
+	// would silently drop every diagnostic.
 	mut out := strings.new_builder(1024)
-	mut errb := strings.new_builder(256)
 	start_ms := time.now().unix_milli()
 	mut timed_out := false
 	// Drain both pipes while the child runs so a large output cannot deadlock
@@ -268,7 +271,7 @@ fn run_v_argv(args []string, work_folder string) os.Result {
 			got_data = true
 		}
 		if chunk := p.pipe_read(.stderr) {
-			errb.write_string(chunk)
+			out.write_string(chunk)
 			got_data = true
 		}
 		if time.now().unix_milli() - start_ms > compiler_timeout_ms {
@@ -283,14 +286,10 @@ fn run_v_argv(args []string, work_folder string) os.Result {
 		}
 	}
 	out.write_string(p.stdout_slurp())
-	errb.write_string(p.stderr_slurp())
+	out.write_string(p.stderr_slurp())
 	p.wait()
 	code := p.code
 	p.close()
-	stderr_text := errb.str()
-	if stderr_text.trim_space() != '' {
-		log('v stderr: ${stderr_text}')
-	}
 	if timed_out {
 		return os.Result{
 			exit_code: compiler_exit_timeout
