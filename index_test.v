@@ -148,3 +148,18 @@ fn test_index_scoped_to_v_mod_project_walks_disk() {
 	// never opened.
 	assert app.query_workspace_symbols('ondisk_fn').len == 1
 }
+
+fn test_index_module_fn_completions_same_module_only() {
+	mut app := index_test_app()
+	app.open_files['file:///tmp/mod/a.v'] = 'module foo\n\npub fn helper(x int) int {\n\treturn x\n}\n'
+	app.open_files['file:///tmp/mod/b.v'] = 'module foo\n\nfn main() {}\n'
+	app.open_files['file:///tmp/mod/c.v'] = 'module bar\n\nfn other() {}\n'
+
+	comps := app.collect_module_fn_completions('file:///tmp/mod/b.v', '/tmp/mod')
+	// helper is a same-module (foo) sibling of b.v
+	assert comps.any(it.label == 'helper')
+	// other belongs to module bar and must be excluded
+	assert !comps.any(it.label == 'other')
+	// b.v's own functions are excluded (it is the current file)
+	assert !comps.any(it.label == 'main')
+}

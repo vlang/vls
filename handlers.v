@@ -2557,52 +2557,23 @@ fn build_safe_organize_imports_action(uri string, lines []string) ?CodeAction {
 	}
 }
 
-// collect_module_fn_completions collects free function completions from sibling files in the module.
-fn (app &App) collect_module_fn_completions(current_file_uri string, working_dir string) []Detail {
-	mut items := []Detail{}
-	mut searched_uris := map[string]bool{}
-	searched_uris[current_file_uri] = true
-
-	// Determine the current file's module so we only include same-module siblings.
+// collect_module_fn_completions collects free-function completions from sibling
+// files in the current module, via the persistent index. A V module lives in a
+// single directory, so we make sure the open buffers and the current file's
+// directory are indexed (cheap, shallow) and then read pre-parsed completion
+// items from the index instead of re-walking and re-parsing on every keystroke.
+fn (mut app App) collect_module_fn_completions(current_file_uri string, working_dir string) []Detail {
 	current_content := app.open_files[current_file_uri] or {
-		content := os.read_file(uri_to_path(current_file_uri)) or { '' }
-		content
+		os.read_file(uri_to_path(current_file_uri)) or { '' }
 	}
 	current_module := get_module_name(current_content)
-
-	// 1. Scan in-memory open files
-	for uri, content in app.open_files {
-		if uri in searched_uris {
-			continue
-		}
-		if uri.ends_with('_test.v') {
-			continue
-		}
-		searched_uris[uri] = true
-		if current_module != '' && get_module_name(content) != current_module {
-			continue
-		}
-		items << parse_module_fn_completions(content)
+	// Keep open buffers fresh, then ensure the current module's directory is
+	// indexed (covers loose files with no v.mod project root too).
+	for uri, _ in app.open_files {
+		app.reindex_uri(uri)
 	}
-
-	// 2. Scan on-disk .v files in the working directory not yet processed
-	for v_file in os.walk_ext(working_dir, '.v') {
-		if v_file.ends_with('_test.v') {
-			continue
-		}
-		uri := path_to_uri(v_file)
-		if uri in searched_uris {
-			continue
-		}
-		searched_uris[uri] = true
-		content := os.read_file(v_file) or { continue }
-		if current_module != '' && get_module_name(content) != current_module {
-			continue
-		}
-		items << parse_module_fn_completions(content)
-	}
-
-	return items
+	app.ensure_dir_shallow_indexed(working_dir)
+	return app.query_module_fn_completions(current_module, current_file_uri)
 }
 
 // parse_module_fn_completions extracts free-function declarations (`pub fn` and `fn`)
