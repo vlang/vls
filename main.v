@@ -233,6 +233,30 @@ fn (mut app App) write_data(data string) {
 	}
 }
 
+// send_framed prepends a Content-Length header to `content` and writes the
+// message. LSP requires CRLF-delimited headers. A TCP connection is a raw byte
+// stream, so it always gets literal `\r\n\r\n`; only Windows *stdio* uses `\n\n`,
+// relying on text-mode stdout to translate each `\n` into `\r\n` on the wire
+// (P0-11). This prevents Windows TCP from emitting LF-only framing.
+fn (mut app App) send_framed(content string) {
+	mut is_tcp := false
+	if _ := app.tcp_conn {
+		is_tcp = true
+	}
+	header := if is_tcp {
+		'Content-Length: ${content.len}\r\n\r\n'
+	} else {
+		$if windows {
+			'Content-Length: ${content.len}\n\n'
+		} $else {
+			'Content-Length: ${content.len}\r\n\r\n'
+		}
+	}
+	full_message := '${header}${content}'
+	log('SEND: ${full_message}')
+	app.write_data(full_message)
+}
+
 // Transport framing limits (P0-11). These bound how much memory an untrusted
 // client (local or over TCP) can force the server to allocate.
 const transport_buffer_cap = 64 * 1024 // buffered reader capacity
@@ -356,8 +380,12 @@ fn (mut app App) handle_requests(mut reader io.BufferedReader) {
 				break
 			}
 			if err.msg().starts_with('invalid header:') {
+				// The frame body was not consumed, so the stream is now
+				// desynchronized: the unread body would be misread as the next
+				// header. Report the error, then close the connection rather than
+				// attempting to resynchronize (P0-11).
 				app.write_error_response(make_parse_error_response(err.msg()))
-				continue
+				break
 			}
 			$if debug { log('Error reading request: ${err.msg()}') }
 			break
@@ -918,15 +946,7 @@ fn inject_raw_id(encoded string, raw_id string) string {
 
 fn (mut app App) write_response(response Response) {
 	content := inject_raw_id(encode_response_payload(response), app.current_request_raw_id)
-	headers := $if windows {
-		// windows text stdio will output `\r\n` for every `\n`
-		'Content-Length: ${content.len}\n\n'
-	} $else {
-		'Content-Length: ${content.len}\r\n\r\n'
-	}
-	full_message := '${headers}${content}'
-	log('SEND: ${full_message}')
-	app.write_data(full_message)
+	app.send_framed(content)
 }
 
 fn encode_response_payload(response Response) string {
@@ -992,16 +1012,7 @@ fn matches_needle_at(s string, i int, needle string) bool {
 }
 
 fn (mut app App) write_notification(notification Notification) {
-	content := json2.encode(notification, escape_unicode: true)
-	headers := $if windows {
-		// windows text stdio will output `\r\n` for every `\n`
-		'Content-Length: ${content.len}\n\n'
-	} $else {
-		'Content-Length: ${content.len}\r\n\r\n'
-	}
-	full_message := '${headers}${content}'
-	log('SEND: ${full_message}')
-	app.write_data(full_message)
+	app.send_framed(json2.encode(notification, escape_unicode: true))
 }
 
 fn (mut app App) write_error_response(response ErrorResponse) {
@@ -1011,15 +1022,7 @@ fn (mut app App) write_error_response(response ErrorResponse) {
 	if response.error.code != jsonrpc_err_parse_error {
 		content = inject_raw_id(content, app.current_request_raw_id)
 	}
-	headers := $if windows {
-		// windows text stdio will output `\r\n` for every `\n`
-		'Content-Length: ${content.len}\n\n'
-	} $else {
-		'Content-Length: ${content.len}\r\n\r\n'
-	}
-	full_message := '${headers}${content}'
-	log('SEND: ${full_message}')
-	app.write_data(full_message)
+	app.send_framed(content)
 }
 
 fn encode_error_response_payload(response ErrorResponse) string {
@@ -1532,28 +1535,12 @@ fn is_valid_v_identifier_name(name string) bool {
 // write_raw_notification sends an arbitrary JSON-RPC notification to the client.
 // params_json must already be a valid JSON value (object or array).
 fn (mut app App) write_raw_notification(method string, params_json string) {
-	content := '{"jsonrpc":"2.0","method":"${method}","params":${params_json}}'
-	headers := $if windows {
-		'Content-Length: ${content.len}\n\n'
-	} $else {
-		'Content-Length: ${content.len}\r\n\r\n'
-	}
-	full_message := '${headers}${content}'
-	log('SEND: ${full_message}')
-	app.write_data(full_message)
+	app.send_framed('{"jsonrpc":"2.0","method":"${method}","params":${params_json}}')
 }
 
 // write_raw_request sends an arbitrary JSON-RPC request from the server to the client.
 fn (mut app App) write_raw_request(id int, method string, params_json string) {
-	content := '{"jsonrpc":"2.0","id":${id},"method":"${method}","params":${params_json}}'
-	headers := $if windows {
-		'Content-Length: ${content.len}\n\n'
-	} $else {
-		'Content-Length: ${content.len}\r\n\r\n'
-	}
-	full_message := '${headers}${content}'
-	log('SEND: ${full_message}')
-	app.write_data(full_message)
+	app.send_framed('{"jsonrpc":"2.0","id":${id},"method":"${method}","params":${params_json}}')
 }
 
 // send_show_message pushes a window/showMessage notification to the client.
@@ -1657,15 +1644,7 @@ fn (mut app App) on_initialized(_ Request) {
 		}
 	}
 	app.next_request_id++
-	content := json2.encode(reg, escape_unicode: true)
-	headers := $if windows {
-		'Content-Length: ${content.len}\n\n'
-	} $else {
-		'Content-Length: ${content.len}\r\n\r\n'
-	}
-	full_message := '${headers}${content}'
-	log('SEND: ${full_message}')
-	app.write_data(full_message)
+	app.send_framed(json2.encode(reg, escape_unicode: true))
 	app.sent_watched_files_registration = true
 }
 

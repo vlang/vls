@@ -24,10 +24,12 @@ struct IndexEntry {
 	fn_completions []Detail          // free-function completion items for this file
 }
 
-// build_index_entry parses `content` into an IndexEntry.
-fn build_index_entry(content string) IndexEntry {
+// build_index_entry parses `content` into an IndexEntry. Symbol ranges are
+// re-encoded into `enc` so document/workspace symbol positions match the
+// negotiated encoding for non-ASCII lines (P0-01).
+fn build_index_entry(content string, enc PositionEncoding) IndexEntry {
 	lines := content.split_into_lines()
-	doc_syms := parse_document_symbols(content)
+	doc_syms := encode_document_symbols(parse_document_symbols(content), lines, enc)
 	mut docs := map[string]string{}
 	for sym in doc_syms {
 		// Each symbol's declaration line is range.start.line; read its vdoc.
@@ -45,6 +47,52 @@ fn build_index_entry(content string) IndexEntry {
 		doc_symbols:    doc_syms
 		docs:           docs
 		fn_completions: parse_module_fn_completions(content)
+	}
+}
+
+// encode_document_symbols re-encodes the character offsets of `syms` (produced
+// as UTF-8 byte offsets by parse_document_symbols) into `enc` units, using
+// `lines` for the per-line conversion. Recurses into children (fields, members).
+fn encode_document_symbols(syms []DocumentSymbol, lines []string, enc PositionEncoding) []DocumentSymbol {
+	if enc == .utf8 {
+		return syms // already byte offsets
+	}
+	mut out := []DocumentSymbol{cap: syms.len}
+	for sym in syms {
+		out << DocumentSymbol{
+			name:            sym.name
+			kind:            sym.kind
+			tags:            sym.tags
+			range:           encode_range_chars(sym.range, lines, enc)
+			selection_range: encode_range_chars(sym.selection_range, lines, enc)
+			children:        encode_document_symbols(sym.children, lines, enc)
+		}
+	}
+	return out
+}
+
+// encode_range_chars converts the byte-offset character fields of `r` into `enc`
+// units using the corresponding source lines.
+fn encode_range_chars(r LSPRange, lines []string, enc PositionEncoding) LSPRange {
+	start_line := if r.start.line >= 0 && r.start.line < lines.len {
+		lines[r.start.line]
+	} else {
+		''
+	}
+	end_line := if r.end.line >= 0 && r.end.line < lines.len {
+		lines[r.end.line]
+	} else {
+		''
+	}
+	return LSPRange{
+		start: Position{
+			line: r.start.line
+			char: byte_to_encoded_col(start_line, r.start.char, enc)
+		}
+		end:   Position{
+			line: r.end.line
+			char: byte_to_encoded_col(end_line, r.end.char, enc)
+		}
 	}
 }
 
@@ -166,7 +214,7 @@ fn (mut app App) reindex_uri(uri string) {
 			return
 		}
 	}
-	app.symbol_index[uri] = build_index_entry(content)
+	app.symbol_index[uri] = build_index_entry(content, app.position_encoding)
 }
 
 // invalidate_index_uri drops a URI's entry so it is re-parsed on next access.
@@ -248,7 +296,7 @@ fn (mut app App) ensure_dirs_indexed(dirs []string) {
 				continue
 			}
 			content := os.read_file(f) or { continue }
-			app.symbol_index[uri] = build_index_entry(content)
+			app.symbol_index[uri] = build_index_entry(content, app.position_encoding)
 		}
 		app.indexed_dirs[dir] = true
 	}
@@ -278,7 +326,7 @@ fn (mut app App) ensure_dir_shallow_indexed(dir string) {
 			continue
 		}
 		content := os.read_file(full) or { continue }
-		app.symbol_index[uri] = build_index_entry(content)
+		app.symbol_index[uri] = build_index_entry(content, app.position_encoding)
 	}
 }
 
