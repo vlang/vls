@@ -222,6 +222,26 @@ fn (mut app App) invalidate_index_uri(uri string) {
 	app.symbol_index.delete(uri)
 }
 
+// drop_index_under removes indexed symbols and occurrence caches for every file
+// whose path is inside `dir_path`, and marks all project dirs for re-walk. Used
+// when a workspace folder is removed so its entries do not linger stale. Any
+// still-open files are re-indexed from their buffers on the next query.
+fn (mut app App) drop_index_under(dir_path string) {
+	d := dir_path.replace('\\', '/')
+	for uri in app.symbol_index.keys() {
+		if path_is_within(uri_to_path(uri).replace('\\', '/'), d) {
+			app.symbol_index.delete(uri)
+		}
+	}
+	for uri in app.ref_occurrences.keys() {
+		if path_is_within(uri_to_path(uri).replace('\\', '/'), d) {
+			app.ref_occurrences.delete(uri)
+		}
+	}
+	// Re-walk on next query (a removed folder must not be re-indexed).
+	app.indexed_dirs.clear()
+}
+
 // Bounds and exclusions for the workspace walk. Without these a stray file
 // opened at a large directory (a home dir, /tmp, or the filesystem root) would
 // pull the entire tree into the index (audit: "unbounded workspace traversal").
