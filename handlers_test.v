@@ -4016,3 +4016,14 @@ fn test_negotiate_position_encoding_defaults_utf16() {
 	}
 	assert negotiate_position_encoding(params) == .utf32
 }
+
+fn test_classify_highlight_kind_read_write() {
+	// Assignments and declarations are writes.
+	assert classify_highlight_kind('x := 1', 1) == doc_highlight_write
+	assert classify_highlight_kind('x = 1', 1) == doc_highlight_write
+	assert classify_highlight_kind('x += 1', 1) == doc_highlight_write
+	// Comparisons and uses are reads.
+	assert classify_highlight_kind('x == 1', 1) == doc_highlight_read
+	assert classify_highlight_kind('foo(x)', 3) == doc_highlight_read
+	assert classify_highlight_kind('return x', 8) == doc_highlight_read
+}
