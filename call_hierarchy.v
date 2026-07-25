@@ -41,7 +41,7 @@ fn (mut app App) handle_prepare_call_hierarchy(request Request) Response {
 		}
 	}
 	// Search the current file first, then the wider workspace.
-	mut item := find_fn_in_content(word, content, uri)
+	mut item := find_fn_in_content(word, content, uri, app.position_encoding)
 	if item.name == '' {
 		working_dir := os.dir(uri_to_path(uri))
 		search_dirs := app.workspace_search_dirs(working_dir)
@@ -94,7 +94,7 @@ fn (mut app App) handle_call_hierarchy_incoming(request Request) Response {
 			continue
 		}
 		processed[uri] = true
-		scan_for_callers(fn_name, uri, fc, mut results)
+		scan_for_callers(fn_name, uri, fc, app.position_encoding, mut results)
 	}
 	// Scan on-disk .v files in the working directory.
 	for dir in search_dirs {
@@ -117,7 +117,7 @@ fn (mut app App) handle_call_hierarchy_incoming(request Request) Response {
 			}
 			processed[uri] = true
 			fc := os.read_file(f) or { continue }
-			scan_for_callers(fn_name, uri, fc, mut results)
+			scan_for_callers(fn_name, uri, fc, app.position_encoding, mut results)
 		}
 	}
 	return Response{
@@ -149,7 +149,7 @@ fn (mut app App) handle_call_hierarchy_outgoing(request Request) Response {
 		if li >= lines.len {
 			break
 		}
-		find_fn_calls_in_line(lines[li], li, mut call_map)
+		find_fn_calls_in_line(lines[li], li, app.position_encoding, mut call_map)
 	}
 
 	working_dir := os.dir(uri_to_path(uri))
@@ -193,8 +193,9 @@ fn extract_simple_fn_name(full_name string) string {
 
 // find_fn_in_content searches `content` for a function/method whose simple
 // (bare) name equals `fn_name` and returns a CallHierarchyItem on success.
-fn find_fn_in_content(fn_name string, content string, uri string) CallHierarchyItem {
-	syms := parse_document_symbols(content)
+fn find_fn_in_content(fn_name string, content string, uri string, enc PositionEncoding) CallHierarchyItem {
+	syms :=
+		encode_document_symbols(parse_document_symbols(content), content.split_into_lines(), enc)
 	for sym in syms {
 		if sym.kind != sym_kind_function && sym.kind != sym_kind_method {
 			continue
@@ -234,9 +235,9 @@ fn (mut app App) find_fn_declaration(fn_name string, search_dirs []string, reque
 // call site, appends a CallHierarchyIncomingCall entry to `results` keyed by
 // the enclosing function symbol (nearest preceding function declaration).
 // String literals and line comments are skipped to avoid false positives.
-fn scan_for_callers(fn_name string, file_uri string, file_content string, mut results []CallHierarchyIncomingCall) {
+fn scan_for_callers(fn_name string, file_uri string, file_content string, enc PositionEncoding, mut results []CallHierarchyIncomingCall) {
 	file_lines := file_content.split_into_lines()
-	syms := parse_document_symbols(file_content)
+	syms := encode_document_symbols(parse_document_symbols(file_content), file_lines, enc)
 
 	// For each function symbol, scan its body for calls to fn_name.
 	for sym in syms {
@@ -282,8 +283,8 @@ fn scan_for_callers(fn_name string, file_uri string, file_content string, mut re
 					col = abs + 1
 					continue
 				}
-				start_char := utf8_byte_to_char_index(line, abs)
-				end_char := utf8_byte_to_char_index(line, abs + fn_name.len)
+				start_char := byte_to_encoded_col(line, abs, enc)
+				end_char := byte_to_encoded_col(line, abs + fn_name.len, enc)
 				call_ranges << LSPRange{
 					start: Position{
 						line: li
@@ -314,7 +315,7 @@ fn scan_for_callers(fn_name string, file_uri string, file_content string, mut re
 
 // find_fn_calls_in_line scans a single source line for `identifier(` patterns
 // and adds them to `call_map` keyed by the unqualified callee name.
-fn find_fn_calls_in_line(line string, line_idx int, mut call_map map[string][]LSPRange) {
+fn find_fn_calls_in_line(line string, line_idx int, enc PositionEncoding, mut call_map map[string][]LSPRange) {
 	n := line.len
 	mut col := 0
 	for col < n {
@@ -357,8 +358,8 @@ fn find_fn_calls_in_line(line string, line_idx int, mut call_map map[string][]LS
 				parts := word.split('.')
 				simple := parts.last()
 				if simple.len > 0 && simple !in v_keywords {
-					start_char := utf8_byte_to_char_index(line, start)
-					end_char := utf8_byte_to_char_index(line, col)
+					start_char := byte_to_encoded_col(line, start, enc)
+					end_char := byte_to_encoded_col(line, col, enc)
 					cr := LSPRange{
 						start: Position{
 							line: line_idx

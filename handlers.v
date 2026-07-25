@@ -1613,7 +1613,8 @@ fn (mut app App) handle_document_symbols(request Request) Response {
 	content := app.open_files[uri] or { '' }
 	return Response{
 		id:     request.id
-		result: parse_document_symbols(content)
+		result: encode_document_symbols(parse_document_symbols(content),
+			content.split_into_lines(), app.position_encoding)
 	}
 }
 
@@ -2349,7 +2350,7 @@ fn (mut app App) handle_code_action(request Request) Response {
 	// contiguous block. If imports are separated by any other code or comments
 	// we refuse the action rather than delete the intervening text (P0-09).
 	if code_action_kind_wanted(only, code_action_kind_source_organize_imports) {
-		if action := build_safe_organize_imports_action(uri, lines) {
+		if action := build_safe_organize_imports_action(uri, lines, app.position_encoding) {
 			actions << action
 		}
 	}
@@ -2382,7 +2383,7 @@ fn code_action_kind_wanted(only []string, kind string) bool {
 // build_safe_organize_imports_action returns an Organize Imports action that is
 // guaranteed to leave all non-import text byte-for-byte unchanged, or none when
 // the imports are not a single contiguous block.
-fn build_safe_organize_imports_action(uri string, lines []string) ?CodeAction {
+fn build_safe_organize_imports_action(uri string, lines []string, enc PositionEncoding) ?CodeAction {
 	mut import_lines := []int{}
 	for i, line in lines {
 		if line.trim_space().starts_with('import ') {
@@ -2432,7 +2433,7 @@ fn build_safe_organize_imports_action(uri string, lines []string) ?CodeAction {
 						}
 						end:   Position{
 							line: last
-							char: utf8_byte_to_char_index(lines[last], lines[last].len)
+							char: byte_to_encoded_col(lines[last], lines[last].len, enc)
 						}
 					}
 					new_text: new_text
