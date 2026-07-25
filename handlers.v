@@ -2960,7 +2960,12 @@ fn (mut app App) on_cancel_request(request Request) {
 	// (P0-02/P0-03).
 	if raw := extract_raw_id(request.params) {
 		app.cancelled_raw_ids[raw] = true
-		app.cancelled_requests[raw_id_to_int(raw)] = true
+		// Only a numeric id belongs in the int map. A string id must NOT be
+		// collapsed to 0: that would spuriously cancel numeric id 0 and make every
+		// string id collide at 0 (P0-02). String ids are matched via the raw set.
+		if !raw.starts_with('"') {
+			app.cancelled_requests[raw.int()] = true
+		}
 		log('VLS: request ${raw} marked as cancelled')
 		return
 	}

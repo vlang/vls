@@ -2248,3 +2248,45 @@ fn test_integration_request_to_notification_only_method_is_invalid_request() {
 	assert out[1].contains('"id":42')
 	assert out[1].contains('${jsonrpc_err_invalid_request}')
 }
+
+fn test_integration_string_id_cancel_does_not_collide_with_numeric_zero() {
+	// Cancelling string id "a" must NOT mark numeric id 0 as cancelled, and a
+	// different string id "b" must not collide with "a" (P0-02).
+	mut app, project_dir := create_integration_test_env()
+	defer {
+		cleanup_integration_test_env(app, project_dir)
+	}
+	// Cancel string id "a".
+	app.current_request_raw_id = ''
+	app.on_cancel_request(Request{
+		method: '$/cancelRequest'
+		params: '{"id":"a"}'
+	})
+	// A numeric id-0 request is NOT cancelled by the string cancel.
+	app.current_request_raw_id = '0'
+	assert !app.request_is_cancelled(0)
+	// A different string id "b" is NOT cancelled.
+	app.current_request_raw_id = '"b"'
+	assert !app.request_is_cancelled(0)
+	// The exact string id "a" IS cancelled.
+	app.current_request_raw_id = '"a"'
+	assert app.request_is_cancelled(0)
+}
+
+fn test_integration_numeric_and_string_cancel_are_independent() {
+	mut app, project_dir := create_integration_test_env()
+	defer {
+		cleanup_integration_test_env(app, project_dir)
+	}
+	// Cancel numeric id 7.
+	app.current_request_raw_id = ''
+	app.on_cancel_request(Request{
+		method: '$/cancelRequest'
+		params: '{"id":7}'
+	})
+	app.current_request_raw_id = '7'
+	assert app.request_is_cancelled(7)
+	// A string id "7" is a different request and is not cancelled.
+	app.current_request_raw_id = '"7"'
+	assert !app.request_is_cancelled(0)
+}
