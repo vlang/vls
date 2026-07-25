@@ -1536,15 +1536,16 @@ fn (mut app App) format_content(uri string, content string) ([]TextEdit, string)
 		return []TextEdit{}, ''
 	}
 
-	lines := content.split_into_lines()
-	last_line := lines.len - 1
-	// The end position's character must be in the client's encoding, not raw
-	// bytes, for a correct full-document replace range (P0-01).
-	last_char := if lines.len > 0 {
-		byte_to_encoded_col(lines[last_line], lines[last_line].len, app.position_encoding)
-	} else {
-		0
-	}
+	// Compute the document's true end position from line-start byte offsets, not
+	// split_into_lines(): the latter drops the empty line after a trailing
+	// newline, which would leave the final terminator outside the replacement and
+	// let `v fmt` append an extra one (P0-08). `starts.len - 1` is the number of
+	// line terminators; the final segment is the text after the last terminator
+	// (empty when the file ends in a newline).
+	starts := line_start_offsets(content)
+	end_line := starts.len - 1
+	final_segment := content[starts[end_line]..]
+	end_char := byte_to_encoded_col(final_segment, final_segment.len, app.position_encoding)
 
 	edit := TextEdit{
 		range:    LSPRange{
@@ -1553,8 +1554,8 @@ fn (mut app App) format_content(uri string, content string) ([]TextEdit, string)
 				char: 0
 			}
 			end:   Position{
-				line: last_line
-				char: last_char
+				line: end_line
+				char: end_char
 			}
 		}
 		new_text: formatted
