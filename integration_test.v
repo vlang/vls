@@ -2290,3 +2290,22 @@ fn test_integration_numeric_and_string_cancel_are_independent() {
 	app.current_request_raw_id = '"7"'
 	assert !app.request_is_cancelled(0)
 }
+
+fn test_integration_diagnostics_contain_real_compiler_errors() {
+	// Regression guard: the server must surface actual compiler errors, not an
+	// empty diagnostics list (the compiler writes -json-errors output to stderr).
+	mut app, project_dir := create_integration_test_env()
+	defer {
+		cleanup_integration_test_env(app, project_dir)
+	}
+	test_file := os.join_path(project_dir, 'err.v')
+	content := 'module main\n\nfn main() {\n\tx := undefined_thing\n}\n'
+	integration_test_must_write_file(test_file, content)
+	uri := path_to_uri(test_file)
+	app.open_files[uri] = content
+
+	notification := app.build_diagnostics_notification(uri, content)
+	assert notification.params.diagnostics.len > 0
+	assert notification.params.diagnostics.any(it.message.contains('undefined'))
+	assert notification.params.diagnostics.any(it.severity == 1)
+}
