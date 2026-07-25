@@ -725,6 +725,11 @@ fn test_integration_definition_request() {
 
 	response := app.operation_at_pos(.definition, request)
 	assert response.id == 2
+	// Must resolve to the `fn helper()` declaration (line 2), not return null —
+	// guards the compiler-interop path end to end.
+	assert response.result is Location
+	loc := response.result as Location
+	assert loc.range.start.line == 2
 }
 
 fn test_integration_definition_multifile() {
@@ -833,6 +838,11 @@ fn test_integration_signature_help_request() {
 
 	response := app.operation_at_pos(.signature_help, request)
 	assert response.id == 3
+	// Must return the actual signature via the compiler-interop path, not null.
+	assert response.result is SignatureHelp
+	sh := response.result as SignatureHelp
+	assert sh.signatures.len > 0
+	assert sh.signatures[0].label.contains('greet')
 }
 
 fn test_integration_signature_help_with_params() {

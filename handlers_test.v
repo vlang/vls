@@ -679,6 +679,12 @@ fn test_operation_at_pos_definition_line_info() {
 
 	response := app.operation_at_pos(.definition, request)
 	assert response.id == 2
+	// Regression guard: definition must actually resolve through the compiler
+	// interop path (which silently broke once when compiler stderr was dropped),
+	// not return null. It must point at the `fn helper()` declaration on line 2.
+	assert response.result is Location
+	loc := response.result as Location
+	assert loc.range.start.line == 2
 }
 
 fn test_operation_at_pos_signature_help_line_info() {
