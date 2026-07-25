@@ -529,7 +529,7 @@ fn (mut app App) handle_requests(mut reader io.BufferedReader) {
 							// run/test executeCommand + codeLens stubs, and willSave
 							// (never dispatched). Advertising only working features gives
 							// a better editor experience than exposing broken UI.
-							text_document_sync:                 TextDocumentSyncOptions{
+							text_document_sync:           TextDocumentSyncOptions{
 								open_close:           true
 								change:               2 // Incremental
 								save:                 SaveOptions{
@@ -538,27 +538,27 @@ fn (mut app App) handle_requests(mut reader io.BufferedReader) {
 								will_save:            false
 								will_save_wait_until: true
 							}
-							completion_provider:                CompletionProvider{
+							completion_provider:          CompletionProvider{
 								trigger_characters: ['.']
 							}
-							signature_help_provider:            SignatureHelpOptions{
+							signature_help_provider:      SignatureHelpOptions{
 								trigger_characters: ['(', ',']
 							}
-							definition_provider:                true
-							declaration_provider:               true
-							type_definition_provider:           true
-							implementation_provider:            true
-							hover_provider:                     true
-							references_provider:                true
-							rename_provider:                    RenameOptions{
+							definition_provider:          true
+							declaration_provider:         true
+							type_definition_provider:     true
+							implementation_provider:      true
+							hover_provider:               true
+							references_provider:          true
+							rename_provider:              RenameOptions{
 								prepare_provider: true
 							}
-							document_formatting_provider:       true
-							document_symbol_provider:           true
-							workspace_symbol_provider:          true
-							inlay_hint_provider:                true
-							code_action_provider:               true
-							semantic_tokens_provider:           SemanticTokensOptions{
+							document_formatting_provider: true
+							document_symbol_provider:     true
+							workspace_symbol_provider:    true
+							inlay_hint_provider:          true
+							code_action_provider:         true
+							semantic_tokens_provider:     SemanticTokensOptions{
 								legend: SemanticTokensLegend{
 									token_types:     semantic_token_types()
 									token_modifiers: semantic_token_modifiers()
@@ -566,11 +566,15 @@ fn (mut app App) handle_requests(mut reader io.BufferedReader) {
 								full:   true
 								range:  true
 							}
-							folding_range_provider:             true
-							call_hierarchy_provider:            true
-							document_highlight_provider:        true
-							selection_range_provider:           true
-							document_range_formatting_provider: true
+							folding_range_provider:       true
+							call_hierarchy_provider:      true
+							document_highlight_provider:  true
+							selection_range_provider:     true
+							// Range formatting is NOT advertised: v fmt only formats whole
+							// files, so a correct range implementation needs a
+							// character-accurate, EOL-preserving diff restricted to the
+							// requested range, which is not yet implemented (P0-08).
+							document_range_formatting_provider: false
 							position_encoding:                  position_encoding_string(app.position_encoding)
 							workspace:                          WorkspaceCapability{
 								workspace_folders: WorkspaceFoldersServerCapability{
