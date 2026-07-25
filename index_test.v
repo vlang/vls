@@ -211,3 +211,21 @@ fn test_search_symbol_in_dirs_finds_cross_file_occurrences() {
 	assert uris.any(it.ends_with('a.v'))
 	assert uris.any(it.ends_with('b.v'))
 }
+
+fn test_drop_index_under_removes_folder_entries() {
+	mut app := index_test_app()
+	app.open_files['file:///proj/a/x.v'] = 'module main\n\nfn ax() {}\n'
+	app.open_files['file:///proj/b/y.v'] = 'module main\n\nfn by() {}\n'
+	app.reindex_uri('file:///proj/a/x.v')
+	app.reindex_uri('file:///proj/b/y.v')
+	app.occurrences_for('file:///proj/a/x.v')
+	app.indexed_dirs['/proj/a'] = true
+
+	app.drop_index_under('/proj/a')
+	// Entries under /proj/a are gone; /proj/b remains.
+	assert 'file:///proj/a/x.v' !in app.symbol_index
+	assert 'file:///proj/a/x.v' !in app.ref_occurrences
+	assert 'file:///proj/b/y.v' in app.symbol_index
+	// A boundary-similar path is NOT dropped.
+	assert app.indexed_dirs.len == 0
+}

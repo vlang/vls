@@ -3024,6 +3024,8 @@ fn (mut app App) on_did_change_workspace_folders(request Request) {
 			}
 		}
 		app.workspace_roots = new_roots
+		// Drop now-stale index entries that belonged to the removed folder.
+		app.drop_index_under(path)
 	}
 	// Add newly opened folders.
 	for folder in params.event.added {
