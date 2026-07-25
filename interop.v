@@ -660,8 +660,9 @@ fn (mut app App) run_v_line_info(method Method, path string, line_info string) R
 			log('WRITING FILE ${time.now()} to temp path ${singlefile_tmppath}')
 			// Overlay the requested document's open buffer, never a global
 			// "last touched" field, so a request for one URI can't compile the
-			// buffer of another (P1-02).
-			request_content := app.open_files[path] or { os.read_file(real_path) or { app.text } }
+			// buffer of another (P1-02). Fall back to this exact file on disk, or
+			// empty — never to another document's content.
+			request_content := app.open_files[path] or { os.read_file(real_path) or { '' } }
 			mut wrote_temp := true
 			os.write_file(singlefile_tmppath, request_content) or {
 				wrote_temp = false
@@ -736,7 +737,9 @@ fn (mut app App) run_v_line_info(method Method, path string, line_info string) R
 			// Extract vdoc comment via cross-file search as a fallback when the
 			// compiler does not provide documentation.
 			mut doc := ''
-			file_content := app.open_files[path] or { app.text }
+			// Use the requested document's buffer, else this exact file from disk
+			// — never a global last-touched buffer (P1-02).
+			file_content := app.open_files[path] or { os.read_file(real_path) or { '' } }
 			file_lines := file_content.split_into_lines()
 			// line_info format for hover is "${line_nr}:hv^${col}"
 			info_parts := line_info.split(':')
