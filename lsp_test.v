@@ -1596,3 +1596,34 @@ fn test_method_is_notification_only_contract() {
 	// exit is excluded so the shutdown/exit lifecycle stays robust.
 	assert !method_is_notification_only(.exit)
 }
+
+fn test_encode_response_payload_strips_type_from_array_variant() {
+	// Array-of-struct result variants (e.g. []WorkspaceSymbol) must also have
+	// their per-element `_type` discriminators stripped (P1-10).
+	resp := Response{
+		id:     9
+		result: [
+			WorkspaceSymbol{
+				name:     'helper_fn'
+				kind:     sym_kind_function
+				location: Location{
+					uri:   'file:///tmp/lib.v'
+					range: LSPRange{}
+				}
+			},
+		]
+	}
+	encoded := encode_response_payload(resp)
+	assert encoded.contains('"name":"helper_fn"')
+	assert !encoded.contains('"_type"')
+}
+
+fn test_strip_sum_type_tags_handles_multiple_and_positions() {
+	// Tag as last member, first member, and only member.
+	assert strip_response_sum_type_tags('{"a":1,"_type":"X"}') == '{"a":1}'
+	assert strip_response_sum_type_tags('{"_type":"X","a":1}') == '{"a":1}'
+	assert strip_response_sum_type_tags('{"_type":"X"}') == '{}'
+	assert strip_response_sum_type_tags('[{"a":1,"_type":"X"},{"b":2,"_type":"Y"}]') == '[{"a":1},{"b":2}]'
+	// No tag: unchanged.
+	assert strip_response_sum_type_tags('{"a":1}') == '{"a":1}'
+}

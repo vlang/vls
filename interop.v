@@ -561,6 +561,11 @@ fn (mut app App) on_did_change_watched_files(request Request) {
 					app.diag_cache.delete(uri)
 				}
 				app.bump_generation(uri)
+				// Re-index from disk when no editor buffer owns the URI (the file
+				// was removed, so this drops the entry).
+				if uri !in app.open_files {
+					app.reindex_uri(uri)
+				}
 				log('on_did_change_watched_files: disk delete for ${uri}')
 			}
 			1, 2 {
@@ -571,6 +576,9 @@ fn (mut app App) on_did_change_watched_files(request Request) {
 				// non-open files from disk.
 				if uri in app.open_files {
 					log('on_did_change_watched_files: ignoring disk change for open buffer ${uri}')
+				} else {
+					// Re-read this file from disk into the index.
+					app.reindex_uri(uri)
 				}
 				if uri in app.diag_cache {
 					app.diag_cache.delete(uri)

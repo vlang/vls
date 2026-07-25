@@ -216,35 +216,15 @@ fn find_fn_in_content(fn_name string, content string, uri string) CallHierarchyI
 // `search_dirs` for a function/method named `fn_name`. Polls for cancellation
 // between files so callers can return early when the request is cancelled.
 fn (mut app App) find_fn_declaration(fn_name string, search_dirs []string, request_id int) CallHierarchyItem {
-	for uri, fc in app.open_files {
-		if request_id in app.cancelled_requests {
-			return CallHierarchyItem{}
-		}
-		item := find_fn_in_content(fn_name, fc, uri)
-		if item.name != '' {
-			return item
-		}
-	}
-	for dir in search_dirs {
-		if dir == '' || dir == '/' || !os.is_dir(dir) {
-			continue
-		}
-		for f in os.walk_ext(dir, '.v') {
-			if request_id in app.cancelled_requests {
-				return CallHierarchyItem{}
-			}
-			if f.ends_with('_test.v') {
-				continue
-			}
-			uri := path_to_uri(f)
-			if uri in app.open_files {
-				continue
-			}
-			fc := os.read_file(f) or { continue }
-			item := find_fn_in_content(fn_name, fc, uri)
-			if item.name != '' {
-				return item
-			}
+	// Answer from the persistent symbol index instead of re-scanning every file.
+	app.ensure_dirs_indexed(search_dirs)
+	if uri, sym := app.find_indexed_fn(fn_name) {
+		return CallHierarchyItem{
+			name:            sym.name
+			kind:            sym.kind
+			uri:             uri
+			range:           sym.range
+			selection_range: sym.selection_range
 		}
 	}
 	return CallHierarchyItem{}

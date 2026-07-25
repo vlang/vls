@@ -394,6 +394,7 @@ fn (mut app App) on_did_open(request Request) {
 		app.open_files_versions[uri] = version
 	}
 	app.bump_generation(uri)
+	app.invalidate_index_uri(uri) // re-parse from the buffer on next query
 	app.text = content
 	$if debug { log('STORED CONTENT for uri=${uri}, FILE COUNT: ${app.open_files.len}') }
 }
@@ -418,6 +419,9 @@ fn (mut app App) on_did_close(request Request) {
 	if uri in app.diag_cache {
 		app.diag_cache.delete(uri)
 	}
+	// The buffer is gone; re-index from disk so the file's symbols remain
+	// discoverable with their on-disk content.
+	app.reindex_uri(uri)
 }
 
 fn (mut app App) build_diagnostics_notification(uri string, content string) Notification {
@@ -518,6 +522,7 @@ fn (mut app App) on_did_change(request Request) ?Notification {
 		app.open_files_versions[uri] = version
 	}
 	app.bump_generation(uri)
+	app.invalidate_index_uri(uri) // symbols re-parsed lazily on next query
 	notification := app.build_diagnostics_notification(uri, content)
 	$if debug { log('returning notification: ${notification}') }
 	return notification
@@ -589,6 +594,7 @@ fn (mut app App) on_did_save(request Request) ?Notification {
 		app.text = content
 		app.bump_generation(uri)
 	}
+	app.invalidate_index_uri(uri)
 	notification := app.build_diagnostics_notification(uri, content)
 	return notification
 }
@@ -764,95 +770,14 @@ fn (mut app App) handle_workspace_symbol(request Request) Response {
 			result: []WorkspaceSymbol{}
 		}
 	}
-	query := params.query.to_lower()
-	mut results := []WorkspaceSymbol{}
-	mut searched_uris := map[string]bool{}
-	mut seen_symbols := map[string]bool{}
-
+	query := params.query
 	token := app.begin_progress('Searching workspace symbols…')
-
-	// Determine working dirs from open files
-	mut working_dirs := map[string]bool{}
-	for uri, _ in app.open_files {
-		dir := os.dir(uri_to_path(uri))
-		if dir != '' && dir != '/' {
-			working_dirs[dir] = true
-		}
-	}
-	for root in app.workspace_roots {
-		if root != '' && root != '/' {
-			working_dirs[root] = true
-		}
-	}
-	mut sorted_open_uris := app.open_files.keys()
-	sorted_open_uris.sort()
-	mut sorted_working_dirs := working_dirs.keys()
-	sorted_working_dirs.sort()
-
-	// Search open files first (in-memory)
-	for uri in sorted_open_uris {
-		if request.id in app.cancelled_requests {
-			app.end_progress(token, '')
-			return Response{
-				id:     request.id
-				result: results
-			}
-		}
-		content := app.open_files[uri]
-		searched_uris[uri] = true
-		syms := parse_document_symbols(content)
-		for sym in syms {
-			if query == '' || sym.name.to_lower().contains(query) {
-				add_workspace_symbol(mut results, mut seen_symbols, sym.name, sym.kind, uri,
-					sym.selection_range)
-			}
-			// Also include children (struct fields and enum members)
-			for child in sym.children {
-				if query == '' || child.name.to_lower().contains(query) {
-					add_workspace_symbol(mut results, mut seen_symbols,
-						'${sym.name}.${child.name}', child.kind, uri, child.selection_range)
-				}
-			}
-		}
-	}
-
-	// Search on-disk .v files not already tracked
-	for dir in sorted_working_dirs {
-		for v_file in os.walk_ext(dir, '.v') {
-			if request.id in app.cancelled_requests {
-				app.end_progress(token, '')
-				return Response{
-					id:     request.id
-					result: results
-				}
-			}
-			if v_file.ends_with('_test.v') {
-				continue
-			}
-			uri := path_to_uri(v_file)
-			if uri in searched_uris {
-				continue
-			}
-			searched_uris[uri] = true
-			content := os.read_file(v_file) or { continue }
-			syms := parse_document_symbols(content)
-			for sym in syms {
-				if query == '' || sym.name.to_lower().contains(query) {
-					add_workspace_symbol(mut results, mut seen_symbols, sym.name, sym.kind, uri,
-						sym.selection_range)
-				}
-				for child in sym.children {
-					if query == '' || child.name.to_lower().contains(query) {
-						add_workspace_symbol(mut results, mut seen_symbols,
-							'${sym.name}.${child.name}', child.kind, uri, child.selection_range)
-					}
-				}
-			}
-		}
-	}
-
+	// Populate/refresh the persistent index once, then answer from it. Tests are
+	// included so test functions/types are discoverable (P2-11). Subsequent
+	// queries reuse the index instead of re-reading and re-parsing the workspace.
+	app.ensure_dirs_indexed(app.index_query_dirs())
+	results := app.query_workspace_symbols(query)
 	app.end_progress(token, '')
-
 	return Response{
 		id:     request.id
 		result: results
@@ -1517,7 +1442,7 @@ fn get_import_completions(line string, work_dir string) []Detail {
 //  3. all .v files in the project working directory
 //  4. vlib/builtin/ (always, for built-in functions like println)
 //  5. vlib/<module>/ for each module imported in the current file
-fn (app &App) find_doc_comment_for_symbol(symbol string, current_lines []string, current_file_uri string) string {
+fn (mut app App) find_doc_comment_for_symbol(symbol string, current_lines []string, current_file_uri string) string {
 	// 1. Current file
 	decl_line := find_declaration_line(current_lines, symbol)
 	if decl_line >= 0 {
@@ -1527,43 +1452,12 @@ fn (app &App) find_doc_comment_for_symbol(symbol string, current_lines []string,
 		}
 	}
 
-	// 2 & 3. Other open files then all project .v files
-	working_dir := os.dir(uri_to_path(current_file_uri))
-	mut searched_uris := map[string]bool{}
-	searched_uris[current_file_uri] = true
-
-	// Search open files first (in memory, no disk I/O)
-	for uri, content in app.open_files {
-		if uri in searched_uris {
-			continue
-		}
-		searched_uris[uri] = true
-		lines := content.split_into_lines()
-		dl := find_declaration_line(lines, symbol)
-		if dl >= 0 {
-			doc := extract_doc_comment(lines, dl)
-			if doc != '' {
-				return doc
-			}
-		}
-	}
-
-	// Search remaining .v files on disk in the working directory
-	for v_file in os.walk_ext(working_dir, '.v') {
-		uri := path_to_uri(v_file)
-		if uri in searched_uris {
-			continue
-		}
-		searched_uris[uri] = true
-		content := os.read_file(v_file) or { continue }
-		lines := content.split_into_lines()
-		dl := find_declaration_line(lines, symbol)
-		if dl >= 0 {
-			doc := extract_doc_comment(lines, dl)
-			if doc != '' {
-				return doc
-			}
-		}
+	// 2 & 3. Other open files and project .v files, via the persistent index
+	// (avoids re-reading and re-parsing the whole project on every hover, P1-08).
+	app.ensure_dirs_indexed(app.index_query_dirs())
+	indexed_doc := app.find_indexed_doc(symbol)
+	if indexed_doc != '' {
+		return indexed_doc
 	}
 
 	// 4. vlib/builtin/ — always search for built-in symbols
@@ -1711,11 +1605,19 @@ fn (mut app App) handle_document_symbols(request Request) Response {
 		}
 	}
 	uri := params.text_document.uri
+	// Serve from the persistent index, refreshing this one document first so it
+	// reflects the latest buffer content.
+	app.reindex_uri(uri)
+	if entry := app.symbol_index[uri] {
+		return Response{
+			id:     request.id
+			result: entry.doc_symbols
+		}
+	}
 	content := app.open_files[uri] or { '' }
-	symbols := parse_document_symbols(content)
 	return Response{
 		id:     request.id
-		result: symbols
+		result: parse_document_symbols(content)
 	}
 }
 

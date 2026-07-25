@@ -33,10 +33,12 @@ mut:
 	cancelled_raw_ids                           map[string]bool           // String/raw request ids cancelled via $/cancelRequest
 	current_request_raw_id                      string                    // Raw JSON id of the request being processed (echoed verbatim)
 	position_encoding                           PositionEncoding = .utf16 // Negotiated LSP position encoding (default UTF-16)
-	tcp_conn                                    ?&net.TcpConn // Non-nil when serving a TCP client
-	is_shutdown                                 bool          // True after shutdown request was acknowledged
-	exit_was_requested                          bool          // True when the exit notification was received
-	received_initialize                         bool          // True after initialize request was processed
+	symbol_index                                map[string]IndexEntry // Persistent per-URI symbol index (see index.v)
+	indexed_dirs                                map[string]bool       // Project dirs already walked into the index
+	tcp_conn                                    ?&net.TcpConn         // Non-nil when serving a TCP client
+	is_shutdown                                 bool                  // True after shutdown request was acknowledged
+	exit_was_requested                          bool                  // True when the exit notification was received
+	received_initialize                         bool                  // True after initialize request was processed
 	next_request_id                             int = 1 // Counter for server-initiated request ids
 }
 
@@ -937,16 +939,55 @@ fn encode_response_payload(response Response) string {
 	return content
 }
 
+// strip_response_sum_type_tags removes V's non-standard `_type` sum-type
+// discriminator members from an encoded result payload. LSP/JSON-RPC responses
+// must not expose them. This strips the tag for EVERY result variant — including
+// array-of-struct variants and any future type — rather than a hardcoded list,
+// so a newly added result type can never leak a `_type` field (P1-10). The tag
+// value is always a bare V struct name (identifier characters only), so scanning
+// to its closing quote is unambiguous.
 fn strip_response_sum_type_tags(content string) string {
-	mut cleaned := content
-	// V sum-type JSON encoding injects a non-standard `_type` discriminator for
-	// struct variants. LSP/JSON-RPC result payloads must not expose those tags.
-	for type_name in ['CompletionList', 'Capabilities', 'SignatureHelp', 'Location', 'Hover',
-		'WorkspaceEdit', 'PrepareRenameResult', 'SemanticTokens', 'CodeLens', 'LinkedEditingRanges'] {
-		cleaned = cleaned.replace(',"_type":"${type_name}"', '')
-		cleaned = cleaned.replace('"_type":"${type_name}",', '')
+	needle := '"_type":"'
+	if !content.contains(needle) {
+		return content
 	}
-	return cleaned
+	mut sb := []u8{cap: content.len}
+	mut i := 0
+	for i < content.len {
+		if content[i] == `"` && matches_needle_at(content, i, needle) {
+			mut j := i + needle.len
+			for j < content.len && content[j] != `"` {
+				j++
+			}
+			member_end := if j < content.len { j + 1 } else { j } // just past closing quote
+			if i > 0 && content[i - 1] == `,` {
+				// The separating comma was already emitted; drop it.
+				sb.delete_last()
+				i = member_end
+			} else if member_end < content.len && content[member_end] == `,` {
+				i = member_end + 1
+			} else {
+				i = member_end
+			}
+			continue
+		}
+		sb << content[i]
+		i++
+	}
+	return sb.bytestr()
+}
+
+// matches_needle_at reports whether `needle` occurs in `s` starting at `i`.
+fn matches_needle_at(s string, i int, needle string) bool {
+	if i + needle.len > s.len {
+		return false
+	}
+	for k in 0 .. needle.len {
+		if s[i + k] != needle[k] {
+			return false
+		}
+	}
+	return true
 }
 
 fn (mut app App) write_notification(notification Notification) {
