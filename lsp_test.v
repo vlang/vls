@@ -1627,3 +1627,18 @@ fn test_strip_sum_type_tags_handles_multiple_and_positions() {
 	// No tag: unchanged.
 	assert strip_response_sum_type_tags('{"a":1}') == '{"a":1}'
 }
+
+fn test_validate_rename_rejects_keyword_new_name() {
+	// Renaming to a V keyword must be rejected (uncompilable result).
+	params := '{"textDocument":{"uri":"file:///a.v"},"position":{"line":0,"character":0},"newName":"fn"}'
+	if err := validate_request_params(.rename, params) {
+		assert err.contains('reserved')
+	} else {
+		assert false, 'expected keyword newName to be rejected'
+	}
+}
+
+fn test_validate_rename_accepts_normal_new_name() {
+	params := '{"textDocument":{"uri":"file:///a.v"},"position":{"line":0,"character":0},"newName":"my_fn"}'
+	assert validate_request_params(.rename, params) == none
+}

@@ -1284,6 +1284,10 @@ fn validate_request_params(method Method, params_json string) ?string {
 			if !is_valid_v_identifier_name(params.new_name) {
 				return 'Invalid newName'
 			}
+			// Renaming to a V keyword or builtin would produce uncompilable code.
+			if params.new_name in v_keywords || params.new_name in v_builtins {
+				return 'newName `${params.new_name}` is a reserved V keyword or builtin'
+			}
 			none
 		}
 		.workspace_symbol {

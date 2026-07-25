@@ -251,20 +251,33 @@ fn find_project_root(dir string) string {
 // collect_v_files recursively gathers `.v` files under `root`, skipping hidden
 // and known heavy directories and stopping once `index_max_files` is reached.
 fn collect_v_files(root string, mut acc []string) {
+	mut visited := map[string]bool{}
+	collect_v_files_rec(root, mut acc, mut visited)
+}
+
+// collect_v_files_rec is the recursive worker; `visited` holds the canonical
+// (realpath-resolved) directories already walked, so a symlink cycle cannot
+// cause infinite recursion or double-indexing.
+fn collect_v_files_rec(dir string, mut acc []string, mut visited map[string]bool) {
 	if acc.len >= index_max_files {
 		return
 	}
-	entries := os.ls(root) or { return }
+	real := os.real_path(dir)
+	if real in visited {
+		return
+	}
+	visited[real] = true
+	entries := os.ls(dir) or { return }
 	for entry in entries {
 		if acc.len >= index_max_files {
 			return
 		}
-		full := os.join_path(root, entry)
+		full := os.join_path(dir, entry)
 		if os.is_dir(full) {
 			if entry.starts_with('.') || entry in index_excluded_dirs {
 				continue
 			}
-			collect_v_files(full, mut acc)
+			collect_v_files_rec(full, mut acc, mut visited)
 		} else if entry.ends_with('.v') {
 			acc << full
 		}
