@@ -58,6 +58,101 @@ fn (app &App) index_source_for(uri string) ?string {
 	return os.read_file(uri_to_path(uri)) or { none }
 }
 
+// TokenOccurrence is one identifier occurrence in a file, with its position in
+// the client's negotiated encoding.
+struct TokenOccurrence {
+	line       int
+	start_char int
+	end_char   int
+}
+
+// OccEntry caches the identifier occurrences of one file, keyed by content
+// fingerprint so unchanged files are not re-tokenized.
+struct OccEntry {
+	fingerprint int
+	occ         map[string][]TokenOccurrence
+}
+
+// extract_identifier_occurrences returns every identifier occurrence in `content`
+// grouped by name, positioned in `enc` units. Line comments and string literals
+// are skipped (matching the reference scanner), and number literals are ignored.
+// This is the reference-index tokenizer: references/rename read candidate
+// occurrences from here instead of re-walking and re-tokenizing files per request
+// (P1-05).
+fn extract_identifier_occurrences(content string, enc PositionEncoding) map[string][]TokenOccurrence {
+	mut occ := map[string][]TokenOccurrence{}
+	for line_idx, line_text in content.split_into_lines() {
+		n := line_text.len
+		mut col := 0
+		for col < n {
+			c := line_text[col]
+			// Skip line comments.
+			if col + 1 < n && c == `/` && line_text[col + 1] == `/` {
+				break
+			}
+			// Skip string literals.
+			if c == `"` || c == `'` {
+				quote := c
+				col++
+				for col < n {
+					if line_text[col] == `\\` {
+						col += 2
+						continue
+					}
+					if line_text[col] == quote {
+						col++
+						break
+					}
+					col++
+				}
+				continue
+			}
+			if is_ident_char(c) {
+				start := col
+				col++
+				for col < n && is_ident_char(line_text[col]) {
+					col++
+				}
+				// Identifiers cannot start with a digit; skip number literals.
+				if line_text[start] >= `0` && line_text[start] <= `9` {
+					continue
+				}
+				name := line_text[start..col]
+				occ[name] << TokenOccurrence{
+					line:       line_idx
+					start_char: byte_to_encoded_col(line_text, start, enc)
+					end_char:   byte_to_encoded_col(line_text, col, enc)
+				}
+				continue
+			}
+			col++
+		}
+	}
+	return occ
+}
+
+// occurrences_for returns the identifier occurrences of `uri`, building and
+// caching them from the authoritative source (open buffer or disk) and reusing
+// the cache while the content fingerprint is unchanged.
+fn (mut app App) occurrences_for(uri string) map[string][]TokenOccurrence {
+	content := app.index_source_for(uri) or {
+		app.ref_occurrences.delete(uri)
+		return map[string][]TokenOccurrence{}
+	}
+	fp := content.hash()
+	if existing := app.ref_occurrences[uri] {
+		if existing.fingerprint == fp {
+			return existing.occ
+		}
+	}
+	occ := extract_identifier_occurrences(content, app.position_encoding)
+	app.ref_occurrences[uri] = OccEntry{
+		fingerprint: fp
+		occ:         occ
+	}
+	return occ
+}
+
 // reindex_uri (re)parses `uri` from its authoritative source, skipping work when
 // the content fingerprint is unchanged. Removes the entry if the file is gone.
 fn (mut app App) reindex_uri(uri string) {

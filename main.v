@@ -35,6 +35,7 @@ mut:
 	position_encoding                           PositionEncoding = .utf16 // Negotiated LSP position encoding (default UTF-16)
 	symbol_index                                map[string]IndexEntry // Persistent per-URI symbol index (see index.v)
 	indexed_dirs                                map[string]bool       // Project dirs already walked into the index
+	ref_occurrences                             map[string]OccEntry   // Per-URI identifier occurrences for references (see index.v)
 	tcp_conn                                    ?&net.TcpConn         // Non-nil when serving a TCP client
 	is_shutdown                                 bool                  // True after shutdown request was acknowledged
 	exit_was_requested                          bool                  // True when the exit notification was received

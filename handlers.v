@@ -889,17 +889,15 @@ fn (mut app App) find_references(request Request) Response {
 		}
 	}
 
-	// Search all .v files in working directory
-	working_dir := os.dir(real_path)
-	search_dirs := app.workspace_search_dirs(working_dir)
+	// Resolve references from the project's reference-occurrence index.
 	anchor := app.resolve_symbol_anchor(path, line, col)
 	mut locations := if a := anchor {
-		app.search_symbol_in_dirs_semantic(search_dirs, symbol, a, request.id)
+		app.search_symbol_in_dirs_semantic(symbol, a, request.id)
 	} else {
-		app.search_symbol_in_dirs(search_dirs, symbol, request.id)
+		app.search_symbol_in_dirs(symbol, request.id)
 	}
 	if locations.len == 0 {
-		locations = app.search_symbol_in_dirs(search_dirs, symbol, request.id)
+		locations = app.search_symbol_in_dirs(symbol, request.id)
 	}
 	if !params.context.include_declaration {
 		if a := anchor {
@@ -954,8 +952,6 @@ fn (mut app App) handle_rename(request Request) Response {
 	// definition anchor, we refuse rather than fall back to lexical same-name
 	// matching, which would rename unrelated symbols in other scopes/modules
 	// (P1-04).
-	working_dir := os.dir(real_path)
-	search_dirs := app.workspace_search_dirs(working_dir)
 	anchor := app.resolve_symbol_anchor(path, line, col) or {
 		log('rename: could not resolve a semantic anchor for "${symbol}"; refusing lexical rename (P1-04)')
 		return Response{
@@ -963,7 +959,7 @@ fn (mut app App) handle_rename(request Request) Response {
 			result: 'null'
 		}
 	}
-	locations := app.search_symbol_in_dirs_semantic(search_dirs, symbol, anchor, request.id)
+	locations := app.search_symbol_in_dirs_semantic(symbol, anchor, request.id)
 	if locations.len == 0 {
 		return Response{
 			id:     request.id
@@ -2157,86 +2153,32 @@ fn (app &App) workspace_search_dirs(primary_dir string) []string {
 	return dirs
 }
 
-fn (mut app App) search_symbol_in_project(working_dir string, symbol string, request_id int) []Location {
-	return app.search_symbol_in_dirs([working_dir], symbol, request_id)
-}
-
-fn (mut app App) search_symbol_in_dirs(search_dirs []string, symbol string, request_id int) []Location {
+// search_symbol_in_dirs returns every lexical occurrence of `symbol` across the
+// indexed project, read from the reference-occurrence index rather than by
+// re-walking and re-tokenizing the workspace on each request (P1-05).
+fn (mut app App) search_symbol_in_dirs(symbol string, request_id int) []Location {
+	app.ensure_dirs_indexed(app.index_query_dirs())
 	mut locations := []Location{}
-	mut seen_files := map[string]bool{}
-	for dir in search_dirs {
-		if dir == '' || dir == '/' || !os.is_dir(dir) {
-			continue
+	mut uris := app.symbol_index.keys()
+	uris.sort()
+	for uri in uris {
+		if request_id in app.cancelled_requests {
+			return locations
 		}
-		v_files := os.walk_ext(dir, '.v')
-
-		for v_file in v_files {
-			if request_id in app.cancelled_requests {
-				return locations
-			}
-			if seen_files[v_file] {
-				continue
-			}
-			seen_files[v_file] = true
-			content := app.open_files[path_to_uri(v_file)] or {
-				os.read_file(v_file) or { continue }
-			}
-			lines := content.split_into_lines()
-
-			for line_idx, line_text in lines {
-				n := line_text.len
-				mut col := 0
-				for col < n {
-					c := line_text[col]
-					// Skip line comments.
-					if col + 1 < n && c == `/` && line_text[col + 1] == `/` {
-						break
+		occ := app.occurrences_for(uri)
+		positions := occ[symbol] or { continue }
+		for p in positions {
+			locations << Location{
+				uri:   uri
+				range: LSPRange{
+					start: Position{
+						line: p.line
+						char: p.start_char
 					}
-					// Skip string literals.
-					if c == `"` || c == `'` {
-						quote := c
-						col++
-						for col < n {
-							if line_text[col] == `\\` {
-								col += 2
-								continue
-							}
-							if line_text[col] == quote {
-								col++
-								break
-							}
-							col++
-						}
-						continue
+					end:   Position{
+						line: p.line
+						char: p.end_char
 					}
-					// Extract full identifier token at this position.
-					if is_ident_char(c) {
-						start := col
-						col++
-						for col < n && is_ident_char(line_text[col]) {
-							col++
-						}
-						if line_text[start..col] == symbol {
-							start_char := byte_to_encoded_col(line_text, start,
-								app.position_encoding)
-							end_char := byte_to_encoded_col(line_text, col, app.position_encoding)
-							locations << Location{
-								uri:   path_to_uri(v_file)
-								range: LSPRange{
-									start: Position{
-										line: line_idx
-										char: start_char
-									}
-									end:   Position{
-										line: line_idx
-										char: end_char
-									}
-								}
-							}
-						}
-						continue
-					}
-					col++
 				}
 			}
 		}
@@ -2245,10 +2187,12 @@ fn (mut app App) search_symbol_in_dirs(search_dirs []string, symbol string, requ
 }
 
 // resolve_symbol_anchor resolves the canonical definition location for a symbol
-// usage via compiler gd^ lookup. Returns none when the definition cannot be
-// resolved, allowing callers to fall back to lexical matching.
+// usage via compiler gd^ lookup. `ch` is a column in the client's negotiated
+// encoding; it is converted to the byte column the compiler expects (P0-01).
+// Returns none when the definition cannot be resolved.
 fn (mut app App) resolve_symbol_anchor(uri string, line int, ch int) ?Location {
-	line_info := '${line + 1}:gd^${ch}'
+	byte_col := app.client_col_to_byte_col(uri, line, ch)
+	line_info := '${line + 1}:gd^${byte_col}'
 	result := app.run_v_line_info(.definition, uri, line_info)
 	if result is Location {
 		loc := result as Location
@@ -2291,107 +2235,53 @@ fn same_anchor_location(a Location, b Location) bool {
 	return delta == 0 || delta == 1 || delta == -1
 }
 
-// search_symbol_in_dirs_semantic performs a lexical candidate scan and validates
-// each candidate with a compiler definition lookup, keeping only occurrences that
-// resolve to the same declaration anchor. Polls for cancellation after each file
-// so that expensive compiler lookups are skipped when the request is cancelled.
-fn (mut app App) search_symbol_in_dirs_semantic(search_dirs []string, symbol string, anchor Location, request_id int) []Location {
+// search_symbol_in_dirs_semantic reads candidate occurrences of `symbol` from the
+// reference-occurrence index (no per-request workspace re-walk, P1-05) and keeps
+// only those whose compiler definition lookup resolves to the same declaration
+// anchor, so references stay scope-safe across same-name symbols (P1-04). The
+// per-candidate compiler lookup is cached within the request. Polls for
+// cancellation so a long scan can bail out.
+fn (mut app App) search_symbol_in_dirs_semantic(symbol string, anchor Location, request_id int) []Location {
 	started_ms := time.now().unix_milli()
+	app.ensure_dirs_indexed(app.index_query_dirs())
 	mut locations := []Location{}
-	mut seen_files := map[string]bool{}
 	mut anchor_cache := map[string]?Location{}
-	mut files_scanned := 0
-	mut anchor_lookups := 0
 	mut candidate_tokens := 0
-	for dir in search_dirs {
-		if dir == '' || dir == '/' || !os.is_dir(dir) {
-			continue
+	mut uris := app.symbol_index.keys()
+	uris.sort()
+	for uri in uris {
+		if request_id in app.cancelled_requests {
+			return locations
 		}
-		v_files := os.walk_ext(dir, '.v')
-		for v_file in v_files {
+		occ := app.occurrences_for(uri)
+		positions := occ[symbol] or { continue }
+		for p in positions {
 			if request_id in app.cancelled_requests {
 				return locations
 			}
-			if seen_files[v_file] {
+			candidate_tokens++
+			resolved := app.resolve_symbol_anchor_cached(uri, p.line, p.start_char, mut
+				anchor_cache) or { continue }
+			if !same_anchor_location(resolved, anchor) {
 				continue
 			}
-			seen_files[v_file] = true
-			uri := path_to_uri(v_file)
-			content := app.open_files[uri] or { os.read_file(v_file) or { continue } }
-			if !content.contains(symbol) {
-				continue
-			}
-			files_scanned++
-			lines := content.split_into_lines()
-			for line_idx, line_text in lines {
-				if !line_text.contains(symbol) {
-					continue
-				}
-				n := line_text.len
-				mut col := 0
-				for col < n {
-					c := line_text[col]
-					if col + 1 < n && c == `/` && line_text[col + 1] == `/` {
-						break
+			locations << Location{
+				uri:   uri
+				range: LSPRange{
+					start: Position{
+						line: p.line
+						char: p.start_char
 					}
-					if c == `"` || c == `'` {
-						quote := c
-						col++
-						for col < n {
-							if line_text[col] == `\\` {
-								col += 2
-								continue
-							}
-							if line_text[col] == quote {
-								col++
-								break
-							}
-							col++
-						}
-						continue
+					end:   Position{
+						line: p.line
+						char: p.end_char
 					}
-					if is_ident_char(c) {
-						start := col
-						col++
-						for col < n && is_ident_char(line_text[col]) {
-							col++
-						}
-						if line_text[start..col] != symbol {
-							continue
-						}
-						candidate_tokens++
-						start_char := byte_to_encoded_col(line_text, start, app.position_encoding)
-						anchor_lookups++
-						if resolved := app.resolve_symbol_anchor_cached(uri, line_idx, start_char, mut
-							anchor_cache)
-						{
-							if !same_anchor_location(resolved, anchor) {
-								continue
-							}
-							end_char := byte_to_encoded_col(line_text, col, app.position_encoding)
-							locations << Location{
-								uri:   uri
-								range: LSPRange{
-									start: Position{
-										line: line_idx
-										char: start_char
-									}
-									end:   Position{
-										line: line_idx
-										char: end_char
-									}
-								}
-							}
-						}
-						continue
-					}
-					col++
 				}
 			}
 		}
 	}
 	elapsed_ms := time.now().unix_milli() - started_ms
-	app.send_log_message('semantic-scan symbol=${symbol} files=${files_scanned} candidates=${candidate_tokens} lookups=${anchor_lookups} matches=${locations.len} elapsed_ms=${elapsed_ms}',
+	app.send_log_message('semantic-scan symbol=${symbol} candidates=${candidate_tokens} matches=${locations.len} elapsed_ms=${elapsed_ms}',
 		4)
 	return locations
 }

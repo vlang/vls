@@ -163,3 +163,51 @@ fn test_index_module_fn_completions_same_module_only() {
 	// b.v's own functions are excluded (it is the current file)
 	assert !comps.any(it.label == 'main')
 }
+
+// --- reference / occurrence index (P1-05) ---
+
+fn test_extract_identifier_occurrences_skips_comments_strings_numbers() {
+	content := 'fn foo() {\n\tbar := 123 // baz\n\ts := "qux"\n\tfoo()\n}\n'
+	occ := extract_identifier_occurrences(content, .utf16)
+	// foo: declaration (line 0) + call (line 3)
+	assert occ['foo'].len == 2
+	assert occ['foo'][0].line == 0
+	assert occ['foo'][0].start_char == 3
+	assert occ['foo'][0].end_char == 6
+	assert occ['foo'][1].line == 3
+	// bar assigned once
+	assert occ['bar'].len == 1
+	// identifiers inside a line comment (baz) and a string (qux) are not indexed
+	assert 'baz' !in occ
+	assert 'qux' !in occ
+	// number literals are not identifiers
+	assert '123' !in occ
+}
+
+fn test_occurrences_for_caches_by_fingerprint() {
+	mut app := index_test_app()
+	uri := 'file:///tmp/occ.v'
+	app.open_files[uri] = 'module main\n\nfn a() {\n\ta()\n}\n'
+	first := app.occurrences_for(uri)
+	assert first['a'].len == 2
+	fp1 := app.ref_occurrences[uri].fingerprint
+	// Unchanged content reuses the cache entry.
+	app.occurrences_for(uri)
+	assert app.ref_occurrences[uri].fingerprint == fp1
+	// Changing the buffer rebuilds it.
+	app.open_files[uri] = 'module main\n\nfn a() {\n\ta()\n\ta()\n}\n'
+	second := app.occurrences_for(uri)
+	assert second['a'].len == 3
+}
+
+fn test_search_symbol_in_dirs_finds_cross_file_occurrences() {
+	mut app := index_test_app()
+	app.open_files['file:///tmp/r/a.v'] = 'module main\n\nfn foo() {}\n'
+	app.open_files['file:///tmp/r/b.v'] = 'module main\n\nfn bar() {\n\tfoo()\n}\n'
+	locs := app.search_symbol_in_dirs('foo', 0)
+	// declaration in a.v + call in b.v
+	assert locs.len == 2
+	uris := locs.map(it.uri)
+	assert uris.any(it.ends_with('a.v'))
+	assert uris.any(it.ends_with('b.v'))
+}
