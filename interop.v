@@ -808,10 +808,11 @@ fn (mut app App) run_v_line_info(method Method, path string, line_info string) R
 
 					log('MAPPED TO uri_path=${uri_path}')
 				}
-				uri_header := if uri_path.starts_with('/') { 'file://' } else { 'file:///' }
-				// The compiler reports a byte column; convert it to the client's
-				// encoding using the target file's line (P0-01).
-				target_uri := uri_header + uri_path
+				// Build a proper percent-encoded DocumentUri so paths containing
+				// spaces, `#`, `%`, or Unicode are valid and match the client's URI
+				// keys (P0-10). The compiler reports a byte column; convert it to
+				// the client's encoding using the target file's line (P0-01).
+				target_uri := path_to_uri(uri_path)
 				client_col := app.byte_col_to_client_col(target_uri, line_nr, col)
 				result = Location{
 					uri:   target_uri
