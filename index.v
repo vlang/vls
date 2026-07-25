@@ -17,10 +17,11 @@ import os
 
 // IndexEntry is the parsed symbol information for one file.
 struct IndexEntry {
-	fingerprint int // content.hash(); used to skip re-parsing unchanged files
-	module_name string
-	doc_symbols []DocumentSymbol  // hierarchical symbols (as parse_document_symbols returns)
-	docs        map[string]string // simple symbol name -> leading vdoc comment
+	fingerprint    int // content.hash(); used to skip re-parsing unchanged files
+	module_name    string
+	doc_symbols    []DocumentSymbol  // hierarchical symbols (as parse_document_symbols returns)
+	docs           map[string]string // simple symbol name -> leading vdoc comment
+	fn_completions []Detail          // free-function completion items for this file
 }
 
 // build_index_entry parses `content` into an IndexEntry.
@@ -39,10 +40,11 @@ fn build_index_entry(content string) IndexEntry {
 		}
 	}
 	return IndexEntry{
-		fingerprint: content.hash()
-		module_name: get_module_name(content)
-		doc_symbols: doc_syms
-		docs:        docs
+		fingerprint:    content.hash()
+		module_name:    get_module_name(content)
+		doc_symbols:    doc_syms
+		docs:           docs
+		fn_completions: parse_module_fn_completions(content)
 	}
 }
 
@@ -155,6 +157,54 @@ fn (mut app App) ensure_dirs_indexed(dirs []string) {
 		}
 		app.indexed_dirs[dir] = true
 	}
+}
+
+// ensure_dir_shallow_indexed indexes the `.v` files directly in `dir` (no
+// recursion). A V module occupies a single directory, so this is all that is
+// needed for same-module lookups such as completion, and it is cheap enough to
+// run on a keystroke. Already-indexed files are skipped.
+fn (mut app App) ensure_dir_shallow_indexed(dir string) {
+	if dir == '' || dir == '/' || !os.is_dir(dir) {
+		return
+	}
+	for entry in os.ls(dir) or { return } {
+		if !entry.ends_with('.v') {
+			continue
+		}
+		full := os.join_path(dir, entry)
+		if !os.is_file(full) {
+			continue
+		}
+		uri := path_to_uri(full)
+		if uri in app.open_files || uri in app.symbol_index {
+			continue
+		}
+		if os.file_size(full) > index_max_file_bytes {
+			continue
+		}
+		content := os.read_file(full) or { continue }
+		app.symbol_index[uri] = build_index_entry(content)
+	}
+}
+
+// query_module_fn_completions returns free-function completion items from every
+// indexed file that belongs to `module_name`, excluding `exclude_uri` and test
+// files. The index must already cover the relevant files.
+fn (app &App) query_module_fn_completions(module_name string, exclude_uri string) []Detail {
+	mut items := []Detail{}
+	mut uris := app.symbol_index.keys()
+	uris.sort()
+	for uri in uris {
+		if uri == exclude_uri || uri.ends_with('_test.v') {
+			continue
+		}
+		entry := app.symbol_index[uri] or { continue }
+		if module_name != '' && entry.module_name != module_name {
+			continue
+		}
+		items << entry.fn_completions
+	}
+	return items
 }
 
 // index_query_dirs returns the project directories to index: the configured
