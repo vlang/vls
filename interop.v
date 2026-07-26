@@ -234,11 +234,12 @@ fn resolve_compiler_timeout_ms() i64 {
 }
 
 // run_v_argv executes the V compiler with the given argument vector in
-// `work_folder` (set on the child process, never via a process-global chdir),
-// capturing stdout. stderr is captured separately and only logged, so it can
-// never corrupt the JSON the compiler writes to stdout. The child is killed if
-// it exceeds compiler_timeout_ms. This is the single, shell-free entry point for
-// all compiler invocations.
+// `work_folder` (set on the child process, never via a process-global chdir).
+// stdout and stderr are merged into one combined buffer because the compiler
+// writes its `-json-errors` / `-line-info` output to STDERR; returning stdout
+// alone would silently drop every diagnostic. The child is killed if it exceeds
+// compiler_timeout_ms. This is the single, shell-free entry point for all
+// compiler invocations.
 fn run_v_argv(args []string, work_folder string) os.Result {
 	if work_folder != '' && !os.is_dir(work_folder) {
 		msg := 'Working dir does not exist: ${work_folder}'
@@ -262,8 +263,12 @@ fn run_v_argv(args []string, work_folder string) os.Result {
 	mut out := strings.new_builder(1024)
 	start_ms := time.now().unix_milli()
 	mut timed_out := false
-	// Drain both pipes while the child runs so a large output cannot deadlock
-	// the child against a full pipe buffer, and enforce the timeout.
+	// Drain both pipes on every iteration and enforce the deadline. `pipe_read`
+	// is non-blocking (it polls the fd and returns none immediately when no data
+	// is pending), so a child that writes only to stderr, or one that hangs
+	// silently, never wedges this loop: the stderr drain still runs so a large
+	// payload cannot fill the pipe and deadlock the child, and the timeout check
+	// below still fires to kill a stuck process.
 	for p.is_alive() {
 		mut got_data := false
 		if chunk := p.pipe_read(.stdout) {
