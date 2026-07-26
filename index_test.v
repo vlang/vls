@@ -266,6 +266,43 @@ fn test_index_refresh_discovers_new_files_without_watchers() {
 	assert app.query_workspace_symbols('beta').len == 1
 }
 
+fn test_index_refresh_removes_deleted_files_without_watchers() {
+	root := index_test_tmpdir('reconcile')
+	defer {
+		os.rmdir_all(root) or {}
+	}
+	os.write_file(os.join_path(root, 'v.mod'), 'Module {}\n') or {
+		assert false, 'write v.mod failed'
+		return
+	}
+	os.write_file(os.join_path(root, 'a.v'), 'module main\n\nfn alpha() {}\n') or {
+		assert false, 'write a.v failed'
+		return
+	}
+	b_path := os.join_path(root, 'b.v')
+	os.write_file(b_path, 'module main\n\nfn beta() {}\n') or {
+		assert false, 'write b.v failed'
+		return
+	}
+	mut app := index_test_app()
+	app.supports_dynamic_watched_files_registration = false // no client watchers
+	app.ensure_dirs_indexed([root])
+	assert app.query_workspace_symbols('alpha').len == 1
+	assert app.query_workspace_symbols('beta').len == 1
+
+	// Delete an unopened file on disk. Without watchers there is no delete
+	// notification, so a throttled refresh must reconcile it out of the index.
+	os.rm(b_path) or {
+		assert false, 'rm b.v failed'
+		return
+	}
+	app.indexed_dir_walk_ms[root] = 0 // force the throttle to treat the dir as stale
+	app.ensure_dirs_indexed([root])
+	assert app.query_workspace_symbols('beta').len == 0
+	// The surviving file is untouched.
+	assert app.query_workspace_symbols('alpha').len == 1
+}
+
 fn test_index_no_refresh_when_watchers_available() {
 	root := index_test_tmpdir('nowatch')
 	defer {

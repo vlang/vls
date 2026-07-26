@@ -345,6 +345,24 @@ fn (mut app App) ensure_dirs_indexed(dirs []string) {
 		}
 		mut files := []string{}
 		collect_v_files(dir, mut files)
+		mut present := map[string]bool{}
+		for f in files {
+			present[path_to_uri(f)] = true
+		}
+		// Reconcile the existing index against what is actually on disk: drop
+		// entries for non-open files under `dir` that the walk no longer found.
+		// Without client watchers there is no delete notification, so a removed
+		// unopened file would otherwise linger in symbol/hover/call results.
+		dir_norm := dir.replace('\\', '/')
+		for uri in app.symbol_index.keys() {
+			if uri in app.open_files || uri in present {
+				continue
+			}
+			if path_is_within(uri_to_path(uri).replace('\\', '/'), dir_norm) {
+				app.symbol_index.delete(uri)
+				app.ref_occurrences.delete(uri)
+			}
+		}
 		for f in files {
 			uri := path_to_uri(f)
 			if uri in app.open_files {
