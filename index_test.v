@@ -166,6 +166,33 @@ fn test_collect_v_files_excludes_hidden_and_heavy_dirs() {
 	assert files.all(!it.contains('node_modules'))
 }
 
+fn test_collect_v_files_excludes_out_of_tree_symlink() {
+	root := index_test_tmpdir('containment')
+	outside := index_test_tmpdir('outside')
+	defer {
+		os.rmdir_all(root) or {}
+		os.rmdir_all(outside) or {}
+	}
+	os.write_file(os.join_path(root, 'in.v'), 'module main\n') or {
+		assert false, 'write in.v failed'
+		return
+	}
+	os.write_file(os.join_path(outside, 'out.v'), 'module main\n') or {
+		assert false, 'write out.v failed'
+		return
+	}
+	// A directory symlink inside the workspace whose target is outside it.
+	os.symlink(outside, os.join_path(root, 'external')) or {
+		// Symlink creation can be unavailable (permissions/filesystem); skip then.
+		return
+	}
+	mut files := []string{}
+	collect_v_files(root, mut files)
+	assert files.any(it.ends_with('in.v'))
+	// The out-of-tree file reachable only via the symlink must NOT be indexed.
+	assert files.all(!it.ends_with('out.v'))
+}
+
 fn test_index_scoped_to_v_mod_project_walks_disk() {
 	root := index_test_tmpdir('scoped')
 	defer {
