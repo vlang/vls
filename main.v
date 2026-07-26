@@ -1016,7 +1016,11 @@ fn is_client_response_message(content string) bool {
 	if content_has_member(content, 'method') {
 		return false
 	}
-	has_id := content.contains('"id"')
+	// Detect the id through the escape-decoding parser (request_content_has_id),
+	// not a raw `"id"` substring: a response whose id key is unicode-escaped
+	// (e.g. {"id":1,"result":null}) must still be recognized and consumed, not
+	// dispatched as an empty method (P0-02).
+	has_id := request_content_has_id(content)
 	return has_id && (content_has_member(content, 'result') || content_has_member(content, 'error'))
 }
 
