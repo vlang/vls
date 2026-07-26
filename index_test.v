@@ -39,6 +39,31 @@ fn test_index_workspace_symbols_from_open_buffers() {
 	assert betas.all(it.name.to_lower().contains('bet'))
 }
 
+fn test_index_walk_reuses_equivalent_open_document_uri() {
+	root := index_test_tmpdir('open_uri')
+	defer {
+		os.rmdir_all(root) or {}
+	}
+	path := os.join_path(root, 'main.v')
+	os.write_file(path, 'module main\n\nfn stale_disk_symbol() {}\n') or {
+		assert false, 'write main.v failed: ${err}'
+		return
+	}
+	canonical_uri := path_to_uri(path)
+	open_uri := canonical_uri.replace_once('file:///', 'file://localhost/')
+	mut app := index_test_app()
+	app.open_files[open_uri] = 'module main\n\nfn authoritative_open_symbol() {}\n'
+
+	app.ensure_dirs_indexed([root])
+
+	assert open_uri in app.symbol_index
+	assert canonical_uri !in app.symbol_index
+	assert app.query_workspace_symbols('stale_disk_symbol').len == 0
+	open_symbols := app.query_workspace_symbols('authoritative_open_symbol')
+	assert open_symbols.len == 1
+	assert open_symbols[0].location.uri == open_uri
+}
+
 fn test_index_incremental_reindex_reflects_change() {
 	mut app := index_test_app()
 	uri := 'file:///tmp/inc.v'

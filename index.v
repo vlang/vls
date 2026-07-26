@@ -208,6 +208,35 @@ fn (mut app App) drop_index_uri(uri string) {
 	app.ref_occurrences.delete(uri)
 }
 
+// normalized_index_path returns a stable filesystem key for matching a path
+// discovered by a directory walk to an already-open document URI. Resolving the
+// real path collapses equivalent URI spellings such as file://localhost/tmp/a.v
+// and file:///tmp/a.v. Windows filesystem paths are case-insensitive.
+fn normalized_index_path(path string) string {
+	mut normalized := os.real_path(path).replace('\\', '/')
+	$if windows {
+		normalized = normalized.to_lower()
+	}
+	return normalized
+}
+
+// open_index_uris_by_path maps normalized filesystem paths to the original URI
+// supplied by the client. Open buffers are authoritative, so index entries and
+// result locations must retain that URI rather than a reconstructed equivalent.
+fn (app &App) open_index_uris_by_path() map[string]string {
+	mut uris := map[string]string{}
+	for uri, _ in app.open_files {
+		uris[normalized_index_path(uri_to_path(uri))] = uri
+	}
+	return uris
+}
+
+// index_uri_for_path returns the client's URI when `path` names an open
+// document, otherwise it constructs the canonical file URI used for disk files.
+fn index_uri_for_path(path string, open_uris_by_path map[string]string) string {
+	return open_uris_by_path[normalized_index_path(path)] or { path_to_uri(path) }
+}
+
 // reindex_uri (re)parses `uri` from its authoritative source, skipping work when
 // the content fingerprint is unchanged. Open buffers are always authoritative.
 // Disk-backed entries obey the same file-size and total-entry limits as workspace
@@ -414,6 +443,7 @@ fn (mut app App) ensure_dirs_indexed(dirs []string) {
 	for uri, _ in app.open_files {
 		app.reindex_uri(uri)
 	}
+	open_uris_by_path := app.open_index_uris_by_path()
 	for dir in dirs {
 		if dir == '' || dir == '/' || !os.is_dir(dir) {
 			continue
@@ -430,7 +460,7 @@ fn (mut app App) ensure_dirs_indexed(dirs []string) {
 		}
 		mut present := map[string]bool{}
 		for f in files {
-			present[path_to_uri(f)] = true
+			present[index_uri_for_path(f, open_uris_by_path)] = true
 		}
 		// Reconcile the existing index against what is actually on disk: drop
 		// entries for non-open files under `dir` that the walk no longer found.
@@ -439,7 +469,7 @@ fn (mut app App) ensure_dirs_indexed(dirs []string) {
 		// partial walk must retain old entries it may simply not have reached.
 		app.reconcile_indexed_dir(dir, present, walk_complete)
 		for f in files {
-			uri := path_to_uri(f)
+			uri := index_uri_for_path(f, open_uris_by_path)
 			if uri in app.open_files {
 				continue
 			}
@@ -476,6 +506,7 @@ fn (mut app App) ensure_dir_shallow_indexed(dir string) {
 	scope := 'shallow:${dir}'
 	app.index_incomplete_scopes.delete(scope)
 	refresh := app.index_dir_needs_refresh(dir)
+	open_uris_by_path := app.open_index_uris_by_path()
 	mut present := map[string]bool{}
 	entries := os.ls(dir) or {
 		app.index_incomplete_scopes[scope] = true
@@ -489,7 +520,7 @@ fn (mut app App) ensure_dir_shallow_indexed(dir string) {
 		if !os.is_file(full) {
 			continue
 		}
-		uri := path_to_uri(full)
+		uri := index_uri_for_path(full, open_uris_by_path)
 		present[uri] = true
 		if uri in app.open_files {
 			continue

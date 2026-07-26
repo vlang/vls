@@ -347,10 +347,74 @@ fn read_request(mut reader io.BufferedReader) !string {
 // charset other than UTF-8. LSP §3 mandates UTF-8 for all message content; the
 // historical `utf8` spelling is also accepted.
 fn charset_is_unsupported(content_type string) bool {
-	lower := content_type.to_lower()
-	idx := lower.index('charset=') or { return false }
-	charset := lower[idx + 'charset='.len..].trim_space().trim_right(';').trim_space()
-	return charset != 'utf-8' && charset != 'utf8'
+	parameters := split_mime_parameters(content_type)
+	for parameter in parameters[1..] {
+		eq := parameter.index('=') or { continue }
+		if parameter[..eq].trim_space().to_lower() != 'charset' {
+			continue
+		}
+		charset := unquote_mime_parameter(parameter[eq + 1..]).to_lower()
+		if charset != 'utf-8' && charset != 'utf8' {
+			return true
+		}
+	}
+	return false
+}
+
+// split_mime_parameters separates a media type and its parameters without
+// treating semicolons inside a quoted-string as delimiters.
+fn split_mime_parameters(content_type string) []string {
+	mut parameters := []string{}
+	mut start := 0
+	mut quoted := false
+	mut escaped := false
+	for i, ch in content_type {
+		if escaped {
+			escaped = false
+			continue
+		}
+		if quoted && ch == `\\` {
+			escaped = true
+			continue
+		}
+		if ch == `"` {
+			quoted = !quoted
+			continue
+		}
+		if ch == `;` && !quoted {
+			parameters << content_type[start..i].trim_space()
+			start = i + 1
+		}
+	}
+	parameters << content_type[start..].trim_space()
+	return parameters
+}
+
+// unquote_mime_parameter parses a MIME quoted-string parameter value, including
+// quoted-pair escapes. Malformed quoted values remain invalid charset values.
+fn unquote_mime_parameter(raw string) string {
+	value := raw.trim_space()
+	if value.len < 2 || value[0] != `"` || value[value.len - 1] != `"` {
+		return value
+	}
+	mut decoded := []u8{cap: value.len - 2}
+	mut escaped := false
+	for ch in value[1..value.len - 1] {
+		if escaped {
+			decoded << ch
+			escaped = false
+			continue
+		}
+		if ch == `\\` {
+			escaped = true
+			continue
+		}
+		decoded << ch
+	}
+	if escaped {
+		return value
+	}
+	return decoded.bytestr()
 }
 
 fn parse_content_length_header(s string) !int {
