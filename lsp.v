@@ -756,7 +756,7 @@ struct CodeActionParams {
 // is 1 = Invoked, 2 = Automatic (LSP §3.17 CodeActionContext).
 struct CodeActionContext {
 	diagnostics  []LSPDiagnostic
-	only         ?[]string @[json: 'only']
+	only         ?[]string
 	trigger_kind ?int      @[json: 'triggerKind']
 }
 
