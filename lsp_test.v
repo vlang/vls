@@ -1653,6 +1653,9 @@ fn test_is_client_response_message_detection() {
 	assert is_client_response_message('{"jsonrpc":"2.0","id":2,"error":{"code":-1,"message":"x"}}')
 	assert !is_client_response_message('{"jsonrpc":"2.0","id":2,"method":"initialize","params":{}}')
 	assert !is_client_response_message('{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{}}')
+	// A response whose id key is unicode-escaped (id) must still be recognized
+	// as a response and consumed, not dispatched as an empty method.
+	assert is_client_response_message('{"jsonrpc":"2.0","\\u0069d":1,"result":null}')
 }
 
 fn test_inject_raw_id_restores_string_id() {
