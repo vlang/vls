@@ -634,6 +634,48 @@ fn test_incremental_change_is_valid_rejects_lines_past_eof() {
 	assert incremental_change_is_valid(content, ok, .utf16)
 }
 
+fn test_incremental_change_is_valid_rejects_char_past_line() {
+	// Line 0 "abc" has length 3. A character offset past the line end is invalid
+	// even though the line exists: position_to_byte_offset would clamp it to EOL
+	// and the edit would be applied there while the version advances (P0-07).
+	content := 'abc\ndef'
+	past_start := LSPRange{
+		start: Position{
+			line: 0
+			char: 9
+		}
+		end:   Position{
+			line: 1
+			char: 1
+		}
+	}
+	assert !incremental_change_is_valid(content, past_start, .utf16)
+	past_end := LSPRange{
+		start: Position{
+			line: 0
+			char: 1
+		}
+		end:   Position{
+			line: 1
+			char: 9
+		}
+	}
+	assert !incremental_change_is_valid(content, past_end, .utf16)
+	// A character offset exactly at the line's length is the valid end-of-line
+	// insertion point and must be accepted.
+	at_eol := LSPRange{
+		start: Position{
+			line: 0
+			char: 3
+		}
+		end:   Position{
+			line: 0
+			char: 3
+		}
+	}
+	assert incremental_change_is_valid(content, at_eol, .utf16)
+}
+
 fn test_apply_incremental_change_handles_multiline_ranges() {
 	content := 'abc\ndef\nghi'
 	range := LSPRange{

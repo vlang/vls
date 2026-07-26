@@ -894,6 +894,18 @@ fn incremental_change_is_valid(content string, range LSPRange, enc PositionEncod
 	if range.start.line >= starts.len || range.end.line >= starts.len {
 		return false
 	}
+	// Reject a character offset past its line's encoded length. On an existing
+	// line, position_to_byte_offset clamps a too-large character to the line end,
+	// which would likewise make an invalid range look valid and get applied at EOL
+	// while the version advances — the same desync in the character dimension.
+	start_line_text := line_text_without_terminator(content, starts, range.start.line)
+	if range.start.char > byte_to_encoded_col(start_line_text, start_line_text.len, enc) {
+		return false
+	}
+	end_line_text := line_text_without_terminator(content, starts, range.end.line)
+	if range.end.char > byte_to_encoded_col(end_line_text, end_line_text.len, enc) {
+		return false
+	}
 	start_byte := position_to_byte_offset(content, starts, range.start.line, range.start.char, enc)
 	end_byte := position_to_byte_offset(content, starts, range.end.line, range.end.char, enc)
 	return start_byte <= end_byte && start_byte <= content.len && end_byte <= content.len
@@ -1483,8 +1495,12 @@ fn (mut app App) find_doc_comment_for_symbol(symbol string, current_lines []stri
 
 	// 2 & 3. Other open files and project .v files, via the persistent index
 	// (avoids re-reading and re-parsing the whole project on every hover, P1-08).
+	// Scope the lookup to the current module directory, then the current project,
+	// so a same-named symbol from an unrelated project/module is never used.
 	app.ensure_dirs_indexed(app.index_query_dirs())
-	indexed_doc := app.find_indexed_doc(symbol)
+	cur_dir := os.dir(uri_to_path(current_file_uri))
+	scope_root := find_project_root(cur_dir)
+	indexed_doc := app.find_indexed_doc_in_scope(symbol, cur_dir, scope_root)
 	if indexed_doc != '' {
 		return indexed_doc
 	}
