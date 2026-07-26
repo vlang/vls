@@ -389,11 +389,17 @@ fn (mut app App) ensure_dirs_indexed(dirs []string) {
 // ensure_dir_shallow_indexed indexes the `.v` files directly in `dir` (no
 // recursion). A V module occupies a single directory, so this is all that is
 // needed for same-module lookups such as completion, and it is cheap enough to
-// run on a keystroke. Already-indexed files are skipped.
+// run on a keystroke. New files are always picked up; when the client provides
+// no file watchers, already-indexed siblings are also refreshed on a throttled
+// interval (fingerprint check skips unchanged content) and entries for files
+// deleted from `dir` are reconciled out — otherwise a stale or removed unopened
+// sibling would keep contributing completions until restart.
 fn (mut app App) ensure_dir_shallow_indexed(dir string) {
 	if dir == '' || dir == '/' || !os.is_dir(dir) {
 		return
 	}
+	refresh := app.index_dir_needs_refresh(dir)
+	mut present := map[string]bool{}
 	for entry in os.ls(dir) or { return } {
 		if !entry.ends_with('.v') {
 			continue
@@ -403,7 +409,16 @@ fn (mut app App) ensure_dir_shallow_indexed(dir string) {
 			continue
 		}
 		uri := path_to_uri(full)
-		if uri in app.open_files || uri in app.symbol_index {
+		present[uri] = true
+		if uri in app.open_files {
+			continue
+		}
+		if uri in app.symbol_index {
+			// Already indexed: on a throttled refresh re-read from disk so external
+			// edits to unopened siblings are picked up (fingerprint skips no-ops).
+			if refresh {
+				app.reindex_uri(uri)
+			}
 			continue
 		}
 		if os.file_size(full) > index_max_file_bytes {
@@ -412,17 +427,40 @@ fn (mut app App) ensure_dir_shallow_indexed(dir string) {
 		content := os.read_file(full) or { continue }
 		app.symbol_index[uri] = build_index_entry(content, app.position_encoding)
 	}
+	if refresh {
+		// Reconcile deletions: drop non-open entries for files that were directly
+		// in `dir` (shallow, not recursive) but the walk no longer found.
+		dir_norm := dir.replace('\\', '/').trim_right('/')
+		for uri in app.symbol_index.keys() {
+			if uri in app.open_files || uri in present {
+				continue
+			}
+			if os.dir(uri_to_path(uri)).replace('\\', '/').trim_right('/') == dir_norm {
+				app.symbol_index.delete(uri)
+				app.ref_occurrences.delete(uri)
+			}
+		}
+		app.indexed_dir_walk_ms[dir] = time.now().unix_milli()
+	}
 }
 
-// query_module_fn_completions returns free-function completion items from every
-// indexed file that belongs to `module_name`, excluding `exclude_uri` and test
-// files. The index must already cover the relevant files.
-fn (app &App) query_module_fn_completions(module_name string, exclude_uri string) []Detail {
+// query_module_fn_completions returns free-function completion items from the
+// indexed files in `dir` that belong to `module_name`, excluding `exclude_uri`
+// and test files. A V module occupies a single directory, so the results are
+// constrained to `dir` as well as the module name: without that, distinct
+// directories that share a common module name (e.g. `main`) would leak
+// completions from unrelated indexed projects into each other. The index must
+// already cover the relevant files.
+fn (app &App) query_module_fn_completions(module_name string, exclude_uri string, dir string) []Detail {
+	d := dir.replace('\\', '/').trim_right('/')
 	mut items := []Detail{}
 	mut uris := app.symbol_index.keys()
 	uris.sort()
 	for uri in uris {
 		if uri == exclude_uri || uri.ends_with('_test.v') {
+			continue
+		}
+		if d != '' && os.dir(uri_to_path(uri)).replace('\\', '/').trim_right('/') != d {
 			continue
 		}
 		entry := app.symbol_index[uri] or { continue }
@@ -456,6 +494,35 @@ fn (app &App) index_query_dirs() []string {
 	}
 	dirs.sort()
 	return dirs
+}
+
+// ensure_loose_file_dirs_shallow_indexed shallow-indexes the directory of every
+// open file that no recursive project walk covers — a multi-file module opened
+// with no `v.mod` and no workspace root. Its sibling `.v` files must be indexed
+// so references and rename see every occurrence (a partial rename would leave
+// the module uncompilable), but the parent may be an arbitrary directory (a home
+// dir, `/tmp`), so it is indexed shallowly rather than walked recursively
+// (P1-01). Files already covered by index_query_dirs are skipped.
+fn (mut app App) ensure_loose_file_dirs_shallow_indexed() {
+	query_dirs := app.index_query_dirs()
+	mut done := map[string]bool{}
+	for uri, _ in app.open_files {
+		dir := os.dir(uri_to_path(uri)).replace('\\', '/')
+		if dir == '' || dir == '/' || dir in done {
+			continue
+		}
+		done[dir] = true
+		mut covered := false
+		for qd in query_dirs {
+			if path_is_within(dir, qd.replace('\\', '/')) {
+				covered = true
+				break
+			}
+		}
+		if !covered {
+			app.ensure_dir_shallow_indexed(dir)
+		}
+	}
 }
 
 // query_workspace_symbols returns all indexed symbols whose name contains

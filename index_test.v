@@ -164,6 +164,55 @@ fn test_index_module_fn_completions_same_module_only() {
 	assert !comps.any(it.label == 'main')
 }
 
+fn test_index_module_fn_completions_scoped_to_directory() {
+	mut app := index_test_app()
+	// Two unrelated projects that both declare `module main`.
+	app.open_files['file:///proj1/a.v'] = 'module main\n\npub fn one() {}\n'
+	app.open_files['file:///proj1/b.v'] = 'module main\n\nfn main() {}\n'
+	app.open_files['file:///proj2/c.v'] = 'module main\n\npub fn two() {}\n'
+
+	comps := app.collect_module_fn_completions('file:///proj1/b.v', '/proj1')
+	// A same-directory sibling in the same module is offered.
+	assert comps.any(it.label == 'one')
+	// A file with the same module name in a DIFFERENT directory must not leak in.
+	assert !comps.any(it.label == 'two')
+}
+
+fn test_shallow_index_refreshes_and_reconciles_without_watchers() {
+	root := index_test_tmpdir('shallow')
+	defer {
+		os.rmdir_all(root) or {}
+	}
+	sib := os.join_path(root, 'sib.v')
+	os.write_file(sib, 'module main\n\nfn gamma() {}\n') or {
+		assert false, 'write sib.v failed'
+		return
+	}
+	mut app := index_test_app()
+	app.supports_dynamic_watched_files_registration = false // no client watchers
+	app.ensure_dir_shallow_indexed(root)
+	assert app.query_workspace_symbols('gamma').len == 1
+
+	// An external edit to the unopened sibling is picked up on a throttled refresh.
+	os.write_file(sib, 'module main\n\nfn delta() {}\n') or {
+		assert false, 'rewrite sib.v failed'
+		return
+	}
+	app.indexed_dir_walk_ms[root] = 0
+	app.ensure_dir_shallow_indexed(root)
+	assert app.query_workspace_symbols('gamma').len == 0
+	assert app.query_workspace_symbols('delta').len == 1
+
+	// Deleting the sibling reconciles its entry out of the index.
+	os.rm(sib) or {
+		assert false, 'rm sib.v failed'
+		return
+	}
+	app.indexed_dir_walk_ms[root] = 0
+	app.ensure_dir_shallow_indexed(root)
+	assert app.query_workspace_symbols('delta').len == 0
+}
+
 // --- reference / occurrence index (P1-05) ---
 
 fn test_extract_identifier_occurrences_skips_comments_strings_numbers() {
@@ -208,6 +257,34 @@ fn test_search_symbol_in_dirs_finds_cross_file_occurrences() {
 	// declaration in a.v + call in b.v
 	assert locs.len == 2
 	uris := locs.map(it.uri)
+	assert uris.any(it.ends_with('a.v'))
+	assert uris.any(it.ends_with('b.v'))
+}
+
+fn test_search_symbol_in_dirs_indexes_loose_unopened_siblings() {
+	root := index_test_tmpdir('loose')
+	defer {
+		os.rmdir_all(root) or {}
+	}
+	// A loose multi-file module: no v.mod, no workspace root.
+	a := os.join_path(root, 'a.v')
+	b := os.join_path(root, 'b.v')
+	os.write_file(a, 'module main\n\nfn foo() {}\n') or {
+		assert false, 'write a.v failed'
+		return
+	}
+	os.write_file(b, 'module main\n\nfn bar() {\n\tfoo()\n}\n') or {
+		assert false, 'write b.v failed'
+		return
+	}
+	mut app := index_test_app()
+	// Only a.v is open; b.v is an unopened sibling that exists only on disk.
+	app.open_files[path_to_uri(a)] = os.read_file(a) or { '' }
+
+	locs := app.search_symbol_in_dirs('foo', 0)
+	uris := locs.map(it.uri)
+	// The declaration in the open a.v AND the call in the unopened sibling b.v
+	// must both be found — otherwise rename would leave the module uncompilable.
 	assert uris.any(it.ends_with('a.v'))
 	assert uris.any(it.ends_with('b.v'))
 }
