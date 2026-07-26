@@ -594,8 +594,19 @@ fn (mut app App) on_did_change_watched_files(request Request) {
 		$if debug { log('Failed to decode DidChangeWatchedFilesParams: ${err}') }
 		return
 	}
+	open_uris_by_path := app.open_index_uris_by_path()
 	for change in params.changes {
-		uri := change.uri
+		event_uri := change.uri
+		uri := open_uris_by_path[normalized_index_path(uri_to_path(event_uri))] or { event_uri }
+		// A watcher may spell an open document URI differently from the client
+		// (for example file:///tmp/a.v versus file://localhost/tmp/a.v). Remove
+		// any disk-backed alias and keep all subsequent work on the authoritative
+		// editor-owned URI.
+		if event_uri != uri {
+			app.drop_index_uri(event_uri)
+			app.index_skipped_uris.delete(event_uri)
+			app.diag_cache.delete(event_uri)
+		}
 		match change.event_type {
 			3 {
 				// Deleted on disk. Invalidate cached diagnostics, but do NOT drop
