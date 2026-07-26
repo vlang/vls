@@ -1580,6 +1580,28 @@ fn test_extract_raw_id_absent_is_none() {
 	assert extract_raw_id('{"method":"x","params":{}}') == none
 }
 
+fn test_extract_raw_id_decodes_escaped_id_key() {
+	// The `id` key is JSON-escaped as id ('i' = i). A compliant server
+	// must decode the key and still find the top-level id.
+	id := extract_raw_id('{"\\u0069d":1,"method":"initialize"}') or {
+		assert false, 'escaped id key must decode to `id`'
+		return
+	}
+	assert id == '1'
+}
+
+fn test_read_json_string_token_decodes_unicode_escapes() {
+	// ASCII via \uXXXX.
+	key, _ := read_json_string_token('"\\u0069d"', 0)
+	assert key == 'id'
+	// Non-ASCII BMP codepoint (é = é, two UTF-8 bytes).
+	accented, _ := read_json_string_token('"caf\\u00e9"', 0)
+	assert accented == 'café'
+	// Astral codepoint via a surrogate pair (😀 = 😀).
+	emoji, _ := read_json_string_token('"\\uD83D\\uDE00"', 0)
+	assert emoji == '😀'
+}
+
 fn test_raw_id_is_valid_accepts_strings_and_numbers() {
 	assert raw_id_is_valid('') // absent/null id
 	assert raw_id_is_valid('5')
