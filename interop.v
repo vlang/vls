@@ -366,26 +366,38 @@ struct CompilationOverlay {
 	temp_source_file    string
 }
 
+// normalize_overlay_path converts native Windows separators before paths enter
+// the overlay's slash-based containment and relative-path helpers.
+fn normalize_overlay_path(path string) string {
+	return path.replace('\\', '/')
+}
+
 // compilation_overlay_root returns the broadest source root needed to preserve
 // local module imports. A v.mod project is overlaid from its root; loose modules
 // retain the historical same-directory scope.
 fn compilation_overlay_root(real_path string) string {
-	work_dir := os.dir(real_path)
+	normalized_real_path := normalize_overlay_path(real_path)
+	work_dir := normalize_overlay_path(os.dir(normalized_real_path))
 	project_root := find_project_root(work_dir)
-	if project_root != '' && project_root != '/' && path_is_within(real_path, project_root) {
-		return os.real_path(project_root)
+	normalized_project_root := normalize_overlay_path(project_root)
+	if normalized_project_root != '' && normalized_project_root != '/'
+		&& path_is_within(normalized_real_path, normalized_project_root) {
+		return normalize_overlay_path(os.real_path(normalized_project_root))
 	}
-	return os.real_path(work_dir)
+	return normalize_overlay_path(os.real_path(work_dir))
 }
 
 // compilation_overlay_display_root retains the path spelling supplied by the
 // LSP client. On macOS, canonicalizing `/tmp` to `/private/tmp` is necessary for
 // containment checks but must not silently change returned document URIs.
 fn compilation_overlay_display_root(real_path string) string {
-	work_dir := os.dir(real_path)
+	normalized_real_path := normalize_overlay_path(real_path)
+	work_dir := normalize_overlay_path(os.dir(normalized_real_path))
 	project_root := find_project_root(work_dir)
-	if project_root != '' && project_root != '/' && path_is_within(real_path, project_root) {
-		return project_root
+	normalized_project_root := normalize_overlay_path(project_root)
+	if normalized_project_root != '' && normalized_project_root != '/'
+		&& path_is_within(normalized_real_path, normalized_project_root) {
+		return normalized_project_root
 	}
 	return work_dir
 }
@@ -400,12 +412,12 @@ fn should_use_compilation_overlay(real_path string, open_file_count int) bool {
 // open buffer is materialized and unchanged project paths are symlinked back to
 // disk. The compiler runs in the overlaid counterpart of the source module.
 fn (mut app App) prepare_compilation_overlay(real_path string) !CompilationOverlay {
-	canonical_real_path := os.real_path(real_path)
+	canonical_real_path := normalize_overlay_path(os.real_path(real_path))
 	source_root := compilation_overlay_root(canonical_real_path)
 	source_display_root := compilation_overlay_display_root(real_path)
-	source_work_dir := os.dir(canonical_real_path)
+	source_work_dir := normalize_overlay_path(os.dir(canonical_real_path))
 	temp_root_unresolved := app.write_tracked_files_to_temp(source_root)!
-	temp_root := os.real_path(temp_root_unresolved)
+	temp_root := normalize_overlay_path(os.real_path(temp_root_unresolved))
 	symlink_untracked_files(source_root, temp_root, app.open_files) or {
 		os.rmdir_all(temp_root) or {}
 		return error('Failed to populate compilation overlay: ${err}')
@@ -443,7 +455,7 @@ fn (mut app App) prepare_compilation_overlay(real_path string) !CompilationOverl
 // source_path_from_overlay maps compiler paths in the temporary project back to
 // their original source paths.
 fn source_path_from_overlay(reported_path string, overlay CompilationOverlay) string {
-	mut candidate := os.to_slash(reported_path)
+	mut candidate := normalize_overlay_path(reported_path)
 	if candidate.starts_with('./') || candidate.starts_with('.\\') {
 		candidate = os.join_path(overlay.temp_work_dir, candidate[2..])
 	} else if !os.is_abs_path(candidate) {
@@ -574,11 +586,11 @@ fn (mut app App) write_tracked_files_to_temp(working_dir string) !string {
 
 	// write file structure
 	for uri, content in app.open_files {
-		real_path := os.real_path(uri_to_path(uri))
+		real_path := normalize_overlay_path(os.real_path(uri_to_path(uri)))
 
 		// Normalize slashes for comparison
-		normalized_real := real_path.replace('\\', '/')
-		normalized_working := os.real_path(working_dir).replace('\\', '/')
+		normalized_real := normalize_overlay_path(real_path)
+		normalized_working := normalize_overlay_path(os.real_path(working_dir))
 
 		// Skip files outside the working dir. On Windows the containment check is
 		// case-insensitive, while the returned path preserves its original case.
@@ -632,19 +644,30 @@ fn has_sibling_v_files(working_dir string, current_file string) bool {
 	return false
 }
 
+type OverlayLinkFn = fn (string, string) !
+
+fn create_overlay_symlink(source_path string, target_path string) ! {
+	os.symlink(source_path, target_path)!
+}
+
 fn symlink_untracked_files(working_dir string, temp_dir string, tracked_files map[string]string) ! {
+	symlink_untracked_files_with_linker(working_dir, temp_dir, tracked_files,
+		create_overlay_symlink)!
+}
+
+fn symlink_untracked_files_with_linker(working_dir string, temp_dir string, tracked_files map[string]string, link_fn OverlayLinkFn) ! {
 	log('SYMLINKING FROM ${working_dir} TO ${temp_dir}')
 	mut tracked_rel_paths := []string{}
-	canonical_working_dir := os.real_path(working_dir)
+	canonical_working_dir := normalize_overlay_path(os.real_path(working_dir))
 	for uri, _ in tracked_files {
-		real_path := os.real_path(uri_to_path(uri))
+		real_path := normalize_overlay_path(os.real_path(uri_to_path(uri)))
 		if rel := path_relative_to(real_path, canonical_working_dir) {
-			tracked_rel_paths << rel.replace('\\', '/')
+			tracked_rel_paths << normalize_overlay_path(rel)
 		}
 	}
 	local_import_dirs := local_import_rel_dirs(canonical_working_dir, tracked_files)
 	symlink_untracked_tree(canonical_working_dir, temp_dir, '', tracked_rel_paths,
-		local_import_dirs)!
+		local_import_dirs, link_fn)!
 }
 
 // local_import_rel_dirs returns project-local module directories imported by
@@ -688,7 +711,7 @@ fn local_import_rel_dirs(source_root string, tracked_files map[string]string) []
 	return result
 }
 
-fn symlink_untracked_tree(source_dir string, target_dir string, relative_dir string, tracked_rel_paths []string, local_import_dirs []string) ! {
+fn symlink_untracked_tree(source_dir string, target_dir string, relative_dir string, tracked_rel_paths []string, local_import_dirs []string, link_fn OverlayLinkFn) ! {
 	entries := os.ls(source_dir)!
 	for entry in entries {
 		source_path := os.join_path(source_dir, entry)
@@ -724,7 +747,7 @@ fn symlink_untracked_tree(source_dir string, target_dir string, relative_dir str
 				os.mkdir_all(target_path)!
 			}
 			symlink_untracked_tree(source_path, target_path, relative_path, tracked_rel_paths,
-				local_import_dirs)!
+				local_import_dirs, link_fn)!
 			continue
 		}
 		if os.exists(target_path) || os.is_link(target_path) {
@@ -736,7 +759,12 @@ fn symlink_untracked_tree(source_dir string, target_dir string, relative_dir str
 			log('Materialized local module file: ${source_path} -> ${target_path}')
 			continue
 		}
-		os.symlink(source_path, target_path)!
+		link_fn(source_path, target_path) or {
+			log('Failed to symlink ${source_path}; copying overlay entry instead: ${err}')
+			os.cp_all(source_path, target_path, false)!
+			log('Copied untracked path: ${source_path} -> ${target_path}')
+			continue
+		}
 		log('Symlinked untracked path: ${source_path} -> ${target_path}')
 	}
 }

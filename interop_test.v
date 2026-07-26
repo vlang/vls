@@ -126,6 +126,19 @@ fn test_path_is_within_with_case_accepts_windows_case_differences() {
 	assert relative == 'src/Main.v'
 }
 
+fn test_normalize_overlay_path_before_windows_containment_checks() {
+	path := normalize_overlay_path(r'C:\Users\Alex\project\src\main.v')
+	root := normalize_overlay_path(r'c:\users\alex\project')
+	assert path == 'C:/Users/Alex/project/src/main.v'
+	assert root == 'c:/users/alex/project'
+	assert path_is_within_with_case(path, root, true)
+	relative := path_relative_to_with_case(path, root, true) or {
+		assert false, 'expected normalized Windows path to remain inside the project'
+		return
+	}
+	assert relative == 'src/main.v'
+}
+
 // --- path_to_uri tests ---
 
 fn test_path_to_uri_unix() {
@@ -1024,6 +1037,51 @@ fn test_symlink_untracked_files_materializes_local_imports() {
 	assert !os.is_link(target_module_dir)
 	assert os.is_file(target_module_file)
 	assert !os.is_link(target_module_file)
+	assert os.read_file(target_module_file) or { '' } == module_content
+}
+
+fn deny_overlay_symlink(_ string, _ string) ! {
+	return error('permission denied')
+}
+
+fn test_symlink_untracked_files_copies_when_symlinks_are_denied() {
+	temp_dir := os.join_path(os.temp_dir(),
+		'vls_symlink_denied_${os.getpid()}_${time.now().unix_nano()}')
+	defer {
+		os.rmdir_all(temp_dir) or {}
+	}
+	project_dir := os.join_path(temp_dir, 'project')
+	module_dir := os.join_path(project_dir, 'helper')
+	target_dir := os.join_path(temp_dir, 'target')
+	interop_test_must_mkdir_all(module_dir)
+	interop_test_must_mkdir_all(target_dir)
+
+	main_file := os.join_path(project_dir, 'main.v')
+	vmod_file := os.join_path(project_dir, 'v.mod')
+	module_file := os.join_path(module_dir, 'helper.v')
+	main_content := 'module main\n'
+	vmod_content := "Module {\n\tname: 'denied_symlink_test'\n}\n"
+	module_content := 'module helper\n\npub fn answer() int { return 42 }\n'
+	interop_test_must_write_file(main_file, main_content)
+	interop_test_must_write_file(vmod_file, vmod_content)
+	interop_test_must_write_file(module_file, module_content)
+
+	mut tracked := map[string]string{}
+	tracked[path_to_uri(main_file)] = 'module main\n\n// unsaved\n'
+	symlink_untracked_files_with_linker(project_dir, target_dir, tracked, deny_overlay_symlink) or {
+		assert false, 'Failed to copy denied symlinks: ${err}'
+		return
+	}
+
+	assert !os.exists(os.join_path(target_dir, 'main.v'))
+	target_vmod := os.join_path(target_dir, 'v.mod')
+	target_module := os.join_path(target_dir, 'helper')
+	target_module_file := os.join_path(target_module, 'helper.v')
+	assert os.is_file(target_vmod)
+	assert !os.is_link(target_vmod)
+	assert os.read_file(target_vmod) or { '' } == vmod_content
+	assert os.is_dir(target_module)
+	assert !os.is_link(target_module)
 	assert os.read_file(target_module_file) or { '' } == module_content
 }
 
