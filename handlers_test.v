@@ -4525,6 +4525,18 @@ fn test_classify_highlight_kind_read_write() {
 	assert classify_highlight_kind('for item in items {}', 12, 17) == doc_highlight_read
 }
 
+fn test_document_highlight_candidates_include_string_interpolations() {
+	content := "fn greet(name string) {\n\tprintln('hello \${name} \$name literal_name')\n}\n"
+	lines := content.split_into_lines()
+
+	candidates := collect_document_highlight_candidates(content, lines, 'name', .utf16)
+	assert candidates.len == 3
+	assert candidates[0].line_idx == 0
+	assert candidates[1].line_idx == 1
+	assert candidates[2].line_idx == 1
+	assert collect_document_highlight_candidates(content, lines, 'literal_name', .utf16).len == 0
+}
+
 fn test_document_highlight_returns_empty_over_semantic_cap() {
 	mut app := create_test_app()
 	defer {

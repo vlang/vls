@@ -571,6 +571,19 @@ fn test_extract_identifier_occurrences_indexes_string_interpolations() {
 	assert 'literal_name' !in occ
 }
 
+fn test_extract_identifier_occurrences_skips_multiline_block_comments() {
+	mut content := 'fn target() {}\n/*\n'
+	for _ in 0 .. reference_semantic_max_candidates + 1 {
+		content += 'target\n'
+	}
+	content += '*/\nfn use() { target() }\n'
+	occ := extract_identifier_occurrences(content, .utf16)
+
+	// Only the declaration and real call are candidates; repeated comment text
+	// cannot push rename over its semantic candidate cap.
+	assert occ['target'].len == 2
+}
+
 fn test_occurrences_for_caches_by_fingerprint() {
 	mut app := index_test_app()
 	uri := 'file:///tmp/occ.v'
