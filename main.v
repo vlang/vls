@@ -169,6 +169,16 @@ fn is_loopback_host(host string) bool {
 	return host in ['127.0.0.1', '::1', 'localhost', '']
 }
 
+// tcp_bind_address joins a host and port using the bracketed representation
+// required for IPv6 literals.
+fn tcp_bind_address(host string, port string) string {
+	mut bind_host := if host == '' { '127.0.0.1' } else { host }
+	if bind_host.contains(':') && !(bind_host.starts_with('[') && bind_host.ends_with(']')) {
+		bind_host = '[${bind_host}]'
+	}
+	return '${bind_host}:${port}'
+}
+
 // run_tcp_server listens on the given host/port and spawns a goroutine for each
 // incoming client connection.  Each client gets its own App instance so all
 // state is fully isolated.  Non-loopback binds require an explicit opt-in
@@ -182,8 +192,7 @@ fn run_tcp_server(host string, port string, allow_remote bool) {
 		eprintln(msg)
 		return
 	}
-	bind_host := if host == '' { '127.0.0.1' } else { host }
-	addr := '${bind_host}:${port}'
+	addr := tcp_bind_address(host, port)
 	log('VLS TCP server starting on ${addr}...')
 	mut listener := net.listen_tcp(.ip, addr) or {
 		log('Failed to start TCP listener on ${addr}: ${err}')
