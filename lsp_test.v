@@ -738,6 +738,32 @@ fn test_read_request_accepts_utf8_charset_header() {
 	assert decoded == payload
 }
 
+fn test_read_request_accepts_quoted_utf8_charset_with_additional_parameters() {
+	payload := '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}'
+	framed := 'Content-Length: ${payload.len}\r\nContent-Type: application/vscode-jsonrpc; charset="utf-8"; version=1\r\n\r\n${payload}'
+	tmp := os.join_path(os.temp_dir(), 'vls_read_request_quoted_utf8_${os.getpid()}.txt')
+	os.write_file(tmp, framed) or {
+		assert false, 'Failed to write temp request file: ${err}'
+		return
+	}
+	defer {
+		os.rm(tmp) or {}
+	}
+	mut f := os.open(tmp) or {
+		assert false, 'Failed to open temp request file: ${err}'
+		return
+	}
+	defer {
+		f.close()
+	}
+	mut reader := io.new_buffered_reader(reader: f, cap: 1)
+	decoded := read_request(mut reader) or {
+		assert false, 'read_request failed: ${err}'
+		return
+	}
+	assert decoded == payload
+}
+
 fn test_read_request_rejects_oversized_content_length() {
 	// A huge Content-Length must be refused before allocating (P0-11).
 	framed := 'Content-Length: 999999999999\r\n\r\n'
