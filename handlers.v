@@ -937,7 +937,8 @@ fn (mut app App) find_references(request Request) Response {
 	// Resolve references from the project's reference-occurrence index.
 	anchor := app.resolve_symbol_anchor(path, line, col)
 	mut locations := if a := anchor {
-		app.search_symbol_in_dirs_semantic(symbol, a, request.id)
+		// References may fall back to lexical occurrences past the candidate cap.
+		app.search_symbol_in_dirs_semantic(symbol, a, request.id, true)
 	} else {
 		app.search_symbol_in_dirs(symbol, request.id)
 	}
@@ -1004,8 +1005,12 @@ fn (mut app App) handle_rename(request Request) Response {
 			result: 'null'
 		}
 	}
-	locations := app.search_symbol_in_dirs_semantic(symbol, anchor, request.id)
+	// Rename is destructive: never accept the scope-unsafe lexical fallback. Past
+	// the candidate cap search_symbol_in_dirs_semantic returns none, and an
+	// unresolved rename is refused below rather than editing unrelated symbols.
+	locations := app.search_symbol_in_dirs_semantic(symbol, anchor, request.id, false)
 	if locations.len == 0 {
+		log('rename: no scope-safe occurrences for "${symbol}" (unresolved or above candidate cap); refusing')
 		return Response{
 			id:     request.id
 			result: 'null'
@@ -2319,8 +2324,12 @@ const reference_semantic_max_candidates = 48
 // only those whose compiler definition lookup resolves to the same declaration
 // anchor, so references stay scope-safe across same-name symbols (P1-04). The
 // per-candidate compiler lookup is cached within the request and the number of
-// compiler invocations is bounded (see reference_semantic_max_candidates).
-fn (mut app App) search_symbol_in_dirs_semantic(symbol string, anchor Location, request_id int) []Location {
+// compiler invocations is bounded (see reference_semantic_max_candidates). When
+// the candidate count exceeds the cap, `allow_lexical_fallback` decides the
+// outcome: references may take the unverified lexical occurrences (over-inclusive
+// but harmless highlights), whereas rename must NOT — it passes false so the
+// caller refuses rather than emit a destructive edit across unrelated scopes.
+fn (mut app App) search_symbol_in_dirs_semantic(symbol string, anchor Location, request_id int, allow_lexical_fallback bool) []Location {
 	started_ms := time.now().unix_milli()
 	app.ensure_dirs_indexed(app.index_query_dirs())
 	app.ensure_loose_file_dirs_shallow_indexed()
@@ -2351,8 +2360,15 @@ fn (mut app App) search_symbol_in_dirs_semantic(symbol string, anchor Location, 
 	}
 
 	// Too many candidates to verify one-compile-per-token without freezing the
-	// loop: return the lexical occurrences unverified (scope-unsafe but bounded).
+	// loop. References fall back to the unverified lexical occurrences (bounded,
+	// scope-unsafe but harmless); rename refuses (returns none) so it never edits
+	// unrelated same-named symbols in other scopes.
 	if candidates.len > reference_semantic_max_candidates {
+		if !allow_lexical_fallback {
+			app.send_log_message('semantic-scan symbol=${symbol} candidates=${candidates.len} exceeds cap ${reference_semantic_max_candidates}; refusing scope-unsafe resolution',
+				2)
+			return []Location{}
+		}
 		app.send_log_message('semantic-scan symbol=${symbol} candidates=${candidates.len} exceeds cap ${reference_semantic_max_candidates}; returning lexical occurrences',
 			3)
 		return candidates

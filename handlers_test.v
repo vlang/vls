@@ -651,10 +651,14 @@ fn test_semantic_reference_scan_caps_candidates() {
 	dummy_anchor := Location{
 		uri: uri
 	}
-	locs := app.search_symbol_in_dirs_semantic('foo', dummy_anchor, 0)
-	// Over the cap, every lexical occurrence is returned unverified (no compiler
-	// process is launched), bounding the worst-case cost.
-	assert locs.len == reference_semantic_max_candidates + 5
+	// References (allow_lexical_fallback = true): over the cap, every lexical
+	// occurrence is returned unverified (no compiler process is launched).
+	refs := app.search_symbol_in_dirs_semantic('foo', dummy_anchor, 0, true)
+	assert refs.len == reference_semantic_max_candidates + 5
+	// Rename (allow_lexical_fallback = false): over the cap it refuses (returns
+	// none) rather than emit a scope-unsafe destructive edit.
+	rename_locs := app.search_symbol_in_dirs_semantic('foo', dummy_anchor, 0, false)
+	assert rename_locs.len == 0
 }
 
 fn test_incremental_change_is_valid_rejects_char_past_line() {
