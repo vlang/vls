@@ -1572,6 +1572,30 @@ fn test_extract_raw_id_absent_is_none() {
 	assert extract_raw_id('{"method":"x","params":{}}') == none
 }
 
+fn test_raw_id_is_valid_accepts_strings_and_numbers() {
+	assert raw_id_is_valid('') // absent/null id
+	assert raw_id_is_valid('5')
+	assert raw_id_is_valid('-3')
+	assert raw_id_is_valid('"abc-1"')
+}
+
+fn test_raw_id_is_valid_rejects_other_types() {
+	// Booleans, objects, and arrays are not legal JSON-RPC ids.
+	assert !raw_id_is_valid('true')
+	assert !raw_id_is_valid('false')
+	assert !raw_id_is_valid('{}')
+	assert !raw_id_is_valid('{"a":1}')
+	assert !raw_id_is_valid('[]')
+	assert !raw_id_is_valid('[1,2]')
+	// extract_raw_id returns these exact tokens, so the pair rejects the request.
+	bad := extract_raw_id('{"id":true,"method":"x"}') or {
+		assert false, 'expected raw id token'
+		return
+	}
+	assert bad == 'true'
+	assert !raw_id_is_valid(bad)
+}
+
 fn test_is_client_response_message_detection() {
 	assert is_client_response_message('{"jsonrpc":"2.0","id":2,"result":null}')
 	assert is_client_response_message('{"jsonrpc":"2.0","id":2,"error":{"code":-1,"message":"x"}}')

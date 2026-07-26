@@ -35,6 +35,7 @@ mut:
 	position_encoding                           PositionEncoding = .utf16 // Negotiated LSP position encoding (default UTF-16)
 	symbol_index                                map[string]IndexEntry // Persistent per-URI symbol index (see index.v)
 	indexed_dirs                                map[string]bool       // Project dirs already walked into the index
+	indexed_dir_walk_ms                         map[string]i64        // Last walk time per dir, for watcher-less refresh
 	ref_occurrences                             map[string]OccEntry   // Per-URI identifier occurrences for references (see index.v)
 	vlib_fn_cache                               map[string]map[string]string // Per-vlib-module fn→return-type index (immutable during a session)
 	tcp_conn                                    ?&net.TcpConn         // Non-nil when serving a TCP client
@@ -407,6 +408,15 @@ fn (mut app App) handle_requests(mut reader io.BufferedReader) {
 		// Preserve the exact id (numeric or string) so responses echo it
 		// verbatim; string ids would otherwise collapse to 0 (P0-02).
 		app.current_request_raw_id = extract_raw_id(content) or { '' }
+		// JSON-RPC ids may only be a string, number, or null (an absent raw id).
+		// A present id of any other type (object, array, boolean) is an Invalid
+		// Request: respond with a null id — the id could not be validly
+		// determined — rather than dispatching and echoing a bogus id (P0-02).
+		if app.current_request_raw_id != '' && !raw_id_is_valid(app.current_request_raw_id) {
+			app.current_request_raw_id = 'null'
+			app.write_error_response(make_invalid_request_error_response(0, 'Request id must be a string, number, or null'))
+			continue
+		}
 		// Decode the body WITHOUT the id field: json2 aborts the whole decode on
 		// a string value in an int field, which would otherwise make every
 		// string-id request undecodable. The numeric id is derived from the raw
@@ -763,6 +773,17 @@ fn raw_id_to_int(raw string) int {
 		return 0
 	}
 	return raw.int()
+}
+
+// raw_id_is_valid reports whether a raw JSON id token is a legal JSON-RPC id: a
+// string or a number. Objects, arrays, and booleans are rejected. An absent or
+// null id is represented by an empty token and is handled by the caller.
+fn raw_id_is_valid(raw string) bool {
+	if raw == '' || raw[0] == `"` {
+		return true
+	}
+	c := raw[0]
+	return c == `-` || (c >= `0` && c <= `9`)
 }
 
 // json_is_ws reports whether a byte is JSON insignificant whitespace.
@@ -1697,20 +1718,29 @@ fn (mut app App) consume_cancelled_request(id int) bool {
 	return was_cancelled
 }
 
-// bump_generation records a mutation to `uri`, advancing both the global
-// counter and the per-project-directory revision. Diagnostic caching keys off
-// the per-project revision so that editing one file only invalidates cached
-// diagnostics for files in the same project directory, not every open document
-// (P1-06).
-fn (mut app App) bump_generation(uri string) {
-	app.open_files_generation++
+// generation_key returns the cache-invalidation scope for `uri`: its enclosing
+// `v.mod` project root, or its immediate directory when the file belongs to no
+// project. Keying on the project root (not just `os.dir`) means editing one
+// module invalidates diagnostics for sibling modules in the same project that
+// import it — otherwise an importer keyed on its own directory would reuse
+// diagnostics computed against the imported module's old API (P1-06).
+fn (app &App) generation_key(uri string) string {
 	dir := os.dir(uri_to_path(uri))
-	app.project_generations[dir] = app.project_generations[dir] + 1
+	root := find_project_root(dir)
+	return if root != '' { root } else { dir }
 }
 
-// project_generation returns the current revision for the project directory
-// that owns `uri`.
+// bump_generation records a mutation to `uri`, advancing both the global counter
+// and the per-project revision. Diagnostic caching keys off the per-project
+// revision so that editing one file invalidates cached diagnostics for the whole
+// owning project (covering cross-module imports), not every open document (P1-06).
+fn (mut app App) bump_generation(uri string) {
+	app.open_files_generation++
+	key := app.generation_key(uri)
+	app.project_generations[key] = app.project_generations[key] + 1
+}
+
+// project_generation returns the current revision for the project that owns `uri`.
 fn (app &App) project_generation(uri string) int {
-	dir := os.dir(uri_to_path(uri))
-	return app.project_generations[dir]
+	return app.project_generations[app.generation_key(uri)]
 }

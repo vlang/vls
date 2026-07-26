@@ -3,6 +3,7 @@
 module main
 
 import os
+import time
 
 // Persistent, incremental symbol index (audit Stage 4).
 //
@@ -240,6 +241,7 @@ fn (mut app App) drop_index_under(dir_path string) {
 	}
 	// Re-walk on next query (a removed folder must not be re-indexed).
 	app.indexed_dirs.clear()
+	app.indexed_dir_walk_ms.clear()
 }
 
 // Bounds and exclusions for the workspace walk. Without these a stray file
@@ -304,10 +306,30 @@ fn collect_v_files_rec(dir string, mut acc []string, mut visited map[string]bool
 	}
 }
 
+// index_refresh_interval_ms bounds how often a directory is re-walked when the
+// client provides no file watchers. Without watcher notifications the index would
+// otherwise never discover files created after the first walk, nor pick up disk
+// edits to unopened files, until the server restarts.
+const index_refresh_interval_ms = i64(10_000)
+
+// index_dir_needs_refresh reports whether an already-walked `dir` should be
+// re-scanned. When the client supports dynamic watched-file registration we rely
+// on didChangeWatchedFiles for freshness and never re-walk; otherwise we re-walk
+// on a throttled interval so a watcher-less client still sees new/changed files.
+fn (app &App) index_dir_needs_refresh(dir string) bool {
+	if app.supports_dynamic_watched_files_registration {
+		return false
+	}
+	last := app.indexed_dir_walk_ms[dir] or { return true }
+	return time.now().unix_milli() - last > index_refresh_interval_ms
+}
+
 // ensure_dirs_indexed makes sure every open buffer and every `.v` file under the
-// given project `dirs` has an up-to-date index entry. Each dir is walked at most
-// once (tracked in indexed_dirs); already-indexed files are skipped, so only new
-// or changed files are read and parsed rather than the whole workspace.
+// given project `dirs` has an up-to-date index entry. A dir is walked once and
+// then, when no client file watchers are available, re-walked on a throttled
+// interval (see index_dir_needs_refresh) so new and changed unopened files are
+// still discovered. Unchanged files are skipped via a fingerprint check, so a
+// refresh walk only re-parses what actually changed.
 fn (mut app App) ensure_dirs_indexed(dirs []string) {
 	// Open buffers are authoritative; keep their entries fresh (cheap fingerprint
 	// check skips unchanged content).
@@ -315,14 +337,24 @@ fn (mut app App) ensure_dirs_indexed(dirs []string) {
 		app.reindex_uri(uri)
 	}
 	for dir in dirs {
-		if dir == '' || dir == '/' || dir in app.indexed_dirs || !os.is_dir(dir) {
+		if dir == '' || dir == '/' || !os.is_dir(dir) {
+			continue
+		}
+		if dir in app.indexed_dirs && !app.index_dir_needs_refresh(dir) {
 			continue
 		}
 		mut files := []string{}
 		collect_v_files(dir, mut files)
 		for f in files {
 			uri := path_to_uri(f)
-			if uri in app.open_files || uri in app.symbol_index {
+			if uri in app.open_files {
+				continue
+			}
+			if uri in app.symbol_index {
+				// Already indexed: on a refresh walk, re-read from disk so edits to
+				// unopened files are picked up (the fingerprint check skips work
+				// when the content is unchanged).
+				app.reindex_uri(uri)
 				continue
 			}
 			if os.file_size(f) > index_max_file_bytes {
@@ -332,6 +364,7 @@ fn (mut app App) ensure_dirs_indexed(dirs []string) {
 			app.symbol_index[uri] = build_index_entry(content, app.position_encoding)
 		}
 		app.indexed_dirs[dir] = true
+		app.indexed_dir_walk_ms[dir] = time.now().unix_milli()
 	}
 }
 
