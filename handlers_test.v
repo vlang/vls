@@ -3390,6 +3390,71 @@ fn test_semantic_tokens_range_returns_empty_for_missing_document() {
 	assert tokens.data.len == 0
 }
 
+fn test_semantic_tokens_range_filters_by_character() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	uri := 'file:///tmp/semrange.v'
+	// Line 0 has two string tokens: `"b"` at column 5 and `"c"` at column 11.
+	app.open_files[uri] = 'a := "b" + "c"\n'
+
+	full_params := json2.encode(SemanticTokensRangeParams{
+		text_document: TextDocumentIdentifier{
+			uri: uri
+		}
+		range:         LSPRange{
+			start: Position{
+				line: 0
+				char: 0
+			}
+			end:   Position{
+				line: 0
+				char: 50
+			}
+		}
+	},
+		escape_unicode: true)
+	full := app.handle_semantic_tokens_range(Request{
+		id:     1
+		params: full_params
+	})
+	ftok := full.result as SemanticTokens
+	// The full-line request includes the token that starts at column 5.
+	assert ftok.data.len >= 5
+	assert ftok.data[0] == 0
+	assert ftok.data[1] == 5
+
+	// Narrow the range to columns [8,50): the column-5 token must be excluded, so
+	// the first returned token starts at or after column 8 (the `"c"` at 11) and
+	// the payload is strictly smaller than the full-line one.
+	narrow_params := json2.encode(SemanticTokensRangeParams{
+		text_document: TextDocumentIdentifier{
+			uri: uri
+		}
+		range:         LSPRange{
+			start: Position{
+				line: 0
+				char: 8
+			}
+			end:   Position{
+				line: 0
+				char: 50
+			}
+		}
+	},
+		escape_unicode: true)
+	narrow := app.handle_semantic_tokens_range(Request{
+		id:     2
+		params: narrow_params
+	})
+	ntok := narrow.result as SemanticTokens
+	assert ntok.data.len >= 5
+	assert ntok.data[0] == 0
+	assert ntok.data[1] >= 8
+	assert ntok.data.len < ftok.data.len
+}
+
 // ── code lens ────────────────────────────────────────────────────────────────
 
 fn test_code_lens_returns_run_lens_for_main() {
