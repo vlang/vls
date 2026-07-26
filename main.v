@@ -615,7 +615,14 @@ fn (mut app App) handle_requests(mut reader io.BufferedReader) {
 			}
 			.did_open {
 				app.on_did_open(request)
-				// Publish diagnostics immediately on open (P0-07 item 10).
+				// Publish diagnostics on open (P0-07 item 10). This compiles inline in
+				// the request loop, so opening many files serially blocks other
+				// requests until each compile returns. Moving it off the loop is the
+				// async-diagnostics scheduler (P0-04), which is blocked by the
+				// synchronous test harness and V's non-thread-safe shared state; until
+				// then each compile is bounded by compiler_timeout_ms so a single
+				// invocation cannot hang the loop indefinitely, and diag_cache avoids
+				// recompiling unchanged content.
 				if params := json2.decode[DidOpenTextDocumentParams](request.params) {
 					uri := params.text_document.uri
 					if doc_content := app.open_files[uri] {
