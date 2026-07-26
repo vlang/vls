@@ -3,6 +3,7 @@
 module main
 
 import os
+import json2
 import time
 
 fn index_test_app() &App {
@@ -62,6 +63,73 @@ fn test_index_reindex_skips_unchanged_content() {
 	app.reindex_uri(uri) // same content
 	fp2 := app.symbol_index[uri].fingerprint
 	assert fp1 == fp2
+}
+
+fn test_watched_file_reindex_drops_oversized_disk_entry() {
+	root := index_test_tmpdir('watched_large')
+	defer {
+		os.rmdir_all(root) or {}
+	}
+	path := os.join_path(root, 'large.v')
+	uri := path_to_uri(path)
+	os.write_file(path, 'module main\n\nfn before_growth() {}\n') or {
+		assert false, 'write initial file failed: ${err}'
+		return
+	}
+	mut app := index_test_app()
+	app.on_did_change_watched_files(Request{
+		params: json2.encode(DidChangeWatchedFilesParams{
+			changes: [FileEvent{
+				uri:        uri
+				event_type: 1
+			}]
+		})
+	})
+	assert uri in app.symbol_index
+	app.occurrences_for(uri)
+	assert uri in app.ref_occurrences
+
+	os.write_file(path, 'x'.repeat(index_max_file_bytes + 1)) or {
+		assert false, 'grow watched file failed: ${err}'
+		return
+	}
+	app.on_did_change_watched_files(Request{
+		params: json2.encode(DidChangeWatchedFilesParams{
+			changes: [FileEvent{
+				uri:        uri
+				event_type: 2
+			}]
+		})
+	})
+	assert uri !in app.symbol_index
+	assert uri !in app.ref_occurrences
+}
+
+fn test_watched_file_reindex_obeys_total_entry_limit() {
+	root := index_test_tmpdir('watched_count')
+	defer {
+		os.rmdir_all(root) or {}
+	}
+	path := os.join_path(root, 'beyond_limit.v')
+	uri := path_to_uri(path)
+	os.write_file(path, 'module main\n\nfn beyond_limit() {}\n') or {
+		assert false, 'write watched file failed: ${err}'
+		return
+	}
+	mut app := index_test_app()
+	for i in 0 .. index_max_files {
+		app.symbol_index['file:///already_indexed_${i}.v'] = IndexEntry{}
+	}
+	app.on_did_change_watched_files(Request{
+		params: json2.encode(DidChangeWatchedFilesParams{
+			changes: [FileEvent{
+				uri:        uri
+				event_type: 1
+			}]
+		})
+	})
+	assert app.symbol_index.len == index_max_files
+	assert uri !in app.symbol_index
 }
 
 fn test_index_doc_lookup() {
@@ -180,7 +248,7 @@ fn test_collect_v_files_excludes_hidden_and_heavy_dirs() {
 	os.write_file(os.join_path(root, 'sub', 'lib.v'), 'module main\n') or { return }
 
 	mut files := []string{}
-	collect_v_files(root, mut files)
+	assert collect_v_files(root, mut files)
 	assert files.any(it.ends_with('main.v'))
 	assert files.any(it.ends_with('lib.v'))
 	assert files.all(!it.contains('.git'))
@@ -208,7 +276,7 @@ fn test_collect_v_files_excludes_out_of_tree_symlink() {
 		return
 	}
 	mut files := []string{}
-	collect_v_files(root, mut files)
+	assert collect_v_files(root, mut files)
 	assert files.any(it.ends_with('in.v'))
 	// The out-of-tree file reachable only via the symlink must NOT be indexed.
 	assert files.all(!it.ends_with('out.v'))

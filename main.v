@@ -35,15 +35,17 @@ mut:
 	cancelled_raw_ids                           map[string]bool           // String/raw request ids cancelled via $/cancelRequest
 	current_request_raw_id                      string                    // Raw JSON id of the request being processed (echoed verbatim)
 	position_encoding                           PositionEncoding = .utf16 // Negotiated LSP position encoding (default UTF-16)
-	symbol_index                                map[string]IndexEntry // Persistent per-URI symbol index (see index.v)
-	indexed_dirs                                map[string]bool       // Project dirs already walked into the index
-	indexed_dir_walk_ms                         map[string]i64        // Last walk time per dir, for watcher-less refresh
-	ref_occurrences                             map[string]OccEntry   // Per-URI identifier occurrences for references (see index.v)
+	symbol_index                                map[string]IndexEntry        // Persistent per-URI symbol index (see index.v)
+	indexed_dirs                                map[string]bool              // Project dirs already walked into the index
+	indexed_dir_walk_ms                         map[string]i64               // Last walk time per dir, for watcher-less refresh
+	ref_occurrences                             map[string]OccEntry          // Per-URI identifier occurrences for references (see index.v)
+	index_skipped_uris                          map[string]bool              // Disk files omitted from the bounded index
+	index_incomplete_scopes                     map[string]bool              // Index walks that could not finish
 	vlib_fn_cache                               map[string]map[string]string // Per-vlib-module fn→return-type index (immutable during a session)
-	tcp_conn                                    ?&net.TcpConn         // Non-nil when serving a TCP client
-	is_shutdown                                 bool                  // True after shutdown request was acknowledged
-	exit_was_requested                          bool                  // True when the exit notification was received
-	received_initialize                         bool                  // True after initialize request was processed
+	tcp_conn                                    ?&net.TcpConn                // Non-nil when serving a TCP client
+	is_shutdown                                 bool                         // True after shutdown request was acknowledged
+	exit_was_requested                          bool                         // True when the exit notification was received
+	received_initialize                         bool                         // True after initialize request was processed
 	next_request_id                             int = 1 // Counter for server-initiated request ids
 }
 
@@ -417,7 +419,8 @@ fn (mut app App) handle_requests(mut reader io.BufferedReader) {
 		// determined — rather than dispatching and echoing a bogus id (P0-02).
 		if app.current_request_raw_id != '' && !raw_id_is_valid(app.current_request_raw_id) {
 			app.current_request_raw_id = 'null'
-			app.write_error_response(make_invalid_request_error_response(0, 'Request id must be a string, number, or null'))
+			app.write_error_response(make_invalid_request_error_response(0,
+				'Request id must be a string, number, or null'))
 			continue
 		}
 		// Decode the body WITHOUT the id field: json2 aborts the whole decode on

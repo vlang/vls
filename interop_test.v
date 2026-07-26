@@ -114,6 +114,18 @@ fn test_uri_to_path_with_dots() {
 	assert result == '/path/./to/../file.v'
 }
 
+fn test_path_is_within_with_case_accepts_windows_case_differences() {
+	assert path_is_within_with_case('c:/repo/src/main.v', 'C:/Repo', true)
+	assert path_is_within_with_case('//server/share/FILE.v', '//SERVER/SHARE', true)
+	assert !path_is_within_with_case('c:/repository/main.v', 'C:/Repo', true)
+	assert !path_is_within_with_case('c:/repo/src/main.v', 'C:/Repo', false)
+	relative := path_relative_to_with_case('c:/repo/src/Main.v', 'C:/Repo', true) or {
+		assert false, 'expected a relative Windows path'
+		return
+	}
+	assert relative == 'src/Main.v'
+}
+
 // --- path_to_uri tests ---
 
 fn test_path_to_uri_unix() {
