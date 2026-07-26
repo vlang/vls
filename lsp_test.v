@@ -1555,8 +1555,16 @@ fn test_extract_raw_id_string_preserves_quotes() {
 	assert id == '"abc-1"'
 }
 
-fn test_extract_raw_id_null_is_none() {
-	assert extract_raw_id('{"id":null,"method":"x"}') == none
+fn test_extract_raw_id_present_null_is_literal() {
+	// A present null id is a request with a null id (JSON-RPC permits it), not a
+	// notification: it must be distinguished from an absent id.
+	id := extract_raw_id('{"id":null,"method":"x"}') or {
+		assert false, 'present null id must not be none'
+		return
+	}
+	assert id == 'null'
+	assert raw_id_is_valid(id)
+	assert request_content_has_id('{"id":null,"method":"x"}')
 }
 
 fn test_extract_raw_id_ignores_nested_id() {

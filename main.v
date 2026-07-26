@@ -776,10 +776,10 @@ fn raw_id_to_int(raw string) int {
 }
 
 // raw_id_is_valid reports whether a raw JSON id token is a legal JSON-RPC id: a
-// string or a number. Objects, arrays, and booleans are rejected. An absent or
-// null id is represented by an empty token and is handled by the caller.
+// string, a number, or null. Objects, arrays, and booleans are rejected. An
+// absent id is represented by an empty token and is handled by the caller.
 fn raw_id_is_valid(raw string) bool {
-	if raw == '' || raw[0] == `"` {
+	if raw == '' || raw == 'null' || raw[0] == `"` {
 		return true
 	}
 	c := raw[0]
@@ -863,10 +863,13 @@ fn skip_json_value(content string, start int) int {
 }
 
 // extract_raw_id returns the raw JSON representation of the top-level `id`
-// member (e.g. `5` or `"abc"`), preserving its exact type so it can be echoed
-// verbatim in the response. Returns none when `id` is absent or JSON null.
-// This is how the server supports both numeric and string request/cancellation
-// IDs (P0-02) even though the typed decoder collapses string ids to 0.
+// member (e.g. `5`, `"abc"`, or `null`), preserving its exact type so it can be
+// echoed verbatim in the response. Returns none ONLY when `id` is absent: a
+// present JSON null yields the literal token `null` so the message is treated as
+// a request (JSON-RPC permits null ids) and answered with `"id":null`, rather
+// than being misclassified as a notification. This is how the server supports
+// numeric, string, and null request/cancellation IDs (P0-02) even though the
+// typed decoder collapses string ids to 0.
 fn extract_raw_id(content string) ?string {
 	mut i := content.index('{') or { return none }
 	i++
@@ -894,9 +897,8 @@ fn extract_raw_id(content string) ?string {
 			i++
 		}
 		if key == 'id' {
-			if content[i..].starts_with('null') {
-				return none
-			}
+			// A present null id is returned as the literal `null` (not none) so it
+			// is distinguished from an absent id and treated as a request.
 			end := skip_json_value(content, i)
 			return content[i..end].trim_space()
 		}
