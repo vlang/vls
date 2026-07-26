@@ -651,14 +651,39 @@ fn test_semantic_reference_scan_caps_candidates() {
 	dummy_anchor := Location{
 		uri: uri
 	}
+	scope := app.index_scope_for_uri(uri)
 	// References (allow_lexical_fallback = true): over the cap, every lexical
 	// occurrence is returned unverified (no compiler process is launched).
-	refs := app.search_symbol_in_dirs_semantic('foo', dummy_anchor, 0, true)
+	refs := app.search_symbol_in_dirs_semantic('foo', dummy_anchor, scope, 0, true)
 	assert refs.len == reference_semantic_max_candidates + 5
 	// Rename (allow_lexical_fallback = false): over the cap it refuses (returns
 	// none) rather than emit a scope-unsafe destructive edit.
-	rename_locs := app.search_symbol_in_dirs_semantic('foo', dummy_anchor, 0, false)
+	rename_locs := app.search_symbol_in_dirs_semantic('foo', dummy_anchor, scope, 0, false)
 	assert rename_locs.len == 0
+}
+
+fn test_semantic_candidate_cap_ignores_unrelated_workspace_root() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	current_uri := 'file:///root_a/main.v'
+	app.open_files[current_uri] = 'module main\n\nfn main() { unique() }\n'
+	mut unrelated_content := 'module main\n'
+	for i in 0 .. reference_semantic_max_candidates + 1 {
+		unrelated_content += 'fn unrelated_${i}() { unique() }\n'
+	}
+	app.open_files['file:///root_b/many.v'] = unrelated_content
+	app.ensure_dirs_indexed(app.index_query_dirs())
+
+	current_scope := IndexScope{
+		dir:       '/root_a'
+		recursive: true
+	}
+	candidates := app.collect_semantic_candidates('unique', current_scope)
+
+	assert candidates.len == 1
+	assert candidates[0].uri == current_uri
 }
 
 fn test_incremental_change_is_valid_rejects_char_past_line() {
@@ -1701,6 +1726,7 @@ fn test_handle_rename_refuses_incomplete_oversized_sibling_index() {
 	})
 
 	assert !app.index_is_complete()
+	assert !app.index_is_complete_for_scope(app.index_scope_for_uri(uri))
 	assert resp.result is string
 	assert (resp.result as string) == 'null'
 }
