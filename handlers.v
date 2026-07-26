@@ -2211,6 +2211,7 @@ fn (app &App) workspace_search_dirs(primary_dir string) []string {
 // re-walking and re-tokenizing the workspace on each request (P1-05).
 fn (mut app App) search_symbol_in_dirs(symbol string, request_id int) []Location {
 	app.ensure_dirs_indexed(app.index_query_dirs())
+	app.ensure_loose_file_dirs_shallow_indexed()
 	mut locations := []Location{}
 	mut uris := app.symbol_index.keys()
 	uris.sort()
@@ -2297,6 +2298,7 @@ fn same_anchor_location(a Location, b Location) bool {
 fn (mut app App) search_symbol_in_dirs_semantic(symbol string, anchor Location, request_id int) []Location {
 	started_ms := time.now().unix_milli()
 	app.ensure_dirs_indexed(app.index_query_dirs())
+	app.ensure_loose_file_dirs_shallow_indexed()
 	mut locations := []Location{}
 	mut anchor_cache := map[string]?Location{}
 	mut candidate_tokens := 0
@@ -2528,7 +2530,7 @@ fn (mut app App) collect_module_fn_completions(current_file_uri string, working_
 		app.reindex_uri(uri)
 	}
 	app.ensure_dir_shallow_indexed(working_dir)
-	return app.query_module_fn_completions(current_module, current_file_uri)
+	return app.query_module_fn_completions(current_module, current_file_uri, working_dir)
 }
 
 // parse_module_fn_completions extracts free-function declarations (`pub fn` and `fn`)
