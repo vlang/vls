@@ -873,25 +873,33 @@ fn (mut app App) run_v_line_info(method Method, path string, line_info string) R
 				// spaces, `#`, `%`, or Unicode are valid and match the client's URI
 				// keys (P0-10). The compiler reports a byte column; convert it to
 				// the client's encoding using the target file's line (P0-01).
-				target_uri := path_to_uri(uri_path)
-				client_col := app.byte_col_to_client_col(target_uri, line_nr, col)
-				result = Location{
-					uri:   target_uri
-					range: LSPRange{
-						start: Position{
-							line: line_nr
-							char: client_col
-						}
-						end:   Position{
-							line: line_nr
-							char: client_col
-						}
-					}
-				}
+				result = app.compiler_location(uri_path, line_nr, col)
 			}
 		}
 		else {}
 	}
 
 	return result
+}
+
+// compiler_location maps a compiler-reported filesystem path back to the
+// original URI of an equivalent open document before converting its byte
+// column. This keeps both the URI spelling and position based on the
+// authoritative unsaved buffer.
+fn (app &App) compiler_location(path string, line int, byte_col int) Location {
+	target_uri := index_uri_for_path(path, app.open_index_uris_by_path())
+	client_col := app.byte_col_to_client_col(target_uri, line, byte_col)
+	return Location{
+		uri:   target_uri
+		range: LSPRange{
+			start: Position{
+				line: line
+				char: client_col
+			}
+			end:   Position{
+				line: line
+				char: client_col
+			}
+		}
+	}
 }
