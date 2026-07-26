@@ -527,6 +527,21 @@ fn test_extract_identifier_occurrences_skips_comments_strings_numbers() {
 	assert '123' !in occ
 }
 
+fn test_extract_identifier_occurrences_indexes_string_interpolations() {
+	content := "fn greet(name string) string {\n\tother := 'ignored'\n\treturn 'hello \${name} \${other.to_upper()} \$name literal_name'\n}\n"
+	occ := extract_identifier_occurrences(content, .utf16)
+
+	// The parameter plus braced and shorthand interpolation references.
+	assert occ['name'].len == 3
+	// The declaration and its use inside a compound interpolation expression.
+	assert occ['other'].len == 2
+	assert occ['to_upper'].len == 1
+	// Ordinary literal text remains excluded from rename candidates.
+	assert 'ignored' !in occ
+	assert 'hello' !in occ
+	assert 'literal_name' !in occ
+}
+
 fn test_occurrences_for_caches_by_fingerprint() {
 	mut app := index_test_app()
 	uri := 'file:///tmp/occ.v'
