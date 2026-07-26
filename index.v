@@ -274,18 +274,27 @@ fn find_project_root(dir string) string {
 // and known heavy directories and stopping once `index_max_files` is reached.
 fn collect_v_files(root string, mut acc []string) {
 	mut visited := map[string]bool{}
-	collect_v_files_rec(root, mut acc, mut visited)
+	canonical_root := os.real_path(root).replace('\\', '/')
+	collect_v_files_rec(root, canonical_root, mut acc, mut visited)
 }
 
 // collect_v_files_rec is the recursive worker; `visited` holds the canonical
 // (realpath-resolved) directories already walked, so a symlink cycle cannot
-// cause infinite recursion or double-indexing.
-fn collect_v_files_rec(dir string, mut acc []string, mut visited map[string]bool) {
+// cause infinite recursion or double-indexing. `canonical_root` bounds the walk
+// to the workspace: a directory whose resolved path escapes it (e.g. a symlink
+// `external -> /home`) is skipped so an out-of-tree directory cannot pull an
+// unrelated file tree into the index (P1-01).
+fn collect_v_files_rec(dir string, canonical_root string, mut acc []string, mut visited map[string]bool) {
 	if acc.len >= index_max_files {
 		return
 	}
 	real := os.real_path(dir)
 	if real in visited {
+		return
+	}
+	// Containment: os.real_path resolves symlinks, so a symlinked directory whose
+	// target lies outside the workspace root is rejected here rather than walked.
+	if !path_is_within(real.replace('\\', '/'), canonical_root) {
 		return
 	}
 	visited[real] = true
@@ -299,7 +308,7 @@ fn collect_v_files_rec(dir string, mut acc []string, mut visited map[string]bool
 			if entry.starts_with('.') || entry in index_excluded_dirs {
 				continue
 			}
-			collect_v_files_rec(full, mut acc, mut visited)
+			collect_v_files_rec(full, canonical_root, mut acc, mut visited)
 		} else if entry.ends_with('.v') {
 			acc << full
 		}
