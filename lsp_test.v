@@ -674,6 +674,14 @@ fn test_read_request_accepts_lowercase_content_length_header() {
 	assert decoded == payload
 }
 
+fn test_tcp_bind_address_brackets_ipv6_literals() {
+	assert tcp_bind_address('::1', '5007') == '[::1]:5007'
+	assert tcp_bind_address('2001:db8::1', '5007') == '[2001:db8::1]:5007'
+	assert tcp_bind_address('[::1]', '5007') == '[::1]:5007'
+	assert tcp_bind_address('127.0.0.1', '5007') == '127.0.0.1:5007'
+	assert tcp_bind_address('', '5007') == '127.0.0.1:5007'
+}
+
 fn test_parse_content_length_header_rejects_non_numeric() {
 	parse_content_length_header('12x') or {
 		assert err.msg().contains('non-numeric')

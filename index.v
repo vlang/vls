@@ -508,10 +508,12 @@ fn (mut app App) ensure_dir_shallow_indexed(dir string) {
 	refresh := app.index_dir_needs_refresh(dir)
 	open_uris_by_path := app.open_index_uris_by_path()
 	mut present := map[string]bool{}
-	entries := os.ls(dir) or {
+	mut entries := os.ls(dir) or {
 		app.index_incomplete_scopes[scope] = true
 		return
 	}
+	entries.sort()
+	mut scan_complete := true
 	for entry in entries {
 		if !entry.ends_with('.v') {
 			continue
@@ -535,11 +537,12 @@ fn (mut app App) ensure_dir_shallow_indexed(dir string) {
 		}
 		if app.symbol_index.len >= index_max_files {
 			app.index_incomplete_scopes[scope] = true
+			scan_complete = false
 			break
 		}
 		app.reindex_uri(uri)
 	}
-	if refresh {
+	if refresh && scan_complete {
 		// Reconcile deletions: drop non-open entries for files that were directly
 		// in `dir` (shallow, not recursive) but the walk no longer found.
 		dir_norm := dir.replace('\\', '/').trim_right('/')
@@ -560,6 +563,8 @@ fn (mut app App) ensure_dir_shallow_indexed(dir string) {
 				app.index_skipped_uris.delete(uri)
 			}
 		}
+	}
+	if refresh {
 		app.indexed_dir_walk_ms[dir] = time.now().unix_milli()
 	}
 }

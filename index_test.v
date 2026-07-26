@@ -475,6 +475,38 @@ fn test_shallow_index_refreshes_and_reconciles_without_watchers() {
 	assert app.query_workspace_symbols('delta').len == 0
 }
 
+fn test_shallow_index_skips_reconciliation_after_hitting_entry_cap() {
+	root := index_test_tmpdir('shallow_cap')
+	defer {
+		os.rmdir_all(root) or {}
+	}
+	new_path := os.join_path(root, 'a_new.v')
+	kept_path := os.join_path(root, 'z_kept.v')
+	os.write_file(new_path, 'module main\n\nfn new_symbol() {}\n') or {
+		assert false, 'write new file failed: ${err}'
+		return
+	}
+	os.write_file(kept_path, 'module main\n\nfn kept_symbol() {}\n') or {
+		assert false, 'write kept file failed: ${err}'
+		return
+	}
+	mut app := index_test_app()
+	for i in 0 .. index_max_files {
+		app.symbol_index['file:///already_indexed_${i}.v'] = IndexEntry{}
+	}
+	app.symbol_index.delete('file:///already_indexed_0.v')
+	kept_uri := path_to_uri(kept_path)
+	app.reindex_uri(kept_uri)
+	assert app.symbol_index.len == index_max_files
+	app.indexed_dir_walk_ms[root] = 0
+
+	app.ensure_dir_shallow_indexed(root)
+
+	assert 'shallow:${root}' in app.index_incomplete_scopes
+	assert kept_uri in app.symbol_index
+	assert app.query_workspace_symbols('kept_symbol').len == 1
+}
+
 // --- reference / occurrence index (P1-05) ---
 
 fn test_extract_identifier_occurrences_skips_comments_strings_numbers() {
