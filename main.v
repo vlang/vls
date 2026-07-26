@@ -804,11 +804,24 @@ fn read_json_string_token(content string, start int) (string, int) {
 		c := content[i]
 		if c == `\\` && i + 1 < content.len {
 			nxt := content[i + 1]
+			if nxt == `u` {
+				// `\uXXXX` unicode escape (with surrogate-pair support). Decode to a
+				// codepoint and append its UTF-8 bytes so an escaped member name like
+				// `id` decodes to `id` rather than a literal `u...` — otherwise
+				// extract_raw_id would miss the `id` key (JSON permits escaped keys).
+				if cp, adv := decode_json_unicode_escape(content, i) {
+					sb << utf32_to_str(u32(cp)).bytes()
+					i += adv
+					continue
+				}
+			}
 			esc := match nxt {
 				`n` { u8(`\n`) }
 				`t` { u8(`\t`) }
 				`r` { u8(`\r`) }
-				else { nxt }
+				`b` { u8(0x08) }
+				`f` { u8(0x0c) }
+				else { nxt } // `\"`, `\\`, `\/`, and any other: keep the char verbatim
 			}
 			sb << esc
 			i += 2
@@ -821,6 +834,49 @@ fn read_json_string_token(content string, start int) (string, int) {
 		i++
 	}
 	return sb.bytestr(), i
+}
+
+// decode_json_unicode_escape decodes a `\uXXXX` escape (and a following low
+// surrogate for astral codepoints) starting at `content[i]` (the backslash).
+// Returns the Unicode codepoint and the number of bytes consumed, or none when
+// the escape is malformed or a high surrogate is unpaired.
+fn decode_json_unicode_escape(content string, i int) ?(int, int) {
+	if i + 6 > content.len {
+		return none
+	}
+	hi := hex4_to_int(content[i + 2..i + 6]) or { return none }
+	if hi >= 0xD800 && hi <= 0xDBFF {
+		// High surrogate: must be followed by a `\uXXXX` low surrogate.
+		if i + 12 <= content.len && content[i + 6] == `\\` && content[i + 7] == `u` {
+			lo := hex4_to_int(content[i + 8..i + 12]) or { return none }
+			if lo >= 0xDC00 && lo <= 0xDFFF {
+				return 0x10000 + ((hi - 0xD800) << 10) + (lo - 0xDC00), 12
+			}
+		}
+		return none
+	}
+	return hi, 6
+}
+
+// hex4_to_int parses exactly four hexadecimal digits into an int, or none.
+fn hex4_to_int(s string) ?int {
+	if s.len != 4 {
+		return none
+	}
+	mut v := 0
+	for c in s {
+		d := if c >= `0` && c <= `9` {
+			int(c - `0`)
+		} else if c >= `a` && c <= `f` {
+			int(c - `a`) + 10
+		} else if c >= `A` && c <= `F` {
+			int(c - `A`) + 10
+		} else {
+			return none
+		}
+		v = v * 16 + d
+	}
+	return v
 }
 
 // skip_json_value returns the index just past a complete JSON value beginning at
