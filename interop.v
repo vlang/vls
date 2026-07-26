@@ -121,8 +121,10 @@ fn uri_to_path(uri string) string {
 		rest = rest[..q]
 	}
 	decoded := percent_decode(rest)
-	if authority != '' {
-		// Preserve UNC authority: //server/share/...
+	// An empty or `localhost` authority denotes the local machine (RFC 8089), so
+	// the path is local: file://localhost/tmp/main.v -> /tmp/main.v. A genuine
+	// remote authority is preserved as a UNC path (//server/share/...).
+	if authority != '' && authority.to_lower() != 'localhost' {
 		return '//' + authority + decoded
 	}
 	// Windows drive path: /C:/Users/... -> C:/Users/...

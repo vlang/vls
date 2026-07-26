@@ -67,6 +67,15 @@ fn test_uri_to_path_percent_encoded_hash_and_percent() {
 	assert uri_to_path('file:///home/user/100%25.v') == '/home/user/100%.v'
 }
 
+fn test_uri_to_path_localhost_authority_is_local() {
+	// A `localhost` authority denotes the local machine (RFC 8089), so the path
+	// must resolve to the local file, not a //localhost/... UNC-style path.
+	assert uri_to_path('file://localhost/tmp/main.v') == '/tmp/main.v'
+	assert uri_to_path('file://LOCALHOST/tmp/main.v') == '/tmp/main.v'
+	// A genuine remote authority is still preserved as a UNC path.
+	assert uri_to_path('file://server/share/main.v') == '//server/share/main.v'
+}
+
 fn test_uri_to_path_drops_fragment_and_query() {
 	assert uri_to_path('file:///home/user/test.v#L10') == '/home/user/test.v'
 	assert uri_to_path('file:///home/user/test.v?rev=2') == '/home/user/test.v'
