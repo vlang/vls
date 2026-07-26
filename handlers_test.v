@@ -593,6 +593,47 @@ fn test_apply_incremental_change_rejects_reversed_range() {
 	assert updated == content
 }
 
+fn test_incremental_change_is_valid_rejects_lines_past_eof() {
+	// "abc\ndef" has lines 0 and 1 only. A stale client targeting lines beyond
+	// the document must be rejected, not clamped-and-appended at EOF (P0-07).
+	content := 'abc\ndef'
+	past := LSPRange{
+		start: Position{
+			line: 5
+			char: 0
+		}
+		end:   Position{
+			line: 6
+			char: 0
+		}
+	}
+	assert !incremental_change_is_valid(content, past, .utf16)
+	// An end line past EOF is rejected even when the start line is in range.
+	half_past := LSPRange{
+		start: Position{
+			line: 1
+			char: 0
+		}
+		end:   Position{
+			line: 9
+			char: 0
+		}
+	}
+	assert !incremental_change_is_valid(content, half_past, .utf16)
+	// A range fully inside the document is still accepted.
+	ok := LSPRange{
+		start: Position{
+			line: 0
+			char: 1
+		}
+		end:   Position{
+			line: 1
+			char: 2
+		}
+	}
+	assert incremental_change_is_valid(content, ok, .utf16)
+}
+
 fn test_apply_incremental_change_handles_multiline_ranges() {
 	content := 'abc\ndef\nghi'
 	range := LSPRange{
@@ -3899,6 +3940,110 @@ fn test_organize_imports_sorts_contiguous_block() {
 		}
 	}
 	assert found, 'organize imports should be offered for a contiguous import block'
+}
+
+fn test_remove_unknown_import_range_at_eof_without_newline() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	uri := 'file:///tmp/unknown_eof.v'
+	// The unknown import is the final line and the file has NO trailing newline,
+	// so [line+1,0) would be out of bounds. The edit must end at the line's
+	// encoded length instead so clients accept the range (P0-09).
+	app.open_files[uri] = 'module main\nimport foo'
+	diag := LSPDiagnostic{
+		message: 'unknown module `foo`'
+		range:   LSPRange{
+			start: Position{
+				line: 1
+				char: 0
+			}
+			end:   Position{
+				line: 1
+				char: 10
+			}
+		}
+	}
+	params := CodeActionParams{
+		text_document: TextDocumentIdentifier{
+			uri: uri
+		}
+		range:         LSPRange{}
+		context:       CodeActionContext{
+			diagnostics: [diag]
+		}
+	}
+	resp := app.handle_code_action(Request{
+		id:     1
+		params: json2.encode(params, escape_unicode: true)
+	})
+	actions := resp.result as []CodeAction
+	mut found := false
+	for a in actions {
+		if a.title == 'Remove unknown import' {
+			found = true
+			edit := a.edit or { continue }
+			e := edit.changes[uri][0]
+			assert e.range.start.line == 1
+			assert e.range.start.char == 0
+			// Ends at the final line's length, not the nonexistent next line.
+			assert e.range.end.line == 1
+			assert e.range.end.char == 'import foo'.len
+		}
+	}
+	assert found, 'expected a Remove unknown import quick fix'
+}
+
+fn test_remove_unknown_import_range_with_trailing_newline() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	uri := 'file:///tmp/unknown_nl.v'
+	// The import line has a terminator, so the whole line (incl. newline) is
+	// removed by ending at the next line's start.
+	app.open_files[uri] = 'import foo\nmodule main\n'
+	diag := LSPDiagnostic{
+		message: 'unknown module `foo`'
+		range:   LSPRange{
+			start: Position{
+				line: 0
+				char: 0
+			}
+			end:   Position{
+				line: 0
+				char: 10
+			}
+		}
+	}
+	params := CodeActionParams{
+		text_document: TextDocumentIdentifier{
+			uri: uri
+		}
+		range:         LSPRange{}
+		context:       CodeActionContext{
+			diagnostics: [diag]
+		}
+	}
+	resp := app.handle_code_action(Request{
+		id:     1
+		params: json2.encode(params, escape_unicode: true)
+	})
+	actions := resp.result as []CodeAction
+	mut found := false
+	for a in actions {
+		if a.title == 'Remove unknown import' {
+			found = true
+			edit := a.edit or { continue }
+			e := edit.changes[uri][0]
+			assert e.range.start.line == 0
+			assert e.range.start.char == 0
+			assert e.range.end.line == 1
+			assert e.range.end.char == 0
+		}
+	}
+	assert found, 'expected a Remove unknown import quick fix'
 }
 
 fn test_code_action_kind_wanted_respects_only_filter() {

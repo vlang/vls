@@ -887,6 +887,13 @@ fn incremental_change_is_valid(content string, range LSPRange, enc PositionEncod
 		return false
 	}
 	starts := line_start_offsets(content)
+	// Reject a range whose start or end line does not exist in the document. A
+	// desynced client can send lines past EOF; position_to_byte_offset clamps
+	// those to content.len, which would make an out-of-bounds edit look valid and
+	// get appended at EOF while the version advances, desyncing the buffer (P0-07).
+	if range.start.line >= starts.len || range.end.line >= starts.len {
+		return false
+	}
 	start_byte := position_to_byte_offset(content, starts, range.start.line, range.start.char, enc)
 	end_byte := position_to_byte_offset(content, starts, range.end.line, range.end.char, enc)
 	return start_byte <= end_byte && start_byte <= content.len && end_byte <= content.len
@@ -2356,10 +2363,25 @@ fn (mut app App) handle_code_action(request Request) Response {
 				line_nr := diag.range.start.line
 				if line_nr >= 0 && line_nr < lines.len
 					&& lines[line_nr].trim_space().starts_with('import ') {
-					// Remove the whole line including its trailing newline by
-					// deleting the range [line_nr,0)..[line_nr+1,0). Ending the
-					// range at the previous line length would leave a blank line
-					// behind (P0-09).
+					// Remove the whole import line. When the line has a trailing
+					// terminator (a following line-start exists) delete it too by
+					// ending at [line_nr+1,0), so no blank line is left behind. When
+					// the import is the final line with no newline, [line_nr+1,0) is
+					// out of bounds and clients may reject the whole edit, so end at
+					// the final line's encoded length instead (P0-09).
+					starts := line_start_offsets(content)
+					end_pos := if line_nr + 1 < starts.len {
+						Position{
+							line: line_nr + 1
+							char: 0
+						}
+					} else {
+						Position{
+							line: line_nr
+							char: byte_to_encoded_col(lines[line_nr], lines[line_nr].len,
+								app.position_encoding)
+						}
+					}
 					edit := WorkspaceEdit{
 						changes: {
 							uri: [
@@ -2369,10 +2391,7 @@ fn (mut app App) handle_code_action(request Request) Response {
 											line: line_nr
 											char: 0
 										}
-										end:   Position{
-											line: line_nr + 1
-											char: 0
-										}
+										end:   end_pos
 									}
 									new_text: ''
 								},
