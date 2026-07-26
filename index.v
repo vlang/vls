@@ -573,6 +573,7 @@ fn (mut app App) ensure_dir_shallow_indexed(dir string) {
 	scope := 'shallow:${dir}'
 	app.index_incomplete_scopes.delete(scope)
 	refresh := app.index_dir_needs_refresh(dir)
+	canonical_dir := os.real_path(dir).replace('\\', '/')
 	open_uris_by_path := app.open_index_uris_by_path()
 	mut present := map[string]bool{}
 	mut entries := os.ls(dir) or {
@@ -587,6 +588,13 @@ fn (mut app App) ensure_dir_shallow_indexed(dir string) {
 		}
 		full := os.join_path(dir, entry)
 		if !os.is_file(full) {
+			continue
+		}
+		// os.is_file follows symlinks. Resolve the candidate as well so a
+		// directly contained link cannot pull an external source into this
+		// loose-module scope.
+		real_file := os.real_path(full).replace('\\', '/')
+		if !path_is_within(real_file, canonical_dir) {
 			continue
 		}
 		uri := index_uri_for_path(full, open_uris_by_path)

@@ -922,12 +922,11 @@ fn (mut app App) find_references(request Request) Response {
 		}
 	}
 	path := params.text_document.uri
-	real_path := uri_to_path(path)
 	line := params.position.line
 	col := params.position.char
 
 	// Get symbol name at cursor
-	symbol := app.get_word_at_position(real_path, line, col)
+	symbol := app.get_word_at_position(path, line, col)
 	if symbol == '' {
 		return Response{
 			id:     request.id
@@ -981,13 +980,12 @@ fn (mut app App) handle_rename(request Request) Response {
 		}
 	}
 	path := params.text_document.uri
-	real_path := uri_to_path(path)
 	line := params.position.line
 	col := params.position.char
 	new_name := params.new_name
 
 	// Get symbol name at cursor
-	symbol := app.get_word_at_position(real_path, line, col)
+	symbol := app.get_word_at_position(path, line, col)
 	if symbol == '' {
 		return Response{
 			id:     request.id
@@ -1107,10 +1105,8 @@ fn (app &App) byte_col_to_client_col(uri string, line int, byte_col int) int {
 	return byte_to_encoded_col(lines[line], byte_col, app.position_encoding)
 }
 
-fn (app &App) get_word_at_position(file_path string, line int, col int) string {
-	content := app.open_files[path_to_uri(file_path)] or {
-		os.read_file(file_path) or { return '' }
-	}
+fn (app &App) get_word_at_position(uri string, line int, col int) string {
+	content := app.open_files[uri] or { os.read_file(uri_to_path(uri)) or { return '' } }
 	lines := content.split_into_lines()
 	if line < 0 || line >= lines.len {
 		return ''

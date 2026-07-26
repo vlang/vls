@@ -1693,6 +1693,20 @@ fn test_handle_rename_returns_null_when_no_symbol_at_position() {
 	assert (resp.result as string) == 'null'
 }
 
+fn test_get_word_at_position_uses_original_client_uri() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_file := os.join_path(app.temp_dir, 'noncanonical_uri.v')
+	must_write_file(test_file, 'module main\n\nfn stale_disk_symbol() {}\n')
+	canonical_uri := path_to_uri(test_file)
+	open_uri := canonical_uri.replace_once('file:///', 'file://localhost/')
+	app.open_files[open_uri] = 'module main\n\nfn authoritative_open_symbol() {}\n'
+
+	assert app.get_word_at_position(open_uri, 2, 3) == 'authoritative_open_symbol'
+}
+
 fn test_handle_rename_refuses_incomplete_oversized_sibling_index() {
 	mut app := create_test_app()
 	defer {
