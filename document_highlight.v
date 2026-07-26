@@ -10,7 +10,8 @@ const doc_highlight_read = 2
 const doc_highlight_write = 3
 
 // Each semantic highlight candidate requires a serial compiler definition
-// lookup. Above this bound, highlighting falls back to lexical occurrences.
+// lookup. Above this bound, return no highlights rather than conflate symbols
+// with the same spelling from different scopes.
 const document_highlight_semantic_max_candidates = 48
 
 struct DocumentHighlightCandidate {
@@ -203,15 +204,6 @@ fn collect_document_highlight_candidates(lines []string, symbol string) []Docume
 	return candidates
 }
 
-// resolve_document_highlight_anchor avoids all compiler work when semantic
-// verification would exceed the per-request candidate bound.
-fn (mut app App) resolve_document_highlight_anchor(uri string, line int, ch int, candidate_count int) ?Location {
-	if candidate_count > document_highlight_semantic_max_candidates {
-		return none
-	}
-	return app.resolve_symbol_anchor(uri, line, ch)
-}
-
 // handle_document_highlight handles textDocument/documentHighlight.
 // It finds all occurrences of the identifier under the cursor within the current
 // document and returns them as a DocumentHighlight list.
@@ -254,8 +246,13 @@ fn (mut app App) handle_document_highlight(request Request) Response {
 		}
 	}
 	candidates := collect_document_highlight_candidates(lines, symbol)
-	anchor := app.resolve_document_highlight_anchor(uri, params.position.line, start,
-		candidates.len)
+	if candidates.len > document_highlight_semantic_max_candidates {
+		return Response{
+			id:     request.id
+			result: []DocumentHighlight{}
+		}
+	}
+	anchor := app.resolve_symbol_anchor(uri, params.position.line, start)
 	mut anchor_cache := map[string]?Location{}
 	if a := anchor {
 		// The initial lookup already resolved the selected occurrence.

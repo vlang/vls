@@ -4464,14 +4464,18 @@ fn test_classify_highlight_kind_read_write() {
 	assert classify_highlight_kind('for item in items {}', 12, 17) == doc_highlight_read
 }
 
-fn test_document_highlight_falls_back_to_lexical_results_over_semantic_cap() {
+fn test_document_highlight_returns_empty_over_semantic_cap() {
 	mut app := create_test_app()
 	defer {
 		cleanup_test_app(app)
 	}
 	uri := 'file:///nonexistent_vls_highlight/main.v'
-	mut content := 'module main\n\nfn main() {\n\tmut item := 0\n'
-	for _ in 0 .. document_highlight_semantic_max_candidates {
+	mut content := 'module main\n\nfn first() {\n\tmut item := 0\n'
+	for _ in 0 .. document_highlight_semantic_max_candidates / 2 {
+		content += '\titem++\n'
+	}
+	content += '}\n\nfn second() {\n\tmut item := 0\n'
+	for _ in 0 .. document_highlight_semantic_max_candidates / 2 {
 		content += '\titem++\n'
 	}
 	content += '}\n'
@@ -4495,8 +4499,7 @@ fn test_document_highlight_falls_back_to_lexical_results_over_semantic_cap() {
 
 	assert response.result is []DocumentHighlight
 	highlights := response.result as []DocumentHighlight
-	assert highlights.len == document_highlight_semantic_max_candidates + 1
-	assert highlights[0].kind == doc_highlight_write
+	assert highlights.len == 0
 }
 
 fn test_on_did_change_invalid_range_does_not_advance_version() {
