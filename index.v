@@ -351,7 +351,13 @@ fn collect_v_files_rec(dir string, canonical_root string, mut acc []string, mut 
 				return false
 			}
 		} else if entry.ends_with('.v') {
-			acc << full
+			// Directory containment is not enough: an in-tree file symlink can
+			// point outside the workspace. Resolve every candidate and retain it
+			// only when its canonical target remains under the canonical root.
+			real_file := os.real_path(full).replace('\\', '/')
+			if path_is_within(real_file, canonical_root) {
+				acc << full
+			}
 		}
 	}
 	return true
