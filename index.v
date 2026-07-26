@@ -377,6 +377,25 @@ fn (app &App) index_dir_needs_refresh(dir string) bool {
 	return time.now().unix_milli() - last > index_refresh_interval_ms
 }
 
+// reconcile_indexed_dir removes stale entries only after a complete recursive
+// walk. A partial walk cannot distinguish deleted files from files it did not
+// reach, so reconciling it would incorrectly discard valid indexed symbols.
+fn (mut app App) reconcile_indexed_dir(dir string, present map[string]bool, walk_complete bool) {
+	if !walk_complete {
+		return
+	}
+	dir_norm := dir.replace('\\', '/')
+	for uri in app.symbol_index.keys() {
+		if uri in app.open_files || uri in present {
+			continue
+		}
+		if path_is_within(uri_to_path(uri).replace('\\', '/'), dir_norm) {
+			app.symbol_index.delete(uri)
+			app.ref_occurrences.delete(uri)
+		}
+	}
+}
+
 // ensure_dirs_indexed makes sure every open buffer and every `.v` file under the
 // given project `dirs` has an up-to-date index entry. A dir is walked once and
 // then, when no client file watchers are available, re-walked on a throttled
@@ -399,7 +418,8 @@ fn (mut app App) ensure_dirs_indexed(dirs []string) {
 		mut files := []string{}
 		scope := 'recursive:${dir}'
 		app.index_incomplete_scopes.delete(scope)
-		if !collect_v_files(dir, mut files) {
+		walk_complete := collect_v_files(dir, mut files)
+		if !walk_complete {
 			app.index_incomplete_scopes[scope] = true
 		}
 		mut present := map[string]bool{}
@@ -409,17 +429,9 @@ fn (mut app App) ensure_dirs_indexed(dirs []string) {
 		// Reconcile the existing index against what is actually on disk: drop
 		// entries for non-open files under `dir` that the walk no longer found.
 		// Without client watchers there is no delete notification, so a removed
-		// unopened file would otherwise linger in symbol/hover/call results.
-		dir_norm := dir.replace('\\', '/')
-		for uri in app.symbol_index.keys() {
-			if uri in app.open_files || uri in present {
-				continue
-			}
-			if path_is_within(uri_to_path(uri).replace('\\', '/'), dir_norm) {
-				app.symbol_index.delete(uri)
-				app.ref_occurrences.delete(uri)
-			}
-		}
+		// unopened file would otherwise linger in symbol/hover/call results. A
+		// partial walk must retain old entries it may simply not have reached.
+		app.reconcile_indexed_dir(dir, present, walk_complete)
 		for f in files {
 			uri := path_to_uri(f)
 			if uri in app.open_files {
@@ -637,17 +649,29 @@ fn (app &App) query_workspace_symbols(query string) []WorkspaceSymbol {
 	return results
 }
 
-// find_indexed_doc_in_scope returns the vdoc comment for `name`, preferring a
-// declaration in the current module directory `cur_dir` and otherwise limited to
-// the current project subtree `scope_root`. Scoping the search avoids returning a
-// same-named symbol's comment from an unrelated project (a multi-root workspace)
-// or another module elsewhere in the global index, which hover would otherwise
-// append to an imported symbol's documentation (P1-08). A loose file passes an
-// empty `scope_root`, restricting the lookup to its own directory.
-fn (app &App) find_indexed_doc_in_scope(name string, cur_dir string, scope_root string) string {
+// find_indexed_doc_in_scope returns the vdoc comment for `name`. When
+// `preferred_dir` is set (for a qualified imported symbol), only that module
+// directory is searched. Otherwise the current module is preferred and the
+// fallback is limited to `scope_root`.
+fn (app &App) find_indexed_doc_in_scope(name string, cur_dir string, scope_root string, preferred_dir string) string {
 	cd := cur_dir.replace('\\', '/').trim_right('/')
+	pd := preferred_dir.replace('\\', '/').trim_right('/')
 	mut uris := app.symbol_index.keys()
 	uris.sort()
+	if pd != '' {
+		for uri in uris {
+			if os.dir(uri_to_path(uri)).replace('\\', '/').trim_right('/') != pd {
+				continue
+			}
+			entry := app.symbol_index[uri] or { continue }
+			if doc := entry.docs[name] {
+				if doc != '' {
+					return doc
+				}
+			}
+		}
+		return ''
+	}
 	// Pass 1: the current module directory (where a same-module symbol lives).
 	if cd != '' {
 		for uri in uris {

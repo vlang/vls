@@ -1502,13 +1502,16 @@ fn get_import_completions(line string, work_dir string) []Detail {
 //  3. all .v files in the project working directory
 //  4. vlib/builtin/ (always, for built-in functions like println)
 //  5. vlib/<module>/ for each module imported in the current file
-fn (mut app App) find_doc_comment_for_symbol(symbol string, current_lines []string, current_file_uri string) string {
-	// 1. Current file
-	decl_line := find_declaration_line(current_lines, symbol)
-	if decl_line >= 0 {
-		doc := extract_doc_comment(current_lines, decl_line)
-		if doc != '' {
-			return doc
+fn (mut app App) find_doc_comment_for_symbol(symbol string, current_lines []string, current_file_uri string, imported_module string) string {
+	// 1. Current file, but only for an unqualified symbol. A qualified
+	// `module.symbol` must never inherit a same-named local declaration's docs.
+	if imported_module == '' {
+		decl_line := find_declaration_line(current_lines, symbol)
+		if decl_line >= 0 {
+			doc := extract_doc_comment(current_lines, decl_line)
+			if doc != '' {
+				return doc
+			}
 		}
 	}
 
@@ -1519,9 +1522,28 @@ fn (mut app App) find_doc_comment_for_symbol(symbol string, current_lines []stri
 	app.ensure_dirs_indexed(app.index_query_dirs())
 	cur_dir := os.dir(uri_to_path(current_file_uri))
 	scope_root := find_project_root(cur_dir)
-	indexed_doc := app.find_indexed_doc_in_scope(symbol, cur_dir, scope_root)
-	if indexed_doc != '' {
-		return indexed_doc
+	if imported_module != '' {
+		rel := imported_module.replace('.', os.path_separator)
+		base_dir := if scope_root != '' { scope_root } else { cur_dir }
+		preferred_dir := os.join_path(base_dir, rel)
+		if os.is_dir(preferred_dir) {
+			indexed_doc := app.find_indexed_doc_in_scope(symbol, cur_dir, scope_root, preferred_dir)
+			if indexed_doc != '' {
+				return indexed_doc
+			}
+		}
+		// A qualified stdlib symbol is likewise constrained to its imported
+		// module. Do not fall through to builtin or another imported module.
+		module_dir := os.join_path(v_dir, 'vlib', rel)
+		if os.is_dir(module_dir) {
+			return search_doc_in_vlib_dir(module_dir, symbol)
+		}
+		return ''
+	} else {
+		indexed_doc := app.find_indexed_doc_in_scope(symbol, cur_dir, scope_root, '')
+		if indexed_doc != '' {
+			return indexed_doc
+		}
 	}
 
 	// 4. vlib/builtin/ — always search for built-in symbols
@@ -1549,6 +1571,20 @@ fn (mut app App) find_doc_comment_for_symbol(symbol string, current_lines []stri
 	}
 
 	return ''
+}
+
+// imported_module_at_symbol returns the imported module path qualifying the
+// symbol at byte column `col`, or '' for an unqualified symbol.
+fn imported_module_at_symbol(line string, col int, content string) string {
+	start, _ := find_word_bounds_at_col(line, col, .utf8)
+	if start <= 0 || line[start - 1] != `.` {
+		return ''
+	}
+	alias := get_word_before_dot(line, start - 1, .utf8)
+	if alias == '' {
+		return ''
+	}
+	return parse_import_aliases(content)[alias] or { '' }
 }
 
 // search_doc_in_vlib_dir searches all non-test .v files in `dir` for a
@@ -3091,12 +3127,8 @@ fn (mut app App) on_cancel_request(request Request) {
 	// (P0-02/P0-03).
 	if raw := extract_raw_id(request.params) {
 		app.cancelled_raw_ids[raw] = true
-		// Only a numeric id belongs in the int map. A string id must NOT be
-		// collapsed to 0: that would spuriously cancel numeric id 0 and make every
-		// string id collide at 0 (P0-02). String ids are matched via the raw set.
-		if !raw.starts_with('"') {
-			app.cancelled_requests[raw.int()] = true
-		}
+		// Match every valid id by its exact raw token. Narrowing a fractional or
+		// out-of-range numeric id to int can collide with a different request.
 		log('VLS: request ${raw} marked as cancelled')
 		return
 	}

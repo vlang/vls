@@ -1251,17 +1251,14 @@ fn method_is_notification_only(method Method) bool {
 }
 
 // request_is_cancelled reports whether the request currently being processed was
-// cancelled. A string-id request is matched ONLY by its exact raw id, so it can
-// never be falsely cancelled by a numeric cancel of id 0 (P0-02).
+// cancelled. When its raw id is available, every id type is matched by that
+// exact token so numeric values are never narrowed into a colliding int.
 fn (app &App) request_is_cancelled(id int) bool {
 	raw := app.current_request_raw_id
-	if raw.starts_with('"') {
+	if raw != '' {
 		return raw in app.cancelled_raw_ids
 	}
-	if id in app.cancelled_requests {
-		return true
-	}
-	return raw != '' && raw in app.cancelled_raw_ids
+	return id in app.cancelled_requests
 }
 
 fn make_invalid_request_error_response(id int, message string) ErrorResponse {
@@ -1797,8 +1794,8 @@ fn (mut app App) write_response_or_cancelled(id int, response Response) {
 fn (mut app App) consume_cancelled_request(id int) bool {
 	raw := app.current_request_raw_id
 	mut was_cancelled := false
-	if raw.starts_with('"') {
-		// String-id request: consume only its exact raw id.
+	if raw != '' {
+		// Consume every request by its exact raw id when it is available.
 		if raw in app.cancelled_raw_ids {
 			app.cancelled_raw_ids.delete(raw)
 			was_cancelled = true
@@ -1807,10 +1804,6 @@ fn (mut app App) consume_cancelled_request(id int) bool {
 	}
 	if id in app.cancelled_requests {
 		app.cancelled_requests.delete(id)
-		was_cancelled = true
-	}
-	if raw != '' && raw in app.cancelled_raw_ids {
-		app.cancelled_raw_ids.delete(raw)
 		was_cancelled = true
 	}
 	return was_cancelled

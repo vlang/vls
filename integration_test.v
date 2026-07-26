@@ -2332,6 +2332,34 @@ fn test_integration_numeric_and_string_cancel_are_independent() {
 	assert !app.request_is_cancelled(0)
 }
 
+fn test_integration_numeric_cancel_ids_match_exact_raw_token() {
+	mut app, project_dir := create_integration_test_env()
+	defer {
+		cleanup_integration_test_env(app, project_dir)
+	}
+
+	app.on_cancel_request(Request{
+		method: '$/cancelRequest'
+		params: '{"id":1.25}'
+	})
+	assert app.cancelled_requests.len == 0
+	app.current_request_raw_id = '1.75'
+	assert !app.request_is_cancelled(1)
+	app.current_request_raw_id = '1.25'
+	assert app.request_is_cancelled(1)
+	assert app.consume_cancelled_request(1)
+	assert !app.request_is_cancelled(1)
+
+	app.on_cancel_request(Request{
+		method: '$/cancelRequest'
+		params: '{"id":9223372036854775808}'
+	})
+	app.current_request_raw_id = '9223372036854775809'
+	assert !app.request_is_cancelled(0)
+	app.current_request_raw_id = '9223372036854775808'
+	assert app.request_is_cancelled(0)
+}
+
 fn test_integration_diagnostics_contain_real_compiler_errors() {
 	// Regression guard: the server must surface actual compiler errors, not an
 	// empty diagnostics list (the compiler writes -json-errors output to stderr).
