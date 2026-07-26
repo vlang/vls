@@ -720,3 +720,59 @@ fn test_drop_index_under_removes_folder_entries() {
 	// A boundary-similar path is NOT dropped.
 	assert app.indexed_dirs.len == 0
 }
+
+fn test_removed_workspace_root_keeps_only_open_buffer_indexed() {
+	root := index_test_tmpdir('removed_root')
+	defer {
+		os.rmdir_all(root) or {}
+	}
+	os.write_file(os.join_path(root, 'v.mod'), 'Module {}\n') or {
+		assert false, 'write v.mod failed: ${err}'
+		return
+	}
+	open_path := os.join_path(root, 'main.v')
+	sibling_path := os.join_path(root, 'sibling.v')
+	os.write_file(open_path, 'module main\n\nfn disk_open_symbol() {}\n') or {
+		assert false, 'write main.v failed: ${err}'
+		return
+	}
+	os.write_file(sibling_path, 'module main\n\nfn removed_sibling_symbol() {}\n') or {
+		assert false, 'write sibling.v failed: ${err}'
+		return
+	}
+	open_uri := path_to_uri(open_path)
+	mut app := index_test_app()
+	app.workspace_roots = [root]
+	app.open_files[open_uri] = 'module main\n\nfn retained_open_symbol() {}\n'
+	app.ensure_dirs_indexed(app.index_query_dirs())
+	assert app.query_workspace_symbols('removed_sibling_symbol').len == 1
+
+	app.on_did_change_workspace_folders(Request{
+		params: json2.encode(DidChangeWorkspaceFoldersParams{
+			event: WorkspaceFoldersChangeEvent{
+				removed: [WorkspaceFolder{
+					uri: path_to_uri(root)
+				}]
+			}
+		})
+	})
+	app.ensure_dirs_indexed(app.index_query_dirs())
+	app.ensure_loose_file_dirs_shallow_indexed()
+
+	assert app.index_query_dirs().len == 0
+	assert open_uri in app.symbol_index
+	assert app.query_workspace_symbols('retained_open_symbol').len == 1
+	assert app.query_workspace_symbols('removed_sibling_symbol').len == 0
+
+	app.on_did_change_workspace_folders(Request{
+		params: json2.encode(DidChangeWorkspaceFoldersParams{
+			event: WorkspaceFoldersChangeEvent{
+				added: [WorkspaceFolder{
+					uri: path_to_uri(root)
+				}]
+			}
+		})
+	})
+	app.ensure_dirs_indexed(app.index_query_dirs())
+	assert app.query_workspace_symbols('removed_sibling_symbol').len == 1
+}

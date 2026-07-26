@@ -3171,13 +3171,24 @@ fn (mut app App) on_did_change_workspace_folders(request Request) {
 		if path == '' || path == '/' {
 			continue
 		}
+		path_key := normalized_index_path(path)
 		mut new_roots := []string{}
 		for r in app.workspace_roots {
-			if r != path {
+			if normalized_index_path(r) != path_key {
 				new_roots << r
 			}
 		}
 		app.workspace_roots = new_roots
+		mut already_removed := false
+		for removed in app.removed_workspace_roots {
+			if normalized_index_path(removed) == path_key {
+				already_removed = true
+				break
+			}
+		}
+		if !already_removed {
+			app.removed_workspace_roots << path
+		}
 		// Drop now-stale index entries that belonged to the removed folder.
 		app.drop_index_under(path)
 	}
@@ -3187,7 +3198,22 @@ fn (mut app App) on_did_change_workspace_folders(request Request) {
 		if path == '' || path == '/' {
 			continue
 		}
-		if path !in app.workspace_roots {
+		path_key := normalized_index_path(path)
+		mut remaining_removed := []string{}
+		for removed in app.removed_workspace_roots {
+			if normalized_index_path(removed) != path_key {
+				remaining_removed << removed
+			}
+		}
+		app.removed_workspace_roots = remaining_removed
+		mut already_active := false
+		for root in app.workspace_roots {
+			if normalized_index_path(root) == path_key {
+				already_active = true
+				break
+			}
+		}
+		if !already_active {
 			app.workspace_roots << path
 		}
 	}
