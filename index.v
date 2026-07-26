@@ -592,8 +592,108 @@ fn (mut app App) ensure_dir_shallow_indexed(dir string) {
 	}
 }
 
+// IndexScope identifies the project or loose module relevant to one source file.
+// Recursive scopes are project/workspace roots; shallow scopes are loose-file
+// module directories.
+struct IndexScope {
+	dir       string
+	recursive bool
+}
+
+// index_scope_for_uri returns the narrowest configured project scope containing
+// `uri`. A nested v.mod inside an active workspace root wins; a v.mod outside a
+// configured root does not expand that root. Loose and explicitly removed files
+// are limited to their immediate directory.
+fn (app &App) index_scope_for_uri(uri string) IndexScope {
+	path := uri_to_path(uri).replace('\\', '/')
+	dir := os.dir(path).replace('\\', '/')
+	if dir == '' || dir == '/' {
+		return IndexScope{}
+	}
+	if app.path_is_in_removed_workspace(path) {
+		return IndexScope{
+			dir: dir
+		}
+	}
+	mut workspace_root := ''
+	for root in app.workspace_roots {
+		root_norm := root.replace('\\', '/')
+		if path_is_within(path, root_norm) && root_norm.len > workspace_root.len {
+			workspace_root = root_norm
+		}
+	}
+	project_root := find_project_root(dir).replace('\\', '/')
+	if project_root != '' && project_root != '/'
+		&& (workspace_root == '' || path_is_within(project_root, workspace_root)) {
+		return IndexScope{
+			dir:       project_root
+			recursive: true
+		}
+	}
+	if workspace_root != '' {
+		return IndexScope{
+			dir:       workspace_root
+			recursive: true
+		}
+	}
+	return IndexScope{
+		dir: dir
+	}
+}
+
+// path_is_in_index_scope reports whether a file belongs to `scope`.
+fn path_is_in_index_scope(path string, scope IndexScope) bool {
+	if scope.dir == '' {
+		return false
+	}
+	p := path.replace('\\', '/')
+	if scope.recursive {
+		return path_is_within(p, scope.dir.replace('\\', '/'))
+	}
+	return normalized_index_path(os.dir(p)) == normalized_index_path(scope.dir)
+}
+
+fn uri_is_in_index_scope(uri string, scope IndexScope) bool {
+	return path_is_in_index_scope(uri_to_path(uri), scope)
+}
+
+// ensure_index_scope indexes only the project/module relevant to a request.
+fn (mut app App) ensure_index_scope(scope IndexScope) {
+	if scope.dir == '' || scope.dir == '/' {
+		return
+	}
+	if scope.recursive {
+		app.ensure_dirs_indexed([scope.dir])
+		return
+	}
+	for uri, _ in app.open_files {
+		if uri_is_in_index_scope(uri, scope) {
+			app.reindex_uri(uri)
+		}
+	}
+	app.ensure_dir_shallow_indexed(scope.dir)
+}
+
+// index_is_complete_for_scope reports whether every source relevant to a
+// destructive operation in `scope` was indexed.
+fn (app &App) index_is_complete_for_scope(scope IndexScope) bool {
+	if scope.dir == '' {
+		return false
+	}
+	scope_kind := if scope.recursive { 'recursive' } else { 'shallow' }
+	if '${scope_kind}:${scope.dir}' in app.index_incomplete_scopes {
+		return false
+	}
+	for uri, _ in app.index_skipped_uris {
+		if uri_is_in_index_scope(uri, scope) && os.is_file(uri_to_path(uri)) {
+			return false
+		}
+	}
+	return true
+}
+
 // index_is_complete reports whether every discovered disk source was indexed.
-// Non-destructive queries may use a partial bounded index, but rename must not.
+// Non-destructive queries may use a partial bounded index.
 fn (app &App) index_is_complete() bool {
 	if app.index_incomplete_scopes.len > 0 {
 		return false

@@ -936,10 +936,11 @@ fn (mut app App) find_references(request Request) Response {
 	}
 
 	// Resolve references from the project's reference-occurrence index.
+	scope := app.index_scope_for_uri(path)
 	anchor := app.resolve_symbol_anchor(path, line, col)
 	mut locations := if a := anchor {
 		// References may fall back to lexical occurrences past the candidate cap.
-		app.search_symbol_in_dirs_semantic(symbol, a, request.id, true)
+		app.search_symbol_in_dirs_semantic(symbol, a, scope, request.id, true)
 	} else {
 		app.search_symbol_in_dirs(symbol, request.id)
 	}
@@ -997,9 +998,9 @@ fn (mut app App) handle_rename(request Request) Response {
 	// A destructive rename is safe only when the bounded index covers every
 	// source in the project/module. Oversized, unreadable, or count-capped files
 	// may contain additional references that must not be left unchanged.
-	app.ensure_dirs_indexed(app.index_query_dirs())
-	app.ensure_loose_file_dirs_shallow_indexed()
-	if !app.index_is_complete() {
+	scope := app.index_scope_for_uri(path)
+	app.ensure_index_scope(scope)
+	if !app.index_is_complete_for_scope(scope) {
 		log('rename: source index is incomplete; refusing a partial workspace edit')
 		return Response{
 			id:     request.id
@@ -1022,7 +1023,7 @@ fn (mut app App) handle_rename(request Request) Response {
 	// Rename is destructive: never accept the scope-unsafe lexical fallback. Past
 	// the candidate cap search_symbol_in_dirs_semantic returns none, and an
 	// unresolved rename is refused below rather than editing unrelated symbols.
-	locations := app.search_symbol_in_dirs_semantic(symbol, anchor, request.id, false)
+	locations := app.search_symbol_in_dirs_semantic(symbol, anchor, scope, request.id, false)
 	if locations.len == 0 {
 		log('rename: no scope-safe occurrences for "${symbol}" (unresolved or above candidate cap); refusing')
 		return Response{
@@ -2369,27 +2370,15 @@ fn same_anchor_location(a Location, b Location) bool {
 // responsive, at the cost of scope precision for that one very common symbol.
 const reference_semantic_max_candidates = 48
 
-// search_symbol_in_dirs_semantic reads candidate occurrences of `symbol` from the
-// reference-occurrence index (no per-request workspace re-walk, P1-05) and keeps
-// only those whose compiler definition lookup resolves to the same declaration
-// anchor, so references stay scope-safe across same-name symbols (P1-04). The
-// per-candidate compiler lookup is cached within the request and the number of
-// compiler invocations is bounded (see reference_semantic_max_candidates). When
-// the candidate count exceeds the cap, `allow_lexical_fallback` decides the
-// outcome: references may take the unverified lexical occurrences (over-inclusive
-// but harmless highlights), whereas rename must NOT — it passes false so the
-// caller refuses rather than emit a destructive edit across unrelated scopes.
-fn (mut app App) search_symbol_in_dirs_semantic(symbol string, anchor Location, request_id int, allow_lexical_fallback bool) []Location {
-	started_ms := time.now().unix_milli()
-	app.ensure_dirs_indexed(app.index_query_dirs())
-	app.ensure_loose_file_dirs_shallow_indexed()
-
-	// Collect every lexical candidate first so the compiler-verification cost can
-	// be bounded up front rather than discovered candidate-by-candidate.
+// collect_semantic_candidates returns lexical occurrences inside `scope`.
+fn (mut app App) collect_semantic_candidates(symbol string, scope IndexScope) []Location {
 	mut candidates := []Location{}
 	mut uris := app.symbol_index.keys()
 	uris.sort()
 	for uri in uris {
+		if !uri_is_in_index_scope(uri, scope) {
+			continue
+		}
 		occ := app.occurrences_for(uri)
 		positions := occ[symbol] or { continue }
 		for p in positions {
@@ -2408,6 +2397,21 @@ fn (mut app App) search_symbol_in_dirs_semantic(symbol string, anchor Location, 
 			}
 		}
 	}
+	return candidates
+}
+
+// search_symbol_in_dirs_semantic reads scoped candidate occurrences of `symbol`
+// from the reference index and keeps only those whose compiler definition lookup
+// resolves to the same declaration anchor. Compiler work is capped after scope
+// filtering. References may use lexical fallback over the cap; rename may not.
+fn (mut app App) search_symbol_in_dirs_semantic(symbol string, anchor Location, scope IndexScope, request_id int, allow_lexical_fallback bool) []Location {
+	started_ms := time.now().unix_milli()
+	app.ensure_index_scope(scope)
+
+	// Filter lexical candidates to the source project/module before applying the
+	// cap, so same-named occurrences in unrelated workspace roots cannot make a
+	// safe rename appear too expensive.
+	candidates := app.collect_semantic_candidates(symbol, scope)
 
 	// Too many candidates to verify one-compile-per-token without freezing the
 	// loop. References fall back to the unverified lexical occurrences (bounded,

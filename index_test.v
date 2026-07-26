@@ -637,6 +637,48 @@ fn test_index_refresh_discovers_new_files_without_watchers() {
 	assert app.query_workspace_symbols('beta').len == 1
 }
 
+fn test_index_completeness_is_scoped_to_relevant_project() {
+	parent := index_test_tmpdir('scoped_complete')
+	defer {
+		os.rmdir_all(parent) or {}
+	}
+	root_a := os.join_path(parent, 'root_a')
+	root_b := os.join_path(parent, 'root_b')
+	os.mkdir_all(root_a) or {
+		assert false, 'mkdir root_a failed: ${err}'
+		return
+	}
+	os.mkdir_all(root_b) or {
+		assert false, 'mkdir root_b failed: ${err}'
+		return
+	}
+	for root in [root_a, root_b] {
+		os.write_file(os.join_path(root, 'v.mod'), 'Module {}\n') or {
+			assert false, 'write v.mod failed: ${err}'
+			return
+		}
+	}
+	path_a := os.join_path(root_a, 'main.v')
+	os.write_file(path_a, 'module main\n\nfn target() {}\n') or {
+		assert false, 'write root_a file failed: ${err}'
+		return
+	}
+	path_b := os.join_path(root_b, 'oversized.v')
+	os.write_file(path_b, 'x'.repeat(index_max_file_bytes + 1)) or {
+		assert false, 'write oversized root_b file failed: ${err}'
+		return
+	}
+	mut app := index_test_app()
+	app.workspace_roots = [root_a, root_b]
+	app.ensure_dirs_indexed(app.index_query_dirs())
+	scope_a := app.index_scope_for_uri(path_to_uri(path_a))
+	scope_b := app.index_scope_for_uri(path_to_uri(path_b))
+
+	assert app.index_is_complete_for_scope(scope_a)
+	assert !app.index_is_complete_for_scope(scope_b)
+	assert !app.index_is_complete()
+}
+
 fn test_index_refresh_removes_deleted_files_without_watchers() {
 	root := index_test_tmpdir('reconcile')
 	defer {
