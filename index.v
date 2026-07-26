@@ -122,60 +122,104 @@ struct OccEntry {
 	occ         map[string][]TokenOccurrence
 }
 
+fn add_identifier_occurrence(line_text string, line_idx int, start int, end int, enc PositionEncoding, mut occ map[string][]TokenOccurrence) {
+	if line_text[start] >= `0` && line_text[start] <= `9` {
+		return
+	}
+	name := line_text[start..end]
+	occ[name] << TokenOccurrence{
+		line:       line_idx
+		start_char: byte_to_encoded_col(line_text, start, enc)
+		end_char:   byte_to_encoded_col(line_text, end, enc)
+	}
+}
+
+// scan_string_identifier_occurrences skips literal text while indexing V string
+// interpolation expressions. It returns the byte after the closing quote.
+fn scan_string_identifier_occurrences(line_text string, line_idx int, start int, enc PositionEncoding, mut occ map[string][]TokenOccurrence) int {
+	quote := line_text[start]
+	mut col := start + 1
+	for col < line_text.len {
+		if line_text[col] == `\\` {
+			col += 2
+			continue
+		}
+		if line_text[col] == quote {
+			return col + 1
+		}
+		if line_text[col] == `$` && col + 1 < line_text.len {
+			if line_text[col + 1] == `{` {
+				col =
+					scan_code_identifier_occurrences(line_text, line_idx, col + 2, enc, true, mut occ)
+				continue
+			}
+			if is_ident_char(line_text[col + 1]) && !(line_text[col + 1] >= `0`
+				&& line_text[col + 1] <= `9`) {
+				ident_start := col + 1
+				col = ident_start + 1
+				for col < line_text.len && is_ident_char(line_text[col]) {
+					col++
+				}
+				add_identifier_occurrence(line_text, line_idx, ident_start, col, enc, mut occ)
+				continue
+			}
+		}
+		col++
+	}
+	return col
+}
+
+// scan_code_identifier_occurrences indexes code between `start` and the end of
+// the line, or through the matching `}` for a braced interpolation expression.
+fn scan_code_identifier_occurrences(line_text string, line_idx int, start int, enc PositionEncoding, stop_at_closing_brace bool, mut occ map[string][]TokenOccurrence) int {
+	mut col := start
+	mut brace_depth := 0
+	for col < line_text.len {
+		c := line_text[col]
+		if col + 1 < line_text.len && c == `/` && line_text[col + 1] == `/` {
+			return line_text.len
+		}
+		if c == `"` || c == `'` {
+			col = scan_string_identifier_occurrences(line_text, line_idx, col, enc, mut occ)
+			continue
+		}
+		if c == `{` {
+			brace_depth++
+			col++
+			continue
+		}
+		if c == `}` && stop_at_closing_brace {
+			if brace_depth == 0 {
+				return col + 1
+			}
+			brace_depth--
+			col++
+			continue
+		}
+		if is_ident_char(c) {
+			ident_start := col
+			col++
+			for col < line_text.len && is_ident_char(line_text[col]) {
+				col++
+			}
+			add_identifier_occurrence(line_text, line_idx, ident_start, col, enc, mut occ)
+			continue
+		}
+		col++
+	}
+	return col
+}
+
 // extract_identifier_occurrences returns every identifier occurrence in `content`
-// grouped by name, positioned in `enc` units. Line comments and string literals
-// are skipped (matching the reference scanner), and number literals are ignored.
-// This is the reference-index tokenizer: references/rename read candidate
-// occurrences from here instead of re-walking and re-tokenizing files per request
+// grouped by name, positioned in `enc` units. Line comments and string literal
+// text are skipped, interpolation expressions are scanned, and number literals
+// are ignored. This is the reference-index tokenizer: references/rename read
+// candidates from here instead of re-walking and re-tokenizing files per request
 // (P1-05).
 fn extract_identifier_occurrences(content string, enc PositionEncoding) map[string][]TokenOccurrence {
 	mut occ := map[string][]TokenOccurrence{}
 	for line_idx, line_text in content.split_into_lines() {
-		n := line_text.len
-		mut col := 0
-		for col < n {
-			c := line_text[col]
-			// Skip line comments.
-			if col + 1 < n && c == `/` && line_text[col + 1] == `/` {
-				break
-			}
-			// Skip string literals.
-			if c == `"` || c == `'` {
-				quote := c
-				col++
-				for col < n {
-					if line_text[col] == `\\` {
-						col += 2
-						continue
-					}
-					if line_text[col] == quote {
-						col++
-						break
-					}
-					col++
-				}
-				continue
-			}
-			if is_ident_char(c) {
-				start := col
-				col++
-				for col < n && is_ident_char(line_text[col]) {
-					col++
-				}
-				// Identifiers cannot start with a digit; skip number literals.
-				if line_text[start] >= `0` && line_text[start] <= `9` {
-					continue
-				}
-				name := line_text[start..col]
-				occ[name] << TokenOccurrence{
-					line:       line_idx
-					start_char: byte_to_encoded_col(line_text, start, enc)
-					end_char:   byte_to_encoded_col(line_text, col, enc)
-				}
-				continue
-			}
-			col++
-		}
+		scan_code_identifier_occurrences(line_text, line_idx, 0, enc, false, mut occ)
 	}
 	return occ
 }
