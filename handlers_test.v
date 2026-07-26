@@ -2267,7 +2267,7 @@ fn test_find_doc_comment_for_symbol_current_file() {
 	uri := 'file:///tmp/test_greet.v'
 	app.open_files[uri] = content
 	lines := content.split_into_lines()
-	doc := app.find_doc_comment_for_symbol('greet', lines, uri)
+	doc := app.find_doc_comment_for_symbol('greet', lines, uri, '')
 	assert doc == 'greet says hello'
 }
 
@@ -2285,8 +2285,43 @@ fn test_find_doc_comment_for_symbol_other_open_file() {
 	app.open_files[current_uri] = current_content
 	current_lines := current_content.split_into_lines()
 
-	doc := app.find_doc_comment_for_symbol('helper', current_lines, current_uri)
+	doc := app.find_doc_comment_for_symbol('helper', current_lines, current_uri, '')
 	assert doc == 'helper does the thing'
+}
+
+fn test_find_doc_comment_for_qualified_symbol_uses_imported_module() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	project_dir := os.join_path(app.temp_dir, 'hover_import')
+	a_dir := os.join_path(project_dir, 'a')
+	b_dir := os.join_path(project_dir, 'b')
+	must_mkdir_all(a_dir)
+	must_mkdir_all(b_dir)
+	must_write_file(os.join_path(project_dir, 'v.mod'), 'Module {}\n')
+	must_write_file(os.join_path(a_dir, 'a.v'), 'module a\n\n// A foo docs\npub fn foo() {}\n')
+	must_write_file(os.join_path(b_dir, 'b.v'), 'module b\n\n// B foo docs\npub fn foo() {}\n')
+	main_path := os.join_path(project_dir, 'main.v')
+	content := 'module main\n\nimport a\nimport b\n\n// Local foo docs\nfn foo() {}\n\nfn main() {\n\tb.foo()\n}\n'
+	must_write_file(main_path, content)
+	uri := path_to_uri(main_path)
+	app.open_files[uri] = content
+	lines := content.split_into_lines()
+	call_line := lines.index('\tb.foo()')
+	if call_line < 0 {
+		assert false, 'expected qualified call line'
+		return
+	}
+	foo_col := lines[call_line].index('foo') or {
+		assert false, 'expected foo column'
+		return
+	}
+	imported_module := imported_module_at_symbol(lines[call_line], foo_col, content)
+	assert imported_module == 'b'
+
+	doc := app.find_doc_comment_for_symbol('foo', lines, uri, imported_module)
+	assert doc == 'B foo docs'
 }
 
 fn test_find_doc_comment_for_symbol_not_found() {
@@ -2298,7 +2333,7 @@ fn test_find_doc_comment_for_symbol_not_found() {
 	uri := 'file:///tmp/main.v'
 	app.open_files[uri] = content
 	lines := content.split_into_lines()
-	doc := app.find_doc_comment_for_symbol('nonexistent', lines, uri)
+	doc := app.find_doc_comment_for_symbol('nonexistent', lines, uri, '')
 	assert doc == ''
 }
 

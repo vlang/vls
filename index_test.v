@@ -132,12 +132,35 @@ fn test_watched_file_reindex_obeys_total_entry_limit() {
 	assert uri !in app.symbol_index
 }
 
+fn test_reconcile_indexed_dir_retains_entries_after_incomplete_walk() {
+	mut app := index_test_app()
+	kept_uri := 'file:///workspace/kept.v'
+	unseen_uri := 'file:///workspace/unseen.v'
+	app.symbol_index[kept_uri] = IndexEntry{}
+	app.symbol_index[unseen_uri] = IndexEntry{}
+	app.ref_occurrences[unseen_uri] = OccEntry{}
+	present := {
+		kept_uri: true
+	}
+
+	// A partial walk did not see unseen.v, but it must retain the old entry.
+	app.reconcile_indexed_dir('/workspace', present, false)
+	assert unseen_uri in app.symbol_index
+	assert unseen_uri in app.ref_occurrences
+
+	// The same absence after a complete walk proves the file was deleted.
+	app.reconcile_indexed_dir('/workspace', present, true)
+	assert kept_uri in app.symbol_index
+	assert unseen_uri !in app.symbol_index
+	assert unseen_uri !in app.ref_occurrences
+}
+
 fn test_index_doc_lookup() {
 	mut app := index_test_app()
 	app.open_files['file:///tmp/doc.v'] = 'module main\n\n// greet says hello\nfn greet() {}\n'
 	app.ensure_dirs_indexed(app.index_query_dirs())
-	assert app.find_indexed_doc_in_scope('greet', '/tmp', '') == 'greet says hello'
-	assert app.find_indexed_doc_in_scope('missing', '/tmp', '') == ''
+	assert app.find_indexed_doc_in_scope('greet', '/tmp', '', '') == 'greet says hello'
+	assert app.find_indexed_doc_in_scope('missing', '/tmp', '', '') == ''
 }
 
 fn test_index_doc_lookup_scoped_to_project() {
@@ -147,8 +170,8 @@ fn test_index_doc_lookup_scoped_to_project() {
 	app.open_files['file:///projB/lib.v'] = 'module main\n\n// B-foo does B\npub fn foo() {}\n'
 	app.ensure_dirs_indexed(app.index_query_dirs())
 	// A hover in project A must not pick up project B's doc for the same name.
-	assert app.find_indexed_doc_in_scope('foo', '/projA', '/projA') == 'A-foo does A'
-	assert app.find_indexed_doc_in_scope('foo', '/projB', '/projB') == 'B-foo does B'
+	assert app.find_indexed_doc_in_scope('foo', '/projA', '/projA', '') == 'A-foo does A'
+	assert app.find_indexed_doc_in_scope('foo', '/projB', '/projB', '') == 'B-foo does B'
 }
 
 fn test_index_find_fn() {
