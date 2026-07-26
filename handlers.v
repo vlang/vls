@@ -783,6 +783,7 @@ fn (mut app App) handle_workspace_symbol(request Request) Response {
 	// included so test functions/types are discoverable (P2-11). Subsequent
 	// queries reuse the index instead of re-reading and re-parsing the workspace.
 	app.ensure_dirs_indexed(app.index_query_dirs())
+	app.ensure_loose_file_dirs_shallow_indexed()
 	results := app.query_workspace_symbols(query)
 	app.end_progress(token, '')
 	return Response{
@@ -987,6 +988,19 @@ fn (mut app App) handle_rename(request Request) Response {
 	// Get symbol name at cursor
 	symbol := app.get_word_at_position(real_path, line, col)
 	if symbol == '' {
+		return Response{
+			id:     request.id
+			result: 'null'
+		}
+	}
+
+	// A destructive rename is safe only when the bounded index covers every
+	// source in the project/module. Oversized, unreadable, or count-capped files
+	// may contain additional references that must not be left unchanged.
+	app.ensure_dirs_indexed(app.index_query_dirs())
+	app.ensure_loose_file_dirs_shallow_indexed()
+	if !app.index_is_complete() {
+		log('rename: source index is incomplete; refusing a partial workspace edit')
 		return Response{
 			id:     request.id
 			result: 'null'

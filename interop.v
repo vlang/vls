@@ -134,19 +134,59 @@ fn uri_to_path(uri string) string {
 	return decoded
 }
 
-// path_is_within reports whether `path` lies inside directory `dir`, using a
-// boundary-aware comparison so that e.g. /foo/barley is NOT treated as inside
-// /foo/bar (P1-01). Both arguments are expected to use '/' separators.
-fn path_is_within(path string, dir string) bool {
+// path_is_within_with_case reports whether `path` lies inside `dir` using the
+// requested case sensitivity. Both arguments are expected to use '/' separators.
+fn path_is_within_with_case(path string, dir string, case_insensitive bool) bool {
 	if dir == '' {
 		return false
 	}
-	d := dir.trim_right('/')
+	mut p := path
+	mut d := dir.trim_right('/')
+	if case_insensitive {
+		p = p.to_lower()
+		d = d.to_lower()
+	}
 	if d == '' {
 		// dir was the filesystem root.
-		return path.starts_with('/')
+		return p.starts_with('/')
 	}
-	return path == d || path.starts_with(d + '/')
+	return p == d || p.starts_with(d + '/')
+}
+
+// path_is_within reports whether `path` lies inside directory `dir`, using a
+// boundary-aware comparison so that e.g. /foo/barley is NOT treated as inside
+// /foo/bar (P1-01). Windows filesystem paths are compared case-insensitively.
+fn path_is_within(path string, dir string) bool {
+	$if windows {
+		return path_is_within_with_case(path, dir, true)
+	}
+	return path_is_within_with_case(path, dir, false)
+}
+
+// path_relative_to_with_case returns `path` relative to `dir` using the
+// requested case sensitivity. It slices by the original prefix length so paths
+// that differ only in casing still produce a valid relative path.
+fn path_relative_to_with_case(path string, dir string, case_insensitive bool) ?string {
+	if !path_is_within_with_case(path, dir, case_insensitive) {
+		return none
+	}
+	d := dir.trim_right('/')
+	if d == '' {
+		return path.trim_string_left('/')
+	}
+	if path.len == d.len {
+		return ''
+	}
+	return path[d.len..].trim_string_left('/')
+}
+
+// path_relative_to returns `path` relative to `dir` using platform filesystem
+// case rules.
+fn path_relative_to(path string, dir string) ?string {
+	$if windows {
+		return path_relative_to_with_case(path, dir, true)
+	}
+	return path_relative_to_with_case(path, dir, false)
 }
 
 // path_to_uri converts a local filesystem path to a `file:` DocumentUri,
@@ -460,15 +500,13 @@ fn (mut app App) write_tracked_files_to_temp(working_dir string) !string {
 		normalized_real := real_path.replace('\\', '/')
 		normalized_working := working_dir.replace('\\', '/')
 
-		// skip not in working dir (boundary-aware: /foo/barley is not in /foo/bar)
-		if !path_is_within(normalized_real, normalized_working) {
+		// Skip files outside the working dir. On Windows the containment check is
+		// case-insensitive, while the returned path preserves its original case.
+		mut rel_path := path_relative_to(normalized_real, normalized_working) or {
 			log('SKIPPING FILE: ${real_path}')
 			continue
 		}
 
-		// calc rel path
-		mut rel_path :=
-			normalized_real.replace(normalized_working, '').trim_string_left('/').trim_string_left('\\')
 		if rel_path == '' {
 			rel_path = os.file_name(real_path)
 		}

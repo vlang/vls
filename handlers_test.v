@@ -1668,6 +1668,43 @@ fn test_handle_rename_returns_null_when_no_symbol_at_position() {
 	assert (resp.result as string) == 'null'
 }
 
+fn test_handle_rename_refuses_incomplete_oversized_sibling_index() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+
+	test_dir := os.join_path(app.temp_dir, 'loose_rename')
+	must_mkdir_all(test_dir)
+	test_file := os.join_path(test_dir, 'main.v')
+	content := 'module main\n\nfn target() {\n\ttarget()\n}\n'
+	must_write_file(test_file, content)
+	must_write_file(os.join_path(test_dir, 'oversized.v'), 'x'.repeat(index_max_file_bytes + 1))
+	uri := path_to_uri(test_file)
+	app.open_files[uri] = content
+
+	resp := app.handle_rename(Request{
+		id:     903
+		method: 'textDocument/rename'
+		params: json2.encode(RenameParams{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			position:      Position{
+				line: 2
+				char: 4
+			}
+			new_name:      'renamed'
+		},
+			escape_unicode: true
+		)
+	})
+
+	assert !app.index_is_complete()
+	assert resp.result is string
+	assert (resp.result as string) == 'null'
+}
+
 fn test_parse_document_symbols_empty_content() {
 	syms := parse_document_symbols('')
 	assert syms.len == 0
@@ -3483,7 +3520,8 @@ fn test_semantic_tokens_range_filters_by_character() {
 			}
 		}
 	},
-		escape_unicode: true)
+		escape_unicode: true
+	)
 	full := app.handle_semantic_tokens_range(Request{
 		id:     1
 		params: full_params
@@ -3512,7 +3550,8 @@ fn test_semantic_tokens_range_filters_by_character() {
 			}
 		}
 	},
-		escape_unicode: true)
+		escape_unicode: true
+	)
 	narrow := app.handle_semantic_tokens_range(Request{
 		id:     2
 		params: narrow_params

@@ -2105,6 +2105,37 @@ fn test_integration_workspace_symbol_query_matches() {
 	assert 'helper_name' in labels
 }
 
+fn test_integration_workspace_symbol_indexes_loose_module_sibling() {
+	mut app, project_dir := create_integration_test_env()
+	defer {
+		cleanup_integration_test_env(app, project_dir)
+	}
+
+	open_file := os.join_path(project_dir, 'main.v')
+	open_content := 'module main\n\nfn main() {}\n'
+	integration_test_must_write_file(open_file, open_content)
+	sibling_file := os.join_path(project_dir, 'sibling.v')
+	integration_test_must_write_file(sibling_file, 'module main\n\nfn unopened_loose_symbol() {}\n')
+	app.open_files[path_to_uri(open_file)] = open_content
+	assert app.workspace_roots.len == 0
+	assert find_project_root(project_dir) == ''
+
+	response := app.handle_workspace_symbol(Request{
+		id:     303
+		method: 'workspace/symbol'
+		params: json2.encode(WorkspaceSymbolParams{
+			query: 'unopened_loose'
+		},
+			escape_unicode: true
+		)
+	})
+
+	assert response.result is []WorkspaceSymbol
+	syms := response.result as []WorkspaceSymbol
+	assert syms.any(it.name == 'unopened_loose_symbol'
+		&& it.location.uri == path_to_uri(sibling_file))
+}
+
 fn test_integration_alias_navigation_methods_preserve_id() {
 	mut app, project_dir := create_integration_test_env()
 	defer {

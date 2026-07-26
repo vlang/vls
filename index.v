@@ -202,12 +202,44 @@ fn (mut app App) occurrences_for(uri string) map[string][]TokenOccurrence {
 	return occ
 }
 
+// drop_index_uri removes all cached index data for `uri`.
+fn (mut app App) drop_index_uri(uri string) {
+	app.symbol_index.delete(uri)
+	app.ref_occurrences.delete(uri)
+}
+
 // reindex_uri (re)parses `uri` from its authoritative source, skipping work when
-// the content fingerprint is unchanged. Removes the entry if the file is gone.
+// the content fingerprint is unchanged. Open buffers are always authoritative.
+// Disk-backed entries obey the same file-size and total-entry limits as workspace
+// walks, including when this function is reached through file-watcher events.
 fn (mut app App) reindex_uri(uri string) {
-	content := app.index_source_for(uri) or {
-		app.symbol_index.delete(uri)
-		return
+	mut content := ''
+	if open_content := app.open_files[uri] {
+		content = open_content
+		app.index_skipped_uris.delete(uri)
+	} else {
+		path := uri_to_path(uri)
+		if !os.is_file(path) {
+			app.drop_index_uri(uri)
+			app.index_skipped_uris.delete(uri)
+			return
+		}
+		if os.file_size(path) > index_max_file_bytes {
+			app.drop_index_uri(uri)
+			app.index_skipped_uris[uri] = true
+			return
+		}
+		if uri !in app.symbol_index && app.symbol_index.len >= index_max_files {
+			app.ref_occurrences.delete(uri)
+			app.index_skipped_uris[uri] = true
+			return
+		}
+		content = os.read_file(path) or {
+			app.drop_index_uri(uri)
+			app.index_skipped_uris[uri] = true
+			return
+		}
+		app.index_skipped_uris.delete(uri)
 	}
 	fp := content.hash()
 	if existing := app.symbol_index[uri] {
@@ -239,9 +271,15 @@ fn (mut app App) drop_index_under(dir_path string) {
 			app.ref_occurrences.delete(uri)
 		}
 	}
+	for uri in app.index_skipped_uris.keys() {
+		if path_is_within(uri_to_path(uri).replace('\\', '/'), d) {
+			app.index_skipped_uris.delete(uri)
+		}
+	}
 	// Re-walk on next query (a removed folder must not be re-indexed).
 	app.indexed_dirs.clear()
 	app.indexed_dir_walk_ms.clear()
+	app.index_incomplete_scopes.clear()
 }
 
 // Bounds and exclusions for the workspace walk. Without these a stray file
@@ -272,10 +310,11 @@ fn find_project_root(dir string) string {
 
 // collect_v_files recursively gathers `.v` files under `root`, skipping hidden
 // and known heavy directories and stopping once `index_max_files` is reached.
-fn collect_v_files(root string, mut acc []string) {
+// It returns false when a limit or filesystem error prevents a complete walk.
+fn collect_v_files(root string, mut acc []string) bool {
 	mut visited := map[string]bool{}
 	canonical_root := os.real_path(root).replace('\\', '/')
-	collect_v_files_rec(root, canonical_root, mut acc, mut visited)
+	return collect_v_files_rec(root, canonical_root, mut acc, mut visited)
 }
 
 // collect_v_files_rec is the recursive worker; `visited` holds the canonical
@@ -284,35 +323,38 @@ fn collect_v_files(root string, mut acc []string) {
 // to the workspace: a directory whose resolved path escapes it (e.g. a symlink
 // `external -> /home`) is skipped so an out-of-tree directory cannot pull an
 // unrelated file tree into the index (P1-01).
-fn collect_v_files_rec(dir string, canonical_root string, mut acc []string, mut visited map[string]bool) {
+fn collect_v_files_rec(dir string, canonical_root string, mut acc []string, mut visited map[string]bool) bool {
 	if acc.len >= index_max_files {
-		return
+		return false
 	}
 	real := os.real_path(dir)
 	if real in visited {
-		return
+		return true
 	}
 	// Containment: os.real_path resolves symlinks, so a symlinked directory whose
 	// target lies outside the workspace root is rejected here rather than walked.
 	if !path_is_within(real.replace('\\', '/'), canonical_root) {
-		return
+		return true
 	}
 	visited[real] = true
-	entries := os.ls(dir) or { return }
+	entries := os.ls(dir) or { return false }
 	for entry in entries {
 		if acc.len >= index_max_files {
-			return
+			return false
 		}
 		full := os.join_path(dir, entry)
 		if os.is_dir(full) {
 			if entry.starts_with('.') || entry in index_excluded_dirs {
 				continue
 			}
-			collect_v_files_rec(full, canonical_root, mut acc, mut visited)
+			if !collect_v_files_rec(full, canonical_root, mut acc, mut visited) {
+				return false
+			}
 		} else if entry.ends_with('.v') {
 			acc << full
 		}
 	}
+	return true
 }
 
 // index_refresh_interval_ms bounds how often a directory is re-walked when the
@@ -355,7 +397,11 @@ fn (mut app App) ensure_dirs_indexed(dirs []string) {
 			continue
 		}
 		mut files := []string{}
-		collect_v_files(dir, mut files)
+		scope := 'recursive:${dir}'
+		app.index_incomplete_scopes.delete(scope)
+		if !collect_v_files(dir, mut files) {
+			app.index_incomplete_scopes[scope] = true
+		}
 		mut present := map[string]bool{}
 		for f in files {
 			present[path_to_uri(f)] = true
@@ -386,11 +432,11 @@ fn (mut app App) ensure_dirs_indexed(dirs []string) {
 				app.reindex_uri(uri)
 				continue
 			}
-			if os.file_size(f) > index_max_file_bytes {
-				continue
+			if app.symbol_index.len >= index_max_files {
+				app.index_incomplete_scopes[scope] = true
+				break
 			}
-			content := os.read_file(f) or { continue }
-			app.symbol_index[uri] = build_index_entry(content, app.position_encoding)
+			app.reindex_uri(uri)
 		}
 		app.indexed_dirs[dir] = true
 		app.indexed_dir_walk_ms[dir] = time.now().unix_milli()
@@ -409,9 +455,15 @@ fn (mut app App) ensure_dir_shallow_indexed(dir string) {
 	if dir == '' || dir == '/' || !os.is_dir(dir) {
 		return
 	}
+	scope := 'shallow:${dir}'
+	app.index_incomplete_scopes.delete(scope)
 	refresh := app.index_dir_needs_refresh(dir)
 	mut present := map[string]bool{}
-	for entry in os.ls(dir) or { return } {
+	entries := os.ls(dir) or {
+		app.index_incomplete_scopes[scope] = true
+		return
+	}
+	for entry in entries {
 		if !entry.ends_with('.v') {
 			continue
 		}
@@ -432,11 +484,11 @@ fn (mut app App) ensure_dir_shallow_indexed(dir string) {
 			}
 			continue
 		}
-		if os.file_size(full) > index_max_file_bytes {
-			continue
+		if app.symbol_index.len >= index_max_files {
+			app.index_incomplete_scopes[scope] = true
+			break
 		}
-		content := os.read_file(full) or { continue }
-		app.symbol_index[uri] = build_index_entry(content, app.position_encoding)
+		app.reindex_uri(uri)
 	}
 	if refresh {
 		// Reconcile deletions: drop non-open entries for files that were directly
@@ -451,8 +503,30 @@ fn (mut app App) ensure_dir_shallow_indexed(dir string) {
 				app.ref_occurrences.delete(uri)
 			}
 		}
+		for uri in app.index_skipped_uris.keys() {
+			if uri in present {
+				continue
+			}
+			if os.dir(uri_to_path(uri)).replace('\\', '/').trim_right('/') == dir_norm {
+				app.index_skipped_uris.delete(uri)
+			}
+		}
 		app.indexed_dir_walk_ms[dir] = time.now().unix_milli()
 	}
+}
+
+// index_is_complete reports whether every discovered disk source was indexed.
+// Non-destructive queries may use a partial bounded index, but rename must not.
+fn (app &App) index_is_complete() bool {
+	if app.index_incomplete_scopes.len > 0 {
+		return false
+	}
+	for uri, _ in app.index_skipped_uris {
+		if os.is_file(uri_to_path(uri)) {
+			return false
+		}
+	}
+	return true
 }
 
 // query_module_fn_completions returns free-function completion items from the
