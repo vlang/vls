@@ -2258,6 +2258,23 @@ fn test_integration_client_response_is_consumed_not_dispatched() {
 	assert !out.any(it.contains('-32601'))
 }
 
+fn test_integration_malformed_client_response_is_not_consumed() {
+	mut app, project_dir := create_integration_test_env()
+	defer {
+		cleanup_integration_test_env(app, project_dir)
+	}
+	app.watched_files_registration_id = '2'
+	out := integration_run_frames(mut app, project_dir, 'malformed_client_resp', [
+		'{"jsonrpc":"2.0","id":2,"result":null garbage}',
+	])
+
+	assert out.len == 1
+	assert out[0].contains('"code":-32700')
+	assert out[0].contains('"id":null')
+	assert !app.watched_files_active
+	assert app.index_dir_needs_refresh(project_dir)
+}
+
 fn test_integration_notification_shaped_shutdown_is_dropped() {
 	mut app, project_dir := create_integration_test_env()
 	defer {

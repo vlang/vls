@@ -1707,6 +1707,53 @@ fn test_get_word_at_position_uses_original_client_uri() {
 	assert app.get_word_at_position(open_uri, 2, 3) == 'authoritative_open_symbol'
 }
 
+fn test_did_close_reindexes_noncanonical_uri_under_disk_uri() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_file := os.join_path(app.temp_dir, 'close_alias.v')
+	must_write_file(test_file, 'module main\n\nfn disk_symbol() {}\n')
+	disk_uri := path_to_uri(test_file)
+	open_uri := disk_uri.replace_once('file:///', 'file://localhost/')
+	app.open_files[open_uri] = 'module main\n\nfn open_symbol() {}\n'
+	app.reindex_uri(open_uri)
+	app.occurrences_for(open_uri)
+
+	app.on_did_close(Request{
+		params: json2.encode(DidCloseTextDocumentParams{
+			text_document: TextDocumentIdentifier{
+				uri: open_uri
+			}
+		},
+			escape_unicode: true
+		)
+	})
+
+	assert open_uri !in app.open_files
+	assert open_uri !in app.symbol_index
+	assert open_uri !in app.ref_occurrences
+	assert disk_uri in app.symbol_index
+	assert app.query_workspace_symbols('open_symbol').len == 0
+	assert app.query_workspace_symbols('disk_symbol').len == 1
+
+	app.on_did_change_watched_files(Request{
+		params: json2.encode(DidChangeWatchedFilesParams{
+			changes: [FileEvent{
+				uri:        disk_uri
+				event_type: 2
+			}]
+		})
+	})
+	mut equivalent_entries := 0
+	for indexed_uri, _ in app.symbol_index {
+		if normalized_index_path(uri_to_path(indexed_uri)) == normalized_index_path(test_file) {
+			equivalent_entries++
+		}
+	}
+	assert equivalent_entries == 1
+}
+
 fn test_handle_rename_refuses_incomplete_oversized_sibling_index() {
 	mut app := create_test_app()
 	defer {
