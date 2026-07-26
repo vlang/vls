@@ -4464,6 +4464,41 @@ fn test_classify_highlight_kind_read_write() {
 	assert classify_highlight_kind('for item in items {}', 12, 17) == doc_highlight_read
 }
 
+fn test_document_highlight_falls_back_to_lexical_results_over_semantic_cap() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	uri := 'file:///nonexistent_vls_highlight/main.v'
+	mut content := 'module main\n\nfn main() {\n\tmut item := 0\n'
+	for _ in 0 .. document_highlight_semantic_max_candidates {
+		content += '\titem++\n'
+	}
+	content += '}\n'
+	app.open_files[uri] = content
+
+	response := app.handle_document_highlight(Request{
+		id:     900
+		method: 'textDocument/documentHighlight'
+		params: json2.encode(DocumentHighlightParams{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			position:      Position{
+				line: 3
+				char: 5
+			}
+		},
+			escape_unicode: true
+		)
+	})
+
+	assert response.result is []DocumentHighlight
+	highlights := response.result as []DocumentHighlight
+	assert highlights.len == document_highlight_semantic_max_candidates + 1
+	assert highlights[0].kind == doc_highlight_write
+}
+
 fn test_on_did_change_invalid_range_does_not_advance_version() {
 	mut app := create_test_app()
 	defer {
