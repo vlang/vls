@@ -252,6 +252,28 @@ fn (mut app App) drop_index_uri(uri string) {
 	app.ref_occurrences.delete(uri)
 }
 
+// drop_index_aliases_for_path removes cached URI spellings for the same physical
+// file, retaining `keep_uri` when it is the canonical disk key or another open
+// buffer still owns the file.
+fn (mut app App) drop_index_aliases_for_path(path string, keep_uri string) {
+	target_path := normalized_index_path(path)
+	for uri in app.symbol_index.keys() {
+		if uri != keep_uri && normalized_index_path(uri_to_path(uri)) == target_path {
+			app.symbol_index.delete(uri)
+		}
+	}
+	for uri in app.ref_occurrences.keys() {
+		if uri != keep_uri && normalized_index_path(uri_to_path(uri)) == target_path {
+			app.ref_occurrences.delete(uri)
+		}
+	}
+	for uri in app.index_skipped_uris.keys() {
+		if uri != keep_uri && normalized_index_path(uri_to_path(uri)) == target_path {
+			app.index_skipped_uris.delete(uri)
+		}
+	}
+}
+
 // normalized_index_path returns a stable filesystem key for matching a path
 // discovered by a directory walk to an already-open document URI. Resolving the
 // real path collapses equivalent URI spellings such as file://localhost/tmp/a.v

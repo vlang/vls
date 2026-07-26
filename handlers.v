@@ -420,8 +420,13 @@ fn (mut app App) on_did_close(request Request) {
 		app.diag_cache.delete(uri)
 	}
 	// The buffer is gone; re-index from disk so the file's symbols remain
-	// discoverable with their on-disk content.
-	app.reindex_uri(uri)
+	// discoverable with their on-disk content. Remove the client URI alias and
+	// retain one stable key so a later canonical watcher event cannot create a
+	// duplicate entry for the same physical file.
+	disk_path := uri_to_path(uri)
+	disk_uri := index_uri_for_path(disk_path, app.open_index_uris_by_path())
+	app.drop_index_aliases_for_path(disk_path, disk_uri)
+	app.reindex_uri(disk_uri)
 }
 
 fn (mut app App) build_diagnostics_notification(uri string, content string) Notification {

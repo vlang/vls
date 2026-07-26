@@ -474,15 +474,6 @@ fn (mut app App) handle_requests(mut reader io.BufferedReader) {
 			continue
 		}
 		log('\n\nRECV: ${content}')
-		// A message with an id + result/error but no method is a response to a
-		// server-initiated request (progress create, capability registration).
-		// Consume it without dispatching so it never hits the method router or
-		// produces a spurious MethodNotFound error (P0-02).
-		if is_client_response_message(content) {
-			app.note_server_request_response(content)
-			log('Consumed client response to a server-initiated request: ${content}')
-			continue
-		}
 		has_id := request_content_has_id(content)
 		// Preserve the exact id (numeric or string) so responses echo it
 		// verbatim; string ids would otherwise collapse to 0 (P0-02).
@@ -503,7 +494,18 @@ fn (mut app App) handle_requests(mut reader io.BufferedReader) {
 		// id (0 for non-numeric ids), while the exact id is echoed via the raw id.
 		body := json2.decode[RequestBody](content) or {
 			log('Failed to decode JSON request: ${err.msg()}. Content: "${content}"')
+			app.current_request_raw_id = 'null'
 			app.write_error_response(make_parse_error_response(err.msg()))
+			continue
+		}
+		// A message with an id + result/error but no method is a response to a
+		// server-initiated request (progress create, capability registration).
+		// Classify and record it only after the typed decode above validated the
+		// complete JSON payload, so malformed acknowledgements cannot activate
+		// capabilities or disappear without a parse error (P0-02).
+		if is_client_response_message(content) {
+			app.note_server_request_response(content)
+			log('Consumed client response to a server-initiated request: ${content}')
 			continue
 		}
 		request := Request{
