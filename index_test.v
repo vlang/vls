@@ -391,6 +391,32 @@ fn test_collect_v_files_excludes_out_of_tree_file_symlink() {
 	assert files.all(!it.ends_with('external.v'))
 }
 
+fn test_collect_v_files_deduplicates_in_tree_file_symlink() {
+	root := index_test_tmpdir('file_alias')
+	defer {
+		os.rmdir_all(root) or {}
+	}
+	real_file := os.join_path(root, 'real.v')
+	os.write_file(real_file, 'module main\n\nfn unique_symbol() {}\n') or {
+		assert false, 'write real.v failed: ${err}'
+		return
+	}
+	os.symlink(real_file, os.join_path(root, 'alias.v')) or {
+		// Symlink creation can be unavailable (permissions/filesystem); skip then.
+		return
+	}
+
+	mut files := []string{}
+	assert collect_v_files(root, mut files)
+	assert files.len == 1
+	assert normalized_index_path(files[0]) == normalized_index_path(real_file)
+
+	mut app := index_test_app()
+	app.ensure_dirs_indexed([root])
+	assert app.query_workspace_symbols('unique_symbol').len == 1
+	assert app.symbol_index.len == 1
+}
+
 fn test_index_scoped_to_v_mod_project_walks_disk() {
 	root := index_test_tmpdir('scoped')
 	defer {
