@@ -9,6 +9,16 @@ import os
 const doc_highlight_read = 2
 const doc_highlight_write = 3
 
+// Each semantic highlight candidate requires a serial compiler definition
+// lookup. Above this bound, highlighting falls back to lexical occurrences.
+const document_highlight_semantic_max_candidates = 48
+
+struct DocumentHighlightCandidate {
+	line_idx   int
+	start_byte int
+	end_byte   int
+}
+
 // highlight_has_word reports whether `text` contains `word` at identifier
 // boundaries.
 fn highlight_has_word(text string, word string) bool {
@@ -141,6 +151,67 @@ fn classify_highlight_kind(line string, start_byte int, end_byte int) int {
 	return doc_highlight_read
 }
 
+// collect_document_highlight_candidates finds exact identifier occurrences
+// while excluding line comments and string literals.
+fn collect_document_highlight_candidates(lines []string, symbol string) []DocumentHighlightCandidate {
+	mut candidates := []DocumentHighlightCandidate{}
+	for line_idx, line in lines {
+		if !line.contains(symbol) {
+			continue
+		}
+		n := line.len
+		mut col := 0
+		for col < n {
+			c := line[col]
+			if col + 1 < n && c == `/` && line[col + 1] == `/` {
+				break
+			}
+			if c == `"` || c == `'` {
+				quote := c
+				col++
+				for col < n {
+					if line[col] == `\\` {
+						col += 2
+						continue
+					}
+					if line[col] == quote {
+						col++
+						break
+					}
+					col++
+				}
+				continue
+			}
+			if is_ident_char(c) {
+				start_byte := col
+				col++
+				for col < n && is_ident_char(line[col]) {
+					col++
+				}
+				if line[start_byte..col] == symbol {
+					candidates << DocumentHighlightCandidate{
+						line_idx:   line_idx
+						start_byte: start_byte
+						end_byte:   col
+					}
+				}
+				continue
+			}
+			col++
+		}
+	}
+	return candidates
+}
+
+// resolve_document_highlight_anchor avoids all compiler work when semantic
+// verification would exceed the per-request candidate bound.
+fn (mut app App) resolve_document_highlight_anchor(uri string, line int, ch int, candidate_count int) ?Location {
+	if candidate_count > document_highlight_semantic_max_candidates {
+		return none
+	}
+	return app.resolve_symbol_anchor(uri, line, ch)
+}
+
 // handle_document_highlight handles textDocument/documentHighlight.
 // It finds all occurrences of the identifier under the cursor within the current
 // document and returns them as a DocumentHighlight list.
@@ -182,90 +253,57 @@ fn (mut app App) handle_document_highlight(request Request) Response {
 			result: []DocumentHighlight{}
 		}
 	}
-	anchor := app.resolve_symbol_anchor(uri, params.position.line, start)
+	candidates := collect_document_highlight_candidates(lines, symbol)
+	anchor := app.resolve_document_highlight_anchor(uri, params.position.line, start,
+		candidates.len)
 	mut anchor_cache := map[string]?Location{}
-	mut highlights := []DocumentHighlight{}
-	for line_idx, line in lines {
-		if !line.contains(symbol) {
-			continue
+	if a := anchor {
+		// The initial lookup already resolved the selected occurrence.
+		anchor_cache[anchor_cache_key(uri, params.position.line, start)] = a
+	}
+	mut highlights := []DocumentHighlight{cap: candidates.len}
+	for candidate in candidates {
+		line := lines[candidate.line_idx]
+		start_char := byte_to_encoded_col(line, candidate.start_byte, app.position_encoding)
+		end_char := byte_to_encoded_col(line, candidate.end_byte, app.position_encoding)
+		if a := anchor {
+			if resolved := app.resolve_symbol_anchor_cached(uri, candidate.line_idx, start_char, mut
+				anchor_cache)
+			{
+				if !same_anchor_location(resolved, a) {
+					continue
+				}
+			} else {
+				continue
+			}
 		}
-		n := line.len
-		mut col := 0
-		for col < n {
-			c := line[col]
-			// Skip line comments.
-			if col + 1 < n && c == `/` && line[col + 1] == `/` {
-				break
-			}
-			// Skip string literals.
-			if c == `"` || c == `'` {
-				quote := c
-				col++
-				for col < n {
-					if line[col] == `\\` {
-						col += 2
-						continue
-					}
-					if line[col] == quote {
-						col++
-						break
-					}
-					col++
-				}
-				continue
-			}
-			if is_ident_char(c) {
-				start_byte := col
-				col++
-				for col < n && is_ident_char(line[col]) {
-					col++
-				}
-				if line[start_byte..col] == symbol {
-					start_char := byte_to_encoded_col(line, start_byte, app.position_encoding)
-					end_char := byte_to_encoded_col(line, col, app.position_encoding)
-					if a := anchor {
-						if resolved := app.resolve_symbol_anchor_cached(uri, line_idx, start_char, mut
-							anchor_cache)
-						{
-							if !same_anchor_location(resolved, a) {
-								continue
-							}
-						} else {
-							continue
-						}
-					}
-					mut kind := classify_highlight_kind(line, start_byte, col)
-					if a := anchor {
-						occurrence := Location{
-							uri:   uri
-							range: LSPRange{
-								start: Position{
-									line: line_idx
-									char: start_char
-								}
-							}
-						}
-						if same_anchor_location(occurrence, a) {
-							kind = doc_highlight_write
-						}
-					}
-					highlights << DocumentHighlight{
-						range: LSPRange{
-							start: Position{
-								line: line_idx
-								char: start_char
-							}
-							end:   Position{
-								line: line_idx
-								char: end_char
-							}
-						}
-						kind:  kind // Read/Write (P2-03)
+		mut kind := classify_highlight_kind(line, candidate.start_byte, candidate.end_byte)
+		if a := anchor {
+			occurrence := Location{
+				uri:   uri
+				range: LSPRange{
+					start: Position{
+						line: candidate.line_idx
+						char: start_char
 					}
 				}
-				continue
 			}
-			col++
+			if same_anchor_location(occurrence, a) {
+				kind = doc_highlight_write
+			}
+		}
+		highlights << DocumentHighlight{
+			range: LSPRange{
+				start: Position{
+					line: candidate.line_idx
+					char: start_char
+				}
+				end:   Position{
+					line: candidate.line_idx
+					char: end_char
+				}
+			}
+			kind:  kind // Read/Write (P2-03)
 		}
 	}
 	return Response{
