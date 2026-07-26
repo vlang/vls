@@ -794,6 +794,249 @@ fn test_integration_definition_multifile() {
 	assert response.id == 3
 }
 
+fn test_integration_cross_module_features_use_unsaved_project_overlay() {
+	mut app, project_dir := create_integration_test_env()
+	defer {
+		cleanup_integration_test_env(app, project_dir)
+	}
+	integration_test_must_write_file(os.join_path(project_dir, 'v.mod'),
+		"Module {\n\tname: 'cross_module_test'\n}\n")
+	module_dir := os.join_path(project_dir, 'mathutil')
+	integration_test_must_mkdir_all(module_dir)
+	module_file := os.join_path(module_dir, 'mathutil.v')
+	module_content := 'module mathutil\n\npub fn answer(value int) int {\n\treturn value\n}\n'
+	integration_test_must_write_file(module_file, module_content)
+
+	main_file := os.join_path(project_dir, 'main.v')
+	// Disk deliberately lacks the import and call. Compiler-backed features must
+	// use the authoritative unsaved editor buffer while retaining project imports.
+	integration_test_must_write_file(main_file, 'module main\n\nfn main() {}\n')
+	open_content := 'module main\n\nimport mathutil\n\nfn main() {\n\tprintln(mathutil.answer(42))\n}\n'
+	main_uri := path_to_uri(main_file)
+	module_uri := path_to_uri(module_file)
+	app.open_files[main_uri] = open_content
+	app.text = open_content
+	app.workspace_roots = [project_dir]
+
+	invalid_content := open_content.replace('answer(42)', "answer('wrong')")
+	app.open_files[main_uri] = invalid_content
+	app.text = invalid_content
+	diagnostics := app.run_v_check(main_uri, invalid_content)
+	assert diagnostics.len > 0
+	assert diagnostics.all(normalized_index_path(it.path) == normalized_index_path(main_file))
+	assert diagnostics.any(it.message.contains('string'))
+	app.open_files[main_uri] = open_content
+	app.text = open_content
+
+	definition := app.operation_at_pos(.definition, Request{
+		id:     31
+		method: 'textDocument/definition'
+		params: json2.encode(TextDocumentPositionParams{
+			text_document: TextDocumentIdentifier{
+				uri: main_uri
+			}
+			position:      Position{
+				line: 5
+				char: 20
+			}
+		},
+			escape_unicode: true
+		)
+	})
+	assert definition.result is Location
+	definition_location := definition.result as Location
+	assert definition_location.uri == module_uri
+	assert definition_location.range.start.line == 2
+
+	hover := app.operation_at_pos(.hover, Request{
+		id:     32
+		method: 'textDocument/hover'
+		params: json2.encode(TextDocumentPositionParams{
+			text_document: TextDocumentIdentifier{
+				uri: main_uri
+			}
+			position:      Position{
+				line: 5
+				char: 20
+			}
+		},
+			escape_unicode: true
+		)
+	})
+	assert hover.result is Hover
+	assert (hover.result as Hover).contents.value.contains('answer')
+
+	signature := app.operation_at_pos(.signature_help, Request{
+		id:     33
+		method: 'textDocument/signatureHelp'
+		params: json2.encode(TextDocumentPositionParams{
+			text_document: TextDocumentIdentifier{
+				uri: main_uri
+			}
+			position:      Position{
+				line: 5
+				char: 25
+			}
+		},
+			escape_unicode: true
+		)
+	})
+	assert signature.result is SignatureHelp
+	signature_help := signature.result as SignatureHelp
+	assert signature_help.signatures.any(it.label.contains('answer'))
+
+	completion := app.operation_at_pos(.completion, Request{
+		id:     34
+		method: 'textDocument/completion'
+		params: json2.encode(TextDocumentPositionParams{
+			text_document: TextDocumentIdentifier{
+				uri: main_uri
+			}
+			position:      Position{
+				line: 5
+				char: 18
+			}
+		},
+			escape_unicode: true
+		)
+	})
+	assert completion.result is CompletionList
+	items := (completion.result as CompletionList).items
+	assert items.any(it.label == 'answer')
+}
+
+fn test_integration_vlang_v_cross_module_features_from_env() {
+	configured_root := os.getenv('VLS_VLANG_V_REPO')
+	if configured_root == '' {
+		return
+	}
+	root := os.real_path(configured_root)
+	assert os.is_file(os.join_path(root, 'v.mod')), 'VLS_VLANG_V_REPO must point at a vlang/v checkout'
+
+	main_file := os.join_path(root, 'cmd', 'v', 'v.v')
+	assert os.is_file(main_file), 'expected cmd/v/v.v in vlang/v checkout'
+	content := os.read_file(main_file) or {
+		assert false, 'failed to read ${main_file}: ${err}'
+		return
+	}
+	lines := content.split_into_lines()
+	mut call_line := -1
+	mut compile_col := -1
+	for i, line in lines {
+		if line.contains("builder.compile('build'") {
+			call_line = i
+			compile_col = line.index('compile') or { -1 }
+			break
+		}
+	}
+	assert call_line >= 0, 'expected builder.compile build call in cmd/v/v.v'
+	assert compile_col >= 0
+
+	mut app, scratch_project := create_integration_test_env()
+	defer {
+		cleanup_integration_test_env(app, scratch_project)
+	}
+	main_uri := path_to_uri(main_file)
+	app.open_files[main_uri] = content
+	app.text = content
+	app.workspace_roots = [root]
+	expected_file := os.join_path(root, 'vlib', 'v', 'builder', 'compile.v')
+	expected_content := os.read_file(expected_file) or {
+		assert false, 'failed to read ${expected_file}: ${err}'
+		return
+	}
+	mut expected_line := -1
+	for i, line in expected_content.split_into_lines() {
+		if line.contains('fn compile(') {
+			expected_line = i
+			break
+		}
+	}
+	assert expected_line >= 0, 'expected fn compile declaration in v/builder/compile.v'
+	expected_definition := path_to_uri(expected_file)
+
+	for i, method in [Method.definition, .declaration, .type_definition, .implementation] {
+		response := app.operation_at_pos(method, Request{
+			id:     40 + i
+			params: json2.encode(TextDocumentPositionParams{
+				text_document: TextDocumentIdentifier{
+					uri: main_uri
+				}
+				position:      Position{
+					line: call_line
+					char: compile_col + 2
+				}
+			},
+				escape_unicode: true
+			)
+		})
+		assert response.result is Location
+		location := response.result as Location
+		assert location.uri == expected_definition
+		assert location.range.start.line == expected_line
+	}
+
+	hover := app.operation_at_pos(.hover, Request{
+		id:     44
+		params: json2.encode(TextDocumentPositionParams{
+			text_document: TextDocumentIdentifier{
+				uri: main_uri
+			}
+			position:      Position{
+				line: call_line
+				char: compile_col + 2
+			}
+		},
+			escape_unicode: true
+		)
+	})
+	assert hover.result is Hover
+	assert (hover.result as Hover).contents.value.contains('fn compile(')
+
+	open_paren_col := lines[call_line].index('builder.compile(') or { -1 }
+	assert open_paren_col >= 0
+	signature := app.operation_at_pos(.signature_help, Request{
+		id:     45
+		params: json2.encode(TextDocumentPositionParams{
+			text_document: TextDocumentIdentifier{
+				uri: main_uri
+			}
+			position:      Position{
+				line: call_line
+				char: open_paren_col + 'builder.compile('.len
+			}
+		},
+			escape_unicode: true
+		)
+	})
+	assert signature.result is SignatureHelp
+	assert (signature.result as SignatureHelp).signatures.any(it.label.starts_with('compile('))
+
+	dot_col := lines[call_line].index('builder.') or { -1 }
+	assert dot_col >= 0
+	mut completion_lines := lines.clone()
+	completion_lines[call_line] = lines[call_line][..dot_col + 'builder.'.len]
+	completion_content := completion_lines.join('\n')
+	app.open_files[main_uri] = completion_content
+	app.text = completion_content
+	completion := app.operation_at_pos(.completion, Request{
+		id:     46
+		params: json2.encode(TextDocumentPositionParams{
+			text_document: TextDocumentIdentifier{
+				uri: main_uri
+			}
+			position:      Position{
+				line: call_line
+				char: dot_col + 'builder.'.len
+			}
+		},
+			escape_unicode: true
+		)
+	})
+	assert completion.result is CompletionList
+	assert (completion.result as CompletionList).items.any(it.label == 'compile')
+}
+
 fn test_integration_signature_help_request() {
 	mut app, project_dir := create_integration_test_env()
 	defer {
@@ -2394,4 +2637,40 @@ fn test_integration_diagnostics_contain_real_compiler_errors() {
 	assert notification.params.diagnostics.len > 0
 	assert notification.params.diagnostics.any(it.message.contains('undefined'))
 	assert notification.params.diagnostics.any(it.severity == 1)
+}
+
+fn test_integration_initialize_advertises_every_implemented_feature() {
+	mut app, project_dir := create_integration_test_env()
+	defer {
+		cleanup_integration_test_env(app, project_dir)
+	}
+	output := integration_run_frames(mut app, project_dir, 'all_capabilities', [
+		'{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{"general":{"positionEncodings":["utf-8","utf-16"]}}}}',
+	]).join('')
+
+	assert output.contains('"positionEncoding":"utf-8"')
+	assert output.contains('"openClose":true')
+	assert output.contains('"change":2')
+	assert output.contains('"willSaveWaitUntil":true')
+	assert output.contains('"completionProvider"')
+	assert output.contains('"signatureHelpProvider"')
+	assert output.contains('"definitionProvider":true')
+	assert output.contains('"declarationProvider":true')
+	assert output.contains('"typeDefinitionProvider":true')
+	assert output.contains('"implementationProvider":true')
+	assert output.contains('"hoverProvider":true')
+	assert output.contains('"referencesProvider":true')
+	assert output.contains('"renameProvider":{"prepareProvider":true}')
+	assert output.contains('"documentFormattingProvider":true')
+	assert output.contains('"documentSymbolProvider":true')
+	assert output.contains('"workspaceSymbolProvider":true')
+	assert output.contains('"inlayHintProvider":true')
+	assert output.contains('"codeActionProvider":true')
+	assert output.contains('"semanticTokensProvider"')
+	assert output.contains('"foldingRangeProvider":true')
+	assert output.contains('"callHierarchyProvider":true')
+	assert output.contains('"documentHighlightProvider":true')
+	assert output.contains('"selectionRangeProvider":true')
+	assert output.contains('"workspaceFolders":{"supported":true,"changeNotifications":true}')
+	assert output.contains('"serverInfo":{"name":"vls","version":"0.0.2"}')
 }

@@ -4631,3 +4631,354 @@ fn test_merge_vlib_module_fns_caches_per_module() {
 	app.merge_vlib_module_fns('no_such_vlib_module_xyz', mut idx)
 	assert idx.len == 0
 }
+
+fn test_operation_at_pos_hover_returns_symbol_information() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'hover_feature')
+	must_mkdir_all(test_dir)
+	test_file := os.join_path(test_dir, 'main.v')
+	content := 'module main\n\n// helper returns the supplied value.\nfn helper(value int) int {\n\treturn value\n}\n\nfn main() {\n\tanswer := helper(1)\n\tprintln(answer)\n}\n'
+	must_write_file(test_file, content)
+	uri := path_to_uri(test_file)
+	app.open_files[uri] = content
+	app.text = content
+
+	response := app.operation_at_pos(.hover, Request{
+		id:     901
+		method: 'textDocument/hover'
+		params: json2.encode(TextDocumentPositionParams{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			position:      Position{
+				line: 8
+				char: 13
+			}
+		},
+			escape_unicode: true
+		)
+	})
+
+	assert response.id == 901
+	assert response.result is Hover
+	hover := response.result as Hover
+	assert hover.contents.value.contains('helper')
+	assert hover.contents.value.contains('helper returns the supplied value')
+}
+
+fn test_find_references_returns_declaration_and_calls() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'references_feature')
+	must_mkdir_all(test_dir)
+	must_write_file(os.join_path(test_dir, 'v.mod'), 'Module {}\n')
+	test_file := os.join_path(test_dir, 'main.v')
+	content := 'module main\n\nfn shared_value() int {\n\treturn 1\n}\n\nfn first() int {\n\treturn shared_value()\n}\n\nfn second() int {\n\treturn shared_value()\n}\n'
+	must_write_file(test_file, content)
+	uri := path_to_uri(test_file)
+	app.open_files[uri] = content
+	app.workspace_roots = [test_dir]
+
+	response := app.find_references(Request{
+		id:     902
+		method: 'textDocument/references'
+		params: json2.encode(ReferenceParams{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			position:      Position{
+				line: 7
+				char: 10
+			}
+			context:       ReferenceContext{
+				include_declaration: true
+			}
+		},
+			escape_unicode: true
+		)
+	})
+
+	assert response.id == 902
+	assert response.result is []Location
+	locations := response.result as []Location
+	assert locations.len == 3
+	assert locations.any(it.range.start.line == 2)
+	assert locations.any(it.range.start.line == 7)
+	assert locations.any(it.range.start.line == 11)
+}
+
+fn test_handle_rename_returns_complete_workspace_edit() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'rename_feature')
+	must_mkdir_all(test_dir)
+	must_write_file(os.join_path(test_dir, 'v.mod'), 'Module {}\n')
+	test_file := os.join_path(test_dir, 'main.v')
+	content := 'module main\n\nfn shared_value() int {\n\treturn 1\n}\n\nfn main() {\n\tprintln(shared_value())\n}\n'
+	must_write_file(test_file, content)
+	uri := path_to_uri(test_file)
+	app.open_files[uri] = content
+	app.open_files_versions[uri] = 7
+	app.workspace_roots = [test_dir]
+
+	response := app.handle_rename(Request{
+		id:     903
+		method: 'textDocument/rename'
+		params: json2.encode(RenameParams{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			position:      Position{
+				line: 7
+				char: 11
+			}
+			new_name:      'renamed_value'
+		},
+			escape_unicode: true
+		)
+	})
+
+	assert response.id == 903
+	assert response.result is WorkspaceEdit
+	edit := response.result as WorkspaceEdit
+	assert edit.changes[uri].len == 2
+	assert edit.changes[uri].all(it.new_text == 'renamed_value')
+	if document_changes := edit.document_changes {
+		assert document_changes.len == 1
+		assert document_changes[0].text_document.uri == uri
+		assert (document_changes[0].text_document.version or { -1 }) == 7
+		assert document_changes[0].edits.len == 2
+	} else {
+		assert false, 'rename must include versioned documentChanges'
+	}
+}
+
+fn test_folding_range_covers_imports_comments_and_code_blocks() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	uri := 'file:///tmp/folding_feature.v'
+	app.open_files[uri] = 'module main\n\nimport os\nimport time\n\n// first line\n// second line\n\nfn main() {\n\tprintln(os.args)\n}\n'
+
+	response := app.handle_folding_range(Request{
+		id:     904
+		method: 'textDocument/foldingRange'
+		params: json2.encode(FoldingRangeParams{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+		},
+			escape_unicode: true
+		)
+	})
+
+	assert response.id == 904
+	assert response.result is []FoldingRange
+	ranges := response.result as []FoldingRange
+	assert ranges.any(it.kind == 'imports' && it.start_line == 2 && it.end_line == 3)
+	assert ranges.any(it.kind == 'comment' && it.start_line == 5 && it.end_line == 6)
+	assert ranges.any(it.kind == 'region' && it.start_line == 8 && it.end_line == 10)
+}
+
+fn test_document_highlight_returns_reads_and_writes() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'highlight_feature')
+	must_mkdir_all(test_dir)
+	test_file := os.join_path(test_dir, 'main.v')
+	content := 'module main\n\nfn main() {\n\tvalue := 1\n\tvalue += 1\n\tprintln(value)\n}\n'
+	must_write_file(test_file, content)
+	uri := path_to_uri(test_file)
+	app.open_files[uri] = content
+
+	response := app.handle_document_highlight(Request{
+		id:     905
+		method: 'textDocument/documentHighlight'
+		params: json2.encode(DocumentHighlightParams{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			position:      Position{
+				line: 3
+				char: 2
+			}
+		},
+			escape_unicode: true
+		)
+	})
+
+	assert response.id == 905
+	assert response.result is []DocumentHighlight
+	highlights := response.result as []DocumentHighlight
+	assert highlights.len == 3
+	assert highlights.filter(it.kind == doc_highlight_write).len == 2
+	assert highlights.filter(it.kind == doc_highlight_read).len == 1
+}
+
+fn test_workspace_configuration_toggles_feature_behavior() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	uri := 'file:///tmp/config_feature.v'
+	content := 'module main\n\nfn main() {\n\tvalue := 1\n\tprintln(value)\n}\n'
+	app.open_files[uri] = content
+
+	app.on_did_change_configuration(Request{
+		method: 'workspace/didChangeConfiguration'
+		params: '{"settings":{"vls":{"inlayHints":false,"diagnostics":false}}}'
+	})
+	assert !app.inlay_hints_enabled
+	assert !app.diagnostics_enabled
+
+	hint_response := app.handle_inlay_hints(Request{
+		id:     906
+		method: 'textDocument/inlayHint'
+		params: json2.encode(InlayHintParams{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			range:         LSPRange{
+				start: Position{}
+				end:   Position{
+					line: 5
+				}
+			}
+		},
+			escape_unicode: true
+		)
+	})
+	assert hint_response.result is []InlayHint
+	assert (hint_response.result as []InlayHint).len == 0
+	assert app.build_diagnostics_notification(uri, content).params.diagnostics.len == 0
+
+	app.on_did_change_configuration(Request{
+		method: 'workspace/didChangeConfiguration'
+		params: '{"settings":{"inlayHints":true,"diagnostics":true}}'
+	})
+	assert app.inlay_hints_enabled
+	assert app.diagnostics_enabled
+}
+
+fn test_will_save_wait_until_formats_without_mutating_open_document() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'will_save_feature')
+	must_mkdir_all(test_dir)
+	test_file := os.join_path(test_dir, 'main.v')
+	content := 'module main\n\nfn main(){\nprintln("hello")\n}\n'
+	must_write_file(test_file, content)
+	uri := path_to_uri(test_file)
+	app.open_files[uri] = content
+
+	response := app.on_will_save_wait_until(Request{
+		id:     907
+		method: 'textDocument/willSaveWaitUntil'
+		params: json2.encode(WillSaveTextDocumentParams{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			reason:        1
+		},
+			escape_unicode: true
+		)
+	})
+
+	assert response.result is []TextEdit
+	edits := response.result as []TextEdit
+	assert edits.len == 1
+	assert edits[0].new_text.contains('fn main() {')
+	assert edits[0].new_text.contains('\tprintln')
+	assert app.open_files[uri] == content
+}
+
+fn test_range_formatting_returns_only_contained_changed_hunk() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'range_format_feature')
+	must_mkdir_all(test_dir)
+	test_file := os.join_path(test_dir, 'main.v')
+	content := 'module main\n\nfn main() {\nx:=1\n}\n'
+	must_write_file(test_file, content)
+	uri := path_to_uri(test_file)
+	app.open_files[uri] = content
+
+	response := app.handle_range_formatting(Request{
+		id:     908
+		method: 'textDocument/rangeFormatting'
+		params: json2.encode(DocumentRangeFormattingParams{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			range:         LSPRange{
+				start: Position{
+					line: 3
+				}
+				end:   Position{
+					line: 3
+					char: 4
+				}
+			}
+			options:       FormattingOptions{
+				tab_size: 4
+			}
+		},
+			escape_unicode: true
+		)
+	})
+
+	assert response.id == 908
+	assert response.result is []TextEdit
+	edits := response.result as []TextEdit
+	assert edits.len == 1
+	assert edits[0].range.start.line == 3
+	assert edits[0].range.end.line == 4
+	assert edits[0].new_text == '\tx := 1\n'
+}
+
+fn test_prepare_call_hierarchy_returns_function_item() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	uri := 'file:///tmp/prepare_call_feature.v'
+	app.open_files[uri] = 'module main\n\nfn helper() {}\n\nfn main() {\n\thelper()\n}\n'
+
+	response := app.handle_prepare_call_hierarchy(Request{
+		id:     909
+		method: 'textDocument/prepareCallHierarchy'
+		params: json2.encode(PrepareCallHierarchyParams{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			position:      Position{
+				line: 5
+				char: 2
+			}
+		},
+			escape_unicode: true
+		)
+	})
+
+	assert response.id == 909
+	assert response.result is []CallHierarchyItem
+	items := response.result as []CallHierarchyItem
+	assert items.len == 1
+	assert items[0].name == 'helper'
+	assert items[0].uri == uri
+	assert items[0].selection_range.start.line == 2
+}

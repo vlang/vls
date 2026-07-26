@@ -901,3 +901,109 @@ fn test_removed_workspace_root_keeps_only_open_buffer_indexed() {
 	app.ensure_dirs_indexed(app.index_query_dirs())
 	assert app.query_workspace_symbols('removed_sibling_symbol').len == 1
 }
+
+fn test_index_large_multifile_project_stays_complete_and_incremental() {
+	root := index_test_tmpdir('many_files')
+	defer {
+		os.rmdir_all(root) or {}
+	}
+	os.write_file(os.join_path(root, 'v.mod'), "Module {\n\tname: 'large_index_test'\n}\n") or {
+		assert false, 'write v.mod failed: ${err}'
+		return
+	}
+
+	file_count := 1500
+	files_per_dir := 50
+	for i in 0 .. file_count {
+		dir := os.join_path(root, 'module_${i / files_per_dir:02}')
+		os.mkdir_all(dir) or {
+			assert false, 'mkdir ${dir} failed: ${err}'
+			return
+		}
+		mut body := 'module large_index_test\n\nfn stress_symbol_${i}() int {\n\treturn ${i}\n}\n'
+		if i == 0 {
+			body += '\nfn shared_stress_symbol() {}\n'
+		}
+		if i == file_count - 1 {
+			body += '\nfn use_shared_stress_symbol() {\n\tshared_stress_symbol()\n}\n'
+		}
+		os.write_file(os.join_path(dir, 'file_${i:04}.v'), body) or {
+			assert false, 'write stress file ${i} failed: ${err}'
+			return
+		}
+	}
+
+	mut app := index_test_app()
+	app.workspace_roots = [root]
+	app.watched_files_active = true
+	app.ensure_dirs_indexed([root])
+
+	assert app.symbol_index.len == file_count
+	assert app.index_is_complete()
+	assert app.query_workspace_symbols('stress_symbol_0').any(it.name == 'stress_symbol_0')
+	assert app.query_workspace_symbols('stress_symbol_749').any(it.name == 'stress_symbol_749')
+	assert app.query_workspace_symbols('stress_symbol_1499').any(it.name == 'stress_symbol_1499')
+
+	shared_locations := app.search_symbol_in_dirs('shared_stress_symbol', 0)
+	assert shared_locations.len == 2
+	assert shared_locations.any(it.range.start.line == 6)
+	assert shared_locations.any(it.range.start.line == 7)
+
+	changed_path := os.join_path(root, 'module_14', 'file_0749.v')
+	changed_uri := path_to_uri(changed_path)
+	os.write_file(changed_path,
+		'module large_index_test\n\nfn stress_symbol_reindexed() int {\n\treturn 749\n}\n') or {
+		assert false, 'rewrite stress file failed: ${err}'
+		return
+	}
+	app.on_did_change_watched_files(Request{
+		params: json2.encode(DidChangeWatchedFilesParams{
+			changes: [FileEvent{
+				uri:        changed_uri
+				event_type: 2
+			}]
+		})
+	})
+	assert app.symbol_index.len == file_count
+	assert app.query_workspace_symbols('stress_symbol_749').len == 0
+	assert app.query_workspace_symbols('stress_symbol_reindexed').len == 1
+}
+
+fn test_large_vlang_v_workspace_from_env() {
+	configured_root := os.getenv('VLS_VLANG_V_REPO')
+	if configured_root == '' {
+		return
+	}
+	root := os.real_path(configured_root)
+	assert os.is_file(os.join_path(root, 'v.mod')), 'VLS_VLANG_V_REPO must point at a vlang/v checkout'
+
+	mut files := []string{}
+	assert collect_v_files(root, mut files), 'vlang/v walk must finish without hitting index bounds'
+	assert files.len >= 2000, 'expected a large vlang/v checkout, found only ${files.len} V files'
+
+	mut app := index_test_app()
+	app.workspace_roots = [root]
+	app.watched_files_active = true
+	app.ensure_dirs_indexed([root])
+
+	assert app.index_is_complete()
+	assert app.symbol_index.len >= 2000
+	assert app.index_skipped_uris.len == 0
+	assert app.symbol_index.len == files.len
+
+	preferences := app.query_workspace_symbols('Preferences')
+	assert preferences.len > 0
+	preferences_uri := preferences[0].location.uri
+	preference_occurrences := app.occurrences_for(preferences_uri)
+	assert preference_occurrences['Preferences'].len > 0
+
+	if main_uri, main_symbol := app.find_indexed_fn('main', false, [
+		os.join_path(root, 'cmd'),
+	])
+	{
+		assert main_uri.starts_with(path_to_uri(os.join_path(root, 'cmd')))
+		assert main_symbol.name == 'main'
+	} else {
+		assert false, 'expected to find a production fn main under vlang/v cmd'
+	}
+}

@@ -36,7 +36,9 @@ jobs:
       - name: Check formatting
         run: v fmt -verify vls/
 
-      - name: Run tests
+      - name: Run all tests, including the vlang/v workspace tests
+        env:
+          VLS_VLANG_V_REPO: ${{ github.workspace }}
         run: v test vls/
 
       - name: Compile project

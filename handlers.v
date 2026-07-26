@@ -2318,13 +2318,34 @@ fn (mut app App) search_symbol_in_dirs(symbol string, request_id int) []Location
 // encoding; it is converted to the byte column the compiler expects (P0-01).
 // Returns none when the definition cannot be resolved.
 fn (mut app App) resolve_symbol_anchor(uri string, line int, ch int) ?Location {
-	byte_col := app.client_col_to_byte_col(uri, line, ch)
-	line_info := '${line + 1}:gd^${byte_col}'
-	result := app.run_v_line_info(.definition, uri, line_info)
-	if result is Location {
-		loc := result as Location
-		if loc.uri != '' {
-			return loc
+	mut probe_cols := []int{}
+	// The compiler's gd^ lookup can misclassify a probe exactly on the first byte
+	// of an identifier as the enclosing call. Indexed candidates always use that
+	// first position, so probe two units into the identifier (or one for a two-unit
+	// name). A one-unit or midpoint probe can be misclassified as the enclosing
+	// call in nested expressions such as `println(shared_value())`.
+	content := app.open_files[uri] or { os.read_file(uri_to_path(uri)) or { '' } }
+	lines := content.split_into_lines()
+	if line >= 0 && line < lines.len {
+		start, end := find_word_bounds_at_col(lines[line], ch, app.position_encoding)
+		inner_offset := if end - start > 2 { 2 } else { 1 }
+		inner := start + inner_offset
+		if ch == start && inner > start && inner < end {
+			probe_cols << inner
+		}
+	}
+	if probe_cols.len == 0 {
+		probe_cols << ch
+	}
+	for probe_col in probe_cols {
+		byte_col := app.client_col_to_byte_col(uri, line, probe_col)
+		line_info := '${line + 1}:gd^${byte_col}'
+		result := app.run_v_line_info(.definition, uri, line_info)
+		if result is Location {
+			loc := result as Location
+			if loc.uri != '' {
+				return loc
+			}
 		}
 	}
 	return none
@@ -2434,6 +2455,13 @@ fn (mut app App) search_symbol_in_dirs_semantic(symbol string, anchor Location, 
 	for cand in candidates {
 		if request_id in app.cancelled_requests {
 			return locations
+		}
+		// A definition lookup performed on the declaration itself may return no
+		// location. The candidate is nevertheless safe when its indexed position
+		// is the canonical anchor returned for the user's selected occurrence.
+		if same_anchor_location(cand, anchor) {
+			locations << cand
+			continue
 		}
 		resolved := app.resolve_symbol_anchor_cached(cand.uri, cand.range.start.line,
 			cand.range.start.char, mut anchor_cache) or { continue }
