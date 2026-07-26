@@ -357,6 +357,105 @@ fn cleanup_compilation_temp(temp_project_dir string, singlefile_tmppath string) 
 	}
 }
 
+struct CompilationOverlay {
+	source_root         string
+	source_display_root string
+	temp_root           string
+	source_work_dir     string
+	temp_work_dir       string
+	temp_source_file    string
+}
+
+// compilation_overlay_root returns the broadest source root needed to preserve
+// local module imports. A v.mod project is overlaid from its root; loose modules
+// retain the historical same-directory scope.
+fn compilation_overlay_root(real_path string) string {
+	work_dir := os.dir(real_path)
+	project_root := find_project_root(work_dir)
+	if project_root != '' && project_root != '/' && path_is_within(real_path, project_root) {
+		return os.real_path(project_root)
+	}
+	return os.real_path(work_dir)
+}
+
+// compilation_overlay_display_root retains the path spelling supplied by the
+// LSP client. On macOS, canonicalizing `/tmp` to `/private/tmp` is necessary for
+// containment checks but must not silently change returned document URIs.
+fn compilation_overlay_display_root(real_path string) string {
+	work_dir := os.dir(real_path)
+	project_root := find_project_root(work_dir)
+	if project_root != '' && project_root != '/' && path_is_within(real_path, project_root) {
+		return project_root
+	}
+	return work_dir
+}
+
+fn should_use_compilation_overlay(real_path string, open_file_count int) bool {
+	work_dir := os.dir(real_path)
+	return find_project_root(work_dir) != '' || open_file_count > 1
+		|| has_sibling_v_files(work_dir, real_path)
+}
+
+// prepare_compilation_overlay builds a temporary project view in which every
+// open buffer is materialized and unchanged project paths are symlinked back to
+// disk. The compiler runs in the overlaid counterpart of the source module.
+fn (mut app App) prepare_compilation_overlay(real_path string) !CompilationOverlay {
+	canonical_real_path := os.real_path(real_path)
+	source_root := compilation_overlay_root(canonical_real_path)
+	source_display_root := compilation_overlay_display_root(real_path)
+	source_work_dir := os.dir(canonical_real_path)
+	temp_root_unresolved := app.write_tracked_files_to_temp(source_root)!
+	temp_root := os.real_path(temp_root_unresolved)
+	symlink_untracked_files(source_root, temp_root, app.open_files) or {
+		os.rmdir_all(temp_root) or {}
+		return error('Failed to populate compilation overlay: ${err}')
+	}
+
+	work_rel := path_relative_to(source_work_dir, source_root) or {
+		os.rmdir_all(temp_root) or {}
+		return error('Source work directory is outside overlay root: ${source_work_dir}')
+	}
+	file_rel := path_relative_to(canonical_real_path, source_root) or {
+		os.rmdir_all(temp_root) or {}
+		return error('Source file is outside overlay root: ${canonical_real_path}')
+	}
+	temp_work_dir := if work_rel == '' {
+		temp_root
+	} else {
+		os.join_path(temp_root, work_rel)
+	}
+	if !os.exists(temp_work_dir) {
+		os.mkdir_all(temp_work_dir) or {
+			os.rmdir_all(temp_root) or {}
+			return error('Failed to create overlay work directory ${temp_work_dir}: ${err}')
+		}
+	}
+	return CompilationOverlay{
+		source_root:         source_root
+		source_display_root: source_display_root
+		temp_root:           temp_root
+		source_work_dir:     source_work_dir
+		temp_work_dir:       temp_work_dir
+		temp_source_file:    os.join_path(temp_root, file_rel)
+	}
+}
+
+// source_path_from_overlay maps compiler paths in the temporary project back to
+// their original source paths.
+fn source_path_from_overlay(reported_path string, overlay CompilationOverlay) string {
+	mut candidate := os.to_slash(reported_path)
+	if candidate.starts_with('./') || candidate.starts_with('.\\') {
+		candidate = os.join_path(overlay.temp_work_dir, candidate[2..])
+	} else if !os.is_abs_path(candidate) {
+		candidate = os.join_path(overlay.temp_work_dir, candidate)
+	}
+	if path_is_within(candidate, overlay.temp_root) {
+		rel := path_relative_to(candidate, overlay.temp_root) or { return candidate }
+		return os.join_path(overlay.source_display_root, rel)
+	}
+	return candidate
+}
+
 fn (mut app App) run_v_check(path string, text string) []JsonError {
 	real_path := uri_to_path(path)
 	working_dir := os.dir(real_path)
@@ -365,6 +464,7 @@ fn (mut app App) run_v_check(path string, text string) []JsonError {
 	mut compile_target := ''
 	mut use_multifile := false
 	mut singlefile_tmppath := ''
+	mut overlay := CompilationOverlay{}
 
 	// Check the diagnostics cache before invoking the compiler.
 	content_hash := text.hash()
@@ -379,23 +479,15 @@ fn (mut app App) run_v_check(path string, text string) []JsonError {
 	log('running v.exe check for ${real_path}')
 	log('Open files count: ${app.open_files.len}')
 
-	if app.open_files.len > 1 || has_sibling_v_files(working_dir, real_path) {
-		// Write all tracked files to temp directory
-		temp_project_dir = app.write_tracked_files_to_temp(working_dir) or {
-			log('Failed to write tracked files: ${err}')
-			''
+	if should_use_compilation_overlay(real_path, app.open_files.len) {
+		overlay = app.prepare_compilation_overlay(real_path) or {
+			log('Failed to prepare compilation overlay: ${err}')
+			CompilationOverlay{}
 		}
-
-		if temp_project_dir != '' {
-			// Resolve symlinks so compiler output paths (e.g. /private/tmp on macOS)
-			// match temp_project_dir when remapping paths back to real locations.
-			temp_project_dir = os.real_path(temp_project_dir)
-			symlink_untracked_files(working_dir, temp_project_dir, app.open_files) or {
-				log('Failed to symlink untracked files: ${err}')
-			}
-			rel_path := real_path.replace(working_dir, '').trim_left('/')
-			file_to_check = os.join_path(temp_project_dir, rel_path)
-			compile_target = temp_project_dir
+		if overlay.temp_root != '' {
+			temp_project_dir = overlay.temp_root
+			file_to_check = overlay.temp_source_file
+			compile_target = overlay.temp_work_dir
 			use_multifile = true
 			log('temp_project_dir=${temp_project_dir}, file_to_check=${file_to_check}, compile_target=${compile_target}')
 		}
@@ -436,22 +528,10 @@ fn (mut app App) run_v_check(path string, text string) []JsonError {
 	// error filtlering
 	if use_multifile {
 		mut filtered_errors := []JsonError{}
-		rel_path_to_check := real_path.replace(working_dir, '').trim_string_left('/')
 
 		for err in json_errors {
-			err_file := match true {
-				err.path.starts_with(temp_project_dir) {
-					err.path.replace(temp_project_dir, '').trim_string_left('/')
-				}
-				err.path.starts_with('./') || err.path.starts_with('.\\') {
-					err.path[2..]
-				}
-				else {
-					err.path
-				}
-			}
-
-			if err_file == rel_path_to_check || err_file == os.file_name(real_path) {
+			err_file := source_path_from_overlay(err.path, overlay)
+			if normalized_index_path(err_file) == normalized_index_path(real_path) {
 				updated_err := JsonError{
 					path:    real_path
 					message: err.message
@@ -463,7 +543,7 @@ fn (mut app App) run_v_check(path string, text string) []JsonError {
 				filtered_errors << updated_err
 				log('INCLUDING ERROR from err_file=${err_file}: ${err.message}')
 			} else {
-				log('EXLUCING ERROR from err_file=${err_file} rel_path_to_check=${rel_path_to_check}')
+				log('EXCLUDING ERROR from err_file=${err_file} real_path=${real_path}')
 			}
 		}
 
@@ -489,16 +569,16 @@ fn (mut app App) write_tracked_files_to_temp(working_dir string) !string {
 	log('WRITING ${app.open_files.len} tracked files to temp directory')
 
 	// create subdir
-	temp_project_dir := os.join_path(app.temp_dir, 'project_${time.now().unix_milli()}')
+	temp_project_dir := os.join_path(app.temp_dir, 'project_${time.now().unix_nano()}')
 	os.mkdir_all(temp_project_dir) or { return error('Failed to create temp project dir: ${err}') }
 
 	// write file structure
 	for uri, content in app.open_files {
-		real_path := uri_to_path(uri)
+		real_path := os.real_path(uri_to_path(uri))
 
 		// Normalize slashes for comparison
 		normalized_real := real_path.replace('\\', '/')
-		normalized_working := working_dir.replace('\\', '/')
+		normalized_working := os.real_path(working_dir).replace('\\', '/')
 
 		// Skip files outside the working dir. On Windows the containment check is
 		// case-insensitive, while the returned path preserves its original case.
@@ -554,35 +634,110 @@ fn has_sibling_v_files(working_dir string, current_file string) bool {
 
 fn symlink_untracked_files(working_dir string, temp_dir string, tracked_files map[string]string) ! {
 	log('SYMLINKING FROM ${working_dir} TO ${temp_dir}')
+	mut tracked_rel_paths := []string{}
+	canonical_working_dir := os.real_path(working_dir)
+	for uri, _ in tracked_files {
+		real_path := os.real_path(uri_to_path(uri))
+		if rel := path_relative_to(real_path, canonical_working_dir) {
+			tracked_rel_paths << rel.replace('\\', '/')
+		}
+	}
+	local_import_dirs := local_import_rel_dirs(canonical_working_dir, tracked_files)
+	symlink_untracked_tree(canonical_working_dir, temp_dir, '', tracked_rel_paths,
+		local_import_dirs)!
+}
 
-	v_files := os.walk_ext(working_dir, '.v')
-	for v_file in v_files {
-		// skip if tracked
-		file_uri := path_to_uri(v_file)
-		if file_uri in tracked_files {
+// local_import_rel_dirs returns project-local module directories imported by
+// tracked buffers, including their local import closure. These directories must
+// be real directories in the overlay: the V checker resolves symlinked local
+// module files back outside the temporary project and gd^ can then stop at the
+// import declaration instead of the requested symbol.
+fn local_import_rel_dirs(source_root string, tracked_files map[string]string) []string {
+	mut pending := []string{}
+	for _, content in tracked_files {
+		pending << parse_imports(content)
+	}
+	mut seen_modules := map[string]bool{}
+	mut seen_dirs := map[string]bool{}
+	mut result := []string{}
+	for pending.len > 0 {
+		module_path := pending.pop()
+		if module_path == '' || module_path in seen_modules {
+			continue
+		}
+		seen_modules[module_path] = true
+		rel_dir := module_path.replace('.', '/')
+		module_dir := os.join_path(source_root, rel_dir)
+		if !os.is_dir(module_dir) {
+			continue
+		}
+		normalized_rel := rel_dir.replace('\\', '/').trim('/')
+		if normalized_rel == '' || normalized_rel in seen_dirs {
+			continue
+		}
+		seen_dirs[normalized_rel] = true
+		result << normalized_rel
+		for entry in os.ls(module_dir) or { [] } {
+			if !entry.ends_with('.v') || entry.ends_with('_test.v') {
+				continue
+			}
+			content := os.read_file(os.join_path(module_dir, entry)) or { continue }
+			pending << parse_imports(content)
+		}
+	}
+	return result
+}
+
+fn symlink_untracked_tree(source_dir string, target_dir string, relative_dir string, tracked_rel_paths []string, local_import_dirs []string) ! {
+	entries := os.ls(source_dir)!
+	for entry in entries {
+		source_path := os.join_path(source_dir, entry)
+		relative_path := if relative_dir == '' {
+			entry
+		} else {
+			relative_dir + '/' + entry
+		}
+		target_path := os.join_path(target_dir, entry)
+		if relative_path in tracked_rel_paths {
 			continue
 		}
 
-		// calc rel path
-		mut rel_path := v_file.replace(working_dir, '').trim_string_left('/')
-		if rel_path == '' {
-			rel_path = os.file_name(v_file)
+		mut has_tracked_descendant := false
+		prefix := relative_path + '/'
+		for tracked_path in tracked_rel_paths {
+			if tracked_path.starts_with(prefix) {
+				has_tracked_descendant = true
+				break
+			}
 		}
-		temp_file_path := os.join_path(temp_dir, rel_path)
-
-		// create parent dir
-		temp_file_dir := os.dir(temp_file_path)
-		os.mkdir_all(temp_file_dir) or {
-			log('Failed to create dir ${temp_file_dir}: ${err}')
+		mut materialize_dir := relative_path in local_import_dirs
+		if !materialize_dir {
+			for import_dir in local_import_dirs {
+				if import_dir.starts_with(relative_path + '/') {
+					materialize_dir = true
+					break
+				}
+			}
+		}
+		if os.is_dir(source_path) && (has_tracked_descendant || materialize_dir) {
+			if !os.exists(target_path) {
+				os.mkdir_all(target_path)!
+			}
+			symlink_untracked_tree(source_path, target_path, relative_path, tracked_rel_paths,
+				local_import_dirs)!
 			continue
 		}
-
-		// create symlink
-		os.symlink(v_file, temp_file_path) or {
-			log('Failed to symlink ${v_file} to ${temp_file_path}: ${err}')
+		if os.exists(target_path) || os.is_link(target_path) {
 			continue
 		}
-		log('Symlinked untracked file: ${v_file} -> ${temp_file_path}')
+		if relative_dir in local_import_dirs && source_path.ends_with('.v')
+			&& os.is_file(source_path) {
+			os.link(source_path, target_path) or { os.cp(source_path, target_path)! }
+			log('Materialized local module file: ${source_path} -> ${target_path}')
+			continue
+		}
+		os.symlink(source_path, target_path)!
+		log('Symlinked untracked path: ${source_path} -> ${target_path}')
 	}
 }
 
@@ -656,60 +811,30 @@ fn (mut app App) run_v_line_info(method Method, path string, line_info string) R
 	mut temp_project_dir := ''
 	mut use_multifile := false
 	mut singlefile_tmppath := ''
+	mut overlay := CompilationOverlay{}
 
-	if method == .definition || method == .declaration || method == .type_definition
-		|| method == .implementation {
-		log('OPEN FILES COUNT: ${app.open_files.len}')
-		if app.open_files.len > 1 || has_sibling_v_files(working_dir, real_path) {
-			temp_project_dir = app.write_tracked_files_to_temp(working_dir) or {
-				log('Failed to write tracked files: ${err}')
-				''
-			}
-
-			if temp_project_dir != '' {
-				// Resolve symlinks so compiler output paths (e.g. /private/tmp on macOS)
-				// match temp_project_dir when remapping paths back to real locations.
-				temp_project_dir = os.real_path(temp_project_dir)
-				symlink_untracked_files(working_dir, temp_project_dir, app.open_files) or {
-					log('Failed to symlink untracked files: ${err}')
-				}
-				rel_path := real_path.replace(working_dir, '').trim_left('/')
-				file_to_check = os.join_path(temp_project_dir, rel_path)
-				compile_target = temp_project_dir
-				use_multifile = true
-				log('temp_project_dir=${temp_project_dir}, file_to_check=${file_to_check}, compile_target=${compile_target}')
-			}
+	log('COMPILER OVERLAY for method=${method}, open files=${app.open_files.len}')
+	if should_use_compilation_overlay(real_path, app.open_files.len) {
+		overlay = app.prepare_compilation_overlay(real_path) or {
+			log('Failed to prepare compilation overlay: ${err}')
+			CompilationOverlay{}
 		}
-		if !use_multifile {
+		if overlay.temp_root != '' {
+			temp_project_dir = overlay.temp_root
+			file_to_check = overlay.temp_source_file
+			compile_target = overlay.temp_work_dir
+			use_multifile = true
+			log('temp_project_dir=${temp_project_dir}, file_to_check=${file_to_check}, compile_target=${compile_target}')
+		}
+	}
+
+	if !use_multifile {
+		if method == .definition || method == .declaration || method == .type_definition
+			|| method == .implementation {
 			log('Using single file compilation from disk')
 			file_to_check = real_path
 			compile_target = real_path
-		}
-	} else {
-		log('MULTIFILE for method=${method}')
-		log('OPEN FILES COUNT: ${app.open_files.len}')
-
-		if app.open_files.len > 1 || has_sibling_v_files(working_dir, real_path) {
-			temp_project_dir = app.write_tracked_files_to_temp(working_dir) or {
-				log('Failed to write tracked files: ${err}')
-				''
-			}
-			if temp_project_dir != '' {
-				// Resolve symlinks so compiler output paths (e.g. /private/tmp on macOS)
-				// match temp_project_dir when remapping paths back to real locations.
-				temp_project_dir = os.real_path(temp_project_dir)
-				symlink_untracked_files(working_dir, temp_project_dir, app.open_files) or {
-					log('Failed to symlink untracked files: ${err}')
-				}
-				rel_path := real_path.replace(working_dir, '').trim_left('/')
-				file_to_check = os.join_path(temp_project_dir, rel_path)
-				compile_target = temp_project_dir
-				use_multifile = true
-				log('temp_project_dir=${temp_project_dir}, file_to_check=${file_to_check}, compile_target=${compile_target}')
-			}
-		}
-
-		if !use_multifile {
+		} else {
 			log('SINGLEFILE method=${method}')
 			singlefile_tmppath = make_singlefile_temp_path(app.temp_dir, real_path, 'lineinfo')
 			log('WRITING FILE ${time.now()} to temp path ${singlefile_tmppath}')
@@ -851,22 +976,7 @@ fn (mut app App) run_v_line_info(method Method, path string, line_info string) R
 				col := fields[fields.len - 1].int()
 				mut uri_path := os.to_slash(fields[..fields.len - 2].join(':'))
 				if use_multifile && temp_project_dir != '' {
-					uri_path = match true {
-						uri_path.starts_with(temp_project_dir) {
-							rel_path := uri_path.replace(temp_project_dir, '').trim_left('/')
-							os.join_path(working_dir, rel_path)
-						}
-						uri_path.starts_with('./') || uri_path.starts_with('.\\') {
-							os.join_path(working_dir, uri_path[2..])
-						}
-						!os.is_abs_path(uri_path) {
-							os.join_path(working_dir, uri_path)
-						}
-						else {
-							uri_path
-						}
-					}
-
+					uri_path = source_path_from_overlay(uri_path, overlay)
 					log('MAPPED TO uri_path=${uri_path}')
 				}
 				// Build a proper percent-encoded DocumentUri so paths containing
