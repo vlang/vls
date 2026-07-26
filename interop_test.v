@@ -168,6 +168,34 @@ fn test_path_to_uri_parent_dir() {
 	assert result.contains('file.v')
 }
 
+fn test_compiler_location_reuses_equivalent_open_uri() {
+	temp_dir := os.join_path(os.temp_dir(), 'vls_compiler_location_${os.getpid()}')
+	interop_test_must_mkdir_all(temp_dir)
+	defer {
+		os.rmdir_all(temp_dir) or {}
+	}
+	path := os.join_path(temp_dir, 'main.v')
+	interop_test_must_write_file(path, 'aaaa target\n')
+	canonical_uri := path_to_uri(path)
+	open_uri := canonical_uri.replace_once('file:///', 'file://localhost/')
+	mut app := &App{
+		open_files:        map[string]string{}
+		position_encoding: .utf16
+	}
+	app.open_files[open_uri] = '🚀 target\n'
+
+	location := app.compiler_location(path, 0, 5)
+
+	assert location.uri == open_uri
+	assert location.range.start.char == 3
+	assert location.range.end.char == 3
+
+	app.position_encoding = .utf32
+	location_utf32 := app.compiler_location(path, 0, 5)
+	assert location_utf32.uri == open_uri
+	assert location_utf32.range.start.char == 2
+}
+
 // --- Round-trip conversion tests ---
 
 fn test_path_uri_roundtrip() {

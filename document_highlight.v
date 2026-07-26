@@ -12,8 +12,8 @@ const doc_highlight_write = 3
 // classify_highlight_kind classifies an identifier occurrence ending at byte
 // offset `end_byte` on `line` as a Write (assignment target) or a Read, based on
 // the operator that immediately follows it. This is a syntactic heuristic
-// (P2-03): `name :=` / `name =` / `name op=` are writes; comparisons and
-// everything else are reads.
+// (P2-03): `name :=` / `name =` / `name op=` / `name++` / `name--` are writes;
+// comparisons and everything else are reads.
 fn classify_highlight_kind(line string, end_byte int) int {
 	mut i := end_byte
 	for i < line.len && (line[i] == ` ` || line[i] == `\t`) {
@@ -31,6 +31,9 @@ fn classify_highlight_kind(line string, end_byte int) int {
 		return doc_highlight_read
 	}
 	if rest.starts_with('=') {
+		return doc_highlight_write
+	}
+	if rest.starts_with('++') || rest.starts_with('--') {
 		return doc_highlight_write
 	}
 	// Compound assignment: += -= *= /= %= &= |= ^= (op followed by '=', not '==').
