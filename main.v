@@ -19,6 +19,7 @@ mut:
 	open_files_versions                         map[string]int    // Per-URI document version from the client
 	temp_dir                                    string            // Temporary directory for multi-file compilation
 	workspace_roots                             []string          // Workspace root directories from initialize
+	removed_workspace_roots                     []string          // Roots explicitly removed by the client
 	capture_output                              bool              // Test hook: capture outbound transport messages instead of writing
 	captured_output                             []string          // Test hook buffer for outbound transport messages
 	supports_dynamic_watched_files_registration bool              // Client supports dynamic workspace watcher registration

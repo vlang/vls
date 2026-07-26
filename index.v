@@ -237,6 +237,24 @@ fn index_uri_for_path(path string, open_uris_by_path map[string]string) string {
 	return open_uris_by_path[normalized_index_path(path)] or { path_to_uri(path) }
 }
 
+// path_is_in_removed_workspace reports whether `path` is under a workspace root
+// explicitly removed by the client. A currently active root takes precedence,
+// allowing a nested folder to be added again under a removed parent.
+fn (app &App) path_is_in_removed_workspace(path string) bool {
+	p := path.replace('\\', '/')
+	for root in app.workspace_roots {
+		if path_is_within(p, root.replace('\\', '/')) {
+			return false
+		}
+	}
+	for root in app.removed_workspace_roots {
+		if path_is_within(p, root.replace('\\', '/')) {
+			return true
+		}
+	}
+	return false
+}
+
 // reindex_uri (re)parses `uri` from its authoritative source, skipping work when
 // the content fingerprint is unchanged. Open buffers are always authoritative.
 // Disk-backed entries obey the same file-size and total-entry limits as workspace
@@ -248,6 +266,11 @@ fn (mut app App) reindex_uri(uri string) {
 		app.index_skipped_uris.delete(uri)
 	} else {
 		path := uri_to_path(uri)
+		if app.path_is_in_removed_workspace(path) {
+			app.drop_index_uri(uri)
+			app.index_skipped_uris.delete(uri)
+			return
+		}
 		if !os.is_file(path) {
 			app.drop_index_uri(uri)
 			app.index_skipped_uris.delete(uri)
@@ -445,7 +468,7 @@ fn (mut app App) ensure_dirs_indexed(dirs []string) {
 	}
 	open_uris_by_path := app.open_index_uris_by_path()
 	for dir in dirs {
-		if dir == '' || dir == '/' || !os.is_dir(dir) {
+		if dir == '' || dir == '/' || app.path_is_in_removed_workspace(dir) || !os.is_dir(dir) {
 			continue
 		}
 		if dir in app.indexed_dirs && !app.index_dir_needs_refresh(dir) {
@@ -500,7 +523,7 @@ fn (mut app App) ensure_dirs_indexed(dirs []string) {
 // deleted from `dir` are reconciled out — otherwise a stale or removed unopened
 // sibling would keep contributing completions until restart.
 fn (mut app App) ensure_dir_shallow_indexed(dir string) {
-	if dir == '' || dir == '/' || !os.is_dir(dir) {
+	if dir == '' || dir == '/' || app.path_is_in_removed_workspace(dir) || !os.is_dir(dir) {
 		return
 	}
 	scope := 'shallow:${dir}'
@@ -625,7 +648,18 @@ fn (app &App) index_query_dirs() []string {
 		}
 	}
 	for uri, _ in app.open_files {
-		root := find_project_root(os.dir(uri_to_path(uri)))
+		open_path := uri_to_path(uri).replace('\\', '/')
+		mut covered := false
+		for workspace_root in app.workspace_roots {
+			if path_is_within(open_path, workspace_root.replace('\\', '/')) {
+				covered = true
+				break
+			}
+		}
+		if covered || app.path_is_in_removed_workspace(open_path) {
+			continue
+		}
+		root := find_project_root(os.dir(open_path))
 		if root != '' && root != '/' && root !in seen {
 			seen[root] = true
 			dirs << root
@@ -659,6 +693,9 @@ fn (mut app App) ensure_loose_file_dirs_shallow_indexed() {
 			}
 		}
 		if !covered {
+			if app.path_is_in_removed_workspace(dir) {
+				continue
+			}
 			app.ensure_dir_shallow_indexed(dir)
 		}
 	}
