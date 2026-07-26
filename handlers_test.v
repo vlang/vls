@@ -4421,8 +4421,12 @@ fn test_classify_highlight_kind_read_write() {
 	assert classify_highlight_kind('x += 1', 1) == doc_highlight_write
 	assert classify_highlight_kind('x++', 1) == doc_highlight_write
 	assert classify_highlight_kind('x--', 1) == doc_highlight_write
+	assert classify_highlight_kind('bits <<= 1', 4) == doc_highlight_write
+	assert classify_highlight_kind('bits >>= 1', 4) == doc_highlight_write
 	// Comparisons and uses are reads.
 	assert classify_highlight_kind('x == 1', 1) == doc_highlight_read
+	assert classify_highlight_kind('bits << 1', 4) == doc_highlight_read
+	assert classify_highlight_kind('bits >> 1', 4) == doc_highlight_read
 	assert classify_highlight_kind('foo(x)', 3) == doc_highlight_read
 	assert classify_highlight_kind('return x', 8) == doc_highlight_read
 }
