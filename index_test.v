@@ -212,6 +212,89 @@ fn test_search_symbol_in_dirs_finds_cross_file_occurrences() {
 	assert uris.any(it.ends_with('b.v'))
 }
 
+fn test_generation_key_scopes_to_project_root() {
+	root := index_test_tmpdir('genkey')
+	defer {
+		os.rmdir_all(root) or {}
+	}
+	os.write_file(os.join_path(root, 'v.mod'), 'Module {}\n') or {
+		assert false, 'write v.mod failed'
+		return
+	}
+	sub := os.join_path(root, 'sub')
+	os.mkdir_all(sub) or {
+		assert false, 'mkdir sub failed'
+		return
+	}
+	mut app := index_test_app()
+	// Two files in different directories of the same project share a generation
+	// key (the project root), so editing one invalidates the other's cache.
+	uri_a := path_to_uri(os.join_path(root, 'a.v'))
+	uri_b := path_to_uri(os.join_path(sub, 'b.v'))
+	assert app.generation_key(uri_a) == app.generation_key(uri_b)
+	before := app.project_generation(uri_a)
+	app.bump_generation(uri_b)
+	assert app.project_generation(uri_a) == before + 1
+}
+
+fn test_index_refresh_discovers_new_files_without_watchers() {
+	root := index_test_tmpdir('refresh')
+	defer {
+		os.rmdir_all(root) or {}
+	}
+	os.write_file(os.join_path(root, 'v.mod'), 'Module {}\n') or {
+		assert false, 'write v.mod failed'
+		return
+	}
+	os.write_file(os.join_path(root, 'a.v'), 'module main\n\nfn alpha() {}\n') or {
+		assert false, 'write a.v failed'
+		return
+	}
+	mut app := index_test_app()
+	app.supports_dynamic_watched_files_registration = false // no client watchers
+	app.ensure_dirs_indexed([root])
+	assert app.query_workspace_symbols('alpha').len == 1
+	assert app.query_workspace_symbols('beta').len == 0
+
+	// A file created after the first walk is discovered on a throttled re-walk.
+	os.write_file(os.join_path(root, 'b.v'), 'module main\n\nfn beta() {}\n') or {
+		assert false, 'write b.v failed'
+		return
+	}
+	app.indexed_dir_walk_ms[root] = 0 // force the throttle to treat the dir as stale
+	app.ensure_dirs_indexed([root])
+	assert app.query_workspace_symbols('beta').len == 1
+}
+
+fn test_index_no_refresh_when_watchers_available() {
+	root := index_test_tmpdir('nowatch')
+	defer {
+		os.rmdir_all(root) or {}
+	}
+	os.write_file(os.join_path(root, 'v.mod'), 'Module {}\n') or {
+		assert false, 'write v.mod failed'
+		return
+	}
+	os.write_file(os.join_path(root, 'a.v'), 'module main\n\nfn alpha() {}\n') or {
+		assert false, 'write a.v failed'
+		return
+	}
+	mut app := index_test_app()
+	app.supports_dynamic_watched_files_registration = true // rely on watcher events
+	app.ensure_dirs_indexed([root])
+	assert app.query_workspace_symbols('alpha').len == 1
+
+	// With watchers active, freshness comes from didChangeWatchedFiles, so a bare
+	// re-index call does NOT re-walk even when the recorded walk time looks stale.
+	os.write_file(os.join_path(root, 'b.v'), 'module main\n\nfn beta() {}\n') or {
+		assert false, 'write b.v failed'
+		return
+	}
+	app.indexed_dir_walk_ms[root] = 0
+	app.ensure_dirs_indexed([root])
+	assert app.query_workspace_symbols('beta').len == 0
+}
+
 fn test_drop_index_under_removes_folder_entries() {
 	mut app := index_test_app()
 	app.open_files['file:///proj/a/x.v'] = 'module main\n\nfn ax() {}\n'
