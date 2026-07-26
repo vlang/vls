@@ -157,6 +157,40 @@ fn test_watched_file_reindex_obeys_total_entry_limit() {
 	assert uri !in app.symbol_index
 }
 
+fn test_watched_file_reuses_equivalent_open_document_uri() {
+	root := index_test_tmpdir('watched_open_uri')
+	defer {
+		os.rmdir_all(root) or {}
+	}
+	path := os.join_path(root, 'main.v')
+	os.write_file(path, 'module main\n\nfn stale_disk_symbol() {}\n') or {
+		assert false, 'write main.v failed: ${err}'
+		return
+	}
+	event_uri := path_to_uri(path)
+	open_uri := event_uri.replace_once('file:///', 'file://localhost/')
+	mut app := index_test_app()
+	app.watched_files_active = true
+	app.open_files[open_uri] = 'module main\n\nfn authoritative_open_symbol() {}\n'
+	app.reindex_uri(open_uri)
+
+	app.on_did_change_watched_files(Request{
+		params: json2.encode(DidChangeWatchedFilesParams{
+			changes: [FileEvent{
+				uri:        event_uri
+				event_type: 2
+			}]
+		})
+	})
+
+	assert open_uri in app.symbol_index
+	assert event_uri !in app.symbol_index
+	assert app.query_workspace_symbols('stale_disk_symbol').len == 0
+	open_symbols := app.query_workspace_symbols('authoritative_open_symbol')
+	assert open_symbols.len == 1
+	assert open_symbols[0].location.uri == open_uri
+}
+
 fn test_reconcile_indexed_dir_retains_entries_after_incomplete_walk() {
 	mut app := index_test_app()
 	kept_uri := 'file:///workspace/kept.v'
