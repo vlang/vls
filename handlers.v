@@ -2305,38 +2305,36 @@ fn same_anchor_location(a Location, b Location) bool {
 	return delta == 0 || delta == 1 || delta == -1
 }
 
+// reference_semantic_max_candidates bounds how many occurrences a references or
+// rename request will verify with the compiler. Each verification launches a
+// serial `run_v_line_info` (gd^) process, and the request loop cannot process a
+// cancellation mid-scan, so an unbounded scan of a very common symbol could fire
+// hundreds of serial compiles each up to compiler_timeout_ms (P1-04/P0-04). Past
+// this cap the scan falls back to the unverified lexical occurrences: bounded and
+// responsive, at the cost of scope precision for that one very common symbol.
+const reference_semantic_max_candidates = 48
+
 // search_symbol_in_dirs_semantic reads candidate occurrences of `symbol` from the
 // reference-occurrence index (no per-request workspace re-walk, P1-05) and keeps
 // only those whose compiler definition lookup resolves to the same declaration
 // anchor, so references stay scope-safe across same-name symbols (P1-04). The
-// per-candidate compiler lookup is cached within the request. Polls for
-// cancellation so a long scan can bail out.
+// per-candidate compiler lookup is cached within the request and the number of
+// compiler invocations is bounded (see reference_semantic_max_candidates).
 fn (mut app App) search_symbol_in_dirs_semantic(symbol string, anchor Location, request_id int) []Location {
 	started_ms := time.now().unix_milli()
 	app.ensure_dirs_indexed(app.index_query_dirs())
 	app.ensure_loose_file_dirs_shallow_indexed()
-	mut locations := []Location{}
-	mut anchor_cache := map[string]?Location{}
-	mut candidate_tokens := 0
+
+	// Collect every lexical candidate first so the compiler-verification cost can
+	// be bounded up front rather than discovered candidate-by-candidate.
+	mut candidates := []Location{}
 	mut uris := app.symbol_index.keys()
 	uris.sort()
 	for uri in uris {
-		if request_id in app.cancelled_requests {
-			return locations
-		}
 		occ := app.occurrences_for(uri)
 		positions := occ[symbol] or { continue }
 		for p in positions {
-			if request_id in app.cancelled_requests {
-				return locations
-			}
-			candidate_tokens++
-			resolved := app.resolve_symbol_anchor_cached(uri, p.line, p.start_char, mut
-				anchor_cache) or { continue }
-			if !same_anchor_location(resolved, anchor) {
-				continue
-			}
-			locations << Location{
+			candidates << Location{
 				uri:   uri
 				range: LSPRange{
 					start: Position{
@@ -2351,8 +2349,29 @@ fn (mut app App) search_symbol_in_dirs_semantic(symbol string, anchor Location, 
 			}
 		}
 	}
+
+	// Too many candidates to verify one-compile-per-token without freezing the
+	// loop: return the lexical occurrences unverified (scope-unsafe but bounded).
+	if candidates.len > reference_semantic_max_candidates {
+		app.send_log_message('semantic-scan symbol=${symbol} candidates=${candidates.len} exceeds cap ${reference_semantic_max_candidates}; returning lexical occurrences',
+			3)
+		return candidates
+	}
+
+	mut locations := []Location{}
+	mut anchor_cache := map[string]?Location{}
+	for cand in candidates {
+		if request_id in app.cancelled_requests {
+			return locations
+		}
+		resolved := app.resolve_symbol_anchor_cached(cand.uri, cand.range.start.line,
+			cand.range.start.char, mut anchor_cache) or { continue }
+		if same_anchor_location(resolved, anchor) {
+			locations << cand
+		}
+	}
 	elapsed_ms := time.now().unix_milli() - started_ms
-	app.send_log_message('semantic-scan symbol=${symbol} candidates=${candidate_tokens} matches=${locations.len} elapsed_ms=${elapsed_ms}',
+	app.send_log_message('semantic-scan symbol=${symbol} candidates=${candidates.len} matches=${locations.len} elapsed_ms=${elapsed_ms}',
 		4)
 	return locations
 }
