@@ -475,6 +475,35 @@ fn test_shallow_index_refreshes_and_reconciles_without_watchers() {
 	assert app.query_workspace_symbols('delta').len == 0
 }
 
+fn test_shallow_index_excludes_out_of_tree_file_symlink() {
+	root := index_test_tmpdir('shallow_file_containment')
+	outside := index_test_tmpdir('shallow_file_outside')
+	defer {
+		os.rmdir_all(root) or {}
+		os.rmdir_all(outside) or {}
+	}
+	os.write_file(os.join_path(root, 'in.v'), 'module main\n\nfn inside_symbol() {}\n') or {
+		assert false, 'write in.v failed: ${err}'
+		return
+	}
+	outside_file := os.join_path(outside, 'out.v')
+	os.write_file(outside_file, 'module main\n\nfn external_symbol() {}\n') or {
+		assert false, 'write out.v failed: ${err}'
+		return
+	}
+	os.symlink(outside_file, os.join_path(root, 'external.v')) or {
+		// Symlink creation can be unavailable (permissions/filesystem); skip then.
+		return
+	}
+
+	mut app := index_test_app()
+	app.ensure_dir_shallow_indexed(root)
+
+	assert app.query_workspace_symbols('inside_symbol').len == 1
+	assert app.query_workspace_symbols('external_symbol').len == 0
+	assert path_to_uri(os.join_path(root, 'external.v')) !in app.symbol_index
+}
+
 fn test_shallow_index_skips_reconciliation_after_hitting_entry_cap() {
 	root := index_test_tmpdir('shallow_cap')
 	defer {
