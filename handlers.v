@@ -2517,7 +2517,7 @@ fn (mut app App) handle_code_action(request Request) Response {
 	// contiguous block. If imports are separated by any other code or comments
 	// we refuse the action rather than delete the intervening text (P0-09).
 	if code_action_kind_wanted(only, code_action_kind_source_organize_imports) {
-		if action := build_safe_organize_imports_action(uri, lines, app.position_encoding) {
+		if action := build_safe_organize_imports_action(uri, content, lines, app.position_encoding) {
 			actions << action
 		}
 	}
@@ -2550,7 +2550,7 @@ fn code_action_kind_wanted(only []string, kind string) bool {
 // build_safe_organize_imports_action returns an Organize Imports action that is
 // guaranteed to leave all non-import text byte-for-byte unchanged, or none when
 // the imports are not a single contiguous block.
-fn build_safe_organize_imports_action(uri string, lines []string, enc PositionEncoding) ?CodeAction {
+fn build_safe_organize_imports_action(uri string, content string, lines []string, enc PositionEncoding) ?CodeAction {
 	mut import_lines := []int{}
 	for i, line in lines {
 		if line.trim_space().starts_with('import ') {
@@ -2578,13 +2578,14 @@ fn build_safe_organize_imports_action(uri string, lines []string, enc PositionEn
 		}
 	}
 	unique_imports.sort()
-	new_text := unique_imports.join('\n')
+	line_ending := line_ending_after_line(content, first)
+	new_text := unique_imports.join(line_ending)
 	// If nothing would change, don't offer a no-op edit.
 	mut original := []string{}
 	for i in first .. last + 1 {
 		original << lines[i]
 	}
-	if original.join('\n') == new_text {
+	if original.join(line_ending) == new_text {
 		return none
 	}
 	// Postcondition guard: the replaced block contains only import lines, so no
@@ -2613,6 +2614,23 @@ fn build_safe_organize_imports_action(uri string, lines []string, enc PositionEn
 		kind:  code_action_kind_source_organize_imports
 		edit:  edit
 	}
+}
+
+// line_ending_after_line returns the terminator following `line`. Falling back
+// to LF covers a final unterminated line and empty content.
+fn line_ending_after_line(content string, line int) string {
+	starts := line_start_offsets(content)
+	if line < 0 || line + 1 >= starts.len {
+		return '\n'
+	}
+	next_start := starts[line + 1]
+	if next_start >= 2 && content[next_start - 2] == `\r` && content[next_start - 1] == `\n` {
+		return '\r\n'
+	}
+	if next_start >= 1 && content[next_start - 1] == `\r` {
+		return '\r'
+	}
+	return '\n'
 }
 
 // collect_module_fn_completions collects free-function completions from sibling

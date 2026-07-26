@@ -4150,6 +4150,44 @@ fn test_organize_imports_sorts_contiguous_block() {
 	assert found, 'organize imports should be offered for a contiguous import block'
 }
 
+fn test_organize_imports_preserves_crlf_line_endings() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	uri := 'file:///tmp/oi_crlf.v'
+	app.open_files[uri] = 'module main\r\n\r\nimport time\r\nimport os\r\n\r\nfn main() {}\r\n'
+	resp := app.handle_code_action(Request{
+		id:     3
+		params: json2.encode(CodeActionParams{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			range:         LSPRange{}
+			context:       CodeActionContext{}
+		},
+			escape_unicode: true
+		)
+	})
+	assert resp.result is []CodeAction
+	actions := resp.result as []CodeAction
+	for action in actions {
+		if action.kind != code_action_kind_source_organize_imports {
+			continue
+		}
+		edit := action.edit or {
+			assert false, 'organize imports action must contain an edit'
+			return
+		}
+
+		edits := edit.changes[uri]
+		assert edits.len == 1
+		assert edits[0].new_text == 'import os\r\nimport time'
+		return
+	}
+	assert false, 'organize imports should be offered for an unsorted CRLF block'
+}
+
 fn test_remove_unknown_import_range_at_eof_without_newline() {
 	mut app := create_test_app()
 	defer {
