@@ -45,7 +45,7 @@ fn (mut app App) handle_prepare_call_hierarchy(request Request) Response {
 	if item.name == '' {
 		working_dir := os.dir(uri_to_path(uri))
 		search_dirs := app.workspace_search_dirs(working_dir)
-		item = app.find_fn_declaration(word, search_dirs, request.id)
+		item = app.find_fn_declaration(word, search_dirs, request.id, uri.ends_with('_test.v'))
 	}
 	if item.name == '' {
 		return Response{
@@ -163,7 +163,7 @@ fn (mut app App) handle_call_hierarchy_outgoing(request Request) Response {
 		if called_name == self_name {
 			continue // skip direct recursion
 		}
-		callee := app.find_fn_declaration(called_name, search_dirs, request.id)
+		callee := app.find_fn_declaration(called_name, search_dirs, request.id, uri.ends_with('_test.v'))
 		if callee.name == '' {
 			continue
 		}
@@ -216,10 +216,10 @@ fn find_fn_in_content(fn_name string, content string, uri string, enc PositionEn
 // find_fn_declaration searches open files and then on-disk files in
 // `search_dirs` for a function/method named `fn_name`. Polls for cancellation
 // between files so callers can return early when the request is cancelled.
-fn (mut app App) find_fn_declaration(fn_name string, search_dirs []string, request_id int) CallHierarchyItem {
+fn (mut app App) find_fn_declaration(fn_name string, search_dirs []string, request_id int, include_tests bool) CallHierarchyItem {
 	// Answer from the persistent symbol index instead of re-scanning every file.
 	app.ensure_dirs_indexed(search_dirs)
-	if uri, sym := app.find_indexed_fn(fn_name) {
+	if uri, sym := app.find_indexed_fn(fn_name, include_tests) {
 		return CallHierarchyItem{
 			name:            sym.name
 			kind:            sym.kind

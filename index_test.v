@@ -88,12 +88,38 @@ fn test_index_find_fn() {
 	uri := 'file:///tmp/fn.v'
 	app.open_files[uri] = 'module main\n\nfn target() {}\n'
 	app.ensure_dirs_indexed(app.index_query_dirs())
-	found_uri, sym := app.find_indexed_fn('target') or {
+	found_uri, sym := app.find_indexed_fn('target', false) or {
 		assert false, 'expected to find target'
 		return
 	}
 	assert found_uri == uri
 	assert extract_simple_fn_name(sym.name) == 'target'
+}
+
+fn test_index_find_fn_skips_test_files() {
+	mut app := index_test_app()
+	prod := 'file:///tmp/proj/lib.v'
+	test := 'file:///tmp/proj/lib_test.v'
+	app.open_files[prod] = 'module main\n\nfn helper() {}\n'
+	app.open_files[test] = 'module main\n\nfn helper() {}\n'
+	app.ensure_dirs_indexed(app.index_query_dirs())
+
+	// Production lookup must resolve to the production file, never the test one,
+	// regardless of URI sort order (lib.v sorts before lib_test.v here, but the
+	// filter is what guarantees it).
+	prod_uri, _ := app.find_indexed_fn('helper', false) or {
+		assert false, 'expected to find helper in production'
+		return
+	}
+	assert prod_uri == prod
+	assert !prod_uri.ends_with('_test.v')
+
+	// A query originating from a test file may resolve into test declarations.
+	any_uri, _ := app.find_indexed_fn('helper', true) or {
+		assert false, 'expected to find helper with tests included'
+		return
+	}
+	assert any_uri in [prod, test]
 }
 
 fn test_find_project_root_walks_up_to_v_mod() {
