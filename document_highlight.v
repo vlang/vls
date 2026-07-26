@@ -9,12 +9,106 @@ import os
 const doc_highlight_read = 2
 const doc_highlight_write = 3
 
-// classify_highlight_kind classifies an identifier occurrence ending at byte
-// offset `end_byte` on `line` as a Write (assignment target) or a Read, based on
-// the operator that immediately follows it. This is a syntactic heuristic
-// (P2-03): declarations, assignments (including shifts), and `name++`/`name--`
-// are writes; comparisons and everything else are reads.
-fn classify_highlight_kind(line string, end_byte int) int {
+// highlight_has_word reports whether `text` contains `word` at identifier
+// boundaries.
+fn highlight_has_word(text string, word string) bool {
+	if word == '' || text.len < word.len {
+		return false
+	}
+	for i := 0; i + word.len <= text.len; i++ {
+		if text[i..i + word.len] != word {
+			continue
+		}
+		left_ok := i == 0 || !is_ident_char(text[i - 1])
+		right_ok := i + word.len == text.len || !is_ident_char(text[i + word.len])
+		if left_ok && right_ok {
+			return true
+		}
+	}
+	return false
+}
+
+// is_for_binding_highlight reports whether the occurrence is on the binding
+// side of `for name in values` (including `for key, value in map`).
+fn is_for_binding_highlight(line string, start_byte int, end_byte int) bool {
+	prefix := line[..start_byte]
+	mut for_byte := -1
+	for i := 0; i + 3 <= prefix.len; i++ {
+		if prefix[i..i + 3] != 'for' {
+			continue
+		}
+		left_ok := i == 0 || !is_ident_char(prefix[i - 1])
+		right_ok := i + 3 == prefix.len || !is_ident_char(prefix[i + 3])
+		if left_ok && right_ok {
+			for_byte = i
+		}
+	}
+	if for_byte < 0 {
+		return false
+	}
+	binding_prefix := prefix[for_byte + 3..]
+	if binding_prefix.contains('{') || binding_prefix.contains(';')
+		|| highlight_has_word(binding_prefix, 'in') {
+		return false
+	}
+	mut binding_suffix := line[end_byte..]
+	brace_byte := binding_suffix.index_any('{;')
+	if brace_byte >= 0 {
+		binding_suffix = binding_suffix[..brace_byte]
+	}
+	return highlight_has_word(binding_suffix, 'in')
+}
+
+// is_fn_parameter_highlight reports whether an occurrence is a receiver or
+// parameter name in a function signature and is followed by its type.
+fn is_fn_parameter_highlight(line string, start_byte int, end_byte int) bool {
+	mut type_byte := end_byte
+	for type_byte < line.len && (line[type_byte] == ` ` || line[type_byte] == `\t`) {
+		type_byte++
+	}
+	if type_byte == end_byte || type_byte >= line.len {
+		return false
+	}
+	type_start := line[type_byte]
+	if !is_ident_char(type_start) && type_start !in [`[`, `?`, `&`, `.`] {
+		return false
+	}
+
+	prefix := line[..start_byte]
+	mut fn_byte := -1
+	for i := 0; i + 2 <= prefix.len; i++ {
+		if prefix[i..i + 2] != 'fn' {
+			continue
+		}
+		left_ok := i == 0 || !is_ident_char(prefix[i - 1])
+		right_ok := i + 2 == prefix.len || !is_ident_char(prefix[i + 2])
+		if left_ok && right_ok {
+			fn_byte = i
+		}
+	}
+	if fn_byte < 0 {
+		return false
+	}
+	mut paren_depth := 0
+	for i := fn_byte + 2; i < prefix.len; i++ {
+		if prefix[i] == `(` {
+			paren_depth++
+		} else if prefix[i] == `)` {
+			paren_depth--
+		}
+	}
+	return paren_depth > 0
+}
+
+// classify_highlight_kind classifies an identifier occurrence between byte
+// offsets `start_byte` and `end_byte` on `line` as a Write or a Read. This is a
+// syntactic heuristic (P2-03): declarations, assignments (including shifts),
+// and `name++`/`name--` are writes; comparisons and other uses are reads.
+fn classify_highlight_kind(line string, start_byte int, end_byte int) int {
+	if is_for_binding_highlight(line, start_byte, end_byte)
+		|| is_fn_parameter_highlight(line, start_byte, end_byte) {
+		return doc_highlight_write
+	}
 	mut i := end_byte
 	for i < line.len && (line[i] == ` ` || line[i] == `\t`) {
 		i++
@@ -140,6 +234,21 @@ fn (mut app App) handle_document_highlight(request Request) Response {
 							continue
 						}
 					}
+					mut kind := classify_highlight_kind(line, start_byte, col)
+					if a := anchor {
+						occurrence := Location{
+							uri:   uri
+							range: LSPRange{
+								start: Position{
+									line: line_idx
+									char: start_char
+								}
+							}
+						}
+						if same_anchor_location(occurrence, a) {
+							kind = doc_highlight_write
+						}
+					}
 					highlights << DocumentHighlight{
 						range: LSPRange{
 							start: Position{
@@ -151,7 +260,7 @@ fn (mut app App) handle_document_highlight(request Request) Response {
 								char: end_char
 							}
 						}
-						kind:  classify_highlight_kind(line, col) // Read/Write (P2-03)
+						kind:  kind // Read/Write (P2-03)
 					}
 				}
 				continue
