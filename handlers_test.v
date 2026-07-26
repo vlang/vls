@@ -4442,19 +4442,26 @@ fn test_negotiate_position_encoding_defaults_utf16() {
 
 fn test_classify_highlight_kind_read_write() {
 	// Assignments and declarations are writes.
-	assert classify_highlight_kind('x := 1', 1) == doc_highlight_write
-	assert classify_highlight_kind('x = 1', 1) == doc_highlight_write
-	assert classify_highlight_kind('x += 1', 1) == doc_highlight_write
-	assert classify_highlight_kind('x++', 1) == doc_highlight_write
-	assert classify_highlight_kind('x--', 1) == doc_highlight_write
-	assert classify_highlight_kind('bits <<= 1', 4) == doc_highlight_write
-	assert classify_highlight_kind('bits >>= 1', 4) == doc_highlight_write
+	assert classify_highlight_kind('x := 1', 0, 1) == doc_highlight_write
+	assert classify_highlight_kind('x = 1', 0, 1) == doc_highlight_write
+	assert classify_highlight_kind('x += 1', 0, 1) == doc_highlight_write
+	assert classify_highlight_kind('x++', 0, 1) == doc_highlight_write
+	assert classify_highlight_kind('x--', 0, 1) == doc_highlight_write
+	assert classify_highlight_kind('bits <<= 1', 0, 4) == doc_highlight_write
+	assert classify_highlight_kind('bits >>= 1', 0, 4) == doc_highlight_write
+	assert classify_highlight_kind('fn f(item Type) {}', 5, 9) == doc_highlight_write
+	assert classify_highlight_kind('fn (app App) run() {}', 4, 7) == doc_highlight_write
+	assert classify_highlight_kind('for item in items {}', 4, 8) == doc_highlight_write
+	assert classify_highlight_kind('for key, value in items {}', 4, 7) == doc_highlight_write
+	assert classify_highlight_kind('for key, value in items {}', 9, 14) == doc_highlight_write
 	// Comparisons and uses are reads.
-	assert classify_highlight_kind('x == 1', 1) == doc_highlight_read
-	assert classify_highlight_kind('bits << 1', 4) == doc_highlight_read
-	assert classify_highlight_kind('bits >> 1', 4) == doc_highlight_read
-	assert classify_highlight_kind('foo(x)', 3) == doc_highlight_read
-	assert classify_highlight_kind('return x', 8) == doc_highlight_read
+	assert classify_highlight_kind('x == 1', 0, 1) == doc_highlight_read
+	assert classify_highlight_kind('bits << 1', 0, 4) == doc_highlight_read
+	assert classify_highlight_kind('bits >> 1', 0, 4) == doc_highlight_read
+	assert classify_highlight_kind('foo(x)', 0, 3) == doc_highlight_read
+	assert classify_highlight_kind('return x', 7, 8) == doc_highlight_read
+	assert classify_highlight_kind('fn f(item Type) {}', 10, 14) == doc_highlight_read
+	assert classify_highlight_kind('for item in items {}', 12, 17) == doc_highlight_read
 }
 
 fn test_on_did_change_invalid_range_does_not_advance_version() {
