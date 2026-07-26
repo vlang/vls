@@ -608,16 +608,33 @@ fn (app &App) find_indexed_doc_in_scope(name string, cur_dir string, scope_root 
 	return ''
 }
 
+// uri_within_any reports whether `uri`'s path lies within any of `dirs`.
+fn uri_within_any(uri string, dirs []string) bool {
+	p := uri_to_path(uri).replace('\\', '/')
+	for d in dirs {
+		if path_is_within(p, d.replace('\\', '/')) {
+			return true
+		}
+	}
+	return false
+}
+
 // find_indexed_fn returns the (uri, symbol) of the first indexed function or
 // method whose simple name matches `name`. `_test.v` declarations are skipped
 // unless `include_tests` is set, so call hierarchy from production code never
 // resolves into a same-named test helper just because of URI ordering; a query
 // originating in a test file passes include_tests so its own helpers resolve.
-fn (app &App) find_indexed_fn(name string, include_tests bool) ?(string, DocumentSymbol) {
+// When `dirs` is non-empty the search is confined to files within those
+// directories, so a same-named function in an unrelated indexed root is not
+// returned (P1-04) — the global index can span multiple workspace roots.
+fn (app &App) find_indexed_fn(name string, include_tests bool, dirs []string) ?(string, DocumentSymbol) {
 	mut uris := app.symbol_index.keys()
 	uris.sort()
 	for uri in uris {
 		if !include_tests && uri.ends_with('_test.v') {
+			continue
+		}
+		if dirs.len > 0 && !uri_within_any(uri, dirs) {
 			continue
 		}
 		entry := app.symbol_index[uri] or { continue }

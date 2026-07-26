@@ -219,13 +219,23 @@ fn find_fn_in_content(fn_name string, content string, uri string, enc PositionEn
 fn (mut app App) find_fn_declaration(fn_name string, search_dirs []string, request_id int, include_tests bool) CallHierarchyItem {
 	// Answer from the persistent symbol index instead of re-scanning every file.
 	app.ensure_dirs_indexed(search_dirs)
-	if uri, sym := app.find_indexed_fn(fn_name, include_tests) {
-		return CallHierarchyItem{
-			name:            sym.name
-			kind:            sym.kind
-			uri:             uri
-			range:           sym.range
-			selection_range: sym.selection_range
+	// Prefer a declaration in the primary (current module) directory, then widen
+	// to the full search set; never look outside the supplied dirs, so a
+	// same-named function in an unrelated indexed workspace root is not returned.
+	mut dir_passes := [][]string{}
+	if search_dirs.len > 1 {
+		dir_passes << [search_dirs[0]]
+	}
+	dir_passes << search_dirs
+	for dirs in dir_passes {
+		if uri, sym := app.find_indexed_fn(fn_name, include_tests, dirs) {
+			return CallHierarchyItem{
+				name:            sym.name
+				kind:            sym.kind
+				uri:             uri
+				range:           sym.range
+				selection_range: sym.selection_range
+			}
 		}
 	}
 	return CallHierarchyItem{}

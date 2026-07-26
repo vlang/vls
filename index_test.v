@@ -88,12 +88,33 @@ fn test_index_find_fn() {
 	uri := 'file:///tmp/fn.v'
 	app.open_files[uri] = 'module main\n\nfn target() {}\n'
 	app.ensure_dirs_indexed(app.index_query_dirs())
-	found_uri, sym := app.find_indexed_fn('target', false) or {
+	found_uri, sym := app.find_indexed_fn('target', false, []) or {
 		assert false, 'expected to find target'
 		return
 	}
 	assert found_uri == uri
 	assert extract_simple_fn_name(sym.name) == 'target'
+}
+
+fn test_index_find_fn_restricted_to_dirs() {
+	mut app := index_test_app()
+	// Same simple function name in two unrelated indexed roots.
+	app.open_files['file:///rootA/a.v'] = 'module main\n\nfn shared() {}\n'
+	app.open_files['file:///rootB/b.v'] = 'module main\n\nfn shared() {}\n'
+	app.ensure_dirs_indexed(app.index_query_dirs())
+
+	// Restricting to rootB must return rootB's declaration, never rootA's, even
+	// though rootA sorts first.
+	uri_b, _ := app.find_indexed_fn('shared', false, ['/rootB']) or {
+		assert false, 'expected to find shared in rootB'
+		return
+	}
+	assert uri_b == 'file:///rootB/b.v'
+	uri_a, _ := app.find_indexed_fn('shared', false, ['/rootA']) or {
+		assert false, 'expected to find shared in rootA'
+		return
+	}
+	assert uri_a == 'file:///rootA/a.v'
 }
 
 fn test_index_find_fn_skips_test_files() {
@@ -107,7 +128,7 @@ fn test_index_find_fn_skips_test_files() {
 	// Production lookup must resolve to the production file, never the test one,
 	// regardless of URI sort order (lib.v sorts before lib_test.v here, but the
 	// filter is what guarantees it).
-	prod_uri, _ := app.find_indexed_fn('helper', false) or {
+	prod_uri, _ := app.find_indexed_fn('helper', false, []) or {
 		assert false, 'expected to find helper in production'
 		return
 	}
@@ -115,7 +136,7 @@ fn test_index_find_fn_skips_test_files() {
 	assert !prod_uri.ends_with('_test.v')
 
 	// A query originating from a test file may resolve into test declarations.
-	any_uri, _ := app.find_indexed_fn('helper', true) or {
+	any_uri, _ := app.find_indexed_fn('helper', true, []) or {
 		assert false, 'expected to find helper with tests included'
 		return
 	}
