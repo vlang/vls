@@ -152,53 +152,22 @@ fn classify_highlight_kind(line string, start_byte int, end_byte int) int {
 	return doc_highlight_read
 }
 
-// collect_document_highlight_candidates finds exact identifier occurrences
-// while excluding line comments and string literals.
-fn collect_document_highlight_candidates(lines []string, symbol string) []DocumentHighlightCandidate {
-	mut candidates := []DocumentHighlightCandidate{}
-	for line_idx, line in lines {
-		if !line.contains(symbol) {
+// collect_document_highlight_candidates reuses the reference tokenizer so
+// comments, literal text, and executable string interpolations are treated
+// consistently by highlighting and rename.
+fn collect_document_highlight_candidates(content string, lines []string, symbol string, enc PositionEncoding) []DocumentHighlightCandidate {
+	occurrences := extract_identifier_occurrences(content, enc)
+	positions := occurrences[symbol] or { return []DocumentHighlightCandidate{} }
+	mut candidates := []DocumentHighlightCandidate{cap: positions.len}
+	for position in positions {
+		if position.line < 0 || position.line >= lines.len {
 			continue
 		}
-		n := line.len
-		mut col := 0
-		for col < n {
-			c := line[col]
-			if col + 1 < n && c == `/` && line[col + 1] == `/` {
-				break
-			}
-			if c == `"` || c == `'` {
-				quote := c
-				col++
-				for col < n {
-					if line[col] == `\\` {
-						col += 2
-						continue
-					}
-					if line[col] == quote {
-						col++
-						break
-					}
-					col++
-				}
-				continue
-			}
-			if is_ident_char(c) {
-				start_byte := col
-				col++
-				for col < n && is_ident_char(line[col]) {
-					col++
-				}
-				if line[start_byte..col] == symbol {
-					candidates << DocumentHighlightCandidate{
-						line_idx:   line_idx
-						start_byte: start_byte
-						end_byte:   col
-					}
-				}
-				continue
-			}
-			col++
+		line := lines[position.line]
+		candidates << DocumentHighlightCandidate{
+			line_idx:   position.line
+			start_byte: encoded_col_to_byte(line, position.start_char, enc)
+			end_byte:   encoded_col_to_byte(line, position.end_char, enc)
 		}
 	}
 	return candidates
@@ -245,7 +214,8 @@ fn (mut app App) handle_document_highlight(request Request) Response {
 			result: []DocumentHighlight{}
 		}
 	}
-	candidates := collect_document_highlight_candidates(lines, symbol)
+	candidates := collect_document_highlight_candidates(content, lines, symbol,
+		app.position_encoding)
 	if candidates.len > document_highlight_semantic_max_candidates {
 		return Response{
 			id:     request.id

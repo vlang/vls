@@ -122,6 +122,11 @@ struct OccEntry {
 	occ         map[string][]TokenOccurrence
 }
 
+struct OccurrenceScanState {
+mut:
+	in_block_comment bool
+}
+
 fn add_identifier_occurrence(line_text string, line_idx int, start int, end int, enc PositionEncoding, mut occ map[string][]TokenOccurrence) {
 	if line_text[start] >= `0` && line_text[start] <= `9` {
 		return
@@ -136,7 +141,7 @@ fn add_identifier_occurrence(line_text string, line_idx int, start int, end int,
 
 // scan_string_identifier_occurrences skips literal text while indexing V string
 // interpolation expressions. It returns the byte after the closing quote.
-fn scan_string_identifier_occurrences(line_text string, line_idx int, start int, enc PositionEncoding, mut occ map[string][]TokenOccurrence) int {
+fn scan_string_identifier_occurrences(line_text string, line_idx int, start int, enc PositionEncoding, mut state OccurrenceScanState, mut occ map[string][]TokenOccurrence) int {
 	quote := line_text[start]
 	mut col := start + 1
 	for col < line_text.len {
@@ -149,8 +154,8 @@ fn scan_string_identifier_occurrences(line_text string, line_idx int, start int,
 		}
 		if line_text[col] == `$` && col + 1 < line_text.len {
 			if line_text[col + 1] == `{` {
-				col =
-					scan_code_identifier_occurrences(line_text, line_idx, col + 2, enc, true, mut occ)
+				col = scan_code_identifier_occurrences(line_text, line_idx, col + 2, enc, true, mut
+					state, mut occ)
 				continue
 			}
 			if is_ident_char(line_text[col + 1]) && !(line_text[col + 1] >= `0`
@@ -171,16 +176,31 @@ fn scan_string_identifier_occurrences(line_text string, line_idx int, start int,
 
 // scan_code_identifier_occurrences indexes code between `start` and the end of
 // the line, or through the matching `}` for a braced interpolation expression.
-fn scan_code_identifier_occurrences(line_text string, line_idx int, start int, enc PositionEncoding, stop_at_closing_brace bool, mut occ map[string][]TokenOccurrence) int {
+fn scan_code_identifier_occurrences(line_text string, line_idx int, start int, enc PositionEncoding, stop_at_closing_brace bool, mut state OccurrenceScanState, mut occ map[string][]TokenOccurrence) int {
 	mut col := start
 	mut brace_depth := 0
 	for col < line_text.len {
 		c := line_text[col]
+		if state.in_block_comment {
+			if col + 1 < line_text.len && c == `*` && line_text[col + 1] == `/` {
+				state.in_block_comment = false
+				col += 2
+				continue
+			}
+			col++
+			continue
+		}
 		if col + 1 < line_text.len && c == `/` && line_text[col + 1] == `/` {
 			return line_text.len
 		}
+		if col + 1 < line_text.len && c == `/` && line_text[col + 1] == `*` {
+			state.in_block_comment = true
+			col += 2
+			continue
+		}
 		if c == `"` || c == `'` {
-			col = scan_string_identifier_occurrences(line_text, line_idx, col, enc, mut occ)
+			col =
+				scan_string_identifier_occurrences(line_text, line_idx, col, enc, mut state, mut occ)
 			continue
 		}
 		if c == `{` {
@@ -218,8 +238,9 @@ fn scan_code_identifier_occurrences(line_text string, line_idx int, start int, e
 // (P1-05).
 fn extract_identifier_occurrences(content string, enc PositionEncoding) map[string][]TokenOccurrence {
 	mut occ := map[string][]TokenOccurrence{}
+	mut state := OccurrenceScanState{}
 	for line_idx, line_text in content.split_into_lines() {
-		scan_code_identifier_occurrences(line_text, line_idx, 0, enc, false, mut occ)
+		scan_code_identifier_occurrences(line_text, line_idx, 0, enc, false, mut state, mut occ)
 	}
 	return occ
 }
