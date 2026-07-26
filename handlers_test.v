@@ -634,6 +634,29 @@ fn test_incremental_change_is_valid_rejects_lines_past_eof() {
 	assert incremental_change_is_valid(content, ok, .utf16)
 }
 
+fn test_semantic_reference_scan_caps_candidates() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	app.capture_output = true // don't write log notifications to stdout during the test
+	// A directory that does not exist on disk, so no real files are scanned.
+	uri := 'file:///nonexistent_vls_reftest/a.v'
+	mut content := 'module main\n'
+	for _ in 0 .. reference_semantic_max_candidates + 5 {
+		content += 'fn line() { foo() }\n'
+	}
+	app.open_files[uri] = content
+
+	dummy_anchor := Location{
+		uri: uri
+	}
+	locs := app.search_symbol_in_dirs_semantic('foo', dummy_anchor, 0)
+	// Over the cap, every lexical occurrence is returned unverified (no compiler
+	// process is launched), bounding the worst-case cost.
+	assert locs.len == reference_semantic_max_candidates + 5
+}
+
 fn test_incremental_change_is_valid_rejects_char_past_line() {
 	// Line 0 "abc" has length 3. A character offset past the line end is invalid
 	// even though the line exists: position_to_byte_offset would clamp it to EOL
