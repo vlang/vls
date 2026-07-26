@@ -1604,6 +1604,28 @@ fn test_raw_id_is_valid_rejects_other_types() {
 	assert !raw_id_is_valid(bad)
 }
 
+fn test_watcher_registration_rejection_keeps_refresh_fallback() {
+	mut app := &App{}
+	app.watched_files_registration_id = '7' // pretend we sent registration with id 7
+	// The client rejects registration: watchers never activate, so the timed
+	// index refresh fallback must stay on (no watcher events will arrive).
+	app.note_server_request_response('{"jsonrpc":"2.0","id":7,"error":{"code":-32601,"message":"unsupported"}}')
+	assert !app.watched_files_active
+	assert app.index_dir_needs_refresh('/some/dir')
+}
+
+fn test_watcher_registration_success_stops_refresh() {
+	mut app := &App{}
+	app.watched_files_registration_id = '7'
+	// A response for a DIFFERENT id must not activate watchers.
+	app.note_server_request_response('{"jsonrpc":"2.0","id":8,"result":null}')
+	assert !app.watched_files_active
+	// The success response for our id activates watchers and stands the fallback down.
+	app.note_server_request_response('{"jsonrpc":"2.0","id":7,"result":null}')
+	assert app.watched_files_active
+	assert !app.index_dir_needs_refresh('/some/dir')
+}
+
 fn test_is_client_response_message_detection() {
 	assert is_client_response_message('{"jsonrpc":"2.0","id":2,"result":null}')
 	assert is_client_response_message('{"jsonrpc":"2.0","id":2,"error":{"code":-1,"message":"x"}}')

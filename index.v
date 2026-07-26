@@ -313,11 +313,13 @@ fn collect_v_files_rec(dir string, mut acc []string, mut visited map[string]bool
 const index_refresh_interval_ms = i64(10_000)
 
 // index_dir_needs_refresh reports whether an already-walked `dir` should be
-// re-scanned. When the client supports dynamic watched-file registration we rely
-// on didChangeWatchedFiles for freshness and never re-walk; otherwise we re-walk
-// on a throttled interval so a watcher-less client still sees new/changed files.
+// re-scanned. Only once the client has actually acknowledged watcher
+// registration do we rely on didChangeWatchedFiles and stop re-walking; if the
+// client never supported it, or advertised it but rejected the registration
+// request, watcher notifications will not arrive, so we keep re-walking on a
+// throttled interval to stay fresh.
 fn (app &App) index_dir_needs_refresh(dir string) bool {
-	if app.supports_dynamic_watched_files_registration {
+	if app.watched_files_active {
 		return false
 	}
 	last := app.indexed_dir_walk_ms[dir] or { return true }
@@ -552,12 +554,41 @@ fn (app &App) query_workspace_symbols(query string) []WorkspaceSymbol {
 	return results
 }
 
-// find_indexed_doc returns the vdoc comment for the first indexed declaration
-// whose simple name matches `name`, or '' when none is found.
-fn (app &App) find_indexed_doc(name string) string {
+// find_indexed_doc_in_scope returns the vdoc comment for `name`, preferring a
+// declaration in the current module directory `cur_dir` and otherwise limited to
+// the current project subtree `scope_root`. Scoping the search avoids returning a
+// same-named symbol's comment from an unrelated project (a multi-root workspace)
+// or another module elsewhere in the global index, which hover would otherwise
+// append to an imported symbol's documentation (P1-08). A loose file passes an
+// empty `scope_root`, restricting the lookup to its own directory.
+fn (app &App) find_indexed_doc_in_scope(name string, cur_dir string, scope_root string) string {
+	cd := cur_dir.replace('\\', '/').trim_right('/')
 	mut uris := app.symbol_index.keys()
 	uris.sort()
+	// Pass 1: the current module directory (where a same-module symbol lives).
+	if cd != '' {
+		for uri in uris {
+			if os.dir(uri_to_path(uri)).replace('\\', '/').trim_right('/') != cd {
+				continue
+			}
+			entry := app.symbol_index[uri] or { continue }
+			if doc := entry.docs[name] {
+				if doc != '' {
+					return doc
+				}
+			}
+		}
+	}
+	// Pass 2: elsewhere within the same project subtree (imported sibling module).
+	sr := scope_root.replace('\\', '/').trim_right('/')
+	if sr == '' {
+		return ''
+	}
 	for uri in uris {
+		p := uri_to_path(uri).replace('\\', '/')
+		if !path_is_within(p, sr) || os.dir(p).trim_right('/') == cd {
+			continue
+		}
 		entry := app.symbol_index[uri] or { continue }
 		if doc := entry.docs[name] {
 			if doc != '' {

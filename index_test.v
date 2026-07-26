@@ -68,8 +68,19 @@ fn test_index_doc_lookup() {
 	mut app := index_test_app()
 	app.open_files['file:///tmp/doc.v'] = 'module main\n\n// greet says hello\nfn greet() {}\n'
 	app.ensure_dirs_indexed(app.index_query_dirs())
-	assert app.find_indexed_doc('greet') == 'greet says hello'
-	assert app.find_indexed_doc('missing') == ''
+	assert app.find_indexed_doc_in_scope('greet', '/tmp', '') == 'greet says hello'
+	assert app.find_indexed_doc_in_scope('missing', '/tmp', '') == ''
+}
+
+fn test_index_doc_lookup_scoped_to_project() {
+	mut app := index_test_app()
+	// Two unrelated projects each declare a documented `foo` in module `main`.
+	app.open_files['file:///projA/lib.v'] = 'module main\n\n// A-foo does A\npub fn foo() {}\n'
+	app.open_files['file:///projB/lib.v'] = 'module main\n\n// B-foo does B\npub fn foo() {}\n'
+	app.ensure_dirs_indexed(app.index_query_dirs())
+	// A hover in project A must not pick up project B's doc for the same name.
+	assert app.find_indexed_doc_in_scope('foo', '/projA', '/projA') == 'A-foo does A'
+	assert app.find_indexed_doc_in_scope('foo', '/projB', '/projB') == 'B-foo does B'
 }
 
 fn test_index_find_fn() {
@@ -394,7 +405,7 @@ fn test_index_no_refresh_when_watchers_available() {
 		return
 	}
 	mut app := index_test_app()
-	app.supports_dynamic_watched_files_registration = true // rely on watcher events
+	app.watched_files_active = true // registration acknowledged; rely on watcher events
 	app.ensure_dirs_indexed([root])
 	assert app.query_workspace_symbols('alpha').len == 1
 

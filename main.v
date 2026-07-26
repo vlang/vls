@@ -24,6 +24,8 @@ mut:
 	supports_dynamic_watched_files_registration bool              // Client supports dynamic workspace watcher registration
 	supports_work_done_progress                 bool              // Client supports window/workDoneProgress + $/progress
 	sent_watched_files_registration             bool              // client/registerCapability watcher registration was sent
+	watched_files_registration_id               string            // Raw id of the watcher registration request, to match its response
+	watched_files_active                        bool              // True once the client acknowledged watcher registration (not rejected)
 	inlay_hints_enabled                         bool = true // toggled via workspace/didChangeConfiguration
 	diagnostics_enabled                         bool = true // toggled via workspace/didChangeConfiguration
 	diag_cache                                  map[string]DiagCacheEntry // Per-URI cached diagnostics
@@ -401,6 +403,7 @@ fn (mut app App) handle_requests(mut reader io.BufferedReader) {
 		// Consume it without dispatching so it never hits the method router or
 		// produces a spurious MethodNotFound error (P0-02).
 		if is_client_response_message(content) {
+			app.note_server_request_response(content)
 			log('Consumed client response to a server-initiated request: ${content}')
 			continue
 		}
@@ -952,6 +955,27 @@ fn is_client_response_message(content string) bool {
 	}
 	has_id := content.contains('"id"')
 	return has_id && (content_has_member(content, 'result') || content_has_member(content, 'error'))
+}
+
+// note_server_request_response inspects a client's response to a server-initiated
+// request. When it is the reply to our watched-files registration, a success
+// confirms watchers are active so the timed index refresh can stand down; an
+// error (the client rejected registration) or a mismatched id leaves the
+// watcher-less refresh fallback on, since no watcher notifications will arrive.
+fn (mut app App) note_server_request_response(content string) {
+	if app.watched_files_registration_id == '' || app.watched_files_active {
+		return
+	}
+	raw := extract_raw_id(content) or { return }
+	if raw != app.watched_files_registration_id {
+		return
+	}
+	if content_has_member(content, 'error') {
+		log('VLS: client rejected watched-files registration; keeping timed index refresh')
+		return
+	}
+	app.watched_files_active = true
+	log('VLS: watched-files registration acknowledged; watcher events drive index freshness')
 }
 
 // inject_raw_id rewrites the first `"id":<value>` in an encoded response so the
@@ -1659,8 +1683,9 @@ fn (mut app App) on_initialized(_ Request) {
 		log('VLS: dynamic watched-files registration already sent; skipping duplicate')
 		return
 	}
+	reg_id := app.next_request_id
 	reg := RegisterCapabilityRequest{
-		id:     app.next_request_id
+		id:     reg_id
 		params: WatcherRegistrationParams{
 			registrations: [
 				WatcherRegistration{
@@ -1680,6 +1705,7 @@ fn (mut app App) on_initialized(_ Request) {
 	app.next_request_id++
 	app.send_framed(json2.encode(reg, escape_unicode: true))
 	app.sent_watched_files_registration = true
+	app.watched_files_registration_id = reg_id.str()
 }
 
 // write_response_or_cancelled sends a cancelled error if the request was
