@@ -1398,16 +1398,32 @@ fn get_module_name(content string) string {
 // Returns a list of module paths, e.g. ['os', 'math', 'v.util'].
 fn parse_imports(content string) []string {
 	mut imports := []string{}
+	mut in_import_block := false
 	for line in content.split_into_lines() {
 		trimmed := line.trim_space()
+		if in_import_block {
+			if trimmed.starts_with(')') {
+				in_import_block = false
+				continue
+			}
+			parts := trimmed.all_before('//').fields()
+			if parts.len > 0 {
+				imports << parts[0]
+			}
+			continue
+		}
 		if !trimmed.starts_with('import ') {
 			continue
 		}
-		rest := trimmed[7..].trim_space()
+		rest := trimmed[7..].all_before('//').trim_space()
+		if rest == '(' {
+			in_import_block = true
+			continue
+		}
 		// Strip optional `as alias` suffix
-		module_path := rest.split(' ')[0].trim_space()
-		if module_path != '' {
-			imports << module_path
+		parts := rest.fields()
+		if parts.len > 0 {
+			imports << parts[0]
 		}
 	}
 	return imports

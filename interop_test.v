@@ -1018,7 +1018,7 @@ fn test_symlink_untracked_files_materializes_local_imports() {
 	interop_test_must_mkdir_all(target_dir)
 
 	main_file := os.join_path(project_dir, 'main.v')
-	main_content := 'module main\n\nimport mathutil\n'
+	main_content := 'module main\n\nimport (\n\tmathutil\n)\n'
 	module_file := os.join_path(module_dir, 'mathutil.v')
 	module_content := 'module mathutil\n\npub fn answer() int { return 42 }\n'
 	interop_test_must_write_file(main_file, main_content)
@@ -1098,20 +1098,26 @@ fn test_symlink_untracked_files_copies_when_symlinks_are_denied() {
 	git_dir := os.join_path(project_dir, '.git')
 	node_modules_dir := os.join_path(project_dir, 'node_modules', 'dependency')
 	build_dir := os.join_path(project_dir, 'build')
+	assets_dir := os.join_path(project_dir, 'assets')
 	main_content := 'module main\n'
 	vmod_content := "Module {\n\tname: 'denied_symlink_test'\n}\n"
 	module_content := 'module helper\n\npub fn answer() int { return 42 }\n'
 	interop_test_must_mkdir_all(git_dir)
 	interop_test_must_mkdir_all(node_modules_dir)
 	interop_test_must_mkdir_all(build_dir)
+	interop_test_must_mkdir_all(assets_dir)
 	interop_test_must_write_file(main_file, main_content)
 	interop_test_must_write_file(vmod_file, vmod_content)
 	interop_test_must_write_file(module_file, module_content)
-	interop_test_must_write_file(os.join_path(project_dir, 'README.md'), 'not compiler input\n')
-	interop_test_must_write_file(os.join_path(git_dir, 'metadata.v'), 'module metadata\n')
-	interop_test_must_write_file(os.join_path(node_modules_dir, 'dependency.v'),
-		'module dependency\n')
-	interop_test_must_write_file(os.join_path(build_dir, 'generated.v'), 'module generated\n')
+	interop_test_must_write_file(os.join_path(project_dir, 'README.md'), 'project documentation\n')
+	interop_test_must_write_file(os.join_path(assets_dir, 'config.json'), '{"enabled":true}\n')
+	interop_test_must_write_file(os.join_path(assets_dir, 'template.txt'),
+		'Hello, embedded asset!\n')
+	interop_test_must_write_file(os.join_path(assets_dir, 'logo.png'), 'fake png bytes')
+	interop_test_must_write_file(os.join_path(git_dir, 'metadata.json'), '{"git":true}\n')
+	interop_test_must_write_file(os.join_path(node_modules_dir, 'dependency.json'),
+		'{"dependency":true}\n')
+	interop_test_must_write_file(os.join_path(build_dir, 'generated.json'), '{"build":true}\n')
 
 	mut tracked := map[string]string{}
 	tracked[path_to_uri(main_file)] = 'module main\n\n// unsaved\n'
@@ -1131,7 +1137,10 @@ fn test_symlink_untracked_files_copies_when_symlinks_are_denied() {
 	assert os.is_dir(target_module)
 	assert !os.is_link(target_module)
 	assert os.read_file(target_module_file) or { '' } == module_content
-	assert !os.exists(os.join_path(target_dir, 'README.md'))
+	assert os.read_file(os.join_path(target_dir, 'README.md')) or { '' } == 'project documentation\n'
+	assert os.read_file(os.join_path(target_dir, 'assets', 'config.json')) or { '' } == '{"enabled":true}\n'
+	assert os.read_file(os.join_path(target_dir, 'assets', 'template.txt')) or { '' } == 'Hello, embedded asset!\n'
+	assert os.read_file(os.join_path(target_dir, 'assets', 'logo.png')) or { '' } == 'fake png bytes'
 	assert !os.exists(os.join_path(target_dir, '.git'))
 	assert !os.exists(os.join_path(target_dir, 'node_modules'))
 	assert !os.exists(os.join_path(target_dir, 'build'))

@@ -2339,6 +2339,12 @@ fn test_parse_imports_dotted_module() {
 	assert imports == ['v.util']
 }
 
+fn test_parse_imports_grouped() {
+	content := 'module main\n\nimport (\n\tos\n\tv.util as util // alias\n\n\t// comment\n\tstrings\n)\n'
+	imports := parse_imports(content)
+	assert imports == ['os', 'v.util', 'strings']
+}
+
 fn test_parse_imports_none() {
 	content := 'module main\n\nfn main() {}'
 	imports := parse_imports(content)
