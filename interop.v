@@ -674,16 +674,17 @@ fn new_overlay_copy_budget() OverlayCopyBudget {
 	}
 }
 
-fn (mut budget OverlayCopyBudget) reserve(path string) ! {
+fn (mut budget OverlayCopyBudget) try_reserve(path string) bool {
 	if budget.files >= budget.max_files {
-		return error('Overlay copy file limit (${budget.max_files}) exceeded at ${path}')
+		return false
 	}
 	size := os.file_size(path)
 	if size > budget.max_bytes || budget.bytes > budget.max_bytes - size {
-		return error('Overlay copy byte limit (${budget.max_bytes}) exceeded at ${path}')
+		return false
 	}
 	budget.files++
 	budget.bytes += size
+	return true
 }
 
 fn overlay_path_in_with_case(path string, paths []string, case_insensitive bool) bool {
@@ -727,16 +728,19 @@ fn create_overlay_hard_link(source_path string, target_path string) ! {
 	os.link(source_path, target_path)!
 }
 
-fn materialize_overlay_file_with_linker(source_path string, target_path string, link_fn OverlayLinkFn, mut budget OverlayCopyBudget) ! {
+fn materialize_overlay_file_with_linker(source_path string, target_path string, link_fn OverlayLinkFn, mut budget OverlayCopyBudget) !bool {
 	link_fn(source_path, target_path) or {
-		budget.reserve(source_path)!
+		if !budget.try_reserve(source_path) {
+			return false
+		}
 		os.cp(source_path, target_path)!
 	}
+	return true
 }
 
-fn materialize_overlay_file(source_path string, target_path string, mut budget OverlayCopyBudget) ! {
-	materialize_overlay_file_with_linker(source_path, target_path, create_overlay_hard_link, mut
-		budget)!
+fn materialize_overlay_file(source_path string, target_path string, mut budget OverlayCopyBudget) !bool {
+	return materialize_overlay_file_with_linker(source_path, target_path, create_overlay_hard_link, mut
+		budget)
 }
 
 fn symlink_untracked_files(source_root string, source_module_dir string, temp_dir string, tracked_files map[string]string) ! {
@@ -807,13 +811,23 @@ fn local_import_rel_dirs(source_root string, source_module_dir string, tracked_f
 	return result
 }
 
-// copy_bounded_overlay_entry is the fallback for hosts where directory symlinks
-// are unavailable. It follows existing project symlinks, including links outside
-// the project root, while the shared budget and canonical-directory cycle
-// detection keep the copy bounded.
-fn copy_bounded_overlay_entry(source_path string, target_path string, mut budget OverlayCopyBudget, mut visited map[string]bool) !int {
-	real_path := normalize_overlay_path(os.real_path(source_path))
+fn is_overlay_compilation_file(path string) bool {
+	name := os.file_name(path)
+	if name == 'v.mod' {
+		return true
+	}
+	for suffix in ['.v', '.vsh', '.vv', '.c', '.h', '.cc', '.cpp', '.cxx', '.hpp', '.m', '.mm',
+		'.s', '.asm', '.js', '.a', '.o', '.so', '.dylib', '.dll', '.lib'] {
+		if name.ends_with(suffix) {
+			return true
+		}
+	}
+	return false
+}
+
+fn copy_bounded_overlay_entry_pass(source_path string, target_path string, compilation_files bool, mut budget OverlayCopyBudget, mut visited map[string]bool) !int {
 	if os.is_dir(source_path) {
+		real_path := normalize_overlay_path(os.real_path(source_path))
 		if real_path in visited {
 			return 0
 		}
@@ -824,22 +838,71 @@ fn copy_bounded_overlay_entry(source_path string, target_path string, mut budget
 		visited[real_path] = true
 		mut copied := 0
 		for entry in os.ls(source_path)! {
-			copied += copy_bounded_overlay_entry(os.join_path(source_path, entry), os.join_path(target_path,
-				entry), mut budget, mut visited)!
+			copied += copy_bounded_overlay_entry_pass(os.join_path(source_path, entry), os.join_path(target_path,
+				entry), compilation_files, mut budget, mut visited)!
 		}
 		return copied
 	}
-	if !os.is_file(source_path) {
+	if !os.is_file(source_path) || is_overlay_compilation_file(source_path) != compilation_files {
 		return 0
 	}
-	budget.reserve(source_path)!
+	if !budget.try_reserve(source_path) {
+		return 0
+	}
 	os.mkdir_all(os.dir(target_path))!
 	os.cp(source_path, target_path)!
 	return 1
 }
 
+// copy_bounded_overlay_entry is the fallback for hosts where directory symlinks
+// are unavailable. It follows existing project symlinks, including links outside
+// the project root, while the shared budget and canonical-directory cycle
+// detection keep the copy bounded. Compiler inputs are copied before assets, and
+// files beyond the limit are skipped without invalidating the partial overlay.
+fn copy_bounded_overlay_entry(source_path string, target_path string, mut budget OverlayCopyBudget, mut visited map[string]bool) !int {
+	mut copied := copy_bounded_overlay_entry_pass(source_path, target_path, true, mut budget, mut
+		visited)!
+	mut asset_visited := map[string]bool{}
+	copied += copy_bounded_overlay_entry_pass(source_path, target_path, false, mut budget, mut
+		asset_visited)!
+	return copied
+}
+
 fn symlink_untracked_tree(source_root string, source_dir string, target_dir string, relative_dir string, tracked_rel_paths []string, local_import_dirs []string, link_fn OverlayLinkFn, mut copy_budget OverlayCopyBudget) ! {
-	entries := os.ls(source_dir)!
+	unordered_entries := os.ls(source_dir)!
+	mut critical_entries := []string{}
+	mut compilation_entries := []string{}
+	mut other_entries := []string{}
+	for entry in unordered_entries {
+		source_path := os.join_path(source_dir, entry)
+		relative_path := if relative_dir == '' {
+			entry
+		} else {
+			relative_dir + '/' + entry
+		}
+		if overlay_path_has_descendant(relative_path, tracked_rel_paths)
+			|| overlay_path_in(relative_path, local_import_dirs)
+			|| overlay_path_has_descendant(relative_path, local_import_dirs) {
+			critical_entries << entry
+		} else if is_overlay_compilation_file(source_path) {
+			compilation_entries << entry
+		} else {
+			other_entries << entry
+		}
+	}
+	critical_entries.sort()
+	compilation_entries.sort()
+	other_entries.sort()
+	mut entries := []string{cap: unordered_entries.len}
+	for entry in critical_entries {
+		entries << entry
+	}
+	for entry in compilation_entries {
+		entries << entry
+	}
+	for entry in other_entries {
+		entries << entry
+	}
 	for entry in entries {
 		source_path := os.join_path(source_dir, entry)
 		relative_path := if relative_dir == '' {
@@ -868,8 +931,11 @@ fn symlink_untracked_tree(source_root string, source_dir string, target_dir stri
 		}
 		if overlay_path_in(relative_dir, local_import_dirs) && source_path.ends_with('.v')
 			&& os.is_file(source_path) {
-			materialize_overlay_file(source_path, target_path, mut copy_budget)!
-			log('Materialized local module file: ${source_path} -> ${target_path}')
+			if materialize_overlay_file(source_path, target_path, mut copy_budget)! {
+				log('Materialized local module file: ${source_path} -> ${target_path}')
+			} else {
+				log('Skipped local module file after reaching the overlay copy limit: ${source_path}')
+			}
 			continue
 		}
 		link_fn(source_path, target_path) or {

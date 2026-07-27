@@ -1260,13 +1260,14 @@ fn test_bounded_overlay_copy_caps_file_count_across_entries() {
 	}
 	assert copied == 1
 	mut second_visited := map[string]bool{}
-	copy_bounded_overlay_entry(os.join_path(source_dir, 'two.txt'), os.join_path(target_dir,
+	second_copied := copy_bounded_overlay_entry(os.join_path(source_dir, 'two.txt'), os.join_path(target_dir,
 		'two.txt'), mut budget, mut second_visited) or {
-		assert err.msg().contains('file limit')
-		assert budget.files == 1
+		assert false, 'The overlay file limit must not abort the fallback: ${err}'
 		return
 	}
-	assert false, 'expected the overlay copy file limit to be enforced'
+	assert second_copied == 0
+	assert budget.files == 1
+	assert !os.exists(os.join_path(target_dir, 'two.txt'))
 }
 
 fn test_bounded_overlay_copy_caps_bytes() {
@@ -1284,13 +1285,13 @@ fn test_bounded_overlay_copy_caps_bytes() {
 		max_bytes: 4
 	}
 	mut visited := map[string]bool{}
-	copy_bounded_overlay_entry(source_file, target_file, mut budget, mut visited) or {
-		assert err.msg().contains('byte limit')
-		assert budget.bytes == 0
-		assert !os.exists(target_file)
+	copied := copy_bounded_overlay_entry(source_file, target_file, mut budget, mut visited) or {
+		assert false, 'The overlay byte limit must not abort the fallback: ${err}'
 		return
 	}
-	assert false, 'expected the overlay copy byte limit to be enforced'
+	assert copied == 0
+	assert budget.bytes == 0
+	assert !os.exists(target_file)
 }
 
 fn test_symlink_denied_fallback_copies_external_symlink_targets() {
@@ -1347,14 +1348,44 @@ fn test_local_module_copy_fallback_shares_overlay_budget() {
 		return
 	}
 	target_module := os.join_path(target_dir, 'helper.v')
-	materialize_overlay_file_with_linker(module_file, target_module, deny_overlay_symlink, mut
-		budget) or {
-		assert err.msg().contains('file limit')
-		assert budget.files == 1
-		assert !os.exists(target_module)
+	materialized := materialize_overlay_file_with_linker(module_file, target_module,
+		deny_overlay_symlink, mut budget) or {
+		assert false, 'The local-module copy limit must not abort the overlay: ${err}'
 		return
 	}
-	assert false, 'expected the local-module copy to share the overlay file limit'
+	assert !materialized
+	assert budget.files == 1
+	assert !os.exists(target_module)
+}
+
+fn test_symlink_denied_fallback_keeps_sources_when_copy_limit_is_reached() {
+	temp_dir := os.join_path(os.temp_dir(),
+		'vls_overlay_partial_${os.getpid()}_${time.now().unix_nano()}')
+	defer {
+		os.rmdir_all(temp_dir) or {}
+	}
+	source_dir := os.join_path(temp_dir, 'source')
+	target_dir := os.join_path(temp_dir, 'target')
+	interop_test_must_mkdir_all(source_dir)
+	interop_test_must_mkdir_all(target_dir)
+	asset_file := os.join_path(source_dir, 'aaa_asset.txt')
+	source_file := os.join_path(source_dir, 'zzz_sibling.v')
+	interop_test_must_write_file(asset_file, 'asset')
+	interop_test_must_write_file(source_file, 'module main\n')
+
+	mut budget := OverlayCopyBudget{
+		max_files: 1
+		max_bytes: 1024
+	}
+	symlink_untracked_tree(source_dir, source_dir, target_dir, '', []string{}, []string{},
+		deny_overlay_symlink, mut budget) or {
+		assert false, 'The copy limit must preserve the partial overlay: ${err}'
+		return
+	}
+
+	assert os.is_file(os.join_path(target_dir, 'zzz_sibling.v'))
+	assert !os.exists(os.join_path(target_dir, 'aaa_asset.txt'))
+	assert budget.files == 1
 }
 
 fn test_symlink_untracked_files_copies_when_symlinks_are_denied() {
