@@ -147,6 +147,16 @@ fn test_normalize_overlay_path_preserves_posix_backslashes() {
 	}
 }
 
+fn test_source_path_from_overlay_normalizes_windows_relative_join() {
+	overlay := CompilationOverlay{
+		source_display_root: r'C:\repo'
+		temp_root:           r'C:\temp\overlay'
+		temp_work_dir:       r'C:\temp\overlay\src'
+	}
+	mapped := source_path_from_overlay_with_windows_rules('./main.v', overlay, true)
+	assert mapped == 'C:/repo/src/main.v'
+}
+
 fn test_overlay_relative_path_prefers_nested_symlink_layout() {
 	temp_dir := os.join_path(os.temp_dir(),
 		'vls_overlay_relative_symlink_${os.getpid()}_${time.now().unix_nano()}')
@@ -1429,10 +1439,15 @@ fn test_symlink_untracked_files_copies_when_symlinks_are_denied() {
 		'{"dependency":true}\n')
 	interop_test_must_write_file(os.join_path(thirdparty_dir, 'dependency.json'),
 		'{"native_dependency":true}\n')
+	interop_test_must_write_file(os.join_path(thirdparty_dir, 'embedded.json'),
+		'{"embedded":true}\n')
+	interop_test_must_write_file(os.join_path(thirdparty_dir, 'dependency.h'),
+		'#define DEPENDENCY 1\n')
+	interop_test_must_write_file(os.join_path(thirdparty_dir, 'dependency.a'), 'fake library bytes')
 	interop_test_must_write_file(os.join_path(build_dir, 'generated.json'), '{"build":true}\n')
 
 	mut tracked := map[string]string{}
-	tracked[path_to_uri(main_file)] = 'module main\n\n// unsaved\n'
+	tracked[path_to_uri(main_file)] = "module main\n\n#flag -I @VMODROOT/thirdparty/native_dependency\nconst embedded = \$embed_file('thirdparty/native_dependency/embedded.json')\n"
 	symlink_untracked_files_with_linker(project_dir, project_dir, target_dir, tracked,
 		deny_overlay_symlink) or {
 		assert false, 'Failed to copy denied symlinks: ${err}'
@@ -1455,7 +1470,11 @@ fn test_symlink_untracked_files_copies_when_symlinks_are_denied() {
 	assert os.read_file(os.join_path(target_dir, 'assets', 'logo.png')) or { '' } == 'fake png bytes'
 	assert !os.exists(os.join_path(target_dir, '.git'))
 	assert !os.exists(os.join_path(target_dir, 'node_modules'))
-	assert !os.exists(os.join_path(target_dir, 'thirdparty'))
+	target_thirdparty := os.join_path(target_dir, 'thirdparty', 'native_dependency')
+	assert os.read_file(os.join_path(target_thirdparty, 'embedded.json')) or { '' } == '{"embedded":true}\n'
+	assert os.read_file(os.join_path(target_thirdparty, 'dependency.h')) or { '' } == '#define DEPENDENCY 1\n'
+	assert os.read_file(os.join_path(target_thirdparty, 'dependency.a')) or { '' } == 'fake library bytes'
+	assert !os.exists(os.join_path(target_thirdparty, 'dependency.json'))
 	assert !os.exists(os.join_path(target_dir, 'build'))
 }
 
