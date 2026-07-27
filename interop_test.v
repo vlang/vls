@@ -1252,17 +1252,16 @@ fn test_bounded_overlay_copy_caps_file_count_across_entries() {
 		max_files: 1
 		max_bytes: 1024
 	}
-	containment_root := normalize_overlay_path(os.real_path(source_dir))
 	mut first_visited := map[string]bool{}
 	copied := copy_bounded_overlay_entry(os.join_path(source_dir, 'one.txt'), os.join_path(target_dir,
-		'one.txt'), containment_root, mut budget, mut first_visited) or {
+		'one.txt'), mut budget, mut first_visited) or {
 		assert false, 'Failed to copy the first bounded entry: ${err}'
 		return
 	}
 	assert copied == 1
 	mut second_visited := map[string]bool{}
 	copy_bounded_overlay_entry(os.join_path(source_dir, 'two.txt'), os.join_path(target_dir,
-		'two.txt'), containment_root, mut budget, mut second_visited) or {
+		'two.txt'), mut budget, mut second_visited) or {
 		assert err.msg().contains('file limit')
 		assert budget.files == 1
 		return
@@ -1285,14 +1284,77 @@ fn test_bounded_overlay_copy_caps_bytes() {
 		max_bytes: 4
 	}
 	mut visited := map[string]bool{}
-	containment_root := normalize_overlay_path(os.real_path(temp_dir))
-	copy_bounded_overlay_entry(source_file, target_file, containment_root, mut budget, mut visited) or {
+	copy_bounded_overlay_entry(source_file, target_file, mut budget, mut visited) or {
 		assert err.msg().contains('byte limit')
 		assert budget.bytes == 0
 		assert !os.exists(target_file)
 		return
 	}
 	assert false, 'expected the overlay copy byte limit to be enforced'
+}
+
+fn test_symlink_denied_fallback_copies_external_symlink_targets() {
+	temp_dir := os.join_path(os.temp_dir(),
+		'vls_external_symlink_${os.getpid()}_${time.now().unix_nano()}')
+	defer {
+		os.rmdir_all(temp_dir) or {}
+	}
+	project_dir := os.join_path(temp_dir, 'project')
+	external_dir := os.join_path(temp_dir, 'external_assets')
+	linked_dir := os.join_path(project_dir, 'assets')
+	target_dir := os.join_path(temp_dir, 'target')
+	interop_test_must_mkdir_all(project_dir)
+	interop_test_must_mkdir_all(external_dir)
+	interop_test_must_mkdir_all(target_dir)
+	interop_test_must_write_file(os.join_path(project_dir, 'main.v'), 'module main\n')
+	interop_test_must_write_file(os.join_path(external_dir, 'config.json'), '{"external":true}\n')
+	os.symlink(external_dir, linked_dir) or { return }
+
+	symlink_untracked_files_with_linker(project_dir, project_dir, target_dir, map[string]string{},
+		deny_overlay_symlink) or {
+		assert false, 'Failed to copy an external symlink target: ${err}'
+		return
+	}
+
+	target_asset := os.join_path(target_dir, 'assets', 'config.json')
+	assert os.is_file(target_asset)
+	assert !os.is_link(os.join_path(target_dir, 'assets'))
+	assert os.read_file(target_asset) or { '' } == '{"external":true}\n'
+}
+
+fn test_local_module_copy_fallback_shares_overlay_budget() {
+	temp_dir := os.join_path(os.temp_dir(),
+		'vls_local_module_budget_${os.getpid()}_${time.now().unix_nano()}')
+	defer {
+		os.rmdir_all(temp_dir) or {}
+	}
+	source_dir := os.join_path(temp_dir, 'source')
+	target_dir := os.join_path(temp_dir, 'target')
+	interop_test_must_mkdir_all(source_dir)
+	asset_file := os.join_path(source_dir, 'asset.txt')
+	module_file := os.join_path(source_dir, 'helper.v')
+	interop_test_must_write_file(asset_file, 'asset')
+	interop_test_must_write_file(module_file, 'module helper\n')
+
+	mut budget := OverlayCopyBudget{
+		max_files: 1
+		max_bytes: 1024
+	}
+	mut visited := map[string]bool{}
+	copy_bounded_overlay_entry(asset_file, os.join_path(target_dir, 'asset.txt'), mut budget, mut
+		visited) or {
+		assert false, 'Failed to consume the first overlay budget slot: ${err}'
+		return
+	}
+	target_module := os.join_path(target_dir, 'helper.v')
+	materialize_overlay_file_with_linker(module_file, target_module, deny_overlay_symlink, mut
+		budget) or {
+		assert err.msg().contains('file limit')
+		assert budget.files == 1
+		assert !os.exists(target_module)
+		return
+	}
+	assert false, 'expected the local-module copy to share the overlay file limit'
 }
 
 fn test_symlink_untracked_files_copies_when_symlinks_are_denied() {
