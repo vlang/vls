@@ -139,6 +139,27 @@ fn test_normalize_overlay_path_before_windows_containment_checks() {
 	assert relative == 'src/main.v'
 }
 
+fn test_overlay_relative_path_prefers_nested_symlink_layout() {
+	temp_dir := os.join_path(os.temp_dir(),
+		'vls_overlay_relative_symlink_${os.getpid()}_${time.now().unix_nano()}')
+	defer {
+		os.rmdir_all(temp_dir) or {}
+	}
+	project_dir := os.join_path(temp_dir, 'project')
+	shared_src := os.join_path(temp_dir, 'shared', 'src')
+	lexical_src := os.join_path(project_dir, 'src')
+	interop_test_must_mkdir_all(project_dir)
+	interop_test_must_mkdir_all(shared_src)
+	os.symlink(shared_src, lexical_src) or { return }
+
+	lexical_file := os.join_path(lexical_src, 'main.v')
+	relative := overlay_relative_path(lexical_file, project_dir) or {
+		assert false, 'expected the lexical source path to remain inside the project'
+		return
+	}
+	assert relative == 'src/main.v'
+}
+
 // --- path_to_uri tests ---
 
 fn test_path_to_uri_unix() {
@@ -878,6 +899,52 @@ fn test_write_tracked_files_to_temp_nested_directories() {
 	// Verify nested structure was preserved
 	temp_nested := os.join_path(temp_project, 'src', 'internal', 'util.v')
 	assert os.exists(temp_nested)
+}
+
+fn test_prepare_compilation_overlay_preserves_nested_symlink_layout() {
+	temp_dir := os.join_path(os.temp_dir(),
+		'vls_overlay_nested_symlink_${os.getpid()}_${time.now().unix_nano()}')
+	defer {
+		os.rmdir_all(temp_dir) or {}
+	}
+	project_dir := os.join_path(temp_dir, 'project')
+	shared_src := os.join_path(temp_dir, 'shared', 'src')
+	lexical_src := os.join_path(project_dir, 'src')
+	app_temp_dir := os.join_path(temp_dir, 'app-temp')
+	interop_test_must_mkdir_all(project_dir)
+	interop_test_must_mkdir_all(shared_src)
+	interop_test_must_mkdir_all(app_temp_dir)
+	interop_test_must_write_file(os.join_path(project_dir, 'v.mod'),
+		"Module {\n\tname: 'nested_symlink_test'\n}\n")
+	os.symlink(shared_src, lexical_src) or { return }
+
+	main_file := os.join_path(lexical_src, 'main.v')
+	interop_test_must_write_file(main_file, 'module main\n')
+	main_uri := path_to_uri(main_file)
+	unsaved_content := 'module main\n\nfn unsaved() {}\n'
+	mut app := &App{
+		temp_dir:   app_temp_dir
+		open_files: {
+			main_uri: unsaved_content
+		}
+	}
+
+	overlay := app.prepare_compilation_overlay(main_file) or {
+		assert false, 'Failed to prepare nested-symlink overlay: ${err}'
+		return
+	}
+	defer {
+		os.rmdir_all(overlay.temp_root) or {}
+	}
+
+	assert overlay.source_root == normalize_overlay_path(project_dir)
+	assert overlay.source_display_root == normalize_overlay_path(project_dir)
+	assert overlay.source_work_dir == normalize_overlay_path(lexical_src)
+	assert overlay.temp_work_dir == os.join_path(overlay.temp_root, 'src')
+	assert overlay.temp_source_file == os.join_path(overlay.temp_root, 'src', 'main.v')
+	assert os.read_file(overlay.temp_source_file) or { '' } == unsaved_content
+	mapped_path := source_path_from_overlay(overlay.temp_source_file, overlay)
+	assert normalize_overlay_path(mapped_path) == normalize_overlay_path(main_file)
 }
 
 fn test_write_tracked_files_skips_files_outside_working_dir() {

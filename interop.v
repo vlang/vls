@@ -374,32 +374,32 @@ fn normalize_overlay_path(path string) string {
 
 // compilation_overlay_root returns the broadest source root needed to preserve
 // local module imports. A v.mod project is overlaid from its root; loose modules
-// retain the historical same-directory scope.
-fn compilation_overlay_root(real_path string) string {
-	normalized_real_path := normalize_overlay_path(real_path)
-	work_dir := normalize_overlay_path(os.dir(normalized_real_path))
+// retain the historical same-directory scope. The lexical path is preserved so
+// a nested directory symlink keeps its project-relative position.
+fn compilation_overlay_root(source_path string) string {
+	normalized_source_path := normalize_overlay_path(source_path)
+	work_dir := normalize_overlay_path(os.dir(normalized_source_path))
 	project_root := find_project_root(work_dir)
 	normalized_project_root := normalize_overlay_path(project_root)
 	if normalized_project_root != '' && normalized_project_root != '/'
-		&& path_is_within(normalized_real_path, normalized_project_root) {
-		return normalize_overlay_path(os.real_path(normalized_project_root))
-	}
-	return normalize_overlay_path(os.real_path(work_dir))
-}
-
-// compilation_overlay_display_root retains the path spelling supplied by the
-// LSP client. On macOS, canonicalizing `/tmp` to `/private/tmp` is necessary for
-// containment checks but must not silently change returned document URIs.
-fn compilation_overlay_display_root(real_path string) string {
-	normalized_real_path := normalize_overlay_path(real_path)
-	work_dir := normalize_overlay_path(os.dir(normalized_real_path))
-	project_root := find_project_root(work_dir)
-	normalized_project_root := normalize_overlay_path(project_root)
-	if normalized_project_root != '' && normalized_project_root != '/'
-		&& path_is_within(normalized_real_path, normalized_project_root) {
+		&& path_is_within(normalized_source_path, normalized_project_root) {
 		return normalized_project_root
 	}
 	return work_dir
+}
+
+// overlay_relative_path prefers the lexical hierarchy supplied by the client.
+// Canonical paths are only a fallback for equivalent aliases such as macOS
+// `/tmp` and `/private/tmp`; a nested symlink must retain its lexical segment.
+fn overlay_relative_path(path string, root string) ?string {
+	normalized_path := normalize_overlay_path(path)
+	normalized_root := normalize_overlay_path(root)
+	if rel := path_relative_to(normalized_path, normalized_root) {
+		return rel
+	}
+	canonical_path := normalize_overlay_path(os.real_path(normalized_path))
+	canonical_root := normalize_overlay_path(os.real_path(normalized_root))
+	return path_relative_to(canonical_path, canonical_root)
 }
 
 fn should_use_compilation_overlay(real_path string, open_file_count int) bool {
@@ -412,10 +412,10 @@ fn should_use_compilation_overlay(real_path string, open_file_count int) bool {
 // open buffer is materialized and unchanged project paths are symlinked back to
 // disk. The compiler runs in the overlaid counterpart of the source module.
 fn (mut app App) prepare_compilation_overlay(real_path string) !CompilationOverlay {
-	canonical_real_path := normalize_overlay_path(os.real_path(real_path))
-	source_root := compilation_overlay_root(canonical_real_path)
-	source_display_root := compilation_overlay_display_root(real_path)
-	source_work_dir := normalize_overlay_path(os.dir(canonical_real_path))
+	source_path := normalize_overlay_path(real_path)
+	source_root := compilation_overlay_root(source_path)
+	source_display_root := source_root
+	source_work_dir := normalize_overlay_path(os.dir(source_path))
 	temp_root_unresolved := app.write_tracked_files_to_temp(source_root)!
 	temp_root := normalize_overlay_path(os.real_path(temp_root_unresolved))
 	symlink_untracked_files(source_root, source_work_dir, temp_root, app.open_files) or {
@@ -423,13 +423,13 @@ fn (mut app App) prepare_compilation_overlay(real_path string) !CompilationOverl
 		return error('Failed to populate compilation overlay: ${err}')
 	}
 
-	work_rel := path_relative_to(source_work_dir, source_root) or {
+	work_rel := overlay_relative_path(source_work_dir, source_root) or {
 		os.rmdir_all(temp_root) or {}
 		return error('Source work directory is outside overlay root: ${source_work_dir}')
 	}
-	file_rel := path_relative_to(canonical_real_path, source_root) or {
+	file_rel := overlay_relative_path(source_path, source_root) or {
 		os.rmdir_all(temp_root) or {}
-		return error('Source file is outside overlay root: ${canonical_real_path}')
+		return error('Source file is outside overlay root: ${source_path}')
 	}
 	temp_work_dir := if work_rel == '' {
 		temp_root
@@ -586,21 +586,18 @@ fn (mut app App) write_tracked_files_to_temp(working_dir string) !string {
 
 	// write file structure
 	for uri, content in app.open_files {
-		real_path := normalize_overlay_path(os.real_path(uri_to_path(uri)))
-
-		// Normalize slashes for comparison
-		normalized_real := normalize_overlay_path(real_path)
-		normalized_working := normalize_overlay_path(os.real_path(working_dir))
+		file_path := normalize_overlay_path(uri_to_path(uri))
+		normalized_working := normalize_overlay_path(working_dir)
 
 		// Skip files outside the working dir. On Windows the containment check is
 		// case-insensitive, while the returned path preserves its original case.
-		mut rel_path := path_relative_to(normalized_real, normalized_working) or {
-			log('SKIPPING FILE: ${real_path}')
+		mut rel_path := overlay_relative_path(file_path, normalized_working) or {
+			log('SKIPPING FILE: ${file_path}')
 			continue
 		}
 
 		if rel_path == '' {
-			rel_path = os.file_name(real_path)
+			rel_path = os.file_name(file_path)
 		}
 		temp_file_path := os.join_path(temp_project_dir, rel_path)
 
@@ -661,17 +658,17 @@ fn symlink_untracked_files(source_root string, source_module_dir string, temp_di
 fn symlink_untracked_files_with_linker(source_root string, source_module_dir string, temp_dir string, tracked_files map[string]string, link_fn OverlayLinkFn) ! {
 	log('SYMLINKING FROM ${source_root} TO ${temp_dir}')
 	mut tracked_rel_paths := []string{}
-	canonical_source_root := normalize_overlay_path(os.real_path(source_root))
-	canonical_module_dir := normalize_overlay_path(os.real_path(source_module_dir))
+	normalized_source_root := normalize_overlay_path(source_root)
+	normalized_module_dir := normalize_overlay_path(source_module_dir)
 	for uri, _ in tracked_files {
-		real_path := normalize_overlay_path(os.real_path(uri_to_path(uri)))
-		if rel := path_relative_to(real_path, canonical_source_root) {
+		file_path := normalize_overlay_path(uri_to_path(uri))
+		if rel := overlay_relative_path(file_path, normalized_source_root) {
 			tracked_rel_paths << normalize_overlay_path(rel)
 		}
 	}
-	local_import_dirs := local_import_rel_dirs(canonical_source_root, canonical_module_dir,
+	local_import_dirs := local_import_rel_dirs(normalized_source_root, normalized_module_dir,
 		tracked_files)
-	symlink_untracked_tree(canonical_source_root, canonical_source_root, temp_dir, '',
+	symlink_untracked_tree(normalized_source_root, normalized_source_root, temp_dir, '',
 		tracked_rel_paths, local_import_dirs, link_fn)!
 }
 
@@ -702,8 +699,8 @@ fn local_import_rel_dirs(source_root string, source_module_dir string, tracked_f
 		if !os.is_dir(module_dir) {
 			continue
 		}
-		normalized_module_dir := normalize_overlay_path(os.real_path(module_dir))
-		normalized_rel := path_relative_to(normalized_module_dir, source_root) or { continue }
+		normalized_module_dir := normalize_overlay_path(module_dir)
+		normalized_rel := overlay_relative_path(normalized_module_dir, source_root) or { continue }
 		if normalized_rel == '' || normalized_rel in seen_dirs {
 			continue
 		}
@@ -800,8 +797,9 @@ fn symlink_untracked_tree(source_root string, source_dir string, target_dir stri
 		link_fn(source_path, target_path) or {
 			log('Failed to symlink ${source_path}; using bounded overlay copy: ${err}')
 			mut visited := map[string]bool{}
-			copied :=
-				copy_bounded_overlay_entry(source_path, target_path, source_root, mut visited)!
+			containment_root := normalize_overlay_path(os.real_path(source_dir))
+			copied := copy_bounded_overlay_entry(source_path, target_path, containment_root, mut
+				visited)!
 			log('Copied ${copied} project files from ${source_path} into the overlay')
 			continue
 		}
