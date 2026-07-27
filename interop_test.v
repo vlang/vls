@@ -160,6 +160,14 @@ fn test_overlay_relative_path_prefers_nested_symlink_layout() {
 	assert relative == 'src/main.v'
 }
 
+fn test_overlay_path_lists_can_use_windows_case_rules() {
+	tracked_paths := ['Src/Main.v']
+	assert overlay_path_in_with_case('src/main.v', tracked_paths, true)
+	assert overlay_path_has_descendant_with_case('src', tracked_paths, true)
+	assert !overlay_path_in_with_case('src/main.v', tracked_paths, false)
+	assert !overlay_path_has_descendant_with_case('src', tracked_paths, false)
+}
+
 // --- path_to_uri tests ---
 
 fn test_path_to_uri_unix() {
@@ -1145,6 +1153,97 @@ fn test_symlink_untracked_files_materializes_import_relative_to_source_module() 
 
 fn deny_overlay_symlink(_ string, _ string) ! {
 	return error('permission denied')
+}
+
+fn test_symlink_untracked_files_matches_tracked_descendants_with_windows_case_rules() {
+	$if windows {
+		temp_dir := os.join_path(os.temp_dir(),
+			'vls_overlay_windows_case_${os.getpid()}_${time.now().unix_nano()}')
+		defer {
+			os.rmdir_all(temp_dir) or {}
+		}
+		project_dir := os.join_path(temp_dir, 'project')
+		source_dir := os.join_path(project_dir, 'Src')
+		target_dir := os.join_path(temp_dir, 'target')
+		target_source_dir := os.join_path(target_dir, 'src')
+		interop_test_must_mkdir_all(source_dir)
+		interop_test_must_mkdir_all(target_source_dir)
+		main_file := os.join_path(source_dir, 'main.v')
+		sibling_file := os.join_path(source_dir, 'sibling.v')
+		interop_test_must_write_file(main_file, 'module main\n')
+		interop_test_must_write_file(sibling_file, 'module main\n')
+		interop_test_must_write_file(os.join_path(target_source_dir, 'main.v'),
+			'module main\n\n// unsaved\n')
+
+		mut tracked := map[string]string{}
+		lowercase_main_file := os.join_path(project_dir, 'src', 'main.v')
+		tracked[path_to_uri(lowercase_main_file)] = 'module main\n\n// unsaved\n'
+		symlink_untracked_files_with_linker(project_dir, project_dir, target_dir, tracked,
+			deny_overlay_symlink) or {
+			assert false, 'Failed to populate case-insensitive overlay: ${err}'
+			return
+		}
+
+		assert os.is_file(os.join_path(target_source_dir, 'sibling.v'))
+	}
+}
+
+fn test_bounded_overlay_copy_caps_file_count_across_entries() {
+	temp_dir := os.join_path(os.temp_dir(),
+		'vls_overlay_file_limit_${os.getpid()}_${time.now().unix_nano()}')
+	defer {
+		os.rmdir_all(temp_dir) or {}
+	}
+	source_dir := os.join_path(temp_dir, 'source')
+	target_dir := os.join_path(temp_dir, 'target')
+	interop_test_must_mkdir_all(source_dir)
+	interop_test_must_write_file(os.join_path(source_dir, 'one.txt'), 'one')
+	interop_test_must_write_file(os.join_path(source_dir, 'two.txt'), 'two')
+	mut budget := OverlayCopyBudget{
+		max_files: 1
+		max_bytes: 1024
+	}
+	containment_root := normalize_overlay_path(os.real_path(source_dir))
+	mut first_visited := map[string]bool{}
+	copied := copy_bounded_overlay_entry(os.join_path(source_dir, 'one.txt'), os.join_path(target_dir,
+		'one.txt'), containment_root, mut budget, mut first_visited) or {
+		assert false, 'Failed to copy the first bounded entry: ${err}'
+		return
+	}
+	assert copied == 1
+	mut second_visited := map[string]bool{}
+	copy_bounded_overlay_entry(os.join_path(source_dir, 'two.txt'), os.join_path(target_dir,
+		'two.txt'), containment_root, mut budget, mut second_visited) or {
+		assert err.msg().contains('file limit')
+		assert budget.files == 1
+		return
+	}
+	assert false, 'expected the overlay copy file limit to be enforced'
+}
+
+fn test_bounded_overlay_copy_caps_bytes() {
+	temp_dir := os.join_path(os.temp_dir(),
+		'vls_overlay_byte_limit_${os.getpid()}_${time.now().unix_nano()}')
+	defer {
+		os.rmdir_all(temp_dir) or {}
+	}
+	source_file := os.join_path(temp_dir, 'asset.txt')
+	target_file := os.join_path(temp_dir, 'target', 'asset.txt')
+	interop_test_must_mkdir_all(temp_dir)
+	interop_test_must_write_file(source_file, 'too large')
+	mut budget := OverlayCopyBudget{
+		max_files: 10
+		max_bytes: 4
+	}
+	mut visited := map[string]bool{}
+	containment_root := normalize_overlay_path(os.real_path(temp_dir))
+	copy_bounded_overlay_entry(source_file, target_file, containment_root, mut budget, mut visited) or {
+		assert err.msg().contains('byte limit')
+		assert budget.bytes == 0
+		assert !os.exists(target_file)
+		return
+	}
+	assert false, 'expected the overlay copy byte limit to be enforced'
 }
 
 fn test_symlink_untracked_files_copies_when_symlinks_are_denied() {
