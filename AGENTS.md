@@ -21,7 +21,6 @@ Mandatory guardrails (enforced for all agent work)
  - Keep `.md` lines ≤ 100 characters.
  - Use `//` for V doc comments — do NOT use `///` or `/**`.
  - Use `[T]` style for generics - do NOT use `<T>` or other styles.
- - Do NOT run any git commands, create branches, PRs, or changelogs.
  - Do NOT create repository-local temporary files; use subdirectories under `/tmp` or another
    out-of-repo location for any artifacts you must write.
  - Avoid module-level mutable globals in repository source code; prefer struct fields or explicit

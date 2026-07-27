@@ -418,7 +418,7 @@ fn (mut app App) prepare_compilation_overlay(real_path string) !CompilationOverl
 	source_work_dir := normalize_overlay_path(os.dir(canonical_real_path))
 	temp_root_unresolved := app.write_tracked_files_to_temp(source_root)!
 	temp_root := normalize_overlay_path(os.real_path(temp_root_unresolved))
-	symlink_untracked_files(source_root, temp_root, app.open_files) or {
+	symlink_untracked_files(source_root, source_work_dir, temp_root, app.open_files) or {
 		os.rmdir_all(temp_root) or {}
 		return error('Failed to populate compilation overlay: ${err}')
 	}
@@ -646,28 +646,33 @@ fn has_sibling_v_files(working_dir string, current_file string) bool {
 
 type OverlayLinkFn = fn (string, string) !
 
+const overlay_copy_excluded_dirs = ['.git', '.hg', '.svn', '.cache', '.idea', '.vscode', '.vmodules',
+	'node_modules', '_build', 'build', 'target']
+
 fn create_overlay_symlink(source_path string, target_path string) ! {
 	os.symlink(source_path, target_path)!
 }
 
-fn symlink_untracked_files(working_dir string, temp_dir string, tracked_files map[string]string) ! {
-	symlink_untracked_files_with_linker(working_dir, temp_dir, tracked_files,
+fn symlink_untracked_files(source_root string, source_module_dir string, temp_dir string, tracked_files map[string]string) ! {
+	symlink_untracked_files_with_linker(source_root, source_module_dir, temp_dir, tracked_files,
 		create_overlay_symlink)!
 }
 
-fn symlink_untracked_files_with_linker(working_dir string, temp_dir string, tracked_files map[string]string, link_fn OverlayLinkFn) ! {
-	log('SYMLINKING FROM ${working_dir} TO ${temp_dir}')
+fn symlink_untracked_files_with_linker(source_root string, source_module_dir string, temp_dir string, tracked_files map[string]string, link_fn OverlayLinkFn) ! {
+	log('SYMLINKING FROM ${source_root} TO ${temp_dir}')
 	mut tracked_rel_paths := []string{}
-	canonical_working_dir := normalize_overlay_path(os.real_path(working_dir))
+	canonical_source_root := normalize_overlay_path(os.real_path(source_root))
+	canonical_module_dir := normalize_overlay_path(os.real_path(source_module_dir))
 	for uri, _ in tracked_files {
 		real_path := normalize_overlay_path(os.real_path(uri_to_path(uri)))
-		if rel := path_relative_to(real_path, canonical_working_dir) {
+		if rel := path_relative_to(real_path, canonical_source_root) {
 			tracked_rel_paths << normalize_overlay_path(rel)
 		}
 	}
-	local_import_dirs := local_import_rel_dirs(canonical_working_dir, tracked_files)
-	symlink_untracked_tree(canonical_working_dir, temp_dir, '', tracked_rel_paths,
-		local_import_dirs, link_fn)!
+	local_import_dirs := local_import_rel_dirs(canonical_source_root, canonical_module_dir,
+		tracked_files)
+	symlink_untracked_tree(canonical_source_root, canonical_source_root, temp_dir, '',
+		tracked_rel_paths, local_import_dirs, link_fn)!
 }
 
 // local_import_rel_dirs returns project-local module directories imported by
@@ -675,7 +680,7 @@ fn symlink_untracked_files_with_linker(working_dir string, temp_dir string, trac
 // be real directories in the overlay: the V checker resolves symlinked local
 // module files back outside the temporary project and gd^ can then stop at the
 // import declaration instead of the requested symbol.
-fn local_import_rel_dirs(source_root string, tracked_files map[string]string) []string {
+fn local_import_rel_dirs(source_root string, source_module_dir string, tracked_files map[string]string) []string {
 	mut pending := []string{}
 	for _, content in tracked_files {
 		pending << parse_imports(content)
@@ -690,11 +695,15 @@ fn local_import_rel_dirs(source_root string, tracked_files map[string]string) []
 		}
 		seen_modules[module_path] = true
 		rel_dir := module_path.replace('.', '/')
-		module_dir := os.join_path(source_root, rel_dir)
+		mut module_dir := os.join_path(source_module_dir, rel_dir)
+		if !os.is_dir(module_dir) {
+			module_dir = os.join_path(source_root, rel_dir)
+		}
 		if !os.is_dir(module_dir) {
 			continue
 		}
-		normalized_rel := rel_dir.replace('\\', '/').trim('/')
+		normalized_module_dir := normalize_overlay_path(os.real_path(module_dir))
+		normalized_rel := path_relative_to(normalized_module_dir, source_root) or { continue }
 		if normalized_rel == '' || normalized_rel in seen_dirs {
 			continue
 		}
@@ -711,7 +720,50 @@ fn local_import_rel_dirs(source_root string, tracked_files map[string]string) []
 	return result
 }
 
-fn symlink_untracked_tree(source_dir string, target_dir string, relative_dir string, tracked_rel_paths []string, local_import_dirs []string, link_fn OverlayLinkFn) ! {
+fn is_overlay_compilation_file(path string) bool {
+	name := os.file_name(path)
+	if name == 'v.mod' {
+		return true
+	}
+	for suffix in ['.v', '.vsh', '.vv', '.c', '.h', '.cc', '.cpp', '.cxx', '.hpp', '.m', '.mm',
+		'.s', '.asm', '.js', '.a', '.o', '.so', '.dylib', '.dll', '.lib'] {
+		if name.ends_with(suffix) {
+			return true
+		}
+	}
+	return false
+}
+
+// copy_compilation_overlay_entry is the bounded fallback for hosts where
+// directory symlinks are unavailable. It copies source and native interop files
+// while pruning metadata, dependency caches, and common build-output trees.
+fn copy_compilation_overlay_entry(source_path string, target_path string, source_root string, mut visited map[string]bool) !int {
+	real_path := normalize_overlay_path(os.real_path(source_path))
+	if !path_is_within(real_path, source_root) {
+		return 0
+	}
+	if os.is_dir(source_path) {
+		name := os.file_name(source_path)
+		if name.starts_with('.') || name in overlay_copy_excluded_dirs || real_path in visited {
+			return 0
+		}
+		visited[real_path] = true
+		mut copied := 0
+		for entry in os.ls(source_path)! {
+			copied += copy_compilation_overlay_entry(os.join_path(source_path, entry), os.join_path(target_path,
+				entry), source_root, mut visited)!
+		}
+		return copied
+	}
+	if !os.is_file(source_path) || !is_overlay_compilation_file(source_path) {
+		return 0
+	}
+	os.mkdir_all(os.dir(target_path))!
+	os.cp(source_path, target_path)!
+	return 1
+}
+
+fn symlink_untracked_tree(source_root string, source_dir string, target_dir string, relative_dir string, tracked_rel_paths []string, local_import_dirs []string, link_fn OverlayLinkFn) ! {
 	entries := os.ls(source_dir)!
 	for entry in entries {
 		source_path := os.join_path(source_dir, entry)
@@ -746,8 +798,8 @@ fn symlink_untracked_tree(source_dir string, target_dir string, relative_dir str
 			if !os.exists(target_path) {
 				os.mkdir_all(target_path)!
 			}
-			symlink_untracked_tree(source_path, target_path, relative_path, tracked_rel_paths,
-				local_import_dirs, link_fn)!
+			symlink_untracked_tree(source_root, source_path, target_path, relative_path,
+				tracked_rel_paths, local_import_dirs, link_fn)!
 			continue
 		}
 		if os.exists(target_path) || os.is_link(target_path) {
@@ -760,9 +812,11 @@ fn symlink_untracked_tree(source_dir string, target_dir string, relative_dir str
 			continue
 		}
 		link_fn(source_path, target_path) or {
-			log('Failed to symlink ${source_path}; copying overlay entry instead: ${err}')
-			os.cp_all(source_path, target_path, false)!
-			log('Copied untracked path: ${source_path} -> ${target_path}')
+			log('Failed to symlink ${source_path}; using bounded overlay copy: ${err}')
+			mut visited := map[string]bool{}
+			copied := copy_compilation_overlay_entry(source_path, target_path, source_root, mut
+				visited)!
+			log('Copied ${copied} compilation files from ${source_path} into the overlay')
 			continue
 		}
 		log('Symlinked untracked path: ${source_path} -> ${target_path}')

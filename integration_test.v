@@ -801,13 +801,14 @@ fn test_integration_cross_module_features_use_unsaved_project_overlay() {
 	}
 	integration_test_must_write_file(os.join_path(project_dir, 'v.mod'),
 		"Module {\n\tname: 'cross_module_test'\n}\n")
-	module_dir := os.join_path(project_dir, 'mathutil')
+	source_dir := os.join_path(project_dir, 'src')
+	module_dir := os.join_path(source_dir, 'mathutil')
 	integration_test_must_mkdir_all(module_dir)
 	module_file := os.join_path(module_dir, 'mathutil.v')
 	module_content := 'module mathutil\n\npub fn answer(value int) int {\n\treturn value\n}\n'
 	integration_test_must_write_file(module_file, module_content)
 
-	main_file := os.join_path(project_dir, 'main.v')
+	main_file := os.join_path(source_dir, 'main.v')
 	// Disk deliberately lacks the import and call. Compiler-backed features must
 	// use the authoritative unsaved editor buffer while retaining project imports.
 	integration_test_must_write_file(main_file, 'module main\n\nfn main() {}\n')
