@@ -464,18 +464,28 @@ fn (mut app App) prepare_compilation_overlay(real_path string) !CompilationOverl
 
 // source_path_from_overlay maps compiler paths in the temporary project back to
 // their original source paths.
-fn source_path_from_overlay(reported_path string, overlay CompilationOverlay) string {
-	mut candidate := normalize_overlay_path(reported_path)
+fn source_path_from_overlay_with_windows_rules(reported_path string, overlay CompilationOverlay, windows bool) string {
+	mut candidate := normalize_overlay_path_with_windows_rules(reported_path, windows)
 	if candidate.starts_with('./') || candidate.starts_with('.\\') {
 		candidate = os.join_path(overlay.temp_work_dir, candidate[2..])
 	} else if !os.is_abs_path(candidate) {
 		candidate = os.join_path(overlay.temp_work_dir, candidate)
 	}
-	if path_is_within(candidate, overlay.temp_root) {
-		rel := path_relative_to(candidate, overlay.temp_root) or { return candidate }
-		return os.join_path(overlay.source_display_root, rel)
+	candidate = normalize_overlay_path_with_windows_rules(candidate, windows)
+	temp_root := normalize_overlay_path_with_windows_rules(overlay.temp_root, windows)
+	if path_is_within_with_case(candidate, temp_root, windows) {
+		rel := path_relative_to_with_case(candidate, temp_root, windows) or { return candidate }
+		return normalize_overlay_path_with_windows_rules(os.join_path(overlay.source_display_root,
+			rel), windows)
 	}
 	return candidate
+}
+
+fn source_path_from_overlay(reported_path string, overlay CompilationOverlay) string {
+	$if windows {
+		return source_path_from_overlay_with_windows_rules(reported_path, overlay, true)
+	}
+	return source_path_from_overlay_with_windows_rules(reported_path, overlay, false)
 }
 
 fn (mut app App) run_v_check(path string, text string) []JsonError {
@@ -762,6 +772,10 @@ fn symlink_untracked_files_with_linker(source_root string, source_module_dir str
 	local_import_dirs := local_import_rel_dirs(normalized_source_root, normalized_module_dir,
 		tracked_files)
 	mut copy_budget := new_overlay_copy_budget()
+	thirdparty_references := referenced_thirdparty_rel_paths(normalized_source_root,
+		normalized_module_dir, tracked_files, local_import_dirs)
+	materialize_referenced_thirdparty_inputs(normalized_source_root, temp_dir,
+		thirdparty_references, mut copy_budget)!
 	symlink_untracked_tree(normalized_source_root, normalized_source_root, temp_dir, '',
 		tracked_rel_paths, local_import_dirs, link_fn, mut copy_budget)!
 }
@@ -811,6 +825,138 @@ fn local_import_rel_dirs(source_root string, source_module_dir string, tracked_f
 	return result
 }
 
+fn parse_embed_file_literal_paths(content string) []string {
+	marker := r'$embed_file'
+	mut result := []string{}
+	mut search_start := 0
+	for search_start < content.len {
+		offset := content[search_start..].index(marker) or { break }
+		mut pos := search_start + offset + marker.len
+		for pos < content.len && content[pos].is_space() {
+			pos++
+		}
+		if pos >= content.len || content[pos] != `(` {
+			search_start = pos
+			continue
+		}
+		pos++
+		for pos < content.len && content[pos].is_space() {
+			pos++
+		}
+		mut is_raw := false
+		if pos + 1 < content.len && content[pos] == `r` && content[pos + 1] in [`'`, `"`] {
+			is_raw = true
+			pos++
+		}
+		if pos >= content.len || content[pos] !in [`'`, `"`] {
+			search_start = pos
+			continue
+		}
+		quote := content[pos]
+		pos++
+		path_start := pos
+		for pos < content.len {
+			if !is_raw && content[pos] == `\\` && pos + 1 < content.len {
+				pos += 2
+				continue
+			}
+			if content[pos] == quote {
+				result << content[path_start..pos]
+				pos++
+				break
+			}
+			pos++
+		}
+		search_start = pos
+	}
+	return result
+}
+
+fn parse_vmodroot_thirdparty_paths(content string) []string {
+	marker := '@VMODROOT/thirdparty'
+	mut result := []string{}
+	mut search_start := 0
+	for search_start < content.len {
+		offset := content[search_start..].index(marker) or { break }
+		start := search_start + offset
+		mut end := start + marker.len
+		for end < content.len && !content[end].is_space()
+			&& content[end] !in [`'`, `"`, `)`, `]`, `}`, `,`, `;`] {
+			end++
+		}
+		result << content[start..end]
+		search_start = end
+	}
+	return result
+}
+
+fn resolve_thirdparty_overlay_reference(reference string, source_file string, source_root string) ?string {
+	mut source_path := if reference.starts_with('@VMODROOT/') {
+		os.join_path(source_root, reference['@VMODROOT/'.len..])
+	} else if reference == '@VMODROOT' {
+		source_root
+	} else if os.is_abs_path(reference) || reference.starts_with('@VEXEROOT') {
+		return none
+	} else {
+		os.join_path(os.dir(source_file), reference)
+	}
+	source_path = normalize_overlay_path(os.norm_path(source_path))
+	rel := overlay_relative_path(source_path, source_root) or { return none }
+	normalized_rel := normalize_overlay_path(os.norm_path(rel))
+	if normalized_rel != 'thirdparty' && !normalized_rel.starts_with('thirdparty/') {
+		return none
+	}
+	if !os.exists(source_path) {
+		return none
+	}
+	return normalized_rel
+}
+
+fn referenced_thirdparty_rel_paths(source_root string, source_module_dir string, tracked_files map[string]string, local_import_dirs []string) []string {
+	mut source_contents := map[string]string{}
+	for uri, content in tracked_files {
+		source_path := normalize_overlay_path(uri_to_path(uri))
+		overlay_relative_path(source_path, source_root) or { continue }
+		source_contents[source_path] = content
+	}
+	mut module_dirs := [source_module_dir]
+	for rel_dir in local_import_dirs {
+		module_dirs << os.join_path(source_root, rel_dir)
+	}
+	mut seen_dirs := map[string]bool{}
+	for module_dir in module_dirs {
+		normalized_dir := normalize_overlay_path(module_dir)
+		if normalized_dir in seen_dirs {
+			continue
+		}
+		seen_dirs[normalized_dir] = true
+		for entry in os.ls(module_dir) or { [] } {
+			if !entry.ends_with('.v') || entry.ends_with('_test.v') {
+				continue
+			}
+			source_path := normalize_overlay_path(os.join_path(module_dir, entry))
+			if source_path in source_contents {
+				continue
+			}
+			source_contents[source_path] = os.read_file(source_path) or { continue }
+		}
+	}
+	mut references := map[string]bool{}
+	for source_file, content in source_contents {
+		mut candidates := parse_embed_file_literal_paths(content)
+		candidates << parse_vmodroot_thirdparty_paths(content)
+		for candidate in candidates {
+			rel := resolve_thirdparty_overlay_reference(candidate, source_file, source_root) or {
+				continue
+			}
+			references[rel] = true
+		}
+	}
+	mut result := references.keys()
+	result.sort()
+	return result
+}
+
 fn is_overlay_compilation_file(path string) bool {
 	name := os.file_name(path)
 	if name == 'v.mod' {
@@ -846,6 +992,9 @@ fn copy_bounded_overlay_entry_pass(source_path string, target_path string, compi
 	if !os.is_file(source_path) || is_overlay_compilation_file(source_path) != compilation_files {
 		return 0
 	}
+	if os.exists(target_path) || os.is_link(target_path) {
+		return 0
+	}
 	if !budget.try_reserve(source_path) {
 		return 0
 	}
@@ -866,6 +1015,35 @@ fn copy_bounded_overlay_entry(source_path string, target_path string, mut budget
 	copied += copy_bounded_overlay_entry_pass(source_path, target_path, false, mut budget, mut
 		asset_visited)!
 	return copied
+}
+
+fn materialize_referenced_thirdparty_inputs(source_root string, target_root string, references []string, mut budget OverlayCopyBudget) ! {
+	for rel_path in references {
+		source_path := os.join_path(source_root, rel_path)
+		target_path := os.join_path(target_root, rel_path)
+		if os.is_dir(source_path) {
+			mut visited := map[string]bool{}
+			if os.file_name(source_path) == 'thirdparty' {
+				for entry in os.ls(source_path)! {
+					copy_bounded_overlay_entry_pass(os.join_path(source_path, entry), os.join_path(target_path,
+						entry), true, mut budget, mut visited)!
+				}
+			} else {
+				copy_bounded_overlay_entry_pass(source_path, target_path, true, mut budget, mut
+					visited)!
+			}
+			continue
+		}
+		if !os.is_file(source_path) || os.exists(target_path) || os.is_link(target_path) {
+			continue
+		}
+		os.mkdir_all(os.dir(target_path))!
+		if materialize_overlay_file(source_path, target_path, mut budget)! {
+			log('Materialized referenced thirdparty input: ${source_path} -> ${target_path}')
+		} else {
+			log('Skipped referenced thirdparty input after reaching the overlay copy limit: ${source_path}')
+		}
+	}
 }
 
 fn symlink_untracked_tree(source_root string, source_dir string, target_dir string, relative_dir string, tracked_rel_paths []string, local_import_dirs []string, link_fn OverlayLinkFn, mut copy_budget OverlayCopyBudget) ! {
