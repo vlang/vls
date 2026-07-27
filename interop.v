@@ -644,7 +644,7 @@ fn has_sibling_v_files(working_dir string, current_file string) bool {
 type OverlayLinkFn = fn (string, string) !
 
 const overlay_copy_excluded_dirs = ['.git', '.hg', '.svn', '.cache', '.idea', '.vscode', '.vmodules',
-	'node_modules', '_build', 'build', 'target']
+	'node_modules', 'thirdparty', '_build', 'build', 'target']
 
 fn create_overlay_symlink(source_path string, target_path string) ! {
 	os.symlink(source_path, target_path)!

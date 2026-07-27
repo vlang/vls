@@ -1164,6 +1164,7 @@ fn test_symlink_untracked_files_copies_when_symlinks_are_denied() {
 	module_file := os.join_path(module_dir, 'helper.v')
 	git_dir := os.join_path(project_dir, '.git')
 	node_modules_dir := os.join_path(project_dir, 'node_modules', 'dependency')
+	thirdparty_dir := os.join_path(project_dir, 'thirdparty', 'native_dependency')
 	build_dir := os.join_path(project_dir, 'build')
 	assets_dir := os.join_path(project_dir, 'assets')
 	main_content := 'module main\n'
@@ -1171,6 +1172,7 @@ fn test_symlink_untracked_files_copies_when_symlinks_are_denied() {
 	module_content := 'module helper\n\npub fn answer() int { return 42 }\n'
 	interop_test_must_mkdir_all(git_dir)
 	interop_test_must_mkdir_all(node_modules_dir)
+	interop_test_must_mkdir_all(thirdparty_dir)
 	interop_test_must_mkdir_all(build_dir)
 	interop_test_must_mkdir_all(assets_dir)
 	interop_test_must_write_file(main_file, main_content)
@@ -1184,6 +1186,8 @@ fn test_symlink_untracked_files_copies_when_symlinks_are_denied() {
 	interop_test_must_write_file(os.join_path(git_dir, 'metadata.json'), '{"git":true}\n')
 	interop_test_must_write_file(os.join_path(node_modules_dir, 'dependency.json'),
 		'{"dependency":true}\n')
+	interop_test_must_write_file(os.join_path(thirdparty_dir, 'dependency.json'),
+		'{"native_dependency":true}\n')
 	interop_test_must_write_file(os.join_path(build_dir, 'generated.json'), '{"build":true}\n')
 
 	mut tracked := map[string]string{}
@@ -1210,6 +1214,7 @@ fn test_symlink_untracked_files_copies_when_symlinks_are_denied() {
 	assert os.read_file(os.join_path(target_dir, 'assets', 'logo.png')) or { '' } == 'fake png bytes'
 	assert !os.exists(os.join_path(target_dir, '.git'))
 	assert !os.exists(os.join_path(target_dir, 'node_modules'))
+	assert !os.exists(os.join_path(target_dir, 'thirdparty'))
 	assert !os.exists(os.join_path(target_dir, 'build'))
 }
 
