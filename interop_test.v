@@ -940,7 +940,7 @@ fn test_symlink_untracked_files_basic() {
 	mut tracked := map[string]string{}
 	tracked[path_to_uri(tracked_file)] = 'content'
 
-	symlink_untracked_files(project_dir, target_dir, tracked) or {
+	symlink_untracked_files(project_dir, project_dir, target_dir, tracked) or {
 		assert false, 'Failed to symlink: ${err}'
 		return
 	}
@@ -967,7 +967,7 @@ fn test_symlink_untracked_files_nested() {
 
 	tracked := map[string]string{}
 
-	symlink_untracked_files(project_dir, target_dir, tracked) or {
+	symlink_untracked_files(project_dir, project_dir, target_dir, tracked) or {
 		assert false, 'Failed to symlink: ${err}'
 		return
 	}
@@ -993,7 +993,7 @@ fn test_symlink_untracked_files_empty_tracked() {
 
 	tracked := map[string]string{} // Empty - all files untracked
 
-	symlink_untracked_files(project_dir, target_dir, tracked) or {
+	symlink_untracked_files(project_dir, project_dir, target_dir, tracked) or {
 		assert false, 'Failed to symlink: ${err}'
 		return
 	}
@@ -1026,12 +1026,48 @@ fn test_symlink_untracked_files_materializes_local_imports() {
 
 	mut tracked := map[string]string{}
 	tracked[path_to_uri(main_file)] = main_content
-	symlink_untracked_files(project_dir, target_dir, tracked) or {
+	symlink_untracked_files(project_dir, project_dir, target_dir, tracked) or {
 		assert false, 'Failed to populate overlay: ${err}'
 		return
 	}
 
 	target_module_dir := os.join_path(target_dir, 'mathutil')
+	target_module_file := os.join_path(target_module_dir, 'mathutil.v')
+	assert os.is_dir(target_module_dir)
+	assert !os.is_link(target_module_dir)
+	assert os.is_file(target_module_file)
+	assert !os.is_link(target_module_file)
+	assert os.read_file(target_module_file) or { '' } == module_content
+}
+
+fn test_symlink_untracked_files_materializes_import_relative_to_source_module() {
+	temp_dir := os.join_path(os.temp_dir(),
+		'vls_symlink_nested_import_${os.getpid()}_${time.now().unix_nano()}')
+	defer {
+		os.rmdir_all(temp_dir) or {}
+	}
+	project_dir := os.join_path(temp_dir, 'project')
+	source_dir := os.join_path(project_dir, 'src')
+	module_dir := os.join_path(source_dir, 'mathutil')
+	target_dir := os.join_path(temp_dir, 'target')
+	interop_test_must_mkdir_all(module_dir)
+	interop_test_must_mkdir_all(target_dir)
+
+	main_file := os.join_path(source_dir, 'main.v')
+	main_content := 'module main\n\nimport mathutil\n'
+	module_file := os.join_path(module_dir, 'mathutil.v')
+	module_content := 'module mathutil\n\npub fn answer() int { return 42 }\n'
+	interop_test_must_write_file(main_file, main_content)
+	interop_test_must_write_file(module_file, module_content)
+
+	mut tracked := map[string]string{}
+	tracked[path_to_uri(main_file)] = main_content
+	symlink_untracked_files(project_dir, source_dir, target_dir, tracked) or {
+		assert false, 'Failed to populate nested-source overlay: ${err}'
+		return
+	}
+
+	target_module_dir := os.join_path(target_dir, 'src', 'mathutil')
 	target_module_file := os.join_path(target_module_dir, 'mathutil.v')
 	assert os.is_dir(target_module_dir)
 	assert !os.is_link(target_module_dir)
@@ -1059,16 +1095,28 @@ fn test_symlink_untracked_files_copies_when_symlinks_are_denied() {
 	main_file := os.join_path(project_dir, 'main.v')
 	vmod_file := os.join_path(project_dir, 'v.mod')
 	module_file := os.join_path(module_dir, 'helper.v')
+	git_dir := os.join_path(project_dir, '.git')
+	node_modules_dir := os.join_path(project_dir, 'node_modules', 'dependency')
+	build_dir := os.join_path(project_dir, 'build')
 	main_content := 'module main\n'
 	vmod_content := "Module {\n\tname: 'denied_symlink_test'\n}\n"
 	module_content := 'module helper\n\npub fn answer() int { return 42 }\n'
+	interop_test_must_mkdir_all(git_dir)
+	interop_test_must_mkdir_all(node_modules_dir)
+	interop_test_must_mkdir_all(build_dir)
 	interop_test_must_write_file(main_file, main_content)
 	interop_test_must_write_file(vmod_file, vmod_content)
 	interop_test_must_write_file(module_file, module_content)
+	interop_test_must_write_file(os.join_path(project_dir, 'README.md'), 'not compiler input\n')
+	interop_test_must_write_file(os.join_path(git_dir, 'metadata.v'), 'module metadata\n')
+	interop_test_must_write_file(os.join_path(node_modules_dir, 'dependency.v'),
+		'module dependency\n')
+	interop_test_must_write_file(os.join_path(build_dir, 'generated.v'), 'module generated\n')
 
 	mut tracked := map[string]string{}
 	tracked[path_to_uri(main_file)] = 'module main\n\n// unsaved\n'
-	symlink_untracked_files_with_linker(project_dir, target_dir, tracked, deny_overlay_symlink) or {
+	symlink_untracked_files_with_linker(project_dir, project_dir, target_dir, tracked,
+		deny_overlay_symlink) or {
 		assert false, 'Failed to copy denied symlinks: ${err}'
 		return
 	}
@@ -1083,6 +1131,10 @@ fn test_symlink_untracked_files_copies_when_symlinks_are_denied() {
 	assert os.is_dir(target_module)
 	assert !os.is_link(target_module)
 	assert os.read_file(target_module_file) or { '' } == module_content
+	assert !os.exists(os.join_path(target_dir, 'README.md'))
+	assert !os.exists(os.join_path(target_dir, '.git'))
+	assert !os.exists(os.join_path(target_dir, 'node_modules'))
+	assert !os.exists(os.join_path(target_dir, 'build'))
 }
 
 // ============================================================================
