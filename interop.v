@@ -368,8 +368,18 @@ struct CompilationOverlay {
 
 // normalize_overlay_path converts native Windows separators before paths enter
 // the overlay's slash-based containment and relative-path helpers.
+fn normalize_overlay_path_with_windows_rules(path string, windows bool) string {
+	if windows {
+		return path.replace('\\', '/')
+	}
+	return path
+}
+
 fn normalize_overlay_path(path string) string {
-	return path.replace('\\', '/')
+	$if windows {
+		return normalize_overlay_path_with_windows_rules(path, true)
+	}
+	return normalize_overlay_path_with_windows_rules(path, false)
 }
 
 // compilation_overlay_root returns the broadest source root needed to preserve
