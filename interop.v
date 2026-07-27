@@ -720,42 +720,28 @@ fn local_import_rel_dirs(source_root string, source_module_dir string, tracked_f
 	return result
 }
 
-fn is_overlay_compilation_file(path string) bool {
-	name := os.file_name(path)
-	if name == 'v.mod' {
-		return true
-	}
-	for suffix in ['.v', '.vsh', '.vv', '.c', '.h', '.cc', '.cpp', '.cxx', '.hpp', '.m', '.mm',
-		'.s', '.asm', '.js', '.a', '.o', '.so', '.dylib', '.dll', '.lib'] {
-		if name.ends_with(suffix) {
-			return true
-		}
-	}
-	return false
-}
-
-// copy_compilation_overlay_entry is the bounded fallback for hosts where
-// directory symlinks are unavailable. It copies source and native interop files
-// while pruning metadata, dependency caches, and common build-output trees.
-fn copy_compilation_overlay_entry(source_path string, target_path string, source_root string, mut visited map[string]bool) !int {
+// copy_bounded_overlay_entry is the fallback for hosts where directory symlinks
+// are unavailable. It preserves regular project files, including embedded
+// assets, while pruning metadata, dependency caches, and build-output trees.
+fn copy_bounded_overlay_entry(source_path string, target_path string, source_root string, mut visited map[string]bool) !int {
 	real_path := normalize_overlay_path(os.real_path(source_path))
 	if !path_is_within(real_path, source_root) {
 		return 0
 	}
 	if os.is_dir(source_path) {
 		name := os.file_name(source_path)
-		if name.starts_with('.') || name in overlay_copy_excluded_dirs || real_path in visited {
+		if name in overlay_copy_excluded_dirs || real_path in visited {
 			return 0
 		}
 		visited[real_path] = true
 		mut copied := 0
 		for entry in os.ls(source_path)! {
-			copied += copy_compilation_overlay_entry(os.join_path(source_path, entry), os.join_path(target_path,
+			copied += copy_bounded_overlay_entry(os.join_path(source_path, entry), os.join_path(target_path,
 				entry), source_root, mut visited)!
 		}
 		return copied
 	}
-	if !os.is_file(source_path) || !is_overlay_compilation_file(source_path) {
+	if !os.is_file(source_path) {
 		return 0
 	}
 	os.mkdir_all(os.dir(target_path))!
@@ -814,9 +800,9 @@ fn symlink_untracked_tree(source_root string, source_dir string, target_dir stri
 		link_fn(source_path, target_path) or {
 			log('Failed to symlink ${source_path}; using bounded overlay copy: ${err}')
 			mut visited := map[string]bool{}
-			copied := copy_compilation_overlay_entry(source_path, target_path, source_root, mut
-				visited)!
-			log('Copied ${copied} compilation files from ${source_path} into the overlay')
+			copied :=
+				copy_bounded_overlay_entry(source_path, target_path, source_root, mut visited)!
+			log('Copied ${copied} project files from ${source_path} into the overlay')
 			continue
 		}
 		log('Symlinked untracked path: ${source_path} -> ${target_path}')
