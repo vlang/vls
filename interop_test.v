@@ -127,8 +127,8 @@ fn test_path_is_within_with_case_accepts_windows_case_differences() {
 }
 
 fn test_normalize_overlay_path_before_windows_containment_checks() {
-	path := normalize_overlay_path(r'C:\Users\Alex\project\src\main.v')
-	root := normalize_overlay_path(r'c:\users\alex\project')
+	path := normalize_overlay_path_with_windows_rules(r'C:\Users\Alex\project\src\main.v', true)
+	root := normalize_overlay_path_with_windows_rules(r'c:\users\alex\project', true)
 	assert path == 'C:/Users/Alex/project/src/main.v'
 	assert root == 'c:/users/alex/project'
 	assert path_is_within_with_case(path, root, true)
@@ -137,6 +137,14 @@ fn test_normalize_overlay_path_before_windows_containment_checks() {
 		return
 	}
 	assert relative == 'src/main.v'
+}
+
+fn test_normalize_overlay_path_preserves_posix_backslashes() {
+	path := r'/tmp/project\name/main.v'
+	assert normalize_overlay_path_with_windows_rules(path, false) == path
+	$if !windows {
+		assert normalize_overlay_path(path) == path
+	}
 }
 
 fn test_overlay_relative_path_prefers_nested_symlink_layout() {
@@ -953,6 +961,47 @@ fn test_prepare_compilation_overlay_preserves_nested_symlink_layout() {
 	assert os.read_file(overlay.temp_source_file) or { '' } == unsaved_content
 	mapped_path := source_path_from_overlay(overlay.temp_source_file, overlay)
 	assert normalize_overlay_path(mapped_path) == normalize_overlay_path(main_file)
+}
+
+fn test_prepare_compilation_overlay_preserves_posix_backslashes() {
+	$if !windows {
+		temp_dir := os.join_path(os.temp_dir(),
+			'vls_overlay_posix_backslash_${os.getpid()}_${time.now().unix_nano()}')
+		defer {
+			os.rmdir_all(temp_dir) or {}
+		}
+		project_dir := os.join_path(temp_dir, r'project\name')
+		app_temp_dir := os.join_path(temp_dir, 'app-temp')
+		interop_test_must_mkdir_all(project_dir)
+		interop_test_must_mkdir_all(app_temp_dir)
+		interop_test_must_write_file(os.join_path(project_dir, 'v.mod'),
+			"Module {\n\tname: 'posix_backslash_test'\n}\n")
+		main_file := os.join_path(project_dir, 'main.v')
+		interop_test_must_write_file(main_file, 'module main\n')
+		main_uri := path_to_uri(main_file)
+		assert uri_to_path(main_uri) == main_file
+		unsaved_content := 'module main\n\nfn unsaved() {}\n'
+		mut app := &App{
+			temp_dir:   app_temp_dir
+			open_files: {
+				main_uri: unsaved_content
+			}
+		}
+
+		overlay := app.prepare_compilation_overlay(main_file) or {
+			assert false, 'Failed to prepare literal-backslash overlay: ${err}'
+			return
+		}
+		defer {
+			os.rmdir_all(overlay.temp_root) or {}
+		}
+
+		assert overlay.source_root == project_dir
+		assert overlay.source_display_root == project_dir
+		assert os.read_file(overlay.temp_source_file) or { '' } == unsaved_content
+		mapped_path := source_path_from_overlay(overlay.temp_source_file, overlay)
+		assert mapped_path == main_file
+	}
 }
 
 fn test_write_tracked_files_skips_files_outside_working_dir() {
