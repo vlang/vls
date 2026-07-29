@@ -6,6 +6,30 @@ import json2
 import io
 import os
 
+fn test_stdio_reader_processes_frame_before_eof() {
+	mut transport := os.pipe() or {
+		assert false, 'failed to create stdin test pipe: ${err}'
+		return
+	}
+	defer {
+		transport.close()
+	}
+
+	payload := '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}'
+	frame := 'Content-Length: ${payload.len}\r\n\r\n${payload}'
+	transport.write(frame.bytes()) or {
+		assert false, 'failed to write stdin test frame: ${err}'
+		return
+	}
+
+	mut reader := new_file_descriptor_buffered_reader(transport.read_fd)
+	content := read_request(mut reader) or {
+		assert false, 'failed to read stdin test frame: ${err}'
+		return
+	}
+	assert content == payload
+}
+
 fn test_method_from_string_initialize() {
 	assert Method.from_string('initialize') == .initialize
 }

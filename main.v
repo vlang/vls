@@ -107,6 +107,37 @@ fn log(s string) {
 	output.close()
 }
 
+// FileDescriptorReader reads a stream through its raw descriptor so streaming
+// clients are not blocked by the full-buffer behaviour of C fread.
+struct FileDescriptorReader {
+	fd int
+}
+
+fn (reader FileDescriptorReader) read(mut buffer []u8) !int {
+	data, bytes_read := os.fd_read(reader.fd, buffer.len)
+	if bytes_read < 0 {
+		return error('failed to read from descriptor ${reader.fd}')
+	}
+	if bytes_read == 0 {
+		return io.Eof{}
+	}
+	return copy(mut buffer, data.bytes())
+}
+
+fn new_file_descriptor_buffered_reader(fd int) &io.BufferedReader {
+	return io.new_buffered_reader(
+		reader: FileDescriptorReader{
+			fd: fd
+		}
+		cap:    transport_buffer_cap
+	)
+}
+
+// new_stdin_buffered_reader creates the streaming reader used by stdio mode.
+fn new_stdin_buffered_reader() &io.BufferedReader {
+	return new_file_descriptor_buffered_reader(0)
+}
+
 fn main() {
 	log('VLS started. Reading from stdin...')
 	log('VLS preferences: is_vls=${v_prefs.is_vls}')
@@ -153,7 +184,10 @@ fn main() {
 		open_files: map[string]string{}
 		temp_dir:   temp_dir
 	}
-	mut reader := io.new_buffered_reader(reader: os.stdin(), cap: transport_buffer_cap)
+	// os.File.read uses C fread, which waits for the entire buffer on an open
+	// pipe. LSP clients keep stdin open, so use the raw descriptor-backed pipe
+	// reader to consume each request as soon as it arrives.
+	mut reader := new_stdin_buffered_reader()
 	app.handle_requests(mut reader)
 	log('VLS exiting.')
 	os.rmdir_all(temp_dir) or {
