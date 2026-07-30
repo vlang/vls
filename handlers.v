@@ -709,6 +709,11 @@ fn (mut app App) on_did_change(request Request) ?Notification {
 	}
 	app.bump_generation(uri)
 	app.invalidate_index_uri(uri) // symbols re-parsed lazily on next query
+	$if debug {
+		notification := app.build_diagnostics_notification(uri, content)
+		log('returning notification: ${notification}')
+		return notification
+	}
 	return none
 }
 
