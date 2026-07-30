@@ -155,8 +155,8 @@ fn test_integration_stdio_initialize_completion_and_hover() {
 
 	assert initialize_response.contains('"completionProvider"')
 	assert initialize_response.contains('"hoverProvider":true')
-	assert completion_response.contains('"label":"join_path"')
-	assert hover_response.contains('join_path')
+	assert completion_response.contains('"label":"join_path"'), 'missing join_path completion: ${completion_response}'
+	assert hover_response.contains('join_path'), 'missing join_path hover: ${hover_response}'
 	assert shutdown_response.contains('"result":null')
 	assert app.is_shutdown
 	assert app.exit_was_requested
