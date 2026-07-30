@@ -24,6 +24,33 @@ fn integration_test_frame_message(payload string) string {
 	return 'Content-Length: ${payload.len}\r\n\r\n${payload}'
 }
 
+fn integration_test_parse_strict_frames(output string) ![]string {
+	mut frames := []string{}
+	mut remaining := output
+	for remaining.len > 0 {
+		header_end := remaining.index('\r\n\r\n') or {
+			return error('missing CRLF header separator')
+		}
+		header := remaining[..header_end]
+		if !header.starts_with('Content-Length:') {
+			return error('missing Content-Length header')
+		}
+		content_length := parse_content_length_header(header.all_after(':'))!
+		body_start := header_end + 4
+		body_end := body_start + content_length
+		if body_end > remaining.len {
+			return error('truncated LSP frame body')
+		}
+		frames << remaining[body_start..body_end]
+		remaining = remaining[body_end..]
+	}
+	return frames
+}
+
+fn integration_test_slurp_fd(fd int, output chan string) {
+	output <- os.fd_slurp(fd).join('')
+}
+
 fn create_integration_test_env() (&App, string) {
 	temp_dir := os.join_path(os.temp_dir(), 'vls_integration_test_${os.getpid()}')
 	integration_test_must_mkdir_all(temp_dir)
@@ -42,6 +69,97 @@ fn create_integration_test_env() (&App, string) {
 fn cleanup_integration_test_env(_ &App, project_dir string) {
 	parent := os.dir(project_dir)
 	os.rmdir_all(parent) or {}
+}
+
+fn test_integration_stdio_initialize_completion_and_hover() {
+	mut app, project_dir := create_integration_test_env()
+	defer {
+		cleanup_integration_test_env(app, project_dir)
+	}
+	test_file := os.join_path(project_dir, 'main.v')
+	content := 'module main\n\nimport os\n\nfn main() {\n\t_ := os.join_path("a", "b")\n}\n'
+	integration_test_must_write_file(test_file, content)
+	uri := path_to_uri(test_file)
+	encoded_uri := json2.encode(uri, escape_unicode: true)
+	encoded_root_uri := json2.encode(path_to_uri(project_dir), escape_unicode: true)
+	encoded_content := json2.encode(content, escape_unicode: true)
+	payloads := [
+		'{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"rootUri":${encoded_root_uri},"capabilities":{}}}',
+		'{"jsonrpc":"2.0","method":"initialized","params":{}}',
+		'{"jsonrpc":"2.0","method":"workspace/didChangeConfiguration","params":{"settings":{"vls":{"diagnostics":false}}}}',
+		'{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":${encoded_uri},"languageId":"v","version":1,"text":${encoded_content}}}}',
+		'{"jsonrpc":"2.0","id":2,"method":"textDocument/completion","params":{"textDocument":{"uri":${encoded_uri}},"position":{"line":5,"character":9}}}',
+		'{"jsonrpc":"2.0","id":3,"method":"textDocument/hover","params":{"textDocument":{"uri":${encoded_uri}},"position":{"line":5,"character":12}}}',
+		'{"jsonrpc":"2.0","id":4,"method":"shutdown","params":null}',
+		'{"jsonrpc":"2.0","method":"exit","params":null}',
+	]
+	mut input := ''
+	for payload in payloads {
+		input += integration_test_frame_message(payload)
+	}
+
+	mut transport := os.pipe() or {
+		assert false, 'failed to create stdio test pipe: ${err}'
+		return
+	}
+	saved_stdin := os.fd_dup(0)
+	assert saved_stdin >= 0
+	defer {
+		os.fd_dup2(saved_stdin, 0)
+		os.fd_close(saved_stdin)
+		transport.close()
+	}
+	transport.write(input.bytes()) or {
+		assert false, 'failed to write stdio test input: ${err}'
+		return
+	}
+	os.fd_close(transport.write_fd)
+	transport.write_fd = -1
+	assert os.fd_dup2(transport.read_fd, 0) >= 0
+
+	mut capture := os.stdio_capture() or {
+		assert false, 'failed to capture stdio test output: ${err}'
+		return
+	}
+	defer {
+		capture.stop()
+		capture.close()
+	}
+	stdout_output := chan string{cap: 1}
+	spawn integration_test_slurp_fd(capture.stdout.read_fd, stdout_output)
+	mut reader := new_stdin_buffered_reader()
+	app.handle_requests(mut reader)
+	capture.stop()
+	stdout := <-stdout_output
+	capture.close()
+
+	frames := integration_test_parse_strict_frames(stdout) or {
+		assert false, 'failed to parse strict LSP frames: ${err}'
+		return
+	}
+	mut initialize_response := ''
+	mut completion_response := ''
+	mut hover_response := ''
+	mut shutdown_response := ''
+	for frame in frames {
+		if frame.contains('"id":1') {
+			initialize_response = frame
+		} else if frame.contains('"id":2') {
+			completion_response = frame
+		} else if frame.contains('"id":3') {
+			hover_response = frame
+		} else if frame.contains('"id":4') {
+			shutdown_response = frame
+		}
+	}
+
+	assert initialize_response.contains('"completionProvider"')
+	assert initialize_response.contains('"hoverProvider":true')
+	assert completion_response.contains('"label":"join_path"')
+	assert hover_response.contains('join_path')
+	assert shutdown_response.contains('"result":null')
+	assert app.is_shutdown
+	assert app.exit_was_requested
 }
 
 fn test_integration_initialize_capabilities() {

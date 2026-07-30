@@ -35,6 +35,19 @@ fn test_stdio_reader_processes_frame_before_eof() {
 	assert content == payload
 }
 
+fn test_send_framed_uses_lsp_crlf_separator() {
+	payload := '{"jsonrpc":"2.0","id":1,"result":null}'
+	mut app := &App{
+		capture_output: true
+	}
+
+	app.send_framed(payload)
+
+	assert app.captured_output == [
+		'Content-Length: ${payload.len}\r\n\r\n${payload}',
+	]
+}
+
 fn test_method_from_string_initialize() {
 	assert Method.from_string('initialize') == .initialize
 }
