@@ -91,16 +91,20 @@ fn tokenize_v_source(content string) []SemToken {
 	mut state := TokenizeState{}
 	mut tokens := []SemToken{}
 	lines := content.split_into_lines()
+	mut import_aliases := map[string]bool{}
+	for alias, _ in parse_import_aliases(content) {
+		import_aliases[alias] = true
+	}
 	readonly_variables, line_scopes := collect_readonly_variables(lines)
 	for line_idx, line in lines {
-		tokenize_v_line(line, line_idx, line_scopes[line_idx], readonly_variables, mut state, mut
-			tokens)
+		tokenize_v_line(line, line_idx, line_scopes[line_idx], readonly_variables, import_aliases, mut
+			state, mut tokens)
 	}
 	return tokens
 }
 
 // tokenize_v_line scans one source line and appends recognised tokens to `tokens`.
-fn tokenize_v_line(line string, line_idx int, variable_scope int, readonly_variables map[string]bool, mut state TokenizeState, mut tokens []SemToken) {
+fn tokenize_v_line(line string, line_idx int, variable_scope int, readonly_variables map[string]bool, import_aliases map[string]bool, mut state TokenizeState, mut tokens []SemToken) {
 	n := line.len
 	mut col := 0
 
@@ -257,7 +261,7 @@ fn tokenize_v_line(line string, line_idx int, variable_scope int, readonly_varia
 				}
 			}
 			word := line[start..col]
-			tok_type := classify_v_identifier_at(line, start, col, word)
+			tok_type := classify_v_identifier_at(line, start, col, word, import_aliases)
 			if tok_type >= 0 {
 				tokens << SemToken{
 					line:     line_idx
@@ -402,14 +406,17 @@ fn mark_variable_binding(name string, is_mut bool, variable_scope int, mut reado
 	}
 }
 
-fn classify_v_identifier_at(line string, start int, end int, word string) int {
-	base_type := classify_v_identifier(word)
-	if base_type >= 0 {
-		return base_type
-	}
+fn classify_v_identifier_at(line string, start int, end int, word string, import_aliases map[string]bool) int {
 	prefix := line[..start].trim_space()
 	if prefix == 'module' || prefix == 'import' || prefix.starts_with('import ') {
 		return sem_tok_namespace
+	}
+	if word in import_aliases {
+		return sem_tok_namespace
+	}
+	base_type := classify_v_identifier(word)
+	if base_type >= 0 {
+		return base_type
 	}
 	mut prev := start - 1
 	for prev >= 0 && (line[prev] == ` ` || line[prev] == `\t`) {
@@ -421,6 +428,10 @@ fn classify_v_identifier_at(line string, start int, end int, word string) int {
 	}
 	if next < line.len && line[next] == `(` {
 		if prev >= 0 && line[prev] == `.` {
+			receiver := identifier_before_dot(line, prev)
+			if receiver in import_aliases {
+				return sem_tok_function
+			}
 			return sem_tok_method
 		}
 		if line[..start].contains('fn (') {
@@ -432,6 +443,17 @@ fn classify_v_identifier_at(line string, start int, end int, word string) int {
 		return sem_tok_property
 	}
 	return sem_tok_variable
+}
+
+fn identifier_before_dot(line string, dot int) string {
+	if dot <= 0 || dot > line.len || line[dot] != `.` {
+		return ''
+	}
+	mut start := dot
+	for start > 0 && is_ident_char(line[start - 1]) {
+		start--
+	}
+	return line[start..dot]
 }
 
 // classify_v_identifier returns the semantic token type index for an identifier,

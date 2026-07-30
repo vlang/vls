@@ -3675,6 +3675,18 @@ fn test_semantic_tokens_classify_functions_methods_and_properties() {
 	assert tokens.any(it.line == 1 && it.start == 15 && it.type_idx == sem_tok_property)
 }
 
+fn test_semantic_tokens_classify_imported_namespace_calls() {
+	content := 'module main\n\nimport os\nimport net.http as http\n\nfn main() {\n' +
+		'\tos.read_file("a")\n\thttp.get("https://example.com")\n\tapp.start()\n}\n'
+	tokens := tokenize_v_source(content)
+	assert tokens.any(it.line == 6 && it.start == 1 && it.type_idx == sem_tok_namespace)
+	assert tokens.any(it.line == 6 && it.start == 4 && it.type_idx == sem_tok_function)
+	assert tokens.any(it.line == 7 && it.start == 1 && it.type_idx == sem_tok_namespace)
+	assert tokens.any(it.line == 7 && it.start == 6 && it.type_idx == sem_tok_function)
+	assert tokens.any(it.line == 8 && it.start == 1 && it.type_idx == sem_tok_variable)
+	assert tokens.any(it.line == 8 && it.start == 5 && it.type_idx == sem_tok_method)
+}
+
 fn test_semantic_tokens_classify_receivers_parameters_and_reused_variables() {
 	content := 'module main\n\npub fn (app &App) index(mut ctx Context) {\n' +
 		'\tx := 1\n\tdump(x)\n\tapp.run(ctx)\n}\n'
