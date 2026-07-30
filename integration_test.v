@@ -662,7 +662,7 @@ fn test_integration_diagnostics_empty_file() {
 		)
 	})
 
-	// Empty content should be processed and return diagnostics for the empty file
+	// Empty content should update the buffer without compiling on the edit path.
 	result := app.on_did_change(Request{
 		params: json2.encode(Params{
 			text_document:   TextDocumentIdentifier{
@@ -676,12 +676,8 @@ fn test_integration_diagnostics_empty_file() {
 		)
 	})
 
-	if notif := result {
-		assert notif.method == 'textDocument/publishDiagnostics'
-		assert notif.params.uri == uri
-	} else {
-		assert false, 'expected a notification for empty file'
-	}
+	assert result == none
+	assert app.open_files[uri] == ''
 }
 
 fn test_integration_completion_request() {

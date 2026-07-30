@@ -12,6 +12,11 @@ const sem_tok_string = 2
 const sem_tok_number = 3
 const sem_tok_type = 4 // structs, enums, interfaces; uppercase-named identifiers
 const sem_tok_function = 5
+const sem_tok_method = 6
+const sem_tok_property = 7
+const sem_tok_variable = 8
+const sem_tok_namespace = 9
+const sem_mod_readonly = 1 << 1
 
 // vfmt off
 const digit_chars = [`0`, `1`, `2`, `3`, `4`, `5`, `6`, `7`, `8`, `9`]!
@@ -44,12 +49,22 @@ const identifier_chars = [
 	`0`, `1`, `2`, `3`, `4`, `5`, `6`, `7`, `8`, `9`,
 	`_`,
 ]!
+
+const v_builtin_types = [
+	'any', 'bool', 'byteptr', 'charptr',
+	'f32', 'f64',
+	'i8', 'i16', 'int', 'i64', 'isize',
+	'rune', 'string',
+	'u8', 'u16', 'u32', 'u64', 'usize',
+	'voidptr'
+]!
 // vfmt on
 
 // semantic_token_types returns the ordered list of token-type names that forms
 // the server's SemanticTokensLegend. Indices must match the sem_tok_* constants.
 fn semantic_token_types() []string {
-	return ['keyword', 'comment', 'string', 'number', 'type', 'function']
+	return ['keyword', 'comment', 'string', 'number', 'type', 'function', 'method', 'property',
+		'variable', 'namespace']
 }
 
 // semantic_token_modifiers returns the ordered list of modifier names.
@@ -76,14 +91,16 @@ fn tokenize_v_source(content string) []SemToken {
 	mut state := TokenizeState{}
 	mut tokens := []SemToken{}
 	lines := content.split_into_lines()
+	readonly_variables, line_scopes := collect_readonly_variables(lines)
 	for line_idx, line in lines {
-		tokenize_v_line(line, line_idx, mut state, mut tokens)
+		tokenize_v_line(line, line_idx, line_scopes[line_idx], readonly_variables, mut state, mut
+			tokens)
 	}
 	return tokens
 }
 
 // tokenize_v_line scans one source line and appends recognised tokens to `tokens`.
-fn tokenize_v_line(line string, line_idx int, mut state TokenizeState, mut tokens []SemToken) {
+fn tokenize_v_line(line string, line_idx int, variable_scope int, readonly_variables map[string]bool, mut state TokenizeState, mut tokens []SemToken) {
 	n := line.len
 	mut col := 0
 
@@ -240,13 +257,20 @@ fn tokenize_v_line(line string, line_idx int, mut state TokenizeState, mut token
 				}
 			}
 			word := line[start..col]
-			tok_type := classify_v_identifier(word)
+			tok_type := classify_v_identifier_at(line, start, col, word)
 			if tok_type >= 0 {
 				tokens << SemToken{
 					line:     line_idx
 					start:    start
 					length:   col - start
 					type_idx: tok_type
+					mod_bits: if tok_type == sem_tok_variable
+						&& (variable_binding_key(variable_scope, word) in readonly_variables
+						|| variable_binding_key(0, word) in readonly_variables) {
+						sem_mod_readonly
+					} else {
+						0
+					}
 				}
 			}
 			continue
@@ -254,6 +278,160 @@ fn tokenize_v_line(line string, line_idx int, mut state TokenizeState, mut token
 
 		col++
 	}
+}
+
+fn collect_readonly_variables(lines []string) (map[string]bool, []int) {
+	mut readonly := map[string]bool{}
+	mut mutable := map[string]bool{}
+	mut line_scopes := []int{cap: lines.len}
+	mut in_const_block := false
+	mut variable_scope := 0
+	mut next_scope := 1
+	mut brace_depth := 0
+	mut function_base_depth := 0
+	mut function_body_started := false
+	for raw_line in lines {
+		line := raw_line.all_before('//').trim_space()
+		stripped := if line.starts_with('pub ') { line[4..] } else { line }
+		if stripped.starts_with('fn ') {
+			variable_scope = next_scope
+			next_scope++
+			function_base_depth = brace_depth
+			function_body_started = false
+		}
+		line_scopes << variable_scope
+		if line == '' {
+			continue
+		}
+		if line == 'const (' {
+			in_const_block = true
+			continue
+		}
+		if in_const_block {
+			if line == ')' {
+				in_const_block = false
+				continue
+			}
+			if eq := line.index('=') {
+				mark_variable_binding(line[..eq].trim_space(), false, variable_scope, mut readonly, mut
+					mutable)
+			}
+			continue
+		}
+		if line.starts_with('const ') {
+			if eq := line.index('=') {
+				mark_variable_binding(line[6..eq].trim_space(), false, variable_scope, mut
+					readonly, mut mutable)
+			}
+		}
+		if assign := line.index(' := ') {
+			lhs := line[..assign].trim_space()
+			is_mut := lhs.starts_with('mut ')
+			names := if is_mut { lhs[4..] } else { lhs }
+			for name in names.split(',') {
+				fields := name.fields()
+				if fields.len > 0 {
+					mark_variable_binding(fields.last(), is_mut, variable_scope, mut readonly, mut
+						mutable)
+				}
+			}
+		}
+		collect_fn_parameter_bindings(line, variable_scope, mut readonly, mut mutable)
+		if variable_scope != 0 {
+			if line.contains('{') {
+				function_body_started = true
+			}
+			brace_depth += line.count('{') - line.count('}')
+			if function_body_started && brace_depth <= function_base_depth {
+				variable_scope = 0
+				function_body_started = false
+			}
+		} else {
+			brace_depth += line.count('{') - line.count('}')
+		}
+	}
+	for key, _ in mutable {
+		readonly.delete(key)
+	}
+	return readonly, line_scopes
+}
+
+fn collect_fn_parameter_bindings(line string, variable_scope int, mut readonly map[string]bool, mut mutable map[string]bool) {
+	stripped := if line.starts_with('pub fn ') {
+		line[7..]
+	} else if line.starts_with('fn ') {
+		line[3..]
+	} else {
+		return
+	}
+	mut search_start := 0
+	for search_start < stripped.len {
+		open_offset := stripped[search_start..].index('(') or { return }
+		open := search_start + open_offset
+		close_offset := stripped[open + 1..].index(')') or { return }
+		close := open + 1 + close_offset
+		for raw_parameter in stripped[open + 1..close].split(',') {
+			parts := raw_parameter.trim_space().fields()
+			if parts.len < 2 {
+				continue
+			}
+			is_mut := parts[0] == 'mut'
+			name_idx := if is_mut { 1 } else { 0 }
+			if name_idx < parts.len - 1 {
+				mark_variable_binding(parts[name_idx], is_mut, variable_scope, mut readonly, mut
+					mutable)
+			}
+		}
+		search_start = close + 1
+	}
+}
+
+fn variable_binding_key(variable_scope int, name string) string {
+	return '${variable_scope}:${name}'
+}
+
+fn mark_variable_binding(name string, is_mut bool, variable_scope int, mut readonly map[string]bool, mut mutable map[string]bool) {
+	if name == '' || name == '_' {
+		return
+	}
+	key := variable_binding_key(variable_scope, name)
+	if is_mut {
+		mutable[key] = true
+	} else {
+		readonly[key] = true
+	}
+}
+
+fn classify_v_identifier_at(line string, start int, end int, word string) int {
+	base_type := classify_v_identifier(word)
+	if base_type >= 0 {
+		return base_type
+	}
+	prefix := line[..start].trim_space()
+	if prefix == 'module' || prefix == 'import' || prefix.starts_with('import ') {
+		return sem_tok_namespace
+	}
+	mut prev := start - 1
+	for prev >= 0 && (line[prev] == ` ` || line[prev] == `\t`) {
+		prev--
+	}
+	mut next := end
+	for next < line.len && (line[next] == ` ` || line[next] == `\t`) {
+		next++
+	}
+	if next < line.len && line[next] == `(` {
+		if prev >= 0 && line[prev] == `.` {
+			return sem_tok_method
+		}
+		if line[..start].contains('fn (') {
+			return sem_tok_method
+		}
+		return sem_tok_function
+	}
+	if prev >= 0 && line[prev] == `.` {
+		return sem_tok_property
+	}
+	return sem_tok_variable
 }
 
 // classify_v_identifier returns the semantic token type index for an identifier,
@@ -264,6 +442,9 @@ fn classify_v_identifier(word string) int {
 	}
 	if word in v_builtins {
 		return sem_tok_function
+	}
+	if word in v_builtin_types {
+		return sem_tok_type
 	}
 	// V naming convention: types start with an uppercase letter.
 	if word != '' && word[0] in up_alpha_chars {
