@@ -434,7 +434,7 @@ fn classify_v_identifier_at(line string, start int, end int, word string, import
 			}
 			return sem_tok_method
 		}
-		if line[..start].contains('fn (') {
+		if is_method_declaration_identifier(line, start) {
 			return sem_tok_method
 		}
 		return sem_tok_function
@@ -443,6 +443,18 @@ fn classify_v_identifier_at(line string, start int, end int, word string, import
 		return sem_tok_property
 	}
 	return sem_tok_variable
+}
+
+fn is_method_declaration_identifier(line string, start int) bool {
+	fn_offset := line.index('fn (') or { return false }
+	receiver_open := fn_offset + 3
+	receiver_close_offset := line[receiver_open + 1..].index(')') or { return false }
+	receiver_close := receiver_open + 1 + receiver_close_offset
+	mut name_start := receiver_close + 1
+	for name_start < line.len && (line[name_start] == ` ` || line[name_start] == `\t`) {
+		name_start++
+	}
+	return start == name_start
 }
 
 fn identifier_before_dot(line string, dot int) string {

@@ -3687,6 +3687,12 @@ fn test_semantic_tokens_classify_imported_namespace_calls() {
 	assert tokens.any(it.line == 8 && it.start == 5 && it.type_idx == sem_tok_method)
 }
 
+fn test_semantic_tokens_keep_inline_method_calls_as_functions() {
+	tokens := tokenize_v_source('fn (a A) run() { helper() }\n')
+	assert tokens.any(it.line == 0 && it.start == 9 && it.type_idx == sem_tok_method)
+	assert tokens.any(it.line == 0 && it.start == 17 && it.type_idx == sem_tok_function)
+}
+
 fn test_semantic_tokens_classify_receivers_parameters_and_reused_variables() {
 	content := 'module main\n\npub fn (app &App) index(mut ctx Context) {\n' +
 		'\tx := 1\n\tdump(x)\n\tapp.run(ctx)\n}\n'
