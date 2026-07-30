@@ -3544,10 +3544,11 @@ fn test_operation_at_pos_dot_completion_includes_aliased_import_module_members()
 fn test_local_member_completion_avoids_compiler_for_current_buffer_type() {
 	content := 'module main\n\nstruct App {\n\tname string\n\tshared_values shared []int\n}\n\n' +
 		'fn (app &App) run(port int) bool {\n\tapp.\n\treturn true\n}\n'
-	items := get_local_member_completions(content, 8, 5, .utf16) or {
+	members := get_local_member_completions(content, 8, 5, .utf16) or {
 		assert false, 'expected local member completions'
 		return
 	}
+	items := members.items
 	assert items.map(it.label) == ['name', 'shared_values', 'run']
 	assert items[2].kind == 2
 	assert items[2].insert_text or { '' } == 'run(\${1:port})$0'
@@ -3557,6 +3558,84 @@ fn test_local_member_completion_does_not_leak_variable_from_previous_function() 
 	content := 'module main\n\nstruct App {\n\tname string\n}\n\n' +
 		'fn first() {\n\tapp := App{}\n\tprintln(app.name)\n}\n\n' + 'fn second() {\n\tapp.\n}\n'
 	assert get_local_member_completions(content, 12, 5, .utf16) == none
+}
+
+fn test_local_member_completion_includes_disk_sibling_methods() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+
+	test_dir := os.join_path(app.temp_dir, 'local_member_disk_sibling')
+	must_mkdir_all(test_dir)
+	main_file := os.join_path(test_dir, 'main.v')
+	methods_file := os.join_path(test_dir, 'methods.v')
+	content := 'module main\n\nstruct App {\n\tname string\n}\n\nfn main() {\n\tapp := App{}\n\tapp.\n}\n'
+	must_write_file(main_file, content)
+	must_write_file(methods_file, 'module main\n\nfn (app &App) start() {}\n')
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+
+	response := app.operation_at_pos(.completion, Request{
+		id:     9010
+		method: 'textDocument/completion'
+		params: json2.encode(TextDocumentPositionParams{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			position:      Position{
+				line: 8
+				char: 5
+			}
+		},
+			escape_unicode: true
+		)
+	})
+
+	assert response.result is CompletionList
+	labels := (response.result as CompletionList).items.map(it.label)
+	assert 'name' in labels
+	assert 'start' in labels
+}
+
+fn test_local_member_completion_prefers_open_sibling_methods() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+
+	test_dir := os.join_path(app.temp_dir, 'local_member_open_sibling')
+	must_mkdir_all(test_dir)
+	main_file := os.join_path(test_dir, 'main.v')
+	methods_file := os.join_path(test_dir, 'methods.v')
+	content := 'module main\n\nstruct App {\n\tname string\n}\n\nfn main() {\n\tapp := App{}\n\tapp.\n}\n'
+	must_write_file(main_file, content)
+	must_write_file(methods_file, 'module main\n\nfn (app &App) disk_start() {}\n')
+	uri := path_to_uri(main_file)
+	methods_uri := path_to_uri(methods_file)
+	app.open_files[uri] = content
+	app.open_files[methods_uri] = 'module main\n\nfn (app &App) memory_start() {}\n'
+
+	response := app.operation_at_pos(.completion, Request{
+		id:     9011
+		method: 'textDocument/completion'
+		params: json2.encode(TextDocumentPositionParams{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			position:      Position{
+				line: 8
+				char: 5
+			}
+		},
+			escape_unicode: true
+		)
+	})
+
+	assert response.result is CompletionList
+	labels := (response.result as CompletionList).items.map(it.label)
+	assert 'memory_start' in labels
+	assert 'disk_start' !in labels
 }
 
 fn test_semantic_tokens_returns_data_for_known_content() {

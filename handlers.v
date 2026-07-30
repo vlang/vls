@@ -69,9 +69,24 @@ fn (mut app App) operation_at_pos(method Method, request Request) Response {
 				}
 			}
 		}
-		if items := get_local_member_completions(content, params.position.line, col,
+		if local_members := get_local_member_completions(content, params.position.line, col,
 			app.position_encoding)
 		{
+			mut items := local_members.items.clone()
+			mut seen_labels := map[string]bool{}
+			for item in items {
+				seen_labels[item.label] = true
+			}
+			working_dir := os.dir(uri_to_path(path))
+			if working_dir != '' {
+				for item in app.collect_module_type_member_completions(path, working_dir,
+					local_members.receiver_type) {
+					if item.label !in seen_labels {
+						items << item
+						seen_labels[item.label] = true
+					}
+				}
+			}
 			return Response{
 				id:     request.id
 				result: CompletionList{
@@ -226,9 +241,14 @@ fn get_word_before_dot(line string, dot_col int, enc PositionEncoding) string {
 	return line[start..dot_byte]
 }
 
+struct LocalMemberCompletions {
+	receiver_type string
+	items         []Detail
+}
+
 // get_local_member_completions resolves members declared in the current buffer.
 // It avoids starting the V compiler for the common `receiver.` case.
-fn get_local_member_completions(content string, line_nr int, col int, enc PositionEncoding) ?[]Detail {
+fn get_local_member_completions(content string, line_nr int, col int, enc PositionEncoding) ?LocalMemberCompletions {
 	if content == '' {
 		return none
 	}
@@ -248,7 +268,10 @@ fn get_local_member_completions(content string, line_nr int, col int, enc Positi
 	if items.len == 0 {
 		return none
 	}
-	return items
+	return LocalMemberCompletions{
+		receiver_type: receiver_type
+		items:         items
+	}
 }
 
 fn infer_local_receiver_type(lines []string, cursor_line int, receiver string) string {
@@ -340,6 +363,23 @@ fn parse_local_type_members(content string, receiver_type string) []Detail {
 	return items
 }
 
+// parse_type_method_completions indexes methods by their receiver type.
+// Fields stay in the declaring file, while methods may be declared in siblings.
+fn parse_type_method_completions(content string) map[string][]Detail {
+	lines := content.split_into_lines()
+	mut methods_by_type := map[string][]Detail{}
+	for line_idx, line in lines {
+		receiver_type := local_method_receiver_type(line) or { continue }
+		method := parse_local_method_completion(line, receiver_type, lines, line_idx) or {
+			continue
+		}
+		mut methods := methods_by_type[receiver_type] or { []Detail{} }
+		methods << method
+		methods_by_type[receiver_type] = methods
+	}
+	return methods_by_type
+}
+
 fn local_field_label(line string) string {
 	first := first_word(line)
 	if first == '' {
@@ -363,14 +403,11 @@ fn parse_local_method_completion(line string, receiver_type string, lines []stri
 	} else {
 		return none
 	}
-	if !stripped.starts_with('(') {
+	declared_receiver_type := local_method_receiver_type(line) or { return none }
+	if declared_receiver_type != receiver_type {
 		return none
 	}
 	receiver_end := stripped.index(')') or { return none }
-	receiver_parts := stripped[1..receiver_end].fields().filter(it != 'mut')
-	if receiver_parts.len < 2 || receiver_parts[1].trim_left('&') != receiver_type {
-		return none
-	}
 	after_receiver := stripped[receiver_end + 1..].trim_space()
 	paren_idx := after_receiver.index('(') or { return none }
 	method_name := after_receiver[..paren_idx].trim_space()
@@ -386,6 +423,25 @@ fn parse_local_method_completion(line string, receiver_type string, lines []stri
 		insert_text:        insert
 		insert_text_format: if insert.contains('$') { 2 } else { 1 }
 	}
+}
+
+fn local_method_receiver_type(line string) ?string {
+	stripped := if line.starts_with('pub fn ') {
+		line[7..]
+	} else if line.starts_with('fn ') {
+		line[3..]
+	} else {
+		return none
+	}
+	if !stripped.starts_with('(') {
+		return none
+	}
+	receiver_end := stripped.index(')') or { return none }
+	receiver_parts := stripped[1..receiver_end].fields().filter(it != 'mut')
+	if receiver_parts.len < 2 {
+		return none
+	}
+	return receiver_parts[1].trim_left('&')
 }
 
 // parse_import_aliases returns alias -> module path for simple V import statements.
@@ -2876,6 +2932,21 @@ fn (mut app App) collect_module_fn_completions(current_file_uri string, working_
 	}
 	app.ensure_dir_shallow_indexed(working_dir)
 	return app.query_module_fn_completions(current_module, current_file_uri, working_dir)
+}
+
+// collect_module_type_member_completions returns methods declared in sibling
+// files of the current module without invoking the compiler on each keystroke.
+fn (mut app App) collect_module_type_member_completions(current_file_uri string, working_dir string, receiver_type string) []Detail {
+	current_content := app.open_files[current_file_uri] or {
+		os.read_file(uri_to_path(current_file_uri)) or { '' }
+	}
+	current_module := get_module_name(current_content)
+	for uri, _ in app.open_files {
+		app.reindex_uri(uri)
+	}
+	app.ensure_dir_shallow_indexed(working_dir)
+	return app.query_module_type_method_completions(current_module, receiver_type,
+		current_file_uri, working_dir)
 }
 
 // parse_module_fn_completions extracts free-function declarations (`pub fn` and `fn`)
