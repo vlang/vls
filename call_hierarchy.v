@@ -163,7 +163,8 @@ fn (mut app App) handle_call_hierarchy_outgoing(request Request) Response {
 		if called_name == self_name {
 			continue // skip direct recursion
 		}
-		callee := app.find_fn_declaration(called_name, search_dirs, request.id, uri.ends_with('_test.v'))
+		callee := app.find_fn_declaration(called_name, search_dirs, request.id,
+			uri.ends_with('_test.v'))
 		if callee.name == '' {
 			continue
 		}

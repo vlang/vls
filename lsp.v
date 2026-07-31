@@ -757,7 +757,7 @@ struct CodeActionParams {
 struct CodeActionContext {
 	diagnostics  []LSPDiagnostic
 	only         ?[]string
-	trigger_kind ?int      @[json: 'triggerKind']
+	trigger_kind ?int @[json: 'triggerKind']
 }
 
 // DocumentHighlight represents a highlighted occurrence of a symbol in a document.
