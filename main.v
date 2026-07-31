@@ -272,25 +272,9 @@ fn (mut app App) write_data(data string) {
 	}
 }
 
-// send_framed prepends a Content-Length header to `content` and writes the
-// message. LSP requires CRLF-delimited headers. A TCP connection is a raw byte
-// stream, so it always gets literal `\r\n\r\n`; only Windows *stdio* uses `\n\n`,
-// relying on text-mode stdout to translate each `\n` into `\r\n` on the wire
-// (P0-11). This prevents Windows TCP from emitting LF-only framing.
+// send_framed prepends the CRLF-delimited Content-Length header required by LSP.
 fn (mut app App) send_framed(content string) {
-	mut is_tcp := false
-	if _ := app.tcp_conn {
-		is_tcp = true
-	}
-	header := if is_tcp {
-		'Content-Length: ${content.len}\r\n\r\n'
-	} else {
-		$if windows {
-			'Content-Length: ${content.len}\n\n'
-		} $else {
-			'Content-Length: ${content.len}\r\n\r\n'
-		}
-	}
+	header := 'Content-Length: ${content.len}\r\n\r\n'
 	full_message := '${header}${content}'
 	log('SEND: ${full_message}')
 	app.write_data(full_message)

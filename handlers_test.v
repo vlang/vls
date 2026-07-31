@@ -380,7 +380,7 @@ fn test_on_did_change_empty_text() {
 		cleanup_test_app(app)
 	}
 
-	// Request with empty text (deletion) should be processed and return diagnostics
+	// Empty text is processed without compiling diagnostics on the edit path.
 	request := Request{
 		params: json2.encode(Params{
 			content_changes: [ContentChange{
@@ -392,16 +392,11 @@ fn test_on_did_change_empty_text() {
 	}
 
 	result := app.on_did_change(request)
-	if notif := result {
-		assert notif.method == 'textDocument/publishDiagnostics'
-		assert notif.params.uri == ''
-		assert notif.params.diagnostics.len == 0
-	} else {
-		assert false, 'expected a notification'
-	}
+	assert result == none
+	assert app.text == ''
 }
 
-fn test_on_did_change_returns_notification() {
+fn test_on_did_change_updates_buffer_without_diagnostics_notification() {
 	mut app := create_test_app()
 	defer {
 		cleanup_test_app(app)
@@ -439,11 +434,8 @@ fn test_on_did_change_returns_notification() {
 
 	result := app.on_did_change(request)
 
-	// Should return a notification
-	if notif := result {
-		assert notif.method == 'textDocument/publishDiagnostics'
-		assert notif.params.uri == uri
-	}
+	assert result == none
+	assert app.open_files[uri] == content
 }
 
 fn test_on_did_change_multiple_changes() {
@@ -3549,6 +3541,103 @@ fn test_operation_at_pos_dot_completion_includes_aliased_import_module_members()
 	assert 'ping' in labels
 }
 
+fn test_local_member_completion_avoids_compiler_for_current_buffer_type() {
+	content := 'module main\n\nstruct App {\n\tname string\n\tshared_values shared []int\n}\n\n' +
+		'fn (app &App) run(port int) bool {\n\tapp.\n\treturn true\n}\n'
+	members := get_local_member_completions(content, 8, 5, .utf16) or {
+		assert false, 'expected local member completions'
+		return
+	}
+	items := members.items
+	assert items.map(it.label) == ['name', 'shared_values', 'run']
+	assert items[2].kind == 2
+	assert items[2].insert_text or { '' } == 'run(\${1:port})$0'
+}
+
+fn test_local_member_completion_does_not_leak_variable_from_previous_function() {
+	content := 'module main\n\nstruct App {\n\tname string\n}\n\n' +
+		'fn first() {\n\tapp := App{}\n\tprintln(app.name)\n}\n\n' + 'fn second() {\n\tapp.\n}\n'
+	assert get_local_member_completions(content, 12, 5, .utf16) == none
+}
+
+fn test_local_member_completion_includes_disk_sibling_methods() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+
+	test_dir := os.join_path(app.temp_dir, 'local_member_disk_sibling')
+	must_mkdir_all(test_dir)
+	main_file := os.join_path(test_dir, 'main.v')
+	methods_file := os.join_path(test_dir, 'methods.v')
+	content := 'module main\n\nstruct App {\n\tname string\n}\n\nfn main() {\n\tapp := App{}\n\tapp.\n}\n'
+	must_write_file(main_file, content)
+	must_write_file(methods_file, 'module main\n\nfn (app &App) start() {}\n')
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+
+	response := app.operation_at_pos(.completion, Request{
+		id:     9010
+		method: 'textDocument/completion'
+		params: json2.encode(TextDocumentPositionParams{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			position:      Position{
+				line: 8
+				char: 5
+			}
+		},
+			escape_unicode: true
+		)
+	})
+
+	assert response.result is CompletionList
+	labels := (response.result as CompletionList).items.map(it.label)
+	assert 'name' in labels
+	assert 'start' in labels
+}
+
+fn test_local_member_completion_prefers_open_sibling_methods() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+
+	test_dir := os.join_path(app.temp_dir, 'local_member_open_sibling')
+	must_mkdir_all(test_dir)
+	main_file := os.join_path(test_dir, 'main.v')
+	methods_file := os.join_path(test_dir, 'methods.v')
+	content := 'module main\n\nstruct App {\n\tname string\n}\n\nfn main() {\n\tapp := App{}\n\tapp.\n}\n'
+	must_write_file(main_file, content)
+	must_write_file(methods_file, 'module main\n\nfn (app &App) disk_start() {}\n')
+	uri := path_to_uri(main_file)
+	methods_uri := path_to_uri(methods_file)
+	app.open_files[uri] = content
+	app.open_files[methods_uri] = 'module main\n\nfn (app &App) memory_start() {}\n'
+
+	response := app.operation_at_pos(.completion, Request{
+		id:     9011
+		method: 'textDocument/completion'
+		params: json2.encode(TextDocumentPositionParams{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			position:      Position{
+				line: 8
+				char: 5
+			}
+		},
+			escape_unicode: true
+		)
+	})
+
+	assert response.result is CompletionList
+	labels := (response.result as CompletionList).items.map(it.label)
+	assert 'memory_start' in labels
+	assert 'disk_start' !in labels
+}
+
 fn test_semantic_tokens_returns_data_for_known_content() {
 	mut app := create_test_app()
 	defer {
@@ -3575,6 +3664,69 @@ fn test_semantic_tokens_returns_data_for_known_content() {
 	tokens := resp.result as SemanticTokens
 	// A V file with keywords/strings should yield at least some tokens.
 	assert tokens.data.len > 0
+}
+
+fn test_semantic_tokens_classify_functions_methods_and_properties() {
+	tokens := tokenize_v_source('fn run() {\n\tapp.start(app.name)\n}\n')
+	assert tokens.any(it.line == 0 && it.start == 3 && it.type_idx == sem_tok_function)
+	assert tokens.any(it.line == 1 && it.start == 1 && it.type_idx == sem_tok_variable)
+	assert tokens.any(it.line == 1 && it.start == 5 && it.type_idx == sem_tok_method)
+	assert tokens.any(it.line == 1 && it.start == 11 && it.type_idx == sem_tok_variable)
+	assert tokens.any(it.line == 1 && it.start == 15 && it.type_idx == sem_tok_property)
+}
+
+fn test_semantic_tokens_classify_imported_namespace_calls() {
+	content := 'module main\n\nimport os\nimport net.http as http\n\nfn main() {\n' +
+		'\tos.read_file("a")\n\thttp.get("https://example.com")\n\tapp.start()\n}\n'
+	tokens := tokenize_v_source(content)
+	assert tokens.any(it.line == 6 && it.start == 1 && it.type_idx == sem_tok_namespace)
+	assert tokens.any(it.line == 6 && it.start == 4 && it.type_idx == sem_tok_function)
+	assert tokens.any(it.line == 7 && it.start == 1 && it.type_idx == sem_tok_namespace)
+	assert tokens.any(it.line == 7 && it.start == 6 && it.type_idx == sem_tok_function)
+	assert tokens.any(it.line == 8 && it.start == 1 && it.type_idx == sem_tok_variable)
+	assert tokens.any(it.line == 8 && it.start == 5 && it.type_idx == sem_tok_method)
+}
+
+fn test_semantic_tokens_keep_inline_method_calls_as_functions() {
+	tokens := tokenize_v_source('fn (a A) run() { helper() }\n')
+	assert tokens.any(it.line == 0 && it.start == 9 && it.type_idx == sem_tok_method)
+	assert tokens.any(it.line == 0 && it.start == 17 && it.type_idx == sem_tok_function)
+}
+
+fn test_semantic_tokens_classify_receivers_parameters_and_reused_variables() {
+	content := 'module main\n\npub fn (app &App) index(mut ctx Context) {\n' +
+		'\tx := 1\n\tdump(x)\n\tapp.run(ctx)\n}\n'
+	tokens := tokenize_v_source(content)
+	assert tokens.any(it.line == 2 && it.start == 8 && it.type_idx == sem_tok_variable)
+	assert tokens.any(it.line == 2 && it.start == 28 && it.type_idx == sem_tok_variable)
+	assert tokens.any(it.line == 3 && it.start == 1 && it.type_idx == sem_tok_variable)
+	assert tokens.any(it.line == 4 && it.start == 6 && it.type_idx == sem_tok_variable)
+	assert tokens.any(it.line == 5 && it.start == 1 && it.type_idx == sem_tok_variable)
+	assert tokens.any(it.line == 5 && it.start == 9 && it.type_idx == sem_tok_variable)
+}
+
+fn test_semantic_tokens_apply_readonly_modifier_without_coloring_properties() {
+	content := 'fn main() {\n\tpeople := Person{}\n\tpeople.name = "Andre"\n' +
+		'\tmut others := []Person{}\n\tothers << people\n}\n'
+	tokens := tokenize_v_source(content)
+	people_tokens := tokens.filter(it.type_idx == sem_tok_variable
+		&& content.split_into_lines()[it.line][it.start..it.start + it.length] == 'people')
+	assert people_tokens.len == 3
+	assert people_tokens.all(it.mod_bits == sem_mod_readonly)
+	assert tokens.any(it.line == 2 && it.start == 8 && it.type_idx == sem_tok_property
+		&& it.mod_bits == 0)
+	assert tokens.any(it.line == 4 && it.start == 1 && it.type_idx == sem_tok_variable
+		&& it.mod_bits == 0)
+}
+
+fn test_semantic_tokens_keep_readonly_modifier_scoped_to_function() {
+	content := 'fn read(app &App) {\n\tdump(app)\n}\n\nfn main() {\n\tmut app := &App{}\n' +
+		'\tdump(app)\n}\n'
+	tokens := tokenize_v_source(content)
+	assert tokens.any(it.line == 1 && it.start == 6 && it.type_idx == sem_tok_variable
+		&& it.mod_bits == sem_mod_readonly)
+	assert tokens.any(it.line == 6 && it.start == 6 && it.type_idx == sem_tok_variable
+		&& it.mod_bits == 0)
 }
 
 fn test_semantic_tokens_returns_empty_object_for_empty_file() {
@@ -3630,7 +3782,7 @@ fn test_semantic_tokens_range_filters_by_character() {
 		cleanup_test_app(app)
 	}
 	uri := 'file:///tmp/semrange.v'
-	// Line 0 has two string tokens: `"b"` at column 5 and `"c"` at column 11.
+	// Line 0 has a variable token at column 0 and strings at columns 5 and 11.
 	app.open_files[uri] = 'a := "b" + "c"\n'
 
 	full_params := json2.encode(SemanticTokensRangeParams{
@@ -3655,10 +3807,10 @@ fn test_semantic_tokens_range_filters_by_character() {
 		params: full_params
 	})
 	ftok := full.result as SemanticTokens
-	// The full-line request includes the token that starts at column 5.
+	// The full-line request starts with the variable declaration at column 0.
 	assert ftok.data.len >= 5
 	assert ftok.data[0] == 0
-	assert ftok.data[1] == 5
+	assert ftok.data[1] == 0
 
 	// Narrow the range to columns [8,50): the column-5 token must be excluded, so
 	// the first returned token starts at or after column 8 (the `"c"` at 11) and

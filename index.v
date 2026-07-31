@@ -20,9 +20,10 @@ import time
 struct IndexEntry {
 	fingerprint    int // content.hash(); used to skip re-parsing unchanged files
 	module_name    string
-	doc_symbols    []DocumentSymbol  // hierarchical symbols (as parse_document_symbols returns)
-	docs           map[string]string // simple symbol name -> leading vdoc comment
-	fn_completions []Detail          // free-function completion items for this file
+	doc_symbols    []DocumentSymbol    // hierarchical symbols (as parse_document_symbols returns)
+	docs           map[string]string   // simple symbol name -> leading vdoc comment
+	fn_completions []Detail            // free-function completion items for this file
+	type_methods   map[string][]Detail // receiver type -> method completion items
 }
 
 // build_index_entry parses `content` into an IndexEntry. Symbol ranges are
@@ -48,6 +49,7 @@ fn build_index_entry(content string, enc PositionEncoding) IndexEntry {
 		doc_symbols:    doc_syms
 		docs:           docs
 		fn_completions: parse_module_fn_completions(content)
+		type_methods:   parse_type_method_completions(content)
 	}
 }
 
@@ -824,6 +826,31 @@ fn (app &App) query_module_fn_completions(module_name string, exclude_uri string
 			continue
 		}
 		items << entry.fn_completions
+	}
+	return items
+}
+
+// query_module_type_method_completions returns same-module methods declared in
+// sibling files. The caller merges these with members from the current buffer.
+fn (app &App) query_module_type_method_completions(module_name string, receiver_type string, exclude_uri string, dir string) []Detail {
+	d := dir.replace('\\', '/').trim_right('/')
+	mut items := []Detail{}
+	mut uris := app.symbol_index.keys()
+	uris.sort()
+	for uri in uris {
+		if uri == exclude_uri || uri.ends_with('_test.v') {
+			continue
+		}
+		if d != '' && os.dir(uri_to_path(uri)).replace('\\', '/').trim_right('/') != d {
+			continue
+		}
+		entry := app.symbol_index[uri] or { continue }
+		if module_name != '' && entry.module_name != module_name {
+			continue
+		}
+		if methods := entry.type_methods[receiver_type] {
+			items << methods
+		}
 	}
 	return items
 }

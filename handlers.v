@@ -42,6 +42,7 @@ fn (mut app App) operation_at_pos(method Method, request Request) Response {
 	line_nr := params.position.line + 1
 	col := params.position.char
 	path := params.text_document.uri
+	content := app.open_files[path] or { '' }
 	// The V compiler consumes byte columns, so convert the client's character
 	// offset (in the negotiated encoding) to a byte offset within the cursor line
 	// before building the -line-info string (P0-01).
@@ -49,7 +50,7 @@ fn (mut app App) operation_at_pos(method Method, request Request) Response {
 
 	// Intercept completion on import lines
 	if method == .completion {
-		if content := app.open_files[path] {
+		if content != '' {
 			lines := content.split_into_lines()
 			if line_nr - 1 < lines.len {
 				current_line := lines[line_nr - 1]
@@ -65,6 +66,32 @@ fn (mut app App) operation_at_pos(method Method, request Request) Response {
 							}
 						}
 					}
+				}
+			}
+		}
+		if local_members := get_local_member_completions(content, params.position.line, col,
+			app.position_encoding)
+		{
+			mut items := local_members.items.clone()
+			mut seen_labels := map[string]bool{}
+			for item in items {
+				seen_labels[item.label] = true
+			}
+			working_dir := os.dir(uri_to_path(path))
+			if working_dir != '' {
+				for item in app.collect_module_type_member_completions(path, working_dir,
+					local_members.receiver_type) {
+					if item.label !in seen_labels {
+						items << item
+						seen_labels[item.label] = true
+					}
+				}
+			}
+			return Response{
+				id:     request.id
+				result: CompletionList{
+					is_incomplete: false
+					items:         items
 				}
 			}
 		}
@@ -94,7 +121,6 @@ fn (mut app App) operation_at_pos(method Method, request Request) Response {
 		// If it is not '.', the user is not doing member access, so augment
 		// the compiler result with V keywords and builtins.
 		cursor_line := params.position.line
-		content := app.open_files[path] or { '' }
 		lines := content.split_into_lines()
 		trigger_char := if cursor_line < lines.len && col > 0 {
 			line := lines[cursor_line]
@@ -213,6 +239,209 @@ fn get_word_before_dot(line string, dot_col int, enc PositionEncoding) string {
 		start--
 	}
 	return line[start..dot_byte]
+}
+
+struct LocalMemberCompletions {
+	receiver_type string
+	items         []Detail
+}
+
+// get_local_member_completions resolves members declared in the current buffer.
+// It avoids starting the V compiler for the common `receiver.` case.
+fn get_local_member_completions(content string, line_nr int, col int, enc PositionEncoding) ?LocalMemberCompletions {
+	if content == '' {
+		return none
+	}
+	lines := content.split_into_lines()
+	if line_nr < 0 || line_nr >= lines.len || col <= 0 {
+		return none
+	}
+	receiver := get_word_before_dot(lines[line_nr], col - 1, enc)
+	if receiver == '' {
+		return none
+	}
+	receiver_type := infer_local_receiver_type(lines, line_nr, receiver)
+	if receiver_type == '' {
+		return none
+	}
+	items := parse_local_type_members(content, receiver_type)
+	if items.len == 0 {
+		return none
+	}
+	return LocalMemberCompletions{
+		receiver_type: receiver_type
+		items:         items
+	}
+}
+
+fn infer_local_receiver_type(lines []string, cursor_line int, receiver string) string {
+	for line_idx := cursor_line; line_idx >= 0; line_idx-- {
+		line := lines[line_idx].trim_space()
+		if line == '' || line.starts_with('//') {
+			continue
+		}
+		if inferred := infer_receiver_type_from_declaration(line, receiver) {
+			return inferred
+		}
+		stripped := if line.starts_with('pub ') { line[4..] } else { line }
+		if stripped.starts_with('fn ') {
+			break
+		}
+	}
+	return ''
+}
+
+fn infer_receiver_type_from_declaration(line string, receiver string) ?string {
+	assignment_markers := ['${receiver} := &', '${receiver} := ']
+	for marker in assignment_markers {
+		marker_idx := line.index(marker) or { continue }
+		if marker_idx > 0 && is_ident_char(line[marker_idx - 1]) {
+			continue
+		}
+		mut rest := line[marker_idx + marker.len..].trim_space()
+		if brace_idx := rest.index('{') {
+			rest = rest[..brace_idx]
+		}
+		type_name := rest.trim_space().trim_left('&')
+		if type_name != '' && !type_name.contains(' ') && !type_name.contains('(') {
+			return type_name
+		}
+	}
+
+	fn_idx := line.index('fn (') or { return none }
+	receiver_start := fn_idx + 4
+	receiver_end := line.index_after(')', receiver_start) or { return none }
+	parts := line[receiver_start..receiver_end].fields().filter(it != 'mut')
+	if parts.len < 2 || parts[0] != receiver {
+		return none
+	}
+	return parts[1].trim_left('&')
+}
+
+fn parse_local_type_members(content string, receiver_type string) []Detail {
+	lines := content.split_into_lines()
+	mut items := []Detail{}
+	mut seen := map[string]bool{}
+	mut in_struct := false
+	for line_idx, raw_line in lines {
+		line := raw_line.trim_space()
+		stripped := if line.starts_with('pub ') { line[4..] } else { line }
+		if stripped.starts_with('struct ') {
+			name := first_word(stripped[7..])
+			in_struct = name == receiver_type && line.contains('{') && !line.contains('}')
+			continue
+		}
+		if in_struct {
+			if line == '}' {
+				in_struct = false
+				continue
+			}
+			if line == '' || line.starts_with('//')
+				|| line in ['mut:', 'pub:', 'pub mut:', '__global:'] {
+				continue
+			}
+			field_label := local_field_label(line)
+			if field_label != '' && field_label !in seen {
+				items << Detail{
+					kind:          5
+					label:         field_label
+					detail:        line
+					documentation: extract_doc_comment(lines, line_idx)
+				}
+				seen[field_label] = true
+			}
+			continue
+		}
+		method := parse_local_method_completion(line, receiver_type, lines, line_idx) or {
+			continue
+		}
+		if method.label !in seen {
+			items << method
+			seen[method.label] = true
+		}
+	}
+	return items
+}
+
+// parse_type_method_completions indexes methods by their receiver type.
+// Fields stay in the declaring file, while methods may be declared in siblings.
+fn parse_type_method_completions(content string) map[string][]Detail {
+	lines := content.split_into_lines()
+	mut methods_by_type := map[string][]Detail{}
+	for line_idx, line in lines {
+		receiver_type := local_method_receiver_type(line) or { continue }
+		method := parse_local_method_completion(line, receiver_type, lines, line_idx) or {
+			continue
+		}
+		mut methods := methods_by_type[receiver_type] or { []Detail{} }
+		methods << method
+		methods_by_type[receiver_type] = methods
+	}
+	return methods_by_type
+}
+
+fn local_field_label(line string) string {
+	first := first_word(line)
+	if first == '' {
+		return ''
+	}
+	if !first.contains('.') && !first.contains('[') {
+		return first
+	}
+	mut label := first.all_after_last('.')
+	if bracket := label.index('[') {
+		label = label[..bracket]
+	}
+	return label
+}
+
+fn parse_local_method_completion(line string, receiver_type string, lines []string, line_idx int) ?Detail {
+	stripped := if line.starts_with('pub fn ') {
+		line[7..]
+	} else if line.starts_with('fn ') {
+		line[3..]
+	} else {
+		return none
+	}
+	declared_receiver_type := local_method_receiver_type(line) or { return none }
+	if declared_receiver_type != receiver_type {
+		return none
+	}
+	receiver_end := stripped.index(')') or { return none }
+	after_receiver := stripped[receiver_end + 1..].trim_space()
+	paren_idx := after_receiver.index('(') or { return none }
+	method_name := after_receiver[..paren_idx].trim_space()
+	if method_name == '' {
+		return none
+	}
+	insert := build_fn_snippet(method_name, after_receiver[paren_idx..])
+	return Detail{
+		kind:               2
+		label:              method_name
+		detail:             line.all_before('{').trim_space()
+		documentation:      extract_doc_comment(lines, line_idx)
+		insert_text:        insert
+		insert_text_format: if insert.contains('$') { 2 } else { 1 }
+	}
+}
+
+fn local_method_receiver_type(line string) ?string {
+	stripped := if line.starts_with('pub fn ') {
+		line[7..]
+	} else if line.starts_with('fn ') {
+		line[3..]
+	} else {
+		return none
+	}
+	if !stripped.starts_with('(') {
+		return none
+	}
+	receiver_end := stripped.index(')') or { return none }
+	receiver_parts := stripped[1..receiver_end].fields().filter(it != 'mut')
+	if receiver_parts.len < 2 {
+		return none
+	}
+	return receiver_parts[1].trim_left('&')
 }
 
 // parse_import_aliases returns alias -> module path for simple V import statements.
@@ -477,7 +706,8 @@ fn (mut app App) build_diagnostics_notification(uri string, content string) Noti
 	}
 }
 
-// Returns instant red wavy errors
+// on_did_change updates the authoritative buffer without invoking the compiler.
+// Diagnostics run on open/save so typing, completion, and inlay hints stay responsive.
 fn (mut app App) on_did_change(request Request) ?Notification {
 	params := json2.decode[DidChangeTextDocumentParams](request.params) or {
 		$if debug { log('Failed to decode DidChangeTextDocumentParams: ${err}') }
@@ -535,9 +765,12 @@ fn (mut app App) on_did_change(request Request) ?Notification {
 	}
 	app.bump_generation(uri)
 	app.invalidate_index_uri(uri) // symbols re-parsed lazily on next query
-	notification := app.build_diagnostics_notification(uri, content)
-	$if debug { log('returning notification: ${notification}') }
-	return notification
+	$if debug {
+		notification := app.build_diagnostics_notification(uri, content)
+		log('returning notification: ${notification}')
+		return notification
+	}
+	return none
 }
 
 // encode_diagnostic_range re-encodes a diagnostic's byte-based character
@@ -2701,6 +2934,21 @@ fn (mut app App) collect_module_fn_completions(current_file_uri string, working_
 	return app.query_module_fn_completions(current_module, current_file_uri, working_dir)
 }
 
+// collect_module_type_member_completions returns methods declared in sibling
+// files of the current module without invoking the compiler on each keystroke.
+fn (mut app App) collect_module_type_member_completions(current_file_uri string, working_dir string, receiver_type string) []Detail {
+	current_content := app.open_files[current_file_uri] or {
+		os.read_file(uri_to_path(current_file_uri)) or { '' }
+	}
+	current_module := get_module_name(current_content)
+	for uri, _ in app.open_files {
+		app.reindex_uri(uri)
+	}
+	app.ensure_dir_shallow_indexed(working_dir)
+	return app.query_module_type_method_completions(current_module, receiver_type,
+		current_file_uri, working_dir)
+}
+
 // parse_module_fn_completions extracts free-function declarations (`pub fn` and `fn`)
 // from V source content and returns them as completion Detail items.
 // Method receivers (e.g. `fn (r Recv) method()`) are skipped.
@@ -2981,7 +3229,7 @@ fn (mut app App) handle_selection_range(request Request) Response {
 // on_did_change_configuration handles the workspace/didChangeConfiguration notification.
 // It applies settings that affect server behaviour:
 //   vls.inlayHints  – enable or disable inlay type hints
-//   vls.diagnostics – enable or disable live compile-time diagnostics
+//   vls.diagnostics – enable or disable open/save compile-time diagnostics
 fn (mut app App) on_did_change_configuration(request Request) {
 	resolved := resolve_workspace_settings(request.params)
 	if resolved.has_inlay_hints {
