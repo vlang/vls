@@ -1446,6 +1446,12 @@ fn (mut app App) resolve_indexed_definition(uri string, position Position) ?Loca
 	if symbol == '' {
 		return none
 	}
+	// Reuse the reference tokenizer to reject identifier-shaped text in comments
+	// and string literals while still accepting executable string interpolations.
+	occurrences := app.occurrences_for(uri)[symbol] or { return none }
+	if !occurrences.any(it.line == position.line && it.start_char == start && it.end_char == end) {
+		return none
+	}
 	start_byte := encoded_col_to_byte(line, start, app.position_encoding)
 	if start_byte > 0 && line[start_byte - 1] == `.` {
 		dot_col := byte_to_encoded_col(line, start_byte - 1, app.position_encoding)

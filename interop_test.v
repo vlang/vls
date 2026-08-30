@@ -437,6 +437,31 @@ Use `v help build` for more information.
 	assert parse_v_check_diagnostics(output).len == 0
 }
 
+fn test_cache_v_check_result_retries_failure_without_diagnostics() {
+	mut app := App{}
+	path := 'file:///tmp/main.v'
+	app.diag_cache[path] = DiagCacheEntry{
+		content_hash: 1
+		generation:   1
+		errors:       []
+	}
+	app.cache_v_check_result(path, 2, 2, [], compiler_exit_timeout, 0)
+	assert path !in app.diag_cache
+}
+
+fn test_cache_v_check_result_keeps_valid_clean_and_diagnostic_results() {
+	mut app := App{}
+	path := 'file:///tmp/main.v'
+	app.cache_v_check_result(path, 1, 1, [], 0, 0)
+	assert path in app.diag_cache
+	assert app.diag_cache[path].errors.len == 0
+
+	app.cache_v_check_result(path, 2, 2, [], 1, 1)
+	assert path in app.diag_cache
+	assert app.diag_cache[path].content_hash == 2
+	assert app.diag_cache[path].generation == 2
+}
+
 fn test_run_v_argv_reports_missing_working_dir() {
 	missing_dir := os.join_path(os.temp_dir(),
 		'vls_missing_dir_${os.getpid()}_${time.now().unix_nano()}')

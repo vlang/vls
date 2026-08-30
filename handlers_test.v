@@ -846,6 +846,47 @@ fn test_resolve_indexed_definition_finds_current_file_function() {
 	assert location.range.start.line == 2
 }
 
+fn test_resolve_indexed_definition_rejects_comments_and_string_literals() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'indexed_definition_source_context')
+	must_mkdir_all(test_dir)
+	test_file := os.join_path(test_dir, 'main.v')
+	content := "module main\n\nfn helper() string { return 'ok' }\n\nfn main() {\n\t// helper is mentioned here\n\tliteral := 'helper'\n\tinterpolated := '\${helper()}'\n}\n"
+	must_write_file(test_file, content)
+	uri := path_to_uri(test_file)
+	app.open_files[uri] = content
+	lines := content.split_into_lines()
+
+	for line_idx in [5, 6] {
+		helper_col := lines[line_idx].index('helper') or {
+			assert false, 'expected helper text'
+			return
+		}
+		location := app.resolve_indexed_definition(uri, Position{
+			line: line_idx
+			char: helper_col + 2
+		})
+		assert location == none
+	}
+
+	helper_col := lines[7].index('helper') or {
+		assert false, 'expected interpolated helper reference'
+		return
+	}
+	location := app.resolve_indexed_definition(uri, Position{
+		line: 7
+		char: helper_col + 2
+	}) or {
+		assert false, 'expected indexed definition from string interpolation'
+		return
+	}
+	assert location.uri == uri
+	assert location.range.start.line == 2
+}
+
 fn test_resolve_indexed_definition_uses_unsaved_imported_module() {
 	mut app := create_test_app()
 	defer {

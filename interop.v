@@ -345,6 +345,21 @@ fn v_diagnostic_underline_len(line string) int {
 	return marker.len
 }
 
+// cache_v_check_result retains clean results only when the compiler completed
+// successfully. A failed invocation is cacheable only when it produced parsed
+// diagnostics; otherwise a transient timeout or crash must be retried.
+fn (mut app App) cache_v_check_result(path string, content_hash int, generation int, errors []JsonError, exit_code int, parsed_diagnostic_count int) {
+	if exit_code != 0 && parsed_diagnostic_count == 0 {
+		app.diag_cache.delete(path)
+		return
+	}
+	app.diag_cache[path] = DiagCacheEntry{
+		content_hash: content_hash
+		generation:   generation
+		errors:       errors
+	}
+}
+
 // Sentinel exit code returned when a compiler invocation is killed for
 // exceeding compiler_timeout_ms. 124 matches the coreutils `timeout` convention.
 const compiler_exit_timeout = 124
@@ -670,20 +685,13 @@ fn (mut app App) run_v_check(path string, text string) []JsonError {
 		}
 
 		log('FILTERED ERRORS: ${filtered_errors.len} of ${v_errors.len}')
-		app.diag_cache[path] = DiagCacheEntry{
-			content_hash: content_hash
-			generation:   gen
-			errors:       filtered_errors
-		}
+		app.cache_v_check_result(path, content_hash, gen, filtered_errors, x.exit_code,
+			v_errors.len)
 		return filtered_errors
 	}
 
 	log('V3 CHECK ERRORS: ${v_errors.len}')
-	app.diag_cache[path] = DiagCacheEntry{
-		content_hash: content_hash
-		generation:   gen
-		errors:       v_errors
-	}
+	app.cache_v_check_result(path, content_hash, gen, v_errors, x.exit_code, v_errors.len)
 	return v_errors
 }
 
