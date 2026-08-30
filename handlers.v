@@ -242,9 +242,59 @@ fn parse_import_aliases(content string) map[string]string {
 	return aliases
 }
 
+fn source_line_without_comments(line string, was_in_block_comment bool) (string, bool) {
+	mut code := []u8{cap: line.len}
+	mut in_block_comment := was_in_block_comment
+	mut col := 0
+	for col < line.len {
+		if in_block_comment {
+			if col + 1 < line.len && line[col] == `*` && line[col + 1] == `/` {
+				in_block_comment = false
+				code << ` `
+				col += 2
+				continue
+			}
+			col++
+			continue
+		}
+		if col + 1 < line.len && line[col] == `/` && line[col + 1] == `/` {
+			break
+		}
+		if col + 1 < line.len && line[col] == `/` && line[col + 1] == `*` {
+			in_block_comment = true
+			code << ` `
+			col += 2
+			continue
+		}
+		if line[col] == `"` || line[col] == `'` || line[col] == 96 {
+			quote := line[col]
+			code << line[col]
+			col++
+			for col < line.len {
+				code << line[col]
+				if line[col] == `\\` && col + 1 < line.len {
+					col++
+					code << line[col]
+				} else if line[col] == quote {
+					col++
+					break
+				}
+				col++
+			}
+			continue
+		}
+		code << line[col]
+		col++
+	}
+	return code.bytestr(), in_block_comment
+}
+
 fn parse_import_bindings(content string) []ImportedModuleBinding {
 	mut bindings := []ImportedModuleBinding{}
-	for line in content.split_into_lines() {
+	mut in_block_comment := false
+	for raw_line in content.split_into_lines() {
+		line, next_in_block_comment := source_line_without_comments(raw_line, in_block_comment)
+		in_block_comment = next_in_block_comment
 		trimmed := line.trim_space()
 		if !trimmed.starts_with('import ') {
 			continue
