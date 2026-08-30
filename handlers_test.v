@@ -969,6 +969,27 @@ fn test_resolve_indexed_definition_excludes_inactive_platform_file() {
 	assert location == none
 }
 
+fn test_resolve_indexed_definition_defers_compile_time_declaration() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'indexed_definition_compile_time_branch')
+	must_mkdir_all(test_dir)
+	main_file := os.join_path(test_dir, 'main.v')
+	inactive_branch := $if windows { r'$if linux {' } $else { r'$if windows {' }
+	main_content := 'module main\n\n${inactive_branch}\n\tfn helper() {}\n}\n\nfn main() {\n\thelper()\n}\n'
+	must_write_file(main_file, main_content)
+	main_uri := path_to_uri(main_file)
+	app.open_files[main_uri] = main_content
+
+	location := app.resolve_indexed_definition(main_uri, Position{
+		line: 7
+		char: 3
+	})
+	assert location == none
+}
+
 fn test_resolve_indexed_definition_excludes_different_module_sibling() {
 	mut app := create_test_app()
 	defer {

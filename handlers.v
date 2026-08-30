@@ -1382,6 +1382,89 @@ fn source_declaration_is_public(uri string, sym DocumentSymbol, app &App) bool {
 	return lines[sym.range.start.line].trim_space().starts_with('pub ')
 }
 
+// source_declaration_is_compile_time_conditional identifies declarations nested
+// under `$if` or `$else`. The shallow index does not evaluate compile-time
+// conditions, so every such declaration must defer to compiler-backed lookup.
+fn source_declaration_is_compile_time_conditional(content string, declaration_line int) bool {
+	if declaration_line < 0 {
+		return false
+	}
+	lines := content.split_into_lines()
+	mut brace_depth := 0
+	mut conditional_depths := []int{}
+	mut pending_conditional := false
+	mut in_block_comment := false
+	for line_idx, line in lines {
+		if line_idx == declaration_line {
+			return conditional_depths.len > 0
+		}
+		mut col := 0
+		for col < line.len {
+			if in_block_comment {
+				comment_end := line[col..].index('*/') or { break }
+				col += comment_end + 2
+				in_block_comment = false
+				continue
+			}
+			if col + 1 < line.len && line[col] == `/` && line[col + 1] == `/` {
+				break
+			}
+			if col + 1 < line.len && line[col] == `/` && line[col + 1] == `*` {
+				in_block_comment = true
+				col += 2
+				continue
+			}
+			if line[col] == `'` || line[col] == `"` || line[col] == 96 {
+				quote := line[col]
+				col++
+				for col < line.len {
+					if line[col] == `\\` {
+						col += 2
+						continue
+					}
+					if line[col] == quote {
+						col++
+						break
+					}
+					col++
+				}
+				continue
+			}
+			if line[col] == `$` {
+				directive_len := if line[col..].starts_with('$if') {
+					3
+				} else if line[col..].starts_with('$else') {
+					5
+				} else {
+					0
+				}
+				if directive_len > 0 && (col + directive_len == line.len
+					|| !is_ident_char(line[col + directive_len])) {
+					pending_conditional = true
+					col += directive_len
+					continue
+				}
+			}
+			if line[col] == `{` {
+				brace_depth++
+				if pending_conditional {
+					conditional_depths << brace_depth
+					pending_conditional = false
+				}
+			} else if line[col] == `}` {
+				if conditional_depths.len > 0 && conditional_depths.last() == brace_depth {
+					conditional_depths.delete_last()
+				}
+				if brace_depth > 0 {
+					brace_depth--
+				}
+			}
+			col++
+		}
+	}
+	return false
+}
+
 // source_occurrence_precedes_local_declaration recognizes every target on the
 // comma-separated left side of `:=`. Invalid or ambiguous matches only defer
 // to compiler-backed lookup, so this deliberately favors avoiding false
@@ -1516,9 +1599,13 @@ fn (mut app App) find_indexed_source_definition(dir string, symbol string, inclu
 		if expected_module != '' && entry.module_name != expected_module {
 			continue
 		}
+		source := app.index_source_for(uri) or { continue }
 		for sym in entry.doc_symbols {
 			if !source_definition_kind_is_supported(sym.kind)
 				|| extract_simple_fn_name(sym.name) != symbol {
+				continue
+			}
+			if source_declaration_is_compile_time_conditional(source, sym.range.start.line) {
 				continue
 			}
 			if require_public && !source_declaration_is_public(uri, sym, app) {
