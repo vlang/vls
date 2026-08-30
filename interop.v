@@ -297,7 +297,7 @@ fn parse_v_check_diagnostics(output string) []JsonError {
 fn parse_v_check_diagnostic_header(line string) ?JsonError {
 	for level in ['error', 'warning', 'notice'] {
 		marker := ': ${level}: '
-		marker_idx := line.index(marker) or { continue }
+		marker_idx := line.last_index(marker) or { continue }
 		location := line[..marker_idx]
 		col_separator := location.last_index(':') or { continue }
 		line_location := location[..col_separator]

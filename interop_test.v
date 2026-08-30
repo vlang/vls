@@ -419,6 +419,17 @@ fn test_parse_v_check_diagnostics_preserves_windows_drive_path() {
 	assert diagnostics[0].level == 'notice'
 }
 
+fn test_parse_v_check_diagnostics_preserves_severity_marker_in_posix_path() {
+	header := '/tmp/project: error: fixtures/main.v:12:9: error: unknown identifier'
+	diagnostics := parse_v_check_diagnostics(header)
+	assert diagnostics.len == 1
+	assert diagnostics[0].path == '/tmp/project: error: fixtures/main.v'
+	assert diagnostics[0].message == 'unknown identifier'
+	assert diagnostics[0].line_nr == 12
+	assert diagnostics[0].col == 9
+	assert diagnostics[0].level == 'error'
+}
+
 fn test_parse_v_check_diagnostics_ignores_non_diagnostic_output() {
 	output := 'V3 compatibility fallback disabled; requested reason: compiler_error
 Use `v help build` for more information.
