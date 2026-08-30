@@ -1105,7 +1105,7 @@ fn (mut app App) handle_rename(request Request) Response {
 	for uri, edits in changes {
 		mut version := ?i64(none)
 		if uri in app.open_files_versions {
-			version = i64(app.open_files_versions[uri])
+			version = app.open_files_versions[uri]
 		}
 		doc_changes << TextDocumentEdit{
 			text_document: VersionedTextDocumentIdentifier{
