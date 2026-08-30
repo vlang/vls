@@ -229,9 +229,9 @@ fn get_word_before_dot(line string, dot_col int, enc PositionEncoding) string {
 	return line[start..dot_byte]
 }
 
-// parse_import_aliases returns alias -> module path for simple V import statements.
+// parse_import_aliases returns alias -> module path for V import statements.
 // Examples: `import os` => os -> os, `import net.http` => http -> net.http,
-// `import net.http as nh` => nh -> net.http.
+// `import net.http as nh` => nh -> net.http. Grouped imports are supported too.
 fn parse_import_aliases(content string) map[string]string {
 	mut aliases := map[string]string{}
 	for binding in parse_import_bindings(content) {
@@ -295,45 +295,60 @@ fn source_line_import_code(line string, mut state ImportScanState) string {
 	return code.bytestr()
 }
 
+fn parse_import_binding(text string) ?ImportedModuleBinding {
+	parts := text.fields()
+	if parts.len == 0 {
+		return none
+	}
+	module_path := parts[0]
+	if module_path == '' {
+		return none
+	}
+	mut alias := ''
+	if parts.len >= 3 && parts[1] == 'as' {
+		alias = parts[2]
+	} else {
+		module_parts := module_path.split('.')
+		if module_parts.len > 0 {
+			alias = module_parts.last()
+		}
+	}
+	if alias == '' {
+		return none
+	}
+	return ImportedModuleBinding{
+		alias:       alias
+		module_path: module_path
+	}
+}
+
 fn parse_import_bindings(content string) []ImportedModuleBinding {
 	mut bindings := []ImportedModuleBinding{}
 	mut scan_state := ImportScanState{}
+	mut in_import_block := false
 	for raw_line in content.split_into_lines() {
 		line := source_line_import_code(raw_line, mut scan_state)
 		trimmed := line.trim_space()
+		if in_import_block {
+			if trimmed.starts_with(')') {
+				in_import_block = false
+				continue
+			}
+			if binding := parse_import_binding(trimmed) {
+				bindings << binding
+			}
+			continue
+		}
 		if !trimmed.starts_with('import ') {
 			continue
 		}
 		rest := trimmed[7..].trim_space()
-		if rest == '' {
+		if rest == '(' {
+			in_import_block = true
 			continue
 		}
-		if rest.contains(' as ') {
-			parts := rest.split(' as ')
-			if parts.len < 2 {
-				continue
-			}
-			module_path := parts[0].trim_space()
-			alias := parts[1].trim_space()
-			if module_path != '' && alias != '' {
-				bindings << ImportedModuleBinding{
-					alias:       alias
-					module_path: module_path
-				}
-			}
-			continue
-		}
-		module_path := rest.split(' ')[0].trim_space()
-		if module_path == '' {
-			continue
-		}
-		parts := module_path.split('.')
-		alias := if parts.len > 0 { parts.last() } else { '' }
-		if alias != '' {
-			bindings << ImportedModuleBinding{
-				alias:       alias
-				module_path: module_path
-			}
+		if binding := parse_import_binding(rest) {
+			bindings << binding
 		}
 	}
 	return bindings
