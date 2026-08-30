@@ -423,6 +423,12 @@ fn (app &App) resolve_indexed_import_module_dir(module_path string, work_dir str
 			}
 		}
 	}
+	if work_dir != '' {
+		source_relative_dir := os.join_path(work_dir, rel)
+		if os.is_dir(source_relative_dir) {
+			return source_relative_dir
+		}
+	}
 	return resolve_import_module_dir(module_path, work_dir)
 }
 
