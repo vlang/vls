@@ -1151,6 +1151,30 @@ fn test_resolve_indexed_definition_defers_interface_method_signature() {
 	}
 }
 
+fn test_resolve_indexed_definition_defers_compile_time_at_identifier() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'indexed_definition_compile_time_at')
+	must_mkdir_all(test_dir)
+	test_file := os.join_path(test_dir, 'main.v')
+	content := 'module main\n\nstruct FN {}\n\nfn main() {\n\tprintln(@FN)\n}\n'
+	must_write_file(test_file, content)
+	uri := path_to_uri(test_file)
+	app.open_files[uri] = content
+	macro_col := content.split_into_lines()[5].index('FN') or {
+		assert false, 'expected compile-time @ identifier'
+		return
+	}
+
+	location := app.resolve_indexed_definition(uri, Position{
+		line: 5
+		char: macro_col + 1
+	})
+	assert location == none
+}
+
 fn test_resolve_indexed_definition_defers_generic_type_parameter() {
 	mut app := create_test_app()
 	defer {

@@ -1712,6 +1712,10 @@ fn source_occurrence_is_method_declaration(line string, start_byte int) bool {
 	return receiver.starts_with('(') && receiver.ends_with(')')
 }
 
+fn source_occurrence_has_at_prefix(line string, start_byte int) bool {
+	return start_byte > 0 && start_byte <= line.len && line[start_byte - 1] == `@`
+}
+
 fn source_occurrence_is_interface_method_signature(lines []string, target_line int, start_byte int, end_byte int) bool {
 	if target_line < 0 || target_line >= lines.len || start_byte < 0 || end_byte <= start_byte
 		|| end_byte > lines[target_line].len {
@@ -2128,6 +2132,9 @@ fn (mut app App) resolve_indexed_definition(uri string, position Position) ?Loca
 		return none
 	}
 	if source_occurrence_is_interface_method_signature(lines, position.line, start_byte, end_byte) {
+		return none
+	}
+	if source_occurrence_has_at_prefix(line, start_byte) {
 		return none
 	}
 	if source_occurrence_has_dot_suffix(line, end_byte) && symbol in parse_import_aliases(content) {
