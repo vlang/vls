@@ -947,6 +947,30 @@ fn test_resolve_indexed_definition_rejects_multiline_string_continuations() {
 	assert location == none
 }
 
+fn test_resolve_indexed_definition_rejects_rune_literals() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'indexed_definition_rune_literal')
+	must_mkdir_all(test_dir)
+	test_file := os.join_path(test_dir, 'main.v')
+	content := 'module main\n\nfn f() {}\n\nfn main() {\n\tch := `f`\n\tprintln(ch)\n}\n'
+	must_write_file(test_file, content)
+	uri := path_to_uri(test_file)
+	app.open_files[uri] = content
+	f_col := content.split_into_lines()[5].index('f') or {
+		assert false, 'expected rune literal'
+		return
+	}
+
+	location := app.resolve_indexed_definition(uri, Position{
+		line: 5
+		char: f_col
+	})
+	assert location == none
+}
+
 fn test_resolve_indexed_definition_defers_module_and_import_declarations() {
 	mut app := create_test_app()
 	defer {
