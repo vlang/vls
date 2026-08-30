@@ -125,6 +125,7 @@ struct OccEntry {
 struct OccurrenceScanState {
 mut:
 	in_block_comment bool
+	quote            u8
 }
 
 fn add_identifier_occurrence(line_text string, line_idx int, start int, end int, enc PositionEncoding, mut occ map[string][]TokenOccurrence) {
@@ -140,22 +141,30 @@ fn add_identifier_occurrence(line_text string, line_idx int, start int, end int,
 }
 
 // scan_string_identifier_occurrences skips literal text while indexing V string
-// interpolation expressions. It returns the byte after the closing quote.
+// interpolation expressions. It preserves an unterminated quote across source
+// lines and returns the byte after the closing quote or the end of the line.
 fn scan_string_identifier_occurrences(line_text string, line_idx int, start int, enc PositionEncoding, mut state OccurrenceScanState, mut occ map[string][]TokenOccurrence) int {
-	quote := line_text[start]
-	mut col := start + 1
+	mut col := start
+	if state.quote == 0 {
+		state.quote = line_text[start]
+		col++
+	}
+	quote := state.quote
 	for col < line_text.len {
 		if line_text[col] == `\\` {
 			col += 2
 			continue
 		}
 		if line_text[col] == quote {
+			state.quote = 0
 			return col + 1
 		}
 		if line_text[col] == `$` && col + 1 < line_text.len {
 			if line_text[col + 1] == `{` {
+				state.quote = 0
 				col = scan_code_identifier_occurrences(line_text, line_idx, col + 2, enc, true, mut
 					state, mut occ)
+				state.quote = quote
 				continue
 			}
 			if is_ident_char(line_text[col + 1]) && !(line_text[col + 1] >= `0`
@@ -180,6 +189,11 @@ fn scan_code_identifier_occurrences(line_text string, line_idx int, start int, e
 	mut col := start
 	mut brace_depth := 0
 	for col < line_text.len {
+		if state.quote != 0 {
+			col = scan_string_identifier_occurrences(line_text, line_idx, col, enc, mut state, mut
+				occ)
+			continue
+		}
 		c := line_text[col]
 		if state.in_block_comment {
 			if col + 1 < line_text.len && c == `*` && line_text[col + 1] == `/` {
@@ -231,11 +245,11 @@ fn scan_code_identifier_occurrences(line_text string, line_idx int, start int, e
 }
 
 // extract_identifier_occurrences returns every identifier occurrence in `content`
-// grouped by name, positioned in `enc` units. Line comments and string literal
-// text are skipped, interpolation expressions are scanned, and number literals
-// are ignored. This is the reference-index tokenizer: references/rename read
-// candidates from here instead of re-walking and re-tokenizing files per request
-// (P1-05).
+// grouped by name, positioned in `enc` units. Comments and string literal text
+// are skipped across source lines, interpolation expressions are scanned, and
+// number literals are ignored. This is the reference-index tokenizer:
+// references/rename read candidates from here instead of re-walking and
+// re-tokenizing files per request (P1-05).
 fn extract_identifier_occurrences(content string, enc PositionEncoding) map[string][]TokenOccurrence {
 	mut occ := map[string][]TokenOccurrence{}
 	mut state := OccurrenceScanState{}
