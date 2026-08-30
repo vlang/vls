@@ -1052,6 +1052,30 @@ fn test_resolve_indexed_definition_defers_imported_module_qualifier() {
 	assert location == none
 }
 
+fn test_resolve_indexed_definition_defers_grouped_import_module_qualifier() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'indexed_definition_grouped_module_qualifier')
+	must_mkdir_all(test_dir)
+	test_file := os.join_path(test_dir, 'main.v')
+	content := 'module main\n\nimport (\n\tmath as util\n)\n\nfn util() {}\n\nfn main() {\n\t_ := util.sin(0.0)\n}\n'
+	must_write_file(test_file, content)
+	uri := path_to_uri(test_file)
+	app.open_files[uri] = content
+	qualifier_col := content.split_into_lines()[9].index('util') or {
+		assert false, 'expected grouped import module qualifier'
+		return
+	}
+
+	location := app.resolve_indexed_definition(uri, Position{
+		line: 9
+		char: qualifier_col + 2
+	})
+	assert location == none
+}
+
 fn test_resolve_indexed_definition_defers_generic_type_parameter() {
 	mut app := create_test_app()
 	defer {
@@ -3003,6 +3027,15 @@ fn test_parse_imports_grouped() {
 	content := 'module main\n\nimport (\n\tos\n\tv.util as util // alias\n\n\t// comment\n\tstrings\n)\n'
 	imports := parse_imports(content)
 	assert imports == ['os', 'v.util', 'strings']
+}
+
+fn test_parse_import_aliases_grouped() {
+	content := 'module main\n\nimport (\n\tmath as util\n\tv.ast\n)\n'
+	aliases := parse_import_aliases(content)
+	assert aliases == {
+		'util': 'math'
+		'ast':  'v.ast'
+	}
 }
 
 fn test_parse_imports_none() {
