@@ -976,6 +976,33 @@ fn test_resolve_indexed_definition_defers_struct_initializer_field() {
 	assert location == none
 }
 
+fn test_resolve_indexed_definition_defers_goto_label() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'indexed_definition_goto_label')
+	must_mkdir_all(test_dir)
+	test_file := os.join_path(test_dir, 'main.v')
+	content := 'module main\n\nfn retry() {}\n\nfn main() {\n\tgoto retry\n\tretry:\n\treturn\n}\n'
+	must_write_file(test_file, content)
+	uri := path_to_uri(test_file)
+	app.open_files[uri] = content
+	lines := content.split_into_lines()
+
+	for line_idx in [5, 6] {
+		retry_col := lines[line_idx].index('retry') or {
+			assert false, 'expected goto label'
+			return
+		}
+		location := app.resolve_indexed_definition(uri, Position{
+			line: line_idx
+			char: retry_col + 2
+		})
+		assert location == none
+	}
+}
+
 fn test_resolve_indexed_definition_defers_multiline_parameter_shadow() {
 	mut app := create_test_app()
 	defer {

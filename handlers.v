@@ -1496,7 +1496,7 @@ fn source_occurrence_precedes_local_declaration(line string, end_byte int) bool 
 	return true
 }
 
-fn source_occurrence_is_field_label(line string, end_byte int) bool {
+fn source_occurrence_has_colon_suffix(line string, end_byte int) bool {
 	if end_byte < 0 || end_byte > line.len {
 		return false
 	}
@@ -1505,6 +1505,21 @@ fn source_occurrence_is_field_label(line string, end_byte int) bool {
 		suffix_byte++
 	}
 	return suffix_byte < line.len && line[suffix_byte] == `:`
+}
+
+fn source_occurrence_is_goto_target(line string, start_byte int) bool {
+	if start_byte < 0 || start_byte > line.len {
+		return false
+	}
+	mut keyword_end := start_byte
+	for keyword_end > 0 && (line[keyword_end - 1] == ` ` || line[keyword_end - 1] == `\t`) {
+		keyword_end--
+	}
+	mut keyword_start := keyword_end
+	for keyword_start > 0 && is_ident_char(line[keyword_start - 1]) {
+		keyword_start--
+	}
+	return line[keyword_start..keyword_end] == 'goto'
 }
 
 fn source_line_is_module_or_import_declaration(lines []string, target_line int) bool {
@@ -1712,7 +1727,8 @@ fn (mut app App) resolve_indexed_definition(uri string, position Position) ?Loca
 	}
 	start_byte := encoded_col_to_byte(line, start, app.position_encoding)
 	end_byte := encoded_col_to_byte(line, end, app.position_encoding)
-	if source_occurrence_is_field_label(line, end_byte) {
+	if source_occurrence_has_colon_suffix(line, end_byte)
+		|| source_occurrence_is_goto_target(line, start_byte) {
 		return none
 	}
 	if start_byte > 0 && line[start_byte - 1] == `.` {
