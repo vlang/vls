@@ -1381,6 +1381,24 @@ fn source_declaration_is_public(uri string, sym DocumentSymbol, app &App) bool {
 	return lines[sym.range.start.line].trim_space().starts_with('pub ')
 }
 
+// source_occurrence_precedes_local_declaration recognizes every target on the
+// comma-separated left side of `:=`. Invalid or ambiguous matches only defer
+// to compiler-backed lookup, so this deliberately favors avoiding false
+// indexed definitions for shadowed locals.
+fn source_occurrence_precedes_local_declaration(line string, end_byte int) bool {
+	if end_byte < 0 || end_byte > line.len {
+		return false
+	}
+	declaration_offset := line[end_byte..].index(':=') or { return false }
+	for i := end_byte; i < end_byte + declaration_offset; i++ {
+		c := line[i]
+		if !is_ident_char(c) && c !in [`,`, ` `, `\t`] {
+			return false
+		}
+	}
+	return true
+}
+
 // source_occurrences_have_potential_local_binding conservatively recognizes
 // local declarations that can shadow a top-level or imported symbol. False
 // positives only defer to compiler-backed lookup; false negatives could return
@@ -1400,12 +1418,12 @@ fn source_occurrences_have_potential_local_binding(lines []string, occurrences [
 		if is_for_binding_highlight(line, start_byte, end_byte) {
 			return true
 		}
+		if source_occurrence_precedes_local_declaration(line, end_byte) {
+			return true
+		}
 		mut suffix_byte := end_byte
 		for suffix_byte < line.len && (line[suffix_byte] == ` ` || line[suffix_byte] == `\t`) {
 			suffix_byte++
-		}
-		if suffix_byte < line.len && line[suffix_byte..].starts_with(':=') {
-			return true
 		}
 		if suffix_byte > end_byte && suffix_byte < line.len
 			&& (is_ident_char(line[suffix_byte]) || line[suffix_byte] in [`[`, `?`, `&`, `.`]) {
