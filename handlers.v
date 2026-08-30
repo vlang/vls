@@ -5,6 +5,7 @@ module main
 import os
 import json2
 import time
+import v.pref
 
 const v_keywords = ['asm', 'as', 'assert', 'atomic', 'break', 'const', 'continue', 'defer', 'dump',
 	'else', 'enum', 'false', 'fn', 'for', 'go', 'goto', 'if', 'ilike', 'implements', 'import',
@@ -1433,6 +1434,53 @@ fn source_occurrences_have_potential_local_binding(lines []string, occurrences [
 	return false
 }
 
+// active_indexed_source_file_names applies the compiler's native build-file
+// filtering without removing inactive sources from the broader symbol index.
+// Test files are direct compiler inputs, so normalize their `_test` suffix
+// before checking platform and backend eligibility.
+fn (app &App) active_indexed_source_file_names(dir string, include_tests bool) map[string]bool {
+	mut file_names := os.ls(dir) or { return map[string]bool{} }
+	file_names = file_names.filter(it.ends_with('.v'))
+	normalized_dir := normalized_index_path(dir)
+	for uri, _ in app.open_files {
+		path := uri_to_path(uri)
+		if normalized_index_path(os.dir(path)) != normalized_dir {
+			continue
+		}
+		name := os.file_name(path)
+		if name.ends_with('.v') && name !in file_names {
+			file_names << name
+		}
+	}
+	mut source_names := []string{}
+	mut test_names := []string{}
+	for name in file_names {
+		if name.ends_with('_test.v') {
+			test_names << name
+		} else {
+			source_names << name
+		}
+	}
+	build_prefs := pref.Preferences{
+		os:      pref.get_host_os()
+		backend: .c
+		arch:    pref.get_host_arch()
+	}
+	mut active := map[string]bool{}
+	for path in build_prefs.should_compile_filtered_files(dir, source_names) {
+		active[os.file_name(path)] = true
+	}
+	if include_tests {
+		for name in test_names {
+			build_name := name[..name.len - '_test.v'.len] + '.v'
+			if build_prefs.should_compile_filtered_files(dir, [build_name]).len == 1 {
+				active[name] = true
+			}
+		}
+	}
+	return active
+}
+
 // find_indexed_source_definition finds one unambiguous top-level declaration
 // in `dir`. Methods and fields are intentionally excluded because resolving
 // them safely requires receiver type information.
@@ -1449,6 +1497,7 @@ fn (mut app App) find_indexed_source_definition(dir string, symbol string, inclu
 			app.reindex_uri(open_uri)
 		}
 	}
+	active_file_names := app.active_indexed_source_file_names(dir, include_tests)
 	mut matches := []Location{}
 	mut uris := app.symbol_index.keys()
 	uris.sort()
@@ -1456,7 +1505,11 @@ fn (mut app App) find_indexed_source_definition(dir string, symbol string, inclu
 		if !include_tests && uri.ends_with('_test.v') {
 			continue
 		}
-		if normalized_index_path(os.dir(uri_to_path(uri))) != normalized_dir {
+		path := uri_to_path(uri)
+		if normalized_index_path(os.dir(path)) != normalized_dir {
+			continue
+		}
+		if os.file_name(path) !in active_file_names {
 			continue
 		}
 		entry := app.symbol_index[uri] or { continue }
