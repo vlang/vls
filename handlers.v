@@ -1484,7 +1484,7 @@ fn (app &App) active_indexed_source_file_names(dir string, include_tests bool) m
 // find_indexed_source_definition finds one unambiguous top-level declaration
 // in `dir`. Methods and fields are intentionally excluded because resolving
 // them safely requires receiver type information.
-fn (mut app App) find_indexed_source_definition(dir string, symbol string, include_tests bool, require_public bool) ?Location {
+fn (mut app App) find_indexed_source_definition(dir string, symbol string, include_tests bool, require_public bool, expected_module string) ?Location {
 	if dir == '' || dir == '/' || !os.is_dir(dir) {
 		return none
 	}
@@ -1513,6 +1513,9 @@ fn (mut app App) find_indexed_source_definition(dir string, symbol string, inclu
 			continue
 		}
 		entry := app.symbol_index[uri] or { continue }
+		if expected_module != '' && entry.module_name != expected_module {
+			continue
+		}
 		for sym in entry.doc_symbols {
 			if !source_definition_kind_is_supported(sym.kind)
 				|| extract_simple_fn_name(sym.name) != symbol {
@@ -1569,13 +1572,14 @@ fn (mut app App) resolve_indexed_definition(uri string, position Position) ?Loca
 		}
 		module_path := parse_import_aliases(content)[alias] or { return none }
 		module_dir := app.resolve_indexed_import_module_dir(module_path, os.dir(uri_to_path(uri)))
-		return app.find_indexed_source_definition(module_dir, symbol, false, true)
+		return app.find_indexed_source_definition(module_dir, symbol, false, true,
+			module_path.all_after_last('.'))
 	}
 	if source_occurrences_have_potential_local_binding(lines, occurrences, app.position_encoding) {
 		return none
 	}
 	return app.find_indexed_source_definition(os.dir(uri_to_path(uri)), symbol,
-		uri.ends_with('_test.v'), false)
+		uri.ends_with('_test.v'), false, get_module_name(content))
 }
 
 // find_declaration_line searches `lines` for a top-level declaration whose name

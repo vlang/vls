@@ -432,6 +432,17 @@ fn test_parse_v_check_diagnostics_preserves_severity_marker_in_posix_path() {
 	assert diagnostics[0].level == 'error'
 }
 
+fn test_parse_v_check_diagnostics_preserves_severity_marker_in_message() {
+	header := '/tmp/main.v:1:1: error: failed: error: detail'
+	diagnostics := parse_v_check_diagnostics(header)
+	assert diagnostics.len == 1
+	assert diagnostics[0].path == '/tmp/main.v'
+	assert diagnostics[0].message == 'failed: error: detail'
+	assert diagnostics[0].line_nr == 1
+	assert diagnostics[0].col == 1
+	assert diagnostics[0].level == 'error'
+}
+
 fn test_parse_v_check_diagnostics_ignores_non_diagnostic_output() {
 	output := 'V3 compatibility fallback disabled; requested reason: compiler_error
 Use `v help build` for more information.
