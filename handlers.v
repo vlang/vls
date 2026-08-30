@@ -242,17 +242,34 @@ fn parse_import_aliases(content string) map[string]string {
 	return aliases
 }
 
-fn source_line_without_comments(line string, was_in_block_comment bool) (string, bool) {
+struct ImportScanState {
+mut:
+	in_block_comment bool
+	quote            u8
+}
+
+fn source_line_import_code(line string, mut state ImportScanState) string {
 	mut code := []u8{cap: line.len}
-	mut in_block_comment := was_in_block_comment
 	mut col := 0
 	for col < line.len {
-		if in_block_comment {
+		if state.in_block_comment {
 			if col + 1 < line.len && line[col] == `*` && line[col + 1] == `/` {
-				in_block_comment = false
+				state.in_block_comment = false
 				code << ` `
 				col += 2
 				continue
+			}
+			col++
+			continue
+		}
+		if state.quote != 0 {
+			if line[col] == `\\` && col + 1 < line.len {
+				col += 2
+				continue
+			}
+			if line[col] == state.quote {
+				state.quote = 0
+				code << ` `
 			}
 			col++
 			continue
@@ -261,40 +278,28 @@ fn source_line_without_comments(line string, was_in_block_comment bool) (string,
 			break
 		}
 		if col + 1 < line.len && line[col] == `/` && line[col + 1] == `*` {
-			in_block_comment = true
+			state.in_block_comment = true
 			code << ` `
 			col += 2
 			continue
 		}
 		if line[col] == `"` || line[col] == `'` || line[col] == 96 {
-			quote := line[col]
-			code << line[col]
+			state.quote = line[col]
+			code << ` `
 			col++
-			for col < line.len {
-				code << line[col]
-				if line[col] == `\\` && col + 1 < line.len {
-					col++
-					code << line[col]
-				} else if line[col] == quote {
-					col++
-					break
-				}
-				col++
-			}
 			continue
 		}
 		code << line[col]
 		col++
 	}
-	return code.bytestr(), in_block_comment
+	return code.bytestr()
 }
 
 fn parse_import_bindings(content string) []ImportedModuleBinding {
 	mut bindings := []ImportedModuleBinding{}
-	mut in_block_comment := false
+	mut scan_state := ImportScanState{}
 	for raw_line in content.split_into_lines() {
-		line, next_in_block_comment := source_line_without_comments(raw_line, in_block_comment)
-		in_block_comment = next_in_block_comment
+		line := source_line_import_code(raw_line, mut scan_state)
 		trimmed := line.trim_space()
 		if !trimmed.starts_with('import ') {
 			continue
@@ -1824,6 +1829,11 @@ fn (mut app App) resolve_indexed_definition(uri string, position Position) ?Loca
 	}
 	symbol := substr_by_char_bounds(line, start, end, app.position_encoding)
 	if symbol == '' {
+		return none
+	}
+	// `it` can be introduced implicitly by array operations such as filter/map.
+	// Text-only indexing cannot distinguish that binding from a top-level symbol.
+	if symbol == 'it' {
 		return none
 	}
 	// Reuse the reference tokenizer to reject identifier-shaped text in comments
