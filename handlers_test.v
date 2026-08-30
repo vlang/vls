@@ -1175,6 +1175,36 @@ fn test_resolve_indexed_definition_defers_compile_time_at_identifier() {
 	assert location == none
 }
 
+fn test_resolve_indexed_definition_defers_dollar_prefixed_identifiers() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'indexed_definition_compile_time_dollar')
+	must_mkdir_all(test_dir)
+	test_file := os.join_path(test_dir, 'main.v')
+	content := "module main\n\nfn embed_file() {}\nfn tmpl() {}\n\nfn main() {\n\t_ := \$embed_file('asset.txt')\n\t_ := \$tmpl('page.html')\n}\n"
+	must_write_file(test_file, content)
+	uri := path_to_uri(test_file)
+	app.open_files[uri] = content
+	lines := content.split_into_lines()
+
+	for line_idx, symbol in {
+		6: 'embed_file'
+		7: 'tmpl'
+	} {
+		directive_col := lines[line_idx].index(symbol) or {
+			assert false, 'expected dollar-prefixed identifier'
+			return
+		}
+		location := app.resolve_indexed_definition(uri, Position{
+			line: line_idx
+			char: directive_col + 2
+		})
+		assert location == none
+	}
+}
+
 fn test_resolve_indexed_definition_defers_orm_field_reference() {
 	mut app := create_test_app()
 	defer {
