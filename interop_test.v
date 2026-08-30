@@ -432,6 +432,17 @@ fn test_parse_v_check_diagnostics_preserves_severity_marker_in_posix_path() {
 	assert diagnostics[0].level == 'error'
 }
 
+fn test_parse_v_check_diagnostics_chooses_rightmost_marker_across_severities() {
+	header := '/tmp/foo:1:2: error: dir/main.v:12:9: warning: unused variable'
+	diagnostics := parse_v_check_diagnostics(header)
+	assert diagnostics.len == 1
+	assert diagnostics[0].path == '/tmp/foo:1:2: error: dir/main.v'
+	assert diagnostics[0].message == 'unused variable'
+	assert diagnostics[0].line_nr == 12
+	assert diagnostics[0].col == 9
+	assert diagnostics[0].level == 'warning'
+}
+
 fn test_parse_v_check_diagnostics_preserves_severity_marker_in_message() {
 	header := '/tmp/main.v:1:1: error: failed: error: detail'
 	diagnostics := parse_v_check_diagnostics(header)

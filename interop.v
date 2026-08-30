@@ -298,6 +298,8 @@ fn parse_v_check_diagnostics(output string) []JsonError {
 }
 
 fn parse_v_check_diagnostic_header(line string) ?JsonError {
+	mut best_marker_idx := -1
+	mut best := JsonError{}
 	for level in ['error', 'warning', 'notice'] {
 		marker := ': ${level}: '
 		mut search_end := line.len
@@ -321,14 +323,21 @@ fn parse_v_check_diagnostic_header(line string) ?JsonError {
 				search_end = marker_idx
 				continue
 			}
-			return JsonError{
-				path:    path
-				message: line[marker_idx + marker.len..]
-				line_nr: line_nr_text.int()
-				col:     col_text.int()
-				level:   level
+			if marker_idx > best_marker_idx {
+				best_marker_idx = marker_idx
+				best = JsonError{
+					path:    path
+					message: line[marker_idx + marker.len..]
+					line_nr: line_nr_text.int()
+					col:     col_text.int()
+					level:   level
+				}
 			}
+			break
 		}
+	}
+	if best_marker_idx >= 0 {
+		return best
 	}
 	return none
 }
