@@ -887,6 +887,31 @@ fn test_resolve_indexed_definition_rejects_comments_and_string_literals() {
 	assert location.range.start.line == 2
 }
 
+fn test_resolve_indexed_definition_defers_module_and_import_declarations() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'indexed_definition_declarations')
+	must_mkdir_all(test_dir)
+	test_file := os.join_path(test_dir, 'main.v')
+	content := 'module main\n\nimport helper\n\nfn main() {}\nfn helper() {}\n'
+	must_write_file(test_file, content)
+	uri := path_to_uri(test_file)
+	app.open_files[uri] = content
+
+	module_location := app.resolve_indexed_definition(uri, Position{
+		line: 0
+		char: 8
+	})
+	assert module_location == none
+	import_location := app.resolve_indexed_definition(uri, Position{
+		line: 2
+		char: 9
+	})
+	assert import_location == none
+}
+
 fn test_resolve_indexed_definition_defers_local_variable_shadow() {
 	mut app := create_test_app()
 	defer {
@@ -1086,6 +1111,37 @@ fn test_resolve_indexed_definition_uses_unsaved_imported_module() {
 	}
 	assert location.uri == module_uri
 	assert location.range.start.line == 3
+}
+
+fn test_resolve_indexed_definition_ignores_unrelated_workspace_module() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	root_a := os.join_path(app.temp_dir, 'indexed_definition_workspace_a')
+	root_b := os.join_path(app.temp_dir, 'indexed_definition_workspace_b')
+	module_name := 'vls_unrelated_module'
+	module_dir := os.join_path(root_b, module_name)
+	must_mkdir_all(root_a)
+	must_mkdir_all(module_dir)
+	must_write_file(os.join_path(root_a, 'v.mod'), 'Module {}\n')
+	main_file := os.join_path(root_a, 'main.v')
+	module_file := os.join_path(module_dir, '${module_name}.v')
+	main_content := 'module main\n\nimport ${module_name}\n\nfn main() {\n\t${module_name}.answer()\n}\n'
+	module_content := 'module ${module_name}\n\npub fn answer() {}\n'
+	must_write_file(main_file, main_content)
+	must_write_file(module_file, module_content)
+	main_uri := path_to_uri(main_file)
+	module_uri := path_to_uri(module_file)
+	app.open_files[main_uri] = main_content
+	app.open_files[module_uri] = module_content
+	app.workspace_roots = [root_a, root_b]
+
+	location := app.resolve_indexed_definition(main_uri, Position{
+		line: 5
+		char: module_name.len + 2
+	})
+	assert location == none
 }
 
 fn test_resolve_indexed_definition_prefers_workspace_vlib() {

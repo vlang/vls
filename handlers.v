@@ -322,24 +322,31 @@ fn resolve_import_module_dir(module_path string, work_dir string) string {
 	return ''
 }
 
-// resolve_indexed_import_module_dir prefers modules in the active project and
-// workspace over the V installation used to launch VLS. This matters when the
-// workspace is a V checkout: `v.builder` belongs to that checkout's `vlib`, not
-// necessarily to the toolchain on PATH.
-fn (app &App) resolve_indexed_import_module_dir(module_path string, work_dir string) string {
-	rel := module_path.replace('.', os.path_separator)
-	mut roots := []string{}
-	project_root := find_project_root(work_dir)
-	if project_root != '' {
-		roots << project_root
-	}
-	for workspace_root in app.workspace_roots {
-		if workspace_root != ''
-			&& !roots.any(normalized_index_path(it) == normalized_index_path(workspace_root)) {
-			roots << workspace_root
+fn (app &App) workspace_root_containing(path string) string {
+	normalized_path := path.replace('\\', '/')
+	mut best_root := ''
+	mut best_len := 0
+	for root in app.workspace_roots {
+		normalized_root := root.replace('\\', '/')
+		if path_is_within(normalized_path, normalized_root) && normalized_root.len > best_len {
+			best_root = root
+			best_len = normalized_root.len
 		}
 	}
-	for root in roots {
+	return best_root
+}
+
+// resolve_indexed_import_module_dir prefers modules in the requesting file's
+// active project or workspace root over the V installation used to launch VLS.
+// Unrelated workspace folders are not compiler import roots and must not affect
+// indexed resolution.
+fn (app &App) resolve_indexed_import_module_dir(module_path string, work_dir string) string {
+	rel := module_path.replace('.', os.path_separator)
+	mut root := find_project_root(work_dir)
+	if root == '' || root == '/' {
+		root = app.workspace_root_containing(work_dir)
+	}
+	if root != '' && root != '/' {
 		for candidate in [os.join_path(root, rel), os.join_path(root, 'vlib', rel)] {
 			if os.is_dir(candidate) {
 				return candidate
@@ -1500,6 +1507,38 @@ fn source_occurrence_is_field_label(line string, end_byte int) bool {
 	return suffix_byte < line.len && line[suffix_byte] == `:`
 }
 
+fn source_line_is_module_or_import_declaration(lines []string, target_line int) bool {
+	mut in_import_block := false
+	for line_idx, raw_line in lines {
+		if line_idx > target_line {
+			break
+		}
+		line := raw_line.trim_space()
+		if in_import_block {
+			if line_idx == target_line {
+				return true
+			}
+			if line.starts_with(')') {
+				in_import_block = false
+			}
+			continue
+		}
+		if line.starts_with('import ') {
+			if line_idx == target_line {
+				return true
+			}
+			if line[7..].all_before('//').trim_space() == '(' {
+				in_import_block = true
+			}
+			continue
+		}
+		if line_idx == target_line {
+			return line.starts_with('module ')
+		}
+	}
+	return false
+}
+
 // source_occurrences_have_potential_local_binding conservatively recognizes
 // local declarations that can shadow a top-level or imported symbol. False
 // positives only defer to compiler-backed lookup; false negatives could return
@@ -1666,6 +1705,9 @@ fn (mut app App) resolve_indexed_definition(uri string, position Position) ?Loca
 	// and string literals while still accepting executable string interpolations.
 	occurrences := app.occurrences_for(uri)[symbol] or { return none }
 	if !occurrences.any(it.line == position.line && it.start_char == start && it.end_char == end) {
+		return none
+	}
+	if source_line_is_module_or_import_declaration(lines, position.line) {
 		return none
 	}
 	start_byte := encoded_col_to_byte(line, start, app.position_encoding)
