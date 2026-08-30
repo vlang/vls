@@ -244,12 +244,15 @@ fn v3_compiler_selection_args() []string {
 
 fn build_v_check_args_single(file_to_check string) []string {
 	mut args := v3_compiler_selection_args()
+	// V3 emits warnings by default. At the pinned compiler revision `-w` means
+	// "hide warnings" and also selects established-compiler compatibility.
 	args << ['-check', '-nocolor', file_to_check]
 	return args
 }
 
 fn build_v_check_args_multifile() []string {
 	mut args := v3_compiler_selection_args()
+	// Do not add `-w`: omitting it preserves V3's default warning diagnostics.
 	args << ['-check', '-nocolor', '.']
 	return args
 }

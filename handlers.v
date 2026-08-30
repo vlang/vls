@@ -1381,6 +1381,40 @@ fn source_declaration_is_public(uri string, sym DocumentSymbol, app &App) bool {
 	return lines[sym.range.start.line].trim_space().starts_with('pub ')
 }
 
+// source_occurrences_have_potential_local_binding conservatively recognizes
+// local declarations that can shadow a top-level or imported symbol. False
+// positives only defer to compiler-backed lookup; false negatives could return
+// the wrong indexed declaration, so type-suffixed names are treated as possible
+// parameters even when a function signature spans multiple lines.
+fn source_occurrences_have_potential_local_binding(lines []string, occurrences []TokenOccurrence, enc PositionEncoding) bool {
+	for occurrence in occurrences {
+		if occurrence.line < 0 || occurrence.line >= lines.len {
+			continue
+		}
+		line := lines[occurrence.line]
+		start_byte := encoded_col_to_byte(line, occurrence.start_char, enc)
+		end_byte := encoded_col_to_byte(line, occurrence.end_char, enc)
+		if start_byte < 0 || end_byte <= start_byte || end_byte > line.len {
+			continue
+		}
+		if is_for_binding_highlight(line, start_byte, end_byte) {
+			return true
+		}
+		mut suffix_byte := end_byte
+		for suffix_byte < line.len && (line[suffix_byte] == ` ` || line[suffix_byte] == `\t`) {
+			suffix_byte++
+		}
+		if suffix_byte < line.len && line[suffix_byte..].starts_with(':=') {
+			return true
+		}
+		if suffix_byte > end_byte && suffix_byte < line.len
+			&& (is_ident_char(line[suffix_byte]) || line[suffix_byte] in [`[`, `?`, `&`, `.`]) {
+			return true
+		}
+	}
+	return false
+}
+
 // find_indexed_source_definition finds one unambiguous top-level declaration
 // in `dir`. Methods and fields are intentionally excluded because resolving
 // them safely requires receiver type information.
@@ -1456,9 +1490,18 @@ fn (mut app App) resolve_indexed_definition(uri string, position Position) ?Loca
 	if start_byte > 0 && line[start_byte - 1] == `.` {
 		dot_col := byte_to_encoded_col(line, start_byte - 1, app.position_encoding)
 		alias := get_word_before_dot(line, dot_col, app.position_encoding)
+		alias_occurrences := app.occurrences_for(uri)[alias] or { return none }
+		if source_occurrences_have_potential_local_binding(lines, alias_occurrences,
+			app.position_encoding)
+		{
+			return none
+		}
 		module_path := parse_import_aliases(content)[alias] or { return none }
 		module_dir := app.resolve_indexed_import_module_dir(module_path, os.dir(uri_to_path(uri)))
 		return app.find_indexed_source_definition(module_dir, symbol, false, true)
+	}
+	if source_occurrences_have_potential_local_binding(lines, occurrences, app.position_encoding) {
+		return none
 	}
 	return app.find_indexed_source_definition(os.dir(uri_to_path(uri)), symbol,
 		uri.ends_with('_test.v'), false)
