@@ -300,23 +300,34 @@ fn parse_v_check_diagnostics(output string) []JsonError {
 fn parse_v_check_diagnostic_header(line string) ?JsonError {
 	for level in ['error', 'warning', 'notice'] {
 		marker := ': ${level}: '
-		marker_idx := line.last_index(marker) or { continue }
-		location := line[..marker_idx]
-		col_separator := location.last_index(':') or { continue }
-		line_location := location[..col_separator]
-		line_separator := line_location.last_index(':') or { continue }
-		path := line_location[..line_separator]
-		line_nr_text := line_location[line_separator + 1..]
-		col_text := location[col_separator + 1..]
-		if path == '' || !decimal_text_is_valid(line_nr_text) || !decimal_text_is_valid(col_text) {
-			continue
-		}
-		return JsonError{
-			path:    path
-			message: line[marker_idx + marker.len..]
-			line_nr: line_nr_text.int()
-			col:     col_text.int()
-			level:   level
+		mut search_end := line.len
+		for search_end > 0 {
+			marker_idx := line[..search_end].last_index(marker) or { break }
+			location := line[..marker_idx]
+			col_separator := location.last_index(':') or {
+				search_end = marker_idx
+				continue
+			}
+			line_location := location[..col_separator]
+			line_separator := line_location.last_index(':') or {
+				search_end = marker_idx
+				continue
+			}
+			path := line_location[..line_separator]
+			line_nr_text := line_location[line_separator + 1..]
+			col_text := location[col_separator + 1..]
+			if path == '' || !decimal_text_is_valid(line_nr_text)
+				|| !decimal_text_is_valid(col_text) {
+				search_end = marker_idx
+				continue
+			}
+			return JsonError{
+				path:    path
+				message: line[marker_idx + marker.len..]
+				line_nr: line_nr_text.int()
+				col:     col_text.int()
+				level:   level
+			}
 		}
 	}
 	return none

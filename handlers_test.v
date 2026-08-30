@@ -969,6 +969,30 @@ fn test_resolve_indexed_definition_excludes_inactive_platform_file() {
 	assert location == none
 }
 
+fn test_resolve_indexed_definition_excludes_different_module_sibling() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'indexed_definition_different_module')
+	must_mkdir_all(test_dir)
+	main_file := os.join_path(test_dir, 'main.v')
+	sibling_file := os.join_path(test_dir, 'sibling.v')
+	main_content := 'module bar\n\nfn main() {\n\thelper()\n}\n'
+	must_write_file(main_file, main_content)
+	must_write_file(sibling_file, 'module bar\n')
+	main_uri := path_to_uri(main_file)
+	sibling_uri := path_to_uri(sibling_file)
+	app.open_files[main_uri] = main_content
+	app.open_files[sibling_uri] = 'module main\n\nfn helper() {}\n'
+
+	location := app.resolve_indexed_definition(main_uri, Position{
+		line: 3
+		char: 3
+	})
+	assert location == none
+}
+
 fn test_resolve_indexed_definition_uses_unsaved_imported_module() {
 	mut app := create_test_app()
 	defer {
