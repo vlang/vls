@@ -1477,6 +1477,7 @@ fn source_declaration_is_compile_time_conditional(content string, declaration_li
 	mut conditional_depths := []int{}
 	mut pending_conditional := false
 	mut in_block_comment := false
+	mut quote := u8(0)
 	for line_idx, line in lines {
 		if line_idx == declaration_line {
 			return conditional_depths.len > 0
@@ -1489,6 +1490,17 @@ fn source_declaration_is_compile_time_conditional(content string, declaration_li
 				in_block_comment = false
 				continue
 			}
+			if quote != 0 {
+				if line[col] == `\\` && col + 1 < line.len {
+					col += 2
+					continue
+				}
+				if line[col] == quote {
+					quote = 0
+				}
+				col++
+				continue
+			}
 			if col + 1 < line.len && line[col] == `/` && line[col + 1] == `/` {
 				break
 			}
@@ -1498,19 +1510,8 @@ fn source_declaration_is_compile_time_conditional(content string, declaration_li
 				continue
 			}
 			if line[col] == `'` || line[col] == `"` || line[col] == 96 {
-				quote := line[col]
+				quote = line[col]
 				col++
-				for col < line.len {
-					if line[col] == `\\` {
-						col += 2
-						continue
-					}
-					if line[col] == quote {
-						col++
-						break
-					}
-					col++
-				}
 				continue
 			}
 			if line[col] == `$` {
