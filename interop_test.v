@@ -333,6 +333,7 @@ fn test_build_v_check_args_single_passes_path_literally() {
 	assert args == expected
 	assert '-vls-mode' !in args
 	assert '-json-errors' !in args
+	// At the pinned V3 revision `-w` hides warnings; omission preserves them.
 	assert '-w' !in args
 	$if macos || linux {
 		assert '-new-compiler' in args
@@ -348,6 +349,7 @@ fn test_build_v_check_args_multifile_uses_v3_compatible_flags() {
 	assert args == expected
 	assert '-vls-mode' !in args
 	assert '-json-errors' !in args
+	// V3 reports warnings by default, while `-w` requests compatibility suppression.
 	assert '-w' !in args
 	$if macos || linux {
 		assert '-new-compiler' in args

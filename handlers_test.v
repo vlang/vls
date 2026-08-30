@@ -887,6 +887,46 @@ fn test_resolve_indexed_definition_rejects_comments_and_string_literals() {
 	assert location.range.start.line == 2
 }
 
+fn test_resolve_indexed_definition_defers_local_variable_shadow() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'indexed_definition_local_shadow')
+	must_mkdir_all(test_dir)
+	test_file := os.join_path(test_dir, 'main.v')
+	content := 'module main\n\nfn helper() {}\n\nfn main() {\n\thelper := 1\n\tprintln(helper)\n}\n'
+	must_write_file(test_file, content)
+	uri := path_to_uri(test_file)
+	app.open_files[uri] = content
+
+	location := app.resolve_indexed_definition(uri, Position{
+		line: 6
+		char: 11
+	})
+	assert location == none
+}
+
+fn test_resolve_indexed_definition_defers_multiline_parameter_shadow() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'indexed_definition_parameter_shadow')
+	must_mkdir_all(test_dir)
+	test_file := os.join_path(test_dir, 'main.v')
+	content := 'module main\n\nfn helper() {}\n\nfn use(\n\thelper int,\n) {\n\tprintln(helper)\n}\n'
+	must_write_file(test_file, content)
+	uri := path_to_uri(test_file)
+	app.open_files[uri] = content
+
+	location := app.resolve_indexed_definition(uri, Position{
+		line: 7
+		char: 11
+	})
+	assert location == none
+}
+
 fn test_resolve_indexed_definition_uses_unsaved_imported_module() {
 	mut app := create_test_app()
 	defer {
