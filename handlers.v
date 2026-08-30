@@ -1690,8 +1690,8 @@ fn source_occurrence_is_method_declaration(line string, start_byte int) bool {
 	return receiver.starts_with('(') && receiver.ends_with(')')
 }
 
-fn source_occurrence_has_at_prefix(line string, start_byte int) bool {
-	return start_byte > 0 && start_byte <= line.len && line[start_byte - 1] == `@`
+fn source_occurrence_has_compile_time_prefix(line string, start_byte int) bool {
+	return start_byte > 0 && start_byte <= line.len && line[start_byte - 1] in [`@`, `$`]
 }
 
 fn source_occurrence_is_sql_expression(lines []string, target_line int, start_byte int) bool {
@@ -2168,7 +2168,7 @@ fn (mut app App) resolve_indexed_definition(uri string, position Position) ?Loca
 	if source_occurrence_is_interface_method_signature(lines, position.line, start_byte, end_byte) {
 		return none
 	}
-	if source_occurrence_has_at_prefix(line, start_byte) {
+	if source_occurrence_has_compile_time_prefix(line, start_byte) {
 		return none
 	}
 	if source_occurrence_is_sql_expression(lines, position.line, start_byte) {
