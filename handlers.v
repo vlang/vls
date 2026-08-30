@@ -1604,58 +1604,36 @@ fn source_occurrence_is_goto_target(line string, start_byte int) bool {
 	return line[keyword_start..keyword_end] == 'goto'
 }
 
-fn source_occurrence_is_compile_time_condition(line string, line_idx int, start_byte int, if_occurrences []TokenOccurrence, enc PositionEncoding) bool {
-	if start_byte < 0 || start_byte > line.len {
+fn source_occurrence_is_compile_time_condition(lines []string, line_idx int, start_byte int, if_occurrences []TokenOccurrence, enc PositionEncoding) bool {
+	if line_idx < 0 || line_idx >= lines.len || start_byte < 0 || start_byte > lines[line_idx].len {
 		return false
 	}
 	for occurrence in if_occurrences {
-		if occurrence.line != line_idx {
+		if occurrence.line < 0 || occurrence.line > line_idx || occurrence.line >= lines.len {
 			continue
 		}
-		directive_start := encoded_col_to_byte(line, occurrence.start_char, enc)
-		directive_end := encoded_col_to_byte(line, occurrence.end_char, enc)
-		if directive_start <= 0 || directive_end > start_byte || line[directive_start - 1] != `$` {
+		directive_line := lines[occurrence.line]
+		directive_start := encoded_col_to_byte(directive_line, occurrence.start_char, enc)
+		directive_end := encoded_col_to_byte(directive_line, occurrence.end_char, enc)
+		if directive_start <= 0 || directive_end > directive_line.len
+			|| directive_line[directive_start - 1] != `$`
+			|| (occurrence.line == line_idx && directive_end > start_byte) {
 			continue
 		}
-		mut col := directive_end
 		mut reaches_target := true
-		mut in_block_comment := false
-		for col < start_byte {
-			if in_block_comment {
-				if col + 1 < start_byte && line[col] == `*` && line[col + 1] == `/` {
-					in_block_comment = false
-					col += 2
-					continue
-				}
-				col++
+		mut scan_state := ImportScanState{}
+		for scan_line_idx in occurrence.line .. line_idx + 1 {
+			raw_line := lines[scan_line_idx]
+			fragment_start := if scan_line_idx == occurrence.line { directive_end } else { 0 }
+			fragment_end := if scan_line_idx == line_idx { start_byte } else { raw_line.len }
+			if fragment_start > fragment_end {
 				continue
 			}
-			if col + 1 < start_byte && line[col] == `/` && line[col + 1] == `*` {
-				in_block_comment = true
-				col += 2
-				continue
-			}
-			if line[col] == `"` || line[col] == `'` {
-				quote := line[col]
-				col++
-				for col < start_byte {
-					if line[col] == `\\` {
-						col += 2
-						continue
-					}
-					if line[col] == quote {
-						col++
-						break
-					}
-					col++
-				}
-				continue
-			}
-			if line[col] == `{` {
+			code := source_line_import_code(raw_line[fragment_start..fragment_end], mut scan_state)
+			if code.contains('{') {
 				reaches_target = false
 				break
 			}
-			col++
 		}
 		if reaches_target {
 			return true
@@ -2202,7 +2180,7 @@ fn (mut app App) resolve_indexed_definition(uri string, position Position) ?Loca
 	if_occurrences := file_occurrences['if'] or { []TokenOccurrence{} }
 	if source_occurrence_has_colon_suffix(line, end_byte)
 		|| source_occurrence_is_goto_target(line, start_byte)
-		|| source_occurrence_is_compile_time_condition(line, position.line, start_byte, if_occurrences, app.position_encoding) {
+		|| source_occurrence_is_compile_time_condition(lines, position.line, start_byte, if_occurrences, app.position_encoding) {
 		return none
 	}
 	if start_byte > 0 && line[start_byte - 1] == `.` {

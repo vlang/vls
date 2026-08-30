@@ -1370,6 +1370,30 @@ fn test_resolve_indexed_definition_defers_compile_time_condition() {
 	assert location == none
 }
 
+fn test_resolve_indexed_definition_defers_multiline_compile_time_condition() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'indexed_definition_multiline_compile_time_condition')
+	must_mkdir_all(test_dir)
+	test_file := os.join_path(test_dir, 'main.v')
+	content := 'module main\n\nfn windows() {}\n\n$if (\n\twindows\n) {\n\tfn active() {}\n}\n'
+	must_write_file(test_file, content)
+	uri := path_to_uri(test_file)
+	app.open_files[uri] = content
+	condition_col := content.split_into_lines()[5].index('windows') or {
+		assert false, 'expected multiline compile-time condition'
+		return
+	}
+
+	location := app.resolve_indexed_definition(uri, Position{
+		line: 5
+		char: condition_col + 2
+	})
+	assert location == none
+}
+
 fn test_resolve_indexed_definition_defers_multiline_parameter_shadow() {
 	mut app := create_test_app()
 	defer {
