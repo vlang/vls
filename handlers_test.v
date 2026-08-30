@@ -1124,6 +1124,33 @@ fn test_resolve_indexed_definition_defers_method_declaration_name() {
 	assert location == none
 }
 
+fn test_resolve_indexed_definition_defers_interface_method_signature() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'indexed_definition_interface_method')
+	must_mkdir_all(test_dir)
+	test_file := os.join_path(test_dir, 'main.v')
+	content := 'module main\n\nfn read() {}\n\ninterface Reader {\n\tread()\n}\n\ninterface Writer { read() }\n'
+	must_write_file(test_file, content)
+	uri := path_to_uri(test_file)
+	app.open_files[uri] = content
+	lines := content.split_into_lines()
+
+	for line_idx in [5, 8] {
+		method_col := lines[line_idx].index('read') or {
+			assert false, 'expected interface method signature'
+			return
+		}
+		location := app.resolve_indexed_definition(uri, Position{
+			line: line_idx
+			char: method_col + 2
+		})
+		assert location == none
+	}
+}
+
 fn test_resolve_indexed_definition_defers_generic_type_parameter() {
 	mut app := create_test_app()
 	defer {

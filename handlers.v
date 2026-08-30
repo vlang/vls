@@ -1712,6 +1712,65 @@ fn source_occurrence_is_method_declaration(line string, start_byte int) bool {
 	return receiver.starts_with('(') && receiver.ends_with(')')
 }
 
+fn source_occurrence_is_interface_method_signature(lines []string, target_line int, start_byte int, end_byte int) bool {
+	if target_line < 0 || target_line >= lines.len || start_byte < 0 || end_byte <= start_byte
+		|| end_byte > lines[target_line].len {
+		return false
+	}
+	line := lines[target_line]
+	mut suffix_byte := end_byte
+	for suffix_byte < line.len && (line[suffix_byte] == ` ` || line[suffix_byte] == `\t`) {
+		suffix_byte++
+	}
+	if suffix_byte >= line.len || line[suffix_byte] != `(` {
+		return false
+	}
+	mut brace_depth := 0
+	mut interface_depth := 0
+	mut pending_interface := false
+	mut scan_state := ImportScanState{}
+	for line_idx, raw_line in lines {
+		if line_idx > target_line {
+			break
+		}
+		if line_idx == target_line {
+			if interface_depth > 0 {
+				return true
+			}
+			mut prefix := raw_line[..start_byte].trim_space()
+			if prefix.starts_with('pub ') {
+				prefix = prefix[4..].trim_space()
+			}
+			return (pending_interface || prefix.starts_with('interface ')) && prefix.contains('{')
+		}
+		code := source_line_import_code(raw_line, mut scan_state)
+		if interface_depth == 0 && !pending_interface {
+			mut declaration := code.trim_space()
+			if declaration.starts_with('pub ') {
+				declaration = declaration[4..].trim_space()
+			}
+			pending_interface = declaration.starts_with('interface ')
+		}
+		for c in code {
+			if c == `{` {
+				brace_depth++
+				if pending_interface {
+					interface_depth = brace_depth
+					pending_interface = false
+				}
+			} else if c == `}` {
+				if interface_depth == brace_depth {
+					interface_depth = 0
+				}
+				if brace_depth > 0 {
+					brace_depth--
+				}
+			}
+		}
+	}
+	return false
+}
+
 fn source_occurrence_is_attribute(lines []string, target_line int, start_byte int) bool {
 	if target_line < 0 || target_line >= lines.len || start_byte < 0
 		|| start_byte > lines[target_line].len {
@@ -2066,6 +2125,9 @@ fn (mut app App) resolve_indexed_definition(uri string, position Position) ?Loca
 		return none
 	}
 	if source_occurrence_is_method_declaration(line, start_byte) {
+		return none
+	}
+	if source_occurrence_is_interface_method_signature(lines, position.line, start_byte, end_byte) {
 		return none
 	}
 	if source_occurrence_has_dot_suffix(line, end_byte) && symbol in parse_import_aliases(content) {
