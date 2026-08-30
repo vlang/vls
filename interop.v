@@ -275,11 +275,11 @@ fn build_v_fmt_args(temp_file string) []string {
 // compiler-neutral diagnostic representation used by the LSP layer. V3 emits
 // headers as `path:line:column: severity: message`; paths may themselves
 // contain colons, so location fields are peeled from the right.
-fn parse_v_check_diagnostics(output string) []JsonError {
+fn parse_v_check_diagnostics(output string, source_dir string) []JsonError {
 	mut diagnostics := []JsonError{}
 	mut active := -1
 	for line in output.split_into_lines() {
-		if diagnostic := parse_v_check_diagnostic_header(line) {
+		if diagnostic := parse_v_check_diagnostic_header(line, source_dir) {
 			diagnostics << diagnostic
 			active = diagnostics.len - 1
 			continue
@@ -297,7 +297,18 @@ fn parse_v_check_diagnostics(output string) []JsonError {
 	return diagnostics
 }
 
-fn parse_v_check_diagnostic_header(line string) ?JsonError {
+fn diagnostic_source_path_is_valid(path string, source_dir string) bool {
+	if !path.ends_with('.v') && !path.ends_with('.vsh') {
+		return false
+	}
+	if source_dir == '' {
+		return true
+	}
+	resolved_path := if os.is_abs_path(path) { path } else { os.join_path(source_dir, path) }
+	return os.is_file(resolved_path)
+}
+
+fn parse_v_check_diagnostic_header(line string, source_dir string) ?JsonError {
 	mut best_marker_idx := -1
 	mut best := JsonError{}
 	for level in ['error', 'warning', 'notice'] {
@@ -318,8 +329,8 @@ fn parse_v_check_diagnostic_header(line string) ?JsonError {
 			path := line_location[..line_separator]
 			line_nr_text := line_location[line_separator + 1..]
 			col_text := location[col_separator + 1..]
-			if path == '' || !decimal_text_is_valid(line_nr_text)
-				|| !decimal_text_is_valid(col_text) {
+			if !diagnostic_source_path_is_valid(path, source_dir)
+				|| !decimal_text_is_valid(line_nr_text) || !decimal_text_is_valid(col_text) {
 				search_end = marker_idx
 				continue
 			}
@@ -678,12 +689,12 @@ fn (mut app App) run_v_check(path string, text string) []JsonError {
 
 	log('Check - RUN RES ${x}')
 
-	cleanup_compilation_temp(temp_project_dir, singlefile_tmppath)
-
 	// `-json-errors`, `-w`, and `-vls-mode` select the established compiler.
 	// Parse V3's native flat-AST checker diagnostics instead so ordinary
 	// diagnostics stay on the default backend.
-	v_errors := parse_v_check_diagnostics(x.output)
+	diagnostic_source_dir := if use_multifile { exec_dir } else { os.dir(file_to_check) }
+	v_errors := parse_v_check_diagnostics(x.output, diagnostic_source_dir)
+	cleanup_compilation_temp(temp_project_dir, singlefile_tmppath)
 
 	// error filtlering
 	if use_multifile {

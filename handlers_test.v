@@ -927,6 +927,30 @@ fn test_resolve_indexed_definition_defers_destructured_local_shadow() {
 	assert location == none
 }
 
+fn test_resolve_indexed_definition_defers_struct_initializer_field() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'indexed_definition_struct_field')
+	must_mkdir_all(test_dir)
+	test_file := os.join_path(test_dir, 'main.v')
+	content := 'module main\n\nfn name() {}\n\nfn main() {\n\tvalue := 1\n\t_ := User{name: value}\n}\n'
+	must_write_file(test_file, content)
+	uri := path_to_uri(test_file)
+	app.open_files[uri] = content
+	field_col := content.split_into_lines()[6].index('name') or {
+		assert false, 'expected struct initializer field'
+		return
+	}
+
+	location := app.resolve_indexed_definition(uri, Position{
+		line: 6
+		char: field_col + 2
+	})
+	assert location == none
+}
+
 fn test_resolve_indexed_definition_defers_multiline_parameter_shadow() {
 	mut app := create_test_app()
 	defer {

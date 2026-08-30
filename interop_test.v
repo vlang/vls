@@ -395,7 +395,7 @@ fn test_parse_v_check_diagnostics_reads_v3_output() {
     8 |   value := 1
       |   ~~~~~
 '
-	diagnostics := parse_v_check_diagnostics(output)
+	diagnostics := parse_v_check_diagnostics(output, '')
 	assert diagnostics.len == 2
 	assert diagnostics[0] == JsonError{
 		path:    '/tmp/main.v'
@@ -413,7 +413,7 @@ fn test_parse_v_check_diagnostics_reads_v3_output() {
 
 fn test_parse_v_check_diagnostics_preserves_windows_drive_path() {
 	header := r'C:\work\project\main.v:12:9: notice: deprecated declaration'
-	diagnostics := parse_v_check_diagnostics(header)
+	diagnostics := parse_v_check_diagnostics(header, '')
 	assert diagnostics.len == 1
 	assert diagnostics[0].path == r'C:\work\project\main.v'
 	assert diagnostics[0].line_nr == 12
@@ -423,7 +423,7 @@ fn test_parse_v_check_diagnostics_preserves_windows_drive_path() {
 
 fn test_parse_v_check_diagnostics_preserves_severity_marker_in_posix_path() {
 	header := '/tmp/project: error: fixtures/main.v:12:9: error: unknown identifier'
-	diagnostics := parse_v_check_diagnostics(header)
+	diagnostics := parse_v_check_diagnostics(header, '')
 	assert diagnostics.len == 1
 	assert diagnostics[0].path == '/tmp/project: error: fixtures/main.v'
 	assert diagnostics[0].message == 'unknown identifier'
@@ -434,7 +434,7 @@ fn test_parse_v_check_diagnostics_preserves_severity_marker_in_posix_path() {
 
 fn test_parse_v_check_diagnostics_chooses_rightmost_marker_across_severities() {
 	header := '/tmp/foo:1:2: error: dir/main.v:12:9: warning: unused variable'
-	diagnostics := parse_v_check_diagnostics(header)
+	diagnostics := parse_v_check_diagnostics(header, '')
 	assert diagnostics.len == 1
 	assert diagnostics[0].path == '/tmp/foo:1:2: error: dir/main.v'
 	assert diagnostics[0].message == 'unused variable'
@@ -445,10 +445,29 @@ fn test_parse_v_check_diagnostics_chooses_rightmost_marker_across_severities() {
 
 fn test_parse_v_check_diagnostics_preserves_severity_marker_in_message() {
 	header := '/tmp/main.v:1:1: error: failed: error: detail'
-	diagnostics := parse_v_check_diagnostics(header)
+	diagnostics := parse_v_check_diagnostics(header, '')
 	assert diagnostics.len == 1
 	assert diagnostics[0].path == '/tmp/main.v'
 	assert diagnostics[0].message == 'failed: error: detail'
+	assert diagnostics[0].line_nr == 1
+	assert diagnostics[0].col == 1
+	assert diagnostics[0].level == 'error'
+}
+
+fn test_parse_v_check_diagnostics_rejects_header_marker_in_message() {
+	temp_dir := os.join_path(os.temp_dir(),
+		'vls_diagnostic_source_${os.getpid()}_${time.now().unix_nano()}')
+	interop_test_must_mkdir_all(temp_dir)
+	defer {
+		os.rmdir_all(temp_dir) or {}
+	}
+	source_path := os.join_path(temp_dir, 'main.v')
+	interop_test_must_write_file(source_path, 'module main\n')
+	header := '${source_path}:1:1: error: failed at foo.v:2:3: warning: detail'
+	diagnostics := parse_v_check_diagnostics(header, temp_dir)
+	assert diagnostics.len == 1
+	assert diagnostics[0].path == source_path
+	assert diagnostics[0].message == 'failed at foo.v:2:3: warning: detail'
 	assert diagnostics[0].line_nr == 1
 	assert diagnostics[0].col == 1
 	assert diagnostics[0].level == 'error'
@@ -458,7 +477,7 @@ fn test_parse_v_check_diagnostics_ignores_non_diagnostic_output() {
 	output := 'V3 compatibility fallback disabled; requested reason: compiler_error
 Use `v help build` for more information.
 '
-	assert parse_v_check_diagnostics(output).len == 0
+	assert parse_v_check_diagnostics(output, '').len == 0
 }
 
 fn test_cache_v_check_result_retries_failure_without_diagnostics() {

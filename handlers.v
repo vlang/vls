@@ -1489,6 +1489,17 @@ fn source_occurrence_precedes_local_declaration(line string, end_byte int) bool 
 	return true
 }
 
+fn source_occurrence_is_field_label(line string, end_byte int) bool {
+	if end_byte < 0 || end_byte > line.len {
+		return false
+	}
+	mut suffix_byte := end_byte
+	for suffix_byte < line.len && (line[suffix_byte] == ` ` || line[suffix_byte] == `\t`) {
+		suffix_byte++
+	}
+	return suffix_byte < line.len && line[suffix_byte] == `:`
+}
+
 // source_occurrences_have_potential_local_binding conservatively recognizes
 // local declarations that can shadow a top-level or imported symbol. False
 // positives only defer to compiler-backed lookup; false negatives could return
@@ -1658,6 +1669,10 @@ fn (mut app App) resolve_indexed_definition(uri string, position Position) ?Loca
 		return none
 	}
 	start_byte := encoded_col_to_byte(line, start, app.position_encoding)
+	end_byte := encoded_col_to_byte(line, end, app.position_encoding)
+	if source_occurrence_is_field_label(line, end_byte) {
+		return none
+	}
 	if start_byte > 0 && line[start_byte - 1] == `.` {
 		dot_col := byte_to_encoded_col(line, start_byte - 1, app.position_encoding)
 		alias := get_word_before_dot(line, dot_col, app.position_encoding)
