@@ -932,6 +932,30 @@ fn test_resolve_indexed_definition_defers_local_variable_shadow() {
 	assert location == none
 }
 
+fn test_resolve_indexed_definition_defers_implicit_it_binding() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'indexed_definition_implicit_it')
+	must_mkdir_all(test_dir)
+	test_file := os.join_path(test_dir, 'main.v')
+	content := 'module main\n\nfn it() {}\n\nfn main() {\n\titems := [1, 2]\n\t_ := items.filter(it > 0)\n}\n'
+	must_write_file(test_file, content)
+	uri := path_to_uri(test_file)
+	app.open_files[uri] = content
+	it_col := content.split_into_lines()[6].index('it >') or {
+		assert false, 'expected implicit it reference'
+		return
+	}
+
+	location := app.resolve_indexed_definition(uri, Position{
+		line: 6
+		char: it_col + 1
+	})
+	assert location == none
+}
+
 fn test_resolve_indexed_definition_defers_destructured_local_shadow() {
 	mut app := create_test_app()
 	defer {
@@ -1195,6 +1219,45 @@ fn test_resolve_indexed_definition_ignores_import_in_block_comment() {
 
 	location := app.resolve_indexed_definition(main_uri, Position{
 		line: 8
+		char: answer_col + 2
+	}) or {
+		assert false, 'expected real imported module definition'
+		return
+	}
+	assert location.uri == right_uri
+}
+
+fn test_resolve_indexed_definition_ignores_import_in_multiline_string() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'indexed_definition_string_import')
+	right_dir := os.join_path(test_dir, 'right')
+	wrong_dir := os.join_path(test_dir, 'wrong')
+	must_mkdir_all(right_dir)
+	must_mkdir_all(wrong_dir)
+	main_file := os.join_path(test_dir, 'main.v')
+	right_file := os.join_path(right_dir, 'right.v')
+	wrong_file := os.join_path(wrong_dir, 'wrong.v')
+	main_content := "module main\n\nimport right as util\n\nconst ignored = 'text\nimport wrong as util\n'\n\nfn main() {\n\tutil.answer()\n}\n"
+	right_content := 'module right\n\npub fn answer() {}\n'
+	wrong_content := 'module wrong\n\npub fn answer() {}\n'
+	must_write_file(main_file, main_content)
+	must_write_file(right_file, right_content)
+	must_write_file(wrong_file, wrong_content)
+	main_uri := path_to_uri(main_file)
+	right_uri := path_to_uri(right_file)
+	app.open_files[main_uri] = main_content
+	app.open_files[right_uri] = right_content
+	app.open_files[path_to_uri(wrong_file)] = wrong_content
+	answer_col := main_content.split_into_lines()[9].index('answer') or {
+		assert false, 'expected imported member reference'
+		return
+	}
+
+	location := app.resolve_indexed_definition(main_uri, Position{
+		line: 9
 		char: answer_col + 2
 	}) or {
 		assert false, 'expected real imported module definition'
