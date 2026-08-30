@@ -1669,6 +1669,44 @@ fn source_line_is_module_or_import_declaration(lines []string, target_line int) 
 	return false
 }
 
+fn source_occurrence_is_generic_parameter(line string, start_byte int, end_byte int) bool {
+	if start_byte < 0 || end_byte <= start_byte || end_byte > line.len {
+		return false
+	}
+	mut open_byte := start_byte
+	for open_byte > 0 && line[open_byte - 1] != `[` && line[open_byte - 1] != `]` {
+		open_byte--
+	}
+	if open_byte == 0 || line[open_byte - 1] != `[` {
+		return false
+	}
+	open_byte--
+	mut close_byte := end_byte
+	for close_byte < line.len && line[close_byte] != `[` && line[close_byte] != `]` {
+		close_byte++
+	}
+	if close_byte >= line.len || line[close_byte] != `]` {
+		return false
+	}
+	for parameter in line[open_byte + 1..close_byte].split(',') {
+		name := parameter.trim_space()
+		if name == '' || name[0] >= `0` && name[0] <= `9` {
+			return false
+		}
+		for c in name {
+			if !is_ident_char(c) {
+				return false
+			}
+		}
+	}
+	mut declaration_prefix := line[..open_byte].trim_space()
+	if declaration_prefix.starts_with('pub ') {
+		declaration_prefix = declaration_prefix[4..].trim_space()
+	}
+	return declaration_prefix.starts_with('fn ') || declaration_prefix.starts_with('struct ')
+		|| declaration_prefix.starts_with('interface ') || declaration_prefix.starts_with('type ')
+}
+
 // source_occurrences_have_potential_local_binding conservatively recognizes
 // local declarations that can shadow a top-level or imported symbol. False
 // positives only defer to compiler-backed lookup; false negatives could return
@@ -1689,6 +1727,9 @@ fn source_occurrences_have_potential_local_binding(lines []string, occurrences [
 			return true
 		}
 		if source_occurrence_precedes_local_declaration(line, end_byte) {
+			return true
+		}
+		if source_occurrence_is_generic_parameter(line, start_byte, end_byte) {
 			return true
 		}
 		mut suffix_byte := end_byte
