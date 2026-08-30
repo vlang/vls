@@ -462,6 +462,27 @@ fn test_cache_v_check_result_retries_failure_without_diagnostics() {
 	assert path !in app.diag_cache
 }
 
+fn test_cache_v_check_result_retries_timeout_with_partial_diagnostics() {
+	mut app := App{}
+	path := 'file:///tmp/main.v'
+	app.diag_cache[path] = DiagCacheEntry{
+		content_hash: 1
+		generation:   1
+		errors:       []
+	}
+	partial_errors := [
+		JsonError{
+			path:    '/tmp/main.v'
+			message: 'partial compiler output'
+			line_nr: 1
+			col:     1
+			level:   'error'
+		},
+	]
+	app.cache_v_check_result(path, 2, 2, partial_errors, compiler_exit_timeout, partial_errors.len)
+	assert path !in app.diag_cache
+}
+
 fn test_cache_v_check_result_keeps_valid_clean_and_diagnostic_results() {
 	mut app := App{}
 	path := 'file:///tmp/main.v'

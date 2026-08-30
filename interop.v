@@ -359,11 +359,11 @@ fn v_diagnostic_underline_len(line string) int {
 	return marker.len
 }
 
-// cache_v_check_result retains clean results only when the compiler completed
-// successfully. A failed invocation is cacheable only when it produced parsed
-// diagnostics; otherwise a transient timeout or crash must be retried.
+// cache_v_check_result never retains timed-out output because it may be partial.
+// Other failed invocations are cacheable only when they produced parsed
+// diagnostics; otherwise a transient compiler crash must be retried.
 fn (mut app App) cache_v_check_result(path string, content_hash int, generation int, errors []JsonError, exit_code int, parsed_diagnostic_count int) {
-	if exit_code != 0 && parsed_diagnostic_count == 0 {
+	if exit_code == compiler_exit_timeout || (exit_code != 0 && parsed_diagnostic_count == 0) {
 		app.diag_cache.delete(path)
 		return
 	}
