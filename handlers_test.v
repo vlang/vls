@@ -1076,6 +1076,54 @@ fn test_resolve_indexed_definition_defers_grouped_import_module_qualifier() {
 	assert location == none
 }
 
+fn test_resolve_indexed_definition_preserves_grouped_import_through_block_comment() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'indexed_definition_grouped_import_comment')
+	must_mkdir_all(test_dir)
+	test_file := os.join_path(test_dir, 'main.v')
+	content := 'module main\n\nimport (\n\t/*\n) still commented\n\t*/\n\tmath as util\n)\n\nfn util() {}\n'
+	must_write_file(test_file, content)
+	uri := path_to_uri(test_file)
+	app.open_files[uri] = content
+	alias_col := content.split_into_lines()[6].index('util') or {
+		assert false, 'expected grouped import alias after block comment'
+		return
+	}
+
+	location := app.resolve_indexed_definition(uri, Position{
+		line: 6
+		char: alias_col + 2
+	})
+	assert location == none
+}
+
+fn test_resolve_indexed_definition_defers_method_declaration_name() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'indexed_definition_method_declaration')
+	must_mkdir_all(test_dir)
+	test_file := os.join_path(test_dir, 'main.v')
+	content := 'module main\n\nstruct X {}\n\nfn helper() {}\n\nfn (x X) helper() {}\n'
+	must_write_file(test_file, content)
+	uri := path_to_uri(test_file)
+	app.open_files[uri] = content
+	method_col := content.split_into_lines()[6].index('helper') or {
+		assert false, 'expected method declaration name'
+		return
+	}
+
+	location := app.resolve_indexed_definition(uri, Position{
+		line: 6
+		char: method_col + 2
+	})
+	assert location == none
+}
+
 fn test_resolve_indexed_definition_defers_generic_type_parameter() {
 	mut app := create_test_app()
 	defer {

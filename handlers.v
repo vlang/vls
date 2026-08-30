@@ -1666,11 +1666,12 @@ fn source_occurrence_is_compile_time_condition(line string, line_idx int, start_
 
 fn source_line_is_module_or_import_declaration(lines []string, target_line int) bool {
 	mut in_import_block := false
+	mut scan_state := ImportScanState{}
 	for line_idx, raw_line in lines {
 		if line_idx > target_line {
 			break
 		}
-		line := raw_line.trim_space()
+		line := source_line_import_code(raw_line, mut scan_state).trim_space()
 		if in_import_block {
 			if line_idx == target_line {
 				return true
@@ -1694,6 +1695,21 @@ fn source_line_is_module_or_import_declaration(lines []string, target_line int) 
 		}
 	}
 	return false
+}
+
+fn source_occurrence_is_method_declaration(line string, start_byte int) bool {
+	if start_byte < 0 || start_byte > line.len {
+		return false
+	}
+	mut prefix := line[..start_byte].trim_space()
+	if prefix.starts_with('pub ') {
+		prefix = prefix[4..].trim_space()
+	}
+	if !prefix.starts_with('fn ') {
+		return false
+	}
+	receiver := prefix[3..].trim_space()
+	return receiver.starts_with('(') && receiver.ends_with(')')
 }
 
 fn source_occurrence_is_attribute(lines []string, target_line int, start_byte int) bool {
@@ -2047,6 +2063,9 @@ fn (mut app App) resolve_indexed_definition(uri string, position Position) ?Loca
 		return none
 	}
 	if source_occurrence_is_enum_member_declaration(content, symbol, position.line) {
+		return none
+	}
+	if source_occurrence_is_method_declaration(line, start_byte) {
 		return none
 	}
 	if source_occurrence_has_dot_suffix(line, end_byte) && symbol in parse_import_aliases(content) {
