@@ -233,12 +233,25 @@ fn make_singlefile_temp_path(temp_root string, real_path string, purpose string)
 // separate argv element to os.Process, so no shell metacharacter (spaces,
 // `$()`, backticks, quotes, `;`, `&`, `|`, `%`, ...) in a filename or path can
 // alter the executed command. There is no shell involved at any point.
+fn v3_compiler_selection_args() []string {
+	$if macos || linux {
+		// Default V3 dispatch only applies to executables named `v` or `vnew`.
+		// VLS may be configured with a renamed compiler, so select V3 explicitly.
+		return ['-new-compiler']
+	}
+	return []
+}
+
 fn build_v_check_args_single(file_to_check string) []string {
-	return ['-w', '-vls-mode', '-check', '-json-errors', '-nocolor', file_to_check]
+	mut args := v3_compiler_selection_args()
+	args << ['-check', '-nocolor', file_to_check]
+	return args
 }
 
 fn build_v_check_args_multifile() []string {
-	return ['-w', '-check', '-json-errors', '-nocolor', '.']
+	mut args := v3_compiler_selection_args()
+	args << ['-check', '-nocolor', '.']
+	return args
 }
 
 fn build_v_line_info_args_multifile(rel_file string, line_info string) []string {
@@ -253,6 +266,83 @@ fn build_v_line_info_args_single(file_to_check string, line_info string, compile
 
 fn build_v_fmt_args(temp_file string) []string {
 	return ['fmt', '-inprocess', '-w', temp_file]
+}
+
+// parse_v_check_diagnostics converts V3's flat-AST checker output into the
+// compiler-neutral diagnostic representation used by the LSP layer. V3 emits
+// headers as `path:line:column: severity: message`; paths may themselves
+// contain colons, so location fields are peeled from the right.
+fn parse_v_check_diagnostics(output string) []JsonError {
+	mut diagnostics := []JsonError{}
+	mut active := -1
+	for line in output.split_into_lines() {
+		if diagnostic := parse_v_check_diagnostic_header(line) {
+			diagnostics << diagnostic
+			active = diagnostics.len - 1
+			continue
+		}
+		if active >= 0 && diagnostics[active].len == 0 {
+			underline_len := v_diagnostic_underline_len(line)
+			if underline_len > 0 {
+				diagnostics[active] = JsonError{
+					...diagnostics[active]
+					len: underline_len
+				}
+			}
+		}
+	}
+	return diagnostics
+}
+
+fn parse_v_check_diagnostic_header(line string) ?JsonError {
+	for level in ['error', 'warning', 'notice'] {
+		marker := ': ${level}: '
+		marker_idx := line.index(marker) or { continue }
+		location := line[..marker_idx]
+		col_separator := location.last_index(':') or { continue }
+		line_location := location[..col_separator]
+		line_separator := line_location.last_index(':') or { continue }
+		path := line_location[..line_separator]
+		line_nr_text := line_location[line_separator + 1..]
+		col_text := location[col_separator + 1..]
+		if path == '' || !decimal_text_is_valid(line_nr_text) || !decimal_text_is_valid(col_text) {
+			continue
+		}
+		return JsonError{
+			path:    path
+			message: line[marker_idx + marker.len..]
+			line_nr: line_nr_text.int()
+			col:     col_text.int()
+			level:   level
+		}
+	}
+	return none
+}
+
+fn decimal_text_is_valid(text string) bool {
+	if text == '' {
+		return false
+	}
+	for c in text {
+		if c < `0` || c > `9` {
+			return false
+		}
+	}
+	return true
+}
+
+fn v_diagnostic_underline_len(line string) int {
+	separator := line.index('|') or { return 0 }
+	marker := line[separator + 1..].trim_space()
+	if marker == '' {
+		return 0
+	}
+	for c in marker {
+		if c != `~` && c != `^` {
+			return 0
+		}
+	}
+	return marker.len
 }
 
 // Sentinel exit code returned when a compiler invocation is killed for
@@ -552,16 +642,16 @@ fn (mut app App) run_v_check(path string, text string) []JsonError {
 
 	cleanup_compilation_temp(temp_project_dir, singlefile_tmppath)
 
-	json_errors := json2.decode[[]JsonError](x.output) or {
-		log('failed to parse json ${err}')
-		return []
-	}
+	// `-json-errors`, `-w`, and `-vls-mode` select the established compiler.
+	// Parse V3's native flat-AST checker diagnostics instead so ordinary
+	// diagnostics stay on the default backend.
+	v_errors := parse_v_check_diagnostics(x.output)
 
 	// error filtlering
 	if use_multifile {
 		mut filtered_errors := []JsonError{}
 
-		for err in json_errors {
+		for err in v_errors {
 			err_file := source_path_from_overlay(err.path, overlay)
 			if normalized_index_path(err_file) == normalized_index_path(real_path) {
 				updated_err := JsonError{
@@ -579,7 +669,7 @@ fn (mut app App) run_v_check(path string, text string) []JsonError {
 			}
 		}
 
-		log('FILTERED ERRORS: ${filtered_errors.len} of ${json_errors.len}')
+		log('FILTERED ERRORS: ${filtered_errors.len} of ${v_errors.len}')
 		app.diag_cache[path] = DiagCacheEntry{
 			content_hash: content_hash
 			generation:   gen
@@ -588,13 +678,13 @@ fn (mut app App) run_v_check(path string, text string) []JsonError {
 		return filtered_errors
 	}
 
-	log('JSON ERRORS: ${json_errors.len}')
+	log('V3 CHECK ERRORS: ${v_errors.len}')
 	app.diag_cache[path] = DiagCacheEntry{
 		content_hash: content_hash
 		generation:   gen
-		errors:       json_errors
+		errors:       v_errors
 	}
-	return json_errors
+	return v_errors
 }
 
 fn (mut app App) write_tracked_files_to_temp(working_dir string) !string {

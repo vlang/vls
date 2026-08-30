@@ -6,7 +6,6 @@ import json2
 import net
 import os
 import time
-import v.pref
 import io
 
 // App represents the context of the server during its lifetime.
@@ -70,10 +69,6 @@ struct DiagCacheEntry {
 	errors       []JsonError
 }
 
-const v_prefs = pref.Preferences{
-	is_vls: true
-}
-
 // v_dir is the path to the V home directory, derived from the V compiler executable.
 // It is resolved once at process start and never changes.
 const v_dir = find_v_dir()
@@ -129,7 +124,6 @@ fn new_stdin_buffered_reader() &io.BufferedReader {
 
 fn main() {
 	log('VLS started. Reading from stdin...')
-	log('VLS preferences: is_vls=${v_prefs.is_vls}')
 
 	// Check for --port PORT argument to start as a TCP multi-client server.
 	// TCP binds to loopback (127.0.0.1) by default; binding to any other
@@ -1455,7 +1449,7 @@ fn make_internal_error_response(id int, message string) ErrorResponse {
 }
 
 fn validate_request_params(method Method, params_json string) ?string {
-	return match method {
+	match method {
 		.initialize {
 			params := json2.decode[InitializeParams](params_json) or {
 				return 'Invalid initialize params: ${err.msg()}'
@@ -1467,7 +1461,6 @@ fn validate_request_params(method Method, params_json string) ?string {
 					}
 				}
 			}
-			none
 		}
 		.completion, .signature_help, .definition, .hover, .declaration, .type_definition,
 		.implementation, .prepare_rename, .document_highlight {
@@ -1477,7 +1470,6 @@ fn validate_request_params(method Method, params_json string) ?string {
 			if params.text_document.uri == '' {
 				return 'Missing textDocument.uri'
 			}
-			none
 		}
 		.references {
 			params := json2.decode[ReferenceParams](params_json) or {
@@ -1486,7 +1478,6 @@ fn validate_request_params(method Method, params_json string) ?string {
 			if params.text_document.uri == '' {
 				return 'Missing textDocument.uri'
 			}
-			none
 		}
 		.rename {
 			params := json2.decode[RenameParams](params_json) or {
@@ -1502,13 +1493,11 @@ fn validate_request_params(method Method, params_json string) ?string {
 			if params.new_name in v_keywords || params.new_name in v_builtins {
 				return 'newName `${params.new_name}` is a reserved V keyword or builtin'
 			}
-			none
 		}
 		.workspace_symbol {
 			json2.decode[WorkspaceSymbolParams](params_json) or {
 				return 'Invalid workspace/symbol params: ${err.msg()}'
 			}
-			none
 		}
 		.formatting {
 			params := json2.decode[DocumentFormattingParams](params_json) or {
@@ -1517,7 +1506,6 @@ fn validate_request_params(method Method, params_json string) ?string {
 			if params.text_document.uri == '' {
 				return 'Missing textDocument.uri'
 			}
-			none
 		}
 		.document_symbols {
 			params := json2.decode[DocumentSymbolParams](params_json) or {
@@ -1526,7 +1514,6 @@ fn validate_request_params(method Method, params_json string) ?string {
 			if params.text_document.uri == '' {
 				return 'Missing textDocument.uri'
 			}
-			none
 		}
 		.inlay_hint {
 			params := json2.decode[InlayHintParams](params_json) or {
@@ -1535,7 +1522,6 @@ fn validate_request_params(method Method, params_json string) ?string {
 			if params.text_document.uri == '' {
 				return 'Missing textDocument.uri'
 			}
-			none
 		}
 		.code_action {
 			params := json2.decode[CodeActionParams](params_json) or {
@@ -1544,7 +1530,6 @@ fn validate_request_params(method Method, params_json string) ?string {
 			if params.text_document.uri == '' {
 				return 'Missing textDocument.uri'
 			}
-			none
 		}
 		.semantic_tokens {
 			params := json2.decode[SemanticTokensParams](params_json) or {
@@ -1553,7 +1538,6 @@ fn validate_request_params(method Method, params_json string) ?string {
 			if params.text_document.uri == '' {
 				return 'Missing textDocument.uri'
 			}
-			none
 		}
 		.folding_range {
 			params := json2.decode[FoldingRangeParams](params_json) or {
@@ -1562,7 +1546,6 @@ fn validate_request_params(method Method, params_json string) ?string {
 			if params.text_document.uri == '' {
 				return 'Missing textDocument.uri'
 			}
-			none
 		}
 		.callhierarchy_prepare {
 			params := json2.decode[PrepareCallHierarchyParams](params_json) or {
@@ -1571,7 +1554,6 @@ fn validate_request_params(method Method, params_json string) ?string {
 			if params.text_document.uri == '' {
 				return 'Missing textDocument.uri'
 			}
-			none
 		}
 		.callhierarchy_incoming {
 			params := json2.decode[CallHierarchyIncomingCallsParams](params_json) or {
@@ -1580,7 +1562,6 @@ fn validate_request_params(method Method, params_json string) ?string {
 			if params.item.uri == '' {
 				return 'Missing item.uri'
 			}
-			none
 		}
 		.callhierarchy_outgoing {
 			params := json2.decode[CallHierarchyOutgoingCallsParams](params_json) or {
@@ -1589,7 +1570,6 @@ fn validate_request_params(method Method, params_json string) ?string {
 			if params.item.uri == '' {
 				return 'Missing item.uri'
 			}
-			none
 		}
 		.selection_range {
 			params := json2.decode[SelectionRangeParams](params_json) or {
@@ -1598,7 +1578,6 @@ fn validate_request_params(method Method, params_json string) ?string {
 			if params.text_document.uri == '' {
 				return 'Missing textDocument.uri'
 			}
-			none
 		}
 		.semantic_tokens_range {
 			params := json2.decode[SemanticTokensRangeParams](params_json) or {
@@ -1607,7 +1586,6 @@ fn validate_request_params(method Method, params_json string) ?string {
 			if params.text_document.uri == '' {
 				return 'Missing textDocument.uri'
 			}
-			none
 		}
 		.range_formatting {
 			params := json2.decode[DocumentRangeFormattingParams](params_json) or {
@@ -1616,7 +1594,6 @@ fn validate_request_params(method Method, params_json string) ?string {
 			if params.text_document.uri == '' {
 				return 'Missing textDocument.uri'
 			}
-			none
 		}
 		.linked_editing_range {
 			params := json2.decode[TextDocumentPositionParams](params_json) or {
@@ -1625,7 +1602,6 @@ fn validate_request_params(method Method, params_json string) ?string {
 			if params.text_document.uri == '' {
 				return 'Missing textDocument.uri'
 			}
-			none
 		}
 		.inline_value {
 			params := json2.decode[InlineValueParams](params_json) or {
@@ -1634,7 +1610,6 @@ fn validate_request_params(method Method, params_json string) ?string {
 			if params.text_document.uri == '' {
 				return 'Missing textDocument.uri'
 			}
-			none
 		}
 		.code_lens {
 			params := json2.decode[CodeLensParams](params_json) or {
@@ -1643,19 +1618,16 @@ fn validate_request_params(method Method, params_json string) ?string {
 			if params.text_document.uri == '' {
 				return 'Missing textDocument.uri'
 			}
-			none
 		}
 		.code_lens_resolve {
 			json2.decode[CodeLens](params_json) or {
 				return 'Invalid codeLens/resolve params: ${err.msg()}'
 			}
-			none
 		}
 		.execute_command {
 			json2.decode[ExecuteCommandParams](params_json) or {
 				return 'Invalid executeCommand params: ${err.msg()}'
 			}
-			none
 		}
 		.on_type_formatting {
 			params := json2.decode[OnTypeFormattingParams](params_json) or {
@@ -1664,16 +1636,14 @@ fn validate_request_params(method Method, params_json string) ?string {
 			if params.text_document.uri == '' {
 				return 'Missing textDocument.uri'
 			}
-			none
 		}
-		else {
-			none
-		}
+		else {}
 	}
+	return none
 }
 
 fn validate_notification_params(method Method, params_json string) ?string {
-	return match method {
+	match method {
 		.did_open {
 			params := json2.decode[DidOpenTextDocumentParams](params_json) or {
 				return 'Invalid didOpen params: ${err.msg()}'
@@ -1681,7 +1651,6 @@ fn validate_notification_params(method Method, params_json string) ?string {
 			if params.text_document.uri == '' {
 				return 'Missing textDocument.uri'
 			}
-			none
 		}
 		.did_change {
 			params := json2.decode[DidChangeTextDocumentParams](params_json) or {
@@ -1690,7 +1659,6 @@ fn validate_notification_params(method Method, params_json string) ?string {
 			if params.text_document.uri == '' {
 				return 'Missing textDocument.uri'
 			}
-			none
 		}
 		.did_close {
 			params := json2.decode[DidCloseTextDocumentParams](params_json) or {
@@ -1699,7 +1667,6 @@ fn validate_notification_params(method Method, params_json string) ?string {
 			if params.text_document.uri == '' {
 				return 'Missing textDocument.uri'
 			}
-			none
 		}
 		.did_save {
 			params := json2.decode[DidSaveTextDocumentParams](params_json) or {
@@ -1708,7 +1675,6 @@ fn validate_notification_params(method Method, params_json string) ?string {
 			if params.text_document.uri == '' {
 				return 'Missing textDocument.uri'
 			}
-			none
 		}
 		.did_change_watched_files {
 			params := json2.decode[DidChangeWatchedFilesParams](params_json) or {
@@ -1719,23 +1685,13 @@ fn validate_notification_params(method Method, params_json string) ?string {
 					return 'Missing changes[i].uri'
 				}
 			}
-			none
 		}
-		.workspace_did_change_configuration {
-			// This notification intentionally supports multiple client shapes.
-			none
-		}
-		.workspace_did_change_workspace_folders {
-			// params are decoded in the handler; no pre-validation needed here.
-			none
-		}
-		.initialized, .set_trace, .cancel_request, .exit {
-			none
-		}
-		else {
-			none
-		}
+		.workspace_did_change_configuration {} // Multiple client shapes are supported.
+		.workspace_did_change_workspace_folders {} // Decoded in the handler.
+		.initialized, .set_trace, .cancel_request, .exit {}
+		else {}
 	}
+	return none
 }
 
 fn is_valid_v_identifier_name(name string) bool {

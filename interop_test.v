@@ -328,9 +328,32 @@ fn test_cleanup_compilation_temp_removes_project_dir() {
 
 fn test_build_v_check_args_single_passes_path_literally() {
 	args := build_v_check_args_single('/tmp/a b/test.v')
-	assert '/tmp/a b/test.v' in args
-	assert '-vls-mode' in args
-	assert '-check' in args
+	mut expected := v3_compiler_selection_args()
+	expected << ['-check', '-nocolor', '/tmp/a b/test.v']
+	assert args == expected
+	assert '-vls-mode' !in args
+	assert '-json-errors' !in args
+	assert '-w' !in args
+	$if macos || linux {
+		assert '-new-compiler' in args
+	} $else {
+		assert '-new-compiler' !in args
+	}
+}
+
+fn test_build_v_check_args_multifile_uses_v3_compatible_flags() {
+	args := build_v_check_args_multifile()
+	mut expected := v3_compiler_selection_args()
+	expected << ['-check', '-nocolor', '.']
+	assert args == expected
+	assert '-vls-mode' !in args
+	assert '-json-errors' !in args
+	assert '-w' !in args
+	$if macos || linux {
+		assert '-new-compiler' in args
+	} $else {
+		assert '-new-compiler' !in args
+	}
 }
 
 fn test_build_v_check_args_single_no_shell_injection() {
@@ -357,6 +380,50 @@ fn test_build_v_line_info_args_single_embeds_line_info() {
 	args := build_v_line_info_args_single('/tmp/a.v', '10:gd^5', '/tmp/a.v')
 	assert '/tmp/a.v:10:gd^5' in args
 	assert '-line-info' in args
+}
+
+fn test_parse_v_check_diagnostics_reads_v3_output() {
+	output := '/tmp/main.v:4:7: error: undefined variable: `missing_name`
+    2 |
+    3 | fn main() {
+    4 |     x := missing_name
+      |          ~~~~~~~~~~~~
+    5 | }
+/tmp/main.v:8:3: warning: unused variable `value`
+    8 |   value := 1
+      |   ~~~~~
+'
+	diagnostics := parse_v_check_diagnostics(output)
+	assert diagnostics.len == 2
+	assert diagnostics[0] == JsonError{
+		path:    '/tmp/main.v'
+		message: 'undefined variable: `missing_name`'
+		line_nr: 4
+		col:     7
+		len:     12
+		level:   'error'
+	}
+	assert diagnostics[1].level == 'warning'
+	assert diagnostics[1].line_nr == 8
+	assert diagnostics[1].col == 3
+	assert diagnostics[1].len == 5
+}
+
+fn test_parse_v_check_diagnostics_preserves_windows_drive_path() {
+	header := r'C:\work\project\main.v:12:9: notice: deprecated declaration'
+	diagnostics := parse_v_check_diagnostics(header)
+	assert diagnostics.len == 1
+	assert diagnostics[0].path == r'C:\work\project\main.v'
+	assert diagnostics[0].line_nr == 12
+	assert diagnostics[0].col == 9
+	assert diagnostics[0].level == 'notice'
+}
+
+fn test_parse_v_check_diagnostics_ignores_non_diagnostic_output() {
+	output := 'V3 compatibility fallback disabled; requested reason: compiler_error
+Use `v help build` for more information.
+'
+	assert parse_v_check_diagnostics(output).len == 0
 }
 
 fn test_run_v_argv_reports_missing_working_dir() {

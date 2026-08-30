@@ -196,7 +196,7 @@ fn test_method_roundtrip_all_values() {
 	// Ensure all Method enum values round-trip correctly
 	$for m in Method.values {
 		if m.value != Method.unknown {
-			assert Method.from_string(m.value.str()) == m.value
+			assert Method.from_string(m.attrs[0]) == m.value
 		}
 	}
 }

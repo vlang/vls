@@ -21,8 +21,8 @@ jobs:
         uses: actions/checkout@v5
         with:
           repository: vlang/v
-          # integration_test.v asserts compiler-internal locations from this revision.
-          ref: ad0a6df9f2064659f666c84f60759a5646fd9734
+          # Pin the V3-default compiler revision for reproducible integration coverage.
+          ref: 1a1d7f09d579dcdc8773a29384a10f2e02436591
       - name: Checkout VLS
         uses: actions/checkout@v5
         with:
@@ -41,7 +41,15 @@ jobs:
       - name: Run all tests, including the vlang/v workspace tests
         env:
           VLS_VLANG_V_REPO: ${{ github.workspace }}
+          V_MACOS_V3_NO_FALLBACK: "1"
         run: v test vls/
 
+      - name: Compile project with V3
+        if: runner.os != 'Windows'
+        env:
+          V_MACOS_V3_NO_FALLBACK: "1"
+        run: v -new-compiler vls/
+
       - name: Compile project
+        if: runner.os == 'Windows'
         run: v vls/

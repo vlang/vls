@@ -822,6 +822,114 @@ fn test_operation_at_pos_definition_line_info() {
 	assert loc.range.start.line == 2
 }
 
+fn test_resolve_indexed_definition_finds_current_file_function() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'indexed_definition_current')
+	must_mkdir_all(test_dir)
+	test_file := os.join_path(test_dir, 'main.v')
+	content := 'module main\n\nfn helper() {}\n\nfn main() {\n\thelper()\n}\n'
+	must_write_file(test_file, content)
+	uri := path_to_uri(test_file)
+	app.open_files[uri] = content
+
+	location := app.resolve_indexed_definition(uri, Position{
+		line: 5
+		char: 2
+	}) or {
+		assert false, 'expected indexed definition'
+		return
+	}
+	assert location.uri == uri
+	assert location.range.start.line == 2
+}
+
+fn test_resolve_indexed_definition_uses_unsaved_imported_module() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'indexed_definition_import')
+	module_dir := os.join_path(test_dir, 'mathutil')
+	must_mkdir_all(module_dir)
+	main_file := os.join_path(test_dir, 'main.v')
+	module_file := os.join_path(module_dir, 'mathutil.v')
+	main_content := 'module main\n\nimport mathutil\n\nfn main() {\n\tmathutil.answer()\n}\n'
+	module_content := 'module mathutil\n\n// answer is not saved yet.\npub fn answer() int {\n\treturn 42\n}\n'
+	must_write_file(main_file, main_content)
+	must_write_file(module_file, 'module mathutil\n')
+	main_uri := path_to_uri(main_file)
+	module_uri := path_to_uri(module_file)
+	app.open_files[main_uri] = main_content
+	app.open_files[module_uri] = module_content
+
+	location := app.resolve_indexed_definition(main_uri, Position{
+		line: 5
+		char: 12
+	}) or {
+		assert false, 'expected imported indexed definition'
+		return
+	}
+	assert location.uri == module_uri
+	assert location.range.start.line == 3
+}
+
+fn test_resolve_indexed_definition_prefers_workspace_vlib() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	root := os.join_path(app.temp_dir, 'indexed_definition_workspace_vlib')
+	main_dir := os.join_path(root, 'cmd', 'tool')
+	module_dir := os.join_path(root, 'vlib', 'v', 'builder')
+	must_mkdir_all(main_dir)
+	must_mkdir_all(module_dir)
+	must_write_file(os.join_path(root, 'v.mod'), 'Module {}\n')
+	main_file := os.join_path(main_dir, 'main.v')
+	module_file := os.join_path(module_dir, 'compile.v')
+	main_content := 'module main\n\nimport v.builder\n\nfn main() {\n\tbuilder.compile()\n}\n'
+	module_content := 'module builder\n\npub fn compile() {}\n'
+	must_write_file(main_file, main_content)
+	must_write_file(module_file, module_content)
+	main_uri := path_to_uri(main_file)
+	module_uri := path_to_uri(module_file)
+	app.open_files[main_uri] = main_content
+	app.open_files[module_uri] = module_content
+	app.workspace_roots = [root]
+
+	location := app.resolve_indexed_definition(main_uri, Position{
+		line: 5
+		char: 12
+	}) or {
+		assert false, 'expected workspace vlib definition'
+		return
+	}
+	assert location.uri == module_uri
+	assert location.range.start.line == 2
+}
+
+fn test_resolve_indexed_definition_defers_receiver_method() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'indexed_definition_receiver')
+	must_mkdir_all(test_dir)
+	test_file := os.join_path(test_dir, 'main.v')
+	content := 'module main\n\nstruct Item {}\n\nfn (item Item) answer() {}\n\nfn main() {\n\titem := Item{}\n\titem.answer()\n}\n'
+	must_write_file(test_file, content)
+	uri := path_to_uri(test_file)
+	app.open_files[uri] = content
+
+	location := app.resolve_indexed_definition(uri, Position{
+		line: 8
+		char: 8
+	})
+	assert location == none
+}
+
 fn test_operation_at_pos_signature_help_line_info() {
 	mut app := create_test_app()
 	defer {
@@ -1268,7 +1376,7 @@ fn test_app_cur_mod_default() {
 
 fn test_app_exit_flag_default() {
 	app := App{}
-	app.exit
+	assert app.exit == os.args.contains('exit')
 }
 
 fn test_v_error_to_lsp_diagnostic_basic() {
