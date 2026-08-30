@@ -956,6 +956,41 @@ fn test_resolve_indexed_definition_defers_implicit_it_binding() {
 	assert location == none
 }
 
+fn test_resolve_indexed_definition_defers_generic_type_parameter() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'indexed_definition_generic_parameter')
+	must_mkdir_all(test_dir)
+	test_file := os.join_path(test_dir, 'main.v')
+	content := 'module main\n\nstruct T {}\n\nfn identity[T](value T) T {\n\treturn value\n}\n'
+	must_write_file(test_file, content)
+	uri := path_to_uri(test_file)
+	app.open_files[uri] = content
+	line := content.split_into_lines()[4]
+	generic_col := line.index('[T]') or {
+		assert false, 'expected generic parameter declaration'
+		return
+	}
+	value_col := line.index('value T') or {
+		assert false, 'expected generic parameter type'
+		return
+	}
+	return_col := line.last_index('T {') or {
+		assert false, 'expected generic return type'
+		return
+	}
+
+	for col in [generic_col + 1, value_col + 6, return_col] {
+		location := app.resolve_indexed_definition(uri, Position{
+			line: 4
+			char: col
+		})
+		assert location == none
+	}
+}
+
 fn test_resolve_indexed_definition_defers_destructured_local_shadow() {
 	mut app := create_test_app()
 	defer {
