@@ -1175,6 +1175,30 @@ fn test_resolve_indexed_definition_defers_compile_time_at_identifier() {
 	assert location == none
 }
 
+fn test_resolve_indexed_definition_defers_orm_field_reference() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'indexed_definition_orm_field')
+	must_mkdir_all(test_dir)
+	test_file := os.join_path(test_dir, 'main.v')
+	content := 'module main\n\nfn age() {}\n\nfn query() {\n\t_ := sql db {\n\t\tselect from User where age > 21\n\t}\n}\n'
+	must_write_file(test_file, content)
+	uri := path_to_uri(test_file)
+	app.open_files[uri] = content
+	age_col := content.split_into_lines()[6].index('age') or {
+		assert false, 'expected ORM field reference'
+		return
+	}
+
+	location := app.resolve_indexed_definition(uri, Position{
+		line: 6
+		char: age_col + 1
+	})
+	assert location == none
+}
+
 fn test_resolve_indexed_definition_defers_generic_type_parameter() {
 	mut app := create_test_app()
 	defer {
@@ -1469,6 +1493,30 @@ fn test_resolve_indexed_definition_excludes_different_module_sibling() {
 
 	location := app.resolve_indexed_definition(main_uri, Position{
 		line: 3
+		char: 3
+	})
+	assert location == none
+}
+
+fn test_resolve_indexed_definition_ignores_commented_requesting_module() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'indexed_definition_commented_module')
+	must_mkdir_all(test_dir)
+	main_file := os.join_path(test_dir, 'main.v')
+	sibling_file := os.join_path(test_dir, 'sibling.v')
+	main_content := '/*\nmodule legacy\n*/\nmodule main\n\nfn main() {\n\thelper()\n}\n'
+	must_write_file(main_file, main_content)
+	must_write_file(sibling_file, 'module main\n')
+	main_uri := path_to_uri(main_file)
+	sibling_uri := path_to_uri(sibling_file)
+	app.open_files[main_uri] = main_content
+	app.open_files[sibling_uri] = 'module legacy\n\nfn helper() {}\n'
+
+	location := app.resolve_indexed_definition(main_uri, Position{
+		line: 6
 		char: 3
 	})
 	assert location == none
@@ -4153,8 +4201,9 @@ fn test_get_module_name_no_declaration() {
 
 fn test_get_module_name_ignores_comments() {
 	// module keyword inside a comment is not a declaration
-	content := '// module notthis\nmodule real\n'
-	assert get_module_name(content) == 'real'
+	assert get_module_name('// module notthis\nmodule real\n') == 'real'
+	assert get_module_name('/*\nmodule legacy\n*/\nmodule real\n') == 'real'
+	assert get_module_name("const text = 'start\nmodule legacy\nend'\nmodule real\n") == 'real'
 }
 
 fn test_collect_module_fn_completions_excludes_different_module() {
