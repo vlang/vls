@@ -947,6 +947,28 @@ fn test_resolve_indexed_definition_defers_multiline_parameter_shadow() {
 	assert location == none
 }
 
+fn test_resolve_indexed_definition_excludes_inactive_platform_file() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'indexed_definition_inactive_platform')
+	must_mkdir_all(test_dir)
+	main_file := os.join_path(test_dir, 'main.v')
+	inactive_file_name := $if windows { 'helper_linux.v' } $else { 'helper_windows.v' }
+	main_content := 'module main\n\nfn main() {\n\thelper()\n}\n'
+	must_write_file(main_file, main_content)
+	must_write_file(os.join_path(test_dir, inactive_file_name), 'module main\n\nfn helper() {}\n')
+	main_uri := path_to_uri(main_file)
+	app.open_files[main_uri] = main_content
+
+	location := app.resolve_indexed_definition(main_uri, Position{
+		line: 3
+		char: 3
+	})
+	assert location == none
+}
+
 fn test_resolve_indexed_definition_uses_unsaved_imported_module() {
 	mut app := create_test_app()
 	defer {
