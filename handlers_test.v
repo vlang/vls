@@ -907,6 +907,26 @@ fn test_resolve_indexed_definition_defers_local_variable_shadow() {
 	assert location == none
 }
 
+fn test_resolve_indexed_definition_defers_destructured_local_shadow() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'indexed_definition_destructured_shadow')
+	must_mkdir_all(test_dir)
+	test_file := os.join_path(test_dir, 'main.v')
+	content := 'module main\n\nfn helper() {}\n\nfn make_value() (int, int) {\n\treturn 1, 2\n}\n\nfn main() {\n\thelper, err := make_value()\n\tprintln(helper)\n\tprintln(err)\n}\n'
+	must_write_file(test_file, content)
+	uri := path_to_uri(test_file)
+	app.open_files[uri] = content
+
+	location := app.resolve_indexed_definition(uri, Position{
+		line: 10
+		char: 11
+	})
+	assert location == none
+}
+
 fn test_resolve_indexed_definition_defers_multiline_parameter_shadow() {
 	mut app := create_test_app()
 	defer {
