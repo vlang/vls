@@ -846,6 +846,41 @@ fn test_resolve_indexed_definition_finds_current_file_function() {
 	assert location.range.start.line == 2
 }
 
+fn test_resolve_indexed_definition_limits_test_target() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'indexed_definition_test_target')
+	must_mkdir_all(test_dir)
+	foo_file := os.join_path(test_dir, 'foo_test.v')
+	bar_file := os.join_path(test_dir, 'bar_test.v')
+	foo_content := 'module main\n\nfn local_helper() {}\n\nfn test_target() {\n\thelper()\n\tlocal_helper()\n}\n'
+	bar_content := 'module main\n\nfn helper() {}\n'
+	must_write_file(foo_file, foo_content)
+	must_write_file(bar_file, bar_content)
+	foo_uri := path_to_uri(foo_file)
+	bar_uri := path_to_uri(bar_file)
+	app.open_files[foo_uri] = foo_content
+	app.open_files[bar_uri] = bar_content
+
+	sibling_location := app.resolve_indexed_definition(foo_uri, Position{
+		line: 5
+		char: 3
+	})
+	assert sibling_location == none
+
+	local_location := app.resolve_indexed_definition(foo_uri, Position{
+		line: 6
+		char: 4
+	}) or {
+		assert false, 'expected definition from requesting test target'
+		return
+	}
+	assert local_location.uri == foo_uri
+	assert local_location.range.start.line == 2
+}
+
 fn test_resolve_indexed_definition_rejects_comments_and_string_literals() {
 	mut app := create_test_app()
 	defer {

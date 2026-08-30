@@ -2018,9 +2018,9 @@ fn source_occurrences_have_potential_local_binding(lines []string, occurrences [
 
 // active_indexed_source_file_names applies the compiler's native build-file
 // filtering without removing inactive sources from the broader symbol index.
-// Test files are direct compiler inputs, so normalize their `_test` suffix
-// before checking platform and backend eligibility.
-fn (app &App) active_indexed_source_file_names(dir string, include_tests bool) map[string]bool {
+// The requesting test file is a direct compiler input, but sibling tests are
+// separate targets. Normalize its `_test` suffix before checking eligibility.
+fn (app &App) active_indexed_source_file_names(dir string, active_test_file_name string) map[string]bool {
 	mut file_names := os.ls(dir) or { return map[string]bool{} }
 	file_names = file_names.filter(it.ends_with('.v'))
 	normalized_dir := normalized_index_path(dir)
@@ -2052,12 +2052,10 @@ fn (app &App) active_indexed_source_file_names(dir string, include_tests bool) m
 	for path in build_prefs.should_compile_filtered_files(dir, source_names) {
 		active[os.file_name(path)] = true
 	}
-	if include_tests {
-		for name in test_names {
-			build_name := name[..name.len - '_test.v'.len] + '.v'
-			if build_prefs.should_compile_filtered_files(dir, [build_name]).len == 1 {
-				active[name] = true
-			}
+	if active_test_file_name in test_names {
+		build_name := active_test_file_name[..active_test_file_name.len - '_test.v'.len] + '.v'
+		if build_prefs.should_compile_filtered_files(dir, [build_name]).len == 1 {
+			active[active_test_file_name] = true
 		}
 	}
 	return active
@@ -2066,7 +2064,7 @@ fn (app &App) active_indexed_source_file_names(dir string, include_tests bool) m
 // find_indexed_source_definition finds one unambiguous top-level declaration
 // in `dir`. Methods and fields are intentionally excluded because resolving
 // them safely requires receiver type information.
-fn (mut app App) find_indexed_source_definition(dir string, symbol string, include_tests bool, require_public bool, expected_module string) ?Location {
+fn (mut app App) find_indexed_source_definition(dir string, symbol string, active_test_file_name string, require_public bool, expected_module string) ?Location {
 	if dir == '' || dir == '/' || !os.is_dir(dir) {
 		return none
 	}
@@ -2079,14 +2077,11 @@ fn (mut app App) find_indexed_source_definition(dir string, symbol string, inclu
 			app.reindex_uri(open_uri)
 		}
 	}
-	active_file_names := app.active_indexed_source_file_names(dir, include_tests)
+	active_file_names := app.active_indexed_source_file_names(dir, active_test_file_name)
 	mut matches := []Location{}
 	mut uris := app.symbol_index.keys()
 	uris.sort()
 	for uri in uris {
-		if !include_tests && uri.ends_with('_test.v') {
-			continue
-		}
 		path := uri_to_path(uri)
 		if normalized_index_path(os.dir(path)) != normalized_dir {
 			continue
@@ -2200,14 +2195,20 @@ fn (mut app App) resolve_indexed_definition(uri string, position Position) ?Loca
 		}
 		module_path := parse_import_aliases(content)[alias] or { return none }
 		module_dir := app.resolve_indexed_import_module_dir(module_path, os.dir(uri_to_path(uri)))
-		return app.find_indexed_source_definition(module_dir, symbol, false, true,
+		return app.find_indexed_source_definition(module_dir, symbol, '', true,
 			module_path.all_after_last('.'))
 	}
 	if source_occurrences_have_potential_local_binding(lines, occurrences, app.position_encoding) {
 		return none
 	}
-	return app.find_indexed_source_definition(os.dir(uri_to_path(uri)), symbol,
-		uri.ends_with('_test.v'), false, get_module_name(content))
+	requesting_path := uri_to_path(uri)
+	active_test_file_name := if requesting_path.ends_with('_test.v') {
+		os.file_name(requesting_path)
+	} else {
+		''
+	}
+	return app.find_indexed_source_definition(os.dir(requesting_path), symbol,
+		active_test_file_name, false, get_module_name(content))
 }
 
 // find_declaration_line searches `lines` for a top-level declaration whose name
