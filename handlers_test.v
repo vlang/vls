@@ -1749,6 +1749,43 @@ fn test_resolve_indexed_definition_prefers_workspace_vlib() {
 	assert location.range.start.line == 2
 }
 
+fn test_resolve_indexed_definition_prefers_source_relative_module() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	root := os.join_path(app.temp_dir, 'indexed_definition_source_relative')
+	source_dir := os.join_path(root, 'src')
+	module_dir := os.join_path(source_dir, 'os')
+	must_mkdir_all(module_dir)
+	must_write_file(os.join_path(root, 'v.mod'), 'Module {}\n')
+	main_file := os.join_path(source_dir, 'main.v')
+	module_file := os.join_path(module_dir, 'os.v')
+	main_content := 'module main\n\nimport os\n\nfn main() {\n\tos.local_answer()\n}\n'
+	module_content := 'module os\n\npub fn local_answer() {}\n'
+	must_write_file(main_file, main_content)
+	must_write_file(module_file, module_content)
+	main_uri := path_to_uri(main_file)
+	module_uri := path_to_uri(module_file)
+	app.open_files[main_uri] = main_content
+	app.open_files[module_uri] = module_content
+	app.workspace_roots = [root]
+	answer_col := main_content.split_into_lines()[5].index('local_answer') or {
+		assert false, 'expected source-relative module member'
+		return
+	}
+
+	location := app.resolve_indexed_definition(main_uri, Position{
+		line: 5
+		char: answer_col + 2
+	}) or {
+		assert false, 'expected source-relative indexed definition'
+		return
+	}
+	assert location.uri == module_uri
+	assert location.range.start.line == 2
+}
+
 fn test_resolve_indexed_definition_defers_receiver_method() {
 	mut app := create_test_app()
 	defer {
