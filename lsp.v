@@ -40,11 +40,13 @@ struct Params {
 	new_name        string                 @[json: 'newName']
 }
 
+// Optional JSON integers use i64 because V3 emits a generic option ABI for struct fields, while
+// json2 specializes ?int during reflection. JSON and LSP integers have no wire-level width.
 // ContentChange represents a change to a document's content.
 struct ContentChange {
 	text         string
 	range        ?LSPRange
-	range_length ?int @[json: 'rangeLength']
+	range_length ?i64 @[json: 'rangeLength']
 }
 
 // Response represents an LSP response sent to the client.
@@ -162,7 +164,7 @@ struct Notification {
 // PublishDiagnosticsParams contains diagnostics for a document.
 struct PublishDiagnosticsParams {
 	uri         string
-	version     ?int
+	version     ?i64
 	diagnostics []LSPDiagnostic
 }
 
@@ -192,7 +194,7 @@ struct Detail {
 	sort_text          ?string @[json: 'sortText']   // sort key, defaults to label
 	filter_text        ?string @[json: 'filterText'] // filter key, defaults to label
 	insert_text        ?string @[json: 'insertText']
-	insert_text_format ?int    @[json: 'insertTextFormat'] // 1 for PlainText, 2 for Snippet
+	insert_text_format ?i64    @[json: 'insertTextFormat'] // 1 for PlainText, 2 for Snippet
 	tags               ?[]int  @[json: 'tags']             // 1 = deprecated
 	deprecated         ?bool   @[json: 'deprecated']       // legacy deprecated flag
 }
@@ -528,14 +530,14 @@ struct WorkDoneProgressBegin {
 	title       string
 	cancellable bool
 	message     ?string
-	percentage  ?int
+	percentage  ?i64
 }
 
 // WorkDoneProgressReport sends an incremental update for a work-done progress.
 struct WorkDoneProgressReport {
 	kind       string = 'report'
 	message    ?string
-	percentage ?int
+	percentage ?i64
 }
 
 // WorkDoneProgressEnd sends the final update for a work-done progress.
@@ -708,7 +710,7 @@ struct WorkspaceEdit {
 // VersionedTextDocumentIdentifier identifies a versioned text document.
 struct VersionedTextDocumentIdentifier {
 	uri     string
-	version ?int
+	version ?i64
 }
 
 // TextDocumentEdit represents a list of edits applied to a versioned document.
@@ -757,7 +759,7 @@ struct CodeActionParams {
 struct CodeActionContext {
 	diagnostics  []LSPDiagnostic
 	only         ?[]string
-	trigger_kind ?int      @[json: 'triggerKind']
+	trigger_kind ?i64 @[json: 'triggerKind']
 }
 
 // DocumentHighlight represents a highlighted occurrence of a symbol in a document.
@@ -897,7 +899,7 @@ struct TextDocumentPositionParams {
 struct DidOpenTextDocumentItem {
 	uri         string
 	language_id ?string @[json: 'languageId']
-	version     ?int
+	version     ?i64
 	text        ?string
 }
 

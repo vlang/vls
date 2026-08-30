@@ -385,9 +385,9 @@ fn (mut app App) handle_semantic_tokens_range(request Request) Response {
 	// (line, start) is kept when its start position is >= the range start and <
 	// the range end in (line, char) order; this excludes tokens before the start
 	// character on the first line and at/after the end character on the last line.
-	range_tokens := raw_tokens.filter((it.line > start_line
-		|| (it.line == start_line && it.start >= start_char)) && (it.line < end_line
-		|| (it.line == end_line && it.start < end_char)))
+	range_tokens := raw_tokens.filter(
+		(it.line > start_line || (it.line == start_line && it.start >= start_char))
+		&& (it.line < end_line || (it.line == end_line && it.start < end_char)))
 	encoded := encode_semantic_tokens(range_tokens)
 	return Response{
 		id:     request.id

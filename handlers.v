@@ -70,6 +70,19 @@ fn (mut app App) operation_at_pos(method Method, request Request) Response {
 		}
 	}
 
+	// Resolve declarations from VLS's authoritative source index before using
+	// the established compiler's V1-only `-line-info` compatibility mode. Free
+	// functions and top-level declarations do not require receiver type
+	// inference, so this path is both deterministic and aware of unsaved files.
+	if method in [.definition, .declaration, .type_definition, .implementation] {
+		if location := app.resolve_indexed_definition(path, params.position) {
+			return Response{
+				id:     request.id
+				result: location
+			}
+		}
+	}
+
 	line_info := match method {
 		.completion {
 			'${line_nr}:${byte_col}'
@@ -308,6 +321,33 @@ fn resolve_import_module_dir(module_path string, work_dir string) string {
 	return ''
 }
 
+// resolve_indexed_import_module_dir prefers modules in the active project and
+// workspace over the V installation used to launch VLS. This matters when the
+// workspace is a V checkout: `v.builder` belongs to that checkout's `vlib`, not
+// necessarily to the toolchain on PATH.
+fn (app &App) resolve_indexed_import_module_dir(module_path string, work_dir string) string {
+	rel := module_path.replace('.', os.path_separator)
+	mut roots := []string{}
+	project_root := find_project_root(work_dir)
+	if project_root != '' {
+		roots << project_root
+	}
+	for workspace_root in app.workspace_roots {
+		if workspace_root != ''
+			&& !roots.any(normalized_index_path(it) == normalized_index_path(workspace_root)) {
+			roots << workspace_root
+		}
+	}
+	for root in roots {
+		for candidate in [os.join_path(root, rel), os.join_path(root, 'vlib', rel)] {
+			if os.is_dir(candidate) {
+				return candidate
+			}
+		}
+	}
+	return resolve_import_module_dir(module_path, work_dir)
+}
+
 fn parse_public_module_member_completions(content string) []Detail {
 	mut items := []Detail{}
 	mut in_pub_const_block := false
@@ -436,7 +476,7 @@ fn (mut app App) build_diagnostics_notification(uri string, content string) Noti
 			params: PublishDiagnosticsParams{
 				uri:         uri
 				version:     if uri in app.open_files_versions {
-					?int(app.open_files_versions[uri])
+					?i64(app.open_files_versions[uri])
 				} else {
 					none
 				}
@@ -465,7 +505,7 @@ fn (mut app App) build_diagnostics_notification(uri string, content string) Noti
 	pd_params := PublishDiagnosticsParams{
 		uri:         uri
 		version:     if uri in app.open_files_versions {
-			?int(app.open_files_versions[uri])
+			?i64(app.open_files_versions[uri])
 		} else {
 			none
 		}
@@ -1062,10 +1102,9 @@ fn (mut app App) handle_rename(request Request) Response {
 	}
 	// Build documentChanges list from the same data.
 	for uri, edits in changes {
-		version := if uri in app.open_files_versions {
-			?int(app.open_files_versions[uri])
-		} else {
-			none
+		mut version := ?i64(none)
+		if uri in app.open_files_versions {
+			version = i64(app.open_files_versions[uri])
 		}
 		doc_changes << TextDocumentEdit{
 			text_document: VersionedTextDocumentIdentifier{
@@ -1326,6 +1365,97 @@ fn get_word_at_col(line string, col int, enc PositionEncoding) string {
 		return ''
 	}
 	return line[start..end]
+}
+
+fn source_definition_kind_is_supported(kind int) bool {
+	return kind in [sym_kind_function, sym_kind_struct, sym_kind_enum, sym_kind_interface,
+		sym_kind_constant, sym_kind_class]
+}
+
+fn source_declaration_is_public(uri string, sym DocumentSymbol, app &App) bool {
+	content := app.index_source_for(uri) or { return false }
+	lines := content.split_into_lines()
+	if sym.range.start.line < 0 || sym.range.start.line >= lines.len {
+		return false
+	}
+	return lines[sym.range.start.line].trim_space().starts_with('pub ')
+}
+
+// find_indexed_source_definition finds one unambiguous top-level declaration
+// in `dir`. Methods and fields are intentionally excluded because resolving
+// them safely requires receiver type information.
+fn (mut app App) find_indexed_source_definition(dir string, symbol string, include_tests bool, require_public bool) ?Location {
+	if dir == '' || dir == '/' || !os.is_dir(dir) {
+		return none
+	}
+	app.ensure_dir_shallow_indexed(dir)
+	normalized_dir := normalized_index_path(dir)
+	// The shallow disk walk deliberately skips open buffers. Refresh those
+	// entries explicitly so direct callers and unsaved files remain authoritative.
+	for open_uri, _ in app.open_files {
+		if normalized_index_path(os.dir(uri_to_path(open_uri))) == normalized_dir {
+			app.reindex_uri(open_uri)
+		}
+	}
+	mut matches := []Location{}
+	mut uris := app.symbol_index.keys()
+	uris.sort()
+	for uri in uris {
+		if !include_tests && uri.ends_with('_test.v') {
+			continue
+		}
+		if normalized_index_path(os.dir(uri_to_path(uri))) != normalized_dir {
+			continue
+		}
+		entry := app.symbol_index[uri] or { continue }
+		for sym in entry.doc_symbols {
+			if !source_definition_kind_is_supported(sym.kind)
+				|| extract_simple_fn_name(sym.name) != symbol {
+				continue
+			}
+			if require_public && !source_declaration_is_public(uri, sym, app) {
+				continue
+			}
+			matches << Location{
+				uri:   uri
+				range: sym.selection_range
+			}
+		}
+	}
+	if matches.len != 1 {
+		return none
+	}
+	return matches[0]
+}
+
+// resolve_indexed_definition handles declaration lookup that does not need
+// receiver type inference. Qualified names are constrained to their imported
+// module, while bare names are constrained to the current V module directory.
+fn (mut app App) resolve_indexed_definition(uri string, position Position) ?Location {
+	content := app.index_source_for(uri) or { return none }
+	lines := content.split_into_lines()
+	if position.line < 0 || position.line >= lines.len || position.char < 0 {
+		return none
+	}
+	line := lines[position.line]
+	start, end := find_word_bounds_at_col(line, position.char, app.position_encoding)
+	if start < 0 || end <= start {
+		return none
+	}
+	symbol := substr_by_char_bounds(line, start, end, app.position_encoding)
+	if symbol == '' {
+		return none
+	}
+	start_byte := encoded_col_to_byte(line, start, app.position_encoding)
+	if start_byte > 0 && line[start_byte - 1] == `.` {
+		dot_col := byte_to_encoded_col(line, start_byte - 1, app.position_encoding)
+		alias := get_word_before_dot(line, dot_col, app.position_encoding)
+		module_path := parse_import_aliases(content)[alias] or { return none }
+		module_dir := app.resolve_indexed_import_module_dir(module_path, os.dir(uri_to_path(uri)))
+		return app.find_indexed_source_definition(module_dir, symbol, false, true)
+	}
+	return app.find_indexed_source_definition(os.dir(uri_to_path(uri)), symbol,
+		uri.ends_with('_test.v'), false)
 }
 
 // find_declaration_line searches `lines` for a top-level declaration whose name
