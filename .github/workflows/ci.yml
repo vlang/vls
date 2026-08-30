@@ -42,13 +42,13 @@ jobs:
         env:
           VLS_VLANG_V_REPO: ${{ github.workspace }}
           V_MACOS_V3_NO_FALLBACK: "1"
-        run: v test vls/
+        run: v -no-memory-limit test vls/
 
       - name: Compile project with V3
         if: runner.os != 'Windows'
         env:
           V_MACOS_V3_NO_FALLBACK: "1"
-        run: v -new-compiler vls/
+        run: v -no-memory-limit -new-compiler vls/
 
       - name: Compile project
         if: runner.os == 'Windows'

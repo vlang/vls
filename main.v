@@ -15,7 +15,7 @@ pub struct App {
 mut:
 	text                                        string            // Current file content
 	open_files                                  map[string]string // Map of file URI to file content
-	open_files_versions                         map[string]int    // Per-URI document version from the client
+	open_files_versions                         map[string]i64    // Per-URI document version from the client
 	temp_dir                                    string            // Temporary directory for multi-file compilation
 	workspace_roots                             []string          // Workspace root directories from initialize
 	removed_workspace_roots                     []string          // Roots explicitly removed by the client
