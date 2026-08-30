@@ -1716,6 +1716,62 @@ fn source_occurrence_has_at_prefix(line string, start_byte int) bool {
 	return start_byte > 0 && start_byte <= line.len && line[start_byte - 1] == `@`
 }
 
+fn source_occurrence_is_sql_expression(lines []string, target_line int, start_byte int) bool {
+	if target_line < 0 || target_line >= lines.len || start_byte < 0
+		|| start_byte > lines[target_line].len {
+		return false
+	}
+	mut brace_depth := 0
+	mut sql_depths := []int{}
+	mut sql_prefix_tokens := 0
+	mut scan_state := ImportScanState{}
+	for line_idx, raw_line in lines {
+		if line_idx > target_line {
+			break
+		}
+		fragment := if line_idx == target_line { raw_line[..start_byte] } else { raw_line }
+		line := source_line_import_code(fragment, mut scan_state)
+		mut col := 0
+		for col < line.len {
+			if is_ident_char(line[col]) {
+				identifier_start := col
+				col++
+				for col < line.len && is_ident_char(line[col]) {
+					col++
+				}
+				identifier := line[identifier_start..col]
+				if identifier == 'sql' {
+					sql_prefix_tokens = 1
+				} else if sql_prefix_tokens == 1 {
+					sql_prefix_tokens = 2
+				} else if sql_prefix_tokens == 2 {
+					sql_prefix_tokens = 0
+				}
+				continue
+			}
+			if line[col] == `{` {
+				brace_depth++
+				if sql_prefix_tokens == 2 {
+					sql_depths << brace_depth
+				}
+				sql_prefix_tokens = 0
+			} else if line[col] == `}` {
+				if sql_depths.len > 0 && sql_depths.last() == brace_depth {
+					sql_depths.delete_last()
+				}
+				if brace_depth > 0 {
+					brace_depth--
+				}
+				sql_prefix_tokens = 0
+			} else if line[col] != ` ` && line[col] != `\t` && line[col] != `\r` {
+				sql_prefix_tokens = 0
+			}
+			col++
+		}
+	}
+	return sql_depths.len > 0
+}
+
 fn source_occurrence_is_interface_method_signature(lines []string, target_line int, start_byte int, end_byte int) bool {
 	if target_line < 0 || target_line >= lines.len || start_byte < 0 || end_byte <= start_byte
 		|| end_byte > lines[target_line].len {
@@ -2137,6 +2193,9 @@ fn (mut app App) resolve_indexed_definition(uri string, position Position) ?Loca
 	if source_occurrence_has_at_prefix(line, start_byte) {
 		return none
 	}
+	if source_occurrence_is_sql_expression(lines, position.line, start_byte) {
+		return none
+	}
 	if source_occurrence_has_dot_suffix(line, end_byte) && symbol in parse_import_aliases(content) {
 		return none
 	}
@@ -2221,8 +2280,9 @@ fn extract_doc_comment(lines []string, decl_line int) string {
 // get_module_name extracts the module name declared in V source content.
 // Returns '' if no module declaration is found.
 fn get_module_name(content string) string {
-	for line in content.split_into_lines() {
-		trimmed := line.trim_space()
+	mut scan_state := ImportScanState{}
+	for raw_line in content.split_into_lines() {
+		trimmed := source_line_import_code(raw_line, mut scan_state).trim_space()
 		if trimmed.starts_with('module ') {
 			name := trimmed[7..].trim_space()
 			if name != '' {
