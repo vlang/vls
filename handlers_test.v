@@ -1164,6 +1164,45 @@ fn test_resolve_indexed_definition_uses_unsaved_imported_module() {
 	assert location.range.start.line == 3
 }
 
+fn test_resolve_indexed_definition_ignores_import_in_block_comment() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'indexed_definition_commented_import')
+	right_dir := os.join_path(test_dir, 'right')
+	wrong_dir := os.join_path(test_dir, 'wrong')
+	must_mkdir_all(right_dir)
+	must_mkdir_all(wrong_dir)
+	main_file := os.join_path(test_dir, 'main.v')
+	right_file := os.join_path(right_dir, 'right.v')
+	wrong_file := os.join_path(wrong_dir, 'wrong.v')
+	main_content := 'module main\n\nimport right as util\n/*\nimport wrong as util\n*/\n\nfn main() {\n\tutil.answer()\n}\n'
+	right_content := 'module right\n\npub fn answer() {}\n'
+	wrong_content := 'module wrong\n\npub fn answer() {}\n'
+	must_write_file(main_file, main_content)
+	must_write_file(right_file, right_content)
+	must_write_file(wrong_file, wrong_content)
+	main_uri := path_to_uri(main_file)
+	right_uri := path_to_uri(right_file)
+	app.open_files[main_uri] = main_content
+	app.open_files[right_uri] = right_content
+	app.open_files[path_to_uri(wrong_file)] = wrong_content
+	answer_col := main_content.split_into_lines()[8].index('answer') or {
+		assert false, 'expected imported member reference'
+		return
+	}
+
+	location := app.resolve_indexed_definition(main_uri, Position{
+		line: 8
+		char: answer_col + 2
+	}) or {
+		assert false, 'expected real imported module definition'
+		return
+	}
+	assert location.uri == right_uri
+}
+
 fn test_resolve_indexed_definition_ignores_unrelated_workspace_module() {
 	mut app := create_test_app()
 	defer {
