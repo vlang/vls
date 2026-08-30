@@ -956,6 +956,54 @@ fn test_resolve_indexed_definition_defers_implicit_it_binding() {
 	assert location == none
 }
 
+fn test_resolve_indexed_definition_defers_implicit_err_binding() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'indexed_definition_implicit_err')
+	must_mkdir_all(test_dir)
+	test_file := os.join_path(test_dir, 'main.v')
+	content := "module main\n\nfn err() {}\n\nfn main() {\n\t_ := os.read_file('missing') or {\n\t\teprintln(err)\n\t\t''\n\t}\n}\n"
+	must_write_file(test_file, content)
+	uri := path_to_uri(test_file)
+	app.open_files[uri] = content
+	err_col := content.split_into_lines()[6].index('err') or {
+		assert false, 'expected implicit err reference'
+		return
+	}
+
+	location := app.resolve_indexed_definition(uri, Position{
+		line: 6
+		char: err_col + 1
+	})
+	assert location == none
+}
+
+fn test_resolve_indexed_definition_defers_enum_member_declaration() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'indexed_definition_enum_member')
+	must_mkdir_all(test_dir)
+	test_file := os.join_path(test_dir, 'main.v')
+	content := 'module main\n\nfn red() {}\n\nenum Color {\n\tred\n}\n'
+	must_write_file(test_file, content)
+	uri := path_to_uri(test_file)
+	app.open_files[uri] = content
+	red_col := content.split_into_lines()[5].index('red') or {
+		assert false, 'expected enum member declaration'
+		return
+	}
+
+	location := app.resolve_indexed_definition(uri, Position{
+		line: 5
+		char: red_col + 1
+	})
+	assert location == none
+}
+
 fn test_resolve_indexed_definition_defers_generic_type_parameter() {
 	mut app := create_test_app()
 	defer {

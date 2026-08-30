@@ -1669,6 +1669,20 @@ fn source_line_is_module_or_import_declaration(lines []string, target_line int) 
 	return false
 }
 
+fn source_occurrence_is_enum_member_declaration(content string, symbol string, target_line int) bool {
+	for declaration in parse_document_symbols(content) {
+		if declaration.kind != sym_kind_enum {
+			continue
+		}
+		if declaration.children.any(it.kind == sym_kind_enum_member && it.name == symbol
+			&& it.selection_range.start.line == target_line)
+		{
+			return true
+		}
+	}
+	return false
+}
+
 fn source_occurrence_is_generic_parameter(line string, start_byte int, end_byte int) bool {
 	if start_byte < 0 || end_byte <= start_byte || end_byte > line.len {
 		return false
@@ -1872,9 +1886,10 @@ fn (mut app App) resolve_indexed_definition(uri string, position Position) ?Loca
 	if symbol == '' {
 		return none
 	}
-	// `it` can be introduced implicitly by array operations such as filter/map.
-	// Text-only indexing cannot distinguish that binding from a top-level symbol.
-	if symbol == 'it' {
+	// `it` can be introduced implicitly by array operations such as filter/map,
+	// and `err` is implicit inside `or {}` blocks. Text-only indexing cannot
+	// distinguish either binding from a top-level symbol.
+	if symbol == 'it' || symbol == 'err' {
 		return none
 	}
 	// Reuse the reference tokenizer to reject identifier-shaped text in comments
@@ -1885,6 +1900,9 @@ fn (mut app App) resolve_indexed_definition(uri string, position Position) ?Loca
 		return none
 	}
 	if source_line_is_module_or_import_declaration(lines, position.line) {
+		return none
+	}
+	if source_occurrence_is_enum_member_declaration(content, symbol, position.line) {
 		return none
 	}
 	start_byte := encoded_col_to_byte(line, start, app.position_encoding)
