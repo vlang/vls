@@ -610,6 +610,18 @@ fn test_extract_identifier_occurrences_skips_multiline_block_comments() {
 	assert occ['target'].len == 2
 }
 
+fn test_extract_identifier_occurrences_skips_multiline_strings() {
+	content := "module main\n\nfn helper() {}\n\nfn main() {\n\ttext := 'first\nhelper\nlast'\n\tprintln(text)\n}\n"
+	occ := extract_identifier_occurrences(content, .utf16)
+
+	// The declaration is indexed, but the continuation line inside the literal
+	// is not treated as code. Scanning resumes after the closing quote.
+	assert occ['helper'].len == 1
+	assert occ['helper'][0].line == 2
+	assert occ['println'].len == 1
+	assert occ['text'].len == 2
+}
+
 fn test_occurrences_for_caches_by_fingerprint() {
 	mut app := index_test_app()
 	uri := 'file:///tmp/occ.v'
