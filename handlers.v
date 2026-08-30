@@ -1562,6 +1562,17 @@ fn source_occurrence_has_colon_suffix(line string, end_byte int) bool {
 	return suffix_byte < line.len && line[suffix_byte] == `:`
 }
 
+fn source_occurrence_has_dot_suffix(line string, end_byte int) bool {
+	if end_byte < 0 || end_byte > line.len {
+		return false
+	}
+	mut suffix_byte := end_byte
+	for suffix_byte < line.len && (line[suffix_byte] == ` ` || line[suffix_byte] == `\t`) {
+		suffix_byte++
+	}
+	return suffix_byte < line.len && line[suffix_byte] == `.`
+}
+
 fn source_occurrence_is_goto_target(line string, start_byte int) bool {
 	if start_byte < 0 || start_byte > line.len {
 		return false
@@ -1974,6 +1985,9 @@ fn (mut app App) resolve_indexed_definition(uri string, position Position) ?Loca
 		return none
 	}
 	if source_occurrence_is_enum_member_declaration(content, symbol, position.line) {
+		return none
+	}
+	if source_occurrence_has_dot_suffix(line, end_byte) && symbol in parse_import_aliases(content) {
 		return none
 	}
 	if_occurrences := file_occurrences['if'] or { []TokenOccurrence{} }
