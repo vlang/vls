@@ -1776,26 +1776,72 @@ fn source_occurrence_is_enum_member_declaration(content string, symbol string, t
 	return false
 }
 
-fn source_occurrence_is_generic_parameter(line string, start_byte int, end_byte int) bool {
-	if start_byte < 0 || end_byte <= start_byte || end_byte > line.len {
+fn source_occurrence_is_generic_parameter(lines []string, line_idx int, start_byte int, end_byte int) bool {
+	if line_idx < 0 || line_idx >= lines.len || start_byte < 0 || end_byte <= start_byte
+		|| end_byte > lines[line_idx].len {
 		return false
 	}
+	mut open_line := line_idx
 	mut open_byte := start_byte
-	for open_byte > 0 && line[open_byte - 1] != `[` && line[open_byte - 1] != `]` {
-		open_byte--
+	mut found_open := false
+	for {
+		line := lines[open_line]
+		mut col := if open_line == line_idx { start_byte } else { line.len }
+		for col > 0 {
+			col--
+			if line[col] == `]` {
+				return false
+			}
+			if line[col] == `[` {
+				open_byte = col
+				found_open = true
+				break
+			}
+		}
+		if found_open || open_line == 0 {
+			break
+		}
+		open_line--
 	}
-	if open_byte == 0 || line[open_byte - 1] != `[` {
+	if !found_open {
 		return false
 	}
-	open_byte--
+	mut close_line := line_idx
 	mut close_byte := end_byte
-	for close_byte < line.len && line[close_byte] != `[` && line[close_byte] != `]` {
-		close_byte++
+	mut found_close := false
+	for close_line < lines.len {
+		line := lines[close_line]
+		mut col := if close_line == line_idx { end_byte } else { 0 }
+		for col < line.len {
+			if line[col] == `[` {
+				return false
+			}
+			if line[col] == `]` {
+				close_byte = col
+				found_close = true
+				break
+			}
+			col++
+		}
+		if found_close {
+			break
+		}
+		close_line++
 	}
-	if close_byte >= line.len || line[close_byte] != `]` {
+	if !found_close {
 		return false
 	}
-	for parameter in line[open_byte + 1..close_byte].split(',') {
+	mut parameter_lines := []string{}
+	if open_line == close_line {
+		parameter_lines << lines[open_line][open_byte + 1..close_byte]
+	} else {
+		parameter_lines << lines[open_line][open_byte + 1..]
+		for parameter_line in open_line + 1 .. close_line {
+			parameter_lines << lines[parameter_line]
+		}
+		parameter_lines << lines[close_line][..close_byte]
+	}
+	for parameter in parameter_lines.join('\n').split(',') {
 		name := parameter.trim_space()
 		if name == '' || name[0] >= `0` && name[0] <= `9` {
 			return false
@@ -1806,7 +1852,7 @@ fn source_occurrence_is_generic_parameter(line string, start_byte int, end_byte 
 			}
 		}
 	}
-	mut declaration_prefix := line[..open_byte].trim_space()
+	mut declaration_prefix := lines[open_line][..open_byte].trim_space()
 	if declaration_prefix.starts_with('pub ') {
 		declaration_prefix = declaration_prefix[4..].trim_space()
 	}
@@ -1836,7 +1882,7 @@ fn source_occurrences_have_potential_local_binding(lines []string, occurrences [
 		if source_occurrence_precedes_local_declaration(line, end_byte) {
 			return true
 		}
-		if source_occurrence_is_generic_parameter(line, start_byte, end_byte) {
+		if source_occurrence_is_generic_parameter(lines, occurrence.line, start_byte, end_byte) {
 			return true
 		}
 		mut suffix_byte := end_byte

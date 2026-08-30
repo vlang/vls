@@ -1111,6 +1111,47 @@ fn test_resolve_indexed_definition_defers_generic_type_parameter() {
 	}
 }
 
+fn test_resolve_indexed_definition_defers_multiline_generic_type_parameter() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'indexed_definition_multiline_generic_parameter')
+	must_mkdir_all(test_dir)
+	test_file := os.join_path(test_dir, 'main.v')
+	content := 'module main\n\nstruct T {}\n\nfn identity[\n\tT\n](value T) T {\n\treturn value\n}\n'
+	must_write_file(test_file, content)
+	uri := path_to_uri(test_file)
+	app.open_files[uri] = content
+	lines := content.split_into_lines()
+	declaration_col := lines[5].index('T') or {
+		assert false, 'expected multiline generic parameter declaration'
+		return
+	}
+	value_col := lines[6].index('value T') or {
+		assert false, 'expected multiline generic parameter type'
+		return
+	}
+	return_col := lines[6].last_index('T {') or {
+		assert false, 'expected multiline generic return type'
+		return
+	}
+
+	for position in [Position{
+		line: 5
+		char: declaration_col
+	}, Position{
+		line: 6
+		char: value_col + 6
+	}, Position{
+		line: 6
+		char: return_col
+	}] {
+		location := app.resolve_indexed_definition(uri, position)
+		assert location == none
+	}
+}
+
 fn test_resolve_indexed_definition_defers_destructured_local_shadow() {
 	mut app := create_test_app()
 	defer {
