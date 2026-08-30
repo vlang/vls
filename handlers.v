@@ -1522,6 +1522,66 @@ fn source_occurrence_is_goto_target(line string, start_byte int) bool {
 	return line[keyword_start..keyword_end] == 'goto'
 }
 
+fn source_occurrence_is_compile_time_condition(line string, line_idx int, start_byte int, if_occurrences []TokenOccurrence, enc PositionEncoding) bool {
+	if start_byte < 0 || start_byte > line.len {
+		return false
+	}
+	for occurrence in if_occurrences {
+		if occurrence.line != line_idx {
+			continue
+		}
+		directive_start := encoded_col_to_byte(line, occurrence.start_char, enc)
+		directive_end := encoded_col_to_byte(line, occurrence.end_char, enc)
+		if directive_start <= 0 || directive_end > start_byte || line[directive_start - 1] != `$` {
+			continue
+		}
+		mut col := directive_end
+		mut reaches_target := true
+		mut in_block_comment := false
+		for col < start_byte {
+			if in_block_comment {
+				if col + 1 < start_byte && line[col] == `*` && line[col + 1] == `/` {
+					in_block_comment = false
+					col += 2
+					continue
+				}
+				col++
+				continue
+			}
+			if col + 1 < start_byte && line[col] == `/` && line[col + 1] == `*` {
+				in_block_comment = true
+				col += 2
+				continue
+			}
+			if line[col] == `"` || line[col] == `'` {
+				quote := line[col]
+				col++
+				for col < start_byte {
+					if line[col] == `\\` {
+						col += 2
+						continue
+					}
+					if line[col] == quote {
+						col++
+						break
+					}
+					col++
+				}
+				continue
+			}
+			if line[col] == `{` {
+				reaches_target = false
+				break
+			}
+			col++
+		}
+		if reaches_target {
+			return true
+		}
+	}
+	return false
+}
+
 fn source_line_is_module_or_import_declaration(lines []string, target_line int) bool {
 	mut in_import_block := false
 	for line_idx, raw_line in lines {
@@ -1718,7 +1778,8 @@ fn (mut app App) resolve_indexed_definition(uri string, position Position) ?Loca
 	}
 	// Reuse the reference tokenizer to reject identifier-shaped text in comments
 	// and string literals while still accepting executable string interpolations.
-	occurrences := app.occurrences_for(uri)[symbol] or { return none }
+	file_occurrences := app.occurrences_for(uri)
+	occurrences := file_occurrences[symbol] or { return none }
 	if !occurrences.any(it.line == position.line && it.start_char == start && it.end_char == end) {
 		return none
 	}
@@ -1727,14 +1788,16 @@ fn (mut app App) resolve_indexed_definition(uri string, position Position) ?Loca
 	}
 	start_byte := encoded_col_to_byte(line, start, app.position_encoding)
 	end_byte := encoded_col_to_byte(line, end, app.position_encoding)
+	if_occurrences := file_occurrences['if'] or { []TokenOccurrence{} }
 	if source_occurrence_has_colon_suffix(line, end_byte)
-		|| source_occurrence_is_goto_target(line, start_byte) {
+		|| source_occurrence_is_goto_target(line, start_byte)
+		|| source_occurrence_is_compile_time_condition(line, position.line, start_byte, if_occurrences, app.position_encoding) {
 		return none
 	}
 	if start_byte > 0 && line[start_byte - 1] == `.` {
 		dot_col := byte_to_encoded_col(line, start_byte - 1, app.position_encoding)
 		alias := get_word_before_dot(line, dot_col, app.position_encoding)
-		alias_occurrences := app.occurrences_for(uri)[alias] or { return none }
+		alias_occurrences := file_occurrences[alias] or { return none }
 		if source_occurrences_have_potential_local_binding(lines, alias_occurrences,
 			app.position_encoding)
 		{
