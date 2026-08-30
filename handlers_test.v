@@ -1004,6 +1004,30 @@ fn test_resolve_indexed_definition_defers_enum_member_declaration() {
 	assert location == none
 }
 
+fn test_resolve_indexed_definition_defers_attribute_identifier() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'indexed_definition_attribute')
+	must_mkdir_all(test_dir)
+	test_file := os.join_path(test_dir, 'main.v')
+	content := "module main\n\nfn deprecated() {}\n\n@[deprecated: 'use replacement']\nfn old() {}\n"
+	must_write_file(test_file, content)
+	uri := path_to_uri(test_file)
+	app.open_files[uri] = content
+	attribute_col := content.split_into_lines()[4].index('deprecated') or {
+		assert false, 'expected attribute identifier'
+		return
+	}
+
+	location := app.resolve_indexed_definition(uri, Position{
+		line: 4
+		char: attribute_col + 2
+	})
+	assert location == none
+}
+
 fn test_resolve_indexed_definition_defers_generic_type_parameter() {
 	mut app := create_test_app()
 	defer {

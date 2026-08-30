@@ -1669,6 +1669,72 @@ fn source_line_is_module_or_import_declaration(lines []string, target_line int) 
 	return false
 }
 
+fn source_occurrence_is_attribute(lines []string, target_line int, start_byte int) bool {
+	if target_line < 0 || target_line >= lines.len || start_byte < 0
+		|| start_byte > lines[target_line].len {
+		return false
+	}
+	mut in_block_comment := false
+	mut quote := u8(0)
+	mut attribute_depth := 0
+	for line_idx, line in lines {
+		if line_idx > target_line {
+			break
+		}
+		limit := if line_idx == target_line { start_byte } else { line.len }
+		mut col := 0
+		for col < limit {
+			if in_block_comment {
+				if col + 1 < limit && line[col] == `*` && line[col + 1] == `/` {
+					in_block_comment = false
+					col += 2
+					continue
+				}
+				col++
+				continue
+			}
+			if quote != 0 {
+				if line[col] == `\\` && col + 1 < limit {
+					col += 2
+					continue
+				}
+				if line[col] == quote {
+					quote = 0
+				}
+				col++
+				continue
+			}
+			if col + 1 < limit && line[col] == `/` && line[col + 1] == `/` {
+				break
+			}
+			if col + 1 < limit && line[col] == `/` && line[col + 1] == `*` {
+				in_block_comment = true
+				col += 2
+				continue
+			}
+			if line[col] == `"` || line[col] == `'` || line[col] == 96 {
+				quote = line[col]
+				col++
+				continue
+			}
+			if attribute_depth == 0 && col + 1 < limit && line[col] == `@` && line[col + 1] == `[` {
+				attribute_depth = 1
+				col += 2
+				continue
+			}
+			if attribute_depth > 0 {
+				if line[col] == `[` {
+					attribute_depth++
+				} else if line[col] == `]` {
+					attribute_depth--
+				}
+			}
+			col++
+		}
+	}
+	return attribute_depth > 0
+}
+
 fn source_occurrence_is_enum_member_declaration(content string, symbol string, target_line int) bool {
 	for declaration in parse_document_symbols(content) {
 		if declaration.kind != sym_kind_enum {
@@ -1899,14 +1965,17 @@ fn (mut app App) resolve_indexed_definition(uri string, position Position) ?Loca
 	if !occurrences.any(it.line == position.line && it.start_char == start && it.end_char == end) {
 		return none
 	}
+	start_byte := encoded_col_to_byte(line, start, app.position_encoding)
+	end_byte := encoded_col_to_byte(line, end, app.position_encoding)
 	if source_line_is_module_or_import_declaration(lines, position.line) {
+		return none
+	}
+	if source_occurrence_is_attribute(lines, position.line, start_byte) {
 		return none
 	}
 	if source_occurrence_is_enum_member_declaration(content, symbol, position.line) {
 		return none
 	}
-	start_byte := encoded_col_to_byte(line, start, app.position_encoding)
-	end_byte := encoded_col_to_byte(line, end, app.position_encoding)
 	if_occurrences := file_occurrences['if'] or { []TokenOccurrence{} }
 	if source_occurrence_has_colon_suffix(line, end_byte)
 		|| source_occurrence_is_goto_target(line, start_byte)
