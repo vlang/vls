@@ -140,10 +140,11 @@ fn add_identifier_occurrence(line_text string, line_idx int, start int, end int,
 	}
 }
 
-// scan_string_identifier_occurrences skips literal text while indexing V string
-// interpolation expressions. It preserves an unterminated quote across source
-// lines and returns the byte after the closing quote or the end of the line.
-fn scan_string_identifier_occurrences(line_text string, line_idx int, start int, enc PositionEncoding, mut state OccurrenceScanState, mut occ map[string][]TokenOccurrence) int {
+// scan_literal_identifier_occurrences skips string and rune literal text while
+// indexing V string interpolation expressions. It preserves an unterminated
+// quote across source lines and returns the byte after the closing quote or the
+// end of the line.
+fn scan_literal_identifier_occurrences(line_text string, line_idx int, start int, enc PositionEncoding, mut state OccurrenceScanState, mut occ map[string][]TokenOccurrence) int {
 	mut col := start
 	if state.quote == 0 {
 		state.quote = line_text[start]
@@ -190,7 +191,7 @@ fn scan_code_identifier_occurrences(line_text string, line_idx int, start int, e
 	mut brace_depth := 0
 	for col < line_text.len {
 		if state.quote != 0 {
-			col = scan_string_identifier_occurrences(line_text, line_idx, col, enc, mut state, mut
+			col = scan_literal_identifier_occurrences(line_text, line_idx, col, enc, mut state, mut
 				occ)
 			continue
 		}
@@ -212,9 +213,9 @@ fn scan_code_identifier_occurrences(line_text string, line_idx int, start int, e
 			col += 2
 			continue
 		}
-		if c == `"` || c == `'` {
+		if c == `"` || c == `'` || c == 96 {
 			col =
-				scan_string_identifier_occurrences(line_text, line_idx, col, enc, mut state, mut occ)
+				scan_literal_identifier_occurrences(line_text, line_idx, col, enc, mut state, mut occ)
 			continue
 		}
 		if c == `{` {

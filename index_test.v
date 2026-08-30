@@ -622,6 +622,17 @@ fn test_extract_identifier_occurrences_skips_multiline_strings() {
 	assert occ['text'].len == 2
 }
 
+fn test_extract_identifier_occurrences_skips_rune_literals() {
+	content := 'fn f() {}\nfn main() {\n\tch := `f`\n\tprintln(ch)\n}\n'
+	occ := extract_identifier_occurrences(content, .utf16)
+
+	// The function declaration is indexed, but the matching rune contents are
+	// literal text rather than a reference to that function.
+	assert occ['f'].len == 1
+	assert occ['f'][0].line == 0
+	assert occ['ch'].len == 2
+}
+
 fn test_occurrences_for_caches_by_fingerprint() {
 	mut app := index_test_app()
 	uri := 'file:///tmp/occ.v'
