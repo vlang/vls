@@ -1373,6 +1373,12 @@ fn source_definition_kind_is_supported(kind int) bool {
 		sym_kind_constant, sym_kind_class]
 }
 
+fn source_declaration_occurrence_is_code(sym DocumentSymbol, occurrences []TokenOccurrence) bool {
+	return occurrences.any(it.line == sym.selection_range.start.line
+		&& it.start_char == sym.selection_range.start.char
+		&& it.end_char == sym.selection_range.end.char)
+}
+
 fn source_declaration_is_public(uri string, sym DocumentSymbol, app &App) bool {
 	content := app.index_source_for(uri) or { return false }
 	lines := content.split_into_lines()
@@ -1600,9 +1606,13 @@ fn (mut app App) find_indexed_source_definition(dir string, symbol string, inclu
 			continue
 		}
 		source := app.index_source_for(uri) or { continue }
+		declaration_occurrences := app.occurrences_for(uri)[symbol] or { continue }
 		for sym in entry.doc_symbols {
 			if !source_definition_kind_is_supported(sym.kind)
 				|| extract_simple_fn_name(sym.name) != symbol {
+				continue
+			}
+			if !source_declaration_occurrence_is_code(sym, declaration_occurrences) {
 				continue
 			}
 			if source_declaration_is_compile_time_conditional(source, sym.range.start.line) {
