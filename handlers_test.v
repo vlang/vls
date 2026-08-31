@@ -1166,6 +1166,31 @@ fn test_resolve_indexed_definition_defers_imported_module_qualifier() {
 	assert location == none
 }
 
+fn test_resolve_indexed_definition_defers_builtin_interop_qualifiers() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'indexed_definition_builtin_interop_qualifiers')
+	must_mkdir_all(test_dir)
+	test_file := os.join_path(test_dir, 'main.v')
+	content := 'module main\n\nstruct C {}\nstruct JS {}\n\nfn main() {\n\tC.some_function()\n\tJS.some_function()\n}\n'
+	must_write_file(test_file, content)
+	uri := path_to_uri(test_file)
+	app.open_files[uri] = content
+
+	for position in [Position{
+		line: 6
+		char: 0
+	}, Position{
+		line: 7
+		char: 1
+	}] {
+		location := app.resolve_indexed_definition(uri, position)
+		assert location == none
+	}
+}
+
 fn test_resolve_indexed_definition_defers_grouped_import_module_qualifier() {
 	mut app := create_test_app()
 	defer {
