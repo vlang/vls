@@ -1648,18 +1648,51 @@ fn source_declaration_is_compile_time_conditional(content string, declaration_li
 // comma-separated left side of `:=`. Invalid or ambiguous matches only defer
 // to compiler-backed lookup, so this deliberately favors avoiding false
 // indexed definitions for shadowed locals.
-fn source_occurrence_precedes_local_declaration(line string, end_byte int) bool {
-	if end_byte < 0 || end_byte > line.len {
+fn source_occurrence_precedes_local_declaration(lines []string, line_idx int, end_byte int) bool {
+	if line_idx < 0 || line_idx >= lines.len || end_byte < 0
+		|| end_byte > lines[line_idx].len {
 		return false
 	}
-	declaration_offset := line[end_byte..].index(':=') or { return false }
-	for i := end_byte; i < end_byte + declaration_offset; i++ {
-		c := line[i]
-		if !is_ident_char(c) && c !in [`,`, ` `, `\t`] {
+	mut scan_state := ImportScanState{}
+	for current_line in 0 .. line_idx + 1 {
+		raw_line := lines[current_line]
+		fragment := if current_line == line_idx { raw_line[..end_byte] } else { raw_line }
+		source_line_import_code(fragment, mut scan_state)
+	}
+	mut expects_target := false
+	for current_line in line_idx .. lines.len {
+		raw_line := lines[current_line]
+		fragment := if current_line == line_idx { raw_line[end_byte..] } else { raw_line }
+		code := source_line_import_code(fragment, mut scan_state)
+		mut col := 0
+		for col < code.len {
+			if code[col] in [` `, `\t`, `\r`] {
+				col++
+				continue
+			}
+			if expects_target {
+				if !is_ident_char(code[col]) || (code[col] >= `0` && code[col] <= `9`) {
+					return false
+				}
+				col++
+				for col < code.len && is_ident_char(code[col]) {
+					col++
+				}
+				expects_target = false
+				continue
+			}
+			if code[col] == `,` {
+				expects_target = true
+				col++
+				continue
+			}
+			if col + 1 < code.len && code[col] == `:` && code[col + 1] == `=` {
+				return true
+			}
 			return false
 		}
 	}
-	return true
+	return false
 }
 
 fn source_occurrence_has_colon_suffix(line string, end_byte int) bool {
@@ -2219,7 +2252,7 @@ fn source_occurrences_have_potential_local_binding(lines []string, occurrences [
 			|| source_occurrence_is_for_binding(lines, occurrence.line, start_byte, end_byte) {
 			return true
 		}
-		if source_occurrence_precedes_local_declaration(line, end_byte) {
+		if source_occurrence_precedes_local_declaration(lines, occurrence.line, end_byte) {
 			return true
 		}
 		if source_occurrence_is_generic_parameter(lines, occurrence.line, start_byte, end_byte) {
