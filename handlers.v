@@ -1993,6 +1993,77 @@ fn source_occurrence_is_generic_parameter(lines []string, line_idx int, start_by
 		|| declaration_prefix.starts_with('interface ') || declaration_prefix.starts_with('type ')
 }
 
+fn source_occurrence_is_for_binding(lines []string, line_idx int, start_byte int, end_byte int) bool {
+	if line_idx < 0 || line_idx >= lines.len || start_byte < 0 || end_byte <= start_byte
+		|| end_byte > lines[line_idx].len {
+		return false
+	}
+	mut scan_state := ImportScanState{}
+	mut before_lines := []string{cap: line_idx + 1}
+	for current_line in 0 .. line_idx + 1 {
+		raw_line := lines[current_line]
+		fragment := if current_line == line_idx { raw_line[..start_byte] } else { raw_line }
+		before_lines << source_line_import_code(fragment, mut scan_state)
+	}
+	mut has_for := false
+	mut has_in := false
+	before := before_lines.join('\n')
+	mut col := 0
+	for col < before.len {
+		if before[col] in [`{`, `}`, `;`] {
+			has_for = false
+			has_in = false
+			col++
+			continue
+		}
+		if !is_ident_char(before[col]) {
+			col++
+			continue
+		}
+		start := col
+		col++
+		for col < before.len && is_ident_char(before[col]) {
+			col++
+		}
+		word := before[start..col]
+		if word == 'for' {
+			has_for = true
+			has_in = false
+		} else if has_for && word == 'in' {
+			has_in = true
+		}
+	}
+	if !has_for || has_in {
+		return false
+	}
+	mut after_lines := []string{cap: lines.len - line_idx}
+	for current_line in line_idx .. lines.len {
+		raw_line := lines[current_line]
+		fragment := if current_line == line_idx { raw_line[end_byte..] } else { raw_line }
+		after_lines << source_line_import_code(fragment, mut scan_state)
+	}
+	after := after_lines.join('\n')
+	col = 0
+	for col < after.len {
+		if after[col] in [`{`, `}`, `;`] {
+			return false
+		}
+		if !is_ident_char(after[col]) {
+			col++
+			continue
+		}
+		start := col
+		col++
+		for col < after.len && is_ident_char(after[col]) {
+			col++
+		}
+		if after[start..col] == 'in' {
+			return true
+		}
+	}
+	return false
+}
+
 // source_occurrences_have_potential_local_binding conservatively recognizes
 // local declarations that can shadow a top-level or imported symbol. False
 // positives only defer to compiler-backed lookup; false negatives could return
@@ -2009,7 +2080,8 @@ fn source_occurrences_have_potential_local_binding(lines []string, occurrences [
 		if start_byte < 0 || end_byte <= start_byte || end_byte > line.len {
 			continue
 		}
-		if is_for_binding_highlight(line, start_byte, end_byte) {
+		if is_for_binding_highlight(line, start_byte, end_byte)
+			|| source_occurrence_is_for_binding(lines, occurrence.line, start_byte, end_byte) {
 			return true
 		}
 		if source_occurrence_precedes_local_declaration(line, end_byte) {
