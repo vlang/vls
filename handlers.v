@@ -2261,8 +2261,10 @@ fn (mut app App) resolve_indexed_definition(uri string, position Position) ?Loca
 	if source_occurrence_is_sql_expression(lines, position.line, start_byte) {
 		return none
 	}
-	if source_occurrence_has_dot_suffix(line, end_byte) && symbol in parse_import_aliases(content) {
-		return none
+	if source_occurrence_has_dot_suffix(line, end_byte) {
+		if symbol == 'C' || symbol == 'JS' || symbol in parse_import_aliases(content) {
+			return none
+		}
 	}
 	if_occurrences := file_occurrences['if'] or { []TokenOccurrence{} }
 	if source_occurrence_has_colon_suffix(line, end_byte)
