@@ -2079,7 +2079,7 @@ fn (app &App) active_indexed_source_file_names(dir string, active_test_file_name
 // in `dir`. Methods and fields are intentionally excluded because resolving
 // them safely requires receiver type information.
 fn (mut app App) find_indexed_source_definition(dir string, symbol string, active_test_file_name string, require_public bool, expected_module string) ?Location {
-	if dir == '' || dir == '/' || !os.is_dir(dir) {
+	if dir == '' || dir == '/' || !os.is_dir(dir) || expected_module == '' {
 		return none
 	}
 	app.ensure_dir_shallow_indexed(dir)
@@ -2104,7 +2104,7 @@ fn (mut app App) find_indexed_source_definition(dir string, symbol string, activ
 			continue
 		}
 		entry := app.symbol_index[uri] or { continue }
-		if expected_module != '' && entry.module_name != expected_module {
+		if entry.module_name != expected_module {
 			continue
 		}
 		source := app.index_source_for(uri) or { continue }

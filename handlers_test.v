@@ -1714,6 +1714,28 @@ fn test_resolve_indexed_definition_excludes_different_module_sibling() {
 	assert location == none
 }
 
+fn test_resolve_indexed_definition_defers_moduleless_script_sibling() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'indexed_definition_moduleless_script')
+	must_mkdir_all(test_dir)
+	main_file := os.join_path(test_dir, 'script.v')
+	sibling_file := os.join_path(test_dir, 'sibling.v')
+	main_content := 'helper()\n'
+	must_write_file(main_file, main_content)
+	must_write_file(sibling_file, 'module unrelated\n\nfn helper() {}\n')
+	main_uri := path_to_uri(main_file)
+	app.open_files[main_uri] = main_content
+
+	location := app.resolve_indexed_definition(main_uri, Position{
+		line: 0
+		char: 2
+	})
+	assert location == none
+}
+
 fn test_resolve_indexed_definition_ignores_commented_requesting_module() {
 	mut app := create_test_app()
 	defer {
