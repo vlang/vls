@@ -609,6 +609,19 @@ fn test_extract_identifier_occurrences_skips_raw_string_interpolation_text() {
 	assert 'r' !in occ
 }
 
+fn test_extract_identifier_occurrences_tracks_multiline_interpolations() {
+	content := "fn helper() int { return 1 }\nfn main() {\n\tvalue := 1\n\ttext := 'result \${match value {\n\t\t1 {\n\t\t\thelper()\n\t\t}\n\t\telse { 0 }\n\t}} literal_helper'\n\thelper()\n}\n"
+	occ := extract_identifier_occurrences(content, .utf16)
+
+	// Nested braces remain part of the interpolation across line boundaries.
+	// Scanning resumes as literal text after its matching closing brace.
+	assert occ['helper'].len == 3
+	assert occ['helper'][1].line == 5
+	assert occ['helper'][2].line == 9
+	assert occ['value'].len == 2
+	assert 'literal_helper' !in occ
+}
+
 fn test_extract_identifier_occurrences_skips_multiline_block_comments() {
 	mut content := 'fn target() {}\n/*\n'
 	for _ in 0 .. reference_semantic_max_candidates + 1 {
