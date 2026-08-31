@@ -1124,17 +1124,19 @@ fn test_resolve_indexed_definition_defers_attribute_identifier() {
 	test_dir := os.join_path(app.temp_dir, 'indexed_definition_attribute')
 	must_mkdir_all(test_dir)
 	test_file := os.join_path(test_dir, 'main.v')
-	content := "module main\n\nfn deprecated() {}\n\n@[deprecated: 'use replacement']\nfn old() {}\n"
+	content := "module main\n\nfn deprecated() {}\n\nconst text = r'ends\\'\n\n@[deprecated: 'use replacement']\nfn old() {}\n"
 	must_write_file(test_file, content)
 	uri := path_to_uri(test_file)
 	app.open_files[uri] = content
-	attribute_col := content.split_into_lines()[4].index('deprecated') or {
+	lines := content.split_into_lines()
+	attribute_col := lines[6].index('deprecated') or {
 		assert false, 'expected attribute identifier'
 		return
 	}
 
+	assert source_occurrence_is_attribute(lines, 6, attribute_col)
 	location := app.resolve_indexed_definition(uri, Position{
-		line: 4
+		line: 6
 		char: attribute_col + 2
 	})
 	assert location == none
