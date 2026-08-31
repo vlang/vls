@@ -1465,6 +1465,48 @@ fn test_resolve_indexed_definition_defers_destructured_local_shadow() {
 	assert location == none
 }
 
+fn test_resolve_indexed_definition_defers_multiline_for_bindings() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'indexed_definition_multiline_for_binding')
+	must_mkdir_all(test_dir)
+	test_file := os.join_path(test_dir, 'main.v')
+	content := "module main\n\nfn key() {}\nfn value() {}\n\nfn main() {\n\tentries := {'a': 1}\n\tfor key,\n\t\tvalue in entries {\n\t\tprintln(key)\n\t\tprintln(value)\n\t}\n}\n"
+	must_write_file(test_file, content)
+	uri := path_to_uri(test_file)
+	app.open_files[uri] = content
+	lines := content.split_into_lines()
+	key_col := lines[7].index('key') or {
+		assert false, 'expected multiline for key binding'
+		return
+	}
+	value_col := lines[8].index('value') or {
+		assert false, 'expected multiline for value binding'
+		return
+	}
+
+	assert source_occurrence_is_for_binding(lines, 7, key_col, key_col + 3)
+	assert source_occurrence_is_for_binding(lines, 8, value_col, value_col + 5)
+	for position in [Position{
+		line: 7
+		char: key_col + 1
+	}, Position{
+		line: 8
+		char: value_col + 2
+	}, Position{
+		line: 9
+		char: 11
+	}, Position{
+		line: 10
+		char: 11
+	}] {
+		location := app.resolve_indexed_definition(uri, position)
+		assert location == none
+	}
+}
+
 fn test_resolve_indexed_definition_defers_struct_initializer_field() {
 	mut app := create_test_app()
 	defer {
