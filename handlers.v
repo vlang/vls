@@ -1525,12 +1525,77 @@ fn source_declaration_is_public(uri string, sym DocumentSymbol, app &App) bool {
 	return lines[sym.range.start.line].trim_space().starts_with('pub ')
 }
 
+fn source_attribute_content_is_conditional(content string) bool {
+	for attribute in content.split(';') {
+		fields := attribute.fields()
+		if fields.len > 0 && fields[0] == 'if' {
+			return true
+		}
+	}
+	return false
+}
+
+fn source_declaration_has_conditional_attribute(content string, declaration_line int) bool {
+	lines := content.split_into_lines()
+	if declaration_line < 0 || declaration_line >= lines.len {
+		return false
+	}
+	mut pending_conditional := false
+	mut attribute_depth := 0
+	mut attribute_content := []u8{}
+	mut scan_state := ImportScanState{}
+	for line_idx in 0 .. declaration_line {
+		line := source_line_import_code(lines[line_idx], mut scan_state)
+		mut col := 0
+		for col < line.len {
+			if attribute_depth == 0 && col + 1 < line.len && line[col] == `@`
+				&& line[col + 1] == `[` {
+				attribute_depth = 1
+				attribute_content = []u8{}
+				col += 2
+				continue
+			}
+			if attribute_depth > 0 {
+				if line[col] == `[` {
+					attribute_depth++
+					attribute_content << line[col]
+				} else if line[col] == `]` {
+					attribute_depth--
+					if attribute_depth == 0 {
+						if source_attribute_content_is_conditional(attribute_content.bytestr()) {
+							pending_conditional = true
+						}
+					} else {
+						attribute_content << line[col]
+					}
+				} else {
+					attribute_content << line[col]
+				}
+				col++
+				continue
+			}
+			if line[col] !in [` `, `\t`, `\r`] {
+				pending_conditional = false
+			}
+			col++
+		}
+		if attribute_depth > 0 {
+			attribute_content << `\n`
+		}
+	}
+	return pending_conditional
+}
+
 // source_declaration_is_compile_time_conditional identifies declarations nested
-// under `$if` or `$else`. The shallow index does not evaluate compile-time
-// conditions, so every such declaration must defer to compiler-backed lookup.
+// under `$if`/`$else` or guarded by `@[if ...]`. The shallow index does not
+// evaluate compile-time conditions, so every such declaration must defer to
+// compiler-backed lookup.
 fn source_declaration_is_compile_time_conditional(content string, declaration_line int) bool {
 	if declaration_line < 0 {
 		return false
+	}
+	if source_declaration_has_conditional_attribute(content, declaration_line) {
+		return true
 	}
 	lines := content.split_into_lines()
 	mut brace_depth := 0

@@ -1800,6 +1800,28 @@ fn test_resolve_indexed_definition_defers_compile_time_declaration() {
 	assert location == none
 }
 
+fn test_resolve_indexed_definition_defers_conditional_attribute_declaration() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'indexed_definition_conditional_attribute')
+	must_mkdir_all(test_dir)
+	main_file := os.join_path(test_dir, 'main.v')
+	inactive_condition := $if windows { 'linux' } $else { 'windows' }
+	main_content := 'module main\n\n@[if ${inactive_condition}]\nfn helper() {}\n\nfn main() {\n\thelper()\n}\n'
+	must_write_file(main_file, main_content)
+	main_uri := path_to_uri(main_file)
+	app.open_files[main_uri] = main_content
+
+	assert source_declaration_is_compile_time_conditional(main_content, 3)
+	location := app.resolve_indexed_definition(main_uri, Position{
+		line: 6
+		char: 3
+	})
+	assert location == none
+}
+
 fn test_resolve_indexed_definition_defers_compile_time_declaration_after_multiline_string() {
 	mut app := create_test_app()
 	defer {
