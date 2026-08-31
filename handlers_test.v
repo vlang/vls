@@ -1596,6 +1596,41 @@ fn test_resolve_indexed_definition_defers_destructured_local_shadow() {
 	assert location == none
 }
 
+fn test_resolve_indexed_definition_defers_multiline_destructured_local_shadow() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'indexed_definition_multiline_destructured_shadow')
+	must_mkdir_all(test_dir)
+	test_file := os.join_path(test_dir, 'main.v')
+	content := 'module main\n\nfn key() {}\n\nfn pair() (int, int) {\n\treturn 1, 2\n}\n\nfn main() {\n\tkey,\n\t\tvalue := pair()\n\tprintln(key)\n\tprintln(value)\n}\n'
+	must_write_file(test_file, content)
+	uri := path_to_uri(test_file)
+	app.open_files[uri] = content
+	lines := content.split_into_lines()
+	declaration_col := lines[9].index('key') or {
+		assert false, 'expected first destructured target'
+		return
+	}
+	use_col := lines[11].index('key') or {
+		assert false, 'expected destructured local use'
+		return
+	}
+
+	assert source_occurrence_precedes_local_declaration(lines, 9, declaration_col + 3)
+	for position in [Position{
+		line: 9
+		char: declaration_col + 1
+	}, Position{
+		line: 11
+		char: use_col + 1
+	}] {
+		location := app.resolve_indexed_definition(uri, position)
+		assert location == none
+	}
+}
+
 fn test_resolve_indexed_definition_defers_multiline_for_bindings() {
 	mut app := create_test_app()
 	defer {
