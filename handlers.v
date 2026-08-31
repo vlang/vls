@@ -246,6 +246,7 @@ struct ImportScanState {
 mut:
 	in_block_comment bool
 	quote            u8
+	raw_string       bool
 }
 
 fn source_line_import_code(line string, mut state ImportScanState) string {
@@ -263,12 +264,13 @@ fn source_line_import_code(line string, mut state ImportScanState) string {
 			continue
 		}
 		if state.quote != 0 {
-			if line[col] == `\\` && col + 1 < line.len {
+			if !state.raw_string && line[col] == `\\` && col + 1 < line.len {
 				col += 2
 				continue
 			}
 			if line[col] == state.quote {
 				state.quote = 0
+				state.raw_string = false
 				code << ` `
 			}
 			col++
@@ -283,8 +285,17 @@ fn source_line_import_code(line string, mut state ImportScanState) string {
 			col += 2
 			continue
 		}
+		if line[col] == `r` && col + 1 < line.len
+			&& (line[col + 1] == `"` || line[col + 1] == `'`) {
+			state.quote = line[col + 1]
+			state.raw_string = true
+			code << ` `
+			col += 2
+			continue
+		}
 		if line[col] == `"` || line[col] == `'` || line[col] == 96 {
 			state.quote = line[col]
+			state.raw_string = false
 			code << ` `
 			col++
 			continue
