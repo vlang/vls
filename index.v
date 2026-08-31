@@ -130,10 +130,10 @@ mut:
 
 struct OccurrenceScanState {
 mut:
-	in_block_comment bool
-	quote            u8
-	raw_string       bool
-	interpolations   []OccurrenceInterpolationState
+	block_comment_depth int
+	quote               u8
+	raw_string          bool
+	interpolations      []OccurrenceInterpolationState
 }
 
 fn add_identifier_occurrence(line_text string, line_idx int, start int, end int, enc PositionEncoding, mut occ map[string][]TokenOccurrence) {
@@ -195,9 +195,14 @@ fn scan_code_identifier_occurrences(line_text string, line_idx int, start int, e
 			continue
 		}
 		c := line_text[col]
-		if state.in_block_comment {
+		if state.block_comment_depth > 0 {
+			if col + 1 < line_text.len && c == `/` && line_text[col + 1] == `*` {
+				state.block_comment_depth++
+				col += 2
+				continue
+			}
 			if col + 1 < line_text.len && c == `*` && line_text[col + 1] == `/` {
-				state.in_block_comment = false
+				state.block_comment_depth--
 				col += 2
 				continue
 			}
@@ -208,7 +213,7 @@ fn scan_code_identifier_occurrences(line_text string, line_idx int, start int, e
 			return line_text.len
 		}
 		if col + 1 < line_text.len && c == `/` && line_text[col + 1] == `*` {
-			state.in_block_comment = true
+			state.block_comment_depth = 1
 			col += 2
 			continue
 		}

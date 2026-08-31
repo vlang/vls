@@ -646,6 +646,16 @@ fn test_extract_identifier_occurrences_skips_multiline_block_comments() {
 	assert occ['target'].len == 2
 }
 
+fn test_extract_identifier_occurrences_tracks_nested_block_comments() {
+	content := 'module main\n/* outer\n\t/* inner */\n\tfn helper() {}\n*/\nfn main() { helper() }\n'
+	occ := extract_identifier_occurrences(content, .utf16)
+
+	// Closing the nested comment must not expose the remainder of the outer
+	// comment to identifier indexing.
+	assert occ['helper'].len == 1
+	assert occ['helper'][0].line == 5
+}
+
 fn test_extract_identifier_occurrences_skips_multiline_strings() {
 	content := "module main\n\nfn helper() {}\n\nfn main() {\n\ttext := 'first\nhelper\nlast'\n\tprintln(text)\n}\n"
 	occ := extract_identifier_occurrences(content, .utf16)
