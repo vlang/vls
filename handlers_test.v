@@ -1325,17 +1325,17 @@ fn test_resolve_indexed_definition_defers_orm_field_reference() {
 	test_dir := os.join_path(app.temp_dir, 'indexed_definition_orm_field')
 	must_mkdir_all(test_dir)
 	test_file := os.join_path(test_dir, 'main.v')
-	content := 'module main\n\nfn age() {}\n\nfn query() {\n\t_ := sql db {\n\t\tselect from User where age > 21\n\t}\n}\n'
+	content := "module main\n\nfn age() {}\n\nfn query() {\n\ttext := r'foo\\'\n\t_ := sql db {\n\t\tselect from User where age > 21\n\t}\n\tprintln(text)\n}\n"
 	must_write_file(test_file, content)
 	uri := path_to_uri(test_file)
 	app.open_files[uri] = content
-	age_col := content.split_into_lines()[6].index('age') or {
+	age_col := content.split_into_lines()[7].index('age') or {
 		assert false, 'expected ORM field reference'
 		return
 	}
 
 	location := app.resolve_indexed_definition(uri, Position{
-		line: 6
+		line: 7
 		char: age_col + 1
 	})
 	assert location == none
@@ -3409,6 +3409,16 @@ fn test_get_word_at_col_beyond_end() {
 	line := 'fn foo()'
 	word := get_word_at_col(line, 100, .utf16)
 	assert word == ''
+}
+
+fn test_source_line_import_code_closes_raw_string_after_backslash() {
+	mut state := ImportScanState{}
+	code := source_line_import_code("text := r'foo\\'", mut state)
+
+	assert code.trim_space() == 'text :='
+	assert state.quote == 0
+	assert !state.raw_string
+	assert source_line_import_code('sql db {', mut state) == 'sql db {'
 }
 
 fn test_parse_imports_single() {
