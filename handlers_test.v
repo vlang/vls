@@ -1905,7 +1905,7 @@ fn test_resolve_indexed_definition_uses_unsaved_imported_module() {
 	assert location.range.start.line == 3
 }
 
-fn test_resolve_indexed_definition_ignores_import_in_block_comment() {
+fn test_resolve_indexed_definition_ignores_import_in_nested_block_comment() {
 	mut app := create_test_app()
 	defer {
 		cleanup_test_app(app)
@@ -1918,7 +1918,7 @@ fn test_resolve_indexed_definition_ignores_import_in_block_comment() {
 	main_file := os.join_path(test_dir, 'main.v')
 	right_file := os.join_path(right_dir, 'right.v')
 	wrong_file := os.join_path(wrong_dir, 'wrong.v')
-	main_content := 'module main\n\nimport right as util\n/*\nimport wrong as util\n*/\n\nfn main() {\n\tutil.answer()\n}\n'
+	main_content := 'module main\n\nimport right as util\n/* outer\n\t/* inner */\nimport wrong as util\n*/\n\nfn main() {\n\tutil.answer()\n}\n'
 	right_content := 'module right\n\npub fn answer() {}\n'
 	wrong_content := 'module wrong\n\npub fn answer() {}\n'
 	must_write_file(main_file, main_content)
@@ -1929,13 +1929,13 @@ fn test_resolve_indexed_definition_ignores_import_in_block_comment() {
 	app.open_files[main_uri] = main_content
 	app.open_files[right_uri] = right_content
 	app.open_files[path_to_uri(wrong_file)] = wrong_content
-	answer_col := main_content.split_into_lines()[8].index('answer') or {
+	answer_col := main_content.split_into_lines()[9].index('answer') or {
 		assert false, 'expected imported member reference'
 		return
 	}
 
 	location := app.resolve_indexed_definition(main_uri, Position{
-		line: 8
+		line: 9
 		char: answer_col + 2
 	}) or {
 		assert false, 'expected real imported module definition'
@@ -3606,6 +3606,20 @@ fn test_source_line_import_code_closes_raw_string_after_backslash() {
 	assert state.quote == 0
 	assert !state.raw_string
 	assert source_line_import_code('sql db {', mut state) == 'sql db {'
+}
+
+fn test_source_line_import_code_tracks_nested_block_comments() {
+	mut state := ImportScanState{}
+	outer := source_line_import_code('before /* outer', mut state)
+	inner := source_line_import_code('/* inner */', mut state)
+	commented := source_line_import_code('import wrong as util', mut state)
+	after := source_line_import_code('*/ import right as util', mut state)
+
+	assert outer.trim_space() == 'before'
+	assert inner.trim_space() == ''
+	assert commented.trim_space() == ''
+	assert after.trim_space() == 'import right as util'
+	assert state.block_comment_depth == 0
 }
 
 fn test_source_line_import_code_preserves_multiline_interpolation_mode() {

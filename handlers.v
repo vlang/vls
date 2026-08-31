@@ -250,19 +250,24 @@ mut:
 
 struct ImportScanState {
 mut:
-	in_block_comment bool
-	quote            u8
-	raw_string       bool
-	interpolations   []ImportInterpolationState
+	block_comment_depth int
+	quote               u8
+	raw_string          bool
+	interpolations      []ImportInterpolationState
 }
 
 fn source_line_import_code(line string, mut state ImportScanState) string {
 	mut code := []u8{cap: line.len}
 	mut col := 0
 	for col < line.len {
-		if state.in_block_comment {
+		if state.block_comment_depth > 0 {
+			if col + 1 < line.len && line[col] == `/` && line[col + 1] == `*` {
+				state.block_comment_depth++
+				col += 2
+				continue
+			}
 			if col + 1 < line.len && line[col] == `*` && line[col + 1] == `/` {
-				state.in_block_comment = false
+				state.block_comment_depth--
 				code << ` `
 				col += 2
 				continue
@@ -297,7 +302,7 @@ fn source_line_import_code(line string, mut state ImportScanState) string {
 			break
 		}
 		if col + 1 < line.len && line[col] == `/` && line[col + 1] == `*` {
-			state.in_block_comment = true
+			state.block_comment_depth = 1
 			code << ` `
 			col += 2
 			continue
