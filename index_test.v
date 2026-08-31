@@ -586,8 +586,9 @@ fn test_extract_identifier_occurrences_indexes_string_interpolations() {
 	content := "fn greet(name string) string {\n\tother := 'ignored'\n\treturn 'hello \${name} \${other.to_upper()} \$name literal_name'\n}\n"
 	occ := extract_identifier_occurrences(content, .utf16)
 
-	// The parameter plus braced and shorthand interpolation references.
-	assert occ['name'].len == 3
+	// The parameter plus its braced interpolation reference. Unbraced `$name`
+	// is ordinary string text in current V syntax.
+	assert occ['name'].len == 2
 	// The declaration and its use inside a compound interpolation expression.
 	assert occ['other'].len == 2
 	assert occ['to_upper'].len == 1
@@ -595,6 +596,17 @@ fn test_extract_identifier_occurrences_indexes_string_interpolations() {
 	assert 'ignored' !in occ
 	assert 'hello' !in occ
 	assert 'literal_name' !in occ
+}
+
+fn test_extract_identifier_occurrences_skips_raw_string_interpolation_text() {
+	content := "fn helper() {}\nfn plain() {}\nfn main() {\n\traw := r'\${helper()} \$helper'\n\ttext := '\$plain \${helper()}'\n}\n"
+	occ := extract_identifier_occurrences(content, .utf16)
+
+	// Raw strings suppress all interpolation, while ordinary strings index only
+	// braced expressions.
+	assert occ['helper'].len == 2
+	assert occ['plain'].len == 1
+	assert 'r' !in occ
 }
 
 fn test_extract_identifier_occurrences_skips_multiline_block_comments() {

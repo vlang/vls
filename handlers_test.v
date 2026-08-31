@@ -889,13 +889,13 @@ fn test_resolve_indexed_definition_rejects_comments_and_string_literals() {
 	test_dir := os.join_path(app.temp_dir, 'indexed_definition_source_context')
 	must_mkdir_all(test_dir)
 	test_file := os.join_path(test_dir, 'main.v')
-	content := "module main\n\nfn helper() string { return 'ok' }\n\nfn main() {\n\t// helper is mentioned here\n\tliteral := 'helper'\n\tinterpolated := '\${helper()}'\n}\n"
+	content := "module main\n\nfn helper() string { return 'ok' }\n\nfn main() {\n\t// helper is mentioned here\n\tliteral := 'helper'\n\tplain_dollar := '\$helper'\n\traw := r'\$helper'\n\tinterpolated := '\${helper()}'\n}\n"
 	must_write_file(test_file, content)
 	uri := path_to_uri(test_file)
 	app.open_files[uri] = content
 	lines := content.split_into_lines()
 
-	for line_idx in [5, 6] {
+	for line_idx in [5, 6, 7, 8] {
 		helper_col := lines[line_idx].index('helper') or {
 			assert false, 'expected helper text'
 			return
@@ -907,12 +907,12 @@ fn test_resolve_indexed_definition_rejects_comments_and_string_literals() {
 		assert location == none
 	}
 
-	helper_col := lines[7].index('helper') or {
+	helper_col := lines[9].index('helper') or {
 		assert false, 'expected interpolated helper reference'
 		return
 	}
 	location := app.resolve_indexed_definition(uri, Position{
-		line: 7
+		line: 9
 		char: helper_col + 2
 	}) or {
 		assert false, 'expected indexed definition from string interpolation'
@@ -5609,15 +5609,14 @@ fn test_classify_highlight_kind_read_write() {
 	assert classify_highlight_kind('for item in items {}', 12, 17) == doc_highlight_read
 }
 
-fn test_document_highlight_candidates_include_string_interpolations() {
+fn test_document_highlight_candidates_include_braced_string_interpolations() {
 	content := "fn greet(name string) {\n\tprintln('hello \${name} \$name literal_name')\n}\n"
 	lines := content.split_into_lines()
 
 	candidates := collect_document_highlight_candidates(content, lines, 'name', .utf16)
-	assert candidates.len == 3
+	assert candidates.len == 2
 	assert candidates[0].line_idx == 0
 	assert candidates[1].line_idx == 1
-	assert candidates[2].line_idx == 1
 	assert collect_document_highlight_candidates(content, lines, 'literal_name', .utf16).len == 0
 }
 
