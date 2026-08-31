@@ -1751,6 +1751,68 @@ fn source_occurrence_has_compile_time_prefix(line string, start_byte int) bool {
 	return start_byte > 0 && start_byte <= line.len && line[start_byte - 1] in [`@`, `$`]
 }
 
+fn source_line_is_hash_directive(lines []string, target_line int) bool {
+	if target_line < 0 || target_line >= lines.len {
+		return false
+	}
+	mut scan_state := ImportScanState{}
+	for line_idx in 0 .. target_line + 1 {
+		line := source_line_import_code(lines[line_idx], mut scan_state)
+		if line_idx == target_line {
+			return line.trim_space().starts_with('#')
+		}
+	}
+	return false
+}
+
+fn source_occurrence_is_asm_block(lines []string, target_line int, end_byte int) bool {
+	if target_line < 0 || target_line >= lines.len || end_byte < 0
+		|| end_byte > lines[target_line].len {
+		return false
+	}
+	mut brace_depth := 0
+	mut asm_depths := []int{}
+	mut pending_asm := false
+	mut scan_state := ImportScanState{}
+	for line_idx, raw_line in lines {
+		if line_idx > target_line {
+			break
+		}
+		fragment := if line_idx == target_line { raw_line[..end_byte] } else { raw_line }
+		line := source_line_import_code(fragment, mut scan_state)
+		mut col := 0
+		for col < line.len {
+			if is_ident_char(line[col]) {
+				identifier_start := col
+				col++
+				for col < line.len && is_ident_char(line[col]) {
+					col++
+				}
+				if line[identifier_start..col] == 'asm' {
+					pending_asm = true
+				}
+				continue
+			}
+			if line[col] == `{` {
+				brace_depth++
+				if pending_asm {
+					asm_depths << brace_depth
+					pending_asm = false
+				}
+			} else if line[col] == `}` {
+				if asm_depths.len > 0 && asm_depths.last() == brace_depth {
+					asm_depths.delete_last()
+				}
+				if brace_depth > 0 {
+					brace_depth--
+				}
+			}
+			col++
+		}
+	}
+	return pending_asm || asm_depths.len > 0
+}
+
 fn source_occurrence_is_sql_expression(lines []string, target_line int, start_byte int) bool {
 	if target_line < 0 || target_line >= lines.len || start_byte < 0
 		|| start_byte > lines[target_line].len {
@@ -2263,7 +2325,9 @@ fn (mut app App) resolve_indexed_definition(uri string, position Position) ?Loca
 	if source_occurrence_has_compile_time_prefix(line, start_byte) {
 		return none
 	}
-	if source_occurrence_is_sql_expression(lines, position.line, start_byte) {
+	if source_line_is_hash_directive(lines, position.line)
+		|| source_occurrence_is_asm_block(lines, position.line, end_byte)
+		|| source_occurrence_is_sql_expression(lines, position.line, start_byte) {
 		return none
 	}
 	if source_occurrence_has_dot_suffix(line, end_byte) {

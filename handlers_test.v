@@ -970,6 +970,64 @@ fn test_resolve_indexed_definition_rejects_declaration_in_nested_block_comment()
 	assert location == none
 }
 
+fn test_resolve_indexed_definition_defers_inline_assembly_identifiers() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'indexed_definition_inline_assembly')
+	must_mkdir_all(test_dir)
+	test_file := os.join_path(test_dir, 'main.v')
+	content := 'module main\n\nfn mov() {}\n\nfn main() {\n\tasm amd64 { mov rax, 1 }\n}\n'
+	must_write_file(test_file, content)
+	uri := path_to_uri(test_file)
+	app.open_files[uri] = content
+	mov_col := content.split_into_lines()[5].index('mov') or {
+		assert false, 'expected assembly mnemonic'
+		return
+	}
+
+	location := app.resolve_indexed_definition(uri, Position{
+		line: 5
+		char: mov_col + 1
+	})
+	assert location == none
+}
+
+fn test_resolve_indexed_definition_defers_hash_directive_contents() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'indexed_definition_hash_directive')
+	must_mkdir_all(test_dir)
+	test_file := os.join_path(test_dir, 'main.v')
+	content := 'module main\n\n#include <helper.h>\n#flag -l library\n\nfn helper() {}\nfn library() {}\n'
+	must_write_file(test_file, content)
+	uri := path_to_uri(test_file)
+	app.open_files[uri] = content
+	lines := content.split_into_lines()
+	helper_col := lines[2].index('helper') or {
+		assert false, 'expected include header'
+		return
+	}
+	library_col := lines[3].index('library') or {
+		assert false, 'expected flag argument'
+		return
+	}
+
+	header_location := app.resolve_indexed_definition(uri, Position{
+		line: 2
+		char: helper_col + 2
+	})
+	assert header_location == none
+	flag_location := app.resolve_indexed_definition(uri, Position{
+		line: 3
+		char: library_col + 2
+	})
+	assert flag_location == none
+}
+
 fn test_resolve_indexed_definition_rejects_multiline_string_continuations() {
 	mut app := create_test_app()
 	defer {
