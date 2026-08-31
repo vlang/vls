@@ -126,6 +126,7 @@ struct OccurrenceScanState {
 mut:
 	in_block_comment bool
 	quote            u8
+	raw_string       bool
 }
 
 fn add_identifier_occurrence(line_text string, line_idx int, start int, end int, enc PositionEncoding, mut occ map[string][]TokenOccurrence) {
@@ -152,32 +153,22 @@ fn scan_literal_identifier_occurrences(line_text string, line_idx int, start int
 	}
 	quote := state.quote
 	for col < line_text.len {
-		if line_text[col] == `\\` {
+		if line_text[col] == `\\` && !state.raw_string {
 			col += 2
 			continue
 		}
 		if line_text[col] == quote {
 			state.quote = 0
+			state.raw_string = false
 			return col + 1
 		}
-		if line_text[col] == `$` && col + 1 < line_text.len {
-			if line_text[col + 1] == `{` {
-				state.quote = 0
-				col = scan_code_identifier_occurrences(line_text, line_idx, col + 2, enc, true, mut
-					state, mut occ)
-				state.quote = quote
-				continue
-			}
-			if is_ident_char(line_text[col + 1]) && !(line_text[col + 1] >= `0`
-				&& line_text[col + 1] <= `9`) {
-				ident_start := col + 1
-				col = ident_start + 1
-				for col < line_text.len && is_ident_char(line_text[col]) {
-					col++
-				}
-				add_identifier_occurrence(line_text, line_idx, ident_start, col, enc, mut occ)
-				continue
-			}
+		if !state.raw_string && line_text[col] == `$` && col + 1 < line_text.len
+			&& line_text[col + 1] == `{` {
+			state.quote = 0
+			col = scan_code_identifier_occurrences(line_text, line_idx, col + 2, enc, true, mut
+				state, mut occ)
+			state.quote = quote
+			continue
 		}
 		col++
 	}
@@ -211,6 +202,13 @@ fn scan_code_identifier_occurrences(line_text string, line_idx int, start int, e
 		if col + 1 < line_text.len && c == `/` && line_text[col + 1] == `*` {
 			state.in_block_comment = true
 			col += 2
+			continue
+		}
+		if c == `r` && col + 1 < line_text.len
+			&& (line_text[col + 1] == `"` || line_text[col + 1] == `'`) {
+			state.raw_string = true
+			col = scan_literal_identifier_occurrences(line_text, line_idx, col + 1, enc, mut state, mut
+				occ)
 			continue
 		}
 		if c == `"` || c == `'` || c == 96 {
