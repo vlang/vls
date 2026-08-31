@@ -1493,44 +1493,14 @@ fn source_declaration_is_compile_time_conditional(content string, declaration_li
 	mut brace_depth := 0
 	mut conditional_depths := []int{}
 	mut pending_conditional := false
-	mut in_block_comment := false
-	mut quote := u8(0)
-	for line_idx, line in lines {
+	mut scan_state := ImportScanState{}
+	for line_idx, raw_line in lines {
 		if line_idx == declaration_line {
 			return conditional_depths.len > 0
 		}
+		line := source_line_import_code(raw_line, mut scan_state)
 		mut col := 0
 		for col < line.len {
-			if in_block_comment {
-				comment_end := line[col..].index('*/') or { break }
-				col += comment_end + 2
-				in_block_comment = false
-				continue
-			}
-			if quote != 0 {
-				if line[col] == `\\` && col + 1 < line.len {
-					col += 2
-					continue
-				}
-				if line[col] == quote {
-					quote = 0
-				}
-				col++
-				continue
-			}
-			if col + 1 < line.len && line[col] == `/` && line[col + 1] == `/` {
-				break
-			}
-			if col + 1 < line.len && line[col] == `/` && line[col + 1] == `*` {
-				in_block_comment = true
-				col += 2
-				continue
-			}
-			if line[col] == `'` || line[col] == `"` || line[col] == 96 {
-				quote = line[col]
-				col++
-				continue
-			}
 			if line[col] == `$` {
 				directive_len := if line[col..].starts_with('$if') {
 					3
