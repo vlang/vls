@@ -62,7 +62,7 @@ fn is_for_binding_highlight(line string, start_byte int, end_byte int) bool {
 		|| highlight_has_word(binding_prefix, 'in') {
 		return false
 	}
-	mut binding_suffix := line[end_byte..]
+	mut binding_suffix := line[end_byte..].clone()
 	brace_byte := binding_suffix.index_any('{;')
 	if brace_byte >= 0 {
 		binding_suffix = binding_suffix[..brace_byte]

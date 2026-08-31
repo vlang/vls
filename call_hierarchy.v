@@ -45,7 +45,7 @@ fn (mut app App) handle_prepare_call_hierarchy(request Request) Response {
 	if item.name == '' {
 		working_dir := os.dir(uri_to_path(uri))
 		search_dirs := app.workspace_search_dirs(working_dir)
-		item = app.find_fn_declaration(word, search_dirs, request.id, uri.ends_with('_test.v'))
+		item = app.find_fn_declaration(word, search_dirs, uri.ends_with('_test.v'))
 	}
 	if item.name == '' {
 		return Response{
@@ -163,8 +163,7 @@ fn (mut app App) handle_call_hierarchy_outgoing(request Request) Response {
 		if called_name == self_name {
 			continue // skip direct recursion
 		}
-		callee := app.find_fn_declaration(called_name, search_dirs, request.id,
-			uri.ends_with('_test.v'))
+		callee := app.find_fn_declaration(called_name, search_dirs, uri.ends_with('_test.v'))
 		if callee.name == '' {
 			continue
 		}
@@ -186,8 +185,8 @@ fn (mut app App) handle_call_hierarchy_outgoing(request Request) Response {
 fn extract_simple_fn_name(full_name string) string {
 	trimmed := full_name.trim_space()
 	if trimmed.starts_with('(') {
-		close := trimmed.index(')') or { return '' }
-		return trimmed[close + 1..].trim_space()
+		close_idx := trimmed.index(')') or { return '' }
+		return trimmed[close_idx + 1..].trim_space()
 	}
 	return trimmed
 }
@@ -214,10 +213,9 @@ fn find_fn_in_content(fn_name string, content string, uri string, enc PositionEn
 	return CallHierarchyItem{}
 }
 
-// find_fn_declaration searches open files and then on-disk files in
-// `search_dirs` for a function/method named `fn_name`. Polls for cancellation
-// between files so callers can return early when the request is cancelled.
-fn (mut app App) find_fn_declaration(fn_name string, search_dirs []string, request_id int, include_tests bool) CallHierarchyItem {
+// find_fn_declaration resolves a function/method named `fn_name` from the
+// persistent symbol index, restricted to `search_dirs`.
+fn (mut app App) find_fn_declaration(fn_name string, search_dirs []string, include_tests bool) CallHierarchyItem {
 	// Answer from the persistent symbol index instead of re-scanning every file.
 	app.ensure_dirs_indexed(search_dirs)
 	// Prefer a declaration in the primary (current module) directory, then widen
@@ -288,14 +286,14 @@ fn scan_for_callers(fn_name string, file_uri string, file_content string, enc Po
 					continue
 				}
 				idx := line[col..].index('${fn_name}(') or { break }
-				abs := col + idx
+				abs_idx := col + idx
 				// Require a word boundary before the name.
-				if abs > 0 && is_ident_char(line[abs - 1]) {
-					col = abs + 1
+				if abs_idx > 0 && is_ident_char(line[abs_idx - 1]) {
+					col = abs_idx + 1
 					continue
 				}
-				start_char := byte_to_encoded_col(line, abs, enc)
-				end_char := byte_to_encoded_col(line, abs + fn_name.len, enc)
+				start_char := byte_to_encoded_col(line, abs_idx, enc)
+				end_char := byte_to_encoded_col(line, abs_idx + fn_name.len, enc)
 				call_ranges << LSPRange{
 					start: Position{
 						line: li
@@ -306,7 +304,7 @@ fn scan_for_callers(fn_name string, file_uri string, file_content string, enc Po
 						char: end_char
 					}
 				}
-				col = abs + fn_name.len + 1
+				col = abs_idx + fn_name.len + 1
 			}
 		}
 		if call_ranges.len > 0 {

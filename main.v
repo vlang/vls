@@ -953,7 +953,7 @@ fn decode_json_unicode_escape(content string, i int) ?(int, int) {
 		if i + 12 <= content.len && content[i + 6] == `\\` && content[i + 7] == `u` {
 			lo := hex4_to_int(content[i + 8..i + 12]) or { return none }
 			if lo >= 0xDC00 && lo <= 0xDFFF {
-				return 0x10000 + ((hi - 0xD800) << 10) + (lo - 0xDC00), 12
+				return 0x10000 + int(u32(hi - 0xD800) << 10) + (lo - 0xDC00), 12
 			}
 		}
 		return none
@@ -1700,12 +1700,11 @@ fn is_valid_v_identifier_name(name string) bool {
 		return false
 	}
 	first := t[0]
-	if !((first >= `a` && first <= `z`) || (first >= `A` && first <= `Z`) || first == `_`) {
+	if !is_ident_start(first) {
 		return false
 	}
 	for ch in t {
-		if !((ch >= `a` && ch <= `z`) || (ch >= `A` && ch <= `Z`)
-			|| (ch >= `0` && ch <= `9`) || ch == `_`) {
+		if !is_ident_char(ch) {
 			return false
 		}
 	}
