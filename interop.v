@@ -100,7 +100,7 @@ fn uri_to_path(uri string) string {
 	if !uri.starts_with('file:') {
 		return uri
 	}
-	mut rest := uri[5..] // strip 'file:'
+	mut rest := uri[5..].clone() // strip 'file:'
 	mut authority := ''
 	if rest.starts_with('//') {
 		rest = rest[2..]

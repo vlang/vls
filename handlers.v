@@ -854,7 +854,7 @@ fn (mut app App) handle_prepare_rename(request Request) Response {
 	}
 	// Identifiers used for rename must start with a letter or underscore.
 	first := symbol[0]
-	if !((first >= `a` && first <= `z`) || (first >= `A` && first <= `Z`) || first == `_`) {
+	if !is_ident_start(first) {
 		return Response{
 			id:     request.id
 			result: 'null'
@@ -1320,6 +1320,11 @@ fn is_ident_char(c u8) bool {
 	return (c >= `a` && c <= `z`) || (c >= `A` && c <= `Z`) || (c >= `0` && c <= `9`) || c == `_`
 }
 
+// is_ident_start reports whether `c` can begin an identifier (letter or underscore).
+fn is_ident_start(c u8) bool {
+	return (c >= `a` && c <= `z`) || (c >= `A` && c <= `Z`) || c == `_`
+}
+
 // PositionEncoding is the unit the client uses for LSP `character` offsets.
 // LSP defaults to utf16; utf8 (byte offsets) and utf32 (code points) are only
 // used when negotiated via the client's `general.positionEncodings`.
@@ -1327,16 +1332,6 @@ enum PositionEncoding {
 	utf16
 	utf8
 	utf32
-}
-
-// parse_position_encoding maps an LSP encoding string to a PositionEncoding.
-fn parse_position_encoding(s string) ?PositionEncoding {
-	return match s {
-		'utf-16' { PositionEncoding.utf16 }
-		'utf-8' { PositionEncoding.utf8 }
-		'utf-32' { PositionEncoding.utf32 }
-		else { none }
-	}
 }
 
 // position_encoding_string is the LSP wire string for a PositionEncoding.
@@ -2144,7 +2139,7 @@ fn source_occurrence_is_generic_parameter(lines []string, line_idx int, start_by
 	}
 	for parameter in parameter_lines.join('\n').split(',') {
 		name := parameter.trim_space()
-		if name == '' || name[0] >= `0` && name[0] <= `9` {
+		if name == '' || (name[0] >= `0` && name[0] <= `9`) {
 			return false
 		}
 		for c in name {
@@ -2501,8 +2496,8 @@ fn find_declaration_line(lines []string, symbol string) int {
 				rest := stripped[prefix.len..]
 				// Handle method receivers: fn (recv) name(
 				actual_rest := if rest.starts_with('(') {
-					close := rest.index(')') or { break }
-					rest[close + 1..].trim_space()
+					close_idx := rest.index(')') or { break }
+					rest[close_idx + 1..].trim_space()
 				} else {
 					rest
 				}
@@ -3081,7 +3076,8 @@ fn infer_type_from_literal(rhs string) string {
 	if r.contains('.') {
 		mut is_float := true
 		for c in r {
-			if !((c >= `0` && c <= `9`) || c == `.` || c == `-` || c == `_`) {
+			is_float_char := (c >= `0` && c <= `9`) || c == `.` || c == `-` || c == `_`
+			if !is_float_char {
 				is_float = false
 				break
 			}
@@ -3096,7 +3092,8 @@ fn infer_type_from_literal(rhs string) string {
 	}
 	mut is_int := true
 	for c in r {
-		if !((c >= `0` && c <= `9`) || c == `-` || c == `_`) {
+		is_int_char := (c >= `0` && c <= `9`) || c == `-` || c == `_`
+		if !is_int_char {
 			is_int = false
 			break
 		}
@@ -3400,13 +3397,13 @@ fn extract_fn_name(after_fn string) string {
 	}
 	if t.starts_with('(') {
 		// method: (recv) name(params...
-		close := t.index(')') or { return '' }
-		rest := t[close + 1..].trim_space()
+		close_idx := t.index(')') or { return '' }
+		rest := t[close_idx + 1..].trim_space()
 		name := first_word_paren(rest)
 		if name == '' {
 			return ''
 		}
-		receiver := t[1..close]
+		receiver := t[1..close_idx]
 		return '(${receiver}) ${name}'
 	}
 	return first_word_paren(t)
@@ -3913,8 +3910,8 @@ fn build_fn_snippet(fn_name string, params_str string) string {
 		return fn_name + '()'
 	}
 	// Find closing paren of parameter list.
-	close := params_str.index(')') or { return fn_name + '()' }
-	inner := params_str[1..close].trim_space()
+	close_idx := params_str.index(')') or { return fn_name + '()' }
+	inner := params_str[1..close_idx].trim_space()
 	if inner == '' {
 		return fn_name + '()'
 	}
@@ -4640,12 +4637,12 @@ fn (mut app App) handle_linked_editing_range(request Request) Response {
 	mut col := 0
 	for col < line_text.len {
 		idx := line_text[col..].index(symbol) or { break }
-		abs := col + idx
-		before_ok := abs == 0 || !is_ident_char(line_text[abs - 1])
-		after_ok := abs + symbol.len >= line_text.len || !is_ident_char(line_text[abs + symbol.len])
+		abs_idx := col + idx
+		before_ok := abs_idx == 0 || !is_ident_char(line_text[abs_idx - 1])
+		after_ok := abs_idx + symbol.len >= line_text.len || !is_ident_char(line_text[abs_idx + symbol.len])
 		if before_ok && after_ok {
-			sc := byte_to_encoded_col(line_text, abs, app.position_encoding)
-			ec := byte_to_encoded_col(line_text, abs + symbol.len, app.position_encoding)
+			sc := byte_to_encoded_col(line_text, abs_idx, app.position_encoding)
+			ec := byte_to_encoded_col(line_text, abs_idx + symbol.len, app.position_encoding)
 			ranges << LSPRange{
 				start: Position{
 					line: params.position.line
@@ -4657,7 +4654,7 @@ fn (mut app App) handle_linked_editing_range(request Request) Response {
 				}
 			}
 		}
-		col = abs + 1
+		col = abs_idx + 1
 	}
 	if ranges.len == 0 {
 		return Response{
