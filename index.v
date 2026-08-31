@@ -212,9 +212,9 @@ fn scan_code_identifier_occurrences(line_text string, line_idx int, start int, e
 			col += 2
 			continue
 		}
-		if c == `r` && col + 1 < line_text.len
+		if c in [`r`, `c`] && col + 1 < line_text.len
 			&& (line_text[col + 1] == `"` || line_text[col + 1] == `'`) {
-			state.raw_string = true
+			state.raw_string = c == `r`
 			col = scan_literal_identifier_occurrences(line_text, line_idx, col + 1, enc, mut state, mut
 				occ)
 			continue

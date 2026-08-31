@@ -609,6 +609,17 @@ fn test_extract_identifier_occurrences_skips_raw_string_interpolation_text() {
 	assert 'r' !in occ
 }
 
+fn test_extract_identifier_occurrences_skips_c_string_prefixes() {
+	content := "fn c() {}\nfn main() {\n\ttext := c'hello'\n\tprintln(text)\n}\n"
+	occ := extract_identifier_occurrences(content, .utf16)
+
+	// The declaration is indexed, but the C-string prefix and contents are not
+	// references to top-level declarations with matching names.
+	assert occ['c'].len == 1
+	assert occ['c'][0].line == 0
+	assert 'hello' !in occ
+}
+
 fn test_extract_identifier_occurrences_tracks_multiline_interpolations() {
 	content := "fn helper() int { return 1 }\nfn main() {\n\tvalue := 1\n\ttext := 'result \${match value {\n\t\t1 {\n\t\t\thelper()\n\t\t}\n\t\telse { 0 }\n\t}} literal_helper'\n\thelper()\n}\n"
 	occ := extract_identifier_occurrences(content, .utf16)

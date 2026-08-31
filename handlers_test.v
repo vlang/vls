@@ -922,6 +922,30 @@ fn test_resolve_indexed_definition_rejects_comments_and_string_literals() {
 	assert location.range.start.line == 2
 }
 
+fn test_resolve_indexed_definition_rejects_c_string_prefix() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'indexed_definition_c_string_prefix')
+	must_mkdir_all(test_dir)
+	test_file := os.join_path(test_dir, 'main.v')
+	content := "module main\n\nfn c() {}\n\nfn main() {\n\ttext := c'hello'\n\tprintln(text)\n}\n"
+	must_write_file(test_file, content)
+	uri := path_to_uri(test_file)
+	app.open_files[uri] = content
+	c_string_col := content.split_into_lines()[5].index("c'hello'") or {
+		assert false, 'expected C-string prefix'
+		return
+	}
+
+	location := app.resolve_indexed_definition(uri, Position{
+		line: 5
+		char: c_string_col
+	})
+	assert location == none
+}
+
 fn test_resolve_indexed_definition_rejects_multiline_string_continuations() {
 	mut app := create_test_app()
 	defer {
