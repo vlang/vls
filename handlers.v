@@ -2232,6 +2232,31 @@ fn source_occurrence_is_for_binding(lines []string, line_idx int, start_byte int
 	return false
 }
 
+fn source_occurrence_has_type_suffix(lines []string, line_idx int, end_byte int) bool {
+	if line_idx < 0 || line_idx >= lines.len || end_byte < 0
+		|| end_byte > lines[line_idx].len {
+		return false
+	}
+	mut scan_state := ImportScanState{}
+	for current_line in 0 .. line_idx + 1 {
+		raw_line := lines[current_line]
+		fragment := if current_line == line_idx { raw_line[..end_byte] } else { raw_line }
+		source_line_import_code(fragment, mut scan_state)
+	}
+	code := source_line_import_code(lines[line_idx][end_byte..], mut scan_state)
+	mut has_separator := false
+	for c in code {
+		if c in [` `, `\t`, `\r`] {
+			has_separator = true
+			continue
+		}
+		is_type_start := (is_ident_char(c) && !(c >= `0` && c <= `9`))
+			|| c in [`[`, `?`, `&`, `.`]
+		return has_separator && is_type_start
+	}
+	return false
+}
+
 // source_occurrences_have_potential_local_binding conservatively recognizes
 // local declarations that can shadow a top-level or imported symbol. False
 // positives only defer to compiler-backed lookup; false negatives could return
@@ -2258,12 +2283,7 @@ fn source_occurrences_have_potential_local_binding(lines []string, occurrences [
 		if source_occurrence_is_generic_parameter(lines, occurrence.line, start_byte, end_byte) {
 			return true
 		}
-		mut suffix_byte := end_byte
-		for suffix_byte < line.len && (line[suffix_byte] == ` ` || line[suffix_byte] == `\t`) {
-			suffix_byte++
-		}
-		if suffix_byte > end_byte && suffix_byte < line.len
-			&& (is_ident_char(line[suffix_byte]) || line[suffix_byte] in [`[`, `?`, `&`, `.`]) {
+		if source_occurrence_has_type_suffix(lines, occurrence.line, end_byte) {
 			return true
 		}
 	}

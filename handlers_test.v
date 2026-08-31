@@ -1792,6 +1792,41 @@ fn test_resolve_indexed_definition_defers_multiline_parameter_shadow() {
 	assert location == none
 }
 
+fn test_resolve_indexed_definition_defers_commented_parameter_shadow() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'indexed_definition_commented_parameter_shadow')
+	must_mkdir_all(test_dir)
+	test_file := os.join_path(test_dir, 'main.v')
+	content := 'module main\n\nfn helper() {}\n\nfn use(helper /* explanation */ int) {\n\tprintln(helper)\n}\n'
+	must_write_file(test_file, content)
+	uri := path_to_uri(test_file)
+	app.open_files[uri] = content
+	lines := content.split_into_lines()
+	parameter_col := lines[4].index('helper') or {
+		assert false, 'expected commented parameter'
+		return
+	}
+	use_col := lines[5].index('helper') or {
+		assert false, 'expected parameter use'
+		return
+	}
+
+	assert source_occurrence_has_type_suffix(lines, 4, parameter_col + 6)
+	for position in [Position{
+		line: 4
+		char: parameter_col + 2
+	}, Position{
+		line: 5
+		char: use_col + 2
+	}] {
+		location := app.resolve_indexed_definition(uri, position)
+		assert location == none
+	}
+}
+
 fn test_resolve_indexed_definition_excludes_inactive_platform_file() {
 	mut app := create_test_app()
 	defer {
