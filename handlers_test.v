@@ -1238,6 +1238,32 @@ fn test_resolve_indexed_definition_defers_method_declaration_name() {
 	assert location == none
 }
 
+fn test_resolve_indexed_definition_defers_multiline_method_declaration_name() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'indexed_definition_multiline_method_declaration')
+	must_mkdir_all(test_dir)
+	test_file := os.join_path(test_dir, 'main.v')
+	content := 'module main\n\nstruct X {}\n\nfn helper() {}\n\nfn (\n\tx X\n) helper() {}\n'
+	must_write_file(test_file, content)
+	uri := path_to_uri(test_file)
+	app.open_files[uri] = content
+	lines := content.split_into_lines()
+	method_col := lines[8].index('helper') or {
+		assert false, 'expected multiline method declaration name'
+		return
+	}
+
+	assert source_occurrence_is_method_declaration(lines, 8, method_col)
+	location := app.resolve_indexed_definition(uri, Position{
+		line: 8
+		char: method_col + 2
+	})
+	assert location == none
+}
+
 fn test_resolve_indexed_definition_defers_interface_method_signature() {
 	mut app := create_test_app()
 	defer {

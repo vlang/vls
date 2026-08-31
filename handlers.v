@@ -1662,19 +1662,46 @@ fn source_line_is_module_or_import_declaration(lines []string, target_line int) 
 	return false
 }
 
-fn source_occurrence_is_method_declaration(line string, start_byte int) bool {
-	if start_byte < 0 || start_byte > line.len {
+fn source_occurrence_is_method_declaration(lines []string, target_line int, start_byte int) bool {
+	if target_line < 0 || target_line >= lines.len || start_byte < 0
+		|| start_byte > lines[target_line].len {
 		return false
 	}
-	mut prefix := line[..start_byte].trim_space()
-	if prefix.starts_with('pub ') {
-		prefix = prefix[4..].trim_space()
+	mut code_lines := []string{cap: target_line + 1}
+	mut scan_state := ImportScanState{}
+	for line_idx in 0 .. target_line + 1 {
+		raw_line := lines[line_idx]
+		fragment := if line_idx == target_line { raw_line[..start_byte] } else { raw_line }
+		code_lines << source_line_import_code(fragment, mut scan_state)
 	}
-	if !prefix.starts_with('fn ') {
+	prefix := code_lines.join(' ').trim_space()
+	if prefix.len < 3 || prefix[prefix.len - 1] != `)` {
 		return false
 	}
-	receiver := prefix[3..].trim_space()
-	return receiver.starts_with('(') && receiver.ends_with(')')
+	mut depth := 0
+	mut receiver_start := -1
+	mut col := prefix.len - 1
+	for col >= 0 {
+		if prefix[col] == `)` {
+			depth++
+		} else if prefix[col] == `(` {
+			depth--
+			if depth == 0 {
+				receiver_start = col
+				break
+			}
+		}
+		col--
+	}
+	if receiver_start < 0 || prefix[receiver_start + 1..prefix.len - 1].trim_space() == '' {
+		return false
+	}
+	declaration_prefix := prefix[..receiver_start].trim_space()
+	if !declaration_prefix.ends_with('fn') {
+		return false
+	}
+	fn_start := declaration_prefix.len - 2
+	return fn_start == 0 || !is_ident_char(declaration_prefix[fn_start - 1])
 }
 
 fn source_occurrence_has_compile_time_prefix(line string, start_byte int) bool {
@@ -2112,7 +2139,7 @@ fn (mut app App) resolve_indexed_definition(uri string, position Position) ?Loca
 	if source_occurrence_is_enum_member_declaration(content, symbol, position.line) {
 		return none
 	}
-	if source_occurrence_is_method_declaration(line, start_byte) {
+	if source_occurrence_is_method_declaration(lines, position.line, start_byte) {
 		return none
 	}
 	if source_occurrence_is_interface_method_signature(lines, position.line, start_byte, end_byte) {
