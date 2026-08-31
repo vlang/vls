@@ -242,11 +242,18 @@ fn parse_import_aliases(content string) map[string]string {
 	return aliases
 }
 
+struct ImportInterpolationState {
+	quote u8
+mut:
+	brace_depth int
+}
+
 struct ImportScanState {
 mut:
 	in_block_comment bool
 	quote            u8
 	raw_string       bool
+	interpolations   []ImportInterpolationState
 }
 
 fn source_line_import_code(line string, mut state ImportScanState) string {
@@ -268,6 +275,16 @@ fn source_line_import_code(line string, mut state ImportScanState) string {
 				col += 2
 				continue
 			}
+			if !state.raw_string && line[col] == `$` && col + 1 < line.len
+				&& line[col + 1] == `{` {
+				state.interpolations << ImportInterpolationState{
+					quote: state.quote
+				}
+				state.quote = 0
+				code << ` `
+				col += 2
+				continue
+			}
 			if line[col] == state.quote {
 				state.quote = 0
 				state.raw_string = false
@@ -283,6 +300,27 @@ fn source_line_import_code(line string, mut state ImportScanState) string {
 			state.in_block_comment = true
 			code << ` `
 			col += 2
+			continue
+		}
+		if line[col] == `{` && state.interpolations.len > 0 {
+			last := state.interpolations.len - 1
+			state.interpolations[last].brace_depth++
+			code << line[col]
+			col++
+			continue
+		}
+		if line[col] == `}` && state.interpolations.len > 0 {
+			last := state.interpolations.len - 1
+			if state.interpolations[last].brace_depth == 0 {
+				interpolation := state.interpolations.pop()
+				state.quote = interpolation.quote
+				state.raw_string = false
+				code << ` `
+			} else {
+				state.interpolations[last].brace_depth--
+				code << line[col]
+			}
+			col++
 			continue
 		}
 		if line[col] == `r` && col + 1 < line.len

@@ -1820,7 +1820,7 @@ fn test_resolve_indexed_definition_ignores_import_in_multiline_string() {
 	main_file := os.join_path(test_dir, 'main.v')
 	right_file := os.join_path(right_dir, 'right.v')
 	wrong_file := os.join_path(wrong_dir, 'wrong.v')
-	main_content := "module main\n\nimport right as util\n\nconst ignored = 'text\nimport wrong as util\n'\n\nfn main() {\n\tutil.answer()\n}\n"
+	main_content := "module main\n\nimport right as util\n\nconst ignored = 'text \${\n\t'import wrong as util'\n}'\n\nfn main() {\n\tutil.answer()\n}\n"
 	right_content := 'module right\n\npub fn answer() {}\n'
 	wrong_content := 'module wrong\n\npub fn answer() {}\n'
 	must_write_file(main_file, main_content)
@@ -3469,6 +3469,19 @@ fn test_source_line_import_code_closes_raw_string_after_backslash() {
 	assert state.quote == 0
 	assert !state.raw_string
 	assert source_line_import_code('sql db {', mut state) == 'sql db {'
+}
+
+fn test_source_line_import_code_preserves_multiline_interpolation_mode() {
+	mut state := ImportScanState{}
+	start := source_line_import_code("text := 'value \${", mut state)
+	nested := source_line_import_code("\t'import wrong as util'", mut state)
+	end := source_line_import_code("}'", mut state)
+
+	assert start.trim_space() == 'text :='
+	assert nested.trim_space() == ''
+	assert end.trim_space() == ''
+	assert state.quote == 0
+	assert state.interpolations.len == 0
 }
 
 fn test_parse_imports_single() {
