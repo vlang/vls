@@ -1484,7 +1484,7 @@ fn test_resolve_indexed_definition_defers_orm_field_reference() {
 	test_dir := os.join_path(app.temp_dir, 'indexed_definition_orm_field')
 	must_mkdir_all(test_dir)
 	test_file := os.join_path(test_dir, 'main.v')
-	content := "module main\n\nfn age() {}\n\nfn query() {\n\ttext := r'foo\\'\n\t_ := sql db {\n\t\tselect from User where age > 21\n\t}\n\tprintln(text)\n}\n"
+	content := "module main\n\nfn age() {}\n\nfn query() {\n\ttext := r'foo\\'\n\t_ := sql app.db {\n\t\tselect from User where age > 21\n\t}\n\tprintln(text)\n}\n"
 	must_write_file(test_file, content)
 	uri := path_to_uri(test_file)
 	app.open_files[uri] = content

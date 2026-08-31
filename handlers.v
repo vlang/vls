@@ -1820,7 +1820,9 @@ fn source_occurrence_is_sql_expression(lines []string, target_line int, start_by
 	}
 	mut brace_depth := 0
 	mut sql_depths := []int{}
-	mut sql_prefix_tokens := 0
+	// 1 means the contextual `sql` keyword was seen; 2 means its database
+	// expression has started and remains active until the query block opens.
+	mut sql_connection_state := 0
 	mut scan_state := ImportScanState{}
 	for line_idx, raw_line in lines {
 		if line_idx > target_line {
@@ -1837,21 +1839,19 @@ fn source_occurrence_is_sql_expression(lines []string, target_line int, start_by
 					col++
 				}
 				identifier := line[identifier_start..col]
-				if identifier == 'sql' {
-					sql_prefix_tokens = 1
-				} else if sql_prefix_tokens == 1 {
-					sql_prefix_tokens = 2
-				} else if sql_prefix_tokens == 2 {
-					sql_prefix_tokens = 0
+				if sql_connection_state == 0 && sql_depths.len == 0 && identifier == 'sql' {
+					sql_connection_state = 1
+				} else if sql_connection_state == 1 {
+					sql_connection_state = 2
 				}
 				continue
 			}
 			if line[col] == `{` {
 				brace_depth++
-				if sql_prefix_tokens == 2 {
+				if sql_connection_state == 2 {
 					sql_depths << brace_depth
 				}
-				sql_prefix_tokens = 0
+				sql_connection_state = 0
 			} else if line[col] == `}` {
 				if sql_depths.len > 0 && sql_depths.last() == brace_depth {
 					sql_depths.delete_last()
@@ -1859,9 +1859,12 @@ fn source_occurrence_is_sql_expression(lines []string, target_line int, start_by
 				if brace_depth > 0 {
 					brace_depth--
 				}
-				sql_prefix_tokens = 0
-			} else if line[col] != ` ` && line[col] != `\t` && line[col] != `\r` {
-				sql_prefix_tokens = 0
+				sql_connection_state = 0
+			} else if sql_connection_state == 1 && line[col] != ` ` && line[col] != `\t`
+				&& line[col] != `\r` {
+				sql_connection_state = 0
+			} else if sql_connection_state == 2 && line[col] == `;` {
+				sql_connection_state = 0
 			}
 			col++
 		}
