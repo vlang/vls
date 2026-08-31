@@ -122,11 +122,18 @@ struct OccEntry {
 	occ         map[string][]TokenOccurrence
 }
 
+struct OccurrenceInterpolationState {
+	quote u8
+mut:
+	brace_depth int
+}
+
 struct OccurrenceScanState {
 mut:
 	in_block_comment bool
 	quote            u8
 	raw_string       bool
+	interpolations   []OccurrenceInterpolationState
 }
 
 fn add_identifier_occurrence(line_text string, line_idx int, start int, end int, enc PositionEncoding, mut occ map[string][]TokenOccurrence) {
@@ -165,10 +172,11 @@ fn scan_literal_identifier_occurrences(line_text string, line_idx int, start int
 		if !state.raw_string && line_text[col] == `$` && col + 1 < line_text.len
 			&& line_text[col + 1] == `{` {
 			state.quote = 0
-			col = scan_code_identifier_occurrences(line_text, line_idx, col + 2, enc, true, mut
-				state, mut occ)
-			state.quote = quote
-			continue
+			state.interpolations << OccurrenceInterpolationState{
+				quote: quote
+			}
+			return scan_code_identifier_occurrences(line_text, line_idx, col + 2, enc, mut state, mut
+				occ)
 		}
 		col++
 	}
@@ -176,10 +184,10 @@ fn scan_literal_identifier_occurrences(line_text string, line_idx int, start int
 }
 
 // scan_code_identifier_occurrences indexes code between `start` and the end of
-// the line, or through the matching `}` for a braced interpolation expression.
-fn scan_code_identifier_occurrences(line_text string, line_idx int, start int, enc PositionEncoding, stop_at_closing_brace bool, mut state OccurrenceScanState, mut occ map[string][]TokenOccurrence) int {
+// the line. Braced interpolation state is retained across lines, including its
+// nested brace depth, and the suspended literal resumes after the matching `}`.
+fn scan_code_identifier_occurrences(line_text string, line_idx int, start int, enc PositionEncoding, mut state OccurrenceScanState, mut occ map[string][]TokenOccurrence) int {
 	mut col := start
-	mut brace_depth := 0
 	for col < line_text.len {
 		if state.quote != 0 {
 			col = scan_literal_identifier_occurrences(line_text, line_idx, col, enc, mut state, mut
@@ -217,15 +225,21 @@ fn scan_code_identifier_occurrences(line_text string, line_idx int, start int, e
 			continue
 		}
 		if c == `{` {
-			brace_depth++
+			if state.interpolations.len > 0 {
+				last := state.interpolations.len - 1
+				state.interpolations[last].brace_depth++
+			}
 			col++
 			continue
 		}
-		if c == `}` && stop_at_closing_brace {
-			if brace_depth == 0 {
-				return col + 1
+		if c == `}` && state.interpolations.len > 0 {
+			last := state.interpolations.len - 1
+			if state.interpolations[last].brace_depth == 0 {
+				interpolation := state.interpolations.pop()
+				state.quote = interpolation.quote
+			} else {
+				state.interpolations[last].brace_depth--
 			}
-			brace_depth--
 			col++
 			continue
 		}
@@ -253,7 +267,7 @@ fn extract_identifier_occurrences(content string, enc PositionEncoding) map[stri
 	mut occ := map[string][]TokenOccurrence{}
 	mut state := OccurrenceScanState{}
 	for line_idx, line_text in content.split_into_lines() {
-		scan_code_identifier_occurrences(line_text, line_idx, 0, enc, false, mut state, mut occ)
+		scan_code_identifier_occurrences(line_text, line_idx, 0, enc, mut state, mut occ)
 	}
 	return occ
 }

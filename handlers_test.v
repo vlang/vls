@@ -971,6 +971,34 @@ fn test_resolve_indexed_definition_rejects_rune_literals() {
 	assert location == none
 }
 
+fn test_resolve_indexed_definition_accepts_multiline_string_interpolations() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'indexed_definition_multiline_interpolation')
+	must_mkdir_all(test_dir)
+	test_file := os.join_path(test_dir, 'main.v')
+	content := "module main\n\nfn helper() string { return 'ok' }\n\nfn main() {\n\ttext := 'result \${\n\t\thelper()\n\t}'\n\tprintln(text)\n}\n"
+	must_write_file(test_file, content)
+	uri := path_to_uri(test_file)
+	app.open_files[uri] = content
+	helper_col := content.split_into_lines()[6].index('helper') or {
+		assert false, 'expected multiline interpolation reference'
+		return
+	}
+
+	location := app.resolve_indexed_definition(uri, Position{
+		line: 6
+		char: helper_col + 2
+	}) or {
+		assert false, 'expected indexed multiline interpolation definition'
+		return
+	}
+	assert location.uri == uri
+	assert location.range.start.line == 2
+}
+
 fn test_resolve_indexed_definition_defers_module_and_import_declarations() {
 	mut app := create_test_app()
 	defer {
@@ -5618,6 +5646,16 @@ fn test_document_highlight_candidates_include_braced_string_interpolations() {
 	assert candidates[0].line_idx == 0
 	assert candidates[1].line_idx == 1
 	assert collect_document_highlight_candidates(content, lines, 'literal_name', .utf16).len == 0
+}
+
+fn test_document_highlight_candidates_include_multiline_string_interpolations() {
+	content := "fn greet(name string) {\n\tprintln('hello \${\n\t\tname\n\t}')\n}\n"
+	lines := content.split_into_lines()
+
+	candidates := collect_document_highlight_candidates(content, lines, 'name', .utf16)
+	assert candidates.len == 2
+	assert candidates[0].line_idx == 0
+	assert candidates[1].line_idx == 2
 }
 
 fn test_document_highlight_returns_empty_over_semantic_cap() {
