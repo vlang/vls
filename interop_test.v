@@ -411,6 +411,22 @@ fn test_parse_v_check_diagnostics_reads_v3_output() {
 	assert diagnostics[1].len == 5
 }
 
+fn test_parse_v_check_diagnostics_maps_v3_builder_error_to_error() {
+	output := '/tmp/main.v:3:1: builder error: cannot import module "missing" (not found)
+    3 | import missing
+      | ~~~~~~~~~~~~~~
+'
+	diagnostics := parse_v_check_diagnostics(output, '')
+	assert diagnostics == [JsonError{
+		path:    '/tmp/main.v'
+		message: 'cannot import module "missing" (not found)'
+		line_nr: 3
+		col:     1
+		len:     14
+		level:   'error'
+	}]
+}
+
 fn test_parse_v_check_diagnostics_preserves_windows_drive_path() {
 	header := r'C:\work\project\main.v:12:9: notice: deprecated declaration'
 	diagnostics := parse_v_check_diagnostics(header, '')

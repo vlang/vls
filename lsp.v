@@ -389,11 +389,17 @@ struct WorkspaceInlayHintsSettings {
 	enabled ?bool
 }
 
+// WorkspaceDiagnosticsSettings supports the nested setting shape contributed
+// by the VS Code/VSCodium extension: `vls.diagnostics.enabled`.
+struct WorkspaceDiagnosticsSettings {
+	enabled ?bool
+}
+
 // WorkspaceVlsSettingsCompat mirrors WorkspaceVlsSettings but with nested
-// inlay-hints shape used by some clients.
+// feature settings used by the VS Code/VSCodium extension.
 struct WorkspaceVlsSettingsCompat {
 	inlay_hints WorkspaceInlayHintsSettings @[json: 'inlayHints']
-	diagnostics ?bool
+	diagnostics WorkspaceDiagnosticsSettings
 }
 
 // WorkspaceSettings is the top-level object inside DidChangeConfigurationParams.
