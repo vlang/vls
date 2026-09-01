@@ -6365,6 +6365,55 @@ fn test_workspace_configuration_toggles_feature_behavior() {
 	assert app.diagnostics_enabled
 }
 
+fn test_workspace_configuration_preserves_mixed_setting_shapes() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+
+	app.on_did_change_configuration(Request{
+		method: 'workspace/didChangeConfiguration'
+		params: '{"settings":{"vls":{"inlayHints":false,"diagnostics":true}}}'
+	})
+	assert !app.inlay_hints_enabled
+	assert app.diagnostics_enabled
+
+	app.on_did_change_configuration(Request{
+		method: 'workspace/didChangeConfiguration'
+		params: '{"settings":{"vls":{"inlayHints":{"enabled":false},"diagnostics":true}}}'
+	})
+	assert !app.inlay_hints_enabled
+	assert app.diagnostics_enabled
+
+	app.on_did_change_configuration(Request{
+		method: 'workspace/didChangeConfiguration'
+		params: '{"settings":{"vls":{"inlayHints":true,"diagnostics":{"enabled":false}}}}'
+	})
+	assert app.inlay_hints_enabled
+	assert !app.diagnostics_enabled
+
+	app.on_did_change_configuration(Request{
+		method: 'workspace/didChangeConfiguration'
+		params: '{"settings":{"inlayHints":{"enabled":false},"diagnostics":true}}'
+	})
+	assert !app.inlay_hints_enabled
+	assert app.diagnostics_enabled
+
+	app.on_did_change_configuration(Request{
+		method: 'workspace/didChangeConfiguration'
+		params: '{"settings":{"inlayHints":true,"diagnostics":{"enabled":false}}}'
+	})
+	assert app.inlay_hints_enabled
+	assert !app.diagnostics_enabled
+
+	app.on_did_change_configuration(Request{
+		method: 'workspace/didChangeConfiguration'
+		params: '{"settings":{"inlayHints":{"enabled":false},"diagnostics":{"enabled":true}}}'
+	})
+	assert !app.inlay_hints_enabled
+	assert app.diagnostics_enabled
+}
+
 fn test_will_save_wait_until_formats_without_mutating_open_document() {
 	mut app := create_test_app()
 	defer {

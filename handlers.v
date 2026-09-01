@@ -4169,70 +4169,72 @@ mut:
 fn resolve_workspace_settings(params_json string) ResolvedWorkspaceSettings {
 	mut resolved := ResolvedWorkspaceSettings{}
 
-	// 1) Preferred shape: settings.vls.{inlayHints, diagnostics}
-	sectioned := json2.decode[DidChangeConfigurationParams](params_json) or {
+	sectioned_flat := json2.decode[DidChangeConfigurationParams](params_json) or {
 		DidChangeConfigurationParams{}
 	}
-	if enabled := sectioned.settings.vls.inlay_hints {
-		resolved.inlay_hints = enabled
-		resolved.has_inlay_hints = true
-	}
-	if enabled := sectioned.settings.vls.diagnostics {
-		resolved.diagnostics = enabled
-		resolved.has_diagnostics = true
-	}
+	merge_workspace_settings(mut resolved, sectioned_flat.settings.vls.inlay_hints,
+		sectioned_flat.settings.vls.diagnostics)
 
-	// 2) Direct shape: settings.{inlayHints, diagnostics}
-	direct := json2.decode[DidChangeConfigurationDirectParams](params_json) or {
-		DidChangeConfigurationDirectParams{}
-	}
-	if !resolved.has_inlay_hints {
-		if enabled := direct.settings.inlay_hints {
-			resolved.inlay_hints = enabled
-			resolved.has_inlay_hints = true
-		}
-	}
-	if !resolved.has_diagnostics {
-		if enabled := direct.settings.diagnostics {
-			resolved.diagnostics = enabled
-			resolved.has_diagnostics = true
-		}
-	}
-
-	// 3) Nested compatibility shapes, used only when flat values are absent.
-	sectioned_nested := json2.decode[DidChangeConfigurationParamsCompat](params_json) or {
+	sectioned_inlay_nested := json2.decode[DidChangeConfigurationParamsCompat](params_json) or {
 		DidChangeConfigurationParamsCompat{}
 	}
-	if !resolved.has_inlay_hints {
-		if enabled := sectioned_nested.settings.vls.inlay_hints.enabled {
-			resolved.inlay_hints = enabled
-			resolved.has_inlay_hints = true
-		}
-	}
-	if !resolved.has_diagnostics {
-		if enabled := sectioned_nested.settings.vls.diagnostics.enabled {
-			resolved.diagnostics = enabled
-			resolved.has_diagnostics = true
-		}
-	}
+	merge_workspace_settings(mut resolved,
+		sectioned_inlay_nested.settings.vls.inlay_hints.enabled,
+		sectioned_inlay_nested.settings.vls.diagnostics)
 
-	direct_nested := json2.decode[DidChangeConfigurationDirectParamsCompat](params_json) or {
+	sectioned_diagnostics_nested := json2.decode[DidChangeConfigurationParamsNestedDiagnosticsCompat](params_json) or {
+		DidChangeConfigurationParamsNestedDiagnosticsCompat{}
+	}
+	merge_workspace_settings(mut resolved,
+		sectioned_diagnostics_nested.settings.vls.inlay_hints,
+		sectioned_diagnostics_nested.settings.vls.diagnostics.enabled)
+
+	sectioned_nested := json2.decode[DidChangeConfigurationParamsNestedFeaturesCompat](params_json) or {
+		DidChangeConfigurationParamsNestedFeaturesCompat{}
+	}
+	merge_workspace_settings(mut resolved, sectioned_nested.settings.vls.inlay_hints.enabled,
+		sectioned_nested.settings.vls.diagnostics.enabled)
+
+	direct_flat := json2.decode[DidChangeConfigurationDirectParams](params_json) or {
+		DidChangeConfigurationDirectParams{}
+	}
+	merge_workspace_settings(mut resolved, direct_flat.settings.inlay_hints,
+		direct_flat.settings.diagnostics)
+
+	direct_inlay_nested := json2.decode[DidChangeConfigurationDirectParamsCompat](params_json) or {
 		DidChangeConfigurationDirectParamsCompat{}
 	}
+	merge_workspace_settings(mut resolved, direct_inlay_nested.settings.inlay_hints.enabled,
+		direct_inlay_nested.settings.diagnostics)
+
+	direct_diagnostics_nested := json2.decode[DidChangeConfigurationDirectParamsNestedDiagnosticsCompat](params_json) or {
+		DidChangeConfigurationDirectParamsNestedDiagnosticsCompat{}
+	}
+	merge_workspace_settings(mut resolved, direct_diagnostics_nested.settings.inlay_hints,
+		direct_diagnostics_nested.settings.diagnostics.enabled)
+
+	direct_nested := json2.decode[DidChangeConfigurationDirectParamsNestedFeaturesCompat](params_json) or {
+		DidChangeConfigurationDirectParamsNestedFeaturesCompat{}
+	}
+	merge_workspace_settings(mut resolved, direct_nested.settings.inlay_hints.enabled,
+		direct_nested.settings.diagnostics.enabled)
+	return resolved
+}
+
+fn merge_workspace_settings(mut resolved ResolvedWorkspaceSettings, inlay_hints ?bool,
+	diagnostics ?bool) {
 	if !resolved.has_inlay_hints {
-		if enabled := direct_nested.settings.inlay_hints.enabled {
+		if enabled := inlay_hints {
 			resolved.inlay_hints = enabled
 			resolved.has_inlay_hints = true
 		}
 	}
 	if !resolved.has_diagnostics {
-		if enabled := direct_nested.settings.diagnostics.enabled {
+		if enabled := diagnostics {
 			resolved.diagnostics = enabled
 			resolved.has_diagnostics = true
 		}
 	}
-
-	return resolved
 }
 
 fn (mut app App) on_initialize(request Request) ?string {
