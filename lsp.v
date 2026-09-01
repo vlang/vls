@@ -389,15 +389,29 @@ struct WorkspaceInlayHintsSettings {
 	enabled ?bool
 }
 
-// WorkspaceDiagnosticsSettings supports the nested setting shape contributed
-// by the VS Code/VSCodium extension: `vls.diagnostics.enabled`.
+// WorkspaceDiagnosticsSettings supports client payloads that send
+// `settings.vls.diagnostics.enabled` as a nested object.
 struct WorkspaceDiagnosticsSettings {
 	enabled ?bool
 }
 
 // WorkspaceVlsSettingsCompat mirrors WorkspaceVlsSettings but with nested
-// feature settings used by the VS Code/VSCodium extension.
+// inlay-hints shape used by some clients.
 struct WorkspaceVlsSettingsCompat {
+	inlay_hints WorkspaceInlayHintsSettings @[json: 'inlayHints']
+	diagnostics ?bool
+}
+
+// WorkspaceVlsSettingsNestedDiagnosticsCompat supports flat inlay hints with
+// nested diagnostics.
+struct WorkspaceVlsSettingsNestedDiagnosticsCompat {
+	inlay_hints ?bool @[json: 'inlayHints']
+	diagnostics WorkspaceDiagnosticsSettings
+}
+
+// WorkspaceVlsSettingsNestedFeaturesCompat supports both feature settings as
+// nested objects.
+struct WorkspaceVlsSettingsNestedFeaturesCompat {
 	inlay_hints WorkspaceInlayHintsSettings @[json: 'inlayHints']
 	diagnostics WorkspaceDiagnosticsSettings
 }
@@ -423,6 +437,22 @@ struct DidChangeConfigurationParamsCompat {
 	settings WorkspaceSettingsCompat
 }
 
+struct WorkspaceSettingsNestedDiagnosticsCompat {
+	vls WorkspaceVlsSettingsNestedDiagnosticsCompat
+}
+
+struct DidChangeConfigurationParamsNestedDiagnosticsCompat {
+	settings WorkspaceSettingsNestedDiagnosticsCompat
+}
+
+struct WorkspaceSettingsNestedFeaturesCompat {
+	vls WorkspaceVlsSettingsNestedFeaturesCompat
+}
+
+struct DidChangeConfigurationParamsNestedFeaturesCompat {
+	settings WorkspaceSettingsNestedFeaturesCompat
+}
+
 // DidChangeConfigurationDirectParams covers clients that send the VLS section
 // directly in `settings` (without a nested `settings.vls` object).
 struct DidChangeConfigurationDirectParams {
@@ -433,6 +463,14 @@ struct DidChangeConfigurationDirectParams {
 // when `inlayHints` is itself a nested object with `enabled`.
 struct DidChangeConfigurationDirectParamsCompat {
 	settings WorkspaceVlsSettingsCompat
+}
+
+struct DidChangeConfigurationDirectParamsNestedDiagnosticsCompat {
+	settings WorkspaceVlsSettingsNestedDiagnosticsCompat
+}
+
+struct DidChangeConfigurationDirectParamsNestedFeaturesCompat {
+	settings WorkspaceVlsSettingsNestedFeaturesCompat
 }
 
 // WorkspaceFolder describes a workspace root provided during initialize.
