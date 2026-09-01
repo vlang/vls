@@ -3670,7 +3670,8 @@ fn (mut app App) handle_code_action(request Request) Response {
 	// 1. Quick fixes for diagnostics.
 	if code_action_kind_wanted(only, code_action_kind_quickfix) {
 		for diag in diagnostics {
-			if diag.message.contains('unknown module') {
+			message := diag.message.to_lower()
+			if message.contains('unknown module') || message.contains('cannot import module') {
 				line_nr := diag.range.start.line
 				if line_nr >= 0 && line_nr < lines.len
 					&& lines[line_nr].trim_space().starts_with('import ') {
@@ -4208,6 +4209,12 @@ fn resolve_workspace_settings(params_json string) ResolvedWorkspaceSettings {
 			resolved.has_inlay_hints = true
 		}
 	}
+	if !resolved.has_diagnostics {
+		if enabled := sectioned_nested.settings.vls.diagnostics.enabled {
+			resolved.diagnostics = enabled
+			resolved.has_diagnostics = true
+		}
+	}
 
 	direct_nested := json2.decode[DidChangeConfigurationDirectParamsCompat](params_json) or {
 		DidChangeConfigurationDirectParamsCompat{}
@@ -4216,6 +4223,12 @@ fn resolve_workspace_settings(params_json string) ResolvedWorkspaceSettings {
 		if enabled := direct_nested.settings.inlay_hints.enabled {
 			resolved.inlay_hints = enabled
 			resolved.has_inlay_hints = true
+		}
+	}
+	if !resolved.has_diagnostics {
+		if enabled := direct_nested.settings.diagnostics.enabled {
+			resolved.diagnostics = enabled
+			resolved.has_diagnostics = true
 		}
 	}
 

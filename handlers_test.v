@@ -5772,7 +5772,7 @@ fn test_remove_unknown_import_range_at_eof_without_newline() {
 	// encoded length instead so clients accept the range (P0-09).
 	app.open_files[uri] = 'module main\nimport foo'
 	diag := LSPDiagnostic{
-		message: 'unknown module `foo`'
+		message: 'cannot import module "foo" (not found)'
 		range:   LSPRange{
 			start: Position{
 				line: 1
@@ -6331,7 +6331,7 @@ fn test_workspace_configuration_toggles_feature_behavior() {
 
 	app.on_did_change_configuration(Request{
 		method: 'workspace/didChangeConfiguration'
-		params: '{"settings":{"vls":{"inlayHints":false,"diagnostics":false}}}'
+		params: '{"settings":{"vls":{"inlayHints":{"enabled":false},"diagnostics":{"enabled":false}}}}'
 	})
 	assert !app.inlay_hints_enabled
 	assert !app.diagnostics_enabled

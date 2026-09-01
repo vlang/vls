@@ -273,8 +273,9 @@ fn build_v_fmt_args(temp_file string) []string {
 
 // parse_v_check_diagnostics converts V3's flat-AST checker output into the
 // compiler-neutral diagnostic representation used by the LSP layer. V3 emits
-// headers as `path:line:column: severity: message`; paths may themselves
-// contain colons, so location fields are peeled from the right.
+// headers as `path:line:column: severity: message`; stage-specific severities
+// such as `builder error` are exposed to LSP clients as errors. Paths may
+// themselves contain colons, so location fields are peeled from the right.
 fn parse_v_check_diagnostics(output string, source_dir string) []JsonError {
 	mut diagnostics := []JsonError{}
 	mut active := -1
@@ -311,7 +312,8 @@ fn diagnostic_source_path_is_valid(path string, source_dir string) bool {
 fn parse_v_check_diagnostic_header(line string, source_dir string) ?JsonError {
 	mut best_marker_idx := -1
 	mut best := JsonError{}
-	for level in ['error', 'warning', 'notice'] {
+	for level in ['builder error', 'parser error', 'checker error', 'cgen error', 'error',
+		'warning', 'notice'] {
 		marker := ': ${level}: '
 		mut search_end := line.len
 		for search_end > 0 {
@@ -341,7 +343,7 @@ fn parse_v_check_diagnostic_header(line string, source_dir string) ?JsonError {
 					message: line[marker_idx + marker.len..]
 					line_nr: line_nr_text.int()
 					col:     col_text.int()
-					level:   level
+					level:   if level.contains('error') { 'error' } else { level }
 				}
 			}
 			break
