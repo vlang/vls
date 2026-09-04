@@ -69,10 +69,8 @@ struct DiagCacheEntry {
 	errors       []JsonError
 }
 
-// v_dir is the path to the V home directory, derived from the V compiler executable.
-// It is resolved once at process start and never changes.
-const v_dir = find_v_dir()
-
+// Keep runtime-derived settings behind functions. Function-call module constants can crash V3's
+// parallel constant precomputation while compiling VLS.
 // find_v_dir resolves the V home directory by finding the V executable and
 // returning its parent directory.
 fn find_v_dir() string {
@@ -86,15 +84,20 @@ fn find_v_dir() string {
 // shared unrotated file on every one of the ~160 call sites (P1-13). Set the
 // VLS_LOG environment variable to any non-empty value to enable logging to
 // ${TMPDIR}/vls_out.txt for debugging.
-const logging_enabled = os.getenv('VLS_LOG') != ''
-const log_file_path = os.join_path(os.temp_dir(), 'vls_out.txt')
+fn logging_is_enabled() bool {
+	return os.getenv('VLS_LOG') != ''
+}
+
+fn current_log_file_path() string {
+	return os.join_path(os.temp_dir(), 'vls_out.txt')
+}
 
 fn log(s string) {
-	if !logging_enabled {
+	if !logging_is_enabled() {
 		return
 	}
 	eprintln(s)
-	mut output := os.open_append(log_file_path) or { return }
+	mut output := os.open_append(current_log_file_path()) or { return }
 	output.writeln(s) or {
 		output.close()
 		return
@@ -525,37 +528,37 @@ fn (mut app App) handle_requests(mut reader io.BufferedReader) {
 			log('Consumed client response to a server-initiated request: ${content}')
 			continue
 		}
-		request := Request{
+		lsp_request := Request{
 			id:      raw_id_to_int(app.current_request_raw_id)
 			method:  body.method
 			jsonrpc: body.jsonrpc
 			params:  body.params
 		}
 		log('\n\nRECV (pretty): ${content}')
-		method := Method.from_string(request.method)
-		log('method="${method}" request.method="${request.method}" ${method == .completion}')
+		method := Method.from_string(lsp_request.method)
+		log('method="${method}" request.method="${lsp_request.method}" ${method == .completion}')
 		// Enforce request/notification direction (P0-03): a message with an id
 		// sent to a notification-only method is an InvalidRequest; a message
 		// without an id sent to a request-only method is dropped rather than
 		// processed into a response with a bogus id.
 		if has_id && method_is_notification_only(method) {
-			app.write_error_response(make_invalid_request_error_response(request.id,
-				'Method ${request.method} is a notification and cannot be sent as a request'))
+			app.write_error_response(make_invalid_request_error_response(lsp_request.id,
+				'Method ${lsp_request.method} is a notification and cannot be sent as a request'))
 			continue
 		}
 		if !has_id && method_requires_response(method) {
-			log('Dropping notification-shaped message for request-only method ${request.method}')
+			log('Dropping notification-shaped message for request-only method ${lsp_request.method}')
 			continue
 		}
-		if method_requires_response(method) && app.request_is_cancelled(request.id) {
-			app.write_error_response(make_cancelled_error_response(request.id))
-			app.consume_cancelled_request(request.id)
+		if method_requires_response(method) && app.request_is_cancelled(lsp_request.id) {
+			app.write_error_response(make_cancelled_error_response(lsp_request.id))
+			app.consume_cancelled_request(lsp_request.id)
 			continue
 		}
 		// After shutdown, reject all requests except exit.
 		if app.is_shutdown && method != .exit {
 			if has_id {
-				app.write_error_response(make_server_shutdown_error_response(request.id))
+				app.write_error_response(make_server_shutdown_error_response(lsp_request.id))
 			}
 			continue
 		}
@@ -564,72 +567,72 @@ fn (mut app App) handle_requests(mut reader io.BufferedReader) {
 		// to any request received before the initialize handshake completes.
 		if !app.received_initialize && method != .initialize && method != .exit {
 			if has_id {
-				app.write_error_response(make_server_not_initialized_error_response(request.id))
+				app.write_error_response(make_server_not_initialized_error_response(lsp_request.id))
 			}
 			continue
 		}
 		if has_id {
-			if err_msg := validate_request_params(method, request.params) {
-				app.write_error_response(make_invalid_params_error_response(request.id, err_msg))
+			if err_msg := validate_request_params(method, lsp_request.params) {
+				app.write_error_response(make_invalid_params_error_response(lsp_request.id, err_msg))
 				continue
 			}
 		} else {
-			if err_msg := validate_notification_params(method, request.params) {
-				log('Invalid notification params for ${request.method}: ${err_msg}')
+			if err_msg := validate_notification_params(method, lsp_request.params) {
+				log('Invalid notification params for ${lsp_request.method}: ${err_msg}')
 				continue
 			}
 		}
 		match method {
 			.completion, .signature_help, .definition, .hover, .declaration, .type_definition,
 			.implementation {
-				resp := app.operation_at_pos(method, request)
-				app.write_response_or_cancelled(request.id, resp)
+				resp := app.operation_at_pos(method, lsp_request)
+				app.write_response_or_cancelled(lsp_request.id, resp)
 			}
 			.references {
-				resp := app.find_references(request)
-				app.write_response_or_cancelled(request.id, resp)
+				resp := app.find_references(lsp_request)
+				app.write_response_or_cancelled(lsp_request.id, resp)
 			}
 			.rename {
-				resp := app.handle_rename(request)
-				app.write_response_or_cancelled(request.id, resp)
+				resp := app.handle_rename(lsp_request)
+				app.write_response_or_cancelled(lsp_request.id, resp)
 			}
 			.prepare_rename {
-				resp := app.handle_prepare_rename(request)
-				app.write_response_or_cancelled(request.id, resp)
+				resp := app.handle_prepare_rename(lsp_request)
+				app.write_response_or_cancelled(lsp_request.id, resp)
 			}
 			.workspace_symbol {
-				resp := app.handle_workspace_symbol(request)
-				app.write_response_or_cancelled(request.id, resp)
+				resp := app.handle_workspace_symbol(lsp_request)
+				app.write_response_or_cancelled(lsp_request.id, resp)
 			}
 			.formatting {
-				resp := app.handle_formatting(request)
-				app.write_response_or_cancelled(request.id, resp)
+				resp := app.handle_formatting(lsp_request)
+				app.write_response_or_cancelled(lsp_request.id, resp)
 			}
 			.document_symbols {
-				resp := app.handle_document_symbols(request)
-				app.write_response_or_cancelled(request.id, resp)
+				resp := app.handle_document_symbols(lsp_request)
+				app.write_response_or_cancelled(lsp_request.id, resp)
 			}
 			.inlay_hint {
-				resp := app.handle_inlay_hints(request)
-				app.write_response_or_cancelled(request.id, resp)
+				resp := app.handle_inlay_hints(lsp_request)
+				app.write_response_or_cancelled(lsp_request.id, resp)
 			}
 			.did_change {
-				notification := app.on_did_change(request) or { continue }
+				notification := app.on_did_change(lsp_request) or { continue }
 				app.write_notification(notification)
 			}
 			.initialize {
 				// Reject double-initialize per LSP spec.
 				if app.received_initialize {
-					app.write_error_response(make_server_already_initialized_error_response(request.id))
+					app.write_error_response(make_server_already_initialized_error_response(lsp_request.id))
 					continue
 				}
-				if err_msg := app.on_initialize(request) {
-					app.write_error_response(make_invalid_params_error_response(request.id, err_msg))
+				if err_msg := app.on_initialize(lsp_request) {
+					app.write_error_response(make_invalid_params_error_response(lsp_request.id, err_msg))
 					continue
 				}
 				// Return all supported capabilities, matching the LSP spec and what is implemented.
 				response := Response{
-					id:     request.id
+					id:     lsp_request.id
 					result: Capabilities{
 						capabilities: Capability{
 							// NOTE: Placeholder/stub capabilities are intentionally NOT
@@ -710,7 +713,7 @@ fn (mut app App) handle_requests(mut reader io.BufferedReader) {
 				}
 			}
 			.did_open {
-				app.on_did_open(request)
+				app.on_did_open(lsp_request)
 				// Publish diagnostics on open (P0-07 item 10). This compiles inline in
 				// the request loop, so opening many files serially blocks other
 				// requests until each compile returns. Moving it off the loop is the
@@ -719,7 +722,7 @@ fn (mut app App) handle_requests(mut reader io.BufferedReader) {
 				// then each compile is bounded by compiler_timeout_ms so a single
 				// invocation cannot hang the loop indefinitely, and diag_cache avoids
 				// recompiling unchanged content.
-				if params := json2.decode[DidOpenTextDocumentParams](request.params) {
+				if params := json2.decode[DidOpenTextDocumentParams](lsp_request.params) {
 					uri := params.text_document.uri
 					if doc_content := app.open_files[uri] {
 						app.write_notification(app.build_diagnostics_notification(uri, doc_content))
@@ -727,9 +730,9 @@ fn (mut app App) handle_requests(mut reader io.BufferedReader) {
 				}
 			}
 			.did_close {
-				app.on_did_close(request)
+				app.on_did_close(lsp_request)
 				// Clear published diagnostics for the closed document (P0-07 item 9).
-				if params := json2.decode[DidCloseTextDocumentParams](request.params) {
+				if params := json2.decode[DidCloseTextDocumentParams](lsp_request.params) {
 					app.write_notification(Notification{
 						method: 'textDocument/publishDiagnostics'
 						params: PublishDiagnosticsParams{
@@ -740,28 +743,28 @@ fn (mut app App) handle_requests(mut reader io.BufferedReader) {
 				}
 			}
 			.did_save {
-				notification := app.on_did_save(request) or { continue }
+				notification := app.on_did_save(lsp_request) or { continue }
 				app.write_notification(notification)
 			}
 			.will_save_wait_until {
-				resp := app.on_will_save_wait_until(request)
-				app.write_response_or_cancelled(request.id, resp)
+				resp := app.on_will_save_wait_until(lsp_request)
+				app.write_response_or_cancelled(lsp_request.id, resp)
 			}
 			.initialized {
 				log('Received initialized notification.')
-				app.on_initialized(request)
+				app.on_initialized(lsp_request)
 			}
 			.set_trace {
-				log('Received and ignored method: ${request.method}')
+				log('Received and ignored method: ${lsp_request.method}')
 			}
 			.cancel_request {
-				app.on_cancel_request(request)
+				app.on_cancel_request(lsp_request)
 			}
 			.shutdown {
 				log('Received shutdown request.')
 				app.is_shutdown = true
 				shutdown_resp := Response{
-					id:     request.id
+					id:     lsp_request.id
 					result: 'null'
 				}
 				app.write_response(shutdown_resp)
@@ -772,94 +775,94 @@ fn (mut app App) handle_requests(mut reader io.BufferedReader) {
 				break
 			}
 			.code_action {
-				resp := app.handle_code_action(request)
-				app.write_response_or_cancelled(request.id, resp)
+				resp := app.handle_code_action(lsp_request)
+				app.write_response_or_cancelled(lsp_request.id, resp)
 			}
 			.semantic_tokens {
-				resp := app.handle_semantic_tokens(request)
-				app.write_response_or_cancelled(request.id, resp)
+				resp := app.handle_semantic_tokens(lsp_request)
+				app.write_response_or_cancelled(lsp_request.id, resp)
 			}
 			.folding_range {
-				resp := app.handle_folding_range(request)
-				app.write_response_or_cancelled(request.id, resp)
+				resp := app.handle_folding_range(lsp_request)
+				app.write_response_or_cancelled(lsp_request.id, resp)
 			}
 			.callhierarchy_prepare {
-				resp := app.handle_prepare_call_hierarchy(request)
-				app.write_response_or_cancelled(request.id, resp)
+				resp := app.handle_prepare_call_hierarchy(lsp_request)
+				app.write_response_or_cancelled(lsp_request.id, resp)
 			}
 			.callhierarchy_incoming {
-				resp := app.handle_call_hierarchy_incoming(request)
-				app.write_response_or_cancelled(request.id, resp)
+				resp := app.handle_call_hierarchy_incoming(lsp_request)
+				app.write_response_or_cancelled(lsp_request.id, resp)
 			}
 			.callhierarchy_outgoing {
-				resp := app.handle_call_hierarchy_outgoing(request)
-				app.write_response_or_cancelled(request.id, resp)
+				resp := app.handle_call_hierarchy_outgoing(lsp_request)
+				app.write_response_or_cancelled(lsp_request.id, resp)
 			}
 			.workspace_did_change_configuration {
-				app.on_did_change_configuration(request)
+				app.on_did_change_configuration(lsp_request)
 			}
 			.workspace_did_change_workspace_folders {
-				app.on_did_change_workspace_folders(request)
+				app.on_did_change_workspace_folders(lsp_request)
 			}
 			.document_highlight {
-				resp := app.handle_document_highlight(request)
-				app.write_response_or_cancelled(request.id, resp)
+				resp := app.handle_document_highlight(lsp_request)
+				app.write_response_or_cancelled(lsp_request.id, resp)
 			}
 			.selection_range {
-				resp := app.handle_selection_range(request)
-				app.write_response_or_cancelled(request.id, resp)
+				resp := app.handle_selection_range(lsp_request)
+				app.write_response_or_cancelled(lsp_request.id, resp)
 			}
 			.semantic_tokens_range {
-				resp := app.handle_semantic_tokens_range(request)
-				app.write_response_or_cancelled(request.id, resp)
+				resp := app.handle_semantic_tokens_range(lsp_request)
+				app.write_response_or_cancelled(lsp_request.id, resp)
 			}
 			.range_formatting {
-				resp := app.handle_range_formatting(request)
-				app.write_response_or_cancelled(request.id, resp)
+				resp := app.handle_range_formatting(lsp_request)
+				app.write_response_or_cancelled(lsp_request.id, resp)
 			}
 			.did_change_watched_files {
-				app.on_did_change_watched_files(request)
+				app.on_did_change_watched_files(lsp_request)
 			}
 			.code_lens {
-				resp := app.handle_code_lens(request)
-				app.write_response_or_cancelled(request.id, resp)
+				resp := app.handle_code_lens(lsp_request)
+				app.write_response_or_cancelled(lsp_request.id, resp)
 			}
 			.code_lens_resolve {
-				resp := app.handle_code_lens_resolve(request)
-				app.write_response_or_cancelled(request.id, resp)
+				resp := app.handle_code_lens_resolve(lsp_request)
+				app.write_response_or_cancelled(lsp_request.id, resp)
 			}
 			.execute_command {
-				resp := app.handle_execute_command(request)
-				app.write_response_or_cancelled(request.id, resp)
+				resp := app.handle_execute_command(lsp_request)
+				app.write_response_or_cancelled(lsp_request.id, resp)
 			}
 			.inline_value {
-				resp := app.handle_inline_value(request)
-				app.write_response_or_cancelled(request.id, resp)
+				resp := app.handle_inline_value(lsp_request)
+				app.write_response_or_cancelled(lsp_request.id, resp)
 			}
 			.linked_editing_range {
-				resp := app.handle_linked_editing_range(request)
-				app.write_response_or_cancelled(request.id, resp)
+				resp := app.handle_linked_editing_range(lsp_request)
+				app.write_response_or_cancelled(lsp_request.id, resp)
 			}
 			.will_create_files, .will_rename_files, .will_delete_files {
 				// Return null — vls has no pre-operation file mutations to apply.
 				app.write_response(Response{
-					id:     request.id
+					id:     lsp_request.id
 					result: 'null'
 				})
 			}
 			.on_type_formatting {
-				resp := app.handle_on_type_formatting(request)
-				app.write_response_or_cancelled(request.id, resp)
+				resp := app.handle_on_type_formatting(lsp_request)
+				app.write_response_or_cancelled(lsp_request.id, resp)
 			}
 			else {
-				log('UNKNOWN method ${request.method}')
+				log('UNKNOWN method ${lsp_request.method}')
 				if has_id {
 					if method == .unknown {
-						app.write_error_response(make_method_not_found_error_response(request.id,
-							request.method))
+						app.write_error_response(make_method_not_found_error_response(lsp_request.id,
+							lsp_request.method))
 					} else {
-						app.write_error_response(make_internal_error_response(request.id,
-							'Unhandled request dispatch for known method: ${request.method}'))
+						app.write_error_response(make_internal_error_response(lsp_request.id,
+							'Unhandled request dispatch for known method: ${lsp_request.method}'))
 					}
 				}
 			}

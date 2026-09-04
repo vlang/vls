@@ -7,21 +7,19 @@ import os
 import strings
 import time
 
-// v_compiler_exe is the absolute path to the V compiler executable, resolved
-// once at startup. Using an absolute path (instead of relying on PATH at exec
-// time) makes child-process invocation deterministic and shell-free.
-const v_compiler_exe = resolve_v_compiler_exe()
-
+// Keep runtime-derived compiler settings behind functions. Function-call module constants can
+// crash V3's parallel constant precomputation while compiling VLS.
 fn resolve_v_compiler_exe() string {
 	return os.find_abs_path_of_executable('v') or { 'v' }
 }
 
 // compiler_is_available reports whether the V compiler was resolved to a real
-// executable path at startup. When false, compiler-backed features cannot work
+// executable path. When false, compiler-backed features cannot work
 // and the failure should be surfaced to the user rather than masked as empty
 // results (P1-03).
 fn compiler_is_available() bool {
-	return v_compiler_exe != 'v' && os.exists(v_compiler_exe)
+	v_exe := resolve_v_compiler_exe()
+	return v_exe != 'v' && os.exists(v_exe)
 }
 
 // hex_nibble returns the numeric value of a single hex digit, or none.
@@ -400,11 +398,9 @@ fn (mut app App) cache_v_check_result(path string, content_hash int, generation 
 // exceeding compiler_timeout_ms. 124 matches the coreutils `timeout` convention.
 const compiler_exit_timeout = 124
 
-// compiler_timeout_ms bounds how long any single compiler/formatter invocation
+// resolve_compiler_timeout_ms returns the maximum time a compiler/formatter invocation
 // may run before it is force-killed, so a hung or runaway `v` process can never
 // freeze the server indefinitely (partial P0-04). Overridable via VLS_TIMEOUT_MS.
-const compiler_timeout_ms = resolve_compiler_timeout_ms()
-
 fn resolve_compiler_timeout_ms() i64 {
 	env := os.getenv('VLS_TIMEOUT_MS')
 	if env != '' {
@@ -432,7 +428,9 @@ fn run_v_argv(args []string, work_folder string) os.Result {
 			output:    msg
 		}
 	}
-	mut p := os.new_process(v_compiler_exe)
+	v_exe := resolve_v_compiler_exe()
+	timeout_ms := resolve_compiler_timeout_ms()
+	mut p := os.new_process(v_exe)
 	p.set_args(args)
 	if work_folder != '' {
 		p.set_work_folder(work_folder)
@@ -462,8 +460,8 @@ fn run_v_argv(args []string, work_folder string) os.Result {
 			out.write_string(chunk)
 			got_data = true
 		}
-		if time.now().unix_milli() - start_ms > compiler_timeout_ms {
-			log('v invocation exceeded ${compiler_timeout_ms}ms; killing child')
+		if time.now().unix_milli() - start_ms > timeout_ms {
+			log('v invocation exceeded ${timeout_ms}ms; killing child')
 			p.signal_kill()
 			timed_out = true
 			break

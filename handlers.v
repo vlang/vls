@@ -433,7 +433,7 @@ fn get_imported_module_member_completions(module_path string, work_dir string) [
 
 fn resolve_import_module_dir(module_path string, work_dir string) string {
 	rel := module_path.replace('.', os.path_separator)
-	vlib_dir := os.join_path(v_dir, 'vlib', rel)
+	vlib_dir := os.join_path(find_v_dir(), 'vlib', rel)
 	if os.is_dir(vlib_dir) {
 		return vlib_dir
 	}
@@ -2607,7 +2607,7 @@ fn get_import_completions(line string, work_dir string) []Detail {
 	prefix := parts.last() // filter on last segment
 
 	// Build vlib search path
-	vlib_dir := os.join_path(v_dir, 'vlib')
+	vlib_dir := os.join_path(find_v_dir(), 'vlib')
 	search_dir := if base_path_parts.len > 0 {
 		os.join_path(vlib_dir, base_path_parts.join(os.path_separator))
 	} else {
@@ -2709,7 +2709,7 @@ fn (mut app App) find_doc_comment_for_symbol(symbol string, current_lines []stri
 		}
 		// A qualified stdlib symbol is likewise constrained to its imported
 		// module. Do not fall through to builtin or another imported module.
-		module_dir := os.join_path(v_dir, 'vlib', rel)
+		module_dir := os.join_path(find_v_dir(), 'vlib', rel)
 		if os.is_dir(module_dir) {
 			return search_doc_in_vlib_dir(module_dir, symbol)
 		}
@@ -2722,7 +2722,7 @@ fn (mut app App) find_doc_comment_for_symbol(symbol string, current_lines []stri
 	}
 
 	// 4. vlib/builtin/ — always search for built-in symbols
-	builtin_dir := os.join_path(v_dir, 'vlib', 'builtin')
+	builtin_dir := os.join_path(find_v_dir(), 'vlib', 'builtin')
 	if os.is_dir(builtin_dir) {
 		doc := search_doc_in_vlib_dir(builtin_dir, symbol)
 		if doc != '' {
@@ -2735,7 +2735,7 @@ fn (mut app App) find_doc_comment_for_symbol(symbol string, current_lines []stri
 	for module_path in parse_imports(current_content) {
 		// Convert 'v.util' → 'v/util', 'os' → 'os'
 		module_rel := module_path.replace('.', os.path_separator)
-		module_dir := os.join_path(v_dir, 'vlib', module_rel)
+		module_dir := os.join_path(find_v_dir(), 'vlib', module_rel)
 		if !os.is_dir(module_dir) {
 			continue
 		}
@@ -3205,7 +3205,7 @@ fn (mut app App) merge_vlib_module_fns(mod string, mut index map[string]string) 
 	if mod !in app.vlib_fn_cache {
 		mut built := map[string]string{}
 		mod_path := mod.replace('.', '/')
-		vlib_mod_dir := os.join_path(v_dir, 'vlib', mod_path)
+		vlib_mod_dir := os.join_path(find_v_dir(), 'vlib', mod_path)
 		if os.is_dir(vlib_mod_dir) {
 			mut vfiles := []string{}
 			for vf in os.walk_ext(vlib_mod_dir, '.v') {

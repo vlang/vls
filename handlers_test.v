@@ -4594,7 +4594,7 @@ fn test_import_completions_partial_prefix() {
 }
 
 fn test_import_completions_nested() {
-	encoding_dir := os.join_path(v_dir, 'vlib', 'encoding')
+	encoding_dir := os.join_path(find_v_dir(), 'vlib', 'encoding')
 	if !os.is_dir(encoding_dir) {
 		return
 	}
