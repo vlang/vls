@@ -524,8 +524,87 @@ fn test_diagnostics_scheduler_coalesces_pending_jobs() {
 	assert jobs[0].content == 'latest'
 	assert scheduler.is_current(jobs[0].uri, jobs[0].global_generation, jobs[0].generation)
 
+	scheduler.finish(jobs[0])
 	_, should_stop_after_drain := scheduler.take_ready_jobs(100)
 	assert should_stop_after_drain
+}
+
+fn test_diagnostics_scheduler_requeues_pending_sibling_with_latest_buffers() {
+	mut app := create_test_app()
+	defer {
+		app.cancel_all_scheduled_diagnostics()
+		cleanup_test_app(app)
+	}
+	mut scheduler := new_diagnostics_scheduler()
+	app.diagnostics_scheduler = scheduler
+	project_dir := os.join_path(app.temp_dir, 'sibling_project')
+	must_mkdir_all(project_dir)
+	uri_a := path_to_uri(os.join_path(project_dir, 'a.v'))
+	uri_b := path_to_uri(os.join_path(project_dir, 'b.v'))
+	content_a := 'module main\n\nfn uses_b() { changed_in_b() }\n'
+	old_content_b := 'module main\n\nfn old_in_b() {}\n'
+	new_content_b := 'module main\n\nfn changed_in_b() {}\n'
+	app.open_files[uri_a] = content_a
+	app.open_files[uri_b] = old_content_b
+	assert app.schedule_diagnostics(uri_a, content_a)
+	old_job_a := diagnostics_test_pending_job(mut scheduler, uri_a) or {
+		assert false, 'expected pending diagnostics for a.v'
+		return
+	}
+
+	app.open_files[uri_b] = new_content_b
+	app.bump_generation(uri_b)
+	assert app.schedule_diagnostics(uri_b, new_content_b)
+	assert !scheduler.is_job_current(old_job_a)
+	new_job_a := diagnostics_test_pending_job(mut scheduler, uri_a) or {
+		assert false, 'expected replacement diagnostics for a.v'
+		return
+	}
+	assert new_job_a.open_files[uri_b] == new_content_b
+	assert new_job_a.project_generation > old_job_a.project_generation
+}
+
+fn test_diagnostics_scheduler_requeues_active_sibling() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	mut scheduler := new_diagnostics_scheduler()
+	uri_a := 'file:///project/a.v'
+	uri_b := 'file:///project/b.v'
+	project_key := 'file:///project'
+	tickets_a := scheduler.begin_project_schedule(uri_a, project_key)
+	assert tickets_a.len == 1
+	active_job := DiagnosticsJob{
+		uri: uri_a
+		project_key: project_key
+		project_generation: tickets_a[0].project_generation
+		global_generation: tickets_a[0].global_generation
+		generation: tickets_a[0].generation
+		ready_at: 0
+		write_mutex: app.write_mutex
+	}
+	assert scheduler.enqueue(active_job)
+	jobs, should_stop := scheduler.take_ready_jobs(0)
+	assert !should_stop
+	assert jobs.len == 1
+
+	tickets_b := scheduler.begin_project_schedule(uri_b, project_key)
+	assert !scheduler.is_job_current(active_job)
+	assert tickets_b.any(it.uri == uri_a)
+	assert tickets_b.any(it.uri == uri_b)
+	scheduler.finish(active_job)
+	_, should_stop_after_finish := scheduler.take_ready_jobs(0)
+	assert should_stop_after_finish
+}
+
+fn diagnostics_test_pending_job(mut scheduler DiagnosticsScheduler, uri string) ?DiagnosticsJob {
+	scheduler.mutex.lock()
+	defer {
+		scheduler.mutex.unlock()
+	}
+	job := scheduler.pending_jobs[uri] or { return none }
+	return job
 }
 
 fn test_diagnostics_scheduler_checks_staleness_while_publishing() {

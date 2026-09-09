@@ -16,6 +16,8 @@ struct DiagnosticsJob {
 	uri                 string
 	content             string
 	version             ?i64
+	project_key         string
+	project_generation  u64
 	position_encoding   PositionEncoding
 	open_files          map[string]string
 	project_generations map[string]int
@@ -26,19 +28,31 @@ struct DiagnosticsJob {
 	ready_at            i64
 }
 
+struct DiagnosticsTicket {
+	uri                string
+	global_generation  u64
+	generation         u64
+	project_generation u64
+}
+
 @[heap]
 struct DiagnosticsScheduler {
 mut:
-	mutex             sync.Mutex
-	generations       map[string]u64
-	global_generation u64
-	pending_jobs      map[string]DiagnosticsJob
-	worker_running    bool
+	mutex               sync.Mutex
+	generations         map[string]u64
+	project_generations map[string]u64
+	global_generation   u64
+	pending_jobs        map[string]DiagnosticsJob
+	worker_running      bool
+	active_uri          string
+	active_project_key  string
+	active_generation   u64
 }
 
 fn new_diagnostics_scheduler() &DiagnosticsScheduler {
 	return &DiagnosticsScheduler{
 		generations: map[string]u64{}
+		project_generations: map[string]u64{}
 		pending_jobs: map[string]DiagnosticsJob{}
 	}
 }
@@ -50,6 +64,43 @@ fn (mut scheduler DiagnosticsScheduler) next_generation(uri string) (u64, u64) {
 	}
 	scheduler.generations[uri] = scheduler.generations[uri] + 1
 	return scheduler.global_generation, scheduler.generations[uri]
+}
+
+// begin_project_schedule invalidates jobs whose snapshots include an older
+// buffer from the same project, then returns tickets for replacement jobs.
+fn (mut scheduler DiagnosticsScheduler) begin_project_schedule(uri string, project_key string) []DiagnosticsTicket {
+	scheduler.mutex.lock()
+	defer {
+		scheduler.mutex.unlock()
+	}
+	mut affected := map[string]bool{}
+	affected[uri] = true
+	mut pending_uris := []string{}
+	for pending_uri, job in scheduler.pending_jobs {
+		if job.project_key == project_key {
+			affected[pending_uri] = true
+			pending_uris << pending_uri
+		}
+	}
+	for pending_uri in pending_uris {
+		scheduler.pending_jobs.delete(pending_uri)
+	}
+	if scheduler.active_project_key == project_key && scheduler.active_uri != '' {
+		affected[scheduler.active_uri] = true
+	}
+	scheduler.project_generations[project_key] = scheduler.project_generations[project_key] + 1
+	project_generation := scheduler.project_generations[project_key]
+	mut tickets := []DiagnosticsTicket{cap: affected.len}
+	for affected_uri, _ in affected {
+		scheduler.generations[affected_uri] = scheduler.generations[affected_uri] + 1
+		tickets << DiagnosticsTicket{
+			uri: affected_uri
+			global_generation: scheduler.global_generation
+			generation: scheduler.generations[affected_uri]
+			project_generation: project_generation
+		}
+	}
+	return tickets
 }
 
 fn (mut scheduler DiagnosticsScheduler) is_current(uri string, global_generation u64, generation u64) bool {
@@ -65,6 +116,19 @@ fn (scheduler &DiagnosticsScheduler) is_current_locked(uri string, global_genera
 		&& scheduler.generations[uri] == generation
 }
 
+fn (mut scheduler DiagnosticsScheduler) is_job_current(job DiagnosticsJob) bool {
+	scheduler.mutex.lock()
+	defer {
+		scheduler.mutex.unlock()
+	}
+	return scheduler.is_job_current_locked(job)
+}
+
+fn (scheduler &DiagnosticsScheduler) is_job_current_locked(job DiagnosticsJob) bool {
+	return scheduler.is_current_locked(job.uri, job.global_generation, job.generation)
+		&& scheduler.project_generations[job.project_key] == job.project_generation
+}
+
 // enqueue replaces an older pending job for the same document and returns true
 // only when the caller must start the single diagnostics worker.
 fn (mut scheduler DiagnosticsScheduler) enqueue(job DiagnosticsJob) bool {
@@ -78,29 +142,47 @@ fn (mut scheduler DiagnosticsScheduler) enqueue(job DiagnosticsJob) bool {
 	return should_start
 }
 
-// take_ready_jobs removes jobs whose debounce deadline has passed. The second
-// result tells the worker that the queue is empty and it can stop.
+// take_ready_jobs removes at most one job whose debounce deadline has passed.
+// The second result tells the worker that the queue is empty and it can stop.
 fn (mut scheduler DiagnosticsScheduler) take_ready_jobs(now i64) ([]DiagnosticsJob, bool) {
 	scheduler.mutex.lock()
 	defer {
 		scheduler.mutex.unlock()
 	}
-	mut ready := []DiagnosticsJob{}
-	mut ready_uris := []string{}
-	for uri, job in scheduler.pending_jobs {
-		if job.ready_at <= now {
-			ready << job
-			ready_uris << uri
+	mut ready := []DiagnosticsJob{cap: 1}
+	mut ready_uri := ''
+	if scheduler.active_uri == '' {
+		for uri, job in scheduler.pending_jobs {
+			if job.ready_at <= now {
+				ready << job
+				ready_uri = uri
+				break
+			}
 		}
 	}
-	for uri in ready_uris {
-		scheduler.pending_jobs.delete(uri)
+	if ready_uri != '' {
+		job := ready[0]
+		scheduler.pending_jobs.delete(ready_uri)
+		scheduler.active_uri = job.uri
+		scheduler.active_project_key = job.project_key
+		scheduler.active_generation = job.generation
 	}
 	should_stop := ready.len == 0 && scheduler.pending_jobs.len == 0
+		&& scheduler.active_uri == ''
 	if should_stop {
 		scheduler.worker_running = false
 	}
 	return ready, should_stop
+}
+
+fn (mut scheduler DiagnosticsScheduler) finish(job DiagnosticsJob) {
+	scheduler.mutex.lock()
+	if scheduler.active_uri == job.uri && scheduler.active_generation == job.generation {
+		scheduler.active_uri = ''
+		scheduler.active_project_key = ''
+		scheduler.active_generation = 0
+	}
+	scheduler.mutex.unlock()
 }
 
 fn (mut scheduler DiagnosticsScheduler) cancel(uri string) {
@@ -122,25 +204,40 @@ fn (mut app App) schedule_diagnostics(uri string, content string) bool {
 		return false
 	}
 	if mut scheduler := app.diagnostics_scheduler {
-		global_generation, generation := scheduler.next_generation(uri)
-		mut version := ?i64(none)
-		if current_version := app.open_files_versions[uri] {
-			version = current_version
+		project_key := app.generation_key(uri)
+		tickets := scheduler.begin_project_schedule(uri, project_key)
+		ready_at := time.now().unix_milli() + diagnostics_debounce_ms
+		mut should_start := false
+		for ticket in tickets {
+			job_content := if ticket.uri == uri {
+				content
+			} else {
+				app.open_files[ticket.uri] or { continue }
+			}
+			mut version := ?i64(none)
+			if current_version := app.open_files_versions[ticket.uri] {
+				version = current_version
+			}
+			job := DiagnosticsJob{
+				uri: ticket.uri
+				content: job_content
+				version: version
+				project_key: project_key
+				project_generation: ticket.project_generation
+				position_encoding: app.position_encoding
+				open_files: app.open_files.clone()
+				project_generations: app.project_generations.clone()
+				write_mutex: app.write_mutex
+				tcp_conn: app.tcp_conn
+				global_generation: ticket.global_generation
+				generation: ticket.generation
+				ready_at: ready_at
+			}
+			if scheduler.enqueue(job) {
+				should_start = true
+			}
 		}
-		job := DiagnosticsJob{
-			uri: uri
-			content: content
-			version: version
-			position_encoding: app.position_encoding
-			open_files: app.open_files.clone()
-			project_generations: app.project_generations.clone()
-			write_mutex: app.write_mutex
-			tcp_conn: app.tcp_conn
-			global_generation: global_generation
-			generation: generation
-			ready_at: time.now().unix_milli() + diagnostics_debounce_ms
-		}
-		if scheduler.enqueue(job) {
+		if should_start {
 			spawn run_diagnostics_worker(mut scheduler)
 		}
 		return true
@@ -169,12 +266,13 @@ fn run_diagnostics_worker(mut scheduler DiagnosticsScheduler) {
 		}
 		for job in jobs {
 			run_diagnostics_job(mut scheduler, job)
+			scheduler.finish(job)
 		}
 	}
 }
 
 fn run_diagnostics_job(mut scheduler DiagnosticsScheduler, job DiagnosticsJob) {
-	if !scheduler.is_current(job.uri, job.global_generation, job.generation) {
+	if !scheduler.is_job_current(job) {
 		return
 	}
 	temp_dir := os.join_path(os.temp_dir(), 'vls_diag_${os.getpid()}_${job.generation}_${time.now().unix_nano()}')
@@ -210,7 +308,7 @@ fn (mut scheduler DiagnosticsScheduler) publish_if_current(mut app App, job Diag
 	defer {
 		scheduler.mutex.unlock()
 	}
-	if !scheduler.is_current_locked(job.uri, job.global_generation, job.generation) {
+	if !scheduler.is_job_current_locked(job) {
 		return false
 	}
 	app.write_notification(notification)
