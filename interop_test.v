@@ -24,6 +24,20 @@ fn interop_test_must_write_file(path string, content string) {
 // Unit tests for interop utilities (URI/path conversion)
 // ============================================================================
 
+fn test_resolve_v_compiler_exe_prefers_configured_command() {
+	old_command := os.getenv('VLS_V_COMMAND')
+	defer {
+		if old_command == '' {
+			os.unsetenv('VLS_V_COMMAND')
+		} else {
+			os.setenv('VLS_V_COMMAND', old_command, true)
+		}
+	}
+	configured := os.join_path(os.temp_dir(), 'configured-v-compiler')
+	os.setenv('VLS_V_COMMAND', configured, true)
+	assert resolve_v_compiler_exe() == configured
+}
+
 // --- uri_to_path tests ---
 
 fn test_uri_to_path_unix_style() {

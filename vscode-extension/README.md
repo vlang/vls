@@ -1,63 +1,86 @@
-# VLS VSCode Extension
+# VLS VS Code Extension
 
-This extension integrates the V Language Server (VLS) with Visual Studio Code,
-providing diagnostics, code completion, inlay hints, and more for V files.
+This extension integrates the V Language Server (VLS) with Visual Studio Code. It provides
+diagnostics, completion, navigation, inlay hints, runnable CodeLens actions, and built-in V tasks.
 
 ## Installation
 
-1. Build the VLS binary:
+1. Build the VLS binary from the repository root:
+
    ```sh
    v .
    ```
 
-2. Build the VSCode extension:
+2. Build the VS Code extension:
+
    ```sh
    cd vscode-extension
    npm install
    npm run build
    ```
-   Or download the `.vsix` from the [releases page](https://github.com/vlang/vls/releases).
+
+   Alternatively, download the `.vsix` from the
+   [releases page](https://github.com/vlang/vls/releases).
 
 3. In VS Code, run `Extensions: Install from VSIX...` and select the `.vsix` file.
 
+## Build, run, and test
+
+The extension supplies three tasks for every workspace folder:
+
+- `V: Build` runs `v .`.
+- `V: Run` runs `v run .`.
+- `V: Test` runs `v test .`.
+
+Open `Tasks: Run Task` to select one. The same actions are available as `V: Build`, `V: Run`, and
+`V: Test` in the Command Palette (`Ctrl+Shift+P` on Linux and Windows).
+
+The Command Palette actions use the active V file when useful: Run starts its containing module,
+and Test runs the active `_test.v` file. Otherwise, they operate on the workspace folder.
+
+`Run Main`, `Run File`, and `Run Test` CodeLens actions use these tasks too. Their terminal is
+revealed automatically and displays the command, compiler output, stdout, stderr, and exit status.
+The active file is saved before it runs so the terminal executes the source currently in the
+editor.
+
 ## Configuration
 
-Open VSCode settings and search for `vls`:
+Open VS Code settings and search for `vls`:
 
-- **`vls.command`**: Path to the VLS binary.  Will be auto-detected if in PATH, but you can set it
-  explicitly.
-- **`vls.args`**: Extra arguments to pass to the VLS process (array).
-- **`vls.inlayHints.enabled`**: Enable or disable inlay hints for V files (default: true).
-- **`vls.diagnostics.enabled`**: Enable or disable live diagnostics from VLS (default: true).
+- **`vls.command`**: Path to the VLS binary. It is detected from `PATH` when unset.
+- **`vls.args`**: Extra arguments passed to the VLS process.
+- **`vls.vCommand`**: Path to the V compiler used by the language server and all build, run, test,
+  and CodeLens tasks. It is detected from `PATH` when unset. Absolute paths, `~`, `${env:NAME}`,
+  and `${workspaceFolder}` are supported. Reload VS Code after changing it.
+- **`vls.inlayHints.enabled`**: Enable or disable inlay hints for V files (default: `true`).
+- **`vls.diagnostics.enabled`**: Enable or disable live diagnostics (default: `true`).
 
-You can set these in your `settings.json`:
+Example `settings.json`:
+
 ```json
 {
   "vls.command": "/path/to/vls",
   "vls.args": [],
+  "vls.vCommand": "/path/to/v",
   "vls.inlayHints.enabled": true,
   "vls.diagnostics.enabled": true
 }
 ```
 
-## Usage
-
-- Open a `.v` file to activate the extension.
-- The server runs via stdio and provides diagnostics, completion, go-to-definition,
-  inlay hints, and more.
-- If you see an error about the VLS binary path, set `vls.command` in your settings.
-
 ## Troubleshooting
 
-- Ensure the VLS binary is built and executable.
-- Check the `vls.command` path in your settings.
-- View extension logs in VSCode's Output panel (select "V Language Server").
+- Ensure the VLS and V binaries are executable.
+- Set `vls.command` if VLS is not available through `PATH`.
+- Set `vls.vCommand` if V is not available through the environment inherited by VS Code.
+- CodeLens and task output is in the Terminal panel under a terminal named for the selected task.
+- Language-server logs are in the Output panel under `V Language Server`.
 
 ## Updating
 
-- After updating the VLS binary, restart VSCode or reload the window.
+- After updating the VLS binary, restart VS Code or reload the window.
 - To update the extension, rebuild and reinstall the `.vsix` file.
 
 ## License
 
-See [LICENSE](../LICENSE).
+VLS is licensed under GPL-2.0-only. See the
+[repository license](https://github.com/vlang/vls/blob/master/LICENSE).

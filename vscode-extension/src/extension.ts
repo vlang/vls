@@ -1,10 +1,14 @@
 import * as vscode from 'vscode';
 import { LanguageClient, LanguageClientOptions, ServerOptions } from 'vscode-languageclient/node';
 import * as fs from 'fs';
-import * as path from 'path';
-import { execFileSync } from 'child_process';
+import {
+  findInPath,
+  registerVTasks,
+  runCodeLensCommand,
+  vCommandForServer,
+} from './vTasks';
 
-let client: LanguageClient;
+let client: LanguageClient | undefined;
 
 function isInlayHintsEnabled(): boolean {
   return vscode.workspace.getConfiguration('vls').get<boolean>('inlayHints.enabled', true);
@@ -19,25 +23,15 @@ function isExecutable(filePath: string): boolean {
   }
 }
 
-function findInPath(bin: string): string | undefined {
-  const envPath = process.env.PATH || '';
-  const sep = process.platform === 'win32' ? ';' : ':';
-  for (const dir of envPath.split(sep)) {
-    const full = path.join(dir, bin);
-    if (fs.existsSync(full) && isExecutable(full)) {
-      return full;
-    }
-  }
-  return undefined;
-}
-
 export async function activate(context: vscode.ExtensionContext) {
+  registerVTasks(context);
+
   // Get the configuration for our server.
   const config = vscode.workspace.getConfiguration('vls');
   let vlsPath = config.get<string>('command');
   const vlsArgs = config.get<string[]>('args', []);
 
-  // If not set, try to find 'vls' in PATH
+  // If not set, try to find 'vls' in PATH.
   if (!vlsPath) {
     const found = findInPath('vls');
     if (!found) {
@@ -63,18 +57,18 @@ export async function activate(context: vscode.ExtensionContext) {
     return;
   }
 
-  // ServerOptions tells the client how to launch our server.
-  // We are launching it as a normal process and communicating via stdio.
+  const serverEnvironment = { ...process.env };
+  const vCommand = vCommandForServer();
+  if (vCommand) {
+    serverEnvironment.VLS_V_COMMAND = vCommand;
+  }
   const serverOptions: ServerOptions = {
-    run: { command: vlsPath, args: vlsArgs },
-    debug: { command: vlsPath, args: vlsArgs }, // You can specify different flags for debugging
+    run: { command: vlsPath, args: vlsArgs, options: { env: serverEnvironment } },
+    debug: { command: vlsPath, args: vlsArgs, options: { env: serverEnvironment } },
   };
 
-  // ClientOptions controls the client-side of the connection.
   const clientOptions: LanguageClientOptions = {
-    // Register the server for `v` documents.
     documentSelector: [{ scheme: 'file', language: 'v' }],
-    // Synchronize the 'files' section of settings between client and server.
     synchronize: {
       configurationSection: 'vls',
       fileEvents: vscode.workspace.createFileSystemWatcher('**/*.v'),
@@ -86,16 +80,17 @@ export async function activate(context: vscode.ExtensionContext) {
         }
         return next(document, range, token);
       },
+      executeCommand: async (command, args, next) => {
+        if (command === 'vls.runFile' || command === 'vls.runTests') {
+          await runCodeLensCommand(command, args);
+          return;
+        }
+        return next(command, args);
+      },
     },
   };
 
-  // Create the language client.
-  client = new LanguageClient(
-    'vls',
-    'V Language Server',
-    serverOptions,
-    clientOptions
-  );
+  client = new LanguageClient('vls', 'V Language Server', serverOptions, clientOptions);
 
   // A standalone provider whose sole purpose is to fire onDidChangeInlayHints so
   // that VS Code immediately re-requests hints from all providers (including the
@@ -113,23 +108,18 @@ export async function activate(context: vscode.ExtensionContext) {
   );
 
   context.subscriptions.push(
-    vscode.workspace.onDidChangeConfiguration((e) => {
-      if (e.affectsConfiguration('vls.inlayHints.enabled')) {
+    vscode.workspace.onDidChangeConfiguration((event) => {
+      if (event.affectsConfiguration('vls.inlayHints.enabled')) {
         inlayHintsEmitter.fire();
       }
     })
   );
 
-  // Start the client. This will also launch the server.
   vscode.window.showInformationMessage('V Language Server is starting.');
   await client.start();
   vscode.window.showInformationMessage('V Language Server is now active.');
 }
 
 export function deactivate(): Thenable<void> | undefined {
-  if (!client) {
-    return undefined;
-  }
-  // Stop the client. This will also terminate the server process.
-  return client.stop();
+  return client?.stop();
 }

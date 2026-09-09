@@ -79,7 +79,10 @@ struct DiagCacheEntry {
 // find_v_dir resolves the V home directory by finding the V executable and
 // returning its parent directory.
 fn find_v_dir() string {
-	v_exe := os.find_abs_path_of_executable('v') or { return '' }
+	v_exe := resolve_v_compiler_exe()
+	if v_exe == 'v' || !os.is_file(v_exe) {
+		return ''
+	}
 	return os.dir(os.real_path(v_exe))
 }
 
