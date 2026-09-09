@@ -213,13 +213,30 @@ fn (mut scheduler DiagnosticsScheduler) cancel_all() {
 }
 
 fn (mut app App) schedule_diagnostics(uri string, content string) bool {
+	mutation := app.begin_diagnostics_project_schedule(uri)
+	return app.finish_diagnostics_project_schedule(mutation, uri, content)
+}
+
+fn (mut app App) begin_diagnostics_project_schedule(uri string) DiagnosticsProjectMutation {
 	if !app.diagnostics_enabled {
-		return false
+		return DiagnosticsProjectMutation{}
 	}
 	if mut scheduler := app.diagnostics_scheduler {
 		project_key := app.generation_key(uri)
-		tickets := scheduler.begin_project_schedule(uri, project_key)
-		app.enqueue_diagnostics_tickets(mut scheduler, tickets, project_key, uri, content, '')
+		return DiagnosticsProjectMutation{
+			project_key: project_key
+			tickets: scheduler.begin_project_schedule(uri, project_key)
+		}
+	}
+	return DiagnosticsProjectMutation{}
+}
+
+fn (mut app App) finish_diagnostics_project_schedule(mutation DiagnosticsProjectMutation, uri string, content string) bool {
+	if !app.diagnostics_enabled || mutation.tickets.len == 0 {
+		return false
+	}
+	if mut scheduler := app.diagnostics_scheduler {
+		app.enqueue_diagnostics_tickets(mut scheduler, mutation.tickets, mutation.project_key, uri, content, '')
 		return true
 	}
 	return false

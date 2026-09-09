@@ -546,15 +546,27 @@ fn test_diagnostics_scheduler_requeues_pending_sibling_with_latest_buffers() {
 	new_content_b := 'module main\n\nfn changed_in_b() {}\n'
 	app.open_files[uri_a] = content_a
 	app.open_files[uri_b] = old_content_b
+	app.open_files_versions[uri_b] = 1
 	assert app.schedule_diagnostics(uri_a, content_a)
 	old_job_a := diagnostics_test_pending_job(mut scheduler, uri_a) or {
 		assert false, 'expected pending diagnostics for a.v'
 		return
 	}
 
-	app.open_files[uri_b] = new_content_b
-	app.bump_generation(uri_b)
-	assert app.schedule_diagnostics(uri_b, new_content_b)
+	result := app.on_did_change(Request{
+		params: json2.encode(DidChangeTextDocumentParams{
+			text_document: VersionedTextDocumentIdentifier{
+				uri: uri_b
+				version: 2
+			}
+			content_changes: [ContentChange{
+				text: new_content_b
+			}]
+		},
+			escape_unicode: true
+		)
+	})
+	assert result == none
 	assert !scheduler.is_job_current(old_job_a)
 	new_job_a := diagnostics_test_pending_job(mut scheduler, uri_a) or {
 		assert false, 'expected replacement diagnostics for a.v'

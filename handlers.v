@@ -716,6 +716,9 @@ fn (mut app App) on_did_change(request Request) ?Notification {
 			content = change.text
 		}
 	}
+	// Invalidate every diagnostic snapshot for this project before publishing
+	// the new buffer state. Replacements are built after the mutation below.
+	diagnostics_mutation := app.begin_diagnostics_project_schedule(uri)
 	app.text = content
 	app.open_files[uri] = content // Update tracked file
 	if version := params.text_document.version {
@@ -723,7 +726,7 @@ fn (mut app App) on_did_change(request Request) ?Notification {
 	}
 	app.bump_generation(uri)
 	app.invalidate_index_uri(uri) // symbols re-parsed lazily on next query
-	if app.schedule_diagnostics(uri, content) {
+	if app.finish_diagnostics_project_schedule(diagnostics_mutation, uri, content) {
 		return none
 	}
 	notification := app.build_diagnostics_notification(uri, content)
