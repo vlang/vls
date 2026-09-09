@@ -350,22 +350,45 @@ fn preserve_code_lens_overlay_source_paths(overlay CompilationOverlay,
 struct RunCommandManager {
 	workers &sync.WaitGroup
 mut:
-	mutex     sync.Mutex
-	processes map[u64]&os.Process
-	next_id   u64
-	stopping  bool
+	mutex          sync.Mutex
+	processes      map[u64]&os.Process
+	active_targets map[string]u64
+	next_id        u64
+	stopping       bool
 }
 
 fn new_run_command_manager() &RunCommandManager {
 	return &RunCommandManager{
-		workers:   sync.new_waitgroup()
-		processes: map[u64]&os.Process{}
+		workers:        sync.new_waitgroup()
+		processes:      map[u64]&os.Process{}
+		active_targets: map[string]u64{}
+	}
+}
+
+fn code_lens_run_target(job CodeLensRunJob) string {
+	kind := match job.kind {
+		.main { 'main' }
+		.test_file { 'test-file' }
+		.test_function { 'test-function' }
+	}
+	path := normalized_index_path(job.path)
+	return '${kind}:${path.len}:${path}:${job.fn_name}'
+}
+
+// cancel_process_locked stops the current subprocess for a job while the lifecycle lock is held.
+fn (mut manager RunCommandManager) cancel_process_locked(id u64) {
+	for process_id, mut process in manager.processes {
+		if process_id == id && process.is_alive() {
+			process.signal_pgkill()
+			return
+		}
 	}
 }
 
 // begin_job reserves an id and increments the worker count while holding the lifecycle lock.
-// Once stopping is set, no new worker can race with wait().
-fn (mut manager RunCommandManager) begin_job() (u64, bool) {
+// A newer run replaces the active job for the same target. Once stopping is set, no new worker
+// can race with wait().
+fn (mut manager RunCommandManager) begin_job(target string) (u64, bool) {
 	manager.mutex.lock()
 	defer {
 		manager.mutex.unlock()
@@ -373,35 +396,46 @@ fn (mut manager RunCommandManager) begin_job() (u64, bool) {
 	if manager.stopping {
 		return 0, false
 	}
+	if previous_id := manager.active_targets[target] {
+		manager.cancel_process_locked(previous_id)
+	}
 	manager.next_id++
 	manager.workers.add(1)
+	manager.active_targets[target] = manager.next_id
 	return manager.next_id, true
 }
 
 fn (mut manager RunCommandManager) launch(job CodeLensRunJob) bool {
-	id, accepted := manager.begin_job()
+	target := code_lens_run_target(job)
+	id, accepted := manager.begin_job(target)
 	if !accepted {
 		return false
 	}
-	spawn run_code_lens_job(mut manager, id, job)
+	spawn run_code_lens_job(mut manager, id, target, job)
 	return true
 }
 
 // run_sync is only used by tests that need to inspect worker notifications deterministically.
 fn (mut manager RunCommandManager) run_sync(job CodeLensRunJob) []string {
-	id, accepted := manager.begin_job()
+	target := code_lens_run_target(job)
+	id, accepted := manager.begin_job(target)
 	if !accepted {
 		return []
 	}
-	return run_code_lens_job(mut manager, id, job)
+	return run_code_lens_job(mut manager, id, target, job)
 }
 
-fn (mut manager RunCommandManager) register_process(id u64, process &os.Process) bool {
+fn (mut manager RunCommandManager) register_process(id u64, target string,
+	process &os.Process) bool {
 	manager.mutex.lock()
 	defer {
 		manager.mutex.unlock()
 	}
 	if manager.stopping {
+		return false
+	}
+	active_id := manager.active_targets[target] or { return false }
+	if active_id != id {
 		return false
 	}
 	manager.processes[id] = process
@@ -414,11 +448,29 @@ fn (mut manager RunCommandManager) unregister_process(id u64) {
 	manager.mutex.unlock()
 }
 
-fn (mut manager RunCommandManager) is_stopping() bool {
+fn (mut manager RunCommandManager) job_is_cancelled(id u64, target string) bool {
 	manager.mutex.lock()
-	stopping := manager.stopping
+	mut cancelled := manager.stopping
+	if !cancelled {
+		if active_id := manager.active_targets[target] {
+			cancelled = active_id != id
+		} else {
+			cancelled = true
+		}
+	}
 	manager.mutex.unlock()
-	return stopping
+	return cancelled
+}
+
+fn (mut manager RunCommandManager) finish_job(id u64, target string) {
+	manager.mutex.lock()
+	if active_id := manager.active_targets[target] {
+		if active_id == id {
+			manager.active_targets.delete(target)
+		}
+	}
+	manager.mutex.unlock()
+	manager.workers.done()
 }
 
 // cancel_all_and_wait prevents new runs, kills active children, and joins every worker.
@@ -437,8 +489,13 @@ fn (mut manager RunCommandManager) cancel_all_and_wait() {
 // run_managed_process runs a code-lens subprocess without the diagnostics timeout. The manager
 // owns cancellation instead, so a long-running program stays alive while VLS remains active and
 // is terminated when its client shuts down or disconnects.
-fn run_managed_process(mut manager RunCommandManager, id u64, executable string, args []string,
-	work_folder string) ManagedRunResult {
+fn run_managed_process(mut manager RunCommandManager, id u64, target string, executable string,
+	args []string, work_folder string) ManagedRunResult {
+	if manager.job_is_cancelled(id, target) {
+		return ManagedRunResult{
+			cancelled: true
+		}
+	}
 	if work_folder != '' && !os.is_dir(work_folder) {
 		return ManagedRunResult{
 			result: os.Result{
@@ -456,7 +513,7 @@ fn run_managed_process(mut manager RunCommandManager, id u64, executable string,
 	process.set_stdin_path(os.path_devnull)
 	process.set_redirect_stdio()
 	process.run()
-	registered := manager.register_process(id, process)
+	registered := manager.register_process(id, target, process)
 	if !registered && process.is_alive() {
 		process.signal_pgkill()
 	}
@@ -489,7 +546,7 @@ fn run_managed_process(mut manager RunCommandManager, id u64, executable string,
 			exit_code: exit_code
 			output:    output.str()
 		}
-		cancelled: !registered || manager.is_stopping()
+		cancelled: !registered || manager.job_is_cancelled(id, target)
 	}
 }
 
@@ -528,9 +585,10 @@ fn code_lens_display_args(job CodeLensRunJob) []string {
 	}
 }
 
-fn run_code_lens_job(mut manager RunCommandManager, id u64, job CodeLensRunJob) []string {
+fn run_code_lens_job(mut manager RunCommandManager, id u64, target string,
+	job CodeLensRunJob) []string {
 	defer {
-		manager.workers.done()
+		manager.finish_job(id, target)
 	}
 	temp_dir := os.join_path(os.temp_dir(), 'vls_run_${os.getpid()}_${id}_${time.now().unix_nano()}')
 	mut worker := App{
@@ -572,8 +630,8 @@ fn run_code_lens_job(mut manager RunCommandManager, id u64, job CodeLensRunJob) 
 	compile_args := code_lens_compile_args(job, target_path, executable_path)
 	display_args := code_lens_display_args(job)
 	worker.send_log_message('vls: ${job.title}: v ${display_args.join(' ')}', 3)
-	compile_result := run_managed_process(mut manager, id, resolve_v_compiler_exe(), compile_args,
-		compile_dir)
+	compile_result := run_managed_process(mut manager, id, target, resolve_v_compiler_exe(),
+		compile_args, compile_dir)
 	if compile_result.cancelled {
 		return worker.captured_output.clone()
 	}
@@ -584,7 +642,7 @@ fn run_code_lens_job(mut manager RunCommandManager, id u64, job CodeLensRunJob) 
 		return worker.captured_output.clone()
 	}
 
-	run_result := run_managed_process(mut manager, id, executable_path, [], source_work_dir)
+	run_result := run_managed_process(mut manager, id, target, executable_path, [], source_work_dir)
 	if run_result.cancelled {
 		return worker.captured_output.clone()
 	}

@@ -4495,7 +4495,7 @@ fn code_lens_fn_name(line string) string {
 	return name
 }
 
-fn code_lens_range(line int, raw_line string) LSPRange {
+fn code_lens_range(line int, raw_line string, encoding PositionEncoding) LSPRange {
 	return LSPRange{
 		start: Position{
 			line: line
@@ -4503,7 +4503,7 @@ fn code_lens_range(line int, raw_line string) LSPRange {
 		}
 		end:   Position{
 			line: line
-			char: raw_line.len
+			char: byte_to_encoded_col(raw_line, raw_line.len, encoding)
 		}
 	}
 }
@@ -4529,7 +4529,7 @@ fn (mut app App) handle_code_lens(request Request) Response {
 		fn_name := code_lens_fn_name(code)
 		if fn_name == 'main' {
 			lenses << CodeLens{
-				range:   code_lens_range(i, raw_line)
+				range:   code_lens_range(i, raw_line, app.position_encoding)
 				command: Command{
 					title:     'Run Main'
 					command:   'vls.runFile'
@@ -4539,7 +4539,7 @@ fn (mut app App) handle_code_lens(request Request) Response {
 		}
 		if is_test_file && fn_name.starts_with('test_') {
 			lenses << CodeLens{
-				range:   code_lens_range(i, raw_line)
+				range:   code_lens_range(i, raw_line, app.position_encoding)
 				command: Command{
 					title:     'Run File'
 					command:   'vls.runTests'
@@ -4547,7 +4547,7 @@ fn (mut app App) handle_code_lens(request Request) Response {
 				}
 			}
 			lenses << CodeLens{
-				range:   code_lens_range(i, raw_line)
+				range:   code_lens_range(i, raw_line, app.position_encoding)
 				command: Command{
 					title:     'Run Test'
 					command:   'vls.runTests'

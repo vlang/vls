@@ -5586,6 +5586,47 @@ fn test_code_lens_returns_run_lens_for_main() {
 	assert command_args == [uri]
 }
 
+fn test_code_lens_range_uses_negotiated_position_encoding() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	uri := 'file:///tmp/codelens_unicode.v'
+	app.open_files[uri] = 'module main\n\nfn main() {} // 🚀\n'
+	request := Request{
+		id:     814
+		method: 'textDocument/codeLens'
+		params: json2.encode(CodeLensParams{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+		},
+			escape_unicode: true
+		)
+	}
+
+	for encoding in [PositionEncoding.utf8, .utf16, .utf32] {
+		app.position_encoding = encoding
+		resp := app.handle_code_lens(request)
+		assert resp.result is []CodeLens
+		lenses := resp.result as []CodeLens
+		assert lenses.len == 1
+		assert lenses[0].range.start == Position{
+			line: 2
+			char: 0
+		}
+		expected_end := match encoding {
+			.utf8 { 20 }
+			.utf16 { 18 }
+			.utf32 { 17 }
+		}
+		assert lenses[0].range.end == Position{
+			line: 2
+			char: expected_end
+		}
+	}
+}
+
 fn test_code_lens_returns_test_lens_for_test_fn() {
 	mut app := create_test_app()
 	defer {
@@ -5830,6 +5871,67 @@ fn test_execute_run_file_returns_before_long_running_program_finishes() {
 	stop_started_at := time.now().unix_milli()
 	app.stop_run_commands()
 	assert time.now().unix_milli() - stop_started_at < 1000
+}
+
+fn test_execute_run_file_replaces_active_target() {
+	mut app := create_test_app()
+	defer {
+		app.stop_run_commands()
+		cleanup_test_app(app)
+	}
+	path := os.join_path(app.temp_dir, 'code_lens_replaced.v')
+	marker_path := os.join_path(app.temp_dir, 'code_lens_replaced.txt')
+	marker_literal := code_lens_v_string_literal(marker_path)
+	first_source := 'module main\n\nimport os\nimport time\n\nfn main() {\n\tfor {\n\t\tmut marker := os.open_append(${marker_literal}) or { return }\n\t\tmarker.writeln("first") or {\n\t\t\tmarker.close()\n\t\t\treturn\n\t\t}\n\t\tmarker.close()\n\t\ttime.sleep(10 * time.millisecond)\n\t}\n}\n'
+	must_write_file(path, first_source)
+	uri := path_to_uri(path)
+	app.open_files[uri] = first_source
+	app.capture_output = true
+
+	first_resp := app.handle_execute_command(Request{
+		id:     826
+		method: 'workspace/executeCommand'
+		params: json2.encode(ExecuteCommandParams{
+			command:   'vls.runFile'
+			arguments: [uri]
+		},
+			escape_unicode: true
+		)
+	})
+	assert first_resp.result is string
+	assert (first_resp.result as string) == 'null'
+	first_deadline := time.now().unix_milli() + 10_000
+	for time.now().unix_milli() < first_deadline {
+		if (os.read_file(marker_path) or { '' }).contains('first') {
+			break
+		}
+		time.sleep(10 * time.millisecond)
+	}
+	assert (os.read_file(marker_path) or { '' }).contains('first')
+
+	app.open_files[uri] = 'module main\n\nimport os\nimport time\n\nfn main() {\n\tos.write_file(${marker_literal}, "second") or { return }\n\ttime.sleep(5 * time.second)\n}\n'
+	second_resp := app.handle_execute_command(Request{
+		id:     827
+		method: 'workspace/executeCommand'
+		params: json2.encode(ExecuteCommandParams{
+			command:   'vls.runFile'
+			arguments: [uri]
+		},
+			escape_unicode: true
+		)
+	})
+	assert second_resp.result is string
+	assert (second_resp.result as string) == 'null'
+	second_deadline := time.now().unix_milli() + 10_000
+	for time.now().unix_milli() < second_deadline {
+		if (os.read_file(marker_path) or { '' }) == 'second' {
+			break
+		}
+		time.sleep(10 * time.millisecond)
+	}
+	assert (os.read_file(marker_path) or { '' }) == 'second'
+	time.sleep(200 * time.millisecond)
+	assert (os.read_file(marker_path) or { '' }) == 'second'
 }
 
 fn test_code_lens_process_output_is_bounded() {
