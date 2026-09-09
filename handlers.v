@@ -4578,44 +4578,34 @@ fn (mut app App) handle_code_lens_resolve(request Request) Response {
 	}
 }
 
-fn code_lens_command_path(arguments []string) (string, string) {
+fn (app &App) code_lens_command_target(arguments []string) (string, string, string) {
 	if arguments.len == 0 || arguments[0].trim_space() == '' {
-		return '', 'missing file argument'
+		return '', '', 'missing file argument'
 	}
 	raw_path := arguments[0]
 	if raw_path.contains('://') && !raw_path.starts_with('file:') {
-		return '', 'only local files can be run'
+		return '', '', 'only local files can be run'
 	}
-	path := os.real_path(uri_to_path(raw_path))
-	if !os.is_file(path) {
-		return '', 'file does not exist: ${path}'
+	path := normalize_overlay_path(os.abs_path(uri_to_path(raw_path)))
+	mut uri := if raw_path.starts_with('file:') { raw_path } else { path_to_uri(path) }
+	mut is_open := uri in app.open_files
+	if !is_open {
+		path_key := normalized_index_path(path)
+		for open_uri, _ in app.open_files {
+			if normalized_index_path(uri_to_path(open_uri)) == path_key {
+				uri = open_uri
+				is_open = true
+				break
+			}
+		}
+	}
+	if !is_open && !os.is_file(path) {
+		return '', '', 'file does not exist: ${path}'
 	}
 	if !path.ends_with('.v') && !path.ends_with('.vsh') {
-		return '', 'not a V source file: ${path}'
+		return '', '', 'not a V source file: ${path}'
 	}
-	return path, ''
-}
-
-fn (mut app App) run_code_lens_command(title string, args []string, work_dir string) {
-	if !compiler_is_available() {
-		app.send_show_message('vls: the V compiler (`v`) was not found on PATH.', 1)
-		return
-	}
-	app.send_log_message('vls: ${title}: v ${args.join(' ')}', 3)
-	result := run_v_argv(args, work_dir)
-	output := result.output.trim_space()
-	if output != '' {
-		level := if result.exit_code == 0 { 3 } else { 1 }
-		app.send_log_message(output, level)
-	}
-	if result.exit_code == compiler_exit_timeout {
-		app.send_show_message('vls: ${title} timed out after ${resolve_compiler_timeout_ms()} ms.',
-			1)
-	} else if result.exit_code != 0 {
-		app.send_show_message('vls: ${title} failed with exit code ${result.exit_code}.', 1)
-	} else {
-		app.send_show_message('vls: ${title} finished successfully.', 3)
-	}
+	return uri, path, ''
 }
 
 // handle_execute_command handles workspace/executeCommand by invoking the V compiler.
@@ -4630,16 +4620,27 @@ fn (mut app App) handle_execute_command(request Request) Response {
 	match params.command {
 		'vls.runFile' {
 			args := params.arguments or { [] }
-			path, path_error := code_lens_command_path(args)
+			uri, path, path_error := app.code_lens_command_target(args)
 			if path_error != '' {
 				app.send_show_message('vls: cannot run main: ${path_error}', 1)
+			} else if !compiler_is_available() {
+				app.send_show_message('vls: the V compiler (`v`) was not found on PATH.', 1)
 			} else {
-				app.run_code_lens_command('Run Main', build_v_run_args(path), os.dir(path))
+				app.start_code_lens_run(CodeLensRunJob{
+					kind:           .main
+					title:          'Run Main'
+					uri:            uri
+					path:           path
+					open_files:     app.open_files.clone()
+					write_mutex:    app.write_mutex
+					tcp_conn:       app.tcp_conn
+					capture_output: app.capture_output
+				})
 			}
 		}
 		'vls.runTests' {
 			args := params.arguments or { [] }
-			path, path_error := code_lens_command_path(args)
+			uri, path, path_error := app.code_lens_command_target(args)
 			if path_error != '' {
 				app.send_show_message('vls: cannot run tests: ${path_error}', 1)
 			} else if !path.ends_with('_test.v') {
@@ -4651,7 +4652,27 @@ fn (mut app App) handle_execute_command(request Request) Response {
 					app.send_show_message('vls: invalid test function: ${fn_name}', 1)
 				} else {
 					title := if fn_name == '' { 'Run File' } else { 'Run Test' }
-					app.run_code_lens_command(title, build_v_test_args(path, fn_name), os.dir(path))
+					kind := if fn_name == '' {
+						CodeLensRunKind.test_file
+					} else {
+						CodeLensRunKind.test_function
+					}
+					if !compiler_is_available() {
+						app.send_show_message('vls: the V compiler (`v`) was not found on PATH.',
+							1)
+					} else {
+						app.start_code_lens_run(CodeLensRunJob{
+							kind:           kind
+							title:          title
+							uri:            uri
+							path:           path
+							fn_name:        fn_name
+							open_files:     app.open_files.clone()
+							write_mutex:    app.write_mutex
+							tcp_conn:       app.tcp_conn
+							capture_output: app.capture_output
+						})
+					}
 				}
 			}
 		}

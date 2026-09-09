@@ -270,8 +270,9 @@ fn build_v_fmt_args(temp_file string) []string {
 }
 
 // build_v_run_args builds the compiler arguments used by the Run Main code lens.
-fn build_v_run_args(file_path string) []string {
-	return ['-nocolor', 'run', file_path]
+// Run Main executes the whole containing module from its working directory.
+fn build_v_run_args() []string {
+	return ['-nocolor', 'run', '.']
 }
 
 // build_v_test_args builds the compiler arguments used by the Run File and Run Test lenses.

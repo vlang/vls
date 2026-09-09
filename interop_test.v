@@ -378,9 +378,8 @@ fn test_build_v_fmt_args_passes_temp_file_literally() {
 	assert args == ['fmt', '-inprocess', '-w', '/tmp/fmt file.v']
 }
 
-fn test_build_v_run_args_passes_source_file_literally() {
-	args := build_v_run_args('/tmp/main file; untouched.v')
-	assert args == ['-nocolor', 'run', '/tmp/main file; untouched.v']
+fn test_build_v_run_args_targets_containing_module() {
+	assert build_v_run_args() == ['-nocolor', 'run', '.']
 }
 
 fn test_build_v_test_args_selects_one_test_without_a_shell() {

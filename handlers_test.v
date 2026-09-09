@@ -4,6 +4,7 @@ module main
 
 import os
 import json2
+import time
 
 fn must_mkdir_all(path string) {
 	os.mkdir_all(path) or {
@@ -5718,12 +5719,79 @@ fn test_execute_run_file_invokes_compiler() {
 	defer {
 		cleanup_test_app(app)
 	}
-	path := os.join_path(app.temp_dir, 'code_lens_main.v')
-	must_write_file(path, 'module main\n\nfn main() {\n\tprintln("code-lens-ran")\n}\n')
+	project_dir := os.join_path(app.temp_dir, 'code_lens_module')
+	must_mkdir_all(project_dir)
+	path := os.join_path(project_dir, 'main.v')
+	must_write_file(path, 'module main\n\nfn main() {\n\tprintln("stale-disk")\n}\n')
+	must_write_file(os.join_path(project_dir, 'helper.v'),
+		'module main\n\nfn code_lens_message() string {\n\treturn "module-sibling"\n}\n')
+	uri := path_to_uri(path)
+	app.open_files[uri] = 'module main\n\nfn main() {\n\tprintln(code_lens_message() + "-fresh-buffer")\n}\n'
 	app.capture_output = true
+	app.execute_commands_synchronously = true
 
 	resp := app.handle_execute_command(Request{
 		id:     822
+		method: 'workspace/executeCommand'
+		params: json2.encode(ExecuteCommandParams{
+			command:   'vls.runFile'
+			arguments: [uri]
+		},
+			escape_unicode: true
+		)
+	})
+
+	assert resp.result is string
+	assert (resp.result as string) == 'null'
+	assert app.captured_output.any(it.contains('module-sibling-fresh-buffer'))
+	assert app.captured_output.all(!it.contains('stale-disk'))
+	assert app.captured_output.any(it.contains('Run Main finished successfully'))
+}
+
+fn test_execute_run_file_materializes_new_unsaved_buffer() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	project_dir := os.join_path(app.temp_dir, 'code_lens_unsaved')
+	must_mkdir_all(project_dir)
+	path := os.join_path(project_dir, 'new_main.v')
+	uri := path_to_uri(path)
+	app.open_files[uri] = 'module main\n\nfn main() {\n\tprintln("new-unsaved-buffer")\n}\n'
+	app.capture_output = true
+	app.execute_commands_synchronously = true
+
+	resp := app.handle_execute_command(Request{
+		id:     824
+		method: 'workspace/executeCommand'
+		params: json2.encode(ExecuteCommandParams{
+			command:   'vls.runFile'
+			arguments: [uri]
+		},
+			escape_unicode: true
+		)
+	})
+
+	assert resp.result is string
+	assert (resp.result as string) == 'null'
+	assert app.captured_output.any(it.contains('new-unsaved-buffer'))
+	assert app.captured_output.any(it.contains('Run Main finished successfully'))
+}
+
+fn test_execute_run_file_returns_before_long_running_program_finishes() {
+	mut app := create_test_app()
+	defer {
+		app.stop_run_commands()
+		cleanup_test_app(app)
+	}
+	path := os.join_path(app.temp_dir, 'code_lens_long_running.v')
+	marker_path := os.join_path(app.temp_dir, 'code_lens_long_running.started')
+	must_write_file(path, 'module main\n\nimport os\nimport time\n\nfn main() {\n\tos.write_file("${marker_path}", "started") or {}\n\ttime.sleep(5 * time.second)\n}\n')
+	app.capture_output = true
+
+	started_at := time.now().unix_milli()
+	resp := app.handle_execute_command(Request{
+		id:     825
 		method: 'workspace/executeCommand'
 		params: json2.encode(ExecuteCommandParams{
 			command:   'vls.runFile'
@@ -5732,11 +5800,19 @@ fn test_execute_run_file_invokes_compiler() {
 			escape_unicode: true
 		)
 	})
+	elapsed_ms := time.now().unix_milli() - started_at
 
 	assert resp.result is string
 	assert (resp.result as string) == 'null'
-	assert app.captured_output.any(it.contains('code-lens-ran'))
-	assert app.captured_output.any(it.contains('Run Main finished successfully'))
+	assert elapsed_ms < 1000
+	deadline := time.now().unix_milli() + 10_000
+	for !os.exists(marker_path) && time.now().unix_milli() < deadline {
+		time.sleep(10 * time.millisecond)
+	}
+	assert os.exists(marker_path)
+	stop_started_at := time.now().unix_milli()
+	app.stop_run_commands()
+	assert time.now().unix_milli() - stop_started_at < 1000
 }
 
 fn test_execute_run_test_selects_one_function() {
@@ -5745,15 +5821,18 @@ fn test_execute_run_test_selects_one_function() {
 		cleanup_test_app(app)
 	}
 	path := os.join_path(app.temp_dir, 'code_lens_selected_test.v')
-	must_write_file(path, 'module main\n\nfn test_selected() {\n\tassert true\n}\n\nfn test_other() {\n\tassert false\n}\n')
+	must_write_file(path, 'module main\n\nfn test_selected() {\n\tassert false\n}\n')
+	uri := path_to_uri(path)
+	app.open_files[uri] = 'module main\n\nfn test_selected() {\n\tassert true\n}\n\nfn test_other() {\n\tassert false\n}\n'
 	app.capture_output = true
+	app.execute_commands_synchronously = true
 
 	resp := app.handle_execute_command(Request{
 		id:     823
 		method: 'workspace/executeCommand'
 		params: json2.encode(ExecuteCommandParams{
 			command:   'vls.runTests'
-			arguments: [path_to_uri(path), 'test_selected']
+			arguments: [uri, 'test_selected']
 		},
 			escape_unicode: true
 		)
