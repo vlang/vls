@@ -5726,7 +5726,8 @@ fn test_execute_run_file_invokes_compiler() {
 	must_write_file(os.join_path(project_dir, 'helper.v'),
 		'module main\n\nfn code_lens_message() string {\n\treturn "module-sibling"\n}\n')
 	uri := path_to_uri(path)
-	app.open_files[uri] = 'module main\n\nfn main() {\n\tprintln(code_lens_message() + "-fresh-buffer")\n}\n'
+	runtime_output_path := os.join_path(project_dir, 'code_lens_runtime_cwd.txt')
+	app.open_files[uri] = 'module main\n\nimport os\n\nfn main() {\n\tprintln(code_lens_message() + "-fresh-buffer")\n\tos.write_file("code_lens_runtime_cwd.txt", "real-module") or { panic(err) }\n}\n'
 	app.capture_output = true
 	app.execute_commands_synchronously = true
 
@@ -5746,6 +5747,7 @@ fn test_execute_run_file_invokes_compiler() {
 	assert app.captured_output.any(it.contains('module-sibling-fresh-buffer'))
 	assert app.captured_output.all(!it.contains('stale-disk'))
 	assert app.captured_output.any(it.contains('Run Main finished successfully'))
+	assert (os.read_file(runtime_output_path) or { '' }) == 'real-module'
 }
 
 fn test_execute_run_file_materializes_new_unsaved_buffer() {
@@ -5815,6 +5817,19 @@ fn test_execute_run_file_returns_before_long_running_program_finishes() {
 	assert time.now().unix_milli() - stop_started_at < 1000
 }
 
+fn test_code_lens_process_output_is_bounded() {
+	mut output := new_run_output_buffer()
+	output.write('prefix')
+	output.write('x'.repeat(code_lens_output_limit_bytes))
+	output.write('ignored')
+
+	assert output.output.len == code_lens_output_limit_bytes
+	assert output.truncated
+	result := output.str()
+	assert result.len == code_lens_output_limit_bytes + code_lens_output_truncation_notice.len
+	assert result.ends_with(code_lens_output_truncation_notice)
+}
+
 fn test_execute_run_test_selects_one_function() {
 	mut app := create_test_app()
 	defer {
@@ -5823,7 +5838,8 @@ fn test_execute_run_test_selects_one_function() {
 	path := os.join_path(app.temp_dir, 'code_lens_selected_test.v')
 	must_write_file(path, 'module main\n\nfn test_selected() {\n\tassert false\n}\n')
 	uri := path_to_uri(path)
-	app.open_files[uri] = 'module main\n\nfn test_selected() {\n\tassert true\n}\n\nfn test_other() {\n\tassert false\n}\n'
+	test_runtime_output_path := os.join_path(app.temp_dir, 'code_lens_test_runtime_cwd.txt')
+	app.open_files[uri] = 'module main\n\nimport os\n\nfn test_selected() {\n\tos.write_file("code_lens_test_runtime_cwd.txt", "real-module") or { assert false }\n\tassert true\n}\n\nfn test_other() {\n\tassert false\n}\n'
 	app.capture_output = true
 	app.execute_commands_synchronously = true
 
@@ -5841,6 +5857,7 @@ fn test_execute_run_test_selects_one_function() {
 	assert resp.result is string
 	assert (resp.result as string) == 'null'
 	assert app.captured_output.any(it.contains('Run Test finished successfully'))
+	assert (os.read_file(test_runtime_output_path) or { '' }) == 'real-module'
 }
 
 fn test_execute_command_unknown_still_returns_null() {

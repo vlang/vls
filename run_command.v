@@ -8,6 +8,9 @@ import strings
 import sync
 import time
 
+const code_lens_output_limit_bytes = 256 * 1024
+const code_lens_output_truncation_notice = '\n[vls: additional process output was truncated]'
+
 enum CodeLensRunKind {
 	main
 	test_file
@@ -29,6 +32,42 @@ struct CodeLensRunJob {
 struct ManagedRunResult {
 	result    os.Result
 	cancelled bool
+}
+
+struct RunOutputBuffer {
+mut:
+	output    strings.Builder
+	truncated bool
+}
+
+fn new_run_output_buffer() RunOutputBuffer {
+	return RunOutputBuffer{
+		output: strings.new_builder(1024)
+	}
+}
+
+fn (mut output RunOutputBuffer) write(chunk string) {
+	remaining := code_lens_output_limit_bytes - output.output.len
+	if remaining <= 0 {
+		if chunk.len > 0 {
+			output.truncated = true
+		}
+		return
+	}
+	if chunk.len <= remaining {
+		output.output.write_string(chunk)
+		return
+	}
+	output.output.write_string(chunk[..remaining])
+	output.truncated = true
+}
+
+fn (mut output RunOutputBuffer) str() string {
+	mut result := output.output.str()
+	if output.truncated {
+		result += code_lens_output_truncation_notice
+	}
+	return result
 }
 
 @[heap]
@@ -119,10 +158,10 @@ fn (mut manager RunCommandManager) cancel_all_and_wait() {
 	manager.workers.wait()
 }
 
-// run_managed_v_argv runs a user-requested program without the diagnostics timeout. The manager
-// owns cancellation instead, so a long-running main stays alive while VLS remains active and is
-// terminated when its client shuts down or disconnects.
-fn run_managed_v_argv(mut manager RunCommandManager, id u64, args []string,
+// run_managed_process runs a code-lens subprocess without the diagnostics timeout. The manager
+// owns cancellation instead, so a long-running program stays alive while VLS remains active and
+// is terminated when its client shuts down or disconnects.
+fn run_managed_process(mut manager RunCommandManager, id u64, executable string, args []string,
 	work_folder string) ManagedRunResult {
 	if work_folder != '' && !os.is_dir(work_folder) {
 		return ManagedRunResult{
@@ -132,7 +171,7 @@ fn run_managed_v_argv(mut manager RunCommandManager, id u64, args []string,
 			}
 		}
 	}
-	mut process := os.new_process(resolve_v_compiler_exe())
+	mut process := os.new_process(executable)
 	process.set_args(args)
 	process.use_pgroup = true
 	if work_folder != '' {
@@ -145,23 +184,23 @@ fn run_managed_v_argv(mut manager RunCommandManager, id u64, args []string,
 		process.signal_pgkill()
 	}
 
-	mut output := strings.new_builder(1024)
+	mut output := new_run_output_buffer()
 	for process.is_alive() {
 		mut got_data := false
 		if chunk := process.pipe_read(.stdout) {
-			output.write_string(chunk)
+			output.write(chunk)
 			got_data = true
 		}
 		if chunk := process.pipe_read(.stderr) {
-			output.write_string(chunk)
+			output.write(chunk)
 			got_data = true
 		}
 		if !got_data {
 			time.sleep(time.millisecond)
 		}
 	}
-	output.write_string(process.stdout_slurp())
-	output.write_string(process.stderr_slurp())
+	output.write(process.stdout_slurp())
+	output.write(process.stderr_slurp())
 	process.wait()
 	if registered {
 		manager.unregister_process(id)
@@ -174,6 +213,33 @@ fn run_managed_v_argv(mut manager RunCommandManager, id u64, args []string,
 			output:    output.str()
 		}
 		cancelled: !registered || manager.is_stopping()
+	}
+}
+
+fn code_lens_executable_path(temp_dir string) string {
+	$if windows {
+		return os.join_path(temp_dir, 'code_lens_program.exe')
+	}
+	return os.join_path(temp_dir, 'code_lens_program')
+}
+
+fn code_lens_compile_args(job CodeLensRunJob, target_path string,
+	executable_path string) []string {
+	return match job.kind {
+		.main { build_v_run_compile_args(executable_path) }
+		.test_file { build_v_test_compile_args(target_path, '', executable_path) }
+		.test_function { build_v_test_compile_args(target_path, job.fn_name, executable_path) }
+	}
+}
+
+fn log_code_lens_output(mut worker App, result os.Result, overlay CompilationOverlay) {
+	mut output := result.output.trim_space()
+	if overlay.temp_root != '' {
+		output = output.replace(overlay.temp_root, overlay.source_display_root)
+	}
+	if output != '' {
+		level := if result.exit_code == 0 { 3 } else { 1 }
+		worker.send_log_message(output, level)
 	}
 }
 
@@ -207,7 +273,8 @@ fn run_code_lens_job(mut manager RunCommandManager, id u64, job CodeLensRunJob) 
 	}
 
 	mut target_path := job.path
-	mut exec_dir := os.dir(job.path)
+	source_work_dir := os.dir(job.path)
+	mut compile_dir := source_work_dir
 	mut overlay := CompilationOverlay{}
 	if job.uri in job.open_files {
 		overlay = worker.prepare_compilation_overlay(job.path) or {
@@ -216,34 +283,36 @@ fn run_code_lens_job(mut manager RunCommandManager, id u64, job CodeLensRunJob) 
 			return worker.captured_output.clone()
 		}
 		target_path = overlay.temp_source_file
-		exec_dir = overlay.temp_work_dir
+		compile_dir = overlay.temp_work_dir
 	}
 
-	args := match job.kind {
-		.main { build_v_run_args() }
-		.test_file { build_v_test_args(target_path, '') }
-		.test_function { build_v_test_args(target_path, job.fn_name) }
-	}
+	executable_path := code_lens_executable_path(temp_dir)
+	compile_args := code_lens_compile_args(job, target_path, executable_path)
 	display_args := code_lens_display_args(job)
 	worker.send_log_message('vls: ${job.title}: v ${display_args.join(' ')}', 3)
-	managed_result := run_managed_v_argv(mut manager, id, args, exec_dir)
-	if managed_result.cancelled {
+	compile_result := run_managed_process(mut manager, id, resolve_v_compiler_exe(), compile_args,
+		compile_dir)
+	if compile_result.cancelled {
 		return worker.captured_output.clone()
 	}
-	mut output := managed_result.result.output.trim_space()
-	if overlay.temp_root != '' {
-		output = output.replace(overlay.temp_root, overlay.source_display_root)
-	}
-	if output != '' {
-		level := if managed_result.result.exit_code == 0 { 3 } else { 1 }
-		worker.send_log_message(output, level)
-	}
-	if managed_result.result.exit_code != 0 {
+	log_code_lens_output(mut worker, compile_result.result, overlay)
+	if compile_result.result.exit_code != 0 {
 		worker.send_show_message(
-			'vls: ${job.title} failed with exit code ${managed_result.result.exit_code}.', 1)
-	} else {
-		worker.send_show_message('vls: ${job.title} finished successfully.', 3)
+			'vls: ${job.title} failed with exit code ${compile_result.result.exit_code}.', 1)
+		return worker.captured_output.clone()
 	}
+
+	run_result := run_managed_process(mut manager, id, executable_path, [], source_work_dir)
+	if run_result.cancelled {
+		return worker.captured_output.clone()
+	}
+	log_code_lens_output(mut worker, run_result.result, overlay)
+	if run_result.result.exit_code != 0 {
+		worker.send_show_message(
+			'vls: ${job.title} failed with exit code ${run_result.result.exit_code}.', 1)
+		return worker.captured_output.clone()
+	}
+	worker.send_show_message('vls: ${job.title} finished successfully.', 3)
 	return worker.captured_output.clone()
 }
 

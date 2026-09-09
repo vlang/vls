@@ -380,6 +380,12 @@ fn test_build_v_fmt_args_passes_temp_file_literally() {
 
 fn test_build_v_run_args_targets_containing_module() {
 	assert build_v_run_args() == ['-nocolor', 'run', '.']
+	assert build_v_run_compile_args('/tmp/code lens program') == [
+		'-nocolor',
+		'-o',
+		'/tmp/code lens program',
+		'.',
+	]
 }
 
 fn test_build_v_test_args_selects_one_test_without_a_shell() {
@@ -387,6 +393,15 @@ fn test_build_v_test_args_selects_one_test_without_a_shell() {
 	args := build_v_test_args(file_path, 'test_one')
 	assert args == ['-nocolor', 'test', file_path, '-run-only', 'test_one']
 	assert build_v_test_args(file_path, '') == ['-nocolor', 'test', file_path]
+	assert build_v_test_compile_args(file_path, 'test_one', '/tmp/test program') == [
+		'-nocolor',
+		'-skip-running',
+		'-o',
+		'/tmp/test program',
+		file_path,
+		'-run-only',
+		'test_one',
+	]
 }
 
 fn test_build_v_line_info_args_single_embeds_line_info() {
