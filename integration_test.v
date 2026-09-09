@@ -1657,6 +1657,24 @@ fn test_integration_shutdown_response() {
 	assert transport_encoded.contains('"result":null')
 }
 
+fn test_integration_shutdown_cancels_diagnostics_before_response() {
+	mut app, project_dir := create_integration_test_env()
+	defer {
+		cleanup_integration_test_env(app, project_dir)
+	}
+	app.capture_output = true
+	mut scheduler := new_diagnostics_scheduler()
+	app.diagnostics_scheduler = scheduler
+	global_generation, generation := scheduler.next_generation('file:///shutdown.v')
+
+	app.accept_shutdown(2)
+
+	assert app.is_shutdown
+	assert !scheduler.is_current('file:///shutdown.v', global_generation, generation)
+	assert app.captured_output.len == 1
+	assert app.captured_output[0].contains('"id":2')
+}
+
 fn test_integration_malformed_json_request_writes_parse_error_response() {
 	mut app, project_dir := create_integration_test_env()
 	defer {

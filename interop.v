@@ -1283,6 +1283,8 @@ fn (mut app App) on_did_change_watched_files(request Request) {
 		}
 		match change.event_type {
 			3 {
+				diagnostics_mutation := app.begin_diagnostics_project_mutation(uri)
+				is_open := uri in app.open_files
 				// Deleted on disk. Invalidate cached diagnostics, but do NOT drop
 				// an open editor buffer: the editor still owns the in-memory
 				// document even if the on-disk file was removed (P0-07 item 8).
@@ -1295,9 +1297,15 @@ fn (mut app App) on_did_change_watched_files(request Request) {
 				if uri !in app.open_files {
 					app.reindex_uri(uri)
 				}
+				app.finish_diagnostics_project_mutation(diagnostics_mutation, if is_open {
+					''
+				} else {
+					uri
+				})
 				log('on_did_change_watched_files: disk delete for ${uri}')
 			}
 			1, 2 {
+				diagnostics_mutation := app.begin_diagnostics_project_mutation(uri)
 				// Created or Changed on disk. The editor buffer is authoritative
 				// for any open document, so we must never overwrite open_files
 				// with disk content — doing so would erase unsaved edits (P0-07
@@ -1313,6 +1321,7 @@ fn (mut app App) on_did_change_watched_files(request Request) {
 					app.diag_cache.delete(uri)
 				}
 				app.bump_generation(uri)
+				app.finish_diagnostics_project_mutation(diagnostics_mutation, '')
 			}
 			else {}
 		}
