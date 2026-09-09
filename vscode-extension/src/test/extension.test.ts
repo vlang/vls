@@ -4,6 +4,7 @@ import * as path from 'path';
 import {
   codeLensTaskSpec,
   shouldSaveTaskDocument,
+  standaloneTaskScope,
   workspaceTaskSpec,
 } from '../taskSpec';
 
@@ -88,6 +89,25 @@ describe('VLS VS Code extension', () => {
     );
     assert.ok(
       !shouldSaveTaskDocument(target, undefined, dirtyVDocument('/project/other/dirty.v'))
+    );
+  });
+
+  it('uses the nearest V project root for standalone CodeLens saves', () => {
+    const target = '/project/cmd/app/main.v';
+    const projectRoot = standaloneTaskScope(target, (filePath) => {
+      return filePath === path.normalize('/project/v.mod');
+    });
+    const dirtyImport = {
+      filePath: '/project/lib/foo/foo.v',
+      languageId: 'v',
+      isDirty: true,
+    };
+
+    assert.strictEqual(projectRoot, path.normalize('/project'));
+    assert.ok(shouldSaveTaskDocument(target, projectRoot, dirtyImport));
+    assert.strictEqual(
+      standaloneTaskScope(target, () => false),
+      path.normalize('/project/cmd/app')
     );
   });
 });

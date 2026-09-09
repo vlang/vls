@@ -5,7 +5,8 @@
 - CodeLens and Command Palette task runs now save every dirty V buffer in the active workspace
   before invoking the compiler, so multi-file modules and workspace imports run the code shown in
   the editor.
-- Standalone files save dirty V buffers in the target module tree without touching unrelated files.
+- Standalone files use the nearest `v.mod` project root, falling back to the target module tree,
+  without touching unrelated files.
 
 ## 0.0.3 — Interim release (2026-09-10)
 
