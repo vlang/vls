@@ -62,9 +62,36 @@ fn (mut output RunOutputBuffer) write(chunk string) {
 	output.truncated = true
 }
 
+fn code_lens_complete_utf8_prefix_len(value string) int {
+	if value.len == 0 {
+		return 0
+	}
+	mut start := value.len - 1
+	for start > 0 && value[start] & 0xc0 == 0x80 {
+		start--
+	}
+	first := value[start]
+	expected_len := if first & 0x80 == 0 {
+		1
+	} else if first & 0xe0 == 0xc0 {
+		2
+	} else if first & 0xf0 == 0xe0 {
+		3
+	} else if first & 0xf8 == 0xf0 {
+		4
+	} else {
+		1
+	}
+	if value.len - start < expected_len {
+		return start
+	}
+	return value.len
+}
+
 fn (mut output RunOutputBuffer) str() string {
 	mut result := output.output.str()
 	if output.truncated {
+		result = result[..code_lens_complete_utf8_prefix_len(result)]
 		result += code_lens_output_truncation_notice
 	}
 	return result
@@ -208,18 +235,33 @@ fn code_lens_v_string_literal(value string) string {
 // code_lens_source_with_real_paths prevents the temporary overlay location from being compiled
 // into path pseudo variables. Hash directives retain their tokens so the compiler can resolve
 // native inputs from the materialized overlay.
-fn code_lens_source_with_real_paths(source string, source_path string) string {
+fn code_lens_source_with_real_paths(source string, source_path string,
+	temp_source_path string) string {
 	mask := code_lens_source_code_mask(source)
 	file_path := os.real_path(source_path)
 	file_dir := os.real_path(os.dir(source_path))
 	vmod_root := find_project_root(os.dir(source_path))
 	mut rewritten := strings.new_builder(source.len + 64)
 	mut pos := 0
+	mut line_nr := 1
 	for pos < source.len {
 		if mask[pos] == `@` && !code_lens_token_is_in_hash_directive(mask, pos) {
 			if vmod_root != '' && code_lens_mask_has_at_token(mask, pos, '@VMODROOT') {
 				rewritten.write_string(code_lens_v_string_literal(os.real_path(vmod_root)))
 				pos += '@VMODROOT'.len
+				continue
+			}
+			if code_lens_mask_has_at_token(mask, pos, '@FILE_LINE') {
+				file_line := '${os.file_name(source_path)}:${line_nr}'
+				rewritten.write_string(code_lens_v_string_literal(file_line))
+				pos += '@FILE_LINE'.len
+				continue
+			}
+			if code_lens_mask_has_at_token(mask, pos, '@LOCATION') {
+				temp_literal := code_lens_v_string_literal(temp_source_path)
+				file_literal := code_lens_v_string_literal(file_path)
+				rewritten.write_string('(@LOCATION.replace(${temp_literal}, ${file_literal}))')
+				pos += '@LOCATION'.len
 				continue
 			}
 			if code_lens_mask_has_at_token(mask, pos, '@FILE') {
@@ -234,6 +276,9 @@ fn code_lens_source_with_real_paths(source string, source_path string) string {
 			}
 		}
 		rewritten.write_u8(source[pos])
+		if source[pos] == `\n` {
+			line_nr++
+		}
 		pos++
 	}
 	return rewritten.str()
@@ -254,7 +299,7 @@ fn preserve_code_lens_overlay_dir(overlay CompilationOverlay, temp_dir string,
 		rel_path := overlay_relative_path(temp_path, overlay.temp_root) or { continue }
 		source_path := normalize_overlay_path(os.join_path(overlay.source_root, rel_path))
 		source := open_sources[source_path] or { os.read_file(temp_path)! }
-		rewritten := code_lens_source_with_real_paths(source, source_path)
+		rewritten := code_lens_source_with_real_paths(source, source_path, temp_path)
 		if rewritten == source {
 			continue
 		}
