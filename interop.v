@@ -244,6 +244,16 @@ fn v3_compiler_selection_args() []string {
 	return []
 }
 
+fn established_compiler_selection_args() []string {
+	$if macos || linux {
+		// V3 is the default on these hosts, but -line-info is still provided by
+		// the established compiler. Select it explicitly; -w no longer switches
+		// compilers and is interpreted as a V3 warning flag.
+		return ['-old-compiler']
+	}
+	return []
+}
+
 fn build_v_check_args_single(file_to_check string) []string {
 	mut args := v3_compiler_selection_args()
 	// V3 emits warnings by default. At the pinned compiler revision `-w` means
@@ -260,13 +270,17 @@ fn build_v_check_args_multifile() []string {
 }
 
 fn build_v_line_info_args_multifile(rel_file string, line_info string) []string {
-	return ['-w', '-check', '-json-errors', '-nocolor', '-vls-mode', '-line-info',
+	mut args := established_compiler_selection_args()
+	args << ['-w', '-check', '-json-errors', '-nocolor', '-vls-mode', '-line-info',
 		'${rel_file}:${line_info}', '.']
+	return args
 }
 
 fn build_v_line_info_args_single(file_to_check string, line_info string, compile_target string) []string {
-	return ['-w', '-check', '-json-errors', '-nocolor', '-vls-mode', '-line-info',
+	mut args := established_compiler_selection_args()
+	args << ['-w', '-check', '-json-errors', '-nocolor', '-vls-mode', '-line-info',
 		'${file_to_check}:${line_info}', compile_target]
+	return args
 }
 
 fn build_v_fmt_args(temp_file string) []string {
@@ -1527,8 +1541,12 @@ fn (mut app App) run_v_line_info(method Method, path string, line_info string) R
 		}
 		.definition, .declaration, .type_definition, .implementation {
 			// file.v:line:col => Location
-			fields := x.output.trim_space().split(':')
-			if fields.len < 3 || x.output.trim_space() == '' {
+			// Compiler notices can precede the location (for example while flags
+			// migrate between V1 and V3). Parse only the final output line so that
+			// notice text cannot become part of the returned file URI.
+			location_line := last_compiler_output_line(x.output)
+			fields := location_line.split(':')
+			if fields.len < 3 || location_line == '' {
 				// No definition found — return null so the client does not navigate anywhere.
 				result = 'null'
 			} else {
@@ -1550,6 +1568,14 @@ fn (mut app App) run_v_line_info(method Method, path string, line_info string) R
 	}
 
 	return result
+}
+
+fn last_compiler_output_line(output string) string {
+	lines := output.trim_space().split_into_lines()
+	if lines.len == 0 {
+		return ''
+	}
+	return lines.last().trim_space()
 }
 
 // compiler_location maps a compiler-reported filesystem path back to the

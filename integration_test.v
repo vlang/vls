@@ -1038,6 +1038,107 @@ fn test_integration_vlang_v_cross_module_features_from_env() {
 	assert (completion.result as CompletionList).items.any(it.label == 'compile')
 }
 
+fn test_integration_vlang_v_indexed_completion_and_receiver_definition_from_env() {
+	configured_root := os.getenv('VLS_VLANG_V_REPO')
+	if configured_root == '' {
+		return
+	}
+	root := os.real_path(configured_root)
+	main_file := os.join_path(root, 'cmd', 'v', 'v.v')
+	content := os.read_file(main_file) or {
+		assert false, 'failed to read ${main_file}: ${err}'
+		return
+	}
+	lines := content.split_into_lines()
+	mut compile_line := -1
+	mut compile_dot_col := -1
+	mut timer_line := -1
+	mut timer_dot_col := -1
+	mut show_col := -1
+	for i, line in lines {
+		if compile_line < 0 && line.contains("builder.compile('build'") {
+			compile_line = i
+			compile_dot_col = line.index('builder.') or { -1 }
+			compile_dot_col += 'builder.'.len
+		}
+		if timer_line < 0 && line.contains("timers.show('v start'") {
+			timer_line = i
+			timer_dot_col = line.index('timers.') or { -1 }
+			timer_dot_col += 'timers.'.len
+			show_col = line.index('show') or { -1 }
+		}
+	}
+	assert compile_line >= 0
+	assert compile_dot_col >= 0
+	assert timer_line >= 0
+	assert timer_dot_col >= 0
+	assert show_col >= 0
+
+	mut app, scratch_project := create_integration_test_env()
+	defer {
+		cleanup_integration_test_env(app, scratch_project)
+	}
+	main_uri := path_to_uri(main_file)
+	app.open_files[main_uri] = content
+	app.workspace_roots = [root]
+
+	module_completion := app.operation_at_pos(.completion, Request{
+		id:     47
+		method: 'textDocument/completion'
+		params: json2.encode(TextDocumentPositionParams{
+			text_document: TextDocumentIdentifier{
+				uri: main_uri
+			}
+			position:      Position{
+				line: compile_line
+				char: compile_dot_col
+			}
+		},
+			escape_unicode: true
+		)
+	})
+	assert module_completion.result is CompletionList
+	assert (module_completion.result as CompletionList).items.any(it.label == 'compile')
+
+	receiver_completion := app.operation_at_pos(.completion, Request{
+		id:     48
+		method: 'textDocument/completion'
+		params: json2.encode(TextDocumentPositionParams{
+			text_document: TextDocumentIdentifier{
+				uri: main_uri
+			}
+			position:      Position{
+				line: timer_line
+				char: timer_dot_col
+			}
+		},
+			escape_unicode: true
+		)
+	})
+	assert receiver_completion.result is CompletionList
+	assert (receiver_completion.result as CompletionList).items.any(it.label == 'show')
+
+	definition := app.operation_at_pos(.definition, Request{
+		id:     49
+		method: 'textDocument/definition'
+		params: json2.encode(TextDocumentPositionParams{
+			text_document: TextDocumentIdentifier{
+				uri: main_uri
+			}
+			position:      Position{
+				line: timer_line
+				char: show_col + 2
+			}
+		},
+			escape_unicode: true
+		)
+	})
+	assert definition.result is Location
+	location := definition.result as Location
+	assert location.uri == path_to_uri(os.join_path(root, 'vlib', 'v', 'util', 'timers.v'))
+	assert location.range.start.line == 131
+}
+
 fn test_integration_signature_help_request() {
 	mut app, project_dir := create_integration_test_env()
 	defer {

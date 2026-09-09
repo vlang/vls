@@ -2613,7 +2613,7 @@ fn test_resolve_indexed_definition_prefers_source_relative_module() {
 	assert location.range.start.line == 2
 }
 
-fn test_resolve_indexed_definition_defers_receiver_method() {
+fn test_resolve_indexed_definition_resolves_receiver_method() {
 	mut app := create_test_app()
 	defer {
 		cleanup_test_app(app)
@@ -2629,8 +2629,14 @@ fn test_resolve_indexed_definition_defers_receiver_method() {
 	location := app.resolve_indexed_definition(uri, Position{
 		line: 8
 		char: 8
-	})
-	assert location == none
+	}) or {
+		assert false, 'expected indexed receiver method definition'
+		return
+	}
+	assert location.uri == uri
+	assert location.range.start.line == 4
+	assert location.range.start.char == 15
+	assert location.range.end.char == 21
 }
 
 fn test_operation_at_pos_signature_help_line_info() {
@@ -5405,6 +5411,80 @@ fn test_operation_at_pos_dot_completion_includes_aliased_import_module_members()
 	cl := response.result as CompletionList
 	labels := cl.items.map(it.label)
 	assert 'ping' in labels
+}
+
+fn test_operation_at_pos_completion_and_definition_resolve_cross_file_receiver_method() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+
+	test_dir := os.join_path(app.temp_dir, 'receiver_method_index')
+	clock_dir := os.join_path(test_dir, 'clock')
+	must_mkdir_all(clock_dir)
+	clock_file := os.join_path(clock_dir, 'clock.v')
+	must_write_file(clock_file,
+		'module clock\n\npub struct Timer {}\n\npub fn (mut timer Timer) show(label string) {}\n')
+
+	main_file := os.join_path(test_dir, 'main.v')
+	main_content := 'module main\n\nimport clock\n\nfn timer_pointer(timer &clock.Timer) &clock.Timer {\n\treturn timer\n}\n\nfn main() {\n\tmut timer := unsafe {\n\t\ttimer_pointer(&clock.Timer{})\n\t}\n\ttimer.show("total")\n}\n'
+	must_write_file(main_file, main_content)
+	main_uri := path_to_uri(main_file)
+	app.open_files[main_uri] = main_content
+
+	lines := main_content.split_into_lines()
+	mut call_line := -1
+	mut show_col := -1
+	for i, line in lines {
+		if line.contains('timer.show(') {
+			call_line = i
+			show_col = line.index('show') or { -1 }
+			break
+		}
+	}
+	assert call_line >= 0
+	assert show_col >= 0
+
+	completion := app.operation_at_pos(.completion, Request{
+		id:     9100
+		method: 'textDocument/completion'
+		params: json2.encode(TextDocumentPositionParams{
+			text_document: TextDocumentIdentifier{
+				uri: main_uri
+			}
+			position:      Position{
+				line: call_line
+				char: show_col
+			}
+		},
+			escape_unicode: true
+		)
+	})
+	assert completion.result is CompletionList
+	completion_items := (completion.result as CompletionList).items
+	assert completion_items.any(it.label == 'show' && it.kind == 2)
+
+	definition := app.operation_at_pos(.definition, Request{
+		id:     9101
+		method: 'textDocument/definition'
+		params: json2.encode(TextDocumentPositionParams{
+			text_document: TextDocumentIdentifier{
+				uri: main_uri
+			}
+			position:      Position{
+				line: call_line
+				char: show_col + 2
+			}
+		},
+			escape_unicode: true
+		)
+	})
+	assert definition.result is Location
+	location := definition.result as Location
+	assert location.uri == path_to_uri(clock_file)
+	assert location.range.start.line == 4
+	assert location.range.start.char == 25
+	assert location.range.end.char == 29
 }
 
 fn test_semantic_tokens_returns_data_for_known_content() {

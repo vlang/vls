@@ -422,6 +422,17 @@ fn test_build_v_line_info_args_single_embeds_line_info() {
 	args := build_v_line_info_args_single('/tmp/a.v', '10:gd^5', '/tmp/a.v')
 	assert '/tmp/a.v:10:gd^5' in args
 	assert '-line-info' in args
+	$if macos || linux {
+		assert '-old-compiler' in args
+	} $else {
+		assert '-old-compiler' !in args
+	}
+}
+
+fn test_last_compiler_output_line_ignores_leading_notices() {
+	output := 'unknown option `-json-errors`\n/tmp/project/worker.v:12:7\n'
+	assert last_compiler_output_line(output) == '/tmp/project/worker.v:12:7'
+	assert last_compiler_output_line('') == ''
 }
 
 fn test_parse_v_check_diagnostics_reads_v3_output() {
