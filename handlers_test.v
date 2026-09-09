@@ -5721,17 +5721,19 @@ fn test_execute_run_file_invokes_compiler() {
 	}
 	project_dir := os.join_path(app.temp_dir, 'code_lens_module')
 	must_mkdir_all(project_dir)
-	must_write_file(os.join_path(project_dir, 'v.mod'),
-		"Module {\n\tname: 'code_lens_module'\n}\n")
+	vmod_source := "Module {\n\tname: 'code_lens_module'\n}\n"
+	must_write_file(os.join_path(project_dir, 'v.mod'), vmod_source)
 	path := os.join_path(project_dir, 'main.v')
 	must_write_file(path, 'module main\n\nfn main() {\n\tprintln("stale-disk")\n}\n')
 	helper_path := os.join_path(project_dir, 'helper.v')
-	helper_source := 'module main\n\nfn code_lens_message() string {\n\treturn "module-sibling"\n}\n\nfn code_lens_sibling_paths() string {\n\treturn @VMODROOT + "\\n" + @FILE + "\\n" + @FILE_LINE + "\\n" + @LOCATION\n}\n'
+	helper_source := 'module main\n\nfn code_lens_message() string {\n\treturn "module-sibling"\n}\n\nfn code_lens_sibling_paths() string {\n\treturn @VMODROOT + "\\n" + @FILE + "\\n" + @FILE_LINE + "\\n" + @LOCATION + "\\n" + @COLUMN\n}\n'
 	must_write_file(helper_path, helper_source)
 	uri := path_to_uri(path)
 	runtime_output_path := os.join_path(project_dir, 'code_lens_runtime_cwd.txt')
 	compile_time_output_path := os.join_path(project_dir, 'code_lens_compile_time_paths.txt')
-	app.open_files[uri] = 'module main\n\nimport os\n\nfn main() {\n\tprintln(code_lens_message() + "-fresh-buffer")\n\tos.write_file("code_lens_runtime_cwd.txt", "real-module") or { panic(err) }\n\tos.write_file(os.join_path(@VMODROOT, "code_lens_compile_time_paths.txt"), code_lens_sibling_paths() + "\\n" + @FILE + "\\n" + @FILE_LINE + "\\n" + @LOCATION) or { panic(err) }\n}\n'
+	vmod_output_path := os.join_path(project_dir, 'code_lens_vmod.txt')
+	main_source := 'module main\n\nimport os\n\nfn main() {\n\tprintln(code_lens_message() + "-fresh-buffer")\n\tos.write_file("code_lens_runtime_cwd.txt", "real-module") or { panic(err) }\n\tos.write_file(os.join_path(@VMODROOT, "code_lens_compile_time_paths.txt"), code_lens_sibling_paths() + "\\n" + @FILE + "\\n" + @FILE_LINE + "\\n" + @LOCATION + "\\n" + @COLUMN) or { panic(err) }\n\tos.write_file("code_lens_vmod.txt", @VMOD_FILE) or { panic(err) }\n}\n'
+	app.open_files[uri] = main_source
 	app.capture_output = true
 	app.execute_commands_synchronously = true
 
@@ -5752,10 +5754,14 @@ fn test_execute_run_file_invokes_compiler() {
 	assert app.captured_output.all(!it.contains('stale-disk'))
 	assert app.captured_output.any(it.contains('Run Main finished successfully'))
 	assert (os.read_file(runtime_output_path) or { '' }) == 'real-module'
+	helper_column := helper_source.split_into_lines()[7].index('@COLUMN') or { 0 }
+	main_column := main_source.split_into_lines()[7].index('@COLUMN') or { 0 }
 	expected_paths := [os.real_path(project_dir), os.real_path(helper_path), 'helper.v:8',
-		'${os.real_path(helper_path)}:8, main.code_lens_sibling_paths', os.real_path(path),
-		'main.v:8', '${os.real_path(path)}:8, main.main']
+		'${os.real_path(helper_path)}:8, main.code_lens_sibling_paths', (helper_column + 1).str(),
+		os.real_path(path), 'main.v:8', '${os.real_path(path)}:8, main.main',
+		(main_column + 1).str()]
 	assert (os.read_file(compile_time_output_path) or { '' }) == expected_paths.join('\n')
+	assert (os.read_file(vmod_output_path) or { '' }) == vmod_source
 	assert (os.read_file(helper_path) or { '' }) == helper_source
 }
 
@@ -5862,19 +5868,22 @@ fn test_code_lens_source_paths_are_rewritten_only_in_code() {
 	}
 	project_dir := os.join_path(app.temp_dir, 'code_lens_source_paths')
 	must_mkdir_all(project_dir)
-	must_write_file(os.join_path(project_dir, 'v.mod'), 'Module {}\n')
+	vmod_source := 'Module {}\n'
+	must_write_file(os.join_path(project_dir, 'v.mod'), vmod_source)
 	source_path := os.join_path(project_dir, 'main.v')
 	temp_source_path := os.join_path(app.temp_dir, 'overlay', 'main.v')
-	source := 'const source_file = @FILE\nconst source_dir = @DIR\nconst project = @VMODROOT\nconst file_line = @FILE_LINE\nconst location = @LOCATION\nconst literal = "@FILE @DIR @VMODROOT @FILE_LINE @LOCATION"\n// @FILE @DIR @VMODROOT @FILE_LINE @LOCATION\n#flag -I @VMODROOT/thirdparty\n'
-	rewritten := code_lens_source_with_real_paths(source, source_path, temp_source_path)
+	source := 'const source_file = @FILE\nconst source_dir = @DIR\nconst project = @VMODROOT\nconst manifest = @VMOD_FILE\nconst file_line = @FILE_LINE\nconst location = @LOCATION\nconst column = @FILE + @COLUMN\nconst literal = "@FILE @DIR @VMODROOT @VMOD_FILE @FILE_LINE @LOCATION @COLUMN"\n// @FILE @DIR @VMODROOT @VMOD_FILE @FILE_LINE @LOCATION @COLUMN\n#flag -I @VMODROOT/thirdparty\n'
+	rewritten := code_lens_source_with_original_pseudos(source, source_path, temp_source_path)
 
 	assert rewritten.contains('const source_file = ${code_lens_v_string_literal(os.real_path(source_path))}')
 	assert rewritten.contains('const source_dir = ${code_lens_v_string_literal(os.real_path(project_dir))}')
 	assert rewritten.contains('const project = ${code_lens_v_string_literal(os.real_path(project_dir))}')
-	assert rewritten.contains("const file_line = 'main.v:4'")
+	assert rewritten.contains('const manifest = ${code_lens_v_string_literal(vmod_source)}')
+	assert rewritten.contains("const file_line = 'main.v:5'")
 	assert rewritten.contains('const location = (@LOCATION.replace(${code_lens_v_string_literal(temp_source_path)}, ${code_lens_v_string_literal(os.real_path(source_path))}))')
-	assert rewritten.contains('const literal = "@FILE @DIR @VMODROOT @FILE_LINE @LOCATION"')
-	assert rewritten.contains('// @FILE @DIR @VMODROOT @FILE_LINE @LOCATION')
+	assert rewritten.contains("const column = ${code_lens_v_string_literal(os.real_path(source_path))} + '24'")
+	assert rewritten.contains('const literal = "@FILE @DIR @VMODROOT @VMOD_FILE @FILE_LINE @LOCATION @COLUMN"')
+	assert rewritten.contains('// @FILE @DIR @VMODROOT @VMOD_FILE @FILE_LINE @LOCATION @COLUMN')
 	assert rewritten.contains('#flag -I @VMODROOT/thirdparty')
 }
 
