@@ -1,5 +1,12 @@
 # Change Log
 
+## 0.0.4 — CodeLens buffer consistency (2026-09-10)
+
+- CodeLens and Command Palette task runs now save every dirty V buffer in the active workspace
+  before invoking the compiler, so multi-file modules and workspace imports run the code shown in
+  the editor.
+- Standalone files save dirty V buffers in the target module tree without touching unrelated files.
+
 ## 0.0.3 — Interim release (2026-09-10)
 
 V development commands are now first-class VS Code tasks:
