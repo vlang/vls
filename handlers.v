@@ -548,11 +548,12 @@ fn parse_public_module_member_completions(content string) []Detail {
 	return items
 }
 
-// on_did_open handles the LSP didOpen notification, loading file content into the server state.
-fn (mut app App) on_did_open(request Request) {
+// on_did_open handles the LSP didOpen notification, loading file content into
+// the server state. It returns true when diagnostics were scheduled.
+fn (mut app App) on_did_open(request Request) bool {
 	params := json2.decode[DidOpenTextDocumentParams](request.params) or {
 		$if debug { log('Failed to decode DidOpenTextDocumentParams: ${err}') }
-		return
+		return false
 	}
 	uri := params.text_document.uri
 	log('on_did_open: ${uri}')
@@ -564,9 +565,10 @@ fn (mut app App) on_did_open(request Request) {
 		real_path := uri_to_path(uri)
 		content = os.read_file(real_path) or {
 			$if debug { log('Failed to read file ${real_path}: ${err}') }
-			return
+			return false
 		}
 	}
+	diagnostics_mutation := app.begin_diagnostics_project_schedule(uri)
 	app.open_files[uri] = content
 	if version := params.text_document.version {
 		app.open_files_versions[uri] = version
@@ -575,6 +577,7 @@ fn (mut app App) on_did_open(request Request) {
 	app.invalidate_index_uri(uri) // re-parse from the buffer on next query
 	app.text = content
 	$if debug { log('STORED CONTENT for uri=${uri}, FILE COUNT: ${app.open_files.len}') }
+	return app.finish_diagnostics_project_schedule(diagnostics_mutation, uri, content)
 }
 
 // on_did_close handles the LSP didClose notification by removing the file from
@@ -777,10 +780,12 @@ fn (mut app App) on_did_save(request Request) ?Notification {
 	// tracked as open (P0-07 item 6). When the client includes save text and
 	// the document is open, prefer the client's text as the new source of truth.
 	mut content := ''
+	mut diagnostics_mutation := DiagnosticsProjectMutation{}
 	if existing := app.open_files[uri] {
 		content = existing
 		if text := params.text {
 			content = text
+			diagnostics_mutation = app.begin_diagnostics_project_schedule(uri)
 			app.open_files[uri] = text
 			app.text = text
 			app.bump_generation(uri)
@@ -801,7 +806,11 @@ fn (mut app App) on_did_save(request Request) ?Notification {
 			}
 		}
 	}
-	if app.schedule_diagnostics(uri, content) {
+	if diagnostics_mutation.tickets.len > 0 {
+		if app.finish_diagnostics_project_schedule(diagnostics_mutation, uri, content) {
+			return none
+		}
+	} else if app.schedule_diagnostics(uri, content) {
 		return none
 	}
 	notification := app.build_diagnostics_notification(uri, content)

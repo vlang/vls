@@ -725,13 +725,11 @@ fn (mut app App) handle_requests(mut reader io.BufferedReader) {
 				}
 			}
 			.did_open {
-				app.on_did_open(lsp_request)
-				if params := json2.decode[DidOpenTextDocumentParams](lsp_request.params) {
+				if !app.on_did_open(lsp_request) {
+					params := json2.decode[DidOpenTextDocumentParams](lsp_request.params) or { continue }
 					uri := params.text_document.uri
 					if doc_content := app.open_files[uri] {
-						if !app.schedule_diagnostics(uri, doc_content) {
-							app.write_notification(app.build_diagnostics_notification(uri, doc_content))
-						}
+						app.write_notification(app.build_diagnostics_notification(uri, doc_content))
 					}
 				}
 			}
