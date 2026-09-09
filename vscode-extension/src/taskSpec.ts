@@ -1,3 +1,4 @@
+import * as fs from 'fs';
 import * as path from 'path';
 
 export type VTaskAction = 'build' | 'run' | 'test';
@@ -12,6 +13,24 @@ export interface TaskDocumentSpec {
   filePath: string;
   languageId: string;
   isDirty: boolean;
+}
+
+export function standaloneTaskScope(
+  targetFilePath: string,
+  exists: (filePath: string) => boolean = fs.existsSync
+): string {
+  const targetDirectory = path.dirname(path.resolve(targetFilePath));
+  let directory = targetDirectory;
+  while (true) {
+    if (exists(path.join(directory, 'v.mod'))) {
+      return directory;
+    }
+    const parent = path.dirname(directory);
+    if (parent === directory) {
+      return targetDirectory;
+    }
+    directory = parent;
+  }
 }
 
 export function shouldSaveTaskDocument(

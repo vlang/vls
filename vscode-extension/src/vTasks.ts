@@ -5,6 +5,7 @@ import * as path from 'path';
 import {
   codeLensTaskSpec,
   shouldSaveTaskDocument,
+  standaloneTaskScope,
   taskActionTitle,
   VTaskAction,
   workspaceTaskSpec,
@@ -194,7 +195,7 @@ async function saveTaskDocuments(
   targetFilePath = target.cwd
 ): Promise<boolean> {
   const folder = workspaceFolderForScope(target.scope);
-  const scopeRoot = folder?.uri.fsPath || target.cwd;
+  const scopeRoot = folder?.uri.fsPath || standaloneTaskScope(targetFilePath);
   const documents = vscode.workspace.textDocuments.filter((document) => {
     return (
       document.uri.scheme === 'file' &&
