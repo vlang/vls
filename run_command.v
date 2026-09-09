@@ -227,8 +227,7 @@ fn code_lens_token_is_in_hash_directive(mask []u8, pos int) bool {
 }
 
 fn code_lens_v_string_literal(value string) string {
-	escaped := value.replace('\\', '\\\\').replace("'", "\\'").replace('$', '\\$').replace('\n',
-		'\\n').replace('\r', '\\r').replace('\t', '\\t')
+	escaped := value.replace('\\', '\\\\').replace("'", "\\'").replace('\$', '\\\$').replace('\n', '\\n').replace('\r', '\\r').replace('\t', '\\t')
 	return "'${escaped}'"
 }
 
@@ -359,8 +358,8 @@ mut:
 
 fn new_run_command_manager() &RunCommandManager {
 	return &RunCommandManager{
-		workers:        sync.new_waitgroup()
-		processes:      map[u64]&os.Process{}
+		workers: sync.new_waitgroup()
+		processes: map[u64]&os.Process{}
 		active_targets: map[string]u64{}
 	}
 }
@@ -500,7 +499,7 @@ fn run_managed_process(mut manager RunCommandManager, id u64, target string, exe
 		return ManagedRunResult{
 			result: os.Result{
 				exit_code: 1
-				output:    'Working dir does not exist: ${work_folder}'
+				output: 'Working dir does not exist: ${work_folder}'
 			}
 		}
 	}
@@ -544,7 +543,7 @@ fn run_managed_process(mut manager RunCommandManager, id u64, target string, exe
 	return ManagedRunResult{
 		result: os.Result{
 			exit_code: exit_code
-			output:    output.str()
+			output: output.str()
 		}
 		cancelled: !registered || manager.job_is_cancelled(id, target)
 	}
@@ -592,15 +591,14 @@ fn run_code_lens_job(mut manager RunCommandManager, id u64, target string,
 	}
 	temp_dir := os.join_path(os.temp_dir(), 'vls_run_${os.getpid()}_${id}_${time.now().unix_nano()}')
 	mut worker := App{
-		open_files:      job.open_files
-		temp_dir:        temp_dir
-		capture_output:  job.capture_output
-		write_mutex:     job.write_mutex
-		tcp_conn:        job.tcp_conn
+		open_files: job.open_files
+		temp_dir: temp_dir
+		capture_output: job.capture_output
+		write_mutex: job.write_mutex
+		tcp_conn: job.tcp_conn
 	}
 	os.mkdir_all(temp_dir) or {
-		worker.send_show_message('vls: ${job.title} could not create a temporary directory: ${err}',
-			1)
+		worker.send_show_message('vls: ${job.title} could not create a temporary directory: ${err}', 1)
 		return worker.captured_output.clone()
 	}
 	defer {
@@ -613,13 +611,11 @@ fn run_code_lens_job(mut manager RunCommandManager, id u64, target string,
 	mut overlay := CompilationOverlay{}
 	if job.uri in job.open_files {
 		overlay = worker.prepare_compilation_overlay(job.path) or {
-			worker.send_show_message('vls: ${job.title} could not prepare the open buffer: ${err}',
-				1)
+			worker.send_show_message('vls: ${job.title} could not prepare the open buffer: ${err}', 1)
 			return worker.captured_output.clone()
 		}
 		preserve_code_lens_overlay_source_paths(overlay, job.open_files) or {
-			worker.send_show_message('vls: ${job.title} could not preserve source paths: ${err}',
-				1)
+			worker.send_show_message('vls: ${job.title} could not preserve source paths: ${err}', 1)
 			return worker.captured_output.clone()
 		}
 		target_path = overlay.temp_source_file
@@ -630,15 +626,13 @@ fn run_code_lens_job(mut manager RunCommandManager, id u64, target string,
 	compile_args := code_lens_compile_args(job, target_path, executable_path)
 	display_args := code_lens_display_args(job)
 	worker.send_log_message('vls: ${job.title}: v ${display_args.join(' ')}', 3)
-	compile_result := run_managed_process(mut manager, id, target, resolve_v_compiler_exe(),
-		compile_args, compile_dir)
+	compile_result := run_managed_process(mut manager, id, target, resolve_v_compiler_exe(), compile_args, compile_dir)
 	if compile_result.cancelled {
 		return worker.captured_output.clone()
 	}
 	log_code_lens_output(mut worker, compile_result.result, overlay)
 	if compile_result.result.exit_code != 0 {
-		worker.send_show_message(
-			'vls: ${job.title} failed with exit code ${compile_result.result.exit_code}.', 1)
+		worker.send_show_message('vls: ${job.title} failed with exit code ${compile_result.result.exit_code}.', 1)
 		return worker.captured_output.clone()
 	}
 
@@ -648,8 +642,7 @@ fn run_code_lens_job(mut manager RunCommandManager, id u64, target string,
 	}
 	log_code_lens_output(mut worker, run_result.result, overlay)
 	if run_result.result.exit_code != 0 {
-		worker.send_show_message(
-			'vls: ${job.title} failed with exit code ${run_result.result.exit_code}.', 1)
+		worker.send_show_message('vls: ${job.title} failed with exit code ${run_result.result.exit_code}.', 1)
 		return worker.captured_output.clone()
 	}
 	worker.send_show_message('vls: ${job.title} finished successfully.', 3)
