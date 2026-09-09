@@ -767,13 +767,7 @@ fn (mut app App) handle_requests(mut reader io.BufferedReader) {
 				app.on_cancel_request(lsp_request)
 			}
 			.shutdown {
-				log('Received shutdown request.')
-				app.is_shutdown = true
-				shutdown_resp := Response{
-					id:     lsp_request.id
-					result: 'null'
-				}
-				app.write_response(shutdown_resp)
+				app.accept_shutdown(lsp_request.id)
 			}
 			.exit {
 				log('Received exit notification. Terminating.')
@@ -1237,6 +1231,16 @@ fn matches_needle_at(s string, i int, needle string) bool {
 
 fn (mut app App) write_notification(notification Notification) {
 	app.send_framed(json2.encode(notification, escape_unicode: true))
+}
+
+fn (mut app App) accept_shutdown(id int) {
+	log('Received shutdown request.')
+	app.cancel_all_scheduled_diagnostics()
+	app.is_shutdown = true
+	app.write_response(Response{
+		id:     id
+		result: 'null'
+	})
 }
 
 fn (mut app App) write_error_response(response ErrorResponse) {

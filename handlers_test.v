@@ -492,6 +492,71 @@ fn test_diagnostics_scheduler_invalidates_only_changed_document() {
 	assert !scheduler.is_current('file:///b.v', global_b, generation_b)
 }
 
+fn test_diagnostics_scheduler_coalesces_pending_jobs() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	mut scheduler := new_diagnostics_scheduler()
+	uri := 'file:///pending.v'
+	global_first, generation_first := scheduler.next_generation(uri)
+	assert scheduler.enqueue(DiagnosticsJob{
+		uri: uri
+		content: 'first'
+		global_generation: global_first
+		generation: generation_first
+		ready_at: 100
+		write_mutex: app.write_mutex
+	})
+	global_latest, generation_latest := scheduler.next_generation(uri)
+	assert !scheduler.enqueue(DiagnosticsJob{
+		uri: uri
+		content: 'latest'
+		global_generation: global_latest
+		generation: generation_latest
+		ready_at: 100
+		write_mutex: app.write_mutex
+	})
+
+	jobs, should_stop := scheduler.take_ready_jobs(100)
+	assert !should_stop
+	assert jobs.len == 1
+	assert jobs[0].content == 'latest'
+	assert scheduler.is_current(jobs[0].uri, jobs[0].global_generation, jobs[0].generation)
+
+	_, should_stop_after_drain := scheduler.take_ready_jobs(100)
+	assert should_stop_after_drain
+}
+
+fn test_diagnostics_scheduler_checks_staleness_while_publishing() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	app.capture_output = true
+	mut scheduler := new_diagnostics_scheduler()
+	uri := 'file:///publish.v'
+	global_generation, generation := scheduler.next_generation(uri)
+	job := DiagnosticsJob{
+		uri: uri
+		global_generation: global_generation
+		generation: generation
+		write_mutex: app.write_mutex
+	}
+	notification := Notification{
+		method: 'textDocument/publishDiagnostics'
+		params: PublishDiagnosticsParams{
+			uri: uri
+		}
+	}
+
+	assert scheduler.publish_if_current(mut app, job, notification)
+	assert app.captured_output.len == 1
+	scheduler.cancel(uri)
+	assert !scheduler.publish_if_current(mut app, job, notification)
+	assert app.captured_output.len == 1
+}
+
 fn test_on_did_change_multiple_changes() {
 	mut app := create_test_app()
 	defer {
