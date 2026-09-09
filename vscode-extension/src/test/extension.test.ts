@@ -1,7 +1,11 @@
 import * as assert from 'assert';
 import * as fs from 'fs';
 import * as path from 'path';
-import { codeLensTaskSpec, workspaceTaskSpec } from '../taskSpec';
+import {
+  codeLensTaskSpec,
+  shouldSaveTaskDocument,
+  workspaceTaskSpec,
+} from '../taskSpec';
 
 describe('VLS VS Code extension', () => {
   it('contributes build, run, and test commands and tasks', () => {
@@ -52,5 +56,38 @@ describe('VLS VS Code extension', () => {
       args: ['-nocolor', 'test', '/tmp/main_test.v', '-run-only', 'test_one'],
       name: 'Run Test: test_one',
     });
+  });
+
+  it('saves dirty V buffers in the CodeLens workspace before running', () => {
+    const target = '/workspace/app/main.v';
+    const workspace = '/workspace';
+    const document = (filePath: string, languageId = 'v', isDirty = true) => ({
+      filePath,
+      languageId,
+      isDirty,
+    });
+
+    assert.ok(shouldSaveTaskDocument(target, workspace, document(target)));
+    assert.ok(shouldSaveTaskDocument(target, workspace, document('/workspace/app/sibling.v')));
+    assert.ok(shouldSaveTaskDocument(target, workspace, document('/workspace/lib/imported.v')));
+    assert.ok(shouldSaveTaskDocument(target, workspace, document('/workspace/tool.vsh', 'shellscript')));
+    assert.ok(!shouldSaveTaskDocument(target, workspace, document('/workspace/app/clean.v', 'v', false)));
+    assert.ok(!shouldSaveTaskDocument(target, workspace, document('/workspace/notes.txt', 'plaintext')));
+    assert.ok(!shouldSaveTaskDocument(target, workspace, document('/other/workspace/dirty.v')));
+  });
+
+  it('limits standalone CodeLens saves to the target module tree', () => {
+    const target = '/project/module/main.v';
+    const dirtyVDocument = (filePath: string) => ({ filePath, languageId: 'v', isDirty: true });
+
+    assert.ok(
+      shouldSaveTaskDocument(target, undefined, dirtyVDocument('/project/module/sibling.v'))
+    );
+    assert.ok(
+      shouldSaveTaskDocument(target, undefined, dirtyVDocument('/project/module/lib/imported.v'))
+    );
+    assert.ok(
+      !shouldSaveTaskDocument(target, undefined, dirtyVDocument('/project/other/dirty.v'))
+    );
   });
 });

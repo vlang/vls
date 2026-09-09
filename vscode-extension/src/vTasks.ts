@@ -4,6 +4,7 @@ import * as os from 'os';
 import * as path from 'path';
 import {
   codeLensTaskSpec,
+  shouldSaveTaskDocument,
   taskActionTitle,
   VTaskAction,
   workspaceTaskSpec,
@@ -188,17 +189,27 @@ function activeWorkspaceTarget(): VTaskTarget | undefined {
   return folder ? folderTarget(folder) : undefined;
 }
 
-async function saveDocument(uri?: vscode.Uri): Promise<boolean> {
+async function saveTaskDocuments(uri?: vscode.Uri): Promise<boolean> {
   if (!uri) {
     return true;
   }
-  const document = vscode.workspace.textDocuments.find((candidate) => {
-    return candidate.uri.toString() === uri.toString();
+  const folder = vscode.workspace.getWorkspaceFolder(uri);
+  const documents = vscode.workspace.textDocuments.filter((document) => {
+    return (
+      document.uri.scheme === 'file' &&
+      shouldSaveTaskDocument(uri.fsPath, folder?.uri.fsPath, {
+        filePath: document.uri.fsPath,
+        languageId: document.languageId,
+        isDirty: document.isDirty,
+      })
+    );
   });
-  if (!document || !document.isDirty) {
-    return true;
+  for (const document of documents) {
+    if (!(await document.save())) {
+      return false;
+    }
   }
-  return document.save();
+  return true;
 }
 
 async function executeVTask(
@@ -229,9 +240,9 @@ async function runPaletteTask(action: VTaskAction): Promise<void> {
     return;
   }
   const uri = activeFileUri();
-  if (!(await saveDocument(uri))) {
+  if (!(await saveTaskDocuments(uri))) {
     vscode.window.showErrorMessage(
-      `V: ${taskActionTitle(action)} was cancelled because the file was not saved.`
+      `V: ${taskActionTitle(action)} was cancelled because one or more V files were not saved.`
     );
     return;
   }
@@ -274,8 +285,10 @@ export async function runCodeLensCommand(command: string, args: unknown[]): Prom
     vscode.window.showErrorMessage('V: This command requires a local V source file.');
     return;
   }
-  if (!(await saveDocument(uri))) {
-    vscode.window.showErrorMessage('V: The command was cancelled because the file was not saved.');
+  if (!(await saveTaskDocuments(uri))) {
+    vscode.window.showErrorMessage(
+      'V: The command was cancelled because one or more V files were not saved.'
+    );
     return;
   }
 
