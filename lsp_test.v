@@ -35,6 +35,32 @@ fn test_stdio_reader_processes_frame_before_eof() {
 	assert content == payload
 }
 
+fn test_stdio_reader_preserves_frame_across_small_buffer() {
+	mut transport := os.pipe() or {
+		assert false, 'failed to create stdin test pipe: ${err}'
+		return
+	}
+	defer {
+		transport.close()
+	}
+
+	payload := '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}'
+	frame := 'Content-Length: ${payload.len}\r\n\r\n${payload}'
+	transport.write(frame.bytes()) or {
+		assert false, 'failed to write stdin test frame: ${err}'
+		return
+	}
+	os.fd_close(transport.write_fd)
+	transport.write_fd = -1
+
+	mut reader := new_stdin_buffered_reader_for_fd(transport.read_fd, 1)
+	content := read_request(mut reader) or {
+		assert false, 'failed to read split stdin test frame: ${err}'
+		return
+	}
+	assert content == payload
+}
+
 fn test_method_from_string_initialize() {
 	assert Method.from_string('initialize') == .initialize
 }

@@ -113,27 +113,102 @@ fn log(s string) {
 	output.close()
 }
 
-// StdinReader reads standard input through its raw descriptor so streaming
-// clients are not blocked by the full-buffer behaviour of C fread.
-// Keep it stateful and pointer-backed to match io.Reader's mutable method contract.
-struct StdinReader {
+// StdinBufferedReader reads standard input through its raw descriptor so streaming
+// clients are not blocked by the full-buffer behaviour of C fread. It deliberately
+// stays concrete instead of passing through io.Reader: optimized musl builds can
+// omit the custom interface dispatch entry and panic before the first LSP message.
+struct StdinBufferedReader {
 	fd int
+mut:
+	buf           []u8
+	offset        int
+	len           int
+	end_of_stream bool
 }
 
-fn (mut reader StdinReader) read(mut buffer []u8) !int {
-	data, bytes_read := os.fd_read(reader.fd, buffer.len)
+fn (mut reader StdinBufferedReader) fill_buffer() !bool {
+	if reader.end_of_stream {
+		return false
+	}
+	data, bytes_read := os.fd_read(reader.fd, reader.buf.len)
 	if bytes_read < 0 {
 		return error('failed to read from stdin')
 	}
 	if bytes_read == 0 {
+		reader.end_of_stream = true
+		reader.offset = 0
+		reader.len = 0
+		return false
+	}
+	reader.offset = 0
+	reader.len = copy(mut reader.buf, data.bytes())
+	if reader.len != bytes_read {
+		return error('failed to buffer stdin')
+	}
+	return true
+}
+
+fn (mut reader StdinBufferedReader) read(mut buffer []u8) !int {
+	if buffer.len == 0 {
+		return 0
+	}
+	if reader.offset >= reader.len {
+		if !reader.fill_buffer()! {
+			return io.Eof{}
+		}
+	}
+	bytes_read := copy(mut buffer, reader.buf[reader.offset..reader.len])
+	reader.offset += bytes_read
+	return bytes_read
+}
+
+fn (mut reader StdinBufferedReader) read_line(config io.BufferedReadLineConfig) !string {
+	if reader.end_of_stream && reader.offset >= reader.len {
 		return io.Eof{}
 	}
-	return copy(mut buffer, data.bytes())
+	mut line := []u8{}
+	for {
+		if reader.offset >= reader.len {
+			if !reader.fill_buffer()! {
+				if line.len == 0 {
+					return io.Eof{}
+				}
+				return line.bytestr()
+			}
+		}
+		mut i := reader.offset
+		for ; i < reader.len; i++ {
+			if reader.buf[i] != config.delim {
+				continue
+			}
+			mut end := i
+			if config.delim == `\n` {
+				if i > reader.offset && reader.buf[i - 1] == `\r` {
+					end--
+				} else if i == reader.offset && line.len > 0 && line.last() == `\r` {
+					line.delete_last()
+				}
+			}
+			line << reader.buf[reader.offset..end]
+			reader.offset = i + 1
+			return line.bytestr()
+		}
+		line << reader.buf[reader.offset..i]
+		reader.offset = i
+	}
+	return io.Eof{}
+}
+
+fn new_stdin_buffered_reader_for_fd(fd int, cap int) &StdinBufferedReader {
+	return &StdinBufferedReader{
+		fd:  fd
+		buf: []u8{len: cap}
+	}
 }
 
 // new_stdin_buffered_reader creates the streaming reader used by stdio mode.
-fn new_stdin_buffered_reader() &io.BufferedReader {
-	return io.new_buffered_reader(reader: &StdinReader{ fd: 0 }, cap: transport_buffer_cap)
+fn new_stdin_buffered_reader() &StdinBufferedReader {
+	return new_stdin_buffered_reader_for_fd(0, transport_buffer_cap)
 }
 
 fn main() {
@@ -317,7 +392,7 @@ const max_content_length = 64 * 1024 * 1024 // 64 MiB max JSON-RPC body
 const max_header_bytes = 64 * 1024 // total header section size cap
 const max_charset = 'utf-8' // LSP content is always UTF-8
 
-fn read_request(mut reader io.BufferedReader) !string {
+fn read_request[T](mut reader T) !string {
 	mut len := -1
 	mut header_error := ''
 	mut header_bytes := 0
@@ -486,7 +561,7 @@ fn parse_content_length_header(s string) !int {
 }
 
 // handle_requests is the main request handler loop for both stdio and TCP modes.
-fn (mut app App) handle_requests(mut reader io.BufferedReader) {
+fn (mut app App) handle_requests[T](mut reader T) {
 	defer {
 		app.cancel_all_scheduled_diagnostics()
 		app.stop_run_commands()
