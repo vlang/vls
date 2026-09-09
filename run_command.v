@@ -70,6 +70,211 @@ fn (mut output RunOutputBuffer) str() string {
 	return result
 }
 
+// code_lens_source_code_mask keeps code bytes in place while hiding strings and comments.
+// Interpolation expressions remain visible because they can contain compile-time path tokens.
+fn code_lens_source_code_mask(source string) []u8 {
+	mut mask := []u8{len: source.len, init: ` `}
+	mut state := ImportScanState{}
+	mut in_line_comment := false
+	mut pos := 0
+	for pos < source.len {
+		if in_line_comment {
+			if source[pos] == `\n` {
+				in_line_comment = false
+				mask[pos] = `\n`
+			}
+			pos++
+			continue
+		}
+		if state.block_comment_depth > 0 {
+			if pos + 1 < source.len && source[pos] == `/` && source[pos + 1] == `*` {
+				state.block_comment_depth++
+				pos += 2
+				continue
+			}
+			if pos + 1 < source.len && source[pos] == `*` && source[pos + 1] == `/` {
+				state.block_comment_depth--
+				pos += 2
+				continue
+			}
+			if source[pos] == `\n` {
+				mask[pos] = `\n`
+			}
+			pos++
+			continue
+		}
+		if state.quote != 0 {
+			if !state.raw_string && source[pos] == `\\` && pos + 1 < source.len {
+				pos += 2
+				continue
+			}
+			if !state.raw_string && source[pos] == `$` && pos + 1 < source.len
+				&& source[pos + 1] == `{` {
+				state.interpolations << ImportInterpolationState{
+					quote: state.quote
+				}
+				state.quote = 0
+				pos += 2
+				continue
+			}
+			if source[pos] == state.quote {
+				state.quote = 0
+				state.raw_string = false
+			}
+			if source[pos] == `\n` {
+				mask[pos] = `\n`
+			}
+			pos++
+			continue
+		}
+		if pos + 1 < source.len && source[pos] == `/` && source[pos + 1] == `/` {
+			in_line_comment = true
+			pos += 2
+			continue
+		}
+		if pos + 1 < source.len && source[pos] == `/` && source[pos + 1] == `*` {
+			state.block_comment_depth = 1
+			pos += 2
+			continue
+		}
+		if source[pos] == `{` && state.interpolations.len > 0 {
+			last := state.interpolations.len - 1
+			state.interpolations[last].brace_depth++
+			mask[pos] = source[pos]
+			pos++
+			continue
+		}
+		if source[pos] == `}` && state.interpolations.len > 0 {
+			last := state.interpolations.len - 1
+			if state.interpolations[last].brace_depth == 0 {
+				interpolation := state.interpolations.pop()
+				state.quote = interpolation.quote
+				state.raw_string = false
+			} else {
+				state.interpolations[last].brace_depth--
+				mask[pos] = source[pos]
+			}
+			pos++
+			continue
+		}
+		if source[pos] == `r` && pos + 1 < source.len
+			&& source[pos + 1] in [`'`, `"`] {
+			state.quote = source[pos + 1]
+			state.raw_string = true
+			pos += 2
+			continue
+		}
+		if source[pos] in [`'`, `"`, 96] {
+			state.quote = source[pos]
+			state.raw_string = false
+			pos++
+			continue
+		}
+		mask[pos] = source[pos]
+		pos++
+	}
+	return mask
+}
+
+fn code_lens_mask_has_at_token(mask []u8, pos int, token string) bool {
+	if pos + token.len > mask.len {
+		return false
+	}
+	for i in 0 .. token.len {
+		if mask[pos + i] != token[i] {
+			return false
+		}
+	}
+	return pos + token.len == mask.len || !is_ident_char(mask[pos + token.len])
+}
+
+fn code_lens_token_is_in_hash_directive(mask []u8, pos int) bool {
+	mut line_start := pos
+	for line_start > 0 && mask[line_start - 1] != `\n` {
+		line_start--
+	}
+	for line_start < pos && mask[line_start].is_space() {
+		line_start++
+	}
+	return line_start < pos && mask[line_start] == `#`
+}
+
+fn code_lens_v_string_literal(value string) string {
+	escaped := value.replace('\\', '\\\\').replace("'", "\\'").replace('$', '\\$').replace('\n',
+		'\\n').replace('\r', '\\r').replace('\t', '\\t')
+	return "'${escaped}'"
+}
+
+// code_lens_source_with_real_paths prevents the temporary overlay location from being compiled
+// into path pseudo variables. Hash directives retain their tokens so the compiler can resolve
+// native inputs from the materialized overlay.
+fn code_lens_source_with_real_paths(source string, source_path string) string {
+	mask := code_lens_source_code_mask(source)
+	file_path := os.real_path(source_path)
+	file_dir := os.real_path(os.dir(source_path))
+	vmod_root := find_project_root(os.dir(source_path))
+	mut rewritten := strings.new_builder(source.len + 64)
+	mut pos := 0
+	for pos < source.len {
+		if mask[pos] == `@` && !code_lens_token_is_in_hash_directive(mask, pos) {
+			if vmod_root != '' && code_lens_mask_has_at_token(mask, pos, '@VMODROOT') {
+				rewritten.write_string(code_lens_v_string_literal(os.real_path(vmod_root)))
+				pos += '@VMODROOT'.len
+				continue
+			}
+			if code_lens_mask_has_at_token(mask, pos, '@FILE') {
+				rewritten.write_string(code_lens_v_string_literal(file_path))
+				pos += '@FILE'.len
+				continue
+			}
+			if code_lens_mask_has_at_token(mask, pos, '@DIR') {
+				rewritten.write_string(code_lens_v_string_literal(file_dir))
+				pos += '@DIR'.len
+				continue
+			}
+		}
+		rewritten.write_u8(source[pos])
+		pos++
+	}
+	return rewritten.str()
+}
+
+// preserve_code_lens_overlay_dir rewrites both open buffers and linked sibling module files.
+fn preserve_code_lens_overlay_dir(overlay CompilationOverlay, temp_dir string,
+	open_sources map[string]string) ! {
+	for entry in os.ls(temp_dir)! {
+		temp_path := os.join_path(temp_dir, entry)
+		if !os.is_link(temp_path) && os.is_dir(temp_path) {
+			preserve_code_lens_overlay_dir(overlay, temp_path, open_sources)!
+			continue
+		}
+		if !os.is_file(temp_path) || (!temp_path.ends_with('.v') && !temp_path.ends_with('.vsh')) {
+			continue
+		}
+		rel_path := overlay_relative_path(temp_path, overlay.temp_root) or { continue }
+		source_path := normalize_overlay_path(os.join_path(overlay.source_root, rel_path))
+		source := open_sources[source_path] or { os.read_file(temp_path)! }
+		rewritten := code_lens_source_with_real_paths(source, source_path)
+		if rewritten == source {
+			continue
+		}
+		// Unlink first: unchanged overlay files may be links to the user's source tree.
+		os.rm(temp_path)!
+		os.write_file(temp_path, rewritten) or {
+			return error('Failed to preserve source paths for ${source_path}: ${err}')
+		}
+	}
+}
+
+fn preserve_code_lens_overlay_source_paths(overlay CompilationOverlay,
+	open_files map[string]string) ! {
+	mut open_sources := map[string]string{}
+	for uri, source in open_files {
+		open_sources[normalize_overlay_path(uri_to_path(uri))] = source
+	}
+	preserve_code_lens_overlay_dir(overlay, overlay.temp_root, open_sources)!
+}
+
 @[heap]
 struct RunCommandManager {
 	workers &sync.WaitGroup
@@ -177,6 +382,7 @@ fn run_managed_process(mut manager RunCommandManager, id u64, executable string,
 	if work_folder != '' {
 		process.set_work_folder(work_folder)
 	}
+	process.set_stdin_path(os.path_devnull)
 	process.set_redirect_stdio()
 	process.run()
 	registered := manager.register_process(id, process)
@@ -279,6 +485,11 @@ fn run_code_lens_job(mut manager RunCommandManager, id u64, job CodeLensRunJob) 
 	if job.uri in job.open_files {
 		overlay = worker.prepare_compilation_overlay(job.path) or {
 			worker.send_show_message('vls: ${job.title} could not prepare the open buffer: ${err}',
+				1)
+			return worker.captured_output.clone()
+		}
+		preserve_code_lens_overlay_source_paths(overlay, job.open_files) or {
+			worker.send_show_message('vls: ${job.title} could not preserve source paths: ${err}',
 				1)
 			return worker.captured_output.clone()
 		}
