@@ -189,15 +189,16 @@ function activeWorkspaceTarget(): VTaskTarget | undefined {
   return folder ? folderTarget(folder) : undefined;
 }
 
-async function saveTaskDocuments(uri?: vscode.Uri): Promise<boolean> {
-  if (!uri) {
-    return true;
-  }
-  const folder = vscode.workspace.getWorkspaceFolder(uri);
+async function saveTaskDocuments(
+  target: VTaskTarget,
+  targetFilePath = target.cwd
+): Promise<boolean> {
+  const folder = workspaceFolderForScope(target.scope);
+  const scopeRoot = folder?.uri.fsPath || target.cwd;
   const documents = vscode.workspace.textDocuments.filter((document) => {
     return (
       document.uri.scheme === 'file' &&
-      shouldSaveTaskDocument(uri.fsPath, folder?.uri.fsPath, {
+      shouldSaveTaskDocument(targetFilePath, scopeRoot, {
         filePath: document.uri.fsPath,
         languageId: document.languageId,
         isDirty: document.isDirty,
@@ -240,7 +241,7 @@ async function runPaletteTask(action: VTaskAction): Promise<void> {
     return;
   }
   const uri = activeFileUri();
-  if (!(await saveTaskDocuments(uri))) {
+  if (!(await saveTaskDocuments(workspaceTarget, uri?.fsPath))) {
     vscode.window.showErrorMessage(
       `V: ${taskActionTitle(action)} was cancelled because one or more V files were not saved.`
     );
@@ -285,14 +286,14 @@ export async function runCodeLensCommand(command: string, args: unknown[]): Prom
     vscode.window.showErrorMessage('V: This command requires a local V source file.');
     return;
   }
-  if (!(await saveTaskDocuments(uri))) {
+  const target = targetForUri(uri);
+  if (!(await saveTaskDocuments(target, uri.fsPath))) {
     vscode.window.showErrorMessage(
       'V: The command was cancelled because one or more V files were not saved.'
     );
     return;
   }
 
-  const target = targetForUri(uri);
   const testName = typeof args[1] === 'string' ? args[1].trim() : '';
   const spec = codeLensTaskSpec(command, uri.fsPath, testName);
   const task = createVTask(spec.action, target, spec.args, spec.name);
