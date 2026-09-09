@@ -4,6 +4,7 @@ module main
 
 import os
 import json2
+import time
 
 fn must_mkdir_all(path string) {
 	os.mkdir_all(path) or {
@@ -5574,7 +5575,56 @@ fn test_code_lens_returns_run_lens_for_main() {
 	assert resp.id == 810
 	assert resp.result is []CodeLens
 	lenses := resp.result as []CodeLens
-	assert lenses.any(it.command?.command == 'vls.runFile')
+	assert lenses.len == 1
+	command := lenses[0].command or {
+		assert false, 'expected Run Main command'
+		return
+	}
+	command_args := command.arguments or { [] }
+	assert command.title == 'Run Main'
+	assert command.command == 'vls.runFile'
+	assert command_args == [uri]
+}
+
+fn test_code_lens_range_uses_negotiated_position_encoding() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	uri := 'file:///tmp/codelens_unicode.v'
+	app.open_files[uri] = 'module main\n\nfn main() {} // 🚀\n'
+	request := Request{
+		id:     814
+		method: 'textDocument/codeLens'
+		params: json2.encode(CodeLensParams{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+		},
+			escape_unicode: true
+		)
+	}
+
+	for encoding in [PositionEncoding.utf8, .utf16, .utf32] {
+		app.position_encoding = encoding
+		resp := app.handle_code_lens(request)
+		assert resp.result is []CodeLens
+		lenses := resp.result as []CodeLens
+		assert lenses.len == 1
+		assert lenses[0].range.start == Position{
+			line: 2
+			char: 0
+		}
+		expected_end := match encoding {
+			.utf8 { 20 }
+			.utf16 { 18 }
+			.utf32 { 17 }
+		}
+		assert lenses[0].range.end == Position{
+			line: 2
+			char: expected_end
+		}
+	}
 }
 
 fn test_code_lens_returns_test_lens_for_test_fn() {
@@ -5601,7 +5651,47 @@ fn test_code_lens_returns_test_lens_for_test_fn() {
 	assert resp.id == 811
 	assert resp.result is []CodeLens
 	lenses := resp.result as []CodeLens
-	assert lenses.any(it.command?.command == 'vls.runTests')
+	assert lenses.len == 2
+	file_command := lenses[0].command or {
+		assert false, 'expected Run File command'
+		return
+	}
+	test_command := lenses[1].command or {
+		assert false, 'expected Run Test command'
+		return
+	}
+	file_args := file_command.arguments or { [] }
+	test_args := test_command.arguments or { [] }
+	assert file_command.title == 'Run File'
+	assert file_command.command == 'vls.runTests'
+	assert file_args == [uri]
+	assert test_command.title == 'Run Test'
+	assert test_command.command == 'vls.runTests'
+	assert test_args == [uri, 'test_something']
+}
+
+fn test_code_lens_ignores_declarations_in_comments_and_non_test_files() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	uri := 'file:///tmp/ordinary.v'
+	app.open_files[uri] = 'module main\n\n/*\nfn main() {}\nfn test_hidden() {}\n*/\nfn helper() {}\n'
+
+	resp := app.handle_code_lens(Request{
+		id:     813
+		method: 'textDocument/codeLens'
+		params: json2.encode(CodeLensParams{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+		},
+			escape_unicode: true
+		)
+	})
+
+	assert resp.result is []CodeLens
+	assert (resp.result as []CodeLens).len == 0
 }
 
 fn test_code_lens_resolve_returns_same_lens() {
@@ -5647,6 +5737,7 @@ fn test_execute_command_returns_null_result() {
 		cleanup_test_app(app)
 	}
 
+	app.capture_output = true
 	resp := app.handle_execute_command(Request{
 		id:     820
 		method: 'workspace/executeCommand'
@@ -5660,6 +5751,272 @@ fn test_execute_command_returns_null_result() {
 	assert resp.id == 820
 	assert resp.result is string
 	assert (resp.result as string) == 'null'
+	assert app.captured_output.len == 1
+	assert app.captured_output[0].contains('missing file argument')
+}
+
+fn test_execute_run_file_invokes_compiler() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	project_dir := os.join_path(app.temp_dir, 'code_lens_module')
+	must_mkdir_all(project_dir)
+	vmod_source := "Module {\n\tname: 'code_lens_module'\n}\n"
+	must_write_file(os.join_path(project_dir, 'v.mod'), vmod_source)
+	path := os.join_path(project_dir, 'main.v')
+	must_write_file(path, 'module main\n\nfn main() {\n\tprintln("stale-disk")\n}\n')
+	helper_path := os.join_path(project_dir, 'helper.v')
+	helper_source := 'module main\n\nfn code_lens_message() string {\n\treturn "module-sibling"\n}\n\nfn code_lens_sibling_paths() string {\n\treturn @VMODROOT + "\\n" + @FILE + "\\n" + @FILE_LINE + "\\n" + @LOCATION + "\\n" + @COLUMN\n}\n'
+	must_write_file(helper_path, helper_source)
+	uri := path_to_uri(path)
+	runtime_output_path := os.join_path(project_dir, 'code_lens_runtime_cwd.txt')
+	compile_time_output_path := os.join_path(project_dir, 'code_lens_compile_time_paths.txt')
+	vmod_output_path := os.join_path(project_dir, 'code_lens_vmod.txt')
+	main_source := 'module main\n\nimport os\n\nfn main() {\n\tprintln(code_lens_message() + "-fresh-buffer")\n\tos.write_file("code_lens_runtime_cwd.txt", "real-module") or { panic(err) }\n\tos.write_file(os.join_path(@VMODROOT, "code_lens_compile_time_paths.txt"), code_lens_sibling_paths() + "\\n" + @FILE + "\\n" + @FILE_LINE + "\\n" + @LOCATION + "\\n" + @COLUMN) or { panic(err) }\n\tos.write_file("code_lens_vmod.txt", @VMOD_FILE) or { panic(err) }\n}\n'
+	app.open_files[uri] = main_source
+	app.capture_output = true
+	app.execute_commands_synchronously = true
+
+	resp := app.handle_execute_command(Request{
+		id:     822
+		method: 'workspace/executeCommand'
+		params: json2.encode(ExecuteCommandParams{
+			command:   'vls.runFile'
+			arguments: [uri]
+		},
+			escape_unicode: true
+		)
+	})
+
+	assert resp.result is string
+	assert (resp.result as string) == 'null'
+	assert app.captured_output.any(it.contains('module-sibling-fresh-buffer'))
+	assert app.captured_output.all(!it.contains('stale-disk'))
+	assert app.captured_output.any(it.contains('Run Main finished successfully'))
+	assert (os.read_file(runtime_output_path) or { '' }) == 'real-module'
+	helper_column := helper_source.split_into_lines()[7].index('@COLUMN') or { 0 }
+	main_column := main_source.split_into_lines()[7].index('@COLUMN') or { 0 }
+	expected_paths := [os.real_path(project_dir), os.real_path(helper_path), 'helper.v:8',
+		'${os.real_path(helper_path)}:8, main.code_lens_sibling_paths', (helper_column + 1).str(),
+		os.real_path(path), 'main.v:8', '${os.real_path(path)}:8, main.main',
+		(main_column + 1).str()]
+	assert (os.read_file(compile_time_output_path) or { '' }) == expected_paths.join('\n')
+	assert (os.read_file(vmod_output_path) or { '' }) == vmod_source
+	assert (os.read_file(helper_path) or { '' }) == helper_source
+}
+
+fn test_execute_run_file_materializes_new_unsaved_buffer() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	project_dir := os.join_path(app.temp_dir, 'code_lens_unsaved')
+	must_mkdir_all(project_dir)
+	path := os.join_path(project_dir, 'new_main.v')
+	uri := path_to_uri(path)
+	app.open_files[uri] = 'module main\n\nfn main() {\n\tprintln("new-unsaved-buffer")\n}\n'
+	app.capture_output = true
+	app.execute_commands_synchronously = true
+
+	resp := app.handle_execute_command(Request{
+		id:     824
+		method: 'workspace/executeCommand'
+		params: json2.encode(ExecuteCommandParams{
+			command:   'vls.runFile'
+			arguments: [uri]
+		},
+			escape_unicode: true
+		)
+	})
+
+	assert resp.result is string
+	assert (resp.result as string) == 'null'
+	assert app.captured_output.any(it.contains('new-unsaved-buffer'))
+	assert app.captured_output.any(it.contains('Run Main finished successfully'))
+}
+
+fn test_execute_run_file_returns_before_long_running_program_finishes() {
+	mut app := create_test_app()
+	defer {
+		app.stop_run_commands()
+		cleanup_test_app(app)
+	}
+	path := os.join_path(app.temp_dir, 'code_lens_long_running.v')
+	marker_path := os.join_path(app.temp_dir, 'code_lens_long_running.started')
+	must_write_file(path, 'module main\n\nimport os\nimport time\n\nfn main() {\n\t_ := os.input("")\n\tos.write_file("${marker_path}", "started") or {}\n\ttime.sleep(5 * time.second)\n}\n')
+	app.capture_output = true
+
+	started_at := time.now().unix_milli()
+	resp := app.handle_execute_command(Request{
+		id:     825
+		method: 'workspace/executeCommand'
+		params: json2.encode(ExecuteCommandParams{
+			command:   'vls.runFile'
+			arguments: [path_to_uri(path)]
+		},
+			escape_unicode: true
+		)
+	})
+	elapsed_ms := time.now().unix_milli() - started_at
+
+	assert resp.result is string
+	assert (resp.result as string) == 'null'
+	assert elapsed_ms < 1000
+	deadline := time.now().unix_milli() + 10_000
+	for !os.exists(marker_path) && time.now().unix_milli() < deadline {
+		time.sleep(10 * time.millisecond)
+	}
+	assert os.exists(marker_path)
+	stop_started_at := time.now().unix_milli()
+	app.stop_run_commands()
+	assert time.now().unix_milli() - stop_started_at < 1000
+}
+
+fn test_execute_run_file_replaces_active_target() {
+	mut app := create_test_app()
+	defer {
+		app.stop_run_commands()
+		cleanup_test_app(app)
+	}
+	path := os.join_path(app.temp_dir, 'code_lens_replaced.v')
+	marker_path := os.join_path(app.temp_dir, 'code_lens_replaced.txt')
+	marker_literal := code_lens_v_string_literal(marker_path)
+	first_source := 'module main\n\nimport os\nimport time\n\nfn main() {\n\tfor {\n\t\tmut marker := os.open_append(${marker_literal}) or { return }\n\t\tmarker.writeln("first") or {\n\t\t\tmarker.close()\n\t\t\treturn\n\t\t}\n\t\tmarker.close()\n\t\ttime.sleep(10 * time.millisecond)\n\t}\n}\n'
+	must_write_file(path, first_source)
+	uri := path_to_uri(path)
+	app.open_files[uri] = first_source
+	app.capture_output = true
+
+	first_resp := app.handle_execute_command(Request{
+		id:     826
+		method: 'workspace/executeCommand'
+		params: json2.encode(ExecuteCommandParams{
+			command:   'vls.runFile'
+			arguments: [uri]
+		},
+			escape_unicode: true
+		)
+	})
+	assert first_resp.result is string
+	assert (first_resp.result as string) == 'null'
+	first_deadline := time.now().unix_milli() + 10_000
+	for time.now().unix_milli() < first_deadline {
+		if (os.read_file(marker_path) or { '' }).contains('first') {
+			break
+		}
+		time.sleep(10 * time.millisecond)
+	}
+	assert (os.read_file(marker_path) or { '' }).contains('first')
+
+	app.open_files[uri] = 'module main\n\nimport os\nimport time\n\nfn main() {\n\tos.write_file(${marker_literal}, "second") or { return }\n\ttime.sleep(5 * time.second)\n}\n'
+	second_resp := app.handle_execute_command(Request{
+		id:     827
+		method: 'workspace/executeCommand'
+		params: json2.encode(ExecuteCommandParams{
+			command:   'vls.runFile'
+			arguments: [uri]
+		},
+			escape_unicode: true
+		)
+	})
+	assert second_resp.result is string
+	assert (second_resp.result as string) == 'null'
+	second_deadline := time.now().unix_milli() + 10_000
+	for time.now().unix_milli() < second_deadline {
+		if (os.read_file(marker_path) or { '' }) == 'second' {
+			break
+		}
+		time.sleep(10 * time.millisecond)
+	}
+	assert (os.read_file(marker_path) or { '' }) == 'second'
+	time.sleep(200 * time.millisecond)
+	assert (os.read_file(marker_path) or { '' }) == 'second'
+}
+
+fn test_code_lens_process_output_is_bounded() {
+	mut output := new_run_output_buffer()
+	output.write('prefix')
+	output.write('x'.repeat(code_lens_output_limit_bytes))
+	output.write('ignored')
+
+	assert output.output.len == code_lens_output_limit_bytes
+	assert output.truncated
+	result := output.str()
+	assert result.len == code_lens_output_limit_bytes + code_lens_output_truncation_notice.len
+	assert result.ends_with(code_lens_output_truncation_notice)
+}
+
+fn test_code_lens_process_output_truncates_at_utf8_boundary() {
+	mut output := new_run_output_buffer()
+	prefix := 'x'.repeat(code_lens_output_limit_bytes - 1)
+	output.write(prefix)
+	output.write('€')
+
+	assert output.truncated
+	assert output.str() == prefix + code_lens_output_truncation_notice
+
+	mut exact_output := new_run_output_buffer()
+	exact_prefix := 'x'.repeat(code_lens_output_limit_bytes - '€'.len) + '€'
+	exact_output.write(exact_prefix)
+	exact_output.write('ignored')
+	assert exact_output.str() == exact_prefix + code_lens_output_truncation_notice
+}
+
+fn test_code_lens_source_paths_are_rewritten_only_in_code() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	project_dir := os.join_path(app.temp_dir, 'code_lens_source_paths')
+	must_mkdir_all(project_dir)
+	vmod_source := 'Module {}\n'
+	must_write_file(os.join_path(project_dir, 'v.mod'), vmod_source)
+	source_path := os.join_path(project_dir, 'main.v')
+	temp_source_path := os.join_path(app.temp_dir, 'overlay', 'main.v')
+	source := 'const source_file = @FILE\nconst source_dir = @DIR\nconst project = @VMODROOT\nconst manifest = @VMOD_FILE\nconst file_line = @FILE_LINE\nconst location = @LOCATION\nconst column = @FILE + @COLUMN\nconst literal = "@FILE @DIR @VMODROOT @VMOD_FILE @FILE_LINE @LOCATION @COLUMN"\n// @FILE @DIR @VMODROOT @VMOD_FILE @FILE_LINE @LOCATION @COLUMN\n#flag -I @VMODROOT/thirdparty\n'
+	rewritten := code_lens_source_with_original_pseudos(source, source_path, temp_source_path)
+
+	assert rewritten.contains('const source_file = ${code_lens_v_string_literal(os.real_path(source_path))}')
+	assert rewritten.contains('const source_dir = ${code_lens_v_string_literal(os.real_path(project_dir))}')
+	assert rewritten.contains('const project = ${code_lens_v_string_literal(os.real_path(project_dir))}')
+	assert rewritten.contains('const manifest = ${code_lens_v_string_literal(vmod_source)}')
+	assert rewritten.contains("const file_line = 'main.v:5'")
+	assert rewritten.contains('const location = (@LOCATION.replace(${code_lens_v_string_literal(temp_source_path)}, ${code_lens_v_string_literal(os.real_path(source_path))}))')
+	assert rewritten.contains("const column = ${code_lens_v_string_literal(os.real_path(source_path))} + '24'")
+	assert rewritten.contains('const literal = "@FILE @DIR @VMODROOT @VMOD_FILE @FILE_LINE @LOCATION @COLUMN"')
+	assert rewritten.contains('// @FILE @DIR @VMODROOT @VMOD_FILE @FILE_LINE @LOCATION @COLUMN')
+	assert rewritten.contains('#flag -I @VMODROOT/thirdparty')
+}
+
+fn test_execute_run_test_selects_one_function() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	path := os.join_path(app.temp_dir, 'code_lens_selected_test.v')
+	must_write_file(path, 'module main\n\nfn test_selected() {\n\tassert false\n}\n')
+	uri := path_to_uri(path)
+	test_runtime_output_path := os.join_path(app.temp_dir, 'code_lens_test_runtime_cwd.txt')
+	app.open_files[uri] = 'module main\n\nimport os\n\nfn test_selected() {\n\tos.write_file("code_lens_test_runtime_cwd.txt", "real-module") or { assert false }\n\tassert true\n}\n\nfn test_other() {\n\tassert false\n}\n'
+	app.capture_output = true
+	app.execute_commands_synchronously = true
+
+	resp := app.handle_execute_command(Request{
+		id:     823
+		method: 'workspace/executeCommand'
+		params: json2.encode(ExecuteCommandParams{
+			command:   'vls.runTests'
+			arguments: [uri, 'test_selected']
+		},
+			escape_unicode: true
+		)
+	})
+
+	assert resp.result is string
+	assert (resp.result as string) == 'null'
+	assert app.captured_output.any(it.contains('Run Test finished successfully'))
+	assert (os.read_file(test_runtime_output_path) or { '' }) == 'real-module'
 }
 
 fn test_execute_command_unknown_still_returns_null() {

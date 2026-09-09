@@ -269,6 +269,34 @@ fn build_v_fmt_args(temp_file string) []string {
 	return ['fmt', '-inprocess', '-w', temp_file]
 }
 
+// build_v_run_args builds the compiler arguments used by the Run Main code lens.
+// Run Main executes the whole containing module from its working directory.
+fn build_v_run_args() []string {
+	return ['-nocolor', 'run', '.']
+}
+
+fn build_v_run_compile_args(executable_path string) []string {
+	return ['-nocolor', '-o', executable_path, '.']
+}
+
+// build_v_test_args builds the compiler arguments used by the Run File and Run Test lenses.
+// An empty function name runs every test in the file; otherwise only that test is selected.
+fn build_v_test_args(file_path string, fn_name string) []string {
+	mut args := ['-nocolor', 'test', file_path]
+	if fn_name != '' {
+		args << ['-run-only', fn_name]
+	}
+	return args
+}
+
+fn build_v_test_compile_args(file_path string, fn_name string, executable_path string) []string {
+	mut args := ['-nocolor', '-skip-running', '-o', executable_path, file_path]
+	if fn_name != '' {
+		args << ['-run-only', fn_name]
+	}
+	return args
+}
+
 // parse_v_check_diagnostics converts V3's flat-AST checker output into the
 // compiler-neutral diagnostic representation used by the LSP layer. V3 emits
 // headers as `path:line:column: severity: message`; stage-specific severities

@@ -4474,8 +4474,42 @@ fn (mut app App) on_did_change_workspace_folders(request Request) {
 	log('VLS: workspace roots updated to ${app.workspace_roots}')
 }
 
+// code_lens_fn_name returns the name of a free-function declaration on one line.
+fn code_lens_fn_name(line string) string {
+	mut declaration := line.trim_space()
+	if declaration.starts_with('pub ') {
+		declaration = declaration[4..].trim_space()
+	}
+	if !declaration.starts_with('fn ') {
+		return ''
+	}
+	after_fn := declaration[3..].trim_space()
+	if after_fn.starts_with('(') {
+		return ''
+	}
+	paren_idx := after_fn.index('(') or { return '' }
+	name := after_fn[..paren_idx].trim_space()
+	if !is_valid_v_identifier_name(name) {
+		return ''
+	}
+	return name
+}
+
+fn code_lens_range(line int, raw_line string, encoding PositionEncoding) LSPRange {
+	return LSPRange{
+		start: Position{
+			line: line
+			char: 0
+		}
+		end:   Position{
+			line: line
+			char: byte_to_encoded_col(raw_line, raw_line.len, encoding)
+		}
+	}
+}
+
 // handle_code_lens handles textDocument/codeLens requests.
-// Returns run/test lens items for fn main() and fn test_* declarations.
+// It returns Run Main for main and Run File plus Run Test for test functions.
 fn (mut app App) handle_code_lens(request Request) Response {
 	params := json2.decode[CodeLensParams](request.params) or {
 		$if debug { log('Failed to decode CodeLensParams: ${err}') }
@@ -4488,53 +4522,36 @@ fn (mut app App) handle_code_lens(request Request) Response {
 	content := app.open_files[uri] or { os.read_file(uri_to_path(uri)) or { '' } }
 	lines := content.split_into_lines()
 	mut lenses := []CodeLens{}
+	mut scan_state := ImportScanState{}
+	is_test_file := uri_to_path(uri).ends_with('_test.v')
 	for i, raw_line in lines {
-		trimmed := raw_line.trim_space()
-		// fn main() → offer a "Run" lens.
-		if trimmed == 'fn main() {' || trimmed.starts_with('fn main()') {
+		code := source_line_import_code(raw_line, mut scan_state)
+		fn_name := code_lens_fn_name(code)
+		if fn_name == 'main' {
 			lenses << CodeLens{
-				range:   LSPRange{
-					start: Position{
-						line: i
-						char: 0
-					}
-					end:   Position{
-						line: i
-						char: raw_line.len
-					}
-				}
+				range:   code_lens_range(i, raw_line, app.position_encoding)
 				command: Command{
-					title:     '▶ Run'
+					title:     'Run Main'
 					command:   'vls.runFile'
 					arguments: [uri]
 				}
 			}
 		}
-		// fn test_* → offer a "Run Test" lens.
-		if (trimmed.starts_with('fn test_') || trimmed.starts_with('pub fn test_'))
-			&& trimmed.contains('(') {
-			fn_name := if trimmed.starts_with('pub ') {
-				first_word_paren(trimmed[7..])
-			} else {
-				first_word_paren(trimmed[3..])
+		if is_test_file && fn_name.starts_with('test_') {
+			lenses << CodeLens{
+				range:   code_lens_range(i, raw_line, app.position_encoding)
+				command: Command{
+					title:     'Run File'
+					command:   'vls.runTests'
+					arguments: [uri]
+				}
 			}
-			if fn_name != '' {
-				lenses << CodeLens{
-					range:   LSPRange{
-						start: Position{
-							line: i
-							char: 0
-						}
-						end:   Position{
-							line: i
-							char: raw_line.len
-						}
-					}
-					command: Command{
-						title:     '▶ Run Test'
-						command:   'vls.runTests'
-						arguments: [uri, fn_name]
-					}
+			lenses << CodeLens{
+				range:   code_lens_range(i, raw_line, app.position_encoding)
+				command: Command{
+					title:     'Run Test'
+					command:   'vls.runTests'
+					arguments: [uri, fn_name]
 				}
 			}
 		}
@@ -4561,8 +4578,37 @@ fn (mut app App) handle_code_lens_resolve(request Request) Response {
 	}
 }
 
-// handle_execute_command handles workspace/executeCommand.
-// Currently supports vls.runFile and vls.runTests by echoing a log message.
+fn (app &App) code_lens_command_target(arguments []string) (string, string, string) {
+	if arguments.len == 0 || arguments[0].trim_space() == '' {
+		return '', '', 'missing file argument'
+	}
+	raw_path := arguments[0]
+	if raw_path.contains('://') && !raw_path.starts_with('file:') {
+		return '', '', 'only local files can be run'
+	}
+	path := normalize_overlay_path(os.abs_path(uri_to_path(raw_path)))
+	mut uri := if raw_path.starts_with('file:') { raw_path } else { path_to_uri(path) }
+	mut is_open := uri in app.open_files
+	if !is_open {
+		path_key := normalized_index_path(path)
+		for open_uri, _ in app.open_files {
+			if normalized_index_path(uri_to_path(open_uri)) == path_key {
+				uri = open_uri
+				is_open = true
+				break
+			}
+		}
+	}
+	if !is_open && !os.is_file(path) {
+		return '', '', 'file does not exist: ${path}'
+	}
+	if !path.ends_with('.v') && !path.ends_with('.vsh') {
+		return '', '', 'not a V source file: ${path}'
+	}
+	return uri, path, ''
+}
+
+// handle_execute_command handles workspace/executeCommand by invoking the V compiler.
 fn (mut app App) handle_execute_command(request Request) Response {
 	params := json2.decode[ExecuteCommandParams](request.params) or {
 		$if debug { log('Failed to decode ExecuteCommandParams: ${err}') }
@@ -4574,13 +4620,61 @@ fn (mut app App) handle_execute_command(request Request) Response {
 	match params.command {
 		'vls.runFile' {
 			args := params.arguments or { [] }
-			uri := if args.len > 0 { args[0] } else { '' }
-			app.send_show_message('vls: run file not yet implemented (${uri})', 3)
+			uri, path, path_error := app.code_lens_command_target(args)
+			if path_error != '' {
+				app.send_show_message('vls: cannot run main: ${path_error}', 1)
+			} else if !compiler_is_available() {
+				app.send_show_message('vls: the V compiler (`v`) was not found on PATH.', 1)
+			} else {
+				app.start_code_lens_run(CodeLensRunJob{
+					kind:           .main
+					title:          'Run Main'
+					uri:            uri
+					path:           path
+					open_files:     app.open_files.clone()
+					write_mutex:    app.write_mutex
+					tcp_conn:       app.tcp_conn
+					capture_output: app.capture_output
+				})
+			}
 		}
 		'vls.runTests' {
 			args := params.arguments or { [] }
-			uri := if args.len > 0 { args[0] } else { '' }
-			app.send_show_message('vls: run tests not yet implemented (${uri})', 3)
+			uri, path, path_error := app.code_lens_command_target(args)
+			if path_error != '' {
+				app.send_show_message('vls: cannot run tests: ${path_error}', 1)
+			} else if !path.ends_with('_test.v') {
+				app.send_show_message('vls: tests can only be run from a _test.v file.', 1)
+			} else {
+				fn_name := if args.len > 1 { args[1] } else { '' }
+				if fn_name != ''
+					&& (!fn_name.starts_with('test_') || !is_valid_v_identifier_name(fn_name)) {
+					app.send_show_message('vls: invalid test function: ${fn_name}', 1)
+				} else {
+					title := if fn_name == '' { 'Run File' } else { 'Run Test' }
+					kind := if fn_name == '' {
+						CodeLensRunKind.test_file
+					} else {
+						CodeLensRunKind.test_function
+					}
+					if !compiler_is_available() {
+						app.send_show_message('vls: the V compiler (`v`) was not found on PATH.',
+							1)
+					} else {
+						app.start_code_lens_run(CodeLensRunJob{
+							kind:           kind
+							title:          title
+							uri:            uri
+							path:           path
+							fn_name:        fn_name
+							open_files:     app.open_files.clone()
+							write_mutex:    app.write_mutex
+							tcp_conn:       app.tcp_conn
+							capture_output: app.capture_output
+						})
+					}
+				}
+			}
 		}
 		else {
 			app.send_show_message('vls: unknown command ${params.command}', 2)

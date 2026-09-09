@@ -49,6 +49,8 @@ mut:
 	received_initialize                         bool                         // True after initialize request was processed
 	next_request_id                             int = 1 // Counter for server-initiated request ids
 	diagnostics_scheduler                       ?&DiagnosticsScheduler // Production-only async diagnostics
+	run_command_manager                         ?&RunCommandManager // Async code-lens process lifecycle
+	execute_commands_synchronously              bool // Test hook for deterministic command assertions
 	write_mutex                                 &sync.Mutex = sync.new_mutex() // Serializes worker and request-loop writes
 }
 
@@ -481,6 +483,7 @@ fn parse_content_length_header(s string) !int {
 fn (mut app App) handle_requests(mut reader io.BufferedReader) {
 	defer {
 		app.cancel_all_scheduled_diagnostics()
+		app.stop_run_commands()
 	}
 	for {
 		// Reset the per-request raw id so a stale id can never leak into an
@@ -650,10 +653,9 @@ fn (mut app App) handle_requests(mut reader io.BufferedReader) {
 							// NOTE: Placeholder/stub capabilities are intentionally NOT
 							// advertised (P1-07 / Stage 0): on-type formatting (always
 							// empty), inline values (wrong abstraction), linked editing
-							// (wrong abstraction), file-operation hooks (no-ops), the
-							// run/test executeCommand + codeLens stubs, and willSave
-							// (never dispatched). Advertising only working features gives
-							// a better editor experience than exposing broken UI.
+							// (wrong abstraction), file-operation hooks (no-ops), and
+							// willSave (never dispatched). Advertising only working
+							// features gives a better editor experience than broken UI.
 							text_document_sync:           TextDocumentSyncOptions{
 								open_close:           true
 								change:               2 // Incremental
@@ -683,6 +685,10 @@ fn (mut app App) handle_requests(mut reader io.BufferedReader) {
 							workspace_symbol_provider:    true
 							inlay_hint_provider:          true
 							code_action_provider:         true
+							execute_command_provider:     ExecuteCommandOptions{
+								commands: ['vls.runFile', 'vls.runTests']
+							}
+							code_lens_provider:           CodeLensOptions{}
 							semantic_tokens_provider:     SemanticTokensOptions{
 								legend: SemanticTokensLegend{
 									token_types:     semantic_token_types()
@@ -1234,6 +1240,7 @@ fn (mut app App) write_notification(notification Notification) {
 fn (mut app App) accept_shutdown(id int) {
 	log('Received shutdown request.')
 	app.cancel_all_scheduled_diagnostics()
+	app.stop_run_commands()
 	app.is_shutdown = true
 	app.write_response(Response{
 		id:     id
