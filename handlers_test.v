@@ -5574,7 +5574,15 @@ fn test_code_lens_returns_run_lens_for_main() {
 	assert resp.id == 810
 	assert resp.result is []CodeLens
 	lenses := resp.result as []CodeLens
-	assert lenses.any(it.command?.command == 'vls.runFile')
+	assert lenses.len == 1
+	command := lenses[0].command or {
+		assert false, 'expected Run Main command'
+		return
+	}
+	command_args := command.arguments or { [] }
+	assert command.title == 'Run Main'
+	assert command.command == 'vls.runFile'
+	assert command_args == [uri]
 }
 
 fn test_code_lens_returns_test_lens_for_test_fn() {
@@ -5601,7 +5609,47 @@ fn test_code_lens_returns_test_lens_for_test_fn() {
 	assert resp.id == 811
 	assert resp.result is []CodeLens
 	lenses := resp.result as []CodeLens
-	assert lenses.any(it.command?.command == 'vls.runTests')
+	assert lenses.len == 2
+	file_command := lenses[0].command or {
+		assert false, 'expected Run File command'
+		return
+	}
+	test_command := lenses[1].command or {
+		assert false, 'expected Run Test command'
+		return
+	}
+	file_args := file_command.arguments or { [] }
+	test_args := test_command.arguments or { [] }
+	assert file_command.title == 'Run File'
+	assert file_command.command == 'vls.runTests'
+	assert file_args == [uri]
+	assert test_command.title == 'Run Test'
+	assert test_command.command == 'vls.runTests'
+	assert test_args == [uri, 'test_something']
+}
+
+fn test_code_lens_ignores_declarations_in_comments_and_non_test_files() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	uri := 'file:///tmp/ordinary.v'
+	app.open_files[uri] = 'module main\n\n/*\nfn main() {}\nfn test_hidden() {}\n*/\nfn helper() {}\n'
+
+	resp := app.handle_code_lens(Request{
+		id:     813
+		method: 'textDocument/codeLens'
+		params: json2.encode(CodeLensParams{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+		},
+			escape_unicode: true
+		)
+	})
+
+	assert resp.result is []CodeLens
+	assert (resp.result as []CodeLens).len == 0
 }
 
 fn test_code_lens_resolve_returns_same_lens() {
@@ -5647,6 +5695,7 @@ fn test_execute_command_returns_null_result() {
 		cleanup_test_app(app)
 	}
 
+	app.capture_output = true
 	resp := app.handle_execute_command(Request{
 		id:     820
 		method: 'workspace/executeCommand'
@@ -5660,6 +5709,59 @@ fn test_execute_command_returns_null_result() {
 	assert resp.id == 820
 	assert resp.result is string
 	assert (resp.result as string) == 'null'
+	assert app.captured_output.len == 1
+	assert app.captured_output[0].contains('missing file argument')
+}
+
+fn test_execute_run_file_invokes_compiler() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	path := os.join_path(app.temp_dir, 'code_lens_main.v')
+	must_write_file(path, 'module main\n\nfn main() {\n\tprintln("code-lens-ran")\n}\n')
+	app.capture_output = true
+
+	resp := app.handle_execute_command(Request{
+		id:     822
+		method: 'workspace/executeCommand'
+		params: json2.encode(ExecuteCommandParams{
+			command:   'vls.runFile'
+			arguments: [path_to_uri(path)]
+		},
+			escape_unicode: true
+		)
+	})
+
+	assert resp.result is string
+	assert (resp.result as string) == 'null'
+	assert app.captured_output.any(it.contains('code-lens-ran'))
+	assert app.captured_output.any(it.contains('Run Main finished successfully'))
+}
+
+fn test_execute_run_test_selects_one_function() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	path := os.join_path(app.temp_dir, 'code_lens_selected_test.v')
+	must_write_file(path, 'module main\n\nfn test_selected() {\n\tassert true\n}\n\nfn test_other() {\n\tassert false\n}\n')
+	app.capture_output = true
+
+	resp := app.handle_execute_command(Request{
+		id:     823
+		method: 'workspace/executeCommand'
+		params: json2.encode(ExecuteCommandParams{
+			command:   'vls.runTests'
+			arguments: [path_to_uri(path), 'test_selected']
+		},
+			escape_unicode: true
+		)
+	})
+
+	assert resp.result is string
+	assert (resp.result as string) == 'null'
+	assert app.captured_output.any(it.contains('Run Test finished successfully'))
 }
 
 fn test_execute_command_unknown_still_returns_null() {

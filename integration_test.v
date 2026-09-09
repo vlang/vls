@@ -2503,6 +2503,19 @@ fn test_integration_string_request_id_is_echoed() {
 	assert out[0].contains('"result"')
 }
 
+fn test_integration_initialize_advertises_runnable_code_lenses() {
+	mut app, project_dir := create_integration_test_env()
+	defer {
+		cleanup_integration_test_env(app, project_dir)
+	}
+	out := integration_run_frames(mut app, project_dir, 'code_lens_capabilities', [
+		'{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}',
+	])
+	assert out.len >= 1
+	assert out[0].contains('"codeLensProvider":{}')
+	assert out[0].contains('"executeCommandProvider":{"commands":["vls.runFile","vls.runTests"]}')
+}
+
 fn test_integration_client_response_is_consumed_not_dispatched() {
 	mut app, project_dir := create_integration_test_env()
 	defer {

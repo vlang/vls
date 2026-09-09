@@ -650,10 +650,9 @@ fn (mut app App) handle_requests(mut reader io.BufferedReader) {
 							// NOTE: Placeholder/stub capabilities are intentionally NOT
 							// advertised (P1-07 / Stage 0): on-type formatting (always
 							// empty), inline values (wrong abstraction), linked editing
-							// (wrong abstraction), file-operation hooks (no-ops), the
-							// run/test executeCommand + codeLens stubs, and willSave
-							// (never dispatched). Advertising only working features gives
-							// a better editor experience than exposing broken UI.
+							// (wrong abstraction), file-operation hooks (no-ops), and
+							// willSave (never dispatched). Advertising only working
+							// features gives a better editor experience than broken UI.
 							text_document_sync:           TextDocumentSyncOptions{
 								open_close:           true
 								change:               2 // Incremental
@@ -683,6 +682,10 @@ fn (mut app App) handle_requests(mut reader io.BufferedReader) {
 							workspace_symbol_provider:    true
 							inlay_hint_provider:          true
 							code_action_provider:         true
+							execute_command_provider:     ExecuteCommandOptions{
+								commands: ['vls.runFile', 'vls.runTests']
+							}
+							code_lens_provider:           CodeLensOptions{}
 							semantic_tokens_provider:     SemanticTokensOptions{
 								legend: SemanticTokensLegend{
 									token_types:     semantic_token_types()
