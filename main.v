@@ -112,10 +112,13 @@ fn log(s string) {
 
 // StdinReader reads standard input through its raw descriptor so streaming
 // clients are not blocked by the full-buffer behaviour of C fread.
-struct StdinReader {}
+// Keep it stateful and pointer-backed to match io.Reader's mutable method contract.
+struct StdinReader {
+	fd int
+}
 
-fn (_ StdinReader) read(mut buffer []u8) !int {
-	data, bytes_read := os.fd_read(0, buffer.len)
+fn (mut reader StdinReader) read(mut buffer []u8) !int {
+	data, bytes_read := os.fd_read(reader.fd, buffer.len)
 	if bytes_read < 0 {
 		return error('failed to read from stdin')
 	}
@@ -127,7 +130,7 @@ fn (_ StdinReader) read(mut buffer []u8) !int {
 
 // new_stdin_buffered_reader creates the streaming reader used by stdio mode.
 fn new_stdin_buffered_reader() &io.BufferedReader {
-	return io.new_buffered_reader(reader: StdinReader{}, cap: transport_buffer_cap)
+	return io.new_buffered_reader(reader: &StdinReader{ fd: 0 }, cap: transport_buffer_cap)
 }
 
 fn main() {
