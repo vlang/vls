@@ -5487,6 +5487,155 @@ fn test_operation_at_pos_completion_and_definition_resolve_cross_file_receiver_m
 	assert location.range.end.char == 29
 }
 
+fn test_operation_at_pos_completion_includes_indexed_struct_fields() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+
+	test_dir := os.join_path(app.temp_dir, 'receiver_field_index')
+	must_mkdir_all(test_dir)
+	main_file := os.join_path(test_dir, 'main.v')
+	content := 'module main\n\nstruct User {\n\tname string\n\tage int\n}\n\nfn (user User) display_name() string {\n\treturn user.name\n}\n\nfn main() {\n\tuser := User{}\n\tuser.\n}\n'
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+
+	lines := content.split_into_lines()
+	completion_line := lines.index('\tuser.')
+	assert completion_line >= 0
+	response := app.operation_at_pos(.completion, Request{
+		id:     9200
+		method: 'textDocument/completion'
+		params: json2.encode(TextDocumentPositionParams{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			position:      Position{
+				line: completion_line
+				char: lines[completion_line].len
+			}
+		},
+			escape_unicode: true
+		)
+	})
+
+	assert response.result is CompletionList
+	items := (response.result as CompletionList).items
+	assert items.any(it.label == 'name' && it.kind == 5)
+	assert items.any(it.label == 'age' && it.kind == 5)
+	assert items.any(it.label == 'display_name' && it.kind == 2)
+}
+
+fn test_receiver_inference_does_not_reuse_declaration_from_earlier_function() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+
+	test_dir := os.join_path(app.temp_dir, 'receiver_function_scope')
+	must_mkdir_all(test_dir)
+	main_file := os.join_path(test_dir, 'main.v')
+	content := 'module main\n\nstruct A {}\nstruct B {}\n\nfn (a A) alpha() {}\nfn (b B) beta() {}\n\nfn first() {\n\tx := A{}\n\tx.alpha()\n}\n\nfn second(x B) {\n\tx.beta()\n}\n'
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+
+	lines := content.split_into_lines()
+	call_line := lines.index('\tx.beta()')
+	assert call_line >= 0
+	dot_col := lines[call_line].index('.') or { -1 }
+	beta_col := lines[call_line].index('beta') or { -1 }
+	assert dot_col >= 0
+	assert beta_col >= 0
+
+	completion := app.operation_at_pos(.completion, Request{
+		id:     9201
+		method: 'textDocument/completion'
+		params: json2.encode(TextDocumentPositionParams{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			position:      Position{
+				line: call_line
+				char: dot_col + 1
+			}
+		},
+			escape_unicode: true
+		)
+	})
+	assert completion.result is CompletionList
+	items := (completion.result as CompletionList).items
+	assert items.any(it.label == 'beta')
+	assert !items.any(it.label == 'alpha')
+
+	definition := app.operation_at_pos(.definition, Request{
+		id:     9202
+		method: 'textDocument/definition'
+		params: json2.encode(TextDocumentPositionParams{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			position:      Position{
+				line: call_line
+				char: beta_col + 2
+			}
+		},
+			escape_unicode: true
+		)
+	})
+	assert definition.result is Location
+	location := definition.result as Location
+	assert location.uri == uri
+	assert location.range.start.line == lines.index('fn (b B) beta() {}')
+}
+
+fn test_imported_module_completion_resolves_from_project_root() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+
+	root := os.join_path(app.temp_dir, 'nested_module_completion')
+	module_dir := os.join_path(root, 'mylib')
+	app_dir := os.join_path(root, 'cmd', 'app')
+	must_mkdir_all(module_dir)
+	must_mkdir_all(app_dir)
+	must_write_file(os.join_path(root, 'v.mod'), "Module {\n\tname: 'nested_completion'\n}\n")
+	must_write_file(os.join_path(module_dir, 'mylib.v'),
+		'module mylib\n\npub fn from_project_root() {}\n')
+
+	main_file := os.join_path(app_dir, 'main.v')
+	content := 'module main\n\nimport mylib\n\nfn main() {\n\tmylib.\n}\n'
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	app.workspace_roots = [root]
+
+	lines := content.split_into_lines()
+	completion_line := lines.index('\tmylib.')
+	assert completion_line >= 0
+	response := app.operation_at_pos(.completion, Request{
+		id:     9203
+		method: 'textDocument/completion'
+		params: json2.encode(TextDocumentPositionParams{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			position:      Position{
+				line: completion_line
+				char: lines[completion_line].len
+			}
+		},
+			escape_unicode: true
+		)
+	})
+
+	assert response.result is CompletionList
+	items := (response.result as CompletionList).items
+	assert items.any(it.label == 'from_project_root')
+}
+
 fn test_semantic_tokens_returns_data_for_known_content() {
 	mut app := create_test_app()
 	defer {

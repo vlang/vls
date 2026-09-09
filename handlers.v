@@ -117,7 +117,7 @@ fn (mut app App) indexed_completions(uri string, position Position) []Detail {
 		if trigger_byte < line.len && line[trigger_byte] == `.` {
 			qualifier := get_word_before_dot(line, position.char - 1, app.position_encoding)
 			if module_path := parse_import_aliases(content)[qualifier] {
-				return get_imported_module_member_completions(module_path,
+				return app.get_imported_module_member_completions(module_path,
 					os.dir(uri_to_path(uri)))
 			}
 			return app.indexed_receiver_completions(uri, content, qualifier, position.line)
@@ -317,6 +317,8 @@ fn (mut app App) infer_receiver_type(uri string, content string, receiver string
 		}
 		if declaration.starts_with('fn ') {
 			header_start = i
+			latest_rhs = ''
+			latest_declaration_line = -1
 		}
 		name_col := identifier_index(code, receiver)
 		if name_col < 0 {
@@ -495,14 +497,96 @@ fn (mut app App) indexed_method_symbols(uri string, content string, receiver_typ
 	return matches
 }
 
+fn struct_field_is_public(source string, struct_symbol DocumentSymbol, field_symbol DocumentSymbol) bool {
+	lines := source.split_into_lines()
+	start_line := struct_symbol.range.start.line + 1
+	end_line := field_symbol.range.start.line
+	if start_line < 0 || end_line < start_line || end_line >= lines.len {
+		return false
+	}
+	mut is_public := false
+	for line_idx in start_line .. end_line + 1 {
+		access_label := lines[line_idx].trim_space()
+		if access_label == 'pub:' || access_label == 'pub mut:' {
+			is_public = true
+		} else if access_label in ['mut:', 'private:', '__global:'] {
+			is_public = false
+		}
+	}
+	return is_public
+}
+
+fn field_completion_from_symbol(source string, symbol DocumentSymbol) ?Detail {
+	lines := source.split_into_lines()
+	line_idx := symbol.range.start.line
+	if line_idx < 0 || line_idx >= lines.len {
+		return none
+	}
+	return Detail{
+		kind:   5 // CompletionItemKind.Field
+		label:  symbol.name
+		detail: lines[line_idx].trim_space()
+	}
+}
+
+fn (mut app App) indexed_struct_field_completions(uri string, content string, receiver_type string) []Detail {
+	dir, type_name, require_public, expected_module := app.receiver_type_scope(uri, content,
+		receiver_type)
+	if dir == '' || type_name == '' || expected_module == '' || !os.is_dir(dir) {
+		return []Detail{}
+	}
+	normalized_dir := normalized_index_path(dir)
+	requesting_path := uri_to_path(uri)
+	active_test_name := if !require_public && requesting_path.ends_with('_test.v') {
+		os.file_name(requesting_path)
+	} else {
+		''
+	}
+	active_names := app.active_indexed_source_file_names(dir, active_test_name)
+	mut items := []Detail{}
+	mut indexed_uris := app.symbol_index.keys()
+	indexed_uris.sort()
+	for indexed_uri in indexed_uris {
+		entry := app.symbol_index[indexed_uri] or { continue }
+		if normalized_index_path(os.dir(uri_to_path(indexed_uri))) != normalized_dir
+			|| os.file_name(uri_to_path(indexed_uri)) !in active_names
+			|| entry.module_name != expected_module {
+			continue
+		}
+		source := app.index_source_for(indexed_uri) or { continue }
+		for symbol in entry.doc_symbols {
+			if symbol.kind != sym_kind_struct || symbol.name != type_name {
+				continue
+			}
+			if require_public && !source_declaration_is_public(indexed_uri, symbol, app) {
+				continue
+			}
+			for field in symbol.children {
+				if field.kind != sym_kind_field
+					|| (require_public && !struct_field_is_public(source, symbol, field)) {
+					continue
+				}
+				if detail := field_completion_from_symbol(source, field) {
+					items << detail
+				}
+			}
+		}
+	}
+	return items
+}
+
 fn (mut app App) indexed_receiver_completions(uri string, content string, receiver string, use_line int) []Detail {
 	receiver_type := app.infer_receiver_type(uri, content, receiver, use_line)
 	if receiver_type == '' {
 		return []Detail{}
 	}
+	// indexed_method_symbols prepares the source index used for both member kinds.
 	locations := app.indexed_method_symbols(uri, content, receiver_type, '')
-	mut items := []Detail{}
+	mut items := app.indexed_struct_field_completions(uri, content, receiver_type)
 	mut seen := map[string]bool{}
+	for item in items {
+		seen[item.label] = true
+	}
 	for location in locations {
 		entry := app.symbol_index[location.uri] or { continue }
 		source := app.index_source_for(location.uri) or { continue }
@@ -725,9 +809,9 @@ fn parse_import_bindings(content string) []ImportedModuleBinding {
 	return bindings
 }
 
-fn get_imported_module_member_completions(module_path string, work_dir string) []Detail {
+fn (app &App) get_imported_module_member_completions(module_path string, work_dir string) []Detail {
 	mut items := []Detail{}
-	module_dir := resolve_import_module_dir(module_path, work_dir)
+	module_dir := app.resolve_indexed_import_module_dir(module_path, work_dir)
 	if module_dir == '' {
 		return items
 	}
