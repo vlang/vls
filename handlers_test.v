@@ -446,6 +446,52 @@ fn test_on_did_change_returns_notification() {
 	}
 }
 
+fn test_on_did_change_schedules_diagnostics_without_blocking() {
+	mut app := create_test_app()
+	defer {
+		app.cancel_all_scheduled_diagnostics()
+		cleanup_test_app(app)
+	}
+	app.diagnostics_scheduler = new_diagnostics_scheduler()
+	uri := 'file:///tmp/scheduled.v'
+	content := 'module main\n'
+	app.open_files[uri] = content
+	app.open_files_versions[uri] = 1
+
+	result := app.on_did_change(Request{
+		params: json2.encode(DidChangeTextDocumentParams{
+			text_document:   VersionedTextDocumentIdentifier{
+				uri:     uri
+				version: 2
+			}
+			content_changes: [ContentChange{
+				text: content + '\nfn changed() {}\n'
+			}]
+		},
+			escape_unicode: true
+		)
+	})
+
+	assert result == none
+	assert app.open_files_versions[uri] == 2
+	assert app.open_files[uri].contains('fn changed()')
+}
+
+fn test_diagnostics_scheduler_invalidates_only_changed_document() {
+	mut scheduler := new_diagnostics_scheduler()
+	global_a, generation_a := scheduler.next_generation('file:///a.v')
+	global_b, generation_b := scheduler.next_generation('file:///b.v')
+	assert scheduler.is_current('file:///a.v', global_a, generation_a)
+	assert scheduler.is_current('file:///b.v', global_b, generation_b)
+
+	scheduler.cancel('file:///a.v')
+	assert !scheduler.is_current('file:///a.v', global_a, generation_a)
+	assert scheduler.is_current('file:///b.v', global_b, generation_b)
+
+	scheduler.cancel_all()
+	assert !scheduler.is_current('file:///b.v', global_b, generation_b)
+}
+
 fn test_on_did_change_multiple_changes() {
 	mut app := create_test_app()
 	defer {

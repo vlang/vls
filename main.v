@@ -5,6 +5,7 @@ module main
 import json2
 import net
 import os
+import sync
 import time
 import io
 
@@ -47,6 +48,8 @@ mut:
 	exit_was_requested                          bool                         // True when the exit notification was received
 	received_initialize                         bool                         // True after initialize request was processed
 	next_request_id                             int = 1 // Counter for server-initiated request ids
+	diagnostics_scheduler                       ?&DiagnosticsScheduler // Production-only async diagnostics
+	write_mutex                                 &sync.Mutex = sync.new_mutex() // Serializes worker and request-loop writes
 }
 
 struct JsonError {
@@ -166,9 +169,10 @@ fn main() {
 		return
 	}
 	mut app := &App{
-		text:       ''
-		open_files: map[string]string{}
-		temp_dir:   temp_dir
+		text:                  ''
+		open_files:            map[string]string{}
+		temp_dir:              temp_dir
+		diagnostics_scheduler: new_diagnostics_scheduler()
 	}
 	// os.File.read uses C fread, which waits for the entire buffer on an open
 	// pipe. LSP clients keep stdin open, so use the raw descriptor-backed pipe
@@ -240,10 +244,11 @@ fn handle_tcp_client(mut conn net.TcpConn) {
 		return
 	}
 	mut app := &App{
-		text:       ''
-		open_files: map[string]string{}
-		temp_dir:   temp_dir
-		tcp_conn:   &conn
+		text:                  ''
+		open_files:            map[string]string{}
+		temp_dir:              temp_dir
+		tcp_conn:              &conn
+		diagnostics_scheduler: new_diagnostics_scheduler()
 	}
 	mut reader := io.new_buffered_reader(reader: conn, cap: transport_buffer_cap)
 	app.handle_requests(mut reader)
@@ -257,6 +262,10 @@ fn handle_tcp_client(mut conn net.TcpConn) {
 // write_data sends raw data to the client — either via the TCP connection when
 // in multi-client mode, or to stdout in stdio mode.
 fn (mut app App) write_data(data string) {
+	app.write_mutex.lock()
+	defer {
+		app.write_mutex.unlock()
+	}
 	if app.capture_output {
 		app.captured_output << data
 		return
@@ -470,6 +479,9 @@ fn parse_content_length_header(s string) !int {
 
 // handle_requests is the main request handler loop for both stdio and TCP modes.
 fn (mut app App) handle_requests(mut reader io.BufferedReader) {
+	defer {
+		app.cancel_all_scheduled_diagnostics()
+	}
 	for {
 		// Reset the per-request raw id so a stale id can never leak into an
 		// error response emitted before a new message is fully read.
@@ -714,18 +726,12 @@ fn (mut app App) handle_requests(mut reader io.BufferedReader) {
 			}
 			.did_open {
 				app.on_did_open(lsp_request)
-				// Publish diagnostics on open (P0-07 item 10). This compiles inline in
-				// the request loop, so opening many files serially blocks other
-				// requests until each compile returns. Moving it off the loop is the
-				// async-diagnostics scheduler (P0-04), which is blocked by the
-				// synchronous test harness and V's non-thread-safe shared state; until
-				// then each compile is bounded by compiler_timeout_ms so a single
-				// invocation cannot hang the loop indefinitely, and diag_cache avoids
-				// recompiling unchanged content.
 				if params := json2.decode[DidOpenTextDocumentParams](lsp_request.params) {
 					uri := params.text_document.uri
 					if doc_content := app.open_files[uri] {
-						app.write_notification(app.build_diagnostics_notification(uri, doc_content))
+						if !app.schedule_diagnostics(uri, doc_content) {
+							app.write_notification(app.build_diagnostics_notification(uri, doc_content))
+						}
 					}
 				}
 			}

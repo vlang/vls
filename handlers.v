@@ -587,6 +587,7 @@ fn (mut app App) on_did_close(request Request) {
 		return
 	}
 	uri := params.text_document.uri
+	app.cancel_scheduled_diagnostics(uri)
 	if uri in app.open_files {
 		app.open_files.delete(uri)
 		app.bump_generation(uri)
@@ -713,6 +714,9 @@ fn (mut app App) on_did_change(request Request) ?Notification {
 	}
 	app.bump_generation(uri)
 	app.invalidate_index_uri(uri) // symbols re-parsed lazily on next query
+	if app.schedule_diagnostics(uri, content) {
+		return none
+	}
 	notification := app.build_diagnostics_notification(uri, content)
 	$if debug { log('returning notification: ${notification}') }
 	return notification
@@ -784,6 +788,9 @@ fn (mut app App) on_did_save(request Request) ?Notification {
 				return none
 			}
 		}
+	}
+	if app.schedule_diagnostics(uri, content) {
+		return none
 	}
 	notification := app.build_diagnostics_notification(uri, content)
 	return notification
@@ -4153,6 +4160,9 @@ fn (mut app App) on_did_change_configuration(request Request) {
 	if resolved.has_diagnostics {
 		if enabled := resolved.diagnostics {
 			app.diagnostics_enabled = enabled
+			if !enabled {
+				app.cancel_all_scheduled_diagnostics()
+			}
 			log('VLS: diagnostics_enabled=${enabled}')
 		}
 	}
