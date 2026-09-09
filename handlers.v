@@ -587,8 +587,14 @@ fn (mut app App) on_did_close(request Request) {
 		return
 	}
 	uri := params.text_document.uri
-	app.cancel_scheduled_diagnostics(uri)
-	if uri in app.open_files {
+	is_open := uri in app.open_files
+	mut diagnostics_mutation := DiagnosticsProjectMutation{}
+	if is_open {
+		diagnostics_mutation = app.begin_diagnostics_project_mutation(uri)
+	} else {
+		app.cancel_scheduled_diagnostics(uri)
+	}
+	if is_open {
 		app.open_files.delete(uri)
 		app.bump_generation(uri)
 	}
@@ -597,6 +603,9 @@ fn (mut app App) on_did_close(request Request) {
 	}
 	if uri in app.diag_cache {
 		app.diag_cache.delete(uri)
+	}
+	if is_open {
+		app.finish_diagnostics_project_mutation(diagnostics_mutation, uri)
 	}
 	// The buffer is gone; re-index from disk so the file's symbols remain
 	// discoverable with their on-disk content. Remove the client URI alias and

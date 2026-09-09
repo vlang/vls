@@ -35,6 +35,11 @@ struct DiagnosticsTicket {
 	project_generation u64
 }
 
+struct DiagnosticsProjectMutation {
+	project_key string
+	tickets     []DiagnosticsTicket
+}
+
 @[heap]
 struct DiagnosticsScheduler {
 mut:
@@ -69,12 +74,20 @@ fn (mut scheduler DiagnosticsScheduler) next_generation(uri string) (u64, u64) {
 // begin_project_schedule invalidates jobs whose snapshots include an older
 // buffer from the same project, then returns tickets for replacement jobs.
 fn (mut scheduler DiagnosticsScheduler) begin_project_schedule(uri string, project_key string) []DiagnosticsTicket {
+	return scheduler.begin_project_mutation(project_key, uri)
+}
+
+// begin_project_mutation invalidates pending and active jobs in a project. A
+// non-empty requested_uri also schedules diagnostics for that document.
+fn (mut scheduler DiagnosticsScheduler) begin_project_mutation(project_key string, requested_uri string) []DiagnosticsTicket {
 	scheduler.mutex.lock()
 	defer {
 		scheduler.mutex.unlock()
 	}
 	mut affected := map[string]bool{}
-	affected[uri] = true
+	if requested_uri != '' {
+		affected[requested_uri] = true
+	}
 	mut pending_uris := []string{}
 	for pending_uri, job in scheduler.pending_jobs {
 		if job.project_key == project_key {
@@ -206,43 +219,74 @@ fn (mut app App) schedule_diagnostics(uri string, content string) bool {
 	if mut scheduler := app.diagnostics_scheduler {
 		project_key := app.generation_key(uri)
 		tickets := scheduler.begin_project_schedule(uri, project_key)
-		ready_at := time.now().unix_milli() + diagnostics_debounce_ms
-		mut should_start := false
-		for ticket in tickets {
-			job_content := if ticket.uri == uri {
-				content
-			} else {
-				app.open_files[ticket.uri] or { continue }
-			}
-			mut version := ?i64(none)
-			if current_version := app.open_files_versions[ticket.uri] {
-				version = current_version
-			}
-			job := DiagnosticsJob{
-				uri: ticket.uri
-				content: job_content
-				version: version
-				project_key: project_key
-				project_generation: ticket.project_generation
-				position_encoding: app.position_encoding
-				open_files: app.open_files.clone()
-				project_generations: app.project_generations.clone()
-				write_mutex: app.write_mutex
-				tcp_conn: app.tcp_conn
-				global_generation: ticket.global_generation
-				generation: ticket.generation
-				ready_at: ready_at
-			}
-			if scheduler.enqueue(job) {
-				should_start = true
-			}
-		}
-		if should_start {
-			spawn run_diagnostics_worker(mut scheduler)
-		}
+		app.enqueue_diagnostics_tickets(mut scheduler, tickets, project_key, uri, content, '')
 		return true
 	}
 	return false
+}
+
+// begin_diagnostics_project_mutation invalidates existing jobs before App state
+// changes. finish_diagnostics_project_mutation rebuilds them from fresh state.
+fn (mut app App) begin_diagnostics_project_mutation(uri string) DiagnosticsProjectMutation {
+	if mut scheduler := app.diagnostics_scheduler {
+		project_key := app.generation_key(uri)
+		return DiagnosticsProjectMutation{
+			project_key: project_key
+			tickets: scheduler.begin_project_mutation(project_key, '')
+		}
+	}
+	return DiagnosticsProjectMutation{}
+}
+
+fn (mut app App) finish_diagnostics_project_mutation(mutation DiagnosticsProjectMutation, excluded_uri string) {
+	if !app.diagnostics_enabled || mutation.tickets.len == 0 {
+		return
+	}
+	if mut scheduler := app.diagnostics_scheduler {
+		app.enqueue_diagnostics_tickets(mut scheduler, mutation.tickets, mutation.project_key, '', '', excluded_uri)
+	}
+}
+
+fn (mut app App) enqueue_diagnostics_tickets(mut scheduler DiagnosticsScheduler, tickets []DiagnosticsTicket, project_key string, changed_uri string, changed_content string, excluded_uri string) {
+	ready_at := time.now().unix_milli() + diagnostics_debounce_ms
+	mut should_start := false
+	for ticket in tickets {
+		if ticket.uri == excluded_uri {
+			continue
+		}
+		job_content := if ticket.uri == changed_uri {
+			changed_content
+		} else if open_content := app.open_files[ticket.uri] {
+			open_content
+		} else {
+			os.read_file(uri_to_path(ticket.uri)) or { continue }
+		}
+		mut version := ?i64(none)
+		if current_version := app.open_files_versions[ticket.uri] {
+			version = current_version
+		}
+		job := DiagnosticsJob{
+			uri: ticket.uri
+			content: job_content
+			version: version
+			project_key: project_key
+			project_generation: ticket.project_generation
+			position_encoding: app.position_encoding
+			open_files: app.open_files.clone()
+			project_generations: app.project_generations.clone()
+			write_mutex: app.write_mutex
+			tcp_conn: app.tcp_conn
+			global_generation: ticket.global_generation
+			generation: ticket.generation
+			ready_at: ready_at
+		}
+		if scheduler.enqueue(job) {
+			should_start = true
+		}
+	}
+	if should_start {
+		spawn run_diagnostics_worker(mut scheduler)
+	}
 }
 
 fn (mut app App) cancel_scheduled_diagnostics(uri string) {

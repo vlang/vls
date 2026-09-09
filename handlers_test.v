@@ -564,6 +564,96 @@ fn test_diagnostics_scheduler_requeues_pending_sibling_with_latest_buffers() {
 	assert new_job_a.project_generation > old_job_a.project_generation
 }
 
+fn test_diagnostics_scheduler_requeues_sibling_after_close() {
+	mut app := create_test_app()
+	defer {
+		app.cancel_all_scheduled_diagnostics()
+		cleanup_test_app(app)
+	}
+	mut scheduler := new_diagnostics_scheduler()
+	app.diagnostics_scheduler = scheduler
+	project_dir := os.join_path(app.temp_dir, 'close_sibling_project')
+	must_mkdir_all(project_dir)
+	path_a := os.join_path(project_dir, 'a.v')
+	path_b := os.join_path(project_dir, 'b.v')
+	uri_a := path_to_uri(path_a)
+	uri_b := path_to_uri(path_b)
+	content_a := 'module main\n\nfn uses_b() { disk_in_b() }\n'
+	open_content_b := 'module main\n\nfn unsaved_in_b() {}\n'
+	must_write_file(path_a, content_a)
+	must_write_file(path_b, 'module main\n\nfn disk_in_b() {}\n')
+	app.open_files[uri_a] = content_a
+	app.open_files[uri_b] = open_content_b
+	assert app.schedule_diagnostics(uri_a, content_a)
+	old_job_a := diagnostics_test_pending_job(mut scheduler, uri_a) or {
+		assert false, 'expected pending diagnostics for a.v'
+		return
+	}
+	assert old_job_a.open_files[uri_b] == open_content_b
+
+	app.on_did_close(Request{
+		params: json2.encode(DidCloseTextDocumentParams{
+			text_document: TextDocumentIdentifier{
+				uri: uri_b
+			}
+		},
+			escape_unicode: true
+		)
+	})
+
+	assert !scheduler.is_job_current(old_job_a)
+	new_job_a := diagnostics_test_pending_job(mut scheduler, uri_a) or {
+		assert false, 'expected replacement diagnostics for a.v'
+		return
+	}
+	assert uri_b !in new_job_a.open_files
+	assert new_job_a.project_generation > old_job_a.project_generation
+}
+
+fn test_diagnostics_scheduler_requeues_job_after_watched_file_change() {
+	mut app := create_test_app()
+	defer {
+		app.cancel_all_scheduled_diagnostics()
+		cleanup_test_app(app)
+	}
+	mut scheduler := new_diagnostics_scheduler()
+	app.diagnostics_scheduler = scheduler
+	project_dir := os.join_path(app.temp_dir, 'watched_sibling_project')
+	must_mkdir_all(project_dir)
+	path_a := os.join_path(project_dir, 'a.v')
+	path_b := os.join_path(project_dir, 'b.v')
+	uri_a := path_to_uri(path_a)
+	uri_b := path_to_uri(path_b)
+	content_a := 'module main\n\nfn uses_b() { changed_in_b() }\n'
+	must_write_file(path_a, content_a)
+	must_write_file(path_b, 'module main\n\nfn old_in_b() {}\n')
+	app.open_files[uri_a] = content_a
+	assert app.schedule_diagnostics(uri_a, content_a)
+	old_job_a := diagnostics_test_pending_job(mut scheduler, uri_a) or {
+		assert false, 'expected pending diagnostics for a.v'
+		return
+	}
+	old_cache_generation := old_job_a.project_generations[app.generation_key(uri_a)]
+	must_write_file(path_b, 'module main\n\nfn changed_in_b() {}\n')
+
+	app.on_did_change_watched_files(Request{
+		params: json2.encode(DidChangeWatchedFilesParams{
+			changes: [FileEvent{
+				uri: uri_b
+				event_type: 2
+			}]
+		})
+	})
+
+	assert !scheduler.is_job_current(old_job_a)
+	new_job_a := diagnostics_test_pending_job(mut scheduler, uri_a) or {
+		assert false, 'expected replacement diagnostics for a.v'
+		return
+	}
+	assert new_job_a.project_generation > old_job_a.project_generation
+	assert new_job_a.project_generations[app.generation_key(uri_a)] > old_cache_generation
+}
+
 fn test_diagnostics_scheduler_requeues_active_sibling() {
 	mut app := create_test_app()
 	defer {
