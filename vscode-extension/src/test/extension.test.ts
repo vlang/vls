@@ -1,7 +1,13 @@
 import * as assert from 'assert';
 import * as fs from 'fs';
 import * as path from 'path';
-import { codeLensTaskSpec, workspaceTaskSpec } from '../taskSpec';
+import {
+  activeRunTaskSpec,
+  codeLensTaskSpec,
+  taskWorkingDirectory,
+  workspaceTaskSpec,
+} from '../taskSpec';
+import { serverCommand } from '../vCommand';
 
 describe('VLS VS Code extension', () => {
   it('contributes build, run, and test commands and tasks', () => {
@@ -52,5 +58,39 @@ describe('VLS VS Code extension', () => {
       args: ['-nocolor', 'test', '/tmp/main_test.v', '-run-only', 'test_one'],
       name: 'Run Test: test_one',
     });
+  });
+
+  it('runs active V scripts directly', () => {
+    assert.deepStrictEqual(activeRunTaskSpec('/workspace/tools/deploy.vsh', '/workspace'), {
+      action: 'run',
+      args: ['-nocolor', 'run', path.join('tools', 'deploy.vsh')],
+      name: 'Run Active Script',
+    });
+    assert.deepStrictEqual(activeRunTaskSpec('/workspace/app/main.v', '/workspace'), {
+      action: 'run',
+      args: ['-nocolor', 'run', 'app'],
+      name: 'Run Active Module',
+    });
+  });
+
+  it('runs nested modules from the problem matcher base', () => {
+    const filePath = path.join('/workspace', 'cmd', 'app', 'main.v');
+    const workingDirectory = taskWorkingDirectory(filePath, '/workspace');
+    assert.strictEqual(workingDirectory, '/workspace');
+    assert.deepStrictEqual(codeLensTaskSpec('vls.runFile', filePath, '', workingDirectory), {
+      action: 'run',
+      args: ['-nocolor', 'run', path.join('cmd', 'app')],
+      name: 'Run Main',
+    });
+  });
+
+  it('scopes and preserves the configured server compiler', () => {
+    const configured = path.join('${workspaceFolder}', 'bin', 'v');
+    assert.strictEqual(
+      serverCommand(configured, '/workspace'),
+      path.join('/workspace', 'bin', 'v')
+    );
+    const missing = path.join('/missing', 'custom-v');
+    assert.strictEqual(serverCommand(missing, '/workspace'), missing);
   });
 });

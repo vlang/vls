@@ -1,13 +1,13 @@
 import * as vscode from 'vscode';
-import * as fs from 'fs';
-import * as os from 'os';
-import * as path from 'path';
 import {
+  activeRunTaskSpec,
   codeLensTaskSpec,
+  taskWorkingDirectory,
   taskActionTitle,
   VTaskAction,
   workspaceTaskSpec,
 } from './taskSpec';
+import { configuredCommand, resolvedCommand, serverCommand } from './vCommand';
 
 interface VTaskDefinition extends vscode.TaskDefinition {
   type: 'v';
@@ -19,83 +19,22 @@ interface VTaskTarget {
   scope: vscode.WorkspaceFolder | vscode.TaskScope;
 }
 
-const activeExecutions = new Map<string, vscode.TaskExecution>();
-
-function isExecutable(filePath: string): boolean {
-  try {
-    if (!fs.statSync(filePath).isFile()) {
-      return false;
-    }
-    if (process.platform !== 'win32') {
-      fs.accessSync(filePath, fs.constants.X_OK);
-    }
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function executableNames(bin: string): string[] {
-  if (process.platform !== 'win32' || path.extname(bin) !== '') {
-    return [bin];
-  }
-  const extensions = (process.env.PATHEXT || '.EXE;.CMD;.BAT;.COM')
-    .split(';')
-    .filter(Boolean);
-  return [bin, ...extensions.map((extension) => `${bin}${extension.toLowerCase()}`)];
-}
-
-export function findInPath(bin: string): string | undefined {
-  const envPath = process.env.PATH || '';
-  for (const rawDirectory of envPath.split(path.delimiter)) {
-    const directory = rawDirectory.replace(/^"|"$/g, '');
-    if (!directory) {
-      continue;
-    }
-    for (const name of executableNames(bin)) {
-      const fullPath = path.join(directory, name);
-      if (isExecutable(fullPath)) {
-        return fullPath;
-      }
-    }
-  }
-  return undefined;
-}
-
-function expandConfiguredPath(value: string, folder?: vscode.WorkspaceFolder): string {
-  let expanded = value.replace(/^~(?=$|[\\/])/, os.homedir());
-  expanded = expanded.replace(/\$\{env:([^}]+)\}/g, (_match, name: string) => {
-    return process.env[name] || '';
-  });
-  if (folder) {
-    expanded = expanded.replace(/\$\{workspaceFolder\}/g, folder.uri.fsPath);
-  }
-  return expanded;
+function vCommandSetting(folder?: vscode.WorkspaceFolder): string {
+  return vscode.workspace
+    .getConfiguration('vls', folder?.uri)
+    .get<string>('vCommand', '');
 }
 
 function configuredVCommand(folder?: vscode.WorkspaceFolder): string {
-  const config = vscode.workspace.getConfiguration('vls', folder?.uri);
-  const configured = config.get<string>('vCommand', '').trim();
-  if (!configured) {
-    return findInPath('v') || 'v';
-  }
-  return expandConfiguredPath(configured, folder);
+  return configuredCommand(vCommandSetting(folder), folder?.uri.fsPath);
 }
 
 function resolvedVCommand(folder?: vscode.WorkspaceFolder): string | undefined {
-  const command = configuredVCommand(folder);
-  const isPath = path.isAbsolute(command) || command.includes('/') || command.includes('\\');
-  if (isPath) {
-    const fullPath = path.isAbsolute(command)
-      ? command
-      : path.resolve(folder?.uri.fsPath || process.cwd(), command);
-    return isExecutable(fullPath) ? fullPath : undefined;
-  }
-  return findInPath(command);
+  return resolvedCommand(vCommandSetting(folder), folder?.uri.fsPath);
 }
 
-export function vCommandForServer(): string | undefined {
-  return resolvedVCommand();
+export function vCommandForServer(folder?: vscode.WorkspaceFolder): string | undefined {
+  return serverCommand(vCommandSetting(folder), folder?.uri.fsPath);
 }
 
 async function showMissingVCompiler(folder?: vscode.WorkspaceFolder): Promise<void> {
@@ -170,7 +109,7 @@ function activeFileUri(): vscode.Uri | undefined {
 function targetForUri(uri: vscode.Uri): VTaskTarget {
   const folder = vscode.workspace.getWorkspaceFolder(uri);
   return {
-    cwd: path.dirname(uri.fsPath),
+    cwd: taskWorkingDirectory(uri.fsPath, folder?.uri.fsPath),
     scope: folder || vscode.TaskScope.Global,
   };
 }
@@ -201,26 +140,25 @@ async function saveDocument(uri?: vscode.Uri): Promise<boolean> {
   return document.save();
 }
 
-async function executeVTask(
-  task: vscode.Task,
-  folder: vscode.WorkspaceFolder | undefined,
-  executionKey: string
-): Promise<vscode.TaskExecution | undefined> {
-  if (!resolvedVCommand(folder)) {
-    await showMissingVCompiler(folder);
-    return undefined;
-  }
-  activeExecutions.get(executionKey)?.terminate();
-  const execution = await vscode.tasks.executeTask(task);
-  activeExecutions.set(executionKey, execution);
-  return execution;
-}
-
 function taskFolder(task: vscode.Task): vscode.WorkspaceFolder | undefined {
   return workspaceFolderForScope(task.scope);
 }
 
-async function runPaletteTask(action: VTaskAction): Promise<void> {
+function codeLensUri(argument: unknown): vscode.Uri | undefined {
+  if (typeof argument !== 'string' || argument.trim() === '') {
+    return undefined;
+  }
+  try {
+    const uri = argument.includes('://') || argument.startsWith('file:')
+      ? vscode.Uri.parse(argument, true)
+      : vscode.Uri.file(argument);
+    return uri.scheme === 'file' ? uri : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+async function runPaletteTask(action: VTaskAction, manager: VTaskManager): Promise<void> {
   const workspaceTarget = activeWorkspaceTarget();
   if (!workspaceTarget) {
     vscode.window.showErrorMessage(
@@ -242,7 +180,9 @@ async function runPaletteTask(action: VTaskAction): Promise<void> {
   let name = workspaceSpec.name;
   if (action === 'run' && uri) {
     target = targetForUri(uri);
-    name = 'Run Active Module';
+    const runSpec = activeRunTaskSpec(uri.fsPath, target.cwd);
+    args = runSpec.args;
+    name = runSpec.name;
   } else if (action === 'test' && uri?.fsPath.endsWith('_test.v')) {
     target = targetForUri(uri);
     args = ['-nocolor', 'test', uri.fsPath];
@@ -251,24 +191,14 @@ async function runPaletteTask(action: VTaskAction): Promise<void> {
 
   const task = createVTask(action, target, args, name);
   const key = `${action}:${target.cwd}:${args.join('\0')}`;
-  await executeVTask(task, taskFolder(task), key);
+  await manager.executeVTask(task, taskFolder(task), key);
 }
 
-function codeLensUri(argument: unknown): vscode.Uri | undefined {
-  if (typeof argument !== 'string' || argument.trim() === '') {
-    return undefined;
-  }
-  try {
-    const uri = argument.includes('://') || argument.startsWith('file:')
-      ? vscode.Uri.parse(argument, true)
-      : vscode.Uri.file(argument);
-    return uri.scheme === 'file' ? uri : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-export async function runCodeLensCommand(command: string, args: unknown[]): Promise<void> {
+export async function runCodeLensCommand(
+  command: string,
+  args: unknown[],
+  manager: VTaskManager
+): Promise<void> {
   const uri = codeLensUri(args[0]);
   if (!uri) {
     vscode.window.showErrorMessage('V: This command requires a local V source file.');
@@ -281,10 +211,10 @@ export async function runCodeLensCommand(command: string, args: unknown[]): Prom
 
   const target = targetForUri(uri);
   const testName = typeof args[1] === 'string' ? args[1].trim() : '';
-  const spec = codeLensTaskSpec(command, uri.fsPath, testName);
+  const spec = codeLensTaskSpec(command, uri.fsPath, testName, target.cwd);
   const task = createVTask(spec.action, target, spec.args, spec.name);
   const key = `${command}:${uri.fsPath}:${args[1] || ''}`;
-  await executeVTask(task, taskFolder(task), key);
+  await manager.executeVTask(task, taskFolder(task), key);
 }
 
 class VTaskProvider implements vscode.TaskProvider {
@@ -311,24 +241,51 @@ class VTaskProvider implements vscode.TaskProvider {
   }
 }
 
-export function registerVTasks(context: vscode.ExtensionContext): void {
+export class VTaskManager implements vscode.Disposable {
+  private readonly activeExecutions = new Map<string, vscode.TaskExecution>();
+
+  async executeVTask(
+    task: vscode.Task,
+    folder: vscode.WorkspaceFolder | undefined,
+    executionKey: string
+  ): Promise<vscode.TaskExecution | undefined> {
+    if (!resolvedVCommand(folder)) {
+      await showMissingVCompiler(folder);
+      return undefined;
+    }
+    this.activeExecutions.get(executionKey)?.terminate();
+    const execution = await vscode.tasks.executeTask(task);
+    this.activeExecutions.set(executionKey, execution);
+    return execution;
+  }
+
+  endExecution(execution: vscode.TaskExecution): void {
+    for (const [key, activeExecution] of this.activeExecutions) {
+      if (activeExecution === execution) {
+        this.activeExecutions.delete(key);
+      }
+    }
+  }
+
+  dispose(): void {
+    for (const execution of this.activeExecutions.values()) {
+      execution.terminate();
+    }
+    this.activeExecutions.clear();
+  }
+}
+
+export function registerVTasks(context: vscode.ExtensionContext): VTaskManager {
+  const manager = new VTaskManager();
   context.subscriptions.push(vscode.tasks.registerTaskProvider('v', new VTaskProvider()));
   context.subscriptions.push(
-    vscode.commands.registerCommand('vls.build', () => runPaletteTask('build')),
-    vscode.commands.registerCommand('vls.run', () => runPaletteTask('run')),
-    vscode.commands.registerCommand('vls.test', () => runPaletteTask('test')),
+    vscode.commands.registerCommand('vls.build', () => runPaletteTask('build', manager)),
+    vscode.commands.registerCommand('vls.run', () => runPaletteTask('run', manager)),
+    vscode.commands.registerCommand('vls.test', () => runPaletteTask('test', manager)),
     vscode.tasks.onDidEndTask((event) => {
-      for (const [key, execution] of activeExecutions) {
-        if (execution === event.execution) {
-          activeExecutions.delete(key);
-        }
-      }
+      manager.endExecution(event.execution);
     }),
-    new vscode.Disposable(() => {
-      for (const execution of activeExecutions.values()) {
-        execution.terminate();
-      }
-      activeExecutions.clear();
-    })
+    manager
   );
+  return manager;
 }
