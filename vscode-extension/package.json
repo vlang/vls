@@ -2,15 +2,22 @@
   "name": "vls",
   "publisher": "vlang",
   "displayName": "vls",
-  "description": "vls",
-  "version": "0.0.2",
+  "description": "V language support powered by VLS, with built-in build, run, and test tasks.",
+  "version": "0.0.3",
+  "license": "GPL-2.0-only",
   "engines": {
     "vscode": "^1.95.0"
   },
   "categories": [
-    "Other"
+    "Programming Languages"
   ],
-  "activationEvents": [],
+  "activationEvents": [
+    "onLanguage:v",
+    "onTaskType:v",
+    "onCommand:vls.build",
+    "onCommand:vls.run",
+    "onCommand:vls.test"
+  ],
   "main": "./out/extension.js",
   "repository": "https://github.com/vlang/vls",
   "contributes": {
@@ -34,6 +41,66 @@
         "path": "./syntaxes/v.tmLanguage.json"
       }
     ],
+    "commands": [
+      {
+        "command": "vls.build",
+        "title": "Build",
+        "category": "V"
+      },
+      {
+        "command": "vls.run",
+        "title": "Run",
+        "category": "V"
+      },
+      {
+        "command": "vls.test",
+        "title": "Test",
+        "category": "V"
+      }
+    ],
+    "taskDefinitions": [
+      {
+        "type": "v",
+        "required": [
+          "action"
+        ],
+        "properties": {
+          "action": {
+            "type": "string",
+            "description": "The V operation to run.",
+            "enum": [
+              "build",
+              "run",
+              "test"
+            ],
+            "enumDescriptions": [
+              "Build the workspace with v .",
+              "Run the workspace with v run .",
+              "Test the workspace with v test ."
+            ]
+          }
+        }
+      }
+    ],
+    "problemMatchers": [
+      {
+        "name": "vls",
+        "label": "V compiler diagnostics",
+        "owner": "v",
+        "fileLocation": [
+          "autoDetect",
+          "${workspaceFolder}"
+        ],
+        "pattern": {
+          "regexp": "^(.*):(\\d+):(\\d+):\\s*(error|warning|notice):\\s*(.*)$",
+          "file": 1,
+          "line": 2,
+          "column": 3,
+          "severity": 4,
+          "message": 5
+        }
+      }
+    ],
     "configuration": {
       "type": "object",
       "title": "V Language Server",
@@ -47,15 +114,21 @@
           "default": [],
           "description": "Arguments to pass to the V language server."
         },
+        "vls.vCommand": {
+          "type": "string",
+          "default": "",
+          "scope": "resource",
+          "description": "Path to the V compiler used by the language server, build, run, test, and CodeLens tasks. If not set, the extension finds 'v' in PATH. Reload VS Code after changing it."
+        },
         "vls.inlayHints.enabled": {
           "type": "boolean",
           "default": true,
           "description": "Enable or disable inlay hints for V files."
-		},
-		"vls.diagnostics.enabled": {
-		  "type": "boolean",
-		  "default": true,
-		  "description": "Enable or disable live diagnostics from VLS for V files."
+        },
+        "vls.diagnostics.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable or disable live diagnostics from VLS for V files."
         }
       }
     }
@@ -66,7 +139,7 @@
     "watch": "npx tsc -watch -p ./",
     "pretest": "npm run compile && npm run lint",
     "lint": "npx eslint src",
-    "test": "vscode-test",
+    "test": "mocha \"out/test/**/*.test.js\"",
     "build": "npx vsce package"
   },
   "devDependencies": {
@@ -75,15 +148,19 @@
     "@types/vscode": "^1.95.0",
     "@typescript-eslint/eslint-plugin": "^8.17.0",
     "@typescript-eslint/parser": "^8.17.0",
-    "@vscode/test-cli": "^0.0.10",
-    "@vscode/test-electron": "^2.4.1",
     "@vscode/vsce": "^3.6.0",
     "eslint": "^9.16.0",
+    "mocha": "^11.7.2",
     "typescript": "^5.9.2"
   },
   "dependencies": {
-    "glob": "^13.0.6",
-    "node": "^24.15.0",
     "vscode-languageclient": "^9.0.1"
+  },
+  "overrides": {
+    "vscode-languageclient": {
+      "minimatch": {
+        "brace-expansion": "2.1.4"
+      }
+    }
   }
 }

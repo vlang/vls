@@ -1,0 +1,7 @@
+src/**
+out/test/**
+eslint.config.js
+package-lock.json
+tsconfig.json
+tsconfig.tsbuildinfo
+**/*.map

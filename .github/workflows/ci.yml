@@ -53,3 +53,29 @@ jobs:
       - name: Compile project
         if: runner.os == 'Windows'
         run: v vls/
+
+  vscode-extension:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout VLS
+        uses: actions/checkout@v5
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: vscode-extension/package-lock.json
+
+      - name: Install extension dependencies
+        working-directory: vscode-extension
+        run: npm ci
+
+      - name: Test extension
+        working-directory: vscode-extension
+        run: npm test
+
+      - name: Package extension
+        working-directory: vscode-extension
+        run: npm run build -- --out /tmp/vls-ci.vsix

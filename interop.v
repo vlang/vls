@@ -10,6 +10,10 @@ import time
 // Keep runtime-derived compiler settings behind functions. Function-call module constants can
 // crash V3's parallel constant precomputation while compiling VLS.
 fn resolve_v_compiler_exe() string {
+	configured := os.getenv('VLS_V_COMMAND').trim_space()
+	if configured != '' {
+		return configured
+	}
 	return os.find_abs_path_of_executable('v') or { 'v' }
 }
 
