@@ -463,7 +463,7 @@ const index_excluded_dirs = ['.git', '.svn', '.hg', 'node_modules', '.vmodules',
 // root. This models the nearest V project root (audit P1-01).
 fn find_project_root(dir string) string {
 	mut d := dir
-	for d != '' && d != '/' {
+	for d != '' && d != '/' && d != '.' {
 		if os.exists(os.join_path(d, 'v.mod')) {
 			return d
 		}

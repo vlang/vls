@@ -215,10 +215,15 @@ fn test_path_to_uri_relative() {
 fn test_path_to_uri_with_backslashes() {
 	// On POSIX a backslash is a valid, literal filename character. It must be
 	// percent-encoded in the URI (never left raw) and must round-trip exactly.
+	// Windows treats the same bytes as path separators and normalizes them.
 	original := '/home/user\\project\\main.v'
 	result := path_to_uri(original)
 	assert !result.contains('\\')
-	assert uri_to_path(result) == original
+	$if windows {
+		assert uri_to_path(result) == original.replace('\\', '/')
+	} $else {
+		assert uri_to_path(result) == original
+	}
 }
 
 fn test_path_to_uri_empty() {

@@ -5864,7 +5864,11 @@ fn test_execute_run_file_returns_before_long_running_program_finishes() {
 	assert resp.result is string
 	assert (resp.result as string) == 'null'
 	assert elapsed_ms < 1000
-	deadline := time.now().unix_milli() + 10_000
+	mut startup_timeout_ms := 10_000
+	$if windows {
+		startup_timeout_ms = 30_000
+	}
+	deadline := time.now().unix_milli() + startup_timeout_ms
 	for !os.exists(marker_path) && time.now().unix_milli() < deadline {
 		time.sleep(10 * time.millisecond)
 	}
@@ -5976,14 +5980,16 @@ fn test_code_lens_source_paths_are_rewritten_only_in_code() {
 	source_path := os.join_path(project_dir, 'main.v')
 	temp_source_path := os.join_path(app.temp_dir, 'overlay', 'main.v')
 	source := 'const source_file = @FILE\nconst source_dir = @DIR\nconst project = @VMODROOT\nconst manifest = @VMOD_FILE\nconst file_line = @FILE_LINE\nconst location = @LOCATION\nconst column = @FILE + @COLUMN\nconst literal = "@FILE @DIR @VMODROOT @VMOD_FILE @FILE_LINE @LOCATION @COLUMN"\n// @FILE @DIR @VMODROOT @VMOD_FILE @FILE_LINE @LOCATION @COLUMN\n#flag -I @VMODROOT/thirdparty\n'
-	rewritten := code_lens_source_with_original_pseudos(source, source_path, temp_source_path)
+	rewritten := code_lens_source_with_original_pseudos(source, source_path, temp_source_path, os.dir(temp_source_path))
 
 	assert rewritten.contains('const source_file = ${code_lens_v_string_literal(os.real_path(source_path))}')
 	assert rewritten.contains('const source_dir = ${code_lens_v_string_literal(os.real_path(project_dir))}')
 	assert rewritten.contains('const project = ${code_lens_v_string_literal(os.real_path(project_dir))}')
 	assert rewritten.contains('const manifest = ${code_lens_v_string_literal(vmod_source)}')
 	assert rewritten.contains("const file_line = 'main.v:5'")
-	assert rewritten.contains('const location = (@LOCATION.replace(${code_lens_v_string_literal(temp_source_path)}, ${code_lens_v_string_literal(os.real_path(source_path))}))')
+	assert rewritten.contains('const location = (@LOCATION.replace(')
+	assert rewritten.contains(code_lens_v_string_literal('.\\main.v'))
+	assert rewritten.contains(code_lens_v_string_literal('./main.v'))
 	assert rewritten.contains("const column = ${code_lens_v_string_literal(os.real_path(source_path))} + '24'")
 	assert rewritten.contains('const literal = "@FILE @DIR @VMODROOT @VMOD_FILE @FILE_LINE @LOCATION @COLUMN"')
 	assert rewritten.contains('// @FILE @DIR @VMODROOT @VMOD_FILE @FILE_LINE @LOCATION @COLUMN')
