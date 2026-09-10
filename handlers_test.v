@@ -6092,6 +6092,98 @@ fn test_multiline_function_completion_builds_full_snippet() {
 	assert local_insert == 'build(\${1:required}, \${2:count})$0'
 }
 
+fn test_struct_literal_completion_includes_indexed_fields() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+
+	test_dir := os.join_path(app.temp_dir, 'struct_literal_field_completion')
+	must_mkdir_all(test_dir)
+	main_file := os.join_path(test_dir, 'main.v')
+	content := 'module main\n\nstruct User {\n\tname string\n\tage int\n}\nfn (user User) save() {}\n\nfn main() {\n\tuser := User{\n\t\tna\n\t}\n}\n'
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	lines := content.split_into_lines()
+	completion_line := lines.index('\t\tna')
+	assert completion_line >= 0
+	position := Position{
+		line: completion_line
+		char: lines[completion_line].len
+	}
+	assert struct_literal_type_at_cursor(content, position, app.position_encoding) == 'User'
+
+	indexed := app.indexed_completions(uri, position)
+	labels := indexed.items.map(it.label)
+	assert !indexed.use_compiler
+	assert 'name' in labels
+	assert 'age' in labels
+	assert 'save' !in labels
+}
+
+fn test_loop_header_bindings_are_removed_with_loop_scope() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+
+	content := 'module main\n\nfn inspect(values []string) {\n\tfor i, value in values {\n\t\tvalue\n\t}\n\tfor j, item in\n\t\tvalues {\n\t\titem\n\t}\n\tval\n}\n'
+	lines := content.split_into_lines()
+	inside_line := lines.index('\t\tvalue')
+	multiline_inside_line := lines.index('\t\titem')
+	after_line := lines.index('\tval')
+	assert inside_line >= 0
+	assert multiline_inside_line >= 0
+	assert after_line >= 0
+	inside := app.local_scope_completions(content, Position{
+		line: inside_line
+		char: lines[inside_line].len
+	}).map(it.label)
+	assert 'i' in inside
+	assert 'value' in inside
+	multiline_inside := app.local_scope_completions(content, Position{
+		line: multiline_inside_line
+		char: lines[multiline_inside_line].len
+	}).map(it.label)
+	assert 'j' in multiline_inside
+	assert 'item' in multiline_inside
+
+	after := app.local_scope_completions(content, Position{
+		line: after_line
+		char: lines[after_line].len
+	}).map(it.label)
+	assert 'values' in after
+	assert 'i' !in after
+	assert 'value' !in after
+	assert 'j' !in after
+	assert 'item' !in after
+}
+
+fn test_conditional_bare_completion_requests_compiler_fallback() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'active_conditional_bare_completion')
+	must_mkdir_all(test_dir)
+	main_file := os.join_path(test_dir, 'main.v')
+	content := 'module main\n\n$if linux {\n\tfn platform_only() {}\n}\n\nfn main() {\n\tplat\n}\n'
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	lines := content.split_into_lines()
+	completion_line := lines.index('\tplat')
+	assert completion_line >= 0
+	position := Position{
+		line: completion_line
+		char: lines[completion_line].len
+	}
+	indexed := app.indexed_completions(uri, position)
+	assert indexed.use_compiler
+	assert !indexed.items.any(it.label == 'platform_only')
+}
+
 fn test_semantic_tokens_returns_data_for_known_content() {
 	mut app := create_test_app()
 	defer {

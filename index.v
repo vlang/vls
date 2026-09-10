@@ -25,6 +25,7 @@ struct IndexEntry {
 	fn_completions            []Detail          // free-function completion items for this file
 	module_completions        []Detail // all same-module top-level completion items
 	public_module_completions []Detail // exported completion items for imported modules
+	has_conditional_module_completions bool
 	has_conditional_public_completions bool
 }
 
@@ -55,6 +56,7 @@ fn build_index_entry(content string, enc PositionEncoding) IndexEntry {
 		fn_completions:            parse_module_fn_completions(content)
 		module_completions:        module_completion_index.items
 		public_module_completions: public_module_completion_index.items
+		has_conditional_module_completions: module_completion_index.has_conditional
 		has_conditional_public_completions: public_module_completion_index.has_conditional
 	}
 }

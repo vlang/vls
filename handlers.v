@@ -169,6 +169,14 @@ fn (mut app App) indexed_completions(uri string, position Position) IndexedCompl
 			}
 		}
 	}
+	struct_type := struct_literal_type_at_cursor(content, position, app.position_encoding)
+	if struct_type != '' {
+		field_items := app.indexed_struct_field_completions(uri, content, struct_type)
+		return IndexedCompletionResult{
+			items:        field_items
+			use_compiler: field_items.len == 0
+		}
+	}
 
 	mut details := make_keyword_completions()
 	mut seen_labels := map[string]bool{}
@@ -192,8 +200,11 @@ fn (mut app App) indexed_completions(uri string, position Position) IndexedCompl
 		}
 	}
 	working_dir := os.dir(uri_to_path(uri))
+	mut use_compiler := false
 	if working_dir != '' {
-		for detail in app.collect_module_completions(uri, working_dir) {
+		module_result := app.collect_module_completions(uri, working_dir)
+		use_compiler = module_result.use_compiler
+		for detail in module_result.items {
 			if detail.label !in seen_labels {
 				details << detail
 				seen_labels[detail.label] = true
@@ -201,8 +212,94 @@ fn (mut app App) indexed_completions(uri string, position Position) IndexedCompl
 		}
 	}
 	return IndexedCompletionResult{
-		items: details
+		items:        details
+		use_compiler: use_compiler
 	}
+}
+
+fn struct_literal_type_at_cursor(content string, position Position, enc PositionEncoding) string {
+	lines := content.split_into_lines()
+	if position.line < 0 || position.line >= lines.len || position.char < 0 {
+		return ''
+	}
+	mut code_lines := []string{cap: position.line + 1}
+	mut scan_state := ImportScanState{}
+	for line_idx in 0 .. position.line + 1 {
+		raw_line := lines[line_idx]
+		fragment := if line_idx == position.line {
+			byte_col := encoded_col_to_byte(raw_line, position.char, enc)
+			raw_line[..byte_col]
+		} else {
+			raw_line
+		}
+		code_lines << source_line_import_code(fragment, mut scan_state)
+	}
+	prefix := code_lines.join('\n')
+	mut brace_depth := 0
+	mut open_brace := -1
+	mut col := prefix.len - 1
+	for col >= 0 {
+		if prefix[col] == `}` {
+			brace_depth++
+		} else if prefix[col] == `{` {
+			if brace_depth == 0 {
+				open_brace = col
+				break
+			}
+			brace_depth--
+		}
+		col--
+	}
+	if open_brace < 0 {
+		return ''
+	}
+	mut type_end := open_brace
+	for type_end > 0 && prefix[type_end - 1] in [` `, `\t`, `\r`, `\n`] {
+		type_end--
+	}
+	mut type_start := type_end
+	mut square_depth := 0
+	for type_start > 0 {
+		c := prefix[type_start - 1]
+		if c == `]` {
+			square_depth++
+			type_start--
+			continue
+		}
+		if square_depth > 0 {
+			if c == `[` {
+				square_depth--
+			}
+			type_start--
+			continue
+		}
+		if is_ident_char(c) || c == `.` {
+			type_start--
+			continue
+		}
+		break
+	}
+	if type_start == type_end || square_depth != 0 {
+		return ''
+	}
+	type_name := prefix[type_start..type_end].trim_space()
+	simple_name := normalize_receiver_type(type_name).all_after_last('.')
+	if simple_name == '' || !(simple_name[0] >= `A` && simple_name[0] <= `Z`) {
+		return ''
+	}
+	mut keyword_end := type_start
+	for keyword_end > 0 && prefix[keyword_end - 1] in [` `, `\t`, `\r`, `\n`] {
+		keyword_end--
+	}
+	mut keyword_start := keyword_end
+	for keyword_start > 0 && is_ident_char(prefix[keyword_start - 1]) {
+		keyword_start--
+	}
+	if prefix[keyword_start..keyword_end] in ['enum', 'for', 'if', 'interface', 'match',
+		'struct', 'union'] {
+		return ''
+	}
+	return type_name
 }
 
 fn member_qualifier_at_cursor(line string, cursor_col int, enc PositionEncoding) (string, bool, bool) {
@@ -395,7 +492,11 @@ fn local_declaration_names(code string) []string {
 				}
 			}
 		} else if statement.starts_with('for ') {
-			if in_idx := statement.index(' in ') {
+			mut in_idx := statement.index(' in ') or { -1 }
+			if in_idx < 0 && statement.ends_with(' in') {
+				in_idx = statement.len - 3
+			}
+			if in_idx >= 0 {
 				for name in binding_identifiers(statement[4..in_idx]) {
 					if name !in names {
 						names << name
@@ -434,6 +535,7 @@ fn (app &App) local_scope_completions(content string, position Position) []Detai
 	scopes << parameter_names.clone()
 	mut scan_state := ImportScanState{}
 	mut body_started := false
+	mut pending_block_names := []string{}
 	for line_idx in 0 .. position.line + 1 {
 		raw_line := if line_idx == position.line {
 			byte_col := encoded_col_to_byte(lines[line_idx], position.char, app.position_encoding)
@@ -450,8 +552,13 @@ fn (app &App) local_scope_completions(content string, position Position) []Detai
 			if c != `{` && c != `}` {
 				continue
 			}
+			segment := code[segment_start..col]
+			segment_names := local_declaration_names(segment)
+			loop_header := c == `{` && segment.trim_space().starts_with('for ')
+			block_names := if loop_header { segment_names } else { pending_block_names }
 			if body_started && scopes.len > 0 {
-				for name in local_declaration_names(code[segment_start..col]) {
+				outer_segment_names := if loop_header { []string{} } else { segment_names }
+				for name in outer_segment_names {
 					if name !in scopes.last() {
 						scopes[scopes.len - 1] << name
 					}
@@ -460,18 +567,32 @@ fn (app &App) local_scope_completions(content string, position Position) []Detai
 			if c == `{` {
 				if body_started {
 					scopes << []string{}
+					if block_names.len > 0 {
+						for name in block_names {
+							if name !in scopes.last() {
+								scopes[scopes.len - 1] << name
+							}
+						}
+					}
 				} else {
 					body_started = true
 				}
+				pending_block_names = []string{}
 			} else if body_started && scopes.len > 1 {
 				scopes.delete_last()
 			}
 			segment_start = col + 1
 		}
 		if body_started && scopes.len > 0 {
-			for name in local_declaration_names(code[segment_start..]) {
-				if name !in scopes.last() {
-					scopes[scopes.len - 1] << name
+			tail := code[segment_start..]
+			tail_names := local_declaration_names(tail)
+			if tail.trim_space().starts_with('for ') && tail_names.len > 0 {
+				pending_block_names = tail_names.clone()
+			} else {
+				for name in tail_names {
+					if name !in scopes.last() {
+						scopes[scopes.len - 1] << name
+					}
 				}
 			}
 		}
@@ -951,7 +1072,13 @@ fn (mut app App) indexed_struct_field_completions(uri string, content string, re
 	if dir == '' || type_name == '' || expected_module == '' || !os.is_dir(dir) {
 		return []Detail{}
 	}
+	app.ensure_dir_shallow_indexed(dir)
 	normalized_dir := normalized_index_path(dir)
+	for open_uri, _ in app.open_files {
+		if normalized_index_path(os.dir(uri_to_path(open_uri))) == normalized_dir {
+			app.reindex_uri(open_uri)
+		}
+	}
 	requesting_path := uri_to_path(uri)
 	active_test_name := if !require_public && requesting_path.ends_with('_test.v') {
 		os.file_name(requesting_path)
@@ -4928,7 +5055,7 @@ fn (mut app App) collect_module_fn_completions(current_file_uri string, working_
 
 // collect_module_completions returns all top-level declarations visible within
 // the current module from the persistent, open-buffer-aware source index.
-fn (mut app App) collect_module_completions(current_file_uri string, working_dir string) []Detail {
+fn (mut app App) collect_module_completions(current_file_uri string, working_dir string) IndexedModuleCompletionResult {
 	current_content := app.open_files[current_file_uri] or {
 		os.read_file(uri_to_path(current_file_uri)) or { '' }
 	}
@@ -4948,6 +5075,7 @@ fn (mut app App) collect_module_completions(current_file_uri string, working_dir
 	active_names := app.active_indexed_source_file_names(working_dir, active_test_name)
 	normalized_dir := normalized_index_path(working_dir)
 	mut items := []Detail{}
+	mut has_conditional := false
 	mut indexed_uris := app.symbol_index.keys()
 	indexed_uris.sort()
 	for indexed_uri in indexed_uris {
@@ -4957,9 +5085,15 @@ fn (mut app App) collect_module_completions(current_file_uri string, working_dir
 			|| entry.module_name != current_module {
 			continue
 		}
+		if entry.has_conditional_module_completions {
+			has_conditional = true
+		}
 		items << entry.module_completions
 	}
-	return items
+	return IndexedModuleCompletionResult{
+		items:        items
+		use_compiler: has_conditional
+	}
 }
 
 // parse_module_fn_completions extracts free-function declarations (`pub fn` and `fn`)
