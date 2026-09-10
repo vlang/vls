@@ -2668,7 +2668,7 @@ fn test_source_declaration_at_stops_non_braced_declarations() {
 		cleanup_test_app(app)
 	}
 	uri := 'file:///tmp/source_declaration_fallback.v'
-	content := 'module main\n\nconst (\n\tanswer = 42\n\tother = 7\n)\n\ntype Alias = int\ntype Handler = fn (int) bool\n\nfn next() {}\n\nfn parse(\n\tvalue string, // explanation\n\tradix int,\n) !int {\n}\n'
+	content := 'module main\n\nconst (\n\tanswer = 42\n\tother = 7\n)\n\ntype Alias = int\ntype Handler = fn (int) bool\n\nfn next() {}\n\nfn parse(\n\tvalue string, // explanation\n\t/* { inside comment\n\tcontinued } */\n\tradix int,\n) !int {\n}\n'
 	app.open_files[uri] = content
 
 	constant := app.source_declaration_at(Location{
@@ -2709,9 +2709,9 @@ fn test_source_declaration_at_stops_non_braced_declarations() {
 			}
 		}
 	})
-	assert function == 'fn parse(\nvalue string, // explanation\nradix int,\n) !int'
+	assert function == 'fn parse(\nvalue string, // explanation\n/* { inside comment\ncontinued } */\nradix int,\n) !int'
 	label := declaration_signature_label(function, 'parse')
-	assert label == 'parse(\nvalue string, // explanation\nradix int,\n) !int'
+	assert label == 'parse(\nvalue string, // explanation\n/* { inside comment\ncontinued } */\nradix int,\n) !int'
 	assert signature_parameters(label).len == 2
 }
 

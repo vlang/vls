@@ -135,22 +135,24 @@ fn (app &App) source_declaration_at(location Location) string {
 	if !source_declaration_opens_body(first_mask) {
 		return first_part
 	}
-	mut parts := []string{}
+	starts := line_start_offsets(content)
+	source_mask := v_source_code_mask(content)
 	end_line := if start_line + 16 < lines.len { start_line + 16 } else { lines.len }
-	for i in start_line .. end_line {
-		mut part := lines[i].trim_space()
-		if part == '' {
-			continue
-		}
-		part_mask := v_source_code_mask(part).bytestr()
-		if brace := part_mask.index('{') {
-			part = part[..brace].trim_space()
-			if part != '' {
-				parts << part
-			}
+	start_byte := starts[start_line]
+	end_byte := if end_line < starts.len { starts[end_line] } else { content.len }
+	mut header_end := end_byte
+	for pos in start_byte .. end_byte {
+		if source_mask[pos] == `{` {
+			header_end = pos
 			break
 		}
-		parts << part
+	}
+	mut parts := []string{}
+	for raw_part in content[start_byte..header_end].split_into_lines() {
+		part := raw_part.trim_space()
+		if part != '' {
+			parts << part
+		}
 	}
 	return parts.join('\n').trim_space()
 }
