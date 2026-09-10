@@ -97,9 +97,9 @@ fn (mut output RunOutputBuffer) str() string {
 	return result
 }
 
-// code_lens_source_code_mask keeps code bytes in place while hiding strings and comments.
+// v_source_code_mask keeps code bytes in place while hiding strings and comments.
 // Interpolation expressions remain visible because they can contain compile-time path tokens.
-fn code_lens_source_code_mask(source string) []u8 {
+fn v_source_code_mask(source string) []u8 {
 	mut mask := []u8{len: source.len, init: ` `}
 	mut state := ImportScanState{}
 	mut in_line_comment := false
@@ -236,7 +236,7 @@ fn code_lens_v_string_literal(value string) string {
 // native inputs from the materialized overlay.
 fn code_lens_source_with_original_pseudos(source string, source_path string,
 	temp_source_path string, temp_work_dir string) string {
-	mask := code_lens_source_code_mask(source)
+	mask := v_source_code_mask(source)
 	file_path := os.real_path(source_path)
 	file_dir := os.real_path(os.dir(source_path))
 	relative_temp_path := overlay_relative_path(temp_source_path, temp_work_dir) or {

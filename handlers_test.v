@@ -2578,6 +2578,40 @@ fn test_resolve_indexed_definition_prefers_workspace_vlib() {
 	assert location.range.start.line == 2
 }
 
+fn test_source_call_target_ignores_non_code_delimiters() {
+	literal_line := "foo(')')"
+	literal_target := source_call_target(literal_line, literal_line.len - 1, .utf8) or {
+		assert false, 'expected call target with a parenthesis in a string literal'
+		return
+	}
+	assert literal_target.position.char == 2
+	assert literal_target.active_parameter == 0
+
+	raw_line := "foo(r')')"
+	raw_target := source_call_target(raw_line, raw_line.len - 1, .utf8) or {
+		assert false, 'expected call target with a parenthesis in a raw string literal'
+		return
+	}
+	assert raw_target.position.char == 2
+	assert raw_target.active_parameter == 0
+
+	comment_line := 'foo(/* ) */ value)'
+	comment_target := source_call_target(comment_line, comment_line.len - 1, .utf8) or {
+		assert false, 'expected call target with a parenthesis in a comment'
+		return
+	}
+	assert comment_target.position.char == 2
+	assert comment_target.active_parameter == 0
+
+	comma_line := "foo('last, first', value)"
+	comma_target := source_call_target(comma_line, comma_line.len - 1, .utf8) or {
+		assert false, 'expected call target with a comma in a string literal'
+		return
+	}
+	assert comma_target.position.char == 2
+	assert comma_target.active_parameter == 1
+}
+
 fn test_resolve_indexed_definition_prefers_source_relative_module() {
 	mut app := create_test_app()
 	defer {

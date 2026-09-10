@@ -29,13 +29,14 @@ fn source_call_target(line string, cursor_col int, enc PositionEncoding) ?Source
 	if cursor_byte > line.len {
 		cursor_byte = line.len
 	}
+	mask := v_source_code_mask(line)
 	mut depth := 0
 	mut open_paren := -1
 	mut i := cursor_byte - 1
 	for i >= 0 {
-		if line[i] == `)` {
+		if mask[i] == `)` {
 			depth++
-		} else if line[i] == `(` {
+		} else if mask[i] == `(` {
 			if depth == 0 {
 				open_paren = i
 				break
@@ -61,11 +62,11 @@ fn source_call_target(line string, cursor_col int, enc PositionEncoding) ?Source
 	mut active_parameter := 0
 	depth = 0
 	for j in open_paren + 1 .. cursor_byte {
-		if line[j] in [`(`, `[`, `{`] {
+		if mask[j] in [`(`, `[`, `{`] {
 			depth++
-		} else if line[j] in [`)`, `]`, `}`] && depth > 0 {
+		} else if mask[j] in [`)`, `]`, `}`] && depth > 0 {
 			depth--
-		} else if line[j] == `,` && depth == 0 {
+		} else if mask[j] == `,` && depth == 0 {
 			active_parameter++
 		}
 	}
