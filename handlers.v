@@ -255,6 +255,17 @@ fn starts_binding_scope_header(source string) bool {
 		|| trimmed.starts_with('else if ')
 }
 
+fn binding_scope_header_starts_literal(source string) bool {
+	trimmed := source.trim_space()
+	if !starts_binding_scope_header(trimmed) || trimmed == '' {
+		return false
+	}
+	if trimmed.ends_with(' in') {
+		return true
+	}
+	return trimmed[trimmed.len - 1] in [`=`, `:`, `,`, `(`, `[`]
+}
+
 struct AnonymousFunctionHeader {
 	found           bool
 	complete        bool
@@ -829,8 +840,10 @@ fn (app &App) local_scope_bindings(content string, position Position) []LocalBin
 	mut body_started := false
 	mut pending_block_names := []string{}
 	mut pending_block_line := -1
+	mut pending_block_expects_expression := false
 	mut pending_closure_header := ''
 	mut pending_closure_line := -1
+	mut literal_brace_depth := 0
 	mut active_code_lines := []string{}
 	for line_idx in 0 .. position.line + 1 {
 		raw_line := if line_idx == position.line {
@@ -849,7 +862,29 @@ fn (app &App) local_scope_bindings(content string, position Position) []LocalBin
 			if c != `{` && c != `}` {
 				continue
 			}
+			if literal_brace_depth > 0 {
+				if c == `{` {
+					literal_brace_depth++
+				} else {
+					literal_brace_depth--
+					if literal_brace_depth == 0 {
+						pending_block_expects_expression = false
+					}
+				}
+				continue
+			}
 			segment := code[segment_start..col]
+			if c == `{`
+				&& (binding_scope_header_starts_literal(segment)
+				|| (pending_block_expects_expression && segment.trim_space() == '')) {
+				literal_brace_depth = 1
+				segment_names := local_declaration_names(segment)
+				if segment_names.len > 0 {
+					pending_block_names = segment_names.clone()
+					pending_block_line = line_idx
+				}
+				continue
+			}
 			segment_names := local_declaration_names(segment)
 			binding_scope_header := c == `{` && starts_binding_scope_header(segment)
 			error_scope_header := c == `{` && starts_or_block_header(segment)
@@ -906,6 +941,7 @@ fn (app &App) local_scope_bindings(content string, position Position) []LocalBin
 				}
 				pending_block_names = []string{}
 				pending_block_line = -1
+				pending_block_expects_expression = false
 				pending_closure_header = ''
 				pending_closure_line = -1
 			} else if body_started && scopes.len > 1 {
@@ -919,6 +955,7 @@ fn (app &App) local_scope_bindings(content string, position Position) []LocalBin
 			if starts_binding_scope_header(tail) && tail_names.len > 0 {
 				pending_block_names = tail_names.clone()
 				pending_block_line = line_idx
+				pending_block_expects_expression = binding_scope_header_starts_literal(tail)
 			} else {
 				closure_source := if pending_closure_header != '' {
 					pending_closure_header + '\n' + tail
@@ -5767,7 +5804,10 @@ fn build_fn_snippet(fn_name string, params_str string) string {
 		return fn_name + '()'
 	}
 	// Find closing paren of parameter list.
-	close_idx := params_str.index(')') or { return fn_name + '()' }
+	close_idx := matching_delimiter(params_str, 0, `(`, `)`)
+	if close_idx < 0 {
+		return fn_name + '()'
+	}
 	inner := params_str[1..close_idx].trim_space()
 	if inner == '' {
 		return fn_name + '()'

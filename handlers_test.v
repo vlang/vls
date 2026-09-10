@@ -6315,6 +6315,15 @@ fn test_multiline_function_completion_builds_full_snippet() {
 	assert local_insert == 'build(\${1:required}, \${2:count})$0'
 }
 
+fn test_function_typed_parameter_completion_builds_full_snippet() {
+	module_content := 'module callbacks\n\npub fn apply(callback fn (int) int, value int) int {\n\treturn callback(value)\n}\n'
+	items := parse_module_fn_completions(module_content)
+	apply_items := items.filter(it.label == 'apply')
+	assert apply_items.len == 1
+	insert := apply_items[0].insert_text or { '' }
+	assert insert == 'apply(\${1:callback}, \${2:value})$0'
+}
+
 fn test_struct_literal_completion_includes_indexed_fields() {
 	mut app := create_test_app()
 	defer {
@@ -6589,6 +6598,44 @@ fn test_loop_header_bindings_are_removed_with_loop_scope() {
 	assert 'value' !in after
 	assert 'j' !in after
 	assert 'item' !in after
+}
+
+fn test_loop_header_literal_braces_do_not_change_lexical_scope() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	content := "module main\n\nfn inspect() {\n\tfor key, value in {'x': 1} {\n\t\tvalue\n\t}\n\tkey\n}\n"
+	test_dir := os.join_path(app.temp_dir, 'loop_literal_scope_completion')
+	must_mkdir_all(test_dir)
+	main_file := os.join_path(test_dir, 'main.v')
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	lines := content.split_into_lines()
+	inside_line := lines.index('\t\tvalue')
+	after_line := lines.index('\tkey')
+	assert inside_line >= 0
+	assert after_line >= 0
+	inside := app.local_scope_completions(content, Position{
+		line: inside_line
+		char: lines[inside_line].len
+	}).map(it.label)
+	assert 'key' in inside
+	assert 'value' in inside
+	indexed := app.indexed_completions(uri, Position{
+		line: inside_line
+		char: lines[inside_line].len
+	})
+	assert !indexed.use_compiler
+	assert indexed.items.any(it.label == 'key')
+	assert indexed.items.any(it.label == 'value')
+	after := app.local_scope_completions(content, Position{
+		line: after_line
+		char: lines[after_line].len
+	}).map(it.label)
+	assert 'key' !in after
+	assert 'value' !in after
 }
 
 fn test_conditional_bare_completion_requests_compiler_fallback() {
