@@ -17,8 +17,10 @@ const v_builtins = ['close', 'copy', 'eprintln', 'eprint', 'error', 'error_with_
 	'flush_stderr', 'flush_stdout', 'free', 'isnil', 'panic', 'print', 'println']!
 
 struct IndexedCompletionResult {
-	items        []Detail
-	use_compiler bool
+	items          []Detail
+	use_compiler   bool
+	embedded_types []string
+	resolved_type  bool
 }
 
 struct IndexedMethodSymbolResult {
@@ -958,6 +960,10 @@ fn callable_or_constructor(rhs string) (string, bool) {
 		}
 		is_constructor := rhs[col] == `{`
 		if is_constructor {
+			prefix := rhs[..start].trim_space()
+			if prefix !in ['', '&'] {
+				return '', false
+			}
 			type_name := name.all_after_last('.')
 			if type_name == '' || !(type_name[0] >= `A` && type_name[0] <= `Z`) {
 				col++
@@ -1428,7 +1434,36 @@ fn field_completion_from_symbol(lines []string, code_lines []string, symbol Docu
 	}
 }
 
+fn embedded_struct_type(code_line string) string {
+	fields := code_line.trim_space().fields()
+	if fields.len == 0 || (fields.len > 1 && !fields[1].starts_with('@[')) {
+		return ''
+	}
+	type_name := normalize_receiver_type(fields[0]).all_after_last('.')
+	if type_name == '' || !(type_name[0] >= `A` && type_name[0] <= `Z`) {
+		return ''
+	}
+	return fields[0]
+}
+
+fn qualify_embedded_receiver_type(receiver_type string, embedded_type string) string {
+	embedded := normalize_receiver_type(embedded_type)
+	if embedded.contains('.') {
+		return embedded
+	}
+	parent := normalize_receiver_type(receiver_type)
+	if parent.contains('.') {
+		return '${parent.all_before_last('.')}.${embedded}'
+	}
+	return embedded
+}
+
 fn (mut app App) indexed_struct_field_completions(uri string, content string, receiver_type string) IndexedCompletionResult {
+	mut visited := map[string]bool{}
+	return app.indexed_struct_field_completions_visited(uri, content, receiver_type, mut visited)
+}
+
+fn (mut app App) indexed_struct_field_completions_visited(uri string, content string, receiver_type string, mut visited map[string]bool) IndexedCompletionResult {
 	dir, type_name, require_public, expected_module := app.receiver_type_scope(uri, content,
 		receiver_type)
 	if dir == '' || type_name == '' || expected_module == '' || !os.is_dir(dir) {
@@ -1436,6 +1471,13 @@ fn (mut app App) indexed_struct_field_completions(uri string, content string, re
 	}
 	app.ensure_dir_shallow_indexed(dir)
 	normalized_dir := normalized_index_path(dir)
+	visited_key := '${normalized_dir}|${expected_module}|${type_name}'
+	if visited_key in visited {
+		return IndexedCompletionResult{
+			resolved_type: true
+		}
+	}
+	visited[visited_key] = true
 	for open_uri, _ in app.open_files {
 		if normalized_index_path(os.dir(uri_to_path(open_uri))) == normalized_dir {
 			app.reindex_uri(open_uri)
@@ -1449,7 +1491,11 @@ fn (mut app App) indexed_struct_field_completions(uri string, content string, re
 	}
 	active_names := app.active_indexed_source_file_names(dir, active_test_name)
 	mut items := []Detail{}
+	mut seen_items := map[string]bool{}
+	mut embedded_types := []string{}
 	mut has_conditional := false
+	mut has_unresolved_embedded := false
+	mut resolved_type := false
 	mut indexed_uris := app.symbol_index.keys()
 	indexed_uris.sort()
 	for indexed_uri in indexed_uris {
@@ -1473,20 +1519,52 @@ fn (mut app App) indexed_struct_field_completions(uri string, content string, re
 			if require_public && !source_declaration_is_public(indexed_uri, symbol, app) {
 				continue
 			}
+			resolved_type = true
 			for field in symbol.children {
 				if field.kind != sym_kind_field
 					|| (require_public && !struct_field_is_public(code_lines, symbol, field)) {
 					continue
 				}
+				if field.range.start.line >= 0 && field.range.start.line < code_lines.len {
+					embedded_source_type := embedded_struct_type(code_lines[field.range.start.line])
+					if embedded_source_type != '' {
+						embedded_type := qualify_embedded_receiver_type(receiver_type,
+							embedded_source_type)
+						if embedded_type !in embedded_types {
+							embedded_types << embedded_type
+						}
+						promoted := app.indexed_struct_field_completions_visited(uri, content,
+							embedded_type, mut visited)
+						has_conditional = has_conditional || promoted.use_compiler
+						has_unresolved_embedded = has_unresolved_embedded || !promoted.resolved_type
+						for promoted_type in promoted.embedded_types {
+							if promoted_type !in embedded_types {
+								embedded_types << promoted_type
+							}
+						}
+						for detail in promoted.items {
+							if detail.label !in seen_items {
+								items << detail
+								seen_items[detail.label] = true
+							}
+						}
+						continue
+					}
+				}
 				if detail := field_completion_from_symbol(source_lines, code_lines, field) {
-					items << detail
+					if detail.label !in seen_items {
+						items << detail
+						seen_items[detail.label] = true
+					}
 				}
 			}
 		}
 	}
 	return IndexedCompletionResult{
-		items:        items
-		use_compiler: has_conditional
+		items:          items
+		use_compiler:   has_conditional || has_unresolved_embedded
+		embedded_types: embedded_types
+		resolved_type:  resolved_type
 	}
 }
 
@@ -1497,32 +1575,42 @@ fn (mut app App) indexed_receiver_completions(uri string, content string, receiv
 			use_compiler: true
 		}
 	}
-	// indexed_method_symbols prepares the source index used for both member kinds.
-	method_result := app.indexed_method_symbols(uri, content, receiver_type, '')
 	field_result := app.indexed_struct_field_completions(uri, content, receiver_type)
 	mut items := field_result.items.clone()
 	mut seen := map[string]bool{}
 	for item in items {
 		seen[item.label] = true
 	}
-	for location in method_result.locations {
-		entry := app.symbol_index[location.uri] or { continue }
-		source := app.index_source_for(location.uri) or { continue }
-		for symbol in entry.doc_symbols {
-			if symbol.kind != sym_kind_method || symbol.range.start.line != location.range.start.line {
-				continue
-			}
-			if detail := method_completion_from_symbol(source, symbol) {
-				if detail.label !in seen {
-					items << detail
-					seen[detail.label] = true
+	mut receiver_types := [receiver_type]
+	for embedded_type in field_result.embedded_types {
+		if embedded_type !in receiver_types {
+			receiver_types << embedded_type
+		}
+	}
+	mut methods_use_compiler := false
+	for member_type in receiver_types {
+		method_result := app.indexed_method_symbols(uri, content, member_type, '')
+		methods_use_compiler = methods_use_compiler || method_result.use_compiler
+		for location in method_result.locations {
+			entry := app.symbol_index[location.uri] or { continue }
+			source := app.index_source_for(location.uri) or { continue }
+			for symbol in entry.doc_symbols {
+				if symbol.kind != sym_kind_method
+					|| symbol.range.start.line != location.range.start.line {
+					continue
+				}
+				if detail := method_completion_from_symbol(source, symbol) {
+					if detail.label !in seen {
+						items << detail
+						seen[detail.label] = true
+					}
 				}
 			}
 		}
 	}
 	return IndexedCompletionResult{
 		items:        items
-		use_compiler: field_result.use_compiler || method_result.use_compiler || items.len == 0
+		use_compiler: field_result.use_compiler || methods_use_compiler || items.len == 0
 	}
 }
 

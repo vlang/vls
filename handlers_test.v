@@ -5753,6 +5753,56 @@ fn test_literal_and_container_receiver_completion_falls_back_to_compiler() {
 	}
 }
 
+fn test_typed_container_receiver_does_not_infer_nested_struct_type() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+
+	test_dir := os.join_path(app.temp_dir, 'typed_container_receiver_fallback')
+	must_mkdir_all(test_dir)
+	main_file := os.join_path(test_dir, 'main.v')
+	cases := [
+		'users := []User{}',
+		'users := [User{}]',
+	]
+	for declaration in cases {
+		content := 'module main\n\nstruct User {\n\tname string\n}\nfn (user User) save() {}\n\nfn main() {\n\t${declaration}\n\tusers.\n}\n'
+		must_write_file(main_file, content)
+		uri := path_to_uri(main_file)
+		app.open_files[uri] = content
+		lines := content.split_into_lines()
+		completion_line := lines.index('\tusers.')
+		assert completion_line >= 0
+		assert app.infer_receiver_type(uri, content, 'users', completion_line) == '', declaration
+		indexed := app.indexed_completions(uri, Position{
+			line: completion_line
+			char: lines[completion_line].len
+		})
+		assert indexed.use_compiler, declaration
+		assert !indexed.items.any(it.label in ['name', 'save']), declaration
+		response := app.operation_at_pos(.completion, Request{
+			id:     9350
+			method: 'textDocument/completion'
+			params: json2.encode(TextDocumentPositionParams{
+				text_document: TextDocumentIdentifier{
+					uri: uri
+				}
+				position:      Position{
+					line: completion_line
+					char: lines[completion_line].len
+				}
+			},
+				escape_unicode: true
+			)
+		})
+		assert response.result is CompletionList
+		labels := (response.result as CompletionList).items.map(it.label)
+		assert labels.len > 0, declaration
+		assert !labels.any(it in ['name', 'save']), declaration
+	}
+}
+
 fn test_receiver_completion_honors_local_binding_that_shadows_import() {
 	mut app := create_test_app()
 	defer {
@@ -6047,6 +6097,59 @@ fn test_generic_struct_receiver_completion_includes_fields() {
 	assert !indexed.use_compiler
 	assert 'value' in labels
 	assert 'reset' in labels
+}
+
+fn test_embedded_struct_receiver_completion_includes_promoted_members() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+
+	test_dir := os.join_path(app.temp_dir, 'embedded_struct_receiver_completion')
+	must_mkdir_all(test_dir)
+	main_file := os.join_path(test_dir, 'main.v')
+	content := 'module main\n\nstruct Base {\n\tpromoted_field string\n}\nfn (base Base) promoted_method() {}\n\nstruct Child {\n\tBase\n\town_field int\n}\nfn (child Child) child_method() {}\n\nfn inspect(child Child) {\n\tchild.\n}\n'
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	lines := content.split_into_lines()
+	completion_line := lines.index('\tchild.')
+	assert completion_line >= 0
+	position := Position{
+		line: completion_line
+		char: lines[completion_line].len
+	}
+	fields := app.indexed_struct_field_completions(uri, content, 'Child')
+	assert !fields.use_compiler
+	assert fields.items.any(it.label == 'own_field')
+	assert fields.items.any(it.label == 'promoted_field')
+	assert !fields.items.any(it.label == 'Base')
+	indexed := app.indexed_completions(uri, position)
+	assert !indexed.use_compiler
+	assert indexed.items.any(it.label == 'own_field')
+	assert indexed.items.any(it.label == 'promoted_field')
+	assert indexed.items.any(it.label == 'child_method')
+	assert indexed.items.any(it.label == 'promoted_method')
+	assert !indexed.items.any(it.label == 'Base')
+
+	response := app.operation_at_pos(.completion, Request{
+		id:     9700
+		method: 'textDocument/completion'
+		params: json2.encode(TextDocumentPositionParams{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			position:      position
+		},
+			escape_unicode: true
+		)
+	})
+	assert response.result is CompletionList
+	labels := (response.result as CompletionList).items.map(it.label)
+	assert 'promoted_field' in labels
+	assert 'promoted_method' in labels
+	assert 'own_field' in labels
+	assert 'child_method' in labels
 }
 
 fn test_struct_field_completion_excludes_attributes() {
