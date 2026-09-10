@@ -2580,7 +2580,9 @@ fn test_resolve_indexed_definition_prefers_workspace_vlib() {
 
 fn test_source_call_target_ignores_non_code_delimiters() {
 	literal_line := "foo(')')"
-	literal_target := source_call_target(literal_line, literal_line.len - 1, .utf8) or {
+	literal_target := source_call_target(literal_line, Position{
+		char: literal_line.len - 1
+	}, .utf8) or {
 		assert false, 'expected call target with a parenthesis in a string literal'
 		return
 	}
@@ -2588,7 +2590,9 @@ fn test_source_call_target_ignores_non_code_delimiters() {
 	assert literal_target.active_parameter == 0
 
 	raw_line := "foo(r')')"
-	raw_target := source_call_target(raw_line, raw_line.len - 1, .utf8) or {
+	raw_target := source_call_target(raw_line, Position{
+		char: raw_line.len - 1
+	}, .utf8) or {
 		assert false, 'expected call target with a parenthesis in a raw string literal'
 		return
 	}
@@ -2596,7 +2600,9 @@ fn test_source_call_target_ignores_non_code_delimiters() {
 	assert raw_target.active_parameter == 0
 
 	comment_line := 'foo(/* ) */ value)'
-	comment_target := source_call_target(comment_line, comment_line.len - 1, .utf8) or {
+	comment_target := source_call_target(comment_line, Position{
+		char: comment_line.len - 1
+	}, .utf8) or {
 		assert false, 'expected call target with a parenthesis in a comment'
 		return
 	}
@@ -2604,12 +2610,106 @@ fn test_source_call_target_ignores_non_code_delimiters() {
 	assert comment_target.active_parameter == 0
 
 	comma_line := "foo('last, first', value)"
-	comma_target := source_call_target(comma_line, comma_line.len - 1, .utf8) or {
+	comma_target := source_call_target(comma_line, Position{
+		char: comma_line.len - 1
+	}, .utf8) or {
 		assert false, 'expected call target with a comma in a string literal'
 		return
 	}
 	assert comma_target.position.char == 2
 	assert comma_target.active_parameter == 1
+}
+
+fn test_source_call_target_handles_multiline_and_generic_calls() {
+	generic_line := 'convert[int](value)'
+	generic_target := source_call_target(generic_line, Position{
+		char: generic_line.len - 1
+	}, .utf8) or {
+		assert false, 'expected call target before explicit generic arguments'
+		return
+	}
+	assert generic_target.position == Position{
+		line: 0
+		char: 2
+	}
+
+	multiline := "fn main() {\n\tfoo(\n\t\tfirst,\n\t\t'last, )'\n\t)\n}"
+	cursor_line := "\t\t'last, )'"
+	multiline_target := source_call_target(multiline, Position{
+		line: 3
+		char: cursor_line.len
+	}, .utf8) or {
+		assert false, 'expected call target on a preceding line'
+		return
+	}
+	assert multiline_target.position == Position{
+		line: 1
+		char: 3
+	}
+	assert multiline_target.active_parameter == 1
+}
+
+fn test_declaration_signature_label_keeps_generics_and_return_type() {
+	declaration := 'pub fn convert[T](value T) !T'
+	assert declaration_signature_label(declaration, 'convert') == 'convert[T](value T) !T'
+	assert declaration_signature_label('fn parse(value string) ?int', 'parse') == 'parse(value string) ?int'
+}
+
+fn test_signature_parameters_split_only_top_level_commas() {
+	parameters := signature_parameters('apply(cb fn (int, string), value int) !bool')
+	assert parameters.len == 2
+	assert parameters[0].label == 'cb fn (int, string)'
+	assert parameters[1].label == 'value int'
+}
+
+fn test_source_declaration_at_stops_non_braced_declarations() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	uri := 'file:///tmp/source_declaration_fallback.v'
+	content := 'module main\n\nconst (\n\tanswer = 42\n\tother = 7\n)\n\ntype Alias = int\ntype Handler = fn (int) bool\n\nfn next() {}\n\nfn parse(\n\tvalue string,\n) !int {\n}\n'
+	app.open_files[uri] = content
+
+	constant := app.source_declaration_at(Location{
+		uri: uri
+		range: LSPRange{
+			start: Position{
+				line: 3
+			}
+		}
+	})
+	assert constant == 'answer = 42'
+
+	alias := app.source_declaration_at(Location{
+		uri: uri
+		range: LSPRange{
+			start: Position{
+				line: 7
+			}
+		}
+	})
+	assert alias == 'type Alias = int'
+
+	function_alias := app.source_declaration_at(Location{
+		uri: uri
+		range: LSPRange{
+			start: Position{
+				line: 8
+			}
+		}
+	})
+	assert function_alias == 'type Handler = fn (int) bool'
+
+	function := app.source_declaration_at(Location{
+		uri: uri
+		range: LSPRange{
+			start: Position{
+				line: 12
+			}
+		}
+	})
+	assert function == 'fn parse( value string, ) !int'
 }
 
 fn test_resolve_indexed_definition_prefers_source_relative_module() {

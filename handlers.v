@@ -21,19 +21,22 @@ struct SourceCallTarget {
 	active_parameter int
 }
 
-// source_call_target finds the function identifier for the call containing the
-// cursor. It is used only when the compiler's signature-help query has no
-// payload, so keep the scan bounded to the current source line.
-fn source_call_target(line string, cursor_col int, enc PositionEncoding) ?SourceCallTarget {
-	mut cursor_byte := encoded_col_to_byte(line, cursor_col, enc)
-	if cursor_byte > line.len {
-		cursor_byte = line.len
+// source_call_target finds the function identifier for the call containing the cursor.
+// It is used only when the compiler's signature-help query has no payload, so the
+// backward scan is bounded to the preceding 32 source lines.
+fn source_call_target(content string, cursor Position, enc PositionEncoding) ?SourceCallTarget {
+	starts := line_start_offsets(content)
+	if cursor.line < 0 || cursor.line >= starts.len || cursor.char < 0 {
+		return none
 	}
-	mask := v_source_code_mask(line)
+	cursor_byte := position_to_byte_offset(content, starts, cursor.line, cursor.char, enc)
+	mask := v_source_code_mask(content)
+	first_line := if cursor.line > 32 { cursor.line - 32 } else { 0 }
+	scan_start := starts[first_line]
 	mut depth := 0
 	mut open_paren := -1
 	mut i := cursor_byte - 1
-	for i >= 0 {
+	for i >= scan_start {
 		if mask[i] == `)` {
 			depth++
 		} else if mask[i] == `(` {
@@ -49,11 +52,35 @@ fn source_call_target(line string, cursor_col int, enc PositionEncoding) ?Source
 		return none
 	}
 	mut name_end := open_paren
-	for name_end > 0 && line[name_end - 1].is_space() {
+	for name_end > scan_start && content[name_end - 1].is_space() {
 		name_end--
 	}
+	if name_end > scan_start && mask[name_end - 1] == `]` {
+		mut generic_depth := 0
+		mut generic_start := -1
+		mut generic_pos := name_end - 1
+		for generic_pos >= scan_start {
+			if mask[generic_pos] == `]` {
+				generic_depth++
+			} else if mask[generic_pos] == `[` {
+				generic_depth--
+				if generic_depth == 0 {
+					generic_start = generic_pos
+					break
+				}
+			}
+			generic_pos--
+		}
+		if generic_start < 0 {
+			return none
+		}
+		name_end = generic_start
+		for name_end > scan_start && content[name_end - 1].is_space() {
+			name_end--
+		}
+	}
 	mut name_start := name_end
-	for name_start > 0 && is_ident_char(line[name_start - 1]) {
+	for name_start > scan_start && is_ident_char(content[name_start - 1]) {
 		name_start--
 	}
 	if name_start == name_end {
@@ -70,10 +97,21 @@ fn source_call_target(line string, cursor_col int, enc PositionEncoding) ?Source
 			active_parameter++
 		}
 	}
-	probe_byte := if name_end - name_start > 2 { name_start + 2 } else { name_start }
+	mut target_line := cursor.line
+	for target_line > first_line && starts[target_line] > name_start {
+		target_line--
+	}
+	target_line_text := line_text_without_terminator(content, starts, target_line)
+	name_start_in_line := name_start - starts[target_line]
+	probe_byte := if name_end - name_start > 2 {
+		name_start_in_line + 2
+	} else {
+		name_start_in_line
+	}
 	return SourceCallTarget{
 		position: Position{
-			char: byte_to_encoded_col(line, probe_byte, enc)
+			line: target_line
+			char: byte_to_encoded_col(target_line_text, probe_byte, enc)
 		}
 		active_parameter: active_parameter
 	}
@@ -89,6 +127,14 @@ fn (app &App) source_declaration_at(location Location) string {
 	if start_line < 0 || start_line >= lines.len {
 		return ''
 	}
+	first_part := lines[start_line].trim_space()
+	if first_part == '' {
+		return ''
+	}
+	first_mask := v_source_code_mask(first_part)
+	if !source_declaration_opens_body(first_mask) {
+		return first_part
+	}
 	mut parts := []string{}
 	end_line := if start_line + 16 < lines.len { start_line + 16 } else { lines.len }
 	for i in start_line .. end_line {
@@ -96,7 +142,8 @@ fn (app &App) source_declaration_at(location Location) string {
 		if part == '' {
 			continue
 		}
-		if brace := part.index('{') {
+		part_mask := v_source_code_mask(part).bytestr()
+		if brace := part_mask.index('{') {
 			part = part[..brace].trim_space()
 			if part != '' {
 				parts << part
@@ -108,32 +155,144 @@ fn (app &App) source_declaration_at(location Location) string {
 	return parts.join(' ').trim_space()
 }
 
+fn source_declaration_opens_body(mask []u8) bool {
+	mut pos := 0
+	for pos < mask.len {
+		for pos < mask.len && mask[pos].is_space() {
+			pos++
+		}
+		if pos + 1 < mask.len && mask[pos] == `@` && mask[pos + 1] == `[` {
+			mut depth := 1
+			pos += 2
+			for pos < mask.len && depth > 0 {
+				if mask[pos] == `[` {
+					depth++
+				} else if mask[pos] == `]` {
+					depth--
+				}
+				pos++
+			}
+			continue
+		}
+		if pos >= mask.len || !is_ident_start(mask[pos]) {
+			return false
+		}
+		start := pos
+		for pos < mask.len && is_ident_char(mask[pos]) {
+			pos++
+		}
+		keyword := mask[start..pos].bytestr()
+		if keyword in ['pub', 'unsafe'] {
+			continue
+		}
+		return keyword in ['fn', 'struct', 'enum', 'interface', 'union']
+	}
+	return false
+}
+
 fn declaration_signature_label(declaration string, name string) string {
-	start := declaration.index('${name}(') or { return '' }
-	mut depth := 0
-	for i in start + name.len .. declaration.len {
-		if declaration[i] == `(` {
-			depth++
-		} else if declaration[i] == `)` {
-			depth--
-			if depth == 0 {
-				return declaration[start..i + 1]
+	if name == '' {
+		return ''
+	}
+	mask := v_source_code_mask(declaration)
+	mut search_start := 0
+	for search_start + name.len <= declaration.len {
+		relative_start := declaration[search_start..].index(name) or { return '' }
+		start := search_start + relative_start
+		name_end := start + name.len
+		if (start == 0 || !is_ident_char(mask[start - 1]))
+			&& (name_end == declaration.len || !is_ident_char(mask[name_end])) {
+			mut open_paren := name_end
+			for open_paren < declaration.len && mask[open_paren].is_space() {
+				open_paren++
+			}
+			if open_paren < declaration.len && mask[open_paren] == `[` {
+				mut generic_depth := 0
+				for open_paren < declaration.len {
+					if mask[open_paren] == `[` {
+						generic_depth++
+					} else if mask[open_paren] == `]` {
+						generic_depth--
+						if generic_depth == 0 {
+							open_paren++
+							break
+						}
+					}
+					open_paren++
+				}
+				for open_paren < declaration.len && mask[open_paren].is_space() {
+					open_paren++
+				}
+			}
+			if open_paren < declaration.len && mask[open_paren] == `(` {
+				mut paren_depth := 0
+				mut close_paren := -1
+				for i in open_paren .. declaration.len {
+					if mask[i] == `(` {
+						paren_depth++
+					} else if mask[i] == `)` {
+						paren_depth--
+						if paren_depth == 0 {
+							close_paren = i
+							break
+						}
+					}
+				}
+				if close_paren < 0 {
+					return ''
+				}
+				mut end := declaration.len
+				for i in close_paren + 1 .. declaration.len {
+					if mask[i] == `{` {
+						end = i
+						break
+					}
+				}
+				return declaration[start..end].trim_space()
 			}
 		}
+		search_start = name_end
 	}
 	return ''
 }
 
 fn signature_parameters(label string) []ParameterInformation {
-	open_paren := label.index('(') or { return [] }
-	close_paren := label.last_index(')') or { return [] }
+	mask := v_source_code_mask(label)
+	open_paren := mask.bytestr().index('(') or { return [] }
+	mut close_paren := -1
+	mut paren_depth := 0
+	for i in open_paren .. label.len {
+		if mask[i] == `(` {
+			paren_depth++
+		} else if mask[i] == `)` {
+			paren_depth--
+			if paren_depth == 0 {
+				close_paren = i
+				break
+			}
+		}
+	}
 	if close_paren <= open_paren + 1 {
 		return []
 	}
 	mut parameters := []ParameterInformation{}
-	for parameter in label[open_paren + 1..close_paren].split(',') {
+	mut parameter_start := open_paren + 1
+	mut depth := 0
+	for i in open_paren + 1 .. close_paren {
+		if mask[i] in [`(`, `[`, `{`] {
+			depth++
+		} else if mask[i] in [`)`, `]`, `}`] && depth > 0 {
+			depth--
+		} else if mask[i] == `,` && depth == 0 {
+			parameters << ParameterInformation{
+				label: label[parameter_start..i].trim_space()
+			}
+			parameter_start = i + 1
+		}
+	}
+	if parameter_start < close_paren {
 		parameters << ParameterInformation{
-			label: parameter.trim_space()
+			label: label[parameter_start..close_paren].trim_space()
 		}
 	}
 	return parameters
@@ -157,17 +316,10 @@ fn (mut app App) source_hover_fallback(uri string, position Position) ?Hover {
 
 fn (mut app App) source_signature_fallback(uri string, position Position) ?SignatureHelp {
 	content := app.index_source_for(uri) or { return none }
-	lines := content.split_into_lines()
-	if position.line < 0 || position.line >= lines.len {
+	target := source_call_target(content, position, app.position_encoding) or {
 		return none
 	}
-	target := source_call_target(lines[position.line], position.char, app.position_encoding) or {
-		return none
-	}
-	target_position := Position{
-		line: position.line
-		char: target.position.char
-	}
+	target_position := target.position
 	name := app.get_word_at_position(uri, target_position.line, target_position.char)
 	if name == '' {
 		return none
