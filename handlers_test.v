@@ -5200,6 +5200,20 @@ fn test_import_completions_local_module() {
 	assert local_results[0].insert_text or { '' } == 'mymod'
 }
 
+fn parse_module_member_completions(content string, public_only bool) ParsedModuleCompletionIndex {
+	return parse_module_member_completions_from_lines(source_code_lines(content), compile_time_conditional_lines(content), public_only)
+}
+
+fn source_declaration_is_compile_time_conditional(content string, declaration_line int) bool {
+	conditional_lines := compile_time_conditional_lines(content)
+	return declaration_line >= 0 && declaration_line < conditional_lines.len
+		&& conditional_lines[declaration_line]
+}
+
+fn parse_module_fn_completions(content string) []Detail {
+	return parse_module_member_completions(content, false).items.filter(it.kind == 3)
+}
+
 fn test_parse_module_fn_completions_basic() {
 	content := 'module main\n\npub fn helper(name string) string {\n\treturn name\n}\n\nfn private_fn() {}\n'
 	items := parse_module_fn_completions(content)
@@ -6222,7 +6236,7 @@ fn test_conditional_module_types_delegate_completion_to_compiler() {
 	assert 'AttributeType' !in labels
 }
 
-fn test_chained_member_qualifier_does_not_resolve_import_alias() {
+fn test_chained_member_completion_resolves_nested_struct_type() {
 	mut app := create_test_app()
 	defer {
 		cleanup_test_app(app)
@@ -6233,7 +6247,7 @@ fn test_chained_member_qualifier_does_not_resolve_import_alias() {
 	must_mkdir_all(module_dir)
 	must_write_file(os.join_path(module_dir, 'clock.v'), 'module clock\n\npub fn module_member() {}\n')
 	main_file := os.join_path(test_dir, 'main.v')
-	content := 'module main\n\nimport clock\n\nstruct ClockValue {}\nfn (value ClockValue) tick() {}\nstruct AppState {\n\tclock ClockValue\n}\n\nfn main() {\n\tapp := AppState{}\n\tapp.clock.\n}\n'
+	content := 'module main\n\nimport clock\n\nstruct ClockValue {}\nfn (value ClockValue) tick() {}\nstruct AppState {\n\tclock ClockValue\n}\n\nfn main() {\n\tapp := AppState{}\n\tapp.clock.\n\tapp.clock.tick()\n}\n'
 	must_write_file(main_file, content)
 	uri := path_to_uri(main_file)
 	app.open_files[uri] = content
@@ -6243,14 +6257,63 @@ fn test_chained_member_qualifier_does_not_resolve_import_alias() {
 
 	qualifier, has_member_access, standalone := member_qualifier_at_cursor(lines[completion_line], lines[completion_line].len, app.position_encoding)
 	assert has_member_access
-	assert qualifier == 'clock'
+	assert qualifier == 'app.clock'
 	assert !standalone
 	indexed := app.indexed_completions(uri, Position{
 		line: completion_line
 		char: lines[completion_line].len
 	})
-	assert indexed.use_compiler
+	assert !indexed.use_compiler
+	assert indexed.items.any(it.label == 'tick')
 	assert !indexed.items.any(it.label == 'module_member')
+	definition_line := lines.index('\tapp.clock.tick()')
+	assert definition_line >= 0
+	tick_col := lines[definition_line].index('tick') or { -1 }
+	definition := app.resolve_indexed_definition(uri, Position{
+		line: definition_line
+		char: tick_col + 2
+	}) or {
+		assert false, 'expected nested receiver method definition'
+		return
+	}
+	assert definition.uri == uri
+	assert definition.range.start.line == lines.index('fn (value ClockValue) tick() {}')
+}
+
+fn test_chained_member_completion_resolves_field_type_imported_by_parent_module() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+
+	root := os.join_path(app.temp_dir, 'nested_imported_field_completion')
+	devices_dir := os.join_path(root, 'devices')
+	models_dir := os.join_path(root, 'models')
+	must_mkdir_all(devices_dir)
+	must_mkdir_all(models_dir)
+	must_write_file(os.join_path(root, 'v.mod'), "Module {\n\tname: 'nested_fields'\n}\n")
+	device_file := os.join_path(devices_dir, 'devices.v')
+	must_write_file(device_file, 'module devices\n\npub struct Cpu {\npub:\n\tcores int\n}\n\npub fn (cpu Cpu) usage() int {\n\treturn 0\n}\n')
+	must_write_file(os.join_path(models_dir, 'models.v'), 'module models\n\nimport devices\n\npub struct AppState {\npub:\n\tcpu devices.Cpu\n}\n')
+	main_file := os.join_path(root, 'main.v')
+	content := 'module main\n\nimport models\n\nfn main() {\n\tapp := models.AppState{}\n\tapp.cpu.\n}\n'
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	app.workspace_roots = [root]
+	lines := content.split_into_lines()
+	completion_line := lines.index('\tapp.cpu.')
+	assert completion_line >= 0
+	position := Position{
+		line: completion_line
+		char: lines[completion_line].len
+	}
+
+	assert app.infer_receiver_type_at_position(uri, content, 'app.cpu', position) == 'devices.Cpu'
+	indexed := app.indexed_completions(uri, position)
+	assert !indexed.use_compiler
+	assert indexed.items.any(it.label == 'cores' && it.kind == 5)
+	assert indexed.items.any(it.label == 'usage' && it.kind == 2)
 }
 
 fn test_multi_binding_receiver_uses_corresponding_rhs() {
@@ -7009,7 +7072,7 @@ fn test_receiver_definition_ignores_closed_import_shadow() {
 	assert outside.range.start.line == 2
 }
 
-fn test_chained_definition_does_not_resolve_final_field_as_import_alias() {
+fn test_chained_definition_resolves_nested_receiver_not_import_alias() {
 	mut app := create_test_app()
 	defer {
 		cleanup_test_app(app)
@@ -7034,9 +7097,12 @@ fn test_chained_definition_does_not_resolve_final_field_as_import_alias() {
 		line: call_line
 		char: start_col + 2
 	}
-	if location := app.resolve_indexed_definition(uri, position) {
-		assert false, 'chained field resolved to ${location.uri}'
+	indexed_location := app.resolve_indexed_definition(uri, position) or {
+		assert false, 'expected indexed nested receiver definition'
+		return
 	}
+	assert indexed_location.uri == uri
+	assert indexed_location.range.start.line == lines.index('fn (timer Timer) start() {}')
 	definition := app.operation_at_pos(.definition, Request{
 		id: 9602
 		method: 'textDocument/definition'

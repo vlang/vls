@@ -27,6 +27,7 @@ struct IndexEntry {
 	public_module_completions          []Detail // exported completion items for imported modules
 	has_conditional_module_completions bool
 	has_conditional_public_completions bool
+	conditional_lines                  []bool // declarations guarded by $if/$else or @[if]
 }
 
 // build_index_entry parses `content` into an IndexEntry. Symbol ranges are
@@ -35,8 +36,10 @@ struct IndexEntry {
 fn build_index_entry(content string, enc PositionEncoding) IndexEntry {
 	lines := content.split_into_lines()
 	doc_syms := encode_document_symbols(parse_document_symbols(content), lines, enc)
-	module_completion_index := parse_module_member_completions(content, false)
-	public_module_completion_index := parse_module_member_completions(content, true)
+	code_lines := source_code_lines(content)
+	conditional_lines := compile_time_conditional_lines(content)
+	module_completion_index := parse_module_member_completions_from_lines(code_lines, conditional_lines, false)
+	public_module_completion_index := parse_module_member_completions_from_lines(code_lines, conditional_lines, true)
 	mut docs := map[string]string{}
 	for sym in doc_syms {
 		// Each symbol's declaration line is range.start.line; read its vdoc.
@@ -53,11 +56,12 @@ fn build_index_entry(content string, enc PositionEncoding) IndexEntry {
 		module_name: get_module_name(content)
 		doc_symbols: doc_syms
 		docs: docs
-		fn_completions: parse_module_fn_completions(content)
+		fn_completions: module_completion_index.items.filter(it.kind == 3)
 		module_completions: module_completion_index.items
 		public_module_completions: public_module_completion_index.items
 		has_conditional_module_completions: module_completion_index.has_conditional
 		has_conditional_public_completions: public_module_completion_index.has_conditional
+		conditional_lines: conditional_lines
 	}
 }
 

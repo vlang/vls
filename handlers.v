@@ -24,11 +24,13 @@ struct IndexedCompletionResult {
 	items          []Detail
 	use_compiler   bool
 	embedded_types []string
+	field_types    map[string]string
 	resolved_type  bool
 }
 
 struct IndexedMethodSymbolResult {
 	locations    []Location
+	items        []Detail
 	use_compiler bool
 }
 
@@ -988,13 +990,28 @@ fn member_qualifier_at_cursor(line string, cursor_col int, enc PositionEncoding)
 		return '', false, false
 	}
 	dot_byte := member_start - 1
-	dot_col := byte_to_encoded_col(line, dot_byte, enc)
-	qualifier := get_word_before_dot(line, dot_col, enc)
-	mut qualifier_start := dot_byte - qualifier.len
-	if qualifier_start < 0 {
-		qualifier_start = 0
+	mut receiver_start := dot_byte
+	mut scan_end := dot_byte
+	mut has_parent_access := false
+	for scan_end > 0 {
+		mut identifier_start := scan_end
+		for identifier_start > 0 && is_ident_char(line[identifier_start - 1]) {
+			identifier_start--
+		}
+		if identifier_start == scan_end {
+			break
+		}
+		receiver_start = identifier_start
+		if identifier_start == 0 || line[identifier_start - 1] != `.` {
+			break
+		}
+		has_parent_access = true
+		scan_end = identifier_start - 1
 	}
-	return qualifier, true, qualifier_start == 0 || line[qualifier_start - 1] != `.`
+	if receiver_start == dot_byte {
+		return '', false, false
+	}
+	return line[receiver_start..dot_byte], true, !has_parent_access
 }
 
 fn binding_identifiers(text string) []string {
@@ -1726,7 +1743,23 @@ fn (mut app App) infer_receiver_type(uri string, content string, receiver string
 	})
 }
 
-fn (mut app App) infer_receiver_type_at_position(uri string, content string, receiver string, use_position Position) string {
+fn (mut app App) infer_receiver_type_at_position(uri string, content string, receiver_expression string, use_position Position) string {
+	parts := receiver_expression.split('.')
+	if parts.len == 0 || parts.any(it == '') {
+		return ''
+	}
+	mut receiver_type := app.infer_bound_receiver_type_at_position(uri, content, parts[0], use_position)
+	if receiver_type == '' {
+		return ''
+	}
+	for field_name in parts[1..] {
+		fields := app.indexed_struct_field_completions(uri, content, receiver_type)
+		receiver_type = fields.field_types[field_name] or { return '' }
+	}
+	return receiver_type
+}
+
+fn (mut app App) infer_bound_receiver_type_at_position(uri string, content string, receiver string, use_position Position) string {
 	if receiver == '' {
 		return ''
 	}
@@ -1891,8 +1924,7 @@ fn complete_function_signature(lines []string, start_line int, initial string) s
 	return signature
 }
 
-fn method_completion_from_symbol(source string, symbol DocumentSymbol) ?Detail {
-	lines := source.split_into_lines()
+fn method_completion_from_lines(lines []string, symbol DocumentSymbol) ?Detail {
 	line_idx := symbol.range.start.line
 	if line_idx < 0 || line_idx >= lines.len {
 		return none
@@ -1931,7 +1963,9 @@ fn (mut app App) receiver_type_scope(uri string, content string, receiver_type s
 	if normalized_type.contains('.') {
 		qualifier := normalized_type.all_before_last('.')
 		type_name := normalized_type.all_after_last('.')
-		module_path := parse_import_aliases(content)[qualifier] or { return '', '', false, '' }
+		// Nested-field inference stores the declaration file's full module path,
+		// which may not have an alias in the requesting file.
+		module_path := parse_import_aliases(content)[qualifier] or { qualifier }
 		dir := app.resolve_indexed_import_module_dir(module_path, os.dir(uri_to_path(uri)))
 		return dir, type_name, true, module_path.all_after_last('.')
 	}
@@ -1958,6 +1992,7 @@ fn (mut app App) indexed_method_symbols(uri string, content string, receiver_typ
 	}
 	active_names := app.active_indexed_source_file_names(dir, active_test_name)
 	mut matches := []Location{}
+	mut items := []Detail{}
 	mut has_conditional := false
 	mut indexed_uris := app.symbol_index.keys()
 	indexed_uris.sort()
@@ -1968,6 +2003,8 @@ fn (mut app App) indexed_method_symbols(uri string, content string, receiver_typ
 			continue
 		}
 		source := app.index_source_for(indexed_uri) or { continue }
+		source_lines := source.split_into_lines()
+		file_occurrences := app.occurrences_for(indexed_uri)
 		for symbol in entry.doc_symbols {
 			if symbol.kind != sym_kind_method || method_receiver_type(symbol.name) != type_name {
 				continue
@@ -1976,18 +2013,26 @@ fn (mut app App) indexed_method_symbols(uri string, content string, receiver_typ
 			if method_name != '' && simple_name != method_name {
 				continue
 			}
-			declaration_occurrences := app.occurrences_for(indexed_uri)[simple_name] or {
+			if symbol.range.start.line >= 0 && symbol.range.start.line < entry.conditional_lines.len
+				&& entry.conditional_lines[symbol.range.start.line] {
+				has_conditional = true
+				continue
+			}
+			declaration_occurrences := file_occurrences[simple_name] or {
 				continue
 			}
 			if !source_declaration_occurrence_is_code(symbol, declaration_occurrences) {
 				continue
 			}
-			if require_public && !source_declaration_is_public(indexed_uri, symbol, app) {
+			if require_public
+				&& (symbol.range.start.line < 0 || symbol.range.start.line >= source_lines.len
+					|| !source_lines[symbol.range.start.line].trim_space().starts_with('pub ')) {
 				continue
 			}
-			if source_declaration_is_compile_time_conditional(source, symbol.range.start.line) {
-				has_conditional = true
-				continue
+			if method_name == '' {
+				if detail := method_completion_from_lines(source_lines, symbol) {
+					items << detail
+				}
 			}
 			matches << Location{
 				uri: indexed_uri
@@ -2006,6 +2051,7 @@ fn (mut app App) indexed_method_symbols(uri string, content string, receiver_typ
 	}
 	return IndexedMethodSymbolResult{
 		locations: matches
+		items: items
 		use_compiler: has_conditional
 	}
 }
@@ -2071,6 +2117,40 @@ fn qualify_embedded_receiver_type(receiver_type string, embedded_type string) st
 	return embedded
 }
 
+fn struct_field_source_type(code_line string, field_name string) string {
+	code := code_line.trim_space()
+	if field_name == '' || first_word(code) != field_name {
+		return ''
+	}
+	return type_after_identifier(code, field_name)
+}
+
+// canonical_field_receiver_type translates a field's source type into a type
+// that receiver_type_scope can resolve from the requesting file. Imported
+// aliases belong to the struct's declaration file, not necessarily the caller.
+fn canonical_field_receiver_type(parent_receiver_type string, field_source_type string, receiver_content string, declaration_content string) string {
+	field_type := normalize_receiver_type(field_source_type)
+	if field_type == '' {
+		return ''
+	}
+	field_name := field_type.all_after_last('.')
+	if field_name == '' || !(field_name[0] >= `A` && field_name[0] <= `Z`) {
+		return ''
+	}
+	if field_type.contains('.') {
+		qualifier := field_type.all_before_last('.')
+		module_path := parse_import_aliases(declaration_content)[qualifier] or { qualifier }
+		return '${module_path}.${field_name}'
+	}
+	parent_type := normalize_receiver_type(parent_receiver_type)
+	if parent_type.contains('.') {
+		qualifier := parent_type.all_before_last('.')
+		module_path := parse_import_aliases(receiver_content)[qualifier] or { qualifier }
+		return '${module_path}.${field_type}'
+	}
+	return field_type
+}
+
 fn (mut app App) indexed_struct_field_completions(uri string, content string, receiver_type string) IndexedCompletionResult {
 	mut visited := map[string]bool{}
 	return app.indexed_struct_field_completions_visited(uri, content, receiver_type, mut visited)
@@ -2105,6 +2185,7 @@ fn (mut app App) indexed_struct_field_completions_visited(uri string, content st
 	mut items := []Detail{}
 	mut seen_items := map[string]bool{}
 	mut embedded_types := []string{}
+	mut field_types := map[string]string{}
 	mut has_conditional := false
 	mut has_unresolved_embedded := false
 	mut resolved_type := false
@@ -2123,7 +2204,8 @@ fn (mut app App) indexed_struct_field_completions_visited(uri string, content st
 			if symbol.kind != sym_kind_struct || normalize_receiver_type(symbol.name) != type_name {
 				continue
 			}
-			if source_declaration_is_compile_time_conditional(source, symbol.range.start.line) {
+			if symbol.range.start.line >= 0 && symbol.range.start.line < entry.conditional_lines.len
+				&& entry.conditional_lines[symbol.range.start.line] {
 				has_conditional = true
 				continue
 			}
@@ -2157,6 +2239,11 @@ fn (mut app App) indexed_struct_field_completions_visited(uri string, content st
 								seen_items[detail.label] = true
 							}
 						}
+						for field_name, field_type in promoted.field_types {
+							if field_name !in field_types {
+								field_types[field_name] = field_type
+							}
+						}
 						continue
 					}
 				}
@@ -2164,6 +2251,11 @@ fn (mut app App) indexed_struct_field_completions_visited(uri string, content st
 					if detail.label !in seen_items {
 						items << detail
 						seen_items[detail.label] = true
+					}
+					field_source_type := struct_field_source_type(code_lines[field.range.start.line], field.name)
+					field_type := canonical_field_receiver_type(receiver_type, field_source_type, content, source)
+					if field_type != '' {
+						field_types[detail.label] = field_type
 					}
 				}
 			}
@@ -2173,6 +2265,7 @@ fn (mut app App) indexed_struct_field_completions_visited(uri string, content st
 		items: items
 		use_compiler: has_conditional || has_unresolved_embedded
 		embedded_types: embedded_types
+		field_types: field_types
 		resolved_type: resolved_type
 	}
 }
@@ -2200,20 +2293,10 @@ fn (mut app App) indexed_receiver_completions(uri string, content string, receiv
 	for member_type in receiver_types {
 		method_result := app.indexed_method_symbols(uri, content, member_type, '')
 		methods_use_compiler = methods_use_compiler || method_result.use_compiler
-		for location in method_result.locations {
-			entry := app.symbol_index[location.uri] or { continue }
-			source := app.index_source_for(location.uri) or { continue }
-			for symbol in entry.doc_symbols {
-				if symbol.kind != sym_kind_method
-					|| symbol.range.start.line != location.range.start.line {
-					continue
-				}
-				if detail := method_completion_from_symbol(source, symbol) {
-					if detail.label !in seen {
-						items << detail
-						seen[detail.label] = true
-					}
-				}
+		for detail in method_result.items {
+			if detail.label !in seen {
+				items << detail
+				seen[detail.label] = true
 			}
 		}
 	}
@@ -2672,11 +2755,9 @@ fn compile_time_conditional_lines(content string) []bool {
 	return result
 }
 
-fn parse_module_member_completions(content string, public_only bool) ParsedModuleCompletionIndex {
+fn parse_module_member_completions_from_lines(lines []string, conditional_lines []bool, public_only bool) ParsedModuleCompletionIndex {
 	mut items := []Detail{}
 	mut has_conditional := false
-	lines := source_code_lines(content)
-	conditional_lines := compile_time_conditional_lines(content)
 	mut in_const_block := false
 	mut const_block_public := false
 	mut const_expression_depth := 0
@@ -3879,115 +3960,6 @@ fn source_attribute_content_is_conditional(content string) bool {
 	return false
 }
 
-fn source_declaration_has_conditional_attribute(content string, declaration_line int) bool {
-	lines := content.split_into_lines()
-	if declaration_line < 0 || declaration_line >= lines.len {
-		return false
-	}
-	mut pending_conditional := false
-	mut attribute_depth := 0
-	mut attribute_content := []u8{}
-	mut scan_state := ImportScanState{}
-	for line_idx in 0 .. declaration_line {
-		line := source_line_import_code(lines[line_idx], mut scan_state)
-		mut col := 0
-		for col < line.len {
-			if attribute_depth == 0 && col + 1 < line.len && line[col] == `@`
-				&& line[col + 1] == `[` {
-				attribute_depth = 1
-				attribute_content = []u8{}
-				col += 2
-				continue
-			}
-			if attribute_depth > 0 {
-				if line[col] == `[` {
-					attribute_depth++
-					attribute_content << line[col]
-				} else if line[col] == `]` {
-					attribute_depth--
-					if attribute_depth == 0 {
-						if source_attribute_content_is_conditional(attribute_content.bytestr()) {
-							pending_conditional = true
-						}
-					} else {
-						attribute_content << line[col]
-					}
-				} else {
-					attribute_content << line[col]
-				}
-				col++
-				continue
-			}
-			if line[col] !in [` `, `\t`, `\r`] {
-				pending_conditional = false
-			}
-			col++
-		}
-		if attribute_depth > 0 {
-			attribute_content << `\n`
-		}
-	}
-	return pending_conditional
-}
-
-// source_declaration_is_compile_time_conditional identifies declarations nested
-// under `$if`/`$else` or guarded by `@[if ...]`. The shallow index does not
-// evaluate compile-time conditions, so every such declaration must defer to
-// compiler-backed lookup.
-fn source_declaration_is_compile_time_conditional(content string, declaration_line int) bool {
-	if declaration_line < 0 {
-		return false
-	}
-	if source_declaration_has_conditional_attribute(content, declaration_line) {
-		return true
-	}
-	lines := content.split_into_lines()
-	mut brace_depth := 0
-	mut conditional_depths := []int{}
-	mut pending_conditional := false
-	mut scan_state := ImportScanState{}
-	for line_idx, raw_line in lines {
-		if line_idx == declaration_line {
-			return conditional_depths.len > 0
-		}
-		line := source_line_import_code(raw_line, mut scan_state)
-		mut col := 0
-		for col < line.len {
-			if line[col] == `$` {
-				directive_len := if line[col..].starts_with('\$if') {
-					3
-				} else if line[col..].starts_with('\$else') {
-					5
-				} else {
-					0
-				}
-				if directive_len > 0 && (col + directive_len == line.len
-					|| !is_ident_char(line[col + directive_len])) {
-					pending_conditional = true
-					col += directive_len
-					continue
-				}
-			}
-			if line[col] == `{` {
-				brace_depth++
-				if pending_conditional {
-					conditional_depths << brace_depth
-					pending_conditional = false
-				}
-			} else if line[col] == `}` {
-				if conditional_depths.len > 0 && conditional_depths.last() == brace_depth {
-					conditional_depths.delete_last()
-				}
-				if brace_depth > 0 {
-					brace_depth--
-				}
-			}
-			col++
-		}
-	}
-	return false
-}
-
 // source_occurrence_precedes_local_declaration recognizes every target on the
 // comma-separated left side of `:=`. Invalid or ambiguous matches only defer
 // to compiler-backed lookup, so this deliberately favors avoiding false
@@ -4710,7 +4682,6 @@ fn (mut app App) find_indexed_source_definition(dir string, symbol string, activ
 		if entry.module_name != expected_module {
 			continue
 		}
-		source := app.index_source_for(uri) or { continue }
 		declaration_occurrences := app.occurrences_for(uri)[symbol] or { continue }
 		for sym in entry.doc_symbols {
 			if !source_definition_kind_is_supported(sym.kind)
@@ -4720,7 +4691,8 @@ fn (mut app App) find_indexed_source_definition(dir string, symbol string, activ
 			if !source_declaration_occurrence_is_code(sym, declaration_occurrences) {
 				continue
 			}
-			if source_declaration_is_compile_time_conditional(source, sym.range.start.line) {
+			if sym.range.start.line >= 0 && sym.range.start.line < entry.conditional_lines.len
+				&& entry.conditional_lines[sym.range.start.line] {
 				continue
 			}
 			if require_public && !source_declaration_is_public(uri, sym, app) {
@@ -6274,14 +6246,6 @@ fn (mut app App) collect_module_completions(current_file_uri string, working_dir
 		items: items
 		use_compiler: has_conditional
 	}
-}
-
-// parse_module_fn_completions extracts free-function declarations (`pub fn` and `fn`)
-// from V source content and returns them as completion Detail items.
-// Method receivers (e.g. `fn (r Recv) method()`) are skipped.
-// When a function has parameters a snippet insertText with tab-stops is produced.
-fn parse_module_fn_completions(content string) []Detail {
-	return parse_module_member_completions(content, false).items.filter(it.kind == 3)
 }
 
 // build_fn_snippet builds a VSCode-style snippet string for a function call.
