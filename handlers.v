@@ -21,6 +21,16 @@ struct IndexedCompletionResult {
 	use_compiler bool
 }
 
+struct IndexedModuleCompletionResult {
+	items        []Detail
+	use_compiler bool
+}
+
+struct ParsedModuleCompletionIndex {
+	items           []Detail
+	has_conditional bool
+}
+
 // operation_at_pos handles LSP requests at a given position (completion, hover, signature, definition).
 fn (mut app App) operation_at_pos(method Method, request Request) Response {
 	params := json2.decode[TextDocumentPositionParams](request.params) or {
@@ -136,18 +146,18 @@ fn (mut app App) indexed_completions(uri string, position Position) IndexedCompl
 		}
 	}
 	if position.char > 0 {
-		trigger_byte := encoded_col_to_byte(line, position.char - 1, app.position_encoding)
-		if trigger_byte < line.len && line[trigger_byte] == `.` {
-			qualifier := get_word_before_dot(line, position.char - 1, app.position_encoding)
+		qualifier, has_member_access := member_qualifier_at_cursor(line, position.char,
+			app.position_encoding)
+		if has_member_access {
 			local_items := app.local_scope_completions(content, position)
 			has_local_binding := local_items.any(it.label == qualifier)
 			if !has_local_binding {
 				if module_path := parse_import_aliases(content)[qualifier] {
-					module_items := app.get_imported_module_member_completions(module_path,
+					module_result := app.get_imported_module_member_completions(module_path,
 						os.dir(uri_to_path(uri)))
 					return IndexedCompletionResult{
-						items:        module_items
-						use_compiler: module_items.len == 0
+						items:        module_result.items
+						use_compiler: module_result.use_compiler
 					}
 				}
 			}
@@ -193,6 +203,23 @@ fn (mut app App) indexed_completions(uri string, position Position) IndexedCompl
 	return IndexedCompletionResult{
 		items: details
 	}
+}
+
+fn member_qualifier_at_cursor(line string, cursor_col int, enc PositionEncoding) (string, bool) {
+	if line == '' || cursor_col <= 0 {
+		return '', false
+	}
+	cursor_byte := encoded_col_to_byte(line, cursor_col, enc)
+	mut member_start := cursor_byte
+	for member_start > 0 && is_ident_char(line[member_start - 1]) {
+		member_start--
+	}
+	if member_start == 0 || line[member_start - 1] != `.` {
+		return '', false
+	}
+	dot_byte := member_start - 1
+	dot_col := byte_to_encoded_col(line, dot_byte, enc)
+	return get_word_before_dot(line, dot_col, enc), true
 }
 
 fn binding_identifiers(text string) []string {
@@ -397,8 +424,11 @@ fn (app &App) local_scope_completions(content string, position Position) []Detai
 			break
 		}
 	}
-	mut names := function_parameter_names(header_lines.join('\n').all_before('{'))
+	parameter_names := function_parameter_names(header_lines.join('\n').all_before('{'))
+	mut scopes := [][]string{}
+	scopes << parameter_names.clone()
 	mut scan_state := ImportScanState{}
+	mut body_started := false
 	for line_idx in 0 .. position.line + 1 {
 		raw_line := if line_idx == position.line {
 			byte_col := encoded_col_to_byte(lines[line_idx], position.char, app.position_encoding)
@@ -410,8 +440,41 @@ fn (app &App) local_scope_completions(content string, position Position) []Detai
 		if line_idx < function_start {
 			continue
 		}
-		for name in local_declaration_names(code) {
-			if name !in names {
+		mut segment_start := 0
+		for col, c in code {
+			if c != `{` && c != `}` {
+				continue
+			}
+			if body_started && scopes.len > 0 {
+				for name in local_declaration_names(code[segment_start..col]) {
+					if name !in scopes.last() {
+						scopes[scopes.len - 1] << name
+					}
+				}
+			}
+			if c == `{` {
+				if body_started {
+					scopes << []string{}
+				} else {
+					body_started = true
+				}
+			} else if body_started && scopes.len > 1 {
+				scopes.delete_last()
+			}
+			segment_start = col + 1
+		}
+		if body_started && scopes.len > 0 {
+			for name in local_declaration_names(code[segment_start..]) {
+				if name !in scopes.last() {
+					scopes[scopes.len - 1] << name
+				}
+			}
+		}
+	}
+	mut names := []string{}
+	for scope in scopes {
+		for name in scope {
+			if name != '' && name !in names {
 				names << name
 			}
 		}
@@ -1085,11 +1148,13 @@ fn parse_import_bindings(content string) []ImportedModuleBinding {
 	return bindings
 }
 
-fn (mut app App) get_imported_module_member_completions(module_path string, work_dir string) []Detail {
+fn (mut app App) get_imported_module_member_completions(module_path string, work_dir string) IndexedModuleCompletionResult {
 	mut items := []Detail{}
 	module_dir := app.resolve_indexed_import_module_dir(module_path, work_dir)
 	if module_dir == '' {
-		return items
+		return IndexedModuleCompletionResult{
+			use_compiler: true
+		}
 	}
 	app.ensure_dir_shallow_indexed(module_dir)
 	normalized_dir := normalized_index_path(module_dir)
@@ -1101,6 +1166,7 @@ fn (mut app App) get_imported_module_member_completions(module_path string, work
 	active_names := app.active_indexed_source_file_names(module_dir, '')
 	expected_module := module_path.all_after_last('.')
 	mut seen_labels := map[string]bool{}
+	mut has_conditional := false
 	mut indexed_uris := app.symbol_index.keys()
 	indexed_uris.sort()
 	for indexed_uri in indexed_uris {
@@ -1110,6 +1176,9 @@ fn (mut app App) get_imported_module_member_completions(module_path string, work
 			|| entry.module_name != expected_module {
 			continue
 		}
+		if entry.has_conditional_public_completions {
+			has_conditional = true
+		}
 		for item in entry.public_module_completions {
 			if item.label in seen_labels {
 				continue
@@ -1118,7 +1187,10 @@ fn (mut app App) get_imported_module_member_completions(module_path string, work
 			items << item
 		}
 	}
-	return items
+	return IndexedModuleCompletionResult{
+		items:        items
+		use_compiler: has_conditional || items.len == 0
+	}
 }
 
 fn resolve_import_module_dir(module_path string, work_dir string) string {
@@ -1181,13 +1253,118 @@ fn module_type_completion_name(declaration string) string {
 	return name.all_before('[')
 }
 
-fn parse_module_member_completions(content string, public_only bool) []Detail {
+fn module_completion_declaration(line string, public_only bool) bool {
+	is_public := line.starts_with('pub ')
+	if public_only && !is_public {
+		return false
+	}
+	declaration := if is_public { line[4..] } else { line }
+	if declaration.starts_with('fn ') {
+		return !declaration[3..].trim_space().starts_with('(')
+	}
+	return declaration.starts_with('const ') || declaration.starts_with('struct ')
+		|| declaration.starts_with('enum ') || declaration.starts_with('interface ')
+		|| declaration.starts_with('type ')
+}
+
+fn compile_time_conditional_lines(content string) []bool {
+	lines := content.split_into_lines()
+	mut result := []bool{len: lines.len}
+	mut brace_depth := 0
+	mut conditional_depths := []int{}
+	mut pending_conditional_block := false
+	mut pending_conditional_attribute := false
+	mut attribute_depth := 0
+	mut attribute_content := []u8{}
+	mut scan_state := ImportScanState{}
+	for line_idx, raw_line in lines {
+		line := source_line_import_code(raw_line, mut scan_state)
+		result[line_idx] = conditional_depths.len > 0 || pending_conditional_attribute
+		mut col := 0
+		for col < line.len {
+			if attribute_depth == 0 && col + 1 < line.len && line[col] == `@`
+				&& line[col + 1] == `[` {
+				attribute_depth = 1
+				attribute_content = []u8{}
+				col += 2
+				continue
+			}
+			if attribute_depth > 0 {
+				if line[col] == `[` {
+					attribute_depth++
+					attribute_content << line[col]
+				} else if line[col] == `]` {
+					attribute_depth--
+					if attribute_depth == 0 {
+						if source_attribute_content_is_conditional(attribute_content.bytestr()) {
+							pending_conditional_attribute = true
+						}
+					} else {
+						attribute_content << line[col]
+					}
+				} else {
+					attribute_content << line[col]
+				}
+				col++
+				continue
+			}
+			if line[col] == `$` {
+				directive_len := if line[col..].starts_with('$if') {
+					3
+				} else if line[col..].starts_with('$else') {
+					5
+				} else {
+					0
+				}
+				if directive_len > 0 && (col + directive_len == line.len
+					|| !is_ident_char(line[col + directive_len])) {
+					pending_conditional_block = true
+					col += directive_len
+					continue
+				}
+			}
+			if line[col] == `{` {
+				brace_depth++
+				if pending_conditional_block {
+					conditional_depths << brace_depth
+					pending_conditional_block = false
+					result[line_idx] = true
+				}
+			} else if line[col] == `}` {
+				if conditional_depths.len > 0 && conditional_depths.last() == brace_depth {
+					conditional_depths.delete_last()
+				}
+				if brace_depth > 0 {
+					brace_depth--
+				}
+			} else if line[col] !in [` `, `\t`, `\r`] && pending_conditional_attribute {
+				result[line_idx] = true
+				pending_conditional_attribute = false
+			}
+			col++
+		}
+		if attribute_depth > 0 {
+			attribute_content << `\n`
+		}
+	}
+	return result
+}
+
+fn parse_module_member_completions(content string, public_only bool) ParsedModuleCompletionIndex {
 	mut items := []Detail{}
+	mut has_conditional := false
+	conditional_lines := compile_time_conditional_lines(content)
 	mut in_const_block := false
 	mut const_block_public := false
-	for line in content.split_into_lines() {
+	for line_idx, line in content.split_into_lines() {
 		trimmed := line.trim_space()
 		if trimmed == '' || trimmed.starts_with('//') {
+			continue
+		}
+		if conditional_lines[line_idx] {
+			if module_completion_declaration(trimmed, public_only) {
+				has_conditional = true
+			}
 			continue
 		}
 		if trimmed == 'const (' || trimmed == 'pub const (' {
@@ -1293,7 +1470,10 @@ fn parse_module_member_completions(content string, public_only bool) []Detail {
 			}
 		}
 	}
-	return items
+	return ParsedModuleCompletionIndex{
+		items:           items
+		has_conditional: has_conditional
+	}
 }
 
 // on_did_open handles the LSP didOpen notification, loading file content into

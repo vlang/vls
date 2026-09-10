@@ -25,6 +25,7 @@ struct IndexEntry {
 	fn_completions            []Detail          // free-function completion items for this file
 	module_completions        []Detail // all same-module top-level completion items
 	public_module_completions []Detail // exported completion items for imported modules
+	has_conditional_public_completions bool
 }
 
 // build_index_entry parses `content` into an IndexEntry. Symbol ranges are
@@ -33,6 +34,8 @@ struct IndexEntry {
 fn build_index_entry(content string, enc PositionEncoding) IndexEntry {
 	lines := content.split_into_lines()
 	doc_syms := encode_document_symbols(parse_document_symbols(content), lines, enc)
+	module_completion_index := parse_module_member_completions(content, false)
+	public_module_completion_index := parse_module_member_completions(content, true)
 	mut docs := map[string]string{}
 	for sym in doc_syms {
 		// Each symbol's declaration line is range.start.line; read its vdoc.
@@ -50,8 +53,9 @@ fn build_index_entry(content string, enc PositionEncoding) IndexEntry {
 		doc_symbols:               doc_syms
 		docs:                      docs
 		fn_completions:            parse_module_fn_completions(content)
-		module_completions:        parse_module_member_completions(content, false)
-		public_module_completions: parse_module_member_completions(content, true)
+		module_completions:        module_completion_index.items
+		public_module_completions: public_module_completion_index.items
+		has_conditional_public_completions: public_module_completion_index.has_conditional
 	}
 }
 

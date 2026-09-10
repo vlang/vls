@@ -5821,6 +5821,125 @@ fn test_imported_module_completion_uses_unsaved_open_buffer() {
 	assert 'saved_member' !in labels
 }
 
+fn test_member_completion_recognizes_typed_prefix() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+
+	test_dir := os.join_path(app.temp_dir, 'typed_member_completion')
+	module_dir := os.join_path(test_dir, 'my_mod')
+	must_mkdir_all(module_dir)
+	must_write_file(os.join_path(module_dir, 'my_mod.v'),
+		'module my_mod\n\npub fn read_value() {}\n')
+	main_file := os.join_path(test_dir, 'main.v')
+	content := 'module main\n\nimport my_mod\n\nstruct User {\n\tname string\n}\n\nfn main() {\n\tuser := User{}\n\tuser.na\n\tmy_mod.rea\n}\n'
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	lines := content.split_into_lines()
+
+	for expected, source_line in {
+		'name':       '\tuser.na'
+		'read_value': '\tmy_mod.rea'
+	} {
+		completion_line := lines.index(source_line)
+		assert completion_line >= 0
+		response := app.operation_at_pos(.completion, Request{
+			id:     9400 + completion_line
+			method: 'textDocument/completion'
+			params: json2.encode(TextDocumentPositionParams{
+				text_document: TextDocumentIdentifier{
+					uri: uri
+				}
+				position:      Position{
+					line: completion_line
+					char: lines[completion_line].len
+				}
+			},
+				escape_unicode: true
+			)
+		})
+		assert response.result is CompletionList
+		assert (response.result as CompletionList).items.any(it.label == expected)
+	}
+}
+
+fn test_local_scope_completion_drops_bindings_after_nested_block() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+
+	test_dir := os.join_path(app.temp_dir, 'nested_scope_completion')
+	module_dir := os.join_path(test_dir, 'clock')
+	must_mkdir_all(module_dir)
+	must_write_file(os.join_path(module_dir, 'clock.v'),
+		'module clock\n\npub fn module_member() {}\n')
+	main_file := os.join_path(test_dir, 'main.v')
+	content := 'module main\n\nimport clock\n\nstruct Timer {}\nfn (timer Timer) start() {}\n\nfn main() {\n\tif true {\n\t\tclock := Timer{}\n\t\tclock.start()\n\t}\n\tclock.\n}\n'
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	lines := content.split_into_lines()
+	completion_line := lines.index('\tclock.')
+	assert completion_line >= 0
+	position := Position{
+		line: completion_line
+		char: lines[completion_line].len
+	}
+	assert !app.local_scope_completions(content, position).any(it.label == 'clock')
+
+	response := app.operation_at_pos(.completion, Request{
+		id:     9401
+		method: 'textDocument/completion'
+		params: json2.encode(TextDocumentPositionParams{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			position:      position
+		},
+			escape_unicode: true
+		)
+	})
+	assert response.result is CompletionList
+	labels := (response.result as CompletionList).items.map(it.label)
+	assert 'module_member' in labels
+	assert 'start' !in labels
+}
+
+fn test_conditional_module_types_delegate_completion_to_compiler() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+
+	test_dir := os.join_path(app.temp_dir, 'conditional_module_completion')
+	module_dir := os.join_path(test_dir, 'conditional')
+	must_mkdir_all(module_dir)
+	module_file := os.join_path(module_dir, 'conditional.v')
+	module_content := 'module conditional\n\npub fn always() {}\n\n$if windows {\n\tpub struct WinType {}\n}\n\n@[if windows]\npub struct AttributeType {}\n'
+	must_write_file(module_file, module_content)
+	main_file := os.join_path(test_dir, 'main.v')
+	content := 'module main\n\nimport conditional\n\nfn main() {\n\tconditional.\n}\n'
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	lines := content.split_into_lines()
+	completion_line := lines.index('\tconditional.')
+	assert completion_line >= 0
+
+	indexed := app.indexed_completions(uri, Position{
+		line: completion_line
+		char: lines[completion_line].len
+	})
+	labels := indexed.items.map(it.label)
+	assert indexed.use_compiler
+	assert 'always' in labels
+	assert 'WinType' !in labels
+	assert 'AttributeType' !in labels
+}
+
 fn test_semantic_tokens_returns_data_for_known_content() {
 	mut app := create_test_app()
 	defer {
