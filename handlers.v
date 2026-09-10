@@ -191,7 +191,7 @@ fn (mut app App) indexed_completions(uri string, position Position) IndexedCompl
 				}
 			}
 			receiver_result := app.indexed_receiver_completions(uri, content, qualifier,
-				position.line)
+				position)
 			return receiver_result
 		}
 	}
@@ -294,11 +294,15 @@ fn binding_scope_header_ends_with_literal_type(source string) bool {
 		return true
 	}
 	if type_expression.starts_with('[') {
-		array_end := matching_delimiter(type_expression, 0, `[`, `]`)
-		if array_end < 0 || array_end + 1 >= type_expression.len {
-			return false
+		mut element_type := type_expression
+		for element_type.starts_with('[') {
+			array_end := matching_delimiter(element_type, 0, `[`, `]`)
+			if array_end < 0 || array_end + 1 >= element_type.len {
+				return false
+			}
+			element_type = element_type[array_end + 1..]
 		}
-		item_type := type_expression[array_end + 1..].all_before('[').all_after_last('.')
+		item_type := element_type.all_before('[').all_after_last('.')
 		return item_type != ''
 	}
 	type_name := type_expression.all_before('[').all_after_last('.')
@@ -851,8 +855,17 @@ fn has_implicit_it_scope_at_cursor(source string) bool {
 }
 
 struct LocalBinding {
-	name string
-	line int
+	name   string
+	line   int
+	column int
+}
+
+fn local_binding_column(segment string, segment_start int, name string) int {
+	relative_column := identifier_index(segment, name)
+	if relative_column < 0 {
+		return -1
+	}
+	return segment_start + relative_column
 }
 
 fn (app &App) local_scope_bindings(content string, position Position) []LocalBinding {
@@ -881,8 +894,9 @@ fn (app &App) local_scope_bindings(content string, position Position) []LocalBin
 	mut parameter_bindings := []LocalBinding{}
 	for name in parameter_names {
 		parameter_bindings << LocalBinding{
-			name: name
-			line: function_start
+			name:   name
+			line:   function_start
+			column: -1
 		}
 	}
 	mut scopes := [][]LocalBinding{}
@@ -891,6 +905,7 @@ fn (app &App) local_scope_bindings(content string, position Position) []LocalBin
 	mut body_started := false
 	mut pending_block_names := []string{}
 	mut pending_block_line := -1
+	mut pending_block_columns := map[string]int{}
 	mut pending_block_expects_expression := false
 	mut pending_closure_header := ''
 	mut pending_closure_line := -1
@@ -933,6 +948,11 @@ fn (app &App) local_scope_bindings(content string, position Position) []LocalBin
 				if segment_names.len > 0 {
 					pending_block_names = segment_names.clone()
 					pending_block_line = line_idx
+					pending_block_columns = map[string]int{}
+					for name in segment_names {
+						pending_block_columns[name] = local_binding_column(segment,
+							segment_start, name)
+					}
 				}
 				continue
 			}
@@ -968,8 +988,9 @@ fn (app &App) local_scope_bindings(content string, position Position) []LocalBin
 				for name in outer_segment_names {
 					if !scopes.last().any(it.name == name) {
 						scopes[scopes.len - 1] << LocalBinding{
-							name: name
-							line: line_idx
+							name:   name
+							line:   line_idx
+							column: local_binding_column(segment, segment_start, name)
 						}
 					}
 				}
@@ -983,6 +1004,11 @@ fn (app &App) local_scope_bindings(content string, position Position) []LocalBin
 								scopes[scopes.len - 1] << LocalBinding{
 									name: name
 									line: block_line
+									column: if binding_scope_header {
+										local_binding_column(segment, segment_start, name)
+									} else {
+										pending_block_columns[name] or { -1 }
+									}
 								}
 							}
 						}
@@ -992,6 +1018,7 @@ fn (app &App) local_scope_bindings(content string, position Position) []LocalBin
 				}
 				pending_block_names = []string{}
 				pending_block_line = -1
+				pending_block_columns = map[string]int{}
 				pending_block_expects_expression = false
 				pending_closure_header = ''
 				pending_closure_line = -1
@@ -1006,6 +1033,11 @@ fn (app &App) local_scope_bindings(content string, position Position) []LocalBin
 			if starts_binding_scope_header(tail) && tail_names.len > 0 {
 				pending_block_names = tail_names.clone()
 				pending_block_line = line_idx
+				pending_block_columns = map[string]int{}
+				for name in tail_names {
+					pending_block_columns[name] = local_binding_column(tail, segment_start,
+						name)
+				}
 				pending_block_expects_expression = binding_scope_header_starts_literal(tail)
 			} else {
 				closure_source := if pending_closure_header != '' {
@@ -1017,8 +1049,9 @@ fn (app &App) local_scope_bindings(content string, position Position) []LocalBin
 				for name in tail_names {
 					if !scopes.last().any(it.name == name) {
 						scopes[scopes.len - 1] << LocalBinding{
-							name: name
-							line: line_idx
+							name:   name
+							line:   line_idx
+							column: local_binding_column(tail, segment_start, name)
 						}
 					}
 				}
@@ -1050,8 +1083,9 @@ fn (app &App) local_scope_bindings(content string, position Position) []LocalBin
 	if has_implicit_it_scope_at_cursor(active_code_lines.join('\n')) && scopes.len > 0
 		&& !has_explicit_it {
 		scopes[scopes.len - 1] << LocalBinding{
-			name: 'it'
-			line: position.line
+			name:   'it'
+			line:   position.line
+			column: -1
 		}
 	}
 	mut bindings := []LocalBinding{}
@@ -1212,34 +1246,49 @@ struct ReceiverDeclaration {
 	rhs            string
 	binding_index  int
 	binding_count  int
+	binding_column int
 	assignment_end int
 }
 
-fn receiver_declaration_on_line(code string, receiver string) ?ReceiverDeclaration {
+fn receiver_declaration_on_line(code string, receiver string, active_columns []int) ?ReceiverDeclaration {
 	mut statement_start := 0
+	mut found := false
+	mut latest := ReceiverDeclaration{}
 	for raw_statement in code.split(';') {
 		assign_idx := raw_statement.index(':=') or {
 			statement_start += raw_statement.len + 1
 			continue
 		}
 		assignment_prefix := raw_statement[..assign_idx]
-		lhs := if brace_idx := assignment_prefix.last_index('{') {
-			assignment_prefix[brace_idx + 1..]
-		} else {
-			assignment_prefix
+		mut lhs_start := 0
+		if brace_idx := assignment_prefix.last_index('{') {
+			lhs_start = brace_idx + 1
 		}
+		lhs := assignment_prefix[lhs_start..]
 		bindings := binding_identifiers(lhs)
 		binding_index := bindings.index(receiver)
 		if binding_index < 0 {
 			statement_start += raw_statement.len + 1
 			continue
 		}
-		return ReceiverDeclaration{
+		receiver_column := identifier_index(lhs, receiver)
+		if receiver_column < 0
+			|| statement_start + lhs_start + receiver_column !in active_columns {
+			statement_start += raw_statement.len + 1
+			continue
+		}
+		latest = ReceiverDeclaration{
 			rhs:            raw_statement[assign_idx + 2..].trim_space()
 			binding_index:  binding_index
 			binding_count:  bindings.len
+			binding_column: statement_start + lhs_start + receiver_column
 			assignment_end: statement_start + assign_idx + 2
 		}
+		found = true
+		statement_start += raw_statement.len + 1
+	}
+	if found {
+		return latest
 	}
 	return none
 }
@@ -1310,24 +1359,36 @@ fn (mut app App) function_return_type(uri string, content string, candidate stri
 }
 
 fn (mut app App) infer_receiver_type(uri string, content string, receiver string, use_line int) string {
-	if receiver == '' {
-		return ''
-	}
 	lines := content.split_into_lines()
 	if use_line < 0 || use_line >= lines.len {
 		return ''
 	}
-	use_position := Position{
+	return app.infer_receiver_type_at_position(uri, content, receiver, Position{
 		line: use_line
 		char: byte_to_encoded_col(lines[use_line], lines[use_line].len, app.position_encoding)
+	})
+}
+
+fn (mut app App) infer_receiver_type_at_position(uri string, content string, receiver string, use_position Position) string {
+	if receiver == '' {
+		return ''
 	}
-	mut active_declaration_lines := map[int]bool{}
+	lines := content.split_into_lines()
+	use_line := use_position.line
+	if use_line < 0 || use_line >= lines.len || use_position.char < 0 {
+		return ''
+	}
+	mut has_active_binding := false
+	mut active_declaration_columns := map[int][]int{}
 	for binding in app.local_scope_bindings(content, use_position) {
 		if binding.name == receiver {
-			active_declaration_lines[binding.line] = true
+			has_active_binding = true
+			if binding.column >= 0 {
+				active_declaration_columns[binding.line] << binding.column
+			}
 		}
 	}
-	if active_declaration_lines.len == 0 {
+	if !has_active_binding {
 		return ''
 	}
 	mut header_start := -1
@@ -1341,7 +1402,13 @@ fn (mut app App) infer_receiver_type(uri string, content string, receiver string
 		if i > use_line {
 			break
 		}
-		code := source_line_import_code(raw_line, mut scan_state)
+		line := if i == use_line {
+			byte_col := encoded_col_to_byte(raw_line, use_position.char, app.position_encoding)
+			raw_line[..byte_col]
+		} else {
+			raw_line
+		}
+		code := source_line_import_code(line, mut scan_state)
 		trimmed := code.trim_space()
 		declaration := if trimmed.starts_with('pub fn ') {
 			trimmed[4..]
@@ -1356,13 +1423,11 @@ fn (mut app App) infer_receiver_type(uri string, content string, receiver string
 			latest_binding_index = 0
 			latest_binding_count = 1
 		}
-		if receiver_declaration := receiver_declaration_on_line(code, receiver) {
-			if !active_declaration_lines[i] {
-				continue
-			}
+		active_columns := active_declaration_columns[i] or { []int{} }
+		if receiver_declaration := receiver_declaration_on_line(code, receiver, active_columns) {
 			latest_rhs = receiver_declaration.rhs
-			latest_raw_rhs = if receiver_declaration.assignment_end <= raw_line.len {
-				raw_line[receiver_declaration.assignment_end..]
+			latest_raw_rhs = if receiver_declaration.assignment_end <= line.len {
+				line[receiver_declaration.assignment_end..]
 			} else {
 				''
 			}
@@ -1757,8 +1822,8 @@ fn (mut app App) indexed_struct_field_completions_visited(uri string, content st
 	}
 }
 
-fn (mut app App) indexed_receiver_completions(uri string, content string, receiver string, use_line int) IndexedCompletionResult {
-	receiver_type := app.infer_receiver_type(uri, content, receiver, use_line)
+fn (mut app App) indexed_receiver_completions(uri string, content string, receiver string, use_position Position) IndexedCompletionResult {
+	receiver_type := app.infer_receiver_type_at_position(uri, content, receiver, use_position)
 	if receiver_type == '' {
 		return IndexedCompletionResult{
 			use_compiler: true
@@ -4373,7 +4438,7 @@ fn (mut app App) resolve_indexed_definition(uri string, position Position) ?Loca
 					module_path.all_after_last('.'))
 			}
 		}
-		receiver_type := app.infer_receiver_type(uri, content, alias, position.line)
+		receiver_type := app.infer_receiver_type_at_position(uri, content, alias, position)
 		method_locations := app.indexed_method_symbols(uri, content, receiver_type, symbol).locations
 		if method_locations.len == 1 {
 			return method_locations[0]

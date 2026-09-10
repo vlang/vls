@@ -6674,6 +6674,38 @@ fn test_loop_header_nested_struct_literal_does_not_change_lexical_scope() {
 	assert !after.any(it.label == 'user')
 }
 
+fn test_loop_header_multidimensional_literal_does_not_change_lexical_scope() {
+	assert binding_scope_header_starts_literal('for row in [][]int')
+	assert binding_scope_header_starts_literal('for row in [2][]int')
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	content := 'module main\n\nfn inspect() {\n\tfor row in [][]int{len: 2, init: []int{}} {\n\t\trow\n\t}\n\trow\n}\n'
+	test_dir := os.join_path(app.temp_dir, 'loop_multidimensional_scope_completion')
+	must_mkdir_all(test_dir)
+	main_file := os.join_path(test_dir, 'main.v')
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	lines := content.split_into_lines()
+	inside_line := lines.index('\t\trow')
+	after_line := lines.index('\trow')
+	assert inside_line >= 0
+	assert after_line >= 0
+	inside := app.indexed_completions(uri, Position{
+		line: inside_line
+		char: lines[inside_line].len
+	})
+	assert !inside.use_compiler
+	assert inside.items.any(it.label == 'row')
+	after := app.local_scope_completions(content, Position{
+		line: after_line
+		char: lines[after_line].len
+	})
+	assert !after.any(it.label == 'row')
+}
+
 fn test_conditional_bare_completion_requests_compiler_fallback() {
 	mut app := create_test_app()
 	defer {
@@ -6898,6 +6930,56 @@ fn test_receiver_inference_uses_active_outer_binding_after_inner_shadow() {
 		inside_line) == 'Inner'
 	assert app.infer_receiver_type('file:///tmp/scoped_receiver.v', content, 'value',
 		outside_line) == 'Outer'
+}
+
+fn test_receiver_inference_uses_innermost_same_line_binding() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	content := 'module main\n\nstruct A {}\nfn (value A) from_a() {}\nfn (value A) target() {}\nstruct B {}\nfn (value B) from_b() {}\nfn (value B) target() {}\n\nfn main() {\n\tvalue := A{}; if true { value := B{}; value.target() }; value.from_a()\n}\n'
+	test_dir := os.join_path(app.temp_dir, 'same_line_receiver_shadow')
+	must_mkdir_all(test_dir)
+	main_file := os.join_path(test_dir, 'main.v')
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	lines := content.split_into_lines()
+	use_line := lines.index('\tvalue := A{}; if true { value := B{}; value.target() }; value.from_a()')
+	assert use_line >= 0
+	member_start := lines[use_line].index('value.target') or { -1 }
+	assert member_start >= 0
+	completion_position := Position{
+		line: use_line
+		char: member_start + 'value.'.len
+	}
+	assert app.infer_receiver_type_at_position(uri, content, 'value', completion_position) == 'B'
+	indexed := app.indexed_completions(uri, completion_position)
+	assert !indexed.use_compiler
+	assert indexed.items.any(it.label == 'from_b')
+	assert !indexed.items.any(it.label == 'from_a')
+	outer_start := lines[use_line].last_index('value.from_a') or { -1 }
+	assert outer_start >= 0
+	outer_position := Position{
+		line: use_line
+		char: outer_start + 'value.'.len
+	}
+	assert app.infer_receiver_type_at_position(uri, content, 'value', outer_position) == 'A'
+	outer := app.indexed_completions(uri, outer_position)
+	assert !outer.use_compiler
+	assert outer.items.any(it.label == 'from_a')
+	assert !outer.items.any(it.label == 'from_b')
+	target_start := lines[use_line].index('target()') or { -1 }
+	assert target_start >= 0
+	location := app.resolve_indexed_definition(uri, Position{
+		line: use_line
+		char: target_start + 2
+	}) or {
+		assert false, 'expected the innermost B method definition'
+		return
+	}
+	assert location.uri == uri
+	assert location.range.start.line == lines.index('fn (value B) target() {}')
 }
 
 fn test_closure_parameters_are_scoped_local_completions() {
