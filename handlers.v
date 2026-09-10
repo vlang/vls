@@ -152,7 +152,7 @@ fn (app &App) source_declaration_at(location Location) string {
 		}
 		parts << part
 	}
-	return parts.join(' ').trim_space()
+	return parts.join('\n').trim_space()
 }
 
 fn source_declaration_opens_body(mask []u8) bool {
@@ -284,15 +284,21 @@ fn signature_parameters(label string) []ParameterInformation {
 		} else if mask[i] in [`)`, `]`, `}`] && depth > 0 {
 			depth--
 		} else if mask[i] == `,` && depth == 0 {
-			parameters << ParameterInformation{
-				label: label[parameter_start..i].trim_space()
+			parameter := label[parameter_start..i].trim_space()
+			if parameter != '' {
+				parameters << ParameterInformation{
+					label: parameter
+				}
 			}
 			parameter_start = i + 1
 		}
 	}
 	if parameter_start < close_paren {
-		parameters << ParameterInformation{
-			label: label[parameter_start..close_paren].trim_space()
+		parameter := label[parameter_start..close_paren].trim_space()
+		if parameter != '' {
+			parameters << ParameterInformation{
+				label: parameter
+			}
 		}
 	}
 	return parameters
