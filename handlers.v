@@ -1291,8 +1291,7 @@ fn (mut app App) indexed_method_symbols(uri string, content string, receiver_typ
 	}
 }
 
-fn struct_field_is_public(source string, struct_symbol DocumentSymbol, field_symbol DocumentSymbol) bool {
-	lines := source.split_into_lines()
+fn struct_field_is_public(lines []string, struct_symbol DocumentSymbol, field_symbol DocumentSymbol) bool {
 	start_line := struct_symbol.range.start.line + 1
 	end_line := field_symbol.range.start.line
 	if start_line < 0 || end_line < start_line || end_line >= lines.len {
@@ -1310,23 +1309,22 @@ fn struct_field_is_public(source string, struct_symbol DocumentSymbol, field_sym
 	return is_public
 }
 
-fn field_completion_from_symbol(source string, symbol DocumentSymbol) ?Detail {
-	lines := source.split_into_lines()
+fn field_completion_from_symbol(lines []string, code_lines []string, symbol DocumentSymbol) ?Detail {
 	line_idx := symbol.range.start.line
-	if line_idx < 0 || line_idx >= lines.len {
+	if line_idx < 0 || line_idx >= lines.len || line_idx >= code_lines.len {
 		return none
 	}
 	if !is_valid_v_identifier_name(symbol.name) {
 		return none
 	}
-	trimmed := lines[line_idx].trim_space()
-	if trimmed.starts_with('@[') || first_word(trimmed) != symbol.name {
+	code := code_lines[line_idx].trim_space()
+	if code.starts_with('@[') || first_word(code) != symbol.name {
 		return none
 	}
 	return Detail{
 		kind:   5 // CompletionItemKind.Field
 		label:  symbol.name
-		detail: trimmed
+		detail: lines[line_idx].trim_space()
 	}
 }
 
@@ -1362,6 +1360,8 @@ fn (mut app App) indexed_struct_field_completions(uri string, content string, re
 			continue
 		}
 		source := app.index_source_for(indexed_uri) or { continue }
+		source_lines := source.split_into_lines()
+		code_lines := source_code_lines(source)
 		for symbol in entry.doc_symbols {
 			if symbol.kind != sym_kind_struct || normalize_receiver_type(symbol.name) != type_name {
 				continue
@@ -1375,10 +1375,10 @@ fn (mut app App) indexed_struct_field_completions(uri string, content string, re
 			}
 			for field in symbol.children {
 				if field.kind != sym_kind_field
-					|| (require_public && !struct_field_is_public(source, symbol, field)) {
+					|| (require_public && !struct_field_is_public(code_lines, symbol, field)) {
 					continue
 				}
-				if detail := field_completion_from_symbol(source, field) {
+				if detail := field_completion_from_symbol(source_lines, code_lines, field) {
 					items << detail
 				}
 			}
@@ -1571,6 +1571,15 @@ fn source_line_import_code(line string, mut state ImportScanState) string {
 	return code.bytestr()
 }
 
+fn source_code_lines(content string) []string {
+	mut lines := []string{}
+	mut scan_state := ImportScanState{}
+	for raw_line in content.split_into_lines() {
+		lines << source_line_import_code(raw_line, mut scan_state)
+	}
+	return lines
+}
+
 fn parse_import_binding(text string) ?ImportedModuleBinding {
 	parts := text.fields()
 	if parts.len == 0 {
@@ -1749,6 +1758,40 @@ fn module_completion_declaration(line string, public_only bool) bool {
 		|| declaration.starts_with('interface ') || declaration.starts_with('type ')
 }
 
+fn const_block_assignment_name(line string) string {
+	mut delimiter_depth := 0
+	for index, c in line {
+		match c {
+			`(`, `[`, `{` { delimiter_depth++ }
+			`)`, `]`, `}` {
+				if delimiter_depth > 0 {
+					delimiter_depth--
+				}
+			}
+			`=` {
+				if delimiter_depth == 0 {
+					name := line[..index].trim_space()
+					return if is_valid_v_identifier_name(name) { name } else { '' }
+				}
+			}
+			else {}
+		}
+	}
+	return ''
+}
+
+fn update_expression_delimiter_depth(line string, initial_depth int) int {
+	mut depth := initial_depth
+	for c in line {
+		if c in [`(`, `[`, `{`] {
+			depth++
+		} else if c in [`)`, `]`, `}`] && depth > 0 {
+			depth--
+		}
+	}
+	return depth
+}
+
 fn compile_time_conditional_lines(content string) []bool {
 	lines := content.split_into_lines()
 	mut result := []bool{len: lines.len}
@@ -1835,10 +1878,11 @@ fn compile_time_conditional_lines(content string) []bool {
 fn parse_module_member_completions(content string, public_only bool) ParsedModuleCompletionIndex {
 	mut items := []Detail{}
 	mut has_conditional := false
-	lines := content.split_into_lines()
+	lines := source_code_lines(content)
 	conditional_lines := compile_time_conditional_lines(content)
 	mut in_const_block := false
 	mut const_block_public := false
+	mut const_expression_depth := 0
 	for line_idx, line in lines {
 		trimmed := line.trim_space()
 		if trimmed == '' || trimmed.starts_with('//') {
@@ -1853,22 +1897,27 @@ fn parse_module_member_completions(content string, public_only bool) ParsedModul
 		if trimmed == 'const (' || trimmed == 'pub const (' {
 			in_const_block = true
 			const_block_public = trimmed.starts_with('pub ')
+			const_expression_depth = 0
 			continue
 		}
 		if in_const_block {
-			if trimmed == ')' {
+			if const_expression_depth == 0 && trimmed == ')' {
 				in_const_block = false
 				const_block_public = false
 				continue
 			}
-			name := extract_const_name(trimmed.all_before('//').trim_space())
-			if name != '' && (!public_only || const_block_public) {
-				items << Detail{
-					kind:   21 // CompletionItemKind.Constant
-					label:  name
-					detail: if const_block_public { 'pub const' } else { 'const' }
+			if const_expression_depth == 0 {
+				name := const_block_assignment_name(trimmed)
+				if name != '' && (!public_only || const_block_public) {
+					items << Detail{
+						kind:   21 // CompletionItemKind.Constant
+						label:  name
+						detail: if const_block_public { 'pub const' } else { 'const' }
+					}
 				}
 			}
+			const_expression_depth = update_expression_delimiter_depth(trimmed,
+				const_expression_depth)
 			continue
 		}
 		is_public := trimmed.starts_with('pub ')
@@ -4705,6 +4754,7 @@ fn lookup_fn_return_type(rhs string, index map[string]string) string {
 // and type aliases. Struct fields and enum members are returned as children.
 fn parse_document_symbols(content string) []DocumentSymbol {
 	lines := content.split_into_lines()
+	code_lines := source_code_lines(content)
 	mut symbols := []DocumentSymbol{}
 	// Track whether we are inside a struct or enum block to collect children.
 	mut in_struct := false
@@ -4713,7 +4763,7 @@ fn parse_document_symbols(content string) []DocumentSymbol {
 	mut current_parent_idx := -1 // index into `symbols` for the current parent
 
 	for i, raw_line in lines {
-		line := raw_line.trim_space()
+		line := code_lines[i].trim_space()
 
 		// Skip blank lines and pure comment lines
 		if line == '' || line.starts_with('//') {
@@ -5388,41 +5438,7 @@ fn (mut app App) collect_module_completions(current_file_uri string, working_dir
 // Method receivers (e.g. `fn (r Recv) method()`) are skipped.
 // When a function has parameters a snippet insertText with tab-stops is produced.
 fn parse_module_fn_completions(content string) []Detail {
-	mut items := []Detail{}
-	lines := content.split_into_lines()
-	for line_idx, line in lines {
-		trimmed := line.trim_space()
-		mut initial_after_fn := ''
-		if trimmed.starts_with('pub fn ') {
-			initial_after_fn = trimmed[7..]
-		} else if trimmed.starts_with('fn ') {
-			initial_after_fn = trimmed[3..]
-		} else {
-			continue
-		}
-		after_fn := complete_function_signature(lines, line_idx, initial_after_fn)
-		// Skip method receivers: `fn (recv Recv) method_name(`
-		if after_fn.starts_with('(') {
-			continue
-		}
-		paren_idx := after_fn.index('(') or { continue }
-		fn_name := after_fn[..paren_idx].trim_space()
-		if fn_name == '' || fn_name.contains(' ') || fn_name.contains('[') {
-			continue
-		}
-		// Build the detail string: full signature up to (but not including) ` {`
-		detail_str := '${if trimmed.starts_with('pub ') { 'pub ' } else { '' }}fn ${after_fn}'.all_before('{').trim_space()
-		// Build snippet insertText: fn_name($1, $2, ...) or fn_name($1)$0
-		insert := build_fn_snippet(fn_name, after_fn[paren_idx..])
-		items << Detail{
-			kind:               3 // CompletionItemKind.Function
-			label:              fn_name
-			detail:             detail_str
-			insert_text:        insert
-			insert_text_format: if insert.contains('$') { 2 } else { 1 }
-		}
-	}
-	return items
+	return parse_module_member_completions(content, false).items.filter(it.kind == 3)
 }
 
 // build_fn_snippet builds a VSCode-style snippet string for a function call.

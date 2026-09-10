@@ -5064,6 +5064,26 @@ fn test_parse_module_fn_completions_void_fn() {
 	assert 'log_msg' in labels
 }
 
+fn test_module_member_completions_ignore_block_comment_declarations() {
+	content := 'module example\n\n/*\npub fn removed() {}\npub struct Removed {}\n*/\n\npub fn available() {}\npub struct Available {}\n'
+	public_items := parse_module_member_completions(content, true).items
+	public_labels := public_items.map(it.label)
+	assert 'available' in public_labels
+	assert 'Available' in public_labels
+	assert 'removed' !in public_labels
+	assert 'Removed' !in public_labels
+	function_labels := parse_module_fn_completions(content).map(it.label)
+	assert 'available' in function_labels
+	assert 'removed' !in function_labels
+}
+
+fn test_module_const_block_completion_tracks_nested_expressions() {
+	content := 'module example\n\npub const (\n\tvalues = [\n\t\t1\n\t\t2\n\t]\n\tnested = build(\n\t\t3\n\t)\n\tafter = 4\n)\n'
+	items := parse_module_member_completions(content, true).items
+	labels := items.map(it.label)
+	assert labels == ['values', 'nested', 'after']
+}
+
 fn test_collect_module_fn_completions_skips_current_file() {
 	mut app := create_test_app()
 	defer {
@@ -6055,6 +6075,36 @@ fn test_struct_field_completion_excludes_attributes() {
 	assert 'age' in labels
 	assert '@[json:' !in labels
 	assert 'deprecated' !in labels
+}
+
+fn test_struct_field_completion_excludes_block_comment_fields() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'commented_struct_field_completion')
+	must_mkdir_all(test_dir)
+	main_file := os.join_path(test_dir, 'main.v')
+	content := 'module main\n\nstruct User {\n\tname string\n\t/*\n\tobsolete string\n\t*/\n\tage int\n}\n\nfn inspect(user User) {\n\tuser.\n}\n'
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	lines := content.split_into_lines()
+	completion_line := lines.index('\tuser.')
+	assert completion_line >= 0
+
+	symbols := parse_document_symbols(content)
+	user := symbols.filter(it.name == 'User')
+	assert user.len == 1
+	assert !user[0].children.any(it.name == 'obsolete')
+	indexed := app.indexed_completions(uri, Position{
+		line: completion_line
+		char: lines[completion_line].len
+	})
+	labels := indexed.items.map(it.label)
+	assert 'name' in labels
+	assert 'age' in labels
+	assert 'obsolete' !in labels
 }
 
 fn test_multiline_function_completion_builds_full_snippet() {
