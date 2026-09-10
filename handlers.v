@@ -140,7 +140,7 @@ fn (mut app App) indexed_completions(uri string, position Position) IndexedCompl
 		return IndexedCompletionResult{}
 	}
 	line := lines[position.line]
-	if line.trim_space().starts_with('import') {
+	if is_import_completion_line(line) {
 		return IndexedCompletionResult{
 			items: get_import_completions(line, os.dir(uri_to_path(uri)))
 		}
@@ -215,6 +215,18 @@ fn (mut app App) indexed_completions(uri string, position Position) IndexedCompl
 		items:        details
 		use_compiler: use_compiler
 	}
+}
+
+fn is_import_completion_line(line string) bool {
+	trimmed := line.trim_space()
+	return trimmed.starts_with('import')
+		&& (trimmed.len == 6 || !is_ident_char(trimmed[6]))
+}
+
+fn starts_binding_scope_header(source string) bool {
+	trimmed := source.trim_space()
+	return trimmed.starts_with('for ') || trimmed.starts_with('if ')
+		|| trimmed.starts_with('else if ')
 }
 
 fn struct_literal_type_at_cursor(content string, position Position, enc PositionEncoding) string {
@@ -554,10 +566,10 @@ fn (app &App) local_scope_completions(content string, position Position) []Detai
 			}
 			segment := code[segment_start..col]
 			segment_names := local_declaration_names(segment)
-			loop_header := c == `{` && segment.trim_space().starts_with('for ')
-			block_names := if loop_header { segment_names } else { pending_block_names }
+			binding_scope_header := c == `{` && starts_binding_scope_header(segment)
+			block_names := if binding_scope_header { segment_names } else { pending_block_names }
 			if body_started && scopes.len > 0 {
-				outer_segment_names := if loop_header { []string{} } else { segment_names }
+				outer_segment_names := if binding_scope_header { []string{} } else { segment_names }
 				for name in outer_segment_names {
 					if name !in scopes.last() {
 						scopes[scopes.len - 1] << name
@@ -586,7 +598,7 @@ fn (app &App) local_scope_completions(content string, position Position) []Detai
 		if body_started && scopes.len > 0 {
 			tail := code[segment_start..]
 			tail_names := local_declaration_names(tail)
-			if tail.trim_space().starts_with('for ') && tail_names.len > 0 {
+			if starts_binding_scope_header(tail) && tail_names.len > 0 {
 				pending_block_names = tail_names.clone()
 			} else {
 				for name in tail_names {
@@ -695,17 +707,65 @@ fn callable_or_constructor(rhs string) (string, bool) {
 	return '', false
 }
 
+fn source_fragment_starts_with_literal(source string) bool {
+	trimmed := source.trim_space()
+	if trimmed == '' {
+		return false
+	}
+	if trimmed[0] in [`'`, `"`, 96] {
+		return true
+	}
+	return trimmed.len > 1 && trimmed[0] == `r` && trimmed[1] in [`'`, `"`]
+}
+
+fn receiver_rhs_has_open_delimiter(rhs string) bool {
+	mut round_depth := 0
+	mut square_depth := 0
+	mut curly_depth := 0
+	for c in rhs {
+		match c {
+			`(` { round_depth++ }
+			`)` { round_depth-- }
+			`[` { square_depth++ }
+			`]` { square_depth-- }
+			`{` { curly_depth++ }
+			`}` { curly_depth-- }
+			else {}
+		}
+	}
+	return round_depth > 0 || square_depth > 0 || curly_depth > 0
+}
+
+fn receiver_rhs_needs_continuation(rhs string, has_expression bool, scan_state &ImportScanState) bool {
+	if scan_state.quote != 0 || receiver_rhs_has_open_delimiter(rhs) {
+		return true
+	}
+	if !has_expression {
+		return true
+	}
+	trimmed := rhs.trim_space()
+	if trimmed == '' {
+		return false
+	}
+	return trimmed[trimmed.len - 1] in [`.`, `,`, `+`, `-`, `*`, `/`, `%`, `&`, `|`, `^`,
+		`=`, `!`, `<`, `>`, `?`, `:`]
+}
+
 struct ReceiverDeclaration {
-	rhs           string
-	binding_index int
-	binding_count int
+	rhs            string
+	binding_index  int
+	binding_count  int
+	assignment_end int
 }
 
 fn receiver_declaration_on_line(code string, receiver string) ?ReceiverDeclaration {
+	mut statement_start := 0
 	for raw_statement in code.split(';') {
-		statement := raw_statement.trim_space()
-		assign_idx := statement.index(':=') or { continue }
-		assignment_prefix := statement[..assign_idx]
+		assign_idx := raw_statement.index(':=') or {
+			statement_start += raw_statement.len + 1
+			continue
+		}
+		assignment_prefix := raw_statement[..assign_idx]
 		lhs := if brace_idx := assignment_prefix.last_index('{') {
 			assignment_prefix[brace_idx + 1..]
 		} else {
@@ -714,12 +774,14 @@ fn receiver_declaration_on_line(code string, receiver string) ?ReceiverDeclarati
 		bindings := binding_identifiers(lhs)
 		binding_index := bindings.index(receiver)
 		if binding_index < 0 {
+			statement_start += raw_statement.len + 1
 			continue
 		}
 		return ReceiverDeclaration{
-			rhs:           statement[assign_idx + 2..]
-			binding_index: binding_index
-			binding_count: bindings.len
+			rhs:            raw_statement[assign_idx + 2..].trim_space()
+			binding_index:  binding_index
+			binding_count:  bindings.len
+			assignment_end: statement_start + assign_idx + 2
 		}
 	}
 	return none
@@ -798,6 +860,7 @@ fn (mut app App) infer_receiver_type(uri string, content string, receiver string
 	mut header_start := -1
 	mut scan_state := ImportScanState{}
 	mut latest_rhs := ''
+	mut latest_raw_rhs := ''
 	mut latest_declaration_line := -1
 	mut latest_binding_index := 0
 	mut latest_binding_count := 1
@@ -815,12 +878,18 @@ fn (mut app App) infer_receiver_type(uri string, content string, receiver string
 		if declaration.starts_with('fn ') {
 			header_start = i
 			latest_rhs = ''
+			latest_raw_rhs = ''
 			latest_declaration_line = -1
 			latest_binding_index = 0
 			latest_binding_count = 1
 		}
 		if receiver_declaration := receiver_declaration_on_line(code, receiver) {
 			latest_rhs = receiver_declaration.rhs
+			latest_raw_rhs = if receiver_declaration.assignment_end <= raw_line.len {
+				raw_line[receiver_declaration.assignment_end..]
+			} else {
+				''
+			}
 			latest_declaration_line = i
 			latest_binding_index = receiver_declaration.binding_index
 			latest_binding_count = receiver_declaration.binding_count
@@ -828,15 +897,22 @@ fn (mut app App) infer_receiver_type(uri string, content string, receiver string
 	}
 
 	if latest_declaration_line >= 0 {
-		mut end_line := latest_declaration_line + 12
-		if end_line > use_line + 1 {
-			end_line = use_line + 1
-		}
-		if end_line > lines.len {
-			end_line = lines.len
-		}
-		for i in latest_declaration_line + 1 .. end_line {
-			latest_rhs += '\n' + lines[i]
+		mut rhs_scan_state := ImportScanState{}
+		source_line_import_code(latest_raw_rhs, mut rhs_scan_state)
+		mut rhs_has_expression := latest_rhs.trim_space() != ''
+			|| source_fragment_starts_with_literal(latest_raw_rhs)
+		mut next_line := latest_declaration_line + 1
+		for next_line <= use_line && next_line < lines.len
+			&& receiver_rhs_needs_continuation(latest_rhs, rhs_has_expression, &rhs_scan_state) {
+			next_code := source_line_import_code(lines[next_line], mut rhs_scan_state)
+			if !receiver_rhs_has_open_delimiter(latest_rhs)
+				&& local_declaration_names(next_code).len > 0 {
+				break
+			}
+			latest_rhs += '\n' + next_code
+			rhs_has_expression = rhs_has_expression || next_code.trim_space() != ''
+				|| source_fragment_starts_with_literal(lines[next_line])
+			next_line++
 		}
 		mut receiver_rhs := latest_rhs
 		if latest_binding_count > 1 {
@@ -1467,8 +1543,8 @@ fn module_completion_declaration(line string, public_only bool) bool {
 		return !declaration[3..].trim_space().starts_with('(')
 	}
 	return declaration.starts_with('const ') || declaration.starts_with('struct ')
-		|| declaration.starts_with('enum ') || declaration.starts_with('interface ')
-		|| declaration.starts_with('type ')
+		|| declaration.starts_with('union ') || declaration.starts_with('enum ')
+		|| declaration.starts_with('interface ') || declaration.starts_with('type ')
 }
 
 fn compile_time_conditional_lines(content string) []bool {
@@ -1634,6 +1710,17 @@ fn parse_module_member_completions(content string, public_only bool) ParsedModul
 		}
 		if declaration.starts_with('struct ') {
 			name := module_type_completion_name(declaration[7..])
+			if name != '' {
+				items << Detail{
+					kind:   22 // CompletionItemKind.Struct
+					label:  name
+					detail: trimmed.all_before('{').trim_space()
+				}
+			}
+			continue
+		}
+		if declaration.starts_with('union ') {
+			name := module_type_completion_name(declaration[6..])
 			if name != '' {
 				items << Detail{
 					kind:   22 // CompletionItemKind.Struct
@@ -3758,10 +3845,10 @@ fn parse_imports(content string) []string {
 // get_import_completions returns completion items for an `import` line.
 // It lists vlib modules and local project modules matching the typed prefix.
 fn get_import_completions(line string, work_dir string) []Detail {
-	trimmed := line.trim_space()
-	if !trimmed.starts_with('import') {
+	if !is_import_completion_line(line) {
 		return []
 	}
+	trimmed := line.trim_space()
 	// typed is everything after 'import', e.g. '', 'enc', 'encoding', 'encoding.'
 	typed := if trimmed.len > 7 { trimmed[7..].trim_space() } else { '' }
 

@@ -6184,6 +6184,144 @@ fn test_conditional_bare_completion_requests_compiler_fallback() {
 	assert !indexed.items.any(it.label == 'platform_only')
 }
 
+fn test_receiver_inference_stops_at_completed_declaration_rhs() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'receiver_declaration_boundary')
+	must_mkdir_all(test_dir)
+	main_file := os.join_path(test_dir, 'main.v')
+	content := "module main\n\nstruct User {}\nfn (user User) save() {}\n\nfn main() {\n\ttext := 'hello'\n\tuser := User{}\n\ttext.\n}\n"
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	lines := content.split_into_lines()
+	completion_line := lines.index('\ttext.')
+	assert completion_line >= 0
+	assert app.infer_receiver_type(uri, content, 'text', completion_line) == ''
+
+	indexed := app.indexed_completions(uri, Position{
+		line: completion_line
+		char: lines[completion_line].len
+	})
+	assert indexed.use_compiler
+	assert !indexed.items.any(it.label == 'save')
+
+	continued_content := 'module main\n\nstruct User {}\n\nfn main() {\n\tcontinued :=\n\t\tUser{}\n\tcontinued.\n}\n'
+	continued_lines := continued_content.split_into_lines()
+	continued_line := continued_lines.index('\tcontinued.')
+	assert continued_line >= 0
+	assert app.infer_receiver_type(uri, continued_content, 'continued', continued_line) == 'User'
+}
+
+fn test_import_prefix_identifiers_use_normal_completion() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'import_prefix_completion')
+	must_mkdir_all(test_dir)
+	main_file := os.join_path(test_dir, 'main.v')
+	content := 'module main\n\nstruct Important {}\nfn (value Important) run() {}\n\nfn main() {\n\timportant := Important{}\n\timported_value := 1\n\timportant.\n\timported_\n}\n'
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	lines := content.split_into_lines()
+	member_line := lines.index('\timportant.')
+	bare_line := lines.index('\timported_')
+	assert member_line >= 0
+	assert bare_line >= 0
+	assert !is_import_completion_line(lines[member_line])
+	assert !is_import_completion_line(lines[bare_line])
+	assert get_import_completions(lines[member_line], test_dir).len == 0
+
+	member := app.indexed_completions(uri, Position{
+		line: member_line
+		char: lines[member_line].len
+	})
+	assert !member.use_compiler
+	assert member.items.any(it.label == 'run')
+	bare := app.indexed_completions(uri, Position{
+		line: bare_line
+		char: lines[bare_line].len
+	})
+	assert bare.items.any(it.label == 'imported_value')
+}
+
+fn test_if_header_bindings_are_removed_with_branch_scope() {
+	app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	content := 'module main\n\nfn inspect() {\n\tif clock := maybe_clock() {\n\t\tclock\n\t}\n\tif other :=\n\t\tmaybe_clock() {\n\t\tother\n\t}\n\tclo\n}\n'
+	lines := content.split_into_lines()
+	inside_line := lines.index('\t\tclock')
+	multiline_inside_line := lines.index('\t\tother')
+	after_line := lines.index('\tclo')
+	assert inside_line >= 0
+	assert multiline_inside_line >= 0
+	assert after_line >= 0
+	inside := app.local_scope_completions(content, Position{
+		line: inside_line
+		char: lines[inside_line].len
+	}).map(it.label)
+	assert 'clock' in inside
+	multiline_inside := app.local_scope_completions(content, Position{
+		line: multiline_inside_line
+		char: lines[multiline_inside_line].len
+	}).map(it.label)
+	assert 'other' in multiline_inside
+	after := app.local_scope_completions(content, Position{
+		line: after_line
+		char: lines[after_line].len
+	}).map(it.label)
+	assert 'clock' !in after
+	assert 'other' !in after
+}
+
+fn test_union_declarations_are_in_module_completions() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'union_module_completion')
+	module_dir := os.join_path(test_dir, 'packets')
+	must_mkdir_all(module_dir)
+	module_file := os.join_path(module_dir, 'packets.v')
+	module_content := 'module packets\n\npub union Packet {\n\ttext string\n\tnumber int\n}\n\npub fn always() {}\n\nfn inspect() {\n\tPac\n}\n'
+	must_write_file(module_file, module_content)
+	module_uri := path_to_uri(module_file)
+	app.open_files[module_uri] = module_content
+	module_lines := module_content.split_into_lines()
+	bare_line := module_lines.index('\tPac')
+	assert bare_line >= 0
+	bare := app.indexed_completions(module_uri, Position{
+		line: bare_line
+		char: module_lines[bare_line].len
+	})
+	packet_items := bare.items.filter(it.label == 'Packet')
+	assert packet_items.len == 1
+	assert packet_items[0].kind == 22
+
+	main_file := os.join_path(test_dir, 'main.v')
+	content := 'module main\n\nimport packets\n\nfn main() {\n\tpackets.\n}\n'
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	lines := content.split_into_lines()
+	member_line := lines.index('\tpackets.')
+	assert member_line >= 0
+	imported := app.indexed_completions(uri, Position{
+		line: member_line
+		char: lines[member_line].len
+	})
+	labels := imported.items.map(it.label)
+	assert !imported.use_compiler
+	assert 'Packet' in labels
+	assert 'always' in labels
+}
+
 fn test_semantic_tokens_returns_data_for_known_content() {
 	mut app := create_test_app()
 	defer {
