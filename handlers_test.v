@@ -6002,10 +6002,8 @@ fn test_execute_run_file_returns_before_long_running_program_finishes() {
 	assert resp.result is string
 	assert (resp.result as string) == 'null'
 	assert elapsed_ms < 1000
-	mut startup_timeout_ms := 10_000
-	$if windows {
-		startup_timeout_ms = 30_000
-	}
+	// V3 compilation can take more than 10 seconds on loaded CI runners.
+	startup_timeout_ms := 30_000
 	deadline := time.now().unix_milli() + startup_timeout_ms
 	for !os.exists(marker_path) && time.now().unix_milli() < deadline {
 		time.sleep(10 * time.millisecond)
