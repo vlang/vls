@@ -5845,7 +5845,8 @@ fn test_execute_run_file_returns_before_long_running_program_finishes() {
 	}
 	path := os.join_path(app.temp_dir, 'code_lens_long_running.v')
 	marker_path := os.join_path(app.temp_dir, 'code_lens_long_running.started')
-	must_write_file(path, 'module main\n\nimport os\nimport time\n\nfn main() {\n\tos.write_file("${marker_path}", "started") or {}\n\t_ := os.input("")\n\ttime.sleep(5 * time.second)\n}\n')
+	marker_literal := code_lens_v_string_literal(marker_path)
+	must_write_file(path, 'module main\n\nimport os\nimport time\n\nfn main() {\n\tos.write_file(${marker_literal}, "started") or {}\n\t_ := os.input("")\n\ttime.sleep(5 * time.second)\n}\n')
 	app.capture_output = true
 
 	started_at := time.now().unix_milli()
