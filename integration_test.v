@@ -32,9 +32,9 @@ fn create_integration_test_env() (&App, string) {
 	integration_test_must_mkdir_all(project_dir)
 
 	app := &App{
-		text:       ''
+		text: ''
 		open_files: map[string]string{}
-		temp_dir:   temp_dir
+		temp_dir: temp_dir
 	}
 	return app, project_dir
 }
@@ -47,20 +47,20 @@ fn cleanup_integration_test_env(_ &App, project_dir string) {
 fn test_integration_initialize_capabilities() {
 	// Simulate what the server returns for initialize
 	response := Response{
-		id:     0
+		id: 0
 		result: Capabilities{
 			capabilities: Capability{
-				text_document_sync:      TextDocumentSyncOptions{
+				text_document_sync: TextDocumentSyncOptions{
 					open_close: true
-					change:     1
+					change: 1
 				}
-				completion_provider:     CompletionProvider{
+				completion_provider: CompletionProvider{
 					trigger_characters: ['.']
 				}
 				signature_help_provider: SignatureHelpOptions{
 					trigger_characters: ['(', ',']
 				}
-				definition_provider:     true
+				definition_provider: true
 			}
 		}
 	}
@@ -81,7 +81,7 @@ fn test_integration_initialize_capabilities() {
 fn test_integration_initialize_response_structure() {
 	// Verify response has proper JSON-RPC structure
 	response := Response{
-		id:     0
+		id: 0
 		result: Capabilities{
 			capabilities: Capability{
 				definition_provider: true
@@ -99,7 +99,7 @@ fn test_integration_initialize_response_structure() {
 
 fn test_integration_initialize_does_not_advertise_client_snippet_support() {
 	response := Response{
-		id:     0
+		id: 0
 		result: Capabilities{
 			capabilities: Capability{
 				completion_provider: CompletionProvider{
@@ -115,14 +115,14 @@ fn test_integration_initialize_does_not_advertise_client_snippet_support() {
 
 fn test_integration_initialize_workspace_capabilities() {
 	response := Response{
-		id:     0
+		id: 0
 		result: Capabilities{
 			capabilities: Capability{
 				execute_command_provider: ExecuteCommandOptions{
 					commands: ['vls.runFile', 'vls.runTests']
 				}
-				workspace:                WorkspaceCapability{
-					file_operations:   WorkspaceFileOperations{
+				workspace: WorkspaceCapability{
+					file_operations: WorkspaceFileOperations{
 						will_create: FileOperationRegistrationOptions{
 							filters: [
 								FileOperationFilter{
@@ -152,7 +152,7 @@ fn test_integration_initialize_workspace_capabilities() {
 						}
 					}
 					workspace_folders: WorkspaceFoldersServerCapability{
-						supported:            true
+						supported: true
 						change_notifications: true
 					}
 				}
@@ -183,10 +183,10 @@ fn test_integration_document_lifecycle() {
 
 	// 1. Open document
 	open_request := Request{
-		id:      1
-		method:  'textDocument/didOpen'
+		id: 1
+		method: 'textDocument/didOpen'
 		jsonrpc: '2.0'
-		params:  json2.encode(Params{
+		params: json2.encode(Params{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
@@ -202,11 +202,11 @@ fn test_integration_document_lifecycle() {
 	// 2. Change document
 	new_content := "module main\n\nfn main() {\n\tprintln('world')\n}\n"
 	change_request := Request{
-		id:      2
-		method:  'textDocument/didChange'
+		id: 2
+		method: 'textDocument/didChange'
 		jsonrpc: '2.0'
-		params:  json2.encode(Params{
-			text_document:   TextDocumentIdentifier{
+		params: json2.encode(Params{
+			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
 			content_changes: [ContentChange{
@@ -421,7 +421,7 @@ fn test_integration_diagnostics_syntax_error() {
 	// Trigger change to get diagnostics
 	change_request := Request{
 		params: json2.encode(Params{
-			text_document:   TextDocumentIdentifier{
+			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
 			content_changes: [ContentChange{
@@ -467,7 +467,7 @@ fn test_integration_diagnostics_valid_code() {
 
 	change_request := Request{
 		params: json2.encode(Params{
-			text_document:   TextDocumentIdentifier{
+			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
 			content_changes: [ContentChange{
@@ -495,17 +495,17 @@ fn test_integration_diagnostics_deduplication() {
 	errors := [
 		JsonError{
 			line_nr: 5
-			col:     10
+			col: 10
 			message: 'first error'
 		},
 		JsonError{
 			line_nr: 5
-			col:     10
+			col: 10
 			message: 'duplicate error'
 		}, // Same position
 		JsonError{
 			line_nr: 6
-			col:     1
+			col: 1
 			message: 'different position'
 		},
 	]
@@ -547,7 +547,7 @@ fn test_integration_diagnostics_empty_file() {
 	// Empty content should be processed and return diagnostics for the empty file
 	result := app.on_did_change(Request{
 		params: json2.encode(Params{
-			text_document:   TextDocumentIdentifier{
+			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
 			content_changes: [ContentChange{
@@ -592,14 +592,14 @@ fn test_integration_completion_request() {
 
 	// Request completion at the position after "os."
 	request := Request{
-		id:      1
-		method:  'textDocument/completion'
+		id: 1
+		method: 'textDocument/completion'
 		jsonrpc: '2.0'
-		params:  json2.encode(Params{
+		params: json2.encode(Params{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-			position:      Position{
+			position: Position{
 				line: 3
 				char: 4
 			} // After "os."
@@ -630,12 +630,12 @@ fn test_integration_completion_request_id_preserved() {
 	// Test with various IDs
 	for id in [1, 42, 100, 999] {
 		request := Request{
-			id:     id
+			id: id
 			params: json2.encode(Params{
 				text_document: TextDocumentIdentifier{
 					uri: uri
 				}
-				position:      Position{
+				position: Position{
 					line: 2
 					char: 0
 				}
@@ -663,12 +663,12 @@ fn test_integration_completion_at_function_call() {
 	app.open_files[uri] = content
 
 	request := Request{
-		id:     1
+		id: 1
 		params: json2.encode(Params{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-			position:      Position{
+			position: Position{
 				line: 3
 				char: 9
 			}
@@ -707,14 +707,14 @@ fn test_integration_definition_request() {
 
 	// Request definition at the call site of helper()
 	request := Request{
-		id:      2
-		method:  'textDocument/definition'
+		id: 2
+		method: 'textDocument/definition'
 		jsonrpc: '2.0'
-		params:  json2.encode(Params{
+		params: json2.encode(Params{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-			position:      Position{
+			position: Position{
 				line: 5
 				char: 2
 			} // At "helper()"
@@ -776,12 +776,12 @@ fn test_integration_definition_multifile() {
 
 	// Request definition from main file
 	request := Request{
-		id:     3
+		id: 3
 		params: json2.encode(Params{
 			text_document: TextDocumentIdentifier{
 				uri: main_uri
 			}
-			position:      Position{
+			position: Position{
 				line: 3
 				char: 2
 			}
@@ -799,8 +799,7 @@ fn test_integration_cross_module_features_use_unsaved_project_overlay() {
 	defer {
 		cleanup_integration_test_env(app, project_dir)
 	}
-	integration_test_must_write_file(os.join_path(project_dir, 'v.mod'),
-		"Module {\n\tname: 'cross_module_test'\n}\n")
+	integration_test_must_write_file(os.join_path(project_dir, 'v.mod'), "Module {\n\tname: 'cross_module_test'\n}\n")
 	source_dir := os.join_path(project_dir, 'src')
 	module_dir := os.join_path(source_dir, 'mathutil')
 	integration_test_must_mkdir_all(module_dir)
@@ -830,13 +829,13 @@ fn test_integration_cross_module_features_use_unsaved_project_overlay() {
 	app.text = open_content
 
 	definition := app.operation_at_pos(.definition, Request{
-		id:     31
+		id: 31
 		method: 'textDocument/definition'
 		params: json2.encode(TextDocumentPositionParams{
 			text_document: TextDocumentIdentifier{
 				uri: main_uri
 			}
-			position:      Position{
+			position: Position{
 				line: 5
 				char: 20
 			}
@@ -850,13 +849,13 @@ fn test_integration_cross_module_features_use_unsaved_project_overlay() {
 	assert definition_location.range.start.line == 2
 
 	hover := app.operation_at_pos(.hover, Request{
-		id:     32
+		id: 32
 		method: 'textDocument/hover'
 		params: json2.encode(TextDocumentPositionParams{
 			text_document: TextDocumentIdentifier{
 				uri: main_uri
 			}
-			position:      Position{
+			position: Position{
 				line: 5
 				char: 20
 			}
@@ -868,13 +867,13 @@ fn test_integration_cross_module_features_use_unsaved_project_overlay() {
 	assert (hover.result as Hover).contents.value.contains('answer')
 
 	signature := app.operation_at_pos(.signature_help, Request{
-		id:     33
+		id: 33
 		method: 'textDocument/signatureHelp'
 		params: json2.encode(TextDocumentPositionParams{
 			text_document: TextDocumentIdentifier{
 				uri: main_uri
 			}
-			position:      Position{
+			position: Position{
 				line: 5
 				char: 25
 			}
@@ -887,13 +886,13 @@ fn test_integration_cross_module_features_use_unsaved_project_overlay() {
 	assert signature_help.signatures.any(it.label.contains('answer'))
 
 	completion := app.operation_at_pos(.completion, Request{
-		id:     34
+		id: 34
 		method: 'textDocument/completion'
 		params: json2.encode(TextDocumentPositionParams{
 			text_document: TextDocumentIdentifier{
 				uri: main_uri
 			}
-			position:      Position{
+			position: Position{
 				line: 5
 				char: 18
 			}
@@ -958,12 +957,12 @@ fn test_integration_vlang_v_cross_module_features_from_env() {
 
 	for i, method in [Method.definition, .declaration, .type_definition, .implementation] {
 		response := app.operation_at_pos(method, Request{
-			id:     40 + i
+			id: 40 + i
 			params: json2.encode(TextDocumentPositionParams{
 				text_document: TextDocumentIdentifier{
 					uri: main_uri
 				}
-				position:      Position{
+				position: Position{
 					line: call_line
 					char: compile_col + 2
 				}
@@ -978,12 +977,12 @@ fn test_integration_vlang_v_cross_module_features_from_env() {
 	}
 
 	hover := app.operation_at_pos(.hover, Request{
-		id:     44
+		id: 44
 		params: json2.encode(TextDocumentPositionParams{
 			text_document: TextDocumentIdentifier{
 				uri: main_uri
 			}
-			position:      Position{
+			position: Position{
 				line: call_line
 				char: compile_col + 2
 			}
@@ -997,12 +996,12 @@ fn test_integration_vlang_v_cross_module_features_from_env() {
 	open_paren_col := lines[call_line].index('builder.compile(') or { -1 }
 	assert open_paren_col >= 0
 	signature := app.operation_at_pos(.signature_help, Request{
-		id:     45
+		id: 45
 		params: json2.encode(TextDocumentPositionParams{
 			text_document: TextDocumentIdentifier{
 				uri: main_uri
 			}
-			position:      Position{
+			position: Position{
 				line: call_line
 				char: open_paren_col + 'builder.compile('.len
 			}
@@ -1021,12 +1020,12 @@ fn test_integration_vlang_v_cross_module_features_from_env() {
 	app.open_files[main_uri] = completion_content
 	app.text = completion_content
 	completion := app.operation_at_pos(.completion, Request{
-		id:     46
+		id: 46
 		params: json2.encode(TextDocumentPositionParams{
 			text_document: TextDocumentIdentifier{
 				uri: main_uri
 			}
-			position:      Position{
+			position: Position{
 				line: call_line
 				char: dot_col + 'builder.'.len
 			}
@@ -1165,14 +1164,14 @@ fn test_integration_signature_help_request() {
 
 	// Request signature help after opening paren
 	request := Request{
-		id:      3
-		method:  'textDocument/signatureHelp'
+		id: 3
+		method: 'textDocument/signatureHelp'
 		jsonrpc: '2.0'
-		params:  json2.encode(Params{
+		params: json2.encode(Params{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-			position:      Position{
+			position: Position{
 				line: 5
 				char: 7
 			} // After "greet("
@@ -1206,12 +1205,12 @@ fn test_integration_signature_help_with_params() {
 
 	// At second parameter position
 	request := Request{
-		id:     4
+		id: 4
 		params: json2.encode(Params{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-			position:      Position{
+			position: Position{
 				line: 5
 				char: 7
 			}
@@ -1375,7 +1374,7 @@ fn test_integration_json_error_with_special_chars() {
 
 fn test_integration_response_encoding() {
 	response := Response{
-		id:     42
+		id: 42
 		result: 'null'
 	}
 
@@ -1391,20 +1390,20 @@ fn test_integration_notification_encoding() {
 	notification := Notification{
 		method: 'textDocument/publishDiagnostics'
 		params: PublishDiagnosticsParams{
-			uri:         'file:///test.v'
+			uri: 'file:///test.v'
 			diagnostics: [
 				LSPDiagnostic{
-					range:    LSPRange{
+					range: LSPRange{
 						start: Position{
 							line: 0
 							char: 0
 						}
-						end:   Position{
+						end: Position{
 							line: 0
 							char: 5
 						}
 					}
-					message:  'test error'
+					message: 'test error'
 					severity: 1
 				},
 			]
@@ -1446,7 +1445,7 @@ fn test_integration_begin_progress_with_client_support_emits_create_and_begin() 
 	assert app.captured_output.len == 2
 	assert app.captured_output[0].contains('"method":"window/workDoneProgress/create"')
 	assert app.captured_output[0].contains('"token":"${token}"')
-	assert app.captured_output[1].contains('"method":"$/progress"')
+	assert app.captured_output[1].contains('"method":"\$/progress"')
 	assert app.captured_output[1].contains('"kind":"begin"')
 	assert app.captured_output[1].contains('"title":"Searching workspace symbols')
 }
@@ -1454,19 +1453,19 @@ fn test_integration_begin_progress_with_client_support_emits_create_and_begin() 
 fn test_integration_completion_response_encoding() {
 	details := [
 		Detail{
-			kind:   6
-			label:  'println'
+			kind: 6
+			label: 'println'
 			detail: 'fn println(s string)'
 		},
 		Detail{
-			kind:   6
-			label:  'print'
+			kind: 6
+			label: 'print'
 			detail: 'fn print(s string)'
 		},
 	]
 
 	response := Response{
-		id:     1
+		id: 1
 		result: details
 	}
 
@@ -1477,15 +1476,15 @@ fn test_integration_completion_response_encoding() {
 
 fn test_integration_location_response_encoding() {
 	response := Response{
-		id:     1
+		id: 1
 		result: Location{
-			uri:   'file:///test/main.v'
+			uri: 'file:///test/main.v'
 			range: LSPRange{
 				start: Position{
 					line: 10
 					char: 5
 				}
-				end:   Position{
+				end: Position{
 					line: 10
 					char: 15
 				}
@@ -1500,11 +1499,11 @@ fn test_integration_location_response_encoding() {
 
 fn test_integration_signature_help_response_encoding() {
 	response := Response{
-		id:     1
+		id: 1
 		result: SignatureHelp{
-			signatures:       [
+			signatures: [
 				SignatureInformation{
-					label:      'fn test(a int, b string)'
+					label: 'fn test(a int, b string)'
 					parameters: [
 						ParameterInformation{
 							label: 'a int'
@@ -1543,13 +1542,13 @@ fn test_integration_request_id_preserved() {
 	// Test with different request IDs
 	for id in [1, 42, 999, 0] {
 		request := Request{
-			id:     id
+			id: id
 			method: 'textDocument/completion'
 			params: json2.encode(Params{
 				text_document: TextDocumentIdentifier{
 					uri: uri
 				}
-				position:      Position{
+				position: Position{
 					line: 2
 					char: 0
 				}
@@ -1662,17 +1661,17 @@ fn test_integration_full_lifecycle() {
 	// 2. Simulate initialize (verify capabilities)
 	caps := Capabilities{
 		capabilities: Capability{
-			text_document_sync:      TextDocumentSyncOptions{
+			text_document_sync: TextDocumentSyncOptions{
 				open_close: true
-				change:     1
+				change: 1
 			}
-			completion_provider:     CompletionProvider{
+			completion_provider: CompletionProvider{
 				trigger_characters: ['.']
 			}
 			signature_help_provider: SignatureHelpOptions{
 				trigger_characters: ['(', ',']
 			}
-			definition_provider:     true
+			definition_provider: true
 		}
 	}
 	assert caps.capabilities.definition_provider == true
@@ -1693,7 +1692,7 @@ fn test_integration_full_lifecycle() {
 	modified_content := 'module main\n\nfn helper() {}\n\nfn main() {\n\thelper()\n}\n'
 	app.on_did_change(Request{
 		params: json2.encode(Params{
-			text_document:   TextDocumentIdentifier{
+			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
 			content_changes: [ContentChange{
@@ -1707,12 +1706,12 @@ fn test_integration_full_lifecycle() {
 
 	// 5. Request completion
 	comp_response := app.operation_at_pos(.completion, Request{
-		id:     1
+		id: 1
 		params: json2.encode(Params{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-			position:      Position{
+			position: Position{
 				line: 5
 				char: 2
 			}
@@ -1724,12 +1723,12 @@ fn test_integration_full_lifecycle() {
 
 	// 6. Request definition
 	def_response := app.operation_at_pos(.definition, Request{
-		id:     2
+		id: 2
 		params: json2.encode(Params{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-			position:      Position{
+			position: Position{
 				line: 5
 				char: 2
 			}
@@ -1746,7 +1745,7 @@ fn test_integration_full_lifecycle() {
 fn test_integration_shutdown_response() {
 	// Verify shutdown response structure
 	shutdown_resp := Response{
-		id:     1
+		id: 1
 		result: 'null'
 	}
 
@@ -1875,8 +1874,7 @@ fn test_integration_pre_initialize_notification_is_ignored() {
 
 	did_open_before_init := '{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"file:///tmp/preinit.v","text":"module main"}}}'
 	initialize := '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}'
-	framed := integration_test_frame_message(did_open_before_init) +
-		integration_test_frame_message(initialize)
+	framed := integration_test_frame_message(did_open_before_init) + integration_test_frame_message(initialize)
 	input_path := os.join_path(project_dir, 'pre_init_notification_input.txt')
 	integration_test_must_write_file(input_path, framed)
 
@@ -1907,8 +1905,7 @@ fn test_integration_initialized_notification_after_initialize_registers_watcher(
 
 	initialize := '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{"workspace":{"didChangeWatchedFiles":{"dynamicRegistration":true}}}}}'
 	initialized := '{"jsonrpc":"2.0","method":"initialized","params":{}}'
-	framed := integration_test_frame_message(initialize) +
-		integration_test_frame_message(initialized)
+	framed := integration_test_frame_message(initialize) + integration_test_frame_message(initialized)
 	input_path := os.join_path(project_dir, 'initialized_notification_input.txt')
 	integration_test_must_write_file(input_path, framed)
 
@@ -1941,8 +1938,7 @@ fn test_integration_initialized_notification_without_dynamic_support_skips_regis
 
 	initialize := '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}'
 	initialized := '{"jsonrpc":"2.0","method":"initialized","params":{}}'
-	framed := integration_test_frame_message(initialize) +
-		integration_test_frame_message(initialized)
+	framed := integration_test_frame_message(initialize) + integration_test_frame_message(initialized)
 	input_path := os.join_path(project_dir, 'initialized_no_dynamic_support_input.txt')
 	integration_test_must_write_file(input_path, framed)
 
@@ -1975,9 +1971,7 @@ fn test_integration_duplicate_initialized_sends_single_registration() {
 	initialize := '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{"workspace":{"didChangeWatchedFiles":{"dynamicRegistration":true}}}}}'
 	initialized_1 := '{"jsonrpc":"2.0","method":"initialized","params":{}}'
 	initialized_2 := '{"jsonrpc":"2.0","method":"initialized","params":{}}'
-	framed := integration_test_frame_message(initialize) +
-		integration_test_frame_message(initialized_1) +
-		integration_test_frame_message(initialized_2)
+	framed := integration_test_frame_message(initialize) + integration_test_frame_message(initialized_1) + integration_test_frame_message(initialized_2)
 	input_path := os.join_path(project_dir, 'duplicate_initialized_input.txt')
 	integration_test_must_write_file(input_path, framed)
 
@@ -2011,8 +2005,7 @@ fn test_integration_post_initialize_notification_updates_state() {
 	content := 'module main\n\nfn main() {}\n'
 	initialize := '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}'
 	did_open_after_init := '{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"${uri}","text":"${content}"}}}'
-	framed := integration_test_frame_message(initialize) +
-		integration_test_frame_message(did_open_after_init)
+	framed := integration_test_frame_message(initialize) + integration_test_frame_message(did_open_after_init)
 	input_path := os.join_path(project_dir, 'post_init_notification_input.txt')
 	integration_test_must_write_file(input_path, framed)
 
@@ -2047,10 +2040,9 @@ fn test_integration_pre_initialize_cancel_request_is_ignored() {
 		cleanup_integration_test_env(app, project_dir)
 	}
 
-	cancel_before_init := '{"jsonrpc":"2.0","method":"$/cancelRequest","params":{"id":99}}'
+	cancel_before_init := '{"jsonrpc":"2.0","method":"\$/cancelRequest","params":{"id":99}}'
 	initialize := '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}'
-	framed := integration_test_frame_message(cancel_before_init) +
-		integration_test_frame_message(initialize)
+	framed := integration_test_frame_message(cancel_before_init) + integration_test_frame_message(initialize)
 	input_path := os.join_path(project_dir, 'pre_init_cancel_input.txt')
 	integration_test_must_write_file(input_path, framed)
 
@@ -2082,8 +2074,7 @@ fn test_integration_second_initialize_rejected_with_invalid_request() {
 
 	initialize_1 := '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}'
 	initialize_2 := '{"jsonrpc":"2.0","id":2,"method":"initialize","params":{}}'
-	framed := integration_test_frame_message(initialize_1) +
-		integration_test_frame_message(initialize_2)
+	framed := integration_test_frame_message(initialize_1) + integration_test_frame_message(initialize_2)
 	input_path := os.join_path(project_dir, 'double_initialize_input.txt')
 	integration_test_must_write_file(input_path, framed)
 
@@ -2118,9 +2109,7 @@ fn test_integration_post_shutdown_request_rejected_with_invalid_request() {
 	initialize := '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}'
 	shutdown := '{"jsonrpc":"2.0","id":2,"method":"shutdown","params":{}}'
 	completion_after_shutdown := '{"jsonrpc":"2.0","id":3,"method":"textDocument/completion","params":{"textDocument":{"uri":"file:///tmp/a.v"},"position":{"line":0,"character":0}}}'
-	framed := integration_test_frame_message(initialize) +
-		integration_test_frame_message(shutdown) +
-		integration_test_frame_message(completion_after_shutdown)
+	framed := integration_test_frame_message(initialize) + integration_test_frame_message(shutdown) + integration_test_frame_message(completion_after_shutdown)
 	input_path := os.join_path(project_dir, 'post_shutdown_request_input.txt')
 	integration_test_must_write_file(input_path, framed)
 
@@ -2152,8 +2141,7 @@ fn test_integration_exit_after_shutdown_emits_no_exit_response() {
 	initialize := '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}'
 	shutdown := '{"jsonrpc":"2.0","id":2,"method":"shutdown","params":{}}'
 	exit_notification := '{"jsonrpc":"2.0","method":"exit","params":{}}'
-	framed := integration_test_frame_message(initialize) +
-		integration_test_frame_message(shutdown) + integration_test_frame_message(exit_notification)
+	framed := integration_test_frame_message(initialize) + integration_test_frame_message(shutdown) + integration_test_frame_message(exit_notification)
 	input_path := os.join_path(project_dir, 'shutdown_exit_input.txt')
 	integration_test_must_write_file(input_path, framed)
 
@@ -2231,12 +2219,12 @@ fn test_integration_completion_includes_sibling_pub_fn() {
 
 	// Request completion at `helper` on line 3, col 1 (not after '.')
 	response := app.operation_at_pos(.completion, Request{
-		id:     1
+		id: 1
 		params: json2.encode(Params{
 			text_document: TextDocumentIdentifier{
 				uri: main_uri
 			}
-			position:      Position{
+			position: Position{
 				line: 3
 				char: 1
 			}
@@ -2277,12 +2265,12 @@ fn test_integration_completion_includes_private_sibling_fn() {
 	app.text = main_content
 
 	response := app.operation_at_pos(.completion, Request{
-		id:     1
+		id: 1
 		params: json2.encode(Params{
 			text_document: TextDocumentIdentifier{
 				uri: main_uri
 			}
-			position:      Position{
+			position: Position{
 				line: 3
 				char: 2
 			}
@@ -2316,12 +2304,12 @@ fn test_integration_completion_includes_current_file_fns() {
 	app.text = content
 
 	response := app.operation_at_pos(.completion, Request{
-		id:     1
+		id: 1
 		params: json2.encode(Params{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-			position:      Position{
+			position: Position{
 				line: 5 // inside fn main, after `he`
 				char: 2
 			}
@@ -2416,13 +2404,13 @@ fn test_integration_prepare_rename_returns_symbol_range() {
 	app.open_files[uri] = content
 
 	response := app.handle_prepare_rename(Request{
-		id:     301
+		id: 301
 		method: 'textDocument/prepareRename'
 		params: json2.encode(TextDocumentPositionParams{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-			position:      Position{
+			position: Position{
 				line: 4
 				char: 12
 			}
@@ -2451,7 +2439,7 @@ fn test_integration_workspace_symbol_query_matches() {
 	app.open_files[uri] = content
 
 	response := app.handle_workspace_symbol(Request{
-		id:     302
+		id: 302
 		method: 'workspace/symbol'
 		params: json2.encode(WorkspaceSymbolParams{
 			query: 'name'
@@ -2484,7 +2472,7 @@ fn test_integration_workspace_symbol_indexes_loose_module_sibling() {
 	assert find_project_root(project_dir) == ''
 
 	response := app.handle_workspace_symbol(Request{
-		id:     303
+		id: 303
 		method: 'workspace/symbol'
 		params: json2.encode(WorkspaceSymbolParams{
 			query: 'unopened_loose'
@@ -2516,13 +2504,13 @@ fn test_integration_alias_navigation_methods_preserve_id() {
 	mut request_id := 410
 	for m in methods {
 		resp := app.operation_at_pos(m, Request{
-			id:     request_id
+			id: request_id
 			method: m.str()
 			params: json2.encode(TextDocumentPositionParams{
 				text_document: TextDocumentIdentifier{
 					uri: uri
 				}
-				position:      Position{
+				position: Position{
 					line: 5
 					char: 2
 				}
@@ -2537,17 +2525,17 @@ fn test_integration_alias_navigation_methods_preserve_id() {
 
 fn test_integration_capability_flags_for_new_features() {
 	caps := Capability{
-		text_document_sync:        TextDocumentSyncOptions{
+		text_document_sync: TextDocumentSyncOptions{
 			open_close: true
-			change:     2
-			save:       SaveOptions{
+			change: 2
+			save: SaveOptions{
 				include_text: true
 			}
 		}
-		declaration_provider:      true
-		type_definition_provider:  true
-		implementation_provider:   true
-		rename_provider:           RenameOptions{
+		declaration_provider: true
+		type_definition_provider: true
+		implementation_provider: true
+		rename_provider: RenameOptions{
 			prepare_provider: true
 		}
 		workspace_symbol_provider: true
@@ -2693,7 +2681,7 @@ fn test_integration_string_id_cancel_does_not_collide_with_numeric_zero() {
 	// Cancel string id "a".
 	app.current_request_raw_id = ''
 	app.on_cancel_request(Request{
-		method: '$/cancelRequest'
+		method: '\$/cancelRequest'
 		params: '{"id":"a"}'
 	})
 	// A numeric id-0 request is NOT cancelled by the string cancel.
@@ -2715,7 +2703,7 @@ fn test_integration_numeric_and_string_cancel_are_independent() {
 	// Cancel numeric id 7.
 	app.current_request_raw_id = ''
 	app.on_cancel_request(Request{
-		method: '$/cancelRequest'
+		method: '\$/cancelRequest'
 		params: '{"id":7}'
 	})
 	app.current_request_raw_id = '7'
@@ -2732,7 +2720,7 @@ fn test_integration_numeric_cancel_ids_match_exact_raw_token() {
 	}
 
 	app.on_cancel_request(Request{
-		method: '$/cancelRequest'
+		method: '\$/cancelRequest'
 		params: '{"id":1.25}'
 	})
 	assert app.cancelled_requests.len == 0
@@ -2744,7 +2732,7 @@ fn test_integration_numeric_cancel_ids_match_exact_raw_token() {
 	assert !app.request_is_cancelled(1)
 
 	app.on_cancel_request(Request{
-		method: '$/cancelRequest'
+		method: '\$/cancelRequest'
 		params: '{"id":9223372036854775808}'
 	})
 	app.current_request_raw_id = '9223372036854775809'
@@ -2755,7 +2743,7 @@ fn test_integration_numeric_cancel_ids_match_exact_raw_token() {
 
 fn test_integration_diagnostics_contain_real_compiler_errors() {
 	// Regression guard: the server must surface actual compiler errors, not an
-	// empty diagnostics list (the compiler writes -json-errors output to stderr).
+	// empty diagnostics list (the compiler writes checker output to stderr).
 	mut app, project_dir := create_integration_test_env()
 	defer {
 		cleanup_integration_test_env(app, project_dir)

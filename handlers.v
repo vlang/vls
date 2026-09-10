@@ -8,10 +8,10 @@ import time
 import v.pref
 
 const v_keywords = ['asm', 'as', 'assert', 'atomic', 'break', 'const', 'continue', 'defer', 'dump',
-	'else', 'enum', 'false', 'fn', 'for', 'go', 'goto', 'if', 'ilike', 'implements', 'import',
-	'in', 'interface', 'is', 'isreftype', 'like', 'lock', 'match', 'module', 'mut', 'nil', 'none',
-	'or', 'pub', 'return', 'rlock', 'select', 'shared', 'sizeof', 'spawn', 'static', 'struct',
-	'true', 'type', 'typeof', 'union', 'unsafe', 'volatile']!
+	'else', 'enum', 'false', 'fn', 'for', 'go', 'goto', 'if', 'ilike', 'implements', 'import', 'in',
+	'interface', 'is', 'isreftype', 'like', 'lock', 'match', 'module', 'mut', 'nil', 'none', 'or',
+	'pub', 'return', 'rlock', 'select', 'shared', 'sizeof', 'spawn', 'static', 'struct', 'true',
+	'type', 'typeof', 'union', 'unsafe', 'volatile']!
 
 const v_builtins = ['close', 'copy', 'eprintln', 'eprint', 'error', 'error_with_code', 'exit',
 	'flush_stderr', 'flush_stdout', 'free', 'isnil', 'panic', 'print', 'println']!
@@ -42,19 +42,370 @@ struct ParsedModuleCompletionIndex {
 	has_conditional bool
 }
 
+struct SourceCallTarget {
+	position         Position
+	active_parameter int
+}
+
+// source_call_target finds the function identifier for the call containing the cursor.
+// It is used only when the compiler's signature-help query has no payload, so the
+// backward scan is bounded to the preceding 32 source lines.
+fn source_call_target(content string, cursor Position, enc PositionEncoding) ?SourceCallTarget {
+	starts := line_start_offsets(content)
+	if cursor.line < 0 || cursor.line >= starts.len || cursor.char < 0 {
+		return none
+	}
+	cursor_byte := position_to_byte_offset(content, starts, cursor.line, cursor.char, enc)
+	mask := v_source_code_mask(content)
+	first_line := if cursor.line > 32 { cursor.line - 32 } else { 0 }
+	scan_start := starts[first_line]
+	mut depth := 0
+	mut open_paren := -1
+	mut i := cursor_byte - 1
+	for i >= scan_start {
+		if mask[i] == `)` {
+			depth++
+		} else if mask[i] == `(` {
+			if depth == 0 {
+				open_paren = i
+				break
+			}
+			depth--
+		}
+		i--
+	}
+	if open_paren < 0 {
+		return none
+	}
+	mut name_end := open_paren
+	for name_end > scan_start && content[name_end - 1].is_space() {
+		name_end--
+	}
+	if name_end > scan_start && mask[name_end - 1] == `]` {
+		mut generic_depth := 0
+		mut generic_start := -1
+		mut generic_pos := name_end - 1
+		for generic_pos >= scan_start {
+			if mask[generic_pos] == `]` {
+				generic_depth++
+			} else if mask[generic_pos] == `[` {
+				generic_depth--
+				if generic_depth == 0 {
+					generic_start = generic_pos
+					break
+				}
+			}
+			generic_pos--
+		}
+		if generic_start < 0 {
+			return none
+		}
+		name_end = generic_start
+		for name_end > scan_start && content[name_end - 1].is_space() {
+			name_end--
+		}
+	}
+	mut name_start := name_end
+	for name_start > scan_start && is_ident_char(content[name_start - 1]) {
+		name_start--
+	}
+	if name_start == name_end {
+		return none
+	}
+	mut active_parameter := 0
+	depth = 0
+	for j in open_paren + 1 .. cursor_byte {
+		if mask[j] in [`(`, `[`, `{`] {
+			depth++
+		} else if mask[j] in [`)`, `]`, `}`] && depth > 0 {
+			depth--
+		} else if mask[j] == `,` && depth == 0 {
+			active_parameter++
+		}
+	}
+	mut target_line := cursor.line
+	for target_line > first_line && starts[target_line] > name_start {
+		target_line--
+	}
+	target_line_text := line_text_without_terminator(content, starts, target_line)
+	name_start_in_line := name_start - starts[target_line]
+	probe_byte := if name_end - name_start > 2 {
+		name_start_in_line + 2
+	} else {
+		name_start_in_line
+	}
+	return SourceCallTarget{
+		position: Position{
+			line: target_line
+			char: byte_to_encoded_col(target_line_text, probe_byte, enc)
+		}
+		active_parameter: active_parameter
+	}
+}
+
+// source_declaration_at returns a compact declaration header for a compiler
+// definition location. A small line cap prevents malformed source from causing
+// an unbounded scan.
+fn (app &App) source_declaration_at(location Location) string {
+	content := app.index_source_for(location.uri) or { return '' }
+	lines := content.split_into_lines()
+	start_line := location.range.start.line
+	if start_line < 0 || start_line >= lines.len {
+		return ''
+	}
+	first_part := lines[start_line].trim_space()
+	if first_part == '' {
+		return ''
+	}
+	first_mask := v_source_code_mask(first_part)
+	if !source_declaration_opens_body(first_mask) {
+		return first_part
+	}
+	starts := line_start_offsets(content)
+	source_mask := v_source_code_mask(content)
+	end_line := if start_line + 16 < lines.len { start_line + 16 } else { lines.len }
+	start_byte := starts[start_line]
+	end_byte := if end_line < starts.len { starts[end_line] } else { content.len }
+	mut header_end := end_byte
+	for pos in start_byte .. end_byte {
+		if source_mask[pos] == `{` {
+			header_end = pos
+			break
+		}
+	}
+	mut parts := []string{}
+	for raw_part in content[start_byte..header_end].split_into_lines() {
+		part := raw_part.trim_space()
+		if part != '' {
+			parts << part
+		}
+	}
+	return parts.join('\n').trim_space()
+}
+
+fn source_declaration_opens_body(mask []u8) bool {
+	mut pos := 0
+	for pos < mask.len {
+		for pos < mask.len && mask[pos].is_space() {
+			pos++
+		}
+		if pos + 1 < mask.len && mask[pos] == `@` && mask[pos + 1] == `[` {
+			mut depth := 1
+			pos += 2
+			for pos < mask.len && depth > 0 {
+				if mask[pos] == `[` {
+					depth++
+				} else if mask[pos] == `]` {
+					depth--
+				}
+				pos++
+			}
+			continue
+		}
+		if pos >= mask.len || !is_ident_start(mask[pos]) {
+			return false
+		}
+		start := pos
+		for pos < mask.len && is_ident_char(mask[pos]) {
+			pos++
+		}
+		keyword := mask[start..pos].bytestr()
+		if keyword in ['pub', 'unsafe'] {
+			continue
+		}
+		return keyword in ['fn', 'struct', 'enum', 'interface', 'union']
+	}
+	return false
+}
+
+fn declaration_signature_label(declaration string, name string) string {
+	if name == '' {
+		return ''
+	}
+	mask := v_source_code_mask(declaration)
+	mut search_start := 0
+	for search_start + name.len <= declaration.len {
+		relative_start := declaration[search_start..].index(name) or { return '' }
+		start := search_start + relative_start
+		name_end := start + name.len
+		if (start == 0 || !is_ident_char(mask[start - 1]))
+			&& (name_end == declaration.len || !is_ident_char(mask[name_end])) {
+			mut open_paren := name_end
+			for open_paren < declaration.len && mask[open_paren].is_space() {
+				open_paren++
+			}
+			if open_paren < declaration.len && mask[open_paren] == `[` {
+				mut generic_depth := 0
+				for open_paren < declaration.len {
+					if mask[open_paren] == `[` {
+						generic_depth++
+					} else if mask[open_paren] == `]` {
+						generic_depth--
+						if generic_depth == 0 {
+							open_paren++
+							break
+						}
+					}
+					open_paren++
+				}
+				for open_paren < declaration.len && mask[open_paren].is_space() {
+					open_paren++
+				}
+			}
+			if open_paren < declaration.len && mask[open_paren] == `(` {
+				mut paren_depth := 0
+				mut close_paren := -1
+				for i in open_paren .. declaration.len {
+					if mask[i] == `(` {
+						paren_depth++
+					} else if mask[i] == `)` {
+						paren_depth--
+						if paren_depth == 0 {
+							close_paren = i
+							break
+						}
+					}
+				}
+				if close_paren < 0 {
+					return ''
+				}
+				mut end := declaration.len
+				for i in close_paren + 1 .. declaration.len {
+					if mask[i] == `{` {
+						end = i
+						break
+					}
+				}
+				return declaration[start..end].trim_space()
+			}
+		}
+		search_start = name_end
+	}
+	return ''
+}
+
+fn signature_parameters(label string) []ParameterInformation {
+	mask := v_source_code_mask(label)
+	open_paren := mask.bytestr().index('(') or { return [] }
+	mut close_paren := -1
+	mut paren_depth := 0
+	for i in open_paren .. label.len {
+		if mask[i] == `(` {
+			paren_depth++
+		} else if mask[i] == `)` {
+			paren_depth--
+			if paren_depth == 0 {
+				close_paren = i
+				break
+			}
+		}
+	}
+	if close_paren <= open_paren + 1 {
+		return []
+	}
+	mut parameters := []ParameterInformation{}
+	mut parameter_start := open_paren + 1
+	mut depth := 0
+	for i in open_paren + 1 .. close_paren {
+		if mask[i] in [`(`, `[`, `{`] {
+			depth++
+		} else if mask[i] in [`)`, `]`, `}`] && depth > 0 {
+			depth--
+		} else if mask[i] == `,` && depth == 0 {
+			parameter := label[parameter_start..i].trim_space()
+			if parameter != '' {
+				parameters << ParameterInformation{
+					label: parameter
+				}
+			}
+			parameter_start = i + 1
+		}
+	}
+	if parameter_start < close_paren {
+		parameter := label[parameter_start..close_paren].trim_space()
+		if parameter != '' {
+			parameters << ParameterInformation{
+				label: parameter
+			}
+		}
+	}
+	return parameters
+}
+
+fn signature_active_parameter(parameters []ParameterInformation, requested int) int {
+	if parameters.len > 0 && requested >= parameters.len {
+		last_parameter := parameters[parameters.len - 1]
+		last_mask := v_source_code_mask(last_parameter.label).bytestr()
+		if last_mask.contains('...') {
+			return parameters.len - 1
+		}
+	}
+	return requested
+}
+
+fn (mut app App) source_hover_fallback(uri string, position Position) ?Hover {
+	location := app.resolve_indexed_definition(uri, position) or {
+		app.resolve_symbol_anchor(uri, position.line, position.char) or { return none }
+	}
+	declaration := app.source_declaration_at(location)
+	if declaration == '' {
+		return none
+	}
+	return Hover{
+		contents: MarkupContent{
+			kind: 'markdown'
+			value: '```v\n${declaration}\n```'
+		}
+	}
+}
+
+fn (mut app App) source_signature_fallback(uri string, position Position) ?SignatureHelp {
+	content := app.index_source_for(uri) or { return none }
+	target := source_call_target(content, position, app.position_encoding) or {
+		return none
+	}
+	target_position := target.position
+	name := app.get_word_at_position(uri, target_position.line, target_position.char)
+	if name == '' {
+		return none
+	}
+	location := app.resolve_indexed_definition(uri, target_position) or {
+		app.resolve_symbol_anchor(uri, target_position.line, target_position.char) or { return none }
+	}
+	declaration := app.source_declaration_at(location)
+	label := declaration_signature_label(declaration, name)
+	if label == '' {
+		return none
+	}
+	parameters := signature_parameters(label)
+	return SignatureHelp{
+		signatures: [
+			SignatureInformation{
+				label: label
+				parameters: parameters
+			},
+		]
+		active_parameter: signature_active_parameter(parameters, target.active_parameter)
+	}
+}
+
 // operation_at_pos handles LSP requests at a given position (completion, hover, signature, definition).
 fn (mut app App) operation_at_pos(method Method, request Request) Response {
 	params := json2.decode[TextDocumentPositionParams](request.params) or {
-		$if debug { log('Failed to decode TextDocumentPositionParams: ${err}') }
+		$if debug {
+			log('Failed to decode TextDocumentPositionParams: ${err}')
+		}
 		return Response{
-			id:     request.id
+			id: request.id
 			result: 'null'
 		}
 	}
 	if params.text_document.uri == '' {
-		$if debug { log('operation_at_pos: missing textDocument.uri') }
+		$if debug {
+			log('operation_at_pos: missing textDocument.uri')
+		}
 		return Response{
-			id:     request.id
+			id: request.id
 			result: 'null'
 		}
 	}
@@ -62,7 +413,7 @@ fn (mut app App) operation_at_pos(method Method, request Request) Response {
 	// than indexing arrays with negative values (P1-09).
 	if params.position.line < 0 || params.position.char < 0 {
 		return Response{
-			id:     request.id
+			id: request.id
 			result: 'null'
 		}
 	}
@@ -88,18 +439,18 @@ fn (mut app App) operation_at_pos(method Method, request Request) Response {
 			}
 			items := merge_completion_items(indexed.items, compiler_items)
 			return Response{
-				id:     request.id
+				id: request.id
 				result: CompletionList{
 					is_incomplete: false
-					items:         items
+					items: items
 				}
 			}
 		}
 		return Response{
-			id:     request.id
+			id: request.id
 			result: CompletionList{
 				is_incomplete: false
-				items:         indexed.items
+				items: indexed.items
 			}
 		}
 	}
@@ -111,7 +462,7 @@ fn (mut app App) operation_at_pos(method Method, request Request) Response {
 	if method in [.definition, .declaration, .type_definition, .implementation] {
 		if location := app.resolve_indexed_definition(path, params.position) {
 			return Response{
-				id:     request.id
+				id: request.id
 				result: location
 			}
 		}
@@ -132,12 +483,23 @@ fn (mut app App) operation_at_pos(method Method, request Request) Response {
 		}
 	}
 
-	result := app.run_v_line_info(method, path, line_info)
+	mut result := app.run_v_line_info(method, path, line_info)
+	if result is string && result == 'null' {
+		if method == .hover {
+			if fallback := app.source_hover_fallback(path, params.position) {
+				result = fallback
+			}
+		} else if method == .signature_help {
+			if fallback := app.source_signature_fallback(path, params.position) {
+				result = fallback
+			}
+		}
+	}
 	$if debug {
 		log(result.str())
 	}
 	return Response{
-		id:     request.id
+		id: request.id
 		result: result
 	}
 }
@@ -174,24 +536,21 @@ fn (mut app App) indexed_completions(uri string, position Position) IndexedCompl
 		}
 	}
 	if position.char > 0 {
-		qualifier, has_member_access, standalone_qualifier := member_qualifier_at_cursor(line,
-			position.char, app.position_encoding)
+		qualifier, has_member_access, standalone_qualifier := member_qualifier_at_cursor(line, position.char, app.position_encoding)
 		if has_member_access {
 			if standalone_qualifier {
 				if module_path := parse_import_aliases(content)[qualifier] {
 					has_local_binding := app.local_scope_bindings(content, position).any(it.name == qualifier)
 					if !has_local_binding {
-						module_result := app.get_imported_module_member_completions(module_path,
-							os.dir(uri_to_path(uri)))
+						module_result := app.get_imported_module_member_completions(module_path, os.dir(uri_to_path(uri)))
 						return IndexedCompletionResult{
-							items:        module_result.items
+							items: module_result.items
 							use_compiler: module_result.use_compiler
 						}
 					}
 				}
 			}
-			receiver_result := app.indexed_receiver_completions(uri, content, qualifier,
-				position)
+			receiver_result := app.indexed_receiver_completions(uri, content, qualifier, position)
 			return receiver_result
 		}
 	}
@@ -199,7 +558,7 @@ fn (mut app App) indexed_completions(uri string, position Position) IndexedCompl
 	if struct_type != '' {
 		field_result := app.indexed_struct_field_completions(uri, content, struct_type)
 		return IndexedCompletionResult{
-			items:        field_result.items
+			items: field_result.items
 			use_compiler: field_result.use_compiler || field_result.items.len == 0
 		}
 	}
@@ -218,8 +577,8 @@ fn (mut app App) indexed_completions(uri string, position Position) IndexedCompl
 	for binding in parse_import_bindings(content) {
 		if binding.alias != '' && binding.alias !in seen_labels {
 			details << Detail{
-				kind:   9 // CompletionItemKind.Module
-				label:  binding.alias
+				kind: 9 // CompletionItemKind.Module
+				label: binding.alias
 				detail: binding.module_path
 			}
 			seen_labels[binding.alias] = true
@@ -238,7 +597,7 @@ fn (mut app App) indexed_completions(uri string, position Position) IndexedCompl
 		}
 	}
 	return IndexedCompletionResult{
-		items:        details
+		items: details
 		use_compiler: use_compiler
 	}
 }
@@ -384,8 +743,8 @@ fn anonymous_function_header(source string) AnonymousFunctionHeader {
 		}
 	}
 	return AnonymousFunctionHeader{
-		found:           true
-		complete:        true
+		found: true
+		complete: true
 		parameter_names: names
 	}
 }
@@ -395,8 +754,8 @@ fn expression_line_is_continued(line string) bool {
 	if trimmed == '' {
 		return false
 	}
-	return trimmed[trimmed.len - 1] in [`.`, `,`, `+`, `-`, `*`, `/`, `%`, `&`, `|`, `^`,
-		`=`, `!`, `<`, `>`, `?`, `:`]
+	return trimmed[trimmed.len - 1] in [`.`, `,`, `+`, `-`, `*`, `/`, `%`, `&`, `|`, `^`, `=`, `!`,
+		`<`, `>`, `?`, `:`]
 }
 
 fn struct_literal_cursor_is_at_field(prefix string, open_brace int, raw_lines []string) bool {
@@ -641,8 +1000,8 @@ fn member_qualifier_at_cursor(line string, cursor_col int, enc PositionEncoding)
 fn binding_identifiers(text string) []string {
 	mut names := []string{}
 	mut col := 0
-	ignored := ['_', 'atomic', 'else', 'for', 'if', 'lock', 'match', 'mut', 'rlock',
-		'select', 'shared']
+	ignored := ['_', 'atomic', 'else', 'for', 'if', 'lock', 'match', 'mut', 'rlock', 'select',
+		'shared']
 	for col < text.len {
 		if !is_ident_char(text[col]) || (text[col] >= `0` && text[col] <= `9`) {
 			col++
@@ -894,8 +1253,8 @@ fn (app &App) local_scope_bindings(content string, position Position) []LocalBin
 	mut parameter_bindings := []LocalBinding{}
 	for name in parameter_names {
 		parameter_bindings << LocalBinding{
-			name:   name
-			line:   function_start
+			name: name
+			line: function_start
 			column: -1
 		}
 	}
@@ -942,7 +1301,7 @@ fn (app &App) local_scope_bindings(content string, position Position) []LocalBin
 			segment := code[segment_start..col]
 			if c == `{`
 				&& (binding_scope_header_starts_literal(segment)
-				|| (pending_block_expects_expression && segment.trim_space() == '')) {
+					|| (pending_block_expects_expression && segment.trim_space() == '')) {
 				literal_brace_depth = 1
 				segment_names := local_declaration_names(segment)
 				if segment_names.len > 0 {
@@ -950,8 +1309,7 @@ fn (app &App) local_scope_bindings(content string, position Position) []LocalBin
 					pending_block_line = line_idx
 					pending_block_columns = map[string]int{}
 					for name in segment_names {
-						pending_block_columns[name] = local_binding_column(segment,
-							segment_start, name)
+						pending_block_columns[name] = local_binding_column(segment, segment_start, name)
 					}
 				}
 				continue
@@ -988,8 +1346,8 @@ fn (app &App) local_scope_bindings(content string, position Position) []LocalBin
 				for name in outer_segment_names {
 					if !scopes.last().any(it.name == name) {
 						scopes[scopes.len - 1] << LocalBinding{
-							name:   name
-							line:   line_idx
+							name: name
+							line: line_idx
 							column: local_binding_column(segment, segment_start, name)
 						}
 					}
@@ -1035,8 +1393,7 @@ fn (app &App) local_scope_bindings(content string, position Position) []LocalBin
 				pending_block_line = line_idx
 				pending_block_columns = map[string]int{}
 				for name in tail_names {
-					pending_block_columns[name] = local_binding_column(tail, segment_start,
-						name)
+					pending_block_columns[name] = local_binding_column(tail, segment_start, name)
 				}
 				pending_block_expects_expression = binding_scope_header_starts_literal(tail)
 			} else {
@@ -1049,8 +1406,8 @@ fn (app &App) local_scope_bindings(content string, position Position) []LocalBin
 				for name in tail_names {
 					if !scopes.last().any(it.name == name) {
 						scopes[scopes.len - 1] << LocalBinding{
-							name:   name
-							line:   line_idx
+							name: name
+							line: line_idx
 							column: local_binding_column(tail, segment_start, name)
 						}
 					}
@@ -1083,8 +1440,8 @@ fn (app &App) local_scope_bindings(content string, position Position) []LocalBin
 	if has_implicit_it_scope_at_cursor(active_code_lines.join('\n')) && scopes.len > 0
 		&& !has_explicit_it {
 		scopes[scopes.len - 1] << LocalBinding{
-			name:   'it'
-			line:   position.line
+			name: 'it'
+			line: position.line
 			column: -1
 		}
 	}
@@ -1105,8 +1462,8 @@ fn (app &App) local_scope_completions(content string, position Position) []Detai
 		}
 	}
 	return names.filter(it != '').map(Detail{
-		kind:   6 // CompletionItemKind.Variable
-		label:  it
+		kind: 6 // CompletionItemKind.Variable
+		label: it
 		detail: 'local binding'
 	})
 }
@@ -1238,8 +1595,8 @@ fn receiver_rhs_needs_continuation(rhs string, has_expression bool, scan_state &
 	if trimmed == '' {
 		return false
 	}
-	return trimmed[trimmed.len - 1] in [`.`, `,`, `+`, `-`, `*`, `/`, `%`, `&`, `|`, `^`,
-		`=`, `!`, `<`, `>`, `?`, `:`]
+	return trimmed[trimmed.len - 1] in [`.`, `,`, `+`, `-`, `*`, `/`, `%`, `&`, `|`, `^`, `=`, `!`,
+		`<`, `>`, `?`, `:`]
 }
 
 struct ReceiverDeclaration {
@@ -1278,9 +1635,9 @@ fn receiver_declaration_on_line(code string, receiver string, active_columns []i
 			continue
 		}
 		latest = ReceiverDeclaration{
-			rhs:            raw_statement[assign_idx + 2..].trim_space()
-			binding_index:  binding_index
-			binding_count:  bindings.len
+			rhs: raw_statement[assign_idx + 2..].trim_space()
+			binding_index: binding_index
+			binding_count: bindings.len
 			binding_column: statement_start + lhs_start + receiver_column
 			assignment_end: statement_start + assign_idx + 2
 		}
@@ -1509,7 +1866,11 @@ fn complete_function_signature(lines []string, start_line int, initial string) s
 	mut parenthesis_depth := 0
 	mut found_parameters := false
 	for line_idx in start_line .. lines.len {
-		segment := if line_idx == start_line { initial.trim_space() } else { lines[line_idx].trim_space() }
+		segment := if line_idx == start_line {
+			initial.trim_space()
+		} else {
+			lines[line_idx].trim_space()
+		}
 		if signature != '' && segment != '' {
 			signature += ' '
 		}
@@ -1554,11 +1915,11 @@ fn method_completion_from_symbol(source string, symbol DocumentSymbol) ?Detail {
 	}
 	insert := build_fn_snippet(name, after_receiver[paren_idx..])
 	return Detail{
-		kind:               2
-		label:              name
-		detail:             '${if trimmed.starts_with('pub ') { 'pub ' } else { '' }}fn ${after_fn}'.all_before('{').trim_space()
-		insert_text:        insert
-		insert_text_format: if insert.contains('$') { 2 } else { 1 }
+		kind: 2
+		label: name
+		detail: '${if trimmed.starts_with('pub ') { 'pub ' } else { '' }}fn ${after_fn}'.all_before('{').trim_space()
+		insert_text: insert
+		insert_text_format: if insert.contains('\$') { 2 } else { 1 }
 	}
 }
 
@@ -1578,8 +1939,7 @@ fn (mut app App) receiver_type_scope(uri string, content string, receiver_type s
 }
 
 fn (mut app App) indexed_method_symbols(uri string, content string, receiver_type string, method_name string) IndexedMethodSymbolResult {
-	dir, type_name, require_public, expected_module := app.receiver_type_scope(uri, content,
-		receiver_type)
+	dir, type_name, require_public, expected_module := app.receiver_type_scope(uri, content, receiver_type)
 	if dir == '' || type_name == '' || expected_module == '' || !os.is_dir(dir) {
 		return IndexedMethodSymbolResult{}
 	}
@@ -1604,8 +1964,7 @@ fn (mut app App) indexed_method_symbols(uri string, content string, receiver_typ
 	for indexed_uri in indexed_uris {
 		entry := app.symbol_index[indexed_uri] or { continue }
 		if normalized_index_path(os.dir(uri_to_path(indexed_uri))) != normalized_dir
-			|| os.file_name(uri_to_path(indexed_uri)) !in active_names
-			|| entry.module_name != expected_module {
+			|| os.file_name(uri_to_path(indexed_uri)) !in active_names || entry.module_name != expected_module {
 			continue
 		}
 		source := app.index_source_for(indexed_uri) or { continue }
@@ -1631,13 +1990,13 @@ fn (mut app App) indexed_method_symbols(uri string, content string, receiver_typ
 				continue
 			}
 			matches << Location{
-				uri:   indexed_uri
+				uri: indexed_uri
 				range: LSPRange{
 					start: Position{
 						line: symbol.range.start.line
 						char: symbol.selection_range.start.char
 					}
-					end:   Position{
+					end: Position{
 						line: symbol.range.start.line
 						char: symbol.selection_range.end.char
 					}
@@ -1646,7 +2005,7 @@ fn (mut app App) indexed_method_symbols(uri string, content string, receiver_typ
 		}
 	}
 	return IndexedMethodSymbolResult{
-		locations:    matches
+		locations: matches
 		use_compiler: has_conditional
 	}
 }
@@ -1682,8 +2041,8 @@ fn field_completion_from_symbol(lines []string, code_lines []string, symbol Docu
 		return none
 	}
 	return Detail{
-		kind:   5 // CompletionItemKind.Field
-		label:  symbol.name
+		kind: 5 // CompletionItemKind.Field
+		label: symbol.name
 		detail: lines[line_idx].trim_space()
 	}
 }
@@ -1718,8 +2077,7 @@ fn (mut app App) indexed_struct_field_completions(uri string, content string, re
 }
 
 fn (mut app App) indexed_struct_field_completions_visited(uri string, content string, receiver_type string, mut visited map[string]bool) IndexedCompletionResult {
-	dir, type_name, require_public, expected_module := app.receiver_type_scope(uri, content,
-		receiver_type)
+	dir, type_name, require_public, expected_module := app.receiver_type_scope(uri, content, receiver_type)
 	if dir == '' || type_name == '' || expected_module == '' || !os.is_dir(dir) {
 		return IndexedCompletionResult{}
 	}
@@ -1755,8 +2113,7 @@ fn (mut app App) indexed_struct_field_completions_visited(uri string, content st
 	for indexed_uri in indexed_uris {
 		entry := app.symbol_index[indexed_uri] or { continue }
 		if normalized_index_path(os.dir(uri_to_path(indexed_uri))) != normalized_dir
-			|| os.file_name(uri_to_path(indexed_uri)) !in active_names
-			|| entry.module_name != expected_module {
+			|| os.file_name(uri_to_path(indexed_uri)) !in active_names || entry.module_name != expected_module {
 			continue
 		}
 		source := app.index_source_for(indexed_uri) or { continue }
@@ -1782,13 +2139,11 @@ fn (mut app App) indexed_struct_field_completions_visited(uri string, content st
 				if field.range.start.line >= 0 && field.range.start.line < code_lines.len {
 					embedded_source_type := embedded_struct_type(code_lines[field.range.start.line])
 					if embedded_source_type != '' {
-						embedded_type := qualify_embedded_receiver_type(receiver_type,
-							embedded_source_type)
+						embedded_type := qualify_embedded_receiver_type(receiver_type, embedded_source_type)
 						if embedded_type !in embedded_types {
 							embedded_types << embedded_type
 						}
-						promoted := app.indexed_struct_field_completions_visited(uri, content,
-							embedded_type, mut visited)
+						promoted := app.indexed_struct_field_completions_visited(uri, content, embedded_type, mut visited)
 						has_conditional = has_conditional || promoted.use_compiler
 						has_unresolved_embedded = has_unresolved_embedded || !promoted.resolved_type
 						for promoted_type in promoted.embedded_types {
@@ -1815,10 +2170,10 @@ fn (mut app App) indexed_struct_field_completions_visited(uri string, content st
 		}
 	}
 	return IndexedCompletionResult{
-		items:          items
-		use_compiler:   has_conditional || has_unresolved_embedded
+		items: items
+		use_compiler: has_conditional || has_unresolved_embedded
 		embedded_types: embedded_types
-		resolved_type:  resolved_type
+		resolved_type: resolved_type
 	}
 }
 
@@ -1863,7 +2218,7 @@ fn (mut app App) indexed_receiver_completions(uri string, content string, receiv
 		}
 	}
 	return IndexedCompletionResult{
-		items:        items
+		items: items
 		use_compiler: field_result.use_compiler || methods_use_compiler || items.len == 0
 	}
 }
@@ -2044,7 +2399,7 @@ fn parse_import_binding(text string) ?ImportedModuleBinding {
 		return none
 	}
 	return ImportedModuleBinding{
-		alias:       alias
+		alias: alias
 		module_path: module_path
 	}
 }
@@ -2105,8 +2460,7 @@ fn (mut app App) get_imported_module_member_completions(module_path string, work
 	for indexed_uri in indexed_uris {
 		entry := app.symbol_index[indexed_uri] or { continue }
 		if normalized_index_path(os.dir(uri_to_path(indexed_uri))) != normalized_dir
-			|| os.file_name(uri_to_path(indexed_uri)) !in active_names
-			|| entry.module_name != expected_module {
+			|| os.file_name(uri_to_path(indexed_uri)) !in active_names || entry.module_name != expected_module {
 			continue
 		}
 		if entry.has_conditional_public_completions {
@@ -2121,7 +2475,7 @@ fn (mut app App) get_imported_module_member_completions(module_path string, work
 		}
 	}
 	return IndexedModuleCompletionResult{
-		items:        items
+		items: items
 		use_compiler: has_conditional || items.len == 0
 	}
 }
@@ -2277,9 +2631,9 @@ fn compile_time_conditional_lines(content string) []bool {
 				continue
 			}
 			if line[col] == `$` {
-				directive_len := if line[col..].starts_with('$if') {
+				directive_len := if line[col..].starts_with('\$if') {
 					3
-				} else if line[col..].starts_with('$else') {
+				} else if line[col..].starts_with('\$else') {
 					5
 				} else {
 					0
@@ -2353,14 +2707,13 @@ fn parse_module_member_completions(content string, public_only bool) ParsedModul
 				name := first_word(trimmed)
 				if is_valid_v_identifier_name(name) {
 					items << Detail{
-						kind:   6 // CompletionItemKind.Variable
-						label:  name
+						kind: 6 // CompletionItemKind.Variable
+						label: name
 						detail: '__global'
 					}
 				}
 			}
-			global_expression_depth = update_expression_delimiter_depth(trimmed,
-				global_expression_depth)
+			global_expression_depth = update_expression_delimiter_depth(trimmed, global_expression_depth)
 			continue
 		}
 		if trimmed == 'const (' || trimmed == 'pub const (' {
@@ -2379,14 +2732,13 @@ fn parse_module_member_completions(content string, public_only bool) ParsedModul
 				name := const_block_assignment_name(trimmed)
 				if name != '' && (!public_only || const_block_public) {
 					items << Detail{
-						kind:   21 // CompletionItemKind.Constant
-						label:  name
+						kind: 21 // CompletionItemKind.Constant
+						label: name
 						detail: if const_block_public { 'pub const' } else { 'const' }
 					}
 				}
 			}
-			const_expression_depth = update_expression_delimiter_depth(trimmed,
-				const_expression_depth)
+			const_expression_depth = update_expression_delimiter_depth(trimmed, const_expression_depth)
 			continue
 		}
 		is_public := trimmed.starts_with('pub ')
@@ -2409,11 +2761,11 @@ fn parse_module_member_completions(content string, public_only bool) ParsedModul
 			detail_str := '${if is_public { 'pub ' } else { '' }}${complete_declaration}'.all_before('{').trim_space()
 			insert := build_fn_snippet(fn_name, after_fn[paren_idx..])
 			items << Detail{
-				kind:               3 // CompletionItemKind.Function
-				label:              fn_name
-				detail:             detail_str
-				insert_text:        insert
-				insert_text_format: if insert.contains('$') { 2 } else { 1 }
+				kind: 3 // CompletionItemKind.Function
+				label: fn_name
+				detail: detail_str
+				insert_text: insert
+				insert_text_format: if insert.contains('\$') { 2 } else { 1 }
 			}
 			continue
 		}
@@ -2421,8 +2773,8 @@ fn parse_module_member_completions(content string, public_only bool) ParsedModul
 			name := extract_const_name(declaration[6..])
 			if name != '' {
 				items << Detail{
-					kind:   21
-					label:  name
+					kind: 21
+					label: name
 					detail: trimmed.all_before('=').trim_space()
 				}
 			}
@@ -2432,8 +2784,8 @@ fn parse_module_member_completions(content string, public_only bool) ParsedModul
 			name := module_type_completion_name(declaration[7..])
 			if name != '' {
 				items << Detail{
-					kind:   22 // CompletionItemKind.Struct
-					label:  name
+					kind: 22 // CompletionItemKind.Struct
+					label: name
 					detail: trimmed.all_before('{').trim_space()
 				}
 			}
@@ -2443,8 +2795,8 @@ fn parse_module_member_completions(content string, public_only bool) ParsedModul
 			name := module_type_completion_name(declaration[6..])
 			if name != '' {
 				items << Detail{
-					kind:   22 // CompletionItemKind.Struct
-					label:  name
+					kind: 22 // CompletionItemKind.Struct
+					label: name
 					detail: trimmed.all_before('{').trim_space()
 				}
 			}
@@ -2454,8 +2806,8 @@ fn parse_module_member_completions(content string, public_only bool) ParsedModul
 			name := module_type_completion_name(declaration[5..])
 			if name != '' {
 				items << Detail{
-					kind:   13 // CompletionItemKind.Enum
-					label:  name
+					kind: 13 // CompletionItemKind.Enum
+					label: name
 					detail: trimmed.all_before('{').trim_space()
 				}
 			}
@@ -2465,8 +2817,8 @@ fn parse_module_member_completions(content string, public_only bool) ParsedModul
 			name := module_type_completion_name(declaration[10..])
 			if name != '' {
 				items << Detail{
-					kind:   8 // CompletionItemKind.Interface
-					label:  name
+					kind: 8 // CompletionItemKind.Interface
+					label: name
 					detail: trimmed.all_before('{').trim_space()
 				}
 			}
@@ -2476,15 +2828,15 @@ fn parse_module_member_completions(content string, public_only bool) ParsedModul
 			name := module_type_completion_name(declaration[5..])
 			if name != '' {
 				items << Detail{
-					kind:   7 // CompletionItemKind.Class
-					label:  name
+					kind: 7 // CompletionItemKind.Class
+					label: name
 					detail: trimmed.all_before('=').trim_space()
 				}
 			}
 		}
 	}
 	return ParsedModuleCompletionIndex{
-		items:           items
+		items: items
 		has_conditional: has_conditional
 	}
 }
@@ -2493,7 +2845,9 @@ fn parse_module_member_completions(content string, public_only bool) ParsedModul
 // the server state. It returns true when diagnostics were scheduled.
 fn (mut app App) on_did_open(request Request) bool {
 	params := json2.decode[DidOpenTextDocumentParams](request.params) or {
-		$if debug { log('Failed to decode DidOpenTextDocumentParams: ${err}') }
+		$if debug {
+			log('Failed to decode DidOpenTextDocumentParams: ${err}')
+		}
 		return false
 	}
 	uri := params.text_document.uri
@@ -2505,7 +2859,9 @@ fn (mut app App) on_did_open(request Request) bool {
 	} else {
 		real_path := uri_to_path(uri)
 		content = os.read_file(real_path) or {
-			$if debug { log('Failed to read file ${real_path}: ${err}') }
+			$if debug {
+				log('Failed to read file ${real_path}: ${err}')
+			}
 			return false
 		}
 	}
@@ -2517,7 +2873,9 @@ fn (mut app App) on_did_open(request Request) bool {
 	app.bump_generation(uri)
 	app.invalidate_index_uri(uri) // re-parse from the buffer on next query
 	app.text = content
-	$if debug { log('STORED CONTENT for uri=${uri}, FILE COUNT: ${app.open_files.len}') }
+	$if debug {
+		log('STORED CONTENT for uri=${uri}, FILE COUNT: ${app.open_files.len}')
+	}
 	return app.finish_diagnostics_project_schedule(diagnostics_mutation, uri, content)
 }
 
@@ -2527,7 +2885,9 @@ fn (mut app App) on_did_open(request Request) bool {
 // diagnostic set to clear editor markers.
 fn (mut app App) on_did_close(request Request) {
 	params := json2.decode[DidCloseTextDocumentParams](request.params) or {
-		$if debug { log('Failed to decode DidCloseTextDocumentParams: ${err}') }
+		$if debug {
+			log('Failed to decode DidCloseTextDocumentParams: ${err}')
+		}
 		return
 	}
 	uri := params.text_document.uri
@@ -2566,8 +2926,8 @@ fn (mut app App) build_diagnostics_notification(uri string, content string) Noti
 		return Notification{
 			method: 'textDocument/publishDiagnostics'
 			params: PublishDiagnosticsParams{
-				uri:         uri
-				version:     if uri in app.open_files_versions {
+				uri: uri
+				version: if uri in app.open_files_versions {
 					?i64(app.open_files_versions[uri])
 				} else {
 					none
@@ -2595,8 +2955,8 @@ fn (mut app App) build_diagnostics_notification(uri string, content string) Noti
 		diagnostics << app.encode_diagnostic_range(v_error_to_lsp_diagnostic(v_err), lines)
 	}
 	pd_params := PublishDiagnosticsParams{
-		uri:         uri
-		version:     if uri in app.open_files_versions {
+		uri: uri
+		version: if uri in app.open_files_versions {
 			?i64(app.open_files_versions[uri])
 		} else {
 			none
@@ -2612,7 +2972,9 @@ fn (mut app App) build_diagnostics_notification(uri string, content string) Noti
 // Returns instant red wavy errors
 fn (mut app App) on_did_change(request Request) ?Notification {
 	params := json2.decode[DidChangeTextDocumentParams](request.params) or {
-		$if debug { log('Failed to decode DidChangeTextDocumentParams: ${err}') }
+		$if debug {
+			log('Failed to decode DidChangeTextDocumentParams: ${err}')
+		}
 		return none
 	}
 	log('on did change(len=${params.content_changes.len})')
@@ -2643,7 +3005,9 @@ fn (mut app App) on_did_change(request Request) ?Notification {
 				return none
 			}
 			rng := change.range or {
-				$if debug { log('Skipping malformed incremental change with missing range') }
+				$if debug {
+					log('Skipping malformed incremental change with missing range')
+				}
 				continue
 			}
 
@@ -2674,7 +3038,9 @@ fn (mut app App) on_did_change(request Request) ?Notification {
 		return none
 	}
 	notification := app.build_diagnostics_notification(uri, content)
-	$if debug { log('returning notification: ${notification}') }
+	$if debug {
+		log('returning notification: ${notification}')
+	}
 	return notification
 }
 
@@ -2701,7 +3067,7 @@ fn (app &App) encode_diagnostic_range(diag LSPDiagnostic, lines []string) LSPDia
 				line: start_line
 				char: start_char
 			}
-			end:   Position{
+			end: Position{
 				line: end_line
 				char: end_char
 			}
@@ -2712,7 +3078,9 @@ fn (app &App) encode_diagnostic_range(diag LSPDiagnostic, lines []string) LSPDia
 // on_did_save handles didSave by re-running diagnostics for the saved document.
 fn (mut app App) on_did_save(request Request) ?Notification {
 	params := json2.decode[DidSaveTextDocumentParams](request.params) or {
-		$if debug { log('Failed to decode DidSaveTextDocumentParams: ${err}') }
+		$if debug {
+			log('Failed to decode DidSaveTextDocumentParams: ${err}')
+		}
 		return none
 	}
 	uri := params.text_document.uri
@@ -2742,7 +3110,9 @@ fn (mut app App) on_did_save(request Request) ?Notification {
 		} else {
 			real_path := uri_to_path(uri)
 			content = os.read_file(real_path) or {
-				$if debug { log('on_did_save: failed to read file ${real_path}: ${err}') }
+				$if debug {
+					log('on_did_save: failed to read file ${real_path}: ${err}')
+				}
 				return none
 			}
 		}
@@ -2762,16 +3132,18 @@ fn (mut app App) on_did_save(request Request) ?Notification {
 // before it is saved, returning the edits to apply atomically with the save.
 fn (mut app App) on_will_save_wait_until(request Request) Response {
 	params := json2.decode[WillSaveTextDocumentParams](request.params) or {
-		$if debug { log('Failed to decode WillSaveTextDocumentParams: ${err}') }
+		$if debug {
+			log('Failed to decode WillSaveTextDocumentParams: ${err}')
+		}
 		return Response{
-			id:     request.id
+			id: request.id
 			result: []TextEdit{}
 		}
 	}
 	uri := params.text_document.uri
 	content := app.open_files[uri] or {
 		return Response{
-			id:     request.id
+			id: request.id
 			result: []TextEdit{}
 		}
 	}
@@ -2781,7 +3153,7 @@ fn (mut app App) on_will_save_wait_until(request Request) Response {
 	// would desynchronize the server from the editor (P0-07 item 7).
 	edits, _ := app.format_content(uri, content)
 	return Response{
-		id:     request.id
+		id: request.id
 		result: edits
 	}
 }
@@ -2791,9 +3163,11 @@ fn (mut app App) on_will_save_wait_until(request Request) Response {
 // when the cursor is not on a renameable symbol.
 fn (mut app App) handle_prepare_rename(request Request) Response {
 	params := json2.decode[TextDocumentPositionParams](request.params) or {
-		$if debug { log('Failed to decode TextDocumentPositionParams for prepareRename: ${err}') }
+		$if debug {
+			log('Failed to decode TextDocumentPositionParams for prepareRename: ${err}')
+		}
 		return Response{
-			id:     request.id
+			id: request.id
 			result: 'null'
 		}
 	}
@@ -2802,7 +3176,7 @@ fn (mut app App) handle_prepare_rename(request Request) Response {
 	lines := content.split_into_lines()
 	if params.position.line < 0 || params.position.line >= lines.len {
 		return Response{
-			id:     request.id
+			id: request.id
 			result: 'null'
 		}
 	}
@@ -2810,14 +3184,14 @@ fn (mut app App) handle_prepare_rename(request Request) Response {
 	start, end := find_word_bounds_at_col(line_text, params.position.char, app.position_encoding)
 	if start < 0 || end <= start {
 		return Response{
-			id:     request.id
+			id: request.id
 			result: 'null'
 		}
 	}
 	symbol := substr_by_char_bounds(line_text, start, end, app.position_encoding)
 	if symbol == '' {
 		return Response{
-			id:     request.id
+			id: request.id
 			result: 'null'
 		}
 	}
@@ -2825,26 +3199,26 @@ fn (mut app App) handle_prepare_rename(request Request) Response {
 	first := symbol[0]
 	if !is_ident_start(first) {
 		return Response{
-			id:     request.id
+			id: request.id
 			result: 'null'
 		}
 	}
 	// Reject V keywords and built-in function names — they cannot be renamed.
 	if symbol in v_keywords || symbol in v_builtins {
 		return Response{
-			id:     request.id
+			id: request.id
 			result: 'null'
 		}
 	}
 	return Response{
-		id:     request.id
+		id: request.id
 		result: PrepareRenameResult{
-			range:       LSPRange{
+			range: LSPRange{
 				start: Position{
 					line: params.position.line
 					char: start
 				}
-				end:   Position{
+				end: Position{
 					line: params.position.line
 					char: end
 				}
@@ -2862,10 +3236,10 @@ fn add_workspace_symbol(mut results []WorkspaceSymbol, mut seen_symbols map[stri
 	}
 	seen_symbols[key] = true
 	results << WorkspaceSymbol{
-		name:     name
-		kind:     kind
+		name: name
+		kind: kind
 		location: Location{
-			uri:   uri
+			uri: uri
 			range: rng
 		}
 	}
@@ -2923,9 +3297,11 @@ fn find_word_bounds_at_col(line string, col int, enc PositionEncoding) (int, int
 // and returns them as WorkspaceSymbol items.
 fn (mut app App) handle_workspace_symbol(request Request) Response {
 	params := json2.decode[WorkspaceSymbolParams](request.params) or {
-		$if debug { log('Failed to decode WorkspaceSymbolParams: ${err}') }
+		$if debug {
+			log('Failed to decode WorkspaceSymbolParams: ${err}')
+		}
 		return Response{
-			id:     request.id
+			id: request.id
 			result: []WorkspaceSymbol{}
 		}
 	}
@@ -2939,7 +3315,7 @@ fn (mut app App) handle_workspace_symbol(request Request) Response {
 	results := app.query_workspace_symbols(query)
 	app.end_progress(token, '')
 	return Response{
-		id:     request.id
+		id: request.id
 		result: results
 	}
 }
@@ -3067,9 +3443,11 @@ fn incremental_change_is_valid(content string, range LSPRange, enc PositionEncod
 // find_references handles the LSP references request, returning all locations of a symbol.
 fn (mut app App) find_references(request Request) Response {
 	params := json2.decode[ReferenceParams](request.params) or {
-		$if debug { log('Failed to decode ReferenceParams: ${err}') }
+		$if debug {
+			log('Failed to decode ReferenceParams: ${err}')
+		}
 		return Response{
-			id:     request.id
+			id: request.id
 			result: 'null'
 		}
 	}
@@ -3081,7 +3459,7 @@ fn (mut app App) find_references(request Request) Response {
 	symbol := app.get_word_at_position(path, line, col)
 	if symbol == '' {
 		return Response{
-			id:     request.id
+			id: request.id
 			result: 'null'
 		}
 	}
@@ -3111,13 +3489,13 @@ fn (mut app App) find_references(request Request) Response {
 	}
 	if locations.len == 0 {
 		return Response{
-			id:     request.id
+			id: request.id
 			result: 'null'
 		}
 	}
 
 	return Response{
-		id:     request.id
+		id: request.id
 		result: locations
 	}
 }
@@ -3125,9 +3503,11 @@ fn (mut app App) find_references(request Request) Response {
 // handle_rename handles the LSP rename request, returning edits to rename a symbol.
 fn (mut app App) handle_rename(request Request) Response {
 	params := json2.decode[RenameParams](request.params) or {
-		$if debug { log('Failed to decode RenameParams: ${err}') }
+		$if debug {
+			log('Failed to decode RenameParams: ${err}')
+		}
 		return Response{
-			id:     request.id
+			id: request.id
 			result: 'null'
 		}
 	}
@@ -3140,7 +3520,7 @@ fn (mut app App) handle_rename(request Request) Response {
 	symbol := app.get_word_at_position(path, line, col)
 	if symbol == '' {
 		return Response{
-			id:     request.id
+			id: request.id
 			result: 'null'
 		}
 	}
@@ -3153,7 +3533,7 @@ fn (mut app App) handle_rename(request Request) Response {
 	if !app.index_is_complete_for_scope(scope) {
 		log('rename: source index is incomplete; refusing a partial workspace edit')
 		return Response{
-			id:     request.id
+			id: request.id
 			result: 'null'
 		}
 	}
@@ -3166,7 +3546,7 @@ fn (mut app App) handle_rename(request Request) Response {
 	anchor := app.resolve_symbol_anchor(path, line, col) or {
 		log('rename: could not resolve a semantic anchor for "${symbol}"; refusing lexical rename (P1-04)')
 		return Response{
-			id:     request.id
+			id: request.id
 			result: 'null'
 		}
 	}
@@ -3177,7 +3557,7 @@ fn (mut app App) handle_rename(request Request) Response {
 	if locations.len == 0 {
 		log('rename: no scope-safe occurrences for "${symbol}" (unresolved or above candidate cap); refusing')
 		return Response{
-			id:     request.id
+			id: request.id
 			result: 'null'
 		}
 	}
@@ -3192,9 +3572,9 @@ fn (mut app App) handle_rename(request Request) Response {
 			loc.range.start.char + byte_to_encoded_col(symbol, symbol.len, app.position_encoding)
 		}
 		edit := TextEdit{
-			range:    LSPRange{
+			range: LSPRange{
 				start: loc.range.start
-				end:   Position{
+				end: Position{
 					line: loc.range.start.line
 					char: end_char
 				}
@@ -3215,17 +3595,17 @@ fn (mut app App) handle_rename(request Request) Response {
 		}
 		doc_changes << TextDocumentEdit{
 			text_document: VersionedTextDocumentIdentifier{
-				uri:     uri
+				uri: uri
 				version: version
 			}
-			edits:         edits
+			edits: edits
 		}
 	}
 
 	return Response{
-		id:     request.id
+		id: request.id
 		result: WorkspaceEdit{
-			changes:          changes
+			changes: changes
 			document_changes: doc_changes
 		}
 	}
@@ -3574,9 +3954,9 @@ fn source_declaration_is_compile_time_conditional(content string, declaration_li
 		mut col := 0
 		for col < line.len {
 			if line[col] == `$` {
-				directive_len := if line[col..].starts_with('$if') {
+				directive_len := if line[col..].starts_with('\$if') {
 					3
-				} else if line[col..].starts_with('$else') {
+				} else if line[col..].starts_with('\$else') {
 					5
 				} else {
 					0
@@ -4033,8 +4413,7 @@ fn source_occurrence_is_enum_member_declaration(content string, symbol string, t
 			continue
 		}
 		if declaration.children.any(it.kind == sym_kind_enum_member && it.name == symbol
-			&& it.selection_range.start.line == target_line)
-		{
+			&& it.selection_range.start.line == target_line) {
 			return true
 		}
 	}
@@ -4282,9 +4661,9 @@ fn (app &App) active_indexed_source_file_names(dir string, active_test_file_name
 		}
 	}
 	build_prefs := pref.Preferences{
-		os:      pref.get_host_os()
+		os: pref.get_host_os()
 		backend: .c
-		arch:    pref.get_host_arch()
+		arch: pref.get_host_arch()
 	}
 	mut active := map[string]bool{}
 	for path in build_prefs.should_compile_filtered_files(dir, source_names) {
@@ -4348,7 +4727,7 @@ fn (mut app App) find_indexed_source_definition(dir string, symbol string, activ
 				continue
 			}
 			matches << Location{
-				uri:   uri
+				uri: uri
 				range: sym.selection_range
 			}
 		}
@@ -4426,16 +4805,13 @@ fn (mut app App) resolve_indexed_definition(uri string, position Position) ?Loca
 		|| source_occurrence_is_compile_time_condition(lines, position.line, start_byte, if_occurrences, app.position_encoding) {
 		return none
 	}
-	alias, has_member_access, standalone_qualifier := member_qualifier_at_cursor(line, end,
-		app.position_encoding)
+	alias, has_member_access, standalone_qualifier := member_qualifier_at_cursor(line, end, app.position_encoding)
 	if has_member_access {
 		has_local_binding := app.local_scope_bindings(content, position).any(it.name == alias)
 		if standalone_qualifier && !has_local_binding {
 			if module_path := parse_import_aliases(content)[alias] {
-				module_dir := app.resolve_indexed_import_module_dir(module_path,
-					os.dir(uri_to_path(uri)))
-				return app.find_indexed_source_definition(module_dir, symbol, '', true,
-					module_path.all_after_last('.'))
+				module_dir := app.resolve_indexed_import_module_dir(module_path, os.dir(uri_to_path(uri)))
+				return app.find_indexed_source_definition(module_dir, symbol, '', true, module_path.all_after_last('.'))
 			}
 		}
 		receiver_type := app.infer_receiver_type_at_position(uri, content, alias, position)
@@ -4454,8 +4830,7 @@ fn (mut app App) resolve_indexed_definition(uri string, position Position) ?Loca
 	} else {
 		''
 	}
-	return app.find_indexed_source_definition(os.dir(requesting_path), symbol,
-		active_test_file_name, false, get_module_name(content))
+	return app.find_indexed_source_definition(os.dir(requesting_path), symbol, active_test_file_name, false, get_module_name(content))
 }
 
 // find_declaration_line searches `lines` for a top-level declaration whose name
@@ -4608,9 +4983,9 @@ fn get_import_completions(line string, work_dir string) []Detail {
 				continue
 			}
 			results << Detail{
-				kind:        9 // CompletionItemKind.Module
-				label:       entry
-				detail:      'V stdlib module'
+				kind: 9 // CompletionItemKind.Module
+				label: entry
+				detail: 'V stdlib module'
 				insert_text: entry
 			}
 		}
@@ -4633,9 +5008,9 @@ fn get_import_completions(line string, work_dir string) []Detail {
 				continue
 			}
 			results << Detail{
-				kind:        9
-				label:       entry
-				detail:      'Local module'
+				kind: 9
+				label: entry
+				detail: 'Local module'
 				insert_text: entry
 			}
 		}
@@ -4777,11 +5152,15 @@ fn (mut app App) format_content(uri string, content string) ([]TextEdit, string)
 	mut formatted := os.read_file(temp_file) or { result.output }
 
 	os.rm(temp_file) or {
-		$if debug { log('Failed to remove temp file: ${err}') }
+		$if debug {
+			log('Failed to remove temp file: ${err}')
+		}
 	}
 
 	if result.exit_code != 0 {
-		$if debug { log('v fmt failed with code ${result.exit_code}: ${result.output}') }
+		$if debug {
+			log('v fmt failed with code ${result.exit_code}: ${result.output}')
+		}
 		return []TextEdit{}, ''
 	}
 
@@ -4801,12 +5180,12 @@ fn (mut app App) format_content(uri string, content string) ([]TextEdit, string)
 	end_char := byte_to_encoded_col(final_segment, final_segment.len, app.position_encoding)
 
 	edit := TextEdit{
-		range:    LSPRange{
+		range: LSPRange{
 			start: Position{
 				line: 0
 				char: 0
 			}
-			end:   Position{
+			end: Position{
 				line: end_line
 				char: end_char
 			}
@@ -4821,7 +5200,7 @@ fn (mut app App) handle_formatting(request Request) Response {
 	params := json2.decode[DocumentFormattingParams](request.params) or {
 		log('Failed to decode DocumentFormattingParams: ${err}')
 		return Response{
-			id:     request.id
+			id: request.id
 			result: []TextEdit{}
 		}
 	}
@@ -4832,7 +5211,7 @@ fn (mut app App) handle_formatting(request Request) Response {
 		os.read_file(real_path) or {
 			log('Failed to read file for formatting: ${err}')
 			return Response{
-				id:     request.id
+				id: request.id
 				result: []TextEdit{}
 			}
 		}
@@ -4840,7 +5219,7 @@ fn (mut app App) handle_formatting(request Request) Response {
 
 	edits, _ := app.format_content(path, content)
 	return Response{
-		id:     request.id
+		id: request.id
 		result: edits
 	}
 }
@@ -4850,7 +5229,7 @@ fn (mut app App) handle_document_symbols(request Request) Response {
 	params := json2.decode[DocumentSymbolParams](request.params) or {
 		log('Failed to decode DocumentSymbolParams: ${err}')
 		return Response{
-			id:     request.id
+			id: request.id
 			result: []DocumentSymbol{}
 		}
 	}
@@ -4860,15 +5239,14 @@ fn (mut app App) handle_document_symbols(request Request) Response {
 	app.reindex_uri(uri)
 	if entry := app.symbol_index[uri] {
 		return Response{
-			id:     request.id
+			id: request.id
 			result: entry.doc_symbols
 		}
 	}
 	content := app.open_files[uri] or { '' }
 	return Response{
-		id:     request.id
-		result: encode_document_symbols(parse_document_symbols(content),
-			content.split_into_lines(), app.position_encoding)
+		id: request.id
+		result: encode_document_symbols(parse_document_symbols(content), content.split_into_lines(), app.position_encoding)
 	}
 }
 
@@ -4876,14 +5254,14 @@ fn (mut app App) handle_document_symbols(request Request) Response {
 fn (mut app App) handle_inlay_hints(request Request) Response {
 	if !app.inlay_hints_enabled {
 		return Response{
-			id:     request.id
+			id: request.id
 			result: []InlayHint{}
 		}
 	}
 	params := json2.decode[InlayHintParams](request.params) or {
 		log('Failed to decode InlayHintParams: ${err}')
 		return Response{
-			id:     request.id
+			id: request.id
 			result: []InlayHint{}
 		}
 	}
@@ -5010,18 +5388,18 @@ fn (mut app App) handle_inlay_hints(request Request) Response {
 		// byte offset is re-encoded into the client's encoding (P0-01/P2-07).
 		name_col := raw.index(var_name) or { continue }
 		hints << InlayHint{
-			position:     Position{
+			position: Position{
 				line: line_idx
 				char: byte_to_encoded_col(raw, name_col + var_name.len, app.position_encoding)
 			}
-			label:        ': ${inferred}'
-			kind:         inlay_hint_kind_type
+			label: ': ${inferred}'
+			kind: inlay_hint_kind_type
 			padding_left: false
 		}
 	}
 
 	return Response{
-		id:     request.id
+		id: request.id
 		result: hints
 	}
 }
@@ -5361,7 +5739,7 @@ fn make_symbol(name string, kind int, line_idx int, raw_line string) DocumentSym
 			line: line_idx
 			char: 0
 		}
-		end:   Position{
+		end: Position{
 			line: line_idx
 			char: raw_line.len
 		}
@@ -5371,17 +5749,17 @@ fn make_symbol(name string, kind int, line_idx int, raw_line string) DocumentSym
 			line: line_idx
 			char: col_start
 		}
-		end:   Position{
+		end: Position{
 			line: line_idx
 			char: col_end
 		}
 	}
 	return DocumentSymbol{
-		name:            name
-		kind:            kind
-		range:           line_range
+		name: name
+		kind: kind
+		range: line_range
 		selection_range: sel_range
-		children:        []DocumentSymbol{}
+		children: []DocumentSymbol{}
 	}
 }
 
@@ -5469,13 +5847,13 @@ fn (mut app App) search_symbol_in_dirs(symbol string, request_id int) []Location
 		positions := occ[symbol] or { continue }
 		for p in positions {
 			locations << Location{
-				uri:   uri
+				uri: uri
 				range: LSPRange{
 					start: Position{
 						line: p.line
 						char: p.start_char
 					}
-					end:   Position{
+					end: Position{
 						line: p.line
 						char: p.end_char
 					}
@@ -5578,13 +5956,13 @@ fn (mut app App) collect_semantic_candidates(symbol string, scope IndexScope) []
 		positions := occ[symbol] or { continue }
 		for p in positions {
 			candidates << Location{
-				uri:   uri
+				uri: uri
 				range: LSPRange{
 					start: Position{
 						line: p.line
 						char: p.start_char
 					}
-					end:   Position{
+					end: Position{
 						line: p.line
 						char: p.end_char
 					}
@@ -5614,12 +5992,10 @@ fn (mut app App) search_symbol_in_dirs_semantic(symbol string, anchor Location, 
 	// unrelated same-named symbols in other scopes.
 	if candidates.len > reference_semantic_max_candidates {
 		if !allow_lexical_fallback {
-			app.send_log_message('semantic-scan symbol=${symbol} candidates=${candidates.len} exceeds cap ${reference_semantic_max_candidates}; refusing scope-unsafe resolution',
-				2)
+			app.send_log_message('semantic-scan symbol=${symbol} candidates=${candidates.len} exceeds cap ${reference_semantic_max_candidates}; refusing scope-unsafe resolution', 2)
 			return []Location{}
 		}
-		app.send_log_message('semantic-scan symbol=${symbol} candidates=${candidates.len} exceeds cap ${reference_semantic_max_candidates}; returning lexical occurrences',
-			3)
+		app.send_log_message('semantic-scan symbol=${symbol} candidates=${candidates.len} exceeds cap ${reference_semantic_max_candidates}; returning lexical occurrences', 3)
 		return candidates
 	}
 
@@ -5636,24 +6012,24 @@ fn (mut app App) search_symbol_in_dirs_semantic(symbol string, anchor Location, 
 			locations << cand
 			continue
 		}
-		resolved := app.resolve_symbol_anchor_cached(cand.uri, cand.range.start.line,
-			cand.range.start.char, mut anchor_cache) or { continue }
+		resolved := app.resolve_symbol_anchor_cached(cand.uri, cand.range.start.line, cand.range.start.char, mut anchor_cache) or { continue }
 		if same_anchor_location(resolved, anchor) {
 			locations << cand
 		}
 	}
 	elapsed_ms := time.now().unix_milli() - started_ms
-	app.send_log_message('semantic-scan symbol=${symbol} candidates=${candidates.len} matches=${locations.len} elapsed_ms=${elapsed_ms}',
-		4)
+	app.send_log_message('semantic-scan symbol=${symbol} candidates=${candidates.len} matches=${locations.len} elapsed_ms=${elapsed_ms}', 4)
 	return locations
 }
 
 // handle_code_action handles the LSP codeAction request, returning quick fixes and organize imports.
 fn (mut app App) handle_code_action(request Request) Response {
 	params := json2.decode[CodeActionParams](request.params) or {
-		$if debug { log('Failed to decode CodeActionParams: ${err}') }
+		$if debug {
+			log('Failed to decode CodeActionParams: ${err}')
+		}
 		return Response{
-			id:     request.id
+			id: request.id
 			result: []CodeAction{}
 		}
 	}
@@ -5688,20 +6064,19 @@ fn (mut app App) handle_code_action(request Request) Response {
 					} else {
 						Position{
 							line: line_nr
-							char: byte_to_encoded_col(lines[line_nr], lines[line_nr].len,
-								app.position_encoding)
+							char: byte_to_encoded_col(lines[line_nr], lines[line_nr].len, app.position_encoding)
 						}
 					}
 					edit := WorkspaceEdit{
 						changes: {
 							uri: [
 								TextEdit{
-									range:    LSPRange{
+									range: LSPRange{
 										start: Position{
 											line: line_nr
 											char: 0
 										}
-										end:   end_pos
+										end: end_pos
 									}
 									new_text: ''
 								},
@@ -5709,11 +6084,11 @@ fn (mut app App) handle_code_action(request Request) Response {
 						}
 					}
 					actions << CodeAction{
-						title:        'Remove unknown import'
-						kind:         code_action_kind_quickfix
+						title: 'Remove unknown import'
+						kind: code_action_kind_quickfix
 						is_preferred: true
-						edit:         edit
-						diagnostics:  [diag]
+						edit: edit
+						diagnostics: [diag]
 					}
 				}
 			}
@@ -5730,7 +6105,7 @@ fn (mut app App) handle_code_action(request Request) Response {
 	}
 
 	return Response{
-		id:     request.id
+		id: request.id
 		result: actions
 	}
 }
@@ -5801,12 +6176,12 @@ fn build_safe_organize_imports_action(uri string, content string, lines []string
 		changes: {
 			uri: [
 				TextEdit{
-					range:    LSPRange{
+					range: LSPRange{
 						start: Position{
 							line: first
 							char: 0
 						}
-						end:   Position{
+						end: Position{
 							line: last
 							char: byte_to_encoded_col(lines[last], lines[last].len, enc)
 						}
@@ -5818,8 +6193,8 @@ fn build_safe_organize_imports_action(uri string, content string, lines []string
 	}
 	return CodeAction{
 		title: 'Organize Imports'
-		kind:  code_action_kind_source_organize_imports
-		edit:  edit
+		kind: code_action_kind_source_organize_imports
+		edit: edit
 	}
 }
 
@@ -5887,8 +6262,7 @@ fn (mut app App) collect_module_completions(current_file_uri string, working_dir
 	for indexed_uri in indexed_uris {
 		entry := app.symbol_index[indexed_uri] or { continue }
 		if normalized_index_path(os.dir(uri_to_path(indexed_uri))) != normalized_dir
-			|| os.file_name(uri_to_path(indexed_uri)) !in active_names
-			|| entry.module_name != current_module {
+			|| os.file_name(uri_to_path(indexed_uri)) !in active_names || entry.module_name != current_module {
 			continue
 		}
 		if entry.has_conditional_module_completions {
@@ -5897,7 +6271,7 @@ fn (mut app App) collect_module_completions(current_file_uri string, working_dir
 		items << entry.module_completions
 	}
 	return IndexedModuleCompletionResult{
-		items:        items
+		items: items
 		use_compiler: has_conditional
 	}
 }
@@ -5953,29 +6327,29 @@ fn build_fn_snippet(fn_name string, params_str string) string {
 		}
 		placeholders << '\${${placeholders.len + 1}:${param_name}}'
 	}
-	return '${fn_name}(${placeholders.join(', ')})$0'
+	return '${fn_name}(${placeholders.join(', ')})\$0'
 }
 
 fn make_keyword_completions() []Detail {
 	mut items := []Detail{}
 	for kw in v_keywords {
 		items << Detail{
-			kind:   14 // Keyword
-			label:  kw
+			kind: 14 // Keyword
+			label: kw
 			detail: kw
 		}
 	}
 	for b in v_builtins {
 		items << Detail{
-			kind:   3 // Function
-			label:  b
+			kind: 3 // Function
+			label: b
 			detail: b
 		}
 	}
 	for builtin_type in v_builtin_types {
 		items << Detail{
-			kind:   7 // Class
-			label:  builtin_type
+			kind: 7 // Class
+			label: builtin_type
 			detail: 'builtin type'
 		}
 	}
@@ -5988,7 +6362,7 @@ fn (mut app App) handle_range_formatting(request Request) Response {
 	params := json2.decode[DocumentRangeFormattingParams](request.params) or {
 		log('Failed to decode DocumentRangeFormattingParams: ${err}')
 		return Response{
-			id:     request.id
+			id: request.id
 			result: []TextEdit{}
 		}
 	}
@@ -5998,7 +6372,7 @@ fn (mut app App) handle_range_formatting(request Request) Response {
 		os.read_file(real_path) or {
 			log('Failed to read file for range formatting: ${err}')
 			return Response{
-				id:     request.id
+				id: request.id
 				result: []TextEdit{}
 			}
 		}
@@ -6011,7 +6385,7 @@ fn (mut app App) handle_range_formatting(request Request) Response {
 	os.write_file(temp_file, content) or {
 		log('Failed to write temp file for range formatting: ${err}')
 		return Response{
-			id:     request.id
+			id: request.id
 			result: []TextEdit{}
 		}
 	}
@@ -6020,16 +6394,18 @@ fn (mut app App) handle_range_formatting(request Request) Response {
 	formatted := os.read_file(temp_file) or {
 		os.rm(temp_file) or {}
 		return Response{
-			id:     request.id
+			id: request.id
 			result: []TextEdit{}
 		}
 	}
 	os.rm(temp_file) or {
-		$if debug { log('Failed to remove temp file for range formatting: ${err}') }
+		$if debug {
+			log('Failed to remove temp file for range formatting: ${err}')
+		}
 	}
 	if result.exit_code != 0 || formatted == '' || formatted == content {
 		return Response{
-			id:     request.id
+			id: request.id
 			result: []TextEdit{}
 		}
 	}
@@ -6042,7 +6418,7 @@ fn (mut app App) handle_range_formatting(request Request) Response {
 	}
 	if req_start >= original_lines.len || req_start > req_end {
 		return Response{
-			id:     request.id
+			id: request.id
 			result: []TextEdit{}
 		}
 	}
@@ -6064,19 +6440,19 @@ fn (mut app App) handle_range_formatting(request Request) Response {
 	if orig_hunk_start < req_start || orig_hunk_end - 1 > req_end {
 		log('range formatting: changed hunk [${orig_hunk_start}..${orig_hunk_end}) outside requested range [${req_start}..${req_end}]; returning no edits')
 		return Response{
-			id:     request.id
+			id: request.id
 			result: []TextEdit{}
 		}
 	}
 	fmt_hunk_end := formatted_lines.len - suf // exclusive
 	new_text := formatted_lines[orig_hunk_start..fmt_hunk_end].join('\n') + '\n'
 	edit := TextEdit{
-		range:    LSPRange{
+		range: LSPRange{
 			start: Position{
 				line: orig_hunk_start
 				char: 0
 			}
-			end:   Position{
+			end: Position{
 				line: orig_hunk_end
 				char: 0
 			}
@@ -6084,7 +6460,7 @@ fn (mut app App) handle_range_formatting(request Request) Response {
 		new_text: new_text
 	}
 	return Response{
-		id:     request.id
+		id: request.id
 		result: [edit]
 	}
 }
@@ -6095,9 +6471,11 @@ fn (mut app App) handle_range_formatting(request Request) Response {
 // as the outer (parent) range.  Clients expand the selection incrementally.
 fn (mut app App) handle_selection_range(request Request) Response {
 	params := json2.decode[SelectionRangeParams](request.params) or {
-		$if debug { log('Failed to decode SelectionRangeParams: ${err}') }
+		$if debug {
+			log('Failed to decode SelectionRangeParams: ${err}')
+		}
 		return Response{
-			id:     request.id
+			id: request.id
 			result: []SelectionRange{}
 		}
 	}
@@ -6110,7 +6488,7 @@ fn (mut app App) handle_selection_range(request Request) Response {
 			results << SelectionRange{
 				range: LSPRange{
 					start: pos
-					end:   pos
+					end: pos
 				}
 			}
 			continue
@@ -6123,7 +6501,7 @@ fn (mut app App) handle_selection_range(request Request) Response {
 				line: pos.line
 				char: 0
 			}
-			end:   Position{
+			end: Position{
 				line: pos.line
 				char: byte_to_encoded_col(line_text, line_text.len, app.position_encoding)
 			}
@@ -6141,7 +6519,7 @@ fn (mut app App) handle_selection_range(request Request) Response {
 				line: pos.line
 				char: start
 			}
-			end:   Position{
+			end: Position{
 				line: pos.line
 				char: end
 			}
@@ -6150,12 +6528,12 @@ fn (mut app App) handle_selection_range(request Request) Response {
 			range: line_range
 		}
 		results << SelectionRange{
-			range:  word_range
+			range: word_range
 			parent: line_parent
 		}
 	}
 	return Response{
-		id:     request.id
+		id: request.id
 		result: results
 	}
 }
@@ -6197,52 +6575,42 @@ fn resolve_workspace_settings(params_json string) ResolvedWorkspaceSettings {
 	sectioned_flat := json2.decode[DidChangeConfigurationParams](params_json) or {
 		DidChangeConfigurationParams{}
 	}
-	merge_workspace_settings(mut resolved, sectioned_flat.settings.vls.inlay_hints,
-		sectioned_flat.settings.vls.diagnostics)
+	merge_workspace_settings(mut resolved, sectioned_flat.settings.vls.inlay_hints, sectioned_flat.settings.vls.diagnostics)
 
 	sectioned_inlay_nested := json2.decode[DidChangeConfigurationParamsCompat](params_json) or {
 		DidChangeConfigurationParamsCompat{}
 	}
-	merge_workspace_settings(mut resolved,
-		sectioned_inlay_nested.settings.vls.inlay_hints.enabled,
-		sectioned_inlay_nested.settings.vls.diagnostics)
+	merge_workspace_settings(mut resolved, sectioned_inlay_nested.settings.vls.inlay_hints.enabled, sectioned_inlay_nested.settings.vls.diagnostics)
 
 	sectioned_diagnostics_nested := json2.decode[DidChangeConfigurationParamsNestedDiagnosticsCompat](params_json) or {
 		DidChangeConfigurationParamsNestedDiagnosticsCompat{}
 	}
-	merge_workspace_settings(mut resolved,
-		sectioned_diagnostics_nested.settings.vls.inlay_hints,
-		sectioned_diagnostics_nested.settings.vls.diagnostics.enabled)
+	merge_workspace_settings(mut resolved, sectioned_diagnostics_nested.settings.vls.inlay_hints, sectioned_diagnostics_nested.settings.vls.diagnostics.enabled)
 
 	sectioned_nested := json2.decode[DidChangeConfigurationParamsNestedFeaturesCompat](params_json) or {
 		DidChangeConfigurationParamsNestedFeaturesCompat{}
 	}
-	merge_workspace_settings(mut resolved, sectioned_nested.settings.vls.inlay_hints.enabled,
-		sectioned_nested.settings.vls.diagnostics.enabled)
+	merge_workspace_settings(mut resolved, sectioned_nested.settings.vls.inlay_hints.enabled, sectioned_nested.settings.vls.diagnostics.enabled)
 
 	direct_flat := json2.decode[DidChangeConfigurationDirectParams](params_json) or {
 		DidChangeConfigurationDirectParams{}
 	}
-	merge_workspace_settings(mut resolved, direct_flat.settings.inlay_hints,
-		direct_flat.settings.diagnostics)
+	merge_workspace_settings(mut resolved, direct_flat.settings.inlay_hints, direct_flat.settings.diagnostics)
 
 	direct_inlay_nested := json2.decode[DidChangeConfigurationDirectParamsCompat](params_json) or {
 		DidChangeConfigurationDirectParamsCompat{}
 	}
-	merge_workspace_settings(mut resolved, direct_inlay_nested.settings.inlay_hints.enabled,
-		direct_inlay_nested.settings.diagnostics)
+	merge_workspace_settings(mut resolved, direct_inlay_nested.settings.inlay_hints.enabled, direct_inlay_nested.settings.diagnostics)
 
 	direct_diagnostics_nested := json2.decode[DidChangeConfigurationDirectParamsNestedDiagnosticsCompat](params_json) or {
 		DidChangeConfigurationDirectParamsNestedDiagnosticsCompat{}
 	}
-	merge_workspace_settings(mut resolved, direct_diagnostics_nested.settings.inlay_hints,
-		direct_diagnostics_nested.settings.diagnostics.enabled)
+	merge_workspace_settings(mut resolved, direct_diagnostics_nested.settings.inlay_hints, direct_diagnostics_nested.settings.diagnostics.enabled)
 
 	direct_nested := json2.decode[DidChangeConfigurationDirectParamsNestedFeaturesCompat](params_json) or {
 		DidChangeConfigurationDirectParamsNestedFeaturesCompat{}
 	}
-	merge_workspace_settings(mut resolved, direct_nested.settings.inlay_hints.enabled,
-		direct_nested.settings.diagnostics.enabled)
+	merge_workspace_settings(mut resolved, direct_nested.settings.inlay_hints.enabled, direct_nested.settings.diagnostics.enabled)
 	return resolved
 }
 
@@ -6265,7 +6633,9 @@ fn merge_workspace_settings(mut resolved ResolvedWorkspaceSettings, inlay_hints 
 fn (mut app App) on_initialize(request Request) ?string {
 	params := json2.decode[InitializeParams](request.params) or {
 		msg := 'Invalid initialize params: ${err.msg()}'
-		$if debug { log(msg) }
+		$if debug {
+			log(msg)
+		}
 		return msg
 	}
 	roots := resolve_initialize_workspace_roots(params)
@@ -6302,9 +6672,15 @@ fn negotiate_position_encoding(params InitializeParams) PositionEncoding {
 				mut has_utf32 := false
 				for e in encodings {
 					match e {
-						'utf-8' { return PositionEncoding.utf8 }
-						'utf-16' { has_utf16 = true }
-						'utf-32' { has_utf32 = true }
+						'utf-8' {
+							return PositionEncoding.utf8
+						}
+						'utf-16' {
+							has_utf16 = true
+						}
+						'utf-32' {
+							has_utf32 = true
+						}
 						else {}
 					}
 				}
@@ -6402,7 +6778,9 @@ fn (mut app App) on_cancel_request(request Request) {
 		app.cancelled_requests[params.id] = true
 		log('VLS: request ${params.id} marked as cancelled')
 	} else {
-		$if debug { log('Failed to decode CancelRequestParams') }
+		$if debug {
+			log('Failed to decode CancelRequestParams')
+		}
 	}
 }
 
@@ -6410,7 +6788,9 @@ fn (mut app App) on_cancel_request(request Request) {
 // updating the server's list of workspace roots when the client adds or removes folders.
 fn (mut app App) on_did_change_workspace_folders(request Request) {
 	params := json2.decode[DidChangeWorkspaceFoldersParams](request.params) or {
-		$if debug { log('Failed to decode DidChangeWorkspaceFoldersParams: ${err}') }
+		$if debug {
+			log('Failed to decode DidChangeWorkspaceFoldersParams: ${err}')
+		}
 		return
 	}
 	// Remove folders that were closed.
@@ -6495,7 +6875,7 @@ fn code_lens_range(line int, raw_line string, encoding PositionEncoding) LSPRang
 			line: line
 			char: 0
 		}
-		end:   Position{
+		end: Position{
 			line: line
 			char: byte_to_encoded_col(raw_line, raw_line.len, encoding)
 		}
@@ -6506,9 +6886,11 @@ fn code_lens_range(line int, raw_line string, encoding PositionEncoding) LSPRang
 // It returns Run Main for main and Run File plus Run Test for test functions.
 fn (mut app App) handle_code_lens(request Request) Response {
 	params := json2.decode[CodeLensParams](request.params) or {
-		$if debug { log('Failed to decode CodeLensParams: ${err}') }
+		$if debug {
+			log('Failed to decode CodeLensParams: ${err}')
+		}
 		return Response{
-			id:     request.id
+			id: request.id
 			result: []CodeLens{}
 		}
 	}
@@ -6523,35 +6905,35 @@ fn (mut app App) handle_code_lens(request Request) Response {
 		fn_name := code_lens_fn_name(code)
 		if fn_name == 'main' {
 			lenses << CodeLens{
-				range:   code_lens_range(i, raw_line, app.position_encoding)
+				range: code_lens_range(i, raw_line, app.position_encoding)
 				command: Command{
-					title:     'Run Main'
-					command:   'vls.runFile'
+					title: 'Run Main'
+					command: 'vls.runFile'
 					arguments: [uri]
 				}
 			}
 		}
 		if is_test_file && fn_name.starts_with('test_') {
 			lenses << CodeLens{
-				range:   code_lens_range(i, raw_line, app.position_encoding)
+				range: code_lens_range(i, raw_line, app.position_encoding)
 				command: Command{
-					title:     'Run File'
-					command:   'vls.runTests'
+					title: 'Run File'
+					command: 'vls.runTests'
 					arguments: [uri]
 				}
 			}
 			lenses << CodeLens{
-				range:   code_lens_range(i, raw_line, app.position_encoding)
+				range: code_lens_range(i, raw_line, app.position_encoding)
 				command: Command{
-					title:     'Run Test'
-					command:   'vls.runTests'
+					title: 'Run Test'
+					command: 'vls.runTests'
 					arguments: [uri, fn_name]
 				}
 			}
 		}
 	}
 	return Response{
-		id:     request.id
+		id: request.id
 		result: lenses
 	}
 }
@@ -6560,14 +6942,16 @@ fn (mut app App) handle_code_lens(request Request) Response {
 // The lens is already fully resolved at creation time so this is a pass-through.
 fn (mut app App) handle_code_lens_resolve(request Request) Response {
 	lens := json2.decode[CodeLens](request.params) or {
-		$if debug { log('Failed to decode CodeLens for resolve: ${err}') }
+		$if debug {
+			log('Failed to decode CodeLens for resolve: ${err}')
+		}
 		return Response{
-			id:     request.id
+			id: request.id
 			result: 'null'
 		}
 	}
 	return Response{
-		id:     request.id
+		id: request.id
 		result: lens
 	}
 }
@@ -6605,9 +6989,11 @@ fn (app &App) code_lens_command_target(arguments []string) (string, string, stri
 // handle_execute_command handles workspace/executeCommand by invoking the V compiler.
 fn (mut app App) handle_execute_command(request Request) Response {
 	params := json2.decode[ExecuteCommandParams](request.params) or {
-		$if debug { log('Failed to decode ExecuteCommandParams: ${err}') }
+		$if debug {
+			log('Failed to decode ExecuteCommandParams: ${err}')
+		}
 		return Response{
-			id:     request.id
+			id: request.id
 			result: 'null'
 		}
 	}
@@ -6621,13 +7007,13 @@ fn (mut app App) handle_execute_command(request Request) Response {
 				app.send_show_message('vls: the V compiler (`v`) was not found on PATH.', 1)
 			} else {
 				app.start_code_lens_run(CodeLensRunJob{
-					kind:           .main
-					title:          'Run Main'
-					uri:            uri
-					path:           path
-					open_files:     app.open_files.clone()
-					write_mutex:    app.write_mutex
-					tcp_conn:       app.tcp_conn
+					kind: .main
+					title: 'Run Main'
+					uri: uri
+					path: path
+					open_files: app.open_files.clone()
+					write_mutex: app.write_mutex
+					tcp_conn: app.tcp_conn
 					capture_output: app.capture_output
 				})
 			}
@@ -6652,18 +7038,17 @@ fn (mut app App) handle_execute_command(request Request) Response {
 						CodeLensRunKind.test_function
 					}
 					if !compiler_is_available() {
-						app.send_show_message('vls: the V compiler (`v`) was not found on PATH.',
-							1)
+						app.send_show_message('vls: the V compiler (`v`) was not found on PATH.', 1)
 					} else {
 						app.start_code_lens_run(CodeLensRunJob{
-							kind:           kind
-							title:          title
-							uri:            uri
-							path:           path
-							fn_name:        fn_name
-							open_files:     app.open_files.clone()
-							write_mutex:    app.write_mutex
-							tcp_conn:       app.tcp_conn
+							kind: kind
+							title: title
+							uri: uri
+							path: path
+							fn_name: fn_name
+							open_files: app.open_files.clone()
+							write_mutex: app.write_mutex
+							tcp_conn: app.tcp_conn
 							capture_output: app.capture_output
 						})
 					}
@@ -6676,7 +7061,7 @@ fn (mut app App) handle_execute_command(request Request) Response {
 	}
 
 	return Response{
-		id:     request.id
+		id: request.id
 		result: 'null'
 	}
 }
@@ -6685,9 +7070,11 @@ fn (mut app App) handle_execute_command(request Request) Response {
 // Returns inline text values for simple variable := literal assignments in the range.
 fn (mut app App) handle_inline_value(request Request) Response {
 	params := json2.decode[InlineValueParams](request.params) or {
-		$if debug { log('Failed to decode InlineValueParams: ${err}') }
+		$if debug {
+			log('Failed to decode InlineValueParams: ${err}')
+		}
 		return Response{
-			id:     request.id
+			id: request.id
 			result: []InlineValueText{}
 		}
 	}
@@ -6721,16 +7108,16 @@ fn (mut app App) handle_inline_value(request Request) Response {
 					line: i
 					char: col_start
 				}
-				end:   Position{
+				end: Position{
 					line: i
 					char: col_start + var_name.len
 				}
 			}
-			text:  ': ${inferred}'
+			text: ': ${inferred}'
 		}
 	}
 	return Response{
-		id:     request.id
+		id: request.id
 		result: values
 	}
 }
@@ -6744,7 +7131,7 @@ fn (mut app App) handle_linked_editing_range(request Request) Response {
 			log('Failed to decode TextDocumentPositionParams for linkedEditingRange: ${err}')
 		}
 		return Response{
-			id:     request.id
+			id: request.id
 			result: 'null'
 		}
 	}
@@ -6753,7 +7140,7 @@ fn (mut app App) handle_linked_editing_range(request Request) Response {
 	lines := content.split_into_lines()
 	if params.position.line < 0 || params.position.line >= lines.len {
 		return Response{
-			id:     request.id
+			id: request.id
 			result: 'null'
 		}
 	}
@@ -6761,7 +7148,7 @@ fn (mut app App) handle_linked_editing_range(request Request) Response {
 	start, end := find_word_bounds_at_col(line_text, params.position.char, app.position_encoding)
 	if start < 0 || end <= start {
 		return Response{
-			id:     request.id
+			id: request.id
 			result: 'null'
 		}
 	}
@@ -6782,7 +7169,7 @@ fn (mut app App) handle_linked_editing_range(request Request) Response {
 					line: params.position.line
 					char: sc
 				}
-				end:   Position{
+				end: Position{
 					line: params.position.line
 					char: ec
 				}
@@ -6792,12 +7179,12 @@ fn (mut app App) handle_linked_editing_range(request Request) Response {
 	}
 	if ranges.len == 0 {
 		return Response{
-			id:     request.id
+			id: request.id
 			result: 'null'
 		}
 	}
 	return Response{
-		id:     request.id
+		id: request.id
 		result: LinkedEditingRanges{
 			ranges: ranges
 		}
@@ -6808,7 +7195,7 @@ fn (mut app App) handle_linked_editing_range(request Request) Response {
 // For now it returns empty edits — triggering v fmt on every keystroke would be too expensive.
 fn (mut app App) handle_on_type_formatting(request Request) Response {
 	return Response{
-		id:     request.id
+		id: request.id
 		result: []TextEdit{}
 	}
 }

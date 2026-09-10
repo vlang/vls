@@ -90,11 +90,11 @@ fn test_method_from_string_signature_help() {
 }
 
 fn test_method_from_string_set_trace() {
-	assert Method.from_string('$/setTrace') == .set_trace
+	assert Method.from_string(u8(36).ascii_str() + '/setTrace') == .set_trace
 }
 
 fn test_method_from_string_cancel_request() {
-	assert Method.from_string('$/cancelRequest') == .cancel_request
+	assert Method.from_string(u8(36).ascii_str() + '/cancelRequest') == .cancel_request
 }
 
 fn test_method_from_string_shutdown() {
@@ -190,11 +190,11 @@ fn test_method_str_rename() {
 }
 
 fn test_method_str_set_trace() {
-	assert Method.set_trace.str() == '$/setTrace'
+	assert Method.set_trace.str() == u8(36).ascii_str() + '/setTrace'
 }
 
 fn test_method_str_cancel_request() {
-	assert Method.cancel_request.str() == '$/cancelRequest'
+	assert Method.cancel_request.str() == u8(36).ascii_str() + '/cancelRequest'
 }
 
 fn test_method_str_shutdown() {
@@ -219,11 +219,21 @@ fn test_method_roundtrip() {
 }
 
 fn test_method_roundtrip_all_values() {
-	// Ensure all Method enum values round-trip correctly
-	$for m in Method.values {
-		if m.value != Method.unknown {
-			assert Method.from_string(m.attrs[0]) == m.value
-		}
+	// Keep this runtime-only: V3 currently does not reliably dispatch methods on
+	// compile-time enum-value wrappers.
+	methods := [Method.initialize, .initialized, .did_open, .did_change, .did_close, .did_save,
+		.definition, .declaration, .type_definition, .implementation, .completion, .signature_help,
+		.hover, .references, .rename, .prepare_rename, .formatting, .document_symbols,
+		.workspace_symbol, .inlay_hint, .code_action, .semantic_tokens, .folding_range,
+		.callhierarchy_prepare, .callhierarchy_incoming, .callhierarchy_outgoing,
+		.workspace_did_change_configuration, .workspace_did_change_workspace_folders,
+		.document_highlight, .selection_range, .semantic_tokens_range, .range_formatting, .will_save,
+		.will_save_wait_until, .did_change_watched_files, .code_lens, .code_lens_resolve,
+		.execute_command, .inline_value, .linked_editing_range, .will_create_files,
+		.will_rename_files, .will_delete_files, .on_type_formatting, .set_trace, .cancel_request,
+		.shutdown, .exit]
+	for m in methods {
+		assert Method.from_string(m.str()) == m
 	}
 }
 
@@ -325,7 +335,7 @@ fn test_request_content_has_id_detects_presence() {
 }
 
 fn test_request_content_has_id_ignores_nested_id_in_params() {
-	assert !request_content_has_id('{"method":"$/cancelRequest","params":{"id":77}}')
+	assert !request_content_has_id('{"method":"\$/cancelRequest","params":{"id":77}}')
 }
 
 fn test_request_content_has_id_fallback_for_malformed_payload() {
@@ -345,26 +355,22 @@ fn test_validate_request_params_reports_missing_uri() {
 }
 
 fn test_validate_request_params_accepts_valid_completion_params() {
-	err := validate_request_params(.completion,
-		'{"textDocument":{"uri":"file:///tmp/a.v"},"position":{"line":0,"character":0}}')
+	err := validate_request_params(.completion, '{"textDocument":{"uri":"file:///tmp/a.v"},"position":{"line":0,"character":0}}')
 	assert err == none
 }
 
 fn test_validate_request_params_initialize_accepts_position_encodings_list() {
-	err := validate_request_params(.initialize,
-		'{"capabilities":{"general":{"positionEncodings":["utf-16"]}}}')
+	err := validate_request_params(.initialize, '{"capabilities":{"general":{"positionEncodings":["utf-16"]}}}')
 	assert err == none
 }
 
 fn test_validate_request_params_initialize_accepts_multiple_position_encodings() {
-	err := validate_request_params(.initialize,
-		'{"capabilities":{"general":{"positionEncodings":["utf-16","utf-32"]}}}')
+	err := validate_request_params(.initialize, '{"capabilities":{"general":{"positionEncodings":["utf-16","utf-32"]}}}')
 	assert err == none
 }
 
 fn test_validate_request_params_initialize_accepts_workspace_folders_with_uri() {
-	err := validate_request_params(.initialize,
-		'{"workspaceFolders":[{"uri":"file:///tmp/project","name":"project"}]}')
+	err := validate_request_params(.initialize, '{"workspaceFolders":[{"uri":"file:///tmp/project","name":"project"}]}')
 	assert err == none
 }
 
@@ -383,23 +389,19 @@ fn test_validate_request_params_reports_missing_call_hierarchy_item_uri() {
 }
 
 fn test_validate_request_params_accepts_valid_call_hierarchy_item_uri() {
-	err := validate_request_params(.callhierarchy_incoming,
-		'{"item":{"name":"foo","kind":12,"uri":"file:///tmp/a.v","range":{"start":{"line":0,"character":0},"end":{"line":0,"character":3}},"selectionRange":{"start":{"line":0,"character":0},"end":{"line":0,"character":3}},"detail":""}}')
+	err := validate_request_params(.callhierarchy_incoming, '{"item":{"name":"foo","kind":12,"uri":"file:///tmp/a.v","range":{"start":{"line":0,"character":0},"end":{"line":0,"character":3}},"selectionRange":{"start":{"line":0,"character":0},"end":{"line":0,"character":3}},"detail":""}}')
 	assert err == none
 }
 
 fn test_validate_request_params_reports_invalid_rename_new_name() {
-	err_empty := validate_request_params(.rename,
-		'{"textDocument":{"uri":"file:///tmp/a.v"},"position":{"line":0,"character":0},"newName":""}')
+	err_empty := validate_request_params(.rename, '{"textDocument":{"uri":"file:///tmp/a.v"},"position":{"line":0,"character":0},"newName":""}')
 	assert err_empty != none
-	err_bad := validate_request_params(.rename,
-		'{"textDocument":{"uri":"file:///tmp/a.v"},"position":{"line":0,"character":0},"newName":"1 bad"}')
+	err_bad := validate_request_params(.rename, '{"textDocument":{"uri":"file:///tmp/a.v"},"position":{"line":0,"character":0},"newName":"1 bad"}')
 	assert err_bad != none
 }
 
 fn test_validate_request_params_accepts_valid_rename_new_name() {
-	err := validate_request_params(.rename,
-		'{"textDocument":{"uri":"file:///tmp/a.v"},"position":{"line":0,"character":0},"newName":"new_name1"}')
+	err := validate_request_params(.rename, '{"textDocument":{"uri":"file:///tmp/a.v"},"position":{"line":0,"character":0},"newName":"new_name1"}')
 	assert err == none
 }
 
@@ -409,14 +411,12 @@ fn test_validate_notification_params_reports_missing_uri_for_did_open() {
 }
 
 fn test_validate_notification_params_accepts_valid_did_open() {
-	err := validate_notification_params(.did_open,
-		'{"textDocument":{"uri":"file:///tmp/a.v","text":"module main"}}')
+	err := validate_notification_params(.did_open, '{"textDocument":{"uri":"file:///tmp/a.v","text":"module main"}}')
 	assert err == none
 }
 
 fn test_validate_notification_params_accepts_workspace_configuration() {
-	err := validate_notification_params(.workspace_did_change_configuration,
-		'{"settings":{"vls":{"inlayHints":true}}}')
+	err := validate_notification_params(.workspace_did_change_configuration, '{"settings":{"vls":{"inlayHints":true}}}')
 	assert err == none
 }
 
@@ -426,8 +426,7 @@ fn test_validate_notification_params_reports_missing_watched_file_uri() {
 }
 
 fn test_validate_notification_params_accepts_valid_watched_file_uri() {
-	err := validate_notification_params(.did_change_watched_files,
-		'{"changes":[{"uri":"file:///tmp/a.v","type":2}]}')
+	err := validate_notification_params(.did_change_watched_files, '{"changes":[{"uri":"file:///tmp/a.v","type":2}]}')
 	assert err == none
 }
 
@@ -460,7 +459,7 @@ fn test_lsp_range_same_line() {
 			line: 5
 			char: 10
 		}
-		end:   Position{
+		end: Position{
 			line: 5
 			char: 20
 		}
@@ -475,7 +474,7 @@ fn test_lsp_range_multi_line() {
 			line: 5
 			char: 0
 		}
-		end:   Position{
+		end: Position{
 			line: 10
 			char: 15
 		}
@@ -489,7 +488,7 @@ fn test_lsp_range_json_encoding() {
 			line: 1
 			char: 2
 		}
-		end:   Position{
+		end: Position{
 			line: 3
 			char: 4
 		}
@@ -581,8 +580,8 @@ fn test_request_default_values() {
 
 fn test_request_with_values() {
 	req := Request{
-		id:      1
-		method:  'textDocument/completion'
+		id: 1
+		method: 'textDocument/completion'
 		jsonrpc: '2.0'
 	}
 	assert req.id == 1
@@ -632,7 +631,7 @@ fn test_request_json_decoding_initialize() {
 
 fn test_response_default_jsonrpc() {
 	resp := Response{
-		id:     1
+		id: 1
 		result: 'null'
 	}
 	assert resp.jsonrpc == '2.0'
@@ -640,7 +639,7 @@ fn test_response_default_jsonrpc() {
 
 fn test_response_json_encoding() {
 	resp := Response{
-		id:     42
+		id: 42
 		result: 'null'
 	}
 	encoded := json2.encode(resp, escape_unicode: true)
@@ -650,7 +649,7 @@ fn test_response_json_encoding() {
 
 fn test_encode_response_payload_uses_json_null_for_null_result() {
 	resp := Response{
-		id:     2
+		id: 2
 		result: 'null'
 	}
 	encoded := encode_response_payload(resp)
@@ -660,7 +659,7 @@ fn test_encode_response_payload_uses_json_null_for_null_result() {
 
 fn test_encode_response_payload_preserves_non_null_results() {
 	resp := Response{
-		id:     3
+		id: 3
 		result: []TextEdit{}
 	}
 	encoded := encode_response_payload(resp)
@@ -669,7 +668,7 @@ fn test_encode_response_payload_preserves_non_null_results() {
 
 fn test_encode_response_payload_strips_sum_type_tag_from_capabilities() {
 	resp := Response{
-		id:     4
+		id: 4
 		result: Capabilities{
 			capabilities: Capability{
 				definition_provider: true
@@ -683,14 +682,14 @@ fn test_encode_response_payload_strips_sum_type_tag_from_capabilities() {
 
 fn test_encode_response_payload_strips_sum_type_tag_from_prepare_rename() {
 	resp := Response{
-		id:     5
+		id: 5
 		result: PrepareRenameResult{
-			range:       LSPRange{
+			range: LSPRange{
 				start: Position{
 					line: 1
 					char: 2
 				}
-				end:   Position{
+				end: Position{
 					line: 1
 					char: 7
 				}
@@ -891,7 +890,7 @@ fn test_notification_json_encoding() {
 	notif := Notification{
 		method: 'textDocument/publishDiagnostics'
 		params: PublishDiagnosticsParams{
-			uri:         'file:///test.v'
+			uri: 'file:///test.v'
 			diagnostics: []
 		}
 	}
@@ -902,8 +901,8 @@ fn test_notification_json_encoding() {
 
 fn test_lsp_diagnostic_error_severity() {
 	diag := LSPDiagnostic{
-		range:    LSPRange{}
-		message:  'error message'
+		range: LSPRange{}
+		message: 'error message'
 		severity: 1
 	}
 	assert diag.severity == 1 // Error
@@ -912,8 +911,8 @@ fn test_lsp_diagnostic_error_severity() {
 
 fn test_lsp_diagnostic_warning_severity() {
 	diag := LSPDiagnostic{
-		range:    LSPRange{}
-		message:  'warning message'
+		range: LSPRange{}
+		message: 'warning message'
 		severity: 2
 	}
 	assert diag.severity == 2 // Warning
@@ -921,17 +920,17 @@ fn test_lsp_diagnostic_warning_severity() {
 
 fn test_lsp_diagnostic_json_encoding() {
 	diag := LSPDiagnostic{
-		range:    LSPRange{
+		range: LSPRange{
 			start: Position{
 				line: 5
 				char: 0
 			}
-			end:   Position{
+			end: Position{
 				line: 5
 				char: 10
 			}
 		}
-		message:  'undefined identifier'
+		message: 'undefined identifier'
 		severity: 1
 	}
 	encoded := json2.encode(diag, escape_unicode: true)
@@ -941,9 +940,9 @@ fn test_lsp_diagnostic_json_encoding() {
 
 fn test_detail_function_kind() {
 	detail := Detail{
-		kind:          6 // Function
-		label:         'my_function'
-		detail:        'fn my_function() string'
+		kind: 6 // Function
+		label: 'my_function'
+		detail: 'fn my_function() string'
 		documentation: 'A helper function'
 	}
 	assert detail.kind == 6
@@ -952,9 +951,9 @@ fn test_detail_function_kind() {
 
 fn test_detail_variable_kind() {
 	detail := Detail{
-		kind:          6
-		label:         'my_var'
-		detail:        'int'
+		kind: 6
+		label: 'my_var'
+		detail: 'int'
 		documentation: 'A variable'
 	}
 	assert detail.label == 'my_var'
@@ -962,10 +961,10 @@ fn test_detail_variable_kind() {
 
 fn test_detail_with_snippet() {
 	detail := Detail{
-		kind:               6
-		label:              'println'
-		detail:             'fn println(s string)'
-		insert_text:        'println(\${1:s})'
+		kind: 6
+		label: 'println'
+		detail: 'fn println(s string)'
+		insert_text: 'println(\${1:s})'
 		insert_text_format: 2 // Snippet
 	}
 	assert detail.insert_text? == 'println(\${1:s})'
@@ -974,7 +973,7 @@ fn test_detail_with_snippet() {
 
 fn test_detail_json_encoding() {
 	detail := Detail{
-		kind:  6
+		kind: 6
 		label: 'test_fn'
 	}
 	encoded := json2.encode(detail, escape_unicode: true)
@@ -984,13 +983,13 @@ fn test_detail_json_encoding() {
 
 fn test_location_basic() {
 	loc := Location{
-		uri:   'file:///test/file.v'
+		uri: 'file:///test/file.v'
 		range: LSPRange{
 			start: Position{
 				line: 10
 				char: 5
 			}
-			end:   Position{
+			end: Position{
 				line: 10
 				char: 15
 			}
@@ -1002,13 +1001,13 @@ fn test_location_basic() {
 
 fn test_location_json_encoding() {
 	loc := Location{
-		uri:   'file:///path/to/file.v'
+		uri: 'file:///path/to/file.v'
 		range: LSPRange{
 			start: Position{
 				line: 0
 				char: 0
 			}
-			end:   Position{
+			end: Position{
 				line: 0
 				char: 5
 			}
@@ -1028,9 +1027,9 @@ fn test_signature_help_empty() {
 
 fn test_signature_help_with_signature() {
 	sig := SignatureHelp{
-		signatures:       [
+		signatures: [
 			SignatureInformation{
-				label:      'fn test(a int, b string)'
+				label: 'fn test(a int, b string)'
 				parameters: [
 					ParameterInformation{
 						label: 'a int'
@@ -1051,7 +1050,7 @@ fn test_signature_help_with_signature() {
 
 fn test_signature_help_json_encoding() {
 	sig := SignatureHelp{
-		signatures:       [
+		signatures: [
 			SignatureInformation{
 				label: 'fn example()'
 			},
@@ -1067,17 +1066,17 @@ fn test_signature_help_json_encoding() {
 fn test_capabilities_full() {
 	caps := Capabilities{
 		capabilities: Capability{
-			text_document_sync:      TextDocumentSyncOptions{
+			text_document_sync: TextDocumentSyncOptions{
 				open_close: true
-				change:     1
+				change: 1
 			}
-			completion_provider:     CompletionProvider{
+			completion_provider: CompletionProvider{
 				trigger_characters: ['.']
 			}
 			signature_help_provider: SignatureHelpOptions{
 				trigger_characters: ['(', ',']
 			}
-			definition_provider:     true
+			definition_provider: true
 		}
 	}
 	assert caps.capabilities.definition_provider == true
@@ -1114,7 +1113,7 @@ fn test_completion_item_capability_snippet_support() {
 fn test_text_document_sync_full() {
 	sync := TextDocumentSyncOptions{
 		open_close: true
-		change:     1 // Full
+		change: 1 // Full
 	}
 	assert sync.open_close == true
 	assert sync.change == 1
@@ -1123,7 +1122,7 @@ fn test_text_document_sync_full() {
 fn test_text_document_sync_incremental() {
 	sync := TextDocumentSyncOptions{
 		open_close: true
-		change:     2 // Incremental
+		change: 2 // Incremental
 	}
 	assert sync.change == 2
 }
@@ -1148,7 +1147,7 @@ fn test_response_result_string() {
 fn test_response_result_details() {
 	details := [
 		Detail{
-			kind:  6
+			kind: 6
 			label: 'test'
 		},
 	]
@@ -1201,7 +1200,7 @@ fn test_response_result_location() {
 
 fn test_publish_diagnostics_params_empty() {
 	params := PublishDiagnosticsParams{
-		uri:         'file:///test.v'
+		uri: 'file:///test.v'
 		diagnostics: []
 	}
 	assert params.uri == 'file:///test.v'
@@ -1210,16 +1209,16 @@ fn test_publish_diagnostics_params_empty() {
 
 fn test_publish_diagnostics_params_with_diagnostics() {
 	params := PublishDiagnosticsParams{
-		uri:         'file:///test.v'
+		uri: 'file:///test.v'
 		diagnostics: [
 			LSPDiagnostic{
-				range:    LSPRange{}
-				message:  'error 1'
+				range: LSPRange{}
+				message: 'error 1'
 				severity: 1
 			},
 			LSPDiagnostic{
-				range:    LSPRange{}
-				message:  'error 2'
+				range: LSPRange{}
+				message: 'error 2'
 				severity: 1
 			},
 		]
@@ -1229,11 +1228,11 @@ fn test_publish_diagnostics_params_with_diagnostics() {
 
 fn test_json_error_struct() {
 	err := JsonError{
-		path:    '/test/file.v'
+		path: '/test/file.v'
 		message: 'undefined identifier'
 		line_nr: 10
-		col:     5
-		len:     3
+		col: 5
+		len: 3
 	}
 	assert err.path == '/test/file.v'
 	assert err.message == 'undefined identifier'
@@ -1272,11 +1271,11 @@ fn test_json_var_ac_with_details() {
 	ac := JsonVarAC{
 		details: [
 			Detail{
-				kind:  6
+				kind: 6
 				label: 'fn1'
 			},
 			Detail{
-				kind:  6
+				kind: 6
 				label: 'fn2'
 			},
 		]
@@ -1307,14 +1306,14 @@ fn test_document_symbol_default_values() {
 
 fn test_document_symbol_with_values() {
 	sym := DocumentSymbol{
-		name:            'greet'
-		kind:            sym_kind_function
-		range:           LSPRange{
+		name: 'greet'
+		kind: sym_kind_function
+		range: LSPRange{
 			start: Position{
 				line: 2
 				char: 0
 			}
-			end:   Position{
+			end: Position{
 				line: 2
 				char: 20
 			}
@@ -1324,12 +1323,12 @@ fn test_document_symbol_with_values() {
 				line: 2
 				char: 3
 			}
-			end:   Position{
+			end: Position{
 				line: 2
 				char: 8
 			}
 		}
-		children:        []DocumentSymbol{}
+		children: []DocumentSymbol{}
 	}
 	assert sym.name == 'greet'
 	assert sym.kind == sym_kind_function
@@ -1339,14 +1338,14 @@ fn test_document_symbol_with_values() {
 
 fn test_document_symbol_json_encoding() {
 	sym := DocumentSymbol{
-		name:            'Person'
-		kind:            sym_kind_struct
-		range:           LSPRange{
+		name: 'Person'
+		kind: sym_kind_struct
+		range: LSPRange{
 			start: Position{
 				line: 5
 				char: 0
 			}
-			end:   Position{
+			end: Position{
 				line: 5
 				char: 14
 			}
@@ -1356,12 +1355,12 @@ fn test_document_symbol_json_encoding() {
 				line: 5
 				char: 7
 			}
-			end:   Position{
+			end: Position{
 				line: 5
 				char: 13
 			}
 		}
-		children:        []DocumentSymbol{}
+		children: []DocumentSymbol{}
 	}
 	encoded := json2.encode(sym, escape_unicode: true)
 	assert encoded.contains('"name":"Person"')
@@ -1384,17 +1383,17 @@ fn test_document_symbol_json_decoding() {
 
 fn test_document_symbol_with_children() {
 	sym := DocumentSymbol{
-		name:            'App'
-		kind:            sym_kind_struct
-		range:           LSPRange{}
+		name: 'App'
+		kind: sym_kind_struct
+		range: LSPRange{}
 		selection_range: LSPRange{}
-		children:        [
+		children: [
 			DocumentSymbol{
-				name:            'run'
-				kind:            sym_kind_method
-				range:           LSPRange{}
+				name: 'run'
+				kind: sym_kind_method
+				range: LSPRange{}
 				selection_range: LSPRange{}
-				children:        []DocumentSymbol{}
+				children: []DocumentSymbol{}
 			},
 		]
 	}
@@ -1475,10 +1474,10 @@ fn test_method_roundtrip_new_methods() {
 fn test_response_result_workspace_symbols() {
 	result := ResponseResult([
 		WorkspaceSymbol{
-			name:     'main'
-			kind:     sym_kind_function
+			name: 'main'
+			kind: sym_kind_function
 			location: Location{
-				uri:   'file:///tmp/main.v'
+				uri: 'file:///tmp/main.v'
 				range: LSPRange{}
 			}
 		},
@@ -1493,12 +1492,12 @@ fn test_response_result_workspace_symbols() {
 
 fn test_response_result_prepare_rename_result() {
 	result := ResponseResult(PrepareRenameResult{
-		range:       LSPRange{
+		range: LSPRange{
 			start: Position{
 				line: 1
 				char: 2
 			}
-			end:   Position{
+			end: Position{
 				line: 1
 				char: 5
 			}
@@ -1526,18 +1525,18 @@ fn test_response_result_document_symbols_empty() {
 fn test_response_result_document_symbols_with_data() {
 	syms := [
 		DocumentSymbol{
-			name:            'main'
-			kind:            sym_kind_function
-			range:           LSPRange{}
+			name: 'main'
+			kind: sym_kind_function
+			range: LSPRange{}
 			selection_range: LSPRange{}
-			children:        []DocumentSymbol{}
+			children: []DocumentSymbol{}
 		},
 		DocumentSymbol{
-			name:            'App'
-			kind:            sym_kind_struct
-			range:           LSPRange{}
+			name: 'App'
+			kind: sym_kind_struct
+			range: LSPRange{}
 			selection_range: LSPRange{}
-			children:        []DocumentSymbol{}
+			children: []DocumentSymbol{}
 		},
 	]
 	result := ResponseResult(syms)
@@ -1555,14 +1554,14 @@ fn test_response_result_document_symbols_with_data() {
 fn test_response_with_document_symbols_json_encoding() {
 	syms := [
 		DocumentSymbol{
-			name:            'greet'
-			kind:            sym_kind_function
-			range:           LSPRange{
+			name: 'greet'
+			kind: sym_kind_function
+			range: LSPRange{
 				start: Position{
 					line: 2
 					char: 0
 				}
-				end:   Position{
+				end: Position{
 					line: 2
 					char: 25
 				}
@@ -1572,16 +1571,16 @@ fn test_response_with_document_symbols_json_encoding() {
 					line: 2
 					char: 3
 				}
-				end:   Position{
+				end: Position{
 					line: 2
 					char: 8
 				}
 			}
-			children:        []DocumentSymbol{}
+			children: []DocumentSymbol{}
 		},
 	]
 	resp := Response{
-		id:     7
+		id: 7
 		result: syms
 	}
 	encoded := json2.encode(resp, escape_unicode: true)
@@ -1607,7 +1606,7 @@ fn test_capability_document_symbol_provider_json_encoding() {
 	caps := Capabilities{
 		capabilities: Capability{
 			document_symbol_provider: true
-			definition_provider:      true
+			definition_provider: true
 		}
 	}
 	encoded := json2.encode(caps, escape_unicode: true)
@@ -1769,13 +1768,13 @@ fn test_encode_response_payload_strips_type_from_array_variant() {
 	// Array-of-struct result variants (e.g. []WorkspaceSymbol) must also have
 	// their per-element `_type` discriminators stripped (P1-10).
 	resp := Response{
-		id:     9
+		id: 9
 		result: [
 			WorkspaceSymbol{
-				name:     'helper_fn'
-				kind:     sym_kind_function
+				name: 'helper_fn'
+				kind: sym_kind_function
 				location: Location{
-					uri:   'file:///tmp/lib.v'
+					uri: 'file:///tmp/lib.v'
 					range: LSPRange{}
 				}
 			},

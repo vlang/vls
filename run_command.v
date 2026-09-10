@@ -97,9 +97,9 @@ fn (mut output RunOutputBuffer) str() string {
 	return result
 }
 
-// code_lens_source_code_mask keeps code bytes in place while hiding strings and comments.
+// v_source_code_mask keeps code bytes in place while hiding strings and comments.
 // Interpolation expressions remain visible because they can contain compile-time path tokens.
-fn code_lens_source_code_mask(source string) []u8 {
+fn v_source_code_mask(source string) []u8 {
 	mut mask := []u8{len: source.len, init: ` `}
 	mut state := ImportScanState{}
 	mut in_line_comment := false
@@ -227,8 +227,7 @@ fn code_lens_token_is_in_hash_directive(mask []u8, pos int) bool {
 }
 
 fn code_lens_v_string_literal(value string) string {
-	escaped := value.replace('\\', '\\\\').replace("'", "\\'").replace('$', '\\$').replace('\n',
-		'\\n').replace('\r', '\\r').replace('\t', '\\t')
+	escaped := value.replace('\\', '\\\\').replace("'", "\\'").replace('\$', '\\\$').replace('\n', '\\n').replace('\r', '\\r').replace('\t', '\\t')
 	return "'${escaped}'"
 }
 
@@ -236,10 +235,15 @@ fn code_lens_v_string_literal(value string) string {
 // compile-time pseudo values. Hash directives retain their tokens so the compiler can resolve
 // native inputs from the materialized overlay.
 fn code_lens_source_with_original_pseudos(source string, source_path string,
-	temp_source_path string) string {
-	mask := code_lens_source_code_mask(source)
+	temp_source_path string, temp_work_dir string) string {
+	mask := v_source_code_mask(source)
 	file_path := os.real_path(source_path)
 	file_dir := os.real_path(os.dir(source_path))
+	relative_temp_path := overlay_relative_path(temp_source_path, temp_work_dir) or {
+		os.file_name(temp_source_path)
+	}
+	windows_temp_location := '.\\' + relative_temp_path.replace('/', '\\')
+	posix_temp_location := './' + relative_temp_path.replace('\\', '/')
 	vmod_root := find_project_root(os.dir(source_path))
 	temp_vmod_root := find_project_root(os.dir(temp_source_path))
 	vmod_file_path := if temp_vmod_root != '' {
@@ -280,7 +284,9 @@ fn code_lens_source_with_original_pseudos(source string, source_path string,
 			if code_lens_mask_has_at_token(mask, pos, '@LOCATION') {
 				temp_literal := code_lens_v_string_literal(temp_source_path)
 				file_literal := code_lens_v_string_literal(file_path)
-				rewritten.write_string('(@LOCATION.replace(${temp_literal}, ${file_literal}))')
+				windows_literal := code_lens_v_string_literal(windows_temp_location)
+				posix_literal := code_lens_v_string_literal(posix_temp_location)
+				rewritten.write_string('(@LOCATION.replace(${temp_literal}, ${file_literal}).replace(${windows_literal}, ${file_literal}).replace(${posix_literal}, ${file_literal}))')
 				pos += '@LOCATION'.len
 				continue
 			}
@@ -325,7 +331,7 @@ fn preserve_code_lens_overlay_dir(overlay CompilationOverlay, temp_dir string,
 		rel_path := overlay_relative_path(temp_path, overlay.temp_root) or { continue }
 		source_path := normalize_overlay_path(os.join_path(overlay.source_root, rel_path))
 		source := open_sources[source_path] or { os.read_file(temp_path)! }
-		rewritten := code_lens_source_with_original_pseudos(source, source_path, temp_path)
+		rewritten := code_lens_source_with_original_pseudos(source, source_path, temp_path, overlay.temp_work_dir)
 		if rewritten == source {
 			continue
 		}
@@ -359,8 +365,8 @@ mut:
 
 fn new_run_command_manager() &RunCommandManager {
 	return &RunCommandManager{
-		workers:        sync.new_waitgroup()
-		processes:      map[u64]&os.Process{}
+		workers: sync.new_waitgroup()
+		processes: map[u64]&os.Process{}
 		active_targets: map[string]u64{}
 	}
 }
@@ -500,7 +506,7 @@ fn run_managed_process(mut manager RunCommandManager, id u64, target string, exe
 		return ManagedRunResult{
 			result: os.Result{
 				exit_code: 1
-				output:    'Working dir does not exist: ${work_folder}'
+				output: 'Working dir does not exist: ${work_folder}'
 			}
 		}
 	}
@@ -544,7 +550,7 @@ fn run_managed_process(mut manager RunCommandManager, id u64, target string, exe
 	return ManagedRunResult{
 		result: os.Result{
 			exit_code: exit_code
-			output:    output.str()
+			output: output.str()
 		}
 		cancelled: !registered || manager.job_is_cancelled(id, target)
 	}
@@ -592,15 +598,14 @@ fn run_code_lens_job(mut manager RunCommandManager, id u64, target string,
 	}
 	temp_dir := os.join_path(os.temp_dir(), 'vls_run_${os.getpid()}_${id}_${time.now().unix_nano()}')
 	mut worker := App{
-		open_files:      job.open_files
-		temp_dir:        temp_dir
-		capture_output:  job.capture_output
-		write_mutex:     job.write_mutex
-		tcp_conn:        job.tcp_conn
+		open_files: job.open_files
+		temp_dir: temp_dir
+		capture_output: job.capture_output
+		write_mutex: job.write_mutex
+		tcp_conn: job.tcp_conn
 	}
 	os.mkdir_all(temp_dir) or {
-		worker.send_show_message('vls: ${job.title} could not create a temporary directory: ${err}',
-			1)
+		worker.send_show_message('vls: ${job.title} could not create a temporary directory: ${err}', 1)
 		return worker.captured_output.clone()
 	}
 	defer {
@@ -613,13 +618,11 @@ fn run_code_lens_job(mut manager RunCommandManager, id u64, target string,
 	mut overlay := CompilationOverlay{}
 	if job.uri in job.open_files {
 		overlay = worker.prepare_compilation_overlay(job.path) or {
-			worker.send_show_message('vls: ${job.title} could not prepare the open buffer: ${err}',
-				1)
+			worker.send_show_message('vls: ${job.title} could not prepare the open buffer: ${err}', 1)
 			return worker.captured_output.clone()
 		}
 		preserve_code_lens_overlay_source_paths(overlay, job.open_files) or {
-			worker.send_show_message('vls: ${job.title} could not preserve source paths: ${err}',
-				1)
+			worker.send_show_message('vls: ${job.title} could not preserve source paths: ${err}', 1)
 			return worker.captured_output.clone()
 		}
 		target_path = overlay.temp_source_file
@@ -630,15 +633,13 @@ fn run_code_lens_job(mut manager RunCommandManager, id u64, target string,
 	compile_args := code_lens_compile_args(job, target_path, executable_path)
 	display_args := code_lens_display_args(job)
 	worker.send_log_message('vls: ${job.title}: v ${display_args.join(' ')}', 3)
-	compile_result := run_managed_process(mut manager, id, target, resolve_v_compiler_exe(),
-		compile_args, compile_dir)
+	compile_result := run_managed_process(mut manager, id, target, resolve_v_compiler_exe(), compile_args, compile_dir)
 	if compile_result.cancelled {
 		return worker.captured_output.clone()
 	}
 	log_code_lens_output(mut worker, compile_result.result, overlay)
 	if compile_result.result.exit_code != 0 {
-		worker.send_show_message(
-			'vls: ${job.title} failed with exit code ${compile_result.result.exit_code}.', 1)
+		worker.send_show_message('vls: ${job.title} failed with exit code ${compile_result.result.exit_code}.', 1)
 		return worker.captured_output.clone()
 	}
 
@@ -648,8 +649,7 @@ fn run_code_lens_job(mut manager RunCommandManager, id u64, target string,
 	}
 	log_code_lens_output(mut worker, run_result.result, overlay)
 	if run_result.result.exit_code != 0 {
-		worker.send_show_message(
-			'vls: ${job.title} failed with exit code ${run_result.result.exit_code}.', 1)
+		worker.send_show_message('vls: ${job.title} failed with exit code ${run_result.result.exit_code}.', 1)
 		return worker.captured_output.clone()
 	}
 	worker.send_show_message('vls: ${job.title} finished successfully.', 3)
