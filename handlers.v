@@ -16,6 +16,11 @@ const v_keywords = ['asm', 'as', 'assert', 'atomic', 'break', 'const', 'continue
 const v_builtins = ['close', 'copy', 'eprintln', 'eprint', 'error', 'error_with_code', 'exit',
 	'flush_stderr', 'flush_stdout', 'free', 'isnil', 'panic', 'print', 'println']!
 
+struct IndexedCompletionResult {
+	items        []Detail
+	use_compiler bool
+}
+
 // operation_at_pos handles LSP requests at a given position (completion, hover, signature, definition).
 fn (mut app App) operation_at_pos(method Method, request Request) Response {
 	params := json2.decode[TextDocumentPositionParams](request.params) or {
@@ -52,11 +57,27 @@ fn (mut app App) operation_at_pos(method Method, request Request) Response {
 	// compiler process here used to cost hundreds of milliseconds on every request,
 	// even when the compiler returned no completion payload for an incomplete file.
 	if method == .completion {
+		indexed := app.indexed_completions(path, params.position)
+		if indexed.use_compiler {
+			compiler_result := app.run_v_line_info(.completion, path, '${line_nr}:${byte_col}')
+			compiler_items := if compiler_result is []Detail {
+				compiler_result as []Detail
+			} else {
+				[]Detail{}
+			}
+			return Response{
+				id:     request.id
+				result: CompletionList{
+					is_incomplete: false
+					items:         compiler_items
+				}
+			}
+		}
 		return Response{
 			id:     request.id
 			result: CompletionList{
 				is_incomplete: false
-				items:         app.indexed_completions(path, params.position)
+				items:         indexed.items
 			}
 		}
 	}
@@ -102,25 +123,40 @@ fn (mut app App) operation_at_pos(method Method, request Request) Response {
 // indexed_completions returns useful completions without compiling the project.
 // The compiler-backed path rebuilt an unsaved project overlay and launched V for
 // every request; on vlang/v that was roughly 400 ms even for a warm request.
-fn (mut app App) indexed_completions(uri string, position Position) []Detail {
+fn (mut app App) indexed_completions(uri string, position Position) IndexedCompletionResult {
 	content := app.open_files[uri] or { os.read_file(uri_to_path(uri)) or { '' } }
 	lines := content.split_into_lines()
 	if position.line < 0 || position.line >= lines.len {
-		return []Detail{}
+		return IndexedCompletionResult{}
 	}
 	line := lines[position.line]
 	if line.trim_space().starts_with('import') {
-		return get_import_completions(line, os.dir(uri_to_path(uri)))
+		return IndexedCompletionResult{
+			items: get_import_completions(line, os.dir(uri_to_path(uri)))
+		}
 	}
 	if position.char > 0 {
 		trigger_byte := encoded_col_to_byte(line, position.char - 1, app.position_encoding)
 		if trigger_byte < line.len && line[trigger_byte] == `.` {
 			qualifier := get_word_before_dot(line, position.char - 1, app.position_encoding)
-			if module_path := parse_import_aliases(content)[qualifier] {
-				return app.get_imported_module_member_completions(module_path,
-					os.dir(uri_to_path(uri)))
+			local_items := app.local_scope_completions(content, position)
+			has_local_binding := local_items.any(it.label == qualifier)
+			if !has_local_binding {
+				if module_path := parse_import_aliases(content)[qualifier] {
+					module_items := app.get_imported_module_member_completions(module_path,
+						os.dir(uri_to_path(uri)))
+					return IndexedCompletionResult{
+						items:        module_items
+						use_compiler: module_items.len == 0
+					}
+				}
 			}
-			return app.indexed_receiver_completions(uri, content, qualifier, position.line)
+			receiver_items := app.indexed_receiver_completions(uri, content, qualifier,
+				position.line)
+			return IndexedCompletionResult{
+				items:        receiver_items
+				use_compiler: receiver_items.len == 0
+			}
 		}
 	}
 
@@ -129,22 +165,262 @@ fn (mut app App) indexed_completions(uri string, position Position) []Detail {
 	for detail in details {
 		seen_labels[detail.label] = true
 	}
+	for detail in app.local_scope_completions(content, position) {
+		if detail.label !in seen_labels {
+			details << detail
+			seen_labels[detail.label] = true
+		}
+	}
+	for binding in parse_import_bindings(content) {
+		if binding.alias != '' && binding.alias !in seen_labels {
+			details << Detail{
+				kind:   9 // CompletionItemKind.Module
+				label:  binding.alias
+				detail: binding.module_path
+			}
+			seen_labels[binding.alias] = true
+		}
+	}
 	working_dir := os.dir(uri_to_path(uri))
 	if working_dir != '' {
-		for detail in app.collect_module_fn_completions(uri, working_dir) {
+		for detail in app.collect_module_completions(uri, working_dir) {
 			if detail.label !in seen_labels {
 				details << detail
 				seen_labels[detail.label] = true
 			}
 		}
 	}
-	for detail in parse_module_fn_completions(content) {
-		if detail.label !in seen_labels {
-			details << detail
-			seen_labels[detail.label] = true
+	return IndexedCompletionResult{
+		items: details
+	}
+}
+
+fn binding_identifiers(text string) []string {
+	mut names := []string{}
+	mut col := 0
+	ignored := ['_', 'atomic', 'else', 'for', 'if', 'lock', 'match', 'mut', 'rlock',
+		'select', 'shared']
+	for col < text.len {
+		if !is_ident_char(text[col]) || (text[col] >= `0` && text[col] <= `9`) {
+			col++
+			continue
+		}
+		start := col
+		col++
+		for col < text.len && is_ident_char(text[col]) {
+			col++
+		}
+		name := text[start..col]
+		if name !in ignored && name !in names {
+			names << name
 		}
 	}
-	return details
+	return names
+}
+
+fn matching_delimiter(text string, open_idx int, open u8, close u8) int {
+	if open_idx < 0 || open_idx >= text.len || text[open_idx] != open {
+		return -1
+	}
+	mut depth := 0
+	for idx in open_idx .. text.len {
+		if text[idx] == open {
+			depth++
+		} else if text[idx] == close {
+			depth--
+			if depth == 0 {
+				return idx
+			}
+		}
+	}
+	return -1
+}
+
+fn split_top_level_commas(text string) []string {
+	mut parts := []string{}
+	mut start := 0
+	mut round_depth := 0
+	mut square_depth := 0
+	mut curly_depth := 0
+	for idx, c in text {
+		match c {
+			`(` { round_depth++ }
+			`)` { round_depth-- }
+			`[` { square_depth++ }
+			`]` { square_depth-- }
+			`{` { curly_depth++ }
+			`}` { curly_depth-- }
+			`,` {
+				if round_depth == 0 && square_depth == 0 && curly_depth == 0 {
+					parts << text[start..idx]
+					start = idx + 1
+				}
+			}
+			else {}
+		}
+	}
+	parts << text[start..]
+	return parts
+}
+
+fn function_parameter_names(header string) []string {
+	fn_idx := header.index('fn ') or { return []string{} }
+	mut rest := header[fn_idx + 3..].trim_space()
+	mut names := []string{}
+	if rest.starts_with('(') {
+		receiver_end := matching_delimiter(rest, 0, `(`, `)`)
+		if receiver_end < 0 {
+			return names
+		}
+		receiver_fields := rest[1..receiver_end].fields()
+		for field in receiver_fields {
+			if field !in ['mut', 'shared', 'atomic', '_'] {
+				names << field
+				break
+			}
+		}
+		rest = rest[receiver_end + 1..].trim_space()
+	}
+	params_start := rest.index('(') or { return names }
+	params_end := matching_delimiter(rest, params_start, `(`, `)`)
+	if params_end < 0 {
+		return names
+	}
+	for parameter in split_top_level_commas(rest[params_start + 1..params_end]) {
+		fields := parameter.fields()
+		for field in fields {
+			if field !in ['mut', 'shared', 'atomic', '_'] {
+				if field !in names {
+					names << field
+				}
+				break
+			}
+		}
+	}
+	return names
+}
+
+fn containing_function_start(lines []string, position Position, enc PositionEncoding) int {
+	mut scan_state := ImportScanState{}
+	mut brace_depth := 0
+	mut pending_start := -1
+	mut function_start := -1
+	for line_idx, raw_line in lines {
+		if line_idx > position.line {
+			break
+		}
+		line := if line_idx == position.line {
+			byte_col := encoded_col_to_byte(raw_line, position.char, enc)
+			raw_line[..byte_col]
+		} else {
+			raw_line
+		}
+		code := source_line_import_code(line, mut scan_state)
+		trimmed := code.trim_space()
+		declaration := if trimmed.starts_with('pub fn ') {
+			trimmed[4..]
+		} else {
+			trimmed
+		}
+		if brace_depth == 0 && declaration.starts_with('fn ') {
+			pending_start = line_idx
+		}
+		for c in code {
+			if c == `{` {
+				if brace_depth == 0 && pending_start >= 0 {
+					function_start = pending_start
+				}
+				brace_depth++
+			} else if c == `}` && brace_depth > 0 {
+				brace_depth--
+				if brace_depth == 0 {
+					function_start = -1
+					pending_start = -1
+				}
+			}
+		}
+	}
+	if function_start >= 0 {
+		return function_start
+	}
+	return pending_start
+}
+
+fn local_declaration_names(code string) []string {
+	mut names := []string{}
+	for raw_statement in code.split(';') {
+		statement := raw_statement.trim_space()
+		if assign_idx := statement.index(':=') {
+			assignment_prefix := statement[..assign_idx]
+			lhs := if brace_idx := assignment_prefix.last_index('{') {
+				assignment_prefix[brace_idx + 1..]
+			} else {
+				assignment_prefix
+			}
+			for name in binding_identifiers(lhs) {
+				if name !in names {
+					names << name
+				}
+			}
+		} else if statement.starts_with('for ') {
+			if in_idx := statement.index(' in ') {
+				for name in binding_identifiers(statement[4..in_idx]) {
+					if name !in names {
+						names << name
+					}
+				}
+			}
+		}
+	}
+	return names
+}
+
+fn (app &App) local_scope_completions(content string, position Position) []Detail {
+	lines := content.split_into_lines()
+	if position.line < 0 || position.line >= lines.len {
+		return []Detail{}
+	}
+	function_start := containing_function_start(lines, position, app.position_encoding)
+	if function_start < 0 {
+		return []Detail{}
+	}
+	mut header_lines := []string{}
+	for line_idx in function_start .. position.line + 1 {
+		line := if line_idx == position.line {
+			byte_col := encoded_col_to_byte(lines[line_idx], position.char, app.position_encoding)
+			lines[line_idx][..byte_col]
+		} else {
+			lines[line_idx]
+		}
+		header_lines << line
+		if line.contains('{') {
+			break
+		}
+	}
+	mut names := function_parameter_names(header_lines.join('\n').all_before('{'))
+	mut scan_state := ImportScanState{}
+	for line_idx in 0 .. position.line + 1 {
+		raw_line := if line_idx == position.line {
+			byte_col := encoded_col_to_byte(lines[line_idx], position.char, app.position_encoding)
+			lines[line_idx][..byte_col]
+		} else {
+			lines[line_idx]
+		}
+		code := source_line_import_code(raw_line, mut scan_state)
+		if line_idx < function_start {
+			continue
+		}
+		for name in local_declaration_names(code) {
+			if name !in names {
+				names << name
+			}
+		}
+	}
+	return names.filter(it != '').map(Detail{
+		kind:   6 // CompletionItemKind.Variable
+		label:  it
+		detail: 'local binding'
+	})
 }
 
 fn identifier_index(text string, name string) int {
@@ -809,19 +1085,32 @@ fn parse_import_bindings(content string) []ImportedModuleBinding {
 	return bindings
 }
 
-fn (app &App) get_imported_module_member_completions(module_path string, work_dir string) []Detail {
+fn (mut app App) get_imported_module_member_completions(module_path string, work_dir string) []Detail {
 	mut items := []Detail{}
 	module_dir := app.resolve_indexed_import_module_dir(module_path, work_dir)
 	if module_dir == '' {
 		return items
 	}
+	app.ensure_dir_shallow_indexed(module_dir)
+	normalized_dir := normalized_index_path(module_dir)
+	for open_uri, _ in app.open_files {
+		if normalized_index_path(os.dir(uri_to_path(open_uri))) == normalized_dir {
+			app.reindex_uri(open_uri)
+		}
+	}
+	active_names := app.active_indexed_source_file_names(module_dir, '')
+	expected_module := module_path.all_after_last('.')
 	mut seen_labels := map[string]bool{}
-	for v_file in os.walk_ext(module_dir, '.v') {
-		if v_file.ends_with('_test.v') {
+	mut indexed_uris := app.symbol_index.keys()
+	indexed_uris.sort()
+	for indexed_uri in indexed_uris {
+		entry := app.symbol_index[indexed_uri] or { continue }
+		if normalized_index_path(os.dir(uri_to_path(indexed_uri))) != normalized_dir
+			|| os.file_name(uri_to_path(indexed_uri)) !in active_names
+			|| entry.module_name != expected_module {
 			continue
 		}
-		content := os.read_file(v_file) or { continue }
-		for item in parse_public_module_member_completions(content) {
+		for item in entry.public_module_completions {
 			if item.label in seen_labels {
 				continue
 			}
@@ -887,41 +1176,55 @@ fn (app &App) resolve_indexed_import_module_dir(module_path string, work_dir str
 	return resolve_import_module_dir(module_path, work_dir)
 }
 
-fn parse_public_module_member_completions(content string) []Detail {
+fn module_type_completion_name(declaration string) string {
+	name := first_word(declaration)
+	return name.all_before('[')
+}
+
+fn parse_module_member_completions(content string, public_only bool) []Detail {
 	mut items := []Detail{}
-	mut in_pub_const_block := false
+	mut in_const_block := false
+	mut const_block_public := false
 	for line in content.split_into_lines() {
 		trimmed := line.trim_space()
 		if trimmed == '' || trimmed.starts_with('//') {
 			continue
 		}
-		if trimmed == 'pub const (' {
-			in_pub_const_block = true
+		if trimmed == 'const (' || trimmed == 'pub const (' {
+			in_const_block = true
+			const_block_public = trimmed.starts_with('pub ')
 			continue
 		}
-		if in_pub_const_block {
+		if in_const_block {
 			if trimmed == ')' {
-				in_pub_const_block = false
+				in_const_block = false
+				const_block_public = false
 				continue
 			}
-			name := extract_const_name(trimmed)
-			if name != '' {
+			name := extract_const_name(trimmed.all_before('//').trim_space())
+			if name != '' && (!public_only || const_block_public) {
 				items << Detail{
 					kind:   21 // CompletionItemKind.Constant
 					label:  name
-					detail: 'pub const'
+					detail: if const_block_public { 'pub const' } else { 'const' }
 				}
 			}
 			continue
 		}
-		if trimmed.starts_with('pub fn ') {
-			after_fn := trimmed[7..]
+		is_public := trimmed.starts_with('pub ')
+		if public_only && !is_public {
+			continue
+		}
+		declaration := if is_public { trimmed[4..] } else { trimmed }
+		if declaration.starts_with('fn ') {
+			after_fn := declaration[3..]
 			if after_fn.starts_with('(') {
 				continue
 			}
 			paren_idx := after_fn.index('(') or { continue }
-			fn_name := after_fn[..paren_idx].trim_space()
-			if fn_name == '' || fn_name.contains(' ') || fn_name.contains('[') {
+			raw_fn_name := after_fn[..paren_idx].trim_space()
+			fn_name := raw_fn_name.all_before('[')
+			if fn_name == '' || fn_name.contains(' ') {
 				continue
 			}
 			detail_str := trimmed.all_before('{').trim_space()
@@ -935,13 +1238,57 @@ fn parse_public_module_member_completions(content string) []Detail {
 			}
 			continue
 		}
-		if trimmed.starts_with('pub const ') && trimmed != 'pub const (' {
-			name := extract_const_name(trimmed[10..])
+		if declaration.starts_with('const ') {
+			name := extract_const_name(declaration[6..])
 			if name != '' {
 				items << Detail{
 					kind:   21
 					label:  name
-					detail: 'pub const'
+					detail: trimmed.all_before('=').trim_space()
+				}
+			}
+			continue
+		}
+		if declaration.starts_with('struct ') {
+			name := module_type_completion_name(declaration[7..])
+			if name != '' {
+				items << Detail{
+					kind:   22 // CompletionItemKind.Struct
+					label:  name
+					detail: trimmed.all_before('{').trim_space()
+				}
+			}
+			continue
+		}
+		if declaration.starts_with('enum ') {
+			name := module_type_completion_name(declaration[5..])
+			if name != '' {
+				items << Detail{
+					kind:   13 // CompletionItemKind.Enum
+					label:  name
+					detail: trimmed.all_before('{').trim_space()
+				}
+			}
+			continue
+		}
+		if declaration.starts_with('interface ') {
+			name := module_type_completion_name(declaration[10..])
+			if name != '' {
+				items << Detail{
+					kind:   8 // CompletionItemKind.Interface
+					label:  name
+					detail: trimmed.all_before('{').trim_space()
+				}
+			}
+			continue
+		}
+		if declaration.starts_with('type ') {
+			name := module_type_completion_name(declaration[5..])
+			if name != '' {
+				items << Detail{
+					kind:   7 // CompletionItemKind.Class
+					label:  name
+					detail: trimmed.all_before('=').trim_space()
 				}
 			}
 		}
@@ -4305,6 +4652,42 @@ fn (mut app App) collect_module_fn_completions(current_file_uri string, working_
 	}
 	app.ensure_dir_shallow_indexed(working_dir)
 	return app.query_module_fn_completions(current_module, current_file_uri, working_dir)
+}
+
+// collect_module_completions returns all top-level declarations visible within
+// the current module from the persistent, open-buffer-aware source index.
+fn (mut app App) collect_module_completions(current_file_uri string, working_dir string) []Detail {
+	current_content := app.open_files[current_file_uri] or {
+		os.read_file(uri_to_path(current_file_uri)) or { '' }
+	}
+	current_module := get_module_name(current_content)
+	for uri, _ in app.open_files {
+		if normalized_index_path(os.dir(uri_to_path(uri))) == normalized_index_path(working_dir) {
+			app.reindex_uri(uri)
+		}
+	}
+	app.ensure_dir_shallow_indexed(working_dir)
+	requesting_path := uri_to_path(current_file_uri)
+	active_test_name := if requesting_path.ends_with('_test.v') {
+		os.file_name(requesting_path)
+	} else {
+		''
+	}
+	active_names := app.active_indexed_source_file_names(working_dir, active_test_name)
+	normalized_dir := normalized_index_path(working_dir)
+	mut items := []Detail{}
+	mut indexed_uris := app.symbol_index.keys()
+	indexed_uris.sort()
+	for indexed_uri in indexed_uris {
+		entry := app.symbol_index[indexed_uri] or { continue }
+		if normalized_index_path(os.dir(uri_to_path(indexed_uri))) != normalized_dir
+			|| os.file_name(uri_to_path(indexed_uri)) !in active_names
+			|| entry.module_name != current_module {
+			continue
+		}
+		items << entry.module_completions
+	}
+	return items
 }
 
 // parse_module_fn_completions extracts free-function declarations (`pub fn` and `fn`)

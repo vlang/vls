@@ -5338,7 +5338,7 @@ fn test_operation_at_pos_dot_completion_includes_imported_module_members() {
 	must_mkdir_all(mod_dir)
 
 	must_write_file(os.join_path(mod_dir, 'my_mod.v'),
-		'module my_mod\n\npub fn greet(name string) string {\n\treturn name\n}\n\nfn hidden() {}\n')
+		'module my_mod\n\npub fn greet(name string) string {\n\treturn name\n}\n\npub struct PublicStruct {}\npub enum PublicEnum { value }\npub interface PublicInterface {}\npub type PublicAlias = string\n\nfn hidden() {}\nstruct HiddenStruct {}\n')
 
 	main_file := os.join_path(test_dir, 'main.v')
 	content := 'module main\n\nimport my_mod\n\nfn main() {\n\tmy_mod.\n}\n'
@@ -5368,7 +5368,12 @@ fn test_operation_at_pos_dot_completion_includes_imported_module_members() {
 	cl := response.result as CompletionList
 	labels := cl.items.map(it.label)
 	assert 'greet' in labels
+	assert 'PublicStruct' in labels
+	assert 'PublicEnum' in labels
+	assert 'PublicInterface' in labels
+	assert 'PublicAlias' in labels
 	assert 'hidden' !in labels
+	assert 'HiddenStruct' !in labels
 }
 
 fn test_operation_at_pos_dot_completion_includes_aliased_import_module_members() {
@@ -5634,6 +5639,186 @@ fn test_imported_module_completion_resolves_from_project_root() {
 	assert response.result is CompletionList
 	items := (response.result as CompletionList).items
 	assert items.any(it.label == 'from_project_root')
+}
+
+fn test_bare_completion_includes_local_and_top_level_scope_symbols() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+
+	test_dir := os.join_path(app.temp_dir, 'bare_scope_completion')
+	must_mkdir_all(test_dir)
+	main_file := os.join_path(test_dir, 'main.v')
+	content := 'module main\n\nconst app_name = "vls"\nstruct User {}\nenum Mode { active }\ninterface Runner {}\n\nfn helper() {}\n\nfn main(local_param string) {\n\tlocal_value := 42\n\tlocal_\n}\n'
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+
+	lines := content.split_into_lines()
+	completion_line := lines.index('\tlocal_')
+	assert completion_line >= 0
+	response := app.operation_at_pos(.completion, Request{
+		id:     9300
+		method: 'textDocument/completion'
+		params: json2.encode(TextDocumentPositionParams{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			position:      Position{
+				line: completion_line
+				char: lines[completion_line].len
+			}
+		},
+			escape_unicode: true
+		)
+	})
+
+	assert response.result is CompletionList
+	items := (response.result as CompletionList).items
+	labels := items.map(it.label)
+	assert 'local_param' in labels
+	assert 'local_value' in labels
+	assert 'app_name' in labels
+	assert 'User' in labels
+	assert 'Mode' in labels
+	assert 'Runner' in labels
+	assert 'helper' in labels
+}
+
+fn test_literal_and_container_receiver_completion_falls_back_to_compiler() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+
+	test_dir := os.join_path(app.temp_dir, 'receiver_compiler_fallback')
+	must_mkdir_all(test_dir)
+	cases := [
+		["text := 'hello'", 'text.'],
+		['values := [1, 2]', 'values.'],
+	]
+	main_file := os.join_path(test_dir, 'main.v')
+	for case_idx, completion_case in cases {
+		content := 'module main\n\nfn main() {\n\t${completion_case[0]}\n\t${completion_case[1]}\n}\n'
+		must_write_file(main_file, content)
+		uri := path_to_uri(main_file)
+		app.open_files[uri] = content
+		lines := content.split_into_lines()
+		completion_line := lines.index('\t${completion_case[1]}')
+		assert completion_line >= 0
+
+		indexed := app.indexed_completions(uri, Position{
+			line: completion_line
+			char: lines[completion_line].len
+		})
+		assert indexed.use_compiler
+		response := app.operation_at_pos(.completion, Request{
+			id:     9301 + case_idx
+			method: 'textDocument/completion'
+			params: json2.encode(TextDocumentPositionParams{
+				text_document: TextDocumentIdentifier{
+					uri: uri
+				}
+				position:      Position{
+					line: completion_line
+					char: lines[completion_line].len
+				}
+			},
+				escape_unicode: true
+			)
+		})
+		assert response.result is CompletionList
+		assert (response.result as CompletionList).items.len > 0, completion_case.str()
+	}
+}
+
+fn test_receiver_completion_honors_local_binding_that_shadows_import() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+
+	test_dir := os.join_path(app.temp_dir, 'shadowed_import_completion')
+	module_dir := os.join_path(test_dir, 'clock')
+	must_mkdir_all(module_dir)
+	must_write_file(os.join_path(module_dir, 'clock.v'),
+		'module clock\n\npub fn module_member() {}\n')
+	main_file := os.join_path(test_dir, 'main.v')
+	content := 'module main\n\nimport clock\n\nstruct Timer {}\nfn (timer Timer) start() {}\n\nfn main() {\n\tclock := Timer{}\n\tclock.\n}\n'
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+
+	lines := content.split_into_lines()
+	completion_line := lines.index('\tclock.')
+	assert completion_line >= 0
+	response := app.operation_at_pos(.completion, Request{
+		id:     9303
+		method: 'textDocument/completion'
+		params: json2.encode(TextDocumentPositionParams{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			position:      Position{
+				line: completion_line
+				char: lines[completion_line].len
+			}
+		},
+			escape_unicode: true
+		)
+	})
+
+	assert response.result is CompletionList
+	labels := (response.result as CompletionList).items.map(it.label)
+	assert 'start' in labels
+	assert 'module_member' !in labels
+}
+
+fn test_imported_module_completion_uses_unsaved_open_buffer() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+
+	test_dir := os.join_path(app.temp_dir, 'open_import_completion')
+	module_dir := os.join_path(test_dir, 'my_mod')
+	must_mkdir_all(module_dir)
+	module_file := os.join_path(module_dir, 'my_mod.v')
+	must_write_file(module_file, 'module my_mod\n\npub fn saved_member() {}\n')
+	module_uri := path_to_uri(module_file)
+	app.open_files[module_uri] = 'module my_mod\n\npub fn unsaved_member() {}\npub struct UnsavedType {}\n'
+
+	main_file := os.join_path(test_dir, 'main.v')
+	content := 'module main\n\nimport my_mod\n\nfn main() {\n\tmy_mod.\n}\n'
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	lines := content.split_into_lines()
+	completion_line := lines.index('\tmy_mod.')
+	assert completion_line >= 0
+
+	response := app.operation_at_pos(.completion, Request{
+		id:     9304
+		method: 'textDocument/completion'
+		params: json2.encode(TextDocumentPositionParams{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			position:      Position{
+				line: completion_line
+				char: lines[completion_line].len
+			}
+		},
+			escape_unicode: true
+		)
+	})
+
+	assert response.result is CompletionList
+	labels := (response.result as CompletionList).items.map(it.label)
+	assert 'unsaved_member' in labels
+	assert 'UnsavedType' in labels
+	assert 'saved_member' !in labels
 }
 
 fn test_semantic_tokens_returns_data_for_known_content() {

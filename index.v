@@ -18,11 +18,13 @@ import time
 
 // IndexEntry is the parsed symbol information for one file.
 struct IndexEntry {
-	fingerprint    int // content.hash(); used to skip re-parsing unchanged files
-	module_name    string
-	doc_symbols    []DocumentSymbol  // hierarchical symbols (as parse_document_symbols returns)
-	docs           map[string]string // simple symbol name -> leading vdoc comment
-	fn_completions []Detail          // free-function completion items for this file
+	fingerprint               int // content.hash(); used to skip re-parsing unchanged files
+	module_name               string
+	doc_symbols               []DocumentSymbol  // hierarchical symbols (as parse_document_symbols returns)
+	docs                      map[string]string // simple symbol name -> leading vdoc comment
+	fn_completions            []Detail          // free-function completion items for this file
+	module_completions        []Detail // all same-module top-level completion items
+	public_module_completions []Detail // exported completion items for imported modules
 }
 
 // build_index_entry parses `content` into an IndexEntry. Symbol ranges are
@@ -43,11 +45,13 @@ fn build_index_entry(content string, enc PositionEncoding) IndexEntry {
 		}
 	}
 	return IndexEntry{
-		fingerprint:    content.hash()
-		module_name:    get_module_name(content)
-		doc_symbols:    doc_syms
-		docs:           docs
-		fn_completions: parse_module_fn_completions(content)
+		fingerprint:               content.hash()
+		module_name:               get_module_name(content)
+		doc_symbols:               doc_syms
+		docs:                      docs
+		fn_completions:            parse_module_fn_completions(content)
+		module_completions:        parse_module_member_completions(content, false)
+		public_module_completions: parse_module_member_completions(content, true)
 	}
 }
 
