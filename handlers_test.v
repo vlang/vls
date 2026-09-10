@@ -6228,6 +6228,52 @@ fn test_conditional_structs_do_not_contribute_indexed_receiver_fields() {
 	assert !indexed.items.any(it.label in ['win', 'unix'])
 }
 
+fn test_conditional_methods_request_receiver_completion_fallback() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'conditional_receiver_methods')
+	must_mkdir_all(test_dir)
+	main_file := os.join_path(test_dir, 'main.v')
+	content := 'module main\n\nstruct Service {\n\tname string\n}\n\nfn (service Service) start() {}\n\n$if !js {\n\tfn (service Service) reload() {}\n}\n\nfn inspect(service Service) {\n\tservice.\n}\n'
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	lines := content.split_into_lines()
+	completion_line := lines.index('\tservice.')
+	assert completion_line >= 0
+
+	methods := app.indexed_method_symbols(uri, content, 'Service', '')
+	assert methods.use_compiler
+	assert methods.locations.len == 1
+	indexed := app.indexed_completions(uri, Position{
+		line: completion_line
+		char: lines[completion_line].len
+	})
+	assert indexed.use_compiler
+	assert indexed.items.any(it.label == 'name')
+	assert indexed.items.any(it.label == 'start')
+	assert !indexed.items.any(it.label == 'reload')
+	response := app.operation_at_pos(.completion, Request{
+		id:     9601
+		method: 'textDocument/completion'
+		params: json2.encode(TextDocumentPositionParams{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			position:      Position{
+				line: completion_line
+				char: lines[completion_line].len
+			}
+		},
+			escape_unicode: true
+		)
+	})
+	assert response.result is CompletionList
+	assert (response.result as CompletionList).items.any(it.label == 'reload')
+}
+
 fn test_receiver_definition_ignores_closed_import_shadow() {
 	mut app := create_test_app()
 	defer {
@@ -6277,6 +6323,52 @@ fn test_receiver_definition_ignores_closed_import_shadow() {
 	assert outside.range.start.line == 2
 }
 
+fn test_chained_definition_does_not_resolve_final_field_as_import_alias() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'chained_definition_import_alias')
+	module_dir := os.join_path(test_dir, 'clock')
+	must_mkdir_all(module_dir)
+	module_file := os.join_path(module_dir, 'clock.v')
+	module_content := 'module clock\n\npub fn start() {}\n'
+	must_write_file(module_file, module_content)
+	main_file := os.join_path(test_dir, 'main.v')
+	content := 'module main\n\nimport clock\n\nstruct Timer {}\nfn (timer Timer) start() {}\nstruct App {\n\tclock Timer\n}\n\nfn main() {\n\tapp := App{}\n\tapp.clock.start()\n}\n'
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	lines := content.split_into_lines()
+	call_line := lines.index('\tapp.clock.start()')
+	assert call_line >= 0
+	start_col := lines[call_line].index('start') or { -1 }
+	assert start_col >= 0
+	position := Position{
+		line: call_line
+		char: start_col + 2
+	}
+	if location := app.resolve_indexed_definition(uri, position) {
+		assert false, 'chained field resolved to ${location.uri}'
+	}
+	definition := app.operation_at_pos(.definition, Request{
+		id:     9602
+		method: 'textDocument/definition'
+		params: json2.encode(TextDocumentPositionParams{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			position:      position
+		},
+			escape_unicode: true
+		)
+	})
+	assert definition.result is Location
+	location := definition.result as Location
+	assert location.uri == uri
+	assert location.range.start.line == lines.index('fn (timer Timer) start() {}')
+}
+
 fn test_receiver_inference_uses_active_outer_binding_after_inner_shadow() {
 	mut app := create_test_app()
 	defer {
@@ -6292,6 +6384,53 @@ fn test_receiver_inference_uses_active_outer_binding_after_inner_shadow() {
 		inside_line) == 'Inner'
 	assert app.infer_receiver_type('file:///tmp/scoped_receiver.v', content, 'value',
 		outside_line) == 'Outer'
+}
+
+fn test_closure_parameters_are_scoped_local_completions() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	content := 'module main\n\nfn main() {\n\tcallback := fn (value int) {\n\t\tval\n\t}\n\tother := fn (\n\t\titem string,\n\t) {\n\t\tite\n\t}\n\tval\n}\n'
+	test_dir := os.join_path(app.temp_dir, 'closure_parameter_completion')
+	must_mkdir_all(test_dir)
+	main_file := os.join_path(test_dir, 'main.v')
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	lines := content.split_into_lines()
+	value_line := lines.index('\t\tval')
+	item_line := lines.index('\t\tite')
+	after_line := lines.index('\tval')
+	assert value_line >= 0
+	assert item_line >= 0
+	assert after_line >= 0
+
+	value_items := app.local_scope_completions(content, Position{
+		line: value_line
+		char: lines[value_line].len
+	}).map(it.label)
+	assert 'value' in value_items
+	assert 'callback' in value_items
+	indexed := app.indexed_completions(uri, Position{
+		line: value_line
+		char: lines[value_line].len
+	})
+	assert indexed.items.any(it.label == 'value')
+	item_items := app.local_scope_completions(content, Position{
+		line: item_line
+		char: lines[item_line].len
+	}).map(it.label)
+	assert 'item' in item_items
+	assert 'other' in item_items
+	after_items := app.local_scope_completions(content, Position{
+		line: after_line
+		char: lines[after_line].len
+	}).map(it.label)
+	assert 'value' !in after_items
+	assert 'item' !in after_items
+	assert 'callback' in after_items
+	assert 'other' in after_items
 }
 
 fn test_receiver_inference_stops_at_completed_declaration_rhs() {

@@ -21,6 +21,11 @@ struct IndexedCompletionResult {
 	use_compiler bool
 }
 
+struct IndexedMethodSymbolResult {
+	locations    []Location
+	use_compiler bool
+}
+
 struct IndexedModuleCompletionResult {
 	items        []Detail
 	use_compiler bool
@@ -242,6 +247,75 @@ fn starts_binding_scope_header(source string) bool {
 	trimmed := source.trim_space()
 	return trimmed.starts_with('for ') || trimmed.starts_with('if ')
 		|| trimmed.starts_with('else if ')
+}
+
+struct AnonymousFunctionHeader {
+	found           bool
+	complete        bool
+	parameter_names []string
+}
+
+fn last_fn_keyword_index(source string) int {
+	if source.len < 2 {
+		return -1
+	}
+	mut index := source.len - 2
+	for index >= 0 {
+		if source[index] == `f` && source[index + 1] == `n`
+			&& (index == 0 || !is_ident_char(source[index - 1]))
+			&& (index + 2 == source.len || !is_ident_char(source[index + 2])) {
+			return index
+		}
+		index--
+	}
+	return -1
+}
+
+fn anonymous_function_header(source string) AnonymousFunctionHeader {
+	fn_index := last_fn_keyword_index(source)
+	if fn_index < 0 {
+		return AnonymousFunctionHeader{}
+	}
+	mut rest := source[fn_index + 2..].trim_space()
+	if rest == '' {
+		return AnonymousFunctionHeader{
+			found: true
+		}
+	}
+	if rest.starts_with('[') {
+		capture_end := matching_delimiter(rest, 0, `[`, `]`)
+		if capture_end < 0 {
+			return AnonymousFunctionHeader{
+				found: true
+			}
+		}
+		rest = rest[capture_end + 1..].trim_space()
+	}
+	if !rest.starts_with('(') {
+		return AnonymousFunctionHeader{}
+	}
+	params_end := matching_delimiter(rest, 0, `(`, `)`)
+	if params_end < 0 {
+		return AnonymousFunctionHeader{
+			found: true
+		}
+	}
+	mut names := []string{}
+	for parameter in split_top_level_commas(rest[1..params_end]) {
+		for field in parameter.fields() {
+			if field !in ['mut', 'shared', 'atomic', '_'] {
+				if field !in names {
+					names << field
+				}
+				break
+			}
+		}
+	}
+	return AnonymousFunctionHeader{
+		found:           true
+		complete:        true
+		parameter_names: names
+	}
 }
 
 fn struct_literal_type_at_cursor(content string, position Position, enc PositionEncoding) string {
@@ -576,6 +650,8 @@ fn (app &App) local_scope_bindings(content string, position Position) []LocalBin
 	mut body_started := false
 	mut pending_block_names := []string{}
 	mut pending_block_line := -1
+	mut pending_closure_header := ''
+	mut pending_closure_line := -1
 	for line_idx in 0 .. position.line + 1 {
 		raw_line := if line_idx == position.line {
 			byte_col := encoded_col_to_byte(lines[line_idx], position.char, app.position_encoding)
@@ -595,8 +671,26 @@ fn (app &App) local_scope_bindings(content string, position Position) []LocalBin
 			segment := code[segment_start..col]
 			segment_names := local_declaration_names(segment)
 			binding_scope_header := c == `{` && starts_binding_scope_header(segment)
-			block_names := if binding_scope_header { segment_names } else { pending_block_names }
-			block_line := if binding_scope_header { line_idx } else { pending_block_line }
+			closure_source := if pending_closure_header != '' {
+				pending_closure_header + '\n' + segment
+			} else {
+				segment
+			}
+			closure_header := anonymous_function_header(closure_source)
+			block_names := if closure_header.complete {
+				closure_header.parameter_names
+			} else if binding_scope_header {
+				segment_names
+			} else {
+				pending_block_names
+			}
+			block_line := if closure_header.complete {
+				if pending_closure_line >= 0 { pending_closure_line } else { line_idx }
+			} else if binding_scope_header {
+				line_idx
+			} else {
+				pending_block_line
+			}
 			if body_started && scopes.len > 0 {
 				outer_segment_names := if binding_scope_header { []string{} } else { segment_names }
 				for name in outer_segment_names {
@@ -626,6 +720,8 @@ fn (app &App) local_scope_bindings(content string, position Position) []LocalBin
 				}
 				pending_block_names = []string{}
 				pending_block_line = -1
+				pending_closure_header = ''
+				pending_closure_line = -1
 			} else if body_started && scopes.len > 1 {
 				scopes.delete_last()
 			}
@@ -638,12 +734,30 @@ fn (app &App) local_scope_bindings(content string, position Position) []LocalBin
 				pending_block_names = tail_names.clone()
 				pending_block_line = line_idx
 			} else {
+				closure_source := if pending_closure_header != '' {
+					pending_closure_header + '\n' + tail
+				} else {
+					tail
+				}
+				closure_header := anonymous_function_header(closure_source)
 				for name in tail_names {
 					if !scopes.last().any(it.name == name) {
 						scopes[scopes.len - 1] << LocalBinding{
 							name: name
 							line: line_idx
 						}
+					}
+				}
+				if closure_header.found {
+					if pending_closure_line < 0 {
+						pending_closure_line = line_idx
+					}
+					if closure_header.complete {
+						pending_block_names = closure_header.parameter_names.clone()
+						pending_block_line = pending_closure_line
+						pending_closure_header = ''
+					} else {
+						pending_closure_header = closure_source
 					}
 				}
 			}
@@ -1103,11 +1217,11 @@ fn (mut app App) receiver_type_scope(uri string, content string, receiver_type s
 	return os.dir(uri_to_path(uri)), normalized_type, false, get_module_name(content)
 }
 
-fn (mut app App) indexed_method_symbols(uri string, content string, receiver_type string, method_name string) []Location {
+fn (mut app App) indexed_method_symbols(uri string, content string, receiver_type string, method_name string) IndexedMethodSymbolResult {
 	dir, type_name, require_public, expected_module := app.receiver_type_scope(uri, content,
 		receiver_type)
 	if dir == '' || type_name == '' || expected_module == '' || !os.is_dir(dir) {
-		return []Location{}
+		return IndexedMethodSymbolResult{}
 	}
 	app.ensure_dir_shallow_indexed(dir)
 	normalized_dir := normalized_index_path(dir)
@@ -1124,6 +1238,7 @@ fn (mut app App) indexed_method_symbols(uri string, content string, receiver_typ
 	}
 	active_names := app.active_indexed_source_file_names(dir, active_test_name)
 	mut matches := []Location{}
+	mut has_conditional := false
 	mut indexed_uris := app.symbol_index.keys()
 	indexed_uris.sort()
 	for indexed_uri in indexed_uris {
@@ -1145,11 +1260,14 @@ fn (mut app App) indexed_method_symbols(uri string, content string, receiver_typ
 			declaration_occurrences := app.occurrences_for(indexed_uri)[simple_name] or {
 				continue
 			}
-			if !source_declaration_occurrence_is_code(symbol, declaration_occurrences)
-				|| source_declaration_is_compile_time_conditional(source, symbol.range.start.line) {
+			if !source_declaration_occurrence_is_code(symbol, declaration_occurrences) {
 				continue
 			}
 			if require_public && !source_declaration_is_public(indexed_uri, symbol, app) {
+				continue
+			}
+			if source_declaration_is_compile_time_conditional(source, symbol.range.start.line) {
+				has_conditional = true
 				continue
 			}
 			matches << Location{
@@ -1167,7 +1285,10 @@ fn (mut app App) indexed_method_symbols(uri string, content string, receiver_typ
 			}
 		}
 	}
-	return matches
+	return IndexedMethodSymbolResult{
+		locations:    matches
+		use_compiler: has_conditional
+	}
 }
 
 fn struct_field_is_public(source string, struct_symbol DocumentSymbol, field_symbol DocumentSymbol) bool {
@@ -1277,14 +1398,14 @@ fn (mut app App) indexed_receiver_completions(uri string, content string, receiv
 		}
 	}
 	// indexed_method_symbols prepares the source index used for both member kinds.
-	locations := app.indexed_method_symbols(uri, content, receiver_type, '')
+	method_result := app.indexed_method_symbols(uri, content, receiver_type, '')
 	field_result := app.indexed_struct_field_completions(uri, content, receiver_type)
 	mut items := field_result.items.clone()
 	mut seen := map[string]bool{}
 	for item in items {
 		seen[item.label] = true
 	}
-	for location in locations {
+	for location in method_result.locations {
 		entry := app.symbol_index[location.uri] or { continue }
 		source := app.index_source_for(location.uri) or { continue }
 		for symbol in entry.doc_symbols {
@@ -1301,7 +1422,7 @@ fn (mut app App) indexed_receiver_completions(uri string, content string, receiv
 	}
 	return IndexedCompletionResult{
 		items:        items
-		use_compiler: field_result.use_compiler || items.len == 0
+		use_compiler: field_result.use_compiler || method_result.use_compiler || items.len == 0
 	}
 }
 
@@ -3787,11 +3908,11 @@ fn (mut app App) resolve_indexed_definition(uri string, position Position) ?Loca
 		|| source_occurrence_is_compile_time_condition(lines, position.line, start_byte, if_occurrences, app.position_encoding) {
 		return none
 	}
-	if start_byte > 0 && line[start_byte - 1] == `.` {
-		dot_col := byte_to_encoded_col(line, start_byte - 1, app.position_encoding)
-		alias := get_word_before_dot(line, dot_col, app.position_encoding)
+	alias, has_member_access, standalone_qualifier := member_qualifier_at_cursor(line, end,
+		app.position_encoding)
+	if has_member_access {
 		has_local_binding := app.local_scope_bindings(content, position).any(it.name == alias)
-		if !has_local_binding {
+		if standalone_qualifier && !has_local_binding {
 			if module_path := parse_import_aliases(content)[alias] {
 				module_dir := app.resolve_indexed_import_module_dir(module_path,
 					os.dir(uri_to_path(uri)))
@@ -3800,7 +3921,7 @@ fn (mut app App) resolve_indexed_definition(uri string, position Position) ?Loca
 			}
 		}
 		receiver_type := app.infer_receiver_type(uri, content, alias, position.line)
-		method_locations := app.indexed_method_symbols(uri, content, receiver_type, symbol)
+		method_locations := app.indexed_method_symbols(uri, content, receiver_type, symbol).locations
 		if method_locations.len == 1 {
 			return method_locations[0]
 		}
