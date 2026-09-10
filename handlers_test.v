@@ -2662,6 +2662,15 @@ fn test_signature_parameters_split_only_top_level_commas() {
 	assert parameters[1].label == 'value int'
 }
 
+fn test_signature_active_parameter_clamps_variadic_arguments() {
+	variadic := signature_parameters('collect(prefix string, values ...int)')
+	assert signature_active_parameter(variadic, 1) == 1
+	assert signature_active_parameter(variadic, 2) == 1
+
+	fixed := signature_parameters('collect(prefix string, value int)')
+	assert signature_active_parameter(fixed, 2) == 2
+}
+
 fn test_source_declaration_at_stops_non_braced_declarations() {
 	mut app := create_test_app()
 	defer {

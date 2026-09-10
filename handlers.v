@@ -306,6 +306,17 @@ fn signature_parameters(label string) []ParameterInformation {
 	return parameters
 }
 
+fn signature_active_parameter(parameters []ParameterInformation, requested int) int {
+	if parameters.len > 0 && requested >= parameters.len {
+		last_parameter := parameters[parameters.len - 1]
+		last_mask := v_source_code_mask(last_parameter.label).bytestr()
+		if last_mask.contains('...') {
+			return parameters.len - 1
+		}
+	}
+	return requested
+}
+
 fn (mut app App) source_hover_fallback(uri string, position Position) ?Hover {
 	location := app.resolve_indexed_definition(uri, position) or {
 		app.resolve_symbol_anchor(uri, position.line, position.char) or { return none }
@@ -340,14 +351,15 @@ fn (mut app App) source_signature_fallback(uri string, position Position) ?Signa
 	if label == '' {
 		return none
 	}
+	parameters := signature_parameters(label)
 	return SignatureHelp{
 		signatures: [
 			SignatureInformation{
 				label: label
-				parameters: signature_parameters(label)
+				parameters: parameters
 			},
 		]
-		active_parameter: target.active_parameter
+		active_parameter: signature_active_parameter(parameters, target.active_parameter)
 	}
 }
 
