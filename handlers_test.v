@@ -6168,7 +6168,7 @@ fn test_conditional_bare_completion_requests_compiler_fallback() {
 	test_dir := os.join_path(app.temp_dir, 'active_conditional_bare_completion')
 	must_mkdir_all(test_dir)
 	main_file := os.join_path(test_dir, 'main.v')
-	content := 'module main\n\n$if linux {\n\tfn platform_only() {}\n}\n\nfn main() {\n\tplat\n}\n'
+	content := 'module main\n\nfn always() {}\n\n$if linux {\n\tfn platform_only() {}\n}\n\nfn main() {\n\tplat\n}\n'
 	must_write_file(main_file, content)
 	uri := path_to_uri(main_file)
 	app.open_files[uri] = content
@@ -6181,7 +6181,117 @@ fn test_conditional_bare_completion_requests_compiler_fallback() {
 	}
 	indexed := app.indexed_completions(uri, position)
 	assert indexed.use_compiler
+	assert indexed.items.any(it.label == 'always')
 	assert !indexed.items.any(it.label == 'platform_only')
+
+	response := app.operation_at_pos(.completion, Request{
+		id:     9600
+		method: 'textDocument/completion'
+		params: json2.encode(TextDocumentPositionParams{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			position:      position
+		},
+			escape_unicode: true
+		)
+	})
+	assert response.result is CompletionList
+	assert (response.result as CompletionList).items.any(it.label == 'always')
+}
+
+fn test_conditional_structs_do_not_contribute_indexed_receiver_fields() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'conditional_receiver_fields')
+	must_mkdir_all(test_dir)
+	main_file := os.join_path(test_dir, 'main.v')
+	content := 'module main\n\n$if windows {\n\tstruct Platform {\n\t\twin int\n\t}\n} $else {\n\tstruct Platform {\n\t\tunix int\n\t}\n}\n\nfn (platform Platform) reset() {}\n\nfn inspect(platform Platform) {\n\tplatform.\n}\n'
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	lines := content.split_into_lines()
+	completion_line := lines.index('\tplatform.')
+	assert completion_line >= 0
+	position := Position{
+		line: completion_line
+		char: lines[completion_line].len
+	}
+	fields := app.indexed_struct_field_completions(uri, content, 'Platform')
+	assert fields.items.len == 0
+	assert fields.use_compiler
+	indexed := app.indexed_completions(uri, position)
+	assert indexed.use_compiler
+	assert indexed.items.any(it.label == 'reset')
+	assert !indexed.items.any(it.label in ['win', 'unix'])
+}
+
+fn test_receiver_definition_ignores_closed_import_shadow() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'closed_import_shadow_definition')
+	module_dir := os.join_path(test_dir, 'clock')
+	must_mkdir_all(module_dir)
+	module_file := os.join_path(module_dir, 'clock.v')
+	module_content := 'module clock\n\npub fn start() {}\n'
+	must_write_file(module_file, module_content)
+	main_file := os.join_path(test_dir, 'main.v')
+	content := 'module main\n\nimport clock\n\nstruct Timer {}\nfn (timer Timer) start() {}\n\nfn main() {\n\tif true {\n\t\tclock := Timer{}\n\t\tclock.start()\n\t}\n\tclock.start()\n}\n'
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	module_uri := path_to_uri(module_file)
+	app.open_files[uri] = content
+	app.open_files[module_uri] = module_content
+	lines := content.split_into_lines()
+	inside_line := lines.index('\t\tclock.start()')
+	outside_line := lines.index('\tclock.start()')
+	assert inside_line >= 0
+	assert outside_line >= 0
+	assert app.infer_receiver_type(uri, content, 'clock', inside_line) == 'Timer'
+	assert app.infer_receiver_type(uri, content, 'clock', outside_line) == ''
+	inside_start_col := lines[inside_line].index('start') or { 0 }
+	outside_start_col := lines[outside_line].index('start') or { 0 }
+
+	inside := app.resolve_indexed_definition(uri, Position{
+		line: inside_line
+		char: inside_start_col + 2
+	}) or {
+		assert false, 'expected the in-scope Timer method definition'
+		return
+	}
+	assert inside.uri == uri
+	assert inside.range.start.line == 5
+
+	outside := app.resolve_indexed_definition(uri, Position{
+		line: outside_line
+		char: outside_start_col + 2
+	}) or {
+		assert false, 'expected the imported clock.start definition'
+		return
+	}
+	assert outside.uri == module_uri
+	assert outside.range.start.line == 2
+}
+
+fn test_receiver_inference_uses_active_outer_binding_after_inner_shadow() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	content := 'module main\n\nstruct Outer {}\nstruct Inner {}\n\nfn main() {\n\tvalue := Outer{}\n\tif true {\n\t\tvalue := Inner{}\n\t\tvalue.\n\t}\n\tvalue.\n}\n'
+	lines := content.split_into_lines()
+	inside_line := lines.index('\t\tvalue.')
+	outside_line := lines.index('\tvalue.')
+	assert inside_line >= 0
+	assert outside_line >= 0
+	assert app.infer_receiver_type('file:///tmp/scoped_receiver.v', content, 'value',
+		inside_line) == 'Inner'
+	assert app.infer_receiver_type('file:///tmp/scoped_receiver.v', content, 'value',
+		outside_line) == 'Outer'
 }
 
 fn test_receiver_inference_stops_at_completed_declaration_rhs() {
