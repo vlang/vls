@@ -146,12 +146,12 @@ fn (mut app App) indexed_completions(uri string, position Position) IndexedCompl
 		}
 	}
 	if position.char > 0 {
-		qualifier, has_member_access := member_qualifier_at_cursor(line, position.char,
-			app.position_encoding)
+		qualifier, has_member_access, standalone_qualifier := member_qualifier_at_cursor(line,
+			position.char, app.position_encoding)
 		if has_member_access {
 			local_items := app.local_scope_completions(content, position)
 			has_local_binding := local_items.any(it.label == qualifier)
-			if !has_local_binding {
+			if standalone_qualifier && !has_local_binding {
 				if module_path := parse_import_aliases(content)[qualifier] {
 					module_result := app.get_imported_module_member_completions(module_path,
 						os.dir(uri_to_path(uri)))
@@ -205,9 +205,9 @@ fn (mut app App) indexed_completions(uri string, position Position) IndexedCompl
 	}
 }
 
-fn member_qualifier_at_cursor(line string, cursor_col int, enc PositionEncoding) (string, bool) {
+fn member_qualifier_at_cursor(line string, cursor_col int, enc PositionEncoding) (string, bool, bool) {
 	if line == '' || cursor_col <= 0 {
-		return '', false
+		return '', false, false
 	}
 	cursor_byte := encoded_col_to_byte(line, cursor_col, enc)
 	mut member_start := cursor_byte
@@ -215,11 +215,16 @@ fn member_qualifier_at_cursor(line string, cursor_col int, enc PositionEncoding)
 		member_start--
 	}
 	if member_start == 0 || line[member_start - 1] != `.` {
-		return '', false
+		return '', false, false
 	}
 	dot_byte := member_start - 1
 	dot_col := byte_to_encoded_col(line, dot_byte, enc)
-	return get_word_before_dot(line, dot_col, enc), true
+	qualifier := get_word_before_dot(line, dot_col, enc)
+	mut qualifier_start := dot_byte - qualifier.len
+	if qualifier_start < 0 {
+		qualifier_start = 0
+	}
+	return qualifier, true, qualifier_start == 0 || line[qualifier_start - 1] != `.`
 }
 
 fn binding_identifiers(text string) []string {
@@ -569,6 +574,36 @@ fn callable_or_constructor(rhs string) (string, bool) {
 	return '', false
 }
 
+struct ReceiverDeclaration {
+	rhs           string
+	binding_index int
+	binding_count int
+}
+
+fn receiver_declaration_on_line(code string, receiver string) ?ReceiverDeclaration {
+	for raw_statement in code.split(';') {
+		statement := raw_statement.trim_space()
+		assign_idx := statement.index(':=') or { continue }
+		assignment_prefix := statement[..assign_idx]
+		lhs := if brace_idx := assignment_prefix.last_index('{') {
+			assignment_prefix[brace_idx + 1..]
+		} else {
+			assignment_prefix
+		}
+		bindings := binding_identifiers(lhs)
+		binding_index := bindings.index(receiver)
+		if binding_index < 0 {
+			continue
+		}
+		return ReceiverDeclaration{
+			rhs:           statement[assign_idx + 2..]
+			binding_index: binding_index
+			binding_count: bindings.len
+		}
+	}
+	return none
+}
+
 fn normalize_receiver_type(source_type string) string {
 	mut result := source_type.trim_space()
 	for result.len > 0 && result[0] in [`&`, `?`, `!`] {
@@ -643,6 +678,8 @@ fn (mut app App) infer_receiver_type(uri string, content string, receiver string
 	mut scan_state := ImportScanState{}
 	mut latest_rhs := ''
 	mut latest_declaration_line := -1
+	mut latest_binding_index := 0
+	mut latest_binding_count := 1
 	for i, raw_line in lines {
 		if i > use_line {
 			break
@@ -658,19 +695,14 @@ fn (mut app App) infer_receiver_type(uri string, content string, receiver string
 			header_start = i
 			latest_rhs = ''
 			latest_declaration_line = -1
+			latest_binding_index = 0
+			latest_binding_count = 1
 		}
-		name_col := identifier_index(code, receiver)
-		if name_col < 0 {
-			continue
-		}
-		mut after_name := name_col + receiver.len
-		for after_name < code.len && code[after_name] in [` `, `\t`] {
-			after_name++
-		}
-		if after_name + 1 < code.len && code[after_name] == `:`
-			&& code[after_name + 1] == `=` {
-			latest_rhs = code[after_name + 2..]
+		if receiver_declaration := receiver_declaration_on_line(code, receiver) {
+			latest_rhs = receiver_declaration.rhs
 			latest_declaration_line = i
+			latest_binding_index = receiver_declaration.binding_index
+			latest_binding_count = receiver_declaration.binding_count
 		}
 	}
 
@@ -685,7 +717,15 @@ fn (mut app App) infer_receiver_type(uri string, content string, receiver string
 		for i in latest_declaration_line + 1 .. end_line {
 			latest_rhs += '\n' + lines[i]
 		}
-		candidate, is_constructor := callable_or_constructor(latest_rhs)
+		mut receiver_rhs := latest_rhs
+		if latest_binding_count > 1 {
+			rhs_values := split_top_level_commas(latest_rhs)
+			if rhs_values.len != latest_binding_count || latest_binding_index >= rhs_values.len {
+				return ''
+			}
+			receiver_rhs = rhs_values[latest_binding_index]
+		}
+		candidate, is_constructor := callable_or_constructor(receiver_rhs)
 		if candidate != '' {
 			if is_constructor {
 				return normalize_receiver_type(candidate)
@@ -723,6 +763,35 @@ fn method_receiver_type(method_name string) string {
 	return normalize_receiver_type(fields.last())
 }
 
+fn complete_function_signature(lines []string, start_line int, initial string) string {
+	if start_line < 0 || start_line >= lines.len {
+		return initial
+	}
+	mut signature := ''
+	mut parenthesis_depth := 0
+	mut found_parameters := false
+	for line_idx in start_line .. lines.len {
+		segment := if line_idx == start_line { initial.trim_space() } else { lines[line_idx].trim_space() }
+		if signature != '' && segment != '' {
+			signature += ' '
+		}
+		signature += segment
+		code_segment := segment.all_before('//')
+		for c in code_segment {
+			if c == `(` {
+				parenthesis_depth++
+				found_parameters = true
+			} else if c == `)` && parenthesis_depth > 0 {
+				parenthesis_depth--
+			}
+		}
+		if found_parameters && parenthesis_depth == 0 {
+			break
+		}
+	}
+	return signature
+}
+
 fn method_completion_from_symbol(source string, symbol DocumentSymbol) ?Detail {
 	lines := source.split_into_lines()
 	line_idx := symbol.range.start.line
@@ -730,13 +799,14 @@ fn method_completion_from_symbol(source string, symbol DocumentSymbol) ?Detail {
 		return none
 	}
 	trimmed := lines[line_idx].trim_space()
-	after_fn := if trimmed.starts_with('pub fn ') {
+	initial_after_fn := if trimmed.starts_with('pub fn ') {
 		trimmed[7..]
 	} else if trimmed.starts_with('fn ') {
 		trimmed[3..]
 	} else {
 		return none
 	}
+	after_fn := complete_function_signature(lines, line_idx, initial_after_fn)
 	close_receiver := after_fn.index(')') or { return none }
 	after_receiver := after_fn[close_receiver + 1..].trim_space()
 	paren_idx := after_receiver.index('(') or { return none }
@@ -748,7 +818,7 @@ fn method_completion_from_symbol(source string, symbol DocumentSymbol) ?Detail {
 	return Detail{
 		kind:               2
 		label:              name
-		detail:             trimmed.all_before('{').trim_space()
+		detail:             '${if trimmed.starts_with('pub ') { 'pub ' } else { '' }}fn ${after_fn}'.all_before('{').trim_space()
 		insert_text:        insert
 		insert_text_format: if insert.contains('$') { 2 } else { 1 }
 	}
@@ -861,10 +931,17 @@ fn field_completion_from_symbol(source string, symbol DocumentSymbol) ?Detail {
 	if line_idx < 0 || line_idx >= lines.len {
 		return none
 	}
+	if !is_valid_v_identifier_name(symbol.name) {
+		return none
+	}
+	trimmed := lines[line_idx].trim_space()
+	if trimmed.starts_with('@[') || first_word(trimmed) != symbol.name {
+		return none
+	}
 	return Detail{
 		kind:   5 // CompletionItemKind.Field
 		label:  symbol.name
-		detail: lines[line_idx].trim_space()
+		detail: trimmed
 	}
 }
 
@@ -894,7 +971,7 @@ fn (mut app App) indexed_struct_field_completions(uri string, content string, re
 		}
 		source := app.index_source_for(indexed_uri) or { continue }
 		for symbol in entry.doc_symbols {
-			if symbol.kind != sym_kind_struct || symbol.name != type_name {
+			if symbol.kind != sym_kind_struct || normalize_receiver_type(symbol.name) != type_name {
 				continue
 			}
 			if require_public && !source_declaration_is_public(indexed_uri, symbol, app) {
@@ -1353,10 +1430,11 @@ fn compile_time_conditional_lines(content string) []bool {
 fn parse_module_member_completions(content string, public_only bool) ParsedModuleCompletionIndex {
 	mut items := []Detail{}
 	mut has_conditional := false
+	lines := content.split_into_lines()
 	conditional_lines := compile_time_conditional_lines(content)
 	mut in_const_block := false
 	mut const_block_public := false
-	for line_idx, line in content.split_into_lines() {
+	for line_idx, line in lines {
 		trimmed := line.trim_space()
 		if trimmed == '' || trimmed.starts_with('//') {
 			continue
@@ -1394,7 +1472,8 @@ fn parse_module_member_completions(content string, public_only bool) ParsedModul
 		}
 		declaration := if is_public { trimmed[4..] } else { trimmed }
 		if declaration.starts_with('fn ') {
-			after_fn := declaration[3..]
+			complete_declaration := complete_function_signature(lines, line_idx, declaration)
+			after_fn := complete_declaration[3..]
 			if after_fn.starts_with('(') {
 				continue
 			}
@@ -1404,7 +1483,7 @@ fn parse_module_member_completions(content string, public_only bool) ParsedModul
 			if fn_name == '' || fn_name.contains(' ') {
 				continue
 			}
-			detail_str := trimmed.all_before('{').trim_space()
+			detail_str := '${if is_public { 'pub ' } else { '' }}${complete_declaration}'.all_before('{').trim_space()
 			insert := build_fn_snippet(fn_name, after_fn[paren_idx..])
 			items << Detail{
 				kind:               3 // CompletionItemKind.Function
@@ -4216,6 +4295,7 @@ fn parse_document_symbols(content string) []DocumentSymbol {
 	// Track whether we are inside a struct or enum block to collect children.
 	mut in_struct := false
 	mut in_enum := false
+	mut in_struct_attribute := false
 	mut current_parent_idx := -1 // index into `symbols` for the current parent
 
 	for i, raw_line in lines {
@@ -4230,12 +4310,23 @@ fn parse_document_symbols(content string) []DocumentSymbol {
 		if line == '}' {
 			in_struct = false
 			in_enum = false
+			in_struct_attribute = false
 			current_parent_idx = -1
 			continue
 		}
 
 		// Inside a struct body — collect field names
 		if in_struct && current_parent_idx >= 0 {
+			if in_struct_attribute {
+				if line.contains(']') {
+					in_struct_attribute = false
+				}
+				continue
+			}
+			if line.starts_with('@[') {
+				in_struct_attribute = !line.contains(']')
+				continue
+			}
 			// Field lines look like `name  Type` or `mut:` / `pub:` etc.
 			// Skip access modifier lines
 			if line == 'mut:' || line == 'pub:' || line == 'pub mut:' || line == '__global:' {
@@ -4283,6 +4374,7 @@ fn parse_document_symbols(content string) []DocumentSymbol {
 				if line.contains('{') && !line.contains('}') {
 					in_struct = true
 					in_enum = false
+					in_struct_attribute = false
 					current_parent_idx = symbols.len - 1
 				}
 			}
@@ -4876,16 +4968,18 @@ fn (mut app App) collect_module_completions(current_file_uri string, working_dir
 // When a function has parameters a snippet insertText with tab-stops is produced.
 fn parse_module_fn_completions(content string) []Detail {
 	mut items := []Detail{}
-	for line in content.split_into_lines() {
+	lines := content.split_into_lines()
+	for line_idx, line in lines {
 		trimmed := line.trim_space()
-		mut after_fn := ''
+		mut initial_after_fn := ''
 		if trimmed.starts_with('pub fn ') {
-			after_fn = trimmed[7..]
+			initial_after_fn = trimmed[7..]
 		} else if trimmed.starts_with('fn ') {
-			after_fn = trimmed[3..]
+			initial_after_fn = trimmed[3..]
 		} else {
 			continue
 		}
+		after_fn := complete_function_signature(lines, line_idx, initial_after_fn)
 		// Skip method receivers: `fn (recv Recv) method_name(`
 		if after_fn.starts_with('(') {
 			continue
@@ -4896,7 +4990,7 @@ fn parse_module_fn_completions(content string) []Detail {
 			continue
 		}
 		// Build the detail string: full signature up to (but not including) ` {`
-		detail_str := trimmed.all_before('{').trim_space()
+		detail_str := '${if trimmed.starts_with('pub ') { 'pub ' } else { '' }}fn ${after_fn}'.all_before('{').trim_space()
 		// Build snippet insertText: fn_name($1, $2, ...) or fn_name($1)$0
 		insert := build_fn_snippet(fn_name, after_fn[paren_idx..])
 		items << Detail{
@@ -4926,11 +5020,14 @@ fn build_fn_snippet(fn_name string, params_str string) string {
 		return fn_name + '()'
 	}
 	// Split parameters by comma and extract their names.
-	raw_params := inner.split(',')
+	raw_params := split_top_level_commas(inner)
 	mut placeholders := []string{}
-	for idx, raw_param in raw_params {
+	for raw_param in raw_params {
 		// Each token looks like `name Type` or `mut name Type` or `_ Type`.
 		trimmed := raw_param.trim_space()
+		if trimmed == '' {
+			continue
+		}
 		parts := trimmed.split(' ')
 		// Skip parameters without a name (e.g. `_ string`).
 		mut param_name := ''
@@ -4943,9 +5040,9 @@ fn build_fn_snippet(fn_name string, params_str string) string {
 			break
 		}
 		if param_name == '' {
-			param_name = 'arg${idx + 1}'
+			param_name = 'arg${placeholders.len + 1}'
 		}
-		placeholders << '\${${idx + 1}:${param_name}}'
+		placeholders << '\${${placeholders.len + 1}:${param_name}}'
 	}
 	return '${fn_name}(${placeholders.join(', ')})$0'
 }

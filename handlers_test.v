@@ -5940,6 +5940,158 @@ fn test_conditional_module_types_delegate_completion_to_compiler() {
 	assert 'AttributeType' !in labels
 }
 
+fn test_chained_member_qualifier_does_not_resolve_import_alias() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+
+	test_dir := os.join_path(app.temp_dir, 'chained_qualifier_completion')
+	module_dir := os.join_path(test_dir, 'clock')
+	must_mkdir_all(module_dir)
+	must_write_file(os.join_path(module_dir, 'clock.v'),
+		'module clock\n\npub fn module_member() {}\n')
+	main_file := os.join_path(test_dir, 'main.v')
+	content := 'module main\n\nimport clock\n\nstruct ClockValue {}\nfn (value ClockValue) tick() {}\nstruct AppState {\n\tclock ClockValue\n}\n\nfn main() {\n\tapp := AppState{}\n\tapp.clock.\n}\n'
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	lines := content.split_into_lines()
+	completion_line := lines.index('\tapp.clock.')
+	assert completion_line >= 0
+
+	qualifier, has_member_access, standalone := member_qualifier_at_cursor(lines[completion_line],
+		lines[completion_line].len, app.position_encoding)
+	assert has_member_access
+	assert qualifier == 'clock'
+	assert !standalone
+	indexed := app.indexed_completions(uri, Position{
+		line: completion_line
+		char: lines[completion_line].len
+	})
+	assert indexed.use_compiler
+	assert !indexed.items.any(it.label == 'module_member')
+}
+
+fn test_multi_binding_receiver_uses_corresponding_rhs() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+
+	test_dir := os.join_path(app.temp_dir, 'multi_binding_receiver_completion')
+	must_mkdir_all(test_dir)
+	main_file := os.join_path(test_dir, 'main.v')
+	content := 'module main\n\nstruct A {}\nfn (value A) left_method() {}\nstruct B {}\nfn (value B) right_method() {}\n\nfn main() {\n\tleft, right := A{}, B{}\n\tright.\n}\n'
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	lines := content.split_into_lines()
+	completion_line := lines.index('\tright.')
+	assert completion_line >= 0
+	assert app.infer_receiver_type(uri, content, 'left', completion_line) == 'A'
+	assert app.infer_receiver_type(uri, content, 'right', completion_line) == 'B'
+
+	indexed := app.indexed_completions(uri, Position{
+		line: completion_line
+		char: lines[completion_line].len
+	})
+	labels := indexed.items.map(it.label)
+	assert !indexed.use_compiler
+	assert 'right_method' in labels
+	assert 'left_method' !in labels
+}
+
+fn test_generic_struct_receiver_completion_includes_fields() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+
+	test_dir := os.join_path(app.temp_dir, 'generic_struct_field_completion')
+	must_mkdir_all(test_dir)
+	main_file := os.join_path(test_dir, 'main.v')
+	content := 'module main\n\nstruct Box[T] {\n\tvalue T\n}\nfn (box Box[T]) reset() {}\n\nfn inspect(box Box[int]) {\n\tbox.\n}\n'
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	lines := content.split_into_lines()
+	completion_line := lines.index('\tbox.')
+	assert completion_line >= 0
+
+	indexed := app.indexed_completions(uri, Position{
+		line: completion_line
+		char: lines[completion_line].len
+	})
+	labels := indexed.items.map(it.label)
+	assert !indexed.use_compiler
+	assert 'value' in labels
+	assert 'reset' in labels
+}
+
+fn test_struct_field_completion_excludes_attributes() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+
+	test_dir := os.join_path(app.temp_dir, 'attributed_struct_field_completion')
+	must_mkdir_all(test_dir)
+	main_file := os.join_path(test_dir, 'main.v')
+	content := "module main\n\nstruct User {\n\t@[json: 'user_name']\n\tname string\n\t@[\n\t\tdeprecated\n\t]\n\tage int\n}\n\nfn inspect(user User) {\n\tuser.\n}\n"
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	lines := content.split_into_lines()
+	completion_line := lines.index('\tuser.')
+	assert completion_line >= 0
+
+	indexed := app.indexed_completions(uri, Position{
+		line: completion_line
+		char: lines[completion_line].len
+	})
+	labels := indexed.items.map(it.label)
+	assert 'name' in labels
+	assert 'age' in labels
+	assert '@[json:' !in labels
+	assert 'deprecated' !in labels
+}
+
+fn test_multiline_function_completion_builds_full_snippet() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+
+	test_dir := os.join_path(app.temp_dir, 'multiline_function_completion')
+	module_dir := os.join_path(test_dir, 'builder')
+	must_mkdir_all(module_dir)
+	module_content := 'module builder\n\npub fn build(\n\trequired string,\n\tcount int,\n) string {\n\treturn required.repeat(count)\n}\n'
+	must_write_file(os.join_path(module_dir, 'builder.v'), module_content)
+	main_file := os.join_path(test_dir, 'main.v')
+	content := 'module main\n\nimport builder\n\nfn main() {\n\tbuilder.\n}\n'
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	lines := content.split_into_lines()
+	completion_line := lines.index('\tbuilder.')
+	assert completion_line >= 0
+	indexed := app.indexed_completions(uri, Position{
+		line: completion_line
+		char: lines[completion_line].len
+	})
+	public_build := indexed.items.filter(it.label == 'build')
+	assert public_build.len == 1
+	public_insert := public_build[0].insert_text or { '' }
+	assert public_insert == 'build(\${1:required}, \${2:count})$0'
+
+	local_items := parse_module_fn_completions(module_content)
+	local_build := local_items.filter(it.label == 'build')
+	assert local_build.len == 1
+	local_insert := local_build[0].insert_text or { '' }
+	assert local_insert == 'build(\${1:required}, \${2:count})$0'
+}
+
 fn test_semantic_tokens_returns_data_for_known_content() {
 	mut app := create_test_app()
 	defer {
