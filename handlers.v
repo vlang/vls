@@ -318,6 +318,40 @@ fn anonymous_function_header(source string) AnonymousFunctionHeader {
 	}
 }
 
+fn struct_literal_cursor_is_at_field(prefix string, open_brace int) bool {
+	mut round_depth := 0
+	mut square_depth := 0
+	mut curly_depth := 0
+	mut in_value := false
+	for c in prefix[open_brace + 1..] {
+		match c {
+			`(` { round_depth++ }
+			`)` { round_depth-- }
+			`[` { square_depth++ }
+			`]` { square_depth-- }
+			`{` { curly_depth++ }
+			`}` { curly_depth-- }
+			`:` {
+				if round_depth == 0 && square_depth == 0 && curly_depth == 0 {
+					in_value = true
+				}
+			}
+			`,` {
+				if round_depth == 0 && square_depth == 0 && curly_depth == 0 {
+					in_value = false
+				}
+			}
+			`\n` {
+				if round_depth == 0 && square_depth == 0 && curly_depth == 0 {
+					in_value = false
+				}
+			}
+			else {}
+		}
+	}
+	return !in_value
+}
+
 fn struct_literal_type_at_cursor(content string, position Position, enc PositionEncoding) string {
 	lines := content.split_into_lines()
 	if position.line < 0 || position.line >= lines.len || position.char < 0 {
@@ -353,6 +387,16 @@ fn struct_literal_type_at_cursor(content string, position Position, enc Position
 	}
 	if open_brace < 0 {
 		return ''
+	}
+	if !struct_literal_cursor_is_at_field(prefix, open_brace) {
+		return ''
+	}
+	fn_index := last_fn_keyword_index(prefix[..open_brace])
+	if fn_index >= 0 {
+		function_header := prefix[fn_index..open_brace]
+		if !function_header.contains('{') && !function_header.contains('}') {
+			return ''
+		}
 	}
 	mut type_end := open_brace
 	for type_end > 0 && prefix[type_end - 1] in [` `, `\t`, `\r`, `\n`] {
@@ -609,6 +653,38 @@ fn local_declaration_names(code string) []string {
 	return names
 }
 
+fn starts_or_block_header(source string) bool {
+	trimmed := source.trim_space()
+	return trimmed == 'or' || trimmed.ends_with(' or')
+}
+
+fn opens_implicit_it_scope(source string, open_paren int) bool {
+	mut name_end := open_paren
+	for name_end > 0 && source[name_end - 1] in [` `, `\t`, `\r`, `\n`] {
+		name_end--
+	}
+	mut name_start := name_end
+	for name_start > 0 && is_ident_char(source[name_start - 1]) {
+		name_start--
+	}
+	if name_start == name_end || name_start == 0 || source[name_start - 1] != `.` {
+		return false
+	}
+	return source[name_start..name_end] in ['all', 'any', 'filter', 'map']
+}
+
+fn has_implicit_it_scope_at_cursor(source string) bool {
+	mut scopes := []bool{}
+	for index, c in source {
+		if c == `(` {
+			scopes << opens_implicit_it_scope(source, index)
+		} else if c == `)` && scopes.len > 0 {
+			scopes.delete_last()
+		}
+	}
+	return scopes.any(it)
+}
+
 struct LocalBinding {
 	name string
 	line int
@@ -652,6 +728,7 @@ fn (app &App) local_scope_bindings(content string, position Position) []LocalBin
 	mut pending_block_line := -1
 	mut pending_closure_header := ''
 	mut pending_closure_line := -1
+	mut active_code_lines := []string{}
 	for line_idx in 0 .. position.line + 1 {
 		raw_line := if line_idx == position.line {
 			byte_col := encoded_col_to_byte(lines[line_idx], position.char, app.position_encoding)
@@ -663,6 +740,7 @@ fn (app &App) local_scope_bindings(content string, position Position) []LocalBin
 		if line_idx < function_start {
 			continue
 		}
+		active_code_lines << code
 		mut segment_start := 0
 		for col, c in code {
 			if c != `{` && c != `}` {
@@ -671,6 +749,7 @@ fn (app &App) local_scope_bindings(content string, position Position) []LocalBin
 			segment := code[segment_start..col]
 			segment_names := local_declaration_names(segment)
 			binding_scope_header := c == `{` && starts_binding_scope_header(segment)
+			error_scope_header := c == `{` && starts_or_block_header(segment)
 			closure_source := if pending_closure_header != '' {
 				pending_closure_header + '\n' + segment
 			} else {
@@ -681,12 +760,16 @@ fn (app &App) local_scope_bindings(content string, position Position) []LocalBin
 				closure_header.parameter_names
 			} else if binding_scope_header {
 				segment_names
+			} else if error_scope_header {
+				['err']
 			} else {
 				pending_block_names
 			}
 			block_line := if closure_header.complete {
 				if pending_closure_line >= 0 { pending_closure_line } else { line_idx }
 			} else if binding_scope_header {
+				line_idx
+			} else if error_scope_header {
 				line_idx
 			} else {
 				pending_block_line
@@ -748,7 +831,10 @@ fn (app &App) local_scope_bindings(content string, position Position) []LocalBin
 						}
 					}
 				}
-				if closure_header.found {
+				if starts_or_block_header(tail) {
+					pending_block_names = ['err']
+					pending_block_line = line_idx
+				} else if closure_header.found {
 					if pending_closure_line < 0 {
 						pending_closure_line = line_idx
 					}
@@ -761,6 +847,20 @@ fn (app &App) local_scope_bindings(content string, position Position) []LocalBin
 					}
 				}
 			}
+		}
+	}
+	mut has_explicit_it := false
+	for scope in scopes {
+		if scope.any(it.name == 'it') {
+			has_explicit_it = true
+			break
+		}
+	}
+	if has_implicit_it_scope_at_cursor(active_code_lines.join('\n')) && scopes.len > 0
+		&& !has_explicit_it {
+		scopes[scopes.len - 1] << LocalBinding{
+			name: 'it'
+			line: position.line
 		}
 	}
 	mut bindings := []LocalBinding{}

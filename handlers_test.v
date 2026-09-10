@@ -6172,6 +6172,123 @@ fn test_struct_literal_completion_includes_indexed_fields() {
 	assert 'save' !in labels
 }
 
+fn test_struct_literal_value_completion_keeps_expression_symbols() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'struct_literal_value_completion')
+	must_mkdir_all(test_dir)
+	main_file := os.join_path(test_dir, 'main.v')
+	content := "module main\n\nstruct User {\n\tname string\n\tage int\n}\n\nfn main() {\n\tlocal_name := 'Alex'\n\tuser := User{name: local_}\n}\n"
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	lines := content.split_into_lines()
+	completion_line := lines.index('\tuser := User{name: local_}')
+	assert completion_line >= 0
+	local_end := lines[completion_line].index('local_') or { -1 }
+	assert local_end >= 0
+	position := Position{
+		line: completion_line
+		char: local_end + 'local_'.len
+	}
+	assert struct_literal_type_at_cursor(content, position, app.position_encoding) == ''
+	indexed := app.indexed_completions(uri, position)
+	assert indexed.items.any(it.label == 'local_name')
+	assert !indexed.items.any(it.label == 'age')
+}
+
+fn test_struct_literal_completion_resumes_on_next_field_line() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'struct_literal_next_field_completion')
+	must_mkdir_all(test_dir)
+	main_file := os.join_path(test_dir, 'main.v')
+	content := "module main\n\nstruct User {\n\tname string\n\tage int\n}\n\nfn main() {\n\tuser := User{\n\t\tname: 'Alex'\n\t\tag\n\t}\n}\n"
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	lines := content.split_into_lines()
+	completion_line := lines.index('\t\tag')
+	assert completion_line >= 0
+	position := Position{
+		line: completion_line
+		char: lines[completion_line].len
+	}
+	assert struct_literal_type_at_cursor(content, position, app.position_encoding) == 'User'
+	indexed := app.indexed_completions(uri, position)
+	assert indexed.items.any(it.label == 'age')
+	assert !indexed.items.any(it.label == 'user')
+}
+
+fn test_function_body_is_not_detected_as_struct_literal() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'function_body_struct_literal_detection')
+	must_mkdir_all(test_dir)
+	main_file := os.join_path(test_dir, 'main.v')
+	content := 'module main\n\nstruct User {\n\tname string\n}\n\nfn build() User {\n\tlocal_value := 1\n\tloc\n\treturn User{}\n}\n'
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	lines := content.split_into_lines()
+	completion_line := lines.index('\tloc')
+	assert completion_line >= 0
+	position := Position{
+		line: completion_line
+		char: lines[completion_line].len
+	}
+	assert struct_literal_type_at_cursor(content, position, app.position_encoding) == ''
+	indexed := app.indexed_completions(uri, position)
+	assert indexed.items.any(it.label == 'local_value')
+	assert !indexed.items.any(it.label == 'name')
+}
+
+fn test_bare_completion_includes_scoped_implicit_bindings() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'implicit_binding_completion')
+	must_mkdir_all(test_dir)
+	main_file := os.join_path(test_dir, 'main.v')
+	content := 'module main\n\nfn might_fail() !int {\n\treturn 1\n}\n\nfn main() {\n\tvalues := [1, 2]\n\tpositive := values.filter(it)\n\tvalue := might_fail() or {\n\t\ter\n\t}\n\ter\n}\n'
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	lines := content.split_into_lines()
+	it_line := lines.index('\tpositive := values.filter(it)')
+	err_line := lines.index('\t\ter')
+	after_line := lines.index('\ter')
+	assert it_line >= 0
+	assert err_line >= 0
+	assert after_line >= 0
+	it_start := lines[it_line].index('it)') or { -1 }
+	assert it_start >= 0
+	it_position := Position{
+		line: it_line
+		char: it_start + 2
+	}
+	assert app.local_scope_completions(content, it_position).any(it.label == 'it')
+	assert app.indexed_completions(uri, it_position).items.any(it.label == 'it')
+	err_position := Position{
+		line: err_line
+		char: lines[err_line].len
+	}
+	assert app.local_scope_completions(content, err_position).any(it.label == 'err')
+	assert app.indexed_completions(uri, err_position).items.any(it.label == 'err')
+	after_position := Position{
+		line: after_line
+		char: lines[after_line].len
+	}
+	assert !app.local_scope_completions(content, after_position).any(it.label in ['it', 'err'])
+}
+
 fn test_loop_header_bindings_are_removed_with_loop_scope() {
 	mut app := create_test_app()
 	defer {
