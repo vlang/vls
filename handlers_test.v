@@ -5084,6 +5084,40 @@ fn test_module_const_block_completion_tracks_nested_expressions() {
 	assert labels == ['values', 'nested', 'after']
 }
 
+fn test_module_global_bindings_are_in_bare_completion() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'module_global_completion')
+	must_mkdir_all(test_dir)
+	main_file := os.join_path(test_dir, 'main.v')
+	content := '@[has_globals]\nmodule main\n\n__global (\n\tshared_cache map[string]int\n\tinitialized = [\n\t\t1\n\t\t2\n\t]\n\tafter int\n)\n\nfn inspect() {\n\tshared_ca\n}\n'
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	parsed := parse_module_member_completions(content, false).items
+	labels := parsed.map(it.label)
+	assert labels.filter(it in ['shared_cache', 'initialized', 'after']) == [
+		'shared_cache',
+		'initialized',
+		'after',
+	]
+	assert '1' !in labels
+	assert parse_module_member_completions(content, true).items.len == 0
+	lines := content.split_into_lines()
+	completion_line := lines.index('\tshared_ca')
+	assert completion_line >= 0
+	indexed := app.indexed_completions(uri, Position{
+		line: completion_line
+		char: lines[completion_line].len
+	})
+	assert !indexed.use_compiler
+	assert indexed.items.any(it.label == 'shared_cache')
+	assert indexed.items.any(it.label == 'initialized')
+	assert indexed.items.any(it.label == 'after')
+}
+
 fn test_collect_module_fn_completions_skips_current_file() {
 	mut app := create_test_app()
 	defer {
@@ -6302,6 +6336,37 @@ fn test_struct_literal_value_completion_keeps_expression_symbols() {
 	assert !indexed.items.any(it.label == 'age')
 }
 
+fn test_struct_literal_value_completion_survives_continuation_lines() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'struct_literal_continued_value_completion')
+	must_mkdir_all(test_dir)
+	main_file := os.join_path(test_dir, 'main.v')
+	cases := [
+		"\tuser := User{\n\t\tname:\n\t\t\tlocal_\n\t}",
+		"\tuser := User{\n\t\tname: local_name +\n\t\t\tlocal_\n\t}",
+	]
+	for literal in cases {
+		content := "module main\n\nstruct User {\n\tname string\n\tage int\n}\n\nfn main() {\n\tlocal_name := 'Alex'\n${literal}\n}\n"
+		must_write_file(main_file, content)
+		uri := path_to_uri(main_file)
+		app.open_files[uri] = content
+		lines := content.split_into_lines()
+		completion_line := lines.index('\t\t\tlocal_')
+		assert completion_line >= 0
+		position := Position{
+			line: completion_line
+			char: lines[completion_line].len
+		}
+		assert struct_literal_type_at_cursor(content, position, app.position_encoding) == '', literal
+		indexed := app.indexed_completions(uri, position)
+		assert indexed.items.any(it.label == 'local_name'), literal
+		assert !indexed.items.any(it.label == 'age'), literal
+	}
+}
+
 fn test_struct_literal_completion_resumes_on_next_field_line() {
 	mut app := create_test_app()
 	defer {
@@ -6341,6 +6406,31 @@ fn test_function_body_is_not_detected_as_struct_literal() {
 	app.open_files[uri] = content
 	lines := content.split_into_lines()
 	completion_line := lines.index('\tloc')
+	assert completion_line >= 0
+	position := Position{
+		line: completion_line
+		char: lines[completion_line].len
+	}
+	assert struct_literal_type_at_cursor(content, position, app.position_encoding) == ''
+	indexed := app.indexed_completions(uri, position)
+	assert indexed.items.any(it.label == 'local_value')
+	assert !indexed.items.any(it.label == 'name')
+}
+
+fn test_smart_cast_body_is_not_detected_as_struct_literal() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'smart_cast_struct_literal_detection')
+	must_mkdir_all(test_dir)
+	main_file := os.join_path(test_dir, 'main.v')
+	content := 'module main\n\nstruct Location {\n\tname string\n}\nstruct Missing {}\ntype Result = Location | Missing\n\nfn inspect(result Result) {\n\tlocal_value := 1\n\tif result is Location {\n\t\tloc\n\t}\n}\n'
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	lines := content.split_into_lines()
+	completion_line := lines.index('\t\tloc')
 	assert completion_line >= 0
 	position := Position{
 		line: completion_line

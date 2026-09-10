@@ -320,12 +320,30 @@ fn anonymous_function_header(source string) AnonymousFunctionHeader {
 	}
 }
 
-fn struct_literal_cursor_is_at_field(prefix string, open_brace int) bool {
+fn expression_line_is_continued(line string) bool {
+	trimmed := line.trim_space()
+	if trimmed == '' {
+		return false
+	}
+	return trimmed[trimmed.len - 1] in [`.`, `,`, `+`, `-`, `*`, `/`, `%`, `&`, `|`, `^`,
+		`=`, `!`, `<`, `>`, `?`, `:`]
+}
+
+fn struct_literal_cursor_is_at_field(prefix string, open_brace int, raw_lines []string) bool {
 	mut round_depth := 0
 	mut square_depth := 0
 	mut curly_depth := 0
 	mut in_value := false
+	mut value_has_expression := false
+	mut line_idx := prefix[..open_brace].count('\n')
+	mut current_line := []u8{}
 	for c in prefix[open_brace + 1..] {
+		if c != `\n` {
+			current_line << c
+		}
+		if in_value && c !in [` `, `\t`, `\r`, `\n`] {
+			value_has_expression = true
+		}
 		match c {
 			`(` { round_depth++ }
 			`)` { round_depth-- }
@@ -336,17 +354,34 @@ fn struct_literal_cursor_is_at_field(prefix string, open_brace int) bool {
 			`:` {
 				if round_depth == 0 && square_depth == 0 && curly_depth == 0 {
 					in_value = true
+					value_has_expression = false
 				}
 			}
 			`,` {
 				if round_depth == 0 && square_depth == 0 && curly_depth == 0 {
 					in_value = false
+					value_has_expression = false
 				}
 			}
 			`\n` {
 				if round_depth == 0 && square_depth == 0 && curly_depth == 0 {
-					in_value = false
+					mut continuation_line := current_line.bytestr()
+					if in_value && !value_has_expression && line_idx >= 0
+						&& line_idx < raw_lines.len {
+						raw_value := raw_lines[line_idx].all_after_last(':')
+						value_has_expression = source_fragment_starts_with_literal(raw_value)
+						if value_has_expression {
+							continuation_line = raw_lines[line_idx]
+						}
+					}
+					if in_value && value_has_expression
+						&& !expression_line_is_continued(continuation_line) {
+						in_value = false
+						value_has_expression = false
+					}
 				}
+				line_idx++
+				current_line = []u8{}
 			}
 			else {}
 		}
@@ -360,6 +395,7 @@ fn struct_literal_type_at_cursor(content string, position Position, enc Position
 		return ''
 	}
 	mut code_lines := []string{cap: position.line + 1}
+	mut raw_fragments := []string{cap: position.line + 1}
 	mut scan_state := ImportScanState{}
 	for line_idx in 0 .. position.line + 1 {
 		raw_line := lines[line_idx]
@@ -369,6 +405,7 @@ fn struct_literal_type_at_cursor(content string, position Position, enc Position
 		} else {
 			raw_line
 		}
+		raw_fragments << fragment
 		code_lines << source_line_import_code(fragment, mut scan_state)
 	}
 	prefix := code_lines.join('\n')
@@ -390,7 +427,7 @@ fn struct_literal_type_at_cursor(content string, position Position, enc Position
 	if open_brace < 0 {
 		return ''
 	}
-	if !struct_literal_cursor_is_at_field(prefix, open_brace) {
+	if !struct_literal_cursor_is_at_field(prefix, open_brace, raw_fragments) {
 		return ''
 	}
 	fn_index := last_fn_keyword_index(prefix[..open_brace])
@@ -442,7 +479,7 @@ fn struct_literal_type_at_cursor(content string, position Position, enc Position
 	for keyword_start > 0 && is_ident_char(prefix[keyword_start - 1]) {
 		keyword_start--
 	}
-	if prefix[keyword_start..keyword_end] in ['enum', 'for', 'if', 'interface', 'match',
+	if prefix[keyword_start..keyword_end] in ['enum', 'for', 'if', 'interface', 'is', 'match',
 		'struct', 'union'] {
 		return ''
 	}
@@ -1941,7 +1978,8 @@ fn module_completion_declaration(line string, public_only bool) bool {
 	if declaration.starts_with('fn ') {
 		return !declaration[3..].trim_space().starts_with('(')
 	}
-	return declaration.starts_with('const ') || declaration.starts_with('struct ')
+	return declaration == '__global (' || declaration.starts_with('const ')
+		|| declaration.starts_with('struct ')
 		|| declaration.starts_with('union ') || declaration.starts_with('enum ')
 		|| declaration.starts_with('interface ') || declaration.starts_with('type ')
 }
@@ -2071,6 +2109,8 @@ fn parse_module_member_completions(content string, public_only bool) ParsedModul
 	mut in_const_block := false
 	mut const_block_public := false
 	mut const_expression_depth := 0
+	mut in_global_block := false
+	mut global_expression_depth := 0
 	for line_idx, line in lines {
 		trimmed := line.trim_space()
 		if trimmed == '' || trimmed.starts_with('//') {
@@ -2080,6 +2120,30 @@ fn parse_module_member_completions(content string, public_only bool) ParsedModul
 			if module_completion_declaration(trimmed, public_only) {
 				has_conditional = true
 			}
+			continue
+		}
+		if trimmed == '__global (' {
+			in_global_block = true
+			global_expression_depth = 0
+			continue
+		}
+		if in_global_block {
+			if global_expression_depth == 0 && trimmed == ')' {
+				in_global_block = false
+				continue
+			}
+			if global_expression_depth == 0 && !public_only {
+				name := first_word(trimmed)
+				if is_valid_v_identifier_name(name) {
+					items << Detail{
+						kind:   6 // CompletionItemKind.Variable
+						label:  name
+						detail: '__global'
+					}
+				}
+			}
+			global_expression_depth = update_expression_delimiter_depth(trimmed,
+				global_expression_depth)
 			continue
 		}
 		if trimmed == 'const (' || trimmed == 'pub const (' {
