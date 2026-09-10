@@ -6638,6 +6638,42 @@ fn test_loop_header_literal_braces_do_not_change_lexical_scope() {
 	assert 'value' !in after
 }
 
+fn test_loop_header_nested_struct_literal_does_not_change_lexical_scope() {
+	assert binding_scope_header_starts_literal('for user in [User')
+	assert binding_scope_header_starts_literal('for box in []Box[int]')
+	assert binding_scope_header_starts_literal('for value in []int')
+	assert binding_scope_header_starts_literal('if value := module.Value')
+	assert !binding_scope_header_starts_literal('if result is module.Location')
+	assert !binding_scope_header_starts_literal('for user in [User{}]')
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	content := 'module main\n\nstruct User {}\n\nfn inspect() {\n\tfor user in [User{}] {\n\t\tuser\n\t}\n\tuser\n}\n'
+	test_dir := os.join_path(app.temp_dir, 'loop_struct_literal_scope_completion')
+	must_mkdir_all(test_dir)
+	main_file := os.join_path(test_dir, 'main.v')
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	lines := content.split_into_lines()
+	inside_line := lines.index('\t\tuser')
+	after_line := lines.index('\tuser')
+	assert inside_line >= 0
+	assert after_line >= 0
+	inside := app.indexed_completions(uri, Position{
+		line: inside_line
+		char: lines[inside_line].len
+	})
+	assert !inside.use_compiler
+	assert inside.items.any(it.label == 'user')
+	after := app.local_scope_completions(content, Position{
+		line: after_line
+		char: lines[after_line].len
+	})
+	assert !after.any(it.label == 'user')
+}
+
 fn test_conditional_bare_completion_requests_compiler_fallback() {
 	mut app := create_test_app()
 	defer {

@@ -255,6 +255,56 @@ fn starts_binding_scope_header(source string) bool {
 		|| trimmed.starts_with('else if ')
 }
 
+fn binding_scope_header_ends_with_literal_type(source string) bool {
+	trimmed := source.trim_space()
+	mut type_start := trimmed.len
+	mut square_depth := 0
+	for type_start > 0 {
+		c := trimmed[type_start - 1]
+		if c == `]` {
+			square_depth++
+			type_start--
+			continue
+		}
+		if square_depth > 0 {
+			if c == `[` {
+				square_depth--
+			}
+			type_start--
+			continue
+		}
+		if is_ident_char(c) || c == `.` {
+			type_start--
+			continue
+		}
+		break
+	}
+	if type_start == trimmed.len || square_depth != 0 {
+		return false
+	}
+	type_expression := trimmed[type_start..]
+	if type_expression.contains('{') || type_expression.contains('}') {
+		return false
+	}
+	prefix_fields := trimmed[..type_start].trim_space().fields()
+	if prefix_fields.len > 0 && prefix_fields.last() in ['is', '!is'] {
+		return false
+	}
+	if type_expression.starts_with('map[') {
+		return true
+	}
+	if type_expression.starts_with('[') {
+		array_end := matching_delimiter(type_expression, 0, `[`, `]`)
+		if array_end < 0 || array_end + 1 >= type_expression.len {
+			return false
+		}
+		item_type := type_expression[array_end + 1..].all_before('[').all_after_last('.')
+		return item_type != ''
+	}
+	type_name := type_expression.all_before('[').all_after_last('.')
+	return type_name != '' && type_name[0] >= `A` && type_name[0] <= `Z`
+}
+
 fn binding_scope_header_starts_literal(source string) bool {
 	trimmed := source.trim_space()
 	if !starts_binding_scope_header(trimmed) || trimmed == '' {
@@ -264,6 +314,7 @@ fn binding_scope_header_starts_literal(source string) bool {
 		return true
 	}
 	return trimmed[trimmed.len - 1] in [`=`, `:`, `,`, `(`, `[`]
+		|| binding_scope_header_ends_with_literal_type(trimmed)
 }
 
 struct AnonymousFunctionHeader {
