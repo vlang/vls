@@ -2761,7 +2761,7 @@ fn test_resolve_indexed_definition_prefers_source_relative_module() {
 	assert location.range.start.line == 2
 }
 
-fn test_resolve_indexed_definition_defers_receiver_method() {
+fn test_resolve_indexed_definition_resolves_receiver_method() {
 	mut app := create_test_app()
 	defer {
 		cleanup_test_app(app)
@@ -2777,8 +2777,14 @@ fn test_resolve_indexed_definition_defers_receiver_method() {
 	location := app.resolve_indexed_definition(uri, Position{
 		line: 8
 		char: 8
-	})
-	assert location == none
+	}) or {
+		assert false, 'expected indexed receiver method definition'
+		return
+	}
+	assert location.uri == uri
+	assert location.range.start.line == 4
+	assert location.range.start.char == 15
+	assert location.range.end.char == 21
 }
 
 fn test_operation_at_pos_signature_help_line_info() {
@@ -5095,6 +5101,42 @@ fn test_make_keyword_completions_contains_error_with_code() {
 	assert 'error_with_code' in labels
 }
 
+fn test_make_keyword_completions_contains_builtin_types() {
+	items := make_keyword_completions()
+	for builtin_type in ['string', 'bool', 'int', 'u64', 'rune', 'map', 'voidptr', 'IError'] {
+		matches := items.filter(it.label == builtin_type)
+		assert matches.len == 1, builtin_type
+		assert matches[0].kind == 7, builtin_type
+		assert matches[0].detail == 'builtin type', builtin_type
+	}
+}
+
+fn test_bare_completion_includes_builtin_types_without_compiler_fallback() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'builtin_type_completion')
+	must_mkdir_all(test_dir)
+	main_file := os.join_path(test_dir, 'main.v')
+	content := 'module main\n\nstruct User {\n\tname str\n\tactive bo\n}\n'
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	lines := content.split_into_lines()
+	for line_text in ['\tname str', '\tactive bo'] {
+		completion_line := lines.index(line_text)
+		assert completion_line >= 0
+		indexed := app.indexed_completions(uri, Position{
+			line: completion_line
+			char: lines[completion_line].len
+		})
+		assert !indexed.use_compiler
+		assert indexed.items.any(it.label == 'string')
+		assert indexed.items.any(it.label == 'bool')
+	}
+}
+
 fn test_import_completions_non_import_line() {
 	results := get_import_completions('fn main() {', '')
 	assert results.len == 0
@@ -5204,6 +5246,60 @@ fn test_parse_module_fn_completions_void_fn() {
 	labels := items.map(it.label)
 	assert 'greet' in labels
 	assert 'log_msg' in labels
+}
+
+fn test_module_member_completions_ignore_block_comment_declarations() {
+	content := 'module example\n\n/*\npub fn removed() {}\npub struct Removed {}\n*/\n\npub fn available() {}\npub struct Available {}\n'
+	public_items := parse_module_member_completions(content, true).items
+	public_labels := public_items.map(it.label)
+	assert 'available' in public_labels
+	assert 'Available' in public_labels
+	assert 'removed' !in public_labels
+	assert 'Removed' !in public_labels
+	function_labels := parse_module_fn_completions(content).map(it.label)
+	assert 'available' in function_labels
+	assert 'removed' !in function_labels
+}
+
+fn test_module_const_block_completion_tracks_nested_expressions() {
+	content := 'module example\n\npub const (\n\tvalues = [\n\t\t1\n\t\t2\n\t]\n\tnested = build(\n\t\t3\n\t)\n\tafter = 4\n)\n'
+	items := parse_module_member_completions(content, true).items
+	labels := items.map(it.label)
+	assert labels == ['values', 'nested', 'after']
+}
+
+fn test_module_global_bindings_are_in_bare_completion() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'module_global_completion')
+	must_mkdir_all(test_dir)
+	main_file := os.join_path(test_dir, 'main.v')
+	content := '@[has_globals]\nmodule main\n\n__global (\n\tshared_cache map[string]int\n\tinitialized = [\n\t\t1\n\t\t2\n\t]\n\tafter int\n)\n\nfn inspect() {\n\tshared_ca\n}\n'
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	parsed := parse_module_member_completions(content, false).items
+	labels := parsed.map(it.label)
+	assert labels.filter(it in ['shared_cache', 'initialized', 'after']) == [
+		'shared_cache',
+		'initialized',
+		'after',
+	]
+	assert '1' !in labels
+	assert parse_module_member_completions(content, true).items.len == 0
+	lines := content.split_into_lines()
+	completion_line := lines.index('\tshared_ca')
+	assert completion_line >= 0
+	indexed := app.indexed_completions(uri, Position{
+		line: completion_line
+		char: lines[completion_line].len
+	})
+	assert !indexed.use_compiler
+	assert indexed.items.any(it.label == 'shared_cache')
+	assert indexed.items.any(it.label == 'initialized')
+	assert indexed.items.any(it.label == 'after')
 }
 
 fn test_collect_module_fn_completions_skips_current_file() {
@@ -5479,7 +5575,7 @@ fn test_operation_at_pos_dot_completion_includes_imported_module_members() {
 	mod_dir := os.join_path(test_dir, 'my_mod')
 	must_mkdir_all(mod_dir)
 
-	must_write_file(os.join_path(mod_dir, 'my_mod.v'), 'module my_mod\n\npub fn greet(name string) string {\n\treturn name\n}\n\nfn hidden() {}\n')
+	must_write_file(os.join_path(mod_dir, 'my_mod.v'), 'module my_mod\n\npub fn greet(name string) string {\n\treturn name\n}\n\npub struct PublicStruct {}\npub enum PublicEnum { value }\npub interface PublicInterface {}\npub type PublicAlias = string\n\nfn hidden() {}\nstruct HiddenStruct {}\n')
 
 	main_file := os.join_path(test_dir, 'main.v')
 	content := 'module main\n\nimport my_mod\n\nfn main() {\n\tmy_mod.\n}\n'
@@ -5509,7 +5605,12 @@ fn test_operation_at_pos_dot_completion_includes_imported_module_members() {
 	cl := response.result as CompletionList
 	labels := cl.items.map(it.label)
 	assert 'greet' in labels
+	assert 'PublicStruct' in labels
+	assert 'PublicEnum' in labels
+	assert 'PublicInterface' in labels
+	assert 'PublicAlias' in labels
 	assert 'hidden' !in labels
+	assert 'HiddenStruct' !in labels
 }
 
 fn test_operation_at_pos_dot_completion_includes_aliased_import_module_members() {
@@ -5552,6 +5653,1656 @@ fn test_operation_at_pos_dot_completion_includes_aliased_import_module_members()
 	cl := response.result as CompletionList
 	labels := cl.items.map(it.label)
 	assert 'ping' in labels
+}
+
+fn test_operation_at_pos_completion_and_definition_resolve_cross_file_receiver_method() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+
+	test_dir := os.join_path(app.temp_dir, 'receiver_method_index')
+	clock_dir := os.join_path(test_dir, 'clock')
+	must_mkdir_all(clock_dir)
+	clock_file := os.join_path(clock_dir, 'clock.v')
+	must_write_file(clock_file, 'module clock\n\npub struct Timer {}\n\npub fn (mut timer Timer) show(label string) {}\n')
+
+	main_file := os.join_path(test_dir, 'main.v')
+	main_content := 'module main\n\nimport clock\n\nfn timer_pointer(timer &clock.Timer) &clock.Timer {\n\treturn timer\n}\n\nfn main() {\n\tmut timer := unsafe {\n\t\ttimer_pointer(&clock.Timer{})\n\t}\n\ttimer.show("total")\n}\n'
+	must_write_file(main_file, main_content)
+	main_uri := path_to_uri(main_file)
+	app.open_files[main_uri] = main_content
+
+	lines := main_content.split_into_lines()
+	mut call_line := -1
+	mut show_col := -1
+	for i, line in lines {
+		if line.contains('timer.show(') {
+			call_line = i
+			show_col = line.index('show') or { -1 }
+			break
+		}
+	}
+	assert call_line >= 0
+	assert show_col >= 0
+
+	completion := app.operation_at_pos(.completion, Request{
+		id: 9100
+		method: 'textDocument/completion'
+		params: json2.encode(TextDocumentPositionParams{
+			text_document: TextDocumentIdentifier{
+				uri: main_uri
+			}
+			position: Position{
+				line: call_line
+				char: show_col
+			}
+		},
+			escape_unicode: true
+		)
+	})
+	assert completion.result is CompletionList
+	completion_items := (completion.result as CompletionList).items
+	assert completion_items.any(it.label == 'show' && it.kind == 2)
+
+	definition := app.operation_at_pos(.definition, Request{
+		id: 9101
+		method: 'textDocument/definition'
+		params: json2.encode(TextDocumentPositionParams{
+			text_document: TextDocumentIdentifier{
+				uri: main_uri
+			}
+			position: Position{
+				line: call_line
+				char: show_col + 2
+			}
+		},
+			escape_unicode: true
+		)
+	})
+	assert definition.result is Location
+	location := definition.result as Location
+	assert location.uri == path_to_uri(clock_file)
+	assert location.range.start.line == 4
+	assert location.range.start.char == 25
+	assert location.range.end.char == 29
+}
+
+fn test_operation_at_pos_completion_includes_indexed_struct_fields() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+
+	test_dir := os.join_path(app.temp_dir, 'receiver_field_index')
+	must_mkdir_all(test_dir)
+	main_file := os.join_path(test_dir, 'main.v')
+	content := 'module main\n\nstruct User {\n\tname string\n\tage int\n}\n\nfn (user User) display_name() string {\n\treturn user.name\n}\n\nfn main() {\n\tuser := User{}\n\tuser.\n}\n'
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+
+	lines := content.split_into_lines()
+	completion_line := lines.index('\tuser.')
+	assert completion_line >= 0
+	response := app.operation_at_pos(.completion, Request{
+		id: 9200
+		method: 'textDocument/completion'
+		params: json2.encode(TextDocumentPositionParams{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			position: Position{
+				line: completion_line
+				char: lines[completion_line].len
+			}
+		},
+			escape_unicode: true
+		)
+	})
+
+	assert response.result is CompletionList
+	items := (response.result as CompletionList).items
+	assert items.any(it.label == 'name' && it.kind == 5)
+	assert items.any(it.label == 'age' && it.kind == 5)
+	assert items.any(it.label == 'display_name' && it.kind == 2)
+}
+
+fn test_receiver_inference_does_not_reuse_declaration_from_earlier_function() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+
+	test_dir := os.join_path(app.temp_dir, 'receiver_function_scope')
+	must_mkdir_all(test_dir)
+	main_file := os.join_path(test_dir, 'main.v')
+	content := 'module main\n\nstruct A {}\nstruct B {}\n\nfn (a A) alpha() {}\nfn (b B) beta() {}\n\nfn first() {\n\tx := A{}\n\tx.alpha()\n}\n\nfn second(x B) {\n\tx.beta()\n}\n'
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+
+	lines := content.split_into_lines()
+	call_line := lines.index('\tx.beta()')
+	assert call_line >= 0
+	dot_col := lines[call_line].index('.') or { -1 }
+	beta_col := lines[call_line].index('beta') or { -1 }
+	assert dot_col >= 0
+	assert beta_col >= 0
+
+	completion := app.operation_at_pos(.completion, Request{
+		id: 9201
+		method: 'textDocument/completion'
+		params: json2.encode(TextDocumentPositionParams{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			position: Position{
+				line: call_line
+				char: dot_col + 1
+			}
+		},
+			escape_unicode: true
+		)
+	})
+	assert completion.result is CompletionList
+	items := (completion.result as CompletionList).items
+	assert items.any(it.label == 'beta')
+	assert !items.any(it.label == 'alpha')
+
+	definition := app.operation_at_pos(.definition, Request{
+		id: 9202
+		method: 'textDocument/definition'
+		params: json2.encode(TextDocumentPositionParams{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			position: Position{
+				line: call_line
+				char: beta_col + 2
+			}
+		},
+			escape_unicode: true
+		)
+	})
+	assert definition.result is Location
+	location := definition.result as Location
+	assert location.uri == uri
+	assert location.range.start.line == lines.index('fn (b B) beta() {}')
+}
+
+fn test_imported_module_completion_resolves_from_project_root() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+
+	root := os.join_path(app.temp_dir, 'nested_module_completion')
+	module_dir := os.join_path(root, 'mylib')
+	app_dir := os.join_path(root, 'cmd', 'app')
+	must_mkdir_all(module_dir)
+	must_mkdir_all(app_dir)
+	must_write_file(os.join_path(root, 'v.mod'), "Module {\n\tname: 'nested_completion'\n}\n")
+	must_write_file(os.join_path(module_dir, 'mylib.v'), 'module mylib\n\npub fn from_project_root() {}\n')
+
+	main_file := os.join_path(app_dir, 'main.v')
+	content := 'module main\n\nimport mylib\n\nfn main() {\n\tmylib.\n}\n'
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	app.workspace_roots = [root]
+
+	lines := content.split_into_lines()
+	completion_line := lines.index('\tmylib.')
+	assert completion_line >= 0
+	response := app.operation_at_pos(.completion, Request{
+		id: 9203
+		method: 'textDocument/completion'
+		params: json2.encode(TextDocumentPositionParams{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			position: Position{
+				line: completion_line
+				char: lines[completion_line].len
+			}
+		},
+			escape_unicode: true
+		)
+	})
+
+	assert response.result is CompletionList
+	items := (response.result as CompletionList).items
+	assert items.any(it.label == 'from_project_root')
+}
+
+fn test_bare_completion_includes_local_and_top_level_scope_symbols() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+
+	test_dir := os.join_path(app.temp_dir, 'bare_scope_completion')
+	must_mkdir_all(test_dir)
+	main_file := os.join_path(test_dir, 'main.v')
+	content := 'module main\n\nconst app_name = "vls"\nstruct User {}\nenum Mode { active }\ninterface Runner {}\n\nfn helper() {}\n\nfn main(local_param string) {\n\tlocal_value := 42\n\tlocal_\n}\n'
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+
+	lines := content.split_into_lines()
+	completion_line := lines.index('\tlocal_')
+	assert completion_line >= 0
+	response := app.operation_at_pos(.completion, Request{
+		id: 9300
+		method: 'textDocument/completion'
+		params: json2.encode(TextDocumentPositionParams{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			position: Position{
+				line: completion_line
+				char: lines[completion_line].len
+			}
+		},
+			escape_unicode: true
+		)
+	})
+
+	assert response.result is CompletionList
+	items := (response.result as CompletionList).items
+	labels := items.map(it.label)
+	assert 'local_param' in labels
+	assert 'local_value' in labels
+	assert 'app_name' in labels
+	assert 'User' in labels
+	assert 'Mode' in labels
+	assert 'Runner' in labels
+	assert 'helper' in labels
+}
+
+fn test_literal_and_container_receiver_completion_falls_back_to_compiler() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+
+	test_dir := os.join_path(app.temp_dir, 'receiver_compiler_fallback')
+	must_mkdir_all(test_dir)
+	cases := [
+		["text := 'hello'", 'text.'],
+		['values := [1, 2]', 'values.'],
+	]
+	main_file := os.join_path(test_dir, 'main.v')
+	for case_idx, completion_case in cases {
+		content := 'module main\n\nfn main() {\n\t${completion_case[0]}\n\t${completion_case[1]}\n}\n'
+		must_write_file(main_file, content)
+		uri := path_to_uri(main_file)
+		app.open_files[uri] = content
+		lines := content.split_into_lines()
+		completion_line := lines.index('\t${completion_case[1]}')
+		assert completion_line >= 0
+
+		indexed := app.indexed_completions(uri, Position{
+			line: completion_line
+			char: lines[completion_line].len
+		})
+		assert indexed.use_compiler
+		response := app.operation_at_pos(.completion, Request{
+			id: 9301 + case_idx
+			method: 'textDocument/completion'
+			params: json2.encode(TextDocumentPositionParams{
+				text_document: TextDocumentIdentifier{
+					uri: uri
+				}
+				position: Position{
+					line: completion_line
+					char: lines[completion_line].len
+				}
+			},
+				escape_unicode: true
+			)
+		})
+		assert response.result is CompletionList
+		assert (response.result as CompletionList).items.len > 0, completion_case.str()
+	}
+}
+
+fn test_typed_container_receiver_does_not_infer_nested_struct_type() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+
+	test_dir := os.join_path(app.temp_dir, 'typed_container_receiver_fallback')
+	must_mkdir_all(test_dir)
+	main_file := os.join_path(test_dir, 'main.v')
+	cases := [
+		'users := []User{}',
+		'users := [User{}]',
+	]
+	for declaration in cases {
+		content := 'module main\n\nstruct User {\n\tname string\n}\nfn (user User) save() {}\n\nfn main() {\n\t${declaration}\n\tusers.\n}\n'
+		must_write_file(main_file, content)
+		uri := path_to_uri(main_file)
+		app.open_files[uri] = content
+		lines := content.split_into_lines()
+		completion_line := lines.index('\tusers.')
+		assert completion_line >= 0
+		assert app.infer_receiver_type(uri, content, 'users', completion_line) == '', declaration
+		indexed := app.indexed_completions(uri, Position{
+			line: completion_line
+			char: lines[completion_line].len
+		})
+		assert indexed.use_compiler, declaration
+		assert !indexed.items.any(it.label in ['name', 'save']), declaration
+		response := app.operation_at_pos(.completion, Request{
+			id: 9350
+			method: 'textDocument/completion'
+			params: json2.encode(TextDocumentPositionParams{
+				text_document: TextDocumentIdentifier{
+					uri: uri
+				}
+				position: Position{
+					line: completion_line
+					char: lines[completion_line].len
+				}
+			},
+				escape_unicode: true
+			)
+		})
+		assert response.result is CompletionList
+		labels := (response.result as CompletionList).items.map(it.label)
+		assert labels.len > 0, declaration
+		assert !labels.any(it in ['name', 'save']), declaration
+	}
+}
+
+fn test_receiver_completion_honors_local_binding_that_shadows_import() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+
+	test_dir := os.join_path(app.temp_dir, 'shadowed_import_completion')
+	module_dir := os.join_path(test_dir, 'clock')
+	must_mkdir_all(module_dir)
+	must_write_file(os.join_path(module_dir, 'clock.v'), 'module clock\n\npub fn module_member() {}\n')
+	main_file := os.join_path(test_dir, 'main.v')
+	content := 'module main\n\nimport clock\n\nstruct Timer {}\nfn (timer Timer) start() {}\n\nfn main() {\n\tclock := Timer{}\n\tclock.\n}\n'
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+
+	lines := content.split_into_lines()
+	completion_line := lines.index('\tclock.')
+	assert completion_line >= 0
+	response := app.operation_at_pos(.completion, Request{
+		id: 9303
+		method: 'textDocument/completion'
+		params: json2.encode(TextDocumentPositionParams{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			position: Position{
+				line: completion_line
+				char: lines[completion_line].len
+			}
+		},
+			escape_unicode: true
+		)
+	})
+
+	assert response.result is CompletionList
+	labels := (response.result as CompletionList).items.map(it.label)
+	assert 'start' in labels
+	assert 'module_member' !in labels
+}
+
+fn test_imported_module_completion_uses_unsaved_open_buffer() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+
+	test_dir := os.join_path(app.temp_dir, 'open_import_completion')
+	module_dir := os.join_path(test_dir, 'my_mod')
+	must_mkdir_all(module_dir)
+	module_file := os.join_path(module_dir, 'my_mod.v')
+	must_write_file(module_file, 'module my_mod\n\npub fn saved_member() {}\n')
+	module_uri := path_to_uri(module_file)
+	app.open_files[module_uri] = 'module my_mod\n\npub fn unsaved_member() {}\npub struct UnsavedType {}\n'
+
+	main_file := os.join_path(test_dir, 'main.v')
+	content := 'module main\n\nimport my_mod\n\nfn main() {\n\tmy_mod.\n}\n'
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	lines := content.split_into_lines()
+	completion_line := lines.index('\tmy_mod.')
+	assert completion_line >= 0
+
+	response := app.operation_at_pos(.completion, Request{
+		id: 9304
+		method: 'textDocument/completion'
+		params: json2.encode(TextDocumentPositionParams{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			position: Position{
+				line: completion_line
+				char: lines[completion_line].len
+			}
+		},
+			escape_unicode: true
+		)
+	})
+
+	assert response.result is CompletionList
+	labels := (response.result as CompletionList).items.map(it.label)
+	assert 'unsaved_member' in labels
+	assert 'UnsavedType' in labels
+	assert 'saved_member' !in labels
+}
+
+fn test_member_completion_recognizes_typed_prefix() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+
+	test_dir := os.join_path(app.temp_dir, 'typed_member_completion')
+	module_dir := os.join_path(test_dir, 'my_mod')
+	must_mkdir_all(module_dir)
+	must_write_file(os.join_path(module_dir, 'my_mod.v'), 'module my_mod\n\npub fn read_value() {}\n')
+	main_file := os.join_path(test_dir, 'main.v')
+	content := 'module main\n\nimport my_mod\n\nstruct User {\n\tname string\n}\n\nfn main() {\n\tuser := User{}\n\tuser.na\n\tmy_mod.rea\n}\n'
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	lines := content.split_into_lines()
+
+	for expected, source_line in {
+		'name':       '\tuser.na'
+		'read_value': '\tmy_mod.rea'
+	} {
+		completion_line := lines.index(source_line)
+		assert completion_line >= 0
+		response := app.operation_at_pos(.completion, Request{
+			id: 9400 + completion_line
+			method: 'textDocument/completion'
+			params: json2.encode(TextDocumentPositionParams{
+				text_document: TextDocumentIdentifier{
+					uri: uri
+				}
+				position: Position{
+					line: completion_line
+					char: lines[completion_line].len
+				}
+			},
+				escape_unicode: true
+			)
+		})
+		assert response.result is CompletionList
+		assert (response.result as CompletionList).items.any(it.label == expected)
+	}
+}
+
+fn test_local_scope_completion_drops_bindings_after_nested_block() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+
+	test_dir := os.join_path(app.temp_dir, 'nested_scope_completion')
+	module_dir := os.join_path(test_dir, 'clock')
+	must_mkdir_all(module_dir)
+	must_write_file(os.join_path(module_dir, 'clock.v'), 'module clock\n\npub fn module_member() {}\n')
+	main_file := os.join_path(test_dir, 'main.v')
+	content := 'module main\n\nimport clock\n\nstruct Timer {}\nfn (timer Timer) start() {}\n\nfn main() {\n\tif true {\n\t\tclock := Timer{}\n\t\tclock.start()\n\t}\n\tclock.\n}\n'
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	lines := content.split_into_lines()
+	completion_line := lines.index('\tclock.')
+	assert completion_line >= 0
+	position := Position{
+		line: completion_line
+		char: lines[completion_line].len
+	}
+	assert !app.local_scope_completions(content, position).any(it.label == 'clock')
+
+	response := app.operation_at_pos(.completion, Request{
+		id: 9401
+		method: 'textDocument/completion'
+		params: json2.encode(TextDocumentPositionParams{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			position: position
+		},
+			escape_unicode: true
+		)
+	})
+	assert response.result is CompletionList
+	labels := (response.result as CompletionList).items.map(it.label)
+	assert 'module_member' in labels
+	assert 'start' !in labels
+}
+
+fn test_conditional_module_types_delegate_completion_to_compiler() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+
+	test_dir := os.join_path(app.temp_dir, 'conditional_module_completion')
+	module_dir := os.join_path(test_dir, 'conditional')
+	must_mkdir_all(module_dir)
+	module_file := os.join_path(module_dir, 'conditional.v')
+	module_content := 'module conditional\n\npub fn always() {}\n\n\$if windows {\n\tpub struct WinType {}\n}\n\n@[if windows]\npub struct AttributeType {}\n'
+	must_write_file(module_file, module_content)
+	main_file := os.join_path(test_dir, 'main.v')
+	content := 'module main\n\nimport conditional\n\nfn main() {\n\tconditional.\n}\n'
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	lines := content.split_into_lines()
+	completion_line := lines.index('\tconditional.')
+	assert completion_line >= 0
+
+	indexed := app.indexed_completions(uri, Position{
+		line: completion_line
+		char: lines[completion_line].len
+	})
+	labels := indexed.items.map(it.label)
+	assert indexed.use_compiler
+	assert 'always' in labels
+	assert 'WinType' !in labels
+	assert 'AttributeType' !in labels
+}
+
+fn test_chained_member_qualifier_does_not_resolve_import_alias() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+
+	test_dir := os.join_path(app.temp_dir, 'chained_qualifier_completion')
+	module_dir := os.join_path(test_dir, 'clock')
+	must_mkdir_all(module_dir)
+	must_write_file(os.join_path(module_dir, 'clock.v'), 'module clock\n\npub fn module_member() {}\n')
+	main_file := os.join_path(test_dir, 'main.v')
+	content := 'module main\n\nimport clock\n\nstruct ClockValue {}\nfn (value ClockValue) tick() {}\nstruct AppState {\n\tclock ClockValue\n}\n\nfn main() {\n\tapp := AppState{}\n\tapp.clock.\n}\n'
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	lines := content.split_into_lines()
+	completion_line := lines.index('\tapp.clock.')
+	assert completion_line >= 0
+
+	qualifier, has_member_access, standalone := member_qualifier_at_cursor(lines[completion_line], lines[completion_line].len, app.position_encoding)
+	assert has_member_access
+	assert qualifier == 'clock'
+	assert !standalone
+	indexed := app.indexed_completions(uri, Position{
+		line: completion_line
+		char: lines[completion_line].len
+	})
+	assert indexed.use_compiler
+	assert !indexed.items.any(it.label == 'module_member')
+}
+
+fn test_multi_binding_receiver_uses_corresponding_rhs() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+
+	test_dir := os.join_path(app.temp_dir, 'multi_binding_receiver_completion')
+	must_mkdir_all(test_dir)
+	main_file := os.join_path(test_dir, 'main.v')
+	content := 'module main\n\nstruct A {}\nfn (value A) left_method() {}\nstruct B {}\nfn (value B) right_method() {}\n\nfn main() {\n\tleft, right := A{}, B{}\n\tright.\n}\n'
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	lines := content.split_into_lines()
+	completion_line := lines.index('\tright.')
+	assert completion_line >= 0
+	assert app.infer_receiver_type(uri, content, 'left', completion_line) == 'A'
+	assert app.infer_receiver_type(uri, content, 'right', completion_line) == 'B'
+
+	indexed := app.indexed_completions(uri, Position{
+		line: completion_line
+		char: lines[completion_line].len
+	})
+	labels := indexed.items.map(it.label)
+	assert !indexed.use_compiler
+	assert 'right_method' in labels
+	assert 'left_method' !in labels
+}
+
+fn test_generic_struct_receiver_completion_includes_fields() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+
+	test_dir := os.join_path(app.temp_dir, 'generic_struct_field_completion')
+	must_mkdir_all(test_dir)
+	main_file := os.join_path(test_dir, 'main.v')
+	content := 'module main\n\nstruct Box[T] {\n\tvalue T\n}\nfn (box Box[T]) reset() {}\n\nfn inspect(box Box[int]) {\n\tbox.\n}\n'
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	lines := content.split_into_lines()
+	completion_line := lines.index('\tbox.')
+	assert completion_line >= 0
+
+	indexed := app.indexed_completions(uri, Position{
+		line: completion_line
+		char: lines[completion_line].len
+	})
+	labels := indexed.items.map(it.label)
+	assert !indexed.use_compiler
+	assert 'value' in labels
+	assert 'reset' in labels
+}
+
+fn test_embedded_struct_receiver_completion_includes_promoted_members() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+
+	test_dir := os.join_path(app.temp_dir, 'embedded_struct_receiver_completion')
+	must_mkdir_all(test_dir)
+	main_file := os.join_path(test_dir, 'main.v')
+	content := 'module main\n\nstruct Base {\n\tpromoted_field string\n}\nfn (base Base) promoted_method() {}\n\nstruct Child {\n\tBase\n\town_field int\n}\nfn (child Child) child_method() {}\n\nfn inspect(child Child) {\n\tchild.\n}\n'
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	lines := content.split_into_lines()
+	completion_line := lines.index('\tchild.')
+	assert completion_line >= 0
+	position := Position{
+		line: completion_line
+		char: lines[completion_line].len
+	}
+	fields := app.indexed_struct_field_completions(uri, content, 'Child')
+	assert !fields.use_compiler
+	assert fields.items.any(it.label == 'own_field')
+	assert fields.items.any(it.label == 'promoted_field')
+	assert !fields.items.any(it.label == 'Base')
+	indexed := app.indexed_completions(uri, position)
+	assert !indexed.use_compiler
+	assert indexed.items.any(it.label == 'own_field')
+	assert indexed.items.any(it.label == 'promoted_field')
+	assert indexed.items.any(it.label == 'child_method')
+	assert indexed.items.any(it.label == 'promoted_method')
+	assert !indexed.items.any(it.label == 'Base')
+
+	response := app.operation_at_pos(.completion, Request{
+		id: 9700
+		method: 'textDocument/completion'
+		params: json2.encode(TextDocumentPositionParams{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			position: position
+		},
+			escape_unicode: true
+		)
+	})
+	assert response.result is CompletionList
+	labels := (response.result as CompletionList).items.map(it.label)
+	assert 'promoted_field' in labels
+	assert 'promoted_method' in labels
+	assert 'own_field' in labels
+	assert 'child_method' in labels
+}
+
+fn test_struct_field_completion_excludes_attributes() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+
+	test_dir := os.join_path(app.temp_dir, 'attributed_struct_field_completion')
+	must_mkdir_all(test_dir)
+	main_file := os.join_path(test_dir, 'main.v')
+	content := "module main\n\nstruct User {\n\t@[json: 'user_name']\n\tname string\n\t@[\n\t\tdeprecated\n\t]\n\tage int\n}\n\nfn inspect(user User) {\n\tuser.\n}\n"
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	lines := content.split_into_lines()
+	completion_line := lines.index('\tuser.')
+	assert completion_line >= 0
+
+	indexed := app.indexed_completions(uri, Position{
+		line: completion_line
+		char: lines[completion_line].len
+	})
+	labels := indexed.items.map(it.label)
+	assert 'name' in labels
+	assert 'age' in labels
+	assert '@[json:' !in labels
+	assert 'deprecated' !in labels
+}
+
+fn test_struct_field_completion_excludes_block_comment_fields() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'commented_struct_field_completion')
+	must_mkdir_all(test_dir)
+	main_file := os.join_path(test_dir, 'main.v')
+	content := 'module main\n\nstruct User {\n\tname string\n\t/*\n\tobsolete string\n\t*/\n\tage int\n}\n\nfn inspect(user User) {\n\tuser.\n}\n'
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	lines := content.split_into_lines()
+	completion_line := lines.index('\tuser.')
+	assert completion_line >= 0
+
+	symbols := parse_document_symbols(content)
+	user := symbols.filter(it.name == 'User')
+	assert user.len == 1
+	assert !user[0].children.any(it.name == 'obsolete')
+	indexed := app.indexed_completions(uri, Position{
+		line: completion_line
+		char: lines[completion_line].len
+	})
+	labels := indexed.items.map(it.label)
+	assert 'name' in labels
+	assert 'age' in labels
+	assert 'obsolete' !in labels
+}
+
+fn test_multiline_function_completion_builds_full_snippet() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+
+	test_dir := os.join_path(app.temp_dir, 'multiline_function_completion')
+	module_dir := os.join_path(test_dir, 'builder')
+	must_mkdir_all(module_dir)
+	module_content := 'module builder\n\npub fn build(\n\trequired string,\n\tcount int,\n) string {\n\treturn required.repeat(count)\n}\n'
+	must_write_file(os.join_path(module_dir, 'builder.v'), module_content)
+	main_file := os.join_path(test_dir, 'main.v')
+	content := 'module main\n\nimport builder\n\nfn main() {\n\tbuilder.\n}\n'
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	lines := content.split_into_lines()
+	completion_line := lines.index('\tbuilder.')
+	assert completion_line >= 0
+	indexed := app.indexed_completions(uri, Position{
+		line: completion_line
+		char: lines[completion_line].len
+	})
+	public_build := indexed.items.filter(it.label == 'build')
+	assert public_build.len == 1
+	public_insert := public_build[0].insert_text or { '' }
+	assert public_insert == 'build(\${1:required}, \${2:count})\$0'
+
+	local_items := parse_module_fn_completions(module_content)
+	local_build := local_items.filter(it.label == 'build')
+	assert local_build.len == 1
+	local_insert := local_build[0].insert_text or { '' }
+	assert local_insert == 'build(\${1:required}, \${2:count})\$0'
+}
+
+fn test_function_typed_parameter_completion_builds_full_snippet() {
+	module_content := 'module callbacks\n\npub fn apply(callback fn (int) int, value int) int {\n\treturn callback(value)\n}\n'
+	items := parse_module_fn_completions(module_content)
+	apply_items := items.filter(it.label == 'apply')
+	assert apply_items.len == 1
+	insert := apply_items[0].insert_text or { '' }
+	assert insert == 'apply(\${1:callback}, \${2:value})\$0'
+}
+
+fn test_struct_literal_completion_includes_indexed_fields() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+
+	test_dir := os.join_path(app.temp_dir, 'struct_literal_field_completion')
+	must_mkdir_all(test_dir)
+	main_file := os.join_path(test_dir, 'main.v')
+	content := 'module main\n\nstruct User {\n\tname string\n\tage int\n}\nfn (user User) save() {}\n\nfn main() {\n\tuser := User{\n\t\tna\n\t}\n}\n'
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	lines := content.split_into_lines()
+	completion_line := lines.index('\t\tna')
+	assert completion_line >= 0
+	position := Position{
+		line: completion_line
+		char: lines[completion_line].len
+	}
+	assert struct_literal_type_at_cursor(content, position, app.position_encoding) == 'User'
+
+	indexed := app.indexed_completions(uri, position)
+	labels := indexed.items.map(it.label)
+	assert !indexed.use_compiler
+	assert 'name' in labels
+	assert 'age' in labels
+	assert 'save' !in labels
+}
+
+fn test_struct_literal_value_completion_keeps_expression_symbols() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'struct_literal_value_completion')
+	must_mkdir_all(test_dir)
+	main_file := os.join_path(test_dir, 'main.v')
+	content := "module main\n\nstruct User {\n\tname string\n\tage int\n}\n\nfn main() {\n\tlocal_name := 'Alex'\n\tuser := User{name: local_}\n}\n"
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	lines := content.split_into_lines()
+	completion_line := lines.index('\tuser := User{name: local_}')
+	assert completion_line >= 0
+	local_end := lines[completion_line].index('local_') or { -1 }
+	assert local_end >= 0
+	position := Position{
+		line: completion_line
+		char: local_end + 'local_'.len
+	}
+	assert struct_literal_type_at_cursor(content, position, app.position_encoding) == ''
+	indexed := app.indexed_completions(uri, position)
+	assert indexed.items.any(it.label == 'local_name')
+	assert !indexed.items.any(it.label == 'age')
+}
+
+fn test_struct_literal_value_completion_survives_continuation_lines() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'struct_literal_continued_value_completion')
+	must_mkdir_all(test_dir)
+	main_file := os.join_path(test_dir, 'main.v')
+	cases := [
+		'\tuser := User{\n\t\tname:\n\t\t\tlocal_\n\t}',
+		'\tuser := User{\n\t\tname: local_name +\n\t\t\tlocal_\n\t}',
+	]
+	for literal in cases {
+		content := "module main\n\nstruct User {\n\tname string\n\tage int\n}\n\nfn main() {\n\tlocal_name := 'Alex'\n${literal}\n}\n"
+		must_write_file(main_file, content)
+		uri := path_to_uri(main_file)
+		app.open_files[uri] = content
+		lines := content.split_into_lines()
+		completion_line := lines.index('\t\t\tlocal_')
+		assert completion_line >= 0
+		position := Position{
+			line: completion_line
+			char: lines[completion_line].len
+		}
+		assert struct_literal_type_at_cursor(content, position, app.position_encoding) == '', literal
+		indexed := app.indexed_completions(uri, position)
+		assert indexed.items.any(it.label == 'local_name'), literal
+		assert !indexed.items.any(it.label == 'age'), literal
+	}
+}
+
+fn test_struct_literal_completion_resumes_on_next_field_line() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'struct_literal_next_field_completion')
+	must_mkdir_all(test_dir)
+	main_file := os.join_path(test_dir, 'main.v')
+	content := "module main\n\nstruct User {\n\tname string\n\tage int\n}\n\nfn main() {\n\tuser := User{\n\t\tname: 'Alex'\n\t\tag\n\t}\n}\n"
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	lines := content.split_into_lines()
+	completion_line := lines.index('\t\tag')
+	assert completion_line >= 0
+	position := Position{
+		line: completion_line
+		char: lines[completion_line].len
+	}
+	assert struct_literal_type_at_cursor(content, position, app.position_encoding) == 'User'
+	indexed := app.indexed_completions(uri, position)
+	assert indexed.items.any(it.label == 'age')
+	assert !indexed.items.any(it.label == 'user')
+}
+
+fn test_function_body_is_not_detected_as_struct_literal() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'function_body_struct_literal_detection')
+	must_mkdir_all(test_dir)
+	main_file := os.join_path(test_dir, 'main.v')
+	content := 'module main\n\nstruct User {\n\tname string\n}\n\nfn build() User {\n\tlocal_value := 1\n\tloc\n\treturn User{}\n}\n'
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	lines := content.split_into_lines()
+	completion_line := lines.index('\tloc')
+	assert completion_line >= 0
+	position := Position{
+		line: completion_line
+		char: lines[completion_line].len
+	}
+	assert struct_literal_type_at_cursor(content, position, app.position_encoding) == ''
+	indexed := app.indexed_completions(uri, position)
+	assert indexed.items.any(it.label == 'local_value')
+	assert !indexed.items.any(it.label == 'name')
+}
+
+fn test_smart_cast_body_is_not_detected_as_struct_literal() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'smart_cast_struct_literal_detection')
+	must_mkdir_all(test_dir)
+	main_file := os.join_path(test_dir, 'main.v')
+	content := 'module main\n\nstruct Location {\n\tname string\n}\nstruct Missing {}\ntype Result = Location | Missing\n\nfn inspect(result Result) {\n\tlocal_value := 1\n\tif result is Location {\n\t\tloc\n\t}\n}\n'
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	lines := content.split_into_lines()
+	completion_line := lines.index('\t\tloc')
+	assert completion_line >= 0
+	position := Position{
+		line: completion_line
+		char: lines[completion_line].len
+	}
+	assert struct_literal_type_at_cursor(content, position, app.position_encoding) == ''
+	indexed := app.indexed_completions(uri, position)
+	assert indexed.items.any(it.label == 'local_value')
+	assert !indexed.items.any(it.label == 'name')
+}
+
+fn test_sum_type_match_arm_is_not_detected_as_struct_literal() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'match_arm_struct_literal_detection')
+	must_mkdir_all(test_dir)
+	main_file := os.join_path(test_dir, 'main.v')
+	content := 'module main\n\nstruct Location {\n\tname string\n}\nstruct Missing {}\nstruct User {\n\tlabel string\n}\ntype Result = Location | Missing\n\nfn inspect(result Result) {\n\tlocal_value := 1\n\tmatch result {\n\t\tLocation {\n\t\t\tloc\n\t\t\tuser := User{\n\t\t\t\tlab\n\t\t\t}\n\t\t}\n\t\tMissing {}\n\t}\n}\n'
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	lines := content.split_into_lines()
+	completion_line := lines.index('\t\t\tloc')
+	assert completion_line >= 0
+	position := Position{
+		line: completion_line
+		char: lines[completion_line].len
+	}
+	assert struct_literal_type_at_cursor(content, position, app.position_encoding) == ''
+	indexed := app.indexed_completions(uri, position)
+	assert indexed.items.any(it.label == 'local_value')
+	assert indexed.items.any(it.label == 'string')
+	assert !indexed.items.any(it.label == 'name')
+	literal_line := lines.index('\t\t\t\tlab')
+	assert literal_line >= 0
+	literal_position := Position{
+		line: literal_line
+		char: lines[literal_line].len
+	}
+	assert struct_literal_type_at_cursor(content, literal_position, app.position_encoding) == 'User'
+	literal_indexed := app.indexed_completions(uri, literal_position)
+	assert literal_indexed.items.any(it.label == 'label')
+}
+
+fn test_bare_completion_includes_scoped_implicit_bindings() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'implicit_binding_completion')
+	must_mkdir_all(test_dir)
+	main_file := os.join_path(test_dir, 'main.v')
+	content := 'module main\n\nfn might_fail() !int {\n\treturn 1\n}\n\nfn main() {\n\tvalues := [1, 2]\n\tpositive := values.filter(it)\n\tvalue := might_fail() or {\n\t\ter\n\t}\n\ter\n}\n'
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	lines := content.split_into_lines()
+	it_line := lines.index('\tpositive := values.filter(it)')
+	err_line := lines.index('\t\ter')
+	after_line := lines.index('\ter')
+	assert it_line >= 0
+	assert err_line >= 0
+	assert after_line >= 0
+	it_start := lines[it_line].index('it)') or { -1 }
+	assert it_start >= 0
+	it_position := Position{
+		line: it_line
+		char: it_start + 2
+	}
+	assert app.local_scope_completions(content, it_position).any(it.label == 'it')
+	assert app.indexed_completions(uri, it_position).items.any(it.label == 'it')
+	err_position := Position{
+		line: err_line
+		char: lines[err_line].len
+	}
+	assert app.local_scope_completions(content, err_position).any(it.label == 'err')
+	assert app.indexed_completions(uri, err_position).items.any(it.label == 'err')
+	after_position := Position{
+		line: after_line
+		char: lines[after_line].len
+	}
+	assert !app.local_scope_completions(content, after_position).any(it.label in ['it', 'err'])
+}
+
+fn test_loop_header_bindings_are_removed_with_loop_scope() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+
+	content := 'module main\n\nfn inspect(values []string) {\n\tfor i, value in values {\n\t\tvalue\n\t}\n\tfor j, item in\n\t\tvalues {\n\t\titem\n\t}\n\tval\n}\n'
+	lines := content.split_into_lines()
+	inside_line := lines.index('\t\tvalue')
+	multiline_inside_line := lines.index('\t\titem')
+	after_line := lines.index('\tval')
+	assert inside_line >= 0
+	assert multiline_inside_line >= 0
+	assert after_line >= 0
+	inside := app.local_scope_completions(content, Position{
+		line: inside_line
+		char: lines[inside_line].len
+	}).map(it.label)
+	assert 'i' in inside
+	assert 'value' in inside
+	multiline_inside := app.local_scope_completions(content, Position{
+		line: multiline_inside_line
+		char: lines[multiline_inside_line].len
+	}).map(it.label)
+	assert 'j' in multiline_inside
+	assert 'item' in multiline_inside
+
+	after := app.local_scope_completions(content, Position{
+		line: after_line
+		char: lines[after_line].len
+	}).map(it.label)
+	assert 'values' in after
+	assert 'i' !in after
+	assert 'value' !in after
+	assert 'j' !in after
+	assert 'item' !in after
+}
+
+fn test_loop_header_literal_braces_do_not_change_lexical_scope() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	content := "module main\n\nfn inspect() {\n\tfor key, value in {'x': 1} {\n\t\tvalue\n\t}\n\tkey\n}\n"
+	test_dir := os.join_path(app.temp_dir, 'loop_literal_scope_completion')
+	must_mkdir_all(test_dir)
+	main_file := os.join_path(test_dir, 'main.v')
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	lines := content.split_into_lines()
+	inside_line := lines.index('\t\tvalue')
+	after_line := lines.index('\tkey')
+	assert inside_line >= 0
+	assert after_line >= 0
+	inside := app.local_scope_completions(content, Position{
+		line: inside_line
+		char: lines[inside_line].len
+	}).map(it.label)
+	assert 'key' in inside
+	assert 'value' in inside
+	indexed := app.indexed_completions(uri, Position{
+		line: inside_line
+		char: lines[inside_line].len
+	})
+	assert !indexed.use_compiler
+	assert indexed.items.any(it.label == 'key')
+	assert indexed.items.any(it.label == 'value')
+	after := app.local_scope_completions(content, Position{
+		line: after_line
+		char: lines[after_line].len
+	}).map(it.label)
+	assert 'key' !in after
+	assert 'value' !in after
+}
+
+fn test_loop_header_nested_struct_literal_does_not_change_lexical_scope() {
+	assert binding_scope_header_starts_literal('for user in [User')
+	assert binding_scope_header_starts_literal('for box in []Box[int]')
+	assert binding_scope_header_starts_literal('for value in []int')
+	assert binding_scope_header_starts_literal('if value := module.Value')
+	assert !binding_scope_header_starts_literal('if result is module.Location')
+	assert !binding_scope_header_starts_literal('for user in [User{}]')
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	content := 'module main\n\nstruct User {}\n\nfn inspect() {\n\tfor user in [User{}] {\n\t\tuser\n\t}\n\tuser\n}\n'
+	test_dir := os.join_path(app.temp_dir, 'loop_struct_literal_scope_completion')
+	must_mkdir_all(test_dir)
+	main_file := os.join_path(test_dir, 'main.v')
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	lines := content.split_into_lines()
+	inside_line := lines.index('\t\tuser')
+	after_line := lines.index('\tuser')
+	assert inside_line >= 0
+	assert after_line >= 0
+	inside := app.indexed_completions(uri, Position{
+		line: inside_line
+		char: lines[inside_line].len
+	})
+	assert !inside.use_compiler
+	assert inside.items.any(it.label == 'user')
+	after := app.local_scope_completions(content, Position{
+		line: after_line
+		char: lines[after_line].len
+	})
+	assert !after.any(it.label == 'user')
+}
+
+fn test_loop_header_multidimensional_literal_does_not_change_lexical_scope() {
+	assert binding_scope_header_starts_literal('for row in [][]int')
+	assert binding_scope_header_starts_literal('for row in [2][]int')
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	content := 'module main\n\nfn inspect() {\n\tfor row in [][]int{len: 2, init: []int{}} {\n\t\trow\n\t}\n\trow\n}\n'
+	test_dir := os.join_path(app.temp_dir, 'loop_multidimensional_scope_completion')
+	must_mkdir_all(test_dir)
+	main_file := os.join_path(test_dir, 'main.v')
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	lines := content.split_into_lines()
+	inside_line := lines.index('\t\trow')
+	after_line := lines.index('\trow')
+	assert inside_line >= 0
+	assert after_line >= 0
+	inside := app.indexed_completions(uri, Position{
+		line: inside_line
+		char: lines[inside_line].len
+	})
+	assert !inside.use_compiler
+	assert inside.items.any(it.label == 'row')
+	after := app.local_scope_completions(content, Position{
+		line: after_line
+		char: lines[after_line].len
+	})
+	assert !after.any(it.label == 'row')
+}
+
+fn test_conditional_bare_completion_requests_compiler_fallback() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'active_conditional_bare_completion')
+	must_mkdir_all(test_dir)
+	main_file := os.join_path(test_dir, 'main.v')
+	content := 'module main\n\nfn always() {}\n\n\$if linux {\n\tfn platform_only() {}\n}\n\nfn main() {\n\tplat\n}\n'
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	lines := content.split_into_lines()
+	completion_line := lines.index('\tplat')
+	assert completion_line >= 0
+	position := Position{
+		line: completion_line
+		char: lines[completion_line].len
+	}
+	indexed := app.indexed_completions(uri, position)
+	assert indexed.use_compiler
+	assert indexed.items.any(it.label == 'always')
+	assert !indexed.items.any(it.label == 'platform_only')
+
+	response := app.operation_at_pos(.completion, Request{
+		id: 9600
+		method: 'textDocument/completion'
+		params: json2.encode(TextDocumentPositionParams{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			position: position
+		},
+			escape_unicode: true
+		)
+	})
+	assert response.result is CompletionList
+	assert (response.result as CompletionList).items.any(it.label == 'always')
+}
+
+fn test_conditional_structs_do_not_contribute_indexed_receiver_fields() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'conditional_receiver_fields')
+	must_mkdir_all(test_dir)
+	main_file := os.join_path(test_dir, 'main.v')
+	content := 'module main\n\n\$if windows {\n\tstruct Platform {\n\t\twin int\n\t}\n} \$else {\n\tstruct Platform {\n\t\tunix int\n\t}\n}\n\nfn (platform Platform) reset() {}\n\nfn inspect(platform Platform) {\n\tplatform.\n}\n'
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	lines := content.split_into_lines()
+	completion_line := lines.index('\tplatform.')
+	assert completion_line >= 0
+	position := Position{
+		line: completion_line
+		char: lines[completion_line].len
+	}
+	fields := app.indexed_struct_field_completions(uri, content, 'Platform')
+	assert fields.items.len == 0
+	assert fields.use_compiler
+	indexed := app.indexed_completions(uri, position)
+	assert indexed.use_compiler
+	assert indexed.items.any(it.label == 'reset')
+	assert !indexed.items.any(it.label in ['win', 'unix'])
+}
+
+fn test_conditional_methods_request_receiver_completion_fallback() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'conditional_receiver_methods')
+	must_mkdir_all(test_dir)
+	main_file := os.join_path(test_dir, 'main.v')
+	content := 'module main\n\nstruct Service {\n\tname string\n}\n\nfn (service Service) start() {}\n\n\$if !js {\n\tfn (service Service) reload() {}\n}\n\nfn inspect(service Service) {\n\tservice.\n}\n'
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	lines := content.split_into_lines()
+	completion_line := lines.index('\tservice.')
+	assert completion_line >= 0
+
+	methods := app.indexed_method_symbols(uri, content, 'Service', '')
+	assert methods.use_compiler
+	assert methods.locations.len == 1
+	indexed := app.indexed_completions(uri, Position{
+		line: completion_line
+		char: lines[completion_line].len
+	})
+	assert indexed.use_compiler
+	assert indexed.items.any(it.label == 'name')
+	assert indexed.items.any(it.label == 'start')
+	assert !indexed.items.any(it.label == 'reload')
+	response := app.operation_at_pos(.completion, Request{
+		id: 9601
+		method: 'textDocument/completion'
+		params: json2.encode(TextDocumentPositionParams{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			position: Position{
+				line: completion_line
+				char: lines[completion_line].len
+			}
+		},
+			escape_unicode: true
+		)
+	})
+	assert response.result is CompletionList
+	assert (response.result as CompletionList).items.any(it.label == 'reload')
+}
+
+fn test_receiver_definition_ignores_closed_import_shadow() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'closed_import_shadow_definition')
+	module_dir := os.join_path(test_dir, 'clock')
+	must_mkdir_all(module_dir)
+	module_file := os.join_path(module_dir, 'clock.v')
+	module_content := 'module clock\n\npub fn start() {}\n'
+	must_write_file(module_file, module_content)
+	main_file := os.join_path(test_dir, 'main.v')
+	content := 'module main\n\nimport clock\n\nstruct Timer {}\nfn (timer Timer) start() {}\n\nfn main() {\n\tif true {\n\t\tclock := Timer{}\n\t\tclock.start()\n\t}\n\tclock.start()\n}\n'
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	module_uri := path_to_uri(module_file)
+	app.open_files[uri] = content
+	app.open_files[module_uri] = module_content
+	lines := content.split_into_lines()
+	inside_line := lines.index('\t\tclock.start()')
+	outside_line := lines.index('\tclock.start()')
+	assert inside_line >= 0
+	assert outside_line >= 0
+	assert app.infer_receiver_type(uri, content, 'clock', inside_line) == 'Timer'
+	assert app.infer_receiver_type(uri, content, 'clock', outside_line) == ''
+	inside_start_col := lines[inside_line].index('start') or { 0 }
+	outside_start_col := lines[outside_line].index('start') or { 0 }
+
+	inside := app.resolve_indexed_definition(uri, Position{
+		line: inside_line
+		char: inside_start_col + 2
+	}) or {
+		assert false, 'expected the in-scope Timer method definition'
+		return
+	}
+	assert inside.uri == uri
+	assert inside.range.start.line == 5
+
+	outside := app.resolve_indexed_definition(uri, Position{
+		line: outside_line
+		char: outside_start_col + 2
+	}) or {
+		assert false, 'expected the imported clock.start definition'
+		return
+	}
+	assert outside.uri == module_uri
+	assert outside.range.start.line == 2
+}
+
+fn test_chained_definition_does_not_resolve_final_field_as_import_alias() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'chained_definition_import_alias')
+	module_dir := os.join_path(test_dir, 'clock')
+	must_mkdir_all(module_dir)
+	module_file := os.join_path(module_dir, 'clock.v')
+	module_content := 'module clock\n\npub fn start() {}\n'
+	must_write_file(module_file, module_content)
+	main_file := os.join_path(test_dir, 'main.v')
+	content := 'module main\n\nimport clock\n\nstruct Timer {}\nfn (timer Timer) start() {}\nstruct App {\n\tclock Timer\n}\n\nfn main() {\n\tapp := App{}\n\tapp.clock.start()\n}\n'
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	lines := content.split_into_lines()
+	call_line := lines.index('\tapp.clock.start()')
+	assert call_line >= 0
+	start_col := lines[call_line].index('start') or { -1 }
+	assert start_col >= 0
+	position := Position{
+		line: call_line
+		char: start_col + 2
+	}
+	if location := app.resolve_indexed_definition(uri, position) {
+		assert false, 'chained field resolved to ${location.uri}'
+	}
+	definition := app.operation_at_pos(.definition, Request{
+		id: 9602
+		method: 'textDocument/definition'
+		params: json2.encode(TextDocumentPositionParams{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			position: position
+		},
+			escape_unicode: true
+		)
+	})
+	assert definition.result is Location
+	location := definition.result as Location
+	assert location.uri == uri
+	assert location.range.start.line == lines.index('fn (timer Timer) start() {}')
+}
+
+fn test_receiver_inference_uses_active_outer_binding_after_inner_shadow() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	content := 'module main\n\nstruct Outer {}\nstruct Inner {}\n\nfn main() {\n\tvalue := Outer{}\n\tif true {\n\t\tvalue := Inner{}\n\t\tvalue.\n\t}\n\tvalue.\n}\n'
+	lines := content.split_into_lines()
+	inside_line := lines.index('\t\tvalue.')
+	outside_line := lines.index('\tvalue.')
+	assert inside_line >= 0
+	assert outside_line >= 0
+	assert app.infer_receiver_type('file:///tmp/scoped_receiver.v', content, 'value', inside_line) == 'Inner'
+	assert app.infer_receiver_type('file:///tmp/scoped_receiver.v', content, 'value', outside_line) == 'Outer'
+}
+
+fn test_receiver_inference_uses_innermost_same_line_binding() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	content := 'module main\n\nstruct A {}\nfn (value A) from_a() {}\nfn (value A) target() {}\nstruct B {}\nfn (value B) from_b() {}\nfn (value B) target() {}\n\nfn main() {\n\tvalue := A{}; if true { value := B{}; value.target() }; value.from_a()\n}\n'
+	test_dir := os.join_path(app.temp_dir, 'same_line_receiver_shadow')
+	must_mkdir_all(test_dir)
+	main_file := os.join_path(test_dir, 'main.v')
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	lines := content.split_into_lines()
+	use_line := lines.index('\tvalue := A{}; if true { value := B{}; value.target() }; value.from_a()')
+	assert use_line >= 0
+	member_start := lines[use_line].index('value.target') or { -1 }
+	assert member_start >= 0
+	completion_position := Position{
+		line: use_line
+		char: member_start + 'value.'.len
+	}
+	assert app.infer_receiver_type_at_position(uri, content, 'value', completion_position) == 'B'
+	indexed := app.indexed_completions(uri, completion_position)
+	assert !indexed.use_compiler
+	assert indexed.items.any(it.label == 'from_b')
+	assert !indexed.items.any(it.label == 'from_a')
+	outer_start := lines[use_line].last_index('value.from_a') or { -1 }
+	assert outer_start >= 0
+	outer_position := Position{
+		line: use_line
+		char: outer_start + 'value.'.len
+	}
+	assert app.infer_receiver_type_at_position(uri, content, 'value', outer_position) == 'A'
+	outer := app.indexed_completions(uri, outer_position)
+	assert !outer.use_compiler
+	assert outer.items.any(it.label == 'from_a')
+	assert !outer.items.any(it.label == 'from_b')
+	target_start := lines[use_line].index('target()') or { -1 }
+	assert target_start >= 0
+	location := app.resolve_indexed_definition(uri, Position{
+		line: use_line
+		char: target_start + 2
+	}) or {
+		assert false, 'expected the innermost B method definition'
+		return
+	}
+	assert location.uri == uri
+	assert location.range.start.line == lines.index('fn (value B) target() {}')
+}
+
+fn test_closure_parameters_are_scoped_local_completions() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	content := 'module main\n\nfn main() {\n\tcallback := fn (value int) {\n\t\tval\n\t}\n\tother := fn (\n\t\titem string,\n\t) {\n\t\tite\n\t}\n\tval\n}\n'
+	test_dir := os.join_path(app.temp_dir, 'closure_parameter_completion')
+	must_mkdir_all(test_dir)
+	main_file := os.join_path(test_dir, 'main.v')
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	lines := content.split_into_lines()
+	value_line := lines.index('\t\tval')
+	item_line := lines.index('\t\tite')
+	after_line := lines.index('\tval')
+	assert value_line >= 0
+	assert item_line >= 0
+	assert after_line >= 0
+
+	value_items := app.local_scope_completions(content, Position{
+		line: value_line
+		char: lines[value_line].len
+	}).map(it.label)
+	assert 'value' in value_items
+	assert 'callback' in value_items
+	indexed := app.indexed_completions(uri, Position{
+		line: value_line
+		char: lines[value_line].len
+	})
+	assert indexed.items.any(it.label == 'value')
+	item_items := app.local_scope_completions(content, Position{
+		line: item_line
+		char: lines[item_line].len
+	}).map(it.label)
+	assert 'item' in item_items
+	assert 'other' in item_items
+	after_items := app.local_scope_completions(content, Position{
+		line: after_line
+		char: lines[after_line].len
+	}).map(it.label)
+	assert 'value' !in after_items
+	assert 'item' !in after_items
+	assert 'callback' in after_items
+	assert 'other' in after_items
+}
+
+fn test_receiver_inference_stops_at_completed_declaration_rhs() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'receiver_declaration_boundary')
+	must_mkdir_all(test_dir)
+	main_file := os.join_path(test_dir, 'main.v')
+	content := "module main\n\nstruct User {}\nfn (user User) save() {}\n\nfn main() {\n\ttext := 'hello'\n\tuser := User{}\n\ttext.\n}\n"
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	lines := content.split_into_lines()
+	completion_line := lines.index('\ttext.')
+	assert completion_line >= 0
+	assert app.infer_receiver_type(uri, content, 'text', completion_line) == ''
+
+	indexed := app.indexed_completions(uri, Position{
+		line: completion_line
+		char: lines[completion_line].len
+	})
+	assert indexed.use_compiler
+	assert !indexed.items.any(it.label == 'save')
+
+	continued_content := 'module main\n\nstruct User {}\n\nfn main() {\n\tcontinued :=\n\t\tUser{}\n\tcontinued.\n}\n'
+	continued_lines := continued_content.split_into_lines()
+	continued_line := continued_lines.index('\tcontinued.')
+	assert continued_line >= 0
+	assert app.infer_receiver_type(uri, continued_content, 'continued', continued_line) == 'User'
+}
+
+fn test_import_prefix_identifiers_use_normal_completion() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'import_prefix_completion')
+	must_mkdir_all(test_dir)
+	main_file := os.join_path(test_dir, 'main.v')
+	content := 'module main\n\nstruct Important {}\nfn (value Important) run() {}\n\nfn main() {\n\timportant := Important{}\n\timported_value := 1\n\timportant.\n\timported_\n}\n'
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	lines := content.split_into_lines()
+	member_line := lines.index('\timportant.')
+	bare_line := lines.index('\timported_')
+	assert member_line >= 0
+	assert bare_line >= 0
+	assert !is_import_completion_line(lines[member_line])
+	assert !is_import_completion_line(lines[bare_line])
+	assert get_import_completions(lines[member_line], test_dir).len == 0
+
+	member := app.indexed_completions(uri, Position{
+		line: member_line
+		char: lines[member_line].len
+	})
+	assert !member.use_compiler
+	assert member.items.any(it.label == 'run')
+	bare := app.indexed_completions(uri, Position{
+		line: bare_line
+		char: lines[bare_line].len
+	})
+	assert bare.items.any(it.label == 'imported_value')
+}
+
+fn test_if_header_bindings_are_removed_with_branch_scope() {
+	app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	content := 'module main\n\nfn inspect() {\n\tif clock := maybe_clock() {\n\t\tclock\n\t}\n\tif other :=\n\t\tmaybe_clock() {\n\t\tother\n\t}\n\tclo\n}\n'
+	lines := content.split_into_lines()
+	inside_line := lines.index('\t\tclock')
+	multiline_inside_line := lines.index('\t\tother')
+	after_line := lines.index('\tclo')
+	assert inside_line >= 0
+	assert multiline_inside_line >= 0
+	assert after_line >= 0
+	inside := app.local_scope_completions(content, Position{
+		line: inside_line
+		char: lines[inside_line].len
+	}).map(it.label)
+	assert 'clock' in inside
+	multiline_inside := app.local_scope_completions(content, Position{
+		line: multiline_inside_line
+		char: lines[multiline_inside_line].len
+	}).map(it.label)
+	assert 'other' in multiline_inside
+	after := app.local_scope_completions(content, Position{
+		line: after_line
+		char: lines[after_line].len
+	}).map(it.label)
+	assert 'clock' !in after
+	assert 'other' !in after
+}
+
+fn test_union_declarations_are_in_module_completions() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'union_module_completion')
+	module_dir := os.join_path(test_dir, 'packets')
+	must_mkdir_all(module_dir)
+	module_file := os.join_path(module_dir, 'packets.v')
+	module_content := 'module packets\n\npub union Packet {\n\ttext string\n\tnumber int\n}\n\npub fn always() {}\n\nfn inspect() {\n\tPac\n}\n'
+	must_write_file(module_file, module_content)
+	module_uri := path_to_uri(module_file)
+	app.open_files[module_uri] = module_content
+	module_lines := module_content.split_into_lines()
+	bare_line := module_lines.index('\tPac')
+	assert bare_line >= 0
+	bare := app.indexed_completions(module_uri, Position{
+		line: bare_line
+		char: module_lines[bare_line].len
+	})
+	packet_items := bare.items.filter(it.label == 'Packet')
+	assert packet_items.len == 1
+	assert packet_items[0].kind == 22
+
+	main_file := os.join_path(test_dir, 'main.v')
+	content := 'module main\n\nimport packets\n\nfn main() {\n\tpackets.\n}\n'
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	lines := content.split_into_lines()
+	member_line := lines.index('\tpackets.')
+	assert member_line >= 0
+	imported := app.indexed_completions(uri, Position{
+		line: member_line
+		char: lines[member_line].len
+	})
+	labels := imported.items.map(it.label)
+	assert !imported.use_compiler
+	assert 'Packet' in labels
+	assert 'always' in labels
 }
 
 fn test_semantic_tokens_returns_data_for_known_content() {
