@@ -20,9 +20,9 @@ import time
 struct IndexEntry {
 	fingerprint    int // content.hash(); used to skip re-parsing unchanged files
 	module_name    string
-	doc_symbols    []DocumentSymbol  // hierarchical symbols (as parse_document_symbols returns)
+	doc_symbols    []DocumentSymbol // hierarchical symbols (as parse_document_symbols returns)
 	docs           map[string]string // simple symbol name -> leading vdoc comment
-	fn_completions []Detail          // free-function completion items for this file
+	fn_completions []Detail // free-function completion items for this file
 }
 
 // build_index_entry parses `content` into an IndexEntry. Symbol ranges are
@@ -43,10 +43,10 @@ fn build_index_entry(content string, enc PositionEncoding) IndexEntry {
 		}
 	}
 	return IndexEntry{
-		fingerprint:    content.hash()
-		module_name:    get_module_name(content)
-		doc_symbols:    doc_syms
-		docs:           docs
+		fingerprint: content.hash()
+		module_name: get_module_name(content)
+		doc_symbols: doc_syms
+		docs: docs
 		fn_completions: parse_module_fn_completions(content)
 	}
 }
@@ -61,12 +61,12 @@ fn encode_document_symbols(syms []DocumentSymbol, lines []string, enc PositionEn
 	mut out := []DocumentSymbol{cap: syms.len}
 	for sym in syms {
 		out << DocumentSymbol{
-			name:            sym.name
-			kind:            sym.kind
-			tags:            sym.tags
-			range:           encode_range_chars(sym.range, lines, enc)
+			name: sym.name
+			kind: sym.kind
+			tags: sym.tags
+			range: encode_range_chars(sym.range, lines, enc)
 			selection_range: encode_range_chars(sym.selection_range, lines, enc)
-			children:        encode_document_symbols(sym.children, lines, enc)
+			children: encode_document_symbols(sym.children, lines, enc)
 		}
 	}
 	return out
@@ -90,7 +90,7 @@ fn encode_range_chars(r LSPRange, lines []string, enc PositionEncoding) LSPRange
 			line: r.start.line
 			char: byte_to_encoded_col(start_line, r.start.char, enc)
 		}
-		end:   Position{
+		end: Position{
 			line: r.end.line
 			char: byte_to_encoded_col(end_line, r.end.char, enc)
 		}
@@ -142,9 +142,9 @@ fn add_identifier_occurrence(line_text string, line_idx int, start int, end int,
 	}
 	name := line_text[start..end]
 	occ[name] << TokenOccurrence{
-		line:       line_idx
+		line: line_idx
 		start_char: byte_to_encoded_col(line_text, start, enc)
-		end_char:   byte_to_encoded_col(line_text, end, enc)
+		end_char: byte_to_encoded_col(line_text, end, enc)
 	}
 }
 
@@ -175,8 +175,7 @@ fn scan_literal_identifier_occurrences(line_text string, line_idx int, start int
 			state.interpolations << OccurrenceInterpolationState{
 				quote: quote
 			}
-			return scan_code_identifier_occurrences(line_text, line_idx, col + 2, enc, mut state, mut
-				occ)
+			return scan_code_identifier_occurrences(line_text, line_idx, col + 2, enc, mut state, mut occ)
 		}
 		col++
 	}
@@ -190,8 +189,7 @@ fn scan_code_identifier_occurrences(line_text string, line_idx int, start int, e
 	mut col := start
 	for col < line_text.len {
 		if state.quote != 0 {
-			col = scan_literal_identifier_occurrences(line_text, line_idx, col, enc, mut state, mut
-				occ)
+			col = scan_literal_identifier_occurrences(line_text, line_idx, col, enc, mut state, mut occ)
 			continue
 		}
 		c := line_text[col]
@@ -220,8 +218,7 @@ fn scan_code_identifier_occurrences(line_text string, line_idx int, start int, e
 		if c in [`r`, `c`] && col + 1 < line_text.len
 			&& (line_text[col + 1] == `"` || line_text[col + 1] == `'`) {
 			state.raw_string = c == `r`
-			col = scan_literal_identifier_occurrences(line_text, line_idx, col + 1, enc, mut state, mut
-				occ)
+			col = scan_literal_identifier_occurrences(line_text, line_idx, col + 1, enc, mut state, mut occ)
 			continue
 		}
 		if c == `"` || c == `'` || c == 96 {
@@ -294,7 +291,7 @@ fn (mut app App) occurrences_for(uri string) map[string][]TokenOccurrence {
 	occ := extract_identifier_occurrences(content, app.position_encoding)
 	app.ref_occurrences[uri] = OccEntry{
 		fingerprint: fp
-		occ:         occ
+		occ: occ
 	}
 	return occ
 }
@@ -466,7 +463,7 @@ const index_excluded_dirs = ['.git', '.svn', '.hg', 'node_modules', '.vmodules',
 // root. This models the nearest V project root (audit P1-01).
 fn find_project_root(dir string) string {
 	mut d := dir
-	for d != '' && d != '/' {
+	for d != '' && d != '/' && d != '.' {
 		if os.exists(os.join_path(d, 'v.mod')) {
 			return d
 		}
@@ -752,13 +749,13 @@ fn (app &App) index_scope_for_uri(uri string) IndexScope {
 	if project_root != '' && project_root != '/'
 		&& (workspace_root == '' || path_is_within(project_root, workspace_root)) {
 		return IndexScope{
-			dir:       project_root
+			dir: project_root
 			recursive: true
 		}
 	}
 	if workspace_root != '' {
 		return IndexScope{
-			dir:       workspace_root
+			dir: workspace_root
 			recursive: true
 		}
 	}
@@ -940,13 +937,11 @@ fn (app &App) query_workspace_symbols(query string) []WorkspaceSymbol {
 		entry := app.symbol_index[uri] or { continue }
 		for sym in entry.doc_symbols {
 			if q == '' || sym.name.to_lower().contains(q) {
-				add_workspace_symbol(mut results, mut seen, sym.name, sym.kind, uri,
-					sym.selection_range)
+				add_workspace_symbol(mut results, mut seen, sym.name, sym.kind, uri, sym.selection_range)
 			}
 			for child in sym.children {
 				if q == '' || child.name.to_lower().contains(q) {
-					add_workspace_symbol(mut results, mut seen, '${sym.name}.${child.name}',
-						child.kind, uri, child.selection_range)
+					add_workspace_symbol(mut results, mut seen, '${sym.name}.${child.name}', child.kind, uri, child.selection_range)
 				}
 			}
 		}

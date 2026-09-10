@@ -25,15 +25,15 @@ fn create_test_app() &App {
 	os.mkdir_all(temp_dir) or {
 		assert false, 'Failed to create test temp dir: ${err}'
 		return &App{
-			text:       ''
+			text: ''
 			open_files: map[string]string{}
-			temp_dir:   temp_dir
+			temp_dir: temp_dir
 		}
 	}
 	return &App{
-		text:       ''
+		text: ''
 		open_files: map[string]string{}
-		temp_dir:   temp_dir
+		temp_dir: temp_dir
 	}
 }
 
@@ -56,10 +56,10 @@ fn test_on_did_open_tracks_file() {
 
 	uri := path_to_uri(test_file)
 	request := Request{
-		id:      1
-		method:  'textDocument/didOpen'
+		id: 1
+		method: 'textDocument/didOpen'
 		jsonrpc: '2.0'
-		params:  json2.encode(Params{
+		params: json2.encode(Params{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
@@ -201,7 +201,7 @@ fn test_on_did_open_uses_text_document_payload() {
 	app.on_did_open(Request{
 		params: json2.encode(DidOpenTextDocumentParams{
 			text_document: DidOpenTextDocumentItem{
-				uri:  uri
+				uri: uri
 				text: content
 			}
 		},
@@ -224,7 +224,7 @@ fn test_on_did_open_uses_empty_text_payload_without_disk_fallback() {
 	app.on_did_open(Request{
 		params: json2.encode(DidOpenTextDocumentParams{
 			text_document: DidOpenTextDocumentItem{
-				uri:  uri
+				uri: uri
 				text: ''
 			}
 		},
@@ -335,11 +335,11 @@ fn test_on_did_change_updates_content() {
 	// Then change it
 	new_content := 'module main\n\nfn main() {\n\tprintln("changed")\n}'
 	request := Request{
-		id:      2
-		method:  'textDocument/didChange'
+		id: 2
+		method: 'textDocument/didChange'
 		jsonrpc: '2.0'
-		params:  json2.encode(Params{
-			text_document:   TextDocumentIdentifier{
+		params: json2.encode(Params{
+			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
 			content_changes: [ContentChange{
@@ -427,7 +427,7 @@ fn test_on_did_change_returns_notification() {
 
 	request := Request{
 		params: json2.encode(Params{
-			text_document:   TextDocumentIdentifier{
+			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
 			content_changes: [ContentChange{
@@ -461,8 +461,8 @@ fn test_on_did_change_schedules_diagnostics_without_blocking() {
 
 	result := app.on_did_change(Request{
 		params: json2.encode(DidChangeTextDocumentParams{
-			text_document:   VersionedTextDocumentIdentifier{
-				uri:     uri
+			text_document: VersionedTextDocumentIdentifier{
+				uri: uri
 				version: 2
 			}
 			content_changes: [ContentChange{
@@ -501,7 +501,7 @@ fn test_diagnostics_scheduler_coalesces_pending_jobs() {
 	mut scheduler := new_diagnostics_scheduler()
 	uri := 'file:///pending.v'
 	global_first, generation_first := scheduler.next_generation(uri)
-	assert scheduler.enqueue(DiagnosticsJob{
+	should_start := scheduler.enqueue(DiagnosticsJob{
 		uri: uri
 		content: 'first'
 		global_generation: global_first
@@ -509,8 +509,9 @@ fn test_diagnostics_scheduler_coalesces_pending_jobs() {
 		ready_at: 100
 		write_mutex: app.write_mutex
 	})
+	assert should_start
 	global_latest, generation_latest := scheduler.next_generation(uri)
-	assert !scheduler.enqueue(DiagnosticsJob{
+	should_restart := scheduler.enqueue(DiagnosticsJob{
 		uri: uri
 		content: 'latest'
 		global_generation: global_latest
@@ -518,6 +519,7 @@ fn test_diagnostics_scheduler_coalesces_pending_jobs() {
 		ready_at: 100
 		write_mutex: app.write_mutex
 	})
+	assert !should_restart
 
 	jobs, should_stop := scheduler.take_ready_jobs(100)
 	assert !should_stop
@@ -856,7 +858,7 @@ fn test_on_did_change_multiple_changes() {
 	for change in changes {
 		request := Request{
 			params: json2.encode(Params{
-				text_document:   TextDocumentIdentifier{
+				text_document: TextDocumentIdentifier{
 					uri: uri
 				}
 				content_changes: [ContentChange{
@@ -903,7 +905,7 @@ fn test_on_did_change_updates_tracked_file() {
 	new_content := 'modified content'
 	app.on_did_change(Request{
 		params: json2.encode(Params{
-			text_document:   TextDocumentIdentifier{
+			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
 			content_changes: [ContentChange{
@@ -926,7 +928,7 @@ fn test_apply_incremental_change_handles_utf8_columns() {
 			line: 0
 			char: 1
 		}
-		end:   Position{
+		end: Position{
 			line: 0
 			char: 2
 		}
@@ -945,7 +947,7 @@ fn test_apply_incremental_change_preserves_crlf() {
 			line: 1
 			char: 0
 		}
-		end:   Position{
+		end: Position{
 			line: 1
 			char: 3
 		}
@@ -961,7 +963,7 @@ fn test_apply_incremental_change_rejects_reversed_range() {
 			line: 0
 			char: 4
 		}
-		end:   Position{
+		end: Position{
 			line: 0
 			char: 2
 		}
@@ -980,7 +982,7 @@ fn test_incremental_change_is_valid_rejects_lines_past_eof() {
 			line: 5
 			char: 0
 		}
-		end:   Position{
+		end: Position{
 			line: 6
 			char: 0
 		}
@@ -992,7 +994,7 @@ fn test_incremental_change_is_valid_rejects_lines_past_eof() {
 			line: 1
 			char: 0
 		}
-		end:   Position{
+		end: Position{
 			line: 9
 			char: 0
 		}
@@ -1004,7 +1006,7 @@ fn test_incremental_change_is_valid_rejects_lines_past_eof() {
 			line: 0
 			char: 1
 		}
-		end:   Position{
+		end: Position{
 			line: 1
 			char: 2
 		}
@@ -1055,7 +1057,7 @@ fn test_semantic_candidate_cap_ignores_unrelated_workspace_root() {
 	app.ensure_dirs_indexed(app.index_query_dirs())
 
 	current_scope := IndexScope{
-		dir:       '/root_a'
+		dir: '/root_a'
 		recursive: true
 	}
 	candidates := app.collect_semantic_candidates('unique', current_scope)
@@ -1074,7 +1076,7 @@ fn test_incremental_change_is_valid_rejects_char_past_line() {
 			line: 0
 			char: 9
 		}
-		end:   Position{
+		end: Position{
 			line: 1
 			char: 1
 		}
@@ -1085,7 +1087,7 @@ fn test_incremental_change_is_valid_rejects_char_past_line() {
 			line: 0
 			char: 1
 		}
-		end:   Position{
+		end: Position{
 			line: 1
 			char: 9
 		}
@@ -1098,7 +1100,7 @@ fn test_incremental_change_is_valid_rejects_char_past_line() {
 			line: 0
 			char: 3
 		}
-		end:   Position{
+		end: Position{
 			line: 0
 			char: 3
 		}
@@ -1113,7 +1115,7 @@ fn test_apply_incremental_change_handles_multiline_ranges() {
 			line: 0
 			char: 1
 		}
-		end:   Position{
+		end: Position{
 			line: 1
 			char: 2
 		}
@@ -1139,13 +1141,13 @@ fn test_operation_at_pos_completion_line_info() {
 	app.open_files[uri] = content
 
 	request := Request{
-		id:     1
+		id: 1
 		method: 'textDocument/completion'
 		params: json2.encode(Params{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-			position:      Position{
+			position: Position{
 				line: 3
 				char: 4
 			}
@@ -1175,13 +1177,13 @@ fn test_operation_at_pos_definition_line_info() {
 	app.open_files[uri] = content
 
 	request := Request{
-		id:     2
+		id: 2
 		method: 'textDocument/definition'
 		params: json2.encode(Params{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-			position:      Position{
+			position: Position{
 				line: 5
 				char: 2
 			}
@@ -2110,7 +2112,7 @@ fn test_resolve_indexed_definition_defers_compile_time_condition() {
 	test_dir := os.join_path(app.temp_dir, 'indexed_definition_compile_time_condition')
 	must_mkdir_all(test_dir)
 	test_file := os.join_path(test_dir, 'main.v')
-	content := 'module main\n\nfn windows() {}\n\n$if windows {\n\tfn active() {}\n}\n'
+	content := 'module main\n\nfn windows() {}\n\n\$if windows {\n\tfn active() {}\n}\n'
 	must_write_file(test_file, content)
 	uri := path_to_uri(test_file)
 	app.open_files[uri] = content
@@ -2134,7 +2136,7 @@ fn test_resolve_indexed_definition_defers_multiline_compile_time_condition() {
 	test_dir := os.join_path(app.temp_dir, 'indexed_definition_multiline_compile_time_condition')
 	must_mkdir_all(test_dir)
 	test_file := os.join_path(test_dir, 'main.v')
-	content := 'module main\n\nfn windows() {}\n\n$if (\n\twindows\n) {\n\tfn active() {}\n}\n'
+	content := 'module main\n\nfn windows() {}\n\n\$if (\n\twindows\n) {\n\tfn active() {}\n}\n'
 	must_write_file(test_file, content)
 	uri := path_to_uri(test_file)
 	app.open_files[uri] = content
@@ -2576,6 +2578,152 @@ fn test_resolve_indexed_definition_prefers_workspace_vlib() {
 	assert location.range.start.line == 2
 }
 
+fn test_source_call_target_ignores_non_code_delimiters() {
+	literal_line := "foo(')')"
+	literal_target := source_call_target(literal_line, Position{
+		char: literal_line.len - 1
+	}, .utf8) or {
+		assert false, 'expected call target with a parenthesis in a string literal'
+		return
+	}
+	assert literal_target.position.char == 2
+	assert literal_target.active_parameter == 0
+
+	raw_line := "foo(r')')"
+	raw_target := source_call_target(raw_line, Position{
+		char: raw_line.len - 1
+	}, .utf8) or {
+		assert false, 'expected call target with a parenthesis in a raw string literal'
+		return
+	}
+	assert raw_target.position.char == 2
+	assert raw_target.active_parameter == 0
+
+	comment_line := 'foo(/* ) */ value)'
+	comment_target := source_call_target(comment_line, Position{
+		char: comment_line.len - 1
+	}, .utf8) or {
+		assert false, 'expected call target with a parenthesis in a comment'
+		return
+	}
+	assert comment_target.position.char == 2
+	assert comment_target.active_parameter == 0
+
+	comma_line := "foo('last, first', value)"
+	comma_target := source_call_target(comma_line, Position{
+		char: comma_line.len - 1
+	}, .utf8) or {
+		assert false, 'expected call target with a comma in a string literal'
+		return
+	}
+	assert comma_target.position.char == 2
+	assert comma_target.active_parameter == 1
+}
+
+fn test_source_call_target_handles_multiline_and_generic_calls() {
+	generic_line := 'convert[int](value)'
+	generic_target := source_call_target(generic_line, Position{
+		char: generic_line.len - 1
+	}, .utf8) or {
+		assert false, 'expected call target before explicit generic arguments'
+		return
+	}
+	assert generic_target.position == Position{
+		line: 0
+		char: 2
+	}
+
+	multiline := "fn main() {\n\tfoo(\n\t\tfirst,\n\t\t'last, )'\n\t)\n}"
+	cursor_line := "\t\t'last, )'"
+	multiline_target := source_call_target(multiline, Position{
+		line: 3
+		char: cursor_line.len
+	}, .utf8) or {
+		assert false, 'expected call target on a preceding line'
+		return
+	}
+	assert multiline_target.position == Position{
+		line: 1
+		char: 3
+	}
+	assert multiline_target.active_parameter == 1
+}
+
+fn test_declaration_signature_label_keeps_generics_and_return_type() {
+	declaration := 'pub fn convert[T](value T) !T'
+	assert declaration_signature_label(declaration, 'convert') == 'convert[T](value T) !T'
+	assert declaration_signature_label('fn parse(value string) ?int', 'parse') == 'parse(value string) ?int'
+}
+
+fn test_signature_parameters_split_only_top_level_commas() {
+	parameters := signature_parameters('apply(cb fn (int, string), value int) !bool')
+	assert parameters.len == 2
+	assert parameters[0].label == 'cb fn (int, string)'
+	assert parameters[1].label == 'value int'
+}
+
+fn test_signature_active_parameter_clamps_variadic_arguments() {
+	variadic := signature_parameters('collect(prefix string, values ...int)')
+	assert signature_active_parameter(variadic, 1) == 1
+	assert signature_active_parameter(variadic, 2) == 1
+
+	fixed := signature_parameters('collect(prefix string, value int)')
+	assert signature_active_parameter(fixed, 2) == 2
+}
+
+fn test_source_declaration_at_stops_non_braced_declarations() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	uri := 'file:///tmp/source_declaration_fallback.v'
+	content := 'module main\n\nconst (\n\tanswer = 42\n\tother = 7\n)\n\ntype Alias = int\ntype Handler = fn (int) bool\n\nfn next() {}\n\nfn parse(\n\tvalue string, // explanation\n\t/* { inside comment\n\tcontinued } */\n\tradix int,\n) !int {\n}\n'
+	app.open_files[uri] = content
+
+	constant := app.source_declaration_at(Location{
+		uri: uri
+		range: LSPRange{
+			start: Position{
+				line: 3
+			}
+		}
+	})
+	assert constant == 'answer = 42'
+
+	alias := app.source_declaration_at(Location{
+		uri: uri
+		range: LSPRange{
+			start: Position{
+				line: 7
+			}
+		}
+	})
+	assert alias == 'type Alias = int'
+
+	function_alias := app.source_declaration_at(Location{
+		uri: uri
+		range: LSPRange{
+			start: Position{
+				line: 8
+			}
+		}
+	})
+	assert function_alias == 'type Handler = fn (int) bool'
+
+	function := app.source_declaration_at(Location{
+		uri: uri
+		range: LSPRange{
+			start: Position{
+				line: 12
+			}
+		}
+	})
+	assert function == 'fn parse(\nvalue string, // explanation\n/* { inside comment\ncontinued } */\nradix int,\n) !int'
+	label := declaration_signature_label(function, 'parse')
+	assert label == 'parse(\nvalue string, // explanation\n/* { inside comment\ncontinued } */\nradix int,\n) !int'
+	assert signature_parameters(label).len == 2
+}
+
 fn test_resolve_indexed_definition_prefers_source_relative_module() {
 	mut app := create_test_app()
 	defer {
@@ -2650,13 +2798,13 @@ fn test_operation_at_pos_signature_help_line_info() {
 	app.open_files[uri] = content
 
 	request := Request{
-		id:     3
+		id: 3
 		method: 'textDocument/signatureHelp'
 		params: json2.encode(Params{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-			position:      Position{
+			position: Position{
 				line: 5
 				char: 7
 			}
@@ -2689,12 +2837,12 @@ fn test_operation_at_pos_preserves_request_id() {
 	test_ids := [0, 1, 42, 999, 12345]
 	for id in test_ids {
 		request := Request{
-			id:     id
+			id: id
 			params: json2.encode(Params{
 				text_document: TextDocumentIdentifier{
 					uri: uri
 				}
-				position:      Position{
+				position: Position{
 					line: 2
 					char: 0
 				}
@@ -2709,7 +2857,7 @@ fn test_operation_at_pos_preserves_request_id() {
 
 fn test_json_encode_response() {
 	response := Response{
-		id:     1
+		id: 1
 		result: 'null'
 	}
 	encoded := json2.encode(response, escape_unicode: true)
@@ -2719,20 +2867,20 @@ fn test_json_encode_response() {
 
 fn test_json_encode_capabilities_response() {
 	response := Response{
-		id:     0
+		id: 0
 		result: Capabilities{
 			capabilities: Capability{
-				text_document_sync:      TextDocumentSyncOptions{
+				text_document_sync: TextDocumentSyncOptions{
 					open_close: true
-					change:     1
+					change: 1
 				}
-				completion_provider:     CompletionProvider{
+				completion_provider: CompletionProvider{
 					trigger_characters: ['.']
 				}
 				signature_help_provider: SignatureHelpOptions{
 					trigger_characters: ['(', ',']
 				}
-				definition_provider:     true
+				definition_provider: true
 			}
 		}
 	}
@@ -2745,20 +2893,20 @@ fn test_json_encode_capabilities_response() {
 fn test_json_encode_completion_response() {
 	details := [
 		Detail{
-			kind:          6
-			label:         'println'
-			detail:        'fn println(s string)'
+			kind: 6
+			label: 'println'
+			detail: 'fn println(s string)'
 			documentation: 'Prints to stdout'
 		},
 		Detail{
-			kind:          6
-			label:         'print'
-			detail:        'fn print(s string)'
+			kind: 6
+			label: 'print'
+			detail: 'fn print(s string)'
 			documentation: 'Prints without newline'
 		},
 	]
 	response := Response{
-		id:     2
+		id: 2
 		result: details
 	}
 	encoded := json2.encode(response, escape_unicode: true)
@@ -2768,15 +2916,15 @@ fn test_json_encode_completion_response() {
 
 fn test_json_encode_location_response() {
 	response := Response{
-		id:     3
+		id: 3
 		result: Location{
-			uri:   'file:///test/main.v'
+			uri: 'file:///test/main.v'
 			range: LSPRange{
 				start: Position{
 					line: 10
 					char: 5
 				}
-				end:   Position{
+				end: Position{
 					line: 10
 					char: 15
 				}
@@ -2790,11 +2938,11 @@ fn test_json_encode_location_response() {
 
 fn test_json_encode_signature_help_response() {
 	response := Response{
-		id:     4
+		id: 4
 		result: SignatureHelp{
-			signatures:       [
+			signatures: [
 				SignatureInformation{
-					label:      'fn test(a int, b string)'
+					label: 'fn test(a int, b string)'
 					parameters: [
 						ParameterInformation{
 							label: 'a int'
@@ -2819,20 +2967,20 @@ fn test_json_encode_notification() {
 	notification := Notification{
 		method: 'textDocument/publishDiagnostics'
 		params: PublishDiagnosticsParams{
-			uri:         'file:///test.v'
+			uri: 'file:///test.v'
 			diagnostics: [
 				LSPDiagnostic{
-					range:    LSPRange{
+					range: LSPRange{
 						start: Position{
 							line: 5
 							char: 0
 						}
-						end:   Position{
+						end: Position{
 							line: 5
 							char: 10
 						}
 					}
-					message:  'undefined identifier'
+					message: 'undefined identifier'
 					severity: 1
 				},
 			]
@@ -2918,17 +3066,17 @@ fn test_diagnostics_deduplication() {
 	errors := [
 		JsonError{
 			line_nr: 5
-			col:     10
+			col: 10
 			message: 'error 1'
 		},
 		JsonError{
 			line_nr: 5
-			col:     10
+			col: 10
 			message: 'error 2'
 		}, // duplicate position
 		JsonError{
 			line_nr: 6
-			col:     5
+			col: 5
 			message: 'error 3'
 		},
 	]
@@ -2952,17 +3100,17 @@ fn test_diagnostics_deduplication_same_line_different_col() {
 	errors := [
 		JsonError{
 			line_nr: 5
-			col:     1
+			col: 1
 			message: 'error 1'
 		},
 		JsonError{
 			line_nr: 5
-			col:     10
+			col: 10
 			message: 'error 2'
 		},
 		JsonError{
 			line_nr: 5
-			col:     20
+			col: 20
 			message: 'error 3'
 		},
 	]
@@ -3009,7 +3157,7 @@ fn test_response_result_string() {
 fn test_response_result_details() {
 	details := [
 		Detail{
-			kind:  6
+			kind: 6
 			label: 'test'
 		},
 	]
@@ -3084,11 +3232,11 @@ fn test_app_exit_flag_default() {
 
 fn test_v_error_to_lsp_diagnostic_basic() {
 	v_err := JsonError{
-		path:    '/test/file.v'
+		path: '/test/file.v'
 		message: 'undefined identifier `foo`'
 		line_nr: 10
-		col:     5
-		len:     3
+		col: 5
+		len: 3
 	}
 	diag := v_error_to_lsp_diagnostic(v_err)
 
@@ -3103,11 +3251,11 @@ fn test_v_error_to_lsp_diagnostic_basic() {
 
 fn test_v_error_to_lsp_diagnostic_first_line() {
 	v_err := JsonError{
-		path:    '/test/file.v'
+		path: '/test/file.v'
 		message: 'syntax error'
 		line_nr: 1
-		col:     1
-		len:     1
+		col: 1
+		len: 1
 	}
 	diag := v_error_to_lsp_diagnostic(v_err)
 
@@ -3118,11 +3266,11 @@ fn test_v_error_to_lsp_diagnostic_first_line() {
 
 fn test_v_error_to_lsp_diagnostic_long_error() {
 	v_err := JsonError{
-		path:    '/test/file.v'
+		path: '/test/file.v'
 		message: 'unexpected token'
 		line_nr: 100
-		col:     50
-		len:     20
+		col: 50
+		len: 20
 	}
 	diag := v_error_to_lsp_diagnostic(v_err)
 
@@ -3133,11 +3281,11 @@ fn test_v_error_to_lsp_diagnostic_long_error() {
 
 fn test_v_error_to_lsp_diagnostic_zero_length() {
 	v_err := JsonError{
-		path:    '/test/file.v'
+		path: '/test/file.v'
 		message: 'error at position'
 		line_nr: 5
-		col:     10
-		len:     0
+		col: 10
+		len: 0
 	}
 	diag := v_error_to_lsp_diagnostic(v_err)
 
@@ -3158,8 +3306,8 @@ fn test_v_error_to_lsp_diagnostic_preserves_message() {
 		v_err := JsonError{
 			message: msg
 			line_nr: 1
-			col:     1
-			len:     1
+			col: 1
+			len: 1
 		}
 		diag := v_error_to_lsp_diagnostic(v_err)
 		assert diag.message == msg
@@ -3168,11 +3316,11 @@ fn test_v_error_to_lsp_diagnostic_preserves_message() {
 
 fn test_v_error_to_lsp_diagnostic_always_error_severity() {
 	v_err := JsonError{
-		path:    '/test.v'
+		path: '/test.v'
 		message: 'any error'
 		line_nr: 1
-		col:     1
-		len:     1
+		col: 1
+		len: 1
 	}
 	diag := v_error_to_lsp_diagnostic(v_err)
 	assert diag.severity == 1 // Always Error severity
@@ -3249,7 +3397,7 @@ fn test_multifile_change_single_file() {
 	new_content := 'module main\n\nfn main() { changed }'
 	app.on_did_change(Request{
 		params: json2.encode(Params{
-			text_document:   TextDocumentIdentifier{
+			text_document: TextDocumentIdentifier{
 				uri: main_uri
 			}
 			content_changes: [ContentChange{
@@ -3283,10 +3431,10 @@ fn test_handle_formatting_formats_code() {
 	app.open_files[uri] = unformatted
 
 	request := Request{
-		id:      1
-		method:  'textDocument/formatting'
+		id: 1
+		method: 'textDocument/formatting'
 		jsonrpc: '2.0'
-		params:  json2.encode(Params{
+		params: json2.encode(Params{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
@@ -3330,10 +3478,10 @@ fn test_handle_formatting_already_formatted() {
 	app.open_files[uri] = formatted
 
 	request := Request{
-		id:      2
-		method:  'textDocument/formatting'
+		id: 2
+		method: 'textDocument/formatting'
 		jsonrpc: '2.0'
-		params:  json2.encode(Params{
+		params: json2.encode(Params{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
@@ -3363,10 +3511,10 @@ fn test_handle_formatting_nonexistent_file() {
 	uri := path_to_uri(nonexistent)
 
 	request := Request{
-		id:      3
-		method:  'textDocument/formatting'
+		id: 3
+		method: 'textDocument/formatting'
 		jsonrpc: '2.0'
-		params:  json2.encode(Params{
+		params: json2.encode(Params{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
@@ -3403,10 +3551,10 @@ fn test_handle_formatting_uses_open_file_content() {
 	app.open_files[uri] = 'module main\n\nfn   new(   )   {}'
 
 	request := Request{
-		id:      4
-		method:  'textDocument/formatting'
+		id: 4
+		method: 'textDocument/formatting'
 		jsonrpc: '2.0'
-		params:  json2.encode(Params{
+		params: json2.encode(Params{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
@@ -3444,17 +3592,17 @@ fn test_find_references_returns_null_when_no_symbol_at_position() {
 	app.open_files[uri] = content
 
 	resp := app.find_references(Request{
-		id:     901
+		id: 901
 		method: 'textDocument/references'
 		params: json2.encode(ReferenceParams{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-			position:      Position{
+			position: Position{
 				line: 1
 				char: 0
 			}
-			context:       ReferenceContext{
+			context: ReferenceContext{
 				include_declaration: true
 			}
 		},
@@ -3483,17 +3631,17 @@ fn test_handle_rename_returns_null_when_no_symbol_at_position() {
 	app.open_files[uri] = content
 
 	resp := app.handle_rename(Request{
-		id:     902
+		id: 902
 		method: 'textDocument/rename'
 		params: json2.encode(RenameParams{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-			position:      Position{
+			position: Position{
 				line: 1
 				char: 0
 			}
-			new_name:      'renamed'
+			new_name: 'renamed'
 		},
 			escape_unicode: true
 		)
@@ -3551,7 +3699,7 @@ fn test_did_close_reindexes_noncanonical_uri_under_disk_uri() {
 	app.on_did_change_watched_files(Request{
 		params: json2.encode(DidChangeWatchedFilesParams{
 			changes: [FileEvent{
-				uri:        disk_uri
+				uri: disk_uri
 				event_type: 2
 			}]
 		})
@@ -3581,17 +3729,17 @@ fn test_handle_rename_refuses_incomplete_oversized_sibling_index() {
 	app.open_files[uri] = content
 
 	resp := app.handle_rename(Request{
-		id:     903
+		id: 903
 		method: 'textDocument/rename'
 		params: json2.encode(RenameParams{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-			position:      Position{
+			position: Position{
 				line: 2
 				char: 4
 			}
-			new_name:      'renamed'
+			new_name: 'renamed'
 		},
 			escape_unicode: true
 		)
@@ -3854,7 +4002,7 @@ fn test_handle_document_symbols_empty_file() {
 	app.open_files[uri] = ''
 
 	request := Request{
-		id:     10
+		id: 10
 		method: 'textDocument/documentSymbol'
 		params: json2.encode(Params{
 			text_document: TextDocumentIdentifier{
@@ -3882,7 +4030,7 @@ fn test_handle_document_symbols_no_tracked_file() {
 
 	// URI not in open_files — should still return an empty symbol list, not crash
 	request := Request{
-		id:     11
+		id: 11
 		method: 'textDocument/documentSymbol'
 		params: json2.encode(Params{
 			text_document: TextDocumentIdentifier{
@@ -3912,7 +4060,7 @@ fn test_handle_document_symbols_returns_correct_symbols() {
 	app.open_files[uri] = 'module main\n\nfn hello() {}\n\nstruct Config {}\n\nenum Mode { on off }\n\nconst version = 1\n'
 
 	request := Request{
-		id:     12
+		id: 12
 		method: 'textDocument/documentSymbol'
 		params: json2.encode(Params{
 			text_document: TextDocumentIdentifier{
@@ -3949,7 +4097,7 @@ fn test_handle_document_symbols_preserves_request_id() {
 
 	for id in [1, 99, 1000, 0] {
 		request := Request{
-			id:     id
+			id: id
 			method: 'textDocument/documentSymbol'
 			params: json2.encode(Params{
 				text_document: TextDocumentIdentifier{
@@ -3987,7 +4135,7 @@ const my_const = 42
 '
 
 	request := Request{
-		id:     20
+		id: 20
 		method: 'textDocument/documentSymbol'
 		params: json2.encode(Params{
 			text_document: TextDocumentIdentifier{
@@ -4433,18 +4581,18 @@ obj := MyStruct{}
 	app.open_files[uri] = content
 
 	request := Request{
-		id:     30
+		id: 30
 		method: 'textDocument/inlayHint'
 		params: json2.encode(Params{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-			range:         LSPRange{
+			range: LSPRange{
 				start: Position{
 					line: 0
 					char: 0
 				}
-				end:   Position{
+				end: Position{
 					line: 9
 					char: 0
 				}
@@ -4484,18 +4632,18 @@ x := 99
 	app.open_files[uri] = content
 
 	request := Request{
-		id:     31
+		id: 31
 		method: 'textDocument/inlayHint'
 		params: json2.encode(Params{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-			range:         LSPRange{
+			range: LSPRange{
 				start: Position{
 					line: 0
 					char: 0
 				}
-				end:   Position{
+				end: Position{
 					line: 4
 					char: 0
 				}
@@ -4531,18 +4679,18 @@ fn test_handle_inlay_hints_empty_file() {
 	app.open_files[uri] = ''
 
 	request := Request{
-		id:     32
+		id: 32
 		method: 'textDocument/inlayHint'
 		params: json2.encode(Params{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-			range:         LSPRange{
+			range: LSPRange{
 				start: Position{
 					line: 0
 					char: 0
 				}
-				end:   Position{
+				end: Position{
 					line: 0
 					char: 0
 				}
@@ -4574,18 +4722,18 @@ mut count := 0
 	app.open_files[uri] = content
 
 	request := Request{
-		id:     33
+		id: 33
 		method: 'textDocument/inlayHint'
 		params: json2.encode(Params{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-			range:         LSPRange{
+			range: LSPRange{
 				start: Position{
 					line: 0
 					char: 0
 				}
-				end:   Position{
+				end: Position{
 					line: 2
 					char: 0
 				}
@@ -4623,18 +4771,18 @@ const is_debug = false
 	app.open_files[uri] = content
 
 	request := Request{
-		id:     34
+		id: 34
 		method: 'textDocument/inlayHint'
 		params: json2.encode(Params{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-			range:         LSPRange{
+			range: LSPRange{
 				start: Position{
 					line: 0
 					char: 0
 				}
-				end:   Position{
+				end: Position{
 					line: 7
 					char: 0
 				}
@@ -4678,18 +4826,18 @@ enabled   = true
 	app.open_files[uri] = content
 
 	request := Request{
-		id:     35
+		id: 35
 		method: 'textDocument/inlayHint'
 		params: json2.encode(Params{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-			range:         LSPRange{
+			range: LSPRange{
 				start: Position{
 					line: 0
 					char: 0
 				}
-				end:   Position{
+				end: Position{
 					line: 9
 					char: 0
 				}
@@ -4729,18 +4877,18 @@ fn test_handle_inlay_hints_local_fn_call() {
 	app.open_files[uri] = 'module main\n\nfn main() {\n\tmsg := get_greeting()\n}\n'
 
 	request := Request{
-		id:     40
+		id: 40
 		method: 'textDocument/inlayHint'
 		params: json2.encode(Params{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-			range:         LSPRange{
+			range: LSPRange{
 				start: Position{
 					line: 0
 					char: 0
 				}
-				end:   Position{
+				end: Position{
 					line: 5
 					char: 0
 				}
@@ -4774,18 +4922,18 @@ fn test_handle_inlay_hints_error_result_fn() {
 	app.open_files[uri] = 'module main\n\nfn main() {\n\tdata := read_data() or { return }\n}\n'
 
 	request := Request{
-		id:     41
+		id: 41
 		method: 'textDocument/inlayHint'
 		params: json2.encode(Params{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-			range:         LSPRange{
+			range: LSPRange{
 				start: Position{
 					line: 0
 					char: 0
 				}
-				end:   Position{
+				end: Position{
 					line: 5
 					char: 0
 				}
@@ -4824,18 +4972,18 @@ greeting := get_greeting()
 	app.open_files[uri] = content
 
 	request := Request{
-		id:     50
+		id: 50
 		method: 'textDocument/inlayHint'
 		params: json2.encode(Params{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-			range:         LSPRange{
+			range: LSPRange{
 				start: Position{
 					line: 0
 					char: 0
 				}
-				end:   Position{
+				end: Position{
 					line: 9
 					char: 0
 				}
@@ -5296,13 +5444,13 @@ fn test_operation_at_pos_completion_includes_current_file_fns() {
 	app.text = content
 
 	request := Request{
-		id:     1
+		id: 1
 		method: 'textDocument/completion'
 		params: json2.encode(Params{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-			position:      Position{
+			position: Position{
 				line: 3
 				char: 4
 			}
@@ -5331,8 +5479,7 @@ fn test_operation_at_pos_dot_completion_includes_imported_module_members() {
 	mod_dir := os.join_path(test_dir, 'my_mod')
 	must_mkdir_all(mod_dir)
 
-	must_write_file(os.join_path(mod_dir, 'my_mod.v'),
-		'module my_mod\n\npub fn greet(name string) string {\n\treturn name\n}\n\nfn hidden() {}\n')
+	must_write_file(os.join_path(mod_dir, 'my_mod.v'), 'module my_mod\n\npub fn greet(name string) string {\n\treturn name\n}\n\nfn hidden() {}\n')
 
 	main_file := os.join_path(test_dir, 'main.v')
 	content := 'module main\n\nimport my_mod\n\nfn main() {\n\tmy_mod.\n}\n'
@@ -5343,13 +5490,13 @@ fn test_operation_at_pos_dot_completion_includes_imported_module_members() {
 	app.text = content
 
 	response := app.operation_at_pos(.completion, Request{
-		id:     9001
+		id: 9001
 		method: 'textDocument/completion'
 		params: json2.encode(Params{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-			position:      Position{
+			position: Position{
 				line: 5
 				char: 8
 			}
@@ -5386,13 +5533,13 @@ fn test_operation_at_pos_dot_completion_includes_aliased_import_module_members()
 	app.text = content
 
 	response := app.operation_at_pos(.completion, Request{
-		id:     9002
+		id: 9002
 		method: 'textDocument/completion'
 		params: json2.encode(Params{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-			position:      Position{
+			position: Position{
 				line: 5
 				char: 4
 			}
@@ -5417,7 +5564,7 @@ fn test_semantic_tokens_returns_data_for_known_content() {
 	app.open_files[uri] = content
 
 	resp := app.handle_semantic_tokens(Request{
-		id:     800
+		id: 800
 		method: 'textDocument/semanticTokens/full'
 		params: json2.encode(SemanticTokensParams{
 			text_document: TextDocumentIdentifier{
@@ -5444,7 +5591,7 @@ fn test_semantic_tokens_returns_empty_object_for_empty_file() {
 	app.open_files[uri] = ''
 
 	resp := app.handle_semantic_tokens(Request{
-		id:     801
+		id: 801
 		method: 'textDocument/semanticTokens/full'
 		params: json2.encode(SemanticTokensParams{
 			text_document: TextDocumentIdentifier{
@@ -5469,7 +5616,7 @@ fn test_semantic_tokens_range_returns_empty_for_missing_document() {
 	}
 
 	resp := app.handle_semantic_tokens_range(Request{
-		id:     802
+		id: 802
 		method: 'textDocument/semanticTokens/range'
 		params: '{}'
 	})
@@ -5495,12 +5642,12 @@ fn test_semantic_tokens_range_filters_by_character() {
 		text_document: TextDocumentIdentifier{
 			uri: uri
 		}
-		range:         LSPRange{
+		range: LSPRange{
 			start: Position{
 				line: 0
 				char: 0
 			}
-			end:   Position{
+			end: Position{
 				line: 0
 				char: 50
 			}
@@ -5509,7 +5656,7 @@ fn test_semantic_tokens_range_filters_by_character() {
 		escape_unicode: true
 	)
 	full := app.handle_semantic_tokens_range(Request{
-		id:     1
+		id: 1
 		params: full_params
 	})
 	ftok := full.result as SemanticTokens
@@ -5525,12 +5672,12 @@ fn test_semantic_tokens_range_filters_by_character() {
 		text_document: TextDocumentIdentifier{
 			uri: uri
 		}
-		range:         LSPRange{
+		range: LSPRange{
 			start: Position{
 				line: 0
 				char: 8
 			}
-			end:   Position{
+			end: Position{
 				line: 0
 				char: 50
 			}
@@ -5539,7 +5686,7 @@ fn test_semantic_tokens_range_filters_by_character() {
 		escape_unicode: true
 	)
 	narrow := app.handle_semantic_tokens_range(Request{
-		id:     2
+		id: 2
 		params: narrow_params
 	})
 	ntok := narrow.result as SemanticTokens
@@ -5561,7 +5708,7 @@ fn test_code_lens_returns_run_lens_for_main() {
 	app.open_files[uri] = content
 
 	resp := app.handle_code_lens(Request{
-		id:     810
+		id: 810
 		method: 'textDocument/codeLens'
 		params: json2.encode(CodeLensParams{
 			text_document: TextDocumentIdentifier{
@@ -5594,7 +5741,7 @@ fn test_code_lens_range_uses_negotiated_position_encoding() {
 	uri := 'file:///tmp/codelens_unicode.v'
 	app.open_files[uri] = 'module main\n\nfn main() {} // 🚀\n'
 	request := Request{
-		id:     814
+		id: 814
 		method: 'textDocument/codeLens'
 		params: json2.encode(CodeLensParams{
 			text_document: TextDocumentIdentifier{
@@ -5637,7 +5784,7 @@ fn test_code_lens_returns_test_lens_for_test_fn() {
 	app.open_files[uri] = content
 
 	resp := app.handle_code_lens(Request{
-		id:     811
+		id: 811
 		method: 'textDocument/codeLens'
 		params: json2.encode(CodeLensParams{
 			text_document: TextDocumentIdentifier{
@@ -5679,7 +5826,7 @@ fn test_code_lens_ignores_declarations_in_comments_and_non_test_files() {
 	app.open_files[uri] = 'module main\n\n/*\nfn main() {}\nfn test_hidden() {}\n*/\nfn helper() {}\n'
 
 	resp := app.handle_code_lens(Request{
-		id:     813
+		id: 813
 		method: 'textDocument/codeLens'
 		params: json2.encode(CodeLensParams{
 			text_document: TextDocumentIdentifier{
@@ -5700,25 +5847,25 @@ fn test_code_lens_resolve_returns_same_lens() {
 		cleanup_test_app(app)
 	}
 	lens := CodeLens{
-		range:   LSPRange{
+		range: LSPRange{
 			start: Position{
 				line: 2
 				char: 0
 			}
-			end:   Position{
+			end: Position{
 				line: 2
 				char: 10
 			}
 		}
 		command: Command{
-			title:     '▶ Run'
-			command:   'vls.runFile'
+			title: '▶ Run'
+			command: 'vls.runFile'
 			arguments: ['file:///tmp/a.v']
 		}
 	}
 
 	resp := app.handle_code_lens_resolve(Request{
-		id:     812
+		id: 812
 		method: 'codeLens/resolve'
 		params: json2.encode(lens, escape_unicode: true)
 	})
@@ -5739,7 +5886,7 @@ fn test_execute_command_returns_null_result() {
 
 	app.capture_output = true
 	resp := app.handle_execute_command(Request{
-		id:     820
+		id: 820
 		method: 'workspace/executeCommand'
 		params: json2.encode(ExecuteCommandParams{
 			command: 'vls.runFile'
@@ -5779,10 +5926,10 @@ fn test_execute_run_file_invokes_compiler() {
 	app.execute_commands_synchronously = true
 
 	resp := app.handle_execute_command(Request{
-		id:     822
+		id: 822
 		method: 'workspace/executeCommand'
 		params: json2.encode(ExecuteCommandParams{
-			command:   'vls.runFile'
+			command: 'vls.runFile'
 			arguments: [uri]
 		},
 			escape_unicode: true
@@ -5820,10 +5967,10 @@ fn test_execute_run_file_materializes_new_unsaved_buffer() {
 	app.execute_commands_synchronously = true
 
 	resp := app.handle_execute_command(Request{
-		id:     824
+		id: 824
 		method: 'workspace/executeCommand'
 		params: json2.encode(ExecuteCommandParams{
-			command:   'vls.runFile'
+			command: 'vls.runFile'
 			arguments: [uri]
 		},
 			escape_unicode: true
@@ -5844,15 +5991,16 @@ fn test_execute_run_file_returns_before_long_running_program_finishes() {
 	}
 	path := os.join_path(app.temp_dir, 'code_lens_long_running.v')
 	marker_path := os.join_path(app.temp_dir, 'code_lens_long_running.started')
-	must_write_file(path, 'module main\n\nimport os\nimport time\n\nfn main() {\n\t_ := os.input("")\n\tos.write_file("${marker_path}", "started") or {}\n\ttime.sleep(5 * time.second)\n}\n')
+	marker_literal := code_lens_v_string_literal(marker_path)
+	must_write_file(path, 'module main\n\nimport os\nimport time\n\nfn main() {\n\tos.write_file(${marker_literal}, "started") or {}\n\t_ := os.input("")\n\ttime.sleep(5 * time.second)\n}\n')
 	app.capture_output = true
 
 	started_at := time.now().unix_milli()
 	resp := app.handle_execute_command(Request{
-		id:     825
+		id: 825
 		method: 'workspace/executeCommand'
 		params: json2.encode(ExecuteCommandParams{
-			command:   'vls.runFile'
+			command: 'vls.runFile'
 			arguments: [path_to_uri(path)]
 		},
 			escape_unicode: true
@@ -5863,7 +6011,9 @@ fn test_execute_run_file_returns_before_long_running_program_finishes() {
 	assert resp.result is string
 	assert (resp.result as string) == 'null'
 	assert elapsed_ms < 1000
-	deadline := time.now().unix_milli() + 10_000
+	// V3 compilation can take more than 10 seconds on loaded CI runners.
+	startup_timeout_ms := 30_000
+	deadline := time.now().unix_milli() + startup_timeout_ms
 	for !os.exists(marker_path) && time.now().unix_milli() < deadline {
 		time.sleep(10 * time.millisecond)
 	}
@@ -5889,10 +6039,10 @@ fn test_execute_run_file_replaces_active_target() {
 	app.capture_output = true
 
 	first_resp := app.handle_execute_command(Request{
-		id:     826
+		id: 826
 		method: 'workspace/executeCommand'
 		params: json2.encode(ExecuteCommandParams{
-			command:   'vls.runFile'
+			command: 'vls.runFile'
 			arguments: [uri]
 		},
 			escape_unicode: true
@@ -5911,10 +6061,10 @@ fn test_execute_run_file_replaces_active_target() {
 
 	app.open_files[uri] = 'module main\n\nimport os\nimport time\n\nfn main() {\n\tos.write_file(${marker_literal}, "second") or { return }\n\ttime.sleep(5 * time.second)\n}\n'
 	second_resp := app.handle_execute_command(Request{
-		id:     827
+		id: 827
 		method: 'workspace/executeCommand'
 		params: json2.encode(ExecuteCommandParams{
-			command:   'vls.runFile'
+			command: 'vls.runFile'
 			arguments: [uri]
 		},
 			escape_unicode: true
@@ -5975,14 +6125,16 @@ fn test_code_lens_source_paths_are_rewritten_only_in_code() {
 	source_path := os.join_path(project_dir, 'main.v')
 	temp_source_path := os.join_path(app.temp_dir, 'overlay', 'main.v')
 	source := 'const source_file = @FILE\nconst source_dir = @DIR\nconst project = @VMODROOT\nconst manifest = @VMOD_FILE\nconst file_line = @FILE_LINE\nconst location = @LOCATION\nconst column = @FILE + @COLUMN\nconst literal = "@FILE @DIR @VMODROOT @VMOD_FILE @FILE_LINE @LOCATION @COLUMN"\n// @FILE @DIR @VMODROOT @VMOD_FILE @FILE_LINE @LOCATION @COLUMN\n#flag -I @VMODROOT/thirdparty\n'
-	rewritten := code_lens_source_with_original_pseudos(source, source_path, temp_source_path)
+	rewritten := code_lens_source_with_original_pseudos(source, source_path, temp_source_path, os.dir(temp_source_path))
 
 	assert rewritten.contains('const source_file = ${code_lens_v_string_literal(os.real_path(source_path))}')
 	assert rewritten.contains('const source_dir = ${code_lens_v_string_literal(os.real_path(project_dir))}')
 	assert rewritten.contains('const project = ${code_lens_v_string_literal(os.real_path(project_dir))}')
 	assert rewritten.contains('const manifest = ${code_lens_v_string_literal(vmod_source)}')
 	assert rewritten.contains("const file_line = 'main.v:5'")
-	assert rewritten.contains('const location = (@LOCATION.replace(${code_lens_v_string_literal(temp_source_path)}, ${code_lens_v_string_literal(os.real_path(source_path))}))')
+	assert rewritten.contains('const location = (@LOCATION.replace(')
+	assert rewritten.contains(code_lens_v_string_literal('.\\main.v'))
+	assert rewritten.contains(code_lens_v_string_literal('./main.v'))
 	assert rewritten.contains("const column = ${code_lens_v_string_literal(os.real_path(source_path))} + '24'")
 	assert rewritten.contains('const literal = "@FILE @DIR @VMODROOT @VMOD_FILE @FILE_LINE @LOCATION @COLUMN"')
 	assert rewritten.contains('// @FILE @DIR @VMODROOT @VMOD_FILE @FILE_LINE @LOCATION @COLUMN')
@@ -6003,10 +6155,10 @@ fn test_execute_run_test_selects_one_function() {
 	app.execute_commands_synchronously = true
 
 	resp := app.handle_execute_command(Request{
-		id:     823
+		id: 823
 		method: 'workspace/executeCommand'
 		params: json2.encode(ExecuteCommandParams{
-			command:   'vls.runTests'
+			command: 'vls.runTests'
 			arguments: [uri, 'test_selected']
 		},
 			escape_unicode: true
@@ -6026,7 +6178,7 @@ fn test_execute_command_unknown_still_returns_null() {
 	}
 
 	resp := app.handle_execute_command(Request{
-		id:     821
+		id: 821
 		method: 'workspace/executeCommand'
 		params: json2.encode(ExecuteCommandParams{
 			command: 'unknownCommand'
@@ -6052,18 +6204,18 @@ fn test_inline_value_returns_values_for_simple_assignment() {
 	app.open_files[uri] = content
 
 	resp := app.handle_inline_value(Request{
-		id:     830
+		id: 830
 		method: 'textDocument/inlineValue'
 		params: json2.encode(InlineValueParams{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-			range:         LSPRange{
+			range: LSPRange{
 				start: Position{
 					line: 0
 					char: 0
 				}
-				end:   Position{
+				end: Position{
 					line: 5
 					char: 0
 				}
@@ -6089,18 +6241,18 @@ fn test_inline_value_returns_empty_for_no_assignments() {
 	app.open_files[uri] = 'module main\n\nfn main() {}\n'
 
 	resp := app.handle_inline_value(Request{
-		id:     831
+		id: 831
 		method: 'textDocument/inlineValue'
 		params: json2.encode(InlineValueParams{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-			range:         LSPRange{
+			range: LSPRange{
 				start: Position{
 					line: 0
 					char: 0
 				}
-				end:   Position{
+				end: Position{
 					line: 2
 					char: 0
 				}
@@ -6129,13 +6281,13 @@ fn test_linked_editing_range_returns_ranges_for_identifier() {
 	app.open_files[uri] = content
 
 	resp := app.handle_linked_editing_range(Request{
-		id:     840
+		id: 840
 		method: 'textDocument/linkedEditingRange'
 		params: json2.encode(TextDocumentPositionParams{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-			position:      Position{
+			position: Position{
 				line: 3
 				char: 2
 			}
@@ -6161,13 +6313,13 @@ fn test_linked_editing_range_returns_null_when_not_on_identifier() {
 
 	// Position on an empty line
 	resp := app.handle_linked_editing_range(Request{
-		id:     841
+		id: 841
 		method: 'textDocument/linkedEditingRange'
 		params: json2.encode(TextDocumentPositionParams{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-			position:      Position{
+			position: Position{
 				line: 1
 				char: 0
 			}
@@ -6193,13 +6345,13 @@ fn test_selection_range_returns_one_entry_per_position() {
 	app.open_files[uri] = content
 
 	resp := app.handle_selection_range(Request{
-		id:     850
+		id: 850
 		method: 'textDocument/selectionRange'
 		params: json2.encode(SelectionRangeParams{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-			positions:     [Position{
+			positions: [Position{
 				line: 3
 				char: 2
 			}, Position{
@@ -6227,13 +6379,13 @@ fn test_selection_range_word_range_has_parent_line_range() {
 	app.open_files[uri] = content
 
 	resp := app.handle_selection_range(Request{
-		id:     851
+		id: 851
 		method: 'textDocument/selectionRange'
 		params: json2.encode(SelectionRangeParams{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-			positions:     [Position{
+			positions: [Position{
 				line: 3
 				char: 2
 			}]
@@ -6261,17 +6413,17 @@ fn test_on_type_formatting_returns_empty_edits() {
 	}
 
 	resp := app.handle_on_type_formatting(Request{
-		id:     860
+		id: 860
 		method: 'textDocument/onTypeFormatting'
 		params: json2.encode(OnTypeFormattingParams{
 			text_document: TextDocumentIdentifier{
 				uri: 'file:///tmp/fmt.v'
 			}
-			position:      Position{
+			position: Position{
 				line: 3
 				char: 0
 			}
-			ch:            '}'
+			ch: '}'
 		},
 			escape_unicode: true
 		)
@@ -6301,19 +6453,19 @@ fn test_call_hierarchy_outgoing_returns_callees() {
 	app.workspace_roots = [root]
 
 	resp := app.handle_call_hierarchy_outgoing(Request{
-		id:     870
+		id: 870
 		method: 'callHierarchy/outgoingCalls'
 		params: json2.encode(CallHierarchyOutgoingCallsParams{
 			item: CallHierarchyItem{
-				name:            'main'
-				kind:            sym_kind_function
-				uri:             uri
-				range:           LSPRange{
+				name: 'main'
+				kind: sym_kind_function
+				uri: uri
+				range: LSPRange{
 					start: Position{
 						line: 4
 						char: 0
 					}
-					end:   Position{
+					end: Position{
 						line: 6
 						char: 1
 					}
@@ -6323,7 +6475,7 @@ fn test_call_hierarchy_outgoing_returns_callees() {
 						line: 4
 						char: 3
 					}
-					end:   Position{
+					end: Position{
 						line: 4
 						char: 7
 					}
@@ -6356,19 +6508,19 @@ fn test_call_hierarchy_incoming_returns_callers() {
 	app.workspace_roots = [root]
 
 	resp := app.handle_call_hierarchy_incoming(Request{
-		id:     871
+		id: 871
 		method: 'callHierarchy/incomingCalls'
 		params: json2.encode(CallHierarchyIncomingCallsParams{
 			item: CallHierarchyItem{
-				name:            'helper'
-				kind:            sym_kind_function
-				uri:             uri
-				range:           LSPRange{
+				name: 'helper'
+				kind: sym_kind_function
+				uri: uri
+				range: LSPRange{
 					start: Position{
 						line: 2
 						char: 0
 					}
-					end:   Position{
+					end: Position{
 						line: 2
 						char: 15
 					}
@@ -6378,7 +6530,7 @@ fn test_call_hierarchy_incoming_returns_callers() {
 						line: 2
 						char: 3
 					}
-					end:   Position{
+					end: Position{
 						line: 2
 						char: 9
 					}
@@ -6409,11 +6561,11 @@ fn test_organize_imports_refuses_non_contiguous_block() {
 		text_document: TextDocumentIdentifier{
 			uri: uri
 		}
-		range:         LSPRange{}
-		context:       CodeActionContext{}
+		range: LSPRange{}
+		context: CodeActionContext{}
 	}
 	resp := app.handle_code_action(Request{
-		id:     1
+		id: 1
 		params: json2.encode(params, escape_unicode: true)
 	})
 	assert resp.result is []CodeAction
@@ -6434,11 +6586,11 @@ fn test_organize_imports_sorts_contiguous_block() {
 		text_document: TextDocumentIdentifier{
 			uri: uri
 		}
-		range:         LSPRange{}
-		context:       CodeActionContext{}
+		range: LSPRange{}
+		context: CodeActionContext{}
 	}
 	resp := app.handle_code_action(Request{
-		id:     2
+		id: 2
 		params: json2.encode(params, escape_unicode: true)
 	})
 	assert resp.result is []CodeAction
@@ -6465,13 +6617,13 @@ fn test_organize_imports_preserves_crlf_line_endings() {
 	uri := 'file:///tmp/oi_crlf.v'
 	app.open_files[uri] = 'module main\r\n\r\nimport time\r\nimport os\r\n\r\nfn main() {}\r\n'
 	resp := app.handle_code_action(Request{
-		id:     3
+		id: 3
 		params: json2.encode(CodeActionParams{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-			range:         LSPRange{}
-			context:       CodeActionContext{}
+			range: LSPRange{}
+			context: CodeActionContext{}
 		},
 			escape_unicode: true
 		)
@@ -6507,12 +6659,12 @@ fn test_remove_unknown_import_range_at_eof_without_newline() {
 	app.open_files[uri] = 'module main\nimport foo'
 	diag := LSPDiagnostic{
 		message: 'cannot import module "foo" (not found)'
-		range:   LSPRange{
+		range: LSPRange{
 			start: Position{
 				line: 1
 				char: 0
 			}
-			end:   Position{
+			end: Position{
 				line: 1
 				char: 10
 			}
@@ -6522,13 +6674,13 @@ fn test_remove_unknown_import_range_at_eof_without_newline() {
 		text_document: TextDocumentIdentifier{
 			uri: uri
 		}
-		range:         LSPRange{}
-		context:       CodeActionContext{
+		range: LSPRange{}
+		context: CodeActionContext{
 			diagnostics: [diag]
 		}
 	}
 	resp := app.handle_code_action(Request{
-		id:     1
+		id: 1
 		params: json2.encode(params, escape_unicode: true)
 	})
 	actions := resp.result as []CodeAction
@@ -6559,12 +6711,12 @@ fn test_remove_unknown_import_range_with_trailing_newline() {
 	app.open_files[uri] = 'import foo\nmodule main\n'
 	diag := LSPDiagnostic{
 		message: 'unknown module `foo`'
-		range:   LSPRange{
+		range: LSPRange{
 			start: Position{
 				line: 0
 				char: 0
 			}
-			end:   Position{
+			end: Position{
 				line: 0
 				char: 10
 			}
@@ -6574,13 +6726,13 @@ fn test_remove_unknown_import_range_with_trailing_newline() {
 		text_document: TextDocumentIdentifier{
 			uri: uri
 		}
-		range:         LSPRange{}
-		context:       CodeActionContext{
+		range: LSPRange{}
+		context: CodeActionContext{
 			diagnostics: [diag]
 		}
 	}
 	resp := app.handle_code_action(Request{
-		id:     1
+		id: 1
 		params: json2.encode(params, escape_unicode: true)
 	})
 	actions := resp.result as []CodeAction
@@ -6688,7 +6840,7 @@ fn test_apply_incremental_change_non_bmp_utf16() {
 			line: 0
 			char: 3 // after 🚀 in UTF-16 units (a=1, 🚀=2)
 		}
-		end:   Position{
+		end: Position{
 			line: 0
 			char: 4
 		}
@@ -6784,13 +6936,13 @@ fn test_document_highlight_returns_empty_over_semantic_cap() {
 	app.open_files[uri] = content
 
 	response := app.handle_document_highlight(Request{
-		id:     900
+		id: 900
 		method: 'textDocument/documentHighlight'
 		params: json2.encode(DocumentHighlightParams{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-			position:      Position{
+			position: Position{
 				line: 3
 				char: 5
 			}
@@ -6816,19 +6968,19 @@ fn test_on_did_change_invalid_range_does_not_advance_version() {
 	// must NOT advance (P0-07).
 	app.on_did_change(Request{
 		params: json2.encode(DidChangeTextDocumentParams{
-			text_document:   VersionedTextDocumentIdentifier{
-				uri:     uri
+			text_document: VersionedTextDocumentIdentifier{
+				uri: uri
 				version: 2
 			}
 			content_changes: [
 				ContentChange{
-					text:  'X'
+					text: 'X'
 					range: LSPRange{
 						start: Position{
 							line: 0
 							char: 5
 						}
-						end:   Position{
+						end: Position{
 							line: 0
 							char: 2
 						}
@@ -6876,13 +7028,13 @@ fn test_operation_at_pos_hover_returns_symbol_information() {
 	app.text = content
 
 	response := app.operation_at_pos(.hover, Request{
-		id:     901
+		id: 901
 		method: 'textDocument/hover'
 		params: json2.encode(TextDocumentPositionParams{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-			position:      Position{
+			position: Position{
 				line: 8
 				char: 13
 			}
@@ -6914,17 +7066,17 @@ fn test_find_references_returns_declaration_and_calls() {
 	app.workspace_roots = [test_dir]
 
 	response := app.find_references(Request{
-		id:     902
+		id: 902
 		method: 'textDocument/references'
 		params: json2.encode(ReferenceParams{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-			position:      Position{
+			position: Position{
 				line: 7
 				char: 10
 			}
-			context:       ReferenceContext{
+			context: ReferenceContext{
 				include_declaration: true
 			}
 		},
@@ -6958,17 +7110,17 @@ fn test_handle_rename_returns_complete_workspace_edit() {
 	app.workspace_roots = [test_dir]
 
 	response := app.handle_rename(Request{
-		id:     903
+		id: 903
 		method: 'textDocument/rename'
 		params: json2.encode(RenameParams{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-			position:      Position{
+			position: Position{
 				line: 7
 				char: 11
 			}
-			new_name:      'renamed_value'
+			new_name: 'renamed_value'
 		},
 			escape_unicode: true
 		)
@@ -6998,7 +7150,7 @@ fn test_folding_range_covers_imports_comments_and_code_blocks() {
 	app.open_files[uri] = 'module main\n\nimport os\nimport time\n\n// first line\n// second line\n\nfn main() {\n\tprintln(os.args)\n}\n'
 
 	response := app.handle_folding_range(Request{
-		id:     904
+		id: 904
 		method: 'textDocument/foldingRange'
 		params: json2.encode(FoldingRangeParams{
 			text_document: TextDocumentIdentifier{
@@ -7031,13 +7183,13 @@ fn test_document_highlight_returns_reads_and_writes() {
 	app.open_files[uri] = content
 
 	response := app.handle_document_highlight(Request{
-		id:     905
+		id: 905
 		method: 'textDocument/documentHighlight'
 		params: json2.encode(DocumentHighlightParams{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-			position:      Position{
+			position: Position{
 				line: 3
 				char: 2
 			}
@@ -7071,15 +7223,15 @@ fn test_workspace_configuration_toggles_feature_behavior() {
 	assert !app.diagnostics_enabled
 
 	hint_response := app.handle_inlay_hints(Request{
-		id:     906
+		id: 906
 		method: 'textDocument/inlayHint'
 		params: json2.encode(InlayHintParams{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-			range:         LSPRange{
+			range: LSPRange{
 				start: Position{}
-				end:   Position{
+				end: Position{
 					line: 5
 				}
 			}
@@ -7162,13 +7314,13 @@ fn test_will_save_wait_until_formats_without_mutating_open_document() {
 	app.open_files[uri] = content
 
 	response := app.on_will_save_wait_until(Request{
-		id:     907
+		id: 907
 		method: 'textDocument/willSaveWaitUntil'
 		params: json2.encode(WillSaveTextDocumentParams{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-			reason:        1
+			reason: 1
 		},
 			escape_unicode: true
 		)
@@ -7196,22 +7348,22 @@ fn test_range_formatting_returns_only_contained_changed_hunk() {
 	app.open_files[uri] = content
 
 	response := app.handle_range_formatting(Request{
-		id:     908
+		id: 908
 		method: 'textDocument/rangeFormatting'
 		params: json2.encode(DocumentRangeFormattingParams{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-			range:         LSPRange{
+			range: LSPRange{
 				start: Position{
 					line: 3
 				}
-				end:   Position{
+				end: Position{
 					line: 3
 					char: 4
 				}
 			}
-			options:       FormattingOptions{
+			options: FormattingOptions{
 				tab_size: 4
 			}
 		},
@@ -7237,13 +7389,13 @@ fn test_prepare_call_hierarchy_returns_function_item() {
 	app.open_files[uri] = 'module main\n\nfn helper() {}\n\nfn main() {\n\thelper()\n}\n'
 
 	response := app.handle_prepare_call_hierarchy(Request{
-		id:     909
+		id: 909
 		method: 'textDocument/prepareCallHierarchy'
 		params: json2.encode(PrepareCallHierarchyParams{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-			position:      Position{
+			position: Position{
 				line: 5
 				char: 2
 			}

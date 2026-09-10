@@ -16,7 +16,7 @@ fn test_smoke_incremental_edit_is_lossless() {
 			line: 0
 			char: 1
 		}
-		end:   Position{
+		end: Position{
 			line: 0
 			char: 1
 		}
@@ -35,7 +35,7 @@ fn test_smoke_raw_id_extraction() {
 
 fn test_smoke_argv_is_shell_free() {
 	// A malicious path stays a single literal argv element (no shell involved).
-	malicious := '/tmp/$(touch /tmp/pwned)/x.v'
+	malicious := '/tmp/\$(touch /tmp/pwned)/x.v'
 	args := build_v_check_args_single(malicious)
 	assert malicious in args
 }
