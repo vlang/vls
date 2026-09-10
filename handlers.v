@@ -16,6 +16,10 @@ const v_keywords = ['asm', 'as', 'assert', 'atomic', 'break', 'const', 'continue
 const v_builtins = ['close', 'copy', 'eprintln', 'eprint', 'error', 'error_with_code', 'exit',
 	'flush_stderr', 'flush_stdout', 'free', 'isnil', 'panic', 'print', 'println']!
 
+const v_builtin_types = ['any', 'array', 'bool', 'byte', 'byteptr', 'chan', 'char', 'charptr', 'f32',
+	'f64', 'i8', 'i16', 'i32', 'i64', 'int', 'isize', 'IError', 'map', 'rune', 'string', 'thread',
+	'u8', 'u16', 'u32', 'u64', 'usize', 'void', 'voidptr']!
+
 struct IndexedCompletionResult {
 	items          []Detail
 	use_compiler   bool
@@ -389,6 +393,63 @@ fn struct_literal_cursor_is_at_field(prefix string, open_brace int, raw_lines []
 	return !in_value
 }
 
+fn previous_unmatched_open_brace(source string, before int) int {
+	mut depth := 0
+	mut index := before - 1
+	for index >= 0 {
+		if source[index] == `}` {
+			depth++
+		} else if source[index] == `{` {
+			if depth == 0 {
+				return index
+			}
+			depth--
+		}
+		index--
+	}
+	return -1
+}
+
+fn last_match_keyword_index(source string) int {
+	if source.len < 5 {
+		return -1
+	}
+	mut index := source.len - 5
+	for index >= 0 {
+		if source[index..index + 5] == 'match'
+			&& (index == 0 || !is_ident_char(source[index - 1]))
+			&& (index + 5 == source.len || !is_ident_char(source[index + 5])) {
+			return index
+		}
+		index--
+	}
+	return -1
+}
+
+fn brace_starts_match_body(source string, open_brace int) bool {
+	match_index := last_match_keyword_index(source[..open_brace])
+	if match_index < 0 {
+		return false
+	}
+	mut curly_depth := 0
+	for c in source[match_index + 5..open_brace] {
+		if c == `{` {
+			curly_depth++
+		} else if c == `}` {
+			if curly_depth == 0 {
+				return false
+			}
+			curly_depth--
+		}
+	}
+	return curly_depth == 0
+}
+
+fn struct_literal_brace_is_match_arm(prefix string, open_brace int) bool {
+	parent_open_brace := previous_unmatched_open_brace(prefix, open_brace)
+	return parent_open_brace >= 0 && brace_starts_match_body(prefix, parent_open_brace)
+}
+
 fn struct_literal_type_at_cursor(content string, position Position, enc PositionEncoding) string {
 	lines := content.split_into_lines()
 	if position.line < 0 || position.line >= lines.len || position.char < 0 {
@@ -428,6 +489,9 @@ fn struct_literal_type_at_cursor(content string, position Position, enc Position
 		return ''
 	}
 	if !struct_literal_cursor_is_at_field(prefix, open_brace, raw_fragments) {
+		return ''
+	}
+	if struct_literal_brace_is_match_arm(prefix, open_brace) {
 		return ''
 	}
 	fn_index := last_fn_keyword_index(prefix[..open_brace])
@@ -5750,6 +5814,13 @@ fn make_keyword_completions() []Detail {
 			kind:   3 // Function
 			label:  b
 			detail: b
+		}
+	}
+	for builtin_type in v_builtin_types {
+		items << Detail{
+			kind:   7 // Class
+			label:  builtin_type
+			detail: 'builtin type'
 		}
 	}
 	return items

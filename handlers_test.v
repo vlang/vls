@@ -4953,6 +4953,42 @@ fn test_make_keyword_completions_contains_error_with_code() {
 	assert 'error_with_code' in labels
 }
 
+fn test_make_keyword_completions_contains_builtin_types() {
+	items := make_keyword_completions()
+	for builtin_type in ['string', 'bool', 'int', 'u64', 'rune', 'map', 'voidptr', 'IError'] {
+		matches := items.filter(it.label == builtin_type)
+		assert matches.len == 1, builtin_type
+		assert matches[0].kind == 7, builtin_type
+		assert matches[0].detail == 'builtin type', builtin_type
+	}
+}
+
+fn test_bare_completion_includes_builtin_types_without_compiler_fallback() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'builtin_type_completion')
+	must_mkdir_all(test_dir)
+	main_file := os.join_path(test_dir, 'main.v')
+	content := 'module main\n\nstruct User {\n\tname str\n\tactive bo\n}\n'
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	lines := content.split_into_lines()
+	for line_text in ['\tname str', '\tactive bo'] {
+		completion_line := lines.index(line_text)
+		assert completion_line >= 0
+		indexed := app.indexed_completions(uri, Position{
+			line: completion_line
+			char: lines[completion_line].len
+		})
+		assert !indexed.use_compiler
+		assert indexed.items.any(it.label == 'string')
+		assert indexed.items.any(it.label == 'bool')
+	}
+}
+
 fn test_import_completions_non_import_line() {
 	results := get_import_completions('fn main() {', '')
 	assert results.len == 0
@@ -6440,6 +6476,41 @@ fn test_smart_cast_body_is_not_detected_as_struct_literal() {
 	indexed := app.indexed_completions(uri, position)
 	assert indexed.items.any(it.label == 'local_value')
 	assert !indexed.items.any(it.label == 'name')
+}
+
+fn test_sum_type_match_arm_is_not_detected_as_struct_literal() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'match_arm_struct_literal_detection')
+	must_mkdir_all(test_dir)
+	main_file := os.join_path(test_dir, 'main.v')
+	content := 'module main\n\nstruct Location {\n\tname string\n}\nstruct Missing {}\nstruct User {\n\tlabel string\n}\ntype Result = Location | Missing\n\nfn inspect(result Result) {\n\tlocal_value := 1\n\tmatch result {\n\t\tLocation {\n\t\t\tloc\n\t\t\tuser := User{\n\t\t\t\tlab\n\t\t\t}\n\t\t}\n\t\tMissing {}\n\t}\n}\n'
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	lines := content.split_into_lines()
+	completion_line := lines.index('\t\t\tloc')
+	assert completion_line >= 0
+	position := Position{
+		line: completion_line
+		char: lines[completion_line].len
+	}
+	assert struct_literal_type_at_cursor(content, position, app.position_encoding) == ''
+	indexed := app.indexed_completions(uri, position)
+	assert indexed.items.any(it.label == 'local_value')
+	assert indexed.items.any(it.label == 'string')
+	assert !indexed.items.any(it.label == 'name')
+	literal_line := lines.index('\t\t\t\tlab')
+	assert literal_line >= 0
+	literal_position := Position{
+		line: literal_line
+		char: lines[literal_line].len
+	}
+	assert struct_literal_type_at_cursor(content, literal_position, app.position_encoding) == 'User'
+	literal_indexed := app.indexed_completions(uri, literal_position)
+	assert literal_indexed.items.any(it.label == 'label')
 }
 
 fn test_bare_completion_includes_scoped_implicit_bindings() {
