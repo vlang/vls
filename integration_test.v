@@ -1082,13 +1082,13 @@ fn test_integration_vlang_v_indexed_completion_and_receiver_definition_from_env(
 	app.workspace_roots = [root]
 
 	module_completion := app.operation_at_pos(.completion, Request{
-		id:     47
+		id: 47
 		method: 'textDocument/completion'
 		params: json2.encode(TextDocumentPositionParams{
 			text_document: TextDocumentIdentifier{
 				uri: main_uri
 			}
-			position:      Position{
+			position: Position{
 				line: compile_line
 				char: compile_dot_col
 			}
@@ -1100,13 +1100,13 @@ fn test_integration_vlang_v_indexed_completion_and_receiver_definition_from_env(
 	assert (module_completion.result as CompletionList).items.any(it.label == 'compile')
 
 	receiver_completion := app.operation_at_pos(.completion, Request{
-		id:     48
+		id: 48
 		method: 'textDocument/completion'
 		params: json2.encode(TextDocumentPositionParams{
 			text_document: TextDocumentIdentifier{
 				uri: main_uri
 			}
-			position:      Position{
+			position: Position{
 				line: timer_line
 				char: timer_dot_col
 			}
@@ -1118,13 +1118,13 @@ fn test_integration_vlang_v_indexed_completion_and_receiver_definition_from_env(
 	assert (receiver_completion.result as CompletionList).items.any(it.label == 'show')
 
 	definition := app.operation_at_pos(.definition, Request{
-		id:     49
+		id: 49
 		method: 'textDocument/definition'
 		params: json2.encode(TextDocumentPositionParams{
 			text_document: TextDocumentIdentifier{
 				uri: main_uri
 			}
-			position:      Position{
+			position: Position{
 				line: timer_line
 				char: show_col + 2
 			}
