@@ -2013,11 +2013,6 @@ fn (mut app App) indexed_method_symbols(uri string, content string, receiver_typ
 			if method_name != '' && simple_name != method_name {
 				continue
 			}
-			if symbol.range.start.line >= 0 && symbol.range.start.line < entry.conditional_lines.len
-				&& entry.conditional_lines[symbol.range.start.line] {
-				has_conditional = true
-				continue
-			}
 			declaration_occurrences := file_occurrences[simple_name] or {
 				continue
 			}
@@ -2027,6 +2022,11 @@ fn (mut app App) indexed_method_symbols(uri string, content string, receiver_typ
 			if require_public
 				&& (symbol.range.start.line < 0 || symbol.range.start.line >= source_lines.len
 					|| !source_lines[symbol.range.start.line].trim_space().starts_with('pub ')) {
+				continue
+			}
+			if symbol.range.start.line >= 0 && symbol.range.start.line < entry.conditional_lines.len
+				&& entry.conditional_lines[symbol.range.start.line] {
+				has_conditional = true
 				continue
 			}
 			if method_name == '' {

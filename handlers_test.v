@@ -7133,6 +7133,38 @@ fn test_conditional_methods_request_receiver_completion_fallback() {
 	assert (response.result as CompletionList).items.any(it.label == 'reload')
 }
 
+fn test_imported_private_conditional_methods_do_not_request_fallback() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	root := os.join_path(app.temp_dir, 'private_conditional_receiver_methods')
+	module_dir := os.join_path(root, 'service')
+	must_mkdir_all(module_dir)
+	must_write_file(os.join_path(root, 'v.mod'), "Module {\n\tname: 'private_conditional'\n}\n")
+	must_write_file(os.join_path(module_dir, 'service.v'), 'module service\n\npub struct Service {\npub:\n\tname string\n}\n\n\$if !js {\n\tfn (service Service) private_reload() {}\n}\n')
+	main_file := os.join_path(root, 'main.v')
+	content := 'module main\n\nimport service\n\nfn inspect(value service.Service) {\n\tvalue.\n}\n'
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	app.workspace_roots = [root]
+	lines := content.split_into_lines()
+	completion_line := lines.index('\tvalue.')
+	assert completion_line >= 0
+
+	methods := app.indexed_method_symbols(uri, content, 'service.Service', '')
+	assert !methods.use_compiler
+	assert methods.items.len == 0
+	indexed := app.indexed_completions(uri, Position{
+		line: completion_line
+		char: lines[completion_line].len
+	})
+	assert !indexed.use_compiler
+	assert indexed.items.any(it.label == 'name')
+	assert !indexed.items.any(it.label == 'private_reload')
+}
+
 fn test_receiver_definition_ignores_closed_import_shadow() {
 	mut app := create_test_app()
 	defer {
