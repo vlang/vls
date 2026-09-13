@@ -428,6 +428,65 @@ fn test_build_v_line_info_args_single_embeds_line_info() {
 	assert '-vls-mode' in args
 }
 
+fn test_compiler_rejects_line_info_detects_a_v_without_the_v1_checker() {
+	// V prints exactly this and exits before doing any work.
+	assert compiler_rejects_line_info('unknown option `-vls-mode`')
+	assert compiler_rejects_line_info('unknown option `-line-info`')
+	assert compiler_rejects_line_info('unknown option `-json-errors`')
+	// A compiler that understands the options answers with its payload instead.
+	assert !compiler_rejects_line_info('{"contents":{"kind":"markdown","value":"fn f()"}}')
+	assert !compiler_rejects_line_info('')
+	assert !compiler_rejects_line_info('unknown option `-nosuch`')
+	// A refusal is only recognized as a whole line, so a diagnostic that merely
+	// quotes the message cannot disable compiler-backed lookups for the session.
+	assert !compiler_rejects_line_info('a.v:1:1: error: unknown option `-vls-mode` in flag list')
+	assert compiler_rejects_any_option('unknown option `-old-compiler`', [
+		'-old-compiler',
+	])
+	assert !compiler_rejects_any_option('unknown option `-vls-mode`', ['-old-compiler'])
+}
+
+fn test_with_line_info_selection_only_asks_for_the_compatibility_compiler_when_needed() {
+	base := build_v_line_info_args_single('/tmp/a.v', '10:gd^5', '/tmp/a.v')
+	mut app := App{}
+	// Unprobed and known-direct compilers are driven without a selection flag, so
+	// V releases that predate `-old-compiler` never see it.
+	assert app.line_info_mode == .unknown
+	assert app.with_line_info_selection(base) == base
+	app.line_info_mode = .direct
+	assert app.with_line_info_selection(base) == base
+	app.line_info_mode = .compat
+	selected := app.with_line_info_selection(base)
+	assert selected[0] == '-old-compiler'
+	assert selected[1..] == base
+}
+
+fn test_line_info_unavailable_result_answers_hover_from_the_index() {
+	// When no compiler can serve `-line-info`, hover still resolves the vdoc
+	// comment, completion returns an augmentable empty list, and the remaining
+	// methods report "nothing found" rather than an empty popup.
+	mut app := App{}
+	uri := 'file:///tmp/vls_line_info_unavailable.v'
+	app.open_files[uri] = 'module main\n\n// greet writes a greeting.\nfn greet() {}\n\nfn main() {\n\tgreet()\n}\n'
+
+	hover := app.line_info_unavailable_result(.hover, uri, '7:hv^1')
+	assert hover is Hover
+	if hover is Hover {
+		assert hover.contents.value.contains('greet writes a greeting.')
+	}
+	// A cursor that is not on a symbol has no documentation to report.
+	assert app.line_info_unavailable_result(.hover, uri, '5:hv^0') == ResponseResult('null')
+
+	completion := app.line_info_unavailable_result(.completion, uri, '7:1')
+	assert completion is []Detail
+	if completion is []Detail {
+		assert completion.len == 0
+	}
+
+	assert app.line_info_unavailable_result(.signature_help, uri, '7:fn^6') == ResponseResult('null')
+	assert app.line_info_unavailable_result(.definition, uri, '7:gd^1') == ResponseResult('null')
+}
+
 fn test_normalize_v_line_info_output_ignores_launcher_notices() {
 	signature := 'unknown option `-vls-mode`\n{"signatures":[],"activeSignature":0}'
 	assert normalize_v_line_info_output(signature, .signature_help) == '{"signatures":[],"activeSignature":0}'
