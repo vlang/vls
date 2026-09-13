@@ -4421,11 +4421,79 @@ fn test_find_doc_comment_for_qualified_symbol_uses_imported_module() {
 		assert false, 'expected foo column'
 		return
 	}
-	imported_module := imported_module_at_symbol(lines[call_line], foo_col, content)
+	imported_module := app.imported_module_at_symbol(lines[call_line], foo_col, content, Position{
+		line: call_line
+		char: foo_col
+	})
 	assert imported_module == 'b'
 
 	doc := app.find_doc_comment_for_symbol('foo', lines, uri, imported_module)
 	assert doc == 'B foo docs'
+}
+
+fn test_operation_at_pos_hover_respects_shadowed_chained_module_alias() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'shadowed_chained_hover')
+	module_dir := os.join_path(test_dir, 'clock')
+	must_mkdir_all(module_dir)
+	must_write_file(os.join_path(test_dir, 'v.mod'), 'Module {}\n')
+	must_write_file(os.join_path(module_dir, 'clock.v'), 'module clock
+
+// start performs the imported operation.
+pub fn start() {}
+')
+	content := 'module main
+
+import clock
+
+struct Timer {}
+
+// start performs the local timer operation.
+fn (timer Timer) start() {}
+
+struct Clock {
+	timer Timer
+}
+
+fn main() {
+	clock := Clock{}
+	clock.timer.start()
+}
+'
+	main_file := os.join_path(test_dir, 'main.v')
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	app.workspace_roots = [test_dir]
+	lines := content.split_into_lines()
+	call_line := lines.index('\tclock.timer.start()')
+	assert call_line >= 0
+	start_col := lines[call_line].index('start') or { -1 }
+	assert start_col >= 0
+	position := Position{
+		line: call_line
+		char: start_col + 1
+	}
+	response := app.operation_at_pos(.hover, Request{
+		id: 904
+		method: 'textDocument/hover'
+		params: json2.encode(TextDocumentPositionParams{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			position: position
+		},
+			escape_unicode: true
+		)
+	})
+
+	assert response.result is Hover
+	hover := response.result as Hover
+	assert hover.contents.value.contains('start performs the local timer operation.')
+	assert !hover.contents.value.contains('start performs the imported operation.')
 }
 
 fn test_find_doc_comment_for_symbol_not_found() {
@@ -8865,6 +8933,114 @@ fn test_operation_at_pos_hover_returns_symbol_information() {
 	hover := response.result as Hover
 	assert hover.contents.value.contains('helper')
 	assert hover.contents.value.contains('helper returns the supplied value')
+}
+
+fn test_operation_at_pos_hover_static_method_uses_receiver_documentation() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'hover_static_method')
+	must_mkdir_all(test_dir)
+	must_write_file(os.join_path(test_dir, 'v.mod'), 'Module {}\n')
+	module_dir := os.join_path(test_dir, 'a')
+	must_mkdir_all(module_dir)
+	must_write_file(os.join_path(module_dir, 'a.v'), 'module a
+
+pub struct App {}
+
+// new creates a new instance of the imported App struct.
+pub fn App.new() App {
+	return App{}
+}
+')
+	test_file := os.join_path(test_dir, 'main.v')
+	content := 'module main
+
+import a
+import time
+
+struct App {}
+
+// new creates a new instance of the App struct.
+fn App.new() App {
+	return App{}
+}
+
+fn main() {
+	mut app := App.new()
+	imported := a.App.new()
+	_ = app
+	_ = imported
+	_ = time.now()
+}
+'
+	must_write_file(test_file, content)
+	uri := path_to_uri(test_file)
+	app.open_files[uri] = content
+	app.text = content
+	app.workspace_roots = [test_dir]
+	lines := content.split_into_lines()
+	call_line := lines.index('\tmut app := App.new()')
+	if call_line < 0 {
+		assert false, 'expected static method call line'
+		return
+	}
+	new_col := lines[call_line].index('new') or {
+		assert false, 'expected static method name'
+		return
+	}
+
+	response := app.operation_at_pos(.hover, Request{
+		id: 902
+		method: 'textDocument/hover'
+		params: json2.encode(TextDocumentPositionParams{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			position: Position{
+				line: call_line
+				char: new_col + 1
+			}
+		},
+			escape_unicode: true
+		)
+	})
+
+	assert response.result is Hover
+	hover := response.result as Hover
+	assert hover.contents.value.contains('new creates a new instance of the App struct.')
+	assert !hover.contents.value.contains('new returns a time struct')
+
+	imported_line := lines.index('\timported := a.App.new()')
+	if imported_line < 0 {
+		assert false, 'expected module-qualified static method call line'
+		return
+	}
+	imported_col := lines[imported_line].index('new') or {
+		assert false, 'expected imported static method name'
+		return
+	}
+	imported_response := app.operation_at_pos(.hover, Request{
+		id: 903
+		method: 'textDocument/hover'
+		params: json2.encode(TextDocumentPositionParams{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			position: Position{
+				line: imported_line
+				char: imported_col + 1
+			}
+		},
+			escape_unicode: true
+		)
+	})
+
+	assert imported_response.result is Hover
+	imported_hover := imported_response.result as Hover
+	assert imported_hover.contents.value.contains('new creates a new instance of the imported App struct.')
+	assert !imported_hover.contents.value.contains('new creates a new instance of the App struct.')
 }
 
 fn test_find_references_returns_declaration_and_calls() {

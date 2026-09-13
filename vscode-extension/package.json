@@ -3,7 +3,7 @@
   "publisher": "vlang",
   "displayName": "vls",
   "description": "V language support powered by VLS, with built-in build, run, and test tasks.",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "license": "GPL-2.0-only",
   "engines": {
     "vscode": "^1.95.0"
