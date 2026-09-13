@@ -5100,7 +5100,7 @@ fn (mut app App) find_doc_comment_for_symbol(symbol string, current_lines []stri
 // imported_module_at_symbol returns the imported module path qualifying the
 // symbol at byte column `col`. It handles both `module.symbol` and
 // `module.Type.static_method` access.
-fn imported_module_at_symbol(line string, col int, content string) string {
+fn (app &App) imported_module_at_symbol(line string, col int, content string, position Position) string {
 	start, _ := find_word_bounds_at_col(line, col, .utf8)
 	if start <= 0 || line[start - 1] != `.` {
 		return ''
@@ -5111,6 +5111,9 @@ fn imported_module_at_symbol(line string, col int, content string) string {
 		return ''
 	}
 	if module_path := aliases[alias] {
+		if app.local_scope_bindings(content, position).any(it.name == alias) {
+			return ''
+		}
 		return module_path
 	}
 	qualifier_start, _ := find_word_bounds_at_col(line, start - 2, .utf8)
@@ -5118,7 +5121,11 @@ fn imported_module_at_symbol(line string, col int, content string) string {
 		return ''
 	}
 	module_alias := get_word_before_dot(line, qualifier_start - 1, .utf8)
-	return aliases[module_alias] or { '' }
+	module_path := aliases[module_alias] or { return '' }
+	if app.local_scope_bindings(content, position).any(it.name == module_alias) {
+		return ''
+	}
+	return module_path
 }
 
 // static_method_doc_symbol_at keeps the receiver type in a static method name,

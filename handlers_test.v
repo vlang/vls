@@ -4421,11 +4421,79 @@ fn test_find_doc_comment_for_qualified_symbol_uses_imported_module() {
 		assert false, 'expected foo column'
 		return
 	}
-	imported_module := imported_module_at_symbol(lines[call_line], foo_col, content)
+	imported_module := app.imported_module_at_symbol(lines[call_line], foo_col, content, Position{
+		line: call_line
+		char: foo_col
+	})
 	assert imported_module == 'b'
 
 	doc := app.find_doc_comment_for_symbol('foo', lines, uri, imported_module)
 	assert doc == 'B foo docs'
+}
+
+fn test_operation_at_pos_hover_respects_shadowed_chained_module_alias() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'shadowed_chained_hover')
+	module_dir := os.join_path(test_dir, 'clock')
+	must_mkdir_all(module_dir)
+	must_write_file(os.join_path(test_dir, 'v.mod'), 'Module {}\n')
+	must_write_file(os.join_path(module_dir, 'clock.v'), 'module clock
+
+// start performs the imported operation.
+pub fn start() {}
+')
+	content := 'module main
+
+import clock
+
+struct Timer {}
+
+// start performs the local timer operation.
+fn (timer Timer) start() {}
+
+struct Clock {
+	timer Timer
+}
+
+fn main() {
+	clock := Clock{}
+	clock.timer.start()
+}
+'
+	main_file := os.join_path(test_dir, 'main.v')
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	app.workspace_roots = [test_dir]
+	lines := content.split_into_lines()
+	call_line := lines.index('\tclock.timer.start()')
+	assert call_line >= 0
+	start_col := lines[call_line].index('start') or { -1 }
+	assert start_col >= 0
+	position := Position{
+		line: call_line
+		char: start_col + 1
+	}
+	response := app.operation_at_pos(.hover, Request{
+		id: 904
+		method: 'textDocument/hover'
+		params: json2.encode(TextDocumentPositionParams{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			position: position
+		},
+			escape_unicode: true
+		)
+	})
+
+	assert response.result is Hover
+	hover := response.result as Hover
+	assert hover.contents.value.contains('start performs the local timer operation.')
+	assert !hover.contents.value.contains('start performs the imported operation.')
 }
 
 fn test_find_doc_comment_for_symbol_not_found() {
