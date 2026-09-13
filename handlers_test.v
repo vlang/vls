@@ -6348,6 +6348,48 @@ fn test_chained_member_completion_resolves_nested_struct_type() {
 	assert definition.range.start.line == lines.index('fn (value ClockValue) tick() {}')
 }
 
+fn test_non_identifier_receiver_uses_compiler_fallback() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+
+	test_dir := os.join_path(app.temp_dir, 'non_identifier_receiver_fallback')
+	must_mkdir_all(test_dir)
+	main_file := os.join_path(test_dir, 'main.v')
+	content := 'module main\n\nstruct Service {}\nfn (service Service) start() {}\nfn start() {}\nfn make_service() Service {\n\treturn Service{}\n}\n\nfn main() {\n\tservices := [Service{}]\n\tmake_service().sta\n\tservices[0].\n\tmake_service().start()\n}\n'
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	lines := content.split_into_lines()
+
+	for source_line in ['\tmake_service().sta', '\tservices[0].'] {
+		completion_line := lines.index(source_line)
+		assert completion_line >= 0
+		qualifier, has_member_access, standalone := member_qualifier_at_cursor(lines[completion_line], lines[completion_line].len, app.position_encoding)
+		assert qualifier == ''
+		assert has_member_access
+		assert !standalone
+		indexed := app.indexed_completions(uri, Position{
+			line: completion_line
+			char: lines[completion_line].len
+		})
+		assert indexed.use_compiler
+		assert indexed.items.len == 0
+	}
+
+	definition_line := lines.index('\tmake_service().start()')
+	assert definition_line >= 0
+	start_col := lines[definition_line].index('start') or { -1 }
+	assert start_col >= 0
+	if app.resolve_indexed_definition(uri, Position{
+		line: definition_line
+		char: start_col + 2
+	}) != none {
+		assert false, 'complex receiver definition must delegate to the compiler'
+	}
+}
+
 fn test_chained_member_completion_resolves_field_type_imported_by_parent_module() {
 	mut app := create_test_app()
 	defer {

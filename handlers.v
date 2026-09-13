@@ -1009,7 +1009,7 @@ fn member_qualifier_at_cursor(line string, cursor_col int, enc PositionEncoding)
 		scan_end = identifier_start - 1
 	}
 	if receiver_start == dot_byte {
-		return '', false, false
+		return '', true, false
 	}
 	return line[receiver_start..dot_byte], true, !has_parent_access
 }
