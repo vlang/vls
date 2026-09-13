@@ -309,6 +309,27 @@ fn compiler_rejects_line_info(output string) bool {
 	return compiler_rejects_any_option(output, line_info_flags)
 }
 
+// compiler_refused_and_stopped reports whether an invocation printed its refusal
+// and nothing else, which is how a launcher with no answer at all behaves. One
+// that recovers by rerunning the request against a compatibility compiler always
+// says more — at minimum the notice naming that compiler — so an empty payload
+// from it is an ordinary "nothing here" rather than proof that the options are
+// unserviceable. Only the former may retire the compiler-backed lookups.
+fn compiler_refused_and_stopped(output string) bool {
+	mut refusals := 0
+	for line in output.split_into_lines() {
+		trimmed := line.trim_space()
+		if trimmed == '' {
+			continue
+		}
+		if !trimmed.starts_with('unknown option `') {
+			return false
+		}
+		refusals++
+	}
+	return refusals > 0
+}
+
 // normalize_v_line_info_output extracts the actual line-info payload from the
 // compatibility compiler's combined stdout/stderr. Newer launchers may prepend
 // an option notice before delegating to the established compiler.
@@ -1580,18 +1601,18 @@ fn (mut app App) run_v_line_info(method Method, path string, line_info string) R
 	exec_dir := if use_multifile { compile_target } else { working_dir }
 	mut x := run_v_argv(app.with_line_info_selection(cmd_args), exec_dir)
 	mut output := normalize_v_line_info_output(x.output, method)
-	if compiler_rejects_line_info(x.output) && app.line_info_mode != .compat {
+	if compiler_rejects_line_info(x.output) && app.line_info_mode == .unknown {
 		// This V has no in-tree `-line-info` checker. Its launcher may recover on
-		// its own by retrying the failed run against the compatibility compiler,
-		// but that costs a doomed compile — and an upstream bug report upload —
-		// on every keystroke, so select the compatibility compiler directly from
-		// here on.
+		// its own by rerunning the failed request against the compatibility
+		// compiler, but that costs a doomed compile — and an upstream bug report
+		// upload — on every keystroke, so select that compiler directly instead.
+		// The probe runs once: from here on the session has a mode to drive.
 		log('compiler rejected the -line-info options; retrying with -old-compiler')
 		app.line_info_mode = .compat
 		retry := run_v_argv(app.with_line_info_selection(cmd_args), exec_dir)
 		if compiler_rejects_any_option(retry.output, ['-old-compiler']) {
-			// No compatibility compiler to select. Keep whatever the launcher
-			// managed on its own and stop asking for one.
+			// There is no selector to ask with, so whatever the launcher does on
+			// its own is the best available. Keep driving it that way.
 			log('this V has no -old-compiler; keeping the launcher default')
 			app.line_info_mode = .direct
 		} else {
@@ -1599,10 +1620,13 @@ fn (mut app App) run_v_line_info(method Method, path string, line_info string) R
 			output = normalize_v_line_info_output(x.output, method)
 		}
 	}
-	if output == '' && compiler_rejects_line_info(x.output) {
-		// The options were refused and nothing recovered a payload, so no
-		// compiler on this machine can answer. The single-file retry below would
-		// be refused for the same reason.
+	if compiler_rejects_line_info(x.output) && compiler_refused_and_stopped(x.output) {
+		// The invocation refused the options and did nothing else, so nothing
+		// here can answer and the single-file retry below would be refused for
+		// the same reason. An empty payload alone is not evidence: on a launcher
+		// that recovers by itself it is just a lookup that found nothing, and
+		// retiring the lookups over one of those would cost the session every
+		// compiler-backed hover, signature, and receiver definition.
 		log('no compiler serves -line-info; falling back to the index')
 		app.line_info_mode = .missing
 		cleanup_compilation_temp(temp_project_dir, singlefile_tmppath)
