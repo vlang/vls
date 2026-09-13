@@ -5111,6 +5111,20 @@ fn imported_module_at_symbol(line string, col int, content string) string {
 	return parse_import_aliases(content)[alias] or { '' }
 }
 
+// static_method_doc_symbol_at keeps the receiver type in a static method name,
+// e.g. `App.new` instead of bare `new`, so hover docs resolve to that method.
+fn static_method_doc_symbol_at(line string, col int, symbol string) string {
+	start, _ := find_word_bounds_at_col(line, col, .utf8)
+	if start <= 0 || line[start - 1] != `.` {
+		return symbol
+	}
+	receiver := get_word_before_dot(line, start - 1, .utf8)
+	if receiver == '' || receiver[0] < `A` || receiver[0] > `Z` {
+		return symbol
+	}
+	return '${receiver}.${symbol}'
+}
+
 // search_doc_in_vlib_dir searches all non-test .v files in `dir` for a
 // declaration of `symbol` and returns its vdoc comment, or '' if not found.
 fn search_doc_in_vlib_dir(dir string, symbol string) string {

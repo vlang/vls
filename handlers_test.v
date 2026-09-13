@@ -8801,6 +8801,68 @@ fn test_operation_at_pos_hover_returns_symbol_information() {
 	assert hover.contents.value.contains('helper returns the supplied value')
 }
 
+fn test_operation_at_pos_hover_static_method_uses_receiver_documentation() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'hover_static_method')
+	must_mkdir_all(test_dir)
+	test_file := os.join_path(test_dir, 'main.v')
+	content := 'module main
+
+import time
+
+struct App {}
+
+// new creates a new instance of the App struct.
+fn App.new() App {
+	return App{}
+}
+
+fn main() {
+	mut app := App.new()
+	_ = app
+	_ = time.now()
+}
+'
+	must_write_file(test_file, content)
+	uri := path_to_uri(test_file)
+	app.open_files[uri] = content
+	app.text = content
+	lines := content.split_into_lines()
+	call_line := lines.index('\tmut app := App.new()')
+	if call_line < 0 {
+		assert false, 'expected static method call line'
+		return
+	}
+	new_col := lines[call_line].index('new') or {
+		assert false, 'expected static method name'
+		return
+	}
+
+	response := app.operation_at_pos(.hover, Request{
+		id: 902
+		method: 'textDocument/hover'
+		params: json2.encode(TextDocumentPositionParams{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			position: Position{
+				line: call_line
+				char: new_col + 1
+			}
+		},
+			escape_unicode: true
+		)
+	})
+
+	assert response.result is Hover
+	hover := response.result as Hover
+	assert hover.contents.value.contains('new creates a new instance of the App struct.')
+	assert !hover.contents.value.contains('new returns a time struct')
+}
+
 fn test_find_references_returns_declaration_and_calls() {
 	mut app := create_test_app()
 	defer {
