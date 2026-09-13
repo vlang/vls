@@ -2229,6 +2229,41 @@ fn test_resolve_indexed_definition_excludes_inactive_platform_file() {
 	assert location == none
 }
 
+fn test_active_indexed_source_file_names_applies_compiler_build_rules() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'active_source_file_names')
+	must_mkdir_all(test_dir)
+	inactive_os := $if windows { 'linux' } $else { 'windows' }
+	source := 'module main\n\nfn helper() {}\n'
+	for name in ['main.v', 'plain_${inactive_os}.v', 'gated_d_somefeature.v',
+		'gated_notd_somefeature.v', 'main_test.v', 'sibling_${inactive_os}_test.v'] {
+		must_write_file(os.join_path(test_dir, name), source)
+	}
+	// A file the client created but has not saved yet is not on disk, so the
+	// compiler's directory scan cannot see it.
+	unsaved_uri := path_to_uri(os.join_path(test_dir, 'unsaved.v'))
+	app.open_files[unsaved_uri] = source
+
+	active := app.active_indexed_source_file_names(test_dir, 'main_test.v')
+	assert 'main.v' in active
+	assert 'unsaved.v' in active
+	// VLS passes no defines, so `_d_` sources are inactive and `_notd_` ones active.
+	assert 'gated_notd_somefeature.v' in active
+	assert 'gated_d_somefeature.v' !in active
+	assert 'plain_${inactive_os}.v' !in active
+	// The requesting test file is a compiler input; sibling tests are separate
+	// targets and a platform-qualified one still has to match the host.
+	assert 'main_test.v' in active
+	assert 'sibling_${inactive_os}_test.v' !in active
+
+	// A test that cannot run on this platform is not activated by requesting it.
+	inactive_active := app.active_indexed_source_file_names(test_dir, 'sibling_${inactive_os}_test.v')
+	assert 'sibling_${inactive_os}_test.v' !in inactive_active
+}
+
 fn test_resolve_indexed_definition_defers_compile_time_declaration() {
 	mut app := create_test_app()
 	defer {

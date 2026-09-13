@@ -905,6 +905,89 @@ fn test_integration_cross_module_features_use_unsaved_project_overlay() {
 	assert items.any(it.label == 'answer')
 }
 
+// VlangVCallAnchor pins a call site in the vlang/v `cmd/v/v.v` entry point to
+// the declaration it must resolve to. V reorganized its own sources when V3
+// became the default backend in `vlib/v` and V1 was removed, so these workspace
+// tests use whichever anchor the checkout under VLS_VLANG_V_REPO actually
+// contains instead of one call that only exists on one side of that move.
+struct VlangVCallAnchor {
+	call      string // text identifying the call line in cmd/v/v.v
+	qualifier string // module or receiver prefix on that line, including the dot
+	name      string // function or method being called
+	decl_rel  string // '/'-separated path of the declaring file, from the repo root
+	decl_text string // text identifying the declaration line in that file
+}
+
+fn (a VlangVCallAnchor) decl_path(root string) string {
+	return os.join_path(root, ...a.decl_rel.split('/'))
+}
+
+// Module-qualified calls to a free function: `driver.run` once V3 moved into
+// vlib/v, `builder.compile` before that.
+const vlang_v_module_call_anchors = [
+	VlangVCallAnchor{
+		call: 'driver.run('
+		qualifier: 'driver.'
+		name: 'run'
+		decl_rel: 'vlib/v/driver/driver.v'
+		decl_text: 'fn run('
+	},
+	VlangVCallAnchor{
+		call: "builder.compile('build'"
+		qualifier: 'builder.'
+		name: 'compile'
+		decl_rel: 'vlib/v/builder/compile.v'
+		decl_text: 'fn compile('
+	},
+]
+
+// Method calls on a local variable, for receiver-type inference.
+const vlang_v_method_call_anchors = [
+	VlangVCallAnchor{
+		call: 'process.set_args('
+		qualifier: 'process.'
+		name: 'set_args'
+		decl_rel: 'vlib/os/process.v'
+		decl_text: 'fn (mut p Process) set_args('
+	},
+	VlangVCallAnchor{
+		call: "timers.show('v start'"
+		qualifier: 'timers.'
+		name: 'show'
+		decl_rel: 'vlib/v/util/timers.v'
+		decl_text: 'fn (mut t Timers) show('
+	},
+]
+
+// find_vlang_v_call_anchor returns the first anchor whose declaring file exists
+// in this checkout and whose call site is present in `lines`, along with the
+// 0-based line the call sits on.
+fn find_vlang_v_call_anchor(root string, lines []string, anchors []VlangVCallAnchor) ?(VlangVCallAnchor, int) {
+	for anchor in anchors {
+		if !os.is_file(anchor.decl_path(root)) {
+			continue
+		}
+		for i, line in lines {
+			if line.contains(anchor.call) {
+				return anchor, i
+			}
+		}
+	}
+	return none
+}
+
+// vlang_v_declaration_line returns the 0-based line the anchor's declaration
+// sits on, read from the checkout rather than pinned to a line number.
+fn vlang_v_declaration_line(root string, anchor VlangVCallAnchor) ?int {
+	content := os.read_file(anchor.decl_path(root)) or { return none }
+	for i, line in content.split_into_lines() {
+		if line.contains(anchor.decl_text) {
+			return i
+		}
+	}
+	return none
+}
+
 fn test_integration_vlang_v_cross_module_features_from_env() {
 	configured_root := os.getenv('VLS_VLANG_V_REPO')
 	if configured_root == '' {
@@ -920,16 +1003,11 @@ fn test_integration_vlang_v_cross_module_features_from_env() {
 		return
 	}
 	lines := content.split_into_lines()
-	mut call_line := -1
-	mut compile_col := -1
-	for i, line in lines {
-		if line.contains("builder.compile('build'") {
-			call_line = i
-			compile_col = line.index('compile') or { -1 }
-			break
-		}
+	anchor, call_line := find_vlang_v_call_anchor(root, lines, vlang_v_module_call_anchors) or {
+		assert false, 'no known module call anchor found in cmd/v/v.v'
+		return
 	}
-	assert call_line >= 0, 'expected builder.compile build call in cmd/v/v.v'
+	compile_col := lines[call_line].index(anchor.name) or { -1 }
 	assert compile_col >= 0
 
 	mut app, scratch_project := create_integration_test_env()
@@ -940,19 +1018,11 @@ fn test_integration_vlang_v_cross_module_features_from_env() {
 	app.open_files[main_uri] = content
 	app.text = content
 	app.workspace_roots = [root]
-	expected_file := os.join_path(root, 'vlib', 'v', 'builder', 'compile.v')
-	expected_content := os.read_file(expected_file) or {
-		assert false, 'failed to read ${expected_file}: ${err}'
+	expected_file := anchor.decl_path(root)
+	expected_line := vlang_v_declaration_line(root, anchor) or {
+		assert false, 'expected ${anchor.decl_text} declaration in ${anchor.decl_rel}'
 		return
 	}
-	mut expected_line := -1
-	for i, line in expected_content.split_into_lines() {
-		if line.contains('fn compile(') {
-			expected_line = i
-			break
-		}
-	}
-	assert expected_line >= 0, 'expected fn compile declaration in v/builder/compile.v'
 	expected_definition := path_to_uri(expected_file)
 
 	for i, method in [Method.definition, .declaration, .type_definition, .implementation] {
@@ -991,9 +1061,10 @@ fn test_integration_vlang_v_cross_module_features_from_env() {
 		)
 	})
 	assert hover.result is Hover
-	assert (hover.result as Hover).contents.value.contains('fn compile(')
+	assert (hover.result as Hover).contents.value.contains('fn ${anchor.name}(')
 
-	open_paren_col := lines[call_line].index('builder.compile(') or { -1 }
+	call_text := anchor.qualifier + anchor.name + '('
+	open_paren_col := lines[call_line].index(call_text) or { -1 }
 	assert open_paren_col >= 0
 	signature := app.operation_at_pos(.signature_help, Request{
 		id: 45
@@ -1003,19 +1074,19 @@ fn test_integration_vlang_v_cross_module_features_from_env() {
 			}
 			position: Position{
 				line: call_line
-				char: open_paren_col + 'builder.compile('.len
+				char: open_paren_col + call_text.len
 			}
 		},
 			escape_unicode: true
 		)
 	})
 	assert signature.result is SignatureHelp
-	assert (signature.result as SignatureHelp).signatures.any(it.label.starts_with('compile('))
+	assert (signature.result as SignatureHelp).signatures.any(it.label.starts_with('${anchor.name}('))
 
-	dot_col := lines[call_line].index('builder.') or { -1 }
+	dot_col := lines[call_line].index(anchor.qualifier) or { -1 }
 	assert dot_col >= 0
 	mut completion_lines := lines.clone()
-	completion_lines[call_line] = lines[call_line][..dot_col + 'builder.'.len]
+	completion_lines[call_line] = lines[call_line][..dot_col + anchor.qualifier.len]
 	completion_content := completion_lines.join('\n')
 	app.open_files[main_uri] = completion_content
 	app.text = completion_content
@@ -1027,14 +1098,14 @@ fn test_integration_vlang_v_cross_module_features_from_env() {
 			}
 			position: Position{
 				line: call_line
-				char: dot_col + 'builder.'.len
+				char: dot_col + anchor.qualifier.len
 			}
 		},
 			escape_unicode: true
 		)
 	})
 	assert completion.result is CompletionList
-	assert (completion.result as CompletionList).items.any(it.label == 'compile')
+	assert (completion.result as CompletionList).items.any(it.label == anchor.name)
 }
 
 fn test_integration_vlang_v_indexed_completion_and_receiver_definition_from_env() {
@@ -1049,28 +1120,19 @@ fn test_integration_vlang_v_indexed_completion_and_receiver_definition_from_env(
 		return
 	}
 	lines := content.split_into_lines()
-	mut compile_line := -1
-	mut compile_dot_col := -1
-	mut timer_line := -1
-	mut timer_dot_col := -1
-	mut show_col := -1
-	for i, line in lines {
-		if compile_line < 0 && line.contains("builder.compile('build'") {
-			compile_line = i
-			compile_dot_col = line.index('builder.') or { -1 }
-			compile_dot_col += 'builder.'.len
-		}
-		if timer_line < 0 && line.contains("timers.show('v start'") {
-			timer_line = i
-			timer_dot_col = line.index('timers.') or { -1 }
-			timer_dot_col += 'timers.'.len
-			show_col = line.index('show') or { -1 }
-		}
+	module_anchor, compile_line := find_vlang_v_call_anchor(root, lines, vlang_v_module_call_anchors) or {
+		assert false, 'no known module call anchor found in cmd/v/v.v'
+		return
 	}
-	assert compile_line >= 0
-	assert compile_dot_col >= 0
-	assert timer_line >= 0
-	assert timer_dot_col >= 0
+	method_anchor, timer_line := find_vlang_v_call_anchor(root, lines, vlang_v_method_call_anchors) or {
+		assert false, 'no known method call anchor found in cmd/v/v.v'
+		return
+	}
+	compile_dot_col := (lines[compile_line].index(module_anchor.qualifier) or { -1 }) + module_anchor.qualifier.len
+	timer_dot_col := (lines[timer_line].index(method_anchor.qualifier) or { -1 }) + method_anchor.qualifier.len
+	show_col := lines[timer_line].index(method_anchor.name) or { -1 }
+	assert compile_dot_col >= module_anchor.qualifier.len
+	assert timer_dot_col >= method_anchor.qualifier.len
 	assert show_col >= 0
 
 	mut app, scratch_project := create_integration_test_env()
@@ -1097,7 +1159,7 @@ fn test_integration_vlang_v_indexed_completion_and_receiver_definition_from_env(
 		)
 	})
 	assert module_completion.result is CompletionList
-	assert (module_completion.result as CompletionList).items.any(it.label == 'compile')
+	assert (module_completion.result as CompletionList).items.any(it.label == module_anchor.name)
 
 	receiver_completion := app.operation_at_pos(.completion, Request{
 		id: 48
@@ -1115,7 +1177,7 @@ fn test_integration_vlang_v_indexed_completion_and_receiver_definition_from_env(
 		)
 	})
 	assert receiver_completion.result is CompletionList
-	assert (receiver_completion.result as CompletionList).items.any(it.label == 'show')
+	assert (receiver_completion.result as CompletionList).items.any(it.label == method_anchor.name)
 
 	definition := app.operation_at_pos(.definition, Request{
 		id: 49
@@ -1134,8 +1196,12 @@ fn test_integration_vlang_v_indexed_completion_and_receiver_definition_from_env(
 	})
 	assert definition.result is Location
 	location := definition.result as Location
-	assert location.uri == path_to_uri(os.join_path(root, 'vlib', 'v', 'util', 'timers.v'))
-	assert location.range.start.line == 131
+	assert location.uri == path_to_uri(method_anchor.decl_path(root))
+	expected_method_line := vlang_v_declaration_line(root, method_anchor) or {
+		assert false, 'expected ${method_anchor.decl_text} declaration in ${method_anchor.decl_rel}'
+		return
+	}
+	assert location.range.start.line == expected_method_line
 }
 
 fn test_integration_signature_help_request() {

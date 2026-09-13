@@ -457,10 +457,11 @@ fn (mut app App) operation_at_pos(method Method, request Request) Response {
 		}
 	}
 
-	// Resolve declarations from VLS's authoritative source index before using
-	// the established compiler's V1-only `-line-info` compatibility mode. Free
-	// functions and top-level declarations do not require receiver type
-	// inference, so this path is both deterministic and aware of unsaved files.
+	// Resolve declarations from VLS's authoritative source index before reaching
+	// for the compatibility compiler's `-line-info` mode, which a V without the
+	// V1 checker cannot serve at all. Free functions and top-level declarations
+	// do not require receiver type inference, so this path is both deterministic
+	// and aware of unsaved files.
 	if method in [.definition, .declaration, .type_definition, .implementation] {
 		if location := app.resolve_indexed_definition(path, params.position) {
 			return Response{
@@ -4608,7 +4609,7 @@ fn source_occurrences_have_potential_local_binding(lines []string, occurrences [
 // active_indexed_source_file_names applies the compiler's native build-file
 // filtering without removing inactive sources from the broader symbol index.
 // The requesting test file is a direct compiler input, but sibling tests are
-// separate targets. Normalize its `_test` suffix before checking eligibility.
+// separate targets, so it is judged on its own.
 fn (app &App) active_indexed_source_file_names(dir string, active_test_file_name string) map[string]bool {
 	mut file_names := os.ls(dir) or { return map[string]bool{} }
 	file_names = file_names.filter(it.ends_with('.v'))
@@ -4623,29 +4624,30 @@ fn (app &App) active_indexed_source_file_names(dir string, active_test_file_name
 			file_names << name
 		}
 	}
-	mut source_names := []string{}
-	mut test_names := []string{}
-	for name in file_names {
-		if name.ends_with('_test.v') {
-			test_names << name
-		} else {
-			source_names << name
-		}
-	}
-	build_prefs := pref.Preferences{
-		os: pref.get_host_os()
-		backend: .c
-		arch: pref.get_host_arch()
-	}
+	host := pref.host_target()
 	mut active := map[string]bool{}
-	for path in build_prefs.should_compile_filtered_files(dir, source_names) {
+	// The compiler's own directory scan is authoritative for saved sources: it
+	// settles the os, arch, `_d_`/`_notd_`, and `_default.c.v` rules together,
+	// and VLS compiles with no user defines.
+	for path in pref.get_v_files_from_dir_for_target(dir, [], host) {
 		active[os.file_name(path)] = true
 	}
-	if active_test_file_name in test_names {
-		build_name := active_test_file_name[..active_test_file_name.len - '_test.v'.len] + '.v'
-		if build_prefs.should_compile_filtered_files(dir, [build_name]).len == 1 {
-			active[active_test_file_name] = true
+	// A buffer the client has created but not saved is invisible to that scan,
+	// so judge it from its name. Only the suffix rules can be applied this way;
+	// a `_d_` file needs a define VLS does not pass, and every other name is
+	// treated as active rather than hiding a file the user is editing.
+	for name in file_names {
+		if name in active || name.ends_with('_test.v') || name.contains('_d_')
+			|| os.exists(os.join_path(dir, name)) {
+			continue
 		}
+		if !pref.file_has_incompatible_target_suffix(name, host) {
+			active[name] = true
+		}
+	}
+	if active_test_file_name in file_names
+		&& pref.is_test_file_for_target(os.join_path(dir, active_test_file_name), 'c', host.os) {
+		active[active_test_file_name] = true
 	}
 	return active
 }

@@ -428,6 +428,185 @@ fn test_build_v_line_info_args_single_embeds_line_info() {
 	assert '-vls-mode' in args
 }
 
+fn test_compiler_rejects_line_info_detects_a_v_without_the_v1_checker() {
+	// V prints exactly this and exits before doing any work.
+	assert compiler_rejects_line_info('unknown option `-vls-mode`')
+	assert compiler_rejects_line_info('unknown option `-line-info`')
+	assert compiler_rejects_line_info('unknown option `-json-errors`')
+	// A compiler that understands the options answers with its payload instead.
+	assert !compiler_rejects_line_info('{"contents":{"kind":"markdown","value":"fn f()"}}')
+	assert !compiler_rejects_line_info('')
+	assert !compiler_rejects_line_info('unknown option `-nosuch`')
+	// A refusal is only recognized as a whole line, so a diagnostic that merely
+	// quotes the message cannot disable compiler-backed lookups for the session.
+	assert !compiler_rejects_line_info('a.v:1:1: error: unknown option `-vls-mode` in flag list')
+	assert compiler_rejects_any_option('unknown option `-old-compiler`', [
+		'-old-compiler',
+	])
+	assert !compiler_rejects_any_option('unknown option `-vls-mode`', ['-old-compiler'])
+}
+
+fn test_compiler_refused_and_stopped_separates_a_dead_end_from_a_recovery() {
+	// A launcher with no answer prints its refusal and exits.
+	assert compiler_refused_and_stopped('unknown option `-vls-mode`')
+	assert compiler_refused_and_stopped('unknown option `-vls-mode`\n\n')
+	// One that reruns the request against a compatibility compiler says more,
+	// even when that rerun finds nothing to report.
+	assert !compiler_refused_and_stopped('unknown option `-vls-mode`\nV compilation failed (compiler_error); retrying with `/v1_fallback`.')
+	assert !compiler_refused_and_stopped('unknown option `-vls-mode`\nV compilation failed (compiler_error); retrying with `/v1_fallback`.\n./main.v:3:7')
+	// An invocation that was never refused is not a dead end either.
+	assert !compiler_refused_and_stopped('')
+	assert !compiler_refused_and_stopped('./main.v:3:7')
+}
+
+// line_info_stub_app writes `script` as an executable stand-in for `v`, points
+// VLS_V_COMMAND at it, and returns an App plus the URI of a lone source file.
+// The source sits in its own directory so the request takes the single-file
+// path, and scratch files land elsewhere so they never become its siblings.
+fn line_info_stub_app(name string, script string) (&App, string, string) {
+	root := os.join_path(os.temp_dir(), '${name}_${os.getpid()}_${time.now().unix_nano()}')
+	source_dir := os.join_path(root, 'src')
+	interop_test_must_mkdir_all(os.join_path(root, 'bin'))
+	interop_test_must_mkdir_all(source_dir)
+	interop_test_must_mkdir_all(os.join_path(root, 'work'))
+	stub := os.join_path(root, 'bin', 'v')
+	interop_test_must_write_file(stub, script)
+	os.chmod(stub, 0o755) or { assert false, 'Failed to chmod ${stub}: ${err}' }
+	os.setenv('VLS_V_COMMAND', stub, true)
+	source_file := os.join_path(source_dir, 'main.v')
+	interop_test_must_write_file(source_file, 'module main\n\nfn helper() {}\n\nfn main() {\n\thelper()\n}\n')
+	mut app := &App{
+		temp_dir: os.join_path(root, 'work')
+	}
+	return app, path_to_uri(source_file), root
+}
+
+fn restore_v_command(previous string) {
+	if previous == '' {
+		os.unsetenv('VLS_V_COMMAND')
+	} else {
+		os.setenv('VLS_V_COMMAND', previous, true)
+	}
+}
+
+// A launcher with no in-tree `-line-info` checker that refuses the
+// `-old-compiler` selector but reruns the request against a compatibility
+// compiler on its own. The refusal is on every invocation, so an empty answer
+// through it must not be read as "nothing here can serve line info".
+const recovering_launcher_stub = r'#!/bin/sh
+for arg in "$@"; do
+	if [ "$arg" = "-old-compiler" ]; then
+		echo "unknown option \`-old-compiler\`" >&2
+		exit 1
+	fi
+done
+echo "unknown option \`-vls-mode\`" >&2
+echo "V compilation failed (compiler_error); retrying with \`/v1_fallback\`." >&2
+case " $* " in
+	*hv^4*) echo "{\"contents\":{\"kind\":\"markdown\",\"value\":\"fn helper()\"}}" ;;
+esac
+'
+
+// A launcher that refuses both the options and the selector, and stops there.
+const dead_end_launcher_stub = r'#!/bin/sh
+for arg in "$@"; do
+	if [ "$arg" = "-old-compiler" ]; then
+		echo "unknown option \`-old-compiler\`" >&2
+		exit 1
+	fi
+done
+echo "unknown option \`-vls-mode\`" >&2
+exit 1
+'
+
+fn test_run_v_line_info_keeps_a_recovering_launcher_after_an_empty_lookup() {
+	// Regression: an empty lookup used to be read together with the launcher's
+	// standing refusal as proof that nothing serves `-line-info`, retiring
+	// compiler-backed hover, signature help, and receiver definitions for the
+	// rest of the session (PR #516 review, discussion_r3998999227).
+	$if windows {
+		// The stand-in launcher is a POSIX shell script.
+		return
+	}
+	previous := os.getenv('VLS_V_COMMAND')
+	mut app, uri, root := line_info_stub_app('vls_recovering_launcher', recovering_launcher_stub)
+	defer {
+		restore_v_command(previous)
+		os.rmdir_all(root) or {}
+	}
+
+	// A hover past the end of the file resolves nothing, which is an ordinary
+	// answer and not a reason to stop asking.
+	assert app.run_v_line_info(.hover, uri, '9:hv^1') == ResponseResult('null')
+	assert app.line_info_mode == .direct
+
+	// So the very next hover still reaches the launcher.
+	hover := app.run_v_line_info(.hover, uri, '6:hv^4')
+	assert app.line_info_mode == .direct
+	assert hover is Hover
+	if hover is Hover {
+		assert hover.contents.value.contains('fn helper()')
+	}
+}
+
+fn test_run_v_line_info_retires_lookups_when_the_launcher_only_refuses() {
+	// The other direction: a launcher that refuses and stops really has no
+	// answer, so the session stops spawning a process per request.
+	$if windows {
+		return
+	}
+	previous := os.getenv('VLS_V_COMMAND')
+	mut app, uri, root := line_info_stub_app('vls_dead_end_launcher', dead_end_launcher_stub)
+	defer {
+		restore_v_command(previous)
+		os.rmdir_all(root) or {}
+	}
+
+	assert app.run_v_line_info(.hover, uri, '6:hv^4') == ResponseResult('null')
+	assert app.line_info_mode == .missing
+}
+
+fn test_with_line_info_selection_only_asks_for_the_compatibility_compiler_when_needed() {
+	base := build_v_line_info_args_single('/tmp/a.v', '10:gd^5', '/tmp/a.v')
+	mut app := App{}
+	// Unprobed and known-direct compilers are driven without a selection flag, so
+	// V releases that predate `-old-compiler` never see it.
+	assert app.line_info_mode == .unknown
+	assert app.with_line_info_selection(base) == base
+	app.line_info_mode = .direct
+	assert app.with_line_info_selection(base) == base
+	app.line_info_mode = .compat
+	selected := app.with_line_info_selection(base)
+	assert selected[0] == '-old-compiler'
+	assert selected[1..] == base
+}
+
+fn test_line_info_unavailable_result_answers_hover_from_the_index() {
+	// When no compiler can serve `-line-info`, hover still resolves the vdoc
+	// comment, completion returns an augmentable empty list, and the remaining
+	// methods report "nothing found" rather than an empty popup.
+	mut app := App{}
+	uri := 'file:///tmp/vls_line_info_unavailable.v'
+	app.open_files[uri] = 'module main\n\n// greet writes a greeting.\nfn greet() {}\n\nfn main() {\n\tgreet()\n}\n'
+
+	hover := app.line_info_unavailable_result(.hover, uri, '7:hv^1')
+	assert hover is Hover
+	if hover is Hover {
+		assert hover.contents.value.contains('greet writes a greeting.')
+	}
+	// A cursor that is not on a symbol has no documentation to report.
+	assert app.line_info_unavailable_result(.hover, uri, '5:hv^0') == ResponseResult('null')
+
+	completion := app.line_info_unavailable_result(.completion, uri, '7:1')
+	assert completion is []Detail
+	if completion is []Detail {
+		assert completion.len == 0
+	}
+
+	assert app.line_info_unavailable_result(.signature_help, uri, '7:fn^6') == ResponseResult('null')
+	assert app.line_info_unavailable_result(.definition, uri, '7:gd^1') == ResponseResult('null')
+}
+
 fn test_normalize_v_line_info_output_ignores_launcher_notices() {
 	signature := 'unknown option `-vls-mode`\n{"signatures":[],"activeSignature":0}'
 	assert normalize_v_line_info_output(signature, .signature_help) == '{"signatures":[],"activeSignature":0}'

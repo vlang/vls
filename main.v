@@ -43,6 +43,7 @@ mut:
 	index_skipped_uris                          map[string]bool // Disk files omitted from the bounded index
 	index_incomplete_scopes                     map[string]bool // Index walks that could not finish
 	vlib_fn_cache                               map[string]map[string]string // Per-vlib-module fn→return-type index (immutable during a session)
+	line_info_mode                              LineInfoMode // How the configured `v` reaches the `-line-info` checker (see interop.v)
 	tcp_conn                                    ?&net.TcpConn // Non-nil when serving a TCP client
 	is_shutdown                                 bool // True after shutdown request was acknowledged
 	exit_was_requested                          bool // True when the exit notification was received
