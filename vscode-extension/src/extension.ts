@@ -1,12 +1,8 @@
 import * as vscode from 'vscode';
 import { LanguageClient, LanguageClientOptions, ServerOptions } from 'vscode-languageclient/node';
 import * as fs from 'fs';
-import {
-  findInPath,
-  registerVTasks,
-  runCodeLensCommand,
-  vCommandForServer,
-} from './vTasks';
+import { findInPath } from './vCommand';
+import { registerVTasks, runCodeLensCommand, vCommandForServer } from './vTasks';
 
 let client: LanguageClient | undefined;
 
@@ -24,7 +20,7 @@ function isExecutable(filePath: string): boolean {
 }
 
 export async function activate(context: vscode.ExtensionContext) {
-  registerVTasks(context);
+  const taskManager = registerVTasks(context);
 
   // Get the configuration for our server.
   const config = vscode.workspace.getConfiguration('vls');
@@ -58,7 +54,10 @@ export async function activate(context: vscode.ExtensionContext) {
   }
 
   const serverEnvironment = { ...process.env };
-  const vCommand = vCommandForServer();
+  const activeFolder = vscode.window.activeTextEditor
+    ? vscode.workspace.getWorkspaceFolder(vscode.window.activeTextEditor.document.uri)
+    : undefined;
+  const vCommand = vCommandForServer(activeFolder || vscode.workspace.workspaceFolders?.[0]);
   if (vCommand) {
     serverEnvironment.VLS_V_COMMAND = vCommand;
   }
@@ -82,7 +81,7 @@ export async function activate(context: vscode.ExtensionContext) {
       },
       executeCommand: async (command, args, next) => {
         if (command === 'vls.runFile' || command === 'vls.runTests') {
-          await runCodeLensCommand(command, args);
+          await runCodeLensCommand(command, args, taskManager);
           return;
         }
         return next(command, args);

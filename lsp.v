@@ -37,7 +37,7 @@ struct Params {
 	position        Position
 	range           LSPRange
 	text_document   TextDocumentIdentifier @[json: 'textDocument']
-	new_name        string                 @[json: 'newName']
+	new_name        string @[json: 'newName']
 }
 
 // Optional JSON integers use i64 because V3 emits a generic option ABI for struct fields, while
@@ -116,7 +116,7 @@ type ResponseResult = string
 struct WorkspaceSymbol {
 	name           string
 	kind           int
-	tags           ?[]int  @[json: 'tags']
+	tags           ?[]int @[json: 'tags']
 	container_name ?string @[json: 'containerName']
 	location       Location
 }
@@ -174,8 +174,8 @@ struct LSPDiagnostic {
 	message  string
 	severity int
 	source   ?string @[json: 'source'] // diagnostic source identifier, e.g. 'vlang'
-	code     ?string @[json: 'code']   // optional diagnostic code, e.g. 'unused_variable'
-	tags     ?[]int  @[json: 'tags']   // 1 = unnecessary, 2 = deprecated
+	code     ?string @[json: 'code'] // optional diagnostic code, e.g. 'unused_variable'
+	tags     ?[]int @[json: 'tags'] // 1 = unnecessary, 2 = deprecated
 }
 
 // LSPRange represents a range in a text document.
@@ -186,17 +186,17 @@ struct LSPRange {
 
 // Detail represents a completion or symbol detail item.
 struct Detail {
-	kind               int    // The type of item (e.g., Method, Function, Field)
+	kind               int // The type of item (e.g., Method, Function, Field)
 	label              string // The name of the completion item
 	detail             string // Additional info like the function signature or return type
 	declaration        string // Full fn declaration, e.g. "fn greet(name string) string"
 	documentation      string // The documentation for the item
-	sort_text          ?string @[json: 'sortText']   // sort key, defaults to label
+	sort_text          ?string @[json: 'sortText'] // sort key, defaults to label
 	filter_text        ?string @[json: 'filterText'] // filter key, defaults to label
 	insert_text        ?string @[json: 'insertText']
-	insert_text_format ?i64    @[json: 'insertTextFormat'] // 1 for PlainText, 2 for Snippet
-	tags               ?[]int  @[json: 'tags']             // 1 = deprecated
-	deprecated         ?bool   @[json: 'deprecated']       // legacy deprecated flag
+	insert_text_format ?i64 @[json: 'insertTextFormat'] // 1 for PlainText, 2 for Snippet
+	tags               ?[]int @[json: 'tags'] // 1 = deprecated
+	deprecated         ?bool @[json: 'deprecated'] // legacy deprecated flag
 }
 
 // Capabilities describes the server's capabilities.
@@ -254,7 +254,7 @@ struct WorkspaceFoldersServerCapability {
 
 // WorkspaceCapability advertises workspace-level server features.
 struct WorkspaceCapability {
-	file_operations   ?WorkspaceFileOperations          @[json: 'fileOperations']
+	file_operations   ?WorkspaceFileOperations @[json: 'fileOperations']
 	workspace_folders ?WorkspaceFoldersServerCapability @[json: 'workspaceFolders']
 }
 
@@ -265,39 +265,39 @@ struct CodeLensOptions {
 
 // Capability lists supported LSP features for the server.
 struct Capability {
-	completion_provider                CompletionProvider       @[json: 'completionProvider']
-	text_document_sync                 TextDocumentSyncOptions  @[json: 'textDocumentSync']
-	signature_help_provider            SignatureHelpOptions     @[json: 'signatureHelpProvider']
-	definition_provider                bool                     @[json: 'definitionProvider']
-	declaration_provider               bool                     @[json: 'declarationProvider']
-	type_definition_provider           bool                     @[json: 'typeDefinitionProvider']
-	implementation_provider            bool                     @[json: 'implementationProvider']
-	hover_provider                     bool                     @[json: 'hoverProvider']
-	references_provider                bool                     @[json: 'referencesProvider']
-	rename_provider                    RenameOptions            @[json: 'renameProvider']
-	execute_command_provider           ?ExecuteCommandOptions   @[json: 'executeCommandProvider']
-	document_formatting_provider       bool                     @[json: 'documentFormattingProvider']
-	document_range_formatting_provider bool                     @[json: 'documentRangeFormattingProvider']
-	document_symbol_provider           bool                     @[json: 'documentSymbolProvider']
-	workspace_symbol_provider          bool                     @[json: 'workspaceSymbolProvider']
-	inlay_hint_provider                bool                     @[json: 'inlayHintProvider']
-	code_action_provider               bool                     @[json: 'codeActionProvider']
-	code_lens_provider                 ?CodeLensOptions         @[json: 'codeLensProvider']
-	inline_value_provider              bool                     @[json: 'inlineValueProvider']
-	linked_editing_range_provider      bool                     @[json: 'linkedEditingRangeProvider']
+	completion_provider                CompletionProvider @[json: 'completionProvider']
+	text_document_sync                 TextDocumentSyncOptions @[json: 'textDocumentSync']
+	signature_help_provider            SignatureHelpOptions @[json: 'signatureHelpProvider']
+	definition_provider                bool @[json: 'definitionProvider']
+	declaration_provider               bool @[json: 'declarationProvider']
+	type_definition_provider           bool @[json: 'typeDefinitionProvider']
+	implementation_provider            bool @[json: 'implementationProvider']
+	hover_provider                     bool @[json: 'hoverProvider']
+	references_provider                bool @[json: 'referencesProvider']
+	rename_provider                    RenameOptions @[json: 'renameProvider']
+	execute_command_provider           ?ExecuteCommandOptions @[json: 'executeCommandProvider']
+	document_formatting_provider       bool @[json: 'documentFormattingProvider']
+	document_range_formatting_provider bool @[json: 'documentRangeFormattingProvider']
+	document_symbol_provider           bool @[json: 'documentSymbolProvider']
+	workspace_symbol_provider          bool @[json: 'workspaceSymbolProvider']
+	inlay_hint_provider                bool @[json: 'inlayHintProvider']
+	code_action_provider               bool @[json: 'codeActionProvider']
+	code_lens_provider                 ?CodeLensOptions @[json: 'codeLensProvider']
+	inline_value_provider              bool @[json: 'inlineValueProvider']
+	linked_editing_range_provider      bool @[json: 'linkedEditingRangeProvider']
 	on_type_formatting_provider        ?OnTypeFormattingOptions @[json: 'documentOnTypeFormattingProvider']
-	semantic_tokens_provider           SemanticTokensOptions    @[json: 'semanticTokensProvider']
-	folding_range_provider             bool                     @[json: 'foldingRangeProvider']
-	call_hierarchy_provider            bool                     @[json: 'callHierarchyProvider']
-	document_highlight_provider        bool                     @[json: 'documentHighlightProvider']
-	selection_range_provider           bool                     @[json: 'selectionRangeProvider']
+	semantic_tokens_provider           SemanticTokensOptions @[json: 'semanticTokensProvider']
+	folding_range_provider             bool @[json: 'foldingRangeProvider']
+	call_hierarchy_provider            bool @[json: 'callHierarchyProvider']
+	document_highlight_provider        bool @[json: 'documentHighlightProvider']
+	selection_range_provider           bool @[json: 'selectionRangeProvider']
 	workspace                          WorkspaceCapability
 	position_encoding                  ?string @[json: 'positionEncoding']
 }
 
 // OnTypeFormattingOptions describes the triggers for on-type formatting.
 struct OnTypeFormattingOptions {
-	first_trigger_character string   @[json: 'firstTriggerCharacter']
+	first_trigger_character string @[json: 'firstTriggerCharacter']
 	more_trigger_characters []string @[json: 'moreTriggerCharacters']
 }
 
@@ -674,8 +674,8 @@ struct OnTypeFormattingParams {
 
 // InitializeParams holds client startup parameters relevant to server workspace scope.
 struct InitializeParams {
-	root_uri          ?string            @[json: 'rootUri']
-	root_path         ?string            @[json: 'rootPath']
+	root_uri          ?string @[json: 'rootUri']
+	root_path         ?string @[json: 'rootPath']
 	workspace_folders ?[]WorkspaceFolder @[json: 'workspaceFolders']
 	capabilities      ?ClientCapabilities
 }
@@ -704,7 +704,7 @@ struct SaveOptions {
 // TextDocumentSyncOptions describes document synchronization options.
 struct TextDocumentSyncOptions {
 	open_close           bool @[json: 'openClose']
-	change               int         // 1 for Full, 2 for Incremental
+	change               int // 1 for Full, 2 for Incremental
 	save                 SaveOptions // emit {"includeText":true} to receive text in didSave
 	will_save            bool @[json: 'willSave']
 	will_save_wait_until bool @[json: 'willSaveWaitUntil']
@@ -776,7 +776,7 @@ const inlay_hint_kind_type = 1
 struct InlayHint {
 	position     Position
 	label        string
-	kind         int  @[json: 'kind']
+	kind         int @[json: 'kind']
 	padding_left bool @[json: 'paddingLeft']
 }
 
@@ -881,55 +881,55 @@ struct FileEvent {
 }
 
 enum Method {
-	unknown                                 @['unknown']
-	initialize                              @['initialize']
-	initialized                             @['initialized']
-	did_open                                @['textDocument/didOpen']
-	did_change                              @['textDocument/didChange']
-	did_close                               @['textDocument/didClose']
-	did_save                                @['textDocument/didSave']
-	definition                              @['textDocument/definition']
-	declaration                             @['textDocument/declaration']
-	type_definition                         @['textDocument/typeDefinition']
-	implementation                          @['textDocument/implementation']
-	completion                              @['textDocument/completion']
-	signature_help                          @['textDocument/signatureHelp']
-	hover                                   @['textDocument/hover']
-	references                              @['textDocument/references']
-	rename                                  @['textDocument/rename']
-	prepare_rename                          @['textDocument/prepareRename']
-	formatting                              @['textDocument/formatting']
-	document_symbols                        @['textDocument/documentSymbol']
-	workspace_symbol                        @['workspace/symbol']
-	inlay_hint                              @['textDocument/inlayHint']
-	code_action                             @['textDocument/codeAction']
-	semantic_tokens                         @['textDocument/semanticTokens/full']
-	folding_range                           @['textDocument/foldingRange']
-	callhierarchy_prepare                   @['textDocument/prepareCallHierarchy']
-	callhierarchy_incoming                  @['callHierarchy/incomingCalls']
-	callhierarchy_outgoing                  @['callHierarchy/outgoingCalls']
-	workspace_did_change_configuration      @['workspace/didChangeConfiguration']
-	workspace_did_change_workspace_folders  @['workspace/didChangeWorkspaceFolders']
-	document_highlight                      @['textDocument/documentHighlight']
-	selection_range                         @['textDocument/selectionRange']
-	semantic_tokens_range                   @['textDocument/semanticTokens/range']
-	range_formatting                        @['textDocument/rangeFormatting']
-	will_save                 @['textDocument/willSave']
-	will_save_wait_until      @['textDocument/willSaveWaitUntil']
-	did_change_watched_files  @['workspace/didChangeWatchedFiles']
-	code_lens                 @['textDocument/codeLens']
-	code_lens_resolve         @['codeLens/resolve']
-	execute_command           @['workspace/executeCommand']
-	inline_value              @['textDocument/inlineValue']
-	linked_editing_range      @['textDocument/linkedEditingRange']
-	will_create_files         @['workspace/willCreateFiles']
-	will_rename_files         @['workspace/willRenameFiles']
-	will_delete_files         @['workspace/willDeleteFiles']
-	on_type_formatting        @['textDocument/onTypeFormatting']
-	set_trace                 @['$/setTrace']
-	cancel_request            @['$/cancelRequest']
-	shutdown                  @['shutdown']
-	exit                      @['exit']
+	unknown
+	initialize
+	initialized
+	did_open
+	did_change
+	did_close
+	did_save
+	definition
+	declaration
+	type_definition
+	implementation
+	completion
+	signature_help
+	hover
+	references
+	rename
+	prepare_rename
+	formatting
+	document_symbols
+	workspace_symbol
+	inlay_hint
+	code_action
+	semantic_tokens
+	folding_range
+	callhierarchy_prepare
+	callhierarchy_incoming
+	callhierarchy_outgoing
+	workspace_did_change_configuration
+	workspace_did_change_workspace_folders
+	document_highlight
+	selection_range
+	semantic_tokens_range
+	range_formatting
+	will_save
+	will_save_wait_until
+	did_change_watched_files
+	code_lens
+	code_lens_resolve
+	execute_command
+	inline_value
+	linked_editing_range
+	will_create_files
+	will_rename_files
+	will_delete_files
+	on_type_formatting
+	set_trace
+	cancel_request
+	shutdown
+	exit
 }
 
 // TextDocumentPositionParams for position-based requests
@@ -955,7 +955,7 @@ struct DidOpenTextDocumentParams {
 // DidChangeTextDocumentParams for didChange
 struct DidChangeTextDocumentParams {
 	text_document   VersionedTextDocumentIdentifier @[json: 'textDocument']
-	content_changes []ContentChange                 @[json: 'contentChanges']
+	content_changes []ContentChange @[json: 'contentChanges']
 }
 
 // DidCloseTextDocumentParams for didClose
@@ -998,7 +998,7 @@ struct RenameParams {
 // FormattingOptions carries client formatting preferences (LSP §3.17).
 // VLS ignores these and always delegates to `v fmt`.
 struct FormattingOptions {
-	tab_size      int  @[json: 'tabSize']
+	tab_size      int @[json: 'tabSize']
 	insert_spaces bool @[json: 'insertSpaces']
 }
 
@@ -1025,19 +1025,114 @@ struct WorkspaceSymbolParams {
 }
 
 fn Method.from_string(s string) Method {
-	$for m in Method.values {
-		if s == m.attrs[0] {
-			return m.value
+	if s.len > 0 && s[0] == 36 {
+		return match s[1..] {
+			'/setTrace' { .set_trace }
+			'/cancelRequest' { .cancel_request }
+			else { .unknown }
 		}
 	}
-	return Method.unknown
+	return match s {
+		'initialize' { .initialize }
+		'initialized' { .initialized }
+		'textDocument/didOpen' { .did_open }
+		'textDocument/didChange' { .did_change }
+		'textDocument/didClose' { .did_close }
+		'textDocument/didSave' { .did_save }
+		'textDocument/definition' { .definition }
+		'textDocument/declaration' { .declaration }
+		'textDocument/typeDefinition' { .type_definition }
+		'textDocument/implementation' { .implementation }
+		'textDocument/completion' { .completion }
+		'textDocument/signatureHelp' { .signature_help }
+		'textDocument/hover' { .hover }
+		'textDocument/references' { .references }
+		'textDocument/rename' { .rename }
+		'textDocument/prepareRename' { .prepare_rename }
+		'textDocument/formatting' { .formatting }
+		'textDocument/documentSymbol' { .document_symbols }
+		'workspace/symbol' { .workspace_symbol }
+		'textDocument/inlayHint' { .inlay_hint }
+		'textDocument/codeAction' { .code_action }
+		'textDocument/semanticTokens/full' { .semantic_tokens }
+		'textDocument/foldingRange' { .folding_range }
+		'textDocument/prepareCallHierarchy' { .callhierarchy_prepare }
+		'callHierarchy/incomingCalls' { .callhierarchy_incoming }
+		'callHierarchy/outgoingCalls' { .callhierarchy_outgoing }
+		'workspace/didChangeConfiguration' { .workspace_did_change_configuration }
+		'workspace/didChangeWorkspaceFolders' { .workspace_did_change_workspace_folders }
+		'textDocument/documentHighlight' { .document_highlight }
+		'textDocument/selectionRange' { .selection_range }
+		'textDocument/semanticTokens/range' { .semantic_tokens_range }
+		'textDocument/rangeFormatting' { .range_formatting }
+		'textDocument/willSave' { .will_save }
+		'textDocument/willSaveWaitUntil' { .will_save_wait_until }
+		'workspace/didChangeWatchedFiles' { .did_change_watched_files }
+		'textDocument/codeLens' { .code_lens }
+		'codeLens/resolve' { .code_lens_resolve }
+		'workspace/executeCommand' { .execute_command }
+		'textDocument/inlineValue' { .inline_value }
+		'textDocument/linkedEditingRange' { .linked_editing_range }
+		'workspace/willCreateFiles' { .will_create_files }
+		'workspace/willRenameFiles' { .will_rename_files }
+		'workspace/willDeleteFiles' { .will_delete_files }
+		'textDocument/onTypeFormatting' { .on_type_formatting }
+		'shutdown' { .shutdown }
+		'exit' { .exit }
+		else { .unknown }
+	}
 }
 
 fn (m Method) str() string {
-	$for v in Method.values {
-		if m == v.value {
-			return v.attrs[0]
-		}
+	return match m {
+		.unknown { 'unknown' }
+		.initialize { 'initialize' }
+		.initialized { 'initialized' }
+		.did_open { 'textDocument/didOpen' }
+		.did_change { 'textDocument/didChange' }
+		.did_close { 'textDocument/didClose' }
+		.did_save { 'textDocument/didSave' }
+		.definition { 'textDocument/definition' }
+		.declaration { 'textDocument/declaration' }
+		.type_definition { 'textDocument/typeDefinition' }
+		.implementation { 'textDocument/implementation' }
+		.completion { 'textDocument/completion' }
+		.signature_help { 'textDocument/signatureHelp' }
+		.hover { 'textDocument/hover' }
+		.references { 'textDocument/references' }
+		.rename { 'textDocument/rename' }
+		.prepare_rename { 'textDocument/prepareRename' }
+		.formatting { 'textDocument/formatting' }
+		.document_symbols { 'textDocument/documentSymbol' }
+		.workspace_symbol { 'workspace/symbol' }
+		.inlay_hint { 'textDocument/inlayHint' }
+		.code_action { 'textDocument/codeAction' }
+		.semantic_tokens { 'textDocument/semanticTokens/full' }
+		.folding_range { 'textDocument/foldingRange' }
+		.callhierarchy_prepare { 'textDocument/prepareCallHierarchy' }
+		.callhierarchy_incoming { 'callHierarchy/incomingCalls' }
+		.callhierarchy_outgoing { 'callHierarchy/outgoingCalls' }
+		.workspace_did_change_configuration { 'workspace/didChangeConfiguration' }
+		.workspace_did_change_workspace_folders { 'workspace/didChangeWorkspaceFolders' }
+		.document_highlight { 'textDocument/documentHighlight' }
+		.selection_range { 'textDocument/selectionRange' }
+		.semantic_tokens_range { 'textDocument/semanticTokens/range' }
+		.range_formatting { 'textDocument/rangeFormatting' }
+		.will_save { 'textDocument/willSave' }
+		.will_save_wait_until { 'textDocument/willSaveWaitUntil' }
+		.did_change_watched_files { 'workspace/didChangeWatchedFiles' }
+		.code_lens { 'textDocument/codeLens' }
+		.code_lens_resolve { 'codeLens/resolve' }
+		.execute_command { 'workspace/executeCommand' }
+		.inline_value { 'textDocument/inlineValue' }
+		.linked_editing_range { 'textDocument/linkedEditingRange' }
+		.will_create_files { 'workspace/willCreateFiles' }
+		.will_rename_files { 'workspace/willRenameFiles' }
+		.will_delete_files { 'workspace/willDeleteFiles' }
+		.on_type_formatting { 'textDocument/onTypeFormatting' }
+		.set_trace { u8(36).ascii_str() + '/setTrace' }
+		.cancel_request { u8(36).ascii_str() + '/cancelRequest' }
+		.shutdown { 'shutdown' }
+		.exit { 'exit' }
 	}
-	return 'unknown'
 }

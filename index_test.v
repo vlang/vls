@@ -9,7 +9,7 @@ import time
 fn index_test_app() &App {
 	return &App{
 		open_files: map[string]string{}
-		temp_dir:   os.temp_dir()
+		temp_dir: os.temp_dir()
 	}
 }
 
@@ -105,7 +105,7 @@ fn test_watched_file_reindex_drops_oversized_disk_entry() {
 	app.on_did_change_watched_files(Request{
 		params: json2.encode(DidChangeWatchedFilesParams{
 			changes: [FileEvent{
-				uri:        uri
+				uri: uri
 				event_type: 1
 			}]
 		})
@@ -121,7 +121,7 @@ fn test_watched_file_reindex_drops_oversized_disk_entry() {
 	app.on_did_change_watched_files(Request{
 		params: json2.encode(DidChangeWatchedFilesParams{
 			changes: [FileEvent{
-				uri:        uri
+				uri: uri
 				event_type: 2
 			}]
 		})
@@ -148,7 +148,7 @@ fn test_watched_file_reindex_obeys_total_entry_limit() {
 	app.on_did_change_watched_files(Request{
 		params: json2.encode(DidChangeWatchedFilesParams{
 			changes: [FileEvent{
-				uri:        uri
+				uri: uri
 				event_type: 1
 			}]
 		})
@@ -177,7 +177,7 @@ fn test_watched_file_reuses_equivalent_open_document_uri() {
 	app.on_did_change_watched_files(Request{
 		params: json2.encode(DidChangeWatchedFilesParams{
 			changes: [FileEvent{
-				uri:        event_uri
+				uri: event_uri
 				event_type: 2
 			}]
 		})
@@ -1020,15 +1020,14 @@ fn test_index_large_multifile_project_stays_complete_and_incremental() {
 
 	changed_path := os.join_path(root, 'module_14', 'file_0749.v')
 	changed_uri := path_to_uri(changed_path)
-	os.write_file(changed_path,
-		'module large_index_test\n\nfn stress_symbol_reindexed() int {\n\treturn 749\n}\n') or {
+	os.write_file(changed_path, 'module large_index_test\n\nfn stress_symbol_reindexed() int {\n\treturn 749\n}\n') or {
 		assert false, 'rewrite stress file failed: ${err}'
 		return
 	}
 	app.on_did_change_watched_files(Request{
 		params: json2.encode(DidChangeWatchedFilesParams{
 			changes: [FileEvent{
-				uri:        changed_uri
+				uri: changed_uri
 				event_type: 2
 			}]
 		})
@@ -1068,8 +1067,7 @@ fn test_large_vlang_v_workspace_from_env() {
 
 	if main_uri, main_symbol := app.find_indexed_fn('main', false, [
 		os.join_path(root, 'cmd'),
-	])
-	{
+	]) {
 		assert main_uri.starts_with(path_to_uri(os.join_path(root, 'cmd')))
 		assert main_symbol.name == 'main'
 	} else {

@@ -219,8 +219,7 @@ fn make_unique_temp_path(tag string, real_path string) string {
 	safe_ext := if ext == '' { '.v' } else { ext }
 	name := os.file_name(real_path)
 	base := if name.contains('.') { name.all_before_last('.') } else { name }
-	return os.join_path(os.temp_dir(),
-		'${tag}_${os.getpid()}_${time.now().unix_nano()}_${base}${safe_ext}')
+	return os.join_path(os.temp_dir(), '${tag}_${os.getpid()}_${time.now().unix_nano()}_${base}${safe_ext}')
 }
 
 fn make_singlefile_temp_path(temp_root string, real_path string, purpose string) string {
@@ -260,13 +259,39 @@ fn build_v_check_args_multifile() []string {
 }
 
 fn build_v_line_info_args_multifile(rel_file string, line_info string) []string {
-	return ['-w', '-check', '-json-errors', '-nocolor', '-vls-mode', '-line-info',
-		'${rel_file}:${line_info}', '.']
+	return ['-w', '-check', '-nocolor', '-vls-mode', '-line-info', '${rel_file}:${line_info}', '.']
 }
 
 fn build_v_line_info_args_single(file_to_check string, line_info string, compile_target string) []string {
-	return ['-w', '-check', '-json-errors', '-nocolor', '-vls-mode', '-line-info',
-		'${file_to_check}:${line_info}', compile_target]
+	return ['-w', '-check', '-nocolor', '-vls-mode', '-line-info', '${file_to_check}:${line_info}',
+		compile_target]
+}
+
+// normalize_v_line_info_output extracts the actual line-info payload from the
+// compatibility compiler's combined stdout/stderr. Newer launchers may prepend
+// an option notice before delegating to the established compiler.
+fn normalize_v_line_info_output(output string, method Method) string {
+	trimmed := output.trim_space()
+	if method in [.completion, .signature_help, .hover] {
+		start := trimmed.index('{') or { return '' }
+		end := trimmed.last_index('}') or { return '' }
+		if end < start {
+			return ''
+		}
+		return trimmed[start..end + 1]
+	}
+	if method in [.definition, .declaration, .type_definition, .implementation] {
+		lines := trimmed.split_into_lines()
+		for i := lines.len - 1; i >= 0; i-- {
+			line := lines[i].trim_space()
+			fields := line.split(':')
+			if fields.len >= 3 && fields[fields.len - 2].is_int()
+				&& fields[fields.len - 1].is_int() {
+				return line
+			}
+		}
+	}
+	return ''
 }
 
 fn build_v_fmt_args(temp_file string) []string {
@@ -342,8 +367,8 @@ fn diagnostic_source_path_is_valid(path string, source_dir string) bool {
 fn parse_v_check_diagnostic_header(line string, source_dir string) ?JsonError {
 	mut best_marker_idx := -1
 	mut best := JsonError{}
-	for level in ['builder error', 'parser error', 'checker error', 'cgen error', 'error',
-		'warning', 'notice'] {
+	for level in ['builder error', 'parser error', 'checker error', 'cgen error', 'error', 'warning',
+		'notice'] {
 		marker := ': ${level}: '
 		mut search_end := line.len
 		for search_end > 0 {
@@ -369,11 +394,11 @@ fn parse_v_check_diagnostic_header(line string, source_dir string) ?JsonError {
 			if marker_idx > best_marker_idx {
 				best_marker_idx = marker_idx
 				best = JsonError{
-					path:    path
+					path: path
 					message: line[marker_idx + marker.len..]
 					line_nr: line_nr_text.int()
-					col:     col_text.int()
-					level:   if level.contains('error') { 'error' } else { level }
+					col: col_text.int()
+					level: if level.contains('error') { 'error' } else { level }
 				}
 			}
 			break
@@ -421,8 +446,8 @@ fn (mut app App) cache_v_check_result(path string, content_hash int, generation 
 	}
 	app.diag_cache[path] = DiagCacheEntry{
 		content_hash: content_hash
-		generation:   generation
-		errors:       errors
+		generation: generation
+		errors: errors
 	}
 }
 
@@ -447,8 +472,8 @@ fn resolve_compiler_timeout_ms() i64 {
 // run_v_argv executes the V compiler with the given argument vector in
 // `work_folder` (set on the child process, never via a process-global chdir).
 // stdout and stderr are merged into one combined buffer because the compiler
-// writes its `-json-errors` / `-line-info` output to STDERR; returning stdout
-// alone would silently drop every diagnostic. The child is killed if it exceeds
+// writes diagnostics and `-line-info` output to STDERR; returning stdout alone
+// would silently drop them. The child is killed if it exceeds
 // compiler_timeout_ms. This is the single, shell-free entry point for all
 // compiler invocations.
 fn run_v_argv(args []string, work_folder string) os.Result {
@@ -457,19 +482,27 @@ fn run_v_argv(args []string, work_folder string) os.Result {
 		log(msg)
 		return os.Result{
 			exit_code: 1
-			output:    msg
+			output: msg
 		}
 	}
 	v_exe := resolve_v_compiler_exe()
 	timeout_ms := resolve_compiler_timeout_ms()
 	mut p := os.new_process(v_exe)
 	p.set_args(args)
+	if '-line-info' in args {
+		// CI enforces V3 for VLS itself, but line-info is still served by the
+		// established compiler. Do not leak the macOS no-fallback guard into this
+		// compatibility subprocess.
+		mut child_env := os.environ()
+		child_env.delete('V_MACOS_V3_NO_FALLBACK')
+		p.set_environment(child_env)
+	}
 	if work_folder != '' {
 		p.set_work_folder(work_folder)
 	}
 	p.set_redirect_stdio()
 	p.run()
-	// The V compiler writes its `-json-errors` / `-line-info` output to STDERR,
+	// The V compiler writes diagnostics and `-line-info` output to STDERR,
 	// so both streams are captured into one combined buffer (equivalent to the
 	// shell `2>&1` the previous implementation relied on). Returning stdout alone
 	// would silently drop every diagnostic.
@@ -511,12 +544,12 @@ fn run_v_argv(args []string, work_folder string) os.Result {
 	if timed_out {
 		return os.Result{
 			exit_code: compiler_exit_timeout
-			output:    ''
+			output: ''
 		}
 	}
 	return os.Result{
 		exit_code: code
-		output:    out.str()
+		output: out.str()
 	}
 }
 
@@ -624,12 +657,12 @@ fn (mut app App) prepare_compilation_overlay(real_path string) !CompilationOverl
 		}
 	}
 	return CompilationOverlay{
-		source_root:         source_root
+		source_root: source_root
 		source_display_root: source_display_root
-		temp_root:           temp_root
-		source_work_dir:     source_work_dir
-		temp_work_dir:       temp_work_dir
-		temp_source_file:    os.join_path(temp_root, file_rel)
+		temp_root: temp_root
+		source_work_dir: source_work_dir
+		temp_work_dir: temp_work_dir
+		temp_source_file: os.join_path(temp_root, file_rel)
 	}
 }
 
@@ -646,8 +679,7 @@ fn source_path_from_overlay_with_windows_rules(reported_path string, overlay Com
 	temp_root := normalize_overlay_path_with_windows_rules(overlay.temp_root, windows)
 	if path_is_within_with_case(candidate, temp_root, windows) {
 		rel := path_relative_to_with_case(candidate, temp_root, windows) or { return candidate }
-		return normalize_overlay_path_with_windows_rules(os.join_path(overlay.source_display_root,
-			rel), windows)
+		return normalize_overlay_path_with_windows_rules(os.join_path(overlay.source_display_root, rel), windows)
 	}
 	return candidate
 }
@@ -721,9 +753,8 @@ fn (mut app App) run_v_check(path string, text string) []JsonError {
 
 	log('Check - RUN RES ${x}')
 
-	// `-json-errors`, `-w`, and `-vls-mode` select the established compiler.
-	// Parse V3's native flat-AST checker diagnostics instead so ordinary
-	// diagnostics stay on the default backend.
+	// Parse V3's native flat-AST checker diagnostics so ordinary diagnostics stay
+	// on the default backend.
 	diagnostic_source_dir := if use_multifile { exec_dir } else { os.dir(file_to_check) }
 	v_errors := parse_v_check_diagnostics(x.output, diagnostic_source_dir)
 	cleanup_compilation_temp(temp_project_dir, singlefile_tmppath)
@@ -736,12 +767,12 @@ fn (mut app App) run_v_check(path string, text string) []JsonError {
 			err_file := source_path_from_overlay(err.path, overlay)
 			if normalized_index_path(err_file) == normalized_index_path(real_path) {
 				updated_err := JsonError{
-					path:    real_path
+					path: real_path
 					message: err.message
 					line_nr: err.line_nr
-					col:     err.col
-					len:     err.len
-					level:   err.level
+					col: err.col
+					len: err.len
+					level: err.level
 				}
 				filtered_errors << updated_err
 				log('INCLUDING ERROR from err_file=${err_file}: ${err.message}')
@@ -751,8 +782,7 @@ fn (mut app App) run_v_check(path string, text string) []JsonError {
 		}
 
 		log('FILTERED ERRORS: ${filtered_errors.len} of ${v_errors.len}')
-		app.cache_v_check_result(path, content_hash, gen, filtered_errors, x.exit_code,
-			v_errors.len)
+		app.cache_v_check_result(path, content_hash, gen, filtered_errors, x.exit_code, v_errors.len)
 		return filtered_errors
 	}
 
@@ -913,13 +943,11 @@ fn materialize_overlay_file_with_linker(source_path string, target_path string, 
 }
 
 fn materialize_overlay_file(source_path string, target_path string, mut budget OverlayCopyBudget) !bool {
-	return materialize_overlay_file_with_linker(source_path, target_path, create_overlay_hard_link, mut
-		budget)
+	return materialize_overlay_file_with_linker(source_path, target_path, create_overlay_hard_link, mut budget)
 }
 
 fn symlink_untracked_files(source_root string, source_module_dir string, temp_dir string, tracked_files map[string]string) ! {
-	symlink_untracked_files_with_linker(source_root, source_module_dir, temp_dir, tracked_files,
-		create_overlay_symlink)!
+	symlink_untracked_files_with_linker(source_root, source_module_dir, temp_dir, tracked_files, create_overlay_symlink)!
 }
 
 fn symlink_untracked_files_with_linker(source_root string, source_module_dir string, temp_dir string, tracked_files map[string]string, link_fn OverlayLinkFn) ! {
@@ -933,15 +961,11 @@ fn symlink_untracked_files_with_linker(source_root string, source_module_dir str
 			tracked_rel_paths << normalize_overlay_path(rel)
 		}
 	}
-	local_import_dirs := local_import_rel_dirs(normalized_source_root, normalized_module_dir,
-		tracked_files)
+	local_import_dirs := local_import_rel_dirs(normalized_source_root, normalized_module_dir, tracked_files)
 	mut copy_budget := new_overlay_copy_budget()
-	thirdparty_references := referenced_thirdparty_rel_paths(normalized_source_root,
-		normalized_module_dir, tracked_files, local_import_dirs)
-	materialize_referenced_thirdparty_inputs(normalized_source_root, temp_dir,
-		thirdparty_references, mut copy_budget)!
-	symlink_untracked_tree(normalized_source_root, normalized_source_root, temp_dir, '',
-		tracked_rel_paths, local_import_dirs, link_fn, mut copy_budget)!
+	thirdparty_references := referenced_thirdparty_rel_paths(normalized_source_root, normalized_module_dir, tracked_files, local_import_dirs)
+	materialize_referenced_thirdparty_inputs(normalized_source_root, temp_dir, thirdparty_references, mut copy_budget)!
+	symlink_untracked_tree(normalized_source_root, normalized_source_root, temp_dir, '', tracked_rel_paths, local_import_dirs, link_fn, mut copy_budget)!
 }
 
 // local_import_rel_dirs returns project-local module directories imported by
@@ -1148,8 +1172,7 @@ fn copy_bounded_overlay_entry_pass(source_path string, target_path string, compi
 		visited[real_path] = true
 		mut copied := 0
 		for entry in os.ls(source_path)! {
-			copied += copy_bounded_overlay_entry_pass(os.join_path(source_path, entry), os.join_path(target_path,
-				entry), compilation_files, mut budget, mut visited)!
+			copied += copy_bounded_overlay_entry_pass(os.join_path(source_path, entry), os.join_path(target_path, entry), compilation_files, mut budget, mut visited)!
 		}
 		return copied
 	}
@@ -1173,11 +1196,9 @@ fn copy_bounded_overlay_entry_pass(source_path string, target_path string, compi
 // detection keep the copy bounded. Compiler inputs are copied before assets, and
 // files beyond the limit are skipped without invalidating the partial overlay.
 fn copy_bounded_overlay_entry(source_path string, target_path string, mut budget OverlayCopyBudget, mut visited map[string]bool) !int {
-	mut copied := copy_bounded_overlay_entry_pass(source_path, target_path, true, mut budget, mut
-		visited)!
+	mut copied := copy_bounded_overlay_entry_pass(source_path, target_path, true, mut budget, mut visited)!
 	mut asset_visited := map[string]bool{}
-	copied += copy_bounded_overlay_entry_pass(source_path, target_path, false, mut budget, mut
-		asset_visited)!
+	copied += copy_bounded_overlay_entry_pass(source_path, target_path, false, mut budget, mut asset_visited)!
 	return copied
 }
 
@@ -1189,12 +1210,10 @@ fn materialize_referenced_thirdparty_inputs(source_root string, target_root stri
 			mut visited := map[string]bool{}
 			if os.file_name(source_path) == 'thirdparty' {
 				for entry in os.ls(source_path)! {
-					copy_bounded_overlay_entry_pass(os.join_path(source_path, entry), os.join_path(target_path,
-						entry), true, mut budget, mut visited)!
+					copy_bounded_overlay_entry_pass(os.join_path(source_path, entry), os.join_path(target_path, entry), true, mut budget, mut visited)!
 				}
 			} else {
-				copy_bounded_overlay_entry_pass(source_path, target_path, true, mut budget, mut
-					visited)!
+				copy_bounded_overlay_entry_pass(source_path, target_path, true, mut budget, mut visited)!
 			}
 			continue
 		}
@@ -1264,8 +1283,7 @@ fn symlink_untracked_tree(source_root string, source_dir string, target_dir stri
 			if !os.exists(target_path) {
 				os.mkdir_all(target_path)!
 			}
-			symlink_untracked_tree(source_root, source_path, target_path, relative_path,
-				tracked_rel_paths, local_import_dirs, link_fn, mut copy_budget)!
+			symlink_untracked_tree(source_root, source_path, target_path, relative_path, tracked_rel_paths, local_import_dirs, link_fn, mut copy_budget)!
 			continue
 		}
 		if os.exists(target_path) || os.is_link(target_path) {
@@ -1283,8 +1301,7 @@ fn symlink_untracked_tree(source_root string, source_dir string, target_dir stri
 		link_fn(source_path, target_path) or {
 			log('Failed to symlink ${source_path}; using bounded overlay copy: ${err}')
 			mut visited := map[string]bool{}
-			copied := copy_bounded_overlay_entry(source_path, target_path, mut copy_budget, mut
-				visited)!
+			copied := copy_bounded_overlay_entry(source_path, target_path, mut copy_budget, mut visited)!
 			log('Copied ${copied} project files from ${source_path} into the overlay')
 			continue
 		}
@@ -1297,7 +1314,9 @@ fn symlink_untracked_tree(source_root string, source_dir string, target_dir stri
 // this notification keeps the in-memory open_files map consistent.
 fn (mut app App) on_did_change_watched_files(request Request) {
 	params := json2.decode[DidChangeWatchedFilesParams](request.params) or {
-		$if debug { log('Failed to decode DidChangeWatchedFilesParams: ${err}') }
+		$if debug {
+			log('Failed to decode DidChangeWatchedFilesParams: ${err}')
+		}
 		return
 	}
 	open_uris_by_path := app.open_index_uris_by_path()
@@ -1434,11 +1453,11 @@ fn (mut app App) run_v_line_info(method Method, path string, line_info string) R
 
 	exec_dir := if use_multifile { compile_target } else { working_dir }
 	mut x := run_v_argv(cmd_args, exec_dir)
+	mut output := normalize_v_line_info_output(x.output, method)
 
 	if (method == .definition || method == .declaration || method == .type_definition
 		|| method == .implementation) && use_multifile
-		&& (x.exit_code != 0 || x.output.trim_space() == ''
-		|| x.output.trim_space() == '[]') {
+		&& (x.exit_code != 0 || output == '') {
 		if temp_project_dir != '' {
 			os.rmdir_all(temp_project_dir) or { log('Failed to clean up temp project dir: ${err}') }
 			temp_project_dir = ''
@@ -1448,6 +1467,7 @@ fn (mut app App) run_v_line_info(method Method, path string, line_info string) R
 		cmd_fallback := build_v_line_info_args_single(file_to_check, line_info, compile_target)
 		log('cmd_fallback=v ${cmd_fallback.join(' ')}')
 		x = run_v_argv(cmd_fallback, working_dir)
+		output = normalize_v_line_info_output(x.output, method)
 		log('Fallback RUN RES ${x}')
 	}
 
@@ -1458,11 +1478,11 @@ fn (mut app App) run_v_line_info(method Method, path string, line_info string) R
 	mut result := ResponseResult('null')
 	match method {
 		.completion {
-			result_tmp := json2.decode[JsonVarAC](x.output) or { JsonVarAC{} }
+			result_tmp := json2.decode[JsonVarAC](output) or { JsonVarAC{} }
 			result = result_tmp.details
 		}
 		.signature_help {
-			sig := json2.decode[SignatureHelp](x.output) or { SignatureHelp{} }
+			sig := json2.decode[SignatureHelp](output) or { SignatureHelp{} }
 			// Return null when the compiler found no active signature so editors do not show
 			// empty signature popups (LSP spec: SignatureHelp | null).
 			if sig.signatures.len == 0 {
@@ -1473,7 +1493,7 @@ fn (mut app App) run_v_line_info(method Method, path string, line_info string) R
 		}
 		.hover {
 			// Decode the Hover JSON emitted by the compiler's hv^ mode.
-			hover_result := json2.decode[Hover](x.output) or { Hover{} }
+			hover_result := json2.decode[Hover](output) or { Hover{} }
 			// Extract vdoc comment via cross-file search as a fallback when the
 			// compiler does not provide documentation.
 			mut doc := ''
@@ -1492,10 +1512,13 @@ fn (mut app App) run_v_line_info(method Method, path string, line_info string) R
 				if cursor_line >= 0 && cursor_line < file_lines.len {
 					cursor_symbol = get_word_at_col(file_lines[cursor_line], cursor_col, .utf8)
 					if cursor_symbol != '' {
-						imported_module := imported_module_at_symbol(file_lines[cursor_line],
-							cursor_col, file_content)
-						doc = app.find_doc_comment_for_symbol(cursor_symbol, file_lines, path,
-							imported_module)
+						cursor_position := Position{
+							line: cursor_line
+							char: byte_to_encoded_col(file_lines[cursor_line], cursor_col, app.position_encoding)
+						}
+						imported_module := app.imported_module_at_symbol(file_lines[cursor_line], cursor_col, file_content, cursor_position)
+						doc_symbol := static_method_doc_symbol_at(file_lines[cursor_line], cursor_col, cursor_symbol)
+						doc = app.find_doc_comment_for_symbol(doc_symbol, file_lines, path, imported_module)
 					}
 				}
 			}
@@ -1507,7 +1530,7 @@ fn (mut app App) run_v_line_info(method Method, path string, line_info string) R
 				}
 				result = Hover{
 					contents: MarkupContent{
-						kind:  'markdown'
+						kind: 'markdown'
 						value: value
 					}
 				}
@@ -1515,7 +1538,7 @@ fn (mut app App) run_v_line_info(method Method, path string, line_info string) R
 				// Compiler returned no info but we found a vdoc comment
 				result = Hover{
 					contents: MarkupContent{
-						kind:  'markdown'
+						kind: 'markdown'
 						value: doc
 					}
 				}
@@ -1527,8 +1550,8 @@ fn (mut app App) run_v_line_info(method Method, path string, line_info string) R
 		}
 		.definition, .declaration, .type_definition, .implementation {
 			// file.v:line:col => Location
-			fields := x.output.trim_space().split(':')
-			if fields.len < 3 || x.output.trim_space() == '' {
+			fields := output.split(':')
+			if fields.len < 3 || output == '' {
 				// No definition found — return null so the client does not navigate anywhere.
 				result = 'null'
 			} else {
@@ -1560,13 +1583,13 @@ fn (app &App) compiler_location(path string, line int, byte_col int) Location {
 	target_uri := index_uri_for_path(path, app.open_index_uris_by_path())
 	client_col := app.byte_col_to_client_col(target_uri, line, byte_col)
 	return Location{
-		uri:   target_uri
+		uri: target_uri
 		range: LSPRange{
 			start: Position{
 				line: line
 				char: client_col
 			}
-			end:   Position{
+			end: Position{
 				line: line
 				char: client_col
 			}

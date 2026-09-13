@@ -48,18 +48,25 @@ jobs:
       - name: Run all tests, including the vlang/v workspace tests
         env:
           VLS_VLANG_V_REPO: ${{ github.workspace }}
+          V_MACOS_V3_NO_FALLBACK: ${{ runner.os == 'Windows' && '0' || '1' }}
+        run: v -no-memory-limit -nocache test vls/
+
+      - name: Run tests with production optimizations
+        if: runner.os == 'Linux'
+        env:
+          VLS_VLANG_V_REPO: ${{ github.workspace }}
           V_MACOS_V3_NO_FALLBACK: "1"
-        run: v -no-memory-limit test vls/
+        run: v -no-memory-limit -nocache -prod test vls/
 
       - name: Compile project with V3
         if: runner.os != 'Windows'
         env:
           V_MACOS_V3_NO_FALLBACK: "1"
-        run: v -no-memory-limit -new-compiler vls/
+        run: v -no-memory-limit -nocache -new-compiler vls/
 
       - name: Compile project
         if: runner.os == 'Windows'
-        run: v vls/
+        run: v -nocache vls/
 
   vscode-extension:
     runs-on: ubuntu-latest
