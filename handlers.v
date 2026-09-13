@@ -5098,17 +5098,48 @@ fn (mut app App) find_doc_comment_for_symbol(symbol string, current_lines []stri
 }
 
 // imported_module_at_symbol returns the imported module path qualifying the
-// symbol at byte column `col`, or '' for an unqualified symbol.
-fn imported_module_at_symbol(line string, col int, content string) string {
+// symbol at byte column `col`. It handles both `module.symbol` and
+// `module.Type.static_method` access.
+fn (app &App) imported_module_at_symbol(line string, col int, content string, position Position) string {
 	start, _ := find_word_bounds_at_col(line, col, .utf8)
 	if start <= 0 || line[start - 1] != `.` {
 		return ''
 	}
+	aliases := parse_import_aliases(content)
 	alias := get_word_before_dot(line, start - 1, .utf8)
 	if alias == '' {
 		return ''
 	}
-	return parse_import_aliases(content)[alias] or { '' }
+	if module_path := aliases[alias] {
+		if app.local_scope_bindings(content, position).any(it.name == alias) {
+			return ''
+		}
+		return module_path
+	}
+	qualifier_start, _ := find_word_bounds_at_col(line, start - 2, .utf8)
+	if qualifier_start <= 0 || line[qualifier_start - 1] != `.` {
+		return ''
+	}
+	module_alias := get_word_before_dot(line, qualifier_start - 1, .utf8)
+	module_path := aliases[module_alias] or { return '' }
+	if app.local_scope_bindings(content, position).any(it.name == module_alias) {
+		return ''
+	}
+	return module_path
+}
+
+// static_method_doc_symbol_at keeps the receiver type in a static method name,
+// e.g. `App.new` instead of bare `new`, so hover docs resolve to that method.
+fn static_method_doc_symbol_at(line string, col int, symbol string) string {
+	start, _ := find_word_bounds_at_col(line, col, .utf8)
+	if start <= 0 || line[start - 1] != `.` {
+		return symbol
+	}
+	receiver := get_word_before_dot(line, start - 1, .utf8)
+	if receiver == '' || receiver[0] < `A` || receiver[0] > `Z` {
+		return symbol
+	}
+	return '${receiver}.${symbol}'
 }
 
 // search_doc_in_vlib_dir searches all non-test .v files in `dir` for a

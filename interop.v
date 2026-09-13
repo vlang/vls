@@ -1512,8 +1512,13 @@ fn (mut app App) run_v_line_info(method Method, path string, line_info string) R
 				if cursor_line >= 0 && cursor_line < file_lines.len {
 					cursor_symbol = get_word_at_col(file_lines[cursor_line], cursor_col, .utf8)
 					if cursor_symbol != '' {
-						imported_module := imported_module_at_symbol(file_lines[cursor_line], cursor_col, file_content)
-						doc = app.find_doc_comment_for_symbol(cursor_symbol, file_lines, path, imported_module)
+						cursor_position := Position{
+							line: cursor_line
+							char: byte_to_encoded_col(file_lines[cursor_line], cursor_col, app.position_encoding)
+						}
+						imported_module := app.imported_module_at_symbol(file_lines[cursor_line], cursor_col, file_content, cursor_position)
+						doc_symbol := static_method_doc_symbol_at(file_lines[cursor_line], cursor_col, cursor_symbol)
+						doc = app.find_doc_comment_for_symbol(doc_symbol, file_lines, path, imported_module)
 					}
 				}
 			}
