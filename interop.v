@@ -267,6 +267,69 @@ fn build_v_line_info_args_single(file_to_check string, line_info string, compile
 		compile_target]
 }
 
+// LineInfoMode records how the configured `v` reaches the `-line-info` checker
+// that serves hover, completion, signature help, and go-to-definition. V moved
+// V3 into `vlib/v` and deleted V1, taking `-vls-mode` / `-line-info` with it, so
+// the launcher no longer routes those options anywhere by itself: reaching the
+// checker now takes an explicit `-old-compiler`. Older compilers still answer
+// without it, so the working mode is probed from the first real request rather
+// than assumed from a version number.
+enum LineInfoMode {
+	unknown // not probed yet — try the options as-is
+	direct // the compiler answers `-vls-mode` / `-line-info` itself
+	compat // reaching the checker needs `-old-compiler`
+	missing // no compatibility compiler either — answer from VLS's own index
+}
+
+// line_info_flags are the options a V without the V1 checker rejects outright.
+const line_info_flags = ['-line-info', '-vls-mode', '-json-errors']
+
+// compiler_rejects_any_option reports whether a compiler invocation failed
+// because one of `options` is not understood. V prints "unknown option `-flag`"
+// on a line of its own and exits before doing any work, so a refusal is read off
+// a normal request instead of costing a separate probe process. The match is
+// anchored to a whole line so a diagnostic that merely quotes the text cannot
+// change how VLS drives the compiler for the rest of the session.
+fn compiler_rejects_any_option(output string, options []string) bool {
+	if !output.contains('unknown option `') {
+		return false
+	}
+	for line in output.split_into_lines() {
+		trimmed := line.trim_space()
+		for option in options {
+			if trimmed == 'unknown option `${option}`' {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+fn compiler_rejects_line_info(output string) bool {
+	return compiler_rejects_any_option(output, line_info_flags)
+}
+
+// compiler_refused_and_stopped reports whether an invocation printed its refusal
+// and nothing else, which is how a launcher with no answer at all behaves. One
+// that recovers by rerunning the request against a compatibility compiler always
+// says more — at minimum the notice naming that compiler — so an empty payload
+// from it is an ordinary "nothing here" rather than proof that the options are
+// unserviceable. Only the former may retire the compiler-backed lookups.
+fn compiler_refused_and_stopped(output string) bool {
+	mut refusals := 0
+	for line in output.split_into_lines() {
+		trimmed := line.trim_space()
+		if trimmed == '' {
+			continue
+		}
+		if !trimmed.starts_with('unknown option `') {
+			return false
+		}
+		refusals++
+	}
+	return refusals > 0
+}
+
 // normalize_v_line_info_output extracts the actual line-info payload from the
 // compatibility compiler's combined stdout/stderr. Newer launchers may prepend
 // an option notice before delegating to the established compiler.
@@ -1379,10 +1442,94 @@ fn (mut app App) on_did_change_watched_files(request Request) {
 	}
 }
 
+// with_line_info_selection prefixes the compiler-selection flag this session
+// needs to reach the `-line-info` checker. `-old-compiler` is only added once a
+// refusal has proven it is required, so compilers that predate the flag never
+// see it.
+fn (app &App) with_line_info_selection(args []string) []string {
+	if app.line_info_mode != .compat {
+		return args
+	}
+	mut selected := ['-old-compiler']
+	selected << args
+	return selected
+}
+
+// hover_doc_comment returns the vdoc comment attached to the symbol under the
+// cursor described by `line_info` ("${line_nr}:hv^${byte_col}"). It augments a
+// compiler hover, and is the only hover source when no compiler can answer.
+fn (mut app App) hover_doc_comment(path string, line_info string) string {
+	// line_info format for hover is "${line_nr}:hv^${col}"
+	info_parts := line_info.split(':')
+	if info_parts.len < 2 {
+		return ''
+	}
+	// Use the requested document's buffer, else this exact file from disk
+	// — never a global last-touched buffer (P1-02).
+	file_content := app.open_files[path] or { os.read_file(uri_to_path(path)) or { '' } }
+	file_lines := file_content.split_into_lines()
+	cursor_line := info_parts[0].int() - 1
+	// cursor_col comes from the compiler line-info, which is a byte column, so
+	// treat it as a byte offset (utf8) here.
+	cursor_col := info_parts[1].all_after('hv^').int()
+	if cursor_line < 0 || cursor_line >= file_lines.len {
+		return ''
+	}
+	cursor_symbol := get_word_at_col(file_lines[cursor_line], cursor_col, .utf8)
+	if cursor_symbol == '' {
+		return ''
+	}
+	cursor_position := Position{
+		line: cursor_line
+		char: byte_to_encoded_col(file_lines[cursor_line], cursor_col, app.position_encoding)
+	}
+	imported_module := app.imported_module_at_symbol(file_lines[cursor_line], cursor_col, file_content, cursor_position)
+	doc_symbol := static_method_doc_symbol_at(file_lines[cursor_line], cursor_col, cursor_symbol)
+	return app.find_doc_comment_for_symbol(doc_symbol, file_lines, path, imported_module)
+}
+
+// line_info_unavailable_result answers a `-line-info` request without a
+// compiler. Hover still resolves vdoc comments from the index, and completion
+// returns an empty list that the caller augments with keywords and module
+// functions; the remaining methods report "nothing found" as LSP null. Callers
+// of definition consult resolve_indexed_definition first, so the index stays the
+// answer for the common cases.
+fn (mut app App) line_info_unavailable_result(method Method, path string, line_info string) ResponseResult {
+	match method {
+		.hover {
+			doc := app.hover_doc_comment(path, line_info)
+			if doc == '' {
+				return ResponseResult('null')
+			}
+			return Hover{
+				contents: MarkupContent{
+					kind: 'markdown'
+					value: doc
+				}
+			}
+		}
+		.completion {
+			return []Detail{}
+		}
+		else {
+			return ResponseResult('null')
+		}
+	}
+}
+
 fn (mut app App) run_v_line_info(method Method, path string, line_info string) ResponseResult {
 	// Convert URI to local file path
 	real_path := uri_to_path(path)
 	log('real_path=${real_path}, method=${method}')
+
+	// Once no compiler on this machine can serve `-line-info`, never spawn
+	// another process for it. Requests that verify many candidates — references
+	// and rename run up to reference_semantic_max_candidates serial `gd^`
+	// lookups — would otherwise pay a process launch each to reread one error.
+	if app.line_info_mode == .missing {
+		log('no compiler serves -line-info; answering from the index')
+		return app.line_info_unavailable_result(method, path, line_info)
+	}
 
 	mut working_dir := os.dir(real_path)
 	mut file_to_check := real_path
@@ -1452,8 +1599,42 @@ fn (mut app App) run_v_line_info(method Method, path string, line_info string) R
 	}
 
 	exec_dir := if use_multifile { compile_target } else { working_dir }
-	mut x := run_v_argv(cmd_args, exec_dir)
+	mut x := run_v_argv(app.with_line_info_selection(cmd_args), exec_dir)
 	mut output := normalize_v_line_info_output(x.output, method)
+	if compiler_rejects_line_info(x.output) && app.line_info_mode == .unknown {
+		// This V has no in-tree `-line-info` checker. Its launcher may recover on
+		// its own by rerunning the failed request against the compatibility
+		// compiler, but that costs a doomed compile — and an upstream bug report
+		// upload — on every keystroke, so select that compiler directly instead.
+		// The probe runs once: from here on the session has a mode to drive.
+		log('compiler rejected the -line-info options; retrying with -old-compiler')
+		app.line_info_mode = .compat
+		retry := run_v_argv(app.with_line_info_selection(cmd_args), exec_dir)
+		if compiler_rejects_any_option(retry.output, ['-old-compiler']) {
+			// There is no selector to ask with, so whatever the launcher does on
+			// its own is the best available. Keep driving it that way.
+			log('this V has no -old-compiler; keeping the launcher default')
+			app.line_info_mode = .direct
+		} else {
+			x = retry
+			output = normalize_v_line_info_output(x.output, method)
+		}
+	}
+	if compiler_rejects_line_info(x.output) && compiler_refused_and_stopped(x.output) {
+		// The invocation refused the options and did nothing else, so nothing
+		// here can answer and the single-file retry below would be refused for
+		// the same reason. An empty payload alone is not evidence: on a launcher
+		// that recovers by itself it is just a lookup that found nothing, and
+		// retiring the lookups over one of those would cost the session every
+		// compiler-backed hover, signature, and receiver definition.
+		log('no compiler serves -line-info; falling back to the index')
+		app.line_info_mode = .missing
+		cleanup_compilation_temp(temp_project_dir, singlefile_tmppath)
+		return app.line_info_unavailable_result(method, path, line_info)
+	}
+	if app.line_info_mode == .unknown {
+		app.line_info_mode = .direct
+	}
 
 	if (method == .definition || method == .declaration || method == .type_definition
 		|| method == .implementation) && use_multifile
@@ -1464,7 +1645,7 @@ fn (mut app App) run_v_line_info(method Method, path string, line_info string) R
 		}
 		file_to_check = real_path
 		compile_target = real_path
-		cmd_fallback := build_v_line_info_args_single(file_to_check, line_info, compile_target)
+		cmd_fallback := app.with_line_info_selection(build_v_line_info_args_single(file_to_check, line_info, compile_target))
 		log('cmd_fallback=v ${cmd_fallback.join(' ')}')
 		x = run_v_argv(cmd_fallback, working_dir)
 		output = normalize_v_line_info_output(x.output, method)
@@ -1496,32 +1677,7 @@ fn (mut app App) run_v_line_info(method Method, path string, line_info string) R
 			hover_result := json2.decode[Hover](output) or { Hover{} }
 			// Extract vdoc comment via cross-file search as a fallback when the
 			// compiler does not provide documentation.
-			mut doc := ''
-			// Use the requested document's buffer, else this exact file from disk
-			// — never a global last-touched buffer (P1-02).
-			file_content := app.open_files[path] or { os.read_file(real_path) or { '' } }
-			file_lines := file_content.split_into_lines()
-			// line_info format for hover is "${line_nr}:hv^${col}"
-			info_parts := line_info.split(':')
-			mut cursor_symbol := ''
-			if info_parts.len >= 2 {
-				cursor_line := info_parts[0].int() - 1
-				// cursor_col comes from the compiler line-info, which is a byte
-				// column, so treat it as a byte offset (utf8) here.
-				cursor_col := info_parts[1].all_after('hv^').int()
-				if cursor_line >= 0 && cursor_line < file_lines.len {
-					cursor_symbol = get_word_at_col(file_lines[cursor_line], cursor_col, .utf8)
-					if cursor_symbol != '' {
-						cursor_position := Position{
-							line: cursor_line
-							char: byte_to_encoded_col(file_lines[cursor_line], cursor_col, app.position_encoding)
-						}
-						imported_module := app.imported_module_at_symbol(file_lines[cursor_line], cursor_col, file_content, cursor_position)
-						doc_symbol := static_method_doc_symbol_at(file_lines[cursor_line], cursor_col, cursor_symbol)
-						doc = app.find_doc_comment_for_symbol(doc_symbol, file_lines, path, imported_module)
-					}
-				}
-			}
+			doc := app.hover_doc_comment(path, line_info)
 			if hover_result.contents.value != '' {
 				mut value := hover_result.contents.value
 				// Augment with doc comment if the compiler didn't include one
