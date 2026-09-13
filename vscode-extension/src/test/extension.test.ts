@@ -4,6 +4,8 @@ import * as path from 'path';
 import {
   activeRunTaskSpec,
   codeLensTaskSpec,
+  shouldSaveTaskDocument,
+  standaloneTaskScope,
   taskWorkingDirectory,
   workspaceTaskSpec,
 } from '../taskSpec';
@@ -58,6 +60,58 @@ describe('VLS VS Code extension', () => {
       args: ['-nocolor', 'test', '/tmp/main_test.v', '-run-only', 'test_one'],
       name: 'Run Test: test_one',
     });
+  });
+
+  it('saves dirty V buffers in the CodeLens workspace before running', () => {
+    const target = '/workspace/app/main.v';
+    const workspace = '/workspace';
+    const document = (filePath: string, languageId = 'v', isDirty = true) => ({
+      filePath,
+      languageId,
+      isDirty,
+    });
+
+    assert.ok(shouldSaveTaskDocument(target, workspace, document(target)));
+    assert.ok(shouldSaveTaskDocument(target, workspace, document('/workspace/app/sibling.v')));
+    assert.ok(shouldSaveTaskDocument(target, workspace, document('/workspace/lib/imported.v')));
+    assert.ok(shouldSaveTaskDocument(target, workspace, document('/workspace/tool.vsh', 'shellscript')));
+    assert.ok(!shouldSaveTaskDocument(target, workspace, document('/workspace/app/clean.v', 'v', false)));
+    assert.ok(!shouldSaveTaskDocument(target, workspace, document('/workspace/notes.txt', 'plaintext')));
+    assert.ok(!shouldSaveTaskDocument(target, workspace, document('/other/workspace/dirty.v')));
+  });
+
+  it('limits standalone CodeLens saves to the target module tree', () => {
+    const target = '/project/module/main.v';
+    const dirtyVDocument = (filePath: string) => ({ filePath, languageId: 'v', isDirty: true });
+
+    assert.ok(
+      shouldSaveTaskDocument(target, undefined, dirtyVDocument('/project/module/sibling.v'))
+    );
+    assert.ok(
+      shouldSaveTaskDocument(target, undefined, dirtyVDocument('/project/module/lib/imported.v'))
+    );
+    assert.ok(
+      !shouldSaveTaskDocument(target, undefined, dirtyVDocument('/project/other/dirty.v'))
+    );
+  });
+
+  it('uses the nearest V project root for standalone CodeLens saves', () => {
+    const target = '/project/cmd/app/main.v';
+    const projectRoot = standaloneTaskScope(target, (filePath) => {
+      return filePath === path.normalize('/project/v.mod');
+    });
+    const dirtyImport = {
+      filePath: '/project/lib/foo/foo.v',
+      languageId: 'v',
+      isDirty: true,
+    };
+
+    assert.strictEqual(projectRoot, path.normalize('/project'));
+    assert.ok(shouldSaveTaskDocument(target, projectRoot, dirtyImport));
+    assert.strictEqual(
+      standaloneTaskScope(target, () => false),
+      path.normalize('/project/cmd/app')
+    );
   });
 
   it('runs active V scripts directly', () => {
