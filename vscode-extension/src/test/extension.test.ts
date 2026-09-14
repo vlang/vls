@@ -1,5 +1,6 @@
 import * as assert from 'assert';
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import {
   activeRunTaskSpec,
@@ -10,7 +11,12 @@ import {
   workspaceTaskSpec,
 } from '../taskSpec';
 import { serverCommand } from '../vCommand';
-import { instrumentCoverageArgs, parseLcovProfile } from '../coverageProfile';
+import {
+  canonicalFilePath,
+  instrumentCoverageArgs,
+  parseLcovProfile,
+  seedDirtyFileInvalidations,
+} from '../coverageProfile';
 
 describe('VLS VS Code extension', () => {
   it('contributes build, run, and test commands and tasks', () => {
@@ -70,6 +76,47 @@ describe('VLS VS Code extension', () => {
       covered: [3, 8],
       uncovered: [12],
     });
+  });
+
+  it('canonicalizes relative LCOV paths through workspace symlinks', () => {
+    const temporaryRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'vls-coverage-profile-'));
+    const realWorkspace = path.join(temporaryRoot, 'real-workspace');
+    const linkedWorkspace = path.join(temporaryRoot, 'linked-workspace');
+    const sourceDirectory = path.join(realWorkspace, 'src');
+    const sourceFile = path.join(sourceDirectory, 'example.v');
+    try {
+      fs.mkdirSync(sourceDirectory, { recursive: true });
+      fs.writeFileSync(sourceFile, 'module example\n');
+      fs.symlinkSync(
+        realWorkspace,
+        linkedWorkspace,
+        process.platform === 'win32' ? 'junction' : 'dir'
+      );
+
+      const profile = parseLcovProfile('SF:src/example.v\nDA:1,1\nend_of_record', linkedWorkspace);
+
+      assert.ok(profile.has(canonicalFilePath(sourceFile)));
+      assert.ok(!profile.has(path.join(linkedWorkspace, 'src', 'example.v')));
+    } finally {
+      fs.rmSync(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('carries dirty document invalidations into a new test generation', () => {
+    const changedFiles = new Map<string, number>([
+      [canonicalFilePath('/workspace/previous.v'), 2],
+    ]);
+
+    seedDirtyFileInvalidations(
+      changedFiles,
+      [
+        { filePath: '/workspace/dirty.v', isDirty: true },
+        { filePath: '/workspace/clean.v', isDirty: false },
+      ],
+      3
+    );
+
+    assert.deepStrictEqual([...changedFiles], [[canonicalFilePath('/workspace/dirty.v'), 3]]);
   });
 
   it('defines the preconfigured workspace task arguments', () => {

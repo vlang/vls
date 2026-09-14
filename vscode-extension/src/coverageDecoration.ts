@@ -3,7 +3,12 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
-import { CoverageProfile, parseLcovProfile } from './coverageProfile';
+import {
+  canonicalFilePath,
+  CoverageProfile,
+  parseLcovProfile,
+  seedDirtyFileInvalidations,
+} from './coverageProfile';
 
 interface CoverageTaskDefinition extends vscode.TaskDefinition {
   coverageCommand?: string;
@@ -13,18 +18,8 @@ interface CoverageTaskDefinition extends vscode.TaskDefinition {
 
 const coverageTempRoot = path.join(os.tmpdir(), 'vls-coverage');
 
-function normalizedFilePath(filePath: string): string {
-  let normalized = path.normalize(path.resolve(filePath));
-  try {
-    normalized = fs.realpathSync.native(normalized);
-  } catch {
-    // Keep the normalized path when the file disappeared after the test run.
-  }
-  return process.platform === 'win32' ? normalized.toLowerCase() : normalized;
-}
-
 function isPathInside(filePath: string, root: string): boolean {
-  const relativePath = path.relative(normalizedFilePath(root), normalizedFilePath(filePath));
+  const relativePath = path.relative(canonicalFilePath(root), canonicalFilePath(filePath));
   return (
     relativePath === '' ||
     (relativePath !== '..' &&
@@ -104,7 +99,7 @@ export class CoverageDecorationController implements vscode.Disposable {
         if (event.document.uri.scheme !== 'file') {
           return;
         }
-        const filePath = normalizedFilePath(event.document.uri.fsPath);
+        const filePath = canonicalFilePath(event.document.uri.fsPath);
         this.changedFiles.set(filePath, this.currentGeneration);
         if (this.profile.delete(filePath)) {
           this.refreshVisibleEditors();
@@ -142,7 +137,13 @@ export class CoverageDecorationController implements vscode.Disposable {
     const generation = ++this.nextGeneration;
     this.currentGeneration = generation;
     this.executionGenerations.set(execution, generation);
-    this.changedFiles.clear();
+    seedDirtyFileInvalidations(
+      this.changedFiles,
+      vscode.workspace.textDocuments
+        .filter((document) => document.uri.scheme === 'file')
+        .map((document) => ({ filePath: document.uri.fsPath, isDirty: document.isDirty })),
+      generation
+    );
     this.clearDecorations();
     try {
       fs.mkdirSync(directory, { recursive: true });
@@ -244,7 +245,7 @@ export class CoverageDecorationController implements vscode.Disposable {
       editor.setDecorations(this.uncoveredDecoration, []);
       return;
     }
-    const coverage = this.profile.get(normalizedFilePath(editor.document.uri.fsPath));
+    const coverage = this.profile.get(canonicalFilePath(editor.document.uri.fsPath));
     editor.setDecorations(this.coveredDecoration, this.lineRanges(editor, coverage?.covered || []));
     editor.setDecorations(
       this.uncoveredDecoration,

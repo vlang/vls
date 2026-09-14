@@ -1,3 +1,4 @@
+import * as fs from 'fs';
 import * as path from 'path';
 
 export interface LineCoverage {
@@ -7,15 +8,38 @@ export interface LineCoverage {
 
 export type CoverageProfile = Map<string, LineCoverage>;
 
-function normalizedFilePath(filePath: string, baseDirectory: string): string {
-  const absolutePath = path.isAbsolute(filePath)
+export interface CoverageDocumentState {
+  filePath: string;
+  isDirty: boolean;
+}
+
+export function canonicalFilePath(filePath: string, baseDirectory = process.cwd()): string {
+  let absolutePath = path.isAbsolute(filePath)
     ? path.normalize(filePath)
     : path.resolve(baseDirectory, filePath);
+  try {
+    absolutePath = fs.realpathSync.native(absolutePath);
+  } catch {
+    // Keep the lexical path when the file no longer exists.
+  }
   return process.platform === 'win32' ? absolutePath.toLowerCase() : absolutePath;
 }
 
 export function instrumentCoverageArgs(args: string[], coverageDirectory: string): string[] {
   return ['-no-skip-unused', '-coverage', coverageDirectory, ...args];
+}
+
+export function seedDirtyFileInvalidations(
+  changedFiles: Map<string, number>,
+  documents: readonly CoverageDocumentState[],
+  generation: number
+): void {
+  changedFiles.clear();
+  for (const document of documents) {
+    if (document.isDirty) {
+      changedFiles.set(canonicalFilePath(document.filePath), generation);
+    }
+  }
 }
 
 export function parseLcovProfile(content: string, baseDirectory: string): CoverageProfile {
@@ -25,7 +49,7 @@ export function parseLcovProfile(content: string, baseDirectory: string): Covera
   for (const rawLine of content.split(/\r?\n/)) {
     if (rawLine.startsWith('SF:')) {
       const filePath = rawLine.slice(3).trim();
-      currentFile = filePath ? normalizedFilePath(filePath, baseDirectory) : undefined;
+      currentFile = filePath ? canonicalFilePath(filePath, baseDirectory) : undefined;
       if (currentFile && !hitsByFile.has(currentFile)) {
         hitsByFile.set(currentFile, new Map());
       }
