@@ -48,10 +48,9 @@ export function instrumentCoverageArgs(args: string[], coverageDirectory: string
 
 export function coverageArgsForRun(
   args: string[],
-  coverageDirectory: string,
-  coverageEnabled: boolean
+  coverageDirectory?: string
 ): string[] {
-  return coverageEnabled ? instrumentCoverageArgs(args, coverageDirectory) : [...args];
+  return coverageDirectory ? instrumentCoverageArgs(args, coverageDirectory) : [...args];
 }
 
 export function recordFileChange(changedFiles: Set<string>, filePath: string): void {

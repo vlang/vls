@@ -13,13 +13,11 @@ import {
 import { configuredCommand, resolvedCommand, serverCommand } from './vCommand';
 import { CoverageDecorationController } from './coverageDecoration';
 import { coverageArgsForRun } from './coverageProfile';
+import { processTreeKillCommand, windowsCommandShell } from './processExecution';
 
 interface VTaskDefinition extends vscode.TaskDefinition {
   type: 'v';
   action: VTaskAction;
-  coverageCommand?: string;
-  coverageDirectory?: string;
-  coverageRoot?: string;
 }
 
 interface VTaskTarget {
@@ -47,15 +45,19 @@ class VProcessTerminal implements vscode.Pseudoterminal {
   constructor(
     private readonly command: string,
     private readonly args: string[],
-    private readonly cwd: string
+    private readonly cwd: string,
+    private readonly onStart?: () => void,
+    private readonly onExit?: () => void
   ) {}
 
   open(): void {
+    this.onStart?.();
     const displayedCommand = [this.command, ...this.args].map(displayProcessArgument).join(' ');
     this.writeEmitter.fire(`> ${displayedCommand}\r\n`);
     this.childProcess = spawn(this.command, this.args, {
       cwd: this.cwd,
       detached: process.platform !== 'win32',
+      shell: windowsCommandShell(this.command),
     });
     this.childProcess.stdout.on('data', (chunk: Buffer) => {
       this.writeEmitter.fire(terminalText(chunk));
@@ -75,7 +77,25 @@ class VProcessTerminal implements vscode.Pseudoterminal {
       return;
     }
     const processId = this.childProcess?.pid;
-    if (processId && process.platform !== 'win32') {
+    const treeKill = processId ? processTreeKillCommand(processId) : undefined;
+    if (treeKill) {
+      const terminator = spawn(treeKill.command, treeKill.args, { windowsHide: true });
+      let usedFallback = false;
+      const killDirectChild = () => {
+        if (!usedFallback && !this.finished) {
+          usedFallback = true;
+          this.childProcess?.kill();
+        }
+      };
+      terminator.on('error', killDirectChild);
+      terminator.on('close', (code) => {
+        if (code !== 0) {
+          killDirectChild();
+        }
+      });
+      return;
+    }
+    if (processId) {
       try {
         process.kill(-processId, 'SIGTERM');
         return;
@@ -101,6 +121,7 @@ class VProcessTerminal implements vscode.Pseudoterminal {
       return;
     }
     this.finished = true;
+    this.onExit?.();
     this.closeEmitter.fire(code);
     this.writeEmitter.dispose();
     this.closeEmitter.dispose();
@@ -154,28 +175,30 @@ function createVTask(
 ): vscode.Task {
   const folder = workspaceFolderForScope(target.scope);
   const command = resolvedVCommand(folder) || configuredVCommand(folder);
-  const coverageDirectory = action === 'test' ? coverage.createTaskDirectory() : undefined;
   const definition: VTaskDefinition = {
     type: 'v',
     action,
-    coverageCommand: coverageDirectory ? command : undefined,
-    coverageDirectory,
-    coverageRoot: coverageDirectory ? target.coverageRoot : undefined,
   };
   const task = new vscode.Task(
     definition,
     target.scope,
     name,
     'V',
-    coverageDirectory
+    action === 'test'
       ? new vscode.CustomExecution(() => {
           const resource = folder?.uri || vscode.Uri.file(target.coverageRoot);
-          const executionArgs = coverageArgsForRun(
-            args,
-            coverageDirectory,
-            coverage.isEnabled(resource)
+          const run = coverage.isEnabled(resource)
+            ? coverage.createRun(command, target.coverageRoot)
+            : undefined;
+          return Promise.resolve(
+            new VProcessTerminal(
+              command,
+              coverageArgsForRun(args, run?.directory),
+              target.cwd,
+              run ? () => coverage.beginRun(run) : undefined,
+              run ? () => void coverage.endRun(run) : undefined
+            )
           );
-          return Promise.resolve(new VProcessTerminal(command, executionArgs, target.cwd));
         })
       : new vscode.ProcessExecution(command, args, { cwd: target.cwd }),
     ['$vls']
@@ -414,10 +437,8 @@ export function registerVTasks(context: vscode.ExtensionContext): VTaskManager {
     vscode.commands.registerCommand('vls.run', () => runPaletteTask('run', manager)),
     vscode.commands.registerCommand('vls.test', () => runPaletteTask('test', manager)),
     vscode.commands.registerCommand('vls.coverage.clear', () => coverage.clear()),
-    vscode.tasks.onDidStartTask((event) => coverage.beginTask(event.execution)),
     vscode.tasks.onDidEndTask((event) => {
       manager.endExecution(event.execution);
-      void coverage.endTask(event.execution);
     }),
     manager,
     coverage

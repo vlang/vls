@@ -13,11 +13,12 @@ import {
   recordFileChange,
   seedDirtyFileInvalidations,
 } from './coverageProfile';
+import { windowsCommandShell } from './processExecution';
 
-interface CoverageTaskDefinition extends vscode.TaskDefinition {
-  coverageCommand?: string;
-  coverageDirectory?: string;
-  coverageRoot?: string;
+export interface CoverageRun {
+  command: string;
+  directory: string;
+  root: string;
 }
 
 const coverageTempRoot = path.join(os.tmpdir(), 'vls-coverage');
@@ -61,7 +62,11 @@ function runCoverageConverter(
     execFile(
       command,
       ['cover', coverageDirectory, '--lcov', reportPath, '-P', 'false'],
-      { cwd: workingDirectory, maxBuffer: 4 * 1024 * 1024 },
+      {
+        cwd: workingDirectory,
+        maxBuffer: 4 * 1024 * 1024,
+        shell: windowsCommandShell(command),
+      },
       (error) => (error ? reject(error) : resolve())
     );
   });
@@ -82,9 +87,9 @@ export class CoverageDecorationController implements vscode.Disposable {
   });
   private readonly status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 10);
   private readonly allocatedDirectories = new Set<string>();
-  private readonly executionGenerations = new Map<vscode.TaskExecution, number>();
-  private readonly executionChangedFiles = new Map<vscode.TaskExecution, Set<string>>();
-  private readonly executionWatchers = new Map<vscode.TaskExecution, vscode.Disposable>();
+  private readonly runGenerations = new Map<CoverageRun, number>();
+  private readonly runChangedFiles = new Map<CoverageRun, Set<string>>();
+  private readonly runWatchers = new Map<CoverageRun, vscode.Disposable>();
   private readonly changedFiles = new Map<string, number>();
   private readonly profileFileStates = new Map<string, FileModificationState>();
   private readonly disposables: vscode.Disposable[];
@@ -128,25 +133,20 @@ export class CoverageDecorationController implements vscode.Disposable {
       .get<boolean>('coverage.enabled', true);
   }
 
-  createTaskDirectory(): string {
+  createRun(command: string, root: string): CoverageRun {
     const directory = path.join(
       coverageTempRoot,
       `${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`
     );
     this.allocatedDirectories.add(directory);
-    return directory;
+    return { command, directory, root };
   }
 
-  beginTask(execution: vscode.TaskExecution): void {
-    const directory = this.taskDirectory(execution.task);
-    const root = (execution.task.definition as CoverageTaskDefinition).coverageRoot;
-    if (!directory || !root || !this.isEnabled(vscode.Uri.file(root))) {
-      return;
-    }
+  beginRun(run: CoverageRun): void {
     const generation = ++this.nextGeneration;
     this.currentGeneration = generation;
-    this.executionGenerations.set(execution, generation);
-    this.watchExecutionSourceFiles(execution, root);
+    this.runGenerations.set(run, generation);
+    this.watchRunSourceFiles(run);
     seedDirtyFileInvalidations(
       this.changedFiles,
       vscode.workspace.textDocuments
@@ -156,35 +156,29 @@ export class CoverageDecorationController implements vscode.Disposable {
     );
     this.clearDecorations();
     try {
-      fs.mkdirSync(directory, { recursive: true });
+      fs.mkdirSync(run.directory, { recursive: true });
     } catch (error) {
       vscode.window.showWarningMessage(`VLS could not prepare test coverage: ${String(error)}`);
     }
   }
 
-  async endTask(execution: vscode.TaskExecution): Promise<void> {
-    const directory = this.taskDirectory(execution.task);
-    const generation = this.executionGenerations.get(execution);
-    const changedDuringRun = this.executionChangedFiles.get(execution);
-    this.executionGenerations.delete(execution);
-    if (!directory || generation === undefined || !changedDuringRun) {
-      this.disposeExecutionWatcher(execution);
+  async endRun(run: CoverageRun): Promise<void> {
+    const generation = this.runGenerations.get(run);
+    const changedDuringRun = this.runChangedFiles.get(run);
+    this.runGenerations.delete(run);
+    if (generation === undefined || !changedDuringRun) {
+      this.disposeRunWatcher(run);
+      this.removeRunDirectory(run);
       return;
     }
 
     try {
-      if (!hasCounterFile(directory)) {
+      if (!hasCounterFile(run.directory)) {
         return;
       }
-      const definition = execution.task.definition as CoverageTaskDefinition;
-      const command = definition.coverageCommand;
-      const root = definition.coverageRoot;
-      if (!command || !root) {
-        return;
-      }
-      const reportPath = path.join(directory, 'coverage.lcov');
-      await runCoverageConverter(command, directory, reportPath, root);
-      const parsed = parseLcovProfile(fs.readFileSync(reportPath, 'utf8'), root);
+      const reportPath = path.join(run.directory, 'coverage.lcov');
+      await runCoverageConverter(run.command, run.directory, reportPath, run.root);
+      const parsed = parseLcovProfile(fs.readFileSync(reportPath, 'utf8'), run.root);
       if (generation !== this.currentGeneration) {
         return;
       }
@@ -192,7 +186,7 @@ export class CoverageDecorationController implements vscode.Disposable {
         [...parsed].filter(
           ([filePath]) =>
             filePath.endsWith('.v') &&
-            isPathInside(filePath, root) &&
+            isPathInside(filePath, run.root) &&
             this.changedFiles.get(filePath) !== generation &&
             !changedDuringRun.has(filePath)
         )
@@ -213,12 +207,8 @@ export class CoverageDecorationController implements vscode.Disposable {
         vscode.window.showWarningMessage(`VLS could not load test coverage: ${String(error)}`);
       }
     } finally {
-      this.disposeExecutionWatcher(execution);
-      try {
-        fs.rmSync(directory, { recursive: true, force: true });
-      } catch {
-        // The system can clean up an abandoned temporary coverage directory.
-      }
+      this.disposeRunWatcher(run);
+      this.removeRunDirectory(run);
     }
   }
 
@@ -230,10 +220,10 @@ export class CoverageDecorationController implements vscode.Disposable {
 
   dispose(): void {
     this.currentGeneration = ++this.nextGeneration;
-    for (const execution of this.executionWatchers.keys()) {
-      this.disposeExecutionWatcher(execution);
+    for (const run of this.runWatchers.keys()) {
+      this.disposeRunWatcher(run);
     }
-    this.executionChangedFiles.clear();
+    this.runChangedFiles.clear();
     for (const disposable of this.disposables) {
       disposable.dispose();
     }
@@ -249,23 +239,15 @@ export class CoverageDecorationController implements vscode.Disposable {
     }
   }
 
-  private taskDirectory(task: vscode.Task): string | undefined {
-    const directory = (task.definition as CoverageTaskDefinition).coverageDirectory;
-    return directory && this.allocatedDirectories.has(directory) ? directory : undefined;
-  }
-
-  private watchExecutionSourceFiles(execution: vscode.TaskExecution, root?: string): void {
+  private watchRunSourceFiles(run: CoverageRun): void {
     const changedFiles = new Set<string>();
-    this.executionChangedFiles.set(execution, changedFiles);
-    if (!root) {
-      return;
-    }
+    this.runChangedFiles.set(run, changedFiles);
     const watcher = vscode.workspace.createFileSystemWatcher(
-      new vscode.RelativePattern(vscode.Uri.file(root), '**/*.v')
+      new vscode.RelativePattern(vscode.Uri.file(run.root), '**/*.v')
     );
     const recordChange = (uri: vscode.Uri) => recordFileChange(changedFiles, uri.fsPath);
-    this.executionWatchers.set(
-      execution,
+    this.runWatchers.set(
+      run,
       vscode.Disposable.from(
         watcher.onDidChange(recordChange),
         watcher.onDidCreate(recordChange),
@@ -275,10 +257,19 @@ export class CoverageDecorationController implements vscode.Disposable {
     );
   }
 
-  private disposeExecutionWatcher(execution: vscode.TaskExecution): void {
-    this.executionWatchers.get(execution)?.dispose();
-    this.executionWatchers.delete(execution);
-    this.executionChangedFiles.delete(execution);
+  private disposeRunWatcher(run: CoverageRun): void {
+    this.runWatchers.get(run)?.dispose();
+    this.runWatchers.delete(run);
+    this.runChangedFiles.delete(run);
+  }
+
+  private removeRunDirectory(run: CoverageRun): void {
+    this.allocatedDirectories.delete(run.directory);
+    try {
+      fs.rmSync(run.directory, { recursive: true, force: true });
+    } catch {
+      // The system can clean up an abandoned temporary coverage directory.
+    }
   }
 
   private clearDecorations(): void {

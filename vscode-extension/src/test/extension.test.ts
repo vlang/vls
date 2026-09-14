@@ -22,6 +22,7 @@ import {
   recordFileChange,
   seedDirtyFileInvalidations,
 } from '../coverageProfile';
+import { processTreeKillCommand, windowsCommandShell } from '../processExecution';
 
 describe('VLS VS Code extension', () => {
   it('contributes build, run, and test commands and tasks', () => {
@@ -65,13 +66,33 @@ describe('VLS VS Code extension', () => {
     const args = ['-nocolor', 'test', '.'];
     const coverageDirectory = '/tmp/vls-coverage/run';
 
-    assert.deepStrictEqual(coverageArgsForRun(args, coverageDirectory, false), args);
-    assert.deepStrictEqual(coverageArgsForRun(args, coverageDirectory, true), [
+    assert.deepStrictEqual(coverageArgsForRun(args), args);
+    assert.deepStrictEqual(coverageArgsForRun(args, coverageDirectory), [
       '-no-skip-unused',
       '-coverage',
       coverageDirectory,
       ...args,
     ]);
+  });
+
+  it('launches Windows command wrappers through the command interpreter', () => {
+    const commandInterpreter = 'C:\\Windows\\System32\\cmd.exe';
+
+    assert.strictEqual(
+      windowsCommandShell('C:\\V Compiler\\v.cmd', 'win32', commandInterpreter),
+      commandInterpreter
+    );
+    assert.strictEqual(windowsCommandShell('C:\\V Compiler\\v.bat', 'win32'), 'cmd.exe');
+    assert.strictEqual(windowsCommandShell('C:\\V Compiler\\v.exe', 'win32'), undefined);
+    assert.strictEqual(windowsCommandShell('/usr/local/bin/v.cmd', 'linux'), undefined);
+  });
+
+  it('terminates Windows test process trees with taskkill', () => {
+    assert.deepStrictEqual(processTreeKillCommand(1234, 'win32'), {
+      command: 'taskkill.exe',
+      args: ['/pid', '1234', '/t', '/f'],
+    });
+    assert.strictEqual(processTreeKillCommand(1234, 'darwin'), undefined);
   });
 
   it('parses and merges covered and uncovered LCOV lines', () => {
