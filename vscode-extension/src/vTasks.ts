@@ -10,10 +10,15 @@ import {
   workspaceTaskSpec,
 } from './taskSpec';
 import { configuredCommand, resolvedCommand, serverCommand } from './vCommand';
+import { CoverageDecorationController } from './coverageDecoration';
+import { instrumentCoverageArgs } from './coverageProfile';
 
 interface VTaskDefinition extends vscode.TaskDefinition {
   type: 'v';
   action: VTaskAction;
+  coverageCommand?: string;
+  coverageDirectory?: string;
+  coverageRoot?: string;
 }
 
 interface VTaskTarget {
@@ -62,21 +67,32 @@ function workspaceFolderForScope(
 function createVTask(
   action: VTaskAction,
   target: VTaskTarget,
+  coverage: CoverageDecorationController,
   args = workspaceTaskSpec(action).args,
   name = workspaceTaskSpec(action).name
 ): vscode.Task {
   const folder = workspaceFolderForScope(target.scope);
   const command = resolvedVCommand(folder) || configuredVCommand(folder);
-  const definition: VTaskDefinition = { type: 'v', action };
+  const coverageDirectory = action === 'test' ? coverage.createTaskDirectory(folder) : undefined;
+  const executionArgs = coverageDirectory
+    ? instrumentCoverageArgs(args, coverageDirectory)
+    : args;
+  const definition: VTaskDefinition = {
+    type: 'v',
+    action,
+    coverageCommand: coverageDirectory ? command : undefined,
+    coverageDirectory,
+    coverageRoot: coverageDirectory ? target.cwd : undefined,
+  };
   const task = new vscode.Task(
     definition,
     target.scope,
     name,
     'V',
-    new vscode.ProcessExecution(command, args, { cwd: target.cwd }),
+    new vscode.ProcessExecution(command, executionArgs, { cwd: target.cwd }),
     ['$vls']
   );
-  task.detail = `${command} ${args.join(' ')}`;
+  task.detail = `${command} ${executionArgs.join(' ')}`;
   task.presentationOptions = {
     clear: true,
     echo: true,
@@ -171,7 +187,10 @@ function codeLensUri(argument: unknown): vscode.Uri | undefined {
   }
 }
 
-async function runPaletteTask(action: VTaskAction, manager: VTaskManager): Promise<void> {
+async function runPaletteTask(
+  action: VTaskAction,
+  manager: VTaskManager
+): Promise<void> {
   const workspaceTarget = activeWorkspaceTarget();
   if (!workspaceTarget) {
     vscode.window.showErrorMessage(
@@ -202,7 +221,7 @@ async function runPaletteTask(action: VTaskAction, manager: VTaskManager): Promi
     name = 'Test Active File';
   }
 
-  const task = createVTask(action, target, args, name);
+  const task = createVTask(action, target, manager.coverage, args, name);
   const key = `${action}:${target.cwd}:${args.join('\0')}`;
   await manager.executeVTask(task, taskFolder(task), key);
 }
@@ -227,17 +246,19 @@ export async function runCodeLensCommand(
 
   const testName = typeof args[1] === 'string' ? args[1].trim() : '';
   const spec = codeLensTaskSpec(command, uri.fsPath, testName, target.cwd);
-  const task = createVTask(spec.action, target, spec.args, spec.name);
+  const task = createVTask(spec.action, target, manager.coverage, spec.args, spec.name);
   const key = `${command}:${uri.fsPath}:${args[1] || ''}`;
   await manager.executeVTask(task, taskFolder(task), key);
 }
 
 class VTaskProvider implements vscode.TaskProvider {
+  constructor(private readonly coverage: CoverageDecorationController) {}
+
   provideTasks(): vscode.Task[] {
     const tasks: vscode.Task[] = [];
     for (const folder of vscode.workspace.workspaceFolders || []) {
       for (const action of ['build', 'run', 'test'] as const) {
-        tasks.push(createVTask(action, folderTarget(folder)));
+        tasks.push(createVTask(action, folderTarget(folder), this.coverage));
       }
     }
     return tasks;
@@ -252,12 +273,14 @@ class VTaskProvider implements vscode.TaskProvider {
     if (!folder) {
       return undefined;
     }
-    return createVTask(action, folderTarget(folder));
+    return createVTask(action, folderTarget(folder), this.coverage);
   }
 }
 
 export class VTaskManager implements vscode.Disposable {
   private readonly activeExecutions = new Map<string, vscode.TaskExecution>();
+
+  constructor(readonly coverage: CoverageDecorationController) {}
 
   async executeVTask(
     task: vscode.Task,
@@ -291,16 +314,21 @@ export class VTaskManager implements vscode.Disposable {
 }
 
 export function registerVTasks(context: vscode.ExtensionContext): VTaskManager {
-  const manager = new VTaskManager();
-  context.subscriptions.push(vscode.tasks.registerTaskProvider('v', new VTaskProvider()));
+  const coverage = new CoverageDecorationController();
+  const manager = new VTaskManager(coverage);
+  context.subscriptions.push(vscode.tasks.registerTaskProvider('v', new VTaskProvider(coverage)));
   context.subscriptions.push(
     vscode.commands.registerCommand('vls.build', () => runPaletteTask('build', manager)),
     vscode.commands.registerCommand('vls.run', () => runPaletteTask('run', manager)),
     vscode.commands.registerCommand('vls.test', () => runPaletteTask('test', manager)),
+    vscode.commands.registerCommand('vls.coverage.clear', () => coverage.clear()),
+    vscode.tasks.onDidStartTask((event) => coverage.beginTask(event.execution)),
+    vscode.tasks.onDidEndTaskProcess((event) => void coverage.endTask(event.execution)),
     vscode.tasks.onDidEndTask((event) => {
       manager.endExecution(event.execution);
     }),
-    manager
+    manager,
+    coverage
   );
   return manager;
 }

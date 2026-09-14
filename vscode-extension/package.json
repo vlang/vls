@@ -2,7 +2,7 @@
   "name": "vls",
   "publisher": "vlang",
   "displayName": "vls",
-  "description": "V language support powered by VLS, with built-in build, run, and test tasks.",
+  "description": "V language support powered by VLS, with tasks and test coverage visualization.",
   "version": "0.0.4",
   "license": "GPL-2.0-only",
   "engines": {
@@ -16,7 +16,8 @@
     "onTaskType:v",
     "onCommand:vls.build",
     "onCommand:vls.run",
-    "onCommand:vls.test"
+    "onCommand:vls.test",
+    "onCommand:vls.coverage.clear"
   ],
   "main": "./out/extension.js",
   "repository": "https://github.com/vlang/vls",
@@ -55,6 +56,11 @@
       {
         "command": "vls.test",
         "title": "Test",
+        "category": "V"
+      },
+      {
+        "command": "vls.coverage.clear",
+        "title": "Clear Test Coverage",
         "category": "V"
       }
     ],
@@ -129,6 +135,12 @@
           "type": "boolean",
           "default": true,
           "description": "Enable or disable live diagnostics from VLS for V files."
+        },
+        "vls.coverage.enabled": {
+          "type": "boolean",
+          "default": true,
+          "scope": "resource",
+          "description": "Collect test coverage and highlight covered and uncovered executable lines after V test tasks."
         }
       }
     }

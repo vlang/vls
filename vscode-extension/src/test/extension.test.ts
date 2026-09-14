@@ -10,6 +10,7 @@ import {
   workspaceTaskSpec,
 } from '../taskSpec';
 import { serverCommand } from '../vCommand';
+import { instrumentCoverageArgs, parseLcovProfile } from '../coverageProfile';
 
 describe('VLS VS Code extension', () => {
   it('contributes build, run, and test commands and tasks', () => {
@@ -18,12 +19,57 @@ describe('VLS VS Code extension', () => {
     const commands = manifest.contributes.commands.map((entry: { command: string }) => {
       return entry.command;
     });
-    assert.deepStrictEqual(commands, ['vls.build', 'vls.run', 'vls.test']);
+    assert.deepStrictEqual(commands, [
+      'vls.build',
+      'vls.run',
+      'vls.test',
+      'vls.coverage.clear',
+    ]);
 
     const taskDefinition = manifest.contributes.taskDefinitions[0];
     assert.strictEqual(taskDefinition.type, 'v');
     assert.deepStrictEqual(taskDefinition.properties.action.enum, ['build', 'run', 'test']);
     assert.ok(manifest.contributes.configuration.properties['vls.vCommand']);
+    assert.strictEqual(
+      manifest.contributes.configuration.properties['vls.coverage.enabled'].default,
+      true
+    );
+  });
+
+  it('instruments V test arguments with an isolated coverage directory', () => {
+    assert.deepStrictEqual(
+      instrumentCoverageArgs(['-nocolor', 'test', '.'], '/tmp/vls-coverage/run'),
+      [
+        '-no-skip-unused',
+        '-coverage',
+        '/tmp/vls-coverage/run',
+        '-nocolor',
+        'test',
+        '.',
+      ]
+    );
+  });
+
+  it('parses and merges covered and uncovered LCOV lines', () => {
+    const profile = parseLcovProfile(
+      [
+        'TN:',
+        'SF:src/example.v',
+        'DA:8,0',
+        'DA:3,2',
+        'end_of_record',
+        'SF:src/example.v',
+        'DA:8,1',
+        'DA:12,0',
+        'end_of_record',
+      ].join('\n'),
+      '/workspace'
+    );
+
+    assert.deepStrictEqual(profile.get(path.normalize('/workspace/src/example.v')), {
+      covered: [3, 8],
+      uncovered: [12],
+    });
   });
 
   it('defines the preconfigured workspace task arguments', () => {
