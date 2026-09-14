@@ -77,6 +77,14 @@ export function taskWorkingDirectory(filePath: string, workspaceFolder?: string)
   return workspaceFolder || path.dirname(filePath);
 }
 
+export function taskCoverageRoot(
+  filePath: string,
+  workspaceFolder?: string,
+  exists: (filePath: string) => boolean = fs.existsSync
+): string {
+  return workspaceFolder || standaloneTaskScope(filePath, exists);
+}
+
 function taskPath(targetPath: string, workingDirectory: string): string {
   const relativePath = path.relative(workingDirectory, targetPath);
   if (relativePath === '') {

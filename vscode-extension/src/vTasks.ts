@@ -3,7 +3,7 @@ import {
   activeRunTaskSpec,
   codeLensTaskSpec,
   shouldSaveTaskDocument,
-  standaloneTaskScope,
+  taskCoverageRoot,
   taskWorkingDirectory,
   taskActionTitle,
   VTaskAction,
@@ -22,6 +22,7 @@ interface VTaskDefinition extends vscode.TaskDefinition {
 }
 
 interface VTaskTarget {
+  coverageRoot: string;
   cwd: string;
   scope: vscode.WorkspaceFolder | vscode.TaskScope;
 }
@@ -82,7 +83,7 @@ function createVTask(
     action,
     coverageCommand: coverageDirectory ? command : undefined,
     coverageDirectory,
-    coverageRoot: coverageDirectory ? target.cwd : undefined,
+    coverageRoot: coverageDirectory ? target.coverageRoot : undefined,
   };
   const task = new vscode.Task(
     definition,
@@ -110,7 +111,11 @@ function createVTask(
 }
 
 function folderTarget(folder: vscode.WorkspaceFolder): VTaskTarget {
-  return { cwd: folder.uri.fsPath, scope: folder };
+  return {
+    coverageRoot: folder.uri.fsPath,
+    cwd: folder.uri.fsPath,
+    scope: folder,
+  };
 }
 
 function activeFileUri(): vscode.Uri | undefined {
@@ -127,6 +132,7 @@ function activeFileUri(): vscode.Uri | undefined {
 function targetForUri(uri: vscode.Uri): VTaskTarget {
   const folder = vscode.workspace.getWorkspaceFolder(uri);
   return {
+    coverageRoot: taskCoverageRoot(uri.fsPath, folder?.uri.fsPath),
     cwd: taskWorkingDirectory(uri.fsPath, folder?.uri.fsPath),
     scope: folder || vscode.TaskScope.Global,
   };
@@ -149,12 +155,10 @@ async function saveTaskDocuments(
   target: VTaskTarget,
   targetFilePath = target.cwd
 ): Promise<boolean> {
-  const folder = workspaceFolderForScope(target.scope);
-  const scopeRoot = folder?.uri.fsPath || standaloneTaskScope(targetFilePath);
   const documents = vscode.workspace.textDocuments.filter((document) => {
     return (
       document.uri.scheme === 'file' &&
-      shouldSaveTaskDocument(targetFilePath, scopeRoot, {
+      shouldSaveTaskDocument(targetFilePath, target.coverageRoot, {
         filePath: document.uri.fsPath,
         languageId: document.languageId,
         isDirty: document.isDirty,

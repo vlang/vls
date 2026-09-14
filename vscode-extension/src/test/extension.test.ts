@@ -7,6 +7,7 @@ import {
   codeLensTaskSpec,
   shouldSaveTaskDocument,
   standaloneTaskScope,
+  taskCoverageRoot,
   taskWorkingDirectory,
   workspaceTaskSpec,
 } from '../taskSpec';
@@ -188,11 +189,12 @@ describe('VLS VS Code extension', () => {
     );
   });
 
-  it('uses the nearest V project root for standalone CodeLens saves', () => {
+  it('uses the nearest V project root for standalone saves and coverage', () => {
     const target = '/project/cmd/app/main.v';
-    const projectRoot = standaloneTaskScope(target, (filePath) => {
+    const vmodExists = (filePath: string) => {
       return filePath === path.normalize('/project/v.mod');
-    });
+    };
+    const projectRoot = standaloneTaskScope(target, vmodExists);
     const dirtyImport = {
       filePath: '/project/lib/foo/foo.v',
       languageId: 'v',
@@ -200,6 +202,8 @@ describe('VLS VS Code extension', () => {
     };
 
     assert.strictEqual(projectRoot, path.normalize('/project'));
+    assert.strictEqual(taskCoverageRoot(target, undefined, vmodExists), projectRoot);
+    assert.strictEqual(taskWorkingDirectory(target), path.normalize('/project/cmd/app'));
     assert.ok(shouldSaveTaskDocument(target, projectRoot, dirtyImport));
     assert.strictEqual(
       standaloneTaskScope(target, () => false),
