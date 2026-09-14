@@ -19,6 +19,7 @@ import {
   parseLcovProfile,
   readFileModificationState,
   seedDirtyFileInvalidations,
+  snapshotVSourceFiles,
 } from '../coverageProfile';
 
 describe('VLS VS Code extension', () => {
@@ -133,6 +134,24 @@ describe('VLS VS Code extension', () => {
 
       fs.writeFileSync(sourceFile, 'module example\n\nfn changed() {}\n');
       assert.ok(!fileModificationStateMatches(sourceFile, state));
+    } finally {
+      fs.rmSync(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects source files changed after the coverage run begins', () => {
+    const temporaryRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'vls-coverage-start-state-'));
+    const sourceDirectory = path.join(temporaryRoot, 'src');
+    const sourceFile = path.join(sourceDirectory, 'example.v');
+    try {
+      fs.mkdirSync(sourceDirectory, { recursive: true });
+      fs.writeFileSync(sourceFile, 'module example\n');
+      const startStates = snapshotVSourceFiles(temporaryRoot);
+      const startState = startStates.get(canonicalFilePath(sourceFile));
+      assert.ok(startState);
+
+      fs.writeFileSync(sourceFile, 'module example\n\nfn changed_during_test() {}\n');
+      assert.ok(!fileModificationStateMatches(sourceFile, startState));
     } finally {
       fs.rmSync(temporaryRoot, { recursive: true, force: true });
     }

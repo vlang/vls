@@ -70,6 +70,60 @@ export function fileModificationStateMatches(
   );
 }
 
+export function snapshotVSourceFiles(root: string): Map<string, FileModificationState> {
+  const states = new Map<string, FileModificationState>();
+  const canonicalRoot = canonicalFilePath(root);
+  const pendingDirectories = [canonicalRoot];
+  const visitedDirectories = new Set<string>();
+
+  while (pendingDirectories.length > 0) {
+    const directory = pendingDirectories.pop()!;
+    const canonicalDirectory = canonicalFilePath(directory);
+    if (visitedDirectories.has(canonicalDirectory)) {
+      continue;
+    }
+    visitedDirectories.add(canonicalDirectory);
+
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(directory, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      if (entry.name === '.git') {
+        continue;
+      }
+      const entryPath = path.join(directory, entry.name);
+      let stat: fs.Stats;
+      try {
+        stat = fs.statSync(entryPath);
+      } catch {
+        continue;
+      }
+      if (stat.isDirectory()) {
+        const canonicalEntry = canonicalFilePath(entryPath);
+        const relativePath = path.relative(canonicalRoot, canonicalEntry);
+        if (
+          relativePath === '' ||
+          (relativePath !== '..' &&
+            !relativePath.startsWith(`..${path.sep}`) &&
+            !path.isAbsolute(relativePath))
+        ) {
+          pendingDirectories.push(canonicalEntry);
+        }
+      } else if (stat.isFile() && entry.name.toLowerCase().endsWith('.v')) {
+        const canonicalEntry = canonicalFilePath(entryPath);
+        const state = readFileModificationState(canonicalEntry);
+        if (state) {
+          states.set(canonicalEntry, state);
+        }
+      }
+    }
+  }
+  return states;
+}
+
 export function seedDirtyFileInvalidations(
   changedFiles: Map<string, number>,
   documents: readonly CoverageDocumentState[],
