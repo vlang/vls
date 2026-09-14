@@ -18,6 +18,7 @@ import {
   fileModificationStateMatches,
   instrumentCoverageArgs,
   parseLcovProfile,
+  pruneStaleCoverageFiles,
   readFileModificationState,
   recordFileChange,
   seedDirtyFileInvalidations,
@@ -196,6 +197,43 @@ describe('VLS VS Code extension', () => {
 
       fs.writeFileSync(sourceFile, 'module example\n\nfn changed() {}\n');
       assert.ok(!fileModificationStateMatches(sourceFile, state));
+    } finally {
+      fs.rmSync(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('prunes externally changed closed files from coverage totals', () => {
+    const temporaryRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'vls-coverage-prune-'));
+    const changedFile = path.join(temporaryRoot, 'changed.v');
+    const deletedFile = path.join(temporaryRoot, 'deleted.v');
+    const unchangedFile = path.join(temporaryRoot, 'unchanged.v');
+    try {
+      fs.writeFileSync(changedFile, 'module example\n');
+      fs.writeFileSync(deletedFile, 'module example\n');
+      fs.writeFileSync(unchangedFile, 'module example\n');
+      const changedState = readFileModificationState(changedFile);
+      const deletedState = readFileModificationState(deletedFile);
+      const unchangedState = readFileModificationState(unchangedFile);
+      assert.ok(changedState);
+      assert.ok(deletedState);
+      assert.ok(unchangedState);
+      const profile = new Map([
+        [changedFile, { covered: [1], uncovered: [2] }],
+        [deletedFile, { covered: [1], uncovered: [] }],
+        [unchangedFile, { covered: [1], uncovered: [] }],
+      ]);
+      const fileStates = new Map([
+        [changedFile, changedState],
+        [deletedFile, deletedState],
+        [unchangedFile, unchangedState],
+      ]);
+      fs.writeFileSync(changedFile, 'module example\n\nfn changed() {}\n');
+      fs.rmSync(deletedFile);
+
+      assert.strictEqual(pruneStaleCoverageFiles(profile, fileStates), true);
+      assert.deepStrictEqual([...profile.keys()], [unchangedFile]);
+      assert.deepStrictEqual([...fileStates.keys()], [unchangedFile]);
+      assert.strictEqual(pruneStaleCoverageFiles(profile, fileStates), false);
     } finally {
       fs.rmSync(temporaryRoot, { recursive: true, force: true });
     }

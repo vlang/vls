@@ -90,6 +90,22 @@ export function fileModificationStateMatches(
   );
 }
 
+export function pruneStaleCoverageFiles(
+  profile: CoverageProfile,
+  fileStates: Map<string, FileModificationState>
+): boolean {
+  let removedFile = false;
+  for (const filePath of profile.keys()) {
+    const state = fileStates.get(filePath);
+    if (!state || !fileModificationStateMatches(filePath, state)) {
+      profile.delete(filePath);
+      fileStates.delete(filePath);
+      removedFile = true;
+    }
+  }
+  return removedFile;
+}
+
 export function seedDirtyFileInvalidations(
   changedFiles: Map<string, number>,
   documents: readonly CoverageDocumentState[],

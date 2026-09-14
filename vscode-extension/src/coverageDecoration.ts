@@ -9,6 +9,7 @@ import {
   fileModificationStateMatches,
   FileModificationState,
   parseLcovProfile,
+  pruneStaleCoverageFiles,
   readFileModificationState,
   recordFileChange,
   seedDirtyFileInvalidations,
@@ -101,6 +102,7 @@ export class CoverageDecorationController implements vscode.Disposable {
   private readonly changedFiles = new Map<string, number>();
   private readonly profileFileStates = new Map<string, FileModificationState>();
   private readonly disposables: vscode.Disposable[];
+  private profileWatcher: vscode.Disposable | undefined;
   private profile: CoverageProfile = new Map();
   private nextGeneration = 0;
   private currentGeneration = 0;
@@ -208,6 +210,7 @@ export class CoverageDecorationController implements vscode.Disposable {
           this.profile.delete(filePath);
         }
       }
+      this.watchProfileSourceFiles(run.root);
       this.refreshVisibleEditors();
       this.updateStatus();
     } catch (error) {
@@ -231,6 +234,7 @@ export class CoverageDecorationController implements vscode.Disposable {
     for (const run of this.runWatchers.keys()) {
       this.disposeRunWatcher(run);
     }
+    this.disposeProfileWatcher();
     this.runChangedFiles.clear();
     for (const disposable of this.disposables) {
       disposable.dispose();
@@ -280,7 +284,37 @@ export class CoverageDecorationController implements vscode.Disposable {
     }
   }
 
+  private watchProfileSourceFiles(root: string): void {
+    this.disposeProfileWatcher();
+    if (this.profile.size === 0) {
+      return;
+    }
+    const watcher = vscode.workspace.createFileSystemWatcher(
+      new vscode.RelativePattern(vscode.Uri.file(root), '**/*.v')
+    );
+    const invalidate = (uri: vscode.Uri) => {
+      const filePath = canonicalFilePath(uri.fsPath);
+      if (this.profile.delete(filePath)) {
+        this.profileFileStates.delete(filePath);
+        this.refreshVisibleEditors();
+        this.updateStatus();
+      }
+    };
+    this.profileWatcher = vscode.Disposable.from(
+      watcher.onDidChange(invalidate),
+      watcher.onDidCreate(invalidate),
+      watcher.onDidDelete(invalidate),
+      watcher
+    );
+  }
+
+  private disposeProfileWatcher(): void {
+    this.profileWatcher?.dispose();
+    this.profileWatcher = undefined;
+  }
+
   private clearDecorations(): void {
+    this.disposeProfileWatcher();
     this.profile.clear();
     this.profileFileStates.clear();
     this.status.hide();
@@ -322,6 +356,9 @@ export class CoverageDecorationController implements vscode.Disposable {
   }
 
   private updateStatus(): void {
+    if (pruneStaleCoverageFiles(this.profile, this.profileFileStates)) {
+      this.refreshVisibleEditors();
+    }
     let covered = 0;
     let uncovered = 0;
     for (const fileCoverage of this.profile.values()) {
@@ -330,6 +367,7 @@ export class CoverageDecorationController implements vscode.Disposable {
     }
     const total = covered + uncovered;
     if (total === 0) {
+      this.disposeProfileWatcher();
       this.status.hide();
       return;
     }
