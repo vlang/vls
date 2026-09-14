@@ -22,7 +22,11 @@ import {
   recordFileChange,
   seedDirtyFileInvalidations,
 } from '../coverageProfile';
-import { processLaunchCommand, processTreeKillCommand } from '../processExecution';
+import {
+  isTerminalInterrupt,
+  processLaunchCommand,
+  processTreeKillCommand,
+} from '../processExecution';
 
 describe('VLS VS Code extension', () => {
   it('contributes build, run, and test commands and tasks', () => {
@@ -110,6 +114,12 @@ describe('VLS VS Code extension', () => {
       args: ['/pid', '1234', '/t', '/f'],
     });
     assert.strictEqual(processTreeKillCommand(1234, 'darwin'), undefined);
+  });
+
+  it('recognizes Ctrl+C terminal input as an interrupt', () => {
+    assert.strictEqual(isTerminalInterrupt('\x03'), true);
+    assert.strictEqual(isTerminalInterrupt('input\x03'), true);
+    assert.strictEqual(isTerminalInterrupt('^C'), false);
   });
 
   it('parses and merges covered and uncovered LCOV lines', () => {

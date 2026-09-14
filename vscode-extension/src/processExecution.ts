@@ -61,3 +61,7 @@ export function processTreeKillCommand(
     args: ['/pid', String(processId), '/t', '/f'],
   };
 }
+
+export function isTerminalInterrupt(data: string): boolean {
+  return data.includes('\x03');
+}

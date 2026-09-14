@@ -13,7 +13,11 @@ import {
 import { configuredCommand, resolvedCommand, serverCommand } from './vCommand';
 import { CoverageDecorationController } from './coverageDecoration';
 import { coverageArgsForRun } from './coverageProfile';
-import { processLaunchCommand, processTreeKillCommand } from './processExecution';
+import {
+  isTerminalInterrupt,
+  processLaunchCommand,
+  processTreeKillCommand,
+} from './processExecution';
 
 interface VTaskDefinition extends vscode.TaskDefinition {
   type: 'v';
@@ -41,6 +45,7 @@ class VProcessTerminal implements vscode.Pseudoterminal {
   readonly onDidClose = this.closeEmitter.event;
   private childProcess: ChildProcessWithoutNullStreams | undefined;
   private finished = false;
+  private terminationRequested = false;
 
   constructor(
     private readonly command: string,
@@ -76,9 +81,24 @@ class VProcessTerminal implements vscode.Pseudoterminal {
   }
 
   close(): void {
-    if (this.finished) {
+    this.terminateProcessTree();
+  }
+
+  handleInput(data: string): void {
+    if (isTerminalInterrupt(data)) {
+      this.terminateProcessTree();
       return;
     }
+    if (!this.terminationRequested && this.childProcess?.stdin.writable) {
+      this.childProcess.stdin.write(data);
+    }
+  }
+
+  private terminateProcessTree(): void {
+    if (this.finished || this.terminationRequested) {
+      return;
+    }
+    this.terminationRequested = true;
     const processId = this.childProcess?.pid;
     const treeKill = processId ? processTreeKillCommand(processId) : undefined;
     if (treeKill) {
@@ -110,12 +130,6 @@ class VProcessTerminal implements vscode.Pseudoterminal {
       this.childProcess.kill();
     } else {
       this.finish(1);
-    }
-  }
-
-  handleInput(data: string): void {
-    if (this.childProcess?.stdin.writable) {
-      this.childProcess.stdin.write(data);
     }
   }
 
