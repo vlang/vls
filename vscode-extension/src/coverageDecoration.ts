@@ -6,7 +6,10 @@ import * as vscode from 'vscode';
 import {
   canonicalFilePath,
   CoverageProfile,
+  fileModificationStateMatches,
+  FileModificationState,
   parseLcovProfile,
+  readFileModificationState,
   seedDirtyFileInvalidations,
 } from './coverageProfile';
 
@@ -80,6 +83,7 @@ export class CoverageDecorationController implements vscode.Disposable {
   private readonly allocatedDirectories = new Set<string>();
   private readonly executionGenerations = new Map<vscode.TaskExecution, number>();
   private readonly changedFiles = new Map<string, number>();
+  private readonly profileFileStates = new Map<string, FileModificationState>();
   private readonly disposables: vscode.Disposable[];
   private profile: CoverageProfile = new Map();
   private nextGeneration = 0;
@@ -102,6 +106,7 @@ export class CoverageDecorationController implements vscode.Disposable {
         const filePath = canonicalFilePath(event.document.uri.fsPath);
         this.changedFiles.set(filePath, this.currentGeneration);
         if (this.profile.delete(filePath)) {
+          this.profileFileStates.delete(filePath);
           this.refreshVisibleEditors();
           this.updateStatus();
         }
@@ -184,6 +189,15 @@ export class CoverageDecorationController implements vscode.Disposable {
             this.changedFiles.get(filePath) !== generation
         )
       );
+      this.profileFileStates.clear();
+      for (const filePath of [...this.profile.keys()]) {
+        const state = readFileModificationState(filePath);
+        if (state) {
+          this.profileFileStates.set(filePath, state);
+        } else {
+          this.profile.delete(filePath);
+        }
+      }
       this.refreshVisibleEditors();
       this.updateStatus();
     } catch (error) {
@@ -229,6 +243,7 @@ export class CoverageDecorationController implements vscode.Disposable {
 
   private clearDecorations(): void {
     this.profile.clear();
+    this.profileFileStates.clear();
     this.status.hide();
     this.refreshVisibleEditors();
   }
@@ -245,7 +260,15 @@ export class CoverageDecorationController implements vscode.Disposable {
       editor.setDecorations(this.uncoveredDecoration, []);
       return;
     }
-    const coverage = this.profile.get(canonicalFilePath(editor.document.uri.fsPath));
+    const filePath = canonicalFilePath(editor.document.uri.fsPath);
+    let coverage = this.profile.get(filePath);
+    const fileState = this.profileFileStates.get(filePath);
+    if (coverage && (!fileState || !fileModificationStateMatches(filePath, fileState))) {
+      this.profile.delete(filePath);
+      this.profileFileStates.delete(filePath);
+      this.updateStatus();
+      coverage = undefined;
+    }
     editor.setDecorations(this.coveredDecoration, this.lineRanges(editor, coverage?.covered || []));
     editor.setDecorations(
       this.uncoveredDecoration,

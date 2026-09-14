@@ -14,8 +14,10 @@ import {
 import { serverCommand } from '../vCommand';
 import {
   canonicalFilePath,
+  fileModificationStateMatches,
   instrumentCoverageArgs,
   parseLcovProfile,
+  readFileModificationState,
   seedDirtyFileInvalidations,
 } from '../coverageProfile';
 
@@ -118,6 +120,22 @@ describe('VLS VS Code extension', () => {
     );
 
     assert.deepStrictEqual([...changedFiles], [[canonicalFilePath('/workspace/dirty.v'), 3]]);
+  });
+
+  it('detects external filesystem modifications to covered files', () => {
+    const temporaryRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'vls-coverage-state-'));
+    const sourceFile = path.join(temporaryRoot, 'example.v');
+    try {
+      fs.writeFileSync(sourceFile, 'module example\n');
+      const state = readFileModificationState(sourceFile);
+      assert.ok(state);
+      assert.ok(fileModificationStateMatches(sourceFile, state));
+
+      fs.writeFileSync(sourceFile, 'module example\n\nfn changed() {}\n');
+      assert.ok(!fileModificationStateMatches(sourceFile, state));
+    } finally {
+      fs.rmSync(temporaryRoot, { recursive: true, force: true });
+    }
   });
 
   it('defines the preconfigured workspace task arguments', () => {

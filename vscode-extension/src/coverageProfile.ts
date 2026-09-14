@@ -13,6 +13,14 @@ export interface CoverageDocumentState {
   isDirty: boolean;
 }
 
+export interface FileModificationState {
+  ctimeMs: number;
+  device: number;
+  inode: number;
+  mtimeMs: number;
+  size: number;
+}
+
 export function canonicalFilePath(filePath: string, baseDirectory = process.cwd()): string {
   let absolutePath = path.isAbsolute(filePath)
     ? path.normalize(filePath)
@@ -27,6 +35,39 @@ export function canonicalFilePath(filePath: string, baseDirectory = process.cwd(
 
 export function instrumentCoverageArgs(args: string[], coverageDirectory: string): string[] {
   return ['-no-skip-unused', '-coverage', coverageDirectory, ...args];
+}
+
+export function readFileModificationState(filePath: string): FileModificationState | undefined {
+  try {
+    const stat = fs.statSync(filePath);
+    if (!stat.isFile()) {
+      return undefined;
+    }
+    return {
+      ctimeMs: stat.ctimeMs,
+      device: stat.dev,
+      inode: stat.ino,
+      mtimeMs: stat.mtimeMs,
+      size: stat.size,
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+export function fileModificationStateMatches(
+  filePath: string,
+  expected: FileModificationState
+): boolean {
+  const current = readFileModificationState(filePath);
+  return (
+    current !== undefined &&
+    current.ctimeMs === expected.ctimeMs &&
+    current.device === expected.device &&
+    current.inode === expected.inode &&
+    current.mtimeMs === expected.mtimeMs &&
+    current.size === expected.size
+  );
 }
 
 export function seedDirtyFileInvalidations(
