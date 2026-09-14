@@ -18,8 +18,8 @@ import {
   instrumentCoverageArgs,
   parseLcovProfile,
   readFileModificationState,
+  recordFileChange,
   seedDirtyFileInvalidations,
-  snapshotVSourceFiles,
 } from '../coverageProfile';
 
 describe('VLS VS Code extension', () => {
@@ -139,19 +139,27 @@ describe('VLS VS Code extension', () => {
     }
   });
 
-  it('rejects source files changed after the coverage run begins', () => {
-    const temporaryRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'vls-coverage-start-state-'));
-    const sourceDirectory = path.join(temporaryRoot, 'src');
-    const sourceFile = path.join(sourceDirectory, 'example.v');
+  it('canonicalizes deleted paths reported by a coverage watcher', () => {
+    const temporaryRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'vls-coverage-watch-'));
+    const realWorkspace = path.join(temporaryRoot, 'real-workspace');
+    const linkedWorkspace = path.join(temporaryRoot, 'linked-workspace');
+    const sourceFile = path.join(realWorkspace, 'example.v');
+    const linkedSourceFile = path.join(linkedWorkspace, 'example.v');
     try {
-      fs.mkdirSync(sourceDirectory, { recursive: true });
+      fs.mkdirSync(realWorkspace);
       fs.writeFileSync(sourceFile, 'module example\n');
-      const startStates = snapshotVSourceFiles(temporaryRoot);
-      const startState = startStates.get(canonicalFilePath(sourceFile));
-      assert.ok(startState);
+      fs.symlinkSync(
+        realWorkspace,
+        linkedWorkspace,
+        process.platform === 'win32' ? 'junction' : 'dir'
+      );
+      const canonicalSourceFile = canonicalFilePath(sourceFile);
+      fs.rmSync(sourceFile);
 
-      fs.writeFileSync(sourceFile, 'module example\n\nfn changed_during_test() {}\n');
-      assert.ok(!fileModificationStateMatches(sourceFile, startState));
+      const changedFiles = new Set<string>();
+      recordFileChange(changedFiles, linkedSourceFile);
+
+      assert.deepStrictEqual([...changedFiles], [canonicalSourceFile]);
     } finally {
       fs.rmSync(temporaryRoot, { recursive: true, force: true });
     }

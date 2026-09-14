@@ -9,8 +9,9 @@ import {
   fileModificationStateMatches,
   FileModificationState,
   parseLcovProfile,
+  readFileModificationState,
+  recordFileChange,
   seedDirtyFileInvalidations,
-  snapshotVSourceFiles,
 } from './coverageProfile';
 
 interface CoverageTaskDefinition extends vscode.TaskDefinition {
@@ -82,10 +83,8 @@ export class CoverageDecorationController implements vscode.Disposable {
   private readonly status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 10);
   private readonly allocatedDirectories = new Set<string>();
   private readonly executionGenerations = new Map<vscode.TaskExecution, number>();
-  private readonly executionSourceStates = new Map<
-    vscode.TaskExecution,
-    Map<string, FileModificationState>
-  >();
+  private readonly executionChangedFiles = new Map<vscode.TaskExecution, Set<string>>();
+  private readonly executionWatchers = new Map<vscode.TaskExecution, vscode.Disposable>();
   private readonly changedFiles = new Map<string, number>();
   private readonly profileFileStates = new Map<string, FileModificationState>();
   private readonly disposables: vscode.Disposable[];
@@ -147,7 +146,7 @@ export class CoverageDecorationController implements vscode.Disposable {
     this.currentGeneration = generation;
     this.executionGenerations.set(execution, generation);
     const root = (execution.task.definition as CoverageTaskDefinition).coverageRoot;
-    this.executionSourceStates.set(execution, root ? snapshotVSourceFiles(root) : new Map());
+    this.watchExecutionSourceFiles(execution, root);
     seedDirtyFileInvalidations(
       this.changedFiles,
       vscode.workspace.textDocuments
@@ -166,10 +165,10 @@ export class CoverageDecorationController implements vscode.Disposable {
   async endTask(execution: vscode.TaskExecution): Promise<void> {
     const directory = this.taskDirectory(execution.task);
     const generation = this.executionGenerations.get(execution);
-    const sourceStates = this.executionSourceStates.get(execution);
+    const changedDuringRun = this.executionChangedFiles.get(execution);
     this.executionGenerations.delete(execution);
-    this.executionSourceStates.delete(execution);
-    if (!directory || generation === undefined || !sourceStates) {
+    if (!directory || generation === undefined || !changedDuringRun) {
+      this.disposeExecutionWatcher(execution);
       return;
     }
 
@@ -195,13 +194,17 @@ export class CoverageDecorationController implements vscode.Disposable {
             filePath.endsWith('.v') &&
             isPathInside(filePath, root) &&
             this.changedFiles.get(filePath) !== generation &&
-            sourceStates.has(filePath) &&
-            fileModificationStateMatches(filePath, sourceStates.get(filePath)!)
+            !changedDuringRun.has(filePath)
         )
       );
       this.profileFileStates.clear();
-      for (const filePath of this.profile.keys()) {
-        this.profileFileStates.set(filePath, sourceStates.get(filePath)!);
+      for (const filePath of [...this.profile.keys()]) {
+        const state = readFileModificationState(filePath);
+        if (state && !changedDuringRun.has(filePath)) {
+          this.profileFileStates.set(filePath, state);
+        } else {
+          this.profile.delete(filePath);
+        }
       }
       this.refreshVisibleEditors();
       this.updateStatus();
@@ -210,6 +213,7 @@ export class CoverageDecorationController implements vscode.Disposable {
         vscode.window.showWarningMessage(`VLS could not load test coverage: ${String(error)}`);
       }
     } finally {
+      this.disposeExecutionWatcher(execution);
       try {
         fs.rmSync(directory, { recursive: true, force: true });
       } catch {
@@ -226,7 +230,10 @@ export class CoverageDecorationController implements vscode.Disposable {
 
   dispose(): void {
     this.currentGeneration = ++this.nextGeneration;
-    this.executionSourceStates.clear();
+    for (const execution of this.executionWatchers.keys()) {
+      this.disposeExecutionWatcher(execution);
+    }
+    this.executionChangedFiles.clear();
     for (const disposable of this.disposables) {
       disposable.dispose();
     }
@@ -245,6 +252,33 @@ export class CoverageDecorationController implements vscode.Disposable {
   private taskDirectory(task: vscode.Task): string | undefined {
     const directory = (task.definition as CoverageTaskDefinition).coverageDirectory;
     return directory && this.allocatedDirectories.has(directory) ? directory : undefined;
+  }
+
+  private watchExecutionSourceFiles(execution: vscode.TaskExecution, root?: string): void {
+    const changedFiles = new Set<string>();
+    this.executionChangedFiles.set(execution, changedFiles);
+    if (!root) {
+      return;
+    }
+    const watcher = vscode.workspace.createFileSystemWatcher(
+      new vscode.RelativePattern(vscode.Uri.file(root), '**/*.v')
+    );
+    const recordChange = (uri: vscode.Uri) => recordFileChange(changedFiles, uri.fsPath);
+    this.executionWatchers.set(
+      execution,
+      vscode.Disposable.from(
+        watcher.onDidChange(recordChange),
+        watcher.onDidCreate(recordChange),
+        watcher.onDidDelete(recordChange),
+        watcher
+      )
+    );
+  }
+
+  private disposeExecutionWatcher(execution: vscode.TaskExecution): void {
+    this.executionWatchers.get(execution)?.dispose();
+    this.executionWatchers.delete(execution);
+    this.executionChangedFiles.delete(execution);
   }
 
   private clearDecorations(): void {

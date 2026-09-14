@@ -25,16 +25,29 @@ export function canonicalFilePath(filePath: string, baseDirectory = process.cwd(
   let absolutePath = path.isAbsolute(filePath)
     ? path.normalize(filePath)
     : path.resolve(baseDirectory, filePath);
-  try {
-    absolutePath = fs.realpathSync.native(absolutePath);
-  } catch {
-    // Keep the lexical path when the file no longer exists.
+  let existingPath = absolutePath;
+  while (true) {
+    try {
+      const realExistingPath = fs.realpathSync.native(existingPath);
+      absolutePath = path.resolve(realExistingPath, path.relative(existingPath, absolutePath));
+      break;
+    } catch {
+      const parent = path.dirname(existingPath);
+      if (parent === existingPath) {
+        break;
+      }
+      existingPath = parent;
+    }
   }
   return process.platform === 'win32' ? absolutePath.toLowerCase() : absolutePath;
 }
 
 export function instrumentCoverageArgs(args: string[], coverageDirectory: string): string[] {
   return ['-no-skip-unused', '-coverage', coverageDirectory, ...args];
+}
+
+export function recordFileChange(changedFiles: Set<string>, filePath: string): void {
+  changedFiles.add(canonicalFilePath(filePath));
 }
 
 export function readFileModificationState(filePath: string): FileModificationState | undefined {
@@ -68,60 +81,6 @@ export function fileModificationStateMatches(
     current.mtimeMs === expected.mtimeMs &&
     current.size === expected.size
   );
-}
-
-export function snapshotVSourceFiles(root: string): Map<string, FileModificationState> {
-  const states = new Map<string, FileModificationState>();
-  const canonicalRoot = canonicalFilePath(root);
-  const pendingDirectories = [canonicalRoot];
-  const visitedDirectories = new Set<string>();
-
-  while (pendingDirectories.length > 0) {
-    const directory = pendingDirectories.pop()!;
-    const canonicalDirectory = canonicalFilePath(directory);
-    if (visitedDirectories.has(canonicalDirectory)) {
-      continue;
-    }
-    visitedDirectories.add(canonicalDirectory);
-
-    let entries: fs.Dirent[];
-    try {
-      entries = fs.readdirSync(directory, { withFileTypes: true });
-    } catch {
-      continue;
-    }
-    for (const entry of entries) {
-      if (entry.name === '.git') {
-        continue;
-      }
-      const entryPath = path.join(directory, entry.name);
-      let stat: fs.Stats;
-      try {
-        stat = fs.statSync(entryPath);
-      } catch {
-        continue;
-      }
-      if (stat.isDirectory()) {
-        const canonicalEntry = canonicalFilePath(entryPath);
-        const relativePath = path.relative(canonicalRoot, canonicalEntry);
-        if (
-          relativePath === '' ||
-          (relativePath !== '..' &&
-            !relativePath.startsWith(`..${path.sep}`) &&
-            !path.isAbsolute(relativePath))
-        ) {
-          pendingDirectories.push(canonicalEntry);
-        }
-      } else if (stat.isFile() && entry.name.toLowerCase().endsWith('.v')) {
-        const canonicalEntry = canonicalFilePath(entryPath);
-        const state = readFileModificationState(canonicalEntry);
-        if (state) {
-          states.set(canonicalEntry, state);
-        }
-      }
-    }
-  }
-  return states;
 }
 
 export function seedDirtyFileInvalidations(
