@@ -13,7 +13,7 @@ import {
   recordFileChange,
   seedDirtyFileInvalidations,
 } from './coverageProfile';
-import { windowsCommandShell } from './processExecution';
+import { processLaunchCommand } from './processExecution';
 
 export interface CoverageRun {
   command: string;
@@ -59,13 +59,21 @@ function runCoverageConverter(
   workingDirectory: string
 ): Promise<void> {
   return new Promise((resolve, reject) => {
+    const launch = processLaunchCommand(command, [
+      'cover',
+      coverageDirectory,
+      '--lcov',
+      reportPath,
+      '-P',
+      'false',
+    ]);
     execFile(
-      command,
-      ['cover', coverageDirectory, '--lcov', reportPath, '-P', 'false'],
+      launch.command,
+      launch.args,
       {
         cwd: workingDirectory,
         maxBuffer: 4 * 1024 * 1024,
-        shell: windowsCommandShell(command),
+        windowsVerbatimArguments: launch.windowsVerbatimArguments,
       },
       (error) => (error ? reject(error) : resolve())
     );

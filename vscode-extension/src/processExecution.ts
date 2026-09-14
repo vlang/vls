@@ -1,17 +1,52 @@
 export interface ProcessCommand {
   args: string[];
   command: string;
+  windowsVerbatimArguments?: boolean;
 }
 
-export function windowsCommandShell(
-  command: string,
-  platform = process.platform,
-  commandInterpreter = process.env.ComSpec
-): string | undefined {
-  if (platform !== 'win32' || !/\.(?:cmd|bat)$/i.test(command)) {
-    return undefined;
+const windowsCommandMetaCharacters = /([()\][%!^"`<>&|;, *?])/g;
+
+function escapeWindowsCommand(value: string): string {
+  return value.replace(windowsCommandMetaCharacters, '^$1');
+}
+
+function escapeWindowsArgument(value: string): string {
+  let quoted = '"';
+  let backslashes = 0;
+  for (const character of value) {
+    if (character === '\\') {
+      backslashes++;
+      continue;
+    }
+    if (character === '"') {
+      quoted += '\\'.repeat(backslashes * 2 + 1) + '"';
+    } else {
+      quoted += '\\'.repeat(backslashes) + character;
+    }
+    backslashes = 0;
   }
-  return commandInterpreter || 'cmd.exe';
+  quoted += '\\'.repeat(backslashes * 2) + '"';
+  return quoted.replace(windowsCommandMetaCharacters, '^$1');
+}
+
+export function processLaunchCommand(
+  command: string,
+  args: string[],
+  platform = process.platform,
+  commandInterpreter = process.env.ComSpec || process.env.COMSPEC
+): ProcessCommand {
+  if (platform !== 'win32' || !/\.(?:cmd|bat)$/i.test(command)) {
+    return { command, args: [...args] };
+  }
+  const commandLine = [
+    escapeWindowsCommand(command),
+    ...args.map(escapeWindowsArgument),
+  ].join(' ');
+  return {
+    command: commandInterpreter || 'cmd.exe',
+    args: ['/d', '/s', '/c', `"${commandLine}"`],
+    windowsVerbatimArguments: true,
+  };
 }
 
 export function processTreeKillCommand(

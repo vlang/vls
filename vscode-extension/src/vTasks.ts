@@ -13,7 +13,7 @@ import {
 import { configuredCommand, resolvedCommand, serverCommand } from './vCommand';
 import { CoverageDecorationController } from './coverageDecoration';
 import { coverageArgsForRun } from './coverageProfile';
-import { processTreeKillCommand, windowsCommandShell } from './processExecution';
+import { processLaunchCommand, processTreeKillCommand } from './processExecution';
 
 interface VTaskDefinition extends vscode.TaskDefinition {
   type: 'v';
@@ -26,8 +26,8 @@ interface VTaskTarget {
   scope: vscode.WorkspaceFolder | vscode.TaskScope;
 }
 
-function terminalText(value: Buffer): string {
-  return value.toString().replace(/\r?\n/g, '\r\n');
+function terminalText(value: string): string {
+  return value.replace(/\r?\n/g, '\r\n');
 }
 
 function displayProcessArgument(value: string): string {
@@ -54,15 +54,18 @@ class VProcessTerminal implements vscode.Pseudoterminal {
     this.onStart?.();
     const displayedCommand = [this.command, ...this.args].map(displayProcessArgument).join(' ');
     this.writeEmitter.fire(`> ${displayedCommand}\r\n`);
-    this.childProcess = spawn(this.command, this.args, {
+    const launch = processLaunchCommand(this.command, this.args);
+    this.childProcess = spawn(launch.command, launch.args, {
       cwd: this.cwd,
       detached: process.platform !== 'win32',
-      shell: windowsCommandShell(this.command),
+      windowsVerbatimArguments: launch.windowsVerbatimArguments,
     });
-    this.childProcess.stdout.on('data', (chunk: Buffer) => {
+    this.childProcess.stdout.setEncoding('utf8');
+    this.childProcess.stderr.setEncoding('utf8');
+    this.childProcess.stdout.on('data', (chunk: string) => {
       this.writeEmitter.fire(terminalText(chunk));
     });
-    this.childProcess.stderr.on('data', (chunk: Buffer) => {
+    this.childProcess.stderr.on('data', (chunk: string) => {
       this.writeEmitter.fire(terminalText(chunk));
     });
     this.childProcess.on('error', (error) => {

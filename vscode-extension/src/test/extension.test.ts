@@ -22,7 +22,7 @@ import {
   recordFileChange,
   seedDirtyFileInvalidations,
 } from '../coverageProfile';
-import { processTreeKillCommand, windowsCommandShell } from '../processExecution';
+import { processLaunchCommand, processTreeKillCommand } from '../processExecution';
 
 describe('VLS VS Code extension', () => {
   it('contributes build, run, and test commands and tasks', () => {
@@ -75,16 +75,33 @@ describe('VLS VS Code extension', () => {
     ]);
   });
 
-  it('launches Windows command wrappers through the command interpreter', () => {
+  it('quotes Windows command wrapper arguments through the command interpreter', () => {
     const commandInterpreter = 'C:\\Windows\\System32\\cmd.exe';
-
-    assert.strictEqual(
-      windowsCommandShell('C:\\V Compiler\\v.cmd', 'win32', commandInterpreter),
+    const launch = processLaunchCommand(
+      'C:\\V Compiler\\v.cmd',
+      ['test', 'C:\\My Project\\some&file.v', '100%'],
+      'win32',
       commandInterpreter
     );
-    assert.strictEqual(windowsCommandShell('C:\\V Compiler\\v.bat', 'win32'), 'cmd.exe');
-    assert.strictEqual(windowsCommandShell('C:\\V Compiler\\v.exe', 'win32'), undefined);
-    assert.strictEqual(windowsCommandShell('/usr/local/bin/v.cmd', 'linux'), undefined);
+
+    assert.deepStrictEqual(launch, {
+      command: commandInterpreter,
+      args: [
+        '/d',
+        '/s',
+        '/c',
+        '"C:\\V^ Compiler\\v.cmd ^"test^" ^"C:\\My^ Project\\some^&file.v^" ^"100^%^""',
+      ],
+      windowsVerbatimArguments: true,
+    });
+    assert.deepStrictEqual(processLaunchCommand('C:\\V Compiler\\v.exe', ['test'], 'win32'), {
+      command: 'C:\\V Compiler\\v.exe',
+      args: ['test'],
+    });
+    assert.deepStrictEqual(processLaunchCommand('/usr/local/bin/v.cmd', ['test'], 'linux'), {
+      command: '/usr/local/bin/v.cmd',
+      args: ['test'],
+    });
   });
 
   it('terminates Windows test process trees with taskkill', () => {
