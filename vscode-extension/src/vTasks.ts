@@ -1,3 +1,4 @@
+import { ChildProcessWithoutNullStreams, spawn } from 'child_process';
 import * as vscode from 'vscode';
 import {
   activeRunTaskSpec,
@@ -11,7 +12,7 @@ import {
 } from './taskSpec';
 import { configuredCommand, resolvedCommand, serverCommand } from './vCommand';
 import { CoverageDecorationController } from './coverageDecoration';
-import { instrumentCoverageArgs } from './coverageProfile';
+import { coverageArgsForRun } from './coverageProfile';
 
 interface VTaskDefinition extends vscode.TaskDefinition {
   type: 'v';
@@ -25,6 +26,85 @@ interface VTaskTarget {
   coverageRoot: string;
   cwd: string;
   scope: vscode.WorkspaceFolder | vscode.TaskScope;
+}
+
+function terminalText(value: Buffer): string {
+  return value.toString().replace(/\r?\n/g, '\r\n');
+}
+
+function displayProcessArgument(value: string): string {
+  return /^[a-zA-Z0-9_./:\-]+$/.test(value) ? value : JSON.stringify(value);
+}
+
+class VProcessTerminal implements vscode.Pseudoterminal {
+  private readonly writeEmitter = new vscode.EventEmitter<string>();
+  private readonly closeEmitter = new vscode.EventEmitter<number>();
+  readonly onDidWrite = this.writeEmitter.event;
+  readonly onDidClose = this.closeEmitter.event;
+  private childProcess: ChildProcessWithoutNullStreams | undefined;
+  private finished = false;
+
+  constructor(
+    private readonly command: string,
+    private readonly args: string[],
+    private readonly cwd: string
+  ) {}
+
+  open(): void {
+    const displayedCommand = [this.command, ...this.args].map(displayProcessArgument).join(' ');
+    this.writeEmitter.fire(`> ${displayedCommand}\r\n`);
+    this.childProcess = spawn(this.command, this.args, {
+      cwd: this.cwd,
+      detached: process.platform !== 'win32',
+    });
+    this.childProcess.stdout.on('data', (chunk: Buffer) => {
+      this.writeEmitter.fire(terminalText(chunk));
+    });
+    this.childProcess.stderr.on('data', (chunk: Buffer) => {
+      this.writeEmitter.fire(terminalText(chunk));
+    });
+    this.childProcess.on('error', (error) => {
+      this.writeEmitter.fire(`${error.message}\r\n`);
+      this.finish(1);
+    });
+    this.childProcess.on('close', (code) => this.finish(code ?? 1));
+  }
+
+  close(): void {
+    if (this.finished) {
+      return;
+    }
+    const processId = this.childProcess?.pid;
+    if (processId && process.platform !== 'win32') {
+      try {
+        process.kill(-processId, 'SIGTERM');
+        return;
+      } catch {
+        // Fall through to terminating the direct child.
+      }
+    }
+    if (this.childProcess) {
+      this.childProcess.kill();
+    } else {
+      this.finish(1);
+    }
+  }
+
+  handleInput(data: string): void {
+    if (this.childProcess?.stdin.writable) {
+      this.childProcess.stdin.write(data);
+    }
+  }
+
+  private finish(code: number): void {
+    if (this.finished) {
+      return;
+    }
+    this.finished = true;
+    this.closeEmitter.fire(code);
+    this.writeEmitter.dispose();
+    this.closeEmitter.dispose();
+  }
 }
 
 function vCommandSetting(folder?: vscode.WorkspaceFolder): string {
@@ -74,10 +154,7 @@ function createVTask(
 ): vscode.Task {
   const folder = workspaceFolderForScope(target.scope);
   const command = resolvedVCommand(folder) || configuredVCommand(folder);
-  const coverageDirectory = action === 'test' ? coverage.createTaskDirectory(folder) : undefined;
-  const executionArgs = coverageDirectory
-    ? instrumentCoverageArgs(args, coverageDirectory)
-    : args;
+  const coverageDirectory = action === 'test' ? coverage.createTaskDirectory() : undefined;
   const definition: VTaskDefinition = {
     type: 'v',
     action,
@@ -90,10 +167,20 @@ function createVTask(
     target.scope,
     name,
     'V',
-    new vscode.ProcessExecution(command, executionArgs, { cwd: target.cwd }),
+    coverageDirectory
+      ? new vscode.CustomExecution(() => {
+          const resource = folder?.uri || vscode.Uri.file(target.coverageRoot);
+          const executionArgs = coverageArgsForRun(
+            args,
+            coverageDirectory,
+            coverage.isEnabled(resource)
+          );
+          return Promise.resolve(new VProcessTerminal(command, executionArgs, target.cwd));
+        })
+      : new vscode.ProcessExecution(command, args, { cwd: target.cwd }),
     ['$vls']
   );
-  task.detail = `${command} ${executionArgs.join(' ')}`;
+  task.detail = `${command} ${args.join(' ')}`;
   task.presentationOptions = {
     clear: true,
     echo: true,
@@ -106,6 +193,7 @@ function createVTask(
     task.group = vscode.TaskGroup.Build;
   } else if (action === 'test') {
     task.group = vscode.TaskGroup.Test;
+    task.runOptions = { reevaluateOnRerun: true };
   }
   return task;
 }
@@ -327,9 +415,9 @@ export function registerVTasks(context: vscode.ExtensionContext): VTaskManager {
     vscode.commands.registerCommand('vls.test', () => runPaletteTask('test', manager)),
     vscode.commands.registerCommand('vls.coverage.clear', () => coverage.clear()),
     vscode.tasks.onDidStartTask((event) => coverage.beginTask(event.execution)),
-    vscode.tasks.onDidEndTaskProcess((event) => void coverage.endTask(event.execution)),
     vscode.tasks.onDidEndTask((event) => {
       manager.endExecution(event.execution);
+      void coverage.endTask(event.execution);
     }),
     manager,
     coverage

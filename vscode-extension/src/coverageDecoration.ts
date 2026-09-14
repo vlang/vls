@@ -122,13 +122,13 @@ export class CoverageDecorationController implements vscode.Disposable {
     ];
   }
 
-  createTaskDirectory(folder?: vscode.WorkspaceFolder): string | undefined {
-    const enabled = vscode.workspace
-      .getConfiguration('vls', folder?.uri)
+  isEnabled(resource?: vscode.Uri): boolean {
+    return vscode.workspace
+      .getConfiguration('vls', resource)
       .get<boolean>('coverage.enabled', true);
-    if (!enabled) {
-      return undefined;
-    }
+  }
+
+  createTaskDirectory(): string {
     const directory = path.join(
       coverageTempRoot,
       `${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`
@@ -139,13 +139,13 @@ export class CoverageDecorationController implements vscode.Disposable {
 
   beginTask(execution: vscode.TaskExecution): void {
     const directory = this.taskDirectory(execution.task);
-    if (!directory) {
+    const root = (execution.task.definition as CoverageTaskDefinition).coverageRoot;
+    if (!directory || !root || !this.isEnabled(vscode.Uri.file(root))) {
       return;
     }
     const generation = ++this.nextGeneration;
     this.currentGeneration = generation;
     this.executionGenerations.set(execution, generation);
-    const root = (execution.task.definition as CoverageTaskDefinition).coverageRoot;
     this.watchExecutionSourceFiles(execution, root);
     seedDirtyFileInvalidations(
       this.changedFiles,

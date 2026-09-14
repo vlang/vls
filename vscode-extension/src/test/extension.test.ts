@@ -14,6 +14,7 @@ import {
 import { serverCommand } from '../vCommand';
 import {
   canonicalFilePath,
+  coverageArgsForRun,
   fileModificationStateMatches,
   instrumentCoverageArgs,
   parseLcovProfile,
@@ -58,6 +59,19 @@ describe('VLS VS Code extension', () => {
         '.',
       ]
     );
+  });
+
+  it('re-evaluates coverage arguments for every task run', () => {
+    const args = ['-nocolor', 'test', '.'];
+    const coverageDirectory = '/tmp/vls-coverage/run';
+
+    assert.deepStrictEqual(coverageArgsForRun(args, coverageDirectory, false), args);
+    assert.deepStrictEqual(coverageArgsForRun(args, coverageDirectory, true), [
+      '-no-skip-unused',
+      '-coverage',
+      coverageDirectory,
+      ...args,
+    ]);
   });
 
   it('parses and merges covered and uncovered LCOV lines', () => {

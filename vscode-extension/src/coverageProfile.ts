@@ -46,6 +46,14 @@ export function instrumentCoverageArgs(args: string[], coverageDirectory: string
   return ['-no-skip-unused', '-coverage', coverageDirectory, ...args];
 }
 
+export function coverageArgsForRun(
+  args: string[],
+  coverageDirectory: string,
+  coverageEnabled: boolean
+): string[] {
+  return coverageEnabled ? instrumentCoverageArgs(args, coverageDirectory) : [...args];
+}
+
 export function recordFileChange(changedFiles: Set<string>, filePath: string): void {
   changedFiles.add(canonicalFilePath(filePath));
 }
