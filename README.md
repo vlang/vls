@@ -27,6 +27,8 @@ In VS Code run `Extensions: Install from VSIX...`
 The extension includes `V: Build`, `V: Run`, and `V: Test` in the Command Palette and in
 `Tasks: Run Task`. Runnable CodeLens actions open a task terminal so program and compiler output is
 always visible. Set `vls.vCommand` when the V compiler is not available through VS Code's `PATH`.
+Test tasks also visualize line coverage: covered executable lines are green and uncovered lines are
+red. The visualization can be disabled with `vls.coverage.enabled`.
 
 ### Features
 

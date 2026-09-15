@@ -1,7 +1,8 @@
 # VLS VS Code Extension
 
 This extension integrates the V Language Server (VLS) with Visual Studio Code. It provides
-diagnostics, completion, navigation, inlay hints, runnable CodeLens actions, and built-in V tasks.
+diagnostics, completion, navigation, inlay hints, runnable CodeLens actions, built-in V tasks, and
+test coverage visualization.
 
 ## Installation
 
@@ -43,6 +44,10 @@ revealed automatically and displays the command, compiler output, stdout, stderr
 The active file is saved before it runs so the terminal executes the source currently in the
 editor.
 
+Test tasks collect line coverage automatically. After a run, executable source lines are
+highlighted green when covered and red when uncovered. The status bar shows the aggregate
+percentage. Run `V: Clear Test Coverage` or click the status item to remove the highlights.
+
 ## Configuration
 
 Open VS Code settings and search for `vls`:
@@ -54,6 +59,7 @@ Open VS Code settings and search for `vls`:
   and `${workspaceFolder}` are supported. Reload VS Code after changing it.
 - **`vls.inlayHints.enabled`**: Enable or disable inlay hints for V files (default: `true`).
 - **`vls.diagnostics.enabled`**: Enable or disable live diagnostics (default: `true`).
+- **`vls.coverage.enabled`**: Collect and visualize coverage after test tasks (default: `true`).
 
 Example `settings.json`:
 
@@ -63,7 +69,8 @@ Example `settings.json`:
   "vls.args": [],
   "vls.vCommand": "/path/to/v",
   "vls.inlayHints.enabled": true,
-  "vls.diagnostics.enabled": true
+  "vls.diagnostics.enabled": true,
+  "vls.coverage.enabled": true
 }
 ```
 

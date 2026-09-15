@@ -1,5 +1,11 @@
 # Change Log
 
+## Unreleased
+
+- V test tasks and test CodeLens actions now collect line coverage in isolated temporary profiles.
+- Covered executable lines are highlighted green and uncovered lines red, with an aggregate status
+  item and a `V: Clear Test Coverage` command.
+
 ## 0.0.4 — CodeLens buffer consistency (2026-09-10)
 
 - CodeLens and Command Palette task runs now save every dirty V buffer in the active workspace
