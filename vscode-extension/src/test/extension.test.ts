@@ -18,10 +18,12 @@ import {
   fileModificationStateMatches,
   instrumentCoverageArgs,
   parseLcovProfile,
+  parseLcovProfileFile,
   pruneStaleCoverageFiles,
   readFileModificationState,
   recordFileChange,
   seedDirtyFileInvalidations,
+  visibleCoverageLines,
 } from '../coverageProfile';
 import {
   isTerminalInterrupt,
@@ -143,6 +145,53 @@ describe('VLS VS Code extension', () => {
       covered: [3, 8],
       uncovered: [12],
     });
+  });
+
+  it('streams LCOV while filtering files before retaining line data', async () => {
+    const temporaryRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'vls-coverage-stream-'));
+    const workspace = path.join(temporaryRoot, 'workspace');
+    const reportPath = path.join(temporaryRoot, 'coverage.lcov');
+    const includedFile = path.join(workspace, 'included.v');
+    const excludedFile = path.join(temporaryRoot, 'excluded.v');
+    try {
+      fs.mkdirSync(workspace);
+      fs.writeFileSync(includedFile, 'module example\n');
+      fs.writeFileSync(excludedFile, 'module example\n');
+      fs.writeFileSync(
+        reportPath,
+        [
+          `SF:${includedFile}`,
+          'DA:1,1',
+          'end_of_record',
+          `SF:${excludedFile}`,
+          'DA:1,0',
+          'end_of_record',
+        ].join('\n')
+      );
+
+      const profile = await parseLcovProfileFile(reportPath, workspace, (filePath) => {
+        return filePath === canonicalFilePath(includedFile);
+      });
+
+      assert.deepStrictEqual([...profile], [
+        [canonicalFilePath(includedFile), { covered: [1], uncovered: [] }],
+      ]);
+    } finally {
+      fs.rmSync(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('bounds coverage decorations to visible lines', () => {
+    const lines = Array.from({ length: 10_000 }, (_value, index) => index + 1);
+
+    assert.deepStrictEqual(
+      visibleCoverageLines(lines, [{ start: 99, end: 109 }], lines.length, 5),
+      [100, 101, 102, 103, 104]
+    );
+    assert.deepStrictEqual(
+      visibleCoverageLines([1, 5, 10], [{ start: 4, end: 9 }], 7, 1000),
+      [5]
+    );
   });
 
   it('canonicalizes relative LCOV paths through workspace symlinks', () => {
