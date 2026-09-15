@@ -1,5 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import * as readline from 'readline';
 
 export interface LineCoverage {
   covered: number[];
@@ -19,6 +20,67 @@ export interface FileModificationState {
   inode: number;
   mtimeMs: number;
   size: number;
+}
+
+export interface CoverageLineRange {
+  end: number;
+  start: number;
+}
+
+type CoverageFileFilter = (filePath: string) => boolean;
+
+class LcovProfileParser {
+  private readonly hitsByFile = new Map<string, Map<number, number>>();
+  private currentFile: string | undefined;
+
+  constructor(
+    private readonly baseDirectory: string,
+    private readonly includeFile?: CoverageFileFilter
+  ) {}
+
+  addLine(rawLine: string): void {
+    if (rawLine.startsWith('SF:')) {
+      const filePath = rawLine.slice(3).trim();
+      const canonicalPath = filePath
+        ? canonicalFilePath(filePath, this.baseDirectory)
+        : undefined;
+      this.currentFile =
+        canonicalPath && (!this.includeFile || this.includeFile(canonicalPath))
+          ? canonicalPath
+          : undefined;
+      if (this.currentFile && !this.hitsByFile.has(this.currentFile)) {
+        this.hitsByFile.set(this.currentFile, new Map());
+      }
+      return;
+    }
+    if (!this.currentFile || !rawLine.startsWith('DA:')) {
+      return;
+    }
+
+    const fields = rawLine.slice(3).split(',');
+    const line = Number.parseInt(fields[0] || '', 10);
+    const hits = Number.parseInt(fields[1] || '', 10);
+    if (!Number.isSafeInteger(line) || line < 1 || !Number.isSafeInteger(hits) || hits < 0) {
+      return;
+    }
+    const fileHits = this.hitsByFile.get(this.currentFile)!;
+    fileHits.set(line, (fileHits.get(line) || 0) + hits);
+  }
+
+  profile(): CoverageProfile {
+    const profile: CoverageProfile = new Map();
+    for (const [filePath, lineHits] of this.hitsByFile) {
+      const covered: number[] = [];
+      const uncovered: number[] = [];
+      for (const [line, hits] of lineHits) {
+        (hits > 0 ? covered : uncovered).push(line);
+      }
+      covered.sort((left, right) => left - right);
+      uncovered.sort((left, right) => left - right);
+      profile.set(filePath, { covered, uncovered });
+    }
+    return profile;
+  }
 }
 
 export function canonicalFilePath(filePath: string, baseDirectory = process.cwd()): string {
@@ -119,43 +181,77 @@ export function seedDirtyFileInvalidations(
   }
 }
 
-export function parseLcovProfile(content: string, baseDirectory: string): CoverageProfile {
-  const hitsByFile = new Map<string, Map<number, number>>();
-  let currentFile: string | undefined;
+export function parseLcovProfile(
+  content: string,
+  baseDirectory: string,
+  includeFile?: CoverageFileFilter
+): CoverageProfile {
+  const parser = new LcovProfileParser(baseDirectory, includeFile);
+  let lineStart = 0;
+  while (lineStart <= content.length) {
+    const newline = content.indexOf('\n', lineStart);
+    let lineEnd = newline === -1 ? content.length : newline;
+    if (lineEnd > lineStart && content.charCodeAt(lineEnd - 1) === 13) {
+      lineEnd--;
+    }
+    parser.addLine(content.slice(lineStart, lineEnd));
+    if (newline === -1) {
+      break;
+    }
+    lineStart = newline + 1;
+  }
+  return parser.profile();
+}
 
-  for (const rawLine of content.split(/\r?\n/)) {
-    if (rawLine.startsWith('SF:')) {
-      const filePath = rawLine.slice(3).trim();
-      currentFile = filePath ? canonicalFilePath(filePath, baseDirectory) : undefined;
-      if (currentFile && !hitsByFile.has(currentFile)) {
-        hitsByFile.set(currentFile, new Map());
+export async function parseLcovProfileFile(
+  filePath: string,
+  baseDirectory: string,
+  includeFile?: CoverageFileFilter
+): Promise<CoverageProfile> {
+  const parser = new LcovProfileParser(baseDirectory, includeFile);
+  const input = fs.createReadStream(filePath, { encoding: 'utf8' });
+  const lines = readline.createInterface({ input, crlfDelay: Infinity });
+  for await (const rawLine of lines) {
+    parser.addLine(rawLine);
+  }
+  return parser.profile();
+}
+
+export function visibleCoverageLines(
+  oneBasedLines: readonly number[],
+  visibleRanges: readonly CoverageLineRange[],
+  lineCount: number,
+  limit: number
+): number[] {
+  if (lineCount < 1 || limit < 1) {
+    return [];
+  }
+  const selected: number[] = [];
+  for (const range of visibleRanges) {
+    const firstLine = Math.max(1, range.start + 1);
+    const lastLine = Math.min(lineCount, range.end + 1);
+    let left = 0;
+    let right = oneBasedLines.length;
+    while (left < right) {
+      const middle = Math.floor((left + right) / 2);
+      if (oneBasedLines[middle]! < firstLine) {
+        left = middle + 1;
+      } else {
+        right = middle;
       }
-      continue;
     }
-    if (!currentFile || !rawLine.startsWith('DA:')) {
-      continue;
+    for (let index = left; index < oneBasedLines.length; index++) {
+      const line = oneBasedLines[index]!;
+      if (line > lastLine) {
+        break;
+      }
+      if (selected[selected.length - 1] !== line) {
+        selected.push(line);
+        if (selected.length === limit) {
+          return selected;
+        }
+      }
     }
-
-    const fields = rawLine.slice(3).split(',');
-    const line = Number.parseInt(fields[0] || '', 10);
-    const hits = Number.parseInt(fields[1] || '', 10);
-    if (!Number.isSafeInteger(line) || line < 1 || !Number.isSafeInteger(hits) || hits < 0) {
-      continue;
-    }
-    const fileHits = hitsByFile.get(currentFile)!;
-    fileHits.set(line, (fileHits.get(line) || 0) + hits);
   }
-
-  const profile: CoverageProfile = new Map();
-  for (const [filePath, lineHits] of hitsByFile) {
-    const covered: number[] = [];
-    const uncovered: number[] = [];
-    for (const [line, hits] of lineHits) {
-      (hits > 0 ? covered : uncovered).push(line);
-    }
-    covered.sort((left, right) => left - right);
-    uncovered.sort((left, right) => left - right);
-    profile.set(filePath, { covered, uncovered });
-  }
-  return profile;
+  return selected;
 }

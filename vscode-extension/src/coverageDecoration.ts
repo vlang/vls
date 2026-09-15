@@ -8,11 +8,12 @@ import {
   CoverageProfile,
   fileModificationStateMatches,
   FileModificationState,
-  parseLcovProfile,
+  parseLcovProfileFile,
   pruneStaleCoverageFiles,
   readFileModificationState,
   recordFileChange,
   seedDirtyFileInvalidations,
+  visibleCoverageLines,
 } from './coverageProfile';
 import { processLaunchCommand } from './processExecution';
 
@@ -23,6 +24,7 @@ export interface CoverageRun {
 }
 
 const coverageTempRoot = path.join(os.tmpdir(), 'vls-coverage');
+const maximumDecorationsPerStyle = 1000;
 
 function isPathInside(filePath: string, root: string): boolean {
   const relativePath = path.relative(canonicalFilePath(root), canonicalFilePath(filePath));
@@ -85,14 +87,10 @@ export class CoverageDecorationController implements vscode.Disposable {
   private readonly coveredDecoration = vscode.window.createTextEditorDecorationType({
     isWholeLine: true,
     backgroundColor: 'rgba(46, 160, 67, 0.20)',
-    overviewRulerColor: 'rgba(46, 160, 67, 0.95)',
-    overviewRulerLane: vscode.OverviewRulerLane.Left,
   });
   private readonly uncoveredDecoration = vscode.window.createTextEditorDecorationType({
     isWholeLine: true,
     backgroundColor: 'rgba(248, 81, 73, 0.20)',
-    overviewRulerColor: 'rgba(248, 81, 73, 0.95)',
-    overviewRulerLane: vscode.OverviewRulerLane.Left,
   });
   private readonly status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 10);
   private readonly allocatedDirectories = new Set<string>();
@@ -116,6 +114,9 @@ export class CoverageDecorationController implements vscode.Disposable {
         if (editor) {
           this.decorateEditor(editor);
         }
+      }),
+      vscode.window.onDidChangeTextEditorVisibleRanges((event) => {
+        this.decorateEditor(event.textEditor);
       }),
       vscode.workspace.onDidChangeTextDocument((event) => {
         if (event.document.uri.scheme !== 'file') {
@@ -188,19 +189,23 @@ export class CoverageDecorationController implements vscode.Disposable {
       }
       const reportPath = path.join(run.directory, 'coverage.lcov');
       await runCoverageConverter(run.command, run.directory, reportPath, run.root);
-      const parsed = parseLcovProfile(fs.readFileSync(reportPath, 'utf8'), run.root);
+      const parsed = await parseLcovProfileFile(
+        reportPath,
+        run.root,
+        (filePath) => filePath.endsWith('.v') && isPathInside(filePath, run.root)
+      );
       if (generation !== this.currentGeneration) {
         return;
       }
-      this.profile = new Map(
-        [...parsed].filter(
-          ([filePath]) =>
-            filePath.endsWith('.v') &&
-            isPathInside(filePath, run.root) &&
-            this.changedFiles.get(filePath) !== generation &&
-            !changedDuringRun.has(filePath)
-        )
-      );
+      for (const filePath of parsed.keys()) {
+        if (
+          this.changedFiles.get(filePath) === generation ||
+          changedDuringRun.has(filePath)
+        ) {
+          parsed.delete(filePath);
+        }
+      }
+      this.profile = parsed;
       this.profileFileStates.clear();
       for (const filePath of [...this.profile.keys()]) {
         const state = readFileModificationState(filePath);
@@ -350,8 +355,12 @@ export class CoverageDecorationController implements vscode.Disposable {
   }
 
   private lineRanges(editor: vscode.TextEditor, oneBasedLines: number[]): vscode.Range[] {
-    return oneBasedLines
-      .filter((line) => line <= editor.document.lineCount)
+    return visibleCoverageLines(
+      oneBasedLines,
+      editor.visibleRanges.map((range) => ({ start: range.start.line, end: range.end.line })),
+      editor.document.lineCount,
+      maximumDecorationsPerStyle
+    )
       .map((line) => new vscode.Range(line - 1, 0, line - 1, 0));
   }
 
