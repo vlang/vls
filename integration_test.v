@@ -487,6 +487,32 @@ fn test_integration_diagnostics_valid_code() {
 	}
 }
 
+fn test_integration_library_module_diagnostics_do_not_require_main() {
+	mut app, project_dir := create_integration_test_env()
+	defer {
+		cleanup_integration_test_env(app, project_dir)
+	}
+
+	integration_test_must_write_file(os.join_path(project_dir, 'v.mod'), "Module {\n\tname: 'library_test'\n}\n")
+	module_dir := os.join_path(project_dir, 'library')
+	integration_test_must_mkdir_all(module_dir)
+	test_file := os.join_path(module_dir, 'library.v')
+	content := 'module library\n\npub fn answer() int {\n\treturn 42\n}\n'
+	integration_test_must_write_file(test_file, content)
+	uri := path_to_uri(test_file)
+	app.open_files[uri] = content
+
+	diagnostics := app.run_v_check(uri, content)
+	assert diagnostics.len == 0
+	assert !diagnostics.any(it.message.contains('project must include a `main` module'))
+
+	invalid_content := 'module library\n\npub fn answer() int {\n\treturn missing_value\n}\n'
+	app.open_files[uri] = invalid_content
+	invalid_diagnostics := app.run_v_check(uri, invalid_content)
+	assert invalid_diagnostics.any(it.message.contains('missing_value'))
+	assert !invalid_diagnostics.any(it.message.contains('project must include a `main` module'))
+}
+
 fn test_integration_diagnostics_deduplication() {
 	// Test that duplicate errors at same position are filtered
 	mut seen_positions := map[string]bool{}
@@ -2641,6 +2667,30 @@ fn integration_run_frames(mut app App, project_dir string, name string, payloads
 	mut reader := io.new_buffered_reader(reader: input, cap: 1)
 	app.handle_requests(mut reader)
 	return app.captured_output
+}
+
+fn test_integration_sublime_text_lsp_handshake() {
+	mut app, project_dir := create_integration_test_env()
+	defer {
+		cleanup_integration_test_env(app, project_dir)
+	}
+	root_uri := path_to_uri(project_dir)
+	initialize := '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":42,"clientInfo":{"name":"Sublime Text LSP","version":"2.13.0"},"locale":"en","rootUri":"${root_uri}","rootPath":"${project_dir}","workspaceFolders":[{"uri":"${root_uri}","name":"test_project"}],"capabilities":{"general":{"positionEncodings":["utf-16"]},"workspace":{"workspaceFolders":true,"configuration":true,"didChangeWatchedFiles":{"dynamicRegistration":true,"relativePatternSupport":true}},"textDocument":{"synchronization":{"dynamicRegistration":true,"willSave":true,"willSaveWaitUntil":true,"didSave":true},"completion":{"dynamicRegistration":true,"completionItem":{"snippetSupport":true,"documentationFormat":["markdown","plaintext"]}},"hover":{"dynamicRegistration":true,"contentFormat":["markdown","plaintext"]},"publishDiagnostics":{"versionSupport":true}},"window":{"workDoneProgress":true}},"initializationOptions":{}}}'
+	initialized := '{"jsonrpc":"2.0","method":"initialized","params":{}}'
+	output := integration_run_frames(mut app, project_dir, 'sublime_handshake', [initialize,
+		initialized])
+
+	assert app.received_initialize
+	assert app.workspace_roots == [project_dir]
+	assert app.position_encoding == .utf16
+	assert app.supports_dynamic_watched_files_registration
+	assert app.supports_work_done_progress
+	assert output.len == 2
+	assert output[0].contains('"id":1')
+	assert output[0].contains('"positionEncoding":"utf-16"')
+	assert output[0].contains('"serverInfo":{"name":"vls","version":"0.0.2"}')
+	assert output[1].contains('"method":"client/registerCapability"')
+	assert output[1].contains('"workspace/didChangeWatchedFiles"')
 }
 
 fn test_integration_string_request_id_is_echoed() {
