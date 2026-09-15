@@ -8,7 +8,45 @@ environment variable.
 
 Otherwise, you can set the path to the vls binary in your editor's settings.
 
-#### Building the vscode vls extension
+### Sublime Text
+
+1. Build VLS with `v .` and place the resulting `vls` binary in your `PATH`.
+2. In Sublime Text, open `Package Control: Install Package` from the Command Palette and install
+   both `V` (for the `source.v` syntax) and `LSP`.
+3. Open `Preferences > Package Settings > LSP > Server Configurations` and add this to
+   `Packages/User/LanguageServers.sublime-settings`:
+
+```json
+{
+  "vls": {
+    "enabled": true,
+    "command": ["vls"],
+    "selector": "source.v"
+  }
+}
+```
+
+If `vls` is not in Sublime Text's `PATH`, replace it with the absolute path to the binary. If the
+V compiler is not in that `PATH` either, use absolute paths and add `VLS_V_COMMAND`:
+
+```json
+{
+  "vls": {
+    "enabled": true,
+    "command": ["/absolute/path/to/vls"],
+    "selector": "source.v",
+    "env": {
+      "VLS_V_COMMAND": "/absolute/path/to/v"
+    }
+  }
+}
+```
+
+Open a folder containing a V project, then open a `.v` file. The Sublime status bar should show
+that VLS has started. Use `Tools > Developer > Show Scope Name` to confirm that the file's base
+scope is `source.v` if the server does not start.
+
+### Building the VS Code VLS extension
 
 ```
 cd vscode-extension

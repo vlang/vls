@@ -343,7 +343,7 @@ fn test_cleanup_compilation_temp_removes_project_dir() {
 // single, literal argument-vector elements, so command injection is impossible.
 
 fn test_build_v_check_args_single_passes_path_literally() {
-	args := build_v_check_args_single('/tmp/a b/test.v')
+	args := build_v_check_args_single('/tmp/a b/test.v', false)
 	mut expected := v3_compiler_selection_args()
 	expected << ['-check', '-nocolor', '/tmp/a b/test.v']
 	assert args == expected
@@ -359,7 +359,7 @@ fn test_build_v_check_args_single_passes_path_literally() {
 }
 
 fn test_build_v_check_args_multifile_uses_v3_compatible_flags() {
-	args := build_v_check_args_multifile()
+	args := build_v_check_args_multifile(false)
 	mut expected := v3_compiler_selection_args()
 	expected << ['-check', '-nocolor', '.']
 	assert args == expected
@@ -374,10 +374,22 @@ fn test_build_v_check_args_multifile_uses_v3_compatible_flags() {
 	}
 }
 
+fn test_build_v_check_args_use_shared_for_library_modules() {
+	single_args := build_v_check_args_single('/tmp/library.v', true)
+	mut expected_single := v3_compiler_selection_args()
+	expected_single << ['-shared', '-check', '-nocolor', '/tmp/library.v']
+	assert single_args == expected_single
+
+	multifile_args := build_v_check_args_multifile(true)
+	mut expected_multifile := v3_compiler_selection_args()
+	expected_multifile << ['-shared', '-check', '-nocolor', '.']
+	assert multifile_args == expected_multifile
+}
+
 fn test_build_v_check_args_single_no_shell_injection() {
 	// A path containing command substitution must remain one literal argv element.
 	malicious := '/tmp/\$(touch /tmp/pwned)/x.v'
-	args := build_v_check_args_single(malicious)
+	args := build_v_check_args_single(malicious, false)
 	assert malicious in args
 	// The dangerous text is never split or interpreted; it is exactly one element.
 	mut count := 0
@@ -775,7 +787,7 @@ fn test_cache_v_check_result_keeps_valid_clean_and_diagnostic_results() {
 fn test_run_v_argv_reports_missing_working_dir() {
 	missing_dir := os.join_path(os.temp_dir(), 'vls_missing_dir_${os.getpid()}_${time.now().unix_nano()}')
 	original := os.getwd()
-	result := run_v_argv(build_v_check_args_multifile(), missing_dir)
+	result := run_v_argv(build_v_check_args_multifile(false), missing_dir)
 	assert result.exit_code != 0
 	// The parent process working directory must never be mutated.
 	assert os.getwd() == original

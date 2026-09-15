@@ -243,16 +243,24 @@ fn v3_compiler_selection_args() []string {
 	return []
 }
 
-fn build_v_check_args_single(file_to_check string) []string {
+fn build_v_check_args_single(file_to_check string, is_library_module bool) []string {
 	mut args := v3_compiler_selection_args()
+	if is_library_module {
+		args << '-shared'
+	}
 	// V3 emits warnings by default. At the pinned compiler revision `-w` means
 	// "hide warnings" and also selects established-compiler compatibility.
 	args << ['-check', '-nocolor', file_to_check]
 	return args
 }
 
-fn build_v_check_args_multifile() []string {
+fn build_v_check_args_multifile(is_library_module bool) []string {
 	mut args := v3_compiler_selection_args()
+	if is_library_module {
+		// Library modules have no `fn main()`. Without `-shared`, the compiler
+		// reports that absence as an error before checking the actual source.
+		args << '-shared'
+	}
 	// Do not add `-w`: omitting it preserves V3's default warning diagnostics.
 	args << ['-check', '-nocolor', '.']
 	return args
@@ -803,11 +811,13 @@ fn (mut app App) run_v_check(path string, text string) []JsonError {
 	}
 
 	mut cmd_args := []string{}
+	module_name := get_module_name(text)
+	is_library_module := module_name != '' && module_name != 'main'
 	if use_multifile {
-		cmd_args = build_v_check_args_multifile()
+		cmd_args = build_v_check_args_multifile(is_library_module)
 		log('MULTIFILE CMD - compile_target=${compile_target}): v ${cmd_args.join(' ')}')
 	} else {
-		cmd_args = build_v_check_args_single(file_to_check)
+		cmd_args = build_v_check_args_single(file_to_check, is_library_module)
 		log('SINGLEFILE CMD: v ${cmd_args.join(' ')}')
 	}
 

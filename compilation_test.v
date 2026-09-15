@@ -36,6 +36,6 @@ fn test_smoke_raw_id_extraction() {
 fn test_smoke_argv_is_shell_free() {
 	// A malicious path stays a single literal argv element (no shell involved).
 	malicious := '/tmp/\$(touch /tmp/pwned)/x.v'
-	args := build_v_check_args_single(malicious)
+	args := build_v_check_args_single(malicious, false)
 	assert malicious in args
 }
