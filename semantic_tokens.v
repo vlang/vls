@@ -111,7 +111,14 @@ fn tokenize_v_line(line string, line_idx int, mut state TokenizeState, mut token
 			return
 		}
 	}
+	tokenize_v_code(line, col, n, line_idx, mut state, mut tokens)
+}
 
+// tokenize_v_code scans `line[from..to]` as V code and appends its tokens. It is
+// used for whole lines and for the expressions inside string interpolations.
+fn tokenize_v_code(line string, from int, to int, line_idx int, mut state TokenizeState, mut tokens []SemToken) {
+	n := to
+	mut col := from
 	for col < n {
 		c := line[col]
 
@@ -185,26 +192,7 @@ fn tokenize_v_line(line string, line_idx int, mut state TokenizeState, mut token
 
 		// String literals: "…" or '…'
 		if c == `"` || c == `'` {
-			start := col
-			quote := c
-			col++
-			for col < n {
-				if line[col] == `\\` {
-					col += 2
-					continue
-				}
-				if line[col] == quote {
-					col++
-					break
-				}
-				col++
-			}
-			tokens << SemToken{
-				line: line_idx
-				start: start
-				length: col - start
-				type_idx: sem_tok_string
-			}
+			col = tokenize_v_string(line, col, n, line_idx, mut state, mut tokens)
 			continue
 		}
 
@@ -254,6 +242,94 @@ fn tokenize_v_line(line string, line_idx int, mut state TokenizeState, mut token
 
 		col++
 	}
+}
+
+// tokenize_v_string scans the string literal whose quote is at `line[start]` and
+// returns the column after it. Only its literal parts are string tokens:
+// `${expr}` is tokenized as code and `$name` gets no token, so the editor colors
+// both as the code they are instead of as text.
+fn tokenize_v_string(line string, start int, to int, line_idx int, mut state TokenizeState, mut tokens []SemToken) int {
+	quote := line[start]
+	mut segment_start := start
+	mut col := start + 1
+	for col < to {
+		ch := line[col]
+		if ch == `\\` {
+			col += 2
+			continue
+		}
+		if ch == quote {
+			col++
+			break
+		}
+		if ch == `$` && col + 1 < to && line[col + 1] == `{` {
+			close := interpolation_end(line, col + 1, to)
+			if close < 0 {
+				col++
+				continue
+			}
+			append_string_token(mut tokens, line_idx, segment_start, col)
+			tokenize_v_code(line, col + 2, close, line_idx, mut state, mut tokens)
+			col = close + 1
+			segment_start = col
+			continue
+		}
+		if ch == `$` && col + 1 < to && line[col + 1] in identifier_start_chars {
+			append_string_token(mut tokens, line_idx, segment_start, col)
+			col++
+			for col < to && (line[col] in identifier_chars
+				|| (line[col] == `.` && col + 1 < to && line[col + 1] in identifier_start_chars)) {
+				col++
+			}
+			segment_start = col
+			continue
+		}
+		col++
+	}
+	if col > to {
+		col = to
+	}
+	append_string_token(mut tokens, line_idx, segment_start, col)
+	return col
+}
+
+fn append_string_token(mut tokens []SemToken, line_idx int, start int, end int) {
+	if end > start {
+		tokens << SemToken{
+			line: line_idx
+			start: start
+			length: end - start
+			type_idx: sem_tok_string
+		}
+	}
+}
+
+// interpolation_end returns the column of the `}` that closes the interpolation
+// whose `{` is at `line[open]`, skipping nested braces and strings, or -1.
+fn interpolation_end(line string, open int, to int) int {
+	mut depth := 0
+	mut i := open
+	for i < to {
+		c := line[i]
+		if c == `'` || c == `"` {
+			i++
+			for i < to && line[i] != c {
+				if line[i] == `\\` {
+					i++
+				}
+				i++
+			}
+		} else if c == `{` {
+			depth++
+		} else if c == `}` {
+			depth--
+			if depth == 0 {
+				return i
+			}
+		}
+		i++
+	}
+	return -1
 }
 
 // classify_v_identifier returns the semantic token type index for an identifier,

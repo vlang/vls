@@ -6064,7 +6064,10 @@ fn test_literal_and_container_receiver_completion_falls_back_to_compiler() {
 			line: completion_line
 			char: lines[completion_line].len
 		})
-		assert indexed.use_compiler
+		// Both literals are typed by the index, which lists their builtin members.
+		assert !indexed.use_compiler, completion_case.str()
+		expected_member := if case_idx == 0 { 'after' } else { 'filter' }
+		assert indexed.items.any(it.label == expected_member), completion_case.str()
 		response := app.operation_at_pos(.completion, Request{
 			id: 9301 + case_idx
 			method: 'textDocument/completion'
@@ -6106,12 +6109,13 @@ fn test_typed_container_receiver_does_not_infer_nested_struct_type() {
 		lines := content.split_into_lines()
 		completion_line := lines.index('\tusers.')
 		assert completion_line >= 0
-		assert app.infer_receiver_type(uri, content, 'users', completion_line) == '', declaration
+		// The array is never confused with its element type `User`.
+		assert app.infer_receiver_type(uri, content, 'users', completion_line) == '[]User', declaration
 		indexed := app.indexed_completions(uri, Position{
 			line: completion_line
 			char: lines[completion_line].len
 		})
-		assert indexed.use_compiler, declaration
+		assert !indexed.use_compiler, declaration
 		assert !indexed.items.any(it.label in ['name', 'save']), declaration
 		response := app.operation_at_pos(.completion, Request{
 			id: 9350
@@ -6409,8 +6413,12 @@ fn test_non_identifier_receiver_uses_compiler_fallback() {
 			line: completion_line
 			char: lines[completion_line].len
 		})
-		assert indexed.use_compiler
-		assert indexed.items.len == 0
+		// The index types the receiver itself: `Service`'s method, never the free
+		// function `start()`.
+		assert !indexed.use_compiler
+		starts := indexed.items.filter(it.label == 'start')
+		assert starts.len == 1, indexed.items.map(it.label).str()
+		assert starts[0].detail.contains('(service Service)'), starts[0].detail
 	}
 
 	definition_line := lines.index('\tmake_service().start()')
@@ -7425,13 +7433,14 @@ fn test_receiver_inference_stops_at_completed_declaration_rhs() {
 	lines := content.split_into_lines()
 	completion_line := lines.index('\ttext.')
 	assert completion_line >= 0
-	assert app.infer_receiver_type(uri, content, 'text', completion_line) == ''
+	// The literal types `text`; inference must not continue into `user := User{}`.
+	assert app.infer_receiver_type(uri, content, 'text', completion_line) == 'string'
 
 	indexed := app.indexed_completions(uri, Position{
 		line: completion_line
 		char: lines[completion_line].len
 	})
-	assert indexed.use_compiler
+	assert indexed.items.any(it.label == 'after')
 	assert !indexed.items.any(it.label == 'save')
 
 	continued_content := 'module main\n\nstruct User {}\n\nfn main() {\n\tcontinued :=\n\t\tUser{}\n\tcontinued.\n}\n'
@@ -9513,4 +9522,658 @@ fn test_prepare_call_hierarchy_returns_function_item() {
 	assert items[0].name == 'helper'
 	assert items[0].uri == uri
 	assert items[0].selection_range.start.line == 2
+}
+
+fn indexed_completions_at_line_end(dir_name string, content string, line_text string) IndexedCompletionResult {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, dir_name)
+	must_mkdir_all(test_dir)
+	main_file := os.join_path(test_dir, 'main.v')
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	lines := content.split_into_lines()
+	line := lines.index(line_text)
+	assert line >= 0, line_text
+	return app.indexed_completions(uri, Position{
+		line: line
+		char: lines[line].len
+	})
+}
+
+fn test_thread_handle_from_spawned_fn_literal_completes_wait() {
+	result := indexed_completions_at_line_end('thread_fn_literal_completion', 'module main\n\nfn main() {\n\ta := 1.5\n\tb := 2\n\tth := spawn fn (a f64, b int) f64 {\n\t\treturn a + f64(b)\n\t}(a, b)\n\tth.\n}\n', '\tth.')
+	waits := result.items.filter(it.label == 'wait')
+	assert waits.len == 1, result.items.map(it.label).str()
+	assert waits[0].kind == 2
+	assert waits[0].detail == 'fn (t thread f64) wait() f64'
+}
+
+fn test_thread_handle_from_spawned_call_completes_wait() {
+	result := indexed_completions_at_line_end('thread_call_completion', 'module main\n\nfn work() int {\n\treturn 1\n}\n\nfn main() {\n\tth := spawn work()\n\tth.\n}\n', '\tth.')
+	waits := result.items.filter(it.label == 'wait')
+	assert waits.len == 1, result.items.map(it.label).str()
+	assert waits[0].detail == 'fn (t thread int) wait() int'
+}
+
+fn test_thread_array_completes_wait_and_array_members() {
+	result := indexed_completions_at_line_end('thread_array_completion', 'module main\n\nfn work() int {\n\treturn 1\n}\n\nfn main() {\n\tmut threads := []thread int{}\n\tthreads << spawn work()\n\tthreads.\n}\n', '\tthreads.')
+	waits := result.items.filter(it.label == 'wait')
+	assert waits.len == 1, result.items.map(it.label).str()
+	assert waits[0].detail == 'fn (a []thread int) wait() []int'
+	// `len`, `cap` and the other array members come from VLS itself now.
+	labels := result.items.map(it.label)
+	assert 'len' in labels && 'cap' in labels && 'filter' in labels, labels.str()
+	assert !result.use_compiler
+}
+
+fn test_thread_array_of_results_wait_returns_result_array() {
+	result := indexed_completions_at_line_end('thread_result_array_completion', 'module main\n\nfn work() !int {\n\treturn 1\n}\n\nfn main() {\n\tmut threads := []thread !int{}\n\tthreads << spawn work()\n\tthreads.\n}\n', '\tthreads.')
+	waits := result.items.filter(it.label == 'wait')
+	assert waits.len == 1, result.items.map(it.label).str()
+	assert waits[0].detail == 'fn (a []thread !int) wait() ![]int'
+}
+
+fn sorted_completion_labels(result IndexedCompletionResult) []string {
+	mut labels := result.items.map(it.label)
+	labels.sort()
+	return labels
+}
+
+fn test_channel_literal_completes_channel_members() {
+	result := indexed_completions_at_line_end('channel_literal_completion', 'module main\n\nfn main() {\n\tch := chan int{cap: 5}\n\tch.\n}\n', '\tch.')
+	assert sorted_completion_labels(result) == ['cap', 'close', 'closed', 'len', 'try_pop', 'try_push']
+	close_items := result.items.filter(it.label == 'close')
+	assert close_items[0].detail == 'fn (ch chan int) close()'
+	push_items := result.items.filter(it.label == 'try_push')
+	assert push_items[0].detail == 'fn (ch chan int) try_push(val int) ChanState'
+	pop_items := result.items.filter(it.label == 'try_pop')
+	assert pop_items[0].detail == 'fn (ch chan int) try_pop(mut val int) ChanState'
+	assert (pop_items[0].insert_text or { '' }) == 'try_pop(mut \${1:val})\$0'
+	closed_items := result.items.filter(it.label == 'closed')
+	assert closed_items[0].kind == 10
+	assert closed_items[0].detail == 'bool'
+	// V3, the default compiler, types `len` and `cap` as `int` (V1 said `u32`).
+	assert result.items.filter(it.label == 'len')[0].detail == 'int'
+	assert result.items.filter(it.label == 'cap')[0].detail == 'int'
+}
+
+fn test_thread_parameter_completes_wait_with_return_type() {
+	result := indexed_completions_at_line_end('thread_param_completion', 'module main\n\nfn join(th thread int) {\n\tth.\n}\n\nfn main() {}\n', '\tth.')
+	waits := result.items.filter(it.label == 'wait')
+	assert waits.len == 1, result.items.map(it.label).str()
+	assert waits[0].detail == 'fn (t thread int) wait() int'
+}
+
+fn test_channel_parameter_completes_channel_members() {
+	result := indexed_completions_at_line_end('channel_param_completion', 'module main\n\nfn worker(ch chan int) {\n\tch.\n}\n\nfn main() {}\n', '\tch.')
+	assert sorted_completion_labels(result) == ['cap', 'close', 'closed', 'len', 'try_pop', 'try_push']
+}
+
+fn test_channel_fields_complete_like_their_type() {
+	cap_result := indexed_completions_at_line_end('channel_cap_chain', 'module main\n\nfn main() {\n\tch := chan int{cap: 2}\n\tch.cap.\n}\n', '\tch.cap.')
+	cap_labels := cap_result.items.map(it.label)
+	assert 'str' in cap_labels, cap_labels.str()
+	assert 'hex' in cap_labels, cap_labels.str()
+	closed_result := indexed_completions_at_line_end('channel_closed_chain', 'module main\n\nfn worker(ch chan int) {\n\tch.closed.\n}\n\nfn main() {}\n', '\tch.closed.')
+	assert 'str' in closed_result.items.map(it.label), closed_result.items.map(it.label).str()
+}
+
+fn test_literal_bindings_complete_their_builtin_methods() {
+	int_labels := indexed_completions_at_line_end('literal_int_completion', 'module main\n\nfn main() {\n\tn := 5\n\tn.\n}\n', '\tn.').items.map(it.label)
+	assert 'str' in int_labels, int_labels.str()
+	assert 'hex' in int_labels, int_labels.str()
+	float_labels := indexed_completions_at_line_end('literal_float_completion', 'module main\n\nfn main() {\n\tf := 1.5\n\tf.\n}\n', '\tf.').items.map(it.label)
+	assert 'str' in float_labels, float_labels.str()
+	rune_labels := indexed_completions_at_line_end('literal_rune_completion', 'module main\n\nfn main() {\n\tr := `a`\n\tr.\n}\n', '\tr.').items.map(it.label)
+	assert 'str' in rune_labels, rune_labels.str()
+	assert 'after' !in rune_labels, rune_labels.str()
+	string_labels := indexed_completions_at_line_end('literal_string_completion', "module main\n\nfn main() {\n\ts := 'hello'\n\ts.\n}\n", '\ts.').items.map(it.label)
+	assert 'after' in string_labels, string_labels.str()
+}
+
+fn test_operator_overloads_are_not_offered_as_completions() {
+	content := "module main\n\nfn main() {\n\ts := 'hello'\n\ts.\n}\n"
+	string_labels := indexed_completions_at_line_end('string_operator_completion', content, '\ts.').items.map(it.label)
+	for operator in ['+', '==', '<'] {
+		assert operator !in string_labels, string_labels.str()
+	}
+	// The compiler's list includes the operator overloads that builtin declares.
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	dir := os.join_path(app.temp_dir, 'compiler_operator_completion')
+	must_mkdir_all(dir)
+	main_file := os.join_path(dir, 'main.v')
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	result := app.run_v_line_info(.completion, uri, '5:3')
+	assert result is []Detail
+	compiler_labels := (result as []Detail).map(it.label)
+	assert 'to_upper' in compiler_labels, compiler_labels.str()
+	for operator in ['+', '==', '<'] {
+		assert operator !in compiler_labels, compiler_labels.str()
+	}
+}
+
+const enum_completion_source = 'module main\n\nenum Color {\n\tred\n\tgreen\n\tblue\n}\n\nstruct Pixel {\n\tcolor Color\n}\n\nfn paint(n int, c Color) {\n\tprintln(c)\n}\n\nfn main() {\n\tmut b := Color.red\n\t@@\n}\n'
+
+fn enum_completion_labels(dir_name string, line string) []string {
+	content := enum_completion_source.replace('@@', line)
+	mut labels := indexed_completions_at_line_end(dir_name, content, '\t${line}').items.map(it.label)
+	labels.sort()
+	return labels
+}
+
+fn test_enum_type_name_completes_its_values() {
+	// `from` is the static function V gives every enum.
+	assert enum_completion_labels('enum_type_name', 'a := Color.') == ['blue', 'from', 'green',
+		'red']
+}
+
+fn test_enum_shorthand_completes_from_the_expected_type() {
+	assert enum_completion_labels('enum_assign', 'b = .') == ['blue', 'green', 'red']
+	assert enum_completion_labels('enum_compare', 'if b == .') == ['blue', 'green', 'red']
+	assert enum_completion_labels('enum_argument', 'paint(1, .') == ['blue', 'green', 'red']
+	assert enum_completion_labels('enum_field', 'p := Pixel{color: .') == ['blue', 'green', 'red']
+}
+
+fn test_enum_shorthand_completes_match_branches() {
+	content := enum_completion_source.replace('@@', 'match b {\n\t\t.red {}\n\t\t.')
+	mut labels := indexed_completions_at_line_end('enum_match', content, '\t\t.').items.map(it.label)
+	labels.sort()
+	assert labels == ['blue', 'green', 'red']
+}
+
+// member_completion_source declares one type of each kind. A case replaces
+// `@@body` (or `@@param`, inside a function taking parameters of several types) with its code, where
+// `@cursor` marks the position that asks for completion.
+const member_completion_source = 'module main
+
+import time
+import strings
+
+@[flag]
+enum Perm {
+	read
+	write
+}
+
+enum Color {
+	red
+	green
+}
+
+fn Color.first() Color {
+	return .red
+}
+
+fn (c Color) label() string {
+	return c.str()
+}
+
+struct Point {
+	x int
+	y int
+}
+
+fn Point.origin() Point {
+	return Point{}
+}
+
+fn (p Point) moved() Point {
+	return p
+}
+
+struct Shape {
+	pos  Point
+	name string
+}
+
+type Figure = Point | Shape
+
+interface Animal {
+	speak() string
+}
+
+type Meters = f64
+
+type Names = []string
+
+fn (m Meters) km() f64 {
+	return f64(m) / 1000
+}
+
+fn make_point() Point {
+	return Point{}
+}
+
+fn load() !Point {
+	return Point{}
+}
+
+fn use_params(c Color, nums []int, table map[string]int, cells &[]int, a Animal, u Unknown) {
+	@@param
+}
+
+fn main() {
+	@@body
+}
+'
+
+struct MemberCompletionCase {
+	name   string
+	body   string
+	param  string
+	want   []string
+	forbid []string
+}
+
+fn member_completion_items(c MemberCompletionCase) []Detail {
+	return member_completion_result(c).items
+}
+
+fn member_completion_result(c MemberCompletionCase) IndexedCompletionResult {
+	marked := member_completion_source.replace('@@body', c.body).replace('@@param', c.param)
+	lines := marked.split_into_lines()
+	mut line := -1
+	mut col := -1
+	for i, text in lines {
+		if idx := text.index('@cursor') {
+			line = i
+			col = idx
+			break
+		}
+	}
+	assert line >= 0, c.name
+	content := marked.replace('@cursor', '')
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	dir := os.join_path(app.temp_dir, 'member_completion_${c.name}')
+	must_mkdir_all(dir)
+	main_file := os.join_path(dir, 'main.v')
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	return app.indexed_completions(uri, Position{
+		line: line
+		char: col
+	})
+}
+
+fn test_member_completion_resolves_the_type_of_any_expression() {
+	point := ['x', 'y', 'moved', 'str']
+	cases := [
+		MemberCompletionCase{
+			name: 'flag_enum_type'
+			body: 'a := Perm.@cursor'
+			want: ['read', 'write', 'zero', 'from']
+		},
+		MemberCompletionCase{
+			name:   'enum_type'
+			body:   'a := Color.@cursor'
+			want:   ['red', 'green', 'from', 'first']
+			forbid: ['zero']
+		},
+		MemberCompletionCase{
+			name: 'struct_type'
+			body: 'o := Point.@cursor'
+			want: ['origin']
+		},
+		MemberCompletionCase{
+			name: 'flag_enum_value'
+			body: 'mut p := Perm.read\n\tp.@cursor'
+			want: ['has', 'all', 'set', 'set_all', 'clear', 'clear_all', 'toggle', 'is_empty',
+				'str']
+		},
+		MemberCompletionCase{
+			name:   'enum_value'
+			body:   'c := Color.red\n\tc.@cursor'
+			want:   ['label', 'str']
+			forbid: ['has', 'zero', 'from']
+		},
+		MemberCompletionCase{
+			name:  'enum_parameter'
+			param: 'c.@cursor'
+			want:  ['label', 'str']
+		},
+		MemberCompletionCase{
+			name: 'alias'
+			body: 'm := Meters(1.5)\n\tm.@cursor'
+			want: ['km', 'str']
+		},
+		MemberCompletionCase{
+			name: 'alias_of_array'
+			body: "n := Names(['a'])\n\tn.@cursor"
+			want: ['join', 'len', 'str']
+		},
+		MemberCompletionCase{
+			name: 'call'
+			body: 'make_point().@cursor'
+			want: point
+		},
+		MemberCompletionCase{
+			name: 'module_call'
+			body: 'time.now().@cursor'
+			want: ['year', 'format']
+		},
+		MemberCompletionCase{
+			name: 'array_index'
+			body: 'pts := [Point{}]\n\tpts[0].@cursor'
+			want: point
+		},
+		MemberCompletionCase{
+			name: 'map_index'
+			body: "m := map[string]Point{}\n\tm['a'].@cursor"
+			want: point
+		},
+		MemberCompletionCase{
+			name: 'string_index'
+			body: "s := 'abc'\n\ts[0].@cursor"
+			want: ['ascii_str', 'str']
+		},
+		MemberCompletionCase{
+			name: 'nested_array_index'
+			body: 'grid := [][]int{}\n\tgrid[0].@cursor'
+			want: ['len', 'filter', 'first']
+		},
+		MemberCompletionCase{
+			name: 'string_len'
+			body: "s := 'abc'\n\ts.len.@cursor"
+			want: ['str', 'hex']
+		},
+		MemberCompletionCase{
+			name: 'array_len'
+			body: 'arr := [1, 2]\n\tarr.len.@cursor'
+			want: ['str', 'hex']
+		},
+		MemberCompletionCase{
+			name: 'string_literal'
+			body: "'abc'.@cursor"
+			want: ['to_upper', 'len']
+		},
+		MemberCompletionCase{
+			name: 'string_method_result'
+			body: "u := 'abc'.to_upper()\n\tu.@cursor"
+			want: ['to_upper', 'len']
+		},
+		MemberCompletionCase{
+			name: 'cast'
+			body: 'n := i64(5)\n\tn.@cursor'
+			want: ['str', 'hex']
+		},
+		MemberCompletionCase{
+			name: 'match_branch'
+			body: 'f := Figure(Point{})\n\tmatch f {\n\t\tPoint {\n\t\t\tf.@cursor\n\t\t}\n\t\telse {}\n\t}'
+			want: point
+		},
+		MemberCompletionCase{
+			name: 'is_check'
+			body: 'f := Figure(Point{})\n\tif f is Point {\n\t\tf.@cursor\n\t}'
+			want: point
+		},
+		MemberCompletionCase{
+			name: 'map'
+			body: 'mut m := map[string]int{}\n\tm.@cursor'
+			want: ['len', 'keys', 'values', 'delete', 'clear', 'clone', 'move']
+		},
+		MemberCompletionCase{
+			name:   'fixed_array'
+			body:   'arr := [3]int{}\n\tarr.@cursor'
+			want:   ['len', 'index', 'contains', 'map', 'sorted']
+			forbid: ['first', 'last', 'clone', 'cap']
+		},
+		MemberCompletionCase{
+			name: 'array_of_structs'
+			body: 'pts := [Point{}]\n\tpts.@cursor'
+			want: ['len', 'filter', 'first']
+		},
+		MemberCompletionCase{
+			name: 'map_result'
+			body: 'arr := [1, 2]\n\tdoubled := arr.map(it * 2)\n\tdoubled.@cursor'
+			want: ['len', 'filter', 'first']
+		},
+		MemberCompletionCase{
+			name: 'field_chain'
+			body: 'sh := Shape{}\n\tsh.pos.@cursor'
+			want: point
+		},
+		MemberCompletionCase{
+			name: 'method_chain'
+			body: 'q := make_point().moved()\n\tq.@cursor'
+			want: point
+		},
+		MemberCompletionCase{
+			name: 'builder'
+			body: 'mut sb := strings.new_builder(8)\n\tsb.@cursor'
+			want: ['write_string', 'str']
+		},
+		MemberCompletionCase{
+			name: 'commented_declaration'
+			body: "u := 'abc'.to_upper() // upper\n\tu.@cursor"
+			want: ['to_upper', 'len']
+		},
+		MemberCompletionCase{
+			name:  'array_parameter'
+			param: 'nums.@cursor'
+			want:  ['len', 'filter', 'first']
+		},
+		MemberCompletionCase{
+			name:  'map_parameter'
+			param: 'table.@cursor'
+			want:  ['keys', 'values', 'len']
+		},
+		MemberCompletionCase{
+			name:  'pointer_array_parameter'
+			param: 'cells.@cursor'
+			want:  ['len', 'first']
+		},
+		MemberCompletionCase{
+			name: 'static_call'
+			body: 'Point.origin().@cursor'
+			want: point
+		},
+		MemberCompletionCase{
+			name: 'static_call_binding'
+			body: 'f := Color.first()\n\tf.@cursor'
+			want: ['label', 'str']
+		},
+		MemberCompletionCase{
+			name: 'index_or'
+			body: 'pts := [Point{}]\n\tp := pts[0] or { Point{} }\n\tp.@cursor'
+			want: point
+		},
+		MemberCompletionCase{
+			name: 'result_unwrap'
+			body: 'load()!.@cursor'
+			want: point
+		},
+		MemberCompletionCase{
+			name: 'array_literal_chain'
+			body: '[3, 1, 2].sorted().@cursor'
+			want: ['first', 'len']
+		},
+		MemberCompletionCase{
+			name: 'parenthesized_as_cast'
+			body: 'f := Figure(Point{})\n\t(f as Point).@cursor'
+			want: point
+		},
+		MemberCompletionCase{
+			name: 'typeof'
+			body: 'x := 5\n\ttypeof(x).@cursor'
+			want: ['name', 'idx', 'indirections']
+		},
+		MemberCompletionCase{
+			name: 'typeof_name'
+			body: 'x := 5\n\ttypeof(x).name.@cursor'
+			want: ['to_upper', 'len']
+		},
+		MemberCompletionCase{
+			name: 'typeof_generic'
+			body: 'typeof[int]().@cursor'
+			want: ['name', 'idx']
+		},
+	]
+	mut failures := []string{}
+	for c in cases {
+		labels := member_completion_items(c).map(it.label)
+		missing := c.want.filter(it !in labels)
+		unexpected := c.forbid.filter(it in labels)
+		if missing.len > 0 || unexpected.len > 0 {
+			failures << '${c.name}: missing ${missing}, unexpected ${unexpected}'
+		}
+	}
+	assert failures.len == 0, failures.join('\n')
+}
+
+fn test_member_completion_types_calls_to_functions_of_the_module() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	dir := os.join_path(app.temp_dir, 'calls_across_files')
+	must_mkdir_all(dir)
+	must_write_file(os.join_path(dir, 'shapes.v'), 'module main\n\nstruct Point {\n\tx int\n}\n\nfn origin() Point {\n\treturn Point{}\n}\n\nfn all_points() []Point {\n\treturn [Point{}]\n}\n')
+	main_file := os.join_path(dir, 'main.v')
+	content := 'module main\n\nfn local_points() []Point {\n\treturn []\n}\n\nfn main() {\n\tp := origin()\n\tp.\n\tpts := all_points()\n\tpts.\n\tlp := local_points()\n\tlp.\n}\n'
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	lines := content.split_into_lines()
+	for line_text, want in {
+		'\tp.':   'x'
+		'\tpts.': 'fn (a []Point) first() Point'
+		'\tlp.':  'fn (a []Point) first() Point'
+	} {
+		line := lines.index(line_text)
+		items := app.indexed_completions(uri, Position{
+			line: line
+			char: lines[line].len
+		}).items
+		assert items.any(it.label == want || it.detail == want), '${line_text} ${items.map(it.label)}'
+	}
+}
+
+fn member_detail(name string, body string, label string) string {
+	items := member_completion_items(MemberCompletionCase{
+		name: name
+		body: body
+	}).filter(it.label == label)
+	return if items.len == 1 { items[0].detail } else { '${items.len} items' }
+}
+
+fn test_member_completion_details_carry_the_resolved_types() {
+	assert member_detail('detail_array_of_structs', 'pts := [Point{}]\n\tpts.@cursor', 'first') == 'fn (a []Point) first() Point'
+	assert member_detail('detail_map_keys', 'm := map[string]int{}\n\tm.@cursor', 'keys') == 'fn (m map[string]int) keys() []string'
+	assert member_detail('detail_static', 'a := Color.@cursor', 'first') == 'fn Color.first() Color'
+	assert member_detail('detail_from', 'a := Color.@cursor', 'from') == 'fn Color.from[W](input W) !Color'
+	assert member_detail('detail_zero', 'a := Perm.@cursor', 'zero') == 'fn Perm.zero() Perm'
+	assert member_detail('detail_has', 'p := Perm.read\n\tp.@cursor', 'has') == 'fn (e &Perm) has(flag_ Perm) bool'
+	assert member_detail('detail_set', 'mut p := Perm.read\n\tp.@cursor', 'set') == 'fn (mut e Perm) set(flag_ Perm)'
+	assert member_detail('detail_typeof', 'x := 5\n\ttypeof(x).@cursor', 'name') == 'string'
+	assert member_detail('detail_map_result', 'arr := [1, 2]\n\tdoubled := arr.map(it * 2)\n\tdoubled.@cursor',
+		'first') == 'fn (a []int) first() int'
+}
+
+fn test_member_completion_leaves_unknown_members_to_the_compiler() {
+	// The index lists no member of an interface or of a type it cannot find, so the
+	// compiler still has to answer for them.
+	for body in ['a.@cursor', 'u.@cursor'] {
+		result := member_completion_result(MemberCompletionCase{
+			name:  'compiler_${body[0..1]}'
+			param: body
+		})
+		assert result.use_compiler, body
+	}
+}
+
+fn array_completion_items(dir_name string, decl string) []Detail {
+	return indexed_completions_at_line_end(dir_name, 'module main\n\nfn main() {\n\t${decl}\n\tarr.\n}\n', '\tarr.').items
+}
+
+fn test_array_receivers_complete_their_builtin_methods() {
+	ints := array_completion_items('array_int_literal', 'arr := [3, 1, 2]')
+	int_labels := ints.map(it.label)
+	for name in ['len', 'cap', 'filter', 'map', 'sort', 'sorted', 'contains', 'index', 'first', 'last',
+		'pop', 'insert', 'prepend', 'delete', 'clear', 'reverse', 'clone', 'any', 'all', 'count', 'trim'] {
+		assert name in int_labels, '${name} missing: ${int_labels}'
+	}
+	assert 'join' !in int_labels
+	assert ints.filter(it.label == 'first')[0].detail == 'fn (a []int) first() int'
+	assert ints.filter(it.label == 'filter')[0].detail == 'fn (a []int) filter(predicate fn (int) bool) []int'
+	string_labels := array_completion_items('array_string_init', 'arr := []string{}').map(it.label)
+	assert 'join' in string_labels, string_labels.str()
+	assert 'sort_ignore_case' in string_labels, string_labels.str()
+	byte_labels := array_completion_items('array_u8_init', 'arr := []u8{len: 4}').map(it.label)
+	assert 'bytestr' in byte_labels, byte_labels.str()
+	assert 'hex' in byte_labels, byte_labels.str()
+}
+
+fn test_callback_methods_insert_a_function_skeleton() {
+	items := array_completion_items('array_callback_insert', 'arr := [3, 1, 2]')
+	insert_of := fn [items] (name string) string {
+		return items.filter(it.label == name)[0].insert_text or { '' }
+	}
+	assert insert_of('filter') == 'filter(fn (x int) bool {\n\t\$0\n})'
+	assert insert_of('any') == 'any(fn (x int) bool {\n\t\$0\n})'
+	assert insert_of('map') == 'map(fn (x int) \${1:int} {\n\t\$0\n})'
+	assert insert_of('sort_with_compare') == 'sort_with_compare(fn (a &int, b &int) int {\n\t\$0\n})'
+}
+
+fn callback_argument_items(dir_name string, content string, line_text string, col_from_end int) []Detail {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, dir_name)
+	must_mkdir_all(test_dir)
+	main_file := os.join_path(test_dir, 'main.v')
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	lines := content.split_into_lines()
+	line := lines.index(line_text)
+	assert line >= 0, line_text
+	return app.indexed_completions(uri, Position{
+		line: line
+		char: lines[line].len - col_from_end
+	}).items
+}
+
+fn test_empty_callback_argument_offers_a_function_skeleton() {
+	array_items := callback_argument_items('callback_arg_array', 'module main\n\nfn main() {\n\tnums := [3, 1, 2]\n\tnums.filter()\n}\n', '\tnums.filter()', 1)
+	array_skeletons := array_items.filter(it.label == 'fn (x int) bool')
+	assert array_skeletons.len == 1, array_items.map(it.label).str()
+	assert (array_skeletons[0].insert_text or { '' }) == 'fn (x int) bool {\n\t\$0\n}'
+	user_items := callback_argument_items('callback_arg_user', 'module main\n\nfn apply(f fn (int) int) int {\n\treturn f(1)\n}\n\nfn main() {\n\tapply()\n}\n', '\tapply()', 1)
+	user_skeletons := user_items.filter(it.label == 'fn (x int) int')
+	assert user_skeletons.len == 1, user_items.map(it.label).str()
+	assert (user_skeletons[0].insert_text or { '' }) == 'fn (x int) int {\n\t\$0\n}'
+}
+
+fn semantic_token_texts(line string) []string {
+	return tokenize_v_source(line).map('${semantic_token_types()[it.type_idx]}:${line[it.start..it.start +
+		it.length]}')
+}
+
+fn test_semantic_tokens_leave_string_interpolations_out_of_the_string() {
+	// `${name}` is code, not string: only the literal parts are string tokens, and a
+	// type inside the interpolation keeps its own token.
+	assert semantic_token_texts("\treturn 'hello, \${name} and \${Kind.x}'") == [
+		'keyword:return',
+		"string:'hello, ",
+		'string: and ',
+		'type:Kind',
+		"string:'",
+	]
+	// The old `\$name` form and an escaped `\\\$` behave like V does.
+	assert semantic_token_texts("s := 'a \$b c'") == ["string:'a ", "string: c'"]
+	assert semantic_token_texts("s := 'price: \\\${x}'") == ["string:'price: \\\${x}'"]
 }

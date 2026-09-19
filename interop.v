@@ -1670,7 +1670,7 @@ fn (mut app App) run_v_line_info(method Method, path string, line_info string) R
 	match method {
 		.completion {
 			result_tmp := json2.decode[JsonVarAC](output) or { JsonVarAC{} }
-			result = result_tmp.details
+			result = without_operator_completions(result_tmp.details)
 		}
 		.signature_help {
 			sig := json2.decode[SignatureHelp](output) or { SignatureHelp{} }
