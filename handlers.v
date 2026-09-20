@@ -701,9 +701,10 @@ fn binding_scope_header_starts_literal(source string) bool {
 }
 
 struct AnonymousFunctionHeader {
-	found           bool
-	complete        bool
+	found          bool
+	complete       bool
 	parameter_names []string
+	parameter_types map[string]string
 }
 
 fn last_fn_keyword_index(source string) int {
@@ -752,11 +753,16 @@ fn anonymous_function_header(source string) AnonymousFunctionHeader {
 		}
 	}
 	mut names := []string{}
+	mut types := map[string]string{}
 	for parameter in split_top_level_commas(rest[1..params_end]) {
-		for field in parameter.fields() {
+		fields := parameter.fields()
+		for field_idx, field in fields {
 			if field !in ['mut', 'shared', 'atomic', '_'] {
 				if field !in names {
 					names << field
+				}
+				if field_idx + 1 < fields.len {
+					types[field] = fields[field_idx + 1..].join(' ')
 				}
 				break
 			}
@@ -766,6 +772,7 @@ fn anonymous_function_header(source string) AnonymousFunctionHeader {
 		found: true
 		complete: true
 		parameter_names: names
+		parameter_types: types
 	}
 }
 
@@ -1252,6 +1259,7 @@ struct LocalBinding {
 	name   string
 	line   int
 	column int
+	typ    string
 }
 
 fn local_binding_column(segment string, segment_start int, name string) int {
@@ -1401,6 +1409,11 @@ fn (app &App) local_scope_bindings(content string, position Position) []LocalBin
 										local_binding_column(segment, segment_start, name)
 									} else {
 										pending_block_columns[name] or { -1 }
+									}
+									typ: if closure_header.complete {
+										closure_header.parameter_types[name] or { '' }
+									} else {
+										''
 									}
 								}
 							}
@@ -1823,10 +1836,14 @@ fn (mut app App) infer_bound_receiver_type_at_position(uri string, content strin
 		return ''
 	}
 	mut has_active_binding := false
+	mut active_binding_type := ''
 	mut active_declaration_columns := map[int][]int{}
 	for binding in app.local_scope_bindings(content, use_position) {
 		if binding.name == receiver {
 			has_active_binding = true
+			if binding.typ != '' {
+				active_binding_type = binding.typ
+			}
 			if binding.column >= 0 {
 				active_declaration_columns[binding.line] << binding.column
 			}
@@ -1834,6 +1851,9 @@ fn (mut app App) infer_bound_receiver_type_at_position(uri string, content strin
 	}
 	if !has_active_binding {
 		return ''
+	}
+	if active_binding_type != '' {
+		return active_binding_type
 	}
 	mut header_start := -1
 	mut scan_state := ImportScanState{}

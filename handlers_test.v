@@ -6387,6 +6387,34 @@ fn test_chained_member_completion_resolves_nested_struct_type() {
 	assert definition.range.start.line == lines.index('fn (value ClockValue) tick() {}')
 }
 
+fn test_chained_member_completion_resolves_field_after_local_struct_field() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'nested_field_completion')
+	must_mkdir_all(test_dir)
+	content := 'module main\n\nstruct Node {\n\tid int\n}\n\nstruct Listener {\n\tnode Node\n}\n\nfn main() {\n\tlisteners := []Listener{}\n\tlisteners.filter(fn (xdd Listener) bool {\n\t\treturn xdd.node.\n\t})\n}\n'
+	main_file := os.join_path(test_dir, 'main.v')
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	lines := content.split_into_lines()
+	line := lines.index('\t\treturn xdd.node.')
+	assert line >= 0
+	position := Position{
+		line: line
+		char: lines[line].len
+	}
+	assert app.local_scope_bindings(content, position).any(it.name == 'xdd')
+	expression := member_expression_at_cursor(lines[line], lines[line].len, app.position_encoding)
+	assert expression == 'xdd.node', expression
+	assert app.infer_receiver_type_at_position(uri, content, 'xdd.node', position) == 'Node'
+	result := app.indexed_completions(uri, position)
+	labels := result.items.map(it.label)
+	assert 'id' in labels, labels.str()
+}
+
 fn test_non_identifier_receiver_uses_compiler_fallback() {
 	mut app := create_test_app()
 	defer {
