@@ -361,6 +361,25 @@ fn (mut app App) source_hover_fallback(uri string, position Position) ?Hover {
 	}
 }
 
+fn (mut app App) local_binding_hover(uri string, position Position) ?Hover {
+	content := app.index_source_for(uri) or { return none }
+	name := app.get_word_at_position(uri, position.line, position.char)
+	if name == '' {
+		return none
+	}
+	for binding in app.local_scope_bindings(content, position) {
+		if binding.name == name && binding.typ != '' {
+			return Hover{
+				contents: MarkupContent{
+					kind: 'markdown'
+					value: '```v\n${name} ${binding.typ}\n```'
+				}
+			}
+		}
+	}
+	return none
+}
+
 fn (mut app App) source_signature_fallback(uri string, position Position) ?SignatureHelp {
 	content := app.index_source_for(uri) or { return none }
 	target := source_call_target(content, position, app.position_encoding) or {
@@ -467,6 +486,15 @@ fn (mut app App) operation_at_pos(method Method, request Request) Response {
 			return Response{
 				id: request.id
 				result: location
+			}
+		}
+	}
+
+	if method == .hover {
+		if fallback := app.local_binding_hover(path, params.position) {
+			return Response{
+				id: request.id
+				result: fallback
 			}
 		}
 	}

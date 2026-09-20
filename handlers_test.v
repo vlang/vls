@@ -6415,6 +6415,44 @@ fn test_chained_member_completion_resolves_field_after_local_struct_field() {
 	assert 'id' in labels, labels.str()
 }
 
+fn test_hover_prefers_shadowing_closure_parameter_type() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'shadowing_closure_hover')
+	must_mkdir_all(test_dir)
+	content := 'module main\n\nstruct Listener {}\n\nfn main() {\n\tx := 1\n\t[]Listener{}.filter(fn (x Listener) bool {\n\t\treturn x.\n\t})\n}\n'
+	main_file := os.join_path(test_dir, 'main.v')
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	lines := content.split_into_lines()
+	line := lines.index('\t\treturn x.')
+	assert line >= 0
+	x_col := lines[line].index('x') or { -1 }
+	assert x_col >= 0
+	response := app.operation_at_pos(.hover, Request{
+		id: 9501
+		method: 'textDocument/hover'
+		params: json2.encode(TextDocumentPositionParams{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			position: Position{
+				line: line
+				char: x_col + 1
+			}
+		},
+			escape_unicode: true
+		)
+	})
+	assert response.result is Hover
+	hover := response.result as Hover
+	assert hover.contents.value.contains('x Listener'), hover.contents.value
+	assert !hover.contents.value.contains('x int'), hover.contents.value
+}
+
 fn test_non_identifier_receiver_uses_compiler_fallback() {
 	mut app := create_test_app()
 	defer {
