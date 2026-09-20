@@ -6453,6 +6453,83 @@ fn test_hover_prefers_shadowing_closure_parameter_type() {
 	assert !hover.contents.value.contains('x int'), hover.contents.value
 }
 
+fn test_hover_does_not_treat_member_selector_as_local_binding() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'shadowing_member_hover')
+	must_mkdir_all(test_dir)
+	content := 'module main\n\nstruct Listener {\n\tx int\n}\n\nfn main() {\n\tread := fn (x Listener) int {\n\t\treturn x.x\n\t}\n\tread(Listener{x: 1})\n}\n'
+	main_file := os.join_path(test_dir, 'main.v')
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	lines := content.split_into_lines()
+	line := lines.index('\t\treturn x.x')
+	assert line >= 0
+	receiver_col := lines[line].index('x.x') or { -1 }
+	field_col := receiver_col + 2
+	assert receiver_col >= 0
+	assert app.local_binding_hover(uri, Position{
+		line: line
+		char: receiver_col + 1
+	}) != none
+	assert app.local_binding_hover(uri, Position{
+		line: line
+		char: field_col + 1
+	}) == none
+}
+
+fn test_hover_and_inference_use_innermost_nested_binding() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'nested_binding_hover')
+	must_mkdir_all(test_dir)
+	content := 'module main\n\nfn main() {\n\touter := fn (x string) {\n\t\tinner := fn (x int) {\n\t\t\tprintln(x)\n\t\t}\n\t\tinner(x.len)\n\t}\n\touter("abc")\n}\n'
+	main_file := os.join_path(test_dir, 'main.v')
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	lines := content.split_into_lines()
+	line := lines.index('\t\t\tprintln(x)')
+	assert line >= 0
+	x_col := lines[line].index('x') or { -1 }
+	assert x_col >= 0
+	hover := app.local_binding_hover(uri, Position{
+		line: line
+		char: x_col + 1
+	}) or {
+		assert false, 'expected hover for innermost binding'
+		return
+	}
+	assert hover.contents.value.contains('x int'), hover.contents.value
+}
+
+fn test_inference_does_not_use_typed_outer_binding_for_inner_local() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'nested_inferred_binding')
+	must_mkdir_all(test_dir)
+	content := 'module main\n\nfn main() {\n\touter := fn (x string) {\n\t\tinner := fn () {\n\t\t\tx := 7\n\t\t\tprintln(x)\n\t\t}\n\t\tinner()\n\t}\n\touter("abc")\n}\n'
+	main_file := os.join_path(test_dir, 'main.v')
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	lines := content.split_into_lines()
+	line := lines.index('\t\t\tprintln(x)')
+	assert line >= 0
+	position := Position{
+		line: line
+		char: lines[line].index('x') or { 0 }
+	}
+	assert app.infer_receiver_type_at_position(uri, content, 'x', position) == 'int'
+}
+
 fn test_non_identifier_receiver_uses_compiler_fallback() {
 	mut app := create_test_app()
 	defer {

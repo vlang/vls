@@ -363,19 +363,39 @@ fn (mut app App) source_hover_fallback(uri string, position Position) ?Hover {
 
 fn (mut app App) local_binding_hover(uri string, position Position) ?Hover {
 	content := app.index_source_for(uri) or { return none }
+	lines := content.split_into_lines()
+	if position.line < 0 || position.line >= lines.len {
+		return none
+	}
 	name := app.get_word_at_position(uri, position.line, position.char)
 	if name == '' {
 		return none
 	}
-	for binding in app.local_scope_bindings(content, position) {
-		if binding.name == name && binding.typ != '' {
+	line := lines[position.line]
+	_, has_member_access, _ := member_qualifier_at_cursor(line, position.char, app.position_encoding)
+	if has_member_access {
+		return none
+	}
+	bindings := app.local_scope_bindings(content, position)
+	for i := bindings.len - 1; i >= 0; i-- {
+		binding := bindings[i]
+		if binding.name != name {
+			continue
+		}
+		typ := if binding.typ != '' {
+			binding.typ
+		} else {
+			app.infer_bound_receiver_type_at_position(uri, content, name, position)
+		}
+		if typ != '' {
 			return Hover{
 				contents: MarkupContent{
 					kind: 'markdown'
-					value: '```v\n${name} ${binding.typ}\n```'
+					value: '```v\n${name} ${typ}\n```'
 				}
 			}
 		}
+		break
 	}
 	return none
 }
@@ -1866,7 +1886,9 @@ fn (mut app App) infer_bound_receiver_type_at_position(uri string, content strin
 	mut has_active_binding := false
 	mut active_binding_type := ''
 	mut active_declaration_columns := map[int][]int{}
-	for binding in app.local_scope_bindings(content, use_position) {
+	bindings := app.local_scope_bindings(content, use_position)
+	for i := bindings.len - 1; i >= 0; i-- {
+		binding := bindings[i]
 		if binding.name == receiver {
 			has_active_binding = true
 			if binding.typ != '' {
@@ -1875,6 +1897,7 @@ fn (mut app App) infer_bound_receiver_type_at_position(uri string, content strin
 			if binding.column >= 0 {
 				active_declaration_columns[binding.line] << binding.column
 			}
+			break
 		}
 	}
 	if !has_active_binding {
