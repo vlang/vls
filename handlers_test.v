@@ -9559,6 +9559,20 @@ fn test_thread_handle_from_spawned_call_completes_wait() {
 	assert waits[0].detail == 'fn (t thread int) wait() int'
 }
 
+fn test_thread_handle_from_spawned_result_call_completes_wait() {
+	result := indexed_completions_at_line_end('thread_result_call_completion', 'module main\n\nfn work() !int {\n\treturn 1\n}\n\nfn main() {\n\tth := spawn work()\n\tth.\n}\n', '\tth.')
+	waits := result.items.filter(it.label == 'wait')
+	assert waits.len == 1, result.items.map(it.label).str()
+	assert waits[0].detail == 'fn (t thread !int) wait() !int'
+}
+
+fn test_thread_handle_from_spawned_option_call_completes_wait() {
+	result := indexed_completions_at_line_end('thread_option_call_completion', 'module main\n\nfn work() ?int {\n\treturn 1\n}\n\nfn main() {\n\tth := spawn work()\n\tth.\n}\n', '\tth.')
+	waits := result.items.filter(it.label == 'wait')
+	assert waits.len == 1, result.items.map(it.label).str()
+	assert waits[0].detail == 'fn (t thread ?int) wait() ?int'
+}
+
 fn test_thread_array_completes_wait_and_array_members() {
 	result := indexed_completions_at_line_end('thread_array_completion', 'module main\n\nfn work() int {\n\treturn 1\n}\n\nfn main() {\n\tmut threads := []thread int{}\n\tthreads << spawn work()\n\tthreads.\n}\n', '\tthreads.')
 	waits := result.items.filter(it.label == 'wait')
@@ -9575,6 +9589,33 @@ fn test_thread_array_of_results_wait_returns_result_array() {
 	waits := result.items.filter(it.label == 'wait')
 	assert waits.len == 1, result.items.map(it.label).str()
 	assert waits[0].detail == 'fn (a []thread !int) wait() ![]int'
+}
+
+fn test_unary_ampersand_operand_is_guarded() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	uri := path_to_uri(os.join_path(app.temp_dir, 'guarded_ampersand.v'))
+	content := 'module main\n\nfn main() {}\n'
+	app.open_files[uri] = content
+	assert app.expression_type(uri, content, '&', Position{line: 0, char: 0}) == ''
+	assert app.expression_type(uri, content, '(&)', Position{line: 0, char: 0}) == ''
+}
+
+fn test_index_key_with_dotdot_in_string_literal_is_not_treated_as_slice() {
+	result := indexed_completions_at_line_end('map_key_dotdot_completion', 'module main\n\nstruct Point {\n\tx int\n}\n\nfn main() {\n\tm := map[string]Point{}\n\tm[\'a..b\'].\n}\n', '\tm[\'a..b\'].')
+	labels := result.items.map(it.label)
+	assert 'x' in labels, labels.str()
+	assert 'keys' !in labels, labels.str()
+}
+
+fn test_fixed_array_slice_completion_uses_dynamic_array_members() {
+	result := indexed_completions_at_line_end('fixed_array_slice_completion', 'module main\n\nfn main() {\n\tnums := [3]int{}\n\tnums[..].\n}\n', '\tnums[..].')
+	labels := result.items.map(it.label)
+	assert 'cap' in labels, labels.str()
+	assert 'first' in labels, labels.str()
+	assert !result.use_compiler
 }
 
 fn sorted_completion_labels(result IndexedCompletionResult) []string {

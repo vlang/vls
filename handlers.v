@@ -1713,13 +1713,17 @@ fn normalize_receiver_type(source_type string) string {
 }
 
 fn (mut app App) function_return_type(uri string, content string, candidate string) string {
+	return member_receiver_type(app.function_return_type_raw(uri, content, candidate))
+}
+
+fn (mut app App) function_return_type_raw(uri string, content string, candidate string) string {
 	mut fn_index := map[string]string{}
 	parse_fn_signatures_into(content, '', mut fn_index)
 	if return_type := fn_index[candidate] {
-		return member_receiver_type(return_type)
+		return return_type
 	}
 	if !candidate.contains('.') {
-		return app.module_function_return_type(uri, content, candidate)
+		return app.module_function_return_type_raw(uri, content, candidate)
 	}
 	qualifier := candidate.all_before_last('.')
 	fn_name := candidate.all_after_last('.')
@@ -1751,7 +1755,7 @@ fn (mut app App) function_return_type(uri string, content string, candidate stri
 			mut source_index := map[string]string{}
 			parse_fn_signatures_into(source, '', mut source_index)
 			if return_type := source_index[fn_name] {
-				return_types[member_receiver_type(return_type)] = true
+				return_types[return_type] = true
 			}
 		}
 	}
@@ -1764,6 +1768,10 @@ fn (mut app App) function_return_type(uri string, content string, candidate stri
 // module_function_return_type returns the return type of the function `fn_name`
 // declared in another file of the requesting file's module.
 fn (mut app App) module_function_return_type(uri string, content string, fn_name string) string {
+	return member_receiver_type(app.module_function_return_type_raw(uri, content, fn_name))
+}
+
+fn (mut app App) module_function_return_type_raw(uri string, content string, fn_name string) string {
 	dir := os.dir(uri_to_path(uri))
 	if dir == '' || !os.is_dir(dir) {
 		return ''
@@ -1784,7 +1792,7 @@ fn (mut app App) module_function_return_type(uri string, content string, fn_name
 		mut source_index := map[string]string{}
 		parse_fn_signatures_into(source, '', mut source_index)
 		if return_type := source_index[fn_name] {
-			return member_receiver_type(return_type)
+			return return_type
 		}
 	}
 	return ''
@@ -2387,7 +2395,7 @@ fn (mut app App) spawned_thread_type(uri string, content string, rhs string) ?st
 	if candidate == '' || is_constructor {
 		return 'thread'
 	}
-	return thread_type_for_return(app.function_return_type(uri, content, candidate))
+	return thread_type_for_return(app.function_return_type_raw(uri, content, candidate))
 }
 
 fn thread_type_for_return(return_type string) string {

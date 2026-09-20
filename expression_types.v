@@ -308,6 +308,59 @@ fn member_receiver_type(typ string) string {
 	return t
 }
 
+fn top_level_slice_range(text string) bool {
+	mut depth := 0
+	mut in_string := false
+	mut quote := `\0`
+	mut i := 0
+	for i < text.len {
+		ch := text[i]
+		if in_string {
+			if ch == `\\` {
+				i += 2
+				continue
+			}
+			if ch == quote {
+				in_string = false
+			}
+			i++
+			continue
+		}
+		if ch in [`'`, `"`, `\``] {
+			in_string = true
+			quote = ch
+			i++
+			continue
+		}
+		if ch in [`(`, `[`, `{`] {
+			depth++
+			i++
+			continue
+		}
+		if ch in [`)`, `]`, `}`] {
+			if depth > 0 {
+				depth--
+			}
+			i++
+			continue
+		}
+		if depth == 0 && ch == `.` && i + 1 < text.len && text[i + 1] == `.` {
+			return true
+		}
+		i++
+	}
+	return false
+}
+
+fn slice_result_type(typ string) string {
+	t := member_receiver_type(typ)
+	elem, _, _ := composite_type_parts(t)
+	if elem == '' {
+		return t
+	}
+	return '[]${elem}'
+}
+
 fn unwrap_option_type(typ string) string {
 	t := typ.trim_space()
 	if t.starts_with('?') || t.starts_with('!') {
@@ -883,6 +936,9 @@ fn (mut app App) expression_type(uri string, content string, expr string, positi
 // operand_type reads the operand at the start of `text`, and returns its type and
 // what follows it.
 fn (mut app App) operand_type(uri string, content string, text string, position Position) (string, string) {
+	if text == '' {
+		return '', text
+	}
 	c := text[0]
 	if c == `(` {
 		close := matching_delimiter(text, 0, `(`, `)`)
@@ -892,6 +948,9 @@ fn (mut app App) operand_type(uri string, content string, text string, position 
 		return app.expression_type(uri, content, text[1..close], position), text[close + 1..]
 	}
 	if c == `&` {
+		if text.len == 1 {
+			return '', text
+		}
 		return app.operand_type(uri, content, text[1..].trim_space(), position)
 	}
 	if literal_end := string_literal_end(text) {
@@ -1099,8 +1158,8 @@ fn (mut app App) postfix_type(uri string, content string, typ string, text strin
 			return '', text
 		}
 		after := rest[close + 1..]
-		if rest[1..close].contains('..') {
-			return typ, after
+		if top_level_slice_range(rest[1..close]) {
+			return slice_result_type(typ), after
 		}
 		return index_expression_type(typ), after
 	}
