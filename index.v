@@ -468,7 +468,7 @@ fn (mut app App) drop_index_under(dir_path string) {
 // opened at a large directory (a home dir, /tmp, or the filesystem root) would
 // pull the entire tree into the index (audit: "unbounded workspace traversal").
 const index_max_files = 20000
-const index_max_file_bytes = 2 * 1024 * 1024
+const index_max_file_bytes = u64(2 * 1024 * 1024)
 const index_excluded_dirs = ['.git', '.svn', '.hg', 'node_modules', '.vmodules', 'thirdparty',
 	'_build', 'build', 'target', '.cache']
 
