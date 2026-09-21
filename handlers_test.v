@@ -6507,7 +6507,7 @@ fn test_hover_only_answers_for_a_variable_reference() {
 	}
 	test_dir := os.join_path(app.temp_dir, 'variable_reference_hover')
 	must_mkdir_all(test_dir)
-	content := "module main\n\nfn main() {\n\tvalue := 3\n\touter := 1\n\tprintln('value in text')\n\t// value in comment\n\tprintln('value is \${value}')\n\touter: for i in 0 .. 2 {\n\t\tif i == outer {\n\t\t\tbreak outer\n\t\t}\n\t}\n\tprintln(value)\n}\n"
+	content := "module main\n\nfn main() {\n\tvalue := 3\n\touter := 1\n\tinner := 2\n\tprintln('value in text')\n\t// value in comment\n\tprintln('value is \${value}')\n\touter: for i in 0 .. 2 {\n\t\tif i == outer {\n\t\t\tbreak outer\n\t\t}\n\t}\n\tinner: for j in 0 .. 2 {\n\t\tif j == inner {\n\t\t\tbreak inner // stop here\n\t\t}\n\t}\n\tprintln(value)\n\tprintln(inner) // keep this\n}\n"
 	main_file := os.join_path(test_dir, 'main.v')
 	must_write_file(main_file, content)
 	uri := path_to_uri(main_file)
@@ -6516,16 +6516,25 @@ fn test_hover_only_answers_for_a_variable_reference() {
 	// Only the references are the variable: the word in a string or a comment is
 	// text, and a label is not a variable even when it is spelled like one.
 	for source_line, expected in {
-		"\tprintln('value in text')":  ''
-		'\t// value in comment':       ''
-		'\t\t\tbreak outer':           ''
+		"\tprintln('value in text')":      ''
+		'\t// value in comment':           ''
+		'\t\t\tbreak outer':               ''
+		'\t\t\tbreak inner // stop here':  ''
 		"\tprintln('value is \${value}')": 'value int'
-		'\tprintln(value)':            'value int'
-		'\t\tif i == outer {':         'outer int'
+		'\tprintln(value)':                'value int'
+		'\t\tif i == outer {':             'outer int'
+		'\t\tif j == inner {':             'inner int'
+		'\tprintln(inner) // keep this':   'inner int'
 	} {
 		line := lines.index(source_line)
 		assert line >= 0, source_line
-		word := if source_line.contains('outer') { 'outer' } else { 'value' }
+		word := if source_line.contains('outer') {
+			'outer'
+		} else if source_line.contains('inner') {
+			'inner'
+		} else {
+			'value'
+		}
 		col := lines[line].last_index(word) or { -1 }
 		assert col >= 0, source_line
 		hover := app.local_binding_hover(uri, Position{

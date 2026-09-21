@@ -382,7 +382,8 @@ fn (mut app App) hovered_variable_name(uri string, line string, position Positio
 	if line[end..].trim_left(' \t').starts_with(':') && !line[end..].trim_left(' \t').starts_with(':=') {
 		return none
 	}
-	statement := line.trim_space()
+	// A label use ends the statement, but a trailing comment must not hide it.
+	statement := without_trailing_comment(line).trim_space()
 	for keyword in ['break ', 'continue ', 'goto '] {
 		if statement.starts_with(keyword) && statement[keyword.len..].trim_space() == name {
 			return none
