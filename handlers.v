@@ -426,14 +426,58 @@ fn (mut app App) hover_binding_type(uri string, content string, lines []string, 
 	if declaration.binding_count != 1 || declaration.assignment_end > lines[binding.line].len {
 		return ''
 	}
-	return app.written_declaration_type(uri, content, lines[binding.line][declaration.assignment_end..],
-		position)
+	rhs := declaration_expression(lines, binding.line, lines[binding.line][declaration.assignment_end..])
+	return app.written_declaration_type(uri, content, rhs, position)
 }
 
 // written_declaration_type returns the type that the right-hand side of a
 // declaration names in the source (`&Point{}` gives `&Point`, `[3]int{}`,
 // `map[string]int{}`, `i64(5)`, and `5` gives `int`), or '' when naming it would
 // take inference, which drops `&`, `?` and `!`.
+// max_declaration_expression_lines bounds how far a declaration's value is
+// followed, so an unclosed bracket cannot walk the rest of the file.
+const max_declaration_expression_lines = 40
+
+// declaration_expression returns the whole value of a declaration, joining the
+// lines it spans when it is written over several of them (a struct, array or
+// map literal, or a call). Every line loses its comment first, so a `//` in the
+// middle does not swallow the rest.
+fn declaration_expression(lines []string, start int, rhs string) string {
+	first := without_trailing_comment(rhs)
+	mut parts := [first]
+	mut depth := bracket_depth(first)
+	mut line := start + 1
+	for depth > 0 && line < lines.len && line - start <= max_declaration_expression_lines {
+		part := without_trailing_comment(lines[line])
+		depth += bracket_depth(part)
+		parts << part
+		line++
+	}
+	return parts.join(' ')
+}
+
+// bracket_depth reports how many brackets `text` leaves open, ignoring the ones
+// written inside a string literal.
+fn bracket_depth(text string) int {
+	mut depth := 0
+	mut i := 0
+	for i < text.len {
+		c := text[i]
+		if c in [`'`, `"`, `\``] {
+			end := string_literal_end(text[i..]) or { return depth }
+			i += end
+			continue
+		}
+		if c in [`{`, `[`, `(`] {
+			depth++
+		} else if c in [`}`, `]`, `)`] {
+			depth--
+		}
+		i++
+	}
+	return depth
+}
+
 fn (mut app App) written_declaration_type(uri string, content string, raw_rhs string, position Position) string {
 	mut expr := without_trailing_comment(raw_rhs).trim_space()
 	mut prefix := ''

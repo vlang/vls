@@ -6632,6 +6632,38 @@ fn test_hover_keeps_reference_and_option_parameter_types() {
 	}
 }
 
+fn test_hover_types_a_declaration_split_over_lines() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'multiline_declaration_hover')
+	must_mkdir_all(test_dir)
+	content := "module main\n\nstruct Point {\n\tx int\n}\n\nfn main() {\n\tone := &Point{\n\t\tx: 1\n\t}\n\ttwo := Point{\n\t\tx: 2\n\t}\n\tages := map[string]int{\n\t\t'a': 1\n\t}\n\tnames := []string{\n\t\tlen: 2\n\t}\n\tprintln(one)\n\tprintln(two)\n\tprintln(ages)\n\tprintln(names)\n}\n"
+	main_file := os.join_path(test_dir, 'main.v')
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	lines := content.split_into_lines()
+	// A value written over several lines still names its type on the first one.
+	for name, expected in {
+		'one':   'one &Point'
+		'two':   'two Point'
+		'ages':  'ages map[string]int'
+		'names': 'names []string'
+	} {
+		line := lines.index('\tprintln(${name})')
+		assert line >= 0, name
+		col := lines[line].index('(${name})') or { -1 }
+		assert col > 0, name
+		hover := app.local_binding_hover(uri, Position{
+			line: line
+			char: col + 2
+		}) or { Hover{} }
+		assert hover.contents.value.contains(expected), '${name}: ${hover.contents.value}'
+	}
+}
+
 fn test_hover_keeps_an_inferred_reference_type() {
 	mut app := create_test_app()
 	defer {
