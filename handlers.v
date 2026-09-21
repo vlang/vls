@@ -361,6 +361,103 @@ fn (mut app App) source_hover_fallback(uri string, position Position) ?Hover {
 	}
 }
 
+// identifier_is_label reports whether the identifier at `cursor_col` is a label
+// followed by `:` (the field name in a struct literal, or a loop label) instead of
+// a reference to a variable.
+fn identifier_is_label(line string, cursor_col int, enc PositionEncoding) bool {
+	byte_col := encoded_col_to_byte(line, cursor_col, enc)
+	if byte_col > line.len {
+		return false
+	}
+	mut end := byte_col
+	for end < line.len && is_ident_char(line[end]) {
+		end++
+	}
+	rest := line[end..].trim_left(' \t')
+	return rest.starts_with(':') && !rest.starts_with(':=')
+}
+
+// hover_binding_type returns the type to show for `binding`: the one its
+// declaration writes down. A hover keeps `&`, `?` and `!`, which the receiver
+// type resolver drops on purpose when it chooses a member list, so a declaration
+// whose type would need that resolver is left to the compiler's hover instead.
+fn (mut app App) hover_binding_type(uri string, content string, lines []string, binding LocalBinding, position Position) string {
+	if binding.typ != '' {
+		return binding.typ
+	}
+	header_start := containing_function_start(lines, position, app.position_encoding)
+	if header_start >= 0 && binding.line >= header_start {
+		mut header_end := header_start
+		for header_end < lines.len && !lines[header_end].contains('{') {
+			header_end++
+		}
+		if binding.line <= header_end && header_end < lines.len {
+			// A parameter: the header writes its type down.
+			header := lines[header_start..header_end + 1].join('\n').all_before('{')
+			return type_after_identifier(header, binding.name)
+		}
+	}
+	if binding.line < 0 || binding.line >= lines.len {
+		return ''
+	}
+	declaration := receiver_declaration_on_line(lines[binding.line], binding.name, [
+		binding.column,
+	]) or { return '' }
+	if declaration.binding_count != 1 || declaration.assignment_end > lines[binding.line].len {
+		return ''
+	}
+	return app.written_declaration_type(uri, content, lines[binding.line][declaration.assignment_end..])
+}
+
+// written_declaration_type returns the type that the right-hand side of a
+// declaration names in the source (`&Point{}` gives `&Point`, `[]int{}`,
+// `map[string]int{}`, `i64(5)`, and `5` gives `int`), or '' when naming it would
+// take inference.
+fn (mut app App) written_declaration_type(uri string, content string, raw_rhs string) string {
+	mut expr := without_trailing_comment(raw_rhs).trim_space()
+	mut prefix := ''
+	if expr.starts_with('&') {
+		prefix = '&'
+		expr = expr[1..].trim_space()
+	}
+	if literal := receiver_literal_type(expr) {
+		return literal
+	}
+	if array := array_literal_type(expr) {
+		return '${prefix}${array}'
+	}
+	if channel := channel_literal_type(expr) {
+		return channel
+	}
+	if threads := thread_array_literal_type(expr) {
+		return threads
+	}
+	if enum_type := app.enum_value_type(uri, content, expr) {
+		return enum_type
+	}
+	if expr.starts_with('map[') {
+		brace := expr.index('{') or { return '' }
+		return '${prefix}${expr[..brace].trim_space()}'
+	}
+	mut end := 0
+	for end < expr.len && (is_ident_char(expr[end]) || expr[end] == `.`) {
+		end++
+	}
+	name := expr[..end]
+	rest := expr[end..].trim_space()
+	if name == '' {
+		return ''
+	}
+	if rest.starts_with('{') && is_type_name(name) {
+		return '${prefix}${name}'
+	}
+	if rest.starts_with('(') && (name in builtin_receiver_types || is_type_name(name)) {
+		// A cast names its type: `i64(5)`, `Meters(1.5)`.
+		return '${prefix}${name}'
+	}
+	return ''
+}
+
 fn (mut app App) local_binding_hover(uri string, position Position) ?Hover {
 	content := app.index_source_for(uri) or { return none }
 	lines := content.split_into_lines()
@@ -376,17 +473,16 @@ fn (mut app App) local_binding_hover(uri string, position Position) ?Hover {
 	if has_member_access {
 		return none
 	}
+	if identifier_is_label(line, position.char, app.position_encoding) {
+		return none
+	}
 	bindings := app.local_scope_bindings(content, position)
 	for i := bindings.len - 1; i >= 0; i-- {
 		binding := bindings[i]
 		if binding.name != name {
 			continue
 		}
-		typ := if binding.typ != '' {
-			binding.typ
-		} else {
-			app.infer_bound_receiver_type_at_position(uri, content, name, position)
-		}
+		typ := app.hover_binding_type(uri, content, lines, binding, position)
 		if typ != '' {
 			return Hover{
 				contents: MarkupContent{

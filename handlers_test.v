@@ -6477,8 +6477,114 @@ fn test_hover_does_not_treat_member_selector_as_local_binding() {
 	}) != none
 	assert app.local_binding_hover(uri, Position{
 		line: line
-		char: field_col + 1
+		char: field_col
 	}) == none
+	field_response := app.operation_at_pos(.hover, Request{
+		id: 9531
+		method: 'textDocument/hover'
+		params: json2.encode(TextDocumentPositionParams{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			position: Position{
+				line: line
+				char: field_col
+			}
+		},
+			escape_unicode: true
+		)
+	})
+	if field_response.result is Hover {
+		field_hover := field_response.result as Hover
+		assert !field_hover.contents.value.contains('x Listener'), field_hover.contents.value
+	}
+}
+
+fn test_hover_keeps_reference_and_option_parameter_types() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'modifier_parameter_hover')
+	must_mkdir_all(test_dir)
+	content := 'module main\n\nstruct Point {\n\tx int\n}\n\nfn inspect(ptr &Point, opt ?Point) {\n\tprintln(ptr)\n\tprintln(opt)\n}\n'
+	main_file := os.join_path(test_dir, 'main.v')
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	lines := content.split_into_lines()
+	// A hover shows the variable's own type; only member completion drops `&` and `?`.
+	for name, expected in {
+		'ptr': 'ptr &Point'
+		'opt': 'opt ?Point'
+	} {
+		line := lines.index('\tprintln(${name})')
+		assert line >= 0, name
+		col := lines[line].index('(${name})') or { -1 }
+		assert col > 0, name
+		hover := app.local_binding_hover(uri, Position{
+			line: line
+			char: col + 2
+		}) or { Hover{} }
+		assert hover.contents.value.contains(expected), '${name}: ${hover.contents.value}'
+	}
+}
+
+fn test_hover_keeps_an_inferred_reference_type() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'inferred_reference_hover')
+	must_mkdir_all(test_dir)
+	content := 'module main\n\nstruct Point {\n\tx int\n}\n\nfn main() {\n\tp := &Point{}\n\tprintln(p)\n}\n'
+	main_file := os.join_path(test_dir, 'main.v')
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	lines := content.split_into_lines()
+	line := lines.index('\tprintln(p)')
+	assert line >= 0
+	col := lines[line].index('(p)') or { -1 }
+	assert col > 0
+	hover := app.local_binding_hover(uri, Position{
+		line: line
+		char: col + 2
+	}) or { Hover{} }
+	assert hover.contents.value.contains('p &Point'), hover.contents.value
+}
+
+fn test_hover_leaves_struct_literal_field_labels_to_field_hover() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'field_label_hover')
+	must_mkdir_all(test_dir)
+	content := "module main\n\nstruct Row {\n\tvalue string\n}\n\nfn main() {\n\tshow := fn (value int) {\n\t\trow := Row{\n\t\t\tvalue: 'hello'\n\t\t}\n\t\tprintln(row)\n\t\tprintln(value)\n\t}\n\tshow(1)\n}\n"
+	main_file := os.join_path(test_dir, 'main.v')
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	lines := content.split_into_lines()
+	label_line := lines.index("\t\t\tvalue: 'hello'")
+	assert label_line >= 0
+	label_col := lines[label_line].index('value') or { -1 }
+	assert label_col >= 0
+	// The field label is not the closure parameter, so it is left to field hover.
+	assert app.local_binding_hover(uri, Position{
+		line: label_line
+		char: label_col + 1
+	}) == none
+	use_line := lines.index('\t\tprintln(value)')
+	assert use_line >= 0
+	use_col := lines[use_line].index('(value)') or { -1 }
+	assert use_col > 0
+	hover := app.local_binding_hover(uri, Position{
+		line: use_line
+		char: use_col + 2
+	}) or { Hover{} }
+	assert hover.contents.value.contains('value int'), hover.contents.value
 }
 
 fn test_hover_and_inference_use_innermost_nested_binding() {
