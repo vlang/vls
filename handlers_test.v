@@ -6632,6 +6632,39 @@ fn test_hover_keeps_reference_and_option_parameter_types() {
 	}
 }
 
+fn test_hover_types_bindings_whose_value_names_no_type() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'inferred_binding_hover')
+	must_mkdir_all(test_dir)
+	content := "module main\n\nfn make_int() !int {\n\treturn 3\n}\n\nfn work() int {\n\treturn 4\n}\n\nfn main() {\n\tres := make_int() or {\n\t\tprintln(err)\n\t\t0\n\t}\n\tth := spawn work()\n\tif v := make_int() {\n\t\tprintln(v)\n\t}\n\tprintln(res)\n\tprintln(th.wait())\n}\n"
+	main_file := os.join_path(test_dir, 'main.v')
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	lines := content.split_into_lines()
+	// A value that does not write its type down is still worth inferring: an `or`
+	// block, a spawned call and an `if` guard all bind a variable.
+	for source_line, expected in {
+		'\tprintln(res)':       'res int'
+		'\tprintln(th.wait())': 'th thread int'
+		'\t\tprintln(v)':       'v int'
+	} {
+		line := lines.index(source_line)
+		assert line >= 0, source_line
+		name := source_line.all_after('println(').all_before(')').all_before('.')
+		col := lines[line].index('(${name}') or { -1 }
+		assert col >= 0, source_line
+		hover := app.local_binding_hover(uri, Position{
+			line: line
+			char: col + 2
+		}) or { Hover{} }
+		assert hover.contents.value.contains(expected), '${source_line}: ${hover.contents.value}'
+	}
+}
+
 fn test_hover_types_a_declaration_split_over_lines() {
 	mut app := create_test_app()
 	defer {

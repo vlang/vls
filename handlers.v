@@ -401,7 +401,18 @@ fn (mut app App) hovered_variable_name(uri string, line string, position Positio
 // declaration writes down. A hover keeps `&`, `?` and `!`, which the receiver
 // type resolver drops on purpose when it chooses a member list, so a declaration
 // whose type would need that resolver is left to the compiler's hover instead.
+// hover_binding_type answers with the type as the source writes it, which keeps
+// `&` and `?`, and falls back to the inferred one when the value names no type
+// (an `or` block, a spawned call, an `if` guard), where no modifier is lost.
 fn (mut app App) hover_binding_type(uri string, content string, lines []string, binding LocalBinding, position Position) string {
+	written := app.written_binding_type(uri, content, lines, binding, position)
+	if written != '' {
+		return written
+	}
+	return app.infer_bound_receiver_type_at_position(uri, content, binding.name, position)
+}
+
+fn (mut app App) written_binding_type(uri string, content string, lines []string, binding LocalBinding, position Position) string {
 	if binding.typ != '' {
 		return binding.typ
 	}
