@@ -6632,6 +6632,47 @@ fn test_hover_keeps_reference_and_option_parameter_types() {
 	}
 }
 
+fn test_hover_types_a_binding_holding_a_function_literal() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'function_literal_hover')
+	must_mkdir_all(test_dir)
+	content := "module main\n\nfn main() {\n\tx := 2\n\tf := fn (a int) {\n\t\tprintln(a)\n\t}\n\tg := fn (a int, b string) !int {\n\t\treturn a + b.len\n\t}\n\th := fn () {\n\t\tprintln('hi')\n\t}\n\tc := fn [x] (a int) int {\n\t\treturn a + x\n\t}\n\tf(1)\n\tg(1, 'a') or { 0 }\n\th()\n\tprintln(c(1))\n\tprintln(apply(c))\n}\n\nfn apply(cb fn (int) int) int {\n\treturn cb(1)\n}\n"
+	main_file := os.join_path(test_dir, 'main.v')
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	lines := content.split_into_lines()
+	// A function literal writes its own type down: the signature, without the
+	// capture list and without the body.
+	for name, expected in {
+		'f': 'f fn (a int)'
+		'g': 'g fn (a int, b string) !int'
+		'h': 'h fn ()'
+		'c':  'c fn (a int) int'
+		'cb': 'cb fn (int) int'
+	} {
+		mut line := -1
+		mut col := -1
+		for idx, text in lines {
+			if !text.contains('${name}(') {
+				continue
+			}
+			line = idx
+			col = text.index('${name}(') or { -1 }
+			break
+		}
+		assert line >= 0 && col >= 0, name
+		hover := app.local_binding_hover(uri, Position{
+			line: line
+			char: col + 1
+		}) or { Hover{} }
+		assert hover.contents.value.contains(expected), '${name}: ${hover.contents.value}'
+	}
+}
+
 fn test_hover_types_bindings_whose_value_names_no_type() {
 	mut app := create_test_app()
 	defer {

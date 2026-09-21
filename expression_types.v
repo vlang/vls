@@ -891,6 +891,78 @@ fn string_literal_end(text string) ?int {
 }
 
 // without_trailing_comment drops a `//` comment that ends `text`.
+// function_type_suffix reads the `(params)` and the optional result of a
+// function type written after `fn`, so a parameter declared `cb fn (int) int`
+// keeps its whole type instead of stopping at the first word.
+fn function_type_suffix(text string, start int) ?string {
+	mut i := start
+	for i < text.len && text[i] in [` `, `\t`] {
+		i++
+	}
+	if i >= text.len || text[i] != `(` {
+		return none
+	}
+	params_end := matching_delimiter(text, i, `(`, `)`)
+	if params_end < 0 {
+		return none
+	}
+	params := text[i..params_end + 1]
+	mut result_start := params_end + 1
+	for result_start < text.len && text[result_start] in [` `, `\t`] {
+		result_start++
+	}
+	mut result_end := result_start
+	for result_end < text.len && (is_ident_char(text[result_end])
+		|| text[result_end] in [`&`, `?`, `!`, `.`, `[`, `]`]) {
+		result_end++
+	}
+	if result_end > result_start {
+		return '${params} ${text[result_start..result_end]}'
+	}
+	return params
+}
+
+// function_literal_type renders the type of a function literal the way the
+// source writes it, `fn (a int) string`, without the capture list, which is not
+// part of the type, and without the body.
+fn function_literal_type(expr string) ?string {
+	if !expr.starts_with('fn') {
+		return none
+	}
+	mut i := 2
+	if i < expr.len && expr[i] !in [` `, `\t`, `(`, `[`] {
+		return none
+	}
+	for i < expr.len && expr[i] in [` `, `\t`] {
+		i++
+	}
+	if i < expr.len && expr[i] == `[` {
+		capture_end := matching_delimiter(expr, i, `[`, `]`)
+		if capture_end < 0 {
+			return none
+		}
+		i = capture_end + 1
+		for i < expr.len && expr[i] in [` `, `\t`] {
+			i++
+		}
+	}
+	if i >= expr.len || expr[i] != `(` {
+		return none
+	}
+	params_end := matching_delimiter(expr, i, `(`, `)`)
+	if params_end < 0 {
+		return none
+	}
+	params := expr[i..params_end + 1]
+	rest := expr[params_end + 1..]
+	body_start := rest.index('{') or { rest.len }
+	result := rest[..body_start].trim_space()
+	if result == '' {
+		return 'fn ${params}'
+	}
+	return 'fn ${params} ${result}'
+}
+
 fn without_trailing_comment(text string) string {
 	mut i := 0
 	for i < text.len {

@@ -491,6 +491,9 @@ fn bracket_depth(text string) int {
 
 fn (mut app App) written_declaration_type(uri string, content string, raw_rhs string, position Position) string {
 	mut expr := without_trailing_comment(raw_rhs).trim_space()
+	if literal := function_literal_type(expr) {
+		return literal
+	}
 	mut prefix := ''
 	if expr.starts_with('&') {
 		prefix = '&'
@@ -1764,6 +1767,12 @@ fn type_after_identifier(text string, name string) string {
 		}
 		if col > start {
 			word := text[start..col]
+			if word == 'fn' || word.ends_with(']fn') {
+				// A function type spells its parameters and result after `fn`.
+				if suffix := function_type_suffix(text, col) {
+					return '${word} ${suffix}'
+				}
+			}
 			if word in ['chan', 'thread'] || word.ends_with(']chan') || word.ends_with(']thread') {
 				// `chan T` and `thread T` spell their element type as a second word.
 				mut elem_start := col
