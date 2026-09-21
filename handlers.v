@@ -566,6 +566,133 @@ fn expression_names_its_type(expr string) bool {
 	return head.contains('.') && is_type_name(head.all_before_last('.'))
 }
 
+// parameter_declaration_type reads the type of the parameter the cursor sits on,
+// from the signature that declares it. It covers a named function as well as a
+// closure written inline, which may share the name with a variable outside.
+fn (app &App) parameter_declaration_type(lines []string, position Position, name string) string {
+	if position.line < 0 || position.line >= lines.len {
+		return ''
+	}
+	line := lines[position.line]
+	byte_col := encoded_col_to_byte(line, position.char, app.position_encoding)
+	mut header := ''
+	// A closure is written inline, so its `fn (` starts on this same line.
+	inline_start := last_fn_keyword_before(line, byte_col)
+	if inline_start >= 0 {
+		header = line[inline_start..]
+	} else {
+		header_start := containing_function_start(lines, position, app.position_encoding)
+		if header_start < 0 || position.line < header_start {
+			return ''
+		}
+		mut header_end := header_start
+		for header_end < lines.len && !lines[header_end].contains('{') {
+			header_end++
+		}
+		if position.line > header_end || header_end >= lines.len {
+			return ''
+		}
+		header = lines[header_start..header_end + 1].join('\n')
+	}
+	parameters := parameter_list_of(header) or { return '' }
+	if !cursor_is_inside_parameters(line, byte_col, header, inline_start) {
+		return ''
+	}
+	return type_after_identifier(parameters, name)
+}
+
+// last_fn_keyword_before returns where the `fn` of a closure written on this
+// line starts, or -1 when the cursor is not on such a line.
+fn last_fn_keyword_before(line string, byte_col int) int {
+	mut found := -1
+	mut i := 0
+	for i + 1 < line.len {
+		if line[i] == `f` && line[i + 1] == `n` && (i == 0 || !is_ident_char(line[i - 1])) {
+			after := i + 2
+			if after < line.len && !is_ident_char(line[after]) && i <= byte_col {
+				found = i
+			}
+		}
+		i++
+	}
+	return found
+}
+
+// parameter_list_of returns the text between the parentheses of a signature.
+fn parameter_list_of(header string) ?string {
+	open := header.index('(') or { return none }
+	close := matching_delimiter(header, open, `(`, `)`)
+	if close < 0 {
+		return none
+	}
+	return header[open + 1..close]
+}
+
+// cursor_is_inside_parameters reports whether the cursor sits between the
+// parentheses of the signature, so a hover in the body is left alone.
+fn cursor_is_inside_parameters(line string, byte_col int, header string, inline_start int) bool {
+	if inline_start < 0 {
+		// A signature spanning lines: the parameters are everything before `{`.
+		brace := line.index('{') or { line.len }
+		return byte_col < brace
+	}
+	open := header.index('(') or { return false }
+	close := matching_delimiter(header, open, `(`, `)`)
+	if close < 0 {
+		return false
+	}
+	return byte_col > inline_start + open && byte_col < inline_start + close
+}
+
+// hover_at answers a hover from what VLS knows by itself: a local binding, a
+// field of a chain, or the declaration the index resolves for the symbol. The
+// compiler is asked only when none of these can answer.
+fn (mut app App) hover_at(uri string, position Position) ?Hover {
+	if binding := app.local_binding_hover(uri, position) {
+		return binding
+	}
+	if member := app.member_selector_hover(uri, position) {
+		return member
+	}
+	return app.source_hover_fallback(uri, position)
+}
+
+// member_selector_hover answers for the field the cursor sits on inside a chain
+// such as `a.b.c`. The compiler answers those by describing the receiver of the
+// selector, so `c` comes back as `b`.
+fn (mut app App) member_selector_hover(uri string, position Position) ?Hover {
+	content := app.index_source_for(uri) or { return none }
+	lines := content.split_into_lines()
+	if position.line < 0 || position.line >= lines.len {
+		return none
+	}
+	line := lines[position.line]
+	name := app.get_word_at_position(uri, position.line, position.char)
+	if name == '' {
+		return none
+	}
+	receiver := member_expression_at_cursor(line, position.char, app.position_encoding)
+	if receiver == '' {
+		return none
+	}
+	typ := app.expression_type(uri, content, receiver, position)
+	if typ == '' {
+		return none
+	}
+	// Only fields: a method reads better as the signature the compiler prints.
+	members := app.type_members(uri, content, member_receiver_type(typ))
+	field := members.field_types[name] or { return none }
+	if field == '' {
+		return none
+	}
+	return Hover{
+		contents: MarkupContent{
+			kind:  'markdown'
+			value: '```v\n${name} ${field}\n```'
+		}
+	}
+}
+
 fn (mut app App) local_binding_hover(uri string, position Position) ?Hover {
 	content := app.index_source_for(uri) or { return none }
 	lines := content.split_into_lines()
@@ -573,6 +700,18 @@ fn (mut app App) local_binding_hover(uri string, position Position) ?Hover {
 		return none
 	}
 	name := app.hovered_variable_name(uri, lines[position.line], position)?
+	// A parameter is declared in its signature, not bound by the scope around it,
+	// so the search below would answer with a variable of the same name from
+	// outside. The type is written right next to the name here.
+	declared := app.parameter_declaration_type(lines, position, name)
+	if declared != '' {
+		return Hover{
+			contents: MarkupContent{
+				kind: 'markdown'
+				value: '```v\n${name} ${declared}\n```'
+			}
+		}
+	}
 	bindings := app.local_scope_bindings(content, position)
 	for i := bindings.len - 1; i >= 0; i-- {
 		binding := bindings[i]
@@ -704,10 +843,20 @@ fn (mut app App) operation_at_pos(method Method, request Request) Response {
 	}
 
 	if method == .hover {
-		if fallback := app.local_binding_hover(path, params.position) {
+		if binding := app.local_binding_hover(path, params.position) {
 			return Response{
 				id: request.id
-				result: fallback
+				result: binding
+			}
+		}
+		// A field of a chain has to be answered here: the compiler describes the
+		// receiver of the selector instead of the field the cursor is on. The
+		// declaration from the index waits until after the compiler, which brings
+		// the documentation with its answer.
+		if member := app.member_selector_hover(path, params.position) {
+			return Response{
+				id: request.id
+				result: member
 			}
 		}
 	}

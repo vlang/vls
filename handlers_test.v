@@ -6670,6 +6670,160 @@ fn test_hover_on_a_call_keeps_the_declaration_as_written() {
 	assert rendered.contains('cb fn (a int) int'), rendered
 }
 
+fn test_hover_on_a_field_of_a_chain_answers_for_that_field() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'chain_field_hover')
+	must_mkdir_all(test_dir)
+	content := "module main\n\nstruct Child {\n\tvalue int\n}\n\nstruct Node {\n\tchild Child\n}\n\nstruct Listener {\n\tnode Node\n}\n\nfn main() {\n\tlistener := Listener{}\n\tprintln(listener.node.child.value)\n}\n"
+	main_file := os.join_path(test_dir, 'main.v')
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	lines := content.split_into_lines()
+	line := lines.index('\tprintln(listener.node.child.value)')
+	assert line >= 0
+	// Every step of the chain describes itself, not the one it hangs from.
+	for name, expected in {
+		'node':  'node Node'
+		'child': 'child Child'
+		'value': 'value int'
+	} {
+		col := lines[line].index('.' + name) or { -1 }
+		assert col > 0, name
+		hover := app.hover_at(uri, Position{
+			line: line
+			char: col + 2
+		}) or { Hover{} }
+		assert hover.contents.value.contains(expected), '${name}: ${hover.contents.value}'
+	}
+}
+
+fn test_hover_on_a_deep_chain_inside_nested_closures() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'nested_chain_hover')
+	must_mkdir_all(test_dir)
+	content := "module main\n\nstruct Leaf {\n\tflag bool\n}\n\nstruct Child {\n\tleaf Leaf\n}\n\nstruct Node {\n\tchild Child\n}\n\nstruct Listener {\n\tnode Node\n}\n\nfn main() {\n\tlisteners := []Listener{}\n\touter := fn (x Listener) bool {\n\t\tinner := fn (y Listener) bool {\n\t\t\treturn y.node.child.leaf.flag\n\t\t}\n\t\treturn inner(x) && x.node.child.leaf.flag\n\t}\n\tprintln(listeners.filter(outer))\n}\n"
+	main_file := os.join_path(test_dir, 'main.v')
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	lines := content.split_into_lines()
+	inner_line := lines.index('\t\t\treturn y.node.child.leaf.flag')
+	outer_line := lines.index('\t\treturn inner(x) && x.node.child.leaf.flag')
+	assert inner_line >= 0 && outer_line >= 0
+	for line, cases in {
+		inner_line: {
+			'node':  'node Node'
+			'child': 'child Child'
+			'leaf':  'leaf Leaf'
+			'flag':  'flag bool'
+		}
+		outer_line: {
+			'node':  'node Node'
+			'child': 'child Child'
+			'leaf':  'leaf Leaf'
+			'flag':  'flag bool'
+		}
+	} {
+		for name, expected in cases {
+			col := lines[line].last_index('.' + name) or { -1 }
+			assert col > 0, '${line}:${name}'
+			hover := app.hover_at(uri, Position{
+				line: line
+				char: col + 2
+			}) or { Hover{} }
+			assert hover.contents.value.contains(expected), '${line}:${name}: ${hover.contents.value}'
+		}
+	}
+}
+
+fn test_hover_on_a_closure_parameter_uses_the_type_written_beside_it() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'closure_parameter_hover')
+	must_mkdir_all(test_dir)
+	content := "module main\n\nstruct Child {\n\tvalue int\n}\n\nstruct Node {\n\tchild Child\n}\n\nstruct Listener {\n\tnode Node\n}\n\nfn main() {\n\tx := 1\n\tlisteners := []Listener{}\n\tkept := listeners.filter(fn (x Listener) bool {\n\t\treturn x.node.child.value == 1\n\t})\n\tprintln('\${x} \${kept}')\n}\n"
+	main_file := os.join_path(test_dir, 'main.v')
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	lines := content.split_into_lines()
+	// The parameter is being declared here, so the binding of the same name from
+	// the enclosing scope must not answer for it.
+	signature := lines.index('\tkept := listeners.filter(fn (x Listener) bool {')
+	assert signature >= 0
+	signature_col := lines[signature].index('x Listener') or { -1 }
+	assert signature_col > 0
+	hover := app.local_binding_hover(uri, Position{
+		line: signature
+		char: signature_col
+	}) or { Hover{} }
+	assert hover.contents.value.contains('x Listener'), hover.contents.value
+	body := lines.index('\t\treturn x.node.child.value == 1')
+	assert body >= 0
+	body_col := lines[body].index('x.node') or { -1 }
+	assert body_col > 0
+	inside := app.local_binding_hover(uri, Position{
+		line: body
+		char: body_col
+	}) or { Hover{} }
+	assert inside.contents.value.contains('x Listener'), inside.contents.value
+	outer := lines.index("\tprintln('\${x} \${kept}')")
+	assert outer >= 0
+	outer_col := lines[outer].index('\${x}') or { -1 }
+	assert outer_col > 0
+	outer_hover := app.local_binding_hover(uri, Position{
+		line: outer
+		char: outer_col + 2
+	}) or { Hover{} }
+	assert outer_hover.contents.value.contains('x int'), outer_hover.contents.value
+}
+
+fn test_hover_on_nested_closure_parameters_keeps_each_type() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'nested_closure_parameter_hover')
+	must_mkdir_all(test_dir)
+	content := "module main\n\nstruct Child {\n\tvalue int\n}\n\nstruct Node {\n\tchild Child\n}\n\nstruct Listener {\n\tnode Node\n}\n\nfn main() {\n\tx := 'text'\n\touter := fn (x Listener) bool {\n\t\tinner := fn (x Child) bool {\n\t\t\treturn x.value == 1\n\t\t}\n\t\treturn inner(x.node.child)\n\t}\n\tprintln('\${x} \${outer(Listener{})}')\n}\n"
+	main_file := os.join_path(test_dir, 'main.v')
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	lines := content.split_into_lines()
+	// Three parameters of the same name, one inside the other: each hover has to
+	// answer with the type written next to that one.
+	for source_line, expected in {
+		'\touter := fn (x Listener) bool {':      'x Listener'
+		'\t\tinner := fn (x Child) bool {':       'x Child'
+		'\t\t\treturn x.value == 1':              'x Child'
+		'\t\treturn inner(x.node.child)':         'x Listener'
+	} {
+		line := lines.index(source_line)
+		assert line >= 0, source_line
+		col := if source_line.contains('fn (x ') {
+			lines[line].index('x ' + expected.all_after(' ')) or { -1 }
+		} else {
+			lines[line].index('x.') or { -1 }
+		}
+		assert col > 0, source_line
+		hover := app.local_binding_hover(uri, Position{
+			line: line
+			char: col
+		}) or { Hover{} }
+		assert hover.contents.value.contains(expected), '${source_line}: ${hover.contents.value}'
+	}
+}
+
 fn test_hover_types_a_binding_holding_a_function_literal() {
 	mut app := create_test_app()
 	defer {
