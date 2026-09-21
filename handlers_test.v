@@ -6632,6 +6632,44 @@ fn test_hover_keeps_reference_and_option_parameter_types() {
 	}
 }
 
+fn test_hover_on_a_call_keeps_the_declaration_as_written() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'call_site_hover')
+	must_mkdir_all(test_dir)
+	content := 'module main\n\nfn apply(cb fn (a int) int, times int) int {\n\treturn cb(times)\n}\n\nfn main() {\n\tprintln(apply(fn (n int) int { return n }, 3))\n}\n'
+	main_file := os.join_path(test_dir, 'main.v')
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	lines := content.split_into_lines()
+	line := lines.index('\tprintln(apply(fn (n int) int { return n }, 3))')
+	assert line >= 0
+	col := lines[line].index('apply(') or { -1 }
+	assert col > 0
+	// The compiler re-prints a function type without its parameter names, so the
+	// declaration written in the source is the better answer.
+	response := app.operation_at_pos(.hover, Request{
+		id: 9601
+		method: 'textDocument/hover'
+		params: json2.encode(TextDocumentPositionParams{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			position: Position{
+				line: line
+				char: col + 2
+			}
+		},
+			escape_unicode: true
+		)
+	})
+	rendered := response.result.str()
+	assert rendered.contains('cb fn (a int) int'), rendered
+}
+
 fn test_hover_types_a_binding_holding_a_function_literal() {
 	mut app := create_test_app()
 	defer {

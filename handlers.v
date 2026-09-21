@@ -345,6 +345,37 @@ fn signature_active_parameter(parameters []ParameterInformation, requested int) 
 	return requested
 }
 
+// hover_with_written_declaration puts the declaration the source writes in place
+// of the one the compiler re-prints, and keeps the documentation the compiler
+// found. The compiler renders a declaration from its own types, so a function
+// type arrives without the names of its parameters.
+fn (mut app App) hover_with_written_declaration(uri string, position Position, result ResponseResult) ResponseResult {
+	if result !is Hover {
+		return result
+	}
+	hover := result as Hover
+	value := hover.contents.value
+	open_fence := value.index('```v\n') or { return result }
+	body_start := open_fence + 5
+	close_offset := value[body_start..].index('```') or { return result }
+	printed := value[body_start..body_start + close_offset].trim_space()
+	word := app.get_word_at_position(uri, position.line, position.char)
+	if word == '' || !printed.contains(word) {
+		return result
+	}
+	location := app.resolve_indexed_definition(uri, position) or { return result }
+	declaration := app.source_declaration_at(location)
+	if declaration == '' || !declaration.contains(word) {
+		return result
+	}
+	return Hover{
+		contents: MarkupContent{
+			kind: hover.contents.kind
+			value: value[..body_start] + declaration + '\n' + value[body_start + close_offset..]
+		}
+	}
+}
+
 fn (mut app App) source_hover_fallback(uri string, position Position) ?Hover {
 	location := app.resolve_indexed_definition(uri, position) or {
 		app.resolve_symbol_anchor(uri, position.line, position.char) or { return none }
@@ -697,6 +728,9 @@ fn (mut app App) operation_at_pos(method Method, request Request) Response {
 	}
 
 	mut result := app.run_v_line_info(method, path, line_info)
+	if method == .hover {
+		result = app.hover_with_written_declaration(path, params.position, result)
+	}
 	if result is string && result == 'null' {
 		if method == .hover {
 			if fallback := app.source_hover_fallback(path, params.position) {
