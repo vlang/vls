@@ -6500,6 +6500,99 @@ fn test_hover_does_not_treat_member_selector_as_local_binding() {
 	}
 }
 
+fn test_hover_only_answers_for_a_variable_reference() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'variable_reference_hover')
+	must_mkdir_all(test_dir)
+	content := "module main\n\nfn main() {\n\tvalue := 3\n\touter := 1\n\tprintln('value in text')\n\t// value in comment\n\tprintln('value is \${value}')\n\touter: for i in 0 .. 2 {\n\t\tif i == outer {\n\t\t\tbreak outer\n\t\t}\n\t}\n\tprintln(value)\n}\n"
+	main_file := os.join_path(test_dir, 'main.v')
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	lines := content.split_into_lines()
+	// Only the references are the variable: the word in a string or a comment is
+	// text, and a label is not a variable even when it is spelled like one.
+	for source_line, expected in {
+		"\tprintln('value in text')":  ''
+		'\t// value in comment':       ''
+		'\t\t\tbreak outer':           ''
+		"\tprintln('value is \${value}')": 'value int'
+		'\tprintln(value)':            'value int'
+		'\t\tif i == outer {':         'outer int'
+	} {
+		line := lines.index(source_line)
+		assert line >= 0, source_line
+		word := if source_line.contains('outer') { 'outer' } else { 'value' }
+		col := lines[line].last_index(word) or { -1 }
+		assert col >= 0, source_line
+		hover := app.local_binding_hover(uri, Position{
+			line: line
+			char: col + 1
+		}) or { Hover{} }
+		if expected == '' {
+			assert hover.contents.value == '', '${source_line}: ${hover.contents.value}'
+		} else {
+			assert hover.contents.value.contains(expected), '${source_line}: ${hover.contents.value}'
+		}
+	}
+}
+
+fn test_hover_keeps_a_closure_parameter_reference_type() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'closure_reference_hover')
+	must_mkdir_all(test_dir)
+	content := 'module main\n\nstruct Point {\n\tx int\n}\n\nfn main() {\n\tshow := fn (ptr &Point) {\n\t\tprintln(ptr)\n\t}\n\tshow(&Point{})\n}\n'
+	main_file := os.join_path(test_dir, 'main.v')
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	lines := content.split_into_lines()
+	line := lines.index('\t\tprintln(ptr)')
+	assert line >= 0
+	col := lines[line].index('(ptr)') or { -1 }
+	assert col > 0
+	hover := app.local_binding_hover(uri, Position{
+		line: line
+		char: col + 2
+	}) or { Hover{} }
+	assert hover.contents.value.contains('ptr &Point'), hover.contents.value
+}
+
+fn test_hover_names_the_type_of_a_typed_container_declaration() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'container_declaration_hover')
+	must_mkdir_all(test_dir)
+	content := 'module main\n\nfn main() {\n\tfixed := [3]int{}\n\ttable := map[string]int{}\n\tprintln(fixed)\n\tprintln(table)\n}\n'
+	main_file := os.join_path(test_dir, 'main.v')
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	lines := content.split_into_lines()
+	for name, expected in {
+		'fixed': 'fixed [3]int'
+		'table': 'table map[string]int'
+	} {
+		line := lines.index('\tprintln(${name})')
+		assert line >= 0, name
+		col := lines[line].index('(${name})') or { -1 }
+		assert col > 0, name
+		hover := app.local_binding_hover(uri, Position{
+			line: line
+			char: col + 2
+		}) or { Hover{} }
+		assert hover.contents.value.contains(expected), '${name}: ${hover.contents.value}'
+	}
+}
+
 fn test_hover_keeps_reference_and_option_parameter_types() {
 	mut app := create_test_app()
 	defer {

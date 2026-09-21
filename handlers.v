@@ -361,20 +361,39 @@ fn (mut app App) source_hover_fallback(uri string, position Position) ?Hover {
 	}
 }
 
-// identifier_is_label reports whether the identifier at `cursor_col` is a label
-// followed by `:` (the field name in a struct literal, or a loop label) instead of
-// a reference to a variable.
-fn identifier_is_label(line string, cursor_col int, enc PositionEncoding) bool {
-	byte_col := encoded_col_to_byte(line, cursor_col, enc)
-	if byte_col > line.len {
-		return false
+// hovered_variable_name returns the identifier at `position` when it references a
+// variable: an occurrence the index reads as code (the text inside a string or a
+// comment is not, while a `${}` interpolation is), not a member after a dot, and
+// not a label (`name:`, or the argument of `break`, `continue` or `goto`).
+fn (mut app App) hovered_variable_name(uri string, line string, position Position) ?string {
+	name := app.get_word_at_position(uri, position.line, position.char)
+	if name == '' {
+		return none
 	}
+	_, has_member_access, _ := member_qualifier_at_cursor(line, position.char, app.position_encoding)
+	if has_member_access {
+		return none
+	}
+	byte_col := encoded_col_to_byte(line, position.char, app.position_encoding)
 	mut end := byte_col
 	for end < line.len && is_ident_char(line[end]) {
 		end++
 	}
-	rest := line[end..].trim_left(' \t')
-	return rest.starts_with(':') && !rest.starts_with(':=')
+	if line[end..].trim_left(' \t').starts_with(':') && !line[end..].trim_left(' \t').starts_with(':=') {
+		return none
+	}
+	statement := line.trim_space()
+	for keyword in ['break ', 'continue ', 'goto '] {
+		if statement.starts_with(keyword) && statement[keyword.len..].trim_space() == name {
+			return none
+		}
+	}
+	occurrences := app.occurrences_for(uri)[name] or { return none }
+	if !occurrences.any(it.line == position.line && it.start_char <= position.char
+		&& position.char <= it.end_char) {
+		return none
+	}
+	return name
 }
 
 // hover_binding_type returns the type to show for `binding`: the one its
@@ -406,14 +425,15 @@ fn (mut app App) hover_binding_type(uri string, content string, lines []string, 
 	if declaration.binding_count != 1 || declaration.assignment_end > lines[binding.line].len {
 		return ''
 	}
-	return app.written_declaration_type(uri, content, lines[binding.line][declaration.assignment_end..])
+	return app.written_declaration_type(uri, content, lines[binding.line][declaration.assignment_end..],
+		position)
 }
 
 // written_declaration_type returns the type that the right-hand side of a
-// declaration names in the source (`&Point{}` gives `&Point`, `[]int{}`,
+// declaration names in the source (`&Point{}` gives `&Point`, `[3]int{}`,
 // `map[string]int{}`, `i64(5)`, and `5` gives `int`), or '' when naming it would
-// take inference.
-fn (mut app App) written_declaration_type(uri string, content string, raw_rhs string) string {
+// take inference, which drops `&`, `?` and `!`.
+fn (mut app App) written_declaration_type(uri string, content string, raw_rhs string, position Position) string {
 	mut expr := without_trailing_comment(raw_rhs).trim_space()
 	mut prefix := ''
 	if expr.starts_with('&') {
@@ -423,39 +443,37 @@ fn (mut app App) written_declaration_type(uri string, content string, raw_rhs st
 	if literal := receiver_literal_type(expr) {
 		return literal
 	}
-	if array := array_literal_type(expr) {
-		return '${prefix}${array}'
-	}
 	if channel := channel_literal_type(expr) {
 		return channel
 	}
-	if threads := thread_array_literal_type(expr) {
-		return threads
+	if !expression_names_its_type(expr) {
+		return ''
 	}
-	if enum_type := app.enum_value_type(uri, content, expr) {
-		return enum_type
+	typ, rest := app.operand_type(uri, content, expr, position)
+	if typ == '' || rest.trim_space() != '' {
+		return ''
 	}
-	if expr.starts_with('map[') {
-		brace := expr.index('{') or { return '' }
-		return '${prefix}${expr[..brace].trim_space()}'
+	return '${prefix}${typ}'
+}
+
+// expression_names_its_type reports whether an expression spells its own type out:
+// a typed container (`[]int{}`, `[3]int{}`, `map[string]int{}`), a struct literal,
+// a cast, or an enum value. A call or another variable does not, since reading
+// those takes inference.
+fn expression_names_its_type(expr string) bool {
+	if expr.starts_with('[') || expr.starts_with('map[') {
+		return true
 	}
 	mut end := 0
 	for end < expr.len && (is_ident_char(expr[end]) || expr[end] == `.`) {
 		end++
 	}
-	name := expr[..end]
+	head := expr[..end]
 	rest := expr[end..].trim_space()
-	if name == '' {
-		return ''
+	if rest.starts_with('{') || rest.starts_with('(') {
+		return is_type_name(head) || head in builtin_receiver_types
 	}
-	if rest.starts_with('{') && is_type_name(name) {
-		return '${prefix}${name}'
-	}
-	if rest.starts_with('(') && (name in builtin_receiver_types || is_type_name(name)) {
-		// A cast names its type: `i64(5)`, `Meters(1.5)`.
-		return '${prefix}${name}'
-	}
-	return ''
+	return head.contains('.') && is_type_name(head.all_before_last('.'))
 }
 
 fn (mut app App) local_binding_hover(uri string, position Position) ?Hover {
@@ -464,18 +482,7 @@ fn (mut app App) local_binding_hover(uri string, position Position) ?Hover {
 	if position.line < 0 || position.line >= lines.len {
 		return none
 	}
-	name := app.get_word_at_position(uri, position.line, position.char)
-	if name == '' {
-		return none
-	}
-	line := lines[position.line]
-	_, has_member_access, _ := member_qualifier_at_cursor(line, position.char, app.position_encoding)
-	if has_member_access {
-		return none
-	}
-	if identifier_is_label(line, position.char, app.position_encoding) {
-		return none
-	}
+	name := app.hovered_variable_name(uri, lines[position.line], position)?
 	bindings := app.local_scope_bindings(content, position)
 	for i := bindings.len - 1; i >= 0; i-- {
 		binding := bindings[i]
