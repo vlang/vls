@@ -6632,6 +6632,138 @@ fn test_hover_keeps_reference_and_option_parameter_types() {
 	}
 }
 
+// public_hover_text asks for a hover through the same entry point an editor
+// uses, and returns the text of the answer.
+fn public_hover_text(mut app App, uri string, line int, character int) string {
+	response := app.operation_at_pos(.hover, Request{
+		id: 9700 + line
+		method: 'textDocument/hover'
+		params: json2.encode(TextDocumentPositionParams{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			position: Position{
+				line: line
+				char: character
+			}
+		},
+			escape_unicode: true
+		)
+	})
+	if response.result is Hover {
+		hover := response.result as Hover
+		return hover.contents.value
+	}
+	return ''
+}
+
+fn open_hover_fixture(mut app App, name string, content string) (string, []string) {
+	test_dir := os.join_path(app.temp_dir, name)
+	must_mkdir_all(test_dir)
+	main_file := os.join_path(test_dir, 'main.v')
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	return uri, content.split_into_lines()
+}
+
+fn test_hover_keeps_the_type_a_reference_returning_call_gives() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	uri, lines := open_hover_fixture(mut app, 'reference_call_hover', 'module main\n\n@[heap]\nstruct Point {\n\tx int\n}\n\nfn new_point() &Point {\n\treturn &Point{\n\t\tx: 1\n\t}\n}\n\nfn copy_ref(ptr &Point) {\n\tq := ptr\n\tprintln(q)\n}\n\nfn main() {\n\tp := new_point()\n\tprintln(p)\n\tcopy_ref(p)\n}\n')
+	// A value that does not spell its type can still be a reference: the type
+	// shown has to keep the `&` the function returns or the parameter declares.
+	for source_line, expected in {
+		'\tprintln(p)': 'p &Point'
+		'\tprintln(q)': 'q &Point'
+	} {
+		line := lines.index(source_line)
+		assert line >= 0, source_line
+		col := lines[line].index('(') or { -1 }
+		value := public_hover_text(mut app, uri, line, col + 1)
+		assert value.contains(expected), '${source_line}: ${value}'
+	}
+}
+
+fn test_hover_keeps_the_reference_through_an_inferred_value() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	uri, lines := open_hover_fixture(mut app, 'inferred_reference_hover', 'module main\n\n@[heap]\nstruct Point {\n\tx int\n}\n\nstruct Holder {\n\tptr    &Point\n\tpoints []&Point\n}\n\nfn (h &Holder) itself() &Holder {\n\treturn h\n}\n\nfn new_point() &Point {\n\treturn &Point{\n\t\tx: 1\n\t}\n}\n\nfn maybe_point() ?&Point {\n\treturn new_point()\n}\n\nfn main() {\n\tp := new_point()\n\ts := p\n\tprintln(s)\n\tholder := &Holder{\n\t\tptr:    p\n\t\tpoints: [p]\n\t}\n\tcopied := holder\n\tprintln(copied)\n\tr := holder.ptr\n\tprintln(r)\n\tm := holder.itself()\n\tprintln(m)\n\tfirst := holder.points[0]\n\tprintln(first)\n\tpair := [p, s]\n\tprintln(pair)\n\to := maybe_point() or { p }\n\tprintln(o)\n\tif g := maybe_point() {\n\t\tprintln(g)\n\t}\n\tt := spawn new_point()\n\tprintln(t.wait())\n}\n')
+	// Each value is read from another one: a variable, a field, a method, an
+	// index, an `or` block or an `if` guard. Unwrapping takes the `?` away, but
+	// the `&` the source declares has to reach the hover every time.
+	mut failures := []string{}
+	for source_line, expected in {
+		'\tprintln(s)':        's &Point'
+		'\tprintln(copied)':   'copied &Holder'
+		'\tprintln(r)':        'r &Point'
+		'\tprintln(m)':        'm &Holder'
+		'\tprintln(first)':    'first &Point'
+		'\tprintln(pair)':     'pair []&Point'
+		'\tprintln(o)':        'o &Point'
+		'\t\tprintln(g)':      'g &Point'
+		'\tprintln(t.wait())': 't thread &Point'
+	} {
+		line := lines.index(source_line)
+		assert line >= 0, source_line
+		col := lines[line].index('(') or { -1 }
+		value := public_hover_text(mut app, uri, line, col + 1)
+		if !value.contains(expected) {
+			failures << '${source_line.trim_space()}: expected `${expected}`, got `${value}`'
+		}
+	}
+	assert failures.len == 0, failures.join('\n')
+}
+
+fn test_hover_on_a_field_shows_the_type_it_declares() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	uri, lines := open_hover_fixture(mut app, 'declared_field_hover', 'module main\n\nstruct Point {\n\tx int\n}\n\nstruct Holder {\n\tptr    &Point\n\topt    ?Point\n\tpoints []&Point\n\tlookup map[string]?Point\n}\n\nfn inspect(holder Holder) {\n\tprintln(holder.ptr)\n\tprintln(holder.opt)\n\tprintln(holder.points)\n\tprintln(holder.lookup)\n}\n')
+	// The member list strips `&` and `?` to find the members of the underlying
+	// type; the hover has to show the field as it is declared.
+	for field, expected in {
+		'ptr':    'ptr &Point'
+		'opt':    'opt ?Point'
+		'points': 'points []&Point'
+		'lookup': 'lookup map[string]?Point'
+	} {
+		line := lines.index('\tprintln(holder.${field})')
+		assert line >= 0, field
+		col := lines[line].index('.${field}') or { -1 }
+		value := public_hover_text(mut app, uri, line, col + 2)
+		assert value.contains(expected), '${field}: ${value}'
+	}
+}
+
+fn test_hover_keeps_the_whole_result_of_a_function_typed_parameter() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	uri, lines := open_hover_fixture(mut app, 'function_parameter_result_hover', 'module main\n\nfn use_pair(cb fn () (int, int)) {\n\ta, b := cb()\n\tprintln(a + b)\n}\n\nfn use_chan(make fn () chan int) {\n\tch := make()\n\tprintln(ch)\n}\n\nfn use_nested(build fn (n int) fn () ?string) {\n\tf := build(1)\n\tprintln(f())\n}\n\nfn main() {\n\tuse_pair(fn () (int, int) {\n\t\treturn 1, 2\n\t})\n}\n')
+	// A result type is not always one word: a tuple, a channel and a function
+	// returning another function are single types too.
+	for source_line, expected in {
+		'\ta, b := cb()':  'cb fn () (int, int)'
+		'\tch := make()':  'make fn () chan int'
+		'\tf := build(1)': 'build fn (n int) fn () ?string'
+	} {
+		line := lines.index(source_line)
+		assert line >= 0, source_line
+		name := expected.all_before(' ')
+		col := lines[line].index('${name}(') or { -1 }
+		assert col > 0, source_line
+		value := public_hover_text(mut app, uri, line, col + 1)
+		assert value.contains(expected), '${source_line}: ${value}'
+	}
+}
+
 fn test_hover_on_a_call_keeps_the_declaration_as_written() {
 	mut app := create_test_app()
 	defer {

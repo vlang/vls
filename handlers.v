@@ -24,8 +24,11 @@ struct IndexedCompletionResult {
 	items          []Detail
 	use_compiler   bool
 	embedded_types []string
-	field_types    map[string]string
-	resolved_type  bool
+	// field_types holds each field's type as member lookup needs it, without
+	// `&`, `?` or `!`; field_declared_types keeps it as the source writes it.
+	field_types          map[string]string
+	field_declared_types map[string]string
+	resolved_type        bool
 }
 
 struct IndexedMethodSymbolResult {
@@ -428,21 +431,6 @@ fn (mut app App) hovered_variable_name(uri string, line string, position Positio
 	return name
 }
 
-// hover_binding_type returns the type to show for `binding`: the one its
-// declaration writes down. A hover keeps `&`, `?` and `!`, which the receiver
-// type resolver drops on purpose when it chooses a member list, so a declaration
-// whose type would need that resolver is left to the compiler's hover instead.
-// hover_binding_type answers with the type as the source writes it, which keeps
-// `&` and `?`, and falls back to the inferred one when the value names no type
-// (an `or` block, a spawned call, an `if` guard), where no modifier is lost.
-fn (mut app App) hover_binding_type(uri string, content string, lines []string, binding LocalBinding, position Position) string {
-	written := app.written_binding_type(uri, content, lines, binding, position)
-	if written != '' {
-		return written
-	}
-	return app.infer_bound_receiver_type_at_position(uri, content, binding.name, position)
-}
-
 fn (mut app App) written_binding_type(uri string, content string, lines []string, binding LocalBinding, position Position) string {
 	if binding.typ != '' {
 		return binding.typ
@@ -680,8 +668,10 @@ fn (mut app App) member_selector_hover(uri string, position Position) ?Hover {
 		return none
 	}
 	// Only fields: a method reads better as the signature the compiler prints.
+	// The declared type, not the one member lookup uses: that one has lost its
+	// `&`, `?` and `!`.
 	members := app.type_members(uri, content, member_receiver_type(typ))
-	field := members.field_types[name] or { return none }
+	field := members.field_declared_types[name] or { return none }
 	if field == '' {
 		return none
 	}
@@ -712,24 +702,16 @@ fn (mut app App) local_binding_hover(uri string, position Position) ?Hover {
 			}
 		}
 	}
-	bindings := app.local_scope_bindings(content, position)
-	for i := bindings.len - 1; i >= 0; i-- {
-		binding := bindings[i]
-		if binding.name != name {
-			continue
-		}
-		typ := app.hover_binding_type(uri, content, lines, binding, position)
-		if typ != '' {
-			return Hover{
-				contents: MarkupContent{
-					kind: 'markdown'
-					value: '```v\n${name} ${typ}\n```'
-				}
-			}
-		}
-		break
+	typ := app.infer_binding_type_at_position(uri, content, name, position)
+	if typ == '' {
+		return none
 	}
-	return none
+	return Hover{
+		contents: MarkupContent{
+			kind: 'markdown'
+			value: '```v\n${name} ${typ}\n```'
+		}
+	}
 }
 
 fn (mut app App) source_signature_fallback(uri string, position Position) ?SignatureHelp {
@@ -1943,35 +1925,9 @@ fn type_after_identifier(text string, name string) string {
 			search_start = col + 2
 			continue
 		}
-		start := col
-		for col < text.len && (is_ident_char(text[col])
-			|| text[col] in [`&`, `?`, `!`, `.`, `[`, `]`]) {
-			col++
-		}
-		if col > start {
-			word := text[start..col]
-			if word == 'fn' || word.ends_with(']fn') {
-				// A function type spells its parameters and result after `fn`.
-				if suffix := function_type_suffix(text, col) {
-					return '${word} ${suffix}'
-				}
-			}
-			if word in ['chan', 'thread'] || word.ends_with(']chan') || word.ends_with(']thread') {
-				// `chan T` and `thread T` spell their element type as a second word.
-				mut elem_start := col
-				for elem_start < text.len && text[elem_start] in [` `, `\t`] {
-					elem_start++
-				}
-				mut elem_end := elem_start
-				for elem_end < text.len && (is_ident_char(text[elem_end])
-					|| text[elem_end] in [`&`, `?`, `!`, `.`, `[`, `]`]) {
-					elem_end++
-				}
-				if elem_end > elem_start {
-					return '${word} ${text[elem_start..elem_end]}'
-				}
-			}
-			return word
+		typ, _ := type_at(text, col)
+		if typ != '' {
+			return typ
 		}
 		search_start = col + 1
 	}
@@ -2221,11 +2177,17 @@ fn (mut app App) infer_receiver_type(uri string, content string, receiver string
 	})
 }
 
+// infer_receiver_type_at_position returns the type whose members follow
+// `receiver_expression.`: the type of the expression without the `&`, `?` or `!`
+// it may hold.
 fn (mut app App) infer_receiver_type_at_position(uri string, content string, receiver_expression string, use_position Position) string {
-	return app.expression_type(uri, content, receiver_expression, use_position)
+	return member_receiver_type(app.expression_type(uri, content, receiver_expression, use_position))
 }
 
-fn (mut app App) infer_bound_receiver_type_at_position(uri string, content string, receiver string, use_position Position) string {
+// infer_binding_type_at_position returns the type of the binding `receiver` in
+// scope at `use_position`, keeping the `&`, `?` and `!` it holds: the type its
+// declaration writes down, or else the type of the value it is given.
+fn (mut app App) infer_binding_type_at_position(uri string, content string, receiver string, use_position Position) string {
 	if receiver == '' {
 		return ''
 	}
@@ -2235,16 +2197,14 @@ fn (mut app App) infer_bound_receiver_type_at_position(uri string, content strin
 		return ''
 	}
 	mut has_active_binding := false
-	mut active_binding_type := ''
+	mut active_binding := LocalBinding{}
 	mut active_declaration_columns := map[int][]int{}
 	bindings := app.local_scope_bindings(content, use_position)
 	for i := bindings.len - 1; i >= 0; i-- {
 		binding := bindings[i]
 		if binding.name == receiver {
 			has_active_binding = true
-			if binding.typ != '' {
-				active_binding_type = binding.typ
-			}
+			active_binding = binding
 			if binding.column >= 0 {
 				active_declaration_columns[binding.line] << binding.column
 			}
@@ -2254,8 +2214,9 @@ fn (mut app App) infer_bound_receiver_type_at_position(uri string, content strin
 	if !has_active_binding {
 		return ''
 	}
-	if active_binding_type != '' {
-		return active_binding_type
+	written := app.written_binding_type(uri, content, lines, active_binding, use_position)
+	if written != '' {
+		return written
 	}
 	mut header_start := -1
 	mut scan_state := ImportScanState{}
@@ -2367,7 +2328,11 @@ fn (mut app App) infer_bound_receiver_type_at_position(uri string, content strin
 			if is_constructor {
 				return normalize_receiver_type(candidate)
 			}
-			return_type := app.function_return_type(uri, content, candidate)
+			// V does not let a call's option or result be bound as it is: an `or`
+			// block, a `!` or `?`, or an `if` guard unwraps it first, and the reference
+			// it holds stays.
+			return_type := unwrap_option_type(app.function_return_type_raw(uri, content,
+				candidate))
 			if return_type != '' {
 				return return_type
 			}
@@ -2383,8 +2348,7 @@ fn (mut app App) infer_bound_receiver_type_at_position(uri string, content strin
 			end_line = lines.len
 		}
 		header := lines[header_start..end_line].join('\n').all_before('{')
-		// Keep `[]int` and `map[string]int` whole: only a reference or option goes.
-		return member_receiver_type(type_after_identifier(header, receiver))
+		return type_after_identifier(header, receiver)
 	}
 	return ''
 }
@@ -2711,6 +2675,7 @@ fn (mut app App) indexed_struct_field_completions_visited(uri string, content st
 	mut seen_items := map[string]bool{}
 	mut embedded_types := []string{}
 	mut field_types := map[string]string{}
+	mut field_declared_types := map[string]string{}
 	mut has_conditional := false
 	mut has_unresolved_embedded := false
 	mut resolved_type := false
@@ -2769,6 +2734,11 @@ fn (mut app App) indexed_struct_field_completions_visited(uri string, content st
 								field_types[field_name] = field_type
 							}
 						}
+						for field_name, declared_type in promoted.field_declared_types {
+							if field_name !in field_declared_types {
+								field_declared_types[field_name] = declared_type
+							}
+						}
 						continue
 					}
 				}
@@ -2782,6 +2752,9 @@ fn (mut app App) indexed_struct_field_completions_visited(uri string, content st
 					if field_type != '' {
 						field_types[detail.label] = field_type
 					}
+					if field_source_type != '' {
+						field_declared_types[detail.label] = field_source_type
+					}
 				}
 			}
 		}
@@ -2791,6 +2764,7 @@ fn (mut app App) indexed_struct_field_completions_visited(uri string, content st
 		use_compiler: has_conditional || has_unresolved_embedded
 		embedded_types: embedded_types
 		field_types: field_types
+		field_declared_types: field_declared_types
 		resolved_type: resolved_type
 	}
 }

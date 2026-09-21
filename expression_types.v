@@ -308,6 +308,13 @@ fn member_receiver_type(typ string) string {
 	return t
 }
 
+// type_modifiers returns what member_receiver_type strips from the front of
+// `typ`: the `&` of `&Point`, the `?&` of `?&Point`.
+fn type_modifiers(typ string) string {
+	t := typ.trim_space()
+	return t[..t.len - member_receiver_type(t).len]
+}
+
 fn top_level_slice_range(text string) bool {
 	mut depth := 0
 	mut in_string := false
@@ -545,6 +552,7 @@ fn (mut app App) type_members_at_depth(uri string, content string, typ string, d
 	mut kinds := composite_member_kinds(t)
 	mut items := []Detail{}
 	mut field_types := map[string]string{}
+	mut field_declared_types := map[string]string{}
 	mut embedded_types := []string{}
 	mut use_compiler := false
 	mut resolved_type := false
@@ -552,6 +560,7 @@ fn (mut app App) type_members_at_depth(uri string, content string, typ string, d
 		declared := app.declared_type_members(uri, content, t)
 		items = declared.items.clone()
 		field_types = declared.field_types.clone()
+		field_declared_types = declared.field_declared_types.clone()
 		embedded_types = declared.embedded_types
 		use_compiler = declared.use_compiler
 		resolved_type = declared.resolved_type
@@ -570,6 +579,11 @@ fn (mut app App) type_members_at_depth(uri string, content string, typ string, d
 					field_types[field_name] = field_type
 				}
 			}
+			for field_name, declared_type in base.field_declared_types {
+				if field_name !in field_declared_types {
+					field_declared_types[field_name] = declared_type
+				}
+			}
 			use_compiler = use_compiler || base.use_compiler
 		}
 		if decl.kind in ['', 'interface'] && items.len == 0 {
@@ -586,11 +600,12 @@ fn (mut app App) type_members_at_depth(uri string, content string, typ string, d
 		items << wait_item
 	}
 	return IndexedCompletionResult{
-		items:          items
-		use_compiler:   use_compiler
-		embedded_types: embedded_types
-		field_types:    field_types
-		resolved_type:  resolved_type
+		items:                items
+		use_compiler:         use_compiler
+		embedded_types:       embedded_types
+		field_types:          field_types
+		field_declared_types: field_declared_types
+		resolved_type:        resolved_type
 	}
 }
 
@@ -621,11 +636,12 @@ fn (mut app App) declared_type_members(uri string, content string, receiver_type
 		}
 	}
 	return IndexedCompletionResult{
-		items:          items
-		use_compiler:   field_result.use_compiler || methods_use_compiler
-		embedded_types: field_result.embedded_types
-		field_types:    field_result.field_types
-		resolved_type:  field_result.resolved_type
+		items:                items
+		use_compiler:         field_result.use_compiler || methods_use_compiler
+		embedded_types:       field_result.embedded_types
+		field_types:          field_result.field_types
+		field_declared_types: field_result.field_declared_types
+		resolved_type:        field_result.resolved_type
 	}
 }
 
@@ -635,7 +651,9 @@ fn (mut app App) member_type(uri string, content string, typ string, name string
 	t := member_receiver_type(typ)
 	members := app.type_members(uri, content, t)
 	if field_type := members.field_types[name] {
-		return field_type
+		// The lookup type is named for this file but has lost the field's `&`, `?`
+		// or `!`; the declared one still has them.
+		return type_modifiers(members.field_declared_types[name] or { '' }) + field_type
 	}
 	for item in members.items {
 		if item.label != name {
@@ -891,35 +909,100 @@ fn string_literal_end(text string) ?int {
 }
 
 // without_trailing_comment drops a `//` comment that ends `text`.
-// function_type_suffix reads the `(params)` and the optional result of a
-// function type written after `fn`, so a parameter declared `cb fn (int) int`
-// keeps its whole type instead of stopping at the first word.
-fn function_type_suffix(text string, start int) ?string {
+// type_at reads the complete type written at `start` and returns it with the
+// index right after it, or an empty type when none starts there. A type is not
+// always one word: `(int, string)`, `chan int`, `fn (a int) ?string`,
+// `map[string][]&Point` and `Box[int]` are each a single type.
+fn type_at(text string, start int) (string, int) {
 	mut i := start
 	for i < text.len && text[i] in [` `, `\t`] {
 		i++
 	}
-	if i >= text.len || text[i] != `(` {
-		return none
+	begin := i
+	for i < text.len && text[i] in [`&`, `?`, `!`] {
+		i++
 	}
-	params_end := matching_delimiter(text, i, `(`, `)`)
-	if params_end < 0 {
-		return none
+	if i + 3 <= text.len && text[i..i + 3] == '...' {
+		i += 3
 	}
-	params := text[i..params_end + 1]
-	mut result_start := params_end + 1
-	for result_start < text.len && text[result_start] in [` `, `\t`] {
-		result_start++
+	if i >= text.len {
+		return '', start
 	}
-	mut result_end := result_start
-	for result_end < text.len && (is_ident_char(text[result_end])
-		|| text[result_end] in [`&`, `?`, `!`, `.`, `[`, `]`]) {
-		result_end++
+	if text[i] == `(` {
+		// A tuple of results.
+		close := matching_delimiter(text, i, `(`, `)`)
+		if close < 0 {
+			return '', start
+		}
+		return text[begin..close + 1], close + 1
 	}
-	if result_end > result_start {
-		return '${params} ${text[result_start..result_end]}'
+	if text[i] == `[` {
+		// `[]T` and `[N]T`: the brackets, then the element type.
+		close := matching_delimiter(text, i, `[`, `]`)
+		if close < 0 {
+			return '', start
+		}
+		elem, after := type_at(text, close + 1)
+		if elem == '' {
+			return '', start
+		}
+		return text[begin..close + 1] + elem, after
 	}
-	return params
+	word_start := i
+	for i < text.len && (is_ident_char(text[i]) || text[i] == `.`) {
+		i++
+	}
+	if i == word_start {
+		return '', start
+	}
+	word := text[word_start..i]
+	prefix := text[begin..word_start]
+	if word == 'fn' {
+		// A function type: its parameters, then its own result, if any.
+		mut j := i
+		for j < text.len && text[j] in [` `, `\t`] {
+			j++
+		}
+		if j < text.len && text[j] == `(` {
+			close := matching_delimiter(text, j, `(`, `)`)
+			if close < 0 {
+				return '', start
+			}
+			result, after := type_at(text, close + 1)
+			if result == '' {
+				return '${prefix}fn ${text[j..close + 1]}', close + 1
+			}
+			return '${prefix}fn ${text[j..close + 1]} ${result}', after
+		}
+		return '${prefix}fn', i
+	}
+	if word == 'map' && i < text.len && text[i] == `[` {
+		close := matching_delimiter(text, i, `[`, `]`)
+		if close < 0 {
+			return '', start
+		}
+		value, after := type_at(text, close + 1)
+		if value == '' {
+			return '', start
+		}
+		return prefix + text[word_start..close + 1] + value, after
+	}
+	if word in ['chan', 'thread', 'shared', 'atomic'] {
+		// These spell their element type as a second word.
+		elem, after := type_at(text, i)
+		if elem != '' {
+			return '${prefix}${word} ${elem}', after
+		}
+		return prefix + word, i
+	}
+	if i < text.len && text[i] == `[` {
+		// Generic arguments written right after the name: `Box[int]`.
+		close := matching_delimiter(text, i, `[`, `]`)
+		if close > 0 {
+			i = close + 1
+		}
+	}
+	return text[begin..i], i
 }
 
 // function_literal_type renders the type of a function literal the way the
@@ -983,7 +1066,8 @@ fn without_trailing_comment(text string) string {
 // `[]int`, `map[string]Point`, `time.Time`), or '' when it cannot tell. It reads
 // the operand the expression starts with (a binding, a literal, a call, a cast, a
 // struct or array literal, a module or static function, `typeof`) and then each
-// `.field`, `.method(...)`, `[index]`, `or {...}`, `!` and `?` after it.
+// `.field`, `.method(...)`, `[index]`, `or {...}`, `!` and `?` after it. The type
+// keeps the `&`, `?` and `!` the source declares; member lookup strips them.
 fn (mut app App) expression_type(uri string, content string, expr string, position Position) string {
 	// A binding's type can come from its declaration, which may name the binding
 	// again (`x := x.next()`); stop before that loops.
@@ -1023,7 +1107,11 @@ fn (mut app App) operand_type(uri string, content string, text string, position 
 		if text.len == 1 {
 			return '', text
 		}
-		return app.operand_type(uri, content, text[1..].trim_space(), position)
+		typ, rest := app.operand_type(uri, content, text[1..].trim_space(), position)
+		if typ == '' {
+			return '', text
+		}
+		return '&${typ}', rest
 	}
 	if literal_end := string_literal_end(text) {
 		typ := if c == `\`` {
@@ -1099,7 +1187,7 @@ fn (mut app App) operand_type(uri string, content string, text string, position 
 			// A cast: `i64(5)`, `Meters(1.5)`.
 			return name, rest[close + 1..]
 		}
-		return app.function_return_type(uri, content, name), rest[close + 1..]
+		return app.function_return_type_raw(uri, content, name), rest[close + 1..]
 	}
 	if rest.starts_with('.') && !app.local_scope_bindings(content, position).any(it.name == name) {
 		mut member_end := 1
@@ -1121,7 +1209,7 @@ fn (mut app App) operand_type(uri string, content string, text string, position 
 					return qualified, after[close + 1..]
 				}
 				if after[0] == `(` {
-					return app.function_return_type(uri, content, qualified), after[close + 1..]
+					return app.function_return_type_raw(uri, content, qualified), after[close + 1..]
 				}
 			}
 			return '', text
@@ -1145,7 +1233,7 @@ fn (mut app App) operand_type(uri string, content string, text string, position 
 	if narrowed := smart_cast_type(lines, position, name, app.position_encoding) {
 		return narrowed, rest
 	}
-	return app.infer_bound_receiver_type_at_position(uri, content, name, position), rest
+	return app.infer_binding_type_at_position(uri, content, name, position), rest
 }
 
 // typeof_operand reads `(x)` or `[T]()` after `typeof`.
