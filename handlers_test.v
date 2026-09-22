@@ -10980,6 +10980,84 @@ fn test_empty_callback_argument_offers_a_function_skeleton() {
 	assert (user_skeletons[0].insert_text or { '' }) == 'fn (x int) int {\n\t\$0\n}'
 }
 
+fn test_callback_skeletons_name_parameters_whose_type_takes_several_words() {
+	// `thread int` is one type written as two words: `thread` is not the name of
+	// the parameter, and a function literal needs one.
+	mut failures := []string{}
+	threads := array_completion_items('callback_thread_elements', 'arr := []thread int{}')
+	thread_filter := threads.filter(it.label == 'filter')
+	got_filter := if thread_filter.len > 0 {
+		thread_filter[0].insert_text or { '' }
+	} else {
+		'no filter'
+	}
+	if got_filter != 'filter(fn (x thread int) bool {\n\t\$0\n})' {
+		failures << 'arr.filter on []thread int: ${got_filter}'
+	}
+	user_items := callback_argument_items('callback_arg_channels', 'module main\n\nfn each(f fn (chan int) bool) bool {\n\treturn f(chan int{})\n}\n\nfn main() {\n\teach()\n}\n', '\teach()', 1)
+	if user_items.filter(it.label == 'fn (x chan int) bool').len != 1 {
+		failures << 'each(): ${user_items.map(it.label)}'
+	}
+	for fn_type, expected in {
+		'fn (thread int) bool':              'fn (x thread int) bool'
+		'fn (chan int) bool':                'fn (x chan int) bool'
+		'fn (atomic int)':                   'fn (x atomic int)'
+		'fn (thread int, chan string) bool': 'fn (a thread int, b chan string) bool'
+		'fn (mut []int)':                    'fn (mut x []int)'
+		'fn (shared Data)':                  'fn (shared x Data)'
+		'fn (th thread int) bool':           'fn (th thread int) bool'
+		'fn (mut buf []u8) int':             'fn (mut buf []u8) int'
+		'fn (int) bool':                     'fn (x int) bool'
+		'fn (a &int, b &int) int':           'fn (a &int, b &int) int'
+		'fn (fn (int) int) int':             'fn (x fn (int) int) int'
+		'fn (time.Time, C.FILE)':            'fn (a time.Time, b C.FILE)'
+		'fn (...string)':                    'fn (x ...string)'
+		'fn (map[string]thread int) bool':   'fn (x map[string]thread int) bool'
+	} {
+		label, _ := callback_skeleton(fn_type, '') or { 'none', '' }
+		if label != expected {
+			failures << '${fn_type}: ${label}'
+		}
+	}
+	assert failures.len == 0, failures.join('\n')
+}
+
+fn test_call_snippets_name_the_parameter_after_its_modifier() {
+	// `shared` comes before the name like `mut`, and a type can take two words.
+	assert build_fn_snippet('update', '(shared d Data)') == 'update(\${1:d})\$0'
+	assert build_fn_snippet('fill', '(mut buf []u8, n int)') == 'fill(\${1:buf}, \${2:n})\$0'
+	assert build_fn_snippet('join', '(th thread int, ch chan string)') == 'join(\${1:th}, \${2:ch})\$0'
+	assert build_fn_snippet('skip', '(_ string)') == 'skip(\${1:string})\$0'
+}
+
+fn test_enum_members_are_not_offered_for_a_channel_of_the_enum() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'enum_channel_argument')
+	must_mkdir_all(test_dir)
+	main_file := os.join_path(test_dir, 'main.v')
+	content := 'module main\n\nenum Color {\n\tred\n\tgreen\n}\n\nfn paint(c Color) {}\n\nfn send(ch chan Color) {}\n\nfn main() {\n\tpaint(.)\n\tsend(.)\n}\n'
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	lines := content.split_into_lines()
+	labels_at := fn [mut app, uri, lines] (line_text string) []string {
+		line := lines.index(line_text)
+		assert line >= 0, line_text
+		return app.indexed_completions(uri, Position{
+			line: line
+			char: lines[line].len - 1
+		}).items.map(it.label)
+	}
+	// A `Color` parameter takes `.red`; a `chan Color` one does not.
+	paint_labels := labels_at('\tpaint(.)')
+	assert 'red' in paint_labels, paint_labels.str()
+	send_labels := labels_at('\tsend(.)')
+	assert 'red' !in send_labels, send_labels.str()
+}
+
 fn semantic_token_texts(line string) []string {
 	return tokenize_v_source(line).map('${semantic_token_types()[it.type_idx]}:${line[it.start..it.start +
 		it.length]}')

@@ -3042,7 +3042,9 @@ fn (mut app App) expected_enum_type(uri string, content string, lines []string, 
 		if help.signatures.len > 0 && help.active_parameter >= 0
 			&& help.active_parameter < help.signatures[0].parameters.len {
 			param := help.signatures[0].parameters[help.active_parameter].label.trim_space()
-			param_type := param.all_after_last(' ').trim_left('&?!')
+			// The whole type: `chan Color` takes no enum value.
+			_, _, declared := parameter_parts(param)
+			param_type := declared.trim_left('&?!')
 			if param_type != '' {
 				return param_type
 			}
@@ -3170,6 +3172,36 @@ fn array_member_completions(receiver_type string) []Detail {
 	return language_member_items(array_type, composite_member_kinds(array_type), false)
 }
 
+// parameter_parts splits a parameter as a signature writes it into its modifier,
+// its name and its type: `mut buf []u8` is `mut `, `buf` and `[]u8`, and
+// `c chan Color` is `c` and `chan Color`. A type can take several words, so the
+// first word is only a name when what follows it is the type: a parameter of a
+// function type that is one whole type (`thread int`) has no name.
+fn parameter_parts(param string) (string, string, string) {
+	mut modifier := ''
+	mut rest := param.trim_space()
+	for word in ['mut ', 'shared '] {
+		if rest.starts_with(word) {
+			modifier = word
+			rest = rest[word.len..].trim_space()
+			break
+		}
+	}
+	whole, whole_end := type_at(rest, 0)
+	if whole != '' && rest[whole_end..].trim_space() == '' {
+		return modifier, '', whole
+	}
+	mut name_end := 0
+	for name_end < rest.len && is_ident_char(rest[name_end]) {
+		name_end++
+	}
+	if name_end == 0 {
+		return modifier, '', rest
+	}
+	typ, _ := type_at(rest, name_end)
+	return modifier, rest[..name_end], if typ != '' { typ } else { rest[name_end..].trim_space() }
+}
+
 // callback_skeleton builds the simplest function literal of type `fn_type`
 // (`fn (int) bool`): its completion label (`fn (x int) bool`) and a snippet
 // with the cursor inside the body. Parameters that the type already names
@@ -3189,14 +3221,12 @@ fn callback_skeleton(fn_type string, generic_default string) ?(string, string) {
 	names := if param_types.len == 1 { ['x'] } else { ['a', 'b', 'c', 'd', 'e', 'f'] }
 	mut params := []string{cap: param_types.len}
 	for i, param_type in param_types {
-		first := param_type.all_before(' ')
-		is_named := param_type.contains(' ') && first != 'fn' && first.len > 0
-			&& (first[0].is_letter() || first[0] == `_`) && !first[0].is_capital()
-		if is_named {
+		modifier, param_name, typ := parameter_parts(param_type)
+		if param_name != '' {
 			params << param_type
 		} else {
 			name := if i < names.len { names[i] } else { 'p${i}' }
-			params << '${name} ${param_type}'
+			params << '${modifier}${name} ${typ}'
 		}
 	}
 	signature := 'fn (${params.join(', ')})'
@@ -7305,17 +7335,9 @@ fn build_fn_snippet(fn_name string, params_str string) string {
 		if trimmed == '' {
 			continue
 		}
-		parts := trimmed.split(' ')
-		// Skip parameters without a name (e.g. `_ string`).
-		mut param_name := ''
-		for part in parts {
-			p := part.trim_space()
-			if p == '' || p == 'mut' || p == '_' {
-				continue
-			}
-			param_name = p
-			break
-		}
+		// A parameter without a name (`_ string`) shows its type instead.
+		_, name, typ := parameter_parts(trimmed)
+		mut param_name := if name != '' && name != '_' { name } else { typ }
 		if param_name == '' {
 			param_name = 'arg${placeholders.len + 1}'
 		}
