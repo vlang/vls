@@ -24,8 +24,11 @@ struct IndexedCompletionResult {
 	items          []Detail
 	use_compiler   bool
 	embedded_types []string
-	field_types    map[string]string
-	resolved_type  bool
+	// field_types holds each field's type as member lookup needs it, without
+	// `&`, `?` or `!`; field_declared_types keeps it as the source writes it.
+	field_types          map[string]string
+	field_declared_types map[string]string
+	resolved_type        bool
 }
 
 struct IndexedMethodSymbolResult {
@@ -345,6 +348,37 @@ fn signature_active_parameter(parameters []ParameterInformation, requested int) 
 	return requested
 }
 
+// hover_with_written_declaration puts the declaration the source writes in place
+// of the one the compiler re-prints, and keeps the documentation the compiler
+// found. The compiler renders a declaration from its own types, so a function
+// type arrives without the names of its parameters.
+fn (mut app App) hover_with_written_declaration(uri string, position Position, result ResponseResult) ResponseResult {
+	if result !is Hover {
+		return result
+	}
+	hover := result as Hover
+	value := hover.contents.value
+	open_fence := value.index('```v\n') or { return result }
+	body_start := open_fence + 5
+	close_offset := value[body_start..].index('```') or { return result }
+	printed := value[body_start..body_start + close_offset].trim_space()
+	word := app.get_word_at_position(uri, position.line, position.char)
+	if word == '' || !printed.contains(word) {
+		return result
+	}
+	location := app.resolve_indexed_definition(uri, position) or { return result }
+	declaration := app.source_declaration_at(location)
+	if declaration == '' || !declaration.contains(word) {
+		return result
+	}
+	return Hover{
+		contents: MarkupContent{
+			kind: hover.contents.kind
+			value: value[..body_start] + declaration + '\n' + value[body_start + close_offset..]
+		}
+	}
+}
+
 fn (mut app App) source_hover_fallback(uri string, position Position) ?Hover {
 	location := app.resolve_indexed_definition(uri, position) or {
 		app.resolve_symbol_anchor(uri, position.line, position.char) or { return none }
@@ -357,6 +391,325 @@ fn (mut app App) source_hover_fallback(uri string, position Position) ?Hover {
 		contents: MarkupContent{
 			kind: 'markdown'
 			value: '```v\n${declaration}\n```'
+		}
+	}
+}
+
+// hovered_variable_name returns the identifier at `position` when it references a
+// variable: an occurrence the index reads as code (the text inside a string or a
+// comment is not, while a `${}` interpolation is), not a member after a dot, and
+// not a label (`name:`, or the argument of `break`, `continue` or `goto`).
+fn (mut app App) hovered_variable_name(uri string, line string, position Position) ?string {
+	name := app.get_word_at_position(uri, position.line, position.char)
+	if name == '' {
+		return none
+	}
+	_, has_member_access, _ := member_qualifier_at_cursor(line, position.char, app.position_encoding)
+	if has_member_access {
+		return none
+	}
+	byte_col := encoded_col_to_byte(line, position.char, app.position_encoding)
+	mut end := byte_col
+	for end < line.len && is_ident_char(line[end]) {
+		end++
+	}
+	if line[end..].trim_left(' \t').starts_with(':') && !line[end..].trim_left(' \t').starts_with(':=') {
+		return none
+	}
+	// A label use ends the statement, but a trailing comment must not hide it.
+	statement := without_trailing_comment(line).trim_space()
+	for keyword in ['break ', 'continue ', 'goto '] {
+		if statement.starts_with(keyword) && statement[keyword.len..].trim_space() == name {
+			return none
+		}
+	}
+	occurrences := app.occurrences_for(uri)[name] or { return none }
+	if !occurrences.any(it.line == position.line && it.start_char <= position.char
+		&& position.char <= it.end_char) {
+		return none
+	}
+	return name
+}
+
+fn (mut app App) written_binding_type(uri string, content string, lines []string, binding LocalBinding, position Position) string {
+	if binding.typ != '' {
+		return binding.typ
+	}
+	header_start := containing_function_start(lines, position, app.position_encoding)
+	if header_start >= 0 && binding.line >= header_start {
+		mut header_end := header_start
+		for header_end < lines.len && !lines[header_end].contains('{') {
+			header_end++
+		}
+		if binding.line <= header_end && header_end < lines.len {
+			// A parameter: the header writes its type down.
+			header := lines[header_start..header_end + 1].join('\n').all_before('{')
+			return type_after_identifier(header, binding.name)
+		}
+	}
+	if binding.line < 0 || binding.line >= lines.len {
+		return ''
+	}
+	declaration := receiver_declaration_on_line(lines[binding.line], binding.name, [
+		binding.column,
+	]) or { return '' }
+	if declaration.binding_count != 1 || declaration.assignment_end > lines[binding.line].len {
+		return ''
+	}
+	rhs := declaration_expression(lines, binding.line, lines[binding.line][declaration.assignment_end..])
+	return app.written_declaration_type(uri, content, rhs, position)
+}
+
+// written_declaration_type returns the type that the right-hand side of a
+// declaration names in the source (`&Point{}` gives `&Point`, `[3]int{}`,
+// `map[string]int{}`, `i64(5)`, and `5` gives `int`), or '' when naming it would
+// take inference, which drops `&`, `?` and `!`.
+// max_declaration_expression_lines bounds how far a declaration's value is
+// followed, so an unclosed bracket cannot walk the rest of the file.
+const max_declaration_expression_lines = 40
+
+// declaration_expression returns the whole value of a declaration, joining the
+// lines it spans when it is written over several of them (a struct, array or
+// map literal, or a call). Every line loses its comment first, so a `//` in the
+// middle does not swallow the rest.
+fn declaration_expression(lines []string, start int, rhs string) string {
+	first := without_trailing_comment(rhs)
+	mut parts := [first]
+	mut depth := bracket_depth(first)
+	mut line := start + 1
+	for depth > 0 && line < lines.len && line - start <= max_declaration_expression_lines {
+		part := without_trailing_comment(lines[line])
+		depth += bracket_depth(part)
+		parts << part
+		line++
+	}
+	return parts.join(' ')
+}
+
+// bracket_depth reports how many brackets `text` leaves open, ignoring the ones
+// written inside a string literal.
+fn bracket_depth(text string) int {
+	mut depth := 0
+	mut i := 0
+	for i < text.len {
+		c := text[i]
+		if c in [`'`, `"`, `\``] {
+			end := string_literal_end(text[i..]) or { return depth }
+			i += end
+			continue
+		}
+		if c in [`{`, `[`, `(`] {
+			depth++
+		} else if c in [`}`, `]`, `)`] {
+			depth--
+		}
+		i++
+	}
+	return depth
+}
+
+fn (mut app App) written_declaration_type(uri string, content string, raw_rhs string, position Position) string {
+	mut expr := without_trailing_comment(raw_rhs).trim_space()
+	if literal := function_literal_type(expr) {
+		return literal
+	}
+	mut prefix := ''
+	if expr.starts_with('&') {
+		prefix = '&'
+		expr = expr[1..].trim_space()
+	}
+	if literal := receiver_literal_type(expr) {
+		return literal
+	}
+	if channel := channel_literal_type(expr) {
+		return channel
+	}
+	if !expression_names_its_type(expr) {
+		return ''
+	}
+	typ, rest := app.operand_type(uri, content, expr, position)
+	if typ == '' || rest.trim_space() != '' {
+		return ''
+	}
+	return '${prefix}${typ}'
+}
+
+// expression_names_its_type reports whether an expression spells its own type out:
+// a typed container (`[]int{}`, `[3]int{}`, `map[string]int{}`), a struct literal,
+// a cast, or an enum value. A call or another variable does not, since reading
+// those takes inference.
+fn expression_names_its_type(expr string) bool {
+	if expr.starts_with('[') || expr.starts_with('map[') {
+		return true
+	}
+	mut end := 0
+	for end < expr.len && (is_ident_char(expr[end]) || expr[end] == `.`) {
+		end++
+	}
+	head := expr[..end]
+	rest := expr[end..].trim_space()
+	if rest.starts_with('{') || rest.starts_with('(') {
+		return is_type_name(head) || head in builtin_receiver_types
+	}
+	return head.contains('.') && is_type_name(head.all_before_last('.'))
+}
+
+// parameter_declaration_type reads the type of the parameter the cursor sits on,
+// from the signature that declares it. It covers a named function as well as a
+// closure written inline, which may share the name with a variable outside.
+fn (app &App) parameter_declaration_type(lines []string, position Position, name string) string {
+	if position.line < 0 || position.line >= lines.len {
+		return ''
+	}
+	line := lines[position.line]
+	byte_col := encoded_col_to_byte(line, position.char, app.position_encoding)
+	mut header := ''
+	// A closure is written inline, so its `fn (` starts on this same line.
+	inline_start := last_fn_keyword_before(line, byte_col)
+	if inline_start >= 0 {
+		header = line[inline_start..]
+	} else {
+		header_start := containing_function_start(lines, position, app.position_encoding)
+		if header_start < 0 || position.line < header_start {
+			return ''
+		}
+		mut header_end := header_start
+		for header_end < lines.len && !lines[header_end].contains('{') {
+			header_end++
+		}
+		if position.line > header_end || header_end >= lines.len {
+			return ''
+		}
+		header = lines[header_start..header_end + 1].join('\n')
+	}
+	parameters := parameter_list_of(header) or { return '' }
+	if !cursor_is_inside_parameters(line, byte_col, header, inline_start) {
+		return ''
+	}
+	return type_after_identifier(parameters, name)
+}
+
+// last_fn_keyword_before returns where the `fn` of a closure written on this
+// line starts, or -1 when the cursor is not on such a line.
+fn last_fn_keyword_before(line string, byte_col int) int {
+	mut found := -1
+	mut i := 0
+	for i + 1 < line.len {
+		if line[i] == `f` && line[i + 1] == `n` && (i == 0 || !is_ident_char(line[i - 1])) {
+			after := i + 2
+			if after < line.len && !is_ident_char(line[after]) && i <= byte_col {
+				found = i
+			}
+		}
+		i++
+	}
+	return found
+}
+
+// parameter_list_of returns the text between the parentheses of a signature.
+fn parameter_list_of(header string) ?string {
+	open := header.index('(') or { return none }
+	close := matching_delimiter(header, open, `(`, `)`)
+	if close < 0 {
+		return none
+	}
+	return header[open + 1..close]
+}
+
+// cursor_is_inside_parameters reports whether the cursor sits between the
+// parentheses of the signature, so a hover in the body is left alone.
+fn cursor_is_inside_parameters(line string, byte_col int, header string, inline_start int) bool {
+	if inline_start < 0 {
+		// A signature spanning lines: the parameters are everything before `{`.
+		brace := line.index('{') or { line.len }
+		return byte_col < brace
+	}
+	open := header.index('(') or { return false }
+	close := matching_delimiter(header, open, `(`, `)`)
+	if close < 0 {
+		return false
+	}
+	return byte_col > inline_start + open && byte_col < inline_start + close
+}
+
+// hover_at answers a hover from what VLS knows by itself: a local binding, a
+// field of a chain, or the declaration the index resolves for the symbol. The
+// compiler is asked only when none of these can answer.
+fn (mut app App) hover_at(uri string, position Position) ?Hover {
+	if binding := app.local_binding_hover(uri, position) {
+		return binding
+	}
+	if member := app.member_selector_hover(uri, position) {
+		return member
+	}
+	return app.source_hover_fallback(uri, position)
+}
+
+// member_selector_hover answers for the field the cursor sits on inside a chain
+// such as `a.b.c`. The compiler answers those by describing the receiver of the
+// selector, so `c` comes back as `b`.
+fn (mut app App) member_selector_hover(uri string, position Position) ?Hover {
+	content := app.index_source_for(uri) or { return none }
+	lines := content.split_into_lines()
+	if position.line < 0 || position.line >= lines.len {
+		return none
+	}
+	line := lines[position.line]
+	name := app.get_word_at_position(uri, position.line, position.char)
+	if name == '' {
+		return none
+	}
+	receiver := member_expression_at_cursor(line, position.char, app.position_encoding)
+	if receiver == '' {
+		return none
+	}
+	typ := app.expression_type(uri, content, receiver, position)
+	if typ == '' {
+		return none
+	}
+	// Only fields: a method reads better as the signature the compiler prints.
+	// The declared type, not the one member lookup uses: that one has lost its
+	// `&`, `?` and `!`.
+	members := app.type_members(uri, content, member_receiver_type(typ))
+	field := members.field_declared_types[name] or { return none }
+	if field == '' {
+		return none
+	}
+	return Hover{
+		contents: MarkupContent{
+			kind:  'markdown'
+			value: '```v\n${name} ${field}\n```'
+		}
+	}
+}
+
+fn (mut app App) local_binding_hover(uri string, position Position) ?Hover {
+	content := app.index_source_for(uri) or { return none }
+	lines := content.split_into_lines()
+	if position.line < 0 || position.line >= lines.len {
+		return none
+	}
+	name := app.hovered_variable_name(uri, lines[position.line], position)?
+	// A parameter is declared in its signature, not bound by the scope around it,
+	// so the search below would answer with a variable of the same name from
+	// outside. The type is written right next to the name here.
+	declared := app.parameter_declaration_type(lines, position, name)
+	if declared != '' {
+		return Hover{
+			contents: MarkupContent{
+				kind: 'markdown'
+				value: '```v\n${name} ${declared}\n```'
+			}
+		}
+	}
+	typ := app.infer_binding_type_at_position(uri, content, name, position)
+	if typ == '' {
+		return none
+	}
+	return Hover{
+		contents: MarkupContent{
+			kind: 'markdown'
+			value: '```v\n${name} ${typ}\n```'
 		}
 	}
 }
@@ -471,6 +824,25 @@ fn (mut app App) operation_at_pos(method Method, request Request) Response {
 		}
 	}
 
+	if method == .hover {
+		if binding := app.local_binding_hover(path, params.position) {
+			return Response{
+				id: request.id
+				result: binding
+			}
+		}
+		// A field of a chain has to be answered here: the compiler describes the
+		// receiver of the selector instead of the field the cursor is on. The
+		// declaration from the index waits until after the compiler, which brings
+		// the documentation with its answer.
+		if member := app.member_selector_hover(path, params.position) {
+			return Response{
+				id: request.id
+				result: member
+			}
+		}
+	}
+
 	line_info := match method {
 		.hover {
 			'${line_nr}:hv^${byte_col}'
@@ -487,6 +859,9 @@ fn (mut app App) operation_at_pos(method Method, request Request) Response {
 	}
 
 	mut result := app.run_v_line_info(method, path, line_info)
+	if method == .hover {
+		result = app.hover_with_written_declaration(path, params.position, result)
+	}
 	if result is string && result == 'null' {
 		if method == .hover {
 			if fallback := app.source_hover_fallback(path, params.position) {
@@ -553,8 +928,24 @@ fn (mut app App) indexed_completions(uri string, position Position) IndexedCompl
 					}
 				}
 			}
-			receiver_result := app.indexed_receiver_completions(uri, content, qualifier, position)
-			return receiver_result
+			expression := member_expression_at_cursor(line, position.char, app.position_encoding)
+			if expression == '' {
+				// A bare `.`: the value of the enum expected at this spot.
+				if enum_items := app.shorthand_enum_completions(uri, content, lines, position) {
+					return IndexedCompletionResult{
+						items: enum_items
+					}
+				}
+			} else if expression == qualifier
+				&& !app.local_scope_bindings(content, position).any(it.name == qualifier.all_before('.')) {
+				// `Color.`: the values and static functions of the type named before the dot.
+				if static_items := app.type_static_completions(uri, content, qualifier) {
+					return IndexedCompletionResult{
+						items: static_items
+					}
+				}
+			}
+			return app.indexed_receiver_completions(uri, content, expression, position)
 		}
 	}
 	struct_type := struct_literal_type_at_cursor(content, position, app.position_encoding)
@@ -566,7 +957,8 @@ fn (mut app App) indexed_completions(uri string, position Position) IndexedCompl
 		}
 	}
 
-	mut details := make_keyword_completions()
+	mut details := app.callback_argument_completions(uri, content, lines, position)
+	details << make_keyword_completions()
 	mut seen_labels := map[string]bool{}
 	for detail in details {
 		seen_labels[detail.label] = true
@@ -684,9 +1076,10 @@ fn binding_scope_header_starts_literal(source string) bool {
 }
 
 struct AnonymousFunctionHeader {
-	found           bool
-	complete        bool
+	found          bool
+	complete       bool
 	parameter_names []string
+	parameter_types map[string]string
 }
 
 fn last_fn_keyword_index(source string) int {
@@ -735,11 +1128,16 @@ fn anonymous_function_header(source string) AnonymousFunctionHeader {
 		}
 	}
 	mut names := []string{}
+	mut types := map[string]string{}
 	for parameter in split_top_level_commas(rest[1..params_end]) {
-		for field in parameter.fields() {
+		fields := parameter.fields()
+		for field_idx, field in fields {
 			if field !in ['mut', 'shared', 'atomic', '_'] {
 				if field !in names {
 					names << field
+				}
+				if field_idx + 1 < fields.len {
+					types[field] = fields[field_idx + 1..].join(' ')
 				}
 				break
 			}
@@ -749,6 +1147,7 @@ fn anonymous_function_header(source string) AnonymousFunctionHeader {
 		found: true
 		complete: true
 		parameter_names: names
+		parameter_types: types
 	}
 }
 
@@ -1235,6 +1634,7 @@ struct LocalBinding {
 	name   string
 	line   int
 	column int
+	typ    string
 }
 
 fn local_binding_column(segment string, segment_start int, name string) int {
@@ -1385,6 +1785,11 @@ fn (app &App) local_scope_bindings(content string, position Position) []LocalBin
 									} else {
 										pending_block_columns[name] or { -1 }
 									}
+									typ: if closure_header.complete {
+										closure_header.parameter_types[name] or { '' }
+									} else {
+										''
+									}
 								}
 							}
 						}
@@ -1520,13 +1925,9 @@ fn type_after_identifier(text string, name string) string {
 			search_start = col + 2
 			continue
 		}
-		start := col
-		for col < text.len && (is_ident_char(text[col])
-			|| text[col] in [`&`, `?`, `!`, `.`, `[`, `]`]) {
-			col++
-		}
-		if col > start {
-			return text[start..col]
+		typ, _ := type_at(text, col)
+		if typ != '' {
+			return typ
 		}
 		search_start = col + 1
 	}
@@ -1680,13 +2081,17 @@ fn normalize_receiver_type(source_type string) string {
 }
 
 fn (mut app App) function_return_type(uri string, content string, candidate string) string {
+	return member_receiver_type(app.function_return_type_raw(uri, content, candidate))
+}
+
+fn (mut app App) function_return_type_raw(uri string, content string, candidate string) string {
 	mut fn_index := map[string]string{}
 	parse_fn_signatures_into(content, '', mut fn_index)
 	if return_type := fn_index[candidate] {
-		return normalize_receiver_type(return_type)
+		return return_type
 	}
 	if !candidate.contains('.') {
-		return ''
+		return app.module_function_return_type_raw(uri, content, candidate)
 	}
 	qualifier := candidate.all_before_last('.')
 	fn_name := candidate.all_after_last('.')
@@ -1718,19 +2123,47 @@ fn (mut app App) function_return_type(uri string, content string, candidate stri
 			mut source_index := map[string]string{}
 			parse_fn_signatures_into(source, '', mut source_index)
 			if return_type := source_index[fn_name] {
-				return_types[normalize_receiver_type(return_type)] = true
+				return_types[return_type] = true
 			}
 		}
 	}
 	if return_types.len != 1 {
 		return ''
 	}
-	return_type := return_types.keys()[0]
-	if return_type.contains('.') || return_type == ''
-		|| !(return_type[0] >= `A` && return_type[0] <= `Z`) {
-		return return_type
+	return qualify_member_type(return_types.keys()[0], candidate)
+}
+
+// module_function_return_type returns the return type of the function `fn_name`
+// declared in another file of the requesting file's module.
+fn (mut app App) module_function_return_type(uri string, content string, fn_name string) string {
+	return member_receiver_type(app.module_function_return_type_raw(uri, content, fn_name))
+}
+
+fn (mut app App) module_function_return_type_raw(uri string, content string, fn_name string) string {
+	dir := os.dir(uri_to_path(uri))
+	if dir == '' || !os.is_dir(dir) {
+		return ''
 	}
-	return '${qualifier}.${return_type}'
+	app.ensure_dir_shallow_indexed(dir)
+	normalized_dir := normalized_index_path(dir)
+	module_name := get_module_name(content)
+	mut indexed_uris := app.symbol_index.keys()
+	indexed_uris.sort()
+	for indexed_uri in indexed_uris {
+		entry := app.symbol_index[indexed_uri] or { continue }
+		if normalized_index_path(os.dir(uri_to_path(indexed_uri))) != normalized_dir
+			|| entry.module_name != module_name
+			|| !entry.doc_symbols.any(it.kind == sym_kind_function && it.name == fn_name) {
+			continue
+		}
+		source := app.index_source_for(indexed_uri) or { continue }
+		mut source_index := map[string]string{}
+		parse_fn_signatures_into(source, '', mut source_index)
+		if return_type := source_index[fn_name] {
+			return return_type
+		}
+	}
+	return ''
 }
 
 fn (mut app App) infer_receiver_type(uri string, content string, receiver string, use_line int) string {
@@ -1744,23 +2177,17 @@ fn (mut app App) infer_receiver_type(uri string, content string, receiver string
 	})
 }
 
+// infer_receiver_type_at_position returns the type whose members follow
+// `receiver_expression.`: the type of the expression without the `&`, `?` or `!`
+// it may hold.
 fn (mut app App) infer_receiver_type_at_position(uri string, content string, receiver_expression string, use_position Position) string {
-	parts := receiver_expression.split('.')
-	if parts.len == 0 || parts.any(it == '') {
-		return ''
-	}
-	mut receiver_type := app.infer_bound_receiver_type_at_position(uri, content, parts[0], use_position)
-	if receiver_type == '' {
-		return ''
-	}
-	for field_name in parts[1..] {
-		fields := app.indexed_struct_field_completions(uri, content, receiver_type)
-		receiver_type = fields.field_types[field_name] or { return '' }
-	}
-	return receiver_type
+	return member_receiver_type(app.expression_type(uri, content, receiver_expression, use_position))
 }
 
-fn (mut app App) infer_bound_receiver_type_at_position(uri string, content string, receiver string, use_position Position) string {
+// infer_binding_type_at_position returns the type of the binding `receiver` in
+// scope at `use_position`, keeping the `&`, `?` and `!` it holds: the type its
+// declaration writes down, or else the type of the value it is given.
+fn (mut app App) infer_binding_type_at_position(uri string, content string, receiver string, use_position Position) string {
 	if receiver == '' {
 		return ''
 	}
@@ -1770,17 +2197,26 @@ fn (mut app App) infer_bound_receiver_type_at_position(uri string, content strin
 		return ''
 	}
 	mut has_active_binding := false
+	mut active_binding := LocalBinding{}
 	mut active_declaration_columns := map[int][]int{}
-	for binding in app.local_scope_bindings(content, use_position) {
+	bindings := app.local_scope_bindings(content, use_position)
+	for i := bindings.len - 1; i >= 0; i-- {
+		binding := bindings[i]
 		if binding.name == receiver {
 			has_active_binding = true
+			active_binding = binding
 			if binding.column >= 0 {
 				active_declaration_columns[binding.line] << binding.column
 			}
+			break
 		}
 	}
 	if !has_active_binding {
 		return ''
+	}
+	written := app.written_binding_type(uri, content, lines, active_binding, use_position)
+	if written != '' {
+		return written
 	}
 	mut header_start := -1
 	mut scan_state := ImportScanState{}
@@ -1854,12 +2290,49 @@ fn (mut app App) infer_bound_receiver_type_at_position(uri string, content strin
 			}
 			receiver_rhs = rhs_values[latest_binding_index]
 		}
+		if thread_type := app.spawned_thread_type(uri, content, receiver_rhs) {
+			return thread_type
+		}
+		if thread_array_type := thread_array_literal_type(receiver_rhs) {
+			return thread_array_type
+		}
+		if channel_type := channel_literal_type(receiver_rhs) {
+			return channel_type
+		}
+		if enum_type := app.enum_value_type(uri, content, receiver_rhs) {
+			return enum_type
+		}
+		// The scanned rhs has literal contents blanked out; read the source instead.
+		if latest_binding_count == 1 {
+			if literal_type := receiver_literal_type(latest_raw_rhs) {
+				return literal_type
+			}
+			if array_type := array_literal_type(latest_raw_rhs) {
+				return array_type
+			}
+		}
+		// Any other expression (`'a'.to_upper()`, `arr.map(it * 2)`, `pts[0]`): its type,
+		// read as for member completion.
+		rhs_type := app.expression_type(uri, content, if latest_binding_count == 1 {
+			latest_raw_rhs
+		} else {
+			receiver_rhs
+		}, Position{
+			line: latest_declaration_line
+		})
+		if rhs_type != '' {
+			return rhs_type
+		}
 		candidate, is_constructor := callable_or_constructor(receiver_rhs)
 		if candidate != '' {
 			if is_constructor {
 				return normalize_receiver_type(candidate)
 			}
-			return_type := app.function_return_type(uri, content, candidate)
+			// V does not let a call's option or result be bound as it is: an `or`
+			// block, a `!` or `?`, or an `if` guard unwraps it first, and the reference
+			// it holds stays.
+			return_type := unwrap_option_type(app.function_return_type_raw(uri, content,
+				candidate))
 			if return_type != '' {
 				return return_type
 			}
@@ -1875,7 +2348,7 @@ fn (mut app App) infer_bound_receiver_type_at_position(uri string, content strin
 			end_line = lines.len
 		}
 		header := lines[header_start..end_line].join('\n').all_before('{')
-		return normalize_receiver_type(type_after_identifier(header, receiver))
+		return type_after_identifier(header, receiver)
 	}
 	return ''
 }
@@ -1956,10 +2429,19 @@ fn method_completion_from_lines(lines []string, symbol DocumentSymbol) ?Detail {
 	}
 }
 
+// builtin_receiver_types are the types whose methods live in vlib/builtin.
+const builtin_receiver_types = ['bool', 'string', 'rune', 'char', 'byte', 'u8', 'u16', 'u32', 'u64',
+	'usize', 'i8', 'i16', 'i32', 'int', 'i64', 'isize', 'f32', 'f64']
+
 fn (mut app App) receiver_type_scope(uri string, content string, receiver_type string) (string, string, bool, string) {
 	normalized_type := normalize_receiver_type(receiver_type)
 	if normalized_type == '' {
 		return '', '', false, ''
+	}
+	if normalized_type in builtin_receiver_types {
+		// `fn (n int) str()` and friends are declared in vlib/builtin, not in
+		// the requesting module.
+		return os.join_path(find_v_dir(), 'vlib', 'builtin'), normalized_type, true, 'builtin'
 	}
 	if normalized_type.contains('.') {
 		qualifier := normalized_type.all_before_last('.')
@@ -2130,6 +2612,12 @@ fn struct_field_source_type(code_line string, field_name string) string {
 // that receiver_type_scope can resolve from the requesting file. Imported
 // aliases belong to the struct's declaration file, not necessarily the caller.
 fn canonical_field_receiver_type(parent_receiver_type string, field_source_type string, receiver_content string, declaration_content string) string {
+	source_type := member_receiver_type(field_source_type)
+	if source_type != '' && !is_type_name(source_type.all_before('[')) {
+		// Builtin and composite types (`int`, `[]Point`, `map[string]int`) only need
+		// their element named from the requesting file.
+		return qualify_member_type(source_type, parent_receiver_type)
+	}
 	field_type := normalize_receiver_type(field_source_type)
 	if field_type == '' {
 		return ''
@@ -2187,6 +2675,7 @@ fn (mut app App) indexed_struct_field_completions_visited(uri string, content st
 	mut seen_items := map[string]bool{}
 	mut embedded_types := []string{}
 	mut field_types := map[string]string{}
+	mut field_declared_types := map[string]string{}
 	mut has_conditional := false
 	mut has_unresolved_embedded := false
 	mut resolved_type := false
@@ -2245,6 +2734,11 @@ fn (mut app App) indexed_struct_field_completions_visited(uri string, content st
 								field_types[field_name] = field_type
 							}
 						}
+						for field_name, declared_type in promoted.field_declared_types {
+							if field_name !in field_declared_types {
+								field_declared_types[field_name] = declared_type
+							}
+						}
 						continue
 					}
 				}
@@ -2258,6 +2752,9 @@ fn (mut app App) indexed_struct_field_completions_visited(uri string, content st
 					if field_type != '' {
 						field_types[detail.label] = field_type
 					}
+					if field_source_type != '' {
+						field_declared_types[detail.label] = field_source_type
+					}
 				}
 			}
 		}
@@ -2267,44 +2764,574 @@ fn (mut app App) indexed_struct_field_completions_visited(uri string, content st
 		use_compiler: has_conditional || has_unresolved_embedded
 		embedded_types: embedded_types
 		field_types: field_types
+		field_declared_types: field_declared_types
 		resolved_type: resolved_type
 	}
 }
 
+// spawned_thread_type returns `thread T` for a `spawn`/`go` of a function literal
+// or call (plain `thread` when it returns nothing), so the handle is not typed as
+// the spawned function's return value.
+fn (mut app App) spawned_thread_type(uri string, content string, rhs string) ?string {
+	trimmed := rhs.trim_space()
+	mut spawned := ''
+	for keyword in ['spawn ', 'go '] {
+		if trimmed.starts_with(keyword) {
+			spawned = trimmed[keyword.len..].trim_space()
+			break
+		}
+	}
+	if spawned == '' {
+		return none
+	}
+	if spawned.starts_with('fn ') || spawned.starts_with('fn(') {
+		return thread_type_for_return(fn_literal_return_type(spawned))
+	}
+	candidate, is_constructor := callable_or_constructor(spawned)
+	if candidate == '' || is_constructor {
+		return 'thread'
+	}
+	return thread_type_for_return(app.function_return_type_raw(uri, content, candidate))
+}
+
+fn thread_type_for_return(return_type string) string {
+	ret := return_type.trim_space()
+	if ret == '' || ret == 'void' {
+		return 'thread'
+	}
+	return 'thread ${ret}'
+}
+
+// fn_literal_return_type extracts `T` from `fn (params) T {`; it is empty for
+// literals that return nothing.
+fn fn_literal_return_type(literal string) string {
+	open_idx := literal.index('(') or { return '' }
+	close_idx := matching_delimiter(literal, open_idx, `(`, `)`)
+	if close_idx < 0 {
+		return ''
+	}
+	after_params := literal[close_idx + 1..]
+	body := after_params.index('{') or { return '' }
+	return after_params[..body].trim_space()
+}
+
+// thread_array_literal_type returns `[]thread` or `[]thread T` for an array of
+// thread handles created with a `[]thread T{...}` literal.
+fn thread_array_literal_type(rhs string) ?string {
+	trimmed := rhs.trim_space()
+	if !trimmed.starts_with('[]thread') {
+		return none
+	}
+	brace := trimmed.index('{') or { return none }
+	elem := trimmed[2..brace].fields().join(' ')
+	if elem != 'thread' && !elem.starts_with('thread ') {
+		return none
+	}
+	return '[]${elem}'
+}
+
+// thread_wait_completion offers `wait()` for thread handles and arrays of them,
+// which neither the index nor the compiler's `-line-info` completion lists.
+fn thread_wait_completion(receiver_type string) ?Detail {
+	mut thread_type := receiver_type.trim_space()
+	is_array := thread_type.starts_with('[]')
+	if is_array {
+		thread_type = thread_type[2..]
+	}
+	if thread_type != 'thread' && !thread_type.starts_with('thread ') {
+		return none
+	}
+	payload := thread_type.all_after('thread').trim_space()
+	receiver := if is_array { 'a []${thread_type}' } else { 't ${thread_type}' }
+	result := if payload == '' {
+		''
+	} else if is_array && payload[0] in [`?`, `!`] {
+		// Waiting on `[]thread !T` gives `![]T` (and `?[]T` for `?T`).
+		' ${payload[..1]}[]${payload[1..]}'
+	} else if is_array {
+		' []${payload}'
+	} else {
+		' ${payload}'
+	}
+	return Detail{
+		kind: 2
+		label: 'wait'
+		detail: 'fn (${receiver}) wait()${result}'
+		insert_text: 'wait()'
+		insert_text_format: 1
+	}
+}
+
+// channel_literal_type returns `chan T` for a `chan T{...}` literal.
+fn channel_literal_type(rhs string) ?string {
+	trimmed := rhs.trim_space()
+	if !trimmed.starts_with('chan ') {
+		return none
+	}
+	brace := trimmed.index('{') or { return none }
+	channel_type := trimmed[..brace].fields().join(' ')
+	if channel_type.len <= 'chan '.len {
+		return none
+	}
+	return channel_type
+}
+
+// without_operator_completions drops operator overloads (`+`, `==`, ...), which
+// are declared like methods but cannot be called with `.`.
+fn without_operator_completions(items []Detail) []Detail {
+	return items.filter(it.label.len > 0 && (it.label[0].is_letter() || it.label[0] == `_`))
+}
+
+// receiver_literal_type returns the builtin type of a right-hand side that is a
+// single complete literal (`5`, `1.5`, `true`, `'x'`, `r'x'`, `` `a` ``), optionally
+// followed by a `//` comment, or none. Anything more (`'abc'.len`, `'a' + b`)
+// is left to the other inference paths.
+fn receiver_literal_type(rhs string) ?string {
+	r := rhs.trim_space()
+	if r == '' {
+		return none
+	}
+	is_raw := r.len > 1 && r[0] == `r` && r[1] in [`'`, `"`]
+	mut literal_type := ''
+	mut end := 0
+	if r[0] in [`'`, `"`, 96] || is_raw {
+		start := if is_raw { 2 } else { 1 }
+		quote := r[start - 1]
+		mut i := start
+		mut closed := false
+		for i < r.len {
+			if r[i] == `\\` && !is_raw {
+				i += 2
+				continue
+			}
+			if r[i] == quote {
+				closed = true
+				break
+			}
+			i++
+		}
+		if !closed {
+			return none
+		}
+		end = i + 1
+		literal_type = if quote == 96 { 'rune' } else { 'string' }
+	} else {
+		for end < r.len && r[end] !in [` `, `\t`] && !r[end..].starts_with('//') {
+			end++
+		}
+		token := r[..end]
+		if token in ['true', 'false'] {
+			literal_type = 'bool'
+		} else {
+			numeric := infer_type_from_literal(token)
+			if numeric in ['int', 'f64'] && !token.contains_any('()[]{}') {
+				literal_type = numeric
+			}
+		}
+		if literal_type == '' {
+			return none
+		}
+	}
+	rest := r[end..].trim_space()
+	if rest != '' && !rest.starts_with('//') {
+		return none
+	}
+	return literal_type
+}
+
+// indexed_enum_members lists the values of the enum `type_name` (`Color`, or
+// `mod.Color` through an import) as completion items, or none when it does not
+// name an indexed enum.
+fn (mut app App) indexed_enum_members(uri string, content string, type_name string) ?[]Detail {
+	short_name := type_name.all_after_last('.')
+	if short_name == '' || !short_name[0].is_capital() {
+		return none
+	}
+	dir, name, _, expected_module := app.receiver_type_scope(uri, content, type_name)
+	if dir == '' || name == '' || expected_module == '' || !os.is_dir(dir) {
+		return none
+	}
+	app.ensure_dir_shallow_indexed(dir)
+	normalized_dir := normalized_index_path(dir)
+	for open_uri, _ in app.open_files {
+		if normalized_index_path(os.dir(uri_to_path(open_uri))) == normalized_dir {
+			app.reindex_uri(open_uri)
+		}
+	}
+	mut indexed_uris := app.symbol_index.keys()
+	indexed_uris.sort()
+	for indexed_uri in indexed_uris {
+		entry := app.symbol_index[indexed_uri] or { continue }
+		if normalized_index_path(os.dir(uri_to_path(indexed_uri))) != normalized_dir
+			|| entry.module_name != expected_module {
+			continue
+		}
+		for symbol in entry.doc_symbols {
+			if symbol.kind == sym_kind_enum && symbol.name == name {
+				return symbol.children.filter(it.kind == sym_kind_enum_member).map(Detail{
+					kind: 20 // CompletionItemKind.EnumMember
+					label: it.name
+					detail: type_name
+				})
+			}
+		}
+	}
+	return none
+}
+
+// enum_value_type returns the enum of a right-hand side like `Color.red`.
+fn (mut app App) enum_value_type(uri string, content string, rhs string) ?string {
+	r := rhs.trim_space()
+	if !r.contains('.') || !r.bytes().all(is_ident_char(it) || it == `.`) {
+		return none
+	}
+	type_name := r.all_before_last('.')
+	member := r.all_after_last('.')
+	members := app.indexed_enum_members(uri, content, type_name) or { return none }
+	if !members.any(it.label == member) {
+		return none
+	}
+	return type_name
+}
+
+// shorthand_enum_completions lists the values of the enum expected where a bare
+// `.` is typed: a struct field value, after `x = `/`x == `/`x != `, a call
+// argument, or a `match` branch.
+fn (mut app App) shorthand_enum_completions(uri string, content string, lines []string, position Position) ?[]Detail {
+	line := lines[position.line]
+	mut member_start := encoded_col_to_byte(line, position.char, app.position_encoding)
+	for member_start > 0 && is_ident_char(line[member_start - 1]) {
+		member_start--
+	}
+	dot := member_start - 1
+	if dot < 0 || line[dot] != `.` {
+		return none
+	}
+	before := line[..dot].trim_right(' \t')
+	enum_type := app.expected_enum_type(uri, content, lines, position, before) or { return none }
+	return app.indexed_enum_members(uri, content, enum_type)
+}
+
+fn (mut app App) expected_enum_type(uri string, content string, lines []string, position Position, before string) ?string {
+	if before.ends_with(':') && !before.ends_with('::') {
+		field := trailing_selector(before[..before.len - 1].trim_right(' \t'))
+		struct_type := struct_literal_type_before(lines, position.line, before)
+		if field != '' && !field.contains('.') && struct_type != '' {
+			fields := app.indexed_struct_field_completions(uri, content, struct_type)
+			if field_type := fields.field_types[field] {
+				return field_type
+			}
+		}
+	}
+	for op in ['==', '!=', '='] {
+		if before.ends_with(op) {
+			if op == '=' && before.len > 1 && before[before.len - 2] in [`:`, `<`, `>`, `+`, `-`, `*`, `/`, `%`, `|`, `&`, `^`] {
+				break
+			}
+			left := trailing_selector(before[..before.len - op.len].trim_right(' \t'))
+			if left != '' {
+				left_type := app.infer_receiver_type_at_position(uri, content, left, position)
+				if left_type != '' {
+					return left_type
+				}
+			}
+			break
+		}
+	}
+	if help := app.source_signature_fallback(uri, position) {
+		if help.signatures.len > 0 && help.active_parameter >= 0
+			&& help.active_parameter < help.signatures[0].parameters.len {
+			param := help.signatures[0].parameters[help.active_parameter].label.trim_space()
+			// The whole type: `chan Color` takes no enum value.
+			_, _, declared := parameter_parts(param)
+			param_type := declared.trim_left('&?!')
+			if param_type != '' {
+				return param_type
+			}
+		}
+	}
+	if before == '' {
+		if subject := enclosing_match_subject(lines, position.line) {
+			subject_type := app.infer_receiver_type_at_position(uri, content, subject, position)
+			if subject_type != '' {
+				return subject_type
+			}
+		}
+	}
+	return none
+}
+
+// struct_literal_type_before returns `Pixel` when the text before the cursor
+// (`before`, on `line_idx`) is inside the braces of a `Pixel{` literal.
+fn struct_literal_type_before(lines []string, line_idx int, before string) string {
+	mut scan_state := ImportScanState{}
+	mut code := []string{cap: line_idx + 1}
+	for i in 0 .. line_idx {
+		code << source_line_import_code(lines[i], mut scan_state)
+	}
+	code << source_line_import_code(before, mut scan_state)
+	prefix := code.join('\n')
+	mut depth := 0
+	for col := prefix.len - 1; col >= 0; col-- {
+		if prefix[col] == `}` {
+			depth++
+		} else if prefix[col] == `{` {
+			if depth > 0 {
+				depth--
+				continue
+			}
+			name := trailing_selector(prefix[..col].trim_right(' \t'))
+			short := name.all_after_last('.')
+			return if short.len > 0 && short[0].is_capital() { name } else { '' }
+		}
+	}
+	return ''
+}
+
+// trailing_selector returns the identifier chain that ends `text` (`b` in
+// `if b`, `p.color` in `p.color`).
+fn trailing_selector(text string) string {
+	mut start := text.len
+	for start > 0 && (is_ident_char(text[start - 1]) || text[start - 1] == `.`) {
+		start--
+	}
+	return text[start..].trim_left('.')
+}
+
+// enclosing_match_subject returns `x` when `line_idx` is inside the braces of a
+// `match x {`, looking upwards for the first brace left open.
+fn enclosing_match_subject(lines []string, line_idx int) ?string {
+	mut depth := 0
+	for i := line_idx - 1; i >= 0; i-- {
+		text := lines[i]
+		for j := text.len - 1; j >= 0; j-- {
+			if text[j] == `}` {
+				depth++
+			} else if text[j] == `{` {
+				if depth > 0 {
+					depth--
+					continue
+				}
+				header := text[..j].trim_space()
+				idx := header.index('match ') or { return none }
+				if idx > 0 && is_ident_char(header[idx - 1]) {
+					return none
+				}
+				subject := header[idx + 'match '.len..].trim_space()
+				return if subject == '' { none } else { subject }
+			}
+		}
+	}
+	return none
+}
+
+// array_literal_type returns `[]int` for `[3, 1, 2]` and `[]string` for
+// `[]string{}` or `[]u8{len: 4}`, optionally followed by a `//` comment, or none.
+fn array_literal_type(rhs string) ?string {
+	r := rhs.trim_space()
+	if r.starts_with('[]') {
+		brace := r.index('{') or { return none }
+		typ := r[..brace].trim_space()
+		close := matching_delimiter(r, brace, `{`, `}`)
+		if close < 0 || typ.len <= 2 {
+			return none
+		}
+		rest := r[close + 1..].trim_space()
+		if (rest != '' && !rest.starts_with('//'))
+			|| !typ[2..].bytes().all(is_ident_char(it) || it in [`.`, `[`, `]`, `&`]) {
+			return none
+		}
+		return typ
+	}
+	if !r.starts_with('[') {
+		return none
+	}
+	close := matching_delimiter(r, 0, `[`, `]`)
+	if close < 0 {
+		return none
+	}
+	rest := r[close + 1..].trim_space()
+	if rest != '' && !rest.starts_with('//') {
+		// `[1, 2]!` is a fixed array, `[1, 2].len` is not the array itself
+		return none
+	}
+	elements := split_top_level_commas(r[1..close])
+	if elements.len == 0 {
+		return none
+	}
+	elem := receiver_literal_type(elements[0]) or { return none }
+	return '[]${elem}'
+}
+
+// array_member_completions lists the members of a `[]T` receiver, typed for `T`.
+fn array_member_completions(receiver_type string) []Detail {
+	array_type := receiver_type.trim_space()
+	if !array_type.starts_with('[]') {
+		return []
+	}
+	return language_member_items(array_type, composite_member_kinds(array_type), false)
+}
+
+// parameter_parts splits a parameter as a signature writes it into its modifier,
+// its name and its type: `mut buf []u8` is `mut `, `buf` and `[]u8`, and
+// `c chan Color` is `c` and `chan Color`. A type can take several words, so the
+// first word is only a name when what follows it is the type: a parameter of a
+// function type that is one whole type (`thread int`) has no name.
+fn parameter_parts(param string) (string, string, string) {
+	mut modifier := ''
+	mut rest := param.trim_space()
+	for word in ['mut ', 'shared '] {
+		if rest.starts_with(word) {
+			modifier = word
+			rest = rest[word.len..].trim_space()
+			break
+		}
+	}
+	whole, whole_end := type_at(rest, 0)
+	if whole != '' && rest[whole_end..].trim_space() == '' {
+		return modifier, '', whole
+	}
+	mut name_end := 0
+	for name_end < rest.len && is_ident_char(rest[name_end]) {
+		name_end++
+	}
+	if name_end == 0 {
+		return modifier, '', rest
+	}
+	typ, _ := type_at(rest, name_end)
+	return modifier, rest[..name_end], if typ != '' { typ } else { rest[name_end..].trim_space() }
+}
+
+// callback_skeleton builds the simplest function literal of type `fn_type`
+// (`fn (int) bool`): its completion label (`fn (x int) bool`) and a snippet
+// with the cursor inside the body. Parameters that the type already names
+// (`fn (a &int, b &int) int`) keep their names. A generic return type (`U`)
+// becomes a placeholder that defaults to `generic_default`.
+fn callback_skeleton(fn_type string, generic_default string) ?(string, string) {
+	t := fn_type.trim_space()
+	if !t.starts_with('fn (') {
+		return none
+	}
+	close := matching_delimiter(t, 'fn '.len, `(`, `)`)
+	if close < 0 {
+		return none
+	}
+	param_types := split_top_level_commas(t['fn ('.len..close]).map(it.trim_space()).filter(it != '')
+	ret := t[close + 1..].trim_space()
+	names := if param_types.len == 1 { ['x'] } else { ['a', 'b', 'c', 'd', 'e', 'f'] }
+	mut params := []string{cap: param_types.len}
+	for i, param_type in param_types {
+		modifier, param_name, typ := parameter_parts(param_type)
+		if param_name != '' {
+			params << param_type
+		} else {
+			name := if i < names.len { names[i] } else { 'p${i}' }
+			params << '${modifier}${name} ${typ}'
+		}
+	}
+	signature := 'fn (${params.join(', ')})'
+	label := if ret == '' { signature } else { '${signature} ${ret}' }
+	ret_snippet := if ret == '' {
+		''
+	} else if ret.len == 1 && ret[0].is_capital() && generic_default != '' {
+		' \${1:${generic_default}}'
+	} else {
+		' ${ret}'
+	}
+	return label, '${signature}${ret_snippet} {\n\t\$0\n}'
+}
+
+// callback_argument_completions offers, when the cursor is on an empty argument
+// whose parameter is a function (`nums.filter(|)`, `apply(|)`), the simplest
+// function of that type, ranked first.
+fn (mut app App) callback_argument_completions(uri string, content string, lines []string, position Position) []Detail {
+	line := lines[position.line]
+	mut arg_start := encoded_col_to_byte(line, position.char, app.position_encoding)
+	for arg_start > 0 && line[arg_start - 1] in [` `, `\t`] {
+		arg_start--
+	}
+	if arg_start == 0 || line[arg_start - 1] !in [`(`, `,`] {
+		return []
+	}
+	mut depth := 0
+	mut arg_index := 0
+	mut open := -1
+	for j := arg_start - 1; j >= 0; j-- {
+		c := line[j]
+		if c in [`)`, `]`, `}`] {
+			depth++
+		} else if c in [`(`, `[`, `{`] {
+			if depth > 0 {
+				depth--
+				continue
+			}
+			if c == `(` {
+				open = j
+			}
+			break
+		} else if c == `,` && depth == 0 {
+			arg_index++
+		}
+	}
+	if open <= 0 {
+		return []
+	}
+	callee := trailing_selector(line[..open].trim_right(' \t'))
+	if callee == '' {
+		return []
+	}
+	mut fn_type := ''
+	mut generic_default := ''
+	if callee.contains('.') {
+		receiver_type := app.infer_receiver_type_at_position(uri, content, callee.all_before_last('.'),
+			position)
+		method := callee.all_after_last('.')
+		for item in array_member_completions(receiver_type) {
+			if item.kind != 2 || item.label != method {
+				continue
+			}
+			params_open := item.detail.index('${method}(') or { break } + method.len
+			params_close := matching_delimiter(item.detail, params_open, `(`, `)`)
+			if params_close < 0 {
+				break
+			}
+			parts := split_top_level_commas(item.detail[params_open + 1..params_close])
+			if arg_index < parts.len {
+				fn_type = parts[arg_index].trim_space().all_after(' ')
+				generic_default = receiver_type.trim_space()[2..]
+			}
+			break
+		}
+	}
+	if fn_type == '' {
+		if help := app.source_signature_fallback(uri, position) {
+			if help.signatures.len > 0 && help.active_parameter >= 0
+				&& help.active_parameter < help.signatures[0].parameters.len {
+				fn_type = help.signatures[0].parameters[help.active_parameter].label.trim_space().all_after(' ')
+			}
+		}
+	}
+	label, skeleton := callback_skeleton(fn_type, generic_default) or { return [] }
+	return [
+		Detail{
+			kind: 15 // CompletionItemKind.Snippet
+			label: label
+			detail: 'function literal'
+			sort_text: '0'
+			insert_text: skeleton
+			insert_text_format: 2
+		},
+	]
+}
+
 fn (mut app App) indexed_receiver_completions(uri string, content string, receiver string, use_position Position) IndexedCompletionResult {
-	receiver_type := app.infer_receiver_type_at_position(uri, content, receiver, use_position)
+	receiver_type := app.expression_type(uri, content, receiver, use_position)
 	if receiver_type == '' {
 		return IndexedCompletionResult{
 			use_compiler: true
 		}
 	}
-	field_result := app.indexed_struct_field_completions(uri, content, receiver_type)
-	mut items := field_result.items.clone()
-	mut seen := map[string]bool{}
-	for item in items {
-		seen[item.label] = true
-	}
-	mut receiver_types := [receiver_type]
-	for embedded_type in field_result.embedded_types {
-		if embedded_type !in receiver_types {
-			receiver_types << embedded_type
-		}
-	}
-	mut methods_use_compiler := false
-	for member_type in receiver_types {
-		method_result := app.indexed_method_symbols(uri, content, member_type, '')
-		methods_use_compiler = methods_use_compiler || method_result.use_compiler
-		for detail in method_result.items {
-			if detail.label !in seen {
-				items << detail
-				seen[detail.label] = true
-			}
-		}
-	}
-	return IndexedCompletionResult{
-		items: items
-		use_compiler: field_result.use_compiler || methods_use_compiler || items.len == 0
-	}
+	return app.type_members(uri, content, receiver_type)
 }
 
 struct ImportedModuleBinding {
@@ -6308,17 +7335,9 @@ fn build_fn_snippet(fn_name string, params_str string) string {
 		if trimmed == '' {
 			continue
 		}
-		parts := trimmed.split(' ')
-		// Skip parameters without a name (e.g. `_ string`).
-		mut param_name := ''
-		for part in parts {
-			p := part.trim_space()
-			if p == '' || p == 'mut' || p == '_' {
-				continue
-			}
-			param_name = p
-			break
-		}
+		// A parameter without a name (`_ string`) shows its type instead.
+		_, name, typ := parameter_parts(trimmed)
+		mut param_name := if name != '' && name != '_' { name } else { typ }
 		if param_name == '' {
 			param_name = 'arg${placeholders.len + 1}'
 		}
