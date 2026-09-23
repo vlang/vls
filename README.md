@@ -8,6 +8,14 @@ environment variable.
 
 Otherwise, you can set the path to the vls binary in your editor's settings.
 
+### Installing VLS for your editor
+
+- [Sublime Text](#sublime-text)
+
+- [VS Code](#vs-code)
+
+[Other editor?][EDITORS.md]
+
 ### Sublime Text
 
 1. Build VLS with `v .` and place the resulting `vls` binary in your `PATH`.
