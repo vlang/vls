@@ -10026,7 +10026,9 @@ fn test_handle_rename_returns_complete_workspace_edit() {
 	if document_changes := edit.document_changes {
 		assert document_changes.len == 1
 		assert document_changes[0].text_document.uri == uri
-		assert (document_changes[0].text_document.version or { -1 }) == 7
+		version := document_changes[0].text_document.version
+		assert version is i64
+		assert (version as i64) == 7
 		assert document_changes[0].edits.len == 2
 	} else {
 		assert false, 'rename must include versioned documentChanges'

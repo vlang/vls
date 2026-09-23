@@ -702,6 +702,27 @@ fn test_encode_response_payload_strips_sum_type_tag_from_prepare_rename() {
 	assert !encoded.contains('"_type"')
 }
 
+fn test_workspace_edit_closed_document_has_explicit_null_version() {
+	resp := Response{
+		id: 6
+		result: WorkspaceEdit{
+			document_changes: [TextDocumentEdit{
+				text_document: OptionalVersionedTextDocumentIdentifier{
+					uri: 'file:///tmp/closed.v'
+					version: json2.null
+				}
+				edits: [TextEdit{
+					range: LSPRange{}
+					new_text: 'renamed'
+				}]
+			}]
+		}
+	}
+	encoded := encode_response_payload(resp)
+	assert encoded.contains('"version":null')
+	assert encoded.contains('"documentChanges"')
+}
+
 fn test_read_request_accepts_lowercase_content_length_header() {
 	payload := '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}'
 	framed := 'content-length: ${payload.len}\r\n\r\n${payload}'
