@@ -44,4 +44,4 @@ If you wish to temporarily disable the LSP you have two options:
 
 - Turn on `LSP Client > Suspend All`, which will suspend all LSPs, including VLS, but also other servers too.
 
-- In `Settings > Configure Kate... > LSP Client > Allowed & Blocked Servers`, disable the entry named as the abosolute path to the VLS binary.
+- In `Settings > Configure Kate... > LSP Client > Allowed & Blocked Servers`, disable the entry named as the absolute path to the VLS binary.

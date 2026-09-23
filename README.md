@@ -14,6 +14,8 @@ Otherwise, you can set the path to the vls binary in your editor's settings.
 
 - [VS Code](#vs-code)
 
+- [Zed](#zed)
+
 [Other editor?](EDITORS.md)
 
 ### Sublime Text
@@ -89,3 +91,42 @@ https://github.com/user-attachments/assets/fb4ee6ff-4765-46b7-a21e-267691253d8e
 #### Autocomplete for struct fields and methods
 
 <img width="1804" height="392" alt="image" src="https://github.com/user-attachments/assets/478bfd20-201a-476f-88cd-583fad52d6cc" />
+
+### Zed
+
+> NOTE: the Zed editor lacks first-party support for the V programming language.
+
+1. Build VLS with `v .` and place the resulting `vls` binary in your `PATH`.
+2. Open `Zed > Open Settings File` and add this to your settings file:
+
+```json
+{
+  "languages": {
+    "V": {
+      "formatter": {
+        "external": {
+          "command": "vls",
+          "arguments": ["-"]
+        }
+      }
+    }
+  }
+}
+```
+
+or alternatively if the `vls` binary is NOT in your `PATH`:
+
+```json
+{
+  "languages": {
+    "V": {
+      "formatter": {
+        "external": {
+          "command": "/absolute/path/to/vls",
+          "arguments": ["-"]
+        }
+      }
+    }
+  }
+}
+```
