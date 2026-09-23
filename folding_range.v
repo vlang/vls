@@ -9,9 +9,11 @@ import os
 // returning all collapsible regions for the document.
 fn (mut app App) handle_folding_range(request Request) Response {
 	params := json2.decode[FoldingRangeParams](request.params) or {
-		$if debug { log('Failed to decode FoldingRangeParams: ${err}') }
+		$if debug {
+			log('Failed to decode FoldingRangeParams: ${err}')
+		}
 		return Response{
-			id:     request.id
+			id: request.id
 			result: []FoldingRange{}
 		}
 	}
@@ -19,12 +21,12 @@ fn (mut app App) handle_folding_range(request Request) Response {
 	content := app.open_files[uri] or { os.read_file(uri_to_path(uri)) or { '' } }
 	if content == '' {
 		return Response{
-			id:     request.id
+			id: request.id
 			result: []FoldingRange{}
 		}
 	}
 	return Response{
-		id:     request.id
+		id: request.id
 		result: compute_folding_ranges(content)
 	}
 }
@@ -55,8 +57,8 @@ fn compute_folding_ranges(content string) []FoldingRange {
 				if i > block_comment_start {
 					ranges << FoldingRange{
 						start_line: block_comment_start
-						end_line:   i
-						kind:       'comment'
+						end_line: i
+						kind: 'comment'
 					}
 				}
 				block_comment_start = -1
@@ -81,8 +83,8 @@ fn compute_folding_ranges(content string) []FoldingRange {
 			if import_start >= 0 && import_end > import_start {
 				ranges << FoldingRange{
 					start_line: import_start
-					end_line:   import_end
-					kind:       'imports'
+					end_line: import_end
+					kind: 'imports'
 				}
 			}
 			import_start = -1
@@ -99,8 +101,8 @@ fn compute_folding_ranges(content string) []FoldingRange {
 			if comment_start >= 0 && comment_end > comment_start {
 				ranges << FoldingRange{
 					start_line: comment_start
-					end_line:   comment_end
-					kind:       'comment'
+					end_line: comment_end
+					kind: 'comment'
 				}
 			}
 			comment_start = -1
@@ -120,8 +122,8 @@ fn compute_folding_ranges(content string) []FoldingRange {
 					if i > start {
 						ranges << FoldingRange{
 							start_line: start
-							end_line:   i
-							kind:       'region'
+							end_line: i
+							kind: 'region'
 						}
 					}
 				}
@@ -133,15 +135,15 @@ fn compute_folding_ranges(content string) []FoldingRange {
 	if import_start >= 0 && import_end > import_start {
 		ranges << FoldingRange{
 			start_line: import_start
-			end_line:   import_end
-			kind:       'imports'
+			end_line: import_end
+			kind: 'imports'
 		}
 	}
 	if comment_start >= 0 && comment_end > comment_start {
 		ranges << FoldingRange{
 			start_line: comment_start
-			end_line:   comment_end
-			kind:       'comment'
+			end_line: comment_end
+			kind: 'comment'
 		}
 	}
 

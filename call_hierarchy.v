@@ -10,9 +10,11 @@ import os
 // a CallHierarchyItem that can be used for subsequent incoming/outgoing queries.
 fn (mut app App) handle_prepare_call_hierarchy(request Request) Response {
 	params := json2.decode[PrepareCallHierarchyParams](request.params) or {
-		$if debug { log('Failed to decode PrepareCallHierarchyParams: ${err}') }
+		$if debug {
+			log('Failed to decode PrepareCallHierarchyParams: ${err}')
+		}
 		return Response{
-			id:     request.id
+			id: request.id
 			result: 'null'
 		}
 	}
@@ -21,7 +23,7 @@ fn (mut app App) handle_prepare_call_hierarchy(request Request) Response {
 	lines := content.split_into_lines()
 	if params.position.line < 0 || params.position.line >= lines.len {
 		return Response{
-			id:     request.id
+			id: request.id
 			result: 'null'
 		}
 	}
@@ -29,14 +31,14 @@ fn (mut app App) handle_prepare_call_hierarchy(request Request) Response {
 	start, end := find_word_bounds_at_col(line_text, params.position.char, app.position_encoding)
 	if start < 0 || end <= start {
 		return Response{
-			id:     request.id
+			id: request.id
 			result: 'null'
 		}
 	}
 	word := substr_by_char_bounds(line_text, start, end, app.position_encoding)
 	if word == '' {
 		return Response{
-			id:     request.id
+			id: request.id
 			result: 'null'
 		}
 	}
@@ -45,16 +47,16 @@ fn (mut app App) handle_prepare_call_hierarchy(request Request) Response {
 	if item.name == '' {
 		working_dir := os.dir(uri_to_path(uri))
 		search_dirs := app.workspace_search_dirs(working_dir)
-		item = app.find_fn_declaration(word, search_dirs, request.id, uri.ends_with('_test.v'))
+		item = app.find_fn_declaration(word, search_dirs, uri.ends_with('_test.v'))
 	}
 	if item.name == '' {
 		return Response{
-			id:     request.id
+			id: request.id
 			result: 'null'
 		}
 	}
 	return Response{
-		id:     request.id
+		id: request.id
 		result: [item]
 	}
 }
@@ -64,16 +66,18 @@ fn (mut app App) handle_prepare_call_hierarchy(request Request) Response {
 // calls to the queried function and groups them by the enclosing caller.
 fn (mut app App) handle_call_hierarchy_incoming(request Request) Response {
 	params := json2.decode[CallHierarchyIncomingCallsParams](request.params) or {
-		$if debug { log('Failed to decode CallHierarchyIncomingCallsParams: ${err}') }
+		$if debug {
+			log('Failed to decode CallHierarchyIncomingCallsParams: ${err}')
+		}
 		return Response{
-			id:     request.id
+			id: request.id
 			result: []CallHierarchyIncomingCall{}
 		}
 	}
 	fn_name := extract_simple_fn_name(params.item.name)
 	if fn_name == '' {
 		return Response{
-			id:     request.id
+			id: request.id
 			result: []CallHierarchyIncomingCall{}
 		}
 	}
@@ -86,7 +90,7 @@ fn (mut app App) handle_call_hierarchy_incoming(request Request) Response {
 	for uri, fc in app.open_files {
 		if request.id in app.cancelled_requests {
 			return Response{
-				id:     request.id
+				id: request.id
 				result: results
 			}
 		}
@@ -104,7 +108,7 @@ fn (mut app App) handle_call_hierarchy_incoming(request Request) Response {
 		for f in os.walk_ext(dir, '.v') {
 			if request.id in app.cancelled_requests {
 				return Response{
-					id:     request.id
+					id: request.id
 					result: results
 				}
 			}
@@ -121,7 +125,7 @@ fn (mut app App) handle_call_hierarchy_incoming(request Request) Response {
 		}
 	}
 	return Response{
-		id:     request.id
+		id: request.id
 		result: results
 	}
 }
@@ -130,9 +134,11 @@ fn (mut app App) handle_call_hierarchy_incoming(request Request) Response {
 // It identifies every function called within the body of the queried function.
 fn (mut app App) handle_call_hierarchy_outgoing(request Request) Response {
 	params := json2.decode[CallHierarchyOutgoingCallsParams](request.params) or {
-		$if debug { log('Failed to decode CallHierarchyOutgoingCallsParams: ${err}') }
+		$if debug {
+			log('Failed to decode CallHierarchyOutgoingCallsParams: ${err}')
+		}
 		return Response{
-			id:     request.id
+			id: request.id
 			result: []CallHierarchyOutgoingCall{}
 		}
 	}
@@ -163,18 +169,17 @@ fn (mut app App) handle_call_hierarchy_outgoing(request Request) Response {
 		if called_name == self_name {
 			continue // skip direct recursion
 		}
-		callee := app.find_fn_declaration(called_name, search_dirs, request.id,
-			uri.ends_with('_test.v'))
+		callee := app.find_fn_declaration(called_name, search_dirs, uri.ends_with('_test.v'))
 		if callee.name == '' {
 			continue
 		}
 		results << CallHierarchyOutgoingCall{
-			to:          callee
+			to: callee
 			from_ranges: call_ranges
 		}
 	}
 	return Response{
-		id:     request.id
+		id: request.id
 		result: results
 	}
 }
@@ -186,8 +191,8 @@ fn (mut app App) handle_call_hierarchy_outgoing(request Request) Response {
 fn extract_simple_fn_name(full_name string) string {
 	trimmed := full_name.trim_space()
 	if trimmed.starts_with('(') {
-		close := trimmed.index(')') or { return '' }
-		return trimmed[close + 1..].trim_space()
+		close_idx := trimmed.index(')') or { return '' }
+		return trimmed[close_idx + 1..].trim_space()
 	}
 	return trimmed
 }
@@ -203,10 +208,10 @@ fn find_fn_in_content(fn_name string, content string, uri string, enc PositionEn
 		}
 		if extract_simple_fn_name(sym.name) == fn_name {
 			return CallHierarchyItem{
-				name:            sym.name
-				kind:            sym.kind
-				uri:             uri
-				range:           sym.range
+				name: sym.name
+				kind: sym.kind
+				uri: uri
+				range: sym.range
 				selection_range: sym.selection_range
 			}
 		}
@@ -214,10 +219,9 @@ fn find_fn_in_content(fn_name string, content string, uri string, enc PositionEn
 	return CallHierarchyItem{}
 }
 
-// find_fn_declaration searches open files and then on-disk files in
-// `search_dirs` for a function/method named `fn_name`. Polls for cancellation
-// between files so callers can return early when the request is cancelled.
-fn (mut app App) find_fn_declaration(fn_name string, search_dirs []string, request_id int, include_tests bool) CallHierarchyItem {
+// find_fn_declaration resolves a function/method named `fn_name` from the
+// persistent symbol index, restricted to `search_dirs`.
+fn (mut app App) find_fn_declaration(fn_name string, search_dirs []string, include_tests bool) CallHierarchyItem {
 	// Answer from the persistent symbol index instead of re-scanning every file.
 	app.ensure_dirs_indexed(search_dirs)
 	// Prefer a declaration in the primary (current module) directory, then widen
@@ -231,10 +235,10 @@ fn (mut app App) find_fn_declaration(fn_name string, search_dirs []string, reque
 	for dirs in dir_passes {
 		if uri, sym := app.find_indexed_fn(fn_name, include_tests, dirs) {
 			return CallHierarchyItem{
-				name:            sym.name
-				kind:            sym.kind
-				uri:             uri
-				range:           sym.range
+				name: sym.name
+				kind: sym.kind
+				uri: uri
+				range: sym.range
 				selection_range: sym.selection_range
 			}
 		}
@@ -288,34 +292,34 @@ fn scan_for_callers(fn_name string, file_uri string, file_content string, enc Po
 					continue
 				}
 				idx := line[col..].index('${fn_name}(') or { break }
-				abs := col + idx
+				abs_idx := col + idx
 				// Require a word boundary before the name.
-				if abs > 0 && is_ident_char(line[abs - 1]) {
-					col = abs + 1
+				if abs_idx > 0 && is_ident_char(line[abs_idx - 1]) {
+					col = abs_idx + 1
 					continue
 				}
-				start_char := byte_to_encoded_col(line, abs, enc)
-				end_char := byte_to_encoded_col(line, abs + fn_name.len, enc)
+				start_char := byte_to_encoded_col(line, abs_idx, enc)
+				end_char := byte_to_encoded_col(line, abs_idx + fn_name.len, enc)
 				call_ranges << LSPRange{
 					start: Position{
 						line: li
 						char: start_char
 					}
-					end:   Position{
+					end: Position{
 						line: li
 						char: end_char
 					}
 				}
-				col = abs + fn_name.len + 1
+				col = abs_idx + fn_name.len + 1
 			}
 		}
 		if call_ranges.len > 0 {
 			results << CallHierarchyIncomingCall{
-				from:        CallHierarchyItem{
-					name:            sym.name
-					kind:            sym.kind
-					uri:             file_uri
-					range:           sym.range
+				from: CallHierarchyItem{
+					name: sym.name
+					kind: sym.kind
+					uri: file_uri
+					range: sym.range
 					selection_range: sym.selection_range
 				}
 				from_ranges: call_ranges
@@ -376,7 +380,7 @@ fn find_fn_calls_in_line(line string, line_idx int, enc PositionEncoding, mut ca
 							line: line_idx
 							char: start_char
 						}
-						end:   Position{
+						end: Position{
 							line: line_idx
 							char: end_char
 						}

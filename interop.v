@@ -7,21 +7,23 @@ import os
 import strings
 import time
 
-// v_compiler_exe is the absolute path to the V compiler executable, resolved
-// once at startup. Using an absolute path (instead of relying on PATH at exec
-// time) makes child-process invocation deterministic and shell-free.
-const v_compiler_exe = resolve_v_compiler_exe()
-
+// Keep runtime-derived compiler settings behind functions. Function-call module constants can
+// crash V3's parallel constant precomputation while compiling VLS.
 fn resolve_v_compiler_exe() string {
+	configured := os.getenv('VLS_V_COMMAND').trim_space()
+	if configured != '' {
+		return configured
+	}
 	return os.find_abs_path_of_executable('v') or { 'v' }
 }
 
 // compiler_is_available reports whether the V compiler was resolved to a real
-// executable path at startup. When false, compiler-backed features cannot work
+// executable path. When false, compiler-backed features cannot work
 // and the failure should be surfaced to the user rather than masked as empty
 // results (P1-03).
 fn compiler_is_available() bool {
-	return v_compiler_exe != 'v' && os.exists(v_compiler_exe)
+	v_exe := resolve_v_compiler_exe()
+	return v_exe != 'v' && os.exists(v_exe)
 }
 
 // hex_nibble returns the numeric value of a single hex digit, or none.
@@ -100,7 +102,7 @@ fn uri_to_path(uri string) string {
 	if !uri.starts_with('file:') {
 		return uri
 	}
-	mut rest := uri[5..] // strip 'file:'
+	mut rest := uri[5..].clone() // strip 'file:'
 	mut authority := ''
 	if rest.starts_with('//') {
 		rest = rest[2..]
@@ -217,8 +219,7 @@ fn make_unique_temp_path(tag string, real_path string) string {
 	safe_ext := if ext == '' { '.v' } else { ext }
 	name := os.file_name(real_path)
 	base := if name.contains('.') { name.all_before_last('.') } else { name }
-	return os.join_path(os.temp_dir(),
-		'${tag}_${os.getpid()}_${time.now().unix_nano()}_${base}${safe_ext}')
+	return os.join_path(os.temp_dir(), '${tag}_${os.getpid()}_${time.now().unix_nano()}_${base}${safe_ext}')
 }
 
 fn make_singlefile_temp_path(temp_root string, real_path string, purpose string) string {
@@ -233,37 +234,301 @@ fn make_singlefile_temp_path(temp_root string, real_path string, purpose string)
 // separate argv element to os.Process, so no shell metacharacter (spaces,
 // `$()`, backticks, quotes, `;`, `&`, `|`, `%`, ...) in a filename or path can
 // alter the executed command. There is no shell involved at any point.
-fn build_v_check_args_single(file_to_check string) []string {
-	return ['-w', '-vls-mode', '-check', '-json-errors', '-nocolor', file_to_check]
+fn v3_compiler_selection_args() []string {
+	$if macos || linux {
+		// Default V3 dispatch only applies to executables named `v` or `vnew`.
+		// VLS may be configured with a renamed compiler, so select V3 explicitly.
+		return ['-new-compiler']
+	}
+	return []
 }
 
-fn build_v_check_args_multifile() []string {
-	return ['-w', '-check', '-json-errors', '-nocolor', '.']
+fn build_v_check_args_single(file_to_check string, is_library_module bool) []string {
+	mut args := v3_compiler_selection_args()
+	if is_library_module {
+		args << '-shared'
+	}
+	// V3 emits warnings by default. At the pinned compiler revision `-w` means
+	// "hide warnings" and also selects established-compiler compatibility.
+	args << ['-check', '-nocolor', file_to_check]
+	return args
+}
+
+fn build_v_check_args_multifile(is_library_module bool) []string {
+	mut args := v3_compiler_selection_args()
+	if is_library_module {
+		// Library modules have no `fn main()`. Without `-shared`, the compiler
+		// reports that absence as an error before checking the actual source.
+		args << '-shared'
+	}
+	// Do not add `-w`: omitting it preserves V3's default warning diagnostics.
+	args << ['-check', '-nocolor', '.']
+	return args
 }
 
 fn build_v_line_info_args_multifile(rel_file string, line_info string) []string {
-	return ['-w', '-check', '-json-errors', '-nocolor', '-vls-mode', '-line-info',
-		'${rel_file}:${line_info}', '.']
+	return ['-w', '-check', '-nocolor', '-vls-mode', '-line-info', '${rel_file}:${line_info}', '.']
 }
 
 fn build_v_line_info_args_single(file_to_check string, line_info string, compile_target string) []string {
-	return ['-w', '-check', '-json-errors', '-nocolor', '-vls-mode', '-line-info',
-		'${file_to_check}:${line_info}', compile_target]
+	return ['-w', '-check', '-nocolor', '-vls-mode', '-line-info', '${file_to_check}:${line_info}',
+		compile_target]
+}
+
+// LineInfoMode records how the configured `v` reaches the `-line-info` checker
+// that serves hover, completion, signature help, and go-to-definition. V moved
+// V3 into `vlib/v` and deleted V1, taking `-vls-mode` / `-line-info` with it, so
+// the launcher no longer routes those options anywhere by itself: reaching the
+// checker now takes an explicit `-old-compiler`. Older compilers still answer
+// without it, so the working mode is probed from the first real request rather
+// than assumed from a version number.
+enum LineInfoMode {
+	unknown // not probed yet — try the options as-is
+	direct // the compiler answers `-vls-mode` / `-line-info` itself
+	compat // reaching the checker needs `-old-compiler`
+	missing // no compatibility compiler either — answer from VLS's own index
+}
+
+// line_info_flags are the options a V without the V1 checker rejects outright.
+const line_info_flags = ['-line-info', '-vls-mode', '-json-errors']
+
+// compiler_rejects_any_option reports whether a compiler invocation failed
+// because one of `options` is not understood. V prints "unknown option `-flag`"
+// on a line of its own and exits before doing any work, so a refusal is read off
+// a normal request instead of costing a separate probe process. The match is
+// anchored to a whole line so a diagnostic that merely quotes the text cannot
+// change how VLS drives the compiler for the rest of the session.
+fn compiler_rejects_any_option(output string, options []string) bool {
+	if !output.contains('unknown option `') {
+		return false
+	}
+	for line in output.split_into_lines() {
+		trimmed := line.trim_space()
+		for option in options {
+			if trimmed == 'unknown option `${option}`' {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+fn compiler_rejects_line_info(output string) bool {
+	return compiler_rejects_any_option(output, line_info_flags)
+}
+
+// compiler_refused_and_stopped reports whether an invocation printed its refusal
+// and nothing else, which is how a launcher with no answer at all behaves. One
+// that recovers by rerunning the request against a compatibility compiler always
+// says more — at minimum the notice naming that compiler — so an empty payload
+// from it is an ordinary "nothing here" rather than proof that the options are
+// unserviceable. Only the former may retire the compiler-backed lookups.
+fn compiler_refused_and_stopped(output string) bool {
+	mut refusals := 0
+	for line in output.split_into_lines() {
+		trimmed := line.trim_space()
+		if trimmed == '' {
+			continue
+		}
+		if !trimmed.starts_with('unknown option `') {
+			return false
+		}
+		refusals++
+	}
+	return refusals > 0
+}
+
+// normalize_v_line_info_output extracts the actual line-info payload from the
+// compatibility compiler's combined stdout/stderr. Newer launchers may prepend
+// an option notice before delegating to the established compiler.
+fn normalize_v_line_info_output(output string, method Method) string {
+	trimmed := output.trim_space()
+	if method in [.completion, .signature_help, .hover] {
+		start := trimmed.index('{') or { return '' }
+		end := trimmed.last_index('}') or { return '' }
+		if end < start {
+			return ''
+		}
+		return trimmed[start..end + 1]
+	}
+	if method in [.definition, .declaration, .type_definition, .implementation] {
+		lines := trimmed.split_into_lines()
+		for i := lines.len - 1; i >= 0; i-- {
+			line := lines[i].trim_space()
+			fields := line.split(':')
+			if fields.len >= 3 && fields[fields.len - 2].is_int()
+				&& fields[fields.len - 1].is_int() {
+				return line
+			}
+		}
+	}
+	return ''
 }
 
 fn build_v_fmt_args(temp_file string) []string {
 	return ['fmt', '-inprocess', '-w', temp_file]
 }
 
+// build_v_run_args builds the compiler arguments used by the Run Main code lens.
+// Run Main executes the whole containing module from its working directory.
+fn build_v_run_args() []string {
+	return ['-nocolor', 'run', '.']
+}
+
+fn build_v_run_compile_args(executable_path string) []string {
+	return ['-nocolor', '-o', executable_path, '.']
+}
+
+// build_v_test_args builds the compiler arguments used by the Run File and Run Test lenses.
+// An empty function name runs every test in the file; otherwise only that test is selected.
+fn build_v_test_args(file_path string, fn_name string) []string {
+	mut args := ['-nocolor', 'test', file_path]
+	if fn_name != '' {
+		args << ['-run-only', fn_name]
+	}
+	return args
+}
+
+fn build_v_test_compile_args(file_path string, fn_name string, executable_path string) []string {
+	mut args := ['-nocolor', '-skip-running', '-o', executable_path, file_path]
+	if fn_name != '' {
+		args << ['-run-only', fn_name]
+	}
+	return args
+}
+
+// parse_v_check_diagnostics converts V3's flat-AST checker output into the
+// compiler-neutral diagnostic representation used by the LSP layer. V3 emits
+// headers as `path:line:column: severity: message`; stage-specific severities
+// such as `builder error` are exposed to LSP clients as errors. Paths may
+// themselves contain colons, so location fields are peeled from the right.
+fn parse_v_check_diagnostics(output string, source_dir string) []JsonError {
+	mut diagnostics := []JsonError{}
+	mut active := -1
+	for line in output.split_into_lines() {
+		if diagnostic := parse_v_check_diagnostic_header(line, source_dir) {
+			diagnostics << diagnostic
+			active = diagnostics.len - 1
+			continue
+		}
+		if active >= 0 && diagnostics[active].len == 0 {
+			underline_len := v_diagnostic_underline_len(line)
+			if underline_len > 0 {
+				diagnostics[active] = JsonError{
+					...diagnostics[active]
+					len: underline_len
+				}
+			}
+		}
+	}
+	return diagnostics
+}
+
+fn diagnostic_source_path_is_valid(path string, source_dir string) bool {
+	if !path.ends_with('.v') && !path.ends_with('.vsh') {
+		return false
+	}
+	if source_dir == '' {
+		return true
+	}
+	resolved_path := if os.is_abs_path(path) { path } else { os.join_path(source_dir, path) }
+	return os.is_file(resolved_path)
+}
+
+fn parse_v_check_diagnostic_header(line string, source_dir string) ?JsonError {
+	mut best_marker_idx := -1
+	mut best := JsonError{}
+	for level in ['builder error', 'parser error', 'checker error', 'cgen error', 'error', 'warning',
+		'notice'] {
+		marker := ': ${level}: '
+		mut search_end := line.len
+		for search_end > 0 {
+			marker_idx := line[..search_end].last_index(marker) or { break }
+			location := line[..marker_idx]
+			col_separator := location.last_index(':') or {
+				search_end = marker_idx
+				continue
+			}
+			line_location := location[..col_separator]
+			line_separator := line_location.last_index(':') or {
+				search_end = marker_idx
+				continue
+			}
+			path := line_location[..line_separator]
+			line_nr_text := line_location[line_separator + 1..]
+			col_text := location[col_separator + 1..]
+			if !diagnostic_source_path_is_valid(path, source_dir)
+				|| !decimal_text_is_valid(line_nr_text) || !decimal_text_is_valid(col_text) {
+				search_end = marker_idx
+				continue
+			}
+			if marker_idx > best_marker_idx {
+				best_marker_idx = marker_idx
+				best = JsonError{
+					path: path
+					message: line[marker_idx + marker.len..]
+					line_nr: line_nr_text.int()
+					col: col_text.int()
+					level: if level.contains('error') { 'error' } else { level }
+				}
+			}
+			break
+		}
+	}
+	if best_marker_idx >= 0 {
+		return best
+	}
+	return none
+}
+
+fn decimal_text_is_valid(text string) bool {
+	if text == '' {
+		return false
+	}
+	for c in text {
+		if c < `0` || c > `9` {
+			return false
+		}
+	}
+	return true
+}
+
+fn v_diagnostic_underline_len(line string) int {
+	separator := line.index('|') or { return 0 }
+	marker := line[separator + 1..].trim_space()
+	if marker == '' {
+		return 0
+	}
+	for c in marker {
+		if c != `~` && c != `^` {
+			return 0
+		}
+	}
+	return marker.len
+}
+
+// cache_v_check_result never retains timed-out output because it may be partial.
+// Other failed invocations are cacheable only when they produced parsed
+// diagnostics; otherwise a transient compiler crash must be retried.
+fn (mut app App) cache_v_check_result(path string, content_hash int, generation int, errors []JsonError, exit_code int, parsed_diagnostic_count int) {
+	if exit_code == compiler_exit_timeout || (exit_code != 0 && parsed_diagnostic_count == 0) {
+		app.diag_cache.delete(path)
+		return
+	}
+	app.diag_cache[path] = DiagCacheEntry{
+		content_hash: content_hash
+		generation: generation
+		errors: errors
+	}
+}
+
 // Sentinel exit code returned when a compiler invocation is killed for
 // exceeding compiler_timeout_ms. 124 matches the coreutils `timeout` convention.
 const compiler_exit_timeout = 124
 
-// compiler_timeout_ms bounds how long any single compiler/formatter invocation
+// resolve_compiler_timeout_ms returns the maximum time a compiler/formatter invocation
 // may run before it is force-killed, so a hung or runaway `v` process can never
 // freeze the server indefinitely (partial P0-04). Overridable via VLS_TIMEOUT_MS.
-const compiler_timeout_ms = resolve_compiler_timeout_ms()
-
 fn resolve_compiler_timeout_ms() i64 {
 	env := os.getenv('VLS_TIMEOUT_MS')
 	if env != '' {
@@ -278,8 +543,8 @@ fn resolve_compiler_timeout_ms() i64 {
 // run_v_argv executes the V compiler with the given argument vector in
 // `work_folder` (set on the child process, never via a process-global chdir).
 // stdout and stderr are merged into one combined buffer because the compiler
-// writes its `-json-errors` / `-line-info` output to STDERR; returning stdout
-// alone would silently drop every diagnostic. The child is killed if it exceeds
+// writes diagnostics and `-line-info` output to STDERR; returning stdout alone
+// would silently drop them. The child is killed if it exceeds
 // compiler_timeout_ms. This is the single, shell-free entry point for all
 // compiler invocations.
 fn run_v_argv(args []string, work_folder string) os.Result {
@@ -288,17 +553,27 @@ fn run_v_argv(args []string, work_folder string) os.Result {
 		log(msg)
 		return os.Result{
 			exit_code: 1
-			output:    msg
+			output: msg
 		}
 	}
-	mut p := os.new_process(v_compiler_exe)
+	v_exe := resolve_v_compiler_exe()
+	timeout_ms := resolve_compiler_timeout_ms()
+	mut p := os.new_process(v_exe)
 	p.set_args(args)
+	if '-line-info' in args {
+		// CI enforces V3 for VLS itself, but line-info is still served by the
+		// established compiler. Do not leak the macOS no-fallback guard into this
+		// compatibility subprocess.
+		mut child_env := os.environ()
+		child_env.delete('V_MACOS_V3_NO_FALLBACK')
+		p.set_environment(child_env)
+	}
 	if work_folder != '' {
 		p.set_work_folder(work_folder)
 	}
 	p.set_redirect_stdio()
 	p.run()
-	// The V compiler writes its `-json-errors` / `-line-info` output to STDERR,
+	// The V compiler writes diagnostics and `-line-info` output to STDERR,
 	// so both streams are captured into one combined buffer (equivalent to the
 	// shell `2>&1` the previous implementation relied on). Returning stdout alone
 	// would silently drop every diagnostic.
@@ -321,8 +596,8 @@ fn run_v_argv(args []string, work_folder string) os.Result {
 			out.write_string(chunk)
 			got_data = true
 		}
-		if time.now().unix_milli() - start_ms > compiler_timeout_ms {
-			log('v invocation exceeded ${compiler_timeout_ms}ms; killing child')
+		if time.now().unix_milli() - start_ms > timeout_ms {
+			log('v invocation exceeded ${timeout_ms}ms; killing child')
 			p.signal_kill()
 			timed_out = true
 			break
@@ -340,12 +615,12 @@ fn run_v_argv(args []string, work_folder string) os.Result {
 	if timed_out {
 		return os.Result{
 			exit_code: compiler_exit_timeout
-			output:    ''
+			output: ''
 		}
 	}
 	return os.Result{
 		exit_code: code
-		output:    out.str()
+		output: out.str()
 	}
 }
 
@@ -453,12 +728,12 @@ fn (mut app App) prepare_compilation_overlay(real_path string) !CompilationOverl
 		}
 	}
 	return CompilationOverlay{
-		source_root:         source_root
+		source_root: source_root
 		source_display_root: source_display_root
-		temp_root:           temp_root
-		source_work_dir:     source_work_dir
-		temp_work_dir:       temp_work_dir
-		temp_source_file:    os.join_path(temp_root, file_rel)
+		temp_root: temp_root
+		source_work_dir: source_work_dir
+		temp_work_dir: temp_work_dir
+		temp_source_file: os.join_path(temp_root, file_rel)
 	}
 }
 
@@ -475,8 +750,7 @@ fn source_path_from_overlay_with_windows_rules(reported_path string, overlay Com
 	temp_root := normalize_overlay_path_with_windows_rules(overlay.temp_root, windows)
 	if path_is_within_with_case(candidate, temp_root, windows) {
 		rel := path_relative_to_with_case(candidate, temp_root, windows) or { return candidate }
-		return normalize_overlay_path_with_windows_rules(os.join_path(overlay.source_display_root,
-			rel), windows)
+		return normalize_overlay_path_with_windows_rules(os.join_path(overlay.source_display_root, rel), windows)
 	}
 	return candidate
 }
@@ -537,11 +811,13 @@ fn (mut app App) run_v_check(path string, text string) []JsonError {
 	}
 
 	mut cmd_args := []string{}
+	module_name := get_module_name(text)
+	is_library_module := module_name != '' && module_name != 'main'
 	if use_multifile {
-		cmd_args = build_v_check_args_multifile()
+		cmd_args = build_v_check_args_multifile(is_library_module)
 		log('MULTIFILE CMD - compile_target=${compile_target}): v ${cmd_args.join(' ')}')
 	} else {
-		cmd_args = build_v_check_args_single(file_to_check)
+		cmd_args = build_v_check_args_single(file_to_check, is_library_module)
 		log('SINGLEFILE CMD: v ${cmd_args.join(' ')}')
 	}
 
@@ -550,27 +826,26 @@ fn (mut app App) run_v_check(path string, text string) []JsonError {
 
 	log('Check - RUN RES ${x}')
 
+	// Parse V3's native flat-AST checker diagnostics so ordinary diagnostics stay
+	// on the default backend.
+	diagnostic_source_dir := if use_multifile { exec_dir } else { os.dir(file_to_check) }
+	v_errors := parse_v_check_diagnostics(x.output, diagnostic_source_dir)
 	cleanup_compilation_temp(temp_project_dir, singlefile_tmppath)
-
-	json_errors := json2.decode[[]JsonError](x.output) or {
-		log('failed to parse json ${err}')
-		return []
-	}
 
 	// error filtlering
 	if use_multifile {
 		mut filtered_errors := []JsonError{}
 
-		for err in json_errors {
+		for err in v_errors {
 			err_file := source_path_from_overlay(err.path, overlay)
 			if normalized_index_path(err_file) == normalized_index_path(real_path) {
 				updated_err := JsonError{
-					path:    real_path
+					path: real_path
 					message: err.message
 					line_nr: err.line_nr
-					col:     err.col
-					len:     err.len
-					level:   err.level
+					col: err.col
+					len: err.len
+					level: err.level
 				}
 				filtered_errors << updated_err
 				log('INCLUDING ERROR from err_file=${err_file}: ${err.message}')
@@ -579,22 +854,14 @@ fn (mut app App) run_v_check(path string, text string) []JsonError {
 			}
 		}
 
-		log('FILTERED ERRORS: ${filtered_errors.len} of ${json_errors.len}')
-		app.diag_cache[path] = DiagCacheEntry{
-			content_hash: content_hash
-			generation:   gen
-			errors:       filtered_errors
-		}
+		log('FILTERED ERRORS: ${filtered_errors.len} of ${v_errors.len}')
+		app.cache_v_check_result(path, content_hash, gen, filtered_errors, x.exit_code, v_errors.len)
 		return filtered_errors
 	}
 
-	log('JSON ERRORS: ${json_errors.len}')
-	app.diag_cache[path] = DiagCacheEntry{
-		content_hash: content_hash
-		generation:   gen
-		errors:       json_errors
-	}
-	return json_errors
+	log('V3 CHECK ERRORS: ${v_errors.len}')
+	app.cache_v_check_result(path, content_hash, gen, v_errors, x.exit_code, v_errors.len)
+	return v_errors
 }
 
 fn (mut app App) write_tracked_files_to_temp(working_dir string) !string {
@@ -749,13 +1016,11 @@ fn materialize_overlay_file_with_linker(source_path string, target_path string, 
 }
 
 fn materialize_overlay_file(source_path string, target_path string, mut budget OverlayCopyBudget) !bool {
-	return materialize_overlay_file_with_linker(source_path, target_path, create_overlay_hard_link, mut
-		budget)
+	return materialize_overlay_file_with_linker(source_path, target_path, create_overlay_hard_link, mut budget)
 }
 
 fn symlink_untracked_files(source_root string, source_module_dir string, temp_dir string, tracked_files map[string]string) ! {
-	symlink_untracked_files_with_linker(source_root, source_module_dir, temp_dir, tracked_files,
-		create_overlay_symlink)!
+	symlink_untracked_files_with_linker(source_root, source_module_dir, temp_dir, tracked_files, create_overlay_symlink)!
 }
 
 fn symlink_untracked_files_with_linker(source_root string, source_module_dir string, temp_dir string, tracked_files map[string]string, link_fn OverlayLinkFn) ! {
@@ -769,15 +1034,11 @@ fn symlink_untracked_files_with_linker(source_root string, source_module_dir str
 			tracked_rel_paths << normalize_overlay_path(rel)
 		}
 	}
-	local_import_dirs := local_import_rel_dirs(normalized_source_root, normalized_module_dir,
-		tracked_files)
+	local_import_dirs := local_import_rel_dirs(normalized_source_root, normalized_module_dir, tracked_files)
 	mut copy_budget := new_overlay_copy_budget()
-	thirdparty_references := referenced_thirdparty_rel_paths(normalized_source_root,
-		normalized_module_dir, tracked_files, local_import_dirs)
-	materialize_referenced_thirdparty_inputs(normalized_source_root, temp_dir,
-		thirdparty_references, mut copy_budget)!
-	symlink_untracked_tree(normalized_source_root, normalized_source_root, temp_dir, '',
-		tracked_rel_paths, local_import_dirs, link_fn, mut copy_budget)!
+	thirdparty_references := referenced_thirdparty_rel_paths(normalized_source_root, normalized_module_dir, tracked_files, local_import_dirs)
+	materialize_referenced_thirdparty_inputs(normalized_source_root, temp_dir, thirdparty_references, mut copy_budget)!
+	symlink_untracked_tree(normalized_source_root, normalized_source_root, temp_dir, '', tracked_rel_paths, local_import_dirs, link_fn, mut copy_budget)!
 }
 
 // local_import_rel_dirs returns project-local module directories imported by
@@ -984,8 +1245,7 @@ fn copy_bounded_overlay_entry_pass(source_path string, target_path string, compi
 		visited[real_path] = true
 		mut copied := 0
 		for entry in os.ls(source_path)! {
-			copied += copy_bounded_overlay_entry_pass(os.join_path(source_path, entry), os.join_path(target_path,
-				entry), compilation_files, mut budget, mut visited)!
+			copied += copy_bounded_overlay_entry_pass(os.join_path(source_path, entry), os.join_path(target_path, entry), compilation_files, mut budget, mut visited)!
 		}
 		return copied
 	}
@@ -1009,11 +1269,9 @@ fn copy_bounded_overlay_entry_pass(source_path string, target_path string, compi
 // detection keep the copy bounded. Compiler inputs are copied before assets, and
 // files beyond the limit are skipped without invalidating the partial overlay.
 fn copy_bounded_overlay_entry(source_path string, target_path string, mut budget OverlayCopyBudget, mut visited map[string]bool) !int {
-	mut copied := copy_bounded_overlay_entry_pass(source_path, target_path, true, mut budget, mut
-		visited)!
+	mut copied := copy_bounded_overlay_entry_pass(source_path, target_path, true, mut budget, mut visited)!
 	mut asset_visited := map[string]bool{}
-	copied += copy_bounded_overlay_entry_pass(source_path, target_path, false, mut budget, mut
-		asset_visited)!
+	copied += copy_bounded_overlay_entry_pass(source_path, target_path, false, mut budget, mut asset_visited)!
 	return copied
 }
 
@@ -1025,12 +1283,10 @@ fn materialize_referenced_thirdparty_inputs(source_root string, target_root stri
 			mut visited := map[string]bool{}
 			if os.file_name(source_path) == 'thirdparty' {
 				for entry in os.ls(source_path)! {
-					copy_bounded_overlay_entry_pass(os.join_path(source_path, entry), os.join_path(target_path,
-						entry), true, mut budget, mut visited)!
+					copy_bounded_overlay_entry_pass(os.join_path(source_path, entry), os.join_path(target_path, entry), true, mut budget, mut visited)!
 				}
 			} else {
-				copy_bounded_overlay_entry_pass(source_path, target_path, true, mut budget, mut
-					visited)!
+				copy_bounded_overlay_entry_pass(source_path, target_path, true, mut budget, mut visited)!
 			}
 			continue
 		}
@@ -1100,8 +1356,7 @@ fn symlink_untracked_tree(source_root string, source_dir string, target_dir stri
 			if !os.exists(target_path) {
 				os.mkdir_all(target_path)!
 			}
-			symlink_untracked_tree(source_root, source_path, target_path, relative_path,
-				tracked_rel_paths, local_import_dirs, link_fn, mut copy_budget)!
+			symlink_untracked_tree(source_root, source_path, target_path, relative_path, tracked_rel_paths, local_import_dirs, link_fn, mut copy_budget)!
 			continue
 		}
 		if os.exists(target_path) || os.is_link(target_path) {
@@ -1119,8 +1374,7 @@ fn symlink_untracked_tree(source_root string, source_dir string, target_dir stri
 		link_fn(source_path, target_path) or {
 			log('Failed to symlink ${source_path}; using bounded overlay copy: ${err}')
 			mut visited := map[string]bool{}
-			copied := copy_bounded_overlay_entry(source_path, target_path, mut copy_budget, mut
-				visited)!
+			copied := copy_bounded_overlay_entry(source_path, target_path, mut copy_budget, mut visited)!
 			log('Copied ${copied} project files from ${source_path} into the overlay')
 			continue
 		}
@@ -1133,7 +1387,9 @@ fn symlink_untracked_tree(source_root string, source_dir string, target_dir stri
 // this notification keeps the in-memory open_files map consistent.
 fn (mut app App) on_did_change_watched_files(request Request) {
 	params := json2.decode[DidChangeWatchedFilesParams](request.params) or {
-		$if debug { log('Failed to decode DidChangeWatchedFilesParams: ${err}') }
+		$if debug {
+			log('Failed to decode DidChangeWatchedFilesParams: ${err}')
+		}
 		return
 	}
 	open_uris_by_path := app.open_index_uris_by_path()
@@ -1151,6 +1407,8 @@ fn (mut app App) on_did_change_watched_files(request Request) {
 		}
 		match change.event_type {
 			3 {
+				diagnostics_mutation := app.begin_diagnostics_project_mutation(uri)
+				is_open := uri in app.open_files
 				// Deleted on disk. Invalidate cached diagnostics, but do NOT drop
 				// an open editor buffer: the editor still owns the in-memory
 				// document even if the on-disk file was removed (P0-07 item 8).
@@ -1163,9 +1421,15 @@ fn (mut app App) on_did_change_watched_files(request Request) {
 				if uri !in app.open_files {
 					app.reindex_uri(uri)
 				}
+				app.finish_diagnostics_project_mutation(diagnostics_mutation, if is_open {
+					''
+				} else {
+					uri
+				})
 				log('on_did_change_watched_files: disk delete for ${uri}')
 			}
 			1, 2 {
+				diagnostics_mutation := app.begin_diagnostics_project_mutation(uri)
 				// Created or Changed on disk. The editor buffer is authoritative
 				// for any open document, so we must never overwrite open_files
 				// with disk content — doing so would erase unsaved edits (P0-07
@@ -1181,8 +1445,84 @@ fn (mut app App) on_did_change_watched_files(request Request) {
 					app.diag_cache.delete(uri)
 				}
 				app.bump_generation(uri)
+				app.finish_diagnostics_project_mutation(diagnostics_mutation, '')
 			}
 			else {}
+		}
+	}
+}
+
+// with_line_info_selection prefixes the compiler-selection flag this session
+// needs to reach the `-line-info` checker. `-old-compiler` is only added once a
+// refusal has proven it is required, so compilers that predate the flag never
+// see it.
+fn (app &App) with_line_info_selection(args []string) []string {
+	if app.line_info_mode != .compat {
+		return args
+	}
+	mut selected := ['-old-compiler']
+	selected << args
+	return selected
+}
+
+// hover_doc_comment returns the vdoc comment attached to the symbol under the
+// cursor described by `line_info` ("${line_nr}:hv^${byte_col}"). It augments a
+// compiler hover, and is the only hover source when no compiler can answer.
+fn (mut app App) hover_doc_comment(path string, line_info string) string {
+	// line_info format for hover is "${line_nr}:hv^${col}"
+	info_parts := line_info.split(':')
+	if info_parts.len < 2 {
+		return ''
+	}
+	// Use the requested document's buffer, else this exact file from disk
+	// — never a global last-touched buffer (P1-02).
+	file_content := app.open_files[path] or { os.read_file(uri_to_path(path)) or { '' } }
+	file_lines := file_content.split_into_lines()
+	cursor_line := info_parts[0].int() - 1
+	// cursor_col comes from the compiler line-info, which is a byte column, so
+	// treat it as a byte offset (utf8) here.
+	cursor_col := info_parts[1].all_after('hv^').int()
+	if cursor_line < 0 || cursor_line >= file_lines.len {
+		return ''
+	}
+	cursor_symbol := get_word_at_col(file_lines[cursor_line], cursor_col, .utf8)
+	if cursor_symbol == '' {
+		return ''
+	}
+	cursor_position := Position{
+		line: cursor_line
+		char: byte_to_encoded_col(file_lines[cursor_line], cursor_col, app.position_encoding)
+	}
+	imported_module := app.imported_module_at_symbol(file_lines[cursor_line], cursor_col, file_content, cursor_position)
+	doc_symbol := static_method_doc_symbol_at(file_lines[cursor_line], cursor_col, cursor_symbol)
+	return app.find_doc_comment_for_symbol(doc_symbol, file_lines, path, imported_module)
+}
+
+// line_info_unavailable_result answers a `-line-info` request without a
+// compiler. Hover still resolves vdoc comments from the index, and completion
+// returns an empty list that the caller augments with keywords and module
+// functions; the remaining methods report "nothing found" as LSP null. Callers
+// of definition consult resolve_indexed_definition first, so the index stays the
+// answer for the common cases.
+fn (mut app App) line_info_unavailable_result(method Method, path string, line_info string) ResponseResult {
+	match method {
+		.hover {
+			doc := app.hover_doc_comment(path, line_info)
+			if doc == '' {
+				return ResponseResult('null')
+			}
+			return Hover{
+				contents: MarkupContent{
+					kind: 'markdown'
+					value: doc
+				}
+			}
+		}
+		.completion {
+			return []Detail{}
+		}
+		else {
+			return ResponseResult('null')
 		}
 	}
 }
@@ -1191,6 +1531,15 @@ fn (mut app App) run_v_line_info(method Method, path string, line_info string) R
 	// Convert URI to local file path
 	real_path := uri_to_path(path)
 	log('real_path=${real_path}, method=${method}')
+
+	// Once no compiler on this machine can serve `-line-info`, never spawn
+	// another process for it. Requests that verify many candidates — references
+	// and rename run up to reference_semantic_max_candidates serial `gd^`
+	// lookups — would otherwise pay a process launch each to reread one error.
+	if app.line_info_mode == .missing {
+		log('no compiler serves -line-info; answering from the index')
+		return app.line_info_unavailable_result(method, path, line_info)
+	}
 
 	mut working_dir := os.dir(real_path)
 	mut file_to_check := real_path
@@ -1260,21 +1609,56 @@ fn (mut app App) run_v_line_info(method Method, path string, line_info string) R
 	}
 
 	exec_dir := if use_multifile { compile_target } else { working_dir }
-	mut x := run_v_argv(cmd_args, exec_dir)
+	mut x := run_v_argv(app.with_line_info_selection(cmd_args), exec_dir)
+	mut output := normalize_v_line_info_output(x.output, method)
+	if compiler_rejects_line_info(x.output) && app.line_info_mode == .unknown {
+		// This V has no in-tree `-line-info` checker. Its launcher may recover on
+		// its own by rerunning the failed request against the compatibility
+		// compiler, but that costs a doomed compile — and an upstream bug report
+		// upload — on every keystroke, so select that compiler directly instead.
+		// The probe runs once: from here on the session has a mode to drive.
+		log('compiler rejected the -line-info options; retrying with -old-compiler')
+		app.line_info_mode = .compat
+		retry := run_v_argv(app.with_line_info_selection(cmd_args), exec_dir)
+		if compiler_rejects_any_option(retry.output, ['-old-compiler']) {
+			// There is no selector to ask with, so whatever the launcher does on
+			// its own is the best available. Keep driving it that way.
+			log('this V has no -old-compiler; keeping the launcher default')
+			app.line_info_mode = .direct
+		} else {
+			x = retry
+			output = normalize_v_line_info_output(x.output, method)
+		}
+	}
+	if compiler_rejects_line_info(x.output) && compiler_refused_and_stopped(x.output) {
+		// The invocation refused the options and did nothing else, so nothing
+		// here can answer and the single-file retry below would be refused for
+		// the same reason. An empty payload alone is not evidence: on a launcher
+		// that recovers by itself it is just a lookup that found nothing, and
+		// retiring the lookups over one of those would cost the session every
+		// compiler-backed hover, signature, and receiver definition.
+		log('no compiler serves -line-info; falling back to the index')
+		app.line_info_mode = .missing
+		cleanup_compilation_temp(temp_project_dir, singlefile_tmppath)
+		return app.line_info_unavailable_result(method, path, line_info)
+	}
+	if app.line_info_mode == .unknown {
+		app.line_info_mode = .direct
+	}
 
 	if (method == .definition || method == .declaration || method == .type_definition
 		|| method == .implementation) && use_multifile
-		&& (x.exit_code != 0 || x.output.trim_space() == ''
-		|| x.output.trim_space() == '[]') {
+		&& (x.exit_code != 0 || output == '') {
 		if temp_project_dir != '' {
 			os.rmdir_all(temp_project_dir) or { log('Failed to clean up temp project dir: ${err}') }
 			temp_project_dir = ''
 		}
 		file_to_check = real_path
 		compile_target = real_path
-		cmd_fallback := build_v_line_info_args_single(file_to_check, line_info, compile_target)
+		cmd_fallback := app.with_line_info_selection(build_v_line_info_args_single(file_to_check, line_info, compile_target))
 		log('cmd_fallback=v ${cmd_fallback.join(' ')}')
 		x = run_v_argv(cmd_fallback, working_dir)
+		output = normalize_v_line_info_output(x.output, method)
 		log('Fallback RUN RES ${x}')
 	}
 
@@ -1285,11 +1669,11 @@ fn (mut app App) run_v_line_info(method Method, path string, line_info string) R
 	mut result := ResponseResult('null')
 	match method {
 		.completion {
-			result_tmp := json2.decode[JsonVarAC](x.output) or { JsonVarAC{} }
-			result = result_tmp.details
+			result_tmp := json2.decode[JsonVarAC](output) or { JsonVarAC{} }
+			result = without_operator_completions(result_tmp.details)
 		}
 		.signature_help {
-			sig := json2.decode[SignatureHelp](x.output) or { SignatureHelp{} }
+			sig := json2.decode[SignatureHelp](output) or { SignatureHelp{} }
 			// Return null when the compiler found no active signature so editors do not show
 			// empty signature popups (LSP spec: SignatureHelp | null).
 			if sig.signatures.len == 0 {
@@ -1300,32 +1684,10 @@ fn (mut app App) run_v_line_info(method Method, path string, line_info string) R
 		}
 		.hover {
 			// Decode the Hover JSON emitted by the compiler's hv^ mode.
-			hover_result := json2.decode[Hover](x.output) or { Hover{} }
+			hover_result := json2.decode[Hover](output) or { Hover{} }
 			// Extract vdoc comment via cross-file search as a fallback when the
 			// compiler does not provide documentation.
-			mut doc := ''
-			// Use the requested document's buffer, else this exact file from disk
-			// — never a global last-touched buffer (P1-02).
-			file_content := app.open_files[path] or { os.read_file(real_path) or { '' } }
-			file_lines := file_content.split_into_lines()
-			// line_info format for hover is "${line_nr}:hv^${col}"
-			info_parts := line_info.split(':')
-			mut cursor_symbol := ''
-			if info_parts.len >= 2 {
-				cursor_line := info_parts[0].int() - 1
-				// cursor_col comes from the compiler line-info, which is a byte
-				// column, so treat it as a byte offset (utf8) here.
-				cursor_col := info_parts[1].all_after('hv^').int()
-				if cursor_line >= 0 && cursor_line < file_lines.len {
-					cursor_symbol = get_word_at_col(file_lines[cursor_line], cursor_col, .utf8)
-					if cursor_symbol != '' {
-						imported_module := imported_module_at_symbol(file_lines[cursor_line],
-							cursor_col, file_content)
-						doc = app.find_doc_comment_for_symbol(cursor_symbol, file_lines, path,
-							imported_module)
-					}
-				}
-			}
+			doc := app.hover_doc_comment(path, line_info)
 			if hover_result.contents.value != '' {
 				mut value := hover_result.contents.value
 				// Augment with doc comment if the compiler didn't include one
@@ -1334,7 +1696,7 @@ fn (mut app App) run_v_line_info(method Method, path string, line_info string) R
 				}
 				result = Hover{
 					contents: MarkupContent{
-						kind:  'markdown'
+						kind: 'markdown'
 						value: value
 					}
 				}
@@ -1342,7 +1704,7 @@ fn (mut app App) run_v_line_info(method Method, path string, line_info string) R
 				// Compiler returned no info but we found a vdoc comment
 				result = Hover{
 					contents: MarkupContent{
-						kind:  'markdown'
+						kind: 'markdown'
 						value: doc
 					}
 				}
@@ -1354,8 +1716,8 @@ fn (mut app App) run_v_line_info(method Method, path string, line_info string) R
 		}
 		.definition, .declaration, .type_definition, .implementation {
 			// file.v:line:col => Location
-			fields := x.output.trim_space().split(':')
-			if fields.len < 3 || x.output.trim_space() == '' {
+			fields := output.split(':')
+			if fields.len < 3 || output == '' {
 				// No definition found — return null so the client does not navigate anywhere.
 				result = 'null'
 			} else {
@@ -1387,13 +1749,13 @@ fn (app &App) compiler_location(path string, line int, byte_col int) Location {
 	target_uri := index_uri_for_path(path, app.open_index_uris_by_path())
 	client_col := app.byte_col_to_client_col(target_uri, line, byte_col)
 	return Location{
-		uri:   target_uri
+		uri: target_uri
 		range: LSPRange{
 			start: Position{
 				line: line
 				char: client_col
 			}
-			end:   Position{
+			end: Position{
 				line: line
 				char: client_col
 			}

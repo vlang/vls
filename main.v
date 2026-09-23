@@ -5,49 +5,55 @@ module main
 import json2
 import net
 import os
+import sync
 import time
-import v.pref
 import io
 
 // App represents the context of the server during its lifetime.
 pub struct App {
 	cur_mod string = 'main'
-	exit    bool   = os.args.contains('exit')
+	exit    bool = os.args.contains('exit')
 mut:
-	text                                        string            // Current file content
+	text                                        string // Current file content
 	open_files                                  map[string]string // Map of file URI to file content
-	open_files_versions                         map[string]int    // Per-URI document version from the client
-	temp_dir                                    string            // Temporary directory for multi-file compilation
-	workspace_roots                             []string          // Workspace root directories from initialize
-	removed_workspace_roots                     []string          // Roots explicitly removed by the client
-	capture_output                              bool              // Test hook: capture outbound transport messages instead of writing
-	captured_output                             []string          // Test hook buffer for outbound transport messages
-	supports_dynamic_watched_files_registration bool              // Client supports dynamic workspace watcher registration
-	supports_work_done_progress                 bool              // Client supports window/workDoneProgress + $/progress
-	sent_watched_files_registration             bool              // client/registerCapability watcher registration was sent
-	watched_files_registration_id               string            // Raw id of the watcher registration request, to match its response
-	watched_files_active                        bool              // True once the client acknowledged watcher registration (not rejected)
+	open_files_versions                         map[string]i64 // Per-URI document version from the client
+	temp_dir                                    string // Temporary directory for multi-file compilation
+	workspace_roots                             []string // Workspace root directories from initialize
+	removed_workspace_roots                     []string // Roots explicitly removed by the client
+	capture_output                              bool // Test hook: capture outbound transport messages instead of writing
+	captured_output                             []string // Test hook buffer for outbound transport messages
+	supports_dynamic_watched_files_registration bool // Client supports dynamic workspace watcher registration
+	supports_work_done_progress                 bool // Client supports window/workDoneProgress + $/progress
+	sent_watched_files_registration             bool // client/registerCapability watcher registration was sent
+	watched_files_registration_id               string // Raw id of the watcher registration request, to match its response
+	watched_files_active                        bool // True once the client acknowledged watcher registration (not rejected)
 	inlay_hints_enabled                         bool = true // toggled via workspace/didChangeConfiguration
 	diagnostics_enabled                         bool = true // toggled via workspace/didChangeConfiguration
 	diag_cache                                  map[string]DiagCacheEntry // Per-URI cached diagnostics
-	open_files_generation                       int                       // Incremented on every workspace file mutation
-	project_generations                         map[string]int            // Per-project-dir revision, for scoped cache invalidation
-	cancelled_requests                          map[int]bool              // Request ids cancelled via $/cancelRequest
-	cancelled_raw_ids                           map[string]bool           // String/raw request ids cancelled via $/cancelRequest
-	current_request_raw_id                      string                    // Raw JSON id of the request being processed (echoed verbatim)
+	open_files_generation                       int // Incremented on every workspace file mutation
+	project_generations                         map[string]int // Per-project-dir revision, for scoped cache invalidation
+	cancelled_requests                          map[int]bool // Request ids cancelled via $/cancelRequest
+	cancelled_raw_ids                           map[string]bool // String/raw request ids cancelled via $/cancelRequest
+	current_request_raw_id                      string // Raw JSON id of the request being processed (echoed verbatim)
 	position_encoding                           PositionEncoding = .utf16 // Negotiated LSP position encoding (default UTF-16)
-	symbol_index                                map[string]IndexEntry        // Persistent per-URI symbol index (see index.v)
-	indexed_dirs                                map[string]bool              // Project dirs already walked into the index
-	indexed_dir_walk_ms                         map[string]i64               // Last walk time per dir, for watcher-less refresh
-	ref_occurrences                             map[string]OccEntry          // Per-URI identifier occurrences for references (see index.v)
-	index_skipped_uris                          map[string]bool              // Disk files omitted from the bounded index
-	index_incomplete_scopes                     map[string]bool              // Index walks that could not finish
+	symbol_index                                map[string]IndexEntry // Persistent per-URI symbol index (see index.v)
+	indexed_dirs                                map[string]bool // Project dirs already walked into the index
+	indexed_dir_walk_ms                         map[string]i64 // Last walk time per dir, for watcher-less refresh
+	ref_occurrences                             map[string]OccEntry // Per-URI identifier occurrences for references (see index.v)
+	index_skipped_uris                          map[string]bool // Disk files omitted from the bounded index
+	index_incomplete_scopes                     map[string]bool // Index walks that could not finish
 	vlib_fn_cache                               map[string]map[string]string // Per-vlib-module fn→return-type index (immutable during a session)
-	tcp_conn                                    ?&net.TcpConn                // Non-nil when serving a TCP client
-	is_shutdown                                 bool                         // True after shutdown request was acknowledged
-	exit_was_requested                          bool                         // True when the exit notification was received
-	received_initialize                         bool                         // True after initialize request was processed
+	expression_type_depth                       int // Nesting of expression_type, which a binding's declaration re-enters
+	line_info_mode                              LineInfoMode // How the configured `v` reaches the `-line-info` checker (see interop.v)
+	tcp_conn                                    ?&net.TcpConn // Non-nil when serving a TCP client
+	is_shutdown                                 bool // True after shutdown request was acknowledged
+	exit_was_requested                          bool // True when the exit notification was received
+	received_initialize                         bool // True after initialize request was processed
 	next_request_id                             int = 1 // Counter for server-initiated request ids
+	diagnostics_scheduler                       ?&DiagnosticsScheduler // Production-only async diagnostics
+	run_command_manager                         ?&RunCommandManager // Async code-lens process lifecycle
+	execute_commands_synchronously              bool // Test hook for deterministic command assertions
+	write_mutex                                 &sync.Mutex = sync.new_mutex() // Serializes worker and request-loop writes
 }
 
 struct JsonError {
@@ -70,18 +76,15 @@ struct DiagCacheEntry {
 	errors       []JsonError
 }
 
-const v_prefs = pref.Preferences{
-	is_vls: true
-}
-
-// v_dir is the path to the V home directory, derived from the V compiler executable.
-// It is resolved once at process start and never changes.
-const v_dir = find_v_dir()
-
+// Keep runtime-derived settings behind functions. Function-call module constants can crash V3's
+// parallel constant precomputation while compiling VLS.
 // find_v_dir resolves the V home directory by finding the V executable and
 // returning its parent directory.
 fn find_v_dir() string {
-	v_exe := os.find_abs_path_of_executable('v') or { return '' }
+	v_exe := resolve_v_compiler_exe()
+	if v_exe == 'v' || !os.is_file(v_exe) {
+		return ''
+	}
 	return os.dir(os.real_path(v_exe))
 }
 
@@ -91,15 +94,20 @@ fn find_v_dir() string {
 // shared unrotated file on every one of the ~160 call sites (P1-13). Set the
 // VLS_LOG environment variable to any non-empty value to enable logging to
 // ${TMPDIR}/vls_out.txt for debugging.
-const logging_enabled = os.getenv('VLS_LOG') != ''
-const log_file_path = os.join_path(os.temp_dir(), 'vls_out.txt')
+fn logging_is_enabled() bool {
+	return os.getenv('VLS_LOG') != ''
+}
+
+fn current_log_file_path() string {
+	return os.join_path(os.temp_dir(), 'vls_out.txt')
+}
 
 fn log(s string) {
-	if !logging_enabled {
+	if !logging_is_enabled() {
 		return
 	}
 	eprintln(s)
-	mut output := os.open_append(log_file_path) or { return }
+	mut output := os.open_append(current_log_file_path()) or { return }
 	output.writeln(s) or {
 		output.close()
 		return
@@ -107,29 +115,106 @@ fn log(s string) {
 	output.close()
 }
 
-// StdinReader reads standard input through its raw descriptor so streaming
-// clients are not blocked by the full-buffer behaviour of C fread.
-struct StdinReader {}
+// StdinBufferedReader reads standard input through its raw descriptor so streaming
+// clients are not blocked by the full-buffer behaviour of C fread. It deliberately
+// stays concrete instead of passing through io.Reader: optimized musl builds can
+// omit the custom interface dispatch entry and panic before the first LSP message.
+struct StdinBufferedReader {
+	fd int
+mut:
+	buf           []u8
+	offset        int
+	len           int
+	end_of_stream bool
+}
 
-fn (_ StdinReader) read(mut buffer []u8) !int {
-	data, bytes_read := os.fd_read(0, buffer.len)
+fn (mut reader StdinBufferedReader) fill_buffer() !bool {
+	if reader.end_of_stream {
+		return false
+	}
+	data, bytes_read := os.fd_read(reader.fd, reader.buf.len)
 	if bytes_read < 0 {
 		return error('failed to read from stdin')
 	}
 	if bytes_read == 0 {
+		reader.end_of_stream = true
+		reader.offset = 0
+		reader.len = 0
+		return false
+	}
+	reader.offset = 0
+	reader.len = copy(mut reader.buf, data.bytes())
+	if reader.len != bytes_read {
+		return error('failed to buffer stdin')
+	}
+	return true
+}
+
+fn (mut reader StdinBufferedReader) read(mut buffer []u8) !int {
+	if buffer.len == 0 {
+		return 0
+	}
+	if reader.offset >= reader.len {
+		if !reader.fill_buffer()! {
+			return io.Eof{}
+		}
+	}
+	bytes_read := copy(mut buffer, reader.buf[reader.offset..reader.len])
+	reader.offset += bytes_read
+	return bytes_read
+}
+
+fn (mut reader StdinBufferedReader) read_line(config io.BufferedReadLineConfig) !string {
+	if reader.end_of_stream && reader.offset >= reader.len {
 		return io.Eof{}
 	}
-	return copy(mut buffer, data.bytes())
+	mut line := []u8{}
+	for {
+		if reader.offset >= reader.len {
+			if !reader.fill_buffer()! {
+				if line.len == 0 {
+					return io.Eof{}
+				}
+				return line.bytestr()
+			}
+		}
+		mut i := reader.offset
+		for ; i < reader.len; i++ {
+			if reader.buf[i] != config.delim {
+				continue
+			}
+			mut end := i
+			if config.delim == `\n` {
+				if i > reader.offset && reader.buf[i - 1] == `\r` {
+					end--
+				} else if i == reader.offset && line.len > 0 && line.last() == `\r` {
+					line.delete_last()
+				}
+			}
+			line << reader.buf[reader.offset..end]
+			reader.offset = i + 1
+			return line.bytestr()
+		}
+		line << reader.buf[reader.offset..i]
+		reader.offset = i
+	}
+	return io.Eof{}
+}
+
+fn new_stdin_buffered_reader_for_fd(fd int, cap int) &StdinBufferedReader {
+	return &StdinBufferedReader{
+		fd: fd
+		buf: []u8{len: cap}
+	}
 }
 
 // new_stdin_buffered_reader creates the streaming reader used by stdio mode.
-fn new_stdin_buffered_reader() &io.BufferedReader {
-	return io.new_buffered_reader(reader: StdinReader{}, cap: transport_buffer_cap)
+fn new_stdin_buffered_reader() &StdinBufferedReader {
+	return new_stdin_buffered_reader_for_fd(0, transport_buffer_cap)
 }
 
 fn main() {
 	log('VLS started. Reading from stdin...')
-	log('VLS preferences: is_vls=${v_prefs.is_vls}')
 
 	// Check for --port PORT argument to start as a TCP multi-client server.
 	// TCP binds to loopback (127.0.0.1) by default; binding to any other
@@ -169,9 +254,10 @@ fn main() {
 		return
 	}
 	mut app := &App{
-		text:       ''
+		text: ''
 		open_files: map[string]string{}
-		temp_dir:   temp_dir
+		temp_dir: temp_dir
+		diagnostics_scheduler: new_diagnostics_scheduler()
 	}
 	// os.File.read uses C fread, which waits for the entire buffer on an open
 	// pipe. LSP clients keep stdin open, so use the raw descriptor-backed pipe
@@ -180,7 +266,9 @@ fn main() {
 	app.handle_requests(mut reader)
 	log('VLS exiting.')
 	os.rmdir_all(temp_dir) or {
-		$if debug { log('Failed to clean up temp directory: ${err}') }
+		$if debug {
+			log('Failed to clean up temp directory: ${err}')
+		}
 	}
 	// LSP spec §3.5: exit after proper shutdown → 0; exit without shutdown → 1.
 	if app.exit_was_requested && !app.is_shutdown {
@@ -210,8 +298,7 @@ fn tcp_bind_address(host string, port string) string {
 fn run_tcp_server(host string, port string, allow_remote bool) {
 	if !is_loopback_host(host) && !allow_remote {
 		msg :=
-			'VLS: refusing to bind TCP to non-loopback host "${host}" without --unsafe-allow-remote. ' +
-			'The TCP transport is unauthenticated and unencrypted; exposing it on a network is unsafe.'
+			'VLS: refusing to bind TCP to non-loopback host "${host}" without --unsafe-allow-remote. ' + 'The TCP transport is unauthenticated and unencrypted; exposing it on a network is unsafe.'
 		log(msg)
 		eprintln(msg)
 		return
@@ -243,16 +330,19 @@ fn handle_tcp_client(mut conn net.TcpConn) {
 		return
 	}
 	mut app := &App{
-		text:       ''
+		text: ''
 		open_files: map[string]string{}
-		temp_dir:   temp_dir
-		tcp_conn:   &conn
+		temp_dir: temp_dir
+		tcp_conn: &conn
+		diagnostics_scheduler: new_diagnostics_scheduler()
 	}
 	mut reader := io.new_buffered_reader(reader: conn, cap: transport_buffer_cap)
 	app.handle_requests(mut reader)
 	log('TCP client disconnected')
 	os.rmdir_all(temp_dir) or {
-		$if debug { log('Failed to clean up TCP client temp directory: ${err}') }
+		$if debug {
+			log('Failed to clean up TCP client temp directory: ${err}')
+		}
 	}
 	conn.close() or {}
 }
@@ -260,6 +350,10 @@ fn handle_tcp_client(mut conn net.TcpConn) {
 // write_data sends raw data to the client — either via the TCP connection when
 // in multi-client mode, or to stdout in stdio mode.
 fn (mut app App) write_data(data string) {
+	app.write_mutex.lock()
+	defer {
+		app.write_mutex.unlock()
+	}
 	if app.capture_output {
 		app.captured_output << data
 		return
@@ -287,7 +381,7 @@ const max_content_length = 64 * 1024 * 1024 // 64 MiB max JSON-RPC body
 const max_header_bytes = 64 * 1024 // total header section size cap
 const max_charset = 'utf-8' // LSP content is always UTF-8
 
-fn read_request(mut reader io.BufferedReader) !string {
+fn read_request[T](mut reader T) !string {
 	mut len := -1
 	mut header_error := ''
 	mut header_bytes := 0
@@ -296,7 +390,9 @@ fn read_request(mut reader io.BufferedReader) !string {
 			if err is io.Eof {
 				return err
 			}
-			$if debug { log('read_request: error reading header line: ${err}') }
+			$if debug {
+				log('read_request: error reading header line: ${err}')
+			}
 			return err
 		}
 		header_bytes += line.len + 2 // account for the stripped CRLF
@@ -456,7 +552,11 @@ fn parse_content_length_header(s string) !int {
 }
 
 // handle_requests is the main request handler loop for both stdio and TCP modes.
-fn (mut app App) handle_requests(mut reader io.BufferedReader) {
+fn (mut app App) handle_requests[T](mut reader T) {
+	defer {
+		app.cancel_all_scheduled_diagnostics()
+		app.stop_run_commands()
+	}
 	for {
 		// Reset the per-request raw id so a stale id can never leak into an
 		// error response emitted before a new message is fully read.
@@ -474,7 +574,9 @@ fn (mut app App) handle_requests(mut reader io.BufferedReader) {
 				app.write_error_response(make_parse_error_response(err.msg()))
 				break
 			}
-			$if debug { log('Error reading request: ${err.msg()}') }
+			$if debug {
+				log('Error reading request: ${err.msg()}')
+			}
 			break
 		}
 		if content.len == 0 {
@@ -491,8 +593,7 @@ fn (mut app App) handle_requests(mut reader io.BufferedReader) {
 		// determined — rather than dispatching and echoing a bogus id (P0-02).
 		if app.current_request_raw_id != '' && !raw_id_is_valid(app.current_request_raw_id) {
 			app.current_request_raw_id = 'null'
-			app.write_error_response(make_invalid_request_error_response(0,
-				'Request id must be a string, number, or null'))
+			app.write_error_response(make_invalid_request_error_response(0, 'Request id must be a string, number, or null'))
 			continue
 		}
 		// Decode the body WITHOUT the id field: json2 aborts the whole decode on
@@ -515,37 +616,36 @@ fn (mut app App) handle_requests(mut reader io.BufferedReader) {
 			log('Consumed client response to a server-initiated request: ${content}')
 			continue
 		}
-		request := Request{
-			id:      raw_id_to_int(app.current_request_raw_id)
-			method:  body.method
+		lsp_request := Request{
+			id: raw_id_to_int(app.current_request_raw_id)
+			method: body.method
 			jsonrpc: body.jsonrpc
-			params:  body.params
+			params: body.params
 		}
 		log('\n\nRECV (pretty): ${content}')
-		method := Method.from_string(request.method)
-		log('method="${method}" request.method="${request.method}" ${method == .completion}')
+		method := Method.from_string(lsp_request.method)
+		log('method="${method}" request.method="${lsp_request.method}" ${method == .completion}')
 		// Enforce request/notification direction (P0-03): a message with an id
 		// sent to a notification-only method is an InvalidRequest; a message
 		// without an id sent to a request-only method is dropped rather than
 		// processed into a response with a bogus id.
 		if has_id && method_is_notification_only(method) {
-			app.write_error_response(make_invalid_request_error_response(request.id,
-				'Method ${request.method} is a notification and cannot be sent as a request'))
+			app.write_error_response(make_invalid_request_error_response(lsp_request.id, 'Method ${lsp_request.method} is a notification and cannot be sent as a request'))
 			continue
 		}
 		if !has_id && method_requires_response(method) {
-			log('Dropping notification-shaped message for request-only method ${request.method}')
+			log('Dropping notification-shaped message for request-only method ${lsp_request.method}')
 			continue
 		}
-		if method_requires_response(method) && app.request_is_cancelled(request.id) {
-			app.write_error_response(make_cancelled_error_response(request.id))
-			app.consume_cancelled_request(request.id)
+		if method_requires_response(method) && app.request_is_cancelled(lsp_request.id) {
+			app.write_error_response(make_cancelled_error_response(lsp_request.id))
+			app.consume_cancelled_request(lsp_request.id)
 			continue
 		}
 		// After shutdown, reject all requests except exit.
 		if app.is_shutdown && method != .exit {
 			if has_id {
-				app.write_error_response(make_server_shutdown_error_response(request.id))
+				app.write_error_response(make_server_shutdown_error_response(lsp_request.id))
 			}
 			continue
 		}
@@ -554,137 +654,139 @@ fn (mut app App) handle_requests(mut reader io.BufferedReader) {
 		// to any request received before the initialize handshake completes.
 		if !app.received_initialize && method != .initialize && method != .exit {
 			if has_id {
-				app.write_error_response(make_server_not_initialized_error_response(request.id))
+				app.write_error_response(make_server_not_initialized_error_response(lsp_request.id))
 			}
 			continue
 		}
 		if has_id {
-			if err_msg := validate_request_params(method, request.params) {
-				app.write_error_response(make_invalid_params_error_response(request.id, err_msg))
+			if err_msg := validate_request_params(method, lsp_request.params) {
+				app.write_error_response(make_invalid_params_error_response(lsp_request.id, err_msg))
 				continue
 			}
 		} else {
-			if err_msg := validate_notification_params(method, request.params) {
-				log('Invalid notification params for ${request.method}: ${err_msg}')
+			if err_msg := validate_notification_params(method, lsp_request.params) {
+				log('Invalid notification params for ${lsp_request.method}: ${err_msg}')
 				continue
 			}
 		}
 		match method {
-			.completion, .signature_help, .definition, .hover, .declaration, .type_definition,
-			.implementation {
-				resp := app.operation_at_pos(method, request)
-				app.write_response_or_cancelled(request.id, resp)
+			.completion, .signature_help, .definition, .hover, .declaration, .type_definition, .implementation {
+				resp := app.operation_at_pos(method, lsp_request)
+				app.write_response_or_cancelled(lsp_request.id, resp)
 			}
 			.references {
-				resp := app.find_references(request)
-				app.write_response_or_cancelled(request.id, resp)
+				resp := app.find_references(lsp_request)
+				app.write_response_or_cancelled(lsp_request.id, resp)
 			}
 			.rename {
-				resp := app.handle_rename(request)
-				app.write_response_or_cancelled(request.id, resp)
+				resp := app.handle_rename(lsp_request)
+				app.write_response_or_cancelled(lsp_request.id, resp)
 			}
 			.prepare_rename {
-				resp := app.handle_prepare_rename(request)
-				app.write_response_or_cancelled(request.id, resp)
+				resp := app.handle_prepare_rename(lsp_request)
+				app.write_response_or_cancelled(lsp_request.id, resp)
 			}
 			.workspace_symbol {
-				resp := app.handle_workspace_symbol(request)
-				app.write_response_or_cancelled(request.id, resp)
+				resp := app.handle_workspace_symbol(lsp_request)
+				app.write_response_or_cancelled(lsp_request.id, resp)
 			}
 			.formatting {
-				resp := app.handle_formatting(request)
-				app.write_response_or_cancelled(request.id, resp)
+				resp := app.handle_formatting(lsp_request)
+				app.write_response_or_cancelled(lsp_request.id, resp)
 			}
 			.document_symbols {
-				resp := app.handle_document_symbols(request)
-				app.write_response_or_cancelled(request.id, resp)
+				resp := app.handle_document_symbols(lsp_request)
+				app.write_response_or_cancelled(lsp_request.id, resp)
 			}
 			.inlay_hint {
-				resp := app.handle_inlay_hints(request)
-				app.write_response_or_cancelled(request.id, resp)
+				resp := app.handle_inlay_hints(lsp_request)
+				app.write_response_or_cancelled(lsp_request.id, resp)
 			}
 			.did_change {
-				notification := app.on_did_change(request) or { continue }
+				notification := app.on_did_change(lsp_request) or { continue }
 				app.write_notification(notification)
 			}
 			.initialize {
 				// Reject double-initialize per LSP spec.
 				if app.received_initialize {
-					app.write_error_response(make_server_already_initialized_error_response(request.id))
+					app.write_error_response(make_server_already_initialized_error_response(lsp_request.id))
 					continue
 				}
-				if err_msg := app.on_initialize(request) {
-					app.write_error_response(make_invalid_params_error_response(request.id, err_msg))
+				if err_msg := app.on_initialize(lsp_request) {
+					app.write_error_response(make_invalid_params_error_response(lsp_request.id, err_msg))
 					continue
 				}
 				// Return all supported capabilities, matching the LSP spec and what is implemented.
 				response := Response{
-					id:     request.id
+					id: lsp_request.id
 					result: Capabilities{
 						capabilities: Capability{
 							// NOTE: Placeholder/stub capabilities are intentionally NOT
 							// advertised (P1-07 / Stage 0): on-type formatting (always
 							// empty), inline values (wrong abstraction), linked editing
-							// (wrong abstraction), file-operation hooks (no-ops), the
-							// run/test executeCommand + codeLens stubs, and willSave
-							// (never dispatched). Advertising only working features gives
-							// a better editor experience than exposing broken UI.
-							text_document_sync:           TextDocumentSyncOptions{
-								open_close:           true
-								change:               2 // Incremental
-								save:                 SaveOptions{
+							// (wrong abstraction), file-operation hooks (no-ops), and
+							// willSave (never dispatched). Advertising only working
+							// features gives a better editor experience than broken UI.
+							text_document_sync: TextDocumentSyncOptions{
+								open_close: true
+								change: 2 // Incremental
+								save: SaveOptions{
 									include_text: true
 								}
-								will_save:            false
+								will_save: false
 								will_save_wait_until: true
 							}
-							completion_provider:          CompletionProvider{
+							completion_provider: CompletionProvider{
 								trigger_characters: ['.']
 							}
-							signature_help_provider:      SignatureHelpOptions{
+							signature_help_provider: SignatureHelpOptions{
 								trigger_characters: ['(', ',']
 							}
-							definition_provider:          true
-							declaration_provider:         true
-							type_definition_provider:     true
-							implementation_provider:      true
-							hover_provider:               true
-							references_provider:          true
-							rename_provider:              RenameOptions{
+							definition_provider: true
+							declaration_provider: true
+							type_definition_provider: true
+							implementation_provider: true
+							hover_provider: true
+							references_provider: true
+							rename_provider: RenameOptions{
 								prepare_provider: true
 							}
 							document_formatting_provider: true
-							document_symbol_provider:     true
-							workspace_symbol_provider:    true
-							inlay_hint_provider:          true
-							code_action_provider:         true
-							semantic_tokens_provider:     SemanticTokensOptions{
+							document_symbol_provider: true
+							workspace_symbol_provider: true
+							inlay_hint_provider: true
+							code_action_provider: true
+							execute_command_provider: ExecuteCommandOptions{
+								commands: ['vls.runFile', 'vls.runTests']
+							}
+							code_lens_provider: CodeLensOptions{}
+							semantic_tokens_provider: SemanticTokensOptions{
 								legend: SemanticTokensLegend{
-									token_types:     semantic_token_types()
+									token_types: semantic_token_types()
 									token_modifiers: semantic_token_modifiers()
 								}
-								full:   true
-								range:  true
+								full: true
+								range: true
 							}
-							folding_range_provider:       true
-							call_hierarchy_provider:      true
-							document_highlight_provider:  true
-							selection_range_provider:     true
+							folding_range_provider: true
+							call_hierarchy_provider: true
+							document_highlight_provider: true
+							selection_range_provider: true
 							// Range formatting is NOT advertised: v fmt only formats whole
 							// files, so a correct range implementation needs a
 							// character-accurate, EOL-preserving diff restricted to the
 							// requested range, which is not yet implemented (P0-08).
 							document_range_formatting_provider: false
-							position_encoding:                  position_encoding_string(app.position_encoding)
-							workspace:                          WorkspaceCapability{
+							position_encoding: position_encoding_string(app.position_encoding)
+							workspace: WorkspaceCapability{
 								workspace_folders: WorkspaceFoldersServerCapability{
-									supported:            true
+									supported: true
 									change_notifications: true
 								}
 							}
 						}
-						server_info:  ServerInfo{
-							name:    'vls'
+						server_info: ServerInfo{
+							name: 'vls'
 							version: '0.0.2'
 						}
 					}
@@ -695,21 +797,12 @@ fn (mut app App) handle_requests(mut reader io.BufferedReader) {
 				// available, instead of silently returning empty diagnostics,
 				// completion, and navigation for every request (P1-03).
 				if !compiler_is_available() {
-					app.send_show_message('vls: the V compiler (`v`) was not found on PATH. Diagnostics, completion, and navigation will not work until `v` is installed and on PATH.',
-						1)
+					app.send_show_message('vls: the V compiler (`v`) was not found on PATH. Diagnostics, completion, and navigation will not work until `v` is installed and on PATH.', 1)
 				}
 			}
 			.did_open {
-				app.on_did_open(request)
-				// Publish diagnostics on open (P0-07 item 10). This compiles inline in
-				// the request loop, so opening many files serially blocks other
-				// requests until each compile returns. Moving it off the loop is the
-				// async-diagnostics scheduler (P0-04), which is blocked by the
-				// synchronous test harness and V's non-thread-safe shared state; until
-				// then each compile is bounded by compiler_timeout_ms so a single
-				// invocation cannot hang the loop indefinitely, and diag_cache avoids
-				// recompiling unchanged content.
-				if params := json2.decode[DidOpenTextDocumentParams](request.params) {
+				if !app.on_did_open(lsp_request) {
+					params := json2.decode[DidOpenTextDocumentParams](lsp_request.params) or { continue }
 					uri := params.text_document.uri
 					if doc_content := app.open_files[uri] {
 						app.write_notification(app.build_diagnostics_notification(uri, doc_content))
@@ -717,44 +810,38 @@ fn (mut app App) handle_requests(mut reader io.BufferedReader) {
 				}
 			}
 			.did_close {
-				app.on_did_close(request)
+				app.on_did_close(lsp_request)
 				// Clear published diagnostics for the closed document (P0-07 item 9).
-				if params := json2.decode[DidCloseTextDocumentParams](request.params) {
+				if params := json2.decode[DidCloseTextDocumentParams](lsp_request.params) {
 					app.write_notification(Notification{
 						method: 'textDocument/publishDiagnostics'
 						params: PublishDiagnosticsParams{
-							uri:         params.text_document.uri
+							uri: params.text_document.uri
 							diagnostics: []
 						}
 					})
 				}
 			}
 			.did_save {
-				notification := app.on_did_save(request) or { continue }
+				notification := app.on_did_save(lsp_request) or { continue }
 				app.write_notification(notification)
 			}
 			.will_save_wait_until {
-				resp := app.on_will_save_wait_until(request)
-				app.write_response_or_cancelled(request.id, resp)
+				resp := app.on_will_save_wait_until(lsp_request)
+				app.write_response_or_cancelled(lsp_request.id, resp)
 			}
 			.initialized {
 				log('Received initialized notification.')
-				app.on_initialized(request)
+				app.on_initialized(lsp_request)
 			}
 			.set_trace {
-				log('Received and ignored method: ${request.method}')
+				log('Received and ignored method: ${lsp_request.method}')
 			}
 			.cancel_request {
-				app.on_cancel_request(request)
+				app.on_cancel_request(lsp_request)
 			}
 			.shutdown {
-				log('Received shutdown request.')
-				app.is_shutdown = true
-				shutdown_resp := Response{
-					id:     request.id
-					result: 'null'
-				}
-				app.write_response(shutdown_resp)
+				app.accept_shutdown(lsp_request.id)
 			}
 			.exit {
 				log('Received exit notification. Terminating.')
@@ -762,94 +849,92 @@ fn (mut app App) handle_requests(mut reader io.BufferedReader) {
 				break
 			}
 			.code_action {
-				resp := app.handle_code_action(request)
-				app.write_response_or_cancelled(request.id, resp)
+				resp := app.handle_code_action(lsp_request)
+				app.write_response_or_cancelled(lsp_request.id, resp)
 			}
 			.semantic_tokens {
-				resp := app.handle_semantic_tokens(request)
-				app.write_response_or_cancelled(request.id, resp)
+				resp := app.handle_semantic_tokens(lsp_request)
+				app.write_response_or_cancelled(lsp_request.id, resp)
 			}
 			.folding_range {
-				resp := app.handle_folding_range(request)
-				app.write_response_or_cancelled(request.id, resp)
+				resp := app.handle_folding_range(lsp_request)
+				app.write_response_or_cancelled(lsp_request.id, resp)
 			}
 			.callhierarchy_prepare {
-				resp := app.handle_prepare_call_hierarchy(request)
-				app.write_response_or_cancelled(request.id, resp)
+				resp := app.handle_prepare_call_hierarchy(lsp_request)
+				app.write_response_or_cancelled(lsp_request.id, resp)
 			}
 			.callhierarchy_incoming {
-				resp := app.handle_call_hierarchy_incoming(request)
-				app.write_response_or_cancelled(request.id, resp)
+				resp := app.handle_call_hierarchy_incoming(lsp_request)
+				app.write_response_or_cancelled(lsp_request.id, resp)
 			}
 			.callhierarchy_outgoing {
-				resp := app.handle_call_hierarchy_outgoing(request)
-				app.write_response_or_cancelled(request.id, resp)
+				resp := app.handle_call_hierarchy_outgoing(lsp_request)
+				app.write_response_or_cancelled(lsp_request.id, resp)
 			}
 			.workspace_did_change_configuration {
-				app.on_did_change_configuration(request)
+				app.on_did_change_configuration(lsp_request)
 			}
 			.workspace_did_change_workspace_folders {
-				app.on_did_change_workspace_folders(request)
+				app.on_did_change_workspace_folders(lsp_request)
 			}
 			.document_highlight {
-				resp := app.handle_document_highlight(request)
-				app.write_response_or_cancelled(request.id, resp)
+				resp := app.handle_document_highlight(lsp_request)
+				app.write_response_or_cancelled(lsp_request.id, resp)
 			}
 			.selection_range {
-				resp := app.handle_selection_range(request)
-				app.write_response_or_cancelled(request.id, resp)
+				resp := app.handle_selection_range(lsp_request)
+				app.write_response_or_cancelled(lsp_request.id, resp)
 			}
 			.semantic_tokens_range {
-				resp := app.handle_semantic_tokens_range(request)
-				app.write_response_or_cancelled(request.id, resp)
+				resp := app.handle_semantic_tokens_range(lsp_request)
+				app.write_response_or_cancelled(lsp_request.id, resp)
 			}
 			.range_formatting {
-				resp := app.handle_range_formatting(request)
-				app.write_response_or_cancelled(request.id, resp)
+				resp := app.handle_range_formatting(lsp_request)
+				app.write_response_or_cancelled(lsp_request.id, resp)
 			}
 			.did_change_watched_files {
-				app.on_did_change_watched_files(request)
+				app.on_did_change_watched_files(lsp_request)
 			}
 			.code_lens {
-				resp := app.handle_code_lens(request)
-				app.write_response_or_cancelled(request.id, resp)
+				resp := app.handle_code_lens(lsp_request)
+				app.write_response_or_cancelled(lsp_request.id, resp)
 			}
 			.code_lens_resolve {
-				resp := app.handle_code_lens_resolve(request)
-				app.write_response_or_cancelled(request.id, resp)
+				resp := app.handle_code_lens_resolve(lsp_request)
+				app.write_response_or_cancelled(lsp_request.id, resp)
 			}
 			.execute_command {
-				resp := app.handle_execute_command(request)
-				app.write_response_or_cancelled(request.id, resp)
+				resp := app.handle_execute_command(lsp_request)
+				app.write_response_or_cancelled(lsp_request.id, resp)
 			}
 			.inline_value {
-				resp := app.handle_inline_value(request)
-				app.write_response_or_cancelled(request.id, resp)
+				resp := app.handle_inline_value(lsp_request)
+				app.write_response_or_cancelled(lsp_request.id, resp)
 			}
 			.linked_editing_range {
-				resp := app.handle_linked_editing_range(request)
-				app.write_response_or_cancelled(request.id, resp)
+				resp := app.handle_linked_editing_range(lsp_request)
+				app.write_response_or_cancelled(lsp_request.id, resp)
 			}
 			.will_create_files, .will_rename_files, .will_delete_files {
 				// Return null — vls has no pre-operation file mutations to apply.
 				app.write_response(Response{
-					id:     request.id
+					id: lsp_request.id
 					result: 'null'
 				})
 			}
 			.on_type_formatting {
-				resp := app.handle_on_type_formatting(request)
-				app.write_response_or_cancelled(request.id, resp)
+				resp := app.handle_on_type_formatting(lsp_request)
+				app.write_response_or_cancelled(lsp_request.id, resp)
 			}
 			else {
-				log('UNKNOWN method ${request.method}')
+				log('UNKNOWN method ${lsp_request.method}')
 				if has_id {
 					if method == .unknown {
-						app.write_error_response(make_method_not_found_error_response(request.id,
-							request.method))
+						app.write_error_response(make_method_not_found_error_response(lsp_request.id, lsp_request.method))
 					} else {
-						app.write_error_response(make_internal_error_response(request.id,
-							'Unhandled request dispatch for known method: ${request.method}'))
+						app.write_error_response(make_internal_error_response(lsp_request.id, 'Unhandled request dispatch for known method: ${lsp_request.method}'))
 					}
 				}
 			}
@@ -914,8 +999,9 @@ fn read_json_string_token(content string, start int) (string, int) {
 				`r` { u8(`\r`) }
 				`b` { u8(0x08) }
 				`f` { u8(0x0c) }
-				else { nxt } // `\"`, `\\`, `\/`, and any other: keep the char verbatim
+				else { nxt }
 			}
+			// `\"`, `\\`, `\/`, and any other: keep the char verbatim
 			sb << esc
 			i += 2
 			continue
@@ -943,7 +1029,7 @@ fn decode_json_unicode_escape(content string, i int) ?(int, int) {
 		if i + 12 <= content.len && content[i + 6] == `\\` && content[i + 7] == `u` {
 			lo := hex4_to_int(content[i + 8..i + 12]) or { return none }
 			if lo >= 0xDC00 && lo <= 0xDFFF {
-				return 0x10000 + ((hi - 0xD800) << 10) + (lo - 0xDC00), 12
+				return 0x10000 + int(u32(hi - 0xD800) << 10) + (lo - 0xDC00), 12
 			}
 		}
 		return none
@@ -1220,6 +1306,17 @@ fn (mut app App) write_notification(notification Notification) {
 	app.send_framed(json2.encode(notification, escape_unicode: true))
 }
 
+fn (mut app App) accept_shutdown(id int) {
+	log('Received shutdown request.')
+	app.cancel_all_scheduled_diagnostics()
+	app.stop_run_commands()
+	app.is_shutdown = true
+	app.write_response(Response{
+		id: id
+		result: 'null'
+	})
+}
+
 fn (mut app App) write_error_response(response ErrorResponse) {
 	// Parse errors have a null id per spec; never echo a (possibly stale) raw id
 	// for those. Other errors echo the request's id verbatim.
@@ -1250,22 +1347,24 @@ fn v_error_to_lsp_diagnostic(e JsonError) LSPDiagnostic {
 		'warning' { 2 }
 		'notice' { 3 }
 		'hint' { 4 }
-		else { 1 } // default to Error
+		else { 1 }
 	}
+
+	// default to Error
 
 	code, tags := derive_diagnostic_code_and_tags(e.message)
 	return LSPDiagnostic{
-		message:  e.message
+		message: e.message
 		severity: severity
-		source:   'vlang'
-		code:     code
-		tags:     tags
-		range:    LSPRange{
+		source: 'vlang'
+		code: code
+		tags: tags
+		range: LSPRange{
 			start: Position{
 				line: start_line
 				char: start_char
 			}
-			end:   Position{
+			end: Position{
 				line: start_line
 				char: end_char
 			}
@@ -1300,14 +1399,7 @@ fn derive_diagnostic_code_and_tags(message string) (?string, ?[]int) {
 
 fn method_requires_response(method Method) bool {
 	return match method {
-		.initialize, .completion, .signature_help, .definition, .hover, .declaration,
-		.type_definition, .implementation, .references, .rename, .prepare_rename,
-		.workspace_symbol, .formatting, .document_symbols, .inlay_hint, .shutdown, .code_action,
-		.semantic_tokens, .folding_range, .callhierarchy_prepare, .callhierarchy_incoming,
-		.callhierarchy_outgoing, .document_highlight, .selection_range, .semantic_tokens_range,
-		.range_formatting, .code_lens, .code_lens_resolve, .execute_command, .inline_value,
-		.linked_editing_range, .will_create_files, .will_rename_files, .will_delete_files,
-		.on_type_formatting {
+		.initialize, .completion, .signature_help, .definition, .hover, .declaration, .type_definition, .implementation, .references, .rename, .prepare_rename, .workspace_symbol, .formatting, .document_symbols, .inlay_hint, .shutdown, .code_action, .semantic_tokens, .folding_range, .callhierarchy_prepare, .callhierarchy_incoming, .callhierarchy_outgoing, .document_highlight, .selection_range, .semantic_tokens_range, .range_formatting, .code_lens, .code_lens_resolve, .execute_command, .inline_value, .linked_editing_range, .will_create_files, .will_rename_files, .will_delete_files, .on_type_formatting {
 			true
 		}
 		else {
@@ -1322,9 +1414,7 @@ fn method_requires_response(method Method) bool {
 // regardless of whether a client mistakenly attaches an id.
 fn method_is_notification_only(method Method) bool {
 	return match method {
-		.initialized, .did_open, .did_change, .did_close, .did_save, .did_change_watched_files,
-		.workspace_did_change_configuration, .workspace_did_change_workspace_folders, .set_trace,
-		.cancel_request, .will_save {
+		.initialized, .did_open, .did_change, .did_close, .did_save, .did_change_watched_files, .workspace_did_change_configuration, .workspace_did_change_workspace_folders, .set_trace, .cancel_request, .will_save {
 			true
 		}
 		else {
@@ -1347,9 +1437,9 @@ fn (app &App) request_is_cancelled(id int) bool {
 fn make_invalid_request_error_response(id int, message string) ErrorResponse {
 	msg := if message != '' { message } else { 'Invalid request' }
 	return ErrorResponse{
-		id:    id
+		id: id
 		error: ResponseError{
-			code:    jsonrpc_err_invalid_request
+			code: jsonrpc_err_invalid_request
 			message: msg
 		}
 	}
@@ -1357,9 +1447,9 @@ fn make_invalid_request_error_response(id int, message string) ErrorResponse {
 
 fn make_server_not_initialized_error_response(id int) ErrorResponse {
 	return ErrorResponse{
-		id:    id
+		id: id
 		error: ResponseError{
-			code:    jsonrpc_err_server_not_initialized
+			code: jsonrpc_err_server_not_initialized
 			message: 'Server not yet initialized'
 		}
 	}
@@ -1367,9 +1457,9 @@ fn make_server_not_initialized_error_response(id int) ErrorResponse {
 
 fn make_server_already_initialized_error_response(id int) ErrorResponse {
 	return ErrorResponse{
-		id:    id
+		id: id
 		error: ResponseError{
-			code:    jsonrpc_err_invalid_request
+			code: jsonrpc_err_invalid_request
 			message: 'Server already initialized'
 		}
 	}
@@ -1377,9 +1467,9 @@ fn make_server_already_initialized_error_response(id int) ErrorResponse {
 
 fn make_server_shutdown_error_response(id int) ErrorResponse {
 	return ErrorResponse{
-		id:    id
+		id: id
 		error: ResponseError{
-			code:    jsonrpc_err_invalid_request
+			code: jsonrpc_err_invalid_request
 			message: 'Server has been shut down'
 		}
 	}
@@ -1387,9 +1477,9 @@ fn make_server_shutdown_error_response(id int) ErrorResponse {
 
 fn make_cancelled_error_response(id int) ErrorResponse {
 	return ErrorResponse{
-		id:    id
+		id: id
 		error: ResponseError{
-			code:    jsonrpc_err_request_cancelled
+			code: jsonrpc_err_request_cancelled
 			message: 'Request cancelled'
 		}
 	}
@@ -1398,9 +1488,9 @@ fn make_cancelled_error_response(id int) ErrorResponse {
 fn make_parse_error_response(message string) ErrorResponse {
 	msg := if message != '' { message } else { 'Invalid JSON' }
 	return ErrorResponse{
-		id:    0
+		id: 0
 		error: ResponseError{
-			code:    jsonrpc_err_parse_error
+			code: jsonrpc_err_parse_error
 			message: msg
 		}
 	}
@@ -1408,9 +1498,9 @@ fn make_parse_error_response(message string) ErrorResponse {
 
 fn make_method_not_found_error_response(id int, method string) ErrorResponse {
 	return ErrorResponse{
-		id:    id
+		id: id
 		error: ResponseError{
-			code:    jsonrpc_err_method_not_found
+			code: jsonrpc_err_method_not_found
 			message: 'Method not found: ${method}'
 		}
 	}
@@ -1419,9 +1509,9 @@ fn make_method_not_found_error_response(id int, method string) ErrorResponse {
 fn make_invalid_params_error_response(id int, message string) ErrorResponse {
 	msg := if message != '' { message } else { 'Invalid params' }
 	return ErrorResponse{
-		id:    id
+		id: id
 		error: ResponseError{
-			code:    jsonrpc_err_invalid_params
+			code: jsonrpc_err_invalid_params
 			message: msg
 		}
 	}
@@ -1430,16 +1520,16 @@ fn make_invalid_params_error_response(id int, message string) ErrorResponse {
 fn make_internal_error_response(id int, message string) ErrorResponse {
 	msg := if message != '' { message } else { 'Internal error' }
 	return ErrorResponse{
-		id:    id
+		id: id
 		error: ResponseError{
-			code:    jsonrpc_err_internal_error
+			code: jsonrpc_err_internal_error
 			message: msg
 		}
 	}
 }
 
 fn validate_request_params(method Method, params_json string) ?string {
-	return match method {
+	match method {
 		.initialize {
 			params := json2.decode[InitializeParams](params_json) or {
 				return 'Invalid initialize params: ${err.msg()}'
@@ -1451,17 +1541,14 @@ fn validate_request_params(method Method, params_json string) ?string {
 					}
 				}
 			}
-			none
 		}
-		.completion, .signature_help, .definition, .hover, .declaration, .type_definition,
-		.implementation, .prepare_rename, .document_highlight {
+		.completion, .signature_help, .definition, .hover, .declaration, .type_definition, .implementation, .prepare_rename, .document_highlight {
 			params := json2.decode[TextDocumentPositionParams](params_json) or {
 				return 'Invalid textDocument/position params: ${err.msg()}'
 			}
 			if params.text_document.uri == '' {
 				return 'Missing textDocument.uri'
 			}
-			none
 		}
 		.references {
 			params := json2.decode[ReferenceParams](params_json) or {
@@ -1470,7 +1557,6 @@ fn validate_request_params(method Method, params_json string) ?string {
 			if params.text_document.uri == '' {
 				return 'Missing textDocument.uri'
 			}
-			none
 		}
 		.rename {
 			params := json2.decode[RenameParams](params_json) or {
@@ -1486,13 +1572,11 @@ fn validate_request_params(method Method, params_json string) ?string {
 			if params.new_name in v_keywords || params.new_name in v_builtins {
 				return 'newName `${params.new_name}` is a reserved V keyword or builtin'
 			}
-			none
 		}
 		.workspace_symbol {
 			json2.decode[WorkspaceSymbolParams](params_json) or {
 				return 'Invalid workspace/symbol params: ${err.msg()}'
 			}
-			none
 		}
 		.formatting {
 			params := json2.decode[DocumentFormattingParams](params_json) or {
@@ -1501,7 +1585,6 @@ fn validate_request_params(method Method, params_json string) ?string {
 			if params.text_document.uri == '' {
 				return 'Missing textDocument.uri'
 			}
-			none
 		}
 		.document_symbols {
 			params := json2.decode[DocumentSymbolParams](params_json) or {
@@ -1510,7 +1593,6 @@ fn validate_request_params(method Method, params_json string) ?string {
 			if params.text_document.uri == '' {
 				return 'Missing textDocument.uri'
 			}
-			none
 		}
 		.inlay_hint {
 			params := json2.decode[InlayHintParams](params_json) or {
@@ -1519,7 +1601,6 @@ fn validate_request_params(method Method, params_json string) ?string {
 			if params.text_document.uri == '' {
 				return 'Missing textDocument.uri'
 			}
-			none
 		}
 		.code_action {
 			params := json2.decode[CodeActionParams](params_json) or {
@@ -1528,7 +1609,6 @@ fn validate_request_params(method Method, params_json string) ?string {
 			if params.text_document.uri == '' {
 				return 'Missing textDocument.uri'
 			}
-			none
 		}
 		.semantic_tokens {
 			params := json2.decode[SemanticTokensParams](params_json) or {
@@ -1537,7 +1617,6 @@ fn validate_request_params(method Method, params_json string) ?string {
 			if params.text_document.uri == '' {
 				return 'Missing textDocument.uri'
 			}
-			none
 		}
 		.folding_range {
 			params := json2.decode[FoldingRangeParams](params_json) or {
@@ -1546,7 +1625,6 @@ fn validate_request_params(method Method, params_json string) ?string {
 			if params.text_document.uri == '' {
 				return 'Missing textDocument.uri'
 			}
-			none
 		}
 		.callhierarchy_prepare {
 			params := json2.decode[PrepareCallHierarchyParams](params_json) or {
@@ -1555,7 +1633,6 @@ fn validate_request_params(method Method, params_json string) ?string {
 			if params.text_document.uri == '' {
 				return 'Missing textDocument.uri'
 			}
-			none
 		}
 		.callhierarchy_incoming {
 			params := json2.decode[CallHierarchyIncomingCallsParams](params_json) or {
@@ -1564,7 +1641,6 @@ fn validate_request_params(method Method, params_json string) ?string {
 			if params.item.uri == '' {
 				return 'Missing item.uri'
 			}
-			none
 		}
 		.callhierarchy_outgoing {
 			params := json2.decode[CallHierarchyOutgoingCallsParams](params_json) or {
@@ -1573,7 +1649,6 @@ fn validate_request_params(method Method, params_json string) ?string {
 			if params.item.uri == '' {
 				return 'Missing item.uri'
 			}
-			none
 		}
 		.selection_range {
 			params := json2.decode[SelectionRangeParams](params_json) or {
@@ -1582,7 +1657,6 @@ fn validate_request_params(method Method, params_json string) ?string {
 			if params.text_document.uri == '' {
 				return 'Missing textDocument.uri'
 			}
-			none
 		}
 		.semantic_tokens_range {
 			params := json2.decode[SemanticTokensRangeParams](params_json) or {
@@ -1591,7 +1665,6 @@ fn validate_request_params(method Method, params_json string) ?string {
 			if params.text_document.uri == '' {
 				return 'Missing textDocument.uri'
 			}
-			none
 		}
 		.range_formatting {
 			params := json2.decode[DocumentRangeFormattingParams](params_json) or {
@@ -1600,7 +1673,6 @@ fn validate_request_params(method Method, params_json string) ?string {
 			if params.text_document.uri == '' {
 				return 'Missing textDocument.uri'
 			}
-			none
 		}
 		.linked_editing_range {
 			params := json2.decode[TextDocumentPositionParams](params_json) or {
@@ -1609,7 +1681,6 @@ fn validate_request_params(method Method, params_json string) ?string {
 			if params.text_document.uri == '' {
 				return 'Missing textDocument.uri'
 			}
-			none
 		}
 		.inline_value {
 			params := json2.decode[InlineValueParams](params_json) or {
@@ -1618,7 +1689,6 @@ fn validate_request_params(method Method, params_json string) ?string {
 			if params.text_document.uri == '' {
 				return 'Missing textDocument.uri'
 			}
-			none
 		}
 		.code_lens {
 			params := json2.decode[CodeLensParams](params_json) or {
@@ -1627,19 +1697,16 @@ fn validate_request_params(method Method, params_json string) ?string {
 			if params.text_document.uri == '' {
 				return 'Missing textDocument.uri'
 			}
-			none
 		}
 		.code_lens_resolve {
 			json2.decode[CodeLens](params_json) or {
 				return 'Invalid codeLens/resolve params: ${err.msg()}'
 			}
-			none
 		}
 		.execute_command {
 			json2.decode[ExecuteCommandParams](params_json) or {
 				return 'Invalid executeCommand params: ${err.msg()}'
 			}
-			none
 		}
 		.on_type_formatting {
 			params := json2.decode[OnTypeFormattingParams](params_json) or {
@@ -1648,16 +1715,14 @@ fn validate_request_params(method Method, params_json string) ?string {
 			if params.text_document.uri == '' {
 				return 'Missing textDocument.uri'
 			}
-			none
 		}
-		else {
-			none
-		}
+		else {}
 	}
+	return none
 }
 
 fn validate_notification_params(method Method, params_json string) ?string {
-	return match method {
+	match method {
 		.did_open {
 			params := json2.decode[DidOpenTextDocumentParams](params_json) or {
 				return 'Invalid didOpen params: ${err.msg()}'
@@ -1665,7 +1730,6 @@ fn validate_notification_params(method Method, params_json string) ?string {
 			if params.text_document.uri == '' {
 				return 'Missing textDocument.uri'
 			}
-			none
 		}
 		.did_change {
 			params := json2.decode[DidChangeTextDocumentParams](params_json) or {
@@ -1674,7 +1738,6 @@ fn validate_notification_params(method Method, params_json string) ?string {
 			if params.text_document.uri == '' {
 				return 'Missing textDocument.uri'
 			}
-			none
 		}
 		.did_close {
 			params := json2.decode[DidCloseTextDocumentParams](params_json) or {
@@ -1683,7 +1746,6 @@ fn validate_notification_params(method Method, params_json string) ?string {
 			if params.text_document.uri == '' {
 				return 'Missing textDocument.uri'
 			}
-			none
 		}
 		.did_save {
 			params := json2.decode[DidSaveTextDocumentParams](params_json) or {
@@ -1692,7 +1754,6 @@ fn validate_notification_params(method Method, params_json string) ?string {
 			if params.text_document.uri == '' {
 				return 'Missing textDocument.uri'
 			}
-			none
 		}
 		.did_change_watched_files {
 			params := json2.decode[DidChangeWatchedFilesParams](params_json) or {
@@ -1703,23 +1764,13 @@ fn validate_notification_params(method Method, params_json string) ?string {
 					return 'Missing changes[i].uri'
 				}
 			}
-			none
 		}
-		.workspace_did_change_configuration {
-			// This notification intentionally supports multiple client shapes.
-			none
-		}
-		.workspace_did_change_workspace_folders {
-			// params are decoded in the handler; no pre-validation needed here.
-			none
-		}
-		.initialized, .set_trace, .cancel_request, .exit {
-			none
-		}
-		else {
-			none
-		}
+		.workspace_did_change_configuration {} // Multiple client shapes are supported.
+		.workspace_did_change_workspace_folders {} // Decoded in the handler.
+		.initialized, .set_trace, .cancel_request, .exit {}
+		else {}
 	}
+	return none
 }
 
 fn is_valid_v_identifier_name(name string) bool {
@@ -1728,12 +1779,11 @@ fn is_valid_v_identifier_name(name string) bool {
 		return false
 	}
 	first := t[0]
-	if !((first >= `a` && first <= `z`) || (first >= `A` && first <= `Z`) || first == `_`) {
+	if !is_ident_start(first) {
 		return false
 	}
 	for ch in t {
-		if !((ch >= `a` && ch <= `z`) || (ch >= `A` && ch <= `Z`)
-			|| (ch >= `0` && ch <= `9`) || ch == `_`) {
+		if !is_ident_char(ch) {
 			return false
 		}
 	}
@@ -1755,7 +1805,7 @@ fn (mut app App) write_raw_request(id int, method string, params_json string) {
 // level: 1=Error, 2=Warning, 3=Info, 4=Log.
 fn (mut app App) send_show_message(msg string, level int) {
 	params := ShowMessageParams{
-		type_:   level
+		type_: level
 		message: msg
 	}
 	app.write_raw_notification('window/showMessage', json2.encode(params, escape_unicode: true))
@@ -1765,7 +1815,7 @@ fn (mut app App) send_show_message(msg string, level int) {
 // level: 1=Error, 2=Warning, 3=Info, 4=Log.
 fn (mut app App) send_log_message(msg string, level int) {
 	params := LogMessageParams{
-		type_:   level
+		type_: level
 		message: msg
 	}
 	app.write_raw_notification('window/logMessage', json2.encode(params, escape_unicode: true))
@@ -1793,7 +1843,7 @@ fn (mut app App) begin_progress(title string) string {
 		title: title
 	}
 	progress_json := '{"token":"${token}","value":${json2.encode(begin, escape_unicode: true)}}'
-	app.write_raw_notification('$/progress', progress_json)
+	app.write_raw_notification('\$/progress', progress_json)
 	return token
 }
 
@@ -1803,11 +1853,11 @@ fn (mut app App) report_progress(token string, message string, percentage int) {
 		return
 	}
 	report := WorkDoneProgressReport{
-		message:    message
+		message: message
 		percentage: percentage
 	}
 	progress_json := '{"token":"${token}","value":${json2.encode(report, escape_unicode: true)}}'
-	app.write_raw_notification('$/progress', progress_json)
+	app.write_raw_notification('\$/progress', progress_json)
 }
 
 // end_progress sends a $/progress end notification to finish a progress sequence.
@@ -1819,7 +1869,7 @@ fn (mut app App) end_progress(token string, message string) {
 		message: message
 	}
 	progress_json := '{"token":"${token}","value":${json2.encode(end, escape_unicode: true)}}'
-	app.write_raw_notification('$/progress', progress_json)
+	app.write_raw_notification('\$/progress', progress_json)
 }
 
 // on_initialized handles the initialized notification by registering dynamic
@@ -1835,12 +1885,12 @@ fn (mut app App) on_initialized(_ Request) {
 	}
 	reg_id := app.next_request_id
 	reg := RegisterCapabilityRequest{
-		id:     reg_id
+		id: reg_id
 		params: WatcherRegistrationParams{
 			registrations: [
 				WatcherRegistration{
-					id:               'vls-file-watcher'
-					method:           'workspace/didChangeWatchedFiles'
+					id: 'vls-file-watcher'
+					method: 'workspace/didChangeWatchedFiles'
 					register_options: WatcherRegisterOptions{
 						watchers: [
 							FileSystemWatcher{
@@ -1867,8 +1917,7 @@ fn (mut app App) write_response_or_cancelled(id int, response Response) {
 	}
 	// Defensive: catch response/request id mismatches caused by programming errors.
 	if response.id != id {
-		app.write_error_response(make_internal_error_response(id,
-			'Response id mismatch: expected ${id}, got ${response.id}'))
+		app.write_error_response(make_internal_error_response(id, 'Response id mismatch: expected ${id}, got ${response.id}'))
 		return
 	}
 	app.write_response(response)

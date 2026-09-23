@@ -24,6 +24,20 @@ fn interop_test_must_write_file(path string, content string) {
 // Unit tests for interop utilities (URI/path conversion)
 // ============================================================================
 
+fn test_resolve_v_compiler_exe_prefers_configured_command() {
+	old_command := os.getenv('VLS_V_COMMAND')
+	defer {
+		if old_command == '' {
+			os.unsetenv('VLS_V_COMMAND')
+		} else {
+			os.setenv('VLS_V_COMMAND', old_command, true)
+		}
+	}
+	configured := os.join_path(os.temp_dir(), 'configured-v-compiler')
+	os.setenv('VLS_V_COMMAND', configured, true)
+	assert resolve_v_compiler_exe() == configured
+}
+
 // --- uri_to_path tests ---
 
 fn test_uri_to_path_unix_style() {
@@ -150,16 +164,15 @@ fn test_normalize_overlay_path_preserves_posix_backslashes() {
 fn test_source_path_from_overlay_normalizes_windows_relative_join() {
 	overlay := CompilationOverlay{
 		source_display_root: r'C:\repo'
-		temp_root:           r'C:\temp\overlay'
-		temp_work_dir:       r'C:\temp\overlay\src'
+		temp_root: r'C:\temp\overlay'
+		temp_work_dir: r'C:\temp\overlay\src'
 	}
 	mapped := source_path_from_overlay_with_windows_rules('./main.v', overlay, true)
 	assert mapped == 'C:/repo/src/main.v'
 }
 
 fn test_overlay_relative_path_prefers_nested_symlink_layout() {
-	temp_dir := os.join_path(os.temp_dir(),
-		'vls_overlay_relative_symlink_${os.getpid()}_${time.now().unix_nano()}')
+	temp_dir := os.join_path(os.temp_dir(), 'vls_overlay_relative_symlink_${os.getpid()}_${time.now().unix_nano()}')
 	defer {
 		os.rmdir_all(temp_dir) or {}
 	}
@@ -202,10 +215,15 @@ fn test_path_to_uri_relative() {
 fn test_path_to_uri_with_backslashes() {
 	// On POSIX a backslash is a valid, literal filename character. It must be
 	// percent-encoded in the URI (never left raw) and must round-trip exactly.
+	// Windows treats the same bytes as path separators and normalizes them.
 	original := '/home/user\\project\\main.v'
 	result := path_to_uri(original)
 	assert !result.contains('\\')
-	assert uri_to_path(result) == original
+	$if windows {
+		assert uri_to_path(result) == original.replace('\\', '/')
+	} $else {
+		assert uri_to_path(result) == original
+	}
 }
 
 fn test_path_to_uri_empty() {
@@ -239,7 +257,7 @@ fn test_compiler_location_reuses_equivalent_open_uri() {
 	canonical_uri := path_to_uri(path)
 	open_uri := canonical_uri.replace_once('file:///', 'file://localhost/')
 	mut app := &App{
-		open_files:        map[string]string{}
+		open_files: map[string]string{}
 		position_encoding: .utf16
 	}
 	app.open_files[open_uri] = '🚀 target\n'
@@ -304,8 +322,7 @@ fn test_make_singlefile_temp_path_avoids_test_suffix_regression() {
 }
 
 fn test_cleanup_compilation_temp_removes_singlefile_path() {
-	tmppath := os.join_path(os.temp_dir(),
-		'vls_cleanup_single_${os.getpid()}_${time.now().unix_nano()}.v')
+	tmppath := os.join_path(os.temp_dir(), 'vls_cleanup_single_${os.getpid()}_${time.now().unix_nano()}.v')
 	interop_test_must_write_file(tmppath, 'module main\n')
 	assert os.exists(tmppath)
 	cleanup_compilation_temp('', tmppath)
@@ -313,8 +330,7 @@ fn test_cleanup_compilation_temp_removes_singlefile_path() {
 }
 
 fn test_cleanup_compilation_temp_removes_project_dir() {
-	project_dir := os.join_path(os.temp_dir(),
-		'vls_cleanup_project_${os.getpid()}_${time.now().unix_nano()}')
+	project_dir := os.join_path(os.temp_dir(), 'vls_cleanup_project_${os.getpid()}_${time.now().unix_nano()}')
 	interop_test_must_mkdir_all(project_dir)
 	interop_test_must_write_file(os.join_path(project_dir, 'main.v'), 'module main\n')
 	assert os.exists(project_dir)
@@ -327,16 +343,53 @@ fn test_cleanup_compilation_temp_removes_project_dir() {
 // single, literal argument-vector elements, so command injection is impossible.
 
 fn test_build_v_check_args_single_passes_path_literally() {
-	args := build_v_check_args_single('/tmp/a b/test.v')
-	assert '/tmp/a b/test.v' in args
-	assert '-vls-mode' in args
-	assert '-check' in args
+	args := build_v_check_args_single('/tmp/a b/test.v', false)
+	mut expected := v3_compiler_selection_args()
+	expected << ['-check', '-nocolor', '/tmp/a b/test.v']
+	assert args == expected
+	assert '-vls-mode' !in args
+	assert '-json-errors' !in args
+	// At the pinned V3 revision `-w` hides warnings; omission preserves them.
+	assert '-w' !in args
+	$if macos || linux {
+		assert '-new-compiler' in args
+	} $else {
+		assert '-new-compiler' !in args
+	}
+}
+
+fn test_build_v_check_args_multifile_uses_v3_compatible_flags() {
+	args := build_v_check_args_multifile(false)
+	mut expected := v3_compiler_selection_args()
+	expected << ['-check', '-nocolor', '.']
+	assert args == expected
+	assert '-vls-mode' !in args
+	assert '-json-errors' !in args
+	// V3 reports warnings by default, while `-w` requests compatibility suppression.
+	assert '-w' !in args
+	$if macos || linux {
+		assert '-new-compiler' in args
+	} $else {
+		assert '-new-compiler' !in args
+	}
+}
+
+fn test_build_v_check_args_use_shared_for_library_modules() {
+	single_args := build_v_check_args_single('/tmp/library.v', true)
+	mut expected_single := v3_compiler_selection_args()
+	expected_single << ['-shared', '-check', '-nocolor', '/tmp/library.v']
+	assert single_args == expected_single
+
+	multifile_args := build_v_check_args_multifile(true)
+	mut expected_multifile := v3_compiler_selection_args()
+	expected_multifile << ['-shared', '-check', '-nocolor', '.']
+	assert multifile_args == expected_multifile
 }
 
 fn test_build_v_check_args_single_no_shell_injection() {
 	// A path containing command substitution must remain one literal argv element.
-	malicious := '/tmp/$(touch /tmp/pwned)/x.v'
-	args := build_v_check_args_single(malicious)
+	malicious := '/tmp/\$(touch /tmp/pwned)/x.v'
+	args := build_v_check_args_single(malicious, false)
 	assert malicious in args
 	// The dangerous text is never split or interpreted; it is exactly one element.
 	mut count := 0
@@ -353,17 +406,388 @@ fn test_build_v_fmt_args_passes_temp_file_literally() {
 	assert args == ['fmt', '-inprocess', '-w', '/tmp/fmt file.v']
 }
 
+fn test_build_v_run_args_targets_containing_module() {
+	assert build_v_run_args() == ['-nocolor', 'run', '.']
+	assert build_v_run_compile_args('/tmp/code lens program') == [
+		'-nocolor',
+		'-o',
+		'/tmp/code lens program',
+		'.',
+	]
+}
+
+fn test_build_v_test_args_selects_one_test_without_a_shell() {
+	file_path := '/tmp/file with spaces_test.v'
+	args := build_v_test_args(file_path, 'test_one')
+	assert args == ['-nocolor', 'test', file_path, '-run-only', 'test_one']
+	assert build_v_test_args(file_path, '') == ['-nocolor', 'test', file_path]
+	assert build_v_test_compile_args(file_path, 'test_one', '/tmp/test program') == [
+		'-nocolor',
+		'-skip-running',
+		'-o',
+		'/tmp/test program',
+		file_path,
+		'-run-only',
+		'test_one',
+	]
+}
+
 fn test_build_v_line_info_args_single_embeds_line_info() {
 	args := build_v_line_info_args_single('/tmp/a.v', '10:gd^5', '/tmp/a.v')
 	assert '/tmp/a.v:10:gd^5' in args
 	assert '-line-info' in args
+	assert '-json-errors' !in args
+	assert '-vls-mode' in args
+}
+
+fn test_compiler_rejects_line_info_detects_a_v_without_the_v1_checker() {
+	// V prints exactly this and exits before doing any work.
+	assert compiler_rejects_line_info('unknown option `-vls-mode`')
+	assert compiler_rejects_line_info('unknown option `-line-info`')
+	assert compiler_rejects_line_info('unknown option `-json-errors`')
+	// A compiler that understands the options answers with its payload instead.
+	assert !compiler_rejects_line_info('{"contents":{"kind":"markdown","value":"fn f()"}}')
+	assert !compiler_rejects_line_info('')
+	assert !compiler_rejects_line_info('unknown option `-nosuch`')
+	// A refusal is only recognized as a whole line, so a diagnostic that merely
+	// quotes the message cannot disable compiler-backed lookups for the session.
+	assert !compiler_rejects_line_info('a.v:1:1: error: unknown option `-vls-mode` in flag list')
+	assert compiler_rejects_any_option('unknown option `-old-compiler`', [
+		'-old-compiler',
+	])
+	assert !compiler_rejects_any_option('unknown option `-vls-mode`', ['-old-compiler'])
+}
+
+fn test_compiler_refused_and_stopped_separates_a_dead_end_from_a_recovery() {
+	// A launcher with no answer prints its refusal and exits.
+	assert compiler_refused_and_stopped('unknown option `-vls-mode`')
+	assert compiler_refused_and_stopped('unknown option `-vls-mode`\n\n')
+	// One that reruns the request against a compatibility compiler says more,
+	// even when that rerun finds nothing to report.
+	assert !compiler_refused_and_stopped('unknown option `-vls-mode`\nV compilation failed (compiler_error); retrying with `/v1_fallback`.')
+	assert !compiler_refused_and_stopped('unknown option `-vls-mode`\nV compilation failed (compiler_error); retrying with `/v1_fallback`.\n./main.v:3:7')
+	// An invocation that was never refused is not a dead end either.
+	assert !compiler_refused_and_stopped('')
+	assert !compiler_refused_and_stopped('./main.v:3:7')
+}
+
+// line_info_stub_app writes `script` as an executable stand-in for `v`, points
+// VLS_V_COMMAND at it, and returns an App plus the URI of a lone source file.
+// The source sits in its own directory so the request takes the single-file
+// path, and scratch files land elsewhere so they never become its siblings.
+fn line_info_stub_app(name string, script string) (&App, string, string) {
+	root := os.join_path(os.temp_dir(), '${name}_${os.getpid()}_${time.now().unix_nano()}')
+	source_dir := os.join_path(root, 'src')
+	interop_test_must_mkdir_all(os.join_path(root, 'bin'))
+	interop_test_must_mkdir_all(source_dir)
+	interop_test_must_mkdir_all(os.join_path(root, 'work'))
+	stub := os.join_path(root, 'bin', 'v')
+	interop_test_must_write_file(stub, script)
+	os.chmod(stub, 0o755) or { assert false, 'Failed to chmod ${stub}: ${err}' }
+	os.setenv('VLS_V_COMMAND', stub, true)
+	source_file := os.join_path(source_dir, 'main.v')
+	interop_test_must_write_file(source_file, 'module main\n\nfn helper() {}\n\nfn main() {\n\thelper()\n}\n')
+	mut app := &App{
+		temp_dir: os.join_path(root, 'work')
+	}
+	return app, path_to_uri(source_file), root
+}
+
+fn restore_v_command(previous string) {
+	if previous == '' {
+		os.unsetenv('VLS_V_COMMAND')
+	} else {
+		os.setenv('VLS_V_COMMAND', previous, true)
+	}
+}
+
+// A launcher with no in-tree `-line-info` checker that refuses the
+// `-old-compiler` selector but reruns the request against a compatibility
+// compiler on its own. The refusal is on every invocation, so an empty answer
+// through it must not be read as "nothing here can serve line info".
+const recovering_launcher_stub = r'#!/bin/sh
+for arg in "$@"; do
+	if [ "$arg" = "-old-compiler" ]; then
+		echo "unknown option \`-old-compiler\`" >&2
+		exit 1
+	fi
+done
+echo "unknown option \`-vls-mode\`" >&2
+echo "V compilation failed (compiler_error); retrying with \`/v1_fallback\`." >&2
+case " $* " in
+	*hv^4*) echo "{\"contents\":{\"kind\":\"markdown\",\"value\":\"fn helper()\"}}" ;;
+esac
+'
+
+// A launcher that refuses both the options and the selector, and stops there.
+const dead_end_launcher_stub = r'#!/bin/sh
+for arg in "$@"; do
+	if [ "$arg" = "-old-compiler" ]; then
+		echo "unknown option \`-old-compiler\`" >&2
+		exit 1
+	fi
+done
+echo "unknown option \`-vls-mode\`" >&2
+exit 1
+'
+
+fn test_run_v_line_info_keeps_a_recovering_launcher_after_an_empty_lookup() {
+	// Regression: an empty lookup used to be read together with the launcher's
+	// standing refusal as proof that nothing serves `-line-info`, retiring
+	// compiler-backed hover, signature help, and receiver definitions for the
+	// rest of the session (PR #516 review, discussion_r3998999227).
+	$if windows {
+		// The stand-in launcher is a POSIX shell script.
+		return
+	}
+	previous := os.getenv('VLS_V_COMMAND')
+	mut app, uri, root := line_info_stub_app('vls_recovering_launcher', recovering_launcher_stub)
+	defer {
+		restore_v_command(previous)
+		os.rmdir_all(root) or {}
+	}
+
+	// A hover past the end of the file resolves nothing, which is an ordinary
+	// answer and not a reason to stop asking.
+	assert app.run_v_line_info(.hover, uri, '9:hv^1') == ResponseResult('null')
+	assert app.line_info_mode == .direct
+
+	// So the very next hover still reaches the launcher.
+	hover := app.run_v_line_info(.hover, uri, '6:hv^4')
+	assert app.line_info_mode == .direct
+	assert hover is Hover
+	if hover is Hover {
+		assert hover.contents.value.contains('fn helper()')
+	}
+}
+
+fn test_run_v_line_info_retires_lookups_when_the_launcher_only_refuses() {
+	// The other direction: a launcher that refuses and stops really has no
+	// answer, so the session stops spawning a process per request.
+	$if windows {
+		return
+	}
+	previous := os.getenv('VLS_V_COMMAND')
+	mut app, uri, root := line_info_stub_app('vls_dead_end_launcher', dead_end_launcher_stub)
+	defer {
+		restore_v_command(previous)
+		os.rmdir_all(root) or {}
+	}
+
+	assert app.run_v_line_info(.hover, uri, '6:hv^4') == ResponseResult('null')
+	assert app.line_info_mode == .missing
+}
+
+fn test_with_line_info_selection_only_asks_for_the_compatibility_compiler_when_needed() {
+	base := build_v_line_info_args_single('/tmp/a.v', '10:gd^5', '/tmp/a.v')
+	mut app := App{}
+	// Unprobed and known-direct compilers are driven without a selection flag, so
+	// V releases that predate `-old-compiler` never see it.
+	assert app.line_info_mode == .unknown
+	assert app.with_line_info_selection(base) == base
+	app.line_info_mode = .direct
+	assert app.with_line_info_selection(base) == base
+	app.line_info_mode = .compat
+	selected := app.with_line_info_selection(base)
+	assert selected[0] == '-old-compiler'
+	assert selected[1..] == base
+}
+
+fn test_line_info_unavailable_result_answers_hover_from_the_index() {
+	// When no compiler can serve `-line-info`, hover still resolves the vdoc
+	// comment, completion returns an augmentable empty list, and the remaining
+	// methods report "nothing found" rather than an empty popup.
+	mut app := App{}
+	uri := 'file:///tmp/vls_line_info_unavailable.v'
+	app.open_files[uri] = 'module main\n\n// greet writes a greeting.\nfn greet() {}\n\nfn main() {\n\tgreet()\n}\n'
+
+	hover := app.line_info_unavailable_result(.hover, uri, '7:hv^1')
+	assert hover is Hover
+	if hover is Hover {
+		assert hover.contents.value.contains('greet writes a greeting.')
+	}
+	// A cursor that is not on a symbol has no documentation to report.
+	assert app.line_info_unavailable_result(.hover, uri, '5:hv^0') == ResponseResult('null')
+
+	completion := app.line_info_unavailable_result(.completion, uri, '7:1')
+	assert completion is []Detail
+	if completion is []Detail {
+		assert completion.len == 0
+	}
+
+	assert app.line_info_unavailable_result(.signature_help, uri, '7:fn^6') == ResponseResult('null')
+	assert app.line_info_unavailable_result(.definition, uri, '7:gd^1') == ResponseResult('null')
+}
+
+fn test_normalize_v_line_info_output_ignores_launcher_notices() {
+	signature := 'unknown option `-vls-mode`\n{"signatures":[],"activeSignature":0}'
+	assert normalize_v_line_info_output(signature, .signature_help) == '{"signatures":[],"activeSignature":0}'
+	definition := 'unknown option `-vls-mode`\n./main.v:3:7\n'
+	assert normalize_v_line_info_output(definition, .definition) == './main.v:3:7'
+	assert normalize_v_line_info_output('unknown option `-vls-mode`', .definition) == ''
+}
+
+fn test_parse_v_check_diagnostics_reads_v3_output() {
+	output := '/tmp/main.v:4:7: error: undefined variable: `missing_name`
+    2 |
+    3 | fn main() {
+    4 |     x := missing_name
+      |          ~~~~~~~~~~~~
+    5 | }
+/tmp/main.v:8:3: warning: unused variable `value`
+    8 |   value := 1
+      |   ~~~~~
+'
+	diagnostics := parse_v_check_diagnostics(output, '')
+	assert diagnostics.len == 2
+	assert diagnostics[0] == JsonError{
+		path: '/tmp/main.v'
+		message: 'undefined variable: `missing_name`'
+		line_nr: 4
+		col: 7
+		len: 12
+		level: 'error'
+	}
+	assert diagnostics[1].level == 'warning'
+	assert diagnostics[1].line_nr == 8
+	assert diagnostics[1].col == 3
+	assert diagnostics[1].len == 5
+}
+
+fn test_parse_v_check_diagnostics_maps_v3_builder_error_to_error() {
+	output := '/tmp/main.v:3:1: builder error: cannot import module "missing" (not found)
+    3 | import missing
+      | ~~~~~~~~~~~~~~
+'
+	diagnostics := parse_v_check_diagnostics(output, '')
+	assert diagnostics == [JsonError{
+		path: '/tmp/main.v'
+		message: 'cannot import module "missing" (not found)'
+		line_nr: 3
+		col: 1
+		len: 14
+		level: 'error'
+	}]
+}
+
+fn test_parse_v_check_diagnostics_preserves_windows_drive_path() {
+	header := r'C:\work\project\main.v:12:9: notice: deprecated declaration'
+	diagnostics := parse_v_check_diagnostics(header, '')
+	assert diagnostics.len == 1
+	assert diagnostics[0].path == r'C:\work\project\main.v'
+	assert diagnostics[0].line_nr == 12
+	assert diagnostics[0].col == 9
+	assert diagnostics[0].level == 'notice'
+}
+
+fn test_parse_v_check_diagnostics_preserves_severity_marker_in_posix_path() {
+	header := '/tmp/project: error: fixtures/main.v:12:9: error: unknown identifier'
+	diagnostics := parse_v_check_diagnostics(header, '')
+	assert diagnostics.len == 1
+	assert diagnostics[0].path == '/tmp/project: error: fixtures/main.v'
+	assert diagnostics[0].message == 'unknown identifier'
+	assert diagnostics[0].line_nr == 12
+	assert diagnostics[0].col == 9
+	assert diagnostics[0].level == 'error'
+}
+
+fn test_parse_v_check_diagnostics_chooses_rightmost_marker_across_severities() {
+	header := '/tmp/foo:1:2: error: dir/main.v:12:9: warning: unused variable'
+	diagnostics := parse_v_check_diagnostics(header, '')
+	assert diagnostics.len == 1
+	assert diagnostics[0].path == '/tmp/foo:1:2: error: dir/main.v'
+	assert diagnostics[0].message == 'unused variable'
+	assert diagnostics[0].line_nr == 12
+	assert diagnostics[0].col == 9
+	assert diagnostics[0].level == 'warning'
+}
+
+fn test_parse_v_check_diagnostics_preserves_severity_marker_in_message() {
+	header := '/tmp/main.v:1:1: error: failed: error: detail'
+	diagnostics := parse_v_check_diagnostics(header, '')
+	assert diagnostics.len == 1
+	assert diagnostics[0].path == '/tmp/main.v'
+	assert diagnostics[0].message == 'failed: error: detail'
+	assert diagnostics[0].line_nr == 1
+	assert diagnostics[0].col == 1
+	assert diagnostics[0].level == 'error'
+}
+
+fn test_parse_v_check_diagnostics_rejects_header_marker_in_message() {
+	temp_dir := os.join_path(os.temp_dir(), 'vls_diagnostic_source_${os.getpid()}_${time.now().unix_nano()}')
+	interop_test_must_mkdir_all(temp_dir)
+	defer {
+		os.rmdir_all(temp_dir) or {}
+	}
+	source_path := os.join_path(temp_dir, 'main.v')
+	interop_test_must_write_file(source_path, 'module main\n')
+	header := '${source_path}:1:1: error: failed at foo.v:2:3: warning: detail'
+	diagnostics := parse_v_check_diagnostics(header, temp_dir)
+	assert diagnostics.len == 1
+	assert diagnostics[0].path == source_path
+	assert diagnostics[0].message == 'failed at foo.v:2:3: warning: detail'
+	assert diagnostics[0].line_nr == 1
+	assert diagnostics[0].col == 1
+	assert diagnostics[0].level == 'error'
+}
+
+fn test_parse_v_check_diagnostics_ignores_non_diagnostic_output() {
+	output := 'V3 compatibility fallback disabled; requested reason: compiler_error
+Use `v help build` for more information.
+'
+	assert parse_v_check_diagnostics(output, '').len == 0
+}
+
+fn test_cache_v_check_result_retries_failure_without_diagnostics() {
+	mut app := App{}
+	path := 'file:///tmp/main.v'
+	app.diag_cache[path] = DiagCacheEntry{
+		content_hash: 1
+		generation: 1
+		errors: []
+	}
+	app.cache_v_check_result(path, 2, 2, [], compiler_exit_timeout, 0)
+	assert path !in app.diag_cache
+}
+
+fn test_cache_v_check_result_retries_timeout_with_partial_diagnostics() {
+	mut app := App{}
+	path := 'file:///tmp/main.v'
+	app.diag_cache[path] = DiagCacheEntry{
+		content_hash: 1
+		generation: 1
+		errors: []
+	}
+	partial_errors := [
+		JsonError{
+			path: '/tmp/main.v'
+			message: 'partial compiler output'
+			line_nr: 1
+			col: 1
+			level: 'error'
+		},
+	]
+	app.cache_v_check_result(path, 2, 2, partial_errors, compiler_exit_timeout, partial_errors.len)
+	assert path !in app.diag_cache
+}
+
+fn test_cache_v_check_result_keeps_valid_clean_and_diagnostic_results() {
+	mut app := App{}
+	path := 'file:///tmp/main.v'
+	app.cache_v_check_result(path, 1, 1, [], 0, 0)
+	assert path in app.diag_cache
+	assert app.diag_cache[path].errors.len == 0
+
+	app.cache_v_check_result(path, 2, 2, [], 1, 1)
+	assert path in app.diag_cache
+	assert app.diag_cache[path].content_hash == 2
+	assert app.diag_cache[path].generation == 2
 }
 
 fn test_run_v_argv_reports_missing_working_dir() {
-	missing_dir := os.join_path(os.temp_dir(),
-		'vls_missing_dir_${os.getpid()}_${time.now().unix_nano()}')
+	missing_dir := os.join_path(os.temp_dir(), 'vls_missing_dir_${os.getpid()}_${time.now().unix_nano()}')
 	original := os.getwd()
-	result := run_v_argv(build_v_check_args_multifile(), missing_dir)
+	result := run_v_argv(build_v_check_args_multifile(false), missing_dir)
 	assert result.exit_code != 0
 	// The parent process working directory must never be mutated.
 	assert os.getwd() == original
@@ -375,11 +799,11 @@ fn test_run_v_argv_reports_missing_working_dir() {
 
 fn test_v_error_to_lsp_diagnostic_basic() {
 	v_err := JsonError{
-		path:    '/test/file.v'
+		path: '/test/file.v'
 		message: 'undefined identifier `foo`'
 		line_nr: 10
-		col:     5
-		len:     3
+		col: 5
+		len: 3
 	}
 	diag := v_error_to_lsp_diagnostic(v_err)
 
@@ -394,11 +818,11 @@ fn test_v_error_to_lsp_diagnostic_basic() {
 
 fn test_v_error_to_lsp_diagnostic_first_line() {
 	v_err := JsonError{
-		path:    '/test/file.v'
+		path: '/test/file.v'
 		message: 'syntax error'
 		line_nr: 1
-		col:     1
-		len:     1
+		col: 1
+		len: 1
 	}
 	diag := v_error_to_lsp_diagnostic(v_err)
 
@@ -409,11 +833,11 @@ fn test_v_error_to_lsp_diagnostic_first_line() {
 
 fn test_v_error_to_lsp_diagnostic_long_error() {
 	v_err := JsonError{
-		path:    '/test/file.v'
+		path: '/test/file.v'
 		message: 'unexpected token'
 		line_nr: 100
-		col:     50
-		len:     20
+		col: 50
+		len: 20
 	}
 	diag := v_error_to_lsp_diagnostic(v_err)
 
@@ -424,11 +848,11 @@ fn test_v_error_to_lsp_diagnostic_long_error() {
 
 fn test_v_error_to_lsp_diagnostic_zero_length() {
 	v_err := JsonError{
-		path:    '/test/file.v'
+		path: '/test/file.v'
 		message: 'error at position'
 		line_nr: 5
-		col:     10
-		len:     0
+		col: 10
+		len: 0
 	}
 	diag := v_error_to_lsp_diagnostic(v_err)
 
@@ -438,11 +862,11 @@ fn test_v_error_to_lsp_diagnostic_zero_length() {
 
 fn test_v_error_to_lsp_diagnostic_large_line_numbers() {
 	v_err := JsonError{
-		path:    '/test/file.v'
+		path: '/test/file.v'
 		message: 'error in large file'
 		line_nr: 10000
-		col:     200
-		len:     50
+		col: 200
+		len: 50
 	}
 	diag := v_error_to_lsp_diagnostic(v_err)
 
@@ -453,11 +877,11 @@ fn test_v_error_to_lsp_diagnostic_large_line_numbers() {
 
 fn test_v_error_to_lsp_diagnostic_column_one() {
 	v_err := JsonError{
-		path:    '/test/file.v'
+		path: '/test/file.v'
 		message: 'error at start of line'
 		line_nr: 5
-		col:     1
-		len:     5
+		col: 1
+		len: 5
 	}
 	diag := v_error_to_lsp_diagnostic(v_err)
 
@@ -493,7 +917,7 @@ fn test_lsp_range_struct() {
 			line: 0
 			char: 0
 		}
-		end:   Position{
+		end: Position{
 			line: 0
 			char: 10
 		}
@@ -508,7 +932,7 @@ fn test_lsp_range_multiline() {
 			line: 5
 			char: 10
 		}
-		end:   Position{
+		end: Position{
 			line: 10
 			char: 5
 		}
@@ -518,17 +942,17 @@ fn test_lsp_range_multiline() {
 
 fn test_lsp_diagnostic_struct() {
 	diag := LSPDiagnostic{
-		range:    LSPRange{
+		range: LSPRange{
 			start: Position{
 				line: 5
 				char: 0
 			}
-			end:   Position{
+			end: Position{
 				line: 5
 				char: 10
 			}
 		}
-		message:  'test error'
+		message: 'test error'
 		severity: 1
 	}
 	assert diag.message == 'test error'
@@ -541,8 +965,8 @@ fn test_lsp_diagnostic_severities() {
 	severities := [1, 2, 3, 4] // Error, Warning, Information, Hint
 	for sev in severities {
 		diag := LSPDiagnostic{
-			range:    LSPRange{}
-			message:  'test'
+			range: LSPRange{}
+			message: 'test'
 			severity: sev
 		}
 		assert diag.severity == sev
@@ -551,13 +975,13 @@ fn test_lsp_diagnostic_severities() {
 
 fn test_location_struct() {
 	loc := Location{
-		uri:   'file:///test/file.v'
+		uri: 'file:///test/file.v'
 		range: LSPRange{
 			start: Position{
 				line: 10
 				char: 5
 			}
-			end:   Position{
+			end: Position{
 				line: 10
 				char: 15
 			}
@@ -575,9 +999,9 @@ fn test_location_empty() {
 
 fn test_detail_struct() {
 	detail := Detail{
-		kind:          6 // Function
-		label:         'my_function'
-		detail:        'fn my_function() string'
+		kind: 6 // Function
+		label: 'my_function'
+		detail: 'fn my_function() string'
 		documentation: 'A helper function'
 	}
 	assert detail.kind == 6
@@ -590,7 +1014,7 @@ fn test_detail_kinds() {
 	kinds := [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] // Text, Method, Function, etc.
 	for k in kinds {
 		detail := Detail{
-			kind:  k
+			kind: k
 			label: 'test'
 		}
 		assert detail.kind == k
@@ -599,11 +1023,11 @@ fn test_detail_kinds() {
 
 fn test_detail_struct_with_snippet() {
 	detail := Detail{
-		kind:               6
-		label:              'println'
-		detail:             'fn println(s string)'
-		documentation:      'Prints a string'
-		insert_text:        'println(\${1:s})'
+		kind: 6
+		label: 'println'
+		detail: 'fn println(s string)'
+		documentation: 'Prints a string'
+		insert_text: 'println(\${1:s})'
 		insert_text_format: 2 // Snippet format
 	}
 	assert detail.insert_text? == 'println(\${1:s})'
@@ -612,7 +1036,7 @@ fn test_detail_struct_with_snippet() {
 
 fn test_detail_without_snippet() {
 	detail := Detail{
-		kind:  6
+		kind: 6
 		label: 'println'
 	}
 	assert detail.insert_text == none
@@ -621,9 +1045,9 @@ fn test_detail_without_snippet() {
 
 fn test_signature_help_struct() {
 	sig := SignatureHelp{
-		signatures:       [
+		signatures: [
 			SignatureInformation{
-				label:      'fn my_func(a int, b string) bool'
+				label: 'fn my_func(a int, b string) bool'
 				parameters: [
 					ParameterInformation{
 						label: 'a int'
@@ -644,7 +1068,7 @@ fn test_signature_help_struct() {
 
 fn test_signature_help_multiple_signatures() {
 	sig := SignatureHelp{
-		signatures:       [
+		signatures: [
 			SignatureInformation{
 				label: 'fn overload1(a int)'
 			},
@@ -672,17 +1096,17 @@ fn test_signature_help_empty() {
 fn test_capabilities_struct() {
 	cap := Capabilities{
 		capabilities: Capability{
-			text_document_sync:      TextDocumentSyncOptions{
+			text_document_sync: TextDocumentSyncOptions{
 				open_close: true
-				change:     1
+				change: 1
 			}
-			completion_provider:     CompletionProvider{
+			completion_provider: CompletionProvider{
 				trigger_characters: ['.']
 			}
 			signature_help_provider: SignatureHelpOptions{
 				trigger_characters: ['(', ',']
 			}
-			definition_provider:     true
+			definition_provider: true
 		}
 	}
 	assert cap.capabilities.definition_provider == true
@@ -703,11 +1127,11 @@ fn test_capabilities_minimal() {
 
 fn test_request_struct() {
 	req := Request{
-		id:      1
-		method:  'textDocument/completion'
+		id: 1
+		method: 'textDocument/completion'
 		jsonrpc: '2.0'
-		params:  json2.encode(Params{
-			position:      Position{
+		params: json2.encode(Params{
+			position: Position{
 				line: 5
 				char: 10
 			}
@@ -738,7 +1162,7 @@ fn test_request_params_decode_malformed_returns_error() {
 
 fn test_response_struct() {
 	resp := Response{
-		id:     1
+		id: 1
 		result: 'null'
 	}
 	assert resp.id == 1
@@ -747,7 +1171,7 @@ fn test_response_struct() {
 
 fn test_response_with_capabilities() {
 	resp := Response{
-		id:     0
+		id: 0
 		result: Capabilities{
 			capabilities: Capability{
 				definition_provider: true
@@ -764,7 +1188,7 @@ fn test_notification_struct() {
 	notif := Notification{
 		method: 'textDocument/publishDiagnostics'
 		params: PublishDiagnosticsParams{
-			uri:         'file:///test.v'
+			uri: 'file:///test.v'
 			diagnostics: []
 		}
 	}
@@ -776,16 +1200,16 @@ fn test_notification_with_diagnostics() {
 	notif := Notification{
 		method: 'textDocument/publishDiagnostics'
 		params: PublishDiagnosticsParams{
-			uri:         'file:///test.v'
+			uri: 'file:///test.v'
 			diagnostics: [
 				LSPDiagnostic{
-					range:    LSPRange{}
-					message:  'error 1'
+					range: LSPRange{}
+					message: 'error 1'
 					severity: 1
 				},
 				LSPDiagnostic{
-					range:    LSPRange{}
-					message:  'error 2'
+					range: LSPRange{}
+					message: 'error 2'
 					severity: 1
 				},
 			]
@@ -828,7 +1252,7 @@ fn test_write_tracked_files_to_temp_single_file() {
 	interop_test_must_write_file(test_file, 'module main')
 
 	mut app := &App{
-		temp_dir:   temp_dir
+		temp_dir: temp_dir
 		open_files: map[string]string{}
 	}
 
@@ -866,7 +1290,7 @@ fn test_write_tracked_files_to_temp_multiple_files() {
 	}
 
 	mut app := &App{
-		temp_dir:   temp_dir
+		temp_dir: temp_dir
 		open_files: map[string]string{}
 	}
 
@@ -907,7 +1331,7 @@ fn test_write_tracked_files_to_temp_nested_directories() {
 	interop_test_must_write_file(nested_file, 'module internal')
 
 	mut app := &App{
-		temp_dir:   temp_dir
+		temp_dir: temp_dir
 		open_files: map[string]string{}
 	}
 
@@ -928,8 +1352,7 @@ fn test_write_tracked_files_to_temp_nested_directories() {
 }
 
 fn test_prepare_compilation_overlay_preserves_nested_symlink_layout() {
-	temp_dir := os.join_path(os.temp_dir(),
-		'vls_overlay_nested_symlink_${os.getpid()}_${time.now().unix_nano()}')
+	temp_dir := os.join_path(os.temp_dir(), 'vls_overlay_nested_symlink_${os.getpid()}_${time.now().unix_nano()}')
 	defer {
 		os.rmdir_all(temp_dir) or {}
 	}
@@ -940,8 +1363,7 @@ fn test_prepare_compilation_overlay_preserves_nested_symlink_layout() {
 	interop_test_must_mkdir_all(project_dir)
 	interop_test_must_mkdir_all(shared_src)
 	interop_test_must_mkdir_all(app_temp_dir)
-	interop_test_must_write_file(os.join_path(project_dir, 'v.mod'),
-		"Module {\n\tname: 'nested_symlink_test'\n}\n")
+	interop_test_must_write_file(os.join_path(project_dir, 'v.mod'), "Module {\n\tname: 'nested_symlink_test'\n}\n")
 	os.symlink(shared_src, lexical_src) or { return }
 
 	main_file := os.join_path(lexical_src, 'main.v')
@@ -949,7 +1371,7 @@ fn test_prepare_compilation_overlay_preserves_nested_symlink_layout() {
 	main_uri := path_to_uri(main_file)
 	unsaved_content := 'module main\n\nfn unsaved() {}\n'
 	mut app := &App{
-		temp_dir:   app_temp_dir
+		temp_dir: app_temp_dir
 		open_files: {
 			main_uri: unsaved_content
 		}
@@ -975,8 +1397,7 @@ fn test_prepare_compilation_overlay_preserves_nested_symlink_layout() {
 
 fn test_prepare_compilation_overlay_preserves_posix_backslashes() {
 	$if !windows {
-		temp_dir := os.join_path(os.temp_dir(),
-			'vls_overlay_posix_backslash_${os.getpid()}_${time.now().unix_nano()}')
+		temp_dir := os.join_path(os.temp_dir(), 'vls_overlay_posix_backslash_${os.getpid()}_${time.now().unix_nano()}')
 		defer {
 			os.rmdir_all(temp_dir) or {}
 		}
@@ -984,15 +1405,14 @@ fn test_prepare_compilation_overlay_preserves_posix_backslashes() {
 		app_temp_dir := os.join_path(temp_dir, 'app-temp')
 		interop_test_must_mkdir_all(project_dir)
 		interop_test_must_mkdir_all(app_temp_dir)
-		interop_test_must_write_file(os.join_path(project_dir, 'v.mod'),
-			"Module {\n\tname: 'posix_backslash_test'\n}\n")
+		interop_test_must_write_file(os.join_path(project_dir, 'v.mod'), "Module {\n\tname: 'posix_backslash_test'\n}\n")
 		main_file := os.join_path(project_dir, 'main.v')
 		interop_test_must_write_file(main_file, 'module main\n')
 		main_uri := path_to_uri(main_file)
 		assert uri_to_path(main_uri) == main_file
 		unsaved_content := 'module main\n\nfn unsaved() {}\n'
 		mut app := &App{
-			temp_dir:   app_temp_dir
+			temp_dir: app_temp_dir
 			open_files: {
 				main_uri: unsaved_content
 			}
@@ -1030,7 +1450,7 @@ fn test_write_tracked_files_skips_files_outside_working_dir() {
 	interop_test_must_write_file(other_file, 'module other')
 
 	mut app := &App{
-		temp_dir:   temp_dir
+		temp_dir: temp_dir
 		open_files: map[string]string{}
 	}
 
@@ -1140,8 +1560,7 @@ fn test_symlink_untracked_files_empty_tracked() {
 }
 
 fn test_symlink_untracked_files_materializes_local_imports() {
-	temp_dir := os.join_path(os.temp_dir(),
-		'vls_symlink_local_import_${os.getpid()}_${time.now().unix_nano()}')
+	temp_dir := os.join_path(os.temp_dir(), 'vls_symlink_local_import_${os.getpid()}_${time.now().unix_nano()}')
 	defer {
 		os.rmdir_all(temp_dir) or {}
 	}
@@ -1175,8 +1594,7 @@ fn test_symlink_untracked_files_materializes_local_imports() {
 }
 
 fn test_symlink_untracked_files_materializes_import_relative_to_source_module() {
-	temp_dir := os.join_path(os.temp_dir(),
-		'vls_symlink_nested_import_${os.getpid()}_${time.now().unix_nano()}')
+	temp_dir := os.join_path(os.temp_dir(), 'vls_symlink_nested_import_${os.getpid()}_${time.now().unix_nano()}')
 	defer {
 		os.rmdir_all(temp_dir) or {}
 	}
@@ -1216,8 +1634,7 @@ fn deny_overlay_symlink(_ string, _ string) ! {
 
 fn test_symlink_untracked_files_matches_tracked_descendants_with_windows_case_rules() {
 	$if windows {
-		temp_dir := os.join_path(os.temp_dir(),
-			'vls_overlay_windows_case_${os.getpid()}_${time.now().unix_nano()}')
+		temp_dir := os.join_path(os.temp_dir(), 'vls_overlay_windows_case_${os.getpid()}_${time.now().unix_nano()}')
 		defer {
 			os.rmdir_all(temp_dir) or {}
 		}
@@ -1231,14 +1648,12 @@ fn test_symlink_untracked_files_matches_tracked_descendants_with_windows_case_ru
 		sibling_file := os.join_path(source_dir, 'sibling.v')
 		interop_test_must_write_file(main_file, 'module main\n')
 		interop_test_must_write_file(sibling_file, 'module main\n')
-		interop_test_must_write_file(os.join_path(target_source_dir, 'main.v'),
-			'module main\n\n// unsaved\n')
+		interop_test_must_write_file(os.join_path(target_source_dir, 'main.v'), 'module main\n\n// unsaved\n')
 
 		mut tracked := map[string]string{}
 		lowercase_main_file := os.join_path(project_dir, 'src', 'main.v')
 		tracked[path_to_uri(lowercase_main_file)] = 'module main\n\n// unsaved\n'
-		symlink_untracked_files_with_linker(project_dir, project_dir, target_dir, tracked,
-			deny_overlay_symlink) or {
+		symlink_untracked_files_with_linker(project_dir, project_dir, target_dir, tracked, deny_overlay_symlink) or {
 			assert false, 'Failed to populate case-insensitive overlay: ${err}'
 			return
 		}
@@ -1248,8 +1663,7 @@ fn test_symlink_untracked_files_matches_tracked_descendants_with_windows_case_ru
 }
 
 fn test_bounded_overlay_copy_caps_file_count_across_entries() {
-	temp_dir := os.join_path(os.temp_dir(),
-		'vls_overlay_file_limit_${os.getpid()}_${time.now().unix_nano()}')
+	temp_dir := os.join_path(os.temp_dir(), 'vls_overlay_file_limit_${os.getpid()}_${time.now().unix_nano()}')
 	defer {
 		os.rmdir_all(temp_dir) or {}
 	}
@@ -1263,15 +1677,13 @@ fn test_bounded_overlay_copy_caps_file_count_across_entries() {
 		max_bytes: 1024
 	}
 	mut first_visited := map[string]bool{}
-	copied := copy_bounded_overlay_entry(os.join_path(source_dir, 'one.txt'), os.join_path(target_dir,
-		'one.txt'), mut budget, mut first_visited) or {
+	copied := copy_bounded_overlay_entry(os.join_path(source_dir, 'one.txt'), os.join_path(target_dir, 'one.txt'), mut budget, mut first_visited) or {
 		assert false, 'Failed to copy the first bounded entry: ${err}'
 		return
 	}
 	assert copied == 1
 	mut second_visited := map[string]bool{}
-	second_copied := copy_bounded_overlay_entry(os.join_path(source_dir, 'two.txt'), os.join_path(target_dir,
-		'two.txt'), mut budget, mut second_visited) or {
+	second_copied := copy_bounded_overlay_entry(os.join_path(source_dir, 'two.txt'), os.join_path(target_dir, 'two.txt'), mut budget, mut second_visited) or {
 		assert false, 'The overlay file limit must not abort the fallback: ${err}'
 		return
 	}
@@ -1281,8 +1693,7 @@ fn test_bounded_overlay_copy_caps_file_count_across_entries() {
 }
 
 fn test_bounded_overlay_copy_caps_bytes() {
-	temp_dir := os.join_path(os.temp_dir(),
-		'vls_overlay_byte_limit_${os.getpid()}_${time.now().unix_nano()}')
+	temp_dir := os.join_path(os.temp_dir(), 'vls_overlay_byte_limit_${os.getpid()}_${time.now().unix_nano()}')
 	defer {
 		os.rmdir_all(temp_dir) or {}
 	}
@@ -1305,8 +1716,7 @@ fn test_bounded_overlay_copy_caps_bytes() {
 }
 
 fn test_symlink_denied_fallback_copies_external_symlink_targets() {
-	temp_dir := os.join_path(os.temp_dir(),
-		'vls_external_symlink_${os.getpid()}_${time.now().unix_nano()}')
+	temp_dir := os.join_path(os.temp_dir(), 'vls_external_symlink_${os.getpid()}_${time.now().unix_nano()}')
 	defer {
 		os.rmdir_all(temp_dir) or {}
 	}
@@ -1321,8 +1731,7 @@ fn test_symlink_denied_fallback_copies_external_symlink_targets() {
 	interop_test_must_write_file(os.join_path(external_dir, 'config.json'), '{"external":true}\n')
 	os.symlink(external_dir, linked_dir) or { return }
 
-	symlink_untracked_files_with_linker(project_dir, project_dir, target_dir, map[string]string{},
-		deny_overlay_symlink) or {
+	symlink_untracked_files_with_linker(project_dir, project_dir, target_dir, map[string]string{}, deny_overlay_symlink) or {
 		assert false, 'Failed to copy an external symlink target: ${err}'
 		return
 	}
@@ -1334,8 +1743,7 @@ fn test_symlink_denied_fallback_copies_external_symlink_targets() {
 }
 
 fn test_local_module_copy_fallback_shares_overlay_budget() {
-	temp_dir := os.join_path(os.temp_dir(),
-		'vls_local_module_budget_${os.getpid()}_${time.now().unix_nano()}')
+	temp_dir := os.join_path(os.temp_dir(), 'vls_local_module_budget_${os.getpid()}_${time.now().unix_nano()}')
 	defer {
 		os.rmdir_all(temp_dir) or {}
 	}
@@ -1352,14 +1760,12 @@ fn test_local_module_copy_fallback_shares_overlay_budget() {
 		max_bytes: 1024
 	}
 	mut visited := map[string]bool{}
-	copy_bounded_overlay_entry(asset_file, os.join_path(target_dir, 'asset.txt'), mut budget, mut
-		visited) or {
+	copy_bounded_overlay_entry(asset_file, os.join_path(target_dir, 'asset.txt'), mut budget, mut visited) or {
 		assert false, 'Failed to consume the first overlay budget slot: ${err}'
 		return
 	}
 	target_module := os.join_path(target_dir, 'helper.v')
-	materialized := materialize_overlay_file_with_linker(module_file, target_module,
-		deny_overlay_symlink, mut budget) or {
+	materialized := materialize_overlay_file_with_linker(module_file, target_module, deny_overlay_symlink, mut budget) or {
 		assert false, 'The local-module copy limit must not abort the overlay: ${err}'
 		return
 	}
@@ -1369,8 +1775,7 @@ fn test_local_module_copy_fallback_shares_overlay_budget() {
 }
 
 fn test_symlink_denied_fallback_keeps_sources_when_copy_limit_is_reached() {
-	temp_dir := os.join_path(os.temp_dir(),
-		'vls_overlay_partial_${os.getpid()}_${time.now().unix_nano()}')
+	temp_dir := os.join_path(os.temp_dir(), 'vls_overlay_partial_${os.getpid()}_${time.now().unix_nano()}')
 	defer {
 		os.rmdir_all(temp_dir) or {}
 	}
@@ -1387,8 +1792,7 @@ fn test_symlink_denied_fallback_keeps_sources_when_copy_limit_is_reached() {
 		max_files: 1
 		max_bytes: 1024
 	}
-	symlink_untracked_tree(source_dir, source_dir, target_dir, '', []string{}, []string{},
-		deny_overlay_symlink, mut budget) or {
+	symlink_untracked_tree(source_dir, source_dir, target_dir, '', []string{}, []string{}, deny_overlay_symlink, mut budget) or {
 		assert false, 'The copy limit must preserve the partial overlay: ${err}'
 		return
 	}
@@ -1399,8 +1803,7 @@ fn test_symlink_denied_fallback_keeps_sources_when_copy_limit_is_reached() {
 }
 
 fn test_symlink_untracked_files_copies_when_symlinks_are_denied() {
-	temp_dir := os.join_path(os.temp_dir(),
-		'vls_symlink_denied_${os.getpid()}_${time.now().unix_nano()}')
+	temp_dir := os.join_path(os.temp_dir(), 'vls_symlink_denied_${os.getpid()}_${time.now().unix_nano()}')
 	defer {
 		os.rmdir_all(temp_dir) or {}
 	}
@@ -1431,25 +1834,19 @@ fn test_symlink_untracked_files_copies_when_symlinks_are_denied() {
 	interop_test_must_write_file(module_file, module_content)
 	interop_test_must_write_file(os.join_path(project_dir, 'README.md'), 'project documentation\n')
 	interop_test_must_write_file(os.join_path(assets_dir, 'config.json'), '{"enabled":true}\n')
-	interop_test_must_write_file(os.join_path(assets_dir, 'template.txt'),
-		'Hello, embedded asset!\n')
+	interop_test_must_write_file(os.join_path(assets_dir, 'template.txt'), 'Hello, embedded asset!\n')
 	interop_test_must_write_file(os.join_path(assets_dir, 'logo.png'), 'fake png bytes')
 	interop_test_must_write_file(os.join_path(git_dir, 'metadata.json'), '{"git":true}\n')
-	interop_test_must_write_file(os.join_path(node_modules_dir, 'dependency.json'),
-		'{"dependency":true}\n')
-	interop_test_must_write_file(os.join_path(thirdparty_dir, 'dependency.json'),
-		'{"native_dependency":true}\n')
-	interop_test_must_write_file(os.join_path(thirdparty_dir, 'embedded.json'),
-		'{"embedded":true}\n')
-	interop_test_must_write_file(os.join_path(thirdparty_dir, 'dependency.h'),
-		'#define DEPENDENCY 1\n')
+	interop_test_must_write_file(os.join_path(node_modules_dir, 'dependency.json'), '{"dependency":true}\n')
+	interop_test_must_write_file(os.join_path(thirdparty_dir, 'dependency.json'), '{"native_dependency":true}\n')
+	interop_test_must_write_file(os.join_path(thirdparty_dir, 'embedded.json'), '{"embedded":true}\n')
+	interop_test_must_write_file(os.join_path(thirdparty_dir, 'dependency.h'), '#define DEPENDENCY 1\n')
 	interop_test_must_write_file(os.join_path(thirdparty_dir, 'dependency.a'), 'fake library bytes')
 	interop_test_must_write_file(os.join_path(build_dir, 'generated.json'), '{"build":true}\n')
 
 	mut tracked := map[string]string{}
 	tracked[path_to_uri(main_file)] = "module main\n\n#flag -I @VMODROOT/thirdparty/native_dependency\nconst embedded = \$embed_file('thirdparty/native_dependency/embedded.json')\n"
-	symlink_untracked_files_with_linker(project_dir, project_dir, target_dir, tracked,
-		deny_overlay_symlink) or {
+	symlink_untracked_files_with_linker(project_dir, project_dir, target_dir, tracked, deny_overlay_symlink) or {
 		assert false, 'Failed to copy denied symlinks: ${err}'
 		return
 	}
@@ -1514,8 +1911,8 @@ fn test_json_error_negative_values() {
 	// to 0 rather than emitted as negative positions (P1-09).
 	err := JsonError{
 		line_nr: -1
-		col:     -1
-		len:     -1
+		col: -1
+		len: -1
 	}
 	diag := v_error_to_lsp_diagnostic(err)
 	assert diag.severity == 1
@@ -1542,11 +1939,11 @@ fn test_params_struct_complete() {
 		content_changes: [ContentChange{
 			text: 'test'
 		}]
-		position:        Position{
+		position: Position{
 			line: 5
 			char: 10
 		}
-		text_document:   TextDocumentIdentifier{
+		text_document: TextDocumentIdentifier{
 			uri: 'file:///test.v'
 		}
 	}
@@ -1574,7 +1971,7 @@ fn test_signature_help_options_triggers() {
 fn test_text_document_sync_options() {
 	sync := TextDocumentSyncOptions{
 		open_close: true
-		change:     1 // Full sync
+		change: 1 // Full sync
 	}
 	assert sync.open_close == true
 	assert sync.change == 1
@@ -1583,7 +1980,7 @@ fn test_text_document_sync_options() {
 fn test_text_document_sync_incremental() {
 	sync := TextDocumentSyncOptions{
 		open_close: true
-		change:     2 // Incremental sync
+		change: 2 // Incremental sync
 	}
 	assert sync.change == 2
 }
@@ -1597,7 +1994,7 @@ fn test_parameter_information() {
 
 fn test_signature_information_with_params() {
 	sig := SignatureInformation{
-		label:      'fn test(a int, b string, c bool)'
+		label: 'fn test(a int, b string, c bool)'
 		parameters: [
 			ParameterInformation{
 				label: 'a int'
@@ -1616,11 +2013,11 @@ fn test_signature_information_with_params() {
 
 fn test_publish_diagnostics_params() {
 	params := PublishDiagnosticsParams{
-		uri:         'file:///test.v'
+		uri: 'file:///test.v'
 		diagnostics: [
 			LSPDiagnostic{
-				range:    LSPRange{}
-				message:  'error'
+				range: LSPRange{}
+				message: 'error'
 				severity: 1
 			},
 		]

@@ -18,12 +18,16 @@ import time
 
 // IndexEntry is the parsed symbol information for one file.
 struct IndexEntry {
-	fingerprint    int // content.hash(); used to skip re-parsing unchanged files
-	module_name    string
-	doc_symbols    []DocumentSymbol    // hierarchical symbols (as parse_document_symbols returns)
-	docs           map[string]string   // simple symbol name -> leading vdoc comment
-	fn_completions []Detail            // free-function completion items for this file
-	type_methods   map[string][]Detail // receiver type -> method completion items
+	fingerprint                        int // content.hash(); used to skip re-parsing unchanged files
+	module_name                        string
+	doc_symbols                        []DocumentSymbol // hierarchical symbols (as parse_document_symbols returns)
+	docs                               map[string]string // simple symbol name -> leading vdoc comment
+	fn_completions                     []Detail // free-function completion items for this file
+	module_completions                 []Detail // all same-module top-level completion items
+	public_module_completions          []Detail // exported completion items for imported modules
+	has_conditional_module_completions bool
+	has_conditional_public_completions bool
+	conditional_lines                  []bool // declarations guarded by $if/$else or @[if]
 }
 
 // build_index_entry parses `content` into an IndexEntry. Symbol ranges are
@@ -32,6 +36,10 @@ struct IndexEntry {
 fn build_index_entry(content string, enc PositionEncoding) IndexEntry {
 	lines := content.split_into_lines()
 	doc_syms := encode_document_symbols(parse_document_symbols(content), lines, enc)
+	code_lines := source_code_lines(content)
+	conditional_lines := compile_time_conditional_lines(content)
+	module_completion_index := parse_module_member_completions_from_lines(code_lines, conditional_lines, false)
+	public_module_completion_index := parse_module_member_completions_from_lines(code_lines, conditional_lines, true)
 	mut docs := map[string]string{}
 	for sym in doc_syms {
 		// Each symbol's declaration line is range.start.line; read its vdoc.
@@ -44,12 +52,16 @@ fn build_index_entry(content string, enc PositionEncoding) IndexEntry {
 		}
 	}
 	return IndexEntry{
-		fingerprint:    content.hash()
-		module_name:    get_module_name(content)
-		doc_symbols:    doc_syms
-		docs:           docs
-		fn_completions: parse_module_fn_completions(content)
-		type_methods:   parse_type_method_completions(content)
+		fingerprint: content.hash()
+		module_name: get_module_name(content)
+		doc_symbols: doc_syms
+		docs: docs
+		fn_completions: module_completion_index.items.filter(it.kind == 3)
+		module_completions: module_completion_index.items
+		public_module_completions: public_module_completion_index.items
+		has_conditional_module_completions: module_completion_index.has_conditional
+		has_conditional_public_completions: public_module_completion_index.has_conditional
+		conditional_lines: conditional_lines
 	}
 }
 
@@ -63,12 +75,12 @@ fn encode_document_symbols(syms []DocumentSymbol, lines []string, enc PositionEn
 	mut out := []DocumentSymbol{cap: syms.len}
 	for sym in syms {
 		out << DocumentSymbol{
-			name:            sym.name
-			kind:            sym.kind
-			tags:            sym.tags
-			range:           encode_range_chars(sym.range, lines, enc)
+			name: sym.name
+			kind: sym.kind
+			tags: sym.tags
+			range: encode_range_chars(sym.range, lines, enc)
 			selection_range: encode_range_chars(sym.selection_range, lines, enc)
-			children:        encode_document_symbols(sym.children, lines, enc)
+			children: encode_document_symbols(sym.children, lines, enc)
 		}
 	}
 	return out
@@ -92,7 +104,7 @@ fn encode_range_chars(r LSPRange, lines []string, enc PositionEncoding) LSPRange
 			line: r.start.line
 			char: byte_to_encoded_col(start_line, r.start.char, enc)
 		}
-		end:   Position{
+		end: Position{
 			line: r.end.line
 			char: byte_to_encoded_col(end_line, r.end.char, enc)
 		}
@@ -124,9 +136,18 @@ struct OccEntry {
 	occ         map[string][]TokenOccurrence
 }
 
+struct OccurrenceInterpolationState {
+	quote u8
+mut:
+	brace_depth int
+}
+
 struct OccurrenceScanState {
 mut:
-	in_block_comment bool
+	block_comment_depth int
+	quote               u8
+	raw_string          bool
+	interpolations      []OccurrenceInterpolationState
 }
 
 fn add_identifier_occurrence(line_text string, line_idx int, start int, end int, enc PositionEncoding, mut occ map[string][]TokenOccurrence) {
@@ -135,41 +156,40 @@ fn add_identifier_occurrence(line_text string, line_idx int, start int, end int,
 	}
 	name := line_text[start..end]
 	occ[name] << TokenOccurrence{
-		line:       line_idx
+		line: line_idx
 		start_char: byte_to_encoded_col(line_text, start, enc)
-		end_char:   byte_to_encoded_col(line_text, end, enc)
+		end_char: byte_to_encoded_col(line_text, end, enc)
 	}
 }
 
-// scan_string_identifier_occurrences skips literal text while indexing V string
-// interpolation expressions. It returns the byte after the closing quote.
-fn scan_string_identifier_occurrences(line_text string, line_idx int, start int, enc PositionEncoding, mut state OccurrenceScanState, mut occ map[string][]TokenOccurrence) int {
-	quote := line_text[start]
-	mut col := start + 1
+// scan_literal_identifier_occurrences skips string and rune literal text while
+// indexing V string interpolation expressions. It preserves an unterminated
+// quote across source lines and returns the byte after the closing quote or the
+// end of the line.
+fn scan_literal_identifier_occurrences(line_text string, line_idx int, start int, enc PositionEncoding, mut state OccurrenceScanState, mut occ map[string][]TokenOccurrence) int {
+	mut col := start
+	if state.quote == 0 {
+		state.quote = line_text[start]
+		col++
+	}
+	quote := state.quote
 	for col < line_text.len {
-		if line_text[col] == `\\` {
+		if line_text[col] == `\\` && !state.raw_string {
 			col += 2
 			continue
 		}
 		if line_text[col] == quote {
+			state.quote = 0
+			state.raw_string = false
 			return col + 1
 		}
-		if line_text[col] == `$` && col + 1 < line_text.len {
-			if line_text[col + 1] == `{` {
-				col = scan_code_identifier_occurrences(line_text, line_idx, col + 2, enc, true, mut
-					state, mut occ)
-				continue
+		if !state.raw_string && line_text[col] == `$` && col + 1 < line_text.len
+			&& line_text[col + 1] == `{` {
+			state.quote = 0
+			state.interpolations << OccurrenceInterpolationState{
+				quote: quote
 			}
-			if is_ident_char(line_text[col + 1]) && !(line_text[col + 1] >= `0`
-				&& line_text[col + 1] <= `9`) {
-				ident_start := col + 1
-				col = ident_start + 1
-				for col < line_text.len && is_ident_char(line_text[col]) {
-					col++
-				}
-				add_identifier_occurrence(line_text, line_idx, ident_start, col, enc, mut occ)
-				continue
-			}
+			return scan_code_identifier_occurrences(line_text, line_idx, col + 2, enc, mut state, mut occ)
 		}
 		col++
 	}
@@ -177,15 +197,24 @@ fn scan_string_identifier_occurrences(line_text string, line_idx int, start int,
 }
 
 // scan_code_identifier_occurrences indexes code between `start` and the end of
-// the line, or through the matching `}` for a braced interpolation expression.
-fn scan_code_identifier_occurrences(line_text string, line_idx int, start int, enc PositionEncoding, stop_at_closing_brace bool, mut state OccurrenceScanState, mut occ map[string][]TokenOccurrence) int {
+// the line. Braced interpolation state is retained across lines, including its
+// nested brace depth, and the suspended literal resumes after the matching `}`.
+fn scan_code_identifier_occurrences(line_text string, line_idx int, start int, enc PositionEncoding, mut state OccurrenceScanState, mut occ map[string][]TokenOccurrence) int {
 	mut col := start
-	mut brace_depth := 0
 	for col < line_text.len {
+		if state.quote != 0 {
+			col = scan_literal_identifier_occurrences(line_text, line_idx, col, enc, mut state, mut occ)
+			continue
+		}
 		c := line_text[col]
-		if state.in_block_comment {
+		if state.block_comment_depth > 0 {
+			if col + 1 < line_text.len && c == `/` && line_text[col + 1] == `*` {
+				state.block_comment_depth++
+				col += 2
+				continue
+			}
 			if col + 1 < line_text.len && c == `*` && line_text[col + 1] == `/` {
-				state.in_block_comment = false
+				state.block_comment_depth--
 				col += 2
 				continue
 			}
@@ -196,25 +225,37 @@ fn scan_code_identifier_occurrences(line_text string, line_idx int, start int, e
 			return line_text.len
 		}
 		if col + 1 < line_text.len && c == `/` && line_text[col + 1] == `*` {
-			state.in_block_comment = true
+			state.block_comment_depth = 1
 			col += 2
 			continue
 		}
-		if c == `"` || c == `'` {
+		if c in [`r`, `c`] && col + 1 < line_text.len
+			&& (line_text[col + 1] == `"` || line_text[col + 1] == `'`) {
+			state.raw_string = c == `r`
+			col = scan_literal_identifier_occurrences(line_text, line_idx, col + 1, enc, mut state, mut occ)
+			continue
+		}
+		if c == `"` || c == `'` || c == 96 {
 			col =
-				scan_string_identifier_occurrences(line_text, line_idx, col, enc, mut state, mut occ)
+				scan_literal_identifier_occurrences(line_text, line_idx, col, enc, mut state, mut occ)
 			continue
 		}
 		if c == `{` {
-			brace_depth++
+			if state.interpolations.len > 0 {
+				last := state.interpolations.len - 1
+				state.interpolations[last].brace_depth++
+			}
 			col++
 			continue
 		}
-		if c == `}` && stop_at_closing_brace {
-			if brace_depth == 0 {
-				return col + 1
+		if c == `}` && state.interpolations.len > 0 {
+			last := state.interpolations.len - 1
+			if state.interpolations[last].brace_depth == 0 {
+				interpolation := state.interpolations.pop()
+				state.quote = interpolation.quote
+			} else {
+				state.interpolations[last].brace_depth--
 			}
-			brace_depth--
 			col++
 			continue
 		}
@@ -233,16 +274,16 @@ fn scan_code_identifier_occurrences(line_text string, line_idx int, start int, e
 }
 
 // extract_identifier_occurrences returns every identifier occurrence in `content`
-// grouped by name, positioned in `enc` units. Line comments and string literal
-// text are skipped, interpolation expressions are scanned, and number literals
-// are ignored. This is the reference-index tokenizer: references/rename read
-// candidates from here instead of re-walking and re-tokenizing files per request
-// (P1-05).
+// grouped by name, positioned in `enc` units. Comments and string literal text
+// are skipped across source lines, interpolation expressions are scanned, and
+// number literals are ignored. This is the reference-index tokenizer:
+// references/rename read candidates from here instead of re-walking and
+// re-tokenizing files per request (P1-05).
 fn extract_identifier_occurrences(content string, enc PositionEncoding) map[string][]TokenOccurrence {
 	mut occ := map[string][]TokenOccurrence{}
 	mut state := OccurrenceScanState{}
 	for line_idx, line_text in content.split_into_lines() {
-		scan_code_identifier_occurrences(line_text, line_idx, 0, enc, false, mut state, mut occ)
+		scan_code_identifier_occurrences(line_text, line_idx, 0, enc, mut state, mut occ)
 	}
 	return occ
 }
@@ -264,7 +305,7 @@ fn (mut app App) occurrences_for(uri string) map[string][]TokenOccurrence {
 	occ := extract_identifier_occurrences(content, app.position_encoding)
 	app.ref_occurrences[uri] = OccEntry{
 		fingerprint: fp
-		occ:         occ
+		occ: occ
 	}
 	return occ
 }
@@ -427,7 +468,7 @@ fn (mut app App) drop_index_under(dir_path string) {
 // opened at a large directory (a home dir, /tmp, or the filesystem root) would
 // pull the entire tree into the index (audit: "unbounded workspace traversal").
 const index_max_files = 20000
-const index_max_file_bytes = 2 * 1024 * 1024
+const index_max_file_bytes = u64(2 * 1024 * 1024)
 const index_excluded_dirs = ['.git', '.svn', '.hg', 'node_modules', '.vmodules', 'thirdparty',
 	'_build', 'build', 'target', '.cache']
 
@@ -436,7 +477,7 @@ const index_excluded_dirs = ['.git', '.svn', '.hg', 'node_modules', '.vmodules',
 // root. This models the nearest V project root (audit P1-01).
 fn find_project_root(dir string) string {
 	mut d := dir
-	for d != '' && d != '/' {
+	for d != '' && d != '/' && d != '.' {
 		if os.exists(os.join_path(d, 'v.mod')) {
 			return d
 		}
@@ -722,13 +763,13 @@ fn (app &App) index_scope_for_uri(uri string) IndexScope {
 	if project_root != '' && project_root != '/'
 		&& (workspace_root == '' || path_is_within(project_root, workspace_root)) {
 		return IndexScope{
-			dir:       project_root
+			dir: project_root
 			recursive: true
 		}
 	}
 	if workspace_root != '' {
 		return IndexScope{
-			dir:       workspace_root
+			dir: workspace_root
 			recursive: true
 		}
 	}
@@ -830,31 +871,6 @@ fn (app &App) query_module_fn_completions(module_name string, exclude_uri string
 	return items
 }
 
-// query_module_type_method_completions returns same-module methods declared in
-// sibling files. The caller merges these with members from the current buffer.
-fn (app &App) query_module_type_method_completions(module_name string, receiver_type string, exclude_uri string, dir string) []Detail {
-	d := dir.replace('\\', '/').trim_right('/')
-	mut items := []Detail{}
-	mut uris := app.symbol_index.keys()
-	uris.sort()
-	for uri in uris {
-		if uri == exclude_uri || uri.ends_with('_test.v') {
-			continue
-		}
-		if d != '' && os.dir(uri_to_path(uri)).replace('\\', '/').trim_right('/') != d {
-			continue
-		}
-		entry := app.symbol_index[uri] or { continue }
-		if module_name != '' && entry.module_name != module_name {
-			continue
-		}
-		if methods := entry.type_methods[receiver_type] {
-			items << methods
-		}
-	}
-	return items
-}
-
 // index_query_dirs returns the project directories to index: the configured
 // workspace roots plus the nearest `v.mod` root of each open file. A loose file
 // with no project root contributes only its own (already indexed) buffer, so an
@@ -935,13 +951,11 @@ fn (app &App) query_workspace_symbols(query string) []WorkspaceSymbol {
 		entry := app.symbol_index[uri] or { continue }
 		for sym in entry.doc_symbols {
 			if q == '' || sym.name.to_lower().contains(q) {
-				add_workspace_symbol(mut results, mut seen, sym.name, sym.kind, uri,
-					sym.selection_range)
+				add_workspace_symbol(mut results, mut seen, sym.name, sym.kind, uri, sym.selection_range)
 			}
 			for child in sym.children {
 				if q == '' || child.name.to_lower().contains(q) {
-					add_workspace_symbol(mut results, mut seen, '${sym.name}.${child.name}',
-						child.kind, uri, child.selection_range)
+					add_workspace_symbol(mut results, mut seen, '${sym.name}.${child.name}', child.kind, uri, child.selection_range)
 				}
 			}
 		}

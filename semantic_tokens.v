@@ -49,15 +49,6 @@ const identifier_chars = [
 	`0`, `1`, `2`, `3`, `4`, `5`, `6`, `7`, `8`, `9`,
 	`_`,
 ]!
-
-const v_builtin_types = [
-	'any', 'bool', 'byteptr', 'charptr',
-	'f32', 'f64',
-	'i8', 'i16', 'int', 'i64', 'isize',
-	'rune', 'string',
-	'u8', 'u16', 'u32', 'u64', 'usize',
-	'voidptr'
-]!
 // vfmt on
 
 // semantic_token_types returns the ordered list of token-type names that forms
@@ -82,29 +73,35 @@ struct SemToken {
 }
 
 struct TokenizeState {
+	import_aliases     map[string]bool
+	readonly_variables map[string]bool
 mut:
 	in_block_comment bool
+	variable_scope   int // function scope of the current line; 0 is file level
 }
 
 // tokenize_v_source returns all semantic tokens for the given V source text.
 fn tokenize_v_source(content string) []SemToken {
-	mut state := TokenizeState{}
-	mut tokens := []SemToken{}
 	lines := content.split_into_lines()
 	mut import_aliases := map[string]bool{}
 	for alias, _ in parse_import_aliases(content) {
 		import_aliases[alias] = true
 	}
 	readonly_variables, line_scopes := collect_readonly_variables(lines)
+	mut state := TokenizeState{
+		import_aliases:     import_aliases
+		readonly_variables: readonly_variables
+	}
+	mut tokens := []SemToken{}
 	for line_idx, line in lines {
-		tokenize_v_line(line, line_idx, line_scopes[line_idx], readonly_variables, import_aliases, mut
-			state, mut tokens)
+		state.variable_scope = line_scopes[line_idx]
+		tokenize_v_line(line, line_idx, mut state, mut tokens)
 	}
 	return tokens
 }
 
 // tokenize_v_line scans one source line and appends recognised tokens to `tokens`.
-fn tokenize_v_line(line string, line_idx int, variable_scope int, readonly_variables map[string]bool, import_aliases map[string]bool, mut state TokenizeState, mut tokens []SemToken) {
+fn tokenize_v_line(line string, line_idx int, mut state TokenizeState, mut tokens []SemToken) {
 	n := line.len
 	mut col := 0
 
@@ -122,9 +119,9 @@ fn tokenize_v_line(line string, line_idx int, variable_scope int, readonly_varia
 		}
 		if col > start {
 			tokens << SemToken{
-				line:     line_idx
-				start:    start
-				length:   col - start
+				line: line_idx
+				start: start
+				length: col - start
 				type_idx: sem_tok_comment
 			}
 		}
@@ -132,7 +129,14 @@ fn tokenize_v_line(line string, line_idx int, variable_scope int, readonly_varia
 			return
 		}
 	}
+	tokenize_v_code(line, col, n, line_idx, mut state, mut tokens)
+}
 
+// tokenize_v_code scans `line[from..to]` as V code and appends its tokens. It is
+// used for whole lines and for the expressions inside string interpolations.
+fn tokenize_v_code(line string, from int, to int, line_idx int, mut state TokenizeState, mut tokens []SemToken) {
+	n := to
+	mut col := from
 	for col < n {
 		c := line[col]
 
@@ -159,9 +163,9 @@ fn tokenize_v_line(line string, line_idx int, variable_scope int, readonly_varia
 				state.in_block_comment = true
 			}
 			tokens << SemToken{
-				line:     line_idx
-				start:    start
-				length:   col - start
+				line: line_idx
+				start: start
+				length: col - start
 				type_idx: sem_tok_comment
 			}
 			continue
@@ -170,9 +174,9 @@ fn tokenize_v_line(line string, line_idx int, variable_scope int, readonly_varia
 		// Line comment: // …
 		if col + 1 < n && c == `/` && line[col + 1] == `/` {
 			tokens << SemToken{
-				line:     line_idx
-				start:    col
-				length:   n - col
+				line: line_idx
+				start: col
+				length: n - col
 				type_idx: sem_tok_comment
 			}
 			return
@@ -196,9 +200,9 @@ fn tokenize_v_line(line string, line_idx int, variable_scope int, readonly_varia
 				col++
 			}
 			tokens << SemToken{
-				line:     line_idx
-				start:    start
-				length:   col - start
+				line: line_idx
+				start: start
+				length: col - start
 				type_idx: sem_tok_string
 			}
 			continue
@@ -206,26 +210,7 @@ fn tokenize_v_line(line string, line_idx int, variable_scope int, readonly_varia
 
 		// String literals: "…" or '…'
 		if c == `"` || c == `'` {
-			start := col
-			quote := c
-			col++
-			for col < n {
-				if line[col] == `\\` {
-					col += 2
-					continue
-				}
-				if line[col] == quote {
-					col++
-					break
-				}
-				col++
-			}
-			tokens << SemToken{
-				line:     line_idx
-				start:    start
-				length:   col - start
-				type_idx: sem_tok_string
-			}
+			col = tokenize_v_string(line, col, n, line_idx, mut state, mut tokens)
 			continue
 		}
 
@@ -241,9 +226,9 @@ fn tokenize_v_line(line string, line_idx int, variable_scope int, readonly_varia
 				}
 			}
 			tokens << SemToken{
-				line:     line_idx
-				start:    start
-				length:   col - start
+				line: line_idx
+				start: start
+				length: col - start
 				type_idx: sem_tok_number
 			}
 			continue
@@ -261,16 +246,16 @@ fn tokenize_v_line(line string, line_idx int, variable_scope int, readonly_varia
 				}
 			}
 			word := line[start..col]
-			tok_type := classify_v_identifier_at(line, start, col, word, import_aliases)
+			tok_type := classify_v_identifier_at(line, start, col, word, state.import_aliases)
 			if tok_type >= 0 {
 				tokens << SemToken{
-					line:     line_idx
-					start:    start
-					length:   col - start
+					line: line_idx
+					start: start
+					length: col - start
 					type_idx: tok_type
 					mod_bits: if tok_type == sem_tok_variable
-						&& (variable_binding_key(variable_scope, word) in readonly_variables
-						|| variable_binding_key(0, word) in readonly_variables) {
+						&& (variable_binding_key(state.variable_scope, word) in state.readonly_variables
+						|| variable_binding_key(0, word) in state.readonly_variables) {
 						sem_mod_readonly
 					} else {
 						0
@@ -468,6 +453,94 @@ fn identifier_before_dot(line string, dot int) string {
 	return line[start..dot]
 }
 
+// tokenize_v_string scans the string literal whose quote is at `line[start]` and
+// returns the column after it. Only its literal parts are string tokens:
+// `${expr}` is tokenized as code and `$name` gets no token, so the editor colors
+// both as the code they are instead of as text.
+fn tokenize_v_string(line string, start int, to int, line_idx int, mut state TokenizeState, mut tokens []SemToken) int {
+	quote := line[start]
+	mut segment_start := start
+	mut col := start + 1
+	for col < to {
+		ch := line[col]
+		if ch == `\\` {
+			col += 2
+			continue
+		}
+		if ch == quote {
+			col++
+			break
+		}
+		if ch == `$` && col + 1 < to && line[col + 1] == `{` {
+			close := interpolation_end(line, col + 1, to)
+			if close < 0 {
+				col++
+				continue
+			}
+			append_string_token(mut tokens, line_idx, segment_start, col)
+			tokenize_v_code(line, col + 2, close, line_idx, mut state, mut tokens)
+			col = close + 1
+			segment_start = col
+			continue
+		}
+		if ch == `$` && col + 1 < to && line[col + 1] in identifier_start_chars {
+			append_string_token(mut tokens, line_idx, segment_start, col)
+			col++
+			for col < to && (line[col] in identifier_chars
+				|| (line[col] == `.` && col + 1 < to && line[col + 1] in identifier_start_chars)) {
+				col++
+			}
+			segment_start = col
+			continue
+		}
+		col++
+	}
+	if col > to {
+		col = to
+	}
+	append_string_token(mut tokens, line_idx, segment_start, col)
+	return col
+}
+
+fn append_string_token(mut tokens []SemToken, line_idx int, start int, end int) {
+	if end > start {
+		tokens << SemToken{
+			line: line_idx
+			start: start
+			length: end - start
+			type_idx: sem_tok_string
+		}
+	}
+}
+
+// interpolation_end returns the column of the `}` that closes the interpolation
+// whose `{` is at `line[open]`, skipping nested braces and strings, or -1.
+fn interpolation_end(line string, open int, to int) int {
+	mut depth := 0
+	mut i := open
+	for i < to {
+		c := line[i]
+		if c == `'` || c == `"` {
+			i++
+			for i < to && line[i] != c {
+				if line[i] == `\\` {
+					i++
+				}
+				i++
+			}
+		} else if c == `{` {
+			depth++
+		} else if c == `}` {
+			depth--
+			if depth == 0 {
+				return i
+			}
+		}
+		i++
+	}
+	return -1
+}
+
 // classify_v_identifier returns the semantic token type index for an identifier,
 // or -1 when no special highlighting is needed.
 fn classify_v_identifier(word string) int {
@@ -506,7 +579,7 @@ fn convert_tokens_to_encoding(tokens []SemToken, lines []string, enc PositionEnc
 		enc_end := byte_to_encoded_col(line, tok.start + tok.length, enc)
 		out << SemToken{
 			...tok
-			start:  enc_start
+			start: enc_start
 			length: enc_end - enc_start
 		}
 	}
@@ -538,9 +611,11 @@ fn encode_semantic_tokens(raw_tokens []SemToken) []int {
 // returning semantic highlighting data for the entire document.
 fn (mut app App) handle_semantic_tokens(request Request) Response {
 	params := json2.decode[SemanticTokensParams](request.params) or {
-		$if debug { log('Failed to decode SemanticTokensParams: ${err}') }
+		$if debug {
+			log('Failed to decode SemanticTokensParams: ${err}')
+		}
 		return Response{
-			id:     request.id
+			id: request.id
 			result: 'null'
 		}
 	}
@@ -549,18 +624,17 @@ fn (mut app App) handle_semantic_tokens(request Request) Response {
 	if content == '' {
 		// An empty document has an empty token set, not a null result (P2-01).
 		return Response{
-			id:     request.id
+			id: request.id
 			result: SemanticTokens{
 				data: []
 			}
 		}
 	}
 	lines := content.split_into_lines()
-	raw_tokens := convert_tokens_to_encoding(tokenize_v_source(content), lines,
-		app.position_encoding)
+	raw_tokens := convert_tokens_to_encoding(tokenize_v_source(content), lines, app.position_encoding)
 	encoded := encode_semantic_tokens(raw_tokens)
 	return Response{
-		id:     request.id
+		id: request.id
 		result: SemanticTokens{
 			data: encoded
 		}
@@ -572,9 +646,11 @@ fn (mut app App) handle_semantic_tokens(request Request) Response {
 // which reduces payload size for large files.
 fn (mut app App) handle_semantic_tokens_range(request Request) Response {
 	params := json2.decode[SemanticTokensRangeParams](request.params) or {
-		$if debug { log('Failed to decode SemanticTokensRangeParams: ${err}') }
+		$if debug {
+			log('Failed to decode SemanticTokensRangeParams: ${err}')
+		}
 		return Response{
-			id:     request.id
+			id: request.id
 			result: 'null'
 		}
 	}
@@ -582,15 +658,14 @@ fn (mut app App) handle_semantic_tokens_range(request Request) Response {
 	content := app.open_files[uri] or { os.read_file(uri_to_path(uri)) or { '' } }
 	if content == '' {
 		return Response{
-			id:     request.id
+			id: request.id
 			result: SemanticTokens{
 				data: []
 			}
 		}
 	}
 	lines := content.split_into_lines()
-	raw_tokens := convert_tokens_to_encoding(tokenize_v_source(content), lines,
-		app.position_encoding)
+	raw_tokens := convert_tokens_to_encoding(tokenize_v_source(content), lines, app.position_encoding)
 	start_line := params.range.start.line
 	start_char := params.range.start.char
 	end_line := params.range.end.line
@@ -600,12 +675,11 @@ fn (mut app App) handle_semantic_tokens_range(request Request) Response {
 	// (line, start) is kept when its start position is >= the range start and <
 	// the range end in (line, char) order; this excludes tokens before the start
 	// character on the first line and at/after the end character on the last line.
-	range_tokens := raw_tokens.filter(
-		(it.line > start_line || (it.line == start_line && it.start >= start_char))
+	range_tokens := raw_tokens.filter((it.line > start_line || (it.line == start_line && it.start >= start_char))
 		&& (it.line < end_line || (it.line == end_line && it.start < end_char)))
 	encoded := encode_semantic_tokens(range_tokens)
 	return Response{
-		id:     request.id
+		id: request.id
 		result: SemanticTokens{
 			data: encoded
 		}

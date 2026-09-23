@@ -9,7 +9,7 @@ import time
 fn index_test_app() &App {
 	return &App{
 		open_files: map[string]string{}
-		temp_dir:   os.temp_dir()
+		temp_dir: os.temp_dir()
 	}
 }
 
@@ -105,7 +105,7 @@ fn test_watched_file_reindex_drops_oversized_disk_entry() {
 	app.on_did_change_watched_files(Request{
 		params: json2.encode(DidChangeWatchedFilesParams{
 			changes: [FileEvent{
-				uri:        uri
+				uri: uri
 				event_type: 1
 			}]
 		})
@@ -121,7 +121,7 @@ fn test_watched_file_reindex_drops_oversized_disk_entry() {
 	app.on_did_change_watched_files(Request{
 		params: json2.encode(DidChangeWatchedFilesParams{
 			changes: [FileEvent{
-				uri:        uri
+				uri: uri
 				event_type: 2
 			}]
 		})
@@ -148,7 +148,7 @@ fn test_watched_file_reindex_obeys_total_entry_limit() {
 	app.on_did_change_watched_files(Request{
 		params: json2.encode(DidChangeWatchedFilesParams{
 			changes: [FileEvent{
-				uri:        uri
+				uri: uri
 				event_type: 1
 			}]
 		})
@@ -177,7 +177,7 @@ fn test_watched_file_reuses_equivalent_open_document_uri() {
 	app.on_did_change_watched_files(Request{
 		params: json2.encode(DidChangeWatchedFilesParams{
 			changes: [FileEvent{
-				uri:        event_uri
+				uri: event_uri
 				event_type: 2
 			}]
 		})
@@ -586,8 +586,9 @@ fn test_extract_identifier_occurrences_indexes_string_interpolations() {
 	content := "fn greet(name string) string {\n\tother := 'ignored'\n\treturn 'hello \${name} \${other.to_upper()} \$name literal_name'\n}\n"
 	occ := extract_identifier_occurrences(content, .utf16)
 
-	// The parameter plus braced and shorthand interpolation references.
-	assert occ['name'].len == 3
+	// The parameter plus its braced interpolation reference. Unbraced `$name`
+	// is ordinary string text in current V syntax.
+	assert occ['name'].len == 2
 	// The declaration and its use inside a compound interpolation expression.
 	assert occ['other'].len == 2
 	assert occ['to_upper'].len == 1
@@ -595,6 +596,41 @@ fn test_extract_identifier_occurrences_indexes_string_interpolations() {
 	assert 'ignored' !in occ
 	assert 'hello' !in occ
 	assert 'literal_name' !in occ
+}
+
+fn test_extract_identifier_occurrences_skips_raw_string_interpolation_text() {
+	content := "fn helper() {}\nfn plain() {}\nfn main() {\n\traw := r'\${helper()} \$helper'\n\ttext := '\$plain \${helper()}'\n}\n"
+	occ := extract_identifier_occurrences(content, .utf16)
+
+	// Raw strings suppress all interpolation, while ordinary strings index only
+	// braced expressions.
+	assert occ['helper'].len == 2
+	assert occ['plain'].len == 1
+	assert 'r' !in occ
+}
+
+fn test_extract_identifier_occurrences_skips_c_string_prefixes() {
+	content := "fn c() {}\nfn main() {\n\ttext := c'hello'\n\tprintln(text)\n}\n"
+	occ := extract_identifier_occurrences(content, .utf16)
+
+	// The declaration is indexed, but the C-string prefix and contents are not
+	// references to top-level declarations with matching names.
+	assert occ['c'].len == 1
+	assert occ['c'][0].line == 0
+	assert 'hello' !in occ
+}
+
+fn test_extract_identifier_occurrences_tracks_multiline_interpolations() {
+	content := "fn helper() int { return 1 }\nfn main() {\n\tvalue := 1\n\ttext := 'result \${match value {\n\t\t1 {\n\t\t\thelper()\n\t\t}\n\t\telse { 0 }\n\t}} literal_helper'\n\thelper()\n}\n"
+	occ := extract_identifier_occurrences(content, .utf16)
+
+	// Nested braces remain part of the interpolation across line boundaries.
+	// Scanning resumes as literal text after its matching closing brace.
+	assert occ['helper'].len == 3
+	assert occ['helper'][1].line == 5
+	assert occ['helper'][2].line == 9
+	assert occ['value'].len == 2
+	assert 'literal_helper' !in occ
 }
 
 fn test_extract_identifier_occurrences_skips_multiline_block_comments() {
@@ -608,6 +644,39 @@ fn test_extract_identifier_occurrences_skips_multiline_block_comments() {
 	// Only the declaration and real call are candidates; repeated comment text
 	// cannot push rename over its semantic candidate cap.
 	assert occ['target'].len == 2
+}
+
+fn test_extract_identifier_occurrences_tracks_nested_block_comments() {
+	content := 'module main\n/* outer\n\t/* inner */\n\tfn helper() {}\n*/\nfn main() { helper() }\n'
+	occ := extract_identifier_occurrences(content, .utf16)
+
+	// Closing the nested comment must not expose the remainder of the outer
+	// comment to identifier indexing.
+	assert occ['helper'].len == 1
+	assert occ['helper'][0].line == 5
+}
+
+fn test_extract_identifier_occurrences_skips_multiline_strings() {
+	content := "module main\n\nfn helper() {}\n\nfn main() {\n\ttext := 'first\nhelper\nlast'\n\tprintln(text)\n}\n"
+	occ := extract_identifier_occurrences(content, .utf16)
+
+	// The declaration is indexed, but the continuation line inside the literal
+	// is not treated as code. Scanning resumes after the closing quote.
+	assert occ['helper'].len == 1
+	assert occ['helper'][0].line == 2
+	assert occ['println'].len == 1
+	assert occ['text'].len == 2
+}
+
+fn test_extract_identifier_occurrences_skips_rune_literals() {
+	content := 'fn f() {}\nfn main() {\n\tch := `f`\n\tprintln(ch)\n}\n'
+	occ := extract_identifier_occurrences(content, .utf16)
+
+	// The function declaration is indexed, but the matching rune contents are
+	// literal text rather than a reference to that function.
+	assert occ['f'].len == 1
+	assert occ['f'][0].line == 0
+	assert occ['ch'].len == 2
 }
 
 fn test_occurrences_for_caches_by_fingerprint() {
@@ -951,15 +1020,14 @@ fn test_index_large_multifile_project_stays_complete_and_incremental() {
 
 	changed_path := os.join_path(root, 'module_14', 'file_0749.v')
 	changed_uri := path_to_uri(changed_path)
-	os.write_file(changed_path,
-		'module large_index_test\n\nfn stress_symbol_reindexed() int {\n\treturn 749\n}\n') or {
+	os.write_file(changed_path, 'module large_index_test\n\nfn stress_symbol_reindexed() int {\n\treturn 749\n}\n') or {
 		assert false, 'rewrite stress file failed: ${err}'
 		return
 	}
 	app.on_did_change_watched_files(Request{
 		params: json2.encode(DidChangeWatchedFilesParams{
 			changes: [FileEvent{
-				uri:        changed_uri
+				uri: changed_uri
 				event_type: 2
 			}]
 		})
@@ -999,8 +1067,7 @@ fn test_large_vlang_v_workspace_from_env() {
 
 	if main_uri, main_symbol := app.find_indexed_fn('main', false, [
 		os.join_path(root, 'cmd'),
-	])
-	{
+	]) {
 		assert main_uri.starts_with(path_to_uri(os.join_path(root, 'cmd')))
 		assert main_symbol.name == 'main'
 	} else {
