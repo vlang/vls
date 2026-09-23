@@ -46,27 +46,19 @@ Open a folder containing a V project, then open a `.v` file. The Sublime status 
 that VLS has started. Use `Tools > Developer > Show Scope Name` to confirm that the file's base
 scope is `source.v` if the server does not start.
 
-### Building the VS Code VLS extension
+### VS Code
 
-```
-cd vscode-extension
-npm install
-npm run build
-```
+Install the
+[V extension](https://marketplace.visualstudio.com/items?itemName=vlanguage.vscode-vlang)
+from the Visual Studio Marketplace. Its source and build instructions are in
+[vlang/vscode-vlang](https://github.com/vlang/vscode-vlang).
 
-You should get a `vls-{version}.vsix` file.
-
-Or download the `vsix` file from here:
-
-https://github.com/vlang/vls/releases/
-
-In VS Code run `Extensions: Install from VSIX...`
+Build VLS with `v .` and make the `vls` binary available in VS Code's `PATH`, or set
+`v.vls.command` to its path. Set `v.executablePath` if the V compiler is not on that `PATH`.
 
 The extension includes `V: Build`, `V: Run`, and `V: Test` in the Command Palette and in
-`Tasks: Run Task`. Runnable CodeLens actions open a task terminal so program and compiler output is
-always visible. Set `vls.vCommand` when the V compiler is not available through VS Code's `PATH`.
-Test tasks also visualize line coverage: covered executable lines are green and uncovered lines are
-red. The visualization can be disabled with `vls.coverage.enabled`.
+`Tasks: Run Task`. Runnable CodeLens actions show their output in a task terminal. Test tasks
+also visualize line coverage; set `v.vls.coverage.enabled` to `false` to turn that off.
 
 ### Features
 
