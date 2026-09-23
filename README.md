@@ -14,7 +14,7 @@ Otherwise, you can set the path to the vls binary in your editor's settings.
 
 - [VS Code](#vs-code)
 
-[Other editor?][EDITORS.md]
+[Other editor?](EDITORS.md)
 
 ### Sublime Text
 
