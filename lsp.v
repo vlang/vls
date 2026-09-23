@@ -2,6 +2,8 @@
 // Use of this source code is governed by a GPL license that can be found in the LICENSE file.
 module main
 
+import json2
+
 // Request represents an LSP request sent from the client.
 struct Request {
 	id      int
@@ -757,9 +759,16 @@ struct VersionedTextDocumentIdentifier {
 	version ?i64
 }
 
+// OptionalVersionedTextDocumentIdentifier requires an explicit null version
+// for closed documents in a WorkspaceEdit. An omitted version is invalid LSP.
+struct OptionalVersionedTextDocumentIdentifier {
+	uri     string
+	version json2.Any
+}
+
 // TextDocumentEdit represents a list of edits applied to a versioned document.
 struct TextDocumentEdit {
-	text_document VersionedTextDocumentIdentifier @[json: 'textDocument']
+	text_document OptionalVersionedTextDocumentIdentifier @[json: 'textDocument']
 	edits         []TextEdit
 }
 

@@ -4698,12 +4698,12 @@ fn (mut app App) handle_rename(request Request) Response {
 	}
 	// Build documentChanges list from the same data.
 	for uri, edits in changes {
-		mut version := ?i64(none)
+		mut version := json2.Any(json2.null)
 		if uri in app.open_files_versions {
-			version = app.open_files_versions[uri]
+			version = json2.Any(app.open_files_versions[uri])
 		}
 		doc_changes << TextDocumentEdit{
-			text_document: VersionedTextDocumentIdentifier{
+			text_document: OptionalVersionedTextDocumentIdentifier{
 				uri: uri
 				version: version
 			}
