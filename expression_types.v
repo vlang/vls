@@ -133,6 +133,23 @@ const language_members = [
 	language_method('printable', 'str', '', 'string'),
 ]
 
+// language_member_docs says what the members V gives a named type do, for their
+// hover: they have no declaration, so no documentation of their own.
+const language_member_docs = {
+	'from':      'Returns the value of the enum named `input`, a string, or with the value `input`, an integer, and an error when the enum has none.'
+	'zero':      'Returns the value with no flag set.'
+	'is_empty':  'Reports whether no flag is set.'
+	'has':       'Reports whether at least one of the flags `flag_` is set.'
+	'all':       'Reports whether all the flags `flag_` are set.'
+	'set':       'Sets the flags `flag_`.'
+	'set_all':   'Sets every flag.'
+	'clear':     'Clears the flags `flag_`.'
+	'clear_all': 'Clears every flag.'
+	'toggle':    'Toggles the flags `flag_`.'
+	'str':       'Returns the value as a string, the way `println` prints it.'
+	'type_name': 'Returns the name of the type the value holds.'
+}
+
 // language_member_items renders what language_members gives a type of the given
 // kinds: its static functions (`Color.from`) or the members of its values.
 fn language_member_items(typ string, kinds []string, statics bool) []Detail {

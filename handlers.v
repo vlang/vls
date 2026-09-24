@@ -13,8 +13,8 @@ const v_keywords = ['asm', 'as', 'assert', 'atomic', 'break', 'const', 'continue
 	'pub', 'return', 'rlock', 'select', 'shared', 'sizeof', 'spawn', 'static', 'struct', 'true',
 	'type', 'typeof', 'union', 'unsafe', 'volatile']!
 
-const v_builtins = ['close', 'copy', 'eprintln', 'eprint', 'error', 'error_with_code', 'exit',
-	'flush_stderr', 'flush_stdout', 'free', 'isnil', 'panic', 'print', 'println']!
+const v_builtins = ['copy', 'eprintln', 'eprint', 'error', 'error_with_code', 'exit', 'flush_stderr',
+	'flush_stdout', 'free', 'isnil', 'panic', 'print', 'print_backtrace', 'println']!
 
 const v_builtin_types = ['any', 'array', 'bool', 'byte', 'byteptr', 'chan', 'char', 'charptr', 'f32',
 	'f64', 'i8', 'i16', 'i32', 'i64', 'int', 'isize', 'IError', 'map', 'rune', 'string', 'thread',
@@ -663,6 +663,9 @@ fn (mut app App) member_selector_hover(uri string, position Position) ?Hover {
 	if receiver == '' {
 		return none
 	}
+	if static_member := app.language_static_hover(uri, content, receiver, name) {
+		return static_member
+	}
 	typ := app.expression_type(uri, content, receiver, position)
 	if typ == '' {
 		return none
@@ -671,7 +674,14 @@ fn (mut app App) member_selector_hover(uri string, position Position) ?Hover {
 	// The declared type, not the one member lookup uses: that one has lost its
 	// `&`, `?` and `!`.
 	members := app.type_members(uri, content, member_receiver_type(typ))
-	field := members.field_declared_types[name] or { return none }
+	field := members.field_declared_types[name] or {
+		if method := app.language_method_hover(uri, content, member_receiver_type(typ), name,
+			members)
+		{
+			return method
+		}
+		return none
+	}
 	if field == '' {
 		return none
 	}
@@ -679,6 +689,59 @@ fn (mut app App) member_selector_hover(uri string, position Position) ?Hover {
 		contents: MarkupContent{
 			kind:  'markdown'
 			value: '```v\n${name} ${field}\n```'
+		}
+	}
+}
+
+// language_static_hover answers for `Type.name` when `name` is a static function
+// that V gives the type, as `Color.from`, and not one the type declares: it has
+// no declaration to show, and the compiler has nothing to say about it.
+fn (mut app App) language_static_hover(uri string, content string, receiver string, name string) ?Hover {
+	items := app.type_static_completions(uri, content, receiver) or { return none }
+	found := items.filter(it.label == name)
+	if found.len == 0 {
+		return none
+	}
+	decl := app.type_declaration(uri, content, receiver)
+	for item in language_member_items(receiver, declaration_member_kinds(decl), true) {
+		if item.label == name && item.detail == found[0].detail {
+			return language_member_hover(name, item.detail)
+		}
+	}
+	return none
+}
+
+// language_method_hover answers for `value.name` when `name` is a method that V
+// gives the named type of the value, as `has` of a flag enum, and not one the
+// type declares or embeds, which `members` lists first. The compiler describes
+// it, but without the receiver, and the documentation found for its name is the
+// one of another type's method. The members of arrays, maps and channels are
+// left to the compiler: vlib/builtin declares and documents most of them.
+fn (mut app App) language_method_hover(uri string, content string, typ string, name string, members IndexedCompletionResult) ?Hover {
+	if composite_member_kinds(typ).len > 0 {
+		return none
+	}
+	found := members.items.filter(it.label == name)
+	if found.len == 0 {
+		return none
+	}
+	decl := app.type_declaration(uri, content, typ)
+	for item in language_member_items(typ, declaration_member_kinds(decl), false) {
+		if item.label == name && item.kind == 2 && item.detail == found[0].detail {
+			return language_member_hover(name, item.detail)
+		}
+	}
+	return none
+}
+
+// language_member_hover shows a member V gives a type: its signature, and what
+// it does.
+fn language_member_hover(name string, signature string) Hover {
+	doc := language_member_docs[name] or { '' }
+	return Hover{
+		contents: MarkupContent{
+			kind:  'markdown'
+			value: '```v\n${signature}\n```' + if doc == '' { '' } else { '\n\n${doc}' }
 		}
 	}
 }
@@ -909,8 +972,15 @@ fn (mut app App) indexed_completions(uri string, position Position) IndexedCompl
 	}
 	line := lines[position.line]
 	if is_import_completion_line(line) {
+		mut items := get_import_completions(line, os.dir(uri_to_path(uri)))
+		listed := items.map(it.label)
+		for item in app.import_line_module_completions(uri_to_path(uri), line) {
+			if item.label !in listed {
+				items << item
+			}
+		}
 		return IndexedCompletionResult{
-			items: get_import_completions(line, os.dir(uri_to_path(uri)))
+			items: items
 		}
 	}
 	if position.char > 0 {
@@ -958,7 +1028,7 @@ fn (mut app App) indexed_completions(uri string, position Position) IndexedCompl
 	}
 
 	mut details := app.callback_argument_completions(uri, content, lines, position)
-	details << make_keyword_completions()
+	details << app.with_builtin_calls(make_keyword_completions())
 	mut seen_labels := map[string]bool{}
 	for detail in details {
 		seen_labels[detail.label] = true
@@ -991,6 +1061,12 @@ fn (mut app App) indexed_completions(uri string, position Position) IndexedCompl
 			}
 		}
 	}
+	// Modules not imported yet: accepting one also adds its `import` line.
+	for detail in app.module_import_completions(uri, content, position) {
+		if detail.label !in seen_labels {
+			details << detail
+		}
+	}
 	return IndexedCompletionResult{
 		items: details
 		use_compiler: use_compiler
@@ -1005,8 +1081,8 @@ fn is_import_completion_line(line string) bool {
 
 fn starts_binding_scope_header(source string) bool {
 	trimmed := source.trim_space()
-	return trimmed.starts_with('for ') || trimmed.starts_with('if ')
-		|| trimmed.starts_with('else if ')
+	return trimmed.starts_with('for ') || trimmed.starts_with('\$for ')
+		|| trimmed.starts_with('if ') || trimmed.starts_with('else if ')
 }
 
 fn binding_scope_header_ends_with_literal_type(source string) bool {
@@ -1581,13 +1657,14 @@ fn local_declaration_names(code string) []string {
 					names << name
 				}
 			}
-		} else if statement.starts_with('for ') {
+		} else if statement.starts_with('for ') || statement.starts_with('\$for ') {
 			mut in_idx := statement.index(' in ') or { -1 }
 			if in_idx < 0 && statement.ends_with(' in') {
 				in_idx = statement.len - 3
 			}
-			if in_idx >= 0 {
-				for name in binding_identifiers(statement[4..in_idx]) {
+			names_start := statement.index(' ') or { 0 } + 1
+			if in_idx >= names_start {
+				for name in binding_identifiers(statement[names_start..in_idx]) {
 					if name !in names {
 						names << name
 					}
@@ -1603,7 +1680,22 @@ fn starts_or_block_header(source string) bool {
 	return trimmed == 'or' || trimmed.ends_with(' or')
 }
 
-fn opens_implicit_it_scope(source string, open_paren int) bool {
+// implicit_method_bindings are the names an array method gives the expression in
+// its parentheses: `it`, the element, to a predicate or a callback, and `a` and
+// `b`, the two elements compared, to a sort.
+const implicit_method_bindings = {
+	'all':    ['it']
+	'any':    ['it']
+	'count':  ['it']
+	'filter': ['it']
+	'map':    ['it']
+	'sort':   ['a', 'b']
+	'sorted': ['a', 'b']
+}
+
+// implicit_call_bindings returns the names that the call opened by the `(` at
+// `open_paren` gives its arguments (see implicit_method_bindings).
+fn implicit_call_bindings(source string, open_paren int) []string {
 	mut name_end := open_paren
 	for name_end > 0 && source[name_end - 1] in [` `, `\t`, `\r`, `\n`] {
 		name_end--
@@ -1613,21 +1705,31 @@ fn opens_implicit_it_scope(source string, open_paren int) bool {
 		name_start--
 	}
 	if name_start == name_end || name_start == 0 || source[name_start - 1] != `.` {
-		return false
+		return []
 	}
-	return source[name_start..name_end] in ['all', 'any', 'filter', 'map']
+	return implicit_method_bindings[source[name_start..name_end]] or { [] }
 }
 
-fn has_implicit_it_scope_at_cursor(source string) bool {
-	mut scopes := []bool{}
+// implicit_bindings_at_cursor returns the names that the calls still open at the
+// end of `source` give their arguments.
+fn implicit_bindings_at_cursor(source string) []string {
+	mut scopes := [][]string{}
 	for index, c in source {
 		if c == `(` {
-			scopes << opens_implicit_it_scope(source, index)
+			scopes << implicit_call_bindings(source, index)
 		} else if c == `)` && scopes.len > 0 {
 			scopes.delete_last()
 		}
 	}
-	return scopes.any(it)
+	mut names := []string{}
+	for scope in scopes {
+		for name in scope {
+			if name !in names {
+				names << name
+			}
+		}
+	}
+	return names
 }
 
 struct LocalBinding {
@@ -1688,6 +1790,10 @@ fn (app &App) local_scope_bindings(content string, position Position) []LocalBin
 	mut pending_closure_line := -1
 	mut literal_brace_depth := 0
 	mut active_code_lines := []string{}
+	// Which open blocks are those of `if x := call() {`, and whether the block
+	// closed last was one: the `else` after it gets `err`.
+	mut guard_blocks := []bool{}
+	mut closed_guard_block := false
 	for line_idx in 0 .. position.line + 1 {
 		raw_line := if line_idx == position.line {
 			byte_col := encoded_col_to_byte(lines[line_idx], position.char, app.position_encoding)
@@ -1734,7 +1840,8 @@ fn (app &App) local_scope_bindings(content string, position Position) []LocalBin
 			}
 			segment_names := local_declaration_names(segment)
 			binding_scope_header := c == `{` && starts_binding_scope_header(segment)
-			error_scope_header := c == `{` && starts_or_block_header(segment)
+			error_scope_header := c == `{`
+				&& (starts_or_block_header(segment) || (closed_guard_block && segment.trim_space() == 'else'))
 			closure_source := if pending_closure_header != '' {
 				pending_closure_header + '\n' + segment
 			} else {
@@ -1772,7 +1879,10 @@ fn (app &App) local_scope_bindings(content string, position Position) []LocalBin
 				}
 			}
 			if c == `{` {
+				closed_guard_block = false
 				if body_started {
+					guard_blocks << (binding_scope_header && segment.contains(':=')
+						&& !segment.trim_space().starts_with('for '))
 					scopes << []LocalBinding{}
 					if block_names.len > 0 {
 						for name in block_names {
@@ -1805,6 +1915,7 @@ fn (app &App) local_scope_bindings(content string, position Position) []LocalBin
 				pending_closure_line = -1
 			} else if body_started && scopes.len > 1 {
 				scopes.delete_last()
+				closed_guard_block = guard_blocks.len > 0 && guard_blocks.pop()
 			}
 			segment_start = col + 1
 		}
@@ -1853,19 +1964,22 @@ fn (app &App) local_scope_bindings(content string, position Position) []LocalBin
 			}
 		}
 	}
-	mut has_explicit_it := false
-	for scope in scopes {
-		if scope.any(it.name == 'it') {
-			has_explicit_it = true
-			break
+	// The names a call such as `filter` or `sort` gives its arguments, unless the
+	// code declares one itself.
+	for name in implicit_bindings_at_cursor(active_code_lines.join('\n')) {
+		mut declared := false
+		for scope in scopes {
+			if scope.any(it.name == name) {
+				declared = true
+				break
+			}
 		}
-	}
-	if has_implicit_it_scope_at_cursor(active_code_lines.join('\n')) && scopes.len > 0
-		&& !has_explicit_it {
-		scopes[scopes.len - 1] << LocalBinding{
-			name: 'it'
-			line: position.line
-			column: -1
+		if !declared && scopes.len > 0 {
+			scopes[scopes.len - 1] << LocalBinding{
+				name:   name
+				line:   position.line
+				column: -1
+			}
 		}
 	}
 	mut bindings := []LocalBinding{}
@@ -3643,7 +3757,18 @@ fn (app &App) resolve_indexed_import_module_dir(module_path string, work_dir str
 			return source_relative_dir
 		}
 	}
-	return resolve_import_module_dir(module_path, work_dir)
+	found := resolve_import_module_dir(module_path, work_dir)
+	if found != '' {
+		return found
+	}
+	// Packages installed with `v install`.
+	for vmodules in os.vmodules_paths() {
+		installed := os.join_path(vmodules, rel)
+		if os.is_dir(installed) {
+			return installed
+		}
+	}
+	return ''
 }
 
 fn module_type_completion_name(declaration string) string {
@@ -4011,6 +4136,7 @@ fn (mut app App) on_did_close(request Request) {
 		app.open_files.delete(uri)
 		app.bump_generation(uri)
 	}
+	app.inlay_hint_cache.delete(uri)
 	if uri in app.open_files_versions {
 		app.open_files_versions.delete(uri)
 	}
@@ -4047,6 +4173,12 @@ fn (mut app App) build_diagnostics_notification(uri string, content string) Noti
 	}
 	v_errors := app.run_v_check(uri, content)
 	log('run_v_check errors:${v_errors}')
+	return app.diagnostics_notification_for(uri, content, v_errors)
+}
+
+// diagnostics_notification_for turns the compiler's errors for one file into
+// the notification that publishes them.
+fn (mut app App) diagnostics_notification_for(uri string, content string, v_errors []JsonError) Notification {
 	lines := content.split_into_lines()
 	mut diagnostics := []LSPDiagnostic{}
 	mut seen_positions := map[string]bool{}
@@ -4271,68 +4403,35 @@ fn (mut app App) on_will_save_wait_until(request Request) Response {
 // and placeholder text for the identifier under the cursor, or an empty result
 // when the cursor is not on a renameable symbol.
 fn (mut app App) handle_prepare_rename(request Request) Response {
+	return app.prepare_rename_request(request) or {
+		Response{
+			id:     request.id
+			result: 'null'
+		}
+	}
+}
+
+// prepare_rename_request answers with the name a rename at the position would
+// change, or with the reason the rename cannot be done: a keyword, a symbol
+// declared outside the project, one the compiler cannot resolve.
+fn (mut app App) prepare_rename_request(request Request) !Response {
 	params := json2.decode[TextDocumentPositionParams](request.params) or {
-		$if debug {
-			log('Failed to decode TextDocumentPositionParams for prepareRename: ${err}')
-		}
-		return Response{
-			id: request.id
-			result: 'null'
-		}
+		return error('invalid rename parameters')
 	}
-	real_path := uri_to_path(params.text_document.uri)
-	content := app.open_files[params.text_document.uri] or { os.read_file(real_path) or { '' } }
-	lines := content.split_into_lines()
-	if params.position.line < 0 || params.position.line >= lines.len {
-		return Response{
-			id: request.id
-			result: 'null'
-		}
-	}
-	line_text := lines[params.position.line]
-	start, end := find_word_bounds_at_col(line_text, params.position.char, app.position_encoding)
-	if start < 0 || end <= start {
-		return Response{
-			id: request.id
-			result: 'null'
-		}
-	}
-	symbol := substr_by_char_bounds(line_text, start, end, app.position_encoding)
-	if symbol == '' {
-		return Response{
-			id: request.id
-			result: 'null'
-		}
-	}
-	// Identifiers used for rename must start with a letter or underscore.
-	first := symbol[0]
-	if !is_ident_start(first) {
-		return Response{
-			id: request.id
-			result: 'null'
-		}
-	}
-	// Reject V keywords and built-in function names — they cannot be renamed.
-	if symbol in v_keywords || symbol in v_builtins {
-		return Response{
-			id: request.id
-			result: 'null'
-		}
+	uri := params.text_document.uri
+	scope := app.index_scope_for_uri(uri)
+	app.ensure_index_scope(scope)
+	mut cache := map[string]?Location{}
+	target := app.rename_target(uri, params.position.line, params.position.char, scope, mut
+		cache)!
+	word := app.word_location(uri, params.position.line, params.position.char) or {
+		return error('there is no symbol to rename here')
 	}
 	return Response{
-		id: request.id
+		id:     request.id
 		result: PrepareRenameResult{
-			range: LSPRange{
-				start: Position{
-					line: params.position.line
-					char: start
-				}
-				end: Position{
-					line: params.position.line
-					char: end
-				}
-			}
-			placeholder: symbol
+			range:       word.range
+			placeholder: target.symbol
 		}
 	}
 }
@@ -4611,65 +4710,38 @@ fn (mut app App) find_references(request Request) Response {
 
 // handle_rename handles the LSP rename request, returning edits to rename a symbol.
 fn (mut app App) handle_rename(request Request) Response {
-	params := json2.decode[RenameParams](request.params) or {
-		$if debug {
-			log('Failed to decode RenameParams: ${err}')
-		}
-		return Response{
-			id: request.id
+	return app.rename_request(request) or {
+		log('rename: ${err.msg()}')
+		Response{
+			id:     request.id
 			result: 'null'
 		}
+	}
+}
+
+// rename_request answers a rename with every edit it takes, or with the reason
+// it cannot be done safely.
+fn (mut app App) rename_request(request Request) !Response {
+	params := json2.decode[RenameParams](request.params) or {
+		return error('invalid rename parameters')
 	}
 	path := params.text_document.uri
-	line := params.position.line
-	col := params.position.char
 	new_name := params.new_name
-
-	// Get symbol name at cursor
-	symbol := app.get_word_at_position(path, line, col)
-	if symbol == '' {
-		return Response{
-			id: request.id
-			result: 'null'
-		}
-	}
-
 	// A destructive rename is safe only when the bounded index covers every
 	// source in the project/module. Oversized, unreadable, or count-capped files
 	// may contain additional references that must not be left unchanged.
 	scope := app.index_scope_for_uri(path)
 	app.ensure_index_scope(scope)
 	if !app.index_is_complete_for_scope(scope) {
-		log('rename: source index is incomplete; refusing a partial workspace edit')
-		return Response{
-			id: request.id
-			result: 'null'
-		}
+		return error('this project is only partly indexed (a file is too large or unreadable), so a rename could miss occurrences')
 	}
-
-	// Rename is destructive, so it must be driven by a stable semantic symbol
-	// identity. If we cannot resolve the symbol under the cursor to a compiler
-	// definition anchor, we refuse rather than fall back to lexical same-name
-	// matching, which would rename unrelated symbols in other scopes/modules
-	// (P1-04).
-	anchor := app.resolve_symbol_anchor(path, line, col) or {
-		log('rename: could not resolve a semantic anchor for "${symbol}"; refusing lexical rename (P1-04)')
-		return Response{
-			id: request.id
-			result: 'null'
-		}
-	}
-	// Rename is destructive: never accept the scope-unsafe lexical fallback. Past
-	// the candidate cap search_symbol_in_dirs_semantic returns none, and an
-	// unresolved rename is refused below rather than editing unrelated symbols.
-	locations := app.search_symbol_in_dirs_semantic(symbol, anchor, scope, request.id, false)
-	if locations.len == 0 {
-		log('rename: no scope-safe occurrences for "${symbol}" (unresolved or above candidate cap); refusing')
-		return Response{
-			id: request.id
-			result: 'null'
-		}
-	}
+	mut cache := map[string]?Location{}
+	target := app.rename_target(path, params.position.line, params.position.char, scope, mut
+		cache)!
+	symbol := target.symbol
+	check_new_name(symbol, new_name)!
+	app.check_implicit_name(target, new_name)!
+	locations := app.rename_locations(target, scope, request.id, mut cache)!
 
 	// Build WorkspaceEdit with both `changes` (compat) and `documentChanges` (preferred).
 	mut changes := map[string][]TextEdit{}
@@ -5867,6 +5939,10 @@ fn find_declaration_line(lines []string, symbol string) int {
 fn extract_doc_comment(lines []string, decl_line int) string {
 	mut comments := []string{}
 	mut i := decl_line - 1
+	// The attributes of a declaration sit between it and its documentation.
+	for i >= 0 && lines[i].trim_space().starts_with('@[') {
+		i--
+	}
 	for i >= 0 {
 		trimmed := lines[i].trim_space()
 		if trimmed.starts_with('//') {
@@ -6003,9 +6079,8 @@ fn get_import_completions(line string, work_dir string) []Detail {
 			if !os.is_dir(full_path) {
 				continue
 			}
-			v_files := os.ls(full_path) or { [] }
-			has_v := v_files.any(it.ends_with('.v') && !it.ends_with('_test.v'))
-			if !has_v {
+			// a folder is a module to import when its files declare that module
+			if entry == 'main' || declared_module_of_dir(full_path) != entry {
 				continue
 			}
 			results << Detail{
@@ -6303,6 +6378,16 @@ fn (mut app App) handle_inlay_hints(request Request) Response {
 	start_line := params.range.start.line
 	end_line := params.range.end.line
 
+	// The compiler knows the type of every variable and the parameter names of
+	// every call; the source heuristics below only run when it cannot answer.
+	if compiler_hints := app.compiler_inlay_hints(uri, content) {
+		return Response{
+			id:     request.id
+			result: compiler_hints.filter(it.position.line >= start_line
+				&& it.position.line <= end_line)
+		}
+	}
+
 	// Build fn index lazily: current file + open files + vlib modules imported in this file
 	file_path := uri_to_path(uri)
 	working_dir := os.dir(file_path)
@@ -6434,6 +6519,46 @@ fn (mut app App) handle_inlay_hints(request Request) Response {
 		id: request.id
 		result: hints
 	}
+}
+
+struct CachedInlayHints {
+	stamp string
+	hints []InlayHint
+}
+
+// compiler_inlay_hints returns every inlay hint of the document, computed by the
+// compiler's `ih^` line-info mode, or none when the compiler gave no answer
+// (e.g. on a syntax error). Editors ask again on every scroll, so the answer is
+// reused until this document or any other open one changes.
+fn (mut app App) compiler_inlay_hints(uri string, content string) ?[]InlayHint {
+	stamp := app.inlay_hint_stamp(uri, content)
+	if cached := app.inlay_hint_cache[uri] {
+		if cached.stamp == stamp {
+			return cached.hints
+		}
+	}
+	result := app.run_v_line_info(.inlay_hint, uri, '1:ih^1')
+	if result is []InlayHint {
+		app.inlay_hint_cache[uri] = CachedInlayHints{
+			stamp: stamp
+			hints: result
+		}
+		return result
+	}
+	return none
+}
+
+// inlay_hint_stamp identifies the state the hints were computed from: the
+// document's text, the versions of all open documents, and the revision of its
+// project (bumped when a file that is not open changes on disk), since a
+// signature edited in another file changes the parameter names shown here.
+fn (app &App) inlay_hint_stamp(uri string, content string) string {
+	mut versions := []string{cap: app.open_files_versions.len}
+	for open_uri, version in app.open_files_versions {
+		versions << '${open_uri}=${version}'
+	}
+	versions.sort()
+	return '${app.project_generation(uri)}\n${versions.join(';')}\n${content}'
 }
 
 // infer_type_from_literal returns the V type name for a simple literal RHS value,
@@ -6901,29 +7026,22 @@ fn (mut app App) search_symbol_in_dirs(symbol string, request_id int) []Location
 // encoding; it is converted to the byte column the compiler expects (P0-01).
 // Returns none when the definition cannot be resolved.
 fn (mut app App) resolve_symbol_anchor(uri string, line int, ch int) ?Location {
-	mut probe_cols := []int{}
-	// The compiler's gd^ lookup can misclassify a probe exactly on the first byte
-	// of an identifier as the enclosing call. Indexed candidates always use that
-	// first position, so probe two units into the identifier (or one for a two-unit
-	// name). A one-unit or midpoint probe can be misclassified as the enclosing
-	// call in nested expressions such as `println(shared_value())`.
-	content := app.open_files[uri] or { os.read_file(uri_to_path(uri)) or { '' } }
-	lines := content.split_into_lines()
-	if line >= 0 && line < lines.len {
-		start, end := find_word_bounds_at_col(lines[line], ch, app.position_encoding)
-		inner_offset := if end - start > 2 { 2 } else { 1 }
-		inner := start + inner_offset
-		if ch == start && inner > start && inner < end {
-			probe_cols << inner
-		}
-	}
-	if probe_cols.len == 0 {
-		probe_cols << ch
-	}
-	for probe_col in probe_cols {
+	return app.resolve_symbol_anchor_by(uri, line, ch, false)
+}
+
+// resolve_symbol_anchor_by is resolve_symbol_anchor, asking a compiler process of
+// its own instead of the persistent compiler when `one_shot` is set.
+fn (mut app App) resolve_symbol_anchor_by(uri string, line int, ch int, one_shot bool) ?Location {
+	for probe_col in app.anchor_probe_cols(uri, line, ch) {
 		byte_col := app.client_col_to_byte_col(uri, line, probe_col)
 		line_info := '${line + 1}:gd^${byte_col}'
-		result := app.run_v_line_info(.definition, uri, line_info)
+		// From the program that imports the file's module, which instantiates
+		// its generic functions.
+		result := if one_shot {
+			app.run_v_line_info_once(.definition, uri, line_info, app.program_root(uri_to_path(uri)))
+		} else {
+			app.run_v_line_info(.definition, uri, line_info)
+		}
 		if result is Location {
 			loc := result as Location
 			if loc.uri != '' {
@@ -6932,6 +7050,33 @@ fn (mut app App) resolve_symbol_anchor(uri string, line int, ch int) ?Location {
 		}
 	}
 	return none
+}
+
+// anchor_probe_cols returns the columns to ask the compiler's gd^ lookup at for
+// the name at `ch` of `line`, in the order to try them. The lookup can
+// misclassify a probe exactly on the first byte of an identifier as the
+// enclosing call. Indexed candidates always use that first position, so probe
+// two units into the identifier (or one for a two-unit name). A one-unit or
+// midpoint probe can be misclassified as the enclosing call in nested
+// expressions such as `println(shared_value())`.
+fn (app &App) anchor_probe_cols(uri string, line int, ch int) []int {
+	mut probe_cols := []int{}
+	content := app.open_files[uri] or { os.read_file(uri_to_path(uri)) or { '' } }
+	lines := content.split_into_lines()
+	if line >= 0 && line < lines.len {
+		start, end := find_word_bounds_at_col(lines[line], ch, app.position_encoding)
+		inner_offset := if end - start > 2 { 2 } else { 1 }
+		inner := start + inner_offset
+		// A one-unit name has no inside to probe: right after it, as in the `x` of
+		// `println(x)`, the lookup still finds the name and not the enclosing call.
+		if ch == start && inner > start && inner <= end {
+			probe_cols << inner
+		}
+	}
+	if probe_cols.len == 0 || probe_cols[0] == ch + 1 {
+		probe_cols << ch
+	}
+	return probe_cols
 }
 
 fn anchor_cache_key(uri string, line int, ch int) string {
@@ -7033,6 +7178,7 @@ fn (mut app App) search_symbol_in_dirs_semantic(symbol string, anchor Location, 
 
 	mut locations := []Location{}
 	mut anchor_cache := map[string]?Location{}
+	app.v3_prefetch_anchors(candidates, mut anchor_cache)
 	for cand in candidates {
 		if request_id in app.cancelled_requests {
 			return locations
@@ -7370,6 +7516,63 @@ fn make_keyword_completions() []Detail {
 		}
 	}
 	return items
+}
+
+// The keywords written as calls: `dump`, which V documents as a builtin
+// function, and the ones it answers at compile time. Their completion inserts
+// the parentheses a function's does.
+const v_builtin_keyword_functions = ['dump', 'isreftype', 'sizeof', 'typeof']
+
+// with_builtin_calls gives V's builtin functions among `items` what every other
+// function has: the signature that vlib/builtin declares, and a completion that
+// inserts the call. One that vlib does not declare, as `dump`, which the
+// compiler provides, still inserts its parentheses.
+fn (mut app App) with_builtin_calls(items []Detail) []Detail {
+	declared := app.builtin_call_items()
+	mut out := []Detail{cap: items.len}
+	for item in items {
+		if item.label !in v_builtins && item.label !in v_builtin_keyword_functions {
+			out << item
+		} else if call := declared[item.label] {
+			out << call
+		} else {
+			out << Detail{
+				...item
+				insert_text:        '${item.label}(\$0)'
+				insert_text_format: 2
+			}
+		}
+	}
+	return out
+}
+
+// builtin_call_items returns V's builtin functions (v_builtins) as completion
+// items, from their declarations in vlib/builtin, read once per vlib. It reads
+// the declarations that a flag can leave out too, as `@[if !noprintln ?]` does
+// println: without the flag, that one is what a program calls.
+fn (mut app App) builtin_call_items() map[string]Detail {
+	dir := os.join_path(find_v_dir(), 'vlib', 'builtin')
+	if dir !in app.builtin_calls_cache {
+		mut items := map[string]Detail{}
+		mut files := os.ls(dir) or { []string{} }
+		files.sort()
+		for file in files {
+			if !file.ends_with('.v') || file.ends_with('_test.v') || file.ends_with('.js.v') {
+				continue
+			}
+			content := os.read_file(os.join_path(dir, file)) or { continue }
+			lines := source_code_lines(content)
+			unconditional := []bool{len: lines.len}
+			parsed := parse_module_member_completions_from_lines(lines, unconditional, true)
+			for item in parsed.items {
+				if item.kind == 3 && item.label in v_builtins && item.label !in items {
+					items[item.label] = item
+				}
+			}
+		}
+		app.builtin_calls_cache[dir] = items
+	}
+	return app.builtin_calls_cache[dir] or { map[string]Detail{} }
 }
 
 // handle_range_formatting handles textDocument/rangeFormatting.

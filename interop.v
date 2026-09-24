@@ -4,6 +4,7 @@ module main
 
 import json2
 import os
+import v.vmod
 import strings
 import time
 
@@ -343,6 +344,15 @@ fn compiler_refused_and_stopped(output string) bool {
 // an option notice before delegating to the established compiler.
 fn normalize_v_line_info_output(output string, method Method) string {
 	trimmed := output.trim_space()
+	if method == .inlay_hint {
+		// A single JSON line; errors and warnings may be printed around it.
+		for line in trimmed.split_into_lines() {
+			if line.starts_with('{"inlay_hints":') {
+				return line
+			}
+		}
+		return ''
+	}
 	if method in [.completion, .signature_help, .hover] {
 		start := trimmed.index('{') or { return '' }
 		end := trimmed.last_index('}') or { return '' }
@@ -363,6 +373,19 @@ fn normalize_v_line_info_output(output string, method Method) string {
 		}
 	}
 	return ''
+}
+
+// CompilerInlayHints is the output of the compiler's `-line-info file:L:ih^C` mode.
+struct CompilerInlayHints {
+	inlay_hints []CompilerInlayHint
+}
+
+struct CompilerInlayHint {
+	line    int // 0-based
+	col     int // 0-based byte column
+	label   string
+	kind    int
+	tooltip string
 }
 
 fn build_v_fmt_args(temp_file string) []string {
@@ -422,6 +445,116 @@ fn parse_v_check_diagnostics(output string, source_dir string) []JsonError {
 		}
 	}
 	return diagnostics
+}
+
+// parse_v_check_program_diagnostics reads the diagnostics V prints without a
+// position, which are about the program rather than a place in it, as a module
+// imported under a name its files do not declare. Each is placed in the files of
+// `source_dir` it names, else in `checked_file`: on the import, the module
+// declaration or the function it quotes, else on the first line.
+fn parse_v_check_program_diagnostics(output string, source_dir string, checked_file string) []JsonError {
+	mut result := []JsonError{}
+	mut seen := map[string]bool{}
+	for line in output.split_into_lines() {
+		level, message := program_diagnostic_level(line) or { continue }
+		mut targets := []string{}
+		for word in message.fields() {
+			token := word.trim('`"\'(),;').trim_right('.:')
+			if !token.ends_with('.v') || token in targets {
+				continue
+			}
+			token_path := if os.is_abs_path(token) {
+				token
+			} else {
+				os.join_path(source_dir, token)
+			}
+			if os.is_file(token_path) {
+				targets << token
+			}
+		}
+		if targets.len == 0 {
+			targets << checked_file
+		}
+		quoted := quoted_words(message)
+		// What the message is about comes first: a function it names is looked
+		// for before a module of the same name.
+		keywords := if message.contains('function') {
+			['fn ', 'pub fn ', 'import ', 'module ']
+		} else {
+			['import ', 'module ', 'fn ', 'pub fn ']
+		}
+		for target in targets {
+			path := if os.is_abs_path(target) { target } else { os.join_path(source_dir, target) }
+			line_nr, col, len := program_diagnostic_place(os.read_lines(path) or { []string{} },
+				quoted, keywords)
+			key := '${target}:${line_nr}:${message}'
+			if key in seen {
+				continue
+			}
+			seen[key] = true
+			result << JsonError{
+				path:    target
+				message: message
+				line_nr: line_nr
+				col:     col
+				len:     len
+				level:   level
+			}
+		}
+	}
+	return result
+}
+
+// program_diagnostic_level returns the level and the message of a diagnostic
+// line that has no position.
+fn program_diagnostic_level(line string) ?(string, string) {
+	for prefix in ['builder error: ', 'checker error: ', 'parser error: ', 'cgen error: ', 'error: '] {
+		if line.starts_with(prefix) {
+			return 'error', line[prefix.len..]
+		}
+	}
+	for level in ['warning', 'notice'] {
+		if line.starts_with('${level}: ') {
+			return level, line[level.len + 2..]
+		}
+	}
+	return none
+}
+
+// quoted_words returns what `message` quotes with backticks or double quotes.
+fn quoted_words(message string) []string {
+	mut words := []string{}
+	for quote in ['`', '"'] {
+		parts := message.split(quote)
+		for i := 1; i < parts.len; i += 2 {
+			if parts[i] != '' {
+				words << parts[i]
+			}
+		}
+	}
+	return words
+}
+
+// program_diagnostic_place returns the line, column and length that a diagnostic
+// quoting `words` is shown at in a file of `lines`: the first line that starts
+// with one of `keywords`, in their order, followed by one of the words, else the
+// first line.
+fn program_diagnostic_place(lines []string, words []string, keywords []string) (int, int, int) {
+	for keyword in keywords {
+		for i, line in lines {
+			trimmed := line.trim_space()
+			for word in words {
+				if !trimmed.starts_with(keyword + word) {
+					continue
+				}
+				rest := trimmed[keyword.len + word.len..]
+				if rest == '' || rest[0] in [` `, `\t`, `(`, `{`] {
+					return i + 1, line.len - line.trim_left(' \t').len + 1, trimmed.len
+				}
+			}
+		}
+	}
+	return 1, 1, if lines.len > 0 { lines[0].trim_space().len } else { 0 }
 }
 
 fn diagnostic_source_path_is_valid(path string, source_dir string) bool {
@@ -673,6 +806,31 @@ fn compilation_overlay_root(source_path string) string {
 	return work_dir
 }
 
+// compilation_work_dir returns the directory a file is checked from: its own,
+// unless the v.mod of its project lists, in `subdirs`, the subdirectory that
+// holds it. V compiles such a subdirectory as part of the program next to the
+// v.mod, as V's own directory walk does, so checking the subdirectory alone
+// misses the rest of the program and reports none of the file's diagnostics.
+fn compilation_work_dir(source_path string) string {
+	file_dir := normalize_overlay_path(os.dir(normalize_overlay_path(source_path)))
+	root := find_project_root(file_dir)
+	if root == '' {
+		return file_dir
+	}
+	program_dir := normalize_overlay_path(root)
+	if program_dir == file_dir {
+		return file_dir
+	}
+	manifest := vmod.from_file(os.join_path(program_dir, 'v.mod')) or { return file_dir }
+	for subdir in manifest.unknown['subdirs'] or { []string{} } {
+		listed := normalize_overlay_path(os.join_path(program_dir, subdir))
+		if file_dir == listed || path_is_within(file_dir, listed) {
+			return program_dir
+		}
+	}
+	return file_dir
+}
+
 // overlay_relative_path prefers the lexical hierarchy supplied by the client.
 // Canonical paths are only a fallback for equivalent aliases such as macOS
 // `/tmp` and `/private/tmp`; a nested symlink must retain its lexical segment.
@@ -696,14 +854,211 @@ fn should_use_compilation_overlay(real_path string, open_file_count int) bool {
 // prepare_compilation_overlay builds a temporary project view in which every
 // open buffer is materialized and unchanged project paths are symlinked back to
 // disk. The compiler runs in the overlaid counterpart of the source module.
+// How many directories above a module's own are searched for the program that
+// imports it, when no v.mod says where the project ends.
+const program_root_max_depth = 4
+
+// program_root returns the directory the program a file belongs to is checked
+// from, as `v .` is run there to build it. A file of module main belongs to the
+// program of its own directory, or of the v.mod root when the v.mod lists that
+// directory in `subdirs`. A file of another module belongs to the program that
+// imports the module, directly or through other local modules: the closest
+// directory above it whose module main reaches it, not past the v.mod root. A
+// module that no program here reaches is checked on its own, from its directory.
+fn (app &App) program_root(source_path string) string {
+	normalized_source := normalize_overlay_path(source_path)
+	file_dir := normalize_overlay_path(os.dir(normalized_source))
+	if get_module_name(app.source_text(normalized_source)) in ['', 'main'] {
+		return compilation_work_dir(normalized_source)
+	}
+	vmod_root := normalize_overlay_path(find_project_root(file_dir))
+	limit := if vmod_root != '' { 64 } else { program_root_max_depth }
+	mut dir := file_dir
+	for _ in 0 .. limit {
+		parent := normalize_overlay_path(os.dir(dir))
+		if parent == dir || (vmod_root != '' && !path_is_within(parent, vmod_root)) {
+			break
+		}
+		dir = parent
+		if app.program_reaches(dir, vmod_root, file_dir) {
+			return dir
+		}
+	}
+	return file_dir
+}
+
+// program_reaches reports whether the program in `dir`, if there is one there,
+// imports the module in `module_dir`, directly or through other local modules.
+fn (app &App) program_reaches(dir string, vmod_root string, module_dir string) bool {
+	mut pending := []string{}
+	mut is_program := false
+	for file in app.v_files_in(dir) {
+		content := app.source_text(file)
+		if get_module_name(content) in ['', 'main'] {
+			is_program = true
+			pending << parse_imports(content)
+		}
+	}
+	if !is_program {
+		return false
+	}
+	mut seen := map[string]bool{}
+	for pending.len > 0 {
+		module_path := pending.pop()
+		if module_path == '' || module_path in seen {
+			continue
+		}
+		seen[module_path] = true
+		imported_dir := resolve_local_module_dir(module_path, dir, vmod_root) or { continue }
+		if imported_dir == module_dir {
+			return true
+		}
+		for file in app.v_files_in(imported_dir) {
+			pending << parse_imports(app.source_text(file))
+		}
+	}
+	return false
+}
+
+// is_program_dir reports whether `dir` holds a program, files of module main,
+// rather than a library module.
+fn (app &App) is_program_dir(dir string) bool {
+	return app.v_files_in(dir).any(get_module_name(app.source_text(it)) in ['', 'main'])
+}
+
+// imports_local_module reports whether the file at `path` imports a module that
+// sits in a directory of its program, which a check of the file alone could not
+// find.
+fn (app &App) imports_local_module(path string, program_dir string) bool {
+	vmod_root := normalize_overlay_path(find_project_root(program_dir))
+	for module_path in parse_imports(app.source_text(path)) {
+		if _ := resolve_local_module_dir(module_path, program_dir, vmod_root) {
+			return true
+		}
+	}
+	return false
+}
+
+// resolve_local_module_dir returns the directory of the module imported as
+// `module_path` by a program in `program_dir`, if it is one of the project's:
+// `a.b` is `a/b` below the program or below the v.mod root, and `proj.a` is `a`
+// below a v.mod root in a directory named `proj`.
+fn resolve_local_module_dir(module_path string, program_dir string, vmod_root string) ?string {
+	rel := module_path.replace('.', '/')
+	for base in [program_dir, vmod_root] {
+		if base == '' {
+			continue
+		}
+		candidate := normalize_overlay_path(os.join_path(base, rel))
+		if os.is_dir(candidate) {
+			return candidate
+		}
+	}
+	if vmod_root != '' && module_path.contains('.')
+		&& module_path.all_before('.') == os.file_name(vmod_root) {
+		candidate := normalize_overlay_path(os.join_path(vmod_root, module_path.all_after('.').replace('.',
+			'/')))
+		if os.is_dir(candidate) {
+			return candidate
+		}
+	}
+	return none
+}
+
+// v_files_in returns the V files of `dir` that make up its module, tests left
+// out: those on disk, and those open in the editor and not saved yet.
+fn (app &App) v_files_in(dir string) []string {
+	mut files := []string{}
+	for entry in os.ls(dir) or { []string{} } {
+		if entry.ends_with('.v') && !entry.ends_with('_test.v') {
+			files << normalize_overlay_path(os.join_path(dir, entry))
+		}
+	}
+	for uri, _ in app.open_files {
+		path := normalize_overlay_path(uri_to_path(uri))
+		if path.ends_with('.v') && !path.ends_with('_test.v') && os.dir(path) == dir
+			&& path !in files {
+			files << path
+		}
+	}
+	return files
+}
+
+// source_text returns the text of the file at `path`: the editor's buffer when
+// the file is open, what is on disk otherwise.
+fn (app &App) source_text(path string) string {
+	normalized := normalize_overlay_path(path)
+	for uri, content in app.open_files {
+		if normalize_overlay_path(uri_to_path(uri)) == normalized {
+			return content
+		}
+	}
+	return os.read_file(path) or { '' }
+}
+
+// program_overlay_root returns the directory mirrored to check the program in
+// `program_dir`: the project's, or the program's when it sits above the file.
+fn program_overlay_root(source_path string, program_dir string) string {
+	root := compilation_overlay_root(source_path)
+	return if path_is_within(program_dir, root) { root } else { program_dir }
+}
+
 fn (mut app App) prepare_compilation_overlay(real_path string) !CompilationOverlay {
+	return app.prepare_compilation_overlay_in(real_path, compilation_work_dir(normalize_overlay_path(real_path)))
+}
+
+// prepare_compilation_overlay_in mirrors the project with the editor's buffers so
+// that the program in `work_dir`, which holds the file at `real_path`, can be
+// checked as the editor shows it.
+fn (mut app App) prepare_compilation_overlay_in(real_path string, work_dir string) !CompilationOverlay {
+	return app.prepare_compilation_overlay_with(real_path, work_dir, map[string]string{})
+}
+
+// prepare_line_info_overlay is prepare_compilation_overlay_in for the V1 checker
+// of `-line-info`, which reads the imports of a symlinked file from where the
+// link points, outside the overlay. When the file lies in a module that the
+// program in `work_dir` imports, the program's own files import it: they are
+// written into the overlay like buffers, so the modules they import are read
+// from it too.
+fn (mut app App) prepare_line_info_overlay(real_path string, work_dir string) !CompilationOverlay {
+	source_work_dir := normalize_overlay_path(work_dir)
+	mut importers := map[string]string{}
+	if normalize_overlay_path(os.dir(normalize_overlay_path(real_path))) != source_work_dir {
+		mut open_paths := map[string]bool{}
+		for uri, _ in app.open_files {
+			open_paths[normalize_overlay_path(uri_to_path(uri))] = true
+		}
+		for entry in os.ls(source_work_dir) or { [] } {
+			path := normalize_overlay_path(os.join_path(source_work_dir, entry))
+			if !entry.ends_with('.v') || entry.ends_with('_test.v') || path in open_paths
+				|| !os.is_file(path) {
+				continue
+			}
+			importers[path] = os.read_file(path) or { continue }
+		}
+	}
+	return app.prepare_compilation_overlay_with(real_path, work_dir, importers)
+}
+
+// prepare_compilation_overlay_with builds the overlay with `importers`, files
+// from disk by path, written into it next to the buffers.
+fn (mut app App) prepare_compilation_overlay_with(real_path string, work_dir string, importers map[string]string) !CompilationOverlay {
 	source_path := normalize_overlay_path(real_path)
-	source_root := compilation_overlay_root(source_path)
+	source_work_dir := normalize_overlay_path(work_dir)
+	source_root := program_overlay_root(source_path, source_work_dir)
 	source_display_root := source_root
-	source_work_dir := normalize_overlay_path(os.dir(source_path))
 	temp_root_unresolved := app.write_tracked_files_to_temp(source_root)!
 	temp_root := normalize_overlay_path(os.real_path(temp_root_unresolved))
-	symlink_untracked_files(source_root, source_work_dir, temp_root, app.open_files) or {
+	mut tracked := app.open_files.clone()
+	for path, content in importers {
+		rel := overlay_relative_path(path, source_root) or { continue }
+		os.write_file(os.join_path(temp_root, rel), content) or {
+			os.rmdir_all(temp_root) or {}
+			return error('Failed to write ${rel} into the compilation overlay: ${err}')
+		}
+		tracked[path_to_uri(path)] = content
+	}
+	symlink_untracked_files(source_root, source_work_dir, temp_root, tracked) or {
 		os.rmdir_all(temp_root) or {}
 		return error('Failed to populate compilation overlay: ${err}')
 	}
@@ -785,11 +1140,28 @@ fn (mut app App) run_v_check(path string, text string) []JsonError {
 	log('running v.exe check for ${real_path}')
 	log('Open files count: ${app.open_files.len}')
 
-	if should_use_compilation_overlay(real_path, app.open_files.len) {
-		overlay = app.prepare_compilation_overlay(real_path) or {
+	// A diagnostics server answers for the input it started with, so the files
+	// it checks keep their paths from one check to the next.
+	server_exe := if app.diagnostics_servers != unsafe { nil } {
+		resolve_diagnostics_server_exe() or { '' }
+	} else {
+		''
+	}
+	// The file is checked as part of its program: from the program's directory,
+	// with the local modules it imports, as `v .` there builds it.
+	program_dir := app.program_root(real_path)
+	if should_use_compilation_overlay(real_path, app.open_files.len)
+		|| program_dir != normalize_overlay_path(working_dir)
+		|| app.imports_local_module(real_path, program_dir) {
+		if server_exe != '' {
+			app.overlay_dir = diagnostics_stable_dir('project', program_overlay_root(normalize_overlay_path(real_path),
+				program_dir))
+		}
+		overlay = app.prepare_compilation_overlay_in(real_path, program_dir) or {
 			log('Failed to prepare compilation overlay: ${err}')
 			CompilationOverlay{}
 		}
+		app.overlay_dir = ''
 		if overlay.temp_root != '' {
 			temp_project_dir = overlay.temp_root
 			file_to_check = overlay.temp_source_file
@@ -801,7 +1173,14 @@ fn (mut app App) run_v_check(path string, text string) []JsonError {
 
 	if !use_multifile {
 		log('USING SINGLEFILE')
-		singlefile_tmppath = make_singlefile_temp_path(app.temp_dir, real_path, 'check')
+		singlefile_tmppath = if server_exe != '' {
+			stable_dir := diagnostics_stable_dir('file', real_path)
+			os.mkdir_all(stable_dir) or {}
+			ext := os.file_ext(real_path)
+			os.join_path(stable_dir, 'vls_check${if ext == '' { '.v' } else { ext }}')
+		} else {
+			make_singlefile_temp_path(app.temp_dir, real_path, 'check')
+		}
 		os.write_file(singlefile_tmppath, text) or {
 			log('Failed to write temp file ${singlefile_tmppath}: ${err}')
 			return []
@@ -812,7 +1191,12 @@ fn (mut app App) run_v_check(path string, text string) []JsonError {
 
 	mut cmd_args := []string{}
 	module_name := get_module_name(text)
-	is_library_module := module_name != '' && module_name != 'main'
+	// A module checked with the program that imports it is not a library there.
+	is_library_module := if use_multifile {
+		!app.is_program_dir(overlay.source_work_dir)
+	} else {
+		module_name != '' && module_name != 'main'
+	}
 	if use_multifile {
 		cmd_args = build_v_check_args_multifile(is_library_module)
 		log('MULTIFILE CMD - compile_target=${compile_target}): v ${cmd_args.join(' ')}')
@@ -822,18 +1206,50 @@ fn (mut app App) run_v_check(path string, text string) []JsonError {
 	}
 
 	exec_dir := if use_multifile { compile_target } else { working_dir }
-	x := run_v_argv(cmd_args, exec_dir)
+	x := if server_exe != '' {
+		mut servers := app.diagnostics_servers
+		cancelled := if app.diagnostics_cancelled != unsafe { nil } {
+			app.diagnostics_cancelled
+		} else {
+			fn () bool {
+				return false
+			}
+		}
+		servers.check(server_exe, cmd_args, exec_dir, cancelled) or { run_v_argv(cmd_args, exec_dir) }
+	} else {
+		run_v_argv(cmd_args, exec_dir)
+	}
 
 	log('Check - RUN RES ${x}')
+	if x.exit_code == diagnostics_check_cancelled {
+		// A newer check replaced this one; its answer goes nowhere.
+		return []
+	}
 
 	// Parse V3's native flat-AST checker diagnostics so ordinary diagnostics stay
 	// on the default backend.
 	diagnostic_source_dir := if use_multifile { exec_dir } else { os.dir(file_to_check) }
-	v_errors := parse_v_check_diagnostics(x.output, diagnostic_source_dir)
-	cleanup_compilation_temp(temp_project_dir, singlefile_tmppath)
+	mut v_errors := parse_v_check_diagnostics(x.output, diagnostic_source_dir)
+	v_errors << parse_v_check_program_diagnostics(x.output, diagnostic_source_dir, file_to_check)
+	if server_exe == '' {
+		cleanup_compilation_temp(temp_project_dir, singlefile_tmppath)
+	}
 
 	// error filtlering
 	if use_multifile {
+		// The check covered the whole program, so it answers for every open file
+		// of that program too, including the ones it found nothing in.
+		app.program_errors = map[string][]JsonError{}
+		app.program_dir_checked = overlay.source_work_dir
+		mut program_uris := map[string]string{}
+		for open_uri, _ in app.open_files {
+			open_path := uri_to_path(open_uri)
+			if normalized_index_path(open_path) != normalized_index_path(real_path)
+				&& app.program_root(open_path) == overlay.source_work_dir {
+				app.program_errors[open_uri] = []JsonError{}
+				program_uris[normalized_index_path(open_path)] = open_uri
+			}
+		}
 		mut filtered_errors := []JsonError{}
 
 		for err in v_errors {
@@ -850,6 +1266,16 @@ fn (mut app App) run_v_check(path string, text string) []JsonError {
 				filtered_errors << updated_err
 				log('INCLUDING ERROR from err_file=${err_file}: ${err.message}')
 			} else {
+				if other_uri := program_uris[normalized_index_path(err_file)] {
+					app.program_errors[other_uri] << JsonError{
+						path:    err_file
+						message: err.message
+						line_nr: err.line_nr
+						col:     err.col
+						len:     err.len
+						level:   err.level
+					}
+				}
 				log('EXCLUDING ERROR from err_file=${err_file} real_path=${real_path}')
 			}
 		}
@@ -867,8 +1293,14 @@ fn (mut app App) run_v_check(path string, text string) []JsonError {
 fn (mut app App) write_tracked_files_to_temp(working_dir string) !string {
 	log('WRITING ${app.open_files.len} tracked files to temp directory')
 
-	// create subdir
-	temp_project_dir := os.join_path(app.temp_dir, 'project_${time.now().unix_nano()}')
+	// create subdir; a diagnostics server checks the same one every time, so it
+	// is rebuilt in place
+	temp_project_dir := if app.overlay_dir != '' {
+		os.rmdir_all(app.overlay_dir) or {}
+		app.overlay_dir
+	} else {
+		os.join_path(app.temp_dir, 'project_${time.now().unix_nano()}')
+	}
 	os.mkdir_all(temp_project_dir) or { return error('Failed to create temp project dir: ${err}') }
 
 	// write file structure
@@ -1392,6 +1824,11 @@ fn (mut app App) on_did_change_watched_files(request Request) {
 		}
 		return
 	}
+	// A module folder may have appeared, gone or changed its module name.
+	app.importable_modules_cache = map[string]ImportableModulesCache{}
+	for change in params.changes {
+		app.forget_module_folder(uri_to_path(change.uri))
+	}
 	open_uris_by_path := app.open_index_uris_by_path()
 	for change in params.changes {
 		event_uri := change.uri
@@ -1405,6 +1842,7 @@ fn (mut app App) on_did_change_watched_files(request Request) {
 			app.index_skipped_uris.delete(event_uri)
 			app.diag_cache.delete(event_uri)
 		}
+		app.v3_query_notice_disk_change(uri_to_path(event_uri), change.event_type)
 		match change.event_type {
 			3 {
 				diagnostics_mutation := app.begin_diagnostics_project_mutation(uri)
@@ -1494,6 +1932,29 @@ fn (mut app App) hover_doc_comment(path string, line_info string) string {
 		char: byte_to_encoded_col(file_lines[cursor_line], cursor_col, app.position_encoding)
 	}
 	imported_module := app.imported_module_at_symbol(file_lines[cursor_line], cursor_col, file_content, cursor_position)
+	// A member is documented by the declaration it resolves to, even one without
+	// documentation: the one found for its name alone may be another type's.
+	receiver := member_expression_at_cursor(file_lines[cursor_line], cursor_position.char,
+		app.position_encoding)
+	if receiver != '' {
+		mut location := app.resolve_indexed_definition(path, cursor_position) or { Location{} }
+		if location.uri == '' {
+			// The definition of a member of an expression, as `'abc'.to_upper`, is
+			// left to the compiler; the type of the expression says whose it is.
+			typ := app.expression_type(path, file_content, receiver, cursor_position)
+			if typ != '' {
+				found := app.indexed_method_symbols(path, file_content, member_receiver_type(typ),
+					cursor_symbol).locations
+				if found.len == 1 {
+					location = found[0]
+				}
+			}
+		}
+		if location.uri != '' {
+			source := app.index_source_for(location.uri) or { '' }
+			return extract_doc_comment(source.split_into_lines(), location.range.start.line)
+		}
+	}
 	doc_symbol := static_method_doc_symbol_at(file_lines[cursor_line], cursor_col, cursor_symbol)
 	return app.find_doc_comment_for_symbol(doc_symbol, file_lines, path, imported_module)
 }
@@ -1532,6 +1993,11 @@ fn (mut app App) run_v_line_info(method Method, path string, line_info string) R
 	real_path := uri_to_path(path)
 	log('real_path=${real_path}, method=${method}')
 
+	// V3 answers first; V1 what it cannot, such as a file that does not parse.
+	if served := app.v3_line_info(method, path, real_path, line_info) {
+		return served
+	}
+
 	// Once no compiler on this machine can serve `-line-info`, never spawn
 	// another process for it. Requests that verify many candidates — references
 	// and rename run up to reference_semantic_max_candidates serial `gd^`
@@ -1540,7 +2006,16 @@ fn (mut app App) run_v_line_info(method Method, path string, line_info string) R
 		log('no compiler serves -line-info; answering from the index')
 		return app.line_info_unavailable_result(method, path, line_info)
 	}
+	return app.run_v_line_info_once(method, path, line_info, compilation_work_dir(normalize_overlay_path(real_path)))
+}
 
+// run_v_line_info_once answers from a compiler process of its own, which checks
+// the program from `work_dir`.
+fn (mut app App) run_v_line_info_once(method Method, path string, line_info string, work_dir string) ResponseResult {
+	real_path := uri_to_path(path)
+	if app.line_info_mode == .missing {
+		return app.line_info_unavailable_result(method, path, line_info)
+	}
 	mut working_dir := os.dir(real_path)
 	mut file_to_check := real_path
 	mut compile_target := real_path
@@ -1551,7 +2026,7 @@ fn (mut app App) run_v_line_info(method Method, path string, line_info string) R
 
 	log('COMPILER OVERLAY for method=${method}, open files=${app.open_files.len}')
 	if should_use_compilation_overlay(real_path, app.open_files.len) {
-		overlay = app.prepare_compilation_overlay(real_path) or {
+		overlay = app.prepare_line_info_overlay(real_path, work_dir) or {
 			log('Failed to prepare compilation overlay: ${err}')
 			CompilationOverlay{}
 		}
@@ -1600,7 +2075,10 @@ fn (mut app App) run_v_line_info(method Method, path string, line_info string) R
 	mut cmd_args := []string{}
 
 	if use_multifile {
-		rel_file := os.file_name(file_to_check)
+		// The file as the compiler, run from the work directory, reaches it.
+		rel_file := overlay_relative_path(file_to_check, compile_target) or {
+			os.file_name(file_to_check)
+		}
 		cmd_args = build_v_line_info_args_multifile(rel_file, line_info)
 		log('MULTIFILE CMD compile_target=${compile_target}: v ${cmd_args.join(' ')}')
 	} else {
@@ -1665,6 +2143,14 @@ fn (mut app App) run_v_line_info(method Method, path string, line_info string) R
 	cleanup_compilation_temp(temp_project_dir, singlefile_tmppath)
 
 	log('RUN RES ${x}')
+	return app.line_info_result(method, path, line_info, output, use_multifile, temp_project_dir,
+		overlay)
+}
+
+// line_info_result turns what the compiler printed into the answer the client
+// expects. Both the one-shot process and the persistent compiler end here, so
+// the two paths cannot drift apart.
+fn (mut app App) line_info_result(method Method, path string, line_info string, output string, use_multifile bool, temp_project_dir string, overlay CompilationOverlay) ResponseResult {
 	// Default to JSON null so any unhandled method branch produces a valid LSP response.
 	mut result := ResponseResult('null')
 	match method {
@@ -1712,6 +2198,35 @@ fn (mut app App) run_v_line_info(method Method, path string, line_info string) R
 				// Compiler returned no info and no vdoc comment — return null per LSP spec
 				// so editors do not show empty hover popups.
 				result = 'null'
+			}
+		}
+		.inlay_hint {
+			// Positions from the compiler's ih^ mode are 0-based lines and byte
+			// columns of the checked buffer; convert them to the client encoding.
+			// No JSON line (e.g. a syntax error) leaves the result as null.
+			if output != '' {
+				if decoded := json2.decode[CompilerInlayHints](output) {
+					file_lines := (app.open_files[path] or {
+						os.read_file(uri_to_path(path)) or { '' }
+					}).split('\n')
+					mut hints := []InlayHint{cap: decoded.inlay_hints.len}
+					for h in decoded.inlay_hints {
+						if h.line < 0 || h.line >= file_lines.len {
+							continue
+						}
+						hints << InlayHint{
+							position: Position{
+								line: h.line
+								char: byte_to_encoded_col(file_lines[h.line].trim_right('\r'),
+									h.col, app.position_encoding)
+							}
+							label:    h.label
+							kind:     h.kind
+							tooltip:  if h.tooltip == '' { none } else { h.tooltip }
+						}
+					}
+					result = hints
+				}
 			}
 		}
 		.definition, .declaration, .type_definition, .implementation {

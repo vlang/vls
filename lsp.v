@@ -80,6 +80,7 @@ const jsonrpc_err_internal_error = -32603
 // LSP-specific error codes.
 const jsonrpc_err_server_not_initialized = -32002
 const jsonrpc_err_request_cancelled = -32800
+const jsonrpc_err_request_failed = -32803
 
 // A Location represents a specific location in a file.
 struct Location {
@@ -199,6 +200,8 @@ struct Detail {
 	insert_text_format ?i64 @[json: 'insertTextFormat'] // 1 for PlainText, 2 for Snippet
 	tags               ?[]int @[json: 'tags'] // 1 = deprecated
 	deprecated         ?bool @[json: 'deprecated'] // legacy deprecated flag
+	// edits applied when the item is accepted, e.g. the `import` line of a module
+	additional_text_edits ?[]TextEdit @[json: 'additionalTextEdits']
 }
 
 // Capabilities describes the server's capabilities.
@@ -787,6 +790,7 @@ struct InlayHint {
 	label        string
 	kind         int @[json: 'kind']
 	padding_left bool @[json: 'paddingLeft']
+	tooltip      ?string // e.g. why a struct field is flagged as out of order
 }
 
 // CodeAction represents a code action (e.g., quick fix) for the client.

@@ -478,6 +478,29 @@ fn test_on_did_change_schedules_diagnostics_without_blocking() {
 	assert app.open_files[uri].contains('fn changed()')
 }
 
+fn test_a_file_created_on_disk_rechecks_the_open_files_of_its_program() {
+	// A file created, deleted or renamed on disk decides whether an import
+	// resolves, so the open files of its program are checked again, though none
+	// of them changed.
+	mut app := create_test_app()
+	defer {
+		app.cancel_all_scheduled_diagnostics()
+		cleanup_test_app(app)
+	}
+	app.diagnostics_scheduler = new_diagnostics_scheduler()
+	project := os.join_path(app.temp_dir, 'created_module')
+	must_mkdir_all(os.join_path(project, 'lib'))
+	main_path := os.join_path(project, 'main.v')
+	main_content := 'module main\n\nimport lib\n\nfn main() {}\n'
+	must_write_file(main_path, main_content)
+	main_uri := path_to_uri(main_path)
+	app.open_files[main_uri] = main_content
+	lib_path := os.join_path(project, 'lib', 'lib.v')
+	must_write_file(lib_path, 'module lib\n')
+	mutation := app.begin_diagnostics_project_mutation(path_to_uri(lib_path))
+	assert mutation.tickets.any(it.uri == main_uri), mutation.tickets.str()
+}
+
 fn test_diagnostics_scheduler_invalidates_only_changed_document() {
 	mut scheduler := new_diagnostics_scheduler()
 	global_a, generation_a := scheduler.next_generation('file:///a.v')
@@ -3765,7 +3788,7 @@ fn test_handle_rename_refuses_incomplete_oversized_sibling_index() {
 	test_file := os.join_path(test_dir, 'main.v')
 	content := 'module main\n\nfn target() {\n\ttarget()\n}\n'
 	must_write_file(test_file, content)
-	must_write_file(os.join_path(test_dir, 'oversized.v'), 'x'.repeat(index_max_file_bytes + 1))
+	must_write_file(os.join_path(test_dir, 'oversized.v'), 'x'.repeat(int(index_max_file_bytes) + 1))
 	uri := path_to_uri(test_file)
 	app.open_files[uri] = content
 
@@ -5109,6 +5132,272 @@ greeting := get_greeting()
 	} else {
 		assert false, 'Expected []InlayHint'
 	}
+}
+
+fn inlay_hints_for_file(dir_name string, content string) []InlayHint {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	app.v3_line_info_enabled = v3_answers_inlay_hints()
+	test_dir := os.join_path(app.temp_dir, dir_name)
+	must_mkdir_all(test_dir)
+	main_file := os.join_path(test_dir, 'main.v')
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	return inlay_hints_request(mut app, uri, content)
+}
+
+fn inlay_hints_request(mut app App, uri string, content string) []InlayHint {
+	response := app.handle_inlay_hints(Request{
+		id:     1
+		method: 'textDocument/inlayHint'
+		params: json2.encode(Params{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			range:         LSPRange{
+				start: Position{
+					line: 0
+					char: 0
+				}
+				end:   Position{
+					line: content.count('\n') + 1
+					char: 0
+				}
+			}
+		},
+			escape_unicode: true
+		)
+	})
+	assert response.result is []InlayHint, 'Expected []InlayHint'
+	return response.result as []InlayHint
+}
+
+// compiler_supports_inlay_hints reports whether the configured V answers the
+// `-line-info file:L:ih^C` mode: its V3 with the query engine, or a V1 that was
+// patched for it. With any other compiler VLS falls back to its source
+// heuristics, so the tests that expect compiler hints are skipped. It asks the
+// compiler directly, not through VLS, so a broken VLS side makes those tests
+// fail instead of skipping them.
+fn compiler_supports_inlay_hints() bool {
+	return compiler_answers_inlay_hints([['-new-compiler'], ['-old-compiler'], []string{}])
+}
+
+// v3_answers_inlay_hints reports whether the V3 of the configured V answers the
+// `ih^` mode: the tests that expect compiler hints then take them from V3, as
+// VLS does.
+fn v3_answers_inlay_hints() bool {
+	return compiler_answers_inlay_hints([['-new-compiler']])
+}
+
+fn compiler_answers_inlay_hints(selectors [][]string) bool {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	dir := os.join_path(app.temp_dir, 'inlay_hints_probe')
+	must_mkdir_all(dir)
+	main_file := os.join_path(dir, 'main.v')
+	must_write_file(main_file, 'module main\n\nfn main() {\n\tx := 1\n\tprintln(x)\n}\n')
+	args := build_v_line_info_args_single(main_file, '1:ih^1', main_file)
+	for selector in selectors {
+		mut argv := selector.clone()
+		argv << args
+		if run_v_argv(argv, dir).output.contains('{"inlay_hints":') {
+			return true
+		}
+	}
+	return false
+}
+
+fn inlay_hint_summary(hints []InlayHint) []string {
+	mut out := hints.map('${it.position.line}:${it.position.char} ${it.kind} ${it.label}')
+	out.sort()
+	return out
+}
+
+fn test_inlay_hints_come_from_the_compiler_for_every_variable_and_argument() {
+	if !compiler_supports_inlay_hints() {
+		eprintln('skipped: this V does not implement the `ih^` inlay hints mode')
+		return
+	}
+	content := "module main\n\nstruct Point {\n\tx int\n\ty int\n}\n\nfn greet(name string, times int) string {\n\treturn name.repeat(times)\n}\n\nfn main() {\n\tp := Point{\n\t\tx: 1\n\t\ty: 2\n\t}\n\tmsg := greet('John', p.x)\n\tprintln(msg)\n\tmsg2 := greet('résumé', 2)\n\tprintln(msg2)\n}\n"
+	mut want := [
+		'8:20 2 count: ', // name.repeat(times)
+		'12:2 1 : Point', // p := Point{
+		'16:4 1 : string', // msg := greet('John', p.x)
+		'16:14 2 name: ',
+		'16:22 2 times: ',
+		'17:9 2 s: ', // println(msg)
+		'18:5 1 : string', // msg2 := greet('résumé', 2)
+		'18:15 2 name: ',
+		'18:25 2 times: ', // UTF-16 column: each `é` is one unit
+		'19:9 2 s: ',
+	]
+	want.sort()
+	assert inlay_hint_summary(inlay_hints_for_file('inlay_from_compiler', content)) == want
+}
+
+fn test_inlay_hints_follow_disk_changes_in_files_that_are_not_open() {
+	if !compiler_supports_inlay_hints() {
+		eprintln('skipped: this V does not implement the `ih^` inlay hints mode')
+		return
+	}
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	app.v3_line_info_enabled = v3_answers_inlay_hints()
+	dir := os.join_path(app.temp_dir, 'inlay_cache_disk_change')
+	must_mkdir_all(dir)
+	helper := os.join_path(dir, 'helper.v')
+	must_write_file(helper, 'module main\n\nfn greet(times int) string {\n\treturn "hi".repeat(times)\n}\n')
+	main_file := os.join_path(dir, 'main.v')
+	content := 'module main\n\nfn main() {\n\tprintln(greet(3))\n}\n'
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	before := inlay_hints_request(mut app, uri, content).map(it.label)
+	assert 'times: ' in before, before.str()
+	// helper.v is not open: only the file watcher reports that it changed.
+	must_write_file(helper, 'module main\n\nfn greet(count int) string {\n\treturn "hi".repeat(count)\n}\n')
+	app.on_did_change_watched_files(Request{
+		params: json2.encode(DidChangeWatchedFilesParams{
+			changes: [
+				FileEvent{
+					uri:        path_to_uri(helper)
+					event_type: 2
+				},
+			]
+		})
+	})
+	after := inlay_hints_request(mut app, uri, content).map(it.label)
+	assert 'count: ' in after, after.str()
+	assert 'times: ' !in after, after.str()
+}
+
+fn test_inlay_hints_follow_unsaved_edits_in_other_open_files() {
+	if !compiler_supports_inlay_hints() {
+		eprintln('skipped: this V does not implement the `ih^` inlay hints mode')
+		return
+	}
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	app.v3_line_info_enabled = v3_answers_inlay_hints()
+	dir := os.join_path(app.temp_dir, 'inlay_other_open_buffer')
+	must_mkdir_all(dir)
+	helper := os.join_path(dir, 'helper.v')
+	helper_content := 'module main\n\nfn greet(times int) string {\n\treturn "hi".repeat(times)\n}\n'
+	must_write_file(helper, helper_content)
+	main_file := os.join_path(dir, 'main.v')
+	content := 'module main\n\nfn main() {\n\tprintln(greet(3))\n}\n'
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	helper_uri := path_to_uri(helper)
+	app.open_files[uri] = content
+	app.open_files[helper_uri] = helper_content
+	before := inlay_hints_request(mut app, uri, content).map(it.label)
+	assert 'times: ' in before, before.str()
+	// An unsaved edit in helper.v: the file on disk still says `times`.
+	app.open_files[helper_uri] = helper_content.replace('times', 'count')
+	app.open_files_versions[helper_uri] = 2
+	after := inlay_hints_request(mut app, uri, content).map(it.label)
+	assert 'count: ' in after, after.str()
+	assert 'times: ' !in after, after.str()
+}
+
+fn test_did_close_drops_cached_inlay_hints() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_file := os.join_path(app.temp_dir, 'close_inlay_hints.v')
+	content := 'module main\n\nfn main() {}\n'
+	must_write_file(test_file, content)
+	uri := path_to_uri(test_file)
+	app.open_files[uri] = content
+	app.inlay_hint_cache[uri] = CachedInlayHints{
+		stamp: app.inlay_hint_stamp(uri, content)
+	}
+
+	app.on_did_close(Request{
+		params: json2.encode(DidCloseTextDocumentParams{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+		},
+			escape_unicode: true
+		)
+	})
+
+	assert uri !in app.inlay_hint_cache
+}
+
+// V's builtin functions insert their call as every other function does: with
+// the parameters that vlib/builtin declares, or, for one it does not declare
+// (dump, which the compiler provides), at least the parentheses.
+fn test_builtin_function_completions_insert_the_call() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	path := os.join_path(app.temp_dir, 'builtin_calls', 'main.v')
+	content := 'module main\n\nfn main() {\n\tpr\n}\n'
+	must_mkdir_all(os.dir(path))
+	must_write_file(path, content)
+	uri := path_to_uri(path)
+	app.open_files[uri] = content
+	items := app.indexed_completions(uri, Position{
+		line: 3
+		char: 3
+	}).items
+	for label, insert in {
+		'println':         'println(\${1:s})\$0'
+		'panic':           'panic(\${1:s})\$0'
+		'exit':            'exit(\${1:code})\$0'
+		'copy':            'copy(\${1:dst}, \${2:src})\$0'
+		'error_with_code': 'error_with_code(\${1:message}, \${2:code})\$0'
+		'flush_stdout':    'flush_stdout()'
+		'print_backtrace': 'print_backtrace()'
+		'dump':            'dump(\$0)'
+		'sizeof':          'sizeof(\$0)'
+		'typeof':          'typeof(\$0)'
+		'isreftype':       'isreftype(\$0)'
+	} {
+		found := items.filter(it.label == label)
+		assert found.len == 1, '${label}: ${found.len} items'
+		assert (found[0].insert_text or { '' }) == insert, '${label}: ${found[0].insert_text}'
+		assert (found[0].insert_text_format or { 1 }) == if insert.contains('\$') { 2 } else { 1 }, label
+	}
+	for name in v_builtins {
+		found := items.filter(it.label == name)
+		assert found.len == 1, '${name}: ${found.len} items'
+		assert (found[0].insert_text or { '' }).starts_with('${name}('), name
+	}
+	// the signature is the one vlib/builtin declares, as for any other function
+	assert items.filter(it.label == 'println')[0].detail == 'pub fn println(s string)'
+	// V has no builtin `close`: a channel closes with `ch.close()`
+	assert items.filter(it.label == 'close').len == 0
+	// read once, and again after a watched change there, as when working on V
+	builtin_dir := os.join_path(find_v_dir(), 'vlib', 'builtin')
+	assert builtin_dir in app.builtin_calls_cache
+	notify_changed(mut app, os.join_path(builtin_dir, 'printing.c.v'))
+	assert builtin_dir !in app.builtin_calls_cache
+}
+
+// The builtin functions are V's: `print_backtrace` is one and colored as such,
+// and `close` is not, so a function of the project may be called so and renamed.
+fn test_builtin_functions_are_the_ones_v_has() {
+	assert classify_v_identifier('print_backtrace') == sem_tok_function
+	assert classify_v_identifier('close') == -1
+	files := {
+		'main.v': 'module main\n\nfn close() int {\n\treturn 1\n}\n\nfn main() {\n\tprintln(close())\n}\n'
+	}
+	assert rename_edits_in(files, 'main.v:3:4') == ['main.v:3:4', 'main.v:8:10']
 }
 
 fn test_make_keyword_completions_not_empty() {
@@ -6926,6 +7215,132 @@ fn test_hover_on_a_field_of_a_chain_answers_for_that_field() {
 	}
 }
 
+const language_member_hover_main = "module main
+
+enum Color {
+	red
+	green
+}
+
+@[flag]
+enum Perm {
+	read
+	write
+}
+
+struct Point {
+	x int
+}
+
+fn (point Point) str() string {
+	return 'point'
+}
+
+fn main() {
+	c := Color.from('red') or { Color.green }
+	println(c.str())
+	mut p := Perm.zero()
+	p.set(.read)
+	println(p.has(.read))
+	println(p.all(.read | .write))
+	p.toggle(.write)
+	p.clear(.read)
+	p.set_all()
+	p.clear_all()
+	println(p.is_empty())
+	q := Perm.from('read') or { Perm.zero() }
+	println(q)
+	pt := Point{}
+	println(pt.str())
+	println(Color.red)
+}
+"
+
+// hover_value_at hovers `word` inside the first line of `content` holding `needle`.
+fn hover_value_at(mut app App, uri string, content string, needle string, word string) string {
+	lines := content.split_into_lines()
+	line := lines.filter(it.contains(needle))[0]
+	col := line.index(needle) or { -1 } + needle.index(word) or { -1 } + 1
+	hover := app.hover_at(uri, Position{
+		line: lines.index(line)
+		char: col
+	}) or { Hover{} }
+	return hover.contents.value
+}
+
+// V gives every enum `from` and `str`, and a flag enum `zero` and the methods
+// that work its flags. There is no declaration of them to show: the hover is
+// the signature V gives them with what they do, not the documentation of a
+// method of arrays that has the same name. A type's own `str` is its own.
+fn test_hover_shows_the_members_v_gives_enums() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	path := os.join_path(app.temp_dir, 'language_member_hover', 'main.v')
+	content := language_member_hover_main
+	must_mkdir_all(os.dir(path))
+	must_write_file(path, content)
+	uri := path_to_uri(path)
+	app.open_files[uri] = content
+	app.reindex_uri(uri)
+	for needle, signature in {
+		'Color.from':  'fn Color.from[W](input W) !Color'
+		'Perm.from':   'fn Perm.from[W](input W) !Perm'
+		'Perm.zero':   'fn Perm.zero() Perm'
+		'c.str':       'fn (e Color) str() string'
+		'p.set(':      'fn (mut e Perm) set(flag_ Perm)'
+		'p.has':       'fn (e &Perm) has(flag_ Perm) bool'
+		'p.all':       'fn (e &Perm) all(flag_ Perm) bool'
+		'p.toggle':    'fn (mut e Perm) toggle(flag_ Perm)'
+		'p.clear(':    'fn (mut e Perm) clear(flag_ Perm)'
+		'p.set_all':   'fn (mut e Perm) set_all()'
+		'p.clear_all': 'fn (mut e Perm) clear_all()'
+		'p.is_empty':  'fn (e &Perm) is_empty() bool'
+	} {
+		word := needle.all_after('.').trim_right('(')
+		value := hover_value_at(mut app, uri, content, needle, word)
+		assert value.contains('```v\n${signature}\n```'), '${needle}: ${value}'
+		assert !value.contains('array') && !value.contains('IError'), '${needle}: ${value}'
+	}
+	assert hover_value_at(mut app, uri, content, 'Color.from', 'from').contains('string')
+	assert hover_value_at(mut app, uri, content, 'p.has', 'has').contains('at least one')
+	// declared by the type itself, or not a member V gives: not answered from V's list
+	assert hover_value_at(mut app, uri, content, 'pt.str', 'str').contains('fn (point Point) str() string')
+	assert !hover_value_at(mut app, uri, content, 'Color.red', 'red').contains('fn ')
+}
+
+// A member's documentation is the one of the declaration it resolves to, even
+// when that one has none: never the one of another type's member of the same
+// name, as `str` of IError for a struct's own undocumented `str`.
+fn test_hover_documents_a_member_with_its_own_declaration() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	content := "module main\n\nstruct Point {\n\tx int\n}\n\nfn (point Point) str() string {\n\treturn 'point'\n}\n\n// area is how much room the point takes.\nfn (point Point) area() int {\n\treturn 0\n}\n\n// scaled grows the point.\n@[inline]\nfn (point Point) scaled() Point {\n\treturn point\n}\n\nfn main() {\n\tpt := Point{}\n\tprintln(pt.str())\n\tprintln(pt.area())\n\tprintln(pt.scaled())\n\tarr := [1]\n\tprintln(arr.first())\n\tprintln('a'.to_upper())\n}\n"
+	path := os.join_path(app.temp_dir, 'member_docs', 'main.v')
+	must_mkdir_all(os.dir(path))
+	must_write_file(path, content)
+	uri := path_to_uri(path)
+	app.open_files[uri] = content
+	app.reindex_uri(uri)
+	lines := content.split_into_lines()
+	mut docs := map[string]string{}
+	for needle in ['pt.str', 'pt.area', 'pt.scaled', 'arr.first', "'a'.to_upper"] {
+		line := lines.filter(it.contains(needle))[0]
+		col := line.index(needle) or { -1 } + needle.index('.') or { -1 } + 2
+		docs[needle] = app.hover_doc_comment(uri, '${lines.index(line) + 1}:hv^${col}')
+	}
+	assert docs['pt.str'] == '', docs['pt.str']
+	assert docs['pt.area'] == 'area is how much room the point takes.', docs['pt.area']
+	// an attribute sits between a declaration and its documentation
+	assert docs['pt.scaled'] == 'scaled grows the point.', docs['pt.scaled']
+	assert docs["'a'.to_upper"].starts_with('to_upper returns the string in all uppercase characters.'), docs["'a'.to_upper"]
+	// a member of a builtin type keeps the documentation vlib gives it
+	assert docs['arr.first'].contains('first element'), docs['arr.first']
+}
+
 fn test_hover_on_a_deep_chain_inside_nested_closures() {
 	mut app := create_test_app()
 	defer {
@@ -7790,6 +8205,57 @@ fn test_bare_completion_includes_scoped_implicit_bindings() {
 		char: lines[after_line].len
 	}
 	assert !app.local_scope_completions(content, after_position).any(it.label in ['it', 'err'])
+}
+
+// local_labels_at returns the local names that completion offers where the
+// marked source has `‸`.
+fn local_labels_at(mut app App, marked string) []string {
+	cursor := marked.index('‸') or { panic('no cursor in ${marked}') }
+	content := marked.replace('‸', '')
+	before := content[..cursor]
+	line := before.count('\n')
+	col := cursor - (before.last_index('\n') or { -1 }) - 1
+	return app.local_scope_completions(content, Position{
+		line: line
+		char: col
+	}).map(it.label)
+}
+
+const implicit_names_head = "module main\n\nstruct Row {\n\tname string\n}\n\nfn parse(s string) !int {\n\treturn s.int()\n}\n\nfn find(n int) ?int {\n\treturn if n > 0 { n } else { none }\n}\n\n"
+
+// The names V gives code without a declaration: `it` in the predicate or the
+// callback of every array method that takes one, `a` and `b` in a sort, `err` in
+// the `else` of `if x := call() {` as in an `or {}` block, and the variable of a
+// `$for`. Each only where V gives it.
+fn test_local_completion_offers_the_names_v_gives_without_a_declaration() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	for label, marked in {
+		'it':    'fn main() {\n\tnums := [1]\n\tprintln(nums.count(i‸))\n}\n'
+		'a':     'fn main() {\n\tmut nums := [1]\n\tnums.sort(a‸)\n}\n'
+		'b':     'fn main() {\n\tnums := [1]\n\tprintln(nums.sorted(a < b‸))\n}\n'
+		'err':   "fn main() {\n\tif v := parse('1') {\n\t\tprintln(v)\n\t} else {\n\t\tprintln(e‸)\n\t}\n}\n"
+		'field': 'fn main() {\n\t\$for field in Row.fields {\n\t\tprintln(f‸)\n\t}\n}\n'
+	} {
+		assert label in local_labels_at(mut app, implicit_names_head + marked), '${label}: ${marked}'
+	}
+	// an Option guard gives `err` in its `else` too
+	assert 'err' in local_labels_at(mut app, implicit_names_head + 'fn main() {\n\tif v := find(1) {\n\t\tprintln(v)\n\t} else {\n\t\tprintln(e‸)\n\t}\n}\n')
+	// `it` is still there in filter, and `a` and `b` in sorted
+	assert 'it' in local_labels_at(mut app, implicit_names_head + 'fn main() {\n\tnums := [1]\n\tprintln(nums.filter(i‸))\n}\n')
+	assert 'a' in local_labels_at(mut app, implicit_names_head + 'fn main() {\n\tnums := [1]\n\tprintln(nums.sorted(a‸))\n}\n')
+	// and nowhere else
+	for label, marked in {
+		'it':    'fn main() {\n\tnums := [1]\n\tprintln(nums.index(i‸))\n}\n'
+		'a':     'fn main() {\n\tnums := [1]\n\tprintln(nums.map(a‸))\n}\n'
+		'err':   'fn main() {\n\tif true {\n\t\tprintln(1)\n\t} else {\n\t\tprintln(e‸)\n\t}\n}\n'
+		'field': 'fn main() {\n\t\$for field in Row.fields {\n\t\tprintln(1)\n\t}\n\tprintln(f‸)\n}\n'
+	} {
+		assert label !in local_labels_at(mut app, implicit_names_head + marked), '${label}: ${marked}'
+	}
+	assert 'err' !in local_labels_at(mut app, implicit_names_head + "fn main() {\n\tif v := parse('1') {\n\t\tprintln(v)\n\t} else {\n\t\tprintln(1)\n\t}\n\tprintln(e‸)\n}\n")
 }
 
 fn test_loop_header_bindings_are_removed_with_loop_scope() {
@@ -10191,6 +10657,536 @@ fn test_handle_rename_returns_complete_workspace_edit() {
 	}
 }
 
+const rename_project_main = "module main
+
+import os
+
+const greeting = 'hi'
+
+struct Point {
+	x int
+	y int
+}
+
+fn (p Point) sum() int {
+	return p.x + p.y
+}
+
+enum Color {
+	red
+	green
+}
+
+fn helper(value int) int {
+	total := value + 1
+	return total
+}
+
+fn main() {
+	p := Point{
+		x: 1
+		y: 2
+	}
+	println(p.sum())
+	println(helper(3))
+	println(greeting)
+	c := Color.red
+	println(c)
+	x := 5
+	println(x + p.x)
+	println(os.args.len)
+	// helper is named in a comment
+	s := 'helper in a string'
+	println(s)
+	println(other_file_fn())
+}
+"
+
+const rename_project_other = 'module main
+
+fn other_file_fn() int {
+	q := Point{
+		x: 3
+		y: 4
+	}
+	return helper(1) + q.sum() + q.x
+}
+'
+
+// new_rename_project_app opens a project made of main.v and other.v and returns
+// the app and the uri of each file.
+fn new_rename_project_app() (&App, map[string]string) {
+	return new_rename_project_app_with({
+		'main.v':  rename_project_main
+		'other.v': rename_project_other
+	})
+}
+
+// new_rename_project_app_with writes `files` into a project on disk, opens them
+// all in the editor, and returns the app with the URI of each file.
+fn new_rename_project_app_with(files map[string]string) (&App, map[string]string) {
+	return new_rename_project_app_opening(files, files.keys())
+}
+
+// new_rename_project_app_opening is new_rename_project_app_with that opens only
+// the files named in `open`; the others are on disk alone.
+fn new_rename_project_app_opening(files map[string]string, open []string) (&App, map[string]string) {
+	mut app := create_test_app()
+	dir := os.join_path(app.temp_dir, 'rename_project')
+	must_mkdir_all(dir)
+	must_write_file(os.join_path(dir, 'v.mod'), 'Module {}\n')
+	mut uris := map[string]string{}
+	for name, content in files {
+		path := os.join_path(dir, name)
+		must_mkdir_all(os.dir(path))
+		must_write_file(path, content)
+		uri := path_to_uri(path)
+		if name in open {
+			app.open_files[uri] = content
+			app.open_files_versions[uri] = 1
+		}
+		uris[name] = uri
+	}
+	app.workspace_roots = [dir]
+	return app, uris
+}
+
+// rename_request_at builds a rename request for `file:line:col` (1-based).
+fn rename_request_at(uris map[string]string, at string) Request {
+	return rename_request_named(uris, at, 'renamed')
+}
+
+// rename_request_named builds a request to rename the identifier at
+// `file:line:col` (1-based) to `new_name`.
+fn rename_request_named(uris map[string]string, at string, new_name string) Request {
+	parts := at.split(':')
+	return Request{
+		id:     905
+		method: 'textDocument/rename'
+		params: json2.encode(RenameParams{
+			text_document: TextDocumentIdentifier{
+				uri: uris[parts[0]]
+			}
+			position:      Position{
+				line: parts[1].int() - 1
+				char: parts[2].int() - 1
+			}
+			new_name:      new_name
+		},
+			escape_unicode: true
+		)
+	}
+}
+
+// rename_edits_at renames the identifier at `file:line:col` of the project and
+// returns where every edit starts as `file:line:col`, sorted; nothing when the
+// rename was refused.
+fn rename_edits_at(at string) []string {
+	return rename_edits_in({
+		'main.v':  rename_project_main
+		'other.v': rename_project_other
+	}, at)
+}
+
+// rename_edits_in is rename_edits_at for a project made of `files`.
+fn rename_edits_in(files map[string]string, at string) []string {
+	return rename_edits_opening(files, files.keys(), at)
+}
+
+// rename_edits_opening is rename_edits_in with only the files in `open` open.
+fn rename_edits_opening(files map[string]string, open []string, at string) []string {
+	mut app, uris := new_rename_project_app_opening(files, open)
+	defer {
+		cleanup_test_app(app)
+	}
+	parts := at.split(':')
+	line := files[parts[0]].split_into_lines()[parts[1].int() - 1]
+	// V wants a type capitalized, and anything else lowercase.
+	first := line[int_min(parts[2].int() - 1, line.len - 1)]
+	new_name := if first.is_capital() { 'Renamed' } else { 'renamed' }
+	response := app.handle_rename(rename_request_named(uris, at, new_name))
+	if response.result !is WorkspaceEdit {
+		return []string{}
+	}
+	edit := response.result as WorkspaceEdit
+	mut edits := []string{}
+	for uri, text_edits in edit.changes {
+		for e in text_edits {
+			edits << '${os.file_name(uri_to_path(uri))}:${e.range.start.line + 1}:${e.range.start.char + 1}'
+		}
+	}
+	edits.sort()
+	return edits
+}
+
+fn test_rename_edits_every_occurrence_of_the_symbol_and_nothing_else() {
+	helper := ['main.v:21:4', 'main.v:32:10', 'other.v:8:9']
+	field_x := ['main.v:13:11', 'main.v:28:3', 'main.v:37:16', 'main.v:8:2', 'other.v:5:3',
+		'other.v:8:33']
+	cases := {
+		'main.v:21:4':  helper // a function, from its declaration
+		'other.v:8:9':  helper // and from a call in another file
+		'main.v:22:2':  ['main.v:22:2', 'main.v:23:9'] // a local
+		'main.v:23:14': ['main.v:22:2', 'main.v:23:9'] // the cursor right after a name that ends the line
+		'main.v:21:11': ['main.v:21:11', 'main.v:22:11'] // a parameter
+		'main.v:12:14': ['main.v:12:14', 'main.v:31:12', 'other.v:8:23'] // a method
+		'main.v:7:8':   ['main.v:12:7', 'main.v:27:7', 'main.v:7:8', 'other.v:4:7'] // a struct
+		'main.v:8:2':   field_x // a field, with the keys of struct literals
+		'other.v:5:3':  field_x // from a key
+		'main.v:36:2':  ['main.v:36:2', 'main.v:37:10'] // a local named like the field
+		'main.v:5:7':   ['main.v:33:10', 'main.v:5:7'] // a constant
+		'main.v:16:6':  ['main.v:16:6', 'main.v:34:7'] // an enum, named in `Color.red`
+		'main.v:17:2':  ['main.v:17:2', 'main.v:34:13'] // an enum value
+		'main.v:38:13': []string{} // `os.args` is declared outside the project
+	}
+	for at, want in cases {
+		got := rename_edits_at(at)
+		assert got == want, '${at}: ${got}'
+	}
+}
+
+fn test_rename_says_why_it_refuses_and_prepare_rename_refuses_first() {
+	mut app, uris := new_rename_project_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	outside := rename_request_at(uris, 'main.v:38:13')
+	if _ := app.rename_request(outside) {
+		assert false, 'renaming `os.args` must be refused'
+	} else {
+		assert err.msg().contains('outside this project'), err.msg()
+	}
+	if _ := app.prepare_rename_request(outside) {
+		assert false, 'preparing a rename of `os.args` must be refused'
+	} else {
+		assert err.msg().contains('outside this project'), err.msg()
+	}
+	prepared := app.prepare_rename_request(rename_request_at(uris, 'main.v:21:4')) or {
+		panic(err)
+	}
+	assert prepared.result is PrepareRenameResult
+	result := prepared.result as PrepareRenameResult
+	assert result.placeholder == 'helper'
+	assert result.range.start == Position{
+		line: 20
+		char: 3
+	}
+}
+
+// A struct embedded in another, a closure and its captures, loop variables, and
+// a field named like an imported module.
+const rename_scopes_main = "module main
+
+import time
+
+struct Base {
+	id int
+}
+
+fn (b Base) ident() int {
+	return b.id
+}
+
+struct User {
+	Base
+	name string
+}
+
+struct Job {
+	time int
+}
+
+fn total(items []int) int {
+	mut acc := 0
+	for item in items {
+		acc += item
+	}
+	return acc
+}
+
+fn main() {
+	u := User{
+		Base: Base{
+			id: 1
+		}
+		name: 'ana'
+	}
+	println(u.Base.id)
+	println(u.ident())
+	offset := 7
+	add := fn [offset] (a int) int {
+		return a + offset
+	}
+	println(add(1))
+	job := Job{
+		time: 3
+	}
+	println(job.time)
+	println(time.now().year > 0)
+	println(total([1, 2]))
+}
+
+struct Box[T] {
+	val T
+}
+
+fn (b Box[T]) get() T {
+	return b.val
+}
+
+fn make_bases() []Base {
+	mut bases := []Base{}
+	bases << Base{
+		id: 2
+	}
+	return bases
+}
+
+fn read_point(p struct { x int }) int {
+	y := p.x
+	return y
+}
+
+struct Label {
+	text string
+	x    int
+}
+
+struct Frame {
+	label Label
+	x     int
+}
+
+fn make_frame() Frame {
+	return Frame{
+		label: Label{
+			text: '}'
+			x:    1
+		}
+		x:     2
+	}
+}
+
+fn shadowed() {
+	time := [1, 2]
+	println(time.len)
+}
+"
+
+fn test_rename_follows_embedded_structs_closures_and_loops() {
+	files := {
+		'main.v': rename_scopes_main
+	}
+	// The field that embeds a struct is named after it: both change together.
+	base := ['main.v:14:2', 'main.v:32:3', 'main.v:32:9', 'main.v:37:12', 'main.v:5:8', 'main.v:9:7',
+		'main.v:60:19', 'main.v:61:17', 'main.v:62:11']
+	cases := {
+		'main.v:5:8':   base // a struct that another embeds, from its declaration
+		'main.v:32:3':  base // from the key of the embedded field
+		'main.v:37:12': base // from the embedded field in a selector
+		'main.v:14:2':  base // from the embedding itself
+		'main.v:61:17': base // from `[]Base{}`, where the compiler does not answer
+		'main.v:9:13':  ['main.v:38:12', 'main.v:9:13'] // a method reached through the embedding
+		'main.v:24:6':  ['main.v:24:6', 'main.v:25:10'] // a `for x in` variable
+		'main.v:39:2':  ['main.v:39:2', 'main.v:40:13', 'main.v:41:14'] // a variable a closure captures
+		'main.v:40:22': ['main.v:40:22', 'main.v:41:10'] // a closure parameter
+		'main.v:40:2':  ['main.v:40:2', 'main.v:43:10'] // a closure called through its variable
+		'main.v:19:2':  ['main.v:19:2', 'main.v:45:3', 'main.v:47:14'] // a field named like an imported module
+		'main.v:9:5':   ['main.v:10:9', 'main.v:9:5'] // a receiver, named like one in a generic method
+		'main.v:69:7':  ['main.v:68:15', 'main.v:69:7'] // a parameter, where braces close on the declaration line
+		'main.v:68:15': ['main.v:68:15', 'main.v:69:7'] // and from the parameter itself
+		'main.v:75:2':  ['main.v:75:2', 'main.v:87:4'] // a field whose key follows a brace inside a string
+		'main.v:94:2':  ['main.v:94:2', 'main.v:95:10'] // a local named like an imported module
+		'main.v:95:10': ['main.v:94:2', 'main.v:95:10'] // and from `time.len`, where it is not the module
+	}
+	for at, want in cases {
+		mut sorted_want := want.clone()
+		sorted_want.sort()
+		got := rename_edits_in(files, at)
+		assert got == sorted_want, '${at}: ${got}'
+	}
+}
+
+fn test_rename_refuses_modules_builtin_types_and_names_v_would_reject() {
+	mut app, uris := new_rename_project_app_with({
+		'main.v': rename_scopes_main
+	})
+	defer {
+		cleanup_test_app(app)
+	}
+	refusals := {
+		'main.v:3:8 x':       'names a module' // `import time`
+		'main.v:48:10 x':     'names a module' // `time.now()`
+		'main.v:6:5 x':       'part of V' // `int`
+		'main.v:22:4 Total':  'must be lowercase'
+		'main.v:22:4 fn':     'keyword'
+		'main.v:22:4 1total': 'not a valid name'
+		'main.v:5:8 base':    'must start with a capital letter'
+		'main.v:30:4 start':  'V calls' // `fn main`
+		'main.v:22:4 init':   'V calls' // a function renamed to `init`
+	}
+	for spec, reason in refusals {
+		parts := spec.split(' ')
+		if _ := app.rename_request(rename_request_named(uris, parts[0], parts[1])) {
+			assert false, '${spec} must be refused'
+		} else {
+			assert err.msg().contains(reason), '${spec}: ${err.msg()}'
+		}
+	}
+}
+
+// A generic function of a module, called from main.v, whose parameter is named
+// like a field of the module's struct.
+const rename_generic_store = 'module shop
+
+pub struct Store {
+mut:
+	items []int
+}
+
+pub fn new_store() Store {
+	return Store{
+		items: []int{}
+	}
+}
+
+pub fn (mut s Store) add(n int) {
+	s.items << n
+}
+
+pub fn (s Store) all() []int {
+	return s.items
+}
+
+pub fn keep_if[T](items []T, keep fn (T) bool) []T {
+	mut out := []T{}
+	for item in items {
+		if keep(item) {
+			out << item
+		}
+	}
+	return out
+}
+'
+
+const rename_generic_main = 'module main
+
+import shop
+
+fn main() {
+	mut s := shop.new_store()
+	s.add(3)
+	big := shop.keep_if(s.all(), fn (n int) bool {
+		return n > 1
+	})
+	println(big)
+}
+'
+
+// The persistent compiler reads again only the file it is asked about, so it
+// finds nothing inside a generic function that another file instantiates; a
+// compiler process of its own does, and the rename asks one before refusing.
+fn test_rename_resolves_names_inside_a_generic_function_called_from_another_file() {
+	files := {
+		'main.v':       rename_generic_main
+		'shop/store.v': rename_generic_store
+	}
+	field := ['store.v:10:3', 'store.v:15:4', 'store.v:19:11', 'store.v:5:2']
+	param := ['store.v:22:19', 'store.v:24:14']
+	item := ['store.v:24:6', 'store.v:25:11', 'store.v:26:11']
+	cases := {
+		'shop/store.v:5:2':   field // the field, whose name the generic parameter shares
+		'shop/store.v:19:11': field // from a use
+		'shop/store.v:22:19': param // the parameter, from its declaration
+		'shop/store.v:24:14': param // and from its use in the body
+		'shop/store.v:25:6':  ['store.v:22:30', 'store.v:25:6'] // a parameter called as a function
+		'shop/store.v:26:11': item // a loop variable
+		'shop/store.v:29:9':  ['store.v:23:6', 'store.v:26:4', 'store.v:29:9'] // a local
+	}
+	mut wrong := []string{}
+	for at, want in cases {
+		// Every file open, and only the one edited: the compiler then reads the
+		// others through links to the disk, and reads imports from where a link
+		// points.
+		for open in [files.keys(), [at.all_before(':')]] {
+			got := rename_edits_opening(files, open, at)
+			if got != want {
+				wrong << '${at} with ${open} open: ${got}'
+			}
+		}
+	}
+	assert wrong.len == 0, wrong.str()
+}
+
+// rename_edit_count renames the identifier at `file:line:col` and returns how
+// many edits it takes, or the reason it was refused.
+fn rename_edit_count(mut app App, uris map[string]string, at string) !int {
+	response := app.rename_request(rename_request_named(uris, at, 'renamed'))!
+	edit := response.result as WorkspaceEdit
+	mut count := 0
+	for _, text_edits in edit.changes {
+		count += text_edits.len
+	}
+	return count
+}
+
+// A rename checks at most 48 occurrences, one compiler lookup each, unless
+// VLS_RENAME_MAX_OCCURRENCES says otherwise; the refusal names the variable.
+fn test_rename_occurrence_cap_comes_from_the_environment() {
+	previous := os.getenv('VLS_RENAME_MAX_OCCURRENCES')
+	defer {
+		if previous == '' {
+			os.unsetenv('VLS_RENAME_MAX_OCCURRENCES')
+		} else {
+			os.setenv('VLS_RENAME_MAX_OCCURRENCES', previous, true)
+		}
+	}
+	// `tick` appears 51 times and `tock` 12.
+	mut body := []string{}
+	for _ in 0 .. reference_semantic_max_candidates + 2 {
+		body << '\tprintln(tick())'
+	}
+	for _ in 0 .. 11 {
+		body << '\tprintln(tock())'
+	}
+	main_v := 'module main\n\nfn tick() int {\n\treturn 1\n}\n\nfn tock() int {\n\treturn 2\n}\n\nfn main() {\n${body.join('\n')}\n}\n'
+	mut app, uris := new_rename_project_app_with({
+		'main.v': main_v
+	})
+	defer {
+		cleanup_test_app(app)
+	}
+	tick := 'main.v:3:4'
+	tock := 'main.v:7:4'
+	// Not set, or not a positive number: 48.
+	for value in ['', 'abc', '0', '-5', '60x'] {
+		if value == '' {
+			os.unsetenv('VLS_RENAME_MAX_OCCURRENCES')
+		} else {
+			os.setenv('VLS_RENAME_MAX_OCCURRENCES', value, true)
+		}
+		if n := rename_edit_count(mut app, uris, tick) {
+			assert false, '`${value}`: a rename of 51 occurrences must be refused, took ${n} edits'
+		} else {
+			assert err.msg().contains('appears 51 times'), '`${value}`: ${err.msg()}'
+			assert err.msg().contains('more than the 48 '), '`${value}`: ${err.msg()}'
+			assert err.msg().contains('VLS_RENAME_MAX_OCCURRENCES'), '`${value}`: ${err.msg()}'
+		}
+	}
+	// Raised, the same rename goes through.
+	os.setenv('VLS_RENAME_MAX_OCCURRENCES', '60', true)
+	assert rename_edit_count(mut app, uris, tick) or { panic(err) } == 51
+	// Lowered, a rename that 48 lets through is refused.
+	os.setenv('VLS_RENAME_MAX_OCCURRENCES', '10', true)
+	if n := rename_edit_count(mut app, uris, tock) {
+		assert false, 'a rename of 12 occurrences must be refused with a cap of 10, took ${n} edits'
+	} else {
+		assert err.msg().contains('more than the 10 '), err.msg()
+	}
+	os.unsetenv('VLS_RENAME_MAX_OCCURRENCES')
+	assert rename_edit_count(mut app, uris, tock) or { panic(err) } == 12
+}
+
 fn test_folding_range_covers_imports_comments_and_code_blocks() {
 	mut app := create_test_app()
 	defer {
@@ -11233,7 +12229,394 @@ fn test_semantic_tokens_leave_string_interpolations_out_of_the_string() {
 		'property:x',
 		"string:'",
 	]
-	// The old `\$name` form and an escaped `\\\$` behave like V does.
-	assert semantic_token_texts("s := 'a \$b c'") == ['variable:s', "string:'a ", "string: c'"]
+	// An unbraced `\$name` is text (V interpolates only `\${}`), and so is an escaped `\\\${`.
+	assert semantic_token_texts("s := 'a \$b c'") == ['variable:s', "string:'a \$b c'"]
 	assert semantic_token_texts("s := 'price: \\\${x}'") == ['variable:s', "string:'price: \\\${x}'"]
+}
+
+// Auto-import completion. A project with modules of its own, one without v.mod,
+// and a VMODULES folder of installed packages: `gui` with its `svg` submodule
+// and a namespaced `author.pkg`.
+const import_lab_files = {
+	'proj/v.mod':                   "Module {\n\tname: 'proj'\n\tversion: '0.0.1'\n}\n"
+	'proj/main.v':                  'module main\n\nimport store\n\nfn main() {\n\tstore.open()\n\tte\n}\n'
+	'proj/store/store.v':           'module store\n\npub fn open() {}\n'
+	'proj/utils/textx/textx.v':     'module textx\n\npub fn shout(s string) string {\n\treturn s\n}\n'
+	'proj/utils/mathx/mathx.v':     'module mathx\n\nimport utils.textx\n\npub fn twice(n int) int {\n\treturn n * 2\n}\n'
+	'proj/broken/broken.v':         'module other\n\npub fn f() {}\n'
+	'proj/examples/demo/main.v':    'module main\n\nfn main() {}\n'
+	'proj/.hidden/secret/secret.v': 'module secret\n\npub fn f() {}\n'
+	'noproj/main.v':                'module main\n\nfn main() {\n\tli\n}\n'
+	'noproj/lib/lib.v':             'module lib\n\npub fn greet() {}\n'
+	'vmods/gui/gui.v':              'module gui\n\npub fn window() {}\n'
+	'vmods/gui/svg/svg.v':          'module svg\n\npub fn draw() {}\n'
+	'vmods/gui/examples/demo.v':    'module main\n\nfn main() {}\n'
+	'vmods/author/pkg/pkg.v':       'module pkg\n\npub fn run() {}\n'
+	'vmods/.cache/junk/junk.v':     'module junk\n\npub fn f() {}\n'
+}
+
+struct ImportLab {
+	base         string
+	root         string
+	vmodules     string
+	old_vmodules string
+mut:
+	app &App
+}
+
+// new_import_lab writes the lab under a test app's temp dir and points VMODULES
+// at its packages until close().
+fn new_import_lab() ImportLab {
+	app := create_test_app()
+	base := os.join_path(app.temp_dir, 'import_lab')
+	for rel, content in import_lab_files {
+		path := os.join_path(base, rel)
+		must_mkdir_all(os.dir(path))
+		must_write_file(path, content)
+	}
+	old_vmodules := os.getenv('VMODULES')
+	os.setenv('VMODULES', os.join_path(base, 'vmods'), true)
+	return ImportLab{
+		base:         base
+		root:         os.join_path(base, 'proj')
+		vmodules:     os.join_path(base, 'vmods')
+		old_vmodules: old_vmodules
+		app:          app
+	}
+}
+
+fn (lab ImportLab) close() {
+	if lab.old_vmodules == '' {
+		os.unsetenv('VMODULES')
+	} else {
+		os.setenv('VMODULES', lab.old_vmodules, true)
+	}
+	cleanup_test_app(lab.app)
+}
+
+// completion_at writes `content` to `rel` (relative to the lab base), opens it
+// and returns the completion items at the end of the line equal to `line_text`.
+fn (mut lab ImportLab) completion_at(rel string, content string, line_text string) []Detail {
+	path := os.join_path(lab.base, rel)
+	must_write_file(path, content)
+	uri := path_to_uri(path)
+	lab.app.open_files[uri] = content
+	lines := content.split_into_lines()
+	idx := lines.index(line_text)
+	assert idx >= 0, line_text
+	return lab.app.indexed_completions(uri, Position{
+		line: idx
+		char: lines[idx].len
+	}).items
+}
+
+fn import_edits(item Detail) []TextEdit {
+	return item.additional_text_edits or { []TextEdit{} }
+}
+
+// imports_offered returns the `import` lines that accepting the items would add,
+// for the modules of the project and the installed packages.
+fn imports_offered(items []Detail) []string {
+	mut lines := items.filter(import_edits(it).len > 0 && !it.detail.ends_with(' (vlib)')).map(import_edits(it)[0].new_text.trim_space())
+	lines.sort()
+	return lines
+}
+
+// vlib_imports_offered is imports_offered for V's own modules.
+fn vlib_imports_offered(items []Detail) []string {
+	mut lines := items.filter(import_edits(it).len > 0 && it.detail.ends_with(' (vlib)')).map(import_edits(it)[0].new_text.trim_space())
+	lines.sort()
+	return lines
+}
+
+fn test_completion_offers_the_modules_a_file_does_not_import_yet() {
+	mut lab := new_import_lab()
+	defer {
+		lab.close()
+	}
+	items := lab.completion_at('proj/main.v', import_lab_files['proj/main.v'], '\tte')
+	assert imports_offered(items) == ['import author.pkg', 'import gui', 'import gui.svg',
+		'import utils.mathx', 'import utils.textx'], imports_offered(items).str()
+	for item in items.filter(import_edits(it).len > 0) {
+		assert item.kind == 9, item.label
+		assert (item.insert_text or { '' }) == item.label
+	}
+	textx := items.filter(it.label == 'textx' && import_edits(it).len > 0)
+	assert textx.len == 1
+	edit := import_edits(textx[0])[0]
+	// right after the last import (line 2, `import store`)
+	assert edit.range.start.line == 3 && edit.range.start.char == 0
+	assert edit.range.end.line == 3 && edit.range.end.char == 0
+	assert edit.new_text == 'import utils.textx\n'
+}
+
+fn test_the_import_goes_where_v_expects_it_and_imported_modules_are_not_offered() {
+	mut lab := new_import_lab()
+	defer {
+		lab.close()
+	}
+	// no imports yet: after the module line, in its own paragraph
+	mut items := lab.completion_at('proj/extra.v', 'module main\n\nfn helper() {\n\tgu\n}\n',
+		'\tgu')
+	mut gui := items.filter(it.label == 'gui' && import_edits(it).len > 0)
+	assert gui.len == 1
+	mut edit := import_edits(gui[0])[0]
+	assert edit.range.start.line == 1 && edit.range.start.char == 0
+	assert edit.new_text == '\nimport gui\n'
+	// no module line: at the top
+	items = lab.completion_at('proj/extra.v', 'fn helper() {\n\tgu\n}\n', '\tgu')
+	gui = items.filter(it.label == 'gui' && import_edits(it).len > 0)
+	assert gui.len == 1
+	edit = import_edits(gui[0])[0]
+	assert edit.range.start.line == 0 && edit.range.start.char == 0
+	assert edit.new_text == 'import gui\n\n'
+	// several imports: after the last one
+	items = lab.completion_at('proj/extra.v', 'module main\n\nimport store\nimport os\n\nfn helper() {\n\tgu\n}\n',
+		'\tgu')
+	gui = items.filter(it.label == 'gui' && import_edits(it).len > 0)
+	assert gui.len == 1
+	edit = import_edits(gui[0])[0]
+	assert edit.range.start.line == 4 && edit.new_text == 'import gui\n'
+	// imported under an alias, or only some of its symbols: not offered again
+	items = lab.completion_at('proj/extra.v', 'module main\n\nimport gui as g\nimport utils.mathx { twice }\n\nfn helper() {\n\tgu\n}\n',
+		'\tgu')
+	assert imports_offered(items) == ['import author.pkg', 'import gui.svg', 'import store',
+		'import utils.textx'], imports_offered(items).str()
+}
+
+fn test_a_module_is_not_offered_to_itself_nor_a_module_that_imports_it() {
+	mut lab := new_import_lab()
+	defer {
+		lab.close()
+	}
+	content := 'module textx\n\npub fn shout(s string) string {\n\tst\n\treturn s\n}\n'
+	items := lab.completion_at('proj/utils/textx/textx.v', content, '\tst')
+	// `mathx` imports `textx`: importing it here would make a cycle
+	assert imports_offered(items) == ['import author.pkg', 'import gui', 'import gui.svg',
+		'import store'], imports_offered(items).str()
+}
+
+fn test_no_module_is_offered_inside_strings_or_comments() {
+	mut lab := new_import_lab()
+	defer {
+		lab.close()
+	}
+	for line in ["\tx := 'te", '\t// te'] {
+		content := 'module main\n\nfn main() {\n${line}\n}\n'
+		items := lab.completion_at('proj/extra.v', content, line)
+		assert imports_offered(items) == [], line
+	}
+}
+
+fn test_import_line_completion_lists_installed_and_nested_project_modules() {
+	mut lab := new_import_lab()
+	defer {
+		lab.close()
+	}
+	for line, want in {
+		'import gu':      'gui'
+		'import gui.':    'svg'
+		'import utils.':  'textx'
+		'import au':      'author'
+		'import author.': 'pkg'
+	} {
+		items := lab.completion_at('proj/extra.v', 'module main\n\n${line}\n', line)
+		assert items.any(it.label == want), '${line} -> ${items.map(it.label)}'
+	}
+	items := lab.completion_at('proj/extra.v', 'module main\n\nimport utils.\n', 'import utils.')
+	assert items.any(it.label == 'mathx')
+	// folders whose files declare another module, or `module main`, are not modules to import
+	all := lab.completion_at('proj/extra.v', 'module main\n\nimport \n', 'import ')
+	assert !all.any(it.label in ['broken', 'examples', 'secret', 'junk']), all.map(it.label).str()
+}
+
+fn test_members_of_an_installed_module_resolve_through_vmodules() {
+	mut lab := new_import_lab()
+	defer {
+		lab.close()
+	}
+	assert lab.app.resolve_indexed_import_module_dir('gui', lab.root) == os.join_path(lab.vmodules,
+		'gui')
+	assert lab.app.resolve_indexed_import_module_dir('gui.svg', lab.root) == os.join_path(lab.vmodules,
+		'gui', 'svg')
+	assert lab.app.resolve_indexed_import_module_dir('author.pkg', lab.root) == os.join_path(lab.vmodules,
+		'author', 'pkg')
+	members := lab.app.get_imported_module_member_completions('gui', lab.root)
+	assert members.items.any(it.label == 'window'), members.items.map(it.label).str()
+}
+
+fn test_a_project_without_v_mod_offers_its_own_modules() {
+	mut lab := new_import_lab()
+	defer {
+		lab.close()
+	}
+	items := lab.completion_at('noproj/main.v', import_lab_files['noproj/main.v'], '\tli')
+	assert 'import lib' in imports_offered(items)
+}
+
+// The modules of V's vlib are offered too, but not the ones V refuses to build
+// a program with (deprecated since a date that has come, one that needs a `-d`
+// flag), nor builtin, which every file has, nor the scaffolding of vlib: its
+// tests and examples, and the internals of a module. A deprecated module that V
+// still builds with is offered, marked deprecated.
+fn test_completion_also_offers_the_modules_of_vlib() {
+	mut lab := new_import_lab()
+	defer {
+		lab.close()
+	}
+	items := lab.completion_at('proj/main.v', import_lab_files['proj/main.v'], '\tte')
+	offered := vlib_imports_offered(items)
+	for path in ['os', 'strings', 'net.http', 'x.json2', 'crypto.sha256', 'builtin.wchar', 'json',
+		'x.templating.dtm'] {
+		assert 'import ${path}' in offered, path
+	}
+	for item in items.filter(import_edits(it).len > 0 && it.detail.ends_with(' (vlib)')) {
+		deprecated := item.label in ['json', 'dtm']
+		assert (item.tags or { []int{} }) == if deprecated { [1] } else { []int{} }, item.label
+	}
+	for path in ['builtin', 'gx', 'compress', 'io.string_reader', 'sync.arc', 'math.internal',
+		'crypto.ed25519.internal.edwards25519'] {
+		assert 'import ${path}' !in offered, path
+	}
+	for line in offered {
+		for segment in line.all_after('import ').split('.') {
+			assert segment !in ['tests', 'testdata', 'slow_tests', 'examples', 'internal'], line
+		}
+	}
+	os_items := items.filter(it.label == 'os' && import_edits(it).len > 0)
+	assert os_items.len == 1
+	assert os_items[0].kind == 9
+	assert os_items[0].detail == 'import os (vlib)'
+	edit := import_edits(os_items[0])[0]
+	assert edit.range.start.line == 3 && edit.new_text == 'import os\n'
+	// a module already imported is not offered, from vlib either
+	imported := lab.completion_at('proj/extra.v', 'module main\n\nimport os\nimport net.http\n\nfn helper() {\n\tte\n}\n',
+		'\tte')
+	assert 'import os' !in vlib_imports_offered(imported)
+	assert 'import net.http' !in vlib_imports_offered(imported)
+}
+
+// Editing a module of vlib itself, as when working on V, the vlib modules that
+// already import it are not offered: that would make an import cycle. The
+// buffer is not written: no file of vlib is touched.
+fn test_a_vlib_module_is_not_offered_the_vlib_modules_that_import_it() {
+	mut lab := new_import_lab()
+	defer {
+		lab.close()
+	}
+	vlib := os.join_path(find_v_dir(), 'vlib')
+	path := os.join_path(vlib, 'net', 'http', 'vls_import_cycle_probe.v')
+	assert !os.exists(path)
+	content := 'module http\n\nfn helper() {\n\tte\n}\n'
+	uri := path_to_uri(path)
+	lab.app.open_files[uri] = content
+	items := lab.app.indexed_completions(uri, Position{
+		line: 3
+		char: 3
+	}).items
+	lab.app.open_files.delete(uri)
+	offered := vlib_imports_offered(items)
+	assert 'import os' in offered, offered.str()
+	// net.http itself, and modules that import it directly or through others
+	for path_ in ['net.http', 'net.http.file', 'net.websocket', 'veb', 'net.s3'] {
+		assert 'import ${path_}' !in offered, path_
+	}
+}
+
+// notify_changed tells the app that the file at `path` changed on disk, as the
+// editor's file watcher does.
+fn notify_changed(mut app App, path string) {
+	app.on_did_change_watched_files(Request{
+		params: json2.encode(DidChangeWatchedFilesParams{
+			changes: [FileEvent{
+				uri:        path_to_uri(path)
+				event_type: 2
+			}]
+		})
+	})
+}
+
+// The imports of a module are read once and kept, until the watcher says one
+// of its files changed: a new import there can make a cycle at once.
+fn test_a_changed_import_on_disk_is_seen_by_the_next_completion() {
+	mut lab := new_import_lab()
+	defer {
+		lab.close()
+	}
+	content := 'module textx\n\npub fn shout(s string) string {\n\tst\n\treturn s\n}\n'
+	mut items := lab.completion_at('proj/utils/textx/textx.v', content, '\tst')
+	assert 'import store' in imports_offered(items)
+	store_path := os.join_path(lab.root, 'store', 'store.v')
+	must_write_file(store_path, 'module store\n\nimport utils.textx\n\npub fn open() {\n\ttextx.shout("")\n}\n')
+	notify_changed(mut lab.app, store_path)
+	items = lab.completion_at('proj/utils/textx/textx.v', content, '\tst')
+	assert 'import store' !in imports_offered(items), imports_offered(items).str()
+}
+
+// A watched change of a file in vlib, as when working on V, makes vlib's module
+// list be walked again. Nothing in vlib is written.
+fn test_a_watched_change_in_vlib_forgets_the_vlib_modules() {
+	mut lab := new_import_lab()
+	defer {
+		lab.close()
+	}
+	items := lab.completion_at('proj/main.v', import_lab_files['proj/main.v'], '\tte')
+	assert 'import os' in vlib_imports_offered(items)
+	vlib := os.join_path(find_v_dir(), 'vlib')
+	assert vlib in lab.app.vlib_modules_cache
+	notify_changed(mut lab.app, os.join_path(vlib, 'os', 'os.v'))
+	assert vlib !in lab.app.vlib_modules_cache
+}
+
+// A module of the project named like one of vlib is the one V imports: it is
+// offered once, as the project's.
+fn test_a_project_module_hides_the_vlib_module_of_the_same_path() {
+	mut lab := new_import_lab()
+	defer {
+		lab.close()
+	}
+	must_mkdir_all(os.join_path(lab.root, 'log'))
+	must_write_file(os.join_path(lab.root, 'log', 'log.v'), 'module log\n\npub fn where() string {\n\treturn "project"\n}\n')
+	items := lab.completion_at('proj/main.v', import_lab_files['proj/main.v'], '\tte')
+	assert 'import log' in imports_offered(items)
+	assert 'import log' !in vlib_imports_offered(items)
+}
+
+// Wherever a module comes from, it is not offered when V refuses to build a
+// program that imports it: deprecated since a date that has come, or stopped by
+// `$compile_error` unless a `-d` flag is given. Deprecated with no date, V
+// only warns: it is offered, marked deprecated.
+fn test_modules_v_refuses_are_not_offered_and_deprecated_ones_are_marked() {
+	mut lab := new_import_lab()
+	defer {
+		lab.close()
+	}
+	for rel, content in {
+		'oldlib/oldlib.v':                  "@[deprecated: 'use store instead']\n@[deprecated_after: '2020-01-01']\nmodule oldlib\n\npub fn f() {}\n"
+		'ownonly/ownonly.v':                'module ownonly\n\npub fn f() {}\n'
+		'ownonly/ownonly_notd_ownership.v': "module ownonly\n\n\$compile_error('ownonly needs -d ownership')\n"
+		'fine/fine.v':                      'module fine\n\npub fn f() {}\n'
+		'softold/softold.v':                "@[deprecated: 'use fine instead']\nmodule softold\n\npub fn f() {}\n"
+		'blankdate/blankdate.v':            "@[deprecated: 'use fine instead']\n@[deprecated_after: '']\nmodule blankdate\n\npub fn f() {}\n"
+	} {
+		path := os.join_path(lab.root, rel)
+		must_mkdir_all(os.dir(path))
+		must_write_file(path, content)
+	}
+	items := lab.completion_at('proj/main.v', import_lab_files['proj/main.v'], '\tte')
+	offered := imports_offered(items)
+	assert 'import fine' in offered, offered.str()
+	assert 'import softold' in offered, offered.str()
+	// with no date to refuse it from, V only warns
+	assert 'import blankdate' in offered, offered.str()
+	assert 'import oldlib' !in offered, offered.str()
+	assert 'import ownonly' !in offered, offered.str()
+	for label, tags in {
+		'fine':      []int{}
+		'softold':   [1]
+		'blankdate': [1]
+	} {
+		item := items.filter(it.label == label && import_edits(it).len > 0)[0]
+		assert (item.tags or { []int{} }) == tags, label
+	}
 }

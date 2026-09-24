@@ -45,15 +45,29 @@ mut:
 	vlib_fn_cache                               map[string]map[string]string // Per-vlib-module fn→return-type index (immutable during a session)
 	expression_type_depth                       int // Nesting of expression_type, which a binding's declaration re-enters
 	line_info_mode                              LineInfoMode // How the configured `v` reaches the `-line-info` checker (see interop.v)
+	inlay_hint_cache                            map[string]CachedInlayHints // Per-URI compiler inlay hints, see compiler_inlay_hints
 	tcp_conn                                    ?&net.TcpConn // Non-nil when serving a TCP client
 	is_shutdown                                 bool // True after shutdown request was acknowledged
 	exit_was_requested                          bool // True when the exit notification was received
 	received_initialize                         bool // True after initialize request was processed
 	next_request_id                             int = 1 // Counter for server-initiated request ids
 	diagnostics_scheduler                       ?&DiagnosticsScheduler // Production-only async diagnostics
+	diagnostics_servers                         &DiagnosticsServerPool = unsafe { nil } // Compilers answering checks from one process (see diagnostics_server.v)
+	v3_line_info_enabled                        bool // Whether V3 answers `-line-info` questions first (see v3_line_info.v); off in tests
+	v3_one_shot_unsupported                     bool // The V in use has no V3 that answers `-line-info` in a process of its own
+	v3_query_servers                            &DiagnosticsServerPool = unsafe { nil } // V3 servers answering `-line-info` questions
+	v3_query_projects                           map[string]V3QueryProject // The program copies V3 answers in, by program directory
+	overlay_dir                                 string // When set, the one directory a compilation overlay is rebuilt in
+	program_errors                              map[string][]JsonError // Other open files the last check covered, and their errors
+	program_dir_checked                         string // The program the last check covered, when it covered one
+	diagnostics_cancelled                       fn () bool = unsafe { nil } // Whether a newer check made the running one useless
 	run_command_manager                         ?&RunCommandManager // Async code-lens process lifecycle
 	execute_commands_synchronously              bool // Test hook for deterministic command assertions
 	write_mutex                                 &sync.Mutex = sync.new_mutex() // Serializes worker and request-loop writes
+	importable_modules_cache                    map[string]ImportableModulesCache // Modules a file can import, per project root (see module_imports.v)
+	vlib_modules_cache                          map[string][]ImportableModule // The modules of vlib, per vlib folder
+	module_imports_cache                        map[string]ModuleImports // The modules each module folder imports (see module_imports.v)
+	builtin_calls_cache                         map[string]map[string]Detail // V's builtin functions as completion items, per vlib/builtin folder
 }
 
 struct JsonError {
@@ -258,6 +272,7 @@ fn main() {
 		open_files: map[string]string{}
 		temp_dir: temp_dir
 		diagnostics_scheduler: new_diagnostics_scheduler()
+		v3_line_info_enabled: true
 	}
 	// os.File.read uses C fread, which waits for the entire buffer on an open
 	// pipe. LSP clients keep stdin open, so use the raw descriptor-backed pipe
@@ -335,6 +350,7 @@ fn handle_tcp_client(mut conn net.TcpConn) {
 		temp_dir: temp_dir
 		tcp_conn: &conn
 		diagnostics_scheduler: new_diagnostics_scheduler()
+		v3_line_info_enabled: true
 	}
 	mut reader := io.new_buffered_reader(reader: conn, cap: transport_buffer_cap)
 	app.handle_requests(mut reader)
@@ -679,11 +695,19 @@ fn (mut app App) handle_requests[T](mut reader T) {
 				app.write_response_or_cancelled(lsp_request.id, resp)
 			}
 			.rename {
-				resp := app.handle_rename(lsp_request)
+				resp := app.rename_request(lsp_request) or {
+					app.write_error_response(make_request_failed_error_response(lsp_request.id,
+						'Cannot rename: ${err.msg()}'))
+					continue
+				}
 				app.write_response_or_cancelled(lsp_request.id, resp)
 			}
 			.prepare_rename {
-				resp := app.handle_prepare_rename(lsp_request)
+				resp := app.prepare_rename_request(lsp_request) or {
+					app.write_error_response(make_request_failed_error_response(lsp_request.id,
+						'Cannot rename: ${err.msg()}'))
+					continue
+				}
 				app.write_response_or_cancelled(lsp_request.id, resp)
 			}
 			.workspace_symbol {
@@ -845,6 +869,10 @@ fn (mut app App) handle_requests[T](mut reader T) {
 			}
 			.exit {
 				log('Received exit notification. Terminating.')
+				// A client that exits without shutting down first would otherwise
+				// leave the persistent compilers running.
+				app.stop_diagnostics_servers()
+				app.stop_v3_queries()
 				app.exit_was_requested = true
 				break
 			}
@@ -1310,6 +1338,8 @@ fn (mut app App) accept_shutdown(id int) {
 	log('Received shutdown request.')
 	app.cancel_all_scheduled_diagnostics()
 	app.stop_run_commands()
+	app.stop_diagnostics_servers()
+	app.stop_v3_queries()
 	app.is_shutdown = true
 	app.write_response(Response{
 		id: id
@@ -1432,6 +1462,18 @@ fn (app &App) request_is_cancelled(id int) bool {
 		return raw in app.cancelled_raw_ids
 	}
 	return id in app.cancelled_requests
+}
+
+// make_request_failed_error_response tells the client why a valid request could
+// not be done, such as a rename that would break the program.
+fn make_request_failed_error_response(id int, message string) ErrorResponse {
+	return ErrorResponse{
+		id:    id
+		error: ResponseError{
+			code:    jsonrpc_err_request_failed
+			message: message
+		}
+	}
 }
 
 fn make_invalid_request_error_response(id int, message string) ErrorResponse {
@@ -1948,9 +1990,14 @@ fn (mut app App) consume_cancelled_request(id int) bool {
 // import it — otherwise an importer keyed on its own directory would reuse
 // diagnostics computed against the imported module's old API (P1-06).
 fn (app &App) generation_key(uri string) string {
-	dir := os.dir(uri_to_path(uri))
-	root := find_project_root(dir)
-	return if root != '' { root } else { dir }
+	path := uri_to_path(uri)
+	root := find_project_root(os.dir(path))
+	if root != '' {
+		return root
+	}
+	// Without a v.mod, the project is the program the file belongs to, whose
+	// directory also holds the local modules it imports.
+	return app.program_root(path)
 }
 
 // bump_generation records a mutation to `uri`, advancing both the global counter

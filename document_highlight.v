@@ -229,6 +229,27 @@ fn (mut app App) handle_document_highlight(request Request) Response {
 		// The initial lookup already resolved the selected occurrence.
 		anchor_cache[anchor_cache_key(uri, params.position.line, start)] = a
 	}
+	if anchor != none {
+		mut locations := []Location{cap: candidates.len}
+		for candidate in candidates {
+			start_char := byte_to_encoded_col(lines[candidate.line_idx], candidate.start_byte,
+				app.position_encoding)
+			locations << Location{
+				uri:   uri
+				range: LSPRange{
+					start: Position{
+						line: candidate.line_idx
+						char: start_char
+					}
+					end:   Position{
+						line: candidate.line_idx
+						char: start_char
+					}
+				}
+			}
+		}
+		app.v3_prefetch_anchors(locations, mut anchor_cache)
+	}
 	mut highlights := []DocumentHighlight{cap: candidates.len}
 	for candidate in candidates {
 		line := lines[candidate.line_idx]

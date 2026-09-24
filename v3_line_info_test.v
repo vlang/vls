@@ -1,0 +1,282 @@
+// vtest build: !windows
+module main
+
+import os
+
+// A V3 diagnostics server. A query of one question gets the answer the test
+// left for it; one of several questions gets for each, after its index, the
+// position of the question itself as the declaration. It keeps the questions
+// and a copy of the file of the first one, and fails the questions about a file
+// whose name has `broken` in it, as V3 does with a program it cannot parse.
+const fake_v3_query_server = r"#!/bin/sh
+echo v-diagnostics-server: ready
+here=$(dirname $0)
+tab=$(printf '\t')
+while read -r request rest; do
+	case $request in quit) exit 0 ;; esac
+	token=${rest%% *}
+	questions=${rest#* }
+	echo v-diagnostics-server: child 1 $token
+	echo $questions >> $here/questions.txt
+	first=${questions%%$tab*}
+	cp ${first%%:*} $here/asked.v
+	case $first in
+	*broken*) printf 'main.v:1:1: error: unexpected token\n\nv-diagnostics-server: end 1 %s\n' $token; continue ;;
+	esac
+	case $questions in
+	*$tab*)
+		i=0
+		rest=$questions$tab
+		while [ ${#rest} -gt 0 ]; do
+			q=${rest%%$tab*}
+			rest=${rest#*$tab}
+			pos=${q#*:}
+			printf '%s\t%s:%s:1\n' $i ${q%%:*} ${pos%%:*}
+			i=$((i + 1))
+		done
+		;;
+	*) cat $here/answer.txt; echo ;;
+	esac
+	printf '\nv-diagnostics-server: end 0 %s\n' $token
+done
+"
+
+// A V that runs no diagnostics server, but whose V3 answers `-line-info` in a
+// process of its own, with the answer the test left for it.
+const fake_v3_one_shot = r"#!/bin/sh
+case ${V_DIAGNOSTICS_SERVER}x in 1x) exit 0 ;; esac
+here=$(dirname $0)
+while [ $# -gt 0 ]; do
+	if [ $1 = -line-info ]; then
+		echo $2 >> $here/questions.txt
+		cat $here/answer.txt
+		exit 0
+	fi
+	shift
+done
+exit 1
+"
+
+// A V whose V3 has no query engine.
+const fake_v3_without_line_info = r"#!/bin/sh
+case ${V_DIAGNOSTICS_SERVER}x in 1x) exit 0 ;; esac
+echo 'unknown option `-vls-mode`'
+exit 1
+"
+
+const fake_hover_answer = '{"contents":{"kind":"markdown","value":"```v\\nfake\\n```"}}'
+
+fn test_the_completion_placeholder_follows_a_dot_with_no_name() {
+	source := 'fn main() {\n\tp := 1\n\tp.\n\tq.na\n\tprintln(p.x)\n}\n'
+	// `p.` at the end of line 3: the cursor after the dot is column 3.
+	assert with_completion_placeholder(source, '3:3') == source.replace('\tp.\n', '\tp.vlsmember\n')
+	// A name after the dot already parses.
+	assert with_completion_placeholder(source, '4:3') == source
+	// A cursor that follows no dot.
+	assert with_completion_placeholder(source, '2:3') == source
+	assert with_completion_placeholder(source, '5:10') == source
+	// Positions outside the text.
+	assert with_completion_placeholder(source, '40:3') == source
+	assert with_completion_placeholder(source, '3:0') == source
+}
+
+struct FakeV3 {
+	dir     string
+	project string
+	server  string // the directory of the fake compiler, where it keeps what it was asked
+}
+
+// fake_v3_app returns an app that asks V3 first, and the fake compiler `script`
+// as the diagnostics server it names (`VLS_DIAGNOSTICS_SERVER`) or as the V in
+// use (`VLS_V_COMMAND`).
+fn fake_v3_app(name string, script string, env_name string) !(&App, FakeV3) {
+	dir := os.join_path(os.vtmp_dir(), 'vls_v3_query_${name}_${os.getpid()}')
+	os.rmdir_all(dir) or {}
+	server := os.join_path(dir, 'server')
+	os.mkdir_all(server)!
+	exe := os.join_path(server, 'v')
+	os.write_file(exe, script)!
+	os.chmod(exe, 0o755)!
+	os.write_file(os.join_path(server, 'answer.txt'), fake_hover_answer)!
+	project := os.join_path(dir, 'project')
+	os.mkdir_all(project)!
+	os.write_file(os.join_path(project, 'main.v'), 'module main\n\nfn main() {\n\tp := 1\n\tprintln(p)\n}\n')!
+	os.write_file(os.join_path(project, 'other.v'), 'module main\n\nfn other() {\n\tq := 2\n\tq.\n}\n')!
+	os.setenv(env_name, exe, true)
+	app := &App{
+		open_files:           map[string]string{}
+		temp_dir:             os.join_path(dir, 'tmp')
+		v3_line_info_enabled: true
+	}
+	return app, FakeV3{
+		dir:     dir
+		project: project
+		server:  server
+	}
+}
+
+fn stop_fake_v3_app(mut app App, fake FakeV3) {
+	app.stop_v3_queries()
+	os.unsetenv('VLS_DIAGNOSTICS_SERVER')
+	os.unsetenv('VLS_V_COMMAND')
+	os.rmdir_all(fake.dir) or {}
+}
+
+fn (fake FakeV3) asked() string {
+	return os.read_file(os.join_path(fake.server, 'asked.v')) or { '' }
+}
+
+fn (fake FakeV3) questions() []string {
+	return (os.read_file(os.join_path(fake.server, 'questions.txt')) or { '' }).split_into_lines()
+}
+
+fn test_v3_answers_from_a_copy_that_holds_the_buffer() {
+	mut app, fake := fake_v3_app('buffer', fake_v3_query_server, 'VLS_DIAGNOSTICS_SERVER')!
+	defer {
+		stop_fake_v3_app(mut app, fake)
+	}
+	path := os.join_path(fake.project, 'main.v')
+	uri := path_to_uri(path)
+	buffer := 'module main\n\nfn main() {\n\tp := 10\n\tprintln(p)\n}\n'
+	app.open_files[uri] = buffer
+	result := app.v3_line_info(.hover, uri, path, '4:hv^2') or {
+		assert false, 'V3 gave no answer'
+		return
+	}
+	assert result is Hover
+	assert (result as Hover).contents.value.contains('fake')
+	assert fake.questions().last().ends_with('main.v:4:hv^2')
+	// The copy V3 checked holds the buffer, not the file on disk.
+	assert fake.asked() == buffer
+	assert os.read_file(path)!.contains('p := 1\n')
+}
+
+fn test_completion_writes_its_placeholder_in_the_copy_only() {
+	mut app, fake := fake_v3_app('placeholder', fake_v3_query_server, 'VLS_DIAGNOSTICS_SERVER')!
+	defer {
+		stop_fake_v3_app(mut app, fake)
+	}
+	// `other.v` is not open: the copy links it to the project until a request
+	// writes it, which must not write through the link.
+	path := os.join_path(fake.project, 'other.v')
+	on_disk := os.read_file(path)!
+	app.v3_line_info(.completion, path_to_uri(path), path, '5:3') or {}
+	assert fake.asked() == on_disk.replace('\tq.\n', '\tq.vlsmember\n')
+	assert os.read_file(path)! == on_disk
+}
+
+fn test_a_closed_file_goes_back_to_what_is_on_disk() {
+	mut app, fake := fake_v3_app('closed', fake_v3_query_server, 'VLS_DIAGNOSTICS_SERVER')!
+	defer {
+		stop_fake_v3_app(mut app, fake)
+	}
+	main_path := os.join_path(fake.project, 'main.v')
+	main_uri := path_to_uri(main_path)
+	app.open_files[main_uri] = 'module main\n\nfn main() {\n\tp := 10\n\tprintln(p)\n}\n'
+	other := os.join_path(fake.project, 'other.v')
+	app.v3_line_info(.hover, path_to_uri(other), other, '4:hv^2') or {}
+	project := app.v3_query_projects.values()[0]
+	copy_of_main := os.join_path(project.overlay.temp_root, 'main.v')
+	assert os.read_file(copy_of_main)!.contains('p := 10\n')
+	// Closed without saving: the copy holds main.v as it is on disk again.
+	app.open_files.delete(main_uri)
+	app.v3_line_info(.hover, path_to_uri(other), other, '4:hv^2') or {}
+	assert os.read_file(copy_of_main)! == os.read_file(main_path)!
+}
+
+fn test_several_positions_are_asked_at_once() {
+	mut app, fake := fake_v3_app('prefetch', fake_v3_query_server, 'VLS_DIAGNOSTICS_SERVER')!
+	defer {
+		stop_fake_v3_app(mut app, fake)
+	}
+	path := os.join_path(fake.project, 'main.v')
+	uri := path_to_uri(path)
+	// `p` where main.v declares it, and where it uses it.
+	locations := [
+		Location{
+			uri:   uri
+			range: LSPRange{
+				start: Position{
+					line: 3
+					char: 1
+				}
+			}
+		},
+		Location{
+			uri:   uri
+			range: LSPRange{
+				start: Position{
+					line: 4
+					char: 9
+				}
+			}
+		},
+	]
+	mut cache := map[string]?Location{}
+	app.v3_prefetch_anchors(locations, mut cache)
+	// One query for both, and each answer kept where the lookups find it.
+	assert fake.questions().len == 1
+	for loc in locations {
+		found := cache[anchor_cache_key(uri, loc.range.start.line, loc.range.start.char)] or {
+			assert false, 'nothing kept for line ${loc.range.start.line}'
+			return
+		}
+		assert found.uri == uri
+		assert found.range.start.line == loc.range.start.line
+	}
+}
+
+fn test_v1_answers_what_v3_cannot_parse() {
+	mut app, fake := fake_v3_app('broken', fake_v3_query_server, 'VLS_DIAGNOSTICS_SERVER')!
+	defer {
+		stop_fake_v3_app(mut app, fake)
+	}
+	path := os.join_path(fake.project, 'broken.v')
+	os.write_file(path, 'module main\n\nfn broken( {\n')!
+	if _ := app.v3_line_info(.hover, path_to_uri(path), path, '3:hv^4') {
+		assert false, 'a failed V3 query must leave the answer to V1'
+	}
+}
+
+fn test_without_a_server_v3_answers_in_a_process_of_its_own() {
+	mut app, fake := fake_v3_app('one_shot', fake_v3_one_shot, 'VLS_V_COMMAND')!
+	defer {
+		stop_fake_v3_app(mut app, fake)
+	}
+	path := os.join_path(fake.project, 'main.v')
+	result := app.v3_line_info(.hover, path_to_uri(path), path, '4:hv^2') or {
+		assert false, 'V3 gave no answer'
+		return
+	}
+	assert (result as Hover).contents.value.contains('fake')
+	assert fake.questions() == ['${os.join_path(app.v3_query_projects.values()[0].overlay.temp_root, 'main.v')}:4:hv^2']
+	assert !app.v3_one_shot_unsupported
+}
+
+fn test_a_v_without_the_query_engine_leaves_the_answer_to_v1() {
+	mut app, fake := fake_v3_app('no_engine', fake_v3_without_line_info, 'VLS_V_COMMAND')!
+	defer {
+		stop_fake_v3_app(mut app, fake)
+	}
+	path := os.join_path(fake.project, 'main.v')
+	if _ := app.v3_line_info(.hover, path_to_uri(path), path, '4:hv^2') {
+		assert false, 'a V without the query engine has no V3 answer'
+	}
+	assert app.v3_one_shot_unsupported
+}
+
+fn test_only_a_created_or_deleted_file_rebuilds_the_copy() {
+	mut app, fake := fake_v3_app('watcher', fake_v3_query_server, 'VLS_DIAGNOSTICS_SERVER')!
+	defer {
+		stop_fake_v3_app(mut app, fake)
+	}
+	path := os.join_path(fake.project, 'main.v')
+	app.v3_line_info(.hover, path_to_uri(path), path, '4:hv^2') or {}
+	assert app.v3_query_projects.len == 1
+	// A change shows through the copy.
+	app.v3_query_notice_disk_change(path, 2)
+	assert app.v3_query_projects.len == 1
+	// A new file is not in it.
+	app.v3_query_notice_disk_change(os.join_path(fake.project, 'new.v'), 1)
+	assert app.v3_query_projects.len == 0
+}
