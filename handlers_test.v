@@ -8221,7 +8221,7 @@ fn local_labels_at(mut app App, marked string) []string {
 	}).map(it.label)
 }
 
-const implicit_names_head = "module main\n\nstruct Row {\n\tname string\n}\n\nfn parse(s string) !int {\n\treturn s.int()\n}\n\nfn find(n int) ?int {\n\treturn if n > 0 { n } else { none }\n}\n\n"
+const implicit_names_head = 'module main\n\nstruct Row {\n\tname string\n}\n\nfn parse(s string) !int {\n\treturn s.int()\n}\n\nfn find(n int) ?int {\n\treturn if n > 0 { n } else { none }\n}\n\n'
 
 // The names V gives code without a declaration: `it` in the predicate or the
 // callback of every array method that takes one, `a` and `b` in a sort, `err` in
@@ -10713,6 +10713,18 @@ fn other_file_fn() int {
 }
 '
 
+// v3_answers_line_info is whether the V3 of the configured V answers the
+// `-line-info` questions: a rename then asks it where each name is declared, as
+// VLS does, and V1 only what V3 does not answer.
+const v3_answers_line_info = v3_answers_inlay_hints()
+
+// cleanup_rename_app ends the V3 servers a rename asked, then removes the
+// project: a server runs until it is told to end.
+fn cleanup_rename_app(mut app App) {
+	app.stop_v3_queries()
+	cleanup_test_app(app)
+}
+
 // new_rename_project_app opens a project made of main.v and other.v and returns
 // the app and the uri of each file.
 fn new_rename_project_app() (&App, map[string]string) {
@@ -10732,6 +10744,7 @@ fn new_rename_project_app_with(files map[string]string) (&App, map[string]string
 // the files named in `open`; the others are on disk alone.
 fn new_rename_project_app_opening(files map[string]string, open []string) (&App, map[string]string) {
 	mut app := create_test_app()
+	app.v3_line_info_enabled = v3_answers_line_info
 	dir := os.join_path(app.temp_dir, 'rename_project')
 	must_mkdir_all(dir)
 	must_write_file(os.join_path(dir, 'v.mod'), 'Module {}\n')
@@ -10797,7 +10810,7 @@ fn rename_edits_in(files map[string]string, at string) []string {
 fn rename_edits_opening(files map[string]string, open []string, at string) []string {
 	mut app, uris := new_rename_project_app_opening(files, open)
 	defer {
-		cleanup_test_app(app)
+		cleanup_rename_app(mut app)
 	}
 	parts := at.split(':')
 	line := files[parts[0]].split_into_lines()[parts[1].int() - 1]
@@ -10848,7 +10861,7 @@ fn test_rename_edits_every_occurrence_of_the_symbol_and_nothing_else() {
 fn test_rename_says_why_it_refuses_and_prepare_rename_refuses_first() {
 	mut app, uris := new_rename_project_app()
 	defer {
-		cleanup_test_app(app)
+		cleanup_rename_app(mut app)
 	}
 	outside := rename_request_at(uris, 'main.v:38:13')
 	if _ := app.rename_request(outside) {
@@ -10974,6 +10987,10 @@ fn shadowed() {
 "
 
 fn test_rename_follows_embedded_structs_closures_and_loops() {
+	// V1 alone does not tell where all these names are declared.
+	if !v3_answers_line_info {
+		return
+	}
 	files := {
 		'main.v': rename_scopes_main
 	}
@@ -11012,7 +11029,7 @@ fn test_rename_refuses_modules_builtin_types_and_names_v_would_reject() {
 		'main.v': rename_scopes_main
 	})
 	defer {
-		cleanup_test_app(app)
+		cleanup_rename_app(mut app)
 	}
 	refusals := {
 		'main.v:3:8 x':       'names a module' // `import time`
@@ -11087,6 +11104,10 @@ fn main() {
 // finds nothing inside a generic function that another file instantiates; a
 // compiler process of its own does, and the rename asks one before refusing.
 fn test_rename_resolves_names_inside_a_generic_function_called_from_another_file() {
+	// V1 alone does not tell where all these names are declared.
+	if !v3_answers_line_info {
+		return
+	}
 	files := {
 		'main.v':       rename_generic_main
 		'shop/store.v': rename_generic_store
@@ -11154,7 +11175,7 @@ fn test_rename_occurrence_cap_comes_from_the_environment() {
 		'main.v': main_v
 	})
 	defer {
-		cleanup_test_app(app)
+		cleanup_rename_app(mut app)
 	}
 	tick := 'main.v:3:4'
 	tock := 'main.v:7:4'
