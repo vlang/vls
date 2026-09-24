@@ -11024,6 +11024,120 @@ fn test_rename_follows_embedded_structs_closures_and_loops() {
 	}
 }
 
+// A field of a struct that another embeds, declared in one file and used in
+// another through the struct that embeds it.
+const rename_promoted_base = 'module main
+
+struct Base {
+	id int
+}
+
+struct User {
+	Base
+	name string
+}
+'
+
+const rename_promoted_main = "module main
+
+fn main() {
+	user := User{
+		Base: Base{
+			id: 9
+		}
+		name: 'ana'
+	}
+	println(user.id)
+	println(user.Base.id)
+}
+"
+
+fn test_rename_finds_a_field_through_the_struct_that_embeds_it() {
+	// V1 alone does not tell where `user.id` is declared.
+	if !v3_answers_line_info {
+		return
+	}
+	files := {
+		'base.v': rename_promoted_base
+		'main.v': rename_promoted_main
+	}
+	want := ['base.v:4:2', 'main.v:10:15', 'main.v:11:20', 'main.v:6:4']
+	// From each occurrence, with only its file open, as an editor may have it.
+	for at in want {
+		got := rename_edits_opening(files, [at.all_before(':')], at)
+		assert got == want, '${at}: ${got}'
+	}
+}
+
+// A program whose interface has a method and a field that a struct implements,
+// and a type that implements IError.
+const rename_interface_main = "module main
+
+interface Measurable {
+	area() f64
+	label string
+}
+
+struct Circle {
+	r     f64
+	label string
+}
+
+fn (c Circle) area() f64 {
+	return 3 * c.r * c.r
+}
+
+struct Fail {
+	Error
+}
+
+fn (f Fail) msg() string {
+	return 'fail'
+}
+
+fn total(items []Measurable) f64 {
+	mut acc := 0.0
+	for item in items {
+		acc += item.area()
+	}
+	return acc
+}
+
+fn main() {
+	area := total([Circle{
+		r:     1
+		label: 'c'
+	}])
+	println(area)
+	println(Fail{}.msg())
+}
+"
+
+fn test_rename_refuses_interface_members_and_the_names_they_share() {
+	mut app, uris := new_rename_project_app_with({
+		'main.v': rename_interface_main
+	})
+	defer {
+		cleanup_rename_app(mut app)
+	}
+	// V needs no declaration to implement an interface: the types that
+	// implement one must keep the names of its members, and a rename cannot
+	// see which types those are.
+	for at in ['main.v:4:2', 'main.v:5:2', 'main.v:13:15', 'main.v:10:2', 'main.v:28:15', 'main.v:21:13'] {
+		count := rename_edit_count(mut app, uris, at) or {
+			if v3_answers_line_info {
+				assert err.msg().contains('interface'), '${at}: ${err}'
+			}
+			continue
+		}
+		assert false, '${at}: renamed with ${count} edits'
+	}
+	// A local with the name of such a method is none of them.
+	assert rename_edits_in({
+		'main.v': rename_interface_main
+	}, 'main.v:34:2') == ['main.v:34:2', 'main.v:38:10']
+}
+
 fn test_rename_refuses_modules_builtin_types_and_names_v_would_reject() {
 	mut app, uris := new_rename_project_app_with({
 		'main.v': rename_scopes_main

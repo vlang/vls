@@ -41,6 +41,7 @@ fn (mut app App) rename_target(uri string, line int, ch int, scope IndexScope, m
 	if !uri_is_in_index_scope(anchor.uri, scope) {
 		return error('`${symbol}` is declared in ${os.file_name(uri_to_path(anchor.uri))}, outside this project, so it cannot be renamed here')
 	}
+	app.check_interface_member(anchor, symbol, scope)!
 	return RenameTarget{
 		symbol: symbol
 		anchor: anchor
@@ -339,6 +340,102 @@ fn (mut app App) check_implicit_name(target RenameTarget, new_name string) ! {
 			return error('V calls `${name}` by itself, so this rename would change what the program does')
 		}
 	}
+}
+
+// The methods of `IError`: a type that has them is an error, and V passes it
+// around and prints it through them.
+const ierror_method_names = ['msg', 'code']
+
+// check_interface_member refuses a rename of a member of an interface, or of a
+// method or a field with the name of one: V needs no declaration to implement
+// an interface, so the types that implement it must keep that name, and a
+// rename cannot see which types those are.
+fn (mut app App) check_interface_member(anchor Location, symbol string, scope IndexScope) ! {
+	if app.in_interface_body(anchor) {
+		return error('`${symbol}` is a member of an interface: the types that implement it must keep that name, and V does not say which types those are, so this rename could break the program')
+	}
+	kind := app.indexed_declaration_kind(anchor)
+	if kind !in [sym_kind_method, sym_kind_field] {
+		return
+	}
+	if (kind == sym_kind_method && symbol in ierror_method_names)
+		|| symbol in app.interface_member_names(scope) {
+		return error('`${symbol}` has the name of a member of an interface: a type that implements it must keep that name, and V does not say which types those are, so this rename could break the program')
+	}
+}
+
+// indexed_declaration_kind is the kind of the declaration of the index whose
+// name is at `loc`, the field of a struct included, or 0 when there is none.
+fn (mut app App) indexed_declaration_kind(loc Location) int {
+	for s in app.index_doc_symbols(loc.uri) {
+		if same_anchor_location(Location{ uri: loc.uri, range: s.selection_range }, loc) {
+			return s.kind
+		}
+		for child in s.children {
+			if same_anchor_location(Location{ uri: loc.uri, range: child.selection_range }, loc) {
+				return child.kind
+			}
+		}
+	}
+	return 0
+}
+
+// in_interface_body reports whether `loc` is in the body of an interface: the
+// name of one of its members, which the index does not list.
+fn (mut app App) in_interface_body(loc Location) bool {
+	content := app.open_files[loc.uri] or { os.read_file(uri_to_path(loc.uri)) or { return false } }
+	lines := content.split_into_lines()
+	code := source_code_lines(content)
+	for s in app.index_doc_symbols(loc.uri) {
+		if s.kind != sym_kind_interface {
+			continue
+		}
+		first := s.range.start.line
+		if loc.range.start.line > first && loc.range.start.line <= declaration_end_line(lines, code, first) {
+			return true
+		}
+	}
+	return false
+}
+
+// interface_member_names returns the names of the methods and fields that the
+// interfaces of `scope` declare.
+fn (mut app App) interface_member_names(scope IndexScope) []string {
+	mut names := []string{}
+	mut uris := app.symbol_index.keys()
+	uris.sort()
+	for uri in uris {
+		if !uri_is_in_index_scope(uri, scope)
+			|| !app.index_doc_symbols(uri).any(it.kind == sym_kind_interface) {
+			continue
+		}
+		content := app.open_files[uri] or { os.read_file(uri_to_path(uri)) or { continue } }
+		lines := content.split_into_lines()
+		code := source_code_lines(content)
+		for s in app.index_doc_symbols(uri) {
+			if s.kind != sym_kind_interface {
+				continue
+			}
+			first := s.range.start.line
+			last := declaration_end_line(lines, code, first)
+			for i in first + 1 .. last + 1 {
+				if i >= code.len {
+					break
+				}
+				member := code[i].trim_space()
+				mut end := 0
+				for end < member.len && is_ident_char(member[end]) {
+					end++
+				}
+				// An embedded interface is a type, capitalized; `mut:` opens a section.
+				name := member[..end]
+				if name != '' && !name[0].is_capital() && !member[end..].starts_with(':') {
+					names << name
+				}
+			}
+		}
+	}
+	return names
 }
 
 const type_declaration_kinds = [sym_kind_struct, sym_kind_enum, sym_kind_interface, sym_kind_class]
