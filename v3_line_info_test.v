@@ -64,6 +64,21 @@ echo 'unknown option `-vls-mode`'
 exit 1
 "
 
+// A V without a diagnostics server whose V3 answers `-line-info` in a process
+// of its own, and notes each question with the program it checked: the last
+// argument.
+const fake_v3_notes_targets = r"#!/bin/sh
+case ${V_DIAGNOSTICS_SERVER}x in 1x) exit 0 ;; esac
+here=$(dirname $0)
+question=
+for arg in $@; do
+	case $prev in -line-info) question=$arg ;; esac
+	prev=$arg
+done
+echo $question $prev >> $here/questions.txt
+cat $here/answer.txt
+"
+
 const fake_hover_answer = '{"contents":{"kind":"markdown","value":"```v\\nfake\\n```"}}'
 
 fn test_the_completion_placeholder_follows_a_dot_with_no_name() {
@@ -279,4 +294,22 @@ fn test_only_a_created_or_deleted_file_rebuilds_the_copy() {
 	// A new file is not in it.
 	app.v3_query_notice_disk_change(os.join_path(fake.project, 'new.v'), 1)
 	assert app.v3_query_projects.len == 0
+}
+
+fn test_a_test_file_is_asked_as_a_program_of_its_own() {
+	mut app, fake := fake_v3_app('test_file', fake_v3_notes_targets, 'VLS_V_COMMAND')!
+	defer {
+		stop_fake_v3_app(mut app, fake)
+	}
+	// The program of the directory leaves its test files out: V builds each one
+	// with the files of its module.
+	test_path := os.join_path(fake.project, 'main_test.v')
+	os.write_file(test_path, 'module main\n\nfn test_one() {\n\tp := 1\n\tassert p == 1\n}\n')!
+	main_path := os.join_path(fake.project, 'main.v')
+	app.v3_line_info(.hover, path_to_uri(test_path), test_path, '4:hv^2') or {}
+	app.v3_line_info(.hover, path_to_uri(main_path), main_path, '4:hv^2') or {}
+	copy_root := app.v3_query_projects.values()[0].overlay.temp_root
+	copy_of_test := os.join_path(copy_root, 'main_test.v')
+	assert fake.questions() == ['${copy_of_test}:4:hv^2 ${copy_of_test}',
+		'${os.join_path(copy_root, 'main.v')}:4:hv^2 .']
 }

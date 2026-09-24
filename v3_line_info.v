@@ -75,28 +75,49 @@ fn (mut app App) v3_ask(real_path string, questions []V3Question) ?V3Answers {
 	}
 	app.v3_sync_open_files(mut project)
 	mut specs := []string{cap: questions.len}
+	mut targets := []string{cap: questions.len}
 	for question in questions {
 		copy_path := project.write(question.path, question.content) or { return none }
 		specs << '${copy_path}:${question.line_info}'
+		// A test file is a program of its own, which V builds with the files of
+		// its module: the program of the directory leaves it out.
+		targets << if copy_path.ends_with('_test.v') { copy_path } else { '.' }
 	}
 	app.v3_query_projects[program_dir] = project
-	output := app.v3_run(project, specs)?
-	if questions.len == 1 {
-		return V3Answers{
-			project: project
-			answers: [output]
-		}
-	}
-	// Several questions get an answer each, on a line of its own after its index.
+	// The questions about one program are asked in one check.
 	mut answers := []string{len: questions.len}
-	for line in output.split_into_lines() {
-		index_text := line.all_before('\t')
-		if line.contains('\t') && index_text.is_int() {
-			index := index_text.int()
-			if index >= 0 && index < answers.len {
-				answers[index] = line.all_after('\t')
+	mut asked := []bool{len: questions.len}
+	mut answered := false
+	for first, target in targets {
+		if asked[first] {
+			continue
+		}
+		mut group := []int{}
+		for i in first .. targets.len {
+			if targets[i] == target {
+				group << i
+				asked[i] = true
 			}
 		}
+		output := app.v3_run(project, group.map(specs[it]), target) or { continue }
+		answered = true
+		if group.len == 1 {
+			answers[group[0]] = output
+			continue
+		}
+		// Several questions get an answer each, on a line of its own after its index.
+		for line in output.split_into_lines() {
+			index_text := line.all_before('\t')
+			if line.contains('\t') && index_text.is_int() {
+				index := index_text.int()
+				if index >= 0 && index < group.len {
+					answers[group[index]] = line.all_after('\t')
+				}
+			}
+		}
+	}
+	if !answered {
+		return none
 	}
 	return V3Answers{
 		project: project
@@ -104,12 +125,13 @@ fn (mut app App) v3_ask(real_path string, questions []V3Question) ?V3Answers {
 	}
 }
 
-// v3_run sends the questions `specs` to the diagnostics server of the V in use,
-// or, where there is none, to a compiler process of its own, and returns what
-// it answered. None means V3 has no answer: it cannot parse the program, or the
-// V in use has no V3 that answers questions.
-fn (mut app App) v3_run(project V3QueryProject, specs []string) ?string {
-	is_library := !app.is_program_dir(project.overlay.source_work_dir)
+// v3_run sends the questions `specs` about the program `target`, `.` or a test
+// file, to the diagnostics server of the V in use, or, where there is none, to
+// a compiler process of its own, and returns what it answered. None means V3
+// has no answer: it cannot parse the program, or the V in use has no V3 that
+// answers questions.
+fn (mut app App) v3_run(project V3QueryProject, specs []string, target string) ?string {
+	is_library := target == '.' && !app.is_program_dir(project.overlay.source_work_dir)
 	question := specs.join('\t')
 	if exe := resolve_diagnostics_server_exe() {
 		if app.v3_query_servers == unsafe { nil } {
@@ -119,7 +141,7 @@ fn (mut app App) v3_run(project V3QueryProject, specs []string) ?string {
 		if is_library {
 			args << '-shared'
 		}
-		args << ['-w', '-check', '-nocolor', '.']
+		args << ['-w', '-check', '-nocolor', target]
 		mut servers := app.v3_query_servers
 		if result := servers.query(exe, args, project.overlay.temp_work_dir, question) {
 			return if result.exit_code == 0 { result.output } else { none }
@@ -133,7 +155,7 @@ fn (mut app App) v3_run(project V3QueryProject, specs []string) ?string {
 	if is_library {
 		argv << '-shared'
 	}
-	argv << ['-vls-mode', '-line-info', question, '.']
+	argv << ['-vls-mode', '-line-info', question, target]
 	x := run_v_argv(argv, project.overlay.temp_work_dir)
 	if compiler_rejects_any_option(x.output, ['-new-compiler', '-vls-mode', '-line-info']) {
 		log('this V has no V3 that answers -line-info')
