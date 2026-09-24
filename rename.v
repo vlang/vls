@@ -15,6 +15,33 @@ struct RenameTarget {
 	anchor Location
 }
 
+// rename_anchor_cache returns where the names that renames asked about are
+// declared, while the files are as they were then: prepareRename asks where the
+// name at the cursor is declared, and the rename that follows asks it no more.
+fn (mut app App) rename_anchor_cache() map[string]?Location {
+	if app.rename_anchors_generation != app.open_files_generation {
+		app.rename_anchors = map[string]?Location{}
+		app.rename_anchors_generation = app.open_files_generation
+	}
+	return app.rename_anchors.clone()
+}
+
+// keep_rename_anchors keeps what a rename found out for the next one, unless a
+// file changed meanwhile. A question that got no answer is asked again: the
+// compiler may have failed for a moment.
+fn (mut app App) keep_rename_anchors(cache map[string]?Location) {
+	if app.rename_anchors_generation != app.open_files_generation {
+		return
+	}
+	mut answered := map[string]?Location{}
+	for key, value in cache {
+		if loc := value {
+			answered[key] = loc
+		}
+	}
+	app.rename_anchors = answered.move()
+}
+
 // rename_target resolves the declaration that the identifier at the cursor names.
 fn (mut app App) rename_target(uri string, line int, ch int, scope IndexScope, mut cache map[string]?Location) !RenameTarget {
 	// The cursor may also sit right after the name, where it is after typing it.

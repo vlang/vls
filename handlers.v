@@ -4421,7 +4421,10 @@ fn (mut app App) prepare_rename_request(request Request) !Response {
 	uri := params.text_document.uri
 	scope := app.index_scope_for_uri(uri)
 	app.ensure_index_scope(scope)
-	mut cache := map[string]?Location{}
+	mut cache := app.rename_anchor_cache()
+	defer {
+		app.keep_rename_anchors(cache)
+	}
 	target := app.rename_target(uri, params.position.line, params.position.char, scope, mut
 		cache)!
 	word := app.word_location(uri, params.position.line, params.position.char) or {
@@ -4735,7 +4738,10 @@ fn (mut app App) rename_request(request Request) !Response {
 	if !app.index_is_complete_for_scope(scope) {
 		return error('this project is only partly indexed (a file is too large or unreadable), so a rename could miss occurrences')
 	}
-	mut cache := map[string]?Location{}
+	mut cache := app.rename_anchor_cache()
+	defer {
+		app.keep_rename_anchors(cache)
+	}
 	target := app.rename_target(path, params.position.line, params.position.char, scope, mut
 		cache)!
 	symbol := target.symbol

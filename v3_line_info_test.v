@@ -2,6 +2,8 @@
 module main
 
 import os
+import time
+import x.json2
 
 // A V3 diagnostics server. A query of one question gets the answer the test
 // left for it; one of several questions gets for each, after its index, the
@@ -77,6 +79,79 @@ for arg in $@; do
 done
 echo $question $prev >> $here/questions.txt
 cat $here/answer.txt
+"
+
+// A V3 diagnostics server whose every answer to a question is the position the
+// question asks about: each name is its own declaration.
+const fake_v3_self_declaration_server = r"#!/bin/sh
+echo v-diagnostics-server: ready
+tab=$(printf '\t')
+while read -r request rest; do
+	case $request in quit) exit 0 ;; esac
+	token=${rest%% *}
+	questions=${rest#* }
+	echo v-diagnostics-server: child 1 $token
+	echo $questions >> $(dirname $0)/questions.txt
+	case $questions in
+	*$tab*)
+		i=0
+		rest=$questions$tab
+		while [ ${#rest} -gt 0 ]; do
+			q=${rest%%$tab*}
+			rest=${rest#*$tab}
+			pos=${q#*:}
+			printf '%s\t%s:%s:1\n' $i ${q%%:*} ${pos%%:*}
+			i=$((i + 1))
+		done
+		;;
+	*)
+		pos=${questions#*:}
+		printf '%s:%s:1\n' ${questions%%:*} ${pos%%:*}
+		;;
+	esac
+	printf '\nv-diagnostics-server: end 0 %s\n' $token
+done
+"
+
+// A diagnostics server that answers no question about line 4, and says that the
+// name asked about anywhere else is declared at line 4, column 1: `p` of `p := 1`
+// in the project of fake_v3_app.
+const fake_v3_leads_back_server = r"#!/bin/sh
+echo v-diagnostics-server: ready
+tab=$(printf '\t')
+while read -r request rest; do
+	case $request in quit) exit 0 ;; esac
+	token=${rest%% *}
+	questions=${rest#* }
+	echo v-diagnostics-server: child 1 $token
+	echo $questions >> $(dirname $0)/questions.txt
+	i=0
+	rest=$questions$tab
+	while [ ${#rest} -gt 0 ]; do
+		q=${rest%%$tab*}
+		rest=${rest#*$tab}
+		pos=${q#*:}
+		if [ ${pos%%:*} != 4 ]; then
+			case $questions in
+			*$tab*) printf '%s\t%s:4:1\n' $i ${q%%:*} ;;
+			*) printf '%s:4:1\n' ${q%%:*} ;;
+			esac
+		fi
+		i=$((i + 1))
+	done
+	printf '\nv-diagnostics-server: end 0 %s\n' $token
+done
+"
+
+// A diagnostics server that does not end when told to, as one whose child hangs.
+// It gives up by itself after a while, so that no test leaves it running.
+const fake_server_ignoring_quit = r"#!/bin/sh
+echo v-diagnostics-server: ready
+i=0
+while [ $i -lt 10 ]; do
+	sleep 1
+	i=$((i + 1))
+done
 "
 
 const fake_hover_answer = '{"contents":{"kind":"markdown","value":"```v\\nfake\\n```"}}'
@@ -312,4 +387,137 @@ fn test_a_test_file_is_asked_as_a_program_of_its_own() {
 	copy_of_test := os.join_path(copy_root, 'main_test.v')
 	assert fake.questions() == ['${copy_of_test}:4:hv^2 ${copy_of_test}',
 		'${os.join_path(copy_root, 'main.v')}:4:hv^2 .']
+}
+
+fn stop_and_report(mut server DiagnosticsServer, done chan bool) {
+	server.stop()
+	done <- true
+}
+
+fn test_a_server_that_does_not_end_is_stopped_anyway() {
+	dir := os.join_path(os.vtmp_dir(), 'vls_v3_query_stop_${os.getpid()}')
+	os.mkdir_all(dir)!
+	defer {
+		os.rmdir_all(dir) or {}
+	}
+	exe := os.join_path(dir, 'v')
+	os.write_file(exe, fake_server_ignoring_quit)!
+	os.chmod(exe, 0o755)!
+	mut server := start_diagnostics_server(exe, [], dir)!
+	done := chan bool{cap: 1}
+	spawn stop_and_report(mut server, done)
+	select {
+		_ := <-done {
+		}
+		5 * time.second {
+			assert false, 'stop() waited for a server that does not end'
+		}
+	}
+}
+
+fn test_a_test_file_does_not_push_out_the_server_of_the_program() {
+	mut app, fake := fake_v3_app('evict', fake_v3_query_server, 'VLS_DIAGNOSTICS_SERVER')!
+	defer {
+		stop_fake_v3_app(mut app, fake)
+	}
+	exe := os.getenv('VLS_DIAGNOSTICS_SERVER')
+	mut pool := new_diagnostics_server_pool()
+	defer {
+		pool.stop_all()
+	}
+	// The program of the directory first: the oldest server, when a fourth
+	// program needs one.
+	for target in ['.', 'a_test.v', 'b_test.v', 'c_test.v'] {
+		pool.query(exe, ['-w', '-check', '-nocolor', target], fake.project, 'main.v:4:hv^2') or {}
+	}
+	targets := pool.servers.keys().map(it.all_after_last('\n'))
+	assert '.' in targets, targets.str()
+	assert 'a_test.v' !in targets, targets.str()
+}
+
+fn test_a_rename_asks_nothing_its_prepare_rename_asked() {
+	mut app, fake := fake_v3_app('rename_cache', fake_v3_self_declaration_server, 'VLS_DIAGNOSTICS_SERVER')!
+	defer {
+		stop_fake_v3_app(mut app, fake)
+	}
+	path := os.join_path(fake.project, 'main.v')
+	uri := path_to_uri(path)
+	app.open_files[uri] = os.read_file(path)!
+	app.workspace_roots = [fake.project]
+	// `p` of `p := 1`.
+	position := Position{
+		line: 3
+		char: 1
+	}
+	app.prepare_rename_request(Request{
+		id:     1
+		method: 'textDocument/prepareRename'
+		params: json2.encode(TextDocumentPositionParams{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			position:      position
+		})
+	}) or {}
+	asked := fake.questions().len
+	assert fake.questions().any(it.contains(':4:gd^')), 'prepareRename asked nothing'
+	app.rename_request(Request{
+		id:     2
+		method: 'textDocument/rename'
+		params: json2.encode(RenameParams{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			position:      position
+			new_name:      'q'
+		})
+	}) or {}
+	// With the documents as they were, the rename knows where `p` is declared.
+	later := fake.questions()[asked..]
+	assert !later.any(it.contains(':4:gd^')), later.str()
+}
+
+fn test_a_rename_asks_again_what_its_prepare_rename_could_not_tell() {
+	mut app, fake := fake_v3_app('rename_unanswered', fake_v3_leads_back_server, 'VLS_DIAGNOSTICS_SERVER')!
+	defer {
+		stop_fake_v3_app(mut app, fake)
+	}
+	// No V1 either: a question V3 leaves unanswered gets no answer.
+	app.line_info_mode = .missing
+	path := os.join_path(fake.project, 'main.v')
+	uri := path_to_uri(path)
+	app.open_files[uri] = os.read_file(path)!
+	app.workspace_roots = [fake.project]
+	// `p` of `p := 1`: V3 does not say where it is declared, and its use in
+	// `println(p)` leads back to it.
+	position := Position{
+		line: 3
+		char: 1
+	}
+	prepared := app.prepare_rename_request(Request{
+		id:     1
+		method: 'textDocument/prepareRename'
+		params: json2.encode(TextDocumentPositionParams{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			position:      position
+		})
+	})!
+	assert json2.encode(prepared).contains('"placeholder":"p"'), json2.encode(prepared)
+	asked := fake.questions().len
+	app.rename_request(Request{
+		id:     2
+		method: 'textDocument/rename'
+		params: json2.encode(RenameParams{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			position:      position
+			new_name:      'q'
+		})
+	}) or {}
+	// The compiler may have failed for a moment: what got no answer is asked again.
+	later := fake.questions()[asked..]
+	assert later.any(it.contains(':4:gd^')), later.str()
 }

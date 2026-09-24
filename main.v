@@ -57,6 +57,8 @@ mut:
 	v3_one_shot_unsupported                     bool // The V in use has no V3 that answers `-line-info` in a process of its own
 	v3_query_servers                            &DiagnosticsServerPool = unsafe { nil } // V3 servers answering `-line-info` questions
 	v3_query_projects                           map[string]V3QueryProject // The program copies V3 answers in, by program directory
+	rename_anchors                              map[string]?Location // Where the names a rename asked about are declared, for the rename that follows
+	rename_anchors_generation                   int // open_files_generation when rename_anchors were asked
 	overlay_dir                                 string // When set, the one directory a compilation overlay is rebuilt in
 	program_errors                              map[string][]JsonError // Other open files the last check covered, and their errors
 	program_dir_checked                         string // The program the last check covered, when it covered one

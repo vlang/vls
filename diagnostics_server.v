@@ -120,18 +120,34 @@ fn (mut pool DiagnosticsServerPool) evict_least_recently_used() {
 	if pool.servers.len < diagnostics_server_limit {
 		return
 	}
-	mut oldest_key := ''
-	mut oldest := i64(0)
-	for key, server in pool.servers {
-		if oldest_key == '' || server.last_used < oldest {
-			oldest_key = key
-			oldest = server.last_used
-		}
+	// Every question about a directory goes to the server of its program, `.`;
+	// the one of a test file, a program of its own, serves while a rename or a
+	// request about that file lasts. Such a server goes first.
+	mut oldest_key := pool.least_recently_used(false)
+	if oldest_key == '' {
+		oldest_key = pool.least_recently_used(true)
 	}
 	if mut server := pool.servers[oldest_key] {
 		server.stop()
 	}
 	pool.servers.delete(oldest_key)
+}
+
+// least_recently_used returns the key of the server used longest ago, the
+// servers of the program of a directory, `.`, included only when `programs`.
+fn (pool &DiagnosticsServerPool) least_recently_used(programs bool) string {
+	mut oldest_key := ''
+	mut oldest := i64(0)
+	for key, server in pool.servers {
+		if !programs && key.ends_with('\n.') {
+			continue
+		}
+		if oldest_key == '' || server.last_used < oldest {
+			oldest_key = key
+			oldest = server.last_used
+		}
+	}
+	return oldest_key
 }
 
 // stop_all ends every server and removes the files they checked.
@@ -332,6 +348,17 @@ fn (mut s DiagnosticsServer) stop() {
 	}
 	if s.process.is_alive() {
 		s.process.stdin_write('quit\n')
+		// A server that does not end, as one whose child hangs, is killed:
+		// waiting for it would freeze VLS.
+		for _ in 0 .. 100 {
+			if !s.process.is_alive() {
+				break
+			}
+			time.sleep(10 * time.millisecond)
+		}
+		if s.process.is_alive() {
+			s.process.signal_kill()
+		}
 		s.process.wait()
 	}
 	s.process.close()
