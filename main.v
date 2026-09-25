@@ -574,6 +574,10 @@ fn (mut app App) handle_requests[T](mut reader T) {
 	defer {
 		app.cancel_all_scheduled_diagnostics()
 		app.stop_run_commands()
+		// However the session ends, its compilers end, and the files they
+		// checked go: no other session uses them.
+		app.stop_diagnostics_servers()
+		app.stop_v3_queries()
 	}
 	for {
 		// Reset the per-request raw id so a stale id can never leak into an

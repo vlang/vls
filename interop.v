@@ -1154,7 +1154,7 @@ fn (mut app App) run_v_check(path string, text string) []JsonError {
 		|| program_dir != normalize_overlay_path(working_dir)
 		|| app.imports_local_module(real_path, program_dir) {
 		if server_exe != '' {
-			app.overlay_dir = diagnostics_stable_dir('project', program_overlay_root(normalize_overlay_path(real_path),
+			app.overlay_dir = app.diagnostics_servers.stable_dir('project', program_overlay_root(normalize_overlay_path(real_path),
 				program_dir))
 		}
 		overlay = app.prepare_compilation_overlay_in(real_path, program_dir) or {
@@ -1174,7 +1174,7 @@ fn (mut app App) run_v_check(path string, text string) []JsonError {
 	if !use_multifile {
 		log('USING SINGLEFILE')
 		singlefile_tmppath = if server_exe != '' {
-			stable_dir := diagnostics_stable_dir('file', real_path)
+			stable_dir := app.diagnostics_servers.stable_dir('file', real_path)
 			os.mkdir_all(stable_dir) or {}
 			ext := os.file_ext(real_path)
 			os.join_path(stable_dir, 'vls_check${if ext == '' { '.v' } else { ext }}')

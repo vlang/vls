@@ -137,15 +137,12 @@ fn (mut app App) v3_run(project V3QueryProject, specs []string, target string) ?
 	is_library := target == '.' && !app.is_program_dir(project.overlay.source_work_dir)
 	question := specs.join('\t')
 	if exe := resolve_diagnostics_server_exe() {
-		if app.v3_query_servers == unsafe { nil } {
-			app.v3_query_servers = new_diagnostics_server_pool()
-		}
 		mut args := v3_compiler_selection_args()
 		if is_library {
 			args << '-shared'
 		}
 		args << ['-w', '-check', '-nocolor', target]
-		mut servers := app.v3_query_servers
+		mut servers := app.v3_query_pool()
 		if result := servers.query(exe, args, project.overlay.temp_work_dir, question) {
 			return if result.exit_code == 0 { result.output } else { none }
 		}
@@ -176,8 +173,9 @@ fn (mut app App) v3_query_project(real_path string, program_dir string) !V3Query
 			return project
 		}
 	}
-	app.overlay_dir = diagnostics_stable_dir('query', program_overlay_root(normalize_overlay_path(real_path),
-		program_dir))
+	// A copy for each program: the copy of another would not hold what this one
+	// keeps as written into it.
+	app.overlay_dir = app.v3_query_pool().stable_dir('query', program_dir)
 	defer {
 		app.overlay_dir = ''
 	}
@@ -237,6 +235,15 @@ fn (mut project V3QueryProject) write(path string, content string) !string {
 	os.write_file(copy_path, content)!
 	project.written[path] = content
 	return copy_path
+}
+
+// v3_query_pool returns the servers that answer this editor's questions, whose
+// directory holds the copies of its programs.
+fn (mut app App) v3_query_pool() &DiagnosticsServerPool {
+	if app.v3_query_servers == unsafe { nil } {
+		app.v3_query_servers = new_diagnostics_server_pool()
+	}
+	return app.v3_query_servers
 }
 
 // v3_query_notice_disk_change forgets the copy of the program a file was

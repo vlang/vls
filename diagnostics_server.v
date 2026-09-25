@@ -13,7 +13,7 @@ fn C.kill(pid int, sig int) int
 // that finishes the one-shot run of the same command line, printing the same
 // diagnostics in a fraction of the time. A server answers for one command line
 // run in one directory, so the files it checks live at paths that stay the same
-// from one run to the next (see diagnostics_stable_dir).
+// from one run to the next (see stable_dir).
 @[heap]
 struct DiagnosticsServerPool {
 mut:
@@ -21,6 +21,10 @@ mut:
 	servers     map[string]&DiagnosticsServer
 	unsupported map[string]bool
 	requests    u64
+	// The directory of the files its servers check, which no other pool uses:
+	// the editors one VLS serves over TCP, and the checks and the questions of
+	// one editor, neither write nor remove each other's files.
+	base string
 }
 
 struct DiagnosticsServer {
@@ -46,7 +50,10 @@ const v3_query_answer_ms = 15000
 const diagnostics_server_limit = 3
 
 fn new_diagnostics_server_pool() &DiagnosticsServerPool {
-	return &DiagnosticsServerPool{}
+	mut pool := &DiagnosticsServerPool{}
+	// Its address tells it apart from every other pool alive in this VLS.
+	pool.base = os.join_path(os.temp_dir(), 'vls_diagnostics_${os.getpid()}_${ptr_str(pool)}')
+	return pool
 }
 
 // check runs the compiler with `args` in `work_dir` through a server, starting
@@ -160,7 +167,7 @@ fn (mut pool DiagnosticsServerPool) stop_all() {
 		server.stop()
 	}
 	pool.servers.clear()
-	os.rmdir_all(diagnostics_stable_base()) or {}
+	os.rmdir_all(pool.base) or {}
 }
 
 fn start_diagnostics_server(exe string, args []string, work_dir string) !&DiagnosticsServer {
@@ -382,16 +389,11 @@ fn resolve_diagnostics_server_exe() ?string {
 	return if os.exists(v_exe) { v_exe } else { none }
 }
 
-// diagnostics_stable_base holds the files the servers of this VLS check.
-fn diagnostics_stable_base() string {
-	return os.join_path(os.temp_dir(), 'vls_diagnostics_${os.getpid()}')
-}
-
-// diagnostics_stable_dir returns the directory that stands for `source` in every
-// check run through a server. A one-shot run can use a fresh directory each
+// stable_dir returns the directory that stands for `source` in every check run
+// through a server of this pool. A one-shot run can use a fresh directory each
 // time; a server cannot, since its input was fixed when it started.
-fn diagnostics_stable_dir(kind string, source string) string {
-	return os.join_path(diagnostics_stable_base(), '${kind}_${source.hash().hex()}')
+fn (pool &DiagnosticsServerPool) stable_dir(kind string, source string) string {
+	return os.join_path(pool.base, '${kind}_${source.hash().hex()}')
 }
 
 // stop_diagnostics_servers ends the servers the diagnostics worker used.

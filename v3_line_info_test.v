@@ -1,6 +1,7 @@
 // vtest build: !windows
 module main
 
+import io
 import os
 import time
 import x.json2
@@ -583,4 +584,86 @@ fn test_a_rename_asks_again_what_its_prepare_rename_could_not_tell() {
 	// The compiler may have failed for a moment: what got no answer is asked again.
 	later := fake.questions()[asked..]
 	assert later.any(it.contains(':4:gd^')), later.str()
+}
+
+fn test_two_editors_on_one_project_keep_their_copies_apart() {
+	mut first, fake := fake_v3_app('two_editors', fake_v3_query_server, 'VLS_DIAGNOSTICS_SERVER')!
+	defer {
+		stop_fake_v3_app(mut first, fake)
+	}
+	first.diagnostics_scheduler = new_diagnostics_scheduler()
+	// A VLS serving two clients over TCP has an App for each.
+	mut second := &App{
+		open_files:           map[string]string{}
+		temp_dir:             os.join_path(fake.dir, 'tmp2')
+		v3_line_info_enabled: true
+	}
+	defer {
+		second.stop_v3_queries()
+	}
+	path := os.join_path(fake.project, 'main.v')
+	uri := path_to_uri(path)
+	first.open_files[uri] = 'module main\n\nfn main() {\n\tp := 10\n\tprintln(p)\n}\n'
+	second.open_files[uri] = 'module main\n\nfn main() {\n\tp := 20\n\tprintln(p)\n}\n'
+	first.v3_line_info(.hover, uri, path, '4:hv^2') or {}
+	assert fake.asked() == first.open_files[uri]
+	second.v3_line_info(.hover, uri, path, '4:hv^2') or {}
+	assert fake.asked() == second.open_files[uri]
+	// Each is asked about its own buffer, whatever the other wrote meanwhile.
+	first.v3_line_info(.hover, uri, path, '4:hv^2') or {}
+	assert fake.asked() == first.open_files[uri]
+	// One that stops removes its own files only.
+	second_copy := second.v3_query_projects.values()[0].overlay.temp_root
+	first.stop_diagnostics_servers()
+	assert os.is_dir(second_copy)
+	first.stop_v3_queries()
+	assert os.is_dir(second_copy)
+	second.v3_line_info(.hover, uri, path, '4:hv^2') or {}
+	assert fake.asked() == second.open_files[uri]
+}
+
+fn test_two_programs_of_one_project_keep_their_copies_apart() {
+	mut app, fake := fake_v3_app('two_programs', fake_v3_query_server, 'VLS_DIAGNOSTICS_SERVER')!
+	defer {
+		stop_fake_v3_app(mut app, fake)
+	}
+	// One v.mod and two programs: the one at its root, and cmd/tool.
+	os.write_file(os.join_path(fake.project, 'v.mod'), "Module {\n\tname: 'project'\n}\n")!
+	tool := os.join_path(fake.project, 'cmd', 'tool', 'main.v')
+	os.mkdir_all(os.dir(tool))!
+	os.write_file(tool, 'module main\n\nfn main() {\n\tt := 3\n\tprintln(t)\n}\n')!
+	path := os.join_path(fake.project, 'main.v')
+	uri := path_to_uri(path)
+	buffer := 'module main\n\nfn main() {\n\tp := 10\n\tprintln(p)\n}\n'
+	app.open_files[uri] = buffer
+	app.v3_line_info(.hover, uri, path, '4:hv^2') or {}
+	// An edit, a question about the other program, and the edit undone.
+	app.open_files[uri] = buffer.replace('10', '20')
+	app.v3_line_info(.hover, path_to_uri(tool), tool, '4:hv^2') or {}
+	assert app.v3_query_projects.len == 2
+	app.open_files[uri] = buffer
+	app.v3_line_info(.hover, uri, path, '4:hv^2') or {}
+	assert fake.asked() == buffer
+}
+
+fn test_a_session_that_ends_without_a_shutdown_removes_its_copies() {
+	mut app, fake := fake_v3_app('session_end', fake_v3_query_server, 'VLS_DIAGNOSTICS_SERVER')!
+	defer {
+		stop_fake_v3_app(mut app, fake)
+	}
+	path := os.join_path(fake.project, 'main.v')
+	app.v3_line_info(.hover, path_to_uri(path), path, '4:hv^2') or {}
+	copy_root := app.v3_query_projects.values()[0].overlay.temp_root
+	assert os.is_dir(copy_root)
+	// The client goes away without a word.
+	no_requests := os.join_path(fake.dir, 'no_requests.txt')
+	os.write_file(no_requests, '')!
+	mut input := os.open(no_requests)!
+	defer {
+		input.close()
+	}
+	mut reader := io.new_buffered_reader(reader: input, cap: 1)
+	app.capture_output = true
+	app.handle_requests(mut reader)
+	assert !os.exists(copy_root)
 }
