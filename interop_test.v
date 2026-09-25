@@ -1813,6 +1813,41 @@ fn test_bounded_overlay_copy_caps_file_count_across_entries() {
 	assert !os.exists(os.join_path(target_dir, 'two.txt'))
 }
 
+fn test_directories_made_the_overlay_own_share_one_copy_budget() {
+	temp_dir := os.join_path(os.temp_dir(), 'vls_overlay_own_dirs_budget_${os.getpid()}_${time.now().unix_nano()}')
+	defer {
+		os.rmdir_all(temp_dir) or {}
+	}
+	// Two directories the overlay links whole, made its own one after the other
+	// where no link can be made.
+	project_dir := os.join_path(temp_dir, 'project')
+	overlay_dir := os.join_path(temp_dir, 'overlay')
+	interop_test_must_mkdir_all(overlay_dir)
+	for name in ['a', 'b'] {
+		interop_test_must_mkdir_all(os.join_path(project_dir, name))
+		interop_test_must_write_file(os.join_path(project_dir, name, '${name}.v'), 'module ${name}\n')
+		os.symlink(os.join_path(project_dir, name), os.join_path(overlay_dir, name)) or { return }
+	}
+	mut budget := OverlayCopyBudget{
+		max_files: 1
+		max_bytes: 1024
+	}
+	for name in ['a', 'b'] {
+		own_overlay_dirs_with_linker(project_dir, overlay_dir, name, deny_overlay_symlink, mut budget) or {
+			assert false, 'Failed to make ${name} the overlay own: ${err}'
+			return
+		}
+		assert os.is_dir(os.join_path(overlay_dir, name))
+		assert !os.is_link(os.join_path(overlay_dir, name))
+	}
+	// The limit holds for both together: a.v was copied, b.v was not.
+	assert os.is_file(os.join_path(overlay_dir, 'a', 'a.v'))
+	assert !os.exists(os.join_path(overlay_dir, 'b', 'b.v'))
+	assert budget.files == 1
+	// Nothing was written into the project.
+	assert os.read_file(os.join_path(project_dir, 'b', 'b.v'))! == 'module b\n'
+}
+
 fn test_bounded_overlay_copy_caps_bytes() {
 	temp_dir := os.join_path(os.temp_dir(), 'vls_overlay_byte_limit_${os.getpid()}_${time.now().unix_nano()}')
 	defer {

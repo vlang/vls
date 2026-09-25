@@ -22,6 +22,9 @@ mut:
 	overlay CompilationOverlay
 	// What each file of the program written into the copy holds, by its path.
 	written map[string]string
+	// What the copy may still copy of the project where it cannot link it, for
+	// all its writes together (see own_overlay_dirs).
+	copy_budget OverlayCopyBudget = new_overlay_copy_budget()
 }
 
 // V3Question is a question about a position of the file at `path`, which holds
@@ -213,21 +216,24 @@ fn (mut app App) v3_sync_open_files(mut project V3QueryProject) {
 }
 
 // write makes the copy of the file at `path` hold `content`, and returns the
-// path of that copy. A file that is not open is a link to the one in the
-// project: it is replaced, never written through.
+// path of that copy. The copy links the project's files it was not asked to
+// write, by a link to the file, a hard link, or a link to a directory above it:
+// such a link is replaced by a file of the copy's own, never written through.
 fn (mut project V3QueryProject) write(path string, content string) !string {
 	rel := overlay_relative_path(path, project.overlay.source_root) or {
 		return error('${path} is not in ${project.overlay.source_root}')
 	}
 	copy_path := os.join_path(project.overlay.temp_root, rel)
-	if (project.written[path] or { '' }) == content && os.is_file(copy_path)
-		&& !os.is_link(copy_path) {
-		return copy_path
+	if written := project.written[path] {
+		if written == content && os.is_file(copy_path) && !os.is_link(copy_path) {
+			return copy_path
+		}
 	}
-	if os.is_link(copy_path) {
+	own_overlay_dirs(project.overlay.source_root, project.overlay.temp_root, os.dir(rel), mut
+		project.copy_budget)!
+	if os.exists(copy_path) || os.is_link(copy_path) {
 		os.rm(copy_path)!
 	}
-	os.mkdir_all(os.dir(copy_path))!
 	os.write_file(copy_path, content)!
 	project.written[path] = content
 	return copy_path

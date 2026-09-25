@@ -255,6 +255,69 @@ fn test_completion_writes_its_placeholder_in_the_copy_only() {
 	assert os.read_file(path)! == on_disk
 }
 
+fn test_a_file_opened_after_the_copy_was_built_is_written_in_the_copy_only() {
+	mut app, fake := fake_v3_app('opened_later', fake_v3_query_server, 'VLS_DIAGNOSTICS_SERVER')!
+	defer {
+		stop_fake_v3_app(mut app, fake)
+	}
+	// main.v imports `helper`: the copy holds the files of helper as hard links
+	// to them. Nothing imports `extra`: the copy links the whole directory.
+	helper_path := os.join_path(fake.project, 'helper', 'helper.v')
+	extra_path := os.join_path(fake.project, 'extra', 'extra.v')
+	extra_sibling := os.join_path(fake.project, 'extra', 'more.v')
+	os.mkdir_all(os.dir(helper_path))!
+	os.mkdir_all(os.dir(extra_path))!
+	os.write_file(helper_path, 'module helper\n\npub fn answer() int {\n\treturn 42\n}\n')!
+	os.write_file(extra_path, 'module extra\n\npub fn one() int {\n\treturn 1\n}\n')!
+	os.write_file(extra_sibling, 'module extra\n\npub fn two() int {\n\treturn 2\n}\n')!
+	main_path := os.join_path(fake.project, 'main.v')
+	main_uri := path_to_uri(main_path)
+	app.open_files[main_uri] = 'module main\n\nimport helper\n\nfn main() {\n\tp := helper.answer()\n\tprintln(p)\n}\n'
+	app.v3_line_info(.hover, main_uri, main_path, '6:hv^2') or {}
+	copy_root := app.v3_query_projects.values()[0].overlay.temp_root
+	copy_of_helper := os.join_path(copy_root, 'helper', 'helper.v')
+	// What the test is about: the copy shares both files with the project.
+	assert os.stat(copy_of_helper)!.inode == os.stat(helper_path)!.inode
+	assert os.is_link(os.join_path(copy_root, 'extra'))
+	helper_on_disk := os.read_file(helper_path)!
+	extra_on_disk := os.read_file(extra_path)!
+	// Both opened and edited, and not saved.
+	helper_uri := path_to_uri(helper_path)
+	extra_uri := path_to_uri(extra_path)
+	helper_buffer := helper_on_disk.replace('42', '7') + '\nfn use() {\n\tx := answer()\n\tx.\n}\n'
+	app.open_files[helper_uri] = helper_buffer
+	app.open_files[extra_uri] = extra_on_disk.replace('1', '11')
+	app.v3_line_info(.hover, main_uri, main_path, '6:hv^2') or {}
+	assert os.read_file(os.join_path(copy_root, 'extra', 'extra.v'))! == app.open_files[extra_uri]
+	// A completion writes its placeholder into the copy of helper.v.
+	app.v3_line_info(.completion, helper_uri, helper_path, '9:3') or {}
+	assert fake.asked() == helper_buffer.replace('\tx.\n', '\tx.vlsmember\n')
+	assert os.read_file(helper_path)! == helper_on_disk
+	assert os.read_file(extra_path)! == extra_on_disk
+	// The files next to the one written are still in the copy.
+	assert os.read_file(os.join_path(copy_root, 'extra', 'more.v'))! == os.read_file(extra_sibling)!
+}
+
+fn test_a_file_emptied_in_the_editor_is_empty_in_the_copy() {
+	mut app, fake := fake_v3_app('emptied', fake_v3_query_server, 'VLS_DIAGNOSTICS_SERVER')!
+	defer {
+		stop_fake_v3_app(mut app, fake)
+	}
+	// Nothing imports `extra`: the copy links the whole directory.
+	extra_path := os.join_path(fake.project, 'extra', 'extra.v')
+	os.mkdir_all(os.dir(extra_path))!
+	os.write_file(extra_path, 'module extra\n\npub fn one() int {\n\treturn 1\n}\n')!
+	main_path := os.join_path(fake.project, 'main.v')
+	app.v3_line_info(.hover, path_to_uri(main_path), main_path, '4:hv^2') or {}
+	copy_root := app.v3_query_projects.values()[0].overlay.temp_root
+	assert os.is_link(os.join_path(copy_root, 'extra'))
+	// Opened, and all its text deleted: nothing was written for it yet.
+	app.open_files[path_to_uri(extra_path)] = ''
+	app.v3_line_info(.hover, path_to_uri(main_path), main_path, '4:hv^2') or {}
+	assert os.read_file(os.join_path(copy_root, 'extra', 'extra.v'))! == ''
+	assert os.read_file(extra_path)! != ''
+}
+
 fn test_a_closed_file_goes_back_to_what_is_on_disk() {
 	mut app, fake := fake_v3_app('closed', fake_v3_query_server, 'VLS_DIAGNOSTICS_SERVER')!
 	defer {
