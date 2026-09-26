@@ -4300,6 +4300,51 @@ fn test_extract_doc_comment_at_first_line() {
 	assert comment == ''
 }
 
+fn test_extract_doc_comment_shows_inline_examples_as_v_code() {
+	// `// Example: <code>` is how vlib documents most examples; `v doc` shows
+	// the code as V. Consecutive ones share one block, under `Examples:`.
+	lines := [
+		'// sort sorts the array in place.',
+		'//',
+		'// Example: mut aa := [5,2,1,10]; aa.sort(); assert aa == [1,2,5,10] // ascending',
+		'// Example: mut aa := [5,2,1,10]; aa.sort(b < a) // descending',
+		'pub fn (mut a array) sort(callback fn (voidptr, voidptr) int)',
+	]
+	assert extract_doc_comment(lines, 4) == 'sort sorts the array in place.  \n  \nExamples:  \n```v\nmut aa := [5,2,1,10]; aa.sort(); assert aa == [1,2,5,10] // ascending\nmut aa := [5,2,1,10]; aa.sort(b < a) // descending\n```'
+	one := ['// hex returns the value in base 16.', "// Example: assert 255.hex() == 'ff'",
+		'pub fn (nn int) hex() string']
+	assert extract_doc_comment(one, 2) == "hex returns the value in base 16.  \nExample:  \n```v\nassert 255.hex() == 'ff'\n```"
+}
+
+fn test_extract_doc_comment_keeps_the_lines_of_a_code_block_as_written() {
+	// The lines of a ``` block keep their indentation, and an `Example:` in it
+	// is code, not a new example.
+	lines := [
+		'// map creates a new array.',
+		'// Example:',
+		'// ```v',
+		'// r2 := words.map(fn (w string) string {',
+		'// \treturn w.to_upper()',
+		'// })',
+		'// // Example: in a block',
+		'// ```',
+		'pub fn (a array) map(callback fn (voidptr) voidptr) array',
+	]
+	assert extract_doc_comment(lines, 8) == 'map creates a new array.  \nExample:  \n```v\nr2 := words.map(fn (w string) string {\n\treturn w.to_upper()\n})\n// Example: in a block\n```'
+}
+
+fn test_extract_doc_comment_leaves_other_example_lines_as_text() {
+	// Only `Example: <code>` is an example for `v doc`: `example:` is prose, and
+	// `Example:` alone introduces a ``` block or text.
+	lines := [
+		"// example: utf8.raw_index('ab', 1) => 'b'",
+		'// Example:',
+		'//',
+		'fn raw_index() {}',
+	]
+	assert extract_doc_comment(lines, 3) == "example: utf8.raw_index('ab', 1) => 'b'  \nExample:  \n"
+}
+
 fn test_find_declaration_line_function() {
 	lines := ['module main', '', 'fn my_func() {}']
 	idx := find_declaration_line(lines, 'my_func')

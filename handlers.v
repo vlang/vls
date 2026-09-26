@@ -6198,7 +6198,8 @@ fn find_declaration_line(lines []string, symbol string) int {
 }
 
 // extract_doc_comment walks backward from `decl_line` collecting consecutive
-// `//` comment lines (V's vdoc convention) and returns them joined with newlines.
+// `//` comment lines (V's vdoc convention) and returns them as Markdown (see
+// doc_comment_markdown).
 fn extract_doc_comment(lines []string, decl_line int) string {
 	mut comments := []string{}
 	mut i := decl_line - 1
@@ -6209,7 +6210,7 @@ fn extract_doc_comment(lines []string, decl_line int) string {
 	for i >= 0 {
 		trimmed := lines[i].trim_space()
 		if trimmed.starts_with('//') {
-			comments << trimmed[2..].trim_space()
+			comments << trimmed[2..]
 			i--
 		} else {
 			break
@@ -6218,10 +6219,71 @@ fn extract_doc_comment(lines []string, decl_line int) string {
 	if comments.len == 0 {
 		return ''
 	}
-	comments = comments.reverse()
-	// Use Markdown hard line breaks (two trailing spaces + newline) so each
-	// comment line renders on its own line in the hover popup.
-	return comments.join('  \n')
+	return doc_comment_markdown(comments.reverse())
+}
+
+// doc_comment_markdown renders the lines of a doc comment, each as written
+// after its `//`, as Markdown: a line of text on its own line (a hard line
+// break), the lines of a ``` block as written but for the space after `//`,
+// and consecutive `Example: <code>` lines, which `v doc` shows as V code, as a
+// ```v block under `Example:` or `Examples:`.
+fn doc_comment_markdown(comments []string) string {
+	mut out := []string{cap: comments.len + 4}
+	mut in_block := false
+	mut i := 0
+	for i < comments.len {
+		if !in_block {
+			mut examples := []string{}
+			for i < comments.len {
+				examples << inline_doc_example(comments[i]) or { break }
+				i++
+			}
+			if examples.len > 0 {
+				out << if examples.len == 1 { 'Example:  ' } else { 'Examples:  ' }
+				out << '```v'
+				out << examples
+				out << '```'
+				continue
+			}
+		}
+		text := comments[i].trim_space()
+		if text.starts_with('```') {
+			in_block = !in_block
+			out << text
+		} else if in_block {
+			mut code := comments[i]
+			if code.starts_with(' ') {
+				code = code[1..]
+			}
+			out << code.trim_right(' \t')
+		} else {
+			// Two trailing spaces: a hard line break, so that each line of the
+			// comment shows on its own line.
+			out << text + '  '
+		}
+		i++
+	}
+	if in_block {
+		out << '```'
+	}
+	if out.len > 0 && out.last().ends_with('  ') {
+		out[out.len - 1] = out.last()[..out.last().len - 2]
+	}
+	return out.join('\n')
+}
+
+// inline_doc_example is the code of a doc comment line `Example: <code>`,
+// given as written after its `//`: how vlib documents most of its examples.
+fn inline_doc_example(comment string) ?string {
+	text := comment.trim_space()
+	if !text.starts_with('Example: ') {
+		return none
+	}
+	code := text['Example: '.len..].trim_space()
+	if code == '' {
+		return none
+	}
+	return code
 }
 
 // get_module_name extracts the module name declared in V source content.
