@@ -25,6 +25,18 @@ mut:
 	// What the copy may still copy of the project where it cannot link it, for
 	// all its writes together (see own_overlay_dirs).
 	copy_budget OverlayCopyBudget = new_overlay_copy_budget()
+	// The files of the project that the copy holds by a hard link or as a copy,
+	// by their path in the copy (see refresh_held_files).
+	held map[string]HeldFile
+}
+
+// HeldFile is a file of the project that the copy holds by a hard link or as a
+// copy, as it was when the copy took it.
+struct HeldFile {
+	source string
+	inode  u64
+	size   u64
+	mtime  i64
 }
 
 // V3Question is a question about a position of the file at `path`, which holds
@@ -188,10 +200,12 @@ fn (mut app App) v3_query_project(real_path string, program_dir string) !V3Query
 			written[path] = content
 		}
 	}
-	return V3QueryProject{
+	mut project := V3QueryProject{
 		overlay: overlay
 		written: written
 	}
+	project.note_held_files('')
+	return project
 }
 
 // v3_sync_open_files writes into the copy what the editor holds: every open
@@ -211,6 +225,68 @@ fn (mut app App) v3_sync_open_files(mut project V3QueryProject) {
 			project.write(path, os.read_file(path) or { '' }) or {}
 		}
 	}
+	project.refresh_held_files()
+}
+
+// note_held_files notes the files of the directory `rel` of the copy, and of
+// the directories below it that are the copy's own, that hold a file of the
+// project by a hard link or as a copy: those that it was not asked to write.
+fn (mut project V3QueryProject) note_held_files(rel string) {
+	dir := os.join_path(project.overlay.temp_root, rel)
+	for entry in os.ls(dir) or { return } {
+		entry_rel := if rel == '' { entry } else { rel + '/' + entry }
+		copy_path := os.join_path(project.overlay.temp_root, entry_rel)
+		if os.is_link(copy_path) || copy_path in project.held {
+			continue
+		}
+		if os.is_dir(copy_path) {
+			project.note_held_files(entry_rel)
+			continue
+		}
+		source := normalize_overlay_path(os.join_path(project.overlay.source_root, entry_rel))
+		if source !in project.written {
+			project.hold(copy_path, source)
+		}
+	}
+}
+
+fn (mut project V3QueryProject) hold(copy_path string, source string) {
+	info := os.stat(source) or { return }
+	project.held[copy_path] = HeldFile{
+		source: source
+		inode:  info.inode
+		size:   info.size
+		mtime:  info.mtime
+	}
+}
+
+// refresh_held_files takes again each file of the project that the copy holds
+// by a hard link or as a copy, and that changed since: a hard link shows a file
+// written in place, but not one replaced by another, as a checkout does or an
+// editor that saves by renaming a new file over it, and a copy shows neither.
+// One removed from the project goes from the copy. Nothing needs a client to
+// say that a file changed.
+fn (mut project V3QueryProject) refresh_held_files() {
+	mut changed := []string{}
+	for copy_path, held in project.held {
+		info := os.stat(held.source) or {
+			changed << copy_path
+			continue
+		}
+		if info.inode != held.inode || info.size != held.size || info.mtime != held.mtime {
+			changed << copy_path
+		}
+	}
+	for copy_path in changed {
+		source := project.held[copy_path].source
+		project.held.delete(copy_path)
+		os.rm(copy_path) or { continue }
+		if os.is_file(source) {
+			if materialize_overlay_file(source, copy_path, mut project.copy_budget) or { false } {
+				project.hold(copy_path, source)
+			}
+		}
+	}
 }
 
 // write makes the copy of the file at `path` hold `content`, and returns the
@@ -227,11 +303,14 @@ fn (mut project V3QueryProject) write(path string, content string) !string {
 			return copy_path
 		}
 	}
-	own_overlay_dirs(project.overlay.source_root, project.overlay.temp_root, os.dir(rel), mut
-		project.copy_budget)!
+	for owned in own_overlay_dirs(project.overlay.source_root, project.overlay.temp_root,
+		os.dir(rel), mut project.copy_budget)! {
+		project.note_held_files(owned)
+	}
 	if os.exists(copy_path) || os.is_link(copy_path) {
 		os.rm(copy_path)!
 	}
+	project.held.delete(copy_path)
 	os.write_file(copy_path, content)!
 	project.written[path] = content
 	return copy_path
@@ -248,8 +327,9 @@ fn (mut app App) v3_query_pool() &DiagnosticsServerPool {
 
 // v3_query_notice_disk_change forgets the copy of the program a file was
 // created or deleted in: the copy links the files that were there when it was
-// built. A change to a file needs nothing: a link shows it, and a file written
-// into the copy is written again from what it holds.
+// built. A change to a file needs nothing: a symbolic link shows it, a file
+// written into the copy is written again from what it holds, and one that the
+// copy holds otherwise is taken again (see refresh_held_files).
 fn (mut app App) v3_query_notice_disk_change(changed_path string, event_type int) {
 	if event_type == 2 {
 		return

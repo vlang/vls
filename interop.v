@@ -1818,13 +1818,15 @@ fn symlink_untracked_tree(source_root string, source_dir string, target_dir stri
 // `rel_dir` its own, so that a file written there stays in the overlay: one
 // that links the project's directory becomes a directory whose entries link the
 // project's entries, or are copies of them within `budget` where no link can be
-// made, and one that is missing is created.
-fn own_overlay_dirs(source_root string, temp_root string, rel_dir string, mut budget OverlayCopyBudget) ! {
-	own_overlay_dirs_with_linker(source_root, temp_root, rel_dir, create_overlay_symlink, mut
-		budget)!
+// made, and one that is missing is created. It returns those it made of links,
+// relative to the overlay's root.
+fn own_overlay_dirs(source_root string, temp_root string, rel_dir string, mut budget OverlayCopyBudget) ![]string {
+	return own_overlay_dirs_with_linker(source_root, temp_root, rel_dir, create_overlay_symlink, mut
+		budget)
 }
 
-fn own_overlay_dirs_with_linker(source_root string, temp_root string, rel_dir string, link_fn OverlayLinkFn, mut budget OverlayCopyBudget) ! {
+fn own_overlay_dirs_with_linker(source_root string, temp_root string, rel_dir string, link_fn OverlayLinkFn, mut budget OverlayCopyBudget) ![]string {
+	mut owned := []string{}
 	mut rel := ''
 	for part in normalize_overlay_path(rel_dir).split('/') {
 		if part in ['', '.'] {
@@ -1837,10 +1839,12 @@ fn own_overlay_dirs_with_linker(source_root string, temp_root string, rel_dir st
 			os.mkdir(target)!
 			symlink_untracked_tree(source_root, os.join_path(source_root, rel), target, rel,
 				[], [], link_fn, mut budget)!
+			owned << rel
 		} else if !os.exists(target) {
 			os.mkdir(target)!
 		}
 	}
+	return owned
 }
 
 // on_did_change_watched_files handles workspace/didChangeWatchedFiles.

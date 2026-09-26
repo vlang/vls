@@ -299,6 +299,37 @@ fn test_a_file_opened_after_the_copy_was_built_is_written_in_the_copy_only() {
 	assert os.read_file(os.join_path(copy_root, 'extra', 'more.v'))! == os.read_file(extra_sibling)!
 }
 
+fn test_a_module_file_replaced_on_disk_is_taken_again_by_the_copy() {
+	mut app, fake := fake_v3_app('replaced', fake_v3_query_server, 'VLS_DIAGNOSTICS_SERVER')!
+	defer {
+		stop_fake_v3_app(mut app, fake)
+	}
+	// main.v imports `helper`: the copy holds helper.v as a hard link to it.
+	helper_path := os.join_path(fake.project, 'helper', 'helper.v')
+	os.mkdir_all(os.dir(helper_path))!
+	os.write_file(helper_path, 'module helper\n\npub fn answer() int {\n\treturn 42\n}\n')!
+	main_path := os.join_path(fake.project, 'main.v')
+	main_uri := path_to_uri(main_path)
+	app.open_files[main_uri] = 'module main\n\nimport helper\n\nfn main() {\n\tp := helper.answer()\n\tprintln(p)\n}\n'
+	app.v3_line_info(.hover, main_uri, main_path, '6:hv^2') or {}
+	copy_of_helper := os.join_path(app.v3_query_projects.values()[0].overlay.temp_root, 'helper', 'helper.v')
+	assert os.stat(copy_of_helper)!.inode == os.stat(helper_path)!.inode
+	// Replaced by another file, as a checkout or an editor that saves by
+	// renaming does, and no client says so: the hard link holds the old one.
+	replacement := helper_path + '.new'
+	os.write_file(replacement, 'module helper\n\npub fn answer() string {\n\treturn "x"\n}\n')!
+	os.rename(replacement, helper_path)!
+	app.v3_line_info(.hover, main_uri, main_path, '6:hv^2') or {}
+	assert os.read_file(copy_of_helper)! == os.read_file(helper_path)!
+	// Written in place, then removed.
+	os.write_file(helper_path, 'module helper\n\npub fn answer() f64 {\n\treturn 1.5\n}\n')!
+	app.v3_line_info(.hover, main_uri, main_path, '6:hv^2') or {}
+	assert os.read_file(copy_of_helper)! == os.read_file(helper_path)!
+	os.rm(helper_path)!
+	app.v3_line_info(.hover, main_uri, main_path, '6:hv^2') or {}
+	assert !os.exists(copy_of_helper)
+}
+
 fn test_a_file_emptied_in_the_editor_is_empty_in_the_copy() {
 	mut app, fake := fake_v3_app('emptied', fake_v3_query_server, 'VLS_DIAGNOSTICS_SERVER')!
 	defer {
