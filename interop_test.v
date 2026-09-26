@@ -654,6 +654,29 @@ fn test_parse_v_check_diagnostics_reads_v3_output() {
 	assert diagnostics[1].len == 5
 }
 
+fn test_parse_v_check_program_diagnostics_places_errors_without_a_position() {
+	// Some errors are about the program rather than a place in it, as a module
+	// imported under a name its files do not declare. V prints them without a
+	// position; they are shown where they point: at the import and at the module
+	// declaration of the files they name, else in the file that was checked.
+	dir := os.join_path(os.vtmp_dir(), 'vls_program_errors_${os.getpid()}')
+	os.rmdir_all(dir) or {}
+	defer {
+		os.rmdir_all(dir) or {}
+	}
+	interop_test_must_mkdir_all(os.join_path(dir, 'lib'))
+	interop_test_must_write_file(os.join_path(dir, 'main.v'), 'module main\n\nimport lib\n\nfn main() {\n\tprintln(lib.valor())\n}\n')
+	interop_test_must_write_file(os.join_path(dir, 'lib', 'lib.v'), 'module otro\n\npub fn valor() int {\n\treturn 1\n}\n')
+	bad_module := 'bad module definition: ./main.v imports module "lib" but ./lib/lib.v is defined as module `otro`'
+	output := 'error: ${bad_module}\nbuilder error: redefinition of function `main`\n'
+	got := parse_v_check_program_diagnostics(output, dir, os.join_path(dir, 'main.v')).map('${os.file_name(it.path)}:${it.line_nr}:${it.col}:${it.len} ${it.level}: ${it.message}')
+	assert got == [
+		'main.v:3:1:10 error: ${bad_module}', // `import lib`
+		'lib.v:1:1:11 error: ${bad_module}', // `module otro`
+		'main.v:5:1:11 error: redefinition of function `main`', // `fn main() {`, the checked file
+	], got.str()
+}
+
 fn test_parse_v_check_diagnostics_maps_v3_builder_error_to_error() {
 	output := '/tmp/main.v:3:1: builder error: cannot import module "missing" (not found)
     3 | import missing
@@ -1351,6 +1374,104 @@ fn test_write_tracked_files_to_temp_nested_directories() {
 	assert os.exists(temp_nested)
 }
 
+fn test_program_root_is_the_program_that_imports_a_module() {
+	// `v .` in the directory of a program checks the modules it imports, wherever
+	// they sit below it, so a file of such a module is checked from there: on its
+	// own, the module has no program to tell what it leaves unused, and a check
+	// of the program misses the changes made to it.
+	temp_dir := os.join_path(os.vtmp_dir(), 'vls_program_root_${os.getpid()}')
+	os.rmdir_all(temp_dir) or {}
+	defer {
+		os.rmdir_all(temp_dir) or {}
+	}
+	for with_vmod in [false, true] {
+		project := os.join_path(temp_dir, if with_vmod { 'with_vmod' } else { 'without_vmod' })
+		for rel, content in {
+			'main.v':            'module main\n\nimport lib\n\nfn main() {}\n'
+			'lib/lib.v':         'module lib\n\nimport lib.inner\n'
+			'lib/inner/inner.v': 'module inner\n'
+			'lone/lone.v':       'module lone\n'
+			'extra/extra.v':     'module extra\n'
+			'demo/main.v':       'module main\n\nfn main() {}\n'
+		} {
+			path := os.join_path(project, rel)
+			interop_test_must_mkdir_all(os.dir(path))
+			interop_test_must_write_file(path, content)
+		}
+		if with_vmod {
+			interop_test_must_write_file(os.join_path(project, 'v.mod'), "Module {\n\tname: 'proyecto'\n}\n")
+		}
+		mut app := &App{
+			open_files: map[string]string{}
+		}
+		// An import typed in the editor and not saved yet counts as well.
+		app.open_files[path_to_uri(os.join_path(project, 'main.v'))] = 'module main\n\nimport lib\nimport extra\n\nfn main() {}\n'
+		root := normalize_overlay_path(project)
+		mut failures := []string{}
+		for rel, want in {
+			'main.v':            root
+			'lib/lib.v':         root // imported by main.v
+			'lib/inner/inner.v': root // through lib
+			'extra/extra.v':     root // imported by the unsaved buffer of main.v
+			'lone/lone.v':       normalize_overlay_path(os.join_path(project, 'lone')) // imported by nothing
+			'demo/main.v':       normalize_overlay_path(os.join_path(project, 'demo')) // a program of its own
+		} {
+			got := app.program_root(os.join_path(project, rel))
+			if got != want {
+				failures << '${with_vmod} ${rel}: ${got}, not ${want}'
+			}
+		}
+		assert failures.len == 0, failures.join('\n')
+	}
+}
+
+fn test_prepare_compilation_overlay_checks_vmod_subdirs_from_the_program_root() {
+	// V compiles the subdirectories a v.mod lists in `subdirs` as part of the
+	// program next to it, so a file there is checked from that directory: a
+	// check of its own directory alone misses the rest of the program.
+	temp_dir := os.join_path(os.vtmp_dir(), 'vls_vmod_subdirs_${os.getpid()}')
+	os.rmdir_all(temp_dir) or {}
+	defer {
+		os.rmdir_all(temp_dir) or {}
+	}
+	project_dir := os.join_path(temp_dir, 'project')
+	app_temp_dir := os.join_path(temp_dir, 'app-temp')
+	for dir in ['repo/deeper', 'tools', 'plugin'] {
+		interop_test_must_mkdir_all(os.join_path(project_dir, dir))
+	}
+	interop_test_must_mkdir_all(app_temp_dir)
+	interop_test_must_write_file(os.join_path(project_dir, 'v.mod'), "Module {\n\tname: 'subdirs_test'\n\tsubdirs: ['repo', 'plugin']\n}\n")
+	interop_test_must_write_file(os.join_path(project_dir, 'plugin', 'v.mod'), "Module {\n\tname: 'plugin'\n}\n")
+	mut app := &App{
+		temp_dir: app_temp_dir
+	}
+	mut failures := []string{}
+	for rel, expected in {
+		'main.v':             ''
+		'repo/repo.v':        ''
+		'repo/deeper/more.v': ''
+		'tools/tool.v':       'tools'
+		'plugin/plugin.v':    'plugin'
+	} {
+		path := os.join_path(project_dir, rel)
+		interop_test_must_write_file(path, 'module main\n')
+		overlay := app.prepare_compilation_overlay(path) or {
+			failures << '${rel}: ${err}'
+			continue
+		}
+		os.rmdir_all(overlay.temp_root) or {}
+		want := normalize_overlay_path(if expected == '' {
+			project_dir
+		} else {
+			os.join_path(project_dir, expected)
+		})
+		if overlay.source_work_dir != want {
+			failures << '${rel}: checked from ${overlay.source_work_dir}, not ${want}'
+		}
+	}
+	assert failures.len == 0, failures.join('\n')
+}
+
 fn test_prepare_compilation_overlay_preserves_nested_symlink_layout() {
 	temp_dir := os.join_path(os.temp_dir(), 'vls_overlay_nested_symlink_${os.getpid()}_${time.now().unix_nano()}')
 	defer {
@@ -1690,6 +1811,41 @@ fn test_bounded_overlay_copy_caps_file_count_across_entries() {
 	assert second_copied == 0
 	assert budget.files == 1
 	assert !os.exists(os.join_path(target_dir, 'two.txt'))
+}
+
+fn test_directories_made_the_overlay_own_share_one_copy_budget() {
+	temp_dir := os.join_path(os.temp_dir(), 'vls_overlay_own_dirs_budget_${os.getpid()}_${time.now().unix_nano()}')
+	defer {
+		os.rmdir_all(temp_dir) or {}
+	}
+	// Two directories the overlay links whole, made its own one after the other
+	// where no link can be made.
+	project_dir := os.join_path(temp_dir, 'project')
+	overlay_dir := os.join_path(temp_dir, 'overlay')
+	interop_test_must_mkdir_all(overlay_dir)
+	for name in ['a', 'b'] {
+		interop_test_must_mkdir_all(os.join_path(project_dir, name))
+		interop_test_must_write_file(os.join_path(project_dir, name, '${name}.v'), 'module ${name}\n')
+		os.symlink(os.join_path(project_dir, name), os.join_path(overlay_dir, name)) or { return }
+	}
+	mut budget := OverlayCopyBudget{
+		max_files: 1
+		max_bytes: 1024
+	}
+	for name in ['a', 'b'] {
+		own_overlay_dirs_with_linker(project_dir, overlay_dir, name, deny_overlay_symlink, mut budget) or {
+			assert false, 'Failed to make ${name} the overlay own: ${err}'
+			return
+		}
+		assert os.is_dir(os.join_path(overlay_dir, name))
+		assert !os.is_link(os.join_path(overlay_dir, name))
+	}
+	// The limit holds for both together: a.v was copied, b.v was not.
+	assert os.is_file(os.join_path(overlay_dir, 'a', 'a.v'))
+	assert !os.exists(os.join_path(overlay_dir, 'b', 'b.v'))
+	assert budget.files == 1
+	// Nothing was written into the project.
+	assert os.read_file(os.join_path(project_dir, 'b', 'b.v'))! == 'module b\n'
 }
 
 fn test_bounded_overlay_copy_caps_bytes() {
