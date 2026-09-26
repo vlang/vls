@@ -33,6 +33,16 @@ mut:
 	leftover    string
 	last_used   i64
 	fingerprint string
+	// busy is held while a request talks to this server; the pool's own lock
+	// covers only its map, so a request to one server does not wait for the
+	// others (a hover while the program is checked).
+	busy sync.Mutex
+	// users counts the requests holding this server, under the pool's lock: the
+	// pool stops no server in use.
+	users int
+	// retired is set when the pool dropped this server while it was in use: the
+	// last request to leave stops it.
+	retired bool
 }
 
 const diagnostics_server_ready = 'v-diagnostics-server: ready'
@@ -76,6 +86,37 @@ fn (mut pool DiagnosticsServerPool) query(exe string, args []string, work_dir st
 // waits `timeout_ms` for the answer.
 fn (mut pool DiagnosticsServerPool) request(exe string, args []string, work_dir string, question string, timeout_ms int, cancelled fn () bool) ?os.Result {
 	key := '${exe}\n${work_dir}\n${args.join('\n')}'
+	mut server, token := pool.take_server(key, exe, args, work_dir) or { return none }
+	line := if question == '' { 'check ${token}' } else { 'query ${token} ${question}' }
+	server.busy.lock()
+	mut answered := true
+	result := server.ask(line, token, timeout_ms, cancelled) or {
+		log('the diagnostics server stopped answering: ${err}')
+		server.stop()
+		answered = false
+		os.Result{}
+	}
+	if answered {
+		server.last_used = time.now().unix_milli()
+	}
+	server.busy.unlock()
+	pool.give_back(key, mut server)
+	if !answered {
+		return none
+	}
+	// A child killed by a signal leaves no diagnostics to trust, so the caller
+	// runs the compiler itself for this check. The server stays: it is the
+	// parent, and it is fine.
+	if result.exit_code >= 128 && result.exit_code != diagnostics_check_cancelled {
+		log('the diagnostics server child died with ${result.exit_code}; running the compiler instead')
+		return none
+	}
+	return result
+}
+
+// take_server returns the server of `key`, started when there is none, and a
+// token for a request to it, which it counts as in use until give_back.
+fn (mut pool DiagnosticsServerPool) take_server(key string, exe string, args []string, work_dir string) ?(&DiagnosticsServer, string) {
 	// The compiler reads v.mod and .vvmrc once, before it forks, so a server
 	// started before they changed can never answer again: a new one replaces it.
 	fingerprint := project_config_fingerprint(work_dir)
@@ -88,8 +129,8 @@ fn (mut pool DiagnosticsServerPool) request(exe string, args []string, work_dir 
 	}
 	if mut outdated := pool.servers[key] {
 		if outdated.fingerprint != fingerprint {
-			outdated.stop()
 			pool.servers.delete(key)
+			pool.retire(mut outdated)
 		}
 	}
 	mut server := pool.servers[key] or {
@@ -103,24 +144,41 @@ fn (mut pool DiagnosticsServerPool) request(exe string, args []string, work_dir 
 		pool.servers[key] = started
 		started
 	}
+	server.users++
 	pool.requests++
-	token := '${os.getpid()}-${pool.requests}-${time.now().unix_nano()}'
-	line := if question == '' { 'check ${token}' } else { 'query ${token} ${question}' }
-	result := server.ask(line, token, timeout_ms, cancelled) or {
-		log('the diagnostics server stopped answering: ${err}')
+	return server, '${os.getpid()}-${pool.requests}-${time.now().unix_nano()}'
+}
+
+// give_back ends a request to `server`, the server of `key`: one that stopped
+// answering leaves the pool, and one the pool dropped meanwhile stops with its
+// last request.
+fn (mut pool DiagnosticsServerPool) give_back(key string, mut server DiagnosticsServer) {
+	pool.mutex.lock()
+	defer {
+		pool.mutex.unlock()
+	}
+	server.users--
+	if server.process == unsafe { nil } {
+		if current := pool.servers[key] {
+			if voidptr(current) == voidptr(server) {
+				pool.servers.delete(key)
+			}
+		}
+		return
+	}
+	if server.retired && server.users == 0 {
 		server.stop()
-		pool.servers.delete(key)
-		return none
 	}
-	server.last_used = time.now().unix_milli()
-	// A child killed by a signal leaves no diagnostics to trust, so the caller
-	// runs the compiler itself for this check. The server stays: it is the
-	// parent, and it is fine.
-	if result.exit_code >= 128 && result.exit_code != diagnostics_check_cancelled {
-		log('the diagnostics server child died with ${result.exit_code}; running the compiler instead')
-		return none
+}
+
+// retire stops `server`, which left the pool, now or, when a request still
+// uses it, once the last one gives it back.
+fn (mut pool DiagnosticsServerPool) retire(mut server DiagnosticsServer) {
+	if server.users > 0 {
+		server.retired = true
+	} else {
+		server.stop()
 	}
-	return result
 }
 
 fn (mut pool DiagnosticsServerPool) evict_least_recently_used() {
@@ -135,18 +193,19 @@ fn (mut pool DiagnosticsServerPool) evict_least_recently_used() {
 		oldest_key = pool.least_recently_used(true)
 	}
 	if mut server := pool.servers[oldest_key] {
-		server.stop()
+		pool.servers.delete(oldest_key)
+		pool.retire(mut server)
 	}
-	pool.servers.delete(oldest_key)
 }
 
 // least_recently_used returns the key of the server used longest ago, the
 // servers of the program of a directory, `.`, included only when `programs`.
+// A server that a request uses is never the one: the pool grows for a while.
 fn (pool &DiagnosticsServerPool) least_recently_used(programs bool) string {
 	mut oldest_key := ''
 	mut oldest := i64(0)
 	for key, server in pool.servers {
-		if !programs && key.ends_with('\n.') {
+		if server.users > 0 || (!programs && key.ends_with('\n.')) {
 			continue
 		}
 		if oldest_key == '' || server.last_used < oldest {

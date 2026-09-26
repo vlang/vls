@@ -155,6 +155,19 @@ while [ $i -lt 10 ]; do
 done
 "
 
+// A diagnostics server whose checks take two seconds and whose questions are
+// answered at once.
+const fake_slow_check_server = r"#!/bin/sh
+echo v-diagnostics-server: ready
+while read -r request rest; do
+	case $request in quit) exit 0 ;; esac
+	token=${rest%% *}
+	echo v-diagnostics-server: child 1 $token
+	case $request in check) sleep 2 ;; esac
+	printf '\nv-diagnostics-server: end 0 %s\n' $token
+done
+"
+
 const fake_hover_answer = '{"contents":{"kind":"markdown","value":"```v\\nfake\\n```"}}'
 
 fn test_the_completion_placeholder_follows_a_dot_with_no_name() {
@@ -697,4 +710,38 @@ fn test_a_session_that_ends_without_a_shutdown_removes_its_copies() {
 	app.capture_output = true
 	app.handle_requests(mut reader)
 	assert !os.exists(copy_root)
+}
+
+fn check_in_background(mut pool DiagnosticsServerPool, exe string, dir string, done chan bool) {
+	pool.check(exe, ['-check', '.'], dir, fn () bool {
+		return false
+	}) or {}
+	done <- true
+}
+
+fn test_a_question_does_not_wait_for_the_check_of_another_server() {
+	// A hover asks the server of its command line while the server of the
+	// program's checks is busy: it must not wait for that check.
+	dir := os.join_path(os.vtmp_dir(), 'vls_pool_concurrency_${os.getpid()}')
+	os.mkdir_all(dir)!
+	defer {
+		os.rmdir_all(dir) or {}
+	}
+	exe := os.join_path(dir, 'v')
+	os.write_file(exe, fake_slow_check_server)!
+	os.chmod(exe, 0o755)!
+	mut pool := new_diagnostics_server_pool()
+	defer {
+		pool.stop_all()
+	}
+	query_args := ['-w', '-check', '.']
+	pool.query(exe, query_args, dir, 'main.v:1:hv^1') or { assert false, 'no answer' }
+	done := chan bool{cap: 1}
+	spawn check_in_background(mut pool, exe, dir, done)
+	time.sleep(300 * time.millisecond)
+	sw := time.new_stopwatch()
+	pool.query(exe, query_args, dir, 'main.v:1:hv^1') or { assert false, 'no answer' }
+	waited := sw.elapsed()
+	_ := <-done
+	assert waited < time.second, 'the question waited ${waited} for the check of another server'
 }
