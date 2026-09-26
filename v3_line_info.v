@@ -80,6 +80,65 @@ fn (mut app App) v3_line_info(method Method, path string, real_path string, line
 		result.project.overlay)
 }
 
+// V3Hover is what V3 answers for a hover: what it says of the name under the
+// cursor, and where that name is declared.
+struct V3Hover {
+	hover       ResponseResult = ResponseResult('null')
+	declared_at ?Location
+}
+
+// v3_hover asks V3 at once what it says of the name that `line_info`, a hover
+// question, points at, and where that name is declared. What it says of a name
+// comes with the documentation of the declaration it names, never with that of
+// another declaration of the name. None when V3 answers neither.
+fn (mut app App) v3_hover(uri string, real_path string, line_info string) ?V3Hover {
+	if !app.v3_line_info_enabled || os.getenv('VLS_V3_LINE_INFO') == 'off' {
+		return none
+	}
+	content := app.open_files[uri] or { os.read_file(real_path) or { return none } }
+	path := normalize_overlay_path(real_path)
+	definition_info := line_info.replace(':hv^', ':gd^')
+	result := app.v3_ask(real_path, [
+		V3Question{
+			path:      path
+			content:   content
+			line_info: definition_info
+		},
+		V3Question{
+			path:      path
+			content:   content
+			line_info: line_info
+		},
+	])?
+	definition := normalize_v_line_info_output(result.answers[0], .definition)
+	output := normalize_v_line_info_output(result.answers[1], .hover)
+	mut declared_at := ?Location(none)
+	if definition != '' {
+		located := app.line_info_result(.definition, uri, definition_info, definition,
+			true, result.project.overlay.temp_root, result.project.overlay)
+		if located is Location {
+			declared_at = located
+		}
+	}
+	if output == '' {
+		if declared_at == none {
+			return none
+		}
+		return V3Hover{
+			declared_at: declared_at
+		}
+	}
+	doc := if location := declared_at {
+		app.declaration_doc(location)
+	} else {
+		app.hover_doc_comment(uri, line_info)
+	}
+	return V3Hover{
+		hover:       compiler_hover(output, doc)
+		declared_at: declared_at
+	}
+}
+
 // v3_ask asks V3 `questions` about files of the program that holds the file at
 // `real_path`, all in one check.
 fn (mut app App) v3_ask(real_path string, questions []V3Question) ?V3Answers {

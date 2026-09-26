@@ -12783,3 +12783,342 @@ fn test_modules_v_refuses_are_not_offered_and_deprecated_ones_are_marked() {
 		assert (item.tags or { []int{} }) == tags, label
 	}
 }
+
+// function_hover_main declares a function, a generic function, a method, a
+// static method, a method of a generic struct and one of an interface, each
+// used in `main`.
+const function_hover_main = "module main
+
+interface Speaker {
+	// speak says something.
+	speak() string
+}
+
+struct User {
+	name string
+}
+
+struct Box[T] {
+	item T
+}
+
+// add sums two numbers.
+fn add(a int, b int) int {
+	return a + b
+}
+
+// first returns the first element.
+fn first[T](xs []T) T {
+	return xs[0]
+}
+
+// greet says hello.
+fn (u User) greet() string {
+	return 'hi \${u.name}'
+}
+
+// new makes a user.
+fn User.new(name string) User {
+	return User{
+		name: name
+	}
+}
+
+// label describes the box.
+fn (b Box[T]) label() string {
+	return 'box'
+}
+
+fn (u User) speak() string {
+	return u.name
+}
+
+fn ones[T](xs []T) []int {
+	return xs.map(|x| 1)
+}
+
+fn main() {
+	println(add(1, 2))
+	println(first([1, 2]))
+	u := User.new('eva')
+	println(u.greet())
+	b := Box[User]{
+		item: u
+	}
+	println(b.label())
+	s := Speaker(u)
+	println(s.speak())
+	println(ones([1]))
+	println([1, 2].map(it * 2))
+	println([3].map(|x| x + 1))
+	f := first[int]
+	println(f([4]))
+}
+"
+
+// new_function_hover_app opens function_hover_main in a project on disk, with
+// V3 asked first or not.
+fn new_function_hover_app(v3 bool) (&App, string) {
+	mut app := create_test_app()
+	app.v3_line_info_enabled = v3
+	dir := os.join_path(app.temp_dir, 'function_hover')
+	must_mkdir_all(dir)
+	must_write_file(os.join_path(dir, 'v.mod'), 'Module {}\n')
+	path := os.join_path(dir, 'main.v')
+	must_write_file(path, function_hover_main)
+	uri := path_to_uri(path)
+	app.open_files[uri] = function_hover_main
+	app.open_files_versions[uri] = 1
+	app.workspace_roots = [dir]
+	app.reindex_uri(uri)
+	return app, uri
+}
+
+// function_hover_value hovers the first `word` of the line of `content` that
+// reads `text`, through the request handler, and returns what it shows.
+fn function_hover_value(mut app App, uri string, content string, text string, word string) string {
+	lines := content.split_into_lines()
+	line := lines.index(text)
+	assert line >= 0, '`${text}` is not a line'
+	mut col := -1
+	for i := 0; i + word.len <= text.len; i++ {
+		if text[i..i + word.len] == word && (i == 0 || !is_ident_char(text[i - 1]))
+			&& (i + word.len == text.len || !is_ident_char(text[i + word.len])) {
+			col = i
+			break
+		}
+	}
+	assert col >= 0, '`${word}` is not in `${text}`'
+	response := app.operation_at_pos(.hover, Request{
+		id:     9701
+		method: 'textDocument/hover'
+		params: json2.encode(TextDocumentPositionParams{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			position:      Position{
+				line: line
+				char: col + 1
+			}
+		},
+			escape_unicode: true
+		)
+	})
+	if response.result is Hover {
+		return (response.result as Hover).contents.value
+	}
+	return response.result.str()
+}
+
+// function_hovers are what a hover shows of each function of
+// function_hover_main, where it is declared and where it is used: its
+// declaration as written, with the documentation written above it.
+const function_hovers = {
+	'```v\nfn add(a int, b int) int\n```\n\nadd sums two numbers.':         [
+		['fn add(a int, b int) int {', 'add'],
+		['\tprintln(add(1, 2))', 'add'],
+	]
+	'```v\nfn first[T](xs []T) T\n```\n\nfirst returns the first element.': [
+		['fn first[T](xs []T) T {', 'first'],
+		['\tprintln(first([1, 2]))', 'first'],
+	]
+	'```v\nfn (u User) greet() string\n```\n\ngreet says hello.':           [
+		['fn (u User) greet() string {', 'greet'],
+		['\tprintln(u.greet())', 'greet'],
+	]
+	'```v\nfn User.new(name string) User\n```\n\nnew makes a user.':        [
+		['fn User.new(name string) User {', 'new'],
+		["\tu := User.new('eva')", 'new'],
+	]
+	'```v\nfn (b Box[T]) label() string\n```\n\nlabel describes the box.':  [
+		['fn (b Box[T]) label() string {', 'label'],
+		['\tprintln(b.label())', 'label'],
+	]
+	'```v\nspeak() string\n```\n\nspeak says something.':                   [
+		['\tspeak() string', 'speak'],
+		['\tprintln(s.speak())', 'speak'],
+	]
+}
+
+fn test_hover_shows_a_function_as_declared_where_it_is_declared_and_used() {
+	// V3 says where each name is declared; without it the index does, below.
+	if !v3_answers_line_info {
+		return
+	}
+	mut app, uri := new_function_hover_app(true)
+	defer {
+		cleanup_rename_app(mut app)
+	}
+	for want, places in function_hovers {
+		for place in places {
+			got := function_hover_value(mut app, uri, function_hover_main, place[0], place[1])
+			assert got == want, '${place}: ${got}'
+		}
+	}
+	// The `map` of every array, in a generic body and outside one: builtin's
+	// declaration of it and the documentation above it, not that of the type
+	// `map`, which the name alone finds.
+	for text in ['\treturn xs.map(|x| 1)', '\tprintln([1, 2].map(it * 2))'] {
+		got := function_hover_value(mut app, uri, function_hover_main, text, 'map')
+		assert got.starts_with('```v\npub fn (a array) map(callback fn (voidptr) voidptr) array\n```\n\nmap creates a new array'), got
+		assert !got.contains('internal representation'), got
+	}
+	// A builtin function.
+	got := function_hover_value(mut app, uri, function_hover_main, '\tprintln(add(1, 2))',
+		'println')
+	assert got.starts_with('```v\npub fn println(s string)\n```\n\nprintln prints'), got
+	// A local is what V3 says of it: its declaration is a statement.
+	lambda := function_hover_value(mut app, uri, function_hover_main, '\tprintln([3].map(|x| x + 1))',
+		'x')
+	assert lambda == '```v\nx int\n```', lambda
+	instance := function_hover_value(mut app, uri, function_hover_main, '\tprintln(f([4]))',
+		'f')
+	assert instance.starts_with('```v\nf fn ('), instance
+}
+
+fn test_hover_shows_a_function_as_declared_without_v3() {
+	// Without a compiler that answers, the index says where a function is
+	// declared, and the hover shows it as V3 lets it show.
+	mut app, uri := new_function_hover_app(false)
+	defer {
+		cleanup_test_app(app)
+	}
+	app.line_info_mode = .missing
+	for want, places in function_hovers {
+		if !want.contains('fn add(') && !want.contains('fn first[') {
+			continue
+		}
+		for place in places {
+			got := function_hover_value(mut app, uri, function_hover_main, place[0], place[1])
+			assert got == want, '${place}: ${got}'
+		}
+	}
+}
+
+fn test_hover_documents_a_member_with_its_own_declaration_only() {
+	// VLS types neither the parameter of a lambda in a generic body nor what a
+	// generic function's parameter holds: the documentation found for the name
+	// alone would be another's, the type `map` for the method `map` of an
+	// array, or the `to_upper` of a rune for that of a string.
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	content := "module main\n\nstruct User {\n\tname string\n}\n\nfn shouted[T](xs []T) []string {\n\treturn xs.map(|x| x.name.to_upper())\n}\n\nfn main() {\n\tprintln(shouted([User{ name: 'a' }]))\n}\n"
+	path := os.join_path(app.temp_dir, 'member_own_docs', 'main.v')
+	must_mkdir_all(os.dir(path))
+	must_write_file(path, content)
+	uri := path_to_uri(path)
+	app.open_files[uri] = content
+	app.reindex_uri(uri)
+	line := content.split_into_lines()[7]
+	for word in ['map', 'to_upper'] {
+		col := line.index('.${word}(') or { -1 } + 2
+		doc := app.hover_doc_comment(uri, '8:hv^${col}')
+		assert !doc.contains('internal representation'), '${word}: ${doc}'
+		assert !doc.contains('uppercase mode'), '${word}: ${doc}'
+	}
+	// Of an array VLS types, the method vlib/builtin declares for every array,
+	// not the one of a string, of a map or of an array of strings.
+	arrays := 'module main\n\nfn main() {\n\tmut nums := [3, 1]\n\tnums.sort()\n\tprintln(nums.contains(1))\n\tprintln(nums.clone())\n}\n'
+	arrays_path := os.join_path(app.temp_dir, 'member_own_docs_arrays', 'main.v')
+	must_mkdir_all(os.dir(arrays_path))
+	must_write_file(arrays_path, arrays)
+	arrays_uri := path_to_uri(arrays_path)
+	app.open_files[arrays_uri] = arrays
+	app.reindex_uri(arrays_uri)
+	for n, want in {
+		5: 'sort sorts the array in place.'
+		6: 'contains determines whether an array includes a certain value'
+		7: 'clone returns an independent copy of a given array.'
+	} {
+		text := arrays.split_into_lines()[n - 1]
+		col := text.index('nums.') or { -1 } + 6
+		doc := app.hover_doc_comment(arrays_uri, '${n}:hv^${col}')
+		assert doc.starts_with(want), '${n}: ${doc}'
+	}
+}
+
+fn test_source_declaration_at_ends_a_function_without_a_body_with_its_line() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	// As builtin declares the methods of arrays: the next declaration, and the
+	// body of a function further on, are not part of it.
+	uri := 'file:///tmp/source_declaration_bodyless.v'
+	content := 'module builtin\n\npub fn (a array) map(callback fn (voidptr) voidptr) array\n\n// filter keeps what passes.\npub fn (a array) filter(predicate fn (voidptr) bool) array\n\nfn C.long(\n\ta int,\n\tb int) int\n\nfn with_body() {\n}\n'
+	app.open_files[uri] = content
+	for line, want in {
+		2: 'pub fn (a array) map(callback fn (voidptr) voidptr) array'
+		5: 'pub fn (a array) filter(predicate fn (voidptr) bool) array'
+		7: 'fn C.long(\na int,\nb int) int'
+	} {
+		got := app.source_declaration_at(Location{
+			uri:   uri
+			range: LSPRange{
+				start: Position{
+					line: line
+				}
+			}
+		})
+		assert got == want, '${line}: ${got}'
+	}
+}
+
+fn test_a_generic_function_is_found_by_its_name() {
+	// The index names a generic function with its type parameters, as the
+	// source declares it; a use names it without them.
+	assert extract_simple_fn_name('first[T]') == 'first'
+	assert extract_simple_fn_name('(b Base) twice[T]') == 'twice'
+	assert extract_simple_fn_name('(b Box[T]) label') == 'label'
+	content := 'module main\n\n// first returns the first element.\nfn first[T](xs []T) T {\n\treturn xs[0]\n}\n'
+	symbols := parse_document_symbols(content)
+	assert symbols.len == 1 && extract_simple_fn_name(symbols[0].name) == 'first'
+}
+
+fn test_find_declaration_line_finds_generic_declarations() {
+	lines := ['module main', '', 'struct Box[T] {', '\titem T', '}', '', 'fn first[T](xs []T) T {',
+		'\treturn xs[0]', '}']
+	assert find_declaration_line(lines, 'Box') == 2
+	assert find_declaration_line(lines, 'first') == 6
+}
+
+fn test_hover_of_a_local_holding_a_function_is_the_same_where_it_is_declared() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	content := "module main\n\nstruct User {\n\tname string\n}\n\nfn (u User) greet() string {\n\treturn u.name\n}\n\nfn lengths[T](xs []T) []int {\n\tcount := fn (x T) int {\n\t\treturn 1\n\t}\n\treturn xs.map(count)\n}\n\nfn main() {\n\tdouble := fn (x int) int {\n\t\treturn x * 2\n\t}\n\tprintln(double(4))\n\tu := User{\n\t\tname: 'eva'\n\t}\n\tg := u.greet\n\tprintln(g())\n\tprintln(lengths([1]))\n}\n"
+	path := os.join_path(app.temp_dir, 'local_function_hover', 'main.v')
+	must_mkdir_all(os.dir(path))
+	must_write_file(path, content)
+	uri := path_to_uri(path)
+	app.open_files[uri] = content
+	app.reindex_uri(uri)
+	lines := content.split_into_lines()
+	// A function literal writes its type down; a method named without a call is
+	// a function value.
+	for text, want in {
+		'\tdouble := fn (x int) int {': 'double fn (x int) int'
+		'\tprintln(double(4))':         'double fn (x int) int'
+		'\tcount := fn (x T) int {':    'count fn (x T) int'
+		'\treturn xs.map(count)':       'count fn (x T) int'
+		'\tg := u.greet':               'g fn () string'
+		'\tprintln(g())':               'g fn () string'
+	} {
+		line := lines.index(text)
+		assert line >= 0, text
+		name := want.all_before(' ')
+		mut col := text.index('(${name}') or { text.index(' ${name}') or { -1 } }
+		if col < 0 {
+			col = text.index('\t${name}') or { -1 }
+		}
+		assert col >= 0, text
+		hover := app.local_binding_hover(uri, Position{
+			line: line
+			char: col + 2
+		}) or { Hover{} }
+		assert hover.contents.value == '```v\n${want}\n```', '${text}: ${hover.contents.value}'
+	}
+}

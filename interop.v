@@ -1989,6 +1989,13 @@ fn (mut app App) hover_doc_comment(path string, line_info string) string {
 		}
 	}
 	doc_symbol := static_method_doc_symbol_at(file_lines[cursor_line], cursor_col, cursor_symbol)
+	// A member of a value whose declaration was not found: the name alone would
+	// find another type's member, or no member at all, as the type `map` for
+	// the method `map` of an array. A member of a module or of a type, as
+	// `os.join_path` or `User.new`, is still found by its qualified name.
+	if receiver != '' && imported_module == '' && doc_symbol == cursor_symbol {
+		return ''
+	}
 	return app.find_doc_comment_for_symbol(doc_symbol, file_lines, path, imported_module)
 }
 
@@ -2019,6 +2026,38 @@ fn (mut app App) line_info_unavailable_result(method Method, path string, line_i
 			return ResponseResult('null')
 		}
 	}
+}
+
+// compiler_hover is the hover that the compiler's hv^ mode printed as `output`,
+// with the documentation `doc` after it when the compiler did not include it.
+fn compiler_hover(output string, doc string) ResponseResult {
+	// Decode the Hover JSON emitted by the compiler's hv^ mode.
+	hover_result := json2.decode[Hover](output) or { Hover{} }
+	if hover_result.contents.value != '' {
+		mut value := hover_result.contents.value
+		// Augment with doc comment if the compiler didn't include one
+		if doc != '' && !value.contains(doc) {
+			value += '\n\n' + doc
+		}
+		return Hover{
+			contents: MarkupContent{
+				kind:  'markdown'
+				value: value
+			}
+		}
+	}
+	if doc != '' {
+		// Compiler returned no info but we found a vdoc comment
+		return Hover{
+			contents: MarkupContent{
+				kind:  'markdown'
+				value: doc
+			}
+		}
+	}
+	// Compiler returned no info and no vdoc comment — return null per LSP spec
+	// so editors do not show empty hover popups.
+	return ResponseResult('null')
 }
 
 fn (mut app App) run_v_line_info(method Method, path string, line_info string) ResponseResult {
@@ -2202,36 +2241,9 @@ fn (mut app App) line_info_result(method Method, path string, line_info string, 
 			}
 		}
 		.hover {
-			// Decode the Hover JSON emitted by the compiler's hv^ mode.
-			hover_result := json2.decode[Hover](output) or { Hover{} }
 			// Extract vdoc comment via cross-file search as a fallback when the
 			// compiler does not provide documentation.
-			doc := app.hover_doc_comment(path, line_info)
-			if hover_result.contents.value != '' {
-				mut value := hover_result.contents.value
-				// Augment with doc comment if the compiler didn't include one
-				if doc != '' && !value.contains(doc) {
-					value += '\n\n' + doc
-				}
-				result = Hover{
-					contents: MarkupContent{
-						kind: 'markdown'
-						value: value
-					}
-				}
-			} else if doc != '' {
-				// Compiler returned no info but we found a vdoc comment
-				result = Hover{
-					contents: MarkupContent{
-						kind: 'markdown'
-						value: doc
-					}
-				}
-			} else {
-				// Compiler returned no info and no vdoc comment — return null per LSP spec
-				// so editors do not show empty hover popups.
-				result = 'null'
-			}
+			result = compiler_hover(output, app.hover_doc_comment(path, line_info))
 		}
 		.inlay_hint {
 			// Positions from the compiler's ih^ mode are 0-based lines and byte

@@ -183,8 +183,20 @@ fn (app &App) source_declaration_at(location Location) string {
 	start_byte := starts[start_line]
 	end_byte := if end_line < starts.len { starts[end_line] } else { content.len }
 	mut header_end := end_byte
+	// A function without a body, as builtin declares the methods of arrays,
+	// ends with the line that closes its parameters.
+	mut depth := 0
 	for pos in start_byte .. end_byte {
-		if source_mask[pos] == `{` {
+		c := source_mask[pos]
+		if c == `{` && depth == 0 {
+			header_end = pos
+			break
+		}
+		if c in [`(`, `[`] {
+			depth++
+		} else if c in [`)`, `]`] && depth > 0 {
+			depth--
+		} else if c == `\n` && depth == 0 {
 			header_end = pos
 			break
 		}
@@ -362,8 +374,10 @@ fn signature_active_parameter(parameters []ParameterInformation, requested int) 
 // hover_with_written_declaration puts the declaration the source writes in place
 // of the one the compiler re-prints, and keeps the documentation the compiler
 // found. The compiler renders a declaration from its own types, so a function
-// type arrives without the names of its parameters.
-fn (mut app App) hover_with_written_declaration(uri string, position Position, result ResponseResult) ResponseResult {
+// type arrives without the names of its parameters. The declaration is the one
+// at `declared_at`, where the compiler says the name is declared, or where the
+// index finds it.
+fn (mut app App) hover_with_written_declaration(uri string, position Position, result ResponseResult, declared_at ?Location) ResponseResult {
 	if result !is Hover {
 		return result
 	}
@@ -377,7 +391,12 @@ fn (mut app App) hover_with_written_declaration(uri string, position Position, r
 	if word == '' || !printed.contains(word) {
 		return result
 	}
-	location := app.resolve_indexed_definition(uri, position) or { return result }
+	location := declared_at or { app.resolve_indexed_definition(uri, position) or { return result } }
+	// A local or a parameter is declared by a statement or by a signature,
+	// which say less of it than the compiler does.
+	if app.declares_local_at(location) {
+		return result
+	}
 	declaration := app.source_declaration_at(location)
 	if declaration == '' || !declaration.contains(word) {
 		return result
@@ -388,6 +407,148 @@ fn (mut app App) hover_with_written_declaration(uri string, position Position, r
 			value: value[..body_start] + declaration + '\n' + value[body_start + close_offset..]
 		}
 	}
+}
+
+// hover_result answers a hover from the compiler: where the name under the
+// cursor is declared, and what the compiler says of it. A function, a method or
+// a method of an interface shows its declaration as the source writes it, with
+// the documentation written above it, the same where it is declared and where
+// it is used; anything else what the compiler says of it, with the
+// documentation of its own declaration. `line_info` asks the hover.
+fn (mut app App) hover_result(uri string, position Position, line_info string) ResponseResult {
+	real_path := uri_to_path(uri)
+	mut located := false
+	if answer := app.v3_hover(uri, real_path, line_info) {
+		if location := answer.declared_at {
+			located = true
+			if hover := app.function_declaration_hover(location) {
+				return hover
+			}
+		}
+		if answer.hover is Hover {
+			return app.hover_with_written_declaration(uri, position, answer.hover, answer.declared_at)
+		}
+	}
+	// V3 cannot tell, as while a file does not parse: the index says where a
+	// function is declared, and V1 what anything else is.
+	if !located {
+		if location := app.resolve_indexed_definition(uri, position) {
+			if hover := app.function_declaration_hover(location) {
+				return hover
+			}
+		}
+	}
+	result := if app.line_info_mode == .missing {
+		app.line_info_unavailable_result(.hover, uri, line_info)
+	} else {
+		app.run_v_line_info_once(.hover, uri, line_info, compilation_work_dir(normalize_overlay_path(real_path)))
+	}
+	return app.hover_with_written_declaration(uri, position, result, none)
+}
+
+// function_declaration_hover shows the function, the method or the method of an
+// interface declared at `location` as its declaration writes it, with the
+// documentation written above it: what a hover shows for its declaration and
+// for each of its uses. None when something else is declared there.
+fn (mut app App) function_declaration_hover(location Location) ?Hover {
+	content := app.index_source_for(location.uri) or { return none }
+	lines := content.split_into_lines()
+	line := location.range.start.line
+	if line < 0 || line >= lines.len {
+		return none
+	}
+	start := encoded_col_to_byte(lines[line], location.range.start.char, app.position_encoding)
+	if !declares_function_at(lines, line, start) {
+		return none
+	}
+	declaration := app.source_declaration_at(location)
+	if declaration == '' {
+		return none
+	}
+	doc := extract_doc_comment(lines, line)
+	return Hover{
+		contents: MarkupContent{
+			kind:  'markdown'
+			value: '```v\n${declaration}\n```' + if doc == '' { '' } else { '\n\n${doc}' }
+		}
+	}
+}
+
+// declares_function_at reports whether the name at byte `start` of line `line`
+// is the one that a function, a method or a method of an interface declares:
+// the name after `fn`, after the receiver or after the type of a static
+// method, followed by the parameters.
+fn declares_function_at(lines []string, line int, start int) bool {
+	text := lines[line]
+	if start < 0 || start >= text.len || !is_ident_start(text[start]) {
+		return false
+	}
+	mut end := start
+	for end < text.len && is_ident_char(text[end]) {
+		end++
+	}
+	mut after := text[end..].trim_left(' \t')
+	if after.starts_with('[') {
+		close := matching_delimiter(after, 0, `[`, `]`)
+		if close < 0 {
+			return false
+		}
+		after = after[close + 1..].trim_left(' \t')
+	}
+	if !after.starts_with('(') {
+		return false
+	}
+	mut head := text[..start].trim_space()
+	if head.starts_with('pub ') {
+		head = head[4..].trim_space()
+	}
+	if head == '' {
+		// A method of an interface is declared by its name alone.
+		return source_occurrence_is_interface_method_signature(lines, line, start, end)
+	}
+	return head == 'fn' || head.starts_with('fn ') || head.starts_with('fn(')
+}
+
+// declaration_doc is the documentation written above the declaration at
+// `location`. A local or a parameter has none: V documents neither, and a
+// comment of the body above one is not about it.
+fn (mut app App) declaration_doc(location Location) string {
+	if app.declares_local_at(location) {
+		return ''
+	}
+	content := app.index_source_for(location.uri) or { return '' }
+	lines := content.split_into_lines()
+	line := location.range.start.line
+	if line < 0 || line >= lines.len {
+		return ''
+	}
+	return extract_doc_comment(lines, line)
+}
+
+// declares_local_at reports whether `location` is where a local or a parameter
+// is declared: in a function, in its parameters or in its body, and not the
+// name the function declares. The nearest line from it up that starts a
+// declaration at the top level of the file starts a function.
+fn (mut app App) declares_local_at(location Location) bool {
+	content := app.index_source_for(location.uri) or { return false }
+	lines := content.split_into_lines()
+	line := location.range.start.line
+	if line < 0 || line >= lines.len {
+		return false
+	}
+	start := encoded_col_to_byte(lines[line], location.range.start.char, app.position_encoding)
+	if declares_function_at(lines, line, start) {
+		return false
+	}
+	for i := line; i >= 0; i-- {
+		text := lines[i]
+		// An attribute belongs to the declaration below it.
+		if text.starts_with('@[') || !top_level_starts.any(text.starts_with(it)) {
+			continue
+		}
+		return text.starts_with('fn ') || text.starts_with('pub fn ')
+	}
+	return false
 }
 
 fn (mut app App) source_hover_fallback(uri string, position Position) ?Hover {
@@ -776,7 +937,11 @@ fn (mut app App) local_binding_hover(uri string, position Position) ?Hover {
 			}
 		}
 	}
-	typ := app.infer_binding_type_at_position(uri, content, name, position)
+	// The name a declaration introduces: the scope at the cursor does not hold it
+	// yet, and may hold an outer one of that name.
+	typ := app.declared_binding_type(uri, content, lines, name, position) or {
+		app.infer_binding_type_at_position(uri, content, name, position)
+	}
 	if typ == '' {
 		return none
 	}
@@ -786,6 +951,30 @@ fn (mut app App) local_binding_hover(uri string, position Position) ?Hover {
 			value: '```v\n${name} ${typ}\n```'
 		}
 	}
+}
+
+// declared_binding_type is the type of the variable whose declaration the
+// cursor is on, as `double` in `double := fn (x int) int {`: the type its uses
+// have, or '' when that cannot be told. None when the cursor is on no name that
+// a declaration of its line introduces.
+fn (mut app App) declared_binding_type(uri string, content string, lines []string, name string, position Position) ?string {
+	line := lines[position.line]
+	start, _ := find_word_bounds_at_col(line, encoded_col_to_byte(line, position.char,
+		app.position_encoding), .utf8)
+	receiver_declaration_on_line(line, name, [start])?
+	written := app.written_binding_type(uri, content, lines, LocalBinding{
+		name:   name
+		line:   position.line
+		column: start
+	}, position)
+	if written != '' {
+		return written
+	}
+	// The type a use has right after the declaration, at the end of its line.
+	return app.infer_binding_type_at_position(uri, content, name, Position{
+		line: position.line
+		char: byte_to_encoded_col(line, line.len, app.position_encoding)
+	})
 }
 
 fn (mut app App) source_signature_fallback(uri string, position Position) ?SignatureHelp {
@@ -932,9 +1121,10 @@ fn (mut app App) operation_at_pos(method Method, request Request) Response {
 		}
 	}
 
-	mut result := app.run_v_line_info(method, path, line_info)
-	if method == .hover {
-		result = app.hover_with_written_declaration(path, params.position, result)
+	mut result := if method == .hover {
+		app.hover_result(path, params.position, line_info)
+	} else {
+		app.run_v_line_info(method, path, line_info)
 	}
 	if result is string && result == 'null' {
 		if method == .hover {
@@ -2580,8 +2770,35 @@ fn (mut app App) receiver_type_scope(uri string, content string, receiver_type s
 	return os.dir(uri_to_path(uri)), normalized_type, false, get_module_name(content)
 }
 
+// builtin_composite_owner is `array` for an array type, `[]int`, and `map` for a
+// map type, `map[string]int`: the receiver that vlib/builtin declares their
+// methods on. '' for any other type.
+fn builtin_composite_owner(typ string) string {
+	mut t := typ.trim_space()
+	for t.len > 0 && t[0] in [`&`, `?`, `!`] {
+		t = t[1..].trim_space()
+	}
+	if t.starts_with('[]') {
+		return 'array'
+	}
+	if t.starts_with('map[') {
+		return 'map'
+	}
+	return ''
+}
+
 fn (mut app App) indexed_method_symbols(uri string, content string, receiver_type string, method_name string) IndexedMethodSymbolResult {
-	dir, type_name, require_public, expected_module := app.receiver_type_scope(uri, content, receiver_type)
+	mut dir, mut type_name, mut require_public, mut expected_module := app.receiver_type_scope(uri,
+		content, receiver_type)
+	// vlib/builtin declares the methods of every array on `array`, and those of
+	// every map on `map`.
+	owner := builtin_composite_owner(receiver_type)
+	if owner != '' {
+		dir = os.join_path(find_v_dir(), 'vlib', 'builtin')
+		type_name = owner
+		require_public = true
+		expected_module = 'builtin'
+	}
 	if dir == '' || type_name == '' || expected_module == '' || !os.is_dir(dir) {
 		return IndexedMethodSymbolResult{}
 	}
@@ -5940,7 +6157,9 @@ fn find_declaration_line(lines []string, symbol string) int {
 				} else {
 					rest
 				}
-				name := first_word_paren(actual_rest)
+				// A generic declaration writes its type parameters after its
+				// name: `fn first[T](`, `struct Box[T] {`.
+				name := first_word_paren(actual_rest).all_before('[')
 				if name == symbol {
 					return i
 				}
@@ -6896,7 +7115,13 @@ fn parse_document_symbols(content string) []DocumentSymbol {
 
 // make_symbol builds a DocumentSymbol covering the single line `line_idx`.
 fn make_symbol(name string, kind int, line_idx int, raw_line string) DocumentSymbol {
-	selection_name := if kind == sym_kind_method { extract_simple_fn_name(name) } else { name }
+	// The name alone, without the type parameters a generic declaration writes
+	// after it, `first` of `first[T]`: its uses name it so.
+	selection_name := if kind == sym_kind_method {
+		extract_simple_fn_name(name)
+	} else {
+		name.all_before('[')
+	}
 	mut col_start := raw_line.index(selection_name) or { 0 }
 	if kind == sym_kind_method {
 		// A receiver type can contain the method name as an identifier. Search
