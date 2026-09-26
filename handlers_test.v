@@ -2782,6 +2782,34 @@ fn test_source_declaration_at_stops_non_braced_declarations() {
 	assert signature_parameters(label).len == 2
 }
 
+fn test_source_declaration_at_keeps_the_variants_of_a_sum_type_on_their_lines() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	uri := 'file:///tmp/source_declaration_sum_type.v'
+	content := '// Number is a number.\npub type Number = int\n\t| i8\n\t| f64\n\ntype Word = string\n\nfn main() {}\n'
+	app.open_files[uri] = content
+	number := app.source_declaration_at(Location{
+		uri:   uri
+		range: LSPRange{
+			start: Position{
+				line: 1
+			}
+		}
+	})
+	assert number == 'pub type Number = int\n| i8\n| f64'
+	word := app.source_declaration_at(Location{
+		uri:   uri
+		range: LSPRange{
+			start: Position{
+				line: 5
+			}
+		}
+	})
+	assert word == 'type Word = string'
+}
+
 fn test_resolve_indexed_definition_prefers_source_relative_module() {
 	mut app := create_test_app()
 	defer {

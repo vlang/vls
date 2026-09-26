@@ -164,7 +164,18 @@ fn (app &App) source_declaration_at(location Location) string {
 	}
 	first_mask := v_source_code_mask(first_part)
 	if !source_declaration_opens_body(first_mask) {
-		return first_part
+		// A declaration without a body goes on over the lines that start with
+		// `|`: the variants of a sum type, as vfmt writes a long one, or the
+		// operands of an `|` written over several lines.
+		mut parts := [first_part]
+		for line in lines[start_line + 1..] {
+			part := line.trim_space()
+			if !part.starts_with('|') {
+				break
+			}
+			parts << part
+		}
+		return parts.join('\n')
 	}
 	starts := line_start_offsets(content)
 	source_mask := v_source_code_mask(content)
