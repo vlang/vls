@@ -168,6 +168,20 @@ while read -r request rest; do
 done
 "
 
+// A diagnostics server whose questions take a second to answer, and whose
+// checks are answered at once.
+const fake_slow_query_server = r"#!/bin/sh
+echo v-diagnostics-server: ready
+here=$(dirname $0)
+while read -r request rest; do
+	case $request in quit) exit 0 ;; esac
+	token=${rest%% *}
+	echo v-diagnostics-server: child 1 $token
+	case $request in query) sleep 1; cat $here/answer.txt; echo ;; esac
+	printf '\nv-diagnostics-server: end 0 %s\n' $token
+done
+"
+
 const fake_hover_answer = '{"contents":{"kind":"markdown","value":"```v\\nfake\\n```"}}'
 
 fn test_the_completion_placeholder_follows_a_dot_with_no_name() {
@@ -744,4 +758,44 @@ fn test_a_question_does_not_wait_for_the_check_of_another_server() {
 	waited := sw.elapsed()
 	_ := <-done
 	assert waited < time.second, 'the question waited ${waited} for the check of another server'
+}
+
+fn test_a_request_that_asks_no_compiler_does_not_wait_for_one_that_does() {
+	// After a change an editor asks for the semantic tokens and the hover at the
+	// cursor at once: the tokens, which the compiler plays no part in, come
+	// first, though the hover was asked before them.
+	mut app, fake := fake_v3_app('request_order', fake_slow_query_server, 'VLS_DIAGNOSTICS_SERVER')!
+	defer {
+		stop_fake_v3_app(mut app, fake)
+	}
+	path := os.join_path(fake.project, 'main.v')
+	uri := path_to_uri(path)
+	text := os.read_file(path)!
+	messages := [
+		'{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":"${path_to_uri(fake.project)}","capabilities":{}}}',
+		'{"jsonrpc":"2.0","method":"initialized","params":{}}',
+		'{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"${uri}","languageId":"v","version":1,"text":${json2.encode(text)}}}}',
+		'{"jsonrpc":"2.0","id":2,"method":"textDocument/hover","params":{"textDocument":{"uri":"${uri}"},"position":{"line":3,"character":1}}}',
+		'{"jsonrpc":"2.0","id":3,"method":"textDocument/semanticTokens/full","params":{"textDocument":{"uri":"${uri}"}}}',
+		'{"jsonrpc":"2.0","id":4,"method":"shutdown"}',
+		'{"jsonrpc":"2.0","method":"exit"}',
+	]
+	input_path := os.join_path(fake.dir, 'requests.txt')
+	os.write_file(input_path, messages.map('Content-Length: ${it.len}\r\n\r\n${it}').join(''))!
+	mut input := os.open(input_path)!
+	defer {
+		input.close()
+	}
+	mut reader := io.new_buffered_reader(reader: input, cap: 1)
+	app.capture_output = true
+	app.handle_requests(mut reader)
+	mut order := []string{}
+	for message in app.captured_output {
+		if message.contains('"id":2,') {
+			order << 'hover'
+		} else if message.contains('"id":3,') {
+			order << 'tokens'
+		}
+	}
+	assert order == ['tokens', 'hover'], order.str()
 }

@@ -1843,3 +1843,36 @@ fn test_validate_rename_accepts_normal_new_name() {
 	params := '{"textDocument":{"uri":"file:///a.v"},"position":{"line":0,"character":0},"newName":"my_fn"}'
 	assert validate_request_params(.rename, params) == none
 }
+
+fn incoming(method Method, is_request bool) IncomingMessage {
+	return IncomingMessage{
+		content:    '{}'
+		is_request: is_request
+		method:     method
+	}
+}
+
+fn test_a_request_that_asks_no_compiler_goes_before_one_that_may() {
+	hover := incoming(.hover, true)
+	tokens := incoming(.semantic_tokens, true)
+	// Asked together after a change: the tokens first.
+	assert next_incoming_index([hover, tokens]) == 1
+	assert next_incoming_index([hover, incoming(.definition, true), tokens]) == 2
+	assert next_incoming_index([incoming(.document_highlight, true), incoming(.inlay_hint, true),
+		incoming(.document_symbols, true)]) == 2
+	// Otherwise the order stays: the first is quick, or no quick one follows.
+	assert next_incoming_index([tokens, hover]) == 0
+	assert next_incoming_index([hover, incoming(.inlay_hint, true)]) == 0
+	assert next_incoming_index([hover]) == 0
+	// No request moves past a notification, which can change what it asks about.
+	assert next_incoming_index([incoming(.did_change, false), hover, tokens]) == 0
+	assert next_incoming_index([hover, incoming(.did_change, false), tokens]) == 0
+	// A notification-shaped message of a request method, which the loop drops, is
+	// no request either.
+	assert next_incoming_index([hover, incoming(.semantic_tokens, false)]) == 0
+	// Nor past any other request, nor past the end of the stream.
+	assert next_incoming_index([hover, incoming(.shutdown, true), tokens]) == 0
+	assert next_incoming_index([hover, IncomingMessage{
+		eof: true
+	}, tokens]) == 0
+}

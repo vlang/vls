@@ -399,6 +399,89 @@ const max_content_length = 64 * 1024 * 1024 // 64 MiB max JSON-RPC body
 const max_header_bytes = 64 * 1024 // total header section size cap
 const max_charset = 'utf-8' // LSP content is always UTF-8
 
+// incoming_message_queue is how many messages the reading thread keeps ready.
+const incoming_message_queue = 256
+
+// IncomingMessage is a message the client sent, or the end of what it sends.
+struct IncomingMessage {
+	content string
+	// eof is set when the client closed the stream, and failure when reading
+	// failed otherwise: either ends the session.
+	eof     bool
+	failure string
+	// is_request is set for a message with an id, and method is its method.
+	is_request bool
+	method     Method
+}
+
+// read_incoming_messages reads the messages of the client into `incoming`, up to
+// the end of the stream or the first failure, which it sends too.
+fn read_incoming_messages[T](mut reader T, incoming chan IncomingMessage) {
+	for {
+		content := read_request(mut reader) or {
+			incoming <- IncomingMessage{
+				eof:     err is io.Eof
+				failure: if err is io.Eof { '' } else { err.msg() }
+			} or {}
+			return
+		}
+		mut message := IncomingMessage{
+			content:    content
+			is_request: request_content_has_id(content)
+		}
+		if body := json2.decode[RequestBody](content) {
+			message = IncomingMessage{
+				...message
+				method: Method.from_string(body.method)
+			}
+		}
+		incoming <- message or { return }
+	}
+}
+
+// next_incoming_index returns the index in `pending`, the messages that arrived
+// and wait, of the one to handle now: the first, unless it is a request that may
+// ask the compiler, and a request that never does follows it with only such
+// requests between them; that one goes first. After a change an editor asks at
+// once for the semantic tokens and for the hover or the highlights at the
+// cursor: the tokens take no time, and a question to the compiler can take a
+// whole check. A notification, the end of the stream and any other request keep
+// their place, so no request moves past a change it came after.
+fn next_incoming_index(pending []IncomingMessage) int {
+	if pending.len < 2 || !pending[0].is_request || !method_may_ask_compiler(pending[0].method) {
+		return 0
+	}
+	for i in 1 .. pending.len {
+		message := pending[i]
+		if !message.is_request || message.eof || message.failure != '' {
+			break
+		}
+		if method_never_asks_compiler(message.method) {
+			return i
+		}
+		if !method_may_ask_compiler(message.method) {
+			break
+		}
+	}
+	return 0
+}
+
+// method_may_ask_compiler reports whether a request of `method` may wait for the
+// compiler, or for `v fmt`.
+fn method_may_ask_compiler(method Method) bool {
+	return method in [.definition, .declaration, .type_definition, .implementation, .completion,
+		.signature_help, .hover, .references, .rename, .prepare_rename, .formatting, .range_formatting,
+		.inlay_hint, .document_highlight, .callhierarchy_prepare, .callhierarchy_incoming,
+		.callhierarchy_outgoing]
+}
+
+// method_never_asks_compiler reports whether a request of `method` is answered
+// from the text and the index alone.
+fn method_never_asks_compiler(method Method) bool {
+	return method in [.semantic_tokens, .semantic_tokens_range, .document_symbols, .folding_range,
+		.selection_range, .code_action]
+}
+
 fn read_request[T](mut reader T) !string {
 	mut len := -1
 	mut header_error := ''
@@ -571,7 +654,12 @@ fn parse_content_length_header(s string) !int {
 
 // handle_requests is the main request handler loop for both stdio and TCP modes.
 fn (mut app App) handle_requests[T](mut reader T) {
+	// The messages are read on a thread of their own, so that the ones that
+	// already arrived can be told apart: see next_incoming_index.
+	incoming := chan IncomingMessage{cap: incoming_message_queue}
+	spawn read_incoming_messages(mut reader, incoming)
 	defer {
+		incoming.close()
 		app.cancel_all_scheduled_diagnostics()
 		app.stop_run_commands()
 		// However the session ends, its compilers end, and the files they
@@ -579,28 +667,47 @@ fn (mut app App) handle_requests[T](mut reader T) {
 		app.stop_diagnostics_servers()
 		app.stop_v3_queries()
 	}
+	mut pending := []IncomingMessage{}
 	for {
 		// Reset the per-request raw id so a stale id can never leak into an
 		// error response emitted before a new message is fully read.
 		app.current_request_raw_id = ''
-		content := read_request(mut reader) or {
-			if err is io.Eof {
+		if pending.len == 0 {
+			first := <-incoming or { break }
+			pending << first
+		}
+		for {
+			select {
+				next := <-incoming {
+					pending << next
+				}
+				else {
+					break
+				}
+			}
+		}
+		index := next_incoming_index(pending)
+		message := pending[index]
+		pending.delete(index)
+		if message.failure != '' || message.eof {
+			if message.eof {
 				log('Client closed connection. Exiting.')
 				break
 			}
-			if err.msg().starts_with('invalid header:') {
+			if message.failure.starts_with('invalid header:') {
 				// The frame body was not consumed, so the stream is now
 				// desynchronized: the unread body would be misread as the next
 				// header. Report the error, then close the connection rather than
 				// attempting to resynchronize (P0-11).
-				app.write_error_response(make_parse_error_response(err.msg()))
+				app.write_error_response(make_parse_error_response(message.failure))
 				break
 			}
 			$if debug {
-				log('Error reading request: ${err.msg()}')
+				log('Error reading request: ${message.failure}')
 			}
 			break
 		}
+		content := message.content
 		if content.len == 0 {
 			continue
 		}
