@@ -12837,6 +12837,11 @@ fn ones[T](xs []T) []int {
 	return xs.map(|x| 1)
 }
 
+fn sizes[T](xs []T) int {
+	counts := xs.map(1)
+	return counts.len
+}
+
 fn main() {
 	println(add(1, 2))
 	println(first([1, 2]))
@@ -12849,6 +12854,7 @@ fn main() {
 	s := Speaker(u)
 	println(s.speak())
 	println(ones([1]))
+	println(sizes([1]))
 	println([1, 2].map(it * 2))
 	println([3].map(|x| x + 1))
 	f := first[int]
@@ -12906,6 +12912,9 @@ fn function_hover_value(mut app App, uri string, content string, text string, wo
 	})
 	if response.result is Hover {
 		return (response.result as Hover).contents.value
+	}
+	if response.result is string {
+		return response.result as string
 	}
 	return response.result.str()
 }
@@ -12967,10 +12976,21 @@ fn test_hover_shows_a_function_as_declared_where_it_is_declared_and_used() {
 	got := function_hover_value(mut app, uri, function_hover_main, '\tprintln(add(1, 2))',
 		'println')
 	assert got.starts_with('```v\npub fn println(s string)\n```\n\nprintln prints'), got
-	// A local is what V3 says of it: its declaration is a statement.
+	// A local of a generic body has the type of its value, where it is declared
+	// and where it is used, and never the statement that declares it.
+	for text in ['\tcounts := xs.map(1)', '\treturn counts.len'] {
+		counts := function_hover_value(mut app, uri, function_hover_main, text, 'counts')
+		assert counts == '```v\ncounts []int\n```', counts
+	}
+	// A local is what V3 says of it, never the statement that declares it: the
+	// parameter of a lambda, which only a V3 that takes it for a declaration
+	// describes there, and its use.
 	lambda := function_hover_value(mut app, uri, function_hover_main, '\tprintln([3].map(|x| x + 1))',
 		'x')
-	assert lambda == '```v\nx int\n```', lambda
+	assert lambda in ['```v\nx int\n```', 'null'], lambda
+	used := function_hover_value(mut app, uri, function_hover_main, '\tprintln([3].map(|x| x + 1))',
+		'x + 1')
+	assert used == '```v\nx int\n```', used
 	instance := function_hover_value(mut app, uri, function_hover_main, '\tprintln(f([4]))',
 		'f')
 	assert instance.starts_with('```v\nf fn ('), instance
@@ -13121,4 +13141,73 @@ fn test_hover_of_a_local_holding_a_function_is_the_same_where_it_is_declared() {
 		}) or { Hover{} }
 		assert hover.contents.value == '```v\n${want}\n```', '${text}: ${hover.contents.value}'
 	}
+}
+
+// untyped_local_main declares a local that nothing gives a type: the value of a
+// call of a function that does not exist yet, as while it is being written.
+// Builtin's `DenseArray` has a method named `value`.
+const untyped_local_main = 'module main\n\nfn main() {\n\tvalue := missing_function(1)\n\tprintln(value)\n}\n'
+
+fn test_hover_of_a_local_is_never_its_statement_or_another_documentation() {
+	if !v3_answers_line_info {
+		return
+	}
+	mut app := create_test_app()
+	app.v3_line_info_enabled = true
+	defer {
+		cleanup_rename_app(mut app)
+	}
+	dir := os.join_path(app.temp_dir, 'untyped_local')
+	must_mkdir_all(dir)
+	must_write_file(os.join_path(dir, 'v.mod'), 'Module {}\n')
+	path := os.join_path(dir, 'main.v')
+	must_write_file(path, untyped_local_main)
+	uri := path_to_uri(path)
+	app.open_files[uri] = untyped_local_main
+	app.workspace_roots = [dir]
+	app.reindex_uri(uri)
+	for text in ['\tvalue := missing_function(1)', '\tprintln(value)'] {
+		got := function_hover_value(mut app, uri, untyped_local_main, text, 'value')
+		assert got == 'null', '${text}: ${got}'
+	}
+}
+
+fn test_hover_doc_comment_of_a_local_is_none() {
+	// Without a compiler: the name of a local, which a method of builtin shares.
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	path := os.join_path(app.temp_dir, 'local_doc', 'main.v')
+	must_mkdir_all(os.dir(path))
+	must_write_file(path, untyped_local_main)
+	uri := path_to_uri(path)
+	app.open_files[uri] = untyped_local_main
+	app.reindex_uri(uri)
+	for line, col in {
+		4: 2
+		5: 10
+	} {
+		doc := app.hover_doc_comment(uri, '${line}:hv^${col}')
+		assert doc == '', '${line}: ${doc}'
+	}
+}
+
+fn test_a_name_used_alone_is_never_a_method() {
+	// A method is named after a value and a dot: the name alone is a function, a
+	// type, a const or a local.
+	lines := ['module builtin', '', '// for cgen', 'fn (d &DenseArray) value(i int) voidptr {',
+		'}', '', '// value gives one.', 'pub fn value() int {', '\treturn 1', '}']
+	assert find_bare_declaration_line(lines, 'value') == 7
+	assert find_bare_declaration_line(lines[..5], 'value') == -1
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	uri := 'file:///tmp/bare_names.v'
+	app.open_files[uri] = 'module main\n\nstruct User {}\n\n// greet says hello.\nfn (u User) greet() {}\n\n// wave waves.\nfn wave() {}\n'
+	app.reindex_uri(uri)
+	entry := app.symbol_index[uri] or { panic('not indexed') }
+	assert 'greet' !in entry.docs
+	assert entry.docs['wave'] or { '' } == 'wave waves.'
 }

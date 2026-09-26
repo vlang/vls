@@ -42,6 +42,11 @@ fn build_index_entry(content string, enc PositionEncoding) IndexEntry {
 	public_module_completion_index := parse_module_member_completions_from_lines(code_lines, conditional_lines, true)
 	mut docs := map[string]string{}
 	for sym in doc_syms {
+		// A method is documented where its value's type is known, never by its
+		// name alone (see find_bare_declaration_line).
+		if sym.kind == sym_kind_method {
+			continue
+		}
 		// Each symbol's declaration line is range.start.line; read its vdoc.
 		doc := extract_doc_comment(lines, sym.range.start.line)
 		if doc != '' {

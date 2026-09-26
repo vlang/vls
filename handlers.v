@@ -424,6 +424,11 @@ fn (mut app App) hover_result(uri string, position Position, line_info string) R
 			if hover := app.function_declaration_hover(location) {
 				return hover
 			}
+			// A local or a parameter V3 knows no type of: nothing else can tell
+			// what it holds, and what declares it is a statement.
+			if answer.hover !is Hover && app.declares_local_at(location) {
+				return ResponseResult('null')
+			}
 		}
 		if answer.hover is Hover {
 			return app.hover_with_written_declaration(uri, position, answer.hover, answer.declared_at)
@@ -554,6 +559,11 @@ fn (mut app App) declares_local_at(location Location) bool {
 fn (mut app App) source_hover_fallback(uri string, position Position) ?Hover {
 	location := app.resolve_indexed_definition(uri, position) or {
 		app.resolve_symbol_anchor(uri, position.line, position.char) or { return none }
+	}
+	// What declares a local or a parameter is a statement or a signature, not
+	// what it is.
+	if app.declares_local_at(location) {
+		return none
 	}
 	declaration := app.source_declaration_at(location)
 	if declaration == '' {
@@ -6140,6 +6150,23 @@ fn (mut app App) resolve_indexed_definition(uri string, position Position) ?Loca
 	return app.find_indexed_source_definition(os.dir(requesting_path), symbol, active_test_file_name, false, get_module_name(content))
 }
 
+// find_bare_declaration_line is find_declaration_line for a name used alone, not
+// after a value and a dot: a method is never its declaration, as the method
+// `value` of builtin's `DenseArray` is not that of a local named `value`.
+fn find_bare_declaration_line(lines []string, symbol string) int {
+	for i, raw_line in lines {
+		line := raw_line.trim_space()
+		stripped := if line.starts_with('pub ') { line[4..] } else { line }
+		if stripped.starts_with('fn (') {
+			continue
+		}
+		if find_declaration_line([raw_line], symbol) == 0 {
+			return i
+		}
+	}
+	return -1
+}
+
 // find_declaration_line searches `lines` for a top-level declaration whose name
 // exactly matches `symbol` and returns its 0-based line index, or -1 if not found.
 fn find_declaration_line(lines []string, symbol string) int {
@@ -6342,7 +6369,7 @@ fn (mut app App) find_doc_comment_for_symbol(symbol string, current_lines []stri
 	// 1. Current file, but only for an unqualified symbol. A qualified
 	// `module.symbol` must never inherit a same-named local declaration's docs.
 	if imported_module == '' {
-		decl_line := find_declaration_line(current_lines, symbol)
+		decl_line := find_bare_declaration_line(current_lines, symbol)
 		if decl_line >= 0 {
 			doc := extract_doc_comment(current_lines, decl_line)
 			if doc != '' {
@@ -6464,7 +6491,7 @@ fn search_doc_in_vlib_dir(dir string, symbol string) string {
 		}
 		content := os.read_file(v_file) or { continue }
 		lines := content.split_into_lines()
-		dl := find_declaration_line(lines, symbol)
+		dl := find_bare_declaration_line(lines, symbol)
 		if dl >= 0 {
 			doc := extract_doc_comment(lines, dl)
 			if doc != '' {

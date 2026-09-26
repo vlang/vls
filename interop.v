@@ -1996,7 +1996,28 @@ fn (mut app App) hover_doc_comment(path string, line_info string) string {
 	if receiver != '' && imported_module == '' && doc_symbol == cursor_symbol {
 		return ''
 	}
+	// A local or a parameter, where it is declared or used: V documents neither,
+	// and a declaration of its name elsewhere is not about it.
+	if receiver == '' && app.names_a_local(file_content, file_lines[cursor_line], cursor_symbol,
+		cursor_position) {
+		return ''
+	}
 	return app.find_doc_comment_for_symbol(doc_symbol, file_lines, path, imported_module)
+}
+
+// names_a_local reports whether `name` at `position`, on `line` of `content`,
+// is a local or a parameter: one declared before it in its scope, or one that
+// the declaration it is in introduces.
+fn (app &App) names_a_local(content string, line string, name string, position Position) bool {
+	if app.local_scope_bindings(content, position).any(it.name == name) {
+		return true
+	}
+	start, _ := find_word_bounds_at_col(line, encoded_col_to_byte(line, position.char,
+		app.position_encoding), .utf8)
+	if _ := receiver_declaration_on_line(line, name, [start]) {
+		return true
+	}
+	return false
 }
 
 // line_info_unavailable_result answers a `-line-info` request without a
