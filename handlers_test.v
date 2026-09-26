@@ -562,6 +562,8 @@ fn test_diagnostics_scheduler_requeues_pending_sibling_with_latest_buffers() {
 		cleanup_test_app(app)
 	}
 	mut scheduler := new_diagnostics_scheduler()
+	// The jobs stay pending for the test to look at.
+	scheduler.paused = true
 	app.diagnostics_scheduler = scheduler
 	project_dir := os.join_path(app.temp_dir, 'sibling_project')
 	must_mkdir_all(project_dir)
@@ -609,6 +611,8 @@ fn test_diagnostics_scheduler_requeues_sibling_after_open() {
 		cleanup_test_app(app)
 	}
 	mut scheduler := new_diagnostics_scheduler()
+	// The jobs stay pending for the test to look at.
+	scheduler.paused = true
 	app.diagnostics_scheduler = scheduler
 	project_dir := os.join_path(app.temp_dir, 'open_sibling_project')
 	must_mkdir_all(project_dir)
@@ -651,6 +655,8 @@ fn test_diagnostics_scheduler_requeues_sibling_after_save_text() {
 		cleanup_test_app(app)
 	}
 	mut scheduler := new_diagnostics_scheduler()
+	// The jobs stay pending for the test to look at.
+	scheduler.paused = true
 	app.diagnostics_scheduler = scheduler
 	project_dir := os.join_path(app.temp_dir, 'save_sibling_project')
 	must_mkdir_all(project_dir)
@@ -694,6 +700,8 @@ fn test_diagnostics_scheduler_requeues_sibling_after_close() {
 		cleanup_test_app(app)
 	}
 	mut scheduler := new_diagnostics_scheduler()
+	// The jobs stay pending for the test to look at.
+	scheduler.paused = true
 	app.diagnostics_scheduler = scheduler
 	project_dir := os.join_path(app.temp_dir, 'close_sibling_project')
 	must_mkdir_all(project_dir)
@@ -740,6 +748,8 @@ fn test_diagnostics_scheduler_requeues_job_after_watched_file_change() {
 		cleanup_test_app(app)
 	}
 	mut scheduler := new_diagnostics_scheduler()
+	// The jobs stay pending for the test to look at.
+	scheduler.paused = true
 	app.diagnostics_scheduler = scheduler
 	project_dir := os.join_path(app.temp_dir, 'watched_sibling_project')
 	must_mkdir_all(project_dir)

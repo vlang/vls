@@ -7,11 +7,11 @@ import os
 import sync
 import time
 
-// Wait until typing pauses before starting a check. Completion requests can then
-// overtake diagnostics instead of sitting behind a compile on every key. A check
-// answered by a diagnostics server takes a fraction of a one-shot run, so the
-// pause can be short, and the worker looks for ready jobs often.
-const diagnostics_debounce_ms = 25
+// A check starts as soon as a change arrives: a newer change stops the check
+// that runs, whose answer would be stale, and a question goes to a server of
+// its own, which a check does not hold (see DiagnosticsServer.busy). The worker
+// looks for ready jobs often while one waits for its time.
+const diagnostics_debounce_ms = 0
 const diagnostics_worker_poll = 5 * time.millisecond
 
 struct DiagnosticsJob {
@@ -59,6 +59,10 @@ mut:
 	program_members map[string][]string
 	// The diagnostics servers outlive the worker, which exits when idle.
 	servers &DiagnosticsServerPool = new_diagnostics_server_pool()
+	// A paused scheduler starts no worker and keeps its jobs pending: a test
+	// can look at the queue a change leaves, which a check started at once
+	// would empty.
+	paused bool
 }
 
 fn new_diagnostics_scheduler() &DiagnosticsScheduler {
@@ -161,6 +165,9 @@ fn (mut scheduler DiagnosticsScheduler) enqueue(job DiagnosticsJob) bool {
 		scheduler.mutex.unlock()
 	}
 	scheduler.pending_jobs[job.uri] = job
+	if scheduler.paused {
+		return false
+	}
 	should_start := !scheduler.worker_running
 	scheduler.worker_running = true
 	return should_start
@@ -351,10 +358,13 @@ fn (mut app App) cancel_all_scheduled_diagnostics() {
 
 fn run_diagnostics_worker(mut scheduler DiagnosticsScheduler) {
 	for {
-		time.sleep(diagnostics_worker_poll)
 		jobs, should_stop := scheduler.take_ready_jobs(time.now().unix_milli())
 		if should_stop {
 			return
+		}
+		if jobs.len == 0 {
+			time.sleep(diagnostics_worker_poll)
+			continue
 		}
 		for job in jobs {
 			run_diagnostics_job(mut scheduler, job)
