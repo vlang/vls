@@ -1070,3 +1070,54 @@ fn test_the_index_tells_a_value_of_a_type_parameter_when_the_compiler_cannot() {
 	x_line := narrowing_source.split_into_lines().index('\t\treturn x')
 	assert hover_text_at(mut app, uri, x_line, 9) == '```v\nx T\n```'
 }
+
+const multiline_sum_source = 'module main
+
+struct Circle {
+	r f64
+}
+
+struct Square {
+	side f64
+}
+
+// vfmt writes a long sum type with each type on a line of its own.
+type Shape2 = Circle
+	| Square
+
+fn area2(s Shape2) f64 {
+	if s is Circle {
+		return s.r
+	}
+	return 0.0
+}
+
+fn perimeter(s Shape2) f64 {
+	s.
+	return 0.0
+}
+'
+
+fn test_a_sum_type_written_on_several_lines_is_a_sum_type() {
+	mut app, fake := fake_v3_app('multiline_sum', fake_v3_hover_server, 'VLS_DIAGNOSTICS_SERVER')!
+	defer {
+		stop_fake_v3_app(mut app, fake)
+	}
+	os.write_file(os.join_path(fake.server, 'answer.txt'), '{"contents":{"kind":"markdown","value":"```v\\ns main.Circle\\n```"}}')!
+	path := os.join_path(fake.project, 'shapes.v')
+	os.write_file(path, multiline_sum_source)!
+	uri := path_to_uri(path)
+	app.open_files[uri] = multiline_sum_source
+	lines := multiline_sum_source.split_into_lines()
+	// `s` in the branch of `if s is Circle {`: the compiler tells, as for a sum
+	// type written on one line.
+	assert hover_text_at(mut app, uri, lines.index('\t\treturn s.r'), 9) == '```v\ns main.Circle\n```'
+	// `s.`: what a value of a sum type has, not the fields of its first type.
+	dot := lines.index('\ts.')
+	labels := app.indexed_completions(uri, Position{
+		line: dot
+		char: 3
+	}).items.map(it.label)
+	assert 'r' !in labels, labels.str()
+	assert 'type_name' in labels, labels.str()
+}
