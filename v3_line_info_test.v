@@ -184,6 +184,34 @@ done
 
 const fake_hover_answer = '{"contents":{"kind":"markdown","value":"```v\\nfake\\n```"}}'
 
+// A V whose query server answers a hover with its answer.txt and a definition
+// with the start of the line the question is on.
+const fake_v3_hover_server = r"#!/bin/sh
+echo v-diagnostics-server: ready
+here=$(dirname $0)
+tab=$(printf '\t')
+while read -r request rest; do
+	case $request in quit) exit 0 ;; esac
+	token=${rest%% *}
+	questions=${rest#* }
+	echo v-diagnostics-server: child 1 $token
+	echo $questions >> $here/questions.txt
+	i=0
+	rest=$questions$tab
+	while [ ${#rest} -gt 0 ]; do
+		q=${rest%%$tab*}
+		rest=${rest#*$tab}
+		pos=${q#*:}
+		case $q in
+		*hv^*) printf '%s\t' $i; cat $here/answer.txt; echo ;;
+		*) printf '%s\t%s:%s:1\n' $i ${q%%:*} ${pos%%:*} ;;
+		esac
+		i=$((i + 1))
+	done
+	printf '\nv-diagnostics-server: end 0 %s\n' $token
+done
+"
+
 fn test_the_completion_placeholder_follows_a_dot_with_no_name() {
 	source := 'fn main() {\n\tp := 1\n\tp.\n\tq.na\n\tprintln(p.x)\n}\n'
 	// `p.` at the end of line 3: the cursor after the dot is column 3.
@@ -947,4 +975,98 @@ fn test_a_check_gets_the_partial_answer_of_the_server_first() {
 		return false
 	}, unsafe { nil }) or { panic('no answer') }
 	assert plain.output == result.output
+}
+
+// hover_text_at is what a hover at `line` and `col` of `uri` shows.
+fn hover_text_at(mut app App, uri string, line int, col int) string {
+	response := app.operation_at_pos(.hover, Request{
+		id: 1
+		method: 'textDocument/hover'
+		params: json2.encode(TextDocumentPositionParams{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			position: Position{
+				line: line
+				char: col
+			}
+		})
+	})
+	result := response.result
+	if result is Hover {
+		return result.contents.value
+	}
+	return ''
+}
+
+const narrowing_source = 'module main
+
+type Number = int | f64
+
+struct Circle {
+	r f64
+}
+
+struct Square {
+	side f64
+}
+
+type Shape = Circle | Square
+
+fn half[T Number](x T) f64 {
+	\$if T is f64 {
+		return x
+	}
+	return 0.0
+}
+
+fn area(s Shape) f64 {
+	if s is Circle {
+		return s.r
+	}
+	return 0.0
+}
+
+fn double(y int) int {
+	return y * 2
+}
+'
+
+fn test_the_compiler_tells_what_a_value_of_a_type_parameter_or_a_sum_type_is() {
+	mut app, fake := fake_v3_app('narrowing', fake_v3_hover_server, 'VLS_DIAGNOSTICS_SERVER')!
+	defer {
+		stop_fake_v3_app(mut app, fake)
+	}
+	os.write_file(os.join_path(fake.server, 'answer.txt'), '{"contents":{"kind":"markdown","value":"```v\\nx f64\\n```"}}')!
+	path := os.join_path(fake.project, 'narrowing.v')
+	os.write_file(path, narrowing_source)!
+	uri := path_to_uri(path)
+	app.open_files[uri] = narrowing_source
+	lines := narrowing_source.split_into_lines()
+	// `x` of `half[T Number]` in the branch of `$if T is f64 {`: a `$if` can
+	// decide `T`, and the compiler says what it is there.
+	x_line := lines.index('\t\treturn x')
+	assert hover_text_at(mut app, uri, x_line, 9) == '```v\nx f64\n```'
+	// `s` of a sum type in the branch of `if s is Circle {`: the compiler too.
+	s_line := lines.index('\t\treturn s.r')
+	assert hover_text_at(mut app, uri, s_line, 9) == '```v\nx f64\n```'
+	// `y int` is the index's to tell: the compiler is not asked.
+	asked := fake.questions().len
+	y_line := lines.index('\treturn y * 2')
+	assert hover_text_at(mut app, uri, y_line, 8) == '```v\ny int\n```'
+	assert fake.questions().len == asked
+}
+
+fn test_the_index_tells_a_value_of_a_type_parameter_when_the_compiler_cannot() {
+	// A compiler that answers no hover: the type written in the signature.
+	mut app, fake := fake_v3_app('narrowing_none', fake_v3_query_server, 'VLS_DIAGNOSTICS_SERVER')!
+	defer {
+		stop_fake_v3_app(mut app, fake)
+	}
+	path := os.join_path(fake.project, 'narrowing.v')
+	os.write_file(path, narrowing_source)!
+	uri := path_to_uri(path)
+	app.open_files[uri] = narrowing_source
+	x_line := narrowing_source.split_into_lines().index('\t\treturn x')
+	assert hover_text_at(mut app, uri, x_line, 9) == '```v\nx T\n```'
 }

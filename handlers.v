@@ -928,6 +928,77 @@ fn language_member_hover(name string, signature string) Hover {
 	}
 }
 
+// binding_type_narrows reports whether the compiler tells better than the index
+// what the binding that `hover` describes is at `position`: its type names a
+// type parameter of the generic function around it, which a `$if` can decide,
+// or is a sum type or an interface, which `is` and `match` can.
+fn (mut app App) binding_type_narrows(uri string, position Position, hover Hover) bool {
+	if !app.v3_line_info_enabled || os.getenv('VLS_V3_LINE_INFO') == 'off' {
+		return false
+	}
+	text := hover.contents.value.all_after('```v\n').all_before('\n```').trim_space()
+	typ := text.all_after(' ').trim_space()
+	if typ == '' || typ == text {
+		return false
+	}
+	content := app.index_source_for(uri) or { return false }
+	lines := content.split_into_lines()
+	start := containing_function_start(lines, position, app.position_encoding)
+	if start >= 0 && start < lines.len {
+		mut end := start
+		for end + 1 < lines.len && !lines[end].contains('{') {
+			end++
+		}
+		for name in declared_type_param_names(lines[start..end + 1].join('\n')) {
+			if type_text_names(typ, name) {
+				return true
+			}
+		}
+	}
+	base := typ.trim_left('&').all_after('mut ').trim_left('?!')
+	return app.type_declaration(uri, content, base).kind in ['sum', 'interface']
+}
+
+// declared_type_param_names returns the names of the type parameters written
+// between square brackets in the header of a function: `T` and `U` of
+// `fn pair[T Named, U](a T, b U)`, `T` of `fn (b Box[T]) get() T`.
+fn declared_type_param_names(header string) []string {
+	mut names := []string{}
+	mut i := 0
+	for i < header.len {
+		if header[i] != `[` {
+			i++
+			continue
+		}
+		end := header.index_after(']', i) or { break }
+		for part in header[i + 1..end].split(',') {
+			name := part.trim_space().all_before(' ')
+			if name != '' && name[0].is_capital() && name.bytes().all(is_ident_char(it))
+				&& name !in names {
+				names << name
+			}
+		}
+		i = end + 1
+	}
+	return names
+}
+
+// type_text_names reports whether the type `text` names `name` as a whole
+// identifier: `[]T` names `T`, `Tree` does not.
+fn type_text_names(text string, name string) bool {
+	mut i := 0
+	for {
+		idx := text.index_after(name, i) or { return false }
+		end := idx + name.len
+		if (idx == 0 || !is_ident_char(text[idx - 1]))
+			&& (end >= text.len || !is_ident_char(text[end])) {
+			return true
+		}
+		i = idx + 1
+	}
+	return false
+}
+
 fn (mut app App) local_binding_hover(uri string, position Position) ?Hover {
 	content := app.index_source_for(uri) or { return none }
 	lines := content.split_into_lines()
@@ -1099,6 +1170,18 @@ fn (mut app App) operation_at_pos(method Method, request Request) Response {
 
 	if method == .hover {
 		if binding := app.local_binding_hover(path, params.position) {
+			// What a `$if`, `is` or `match` makes of a value of a type parameter,
+			// a sum type or an interface, the compiler tells: its answer first,
+			// and the index's when it has none.
+			if app.binding_type_narrows(path, params.position, binding) {
+				compiled := app.hover_result(path, params.position, '${line_nr}:hv^${byte_col}')
+				if !(compiled is string && compiled == 'null') {
+					return Response{
+						id: request.id
+						result: compiled
+					}
+				}
+			}
 			return Response{
 				id: request.id
 				result: binding
