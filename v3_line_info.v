@@ -379,7 +379,7 @@ fn (mut project V3QueryProject) write(path string, content string) !string {
 // directory holds the copies of its programs.
 fn (mut app App) v3_query_pool() &DiagnosticsServerPool {
 	if app.v3_query_servers == unsafe { nil } {
-		app.v3_query_servers = new_diagnostics_server_pool()
+		app.v3_query_servers = new_prepared_diagnostics_server_pool()
 	}
 	return app.v3_query_servers
 }

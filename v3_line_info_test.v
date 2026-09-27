@@ -814,7 +814,7 @@ while read -r request rest; do
 done
 "
 
-fn test_the_server_of_the_diagnostics_prepares_builtin_and_the_one_of_the_questions_does_not() {
+fn test_the_servers_of_the_diagnostics_and_of_the_questions_prepare_builtin() {
 	dir := os.join_path(os.vtmp_dir(), 'vls_v3_prepare_${os.getpid()}')
 	os.mkdir_all(dir)!
 	defer {
@@ -831,10 +831,18 @@ fn test_the_server_of_the_diagnostics_prepares_builtin_and_the_one_of_the_questi
 		return false
 	}) or {}
 	assert os.read_file(os.join_path(dir, 'prepare.txt'))!.trim_space() == 'x1'
-	mut questions := new_diagnostics_server_pool()
+	os.rm(os.join_path(dir, 'prepare.txt'))!
+	mut app := App{}
 	defer {
-		questions.stop_all()
+		app.v3_query_pool().stop_all()
 	}
-	questions.query(exe, ['-w', '-check', '-nocolor', '.'], dir, 'main.v:1:hv^1') or {}
+	app.v3_query_pool().query(exe, ['-w', '-check', '-nocolor', '.'], dir, 'main.v:1:hv^1') or {}
+	assert os.read_file(os.join_path(dir, 'prepare.txt'))!.trim_space() == 'x1'
+	// A pool of neither kind leaves it to the compiler.
+	mut plain := new_diagnostics_server_pool()
+	defer {
+		plain.stop_all()
+	}
+	plain.query(exe, ['-check', '-nocolor', '.'], dir, 'main.v:1:hv^1') or {}
 	assert os.read_file(os.join_path(dir, 'prepare.txt'))!.trim_space() == 'x'
 }
