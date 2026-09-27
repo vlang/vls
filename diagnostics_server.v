@@ -28,6 +28,28 @@ mut:
 	// prepare asks its servers to parse and collect builtin and the modules it
 	// imports once, before their first check, instead of in each check.
 	prepare bool
+	// shared makes the checks and the questions about a program share its copy,
+	// and the child of its server that checked it: a check of a program, or a
+	// question about it, answers both while the copy holds what it held
+	// (V_DIAGNOSTICS_SHARED).
+	shared bool
+	copies map[string]&ProgramCopy
+}
+
+// ProgramCopy is the copy of a program that the checks and the questions of an
+// editor share, by program directory: a request holds its lock while it writes
+// what the editor holds into the copy and asks about it, so the copy holds what
+// the request asked about until it is answered.
+@[heap]
+struct ProgramCopy {
+mut:
+	mutex   sync.Mutex
+	project V3QueryProject
+	built   bool
+	// Under the pool's lock: the directory the copy mirrors, and whether a file
+	// was created or deleted there since the copy was built.
+	root  string
+	stale bool
 }
 
 struct DiagnosticsServer {
@@ -75,6 +97,44 @@ fn new_prepared_diagnostics_server_pool() &DiagnosticsServerPool {
 	mut pool := new_diagnostics_server_pool()
 	pool.prepare = true
 	return pool
+}
+
+// new_shared_diagnostics_server_pool returns a prepared pool whose checks and
+// questions share the copy of their program and its checks (see shared).
+fn new_shared_diagnostics_server_pool() &DiagnosticsServerPool {
+	mut pool := new_prepared_diagnostics_server_pool()
+	pool.shared = true
+	return pool
+}
+
+// program_copy returns the copy of the program in `program_dir`, not built yet
+// the first time.
+fn (mut pool DiagnosticsServerPool) program_copy(program_dir string) &ProgramCopy {
+	pool.mutex.lock()
+	defer {
+		pool.mutex.unlock()
+	}
+	if program := pool.copies[program_dir] {
+		return program
+	}
+	program := &ProgramCopy{}
+	pool.copies[program_dir] = program
+	return program
+}
+
+// notice_disk_change tells the copies of the programs that hold `path` that a
+// file was created or deleted there: each is built again before its next
+// request, as a copy links the files that were there when it was built.
+fn (mut pool DiagnosticsServerPool) notice_disk_change(path string) {
+	pool.mutex.lock()
+	defer {
+		pool.mutex.unlock()
+	}
+	for _, mut program in pool.copies {
+		if program.root != '' && path_is_within(path, program.root) {
+			program.stale = true
+		}
+	}
 }
 
 // check runs the compiler with `args` in `work_dir` through a server, starting
@@ -146,7 +206,7 @@ fn (mut pool DiagnosticsServerPool) take_server(key string, exe string, args []s
 	}
 	mut server := pool.servers[key] or {
 		pool.evict_least_recently_used()
-		mut started := start_diagnostics_server(exe, args, work_dir, pool.prepare) or {
+		mut started := start_diagnostics_server(exe, args, work_dir, pool.prepare, pool.shared) or {
 			log('no diagnostics server for ${work_dir}: ${err}')
 			pool.unsupported['${key}\n${fingerprint}'] = true
 			return none
@@ -237,10 +297,12 @@ fn (mut pool DiagnosticsServerPool) stop_all() {
 		server.stop()
 	}
 	pool.servers.clear()
+	// A request that holds a copy keeps it; the next one builds a new one.
+	pool.copies.clear()
 	os.rmdir_all(pool.base) or {}
 }
 
-fn start_diagnostics_server(exe string, args []string, work_dir string, prepare bool) !&DiagnosticsServer {
+fn start_diagnostics_server(exe string, args []string, work_dir string, prepare bool, shared bool) !&DiagnosticsServer {
 	mut p := os.new_process(exe)
 	// The memory watchdog runs on a thread of its own, and a server forks only
 	// while the worker pools are the sole threads.
@@ -252,6 +314,9 @@ fn start_diagnostics_server(exe string, args []string, work_dir string, prepare 
 	env['V_DIAGNOSTICS_SERVER'] = '1'
 	if prepare {
 		env['V_DIAGNOSTICS_PREPARE'] = '1'
+	}
+	if shared {
+		env['V_DIAGNOSTICS_SHARED'] = '1'
 	}
 	p.set_environment(env)
 	p.set_redirect_stdio()

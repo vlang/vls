@@ -1150,24 +1150,47 @@ fn (mut app App) run_v_check(path string, text string) []JsonError {
 	// The file is checked as part of its program: from the program's directory,
 	// with the local modules it imports, as `v .` there builds it.
 	program_dir := app.program_root(real_path)
+	// The copy of the program that the questions about it use too, whose lock
+	// this check holds until it is answered: the same check answers both.
+	mut shared_copy := &ProgramCopy(unsafe { nil })
 	if should_use_compilation_overlay(real_path, app.open_files.len)
 		|| program_dir != normalize_overlay_path(working_dir)
 		|| app.imports_local_module(real_path, program_dir) {
-		if server_exe != '' {
-			app.overlay_dir = app.diagnostics_servers.stable_dir('project', program_overlay_root(normalize_overlay_path(real_path),
-				program_dir))
+		if server_exe != '' && app.diagnostics_servers.shared {
+			mut servers := app.diagnostics_servers
+			mut program := servers.program_copy(program_dir)
+			program.mutex.lock()
+			if written := app.write_program_copy(mut servers, mut program, real_path, program_dir,
+				text)
+			{
+				shared_copy = program
+				overlay = program.project.overlay
+				temp_project_dir = overlay.temp_root
+				file_to_check = written
+				compile_target = overlay.temp_work_dir
+				use_multifile = true
+				log('checking the copy of ${program_dir} the questions use: ${compile_target}')
+			} else {
+				program.mutex.unlock()
+			}
 		}
-		overlay = app.prepare_compilation_overlay_in(real_path, program_dir) or {
-			log('Failed to prepare compilation overlay: ${err}')
-			CompilationOverlay{}
-		}
-		app.overlay_dir = ''
-		if overlay.temp_root != '' {
-			temp_project_dir = overlay.temp_root
-			file_to_check = overlay.temp_source_file
-			compile_target = overlay.temp_work_dir
-			use_multifile = true
-			log('temp_project_dir=${temp_project_dir}, file_to_check=${file_to_check}, compile_target=${compile_target}')
+		if shared_copy == unsafe { nil } {
+			if server_exe != '' {
+				app.overlay_dir = app.diagnostics_servers.stable_dir('project', program_overlay_root(normalize_overlay_path(real_path),
+					program_dir))
+			}
+			overlay = app.prepare_compilation_overlay_in(real_path, program_dir) or {
+				log('Failed to prepare compilation overlay: ${err}')
+				CompilationOverlay{}
+			}
+			app.overlay_dir = ''
+			if overlay.temp_root != '' {
+				temp_project_dir = overlay.temp_root
+				file_to_check = overlay.temp_source_file
+				compile_target = overlay.temp_work_dir
+				use_multifile = true
+				log('temp_project_dir=${temp_project_dir}, file_to_check=${file_to_check}, compile_target=${compile_target}')
+			}
 		}
 	}
 
@@ -1218,6 +1241,9 @@ fn (mut app App) run_v_check(path string, text string) []JsonError {
 		servers.check(server_exe, cmd_args, exec_dir, cancelled) or { run_v_argv(cmd_args, exec_dir) }
 	} else {
 		run_v_argv(cmd_args, exec_dir)
+	}
+	if shared_copy != unsafe { nil } {
+		shared_copy.mutex.unlock()
 	}
 
 	log('Check - RUN RES ${x}')

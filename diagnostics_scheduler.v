@@ -57,9 +57,10 @@ mut:
 	// The open files the last check of each program answered for, by program
 	// directory.
 	program_members map[string][]string
-	// The diagnostics servers outlive the worker, which exits when idle. They
-	// only check, so each one parses and collects builtin once.
-	servers &DiagnosticsServerPool = new_prepared_diagnostics_server_pool()
+	// The diagnostics servers outlive the worker, which exits when idle. Each
+	// one parses and collects builtin once, and they answer the questions about
+	// the programs they check too, from the same checks (see ProgramCopy).
+	servers &DiagnosticsServerPool = new_shared_diagnostics_server_pool()
 	// A paused scheduler starts no worker and keeps its jobs pending: a test
 	// can look at the queue a change leaves, which a check started at once
 	// would empty.
@@ -399,6 +400,7 @@ fn run_diagnostics_job(mut scheduler DiagnosticsScheduler, job DiagnosticsJob) {
 		write_mutex:           job.write_mutex
 		tcp_conn:              job.tcp_conn
 		diagnostics_servers:   scheduler.servers
+		v3_query_servers:      scheduler.servers
 		// A change that arrives while this check runs stops it: its answer would
 		// be stale, and the newer check can start at once.
 		diagnostics_cancelled: fn [mut scheduler, job] () bool {

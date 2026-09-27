@@ -302,7 +302,7 @@ fn test_a_file_opened_after_the_copy_was_built_is_written_in_the_copy_only() {
 	main_uri := path_to_uri(main_path)
 	app.open_files[main_uri] = 'module main\n\nimport helper\n\nfn main() {\n\tp := helper.answer()\n\tprintln(p)\n}\n'
 	app.v3_line_info(.hover, main_uri, main_path, '6:hv^2') or {}
-	copy_root := app.v3_query_projects.values()[0].overlay.temp_root
+	copy_root := app.v3_copies()[0].overlay.temp_root
 	copy_of_helper := os.join_path(copy_root, 'helper', 'helper.v')
 	// What the test is about: the copy shares both files with the project.
 	assert os.stat(copy_of_helper)!.inode == os.stat(helper_path)!.inode
@@ -339,7 +339,7 @@ fn test_a_module_file_replaced_on_disk_is_taken_again_by_the_copy() {
 	main_uri := path_to_uri(main_path)
 	app.open_files[main_uri] = 'module main\n\nimport helper\n\nfn main() {\n\tp := helper.answer()\n\tprintln(p)\n}\n'
 	app.v3_line_info(.hover, main_uri, main_path, '6:hv^2') or {}
-	copy_of_helper := os.join_path(app.v3_query_projects.values()[0].overlay.temp_root, 'helper', 'helper.v')
+	copy_of_helper := os.join_path(app.v3_copies()[0].overlay.temp_root, 'helper', 'helper.v')
 	assert os.stat(copy_of_helper)!.inode == os.stat(helper_path)!.inode
 	// Replaced by another file, as a checkout or an editor that saves by
 	// renaming does, and no client says so: the hard link holds the old one.
@@ -368,7 +368,7 @@ fn test_a_file_emptied_in_the_editor_is_empty_in_the_copy() {
 	os.write_file(extra_path, 'module extra\n\npub fn one() int {\n\treturn 1\n}\n')!
 	main_path := os.join_path(fake.project, 'main.v')
 	app.v3_line_info(.hover, path_to_uri(main_path), main_path, '4:hv^2') or {}
-	copy_root := app.v3_query_projects.values()[0].overlay.temp_root
+	copy_root := app.v3_copies()[0].overlay.temp_root
 	assert os.is_link(os.join_path(copy_root, 'extra'))
 	// Opened, and all its text deleted: nothing was written for it yet.
 	app.open_files[path_to_uri(extra_path)] = ''
@@ -387,7 +387,7 @@ fn test_a_closed_file_goes_back_to_what_is_on_disk() {
 	app.open_files[main_uri] = 'module main\n\nfn main() {\n\tp := 10\n\tprintln(p)\n}\n'
 	other := os.join_path(fake.project, 'other.v')
 	app.v3_line_info(.hover, path_to_uri(other), other, '4:hv^2') or {}
-	project := app.v3_query_projects.values()[0]
+	project := app.v3_copies()[0]
 	copy_of_main := os.join_path(project.overlay.temp_root, 'main.v')
 	assert os.read_file(copy_of_main)!.contains('p := 10\n')
 	// Closed without saving: the copy holds main.v as it is on disk again.
@@ -461,7 +461,7 @@ fn test_without_a_server_v3_answers_in_a_process_of_its_own() {
 		return
 	}
 	assert (result as Hover).contents.value.contains('fake')
-	assert fake.questions() == ['${os.join_path(app.v3_query_projects.values()[0].overlay.temp_root, 'main.v')}:4:hv^2']
+	assert fake.questions() == ['${os.join_path(app.v3_copies()[0].overlay.temp_root, 'main.v')}:4:hv^2']
 	assert !app.v3_one_shot_unsupported
 }
 
@@ -484,13 +484,13 @@ fn test_only_a_created_or_deleted_file_rebuilds_the_copy() {
 	}
 	path := os.join_path(fake.project, 'main.v')
 	app.v3_line_info(.hover, path_to_uri(path), path, '4:hv^2') or {}
-	assert app.v3_query_projects.len == 1
+	assert app.v3_copies().len == 1
 	// A change shows through the copy.
 	app.v3_query_notice_disk_change(path, 2)
-	assert app.v3_query_projects.len == 1
+	assert app.v3_copies().len == 1
 	// A new file is not in it.
 	app.v3_query_notice_disk_change(os.join_path(fake.project, 'new.v'), 1)
-	assert app.v3_query_projects.len == 0
+	assert app.v3_copies().len == 0
 }
 
 fn test_a_test_file_is_asked_as_a_program_of_its_own() {
@@ -505,7 +505,7 @@ fn test_a_test_file_is_asked_as_a_program_of_its_own() {
 	main_path := os.join_path(fake.project, 'main.v')
 	app.v3_line_info(.hover, path_to_uri(test_path), test_path, '4:hv^2') or {}
 	app.v3_line_info(.hover, path_to_uri(main_path), main_path, '4:hv^2') or {}
-	copy_root := app.v3_query_projects.values()[0].overlay.temp_root
+	copy_root := app.v3_copies()[0].overlay.temp_root
 	copy_of_test := os.join_path(copy_root, 'main_test.v')
 	assert fake.questions() == ['${copy_of_test}:4:hv^2 ${copy_of_test}',
 		'${os.join_path(copy_root, 'main.v')}:4:hv^2 .']
@@ -525,7 +525,7 @@ fn test_a_server_that_does_not_end_is_stopped_anyway() {
 	exe := os.join_path(dir, 'v')
 	os.write_file(exe, fake_server_ignoring_quit)!
 	os.chmod(exe, 0o755)!
-	mut server := start_diagnostics_server(exe, [], dir, false)!
+	mut server := start_diagnostics_server(exe, [], dir, false, false)!
 	done := chan bool{cap: 1}
 	spawn stop_and_report(mut server, done)
 	select {
@@ -671,7 +671,7 @@ fn test_two_editors_on_one_project_keep_their_copies_apart() {
 	first.v3_line_info(.hover, uri, path, '4:hv^2') or {}
 	assert fake.asked() == first.open_files[uri]
 	// One that stops removes its own files only.
-	second_copy := second.v3_query_projects.values()[0].overlay.temp_root
+	second_copy := second.v3_copies()[0].overlay.temp_root
 	first.stop_diagnostics_servers()
 	assert os.is_dir(second_copy)
 	first.stop_v3_queries()
@@ -698,7 +698,7 @@ fn test_two_programs_of_one_project_keep_their_copies_apart() {
 	// An edit, a question about the other program, and the edit undone.
 	app.open_files[uri] = buffer.replace('10', '20')
 	app.v3_line_info(.hover, path_to_uri(tool), tool, '4:hv^2') or {}
-	assert app.v3_query_projects.len == 2
+	assert app.v3_copies().len == 2
 	app.open_files[uri] = buffer
 	app.v3_line_info(.hover, uri, path, '4:hv^2') or {}
 	assert fake.asked() == buffer
@@ -711,7 +711,7 @@ fn test_a_session_that_ends_without_a_shutdown_removes_its_copies() {
 	}
 	path := os.join_path(fake.project, 'main.v')
 	app.v3_line_info(.hover, path_to_uri(path), path, '4:hv^2') or {}
-	copy_root := app.v3_query_projects.values()[0].overlay.temp_root
+	copy_root := app.v3_copies()[0].overlay.temp_root
 	assert os.is_dir(copy_root)
 	// The client goes away without a word.
 	no_requests := os.join_path(fake.dir, 'no_requests.txt')
@@ -845,4 +845,55 @@ fn test_the_servers_of_the_diagnostics_and_of_the_questions_prepare_builtin() {
 	}
 	plain.query(exe, ['-check', '-nocolor', '.'], dir, 'main.v:1:hv^1') or {}
 	assert os.read_file(os.join_path(dir, 'prepare.txt'))!.trim_space() == 'x'
+}
+
+// A diagnostics server that notes each request with the directory it runs in,
+// and when it starts, whether it shares its checks with its questions, and
+// answers a question with the answer the test left for it.
+const fake_server_noting_requests = r"#!/bin/sh
+here=$(dirname $0)
+echo start $(pwd) shared=x${V_DIAGNOSTICS_SHARED} >> $here/requests.txt
+echo v-diagnostics-server: ready
+while read -r request rest; do
+	case $request in quit) exit 0 ;; esac
+	token=${rest%% *}
+	echo $request $(pwd) >> $here/requests.txt
+	echo v-diagnostics-server: child 1 $token
+	case $request in query) cat $here/answer.txt; echo ;; esac
+	printf '\nv-diagnostics-server: end 0 %s\n' $token
+done
+"
+
+fn test_a_check_and_a_question_about_a_program_share_its_copy_and_its_server() {
+	mut app, fake := fake_v3_app('shared_copy', fake_server_noting_requests, 'VLS_DIAGNOSTICS_SERVER')!
+	app.diagnostics_scheduler = new_diagnostics_scheduler()
+	defer {
+		stop_fake_v3_app(mut app, fake)
+	}
+	path := os.join_path(fake.project, 'main.v')
+	uri := path_to_uri(path)
+	buffer := 'module main\n\nfn main() {\n\tp := 10\n\tprintln(p)\n}\n'
+	app.open_files[uri] = buffer
+	// The check of the diagnostics worker, as run_diagnostics_job makes it.
+	mut scheduler := app.diagnostics_scheduler or { panic('no scheduler') }
+	mut worker := App{
+		text:                buffer
+		open_files:          app.open_files.clone()
+		temp_dir:            app.temp_dir
+		diagnostics_enabled: true
+		diagnostics_servers: scheduler.servers
+		v3_query_servers:    scheduler.servers
+	}
+	worker.run_v_check(uri, buffer)
+	app.v3_line_info(.hover, uri, path, '4:hv^2') or { panic('no answer') }
+	requests := os.read_file(os.join_path(fake.server, 'requests.txt'))!.split_into_lines()
+	// One server, which shares its checks with its questions, answers both, in
+	// one copy of the program.
+	assert requests.len == 3, requests.str()
+	assert requests[0].starts_with('start ') && requests[0].ends_with(' shared=x1'), requests[0]
+	copy_dir := requests[0].all_after('start ').all_before(' shared=')
+	assert requests[1] == 'check ${copy_dir}'
+	assert requests[2] == 'query ${copy_dir}'
+	// The copy holds the buffer.
+	assert os.read_file(os.join_path(copy_dir, 'main.v'))! == buffer
 }
