@@ -525,7 +525,7 @@ fn test_a_server_that_does_not_end_is_stopped_anyway() {
 	exe := os.join_path(dir, 'v')
 	os.write_file(exe, fake_server_ignoring_quit)!
 	os.chmod(exe, 0o755)!
-	mut server := start_diagnostics_server(exe, [], dir)!
+	mut server := start_diagnostics_server(exe, [], dir, false)!
 	done := chan bool{cap: 1}
 	spawn stop_and_report(mut server, done)
 	select {
@@ -798,4 +798,43 @@ fn test_a_request_that_asks_no_compiler_does_not_wait_for_one_that_does() {
 		}
 	}
 	assert order == ['tokens', 'hover'], order.str()
+}
+
+// A diagnostics server that writes V_DIAGNOSTICS_PREPARE, as it got it, next to
+// itself.
+const fake_server_noting_prepare = r"#!/bin/sh
+here=$(dirname $0)
+echo x${V_DIAGNOSTICS_PREPARE} > $here/prepare.txt
+echo v-diagnostics-server: ready
+while read -r request rest; do
+	case $request in quit) exit 0 ;; esac
+	token=${rest%% *}
+	echo v-diagnostics-server: child 1 $token
+	printf '\nv-diagnostics-server: end 0 %s\n' $token
+done
+"
+
+fn test_the_server_of_the_diagnostics_prepares_builtin_and_the_one_of_the_questions_does_not() {
+	dir := os.join_path(os.vtmp_dir(), 'vls_v3_prepare_${os.getpid()}')
+	os.mkdir_all(dir)!
+	defer {
+		os.rmdir_all(dir) or {}
+	}
+	exe := os.join_path(dir, 'v')
+	os.write_file(exe, fake_server_noting_prepare)!
+	os.chmod(exe, 0o755)!
+	mut scheduler := new_diagnostics_scheduler()
+	defer {
+		scheduler.servers.stop_all()
+	}
+	scheduler.servers.check(exe, ['-check', '-nocolor', '.'], dir, fn () bool {
+		return false
+	}) or {}
+	assert os.read_file(os.join_path(dir, 'prepare.txt'))!.trim_space() == 'x1'
+	mut questions := new_diagnostics_server_pool()
+	defer {
+		questions.stop_all()
+	}
+	questions.query(exe, ['-w', '-check', '-nocolor', '.'], dir, 'main.v:1:hv^1') or {}
+	assert os.read_file(os.join_path(dir, 'prepare.txt'))!.trim_space() == 'x'
 }

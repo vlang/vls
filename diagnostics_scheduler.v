@@ -57,8 +57,9 @@ mut:
 	// The open files the last check of each program answered for, by program
 	// directory.
 	program_members map[string][]string
-	// The diagnostics servers outlive the worker, which exits when idle.
-	servers &DiagnosticsServerPool = new_diagnostics_server_pool()
+	// The diagnostics servers outlive the worker, which exits when idle. They
+	// only check, so each one parses and collects builtin once.
+	servers &DiagnosticsServerPool = new_prepared_diagnostics_server_pool()
 	// A paused scheduler starts no worker and keeps its jobs pending: a test
 	// can look at the queue a change leaves, which a check started at once
 	// would empty.

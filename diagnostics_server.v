@@ -25,6 +25,9 @@ mut:
 	// the editors one VLS serves over TCP, and the checks and the questions of
 	// one editor, neither write nor remove each other's files.
 	base string
+	// prepare asks its servers to parse and collect builtin and the modules it
+	// imports once, before their first check, instead of in each check.
+	prepare bool
 }
 
 struct DiagnosticsServer {
@@ -63,6 +66,14 @@ fn new_diagnostics_server_pool() &DiagnosticsServerPool {
 	mut pool := &DiagnosticsServerPool{}
 	// Its address tells it apart from every other pool alive in this VLS.
 	pool.base = os.join_path(os.temp_dir(), 'vls_diagnostics_${os.getpid()}_${ptr_str(pool)}')
+	return pool
+}
+
+// new_prepared_diagnostics_server_pool returns a pool whose servers prepare
+// builtin before their first check (V_DIAGNOSTICS_PREPARE).
+fn new_prepared_diagnostics_server_pool() &DiagnosticsServerPool {
+	mut pool := new_diagnostics_server_pool()
+	pool.prepare = true
 	return pool
 }
 
@@ -135,7 +146,7 @@ fn (mut pool DiagnosticsServerPool) take_server(key string, exe string, args []s
 	}
 	mut server := pool.servers[key] or {
 		pool.evict_least_recently_used()
-		mut started := start_diagnostics_server(exe, args, work_dir) or {
+		mut started := start_diagnostics_server(exe, args, work_dir, pool.prepare) or {
 			log('no diagnostics server for ${work_dir}: ${err}')
 			pool.unsupported['${key}\n${fingerprint}'] = true
 			return none
@@ -229,7 +240,7 @@ fn (mut pool DiagnosticsServerPool) stop_all() {
 	os.rmdir_all(pool.base) or {}
 }
 
-fn start_diagnostics_server(exe string, args []string, work_dir string) !&DiagnosticsServer {
+fn start_diagnostics_server(exe string, args []string, work_dir string, prepare bool) !&DiagnosticsServer {
 	mut p := os.new_process(exe)
 	// The memory watchdog runs on a thread of its own, and a server forks only
 	// while the worker pools are the sole threads.
@@ -239,6 +250,9 @@ fn start_diagnostics_server(exe string, args []string, work_dir string) !&Diagno
 	p.set_work_folder(work_dir)
 	mut env := os.environ()
 	env['V_DIAGNOSTICS_SERVER'] = '1'
+	if prepare {
+		env['V_DIAGNOSTICS_PREPARE'] = '1'
+	}
 	p.set_environment(env)
 	p.set_redirect_stdio()
 	p.run()
