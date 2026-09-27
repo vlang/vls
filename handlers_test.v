@@ -11300,6 +11300,48 @@ fn main() {
 // The persistent compiler reads again only the file it is asked about, so it
 // finds nothing inside a generic function that another file instantiates; a
 // compiler process of its own does, and the rename asks one before refusing.
+fn test_generic_list_names_reads_a_type_parameter_with_its_constraint() {
+	assert generic_list_names('fn take[T Named](x T) T {') == ['T']
+	assert generic_list_names('fn pair[T Named, U](a T, b U) {') == ['T', 'U']
+	assert generic_list_names('fn smallest[T Comparable[T]](items []T) T {') == ['T']
+	assert generic_list_names('fn (b Box[T]) get() T {') == ['T']
+	assert generic_list_names('fn apply(xs []int, m map[string]int) {') == []string{}
+}
+
+fn test_rename_of_a_type_leaves_a_type_parameter_of_its_name_alone() {
+	// `T` of `take[T Named]` is a type parameter, as `T` of `plain[T]`: renaming
+	// the struct `T` renames neither.
+	files := {
+		'main.v': "module main
+
+interface Named {
+	name string
+}
+
+struct T {
+	name string
+}
+
+fn take[T Named](x T) T {
+	return x
+}
+
+fn plain[T](x T) T {
+	return x
+}
+
+fn main() {
+	t := T{
+		name: 'a'
+	}
+	println(take(t).name)
+	println(plain(t).name)
+}
+"
+	}
+	assert rename_edits_in(files, 'main.v:7:8') == ['main.v:20:7', 'main.v:7:8']
+}
+
 fn test_rename_resolves_names_inside_a_generic_function_called_from_another_file() {
 	// V1 alone does not tell where all these names are declared.
 	if !v3_answers_line_info {

@@ -949,7 +949,7 @@ fn (mut app App) binding_type_narrows(uri string, position Position, hover Hover
 		for end + 1 < lines.len && !lines[end].contains('{') {
 			end++
 		}
-		for name in declared_type_param_names(lines[start..end + 1].join('\n')) {
+		for name in generic_list_names(lines[start..end + 1].join('\n')) {
 			if type_text_names(typ, name) {
 				return true
 			}
@@ -957,30 +957,6 @@ fn (mut app App) binding_type_narrows(uri string, position Position, hover Hover
 	}
 	base := typ.trim_left('&').all_after('mut ').trim_left('?!')
 	return app.type_declaration(uri, content, base).kind in ['sum', 'interface']
-}
-
-// declared_type_param_names returns the names of the type parameters written
-// between square brackets in the header of a function: `T` and `U` of
-// `fn pair[T Named, U](a T, b U)`, `T` of `fn (b Box[T]) get() T`.
-fn declared_type_param_names(header string) []string {
-	mut names := []string{}
-	mut i := 0
-	for i < header.len {
-		if header[i] != `[` {
-			i++
-			continue
-		}
-		end := header.index_after(']', i) or { break }
-		for part in header[i + 1..end].split(',') {
-			name := part.trim_space().all_before(' ')
-			if name != '' && name[0].is_capital() && name.bytes().all(is_ident_char(it))
-				&& name !in names {
-				names << name
-			}
-		}
-		i = end + 1
-	}
-	return names
 }
 
 // type_text_names reports whether the type `text` names `name` as a whole

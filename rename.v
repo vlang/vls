@@ -530,7 +530,7 @@ fn (mut app App) is_generic_parameter(loc Location, symbol string) bool {
 
 // generic_list_names returns the capitalized names between square brackets in a
 // declaration line: `T` and `U` in `fn pair[T, U](a T, b U)`, `T` in
-// `fn (b Box[T]) get() T`.
+// `fn (b Box[T]) get() T`, and with a constraint, `T` in `fn take[T Named](x T)`.
 fn generic_list_names(header string) []string {
 	mut names := []string{}
 	mut i := 0
@@ -541,8 +541,12 @@ fn generic_list_names(header string) []string {
 		}
 		end := header.index_after(']', i) or { break }
 		for part in header[i + 1..end].split(',') {
-			name := part.trim_space()
-			if name != '' && name[0].is_capital() && name.bytes().all(is_ident_char(it)) {
+			words := part.fields()
+			if words.len == 0 {
+				continue
+			}
+			name := words[0]
+			if name[0].is_capital() && name.bytes().all(is_ident_char(it)) {
 				names << name
 			}
 		}
