@@ -73,6 +73,7 @@ mut:
 const diagnostics_server_ready = 'v-diagnostics-server: ready'
 const diagnostics_server_end = 'v-diagnostics-server: end '
 const diagnostics_server_child = 'v-diagnostics-server: child '
+const diagnostics_server_partial = 'v-diagnostics-server: partial '
 // diagnostics_check_cancelled is the exit code of a check stopped because a
 // newer one made its answer useless: no diagnostics, and no one-shot fallback.
 const diagnostics_check_cancelled = -2
@@ -140,8 +141,8 @@ fn (mut pool DiagnosticsServerPool) notice_disk_change(path string) {
 // check runs the compiler with `args` in `work_dir` through a server, starting
 // one for this command line when needed. It returns none when no server can
 // answer, which leaves the caller to run the compiler itself.
-fn (mut pool DiagnosticsServerPool) check(exe string, args []string, work_dir string, cancelled fn () bool) ?os.Result {
-	return pool.request(exe, args, work_dir, '', diagnostics_server_answer_ms, cancelled)
+fn (mut pool DiagnosticsServerPool) check(exe string, args []string, work_dir string, cancelled fn () bool, partial fn (os.Result)) ?os.Result {
+	return pool.request(exe, args, work_dir, '', diagnostics_server_answer_ms, cancelled, partial)
 }
 
 // query asks the server for this command line a question of the mini-VLS
@@ -150,18 +151,19 @@ fn (mut pool DiagnosticsServerPool) check(exe string, args []string, work_dir st
 fn (mut pool DiagnosticsServerPool) query(exe string, args []string, work_dir string, question string) ?os.Result {
 	return pool.request(exe, args, work_dir, question, v3_query_answer_ms, fn () bool {
 		return false
-	})
+	}, unsafe { nil })
 }
 
 // request sends a `check`, or a `query` of `question` when there is one, and
-// waits `timeout_ms` for the answer.
-fn (mut pool DiagnosticsServerPool) request(exe string, args []string, work_dir string, question string, timeout_ms int, cancelled fn () bool) ?os.Result {
+// waits `timeout_ms` for the answer; `partial`, when set, gets the partial
+// answer of a check (see DiagnosticsServer.ask).
+fn (mut pool DiagnosticsServerPool) request(exe string, args []string, work_dir string, question string, timeout_ms int, cancelled fn () bool, partial fn (os.Result)) ?os.Result {
 	key := '${exe}\n${work_dir}\n${args.join('\n')}'
 	mut server, token := pool.take_server(key, exe, args, work_dir) or { return none }
 	line := if question == '' { 'check ${token}' } else { 'query ${token} ${question}' }
 	server.busy.lock()
 	mut answered := true
-	result := server.ask(line, token, timeout_ms, cancelled) or {
+	result := server.ask(line, token, timeout_ms, cancelled, partial) or {
 		log('the diagnostics server stopped answering: ${err}')
 		server.stop()
 		answered = false
@@ -317,6 +319,8 @@ fn start_diagnostics_server(exe string, args []string, work_dir string, prepare 
 	}
 	if shared {
 		env['V_DIAGNOSTICS_SHARED'] = '1'
+		// Its checks may send the errors they found before the end of the check.
+		env['V_DIAGNOSTICS_PARTIAL'] = '1'
 	}
 	p.set_environment(env)
 	p.set_redirect_stdio()
@@ -324,7 +328,8 @@ fn start_diagnostics_server(exe string, args []string, work_dir string, prepare 
 	mut server := &DiagnosticsServer{
 		process: p
 	}
-	greeting := server.read_until(diagnostics_server_ready, diagnostics_server_start_ms) or {
+	// With its newline, which is no output of the first answer.
+	greeting := server.read_until(diagnostics_server_ready + '\n', diagnostics_server_start_ms) or {
 		output := server.leftover
 		server.stop()
 		return error('the compiler does not serve diagnostics: ${output#[..160]}')
@@ -340,8 +345,10 @@ fn start_diagnostics_server(exe string, args []string, work_dir string, prepare 
 // child printed and its exit code. The answer ends on
 // `v-diagnostics-server: end <code> <token>`, with a token fresh for every
 // request, so a diagnostic that quotes a source line holding the marker text
-// cannot end the answer early.
-fn (mut s DiagnosticsServer) ask(line string, token string, timeout_ms int, cancelled fn () bool) !os.Result {
+// cannot end the answer early. A check can send part of its answer first,
+// ended by `v-diagnostics-server: partial <code> <token>`: `partial`, when set,
+// gets it at once, and the answer returned is what came after it.
+fn (mut s DiagnosticsServer) ask(line string, token string, timeout_ms int, cancelled fn () bool, partial fn (os.Result)) !os.Result {
 	if s.process == unsafe { nil } || !s.process.is_alive() {
 		return error('the diagnostics server is gone')
 	}
@@ -356,25 +363,46 @@ fn (mut s DiagnosticsServer) ask(line string, token string, timeout_ms int, canc
 	child_start := child_line.last_index(diagnostics_server_child) or { 0 }
 	child_pid := child_line[child_start + diagnostics_server_child.len..].all_before(' ').int()
 	// Unbuffered output of the child can come before the line that names it.
-	early_output := child_line[..child_start]
+	mut early_output := child_line[..child_start]
 	suffix := ' ${token}\n'
-	answer, was_cancelled := s.read_until_or_cancel(suffix, timeout_ms, fn [cancelled, child_pid] () bool {
-		if !cancelled() {
-			return false
+	mut collected := ''
+	mut line_start := 0
+	mut suffix_start := 0
+	for {
+		answer, was_cancelled := s.read_until_or_cancel(suffix, timeout_ms, fn [cancelled, child_pid] () bool {
+			if !cancelled() {
+				return false
+			}
+			$if !windows {
+				C.kill(child_pid, 9)
+			}
+			return true
+		}) or { return error('no answer within ${timeout_ms} ms') }
+		collected = early_output + answer
+		early_output = ''
+		if was_cancelled {
+			return os.Result{
+				exit_code: diagnostics_check_cancelled
+			}
 		}
-		$if !windows {
-			C.kill(child_pid, 9)
+		suffix_start = collected.index(suffix) or { return error('malformed answer') }
+		line_start = (collected[..suffix_start].last_index('\n') or { -1 }) + 1
+		marker := collected[line_start..suffix_start]
+		if !marker.starts_with(diagnostics_server_partial) {
+			break
 		}
-		return true
-	}) or { return error('no answer within ${timeout_ms} ms') }
-	collected := early_output + answer
-	if was_cancelled {
-		return os.Result{
-			exit_code: diagnostics_check_cancelled
+		// The errors found so far; the answer goes on after them.
+		if partial != unsafe { nil } {
+			mut output := collected[..line_start]
+			if output.ends_with('\n') {
+				output = output[..output.len - 1]
+			}
+			partial(os.Result{
+				exit_code: marker[diagnostics_server_partial.len..].int()
+				output:    output
+			})
 		}
 	}
-	suffix_start := collected.index(suffix) or { return error('malformed answer') }
-	line_start := (collected[..suffix_start].last_index('\n') or { -1 }) + 1
 	end_line := collected[line_start..suffix_start]
 	if !end_line.starts_with(diagnostics_server_end) {
 		return error('malformed end of answer: ${end_line#[..80]}')

@@ -729,7 +729,7 @@ fn test_a_session_that_ends_without_a_shutdown_removes_its_copies() {
 fn check_in_background(mut pool DiagnosticsServerPool, exe string, dir string, done chan bool) {
 	pool.check(exe, ['-check', '.'], dir, fn () bool {
 		return false
-	}) or {}
+	}, unsafe { nil }) or {}
 	done <- true
 }
 
@@ -829,7 +829,7 @@ fn test_the_servers_of_the_diagnostics_and_of_the_questions_prepare_builtin() {
 	}
 	scheduler.servers.check(exe, ['-check', '-nocolor', '.'], dir, fn () bool {
 		return false
-	}) or {}
+	}, unsafe { nil }) or {}
 	assert os.read_file(os.join_path(dir, 'prepare.txt'))!.trim_space() == 'x1'
 	os.rm(os.join_path(dir, 'prepare.txt'))!
 	mut app := App{}
@@ -896,4 +896,55 @@ fn test_a_check_and_a_question_about_a_program_share_its_copy_and_its_server() {
 	assert requests[2] == 'query ${copy_dir}'
 	// The copy holds the buffer.
 	assert os.read_file(os.join_path(copy_dir, 'main.v'))! == buffer
+}
+
+// A diagnostics server whose check sends the errors it found first, and then
+// its whole answer.
+const fake_server_with_partial_answers = r"#!/bin/sh
+echo v-diagnostics-server: ready
+while read -r request rest; do
+	case $request in quit) exit 0 ;; esac
+	token=${rest%% *}
+	echo v-diagnostics-server: child 1 $token
+	echo 'main.v:3:5: error: found first'
+	printf '\nv-diagnostics-server: partial 1 %s\n' $token
+	echo 'main.v:3:5: error: found first'
+	echo 'main.v:9:1: notice: found at the end'
+	printf '\nv-diagnostics-server: end 1 %s\n' $token
+done
+"
+
+fn test_a_check_gets_the_partial_answer_of_the_server_first() {
+	dir := os.join_path(os.vtmp_dir(), 'vls_partial_${os.getpid()}')
+	os.mkdir_all(dir)!
+	defer {
+		os.rmdir_all(dir) or {}
+	}
+	exe := os.join_path(dir, 'v')
+	os.write_file(exe, fake_server_with_partial_answers)!
+	os.chmod(exe, 0o755)!
+	mut pool := new_diagnostics_server_pool()
+	defer {
+		pool.stop_all()
+	}
+	partials := chan os.Result{cap: 2}
+	result := pool.check(exe, ['-check', '.'], dir, fn () bool {
+		return false
+	}, fn [partials] (answer os.Result) {
+		partials <- answer
+	}) or { panic('no answer') }
+	assert partials.len == 1
+	partial := <-partials
+	assert partial.exit_code == 1
+	// Each answer ends with the line before its own marker, as a whole answer
+	// does.
+	assert partial.output == 'main.v:3:5: error: found first\n'
+	// The answer is what came after the partial one.
+	assert result.exit_code == 1
+	assert result.output == 'main.v:3:5: error: found first\nmain.v:9:1: notice: found at the end\n'
+	// Without a callback the partial answer is skipped.
+	plain := pool.check(exe, ['-check', '.'], dir, fn () bool {
+		return false
+	}, unsafe { nil }) or { panic('no answer') }
+	assert plain.output == result.output
 }

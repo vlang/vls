@@ -62,6 +62,7 @@ mut:
 	program_errors                              map[string][]JsonError // Other open files the last check covered, and their errors
 	program_dir_checked                         string // The program the last check covered, when it covered one
 	diagnostics_cancelled                       fn () bool = unsafe { nil } // Whether a newer check made the running one useless
+	diagnostics_partial                         fn (uri string, found CheckErrors) = unsafe { nil } // Publishes the errors a check found before its end (see DiagnosticsServer.ask)
 	run_command_manager                         ?&RunCommandManager // Async code-lens process lifecycle
 	execute_commands_synchronously              bool // Test hook for deterministic command assertions
 	write_mutex                                 &sync.Mutex = sync.new_mutex() // Serializes worker and request-loop writes

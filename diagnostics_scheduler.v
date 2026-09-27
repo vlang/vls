@@ -406,6 +406,11 @@ fn run_diagnostics_job(mut scheduler DiagnosticsScheduler, job DiagnosticsJob) {
 		diagnostics_cancelled: fn [mut scheduler, job] () bool {
 			return !scheduler.is_job_current(job)
 		}
+		// The errors a check found before its slow end, the instances of generic
+		// functions above all, are shown at once; its full answer replaces them.
+		diagnostics_partial:   fn [mut scheduler, job] (uri string, found CheckErrors) {
+			scheduler.publish_partial(job, uri, found)
+		}
 	}
 	notification := worker.build_diagnostics_notification(job.uri, job.content)
 	if !scheduler.publish_if_current(mut worker, job, notification) {
@@ -430,6 +435,33 @@ fn run_diagnostics_job(mut scheduler DiagnosticsScheduler, job DiagnosticsJob) {
 		other_content := job.open_files[other_uri] or { continue }
 		other := worker.build_diagnostics_notification(other_uri, other_content)
 		scheduler.publish_if_current(mut worker, job, other)
+	}
+}
+
+// publish_partial publishes the diagnostics a check of `job` found before its
+// end, for the file at `uri` and the other open files of its program, while the
+// job is current.
+fn (mut scheduler DiagnosticsScheduler) publish_partial(job DiagnosticsJob, uri string, found CheckErrors) {
+	mut versions := map[string]i64{}
+	if version := job.version {
+		versions[job.uri] = version
+	}
+	mut writer := App{
+		open_files:          job.open_files
+		open_files_versions: versions
+		position_encoding:   job.position_encoding
+		write_mutex:         job.write_mutex
+		tcp_conn:            job.tcp_conn
+		diagnostics_enabled: true
+	}
+	if uri == job.uri {
+		scheduler.publish_if_current(mut writer, job, writer.diagnostics_notification_for(uri,
+			job.content, found.file))
+	}
+	for other_uri, other_errors in found.program {
+		other_content := job.open_files[other_uri] or { continue }
+		scheduler.publish_if_current(mut writer, job, writer.diagnostics_notification_for(other_uri,
+			other_content, other_errors))
 	}
 }
 
