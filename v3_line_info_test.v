@@ -92,7 +92,7 @@ while read -r request rest; do
 	token=${rest%% *}
 	questions=${rest#* }
 	echo v-diagnostics-server: child 1 $token
-	echo $questions >> $(dirname $0)/questions.txt
+	echo $questions [$(sed -n 4p ${questions%%:*} 2>/dev/null)] >> $(dirname $0)/questions.txt
 	case $questions in
 	*$tab*)
 		i=0
@@ -622,9 +622,12 @@ fn test_a_rename_asks_nothing_its_prepare_rename_asked() {
 			new_name:      'q'
 		})
 	}) or {}
-	// With the documents as they were, the rename knows where `p` is declared.
+	// With the documents as they were, the rename knows where `p` is declared:
+	// it asks about line 4 again only in the copy that holds the renamed text,
+	// to see where the renamed names lead there (see check_rename_conflicts).
 	later := fake.questions()[asked..]
-	assert !later.any(it.contains(':4:gd^')), later.str()
+	assert !later.any(it.contains(':4:gd^') && it.contains('p := 1')), later.str()
+	assert later.any(it.contains(':4:gd^') && it.contains('q := 1')), later.str()
 }
 
 fn test_a_rename_asks_again_what_its_prepare_rename_could_not_tell() {

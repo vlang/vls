@@ -11249,6 +11249,132 @@ fn test_rename_refuses_modules_builtin_types_and_names_v_would_reject() {
 	}
 }
 
+// A program whose names a rename can clash with: locals, parameters, a
+// constant, functions, a type, a field, an enum value and a module.
+const rename_clash_main = "module main
+
+import os
+
+const limit = 10
+
+struct Point {
+	x int
+	y int
+}
+
+enum Color {
+	red
+	green
+}
+
+fn (p Point) sum() int {
+	return p.x + p.y
+}
+
+fn helper(n int) int {
+	return n * 2
+}
+
+fn other(n int) int {
+	return n + 1
+}
+
+fn compute(a int, b int) int {
+	total := a + b
+	count := 3
+	if total > limit {
+		return helper(total)
+	}
+	return total + count
+}
+
+fn shadow_later(a int) int {
+	x := a
+	mut r := 0
+	if a > 0 {
+		y := 2
+		r = x + y
+	}
+	return r
+}
+
+fn uses_os() string {
+	name := 'v'
+	return os.join_path(name, 'x')
+}
+
+fn separate_one() int {
+	alpha := 1
+	return alpha
+}
+
+fn separate_two() int {
+	beta := 2
+	return beta
+}
+
+fn main() {
+	p := Point{
+		x: 1
+		y: 20
+	}
+	println(compute(p.x, p.y))
+	println(shadow_later(3))
+	println(uses_os())
+	println(separate_one() + separate_two())
+	println(p.sum())
+	println(Color.red)
+	println(other(1))
+}
+"
+
+fn test_rename_refuses_a_new_name_that_clashes_with_a_name_of_the_program() {
+	mut app, uris := new_rename_project_app_with({
+		'main.v': rename_clash_main
+	})
+	defer {
+		cleanup_rename_app(mut app)
+	}
+	refusals := {
+		// V reports the clash: a declaration of the new name where the renamed
+		// one is, or a use that could name either.
+		'main.v:30:2 count':  'redefinition of `count`' // a local, to a later local
+		'main.v:31:2 total':  'redefinition of `total`' // to an earlier one
+		'main.v:29:12 b':     'redefinition of parameter `b`'
+		'main.v:31:2 helper': 'ambiguous call' // to a function called there
+		'main.v:7:8 Color':   'another type with this name exists'
+		'main.v:8:2 y':       'duplicate'
+		'main.v:13:2 green':  'duplicate enum field name'
+		'main.v:49:2 os':     'duplicate of an import symbol'
+		'main.v:30:2 string': 'reserved type'
+		// V only warns, and a use would name another declaration: `limit` of
+		// `if total > limit` would be the local.
+		'main.v:30:2 limit':  'duplicate of a const name `limit`'
+		'main.v:5:7 count':   'duplicate of a const name `count`'
+		// V says nothing, and a call would name the other function.
+		'main.v:21:4 other':  'would make `other` at main.v:'
+		// Keywords that are no names.
+		'main.v:30:2 __offsetof': 'keyword'
+		'main.v:30:2 _likely_':   'keyword'
+		'main.v:30:2 _unlikely_': 'keyword'
+		'main.v:30:2 __global':   'keyword'
+	}
+	for spec, reason in refusals {
+		parts := spec.split(' ')
+		if _ := app.rename_request(rename_request_named(uris, parts[0], parts[1])) {
+			assert false, '${spec} must be refused'
+		} else {
+			assert err.msg().contains(reason), '${spec}: ${err.msg()}'
+		}
+	}
+	// A local of another function is no clash.
+	response := app.rename_request(rename_request_named(uris, 'main.v:54:2', 'beta')) or {
+		panic(err)
+	}
+	edit := response.result as WorkspaceEdit
+	assert edit.changes.values().map(it.len) == [2]
+}
+
 // A generic function of a module, called from main.v, whose parameter is named
 // like a field of the module's struct.
 const rename_generic_store = 'module shop

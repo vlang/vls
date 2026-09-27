@@ -11,7 +11,8 @@ const v_keywords = ['asm', 'as', 'assert', 'atomic', 'break', 'const', 'continue
 	'else', 'enum', 'false', 'fn', 'for', 'go', 'goto', 'if', 'ilike', 'implements', 'import', 'in',
 	'interface', 'is', 'isreftype', 'like', 'lock', 'match', 'module', 'mut', 'nil', 'none', 'or',
 	'pub', 'return', 'rlock', 'select', 'shared', 'sizeof', 'spawn', 'static', 'struct', 'true',
-	'type', 'typeof', 'union', 'unsafe', 'volatile']!
+	'type', 'typeof', 'union', 'unsafe', 'volatile', '__global', '__offsetof', '_likely_',
+	'_unlikely_']!
 
 const v_builtins = ['copy', 'eprintln', 'eprint', 'error', 'error_with_code', 'exit', 'flush_stderr',
 	'flush_stdout', 'free', 'isnil', 'panic', 'print', 'print_backtrace', 'println']!
@@ -5045,6 +5046,7 @@ fn (mut app App) rename_request(request Request) !Response {
 	check_new_name(symbol, new_name)!
 	app.check_implicit_name(target, new_name)!
 	locations := app.rename_locations(target, scope, request.id, mut cache)!
+	app.check_rename_conflicts(target, locations, new_name, scope, cache)!
 
 	// Build WorkspaceEdit with both `changes` (compat) and `documentChanges` (preferred).
 	mut changes := map[string][]TextEdit{}
