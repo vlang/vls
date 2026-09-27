@@ -677,6 +677,24 @@ fn test_parse_v_check_program_diagnostics_places_errors_without_a_position() {
 	], got.str()
 }
 
+fn test_a_redefinition_is_shown_on_each_declaration_it_names() {
+	// V says without a position that a function is declared twice, then where
+	// each declaration is: each one gets the error, and the line without a
+	// position is not placed again on its own.
+	output := 'builder error: redefinition of function `other`
+/tmp/main.v:3:1: conflicting declaration: fn other(n int) int
+    3 | fn other(n int) int {
+      | ~~~~~~~~~~~~~~~~~~~
+/tmp/main.v:7:1: conflicting declaration: fn other(n int) int
+    7 | fn other(n int) int {
+      | ~~~~~~~~~~~~~~~~~~~
+'
+	got := parse_v_check_diagnostics(output, '').map('${it.line_nr}:${it.col}:${it.len} ${it.level}: ${it.message}')
+	assert got == ['3:1:19 error: redefinition of function `other`',
+		'7:1:19 error: redefinition of function `other`'], got.str()
+	assert parse_v_check_program_diagnostics(output, '/tmp', '/tmp/main.v') == []
+}
+
 fn test_parse_v_check_diagnostics_maps_v3_builder_error_to_error() {
 	output := '/tmp/main.v:3:1: builder error: cannot import module "missing" (not found)
     3 | import missing

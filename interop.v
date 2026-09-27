@@ -428,10 +428,26 @@ fn build_v_test_compile_args(file_path string, fn_name string, executable_path s
 fn parse_v_check_diagnostics(output string, source_dir string) []JsonError {
 	mut diagnostics := []JsonError{}
 	mut active := -1
+	// A function declared twice is said without a position, `builder error:
+	// redefinition of function `f``, and then where each declaration is, on
+	// lines of their own: each declaration gets that error.
+	mut unplaced := ''
 	for line in output.split_into_lines() {
 		if diagnostic := parse_v_check_diagnostic_header(line, source_dir) {
-			diagnostics << diagnostic
+			diagnostics << if diagnostic.level == 'conflicting declaration' {
+				JsonError{
+					...diagnostic
+					message: if unplaced != '' { unplaced } else { 'conflicting declaration: ${diagnostic.message}' }
+					level:   'error'
+				}
+			} else {
+				diagnostic
+			}
 			active = diagnostics.len - 1
+			continue
+		}
+		if _, message := program_diagnostic_level(line) {
+			unplaced = message
 			continue
 		}
 		if active >= 0 && diagnostics[active].len == 0 {
@@ -455,8 +471,14 @@ fn parse_v_check_diagnostics(output string, source_dir string) []JsonError {
 fn parse_v_check_program_diagnostics(output string, source_dir string, checked_file string) []JsonError {
 	mut result := []JsonError{}
 	mut seen := map[string]bool{}
-	for line in output.split_into_lines() {
+	lines := output.split_into_lines()
+	for i, line in lines {
 		level, message := program_diagnostic_level(line) or { continue }
+		// A redefinition names its declarations on the lines that follow, which
+		// show it (see parse_v_check_diagnostics).
+		if i + 1 < lines.len && lines[i + 1].contains(': conflicting declaration: ') {
+			continue
+		}
 		mut targets := []string{}
 		for word in message.fields() {
 			token := word.trim('`"\'(),;').trim_right('.:')
@@ -572,7 +594,7 @@ fn parse_v_check_diagnostic_header(line string, source_dir string) ?JsonError {
 	mut best_marker_idx := -1
 	mut best := JsonError{}
 	for level in ['builder error', 'parser error', 'checker error', 'cgen error', 'error', 'warning',
-		'notice'] {
+		'notice', 'conflicting declaration'] {
 		marker := ': ${level}: '
 		mut search_end := line.len
 		for search_end > 0 {

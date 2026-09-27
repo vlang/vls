@@ -11351,8 +11351,8 @@ fn test_rename_refuses_a_new_name_that_clashes_with_a_name_of_the_program() {
 		// `if total > limit` would be the local.
 		'main.v:30:2 limit':  'duplicate of a const name `limit`'
 		'main.v:5:7 count':   'duplicate of a const name `count`'
-		// V says nothing, and a call would name the other function.
-		'main.v:21:4 other':  'would make `other` at main.v:'
+		// A function to the name of another.
+		'main.v:21:4 other':  'redefinition of function `other`'
 		// Keywords that are no names.
 		'main.v:30:2 __offsetof': 'keyword'
 		'main.v:30:2 _likely_':   'keyword'
