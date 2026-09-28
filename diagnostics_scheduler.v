@@ -69,9 +69,9 @@ mut:
 
 fn new_diagnostics_scheduler() &DiagnosticsScheduler {
 	return &DiagnosticsScheduler{
-		generations: map[string]u64{}
+		generations:         map[string]u64{}
 		project_generations: map[string]u64{}
-		pending_jobs: map[string]DiagnosticsJob{}
+		pending_jobs:        map[string]DiagnosticsJob{}
 	}
 }
 
@@ -124,9 +124,9 @@ fn (mut scheduler DiagnosticsScheduler) begin_project_mutation(project_key strin
 	for affected_uri, _ in affected {
 		scheduler.generations[affected_uri] = scheduler.generations[affected_uri] + 1
 		tickets << DiagnosticsTicket{
-			uri: affected_uri
-			global_generation: scheduler.global_generation
-			generation: scheduler.generations[affected_uri]
+			uri:                affected_uri
+			global_generation:  scheduler.global_generation
+			generation:         scheduler.generations[affected_uri]
 			project_generation: project_generation
 		}
 	}
@@ -245,7 +245,7 @@ fn (mut app App) begin_diagnostics_project_schedule(uri string) DiagnosticsProje
 		project_key := app.generation_key(uri)
 		return DiagnosticsProjectMutation{
 			project_key: project_key
-			tickets: scheduler.begin_project_schedule(uri, project_key)
+			tickets:     scheduler.begin_project_schedule(uri, project_key)
 		}
 	}
 	return DiagnosticsProjectMutation{}
@@ -323,19 +323,19 @@ fn (mut app App) enqueue_diagnostics_tickets(mut scheduler DiagnosticsScheduler,
 			version = current_version
 		}
 		job := DiagnosticsJob{
-			uri: ticket.uri
-			content: job_content
-			version: version
-			project_key: project_key
-			project_generation: ticket.project_generation
-			position_encoding: app.position_encoding
-			open_files: app.open_files.clone()
+			uri:                 ticket.uri
+			content:             job_content
+			version:             version
+			project_key:         project_key
+			project_generation:  ticket.project_generation
+			position_encoding:   app.position_encoding
+			open_files:          app.open_files.clone()
 			project_generations: app.project_generations.clone()
-			write_mutex: app.write_mutex
-			tcp_conn: app.tcp_conn
-			global_generation: ticket.global_generation
-			generation: ticket.generation
-			ready_at: ready_at
+			write_mutex:         app.write_mutex
+			tcp_conn:            app.tcp_conn
+			global_generation:   ticket.global_generation
+			generation:          ticket.generation
+			ready_at:            ready_at
 		}
 		if scheduler.enqueue(job) {
 			should_start = true

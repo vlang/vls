@@ -983,13 +983,13 @@ fn test_a_check_gets_the_partial_answer_of_the_server_first() {
 // hover_text_at is what a hover at `line` and `col` of `uri` shows.
 fn hover_text_at(mut app App, uri string, line int, col int) string {
 	response := app.operation_at_pos(.hover, Request{
-		id: 1
+		id:     1
 		method: 'textDocument/hover'
 		params: json2.encode(TextDocumentPositionParams{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-			position: Position{
+			position:      Position{
 				line: line
 				char: col
 			}

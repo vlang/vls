@@ -268,7 +268,8 @@ fn build_v_check_args_multifile(is_library_module bool) []string {
 }
 
 fn build_v_line_info_args_multifile(rel_file string, line_info string) []string {
-	return ['-w', '-check', '-nocolor', '-vls-mode', '-line-info', '${rel_file}:${line_info}', '.']
+	return ['-w', '-check', '-nocolor', '-vls-mode', '-line-info', '${rel_file}:${line_info}',
+		'.']
 }
 
 fn build_v_line_info_args_single(file_to_check string, line_info string, compile_target string) []string {
@@ -285,8 +286,8 @@ fn build_v_line_info_args_single(file_to_check string, line_info string, compile
 // than assumed from a version number.
 enum LineInfoMode {
 	unknown // not probed yet — try the options as-is
-	direct // the compiler answers `-vls-mode` / `-line-info` itself
-	compat // reaching the checker needs `-old-compiler`
+	direct  // the compiler answers `-vls-mode` / `-line-info` itself
+	compat  // reaching the checker needs `-old-compiler`
 	missing // no compatibility compiler either — answer from VLS's own index
 }
 
@@ -437,7 +438,11 @@ fn parse_v_check_diagnostics(output string, source_dir string) []JsonError {
 			diagnostics << if diagnostic.level == 'conflicting declaration' {
 				JsonError{
 					...diagnostic
-					message: if unplaced != '' { unplaced } else { 'conflicting declaration: ${diagnostic.message}' }
+					message: if unplaced != '' {
+						unplaced
+					} else {
+						'conflicting declaration: ${diagnostic.message}'
+					}
 					level:   'error'
 				}
 			} else {
@@ -620,11 +625,11 @@ fn parse_v_check_diagnostic_header(line string, source_dir string) ?JsonError {
 			if marker_idx > best_marker_idx {
 				best_marker_idx = marker_idx
 				best = JsonError{
-					path: path
+					path:    path
 					message: line[marker_idx + marker.len..]
 					line_nr: line_nr_text.int()
-					col: col_text.int()
-					level: if level.contains('error') { 'error' } else { level }
+					col:     col_text.int()
+					level:   if level.contains('error') { 'error' } else { level }
 				}
 			}
 			break
@@ -672,8 +677,8 @@ fn (mut app App) cache_v_check_result(path string, content_hash int, generation 
 	}
 	app.diag_cache[path] = DiagCacheEntry{
 		content_hash: content_hash
-		generation: generation
-		errors: errors
+		generation:   generation
+		errors:       errors
 	}
 }
 
@@ -708,7 +713,7 @@ fn run_v_argv(args []string, work_folder string) os.Result {
 		log(msg)
 		return os.Result{
 			exit_code: 1
-			output: msg
+			output:    msg
 		}
 	}
 	v_exe := resolve_v_compiler_exe()
@@ -770,12 +775,12 @@ fn run_v_argv(args []string, work_folder string) os.Result {
 	if timed_out {
 		return os.Result{
 			exit_code: compiler_exit_timeout
-			output: ''
+			output:    ''
 		}
 	}
 	return os.Result{
 		exit_code: code
-		output: out.str()
+		output:    out.str()
 	}
 }
 
@@ -1105,12 +1110,12 @@ fn (mut app App) prepare_compilation_overlay_with(real_path string, work_dir str
 		}
 	}
 	return CompilationOverlay{
-		source_root: source_root
+		source_root:         source_root
 		source_display_root: source_display_root
-		temp_root: temp_root
-		source_work_dir: source_work_dir
-		temp_work_dir: temp_work_dir
-		temp_source_file: os.join_path(temp_root, file_rel)
+		temp_root:           temp_root
+		source_work_dir:     source_work_dir
+		temp_work_dir:       temp_work_dir
+		temp_source_file:    os.join_path(temp_root, file_rel)
 	}
 }
 
@@ -2135,7 +2140,7 @@ fn (mut app App) line_info_unavailable_result(method Method, path string, line_i
 			}
 			return Hover{
 				contents: MarkupContent{
-					kind: 'markdown'
+					kind:  'markdown'
 					value: doc
 				}
 			}
@@ -2430,13 +2435,13 @@ fn (app &App) compiler_location(path string, line int, byte_col int) Location {
 	target_uri := index_uri_for_path(path, app.open_index_uris_by_path())
 	client_col := app.byte_col_to_client_col(target_uri, line, byte_col)
 	return Location{
-		uri: target_uri
+		uri:   target_uri
 		range: LSPRange{
 			start: Position{
 				line: line
 				char: client_col
 			}
-			end: Position{
+			end:   Position{
 				line: line
 				char: client_col
 			}
