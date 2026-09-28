@@ -20,11 +20,11 @@ import time
 struct IndexEntry {
 	fingerprint                        int // content.hash(); used to skip re-parsing unchanged files
 	module_name                        string
-	doc_symbols                        []DocumentSymbol // hierarchical symbols (as parse_document_symbols returns)
+	doc_symbols                        []DocumentSymbol  // hierarchical symbols (as parse_document_symbols returns)
 	docs                               map[string]string // simple symbol name -> leading vdoc comment
-	fn_completions                     []Detail // free-function completion items for this file
-	module_completions                 []Detail // all same-module top-level completion items
-	public_module_completions          []Detail // exported completion items for imported modules
+	fn_completions                     []Detail          // free-function completion items for this file
+	module_completions                 []Detail          // all same-module top-level completion items
+	public_module_completions          []Detail          // exported completion items for imported modules
 	has_conditional_module_completions bool
 	has_conditional_public_completions bool
 	conditional_lines                  []bool // declarations guarded by $if/$else or @[if]
@@ -57,16 +57,16 @@ fn build_index_entry(content string, enc PositionEncoding) IndexEntry {
 		}
 	}
 	return IndexEntry{
-		fingerprint: content.hash()
-		module_name: get_module_name(content)
-		doc_symbols: doc_syms
-		docs: docs
-		fn_completions: module_completion_index.items.filter(it.kind == 3)
-		module_completions: module_completion_index.items
-		public_module_completions: public_module_completion_index.items
+		fingerprint:                        content.hash()
+		module_name:                        get_module_name(content)
+		doc_symbols:                        doc_syms
+		docs:                               docs
+		fn_completions:                     module_completion_index.items.filter(it.kind == 3)
+		module_completions:                 module_completion_index.items
+		public_module_completions:          public_module_completion_index.items
 		has_conditional_module_completions: module_completion_index.has_conditional
 		has_conditional_public_completions: public_module_completion_index.has_conditional
-		conditional_lines: conditional_lines
+		conditional_lines:                  conditional_lines
 	}
 }
 
@@ -80,12 +80,12 @@ fn encode_document_symbols(syms []DocumentSymbol, lines []string, enc PositionEn
 	mut out := []DocumentSymbol{cap: syms.len}
 	for sym in syms {
 		out << DocumentSymbol{
-			name: sym.name
-			kind: sym.kind
-			tags: sym.tags
-			range: encode_range_chars(sym.range, lines, enc)
+			name:            sym.name
+			kind:            sym.kind
+			tags:            sym.tags
+			range:           encode_range_chars(sym.range, lines, enc)
 			selection_range: encode_range_chars(sym.selection_range, lines, enc)
-			children: encode_document_symbols(sym.children, lines, enc)
+			children:        encode_document_symbols(sym.children, lines, enc)
 		}
 	}
 	return out
@@ -109,7 +109,7 @@ fn encode_range_chars(r LSPRange, lines []string, enc PositionEncoding) LSPRange
 			line: r.start.line
 			char: byte_to_encoded_col(start_line, r.start.char, enc)
 		}
-		end: Position{
+		end:   Position{
 			line: r.end.line
 			char: byte_to_encoded_col(end_line, r.end.char, enc)
 		}
@@ -161,9 +161,9 @@ fn add_identifier_occurrence(line_text string, line_idx int, start int, end int,
 	}
 	name := line_text[start..end]
 	occ[name] << TokenOccurrence{
-		line: line_idx
+		line:       line_idx
 		start_char: byte_to_encoded_col(line_text, start, enc)
-		end_char: byte_to_encoded_col(line_text, end, enc)
+		end_char:   byte_to_encoded_col(line_text, end, enc)
 	}
 }
 
@@ -310,7 +310,7 @@ fn (mut app App) occurrences_for(uri string) map[string][]TokenOccurrence {
 	occ := extract_identifier_occurrences(content, app.position_encoding)
 	app.ref_occurrences[uri] = OccEntry{
 		fingerprint: fp
-		occ: occ
+		occ:         occ
 	}
 	return occ
 }
@@ -768,13 +768,13 @@ fn (app &App) index_scope_for_uri(uri string) IndexScope {
 	if project_root != '' && project_root != '/'
 		&& (workspace_root == '' || path_is_within(project_root, workspace_root)) {
 		return IndexScope{
-			dir: project_root
+			dir:       project_root
 			recursive: true
 		}
 	}
 	if workspace_root != '' {
 		return IndexScope{
-			dir: workspace_root
+			dir:       workspace_root
 			recursive: true
 		}
 	}
