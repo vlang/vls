@@ -1838,6 +1838,17 @@ fn test_validate_rename_rejects_keyword_new_name() {
 	}
 }
 
+// A builtin function is refused as a new name like a keyword: `recover`, which
+// V added with #29134, is one.
+fn test_validate_rename_rejects_builtin_function_new_name() {
+	params := '{"textDocument":{"uri":"file:///a.v"},"position":{"line":0,"character":0},"newName":"recover"}'
+	if err := validate_request_params(.rename, params) {
+		assert err.contains('builtin')
+	} else {
+		assert false, 'expected builtin newName to be rejected'
+	}
+}
+
 fn test_validate_rename_accepts_normal_new_name() {
 	params := '{"textDocument":{"uri":"file:///a.v"},"position":{"line":0,"character":0},"newName":"my_fn"}'
 	assert validate_request_params(.rename, params) == none

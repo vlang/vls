@@ -5446,6 +5446,7 @@ fn test_builtin_function_completions_insert_the_call() {
 		'error_with_code': 'error_with_code(\${1:message}, \${2:code})\$0'
 		'flush_stdout':    'flush_stdout()'
 		'print_backtrace': 'print_backtrace()'
+		'recover':         'recover()'
 		'dump':            'dump(\$0)'
 		'sizeof':          'sizeof(\$0)'
 		'typeof':          'typeof(\$0)'
@@ -5463,6 +5464,8 @@ fn test_builtin_function_completions_insert_the_call() {
 	}
 	// the signature is the one vlib/builtin declares, as for any other function
 	assert items.filter(it.label == 'println')[0].detail == 'pub fn println(s string)'
+	// `recover` too, which stops a panic from a `defer` block (master's #29134)
+	assert items.filter(it.label == 'recover')[0].detail == 'pub fn recover() ?string'
 	// V has no builtin `close`: a channel closes with `ch.close()`
 	assert items.filter(it.label == 'close').len == 0
 	// read once, and again after a watched change there, as when working on V
@@ -5476,6 +5479,7 @@ fn test_builtin_function_completions_insert_the_call() {
 // and `close` is not, so a function of the project may be called so and renamed.
 fn test_builtin_functions_are_the_ones_v_has() {
 	assert classify_v_identifier('print_backtrace') == sem_tok_function
+	assert classify_v_identifier('recover') == sem_tok_function
 	assert classify_v_identifier('close') == -1
 	files := {
 		'main.v': 'module main\n\nfn close() int {\n\treturn 1\n}\n\nfn main() {\n\tprintln(close())\n}\n'

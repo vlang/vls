@@ -15,7 +15,7 @@ const v_keywords = ['asm', 'as', 'assert', 'atomic', 'break', 'const', 'continue
 	'_unlikely_']!
 
 const v_builtins = ['copy', 'eprintln', 'eprint', 'error', 'error_with_code', 'exit', 'flush_stderr',
-	'flush_stdout', 'free', 'isnil', 'panic', 'print', 'print_backtrace', 'println']!
+	'flush_stdout', 'free', 'isnil', 'panic', 'print', 'print_backtrace', 'println', 'recover']!
 
 const v_builtin_types = ['any', 'array', 'bool', 'byte', 'byteptr', 'chan', 'char', 'charptr',
 	'f32', 'f64', 'i8', 'i16', 'i32', 'i64', 'int', 'isize', 'IError', 'map', 'rune', 'string',
