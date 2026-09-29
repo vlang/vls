@@ -7653,6 +7653,78 @@ fn test_hover_types_a_declaration_split_over_lines() {
 	}
 }
 
+fn test_hover_types_a_field_of_a_literal_split_over_lines() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'multiline_literal_field_hover')
+	must_mkdir_all(test_dir)
+	content := 'module main\n\nstruct Point {\n\tx int\n}\n\nfn main() {\n\tr := Point{\n\t\tx: 1\n\t}.x\n\tprintln(r)\n}\n'
+	main_file := os.join_path(test_dir, 'main.v')
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	lines := content.split_into_lines()
+	// The value goes on after the literal closes: `r` is its field `x`, on the
+	// declaration and where it is used.
+	declaration := lines.index('\tr := Point{')
+	use := lines.index('\tprintln(r)')
+	assert declaration >= 0 && use >= 0
+	for position in [Position{
+		line: declaration
+		char: 1
+	}, Position{
+		line: use
+		char: 10
+	}] {
+		hover := app.local_binding_hover(uri, position) or { Hover{} }
+		assert hover.contents.value.contains('r int'), '${position}: ${hover.contents.value}'
+	}
+}
+
+fn test_binding_type_narrows_asks_the_compiler_for_a_type_the_index_does_not_know() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	app.v3_line_info_enabled = true
+	test_dir := os.join_path(app.temp_dir, 'bare_generic_binding_hover')
+	must_mkdir_all(test_dir)
+	content := 'module main\n\nstruct Point {\n\tx int\n}\n\nstruct Pair[T] {\n\tleft  T\n\tright T\n}\n\nfn main() {\n\tprintln(1)\n}\n'
+	main_file := os.join_path(test_dir, 'main.v')
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	position := Position{
+		line: content.split_into_lines().index('\tprintln(1)')
+		char: 1
+	}
+	// The index holds a generic struct as `Pair[T]`: it reads a literal that
+	// infers the arguments (`Pair{ left: 1 }`) as the bare `Pair`, and a field of
+	// it as its declared `T`, where the compiler knows `Pair[int]` and `int`. A
+	// type the index knows stays its answer.
+	for text, narrows in {
+		'one Pair':            true
+		'pairs []Pair':        true
+		'two T':               true
+		'boxed &Pair':         true
+		'full Pair[int]':      true
+		'point Point':         false
+		'points []Point':      false
+		'count int':           false
+		'ages map[string]int': false
+	} {
+		hover := Hover{
+			contents: MarkupContent{
+				kind:  'markdown'
+				value: '```v\n${text}\n```'
+			}
+		}
+		assert app.binding_type_narrows(uri, position, hover) == narrows, text
+	}
+}
+
 fn test_hover_keeps_an_inferred_reference_type() {
 	mut app := create_test_app()
 	defer {

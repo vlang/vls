@@ -656,6 +656,13 @@ const max_declaration_expression_lines = 40
 // map literal, or a call). Every line loses its comment first, so a `//` in the
 // middle does not swallow the rest.
 fn declaration_expression(lines []string, start int, rhs string) string {
+	text, _ := declaration_expression_span(lines, start, rhs)
+	return text
+}
+
+// declaration_expression_span is declaration_expression with the line on which the
+// value ends.
+fn declaration_expression_span(lines []string, start int, rhs string) (string, int) {
 	first := without_trailing_comment(rhs)
 	mut parts := [first]
 	mut depth := bracket_depth(first)
@@ -666,7 +673,7 @@ fn declaration_expression(lines []string, start int, rhs string) string {
 		parts << part
 		line++
 	}
-	return parts.join(' ')
+	return parts.join(' '), line - 1
 }
 
 // bracket_depth reports how many brackets `text` leaves open, ignoring the ones
@@ -956,8 +963,39 @@ fn (mut app App) binding_type_narrows(uri string, position Position, hover Hover
 			}
 		}
 	}
+	// A type the index does not know, the compiler writes out: a generic struct
+	// (the index holds `Pair[T]`), which a literal that infers its arguments
+	// (`Pair{ left: 1 }`) reads as the bare `Pair`, or a field of it, `T`.
+	if app.type_text_names_unknown_type(uri, content, typ) {
+		return true
+	}
 	base := typ.trim_left('&').all_after('mut ').trim_left('?!')
 	return app.type_declaration(uri, content, base).kind in ['sum', 'interface']
+}
+
+// type_text_names_unknown_type reports whether the type `text` names a type the
+// index does not know.
+fn (mut app App) type_text_names_unknown_type(uri string, content string, text string) bool {
+	mut i := 0
+	for i < text.len {
+		if !is_ident_start(text[i]) {
+			i++
+			continue
+		}
+		mut end := i
+		for end < text.len && (is_ident_char(text[end]) || text[end] == `.`) {
+			end++
+		}
+		name := text[i..end].trim_right('.')
+		i = end
+		if !is_type_name(name) {
+			continue
+		}
+		if app.type_declaration(uri, content, name).kind == '' {
+			return true
+		}
+	}
+	return false
 }
 
 // type_text_names reports whether the type `text` names `name` as a whole
@@ -1019,7 +1057,7 @@ fn (mut app App) declared_binding_type(uri string, content string, lines []strin
 	line := lines[position.line]
 	start, _ := find_word_bounds_at_col(line, encoded_col_to_byte(line, position.char,
 		app.position_encoding), .utf8)
-	receiver_declaration_on_line(line, name, [start])?
+	declaration := receiver_declaration_on_line(line, name, [start])?
 	written := app.written_binding_type(uri, content, lines, LocalBinding{
 		name:   name
 		line:   position.line
@@ -1028,10 +1066,18 @@ fn (mut app App) declared_binding_type(uri string, content string, lines []strin
 	if written != '' {
 		return written
 	}
-	// The type a use has right after the declaration, at the end of its line.
+	// The type a use has right after the declaration, at the end of its value: a
+	// value written over several lines (`Point{ ... }.x`) ends on its last one.
+	rhs := if declaration.assignment_end <= line.len {
+		line[declaration.assignment_end..]
+	} else {
+		''
+	}
+	_, end_line := declaration_expression_span(lines, position.line, rhs)
+	end_text := lines[end_line]
 	return app.infer_binding_type_at_position(uri, content, name, Position{
-		line: position.line
-		char: byte_to_encoded_col(line, line.len, app.position_encoding)
+		line: end_line
+		char: byte_to_encoded_col(end_text, end_text.len, app.position_encoding)
 	})
 }
 
@@ -2663,6 +2709,9 @@ fn (mut app App) infer_binding_type_at_position(uri string, content string, rece
 				break
 			}
 			latest_rhs += '\n' + next_code
+			// The source of the value too, which the literals keep: what follows the
+			// first line (`}.x`) can change its type.
+			latest_raw_rhs += ' ' + without_trailing_comment(lines[next_line])
 			rhs_has_expression = rhs_has_expression || next_code.trim_space() != ''
 				|| source_fragment_starts_with_literal(lines[next_line])
 			next_line++
