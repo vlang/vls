@@ -17,9 +17,11 @@ const v_keywords = ['asm', 'as', 'assert', 'atomic', 'break', 'const', 'continue
 const v_builtins = ['copy', 'eprintln', 'eprint', 'error', 'error_with_code', 'exit', 'flush_stderr',
 	'flush_stdout', 'free', 'isnil', 'panic', 'print', 'print_backtrace', 'println', 'recover']!
 
-const v_builtin_types = ['any', 'array', 'bool', 'byte', 'byteptr', 'chan', 'char', 'charptr',
-	'f32', 'f64', 'i8', 'i16', 'i32', 'i64', 'int', 'isize', 'IError', 'map', 'rune', 'string',
-	'thread', 'u8', 'u16', 'u32', 'u64', 'usize', 'void', 'voidptr']!
+// v_builtin_types are the types V builds in: `i128` and `u128` since V's #28877,
+// and no `byte` since #29141.
+const v_builtin_types = ['any', 'array', 'bool', 'byteptr', 'chan', 'char', 'charptr', 'f32',
+	'f64', 'i8', 'i16', 'i32', 'i64', 'i128', 'int', 'isize', 'IError', 'map', 'rune', 'string',
+	'thread', 'u8', 'u16', 'u32', 'u64', 'u128', 'usize', 'void', 'voidptr']!
 
 struct IndexedCompletionResult {
 	items          []Detail
@@ -2873,8 +2875,8 @@ fn method_completion_from_lines(lines []string, symbol DocumentSymbol) ?Detail {
 }
 
 // builtin_receiver_types are the types whose methods live in vlib/builtin.
-const builtin_receiver_types = ['bool', 'string', 'rune', 'char', 'byte', 'u8', 'u16', 'u32', 'u64',
-	'usize', 'i8', 'i16', 'i32', 'int', 'i64', 'isize', 'f32', 'f64']
+const builtin_receiver_types = ['bool', 'string', 'rune', 'char', 'u8', 'u16', 'u32', 'u64', 'u128',
+	'usize', 'i8', 'i16', 'i32', 'int', 'i64', 'i128', 'isize', 'f32', 'f64']
 
 fn (mut app App) receiver_type_scope(uri string, content string, receiver_type string) (string, string, bool, string) {
 	normalized_type := normalize_receiver_type(receiver_type)

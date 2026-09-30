@@ -264,7 +264,7 @@ fn composite_member_kinds(typ string) []string {
 		mut kinds := ['array']
 		if elem == 'string' {
 			kinds << 'array_string'
-		} else if elem in ['u8', 'byte'] {
+		} else if elem == 'u8' {
 			kinds << 'array_u8'
 		} else if elem == 'rune' {
 			kinds << 'array_rune'

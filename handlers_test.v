@@ -11338,6 +11338,27 @@ fn test_rename_refuses_interface_members_and_the_names_they_share() {
 	}, 'main.v:34:2') == ['main.v:34:2', 'main.v:38:10']
 }
 
+// The types V builds in are the ones of V: `i128` and `u128` since V's #28877,
+// and no `byte` since #29141, where `byte` became a name like any other.
+fn test_builtin_types_are_those_of_v() {
+	assert classify_v_identifier('i128') == sem_tok_type
+	assert classify_v_identifier('u128') == sem_tok_type
+	assert classify_v_identifier('byte') == -1
+	types := make_keyword_completions().filter(it.detail == 'builtin type').map(it.label)
+	assert 'i128' in types && 'u128' in types, types.str()
+	assert 'byte' !in types, types.str()
+}
+
+// `i128` is part of V, and a rename refuses it; a variable named `byte` is a
+// name, which a rename changes.
+fn test_rename_follows_the_builtin_types_of_v() {
+	files := {
+		'main.v': 'module main\n\nfn main() {\n\tbig := i128(5)\n\tbyte := u8(1)\n\tprintln(big)\n\tprintln(byte)\n}\n'
+	}
+	assert rename_edits_in(files, 'main.v:4:9') == []string{}
+	assert rename_edits_in(files, 'main.v:5:2') == ['main.v:5:2', 'main.v:7:10']
+}
+
 fn test_rename_refuses_modules_builtin_types_and_names_v_would_reject() {
 	mut app, uris := new_rename_project_app_with({
 		'main.v': rename_scopes_main
@@ -12387,6 +12408,16 @@ fn test_member_completion_resolves_the_type_of_any_expression() {
 			name: 'cast'
 			body: 'n := i64(5)\n\tn.@cursor'
 			want: ['str', 'hex']
+		},
+		MemberCompletionCase{
+			name: 'cast_i128'
+			body: 'n := i128(5)\n\tn.@cursor'
+			want: ['str', 'hex']
+		},
+		MemberCompletionCase{
+			name: 'cast_u128'
+			body: 'n := u128(5)\n\tn.@cursor'
+			want: ['str', 'hex', 'bin']
 		},
 		MemberCompletionCase{
 			name: 'match_branch'
