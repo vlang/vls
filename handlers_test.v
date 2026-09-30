@@ -5338,6 +5338,43 @@ fn test_inlay_hints_follow_unsaved_edits_in_other_open_files() {
 	assert 'times: ' !in after, after.str()
 }
 
+struct PollCount {
+mut:
+	n int
+}
+
+// A server that keeps writing without the marker that a read waits for, as a
+// child stuck in a loop that prints, is waited for no longer than the time
+// given, and a read that can be cancelled asks whether to cancel meanwhile.
+fn test_a_read_of_a_server_that_writes_without_end_ends_in_time() {
+	yes := os.find_abs_path_of_executable('yes') or { return }
+	mut p := os.new_process(yes)
+	p.set_redirect_stdio()
+	p.run()
+	defer {
+		p.signal_kill()
+		p.wait()
+		p.close()
+	}
+	mut s := DiagnosticsServer{
+		process: p
+	}
+	started := time.now()
+	if _ := s.read_until('never printed', 300) {
+		assert false, 'the marker is never printed'
+	}
+	assert time.since(started) < 10 * time.second
+	mut count := &PollCount{}
+	again := time.now()
+	answer, _ := s.read_until_or_cancel('never printed', 300, fn [mut count] () bool {
+		count.n++
+		return false
+	}) or { '<none>', false }
+	assert answer == '<none>'
+	assert time.since(again) < 10 * time.second
+	assert count.n > 0
+}
+
 // A client without file watchers says nothing when a file that is not open
 // changes on disk, and a hint of an open file can depend on it (a signature
 // there): the hints are computed again once it has changed. With watchers, the
