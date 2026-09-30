@@ -5338,6 +5338,34 @@ fn test_inlay_hints_follow_unsaved_edits_in_other_open_files() {
 	assert 'times: ' !in after, after.str()
 }
 
+// A client without file watchers says nothing when a file that is not open
+// changes on disk, and a hint of an open file can depend on it (a signature
+// there): the hints are computed again once it has changed. With watchers, the
+// change comes as a notification, which moves the generation of the project.
+fn test_inlay_hint_stamp_changes_with_a_closed_file_on_disk_without_watchers() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	dir := os.join_path(app.temp_dir, 'hint_stamp_disk')
+	must_mkdir_all(dir)
+	must_write_file(os.join_path(dir, 'v.mod'), 'Module {}\n')
+	main_file := os.join_path(dir, 'main.v')
+	other_file := os.join_path(dir, 'other.v')
+	content := 'module main\n\nfn main() {\n\tx := value()\n\tprintln(x)\n}\n'
+	must_write_file(main_file, content)
+	must_write_file(other_file, 'module main\n\nfn value() int {\n\treturn 1\n}\n')
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	before := app.inlay_hint_stamp(uri, content)
+	must_write_file(other_file, "module main\n\nfn value() string {\n\treturn 'one'\n}\n")
+	assert app.inlay_hint_stamp(uri, content) != before
+	app.watched_files_active = true
+	watched := app.inlay_hint_stamp(uri, content)
+	must_write_file(other_file, 'module main\n\nfn value() int {\n\treturn 2\n}\n')
+	assert app.inlay_hint_stamp(uri, content) == watched
+}
+
 fn test_did_close_drops_cached_inlay_hints() {
 	mut app := create_test_app()
 	defer {
