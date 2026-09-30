@@ -11319,6 +11319,22 @@ fn test_rename_refuses_a_new_name_that_clashes_with_a_name_of_the_program() {
 	assert edit.changes.values().map(it.len) == [2]
 }
 
+// A function with a variant in a file of each platform: a rename from a call
+// renames the variants that the build of this platform leaves out, and their
+// uses there and in `$if` branches, so that no platform's build breaks. The
+// function of another module with the same name keeps its name.
+fn test_rename_renames_the_variants_of_the_other_platforms() {
+	files := {
+		'main.v':           'module main\n\nimport other\n\nfn main() {\n\tprintln(platform_name())\n\tprintln(other.platform_name())\n\t\$if windows {\n\t\tprintln(platform_name())\n\t}\n}\n'
+		'name_linux.c.v':   "module main\n\nfn platform_name() string {\n\treturn 'linux'\n}\n"
+		'name_macos.c.v':   "module main\n\nfn platform_name() string {\n\treturn 'macos'\n}\n"
+		'name_windows.c.v': "module main\n\nfn platform_name() string {\n\treturn 'windows'\n}\n\nfn describe() string {\n\treturn platform_name() + '!'\n}\n"
+		'other/other.v':    "module other\n\npub fn platform_name() string {\n\treturn 'other'\n}\n"
+	}
+	assert rename_edits_in(files, 'main.v:6:10') == ['main.v:6:10', 'main.v:9:11', 'name_linux.c.v:3:4',
+		'name_macos.c.v:3:4', 'name_windows.c.v:3:4', 'name_windows.c.v:8:9']
+}
+
 // A function renamed to another function's name, a local renamed to another
 // local's, and a function renamed to the name of a parameter that a call of it
 // would then reach: the first two break the program, the last one compiles and

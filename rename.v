@@ -180,6 +180,7 @@ fn (mut app App) rename_locations(target RenameTarget, scope IndexScope, request
 	mut locations := []Location{}
 	mut unresolved := []Location{}
 	mut other_declarations := []Location{}
+	target_is_local := !app.is_indexed_declaration(target.anchor)
 	app.v3_prefetch_anchors(candidates, mut cache)
 	for cand in candidates {
 		if request_id in app.cancelled_requests {
@@ -193,7 +194,11 @@ fn (mut app App) rename_locations(target RenameTarget, scope IndexScope, request
 			cache)
 		{
 			named, is_target := app.declaration_resolved(resolved, target, mut cache)
-			if is_target {
+			// A use in a file of another platform names the variant of the target
+			// there, which is renamed with it.
+			if is_target || (!target_is_local
+				&& app.is_indexed_declaration(named)
+				&& app.is_other_build_variant(named, target.anchor)) {
 				locations << cand
 			} else {
 				other_declarations << named
@@ -204,9 +209,16 @@ fn (mut app App) rename_locations(target RenameTarget, scope IndexScope, request
 	}
 	target_is_type := app.index_doc_symbols(target.anchor.uri).any(it.kind in type_declaration_kinds
 		&& same_anchor_location(Location{ uri: target.anchor.uri, range: it.selection_range }, target.anchor))
-	target_is_local := !app.is_indexed_declaration(target.anchor)
 	mut unknown := []Location{}
 	for cand in unresolved {
+		// A declaration of the target's name, in its module, that this build
+		// leaves out: the same function or type for another platform, renamed with
+		// it so that no platform's build breaks.
+		if !target_is_local && app.is_indexed_declaration(cand)
+			&& app.is_other_build_variant(cand, target.anchor) {
+			locations << cand
+			continue
+		}
 		// The declaration of another symbol with the same name, or a module: in
 		// front of a dot too, unless the target is a local, which V lets have the
 		// name of an imported module.
@@ -251,7 +263,10 @@ fn (mut app App) rename_locations(target RenameTarget, scope IndexScope, request
 			continue
 		}
 		named, is_target := app.declaration_resolved(resolved, target, mut cache)
-		if is_target {
+		// A use in a file of another platform names the variant of the target
+		// there, which is renamed with it.
+		if is_target || (!target_is_local && app.is_indexed_declaration(named)
+			&& app.is_other_build_variant(named, target.anchor)) {
 			locations << cand
 		} else {
 			other_declarations << named
@@ -259,6 +274,13 @@ fn (mut app App) rename_locations(target RenameTarget, scope IndexScope, request
 	}
 	for cand in still_unknown {
 		if other_declarations.any(same_anchor_location(it, cand)) {
+			continue
+		}
+		// A use of the target's name, in its module, in code that this build
+		// leaves out: it names the target, or its variant for another platform
+		// that is renamed with it.
+		if !target_is_local && app.is_other_build_use(cand, target) {
+			locations << cand
 			continue
 		}
 		return error('`${target.symbol}` at ${os.file_name(uri_to_path(cand.uri))}:${cand.range.start.line + 1}:${cand.range.start.char + 1} could not be resolved, and renaming around it could break the program')
@@ -763,6 +785,182 @@ fn (mut app App) is_indexed_declaration(loc Location) bool {
 		}
 	}
 	return false
+}
+
+// conditional_file_markers are the parts of a file name that make V build the
+// file only for some platforms, architectures, backends or defines (see
+// v.pref.file_has_incompatible_target_suffix and get_v_files_from_dir_for_target).
+const conditional_file_markers = ['_windows.', '_linux.', '_macos.', '_darwin.', '_nix.', '_bsd.',
+	'_freebsd.', '_openbsd.', '_netbsd.', '_dragonfly.', '_android.', '_termux.', '_ios.', '_solaris.',
+	'_qnx.', '_haiku.', '_serenity.', '_vinix.', '_plan9.', '_default.', '_d_', '_notd_', '.js.v',
+	'.wasm.v', '.native.v', '_amd64.', '.amd64.', '_x64.', '.x64.', '_x86_64.', '.x86_64.', '_arm64.',
+	'.arm64.', '_aarch64.', '.aarch64.', '_x86.', '.x86.', '_i386.', '.i386.', '_arm32.', '.arm32.',
+	'_rv64.', '.rv64.', '_riscv64.', '.riscv64.', '_rv32.', '.rv32.', '_riscv32.', '.riscv32.',
+	'_ppc64le.', '.ppc64le.', '_s390x.', '.s390x.', '_loongarch64.', '.loongarch64.', '_sparc64.',
+	'.sparc64.', '_wasm32.', '.wasm32.']
+
+// is_other_build_variant reports whether `loc`, a declaration that V does not
+// resolve, is the declaration at `anchor` for another build: in code that V
+// builds only for some platforms, architectures, backends or defines, in the
+// same module, and of the same kind, with the same receiver for a method.
+fn (mut app App) is_other_build_variant(loc Location, anchor Location) bool {
+	if !app.in_conditional_code(loc) || !app.in_module_of(loc, anchor) {
+		return false
+	}
+	kind := app.declaration_kind(loc) or { return false }
+	anchor_kind := app.declaration_kind(anchor) or { return false }
+	return kind == anchor_kind
+		&& declaration_receiver(app.line_at(loc)) == declaration_receiver(app.line_at(anchor))
+}
+
+// is_other_build_use reports whether `loc`, an occurrence of the name of
+// `target` that V does not resolve, is a use of it in code that V builds only
+// for some platforms, architectures, backends or defines, in the module of the
+// target: not a member or a name of another module, and not a local of its
+// function with that name.
+fn (mut app App) is_other_build_use(loc Location, target RenameTarget) bool {
+	if !app.in_conditional_code(loc) || !app.in_module_of(loc, target.anchor) {
+		return false
+	}
+	line := app.line_at(loc)
+	col := loc.range.start.char
+	if col > 0 && col <= line.len && line[col - 1] == `.` {
+		return false
+	}
+	return !app.declares_local_named(loc, target.symbol)
+}
+
+// in_conditional_code reports whether V builds the occurrence `loc` only for
+// some platforms, architectures, backends or defines: it is in a file whose
+// name says so, or in a `$if` or `$else` branch.
+fn (mut app App) in_conditional_code(loc Location) bool {
+	name := os.file_name(uri_to_path(loc.uri))
+	if conditional_file_markers.any(name.contains(it)) {
+		return true
+	}
+	lines := source_code_lines(app.file_text(loc.uri))
+	return in_comptime_branch(lines, loc.range.start.line, loc.range.start.char)
+}
+
+// in_comptime_branch reports whether the column `col` of the line `line` of
+// `lines`, code without its comments and the text of its strings, is inside
+// the braces of a `$if` or `$else` branch.
+fn in_comptime_branch(lines []string, line int, col int) bool {
+	mut branches := []bool{}
+	for i, text in lines {
+		if i > line {
+			break
+		}
+		end := if i == line { int_min(col, text.len) } else { text.len }
+		mut head_start := 0
+		for j in 0 .. end {
+			match text[j] {
+				`{` {
+					head := text[head_start..j]
+					branches << (head.contains('\$if') || head.contains('\$else'))
+					head_start = j + 1
+				}
+				`}` {
+					if branches.len > 0 {
+						branches.pop()
+					}
+					head_start = j + 1
+				}
+				`;` {
+					head_start = j + 1
+				}
+				else {}
+			}
+		}
+	}
+	return branches.any(it)
+}
+
+// in_module_of reports whether `loc` is in a file of the module whose file
+// holds `anchor`: the same directory and the same `module` line.
+fn (mut app App) in_module_of(loc Location, anchor Location) bool {
+	path := uri_to_path(loc.uri)
+	anchor_path := uri_to_path(anchor.uri)
+	if os.dir(path) != os.dir(anchor_path) {
+		return false
+	}
+	return get_module_name(app.file_text(loc.uri)) == get_module_name(app.file_text(anchor.uri))
+}
+
+// declaration_kind is the symbol kind of the indexed declaration at `loc`.
+fn (mut app App) declaration_kind(loc Location) ?int {
+	for s in app.index_doc_symbols(loc.uri) {
+		if same_anchor_location(Location{ uri: loc.uri, range: s.selection_range }, loc) {
+			return s.kind
+		}
+		for child in s.children {
+			if same_anchor_location(Location{ uri: loc.uri, range: child.selection_range }, loc) {
+				return child.kind
+			}
+		}
+	}
+	return none
+}
+
+// declaration_receiver returns the type of the receiver of the method that
+// `line` declares, `Process` for `fn (mut p Process) kill() {`, or '' for a
+// line that declares no method.
+fn declaration_receiver(line string) string {
+	mut rest := line.trim_space()
+	if rest.starts_with('pub ') {
+		rest = rest['pub '.len..].trim_space()
+	}
+	if !rest.starts_with('fn (') {
+		return ''
+	}
+	fields := rest['fn ('.len..].all_before(')').fields()
+	return if fields.len == 0 { '' } else { fields.last().trim_left('&') }
+}
+
+// declares_local_named reports whether the function around `loc` declares a
+// parameter or a local named `name`, which V does not resolve for `loc` in
+// code that this build leaves out.
+fn (mut app App) declares_local_named(loc Location, name string) bool {
+	first, last := app.enclosing_fn_lines(loc) or { return false }
+	lines := source_code_lines(app.file_text(loc.uri))
+	for i in first .. int_min(last + 1, lines.len) {
+		text := lines[i]
+		mut from := 0
+		for {
+			at := text.index_after(name, from) or { break }
+			from = at + name.len
+			if (at > 0 && is_ident_char(text[at - 1]))
+				|| (from < text.len && is_ident_char(text[from])) {
+				continue
+			}
+			before := text[..at].trim_space()
+			after := text[from..].trim_space()
+			// A parameter of its signature, a `:=`, or a variable of a `for`.
+			if (i == first && (before.ends_with('(') || before.ends_with(','))
+				&& after.len > 0 && is_ident_start(after[0]))
+				|| after.starts_with(':=') || (after.starts_with(',') && text[from..].contains(':='))
+				|| before.ends_with('for') || before.ends_with('mut')
+				|| (before.ends_with(',') && after.starts_with('in ')) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// file_text is what the editor holds of the file at `uri`, or what is on disk.
+fn (mut app App) file_text(uri string) string {
+	return app.open_files[uri] or { os.read_file(uri_to_path(uri)) or { '' } }
+}
+
+// line_at is the line of `loc` in what the editor holds of its file.
+fn (mut app App) line_at(loc Location) string {
+	lines := app.file_text(loc.uri).split_into_lines()
+	return if loc.range.start.line >= 0 && loc.range.start.line < lines.len {
+		lines[loc.range.start.line]
+	} else {
+		''
+	}
 }
 
 // index_doc_symbols returns the declarations that the index holds for `uri`.
