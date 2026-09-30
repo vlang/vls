@@ -427,19 +427,32 @@ fn (mut s DiagnosticsServer) read_until_or_cancel(marker string, timeout_ms int,
 	watch := time.new_stopwatch()
 	mut last_poll := i64(0)
 	mut cancelled := false
-	for !collected.contains(marker) {
+	// Where the marker can still start: what is before was searched already.
+	mut search_from := 0
+	for {
+		if at := collected.index_after(marker, search_from) {
+			after := at + marker.len
+			if after < collected.len {
+				s.leftover = collected[after..]
+			}
+			return collected[..after], cancelled
+		}
+		search_from = int_max(0, collected.len - marker.len + 1)
 		if s.process == unsafe { nil } {
 			return none
 		}
 		chunk := s.process.stdout_read()
 		if chunk != '' {
 			collected += chunk
-			continue
+		} else {
+			if !s.process.is_alive() {
+				s.leftover = collected
+				return none
+			}
+			time.sleep(100 * time.microsecond)
 		}
-		if !s.process.is_alive() {
-			s.leftover = collected
-			return none
-		}
+		// Output that keeps coming, without the marker, does not stop the clock
+		// or the question whether to cancel.
 		elapsed := watch.elapsed().milliseconds()
 		if elapsed > timeout_ms {
 			s.leftover = collected
@@ -449,13 +462,8 @@ fn (mut s DiagnosticsServer) read_until_or_cancel(marker string, timeout_ms int,
 			last_poll = elapsed
 			cancelled = poll()
 		}
-		time.sleep(100 * time.microsecond)
 	}
-	after := (collected.index(marker) or { collected.len }) + marker.len
-	if after < collected.len {
-		s.leftover = collected[after..]
-	}
-	return collected[..after], cancelled
+	return none
 }
 
 // project_config_fingerprint names the v.mod and .vvmrc files the compiler
@@ -487,30 +495,37 @@ fn (mut s DiagnosticsServer) read_until(marker string, timeout_ms int) ?string {
 	mut collected := s.leftover
 	s.leftover = ''
 	watch := time.new_stopwatch()
-	for !collected.contains(marker) {
+	// Where the marker can still start: what is before was searched already.
+	mut search_from := 0
+	for {
+		if at := collected.index_after(marker, search_from) {
+			after := at + marker.len
+			if after < collected.len {
+				s.leftover = collected[after..]
+			}
+			return collected[..after]
+		}
+		search_from = int_max(0, collected.len - marker.len + 1)
 		if s.process == unsafe { nil } {
 			return none
 		}
 		chunk := s.process.stdout_read()
 		if chunk != '' {
 			collected += chunk
-			continue
+		} else {
+			if !s.process.is_alive() {
+				s.leftover = collected
+				return none
+			}
+			time.sleep(100 * time.microsecond)
 		}
-		if !s.process.is_alive() {
-			s.leftover = collected
-			return none
-		}
+		// Output that keeps coming, without the marker, does not stop the clock.
 		if watch.elapsed().milliseconds() > timeout_ms {
 			s.leftover = collected
 			return none
 		}
-		time.sleep(100 * time.microsecond)
 	}
-	after := (collected.index(marker) or { collected.len }) + marker.len
-	if after < collected.len {
-		s.leftover = collected[after..]
-	}
-	return collected[..after]
+	return none
 }
 
 // stop ends the server: the `quit` line lets it finish on its own, and one that

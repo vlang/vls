@@ -5393,6 +5393,71 @@ fn test_inlay_hints_follow_unsaved_edits_in_other_open_files() {
 	assert 'times: ' !in after, after.str()
 }
 
+struct PollCount {
+mut:
+	n int
+}
+
+// A server that keeps writing without the marker that a read waits for, as a
+// child stuck in a loop that prints, is waited for no longer than the time
+// given, and a read that can be cancelled asks whether to cancel meanwhile.
+fn test_a_read_of_a_server_that_writes_without_end_ends_in_time() {
+	yes := os.find_abs_path_of_executable('yes') or { return }
+	mut p := os.new_process(yes)
+	p.set_redirect_stdio()
+	p.run()
+	defer {
+		p.signal_kill()
+		p.wait()
+		p.close()
+	}
+	mut s := DiagnosticsServer{
+		process: p
+	}
+	started := time.now()
+	if _ := s.read_until('never printed', 300) {
+		assert false, 'the marker is never printed'
+	}
+	assert time.since(started) < 10 * time.second
+	mut count := &PollCount{}
+	again := time.now()
+	answer, _ := s.read_until_or_cancel('never printed', 300, fn [mut count] () bool {
+		count.n++
+		return false
+	}) or { '<none>', false }
+	assert answer == '<none>'
+	assert time.since(again) < 10 * time.second
+	assert count.n > 0
+}
+
+// A client without file watchers says nothing when a file that is not open
+// changes on disk, and a hint of an open file can depend on it (a signature
+// there): the hints are computed again once it has changed. With watchers, the
+// change comes as a notification, which moves the generation of the project.
+fn test_inlay_hint_stamp_changes_with_a_closed_file_on_disk_without_watchers() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	dir := os.join_path(app.temp_dir, 'hint_stamp_disk')
+	must_mkdir_all(dir)
+	must_write_file(os.join_path(dir, 'v.mod'), 'Module {}\n')
+	main_file := os.join_path(dir, 'main.v')
+	other_file := os.join_path(dir, 'other.v')
+	content := 'module main\n\nfn main() {\n\tx := value()\n\tprintln(x)\n}\n'
+	must_write_file(main_file, content)
+	must_write_file(other_file, 'module main\n\nfn value() int {\n\treturn 1\n}\n')
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	before := app.inlay_hint_stamp(uri, content)
+	must_write_file(other_file, "module main\n\nfn value() string {\n\treturn 'one'\n}\n")
+	assert app.inlay_hint_stamp(uri, content) != before
+	app.watched_files_active = true
+	watched := app.inlay_hint_stamp(uri, content)
+	must_write_file(other_file, 'module main\n\nfn value() int {\n\treturn 2\n}\n')
+	assert app.inlay_hint_stamp(uri, content) == watched
+}
+
 fn test_did_close_drops_cached_inlay_hints() {
 	mut app := create_test_app()
 	defer {
@@ -11511,6 +11576,49 @@ fn test_rename_refuses_a_new_name_that_clashes_with_a_name_of_the_program() {
 	}
 	edit := response.result as WorkspaceEdit
 	assert edit.changes.values().map(it.len) == [2]
+}
+
+// A function with a variant in a file of each platform: a rename from a call
+// renames the variants that the build of this platform leaves out, and their
+// uses there and in `$if` branches, so that no platform's build breaks. The
+// function of another module with the same name keeps its name.
+fn test_rename_renames_the_variants_of_the_other_platforms() {
+	files := {
+		'main.v':           'module main\n\nimport other\n\nfn main() {\n\tprintln(platform_name())\n\tprintln(other.platform_name())\n\t\$if windows {\n\t\tprintln(platform_name())\n\t}\n}\n'
+		'name_linux.c.v':   "module main\n\nfn platform_name() string {\n\treturn 'linux'\n}\n"
+		'name_macos.c.v':   "module main\n\nfn platform_name() string {\n\treturn 'macos'\n}\n"
+		'name_windows.c.v': "module main\n\nfn platform_name() string {\n\treturn 'windows'\n}\n\nfn describe() string {\n\treturn platform_name() + '!'\n}\n"
+		'other/other.v':    "module other\n\npub fn platform_name() string {\n\treturn 'other'\n}\n"
+	}
+	assert rename_edits_in(files, 'main.v:6:10') == ['main.v:6:10', 'main.v:9:11', 'name_linux.c.v:3:4',
+		'name_macos.c.v:3:4', 'name_windows.c.v:3:4', 'name_windows.c.v:8:9']
+}
+
+// A function renamed to another function's name, a local renamed to another
+// local's, and a function renamed to the name of a parameter that a call of it
+// would then reach: the first two break the program, the last one compiles and
+// calls the parameter instead.
+fn test_rename_refuses_a_name_that_a_call_or_a_declaration_already_has() {
+	mut app, uris := new_rename_project_app_with({
+		'main.v': 'module main\n\nfn greet() int {\n\treturn 1\n}\n\nfn helper() int {\n\treturn 3\n}\n\nfn invoke(action fn () int) int {\n\tprintln(action())\n\treturn greet()\n}\n\nfn main() {\n\tx := 1\n\ty := 2\n\tprintln(x + y)\n\tprintln(invoke(fn () int {\n\t\treturn 2\n\t}))\n\tprintln(helper())\n}\n'
+	})
+	defer {
+		cleanup_rename_app(mut app)
+	}
+	// A V that reports the redefinition says so; one that does not still sees
+	// that the call of `helper` would name another declaration.
+	for spec, reasons in {
+		'main.v:3:4 helper': ['redefinition of function `helper`', 'would make `helper` at main.v:23:10']
+		'main.v:17:2 y':     ['redefinition of `y`']
+		'main.v:3:4 action': ['would make `action` at main.v:13:9']
+	} {
+		parts := spec.split(' ')
+		if _ := app.rename_request(rename_request_named(uris, parts[0], parts[1])) {
+			assert false, '${spec} must be refused'
+		} else {
+			assert reasons.any(err.msg().contains(it)), '${spec}: ${err.msg()}'
+		}
+	}
 }
 
 // A generic function of a module, called from main.v, whose parameter is named

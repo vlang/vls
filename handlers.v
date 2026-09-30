@@ -7005,7 +7005,36 @@ fn (app &App) inlay_hint_stamp(uri string, content string) string {
 		versions << '${open_uri}=${version}'
 	}
 	versions.sort()
-	return '${app.project_generation(uri)}\n${versions.join(';')}\n${content}'
+	stamp := '${app.project_generation(uri)}\n${versions.join(';')}\n${content}'
+	if app.watched_files_active {
+		return stamp
+	}
+	// Without file watchers, a file that is not open changes on disk without a
+	// notification: what the files of the project are on disk is part of it.
+	return stamp + '\n' + project_disk_fingerprint(app.generation_key(uri))
+}
+
+// project_disk_max_files is how many `.v` files of a project the stamp of its
+// inlay hints looks at on disk (see project_disk_fingerprint).
+const project_disk_max_files = 5000
+
+// project_disk_fingerprint is what the `.v` files under `root` are on disk:
+// their paths, sizes and modification times, for the first
+// project_disk_max_files of them.
+fn project_disk_fingerprint(root string) string {
+	if root == '' || !os.is_dir(root) {
+		return ''
+	}
+	mut files := os.walk_ext(root, '.v')
+	files.sort()
+	mut parts := []string{cap: int_min(files.len, project_disk_max_files)}
+	for path in files {
+		if parts.len == project_disk_max_files {
+			break
+		}
+		parts << '${path}:${os.file_size(path)}:${os.file_last_mod_unix(path)}'
+	}
+	return parts.join('\n')
 }
 
 // infer_type_from_literal returns the V type name for a simple literal RHS value,
