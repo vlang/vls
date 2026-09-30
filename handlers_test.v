@@ -7625,6 +7625,48 @@ fn test_hover_types_bindings_whose_value_names_no_type() {
 	}
 }
 
+fn test_hover_does_not_take_a_literal_receiver_for_the_value_of_its_call() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'literal_receiver_call_hover')
+	must_mkdir_all(test_dir)
+	content := 'module main\n\nstruct Host {}\n\nfn (h Host) first_of[T](xs []T) T {\n\treturn xs[0]\n}\n\nfn inside[A](values []A) A {\n\thead := Host{}.first_of(values)\n\ttyped := Host{}.first_of[A](values)\n\tlit := Host{}\n\tprintln(typed)\n\tprintln(lit)\n\treturn head\n}\n\nfn main() {\n\tprintln(inside([1]))\n}\n'
+	main_file := os.join_path(test_dir, 'main.v')
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	lines := content.split_into_lines()
+	// `Host{}.first_of(values)` is what the generic method returns, which the
+	// index cannot tell: not the `Host` it is called on. The index answers
+	// nothing, and the compiler does. A bare literal is its type.
+	for source_line, expected in {
+		'\treturn head':    ''
+		'\tprintln(typed)': ''
+		'\tprintln(lit)':   'lit Host'
+	} {
+		line := lines.index(source_line)
+		assert line >= 0, source_line
+		name := if source_line.contains('(') {
+			source_line.all_after('(').all_before(')')
+		} else {
+			source_line.all_after_last(' ')
+		}
+		col := lines[line].last_index(name) or { -1 }
+		assert col >= 0, source_line
+		hover := app.local_binding_hover(uri, Position{
+			line: line
+			char: col + 1
+		}) or { Hover{} }
+		if expected == '' {
+			assert !hover.contents.value.contains('Host'), '${source_line}: ${hover.contents.value}'
+		} else {
+			assert hover.contents.value.contains(expected), '${source_line}: ${hover.contents.value}'
+		}
+	}
+}
+
 fn test_hover_types_a_declaration_split_over_lines() {
 	mut app := create_test_app()
 	defer {

@@ -2399,6 +2399,15 @@ fn callable_or_constructor(rhs string) (string, bool) {
 				col++
 				continue
 			}
+			// A literal that the value goes on from, `Host{}.first_of(xs)`, is not
+			// what the value is: its member or its call decides that.
+			close := matching_delimiter(rhs, col, `{`, `}`)
+			if close >= 0 {
+				after := rhs[close + 1..].trim_space()
+				if after != '' && !after.starts_with('//') {
+					return '', false
+				}
+			}
 		}
 		return name, is_constructor
 	}
