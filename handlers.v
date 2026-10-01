@@ -19,9 +19,9 @@ const v_builtins = ['copy', 'eprintln', 'eprint', 'error', 'error_with_code', 'e
 
 // v_builtin_types are the types V builds in: `i128` and `u128` since V's #28877,
 // and no `byte` since #29141.
-const v_builtin_types = ['any', 'array', 'bool', 'byteptr', 'chan', 'char', 'charptr', 'f32',
-	'f64', 'i8', 'i16', 'i32', 'i64', 'i128', 'int', 'isize', 'IError', 'map', 'rune', 'string',
-	'thread', 'u8', 'u16', 'u32', 'u64', 'u128', 'usize', 'void', 'voidptr']!
+const v_builtin_types = ['any', 'array', 'bool', 'byteptr', 'chan', 'char', 'charptr', 'f32', 'f64',
+	'i8', 'i16', 'i32', 'i64', 'i128', 'int', 'isize', 'IError', 'map', 'rune', 'string', 'thread',
+	'u8', 'u16', 'u32', 'u64', 'u128', 'usize', 'void', 'voidptr']!
 
 struct IndexedCompletionResult {
 	items          []Detail
