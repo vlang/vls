@@ -6071,6 +6071,20 @@ fn source_occurrences_have_potential_local_binding(lines []string, occurrences [
 	return false
 }
 
+// v3_own_defines are the defines V3 sets for itself: vlib keeps what only V3
+// builds in `*_d_v3_backend.v` files (the methods of i128 and u128, for one).
+const v3_own_defines = ['v3_backend']
+
+// name_needs_other_defines reports whether a file named `name` is left out by
+// the defines VLS builds with: a `_d_` file for a define it does not pass, and
+// a `_notd_` file for one it does.
+fn name_needs_other_defines(name string) bool {
+	if name.contains('_d_') {
+		return !v3_own_defines.any(name.contains('_d_${it}.'))
+	}
+	return v3_own_defines.any(name.contains('_notd_${it}.'))
+}
+
 // active_indexed_source_file_names applies the compiler's native build-file
 // filtering without removing inactive sources from the broader symbol index.
 // The requesting test file is a direct compiler input, but sibling tests are
@@ -6093,8 +6107,8 @@ fn (app &App) active_indexed_source_file_names(dir string, active_test_file_name
 	mut active := map[string]bool{}
 	// The compiler's own directory scan is authoritative for saved sources: it
 	// settles the os, arch, `_d_`/`_notd_`, and `_default.c.v` rules together,
-	// and VLS compiles with no user defines.
-	for path in pref.get_v_files_from_dir_for_target(dir, [], host) {
+	// and VLS compiles with no user defines, only the ones V3 sets for itself.
+	for path in pref.get_v_files_from_dir_for_target(dir, v3_own_defines, host) {
 		active[os.file_name(path)] = true
 	}
 	// A buffer the client has created but not saved is invisible to that scan,
@@ -6102,7 +6116,7 @@ fn (app &App) active_indexed_source_file_names(dir string, active_test_file_name
 	// a `_d_` file needs a define VLS does not pass, and every other name is
 	// treated as active rather than hiding a file the user is editing.
 	for name in file_names {
-		if name in active || name.ends_with('_test.v') || name.contains('_d_')
+		if name in active || name.ends_with('_test.v') || name_needs_other_defines(name)
 			|| os.exists(os.join_path(dir, name)) {
 			continue
 		}

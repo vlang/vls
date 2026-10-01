@@ -2283,7 +2283,8 @@ fn test_active_indexed_source_file_names_applies_compiler_build_rules() {
 	active := app.active_indexed_source_file_names(test_dir, 'main_test.v')
 	assert 'main.v' in active
 	assert 'unsaved.v' in active
-	// VLS passes no defines, so `_d_` sources are inactive and `_notd_` ones active.
+	// VLS passes only the defines V3 sets for itself, so a `_d_` source of
+	// another define is inactive and its `_notd_` one active.
 	assert 'gated_notd_somefeature.v' in active
 	assert 'gated_d_somefeature.v' !in active
 	assert 'plain_${inactive_os}.v' !in active
@@ -2295,6 +2296,32 @@ fn test_active_indexed_source_file_names_applies_compiler_build_rules() {
 	// A test that cannot run on this platform is not activated by requesting it.
 	inactive_active := app.active_indexed_source_file_names(test_dir, 'sibling_${inactive_os}_test.v')
 	assert 'sibling_${inactive_os}_test.v' !in inactive_active
+}
+
+// V3 sets `v3_backend` for itself, and vlib keeps what only V3 builds in
+// `*_d_v3_backend.v` files (the methods of i128 and u128, for one): the files
+// of a module are the ones V3 builds, saved or not.
+fn test_active_indexed_source_file_names_takes_the_define_v3_sets() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'active_source_file_names_v3')
+	must_mkdir_all(test_dir)
+	source := 'module main\n\nfn helper() {}\n'
+	for name in ['main.v', 'int_d_v3_backend.v', 'int_notd_v3_backend.v'] {
+		must_write_file(os.join_path(test_dir, name), source)
+	}
+	for name in ['unsaved_d_v3_backend.v', 'unsaved_notd_v3_backend.v'] {
+		app.open_files[path_to_uri(os.join_path(test_dir, name))] = source
+	}
+
+	active := app.active_indexed_source_file_names(test_dir, '')
+	assert 'main.v' in active
+	assert 'int_d_v3_backend.v' in active
+	assert 'int_notd_v3_backend.v' !in active
+	assert 'unsaved_d_v3_backend.v' in active
+	assert 'unsaved_notd_v3_backend.v' !in active
 }
 
 fn test_resolve_indexed_definition_defers_compile_time_declaration() {
