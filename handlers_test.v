@@ -13136,12 +13136,12 @@ fn test_completion_also_offers_the_modules_of_vlib() {
 	}
 	items := lab.completion_at('proj/main.v', import_lab_files['proj/main.v'], '\tte')
 	offered := vlib_imports_offered(items)
-	for path in ['os', 'strings', 'net.http', 'x.json2', 'crypto.sha256', 'builtin.wchar', 'json',
+	for path in ['os', 'strings', 'net.http', 'x.json2', 'crypto.sha256', 'builtin.wchar', 'json2',
 		'x.templating.dtm'] {
 		assert 'import ${path}' in offered, path
 	}
 	for item in items.filter(import_edits(it).len > 0 && it.detail.ends_with(' (vlib)')) {
-		deprecated := item.label in ['json', 'dtm']
+		deprecated := item.label in ['dtm']
 		assert (item.tags or { []int{} }) == if deprecated { [1] } else { []int{} }, item.label
 	}
 	for path in ['builtin', 'gx', 'compress', 'io.string_reader', 'sync.arc', 'math.internal',
