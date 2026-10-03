@@ -2787,19 +2787,33 @@ fn integration_run_frames(mut app App, project_dir string, name string, payloads
 	return app.captured_output
 }
 
+// integration_test_json_string escapes a value for embedding inside a JSON string
+// literal. A native Windows path contains backslashes, and a raw one makes the
+// whole payload undecodable: `\U` is an unknown escape sequence, so
+// json2.decode fails and the server rejects `initialize` with InvalidParams.
+// Real clients percent- or backslash-escape these, so the test must too.
+fn integration_test_json_string(value string) string {
+	encoded := json2.encode(value)
+	return encoded[1..encoded.len - 1]
+}
+
 fn test_integration_sublime_text_lsp_handshake() {
 	mut app, project_dir := create_integration_test_env()
 	defer {
 		cleanup_integration_test_env(app, project_dir)
 	}
 	root_uri := path_to_uri(project_dir)
-	initialize := '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":42,"clientInfo":{"name":"Sublime Text LSP","version":"2.13.0"},"locale":"en","rootUri":"${root_uri}","rootPath":"${project_dir}","workspaceFolders":[{"uri":"${root_uri}","name":"test_project"}],"capabilities":{"general":{"positionEncodings":["utf-16"]},"workspace":{"workspaceFolders":true,"configuration":true,"didChangeWatchedFiles":{"dynamicRegistration":true,"relativePatternSupport":true}},"textDocument":{"synchronization":{"dynamicRegistration":true,"willSave":true,"willSaveWaitUntil":true,"didSave":true},"completion":{"dynamicRegistration":true,"completionItem":{"snippetSupport":true,"documentationFormat":["markdown","plaintext"]}},"hover":{"dynamicRegistration":true,"contentFormat":["markdown","plaintext"]},"publishDiagnostics":{"versionSupport":true}},"window":{"workDoneProgress":true}},"initializationOptions":{}}}'
+	root_path := integration_test_json_string(project_dir)
+	initialize := '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":42,"clientInfo":{"name":"Sublime Text LSP","version":"2.13.0"},"locale":"en","rootUri":"${root_uri}","rootPath":"${root_path}","workspaceFolders":[{"uri":"${root_uri}","name":"test_project"}],"capabilities":{"general":{"positionEncodings":["utf-16"]},"workspace":{"workspaceFolders":true,"configuration":true,"didChangeWatchedFiles":{"dynamicRegistration":true,"relativePatternSupport":true}},"textDocument":{"synchronization":{"dynamicRegistration":true,"willSave":true,"willSaveWaitUntil":true,"didSave":true},"completion":{"dynamicRegistration":true,"completionItem":{"snippetSupport":true,"documentationFormat":["markdown","plaintext"]}},"hover":{"dynamicRegistration":true,"contentFormat":["markdown","plaintext"]},"publishDiagnostics":{"versionSupport":true}},"window":{"workDoneProgress":true}},"initializationOptions":{}}}'
 	initialized := '{"jsonrpc":"2.0","method":"initialized","params":{}}'
 	output := integration_run_frames(mut app, project_dir, 'sublime_handshake', [initialize,
 		initialized])
 
 	assert app.received_initialize
-	assert app.workspace_roots == [project_dir]
+	// Workspace roots are resolved from the folder URI, so they carry the '/'
+	// separators a file URI uses. Compare against the URI's own path form rather
+	// than the native one, which is backslash-separated on Windows.
+	assert app.workspace_roots == [uri_to_path(root_uri)]
 	assert app.position_encoding == .utf16
 	assert app.supports_dynamic_watched_files_registration
 	assert app.supports_work_done_progress
