@@ -476,8 +476,15 @@ fn test_compiler_lacks_compatibility_compiler_detects_every_launcher_refusal() {
 	// launcher, verbatim. None of them is an "unknown option" line, so before
 	// this was recognized VLS never retired the lookups and never said anything.
 	assert compiler_lacks_compatibility_compiler('`-vls-mode` requires the compatibility compiler, but no usable V 0.5.2 fallback was found and make is unavailable. Install make, then run `make v1` in `C:\\Users\\me\\v`.')
+	// vlang/v#29369 rewrote the tail of that refusal: the hint after "make is
+	// unavailable" is now platform specific, and the sentence is split. Detection
+	// keys on "requires the compatibility compiler", so both spellings must retire
+	// the lookups, and this test has to hold either side of that change.
+	assert compiler_lacks_compatibility_compiler('`-vls-mode` requires the compatibility compiler, but no usable V 0.5.2 fallback was found and make is unavailable. On Windows, install GNU make in MSYS2 (`make` or `mingw32-make`) and put its tools, including `sh`, on PATH. Then run `make v1` in `C:\\Users\\me\\v`.')
 	assert compiler_lacks_compatibility_compiler('`-vls-mode` requires the compatibility compiler, but the V source tree could not be found. Run `make v1` in the V source directory.')
 	assert compiler_lacks_compatibility_compiler('`-old-compiler` was requested, but no usable V 0.5.2 fallback was found and make is unavailable. Install make, then run `make v1` in `/home/me/v`.')
+	// The same rewrite as above, on the host where the hint is the short one.
+	assert compiler_lacks_compatibility_compiler('`-old-compiler` was requested, but no usable V 0.5.2 fallback was found and make is unavailable. Install make. Then run `make v1` in `/home/me/v`.')
 	assert compiler_lacks_compatibility_compiler('`make v1` failed with exit code 2. Run it manually in `/home/me/v` for more details.')
 	assert compiler_lacks_compatibility_compiler('`make v1` completed without installing a usable V 0.5.2 fallback at `/home/me/.cache/v1_fallback`.')
 	// A launcher that recovers on its own only announces the fallback before
