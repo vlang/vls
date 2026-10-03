@@ -267,7 +267,8 @@ fn build_v_check_args_multifile(is_library_module bool) []string {
 }
 
 fn build_v_line_info_args_multifile(rel_file string, line_info string) []string {
-	return ['-w', '-check', '-nocolor', '-vls-mode', '-line-info', '${rel_file}:${line_info}', '.']
+	return ['-w', '-check', '-nocolor', '-vls-mode', '-line-info', '${rel_file}:${line_info}',
+		'.']
 }
 
 fn build_v_line_info_args_single(file_to_check string, line_info string, compile_target string) []string {
@@ -284,8 +285,8 @@ fn build_v_line_info_args_single(file_to_check string, line_info string, compile
 // than assumed from a version number.
 enum LineInfoMode {
 	unknown // not probed yet — try the options as-is
-	direct // the compiler answers `-vls-mode` / `-line-info` itself
-	compat // reaching the checker needs `-old-compiler`
+	direct  // the compiler answers `-vls-mode` / `-line-info` itself
+	compat  // reaching the checker needs `-old-compiler`
 	missing // no compatibility compiler either — answer from VLS's own index
 }
 
@@ -336,6 +337,56 @@ fn compiler_refused_and_stopped(output string) bool {
 		refusals++
 	}
 	return refusals > 0
+}
+
+// compiler_lacks_compatibility_compiler reports whether an invocation failed
+// because the V launcher could not reach the V1 compatibility compiler, which is
+// what owns `-vls-mode` / `-line-info`. The launcher prints a single-line
+// refusal and exits without compiling, and that refusal is not an "unknown
+// option" line, so `compiler_rejects_line_info` never sees it. Without this
+// check VLS keeps paying a process launch per request for an answer that can
+// never arrive, and answers every hover, completion, and definition with an
+// empty result while saying nothing about why. Each refusal form below is one
+// `ensure_v1_fallback` failure in the launcher.
+fn compiler_lacks_compatibility_compiler(output string) bool {
+	for line in output.split_into_lines() {
+		trimmed := line.trim_space()
+		if trimmed == '' {
+			continue
+		}
+		// A launcher that can build the fallback itself announces that first and
+		// then answers the request, so this form must retire nothing.
+		if trimmed.contains('running `make v1` now') {
+			return false
+		}
+		if trimmed.contains('requires the compatibility compiler') {
+			return true
+		}
+		if trimmed.contains('`-old-compiler` was requested') {
+			return true
+		}
+		if trimmed.starts_with('`make v1` failed') {
+			return true
+		}
+		if trimmed.starts_with('`make v1` completed without installing') {
+			return true
+		}
+	}
+	return false
+}
+
+// report_missing_compatibility_compiler tells the user that the configured `v`
+// cannot serve the compiler-backed lookups, and how to fix it. Without this the
+// editor shows a VLS that highlights code but silently answers nothing for
+// completion, hover, signature help, and go to definition, which is
+// indistinguishable from VLS being broken.
+//
+// No "already warned" flag is needed: the caller sets `line_info_mode` to
+// `.missing` first, and from then on `run_v_line_info` returns from its early
+// `.missing` check without reaching this point, so it is reached at most once per
+// session.
+fn (mut app App) report_missing_compatibility_compiler() {
+	app.send_show_message('vls: the V compiler on PATH cannot serve completion, hover, signature help, or go to definition, because its V1 compatibility compiler is missing. Install `make`, then run `make v1` in your V source directory, or point `v.vls.command` at a V that has it. Diagnostics and formatting are unaffected.', 2)
 }
 
 // normalize_v_line_info_output extracts the actual line-info payload from the
@@ -465,11 +516,11 @@ fn parse_v_check_diagnostic_header(line string, source_dir string) ?JsonError {
 			if marker_idx > best_marker_idx {
 				best_marker_idx = marker_idx
 				best = JsonError{
-					path: path
+					path:    path
 					message: line[marker_idx + marker.len..]
 					line_nr: line_nr_text.int()
-					col: col_text.int()
-					level: if level.contains('error') { 'error' } else { level }
+					col:     col_text.int()
+					level:   if level.contains('error') { 'error' } else { level }
 				}
 			}
 			break
@@ -517,8 +568,8 @@ fn (mut app App) cache_v_check_result(path string, content_hash int, generation 
 	}
 	app.diag_cache[path] = DiagCacheEntry{
 		content_hash: content_hash
-		generation: generation
-		errors: errors
+		generation:   generation
+		errors:       errors
 	}
 }
 
@@ -553,7 +604,7 @@ fn run_v_argv(args []string, work_folder string) os.Result {
 		log(msg)
 		return os.Result{
 			exit_code: 1
-			output: msg
+			output:    msg
 		}
 	}
 	v_exe := resolve_v_compiler_exe()
@@ -615,12 +666,12 @@ fn run_v_argv(args []string, work_folder string) os.Result {
 	if timed_out {
 		return os.Result{
 			exit_code: compiler_exit_timeout
-			output: ''
+			output:    ''
 		}
 	}
 	return os.Result{
 		exit_code: code
-		output: out.str()
+		output:    out.str()
 	}
 }
 
@@ -728,12 +779,12 @@ fn (mut app App) prepare_compilation_overlay(real_path string) !CompilationOverl
 		}
 	}
 	return CompilationOverlay{
-		source_root: source_root
+		source_root:         source_root
 		source_display_root: source_display_root
-		temp_root: temp_root
-		source_work_dir: source_work_dir
-		temp_work_dir: temp_work_dir
-		temp_source_file: os.join_path(temp_root, file_rel)
+		temp_root:           temp_root
+		source_work_dir:     source_work_dir
+		temp_work_dir:       temp_work_dir
+		temp_source_file:    os.join_path(temp_root, file_rel)
 	}
 }
 
@@ -840,12 +891,12 @@ fn (mut app App) run_v_check(path string, text string) []JsonError {
 			err_file := source_path_from_overlay(err.path, overlay)
 			if normalized_index_path(err_file) == normalized_index_path(real_path) {
 				updated_err := JsonError{
-					path: real_path
+					path:    real_path
 					message: err.message
 					line_nr: err.line_nr
-					col: err.col
-					len: err.len
-					level: err.level
+					col:     err.col
+					len:     err.len
+					level:   err.level
 				}
 				filtered_errors << updated_err
 				log('INCLUDING ERROR from err_file=${err_file}: ${err.message}')
@@ -1513,7 +1564,7 @@ fn (mut app App) line_info_unavailable_result(method Method, path string, line_i
 			}
 			return Hover{
 				contents: MarkupContent{
-					kind: 'markdown'
+					kind:  'markdown'
 					value: doc
 				}
 			}
@@ -1630,7 +1681,7 @@ fn (mut app App) run_v_line_info(method Method, path string, line_info string) R
 			output = normalize_v_line_info_output(x.output, method)
 		}
 	}
-	if compiler_rejects_line_info(x.output) && compiler_refused_and_stopped(x.output) {
+	if (compiler_rejects_line_info(x.output) && compiler_refused_and_stopped(x.output)) || compiler_lacks_compatibility_compiler(x.output) {
 		// The invocation refused the options and did nothing else, so nothing
 		// here can answer and the single-file retry below would be refused for
 		// the same reason. An empty payload alone is not evidence: on a launcher
@@ -1639,6 +1690,7 @@ fn (mut app App) run_v_line_info(method Method, path string, line_info string) R
 		// compiler-backed hover, signature, and receiver definition.
 		log('no compiler serves -line-info; falling back to the index')
 		app.line_info_mode = .missing
+		app.report_missing_compatibility_compiler()
 		cleanup_compilation_temp(temp_project_dir, singlefile_tmppath)
 		return app.line_info_unavailable_result(method, path, line_info)
 	}
@@ -1696,7 +1748,7 @@ fn (mut app App) run_v_line_info(method Method, path string, line_info string) R
 				}
 				result = Hover{
 					contents: MarkupContent{
-						kind: 'markdown'
+						kind:  'markdown'
 						value: value
 					}
 				}
@@ -1704,7 +1756,7 @@ fn (mut app App) run_v_line_info(method Method, path string, line_info string) R
 				// Compiler returned no info but we found a vdoc comment
 				result = Hover{
 					contents: MarkupContent{
-						kind: 'markdown'
+						kind:  'markdown'
 						value: doc
 					}
 				}
@@ -1749,13 +1801,13 @@ fn (app &App) compiler_location(path string, line int, byte_col int) Location {
 	target_uri := index_uri_for_path(path, app.open_index_uris_by_path())
 	client_col := app.byte_col_to_client_col(target_uri, line, byte_col)
 	return Location{
-		uri: target_uri
+		uri:   target_uri
 		range: LSPRange{
 			start: Position{
 				line: line
 				char: client_col
 			}
-			end: Position{
+			end:   Position{
 				line: line
 				char: client_col
 			}
