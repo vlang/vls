@@ -365,8 +365,8 @@ mut:
 
 fn new_run_command_manager() &RunCommandManager {
 	return &RunCommandManager{
-		workers: sync.new_waitgroup()
-		processes: map[u64]&os.Process{}
+		workers:        sync.new_waitgroup()
+		processes:      map[u64]&os.Process{}
 		active_targets: map[string]u64{}
 	}
 }
@@ -506,7 +506,7 @@ fn run_managed_process(mut manager RunCommandManager, id u64, target string, exe
 		return ManagedRunResult{
 			result: os.Result{
 				exit_code: 1
-				output: 'Working dir does not exist: ${work_folder}'
+				output:    'Working dir does not exist: ${work_folder}'
 			}
 		}
 	}
@@ -548,9 +548,9 @@ fn run_managed_process(mut manager RunCommandManager, id u64, target string, exe
 	exit_code := process.code
 	process.close()
 	return ManagedRunResult{
-		result: os.Result{
+		result:    os.Result{
 			exit_code: exit_code
-			output: output.str()
+			output:    output.str()
 		}
 		cancelled: !registered || manager.job_is_cancelled(id, target)
 	}
@@ -598,11 +598,11 @@ fn run_code_lens_job(mut manager RunCommandManager, id u64, target string,
 	}
 	temp_dir := os.join_path(os.temp_dir(), 'vls_run_${os.getpid()}_${id}_${time.now().unix_nano()}')
 	mut worker := App{
-		open_files: job.open_files
-		temp_dir: temp_dir
+		open_files:     job.open_files
+		temp_dir:       temp_dir
 		capture_output: job.capture_output
-		write_mutex: job.write_mutex
-		tcp_conn: job.tcp_conn
+		write_mutex:    job.write_mutex
+		tcp_conn:       job.tcp_conn
 	}
 	os.mkdir_all(temp_dir) or {
 		worker.send_show_message('vls: ${job.title} could not create a temporary directory: ${err}', 1)

@@ -165,9 +165,9 @@ fn collect_document_highlight_candidates(content string, lines []string, symbol 
 		}
 		line := lines[position.line]
 		candidates << DocumentHighlightCandidate{
-			line_idx: position.line
+			line_idx:   position.line
 			start_byte: encoded_col_to_byte(line, position.start_char, enc)
-			end_byte: encoded_col_to_byte(line, position.end_char, enc)
+			end_byte:   encoded_col_to_byte(line, position.end_char, enc)
 		}
 	}
 	return candidates
@@ -182,7 +182,7 @@ fn (mut app App) handle_document_highlight(request Request) Response {
 			log('Failed to decode DocumentHighlightParams: ${err}')
 		}
 		return Response{
-			id: request.id
+			id:     request.id
 			result: []DocumentHighlight{}
 		}
 	}
@@ -190,14 +190,14 @@ fn (mut app App) handle_document_highlight(request Request) Response {
 	content := app.open_files[uri] or { os.read_file(uri_to_path(uri)) or { '' } }
 	if content == '' {
 		return Response{
-			id: request.id
+			id:     request.id
 			result: []DocumentHighlight{}
 		}
 	}
 	lines := content.split_into_lines()
 	if params.position.line < 0 || params.position.line >= lines.len {
 		return Response{
-			id: request.id
+			id:     request.id
 			result: []DocumentHighlight{}
 		}
 	}
@@ -205,21 +205,21 @@ fn (mut app App) handle_document_highlight(request Request) Response {
 	start, end := find_word_bounds_at_col(line_text, params.position.char, app.position_encoding)
 	if start < 0 || end <= start {
 		return Response{
-			id: request.id
+			id:     request.id
 			result: []DocumentHighlight{}
 		}
 	}
 	symbol := substr_by_char_bounds(line_text, start, end, app.position_encoding)
 	if symbol == '' {
 		return Response{
-			id: request.id
+			id:     request.id
 			result: []DocumentHighlight{}
 		}
 	}
 	candidates := collect_document_highlight_candidates(content, lines, symbol, app.position_encoding)
 	if candidates.len > document_highlight_semantic_max_candidates {
 		return Response{
-			id: request.id
+			id:     request.id
 			result: []DocumentHighlight{}
 		}
 	}
@@ -246,7 +246,7 @@ fn (mut app App) handle_document_highlight(request Request) Response {
 		mut kind := classify_highlight_kind(line, candidate.start_byte, candidate.end_byte)
 		if a := anchor {
 			occurrence := Location{
-				uri: uri
+				uri:   uri
 				range: LSPRange{
 					start: Position{
 						line: candidate.line_idx
@@ -264,16 +264,16 @@ fn (mut app App) handle_document_highlight(request Request) Response {
 					line: candidate.line_idx
 					char: start_char
 				}
-				end: Position{
+				end:   Position{
 					line: candidate.line_idx
 					char: end_char
 				}
 			}
-			kind: kind // Read/Write (P2-03)
+			kind:  kind // Read/Write (P2-03)
 		}
 	}
 	return Response{
-		id: request.id
+		id:     request.id
 		result: highlights
 	}
 }
