@@ -9,7 +9,7 @@ import time
 fn index_test_app() &App {
 	return &App{
 		open_files: map[string]string{}
-		temp_dir: os.temp_dir()
+		temp_dir:   os.temp_dir()
 	}
 }
 
@@ -105,7 +105,7 @@ fn test_watched_file_reindex_drops_oversized_disk_entry() {
 	app.on_did_change_watched_files(Request{
 		params: json2.encode(DidChangeWatchedFilesParams{
 			changes: [FileEvent{
-				uri: uri
+				uri:        uri
 				event_type: 1
 			}]
 		})
@@ -114,14 +114,14 @@ fn test_watched_file_reindex_drops_oversized_disk_entry() {
 	app.occurrences_for(uri)
 	assert uri in app.ref_occurrences
 
-	os.write_file(path, 'x'.repeat(index_max_file_bytes + 1)) or {
+	os.write_file(path, 'x'.repeat(int(index_max_file_bytes) + 1)) or {
 		assert false, 'grow watched file failed: ${err}'
 		return
 	}
 	app.on_did_change_watched_files(Request{
 		params: json2.encode(DidChangeWatchedFilesParams{
 			changes: [FileEvent{
-				uri: uri
+				uri:        uri
 				event_type: 2
 			}]
 		})
@@ -148,7 +148,7 @@ fn test_watched_file_reindex_obeys_total_entry_limit() {
 	app.on_did_change_watched_files(Request{
 		params: json2.encode(DidChangeWatchedFilesParams{
 			changes: [FileEvent{
-				uri: uri
+				uri:        uri
 				event_type: 1
 			}]
 		})
@@ -177,7 +177,7 @@ fn test_watched_file_reuses_equivalent_open_document_uri() {
 	app.on_did_change_watched_files(Request{
 		params: json2.encode(DidChangeWatchedFilesParams{
 			changes: [FileEvent{
-				uri: event_uri
+				uri:        event_uri
 				event_type: 2
 			}]
 		})
@@ -816,7 +816,7 @@ fn test_index_completeness_is_scoped_to_relevant_project() {
 		return
 	}
 	path_b := os.join_path(root_b, 'oversized.v')
-	os.write_file(path_b, 'x'.repeat(index_max_file_bytes + 1)) or {
+	os.write_file(path_b, 'x'.repeat(int(index_max_file_bytes) + 1)) or {
 		assert false, 'write oversized root_b file failed: ${err}'
 		return
 	}
@@ -1027,7 +1027,7 @@ fn test_index_large_multifile_project_stays_complete_and_incremental() {
 	app.on_did_change_watched_files(Request{
 		params: json2.encode(DidChangeWatchedFilesParams{
 			changes: [FileEvent{
-				uri: changed_uri
+				uri:        changed_uri
 				event_type: 2
 			}]
 		})
