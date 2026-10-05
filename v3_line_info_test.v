@@ -895,3 +895,115 @@ fn test_shutdown_keeps_the_program_copy_through_a_one_shot_check_fallback() {
 	assert !os.exists(pool.base)
 	assert !pool.begin_operation()
 }
+
+// Closing stdin does not end a process. Its pipe must be allowed to fail even
+// when the preceding is_alive check says the compiler is still running.
+const fake_server_closing_stdin = r"#!/bin/sh
+exec 0<&-
+echo v-diagnostics-server: ready
+sleep 1
+"
+
+fn test_a_closed_compiler_input_falls_back_and_stops_without_sigpipe() {
+	dir := os.join_path(os.vtmp_dir(), 'vls_pool_closed_input_${os.getpid()}')
+	os.mkdir_all(dir)!
+	defer {
+		os.rmdir_all(dir) or {}
+	}
+	exe := os.join_path(dir, 'v')
+	os.write_file(exe, fake_server_closing_stdin)!
+	os.chmod(exe, 0o755)!
+	mut pool := new_diagnostics_server_pool()
+	defer {
+		pool.stop_all()
+	}
+	answer := pool.query(exe, ['-check', '.'], dir, 'source.v:1:hv^1')
+	assert answer == none
+	assert pool.servers.len == 0
+	mut server := start_diagnostics_server(exe, [], dir)!
+	server.stop()
+	assert server.process == unsafe { nil }
+}
+
+const fake_server_delaying_cancelled_end = r"#!/bin/sh
+here=$(dirname $0)
+echo v-diagnostics-server: ready
+while read -r request rest; do
+	case $request in quit) exit 0 ;; esac
+	token=${rest%% *}
+	sleep 20 &
+	child=$!
+	echo v-diagnostics-server: child $child $token
+	echo $$ > $here/pid
+	touch $here/started
+	wait $child
+	sleep 1
+	printf '\nv-diagnostics-server: end 137 %s\n' $token
+done
+"
+
+fn test_session_shutdown_joins_the_cancelled_diagnostics_worker() {
+	mut app, fake := fake_v3_app('joined_shutdown', fake_server_delaying_cancelled_end, 'VLS_DIAGNOSTICS_SERVER')!
+	defer {
+		stop_fake_v3_app(mut app, fake)
+	}
+	mut scheduler := new_diagnostics_scheduler()
+	app.diagnostics_scheduler = scheduler
+	path := os.join_path(fake.project, 'main.v')
+	uri := path_to_uri(path)
+	content := os.read_file(path)!
+	app.open_files[uri] = content
+	scheduled := app.schedule_diagnostics(uri, content)
+	started := os.join_path(fake.server, 'started')
+	watch := time.new_stopwatch()
+	for !os.exists(started) && watch.elapsed() < 5 * time.second {
+		time.sleep(5 * time.millisecond)
+	}
+	was_started := os.exists(started)
+	pid := (os.read_file(os.join_path(fake.server, 'pid')) or { '0' }).trim_space().int()
+	app.stop_diagnostics_servers()
+	assert scheduled
+	assert was_started
+	assert pid > 0
+	assert C.kill(pid, 0) != 0, 'the session returned while its compiler was alive'
+	assert !scheduler.worker_running
+	assert !os.exists(scheduler.servers.base)
+}
+
+const fake_one_shot_check_waiting_forever = r"#!/bin/sh
+case ${V_DIAGNOSTICS_SERVER}x in 1x) exit 0 ;; esac
+here=$(dirname $0)
+echo $$ > $here/pid
+touch $here/started
+exec sleep 20
+"
+
+fn test_session_shutdown_cancels_a_one_shot_diagnostics_fallback() {
+	mut app, fake := fake_v3_app('joined_fallback', fake_one_shot_check_waiting_forever, 'VLS_V_COMMAND')!
+	defer {
+		stop_fake_v3_app(mut app, fake)
+	}
+	mut scheduler := new_diagnostics_scheduler()
+	app.diagnostics_scheduler = scheduler
+	path := os.join_path(fake.project, 'main.v')
+	uri := path_to_uri(path)
+	content := os.read_file(path)!
+	app.open_files[uri] = content
+	scheduled := app.schedule_diagnostics(uri, content)
+	started := os.join_path(fake.server, 'started')
+	watch := time.new_stopwatch()
+	for !os.exists(started) && watch.elapsed() < 5 * time.second {
+		time.sleep(5 * time.millisecond)
+	}
+	was_started := os.exists(started)
+	pid := (os.read_file(os.join_path(fake.server, 'pid')) or { '0' }).trim_space().int()
+	stopping := time.new_stopwatch()
+	app.stop_diagnostics_servers()
+	assert scheduled
+	assert was_started
+	assert stopping.elapsed() < 3 * time.second, 'shutdown waited for the compiler timeout'
+	assert pid > 0
+	assert C.kill(pid, 0) != 0
+	assert !scheduler.worker_running
+	assert !os.exists(scheduler.servers.base)
+}
