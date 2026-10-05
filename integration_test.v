@@ -115,7 +115,9 @@ fn test_integration_stdio_initialize_completion_and_hover() {
 	}
 	os.fd_close(transport.write_fd)
 	transport.write_fd = -1
-	assert os.fd_dup2(transport.read_fd, 0) >= 0
+	// Keep this outside `assert`: `-prod` removes assert statements whole, so a dup2
+	// hidden in one never runs and the read below waits on the real stdin forever.
+	os.fd_dup2(transport.read_fd, 0)
 
 	mut capture := os.stdio_capture() or {
 		assert false, 'failed to capture stdio test output: ${err}'
