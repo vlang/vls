@@ -507,15 +507,20 @@ fn collect_v_files(root string, mut acc []string) bool {
 fn collect_v_files_bounded(root string, max_files int, mut acc []string) bool {
 	mut visited := map[string]bool{}
 	canonical_root := os.real_path(root).replace('\\', '/')
-	mut entries_seen := 0
+	mut entries_seen := IndexWalkBudget{}
 	return collect_v_files_rec(root, canonical_root, max_files, mut acc, mut visited, mut entries_seen)
+}
+
+struct IndexWalkBudget {
+mut:
+	entries int
 }
 
 // collect_v_files_rec is the recursive worker; `visited` holds canonical
 // directories and files already seen, so symlink cycles and file aliases cannot
 // cause infinite recursion or duplicate index entries. `canonical_root` bounds
 // the walk to the workspace: a resolved path that escapes it is skipped.
-fn collect_v_files_rec(dir string, canonical_root string, max_files int, mut acc []string, mut visited map[string]bool, mut entries_seen int) bool {
+fn collect_v_files_rec(dir string, canonical_root string, max_files int, mut acc []string, mut visited map[string]bool, mut entries_seen IndexWalkBudget) bool {
 	if acc.len >= max_files {
 		return false
 	}
@@ -534,10 +539,10 @@ fn collect_v_files_rec(dir string, canonical_root string, max_files int, mut acc
 		if acc.len >= max_files {
 			return false
 		}
-		if entries_seen >= max_files * 4 {
+		if entries_seen.entries >= max_files * 4 {
 			return false
 		}
-		entries_seen++
+		entries_seen.entries++
 		full := os.join_path(dir, entry)
 		if os.is_dir(full) {
 			if entry.starts_with('.') || entry in index_excluded_dirs {
