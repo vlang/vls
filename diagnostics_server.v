@@ -1,6 +1,7 @@
 module main
 
 import os
+import strconv
 import sync
 import time
 
@@ -442,7 +443,17 @@ fn (mut s DiagnosticsServer) ask(line string, token string, timeout_ms int, canc
 		return error('malformed start of answer: ${child_line#[..80]}')
 	}
 	child_start := child_line.last_index(diagnostics_server_child) or { 0 }
-	child_pid := child_line[child_start + diagnostics_server_child.len..].all_before(' ').int()
+	child_text := child_line[child_start + diagnostics_server_child.len..].all_before(' ')
+	if child_text == '' || child_text.len > 10
+		|| !child_text.bytes().all(it >= `0` && it <= `9`) {
+		return error('invalid diagnostics child PID: ${child_text#[..40]}')
+	}
+	child_pid := strconv.atoi(child_text) or {
+		return error('invalid diagnostics child PID: ${child_text#[..40]}')
+	}
+	if child_pid <= 0 || child_pid > 2147483647 {
+		return error('invalid diagnostics child PID: ${child_text#[..40]}')
+	}
 	// Unbuffered output of the child can come before the line that names it.
 	mut early_output := child_line[..child_start]
 	suffix := ' ${token}\n'
