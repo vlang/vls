@@ -11,7 +11,7 @@ fn main_test_temp_dir(tag string) string {
 		assert false, 'Failed to create ${dir}: ${err}'
 		return dir
 	}
-	return dir
+	return os.real_path(dir)
 }
 
 fn main_test_write(path string, content string) {
