@@ -339,6 +339,56 @@ fn compiler_refused_and_stopped(output string) bool {
 	return refusals > 0
 }
 
+// compiler_lacks_compatibility_compiler reports whether an invocation failed
+// because the V launcher could not reach the V1 compatibility compiler, which is
+// what owns `-vls-mode` / `-line-info`. The launcher prints a single-line
+// refusal and exits without compiling, and that refusal is not an "unknown
+// option" line, so `compiler_rejects_line_info` never sees it. Without this
+// check VLS keeps paying a process launch per request for an answer that can
+// never arrive, and answers every hover, completion, and definition with an
+// empty result while saying nothing about why. Each refusal form below is one
+// `ensure_v1_fallback` failure in the launcher.
+fn compiler_lacks_compatibility_compiler(output string) bool {
+	for line in output.split_into_lines() {
+		trimmed := line.trim_space()
+		if trimmed == '' {
+			continue
+		}
+		// A launcher that can build the fallback itself announces that first and
+		// then answers the request, so this form must retire nothing.
+		if trimmed.contains('running `make v1` now') {
+			return false
+		}
+		if trimmed.contains('requires the compatibility compiler') {
+			return true
+		}
+		if trimmed.contains('`-old-compiler` was requested') {
+			return true
+		}
+		if trimmed.starts_with('`make v1` failed') {
+			return true
+		}
+		if trimmed.starts_with('`make v1` completed without installing') {
+			return true
+		}
+	}
+	return false
+}
+
+// report_missing_compatibility_compiler tells the user that the configured `v`
+// cannot serve the compiler-backed lookups, and how to fix it. Without this the
+// editor shows a VLS that highlights code but silently answers nothing for
+// completion, hover, signature help, and go to definition, which is
+// indistinguishable from VLS being broken.
+//
+// No "already warned" flag is needed: the caller sets `line_info_mode` to
+// `.missing` first, and from then on `run_v_line_info` returns from its early
+// `.missing` check without reaching this point, so it is reached at most once per
+// session.
+fn (mut app App) report_missing_compatibility_compiler() {
+	app.send_show_message('vls: the V compiler on PATH cannot serve completion, hover, signature help, or go to definition, because its V1 compatibility compiler is missing. Install `make`, then run `make v1` in your V source directory, or point `v.vls.command` at a V that has it. Diagnostics and formatting are unaffected.', 2)
+}
+
 // normalize_v_line_info_output extracts the actual line-info payload from the
 // compatibility compiler's combined stdout/stderr. Newer launchers may prepend
 // an option notice before delegating to the established compiler.
@@ -1631,7 +1681,7 @@ fn (mut app App) run_v_line_info(method Method, path string, line_info string) R
 			output = normalize_v_line_info_output(x.output, method)
 		}
 	}
-	if compiler_rejects_line_info(x.output) && compiler_refused_and_stopped(x.output) {
+	if (compiler_rejects_line_info(x.output) && compiler_refused_and_stopped(x.output)) || compiler_lacks_compatibility_compiler(x.output) {
 		// The invocation refused the options and did nothing else, so nothing
 		// here can answer and the single-file retry below would be refused for
 		// the same reason. An empty payload alone is not evidence: on a launcher
@@ -1640,6 +1690,7 @@ fn (mut app App) run_v_line_info(method Method, path string, line_info string) R
 		// compiler-backed hover, signature, and receiver definition.
 		log('no compiler serves -line-info; falling back to the index')
 		app.line_info_mode = .missing
+		app.report_missing_compatibility_compiler()
 		cleanup_compilation_temp(temp_project_dir, singlefile_tmppath)
 		return app.line_info_unavailable_result(method, path, line_info)
 	}
