@@ -439,6 +439,17 @@ struct IncomingMessage {
 	method     Method
 }
 
+// IncomingReader borrows the session reader until its reading thread joins.
+@[heap]
+struct IncomingReader[T] {
+mut:
+	reader &T
+}
+
+fn run_incoming_reader[T](mut borrowed IncomingReader[T], incoming chan IncomingMessage) {
+	read_incoming_messages(mut borrowed.reader, incoming)
+}
+
 // read_incoming_messages reads the messages of the client into `incoming`, up to
 // the end of the stream or the first failure, which it sends too.
 fn read_incoming_messages[T](mut reader T, incoming chan IncomingMessage) {
@@ -687,7 +698,10 @@ fn (mut app App) handle_requests[T](mut reader T) {
 	// The messages are read on a thread of their own, so that the ones that
 	// already arrived can be told apart: see next_incoming_index.
 	incoming := chan IncomingMessage{cap: incoming_message_queue}
-	reading := spawn read_incoming_messages(mut reader, incoming)
+	mut borrowed := &IncomingReader[T]{
+		reader: &reader
+	}
+	reading := spawn run_incoming_reader(mut borrowed, incoming)
 	defer {
 		incoming.close()
 		reading.wait()

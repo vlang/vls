@@ -590,7 +590,7 @@ fn (mut app App) type_members_at_depth(uri string, content string, typ string, d
 		items = declared.items.clone()
 		field_types = declared.field_types.clone()
 		field_declared_types = declared.field_declared_types.clone()
-		embedded_types = declared.embedded_types
+		embedded_types = declared.embedded_types.clone()
 		use_compiler = declared.use_compiler
 		resolved_type = declared.resolved_type
 		decl := app.type_declaration(uri, content, t)

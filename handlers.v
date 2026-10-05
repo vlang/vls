@@ -8127,7 +8127,7 @@ fn (mut app App) builtin_call_items() map[string]Detail {
 				}
 			}
 		}
-		app.builtin_calls_cache[dir] = items
+		app.builtin_calls_cache[dir] = items.clone()
 	}
 	return app.builtin_calls_cache[dir] or { map[string]Detail{} }
 }

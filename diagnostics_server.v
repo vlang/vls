@@ -385,7 +385,7 @@ fn kill_compiler_process(mut process os.Process) {
 	process.wait()
 }
 
-fn start_diagnostics_server(exe string, args []string, work_dir string, prepare bool, shared bool) !&DiagnosticsServer {
+fn start_diagnostics_server(exe string, args []string, work_dir string, prepare bool, shared_program bool) !&DiagnosticsServer {
 	mut p := os.new_process(exe)
 	// The memory watchdog runs on a thread of its own, and a server forks only
 	// while the worker pools are the sole threads.
@@ -398,7 +398,7 @@ fn start_diagnostics_server(exe string, args []string, work_dir string, prepare 
 	if prepare {
 		env['V_DIAGNOSTICS_PREPARE'] = '1'
 	}
-	if shared {
+	if shared_program {
 		env['V_DIAGNOSTICS_SHARED'] = '1'
 		// Its checks may send the errors they found before the end of the check.
 		env['V_DIAGNOSTICS_PARTIAL'] = '1'
