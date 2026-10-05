@@ -11862,6 +11862,14 @@ fn main() {
 }
 "
 	}
+	// Probe the compiler, independently of VLS: older V3 versions do not yet
+	// accept constrained type parameters. The lexical regression above still
+	// exercises their recognition with those compilers.
+	mut probe, uris := new_rename_project_app_with(files)
+	defer { cleanup_rename_app(mut probe) }
+	checked := run_v_argv(['-new-compiler', '-check', '-nocolor', '.'],
+		os.dir(uri_to_path(uris['main.v'])))
+	if checked.exit_code != 0 { return }
 	assert rename_edits_in(files, 'main.v:7:8') == ['main.v:20:7', 'main.v:7:8']
 }
 
