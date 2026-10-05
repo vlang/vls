@@ -3454,6 +3454,93 @@ fn test_multifile_change_single_file() {
 	assert app.open_files[utils_uri].contains('helper') // utils unchanged
 }
 
+fn test_handle_formatting_preserves_crlf_line_endings() {
+	// `v fmt` writes LF on every platform, so a CRLF buffer used to come back
+	// with every CR stripped and be replaced wholesale — a whole-file line-ending
+	// rewrite from a plain Format Document.
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+
+	test_dir := os.join_path(app.temp_dir, 'project')
+	must_mkdir_all(test_dir)
+	test_file := os.join_path(test_dir, 'crlf.v')
+
+	crlf := 'module main\r\n\r\nfn   badly_formatted(   x    int,y int   )int{\r\nreturn x+y\r\n}\r\n'
+	must_write_file(test_file, crlf)
+
+	uri := path_to_uri(test_file)
+	app.open_files[uri] = crlf
+
+	request := Request{
+		id:      1
+		method:  'textDocument/formatting'
+		jsonrpc: '2.0'
+		params:  json2.encode(Params{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+		},
+			escape_unicode: true
+		)
+	}
+
+	response := app.handle_formatting(request)
+	if response.result is []TextEdit {
+		edits := response.result as []TextEdit
+		assert edits.len > 0
+		formatted_text := edits[0].new_text
+		// The code is formatted...
+		assert formatted_text.contains('fn badly_formatted(x int, y int) int {')
+		assert formatted_text.contains('\treturn x + y')
+		// ...and the document keeps CRLF throughout.
+		assert formatted_text.contains('\r\n')
+		assert !formatted_text.replace('\r\n', '').contains('\n')
+	} else {
+		assert false, 'Expected []TextEdit result'
+	}
+}
+
+fn test_handle_formatting_already_formatted_crlf_is_a_no_op() {
+	// The stronger half of the same bug: with CRLF stripped, `formatted` could
+	// never equal `content`, so VLS reported a change for code that was already
+	// correctly formatted and made the whole file look modified.
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+
+	test_dir := os.join_path(app.temp_dir, 'project')
+	must_mkdir_all(test_dir)
+	test_file := os.join_path(test_dir, 'already.v')
+
+	// Exactly what `v fmt` produces, but with CRLF terminators.
+	crlf := "module main\r\n\r\nfn main() {\r\n\tprintln('hi')\r\n}\r\n"
+	must_write_file(test_file, crlf)
+
+	uri := path_to_uri(test_file)
+	app.open_files[uri] = crlf
+
+	edits, formatted := app.format_content(uri, crlf)
+	assert edits.len == 0
+	assert formatted == ''
+}
+
+fn test_restore_line_endings_leaves_lf_documents_alone() {
+	// The LF path must not regress: an LF document stays byte-identical.
+	lf := 'module main\n\nfn main() {\n\tprintln(1)\n}\n'
+	assert restore_line_endings(lf, lf) == lf
+	// A document with no line break has no convention to preserve.
+	assert restore_line_endings('', 'fn main() {}') == 'fn main() {}'
+	// Output that already has CRLF is not given a second CR.
+	assert restore_line_endings('a\r\nb\r\n', 'a\r\nb\r\n') == 'a\r\nb\r\n'
+	// CRLF in, CRLF out.
+	assert restore_line_endings('a\r\nb\r\n', 'a\nb\n') == 'a\r\nb\r\n'
+	// Mixed endings normalize to the first one, the dominant convention.
+	assert restore_line_endings('a\r\nb\nc', 'x\ny\n') == 'x\r\ny\r\n'
+}
+
 fn test_handle_formatting_formats_code() {
 	mut app := create_test_app()
 	defer {

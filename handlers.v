@@ -6168,6 +6168,34 @@ fn search_doc_in_vlib_dir(dir string, symbol string) string {
 // format_content formats the given content via v fmt and returns the TextEdits
 // needed to replace the document with its formatted version, plus the formatted
 // text. Returns empty edits if the content is already properly formatted.
+// restore_line_endings rewrites the formatter's LF-only output to use the line
+// terminator `original` already uses, so formatting a document never changes its
+// line endings. `v fmt` normalizes every terminator to LF on every platform,
+// which on Windows turns a Format Document into a whole-file CRLF-to-LF rewrite.
+//
+// The terminator is taken from the document's first line break: a document with
+// no line break at all, or one that uses LF, is left as LF. A file whose endings
+// are already mixed is normalized to its first ending, which is what a formatter
+// that respects the dominant convention would do.
+fn restore_line_endings(original string, formatted string) string {
+	if !formatted.contains('\n') || formatted.contains('\r\n') {
+		return formatted
+	}
+	mut ending := '\n'
+	for i in 0 .. original.len {
+		if original[i] == `\n` {
+			if i > 0 && original[i - 1] == `\r` {
+				ending = '\r\n'
+			}
+			break
+		}
+	}
+	if ending == '\n' {
+		return formatted
+	}
+	return formatted.replace('\n', '\r\n')
+}
+
 fn (mut app App) format_content(uri string, content string) ([]TextEdit, string) {
 	real_path := uri_to_path(uri)
 
@@ -6196,6 +6224,14 @@ fn (mut app App) format_content(uri string, content string) ([]TextEdit, string)
 		}
 		return []TextEdit{}, ''
 	}
+
+	// `v fmt` always writes LF, including on Windows, so a CRLF document comes
+	// back with every CR stripped. Returning that verbatim would rewrite the whole
+	// buffer's line endings on a plain Format Document, and the `formatted ==
+	// content` check below could never hold for a CRLF file, so VLS would report
+	// a change even when the code was already formatted. Put back the terminator
+	// the document already uses.
+	formatted = restore_line_endings(content, formatted)
 
 	if formatted == '' || formatted == content {
 		return []TextEdit{}, ''
