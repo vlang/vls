@@ -199,6 +199,26 @@ fn test_overlay_path_lists_can_use_windows_case_rules() {
 	assert !overlay_path_has_descendant_with_case('src', tracked_paths, false)
 }
 
+fn test_path_to_uri_keeps_the_authority_of_a_unc_path() {
+	// An editor opens a file on a Windows network share as `file://server/...`,
+	// and `uri_to_path` already resolves that authority to a `//server/share/...`
+	// UNC path. Re-encoding that path must reproduce the same URI, because VLS
+	// keys open buffers, the index, and every published diagnostic by URI.
+	assert uri_to_path('file://server/share/proj/main.v') == '//server/share/proj/main.v'
+	assert path_to_uri('//server/share/proj/main.v') == 'file://server/share/proj/main.v'
+	assert path_to_uri(uri_to_path('file://server/share/proj/main.v')) == 'file://server/share/proj/main.v'
+	// The share is the authority, not the first path segment: four slashes put it
+	// in the path and produce a URI no client will match.
+	assert !path_to_uri('//server/share/proj/main.v').starts_with('file:////')
+	// Characters that need escaping still are, and the round trip holds.
+	assert path_to_uri('//server/share/my project/main.v') == 'file://server/share/my%20project/main.v'
+	assert uri_to_path(path_to_uri('//server/share/my project/main.v')) == '//server/share/my project/main.v'
+	// A single leading slash stays an ordinary local path, so POSIX paths and
+	// Windows drive paths are unaffected.
+	assert path_to_uri('/home/user/project/main.v') == 'file:///home/user/project/main.v'
+	assert path_to_uri('C:/Users/me/main.v') == 'file:///C:/Users/me/main.v'
+}
+
 // --- path_to_uri tests ---
 
 fn test_path_to_uri_unix() {

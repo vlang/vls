@@ -198,6 +198,15 @@ fn path_to_uri(path string) string {
 		return 'file:///'
 	}
 	mut normalized := os.to_slash(path)
+	// A UNC path carries its host in the URI authority (RFC 8089), so
+	// `//server/share/main.v` must become `file://server/share/main.v`. Treating
+	// it as an ordinary absolute path instead yields `file:////server/share/...`,
+	// which is not a valid file URI and, worse, no longer round-trips: a client
+	// that opened the file as `file://server/share/main.v` would never match the
+	// key VLS derives for it.
+	if normalized.starts_with('//') {
+		return 'file:' + percent_encode_path(normalized)
+	}
 	// Windows drive letter: C:/Users/... -> /C:/Users/... so the URI keeps a
 	// leading slash before the authority-less path.
 	if normalized.len >= 2 && normalized[1] == `:` {
