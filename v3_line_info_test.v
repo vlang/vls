@@ -828,3 +828,70 @@ fn test_a_session_that_ends_without_a_shutdown_removes_its_copies() {
 	app.handle_requests(mut reader)
 	assert !os.exists(copy_root)
 }
+
+fn test_stopping_a_pool_keeps_copies_until_their_operation_releases_them() {
+	mut pool := new_diagnostics_server_pool()
+	assert pool.begin_operation()
+	os.mkdir_all(pool.base)!
+	pool.stop_all()
+	assert os.is_dir(pool.base)
+	assert !pool.begin_operation()
+	pool.end_operation()
+	assert !os.exists(pool.base)
+}
+
+fn test_a_closed_query_pool_does_not_recreate_a_program_copy() {
+	mut app, fake := fake_v3_app('closed_pool', fake_v3_query_server, 'VLS_DIAGNOSTICS_SERVER')!
+	defer { stop_fake_v3_app(mut app, fake) }
+	mut pool := app.v3_query_pool()
+	pool.stop_all()
+	path := os.join_path(fake.project, 'main.v')
+	assert app.v3_line_info(.hover, path_to_uri(path), path, '4:hv^2') == none
+	assert app.v3_query_projects.len == 0
+	assert !os.exists(pool.base)
+	assert fake.questions().len == 0
+}
+
+// A compiler without a server that waits until the test releases its check.
+const fake_check_waiting_for_release = r"#!/bin/sh
+case ${V_DIAGNOSTICS_SERVER}x in 1x) exit 0 ;; esac
+here=$(dirname $0)
+touch $here/started
+while [ ! -f $here/release ]; do sleep 0.01; done
+if [ ! -f main.v ]; then echo 'error: the program copy disappeared'; exit 1; fi
+exit 0
+"
+
+fn check_app_and_report(mut app App, uri string, content string, done chan bool) {
+	app.run_v_check(uri, content)
+	done <- true
+}
+
+fn test_shutdown_keeps_the_program_copy_through_a_one_shot_check_fallback() {
+	mut app, fake := fake_v3_app('shutdown_fallback', fake_check_waiting_for_release, 'VLS_V_COMMAND')!
+	defer { stop_fake_v3_app(mut app, fake) }
+	os.setenv('VLS_DIAGNOSTICS_SERVER', os.join_path(fake.server, 'v'), true)
+	mut pool := new_diagnostics_server_pool()
+	app.diagnostics_servers = pool
+	path := os.join_path(fake.project, 'main.v')
+	uri := path_to_uri(path)
+	content := os.read_file(path)!
+	app.open_files[uri] = content
+	other := os.join_path(fake.project, 'other.v')
+	app.open_files[path_to_uri(other)] = os.read_file(other)!
+	done := chan bool{cap: 1}
+	spawn check_app_and_report(mut app, uri, content, done)
+	watch := time.new_stopwatch()
+	for !os.exists(os.join_path(fake.server, 'started')) && watch.elapsed() < 5 * time.second {
+		time.sleep(5 * time.millisecond)
+	}
+	started := os.exists(os.join_path(fake.server, 'started'))
+	pool.stop_all()
+	kept := os.is_dir(pool.base)
+	os.write_file(os.join_path(fake.server, 'release'), '')!
+	_ := <-done
+	assert started
+	assert kept
+	assert !os.exists(pool.base)
+	assert !pool.begin_operation()
+}

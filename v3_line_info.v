@@ -142,6 +142,9 @@ fn (mut app App) v3_hover(uri string, real_path string, line_info string) ?V3Hov
 // v3_ask asks V3 `questions` about files of the program that holds the file at
 // `real_path`, all in one check.
 fn (mut app App) v3_ask(real_path string, questions []V3Question) ?V3Answers {
+	mut pool := app.v3_query_pool()
+	if !pool.begin_operation() { return none }
+	defer { pool.end_operation() }
 	program_dir := app.program_root(real_path)
 	mut project := app.v3_query_project(real_path, program_dir) or {
 		log('no V3 copy of ${program_dir}: ${err}')

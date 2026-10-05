@@ -21,6 +21,8 @@ mut:
 	servers     map[string]&DiagnosticsServer
 	unsupported map[string]bool
 	requests    u64
+	closed      bool
+	operations  int
 	// The directory of the files its servers check, which no other pool uses:
 	// the editors one VLS serves over TCP, and the checks and the questions of
 	// one editor, neither write nor remove each other's files.
@@ -56,6 +58,36 @@ fn new_diagnostics_server_pool() &DiagnosticsServerPool {
 	return pool
 }
 
+// begin_operation keeps the pool's files alive through copy preparation and
+// any compiler fallback, not just while a server is answering.
+fn (mut pool DiagnosticsServerPool) begin_operation() bool {
+	pool.mutex.lock()
+	defer {
+		pool.mutex.unlock()
+	}
+	if pool.closed {
+		return false
+	}
+	pool.operations++
+	return true
+}
+
+fn (mut pool DiagnosticsServerPool) end_operation() {
+	pool.mutex.lock()
+	defer {
+		pool.mutex.unlock()
+	}
+	pool.operations--
+	pool.clean_closed_pool()
+}
+
+// clean_closed_pool is called under the pool lock, after its servers retire.
+fn (mut pool DiagnosticsServerPool) clean_closed_pool() {
+	if pool.closed && pool.operations == 0 {
+		os.rmdir_all(pool.base) or {}
+	}
+}
+
 // check runs the compiler with `args` in `work_dir` through a server, starting
 // one for this command line when needed. It returns none when no server can
 // answer, which leaves the caller to run the compiler itself.
@@ -75,6 +107,8 @@ fn (mut pool DiagnosticsServerPool) query(exe string, args []string, work_dir st
 // request sends a `check`, or a `query` of `question` when there is one, and
 // waits `timeout_ms` for the answer.
 fn (mut pool DiagnosticsServerPool) request(exe string, args []string, work_dir string, question string, timeout_ms int, cancelled fn () bool) ?os.Result {
+	if !pool.begin_operation() { return none }
+	defer { pool.end_operation() }
 	key := '${exe}\n${work_dir}\n${args.join('\n')}'
 	// The compiler reads v.mod and .vvmrc once, before it forks, so a server
 	// started before they changed can never answer again: a new one replaces it.
@@ -83,7 +117,7 @@ fn (mut pool DiagnosticsServerPool) request(exe string, args []string, work_dir 
 	defer {
 		pool.mutex.unlock()
 	}
-	if pool.unsupported['${key}\n${fingerprint}'] {
+	if pool.closed || pool.unsupported['${key}\n${fingerprint}'] {
 		return none
 	}
 	if mut outdated := pool.servers[key] {
@@ -163,11 +197,12 @@ fn (mut pool DiagnosticsServerPool) stop_all() {
 	defer {
 		pool.mutex.unlock()
 	}
+	pool.closed = true
 	for _, mut server in pool.servers {
 		server.stop()
 	}
 	pool.servers.clear()
-	os.rmdir_all(pool.base) or {}
+	pool.clean_closed_pool()
 }
 
 fn start_diagnostics_server(exe string, args []string, work_dir string) !&DiagnosticsServer {

@@ -115,6 +115,9 @@ fn (mut app App) check_rename_conflicts(target RenameTarget, locations []Locatio
 // `program_dir`, whose files at `paths` it edits or holds the new name, or
 // an empty string when it would not, or an error when validation fails.
 fn (mut app App) rename_clash_in(program_dir string, paths []string, rc RenameCheck) !string {
+	mut pool := app.v3_query_pool()
+	if !pool.begin_operation() { return error('the compiler pool is closed') }
+	defer { pool.end_operation() }
 	mut project := app.v3_query_project(paths[0], program_dir)!
 	app.v3_sync_open_files(mut project)!
 	// The copy is kept for the questions that come later, as v3_ask keeps it, with
