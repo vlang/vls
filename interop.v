@@ -198,6 +198,15 @@ fn path_to_uri(path string) string {
 		return 'file:///'
 	}
 	mut normalized := os.to_slash(path)
+	// A UNC path carries its host in the URI authority (RFC 8089), so
+	// `//server/share/main.v` must become `file://server/share/main.v`. Treating
+	// it as an ordinary absolute path instead yields `file:////server/share/...`,
+	// which is not a valid file URI and, worse, no longer round-trips: a client
+	// that opened the file as `file://server/share/main.v` would never match the
+	// key VLS derives for it.
+	if normalized.starts_with('//') {
+		return 'file:' + percent_encode_path(normalized)
+	}
 	// Windows drive letter: C:/Users/... -> /C:/Users/... so the URI keeps a
 	// leading slash before the authority-less path.
 	if normalized.len >= 2 && normalized[1] == `:` {
@@ -337,6 +346,56 @@ fn compiler_refused_and_stopped(output string) bool {
 		refusals++
 	}
 	return refusals > 0
+}
+
+// compiler_lacks_compatibility_compiler reports whether an invocation failed
+// because the V launcher could not reach the V1 compatibility compiler, which is
+// what owns `-vls-mode` / `-line-info`. The launcher prints a single-line
+// refusal and exits without compiling, and that refusal is not an "unknown
+// option" line, so `compiler_rejects_line_info` never sees it. Without this
+// check VLS keeps paying a process launch per request for an answer that can
+// never arrive, and answers every hover, completion, and definition with an
+// empty result while saying nothing about why. Each refusal form below is one
+// `ensure_v1_fallback` failure in the launcher.
+fn compiler_lacks_compatibility_compiler(output string) bool {
+	for line in output.split_into_lines() {
+		trimmed := line.trim_space()
+		if trimmed == '' {
+			continue
+		}
+		// A launcher can announce a fallback build before either answering the
+		// request or reporting that the build failed. Keep scanning for a failure.
+		if trimmed.contains('running `make v1` now') {
+			continue
+		}
+		// A successful explicit compatibility retry also starts with
+		// `-old-compiler` was requested, but follows it with "; retrying".
+		if trimmed.starts_with('`-vls-mode` requires the compatibility compiler, but ')
+			|| trimmed.starts_with('`-old-compiler` was requested, but ') {
+			return true
+		}
+		if trimmed.starts_with('`make v1` failed') {
+			return true
+		}
+		if trimmed.starts_with('`make v1` completed without installing') {
+			return true
+		}
+	}
+	return false
+}
+
+// report_missing_compatibility_compiler tells the user that the configured `v`
+// cannot serve the compiler-backed lookups, and how to fix it. Without this the
+// editor shows a VLS that highlights code but silently answers nothing for
+// completion, hover, signature help, and go to definition, which is
+// indistinguishable from VLS being broken.
+//
+// No "already warned" flag is needed: the caller sets `line_info_mode` to
+// `.missing` first, and from then on `run_v_line_info` returns from its early
+// `.missing` check without reaching this point, so it is reached at most once per
+// session.
+fn (mut app App) report_missing_compatibility_compiler() {
+	app.send_show_message('vls: the configured V compiler cannot serve completion, hover, signature help, or go to definition, because its V1 compatibility compiler is missing. Install `make`, then run `make v1` in your V source directory, or set `VLS_V_COMMAND` to a V compiler that has it. Diagnostics and formatting are unaffected.', 2)
 }
 
 // normalize_v_line_info_output extracts the actual line-info payload from the
@@ -1631,7 +1690,7 @@ fn (mut app App) run_v_line_info(method Method, path string, line_info string) R
 			output = normalize_v_line_info_output(x.output, method)
 		}
 	}
-	if compiler_rejects_line_info(x.output) && compiler_refused_and_stopped(x.output) {
+	if (compiler_rejects_line_info(x.output) && compiler_refused_and_stopped(x.output)) || compiler_lacks_compatibility_compiler(x.output) {
 		// The invocation refused the options and did nothing else, so nothing
 		// here can answer and the single-file retry below would be refused for
 		// the same reason. An empty payload alone is not evidence: on a launcher
@@ -1640,6 +1699,7 @@ fn (mut app App) run_v_line_info(method Method, path string, line_info string) R
 		// compiler-backed hover, signature, and receiver definition.
 		log('no compiler serves -line-info; falling back to the index')
 		app.line_info_mode = .missing
+		app.report_missing_compatibility_compiler()
 		cleanup_compilation_temp(temp_project_dir, singlefile_tmppath)
 		return app.line_info_unavailable_result(method, path, line_info)
 	}
