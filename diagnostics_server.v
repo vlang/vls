@@ -21,6 +21,10 @@ mut:
 	servers     map[string]&DiagnosticsServer
 	unsupported map[string]bool
 	requests    u64
+	// Closing rejects new work. Operations already holding a server or a copy
+	// keep its files until the last one releases them.
+	closed     bool
+	operations int
 	// The directory of the files its servers check, which no other pool uses:
 	// the editors one VLS serves over TCP, and the checks and the questions of
 	// one editor, neither write nor remove each other's files.
@@ -108,6 +112,37 @@ fn new_shared_diagnostics_server_pool() &DiagnosticsServerPool {
 	return pool
 }
 
+// begin_operation keeps the pool's files alive through copy preparation and
+// any compiler fallback, not just while a server is answering.
+fn (mut pool DiagnosticsServerPool) begin_operation() bool {
+	pool.mutex.lock()
+	defer {
+		pool.mutex.unlock()
+	}
+	if pool.closed {
+		return false
+	}
+	pool.operations++
+	return true
+}
+
+fn (mut pool DiagnosticsServerPool) end_operation() {
+	pool.mutex.lock()
+	defer {
+		pool.mutex.unlock()
+	}
+	pool.operations--
+	pool.clean_closed_pool()
+}
+
+// clean_closed_pool is called under the pool lock, after its servers retire.
+fn (mut pool DiagnosticsServerPool) clean_closed_pool() {
+	if pool.closed && pool.operations == 0 {
+		pool.copies.clear()
+		os.rmdir_all(pool.base) or {}
+	}
+}
+
 // program_copy returns the copy of the program in `program_dir`, not built yet
 // the first time.
 fn (mut pool DiagnosticsServerPool) program_copy(program_dir string) &ProgramCopy {
@@ -158,6 +193,12 @@ fn (mut pool DiagnosticsServerPool) query(exe string, args []string, work_dir st
 // waits `timeout_ms` for the answer; `partial`, when set, gets the partial
 // answer of a check (see DiagnosticsServer.ask).
 fn (mut pool DiagnosticsServerPool) request(exe string, args []string, work_dir string, question string, timeout_ms int, cancelled fn () bool, partial fn (os.Result)) ?os.Result {
+	if !pool.begin_operation() {
+		return none
+	}
+	defer {
+		pool.end_operation()
+	}
 	key := '${exe}\n${work_dir}\n${args.join('\n')}'
 	mut server, token := pool.take_server(key, exe, args, work_dir) or { return none }
 	line := if question == '' { 'check ${token}' } else { 'query ${token} ${question}' }
@@ -197,6 +238,9 @@ fn (mut pool DiagnosticsServerPool) take_server(key string, exe string, args []s
 	defer {
 		pool.mutex.unlock()
 	}
+	if pool.closed {
+		return none
+	}
 	if pool.unsupported['${key}\n${fingerprint}'] {
 		return none
 	}
@@ -231,6 +275,9 @@ fn (mut pool DiagnosticsServerPool) give_back(key string, mut server Diagnostics
 		pool.mutex.unlock()
 	}
 	server.users--
+	if server.users > 0 {
+		return
+	}
 	if server.process == unsafe { nil } {
 		if current := pool.servers[key] {
 			if voidptr(current) == voidptr(server) {
@@ -289,19 +336,19 @@ fn (pool &DiagnosticsServerPool) least_recently_used(programs bool) string {
 	return oldest_key
 }
 
-// stop_all ends every server and removes the files they checked.
+// stop_all rejects new work and retires every server. Requests already using
+// one stop it on release; their copies stay until the last operation finishes.
 fn (mut pool DiagnosticsServerPool) stop_all() {
 	pool.mutex.lock()
 	defer {
 		pool.mutex.unlock()
 	}
+	pool.closed = true
 	for _, mut server in pool.servers {
-		server.stop()
+		pool.retire(mut server)
 	}
 	pool.servers.clear()
-	// A request that holds a copy keeps it; the next one builds a new one.
-	pool.copies.clear()
-	os.rmdir_all(pool.base) or {}
+	pool.clean_closed_pool()
 }
 
 fn start_diagnostics_server(exe string, args []string, work_dir string, prepare bool, shared bool) !&DiagnosticsServer {

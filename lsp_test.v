@@ -5,6 +5,53 @@ module main
 import json2
 import io
 import os
+import net
+import time
+
+fn read_tcp_messages_and_report(mut reader io.BufferedReader, incoming chan IncomingMessage, done chan bool) {
+	read_incoming_messages(mut reader, incoming)
+	done <- true
+}
+
+fn test_tcp_reader_finishes_on_exit_while_the_peer_remains_open() {
+	mut listener := net.listen_tcp(.ip, '127.0.0.1:0')!
+	defer {
+		listener.close() or {}
+	}
+	address := listener.addr()!
+	mut client := net.dial_tcp(address.str())!
+	defer {
+		client.close() or {}
+	}
+	mut conn := listener.accept()!
+	defer {
+		conn.close() or {}
+	}
+	mut reader := io.new_buffered_reader(reader: conn, cap: transport_buffer_cap)
+	incoming := chan IncomingMessage{cap: 2}
+	done := chan bool{cap: 1}
+	spawn read_tcp_messages_and_report(mut reader, incoming, done)
+	// An exit-shaped request is invalid and must leave the reader running.
+	for message in ['{"jsonrpc":"2.0","id":1,"method":"exit"}', '{"jsonrpc":"2.0","method":"exit"}'] {
+		client.write_string('Content-Length: ${message.len}\r\n\r\n${message}')!
+	}
+	mut finished := false
+	select {
+		_ := <-done {
+			finished = true
+		}
+		2 * time.second {
+			// Unblock the old reader before failing so no thread outlives conn.
+			client.close() or {}
+			_ := <-done
+		}
+	}
+	assert finished, 'the reader waited for TCP EOF after exit'
+	invalid := <-incoming
+	exit_message := <-incoming
+	assert invalid.method == .exit && invalid.is_request
+	assert exit_message.method == .exit && !exit_message.is_request
+}
 
 fn test_stdio_reader_processes_frame_before_eof() {
 	mut transport := os.pipe() or {

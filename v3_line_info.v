@@ -146,6 +146,12 @@ fn (mut app App) v3_hover(uri string, real_path string, line_info string) ?V3Hov
 fn (mut app App) v3_ask(real_path string, questions []V3Question) ?V3Answers {
 	program_dir := app.program_root(real_path)
 	mut pool := app.v3_query_pool()
+	if !pool.begin_operation() {
+		return none
+	}
+	defer {
+		pool.end_operation()
+	}
 	mut program := pool.program_copy(program_dir)
 	program.mutex.lock()
 	defer {

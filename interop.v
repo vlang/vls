@@ -1225,6 +1225,15 @@ fn (mut app App) run_v_check(path string, text string) []JsonError {
 
 	log('running v.exe check for ${real_path}')
 	log('Open files count: ${app.open_files.len}')
+	mut pool := app.diagnostics_servers
+	if pool != unsafe { nil } && !pool.begin_operation() {
+		return []
+	}
+	defer {
+		if pool != unsafe { nil } {
+			pool.end_operation()
+		}
+	}
 
 	// A diagnostics server answers for the input it started with, so the files
 	// it checks keep their paths from one check to the next.

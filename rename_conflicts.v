@@ -116,6 +116,12 @@ fn (mut app App) check_rename_conflicts(target RenameTarget, locations []Locatio
 // an empty string when it would not, or an error when validation fails.
 fn (mut app App) rename_clash_in(program_dir string, paths []string, rc RenameCheck) !string {
 	mut pool := app.v3_query_pool()
+	if !pool.begin_operation() {
+		return none
+	}
+	defer {
+		pool.end_operation()
+	}
 	mut program := pool.program_copy(program_dir)
 	program.mutex.lock()
 	defer {

@@ -461,6 +461,11 @@ fn read_incoming_messages[T](mut reader T, incoming chan IncomingMessage) {
 			}
 		}
 		incoming <- message or { return }
+		// Exit ends the stream even if a TCP peer keeps its socket open. Do not
+		// borrow the caller's reader for another blocking read after this message.
+		if message.method == .exit && !message.is_request {
+			return
+		}
 	}
 }
 
@@ -682,9 +687,10 @@ fn (mut app App) handle_requests[T](mut reader T) {
 	// The messages are read on a thread of their own, so that the ones that
 	// already arrived can be told apart: see next_incoming_index.
 	incoming := chan IncomingMessage{cap: incoming_message_queue}
-	spawn read_incoming_messages(mut reader, incoming)
+	reading := spawn read_incoming_messages(mut reader, incoming)
 	defer {
 		incoming.close()
+		reading.wait()
 		app.cancel_all_scheduled_diagnostics()
 		app.stop_run_commands()
 		// However the session ends, its compilers end, and the files they
@@ -701,7 +707,8 @@ fn (mut app App) handle_requests[T](mut reader T) {
 			first := <-incoming or { break }
 			pending << first
 		}
-		for {
+		// Dispatch a bounded batch even when the client keeps the queue full.
+		for pending.len < incoming_message_queue {
 			select {
 				next := <-incoming {
 					pending << next

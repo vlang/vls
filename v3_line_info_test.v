@@ -891,6 +891,105 @@ fn check_in_background(mut pool DiagnosticsServerPool, exe string, dir string, d
 	done <- true
 }
 
+const fake_server_waiting_for_release = r"#!/bin/sh
+here=$(dirname $0)
+echo v-diagnostics-server: ready
+while read -r request rest; do
+	case $request in quit) exit 0 ;; esac
+	token=${rest%% *}
+	echo v-diagnostics-server: child 1 $token
+	touch $here/started
+	while [ ! -f $here/release ]; do sleep 0.01; done
+	if [ -f source.v ]; then echo kept; else echo missing; fi
+	printf '\nv-diagnostics-server: end 0 %s\n' $token
+done
+"
+
+fn delayed_pool_query(mut pool DiagnosticsServerPool, exe string, dir string, done chan os.Result) {
+	result := pool.query(exe, ['-check', '.'], dir, 'source.v:1:hv^1') or {
+		os.Result{
+			exit_code: -99
+		}
+	}
+	done <- result
+}
+
+fn test_stopping_a_pool_retires_active_servers_without_removing_their_files() {
+	dir := os.join_path(os.vtmp_dir(), 'vls_pool_shutdown_${os.getpid()}')
+	os.mkdir_all(dir)!
+	defer {
+		os.rmdir_all(dir) or {}
+	}
+	exe := os.join_path(dir, 'v')
+	os.write_file(exe, fake_server_waiting_for_release)!
+	os.chmod(exe, 0o755)!
+	mut pool := new_diagnostics_server_pool()
+	defer {
+		pool.stop_all()
+	}
+	os.mkdir_all(pool.base)!
+	os.write_file(os.join_path(pool.base, 'source.v'), 'module main\n')!
+	done := chan os.Result{cap: 1}
+	spawn delayed_pool_query(mut pool, exe, pool.base, done)
+	started := os.join_path(dir, 'started')
+	watch := time.new_stopwatch()
+	for !os.exists(started) && watch.elapsed() < 5 * time.second {
+		time.sleep(5 * time.millisecond)
+	}
+	was_started := os.exists(started)
+	stopping := time.new_stopwatch()
+	pool.stop_all()
+	waited := stopping.elapsed()
+	files_kept := os.is_file(os.join_path(pool.base, 'source.v'))
+	// Release the request before assertions so its process always gets reaped.
+	os.write_file(os.join_path(dir, 'release'), '')!
+	result := <-done
+	assert was_started
+	assert waited < 500 * time.millisecond, 'stop_all waited ${waited} for the active request'
+	assert files_kept
+	assert result.exit_code == 0
+	assert result.output.trim_space() == 'kept'
+	assert !os.exists(pool.base)
+	assert pool.servers.len == 0
+	// A cancelled worker arriving later cannot start another server.
+	late := pool.query(exe, ['-check', '.'], dir, 'source.v:1:hv^1')
+	assert late == none
+	assert pool.servers.len == 0
+}
+
+fn test_stopping_a_pool_keeps_copies_until_their_operation_releases_them() {
+	mut pool := new_shared_diagnostics_server_pool()
+	admitted := pool.begin_operation()
+	assert admitted
+	mut program := pool.program_copy('project')
+	program.mutex.lock()
+	os.mkdir_all(pool.base)!
+	pool.stop_all()
+	kept := os.is_dir(pool.base)
+	late := pool.begin_operation()
+	program.mutex.unlock()
+	pool.end_operation()
+	assert kept
+	assert !late
+	assert pool.copies.len == 0
+	assert !os.exists(pool.base)
+}
+
+fn test_a_closed_query_pool_does_not_recreate_a_program_copy() {
+	mut app, fake := fake_v3_app('closed_pool', fake_v3_query_server, 'VLS_DIAGNOSTICS_SERVER')!
+	defer {
+		stop_fake_v3_app(mut app, fake)
+	}
+	mut pool := app.v3_query_pool()
+	pool.stop_all()
+	path := os.join_path(fake.project, 'main.v')
+	answer := app.v3_line_info(.hover, path_to_uri(path), path, '4:hv^2')
+	assert answer == none
+	assert pool.copies.len == 0
+	assert !os.exists(pool.base)
+	assert fake.questions().len == 0
+}
+
 fn test_a_question_does_not_wait_for_the_check_of_another_server() {
 	// A hover asks the server of its command line while the server of the
 	// program's checks is busy: it must not wait for that check.
