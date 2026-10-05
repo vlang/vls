@@ -3537,7 +3537,7 @@ fn test_restore_line_endings_leaves_lf_documents_alone() {
 	assert restore_line_endings('a\r\nb\r\n', 'a\r\nb\r\n') == 'a\r\nb\r\n'
 	// CRLF in, CRLF out.
 	assert restore_line_endings('a\r\nb\r\n', 'a\nb\n') == 'a\r\nb\r\n'
-	// Mixed endings normalize to the first one, the dominant convention.
+	// Mixed endings normalize to the first one.
 	assert restore_line_endings('a\r\nb\nc', 'x\ny\n') == 'x\r\ny\r\n'
 }
 
@@ -10514,6 +10514,51 @@ fn test_range_formatting_returns_only_contained_changed_hunk() {
 	assert edits[0].range.start.line == 3
 	assert edits[0].range.end.line == 4
 	assert edits[0].new_text == '\tx := 1\n'
+}
+
+fn test_range_formatting_preserves_crlf_line_endings() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'crlf_range_format_feature')
+	must_mkdir_all(test_dir)
+	test_file := os.join_path(test_dir, 'main.v')
+	content := 'module main\r\n\r\nfn main() {\r\nx:=1\r\n}\r\n'
+	must_write_file(test_file, content)
+	uri := path_to_uri(test_file)
+	app.open_files[uri] = content
+
+	response := app.handle_range_formatting(Request{
+		id:     909
+		method: 'textDocument/rangeFormatting'
+		params: json2.encode(DocumentRangeFormattingParams{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			range:         LSPRange{
+				start: Position{
+					line: 3
+				}
+				end:   Position{
+					line: 3
+					char: 4
+				}
+			}
+			options:       FormattingOptions{
+				tab_size: 4
+			}
+		},
+			escape_unicode: true
+		)
+	})
+
+	assert response.result is []TextEdit
+	edits := response.result as []TextEdit
+	assert edits.len == 1
+	assert edits[0].range.start.line == 3
+	assert edits[0].range.end.line == 4
+	assert edits[0].new_text == '\tx := 1\r\n'
 }
 
 fn test_prepare_call_hierarchy_returns_function_item() {

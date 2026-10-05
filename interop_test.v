@@ -513,6 +513,11 @@ fn test_compiler_lacks_compatibility_compiler_detects_every_launcher_refusal() {
 	assert !compiler_lacks_compatibility_compiler('unknown option `-vls-mode`')
 	assert !compiler_lacks_compatibility_compiler('unknown option `-vls-mode`\nV compilation failed (compiler_error); retrying with `/v1_fallback`.')
 	assert !compiler_lacks_compatibility_compiler('`-vls-mode` requires the compatibility compiler, but no usable V 0.5.2 fallback was found; running `make v1` now...\n{"contents":{"kind":"markdown","value":"fn f()"}}')
+	assert !compiler_lacks_compatibility_compiler('`-old-compiler` was requested; retrying with `/v1_fallback`.\n{"contents":{"kind":"markdown","value":"fn f()"}}')
+	// Starting an automatic fallback build does not mean that it succeeds.
+	building := '`-vls-mode` requires the compatibility compiler, but no usable V 0.5.2 fallback was found; running `make v1` now...\n'
+	assert compiler_lacks_compatibility_compiler(building + '`make v1` failed with exit code 2. Run it manually in `/v` for more details.')
+	assert compiler_lacks_compatibility_compiler(building + '`make v1` completed without installing a usable V 0.5.2 fallback at `/v1_fallback`.')
 	// A working compiler's payload, an ordinary diagnostic, and empty output.
 	assert !compiler_lacks_compatibility_compiler('{"contents":{"kind":"markdown","value":"fn f()"}}')
 	assert !compiler_lacks_compatibility_compiler('./main.v:3:7: error: unknown option')
@@ -543,6 +548,69 @@ fn test_run_v_line_info_retires_lookups_when_the_compatibility_compiler_is_missi
 	assert app.line_info_mode == .missing
 }
 
+const explicit_compatibility_launcher_stub = r'#!/bin/sh
+for arg in "$@"; do
+	if [ "$arg" = "-old-compiler" ]; then
+		echo "\`-old-compiler\` was requested; retrying with \`/v1_fallback\`." >&2
+		echo "{\"contents\":{\"kind\":\"markdown\",\"value\":\"fn helper()\"}}"
+		exit 0
+	fi
+done
+echo "unknown option \`-vls-mode\`" >&2
+exit 1
+'
+
+fn test_run_v_line_info_keeps_successful_explicit_compatibility_retry() {
+	$if windows {
+		return
+	}
+	previous := os.getenv('VLS_V_COMMAND')
+	mut app, uri, root := line_info_stub_app('vls_explicit_compatibility', explicit_compatibility_launcher_stub)
+	defer {
+		restore_v_command(previous)
+		os.rmdir_all(root) or {}
+	}
+	app.capture_output = true
+
+	// An explicit compatibility retry carries a notice before the valid payload.
+	for _ in 0 .. 2 {
+		hover := app.run_v_line_info(.hover, uri, '6:hv^4')
+		assert app.line_info_mode == .compat
+		assert hover is Hover
+		if hover is Hover {
+			assert hover.contents.value.contains('fn helper()')
+		}
+	}
+	assert app.captured_output.len == 0
+}
+
+const failed_compatibility_build_launcher_stub = r'#!/bin/sh
+echo "\`-vls-mode\` requires the compatibility compiler, but no usable V 0.5.2 fallback was found; running \`make v1\` now..." >&2
+echo "\`make v1\` failed with exit code 2. Run it manually in \`/v\` for more details." >&2
+exit 1
+'
+
+fn test_run_v_line_info_retires_lookups_after_automatic_compatibility_build_fails() {
+	$if windows {
+		return
+	}
+	previous := os.getenv('VLS_V_COMMAND')
+	mut app, uri, root := line_info_stub_app('vls_failed_compatibility_build', failed_compatibility_build_launcher_stub)
+	defer {
+		restore_v_command(previous)
+		os.rmdir_all(root) or {}
+	}
+	app.capture_output = true
+
+	for _ in 0 .. 2 {
+		result := app.run_v_line_info(.hover, uri, '6:hv^4')
+		assert result == ResponseResult('null')
+		assert app.line_info_mode == .missing
+	}
+	assert app.captured_output.len == 1
+	assert app.captured_output[0].contains('window/showMessage')
+}
+
 fn test_report_missing_compatibility_compiler_names_the_repair() {
 	// The editor otherwise shows a VLS that highlights code but answers nothing
 	// for completion, hover, signature help, or go to definition, with no hint
@@ -555,6 +623,7 @@ fn test_report_missing_compatibility_compiler_names_the_repair() {
 	assert app.captured_output[0].contains('window/showMessage')
 	// Name the actual repair, not just the symptom.
 	assert app.captured_output[0].contains('make v1')
+	assert app.captured_output[0].contains('VLS_V_COMMAND')
 	assert app.captured_output[0].contains('type":2')
 }
 

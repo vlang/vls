@@ -363,15 +363,15 @@ fn compiler_lacks_compatibility_compiler(output string) bool {
 		if trimmed == '' {
 			continue
 		}
-		// A launcher that can build the fallback itself announces that first and
-		// then answers the request, so this form must retire nothing.
+		// A launcher can announce a fallback build before either answering the
+		// request or reporting that the build failed. Keep scanning for a failure.
 		if trimmed.contains('running `make v1` now') {
-			return false
+			continue
 		}
-		if trimmed.contains('requires the compatibility compiler') {
-			return true
-		}
-		if trimmed.contains('`-old-compiler` was requested') {
+		// A successful explicit compatibility retry also starts with
+		// `-old-compiler` was requested, but follows it with "; retrying".
+		if trimmed.starts_with('`-vls-mode` requires the compatibility compiler, but ')
+			|| trimmed.starts_with('`-old-compiler` was requested, but ') {
 			return true
 		}
 		if trimmed.starts_with('`make v1` failed') {
@@ -395,7 +395,7 @@ fn compiler_lacks_compatibility_compiler(output string) bool {
 // `.missing` check without reaching this point, so it is reached at most once per
 // session.
 fn (mut app App) report_missing_compatibility_compiler() {
-	app.send_show_message('vls: the V compiler on PATH cannot serve completion, hover, signature help, or go to definition, because its V1 compatibility compiler is missing. Install `make`, then run `make v1` in your V source directory, or point `v.vls.command` at a V that has it. Diagnostics and formatting are unaffected.', 2)
+	app.send_show_message('vls: the configured V compiler cannot serve completion, hover, signature help, or go to definition, because its V1 compatibility compiler is missing. Install `make`, then run `make v1` in your V source directory, or set `VLS_V_COMMAND` to a V compiler that has it. Diagnostics and formatting are unaffected.', 2)
 }
 
 // normalize_v_line_info_output extracts the actual line-info payload from the

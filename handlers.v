@@ -6165,9 +6165,6 @@ fn search_doc_in_vlib_dir(dir string, symbol string) string {
 	return ''
 }
 
-// format_content formats the given content via v fmt and returns the TextEdits
-// needed to replace the document with its formatted version, plus the formatted
-// text. Returns empty edits if the content is already properly formatted.
 // restore_line_endings rewrites the formatter's LF-only output to use the line
 // terminator `original` already uses, so formatting a document never changes its
 // line endings. `v fmt` normalizes every terminator to LF on every platform,
@@ -6175,8 +6172,7 @@ fn search_doc_in_vlib_dir(dir string, symbol string) string {
 //
 // The terminator is taken from the document's first line break: a document with
 // no line break at all, or one that uses LF, is left as LF. A file whose endings
-// are already mixed is normalized to its first ending, which is what a formatter
-// that respects the dominant convention would do.
+// are already mixed is normalized to its first ending.
 fn restore_line_endings(original string, formatted string) string {
 	if !formatted.contains('\n') || formatted.contains('\r\n') {
 		return formatted
@@ -6196,6 +6192,9 @@ fn restore_line_endings(original string, formatted string) string {
 	return formatted.replace('\n', '\r\n')
 }
 
+// format_content formats the given content via v fmt and returns the TextEdits
+// needed to replace the document with its formatted version, plus the formatted
+// text. Returns empty edits if the content is already properly formatted.
 fn (mut app App) format_content(uri string, content string) ([]TextEdit, string) {
 	real_path := uri_to_path(uri)
 
@@ -7498,7 +7497,7 @@ fn (mut app App) handle_range_formatting(request Request) Response {
 		}
 	}
 	fmt_hunk_end := formatted_lines.len - suf // exclusive
-	new_text := formatted_lines[orig_hunk_start..fmt_hunk_end].join('\n') + '\n'
+	new_text := restore_line_endings(content, formatted_lines[orig_hunk_start..fmt_hunk_end].join('\n') + '\n')
 	edit := TextEdit{
 		range:    LSPRange{
 			start: Position{
