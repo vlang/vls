@@ -7033,13 +7033,14 @@ fn (app &App) inlay_hint_stamp(uri string, content string) string {
 const project_disk_max_files = 5000
 
 // project_disk_fingerprint is what the `.v` files under `root` are on disk:
-// their paths, sizes and modification times, for the first
-// project_disk_max_files of them.
+// their paths, sizes and modification times, bounded by project_disk_max_files
+// and the same directory exclusions and symlink rules as the workspace index.
 fn project_disk_fingerprint(root string) string {
 	if root == '' || !os.is_dir(root) {
 		return ''
 	}
-	mut files := os.walk_ext(root, '.v')
+	mut files := []string{}
+	complete := collect_v_files_bounded(root, project_disk_max_files, mut files)
 	files.sort()
 	mut parts := []string{cap: int_min(files.len, project_disk_max_files)}
 	for path in files {
@@ -7047,6 +7048,10 @@ fn project_disk_fingerprint(root string) string {
 			break
 		}
 		parts << '${path}:${os.file_size(path)}:${os.file_last_mod_unix(path)}'
+	}
+	if !complete {
+		// A partial traversal cannot establish that the cached hints are current.
+		parts << 'incomplete:${time.now().unix_nano()}'
 	}
 	return parts.join('\n')
 }

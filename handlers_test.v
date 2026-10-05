@@ -5485,6 +5485,25 @@ fn test_inlay_hint_stamp_changes_with_a_closed_file_on_disk_without_watchers() {
 	assert app.inlay_hint_stamp(uri, content) == watched
 }
 
+fn test_inlay_hint_disk_stamp_skips_excluded_trees_and_bounds_file_collection() {
+	mut app := create_test_app()
+	defer { cleanup_test_app(app) }
+	dir := os.join_path(app.temp_dir, 'hint_stamp_bounded')
+	must_mkdir_all(dir)
+	must_write_file(os.join_path(dir, 'a.v'), 'module main\n')
+	must_write_file(os.join_path(dir, 'b.v'), 'module main\n')
+	must_mkdir_all(os.join_path(dir, 'node_modules', 'nested'))
+	excluded := os.join_path(dir, 'node_modules', 'nested', 'ignored.v')
+	must_write_file(excluded, 'module ignored\n')
+	before := project_disk_fingerprint(dir)
+	must_write_file(excluded, 'module ignored\n\nfn changed() {}\n')
+	assert project_disk_fingerprint(dir) == before
+	mut files := []string{}
+	assert !collect_v_files_bounded(dir, 1, mut files)
+	assert files.len == 1
+	assert !files[0].contains('node_modules')
+}
+
 fn test_did_close_drops_cached_inlay_hints() {
 	mut app := create_test_app()
 	defer {
