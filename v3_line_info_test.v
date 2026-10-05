@@ -1007,3 +1007,44 @@ fn test_session_shutdown_cancels_a_one_shot_diagnostics_fallback() {
 	assert !scheduler.worker_running
 	assert !os.exists(scheduler.servers.base)
 }
+
+const fake_server_with_invalid_child_pid = r"#!/bin/sh
+echo v-diagnostics-server: ready
+while read -r request rest; do
+	case $request in quit) exit 0 ;; esac
+	token=${rest%% *}
+	echo v-diagnostics-server: child INVALID_PID $token
+	printf '\nv-diagnostics-server: end 0 %s\n' $token
+done
+"
+
+fn test_invalid_child_pids_leave_the_check_to_the_compiler_fallback() {
+	dir := os.join_path(os.vtmp_dir(), 'vls_pool_invalid_child_${os.getpid()}')
+	os.mkdir_all(dir)!
+	defer {
+		os.rmdir_all(dir) or {}
+	}
+	exe := os.join_path(dir, 'v')
+	// Every server finishes normally and cancellation is disabled: this test
+	// must never send a signal to any of these unsafe PID values.
+	for pid in ['0', '-1', '2147483648', '4294967297', '999999999999999999999999', '12oops', '+2',
+		'1_2', ''] {
+		os.write_file(exe, fake_server_with_invalid_child_pid.replace('INVALID_PID', pid))!
+		os.chmod(exe, 0o755)!
+		mut pool := new_diagnostics_server_pool()
+		answer := pool.check(exe, ['-check', '.'], dir, fn () bool {
+			return false
+		})
+		pool.stop_all()
+		assert answer == none, 'the diagnostics server accepted child PID `${pid}`'
+	}
+	for pid in ['1', '2147483647'] {
+		os.write_file(exe, fake_server_with_invalid_child_pid.replace('INVALID_PID', pid))!
+		mut pool := new_diagnostics_server_pool()
+		answer := pool.check(exe, ['-check', '.'], dir, fn () bool {
+			return false
+		})
+		pool.stop_all()
+		assert (answer or { panic('a valid child PID was rejected') }).exit_code == 0
+	}
+}
