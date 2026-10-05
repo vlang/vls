@@ -432,20 +432,20 @@ fn name_pos_text(pos NamePos) string {
 }
 
 // check_messages returns the errors and warnings of the output of a check, each
-// as `file:line: kind: message`.
+// as `file:line: level: message`, read as the diagnostics of the editor are;
+// those without a position as `program: level: message`.
 fn check_messages(output string) []string {
 	mut found := []string{}
+	for diagnostic in parse_v_check_diagnostics(output, '') {
+		if diagnostic.level in ['error', 'warning'] {
+			found << '${diagnostic.path}:${diagnostic.line_nr}: ${diagnostic.level}: ${diagnostic.message}'
+		}
+	}
 	for line in output.split_into_lines() {
-		for kind in ['error', 'warning'] {
-			marker := ': ${kind}: '
-			idx := line.index(marker) or { continue }
-			fields := line[..idx].split(':')
-			if fields.len < 3 || !fields[fields.len - 1].is_int()
-				|| !fields[fields.len - 2].is_int() {
-				continue
+		if level, message := program_diagnostic_level(line) {
+			if level != 'notice' {
+				found << 'program: ${level}: ${message}'
 			}
-			found << '${fields[..fields.len - 1].join(':')}: ${kind}: ${line[idx + marker.len..]}'
-			break
 		}
 	}
 	return found
@@ -469,9 +469,11 @@ fn new_check_message(before []string, after []string) ?string {
 		file_line := message.all_before(': ')
 		kind := message.all_after(': ').all_before(': ')
 		text := message.all_after(': ').all_after(': ')
-		place := '${os.file_name(file_line.all_before_last(':'))}:${file_line.all_after_last(':')}'
 		verb := if kind == 'warning' { 'make V warn' } else { 'break the program' }
-		return '${verb}: ${text} (${place})'
+		if !file_line.contains(':') {
+			return '${verb}: ${text}'
+		}
+		return '${verb}: ${text} (${os.file_name(file_line.all_before_last(':'))}:${file_line.all_after_last(':')})'
 	}
 	return none
 }
