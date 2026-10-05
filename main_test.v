@@ -5,6 +5,17 @@ module main
 import os
 import time
 
+fn test_version_request_only_matches_standalone_arguments() {
+	assert is_version_request(['vls', '--version'])
+	assert is_version_request(['vls', 'version'])
+	assert !is_version_request([]string{})
+	assert !is_version_request(['vls'])
+	assert !is_version_request(['version'])
+	assert !is_version_request(['vls', '--port', 'version'])
+	assert !is_version_request(['vls', '--host', '--version'])
+	assert !is_version_request(['vls', '--version', '--port', '7777'])
+}
+
 fn main_test_temp_dir(tag string) string {
 	dir := os.join_path(os.temp_dir(), 'vls_find_v_dir_${tag}_${os.getpid()}_${time.now().unix_nano()}')
 	os.mkdir_all(dir) or {
