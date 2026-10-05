@@ -110,7 +110,7 @@ fn find_v_dir_from_exe(v_exe string) string {
 	if v_exe == 'v' || !os.is_file(v_exe) {
 		return ''
 	}
-	mut dir := os.dir(os.real_path(v_exe))
+	mut dir := os.parent_dir(os.real_path(v_exe))
 	// A V checkout nests vlib directly under its root, so the root is at or above
 	// the executable. The bound stops a pathological layout from walking to the
 	// filesystem root one component at a time.
@@ -118,8 +118,10 @@ fn find_v_dir_from_exe(v_exe string) string {
 		if os.is_dir(os.join_path(dir, 'vlib')) {
 			return dir
 		}
-		parent := os.dir(dir)
-		if parent == dir || parent == '' {
+		parent := os.parent_dir(dir)
+		// Only absolute ancestors are safe to search. In particular, a Windows
+		// drive-relative path would search that drive's current directory instead.
+		if parent == dir || !os.is_abs_path(parent) {
 			break
 		}
 		dir = parent
