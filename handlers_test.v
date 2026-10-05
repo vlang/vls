@@ -5420,6 +5420,14 @@ fn test_inlay_hint_disk_stamp_skips_excluded_trees_and_bounds_file_collection() 
 	assert !collect_v_files_bounded(dir, 1, mut files)
 	assert files.len == 1
 	assert !files[0].contains('node_modules')
+	assert project_disk_fingerprint(os.dir(os.real_path('/'))) == ''
+	// Non-V entries must consume the traversal budget too.
+	os.rm(os.join_path(dir, 'a.v')) or { panic(err) }
+	os.rm(os.join_path(dir, 'b.v')) or { panic(err) }
+	for i in 0 .. 8 { must_write_file(os.join_path(dir, 'entry${i}.txt'), '') }
+	files.clear()
+	assert !collect_v_files_bounded(dir, 1, mut files)
+	assert files.len == 0
 }
 
 fn test_did_close_drops_cached_inlay_hints() {

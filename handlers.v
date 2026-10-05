@@ -6841,7 +6841,9 @@ const project_disk_max_files = 5000
 // their paths, sizes and modification times, bounded by project_disk_max_files
 // and the same directory exclusions and symlink rules as the workspace index.
 fn project_disk_fingerprint(root string) string {
-	if root == '' || !os.is_dir(root) {
+	if root == '' || os.dir(root) == root
+		|| (root.len >= 2 && root[1] == `:` && root.trim_right('/\\').len == 2)
+		|| !os.is_dir(root) {
 		return ''
 	}
 	mut files := []string{}
