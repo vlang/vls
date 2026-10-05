@@ -58,8 +58,11 @@ jobs:
           V_MACOS_V3_NO_FALLBACK: "1"
         run: v -no-memory-limit -nocache -prod test vls/
 
+      # V3 is the default backend on Linux and macOS, so it was only compiled
+      # there. Windows keeps V1 as its default, which let a V3-only breakage sit
+      # unnoticed until someone built with -new-compiler by hand. Both paths are
+      # cheap to compile, so cover all three platforms.
       - name: Compile project with V3
-        if: runner.os != 'Windows'
         env:
           V_MACOS_V3_NO_FALLBACK: "1"
         run: v -no-memory-limit -nocache -new-compiler vls/
