@@ -5490,6 +5490,20 @@ fn test_inlay_hint_stamp_changes_with_a_closed_file_on_disk_without_watchers() {
 	assert app.inlay_hint_stamp(uri, content) == watched
 }
 
+fn test_inlay_hint_stamp_detects_same_size_changes_with_the_same_timestamp() {
+	mut app := create_test_app()
+	defer { cleanup_test_app(app) }
+	dir := os.join_path(app.temp_dir, 'hint_stamp_same_metadata')
+	must_mkdir_all(dir)
+	path := os.join_path(dir, 'other.v')
+	must_write_file(path, 'module main\n\nfn other(alpha int) {}\n')
+	modified := os.file_last_mod_unix(path)
+	before := project_disk_fingerprint(dir)
+	must_write_file(path, 'module main\n\nfn other(bravo int) {}\n')
+	os.utime(path, modified, modified) or { panic(err) }
+	assert project_disk_fingerprint(dir) != before
+}
+
 fn test_inlay_hint_disk_stamp_skips_excluded_trees_and_bounds_file_collection() {
 	mut app := create_test_app()
 	defer { cleanup_test_app(app) }
