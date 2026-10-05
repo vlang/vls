@@ -116,21 +116,25 @@ fn (mut app App) check_rename_conflicts(target RenameTarget, locations []Locatio
 // an empty string when it would not, or an error when validation fails.
 fn (mut app App) rename_clash_in(program_dir string, paths []string, rc RenameCheck) !string {
 	mut pool := app.v3_query_pool()
-	if !pool.begin_operation() { return error('the compiler pool is closed') }
-	defer { pool.end_operation() }
-	mut project := app.v3_query_project(paths[0], program_dir)!
-	app.v3_sync_open_files(mut project)!
-	// The copy is kept for the questions that come later, as v3_ask keeps it, with
-	// the files it held before the rename (see the deferred writes below).
-	defer {
-		app.v3_query_projects[program_dir] = project
+	if !pool.begin_operation() {
+		return error('the compiler pool is closed')
 	}
+	defer {
+		pool.end_operation()
+	}
+	mut program := pool.program_copy(program_dir)
+	program.mutex.lock()
+	defer {
+		program.mutex.unlock()
+	}
+	app.prepare_program_copy(mut pool, mut program, paths[0], program_dir)!
+	app.v3_sync_open_files(mut program.project)!
 	mut originals := map[string]string{}
 	mut copies := map[string]string{}
 	for path in paths {
 		text := app.open_files[rc.uris[path]] or { os.read_file(path)! }
 		originals[path] = text
-		copies[path] = project.write(path, text)!
+		copies[path] = program.project.write(path, text)!
 	}
 	// V builds a test file as a program of its own, with the files of its module.
 	mut targets := ['.']
@@ -144,9 +148,9 @@ fn (mut app App) rename_clash_in(program_dir string, paths []string, rc RenameCh
 	existing := rc.existing.filter(it.path in copies)
 	mut before := []string{}
 	for target in targets {
-		before << check_messages(app.v3_check_copy(project, target)!)
+		before << check_messages(app.v3_check_copy(program.project, target)!)
 	}
-	named_before := app.rename_answers(project, existing.map(NamePos{
+	named_before := app.rename_answers(program.project, existing.map(NamePos{
 		...it
 		path: copies[it.path]
 	}), rc.new_name.len)!
@@ -154,19 +158,19 @@ fn (mut app App) rename_clash_in(program_dir string, paths []string, rc RenameCh
 	defer {
 		for path, _ in rc.spans {
 			if path in copies {
-				project.write(path, originals[path]) or {}
+				program.project.write(path, originals[path]) or {}
 			}
 		}
 	}
 	// The copy holds the renamed files until the answers are in.
 	for path, spans in rc.spans {
 		if path in copies {
-			project.write(path, renamed_text(originals[path], spans, rc.new_name))!
+			program.project.write(path, renamed_text(originals[path], spans, rc.new_name))!
 		}
 	}
 	mut after := []string{}
 	for target in targets {
-		after << check_messages(app.v3_check_copy(project, target)!)
+		after << check_messages(app.v3_check_copy(program.project, target)!)
 	}
 	if message := new_check_message(before, after) {
 		return message
@@ -193,7 +197,7 @@ fn (mut app App) rename_clash_in(program_dir string, paths []string, rc RenameCh
 			col: rc.renamed_col(pos.path, pos.line, pos.col)
 		}
 	}
-	named_after := app.rename_answers(project, asked.map(NamePos{
+	named_after := app.rename_answers(program.project, asked.map(NamePos{
 		...it
 		path: copies[it.path]
 	}), rc.new_name.len)!
@@ -253,7 +257,7 @@ fn (mut app App) v3_check_copy(project V3QueryProject, target string) !string {
 		mut servers := app.v3_query_pool()
 		if result := servers.check(exe, args, project.overlay.temp_work_dir, fn () bool {
 			return false
-		}) {
+		}, unsafe { nil }) {
 			return rename_check_output(result.exit_code, result.output)
 		}
 	}

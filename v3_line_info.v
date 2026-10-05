@@ -9,7 +9,9 @@ import os
 // that changed. The V in use answers through the `query` requests of its
 // diagnostics server when it runs one, and otherwise in a compiler process of
 // its own. V1 is left what V3 cannot answer, such as a file that does not parse
-// while it is being written.
+// while it is being written. Where the checks of the diagnostics run on the
+// same servers, they check the same copy (see ProgramCopy): the check of each
+// version of a program answers its questions too.
 
 // v3_completion_placeholder is the name written after the dot the cursor
 // follows when completion is asked for: V3 has to parse the member access it
@@ -142,25 +144,34 @@ fn (mut app App) v3_hover(uri string, real_path string, line_info string) ?V3Hov
 // v3_ask asks V3 `questions` about files of the program that holds the file at
 // `real_path`, all in one check.
 fn (mut app App) v3_ask(real_path string, questions []V3Question) ?V3Answers {
-	mut pool := app.v3_query_pool()
-	if !pool.begin_operation() { return none }
-	defer { pool.end_operation() }
 	program_dir := app.program_root(real_path)
-	mut project := app.v3_query_project(real_path, program_dir) or {
+	mut pool := app.v3_query_pool()
+	if !pool.begin_operation() {
+		return none
+	}
+	defer {
+		pool.end_operation()
+	}
+	mut program := pool.program_copy(program_dir)
+	program.mutex.lock()
+	defer {
+		program.mutex.unlock()
+	}
+	app.prepare_program_copy(mut pool, mut program, real_path, program_dir) or {
 		log('no V3 copy of ${program_dir}: ${err}')
 		return none
 	}
-	app.v3_sync_open_files(mut project) or { return none }
+	app.v3_sync_open_files(mut program.project) or { return none }
 	mut specs := []string{cap: questions.len}
 	mut targets := []string{cap: questions.len}
 	for question in questions {
-		copy_path := project.write(question.path, question.content) or { return none }
+		copy_path := program.project.write(question.path, question.content) or { return none }
 		specs << '${copy_path}:${question.line_info}'
 		// A test file is a program of its own, which V builds with the files of
 		// its module: the program of the directory leaves it out.
 		targets << if copy_path.ends_with('_test.v') { copy_path } else { '.' }
 	}
-	app.v3_query_projects[program_dir] = project
+	project := program.project
 	// The questions about one program are asked in one check.
 	mut answers := []string{len: questions.len}
 	mut asked := []bool{len: questions.len}
@@ -211,11 +222,14 @@ fn (mut app App) v3_run(project V3QueryProject, specs []string, target string) ?
 	is_library := target == '.' && !app.is_program_dir(project.overlay.source_work_dir)
 	question := specs.join('\t')
 	if exe := resolve_diagnostics_server_exe() {
+		// The command line of the checks of the diagnostics (see
+		// build_v_check_args_multifile), whose servers answer the questions too:
+		// `-w` changes no answer.
 		mut args := v3_compiler_selection_args()
 		if is_library {
 			args << '-shared'
 		}
-		args << ['-w', '-check', '-nocolor', target]
+		args << ['-check', '-nocolor', target]
 		mut servers := app.v3_query_pool()
 		if result := servers.query(exe, args, project.overlay.temp_work_dir, question) {
 			return if result.exit_code == 0 { result.output } else { none }
@@ -239,17 +253,45 @@ fn (mut app App) v3_run(project V3QueryProject, specs []string, target string) ?
 	return if x.exit_code == 0 { x.output } else { none }
 }
 
-// v3_query_project returns the copy of the program in `program_dir` that holds
-// the file at `real_path`, building it when there is none yet.
-fn (mut app App) v3_query_project(real_path string, program_dir string) !V3QueryProject {
-	if project := app.v3_query_projects[program_dir] {
-		if os.is_dir(project.overlay.temp_work_dir) {
-			return project
-		}
+// prepare_program_copy makes `program`, the copy of the program in `program_dir`,
+// ready for a request about the file at `real_path`: built when it is not yet,
+// or when a file was created or deleted in its project since. The caller holds
+// its lock.
+fn (mut app App) prepare_program_copy(mut pool DiagnosticsServerPool, mut program ProgramCopy, real_path string, program_dir string) ! {
+	pool.mutex.lock()
+	stale := program.stale
+	program.stale = false
+	pool.mutex.unlock()
+	if program.built && !stale && os.is_dir(program.project.overlay.temp_work_dir) {
+		return
 	}
+	program.built = false
+	program.project = app.v3_query_project(real_path, program_dir, pool)!
+	program.built = true
+	pool.mutex.lock()
+	program.root = program.project.overlay.source_root
+	pool.mutex.unlock()
+}
+
+// write_program_copy makes `program`, the copy of the program in `program_dir`,
+// hold what the editor holds, and the file at `real_path` hold `text`, and
+// returns the path of that file in the copy. The caller holds its lock.
+fn (mut app App) write_program_copy(mut pool DiagnosticsServerPool, mut program ProgramCopy, real_path string, program_dir string, text string) ?string {
+	app.prepare_program_copy(mut pool, mut program, real_path, program_dir) or {
+		log('no copy of ${program_dir}: ${err}')
+		return none
+	}
+	app.v3_sync_open_files(mut program.project) or { return none }
+	written := program.project.write(normalize_overlay_path(real_path), text) or { return none }
+	return written
+}
+
+// v3_query_project builds the copy of the program in `program_dir` that holds
+// the file at `real_path`, in the directory of `pool` for that program.
+fn (mut app App) v3_query_project(real_path string, program_dir string, pool &DiagnosticsServerPool) !V3QueryProject {
 	// A copy for each program: the copy of another would not hold what this one
 	// keeps as written into it.
-	app.overlay_dir = app.v3_query_pool().stable_dir('query', program_dir)
+	app.overlay_dir = pool.stable_dir('query', program_dir)
 	defer {
 		app.overlay_dir = ''
 	}
@@ -379,16 +421,37 @@ fn (mut project V3QueryProject) write(path string, content string) !string {
 }
 
 // v3_query_pool returns the servers that answer this editor's questions, whose
-// directory holds the copies of its programs.
+// directory holds the copies of its programs: those of its diagnostics, which
+// check the same copies, when it has a diagnostics worker.
 fn (mut app App) v3_query_pool() &DiagnosticsServerPool {
 	if app.v3_query_servers == unsafe { nil } {
-		app.v3_query_servers = new_diagnostics_server_pool()
+		app.v3_query_servers = if scheduler := app.diagnostics_scheduler {
+			scheduler.servers
+		} else {
+			new_prepared_diagnostics_server_pool()
+		}
 	}
 	return app.v3_query_servers
 }
 
-// v3_query_notice_disk_change forgets the copy of the program a file was
-// created or deleted in: the copy links the files that were there when it was
+// v3_copies returns the copies of the programs that are built and current.
+fn (mut app App) v3_copies() []V3QueryProject {
+	mut pool := app.v3_query_pool()
+	pool.mutex.lock()
+	defer {
+		pool.mutex.unlock()
+	}
+	mut copies := []V3QueryProject{}
+	for _, program in pool.copies {
+		if program.built && !program.stale {
+			copies << program.project
+		}
+	}
+	return copies
+}
+
+// v3_query_notice_disk_change has the copy of the program a file was created or
+// deleted in built again: the copy links the files that were there when it was
 // built. A change to a file needs nothing: a symbolic link shows it, a file
 // written into the copy is written again from what it holds, and one that the
 // copy holds otherwise is taken again (see refresh_held_files).
@@ -396,11 +459,8 @@ fn (mut app App) v3_query_notice_disk_change(changed_path string, event_type int
 	if event_type == 2 {
 		return
 	}
-	for program_dir, project in app.v3_query_projects {
-		if path_is_within(normalize_overlay_path(changed_path), project.overlay.source_root) {
-			app.v3_query_projects.delete(program_dir)
-		}
-	}
+	mut pool := app.v3_query_pool()
+	pool.notice_disk_change(normalize_overlay_path(changed_path))
 }
 
 // v3_prefetch_anchors asks V3, in one check per program, where the name at each
@@ -458,14 +518,14 @@ fn (mut app App) v3_prefetch_anchors(locations []Location, mut cache map[string]
 	}
 }
 
-// stop_v3_queries ends the V3 servers that answered questions.
+// stop_v3_queries ends the V3 servers that answered questions, and forgets the
+// copies of their programs.
 fn (mut app App) stop_v3_queries() {
 	if app.v3_query_servers != unsafe { nil } {
 		mut servers := app.v3_query_servers
 		servers.stop_all()
 		servers.wait_closed()
 	}
-	app.v3_query_projects.clear()
 }
 
 // with_completion_placeholder writes v3_completion_placeholder at the cursor of

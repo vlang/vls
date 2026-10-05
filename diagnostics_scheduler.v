@@ -7,11 +7,11 @@ import os
 import sync
 import time
 
-// Wait until typing pauses before starting a check. Completion requests can then
-// overtake diagnostics instead of sitting behind a compile on every key. A check
-// answered by a diagnostics server takes a fraction of a one-shot run, so the
-// pause can be short, and the worker looks for ready jobs often.
-const diagnostics_debounce_ms = 25
+// A check starts as soon as a change arrives: a newer change stops the check
+// that runs, whose answer would be stale, and a question goes to a server of
+// its own, which a check does not hold (see DiagnosticsServer.busy). The worker
+// looks for ready jobs often while one waits for its time.
+const diagnostics_debounce_ms = 0
 const diagnostics_worker_poll = 5 * time.millisecond
 
 struct DiagnosticsJob {
@@ -60,8 +60,14 @@ mut:
 	// The open files the last check of each program answered for, by program
 	// directory.
 	program_members map[string][]string
-	// The diagnostics servers outlive the worker, which exits when idle.
-	servers &DiagnosticsServerPool = new_diagnostics_server_pool()
+	// The diagnostics servers outlive the worker, which exits when idle. Each
+	// one parses and collects builtin once, and they answer the questions about
+	// the programs they check too, from the same checks (see ProgramCopy).
+	servers &DiagnosticsServerPool = new_shared_diagnostics_server_pool()
+	// A paused scheduler starts no worker and keeps its jobs pending: a test
+	// can look at the queue a change leaves, which a check started at once
+	// would empty.
+	paused bool
 }
 
 fn new_diagnostics_scheduler() &DiagnosticsScheduler {
@@ -167,6 +173,9 @@ fn (mut scheduler DiagnosticsScheduler) enqueue(job DiagnosticsJob) bool {
 		return false
 	}
 	scheduler.pending_jobs[job.uri] = job
+	if scheduler.paused {
+		return false
+	}
 	should_start := !scheduler.worker_running
 	if should_start {
 		scheduler.worker_started = true
@@ -233,7 +242,8 @@ fn (mut scheduler DiagnosticsScheduler) cancel_all() {
 	scheduler.mutex.unlock()
 }
 
-// stop_and_wait cancels the session check and joins its compiler work.
+// stop_and_wait cancels the session's last check and waits for its compiler,
+// files and transport borrower to be released before the session can return.
 fn (mut scheduler DiagnosticsScheduler) stop_and_wait() {
 	scheduler.mutex.lock()
 	scheduler.stopped = true
@@ -383,10 +393,13 @@ fn run_diagnostics_worker(mut scheduler DiagnosticsScheduler) {
 		done.close()
 	}
 	for {
-		time.sleep(diagnostics_worker_poll)
 		jobs, should_stop := scheduler.take_ready_jobs(time.now().unix_milli())
 		if should_stop {
 			return
+		}
+		if jobs.len == 0 {
+			time.sleep(diagnostics_worker_poll)
+			continue
 		}
 		for job in jobs {
 			run_diagnostics_job(mut scheduler, job)
@@ -420,10 +433,16 @@ fn run_diagnostics_job(mut scheduler DiagnosticsScheduler, job DiagnosticsJob) {
 		write_mutex:           job.write_mutex
 		tcp_conn:              job.tcp_conn
 		diagnostics_servers:   scheduler.servers
+		v3_query_servers:      scheduler.servers
 		// A change that arrives while this check runs stops it: its answer would
 		// be stale, and the newer check can start at once.
 		diagnostics_cancelled: fn [mut scheduler, job] () bool {
 			return !scheduler.is_job_current(job)
+		}
+		// The errors a check found before its slow end, the instances of generic
+		// functions above all, are shown at once; its full answer replaces them.
+		diagnostics_partial:   fn [mut scheduler, job] (uri string, found CheckErrors) {
+			scheduler.publish_partial(job, uri, found)
 		}
 	}
 	notification := worker.build_diagnostics_notification(job.uri, job.content)
@@ -449,6 +468,33 @@ fn run_diagnostics_job(mut scheduler DiagnosticsScheduler, job DiagnosticsJob) {
 		other_content := job.open_files[other_uri] or { continue }
 		other := worker.build_diagnostics_notification(other_uri, other_content)
 		scheduler.publish_if_current(mut worker, job, other)
+	}
+}
+
+// publish_partial publishes the diagnostics a check of `job` found before its
+// end, for the file at `uri` and the other open files of its program, while the
+// job is current.
+fn (mut scheduler DiagnosticsScheduler) publish_partial(job DiagnosticsJob, uri string, found CheckErrors) {
+	mut versions := map[string]i64{}
+	if version := job.version {
+		versions[job.uri] = version
+	}
+	mut writer := App{
+		open_files:          job.open_files
+		open_files_versions: versions
+		position_encoding:   job.position_encoding
+		write_mutex:         job.write_mutex
+		tcp_conn:            job.tcp_conn
+		diagnostics_enabled: true
+	}
+	if uri == job.uri {
+		scheduler.publish_if_current(mut writer, job, writer.diagnostics_notification_for(uri,
+			job.content, found.file))
+	}
+	for other_uri, other_errors in found.program {
+		other_content := job.open_files[other_uri] or { continue }
+		scheduler.publish_if_current(mut writer, job, writer.diagnostics_notification_for(other_uri,
+			other_content, other_errors))
 	}
 }
 

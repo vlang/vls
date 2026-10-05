@@ -182,7 +182,62 @@ while [ $i -lt 10 ]; do
 done
 "
 
+// A diagnostics server whose checks take two seconds and whose questions are
+// answered at once.
+const fake_slow_check_server = r"#!/bin/sh
+echo v-diagnostics-server: ready
+while read -r request rest; do
+	case $request in quit) exit 0 ;; esac
+	token=${rest%% *}
+	echo v-diagnostics-server: child 1 $token
+	case $request in check) sleep 2 ;; esac
+	printf '\nv-diagnostics-server: end 0 %s\n' $token
+done
+"
+
+// A diagnostics server whose questions take a second to answer, and whose
+// checks are answered at once.
+const fake_slow_query_server = r"#!/bin/sh
+echo v-diagnostics-server: ready
+here=$(dirname $0)
+while read -r request rest; do
+	case $request in quit) exit 0 ;; esac
+	token=${rest%% *}
+	echo v-diagnostics-server: child 1 $token
+	case $request in query) sleep 1; cat $here/answer.txt; echo ;; esac
+	printf '\nv-diagnostics-server: end 0 %s\n' $token
+done
+"
+
 const fake_hover_answer = '{"contents":{"kind":"markdown","value":"```v\\nfake\\n```"}}'
+
+// A V whose query server answers a hover with its answer.txt and a definition
+// with the start of the line the question is on.
+const fake_v3_hover_server = r"#!/bin/sh
+echo v-diagnostics-server: ready
+here=$(dirname $0)
+tab=$(printf '\t')
+while read -r request rest; do
+	case $request in quit) exit 0 ;; esac
+	token=${rest%% *}
+	questions=${rest#* }
+	echo v-diagnostics-server: child 1 $token
+	echo $questions >> $here/questions.txt
+	i=0
+	rest=$questions$tab
+	while [ ${#rest} -gt 0 ]; do
+		q=${rest%%$tab*}
+		rest=${rest#*$tab}
+		pos=${q#*:}
+		case $q in
+		*hv^*) printf '%s\t' $i; cat $here/answer.txt; echo ;;
+		*) printf '%s\t%s:%s:1\n' $i ${q%%:*} ${pos%%:*} ;;
+		esac
+		i=$((i + 1))
+	done
+	printf '\nv-diagnostics-server: end 0 %s\n' $token
+done
+"
 
 fn test_the_completion_placeholder_follows_a_dot_with_no_name() {
 	source := 'fn main() {\n\tp := 1\n\tp.\n\tq.na\n\tprintln(p.x)\n}\n'
@@ -302,7 +357,7 @@ fn test_a_file_opened_after_the_copy_was_built_is_written_in_the_copy_only() {
 	main_uri := path_to_uri(main_path)
 	app.open_files[main_uri] = 'module main\n\nimport helper\n\nfn main() {\n\tp := helper.answer()\n\tprintln(p)\n}\n'
 	app.v3_line_info(.hover, main_uri, main_path, '6:hv^2') or {}
-	copy_root := app.v3_query_projects.values()[0].overlay.temp_root
+	copy_root := app.v3_copies()[0].overlay.temp_root
 	copy_of_helper := os.join_path(copy_root, 'helper', 'helper.v')
 	// What the test is about: the copy shares both files with the project.
 	assert os.stat(copy_of_helper)!.inode == os.stat(helper_path)!.inode
@@ -339,7 +394,7 @@ fn test_a_module_file_replaced_on_disk_is_taken_again_by_the_copy() {
 	main_uri := path_to_uri(main_path)
 	app.open_files[main_uri] = 'module main\n\nimport helper\n\nfn main() {\n\tp := helper.answer()\n\tprintln(p)\n}\n'
 	app.v3_line_info(.hover, main_uri, main_path, '6:hv^2') or {}
-	copy_of_helper := os.join_path(app.v3_query_projects.values()[0].overlay.temp_root, 'helper', 'helper.v')
+	copy_of_helper := os.join_path(app.v3_copies()[0].overlay.temp_root, 'helper', 'helper.v')
 	assert os.stat(copy_of_helper)!.inode == os.stat(helper_path)!.inode
 	// Replaced by another file, as a checkout or an editor that saves by
 	// renaming does, and no client says so: the hard link holds the old one.
@@ -368,7 +423,7 @@ fn test_a_file_emptied_in_the_editor_is_empty_in_the_copy() {
 	os.write_file(extra_path, 'module extra\n\npub fn one() int {\n\treturn 1\n}\n')!
 	main_path := os.join_path(fake.project, 'main.v')
 	app.v3_line_info(.hover, path_to_uri(main_path), main_path, '4:hv^2') or {}
-	copy_root := app.v3_query_projects.values()[0].overlay.temp_root
+	copy_root := app.v3_copies()[0].overlay.temp_root
 	assert os.is_link(os.join_path(copy_root, 'extra'))
 	// Opened, and all its text deleted: nothing was written for it yet.
 	app.open_files[path_to_uri(extra_path)] = ''
@@ -387,7 +442,7 @@ fn test_a_closed_file_goes_back_to_what_is_on_disk() {
 	app.open_files[main_uri] = 'module main\n\nfn main() {\n\tp := 10\n\tprintln(p)\n}\n'
 	other := os.join_path(fake.project, 'other.v')
 	app.v3_line_info(.hover, path_to_uri(other), other, '4:hv^2') or {}
-	project := app.v3_query_projects.values()[0]
+	project := app.v3_copies()[0]
 	copy_of_main := os.join_path(project.overlay.temp_root, 'main.v')
 	assert os.read_file(copy_of_main)!.contains('p := 10\n')
 	// Closed without saving: the copy holds main.v as it is on disk again.
@@ -514,7 +569,7 @@ fn test_a_rename_refuses_when_known_definitions_disappear_after_editing() {
 	} else {
 		assert err.msg().contains('previously resolved name'), err.msg()
 	}
-	copy_path := os.join_path(app.v3_query_projects.values()[0].overlay.temp_root, 'main.v')
+	copy_path := os.join_path(app.v3_query_pool().copies.values()[0].project.overlay.temp_root, 'main.v')
 	assert os.read_file(copy_path)! == os.read_file(path)!
 }
 
@@ -527,7 +582,7 @@ fn test_failed_sibling_buffer_write_prevents_querying_stale_overlay_text() {
 	uri := path_to_uri(path)
 	app.open_files[uri] = os.read_file(path)!
 	app.v3_line_info(.hover, uri, path, '4:hv^2') or { panic('first query failed') }
-	copy_root := app.v3_query_projects.values()[0].overlay.temp_root
+	copy_root := app.v3_query_pool().copies.values()[0].project.overlay.temp_root
 	// A file occupying the sibling's parent makes the next buffer write fail.
 	os.write_file(os.join_path(copy_root, 'blocked'), 'not a directory')!
 	sibling := os.join_path(fake.project, 'blocked', 'sibling.v')
@@ -561,7 +616,7 @@ fn test_without_a_server_v3_answers_in_a_process_of_its_own() {
 		return
 	}
 	assert (result as Hover).contents.value.contains('fake')
-	assert fake.questions() == ['${os.join_path(app.v3_query_projects.values()[0].overlay.temp_root, 'main.v')}:4:hv^2']
+	assert fake.questions() == ['${os.join_path(app.v3_copies()[0].overlay.temp_root, 'main.v')}:4:hv^2']
 	assert !app.v3_one_shot_unsupported
 }
 
@@ -584,13 +639,43 @@ fn test_only_a_created_or_deleted_file_rebuilds_the_copy() {
 	}
 	path := os.join_path(fake.project, 'main.v')
 	app.v3_line_info(.hover, path_to_uri(path), path, '4:hv^2') or {}
-	assert app.v3_query_projects.len == 1
+	assert app.v3_copies().len == 1
 	// A change shows through the copy.
 	app.v3_query_notice_disk_change(path, 2)
-	assert app.v3_query_projects.len == 1
+	assert app.v3_copies().len == 1
 	// A new file is not in it.
 	app.v3_query_notice_disk_change(os.join_path(fake.project, 'new.v'), 1)
-	assert app.v3_query_projects.len == 0
+	assert app.v3_copies().len == 0
+}
+
+fn test_a_disk_create_refreshes_the_owned_directory_of_an_existing_program_copy() {
+	mut app, fake := fake_v3_app('owned_watcher', fake_v3_query_server, 'VLS_DIAGNOSTICS_SERVER')!
+	defer {
+		stop_fake_v3_app(mut app, fake)
+	}
+	helper := os.join_path(fake.project, 'helper', 'helper.v')
+	os.mkdir_all(os.dir(helper))!
+	os.write_file(helper, 'module helper\n\npub fn answer() int { return 42 }\n')!
+	main_path := os.join_path(fake.project, 'main.v')
+	main_uri := path_to_uri(main_path)
+	app.open_files[main_uri] = 'module main\n\nimport helper\n\nfn main() { println(helper.answer()) }\n'
+	app.v3_line_info(.hover, main_uri, main_path, '5:hv^26') or {}
+	mut pool := app.v3_query_pool()
+	mut program := pool.program_copy(os.dir(main_path))
+	program.mutex.lock()
+	defer {
+		program.mutex.unlock()
+	}
+	copy_dir := os.join_path(program.project.overlay.temp_root, 'helper')
+	assert !os.is_link(copy_dir)
+	// A watcher can mark a copy while a request already holds its lock. The
+	// request must see the new file when it next prepares that same copy.
+	new_file := os.join_path(fake.project, 'helper', 'new.v')
+	new_content := 'module helper\n\npub fn another() int { return 7 }\n'
+	os.write_file(new_file, new_content)!
+	app.v3_query_notice_disk_change(new_file, 1)
+	app.prepare_program_copy(mut pool, mut program, main_path, os.dir(main_path))!
+	assert os.read_file(os.join_path(copy_dir, 'new.v'))! == new_content
 }
 
 fn test_a_test_file_is_asked_as_a_program_of_its_own() {
@@ -605,7 +690,7 @@ fn test_a_test_file_is_asked_as_a_program_of_its_own() {
 	main_path := os.join_path(fake.project, 'main.v')
 	app.v3_line_info(.hover, path_to_uri(test_path), test_path, '4:hv^2') or {}
 	app.v3_line_info(.hover, path_to_uri(main_path), main_path, '4:hv^2') or {}
-	copy_root := app.v3_query_projects.values()[0].overlay.temp_root
+	copy_root := app.v3_copies()[0].overlay.temp_root
 	copy_of_test := os.join_path(copy_root, 'main_test.v')
 	assert fake.questions() == ['${copy_of_test}:4:hv^2 ${copy_of_test}',
 		'${os.join_path(copy_root, 'main.v')}:4:hv^2 .']
@@ -625,7 +710,7 @@ fn test_a_server_that_does_not_end_is_stopped_anyway() {
 	exe := os.join_path(dir, 'v')
 	os.write_file(exe, fake_server_ignoring_quit)!
 	os.chmod(exe, 0o755)!
-	mut server := start_diagnostics_server(exe, [], dir)!
+	mut server := start_diagnostics_server(exe, [], dir, false, false)!
 	done := chan bool{cap: 1}
 	spawn stop_and_report(mut server, done)
 	select {
@@ -774,7 +859,7 @@ fn test_two_editors_on_one_project_keep_their_copies_apart() {
 	first.v3_line_info(.hover, uri, path, '4:hv^2') or {}
 	assert fake.asked() == first.open_files[uri]
 	// One that stops removes its own files only.
-	second_copy := second.v3_query_projects.values()[0].overlay.temp_root
+	second_copy := second.v3_copies()[0].overlay.temp_root
 	first.stop_diagnostics_servers()
 	assert os.is_dir(second_copy)
 	first.stop_v3_queries()
@@ -801,7 +886,7 @@ fn test_two_programs_of_one_project_keep_their_copies_apart() {
 	// An edit, a question about the other program, and the edit undone.
 	app.open_files[uri] = buffer.replace('10', '20')
 	app.v3_line_info(.hover, path_to_uri(tool), tool, '4:hv^2') or {}
-	assert app.v3_query_projects.len == 2
+	assert app.v3_copies().len == 2
 	app.open_files[uri] = buffer
 	app.v3_line_info(.hover, uri, path, '4:hv^2') or {}
 	assert fake.asked() == buffer
@@ -814,7 +899,7 @@ fn test_a_session_that_ends_without_a_shutdown_removes_its_copies() {
 	}
 	path := os.join_path(fake.project, 'main.v')
 	app.v3_line_info(.hover, path_to_uri(path), path, '4:hv^2') or {}
-	copy_root := app.v3_query_projects.values()[0].overlay.temp_root
+	copy_root := app.v3_copies()[0].overlay.temp_root
 	assert os.is_dir(copy_root)
 	// The client goes away without a word.
 	no_requests := os.join_path(fake.dir, 'no_requests.txt')
@@ -829,71 +914,110 @@ fn test_a_session_that_ends_without_a_shutdown_removes_its_copies() {
 	assert !os.exists(copy_root)
 }
 
-fn test_stopping_a_pool_keeps_copies_until_their_operation_releases_them() {
+fn check_in_background(mut pool DiagnosticsServerPool, exe string, dir string, done chan bool) {
+	pool.check(exe, ['-check', '.'], dir, fn () bool {
+		return false
+	}, unsafe { nil }) or {}
+	done <- true
+}
+
+const fake_server_waiting_for_release = r"#!/bin/sh
+here=$(dirname $0)
+echo v-diagnostics-server: ready
+while read -r request rest; do
+	case $request in quit) exit 0 ;; esac
+	token=${rest%% *}
+	echo v-diagnostics-server: child 1 $token
+	touch $here/started
+	while [ ! -f $here/release ]; do sleep 0.01; done
+	if [ -f source.v ]; then echo kept; else echo missing; fi
+	printf '\nv-diagnostics-server: end 0 %s\n' $token
+done
+"
+
+fn delayed_pool_query(mut pool DiagnosticsServerPool, exe string, dir string, done chan os.Result) {
+	result := pool.query(exe, ['-check', '.'], dir, 'source.v:1:hv^1') or {
+		os.Result{
+			exit_code: -99
+		}
+	}
+	done <- result
+}
+
+fn test_stopping_a_pool_retires_active_servers_without_removing_their_files() {
+	dir := os.join_path(os.vtmp_dir(), 'vls_pool_shutdown_${os.getpid()}')
+	os.mkdir_all(dir)!
+	defer {
+		os.rmdir_all(dir) or {}
+	}
+	exe := os.join_path(dir, 'v')
+	os.write_file(exe, fake_server_waiting_for_release)!
+	os.chmod(exe, 0o755)!
 	mut pool := new_diagnostics_server_pool()
-	assert pool.begin_operation()
+	defer {
+		pool.stop_all()
+	}
+	os.mkdir_all(pool.base)!
+	os.write_file(os.join_path(pool.base, 'source.v'), 'module main\n')!
+	done := chan os.Result{cap: 1}
+	spawn delayed_pool_query(mut pool, exe, pool.base, done)
+	started := os.join_path(dir, 'started')
+	watch := time.new_stopwatch()
+	for !os.exists(started) && watch.elapsed() < 5 * time.second {
+		time.sleep(5 * time.millisecond)
+	}
+	was_started := os.exists(started)
+	stopping := time.new_stopwatch()
+	pool.stop_all()
+	waited := stopping.elapsed()
+	files_kept := os.is_file(os.join_path(pool.base, 'source.v'))
+	// Release the request before assertions so its process always gets reaped.
+	os.write_file(os.join_path(dir, 'release'), '')!
+	result := <-done
+	assert was_started
+	assert waited < 500 * time.millisecond, 'stop_all waited ${waited} for the active request'
+	assert files_kept
+	assert result.exit_code == 0
+	assert result.output.trim_space() == 'kept'
+	assert !os.exists(pool.base)
+	assert pool.servers.len == 0
+	// A cancelled worker arriving later cannot start another server.
+	late := pool.query(exe, ['-check', '.'], dir, 'source.v:1:hv^1')
+	assert late == none
+	assert pool.servers.len == 0
+}
+
+fn test_stopping_a_pool_keeps_copies_until_their_operation_releases_them() {
+	mut pool := new_shared_diagnostics_server_pool()
+	admitted := pool.begin_operation()
+	assert admitted
+	mut program := pool.program_copy('project')
+	program.mutex.lock()
 	os.mkdir_all(pool.base)!
 	pool.stop_all()
-	assert os.is_dir(pool.base)
-	assert !pool.begin_operation()
+	kept := os.is_dir(pool.base)
+	late := pool.begin_operation()
+	program.mutex.unlock()
 	pool.end_operation()
+	assert kept
+	assert !late
+	assert pool.copies.len == 0
 	assert !os.exists(pool.base)
 }
 
 fn test_a_closed_query_pool_does_not_recreate_a_program_copy() {
 	mut app, fake := fake_v3_app('closed_pool', fake_v3_query_server, 'VLS_DIAGNOSTICS_SERVER')!
-	defer { stop_fake_v3_app(mut app, fake) }
+	defer {
+		stop_fake_v3_app(mut app, fake)
+	}
 	mut pool := app.v3_query_pool()
 	pool.stop_all()
 	path := os.join_path(fake.project, 'main.v')
-	assert app.v3_line_info(.hover, path_to_uri(path), path, '4:hv^2') == none
-	assert app.v3_query_projects.len == 0
+	answer := app.v3_line_info(.hover, path_to_uri(path), path, '4:hv^2')
+	assert answer == none
+	assert pool.copies.len == 0
 	assert !os.exists(pool.base)
 	assert fake.questions().len == 0
-}
-
-// A compiler without a server that waits until the test releases its check.
-const fake_check_waiting_for_release = r"#!/bin/sh
-case ${V_DIAGNOSTICS_SERVER}x in 1x) exit 0 ;; esac
-here=$(dirname $0)
-touch $here/started
-while [ ! -f $here/release ]; do sleep 0.01; done
-if [ ! -f main.v ]; then echo 'error: the program copy disappeared'; exit 1; fi
-exit 0
-"
-
-fn check_app_and_report(mut app App, uri string, content string, done chan bool) {
-	app.run_v_check(uri, content)
-	done <- true
-}
-
-fn test_shutdown_keeps_the_program_copy_through_a_one_shot_check_fallback() {
-	mut app, fake := fake_v3_app('shutdown_fallback', fake_check_waiting_for_release, 'VLS_V_COMMAND')!
-	defer { stop_fake_v3_app(mut app, fake) }
-	os.setenv('VLS_DIAGNOSTICS_SERVER', os.join_path(fake.server, 'v'), true)
-	mut pool := new_diagnostics_server_pool()
-	app.diagnostics_servers = pool
-	path := os.join_path(fake.project, 'main.v')
-	uri := path_to_uri(path)
-	content := os.read_file(path)!
-	app.open_files[uri] = content
-	other := os.join_path(fake.project, 'other.v')
-	app.open_files[path_to_uri(other)] = os.read_file(other)!
-	done := chan bool{cap: 1}
-	spawn check_app_and_report(mut app, uri, content, done)
-	watch := time.new_stopwatch()
-	for !os.exists(os.join_path(fake.server, 'started')) && watch.elapsed() < 5 * time.second {
-		time.sleep(5 * time.millisecond)
-	}
-	started := os.exists(os.join_path(fake.server, 'started'))
-	pool.stop_all()
-	kept := os.is_dir(pool.base)
-	os.write_file(os.join_path(fake.server, 'release'), '')!
-	_ := <-done
-	assert started
-	assert kept
-	assert !os.exists(pool.base)
-	assert !pool.begin_operation()
 }
 
 // Closing stdin does not end a process. Its pipe must be allowed to fail even
@@ -920,9 +1044,50 @@ fn test_a_closed_compiler_input_falls_back_and_stops_without_sigpipe() {
 	answer := pool.query(exe, ['-check', '.'], dir, 'source.v:1:hv^1')
 	assert answer == none
 	assert pool.servers.len == 0
-	mut server := start_diagnostics_server(exe, [], dir)!
+	mut server := start_diagnostics_server(exe, [], dir, false, false)!
 	server.stop()
 	assert server.process == unsafe { nil }
+}
+
+const fake_server_with_invalid_child_pid = r"#!/bin/sh
+echo v-diagnostics-server: ready
+while read -r request rest; do
+	case $request in quit) exit 0 ;; esac
+	token=${rest%% *}
+	echo v-diagnostics-server: child INVALID_PID $token
+	printf '\nv-diagnostics-server: end 0 %s\n' $token
+done
+"
+
+fn test_invalid_child_pids_leave_the_check_to_the_compiler_fallback() {
+	dir := os.join_path(os.vtmp_dir(), 'vls_pool_invalid_child_${os.getpid()}')
+	os.mkdir_all(dir)!
+	defer {
+		os.rmdir_all(dir) or {}
+	}
+	exe := os.join_path(dir, 'v')
+	// Every server finishes normally and cancellation is disabled: this test
+	// must never send a signal to any of these unsafe PID values.
+	for pid in ['0', '-1', '2147483648', '4294967297', '999999999999999999999999', '12oops', '+2',
+		'1_2', ''] {
+		os.write_file(exe, fake_server_with_invalid_child_pid.replace('INVALID_PID', pid))!
+		os.chmod(exe, 0o755)!
+		mut pool := new_diagnostics_server_pool()
+		answer := pool.check(exe, ['-check', '.'], dir, fn () bool {
+			return false
+		}, unsafe { nil })
+		pool.stop_all()
+		assert answer == none, 'the diagnostics server accepted child PID `${pid}`'
+	}
+	for pid in ['1', '2147483647'] {
+		os.write_file(exe, fake_server_with_invalid_child_pid.replace('INVALID_PID', pid))!
+		mut pool := new_diagnostics_server_pool()
+		answer := pool.check(exe, ['-check', '.'], dir, fn () bool {
+			return false
+		}, unsafe { nil })
+		pool.stop_all()
+		assert (answer or { panic('a valid child PID was rejected') }).exit_code == 0
+	}
 }
 
 const fake_server_delaying_cancelled_end = r"#!/bin/sh
@@ -1008,43 +1173,363 @@ fn test_session_shutdown_cancels_a_one_shot_diagnostics_fallback() {
 	assert !os.exists(scheduler.servers.base)
 }
 
-const fake_server_with_invalid_child_pid = r"#!/bin/sh
-echo v-diagnostics-server: ready
-while read -r request rest; do
-	case $request in quit) exit 0 ;; esac
-	token=${rest%% *}
-	echo v-diagnostics-server: child INVALID_PID $token
-	printf '\nv-diagnostics-server: end 0 %s\n' $token
-done
-"
-
-fn test_invalid_child_pids_leave_the_check_to_the_compiler_fallback() {
-	dir := os.join_path(os.vtmp_dir(), 'vls_pool_invalid_child_${os.getpid()}')
+fn test_a_question_does_not_wait_for_the_check_of_another_server() {
+	// A hover asks the server of its command line while the server of the
+	// program's checks is busy: it must not wait for that check.
+	dir := os.join_path(os.vtmp_dir(), 'vls_pool_concurrency_${os.getpid()}')
 	os.mkdir_all(dir)!
 	defer {
 		os.rmdir_all(dir) or {}
 	}
 	exe := os.join_path(dir, 'v')
-	// Every server finishes normally and cancellation is disabled: this test
-	// must never send a signal to any of these unsafe PID values.
-	for pid in ['0', '-1', '2147483648', '4294967297', '999999999999999999999999', '12oops', '+2',
-		'1_2', ''] {
-		os.write_file(exe, fake_server_with_invalid_child_pid.replace('INVALID_PID', pid))!
-		os.chmod(exe, 0o755)!
-		mut pool := new_diagnostics_server_pool()
-		answer := pool.check(exe, ['-check', '.'], dir, fn () bool {
-			return false
-		})
+	os.write_file(exe, fake_slow_check_server)!
+	os.chmod(exe, 0o755)!
+	mut pool := new_diagnostics_server_pool()
+	defer {
 		pool.stop_all()
-		assert answer == none, 'the diagnostics server accepted child PID `${pid}`'
 	}
-	for pid in ['1', '2147483647'] {
-		os.write_file(exe, fake_server_with_invalid_child_pid.replace('INVALID_PID', pid))!
-		mut pool := new_diagnostics_server_pool()
-		answer := pool.check(exe, ['-check', '.'], dir, fn () bool {
-			return false
-		})
+	query_args := ['-w', '-check', '.']
+	pool.query(exe, query_args, dir, 'main.v:1:hv^1') or { assert false, 'no answer' }
+	done := chan bool{cap: 1}
+	spawn check_in_background(mut pool, exe, dir, done)
+	time.sleep(300 * time.millisecond)
+	sw := time.new_stopwatch()
+	pool.query(exe, query_args, dir, 'main.v:1:hv^1') or { assert false, 'no answer' }
+	waited := sw.elapsed()
+	_ := <-done
+	assert waited < time.second, 'the question waited ${waited} for the check of another server'
+}
+
+fn test_a_request_that_asks_no_compiler_does_not_wait_for_one_that_does() {
+	// After a change an editor asks for the semantic tokens and the hover at the
+	// cursor at once: the tokens, which the compiler plays no part in, come
+	// first, though the hover was asked before them.
+	mut app, fake := fake_v3_app('request_order', fake_slow_query_server, 'VLS_DIAGNOSTICS_SERVER')!
+	defer {
+		stop_fake_v3_app(mut app, fake)
+	}
+	path := os.join_path(fake.project, 'main.v')
+	uri := path_to_uri(path)
+	text := os.read_file(path)!
+	messages := [
+		'{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":"${path_to_uri(fake.project)}","capabilities":{}}}',
+		'{"jsonrpc":"2.0","method":"initialized","params":{}}',
+		'{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"${uri}","languageId":"v","version":1,"text":${json2.encode(text)}}}}',
+		'{"jsonrpc":"2.0","id":2,"method":"textDocument/hover","params":{"textDocument":{"uri":"${uri}"},"position":{"line":3,"character":1}}}',
+		'{"jsonrpc":"2.0","id":3,"method":"textDocument/semanticTokens/full","params":{"textDocument":{"uri":"${uri}"}}}',
+		'{"jsonrpc":"2.0","id":4,"method":"shutdown"}',
+		'{"jsonrpc":"2.0","method":"exit"}',
+	]
+	input_path := os.join_path(fake.dir, 'requests.txt')
+	os.write_file(input_path, messages.map('Content-Length: ${it.len}\r\n\r\n${it}').join(''))!
+	mut input := os.open(input_path)!
+	defer {
+		input.close()
+	}
+	mut reader := io.new_buffered_reader(reader: input, cap: 1)
+	app.capture_output = true
+	app.handle_requests(mut reader)
+	mut order := []string{}
+	for message in app.captured_output {
+		if message.contains('"id":2,') {
+			order << 'hover'
+		} else if message.contains('"id":3,') {
+			order << 'tokens'
+		}
+	}
+	assert order == ['tokens', 'hover'], order.str()
+}
+
+// A diagnostics server that writes V_DIAGNOSTICS_PREPARE, as it got it, next to
+// itself.
+const fake_server_noting_prepare = r"#!/bin/sh
+here=$(dirname $0)
+echo x${V_DIAGNOSTICS_PREPARE} > $here/prepare.txt
+echo v-diagnostics-server: ready
+while read -r request rest; do
+	case $request in quit) exit 0 ;; esac
+	token=${rest%% *}
+	echo v-diagnostics-server: child 1 $token
+	printf '\nv-diagnostics-server: end 0 %s\n' $token
+done
+"
+
+fn test_the_servers_of_the_diagnostics_and_of_the_questions_prepare_builtin() {
+	dir := os.join_path(os.vtmp_dir(), 'vls_v3_prepare_${os.getpid()}')
+	os.mkdir_all(dir)!
+	defer {
+		os.rmdir_all(dir) or {}
+	}
+	exe := os.join_path(dir, 'v')
+	os.write_file(exe, fake_server_noting_prepare)!
+	os.chmod(exe, 0o755)!
+	mut scheduler := new_diagnostics_scheduler()
+	defer {
+		scheduler.servers.stop_all()
+	}
+	scheduler.servers.check(exe, ['-check', '-nocolor', '.'], dir, fn () bool {
+		return false
+	}, unsafe { nil }) or {}
+	assert os.read_file(os.join_path(dir, 'prepare.txt'))!.trim_space() == 'x1'
+	os.rm(os.join_path(dir, 'prepare.txt'))!
+	mut app := App{}
+	defer {
+		app.v3_query_pool().stop_all()
+	}
+	app.v3_query_pool().query(exe, ['-w', '-check', '-nocolor', '.'], dir, 'main.v:1:hv^1') or {}
+	assert os.read_file(os.join_path(dir, 'prepare.txt'))!.trim_space() == 'x1'
+	// A pool of neither kind leaves it to the compiler.
+	mut plain := new_diagnostics_server_pool()
+	defer {
+		plain.stop_all()
+	}
+	plain.query(exe, ['-check', '-nocolor', '.'], dir, 'main.v:1:hv^1') or {}
+	assert os.read_file(os.join_path(dir, 'prepare.txt'))!.trim_space() == 'x'
+}
+
+// A diagnostics server that notes each request with the directory it runs in,
+// and when it starts, whether it shares its checks with its questions, and
+// answers a question with the answer the test left for it.
+const fake_server_noting_requests = r"#!/bin/sh
+here=$(dirname $0)
+echo start $(pwd) shared=x${V_DIAGNOSTICS_SHARED} >> $here/requests.txt
+echo v-diagnostics-server: ready
+while read -r request rest; do
+	case $request in quit) exit 0 ;; esac
+	token=${rest%% *}
+	echo $request $(pwd) >> $here/requests.txt
+	echo v-diagnostics-server: child 1 $token
+	case $request in query) cat $here/answer.txt; echo ;; esac
+	printf '\nv-diagnostics-server: end 0 %s\n' $token
+done
+"
+
+fn test_a_check_and_a_question_about_a_program_share_its_copy_and_its_server() {
+	mut app, fake := fake_v3_app('shared_copy', fake_server_noting_requests, 'VLS_DIAGNOSTICS_SERVER')!
+	app.diagnostics_scheduler = new_diagnostics_scheduler()
+	defer {
+		stop_fake_v3_app(mut app, fake)
+	}
+	path := os.join_path(fake.project, 'main.v')
+	uri := path_to_uri(path)
+	buffer := 'module main\n\nfn main() {\n\tp := 10\n\tprintln(p)\n}\n'
+	app.open_files[uri] = buffer
+	// The check of the diagnostics worker, as run_diagnostics_job makes it.
+	mut scheduler := app.diagnostics_scheduler or { panic('no scheduler') }
+	mut worker := App{
+		text:                buffer
+		open_files:          app.open_files.clone()
+		temp_dir:            app.temp_dir
+		diagnostics_enabled: true
+		diagnostics_servers: scheduler.servers
+		v3_query_servers:    scheduler.servers
+	}
+	worker.run_v_check(uri, buffer)
+	app.v3_line_info(.hover, uri, path, '4:hv^2') or { panic('no answer') }
+	requests := os.read_file(os.join_path(fake.server, 'requests.txt'))!.split_into_lines()
+	// One server, which shares its checks with its questions, answers both, in
+	// one copy of the program.
+	assert requests.len == 3, requests.str()
+	assert requests[0].starts_with('start ') && requests[0].ends_with(' shared=x1'), requests[0]
+	copy_dir := requests[0].all_after('start ').all_before(' shared=')
+	assert requests[1] == 'check ${copy_dir}'
+	assert requests[2] == 'query ${copy_dir}'
+	// The copy holds the buffer.
+	assert os.read_file(os.join_path(copy_dir, 'main.v'))! == buffer
+}
+
+// A diagnostics server whose check sends the errors it found first, and then
+// its whole answer.
+const fake_server_with_partial_answers = r"#!/bin/sh
+echo v-diagnostics-server: ready
+while read -r request rest; do
+	case $request in quit) exit 0 ;; esac
+	token=${rest%% *}
+	echo v-diagnostics-server: child 1 $token
+	echo 'main.v:3:5: error: found first'
+	printf '\nv-diagnostics-server: partial 1 %s\n' $token
+	echo 'main.v:3:5: error: found first'
+	echo 'main.v:9:1: notice: found at the end'
+	printf '\nv-diagnostics-server: end 1 %s\n' $token
+done
+"
+
+fn test_a_check_gets_the_partial_answer_of_the_server_first() {
+	dir := os.join_path(os.vtmp_dir(), 'vls_partial_${os.getpid()}')
+	os.mkdir_all(dir)!
+	defer {
+		os.rmdir_all(dir) or {}
+	}
+	exe := os.join_path(dir, 'v')
+	os.write_file(exe, fake_server_with_partial_answers)!
+	os.chmod(exe, 0o755)!
+	mut pool := new_diagnostics_server_pool()
+	defer {
 		pool.stop_all()
-		assert (answer or { panic('a valid child PID was rejected') }).exit_code == 0
 	}
+	partials := chan os.Result{cap: 2}
+	result := pool.check(exe, ['-check', '.'], dir, fn () bool {
+		return false
+	}, fn [partials] (answer os.Result) {
+		partials <- answer
+	}) or { panic('no answer') }
+	assert partials.len == 1
+	partial := <-partials
+	assert partial.exit_code == 1
+	// Each answer ends with the line before its own marker, as a whole answer
+	// does.
+	assert partial.output == 'main.v:3:5: error: found first\n'
+	// The answer is what came after the partial one.
+	assert result.exit_code == 1
+	assert result.output == 'main.v:3:5: error: found first\nmain.v:9:1: notice: found at the end\n'
+	// Without a callback the partial answer is skipped.
+	plain := pool.check(exe, ['-check', '.'], dir, fn () bool {
+		return false
+	}, unsafe { nil }) or { panic('no answer') }
+	assert plain.output == result.output
+}
+
+// hover_text_at is what a hover at `line` and `col` of `uri` shows.
+fn hover_text_at(mut app App, uri string, line int, col int) string {
+	response := app.operation_at_pos(.hover, Request{
+		id:     1
+		method: 'textDocument/hover'
+		params: json2.encode(TextDocumentPositionParams{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			position:      Position{
+				line: line
+				char: col
+			}
+		})
+	})
+	result := response.result
+	if result is Hover {
+		return result.contents.value
+	}
+	return ''
+}
+
+const narrowing_source = 'module main
+
+type Number = int | f64
+
+struct Circle {
+	r f64
+}
+
+struct Square {
+	side f64
+}
+
+type Shape = Circle | Square
+
+fn half[T Number](x T) f64 {
+	\$if T is f64 {
+		return x
+	}
+	return 0.0
+}
+
+fn area(s Shape) f64 {
+	if s is Circle {
+		return s.r
+	}
+	return 0.0
+}
+
+fn double(y int) int {
+	return y * 2
+}
+'
+
+fn test_the_compiler_tells_what_a_value_of_a_type_parameter_or_a_sum_type_is() {
+	mut app, fake := fake_v3_app('narrowing', fake_v3_hover_server, 'VLS_DIAGNOSTICS_SERVER')!
+	defer {
+		stop_fake_v3_app(mut app, fake)
+	}
+	os.write_file(os.join_path(fake.server, 'answer.txt'), '{"contents":{"kind":"markdown","value":"```v\\nx f64\\n```"}}')!
+	path := os.join_path(fake.project, 'narrowing.v')
+	os.write_file(path, narrowing_source)!
+	uri := path_to_uri(path)
+	app.open_files[uri] = narrowing_source
+	lines := narrowing_source.split_into_lines()
+	// `x` of `half[T Number]` in the branch of `$if T is f64 {`: a `$if` can
+	// decide `T`, and the compiler says what it is there.
+	x_line := lines.index('\t\treturn x')
+	assert hover_text_at(mut app, uri, x_line, 9) == '```v\nx f64\n```'
+	// `s` of a sum type in the branch of `if s is Circle {`: the compiler too.
+	s_line := lines.index('\t\treturn s.r')
+	assert hover_text_at(mut app, uri, s_line, 9) == '```v\nx f64\n```'
+	// `y int` is the index's to tell: the compiler is not asked.
+	asked := fake.questions().len
+	y_line := lines.index('\treturn y * 2')
+	assert hover_text_at(mut app, uri, y_line, 8) == '```v\ny int\n```'
+	assert fake.questions().len == asked
+}
+
+fn test_the_index_tells_a_value_of_a_type_parameter_when_the_compiler_cannot() {
+	// A compiler that answers no hover: the type written in the signature.
+	mut app, fake := fake_v3_app('narrowing_none', fake_v3_query_server, 'VLS_DIAGNOSTICS_SERVER')!
+	defer {
+		stop_fake_v3_app(mut app, fake)
+	}
+	path := os.join_path(fake.project, 'narrowing.v')
+	os.write_file(path, narrowing_source)!
+	uri := path_to_uri(path)
+	app.open_files[uri] = narrowing_source
+	x_line := narrowing_source.split_into_lines().index('\t\treturn x')
+	assert hover_text_at(mut app, uri, x_line, 9) == '```v\nx T\n```'
+}
+
+const multiline_sum_source = 'module main
+
+struct Circle {
+	r f64
+}
+
+struct Square {
+	side f64
+}
+
+// vfmt writes a long sum type with each type on a line of its own.
+type Shape2 = Circle
+	| Square
+
+fn area2(s Shape2) f64 {
+	if s is Circle {
+		return s.r
+	}
+	return 0.0
+}
+
+fn perimeter(s Shape2) f64 {
+	s.
+	return 0.0
+}
+'
+
+fn test_a_sum_type_written_on_several_lines_is_a_sum_type() {
+	mut app, fake := fake_v3_app('multiline_sum', fake_v3_hover_server, 'VLS_DIAGNOSTICS_SERVER')!
+	defer {
+		stop_fake_v3_app(mut app, fake)
+	}
+	os.write_file(os.join_path(fake.server, 'answer.txt'), '{"contents":{"kind":"markdown","value":"```v\\ns main.Circle\\n```"}}')!
+	path := os.join_path(fake.project, 'shapes.v')
+	os.write_file(path, multiline_sum_source)!
+	uri := path_to_uri(path)
+	app.open_files[uri] = multiline_sum_source
+	lines := multiline_sum_source.split_into_lines()
+	// `s` in the branch of `if s is Circle {`: the compiler tells, as for a sum
+	// type written on one line.
+	assert hover_text_at(mut app, uri, lines.index('\t\treturn s.r'), 9) == '```v\ns main.Circle\n```'
+	// `s.`: what a value of a sum type has, not the fields of its first type.
+	dot := lines.index('\ts.')
+	labels := app.indexed_completions(uri, Position{
+		line: dot
+		char: 3
+	}).items.map(it.label)
+	assert 'r' !in labels, labels.str()
+	assert 'type_name' in labels, labels.str()
 }

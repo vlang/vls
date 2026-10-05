@@ -15,11 +15,13 @@ const v_keywords = ['asm', 'as', 'assert', 'atomic', 'break', 'const', 'continue
 	'_unlikely_']!
 
 const v_builtins = ['copy', 'eprintln', 'eprint', 'error', 'error_with_code', 'exit', 'flush_stderr',
-	'flush_stdout', 'free', 'isnil', 'panic', 'print', 'print_backtrace', 'println']!
+	'flush_stdout', 'free', 'isnil', 'panic', 'print', 'print_backtrace', 'println', 'recover']!
 
-const v_builtin_types = ['any', 'array', 'bool', 'byte', 'byteptr', 'chan', 'char', 'charptr',
-	'f32', 'f64', 'i8', 'i16', 'i32', 'i64', 'int', 'isize', 'IError', 'map', 'rune', 'string',
-	'thread', 'u8', 'u16', 'u32', 'u64', 'usize', 'void', 'voidptr']!
+// v_builtin_types are the types V builds in: `i128` and `u128` since V's #28877,
+// and no `byte` since #29141.
+const v_builtin_types = ['any', 'array', 'bool', 'byteptr', 'chan', 'char', 'charptr', 'f32', 'f64',
+	'i8', 'i16', 'i32', 'i64', 'i128', 'int', 'isize', 'IError', 'map', 'rune', 'string', 'thread',
+	'u8', 'u16', 'u32', 'u64', 'u128', 'usize', 'void', 'voidptr']!
 
 struct IndexedCompletionResult {
 	items          []Detail
@@ -656,6 +658,13 @@ const max_declaration_expression_lines = 40
 // map literal, or a call). Every line loses its comment first, so a `//` in the
 // middle does not swallow the rest.
 fn declaration_expression(lines []string, start int, rhs string) string {
+	text, _ := declaration_expression_span(lines, start, rhs)
+	return text
+}
+
+// declaration_expression_span is declaration_expression with the line on which the
+// value ends.
+fn declaration_expression_span(lines []string, start int, rhs string) (string, int) {
 	first := without_trailing_comment(rhs)
 	mut parts := [first]
 	mut depth := bracket_depth(first)
@@ -666,7 +675,7 @@ fn declaration_expression(lines []string, start int, rhs string) string {
 		parts << part
 		line++
 	}
-	return parts.join(' ')
+	return parts.join(' '), line - 1
 }
 
 // bracket_depth reports how many brackets `text` leaves open, ignoring the ones
@@ -929,6 +938,84 @@ fn language_member_hover(name string, signature string) Hover {
 	}
 }
 
+// binding_type_narrows reports whether the compiler tells better than the index
+// what the binding that `hover` describes is at `position`: its type names a
+// type parameter of the generic function around it, which a `$if` can decide,
+// or is a sum type or an interface, which `is` and `match` can.
+fn (mut app App) binding_type_narrows(uri string, position Position, hover Hover) bool {
+	if !app.v3_line_info_enabled || os.getenv('VLS_V3_LINE_INFO') == 'off' {
+		return false
+	}
+	text := hover.contents.value.all_after('```v\n').all_before('\n```').trim_space()
+	typ := text.all_after(' ').trim_space()
+	if typ == '' || typ == text {
+		return false
+	}
+	content := app.index_source_for(uri) or { return false }
+	lines := content.split_into_lines()
+	start := containing_function_start(lines, position, app.position_encoding)
+	if start >= 0 && start < lines.len {
+		mut end := start
+		for end + 1 < lines.len && !lines[end].contains('{') {
+			end++
+		}
+		for name in generic_list_names(lines[start..end + 1].join('\n')) {
+			if type_text_names(typ, name) {
+				return true
+			}
+		}
+	}
+	// A type the index does not know, the compiler writes out: a generic struct
+	// (the index holds `Pair[T]`), which a literal that infers its arguments
+	// (`Pair{ left: 1 }`) reads as the bare `Pair`, or a field of it, `T`.
+	if app.type_text_names_unknown_type(uri, content, typ) {
+		return true
+	}
+	base := typ.trim_left('&').all_after('mut ').trim_left('?!')
+	return app.type_declaration(uri, content, base).kind in ['sum', 'interface']
+}
+
+// type_text_names_unknown_type reports whether the type `text` names a type the
+// index does not know.
+fn (mut app App) type_text_names_unknown_type(uri string, content string, text string) bool {
+	mut i := 0
+	for i < text.len {
+		if !is_ident_start(text[i]) {
+			i++
+			continue
+		}
+		mut end := i
+		for end < text.len && (is_ident_char(text[end]) || text[end] == `.`) {
+			end++
+		}
+		name := text[i..end].trim_right('.')
+		i = end
+		if !is_type_name(name) {
+			continue
+		}
+		if app.type_declaration(uri, content, name).kind == '' {
+			return true
+		}
+	}
+	return false
+}
+
+// type_text_names reports whether the type `text` names `name` as a whole
+// identifier: `[]T` names `T`, `Tree` does not.
+fn type_text_names(text string, name string) bool {
+	mut i := 0
+	for {
+		idx := text.index_after(name, i) or { return false }
+		end := idx + name.len
+		if (idx == 0 || !is_ident_char(text[idx - 1]))
+			&& (end >= text.len || !is_ident_char(text[end])) {
+			return true
+		}
+		i = idx + 1
+	}
+	return false
+}
+
 fn (mut app App) local_binding_hover(uri string, position Position) ?Hover {
 	content := app.index_source_for(uri) or { return none }
 	lines := content.split_into_lines()
@@ -972,7 +1059,7 @@ fn (mut app App) declared_binding_type(uri string, content string, lines []strin
 	line := lines[position.line]
 	start, _ := find_word_bounds_at_col(line, encoded_col_to_byte(line, position.char,
 		app.position_encoding), .utf8)
-	receiver_declaration_on_line(line, name, [start])?
+	declaration := receiver_declaration_on_line(line, name, [start])?
 	written := app.written_binding_type(uri, content, lines, LocalBinding{
 		name:   name
 		line:   position.line
@@ -981,10 +1068,18 @@ fn (mut app App) declared_binding_type(uri string, content string, lines []strin
 	if written != '' {
 		return written
 	}
-	// The type a use has right after the declaration, at the end of its line.
+	// The type a use has right after the declaration, at the end of its value: a
+	// value written over several lines (`Point{ ... }.x`) ends on its last one.
+	rhs := if declaration.assignment_end <= line.len {
+		line[declaration.assignment_end..]
+	} else {
+		''
+	}
+	_, end_line := declaration_expression_span(lines, position.line, rhs)
+	end_text := lines[end_line]
 	return app.infer_binding_type_at_position(uri, content, name, Position{
-		line: position.line
-		char: byte_to_encoded_col(line, line.len, app.position_encoding)
+		line: end_line
+		char: byte_to_encoded_col(end_text, end_text.len, app.position_encoding)
 	})
 }
 
@@ -1100,6 +1195,18 @@ fn (mut app App) operation_at_pos(method Method, request Request) Response {
 
 	if method == .hover {
 		if binding := app.local_binding_hover(path, params.position) {
+			// What a `$if`, `is` or `match` makes of a value of a type parameter,
+			// a sum type or an interface, the compiler tells: its answer first,
+			// and the index's when it has none.
+			if app.binding_type_narrows(path, params.position, binding) {
+				compiled := app.hover_result(path, params.position, '${line_nr}:hv^${byte_col}')
+				if !(compiled is string && compiled == 'null') {
+					return Response{
+						id:     request.id
+						result: compiled
+					}
+				}
+			}
 			return Response{
 				id:     request.id
 				result: binding
@@ -2294,6 +2401,15 @@ fn callable_or_constructor(rhs string) (string, bool) {
 				col++
 				continue
 			}
+			// A literal that the value goes on from, `Host{}.first_of(xs)`, is not
+			// what the value is: its member or its call decides that.
+			close := matching_delimiter(rhs, col, `{`, `}`)
+			if close >= 0 {
+				after := rhs[close + 1..].trim_space()
+				if after != '' && !after.starts_with('//') {
+					return '', false
+				}
+			}
 		}
 		return name, is_constructor
 	}
@@ -2604,6 +2720,9 @@ fn (mut app App) infer_binding_type_at_position(uri string, content string, rece
 				break
 			}
 			latest_rhs += '\n' + next_code
+			// The source of the value too, which the literals keep: what follows the
+			// first line (`}.x`) can change its type.
+			latest_raw_rhs += ' ' + without_trailing_comment(lines[next_line])
 			rhs_has_expression = rhs_has_expression || next_code.trim_space() != ''
 				|| source_fragment_starts_with_literal(lines[next_line])
 			next_line++
@@ -2756,8 +2875,8 @@ fn method_completion_from_lines(lines []string, symbol DocumentSymbol) ?Detail {
 }
 
 // builtin_receiver_types are the types whose methods live in vlib/builtin.
-const builtin_receiver_types = ['bool', 'string', 'rune', 'char', 'byte', 'u8', 'u16', 'u32', 'u64',
-	'usize', 'i8', 'i16', 'i32', 'int', 'i64', 'isize', 'f32', 'f64']
+const builtin_receiver_types = ['bool', 'string', 'rune', 'char', 'u8', 'u16', 'u32', 'u64', 'u128',
+	'usize', 'i8', 'i16', 'i32', 'int', 'i64', 'i128', 'isize', 'f32', 'f64']
 
 fn (mut app App) receiver_type_scope(uri string, content string, receiver_type string) (string, string, bool, string) {
 	normalized_type := normalize_receiver_type(receiver_type)
@@ -5952,6 +6071,20 @@ fn source_occurrences_have_potential_local_binding(lines []string, occurrences [
 	return false
 }
 
+// v3_own_defines are the defines V3 sets for itself: vlib keeps what only V3
+// builds in `*_d_v3_backend.v` files (the methods of i128 and u128, for one).
+const v3_own_defines = ['v3_backend']
+
+// name_needs_other_defines reports whether a file named `name` is left out by
+// the defines VLS builds with: a `_d_` file for a define it does not pass, and
+// a `_notd_` file for one it does.
+fn name_needs_other_defines(name string) bool {
+	if name.contains('_d_') {
+		return !v3_own_defines.any(name.contains('_d_${it}.'))
+	}
+	return v3_own_defines.any(name.contains('_notd_${it}.'))
+}
+
 // active_indexed_source_file_names applies the compiler's native build-file
 // filtering without removing inactive sources from the broader symbol index.
 // The requesting test file is a direct compiler input, but sibling tests are
@@ -5974,8 +6107,8 @@ fn (app &App) active_indexed_source_file_names(dir string, active_test_file_name
 	mut active := map[string]bool{}
 	// The compiler's own directory scan is authoritative for saved sources: it
 	// settles the os, arch, `_d_`/`_notd_`, and `_default.c.v` rules together,
-	// and VLS compiles with no user defines.
-	for path in pref.get_v_files_from_dir_for_target(dir, [], host) {
+	// and VLS compiles with no user defines, only the ones V3 sets for itself.
+	for path in pref.get_v_files_from_dir_for_target(dir, v3_own_defines, host) {
 		active[os.file_name(path)] = true
 	}
 	// A buffer the client has created but not saved is invisible to that scan,
@@ -5983,7 +6116,7 @@ fn (app &App) active_indexed_source_file_names(dir string, active_test_file_name
 	// a `_d_` file needs a define VLS does not pass, and every other name is
 	// treated as active rather than hiding a file the user is editing.
 	for name in file_names {
-		if name in active || name.ends_with('_test.v') || name.contains('_d_')
+		if name in active || name.ends_with('_test.v') || name_needs_other_defines(name)
 			|| os.exists(os.join_path(dir, name)) {
 			continue
 		}
@@ -6201,7 +6334,8 @@ fn find_declaration_line(lines []string, symbol string) int {
 }
 
 // extract_doc_comment walks backward from `decl_line` collecting consecutive
-// `//` comment lines (V's vdoc convention) and returns them joined with newlines.
+// `//` comment lines (V's vdoc convention) and returns them as Markdown (see
+// doc_comment_markdown).
 fn extract_doc_comment(lines []string, decl_line int) string {
 	mut comments := []string{}
 	mut i := decl_line - 1
@@ -6212,7 +6346,7 @@ fn extract_doc_comment(lines []string, decl_line int) string {
 	for i >= 0 {
 		trimmed := lines[i].trim_space()
 		if trimmed.starts_with('//') {
-			comments << trimmed[2..].trim_space()
+			comments << trimmed[2..]
 			i--
 		} else {
 			break
@@ -6221,10 +6355,71 @@ fn extract_doc_comment(lines []string, decl_line int) string {
 	if comments.len == 0 {
 		return ''
 	}
-	comments = comments.reverse()
-	// Use Markdown hard line breaks (two trailing spaces + newline) so each
-	// comment line renders on its own line in the hover popup.
-	return comments.join('  \n')
+	return doc_comment_markdown(comments.reverse())
+}
+
+// doc_comment_markdown renders the lines of a doc comment, each as written
+// after its `//`, as Markdown: a line of text on its own line (a hard line
+// break), the lines of a ``` block as written but for the space after `//`,
+// and consecutive `Example: <code>` lines, which `v doc` shows as V code, as a
+// ```v block under `Example:` or `Examples:`.
+fn doc_comment_markdown(comments []string) string {
+	mut out := []string{cap: comments.len + 4}
+	mut in_block := false
+	mut i := 0
+	for i < comments.len {
+		if !in_block {
+			mut examples := []string{}
+			for i < comments.len {
+				examples << inline_doc_example(comments[i]) or { break }
+				i++
+			}
+			if examples.len > 0 {
+				out << if examples.len == 1 { 'Example:  ' } else { 'Examples:  ' }
+				out << '```v'
+				out << examples
+				out << '```'
+				continue
+			}
+		}
+		text := comments[i].trim_space()
+		if text.starts_with('```') {
+			in_block = !in_block
+			out << text
+		} else if in_block {
+			mut code := comments[i]
+			if code.starts_with(' ') {
+				code = code[1..]
+			}
+			out << code.trim_right(' \t')
+		} else {
+			// Two trailing spaces: a hard line break, so that each line of the
+			// comment shows on its own line.
+			out << text + '  '
+		}
+		i++
+	}
+	if in_block {
+		out << '```'
+	}
+	if out.len > 0 && out.last().ends_with('  ') {
+		out[out.len - 1] = out.last()[..out.last().len - 2]
+	}
+	return out.join('\n')
+}
+
+// inline_doc_example is the code of a doc comment line `Example: <code>`,
+// given as written after its `//`: how vlib documents most of its examples.
+fn inline_doc_example(comment string) ?string {
+	text := comment.trim_space()
+	if !text.starts_with('Example: ') {
+		return none
+	}
+	code := text['Example: '.len..].trim_space()
+	if code == '' {
+		return none
+	}
+	return code
 }
 
 // get_module_name extracts the module name declared in V source content.
@@ -7932,7 +8127,7 @@ fn (mut app App) builtin_call_items() map[string]Detail {
 				}
 			}
 		}
-		app.builtin_calls_cache[dir] = items
+		app.builtin_calls_cache[dir] = items.clone()
 	}
 	return app.builtin_calls_cache[dir] or { map[string]Detail{} }
 }

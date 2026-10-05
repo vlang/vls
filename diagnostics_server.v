@@ -22,12 +22,39 @@ mut:
 	servers     map[string]&DiagnosticsServer
 	unsupported map[string]bool
 	requests    u64
-	closed      bool
-	operations  int
+	// Closing rejects new work. Operations already holding a server or a copy
+	// keep its files until the last one releases them.
+	closed     bool
+	operations int
 	// The directory of the files its servers check, which no other pool uses:
 	// the editors one VLS serves over TCP, and the checks and the questions of
 	// one editor, neither write nor remove each other's files.
 	base string
+	// prepare asks its servers to parse and collect builtin and the modules it
+	// imports once, before their first check, instead of in each check.
+	prepare bool
+	// shared makes the checks and the questions about a program share its copy,
+	// and the child of its server that checked it: a check of a program, or a
+	// question about it, answers both while the copy holds what it held
+	// (V_DIAGNOSTICS_SHARED).
+	shared bool
+	copies map[string]&ProgramCopy
+}
+
+// ProgramCopy is the copy of a program that the checks and the questions of an
+// editor share, by program directory: a request holds its lock while it writes
+// what the editor holds into the copy and asks about it, so the copy holds what
+// the request asked about until it is answered.
+@[heap]
+struct ProgramCopy {
+mut:
+	mutex   sync.Mutex
+	project V3QueryProject
+	built   bool
+	// Under the pool's lock: the directory the copy mirrors, and whether a file
+	// was created or deleted there since the copy was built.
+	root  string
+	stale bool
 }
 
 struct DiagnosticsServer {
@@ -36,11 +63,22 @@ mut:
 	leftover    string
 	last_used   i64
 	fingerprint string
+	// busy is held while a request talks to this server; the pool's own lock
+	// covers only its map, so a request to one server does not wait for the
+	// others (a hover while the program is checked).
+	busy sync.Mutex
+	// users counts the requests holding this server, under the pool's lock: the
+	// pool stops no server in use.
+	users int
+	// retired is set when the pool dropped this server while it was in use: the
+	// last request to leave stops it.
+	retired bool
 }
 
 const diagnostics_server_ready = 'v-diagnostics-server: ready'
 const diagnostics_server_end = 'v-diagnostics-server: end '
 const diagnostics_server_child = 'v-diagnostics-server: child '
+const diagnostics_server_partial = 'v-diagnostics-server: partial '
 // diagnostics_check_cancelled is the exit code of a check stopped because a
 // newer one made its answer useless: no diagnostics, and no one-shot fallback.
 const diagnostics_check_cancelled = -2
@@ -66,7 +104,23 @@ fn new_diagnostics_server_pool() &DiagnosticsServerPool {
 	return pool
 }
 
-// begin_operation keeps the pool files alive through copy preparation and
+// new_prepared_diagnostics_server_pool returns a pool whose servers prepare
+// builtin before their first check (V_DIAGNOSTICS_PREPARE).
+fn new_prepared_diagnostics_server_pool() &DiagnosticsServerPool {
+	mut pool := new_diagnostics_server_pool()
+	pool.prepare = true
+	return pool
+}
+
+// new_shared_diagnostics_server_pool returns a prepared pool whose checks and
+// questions share the copy of their program and its checks (see shared).
+fn new_shared_diagnostics_server_pool() &DiagnosticsServerPool {
+	mut pool := new_prepared_diagnostics_server_pool()
+	pool.shared = true
+	return pool
+}
+
+// begin_operation keeps the pool's files alive through copy preparation and
 // any compiler fallback, not just while a server is answering.
 fn (mut pool DiagnosticsServerPool) begin_operation() bool {
 	pool.mutex.lock()
@@ -92,15 +146,48 @@ fn (mut pool DiagnosticsServerPool) end_operation() {
 // clean_closed_pool is called under the pool lock, after its servers retire.
 fn (mut pool DiagnosticsServerPool) clean_closed_pool() {
 	if pool.closed && pool.operations == 0 {
+		pool.copies.clear()
 		os.rmdir_all(pool.base) or {}
+	}
+}
+
+// program_copy returns the copy of the program in `program_dir`, not built yet
+// the first time.
+fn (mut pool DiagnosticsServerPool) program_copy(program_dir string) &ProgramCopy {
+	pool.mutex.lock()
+	defer {
+		pool.mutex.unlock()
+	}
+	if program := pool.copies[program_dir] {
+		return program
+	}
+	program := &ProgramCopy{}
+	pool.copies[program_dir] = program
+	return program
+}
+
+// notice_disk_change tells the copies of the programs that hold `path` that a
+// file was created or deleted there: each is built again before its next
+// request, as a copy links the files that were there when it was built.
+fn (mut pool DiagnosticsServerPool) notice_disk_change(path string) {
+	pool.mutex.lock()
+	defer {
+		pool.mutex.unlock()
+	}
+	for key in pool.copies.keys() {
+		if mut program := pool.copies[key] {
+			if program.root != '' && path_is_within(path, program.root) {
+				program.stale = true
+			}
+		}
 	}
 }
 
 // check runs the compiler with `args` in `work_dir` through a server, starting
 // one for this command line when needed. It returns none when no server can
 // answer, which leaves the caller to run the compiler itself.
-fn (mut pool DiagnosticsServerPool) check(exe string, args []string, work_dir string, cancelled fn () bool) ?os.Result {
-	return pool.request(exe, args, work_dir, '', diagnostics_server_answer_ms, cancelled)
+fn (mut pool DiagnosticsServerPool) check(exe string, args []string, work_dir string, cancelled fn () bool, partial fn (os.Result)) ?os.Result {
+	return pool.request(exe, args, work_dir, '', diagnostics_server_answer_ms, cancelled, partial)
 }
 
 // query asks the server for this command line a question of the mini-VLS
@@ -109,52 +196,38 @@ fn (mut pool DiagnosticsServerPool) check(exe string, args []string, work_dir st
 fn (mut pool DiagnosticsServerPool) query(exe string, args []string, work_dir string, question string) ?os.Result {
 	return pool.request(exe, args, work_dir, question, v3_query_answer_ms, fn () bool {
 		return false
-	})
+	}, unsafe { nil })
 }
 
 // request sends a `check`, or a `query` of `question` when there is one, and
-// waits `timeout_ms` for the answer.
-fn (mut pool DiagnosticsServerPool) request(exe string, args []string, work_dir string, question string, timeout_ms int, cancelled fn () bool) ?os.Result {
-	if !pool.begin_operation() { return none }
-	defer { pool.end_operation() }
-	key := '${exe}\n${work_dir}\n${args.join('\n')}'
-	// The compiler reads v.mod and .vvmrc once, before it forks, so a server
-	// started before they changed can never answer again: a new one replaces it.
-	fingerprint := project_config_fingerprint(work_dir)
-	pool.mutex.lock()
-	defer {
-		pool.mutex.unlock()
-	}
-	if pool.closed || pool.unsupported['${key}\n${fingerprint}'] {
+// waits `timeout_ms` for the answer; `partial`, when set, gets the partial
+// answer of a check (see DiagnosticsServer.ask).
+fn (mut pool DiagnosticsServerPool) request(exe string, args []string, work_dir string, question string, timeout_ms int, cancelled fn () bool, partial fn (os.Result)) ?os.Result {
+	if !pool.begin_operation() {
 		return none
 	}
-	if mut outdated := pool.servers[key] {
-		if outdated.fingerprint != fingerprint {
-			outdated.stop()
-			pool.servers.delete(key)
-		}
+	defer {
+		pool.end_operation()
 	}
-	mut server := pool.servers[key] or {
-		pool.evict_least_recently_used()
-		mut started := start_diagnostics_server(exe, args, work_dir) or {
-			log('no diagnostics server for ${work_dir}: ${err}')
-			pool.unsupported['${key}\n${fingerprint}'] = true
-			return none
-		}
-		started.fingerprint = fingerprint
-		pool.servers[key] = started
-		started
-	}
-	pool.requests++
-	token := '${os.getpid()}-${pool.requests}-${time.now().unix_nano()}'
+	key := '${exe}\n${work_dir}\n${args.join('\n')}'
+	mut server, token := pool.take_server(key, exe, args, work_dir) or { return none }
 	line := if question == '' { 'check ${token}' } else { 'query ${token} ${question}' }
-	result := server.ask(line, token, timeout_ms, cancelled) or {
+	server.busy.lock()
+	mut answered := true
+	result := server.ask(line, token, timeout_ms, cancelled, partial) or {
 		log('the diagnostics server stopped answering: ${err}')
 		server.stop()
-		pool.servers.delete(key)
+		answered = false
+		os.Result{}
+	}
+	if answered {
+		server.last_used = time.now().unix_milli()
+	}
+	server.busy.unlock()
+	pool.give_back(key, mut server)
+	if !answered {
 		return none
 	}
-	server.last_used = time.now().unix_milli()
 	// A child killed by a signal leaves no diagnostics to trust, so the caller
 	// runs the compiler itself for this check. The server stays: it is the
 	// parent, and it is fine.
@@ -163,6 +236,79 @@ fn (mut pool DiagnosticsServerPool) request(exe string, args []string, work_dir 
 		return none
 	}
 	return result
+}
+
+// take_server returns the server of `key`, started when there is none, and a
+// token for a request to it, which it counts as in use until give_back.
+fn (mut pool DiagnosticsServerPool) take_server(key string, exe string, args []string, work_dir string) ?(&DiagnosticsServer, string) {
+	// The compiler reads v.mod and .vvmrc once, before it forks, so a server
+	// started before they changed can never answer again: a new one replaces it.
+	fingerprint := project_config_fingerprint(work_dir)
+	pool.mutex.lock()
+	defer {
+		pool.mutex.unlock()
+	}
+	if pool.closed {
+		return none
+	}
+	if pool.unsupported['${key}\n${fingerprint}'] {
+		return none
+	}
+	if mut outdated := pool.servers[key] {
+		if outdated.fingerprint != fingerprint {
+			pool.servers.delete(key)
+			pool.retire(mut outdated)
+		}
+	}
+	mut server := pool.servers[key] or {
+		pool.evict_least_recently_used()
+		mut started := start_diagnostics_server(exe, args, work_dir, pool.prepare, pool.shared) or {
+			log('no diagnostics server for ${work_dir}: ${err}')
+			pool.unsupported['${key}\n${fingerprint}'] = true
+			return none
+		}
+		started.fingerprint = fingerprint
+		pool.servers[key] = started
+		started
+	}
+	server.users++
+	pool.requests++
+	return server, '${os.getpid()}-${pool.requests}-${time.now().unix_nano()}'
+}
+
+// give_back ends a request to `server`, the server of `key`: one that stopped
+// answering leaves the pool, and one the pool dropped meanwhile stops with its
+// last request.
+fn (mut pool DiagnosticsServerPool) give_back(key string, mut server DiagnosticsServer) {
+	pool.mutex.lock()
+	defer {
+		pool.mutex.unlock()
+	}
+	server.users--
+	if server.users > 0 {
+		return
+	}
+	if server.process == unsafe { nil } {
+		if current := pool.servers[key] {
+			if voidptr(current) == voidptr(server) {
+				pool.servers.delete(key)
+			}
+		}
+		return
+	}
+	if server.retired && server.users == 0 {
+		server.stop()
+	}
+}
+
+// retire stops `server`, which left the pool, now or, when a request still
+// uses it, once the last one gives it back.
+fn (mut pool DiagnosticsServerPool) retire(mut server DiagnosticsServer) {
+	if server.users > 0 {
+		server.retired = true
+	} else {
+		server.stop()
+	}
 }
 
 fn (mut pool DiagnosticsServerPool) evict_least_recently_used() {
@@ -177,18 +323,19 @@ fn (mut pool DiagnosticsServerPool) evict_least_recently_used() {
 		oldest_key = pool.least_recently_used(true)
 	}
 	if mut server := pool.servers[oldest_key] {
-		server.stop()
+		pool.servers.delete(oldest_key)
+		pool.retire(mut server)
 	}
-	pool.servers.delete(oldest_key)
 }
 
 // least_recently_used returns the key of the server used longest ago, the
 // servers of the program of a directory, `.`, included only when `programs`.
+// A server that a request uses is never the one: the pool grows for a while.
 fn (pool &DiagnosticsServerPool) least_recently_used(programs bool) string {
 	mut oldest_key := ''
 	mut oldest := i64(0)
 	for key, server in pool.servers {
-		if !programs && key.ends_with('\n.') {
+		if server.users > 0 || (!programs && key.ends_with('\n.')) {
 			continue
 		}
 		if oldest_key == '' || server.last_used < oldest {
@@ -199,7 +346,8 @@ fn (pool &DiagnosticsServerPool) least_recently_used(programs bool) string {
 	return oldest_key
 }
 
-// stop_all ends every server and removes the files they checked.
+// stop_all rejects new work and retires every server. Requests already using
+// one stop it on release; their copies stay until the last operation finishes.
 fn (mut pool DiagnosticsServerPool) stop_all() {
 	pool.mutex.lock()
 	defer {
@@ -208,7 +356,7 @@ fn (mut pool DiagnosticsServerPool) stop_all() {
 	pool.closed = true
 	for key in pool.servers.keys() {
 		if mut server := pool.servers[key] {
-			server.stop()
+			pool.retire(mut server)
 		}
 	}
 	pool.servers.clear()
@@ -238,7 +386,7 @@ fn kill_compiler_process(mut process os.Process) {
 	process.wait()
 }
 
-fn start_diagnostics_server(exe string, args []string, work_dir string) !&DiagnosticsServer {
+fn start_diagnostics_server(exe string, args []string, work_dir string, prepare bool, shared_program bool) !&DiagnosticsServer {
 	mut p := os.new_process(exe)
 	// The memory watchdog runs on a thread of its own, and a server forks only
 	// while the worker pools are the sole threads.
@@ -248,13 +396,22 @@ fn start_diagnostics_server(exe string, args []string, work_dir string) !&Diagno
 	p.set_work_folder(work_dir)
 	mut env := os.environ()
 	env['V_DIAGNOSTICS_SERVER'] = '1'
+	if prepare {
+		env['V_DIAGNOSTICS_PREPARE'] = '1'
+	}
+	if shared_program {
+		env['V_DIAGNOSTICS_SHARED'] = '1'
+		// Its checks may send the errors they found before the end of the check.
+		env['V_DIAGNOSTICS_PARTIAL'] = '1'
+	}
 	p.set_environment(env)
 	p.set_redirect_stdio()
 	p.run()
 	mut server := &DiagnosticsServer{
 		process: p
 	}
-	greeting := server.read_until(diagnostics_server_ready, diagnostics_server_start_ms) or {
+	// With its newline, which is no output of the first answer.
+	greeting := server.read_until(diagnostics_server_ready + '\n', diagnostics_server_start_ms) or {
 		output := server.leftover
 		server.stop()
 		return error('the compiler does not serve diagnostics: ${output#[..160]}')
@@ -270,8 +427,10 @@ fn start_diagnostics_server(exe string, args []string, work_dir string) !&Diagno
 // child printed and its exit code. The answer ends on
 // `v-diagnostics-server: end <code> <token>`, with a token fresh for every
 // request, so a diagnostic that quotes a source line holding the marker text
-// cannot end the answer early.
-fn (mut s DiagnosticsServer) ask(line string, token string, timeout_ms int, cancelled fn () bool) !os.Result {
+// cannot end the answer early. A check can send part of its answer first,
+// ended by `v-diagnostics-server: partial <code> <token>`: `partial`, when set,
+// gets it at once, and the answer returned is what came after it.
+fn (mut s DiagnosticsServer) ask(line string, token string, timeout_ms int, cancelled fn () bool, partial fn (os.Result)) !os.Result {
 	if s.process == unsafe { nil } || !s.process.is_alive() {
 		return error('the diagnostics server is gone')
 	}
@@ -296,25 +455,46 @@ fn (mut s DiagnosticsServer) ask(line string, token string, timeout_ms int, canc
 		return error('invalid diagnostics child PID: ${child_text#[..40]}')
 	}
 	// Unbuffered output of the child can come before the line that names it.
-	early_output := child_line[..child_start]
+	mut early_output := child_line[..child_start]
 	suffix := ' ${token}\n'
-	answer, was_cancelled := s.read_until_or_cancel(suffix, timeout_ms, fn [cancelled, child_pid] () bool {
-		if !cancelled() {
-			return false
+	mut collected := ''
+	mut line_start := 0
+	mut suffix_start := 0
+	for {
+		answer, was_cancelled := s.read_until_or_cancel(suffix, timeout_ms, fn [cancelled, child_pid] () bool {
+			if !cancelled() {
+				return false
+			}
+			$if !windows {
+				C.kill(child_pid, 9)
+			}
+			return true
+		}) or { return error('no answer within ${timeout_ms} ms') }
+		collected = early_output + answer
+		early_output = ''
+		if was_cancelled {
+			return os.Result{
+				exit_code: diagnostics_check_cancelled
+			}
 		}
-		$if !windows {
-			C.kill(child_pid, 9)
+		suffix_start = collected.index(suffix) or { return error('malformed answer') }
+		line_start = (collected[..suffix_start].last_index('\n') or { -1 }) + 1
+		marker := collected[line_start..suffix_start]
+		if !marker.starts_with(diagnostics_server_partial) {
+			break
 		}
-		return true
-	}) or { return error('no answer within ${timeout_ms} ms') }
-	collected := early_output + answer
-	if was_cancelled {
-		return os.Result{
-			exit_code: diagnostics_check_cancelled
+		// The errors found so far; the answer goes on after them.
+		if partial != unsafe { nil } {
+			mut output := collected[..line_start]
+			if output.ends_with('\n') {
+				output = output[..output.len - 1]
+			}
+			partial(os.Result{
+				exit_code: marker[diagnostics_server_partial.len..].int()
+				output:    output
+			})
 		}
 	}
-	suffix_start := collected.index(suffix) or { return error('malformed answer') }
-	line_start := (collected[..suffix_start].last_index('\n') or { -1 }) + 1
 	end_line := collected[line_start..suffix_start]
 	if !end_line.starts_with(diagnostics_server_end) {
 		return error('malformed end of answer: ${end_line#[..80]}')

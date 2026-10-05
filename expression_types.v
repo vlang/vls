@@ -264,7 +264,7 @@ fn composite_member_kinds(typ string) []string {
 		mut kinds := ['array']
 		if elem == 'string' {
 			kinds << 'array_string'
-		} else if elem in ['u8', 'byte'] {
+		} else if elem == 'u8' {
 			kinds << 'array_u8'
 		} else if elem == 'rune' {
 			kinds << 'array_rune'
@@ -479,13 +479,25 @@ fn (mut app App) type_declaration(uri string, content string, typ string) TypeDe
 					is_flag: declaration_has_attribute(source_lines, line_idx, 'flag')
 				}
 			} else {
-				// `type Name = Base` or `type Name = A | B`
+				// `type Name = Base` or `type Name = A | B`, whose types may go on
+				// lines of their own, as vfmt writes a long one: `type Name = A`,
+				// then `| B` below it.
 				line := if line_idx >= 0 && line_idx < source_lines.len {
 					source_lines[line_idx]
 				} else {
 					''
 				}
-				rhs := line.all_after('=').all_before('//').trim_space()
+				mut rhs := line.all_after('=').all_before('//').trim_space()
+				for next in line_idx + 1 .. source_lines.len {
+					continued := source_lines[next].trim_space()
+					if continued.starts_with('//') {
+						continue
+					}
+					if !continued.starts_with('|') {
+						break
+					}
+					rhs += ' ' + continued.all_before('//').trim_space()
+				}
 				decl = if rhs.contains('|') {
 					TypeDeclaration{
 						...decl
@@ -578,7 +590,7 @@ fn (mut app App) type_members_at_depth(uri string, content string, typ string, d
 		items = declared.items.clone()
 		field_types = declared.field_types.clone()
 		field_declared_types = declared.field_declared_types.clone()
-		embedded_types = declared.embedded_types
+		embedded_types = declared.embedded_types.clone()
 		use_compiler = declared.use_compiler
 		resolved_type = declared.resolved_type
 		decl := app.type_declaration(uri, content, t)

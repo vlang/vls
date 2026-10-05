@@ -562,6 +562,8 @@ fn test_diagnostics_scheduler_requeues_pending_sibling_with_latest_buffers() {
 		cleanup_test_app(app)
 	}
 	mut scheduler := new_diagnostics_scheduler()
+	// The jobs stay pending for the test to look at.
+	scheduler.paused = true
 	app.diagnostics_scheduler = scheduler
 	project_dir := os.join_path(app.temp_dir, 'sibling_project')
 	must_mkdir_all(project_dir)
@@ -609,6 +611,8 @@ fn test_diagnostics_scheduler_requeues_sibling_after_open() {
 		cleanup_test_app(app)
 	}
 	mut scheduler := new_diagnostics_scheduler()
+	// The jobs stay pending for the test to look at.
+	scheduler.paused = true
 	app.diagnostics_scheduler = scheduler
 	project_dir := os.join_path(app.temp_dir, 'open_sibling_project')
 	must_mkdir_all(project_dir)
@@ -651,6 +655,8 @@ fn test_diagnostics_scheduler_requeues_sibling_after_save_text() {
 		cleanup_test_app(app)
 	}
 	mut scheduler := new_diagnostics_scheduler()
+	// The jobs stay pending for the test to look at.
+	scheduler.paused = true
 	app.diagnostics_scheduler = scheduler
 	project_dir := os.join_path(app.temp_dir, 'save_sibling_project')
 	must_mkdir_all(project_dir)
@@ -694,6 +700,8 @@ fn test_diagnostics_scheduler_requeues_sibling_after_close() {
 		cleanup_test_app(app)
 	}
 	mut scheduler := new_diagnostics_scheduler()
+	// The jobs stay pending for the test to look at.
+	scheduler.paused = true
 	app.diagnostics_scheduler = scheduler
 	project_dir := os.join_path(app.temp_dir, 'close_sibling_project')
 	must_mkdir_all(project_dir)
@@ -740,6 +748,8 @@ fn test_diagnostics_scheduler_requeues_job_after_watched_file_change() {
 		cleanup_test_app(app)
 	}
 	mut scheduler := new_diagnostics_scheduler()
+	// The jobs stay pending for the test to look at.
+	scheduler.paused = true
 	app.diagnostics_scheduler = scheduler
 	project_dir := os.join_path(app.temp_dir, 'watched_sibling_project')
 	must_mkdir_all(project_dir)
@@ -2273,7 +2283,8 @@ fn test_active_indexed_source_file_names_applies_compiler_build_rules() {
 	active := app.active_indexed_source_file_names(test_dir, 'main_test.v')
 	assert 'main.v' in active
 	assert 'unsaved.v' in active
-	// VLS passes no defines, so `_d_` sources are inactive and `_notd_` ones active.
+	// VLS passes only the defines V3 sets for itself, so a `_d_` source of
+	// another define is inactive and its `_notd_` one active.
 	assert 'gated_notd_somefeature.v' in active
 	assert 'gated_d_somefeature.v' !in active
 	assert 'plain_${inactive_os}.v' !in active
@@ -2285,6 +2296,32 @@ fn test_active_indexed_source_file_names_applies_compiler_build_rules() {
 	// A test that cannot run on this platform is not activated by requesting it.
 	inactive_active := app.active_indexed_source_file_names(test_dir, 'sibling_${inactive_os}_test.v')
 	assert 'sibling_${inactive_os}_test.v' !in inactive_active
+}
+
+// V3 sets `v3_backend` for itself, and vlib keeps what only V3 builds in
+// `*_d_v3_backend.v` files (the methods of i128 and u128, for one): the files
+// of a module are the ones V3 builds, saved or not.
+fn test_active_indexed_source_file_names_takes_the_define_v3_sets() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'active_source_file_names_v3')
+	must_mkdir_all(test_dir)
+	source := 'module main\n\nfn helper() {}\n'
+	for name in ['main.v', 'int_d_v3_backend.v', 'int_notd_v3_backend.v'] {
+		must_write_file(os.join_path(test_dir, name), source)
+	}
+	for name in ['unsaved_d_v3_backend.v', 'unsaved_notd_v3_backend.v'] {
+		app.open_files[path_to_uri(os.join_path(test_dir, name))] = source
+	}
+
+	active := app.active_indexed_source_file_names(test_dir, '')
+	assert 'main.v' in active
+	assert 'int_d_v3_backend.v' in active
+	assert 'int_notd_v3_backend.v' !in active
+	assert 'unsaved_d_v3_backend.v' in active
+	assert 'unsaved_notd_v3_backend.v' !in active
 }
 
 fn test_resolve_indexed_definition_defers_compile_time_declaration() {
@@ -4387,6 +4424,51 @@ fn test_extract_doc_comment_at_first_line() {
 	assert comment == ''
 }
 
+fn test_extract_doc_comment_shows_inline_examples_as_v_code() {
+	// `// Example: <code>` is how vlib documents most examples; `v doc` shows
+	// the code as V. Consecutive ones share one block, under `Examples:`.
+	lines := [
+		'// sort sorts the array in place.',
+		'//',
+		'// Example: mut aa := [5,2,1,10]; aa.sort(); assert aa == [1,2,5,10] // ascending',
+		'// Example: mut aa := [5,2,1,10]; aa.sort(b < a) // descending',
+		'pub fn (mut a array) sort(callback fn (voidptr, voidptr) int)',
+	]
+	assert extract_doc_comment(lines, 4) == 'sort sorts the array in place.  \n  \nExamples:  \n```v\nmut aa := [5,2,1,10]; aa.sort(); assert aa == [1,2,5,10] // ascending\nmut aa := [5,2,1,10]; aa.sort(b < a) // descending\n```'
+	one := ['// hex returns the value in base 16.', "// Example: assert 255.hex() == 'ff'",
+		'pub fn (nn int) hex() string']
+	assert extract_doc_comment(one, 2) == "hex returns the value in base 16.  \nExample:  \n```v\nassert 255.hex() == 'ff'\n```"
+}
+
+fn test_extract_doc_comment_keeps_the_lines_of_a_code_block_as_written() {
+	// The lines of a ``` block keep their indentation, and an `Example:` in it
+	// is code, not a new example.
+	lines := [
+		'// map creates a new array.',
+		'// Example:',
+		'// ```v',
+		'// r2 := words.map(fn (w string) string {',
+		'// \treturn w.to_upper()',
+		'// })',
+		'// // Example: in a block',
+		'// ```',
+		'pub fn (a array) map(callback fn (voidptr) voidptr) array',
+	]
+	assert extract_doc_comment(lines, 8) == 'map creates a new array.  \nExample:  \n```v\nr2 := words.map(fn (w string) string {\n\treturn w.to_upper()\n})\n// Example: in a block\n```'
+}
+
+fn test_extract_doc_comment_leaves_other_example_lines_as_text() {
+	// Only `Example: <code>` is an example for `v doc`: `example:` is prose, and
+	// `Example:` alone introduces a ``` block or text.
+	lines := [
+		"// example: utf8.raw_index('ab', 1) => 'b'",
+		'// Example:',
+		'//',
+		'fn raw_index() {}',
+	]
+	assert extract_doc_comment(lines, 3) == "example: utf8.raw_index('ab', 1) => 'b'  \nExample:  \n"
+}
+
 fn test_find_declaration_line_function() {
 	lines := ['module main', '', 'fn my_func() {}']
 	idx := find_declaration_line(lines, 'my_func')
@@ -5584,6 +5666,7 @@ fn test_builtin_function_completions_insert_the_call() {
 		'error_with_code': 'error_with_code(\${1:message}, \${2:code})\$0'
 		'flush_stdout':    'flush_stdout()'
 		'print_backtrace': 'print_backtrace()'
+		'recover':         'recover()'
 		'dump':            'dump(\$0)'
 		'sizeof':          'sizeof(\$0)'
 		'typeof':          'typeof(\$0)'
@@ -5601,6 +5684,8 @@ fn test_builtin_function_completions_insert_the_call() {
 	}
 	// the signature is the one vlib/builtin declares, as for any other function
 	assert items.filter(it.label == 'println')[0].detail == 'pub fn println(s string)'
+	// `recover` too, which stops a panic from a `defer` block (master's #29134)
+	assert items.filter(it.label == 'recover')[0].detail == 'pub fn recover() ?string'
 	// V has no builtin `close`: a channel closes with `ch.close()`
 	assert items.filter(it.label == 'close').len == 0
 	// read once, and again after a watched change there, as when working on V
@@ -5614,6 +5699,7 @@ fn test_builtin_function_completions_insert_the_call() {
 // and `close` is not, so a function of the project may be called so and renamed.
 fn test_builtin_functions_are_the_ones_v_has() {
 	assert classify_v_identifier('print_backtrace') == sem_tok_function
+	assert classify_v_identifier('recover') == sem_tok_function
 	assert classify_v_identifier('close') == -1
 	files := {
 		'main.v': 'module main\n\nfn close() int {\n\treturn 1\n}\n\nfn main() {\n\tprintln(close())\n}\n'
@@ -7759,6 +7845,48 @@ fn test_hover_types_bindings_whose_value_names_no_type() {
 	}
 }
 
+fn test_hover_does_not_take_a_literal_receiver_for_the_value_of_its_call() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'literal_receiver_call_hover')
+	must_mkdir_all(test_dir)
+	content := 'module main\n\nstruct Host {}\n\nfn (h Host) first_of[T](xs []T) T {\n\treturn xs[0]\n}\n\nfn inside[A](values []A) A {\n\thead := Host{}.first_of(values)\n\ttyped := Host{}.first_of[A](values)\n\tlit := Host{}\n\tprintln(typed)\n\tprintln(lit)\n\treturn head\n}\n\nfn main() {\n\tprintln(inside([1]))\n}\n'
+	main_file := os.join_path(test_dir, 'main.v')
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	lines := content.split_into_lines()
+	// `Host{}.first_of(values)` is what the generic method returns, which the
+	// index cannot tell: not the `Host` it is called on. The index answers
+	// nothing, and the compiler does. A bare literal is its type.
+	for source_line, expected in {
+		'\treturn head':    ''
+		'\tprintln(typed)': ''
+		'\tprintln(lit)':   'lit Host'
+	} {
+		line := lines.index(source_line)
+		assert line >= 0, source_line
+		name := if source_line.contains('(') {
+			source_line.all_after('(').all_before(')')
+		} else {
+			source_line.all_after_last(' ')
+		}
+		col := lines[line].last_index(name) or { -1 }
+		assert col >= 0, source_line
+		hover := app.local_binding_hover(uri, Position{
+			line: line
+			char: col + 1
+		}) or { Hover{} }
+		if expected == '' {
+			assert !hover.contents.value.contains('Host'), '${source_line}: ${hover.contents.value}'
+		} else {
+			assert hover.contents.value.contains(expected), '${source_line}: ${hover.contents.value}'
+		}
+	}
+}
+
 fn test_hover_types_a_declaration_split_over_lines() {
 	mut app := create_test_app()
 	defer {
@@ -7788,6 +7916,78 @@ fn test_hover_types_a_declaration_split_over_lines() {
 			char: col + 2
 		}) or { Hover{} }
 		assert hover.contents.value.contains(expected), '${name}: ${hover.contents.value}'
+	}
+}
+
+fn test_hover_types_a_field_of_a_literal_split_over_lines() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'multiline_literal_field_hover')
+	must_mkdir_all(test_dir)
+	content := 'module main\n\nstruct Point {\n\tx int\n}\n\nfn main() {\n\tr := Point{\n\t\tx: 1\n\t}.x\n\tprintln(r)\n}\n'
+	main_file := os.join_path(test_dir, 'main.v')
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	lines := content.split_into_lines()
+	// The value goes on after the literal closes: `r` is its field `x`, on the
+	// declaration and where it is used.
+	declaration := lines.index('\tr := Point{')
+	use := lines.index('\tprintln(r)')
+	assert declaration >= 0 && use >= 0
+	for position in [Position{
+		line: declaration
+		char: 1
+	}, Position{
+		line: use
+		char: 10
+	}] {
+		hover := app.local_binding_hover(uri, position) or { Hover{} }
+		assert hover.contents.value.contains('r int'), '${position}: ${hover.contents.value}'
+	}
+}
+
+fn test_binding_type_narrows_asks_the_compiler_for_a_type_the_index_does_not_know() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	app.v3_line_info_enabled = true
+	test_dir := os.join_path(app.temp_dir, 'bare_generic_binding_hover')
+	must_mkdir_all(test_dir)
+	content := 'module main\n\nstruct Point {\n\tx int\n}\n\nstruct Pair[T] {\n\tleft  T\n\tright T\n}\n\nfn main() {\n\tprintln(1)\n}\n'
+	main_file := os.join_path(test_dir, 'main.v')
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	position := Position{
+		line: content.split_into_lines().index('\tprintln(1)')
+		char: 1
+	}
+	// The index holds a generic struct as `Pair[T]`: it reads a literal that
+	// infers the arguments (`Pair{ left: 1 }`) as the bare `Pair`, and a field of
+	// it as its declared `T`, where the compiler knows `Pair[int]` and `int`. A
+	// type the index knows stays its answer.
+	for text, narrows in {
+		'one Pair':            true
+		'pairs []Pair':        true
+		'two T':               true
+		'boxed &Pair':         true
+		'full Pair[int]':      true
+		'point Point':         false
+		'points []Point':      false
+		'count int':           false
+		'ages map[string]int': false
+	} {
+		hover := Hover{
+			contents: MarkupContent{
+				kind:  'markdown'
+				value: '```v\n${text}\n```'
+			}
+		}
+		assert app.binding_type_narrows(uri, position, hover) == narrows, text
 	}
 }
 
@@ -11358,6 +11558,27 @@ fn test_rename_refuses_interface_members_and_the_names_they_share() {
 	}, 'main.v:34:2') == ['main.v:34:2', 'main.v:38:10']
 }
 
+// The types V builds in are the ones of V: `i128` and `u128` since V's #28877,
+// and no `byte` since #29141, where `byte` became a name like any other.
+fn test_builtin_types_are_those_of_v() {
+	assert classify_v_identifier('i128') == sem_tok_type
+	assert classify_v_identifier('u128') == sem_tok_type
+	assert classify_v_identifier('byte') == -1
+	types := make_keyword_completions().filter(it.detail == 'builtin type').map(it.label)
+	assert 'i128' in types && 'u128' in types, types.str()
+	assert 'byte' !in types, types.str()
+}
+
+// `i128` is part of V, and a rename refuses it; a variable named `byte` is a
+// name, which a rename changes.
+fn test_rename_follows_the_builtin_types_of_v() {
+	files := {
+		'main.v': 'module main\n\nfn main() {\n\tbig := i128(5)\n\tbyte := u8(1)\n\tprintln(big)\n\tprintln(byte)\n}\n'
+	}
+	assert rename_edits_in(files, 'main.v:4:9') == []string{}
+	assert rename_edits_in(files, 'main.v:5:2') == ['main.v:5:2', 'main.v:7:10']
+}
+
 fn test_rename_refuses_modules_builtin_types_and_names_v_would_reject() {
 	mut app, uris := new_rename_project_app_with({
 		'main.v': rename_scopes_main
@@ -11488,8 +11709,8 @@ fn test_rename_refuses_a_new_name_that_clashes_with_a_name_of_the_program() {
 		// `if total > limit` would be the local.
 		'main.v:30:2 limit':      'duplicate of a const name `limit`'
 		'main.v:5:7 count':       'duplicate of a const name `count`'
-		// V says nothing, and a call would name the other function.
-		'main.v:21:4 other':      'would make `other` at main.v:'
+		// A function to the name of another.
+		'main.v:21:4 other':      'redefinition of function `other`'
 		// Keywords that are no names.
 		'main.v:30:2 __offsetof': 'keyword'
 		'main.v:30:2 _likely_':   'keyword'
@@ -11630,6 +11851,56 @@ fn main() {
 // The persistent compiler reads again only the file it is asked about, so it
 // finds nothing inside a generic function that another file instantiates; a
 // compiler process of its own does, and the rename asks one before refusing.
+fn test_generic_list_names_reads_a_type_parameter_with_its_constraint() {
+	assert generic_list_names('fn take[T Named](x T) T {') == ['T']
+	assert generic_list_names('fn pair[T Named, U](a T, b U) {') == ['T', 'U']
+	assert generic_list_names('fn smallest[T Comparable[T]](items []T) T {') == ['T']
+	assert generic_list_names('fn (b Box[T]) get() T {') == ['T']
+	assert generic_list_names('fn apply(xs []int, m map[string]int) {') == []string{}
+}
+
+fn test_rename_of_a_type_leaves_a_type_parameter_of_its_name_alone() {
+	// `T` of `take[T Named]` is a type parameter, as `T` of `plain[T]`: renaming
+	// the struct `T` renames neither.
+	files := {
+		'main.v': "module main
+
+interface Named {
+	name string
+}
+
+struct T {
+	name string
+}
+
+fn take[T Named](x T) T {
+	return x
+}
+
+fn plain[T](x T) T {
+	return x
+}
+
+fn main() {
+	t := T{
+		name: 'a'
+	}
+	println(take(t).name)
+	println(plain(t).name)
+}
+"
+	}
+	// Probe the compiler, independently of VLS: older V3 versions do not yet
+	// accept constrained type parameters. The lexical regression above still
+	// exercises their recognition with those compilers.
+	mut probe, uris := new_rename_project_app_with(files)
+	defer { cleanup_rename_app(mut probe) }
+	checked := run_v_argv(['-new-compiler', '-check', '-nocolor', '.'],
+		os.dir(uri_to_path(uris['main.v'])))
+	if checked.exit_code != 0 { return }
+	assert rename_edits_in(files, 'main.v:7:8') == ['main.v:20:7', 'main.v:7:8']
+}
+
 fn test_rename_resolves_names_inside_a_generic_function_called_from_another_file() {
 	// V1 alone does not tell where all these names are declared.
 	if !v3_answers_line_info {
@@ -12477,6 +12748,16 @@ fn test_member_completion_resolves_the_type_of_any_expression() {
 			name: 'cast'
 			body: 'n := i64(5)\n\tn.@cursor'
 			want: ['str', 'hex']
+		},
+		MemberCompletionCase{
+			name: 'cast_i128'
+			body: 'n := i128(5)\n\tn.@cursor'
+			want: ['str', 'hex']
+		},
+		MemberCompletionCase{
+			name: 'cast_u128'
+			body: 'n := u128(5)\n\tn.@cursor'
+			want: ['str', 'hex', 'bin']
 		},
 		MemberCompletionCase{
 			name: 'match_branch'

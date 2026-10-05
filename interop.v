@@ -488,10 +488,30 @@ fn build_v_test_compile_args(file_path string, fn_name string, executable_path s
 fn parse_v_check_diagnostics(output string, source_dir string) []JsonError {
 	mut diagnostics := []JsonError{}
 	mut active := -1
+	// A function declared twice is said without a position, `builder error:
+	// redefinition of function `f``, and then where each declaration is, on
+	// lines of their own: each declaration gets that error.
+	mut unplaced := ''
 	for line in output.split_into_lines() {
 		if diagnostic := parse_v_check_diagnostic_header(line, source_dir) {
-			diagnostics << diagnostic
+			diagnostics << if diagnostic.level == 'conflicting declaration' {
+				JsonError{
+					...diagnostic
+					message: if unplaced != '' {
+						unplaced
+					} else {
+						'conflicting declaration: ${diagnostic.message}'
+					}
+					level:   'error'
+				}
+			} else {
+				diagnostic
+			}
 			active = diagnostics.len - 1
+			continue
+		}
+		if _, message := program_diagnostic_level(line) {
+			unplaced = message
 			continue
 		}
 		if active >= 0 && diagnostics[active].len == 0 {
@@ -515,8 +535,14 @@ fn parse_v_check_diagnostics(output string, source_dir string) []JsonError {
 fn parse_v_check_program_diagnostics(output string, source_dir string, checked_file string) []JsonError {
 	mut result := []JsonError{}
 	mut seen := map[string]bool{}
-	for line in output.split_into_lines() {
+	lines := output.split_into_lines()
+	for i, line in lines {
 		level, message := program_diagnostic_level(line) or { continue }
+		// A redefinition names its declarations on the lines that follow, which
+		// show it (see parse_v_check_diagnostics).
+		if i + 1 < lines.len && lines[i + 1].contains(': conflicting declaration: ') {
+			continue
+		}
 		mut targets := []string{}
 		for word in message.fields() {
 			token := word.trim('`"\'(),;').trim_right('.:')
@@ -632,7 +658,7 @@ fn parse_v_check_diagnostic_header(line string, source_dir string) ?JsonError {
 	mut best_marker_idx := -1
 	mut best := JsonError{}
 	for level in ['builder error', 'parser error', 'checker error', 'cgen error', 'error', 'warning',
-		'notice'] {
+		'notice', 'conflicting declaration'] {
 		marker := ': ${level}: '
 		mut search_end := line.len
 		for search_end > 0 {
@@ -1224,9 +1250,13 @@ fn (mut app App) run_v_check(path string, text string) []JsonError {
 	log('running v.exe check for ${real_path}')
 	log('Open files count: ${app.open_files.len}')
 	mut pool := app.diagnostics_servers
-	if pool != unsafe { nil } && !pool.begin_operation() { return [] }
+	if pool != unsafe { nil } && !pool.begin_operation() {
+		return []
+	}
 	defer {
-		if pool != unsafe { nil } { pool.end_operation() }
+		if pool != unsafe { nil } {
+			pool.end_operation()
+		}
 	}
 
 	// A diagnostics server answers for the input it started with, so the files
@@ -1239,24 +1269,47 @@ fn (mut app App) run_v_check(path string, text string) []JsonError {
 	// The file is checked as part of its program: from the program's directory,
 	// with the local modules it imports, as `v .` there builds it.
 	program_dir := app.program_root(real_path)
+	// The copy of the program that the questions about it use too, whose lock
+	// this check holds until it is answered: the same check answers both.
+	mut shared_copy := &ProgramCopy(unsafe { nil })
 	if should_use_compilation_overlay(real_path, app.open_files.len)
 		|| program_dir != normalize_overlay_path(working_dir)
 		|| app.imports_local_module(real_path, program_dir) {
-		if server_exe != '' {
-			app.overlay_dir = app.diagnostics_servers.stable_dir('project', program_overlay_root(normalize_overlay_path(real_path),
-				program_dir))
+		if server_exe != '' && app.diagnostics_servers.shared {
+			mut servers := app.diagnostics_servers
+			mut program := servers.program_copy(program_dir)
+			program.mutex.lock()
+			if written := app.write_program_copy(mut servers, mut program, real_path, program_dir,
+				text)
+			{
+				shared_copy = program
+				overlay = program.project.overlay
+				temp_project_dir = overlay.temp_root
+				file_to_check = written
+				compile_target = overlay.temp_work_dir
+				use_multifile = true
+				log('checking the copy of ${program_dir} the questions use: ${compile_target}')
+			} else {
+				program.mutex.unlock()
+			}
 		}
-		overlay = app.prepare_compilation_overlay_in(real_path, program_dir) or {
-			log('Failed to prepare compilation overlay: ${err}')
-			CompilationOverlay{}
-		}
-		app.overlay_dir = ''
-		if overlay.temp_root != '' {
-			temp_project_dir = overlay.temp_root
-			file_to_check = overlay.temp_source_file
-			compile_target = overlay.temp_work_dir
-			use_multifile = true
-			log('temp_project_dir=${temp_project_dir}, file_to_check=${file_to_check}, compile_target=${compile_target}')
+		if shared_copy == unsafe { nil } {
+			if server_exe != '' {
+				app.overlay_dir = app.diagnostics_servers.stable_dir('project', program_overlay_root(normalize_overlay_path(real_path),
+					program_dir))
+			}
+			overlay = app.prepare_compilation_overlay_in(real_path, program_dir) or {
+				log('Failed to prepare compilation overlay: ${err}')
+				CompilationOverlay{}
+			}
+			app.overlay_dir = ''
+			if overlay.temp_root != '' {
+				temp_project_dir = overlay.temp_root
+				file_to_check = overlay.temp_source_file
+				compile_target = overlay.temp_work_dir
+				use_multifile = true
+				log('temp_project_dir=${temp_project_dir}, file_to_check=${file_to_check}, compile_target=${compile_target}')
+			}
 		}
 	}
 
@@ -1295,6 +1348,24 @@ fn (mut app App) run_v_check(path string, text string) []JsonError {
 	}
 
 	exec_dir := if use_multifile { compile_target } else { working_dir }
+	diagnostic_source_dir := if use_multifile { exec_dir } else { os.dir(file_to_check) }
+	program_uris := if use_multifile {
+		app.program_open_files(real_path, overlay)
+	} else {
+		map[string]string{}
+	}
+	// A server can send the errors its check found before the slow end of the
+	// check: they are shown at once (see DiagnosticsServer.ask).
+	publish := app.diagnostics_partial
+	partial := if publish != unsafe { nil } {
+		fn [publish, diagnostic_source_dir, file_to_check, use_multifile, overlay, real_path, program_uris, path] (answer os.Result) {
+			found := split_check_errors(answer.output, diagnostic_source_dir, file_to_check,
+				use_multifile, overlay, real_path, program_uris)
+			publish(path, found)
+		}
+	} else {
+		unsafe { nil }
+	}
 	cancelled := if app.diagnostics_cancelled != unsafe { nil } {
 		app.diagnostics_cancelled
 	} else {
@@ -1304,11 +1375,14 @@ fn (mut app App) run_v_check(path string, text string) []JsonError {
 	}
 	x := if server_exe != '' {
 		mut servers := app.diagnostics_servers
-		servers.check(server_exe, cmd_args, exec_dir, cancelled) or {
+		servers.check(server_exe, cmd_args, exec_dir, cancelled, partial) or {
 			run_v_argv_cancelled(cmd_args, exec_dir, cancelled)
 		}
 	} else {
 		run_v_argv_cancelled(cmd_args, exec_dir, cancelled)
+	}
+	if shared_copy != unsafe { nil } {
+		shared_copy.mutex.unlock()
 	}
 
 	log('Check - RUN RES ${x}')
@@ -1317,68 +1391,100 @@ fn (mut app App) run_v_check(path string, text string) []JsonError {
 		return []
 	}
 
-	// Parse V3's native flat-AST checker diagnostics so ordinary diagnostics stay
-	// on the default backend.
-	diagnostic_source_dir := if use_multifile { exec_dir } else { os.dir(file_to_check) }
-	mut v_errors := parse_v_check_diagnostics(x.output, diagnostic_source_dir)
-	v_errors << parse_v_check_program_diagnostics(x.output, diagnostic_source_dir, file_to_check)
+	found := split_check_errors(x.output, diagnostic_source_dir, file_to_check, use_multifile,
+		overlay, real_path, program_uris)
 	if server_exe == '' {
 		cleanup_compilation_temp(temp_project_dir, singlefile_tmppath)
 	}
 
-	// error filtlering
 	if use_multifile {
 		// The check covered the whole program, so it answers for every open file
 		// of that program too, including the ones it found nothing in.
-		app.program_errors = map[string][]JsonError{}
+		app.program_errors = found.program.clone()
 		app.program_dir_checked = overlay.source_work_dir
-		mut program_uris := map[string]string{}
-		for open_uri, _ in app.open_files {
-			open_path := uri_to_path(open_uri)
-			if normalized_index_path(open_path) != normalized_index_path(real_path)
-				&& app.program_root(open_path) == overlay.source_work_dir {
-				app.program_errors[open_uri] = []JsonError{}
-				program_uris[normalized_index_path(open_path)] = open_uri
-			}
-		}
-		mut filtered_errors := []JsonError{}
+		log('FILTERED ERRORS: ${found.file.len} of ${found.parsed}')
+		app.cache_v_check_result(path, content_hash, gen, found.file, x.exit_code, found.parsed)
+		return found.file
+	}
 
-		for err in v_errors {
-			err_file := source_path_from_overlay(err.path, overlay)
-			if normalized_index_path(err_file) == normalized_index_path(real_path) {
-				updated_err := JsonError{
-					path:    real_path
+	log('V3 CHECK ERRORS: ${found.parsed}')
+	app.cache_v_check_result(path, content_hash, gen, found.file, x.exit_code, found.parsed)
+	return found.file
+}
+
+// CheckErrors are the diagnostics of a check: those of the file it was run for,
+// and, when it checked its whole program, those of each other open file of the
+// program, by URI (none for a file it found nothing in); `parsed` counts them all.
+struct CheckErrors {
+	file    []JsonError
+	program map[string][]JsonError
+	parsed  int
+}
+
+// program_open_files returns the other open files of the program `overlay`
+// checks than the file at `real_path`: their URIs by normalized path.
+fn (app &App) program_open_files(real_path string, overlay CompilationOverlay) map[string]string {
+	mut program_uris := map[string]string{}
+	for open_uri, _ in app.open_files {
+		open_path := uri_to_path(open_uri)
+		if normalized_index_path(open_path) != normalized_index_path(real_path)
+			&& app.program_root(open_path) == overlay.source_work_dir {
+			program_uris[normalized_index_path(open_path)] = open_uri
+		}
+	}
+	return program_uris
+}
+
+// split_check_errors reads the diagnostics of `output`, what a check printed,
+// for the file at `real_path`, and, when the check covered its program, for the
+// other open files of the program, `program_uris` (see program_open_files).
+fn split_check_errors(output string, diagnostic_source_dir string, file_to_check string, use_multifile bool, overlay CompilationOverlay, real_path string, program_uris map[string]string) CheckErrors {
+	// Parse V3's native flat-AST checker diagnostics so ordinary diagnostics stay
+	// on the default backend.
+	mut v_errors := parse_v_check_diagnostics(output, diagnostic_source_dir)
+	v_errors << parse_v_check_program_diagnostics(output, diagnostic_source_dir, file_to_check)
+	if !use_multifile {
+		return CheckErrors{
+			file:   v_errors
+			parsed: v_errors.len
+		}
+	}
+	mut program := map[string][]JsonError{}
+	for _, open_uri in program_uris {
+		program[open_uri] = []JsonError{}
+	}
+	mut filtered_errors := []JsonError{}
+	for err in v_errors {
+		err_file := source_path_from_overlay(err.path, overlay)
+		if normalized_index_path(err_file) == normalized_index_path(real_path) {
+			filtered_errors << JsonError{
+				path:    real_path
+				message: err.message
+				line_nr: err.line_nr
+				col:     err.col
+				len:     err.len
+				level:   err.level
+			}
+			log('INCLUDING ERROR from err_file=${err_file}: ${err.message}')
+		} else {
+			if other_uri := program_uris[normalized_index_path(err_file)] {
+				program[other_uri] << JsonError{
+					path:    err_file
 					message: err.message
 					line_nr: err.line_nr
 					col:     err.col
 					len:     err.len
 					level:   err.level
 				}
-				filtered_errors << updated_err
-				log('INCLUDING ERROR from err_file=${err_file}: ${err.message}')
-			} else {
-				if other_uri := program_uris[normalized_index_path(err_file)] {
-					app.program_errors[other_uri] << JsonError{
-						path:    err_file
-						message: err.message
-						line_nr: err.line_nr
-						col:     err.col
-						len:     err.len
-						level:   err.level
-					}
-				}
-				log('EXCLUDING ERROR from err_file=${err_file} real_path=${real_path}')
 			}
+			log('EXCLUDING ERROR from err_file=${err_file} real_path=${real_path}')
 		}
-
-		log('FILTERED ERRORS: ${filtered_errors.len} of ${v_errors.len}')
-		app.cache_v_check_result(path, content_hash, gen, filtered_errors, x.exit_code, v_errors.len)
-		return filtered_errors
 	}
-
-	log('V3 CHECK ERRORS: ${v_errors.len}')
-	app.cache_v_check_result(path, content_hash, gen, v_errors, x.exit_code, v_errors.len)
-	return v_errors
+	return CheckErrors{
+		file:    filtered_errors
+		program: program
+		parsed:  v_errors.len
+	}
 }
 
 fn (mut app App) write_tracked_files_to_temp(working_dir string) !string {

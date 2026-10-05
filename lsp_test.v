@@ -5,6 +5,53 @@ module main
 import json2
 import io
 import os
+import net
+import time
+
+fn read_tcp_messages_and_report(mut reader io.BufferedReader, incoming chan IncomingMessage, done chan bool) {
+	read_incoming_messages(mut reader, incoming)
+	done <- true
+}
+
+fn test_tcp_reader_finishes_on_exit_while_the_peer_remains_open() {
+	mut listener := net.listen_tcp(.ip, '127.0.0.1:0')!
+	defer {
+		listener.close() or {}
+	}
+	address := listener.addr()!
+	mut client := net.dial_tcp(address.str())!
+	defer {
+		client.close() or {}
+	}
+	mut conn := listener.accept()!
+	defer {
+		conn.close() or {}
+	}
+	mut reader := io.new_buffered_reader(reader: conn, cap: transport_buffer_cap)
+	incoming := chan IncomingMessage{cap: 2}
+	done := chan bool{cap: 1}
+	spawn read_tcp_messages_and_report(mut reader, incoming, done)
+	// An exit-shaped request is invalid and must leave the reader running.
+	for message in ['{"jsonrpc":"2.0","id":1,"method":"exit"}', '{"jsonrpc":"2.0","method":"exit"}'] {
+		client.write_string('Content-Length: ${message.len}\r\n\r\n${message}')!
+	}
+	mut finished := false
+	select {
+		_ := <-done {
+			finished = true
+		}
+		2 * time.second {
+			// Unblock the old reader before failing so no thread outlives conn.
+			client.close() or {}
+			_ := <-done
+		}
+	}
+	assert finished, 'the reader waited for TCP EOF after exit'
+	invalid := <-incoming
+	exit_message := <-incoming
+	assert invalid.method == .exit && invalid.is_request
+	assert exit_message.method == .exit && !exit_message.is_request
+}
 
 fn test_stdio_reader_processes_frame_before_eof() {
 	mut transport := os.pipe() or {
@@ -1842,7 +1889,51 @@ fn test_validate_rename_rejects_keyword_new_name() {
 	}
 }
 
+// A builtin function is refused as a new name like a keyword: `recover`, which
+// V added with #29134, is one.
+fn test_validate_rename_rejects_builtin_function_new_name() {
+	params := '{"textDocument":{"uri":"file:///a.v"},"position":{"line":0,"character":0},"newName":"recover"}'
+	if err := validate_request_params(.rename, params) {
+		assert err.contains('builtin')
+	} else {
+		assert false, 'expected builtin newName to be rejected'
+	}
+}
+
 fn test_validate_rename_accepts_normal_new_name() {
 	params := '{"textDocument":{"uri":"file:///a.v"},"position":{"line":0,"character":0},"newName":"my_fn"}'
 	assert validate_request_params(.rename, params) == none
+}
+
+fn incoming(method Method, is_request bool) IncomingMessage {
+	return IncomingMessage{
+		content:    '{}'
+		is_request: is_request
+		method:     method
+	}
+}
+
+fn test_a_request_that_asks_no_compiler_goes_before_one_that_may() {
+	hover := incoming(.hover, true)
+	tokens := incoming(.semantic_tokens, true)
+	// Asked together after a change: the tokens first.
+	assert next_incoming_index([hover, tokens]) == 1
+	assert next_incoming_index([hover, incoming(.definition, true), tokens]) == 2
+	assert next_incoming_index([incoming(.document_highlight, true), incoming(.inlay_hint, true),
+		incoming(.document_symbols, true)]) == 2
+	// Otherwise the order stays: the first is quick, or no quick one follows.
+	assert next_incoming_index([tokens, hover]) == 0
+	assert next_incoming_index([hover, incoming(.inlay_hint, true)]) == 0
+	assert next_incoming_index([hover]) == 0
+	// No request moves past a notification, which can change what it asks about.
+	assert next_incoming_index([incoming(.did_change, false), hover, tokens]) == 0
+	assert next_incoming_index([hover, incoming(.did_change, false), tokens]) == 0
+	// A notification-shaped message of a request method, which the loop drops, is
+	// no request either.
+	assert next_incoming_index([hover, incoming(.semantic_tokens, false)]) == 0
+	// Nor past any other request, nor past the end of the stream.
+	assert next_incoming_index([hover, incoming(.shutdown, true), tokens]) == 0
+	assert next_incoming_index([hover, IncomingMessage{
+		eof: true
+	}, tokens]) == 0
 }
