@@ -206,7 +206,8 @@ fn (mut app App) rename_clash_in(program_dir string, paths []string, rc RenameCh
 	}
 	for i, answer in named_after {
 		named := answer or {
-			if (i < renamed.len && renamed[i].knows && !renamed[i].declaration)
+			if (i < renamed.len && !renamed[i].declaration
+				&& (renamed[i].knows || (rc.old_name != rc.new_name && rc.existing.len > 0)))
 				|| (i >= renamed.len && i - renamed.len < named_before.len
 					&& named_before[i - renamed.len] != none) {
 				return error('the compiler could not resolve a previously resolved name after the rename')
@@ -217,6 +218,9 @@ fn (mut app App) rename_clash_in(program_dir string, paths []string, rc RenameCh
 		at := rc.original_pos(asked[i])
 		if i < renamed.len {
 			led := renamed[i].led
+			if !renamed[i].knows && !renamed[i].declaration && !rc.is_renamed(was) {
+				return 'make `${rc.new_name}` at ${name_pos_text(at)} name an unrelated declaration at ${name_pos_text(was)}'
+			}
 			if renamed[i].knows && !same_name_pos(was, led) {
 				return 'make `${rc.new_name}` at ${name_pos_text(at)} name the declaration at ${name_pos_text(was)} instead of the one at ${name_pos_text(led)}'
 			}
