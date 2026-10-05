@@ -90,6 +90,13 @@ const v3_query_answer_ms = 15000
 const diagnostics_server_limit = 3
 
 fn new_diagnostics_server_pool() &DiagnosticsServerPool {
+	$if !windows {
+		// A compiler can close stdin while still alive, so is_alive cannot make
+		// a pipe write safe. Let that write fail and use the bounded fallback.
+		// A caught handler resets on exec; unlike blocking the signal on a
+		// worker thread, it leaves child programs their default signal handling.
+		os.signal_opt(.pipe, fn (_ os.Signal) {}) or {}
+	}
 	mut pool := &DiagnosticsServerPool{}
 	// Its address tells it apart from every other pool alive in this VLS.
 	pool.base = os.join_path(os.temp_dir(), 'vls_diagnostics_${os.getpid()}_${ptr_str(pool)}')
@@ -166,9 +173,11 @@ fn (mut pool DiagnosticsServerPool) notice_disk_change(path string) {
 	defer {
 		pool.mutex.unlock()
 	}
-	for _, mut program in pool.copies {
-		if program.root != '' && path_is_within(path, program.root) {
-			program.stale = true
+	for key in pool.copies.keys() {
+		if mut program := pool.copies[key] {
+			if program.root != '' && path_is_within(path, program.root) {
+				program.stale = true
+			}
 		}
 	}
 }
@@ -344,11 +353,36 @@ fn (mut pool DiagnosticsServerPool) stop_all() {
 		pool.mutex.unlock()
 	}
 	pool.closed = true
-	for _, mut server in pool.servers {
-		pool.retire(mut server)
+	for key in pool.servers.keys() {
+		if mut server := pool.servers[key] {
+			pool.retire(mut server)
+		}
 	}
 	pool.servers.clear()
 	pool.clean_closed_pool()
+}
+
+// wait_closed joins operations after stop_all has retired their servers.
+fn (mut pool DiagnosticsServerPool) wait_closed() {
+	for {
+		pool.mutex.lock()
+		finished := pool.operations == 0
+		pool.mutex.unlock()
+		if finished {
+			return
+		}
+		time.sleep(time.millisecond)
+	}
+}
+
+// kill_compiler_process reaps a compiler even when signal_kill has already
+// marked it aborted: os.Process.wait otherwise skips that state entirely.
+fn kill_compiler_process(mut process os.Process) {
+	process.signal_kill()
+	if process.status == .aborted {
+		process.status = .running
+	}
+	process.wait()
 }
 
 fn start_diagnostics_server(exe string, args []string, work_dir string, prepare bool, shared bool) !&DiagnosticsServer {
@@ -581,21 +615,21 @@ fn (mut s DiagnosticsServer) stop() {
 	if s.process == unsafe { nil } {
 		return
 	}
-	if s.process.is_alive() {
+	if s.process.status in [.running, .stopped] {
 		s.process.stdin_write('quit\n')
 		// A server that does not end, as one whose child hangs, is killed:
 		// waiting for it would freeze VLS.
 		for _ in 0 .. 100 {
-			if !s.process.is_alive() {
+			if !s.process.is_alive() && s.process.status !in [.running, .stopped] {
 				break
 			}
 			time.sleep(10 * time.millisecond)
 		}
-		if s.process.is_alive() {
-			s.process.signal_kill()
+		if s.process.status in [.running, .stopped] {
+			kill_compiler_process(mut s.process)
 		}
-		s.process.wait()
 	}
+	s.process.wait()
 	s.process.close()
 	s.process = unsafe { nil }
 }
@@ -627,6 +661,6 @@ fn (pool &DiagnosticsServerPool) stable_dir(kind string, source string) string {
 // stop_diagnostics_servers ends the servers the diagnostics worker used.
 fn (mut app App) stop_diagnostics_servers() {
 	if mut scheduler := app.diagnostics_scheduler {
-		scheduler.servers.stop_all()
+		scheduler.stop_and_wait()
 	}
 }

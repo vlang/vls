@@ -767,6 +767,19 @@ fn resolve_compiler_timeout_ms() i64 {
 // compiler_timeout_ms. This is the single, shell-free entry point for all
 // compiler invocations.
 fn run_v_argv(args []string, work_folder string) os.Result {
+	return run_v_argv_cancelled(args, work_folder, fn () bool {
+		return false
+	})
+}
+
+// run_v_argv_cancelled also ends a diagnostics fallback when its session closes
+// or a newer buffer makes its answer obsolete.
+fn run_v_argv_cancelled(args []string, work_folder string, cancelled fn () bool) os.Result {
+	if cancelled() {
+		return os.Result{
+			exit_code: diagnostics_check_cancelled
+		}
+	}
 	if work_folder != '' && !os.is_dir(work_folder) {
 		msg := 'Working dir does not exist: ${work_folder}'
 		log(msg)
@@ -799,6 +812,7 @@ fn run_v_argv(args []string, work_folder string) os.Result {
 	mut out := strings.new_builder(1024)
 	start_ms := time.now().unix_milli()
 	mut timed_out := false
+	mut was_cancelled := false
 	// Drain both pipes on every iteration and enforce the deadline. `pipe_read`
 	// is non-blocking (it polls the fd and returns none immediately when no data
 	// is pending), so a child that writes only to stderr, or one that hangs
@@ -806,6 +820,11 @@ fn run_v_argv(args []string, work_folder string) os.Result {
 	// payload cannot fill the pipe and deadlock the child, and the timeout check
 	// below still fires to kill a stuck process.
 	for p.is_alive() {
+		if cancelled() {
+			kill_compiler_process(mut p)
+			was_cancelled = true
+			break
+		}
 		mut got_data := false
 		if chunk := p.pipe_read(.stdout) {
 			out.write_string(chunk)
@@ -817,7 +836,7 @@ fn run_v_argv(args []string, work_folder string) os.Result {
 		}
 		if time.now().unix_milli() - start_ms > timeout_ms {
 			log('v invocation exceeded ${timeout_ms}ms; killing child')
-			p.signal_kill()
+			kill_compiler_process(mut p)
 			timed_out = true
 			break
 		}
@@ -831,6 +850,11 @@ fn run_v_argv(args []string, work_folder string) os.Result {
 	p.wait()
 	code := p.code
 	p.close()
+	if was_cancelled {
+		return os.Result{
+			exit_code: diagnostics_check_cancelled
+		}
+	}
 	if timed_out {
 		return os.Result{
 			exit_code: compiler_exit_timeout
@@ -1342,20 +1366,20 @@ fn (mut app App) run_v_check(path string, text string) []JsonError {
 	} else {
 		unsafe { nil }
 	}
+	cancelled := if app.diagnostics_cancelled != unsafe { nil } {
+		app.diagnostics_cancelled
+	} else {
+		fn () bool {
+			return false
+		}
+	}
 	x := if server_exe != '' {
 		mut servers := app.diagnostics_servers
-		cancelled := if app.diagnostics_cancelled != unsafe { nil } {
-			app.diagnostics_cancelled
-		} else {
-			fn () bool {
-				return false
-			}
-		}
 		servers.check(server_exe, cmd_args, exec_dir, cancelled, partial) or {
-			run_v_argv(cmd_args, exec_dir)
+			run_v_argv_cancelled(cmd_args, exec_dir, cancelled)
 		}
 	} else {
-		run_v_argv(cmd_args, exec_dir)
+		run_v_argv_cancelled(cmd_args, exec_dir, cancelled)
 	}
 	if shared_copy != unsafe { nil } {
 		shared_copy.mutex.unlock()

@@ -648,6 +648,36 @@ fn test_only_a_created_or_deleted_file_rebuilds_the_copy() {
 	assert app.v3_copies().len == 0
 }
 
+fn test_a_disk_create_refreshes_the_owned_directory_of_an_existing_program_copy() {
+	mut app, fake := fake_v3_app('owned_watcher', fake_v3_query_server, 'VLS_DIAGNOSTICS_SERVER')!
+	defer {
+		stop_fake_v3_app(mut app, fake)
+	}
+	helper := os.join_path(fake.project, 'helper', 'helper.v')
+	os.mkdir_all(os.dir(helper))!
+	os.write_file(helper, 'module helper\n\npub fn answer() int { return 42 }\n')!
+	main_path := os.join_path(fake.project, 'main.v')
+	main_uri := path_to_uri(main_path)
+	app.open_files[main_uri] = 'module main\n\nimport helper\n\nfn main() { println(helper.answer()) }\n'
+	app.v3_line_info(.hover, main_uri, main_path, '5:hv^26') or {}
+	mut pool := app.v3_query_pool()
+	mut program := pool.program_copy(os.dir(main_path))
+	program.mutex.lock()
+	defer {
+		program.mutex.unlock()
+	}
+	copy_dir := os.join_path(program.project.overlay.temp_root, 'helper')
+	assert !os.is_link(copy_dir)
+	// A watcher can mark a copy while a request already holds its lock. The
+	// request must see the new file when it next prepares that same copy.
+	new_file := os.join_path(fake.project, 'helper', 'new.v')
+	new_content := 'module helper\n\npub fn another() int { return 7 }\n'
+	os.write_file(new_file, new_content)!
+	app.v3_query_notice_disk_change(new_file, 1)
+	app.prepare_program_copy(mut pool, mut program, main_path, os.dir(main_path))!
+	assert os.read_file(os.join_path(copy_dir, 'new.v'))! == new_content
+}
+
 fn test_a_test_file_is_asked_as_a_program_of_its_own() {
 	mut app, fake := fake_v3_app('test_file', fake_v3_notes_targets, 'VLS_V_COMMAND')!
 	defer {
@@ -988,6 +1018,118 @@ fn test_a_closed_query_pool_does_not_recreate_a_program_copy() {
 	assert pool.copies.len == 0
 	assert !os.exists(pool.base)
 	assert fake.questions().len == 0
+}
+
+// Closing stdin does not end a process. Its pipe must be allowed to fail even
+// when the preceding is_alive check says the compiler is still running.
+const fake_server_closing_stdin = r"#!/bin/sh
+exec 0<&-
+echo v-diagnostics-server: ready
+sleep 1
+"
+
+fn test_a_closed_compiler_input_falls_back_and_stops_without_sigpipe() {
+	dir := os.join_path(os.vtmp_dir(), 'vls_pool_closed_input_${os.getpid()}')
+	os.mkdir_all(dir)!
+	defer {
+		os.rmdir_all(dir) or {}
+	}
+	exe := os.join_path(dir, 'v')
+	os.write_file(exe, fake_server_closing_stdin)!
+	os.chmod(exe, 0o755)!
+	mut pool := new_diagnostics_server_pool()
+	defer {
+		pool.stop_all()
+	}
+	answer := pool.query(exe, ['-check', '.'], dir, 'source.v:1:hv^1')
+	assert answer == none
+	assert pool.servers.len == 0
+	mut server := start_diagnostics_server(exe, [], dir, false, false)!
+	server.stop()
+	assert server.process == unsafe { nil }
+}
+
+const fake_server_delaying_cancelled_end = r"#!/bin/sh
+here=$(dirname $0)
+echo v-diagnostics-server: ready
+while read -r request rest; do
+	case $request in quit) exit 0 ;; esac
+	token=${rest%% *}
+	sleep 20 &
+	child=$!
+	echo v-diagnostics-server: child $child $token
+	echo $$ > $here/pid
+	touch $here/started
+	wait $child
+	sleep 1
+	printf '\nv-diagnostics-server: end 137 %s\n' $token
+done
+"
+
+fn test_session_shutdown_joins_the_cancelled_diagnostics_worker() {
+	mut app, fake := fake_v3_app('joined_shutdown', fake_server_delaying_cancelled_end, 'VLS_DIAGNOSTICS_SERVER')!
+	defer {
+		stop_fake_v3_app(mut app, fake)
+	}
+	mut scheduler := new_diagnostics_scheduler()
+	app.diagnostics_scheduler = scheduler
+	path := os.join_path(fake.project, 'main.v')
+	uri := path_to_uri(path)
+	content := os.read_file(path)!
+	app.open_files[uri] = content
+	scheduled := app.schedule_diagnostics(uri, content)
+	started := os.join_path(fake.server, 'started')
+	watch := time.new_stopwatch()
+	for !os.exists(started) && watch.elapsed() < 5 * time.second {
+		time.sleep(5 * time.millisecond)
+	}
+	was_started := os.exists(started)
+	pid := (os.read_file(os.join_path(fake.server, 'pid')) or { '0' }).trim_space().int()
+	app.stop_diagnostics_servers()
+	assert scheduled
+	assert was_started
+	assert pid > 0
+	assert C.kill(pid, 0) != 0, 'the session returned while its compiler was alive'
+	assert !scheduler.worker_running
+	assert !os.exists(scheduler.servers.base)
+}
+
+const fake_one_shot_check_waiting_forever = r"#!/bin/sh
+case ${V_DIAGNOSTICS_SERVER}x in 1x) exit 0 ;; esac
+here=$(dirname $0)
+echo $$ > $here/pid
+touch $here/started
+exec sleep 20
+"
+
+fn test_session_shutdown_cancels_a_one_shot_diagnostics_fallback() {
+	mut app, fake := fake_v3_app('joined_fallback', fake_one_shot_check_waiting_forever, 'VLS_V_COMMAND')!
+	defer {
+		stop_fake_v3_app(mut app, fake)
+	}
+	mut scheduler := new_diagnostics_scheduler()
+	app.diagnostics_scheduler = scheduler
+	path := os.join_path(fake.project, 'main.v')
+	uri := path_to_uri(path)
+	content := os.read_file(path)!
+	app.open_files[uri] = content
+	scheduled := app.schedule_diagnostics(uri, content)
+	started := os.join_path(fake.server, 'started')
+	watch := time.new_stopwatch()
+	for !os.exists(started) && watch.elapsed() < 5 * time.second {
+		time.sleep(5 * time.millisecond)
+	}
+	was_started := os.exists(started)
+	pid := (os.read_file(os.join_path(fake.server, 'pid')) or { '0' }).trim_space().int()
+	stopping := time.new_stopwatch()
+	app.stop_diagnostics_servers()
+	assert scheduled
+	assert was_started
+	assert stopping.elapsed() < 3 * time.second, 'shutdown waited for the compiler timeout'
+	assert pid > 0
+	assert C.kill(pid, 0) != 0
+	assert !scheduler.worker_running
+	assert !os.exists(scheduler.servers.base)
 }
 
 fn test_a_question_does_not_wait_for_the_check_of_another_server() {

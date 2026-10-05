@@ -524,6 +524,7 @@ fn (mut app App) stop_v3_queries() {
 	if app.v3_query_servers != unsafe { nil } {
 		mut servers := app.v3_query_servers
 		servers.stop_all()
+		servers.wait_closed()
 	}
 }
 

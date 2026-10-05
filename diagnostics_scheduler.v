@@ -51,6 +51,9 @@ mut:
 	global_generation   u64
 	pending_jobs        map[string]DiagnosticsJob
 	worker_running      bool
+	worker_started      bool
+	worker_done         chan bool
+	stopped             bool
 	active_uri          string
 	active_project_key  string
 	active_generation   u64
@@ -166,11 +169,18 @@ fn (mut scheduler DiagnosticsScheduler) enqueue(job DiagnosticsJob) bool {
 	defer {
 		scheduler.mutex.unlock()
 	}
+	if scheduler.stopped {
+		return false
+	}
 	scheduler.pending_jobs[job.uri] = job
 	if scheduler.paused {
 		return false
 	}
 	should_start := !scheduler.worker_running
+	if should_start {
+		scheduler.worker_started = true
+		scheduler.worker_done = chan bool{}
+	}
 	scheduler.worker_running = true
 	return should_start
 }
@@ -230,6 +240,23 @@ fn (mut scheduler DiagnosticsScheduler) cancel_all() {
 	scheduler.global_generation++
 	scheduler.pending_jobs.clear()
 	scheduler.mutex.unlock()
+}
+
+// stop_and_wait cancels the session's last check and waits for its compiler,
+// files and transport borrower to be released before the session can return.
+fn (mut scheduler DiagnosticsScheduler) stop_and_wait() {
+	scheduler.mutex.lock()
+	scheduler.stopped = true
+	scheduler.global_generation++
+	scheduler.pending_jobs.clear()
+	started := scheduler.worker_started
+	done := scheduler.worker_done
+	scheduler.mutex.unlock()
+	scheduler.servers.stop_all()
+	if started {
+		_ := <-done or {}
+	}
+	scheduler.servers.wait_closed()
 }
 
 fn (mut app App) schedule_diagnostics(uri string, content string) bool {
@@ -359,6 +386,12 @@ fn (mut app App) cancel_all_scheduled_diagnostics() {
 }
 
 fn run_diagnostics_worker(mut scheduler DiagnosticsScheduler) {
+	scheduler.mutex.lock()
+	done := scheduler.worker_done
+	scheduler.mutex.unlock()
+	defer {
+		done.close()
+	}
 	for {
 		jobs, should_stop := scheduler.take_ready_jobs(time.now().unix_milli())
 		if should_stop {
