@@ -502,18 +502,20 @@ fn collect_v_files(root string, mut acc []string) bool {
 	return collect_v_files_bounded(root, index_max_files, mut acc)
 }
 
-// collect_v_files_bounded stops the traversal at the caller's file limit.
+// collect_v_files_bounded stops at the caller's file limit, and at four times
+// that many directory entries so trees without V files are bounded too.
 fn collect_v_files_bounded(root string, max_files int, mut acc []string) bool {
 	mut visited := map[string]bool{}
 	canonical_root := os.real_path(root).replace('\\', '/')
-	return collect_v_files_rec(root, canonical_root, max_files, mut acc, mut visited)
+	mut entries_seen := 0
+	return collect_v_files_rec(root, canonical_root, max_files, mut acc, mut visited, mut entries_seen)
 }
 
 // collect_v_files_rec is the recursive worker; `visited` holds canonical
 // directories and files already seen, so symlink cycles and file aliases cannot
 // cause infinite recursion or duplicate index entries. `canonical_root` bounds
 // the walk to the workspace: a resolved path that escapes it is skipped.
-fn collect_v_files_rec(dir string, canonical_root string, max_files int, mut acc []string, mut visited map[string]bool) bool {
+fn collect_v_files_rec(dir string, canonical_root string, max_files int, mut acc []string, mut visited map[string]bool, mut entries_seen int) bool {
 	if acc.len >= max_files {
 		return false
 	}
@@ -532,12 +534,16 @@ fn collect_v_files_rec(dir string, canonical_root string, max_files int, mut acc
 		if acc.len >= max_files {
 			return false
 		}
+		if entries_seen >= max_files * 4 {
+			return false
+		}
+		entries_seen++
 		full := os.join_path(dir, entry)
 		if os.is_dir(full) {
 			if entry.starts_with('.') || entry in index_excluded_dirs {
 				continue
 			}
-			if !collect_v_files_rec(full, canonical_root, max_files, mut acc, mut visited) {
+			if !collect_v_files_rec(full, canonical_root, max_files, mut acc, mut visited, mut entries_seen) {
 				return false
 			}
 		} else if entry.ends_with('.v') {
