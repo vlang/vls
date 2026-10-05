@@ -1940,7 +1940,11 @@ fn own_overlay_dirs_with_linker(source_root string, temp_root string, rel_dir st
 		rel = if rel == '' { part } else { rel + '/' + part }
 		target := os.join_path(temp_root, rel)
 		if os.is_link(target) {
-			os.rm(target)!
+			$if windows {
+				os.rmdir(target)!
+			} $else {
+				os.rm(target)!
+			}
 			os.mkdir(target)!
 			symlink_untracked_tree(source_root, os.join_path(source_root, rel), target, rel,
 				[], [], link_fn, mut budget)!

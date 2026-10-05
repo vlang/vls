@@ -155,7 +155,7 @@ fn (mut app App) v3_ask(real_path string, questions []V3Question) ?V3Answers {
 		log('no V3 copy of ${program_dir}: ${err}')
 		return none
 	}
-	app.v3_sync_open_files(mut program.project)
+	app.v3_sync_open_files(mut program.project) or { return none }
 	mut specs := []string{cap: questions.len}
 	mut targets := []string{cap: questions.len}
 	for question in questions {
@@ -275,7 +275,7 @@ fn (mut app App) write_program_copy(mut pool DiagnosticsServerPool, mut program 
 		log('no copy of ${program_dir}: ${err}')
 		return none
 	}
-	app.v3_sync_open_files(mut program.project)
+	app.v3_sync_open_files(mut program.project) or { return none }
 	written := program.project.write(normalize_overlay_path(real_path), text) or { return none }
 	return written
 }
@@ -309,18 +309,18 @@ fn (mut app App) v3_query_project(real_path string, program_dir string, pool &Di
 // v3_sync_open_files writes into the copy what the editor holds: every open
 // file of the program as its buffer, and a file written before that is no
 // longer open as it is on disk again.
-fn (mut app App) v3_sync_open_files(mut project V3QueryProject) {
+fn (mut app App) v3_sync_open_files(mut project V3QueryProject) ! {
 	mut open_paths := map[string]bool{}
 	for uri, content in app.open_files {
 		path := normalize_overlay_path(uri_to_path(uri))
 		if path_is_within(path, project.overlay.source_root) {
 			open_paths[path] = true
-			project.write(path, content) or {}
+			project.write(path, content)!
 		}
 	}
 	for path in project.written.keys() {
 		if path !in open_paths {
-			project.write(path, os.read_file(path) or { '' }) or {}
+			project.write(path, os.read_file(path) or { '' })!
 		}
 	}
 	project.refresh_held_files()

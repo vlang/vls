@@ -11621,6 +11621,16 @@ fn test_rename_renames_the_variants_of_the_other_platforms() {
 		'name_macos.c.v:3:4', 'name_windows.c.v:3:4', 'name_windows.c.v:8:9']
 }
 
+// An unrelated type in an inactive platform file does not share its fields
+// with the type being renamed, even when their names match.
+fn test_rename_keeps_unrelated_fields_in_other_platform_files() {
+	files := {
+		'main.v':            'module main\n\nstruct Foo {\n\tvalue int\n}\n\nfn main() {\n\tf := Foo{value: 1}\n\tprintln(f.value)\n}\n'
+		'other_windows.c.v': 'module main\n\nstruct Bar {\n\tvalue int\n}\n\nfn bar() {\n\t_ = Bar{value: 2}\n}\n'
+	}
+	assert rename_edits_in(files, 'main.v:4:2') == ['main.v:4:2', 'main.v:8:11', 'main.v:9:12']
+}
+
 // A function renamed to another function's name, a local renamed to another
 // local's, and a function renamed to the name of a parameter that a call of it
 // would then reach: the first two break the program, the last one compiles and

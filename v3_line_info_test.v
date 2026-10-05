@@ -60,6 +60,33 @@ done
 exit 1
 "
 
+// A V1 compiler that answers definition questions but has no V3 checker.
+const fake_v1_definitions_only = r"#!/bin/sh
+for arg in $@; do
+	if [ $arg = -new-compiler ]; then
+		echo 'unknown option `-new-compiler`'
+		exit 1
+	fi
+done
+while [ $# -gt 0 ]; do
+	if [ $1 = -line-info ]; then
+		question=$2
+		file=${question%%:*}
+		position=${question#*:}
+		line=${position%%:*}
+		case $line in
+		3|13) printf '%s:3:3\n' $file ;;
+		7|23) printf '%s:7:3\n' $file ;;
+		17|19) printf '%s:17:1\n' $file ;;
+		18) printf '%s:18:1\n' $file ;;
+		esac
+		exit 0
+	fi
+	shift
+done
+exit 0
+"
+
 // A V whose V3 has no query engine.
 const fake_v3_without_line_info = r"#!/bin/sh
 case ${V_DIAGNOSTICS_SERVER}x in 1x) exit 0 ;; esac
@@ -476,6 +503,106 @@ fn test_v1_answers_what_v3_cannot_parse() {
 	if _ := app.v3_line_info(.hover, path_to_uri(path), path, '3:hv^4') {
 		assert false, 'a failed V3 query must leave the answer to V1'
 	}
+}
+
+fn test_a_v1_only_compiler_refuses_a_rename_it_cannot_validate() {
+	mut app, fake := fake_v3_app('v1_rename', fake_v1_definitions_only, 'VLS_V_COMMAND')!
+	defer {
+		stop_fake_v3_app(mut app, fake)
+	}
+	os.setenv('VLS_DIAGNOSTICS_SERVER', 'off', true)
+	path := os.join_path(fake.project, 'main.v')
+	uri := path_to_uri(path)
+	content := 'module main\n\nfn greet() int {\n\treturn 1\n}\n\nfn helper() int {\n\treturn 3\n}\n\nfn invoke(action fn () int) int {\n\tprintln(action())\n\treturn greet()\n}\n\nfn main() {\n\tx := 1\n\ty := 2\n\tprintln(x + y)\n\tprintln(invoke(fn () int {\n\t\treturn 2\n\t}))\n\tprintln(helper())\n}\n'
+	os.write_file(path, content)!
+	os.rm(os.join_path(fake.project, 'other.v'))!
+	app.open_files[uri] = content
+	app.workspace_roots = [fake.project]
+	// The existing V1 definition path works after the V3 option is rejected.
+	resolved := app.resolve_symbol_anchor_by(uri, 12, 9, false) or {
+		panic('the fake V1 compiler did not answer the definition')
+	}
+	assert resolved.range.start.line == 2
+	assert app.v3_one_shot_unsupported
+	for spec in ['3:4 helper', '17:2 y', '3:4 action'] {
+		parts := spec.split(' ')
+		at := parts[0].split(':')
+		request := Request{
+			id:     1
+			method: 'textDocument/rename'
+			params: json2.encode(RenameParams{
+				text_document: TextDocumentIdentifier{ uri: uri }
+				position:      Position{ line: at[0].int() - 1, char: at[1].int() - 1 }
+				new_name:      parts[1]
+			})
+		}
+		if response := app.rename_request(request) {
+			assert false, '${spec}: unvalidated rename returned ${response}'
+		} else {
+			assert err.msg().contains('cannot validate rename conflicts'), err.msg()
+		}
+	}
+}
+
+fn test_a_rename_refuses_when_known_definitions_disappear_after_editing() {
+	script := fake_v3_leads_back_server.replace(r'if [ ${pos%%:*} != 4 ]; then',
+		r'if [ ${pos%%:*} != 4 ] && grep -q "p := 1" ${q%%:*}; then')
+	mut app, fake := fake_v3_app('rename_lost_answers', script, 'VLS_DIAGNOSTICS_SERVER')!
+	defer {
+		stop_fake_v3_app(mut app, fake)
+	}
+	app.line_info_mode = .missing
+	path := os.join_path(fake.project, 'main.v')
+	uri := path_to_uri(path)
+	app.open_files[uri] = os.read_file(path)!
+	app.workspace_roots = [fake.project]
+	if _ := app.rename_request(Request{
+		id:     1
+		method: 'textDocument/rename'
+		params: json2.encode(RenameParams{
+			text_document: TextDocumentIdentifier{ uri: uri }
+			position:      Position{ line: 3, char: 1 }
+			new_name:      'renamed'
+		})
+	}) {
+		assert false, 'a lost definition answer must not validate a rename'
+	} else {
+		assert err.msg().contains('previously resolved name'), err.msg()
+	}
+	copy_path := os.join_path(app.v3_query_pool().copies.values()[0].project.overlay.temp_root, 'main.v')
+	assert os.read_file(copy_path)! == os.read_file(path)!
+}
+
+fn test_failed_sibling_buffer_write_prevents_querying_stale_overlay_text() {
+	mut app, fake := fake_v3_app('sync_failure', fake_v3_query_server, 'VLS_DIAGNOSTICS_SERVER')!
+	defer {
+		stop_fake_v3_app(mut app, fake)
+	}
+	path := os.join_path(fake.project, 'main.v')
+	uri := path_to_uri(path)
+	app.open_files[uri] = os.read_file(path)!
+	app.v3_line_info(.hover, uri, path, '4:hv^2') or { panic('first query failed') }
+	copy_root := app.v3_query_pool().copies.values()[0].project.overlay.temp_root
+	// A file occupying the sibling's parent makes the next buffer write fail.
+	os.write_file(os.join_path(copy_root, 'blocked'), 'not a directory')!
+	sibling := os.join_path(fake.project, 'blocked', 'sibling.v')
+	app.open_files[path_to_uri(sibling)] = 'module main\n\nfn sibling() {}\n'
+	asked := fake.questions().len
+	if _ := app.v3_line_info(.hover, uri, path, '4:hv^2') {
+		assert false, 'a stale sibling must not be queried'
+	}
+	assert fake.questions().len == asked
+}
+
+fn test_a_failed_compiler_check_is_not_a_successful_rename_validation() {
+	for output in ['', 'compiler timed out', 'unknown option `-new-compiler`'] {
+		if _ := rename_check_output(1, output) {
+			assert false, 'a failed check must not validate a rename: ${output}'
+		}
+	}
+	assert rename_check_output(0, '')! == ''
+	message := 'main.v:3:1: error: redefinition of `helper`'
+	assert rename_check_output(1, message)! == message
 }
 
 fn test_without_a_server_v3_answers_in_a_process_of_its_own() {
