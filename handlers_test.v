@@ -11539,6 +11539,19 @@ fn test_rename_keeps_unrelated_fields_in_other_platform_files() {
 	assert rename_edits_in(files, 'main.v:4:2') == ['main.v:4:2', 'main.v:8:11', 'main.v:9:12']
 }
 
+// A use in an excluded file may resolve only after the rename, to a local of
+// the new name. That is a capture even though its original binding was unknown.
+fn test_rename_refuses_a_capture_in_an_inactive_platform_file() {
+	mut app, uris := new_rename_project_app_with({
+		'main.v':            'module main\n\nfn greet() int {\n\treturn 1\n}\n\nfn main() {\n\tprintln(greet())\n}\n'
+		'other_windows.c.v': 'module main\n\nfn invoke(action fn () int) int {\n\treturn greet()\n}\n'
+	})
+	defer { cleanup_rename_app(mut app) }
+	if response := app.rename_request(rename_request_named(uris, 'main.v:3:4', 'action')) {
+		assert false, 'a platform-specific capture returned edits: ${response}'
+	}
+}
+
 // A function renamed to another function's name, a local renamed to another
 // local's, and a function renamed to the name of a parameter that a call of it
 // would then reach: the first two break the program, the last one compiles and
