@@ -698,8 +698,10 @@ fn (mut app App) handle_requests[T](mut reader T) {
 	// The messages are read on a thread of their own, so that the ones that
 	// already arrived can be told apart: see next_incoming_index.
 	incoming := chan IncomingMessage{cap: incoming_message_queue}
+	// The thread joins before this session returns, so the borrowed reader's
+	// address remains valid even when its caller owns it on the stack.
 	mut borrowed := &IncomingReader[T]{
-		reader: &reader
+		reader: unsafe { &reader }
 	}
 	reading := spawn run_incoming_reader(mut borrowed, incoming)
 	defer {
