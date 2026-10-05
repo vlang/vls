@@ -3765,7 +3765,7 @@ fn test_handle_rename_refuses_incomplete_oversized_sibling_index() {
 	test_file := os.join_path(test_dir, 'main.v')
 	content := 'module main\n\nfn target() {\n\ttarget()\n}\n'
 	must_write_file(test_file, content)
-	must_write_file(os.join_path(test_dir, 'oversized.v'), 'x'.repeat(index_max_file_bytes + 1))
+	must_write_file(os.join_path(test_dir, 'oversized.v'), 'x'.repeat(int(index_max_file_bytes) + 1))
 	uri := path_to_uri(test_file)
 	app.open_files[uri] = content
 
