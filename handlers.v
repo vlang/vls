@@ -7066,9 +7066,10 @@ fn (app &App) inlay_hint_stamp(uri string, content string) string {
 // project_disk_max_files is how many `.v` files of a project the stamp of its
 // inlay hints looks at on disk (see project_disk_fingerprint).
 const project_disk_max_files = 5000
+const project_disk_max_bytes = u64(8 * 1024 * 1024)
 
 // project_disk_fingerprint is what the `.v` files under `root` are on disk:
-// their paths, sizes and modification times, bounded by project_disk_max_files
+// their paths, metadata and content hashes, bounded by project_disk_max_files
 // and the same directory exclusions and symlink rules as the workspace index.
 fn project_disk_fingerprint(root string) string {
 	if root == '' || os.dir(root) == root
@@ -7077,14 +7078,32 @@ fn project_disk_fingerprint(root string) string {
 		return ''
 	}
 	mut files := []string{}
-	complete := collect_v_files_bounded(root, project_disk_max_files, mut files)
+	mut complete := collect_v_files_bounded(root, project_disk_max_files, mut files)
 	files.sort()
 	mut parts := []string{cap: int_min(files.len, project_disk_max_files)}
+	mut bytes_read := u64(0)
 	for path in files {
-		if parts.len == project_disk_max_files {
-			break
+		info := os.stat(path) or {
+			complete = false
+			continue
 		}
-		parts << '${path}:${os.file_size(path)}:${os.file_last_mod_unix(path)}'
+		if info.size > index_max_file_bytes || info.size > project_disk_max_bytes - bytes_read {
+			complete = false
+			continue
+		}
+		mut file := os.open(path) or {
+			complete = false
+			continue
+		}
+		// A fixed read limit also bounds a file growing after its metadata was read.
+		content := file.read_bytes(int(info.size) + 1).bytestr()
+		file.close()
+		bytes_read += u64(content.len)
+		if content.len != int(info.size) || bytes_read > project_disk_max_bytes {
+			complete = false
+			bytes_read = project_disk_max_bytes
+		}
+		parts << '${path}:${info.inode}:${info.size}:${info.mtime}:${content.hash()}'
 	}
 	if !complete {
 		// A partial traversal cannot establish that the cached hints are current.
