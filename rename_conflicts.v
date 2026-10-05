@@ -117,7 +117,7 @@ fn (mut app App) check_rename_conflicts(target RenameTarget, locations []Locatio
 fn (mut app App) rename_clash_in(program_dir string, paths []string, rc RenameCheck) !string {
 	mut pool := app.v3_query_pool()
 	if !pool.begin_operation() {
-		return none
+		return error('the compiler pool is closed')
 	}
 	defer {
 		pool.end_operation()
