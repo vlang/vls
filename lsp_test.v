@@ -19,7 +19,11 @@ fn test_stdio_reader_processes_frame_before_eof() {
 		transport.close()
 	}
 
-	assert os.fd_dup2(transport.read_fd, 0) >= 0
+	// This dup2 is the operation the test depends on, not a check on it, so it
+	// must not live inside `assert`: `-prod` removes assert statements whole,
+	// which left fd 0 pointing at the real stdin and made the read below block
+	// forever instead of failing.
+	os.fd_dup2(transport.read_fd, 0)
 	payload := '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}'
 	frame := 'Content-Length: ${payload.len}\r\n\r\n${payload}'
 	transport.write(frame.bytes()) or {
