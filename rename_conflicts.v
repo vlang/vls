@@ -22,11 +22,12 @@ struct NamePos {
 // RenameSpan is an occurrence that a rename edits: the bytes of the old name
 // on a line of a file, and where it leads now, when the rename asked V.
 struct RenameSpan {
-	line  int
-	start int
-	end   int
-	knows bool
-	led   NamePos
+	line        int
+	start       int
+	end         int
+	knows       bool
+	declaration bool
+	led         NamePos
 }
 
 // RenameCheck is what check_rename_conflicts compares: the names, the
@@ -52,9 +53,10 @@ fn (mut app App) check_rename_conflicts(target RenameTarget, locations []Locatio
 		start := app.client_col_to_byte_col(loc.uri, line, loc.range.start.char)
 		key := anchor_cache_key(loc.uri, line, loc.range.start.char)
 		mut span := RenameSpan{
-			line:  line
-			start: start
-			end:   start + target.symbol.len
+			line:        line
+			start:       start
+			end:         start + target.symbol.len
+			declaration: app.is_indexed_declaration(loc)
 		}
 		for asked in [key, 'once:' + key] {
 			if led := cache[asked] {
@@ -100,7 +102,10 @@ fn (mut app App) check_rename_conflicts(target RenameTarget, locations []Locatio
 		programs[app.program_root(path)] << path
 	}
 	for dir, paths in programs {
-		if reason := app.rename_clash_in(dir, paths, rc) {
+		reason := app.rename_clash_in(dir, paths, rc) or {
+			return error('cannot safely rename `${target.symbol}` to `${new_name}`: ${err}')
+		}
+		if reason != '' {
 			return error('renaming `${target.symbol}` to `${new_name}` would ${reason}')
 		}
 	}
@@ -108,10 +113,10 @@ fn (mut app App) check_rename_conflicts(target RenameTarget, locations []Locatio
 
 // rename_clash_in returns how the rename `rc` would change the program in
 // `program_dir`, whose files at `paths` it edits or holds the new name, or
-// none when it would not, or when V cannot tell.
-fn (mut app App) rename_clash_in(program_dir string, paths []string, rc RenameCheck) ?string {
-	mut project := app.v3_query_project(paths[0], program_dir) or { return none }
-	app.v3_sync_open_files(mut project)
+// an empty string when it would not, or an error when validation fails.
+fn (mut app App) rename_clash_in(program_dir string, paths []string, rc RenameCheck) !string {
+	mut project := app.v3_query_project(paths[0], program_dir)!
+	app.v3_sync_open_files(mut project)!
 	// The copy is kept for the questions that come later, as v3_ask keeps it, with
 	// the files it held before the rename (see the deferred writes below).
 	defer {
@@ -120,34 +125,29 @@ fn (mut app App) rename_clash_in(program_dir string, paths []string, rc RenameCh
 	mut originals := map[string]string{}
 	mut copies := map[string]string{}
 	for path in paths {
-		text := app.open_files[rc.uris[path]] or { os.read_file(path) or { return none } }
+		text := app.open_files[rc.uris[path]] or { os.read_file(path)! }
 		originals[path] = text
-		copies[path] = project.write(path, text) or { return none }
+		copies[path] = project.write(path, text)!
 	}
 	// V builds a test file as a program of its own, with the files of its module.
 	mut targets := ['.']
 	for path in paths {
-		if copies[path].ends_with('_test.v') && copies[path] !in targets {
+		if (copies[path].ends_with('_test.v')
+			|| conditional_file_markers.any(os.file_name(copies[path]).contains(it)))
+			&& copies[path] !in targets {
 			targets << copies[path]
 		}
 	}
 	existing := rc.existing.filter(it.path in copies)
 	mut before := []string{}
 	for target in targets {
-		before << check_messages(app.v3_check_copy(project, target)?)
+		before << check_messages(app.v3_check_copy(project, target)!)
 	}
 	named_before := app.rename_answers(project, existing.map(NamePos{
 		...it
 		path: copies[it.path]
-	}), rc.new_name.len)
-	// The copy holds the renamed files until the answers are in.
-	for path, spans in rc.spans {
-		if path in copies {
-			project.write(path, renamed_text(originals[path], spans, rc.new_name)) or {
-				return none
-			}
-		}
-	}
+	}), rc.new_name.len)!
+	// Restore even when writing or checking one of the later files fails.
 	defer {
 		for path, _ in rc.spans {
 			if path in copies {
@@ -155,9 +155,15 @@ fn (mut app App) rename_clash_in(program_dir string, paths []string, rc RenameCh
 			}
 		}
 	}
+	// The copy holds the renamed files until the answers are in.
+	for path, spans in rc.spans {
+		if path in copies {
+			project.write(path, renamed_text(originals[path], spans, rc.new_name))!
+		}
+	}
 	mut after := []string{}
 	for target in targets {
-		after << check_messages(app.v3_check_copy(project, target)?)
+		after << check_messages(app.v3_check_copy(project, target)!)
 	}
 	if message := new_check_message(before, after) {
 		return message
@@ -187,12 +193,19 @@ fn (mut app App) rename_clash_in(program_dir string, paths []string, rc RenameCh
 	named_after := app.rename_answers(project, asked.map(NamePos{
 		...it
 		path: copies[it.path]
-	}), rc.new_name.len)
+	}), rc.new_name.len)!
 	if named_after.len != asked.len {
-		return none
+		return error('the compiler did not answer the rename validation questions')
 	}
 	for i, answer in named_after {
-		named := answer or { continue }
+		named := answer or {
+			if (i < renamed.len && renamed[i].knows && !renamed[i].declaration)
+				|| (i >= renamed.len && i - renamed.len < named_before.len
+					&& named_before[i - renamed.len] != none) {
+				return error('the compiler could not resolve a previously resolved name after the rename')
+			}
+			continue
+		}
 		was := rc.original_pos(named)
 		at := rc.original_pos(asked[i])
 		if i < renamed.len {
@@ -215,13 +228,13 @@ fn (mut app App) rename_clash_in(program_dir string, paths []string, rc RenameCh
 			return 'make `${rc.new_name}` at ${name_pos_text(at)} name the renamed declaration at ${name_pos_text(was)}'
 		}
 	}
-	return none
+	return ''
 }
 
 // v3_check_copy checks the program `target` of the copy `project`, `.` or a
 // test file, as the checks of the diagnostics do, and returns what V printed.
-// None when V could not check it.
-fn (mut app App) v3_check_copy(project V3QueryProject, target string) ?string {
+// An error means V could not check it; compiler diagnostics are returned.
+fn (mut app App) v3_check_copy(project V3QueryProject, target string) !string {
 	is_library := target == '.' && !app.is_program_dir(project.overlay.source_work_dir)
 	if exe := resolve_diagnostics_server_exe() {
 		// The command line of the questions (see v3_run): the same server.
@@ -234,24 +247,37 @@ fn (mut app App) v3_check_copy(project V3QueryProject, target string) ?string {
 		if result := servers.check(exe, args, project.overlay.temp_work_dir, fn () bool {
 			return false
 		}) {
-			return result.output
+			return rename_check_output(result.exit_code, result.output)
 		}
 	}
 	if app.v3_one_shot_unsupported {
-		return none
+		return error('this compiler cannot validate rename conflicts')
 	}
 	mut argv := ['-new-compiler', '-check', '-nocolor']
 	if is_library {
 		argv << '-shared'
 	}
 	argv << target
-	return run_v_argv(argv, project.overlay.temp_work_dir).output
+	result := run_v_argv(argv, project.overlay.temp_work_dir)
+	if compiler_rejects_any_option(result.output, ['-new-compiler']) {
+		app.v3_one_shot_unsupported = true
+		return error('this compiler cannot validate rename conflicts')
+	}
+	return rename_check_output(result.exit_code, result.output)
+}
+
+// A failed process without compiler diagnostics did not validate the program.
+fn rename_check_output(exit_code int, output string) !string {
+	if exit_code != 0 && check_messages(output).len == 0 {
+		return error('the compiler could not check rename conflicts: ${output.trim_space()}')
+	}
+	return output
 }
 
 // rename_answers asks V where each name of `len` bytes at `positions`, paths of
 // the copy `project`, leads: a position of the project for each, or none where
-// V gives no answer. Nothing when V answered none of them.
-fn (mut app App) rename_answers(project V3QueryProject, positions []NamePos, len int) []?NamePos {
+// V gives no definition. A failed query is an error, not a safe rename.
+fn (mut app App) rename_answers(project V3QueryProject, positions []NamePos, len int) ![]?NamePos {
 	if positions.len == 0 {
 		return []
 	}
@@ -266,7 +292,9 @@ fn (mut app App) rename_answers(project V3QueryProject, positions []NamePos, len
 	for target, group in groups {
 		specs := group.map('${positions[it].path}:${positions[it].line + 1}:gd^${positions[it].col +
 			probe}')
-		output := app.v3_run(project, specs, target) or { continue }
+		output := app.v3_run(project, specs, target) or {
+			return error('the compiler could not resolve names to validate rename conflicts')
+		}
 		if group.len == 1 {
 			answers[group[0]] = parse_name_pos(output.trim_space(), project.overlay)
 			continue
@@ -280,6 +308,19 @@ fn (mut app App) rename_answers(project V3QueryProject, positions []NamePos, len
 						project.overlay)
 				}
 			}
+		}
+	}
+	// A platform file may be excluded from the directory's build even though
+	// its uses were resolved by a one-shot lookup during occurrence collection.
+	// Ask about such a file as a program of its own before refusing a lost
+	// answer; this also keeps its platform-specific declaration in scope.
+	for i, pos in positions {
+		if answers[i] != none || !conditional_file_markers.any(os.file_name(pos.path).contains(it)) {
+			continue
+		}
+		spec := '${pos.path}:${pos.line + 1}:gd^${pos.col + probe}'
+		if output := app.v3_run(project, [spec], pos.path) {
+			answers[i] = parse_name_pos(output.trim_space(), project.overlay)
 		}
 	}
 	return answers

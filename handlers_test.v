@@ -11400,6 +11400,16 @@ fn test_rename_renames_the_variants_of_the_other_platforms() {
 		'name_macos.c.v:3:4', 'name_windows.c.v:3:4', 'name_windows.c.v:8:9']
 }
 
+// An unrelated type in an inactive platform file does not share its fields
+// with the type being renamed, even when their names match.
+fn test_rename_keeps_unrelated_fields_in_other_platform_files() {
+	files := {
+		'main.v':            'module main\n\nstruct Foo {\n\tvalue int\n}\n\nfn main() {\n\tf := Foo{value: 1}\n\tprintln(f.value)\n}\n'
+		'other_windows.c.v': 'module main\n\nstruct Bar {\n\tvalue int\n}\n\nfn bar() {\n\t_ = Bar{value: 2}\n}\n'
+	}
+	assert rename_edits_in(files, 'main.v:4:2') == ['main.v:4:2', 'main.v:8:11', 'main.v:9:12']
+}
+
 // A function renamed to another function's name, a local renamed to another
 // local's, and a function renamed to the name of a parameter that a call of it
 // would then reach: the first two break the program, the last one compiles and
@@ -12863,12 +12873,12 @@ fn test_completion_also_offers_the_modules_of_vlib() {
 	}
 	items := lab.completion_at('proj/main.v', import_lab_files['proj/main.v'], '\tte')
 	offered := vlib_imports_offered(items)
-	for path in ['os', 'strings', 'net.http', 'x.json2', 'crypto.sha256', 'builtin.wchar', 'json',
+	for path in ['os', 'strings', 'net.http', 'x.json2', 'crypto.sha256', 'builtin.wchar', 'json2',
 		'x.templating.dtm'] {
 		assert 'import ${path}' in offered, path
 	}
 	for item in items.filter(import_edits(it).len > 0 && it.detail.ends_with(' (vlib)')) {
-		deprecated := item.label in ['json', 'dtm']
+		deprecated := item.label in ['dtm']
 		assert (item.tags or { []int{} }) == if deprecated { [1] } else { []int{} }, item.label
 	}
 	for path in ['builtin', 'gx', 'compress', 'io.string_reader', 'sync.arc', 'math.internal',

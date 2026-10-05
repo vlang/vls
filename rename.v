@@ -237,7 +237,7 @@ fn (mut app App) rename_locations(target RenameTarget, scope IndexScope, request
 		}
 		if field := app.struct_literal_field(cand, target.symbol, mut cache) {
 			if same_anchor_location(app.canonical_declaration(field, target.symbol, mut cache),
-				target.anchor)
+				target.anchor) || app.is_other_build_variant(field, target.anchor)
 			{
 				locations << cand
 			}
@@ -802,15 +802,35 @@ const conditional_file_markers = ['_windows.', '_linux.', '_macos.', '_darwin.',
 // is_other_build_variant reports whether `loc`, a declaration that V does not
 // resolve, is the declaration at `anchor` for another build: in code that V
 // builds only for some platforms, architectures, backends or defines, in the
-// same module, and of the same kind, with the same receiver for a method.
+// same module, and of the same kind and owning type for a member.
 fn (mut app App) is_other_build_variant(loc Location, anchor Location) bool {
 	if !app.in_conditional_code(loc) || !app.in_module_of(loc, anchor) {
 		return false
 	}
 	kind := app.declaration_kind(loc) or { return false }
 	anchor_kind := app.declaration_kind(anchor) or { return false }
-	return kind == anchor_kind
-		&& declaration_receiver(app.line_at(loc)) == declaration_receiver(app.line_at(anchor))
+	if kind != anchor_kind {
+		return false
+	}
+	if kind in [sym_kind_field, sym_kind_enum_member] {
+		owner := app.declaration_owner(loc) or { return false }
+		anchor_owner := app.declaration_owner(anchor) or { return false }
+		return owner == anchor_owner
+	}
+	return declaration_receiver(app.line_at(loc)) == declaration_receiver(app.line_at(anchor))
+}
+
+// declaration_owner names the enclosing type of a field or enum value. Its
+// kind is included because a struct and an enum do not share member variants.
+fn (mut app App) declaration_owner(loc Location) ?string {
+	for s in app.index_doc_symbols(loc.uri) {
+		for child in s.children {
+			if same_anchor_location(Location{ uri: loc.uri, range: child.selection_range }, loc) {
+				return '${s.kind}:${s.name}'
+			}
+		}
+	}
+	return none
 }
 
 // is_other_build_use reports whether `loc`, an occurrence of the name of
@@ -822,8 +842,18 @@ fn (mut app App) is_other_build_use(loc Location, target RenameTarget) bool {
 	if !app.in_conditional_code(loc) || !app.in_module_of(loc, target.anchor) {
 		return false
 	}
+	// An unresolved member needs its owning type; a bare name alone cannot
+	// distinguish a field key or enum value from one of another type.
+	if app.indexed_declaration_kind(target.anchor) in [sym_kind_method, sym_kind_field,
+		sym_kind_enum_member] {
+		return false
+	}
 	line := app.line_at(loc)
-	col := loc.range.start.char
+	col := app.client_col_to_byte_col(loc.uri, loc.range.start.line, loc.range.start.char)
+	end := int_min(col + target.symbol.len, line.len)
+	if line[end..].trim_left(' \t').starts_with(':') {
+		return false
+	}
 	if col > 0 && col <= line.len && line[col - 1] == `.` {
 		return false
 	}
@@ -1038,7 +1068,14 @@ fn (mut app App) struct_literal_field(word Location, symbol string, mut cache ma
 		type_line--
 	}
 	type_col := byte_to_encoded_col(lines[type_line], begin - starts[type_line], app.position_encoding)
-	struct_decl := app.resolve_symbol_anchor_cached(word.uri, type_line, type_col, mut cache)?
+	type_word := Location{
+		uri:   word.uri
+		range: LSPRange{ start: Position{ line: type_line, char: type_col } }
+	}
+	struct_decl := app.resolve_symbol_anchor_cached(word.uri, type_line, type_col, mut cache) or {
+		// A unique module type can still be identified in an inactive branch.
+		app.module_type_declaration(type_word, code[begin..end]) or { return none }
+	}
 	for s in app.index_doc_symbols(struct_decl.uri) {
 		if !same_anchor_location(Location{ uri: struct_decl.uri, range: s.selection_range }, struct_decl) {
 			continue
