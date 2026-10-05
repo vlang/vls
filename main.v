@@ -78,14 +78,37 @@ struct DiagCacheEntry {
 
 // Keep runtime-derived settings behind functions. Function-call module constants can crash V3's
 // parallel constant precomputation while compiling VLS.
-// find_v_dir resolves the V home directory by finding the V executable and
-// returning its parent directory.
+// find_v_dir resolves the V home directory, meaning the directory that holds `vlib`.
 fn find_v_dir() string {
-	v_exe := resolve_v_compiler_exe()
+	return find_v_dir_from_exe(resolve_v_compiler_exe())
+}
+
+// find_v_dir_from_exe locates the directory holding `vlib` for a given compiler
+// executable. Trusting the executable's own directory is not enough: V's Windows
+// launcher is a `.bat` wrapper in `.bin/` that forwards to the real `v.exe` one
+// level up, so the executable's directory has no `vlib` at all. Every vlib lookup
+// then silently resolves to nothing, which empties import completions and breaks
+// hover and go-to-definition for vlib symbols. Walk up until a directory that
+// actually contains `vlib` is found, so both layouts work.
+fn find_v_dir_from_exe(v_exe string) string {
 	if v_exe == 'v' || !os.is_file(v_exe) {
 		return ''
 	}
-	return os.dir(os.real_path(v_exe))
+	mut dir := os.dir(os.real_path(v_exe))
+	// A V checkout nests vlib directly under its root, so the root is at or above
+	// the executable. The bound stops a pathological layout from walking to the
+	// filesystem root one component at a time.
+	for _ in 0 .. 8 {
+		if os.is_dir(os.join_path(dir, 'vlib')) {
+			return dir
+		}
+		parent := os.dir(dir)
+		if parent == dir || parent == '' {
+			break
+		}
+		dir = parent
+	}
+	return ''
 }
 
 // logging_enabled gates all diagnostic logging. Logging is OFF by default:
