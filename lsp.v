@@ -39,7 +39,7 @@ struct Params {
 	position        Position
 	range           LSPRange
 	text_document   TextDocumentIdentifier @[json: 'textDocument']
-	new_name        string @[json: 'newName']
+	new_name        string                 @[json: 'newName']
 }
 
 // Optional JSON integers use i64 because V3 emits a generic option ABI for struct fields, while
@@ -118,7 +118,7 @@ type ResponseResult = string
 struct WorkspaceSymbol {
 	name           string
 	kind           int
-	tags           ?[]int @[json: 'tags']
+	tags           ?[]int  @[json: 'tags']
 	container_name ?string @[json: 'containerName']
 	location       Location
 }
@@ -176,8 +176,8 @@ struct LSPDiagnostic {
 	message  string
 	severity int
 	source   ?string @[json: 'source'] // diagnostic source identifier, e.g. 'vlang'
-	code     ?string @[json: 'code'] // optional diagnostic code, e.g. 'unused_variable'
-	tags     ?[]int @[json: 'tags'] // 1 = unnecessary, 2 = deprecated
+	code     ?string @[json: 'code']   // optional diagnostic code, e.g. 'unused_variable'
+	tags     ?[]int  @[json: 'tags']   // 1 = unnecessary, 2 = deprecated
 }
 
 // LSPRange represents a range in a text document.
@@ -188,17 +188,17 @@ struct LSPRange {
 
 // Detail represents a completion or symbol detail item.
 struct Detail {
-	kind               int // The type of item (e.g., Method, Function, Field)
+	kind               int    // The type of item (e.g., Method, Function, Field)
 	label              string // The name of the completion item
 	detail             string // Additional info like the function signature or return type
 	declaration        string // Full fn declaration, e.g. "fn greet(name string) string"
 	documentation      string // The documentation for the item
-	sort_text          ?string @[json: 'sortText'] // sort key, defaults to label
+	sort_text          ?string @[json: 'sortText']   // sort key, defaults to label
 	filter_text        ?string @[json: 'filterText'] // filter key, defaults to label
 	insert_text        ?string @[json: 'insertText']
-	insert_text_format ?i64 @[json: 'insertTextFormat'] // 1 for PlainText, 2 for Snippet
-	tags               ?[]int @[json: 'tags'] // 1 = deprecated
-	deprecated         ?bool @[json: 'deprecated'] // legacy deprecated flag
+	insert_text_format ?i64    @[json: 'insertTextFormat'] // 1 for PlainText, 2 for Snippet
+	tags               ?[]int  @[json: 'tags']             // 1 = deprecated
+	deprecated         ?bool   @[json: 'deprecated']       // legacy deprecated flag
 }
 
 // Capabilities describes the server's capabilities.
@@ -256,7 +256,7 @@ struct WorkspaceFoldersServerCapability {
 
 // WorkspaceCapability advertises workspace-level server features.
 struct WorkspaceCapability {
-	file_operations   ?WorkspaceFileOperations @[json: 'fileOperations']
+	file_operations   ?WorkspaceFileOperations          @[json: 'fileOperations']
 	workspace_folders ?WorkspaceFoldersServerCapability @[json: 'workspaceFolders']
 }
 
@@ -267,39 +267,39 @@ struct CodeLensOptions {
 
 // Capability lists supported LSP features for the server.
 struct Capability {
-	completion_provider                CompletionProvider @[json: 'completionProvider']
-	text_document_sync                 TextDocumentSyncOptions @[json: 'textDocumentSync']
-	signature_help_provider            SignatureHelpOptions @[json: 'signatureHelpProvider']
-	definition_provider                bool @[json: 'definitionProvider']
-	declaration_provider               bool @[json: 'declarationProvider']
-	type_definition_provider           bool @[json: 'typeDefinitionProvider']
-	implementation_provider            bool @[json: 'implementationProvider']
-	hover_provider                     bool @[json: 'hoverProvider']
-	references_provider                bool @[json: 'referencesProvider']
-	rename_provider                    RenameOptions @[json: 'renameProvider']
-	execute_command_provider           ?ExecuteCommandOptions @[json: 'executeCommandProvider']
-	document_formatting_provider       bool @[json: 'documentFormattingProvider']
-	document_range_formatting_provider bool @[json: 'documentRangeFormattingProvider']
-	document_symbol_provider           bool @[json: 'documentSymbolProvider']
-	workspace_symbol_provider          bool @[json: 'workspaceSymbolProvider']
-	inlay_hint_provider                bool @[json: 'inlayHintProvider']
-	code_action_provider               bool @[json: 'codeActionProvider']
-	code_lens_provider                 ?CodeLensOptions @[json: 'codeLensProvider']
-	inline_value_provider              bool @[json: 'inlineValueProvider']
-	linked_editing_range_provider      bool @[json: 'linkedEditingRangeProvider']
+	completion_provider                CompletionProvider       @[json: 'completionProvider']
+	text_document_sync                 TextDocumentSyncOptions  @[json: 'textDocumentSync']
+	signature_help_provider            SignatureHelpOptions     @[json: 'signatureHelpProvider']
+	definition_provider                bool                     @[json: 'definitionProvider']
+	declaration_provider               bool                     @[json: 'declarationProvider']
+	type_definition_provider           bool                     @[json: 'typeDefinitionProvider']
+	implementation_provider            bool                     @[json: 'implementationProvider']
+	hover_provider                     bool                     @[json: 'hoverProvider']
+	references_provider                bool                     @[json: 'referencesProvider']
+	rename_provider                    RenameOptions            @[json: 'renameProvider']
+	execute_command_provider           ?ExecuteCommandOptions   @[json: 'executeCommandProvider']
+	document_formatting_provider       bool                     @[json: 'documentFormattingProvider']
+	document_range_formatting_provider bool                     @[json: 'documentRangeFormattingProvider']
+	document_symbol_provider           bool                     @[json: 'documentSymbolProvider']
+	workspace_symbol_provider          bool                     @[json: 'workspaceSymbolProvider']
+	inlay_hint_provider                bool                     @[json: 'inlayHintProvider']
+	code_action_provider               bool                     @[json: 'codeActionProvider']
+	code_lens_provider                 ?CodeLensOptions         @[json: 'codeLensProvider']
+	inline_value_provider              bool                     @[json: 'inlineValueProvider']
+	linked_editing_range_provider      bool                     @[json: 'linkedEditingRangeProvider']
 	on_type_formatting_provider        ?OnTypeFormattingOptions @[json: 'documentOnTypeFormattingProvider']
-	semantic_tokens_provider           SemanticTokensOptions @[json: 'semanticTokensProvider']
-	folding_range_provider             bool @[json: 'foldingRangeProvider']
-	call_hierarchy_provider            bool @[json: 'callHierarchyProvider']
-	document_highlight_provider        bool @[json: 'documentHighlightProvider']
-	selection_range_provider           bool @[json: 'selectionRangeProvider']
+	semantic_tokens_provider           SemanticTokensOptions    @[json: 'semanticTokensProvider']
+	folding_range_provider             bool                     @[json: 'foldingRangeProvider']
+	call_hierarchy_provider            bool                     @[json: 'callHierarchyProvider']
+	document_highlight_provider        bool                     @[json: 'documentHighlightProvider']
+	selection_range_provider           bool                     @[json: 'selectionRangeProvider']
 	workspace                          WorkspaceCapability
 	position_encoding                  ?string @[json: 'positionEncoding']
 }
 
 // OnTypeFormattingOptions describes the triggers for on-type formatting.
 struct OnTypeFormattingOptions {
-	first_trigger_character string @[json: 'firstTriggerCharacter']
+	first_trigger_character string   @[json: 'firstTriggerCharacter']
 	more_trigger_characters []string @[json: 'moreTriggerCharacters']
 }
 
@@ -676,8 +676,8 @@ struct OnTypeFormattingParams {
 
 // InitializeParams holds client startup parameters relevant to server workspace scope.
 struct InitializeParams {
-	root_uri          ?string @[json: 'rootUri']
-	root_path         ?string @[json: 'rootPath']
+	root_uri          ?string            @[json: 'rootUri']
+	root_path         ?string            @[json: 'rootPath']
 	workspace_folders ?[]WorkspaceFolder @[json: 'workspaceFolders']
 	capabilities      ?ClientCapabilities
 }
@@ -706,7 +706,7 @@ struct SaveOptions {
 // TextDocumentSyncOptions describes document synchronization options.
 struct TextDocumentSyncOptions {
 	open_close           bool @[json: 'openClose']
-	change               int // 1 for Full, 2 for Incremental
+	change               int         // 1 for Full, 2 for Incremental
 	save                 SaveOptions // emit {"includeText":true} to receive text in didSave
 	will_save            bool @[json: 'willSave']
 	will_save_wait_until bool @[json: 'willSaveWaitUntil']
@@ -785,7 +785,7 @@ const inlay_hint_kind_type = 1
 struct InlayHint {
 	position     Position
 	label        string
-	kind         int @[json: 'kind']
+	kind         int  @[json: 'kind']
 	padding_left bool @[json: 'paddingLeft']
 }
 
@@ -964,7 +964,7 @@ struct DidOpenTextDocumentParams {
 // DidChangeTextDocumentParams for didChange
 struct DidChangeTextDocumentParams {
 	text_document   VersionedTextDocumentIdentifier @[json: 'textDocument']
-	content_changes []ContentChange @[json: 'contentChanges']
+	content_changes []ContentChange                 @[json: 'contentChanges']
 }
 
 // DidCloseTextDocumentParams for didClose
@@ -1007,7 +1007,7 @@ struct RenameParams {
 // FormattingOptions carries client formatting preferences (LSP §3.17).
 // VLS ignores these and always delegates to `v fmt`.
 struct FormattingOptions {
-	tab_size      int @[json: 'tabSize']
+	tab_size      int  @[json: 'tabSize']
 	insert_spaces bool @[json: 'insertSpaces']
 }
 

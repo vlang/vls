@@ -56,9 +56,9 @@ mut:
 
 fn new_diagnostics_scheduler() &DiagnosticsScheduler {
 	return &DiagnosticsScheduler{
-		generations: map[string]u64{}
+		generations:         map[string]u64{}
 		project_generations: map[string]u64{}
-		pending_jobs: map[string]DiagnosticsJob{}
+		pending_jobs:        map[string]DiagnosticsJob{}
 	}
 }
 
@@ -107,9 +107,9 @@ fn (mut scheduler DiagnosticsScheduler) begin_project_mutation(project_key strin
 	for affected_uri, _ in affected {
 		scheduler.generations[affected_uri] = scheduler.generations[affected_uri] + 1
 		tickets << DiagnosticsTicket{
-			uri: affected_uri
-			global_generation: scheduler.global_generation
-			generation: scheduler.generations[affected_uri]
+			uri:                affected_uri
+			global_generation:  scheduler.global_generation
+			generation:         scheduler.generations[affected_uri]
 			project_generation: project_generation
 		}
 	}
@@ -225,7 +225,7 @@ fn (mut app App) begin_diagnostics_project_schedule(uri string) DiagnosticsProje
 		project_key := app.generation_key(uri)
 		return DiagnosticsProjectMutation{
 			project_key: project_key
-			tickets: scheduler.begin_project_schedule(uri, project_key)
+			tickets:     scheduler.begin_project_schedule(uri, project_key)
 		}
 	}
 	return DiagnosticsProjectMutation{}
@@ -249,7 +249,7 @@ fn (mut app App) begin_diagnostics_project_mutation(uri string) DiagnosticsProje
 		project_key := app.generation_key(uri)
 		return DiagnosticsProjectMutation{
 			project_key: project_key
-			tickets: scheduler.begin_project_mutation(project_key, '')
+			tickets:     scheduler.begin_project_mutation(project_key, '')
 		}
 	}
 	return DiagnosticsProjectMutation{}
@@ -283,19 +283,19 @@ fn (mut app App) enqueue_diagnostics_tickets(mut scheduler DiagnosticsScheduler,
 			version = current_version
 		}
 		job := DiagnosticsJob{
-			uri: ticket.uri
-			content: job_content
-			version: version
-			project_key: project_key
-			project_generation: ticket.project_generation
-			position_encoding: app.position_encoding
-			open_files: app.open_files.clone()
+			uri:                 ticket.uri
+			content:             job_content
+			version:             version
+			project_key:         project_key
+			project_generation:  ticket.project_generation
+			position_encoding:   app.position_encoding
+			open_files:          app.open_files.clone()
 			project_generations: app.project_generations.clone()
-			write_mutex: app.write_mutex
-			tcp_conn: app.tcp_conn
-			global_generation: ticket.global_generation
-			generation: ticket.generation
-			ready_at: ready_at
+			write_mutex:         app.write_mutex
+			tcp_conn:            app.tcp_conn
+			global_generation:   ticket.global_generation
+			generation:          ticket.generation
+			ready_at:            ready_at
 		}
 		if scheduler.enqueue(job) {
 			should_start = true
@@ -346,16 +346,16 @@ fn run_diagnostics_job(mut scheduler DiagnosticsScheduler, job DiagnosticsJob) {
 		versions[job.uri] = version
 	}
 	mut worker := App{
-		text: job.content
-		open_files: job.open_files
+		text:                job.content
+		open_files:          job.open_files
 		open_files_versions: versions
-		temp_dir: temp_dir
+		temp_dir:            temp_dir
 		diagnostics_enabled: true
-		diag_cache: map[string]DiagCacheEntry{}
+		diag_cache:          map[string]DiagCacheEntry{}
 		project_generations: job.project_generations
-		position_encoding: job.position_encoding
-		write_mutex: job.write_mutex
-		tcp_conn: job.tcp_conn
+		position_encoding:   job.position_encoding
+		write_mutex:         job.write_mutex
+		tcp_conn:            job.tcp_conn
 	}
 	notification := worker.build_diagnostics_notification(job.uri, job.content)
 	scheduler.publish_if_current(mut worker, job, notification)
