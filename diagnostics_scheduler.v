@@ -7,10 +7,12 @@ import os
 import sync
 import time
 
-// Wait until typing pauses before starting a compiler process. Completion requests
-// can then overtake diagnostics instead of sitting behind a compile on every key.
-const diagnostics_debounce_ms = 300
-const diagnostics_worker_poll = 25 * time.millisecond
+// Wait until typing pauses before starting a check. Completion requests can then
+// overtake diagnostics instead of sitting behind a compile on every key. A check
+// answered by a diagnostics server takes a fraction of a one-shot run, so the
+// pause can be short, and the worker looks for ready jobs often.
+const diagnostics_debounce_ms = 25
+const diagnostics_worker_poll = 5 * time.millisecond
 
 struct DiagnosticsJob {
 	uri                 string
@@ -49,9 +51,17 @@ mut:
 	global_generation   u64
 	pending_jobs        map[string]DiagnosticsJob
 	worker_running      bool
+	worker_started      bool
+	worker_done         chan bool
+	stopped             bool
 	active_uri          string
 	active_project_key  string
 	active_generation   u64
+	// The open files the last check of each program answered for, by program
+	// directory.
+	program_members map[string][]string
+	// The diagnostics servers outlive the worker, which exits when idle.
+	servers &DiagnosticsServerPool = new_diagnostics_server_pool()
 }
 
 fn new_diagnostics_scheduler() &DiagnosticsScheduler {
@@ -74,12 +84,13 @@ fn (mut scheduler DiagnosticsScheduler) next_generation(uri string) (u64, u64) {
 // begin_project_schedule invalidates jobs whose snapshots include an older
 // buffer from the same project, then returns tickets for replacement jobs.
 fn (mut scheduler DiagnosticsScheduler) begin_project_schedule(uri string, project_key string) []DiagnosticsTicket {
-	return scheduler.begin_project_mutation(project_key, uri)
+	return scheduler.begin_project_mutation(project_key, uri, [])
 }
 
 // begin_project_mutation invalidates pending and active jobs in a project. A
-// non-empty requested_uri also schedules diagnostics for that document.
-fn (mut scheduler DiagnosticsScheduler) begin_project_mutation(project_key string, requested_uri string) []DiagnosticsTicket {
+// non-empty requested_uri also schedules diagnostics for that document, and
+// `others` for documents the mutation can change the diagnostics of.
+fn (mut scheduler DiagnosticsScheduler) begin_project_mutation(project_key string, requested_uri string, others []string) []DiagnosticsTicket {
 	scheduler.mutex.lock()
 	defer {
 		scheduler.mutex.unlock()
@@ -87,6 +98,9 @@ fn (mut scheduler DiagnosticsScheduler) begin_project_mutation(project_key strin
 	mut affected := map[string]bool{}
 	if requested_uri != '' {
 		affected[requested_uri] = true
+	}
+	for other in others {
+		affected[other] = true
 	}
 	mut pending_uris := []string{}
 	for pending_uri, job in scheduler.pending_jobs {
@@ -149,8 +163,15 @@ fn (mut scheduler DiagnosticsScheduler) enqueue(job DiagnosticsJob) bool {
 	defer {
 		scheduler.mutex.unlock()
 	}
+	if scheduler.stopped {
+		return false
+	}
 	scheduler.pending_jobs[job.uri] = job
 	should_start := !scheduler.worker_running
+	if should_start {
+		scheduler.worker_started = true
+		scheduler.worker_done = chan bool{}
+	}
 	scheduler.worker_running = true
 	return should_start
 }
@@ -212,6 +233,22 @@ fn (mut scheduler DiagnosticsScheduler) cancel_all() {
 	scheduler.mutex.unlock()
 }
 
+// stop_and_wait cancels the session check and joins its compiler work.
+fn (mut scheduler DiagnosticsScheduler) stop_and_wait() {
+	scheduler.mutex.lock()
+	scheduler.stopped = true
+	scheduler.global_generation++
+	scheduler.pending_jobs.clear()
+	started := scheduler.worker_started
+	done := scheduler.worker_done
+	scheduler.mutex.unlock()
+	scheduler.servers.stop_all()
+	if started {
+		_ := <-done or {}
+	}
+	scheduler.servers.wait_closed()
+}
+
 fn (mut app App) schedule_diagnostics(uri string, content string) bool {
 	mutation := app.begin_diagnostics_project_schedule(uri)
 	return app.finish_diagnostics_project_schedule(mutation, uri, content)
@@ -249,10 +286,30 @@ fn (mut app App) begin_diagnostics_project_mutation(uri string) DiagnosticsProje
 		project_key := app.generation_key(uri)
 		return DiagnosticsProjectMutation{
 			project_key: project_key
-			tickets:     scheduler.begin_project_mutation(project_key, '')
+			tickets:     scheduler.begin_project_mutation(project_key, '', app.open_files_affected_by(uri,
+				project_key))
 		}
 	}
 	return DiagnosticsProjectMutation{}
+}
+
+// open_files_affected_by returns the other open files whose diagnostics a change
+// to the file at `uri` can change without them changing: those of its project,
+// and those of any program whose directory holds it, since creating, deleting or
+// renaming a file there decides whether an import resolves.
+fn (app &App) open_files_affected_by(uri string, project_key string) []string {
+	changed := normalize_overlay_path(uri_to_path(uri))
+	mut affected := []string{}
+	for open_uri, _ in app.open_files {
+		if open_uri == uri {
+			continue
+		}
+		key := app.generation_key(open_uri)
+		if key == project_key || path_is_within(changed, normalize_overlay_path(key)) {
+			affected << open_uri
+		}
+	}
+	return affected
 }
 
 fn (mut app App) finish_diagnostics_project_mutation(mutation DiagnosticsProjectMutation, excluded_uri string) {
@@ -319,6 +376,12 @@ fn (mut app App) cancel_all_scheduled_diagnostics() {
 }
 
 fn run_diagnostics_worker(mut scheduler DiagnosticsScheduler) {
+	scheduler.mutex.lock()
+	done := scheduler.worker_done
+	scheduler.mutex.unlock()
+	defer {
+		done.close()
+	}
 	for {
 		time.sleep(diagnostics_worker_poll)
 		jobs, should_stop := scheduler.take_ready_jobs(time.now().unix_milli())
@@ -346,19 +409,60 @@ fn run_diagnostics_job(mut scheduler DiagnosticsScheduler, job DiagnosticsJob) {
 		versions[job.uri] = version
 	}
 	mut worker := App{
-		text:                job.content
-		open_files:          job.open_files
-		open_files_versions: versions
-		temp_dir:            temp_dir
-		diagnostics_enabled: true
-		diag_cache:          map[string]DiagCacheEntry{}
-		project_generations: job.project_generations
-		position_encoding:   job.position_encoding
-		write_mutex:         job.write_mutex
-		tcp_conn:            job.tcp_conn
+		text:                  job.content
+		open_files:            job.open_files
+		open_files_versions:   versions
+		temp_dir:              temp_dir
+		diagnostics_enabled:   true
+		diag_cache:            map[string]DiagCacheEntry{}
+		project_generations:   job.project_generations
+		position_encoding:     job.position_encoding
+		write_mutex:           job.write_mutex
+		tcp_conn:              job.tcp_conn
+		diagnostics_servers:   scheduler.servers
+		// A change that arrives while this check runs stops it: its answer would
+		// be stale, and the newer check can start at once.
+		diagnostics_cancelled: fn [mut scheduler, job] () bool {
+			return !scheduler.is_job_current(job)
+		}
 	}
 	notification := worker.build_diagnostics_notification(job.uri, job.content)
-	scheduler.publish_if_current(mut worker, job, notification)
+	if !scheduler.publish_if_current(mut worker, job, notification) {
+		return
+	}
+	// The same check found the diagnostics of the program's other open files: a
+	// change in one file shows in the others without checking them again.
+	for other_uri, errors in worker.program_errors {
+		other_content := job.open_files[other_uri] or { continue }
+		other := worker.diagnostics_notification_for(other_uri, other_content, errors)
+		scheduler.publish_if_current(mut worker, job, other)
+	}
+	if worker.program_dir_checked == '' {
+		return
+	}
+	// A file that the last check of this program answered for, and this one does
+	// not, left the program, as a module does when the program stops importing
+	// it: nothing else checks it again, and it would keep what the program said.
+	mut members := worker.program_errors.keys()
+	members << job.uri
+	for other_uri in scheduler.swap_program_members(worker.program_dir_checked, members) {
+		other_content := job.open_files[other_uri] or { continue }
+		other := worker.build_diagnostics_notification(other_uri, other_content)
+		scheduler.publish_if_current(mut worker, job, other)
+	}
+}
+
+// swap_program_members records `members`, the open files a check of the program
+// in `program_dir` answered for, and returns those the previous check of that
+// program answered for and this one does not.
+fn (mut scheduler DiagnosticsScheduler) swap_program_members(program_dir string, members []string) []string {
+	scheduler.mutex.lock()
+	defer {
+		scheduler.mutex.unlock()
+	}
+	previous := scheduler.program_members[program_dir] or { []string{} }
+	scheduler.program_members[program_dir] = members
+	return previous.filter(it !in members)
 }
 
 // publish_if_current keeps validation and the transport write atomic with

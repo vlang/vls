@@ -454,9 +454,9 @@ fn identifier_before_dot(line string, dot int) string {
 }
 
 // tokenize_v_string scans the string literal whose quote is at `line[start]` and
-// returns the column after it. Only its literal parts are string tokens:
-// `${expr}` is tokenized as code and `$name` gets no token, so the editor colors
-// both as the code they are instead of as text.
+// returns the column after it. Only its literal parts are string tokens: a
+// `${expr}` is tokenized as the code it is. An unbraced `$name` is text, since V
+// interpolates only `${}`, so it stays in the string token.
 fn tokenize_v_string(line string, start int, to int, line_idx int, mut state TokenizeState, mut tokens []SemToken) int {
 	quote := line[start]
 	mut segment_start := start
@@ -480,16 +480,6 @@ fn tokenize_v_string(line string, start int, to int, line_idx int, mut state Tok
 			append_string_token(mut tokens, line_idx, segment_start, col)
 			tokenize_v_code(line, col + 2, close, line_idx, mut state, mut tokens)
 			col = close + 1
-			segment_start = col
-			continue
-		}
-		if ch == `$` && col + 1 < to && line[col + 1] in identifier_start_chars {
-			append_string_token(mut tokens, line_idx, segment_start, col)
-			col++
-			for col < to && (line[col] in identifier_chars
-				|| (line[col] == `.` && col + 1 < to && line[col + 1] in identifier_start_chars)) {
-				col++
-			}
 			segment_start = col
 			continue
 		}
