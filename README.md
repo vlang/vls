@@ -16,6 +16,14 @@ Otherwise, you can set the path to the vls binary in your editor's settings.
 
 - [Zed](#zed)
 
+- [Kate](#kate)
+
+- [Neovim](#neovim)
+
+- [Emacs](#emacs)
+
+- [Helix](#helix)
+
 [Other editor?](EDITORS.md)
 
 ### Sublime Text
@@ -94,15 +102,21 @@ https://github.com/user-attachments/assets/fb4ee6ff-4765-46b7-a21e-267691253d8e
 
 ### Zed
 
-> NOTE: the Zed editor lacks first-party support for the V programming language.
-
 1. Build VLS with `v .` and place the resulting `vls` binary in your `PATH`.
 2. Open `Zed > Open Settings File` and add this to your settings file:
 
 ```json
 {
+  "lsp": {
+    "vls": {
+      "binary": {
+        "path": "vls"
+      }
+    }
+  },
   "languages": {
     "V": {
+      "language_servers": ["vls"],
       "formatter": {
         "external": {
           "command": "vls",
@@ -118,8 +132,16 @@ or alternatively if the `vls` binary is NOT in your `PATH`:
 
 ```json
 {
+  "lsp": {
+    "vls": {
+      "binary": {
+        "path": "/absolute/path/to/vls"
+      }
+    }
+  },
   "languages": {
     "V": {
+      "language_servers": ["vls"],
       "formatter": {
         "external": {
           "command": "/absolute/path/to/vls",
@@ -129,4 +151,100 @@ or alternatively if the `vls` binary is NOT in your `PATH`:
     }
   }
 }
+```
+
+### Kate
+
+1. Build VLS with `v .` and place the resulting `vls` binary in your `PATH`.
+2. Open `Settings > Configure Kate... > LSP Client > User Server Settings`.
+3. Add this to your settings file:
+
+```json
+{
+    "servers": {
+        "v": {
+            "command": ["vls"],
+            "highlightingModeRegex": "^V$"
+        }
+    }
+}
+```
+
+or alternatively if the `vls` binary is NOT in your `PATH`:
+
+```json
+{
+    "servers": {
+        "v": {
+            "command": ["/absolute/path/to/vls"],
+            "highlightingModeRegex": "^V$"
+        }
+    }
+}
+```
+
+4. When you first open a V source file, a popup will appear asking whether you want to start the LSP. Click `Yes`, and VLS will be started and added to the allowed servers list.
+
+### Neovim
+
+1. Build VLS with `v .` and place the resulting `vls` binary in your `PATH`.
+2. Add this to your `init.lua`:
+
+```lua
+vim.lsp.config('vls', {
+  cmd = {'vls'},
+  filetypes = {'v'},
+})
+```
+
+or if the `vls` binary is NOT in your `PATH`:
+
+```lua
+vim.lsp.config('vls', {
+  cmd = {'/absolute/path/to/vls'},
+  filetypes = {'v'},
+})
+```
+
+### Emacs
+
+1. Build VLS with `v .` and place the resulting `vls` binary in your `PATH`.
+2. Install [eglot](https://github.com/joaotavora/eglot) (built into Emacs 29+).
+3. Add this to your Emacs configuration:
+
+```elisp
+(add-to-list 'eglot-server-programs
+             '(v-mode . ("vls")))
+```
+
+or if the `vls` binary is NOT in your `PATH`:
+
+```elisp
+(add-to-list 'eglot-server-programs
+             '(v-mode . ("/absolute/path/to/vls")))
+```
+
+### Helix
+
+1. Build VLS with `v .` and place the resulting `vls` binary in your `PATH`.
+2. Add this to your `languages.toml`:
+
+```toml
+[language-server.vls]
+command = "vls"
+
+[[language]]
+name = "v"
+language-servers = ["vls"]
+```
+
+or if the `vls` binary is NOT in your `PATH`:
+
+```toml
+[language-server.vls]
+command = "/absolute/path/to/vls"
+
+[[language]]
+name = "v"
+language-servers = ["vls"]
 ```

@@ -785,6 +785,28 @@ fn (mut app App) operation_at_pos(method Method, request Request) Response {
 	// even when the compiler returned no completion payload for an incomplete file.
 	if method == .completion {
 		indexed := app.indexed_completions(path, params.position)
+		prefix := app.word_prefix_at_cursor(path, params.position)
+		if prefix != '' && indexed.items.len > 0 {
+			all_labels := indexed.items.map(it.label)
+			filtered := fuzzy_filter(prefix, all_labels)
+			mut filtered_set := map[string]bool{}
+			for label in filtered {
+				filtered_set[label] = true
+			}
+			mut filtered_items := []Detail{}
+			for item in indexed.items {
+				if item.label in filtered_set {
+					filtered_items << item
+				}
+			}
+			return Response{
+				id: request.id
+				result: CompletionList{
+					is_incomplete: true
+					items: filtered_items
+				}
+			}
+		}
 		if indexed.use_compiler {
 			compiler_result := app.run_v_line_info(.completion, path, '${line_nr}:${byte_col}')
 			compiler_items := if compiler_result is []Detail {
@@ -880,6 +902,24 @@ fn (mut app App) operation_at_pos(method Method, request Request) Response {
 		id: request.id
 		result: result
 	}
+}
+
+fn (app App) word_prefix_at_cursor(uri string, position Position) string {
+	content := app.open_files[uri] or { os.read_file(uri_to_path(uri)) or { '' } }
+	lines := content.split_into_lines()
+	if position.line < 0 || position.line >= lines.len {
+		return ''
+	}
+	line := lines[position.line]
+	col := position.char
+	if col <= 0 || col > line.len {
+		return ''
+	}
+	mut start := col
+	for start > 0 && is_ident_char(line[start - 1]) {
+		start--
+	}
+	return line[start..col]
 }
 
 fn merge_completion_items(indexed_items []Detail, compiler_items []Detail) []Detail {
@@ -3327,6 +3367,13 @@ fn (mut app App) callback_argument_completions(uri string, content string, lines
 fn (mut app App) indexed_receiver_completions(uri string, content string, receiver string, use_position Position) IndexedCompletionResult {
 	receiver_type := app.expression_type(uri, content, receiver, use_position)
 	if receiver_type == '' {
+		if module_path := parse_import_aliases(content)[receiver] {
+			module_result := app.get_imported_module_member_completions(module_path, os.dir(uri_to_path(uri)))
+			return IndexedCompletionResult{
+				items: module_result.items
+				use_compiler: module_result.use_compiler
+			}
+		}
 		return IndexedCompletionResult{
 			use_compiler: true
 		}
