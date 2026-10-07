@@ -2,6 +2,9 @@
 
 Build with: `v .`
 
+Check the installed version with `vls --version` or `vls version`. Both print `VLS 0.0.3`
+and exit without starting the server. LSP `initialize` reports the same version in `serverInfo`.
+
 Place the vls binary in your `PATH`. For example, on Linux you can place it in `/usr/local/bin`. On
 Windows, you can place it in a directory that is included in your `PATH`
 environment variable.
