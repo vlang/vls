@@ -12,9 +12,51 @@ import time
 fn resolve_v_compiler_exe() string {
 	configured := os.getenv('VLS_V_COMMAND').trim_space()
 	if configured != '' {
+		unwrapped := resolve_wrapper_target(configured)
+		if unwrapped != '' {
+			return unwrapped
+		}
 		return configured
 	}
-	return os.find_abs_path_of_executable('v') or { 'v' }
+	found := os.find_abs_path_of_executable('v') or { 'v' }
+	unwrapped := resolve_wrapper_target(found)
+	if unwrapped != '' {
+		return unwrapped
+	}
+	return found
+}
+
+// resolve_wrapper_target unwraps a Windows launcher shim (a `.bat`/`.cmd`
+// file that forwards to the real compiler executable) so compiler-relative
+// lookups such as the vlib directory resolve against the real installation
+// instead of the shim's directory. It returns '' when `candidate` is not a
+// wrapper or no usable target is found, in which case the caller keeps the
+// original path.
+fn resolve_wrapper_target(candidate string) string {
+	if candidate == '' || candidate == 'v' {
+		return ''
+	}
+	lower := candidate.to_lower()
+	if !(lower.ends_with('.bat') || lower.ends_with('.cmd')) {
+		return ''
+	}
+	content := os.read_file(candidate) or { return '' }
+	for line in content.split_into_lines() {
+		trimmed := line.trim_space()
+		if !trimmed.starts_with('"') {
+			continue
+		}
+		end := trimmed[1..].index('"') or { continue }
+		target := trimmed[1..end + 1]
+		target_lower := target.to_lower()
+		if target_lower.ends_with('.bat') || target_lower.ends_with('.cmd') {
+			continue
+		}
+		if os.is_file(target) {
+			return target
+		}
+	}
+	return ''
 }
 
 // compiler_is_available reports whether the V compiler was resolved to a real

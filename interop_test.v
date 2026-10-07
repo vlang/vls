@@ -38,6 +38,80 @@ fn test_resolve_v_compiler_exe_prefers_configured_command() {
 	assert resolve_v_compiler_exe() == configured
 }
 
+fn test_resolve_wrapper_target_ignores_plain_executable() {
+	assert resolve_wrapper_target('C:\\v\\v.exe') == ''
+	assert resolve_wrapper_target('/usr/local/bin/v') == ''
+	assert resolve_wrapper_target('') == ''
+	assert resolve_wrapper_target('v') == ''
+}
+
+fn test_resolve_wrapper_target_ignores_missing_wrapper() {
+	missing := os.join_path(os.temp_dir(), 'vls_no_such_wrapper_${os.getpid()}.bat')
+	assert resolve_wrapper_target(missing) == ''
+}
+
+fn test_resolve_wrapper_target_unwraps_bat_forwarding_to_exe() {
+	base := os.join_path(os.temp_dir(), 'vls_wrapper_probe_${os.getpid()}')
+	bin := os.join_path(base, '.bin')
+	interop_test_must_mkdir_all(bin)
+	defer {
+		os.rmdir_all(base) or {}
+	}
+	target := os.join_path(base, 'v.exe')
+	interop_test_must_write_file(target, '')
+	wrapper := os.join_path(bin, 'v.bat')
+	interop_test_must_write_file(wrapper, '@echo off\n"${target}" %*\n')
+	assert resolve_wrapper_target(wrapper) == target
+}
+
+fn test_resolve_wrapper_target_ignores_bat_without_quoted_target() {
+	base := os.join_path(os.temp_dir(), 'vls_wrapper_bare_${os.getpid()}')
+	interop_test_must_mkdir_all(base)
+	defer {
+		os.rmdir_all(base) or {}
+	}
+	wrapper := os.join_path(base, 'v.bat')
+	interop_test_must_write_file(wrapper, '@echo off\nv.exe %*\n')
+	assert resolve_wrapper_target(wrapper) == ''
+}
+
+fn test_resolve_wrapper_target_ignores_wrapper_chain() {
+	base := os.join_path(os.temp_dir(), 'vls_wrapper_chain_${os.getpid()}')
+	interop_test_must_mkdir_all(base)
+	defer {
+		os.rmdir_all(base) or {}
+	}
+	inner := os.join_path(base, 'inner.bat')
+	interop_test_must_write_file(inner, '@echo off\necho hi\n')
+	outer := os.join_path(base, 'outer.bat')
+	interop_test_must_write_file(outer, '@echo off\n"${inner}" %*\n')
+	assert resolve_wrapper_target(outer) == ''
+}
+
+fn test_resolve_v_compiler_exe_unwraps_configured_wrapper() {
+	old_command := os.getenv('VLS_V_COMMAND')
+	defer {
+		if old_command == '' {
+			os.unsetenv('VLS_V_COMMAND')
+		} else {
+			os.setenv('VLS_V_COMMAND', old_command, true)
+		}
+	}
+	base := os.join_path(os.temp_dir(), 'vls_wrapper_env_${os.getpid()}')
+	bin := os.join_path(base, '.bin')
+	interop_test_must_mkdir_all(bin)
+	defer {
+		os.rmdir_all(base) or {}
+	}
+	target := os.join_path(base, 'v.exe')
+	interop_test_must_write_file(target, '')
+	wrapper := os.join_path(bin, 'v.bat')
+	interop_test_must_write_file(wrapper, '@echo off\n"${target}" %*\n')
+	os.setenv('VLS_V_COMMAND', wrapper, true)
+	assert resolve_v_compiler_exe() == target
+	assert find_v_dir() == os.dir(os.real_path(target))
+}
+
 // --- uri_to_path tests ---
 
 fn test_uri_to_path_unix_style() {

@@ -59,9 +59,9 @@ fn create_integration_test_env() (&App, string) {
 	integration_test_must_mkdir_all(project_dir)
 
 	app := &App{
-		text: ''
+		text:       ''
 		open_files: map[string]string{}
-		temp_dir: temp_dir
+		temp_dir:   temp_dir
 	}
 	return app, project_dir
 }
