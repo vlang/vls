@@ -14,7 +14,7 @@ fn (mut app App) handle_prepare_call_hierarchy(request Request) Response {
 			log('Failed to decode PrepareCallHierarchyParams: ${err}')
 		}
 		return Response{
-			id: request.id
+			id:     request.id
 			result: 'null'
 		}
 	}
@@ -23,7 +23,7 @@ fn (mut app App) handle_prepare_call_hierarchy(request Request) Response {
 	lines := content.split_into_lines()
 	if params.position.line < 0 || params.position.line >= lines.len {
 		return Response{
-			id: request.id
+			id:     request.id
 			result: 'null'
 		}
 	}
@@ -31,14 +31,14 @@ fn (mut app App) handle_prepare_call_hierarchy(request Request) Response {
 	start, end := find_word_bounds_at_col(line_text, params.position.char, app.position_encoding)
 	if start < 0 || end <= start {
 		return Response{
-			id: request.id
+			id:     request.id
 			result: 'null'
 		}
 	}
 	word := substr_by_char_bounds(line_text, start, end, app.position_encoding)
 	if word == '' {
 		return Response{
-			id: request.id
+			id:     request.id
 			result: 'null'
 		}
 	}
@@ -51,12 +51,12 @@ fn (mut app App) handle_prepare_call_hierarchy(request Request) Response {
 	}
 	if item.name == '' {
 		return Response{
-			id: request.id
+			id:     request.id
 			result: 'null'
 		}
 	}
 	return Response{
-		id: request.id
+		id:     request.id
 		result: [item]
 	}
 }
@@ -70,14 +70,14 @@ fn (mut app App) handle_call_hierarchy_incoming(request Request) Response {
 			log('Failed to decode CallHierarchyIncomingCallsParams: ${err}')
 		}
 		return Response{
-			id: request.id
+			id:     request.id
 			result: []CallHierarchyIncomingCall{}
 		}
 	}
 	fn_name := extract_simple_fn_name(params.item.name)
 	if fn_name == '' {
 		return Response{
-			id: request.id
+			id:     request.id
 			result: []CallHierarchyIncomingCall{}
 		}
 	}
@@ -90,7 +90,7 @@ fn (mut app App) handle_call_hierarchy_incoming(request Request) Response {
 	for uri, fc in app.open_files {
 		if request.id in app.cancelled_requests {
 			return Response{
-				id: request.id
+				id:     request.id
 				result: results
 			}
 		}
@@ -108,7 +108,7 @@ fn (mut app App) handle_call_hierarchy_incoming(request Request) Response {
 		for f in os.walk_ext(dir, '.v') {
 			if request.id in app.cancelled_requests {
 				return Response{
-					id: request.id
+					id:     request.id
 					result: results
 				}
 			}
@@ -125,7 +125,7 @@ fn (mut app App) handle_call_hierarchy_incoming(request Request) Response {
 		}
 	}
 	return Response{
-		id: request.id
+		id:     request.id
 		result: results
 	}
 }
@@ -138,7 +138,7 @@ fn (mut app App) handle_call_hierarchy_outgoing(request Request) Response {
 			log('Failed to decode CallHierarchyOutgoingCallsParams: ${err}')
 		}
 		return Response{
-			id: request.id
+			id:     request.id
 			result: []CallHierarchyOutgoingCall{}
 		}
 	}
@@ -174,12 +174,12 @@ fn (mut app App) handle_call_hierarchy_outgoing(request Request) Response {
 			continue
 		}
 		results << CallHierarchyOutgoingCall{
-			to: callee
+			to:          callee
 			from_ranges: call_ranges
 		}
 	}
 	return Response{
-		id: request.id
+		id:     request.id
 		result: results
 	}
 }
@@ -190,11 +190,13 @@ fn (mut app App) handle_call_hierarchy_outgoing(request Request) Response {
 // e.g. "(mut App) foo" → "foo", "foo" → "foo".
 fn extract_simple_fn_name(full_name string) string {
 	trimmed := full_name.trim_space()
+	// A generic function is named without its type parameters where it is
+	// used: `first` for `first[T]`.
 	if trimmed.starts_with('(') {
 		close_idx := trimmed.index(')') or { return '' }
-		return trimmed[close_idx + 1..].trim_space()
+		return trimmed[close_idx + 1..].trim_space().all_before('[')
 	}
-	return trimmed
+	return trimmed.all_before('[')
 }
 
 // find_fn_in_content searches `content` for a function/method whose simple
@@ -208,10 +210,10 @@ fn find_fn_in_content(fn_name string, content string, uri string, enc PositionEn
 		}
 		if extract_simple_fn_name(sym.name) == fn_name {
 			return CallHierarchyItem{
-				name: sym.name
-				kind: sym.kind
-				uri: uri
-				range: sym.range
+				name:            sym.name
+				kind:            sym.kind
+				uri:             uri
+				range:           sym.range
 				selection_range: sym.selection_range
 			}
 		}
@@ -235,10 +237,10 @@ fn (mut app App) find_fn_declaration(fn_name string, search_dirs []string, inclu
 	for dirs in dir_passes {
 		if uri, sym := app.find_indexed_fn(fn_name, include_tests, dirs) {
 			return CallHierarchyItem{
-				name: sym.name
-				kind: sym.kind
-				uri: uri
-				range: sym.range
+				name:            sym.name
+				kind:            sym.kind
+				uri:             uri
+				range:           sym.range
 				selection_range: sym.selection_range
 			}
 		}
@@ -305,7 +307,7 @@ fn scan_for_callers(fn_name string, file_uri string, file_content string, enc Po
 						line: li
 						char: start_char
 					}
-					end: Position{
+					end:   Position{
 						line: li
 						char: end_char
 					}
@@ -315,11 +317,11 @@ fn scan_for_callers(fn_name string, file_uri string, file_content string, enc Po
 		}
 		if call_ranges.len > 0 {
 			results << CallHierarchyIncomingCall{
-				from: CallHierarchyItem{
-					name: sym.name
-					kind: sym.kind
-					uri: file_uri
-					range: sym.range
+				from:        CallHierarchyItem{
+					name:            sym.name
+					kind:            sym.kind
+					uri:             file_uri
+					range:           sym.range
 					selection_range: sym.selection_range
 				}
 				from_ranges: call_ranges
@@ -380,7 +382,7 @@ fn find_fn_calls_in_line(line string, line_idx int, enc PositionEncoding, mut ca
 							line: line_idx
 							char: start_char
 						}
-						end: Position{
+						end:   Position{
 							line: line_idx
 							char: end_char
 						}

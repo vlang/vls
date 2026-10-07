@@ -20,11 +20,11 @@ import time
 struct IndexEntry {
 	fingerprint                        int // content.hash(); used to skip re-parsing unchanged files
 	module_name                        string
-	doc_symbols                        []DocumentSymbol // hierarchical symbols (as parse_document_symbols returns)
+	doc_symbols                        []DocumentSymbol  // hierarchical symbols (as parse_document_symbols returns)
 	docs                               map[string]string // simple symbol name -> leading vdoc comment
-	fn_completions                     []Detail // free-function completion items for this file
-	module_completions                 []Detail // all same-module top-level completion items
-	public_module_completions          []Detail // exported completion items for imported modules
+	fn_completions                     []Detail          // free-function completion items for this file
+	module_completions                 []Detail          // all same-module top-level completion items
+	public_module_completions          []Detail          // exported completion items for imported modules
 	has_conditional_module_completions bool
 	has_conditional_public_completions bool
 	conditional_lines                  []bool // declarations guarded by $if/$else or @[if]
@@ -42,6 +42,11 @@ fn build_index_entry(content string, enc PositionEncoding) IndexEntry {
 	public_module_completion_index := parse_module_member_completions_from_lines(code_lines, conditional_lines, true)
 	mut docs := map[string]string{}
 	for sym in doc_syms {
+		// A method is documented where its value's type is known, never by its
+		// name alone (see find_bare_declaration_line).
+		if sym.kind == sym_kind_method {
+			continue
+		}
 		// Each symbol's declaration line is range.start.line; read its vdoc.
 		doc := extract_doc_comment(lines, sym.range.start.line)
 		if doc != '' {
@@ -52,16 +57,16 @@ fn build_index_entry(content string, enc PositionEncoding) IndexEntry {
 		}
 	}
 	return IndexEntry{
-		fingerprint: content.hash()
-		module_name: get_module_name(content)
-		doc_symbols: doc_syms
-		docs: docs
-		fn_completions: module_completion_index.items.filter(it.kind == 3)
-		module_completions: module_completion_index.items
-		public_module_completions: public_module_completion_index.items
+		fingerprint:                        content.hash()
+		module_name:                        get_module_name(content)
+		doc_symbols:                        doc_syms
+		docs:                               docs
+		fn_completions:                     module_completion_index.items.filter(it.kind == 3)
+		module_completions:                 module_completion_index.items
+		public_module_completions:          public_module_completion_index.items
 		has_conditional_module_completions: module_completion_index.has_conditional
 		has_conditional_public_completions: public_module_completion_index.has_conditional
-		conditional_lines: conditional_lines
+		conditional_lines:                  conditional_lines
 	}
 }
 
@@ -75,12 +80,12 @@ fn encode_document_symbols(syms []DocumentSymbol, lines []string, enc PositionEn
 	mut out := []DocumentSymbol{cap: syms.len}
 	for sym in syms {
 		out << DocumentSymbol{
-			name: sym.name
-			kind: sym.kind
-			tags: sym.tags
-			range: encode_range_chars(sym.range, lines, enc)
+			name:            sym.name
+			kind:            sym.kind
+			tags:            sym.tags
+			range:           encode_range_chars(sym.range, lines, enc)
 			selection_range: encode_range_chars(sym.selection_range, lines, enc)
-			children: encode_document_symbols(sym.children, lines, enc)
+			children:        encode_document_symbols(sym.children, lines, enc)
 		}
 	}
 	return out
@@ -104,7 +109,7 @@ fn encode_range_chars(r LSPRange, lines []string, enc PositionEncoding) LSPRange
 			line: r.start.line
 			char: byte_to_encoded_col(start_line, r.start.char, enc)
 		}
-		end: Position{
+		end:   Position{
 			line: r.end.line
 			char: byte_to_encoded_col(end_line, r.end.char, enc)
 		}
@@ -156,9 +161,9 @@ fn add_identifier_occurrence(line_text string, line_idx int, start int, end int,
 	}
 	name := line_text[start..end]
 	occ[name] << TokenOccurrence{
-		line: line_idx
+		line:       line_idx
 		start_char: byte_to_encoded_col(line_text, start, enc)
-		end_char: byte_to_encoded_col(line_text, end, enc)
+		end_char:   byte_to_encoded_col(line_text, end, enc)
 	}
 }
 
@@ -305,7 +310,7 @@ fn (mut app App) occurrences_for(uri string) map[string][]TokenOccurrence {
 	occ := extract_identifier_occurrences(content, app.position_encoding)
 	app.ref_occurrences[uri] = OccEntry{
 		fingerprint: fp
-		occ: occ
+		occ:         occ
 	}
 	return occ
 }
@@ -494,17 +499,29 @@ fn find_project_root(dir string) string {
 // and known heavy directories and stopping once `index_max_files` is reached.
 // It returns false when a limit or filesystem error prevents a complete walk.
 fn collect_v_files(root string, mut acc []string) bool {
+	return collect_v_files_bounded(root, index_max_files, mut acc)
+}
+
+// collect_v_files_bounded stops at the caller's file limit, and at four times
+// that many directory entries so trees without V files are bounded too.
+fn collect_v_files_bounded(root string, max_files int, mut acc []string) bool {
 	mut visited := map[string]bool{}
 	canonical_root := os.real_path(root).replace('\\', '/')
-	return collect_v_files_rec(root, canonical_root, mut acc, mut visited)
+	mut entries_seen := IndexWalkBudget{}
+	return collect_v_files_rec(root, canonical_root, max_files, mut acc, mut visited, mut entries_seen)
+}
+
+struct IndexWalkBudget {
+mut:
+	entries int
 }
 
 // collect_v_files_rec is the recursive worker; `visited` holds canonical
 // directories and files already seen, so symlink cycles and file aliases cannot
 // cause infinite recursion or duplicate index entries. `canonical_root` bounds
 // the walk to the workspace: a resolved path that escapes it is skipped.
-fn collect_v_files_rec(dir string, canonical_root string, mut acc []string, mut visited map[string]bool) bool {
-	if acc.len >= index_max_files {
+fn collect_v_files_rec(dir string, canonical_root string, max_files int, mut acc []string, mut visited map[string]bool, mut entries_seen IndexWalkBudget) bool {
+	if acc.len >= max_files {
 		return false
 	}
 	real := os.real_path(dir).replace('\\', '/')
@@ -519,15 +536,19 @@ fn collect_v_files_rec(dir string, canonical_root string, mut acc []string, mut 
 	visited[real] = true
 	entries := os.ls(dir) or { return false }
 	for entry in entries {
-		if acc.len >= index_max_files {
+		if acc.len >= max_files {
 			return false
 		}
+		if entries_seen.entries >= max_files * 4 {
+			return false
+		}
+		entries_seen.entries++
 		full := os.join_path(dir, entry)
 		if os.is_dir(full) {
 			if entry.starts_with('.') || entry in index_excluded_dirs {
 				continue
 			}
-			if !collect_v_files_rec(full, canonical_root, mut acc, mut visited) {
+			if !collect_v_files_rec(full, canonical_root, max_files, mut acc, mut visited, mut entries_seen) {
 				return false
 			}
 		} else if entry.ends_with('.v') {
@@ -763,13 +784,13 @@ fn (app &App) index_scope_for_uri(uri string) IndexScope {
 	if project_root != '' && project_root != '/'
 		&& (workspace_root == '' || path_is_within(project_root, workspace_root)) {
 		return IndexScope{
-			dir: project_root
+			dir:       project_root
 			recursive: true
 		}
 	}
 	if workspace_root != '' {
 		return IndexScope{
-			dir: workspace_root
+			dir:       workspace_root
 			recursive: true
 		}
 	}

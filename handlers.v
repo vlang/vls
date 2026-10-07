@@ -8,17 +8,20 @@ import time
 import v.pref
 
 const v_keywords = ['asm', 'as', 'assert', 'atomic', 'break', 'const', 'continue', 'defer', 'dump',
-	'else', 'enum', 'false', 'fn', 'for', 'go', 'goto', 'if', 'ilike', 'implements', 'import', 'in',
-	'interface', 'is', 'isreftype', 'like', 'lock', 'match', 'module', 'mut', 'nil', 'none', 'or',
-	'pub', 'return', 'rlock', 'select', 'shared', 'sizeof', 'spawn', 'static', 'struct', 'true',
-	'type', 'typeof', 'union', 'unsafe', 'volatile']!
+	'else', 'enum', 'false', 'fn', 'for', 'go', 'goto', 'if', 'ilike', 'implements', 'import',
+	'in', 'interface', 'is', 'isreftype', 'like', 'lock', 'match', 'module', 'mut', 'nil', 'none',
+	'or', 'pub', 'return', 'rlock', 'select', 'shared', 'sizeof', 'spawn', 'static', 'struct',
+	'true', 'type', 'typeof', 'union', 'unsafe', 'volatile', '__global', '__offsetof', '_likely_',
+	'_unlikely_']!
 
-const v_builtins = ['close', 'copy', 'eprintln', 'eprint', 'error', 'error_with_code', 'exit',
-	'flush_stderr', 'flush_stdout', 'free', 'isnil', 'panic', 'print', 'println']!
+const v_builtins = ['copy', 'eprintln', 'eprint', 'error', 'error_with_code', 'exit', 'flush_stderr',
+	'flush_stdout', 'free', 'isnil', 'panic', 'print', 'print_backtrace', 'println', 'recover']!
 
-const v_builtin_types = ['any', 'array', 'bool', 'byte', 'byteptr', 'chan', 'char', 'charptr', 'f32',
-	'f64', 'i8', 'i16', 'i32', 'i64', 'int', 'isize', 'IError', 'map', 'rune', 'string', 'thread',
-	'u8', 'u16', 'u32', 'u64', 'usize', 'void', 'voidptr']!
+// v_builtin_types are the types V builds in: `i128` and `u128` since V's #28877,
+// and no `byte` since #29141.
+const v_builtin_types = ['any', 'array', 'bool', 'byteptr', 'chan', 'char', 'charptr', 'f32', 'f64',
+	'i8', 'i16', 'i32', 'i64', 'i128', 'int', 'isize', 'IError', 'map', 'rune', 'string', 'thread',
+	'u8', 'u16', 'u32', 'u64', 'u128', 'usize', 'void', 'voidptr']!
 
 struct IndexedCompletionResult {
 	items          []Detail
@@ -140,7 +143,7 @@ fn source_call_target(content string, cursor Position, enc PositionEncoding) ?So
 		name_start_in_line
 	}
 	return SourceCallTarget{
-		position: Position{
+		position:         Position{
 			line: target_line
 			char: byte_to_encoded_col(target_line_text, probe_byte, enc)
 		}
@@ -164,7 +167,18 @@ fn (app &App) source_declaration_at(location Location) string {
 	}
 	first_mask := v_source_code_mask(first_part)
 	if !source_declaration_opens_body(first_mask) {
-		return first_part
+		// A declaration without a body goes on over the lines that start with
+		// `|`: the variants of a sum type, as vfmt writes a long one, or the
+		// operands of an `|` written over several lines.
+		mut parts := [first_part]
+		for line in lines[start_line + 1..] {
+			part := line.trim_space()
+			if !part.starts_with('|') {
+				break
+			}
+			parts << part
+		}
+		return parts.join('\n')
 	}
 	starts := line_start_offsets(content)
 	source_mask := v_source_code_mask(content)
@@ -172,8 +186,20 @@ fn (app &App) source_declaration_at(location Location) string {
 	start_byte := starts[start_line]
 	end_byte := if end_line < starts.len { starts[end_line] } else { content.len }
 	mut header_end := end_byte
+	// A function without a body, as builtin declares the methods of arrays,
+	// ends with the line that closes its parameters.
+	mut depth := 0
 	for pos in start_byte .. end_byte {
-		if source_mask[pos] == `{` {
+		c := source_mask[pos]
+		if c == `{` && depth == 0 {
+			header_end = pos
+			break
+		}
+		if c in [`(`, `[`] {
+			depth++
+		} else if c in [`)`, `]`] && depth > 0 {
+			depth--
+		} else if c == `\n` && depth == 0 {
 			header_end = pos
 			break
 		}
@@ -351,8 +377,10 @@ fn signature_active_parameter(parameters []ParameterInformation, requested int) 
 // hover_with_written_declaration puts the declaration the source writes in place
 // of the one the compiler re-prints, and keeps the documentation the compiler
 // found. The compiler renders a declaration from its own types, so a function
-// type arrives without the names of its parameters.
-fn (mut app App) hover_with_written_declaration(uri string, position Position, result ResponseResult) ResponseResult {
+// type arrives without the names of its parameters. The declaration is the one
+// at `declared_at`, where the compiler says the name is declared, or where the
+// index finds it.
+fn (mut app App) hover_with_written_declaration(uri string, position Position, result ResponseResult, declared_at ?Location) ResponseResult {
 	if result !is Hover {
 		return result
 	}
@@ -366,22 +394,179 @@ fn (mut app App) hover_with_written_declaration(uri string, position Position, r
 	if word == '' || !printed.contains(word) {
 		return result
 	}
-	location := app.resolve_indexed_definition(uri, position) or { return result }
+	location := declared_at or { app.resolve_indexed_definition(uri, position) or { return result } }
+	// A local or a parameter is declared by a statement or by a signature,
+	// which say less of it than the compiler does.
+	if app.declares_local_at(location) {
+		return result
+	}
 	declaration := app.source_declaration_at(location)
 	if declaration == '' || !declaration.contains(word) {
 		return result
 	}
 	return Hover{
 		contents: MarkupContent{
-			kind: hover.contents.kind
+			kind:  hover.contents.kind
 			value: value[..body_start] + declaration + '\n' + value[body_start + close_offset..]
 		}
 	}
 }
 
+// hover_result answers a hover from the compiler: where the name under the
+// cursor is declared, and what the compiler says of it. A function, a method or
+// a method of an interface shows its declaration as the source writes it, with
+// the documentation written above it, the same where it is declared and where
+// it is used; anything else what the compiler says of it, with the
+// documentation of its own declaration. `line_info` asks the hover.
+fn (mut app App) hover_result(uri string, position Position, line_info string) ResponseResult {
+	real_path := uri_to_path(uri)
+	mut located := false
+	if answer := app.v3_hover(uri, real_path, line_info) {
+		if location := answer.declared_at {
+			located = true
+			if hover := app.function_declaration_hover(location) {
+				return hover
+			}
+			// A local or a parameter V3 knows no type of: nothing else can tell
+			// what it holds, and what declares it is a statement.
+			if answer.hover !is Hover && app.declares_local_at(location) {
+				return ResponseResult('null')
+			}
+		}
+		if answer.hover is Hover {
+			return app.hover_with_written_declaration(uri, position, answer.hover, answer.declared_at)
+		}
+	}
+	// V3 cannot tell, as while a file does not parse: the index says where a
+	// function is declared, and V1 what anything else is.
+	if !located {
+		if location := app.resolve_indexed_definition(uri, position) {
+			if hover := app.function_declaration_hover(location) {
+				return hover
+			}
+		}
+	}
+	result := if app.line_info_mode == .missing {
+		app.line_info_unavailable_result(.hover, uri, line_info)
+	} else {
+		app.run_v_line_info_once(.hover, uri, line_info, compilation_work_dir(normalize_overlay_path(real_path)))
+	}
+	return app.hover_with_written_declaration(uri, position, result, none)
+}
+
+// function_declaration_hover shows the function, the method or the method of an
+// interface declared at `location` as its declaration writes it, with the
+// documentation written above it: what a hover shows for its declaration and
+// for each of its uses. None when something else is declared there.
+fn (mut app App) function_declaration_hover(location Location) ?Hover {
+	content := app.index_source_for(location.uri) or { return none }
+	lines := content.split_into_lines()
+	line := location.range.start.line
+	if line < 0 || line >= lines.len {
+		return none
+	}
+	start := encoded_col_to_byte(lines[line], location.range.start.char, app.position_encoding)
+	if !declares_function_at(lines, line, start) {
+		return none
+	}
+	declaration := app.source_declaration_at(location)
+	if declaration == '' {
+		return none
+	}
+	doc := extract_doc_comment(lines, line)
+	return Hover{
+		contents: MarkupContent{
+			kind:  'markdown'
+			value: '```v\n${declaration}\n```' + if doc == '' { '' } else { '\n\n${doc}' }
+		}
+	}
+}
+
+// declares_function_at reports whether the name at byte `start` of line `line`
+// is the one that a function, a method or a method of an interface declares:
+// the name after `fn`, after the receiver or after the type of a static
+// method, followed by the parameters.
+fn declares_function_at(lines []string, line int, start int) bool {
+	text := lines[line]
+	if start < 0 || start >= text.len || !is_ident_start(text[start]) {
+		return false
+	}
+	mut end := start
+	for end < text.len && is_ident_char(text[end]) {
+		end++
+	}
+	mut after := text[end..].trim_left(' \t')
+	if after.starts_with('[') {
+		close := matching_delimiter(after, 0, `[`, `]`)
+		if close < 0 {
+			return false
+		}
+		after = after[close + 1..].trim_left(' \t')
+	}
+	if !after.starts_with('(') {
+		return false
+	}
+	mut head := text[..start].trim_space()
+	if head.starts_with('pub ') {
+		head = head[4..].trim_space()
+	}
+	if head == '' {
+		// A method of an interface is declared by its name alone.
+		return source_occurrence_is_interface_method_signature(lines, line, start, end)
+	}
+	return head == 'fn' || head.starts_with('fn ') || head.starts_with('fn(')
+}
+
+// declaration_doc is the documentation written above the declaration at
+// `location`. A local or a parameter has none: V documents neither, and a
+// comment of the body above one is not about it.
+fn (mut app App) declaration_doc(location Location) string {
+	if app.declares_local_at(location) {
+		return ''
+	}
+	content := app.index_source_for(location.uri) or { return '' }
+	lines := content.split_into_lines()
+	line := location.range.start.line
+	if line < 0 || line >= lines.len {
+		return ''
+	}
+	return extract_doc_comment(lines, line)
+}
+
+// declares_local_at reports whether `location` is where a local or a parameter
+// is declared: in a function, in its parameters or in its body, and not the
+// name the function declares. The nearest line from it up that starts a
+// declaration at the top level of the file starts a function.
+fn (mut app App) declares_local_at(location Location) bool {
+	content := app.index_source_for(location.uri) or { return false }
+	lines := content.split_into_lines()
+	line := location.range.start.line
+	if line < 0 || line >= lines.len {
+		return false
+	}
+	start := encoded_col_to_byte(lines[line], location.range.start.char, app.position_encoding)
+	if declares_function_at(lines, line, start) {
+		return false
+	}
+	for i := line; i >= 0; i-- {
+		text := lines[i]
+		// An attribute belongs to the declaration below it.
+		if text.starts_with('@[') || !top_level_starts.any(text.starts_with(it)) {
+			continue
+		}
+		return text.starts_with('fn ') || text.starts_with('pub fn ')
+	}
+	return false
+}
+
 fn (mut app App) source_hover_fallback(uri string, position Position) ?Hover {
 	location := app.resolve_indexed_definition(uri, position) or {
 		app.resolve_symbol_anchor(uri, position.line, position.char) or { return none }
+	}
+	// What declares a local or a parameter is a statement or a signature, not
+	// what it is.
+	if app.declares_local_at(location) {
+		return none
 	}
 	declaration := app.source_declaration_at(location)
 	if declaration == '' {
@@ -389,7 +574,7 @@ fn (mut app App) source_hover_fallback(uri string, position Position) ?Hover {
 	}
 	return Hover{
 		contents: MarkupContent{
-			kind: 'markdown'
+			kind:  'markdown'
 			value: '```v\n${declaration}\n```'
 		}
 	}
@@ -473,6 +658,13 @@ const max_declaration_expression_lines = 40
 // map literal, or a call). Every line loses its comment first, so a `//` in the
 // middle does not swallow the rest.
 fn declaration_expression(lines []string, start int, rhs string) string {
+	text, _ := declaration_expression_span(lines, start, rhs)
+	return text
+}
+
+// declaration_expression_span is declaration_expression with the line on which the
+// value ends.
+fn declaration_expression_span(lines []string, start int, rhs string) (string, int) {
 	first := without_trailing_comment(rhs)
 	mut parts := [first]
 	mut depth := bracket_depth(first)
@@ -483,7 +675,7 @@ fn declaration_expression(lines []string, start int, rhs string) string {
 		parts << part
 		line++
 	}
-	return parts.join(' ')
+	return parts.join(' '), line - 1
 }
 
 // bracket_depth reports how many brackets `text` leaves open, ignoring the ones
@@ -663,6 +855,9 @@ fn (mut app App) member_selector_hover(uri string, position Position) ?Hover {
 	if receiver == '' {
 		return none
 	}
+	if static_member := app.language_static_hover(uri, content, receiver, name) {
+		return static_member
+	}
 	typ := app.expression_type(uri, content, receiver, position)
 	if typ == '' {
 		return none
@@ -671,7 +866,14 @@ fn (mut app App) member_selector_hover(uri string, position Position) ?Hover {
 	// The declared type, not the one member lookup uses: that one has lost its
 	// `&`, `?` and `!`.
 	members := app.type_members(uri, content, member_receiver_type(typ))
-	field := members.field_declared_types[name] or { return none }
+	field := members.field_declared_types[name] or {
+		if method := app.language_method_hover(uri, content, member_receiver_type(typ), name,
+			members)
+		{
+			return method
+		}
+		return none
+	}
 	if field == '' {
 		return none
 	}
@@ -681,6 +883,137 @@ fn (mut app App) member_selector_hover(uri string, position Position) ?Hover {
 			value: '```v\n${name} ${field}\n```'
 		}
 	}
+}
+
+// language_static_hover answers for `Type.name` when `name` is a static function
+// that V gives the type, as `Color.from`, and not one the type declares: it has
+// no declaration to show, and the compiler has nothing to say about it.
+fn (mut app App) language_static_hover(uri string, content string, receiver string, name string) ?Hover {
+	items := app.type_static_completions(uri, content, receiver) or { return none }
+	found := items.filter(it.label == name)
+	if found.len == 0 {
+		return none
+	}
+	decl := app.type_declaration(uri, content, receiver)
+	for item in language_member_items(receiver, declaration_member_kinds(decl), true) {
+		if item.label == name && item.detail == found[0].detail {
+			return language_member_hover(name, item.detail)
+		}
+	}
+	return none
+}
+
+// language_method_hover answers for `value.name` when `name` is a method that V
+// gives the named type of the value, as `has` of a flag enum, and not one the
+// type declares or embeds, which `members` lists first. The compiler describes
+// it, but without the receiver, and the documentation found for its name is the
+// one of another type's method. The members of arrays, maps and channels are
+// left to the compiler: vlib/builtin declares and documents most of them.
+fn (mut app App) language_method_hover(uri string, content string, typ string, name string, members IndexedCompletionResult) ?Hover {
+	if composite_member_kinds(typ).len > 0 {
+		return none
+	}
+	found := members.items.filter(it.label == name)
+	if found.len == 0 {
+		return none
+	}
+	decl := app.type_declaration(uri, content, typ)
+	for item in language_member_items(typ, declaration_member_kinds(decl), false) {
+		if item.label == name && item.kind == 2 && item.detail == found[0].detail {
+			return language_member_hover(name, item.detail)
+		}
+	}
+	return none
+}
+
+// language_member_hover shows a member V gives a type: its signature, and what
+// it does.
+fn language_member_hover(name string, signature string) Hover {
+	doc := language_member_docs[name] or { '' }
+	return Hover{
+		contents: MarkupContent{
+			kind:  'markdown'
+			value: '```v\n${signature}\n```' + if doc == '' { '' } else { '\n\n${doc}' }
+		}
+	}
+}
+
+// binding_type_narrows reports whether the compiler tells better than the index
+// what the binding that `hover` describes is at `position`: its type names a
+// type parameter of the generic function around it, which a `$if` can decide,
+// or is a sum type or an interface, which `is` and `match` can.
+fn (mut app App) binding_type_narrows(uri string, position Position, hover Hover) bool {
+	if !app.v3_line_info_enabled || os.getenv('VLS_V3_LINE_INFO') == 'off' {
+		return false
+	}
+	text := hover.contents.value.all_after('```v\n').all_before('\n```').trim_space()
+	typ := text.all_after(' ').trim_space()
+	if typ == '' || typ == text {
+		return false
+	}
+	content := app.index_source_for(uri) or { return false }
+	lines := content.split_into_lines()
+	start := containing_function_start(lines, position, app.position_encoding)
+	if start >= 0 && start < lines.len {
+		mut end := start
+		for end + 1 < lines.len && !lines[end].contains('{') {
+			end++
+		}
+		for name in generic_list_names(lines[start..end + 1].join('\n')) {
+			if type_text_names(typ, name) {
+				return true
+			}
+		}
+	}
+	// A type the index does not know, the compiler writes out: a generic struct
+	// (the index holds `Pair[T]`), which a literal that infers its arguments
+	// (`Pair{ left: 1 }`) reads as the bare `Pair`, or a field of it, `T`.
+	if app.type_text_names_unknown_type(uri, content, typ) {
+		return true
+	}
+	base := typ.trim_left('&').all_after('mut ').trim_left('?!')
+	return app.type_declaration(uri, content, base).kind in ['sum', 'interface']
+}
+
+// type_text_names_unknown_type reports whether the type `text` names a type the
+// index does not know.
+fn (mut app App) type_text_names_unknown_type(uri string, content string, text string) bool {
+	mut i := 0
+	for i < text.len {
+		if !is_ident_start(text[i]) {
+			i++
+			continue
+		}
+		mut end := i
+		for end < text.len && (is_ident_char(text[end]) || text[end] == `.`) {
+			end++
+		}
+		name := text[i..end].trim_right('.')
+		i = end
+		if !is_type_name(name) {
+			continue
+		}
+		if app.type_declaration(uri, content, name).kind == '' {
+			return true
+		}
+	}
+	return false
+}
+
+// type_text_names reports whether the type `text` names `name` as a whole
+// identifier: `[]T` names `T`, `Tree` does not.
+fn type_text_names(text string, name string) bool {
+	mut i := 0
+	for {
+		idx := text.index_after(name, i) or { return false }
+		end := idx + name.len
+		if (idx == 0 || !is_ident_char(text[idx - 1]))
+			&& (end >= text.len || !is_ident_char(text[end])) {
+			return true
+		}
+		i = idx + 1
+	}
+	return false
 }
 
 fn (mut app App) local_binding_hover(uri string, position Position) ?Hover {
@@ -697,21 +1030,57 @@ fn (mut app App) local_binding_hover(uri string, position Position) ?Hover {
 	if declared != '' {
 		return Hover{
 			contents: MarkupContent{
-				kind: 'markdown'
+				kind:  'markdown'
 				value: '```v\n${name} ${declared}\n```'
 			}
 		}
 	}
-	typ := app.infer_binding_type_at_position(uri, content, name, position)
+	// The name a declaration introduces: the scope at the cursor does not hold it
+	// yet, and may hold an outer one of that name.
+	typ := app.declared_binding_type(uri, content, lines, name, position) or {
+		app.infer_binding_type_at_position(uri, content, name, position)
+	}
 	if typ == '' {
 		return none
 	}
 	return Hover{
 		contents: MarkupContent{
-			kind: 'markdown'
+			kind:  'markdown'
 			value: '```v\n${name} ${typ}\n```'
 		}
 	}
+}
+
+// declared_binding_type is the type of the variable whose declaration the
+// cursor is on, as `double` in `double := fn (x int) int {`: the type its uses
+// have, or '' when that cannot be told. None when the cursor is on no name that
+// a declaration of its line introduces.
+fn (mut app App) declared_binding_type(uri string, content string, lines []string, name string, position Position) ?string {
+	line := lines[position.line]
+	start, _ := find_word_bounds_at_col(line, encoded_col_to_byte(line, position.char,
+		app.position_encoding), .utf8)
+	declaration := receiver_declaration_on_line(line, name, [start])?
+	written := app.written_binding_type(uri, content, lines, LocalBinding{
+		name:   name
+		line:   position.line
+		column: start
+	}, position)
+	if written != '' {
+		return written
+	}
+	// The type a use has right after the declaration, at the end of its value: a
+	// value written over several lines (`Point{ ... }.x`) ends on its last one.
+	rhs := if declaration.assignment_end <= line.len {
+		line[declaration.assignment_end..]
+	} else {
+		''
+	}
+	_, end_line := declaration_expression_span(lines, position.line, rhs)
+	end_text := lines[end_line]
+	return app.infer_binding_type_at_position(uri, content, name, Position{
+		line: end_line
+		char: byte_to_encoded_col(end_text, end_text.len, app.position_encoding)
+	})
 }
 
 fn (mut app App) source_signature_fallback(uri string, position Position) ?SignatureHelp {
@@ -734,9 +1103,9 @@ fn (mut app App) source_signature_fallback(uri string, position Position) ?Signa
 	}
 	parameters := signature_parameters(label)
 	return SignatureHelp{
-		signatures: [
+		signatures:       [
 			SignatureInformation{
-				label: label
+				label:      label
 				parameters: parameters
 			},
 		]
@@ -751,7 +1120,7 @@ fn (mut app App) operation_at_pos(method Method, request Request) Response {
 			log('Failed to decode TextDocumentPositionParams: ${err}')
 		}
 		return Response{
-			id: request.id
+			id:     request.id
 			result: 'null'
 		}
 	}
@@ -760,7 +1129,7 @@ fn (mut app App) operation_at_pos(method Method, request Request) Response {
 			log('operation_at_pos: missing textDocument.uri')
 		}
 		return Response{
-			id: request.id
+			id:     request.id
 			result: 'null'
 		}
 	}
@@ -768,7 +1137,7 @@ fn (mut app App) operation_at_pos(method Method, request Request) Response {
 	// than indexing arrays with negative values (P1-09).
 	if params.position.line < 0 || params.position.char < 0 {
 		return Response{
-			id: request.id
+			id:     request.id
 			result: 'null'
 		}
 	}
@@ -794,18 +1163,18 @@ fn (mut app App) operation_at_pos(method Method, request Request) Response {
 			}
 			items := merge_completion_items(indexed.items, compiler_items)
 			return Response{
-				id: request.id
+				id:     request.id
 				result: CompletionList{
 					is_incomplete: false
-					items: items
+					items:         items
 				}
 			}
 		}
 		return Response{
-			id: request.id
+			id:     request.id
 			result: CompletionList{
 				is_incomplete: false
-				items: indexed.items
+				items:         indexed.items
 			}
 		}
 	}
@@ -818,7 +1187,7 @@ fn (mut app App) operation_at_pos(method Method, request Request) Response {
 	if method in [.definition, .declaration, .type_definition, .implementation] {
 		if location := app.resolve_indexed_definition(path, params.position) {
 			return Response{
-				id: request.id
+				id:     request.id
 				result: location
 			}
 		}
@@ -826,8 +1195,20 @@ fn (mut app App) operation_at_pos(method Method, request Request) Response {
 
 	if method == .hover {
 		if binding := app.local_binding_hover(path, params.position) {
+			// What a `$if`, `is` or `match` makes of a value of a type parameter,
+			// a sum type or an interface, the compiler tells: its answer first,
+			// and the index's when it has none.
+			if app.binding_type_narrows(path, params.position, binding) {
+				compiled := app.hover_result(path, params.position, '${line_nr}:hv^${byte_col}')
+				if !(compiled is string && compiled == 'null') {
+					return Response{
+						id:     request.id
+						result: compiled
+					}
+				}
+			}
 			return Response{
-				id: request.id
+				id:     request.id
 				result: binding
 			}
 		}
@@ -837,7 +1218,7 @@ fn (mut app App) operation_at_pos(method Method, request Request) Response {
 		// the documentation with its answer.
 		if member := app.member_selector_hover(path, params.position) {
 			return Response{
-				id: request.id
+				id:     request.id
 				result: member
 			}
 		}
@@ -858,9 +1239,10 @@ fn (mut app App) operation_at_pos(method Method, request Request) Response {
 		}
 	}
 
-	mut result := app.run_v_line_info(method, path, line_info)
-	if method == .hover {
-		result = app.hover_with_written_declaration(path, params.position, result)
+	mut result := if method == .hover {
+		app.hover_result(path, params.position, line_info)
+	} else {
+		app.run_v_line_info(method, path, line_info)
 	}
 	if result is string && result == 'null' {
 		if method == .hover {
@@ -877,7 +1259,7 @@ fn (mut app App) operation_at_pos(method Method, request Request) Response {
 		log(result.str())
 	}
 	return Response{
-		id: request.id
+		id:     request.id
 		result: result
 	}
 }
@@ -909,8 +1291,15 @@ fn (mut app App) indexed_completions(uri string, position Position) IndexedCompl
 	}
 	line := lines[position.line]
 	if is_import_completion_line(line) {
+		mut items := get_import_completions(line, os.dir(uri_to_path(uri)))
+		listed := items.map(it.label)
+		for item in app.import_line_module_completions(uri_to_path(uri), line) {
+			if item.label !in listed {
+				items << item
+			}
+		}
 		return IndexedCompletionResult{
-			items: get_import_completions(line, os.dir(uri_to_path(uri)))
+			items: items
 		}
 	}
 	if position.char > 0 {
@@ -922,7 +1311,7 @@ fn (mut app App) indexed_completions(uri string, position Position) IndexedCompl
 					if !has_local_binding {
 						module_result := app.get_imported_module_member_completions(module_path, os.dir(uri_to_path(uri)))
 						return IndexedCompletionResult{
-							items: module_result.items
+							items:        module_result.items
 							use_compiler: module_result.use_compiler
 						}
 					}
@@ -952,13 +1341,13 @@ fn (mut app App) indexed_completions(uri string, position Position) IndexedCompl
 	if struct_type != '' {
 		field_result := app.indexed_struct_field_completions(uri, content, struct_type)
 		return IndexedCompletionResult{
-			items: field_result.items
+			items:        field_result.items
 			use_compiler: field_result.use_compiler || field_result.items.len == 0
 		}
 	}
 
 	mut details := app.callback_argument_completions(uri, content, lines, position)
-	details << make_keyword_completions()
+	details << app.with_builtin_calls(make_keyword_completions())
 	details << postfix_completions()
 	mut seen_labels := map[string]bool{}
 	for detail in details {
@@ -973,8 +1362,8 @@ fn (mut app App) indexed_completions(uri string, position Position) IndexedCompl
 	for binding in parse_import_bindings(content) {
 		if binding.alias != '' && binding.alias !in seen_labels {
 			details << Detail{
-				kind: 9 // CompletionItemKind.Module
-				label: binding.alias
+				kind:   9 // CompletionItemKind.Module
+				label:  binding.alias
 				detail: binding.module_path
 			}
 			seen_labels[binding.alias] = true
@@ -992,8 +1381,14 @@ fn (mut app App) indexed_completions(uri string, position Position) IndexedCompl
 			}
 		}
 	}
+	// Modules not imported yet: accepting one also adds its `import` line.
+	for detail in app.module_import_completions(uri, content, position) {
+		if detail.label !in seen_labels {
+			details << detail
+		}
+	}
 	return IndexedCompletionResult{
-		items: details
+		items:        details
 		use_compiler: use_compiler
 	}
 }
@@ -1006,8 +1401,8 @@ fn is_import_completion_line(line string) bool {
 
 fn starts_binding_scope_header(source string) bool {
 	trimmed := source.trim_space()
-	return trimmed.starts_with('for ') || trimmed.starts_with('if ')
-		|| trimmed.starts_with('else if ')
+	return trimmed.starts_with('for ') || trimmed.starts_with('\$for ')
+		|| trimmed.starts_with('if ') || trimmed.starts_with('else if ')
 }
 
 fn binding_scope_header_ends_with_literal_type(source string) bool {
@@ -1077,8 +1472,8 @@ fn binding_scope_header_starts_literal(source string) bool {
 }
 
 struct AnonymousFunctionHeader {
-	found          bool
-	complete       bool
+	found           bool
+	complete        bool
 	parameter_names []string
 	parameter_types map[string]string
 }
@@ -1145,8 +1540,8 @@ fn anonymous_function_header(source string) AnonymousFunctionHeader {
 		}
 	}
 	return AnonymousFunctionHeader{
-		found: true
-		complete: true
+		found:           true
+		complete:        true
 		parameter_names: names
 		parameter_types: types
 	}
@@ -1157,8 +1552,8 @@ fn expression_line_is_continued(line string) bool {
 	if trimmed == '' {
 		return false
 	}
-	return trimmed[trimmed.len - 1] in [`.`, `,`, `+`, `-`, `*`, `/`, `%`, `&`, `|`, `^`, `=`, `!`,
-		`<`, `>`, `?`, `:`]
+	return trimmed[trimmed.len - 1] in [`.`, `,`, `+`, `-`, `*`, `/`, `%`, `&`, `|`, `^`, `=`,
+		`!`, `<`, `>`, `?`, `:`]
 }
 
 fn struct_literal_cursor_is_at_field(prefix string, open_brace int, raw_lines []string) bool {
@@ -1582,13 +1977,14 @@ fn local_declaration_names(code string) []string {
 					names << name
 				}
 			}
-		} else if statement.starts_with('for ') {
+		} else if statement.starts_with('for ') || statement.starts_with('\$for ') {
 			mut in_idx := statement.index(' in ') or { -1 }
 			if in_idx < 0 && statement.ends_with(' in') {
 				in_idx = statement.len - 3
 			}
-			if in_idx >= 0 {
-				for name in binding_identifiers(statement[4..in_idx]) {
+			names_start := statement.index(' ') or { 0 } + 1
+			if in_idx >= names_start {
+				for name in binding_identifiers(statement[names_start..in_idx]) {
 					if name !in names {
 						names << name
 					}
@@ -1604,7 +2000,22 @@ fn starts_or_block_header(source string) bool {
 	return trimmed == 'or' || trimmed.ends_with(' or')
 }
 
-fn opens_implicit_it_scope(source string, open_paren int) bool {
+// implicit_method_bindings are the names an array method gives the expression in
+// its parentheses: `it`, the element, to a predicate or a callback, and `a` and
+// `b`, the two elements compared, to a sort.
+const implicit_method_bindings = {
+	'all':    ['it']
+	'any':    ['it']
+	'count':  ['it']
+	'filter': ['it']
+	'map':    ['it']
+	'sort':   ['a', 'b']
+	'sorted': ['a', 'b']
+}
+
+// implicit_call_bindings returns the names that the call opened by the `(` at
+// `open_paren` gives its arguments (see implicit_method_bindings).
+fn implicit_call_bindings(source string, open_paren int) []string {
 	mut name_end := open_paren
 	for name_end > 0 && source[name_end - 1] in [` `, `\t`, `\r`, `\n`] {
 		name_end--
@@ -1614,21 +2025,31 @@ fn opens_implicit_it_scope(source string, open_paren int) bool {
 		name_start--
 	}
 	if name_start == name_end || name_start == 0 || source[name_start - 1] != `.` {
-		return false
+		return []
 	}
-	return source[name_start..name_end] in ['all', 'any', 'filter', 'map']
+	return implicit_method_bindings[source[name_start..name_end]] or { [] }
 }
 
-fn has_implicit_it_scope_at_cursor(source string) bool {
-	mut scopes := []bool{}
+// implicit_bindings_at_cursor returns the names that the calls still open at the
+// end of `source` give their arguments.
+fn implicit_bindings_at_cursor(source string) []string {
+	mut scopes := [][]string{}
 	for index, c in source {
 		if c == `(` {
-			scopes << opens_implicit_it_scope(source, index)
+			scopes << implicit_call_bindings(source, index)
 		} else if c == `)` && scopes.len > 0 {
 			scopes.delete_last()
 		}
 	}
-	return scopes.any(it)
+	mut names := []string{}
+	for scope in scopes {
+		for name in scope {
+			if name !in names {
+				names << name
+			}
+		}
+	}
+	return names
 }
 
 struct LocalBinding {
@@ -1672,8 +2093,8 @@ fn (app &App) local_scope_bindings(content string, position Position) []LocalBin
 	mut parameter_bindings := []LocalBinding{}
 	for name in parameter_names {
 		parameter_bindings << LocalBinding{
-			name: name
-			line: function_start
+			name:   name
+			line:   function_start
 			column: -1
 		}
 	}
@@ -1689,6 +2110,10 @@ fn (app &App) local_scope_bindings(content string, position Position) []LocalBin
 	mut pending_closure_line := -1
 	mut literal_brace_depth := 0
 	mut active_code_lines := []string{}
+	// Which open blocks are those of `if x := call() {`, and whether the block
+	// closed last was one: the `else` after it gets `err`.
+	mut guard_blocks := []bool{}
+	mut closed_guard_block := false
 	for line_idx in 0 .. position.line + 1 {
 		raw_line := if line_idx == position.line {
 			byte_col := encoded_col_to_byte(lines[line_idx], position.char, app.position_encoding)
@@ -1735,7 +2160,8 @@ fn (app &App) local_scope_bindings(content string, position Position) []LocalBin
 			}
 			segment_names := local_declaration_names(segment)
 			binding_scope_header := c == `{` && starts_binding_scope_header(segment)
-			error_scope_header := c == `{` && starts_or_block_header(segment)
+			error_scope_header := c == `{`
+				&& (starts_or_block_header(segment) || (closed_guard_block && segment.trim_space() == 'else'))
 			closure_source := if pending_closure_header != '' {
 				pending_closure_header + '\n' + segment
 			} else {
@@ -1765,28 +2191,31 @@ fn (app &App) local_scope_bindings(content string, position Position) []LocalBin
 				for name in outer_segment_names {
 					if !scopes.last().any(it.name == name) {
 						scopes[scopes.len - 1] << LocalBinding{
-							name: name
-							line: line_idx
+							name:   name
+							line:   line_idx
 							column: local_binding_column(segment, segment_start, name)
 						}
 					}
 				}
 			}
 			if c == `{` {
+				closed_guard_block = false
 				if body_started {
+					guard_blocks << (binding_scope_header && segment.contains(':=')
+						&& !segment.trim_space().starts_with('for '))
 					scopes << []LocalBinding{}
 					if block_names.len > 0 {
 						for name in block_names {
 							if !scopes.last().any(it.name == name) {
 								scopes[scopes.len - 1] << LocalBinding{
-									name: name
-									line: block_line
+									name:   name
+									line:   block_line
 									column: if binding_scope_header {
 										local_binding_column(segment, segment_start, name)
 									} else {
 										pending_block_columns[name] or { -1 }
 									}
-									typ: if closure_header.complete {
+									typ:    if closure_header.complete {
 										closure_header.parameter_types[name] or { '' }
 									} else {
 										''
@@ -1806,6 +2235,7 @@ fn (app &App) local_scope_bindings(content string, position Position) []LocalBin
 				pending_closure_line = -1
 			} else if body_started && scopes.len > 1 {
 				scopes.delete_last()
+				closed_guard_block = guard_blocks.len > 0 && guard_blocks.pop()
 			}
 			segment_start = col + 1
 		}
@@ -1830,8 +2260,8 @@ fn (app &App) local_scope_bindings(content string, position Position) []LocalBin
 				for name in tail_names {
 					if !scopes.last().any(it.name == name) {
 						scopes[scopes.len - 1] << LocalBinding{
-							name: name
-							line: line_idx
+							name:   name
+							line:   line_idx
 							column: local_binding_column(tail, segment_start, name)
 						}
 					}
@@ -1854,19 +2284,22 @@ fn (app &App) local_scope_bindings(content string, position Position) []LocalBin
 			}
 		}
 	}
-	mut has_explicit_it := false
-	for scope in scopes {
-		if scope.any(it.name == 'it') {
-			has_explicit_it = true
-			break
+	// The names a call such as `filter` or `sort` gives its arguments, unless the
+	// code declares one itself.
+	for name in implicit_bindings_at_cursor(active_code_lines.join('\n')) {
+		mut declared := false
+		for scope in scopes {
+			if scope.any(it.name == name) {
+				declared = true
+				break
+			}
 		}
-	}
-	if has_implicit_it_scope_at_cursor(active_code_lines.join('\n')) && scopes.len > 0
-		&& !has_explicit_it {
-		scopes[scopes.len - 1] << LocalBinding{
-			name: 'it'
-			line: position.line
-			column: -1
+		if !declared && scopes.len > 0 {
+			scopes[scopes.len - 1] << LocalBinding{
+				name:   name
+				line:   position.line
+				column: -1
+			}
 		}
 	}
 	mut bindings := []LocalBinding{}
@@ -1886,8 +2319,8 @@ fn (app &App) local_scope_completions(content string, position Position) []Detai
 		}
 	}
 	return names.filter(it != '').map(Detail{
-		kind: 6 // CompletionItemKind.Variable
-		label: it
+		kind:   6 // CompletionItemKind.Variable
+		label:  it
 		detail: 'local binding'
 	})
 }
@@ -1969,6 +2402,15 @@ fn callable_or_constructor(rhs string) (string, bool) {
 				col++
 				continue
 			}
+			// A literal that the value goes on from, `Host{}.first_of(xs)`, is not
+			// what the value is: its member or its call decides that.
+			close := matching_delimiter(rhs, col, `{`, `}`)
+			if close >= 0 {
+				after := rhs[close + 1..].trim_space()
+				if after != '' && !after.starts_with('//') {
+					return '', false
+				}
+			}
 		}
 		return name, is_constructor
 	}
@@ -2015,8 +2457,8 @@ fn receiver_rhs_needs_continuation(rhs string, has_expression bool, scan_state &
 	if trimmed == '' {
 		return false
 	}
-	return trimmed[trimmed.len - 1] in [`.`, `,`, `+`, `-`, `*`, `/`, `%`, `&`, `|`, `^`, `=`, `!`,
-		`<`, `>`, `?`, `:`]
+	return trimmed[trimmed.len - 1] in [`.`, `,`, `+`, `-`, `*`, `/`, `%`, `&`, `|`, `^`, `=`,
+		`!`, `<`, `>`, `?`, `:`]
 }
 
 struct ReceiverDeclaration {
@@ -2055,9 +2497,9 @@ fn receiver_declaration_on_line(code string, receiver string, active_columns []i
 			continue
 		}
 		latest = ReceiverDeclaration{
-			rhs: raw_statement[assign_idx + 2..].trim_space()
-			binding_index: binding_index
-			binding_count: bindings.len
+			rhs:            raw_statement[assign_idx + 2..].trim_space()
+			binding_index:  binding_index
+			binding_count:  bindings.len
 			binding_column: statement_start + lhs_start + receiver_column
 			assignment_end: statement_start + assign_idx + 2
 		}
@@ -2279,6 +2721,9 @@ fn (mut app App) infer_binding_type_at_position(uri string, content string, rece
 				break
 			}
 			latest_rhs += '\n' + next_code
+			// The source of the value too, which the literals keep: what follows the
+			// first line (`}.x`) can change its type.
+			latest_raw_rhs += ' ' + without_trailing_comment(lines[next_line])
 			rhs_has_expression = rhs_has_expression || next_code.trim_space() != ''
 				|| source_fragment_starts_with_literal(lines[next_line])
 			next_line++
@@ -2422,17 +2867,17 @@ fn method_completion_from_lines(lines []string, symbol DocumentSymbol) ?Detail {
 	}
 	insert := build_fn_snippet(name, after_receiver[paren_idx..])
 	return Detail{
-		kind: 2
-		label: name
-		detail: '${if trimmed.starts_with('pub ') { 'pub ' } else { '' }}fn ${after_fn}'.all_before('{').trim_space()
-		insert_text: insert
+		kind:               2
+		label:              name
+		detail:             '${if trimmed.starts_with('pub ') { 'pub ' } else { '' }}fn ${after_fn}'.all_before('{').trim_space()
+		insert_text:        insert
 		insert_text_format: if insert.contains('\$') { 2 } else { 1 }
 	}
 }
 
 // builtin_receiver_types are the types whose methods live in vlib/builtin.
-const builtin_receiver_types = ['bool', 'string', 'rune', 'char', 'byte', 'u8', 'u16', 'u32', 'u64',
-	'usize', 'i8', 'i16', 'i32', 'int', 'i64', 'isize', 'f32', 'f64']
+const builtin_receiver_types = ['bool', 'string', 'rune', 'char', 'u8', 'u16', 'u32', 'u64', 'u128',
+	'usize', 'i8', 'i16', 'i32', 'int', 'i64', 'i128', 'isize', 'f32', 'f64']
 
 fn (mut app App) receiver_type_scope(uri string, content string, receiver_type string) (string, string, bool, string) {
 	normalized_type := normalize_receiver_type(receiver_type)
@@ -2456,8 +2901,35 @@ fn (mut app App) receiver_type_scope(uri string, content string, receiver_type s
 	return os.dir(uri_to_path(uri)), normalized_type, false, get_module_name(content)
 }
 
+// builtin_composite_owner is `array` for an array type, `[]int`, and `map` for a
+// map type, `map[string]int`: the receiver that vlib/builtin declares their
+// methods on. '' for any other type.
+fn builtin_composite_owner(typ string) string {
+	mut t := typ.trim_space()
+	for t.len > 0 && t[0] in [`&`, `?`, `!`] {
+		t = t[1..].trim_space()
+	}
+	if t.starts_with('[]') {
+		return 'array'
+	}
+	if t.starts_with('map[') {
+		return 'map'
+	}
+	return ''
+}
+
 fn (mut app App) indexed_method_symbols(uri string, content string, receiver_type string, method_name string) IndexedMethodSymbolResult {
-	dir, type_name, require_public, expected_module := app.receiver_type_scope(uri, content, receiver_type)
+	mut dir, mut type_name, mut require_public, mut expected_module := app.receiver_type_scope(uri,
+		content, receiver_type)
+	// vlib/builtin declares the methods of every array on `array`, and those of
+	// every map on `map`.
+	owner := builtin_composite_owner(receiver_type)
+	if owner != '' {
+		dir = os.join_path(find_v_dir(), 'vlib', 'builtin')
+		type_name = owner
+		require_public = true
+		expected_module = 'builtin'
+	}
 	if dir == '' || type_name == '' || expected_module == '' || !os.is_dir(dir) {
 		return IndexedMethodSymbolResult{}
 	}
@@ -2519,13 +2991,13 @@ fn (mut app App) indexed_method_symbols(uri string, content string, receiver_typ
 				}
 			}
 			matches << Location{
-				uri: indexed_uri
+				uri:   indexed_uri
 				range: LSPRange{
 					start: Position{
 						line: symbol.range.start.line
 						char: symbol.selection_range.start.char
 					}
-					end: Position{
+					end:   Position{
 						line: symbol.range.start.line
 						char: symbol.selection_range.end.char
 					}
@@ -2534,8 +3006,8 @@ fn (mut app App) indexed_method_symbols(uri string, content string, receiver_typ
 		}
 	}
 	return IndexedMethodSymbolResult{
-		locations: matches
-		items: items
+		locations:    matches
+		items:        items
 		use_compiler: has_conditional
 	}
 }
@@ -2571,8 +3043,8 @@ fn field_completion_from_symbol(lines []string, code_lines []string, symbol Docu
 		return none
 	}
 	return Detail{
-		kind: 5 // CompletionItemKind.Field
-		label: symbol.name
+		kind:   5 // CompletionItemKind.Field
+		label:  symbol.name
 		detail: lines[line_idx].trim_space()
 	}
 }
@@ -2761,12 +3233,12 @@ fn (mut app App) indexed_struct_field_completions_visited(uri string, content st
 		}
 	}
 	return IndexedCompletionResult{
-		items: items
-		use_compiler: has_conditional || has_unresolved_embedded
-		embedded_types: embedded_types
-		field_types: field_types
+		items:                items
+		use_compiler:         has_conditional || has_unresolved_embedded
+		embedded_types:       embedded_types
+		field_types:          field_types
 		field_declared_types: field_declared_types
-		resolved_type: resolved_type
+		resolved_type:        resolved_type
 	}
 }
 
@@ -2855,10 +3327,10 @@ fn thread_wait_completion(receiver_type string) ?Detail {
 		' ${payload}'
 	}
 	return Detail{
-		kind: 2
-		label: 'wait'
-		detail: 'fn (${receiver}) wait()${result}'
-		insert_text: 'wait()'
+		kind:               2
+		label:              'wait'
+		detail:             'fn (${receiver}) wait()${result}'
+		insert_text:        'wait()'
 		insert_text_format: 1
 	}
 }
@@ -2970,8 +3442,8 @@ fn (mut app App) indexed_enum_members(uri string, content string, type_name stri
 		for symbol in entry.doc_symbols {
 			if symbol.kind == sym_kind_enum && symbol.name == name {
 				return symbol.children.filter(it.kind == sym_kind_enum_member).map(Detail{
-					kind: 20 // CompletionItemKind.EnumMember
-					label: it.name
+					kind:   20 // CompletionItemKind.EnumMember
+					label:  it.name
 					detail: type_name
 				})
 			}
@@ -3026,7 +3498,8 @@ fn (mut app App) expected_enum_type(uri string, content string, lines []string, 
 	}
 	for op in ['==', '!=', '='] {
 		if before.ends_with(op) {
-			if op == '=' && before.len > 1 && before[before.len - 2] in [`:`, `<`, `>`, `+`, `-`, `*`, `/`, `%`, `|`, `&`, `^`] {
+			if op == '=' && before.len > 1 && before[before.len - 2] in [`:`, `<`, `>`, `+`, `-`,
+				`*`, `/`, `%`, `|`, `&`, `^`] {
 				break
 			}
 			left := trailing_selector(before[..before.len - op.len].trim_right(' \t'))
@@ -3315,11 +3788,11 @@ fn (mut app App) callback_argument_completions(uri string, content string, lines
 	label, skeleton := callback_skeleton(fn_type, generic_default) or { return [] }
 	return [
 		Detail{
-			kind: 15 // CompletionItemKind.Snippet
-			label: label
-			detail: 'function literal'
-			sort_text: '0'
-			insert_text: skeleton
+			kind:               15 // CompletionItemKind.Snippet
+			label:              label
+			detail:             'function literal'
+			sort_text:          '0'
+			insert_text:        skeleton
 			insert_text_format: 2
 		},
 	]
@@ -3511,7 +3984,7 @@ fn parse_import_binding(text string) ?ImportedModuleBinding {
 		return none
 	}
 	return ImportedModuleBinding{
-		alias: alias
+		alias:       alias
 		module_path: module_path
 	}
 }
@@ -3587,7 +4060,7 @@ fn (mut app App) get_imported_module_member_completions(module_path string, work
 		}
 	}
 	return IndexedModuleCompletionResult{
-		items: items
+		items:        items
 		use_compiler: has_conditional || items.len == 0
 	}
 }
@@ -3644,7 +4117,18 @@ fn (app &App) resolve_indexed_import_module_dir(module_path string, work_dir str
 			return source_relative_dir
 		}
 	}
-	return resolve_import_module_dir(module_path, work_dir)
+	found := resolve_import_module_dir(module_path, work_dir)
+	if found != '' {
+		return found
+	}
+	// Packages installed with `v install`.
+	for vmodules in os.vmodules_paths() {
+		installed := os.join_path(vmodules, rel)
+		if os.is_dir(installed) {
+			return installed
+		}
+	}
+	return ''
 }
 
 fn module_type_completion_name(declaration string) string {
@@ -3817,8 +4301,8 @@ fn parse_module_member_completions_from_lines(lines []string, conditional_lines 
 				name := first_word(trimmed)
 				if is_valid_v_identifier_name(name) {
 					items << Detail{
-						kind: 6 // CompletionItemKind.Variable
-						label: name
+						kind:   6 // CompletionItemKind.Variable
+						label:  name
 						detail: '__global'
 					}
 				}
@@ -3842,8 +4326,8 @@ fn parse_module_member_completions_from_lines(lines []string, conditional_lines 
 				name := const_block_assignment_name(trimmed)
 				if name != '' && (!public_only || const_block_public) {
 					items << Detail{
-						kind: 21 // CompletionItemKind.Constant
-						label: name
+						kind:   21 // CompletionItemKind.Constant
+						label:  name
 						detail: if const_block_public { 'pub const' } else { 'const' }
 					}
 				}
@@ -3871,10 +4355,10 @@ fn parse_module_member_completions_from_lines(lines []string, conditional_lines 
 			detail_str := '${if is_public { 'pub ' } else { '' }}${complete_declaration}'.all_before('{').trim_space()
 			insert := build_fn_snippet(fn_name, after_fn[paren_idx..])
 			items << Detail{
-				kind: 3 // CompletionItemKind.Function
-				label: fn_name
-				detail: detail_str
-				insert_text: insert
+				kind:               3 // CompletionItemKind.Function
+				label:              fn_name
+				detail:             detail_str
+				insert_text:        insert
 				insert_text_format: if insert.contains('\$') { 2 } else { 1 }
 			}
 			continue
@@ -3883,8 +4367,8 @@ fn parse_module_member_completions_from_lines(lines []string, conditional_lines 
 			name := extract_const_name(declaration[6..])
 			if name != '' {
 				items << Detail{
-					kind: 21
-					label: name
+					kind:   21
+					label:  name
 					detail: trimmed.all_before('=').trim_space()
 				}
 			}
@@ -3894,8 +4378,8 @@ fn parse_module_member_completions_from_lines(lines []string, conditional_lines 
 			name := module_type_completion_name(declaration[7..])
 			if name != '' {
 				items << Detail{
-					kind: 22 // CompletionItemKind.Struct
-					label: name
+					kind:   22 // CompletionItemKind.Struct
+					label:  name
 					detail: trimmed.all_before('{').trim_space()
 				}
 			}
@@ -3905,8 +4389,8 @@ fn parse_module_member_completions_from_lines(lines []string, conditional_lines 
 			name := module_type_completion_name(declaration[6..])
 			if name != '' {
 				items << Detail{
-					kind: 22 // CompletionItemKind.Struct
-					label: name
+					kind:   22 // CompletionItemKind.Struct
+					label:  name
 					detail: trimmed.all_before('{').trim_space()
 				}
 			}
@@ -3916,8 +4400,8 @@ fn parse_module_member_completions_from_lines(lines []string, conditional_lines 
 			name := module_type_completion_name(declaration[5..])
 			if name != '' {
 				items << Detail{
-					kind: 13 // CompletionItemKind.Enum
-					label: name
+					kind:   13 // CompletionItemKind.Enum
+					label:  name
 					detail: trimmed.all_before('{').trim_space()
 				}
 			}
@@ -3927,8 +4411,8 @@ fn parse_module_member_completions_from_lines(lines []string, conditional_lines 
 			name := module_type_completion_name(declaration[10..])
 			if name != '' {
 				items << Detail{
-					kind: 8 // CompletionItemKind.Interface
-					label: name
+					kind:   8 // CompletionItemKind.Interface
+					label:  name
 					detail: trimmed.all_before('{').trim_space()
 				}
 			}
@@ -3938,15 +4422,15 @@ fn parse_module_member_completions_from_lines(lines []string, conditional_lines 
 			name := module_type_completion_name(declaration[5..])
 			if name != '' {
 				items << Detail{
-					kind: 7 // CompletionItemKind.Class
-					label: name
+					kind:   7 // CompletionItemKind.Class
+					label:  name
 					detail: trimmed.all_before('=').trim_space()
 				}
 			}
 		}
 	}
 	return ParsedModuleCompletionIndex{
-		items: items
+		items:           items
 		has_conditional: has_conditional
 	}
 }
@@ -4012,6 +4496,7 @@ fn (mut app App) on_did_close(request Request) {
 		app.open_files.delete(uri)
 		app.bump_generation(uri)
 	}
+	app.inlay_hint_cache.delete(uri)
 	if uri in app.open_files_versions {
 		app.open_files_versions.delete(uri)
 	}
@@ -4036,8 +4521,8 @@ fn (mut app App) build_diagnostics_notification(uri string, content string) Noti
 		return Notification{
 			method: 'textDocument/publishDiagnostics'
 			params: PublishDiagnosticsParams{
-				uri: uri
-				version: if uri in app.open_files_versions {
+				uri:         uri
+				version:     if uri in app.open_files_versions {
 					?i64(app.open_files_versions[uri])
 				} else {
 					none
@@ -4048,6 +4533,12 @@ fn (mut app App) build_diagnostics_notification(uri string, content string) Noti
 	}
 	v_errors := app.run_v_check(uri, content)
 	log('run_v_check errors:${v_errors}')
+	return app.diagnostics_notification_for(uri, content, v_errors)
+}
+
+// diagnostics_notification_for turns the compiler's errors for one file into
+// the notification that publishes them.
+fn (mut app App) diagnostics_notification_for(uri string, content string, v_errors []JsonError) Notification {
 	lines := content.split_into_lines()
 	mut diagnostics := []LSPDiagnostic{}
 	mut seen_positions := map[string]bool{}
@@ -4065,8 +4556,8 @@ fn (mut app App) build_diagnostics_notification(uri string, content string) Noti
 		diagnostics << app.encode_diagnostic_range(v_error_to_lsp_diagnostic(v_err), lines)
 	}
 	pd_params := PublishDiagnosticsParams{
-		uri: uri
-		version: if uri in app.open_files_versions {
+		uri:         uri
+		version:     if uri in app.open_files_versions {
 			?i64(app.open_files_versions[uri])
 		} else {
 			none
@@ -4177,7 +4668,7 @@ fn (app &App) encode_diagnostic_range(diag LSPDiagnostic, lines []string) LSPDia
 				line: start_line
 				char: start_char
 			}
-			end: Position{
+			end:   Position{
 				line: end_line
 				char: end_char
 			}
@@ -4246,14 +4737,14 @@ fn (mut app App) on_will_save_wait_until(request Request) Response {
 			log('Failed to decode WillSaveTextDocumentParams: ${err}')
 		}
 		return Response{
-			id: request.id
+			id:     request.id
 			result: []TextEdit{}
 		}
 	}
 	uri := params.text_document.uri
 	content := app.open_files[uri] or {
 		return Response{
-			id: request.id
+			id:     request.id
 			result: []TextEdit{}
 		}
 	}
@@ -4263,7 +4754,7 @@ fn (mut app App) on_will_save_wait_until(request Request) Response {
 	// would desynchronize the server from the editor (P0-07 item 7).
 	edits, _ := app.format_content(uri, content)
 	return Response{
-		id: request.id
+		id:     request.id
 		result: edits
 	}
 }
@@ -4272,68 +4763,38 @@ fn (mut app App) on_will_save_wait_until(request Request) Response {
 // and placeholder text for the identifier under the cursor, or an empty result
 // when the cursor is not on a renameable symbol.
 fn (mut app App) handle_prepare_rename(request Request) Response {
+	return app.prepare_rename_request(request) or {
+		Response{
+			id:     request.id
+			result: 'null'
+		}
+	}
+}
+
+// prepare_rename_request answers with the name a rename at the position would
+// change, or with the reason the rename cannot be done: a keyword, a symbol
+// declared outside the project, one the compiler cannot resolve.
+fn (mut app App) prepare_rename_request(request Request) !Response {
 	params := json2.decode[TextDocumentPositionParams](request.params) or {
-		$if debug {
-			log('Failed to decode TextDocumentPositionParams for prepareRename: ${err}')
-		}
-		return Response{
-			id: request.id
-			result: 'null'
-		}
+		return error('invalid rename parameters')
 	}
-	real_path := uri_to_path(params.text_document.uri)
-	content := app.open_files[params.text_document.uri] or { os.read_file(real_path) or { '' } }
-	lines := content.split_into_lines()
-	if params.position.line < 0 || params.position.line >= lines.len {
-		return Response{
-			id: request.id
-			result: 'null'
-		}
+	uri := params.text_document.uri
+	scope := app.index_scope_for_uri(uri)
+	app.ensure_index_scope(scope)
+	mut cache := app.rename_anchor_cache()
+	defer {
+		app.keep_rename_anchors(cache)
 	}
-	line_text := lines[params.position.line]
-	start, end := find_word_bounds_at_col(line_text, params.position.char, app.position_encoding)
-	if start < 0 || end <= start {
-		return Response{
-			id: request.id
-			result: 'null'
-		}
-	}
-	symbol := substr_by_char_bounds(line_text, start, end, app.position_encoding)
-	if symbol == '' {
-		return Response{
-			id: request.id
-			result: 'null'
-		}
-	}
-	// Identifiers used for rename must start with a letter or underscore.
-	first := symbol[0]
-	if !is_ident_start(first) {
-		return Response{
-			id: request.id
-			result: 'null'
-		}
-	}
-	// Reject V keywords and built-in function names — they cannot be renamed.
-	if symbol in v_keywords || symbol in v_builtins {
-		return Response{
-			id: request.id
-			result: 'null'
-		}
+	target := app.rename_target(uri, params.position.line, params.position.char, scope, mut
+		cache)!
+	word := app.word_location(uri, params.position.line, params.position.char) or {
+		return error('there is no symbol to rename here')
 	}
 	return Response{
-		id: request.id
+		id:     request.id
 		result: PrepareRenameResult{
-			range: LSPRange{
-				start: Position{
-					line: params.position.line
-					char: start
-				}
-				end: Position{
-					line: params.position.line
-					char: end
-				}
-			}
-			placeholder: symbol
+			range:       word.range
+			placeholder: target.symbol
 		}
 	}
 }
@@ -4346,10 +4807,10 @@ fn add_workspace_symbol(mut results []WorkspaceSymbol, mut seen_symbols map[stri
 	}
 	seen_symbols[key] = true
 	results << WorkspaceSymbol{
-		name: name
-		kind: kind
+		name:     name
+		kind:     kind
 		location: Location{
-			uri: uri
+			uri:   uri
 			range: rng
 		}
 	}
@@ -4411,7 +4872,7 @@ fn (mut app App) handle_workspace_symbol(request Request) Response {
 			log('Failed to decode WorkspaceSymbolParams: ${err}')
 		}
 		return Response{
-			id: request.id
+			id:     request.id
 			result: []WorkspaceSymbol{}
 		}
 	}
@@ -4425,7 +4886,7 @@ fn (mut app App) handle_workspace_symbol(request Request) Response {
 	results := app.query_workspace_symbols(query)
 	app.end_progress(token, '')
 	return Response{
-		id: request.id
+		id:     request.id
 		result: results
 	}
 }
@@ -4557,7 +5018,7 @@ fn (mut app App) find_references(request Request) Response {
 			log('Failed to decode ReferenceParams: ${err}')
 		}
 		return Response{
-			id: request.id
+			id:     request.id
 			result: 'null'
 		}
 	}
@@ -4569,7 +5030,7 @@ fn (mut app App) find_references(request Request) Response {
 	symbol := app.get_word_at_position(path, line, col)
 	if symbol == '' {
 		return Response{
-			id: request.id
+			id:     request.id
 			result: 'null'
 		}
 	}
@@ -4599,78 +5060,55 @@ fn (mut app App) find_references(request Request) Response {
 	}
 	if locations.len == 0 {
 		return Response{
-			id: request.id
+			id:     request.id
 			result: 'null'
 		}
 	}
 
 	return Response{
-		id: request.id
+		id:     request.id
 		result: locations
 	}
 }
 
 // handle_rename handles the LSP rename request, returning edits to rename a symbol.
 fn (mut app App) handle_rename(request Request) Response {
-	params := json2.decode[RenameParams](request.params) or {
-		$if debug {
-			log('Failed to decode RenameParams: ${err}')
-		}
-		return Response{
-			id: request.id
+	return app.rename_request(request) or {
+		log('rename: ${err.msg()}')
+		Response{
+			id:     request.id
 			result: 'null'
 		}
+	}
+}
+
+// rename_request answers a rename with every edit it takes, or with the reason
+// it cannot be done safely.
+fn (mut app App) rename_request(request Request) !Response {
+	params := json2.decode[RenameParams](request.params) or {
+		return error('invalid rename parameters')
 	}
 	path := params.text_document.uri
-	line := params.position.line
-	col := params.position.char
 	new_name := params.new_name
-
-	// Get symbol name at cursor
-	symbol := app.get_word_at_position(path, line, col)
-	if symbol == '' {
-		return Response{
-			id: request.id
-			result: 'null'
-		}
-	}
-
 	// A destructive rename is safe only when the bounded index covers every
 	// source in the project/module. Oversized, unreadable, or count-capped files
 	// may contain additional references that must not be left unchanged.
 	scope := app.index_scope_for_uri(path)
 	app.ensure_index_scope(scope)
 	if !app.index_is_complete_for_scope(scope) {
-		log('rename: source index is incomplete; refusing a partial workspace edit')
-		return Response{
-			id: request.id
-			result: 'null'
-		}
+		return error('this project is only partly indexed (a file is too large or unreadable), so a rename could miss occurrences')
 	}
-
-	// Rename is destructive, so it must be driven by a stable semantic symbol
-	// identity. If we cannot resolve the symbol under the cursor to a compiler
-	// definition anchor, we refuse rather than fall back to lexical same-name
-	// matching, which would rename unrelated symbols in other scopes/modules
-	// (P1-04).
-	anchor := app.resolve_symbol_anchor(path, line, col) or {
-		log('rename: could not resolve a semantic anchor for "${symbol}"; refusing lexical rename (P1-04)')
-		return Response{
-			id: request.id
-			result: 'null'
-		}
+	mut cache := app.rename_anchor_cache()
+	defer {
+		app.keep_rename_anchors(cache)
 	}
-	// Rename is destructive: never accept the scope-unsafe lexical fallback. Past
-	// the candidate cap search_symbol_in_dirs_semantic returns none, and an
-	// unresolved rename is refused below rather than editing unrelated symbols.
-	locations := app.search_symbol_in_dirs_semantic(symbol, anchor, scope, request.id, false)
-	if locations.len == 0 {
-		log('rename: no scope-safe occurrences for "${symbol}" (unresolved or above candidate cap); refusing')
-		return Response{
-			id: request.id
-			result: 'null'
-		}
-	}
+	target := app.rename_target(path, params.position.line, params.position.char, scope, mut
+		cache)!
+	symbol := target.symbol
+	check_new_name(symbol, new_name)!
+	app.check_implicit_name(target, new_name)!
+	locations := app.rename_locations(target, scope, request.id, mut cache)!
+	app.check_rename_conflicts(target, locations, new_name, scope, cache)!
 
 	// Build WorkspaceEdit with both `changes` (compat) and `documentChanges` (preferred).
 	mut changes := map[string][]TextEdit{}
@@ -4682,9 +5120,9 @@ fn (mut app App) handle_rename(request Request) Response {
 			loc.range.start.char + byte_to_encoded_col(symbol, symbol.len, app.position_encoding)
 		}
 		edit := TextEdit{
-			range: LSPRange{
+			range:    LSPRange{
 				start: loc.range.start
-				end: Position{
+				end:   Position{
 					line: loc.range.start.line
 					char: end_char
 				}
@@ -4705,17 +5143,17 @@ fn (mut app App) handle_rename(request Request) Response {
 		}
 		doc_changes << TextDocumentEdit{
 			text_document: OptionalVersionedTextDocumentIdentifier{
-				uri: uri
+				uri:     uri
 				version: version
 			}
-			edits: edits
+			edits:         edits
 		}
 	}
 
 	return Response{
-		id: request.id
+		id:     request.id
 		result: WorkspaceEdit{
-			changes: changes
+			changes:          changes
 			document_changes: doc_changes
 		}
 	}
@@ -5634,6 +6072,20 @@ fn source_occurrences_have_potential_local_binding(lines []string, occurrences [
 	return false
 }
 
+// v3_own_defines are the defines V3 sets for itself: vlib keeps what only V3
+// builds in `*_d_v3_backend.v` files (the methods of i128 and u128, for one).
+const v3_own_defines = ['v3_backend']
+
+// name_needs_other_defines reports whether a file named `name` is left out by
+// the defines VLS builds with: a `_d_` file for a define it does not pass, and
+// a `_notd_` file for one it does.
+fn name_needs_other_defines(name string) bool {
+	if name.contains('_d_') {
+		return !v3_own_defines.any(name.contains('_d_${it}.'))
+	}
+	return v3_own_defines.any(name.contains('_notd_${it}.'))
+}
+
 // active_indexed_source_file_names applies the compiler's native build-file
 // filtering without removing inactive sources from the broader symbol index.
 // The requesting test file is a direct compiler input, but sibling tests are
@@ -5656,8 +6108,8 @@ fn (app &App) active_indexed_source_file_names(dir string, active_test_file_name
 	mut active := map[string]bool{}
 	// The compiler's own directory scan is authoritative for saved sources: it
 	// settles the os, arch, `_d_`/`_notd_`, and `_default.c.v` rules together,
-	// and VLS compiles with no user defines.
-	for path in pref.get_v_files_from_dir_for_target(dir, [], host) {
+	// and VLS compiles with no user defines, only the ones V3 sets for itself.
+	for path in pref.get_v_files_from_dir_for_target(dir, v3_own_defines, host) {
 		active[os.file_name(path)] = true
 	}
 	// A buffer the client has created but not saved is invisible to that scan,
@@ -5665,7 +6117,7 @@ fn (app &App) active_indexed_source_file_names(dir string, active_test_file_name
 	// a `_d_` file needs a define VLS does not pass, and every other name is
 	// treated as active rather than hiding a file the user is editing.
 	for name in file_names {
-		if name in active || name.ends_with('_test.v') || name.contains('_d_')
+		if name in active || name.ends_with('_test.v') || name_needs_other_defines(name)
 			|| os.exists(os.join_path(dir, name)) {
 			continue
 		}
@@ -5729,7 +6181,7 @@ fn (mut app App) find_indexed_source_definition(dir string, symbol string, activ
 				continue
 			}
 			matches << Location{
-				uri: uri
+				uri:   uri
 				range: sym.selection_range
 			}
 		}
@@ -5835,6 +6287,23 @@ fn (mut app App) resolve_indexed_definition(uri string, position Position) ?Loca
 	return app.find_indexed_source_definition(os.dir(requesting_path), symbol, active_test_file_name, false, get_module_name(content))
 }
 
+// find_bare_declaration_line is find_declaration_line for a name used alone, not
+// after a value and a dot: a method is never its declaration, as the method
+// `value` of builtin's `DenseArray` is not that of a local named `value`.
+fn find_bare_declaration_line(lines []string, symbol string) int {
+	for i, raw_line in lines {
+		line := raw_line.trim_space()
+		stripped := if line.starts_with('pub ') { line[4..] } else { line }
+		if stripped.starts_with('fn (') {
+			continue
+		}
+		if find_declaration_line([raw_line], symbol) == 0 {
+			return i
+		}
+	}
+	return -1
+}
+
 // find_declaration_line searches `lines` for a top-level declaration whose name
 // exactly matches `symbol` and returns its 0-based line index, or -1 if not found.
 fn find_declaration_line(lines []string, symbol string) int {
@@ -5852,7 +6321,9 @@ fn find_declaration_line(lines []string, symbol string) int {
 				} else {
 					rest
 				}
-				name := first_word_paren(actual_rest)
+				// A generic declaration writes its type parameters after its
+				// name: `fn first[T](`, `struct Box[T] {`.
+				name := first_word_paren(actual_rest).all_before('[')
 				if name == symbol {
 					return i
 				}
@@ -5864,14 +6335,19 @@ fn find_declaration_line(lines []string, symbol string) int {
 }
 
 // extract_doc_comment walks backward from `decl_line` collecting consecutive
-// `//` comment lines (V's vdoc convention) and returns them joined with newlines.
+// `//` comment lines (V's vdoc convention) and returns them as Markdown (see
+// doc_comment_markdown).
 fn extract_doc_comment(lines []string, decl_line int) string {
 	mut comments := []string{}
 	mut i := decl_line - 1
+	// The attributes of a declaration sit between it and its documentation.
+	for i >= 0 && lines[i].trim_space().starts_with('@[') {
+		i--
+	}
 	for i >= 0 {
 		trimmed := lines[i].trim_space()
 		if trimmed.starts_with('//') {
-			comments << trimmed[2..].trim_space()
+			comments << trimmed[2..]
 			i--
 		} else {
 			break
@@ -5880,10 +6356,71 @@ fn extract_doc_comment(lines []string, decl_line int) string {
 	if comments.len == 0 {
 		return ''
 	}
-	comments = comments.reverse()
-	// Use Markdown hard line breaks (two trailing spaces + newline) so each
-	// comment line renders on its own line in the hover popup.
-	return comments.join('  \n')
+	return doc_comment_markdown(comments.reverse())
+}
+
+// doc_comment_markdown renders the lines of a doc comment, each as written
+// after its `//`, as Markdown: a line of text on its own line (a hard line
+// break), the lines of a ``` block as written but for the space after `//`,
+// and consecutive `Example: <code>` lines, which `v doc` shows as V code, as a
+// ```v block under `Example:` or `Examples:`.
+fn doc_comment_markdown(comments []string) string {
+	mut out := []string{cap: comments.len + 4}
+	mut in_block := false
+	mut i := 0
+	for i < comments.len {
+		if !in_block {
+			mut examples := []string{}
+			for i < comments.len {
+				examples << inline_doc_example(comments[i]) or { break }
+				i++
+			}
+			if examples.len > 0 {
+				out << if examples.len == 1 { 'Example:  ' } else { 'Examples:  ' }
+				out << '```v'
+				out << examples
+				out << '```'
+				continue
+			}
+		}
+		text := comments[i].trim_space()
+		if text.starts_with('```') {
+			in_block = !in_block
+			out << text
+		} else if in_block {
+			mut code := comments[i]
+			if code.starts_with(' ') {
+				code = code[1..]
+			}
+			out << code.trim_right(' \t')
+		} else {
+			// Two trailing spaces: a hard line break, so that each line of the
+			// comment shows on its own line.
+			out << text + '  '
+		}
+		i++
+	}
+	if in_block {
+		out << '```'
+	}
+	if out.len > 0 && out.last().ends_with('  ') {
+		out[out.len - 1] = out.last()[..out.last().len - 2]
+	}
+	return out.join('\n')
+}
+
+// inline_doc_example is the code of a doc comment line `Example: <code>`,
+// given as written after its `//`: how vlib documents most of its examples.
+fn inline_doc_example(comment string) ?string {
+	text := comment.trim_space()
+	if !text.starts_with('Example: ') {
+		return none
+	}
+	code := text['Example: '.len..].trim_space()
+	if code == '' {
+		return none
+	}
+	return code
 }
 
 // get_module_name extracts the module name declared in V source content.
@@ -5985,9 +6522,9 @@ fn get_import_completions(line string, work_dir string) []Detail {
 				continue
 			}
 			results << Detail{
-				kind: 9 // CompletionItemKind.Module
-				label: entry
-				detail: 'V stdlib module'
+				kind:        9 // CompletionItemKind.Module
+				label:       entry
+				detail:      'V stdlib module'
 				insert_text: entry
 			}
 		}
@@ -6004,15 +6541,14 @@ fn get_import_completions(line string, work_dir string) []Detail {
 			if !os.is_dir(full_path) {
 				continue
 			}
-			v_files := os.ls(full_path) or { [] }
-			has_v := v_files.any(it.ends_with('.v') && !it.ends_with('_test.v'))
-			if !has_v {
+			// a folder is a module to import when its files declare that module
+			if entry == 'main' || declared_module_of_dir(full_path) != entry {
 				continue
 			}
 			results << Detail{
-				kind: 9
-				label: entry
-				detail: 'Local module'
+				kind:        9
+				label:       entry
+				detail:      'Local module'
 				insert_text: entry
 			}
 		}
@@ -6032,7 +6568,7 @@ fn (mut app App) find_doc_comment_for_symbol(symbol string, current_lines []stri
 	// 1. Current file, but only for an unqualified symbol. A qualified
 	// `module.symbol` must never inherit a same-named local declaration's docs.
 	if imported_module == '' {
-		decl_line := find_declaration_line(current_lines, symbol)
+		decl_line := find_bare_declaration_line(current_lines, symbol)
 		if decl_line >= 0 {
 			doc := extract_doc_comment(current_lines, decl_line)
 			if doc != '' {
@@ -6154,7 +6690,7 @@ fn search_doc_in_vlib_dir(dir string, symbol string) string {
 		}
 		content := os.read_file(v_file) or { continue }
 		lines := content.split_into_lines()
-		dl := find_declaration_line(lines, symbol)
+		dl := find_bare_declaration_line(lines, symbol)
 		if dl >= 0 {
 			doc := extract_doc_comment(lines, dl)
 			if doc != '' {
@@ -6163,6 +6699,33 @@ fn search_doc_in_vlib_dir(dir string, symbol string) string {
 		}
 	}
 	return ''
+}
+
+// restore_line_endings rewrites the formatter's LF-only output to use the line
+// terminator `original` already uses, so formatting a document never changes its
+// line endings. `v fmt` normalizes every terminator to LF on every platform,
+// which on Windows turns a Format Document into a whole-file CRLF-to-LF rewrite.
+//
+// The terminator is taken from the document's first line break: a document with
+// no line break at all, or one that uses LF, is left as LF. A file whose endings
+// are already mixed is normalized to its first ending.
+fn restore_line_endings(original string, formatted string) string {
+	if !formatted.contains('\n') || formatted.contains('\r\n') {
+		return formatted
+	}
+	mut ending := '\n'
+	for i in 0 .. original.len {
+		if original[i] == `\n` {
+			if i > 0 && original[i - 1] == `\r` {
+				ending = '\r\n'
+			}
+			break
+		}
+	}
+	if ending == '\n' {
+		return formatted
+	}
+	return formatted.replace('\n', '\r\n')
 }
 
 // format_content formats the given content via v fmt and returns the TextEdits
@@ -6197,6 +6760,14 @@ fn (mut app App) format_content(uri string, content string) ([]TextEdit, string)
 		return []TextEdit{}, ''
 	}
 
+	// `v fmt` always writes LF, including on Windows, so a CRLF document comes
+	// back with every CR stripped. Returning that verbatim would rewrite the whole
+	// buffer's line endings on a plain Format Document, and the `formatted ==
+	// content` check below could never hold for a CRLF file, so VLS would report
+	// a change even when the code was already formatted. Put back the terminator
+	// the document already uses.
+	formatted = restore_line_endings(content, formatted)
+
 	if formatted == '' || formatted == content {
 		return []TextEdit{}, ''
 	}
@@ -6213,12 +6784,12 @@ fn (mut app App) format_content(uri string, content string) ([]TextEdit, string)
 	end_char := byte_to_encoded_col(final_segment, final_segment.len, app.position_encoding)
 
 	edit := TextEdit{
-		range: LSPRange{
+		range:    LSPRange{
 			start: Position{
 				line: 0
 				char: 0
 			}
-			end: Position{
+			end:   Position{
 				line: end_line
 				char: end_char
 			}
@@ -6233,7 +6804,7 @@ fn (mut app App) handle_formatting(request Request) Response {
 	params := json2.decode[DocumentFormattingParams](request.params) or {
 		log('Failed to decode DocumentFormattingParams: ${err}')
 		return Response{
-			id: request.id
+			id:     request.id
 			result: []TextEdit{}
 		}
 	}
@@ -6244,7 +6815,7 @@ fn (mut app App) handle_formatting(request Request) Response {
 		os.read_file(real_path) or {
 			log('Failed to read file for formatting: ${err}')
 			return Response{
-				id: request.id
+				id:     request.id
 				result: []TextEdit{}
 			}
 		}
@@ -6252,7 +6823,7 @@ fn (mut app App) handle_formatting(request Request) Response {
 
 	edits, _ := app.format_content(path, content)
 	return Response{
-		id: request.id
+		id:     request.id
 		result: edits
 	}
 }
@@ -6262,7 +6833,7 @@ fn (mut app App) handle_document_symbols(request Request) Response {
 	params := json2.decode[DocumentSymbolParams](request.params) or {
 		log('Failed to decode DocumentSymbolParams: ${err}')
 		return Response{
-			id: request.id
+			id:     request.id
 			result: []DocumentSymbol{}
 		}
 	}
@@ -6272,13 +6843,13 @@ fn (mut app App) handle_document_symbols(request Request) Response {
 	app.reindex_uri(uri)
 	if entry := app.symbol_index[uri] {
 		return Response{
-			id: request.id
+			id:     request.id
 			result: entry.doc_symbols
 		}
 	}
 	content := app.open_files[uri] or { '' }
 	return Response{
-		id: request.id
+		id:     request.id
 		result: encode_document_symbols(parse_document_symbols(content), content.split_into_lines(), app.position_encoding)
 	}
 }
@@ -6287,14 +6858,14 @@ fn (mut app App) handle_document_symbols(request Request) Response {
 fn (mut app App) handle_inlay_hints(request Request) Response {
 	if !app.inlay_hints_enabled {
 		return Response{
-			id: request.id
+			id:     request.id
 			result: []InlayHint{}
 		}
 	}
 	params := json2.decode[InlayHintParams](request.params) or {
 		log('Failed to decode InlayHintParams: ${err}')
 		return Response{
-			id: request.id
+			id:     request.id
 			result: []InlayHint{}
 		}
 	}
@@ -6303,6 +6874,16 @@ fn (mut app App) handle_inlay_hints(request Request) Response {
 	lines := content.split_into_lines()
 	start_line := params.range.start.line
 	end_line := params.range.end.line
+
+	// The compiler knows the type of every variable and the parameter names of
+	// every call; the source heuristics below only run when it cannot answer.
+	if compiler_hints := app.compiler_inlay_hints(uri, content) {
+		return Response{
+			id:     request.id
+			result: compiler_hints.filter(it.position.line >= start_line
+				&& it.position.line <= end_line)
+		}
+	}
 
 	// Build fn index lazily: current file + open files + vlib modules imported in this file
 	file_path := uri_to_path(uri)
@@ -6421,20 +7002,115 @@ fn (mut app App) handle_inlay_hints(request Request) Response {
 		// byte offset is re-encoded into the client's encoding (P0-01/P2-07).
 		name_col := raw.index(var_name) or { continue }
 		hints << InlayHint{
-			position: Position{
+			position:     Position{
 				line: line_idx
 				char: byte_to_encoded_col(raw, name_col + var_name.len, app.position_encoding)
 			}
-			label: ': ${inferred}'
-			kind: inlay_hint_kind_type
+			label:        ': ${inferred}'
+			kind:         inlay_hint_kind_type
 			padding_left: false
 		}
 	}
 
 	return Response{
-		id: request.id
+		id:     request.id
 		result: hints
 	}
+}
+
+struct CachedInlayHints {
+	stamp string
+	hints []InlayHint
+}
+
+// compiler_inlay_hints returns every inlay hint of the document, computed by the
+// compiler's `ih^` line-info mode, or none when the compiler gave no answer
+// (e.g. on a syntax error). Editors ask again on every scroll, so the answer is
+// reused until this document or any other open one changes.
+fn (mut app App) compiler_inlay_hints(uri string, content string) ?[]InlayHint {
+	stamp := app.inlay_hint_stamp(uri, content)
+	if cached := app.inlay_hint_cache[uri] {
+		if cached.stamp == stamp {
+			return cached.hints
+		}
+	}
+	result := app.run_v_line_info(.inlay_hint, uri, '1:ih^1')
+	if result is []InlayHint {
+		app.inlay_hint_cache[uri] = CachedInlayHints{
+			stamp: stamp
+			hints: result
+		}
+		return result
+	}
+	return none
+}
+
+// inlay_hint_stamp identifies the state the hints were computed from: the
+// document's text, the versions of all open documents, and the revision of its
+// project (bumped when a file that is not open changes on disk), since a
+// signature edited in another file changes the parameter names shown here.
+fn (app &App) inlay_hint_stamp(uri string, content string) string {
+	mut versions := []string{cap: app.open_files_versions.len}
+	for open_uri, version in app.open_files_versions {
+		versions << '${open_uri}=${version}'
+	}
+	versions.sort()
+	stamp := '${app.project_generation(uri)}\n${versions.join(';')}\n${content}'
+	if app.watched_files_active {
+		return stamp
+	}
+	// Without file watchers, a file that is not open changes on disk without a
+	// notification: what the files of the project are on disk is part of it.
+	return stamp + '\n' + project_disk_fingerprint(app.generation_key(uri))
+}
+
+// project_disk_max_files is how many `.v` files of a project the stamp of its
+// inlay hints looks at on disk (see project_disk_fingerprint).
+const project_disk_max_files = 5000
+const project_disk_max_bytes = u64(8 * 1024 * 1024)
+
+// project_disk_fingerprint is what the `.v` files under `root` are on disk:
+// their paths, metadata and content hashes, bounded by project_disk_max_files
+// and the same directory exclusions and symlink rules as the workspace index.
+fn project_disk_fingerprint(root string) string {
+	if root == '' || os.dir(root) == root
+		|| (root.len >= 2 && root[1] == `:` && root.trim_right('/\\').len == 2)
+		|| !os.is_dir(root) {
+		return ''
+	}
+	mut files := []string{}
+	mut complete := collect_v_files_bounded(root, project_disk_max_files, mut files)
+	files.sort()
+	mut parts := []string{cap: int_min(files.len, project_disk_max_files)}
+	mut bytes_read := u64(0)
+	for path in files {
+		info := os.stat(path) or {
+			complete = false
+			continue
+		}
+		if info.size > index_max_file_bytes || info.size > project_disk_max_bytes - bytes_read {
+			complete = false
+			continue
+		}
+		mut file := os.open(path) or {
+			complete = false
+			continue
+		}
+		// A fixed read limit also bounds a file growing after its metadata was read.
+		content := file.read_bytes(int(info.size) + 1).bytestr()
+		file.close()
+		bytes_read += u64(content.len)
+		if content.len != int(info.size) || bytes_read > project_disk_max_bytes {
+			complete = false
+			bytes_read = project_disk_max_bytes
+		}
+		parts << '${path}:${info.inode}:${info.size}:${info.mtime}:${content.hash()}'
+	}
+	if !complete {
+		// A partial traversal cannot establish that the cached hints are current.
+		parts << 'incomplete:${time.now().unix_nano()}'
+	}
+	return parts.join('\n')
 }
 
 // infer_type_from_literal returns the V type name for a simple literal RHS value,
@@ -6755,7 +7431,13 @@ fn parse_document_symbols(content string) []DocumentSymbol {
 
 // make_symbol builds a DocumentSymbol covering the single line `line_idx`.
 fn make_symbol(name string, kind int, line_idx int, raw_line string) DocumentSymbol {
-	selection_name := if kind == sym_kind_method { extract_simple_fn_name(name) } else { name }
+	// The name alone, without the type parameters a generic declaration writes
+	// after it, `first` of `first[T]`: its uses name it so.
+	selection_name := if kind == sym_kind_method {
+		extract_simple_fn_name(name)
+	} else {
+		name.all_before('[')
+	}
 	mut col_start := raw_line.index(selection_name) or { 0 }
 	if kind == sym_kind_method {
 		// A receiver type can contain the method name as an identifier. Search
@@ -6772,7 +7454,7 @@ fn make_symbol(name string, kind int, line_idx int, raw_line string) DocumentSym
 			line: line_idx
 			char: 0
 		}
-		end: Position{
+		end:   Position{
 			line: line_idx
 			char: raw_line.len
 		}
@@ -6782,17 +7464,17 @@ fn make_symbol(name string, kind int, line_idx int, raw_line string) DocumentSym
 			line: line_idx
 			char: col_start
 		}
-		end: Position{
+		end:   Position{
 			line: line_idx
 			char: col_end
 		}
 	}
 	return DocumentSymbol{
-		name: name
-		kind: kind
-		range: line_range
+		name:            name
+		kind:            kind
+		range:           line_range
 		selection_range: sel_range
-		children: []DocumentSymbol{}
+		children:        []DocumentSymbol{}
 	}
 }
 
@@ -6880,13 +7562,13 @@ fn (mut app App) search_symbol_in_dirs(symbol string, request_id int) []Location
 		positions := occ[symbol] or { continue }
 		for p in positions {
 			locations << Location{
-				uri: uri
+				uri:   uri
 				range: LSPRange{
 					start: Position{
 						line: p.line
 						char: p.start_char
 					}
-					end: Position{
+					end:   Position{
 						line: p.line
 						char: p.end_char
 					}
@@ -6902,29 +7584,22 @@ fn (mut app App) search_symbol_in_dirs(symbol string, request_id int) []Location
 // encoding; it is converted to the byte column the compiler expects (P0-01).
 // Returns none when the definition cannot be resolved.
 fn (mut app App) resolve_symbol_anchor(uri string, line int, ch int) ?Location {
-	mut probe_cols := []int{}
-	// The compiler's gd^ lookup can misclassify a probe exactly on the first byte
-	// of an identifier as the enclosing call. Indexed candidates always use that
-	// first position, so probe two units into the identifier (or one for a two-unit
-	// name). A one-unit or midpoint probe can be misclassified as the enclosing
-	// call in nested expressions such as `println(shared_value())`.
-	content := app.open_files[uri] or { os.read_file(uri_to_path(uri)) or { '' } }
-	lines := content.split_into_lines()
-	if line >= 0 && line < lines.len {
-		start, end := find_word_bounds_at_col(lines[line], ch, app.position_encoding)
-		inner_offset := if end - start > 2 { 2 } else { 1 }
-		inner := start + inner_offset
-		if ch == start && inner > start && inner < end {
-			probe_cols << inner
-		}
-	}
-	if probe_cols.len == 0 {
-		probe_cols << ch
-	}
-	for probe_col in probe_cols {
+	return app.resolve_symbol_anchor_by(uri, line, ch, false)
+}
+
+// resolve_symbol_anchor_by is resolve_symbol_anchor, asking a compiler process of
+// its own instead of the persistent compiler when `one_shot` is set.
+fn (mut app App) resolve_symbol_anchor_by(uri string, line int, ch int, one_shot bool) ?Location {
+	for probe_col in app.anchor_probe_cols(uri, line, ch) {
 		byte_col := app.client_col_to_byte_col(uri, line, probe_col)
 		line_info := '${line + 1}:gd^${byte_col}'
-		result := app.run_v_line_info(.definition, uri, line_info)
+		// From the program that imports the file's module, which instantiates
+		// its generic functions.
+		result := if one_shot {
+			app.run_v_line_info_once(.definition, uri, line_info, app.program_root(uri_to_path(uri)))
+		} else {
+			app.run_v_line_info(.definition, uri, line_info)
+		}
 		if result is Location {
 			loc := result as Location
 			if loc.uri != '' {
@@ -6933,6 +7608,33 @@ fn (mut app App) resolve_symbol_anchor(uri string, line int, ch int) ?Location {
 		}
 	}
 	return none
+}
+
+// anchor_probe_cols returns the columns to ask the compiler's gd^ lookup at for
+// the name at `ch` of `line`, in the order to try them. The lookup can
+// misclassify a probe exactly on the first byte of an identifier as the
+// enclosing call. Indexed candidates always use that first position, so probe
+// two units into the identifier (or one for a two-unit name). A one-unit or
+// midpoint probe can be misclassified as the enclosing call in nested
+// expressions such as `println(shared_value())`.
+fn (app &App) anchor_probe_cols(uri string, line int, ch int) []int {
+	mut probe_cols := []int{}
+	content := app.open_files[uri] or { os.read_file(uri_to_path(uri)) or { '' } }
+	lines := content.split_into_lines()
+	if line >= 0 && line < lines.len {
+		start, end := find_word_bounds_at_col(lines[line], ch, app.position_encoding)
+		inner_offset := if end - start > 2 { 2 } else { 1 }
+		inner := start + inner_offset
+		// A one-unit name has no inside to probe: right after it, as in the `x` of
+		// `println(x)`, the lookup still finds the name and not the enclosing call.
+		if ch == start && inner > start && inner <= end {
+			probe_cols << inner
+		}
+	}
+	if probe_cols.len == 0 || probe_cols[0] == ch + 1 {
+		probe_cols << ch
+	}
+	return probe_cols
 }
 
 fn anchor_cache_key(uri string, line int, ch int) string {
@@ -6989,13 +7691,13 @@ fn (mut app App) collect_semantic_candidates(symbol string, scope IndexScope) []
 		positions := occ[symbol] or { continue }
 		for p in positions {
 			candidates << Location{
-				uri: uri
+				uri:   uri
 				range: LSPRange{
 					start: Position{
 						line: p.line
 						char: p.start_char
 					}
-					end: Position{
+					end:   Position{
 						line: p.line
 						char: p.end_char
 					}
@@ -7034,6 +7736,7 @@ fn (mut app App) search_symbol_in_dirs_semantic(symbol string, anchor Location, 
 
 	mut locations := []Location{}
 	mut anchor_cache := map[string]?Location{}
+	app.v3_prefetch_anchors(candidates, mut anchor_cache)
 	for cand in candidates {
 		if request_id in app.cancelled_requests {
 			return locations
@@ -7062,7 +7765,7 @@ fn (mut app App) handle_code_action(request Request) Response {
 			log('Failed to decode CodeActionParams: ${err}')
 		}
 		return Response{
-			id: request.id
+			id:     request.id
 			result: []CodeAction{}
 		}
 	}
@@ -7104,12 +7807,12 @@ fn (mut app App) handle_code_action(request Request) Response {
 						changes: {
 							uri: [
 								TextEdit{
-									range: LSPRange{
+									range:    LSPRange{
 										start: Position{
 											line: line_nr
 											char: 0
 										}
-										end: end_pos
+										end:   end_pos
 									}
 									new_text: ''
 								},
@@ -7117,11 +7820,11 @@ fn (mut app App) handle_code_action(request Request) Response {
 						}
 					}
 					actions << CodeAction{
-						title: 'Remove unknown import'
-						kind: code_action_kind_quickfix
+						title:        'Remove unknown import'
+						kind:         code_action_kind_quickfix
 						is_preferred: true
-						edit: edit
-						diagnostics: [diag]
+						edit:         edit
+						diagnostics:  [diag]
 					}
 				}
 			}
@@ -7138,7 +7841,7 @@ fn (mut app App) handle_code_action(request Request) Response {
 	}
 
 	return Response{
-		id: request.id
+		id:     request.id
 		result: actions
 	}
 }
@@ -7209,12 +7912,12 @@ fn build_safe_organize_imports_action(uri string, content string, lines []string
 		changes: {
 			uri: [
 				TextEdit{
-					range: LSPRange{
+					range:    LSPRange{
 						start: Position{
 							line: first
 							char: 0
 						}
-						end: Position{
+						end:   Position{
 							line: last
 							char: byte_to_encoded_col(lines[last], lines[last].len, enc)
 						}
@@ -7226,8 +7929,8 @@ fn build_safe_organize_imports_action(uri string, content string, lines []string
 	}
 	return CodeAction{
 		title: 'Organize Imports'
-		kind: code_action_kind_source_organize_imports
-		edit: edit
+		kind:  code_action_kind_source_organize_imports
+		edit:  edit
 	}
 }
 
@@ -7304,7 +8007,7 @@ fn (mut app App) collect_module_completions(current_file_uri string, working_dir
 		items << entry.module_completions
 	}
 	return IndexedModuleCompletionResult{
-		items: items
+		items:        items
 		use_compiler: has_conditional
 	}
 }
@@ -7391,26 +8094,83 @@ fn make_keyword_completions() []Detail {
 	mut items := []Detail{}
 	for kw in v_keywords {
 		items << Detail{
-			kind: 14 // Keyword
-			label: kw
+			kind:   14 // Keyword
+			label:  kw
 			detail: kw
 		}
 	}
 	for b in v_builtins {
 		items << Detail{
-			kind: 3 // Function
-			label: b
+			kind:   3 // Function
+			label:  b
 			detail: b
 		}
 	}
 	for builtin_type in v_builtin_types {
 		items << Detail{
-			kind: 7 // Class
-			label: builtin_type
+			kind:   7 // Class
+			label:  builtin_type
 			detail: 'builtin type'
 		}
 	}
 	return items
+}
+
+// The keywords written as calls: `dump`, which V documents as a builtin
+// function, and the ones it answers at compile time. Their completion inserts
+// the parentheses a function's does.
+const v_builtin_keyword_functions = ['dump', 'isreftype', 'sizeof', 'typeof']
+
+// with_builtin_calls gives V's builtin functions among `items` what every other
+// function has: the signature that vlib/builtin declares, and a completion that
+// inserts the call. One that vlib does not declare, as `dump`, which the
+// compiler provides, still inserts its parentheses.
+fn (mut app App) with_builtin_calls(items []Detail) []Detail {
+	declared := app.builtin_call_items()
+	mut out := []Detail{cap: items.len}
+	for item in items {
+		if item.label !in v_builtins && item.label !in v_builtin_keyword_functions {
+			out << item
+		} else if call := declared[item.label] {
+			out << call
+		} else {
+			out << Detail{
+				...item
+				insert_text:        '${item.label}(\$0)'
+				insert_text_format: 2
+			}
+		}
+	}
+	return out
+}
+
+// builtin_call_items returns V's builtin functions (v_builtins) as completion
+// items, from their declarations in vlib/builtin, read once per vlib. It reads
+// the declarations that a flag can leave out too, as `@[if !noprintln ?]` does
+// println: without the flag, that one is what a program calls.
+fn (mut app App) builtin_call_items() map[string]Detail {
+	dir := os.join_path(find_v_dir(), 'vlib', 'builtin')
+	if dir !in app.builtin_calls_cache {
+		mut items := map[string]Detail{}
+		mut files := os.ls(dir) or { []string{} }
+		files.sort()
+		for file in files {
+			if !file.ends_with('.v') || file.ends_with('_test.v') || file.ends_with('.js.v') {
+				continue
+			}
+			content := os.read_file(os.join_path(dir, file)) or { continue }
+			lines := source_code_lines(content)
+			unconditional := []bool{len: lines.len}
+			parsed := parse_module_member_completions_from_lines(lines, unconditional, true)
+			for item in parsed.items {
+				if item.kind == 3 && item.label in v_builtins && item.label !in items {
+					items[item.label] = item
+				}
+			}
+		}
+		app.builtin_calls_cache[dir] = items.clone()
+	}
+	return app.builtin_calls_cache[dir] or { map[string]Detail{} }
 }
 
 // handle_range_formatting handles textDocument/rangeFormatting.
@@ -7419,7 +8179,7 @@ fn (mut app App) handle_range_formatting(request Request) Response {
 	params := json2.decode[DocumentRangeFormattingParams](request.params) or {
 		log('Failed to decode DocumentRangeFormattingParams: ${err}')
 		return Response{
-			id: request.id
+			id:     request.id
 			result: []TextEdit{}
 		}
 	}
@@ -7429,7 +8189,7 @@ fn (mut app App) handle_range_formatting(request Request) Response {
 		os.read_file(real_path) or {
 			log('Failed to read file for range formatting: ${err}')
 			return Response{
-				id: request.id
+				id:     request.id
 				result: []TextEdit{}
 			}
 		}
@@ -7442,7 +8202,7 @@ fn (mut app App) handle_range_formatting(request Request) Response {
 	os.write_file(temp_file, content) or {
 		log('Failed to write temp file for range formatting: ${err}')
 		return Response{
-			id: request.id
+			id:     request.id
 			result: []TextEdit{}
 		}
 	}
@@ -7451,7 +8211,7 @@ fn (mut app App) handle_range_formatting(request Request) Response {
 	formatted := os.read_file(temp_file) or {
 		os.rm(temp_file) or {}
 		return Response{
-			id: request.id
+			id:     request.id
 			result: []TextEdit{}
 		}
 	}
@@ -7462,7 +8222,7 @@ fn (mut app App) handle_range_formatting(request Request) Response {
 	}
 	if result.exit_code != 0 || formatted == '' || formatted == content {
 		return Response{
-			id: request.id
+			id:     request.id
 			result: []TextEdit{}
 		}
 	}
@@ -7475,7 +8235,7 @@ fn (mut app App) handle_range_formatting(request Request) Response {
 	}
 	if req_start >= original_lines.len || req_start > req_end {
 		return Response{
-			id: request.id
+			id:     request.id
 			result: []TextEdit{}
 		}
 	}
@@ -7497,19 +8257,19 @@ fn (mut app App) handle_range_formatting(request Request) Response {
 	if orig_hunk_start < req_start || orig_hunk_end - 1 > req_end {
 		log('range formatting: changed hunk [${orig_hunk_start}..${orig_hunk_end}) outside requested range [${req_start}..${req_end}]; returning no edits')
 		return Response{
-			id: request.id
+			id:     request.id
 			result: []TextEdit{}
 		}
 	}
 	fmt_hunk_end := formatted_lines.len - suf // exclusive
-	new_text := formatted_lines[orig_hunk_start..fmt_hunk_end].join('\n') + '\n'
+	new_text := restore_line_endings(content, formatted_lines[orig_hunk_start..fmt_hunk_end].join('\n') + '\n')
 	edit := TextEdit{
-		range: LSPRange{
+		range:    LSPRange{
 			start: Position{
 				line: orig_hunk_start
 				char: 0
 			}
-			end: Position{
+			end:   Position{
 				line: orig_hunk_end
 				char: 0
 			}
@@ -7517,7 +8277,7 @@ fn (mut app App) handle_range_formatting(request Request) Response {
 		new_text: new_text
 	}
 	return Response{
-		id: request.id
+		id:     request.id
 		result: [edit]
 	}
 }
@@ -7532,7 +8292,7 @@ fn (mut app App) handle_selection_range(request Request) Response {
 			log('Failed to decode SelectionRangeParams: ${err}')
 		}
 		return Response{
-			id: request.id
+			id:     request.id
 			result: []SelectionRange{}
 		}
 	}
@@ -7545,7 +8305,7 @@ fn (mut app App) handle_selection_range(request Request) Response {
 			results << SelectionRange{
 				range: LSPRange{
 					start: pos
-					end: pos
+					end:   pos
 				}
 			}
 			continue
@@ -7558,7 +8318,7 @@ fn (mut app App) handle_selection_range(request Request) Response {
 				line: pos.line
 				char: 0
 			}
-			end: Position{
+			end:   Position{
 				line: pos.line
 				char: byte_to_encoded_col(line_text, line_text.len, app.position_encoding)
 			}
@@ -7576,7 +8336,7 @@ fn (mut app App) handle_selection_range(request Request) Response {
 				line: pos.line
 				char: start
 			}
-			end: Position{
+			end:   Position{
 				line: pos.line
 				char: end
 			}
@@ -7585,12 +8345,12 @@ fn (mut app App) handle_selection_range(request Request) Response {
 			range: line_range
 		}
 		results << SelectionRange{
-			range: word_range
+			range:  word_range
 			parent: line_parent
 		}
 	}
 	return Response{
-		id: request.id
+		id:     request.id
 		result: results
 	}
 }
@@ -7932,7 +8692,7 @@ fn code_lens_range(line int, raw_line string, encoding PositionEncoding) LSPRang
 			line: line
 			char: 0
 		}
-		end: Position{
+		end:   Position{
 			line: line
 			char: byte_to_encoded_col(raw_line, raw_line.len, encoding)
 		}
@@ -7947,7 +8707,7 @@ fn (mut app App) handle_code_lens(request Request) Response {
 			log('Failed to decode CodeLensParams: ${err}')
 		}
 		return Response{
-			id: request.id
+			id:     request.id
 			result: []CodeLens{}
 		}
 	}
@@ -7962,35 +8722,35 @@ fn (mut app App) handle_code_lens(request Request) Response {
 		fn_name := code_lens_fn_name(code)
 		if fn_name == 'main' {
 			lenses << CodeLens{
-				range: code_lens_range(i, raw_line, app.position_encoding)
+				range:   code_lens_range(i, raw_line, app.position_encoding)
 				command: Command{
-					title: 'Run Main'
-					command: 'vls.runFile'
+					title:     'Run Main'
+					command:   'vls.runFile'
 					arguments: [uri]
 				}
 			}
 		}
 		if is_test_file && fn_name.starts_with('test_') {
 			lenses << CodeLens{
-				range: code_lens_range(i, raw_line, app.position_encoding)
+				range:   code_lens_range(i, raw_line, app.position_encoding)
 				command: Command{
-					title: 'Run File'
-					command: 'vls.runTests'
+					title:     'Run File'
+					command:   'vls.runTests'
 					arguments: [uri]
 				}
 			}
 			lenses << CodeLens{
-				range: code_lens_range(i, raw_line, app.position_encoding)
+				range:   code_lens_range(i, raw_line, app.position_encoding)
 				command: Command{
-					title: 'Run Test'
-					command: 'vls.runTests'
+					title:     'Run Test'
+					command:   'vls.runTests'
 					arguments: [uri, fn_name]
 				}
 			}
 		}
 	}
 	return Response{
-		id: request.id
+		id:     request.id
 		result: lenses
 	}
 }
@@ -8003,12 +8763,12 @@ fn (mut app App) handle_code_lens_resolve(request Request) Response {
 			log('Failed to decode CodeLens for resolve: ${err}')
 		}
 		return Response{
-			id: request.id
+			id:     request.id
 			result: 'null'
 		}
 	}
 	return Response{
-		id: request.id
+		id:     request.id
 		result: lens
 	}
 }
@@ -8050,7 +8810,7 @@ fn (mut app App) handle_execute_command(request Request) Response {
 			log('Failed to decode ExecuteCommandParams: ${err}')
 		}
 		return Response{
-			id: request.id
+			id:     request.id
 			result: 'null'
 		}
 	}
@@ -8064,13 +8824,13 @@ fn (mut app App) handle_execute_command(request Request) Response {
 				app.send_show_message('vls: the V compiler (`v`) was not found on PATH.', 1)
 			} else {
 				app.start_code_lens_run(CodeLensRunJob{
-					kind: .main
-					title: 'Run Main'
-					uri: uri
-					path: path
-					open_files: app.open_files.clone()
-					write_mutex: app.write_mutex
-					tcp_conn: app.tcp_conn
+					kind:           .main
+					title:          'Run Main'
+					uri:            uri
+					path:           path
+					open_files:     app.open_files.clone()
+					write_mutex:    app.write_mutex
+					tcp_conn:       app.tcp_conn
 					capture_output: app.capture_output
 				})
 			}
@@ -8098,14 +8858,14 @@ fn (mut app App) handle_execute_command(request Request) Response {
 						app.send_show_message('vls: the V compiler (`v`) was not found on PATH.', 1)
 					} else {
 						app.start_code_lens_run(CodeLensRunJob{
-							kind: kind
-							title: title
-							uri: uri
-							path: path
-							fn_name: fn_name
-							open_files: app.open_files.clone()
-							write_mutex: app.write_mutex
-							tcp_conn: app.tcp_conn
+							kind:           kind
+							title:          title
+							uri:            uri
+							path:           path
+							fn_name:        fn_name
+							open_files:     app.open_files.clone()
+							write_mutex:    app.write_mutex
+							tcp_conn:       app.tcp_conn
 							capture_output: app.capture_output
 						})
 					}
@@ -8118,7 +8878,7 @@ fn (mut app App) handle_execute_command(request Request) Response {
 	}
 
 	return Response{
-		id: request.id
+		id:     request.id
 		result: 'null'
 	}
 }
@@ -8131,7 +8891,7 @@ fn (mut app App) handle_inline_value(request Request) Response {
 			log('Failed to decode InlineValueParams: ${err}')
 		}
 		return Response{
-			id: request.id
+			id:     request.id
 			result: []InlineValueText{}
 		}
 	}
@@ -8165,16 +8925,16 @@ fn (mut app App) handle_inline_value(request Request) Response {
 					line: i
 					char: col_start
 				}
-				end: Position{
+				end:   Position{
 					line: i
 					char: col_start + var_name.len
 				}
 			}
-			text: ': ${inferred}'
+			text:  ': ${inferred}'
 		}
 	}
 	return Response{
-		id: request.id
+		id:     request.id
 		result: values
 	}
 }
@@ -8188,7 +8948,7 @@ fn (mut app App) handle_linked_editing_range(request Request) Response {
 			log('Failed to decode TextDocumentPositionParams for linkedEditingRange: ${err}')
 		}
 		return Response{
-			id: request.id
+			id:     request.id
 			result: 'null'
 		}
 	}
@@ -8197,7 +8957,7 @@ fn (mut app App) handle_linked_editing_range(request Request) Response {
 	lines := content.split_into_lines()
 	if params.position.line < 0 || params.position.line >= lines.len {
 		return Response{
-			id: request.id
+			id:     request.id
 			result: 'null'
 		}
 	}
@@ -8205,7 +8965,7 @@ fn (mut app App) handle_linked_editing_range(request Request) Response {
 	start, end := find_word_bounds_at_col(line_text, params.position.char, app.position_encoding)
 	if start < 0 || end <= start {
 		return Response{
-			id: request.id
+			id:     request.id
 			result: 'null'
 		}
 	}
@@ -8226,7 +8986,7 @@ fn (mut app App) handle_linked_editing_range(request Request) Response {
 					line: params.position.line
 					char: sc
 				}
-				end: Position{
+				end:   Position{
 					line: params.position.line
 					char: ec
 				}
@@ -8236,12 +8996,12 @@ fn (mut app App) handle_linked_editing_range(request Request) Response {
 	}
 	if ranges.len == 0 {
 		return Response{
-			id: request.id
+			id:     request.id
 			result: 'null'
 		}
 	}
 	return Response{
-		id: request.id
+		id:     request.id
 		result: LinkedEditingRanges{
 			ranges: ranges
 		}
@@ -8252,7 +9012,7 @@ fn (mut app App) handle_linked_editing_range(request Request) Response {
 // For now it returns empty edits — triggering v fmt on every keystroke would be too expensive.
 fn (mut app App) handle_on_type_formatting(request Request) Response {
 	return Response{
-		id: request.id
+		id:     request.id
 		result: []TextEdit{}
 	}
 }

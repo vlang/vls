@@ -51,15 +51,31 @@ jobs:
           V_MACOS_V3_NO_FALLBACK: ${{ runner.os == 'Windows' && '0' || '1' }}
         run: v -no-memory-limit -nocache test vls/
 
+      # `-prod` drops assert statements, which silently changes the behaviour of
+      # any test that performs work inside one. That reached Windows as a hang in
+      # test_stdio_reader_processes_frame_before_eof, invisible here because -prod
+      # only ran on Linux. Keep a bounded step on both, so a future hang is a red
+      # build instead of a job that burns its whole budget.
+      - name: Run tests with production optimizations (Windows)
+        if: runner.os == 'Windows'
+        timeout-minutes: 30
+        env:
+          V_MACOS_V3_NO_FALLBACK: "0"
+        run: v -no-memory-limit -nocache -prod test vls/
+
       - name: Run tests with production optimizations
         if: runner.os == 'Linux'
+        timeout-minutes: 30
         env:
           VLS_VLANG_V_REPO: ${{ github.workspace }}
           V_MACOS_V3_NO_FALLBACK: "1"
         run: v -no-memory-limit -nocache -prod test vls/
 
+      # V3 is the default backend on Linux and macOS, so it was only compiled
+      # there. Windows keeps V1 as its default, which let a V3-only breakage sit
+      # unnoticed until someone built with -new-compiler by hand. Both paths are
+      # cheap to compile, so cover all three platforms.
       - name: Compile project with V3
-        if: runner.os != 'Windows'
         env:
           V_MACOS_V3_NO_FALLBACK: "1"
         run: v -no-memory-limit -nocache -new-compiler vls/
