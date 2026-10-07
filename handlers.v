@@ -959,6 +959,7 @@ fn (mut app App) indexed_completions(uri string, position Position) IndexedCompl
 
 	mut details := app.callback_argument_completions(uri, content, lines, position)
 	details << make_keyword_completions()
+	details << postfix_completions()
 	mut seen_labels := map[string]bool{}
 	for detail in details {
 		seen_labels[detail.label] = true
@@ -7344,6 +7345,46 @@ fn build_fn_snippet(fn_name string, params_str string) string {
 		placeholders << '\${${placeholders.len + 1}:${param_name}}'
 	}
 	return '${fn_name}(${placeholders.join(', ')})\$0'
+}
+
+fn postfix_completions() []Detail {
+	return [
+		Detail{
+			kind: 14
+			label: '.if'
+			detail: 'postfix template'
+			insert_text: 'if expr {\n\t$0\n}'
+			insert_text_format: 2
+		},
+		Detail{
+			kind: 14
+			label: '.match'
+			detail: 'postfix template'
+			insert_text: 'match expr {\n\t$0\n}'
+			insert_text_format: 2
+		},
+		Detail{
+			kind: 14
+			label: '.for'
+			detail: 'postfix template'
+			insert_text: 'for x in expr {\n\t$0\n}'
+			insert_text_format: 2
+		},
+		Detail{
+			kind: 14
+			label: '.ptr'
+			detail: 'postfix template'
+			insert_text: '&expr'
+			insert_text_format: 2
+		},
+		Detail{
+			kind: 14
+			label: '.unwrap'
+			detail: 'postfix template'
+			insert_text: 'expr or { $0 }'
+			insert_text_format: 2
+		},
+	]
 }
 
 fn make_keyword_completions() []Detail {
