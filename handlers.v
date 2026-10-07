@@ -1168,8 +1168,8 @@ fn (mut app App) operation_at_pos(method Method, request Request) Response {
 			return Response{
 				id:     request.id
 				result: CompletionList{
-				is_incomplete: truncated
-				items: budgeted
+					is_incomplete: truncated
+					items:         budgeted
 				}
 			}
 		}
@@ -1178,7 +1178,7 @@ fn (mut app App) operation_at_pos(method Method, request Request) Response {
 			id:     request.id
 			result: CompletionList{
 				is_incomplete: truncated_indexed
-				items: budgeted_indexed
+				items:         budgeted_indexed
 			}
 		}
 	}

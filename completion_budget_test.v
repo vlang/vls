@@ -4,10 +4,10 @@ fn budget_test_items(n int) []Detail {
 	mut items := []Detail{}
 	for i in 0 .. n {
 		items << Detail{
-			kind: 6
-			label: 'item_${i}'
-			detail: ''
-			declaration: ''
+			kind:          6
+			label:         'item_${i}'
+			detail:        ''
+			declaration:   ''
 			documentation: ''
 		}
 	}
