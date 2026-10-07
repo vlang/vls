@@ -167,7 +167,7 @@ fn test_source_path_from_overlay_normalizes_windows_relative_join() {
 		temp_root:           r'C:\temp\overlay'
 		temp_work_dir:       r'C:\temp\overlay\src'
 	}
-	mapped := source_path_from_overlay_with_windows_rules('./main.v', overlay, true)
+	mapped := source_path_from_overlay_with_windows_rules('./main.v', overlay, true, '')
 	assert mapped == 'C:/repo/src/main.v'
 }
 
@@ -1488,7 +1488,7 @@ fn test_prepare_compilation_overlay_preserves_nested_symlink_layout() {
 	assert overlay.temp_work_dir == os.join_path(overlay.temp_root, 'src')
 	assert overlay.temp_source_file == os.join_path(overlay.temp_root, 'src', 'main.v')
 	assert os.read_file(overlay.temp_source_file) or { '' } == unsaved_content
-	mapped_path := source_path_from_overlay(overlay.temp_source_file, overlay)
+	mapped_path := source_path_from_overlay(overlay.temp_source_file, overlay, '')
 	assert normalize_overlay_path(mapped_path) == normalize_overlay_path(main_file)
 }
 
@@ -1526,7 +1526,7 @@ fn test_prepare_compilation_overlay_preserves_posix_backslashes() {
 		assert overlay.source_root == project_dir
 		assert overlay.source_display_root == project_dir
 		assert os.read_file(overlay.temp_source_file) or { '' } == unsaved_content
-		mapped_path := source_path_from_overlay(overlay.temp_source_file, overlay)
+		mapped_path := source_path_from_overlay(overlay.temp_source_file, overlay, '')
 		assert mapped_path == main_file
 	}
 }

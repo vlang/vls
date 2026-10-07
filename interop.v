@@ -790,12 +790,13 @@ fn (mut app App) prepare_compilation_overlay(real_path string) !CompilationOverl
 
 // source_path_from_overlay maps compiler paths in the temporary project back to
 // their original source paths.
-fn source_path_from_overlay_with_windows_rules(reported_path string, overlay CompilationOverlay, windows bool) string {
+fn source_path_from_overlay_with_windows_rules(reported_path string, overlay CompilationOverlay, windows bool, base_dir string) string {
 	mut candidate := normalize_overlay_path_with_windows_rules(reported_path, windows)
+	resolve_base := if base_dir != '' { base_dir } else { overlay.temp_work_dir }
 	if candidate.starts_with('./') || candidate.starts_with('.\\') {
-		candidate = os.join_path(overlay.temp_work_dir, candidate[2..])
+		candidate = os.join_path(resolve_base, candidate[2..])
 	} else if !os.is_abs_path(candidate) {
-		candidate = os.join_path(overlay.temp_work_dir, candidate)
+		candidate = os.join_path(resolve_base, candidate)
 	}
 	candidate = normalize_overlay_path_with_windows_rules(candidate, windows)
 	temp_root := normalize_overlay_path_with_windows_rules(overlay.temp_root, windows)
@@ -806,11 +807,11 @@ fn source_path_from_overlay_with_windows_rules(reported_path string, overlay Com
 	return candidate
 }
 
-fn source_path_from_overlay(reported_path string, overlay CompilationOverlay) string {
+fn source_path_from_overlay(reported_path string, overlay CompilationOverlay, base_dir string) string {
 	$if windows {
-		return source_path_from_overlay_with_windows_rules(reported_path, overlay, true)
+		return source_path_from_overlay_with_windows_rules(reported_path, overlay, true, base_dir)
 	}
-	return source_path_from_overlay_with_windows_rules(reported_path, overlay, false)
+	return source_path_from_overlay_with_windows_rules(reported_path, overlay, false, base_dir)
 }
 
 fn (mut app App) run_v_check(path string, text string) []JsonError {
@@ -888,7 +889,7 @@ fn (mut app App) run_v_check(path string, text string) []JsonError {
 		mut filtered_errors := []JsonError{}
 
 		for err in v_errors {
-			err_file := source_path_from_overlay(err.path, overlay)
+			err_file := source_path_from_overlay(err.path, overlay, compile_target)
 			if normalized_index_path(err_file) == normalized_index_path(real_path) {
 				updated_err := JsonError{
 					path:    real_path
@@ -1777,7 +1778,7 @@ fn (mut app App) run_v_line_info(method Method, path string, line_info string) R
 				col := fields[fields.len - 1].int()
 				mut uri_path := os.to_slash(fields[..fields.len - 2].join(':'))
 				if use_multifile && temp_project_dir != '' {
-					uri_path = source_path_from_overlay(uri_path, overlay)
+					uri_path = source_path_from_overlay(uri_path, overlay, compile_target)
 					log('MAPPED TO uri_path=${uri_path}')
 				}
 				// Build a proper percent-encoded DocumentUri so paths containing

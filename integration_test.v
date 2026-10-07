@@ -2793,13 +2793,14 @@ fn test_integration_sublime_text_lsp_handshake() {
 		cleanup_integration_test_env(app, project_dir)
 	}
 	root_uri := path_to_uri(project_dir)
-	initialize := '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":42,"clientInfo":{"name":"Sublime Text LSP","version":"2.13.0"},"locale":"en","rootUri":"${root_uri}","rootPath":"${project_dir}","workspaceFolders":[{"uri":"${root_uri}","name":"test_project"}],"capabilities":{"general":{"positionEncodings":["utf-16"]},"workspace":{"workspaceFolders":true,"configuration":true,"didChangeWatchedFiles":{"dynamicRegistration":true,"relativePatternSupport":true}},"textDocument":{"synchronization":{"dynamicRegistration":true,"willSave":true,"willSaveWaitUntil":true,"didSave":true},"completion":{"dynamicRegistration":true,"completionItem":{"snippetSupport":true,"documentationFormat":["markdown","plaintext"]}},"hover":{"dynamicRegistration":true,"contentFormat":["markdown","plaintext"]},"publishDiagnostics":{"versionSupport":true}},"window":{"workDoneProgress":true}},"initializationOptions":{}}}'
+	json_root_path := project_dir.replace('\\', '\\\\')
+	initialize := '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":42,"clientInfo":{"name":"Sublime Text LSP","version":"2.13.0"},"locale":"en","rootUri":"${root_uri}","rootPath":"${json_root_path}","workspaceFolders":[{"uri":"${root_uri}","name":"test_project"}],"capabilities":{"general":{"positionEncodings":["utf-16"]},"workspace":{"workspaceFolders":true,"configuration":true,"didChangeWatchedFiles":{"dynamicRegistration":true,"relativePatternSupport":true}},"textDocument":{"synchronization":{"dynamicRegistration":true,"willSave":true,"willSaveWaitUntil":true,"didSave":true},"completion":{"dynamicRegistration":true,"completionItem":{"snippetSupport":true,"documentationFormat":["markdown","plaintext"]}},"hover":{"dynamicRegistration":true,"contentFormat":["markdown","plaintext"]},"publishDiagnostics":{"versionSupport":true}},"window":{"workDoneProgress":true}},"initializationOptions":{}}}'
 	initialized := '{"jsonrpc":"2.0","method":"initialized","params":{}}'
 	output := integration_run_frames(mut app, project_dir, 'sublime_handshake', [initialize,
 		initialized])
 
 	assert app.received_initialize
-	assert app.workspace_roots == [project_dir]
+	assert app.workspace_roots == [project_dir.replace('\\', '/')]
 	assert app.position_encoding == .utf16
 	assert app.supports_dynamic_watched_files_registration
 	assert app.supports_work_done_progress
