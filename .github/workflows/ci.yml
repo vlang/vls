@@ -2,19 +2,43 @@ name: CI
 
 on:
   push:
+    branches:
+      - master
     paths-ignore:
       - "**.md"
   pull_request:
     paths-ignore:
       - "**.md"
+  workflow_dispatch:
+
+# The shared GitHub-hosted runner queue routinely backs up for hours
+# (every push queues 3 jobs, superseded pushes are never cancelled, and
+# runs die at the 24h auto-cancellation with no signal). Cancel outdated
+# runs on the same ref so the queue only ever holds the newest commit.
+# Master runs are never cancelled, so a broken master always reports.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
+
+permissions:
+  contents: read
 
 jobs:
   build:
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu, macos, windows]
       fail-fast: false
-    runs-on: ${{ matrix.os }}
+    # Runner labels are overridable via repo variables, so an alternative
+    # runner pool can be plugged in without editing this file. Set any of
+    # VLS_RUNNER_LINUX / VLS_RUNNER_MACOS / VLS_RUNNER_WINDOWS to the label
+    # of the alternative pool; when unset, the GitHub-hosted runners below
+    # are used.
+    runs-on: >
+      ${{ matrix.os == 'ubuntu' && (vars.VLS_RUNNER_LINUX || 'ubuntu-latest') ||
+      matrix.os == 'macos' && (vars.VLS_RUNNER_MACOS || 'macos-latest') ||
+      (vars.VLS_RUNNER_WINDOWS || 'windows-latest') }}
+    timeout-minutes: 60
 
     steps:
       - name: Checkout V
@@ -29,17 +53,17 @@ jobs:
       # The build fetches the matching vlang/vc bootstrap snapshot itself, so
       # nothing here is pinned and every run tests against the latest compiler.
       - name: Build V
-        if: runner.os != 'Windows'
+        if: matrix.os != 'windows'
         run: make latest_tcc && make -j4 && ./v symlink
       - name: Build V (Windows)
-        if: runner.os == 'Windows'
+        if: matrix.os == 'windows'
         run: ./makev.bat latest_tcc && ./makev.bat && ./v symlink
 
       # Hover, completion, signature help, and go to definition run through
       # `-line-info`, which only the compatibility compiler implements now that
       # V3 is the default backend. `makev.bat` already builds it on Windows.
       - name: Build the V compatibility compiler
-        if: runner.os != 'Windows'
+        if: matrix.os != 'windows'
         run: make v1
 
       - name: Check formatting
@@ -48,23 +72,26 @@ jobs:
       - name: Run all tests, including the vlang/v workspace tests
         env:
           VLS_VLANG_V_REPO: ${{ github.workspace }}
-          V_MACOS_V3_NO_FALLBACK: ${{ runner.os == 'Windows' && '0' || '1' }}
+          V_MACOS_V3_NO_FALLBACK: ${{ matrix.os == 'windows' && '0' || '1' }}
         run: v -no-memory-limit -nocache test vls/
 
+      # The `-prod` runs roughly double job time, so they only run on master
+      # pushes and manual dispatches, not on every PR push competing for the
+      # same runner queue.
       # `-prod` drops assert statements, which silently changes the behaviour of
       # any test that performs work inside one. That reached Windows as a hang in
       # test_stdio_reader_processes_frame_before_eof, invisible here because -prod
       # only ran on Linux. Keep a bounded step on both, so a future hang is a red
       # build instead of a job that burns its whole budget.
       - name: Run tests with production optimizations (Windows)
-        if: runner.os == 'Windows'
+        if: matrix.os == 'windows' && github.event_name != 'pull_request'
         timeout-minutes: 30
         env:
           V_MACOS_V3_NO_FALLBACK: "0"
         run: v -no-memory-limit -nocache -prod test vls/
 
       - name: Run tests with production optimizations
-        if: runner.os == 'Linux'
+        if: matrix.os == 'ubuntu' && github.event_name != 'pull_request'
         timeout-minutes: 30
         env:
           VLS_VLANG_V_REPO: ${{ github.workspace }}
@@ -81,5 +108,5 @@ jobs:
         run: v -no-memory-limit -nocache -new-compiler vls/
 
       - name: Compile project
-        if: runner.os == 'Windows'
+        if: matrix.os == 'windows'
         run: v -nocache vls/
