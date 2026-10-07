@@ -24,21 +24,22 @@ fn create_test_app() &App {
 	os.mkdir_all(temp_dir) or {
 		assert false, 'Failed to create test temp dir: ${err}'
 		return &App{
-			text: ''
+			text:       ''
 			open_files: map[string]string{}
-			temp_dir: temp_dir
+			temp_dir:   temp_dir
 		}
 	}
 	return &App{
-		text: ''
+		text:       ''
 		open_files: map[string]string{}
-		temp_dir: temp_dir
+		temp_dir:   temp_dir
 	}
 }
 
 fn cleanup_test_app(app &App) {
 	os.rmdir_all(app.temp_dir) or {}
 }
+
 const update_env = 'VLS_UPDATE_SNAPSHOTS'
 
 fn snapshot_path(name string) string {
@@ -94,11 +95,11 @@ fn snapshot_completion(name string, content string, line int, ch int) {
 	app.open_files[uri] = content
 
 	req := Request{
-		id: 1
+		id:     1
 		method: 'textDocument/completion'
 		params: json2.encode(Params{
 			text_document: TextDocumentIdentifier{ uri: uri }
-			position: Position{ line: line, char: ch }
+			position:      Position{ line: line, char: ch }
 		}, escape_unicode: true)
 	}
 
@@ -121,11 +122,11 @@ fn snapshot_hover(name string, content string, line int, ch int) {
 	app.open_files[uri] = content
 
 	req := Request{
-		id: 1
+		id:     1
 		method: 'textDocument/hover'
 		params: json2.encode(Params{
 			text_document: TextDocumentIdentifier{ uri: uri }
-			position: Position{ line: line, char: ch }
+			position:      Position{ line: line, char: ch }
 		}, escape_unicode: true)
 	}
 
@@ -148,11 +149,11 @@ fn snapshot_definition(name string, content string, line int, ch int) {
 	app.open_files[uri] = content
 
 	req := Request{
-		id: 1
+		id:     1
 		method: 'textDocument/definition'
 		params: json2.encode(Params{
 			text_document: TextDocumentIdentifier{ uri: uri }
-			position: Position{ line: line, char: ch }
+			position:      Position{ line: line, char: ch }
 		}, escape_unicode: true)
 	}
 
