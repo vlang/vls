@@ -133,6 +133,23 @@ const language_members = [
 	language_method('printable', 'str', '', 'string'),
 ]
 
+// language_member_docs says what the members V gives a named type do, for their
+// hover: they have no declaration, so no documentation of their own.
+const language_member_docs = {
+	'from':      'Returns the value of the enum named `input`, a string, or with the value `input`, an integer, and an error when the enum has none.'
+	'zero':      'Returns the value with no flag set.'
+	'is_empty':  'Reports whether no flag is set.'
+	'has':       'Reports whether at least one of the flags `flag_` is set.'
+	'all':       'Reports whether all the flags `flag_` are set.'
+	'set':       'Sets the flags `flag_`.'
+	'set_all':   'Sets every flag.'
+	'clear':     'Clears the flags `flag_`.'
+	'clear_all': 'Clears every flag.'
+	'toggle':    'Toggles the flags `flag_`.'
+	'str':       'Returns the value as a string, the way `println` prints it.'
+	'type_name': 'Returns the name of the type the value holds.'
+}
+
 // language_member_items renders what language_members gives a type of the given
 // kinds: its static functions (`Color.from`) or the members of its values.
 fn language_member_items(typ string, kinds []string, statics bool) []Detail {
@@ -247,7 +264,7 @@ fn composite_member_kinds(typ string) []string {
 		mut kinds := ['array']
 		if elem == 'string' {
 			kinds << 'array_string'
-		} else if elem in ['u8', 'byte'] {
+		} else if elem == 'u8' {
 			kinds << 'array_u8'
 		} else if elem == 'rune' {
 			kinds << 'array_rune'
@@ -462,13 +479,25 @@ fn (mut app App) type_declaration(uri string, content string, typ string) TypeDe
 					is_flag: declaration_has_attribute(source_lines, line_idx, 'flag')
 				}
 			} else {
-				// `type Name = Base` or `type Name = A | B`
+				// `type Name = Base` or `type Name = A | B`, whose types may go on
+				// lines of their own, as vfmt writes a long one: `type Name = A`,
+				// then `| B` below it.
 				line := if line_idx >= 0 && line_idx < source_lines.len {
 					source_lines[line_idx]
 				} else {
 					''
 				}
-				rhs := line.all_after('=').all_before('//').trim_space()
+				mut rhs := line.all_after('=').all_before('//').trim_space()
+				for next in line_idx + 1 .. source_lines.len {
+					continued := source_lines[next].trim_space()
+					if continued.starts_with('//') {
+						continue
+					}
+					if !continued.starts_with('|') {
+						break
+					}
+					rhs += ' ' + continued.all_before('//').trim_space()
+				}
 				decl = if rhs.contains('|') {
 					TypeDeclaration{
 						...decl
@@ -561,7 +590,7 @@ fn (mut app App) type_members_at_depth(uri string, content string, typ string, d
 		items = declared.items.clone()
 		field_types = declared.field_types.clone()
 		field_declared_types = declared.field_declared_types.clone()
-		embedded_types = declared.embedded_types
+		embedded_types = declared.embedded_types.clone()
 		use_compiler = declared.use_compiler
 		resolved_type = declared.resolved_type
 		decl := app.type_declaration(uri, content, t)
@@ -667,6 +696,46 @@ fn (mut app App) member_type(uri string, content string, typ string, name string
 		}
 	}
 	return ''
+}
+
+// method_value_type is the type of `value.name` when `name` is a method of the
+// type `typ`, and not one of its fields: the function value of the method, as
+// `fn () string` for `u.greet` of `fn (u User) greet() string`.
+fn (mut app App) method_value_type(uri string, content string, typ string, name string) ?string {
+	members := app.type_members(uri, content, member_receiver_type(typ))
+	if name in members.field_types {
+		return none
+	}
+	for item in members.items {
+		if item.label == name && item.kind == 2 {
+			fn_type := signature_fn_type(item.detail)
+			return if fn_type == '' { none } else { fn_type }
+		}
+	}
+	return none
+}
+
+// signature_fn_type returns the type of the function value that a signature
+// such as `fn (u User) renamed(n string) User` declares: `fn (n string) User`,
+// without its receiver, its name and its type parameters.
+fn signature_fn_type(signature string) string {
+	mut s := signature.trim_space()
+	if s.starts_with('pub ') {
+		s = s[4..].trim_space()
+	}
+	if !s.starts_with('fn ') {
+		return ''
+	}
+	s = s[3..].trim_space()
+	if s.starts_with('(') {
+		close := matching_delimiter(s, 0, `(`, `)`)
+		if close < 0 {
+			return ''
+		}
+		s = s[close + 1..].trim_space()
+	}
+	open := s.index('(') or { return '' }
+	return 'fn ${s[open..].all_before('{').trim_space()}'
 }
 
 // signature_return_type returns the return type in a signature such as
@@ -1336,6 +1405,10 @@ fn (mut app App) postfix_type(uri string, content string, typ string, text strin
 		return '', text
 	}
 	if !after.starts_with('(') {
+		// A method named without a call is a function value.
+		if method := app.method_value_type(uri, content, typ, name) {
+			return method, after
+		}
 		return app.member_type(uri, content, typ, name), after
 	}
 	close := matching_delimiter(after, 0, `(`, `)`)

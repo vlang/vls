@@ -164,8 +164,8 @@ fn test_normalize_overlay_path_preserves_posix_backslashes() {
 fn test_source_path_from_overlay_normalizes_windows_relative_join() {
 	overlay := CompilationOverlay{
 		source_display_root: r'C:\repo'
-		temp_root: r'C:\temp\overlay'
-		temp_work_dir: r'C:\temp\overlay\src'
+		temp_root:           r'C:\temp\overlay'
+		temp_work_dir:       r'C:\temp\overlay\src'
 	}
 	mapped := source_path_from_overlay_with_windows_rules('./main.v', overlay, true)
 	assert mapped == 'C:/repo/src/main.v'
@@ -197,6 +197,26 @@ fn test_overlay_path_lists_can_use_windows_case_rules() {
 	assert overlay_path_has_descendant_with_case('src', tracked_paths, true)
 	assert !overlay_path_in_with_case('src/main.v', tracked_paths, false)
 	assert !overlay_path_has_descendant_with_case('src', tracked_paths, false)
+}
+
+fn test_path_to_uri_keeps_the_authority_of_a_unc_path() {
+	// An editor opens a file on a Windows network share as `file://server/...`,
+	// and `uri_to_path` already resolves that authority to a `//server/share/...`
+	// UNC path. Re-encoding that path must reproduce the same URI, because VLS
+	// keys open buffers, the index, and every published diagnostic by URI.
+	assert uri_to_path('file://server/share/proj/main.v') == '//server/share/proj/main.v'
+	assert path_to_uri('//server/share/proj/main.v') == 'file://server/share/proj/main.v'
+	assert path_to_uri(uri_to_path('file://server/share/proj/main.v')) == 'file://server/share/proj/main.v'
+	// The share is the authority, not the first path segment: four slashes put it
+	// in the path and produce a URI no client will match.
+	assert !path_to_uri('//server/share/proj/main.v').starts_with('file:////')
+	// Characters that need escaping still are, and the round trip holds.
+	assert path_to_uri('//server/share/my project/main.v') == 'file://server/share/my%20project/main.v'
+	assert uri_to_path(path_to_uri('//server/share/my project/main.v')) == '//server/share/my project/main.v'
+	// A single leading slash stays an ordinary local path, so POSIX paths and
+	// Windows drive paths are unaffected.
+	assert path_to_uri('/home/user/project/main.v') == 'file:///home/user/project/main.v'
+	assert path_to_uri('C:/Users/me/main.v') == 'file:///C:/Users/me/main.v'
 }
 
 // --- path_to_uri tests ---
@@ -257,7 +277,7 @@ fn test_compiler_location_reuses_equivalent_open_uri() {
 	canonical_uri := path_to_uri(path)
 	open_uri := canonical_uri.replace_once('file:///', 'file://localhost/')
 	mut app := &App{
-		open_files: map[string]string{}
+		open_files:        map[string]string{}
 		position_encoding: .utf16
 	}
 	app.open_files[open_uri] = '🚀 target\n'
@@ -471,6 +491,172 @@ fn test_compiler_refused_and_stopped_separates_a_dead_end_from_a_recovery() {
 	assert !compiler_refused_and_stopped('./main.v:3:7')
 }
 
+fn test_compiler_lacks_compatibility_compiler_detects_every_launcher_refusal() {
+	// These are the single-line refusals `ensure_v1_fallback` prints in the V
+	// launcher, verbatim. None of them is an "unknown option" line, so before
+	// this was recognized VLS never retired the lookups and never said anything.
+	assert compiler_lacks_compatibility_compiler('`-vls-mode` requires the compatibility compiler, but no usable V 0.5.2 fallback was found and make is unavailable. Install make, then run `make v1` in `C:\\Users\\me\\v`.')
+	// vlang/v#29369 rewrote the tail of that refusal: the hint after "make is
+	// unavailable" is now platform specific, and the sentence is split. Detection
+	// keys on "requires the compatibility compiler", so both spellings must retire
+	// the lookups, and this test has to hold either side of that change.
+	assert compiler_lacks_compatibility_compiler('`-vls-mode` requires the compatibility compiler, but no usable V 0.5.2 fallback was found and make is unavailable. On Windows, install GNU make in MSYS2 (`make` or `mingw32-make`) and put its tools, including `sh`, on PATH. Then run `make v1` in `C:\\Users\\me\\v`.')
+	assert compiler_lacks_compatibility_compiler('`-vls-mode` requires the compatibility compiler, but the V source tree could not be found. Run `make v1` in the V source directory.')
+	assert compiler_lacks_compatibility_compiler('`-old-compiler` was requested, but no usable V 0.5.2 fallback was found and make is unavailable. Install make, then run `make v1` in `/home/me/v`.')
+	// The same rewrite as above, on the host where the hint is the short one.
+	assert compiler_lacks_compatibility_compiler('`-old-compiler` was requested, but no usable V 0.5.2 fallback was found and make is unavailable. Install make. Then run `make v1` in `/home/me/v`.')
+	assert compiler_lacks_compatibility_compiler('`make v1` failed with exit code 2. Run it manually in `/home/me/v` for more details.')
+	assert compiler_lacks_compatibility_compiler('`make v1` completed without installing a usable V 0.5.2 fallback at `/home/me/.cache/v1_fallback`.')
+	// A launcher that recovers on its own only announces the fallback before
+	// rerunning, then answers. Retiring the lookups on that would cost the
+	// session every compiler-backed hover, signature, and receiver definition.
+	assert !compiler_lacks_compatibility_compiler('unknown option `-vls-mode`')
+	assert !compiler_lacks_compatibility_compiler('unknown option `-vls-mode`\nV compilation failed (compiler_error); retrying with `/v1_fallback`.')
+	assert !compiler_lacks_compatibility_compiler('`-vls-mode` requires the compatibility compiler, but no usable V 0.5.2 fallback was found; running `make v1` now...\n{"contents":{"kind":"markdown","value":"fn f()"}}')
+	assert !compiler_lacks_compatibility_compiler('`-old-compiler` was requested; retrying with `/v1_fallback`.\n{"contents":{"kind":"markdown","value":"fn f()"}}')
+	// Starting an automatic fallback build does not mean that it succeeds.
+	building := '`-vls-mode` requires the compatibility compiler, but no usable V 0.5.2 fallback was found; running `make v1` now...\n'
+	assert compiler_lacks_compatibility_compiler(building + '`make v1` failed with exit code 2. Run it manually in `/v` for more details.')
+	assert compiler_lacks_compatibility_compiler(building + '`make v1` completed without installing a usable V 0.5.2 fallback at `/v1_fallback`.')
+	// A working compiler's payload, an ordinary diagnostic, and empty output.
+	assert !compiler_lacks_compatibility_compiler('{"contents":{"kind":"markdown","value":"fn f()"}}')
+	assert !compiler_lacks_compatibility_compiler('./main.v:3:7: error: unknown option')
+	assert !compiler_lacks_compatibility_compiler('')
+}
+
+// A launcher that understands `-vls-mode` but cannot reach the compatibility
+// compiler that implements it, and stops there. Its refusal is not an "unknown
+// option" line, which is what made it invisible to the dead-end check.
+const no_compat_compiler_launcher_stub = r'#!/bin/sh
+echo "\`-vls-mode\` requires the compatibility compiler, but no usable V 0.5.2 fallback was found and make is unavailable. Install make, then run \`make v1\` in \`/v\`." >&2
+exit 1
+'
+
+fn test_run_v_line_info_retires_lookups_when_the_compatibility_compiler_is_missing() {
+	$if windows {
+		// The stand-in launcher is a POSIX shell script.
+		return
+	}
+	previous := os.getenv('VLS_V_COMMAND')
+	mut app, uri, root := line_info_stub_app('vls_no_compat_compiler', no_compat_compiler_launcher_stub)
+	defer {
+		restore_v_command(previous)
+		os.rmdir_all(root) or {}
+	}
+
+	assert app.run_v_line_info(.hover, uri, '6:hv^4') == ResponseResult('null')
+	assert app.line_info_mode == .missing
+}
+
+const explicit_compatibility_launcher_stub = r'#!/bin/sh
+for arg in "$@"; do
+	if [ "$arg" = "-old-compiler" ]; then
+		echo "\`-old-compiler\` was requested; retrying with \`/v1_fallback\`." >&2
+		echo "{\"contents\":{\"kind\":\"markdown\",\"value\":\"fn helper()\"}}"
+		exit 0
+	fi
+done
+echo "unknown option \`-vls-mode\`" >&2
+exit 1
+'
+
+fn test_run_v_line_info_keeps_successful_explicit_compatibility_retry() {
+	$if windows {
+		return
+	}
+	previous := os.getenv('VLS_V_COMMAND')
+	mut app, uri, root := line_info_stub_app('vls_explicit_compatibility', explicit_compatibility_launcher_stub)
+	defer {
+		restore_v_command(previous)
+		os.rmdir_all(root) or {}
+	}
+	app.capture_output = true
+
+	// An explicit compatibility retry carries a notice before the valid payload.
+	for _ in 0 .. 2 {
+		hover := app.run_v_line_info(.hover, uri, '6:hv^4')
+		assert app.line_info_mode == .compat
+		assert hover is Hover
+		if hover is Hover {
+			assert hover.contents.value.contains('fn helper()')
+		}
+	}
+	assert app.captured_output.len == 0
+}
+
+const failed_compatibility_build_launcher_stub = r'#!/bin/sh
+echo "\`-vls-mode\` requires the compatibility compiler, but no usable V 0.5.2 fallback was found; running \`make v1\` now..." >&2
+echo "\`make v1\` failed with exit code 2. Run it manually in \`/v\` for more details." >&2
+exit 1
+'
+
+fn test_run_v_line_info_retires_lookups_after_automatic_compatibility_build_fails() {
+	$if windows {
+		return
+	}
+	previous := os.getenv('VLS_V_COMMAND')
+	mut app, uri, root := line_info_stub_app('vls_failed_compatibility_build', failed_compatibility_build_launcher_stub)
+	defer {
+		restore_v_command(previous)
+		os.rmdir_all(root) or {}
+	}
+	app.capture_output = true
+
+	for _ in 0 .. 2 {
+		result := app.run_v_line_info(.hover, uri, '6:hv^4')
+		assert result == ResponseResult('null')
+		assert app.line_info_mode == .missing
+	}
+	assert app.captured_output.len == 1
+	assert app.captured_output[0].contains('window/showMessage')
+}
+
+fn test_report_missing_compatibility_compiler_names_the_repair() {
+	// The editor otherwise shows a VLS that highlights code but answers nothing
+	// for completion, hover, signature help, or go to definition, with no hint
+	// that the compiler is the reason. Platform-independent: no stub compiler.
+	mut app := App{
+		capture_output: true
+	}
+	app.report_missing_compatibility_compiler()
+	assert app.captured_output.len == 1
+	assert app.captured_output[0].contains('window/showMessage')
+	// Name the actual repair, not just the symptom.
+	assert app.captured_output[0].contains('make v1')
+	assert app.captured_output[0].contains('VLS_V_COMMAND')
+	assert app.captured_output[0].contains('type":2')
+}
+
+fn test_a_retired_lookup_never_reports_the_missing_compiler_again() {
+	// Once the lookups are retired, `run_v_line_info` answers from the index at
+	// its early `.missing` check, so it never spawns the compiler and never
+	// re-reports. That structural guarantee is why the notice needs no
+	// "already warned" flag.
+	previous := os.getenv('VLS_V_COMMAND')
+	mut app := App{
+		capture_output: true
+		line_info_mode: .missing
+		open_files:     map[string]string{}
+	}
+	uri := 'file:///tmp/vls_retired_lookup.v'
+	app.open_files[uri] = 'module main\n\n// greet writes a greeting.\nfn greet() {}\n\nfn main() {\n\tgreet()\n}\n'
+	// A compiler that cannot be spawned at all: reaching it would fail loudly.
+	os.setenv('VLS_V_COMMAND', os.join_path(os.temp_dir(), 'vls_no_such_compiler'), true)
+	defer {
+		restore_v_command(previous)
+	}
+
+	hover := app.run_v_line_info(.hover, uri, '7:hv^1')
+	// Answered from the index, from the document's own vdoc comment.
+	assert hover is Hover
+	if hover is Hover {
+		assert hover.contents.value.contains('greet writes a greeting.')
+	}
+	// Nothing was said to the client, and no compiler was launched.
+	assert app.captured_output.len == 0
+	assert app.line_info_mode == .missing
+}
+
 // line_info_stub_app writes `script` as an executable stand-in for `v`, points
 // VLS_V_COMMAND at it, and returns an App plus the URI of a lone source file.
 // The source sits in its own directory so the request takes the single-file
@@ -641,17 +827,58 @@ fn test_parse_v_check_diagnostics_reads_v3_output() {
 	diagnostics := parse_v_check_diagnostics(output, '')
 	assert diagnostics.len == 2
 	assert diagnostics[0] == JsonError{
-		path: '/tmp/main.v'
+		path:    '/tmp/main.v'
 		message: 'undefined variable: `missing_name`'
 		line_nr: 4
-		col: 7
-		len: 12
-		level: 'error'
+		col:     7
+		len:     12
+		level:   'error'
 	}
 	assert diagnostics[1].level == 'warning'
 	assert diagnostics[1].line_nr == 8
 	assert diagnostics[1].col == 3
 	assert diagnostics[1].len == 5
+}
+
+fn test_parse_v_check_program_diagnostics_places_errors_without_a_position() {
+	// Some errors are about the program rather than a place in it, as a module
+	// imported under a name its files do not declare. V prints them without a
+	// position; they are shown where they point: at the import and at the module
+	// declaration of the files they name, else in the file that was checked.
+	dir := os.join_path(os.vtmp_dir(), 'vls_program_errors_${os.getpid()}')
+	os.rmdir_all(dir) or {}
+	defer {
+		os.rmdir_all(dir) or {}
+	}
+	interop_test_must_mkdir_all(os.join_path(dir, 'lib'))
+	interop_test_must_write_file(os.join_path(dir, 'main.v'), 'module main\n\nimport lib\n\nfn main() {\n\tprintln(lib.valor())\n}\n')
+	interop_test_must_write_file(os.join_path(dir, 'lib', 'lib.v'), 'module otro\n\npub fn valor() int {\n\treturn 1\n}\n')
+	bad_module := 'bad module definition: ./main.v imports module "lib" but ./lib/lib.v is defined as module `otro`'
+	output := 'error: ${bad_module}\nbuilder error: redefinition of function `main`\n'
+	got := parse_v_check_program_diagnostics(output, dir, os.join_path(dir, 'main.v')).map('${os.file_name(it.path)}:${it.line_nr}:${it.col}:${it.len} ${it.level}: ${it.message}')
+	assert got == [
+		'main.v:3:1:10 error: ${bad_module}', // `import lib`
+		'lib.v:1:1:11 error: ${bad_module}', // `module otro`
+		'main.v:5:1:11 error: redefinition of function `main`', // `fn main() {`, the checked file
+	], got.str()
+}
+
+fn test_a_redefinition_is_shown_on_each_declaration_it_names() {
+	// V says without a position that a function is declared twice, then where
+	// each declaration is: each one gets the error, and the line without a
+	// position is not placed again on its own.
+	output := 'builder error: redefinition of function `other`
+/tmp/main.v:3:1: conflicting declaration: fn other(n int) int
+    3 | fn other(n int) int {
+      | ~~~~~~~~~~~~~~~~~~~
+/tmp/main.v:7:1: conflicting declaration: fn other(n int) int
+    7 | fn other(n int) int {
+      | ~~~~~~~~~~~~~~~~~~~
+'
+	got := parse_v_check_diagnostics(output, '').map('${it.line_nr}:${it.col}:${it.len} ${it.level}: ${it.message}')
+	assert got == ['3:1:19 error: redefinition of function `other`',
+		'7:1:19 error: redefinition of function `other`'], got.str()
+	assert parse_v_check_program_diagnostics(output, '/tmp', '/tmp/main.v') == []
 }
 
 fn test_parse_v_check_diagnostics_maps_v3_builder_error_to_error() {
@@ -661,12 +888,12 @@ fn test_parse_v_check_diagnostics_maps_v3_builder_error_to_error() {
 '
 	diagnostics := parse_v_check_diagnostics(output, '')
 	assert diagnostics == [JsonError{
-		path: '/tmp/main.v'
+		path:    '/tmp/main.v'
 		message: 'cannot import module "missing" (not found)'
 		line_nr: 3
-		col: 1
-		len: 14
-		level: 'error'
+		col:     1
+		len:     14
+		level:   'error'
 	}]
 }
 
@@ -743,8 +970,8 @@ fn test_cache_v_check_result_retries_failure_without_diagnostics() {
 	path := 'file:///tmp/main.v'
 	app.diag_cache[path] = DiagCacheEntry{
 		content_hash: 1
-		generation: 1
-		errors: []
+		generation:   1
+		errors:       []
 	}
 	app.cache_v_check_result(path, 2, 2, [], compiler_exit_timeout, 0)
 	assert path !in app.diag_cache
@@ -755,16 +982,16 @@ fn test_cache_v_check_result_retries_timeout_with_partial_diagnostics() {
 	path := 'file:///tmp/main.v'
 	app.diag_cache[path] = DiagCacheEntry{
 		content_hash: 1
-		generation: 1
-		errors: []
+		generation:   1
+		errors:       []
 	}
 	partial_errors := [
 		JsonError{
-			path: '/tmp/main.v'
+			path:    '/tmp/main.v'
 			message: 'partial compiler output'
 			line_nr: 1
-			col: 1
-			level: 'error'
+			col:     1
+			level:   'error'
 		},
 	]
 	app.cache_v_check_result(path, 2, 2, partial_errors, compiler_exit_timeout, partial_errors.len)
@@ -799,11 +1026,11 @@ fn test_run_v_argv_reports_missing_working_dir() {
 
 fn test_v_error_to_lsp_diagnostic_basic() {
 	v_err := JsonError{
-		path: '/test/file.v'
+		path:    '/test/file.v'
 		message: 'undefined identifier `foo`'
 		line_nr: 10
-		col: 5
-		len: 3
+		col:     5
+		len:     3
 	}
 	diag := v_error_to_lsp_diagnostic(v_err)
 
@@ -818,11 +1045,11 @@ fn test_v_error_to_lsp_diagnostic_basic() {
 
 fn test_v_error_to_lsp_diagnostic_first_line() {
 	v_err := JsonError{
-		path: '/test/file.v'
+		path:    '/test/file.v'
 		message: 'syntax error'
 		line_nr: 1
-		col: 1
-		len: 1
+		col:     1
+		len:     1
 	}
 	diag := v_error_to_lsp_diagnostic(v_err)
 
@@ -833,11 +1060,11 @@ fn test_v_error_to_lsp_diagnostic_first_line() {
 
 fn test_v_error_to_lsp_diagnostic_long_error() {
 	v_err := JsonError{
-		path: '/test/file.v'
+		path:    '/test/file.v'
 		message: 'unexpected token'
 		line_nr: 100
-		col: 50
-		len: 20
+		col:     50
+		len:     20
 	}
 	diag := v_error_to_lsp_diagnostic(v_err)
 
@@ -848,11 +1075,11 @@ fn test_v_error_to_lsp_diagnostic_long_error() {
 
 fn test_v_error_to_lsp_diagnostic_zero_length() {
 	v_err := JsonError{
-		path: '/test/file.v'
+		path:    '/test/file.v'
 		message: 'error at position'
 		line_nr: 5
-		col: 10
-		len: 0
+		col:     10
+		len:     0
 	}
 	diag := v_error_to_lsp_diagnostic(v_err)
 
@@ -862,11 +1089,11 @@ fn test_v_error_to_lsp_diagnostic_zero_length() {
 
 fn test_v_error_to_lsp_diagnostic_large_line_numbers() {
 	v_err := JsonError{
-		path: '/test/file.v'
+		path:    '/test/file.v'
 		message: 'error in large file'
 		line_nr: 10000
-		col: 200
-		len: 50
+		col:     200
+		len:     50
 	}
 	diag := v_error_to_lsp_diagnostic(v_err)
 
@@ -877,11 +1104,11 @@ fn test_v_error_to_lsp_diagnostic_large_line_numbers() {
 
 fn test_v_error_to_lsp_diagnostic_column_one() {
 	v_err := JsonError{
-		path: '/test/file.v'
+		path:    '/test/file.v'
 		message: 'error at start of line'
 		line_nr: 5
-		col: 1
-		len: 5
+		col:     1
+		len:     5
 	}
 	diag := v_error_to_lsp_diagnostic(v_err)
 
@@ -917,7 +1144,7 @@ fn test_lsp_range_struct() {
 			line: 0
 			char: 0
 		}
-		end: Position{
+		end:   Position{
 			line: 0
 			char: 10
 		}
@@ -932,7 +1159,7 @@ fn test_lsp_range_multiline() {
 			line: 5
 			char: 10
 		}
-		end: Position{
+		end:   Position{
 			line: 10
 			char: 5
 		}
@@ -942,17 +1169,17 @@ fn test_lsp_range_multiline() {
 
 fn test_lsp_diagnostic_struct() {
 	diag := LSPDiagnostic{
-		range: LSPRange{
+		range:    LSPRange{
 			start: Position{
 				line: 5
 				char: 0
 			}
-			end: Position{
+			end:   Position{
 				line: 5
 				char: 10
 			}
 		}
-		message: 'test error'
+		message:  'test error'
 		severity: 1
 	}
 	assert diag.message == 'test error'
@@ -965,8 +1192,8 @@ fn test_lsp_diagnostic_severities() {
 	severities := [1, 2, 3, 4] // Error, Warning, Information, Hint
 	for sev in severities {
 		diag := LSPDiagnostic{
-			range: LSPRange{}
-			message: 'test'
+			range:    LSPRange{}
+			message:  'test'
 			severity: sev
 		}
 		assert diag.severity == sev
@@ -975,13 +1202,13 @@ fn test_lsp_diagnostic_severities() {
 
 fn test_location_struct() {
 	loc := Location{
-		uri: 'file:///test/file.v'
+		uri:   'file:///test/file.v'
 		range: LSPRange{
 			start: Position{
 				line: 10
 				char: 5
 			}
-			end: Position{
+			end:   Position{
 				line: 10
 				char: 15
 			}
@@ -999,9 +1226,9 @@ fn test_location_empty() {
 
 fn test_detail_struct() {
 	detail := Detail{
-		kind: 6 // Function
-		label: 'my_function'
-		detail: 'fn my_function() string'
+		kind:          6 // Function
+		label:         'my_function'
+		detail:        'fn my_function() string'
 		documentation: 'A helper function'
 	}
 	assert detail.kind == 6
@@ -1014,7 +1241,7 @@ fn test_detail_kinds() {
 	kinds := [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] // Text, Method, Function, etc.
 	for k in kinds {
 		detail := Detail{
-			kind: k
+			kind:  k
 			label: 'test'
 		}
 		assert detail.kind == k
@@ -1023,11 +1250,11 @@ fn test_detail_kinds() {
 
 fn test_detail_struct_with_snippet() {
 	detail := Detail{
-		kind: 6
-		label: 'println'
-		detail: 'fn println(s string)'
-		documentation: 'Prints a string'
-		insert_text: 'println(\${1:s})'
+		kind:               6
+		label:              'println'
+		detail:             'fn println(s string)'
+		documentation:      'Prints a string'
+		insert_text:        'println(\${1:s})'
 		insert_text_format: 2 // Snippet format
 	}
 	assert detail.insert_text? == 'println(\${1:s})'
@@ -1036,7 +1263,7 @@ fn test_detail_struct_with_snippet() {
 
 fn test_detail_without_snippet() {
 	detail := Detail{
-		kind: 6
+		kind:  6
 		label: 'println'
 	}
 	assert detail.insert_text == none
@@ -1045,9 +1272,9 @@ fn test_detail_without_snippet() {
 
 fn test_signature_help_struct() {
 	sig := SignatureHelp{
-		signatures: [
+		signatures:       [
 			SignatureInformation{
-				label: 'fn my_func(a int, b string) bool'
+				label:      'fn my_func(a int, b string) bool'
 				parameters: [
 					ParameterInformation{
 						label: 'a int'
@@ -1068,7 +1295,7 @@ fn test_signature_help_struct() {
 
 fn test_signature_help_multiple_signatures() {
 	sig := SignatureHelp{
-		signatures: [
+		signatures:       [
 			SignatureInformation{
 				label: 'fn overload1(a int)'
 			},
@@ -1096,17 +1323,17 @@ fn test_signature_help_empty() {
 fn test_capabilities_struct() {
 	cap := Capabilities{
 		capabilities: Capability{
-			text_document_sync: TextDocumentSyncOptions{
+			text_document_sync:      TextDocumentSyncOptions{
 				open_close: true
-				change: 1
+				change:     1
 			}
-			completion_provider: CompletionProvider{
+			completion_provider:     CompletionProvider{
 				trigger_characters: ['.']
 			}
 			signature_help_provider: SignatureHelpOptions{
 				trigger_characters: ['(', ',']
 			}
-			definition_provider: true
+			definition_provider:     true
 		}
 	}
 	assert cap.capabilities.definition_provider == true
@@ -1127,11 +1354,11 @@ fn test_capabilities_minimal() {
 
 fn test_request_struct() {
 	req := Request{
-		id: 1
-		method: 'textDocument/completion'
+		id:      1
+		method:  'textDocument/completion'
 		jsonrpc: '2.0'
-		params: json2.encode(Params{
-			position: Position{
+		params:  json2.encode(Params{
+			position:      Position{
 				line: 5
 				char: 10
 			}
@@ -1162,7 +1389,7 @@ fn test_request_params_decode_malformed_returns_error() {
 
 fn test_response_struct() {
 	resp := Response{
-		id: 1
+		id:     1
 		result: 'null'
 	}
 	assert resp.id == 1
@@ -1171,7 +1398,7 @@ fn test_response_struct() {
 
 fn test_response_with_capabilities() {
 	resp := Response{
-		id: 0
+		id:     0
 		result: Capabilities{
 			capabilities: Capability{
 				definition_provider: true
@@ -1188,7 +1415,7 @@ fn test_notification_struct() {
 	notif := Notification{
 		method: 'textDocument/publishDiagnostics'
 		params: PublishDiagnosticsParams{
-			uri: 'file:///test.v'
+			uri:         'file:///test.v'
 			diagnostics: []
 		}
 	}
@@ -1200,16 +1427,16 @@ fn test_notification_with_diagnostics() {
 	notif := Notification{
 		method: 'textDocument/publishDiagnostics'
 		params: PublishDiagnosticsParams{
-			uri: 'file:///test.v'
+			uri:         'file:///test.v'
 			diagnostics: [
 				LSPDiagnostic{
-					range: LSPRange{}
-					message: 'error 1'
+					range:    LSPRange{}
+					message:  'error 1'
 					severity: 1
 				},
 				LSPDiagnostic{
-					range: LSPRange{}
-					message: 'error 2'
+					range:    LSPRange{}
+					message:  'error 2'
 					severity: 1
 				},
 			]
@@ -1252,7 +1479,7 @@ fn test_write_tracked_files_to_temp_single_file() {
 	interop_test_must_write_file(test_file, 'module main')
 
 	mut app := &App{
-		temp_dir: temp_dir
+		temp_dir:   temp_dir
 		open_files: map[string]string{}
 	}
 
@@ -1290,7 +1517,7 @@ fn test_write_tracked_files_to_temp_multiple_files() {
 	}
 
 	mut app := &App{
-		temp_dir: temp_dir
+		temp_dir:   temp_dir
 		open_files: map[string]string{}
 	}
 
@@ -1331,7 +1558,7 @@ fn test_write_tracked_files_to_temp_nested_directories() {
 	interop_test_must_write_file(nested_file, 'module internal')
 
 	mut app := &App{
-		temp_dir: temp_dir
+		temp_dir:   temp_dir
 		open_files: map[string]string{}
 	}
 
@@ -1349,6 +1576,104 @@ fn test_write_tracked_files_to_temp_nested_directories() {
 	// Verify nested structure was preserved
 	temp_nested := os.join_path(temp_project, 'src', 'internal', 'util.v')
 	assert os.exists(temp_nested)
+}
+
+fn test_program_root_is_the_program_that_imports_a_module() {
+	// `v .` in the directory of a program checks the modules it imports, wherever
+	// they sit below it, so a file of such a module is checked from there: on its
+	// own, the module has no program to tell what it leaves unused, and a check
+	// of the program misses the changes made to it.
+	temp_dir := os.join_path(os.vtmp_dir(), 'vls_program_root_${os.getpid()}')
+	os.rmdir_all(temp_dir) or {}
+	defer {
+		os.rmdir_all(temp_dir) or {}
+	}
+	for with_vmod in [false, true] {
+		project := os.join_path(temp_dir, if with_vmod { 'with_vmod' } else { 'without_vmod' })
+		for rel, content in {
+			'main.v':            'module main\n\nimport lib\n\nfn main() {}\n'
+			'lib/lib.v':         'module lib\n\nimport lib.inner\n'
+			'lib/inner/inner.v': 'module inner\n'
+			'lone/lone.v':       'module lone\n'
+			'extra/extra.v':     'module extra\n'
+			'demo/main.v':       'module main\n\nfn main() {}\n'
+		} {
+			path := os.join_path(project, rel)
+			interop_test_must_mkdir_all(os.dir(path))
+			interop_test_must_write_file(path, content)
+		}
+		if with_vmod {
+			interop_test_must_write_file(os.join_path(project, 'v.mod'), "Module {\n\tname: 'proyecto'\n}\n")
+		}
+		mut app := &App{
+			open_files: map[string]string{}
+		}
+		// An import typed in the editor and not saved yet counts as well.
+		app.open_files[path_to_uri(os.join_path(project, 'main.v'))] = 'module main\n\nimport lib\nimport extra\n\nfn main() {}\n'
+		root := normalize_overlay_path(project)
+		mut failures := []string{}
+		for rel, want in {
+			'main.v':            root
+			'lib/lib.v':         root // imported by main.v
+			'lib/inner/inner.v': root // through lib
+			'extra/extra.v':     root // imported by the unsaved buffer of main.v
+			'lone/lone.v':       normalize_overlay_path(os.join_path(project, 'lone')) // imported by nothing
+			'demo/main.v':       normalize_overlay_path(os.join_path(project, 'demo')) // a program of its own
+		} {
+			got := app.program_root(os.join_path(project, rel))
+			if got != want {
+				failures << '${with_vmod} ${rel}: ${got}, not ${want}'
+			}
+		}
+		assert failures.len == 0, failures.join('\n')
+	}
+}
+
+fn test_prepare_compilation_overlay_checks_vmod_subdirs_from_the_program_root() {
+	// V compiles the subdirectories a v.mod lists in `subdirs` as part of the
+	// program next to it, so a file there is checked from that directory: a
+	// check of its own directory alone misses the rest of the program.
+	temp_dir := os.join_path(os.vtmp_dir(), 'vls_vmod_subdirs_${os.getpid()}')
+	os.rmdir_all(temp_dir) or {}
+	defer {
+		os.rmdir_all(temp_dir) or {}
+	}
+	project_dir := os.join_path(temp_dir, 'project')
+	app_temp_dir := os.join_path(temp_dir, 'app-temp')
+	for dir in ['repo/deeper', 'tools', 'plugin'] {
+		interop_test_must_mkdir_all(os.join_path(project_dir, dir))
+	}
+	interop_test_must_mkdir_all(app_temp_dir)
+	interop_test_must_write_file(os.join_path(project_dir, 'v.mod'), "Module {\n\tname: 'subdirs_test'\n\tsubdirs: ['repo', 'plugin']\n}\n")
+	interop_test_must_write_file(os.join_path(project_dir, 'plugin', 'v.mod'), "Module {\n\tname: 'plugin'\n}\n")
+	mut app := &App{
+		temp_dir: app_temp_dir
+	}
+	mut failures := []string{}
+	for rel, expected in {
+		'main.v':             ''
+		'repo/repo.v':        ''
+		'repo/deeper/more.v': ''
+		'tools/tool.v':       'tools'
+		'plugin/plugin.v':    'plugin'
+	} {
+		path := os.join_path(project_dir, rel)
+		interop_test_must_write_file(path, 'module main\n')
+		overlay := app.prepare_compilation_overlay(path) or {
+			failures << '${rel}: ${err}'
+			continue
+		}
+		os.rmdir_all(overlay.temp_root) or {}
+		want := normalize_overlay_path(if expected == '' {
+			project_dir
+		} else {
+			os.join_path(project_dir, expected)
+		})
+		if overlay.source_work_dir != want {
+			failures << '${rel}: checked from ${overlay.source_work_dir}, not ${want}'
+		}
+	}
+	assert failures.len == 0, failures.join('\n')
 }
 
 fn test_prepare_compilation_overlay_preserves_nested_symlink_layout() {
@@ -1371,7 +1696,7 @@ fn test_prepare_compilation_overlay_preserves_nested_symlink_layout() {
 	main_uri := path_to_uri(main_file)
 	unsaved_content := 'module main\n\nfn unsaved() {}\n'
 	mut app := &App{
-		temp_dir: app_temp_dir
+		temp_dir:   app_temp_dir
 		open_files: {
 			main_uri: unsaved_content
 		}
@@ -1412,7 +1737,7 @@ fn test_prepare_compilation_overlay_preserves_posix_backslashes() {
 		assert uri_to_path(main_uri) == main_file
 		unsaved_content := 'module main\n\nfn unsaved() {}\n'
 		mut app := &App{
-			temp_dir: app_temp_dir
+			temp_dir:   app_temp_dir
 			open_files: {
 				main_uri: unsaved_content
 			}
@@ -1450,7 +1775,7 @@ fn test_write_tracked_files_skips_files_outside_working_dir() {
 	interop_test_must_write_file(other_file, 'module other')
 
 	mut app := &App{
-		temp_dir: temp_dir
+		temp_dir:   temp_dir
 		open_files: map[string]string{}
 	}
 
@@ -1692,6 +2017,41 @@ fn test_bounded_overlay_copy_caps_file_count_across_entries() {
 	assert !os.exists(os.join_path(target_dir, 'two.txt'))
 }
 
+fn test_directories_made_the_overlay_own_share_one_copy_budget() {
+	temp_dir := os.join_path(os.temp_dir(), 'vls_overlay_own_dirs_budget_${os.getpid()}_${time.now().unix_nano()}')
+	defer {
+		os.rmdir_all(temp_dir) or {}
+	}
+	// Two directories the overlay links whole, made its own one after the other
+	// where no link can be made.
+	project_dir := os.join_path(temp_dir, 'project')
+	overlay_dir := os.join_path(temp_dir, 'overlay')
+	interop_test_must_mkdir_all(overlay_dir)
+	for name in ['a', 'b'] {
+		interop_test_must_mkdir_all(os.join_path(project_dir, name))
+		interop_test_must_write_file(os.join_path(project_dir, name, '${name}.v'), 'module ${name}\n')
+		os.symlink(os.join_path(project_dir, name), os.join_path(overlay_dir, name)) or { return }
+	}
+	mut budget := OverlayCopyBudget{
+		max_files: 1
+		max_bytes: 1024
+	}
+	for name in ['a', 'b'] {
+		own_overlay_dirs_with_linker(project_dir, overlay_dir, name, deny_overlay_symlink, mut budget) or {
+			assert false, 'Failed to make ${name} the overlay own: ${err}'
+			return
+		}
+		assert os.is_dir(os.join_path(overlay_dir, name))
+		assert !os.is_link(os.join_path(overlay_dir, name))
+	}
+	// The limit holds for both together: a.v was copied, b.v was not.
+	assert os.is_file(os.join_path(overlay_dir, 'a', 'a.v'))
+	assert !os.exists(os.join_path(overlay_dir, 'b', 'b.v'))
+	assert budget.files == 1
+	// Nothing was written into the project.
+	assert os.read_file(os.join_path(project_dir, 'b', 'b.v'))! == 'module b\n'
+}
+
 fn test_bounded_overlay_copy_caps_bytes() {
 	temp_dir := os.join_path(os.temp_dir(), 'vls_overlay_byte_limit_${os.getpid()}_${time.now().unix_nano()}')
 	defer {
@@ -1911,8 +2271,8 @@ fn test_json_error_negative_values() {
 	// to 0 rather than emitted as negative positions (P1-09).
 	err := JsonError{
 		line_nr: -1
-		col: -1
-		len: -1
+		col:     -1
+		len:     -1
 	}
 	diag := v_error_to_lsp_diagnostic(err)
 	assert diag.severity == 1
@@ -1939,11 +2299,11 @@ fn test_params_struct_complete() {
 		content_changes: [ContentChange{
 			text: 'test'
 		}]
-		position: Position{
+		position:        Position{
 			line: 5
 			char: 10
 		}
-		text_document: TextDocumentIdentifier{
+		text_document:   TextDocumentIdentifier{
 			uri: 'file:///test.v'
 		}
 	}
@@ -1971,7 +2331,7 @@ fn test_signature_help_options_triggers() {
 fn test_text_document_sync_options() {
 	sync := TextDocumentSyncOptions{
 		open_close: true
-		change: 1 // Full sync
+		change:     1 // Full sync
 	}
 	assert sync.open_close == true
 	assert sync.change == 1
@@ -1980,7 +2340,7 @@ fn test_text_document_sync_options() {
 fn test_text_document_sync_incremental() {
 	sync := TextDocumentSyncOptions{
 		open_close: true
-		change: 2 // Incremental sync
+		change:     2 // Incremental sync
 	}
 	assert sync.change == 2
 }
@@ -1994,7 +2354,7 @@ fn test_parameter_information() {
 
 fn test_signature_information_with_params() {
 	sig := SignatureInformation{
-		label: 'fn test(a int, b string, c bool)'
+		label:      'fn test(a int, b string, c bool)'
 		parameters: [
 			ParameterInformation{
 				label: 'a int'
@@ -2013,11 +2373,11 @@ fn test_signature_information_with_params() {
 
 fn test_publish_diagnostics_params() {
 	params := PublishDiagnosticsParams{
-		uri: 'file:///test.v'
+		uri:         'file:///test.v'
 		diagnostics: [
 			LSPDiagnostic{
-				range: LSPRange{}
-				message: 'error'
+				range:    LSPRange{}
+				message:  'error'
 				severity: 1
 			},
 		]
