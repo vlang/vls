@@ -1401,9 +1401,9 @@ fn (mut app App) run_v_check(path string, text string) []JsonError {
 	// check: they are shown at once (see DiagnosticsServer.ask).
 	publish := app.diagnostics_partial
 	partial := if publish != unsafe { nil } {
-		fn [publish, diagnostic_source_dir, file_to_check, use_multifile, overlay, real_path, program_uris, path] (answer os.Result) {
+		fn [publish, diagnostic_source_dir, file_to_check, use_multifile, overlay, real_path, program_uris, compile_target, path] (answer os.Result) {
 			found := split_check_errors(answer.output, diagnostic_source_dir, file_to_check,
-				use_multifile, overlay, real_path, program_uris)
+				use_multifile, overlay, real_path, program_uris, compile_target)
 			publish(path, found)
 		}
 	} else {
@@ -1435,7 +1435,7 @@ fn (mut app App) run_v_check(path string, text string) []JsonError {
 	}
 
 	found := split_check_errors(x.output, diagnostic_source_dir, file_to_check, use_multifile,
-		overlay, real_path, program_uris)
+		overlay, real_path, program_uris, compile_target)
 	if server_exe == '' {
 		cleanup_compilation_temp(temp_project_dir, singlefile_tmppath)
 	}
@@ -1481,7 +1481,7 @@ fn (app &App) program_open_files(real_path string, overlay CompilationOverlay) m
 // split_check_errors reads the diagnostics of `output`, what a check printed,
 // for the file at `real_path`, and, when the check covered its program, for the
 // other open files of the program, `program_uris` (see program_open_files).
-fn split_check_errors(output string, diagnostic_source_dir string, file_to_check string, use_multifile bool, overlay CompilationOverlay, real_path string, program_uris map[string]string) CheckErrors {
+fn split_check_errors(output string, diagnostic_source_dir string, file_to_check string, use_multifile bool, overlay CompilationOverlay, real_path string, program_uris map[string]string, base_dir string) CheckErrors {
 	// Parse V3's native flat-AST checker diagnostics so ordinary diagnostics stay
 	// on the default backend.
 	mut v_errors := parse_v_check_diagnostics(output, diagnostic_source_dir)
@@ -1498,7 +1498,7 @@ fn split_check_errors(output string, diagnostic_source_dir string, file_to_check
 	}
 	mut filtered_errors := []JsonError{}
 	for err in v_errors {
-		err_file := source_path_from_overlay(err.path, overlay)
+		err_file := source_path_from_overlay(err.path, overlay, base_dir)
 		if normalized_index_path(err_file) == normalized_index_path(real_path) {
 			filtered_errors << JsonError{
 				path:    real_path
@@ -2540,8 +2540,6 @@ fn (mut app App) line_info_result(method Method, path string, line_info string, 
 				}
 			}
 		}
-			}
-		}
 		.definition, .declaration, .type_definition, .implementation {
 			// file.v:line:col => Location
 			fields := output.split(':')
@@ -2563,7 +2561,6 @@ fn (mut app App) line_info_result(method Method, path string, line_info string, 
 				result = app.compiler_location(uri_path, line_nr, col)
 			}
 		}
-		else {}
 	}
 
 	return result
