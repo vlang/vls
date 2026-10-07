@@ -16,7 +16,7 @@ fn test_smoke_incremental_edit_is_lossless() {
 			line: 0
 			char: 1
 		}
-		end: Position{
+		end:   Position{
 			line: 0
 			char: 1
 		}

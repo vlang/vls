@@ -25,15 +25,15 @@ fn create_test_app() &App {
 	os.mkdir_all(temp_dir) or {
 		assert false, 'Failed to create test temp dir: ${err}'
 		return &App{
-			text: ''
+			text:       ''
 			open_files: map[string]string{}
-			temp_dir: temp_dir
+			temp_dir:   temp_dir
 		}
 	}
 	return &App{
-		text: ''
+		text:       ''
 		open_files: map[string]string{}
-		temp_dir: temp_dir
+		temp_dir:   temp_dir
 	}
 }
 
@@ -56,10 +56,10 @@ fn test_on_did_open_tracks_file() {
 
 	uri := path_to_uri(test_file)
 	request := Request{
-		id: 1
-		method: 'textDocument/didOpen'
+		id:      1
+		method:  'textDocument/didOpen'
 		jsonrpc: '2.0'
-		params: json2.encode(Params{
+		params:  json2.encode(Params{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
@@ -201,7 +201,7 @@ fn test_on_did_open_uses_text_document_payload() {
 	app.on_did_open(Request{
 		params: json2.encode(DidOpenTextDocumentParams{
 			text_document: DidOpenTextDocumentItem{
-				uri: uri
+				uri:  uri
 				text: content
 			}
 		},
@@ -224,7 +224,7 @@ fn test_on_did_open_uses_empty_text_payload_without_disk_fallback() {
 	app.on_did_open(Request{
 		params: json2.encode(DidOpenTextDocumentParams{
 			text_document: DidOpenTextDocumentItem{
-				uri: uri
+				uri:  uri
 				text: ''
 			}
 		},
@@ -335,11 +335,11 @@ fn test_on_did_change_updates_content() {
 	// Then change it
 	new_content := 'module main\n\nfn main() {\n\tprintln("changed")\n}'
 	request := Request{
-		id: 2
-		method: 'textDocument/didChange'
+		id:      2
+		method:  'textDocument/didChange'
 		jsonrpc: '2.0'
-		params: json2.encode(Params{
-			text_document: TextDocumentIdentifier{
+		params:  json2.encode(Params{
+			text_document:   TextDocumentIdentifier{
 				uri: uri
 			}
 			content_changes: [ContentChange{
@@ -427,7 +427,7 @@ fn test_on_did_change_returns_notification() {
 
 	request := Request{
 		params: json2.encode(Params{
-			text_document: TextDocumentIdentifier{
+			text_document:   TextDocumentIdentifier{
 				uri: uri
 			}
 			content_changes: [ContentChange{
@@ -461,8 +461,8 @@ fn test_on_did_change_schedules_diagnostics_without_blocking() {
 
 	result := app.on_did_change(Request{
 		params: json2.encode(DidChangeTextDocumentParams{
-			text_document: VersionedTextDocumentIdentifier{
-				uri: uri
+			text_document:   VersionedTextDocumentIdentifier{
+				uri:     uri
 				version: 2
 			}
 			content_changes: [ContentChange{
@@ -476,6 +476,29 @@ fn test_on_did_change_schedules_diagnostics_without_blocking() {
 	assert result == none
 	assert app.open_files_versions[uri] == 2
 	assert app.open_files[uri].contains('fn changed()')
+}
+
+fn test_a_file_created_on_disk_rechecks_the_open_files_of_its_program() {
+	// A file created, deleted or renamed on disk decides whether an import
+	// resolves, so the open files of its program are checked again, though none
+	// of them changed.
+	mut app := create_test_app()
+	defer {
+		app.cancel_all_scheduled_diagnostics()
+		cleanup_test_app(app)
+	}
+	app.diagnostics_scheduler = new_diagnostics_scheduler()
+	project := os.join_path(app.temp_dir, 'created_module')
+	must_mkdir_all(os.join_path(project, 'lib'))
+	main_path := os.join_path(project, 'main.v')
+	main_content := 'module main\n\nimport lib\n\nfn main() {}\n'
+	must_write_file(main_path, main_content)
+	main_uri := path_to_uri(main_path)
+	app.open_files[main_uri] = main_content
+	lib_path := os.join_path(project, 'lib', 'lib.v')
+	must_write_file(lib_path, 'module lib\n')
+	mutation := app.begin_diagnostics_project_mutation(path_to_uri(lib_path))
+	assert mutation.tickets.any(it.uri == main_uri), mutation.tickets.str()
 }
 
 fn test_diagnostics_scheduler_invalidates_only_changed_document() {
@@ -502,22 +525,22 @@ fn test_diagnostics_scheduler_coalesces_pending_jobs() {
 	uri := 'file:///pending.v'
 	global_first, generation_first := scheduler.next_generation(uri)
 	should_start := scheduler.enqueue(DiagnosticsJob{
-		uri: uri
-		content: 'first'
+		uri:               uri
+		content:           'first'
 		global_generation: global_first
-		generation: generation_first
-		ready_at: 100
-		write_mutex: app.write_mutex
+		generation:        generation_first
+		ready_at:          100
+		write_mutex:       app.write_mutex
 	})
 	assert should_start
 	global_latest, generation_latest := scheduler.next_generation(uri)
 	should_restart := scheduler.enqueue(DiagnosticsJob{
-		uri: uri
-		content: 'latest'
+		uri:               uri
+		content:           'latest'
 		global_generation: global_latest
-		generation: generation_latest
-		ready_at: 100
-		write_mutex: app.write_mutex
+		generation:        generation_latest
+		ready_at:          100
+		write_mutex:       app.write_mutex
 	})
 	assert !should_restart
 
@@ -539,6 +562,8 @@ fn test_diagnostics_scheduler_requeues_pending_sibling_with_latest_buffers() {
 		cleanup_test_app(app)
 	}
 	mut scheduler := new_diagnostics_scheduler()
+	// The jobs stay pending for the test to look at.
+	scheduler.paused = true
 	app.diagnostics_scheduler = scheduler
 	project_dir := os.join_path(app.temp_dir, 'sibling_project')
 	must_mkdir_all(project_dir)
@@ -558,8 +583,8 @@ fn test_diagnostics_scheduler_requeues_pending_sibling_with_latest_buffers() {
 
 	result := app.on_did_change(Request{
 		params: json2.encode(DidChangeTextDocumentParams{
-			text_document: VersionedTextDocumentIdentifier{
-				uri: uri_b
+			text_document:   VersionedTextDocumentIdentifier{
+				uri:     uri_b
 				version: 2
 			}
 			content_changes: [ContentChange{
@@ -586,6 +611,8 @@ fn test_diagnostics_scheduler_requeues_sibling_after_open() {
 		cleanup_test_app(app)
 	}
 	mut scheduler := new_diagnostics_scheduler()
+	// The jobs stay pending for the test to look at.
+	scheduler.paused = true
 	app.diagnostics_scheduler = scheduler
 	project_dir := os.join_path(app.temp_dir, 'open_sibling_project')
 	must_mkdir_all(project_dir)
@@ -604,7 +631,7 @@ fn test_diagnostics_scheduler_requeues_sibling_after_open() {
 	assert app.on_did_open(Request{
 		params: json2.encode(DidOpenTextDocumentParams{
 			text_document: DidOpenTextDocumentItem{
-				uri: uri_b
+				uri:  uri_b
 				text: content_b
 			}
 		},
@@ -628,6 +655,8 @@ fn test_diagnostics_scheduler_requeues_sibling_after_save_text() {
 		cleanup_test_app(app)
 	}
 	mut scheduler := new_diagnostics_scheduler()
+	// The jobs stay pending for the test to look at.
+	scheduler.paused = true
 	app.diagnostics_scheduler = scheduler
 	project_dir := os.join_path(app.temp_dir, 'save_sibling_project')
 	must_mkdir_all(project_dir)
@@ -649,7 +678,7 @@ fn test_diagnostics_scheduler_requeues_sibling_after_save_text() {
 			text_document: TextDocumentIdentifier{
 				uri: uri_b
 			}
-			text: new_content_b
+			text:          new_content_b
 		},
 			escape_unicode: true
 		)
@@ -671,6 +700,8 @@ fn test_diagnostics_scheduler_requeues_sibling_after_close() {
 		cleanup_test_app(app)
 	}
 	mut scheduler := new_diagnostics_scheduler()
+	// The jobs stay pending for the test to look at.
+	scheduler.paused = true
 	app.diagnostics_scheduler = scheduler
 	project_dir := os.join_path(app.temp_dir, 'close_sibling_project')
 	must_mkdir_all(project_dir)
@@ -717,6 +748,8 @@ fn test_diagnostics_scheduler_requeues_job_after_watched_file_change() {
 		cleanup_test_app(app)
 	}
 	mut scheduler := new_diagnostics_scheduler()
+	// The jobs stay pending for the test to look at.
+	scheduler.paused = true
 	app.diagnostics_scheduler = scheduler
 	project_dir := os.join_path(app.temp_dir, 'watched_sibling_project')
 	must_mkdir_all(project_dir)
@@ -739,7 +772,7 @@ fn test_diagnostics_scheduler_requeues_job_after_watched_file_change() {
 	app.on_did_change_watched_files(Request{
 		params: json2.encode(DidChangeWatchedFilesParams{
 			changes: [FileEvent{
-				uri: uri_b
+				uri:        uri_b
 				event_type: 2
 			}]
 		})
@@ -766,13 +799,13 @@ fn test_diagnostics_scheduler_requeues_active_sibling() {
 	tickets_a := scheduler.begin_project_schedule(uri_a, project_key)
 	assert tickets_a.len == 1
 	active_job := DiagnosticsJob{
-		uri: uri_a
-		project_key: project_key
+		uri:                uri_a
+		project_key:        project_key
 		project_generation: tickets_a[0].project_generation
-		global_generation: tickets_a[0].global_generation
-		generation: tickets_a[0].generation
-		ready_at: 0
-		write_mutex: app.write_mutex
+		global_generation:  tickets_a[0].global_generation
+		generation:         tickets_a[0].generation
+		ready_at:           0
+		write_mutex:        app.write_mutex
 	}
 	assert scheduler.enqueue(active_job)
 	jobs, should_stop := scheduler.take_ready_jobs(0)
@@ -807,10 +840,10 @@ fn test_diagnostics_scheduler_checks_staleness_while_publishing() {
 	uri := 'file:///publish.v'
 	global_generation, generation := scheduler.next_generation(uri)
 	job := DiagnosticsJob{
-		uri: uri
+		uri:               uri
 		global_generation: global_generation
-		generation: generation
-		write_mutex: app.write_mutex
+		generation:        generation
+		write_mutex:       app.write_mutex
 	}
 	notification := Notification{
 		method: 'textDocument/publishDiagnostics'
@@ -858,7 +891,7 @@ fn test_on_did_change_multiple_changes() {
 	for change in changes {
 		request := Request{
 			params: json2.encode(Params{
-				text_document: TextDocumentIdentifier{
+				text_document:   TextDocumentIdentifier{
 					uri: uri
 				}
 				content_changes: [ContentChange{
@@ -905,7 +938,7 @@ fn test_on_did_change_updates_tracked_file() {
 	new_content := 'modified content'
 	app.on_did_change(Request{
 		params: json2.encode(Params{
-			text_document: TextDocumentIdentifier{
+			text_document:   TextDocumentIdentifier{
 				uri: uri
 			}
 			content_changes: [ContentChange{
@@ -928,7 +961,7 @@ fn test_apply_incremental_change_handles_utf8_columns() {
 			line: 0
 			char: 1
 		}
-		end: Position{
+		end:   Position{
 			line: 0
 			char: 2
 		}
@@ -947,7 +980,7 @@ fn test_apply_incremental_change_preserves_crlf() {
 			line: 1
 			char: 0
 		}
-		end: Position{
+		end:   Position{
 			line: 1
 			char: 3
 		}
@@ -963,7 +996,7 @@ fn test_apply_incremental_change_rejects_reversed_range() {
 			line: 0
 			char: 4
 		}
-		end: Position{
+		end:   Position{
 			line: 0
 			char: 2
 		}
@@ -982,7 +1015,7 @@ fn test_incremental_change_is_valid_rejects_lines_past_eof() {
 			line: 5
 			char: 0
 		}
-		end: Position{
+		end:   Position{
 			line: 6
 			char: 0
 		}
@@ -994,7 +1027,7 @@ fn test_incremental_change_is_valid_rejects_lines_past_eof() {
 			line: 1
 			char: 0
 		}
-		end: Position{
+		end:   Position{
 			line: 9
 			char: 0
 		}
@@ -1006,7 +1039,7 @@ fn test_incremental_change_is_valid_rejects_lines_past_eof() {
 			line: 0
 			char: 1
 		}
-		end: Position{
+		end:   Position{
 			line: 1
 			char: 2
 		}
@@ -1057,7 +1090,7 @@ fn test_semantic_candidate_cap_ignores_unrelated_workspace_root() {
 	app.ensure_dirs_indexed(app.index_query_dirs())
 
 	current_scope := IndexScope{
-		dir: '/root_a'
+		dir:       '/root_a'
 		recursive: true
 	}
 	candidates := app.collect_semantic_candidates('unique', current_scope)
@@ -1076,7 +1109,7 @@ fn test_incremental_change_is_valid_rejects_char_past_line() {
 			line: 0
 			char: 9
 		}
-		end: Position{
+		end:   Position{
 			line: 1
 			char: 1
 		}
@@ -1087,7 +1120,7 @@ fn test_incremental_change_is_valid_rejects_char_past_line() {
 			line: 0
 			char: 1
 		}
-		end: Position{
+		end:   Position{
 			line: 1
 			char: 9
 		}
@@ -1100,7 +1133,7 @@ fn test_incremental_change_is_valid_rejects_char_past_line() {
 			line: 0
 			char: 3
 		}
-		end: Position{
+		end:   Position{
 			line: 0
 			char: 3
 		}
@@ -1115,7 +1148,7 @@ fn test_apply_incremental_change_handles_multiline_ranges() {
 			line: 0
 			char: 1
 		}
-		end: Position{
+		end:   Position{
 			line: 1
 			char: 2
 		}
@@ -1141,13 +1174,13 @@ fn test_operation_at_pos_completion_line_info() {
 	app.open_files[uri] = content
 
 	request := Request{
-		id: 1
+		id:     1
 		method: 'textDocument/completion'
 		params: json2.encode(Params{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-			position: Position{
+			position:      Position{
 				line: 3
 				char: 4
 			}
@@ -1177,13 +1210,13 @@ fn test_operation_at_pos_definition_line_info() {
 	app.open_files[uri] = content
 
 	request := Request{
-		id: 2
+		id:     2
 		method: 'textDocument/definition'
 		params: json2.encode(Params{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-			position: Position{
+			position:      Position{
 				line: 5
 				char: 2
 			}
@@ -2238,8 +2271,8 @@ fn test_active_indexed_source_file_names_applies_compiler_build_rules() {
 	must_mkdir_all(test_dir)
 	inactive_os := $if windows { 'linux' } $else { 'windows' }
 	source := 'module main\n\nfn helper() {}\n'
-	for name in ['main.v', 'plain_${inactive_os}.v', 'gated_d_somefeature.v',
-		'gated_notd_somefeature.v', 'main_test.v', 'sibling_${inactive_os}_test.v'] {
+	for name in ['main.v', 'plain_${inactive_os}.v', 'gated_d_somefeature.v', 'gated_notd_somefeature.v',
+		'main_test.v', 'sibling_${inactive_os}_test.v'] {
 		must_write_file(os.join_path(test_dir, name), source)
 	}
 	// A file the client created but has not saved yet is not on disk, so the
@@ -2250,7 +2283,8 @@ fn test_active_indexed_source_file_names_applies_compiler_build_rules() {
 	active := app.active_indexed_source_file_names(test_dir, 'main_test.v')
 	assert 'main.v' in active
 	assert 'unsaved.v' in active
-	// VLS passes no defines, so `_d_` sources are inactive and `_notd_` ones active.
+	// VLS passes only the defines V3 sets for itself, so a `_d_` source of
+	// another define is inactive and its `_notd_` one active.
 	assert 'gated_notd_somefeature.v' in active
 	assert 'gated_d_somefeature.v' !in active
 	assert 'plain_${inactive_os}.v' !in active
@@ -2262,6 +2296,32 @@ fn test_active_indexed_source_file_names_applies_compiler_build_rules() {
 	// A test that cannot run on this platform is not activated by requesting it.
 	inactive_active := app.active_indexed_source_file_names(test_dir, 'sibling_${inactive_os}_test.v')
 	assert 'sibling_${inactive_os}_test.v' !in inactive_active
+}
+
+// V3 sets `v3_backend` for itself, and vlib keeps what only V3 builds in
+// `*_d_v3_backend.v` files (the methods of i128 and u128, for one): the files
+// of a module are the ones V3 builds, saved or not.
+fn test_active_indexed_source_file_names_takes_the_define_v3_sets() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'active_source_file_names_v3')
+	must_mkdir_all(test_dir)
+	source := 'module main\n\nfn helper() {}\n'
+	for name in ['main.v', 'int_d_v3_backend.v', 'int_notd_v3_backend.v'] {
+		must_write_file(os.join_path(test_dir, name), source)
+	}
+	for name in ['unsaved_d_v3_backend.v', 'unsaved_notd_v3_backend.v'] {
+		app.open_files[path_to_uri(os.join_path(test_dir, name))] = source
+	}
+
+	active := app.active_indexed_source_file_names(test_dir, '')
+	assert 'main.v' in active
+	assert 'int_d_v3_backend.v' in active
+	assert 'int_notd_v3_backend.v' !in active
+	assert 'unsaved_d_v3_backend.v' in active
+	assert 'unsaved_notd_v3_backend.v' !in active
 }
 
 fn test_resolve_indexed_definition_defers_compile_time_declaration() {
@@ -2716,7 +2776,7 @@ fn test_source_declaration_at_stops_non_braced_declarations() {
 	app.open_files[uri] = content
 
 	constant := app.source_declaration_at(Location{
-		uri: uri
+		uri:   uri
 		range: LSPRange{
 			start: Position{
 				line: 3
@@ -2726,7 +2786,7 @@ fn test_source_declaration_at_stops_non_braced_declarations() {
 	assert constant == 'answer = 42'
 
 	alias := app.source_declaration_at(Location{
-		uri: uri
+		uri:   uri
 		range: LSPRange{
 			start: Position{
 				line: 7
@@ -2736,7 +2796,7 @@ fn test_source_declaration_at_stops_non_braced_declarations() {
 	assert alias == 'type Alias = int'
 
 	function_alias := app.source_declaration_at(Location{
-		uri: uri
+		uri:   uri
 		range: LSPRange{
 			start: Position{
 				line: 8
@@ -2746,7 +2806,7 @@ fn test_source_declaration_at_stops_non_braced_declarations() {
 	assert function_alias == 'type Handler = fn (int) bool'
 
 	function := app.source_declaration_at(Location{
-		uri: uri
+		uri:   uri
 		range: LSPRange{
 			start: Position{
 				line: 12
@@ -2757,6 +2817,34 @@ fn test_source_declaration_at_stops_non_braced_declarations() {
 	label := declaration_signature_label(function, 'parse')
 	assert label == 'parse(\nvalue string, // explanation\n/* { inside comment\ncontinued } */\nradix int,\n) !int'
 	assert signature_parameters(label).len == 2
+}
+
+fn test_source_declaration_at_keeps_the_variants_of_a_sum_type_on_their_lines() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	uri := 'file:///tmp/source_declaration_sum_type.v'
+	content := '// Number is a number.\npub type Number = int\n\t| i8\n\t| f64\n\ntype Word = string\n\nfn main() {}\n'
+	app.open_files[uri] = content
+	number := app.source_declaration_at(Location{
+		uri:   uri
+		range: LSPRange{
+			start: Position{
+				line: 1
+			}
+		}
+	})
+	assert number == 'pub type Number = int\n| i8\n| f64'
+	word := app.source_declaration_at(Location{
+		uri:   uri
+		range: LSPRange{
+			start: Position{
+				line: 5
+			}
+		}
+	})
+	assert word == 'type Word = string'
 }
 
 fn test_resolve_indexed_definition_prefers_source_relative_module() {
@@ -2839,13 +2927,13 @@ fn test_operation_at_pos_signature_help_line_info() {
 	app.open_files[uri] = content
 
 	request := Request{
-		id: 3
+		id:     3
 		method: 'textDocument/signatureHelp'
 		params: json2.encode(Params{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-			position: Position{
+			position:      Position{
 				line: 5
 				char: 7
 			}
@@ -2878,12 +2966,12 @@ fn test_operation_at_pos_preserves_request_id() {
 	test_ids := [0, 1, 42, 999, 12345]
 	for id in test_ids {
 		request := Request{
-			id: id
+			id:     id
 			params: json2.encode(Params{
 				text_document: TextDocumentIdentifier{
 					uri: uri
 				}
-				position: Position{
+				position:      Position{
 					line: 2
 					char: 0
 				}
@@ -2898,7 +2986,7 @@ fn test_operation_at_pos_preserves_request_id() {
 
 fn test_json_encode_response() {
 	response := Response{
-		id: 1
+		id:     1
 		result: 'null'
 	}
 	encoded := json2.encode(response, escape_unicode: true)
@@ -2908,20 +2996,20 @@ fn test_json_encode_response() {
 
 fn test_json_encode_capabilities_response() {
 	response := Response{
-		id: 0
+		id:     0
 		result: Capabilities{
 			capabilities: Capability{
-				text_document_sync: TextDocumentSyncOptions{
+				text_document_sync:      TextDocumentSyncOptions{
 					open_close: true
-					change: 1
+					change:     1
 				}
-				completion_provider: CompletionProvider{
+				completion_provider:     CompletionProvider{
 					trigger_characters: ['.']
 				}
 				signature_help_provider: SignatureHelpOptions{
 					trigger_characters: ['(', ',']
 				}
-				definition_provider: true
+				definition_provider:     true
 			}
 		}
 	}
@@ -2934,20 +3022,20 @@ fn test_json_encode_capabilities_response() {
 fn test_json_encode_completion_response() {
 	details := [
 		Detail{
-			kind: 6
-			label: 'println'
-			detail: 'fn println(s string)'
+			kind:          6
+			label:         'println'
+			detail:        'fn println(s string)'
 			documentation: 'Prints to stdout'
 		},
 		Detail{
-			kind: 6
-			label: 'print'
-			detail: 'fn print(s string)'
+			kind:          6
+			label:         'print'
+			detail:        'fn print(s string)'
 			documentation: 'Prints without newline'
 		},
 	]
 	response := Response{
-		id: 2
+		id:     2
 		result: details
 	}
 	encoded := json2.encode(response, escape_unicode: true)
@@ -2957,15 +3045,15 @@ fn test_json_encode_completion_response() {
 
 fn test_json_encode_location_response() {
 	response := Response{
-		id: 3
+		id:     3
 		result: Location{
-			uri: 'file:///test/main.v'
+			uri:   'file:///test/main.v'
 			range: LSPRange{
 				start: Position{
 					line: 10
 					char: 5
 				}
-				end: Position{
+				end:   Position{
 					line: 10
 					char: 15
 				}
@@ -2979,11 +3067,11 @@ fn test_json_encode_location_response() {
 
 fn test_json_encode_signature_help_response() {
 	response := Response{
-		id: 4
+		id:     4
 		result: SignatureHelp{
-			signatures: [
+			signatures:       [
 				SignatureInformation{
-					label: 'fn test(a int, b string)'
+					label:      'fn test(a int, b string)'
 					parameters: [
 						ParameterInformation{
 							label: 'a int'
@@ -3008,20 +3096,20 @@ fn test_json_encode_notification() {
 	notification := Notification{
 		method: 'textDocument/publishDiagnostics'
 		params: PublishDiagnosticsParams{
-			uri: 'file:///test.v'
+			uri:         'file:///test.v'
 			diagnostics: [
 				LSPDiagnostic{
-					range: LSPRange{
+					range:    LSPRange{
 						start: Position{
 							line: 5
 							char: 0
 						}
-						end: Position{
+						end:   Position{
 							line: 5
 							char: 10
 						}
 					}
-					message: 'undefined identifier'
+					message:  'undefined identifier'
 					severity: 1
 				},
 			]
@@ -3107,17 +3195,17 @@ fn test_diagnostics_deduplication() {
 	errors := [
 		JsonError{
 			line_nr: 5
-			col: 10
+			col:     10
 			message: 'error 1'
 		},
 		JsonError{
 			line_nr: 5
-			col: 10
+			col:     10
 			message: 'error 2'
 		}, // duplicate position
 		JsonError{
 			line_nr: 6
-			col: 5
+			col:     5
 			message: 'error 3'
 		},
 	]
@@ -3141,17 +3229,17 @@ fn test_diagnostics_deduplication_same_line_different_col() {
 	errors := [
 		JsonError{
 			line_nr: 5
-			col: 1
+			col:     1
 			message: 'error 1'
 		},
 		JsonError{
 			line_nr: 5
-			col: 10
+			col:     10
 			message: 'error 2'
 		},
 		JsonError{
 			line_nr: 5
-			col: 20
+			col:     20
 			message: 'error 3'
 		},
 	]
@@ -3198,7 +3286,7 @@ fn test_response_result_string() {
 fn test_response_result_details() {
 	details := [
 		Detail{
-			kind: 6
+			kind:  6
 			label: 'test'
 		},
 	]
@@ -3273,11 +3361,11 @@ fn test_app_exit_flag_default() {
 
 fn test_v_error_to_lsp_diagnostic_basic() {
 	v_err := JsonError{
-		path: '/test/file.v'
+		path:    '/test/file.v'
 		message: 'undefined identifier `foo`'
 		line_nr: 10
-		col: 5
-		len: 3
+		col:     5
+		len:     3
 	}
 	diag := v_error_to_lsp_diagnostic(v_err)
 
@@ -3292,11 +3380,11 @@ fn test_v_error_to_lsp_diagnostic_basic() {
 
 fn test_v_error_to_lsp_diagnostic_first_line() {
 	v_err := JsonError{
-		path: '/test/file.v'
+		path:    '/test/file.v'
 		message: 'syntax error'
 		line_nr: 1
-		col: 1
-		len: 1
+		col:     1
+		len:     1
 	}
 	diag := v_error_to_lsp_diagnostic(v_err)
 
@@ -3307,11 +3395,11 @@ fn test_v_error_to_lsp_diagnostic_first_line() {
 
 fn test_v_error_to_lsp_diagnostic_long_error() {
 	v_err := JsonError{
-		path: '/test/file.v'
+		path:    '/test/file.v'
 		message: 'unexpected token'
 		line_nr: 100
-		col: 50
-		len: 20
+		col:     50
+		len:     20
 	}
 	diag := v_error_to_lsp_diagnostic(v_err)
 
@@ -3322,11 +3410,11 @@ fn test_v_error_to_lsp_diagnostic_long_error() {
 
 fn test_v_error_to_lsp_diagnostic_zero_length() {
 	v_err := JsonError{
-		path: '/test/file.v'
+		path:    '/test/file.v'
 		message: 'error at position'
 		line_nr: 5
-		col: 10
-		len: 0
+		col:     10
+		len:     0
 	}
 	diag := v_error_to_lsp_diagnostic(v_err)
 
@@ -3347,8 +3435,8 @@ fn test_v_error_to_lsp_diagnostic_preserves_message() {
 		v_err := JsonError{
 			message: msg
 			line_nr: 1
-			col: 1
-			len: 1
+			col:     1
+			len:     1
 		}
 		diag := v_error_to_lsp_diagnostic(v_err)
 		assert diag.message == msg
@@ -3357,11 +3445,11 @@ fn test_v_error_to_lsp_diagnostic_preserves_message() {
 
 fn test_v_error_to_lsp_diagnostic_always_error_severity() {
 	v_err := JsonError{
-		path: '/test.v'
+		path:    '/test.v'
 		message: 'any error'
 		line_nr: 1
-		col: 1
-		len: 1
+		col:     1
+		len:     1
 	}
 	diag := v_error_to_lsp_diagnostic(v_err)
 	assert diag.severity == 1 // Always Error severity
@@ -3438,7 +3526,7 @@ fn test_multifile_change_single_file() {
 	new_content := 'module main\n\nfn main() { changed }'
 	app.on_did_change(Request{
 		params: json2.encode(Params{
-			text_document: TextDocumentIdentifier{
+			text_document:   TextDocumentIdentifier{
 				uri: main_uri
 			}
 			content_changes: [ContentChange{
@@ -3452,6 +3540,93 @@ fn test_multifile_change_single_file() {
 	// Verify only main.v was updated
 	assert app.open_files[main_uri] == new_content
 	assert app.open_files[utils_uri].contains('helper') // utils unchanged
+}
+
+fn test_handle_formatting_preserves_crlf_line_endings() {
+	// `v fmt` writes LF on every platform, so a CRLF buffer used to come back
+	// with every CR stripped and be replaced wholesale — a whole-file line-ending
+	// rewrite from a plain Format Document.
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+
+	test_dir := os.join_path(app.temp_dir, 'project')
+	must_mkdir_all(test_dir)
+	test_file := os.join_path(test_dir, 'crlf.v')
+
+	crlf := 'module main\r\n\r\nfn   badly_formatted(   x    int,y int   )int{\r\nreturn x+y\r\n}\r\n'
+	must_write_file(test_file, crlf)
+
+	uri := path_to_uri(test_file)
+	app.open_files[uri] = crlf
+
+	request := Request{
+		id:      1
+		method:  'textDocument/formatting'
+		jsonrpc: '2.0'
+		params:  json2.encode(Params{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+		},
+			escape_unicode: true
+		)
+	}
+
+	response := app.handle_formatting(request)
+	if response.result is []TextEdit {
+		edits := response.result as []TextEdit
+		assert edits.len > 0
+		formatted_text := edits[0].new_text
+		// The code is formatted...
+		assert formatted_text.contains('fn badly_formatted(x int, y int) int {')
+		assert formatted_text.contains('\treturn x + y')
+		// ...and the document keeps CRLF throughout.
+		assert formatted_text.contains('\r\n')
+		assert !formatted_text.replace('\r\n', '').contains('\n')
+	} else {
+		assert false, 'Expected []TextEdit result'
+	}
+}
+
+fn test_handle_formatting_already_formatted_crlf_is_a_no_op() {
+	// The stronger half of the same bug: with CRLF stripped, `formatted` could
+	// never equal `content`, so VLS reported a change for code that was already
+	// correctly formatted and made the whole file look modified.
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+
+	test_dir := os.join_path(app.temp_dir, 'project')
+	must_mkdir_all(test_dir)
+	test_file := os.join_path(test_dir, 'already.v')
+
+	// Exactly what `v fmt` produces, but with CRLF terminators.
+	crlf := "module main\r\n\r\nfn main() {\r\n\tprintln('hi')\r\n}\r\n"
+	must_write_file(test_file, crlf)
+
+	uri := path_to_uri(test_file)
+	app.open_files[uri] = crlf
+
+	edits, formatted := app.format_content(uri, crlf)
+	assert edits.len == 0
+	assert formatted == ''
+}
+
+fn test_restore_line_endings_leaves_lf_documents_alone() {
+	// The LF path must not regress: an LF document stays byte-identical.
+	lf := 'module main\n\nfn main() {\n\tprintln(1)\n}\n'
+	assert restore_line_endings(lf, lf) == lf
+	// A document with no line break has no convention to preserve.
+	assert restore_line_endings('', 'fn main() {}') == 'fn main() {}'
+	// Output that already has CRLF is not given a second CR.
+	assert restore_line_endings('a\r\nb\r\n', 'a\r\nb\r\n') == 'a\r\nb\r\n'
+	// CRLF in, CRLF out.
+	assert restore_line_endings('a\r\nb\r\n', 'a\nb\n') == 'a\r\nb\r\n'
+	// Mixed endings normalize to the first one.
+	assert restore_line_endings('a\r\nb\nc', 'x\ny\n') == 'x\r\ny\r\n'
 }
 
 fn test_handle_formatting_formats_code() {
@@ -3472,10 +3647,10 @@ fn test_handle_formatting_formats_code() {
 	app.open_files[uri] = unformatted
 
 	request := Request{
-		id: 1
-		method: 'textDocument/formatting'
+		id:      1
+		method:  'textDocument/formatting'
 		jsonrpc: '2.0'
-		params: json2.encode(Params{
+		params:  json2.encode(Params{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
@@ -3519,10 +3694,10 @@ fn test_handle_formatting_already_formatted() {
 	app.open_files[uri] = formatted
 
 	request := Request{
-		id: 2
-		method: 'textDocument/formatting'
+		id:      2
+		method:  'textDocument/formatting'
 		jsonrpc: '2.0'
-		params: json2.encode(Params{
+		params:  json2.encode(Params{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
@@ -3552,10 +3727,10 @@ fn test_handle_formatting_nonexistent_file() {
 	uri := path_to_uri(nonexistent)
 
 	request := Request{
-		id: 3
-		method: 'textDocument/formatting'
+		id:      3
+		method:  'textDocument/formatting'
 		jsonrpc: '2.0'
-		params: json2.encode(Params{
+		params:  json2.encode(Params{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
@@ -3592,10 +3767,10 @@ fn test_handle_formatting_uses_open_file_content() {
 	app.open_files[uri] = 'module main\n\nfn   new(   )   {}'
 
 	request := Request{
-		id: 4
-		method: 'textDocument/formatting'
+		id:      4
+		method:  'textDocument/formatting'
 		jsonrpc: '2.0'
-		params: json2.encode(Params{
+		params:  json2.encode(Params{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
@@ -3633,17 +3808,17 @@ fn test_find_references_returns_null_when_no_symbol_at_position() {
 	app.open_files[uri] = content
 
 	resp := app.find_references(Request{
-		id: 901
+		id:     901
 		method: 'textDocument/references'
 		params: json2.encode(ReferenceParams{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-			position: Position{
+			position:      Position{
 				line: 1
 				char: 0
 			}
-			context: ReferenceContext{
+			context:       ReferenceContext{
 				include_declaration: true
 			}
 		},
@@ -3672,17 +3847,17 @@ fn test_handle_rename_returns_null_when_no_symbol_at_position() {
 	app.open_files[uri] = content
 
 	resp := app.handle_rename(Request{
-		id: 902
+		id:     902
 		method: 'textDocument/rename'
 		params: json2.encode(RenameParams{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-			position: Position{
+			position:      Position{
 				line: 1
 				char: 0
 			}
-			new_name: 'renamed'
+			new_name:      'renamed'
 		},
 			escape_unicode: true
 		)
@@ -3740,7 +3915,7 @@ fn test_did_close_reindexes_noncanonical_uri_under_disk_uri() {
 	app.on_did_change_watched_files(Request{
 		params: json2.encode(DidChangeWatchedFilesParams{
 			changes: [FileEvent{
-				uri: disk_uri
+				uri:        disk_uri
 				event_type: 2
 			}]
 		})
@@ -3770,17 +3945,17 @@ fn test_handle_rename_refuses_incomplete_oversized_sibling_index() {
 	app.open_files[uri] = content
 
 	resp := app.handle_rename(Request{
-		id: 903
+		id:     903
 		method: 'textDocument/rename'
 		params: json2.encode(RenameParams{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-			position: Position{
+			position:      Position{
 				line: 2
 				char: 4
 			}
-			new_name: 'renamed'
+			new_name:      'renamed'
 		},
 			escape_unicode: true
 		)
@@ -4043,7 +4218,7 @@ fn test_handle_document_symbols_empty_file() {
 	app.open_files[uri] = ''
 
 	request := Request{
-		id: 10
+		id:     10
 		method: 'textDocument/documentSymbol'
 		params: json2.encode(Params{
 			text_document: TextDocumentIdentifier{
@@ -4071,7 +4246,7 @@ fn test_handle_document_symbols_no_tracked_file() {
 
 	// URI not in open_files — should still return an empty symbol list, not crash
 	request := Request{
-		id: 11
+		id:     11
 		method: 'textDocument/documentSymbol'
 		params: json2.encode(Params{
 			text_document: TextDocumentIdentifier{
@@ -4101,7 +4276,7 @@ fn test_handle_document_symbols_returns_correct_symbols() {
 	app.open_files[uri] = 'module main\n\nfn hello() {}\n\nstruct Config {}\n\nenum Mode { on off }\n\nconst version = 1\n'
 
 	request := Request{
-		id: 12
+		id:     12
 		method: 'textDocument/documentSymbol'
 		params: json2.encode(Params{
 			text_document: TextDocumentIdentifier{
@@ -4138,7 +4313,7 @@ fn test_handle_document_symbols_preserves_request_id() {
 
 	for id in [1, 99, 1000, 0] {
 		request := Request{
-			id: id
+			id:     id
 			method: 'textDocument/documentSymbol'
 			params: json2.encode(Params{
 				text_document: TextDocumentIdentifier{
@@ -4176,7 +4351,7 @@ const my_const = 42
 '
 
 	request := Request{
-		id: 20
+		id:     20
 		method: 'textDocument/documentSymbol'
 		params: json2.encode(Params{
 			text_document: TextDocumentIdentifier{
@@ -4247,6 +4422,51 @@ fn test_extract_doc_comment_at_first_line() {
 	lines := ['fn greet() {}']
 	comment := extract_doc_comment(lines, 0)
 	assert comment == ''
+}
+
+fn test_extract_doc_comment_shows_inline_examples_as_v_code() {
+	// `// Example: <code>` is how vlib documents most examples; `v doc` shows
+	// the code as V. Consecutive ones share one block, under `Examples:`.
+	lines := [
+		'// sort sorts the array in place.',
+		'//',
+		'// Example: mut aa := [5,2,1,10]; aa.sort(); assert aa == [1,2,5,10] // ascending',
+		'// Example: mut aa := [5,2,1,10]; aa.sort(b < a) // descending',
+		'pub fn (mut a array) sort(callback fn (voidptr, voidptr) int)',
+	]
+	assert extract_doc_comment(lines, 4) == 'sort sorts the array in place.  \n  \nExamples:  \n```v\nmut aa := [5,2,1,10]; aa.sort(); assert aa == [1,2,5,10] // ascending\nmut aa := [5,2,1,10]; aa.sort(b < a) // descending\n```'
+	one := ['// hex returns the value in base 16.', "// Example: assert 255.hex() == 'ff'",
+		'pub fn (nn int) hex() string']
+	assert extract_doc_comment(one, 2) == "hex returns the value in base 16.  \nExample:  \n```v\nassert 255.hex() == 'ff'\n```"
+}
+
+fn test_extract_doc_comment_keeps_the_lines_of_a_code_block_as_written() {
+	// The lines of a ``` block keep their indentation, and an `Example:` in it
+	// is code, not a new example.
+	lines := [
+		'// map creates a new array.',
+		'// Example:',
+		'// ```v',
+		'// r2 := words.map(fn (w string) string {',
+		'// \treturn w.to_upper()',
+		'// })',
+		'// // Example: in a block',
+		'// ```',
+		'pub fn (a array) map(callback fn (voidptr) voidptr) array',
+	]
+	assert extract_doc_comment(lines, 8) == 'map creates a new array.  \nExample:  \n```v\nr2 := words.map(fn (w string) string {\n\treturn w.to_upper()\n})\n// Example: in a block\n```'
+}
+
+fn test_extract_doc_comment_leaves_other_example_lines_as_text() {
+	// Only `Example: <code>` is an example for `v doc`: `example:` is prose, and
+	// `Example:` alone introduces a ``` block or text.
+	lines := [
+		"// example: utf8.raw_index('ab', 1) => 'b'",
+		'// Example:',
+		'//',
+		'fn raw_index() {}',
+	]
+	assert extract_doc_comment(lines, 3) == "example: utf8.raw_index('ab', 1) => 'b'  \nExample:  \n"
 }
 
 fn test_find_declaration_line_function() {
@@ -4513,13 +4733,13 @@ fn main() {
 		char: start_col + 1
 	}
 	response := app.operation_at_pos(.hover, Request{
-		id: 904
+		id:     904
 		method: 'textDocument/hover'
 		params: json2.encode(TextDocumentPositionParams{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-			position: position
+			position:      position
 		},
 			escape_unicode: true
 		)
@@ -4690,18 +4910,18 @@ obj := MyStruct{}
 	app.open_files[uri] = content
 
 	request := Request{
-		id: 30
+		id:     30
 		method: 'textDocument/inlayHint'
 		params: json2.encode(Params{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-			range: LSPRange{
+			range:         LSPRange{
 				start: Position{
 					line: 0
 					char: 0
 				}
-				end: Position{
+				end:   Position{
 					line: 9
 					char: 0
 				}
@@ -4741,18 +4961,18 @@ x := 99
 	app.open_files[uri] = content
 
 	request := Request{
-		id: 31
+		id:     31
 		method: 'textDocument/inlayHint'
 		params: json2.encode(Params{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-			range: LSPRange{
+			range:         LSPRange{
 				start: Position{
 					line: 0
 					char: 0
 				}
-				end: Position{
+				end:   Position{
 					line: 4
 					char: 0
 				}
@@ -4788,18 +5008,18 @@ fn test_handle_inlay_hints_empty_file() {
 	app.open_files[uri] = ''
 
 	request := Request{
-		id: 32
+		id:     32
 		method: 'textDocument/inlayHint'
 		params: json2.encode(Params{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-			range: LSPRange{
+			range:         LSPRange{
 				start: Position{
 					line: 0
 					char: 0
 				}
-				end: Position{
+				end:   Position{
 					line: 0
 					char: 0
 				}
@@ -4831,18 +5051,18 @@ mut count := 0
 	app.open_files[uri] = content
 
 	request := Request{
-		id: 33
+		id:     33
 		method: 'textDocument/inlayHint'
 		params: json2.encode(Params{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-			range: LSPRange{
+			range:         LSPRange{
 				start: Position{
 					line: 0
 					char: 0
 				}
-				end: Position{
+				end:   Position{
 					line: 2
 					char: 0
 				}
@@ -4880,18 +5100,18 @@ const is_debug = false
 	app.open_files[uri] = content
 
 	request := Request{
-		id: 34
+		id:     34
 		method: 'textDocument/inlayHint'
 		params: json2.encode(Params{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-			range: LSPRange{
+			range:         LSPRange{
 				start: Position{
 					line: 0
 					char: 0
 				}
-				end: Position{
+				end:   Position{
 					line: 7
 					char: 0
 				}
@@ -4935,18 +5155,18 @@ enabled   = true
 	app.open_files[uri] = content
 
 	request := Request{
-		id: 35
+		id:     35
 		method: 'textDocument/inlayHint'
 		params: json2.encode(Params{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-			range: LSPRange{
+			range:         LSPRange{
 				start: Position{
 					line: 0
 					char: 0
 				}
-				end: Position{
+				end:   Position{
 					line: 9
 					char: 0
 				}
@@ -4986,18 +5206,18 @@ fn test_handle_inlay_hints_local_fn_call() {
 	app.open_files[uri] = 'module main\n\nfn main() {\n\tmsg := get_greeting()\n}\n'
 
 	request := Request{
-		id: 40
+		id:     40
 		method: 'textDocument/inlayHint'
 		params: json2.encode(Params{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-			range: LSPRange{
+			range:         LSPRange{
 				start: Position{
 					line: 0
 					char: 0
 				}
-				end: Position{
+				end:   Position{
 					line: 5
 					char: 0
 				}
@@ -5031,18 +5251,18 @@ fn test_handle_inlay_hints_error_result_fn() {
 	app.open_files[uri] = 'module main\n\nfn main() {\n\tdata := read_data() or { return }\n}\n'
 
 	request := Request{
-		id: 41
+		id:     41
 		method: 'textDocument/inlayHint'
 		params: json2.encode(Params{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-			range: LSPRange{
+			range:         LSPRange{
 				start: Position{
 					line: 0
 					char: 0
 				}
-				end: Position{
+				end:   Position{
 					line: 5
 					char: 0
 				}
@@ -5081,18 +5301,18 @@ greeting := get_greeting()
 	app.open_files[uri] = content
 
 	request := Request{
-		id: 50
+		id:     50
 		method: 'textDocument/inlayHint'
 		params: json2.encode(Params{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-			range: LSPRange{
+			range:         LSPRange{
 				start: Position{
 					line: 0
 					char: 0
 				}
-				end: Position{
+				end:   Position{
 					line: 9
 					char: 0
 				}
@@ -5109,6 +5329,382 @@ greeting := get_greeting()
 	} else {
 		assert false, 'Expected []InlayHint'
 	}
+}
+
+fn inlay_hints_for_file(dir_name string, content string) []InlayHint {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	app.v3_line_info_enabled = v3_answers_inlay_hints()
+	test_dir := os.join_path(app.temp_dir, dir_name)
+	must_mkdir_all(test_dir)
+	main_file := os.join_path(test_dir, 'main.v')
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	return inlay_hints_request(mut app, uri, content)
+}
+
+fn inlay_hints_request(mut app App, uri string, content string) []InlayHint {
+	response := app.handle_inlay_hints(Request{
+		id:     1
+		method: 'textDocument/inlayHint'
+		params: json2.encode(Params{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			range:         LSPRange{
+				start: Position{
+					line: 0
+					char: 0
+				}
+				end:   Position{
+					line: content.count('\n') + 1
+					char: 0
+				}
+			}
+		},
+			escape_unicode: true
+		)
+	})
+	assert response.result is []InlayHint, 'Expected []InlayHint'
+	return response.result as []InlayHint
+}
+
+// compiler_supports_inlay_hints reports whether the configured V answers the
+// `-line-info file:L:ih^C` mode: its V3 with the query engine, or a V1 that was
+// patched for it. With any other compiler VLS falls back to its source
+// heuristics, so the tests that expect compiler hints are skipped. It asks the
+// compiler directly, not through VLS, so a broken VLS side makes those tests
+// fail instead of skipping them.
+fn compiler_supports_inlay_hints() bool {
+	return compiler_answers_inlay_hints([['-new-compiler'], ['-old-compiler'], []string{}])
+}
+
+// v3_answers_inlay_hints reports whether the V3 of the configured V answers the
+// `ih^` mode: the tests that expect compiler hints then take them from V3, as
+// VLS does.
+fn v3_answers_inlay_hints() bool {
+	return compiler_answers_inlay_hints([['-new-compiler']])
+}
+
+fn compiler_answers_inlay_hints(selectors [][]string) bool {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	dir := os.join_path(app.temp_dir, 'inlay_hints_probe')
+	must_mkdir_all(dir)
+	main_file := os.join_path(dir, 'main.v')
+	must_write_file(main_file, 'module main\n\nfn main() {\n\tx := 1\n\tprintln(x)\n}\n')
+	args := build_v_line_info_args_single(main_file, '1:ih^1', main_file)
+	for selector in selectors {
+		mut argv := selector.clone()
+		argv << args
+		if run_v_argv(argv, dir).output.contains('{"inlay_hints":') {
+			return true
+		}
+	}
+	return false
+}
+
+fn inlay_hint_summary(hints []InlayHint) []string {
+	mut out := hints.map('${it.position.line}:${it.position.char} ${it.kind} ${it.label}')
+	out.sort()
+	return out
+}
+
+fn test_inlay_hints_come_from_the_compiler_for_every_variable_and_argument() {
+	if !compiler_supports_inlay_hints() {
+		eprintln('skipped: this V does not implement the `ih^` inlay hints mode')
+		return
+	}
+	content := "module main\n\nstruct Point {\n\tx int\n\ty int\n}\n\nfn greet(name string, times int) string {\n\treturn name.repeat(times)\n}\n\nfn main() {\n\tp := Point{\n\t\tx: 1\n\t\ty: 2\n\t}\n\tmsg := greet('John', p.x)\n\tprintln(msg)\n\tmsg2 := greet('résumé', 2)\n\tprintln(msg2)\n}\n"
+	mut want := [
+		'8:20 2 count: ', // name.repeat(times)
+		'12:2 1 : Point', // p := Point{
+		'16:4 1 : string', // msg := greet('John', p.x)
+		'16:14 2 name: ',
+		'16:22 2 times: ',
+		'17:9 2 s: ', // println(msg)
+		'18:5 1 : string', // msg2 := greet('résumé', 2)
+		'18:15 2 name: ',
+		'18:25 2 times: ', // UTF-16 column: each `é` is one unit
+		'19:9 2 s: ',
+	]
+	want.sort()
+	assert inlay_hint_summary(inlay_hints_for_file('inlay_from_compiler', content)) == want
+}
+
+fn test_inlay_hints_follow_disk_changes_in_files_that_are_not_open() {
+	if !compiler_supports_inlay_hints() {
+		eprintln('skipped: this V does not implement the `ih^` inlay hints mode')
+		return
+	}
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	app.v3_line_info_enabled = v3_answers_inlay_hints()
+	dir := os.join_path(app.temp_dir, 'inlay_cache_disk_change')
+	must_mkdir_all(dir)
+	helper := os.join_path(dir, 'helper.v')
+	must_write_file(helper, 'module main\n\nfn greet(times int) string {\n\treturn "hi".repeat(times)\n}\n')
+	main_file := os.join_path(dir, 'main.v')
+	content := 'module main\n\nfn main() {\n\tprintln(greet(3))\n}\n'
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	before := inlay_hints_request(mut app, uri, content).map(it.label)
+	assert 'times: ' in before, before.str()
+	// helper.v is not open: only the file watcher reports that it changed.
+	must_write_file(helper, 'module main\n\nfn greet(count int) string {\n\treturn "hi".repeat(count)\n}\n')
+	app.on_did_change_watched_files(Request{
+		params: json2.encode(DidChangeWatchedFilesParams{
+			changes: [
+				FileEvent{
+					uri:        path_to_uri(helper)
+					event_type: 2
+				},
+			]
+		})
+	})
+	after := inlay_hints_request(mut app, uri, content).map(it.label)
+	assert 'count: ' in after, after.str()
+	assert 'times: ' !in after, after.str()
+}
+
+fn test_inlay_hints_follow_unsaved_edits_in_other_open_files() {
+	if !compiler_supports_inlay_hints() {
+		eprintln('skipped: this V does not implement the `ih^` inlay hints mode')
+		return
+	}
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	app.v3_line_info_enabled = v3_answers_inlay_hints()
+	dir := os.join_path(app.temp_dir, 'inlay_other_open_buffer')
+	must_mkdir_all(dir)
+	helper := os.join_path(dir, 'helper.v')
+	helper_content := 'module main\n\nfn greet(times int) string {\n\treturn "hi".repeat(times)\n}\n'
+	must_write_file(helper, helper_content)
+	main_file := os.join_path(dir, 'main.v')
+	content := 'module main\n\nfn main() {\n\tprintln(greet(3))\n}\n'
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	helper_uri := path_to_uri(helper)
+	app.open_files[uri] = content
+	app.open_files[helper_uri] = helper_content
+	before := inlay_hints_request(mut app, uri, content).map(it.label)
+	assert 'times: ' in before, before.str()
+	// An unsaved edit in helper.v: the file on disk still says `times`.
+	app.open_files[helper_uri] = helper_content.replace('times', 'count')
+	app.open_files_versions[helper_uri] = 2
+	after := inlay_hints_request(mut app, uri, content).map(it.label)
+	assert 'count: ' in after, after.str()
+	assert 'times: ' !in after, after.str()
+}
+
+struct PollCount {
+mut:
+	n int
+}
+
+// A server that keeps writing without the marker that a read waits for, as a
+// child stuck in a loop that prints, is waited for no longer than the time
+// given, and a read that can be cancelled asks whether to cancel meanwhile.
+fn test_a_read_of_a_server_that_writes_without_end_ends_in_time() {
+	yes := os.find_abs_path_of_executable('yes') or { return }
+	mut p := os.new_process(yes)
+	p.set_redirect_stdio()
+	p.run()
+	defer {
+		p.signal_kill()
+		p.wait()
+		p.close()
+	}
+	mut s := DiagnosticsServer{
+		process: p
+	}
+	started := time.now()
+	if _ := s.read_until('never printed', 300) {
+		assert false, 'the marker is never printed'
+	}
+	assert time.since(started) < 10 * time.second
+	mut count := &PollCount{}
+	again := time.now()
+	answer, _ := s.read_until_or_cancel('never printed', 300, fn [mut count] () bool {
+		count.n++
+		return false
+	}) or { '<none>', false }
+	assert answer == '<none>'
+	assert time.since(again) < 10 * time.second
+	assert count.n > 0
+}
+
+// A client without file watchers says nothing when a file that is not open
+// changes on disk, and a hint of an open file can depend on it (a signature
+// there): the hints are computed again once it has changed. With watchers, the
+// change comes as a notification, which moves the generation of the project.
+fn test_inlay_hint_stamp_changes_with_a_closed_file_on_disk_without_watchers() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	dir := os.join_path(app.temp_dir, 'hint_stamp_disk')
+	must_mkdir_all(dir)
+	must_write_file(os.join_path(dir, 'v.mod'), 'Module {}\n')
+	main_file := os.join_path(dir, 'main.v')
+	other_file := os.join_path(dir, 'other.v')
+	content := 'module main\n\nfn main() {\n\tx := value()\n\tprintln(x)\n}\n'
+	must_write_file(main_file, content)
+	must_write_file(other_file, 'module main\n\nfn value() int {\n\treturn 1\n}\n')
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	before := app.inlay_hint_stamp(uri, content)
+	must_write_file(other_file, "module main\n\nfn value() string {\n\treturn 'one'\n}\n")
+	assert app.inlay_hint_stamp(uri, content) != before
+	app.watched_files_active = true
+	watched := app.inlay_hint_stamp(uri, content)
+	must_write_file(other_file, 'module main\n\nfn value() int {\n\treturn 2\n}\n')
+	assert app.inlay_hint_stamp(uri, content) == watched
+}
+
+fn test_inlay_hint_stamp_detects_same_size_changes_with_the_same_timestamp() {
+	mut app := create_test_app()
+	defer { cleanup_test_app(app) }
+	dir := os.join_path(app.temp_dir, 'hint_stamp_same_metadata')
+	must_mkdir_all(dir)
+	path := os.join_path(dir, 'other.v')
+	must_write_file(path, 'module main\n\nfn other(alpha int) {}\n')
+	modified := os.file_last_mod_unix(path)
+	before := project_disk_fingerprint(dir)
+	must_write_file(path, 'module main\n\nfn other(bravo int) {}\n')
+	os.utime(path, modified, modified) or { panic(err) }
+	assert project_disk_fingerprint(dir) != before
+}
+
+fn test_inlay_hint_disk_stamp_skips_excluded_trees_and_bounds_file_collection() {
+	mut app := create_test_app()
+	defer { cleanup_test_app(app) }
+	dir := os.join_path(app.temp_dir, 'hint_stamp_bounded')
+	must_mkdir_all(dir)
+	must_write_file(os.join_path(dir, 'a.v'), 'module main\n')
+	must_write_file(os.join_path(dir, 'b.v'), 'module main\n')
+	must_mkdir_all(os.join_path(dir, 'node_modules', 'nested'))
+	excluded := os.join_path(dir, 'node_modules', 'nested', 'ignored.v')
+	must_write_file(excluded, 'module ignored\n')
+	before := project_disk_fingerprint(dir)
+	must_write_file(excluded, 'module ignored\n\nfn changed() {}\n')
+	assert project_disk_fingerprint(dir) == before
+	mut files := []string{}
+	assert !collect_v_files_bounded(dir, 1, mut files)
+	assert files.len == 1
+	assert !files[0].contains('node_modules')
+	assert project_disk_fingerprint(os.dir(os.real_path('/'))) == ''
+	// Non-V entries must consume the traversal budget too.
+	os.rm(os.join_path(dir, 'a.v')) or { panic(err) }
+	os.rm(os.join_path(dir, 'b.v')) or { panic(err) }
+	for i in 0 .. 8 { must_write_file(os.join_path(dir, 'entry${i}.txt'), '') }
+	files.clear()
+	assert !collect_v_files_bounded(dir, 1, mut files)
+	assert files.len == 0
+}
+
+fn test_did_close_drops_cached_inlay_hints() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_file := os.join_path(app.temp_dir, 'close_inlay_hints.v')
+	content := 'module main\n\nfn main() {}\n'
+	must_write_file(test_file, content)
+	uri := path_to_uri(test_file)
+	app.open_files[uri] = content
+	app.inlay_hint_cache[uri] = CachedInlayHints{
+		stamp: app.inlay_hint_stamp(uri, content)
+	}
+
+	app.on_did_close(Request{
+		params: json2.encode(DidCloseTextDocumentParams{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+		},
+			escape_unicode: true
+		)
+	})
+
+	assert uri !in app.inlay_hint_cache
+}
+
+// V's builtin functions insert their call as every other function does: with
+// the parameters that vlib/builtin declares, or, for one it does not declare
+// (dump, which the compiler provides), at least the parentheses.
+fn test_builtin_function_completions_insert_the_call() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	path := os.join_path(app.temp_dir, 'builtin_calls', 'main.v')
+	content := 'module main\n\nfn main() {\n\tpr\n}\n'
+	must_mkdir_all(os.dir(path))
+	must_write_file(path, content)
+	uri := path_to_uri(path)
+	app.open_files[uri] = content
+	items := app.indexed_completions(uri, Position{
+		line: 3
+		char: 3
+	}).items
+	for label, insert in {
+		'println':         'println(\${1:s})\$0'
+		'panic':           'panic(\${1:s})\$0'
+		'exit':            'exit(\${1:code})\$0'
+		'copy':            'copy(\${1:dst}, \${2:src})\$0'
+		'error_with_code': 'error_with_code(\${1:message}, \${2:code})\$0'
+		'flush_stdout':    'flush_stdout()'
+		'print_backtrace': 'print_backtrace()'
+		'recover':         'recover()'
+		'dump':            'dump(\$0)'
+		'sizeof':          'sizeof(\$0)'
+		'typeof':          'typeof(\$0)'
+		'isreftype':       'isreftype(\$0)'
+	} {
+		found := items.filter(it.label == label)
+		assert found.len == 1, '${label}: ${found.len} items'
+		assert (found[0].insert_text or { '' }) == insert, '${label}: ${found[0].insert_text}'
+		assert (found[0].insert_text_format or { 1 }) == if insert.contains('\$') { 2 } else { 1 }, label
+	}
+	for name in v_builtins {
+		found := items.filter(it.label == name)
+		assert found.len == 1, '${name}: ${found.len} items'
+		assert (found[0].insert_text or { '' }).starts_with('${name}('), name
+	}
+	// the signature is the one vlib/builtin declares, as for any other function
+	assert items.filter(it.label == 'println')[0].detail == 'pub fn println(s string)'
+	// `recover` too, which stops a panic from a `defer` block (master's #29134)
+	assert items.filter(it.label == 'recover')[0].detail == 'pub fn recover() ?string'
+	// V has no builtin `close`: a channel closes with `ch.close()`
+	assert items.filter(it.label == 'close').len == 0
+	// read once, and again after a watched change there, as when working on V
+	builtin_dir := os.join_path(find_v_dir(), 'vlib', 'builtin')
+	assert builtin_dir in app.builtin_calls_cache
+	notify_changed(mut app, os.join_path(builtin_dir, 'printing.c.v'))
+	assert builtin_dir !in app.builtin_calls_cache
+}
+
+// The builtin functions are V's: `print_backtrace` is one and colored as such,
+// and `close` is not, so a function of the project may be called so and renamed.
+fn test_builtin_functions_are_the_ones_v_has() {
+	assert classify_v_identifier('print_backtrace') == sem_tok_function
+	assert classify_v_identifier('recover') == sem_tok_function
+	assert classify_v_identifier('close') == -1
+	files := {
+		'main.v': 'module main\n\nfn close() int {\n\treturn 1\n}\n\nfn main() {\n\tprintln(close())\n}\n'
+	}
+	assert rename_edits_in(files, 'main.v:3:4') == ['main.v:3:4', 'main.v:8:10']
 }
 
 fn test_make_keyword_completions_not_empty() {
@@ -5657,13 +6253,13 @@ fn test_operation_at_pos_completion_includes_current_file_fns() {
 	app.text = content
 
 	request := Request{
-		id: 1
+		id:     1
 		method: 'textDocument/completion'
 		params: json2.encode(Params{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-			position: Position{
+			position:      Position{
 				line: 3
 				char: 4
 			}
@@ -5703,13 +6299,13 @@ fn test_operation_at_pos_dot_completion_includes_imported_module_members() {
 	app.text = content
 
 	response := app.operation_at_pos(.completion, Request{
-		id: 9001
+		id:     9001
 		method: 'textDocument/completion'
 		params: json2.encode(Params{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-			position: Position{
+			position:      Position{
 				line: 5
 				char: 8
 			}
@@ -5751,13 +6347,13 @@ fn test_operation_at_pos_dot_completion_includes_aliased_import_module_members()
 	app.text = content
 
 	response := app.operation_at_pos(.completion, Request{
-		id: 9002
+		id:     9002
 		method: 'textDocument/completion'
 		params: json2.encode(Params{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-			position: Position{
+			position:      Position{
 				line: 5
 				char: 4
 			}
@@ -5897,13 +6493,13 @@ fn test_operation_at_pos_completion_and_definition_resolve_cross_file_receiver_m
 	assert show_col >= 0
 
 	completion := app.operation_at_pos(.completion, Request{
-		id: 9100
+		id:     9100
 		method: 'textDocument/completion'
 		params: json2.encode(TextDocumentPositionParams{
 			text_document: TextDocumentIdentifier{
 				uri: main_uri
 			}
-			position: Position{
+			position:      Position{
 				line: call_line
 				char: show_col
 			}
@@ -5916,13 +6512,13 @@ fn test_operation_at_pos_completion_and_definition_resolve_cross_file_receiver_m
 	assert completion_items.any(it.label == 'show' && it.kind == 2)
 
 	definition := app.operation_at_pos(.definition, Request{
-		id: 9101
+		id:     9101
 		method: 'textDocument/definition'
 		params: json2.encode(TextDocumentPositionParams{
 			text_document: TextDocumentIdentifier{
 				uri: main_uri
 			}
-			position: Position{
+			position:      Position{
 				line: call_line
 				char: show_col + 2
 			}
@@ -5956,13 +6552,13 @@ fn test_operation_at_pos_completion_includes_indexed_struct_fields() {
 	completion_line := lines.index('\tuser.')
 	assert completion_line >= 0
 	response := app.operation_at_pos(.completion, Request{
-		id: 9200
+		id:     9200
 		method: 'textDocument/completion'
 		params: json2.encode(TextDocumentPositionParams{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-			position: Position{
+			position:      Position{
 				line: completion_line
 				char: lines[completion_line].len
 			}
@@ -6001,13 +6597,13 @@ fn test_receiver_inference_does_not_reuse_declaration_from_earlier_function() {
 	assert beta_col >= 0
 
 	completion := app.operation_at_pos(.completion, Request{
-		id: 9201
+		id:     9201
 		method: 'textDocument/completion'
 		params: json2.encode(TextDocumentPositionParams{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-			position: Position{
+			position:      Position{
 				line: call_line
 				char: dot_col + 1
 			}
@@ -6021,13 +6617,13 @@ fn test_receiver_inference_does_not_reuse_declaration_from_earlier_function() {
 	assert !items.any(it.label == 'alpha')
 
 	definition := app.operation_at_pos(.definition, Request{
-		id: 9202
+		id:     9202
 		method: 'textDocument/definition'
 		params: json2.encode(TextDocumentPositionParams{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-			position: Position{
+			position:      Position{
 				line: call_line
 				char: beta_col + 2
 			}
@@ -6066,13 +6662,13 @@ fn test_imported_module_completion_resolves_from_project_root() {
 	completion_line := lines.index('\tmylib.')
 	assert completion_line >= 0
 	response := app.operation_at_pos(.completion, Request{
-		id: 9203
+		id:     9203
 		method: 'textDocument/completion'
 		params: json2.encode(TextDocumentPositionParams{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-			position: Position{
+			position:      Position{
 				line: completion_line
 				char: lines[completion_line].len
 			}
@@ -6104,13 +6700,13 @@ fn test_bare_completion_includes_local_and_top_level_scope_symbols() {
 	completion_line := lines.index('\tlocal_')
 	assert completion_line >= 0
 	response := app.operation_at_pos(.completion, Request{
-		id: 9300
+		id:     9300
 		method: 'textDocument/completion'
 		params: json2.encode(TextDocumentPositionParams{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-			position: Position{
+			position:      Position{
 				line: completion_line
 				char: lines[completion_line].len
 			}
@@ -6162,13 +6758,13 @@ fn test_literal_and_container_receiver_completion_falls_back_to_compiler() {
 		expected_member := if case_idx == 0 { 'after' } else { 'filter' }
 		assert indexed.items.any(it.label == expected_member), completion_case.str()
 		response := app.operation_at_pos(.completion, Request{
-			id: 9301 + case_idx
+			id:     9301 + case_idx
 			method: 'textDocument/completion'
 			params: json2.encode(TextDocumentPositionParams{
 				text_document: TextDocumentIdentifier{
 					uri: uri
 				}
-				position: Position{
+				position:      Position{
 					line: completion_line
 					char: lines[completion_line].len
 				}
@@ -6211,13 +6807,13 @@ fn test_typed_container_receiver_does_not_infer_nested_struct_type() {
 		assert !indexed.use_compiler, declaration
 		assert !indexed.items.any(it.label in ['name', 'save']), declaration
 		response := app.operation_at_pos(.completion, Request{
-			id: 9350
+			id:     9350
 			method: 'textDocument/completion'
 			params: json2.encode(TextDocumentPositionParams{
 				text_document: TextDocumentIdentifier{
 					uri: uri
 				}
-				position: Position{
+				position:      Position{
 					line: completion_line
 					char: lines[completion_line].len
 				}
@@ -6252,13 +6848,13 @@ fn test_receiver_completion_honors_local_binding_that_shadows_import() {
 	completion_line := lines.index('\tclock.')
 	assert completion_line >= 0
 	response := app.operation_at_pos(.completion, Request{
-		id: 9303
+		id:     9303
 		method: 'textDocument/completion'
 		params: json2.encode(TextDocumentPositionParams{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-			position: Position{
+			position:      Position{
 				line: completion_line
 				char: lines[completion_line].len
 			}
@@ -6297,13 +6893,13 @@ fn test_imported_module_completion_uses_unsaved_open_buffer() {
 	assert completion_line >= 0
 
 	response := app.operation_at_pos(.completion, Request{
-		id: 9304
+		id:     9304
 		method: 'textDocument/completion'
 		params: json2.encode(TextDocumentPositionParams{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-			position: Position{
+			position:      Position{
 				line: completion_line
 				char: lines[completion_line].len
 			}
@@ -6343,13 +6939,13 @@ fn test_member_completion_recognizes_typed_prefix() {
 		completion_line := lines.index(source_line)
 		assert completion_line >= 0
 		response := app.operation_at_pos(.completion, Request{
-			id: 9400 + completion_line
+			id:     9400 + completion_line
 			method: 'textDocument/completion'
 			params: json2.encode(TextDocumentPositionParams{
 				text_document: TextDocumentIdentifier{
 					uri: uri
 				}
-				position: Position{
+				position:      Position{
 					line: completion_line
 					char: lines[completion_line].len
 				}
@@ -6387,13 +6983,13 @@ fn test_local_scope_completion_drops_bindings_after_nested_block() {
 	assert !app.local_scope_completions(content, position).any(it.label == 'clock')
 
 	response := app.operation_at_pos(.completion, Request{
-		id: 9401
+		id:     9401
 		method: 'textDocument/completion'
 		params: json2.encode(TextDocumentPositionParams{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-			position: position
+			position:      position
 		},
 			escape_unicode: true
 		)
@@ -6526,13 +7122,13 @@ fn test_hover_prefers_shadowing_closure_parameter_type() {
 	x_col := lines[line].index('x') or { -1 }
 	assert x_col >= 0
 	response := app.operation_at_pos(.hover, Request{
-		id: 9501
+		id:     9501
 		method: 'textDocument/hover'
 		params: json2.encode(TextDocumentPositionParams{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-			position: Position{
+			position:      Position{
 				line: line
 				char: x_col + 1
 			}
@@ -6573,13 +7169,13 @@ fn test_hover_does_not_treat_member_selector_as_local_binding() {
 		char: field_col
 	}) == none
 	field_response := app.operation_at_pos(.hover, Request{
-		id: 9531
+		id:     9531
 		method: 'textDocument/hover'
 		params: json2.encode(TextDocumentPositionParams{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-			position: Position{
+			position:      Position{
 				line: line
 				char: field_col
 			}
@@ -6729,13 +7325,13 @@ fn test_hover_keeps_reference_and_option_parameter_types() {
 // uses, and returns the text of the answer.
 fn public_hover_text(mut app App, uri string, line int, character int) string {
 	response := app.operation_at_pos(.hover, Request{
-		id: 9700 + line
+		id:     9700 + line
 		method: 'textDocument/hover'
 		params: json2.encode(TextDocumentPositionParams{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-			position: Position{
+			position:      Position{
 				line: line
 				char: character
 			}
@@ -6877,13 +7473,13 @@ fn test_hover_on_a_call_keeps_the_declaration_as_written() {
 	// The compiler re-prints a function type without its parameter names, so the
 	// declaration written in the source is the better answer.
 	response := app.operation_at_pos(.hover, Request{
-		id: 9601
+		id:     9601
 		method: 'textDocument/hover'
 		params: json2.encode(TextDocumentPositionParams{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-			position: Position{
+			position:      Position{
 				line: line
 				char: col + 2
 			}
@@ -6902,7 +7498,7 @@ fn test_hover_on_a_field_of_a_chain_answers_for_that_field() {
 	}
 	test_dir := os.join_path(app.temp_dir, 'chain_field_hover')
 	must_mkdir_all(test_dir)
-	content := "module main\n\nstruct Child {\n\tvalue int\n}\n\nstruct Node {\n\tchild Child\n}\n\nstruct Listener {\n\tnode Node\n}\n\nfn main() {\n\tlistener := Listener{}\n\tprintln(listener.node.child.value)\n}\n"
+	content := 'module main\n\nstruct Child {\n\tvalue int\n}\n\nstruct Node {\n\tchild Child\n}\n\nstruct Listener {\n\tnode Node\n}\n\nfn main() {\n\tlistener := Listener{}\n\tprintln(listener.node.child.value)\n}\n'
 	main_file := os.join_path(test_dir, 'main.v')
 	must_write_file(main_file, content)
 	uri := path_to_uri(main_file)
@@ -6926,6 +7522,132 @@ fn test_hover_on_a_field_of_a_chain_answers_for_that_field() {
 	}
 }
 
+const language_member_hover_main = "module main
+
+enum Color {
+	red
+	green
+}
+
+@[flag]
+enum Perm {
+	read
+	write
+}
+
+struct Point {
+	x int
+}
+
+fn (point Point) str() string {
+	return 'point'
+}
+
+fn main() {
+	c := Color.from('red') or { Color.green }
+	println(c.str())
+	mut p := Perm.zero()
+	p.set(.read)
+	println(p.has(.read))
+	println(p.all(.read | .write))
+	p.toggle(.write)
+	p.clear(.read)
+	p.set_all()
+	p.clear_all()
+	println(p.is_empty())
+	q := Perm.from('read') or { Perm.zero() }
+	println(q)
+	pt := Point{}
+	println(pt.str())
+	println(Color.red)
+}
+"
+
+// hover_value_at hovers `word` inside the first line of `content` holding `needle`.
+fn hover_value_at(mut app App, uri string, content string, needle string, word string) string {
+	lines := content.split_into_lines()
+	line := lines.filter(it.contains(needle))[0]
+	col := line.index(needle) or { -1 } + needle.index(word) or { -1 } + 1
+	hover := app.hover_at(uri, Position{
+		line: lines.index(line)
+		char: col
+	}) or { Hover{} }
+	return hover.contents.value
+}
+
+// V gives every enum `from` and `str`, and a flag enum `zero` and the methods
+// that work its flags. There is no declaration of them to show: the hover is
+// the signature V gives them with what they do, not the documentation of a
+// method of arrays that has the same name. A type's own `str` is its own.
+fn test_hover_shows_the_members_v_gives_enums() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	path := os.join_path(app.temp_dir, 'language_member_hover', 'main.v')
+	content := language_member_hover_main
+	must_mkdir_all(os.dir(path))
+	must_write_file(path, content)
+	uri := path_to_uri(path)
+	app.open_files[uri] = content
+	app.reindex_uri(uri)
+	for needle, signature in {
+		'Color.from':  'fn Color.from[W](input W) !Color'
+		'Perm.from':   'fn Perm.from[W](input W) !Perm'
+		'Perm.zero':   'fn Perm.zero() Perm'
+		'c.str':       'fn (e Color) str() string'
+		'p.set(':      'fn (mut e Perm) set(flag_ Perm)'
+		'p.has':       'fn (e &Perm) has(flag_ Perm) bool'
+		'p.all':       'fn (e &Perm) all(flag_ Perm) bool'
+		'p.toggle':    'fn (mut e Perm) toggle(flag_ Perm)'
+		'p.clear(':    'fn (mut e Perm) clear(flag_ Perm)'
+		'p.set_all':   'fn (mut e Perm) set_all()'
+		'p.clear_all': 'fn (mut e Perm) clear_all()'
+		'p.is_empty':  'fn (e &Perm) is_empty() bool'
+	} {
+		word := needle.all_after('.').trim_right('(')
+		value := hover_value_at(mut app, uri, content, needle, word)
+		assert value.contains('```v\n${signature}\n```'), '${needle}: ${value}'
+		assert !value.contains('array') && !value.contains('IError'), '${needle}: ${value}'
+	}
+	assert hover_value_at(mut app, uri, content, 'Color.from', 'from').contains('string')
+	assert hover_value_at(mut app, uri, content, 'p.has', 'has').contains('at least one')
+	// declared by the type itself, or not a member V gives: not answered from V's list
+	assert hover_value_at(mut app, uri, content, 'pt.str', 'str').contains('fn (point Point) str() string')
+	assert !hover_value_at(mut app, uri, content, 'Color.red', 'red').contains('fn ')
+}
+
+// A member's documentation is the one of the declaration it resolves to, even
+// when that one has none: never the one of another type's member of the same
+// name, as `str` of IError for a struct's own undocumented `str`.
+fn test_hover_documents_a_member_with_its_own_declaration() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	content := "module main\n\nstruct Point {\n\tx int\n}\n\nfn (point Point) str() string {\n\treturn 'point'\n}\n\n// area is how much room the point takes.\nfn (point Point) area() int {\n\treturn 0\n}\n\n// scaled grows the point.\n@[inline]\nfn (point Point) scaled() Point {\n\treturn point\n}\n\nfn main() {\n\tpt := Point{}\n\tprintln(pt.str())\n\tprintln(pt.area())\n\tprintln(pt.scaled())\n\tarr := [1]\n\tprintln(arr.first())\n\tprintln('a'.to_upper())\n}\n"
+	path := os.join_path(app.temp_dir, 'member_docs', 'main.v')
+	must_mkdir_all(os.dir(path))
+	must_write_file(path, content)
+	uri := path_to_uri(path)
+	app.open_files[uri] = content
+	app.reindex_uri(uri)
+	lines := content.split_into_lines()
+	mut docs := map[string]string{}
+	for needle in ['pt.str', 'pt.area', 'pt.scaled', 'arr.first', "'a'.to_upper"] {
+		line := lines.filter(it.contains(needle))[0]
+		col := line.index(needle) or { -1 } + needle.index('.') or { -1 } + 2
+		docs[needle] = app.hover_doc_comment(uri, '${lines.index(line) + 1}:hv^${col}')
+	}
+	assert docs['pt.str'] == '', docs['pt.str']
+	assert docs['pt.area'] == 'area is how much room the point takes.', docs['pt.area']
+	// an attribute sits between a declaration and its documentation
+	assert docs['pt.scaled'] == 'scaled grows the point.', docs['pt.scaled']
+	assert docs["'a'.to_upper"].starts_with('to_upper returns the string in all uppercase characters.'), docs["'a'.to_upper"]
+	// a member of a builtin type keeps the documentation vlib gives it
+	assert docs['arr.first'].contains('first element'), docs['arr.first']
+}
+
 fn test_hover_on_a_deep_chain_inside_nested_closures() {
 	mut app := create_test_app()
 	defer {
@@ -6933,7 +7655,7 @@ fn test_hover_on_a_deep_chain_inside_nested_closures() {
 	}
 	test_dir := os.join_path(app.temp_dir, 'nested_chain_hover')
 	must_mkdir_all(test_dir)
-	content := "module main\n\nstruct Leaf {\n\tflag bool\n}\n\nstruct Child {\n\tleaf Leaf\n}\n\nstruct Node {\n\tchild Child\n}\n\nstruct Listener {\n\tnode Node\n}\n\nfn main() {\n\tlisteners := []Listener{}\n\touter := fn (x Listener) bool {\n\t\tinner := fn (y Listener) bool {\n\t\t\treturn y.node.child.leaf.flag\n\t\t}\n\t\treturn inner(x) && x.node.child.leaf.flag\n\t}\n\tprintln(listeners.filter(outer))\n}\n"
+	content := 'module main\n\nstruct Leaf {\n\tflag bool\n}\n\nstruct Child {\n\tleaf Leaf\n}\n\nstruct Node {\n\tchild Child\n}\n\nstruct Listener {\n\tnode Node\n}\n\nfn main() {\n\tlisteners := []Listener{}\n\touter := fn (x Listener) bool {\n\t\tinner := fn (y Listener) bool {\n\t\t\treturn y.node.child.leaf.flag\n\t\t}\n\t\treturn inner(x) && x.node.child.leaf.flag\n\t}\n\tprintln(listeners.filter(outer))\n}\n'
 	main_file := os.join_path(test_dir, 'main.v')
 	must_write_file(main_file, content)
 	uri := path_to_uri(main_file)
@@ -7028,10 +7750,10 @@ fn test_hover_on_nested_closure_parameters_keeps_each_type() {
 	// Three parameters of the same name, one inside the other: each hover has to
 	// answer with the type written next to that one.
 	for source_line, expected in {
-		'\touter := fn (x Listener) bool {':      'x Listener'
-		'\t\tinner := fn (x Child) bool {':       'x Child'
-		'\t\t\treturn x.value == 1':              'x Child'
-		'\t\treturn inner(x.node.child)':         'x Listener'
+		'\touter := fn (x Listener) bool {': 'x Listener'
+		'\t\tinner := fn (x Child) bool {':  'x Child'
+		'\t\t\treturn x.value == 1':         'x Child'
+		'\t\treturn inner(x.node.child)':    'x Listener'
 	} {
 		line := lines.index(source_line)
 		assert line >= 0, source_line
@@ -7065,9 +7787,9 @@ fn test_hover_types_a_binding_holding_a_function_literal() {
 	// A function literal writes its own type down: the signature, without the
 	// capture list and without the body.
 	for name, expected in {
-		'f': 'f fn (a int)'
-		'g': 'g fn (a int, b string) !int'
-		'h': 'h fn ()'
+		'f':  'f fn (a int)'
+		'g':  'g fn (a int, b string) !int'
+		'h':  'h fn ()'
 		'c':  'c fn (a int) int'
 		'cb': 'cb fn (int) int'
 	} {
@@ -7097,7 +7819,7 @@ fn test_hover_types_bindings_whose_value_names_no_type() {
 	}
 	test_dir := os.join_path(app.temp_dir, 'inferred_binding_hover')
 	must_mkdir_all(test_dir)
-	content := "module main\n\nfn make_int() !int {\n\treturn 3\n}\n\nfn work() int {\n\treturn 4\n}\n\nfn main() {\n\tres := make_int() or {\n\t\tprintln(err)\n\t\t0\n\t}\n\tth := spawn work()\n\tif v := make_int() {\n\t\tprintln(v)\n\t}\n\tprintln(res)\n\tprintln(th.wait())\n}\n"
+	content := 'module main\n\nfn make_int() !int {\n\treturn 3\n}\n\nfn work() int {\n\treturn 4\n}\n\nfn main() {\n\tres := make_int() or {\n\t\tprintln(err)\n\t\t0\n\t}\n\tth := spawn work()\n\tif v := make_int() {\n\t\tprintln(v)\n\t}\n\tprintln(res)\n\tprintln(th.wait())\n}\n'
 	main_file := os.join_path(test_dir, 'main.v')
 	must_write_file(main_file, content)
 	uri := path_to_uri(main_file)
@@ -7120,6 +7842,48 @@ fn test_hover_types_bindings_whose_value_names_no_type() {
 			char: col + 2
 		}) or { Hover{} }
 		assert hover.contents.value.contains(expected), '${source_line}: ${hover.contents.value}'
+	}
+}
+
+fn test_hover_does_not_take_a_literal_receiver_for_the_value_of_its_call() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'literal_receiver_call_hover')
+	must_mkdir_all(test_dir)
+	content := 'module main\n\nstruct Host {}\n\nfn (h Host) first_of[T](xs []T) T {\n\treturn xs[0]\n}\n\nfn inside[A](values []A) A {\n\thead := Host{}.first_of(values)\n\ttyped := Host{}.first_of[A](values)\n\tlit := Host{}\n\tprintln(typed)\n\tprintln(lit)\n\treturn head\n}\n\nfn main() {\n\tprintln(inside([1]))\n}\n'
+	main_file := os.join_path(test_dir, 'main.v')
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	lines := content.split_into_lines()
+	// `Host{}.first_of(values)` is what the generic method returns, which the
+	// index cannot tell: not the `Host` it is called on. The index answers
+	// nothing, and the compiler does. A bare literal is its type.
+	for source_line, expected in {
+		'\treturn head':    ''
+		'\tprintln(typed)': ''
+		'\tprintln(lit)':   'lit Host'
+	} {
+		line := lines.index(source_line)
+		assert line >= 0, source_line
+		name := if source_line.contains('(') {
+			source_line.all_after('(').all_before(')')
+		} else {
+			source_line.all_after_last(' ')
+		}
+		col := lines[line].last_index(name) or { -1 }
+		assert col >= 0, source_line
+		hover := app.local_binding_hover(uri, Position{
+			line: line
+			char: col + 1
+		}) or { Hover{} }
+		if expected == '' {
+			assert !hover.contents.value.contains('Host'), '${source_line}: ${hover.contents.value}'
+		} else {
+			assert hover.contents.value.contains(expected), '${source_line}: ${hover.contents.value}'
+		}
 	}
 }
 
@@ -7152,6 +7916,78 @@ fn test_hover_types_a_declaration_split_over_lines() {
 			char: col + 2
 		}) or { Hover{} }
 		assert hover.contents.value.contains(expected), '${name}: ${hover.contents.value}'
+	}
+}
+
+fn test_hover_types_a_field_of_a_literal_split_over_lines() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'multiline_literal_field_hover')
+	must_mkdir_all(test_dir)
+	content := 'module main\n\nstruct Point {\n\tx int\n}\n\nfn main() {\n\tr := Point{\n\t\tx: 1\n\t}.x\n\tprintln(r)\n}\n'
+	main_file := os.join_path(test_dir, 'main.v')
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	lines := content.split_into_lines()
+	// The value goes on after the literal closes: `r` is its field `x`, on the
+	// declaration and where it is used.
+	declaration := lines.index('\tr := Point{')
+	use := lines.index('\tprintln(r)')
+	assert declaration >= 0 && use >= 0
+	for position in [Position{
+		line: declaration
+		char: 1
+	}, Position{
+		line: use
+		char: 10
+	}] {
+		hover := app.local_binding_hover(uri, position) or { Hover{} }
+		assert hover.contents.value.contains('r int'), '${position}: ${hover.contents.value}'
+	}
+}
+
+fn test_binding_type_narrows_asks_the_compiler_for_a_type_the_index_does_not_know() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	app.v3_line_info_enabled = true
+	test_dir := os.join_path(app.temp_dir, 'bare_generic_binding_hover')
+	must_mkdir_all(test_dir)
+	content := 'module main\n\nstruct Point {\n\tx int\n}\n\nstruct Pair[T] {\n\tleft  T\n\tright T\n}\n\nfn main() {\n\tprintln(1)\n}\n'
+	main_file := os.join_path(test_dir, 'main.v')
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	position := Position{
+		line: content.split_into_lines().index('\tprintln(1)')
+		char: 1
+	}
+	// The index holds a generic struct as `Pair[T]`: it reads a literal that
+	// infers the arguments (`Pair{ left: 1 }`) as the bare `Pair`, and a field of
+	// it as its declared `T`, where the compiler knows `Pair[int]` and `int`. A
+	// type the index knows stays its answer.
+	for text, narrows in {
+		'one Pair':            true
+		'pairs []Pair':        true
+		'two T':               true
+		'boxed &Pair':         true
+		'full Pair[int]':      true
+		'point Point':         false
+		'points []Point':      false
+		'count int':           false
+		'ages map[string]int': false
+	} {
+		hover := Hover{
+			contents: MarkupContent{
+				kind:  'markdown'
+				value: '```v\n${text}\n```'
+			}
+		}
+		assert app.binding_type_narrows(uri, position, hover) == narrows, text
 	}
 }
 
@@ -7433,13 +8269,13 @@ fn test_embedded_struct_receiver_completion_includes_promoted_members() {
 	assert !indexed.items.any(it.label == 'Base')
 
 	response := app.operation_at_pos(.completion, Request{
-		id: 9700
+		id:     9700
 		method: 'textDocument/completion'
 		params: json2.encode(TextDocumentPositionParams{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-			position: position
+			position:      position
 		},
 			escape_unicode: true
 		)
@@ -7792,6 +8628,57 @@ fn test_bare_completion_includes_scoped_implicit_bindings() {
 	assert !app.local_scope_completions(content, after_position).any(it.label in ['it', 'err'])
 }
 
+// local_labels_at returns the local names that completion offers where the
+// marked source has `‸`.
+fn local_labels_at(mut app App, marked string) []string {
+	cursor := marked.index('‸') or { panic('no cursor in ${marked}') }
+	content := marked.replace('‸', '')
+	before := content[..cursor]
+	line := before.count('\n')
+	col := cursor - (before.last_index('\n') or { -1 }) - 1
+	return app.local_scope_completions(content, Position{
+		line: line
+		char: col
+	}).map(it.label)
+}
+
+const implicit_names_head = 'module main\n\nstruct Row {\n\tname string\n}\n\nfn parse(s string) !int {\n\treturn s.int()\n}\n\nfn find(n int) ?int {\n\treturn if n > 0 { n } else { none }\n}\n\n'
+
+// The names V gives code without a declaration: `it` in the predicate or the
+// callback of every array method that takes one, `a` and `b` in a sort, `err` in
+// the `else` of `if x := call() {` as in an `or {}` block, and the variable of a
+// `$for`. Each only where V gives it.
+fn test_local_completion_offers_the_names_v_gives_without_a_declaration() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	for label, marked in {
+		'it':    'fn main() {\n\tnums := [1]\n\tprintln(nums.count(i‸))\n}\n'
+		'a':     'fn main() {\n\tmut nums := [1]\n\tnums.sort(a‸)\n}\n'
+		'b':     'fn main() {\n\tnums := [1]\n\tprintln(nums.sorted(a < b‸))\n}\n'
+		'err':   "fn main() {\n\tif v := parse('1') {\n\t\tprintln(v)\n\t} else {\n\t\tprintln(e‸)\n\t}\n}\n"
+		'field': 'fn main() {\n\t\$for field in Row.fields {\n\t\tprintln(f‸)\n\t}\n}\n'
+	} {
+		assert label in local_labels_at(mut app, implicit_names_head + marked), '${label}: ${marked}'
+	}
+	// an Option guard gives `err` in its `else` too
+	assert 'err' in local_labels_at(mut app, implicit_names_head + 'fn main() {\n\tif v := find(1) {\n\t\tprintln(v)\n\t} else {\n\t\tprintln(e‸)\n\t}\n}\n')
+	// `it` is still there in filter, and `a` and `b` in sorted
+	assert 'it' in local_labels_at(mut app, implicit_names_head + 'fn main() {\n\tnums := [1]\n\tprintln(nums.filter(i‸))\n}\n')
+	assert 'a' in local_labels_at(mut app, implicit_names_head + 'fn main() {\n\tnums := [1]\n\tprintln(nums.sorted(a‸))\n}\n')
+	// and nowhere else
+	for label, marked in {
+		'it':    'fn main() {\n\tnums := [1]\n\tprintln(nums.index(i‸))\n}\n'
+		'a':     'fn main() {\n\tnums := [1]\n\tprintln(nums.map(a‸))\n}\n'
+		'err':   'fn main() {\n\tif true {\n\t\tprintln(1)\n\t} else {\n\t\tprintln(e‸)\n\t}\n}\n'
+		'field': 'fn main() {\n\t\$for field in Row.fields {\n\t\tprintln(1)\n\t}\n\tprintln(f‸)\n}\n'
+	} {
+		assert label !in local_labels_at(mut app, implicit_names_head + marked), '${label}: ${marked}'
+	}
+	assert 'err' !in local_labels_at(mut app, implicit_names_head + "fn main() {\n\tif v := parse('1') {\n\t\tprintln(v)\n\t} else {\n\t\tprintln(1)\n\t}\n\tprintln(e‸)\n}\n")
+}
+
 fn test_loop_header_bindings_are_removed_with_loop_scope() {
 	mut app := create_test_app()
 	defer {
@@ -7961,13 +8848,13 @@ fn test_conditional_bare_completion_requests_compiler_fallback() {
 	assert !indexed.items.any(it.label == 'platform_only')
 
 	response := app.operation_at_pos(.completion, Request{
-		id: 9600
+		id:     9600
 		method: 'textDocument/completion'
 		params: json2.encode(TextDocumentPositionParams{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-			position: position
+			position:      position
 		},
 			escape_unicode: true
 		)
@@ -8032,13 +8919,13 @@ fn test_conditional_methods_request_receiver_completion_fallback() {
 	assert indexed.items.any(it.label == 'start')
 	assert !indexed.items.any(it.label == 'reload')
 	response := app.operation_at_pos(.completion, Request{
-		id: 9601
+		id:     9601
 		method: 'textDocument/completion'
 		params: json2.encode(TextDocumentPositionParams{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-			position: Position{
+			position:      Position{
 				line: completion_line
 				char: lines[completion_line].len
 			}
@@ -8163,13 +9050,13 @@ fn test_chained_definition_resolves_nested_receiver_not_import_alias() {
 	assert indexed_location.uri == uri
 	assert indexed_location.range.start.line == lines.index('fn (timer Timer) start() {}')
 	definition := app.operation_at_pos(.definition, Request{
-		id: 9602
+		id:     9602
 		method: 'textDocument/definition'
 		params: json2.encode(TextDocumentPositionParams{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-			position: position
+			position:      position
 		},
 			escape_unicode: true
 		)
@@ -8441,7 +9328,7 @@ fn test_semantic_tokens_returns_data_for_known_content() {
 	app.open_files[uri] = content
 
 	resp := app.handle_semantic_tokens(Request{
-		id: 800
+		id:     800
 		method: 'textDocument/semanticTokens/full'
 		params: json2.encode(SemanticTokensParams{
 			text_document: TextDocumentIdentifier{
@@ -8531,7 +9418,7 @@ fn test_semantic_tokens_returns_empty_object_for_empty_file() {
 	app.open_files[uri] = ''
 
 	resp := app.handle_semantic_tokens(Request{
-		id: 801
+		id:     801
 		method: 'textDocument/semanticTokens/full'
 		params: json2.encode(SemanticTokensParams{
 			text_document: TextDocumentIdentifier{
@@ -8556,7 +9443,7 @@ fn test_semantic_tokens_range_returns_empty_for_missing_document() {
 	}
 
 	resp := app.handle_semantic_tokens_range(Request{
-		id: 802
+		id:     802
 		method: 'textDocument/semanticTokens/range'
 		params: '{}'
 	})
@@ -8582,12 +9469,12 @@ fn test_semantic_tokens_range_filters_by_character() {
 		text_document: TextDocumentIdentifier{
 			uri: uri
 		}
-		range: LSPRange{
+		range:         LSPRange{
 			start: Position{
 				line: 0
 				char: 0
 			}
-			end: Position{
+			end:   Position{
 				line: 0
 				char: 50
 			}
@@ -8596,7 +9483,7 @@ fn test_semantic_tokens_range_filters_by_character() {
 		escape_unicode: true
 	)
 	full := app.handle_semantic_tokens_range(Request{
-		id: 1
+		id:     1
 		params: full_params
 	})
 	ftok := full.result as SemanticTokens
@@ -8612,12 +9499,12 @@ fn test_semantic_tokens_range_filters_by_character() {
 		text_document: TextDocumentIdentifier{
 			uri: uri
 		}
-		range: LSPRange{
+		range:         LSPRange{
 			start: Position{
 				line: 0
 				char: 8
 			}
-			end: Position{
+			end:   Position{
 				line: 0
 				char: 50
 			}
@@ -8626,7 +9513,7 @@ fn test_semantic_tokens_range_filters_by_character() {
 		escape_unicode: true
 	)
 	narrow := app.handle_semantic_tokens_range(Request{
-		id: 2
+		id:     2
 		params: narrow_params
 	})
 	ntok := narrow.result as SemanticTokens
@@ -8648,7 +9535,7 @@ fn test_code_lens_returns_run_lens_for_main() {
 	app.open_files[uri] = content
 
 	resp := app.handle_code_lens(Request{
-		id: 810
+		id:     810
 		method: 'textDocument/codeLens'
 		params: json2.encode(CodeLensParams{
 			text_document: TextDocumentIdentifier{
@@ -8681,7 +9568,7 @@ fn test_code_lens_range_uses_negotiated_position_encoding() {
 	uri := 'file:///tmp/codelens_unicode.v'
 	app.open_files[uri] = 'module main\n\nfn main() {} // 🚀\n'
 	request := Request{
-		id: 814
+		id:     814
 		method: 'textDocument/codeLens'
 		params: json2.encode(CodeLensParams{
 			text_document: TextDocumentIdentifier{
@@ -8724,7 +9611,7 @@ fn test_code_lens_returns_test_lens_for_test_fn() {
 	app.open_files[uri] = content
 
 	resp := app.handle_code_lens(Request{
-		id: 811
+		id:     811
 		method: 'textDocument/codeLens'
 		params: json2.encode(CodeLensParams{
 			text_document: TextDocumentIdentifier{
@@ -8766,7 +9653,7 @@ fn test_code_lens_ignores_declarations_in_comments_and_non_test_files() {
 	app.open_files[uri] = 'module main\n\n/*\nfn main() {}\nfn test_hidden() {}\n*/\nfn helper() {}\n'
 
 	resp := app.handle_code_lens(Request{
-		id: 813
+		id:     813
 		method: 'textDocument/codeLens'
 		params: json2.encode(CodeLensParams{
 			text_document: TextDocumentIdentifier{
@@ -8787,25 +9674,25 @@ fn test_code_lens_resolve_returns_same_lens() {
 		cleanup_test_app(app)
 	}
 	lens := CodeLens{
-		range: LSPRange{
+		range:   LSPRange{
 			start: Position{
 				line: 2
 				char: 0
 			}
-			end: Position{
+			end:   Position{
 				line: 2
 				char: 10
 			}
 		}
 		command: Command{
-			title: '▶ Run'
-			command: 'vls.runFile'
+			title:     '▶ Run'
+			command:   'vls.runFile'
 			arguments: ['file:///tmp/a.v']
 		}
 	}
 
 	resp := app.handle_code_lens_resolve(Request{
-		id: 812
+		id:     812
 		method: 'codeLens/resolve'
 		params: json2.encode(lens, escape_unicode: true)
 	})
@@ -8826,7 +9713,7 @@ fn test_execute_command_returns_null_result() {
 
 	app.capture_output = true
 	resp := app.handle_execute_command(Request{
-		id: 820
+		id:     820
 		method: 'workspace/executeCommand'
 		params: json2.encode(ExecuteCommandParams{
 			command: 'vls.runFile'
@@ -8866,10 +9753,10 @@ fn test_execute_run_file_invokes_compiler() {
 	app.execute_commands_synchronously = true
 
 	resp := app.handle_execute_command(Request{
-		id: 822
+		id:     822
 		method: 'workspace/executeCommand'
 		params: json2.encode(ExecuteCommandParams{
-			command: 'vls.runFile'
+			command:   'vls.runFile'
 			arguments: [uri]
 		},
 			escape_unicode: true
@@ -8886,8 +9773,7 @@ fn test_execute_run_file_invokes_compiler() {
 	main_column := main_source.split_into_lines()[7].index('@COLUMN') or { 0 }
 	expected_paths := [os.real_path(project_dir), os.real_path(helper_path), 'helper.v:8',
 		'${os.real_path(helper_path)}:8, main.code_lens_sibling_paths', (helper_column + 1).str(),
-		os.real_path(path), 'main.v:8', '${os.real_path(path)}:8, main.main',
-		(main_column + 1).str()]
+		os.real_path(path), 'main.v:8', '${os.real_path(path)}:8, main.main', (main_column + 1).str()]
 	assert (os.read_file(compile_time_output_path) or { '' }) == expected_paths.join('\n')
 	assert (os.read_file(vmod_output_path) or { '' }) == vmod_source
 	assert (os.read_file(helper_path) or { '' }) == helper_source
@@ -8907,10 +9793,10 @@ fn test_execute_run_file_materializes_new_unsaved_buffer() {
 	app.execute_commands_synchronously = true
 
 	resp := app.handle_execute_command(Request{
-		id: 824
+		id:     824
 		method: 'workspace/executeCommand'
 		params: json2.encode(ExecuteCommandParams{
-			command: 'vls.runFile'
+			command:   'vls.runFile'
 			arguments: [uri]
 		},
 			escape_unicode: true
@@ -8937,10 +9823,10 @@ fn test_execute_run_file_returns_before_long_running_program_finishes() {
 
 	started_at := time.now().unix_milli()
 	resp := app.handle_execute_command(Request{
-		id: 825
+		id:     825
 		method: 'workspace/executeCommand'
 		params: json2.encode(ExecuteCommandParams{
-			command: 'vls.runFile'
+			command:   'vls.runFile'
 			arguments: [path_to_uri(path)]
 		},
 			escape_unicode: true
@@ -8979,10 +9865,10 @@ fn test_execute_run_file_replaces_active_target() {
 	app.capture_output = true
 
 	first_resp := app.handle_execute_command(Request{
-		id: 826
+		id:     826
 		method: 'workspace/executeCommand'
 		params: json2.encode(ExecuteCommandParams{
-			command: 'vls.runFile'
+			command:   'vls.runFile'
 			arguments: [uri]
 		},
 			escape_unicode: true
@@ -9001,10 +9887,10 @@ fn test_execute_run_file_replaces_active_target() {
 
 	app.open_files[uri] = 'module main\n\nimport os\nimport time\n\nfn main() {\n\tos.write_file(${marker_literal}, "second") or { return }\n\ttime.sleep(5 * time.second)\n}\n'
 	second_resp := app.handle_execute_command(Request{
-		id: 827
+		id:     827
 		method: 'workspace/executeCommand'
 		params: json2.encode(ExecuteCommandParams{
-			command: 'vls.runFile'
+			command:   'vls.runFile'
 			arguments: [uri]
 		},
 			escape_unicode: true
@@ -9095,10 +9981,10 @@ fn test_execute_run_test_selects_one_function() {
 	app.execute_commands_synchronously = true
 
 	resp := app.handle_execute_command(Request{
-		id: 823
+		id:     823
 		method: 'workspace/executeCommand'
 		params: json2.encode(ExecuteCommandParams{
-			command: 'vls.runTests'
+			command:   'vls.runTests'
 			arguments: [uri, 'test_selected']
 		},
 			escape_unicode: true
@@ -9118,7 +10004,7 @@ fn test_execute_command_unknown_still_returns_null() {
 	}
 
 	resp := app.handle_execute_command(Request{
-		id: 821
+		id:     821
 		method: 'workspace/executeCommand'
 		params: json2.encode(ExecuteCommandParams{
 			command: 'unknownCommand'
@@ -9144,18 +10030,18 @@ fn test_inline_value_returns_values_for_simple_assignment() {
 	app.open_files[uri] = content
 
 	resp := app.handle_inline_value(Request{
-		id: 830
+		id:     830
 		method: 'textDocument/inlineValue'
 		params: json2.encode(InlineValueParams{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-			range: LSPRange{
+			range:         LSPRange{
 				start: Position{
 					line: 0
 					char: 0
 				}
-				end: Position{
+				end:   Position{
 					line: 5
 					char: 0
 				}
@@ -9181,18 +10067,18 @@ fn test_inline_value_returns_empty_for_no_assignments() {
 	app.open_files[uri] = 'module main\n\nfn main() {}\n'
 
 	resp := app.handle_inline_value(Request{
-		id: 831
+		id:     831
 		method: 'textDocument/inlineValue'
 		params: json2.encode(InlineValueParams{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-			range: LSPRange{
+			range:         LSPRange{
 				start: Position{
 					line: 0
 					char: 0
 				}
-				end: Position{
+				end:   Position{
 					line: 2
 					char: 0
 				}
@@ -9221,13 +10107,13 @@ fn test_linked_editing_range_returns_ranges_for_identifier() {
 	app.open_files[uri] = content
 
 	resp := app.handle_linked_editing_range(Request{
-		id: 840
+		id:     840
 		method: 'textDocument/linkedEditingRange'
 		params: json2.encode(TextDocumentPositionParams{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-			position: Position{
+			position:      Position{
 				line: 3
 				char: 2
 			}
@@ -9253,13 +10139,13 @@ fn test_linked_editing_range_returns_null_when_not_on_identifier() {
 
 	// Position on an empty line
 	resp := app.handle_linked_editing_range(Request{
-		id: 841
+		id:     841
 		method: 'textDocument/linkedEditingRange'
 		params: json2.encode(TextDocumentPositionParams{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-			position: Position{
+			position:      Position{
 				line: 1
 				char: 0
 			}
@@ -9285,13 +10171,13 @@ fn test_selection_range_returns_one_entry_per_position() {
 	app.open_files[uri] = content
 
 	resp := app.handle_selection_range(Request{
-		id: 850
+		id:     850
 		method: 'textDocument/selectionRange'
 		params: json2.encode(SelectionRangeParams{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-			positions: [Position{
+			positions:     [Position{
 				line: 3
 				char: 2
 			}, Position{
@@ -9319,13 +10205,13 @@ fn test_selection_range_word_range_has_parent_line_range() {
 	app.open_files[uri] = content
 
 	resp := app.handle_selection_range(Request{
-		id: 851
+		id:     851
 		method: 'textDocument/selectionRange'
 		params: json2.encode(SelectionRangeParams{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-			positions: [Position{
+			positions:     [Position{
 				line: 3
 				char: 2
 			}]
@@ -9353,17 +10239,17 @@ fn test_on_type_formatting_returns_empty_edits() {
 	}
 
 	resp := app.handle_on_type_formatting(Request{
-		id: 860
+		id:     860
 		method: 'textDocument/onTypeFormatting'
 		params: json2.encode(OnTypeFormattingParams{
 			text_document: TextDocumentIdentifier{
 				uri: 'file:///tmp/fmt.v'
 			}
-			position: Position{
+			position:      Position{
 				line: 3
 				char: 0
 			}
-			ch: '}'
+			ch:            '}'
 		},
 			escape_unicode: true
 		)
@@ -9393,19 +10279,19 @@ fn test_call_hierarchy_outgoing_returns_callees() {
 	app.workspace_roots = [root]
 
 	resp := app.handle_call_hierarchy_outgoing(Request{
-		id: 870
+		id:     870
 		method: 'callHierarchy/outgoingCalls'
 		params: json2.encode(CallHierarchyOutgoingCallsParams{
 			item: CallHierarchyItem{
-				name: 'main'
-				kind: sym_kind_function
-				uri: uri
-				range: LSPRange{
+				name:            'main'
+				kind:            sym_kind_function
+				uri:             uri
+				range:           LSPRange{
 					start: Position{
 						line: 4
 						char: 0
 					}
-					end: Position{
+					end:   Position{
 						line: 6
 						char: 1
 					}
@@ -9415,7 +10301,7 @@ fn test_call_hierarchy_outgoing_returns_callees() {
 						line: 4
 						char: 3
 					}
-					end: Position{
+					end:   Position{
 						line: 4
 						char: 7
 					}
@@ -9448,19 +10334,19 @@ fn test_call_hierarchy_incoming_returns_callers() {
 	app.workspace_roots = [root]
 
 	resp := app.handle_call_hierarchy_incoming(Request{
-		id: 871
+		id:     871
 		method: 'callHierarchy/incomingCalls'
 		params: json2.encode(CallHierarchyIncomingCallsParams{
 			item: CallHierarchyItem{
-				name: 'helper'
-				kind: sym_kind_function
-				uri: uri
-				range: LSPRange{
+				name:            'helper'
+				kind:            sym_kind_function
+				uri:             uri
+				range:           LSPRange{
 					start: Position{
 						line: 2
 						char: 0
 					}
-					end: Position{
+					end:   Position{
 						line: 2
 						char: 15
 					}
@@ -9470,7 +10356,7 @@ fn test_call_hierarchy_incoming_returns_callers() {
 						line: 2
 						char: 3
 					}
-					end: Position{
+					end:   Position{
 						line: 2
 						char: 9
 					}
@@ -9501,11 +10387,11 @@ fn test_organize_imports_refuses_non_contiguous_block() {
 		text_document: TextDocumentIdentifier{
 			uri: uri
 		}
-		range: LSPRange{}
-		context: CodeActionContext{}
+		range:         LSPRange{}
+		context:       CodeActionContext{}
 	}
 	resp := app.handle_code_action(Request{
-		id: 1
+		id:     1
 		params: json2.encode(params, escape_unicode: true)
 	})
 	assert resp.result is []CodeAction
@@ -9526,11 +10412,11 @@ fn test_organize_imports_sorts_contiguous_block() {
 		text_document: TextDocumentIdentifier{
 			uri: uri
 		}
-		range: LSPRange{}
-		context: CodeActionContext{}
+		range:         LSPRange{}
+		context:       CodeActionContext{}
 	}
 	resp := app.handle_code_action(Request{
-		id: 2
+		id:     2
 		params: json2.encode(params, escape_unicode: true)
 	})
 	assert resp.result is []CodeAction
@@ -9557,13 +10443,13 @@ fn test_organize_imports_preserves_crlf_line_endings() {
 	uri := 'file:///tmp/oi_crlf.v'
 	app.open_files[uri] = 'module main\r\n\r\nimport time\r\nimport os\r\n\r\nfn main() {}\r\n'
 	resp := app.handle_code_action(Request{
-		id: 3
+		id:     3
 		params: json2.encode(CodeActionParams{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-			range: LSPRange{}
-			context: CodeActionContext{}
+			range:         LSPRange{}
+			context:       CodeActionContext{}
 		},
 			escape_unicode: true
 		)
@@ -9599,12 +10485,12 @@ fn test_remove_unknown_import_range_at_eof_without_newline() {
 	app.open_files[uri] = 'module main\nimport foo'
 	diag := LSPDiagnostic{
 		message: 'cannot import module "foo" (not found)'
-		range: LSPRange{
+		range:   LSPRange{
 			start: Position{
 				line: 1
 				char: 0
 			}
-			end: Position{
+			end:   Position{
 				line: 1
 				char: 10
 			}
@@ -9614,13 +10500,13 @@ fn test_remove_unknown_import_range_at_eof_without_newline() {
 		text_document: TextDocumentIdentifier{
 			uri: uri
 		}
-		range: LSPRange{}
-		context: CodeActionContext{
+		range:         LSPRange{}
+		context:       CodeActionContext{
 			diagnostics: [diag]
 		}
 	}
 	resp := app.handle_code_action(Request{
-		id: 1
+		id:     1
 		params: json2.encode(params, escape_unicode: true)
 	})
 	actions := resp.result as []CodeAction
@@ -9651,12 +10537,12 @@ fn test_remove_unknown_import_range_with_trailing_newline() {
 	app.open_files[uri] = 'import foo\nmodule main\n'
 	diag := LSPDiagnostic{
 		message: 'unknown module `foo`'
-		range: LSPRange{
+		range:   LSPRange{
 			start: Position{
 				line: 0
 				char: 0
 			}
-			end: Position{
+			end:   Position{
 				line: 0
 				char: 10
 			}
@@ -9666,13 +10552,13 @@ fn test_remove_unknown_import_range_with_trailing_newline() {
 		text_document: TextDocumentIdentifier{
 			uri: uri
 		}
-		range: LSPRange{}
-		context: CodeActionContext{
+		range:         LSPRange{}
+		context:       CodeActionContext{
 			diagnostics: [diag]
 		}
 	}
 	resp := app.handle_code_action(Request{
-		id: 1
+		id:     1
 		params: json2.encode(params, escape_unicode: true)
 	})
 	actions := resp.result as []CodeAction
@@ -9780,7 +10666,7 @@ fn test_apply_incremental_change_non_bmp_utf16() {
 			line: 0
 			char: 3 // after 🚀 in UTF-16 units (a=1, 🚀=2)
 		}
-		end: Position{
+		end:   Position{
 			line: 0
 			char: 4
 		}
@@ -9876,13 +10762,13 @@ fn test_document_highlight_returns_empty_over_semantic_cap() {
 	app.open_files[uri] = content
 
 	response := app.handle_document_highlight(Request{
-		id: 900
+		id:     900
 		method: 'textDocument/documentHighlight'
 		params: json2.encode(DocumentHighlightParams{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-			position: Position{
+			position:      Position{
 				line: 3
 				char: 5
 			}
@@ -9908,19 +10794,19 @@ fn test_on_did_change_invalid_range_does_not_advance_version() {
 	// must NOT advance (P0-07).
 	app.on_did_change(Request{
 		params: json2.encode(DidChangeTextDocumentParams{
-			text_document: VersionedTextDocumentIdentifier{
-				uri: uri
+			text_document:   VersionedTextDocumentIdentifier{
+				uri:     uri
 				version: 2
 			}
 			content_changes: [
 				ContentChange{
-					text: 'X'
+					text:  'X'
 					range: LSPRange{
 						start: Position{
 							line: 0
 							char: 5
 						}
-						end: Position{
+						end:   Position{
 							line: 0
 							char: 2
 						}
@@ -9968,13 +10854,13 @@ fn test_operation_at_pos_hover_returns_symbol_information() {
 	app.text = content
 
 	response := app.operation_at_pos(.hover, Request{
-		id: 901
+		id:     901
 		method: 'textDocument/hover'
 		params: json2.encode(TextDocumentPositionParams{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-			position: Position{
+			position:      Position{
 				line: 8
 				char: 13
 			}
@@ -10047,13 +10933,13 @@ fn main() {
 	}
 
 	response := app.operation_at_pos(.hover, Request{
-		id: 902
+		id:     902
 		method: 'textDocument/hover'
 		params: json2.encode(TextDocumentPositionParams{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-			position: Position{
+			position:      Position{
 				line: call_line
 				char: new_col + 1
 			}
@@ -10077,13 +10963,13 @@ fn main() {
 		return
 	}
 	imported_response := app.operation_at_pos(.hover, Request{
-		id: 903
+		id:     903
 		method: 'textDocument/hover'
 		params: json2.encode(TextDocumentPositionParams{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-			position: Position{
+			position:      Position{
 				line: imported_line
 				char: imported_col + 1
 			}
@@ -10114,17 +11000,17 @@ fn test_find_references_returns_declaration_and_calls() {
 	app.workspace_roots = [test_dir]
 
 	response := app.find_references(Request{
-		id: 902
+		id:     902
 		method: 'textDocument/references'
 		params: json2.encode(ReferenceParams{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-			position: Position{
+			position:      Position{
 				line: 7
 				char: 10
 			}
-			context: ReferenceContext{
+			context:       ReferenceContext{
 				include_declaration: true
 			}
 		},
@@ -10158,17 +11044,17 @@ fn test_handle_rename_returns_complete_workspace_edit() {
 	app.workspace_roots = [test_dir]
 
 	response := app.handle_rename(Request{
-		id: 903
+		id:     903
 		method: 'textDocument/rename'
 		params: json2.encode(RenameParams{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-			position: Position{
+			position:      Position{
 				line: 7
 				char: 11
 			}
-			new_name: 'renamed_value'
+			new_name:      'renamed_value'
 		},
 			escape_unicode: true
 		)
@@ -10191,6 +11077,935 @@ fn test_handle_rename_returns_complete_workspace_edit() {
 	}
 }
 
+const rename_project_main = "module main
+
+import os
+
+const greeting = 'hi'
+
+struct Point {
+	x int
+	y int
+}
+
+fn (p Point) sum() int {
+	return p.x + p.y
+}
+
+enum Color {
+	red
+	green
+}
+
+fn helper(value int) int {
+	total := value + 1
+	return total
+}
+
+fn main() {
+	p := Point{
+		x: 1
+		y: 2
+	}
+	println(p.sum())
+	println(helper(3))
+	println(greeting)
+	c := Color.red
+	println(c)
+	x := 5
+	println(x + p.x)
+	println(os.args.len)
+	// helper is named in a comment
+	s := 'helper in a string'
+	println(s)
+	println(other_file_fn())
+}
+"
+
+const rename_project_other = 'module main
+
+fn other_file_fn() int {
+	q := Point{
+		x: 3
+		y: 4
+	}
+	return helper(1) + q.sum() + q.x
+}
+'
+
+// v3_answers_line_info is whether the V3 of the configured V answers the
+// `-line-info` questions: a rename then asks it where each name is declared, as
+// VLS does, and V1 only what V3 does not answer.
+const v3_answers_line_info = v3_answers_inlay_hints()
+
+// cleanup_rename_app ends the V3 servers a rename asked, then removes the
+// project: a server runs until it is told to end.
+fn cleanup_rename_app(mut app App) {
+	app.stop_v3_queries()
+	cleanup_test_app(app)
+}
+
+// new_rename_project_app opens a project made of main.v and other.v and returns
+// the app and the uri of each file.
+fn new_rename_project_app() (&App, map[string]string) {
+	return new_rename_project_app_with({
+		'main.v':  rename_project_main
+		'other.v': rename_project_other
+	})
+}
+
+// new_rename_project_app_with writes `files` into a project on disk, opens them
+// all in the editor, and returns the app with the URI of each file.
+fn new_rename_project_app_with(files map[string]string) (&App, map[string]string) {
+	return new_rename_project_app_opening(files, files.keys())
+}
+
+// new_rename_project_app_opening is new_rename_project_app_with that opens only
+// the files named in `open`; the others are on disk alone.
+fn new_rename_project_app_opening(files map[string]string, open []string) (&App, map[string]string) {
+	mut app := create_test_app()
+	app.v3_line_info_enabled = v3_answers_line_info
+	dir := os.join_path(app.temp_dir, 'rename_project')
+	must_mkdir_all(dir)
+	must_write_file(os.join_path(dir, 'v.mod'), 'Module {}\n')
+	mut uris := map[string]string{}
+	for name, content in files {
+		path := os.join_path(dir, name)
+		must_mkdir_all(os.dir(path))
+		must_write_file(path, content)
+		uri := path_to_uri(path)
+		if name in open {
+			app.open_files[uri] = content
+			app.open_files_versions[uri] = 1
+		}
+		uris[name] = uri
+	}
+	app.workspace_roots = [dir]
+	return app, uris
+}
+
+// rename_request_at builds a rename request for `file:line:col` (1-based).
+fn rename_request_at(uris map[string]string, at string) Request {
+	return rename_request_named(uris, at, 'renamed')
+}
+
+// rename_request_named builds a request to rename the identifier at
+// `file:line:col` (1-based) to `new_name`.
+fn rename_request_named(uris map[string]string, at string, new_name string) Request {
+	parts := at.split(':')
+	return Request{
+		id:     905
+		method: 'textDocument/rename'
+		params: json2.encode(RenameParams{
+			text_document: TextDocumentIdentifier{
+				uri: uris[parts[0]]
+			}
+			position:      Position{
+				line: parts[1].int() - 1
+				char: parts[2].int() - 1
+			}
+			new_name:      new_name
+		},
+			escape_unicode: true
+		)
+	}
+}
+
+// rename_edits_at renames the identifier at `file:line:col` of the project and
+// returns where every edit starts as `file:line:col`, sorted; nothing when the
+// rename was refused.
+fn rename_edits_at(at string) []string {
+	return rename_edits_in({
+		'main.v':  rename_project_main
+		'other.v': rename_project_other
+	}, at)
+}
+
+// rename_edits_in is rename_edits_at for a project made of `files`.
+fn rename_edits_in(files map[string]string, at string) []string {
+	return rename_edits_opening(files, files.keys(), at)
+}
+
+// rename_edits_opening is rename_edits_in with only the files in `open` open.
+fn rename_edits_opening(files map[string]string, open []string, at string) []string {
+	mut app, uris := new_rename_project_app_opening(files, open)
+	defer {
+		cleanup_rename_app(mut app)
+	}
+	parts := at.split(':')
+	line := files[parts[0]].split_into_lines()[parts[1].int() - 1]
+	// V wants a type capitalized, and anything else lowercase.
+	first := line[int_min(parts[2].int() - 1, line.len - 1)]
+	new_name := if first.is_capital() { 'Renamed' } else { 'renamed' }
+	response := app.handle_rename(rename_request_named(uris, at, new_name))
+	if response.result !is WorkspaceEdit {
+		return []string{}
+	}
+	edit := response.result as WorkspaceEdit
+	mut edits := []string{}
+	for uri, text_edits in edit.changes {
+		for e in text_edits {
+			edits << '${os.file_name(uri_to_path(uri))}:${e.range.start.line + 1}:${e.range.start.char + 1}'
+		}
+	}
+	edits.sort()
+	return edits
+}
+
+fn test_rename_edits_every_occurrence_of_the_symbol_and_nothing_else() {
+	helper := ['main.v:21:4', 'main.v:32:10', 'other.v:8:9']
+	field_x := ['main.v:13:11', 'main.v:28:3', 'main.v:37:16', 'main.v:8:2', 'other.v:5:3',
+		'other.v:8:33']
+	cases := {
+		'main.v:21:4':  helper // a function, from its declaration
+		'other.v:8:9':  helper // and from a call in another file
+		'main.v:22:2':  ['main.v:22:2', 'main.v:23:9'] // a local
+		'main.v:23:14': ['main.v:22:2', 'main.v:23:9'] // the cursor right after a name that ends the line
+		'main.v:21:11': ['main.v:21:11', 'main.v:22:11'] // a parameter
+		'main.v:12:14': ['main.v:12:14', 'main.v:31:12', 'other.v:8:23'] // a method
+		'main.v:7:8':   ['main.v:12:7', 'main.v:27:7', 'main.v:7:8', 'other.v:4:7'] // a struct
+		'main.v:8:2':   field_x // a field, with the keys of struct literals
+		'other.v:5:3':  field_x // from a key
+		'main.v:36:2':  ['main.v:36:2', 'main.v:37:10'] // a local named like the field
+		'main.v:5:7':   ['main.v:33:10', 'main.v:5:7'] // a constant
+		'main.v:16:6':  ['main.v:16:6', 'main.v:34:7'] // an enum, named in `Color.red`
+		'main.v:17:2':  ['main.v:17:2', 'main.v:34:13'] // an enum value
+		'main.v:38:13': []string{} // `os.args` is declared outside the project
+	}
+	for at, want in cases {
+		got := rename_edits_at(at)
+		assert got == want, '${at}: ${got}'
+	}
+}
+
+fn test_rename_says_why_it_refuses_and_prepare_rename_refuses_first() {
+	mut app, uris := new_rename_project_app()
+	defer {
+		cleanup_rename_app(mut app)
+	}
+	outside := rename_request_at(uris, 'main.v:38:13')
+	if _ := app.rename_request(outside) {
+		assert false, 'renaming `os.args` must be refused'
+	} else {
+		assert err.msg().contains('outside this project'), err.msg()
+	}
+	if _ := app.prepare_rename_request(outside) {
+		assert false, 'preparing a rename of `os.args` must be refused'
+	} else {
+		assert err.msg().contains('outside this project'), err.msg()
+	}
+	prepared := app.prepare_rename_request(rename_request_at(uris, 'main.v:21:4')) or {
+		panic(err)
+	}
+	assert prepared.result is PrepareRenameResult
+	result := prepared.result as PrepareRenameResult
+	assert result.placeholder == 'helper'
+	assert result.range.start == Position{
+		line: 20
+		char: 3
+	}
+}
+
+// A struct embedded in another, a closure and its captures, loop variables, and
+// a field named like an imported module.
+const rename_scopes_main = "module main
+
+import time
+
+struct Base {
+	id int
+}
+
+fn (b Base) ident() int {
+	return b.id
+}
+
+struct User {
+	Base
+	name string
+}
+
+struct Job {
+	time int
+}
+
+fn total(items []int) int {
+	mut acc := 0
+	for item in items {
+		acc += item
+	}
+	return acc
+}
+
+fn main() {
+	u := User{
+		Base: Base{
+			id: 1
+		}
+		name: 'ana'
+	}
+	println(u.Base.id)
+	println(u.ident())
+	offset := 7
+	add := fn [offset] (a int) int {
+		return a + offset
+	}
+	println(add(1))
+	job := Job{
+		time: 3
+	}
+	println(job.time)
+	println(time.now().year > 0)
+	println(total([1, 2]))
+}
+
+struct Box[T] {
+	val T
+}
+
+fn (b Box[T]) get() T {
+	return b.val
+}
+
+fn make_bases() []Base {
+	mut bases := []Base{}
+	bases << Base{
+		id: 2
+	}
+	return bases
+}
+
+fn read_point(p struct { x int }) int {
+	y := p.x
+	return y
+}
+
+struct Label {
+	text string
+	x    int
+}
+
+struct Frame {
+	label Label
+	x     int
+}
+
+fn make_frame() Frame {
+	return Frame{
+		label: Label{
+			text: '}'
+			x:    1
+		}
+		x:     2
+	}
+}
+
+fn shadowed() {
+	time := [1, 2]
+	println(time.len)
+}
+"
+
+fn test_rename_follows_embedded_structs_closures_and_loops() {
+	// V1 alone does not tell where all these names are declared.
+	if !v3_answers_line_info {
+		return
+	}
+	files := {
+		'main.v': rename_scopes_main
+	}
+	// The field that embeds a struct is named after it: both change together.
+	base := ['main.v:14:2', 'main.v:32:3', 'main.v:32:9', 'main.v:37:12', 'main.v:5:8', 'main.v:9:7',
+		'main.v:60:19', 'main.v:61:17', 'main.v:62:11']
+	cases := {
+		'main.v:5:8':   base // a struct that another embeds, from its declaration
+		'main.v:32:3':  base // from the key of the embedded field
+		'main.v:37:12': base // from the embedded field in a selector
+		'main.v:14:2':  base // from the embedding itself
+		'main.v:61:17': base // from `[]Base{}`, where the compiler does not answer
+		'main.v:9:13':  ['main.v:38:12', 'main.v:9:13'] // a method reached through the embedding
+		'main.v:24:6':  ['main.v:24:6', 'main.v:25:10'] // a `for x in` variable
+		'main.v:39:2':  ['main.v:39:2', 'main.v:40:13', 'main.v:41:14'] // a variable a closure captures
+		'main.v:40:22': ['main.v:40:22', 'main.v:41:10'] // a closure parameter
+		'main.v:40:2':  ['main.v:40:2', 'main.v:43:10'] // a closure called through its variable
+		'main.v:19:2':  ['main.v:19:2', 'main.v:45:3', 'main.v:47:14'] // a field named like an imported module
+		'main.v:9:5':   ['main.v:10:9', 'main.v:9:5'] // a receiver, named like one in a generic method
+		'main.v:69:7':  ['main.v:68:15', 'main.v:69:7'] // a parameter, where braces close on the declaration line
+		'main.v:68:15': ['main.v:68:15', 'main.v:69:7'] // and from the parameter itself
+		'main.v:75:2':  ['main.v:75:2', 'main.v:87:4'] // a field whose key follows a brace inside a string
+		'main.v:94:2':  ['main.v:94:2', 'main.v:95:10'] // a local named like an imported module
+		'main.v:95:10': ['main.v:94:2', 'main.v:95:10'] // and from `time.len`, where it is not the module
+	}
+	for at, want in cases {
+		mut sorted_want := want.clone()
+		sorted_want.sort()
+		got := rename_edits_in(files, at)
+		assert got == sorted_want, '${at}: ${got}'
+	}
+}
+
+// A field of a struct that another embeds, declared in one file and used in
+// another through the struct that embeds it.
+const rename_promoted_base = 'module main
+
+struct Base {
+	id int
+}
+
+struct User {
+	Base
+	name string
+}
+'
+
+const rename_promoted_main = "module main
+
+fn main() {
+	user := User{
+		Base: Base{
+			id: 9
+		}
+		name: 'ana'
+	}
+	println(user.id)
+	println(user.Base.id)
+}
+"
+
+fn test_rename_finds_a_field_through_the_struct_that_embeds_it() {
+	// V1 alone does not tell where `user.id` is declared.
+	if !v3_answers_line_info {
+		return
+	}
+	files := {
+		'base.v': rename_promoted_base
+		'main.v': rename_promoted_main
+	}
+	want := ['base.v:4:2', 'main.v:10:15', 'main.v:11:20', 'main.v:6:4']
+	// From each occurrence, with only its file open, as an editor may have it.
+	for at in want {
+		got := rename_edits_opening(files, [at.all_before(':')], at)
+		assert got == want, '${at}: ${got}'
+	}
+}
+
+// A program whose interface has a method and a field that a struct implements,
+// and a type that implements IError.
+const rename_interface_main = "module main
+
+interface Measurable {
+	area() f64
+	label string
+}
+
+struct Circle {
+	r     f64
+	label string
+}
+
+fn (c Circle) area() f64 {
+	return 3 * c.r * c.r
+}
+
+struct Fail {
+	Error
+}
+
+fn (f Fail) msg() string {
+	return 'fail'
+}
+
+fn total(items []Measurable) f64 {
+	mut acc := 0.0
+	for item in items {
+		acc += item.area()
+	}
+	return acc
+}
+
+fn main() {
+	area := total([Circle{
+		r:     1
+		label: 'c'
+	}])
+	println(area)
+	println(Fail{}.msg())
+}
+"
+
+fn test_rename_refuses_interface_members_and_the_names_they_share() {
+	mut app, uris := new_rename_project_app_with({
+		'main.v': rename_interface_main
+	})
+	defer {
+		cleanup_rename_app(mut app)
+	}
+	// V needs no declaration to implement an interface: the types that
+	// implement one must keep the names of its members, and a rename cannot
+	// see which types those are.
+	for at in ['main.v:4:2', 'main.v:5:2', 'main.v:13:15', 'main.v:10:2', 'main.v:28:15', 'main.v:21:13'] {
+		count := rename_edit_count(mut app, uris, at) or {
+			if v3_answers_line_info {
+				assert err.msg().contains('interface'), '${at}: ${err}'
+			}
+			continue
+		}
+		assert false, '${at}: renamed with ${count} edits'
+	}
+	// A local with the name of such a method is none of them.
+	assert rename_edits_in({
+		'main.v': rename_interface_main
+	}, 'main.v:34:2') == ['main.v:34:2', 'main.v:38:10']
+}
+
+// The types V builds in are the ones of V: `i128` and `u128` since V's #28877,
+// and no `byte` since #29141, where `byte` became a name like any other.
+fn test_builtin_types_are_those_of_v() {
+	assert classify_v_identifier('i128') == sem_tok_type
+	assert classify_v_identifier('u128') == sem_tok_type
+	assert classify_v_identifier('byte') == -1
+	types := make_keyword_completions().filter(it.detail == 'builtin type').map(it.label)
+	assert 'i128' in types && 'u128' in types, types.str()
+	assert 'byte' !in types, types.str()
+}
+
+// `i128` is part of V, and a rename refuses it; a variable named `byte` is a
+// name, which a rename changes.
+fn test_rename_follows_the_builtin_types_of_v() {
+	files := {
+		'main.v': 'module main\n\nfn main() {\n\tbig := i128(5)\n\tbyte := u8(1)\n\tprintln(big)\n\tprintln(byte)\n}\n'
+	}
+	assert rename_edits_in(files, 'main.v:4:9') == []string{}
+	assert rename_edits_in(files, 'main.v:5:2') == ['main.v:5:2', 'main.v:7:10']
+}
+
+fn test_rename_refuses_modules_builtin_types_and_names_v_would_reject() {
+	mut app, uris := new_rename_project_app_with({
+		'main.v': rename_scopes_main
+	})
+	defer {
+		cleanup_rename_app(mut app)
+	}
+	refusals := {
+		'main.v:3:8 x':       'names a module' // `import time`
+		'main.v:48:10 x':     'names a module' // `time.now()`
+		'main.v:6:5 x':       'part of V' // `int`
+		'main.v:22:4 Total':  'must be lowercase'
+		'main.v:22:4 fn':     'keyword'
+		'main.v:22:4 1total': 'not a valid name'
+		'main.v:5:8 base':    'must start with a capital letter'
+		'main.v:30:4 start':  'V calls' // `fn main`
+		'main.v:22:4 init':   'V calls' // a function renamed to `init`
+	}
+	for spec, reason in refusals {
+		parts := spec.split(' ')
+		if _ := app.rename_request(rename_request_named(uris, parts[0], parts[1])) {
+			assert false, '${spec} must be refused'
+		} else {
+			assert err.msg().contains(reason), '${spec}: ${err.msg()}'
+		}
+	}
+}
+
+// A program whose names a rename can clash with: locals, parameters, a
+// constant, functions, a type, a field, an enum value and a module.
+const rename_clash_main = "module main
+
+import os
+
+const limit = 10
+
+struct Point {
+	x int
+	y int
+}
+
+enum Color {
+	red
+	green
+}
+
+fn (p Point) sum() int {
+	return p.x + p.y
+}
+
+fn helper(n int) int {
+	return n * 2
+}
+
+fn other(n int) int {
+	return n + 1
+}
+
+fn compute(a int, b int) int {
+	total := a + b
+	count := 3
+	if total > limit {
+		return helper(total)
+	}
+	return total + count
+}
+
+fn shadow_later(a int) int {
+	x := a
+	mut r := 0
+	if a > 0 {
+		y := 2
+		r = x + y
+	}
+	return r
+}
+
+fn uses_os() string {
+	name := 'v'
+	return os.join_path(name, 'x')
+}
+
+fn separate_one() int {
+	alpha := 1
+	return alpha
+}
+
+fn separate_two() int {
+	beta := 2
+	return beta
+}
+
+fn main() {
+	p := Point{
+		x: 1
+		y: 20
+	}
+	println(compute(p.x, p.y))
+	println(shadow_later(3))
+	println(uses_os())
+	println(separate_one() + separate_two())
+	println(p.sum())
+	println(Color.red)
+	println(other(1))
+}
+"
+
+fn test_rename_refuses_a_new_name_that_clashes_with_a_name_of_the_program() {
+	mut app, uris := new_rename_project_app_with({
+		'main.v': rename_clash_main
+	})
+	defer {
+		cleanup_rename_app(mut app)
+	}
+	refusals := {
+		// V reports the clash: a declaration of the new name where the renamed
+		// one is, or a use that could name either.
+		'main.v:30:2 count':      'redefinition of `count`' // a local, to a later local
+		'main.v:31:2 total':      'redefinition of `total`' // to an earlier one
+		'main.v:29:12 b':         'redefinition of parameter `b`'
+		'main.v:31:2 helper':     'ambiguous call' // to a function called there
+		'main.v:7:8 Color':       'another type with this name exists'
+		'main.v:8:2 y':           'duplicate'
+		'main.v:13:2 green':      'duplicate enum field name'
+		'main.v:49:2 os':         'duplicate of an import symbol'
+		'main.v:30:2 string':     'reserved type'
+		// V only warns, and a use would name another declaration: `limit` of
+		// `if total > limit` would be the local.
+		'main.v:30:2 limit':      'duplicate of a const name `limit`'
+		'main.v:5:7 count':       'duplicate of a const name `count`'
+		// A function to the name of another.
+		'main.v:21:4 other':      'redefinition of function `other`'
+		// Keywords that are no names.
+		'main.v:30:2 __offsetof': 'keyword'
+		'main.v:30:2 _likely_':   'keyword'
+		'main.v:30:2 _unlikely_': 'keyword'
+		'main.v:30:2 __global':   'keyword'
+	}
+	for spec, reason in refusals {
+		parts := spec.split(' ')
+		if _ := app.rename_request(rename_request_named(uris, parts[0], parts[1])) {
+			assert false, '${spec} must be refused'
+		} else {
+			assert err.msg().contains(reason)
+				|| (spec == 'main.v:21:4 other' && err.msg().contains('redefinition of function `other`')), '${spec}: ${err.msg()}'
+		}
+	}
+	// A local of another function is no clash.
+	response := app.rename_request(rename_request_named(uris, 'main.v:54:2', 'beta')) or {
+		panic(err)
+	}
+	edit := response.result as WorkspaceEdit
+	assert edit.changes.values().map(it.len) == [2]
+}
+
+// A function with a variant in a file of each platform: a rename from a call
+// renames the variants that the build of this platform leaves out, and their
+// uses there and in `$if` branches, so that no platform's build breaks. The
+// function of another module with the same name keeps its name.
+fn test_rename_renames_the_variants_of_the_other_platforms() {
+	files := {
+		'main.v':           'module main\n\nimport other\n\nfn main() {\n\tprintln(platform_name())\n\tprintln(other.platform_name())\n\t\$if windows {\n\t\tprintln(platform_name())\n\t}\n}\n'
+		'name_linux.c.v':   "module main\n\nfn platform_name() string {\n\treturn 'linux'\n}\n"
+		'name_macos.c.v':   "module main\n\nfn platform_name() string {\n\treturn 'macos'\n}\n"
+		'name_windows.c.v': "module main\n\nfn platform_name() string {\n\treturn 'windows'\n}\n\nfn describe() string {\n\treturn platform_name() + '!'\n}\n"
+		'other/other.v':    "module other\n\npub fn platform_name() string {\n\treturn 'other'\n}\n"
+	}
+	assert rename_edits_in(files, 'main.v:6:10') == ['main.v:6:10', 'main.v:9:11', 'name_linux.c.v:3:4',
+		'name_macos.c.v:3:4', 'name_windows.c.v:3:4', 'name_windows.c.v:8:9']
+}
+
+// An unrelated type in an inactive platform file does not share its fields
+// with the type being renamed, even when their names match.
+fn test_rename_keeps_unrelated_fields_in_other_platform_files() {
+	files := {
+		'main.v':            'module main\n\nstruct Foo {\n\tvalue int\n}\n\nfn main() {\n\tf := Foo{value: 1}\n\tprintln(f.value)\n}\n'
+		'other_windows.c.v': 'module main\n\nstruct Bar {\n\tvalue int\n}\n\nfn bar() {\n\t_ = Bar{value: 2}\n}\n'
+	}
+	assert rename_edits_in(files, 'main.v:4:2') == ['main.v:4:2', 'main.v:8:11', 'main.v:9:12']
+}
+
+// A use in an excluded file may resolve only after the rename, to a local of
+// the new name. That is a capture even though its original binding was unknown.
+fn test_rename_refuses_a_capture_in_an_inactive_platform_file() {
+	mut app, uris := new_rename_project_app_with({
+		'main.v':            'module main\n\nfn greet() int {\n\treturn 1\n}\n\nfn main() {\n\tprintln(greet())\n}\n'
+		'other_windows.c.v': 'module main\n\nfn invoke(action fn () int) int {\n\treturn greet()\n}\n'
+	})
+	defer { cleanup_rename_app(mut app) }
+	if response := app.rename_request(rename_request_named(uris, 'main.v:3:4', 'action')) {
+		assert false, 'a platform-specific capture returned edits: ${response}'
+	}
+}
+
+// A function renamed to another function's name, a local renamed to another
+// local's, and a function renamed to the name of a parameter that a call of it
+// would then reach: the first two break the program, the last one compiles and
+// calls the parameter instead.
+fn test_rename_refuses_a_name_that_a_call_or_a_declaration_already_has() {
+	mut app, uris := new_rename_project_app_with({
+		'main.v': 'module main\n\nfn greet() int {\n\treturn 1\n}\n\nfn helper() int {\n\treturn 3\n}\n\nfn invoke(action fn () int) int {\n\tprintln(action())\n\treturn greet()\n}\n\nfn main() {\n\tx := 1\n\ty := 2\n\tprintln(x + y)\n\tprintln(invoke(fn () int {\n\t\treturn 2\n\t}))\n\tprintln(helper())\n}\n'
+	})
+	defer {
+		cleanup_rename_app(mut app)
+	}
+	// A V that reports the redefinition says so; one that does not still sees
+	// that the call of `helper` would name another declaration.
+	for spec, reasons in {
+		'main.v:3:4 helper': ['redefinition of function `helper`', 'would make `helper` at main.v:23:10']
+		'main.v:17:2 y':     ['redefinition of `y`']
+		'main.v:3:4 action': ['would make `action` at main.v:13:9']
+	} {
+		parts := spec.split(' ')
+		if _ := app.rename_request(rename_request_named(uris, parts[0], parts[1])) {
+			assert false, '${spec} must be refused'
+		} else {
+			assert reasons.any(err.msg().contains(it)), '${spec}: ${err.msg()}'
+		}
+	}
+}
+
+// A generic function of a module, called from main.v, whose parameter is named
+// like a field of the module's struct.
+const rename_generic_store = 'module shop
+
+pub struct Store {
+mut:
+	items []int
+}
+
+pub fn new_store() Store {
+	return Store{
+		items: []int{}
+	}
+}
+
+pub fn (mut s Store) add(n int) {
+	s.items << n
+}
+
+pub fn (s Store) all() []int {
+	return s.items
+}
+
+pub fn keep_if[T](items []T, keep fn (T) bool) []T {
+	mut out := []T{}
+	for item in items {
+		if keep(item) {
+			out << item
+		}
+	}
+	return out
+}
+'
+
+const rename_generic_main = 'module main
+
+import shop
+
+fn main() {
+	mut s := shop.new_store()
+	s.add(3)
+	big := shop.keep_if(s.all(), fn (n int) bool {
+		return n > 1
+	})
+	println(big)
+}
+'
+
+// The persistent compiler reads again only the file it is asked about, so it
+// finds nothing inside a generic function that another file instantiates; a
+// compiler process of its own does, and the rename asks one before refusing.
+fn test_generic_list_names_reads_a_type_parameter_with_its_constraint() {
+	assert generic_list_names('fn take[T Named](x T) T {') == ['T']
+	assert generic_list_names('fn pair[T Named, U](a T, b U) {') == ['T', 'U']
+	assert generic_list_names('fn smallest[T Comparable[T]](items []T) T {') == ['T']
+	assert generic_list_names('fn (b Box[T]) get() T {') == ['T']
+	assert generic_list_names('fn apply(xs []int, m map[string]int) {') == []string{}
+}
+
+fn test_rename_of_a_type_leaves_a_type_parameter_of_its_name_alone() {
+	// `T` of `take[T Named]` is a type parameter, as `T` of `plain[T]`: renaming
+	// the struct `T` renames neither.
+	files := {
+		'main.v': "module main
+
+interface Named {
+	name string
+}
+
+struct T {
+	name string
+}
+
+fn take[T Named](x T) T {
+	return x
+}
+
+fn plain[T](x T) T {
+	return x
+}
+
+fn main() {
+	t := T{
+		name: 'a'
+	}
+	println(take(t).name)
+	println(plain(t).name)
+}
+"
+	}
+	// Probe the compiler, independently of VLS: older V3 versions do not yet
+	// accept constrained type parameters. The lexical regression above still
+	// exercises their recognition with those compilers.
+	mut probe, uris := new_rename_project_app_with(files)
+	defer { cleanup_rename_app(mut probe) }
+	checked := run_v_argv(['-new-compiler', '-check', '-nocolor', '.'],
+		os.dir(uri_to_path(uris['main.v'])))
+	if checked.exit_code != 0 { return }
+	assert rename_edits_in(files, 'main.v:7:8') == ['main.v:20:7', 'main.v:7:8']
+}
+
+fn test_rename_resolves_names_inside_a_generic_function_called_from_another_file() {
+	// V1 alone does not tell where all these names are declared.
+	if !v3_answers_line_info {
+		return
+	}
+	files := {
+		'main.v':       rename_generic_main
+		'shop/store.v': rename_generic_store
+	}
+	field := ['store.v:10:3', 'store.v:15:4', 'store.v:19:11', 'store.v:5:2']
+	param := ['store.v:22:19', 'store.v:24:14']
+	item := ['store.v:24:6', 'store.v:25:11', 'store.v:26:11']
+	cases := {
+		'shop/store.v:5:2':   field // the field, whose name the generic parameter shares
+		'shop/store.v:19:11': field // from a use
+		'shop/store.v:22:19': param // the parameter, from its declaration
+		'shop/store.v:24:14': param // and from its use in the body
+		'shop/store.v:25:6':  ['store.v:22:30', 'store.v:25:6'] // a parameter called as a function
+		'shop/store.v:26:11': item // a loop variable
+		'shop/store.v:29:9':  ['store.v:23:6', 'store.v:26:4', 'store.v:29:9'] // a local
+	}
+	mut wrong := []string{}
+	for at, want in cases {
+		// Every file open, and only the one edited: the compiler then reads the
+		// others through links to the disk, and reads imports from where a link
+		// points.
+		for open in [files.keys(), [at.all_before(':')]] {
+			got := rename_edits_opening(files, open, at)
+			if got != want {
+				wrong << '${at} with ${open} open: ${got}'
+			}
+		}
+	}
+	assert wrong.len == 0, wrong.str()
+}
+
+// rename_edit_count renames the identifier at `file:line:col` and returns how
+// many edits it takes, or the reason it was refused.
+fn rename_edit_count(mut app App, uris map[string]string, at string) !int {
+	response := app.rename_request(rename_request_named(uris, at, 'renamed'))!
+	edit := response.result as WorkspaceEdit
+	mut count := 0
+	for _, text_edits in edit.changes {
+		count += text_edits.len
+	}
+	return count
+}
+
+// A rename checks at most 48 occurrences, one compiler lookup each, unless
+// VLS_RENAME_MAX_OCCURRENCES says otherwise; the refusal names the variable.
+fn test_rename_occurrence_cap_comes_from_the_environment() {
+	previous := os.getenv('VLS_RENAME_MAX_OCCURRENCES')
+	defer {
+		if previous == '' {
+			os.unsetenv('VLS_RENAME_MAX_OCCURRENCES')
+		} else {
+			os.setenv('VLS_RENAME_MAX_OCCURRENCES', previous, true)
+		}
+	}
+	// `tick` appears 51 times and `tock` 12.
+	mut body := []string{}
+	for _ in 0 .. reference_semantic_max_candidates + 2 {
+		body << '\tprintln(tick())'
+	}
+	for _ in 0 .. 11 {
+		body << '\tprintln(tock())'
+	}
+	main_v := 'module main\n\nfn tick() int {\n\treturn 1\n}\n\nfn tock() int {\n\treturn 2\n}\n\nfn main() {\n${body.join('\n')}\n}\n'
+	mut app, uris := new_rename_project_app_with({
+		'main.v': main_v
+	})
+	defer {
+		cleanup_rename_app(mut app)
+	}
+	tick := 'main.v:3:4'
+	tock := 'main.v:7:4'
+	// Not set, or not a positive number: 48.
+	for value in ['', 'abc', '0', '-5', '60x'] {
+		if value == '' {
+			os.unsetenv('VLS_RENAME_MAX_OCCURRENCES')
+		} else {
+			os.setenv('VLS_RENAME_MAX_OCCURRENCES', value, true)
+		}
+		if n := rename_edit_count(mut app, uris, tick) {
+			assert false, '`${value}`: a rename of 51 occurrences must be refused, took ${n} edits'
+		} else {
+			assert err.msg().contains('appears 51 times'), '`${value}`: ${err.msg()}'
+			assert err.msg().contains('more than the 48 '), '`${value}`: ${err.msg()}'
+			assert err.msg().contains('VLS_RENAME_MAX_OCCURRENCES'), '`${value}`: ${err.msg()}'
+		}
+	}
+	// Raised, the same rename goes through.
+	os.setenv('VLS_RENAME_MAX_OCCURRENCES', '60', true)
+	assert rename_edit_count(mut app, uris, tick) or { panic(err) } == 51
+	// Lowered, a rename that 48 lets through is refused.
+	os.setenv('VLS_RENAME_MAX_OCCURRENCES', '10', true)
+	if n := rename_edit_count(mut app, uris, tock) {
+		assert false, 'a rename of 12 occurrences must be refused with a cap of 10, took ${n} edits'
+	} else {
+		assert err.msg().contains('more than the 10 '), err.msg()
+	}
+	os.unsetenv('VLS_RENAME_MAX_OCCURRENCES')
+	assert rename_edit_count(mut app, uris, tock) or { panic(err) } == 12
+}
+
 fn test_folding_range_covers_imports_comments_and_code_blocks() {
 	mut app := create_test_app()
 	defer {
@@ -10200,7 +12015,7 @@ fn test_folding_range_covers_imports_comments_and_code_blocks() {
 	app.open_files[uri] = 'module main\n\nimport os\nimport time\n\n// first line\n// second line\n\nfn main() {\n\tprintln(os.args)\n}\n'
 
 	response := app.handle_folding_range(Request{
-		id: 904
+		id:     904
 		method: 'textDocument/foldingRange'
 		params: json2.encode(FoldingRangeParams{
 			text_document: TextDocumentIdentifier{
@@ -10233,13 +12048,13 @@ fn test_document_highlight_returns_reads_and_writes() {
 	app.open_files[uri] = content
 
 	response := app.handle_document_highlight(Request{
-		id: 905
+		id:     905
 		method: 'textDocument/documentHighlight'
 		params: json2.encode(DocumentHighlightParams{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-			position: Position{
+			position:      Position{
 				line: 3
 				char: 2
 			}
@@ -10273,15 +12088,15 @@ fn test_workspace_configuration_toggles_feature_behavior() {
 	assert !app.diagnostics_enabled
 
 	hint_response := app.handle_inlay_hints(Request{
-		id: 906
+		id:     906
 		method: 'textDocument/inlayHint'
 		params: json2.encode(InlayHintParams{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-			range: LSPRange{
+			range:         LSPRange{
 				start: Position{}
-				end: Position{
+				end:   Position{
 					line: 5
 				}
 			}
@@ -10364,13 +12179,13 @@ fn test_will_save_wait_until_formats_without_mutating_open_document() {
 	app.open_files[uri] = content
 
 	response := app.on_will_save_wait_until(Request{
-		id: 907
+		id:     907
 		method: 'textDocument/willSaveWaitUntil'
 		params: json2.encode(WillSaveTextDocumentParams{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-			reason: 1
+			reason:        1
 		},
 			escape_unicode: true
 		)
@@ -10398,22 +12213,22 @@ fn test_range_formatting_returns_only_contained_changed_hunk() {
 	app.open_files[uri] = content
 
 	response := app.handle_range_formatting(Request{
-		id: 908
+		id:     908
 		method: 'textDocument/rangeFormatting'
 		params: json2.encode(DocumentRangeFormattingParams{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-			range: LSPRange{
+			range:         LSPRange{
 				start: Position{
 					line: 3
 				}
-				end: Position{
+				end:   Position{
 					line: 3
 					char: 4
 				}
 			}
-			options: FormattingOptions{
+			options:       FormattingOptions{
 				tab_size: 4
 			}
 		},
@@ -10430,6 +12245,51 @@ fn test_range_formatting_returns_only_contained_changed_hunk() {
 	assert edits[0].new_text == '\tx := 1\n'
 }
 
+fn test_range_formatting_preserves_crlf_line_endings() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'crlf_range_format_feature')
+	must_mkdir_all(test_dir)
+	test_file := os.join_path(test_dir, 'main.v')
+	content := 'module main\r\n\r\nfn main() {\r\nx:=1\r\n}\r\n'
+	must_write_file(test_file, content)
+	uri := path_to_uri(test_file)
+	app.open_files[uri] = content
+
+	response := app.handle_range_formatting(Request{
+		id:     909
+		method: 'textDocument/rangeFormatting'
+		params: json2.encode(DocumentRangeFormattingParams{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			range:         LSPRange{
+				start: Position{
+					line: 3
+				}
+				end:   Position{
+					line: 3
+					char: 4
+				}
+			}
+			options:       FormattingOptions{
+				tab_size: 4
+			}
+		},
+			escape_unicode: true
+		)
+	})
+
+	assert response.result is []TextEdit
+	edits := response.result as []TextEdit
+	assert edits.len == 1
+	assert edits[0].range.start.line == 3
+	assert edits[0].range.end.line == 4
+	assert edits[0].new_text == '\tx := 1\r\n'
+}
+
 fn test_prepare_call_hierarchy_returns_function_item() {
 	mut app := create_test_app()
 	defer {
@@ -10439,13 +12299,13 @@ fn test_prepare_call_hierarchy_returns_function_item() {
 	app.open_files[uri] = 'module main\n\nfn helper() {}\n\nfn main() {\n\thelper()\n}\n'
 
 	response := app.handle_prepare_call_hierarchy(Request{
-		id: 909
+		id:     909
 		method: 'textDocument/prepareCallHierarchy'
 		params: json2.encode(PrepareCallHierarchyParams{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-			position: Position{
+			position:      Position{
 				line: 5
 				char: 2
 			}
@@ -10538,12 +12398,12 @@ fn test_unary_ampersand_operand_is_guarded() {
 	uri := path_to_uri(os.join_path(app.temp_dir, 'guarded_ampersand.v'))
 	content := 'module main\n\nfn main() {}\n'
 	app.open_files[uri] = content
-	assert app.expression_type(uri, content, '&', Position{line: 0, char: 0}) == ''
-	assert app.expression_type(uri, content, '(&)', Position{line: 0, char: 0}) == ''
+	assert app.expression_type(uri, content, '&', Position{ line: 0, char: 0 }) == ''
+	assert app.expression_type(uri, content, '(&)', Position{ line: 0, char: 0 }) == ''
 }
 
 fn test_index_key_with_dotdot_in_string_literal_is_not_treated_as_slice() {
-	result := indexed_completions_at_line_end('map_key_dotdot_completion', 'module main\n\nstruct Point {\n\tx int\n}\n\nfn main() {\n\tm := map[string]Point{}\n\tm[\'a..b\'].\n}\n', '\tm[\'a..b\'].')
+	result := indexed_completions_at_line_end('map_key_dotdot_completion', "module main\n\nstruct Point {\n\tx int\n}\n\nfn main() {\n\tm := map[string]Point{}\n\tm['a..b'].\n}\n", "\tm['a..b'].")
 	labels := result.items.map(it.label)
 	assert 'x' in labels, labels.str()
 	assert 'keys' !in labels, labels.str()
@@ -10890,6 +12750,16 @@ fn test_member_completion_resolves_the_type_of_any_expression() {
 			want: ['str', 'hex']
 		},
 		MemberCompletionCase{
+			name: 'cast_i128'
+			body: 'n := i128(5)\n\tn.@cursor'
+			want: ['str', 'hex']
+		},
+		MemberCompletionCase{
+			name: 'cast_u128'
+			body: 'n := u128(5)\n\tn.@cursor'
+			want: ['str', 'hex', 'bin']
+		},
+		MemberCompletionCase{
 			name: 'match_branch'
 			body: 'f := Figure(Point{})\n\tmatch f {\n\t\tPoint {\n\t\t\tf.@cursor\n\t\t}\n\t\telse {}\n\t}'
 			want: point
@@ -11081,8 +12951,9 @@ fn array_completion_items(dir_name string, decl string) []Detail {
 fn test_array_receivers_complete_their_builtin_methods() {
 	ints := array_completion_items('array_int_literal', 'arr := [3, 1, 2]')
 	int_labels := ints.map(it.label)
-	for name in ['len', 'cap', 'filter', 'map', 'sort', 'sorted', 'contains', 'index', 'first', 'last',
-		'pop', 'insert', 'prepend', 'delete', 'clear', 'reverse', 'clone', 'any', 'all', 'count', 'trim'] {
+	for name in ['len', 'cap', 'filter', 'map', 'sort', 'sorted', 'contains', 'index', 'first',
+		'last', 'pop', 'insert', 'prepend', 'delete', 'clear', 'reverse', 'clone', 'any', 'all',
+		'count', 'trim'] {
 		assert name in int_labels, '${name} missing: ${int_labels}'
 	}
 	assert 'join' !in int_labels
@@ -11233,7 +13104,838 @@ fn test_semantic_tokens_leave_string_interpolations_out_of_the_string() {
 		'property:x',
 		"string:'",
 	]
-	// The old `\$name` form and an escaped `\\\$` behave like V does.
-	assert semantic_token_texts("s := 'a \$b c'") == ['variable:s', "string:'a ", "string: c'"]
+	// An unbraced `\$name` is text (V interpolates only `\${}`), and so is an escaped `\\\${`.
+	assert semantic_token_texts("s := 'a \$b c'") == ['variable:s', "string:'a \$b c'"]
 	assert semantic_token_texts("s := 'price: \\\${x}'") == ['variable:s', "string:'price: \\\${x}'"]
+}
+
+// Auto-import completion. A project with modules of its own, one without v.mod,
+// and a VMODULES folder of installed packages: `gui` with its `svg` submodule
+// and a namespaced `author.pkg`.
+const import_lab_files = {
+	'proj/v.mod':                   "Module {\n\tname: 'proj'\n\tversion: '0.0.1'\n}\n"
+	'proj/main.v':                  'module main\n\nimport store\n\nfn main() {\n\tstore.open()\n\tte\n}\n'
+	'proj/store/store.v':           'module store\n\npub fn open() {}\n'
+	'proj/utils/textx/textx.v':     'module textx\n\npub fn shout(s string) string {\n\treturn s\n}\n'
+	'proj/utils/mathx/mathx.v':     'module mathx\n\nimport utils.textx\n\npub fn twice(n int) int {\n\treturn n * 2\n}\n'
+	'proj/broken/broken.v':         'module other\n\npub fn f() {}\n'
+	'proj/examples/demo/main.v':    'module main\n\nfn main() {}\n'
+	'proj/.hidden/secret/secret.v': 'module secret\n\npub fn f() {}\n'
+	'noproj/main.v':                'module main\n\nfn main() {\n\tli\n}\n'
+	'noproj/lib/lib.v':             'module lib\n\npub fn greet() {}\n'
+	'vmods/gui/gui.v':              'module gui\n\npub fn window() {}\n'
+	'vmods/gui/svg/svg.v':          'module svg\n\npub fn draw() {}\n'
+	'vmods/gui/examples/demo.v':    'module main\n\nfn main() {}\n'
+	'vmods/author/pkg/pkg.v':       'module pkg\n\npub fn run() {}\n'
+	'vmods/.cache/junk/junk.v':     'module junk\n\npub fn f() {}\n'
+}
+
+struct ImportLab {
+	base         string
+	root         string
+	vmodules     string
+	old_vmodules string
+mut:
+	app &App
+}
+
+// new_import_lab writes the lab under a test app's temp dir and points VMODULES
+// at its packages until close().
+fn new_import_lab() ImportLab {
+	app := create_test_app()
+	base := os.join_path(app.temp_dir, 'import_lab')
+	for rel, content in import_lab_files {
+		path := os.join_path(base, rel)
+		must_mkdir_all(os.dir(path))
+		must_write_file(path, content)
+	}
+	old_vmodules := os.getenv('VMODULES')
+	os.setenv('VMODULES', os.join_path(base, 'vmods'), true)
+	return ImportLab{
+		base:         base
+		root:         os.join_path(base, 'proj')
+		vmodules:     os.join_path(base, 'vmods')
+		old_vmodules: old_vmodules
+		app:          app
+	}
+}
+
+fn (lab ImportLab) close() {
+	if lab.old_vmodules == '' {
+		os.unsetenv('VMODULES')
+	} else {
+		os.setenv('VMODULES', lab.old_vmodules, true)
+	}
+	cleanup_test_app(lab.app)
+}
+
+// completion_at writes `content` to `rel` (relative to the lab base), opens it
+// and returns the completion items at the end of the line equal to `line_text`.
+fn (mut lab ImportLab) completion_at(rel string, content string, line_text string) []Detail {
+	path := os.join_path(lab.base, rel)
+	must_write_file(path, content)
+	uri := path_to_uri(path)
+	lab.app.open_files[uri] = content
+	lines := content.split_into_lines()
+	idx := lines.index(line_text)
+	assert idx >= 0, line_text
+	return lab.app.indexed_completions(uri, Position{
+		line: idx
+		char: lines[idx].len
+	}).items
+}
+
+fn import_edits(item Detail) []TextEdit {
+	return item.additional_text_edits or { []TextEdit{} }
+}
+
+// imports_offered returns the `import` lines that accepting the items would add,
+// for the modules of the project and the installed packages.
+fn imports_offered(items []Detail) []string {
+	mut lines := items.filter(import_edits(it).len > 0 && !it.detail.ends_with(' (vlib)')).map(import_edits(it)[0].new_text.trim_space())
+	lines.sort()
+	return lines
+}
+
+// vlib_imports_offered is imports_offered for V's own modules.
+fn vlib_imports_offered(items []Detail) []string {
+	mut lines := items.filter(import_edits(it).len > 0 && it.detail.ends_with(' (vlib)')).map(import_edits(it)[0].new_text.trim_space())
+	lines.sort()
+	return lines
+}
+
+fn test_completion_offers_the_modules_a_file_does_not_import_yet() {
+	mut lab := new_import_lab()
+	defer {
+		lab.close()
+	}
+	items := lab.completion_at('proj/main.v', import_lab_files['proj/main.v'], '\tte')
+	assert imports_offered(items) == ['import author.pkg', 'import gui', 'import gui.svg',
+		'import utils.mathx', 'import utils.textx'], imports_offered(items).str()
+	for item in items.filter(import_edits(it).len > 0) {
+		assert item.kind == 9, item.label
+		assert (item.insert_text or { '' }) == item.label
+	}
+	textx := items.filter(it.label == 'textx' && import_edits(it).len > 0)
+	assert textx.len == 1
+	edit := import_edits(textx[0])[0]
+	// right after the last import (line 2, `import store`)
+	assert edit.range.start.line == 3 && edit.range.start.char == 0
+	assert edit.range.end.line == 3 && edit.range.end.char == 0
+	assert edit.new_text == 'import utils.textx\n'
+}
+
+fn test_the_import_goes_where_v_expects_it_and_imported_modules_are_not_offered() {
+	mut lab := new_import_lab()
+	defer {
+		lab.close()
+	}
+	// no imports yet: after the module line, in its own paragraph
+	mut items := lab.completion_at('proj/extra.v', 'module main\n\nfn helper() {\n\tgu\n}\n',
+		'\tgu')
+	mut gui := items.filter(it.label == 'gui' && import_edits(it).len > 0)
+	assert gui.len == 1
+	mut edit := import_edits(gui[0])[0]
+	assert edit.range.start.line == 1 && edit.range.start.char == 0
+	assert edit.new_text == '\nimport gui\n'
+	// no module line: at the top
+	items = lab.completion_at('proj/extra.v', 'fn helper() {\n\tgu\n}\n', '\tgu')
+	gui = items.filter(it.label == 'gui' && import_edits(it).len > 0)
+	assert gui.len == 1
+	edit = import_edits(gui[0])[0]
+	assert edit.range.start.line == 0 && edit.range.start.char == 0
+	assert edit.new_text == 'import gui\n\n'
+	// several imports: after the last one
+	items = lab.completion_at('proj/extra.v', 'module main\n\nimport store\nimport os\n\nfn helper() {\n\tgu\n}\n',
+		'\tgu')
+	gui = items.filter(it.label == 'gui' && import_edits(it).len > 0)
+	assert gui.len == 1
+	edit = import_edits(gui[0])[0]
+	assert edit.range.start.line == 4 && edit.new_text == 'import gui\n'
+	// imported under an alias, or only some of its symbols: not offered again
+	items = lab.completion_at('proj/extra.v', 'module main\n\nimport gui as g\nimport utils.mathx { twice }\n\nfn helper() {\n\tgu\n}\n',
+		'\tgu')
+	assert imports_offered(items) == ['import author.pkg', 'import gui.svg', 'import store',
+		'import utils.textx'], imports_offered(items).str()
+}
+
+fn test_a_module_is_not_offered_to_itself_nor_a_module_that_imports_it() {
+	mut lab := new_import_lab()
+	defer {
+		lab.close()
+	}
+	content := 'module textx\n\npub fn shout(s string) string {\n\tst\n\treturn s\n}\n'
+	items := lab.completion_at('proj/utils/textx/textx.v', content, '\tst')
+	// `mathx` imports `textx`: importing it here would make a cycle
+	assert imports_offered(items) == ['import author.pkg', 'import gui', 'import gui.svg',
+		'import store'], imports_offered(items).str()
+}
+
+fn test_no_module_is_offered_inside_strings_or_comments() {
+	mut lab := new_import_lab()
+	defer {
+		lab.close()
+	}
+	for line in ["\tx := 'te", '\t// te'] {
+		content := 'module main\n\nfn main() {\n${line}\n}\n'
+		items := lab.completion_at('proj/extra.v', content, line)
+		assert imports_offered(items) == [], line
+	}
+}
+
+fn test_import_line_completion_lists_installed_and_nested_project_modules() {
+	mut lab := new_import_lab()
+	defer {
+		lab.close()
+	}
+	for line, want in {
+		'import gu':      'gui'
+		'import gui.':    'svg'
+		'import utils.':  'textx'
+		'import au':      'author'
+		'import author.': 'pkg'
+	} {
+		items := lab.completion_at('proj/extra.v', 'module main\n\n${line}\n', line)
+		assert items.any(it.label == want), '${line} -> ${items.map(it.label)}'
+	}
+	items := lab.completion_at('proj/extra.v', 'module main\n\nimport utils.\n', 'import utils.')
+	assert items.any(it.label == 'mathx')
+	// folders whose files declare another module, or `module main`, are not modules to import
+	all := lab.completion_at('proj/extra.v', 'module main\n\nimport \n', 'import ')
+	assert !all.any(it.label in ['broken', 'examples', 'secret', 'junk']), all.map(it.label).str()
+}
+
+fn test_members_of_an_installed_module_resolve_through_vmodules() {
+	mut lab := new_import_lab()
+	defer {
+		lab.close()
+	}
+	assert lab.app.resolve_indexed_import_module_dir('gui', lab.root) == os.join_path(lab.vmodules,
+		'gui')
+	assert lab.app.resolve_indexed_import_module_dir('gui.svg', lab.root) == os.join_path(lab.vmodules,
+		'gui', 'svg')
+	assert lab.app.resolve_indexed_import_module_dir('author.pkg', lab.root) == os.join_path(lab.vmodules,
+		'author', 'pkg')
+	members := lab.app.get_imported_module_member_completions('gui', lab.root)
+	assert members.items.any(it.label == 'window'), members.items.map(it.label).str()
+}
+
+fn test_a_project_without_v_mod_offers_its_own_modules() {
+	mut lab := new_import_lab()
+	defer {
+		lab.close()
+	}
+	items := lab.completion_at('noproj/main.v', import_lab_files['noproj/main.v'], '\tli')
+	assert 'import lib' in imports_offered(items)
+}
+
+// The modules of V's vlib are offered too, but not the ones V refuses to build
+// a program with (deprecated since a date that has come, one that needs a `-d`
+// flag), nor builtin, which every file has, nor the scaffolding of vlib: its
+// tests and examples, and the internals of a module. A deprecated module that V
+// still builds with is offered, marked deprecated.
+fn test_completion_also_offers_the_modules_of_vlib() {
+	mut lab := new_import_lab()
+	defer {
+		lab.close()
+	}
+	items := lab.completion_at('proj/main.v', import_lab_files['proj/main.v'], '\tte')
+	offered := vlib_imports_offered(items)
+	for path in ['os', 'strings', 'net.http', 'x.json2', 'crypto.sha256', 'builtin.wchar', 'json2',
+		'x.templating.dtm'] {
+		assert 'import ${path}' in offered, path
+	}
+	for item in items.filter(import_edits(it).len > 0 && it.detail.ends_with(' (vlib)')) {
+		deprecated := item.label in ['dtm']
+		assert (item.tags or { []int{} }) == if deprecated { [1] } else { []int{} }, item.label
+	}
+	for path in ['builtin', 'gx', 'compress', 'io.string_reader', 'sync.arc', 'math.internal',
+		'crypto.ed25519.internal.edwards25519'] {
+		assert 'import ${path}' !in offered, path
+	}
+	for line in offered {
+		for segment in line.all_after('import ').split('.') {
+			assert segment !in ['tests', 'testdata', 'slow_tests', 'examples', 'internal'], line
+		}
+	}
+	os_items := items.filter(it.label == 'os' && import_edits(it).len > 0)
+	assert os_items.len == 1
+	assert os_items[0].kind == 9
+	assert os_items[0].detail == 'import os (vlib)'
+	edit := import_edits(os_items[0])[0]
+	assert edit.range.start.line == 3 && edit.new_text == 'import os\n'
+	// a module already imported is not offered, from vlib either
+	imported := lab.completion_at('proj/extra.v', 'module main\n\nimport os\nimport net.http\n\nfn helper() {\n\tte\n}\n',
+		'\tte')
+	assert 'import os' !in vlib_imports_offered(imported)
+	assert 'import net.http' !in vlib_imports_offered(imported)
+}
+
+// Editing a module of vlib itself, as when working on V, the vlib modules that
+// already import it are not offered: that would make an import cycle. The
+// buffer is not written: no file of vlib is touched.
+fn test_a_vlib_module_is_not_offered_the_vlib_modules_that_import_it() {
+	mut lab := new_import_lab()
+	defer {
+		lab.close()
+	}
+	vlib := os.join_path(find_v_dir(), 'vlib')
+	path := os.join_path(vlib, 'net', 'http', 'vls_import_cycle_probe.v')
+	assert !os.exists(path)
+	content := 'module http\n\nfn helper() {\n\tte\n}\n'
+	uri := path_to_uri(path)
+	lab.app.open_files[uri] = content
+	items := lab.app.indexed_completions(uri, Position{
+		line: 3
+		char: 3
+	}).items
+	lab.app.open_files.delete(uri)
+	offered := vlib_imports_offered(items)
+	assert 'import os' in offered, offered.str()
+	// net.http itself, and modules that import it directly or through others
+	for path_ in ['net.http', 'net.http.file', 'net.websocket', 'veb', 'net.s3'] {
+		assert 'import ${path_}' !in offered, path_
+	}
+}
+
+// notify_changed tells the app that the file at `path` changed on disk, as the
+// editor's file watcher does.
+fn notify_changed(mut app App, path string) {
+	app.on_did_change_watched_files(Request{
+		params: json2.encode(DidChangeWatchedFilesParams{
+			changes: [FileEvent{
+				uri:        path_to_uri(path)
+				event_type: 2
+			}]
+		})
+	})
+}
+
+// The imports of a module are read once and kept, until the watcher says one
+// of its files changed: a new import there can make a cycle at once.
+fn test_a_changed_import_on_disk_is_seen_by_the_next_completion() {
+	mut lab := new_import_lab()
+	defer {
+		lab.close()
+	}
+	content := 'module textx\n\npub fn shout(s string) string {\n\tst\n\treturn s\n}\n'
+	mut items := lab.completion_at('proj/utils/textx/textx.v', content, '\tst')
+	assert 'import store' in imports_offered(items)
+	store_path := os.join_path(lab.root, 'store', 'store.v')
+	must_write_file(store_path, 'module store\n\nimport utils.textx\n\npub fn open() {\n\ttextx.shout("")\n}\n')
+	notify_changed(mut lab.app, store_path)
+	items = lab.completion_at('proj/utils/textx/textx.v', content, '\tst')
+	assert 'import store' !in imports_offered(items), imports_offered(items).str()
+}
+
+// A watched change of a file in vlib, as when working on V, makes vlib's module
+// list be walked again. Nothing in vlib is written.
+fn test_a_watched_change_in_vlib_forgets_the_vlib_modules() {
+	mut lab := new_import_lab()
+	defer {
+		lab.close()
+	}
+	items := lab.completion_at('proj/main.v', import_lab_files['proj/main.v'], '\tte')
+	assert 'import os' in vlib_imports_offered(items)
+	vlib := os.join_path(find_v_dir(), 'vlib')
+	assert vlib in lab.app.vlib_modules_cache
+	notify_changed(mut lab.app, os.join_path(vlib, 'os', 'os.v'))
+	assert vlib !in lab.app.vlib_modules_cache
+}
+
+// A module of the project named like one of vlib is the one V imports: it is
+// offered once, as the project's.
+fn test_a_project_module_hides_the_vlib_module_of_the_same_path() {
+	mut lab := new_import_lab()
+	defer {
+		lab.close()
+	}
+	must_mkdir_all(os.join_path(lab.root, 'log'))
+	must_write_file(os.join_path(lab.root, 'log', 'log.v'), 'module log\n\npub fn where() string {\n\treturn "project"\n}\n')
+	items := lab.completion_at('proj/main.v', import_lab_files['proj/main.v'], '\tte')
+	assert 'import log' in imports_offered(items)
+	assert 'import log' !in vlib_imports_offered(items)
+}
+
+// Wherever a module comes from, it is not offered when V refuses to build a
+// program that imports it: deprecated since a date that has come, or stopped by
+// `$compile_error` unless a `-d` flag is given. Deprecated with no date, V
+// only warns: it is offered, marked deprecated.
+fn test_modules_v_refuses_are_not_offered_and_deprecated_ones_are_marked() {
+	mut lab := new_import_lab()
+	defer {
+		lab.close()
+	}
+	for rel, content in {
+		'oldlib/oldlib.v':                  "@[deprecated: 'use store instead']\n@[deprecated_after: '2020-01-01']\nmodule oldlib\n\npub fn f() {}\n"
+		'ownonly/ownonly.v':                'module ownonly\n\npub fn f() {}\n'
+		'ownonly/ownonly_notd_ownership.v': "module ownonly\n\n\$compile_error('ownonly needs -d ownership')\n"
+		'fine/fine.v':                      'module fine\n\npub fn f() {}\n'
+		'softold/softold.v':                "@[deprecated: 'use fine instead']\nmodule softold\n\npub fn f() {}\n"
+		'blankdate/blankdate.v':            "@[deprecated: 'use fine instead']\n@[deprecated_after: '']\nmodule blankdate\n\npub fn f() {}\n"
+	} {
+		path := os.join_path(lab.root, rel)
+		must_mkdir_all(os.dir(path))
+		must_write_file(path, content)
+	}
+	items := lab.completion_at('proj/main.v', import_lab_files['proj/main.v'], '\tte')
+	offered := imports_offered(items)
+	assert 'import fine' in offered, offered.str()
+	assert 'import softold' in offered, offered.str()
+	// with no date to refuse it from, V only warns
+	assert 'import blankdate' in offered, offered.str()
+	assert 'import oldlib' !in offered, offered.str()
+	assert 'import ownonly' !in offered, offered.str()
+	for label, tags in {
+		'fine':      []int{}
+		'softold':   [1]
+		'blankdate': [1]
+	} {
+		item := items.filter(it.label == label && import_edits(it).len > 0)[0]
+		assert (item.tags or { []int{} }) == tags, label
+	}
+}
+
+// function_hover_main declares a function, a generic function, a method, a
+// static method, a method of a generic struct and one of an interface, each
+// used in `main`.
+const function_hover_main = "module main
+
+interface Speaker {
+	// speak says something.
+	speak() string
+}
+
+struct User {
+	name string
+}
+
+struct Box[T] {
+	item T
+}
+
+// add sums two numbers.
+fn add(a int, b int) int {
+	return a + b
+}
+
+// first returns the first element.
+fn first[T](xs []T) T {
+	return xs[0]
+}
+
+// greet says hello.
+fn (u User) greet() string {
+	return 'hi \${u.name}'
+}
+
+// new makes a user.
+fn User.new(name string) User {
+	return User{
+		name: name
+	}
+}
+
+// label describes the box.
+fn (b Box[T]) label() string {
+	return 'box'
+}
+
+fn (u User) speak() string {
+	return u.name
+}
+
+fn ones[T](xs []T) []int {
+	return xs.map(|x| 1)
+}
+
+fn sizes[T](xs []T) int {
+	counts := xs.map(1)
+	return counts.len
+}
+
+fn main() {
+	println(add(1, 2))
+	println(first([1, 2]))
+	u := User.new('eva')
+	println(u.greet())
+	b := Box[User]{
+		item: u
+	}
+	println(b.label())
+	s := Speaker(u)
+	println(s.speak())
+	println(ones([1]))
+	println(sizes([1]))
+	println([1, 2].map(it * 2))
+	println([3].map(|x| x + 1))
+	f := first[int]
+	println(f([4]))
+}
+"
+
+// new_function_hover_app opens function_hover_main in a project on disk, with
+// V3 asked first or not.
+fn new_function_hover_app(v3 bool) (&App, string) {
+	mut app := create_test_app()
+	app.v3_line_info_enabled = v3
+	dir := os.join_path(app.temp_dir, 'function_hover')
+	must_mkdir_all(dir)
+	must_write_file(os.join_path(dir, 'v.mod'), 'Module {}\n')
+	path := os.join_path(dir, 'main.v')
+	must_write_file(path, function_hover_main)
+	uri := path_to_uri(path)
+	app.open_files[uri] = function_hover_main
+	app.open_files_versions[uri] = 1
+	app.workspace_roots = [dir]
+	app.reindex_uri(uri)
+	return app, uri
+}
+
+// function_hover_value hovers the first `word` of the line of `content` that
+// reads `text`, through the request handler, and returns what it shows.
+fn function_hover_value(mut app App, uri string, content string, text string, word string) string {
+	lines := content.split_into_lines()
+	line := lines.index(text)
+	assert line >= 0, '`${text}` is not a line'
+	mut col := -1
+	for i := 0; i + word.len <= text.len; i++ {
+		if text[i..i + word.len] == word && (i == 0 || !is_ident_char(text[i - 1]))
+			&& (i + word.len == text.len || !is_ident_char(text[i + word.len])) {
+			col = i
+			break
+		}
+	}
+	assert col >= 0, '`${word}` is not in `${text}`'
+	response := app.operation_at_pos(.hover, Request{
+		id:     9701
+		method: 'textDocument/hover'
+		params: json2.encode(TextDocumentPositionParams{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			position:      Position{
+				line: line
+				char: col + 1
+			}
+		},
+			escape_unicode: true
+		)
+	})
+	if response.result is Hover {
+		return (response.result as Hover).contents.value
+	}
+	if response.result is string {
+		return response.result as string
+	}
+	return response.result.str()
+}
+
+// function_hovers are what a hover shows of each function of
+// function_hover_main, where it is declared and where it is used: its
+// declaration as written, with the documentation written above it.
+const function_hovers = {
+	'```v\nfn add(a int, b int) int\n```\n\nadd sums two numbers.':         [
+		['fn add(a int, b int) int {', 'add'],
+		['\tprintln(add(1, 2))', 'add'],
+	]
+	'```v\nfn first[T](xs []T) T\n```\n\nfirst returns the first element.': [
+		['fn first[T](xs []T) T {', 'first'],
+		['\tprintln(first([1, 2]))', 'first'],
+	]
+	'```v\nfn (u User) greet() string\n```\n\ngreet says hello.':           [
+		['fn (u User) greet() string {', 'greet'],
+		['\tprintln(u.greet())', 'greet'],
+	]
+	'```v\nfn User.new(name string) User\n```\n\nnew makes a user.':        [
+		['fn User.new(name string) User {', 'new'],
+		["\tu := User.new('eva')", 'new'],
+	]
+	'```v\nfn (b Box[T]) label() string\n```\n\nlabel describes the box.':  [
+		['fn (b Box[T]) label() string {', 'label'],
+		['\tprintln(b.label())', 'label'],
+	]
+	'```v\nspeak() string\n```\n\nspeak says something.':                   [
+		['\tspeak() string', 'speak'],
+		['\tprintln(s.speak())', 'speak'],
+	]
+}
+
+fn test_hover_shows_a_function_as_declared_where_it_is_declared_and_used() {
+	// V3 says where each name is declared; without it the index does, below.
+	if !v3_answers_line_info {
+		return
+	}
+	mut app, uri := new_function_hover_app(true)
+	defer {
+		cleanup_rename_app(mut app)
+	}
+	for want, places in function_hovers {
+		for place in places {
+			got := function_hover_value(mut app, uri, function_hover_main, place[0], place[1])
+			assert got == want, '${place}: ${got}'
+		}
+	}
+	// The `map` of every array, in a generic body and outside one: builtin's
+	// declaration of it and the documentation above it, not that of the type
+	// `map`, which the name alone finds.
+	for text in ['\treturn xs.map(|x| 1)', '\tprintln([1, 2].map(it * 2))'] {
+		got := function_hover_value(mut app, uri, function_hover_main, text, 'map')
+		assert got.starts_with('```v\npub fn (a array) map(callback fn (voidptr) voidptr) array\n```\n\nmap creates a new array'), got
+		assert !got.contains('internal representation'), got
+	}
+	// A builtin function.
+	got := function_hover_value(mut app, uri, function_hover_main, '\tprintln(add(1, 2))',
+		'println')
+	assert got.starts_with('```v\npub fn println(s string)\n```\n\nprintln prints'), got
+	// A local of a generic body has the type of its value, where it is declared
+	// and where it is used, and never the statement that declares it.
+	for text in ['\tcounts := xs.map(1)', '\treturn counts.len'] {
+		counts := function_hover_value(mut app, uri, function_hover_main, text, 'counts')
+		assert counts == '```v\ncounts []int\n```', counts
+	}
+	// A local is what V3 says of it, never the statement that declares it: the
+	// parameter of a lambda, which only a V3 that takes it for a declaration
+	// describes there, and its use.
+	lambda := function_hover_value(mut app, uri, function_hover_main, '\tprintln([3].map(|x| x + 1))',
+		'x')
+	assert lambda in ['```v\nx int\n```', 'null'], lambda
+	used := function_hover_value(mut app, uri, function_hover_main, '\tprintln([3].map(|x| x + 1))',
+		'x + 1')
+	assert used == '```v\nx int\n```', used
+	instance := function_hover_value(mut app, uri, function_hover_main, '\tprintln(f([4]))',
+		'f')
+	assert instance.starts_with('```v\nf fn ('), instance
+}
+
+fn test_hover_shows_a_function_as_declared_without_v3() {
+	// Without a compiler that answers, the index says where a function is
+	// declared, and the hover shows it as V3 lets it show.
+	mut app, uri := new_function_hover_app(false)
+	defer {
+		cleanup_test_app(app)
+	}
+	app.line_info_mode = .missing
+	for want, places in function_hovers {
+		if !want.contains('fn add(') && !want.contains('fn first[') {
+			continue
+		}
+		for place in places {
+			got := function_hover_value(mut app, uri, function_hover_main, place[0], place[1])
+			assert got == want, '${place}: ${got}'
+		}
+	}
+}
+
+fn test_hover_documents_a_member_with_its_own_declaration_only() {
+	// VLS types neither the parameter of a lambda in a generic body nor what a
+	// generic function's parameter holds: the documentation found for the name
+	// alone would be another's, the type `map` for the method `map` of an
+	// array, or the `to_upper` of a rune for that of a string.
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	content := "module main\n\nstruct User {\n\tname string\n}\n\nfn shouted[T](xs []T) []string {\n\treturn xs.map(|x| x.name.to_upper())\n}\n\nfn main() {\n\tprintln(shouted([User{ name: 'a' }]))\n}\n"
+	path := os.join_path(app.temp_dir, 'member_own_docs', 'main.v')
+	must_mkdir_all(os.dir(path))
+	must_write_file(path, content)
+	uri := path_to_uri(path)
+	app.open_files[uri] = content
+	app.reindex_uri(uri)
+	line := content.split_into_lines()[7]
+	for word in ['map', 'to_upper'] {
+		col := line.index('.${word}(') or { -1 } + 2
+		doc := app.hover_doc_comment(uri, '8:hv^${col}')
+		assert !doc.contains('internal representation'), '${word}: ${doc}'
+		assert !doc.contains('uppercase mode'), '${word}: ${doc}'
+	}
+	// Of an array VLS types, the method vlib/builtin declares for every array,
+	// not the one of a string, of a map or of an array of strings.
+	arrays := 'module main\n\nfn main() {\n\tmut nums := [3, 1]\n\tnums.sort()\n\tprintln(nums.contains(1))\n\tprintln(nums.clone())\n}\n'
+	arrays_path := os.join_path(app.temp_dir, 'member_own_docs_arrays', 'main.v')
+	must_mkdir_all(os.dir(arrays_path))
+	must_write_file(arrays_path, arrays)
+	arrays_uri := path_to_uri(arrays_path)
+	app.open_files[arrays_uri] = arrays
+	app.reindex_uri(arrays_uri)
+	for n, want in {
+		5: 'sort sorts the array in place.'
+		6: 'contains determines whether an array includes a certain value'
+		7: 'clone returns an independent copy of a given array.'
+	} {
+		text := arrays.split_into_lines()[n - 1]
+		col := text.index('nums.') or { -1 } + 6
+		doc := app.hover_doc_comment(arrays_uri, '${n}:hv^${col}')
+		assert doc.starts_with(want), '${n}: ${doc}'
+	}
+}
+
+fn test_source_declaration_at_ends_a_function_without_a_body_with_its_line() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	// As builtin declares the methods of arrays: the next declaration, and the
+	// body of a function further on, are not part of it.
+	uri := 'file:///tmp/source_declaration_bodyless.v'
+	content := 'module builtin\n\npub fn (a array) map(callback fn (voidptr) voidptr) array\n\n// filter keeps what passes.\npub fn (a array) filter(predicate fn (voidptr) bool) array\n\nfn C.long(\n\ta int,\n\tb int) int\n\nfn with_body() {\n}\n'
+	app.open_files[uri] = content
+	for line, want in {
+		2: 'pub fn (a array) map(callback fn (voidptr) voidptr) array'
+		5: 'pub fn (a array) filter(predicate fn (voidptr) bool) array'
+		7: 'fn C.long(\na int,\nb int) int'
+	} {
+		got := app.source_declaration_at(Location{
+			uri:   uri
+			range: LSPRange{
+				start: Position{
+					line: line
+				}
+			}
+		})
+		assert got == want, '${line}: ${got}'
+	}
+}
+
+fn test_a_generic_function_is_found_by_its_name() {
+	// The index names a generic function with its type parameters, as the
+	// source declares it; a use names it without them.
+	assert extract_simple_fn_name('first[T]') == 'first'
+	assert extract_simple_fn_name('(b Base) twice[T]') == 'twice'
+	assert extract_simple_fn_name('(b Box[T]) label') == 'label'
+	content := 'module main\n\n// first returns the first element.\nfn first[T](xs []T) T {\n\treturn xs[0]\n}\n'
+	symbols := parse_document_symbols(content)
+	assert symbols.len == 1 && extract_simple_fn_name(symbols[0].name) == 'first'
+}
+
+fn test_find_declaration_line_finds_generic_declarations() {
+	lines := ['module main', '', 'struct Box[T] {', '\titem T', '}', '', 'fn first[T](xs []T) T {',
+		'\treturn xs[0]', '}']
+	assert find_declaration_line(lines, 'Box') == 2
+	assert find_declaration_line(lines, 'first') == 6
+}
+
+fn test_hover_of_a_local_holding_a_function_is_the_same_where_it_is_declared() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	content := "module main\n\nstruct User {\n\tname string\n}\n\nfn (u User) greet() string {\n\treturn u.name\n}\n\nfn lengths[T](xs []T) []int {\n\tcount := fn (x T) int {\n\t\treturn 1\n\t}\n\treturn xs.map(count)\n}\n\nfn main() {\n\tdouble := fn (x int) int {\n\t\treturn x * 2\n\t}\n\tprintln(double(4))\n\tu := User{\n\t\tname: 'eva'\n\t}\n\tg := u.greet\n\tprintln(g())\n\tprintln(lengths([1]))\n}\n"
+	path := os.join_path(app.temp_dir, 'local_function_hover', 'main.v')
+	must_mkdir_all(os.dir(path))
+	must_write_file(path, content)
+	uri := path_to_uri(path)
+	app.open_files[uri] = content
+	app.reindex_uri(uri)
+	lines := content.split_into_lines()
+	// A function literal writes its type down; a method named without a call is
+	// a function value.
+	for text, want in {
+		'\tdouble := fn (x int) int {': 'double fn (x int) int'
+		'\tprintln(double(4))':         'double fn (x int) int'
+		'\tcount := fn (x T) int {':    'count fn (x T) int'
+		'\treturn xs.map(count)':       'count fn (x T) int'
+		'\tg := u.greet':               'g fn () string'
+		'\tprintln(g())':               'g fn () string'
+	} {
+		line := lines.index(text)
+		assert line >= 0, text
+		name := want.all_before(' ')
+		mut col := text.index('(${name}') or { text.index(' ${name}') or { -1 } }
+		if col < 0 {
+			col = text.index('\t${name}') or { -1 }
+		}
+		assert col >= 0, text
+		hover := app.local_binding_hover(uri, Position{
+			line: line
+			char: col + 2
+		}) or { Hover{} }
+		assert hover.contents.value == '```v\n${want}\n```', '${text}: ${hover.contents.value}'
+	}
+}
+
+// untyped_local_main declares a local that nothing gives a type: the value of a
+// call of a function that does not exist yet, as while it is being written.
+// Builtin's `DenseArray` has a method named `value`.
+const untyped_local_main = 'module main\n\nfn main() {\n\tvalue := missing_function(1)\n\tprintln(value)\n}\n'
+
+fn test_hover_of_a_local_is_never_its_statement_or_another_documentation() {
+	if !v3_answers_line_info {
+		return
+	}
+	mut app := create_test_app()
+	app.v3_line_info_enabled = true
+	defer {
+		cleanup_rename_app(mut app)
+	}
+	dir := os.join_path(app.temp_dir, 'untyped_local')
+	must_mkdir_all(dir)
+	must_write_file(os.join_path(dir, 'v.mod'), 'Module {}\n')
+	path := os.join_path(dir, 'main.v')
+	must_write_file(path, untyped_local_main)
+	uri := path_to_uri(path)
+	app.open_files[uri] = untyped_local_main
+	app.workspace_roots = [dir]
+	app.reindex_uri(uri)
+	for text in ['\tvalue := missing_function(1)', '\tprintln(value)'] {
+		got := function_hover_value(mut app, uri, untyped_local_main, text, 'value')
+		assert got == 'null', '${text}: ${got}'
+	}
+}
+
+fn test_hover_doc_comment_of_a_local_is_none() {
+	// Without a compiler: the name of a local, which a method of builtin shares.
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	path := os.join_path(app.temp_dir, 'local_doc', 'main.v')
+	must_mkdir_all(os.dir(path))
+	must_write_file(path, untyped_local_main)
+	uri := path_to_uri(path)
+	app.open_files[uri] = untyped_local_main
+	app.reindex_uri(uri)
+	for line, col in {
+		4: 2
+		5: 10
+	} {
+		doc := app.hover_doc_comment(uri, '${line}:hv^${col}')
+		assert doc == '', '${line}: ${doc}'
+	}
+}
+
+fn test_a_name_used_alone_is_never_a_method() {
+	// A method is named after a value and a dot: the name alone is a function, a
+	// type, a const or a local.
+	lines := ['module builtin', '', '// for cgen', 'fn (d &DenseArray) value(i int) voidptr {',
+		'}', '', '// value gives one.', 'pub fn value() int {', '\treturn 1', '}']
+	assert find_bare_declaration_line(lines, 'value') == 7
+	assert find_bare_declaration_line(lines[..5], 'value') == -1
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	uri := 'file:///tmp/bare_names.v'
+	app.open_files[uri] = 'module main\n\nstruct User {}\n\n// greet says hello.\nfn (u User) greet() {}\n\n// wave waves.\nfn wave() {}\n'
+	app.reindex_uri(uri)
+	entry := app.symbol_index[uri] or { panic('not indexed') }
+	assert 'greet' !in entry.docs
+	assert entry.docs['wave'] or { '' } == 'wave waves.'
+}
+
+// sorter_main passes a local `a` to a method of a struct named `sort`, and has
+// an array sorted with the `a` and `b` its `sort` declares.
+const sorter_main = 'module main\n\nstruct Sorter {}\n\nfn (s Sorter) sort(value int) int {\n\treturn value\n}\n\nfn main() {\n\ta := 7\n\ts := Sorter{}\n\tprintln(s.sort(a))\n\tnums := [3, 1, 2]\n\tmut sorted := nums.clone()\n\tsorted.sort(a < b)\n\tprintln(sorted)\n\tprintln(a)\n}\n'
+
+fn test_rename_of_a_local_passed_to_a_method_named_like_an_array_one() {
+	// V3 says where each occurrence is declared: the argument of a user's
+	// `s.sort(a)` is the local, and the `a` of an array's `sort(a < b)` is not.
+	if !v3_answers_line_info {
+		return
+	}
+	edits := rename_edits_in({
+		'main.v': sorter_main
+	}, 'main.v:10:2')
+	assert edits == ['main.v:10:2', 'main.v:12:17', 'main.v:17:10'], edits.str()
 }

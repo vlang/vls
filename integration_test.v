@@ -115,7 +115,9 @@ fn test_integration_stdio_initialize_completion_and_hover() {
 	}
 	os.fd_close(transport.write_fd)
 	transport.write_fd = -1
-	assert os.fd_dup2(transport.read_fd, 0) >= 0
+	// Keep this outside `assert`: `-prod` removes assert statements whole, so a dup2
+	// hidden in one never runs and the read below waits on the real stdin forever.
+	os.fd_dup2(transport.read_fd, 0)
 
 	mut capture := os.stdio_capture() or {
 		assert false, 'failed to capture stdio test output: ${err}'
@@ -165,20 +167,20 @@ fn test_integration_stdio_initialize_completion_and_hover() {
 fn test_integration_initialize_capabilities() {
 	// Simulate what the server returns for initialize
 	response := Response{
-		id: 0
+		id:     0
 		result: Capabilities{
 			capabilities: Capability{
-				text_document_sync: TextDocumentSyncOptions{
+				text_document_sync:      TextDocumentSyncOptions{
 					open_close: true
-					change: 1
+					change:     1
 				}
-				completion_provider: CompletionProvider{
+				completion_provider:     CompletionProvider{
 					trigger_characters: ['.']
 				}
 				signature_help_provider: SignatureHelpOptions{
 					trigger_characters: ['(', ',']
 				}
-				definition_provider: true
+				definition_provider:     true
 			}
 		}
 	}
@@ -199,7 +201,7 @@ fn test_integration_initialize_capabilities() {
 fn test_integration_initialize_response_structure() {
 	// Verify response has proper JSON-RPC structure
 	response := Response{
-		id: 0
+		id:     0
 		result: Capabilities{
 			capabilities: Capability{
 				definition_provider: true
@@ -217,7 +219,7 @@ fn test_integration_initialize_response_structure() {
 
 fn test_integration_initialize_does_not_advertise_client_snippet_support() {
 	response := Response{
-		id: 0
+		id:     0
 		result: Capabilities{
 			capabilities: Capability{
 				completion_provider: CompletionProvider{
@@ -233,14 +235,14 @@ fn test_integration_initialize_does_not_advertise_client_snippet_support() {
 
 fn test_integration_initialize_workspace_capabilities() {
 	response := Response{
-		id: 0
+		id:     0
 		result: Capabilities{
 			capabilities: Capability{
 				execute_command_provider: ExecuteCommandOptions{
 					commands: ['vls.runFile', 'vls.runTests']
 				}
-				workspace: WorkspaceCapability{
-					file_operations: WorkspaceFileOperations{
+				workspace:                WorkspaceCapability{
+					file_operations:   WorkspaceFileOperations{
 						will_create: FileOperationRegistrationOptions{
 							filters: [
 								FileOperationFilter{
@@ -270,7 +272,7 @@ fn test_integration_initialize_workspace_capabilities() {
 						}
 					}
 					workspace_folders: WorkspaceFoldersServerCapability{
-						supported: true
+						supported:            true
 						change_notifications: true
 					}
 				}
@@ -301,10 +303,10 @@ fn test_integration_document_lifecycle() {
 
 	// 1. Open document
 	open_request := Request{
-		id: 1
-		method: 'textDocument/didOpen'
+		id:      1
+		method:  'textDocument/didOpen'
 		jsonrpc: '2.0'
-		params: json2.encode(Params{
+		params:  json2.encode(Params{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
@@ -320,11 +322,11 @@ fn test_integration_document_lifecycle() {
 	// 2. Change document
 	new_content := "module main\n\nfn main() {\n\tprintln('world')\n}\n"
 	change_request := Request{
-		id: 2
-		method: 'textDocument/didChange'
+		id:      2
+		method:  'textDocument/didChange'
 		jsonrpc: '2.0'
-		params: json2.encode(Params{
-			text_document: TextDocumentIdentifier{
+		params:  json2.encode(Params{
+			text_document:   TextDocumentIdentifier{
 				uri: uri
 			}
 			content_changes: [ContentChange{
@@ -539,7 +541,7 @@ fn test_integration_diagnostics_syntax_error() {
 	// Trigger change to get diagnostics
 	change_request := Request{
 		params: json2.encode(Params{
-			text_document: TextDocumentIdentifier{
+			text_document:   TextDocumentIdentifier{
 				uri: uri
 			}
 			content_changes: [ContentChange{
@@ -585,7 +587,7 @@ fn test_integration_diagnostics_valid_code() {
 
 	change_request := Request{
 		params: json2.encode(Params{
-			text_document: TextDocumentIdentifier{
+			text_document:   TextDocumentIdentifier{
 				uri: uri
 			}
 			content_changes: [ContentChange{
@@ -639,17 +641,17 @@ fn test_integration_diagnostics_deduplication() {
 	errors := [
 		JsonError{
 			line_nr: 5
-			col: 10
+			col:     10
 			message: 'first error'
 		},
 		JsonError{
 			line_nr: 5
-			col: 10
+			col:     10
 			message: 'duplicate error'
 		}, // Same position
 		JsonError{
 			line_nr: 6
-			col: 1
+			col:     1
 			message: 'different position'
 		},
 	]
@@ -691,7 +693,7 @@ fn test_integration_diagnostics_empty_file() {
 	// Empty content should be processed and return diagnostics for the empty file
 	result := app.on_did_change(Request{
 		params: json2.encode(Params{
-			text_document: TextDocumentIdentifier{
+			text_document:   TextDocumentIdentifier{
 				uri: uri
 			}
 			content_changes: [ContentChange{
@@ -736,14 +738,14 @@ fn test_integration_completion_request() {
 
 	// Request completion at the position after "os."
 	request := Request{
-		id: 1
-		method: 'textDocument/completion'
+		id:      1
+		method:  'textDocument/completion'
 		jsonrpc: '2.0'
-		params: json2.encode(Params{
+		params:  json2.encode(Params{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-			position: Position{
+			position:      Position{
 				line: 3
 				char: 4
 			} // After "os."
@@ -774,12 +776,12 @@ fn test_integration_completion_request_id_preserved() {
 	// Test with various IDs
 	for id in [1, 42, 100, 999] {
 		request := Request{
-			id: id
+			id:     id
 			params: json2.encode(Params{
 				text_document: TextDocumentIdentifier{
 					uri: uri
 				}
-				position: Position{
+				position:      Position{
 					line: 2
 					char: 0
 				}
@@ -807,12 +809,12 @@ fn test_integration_completion_at_function_call() {
 	app.open_files[uri] = content
 
 	request := Request{
-		id: 1
+		id:     1
 		params: json2.encode(Params{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-			position: Position{
+			position:      Position{
 				line: 3
 				char: 9
 			}
@@ -851,14 +853,14 @@ fn test_integration_definition_request() {
 
 	// Request definition at the call site of helper()
 	request := Request{
-		id: 2
-		method: 'textDocument/definition'
+		id:      2
+		method:  'textDocument/definition'
 		jsonrpc: '2.0'
-		params: json2.encode(Params{
+		params:  json2.encode(Params{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-			position: Position{
+			position:      Position{
 				line: 5
 				char: 2
 			} // At "helper()"
@@ -920,12 +922,12 @@ fn test_integration_definition_multifile() {
 
 	// Request definition from main file
 	request := Request{
-		id: 3
+		id:     3
 		params: json2.encode(Params{
 			text_document: TextDocumentIdentifier{
 				uri: main_uri
 			}
-			position: Position{
+			position:      Position{
 				line: 3
 				char: 2
 			}
@@ -973,13 +975,13 @@ fn test_integration_cross_module_features_use_unsaved_project_overlay() {
 	app.text = open_content
 
 	definition := app.operation_at_pos(.definition, Request{
-		id: 31
+		id:     31
 		method: 'textDocument/definition'
 		params: json2.encode(TextDocumentPositionParams{
 			text_document: TextDocumentIdentifier{
 				uri: main_uri
 			}
-			position: Position{
+			position:      Position{
 				line: 5
 				char: 20
 			}
@@ -993,13 +995,13 @@ fn test_integration_cross_module_features_use_unsaved_project_overlay() {
 	assert definition_location.range.start.line == 2
 
 	hover := app.operation_at_pos(.hover, Request{
-		id: 32
+		id:     32
 		method: 'textDocument/hover'
 		params: json2.encode(TextDocumentPositionParams{
 			text_document: TextDocumentIdentifier{
 				uri: main_uri
 			}
-			position: Position{
+			position:      Position{
 				line: 5
 				char: 20
 			}
@@ -1011,13 +1013,13 @@ fn test_integration_cross_module_features_use_unsaved_project_overlay() {
 	assert (hover.result as Hover).contents.value.contains('answer')
 
 	signature := app.operation_at_pos(.signature_help, Request{
-		id: 33
+		id:     33
 		method: 'textDocument/signatureHelp'
 		params: json2.encode(TextDocumentPositionParams{
 			text_document: TextDocumentIdentifier{
 				uri: main_uri
 			}
-			position: Position{
+			position:      Position{
 				line: 5
 				char: 25
 			}
@@ -1030,13 +1032,13 @@ fn test_integration_cross_module_features_use_unsaved_project_overlay() {
 	assert signature_help.signatures.any(it.label.contains('answer'))
 
 	completion := app.operation_at_pos(.completion, Request{
-		id: 34
+		id:     34
 		method: 'textDocument/completion'
 		params: json2.encode(TextDocumentPositionParams{
 			text_document: TextDocumentIdentifier{
 				uri: main_uri
 			}
-			position: Position{
+			position:      Position{
 				line: 5
 				char: 18
 			}
@@ -1070,17 +1072,17 @@ fn (a VlangVCallAnchor) decl_path(root string) string {
 // vlib/v, `builder.compile` before that.
 const vlang_v_module_call_anchors = [
 	VlangVCallAnchor{
-		call: 'driver.run('
+		call:      'driver.run('
 		qualifier: 'driver.'
-		name: 'run'
-		decl_rel: 'vlib/v/driver/driver.v'
+		name:      'run'
+		decl_rel:  'vlib/v/driver/driver.v'
 		decl_text: 'fn run('
 	},
 	VlangVCallAnchor{
-		call: "builder.compile('build'"
+		call:      "builder.compile('build'"
 		qualifier: 'builder.'
-		name: 'compile'
-		decl_rel: 'vlib/v/builder/compile.v'
+		name:      'compile'
+		decl_rel:  'vlib/v/builder/compile.v'
 		decl_text: 'fn compile('
 	},
 ]
@@ -1088,17 +1090,17 @@ const vlang_v_module_call_anchors = [
 // Method calls on a local variable, for receiver-type inference.
 const vlang_v_method_call_anchors = [
 	VlangVCallAnchor{
-		call: 'process.set_args('
+		call:      'process.set_args('
 		qualifier: 'process.'
-		name: 'set_args'
-		decl_rel: 'vlib/os/process.v'
+		name:      'set_args'
+		decl_rel:  'vlib/os/process.v'
 		decl_text: 'fn (mut p Process) set_args('
 	},
 	VlangVCallAnchor{
-		call: "timers.show('v start'"
+		call:      "timers.show('v start'"
 		qualifier: 'timers.'
-		name: 'show'
-		decl_rel: 'vlib/v/util/timers.v'
+		name:      'show'
+		decl_rel:  'vlib/v/util/timers.v'
 		decl_text: 'fn (mut t Timers) show('
 	},
 ]
@@ -1171,12 +1173,12 @@ fn test_integration_vlang_v_cross_module_features_from_env() {
 
 	for i, method in [Method.definition, .declaration, .type_definition, .implementation] {
 		response := app.operation_at_pos(method, Request{
-			id: 40 + i
+			id:     40 + i
 			params: json2.encode(TextDocumentPositionParams{
 				text_document: TextDocumentIdentifier{
 					uri: main_uri
 				}
-				position: Position{
+				position:      Position{
 					line: call_line
 					char: compile_col + 2
 				}
@@ -1191,12 +1193,12 @@ fn test_integration_vlang_v_cross_module_features_from_env() {
 	}
 
 	hover := app.operation_at_pos(.hover, Request{
-		id: 44
+		id:     44
 		params: json2.encode(TextDocumentPositionParams{
 			text_document: TextDocumentIdentifier{
 				uri: main_uri
 			}
-			position: Position{
+			position:      Position{
 				line: call_line
 				char: compile_col + 2
 			}
@@ -1211,12 +1213,12 @@ fn test_integration_vlang_v_cross_module_features_from_env() {
 	open_paren_col := lines[call_line].index(call_text) or { -1 }
 	assert open_paren_col >= 0
 	signature := app.operation_at_pos(.signature_help, Request{
-		id: 45
+		id:     45
 		params: json2.encode(TextDocumentPositionParams{
 			text_document: TextDocumentIdentifier{
 				uri: main_uri
 			}
-			position: Position{
+			position:      Position{
 				line: call_line
 				char: open_paren_col + call_text.len
 			}
@@ -1235,12 +1237,12 @@ fn test_integration_vlang_v_cross_module_features_from_env() {
 	app.open_files[main_uri] = completion_content
 	app.text = completion_content
 	completion := app.operation_at_pos(.completion, Request{
-		id: 46
+		id:     46
 		params: json2.encode(TextDocumentPositionParams{
 			text_document: TextDocumentIdentifier{
 				uri: main_uri
 			}
-			position: Position{
+			position:      Position{
 				line: call_line
 				char: dot_col + anchor.qualifier.len
 			}
@@ -1288,13 +1290,13 @@ fn test_integration_vlang_v_indexed_completion_and_receiver_definition_from_env(
 	app.workspace_roots = [root]
 
 	module_completion := app.operation_at_pos(.completion, Request{
-		id: 47
+		id:     47
 		method: 'textDocument/completion'
 		params: json2.encode(TextDocumentPositionParams{
 			text_document: TextDocumentIdentifier{
 				uri: main_uri
 			}
-			position: Position{
+			position:      Position{
 				line: compile_line
 				char: compile_dot_col
 			}
@@ -1306,13 +1308,13 @@ fn test_integration_vlang_v_indexed_completion_and_receiver_definition_from_env(
 	assert (module_completion.result as CompletionList).items.any(it.label == module_anchor.name)
 
 	receiver_completion := app.operation_at_pos(.completion, Request{
-		id: 48
+		id:     48
 		method: 'textDocument/completion'
 		params: json2.encode(TextDocumentPositionParams{
 			text_document: TextDocumentIdentifier{
 				uri: main_uri
 			}
-			position: Position{
+			position:      Position{
 				line: timer_line
 				char: timer_dot_col
 			}
@@ -1324,13 +1326,13 @@ fn test_integration_vlang_v_indexed_completion_and_receiver_definition_from_env(
 	assert (receiver_completion.result as CompletionList).items.any(it.label == method_anchor.name)
 
 	definition := app.operation_at_pos(.definition, Request{
-		id: 49
+		id:     49
 		method: 'textDocument/definition'
 		params: json2.encode(TextDocumentPositionParams{
 			text_document: TextDocumentIdentifier{
 				uri: main_uri
 			}
-			position: Position{
+			position:      Position{
 				line: timer_line
 				char: show_col + 2
 			}
@@ -1374,14 +1376,14 @@ fn test_integration_signature_help_request() {
 
 	// Request signature help after opening paren
 	request := Request{
-		id: 3
-		method: 'textDocument/signatureHelp'
+		id:      3
+		method:  'textDocument/signatureHelp'
 		jsonrpc: '2.0'
-		params: json2.encode(Params{
+		params:  json2.encode(Params{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-			position: Position{
+			position:      Position{
 				line: 5
 				char: 7
 			} // After "greet("
@@ -1415,12 +1417,12 @@ fn test_integration_signature_help_with_params() {
 
 	// At second parameter position
 	request := Request{
-		id: 4
+		id:     4
 		params: json2.encode(Params{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-			position: Position{
+			position:      Position{
 				line: 5
 				char: 7
 			}
@@ -1584,7 +1586,7 @@ fn test_integration_json_error_with_special_chars() {
 
 fn test_integration_response_encoding() {
 	response := Response{
-		id: 42
+		id:     42
 		result: 'null'
 	}
 
@@ -1600,20 +1602,20 @@ fn test_integration_notification_encoding() {
 	notification := Notification{
 		method: 'textDocument/publishDiagnostics'
 		params: PublishDiagnosticsParams{
-			uri: 'file:///test.v'
+			uri:         'file:///test.v'
 			diagnostics: [
 				LSPDiagnostic{
-					range: LSPRange{
+					range:    LSPRange{
 						start: Position{
 							line: 0
 							char: 0
 						}
-						end: Position{
+						end:   Position{
 							line: 0
 							char: 5
 						}
 					}
-					message: 'test error'
+					message:  'test error'
 					severity: 1
 				},
 			]
@@ -1663,19 +1665,19 @@ fn test_integration_begin_progress_with_client_support_emits_create_and_begin() 
 fn test_integration_completion_response_encoding() {
 	details := [
 		Detail{
-			kind: 6
-			label: 'println'
+			kind:   6
+			label:  'println'
 			detail: 'fn println(s string)'
 		},
 		Detail{
-			kind: 6
-			label: 'print'
+			kind:   6
+			label:  'print'
 			detail: 'fn print(s string)'
 		},
 	]
 
 	response := Response{
-		id: 1
+		id:     1
 		result: details
 	}
 
@@ -1686,15 +1688,15 @@ fn test_integration_completion_response_encoding() {
 
 fn test_integration_location_response_encoding() {
 	response := Response{
-		id: 1
+		id:     1
 		result: Location{
-			uri: 'file:///test/main.v'
+			uri:   'file:///test/main.v'
 			range: LSPRange{
 				start: Position{
 					line: 10
 					char: 5
 				}
-				end: Position{
+				end:   Position{
 					line: 10
 					char: 15
 				}
@@ -1709,11 +1711,11 @@ fn test_integration_location_response_encoding() {
 
 fn test_integration_signature_help_response_encoding() {
 	response := Response{
-		id: 1
+		id:     1
 		result: SignatureHelp{
-			signatures: [
+			signatures:       [
 				SignatureInformation{
-					label: 'fn test(a int, b string)'
+					label:      'fn test(a int, b string)'
 					parameters: [
 						ParameterInformation{
 							label: 'a int'
@@ -1752,13 +1754,13 @@ fn test_integration_request_id_preserved() {
 	// Test with different request IDs
 	for id in [1, 42, 999, 0] {
 		request := Request{
-			id: id
+			id:     id
 			method: 'textDocument/completion'
 			params: json2.encode(Params{
 				text_document: TextDocumentIdentifier{
 					uri: uri
 				}
-				position: Position{
+				position:      Position{
 					line: 2
 					char: 0
 				}
@@ -1871,17 +1873,17 @@ fn test_integration_full_lifecycle() {
 	// 2. Simulate initialize (verify capabilities)
 	caps := Capabilities{
 		capabilities: Capability{
-			text_document_sync: TextDocumentSyncOptions{
+			text_document_sync:      TextDocumentSyncOptions{
 				open_close: true
-				change: 1
+				change:     1
 			}
-			completion_provider: CompletionProvider{
+			completion_provider:     CompletionProvider{
 				trigger_characters: ['.']
 			}
 			signature_help_provider: SignatureHelpOptions{
 				trigger_characters: ['(', ',']
 			}
-			definition_provider: true
+			definition_provider:     true
 		}
 	}
 	assert caps.capabilities.definition_provider == true
@@ -1902,7 +1904,7 @@ fn test_integration_full_lifecycle() {
 	modified_content := 'module main\n\nfn helper() {}\n\nfn main() {\n\thelper()\n}\n'
 	app.on_did_change(Request{
 		params: json2.encode(Params{
-			text_document: TextDocumentIdentifier{
+			text_document:   TextDocumentIdentifier{
 				uri: uri
 			}
 			content_changes: [ContentChange{
@@ -1916,12 +1918,12 @@ fn test_integration_full_lifecycle() {
 
 	// 5. Request completion
 	comp_response := app.operation_at_pos(.completion, Request{
-		id: 1
+		id:     1
 		params: json2.encode(Params{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-			position: Position{
+			position:      Position{
 				line: 5
 				char: 2
 			}
@@ -1933,12 +1935,12 @@ fn test_integration_full_lifecycle() {
 
 	// 6. Request definition
 	def_response := app.operation_at_pos(.definition, Request{
-		id: 2
+		id:     2
 		params: json2.encode(Params{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-			position: Position{
+			position:      Position{
 				line: 5
 				char: 2
 			}
@@ -1955,7 +1957,7 @@ fn test_integration_full_lifecycle() {
 fn test_integration_shutdown_response() {
 	// Verify shutdown response structure
 	shutdown_resp := Response{
-		id: 1
+		id:     1
 		result: 'null'
 	}
 
@@ -2429,12 +2431,12 @@ fn test_integration_completion_includes_sibling_pub_fn() {
 
 	// Request completion at `helper` on line 3, col 1 (not after '.')
 	response := app.operation_at_pos(.completion, Request{
-		id: 1
+		id:     1
 		params: json2.encode(Params{
 			text_document: TextDocumentIdentifier{
 				uri: main_uri
 			}
-			position: Position{
+			position:      Position{
 				line: 3
 				char: 1
 			}
@@ -2475,12 +2477,12 @@ fn test_integration_completion_includes_private_sibling_fn() {
 	app.text = main_content
 
 	response := app.operation_at_pos(.completion, Request{
-		id: 1
+		id:     1
 		params: json2.encode(Params{
 			text_document: TextDocumentIdentifier{
 				uri: main_uri
 			}
-			position: Position{
+			position:      Position{
 				line: 3
 				char: 2
 			}
@@ -2514,12 +2516,12 @@ fn test_integration_completion_includes_current_file_fns() {
 	app.text = content
 
 	response := app.operation_at_pos(.completion, Request{
-		id: 1
+		id:     1
 		params: json2.encode(Params{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-			position: Position{
+			position:      Position{
 				line: 5 // inside fn main, after `he`
 				char: 2
 			}
@@ -2614,13 +2616,13 @@ fn test_integration_prepare_rename_returns_symbol_range() {
 	app.open_files[uri] = content
 
 	response := app.handle_prepare_rename(Request{
-		id: 301
+		id:     301
 		method: 'textDocument/prepareRename'
 		params: json2.encode(TextDocumentPositionParams{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
-			position: Position{
+			position:      Position{
 				line: 4
 				char: 12
 			}
@@ -2649,7 +2651,7 @@ fn test_integration_workspace_symbol_query_matches() {
 	app.open_files[uri] = content
 
 	response := app.handle_workspace_symbol(Request{
-		id: 302
+		id:     302
 		method: 'workspace/symbol'
 		params: json2.encode(WorkspaceSymbolParams{
 			query: 'name'
@@ -2682,7 +2684,7 @@ fn test_integration_workspace_symbol_indexes_loose_module_sibling() {
 	assert find_project_root(project_dir) == ''
 
 	response := app.handle_workspace_symbol(Request{
-		id: 303
+		id:     303
 		method: 'workspace/symbol'
 		params: json2.encode(WorkspaceSymbolParams{
 			query: 'unopened_loose'
@@ -2714,13 +2716,13 @@ fn test_integration_alias_navigation_methods_preserve_id() {
 	mut request_id := 410
 	for m in methods {
 		resp := app.operation_at_pos(m, Request{
-			id: request_id
+			id:     request_id
 			method: m.str()
 			params: json2.encode(TextDocumentPositionParams{
 				text_document: TextDocumentIdentifier{
 					uri: uri
 				}
-				position: Position{
+				position:      Position{
 					line: 5
 					char: 2
 				}
@@ -2735,17 +2737,17 @@ fn test_integration_alias_navigation_methods_preserve_id() {
 
 fn test_integration_capability_flags_for_new_features() {
 	caps := Capability{
-		text_document_sync: TextDocumentSyncOptions{
+		text_document_sync:        TextDocumentSyncOptions{
 			open_close: true
-			change: 2
-			save: SaveOptions{
+			change:     2
+			save:       SaveOptions{
 				include_text: true
 			}
 		}
-		declaration_provider: true
-		type_definition_provider: true
-		implementation_provider: true
-		rename_provider: RenameOptions{
+		declaration_provider:      true
+		type_definition_provider:  true
+		implementation_provider:   true
+		rename_provider:           RenameOptions{
 			prepare_provider: true
 		}
 		workspace_symbol_provider: true
@@ -2787,20 +2789,35 @@ fn integration_run_frames(mut app App, project_dir string, name string, payloads
 	return app.captured_output
 }
 
+// integration_test_json_string escapes a value for embedding inside a JSON string
+// literal. A native Windows path contains backslashes, and a raw one makes the
+// whole payload undecodable: `\U` is an unknown escape sequence, so
+// json2.decode fails and the server rejects `initialize` with InvalidParams.
+// Real clients percent- or backslash-escape these, so the test must too.
+fn integration_test_json_string(value string) string {
+	encoded := json2.encode(value)
+	return encoded[1..encoded.len - 1]
+}
+
 fn test_integration_sublime_text_lsp_handshake() {
 	mut app, project_dir := create_integration_test_env()
 	defer {
 		cleanup_integration_test_env(app, project_dir)
 	}
 	root_uri := path_to_uri(project_dir)
-	json_root_path := project_dir.replace('\\', '\\\\')
-	initialize := '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":42,"clientInfo":{"name":"Sublime Text LSP","version":"2.13.0"},"locale":"en","rootUri":"${root_uri}","rootPath":"${json_root_path}","workspaceFolders":[{"uri":"${root_uri}","name":"test_project"}],"capabilities":{"general":{"positionEncodings":["utf-16"]},"workspace":{"workspaceFolders":true,"configuration":true,"didChangeWatchedFiles":{"dynamicRegistration":true,"relativePatternSupport":true}},"textDocument":{"synchronization":{"dynamicRegistration":true,"willSave":true,"willSaveWaitUntil":true,"didSave":true},"completion":{"dynamicRegistration":true,"completionItem":{"snippetSupport":true,"documentationFormat":["markdown","plaintext"]}},"hover":{"dynamicRegistration":true,"contentFormat":["markdown","plaintext"]},"publishDiagnostics":{"versionSupport":true}},"window":{"workDoneProgress":true}},"initializationOptions":{}}}'
+	root_path := integration_test_json_string(project_dir)
+	initialize := '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":42,"clientInfo":{"name":"Sublime Text LSP","version":"2.13.0"},"locale":"en","rootUri":"${root_uri}","rootPath":"${root_path}","workspaceFolders":[{"uri":"${root_uri}","name":"test_project"}],"capabilities":{"general":{"positionEncodings":["utf-16"]},"workspace":{"workspaceFolders":true,"configuration":true,"didChangeWatchedFiles":{"dynamicRegistration":true,"relativePatternSupport":true}},"textDocument":{"synchronization":{"dynamicRegistration":true,"willSave":true,"willSaveWaitUntil":true,"didSave":true},"completion":{"dynamicRegistration":true,"completionItem":{"snippetSupport":true,"documentationFormat":["markdown","plaintext"]}},"hover":{"dynamicRegistration":true,"contentFormat":["markdown","plaintext"]},"publishDiagnostics":{"versionSupport":true}},"window":{"workDoneProgress":true}},"initializationOptions":{}}}'
 	initialized := '{"jsonrpc":"2.0","method":"initialized","params":{}}'
-	output := integration_run_frames(mut app, project_dir, 'sublime_handshake', [initialize,
-		initialized])
+	output := integration_run_frames(mut app, project_dir, 'sublime_handshake', [
+		initialize,
+		initialized,
+	])
 
 	assert app.received_initialize
-	assert app.workspace_roots == [project_dir.replace('\\', '/')]
+	// Workspace roots are resolved from the folder URI, so they carry the '/'
+	// separators a file URI uses. Compare against the URI's own path form rather
+	// than the native one, which is backslash-separated on Windows.
+	assert app.workspace_roots == [uri_to_path(root_uri)]
 	assert app.position_encoding == .utf16
 	assert app.supports_dynamic_watched_files_registration
 	assert app.supports_work_done_progress
