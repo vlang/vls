@@ -20,6 +20,8 @@ const v_builtin_types = ['any', 'array', 'bool', 'byte', 'byteptr', 'chan', 'cha
 	'f64', 'i8', 'i16', 'i32', 'i64', 'int', 'isize', 'IError', 'map', 'rune', 'string', 'thread',
 	'u8', 'u16', 'u32', 'u64', 'usize', 'void', 'voidptr']!
 
+const completion_item_budget = 200
+
 struct IndexedCompletionResult {
 	items          []Detail
 	use_compiler   bool
@@ -793,19 +795,21 @@ fn (mut app App) operation_at_pos(method Method, request Request) Response {
 				[]Detail{}
 			}
 			items := merge_completion_items(indexed.items, compiler_items)
+			budgeted, truncated := apply_completion_budget(items)
 			return Response{
 				id: request.id
 				result: CompletionList{
-					is_incomplete: false
-					items: items
+					is_incomplete: truncated
+					items: budgeted
 				}
 			}
 		}
+		budgeted_indexed, truncated_indexed := apply_completion_budget(indexed.items)
 		return Response{
 			id: request.id
 			result: CompletionList{
-				is_incomplete: false
-				items: indexed.items
+				is_incomplete: truncated_indexed
+				items: budgeted_indexed
 			}
 		}
 	}
@@ -880,6 +884,17 @@ fn (mut app App) operation_at_pos(method Method, request Request) Response {
 		id: request.id
 		result: result
 	}
+}
+
+// apply_completion_budget caps the items sent to the client so a huge index
+// cannot stall the editor. It returns the possibly truncated items and whether
+// truncation happened, in which case the caller sets is_incomplete so the
+// client re-queries with a longer prefix.
+fn apply_completion_budget(items []Detail) ([]Detail, bool) {
+	if items.len <= completion_item_budget {
+		return items, false
+	}
+	return items[..completion_item_budget], true
 }
 
 fn merge_completion_items(indexed_items []Detail, compiler_items []Detail) []Detail {
