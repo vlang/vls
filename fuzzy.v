@@ -12,7 +12,7 @@ struct ScoredItem {
 
 fn fuzzy_match(pattern string, text string) ?FuzzyMatch {
 	if pattern == '' {
-		return FuzzyMatch{score: 0, matched: []int{}}
+		return FuzzyMatch{ score: 0, matched: []int{} }
 	}
 	if text == '' {
 		return none
@@ -23,7 +23,7 @@ fn fuzzy_match(pattern string, text string) ?FuzzyMatch {
 	mut score := 0
 	mut matched := []int{}
 	mut last_match_idx := -1
-	for text_idx in 0..text_lower.len {
+	for text_idx in 0 .. text_lower.len {
 		if pattern_idx >= pattern_lower.len {
 			break
 		}
@@ -45,7 +45,7 @@ fn fuzzy_match(pattern string, text string) ?FuzzyMatch {
 		return none
 	}
 	score -= text.len / 4
-	return FuzzyMatch{score: score, matched: matched}
+	return FuzzyMatch{ score: score, matched: matched }
 }
 
 fn fuzzy_filter(pattern string, items []string) []string {
@@ -54,9 +54,9 @@ fn fuzzy_filter(pattern string, items []string) []string {
 	}
 	mut scored := []ScoredItem{}
 	for item in items {
-        if m := fuzzy_match(pattern, item) {
-            scored << ScoredItem{item: item, score: m.score}
-        }
+		if m := fuzzy_match(pattern, item) {
+			scored << ScoredItem{ item: item, score: m.score }
+		}
 	}
 	scored.sort(a.score < b.score)
 	return scored.map(it.item)
