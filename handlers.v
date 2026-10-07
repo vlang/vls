@@ -8053,38 +8053,38 @@ fn build_fn_snippet(fn_name string, params_str string) string {
 fn postfix_completions() []Detail {
 	return [
 		Detail{
-			kind: 14
-			label: '.if'
-			detail: 'postfix template'
-			insert_text: 'if expr {\n\t$0\n}'
+			kind:               14
+			label:              '.if'
+			detail:             'postfix template'
+			insert_text:        'if expr {\n\t$0\n}'
 			insert_text_format: 2
 		},
 		Detail{
-			kind: 14
-			label: '.match'
-			detail: 'postfix template'
-			insert_text: 'match expr {\n\t$0\n}'
+			kind:               14
+			label:              '.match'
+			detail:             'postfix template'
+			insert_text:        'match expr {\n\t$0\n}'
 			insert_text_format: 2
 		},
 		Detail{
-			kind: 14
-			label: '.for'
-			detail: 'postfix template'
-			insert_text: 'for x in expr {\n\t$0\n}'
+			kind:               14
+			label:              '.for'
+			detail:             'postfix template'
+			insert_text:        'for x in expr {\n\t$0\n}'
 			insert_text_format: 2
 		},
 		Detail{
-			kind: 14
-			label: '.ptr'
-			detail: 'postfix template'
-			insert_text: '&expr'
+			kind:               14
+			label:              '.ptr'
+			detail:             'postfix template'
+			insert_text:        '&expr'
 			insert_text_format: 2
 		},
 		Detail{
-			kind: 14
-			label: '.unwrap'
-			detail: 'postfix template'
-			insert_text: 'expr or { $0 }'
+			kind:               14
+			label:              '.unwrap'
+			detail:             'postfix template'
+			insert_text:        'expr or { $0 }'
 			insert_text_format: 2
 		},
 	]
