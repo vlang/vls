@@ -345,7 +345,8 @@ fn parse_name_pos(answer string, overlay CompilationOverlay) ?NamePos {
 		|| !fields[fields.len - 2].is_int() {
 		return none
 	}
-	path := source_path_from_overlay(os.to_slash(fields[..fields.len - 2].join(':')), overlay)
+	path := source_path_from_overlay(os.to_slash(fields[..fields.len - 2].join(':')), overlay,
+		overlay.temp_work_dir)
 	return NamePos{
 		path: normalize_overlay_path(path)
 		line: fields[fields.len - 2].int() - 1

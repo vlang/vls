@@ -2482,13 +2482,13 @@ fn (mut app App) run_v_line_info_once(method Method, path string, line_info stri
 
 	log('RUN RES ${x}')
 	return app.line_info_result(method, path, line_info, output, use_multifile, temp_project_dir,
-		overlay)
+		overlay, compile_target)
 }
 
 // line_info_result turns what the compiler printed into the answer the client
 // expects. Both the one-shot process and the persistent compiler end here, so
 // the two paths cannot drift apart.
-fn (mut app App) line_info_result(method Method, path string, line_info string, output string, use_multifile bool, temp_project_dir string, overlay CompilationOverlay) ResponseResult {
+fn (mut app App) line_info_result(method Method, path string, line_info string, output string, use_multifile bool, temp_project_dir string, overlay CompilationOverlay, compile_target string) ResponseResult {
 	// Default to JSON null so any unhandled method branch produces a valid LSP response.
 	mut result := ResponseResult('null')
 	match method {

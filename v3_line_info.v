@@ -79,7 +79,7 @@ fn (mut app App) v3_line_info(method Method, path string, real_path string, line
 	}
 	log('V3 answered ${output.len} bytes')
 	return app.line_info_result(method, path, line_info, output, true, result.project.overlay.temp_root,
-		result.project.overlay)
+		result.project.overlay, result.project.overlay.temp_work_dir)
 }
 
 // V3Hover is what V3 answers for a hover: what it says of the name under the
@@ -117,7 +117,8 @@ fn (mut app App) v3_hover(uri string, real_path string, line_info string) ?V3Hov
 	mut declared_at := ?Location(none)
 	if definition != '' {
 		located := app.line_info_result(.definition, uri, definition_info, definition,
-			true, result.project.overlay.temp_root, result.project.overlay)
+			true, result.project.overlay.temp_root, result.project.overlay,
+			result.project.overlay.temp_work_dir)
 		if located is Location {
 			declared_at = located
 		}
@@ -510,7 +511,8 @@ fn (mut app App) v3_prefetch_anchors(locations []Location, mut cache map[string]
 				continue
 			}
 			found := app.line_info_result(.definition, loc.uri, questions[i].line_info, output,
-				true, result.project.overlay.temp_root, result.project.overlay)
+				true, result.project.overlay.temp_root, result.project.overlay,
+				result.project.overlay.temp_work_dir)
 			if found is Location && found.uri != '' {
 				cache[anchor_cache_key(loc.uri, loc.range.start.line, loc.range.start.char)] = found
 			}
