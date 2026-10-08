@@ -105,6 +105,9 @@ fn test_resolve_v_compiler_exe_unwraps_configured_wrapper() {
 	}
 	target := os.join_path(base, 'v.exe')
 	interop_test_must_write_file(target, '')
+	// A real V installation holds vlib next to the compiler; without it the
+	// walk-up has no V home to find.
+	interop_test_must_mkdir_all(os.join_path(base, 'vlib'))
 	wrapper := os.join_path(bin, 'v.bat')
 	interop_test_must_write_file(wrapper, '@echo off\n"${target}" %*\n')
 	os.setenv('VLS_V_COMMAND', wrapper, true)
