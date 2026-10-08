@@ -14036,6 +14036,239 @@ fn test_fast_check_errors_skips_c_interop() {
 	assert app.fast_check_errors(uri, content) == []
 }
 
+fn test_fast_parse_errors_flags_stray_closing_delimiter() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	content := 'module main\n\nfn main() {\n}\n}\n'
+	dir := fast_test_project(mut app, 'parse_stray', {
+		'main.v': content
+	})
+	path := os.join_path(dir, 'main.v')
+	uri := path_to_uri(path)
+	text := os.read_file(path) or { panic(err) }
+	errors := app.fast_parse_errors(uri, text)
+	assert errors.len == 1, errors.str()
+	assert errors[0].message == "unexpected token '}'"
+	assert errors[0].line_nr == 5
+	assert errors[0].col == 1
+	assert errors[0].level == 'error'
+	// A stray closer publishes through the same notification path as slow errors.
+	notif := app.diagnostics_notification_for(uri, text, errors)
+	assert notif.method == 'textDocument/publishDiagnostics'
+	assert notif.params.uri == uri
+	assert notif.params.diagnostics.len == 1
+	assert (notif.params.diagnostics[0].source or { '' }) == 'vlang'
+	assert notif.params.diagnostics[0].severity == 1
+	assert notif.params.diagnostics[0].message == "unexpected token '}'"
+}
+
+fn test_fast_parse_errors_accepts_balanced_code() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	content := "module main\n\nfn main() {\n\tprintln('hi')\n}\n"
+	dir := fast_test_project(mut app, 'parse_balanced', {
+		'main.v': content
+	})
+	path := os.join_path(dir, 'main.v')
+	uri := path_to_uri(path)
+	text := os.read_file(path) or { panic(err) }
+	assert app.fast_parse_errors(uri, text) == []
+}
+
+fn test_fast_parse_errors_ignores_brackets_in_strings_comments_and_runes() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	content := 'module main\n\nfn main() {\n\ts := \'()[]{}\'\n\tt := "([{}])"\n\tu := `}{)(`\n\tr := r\'(raw)\'\n\t// comment with ) ] }\n\t/* block with ( [ { */\n\t	w := \'interp \${s} done\'\n\tch := `)`\n\tprintln(s, t, u, r, w, ch)\n}\n'
+	dir := fast_test_project(mut app, 'parse_skipped', {
+		'main.v': content
+	})
+	path := os.join_path(dir, 'main.v')
+	uri := path_to_uri(path)
+	text := os.read_file(path) or { panic(err) }
+	assert app.fast_parse_errors(uri, text) == []
+}
+
+fn test_fast_parse_errors_flags_unclosed_delimiter_at_eof() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	content := 'module main\n\nfn main() {\n\tprintln(x)\n'
+	dir := fast_test_project(mut app, 'parse_unclosed', {
+		'main.v': content
+	})
+	path := os.join_path(dir, 'main.v')
+	uri := path_to_uri(path)
+	text := os.read_file(path) or { panic(err) }
+	errors := app.fast_parse_errors(uri, text)
+	assert errors.len == 1, errors.str()
+	assert errors[0].message == "unclosed delimiter '{'"
+	assert errors[0].line_nr == 3
+	assert errors[0].col == 11
+	assert errors[0].level == 'error'
+}
+
+fn test_fast_parse_errors_suppresses_obvious_continuations() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	still_typing := [
+		'',
+		'module main\n\nfn main() {',
+		'module main\n\nfn main() {\n\tx := [1, 2',
+		'module main\n\nfn main() {\n\tx := 1 +',
+		"module main\n\nfn main() {\n\ts := 'abc",
+		'module main\n\nfn main() {\n\t/* note',
+	]
+	for content in still_typing {
+		uri := path_to_uri(os.join_path(app.temp_dir, 'parse_cont.v'))
+		assert app.fast_parse_errors(uri, content) == [], content
+	}
+}
+
+fn test_fast_parse_errors_flags_unclosed_string() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	content := "module main\n\nfn main() {\n\ts := 'hello\n\tprintln(s)\n}\n"
+	dir := fast_test_project(mut app, 'parse_string', {
+		'main.v': content
+	})
+	path := os.join_path(dir, 'main.v')
+	uri := path_to_uri(path)
+	text := os.read_file(path) or { panic(err) }
+	errors := app.fast_parse_errors(uri, text)
+	assert errors.len == 1, errors.str()
+	assert errors[0].message == 'unclosed string literal'
+	assert errors[0].line_nr == 4
+	assert errors[0].col == 7
+}
+
+fn test_fast_parse_errors_flags_unclosed_block_comment() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	content := 'module main\n\nfn main() {\n\t/* open\n\tprintln(x)\n}\n'
+	dir := fast_test_project(mut app, 'parse_comment', {
+		'main.v': content
+	})
+	path := os.join_path(dir, 'main.v')
+	uri := path_to_uri(path)
+	text := os.read_file(path) or { panic(err) }
+	errors := app.fast_parse_errors(uri, text)
+	assert errors.len == 1, errors.str()
+	assert errors[0].message == 'unclosed block comment'
+	assert errors[0].line_nr == 4
+	assert errors[0].col == 2
+}
+
+fn test_fast_parse_errors_ignores_multiline_backtick_string() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	// A backtick string may legally span lines, so this looks exactly like a
+	// multiline string that is still being typed. The slow check decides.
+	content := 'module main\n\nfn main() {\n\ts := `abc\n\tdef\n}\n'
+	dir := fast_test_project(mut app, 'parse_backtick', {
+		'main.v': content
+	})
+	path := os.join_path(dir, 'main.v')
+	uri := path_to_uri(path)
+	text := os.read_file(path) or { panic(err) }
+	assert app.fast_parse_errors(uri, text) == []
+}
+
+fn test_fast_parse_errors_flags_unclosed_interpolation() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	content := "module main\n\nfn main() {\n\ts := '\${abc\n\tdef\n"
+	dir := fast_test_project(mut app, 'parse_interp', {
+		'main.v': content
+	})
+	path := os.join_path(dir, 'main.v')
+	uri := path_to_uri(path)
+	text := os.read_file(path) or { panic(err) }
+	errors := app.fast_parse_errors(uri, text)
+	assert errors.len == 1, errors.str()
+	assert errors[0].message == 'unclosed string interpolation'
+	assert errors[0].line_nr == 4
+	assert errors[0].col == 8
+}
+
+fn test_fast_parse_errors_flags_string_left_open_by_interpolation() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	// The quote after the interpolation start opens a new literal inside the
+	// interpolation code, so the file ends inside a string opened earlier.
+	content := "module main\n\nfn main() {\n\ts := '\${name'\n\tprintln(s)\n}\n"
+	dir := fast_test_project(mut app, 'parse_interp_quote', {
+		'main.v': content
+	})
+	path := os.join_path(dir, 'main.v')
+	uri := path_to_uri(path)
+	text := os.read_file(path) or { panic(err) }
+	errors := app.fast_parse_errors(uri, text)
+	assert errors.len == 1, errors.str()
+	assert errors[0].message == 'unclosed string literal'
+	assert errors[0].line_nr == 4
+}
+
+fn test_fast_parse_errors_reports_mismatch_as_unclosed() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	// A crossed closer is uncertain mid-keystroke, so the scan leaves the
+	// stack alone and the EOF remainder reports the first unclosed opener.
+	content := 'module main\n\nfn main() {\n\tx := ([)]\n\tprintln(x)\n}\n'
+	dir := fast_test_project(mut app, 'parse_mismatch', {
+		'main.v': content
+	})
+	path := os.join_path(dir, 'main.v')
+	uri := path_to_uri(path)
+	text := os.read_file(path) or { panic(err) }
+	errors := app.fast_parse_errors(uri, text)
+	assert errors.len == 1, errors.str()
+	assert errors[0].message == "unclosed delimiter '{'"
+	assert errors[0].line_nr == 3
+}
+
+fn test_fast_parse_errors_combines_with_import_errors() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	content := 'module main\n\nimport nosuchmod_xyz\n\nfn main() {\n}\n}\n'
+	dir := fast_test_project(mut app, 'parse_combined', {
+		'main.v': content
+	})
+	path := os.join_path(dir, 'main.v')
+	uri := path_to_uri(path)
+	text := os.read_file(path) or { panic(err) }
+	app.open_files[uri] = text
+	import_errors := app.fast_check_errors(uri, text)
+	parse_errors := app.fast_parse_errors(uri, text)
+	assert import_errors.len == 1, import_errors.str()
+	assert parse_errors.len == 1, parse_errors.str()
+	mut combined := import_errors.clone()
+	combined << parse_errors
+	assert combined.len == 2
+}
+
 fn test_scheduler_tickets_come_in_slow_and_fast() {
 	mut scheduler := new_diagnostics_scheduler()
 	tickets := scheduler.begin_project_schedule('file:///a.v', 'proj')
