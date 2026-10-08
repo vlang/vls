@@ -74,6 +74,18 @@ base): `test_conditional_methods_request_receiver_completion_fallback`
 needs the V1 compatibility compiler, which this host cannot build
 (`make` missing).
 
+## Phase 1c — done: pooled line-info, fast parse errors, compat matrix
+
+- `run_v_line_info_once` answers from the shared diagnostics-server
+  pool first (same copy the slow check uses), one-shot fallback
+  preserved; compat/missing modes untouched.
+- Fast tier also reports certain parse errors (stray closers,
+  unclosed delimiters/strings/comments at EOF); mid-keystroke
+  states stay silent.
+- Compiler-compatibility matrix tests: modern-direct, old-flag,
+  and dead-end stub compilers assert probed mode, diagnostics,
+  and mode stability.
+
 ## Phase 1 — foundation (remaining)
 
 - Split diagnostics: fast (parse + open-file errors, ~100ms
