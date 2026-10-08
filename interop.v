@@ -2389,12 +2389,93 @@ fn (mut app App) run_v_line_info(method Method, path string, line_info string) R
 	return app.run_v_line_info_once(method, path, line_info, compilation_work_dir(normalize_overlay_path(real_path)))
 }
 
+// PooledLineInfo is the answer of the shared diagnostics-server pool to one
+// `-line-info` question, with the copy of the program it comes from.
+struct PooledLineInfo {
+	output  string
+	overlay CompilationOverlay
+}
+
+// run_v_line_info_pooled answers from the shared diagnostics-server pool,
+// which checks the same copy of the program the diagnostics slow path checks
+// (see ProgramCopy): a warm server answers in a fraction of the time a
+// compiler process of its own takes to start. None means the pool has no
+// answer, and the caller falls back to that one-shot process. The pool never
+// changes how the session drives the compiler: compat and missing modes keep
+// their one-shot path, and the mode probes there still run.
+fn (mut app App) run_v_line_info_pooled(method Method, path string, line_info string) ?PooledLineInfo {
+	if app.line_info_mode == .compat || app.line_info_mode == .missing {
+		return none
+	}
+	exe := resolve_diagnostics_server_exe() or { return none }
+	real_path := uri_to_path(path)
+	program_dir := app.program_root(real_path)
+	mut pool := app.v3_query_pool()
+	if !pool.begin_operation() {
+		return none
+	}
+	defer {
+		pool.end_operation()
+	}
+	mut program := pool.program_copy(program_dir)
+	program.mutex.lock()
+	defer {
+		program.mutex.unlock()
+	}
+	app.prepare_program_copy(mut pool, mut program, real_path, program_dir) or {
+		log('no pooled copy of ${program_dir}: ${err}')
+		return none
+	}
+	app.v3_sync_open_files(mut program.project) or {
+		log('no pooled copy of ${program_dir}: ${err}')
+		return none
+	}
+	content := app.open_files[path] or { os.read_file(real_path) or { return none } }
+	copy_path := program.project.write(normalize_overlay_path(real_path), content) or {
+		log('no pooled copy of ${program_dir}: ${err}')
+		return none
+	}
+	project := program.project
+	// A test file is a program of its own, which V builds with the files of
+	// its module: the program of the directory leaves it out.
+	target := if copy_path.ends_with('_test.v') { copy_path } else { '.' }
+	// The command line of the checks of the diagnostics (see
+	// build_v_check_args_multifile), whose servers answer the questions too.
+	is_library := target == '.' && !app.is_program_dir(project.overlay.source_work_dir)
+	mut args := v3_compiler_selection_args()
+	if is_library {
+		args << '-shared'
+	}
+	args << ['-check', '-nocolor', target]
+	mut servers := app.v3_query_pool()
+	result := servers.query(exe, args, project.overlay.temp_work_dir, '${copy_path}:${line_info}') or {
+		return none
+	}
+	if result.exit_code != 0 {
+		return none
+	}
+	output := normalize_v_line_info_output(result.output, method)
+	if output == '' {
+		return none
+	}
+	return PooledLineInfo{
+		output:  output
+		overlay: project.overlay
+	}
+}
+
 // run_v_line_info_once answers from a compiler process of its own, which checks
 // the program from `work_dir`.
 fn (mut app App) run_v_line_info_once(method Method, path string, line_info string, work_dir string) ResponseResult {
 	real_path := uri_to_path(path)
 	if app.line_info_mode == .missing {
 		return app.line_info_unavailable_result(method, path, line_info)
+	}
+	// A warm shared server answers from the copy of the program it already
+	// checks, without the overlay and the compiler process of its own below.
+	if pooled := app.run_v_line_info_pooled(method, path, line_info) {
+		return app.line_info_result(method, path, line_info, pooled.output, true,
+			pooled.overlay.temp_root, pooled.overlay, pooled.overlay.temp_work_dir)
 	}
 	mut working_dir := os.dir(real_path)
 	mut file_to_check := real_path

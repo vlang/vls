@@ -632,6 +632,129 @@ fn test_a_v_without_the_query_engine_leaves_the_answer_to_v1() {
 	assert app.v3_one_shot_unsupported
 }
 
+// A diagnostics server that answers no question: each one fails as on a
+// program V3 cannot parse.
+const fake_v3_failing_server = r"#!/bin/sh
+echo v-diagnostics-server: ready
+here=$(dirname $0)
+while read -r request rest; do
+	case $request in quit) exit 0 ;; esac
+	token=${rest%% *}
+	echo ${rest#* } >> $here/questions.txt
+	echo v-diagnostics-server: child 1 $token
+	echo 'main.v:1:1: error: unexpected token'
+	printf '\nv-diagnostics-server: end 1 %s\n' $token
+done
+"
+
+// fake_one_shot_v writes the fake compiler that answers `-line-info` in a
+// process of its own into a directory of its own under `dir`, with the answer
+// the test left for it, and returns its path.
+fn fake_one_shot_v(dir string, name string) !string {
+	alone := os.join_path(dir, name)
+	os.mkdir_all(alone)!
+	exe := os.join_path(alone, 'v')
+	os.write_file(exe, fake_v3_one_shot)!
+	os.chmod(exe, 0o755)!
+	os.write_file(os.join_path(alone, 'answer.txt'), fake_hover_answer)!
+	return exe
+}
+
+fn test_v1_line_info_uses_the_warm_shared_server() {
+	mut app, fake := fake_v3_app('v1_pooled', fake_v3_query_server, 'VLS_DIAGNOSTICS_SERVER')!
+	defer {
+		stop_fake_v3_app(mut app, fake)
+	}
+	// V3 off: the request goes to the V1 path, which asks the shared pool first.
+	app.v3_line_info_enabled = false
+	path := os.join_path(fake.project, 'main.v')
+	uri := path_to_uri(path)
+	result := app.run_v_line_info(.hover, uri, '4:hv^2')
+	assert result is Hover
+	assert (result as Hover).contents.value.contains('fake')
+	// Asked through the shared server, in the copy the diagnostics use.
+	assert fake.questions().len == 1
+	assert app.v3_copies().len == 1
+	copy_root := app.v3_copies()[0].overlay.temp_root
+	assert fake.questions()[0] == '${os.join_path(copy_root, 'main.v')}:4:hv^2'
+	// The pool never changes how the session drives the compiler.
+	assert app.line_info_mode == .unknown
+	// A second request reuses the server and the copy: nothing new starts.
+	app.run_v_line_info(.hover, uri, '4:hv^2')
+	assert fake.questions().len == 2
+	assert app.v3_query_pool().servers.len == 1
+}
+
+fn test_v1_definition_comes_back_mapped_from_the_shared_copy() {
+	mut app, fake := fake_v3_app('v1_definition', fake_v3_self_declaration_server, 'VLS_DIAGNOSTICS_SERVER')!
+	defer {
+		stop_fake_v3_app(mut app, fake)
+	}
+	app.v3_line_info_enabled = false
+	path := os.join_path(fake.project, 'main.v')
+	uri := path_to_uri(path)
+	result := app.run_v_line_info(.definition, uri, '4:gd^2')
+	assert result is Location
+	found := result as Location
+	// The server names the copy; the answer names the file it mirrors.
+	assert found.uri == uri
+	assert found.range.start.line == 3
+}
+
+fn test_v1_line_info_falls_back_to_its_own_process() {
+	mut app, fake := fake_v3_app('v1_fallback', fake_v3_failing_server, 'VLS_DIAGNOSTICS_SERVER')!
+	defer {
+		stop_fake_v3_app(mut app, fake)
+	}
+	app.v3_line_info_enabled = false
+	// The V in use answers `-line-info` in a process of its own.
+	os.setenv('VLS_V_COMMAND', fake_one_shot_v(fake.dir, 'alone')!, true)
+	path := os.join_path(fake.project, 'main.v')
+	uri := path_to_uri(path)
+	result := app.run_v_line_info(.hover, uri, '4:hv^2')
+	assert result is Hover
+	assert (result as Hover).contents.value.contains('fake')
+	// The pool was tried first, then the one-shot process answered.
+	assert fake.questions().len == 1
+	alone_questions := os.read_file(os.join_path(fake.dir, 'alone', 'questions.txt')) or { '' }
+	assert alone_questions.split_into_lines().len == 1
+}
+
+fn test_v1_line_info_in_compat_mode_keeps_its_own_process() {
+	mut app, fake := fake_v3_app('v1_compat', fake_v3_query_server, 'VLS_DIAGNOSTICS_SERVER')!
+	defer {
+		stop_fake_v3_app(mut app, fake)
+	}
+	app.v3_line_info_enabled = false
+	app.line_info_mode = .compat
+	os.setenv('VLS_V_COMMAND', fake_one_shot_v(fake.dir, 'alone')!, true)
+	path := os.join_path(fake.project, 'main.v')
+	uri := path_to_uri(path)
+	result := app.run_v_line_info(.hover, uri, '4:hv^2')
+	assert result is Hover
+	assert (result as Hover).contents.value.contains('fake')
+	// Compat keeps its one-shot path: the shared server is never asked, and
+	// the mode is untouched.
+	assert !os.exists(os.join_path(fake.server, 'questions.txt'))
+	assert app.line_info_mode == .compat
+}
+
+fn test_v1_line_info_without_a_server_keeps_its_own_process() {
+	mut app, fake := fake_v3_app('v1_no_server', fake_v3_one_shot, 'VLS_V_COMMAND')!
+	defer {
+		stop_fake_v3_app(mut app, fake)
+	}
+	app.v3_line_info_enabled = false
+	os.setenv('VLS_DIAGNOSTICS_SERVER', 'off', true)
+	path := os.join_path(fake.project, 'main.v')
+	uri := path_to_uri(path)
+	result := app.run_v_line_info(.hover, uri, '4:hv^2')
+	assert result is Hover
+	assert (result as Hover).contents.value.contains('fake')
+	// No server to ask: no copy is built for questions.
+	assert app.v3_copies().len == 0
+}
+
 fn test_only_a_created_or_deleted_file_rebuilds_the_copy() {
 	mut app, fake := fake_v3_app('watcher', fake_v3_query_server, 'VLS_DIAGNOSTICS_SERVER')!
 	defer {
