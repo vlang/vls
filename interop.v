@@ -263,15 +263,24 @@ fn path_to_uri(path string) string {
 }
 
 // make_unique_temp_path returns a collision-resistant temp file path in the
-// system temp dir, tagged with the caller's purpose, the pid, and a nanosecond
-// timestamp, so concurrent requests for same-named files never overwrite one
-// another (P1-12).
+// system temp dir, tagged with the caller's purpose, the pid, a nanosecond
+// timestamp, and a per-process counter, so sequential requests for same-named
+// files never return the same path (P1-12). The counter is what separates two
+// calls: on Windows consecutive `unix_nano` readings usually fall in the same
+// tick, so the timestamp alone does not tell them apart.
 fn make_unique_temp_path(tag string, real_path string) string {
 	ext := os.file_ext(real_path)
 	safe_ext := if ext == '' { '.v' } else { ext }
 	name := os.file_name(real_path)
 	base := if name.contains('.') { name.all_before_last('.') } else { name }
-	return os.join_path(os.temp_dir(), '${tag}_${os.getpid()}_${time.now().unix_nano()}_${base}${safe_ext}')
+	// A function-local static keeps the counter out of module scope. It needs
+	// `unsafe` because statics are unchecked shared state; the bump happens
+	// before anything else reads it.
+	unsafe {
+		mut static seq := u64(0)
+		seq++
+		return os.join_path(os.temp_dir(), '${tag}_${os.getpid()}_${time.now().unix_nano()}_${seq}_${base}${safe_ext}')
+	}
 }
 
 fn make_singlefile_temp_path(temp_root string, real_path string, purpose string) string {

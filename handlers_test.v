@@ -15429,3 +15429,520 @@ fn test_cov_add_workspace_symbol() {
 	assert results.len == 1, 'duplicate suppressed'
 	assert results[0].name == 'foo' && results[0].location.uri == 'file:///a.v', 'symbol kept'
 }
+
+fn test_cov_rename_conflicts_pure_helpers() {
+	// Renaming replaces the bytes of each span and nothing else.
+	single := renamed_text('fn foo() {\n\tfoo()\n}', [
+		RenameSpan{
+			line:  1
+			start: 1
+			end:   4
+		},
+	], 'bar')
+	assert single == 'fn foo() {\n\tbar()\n}', 'span renamed, rest kept'
+	multi := renamed_text('a foo b foo', [
+		RenameSpan{
+			line:  0
+			start: 2
+			end:   5
+		},
+		RenameSpan{
+			line:  0
+			start: 8
+			end:   11
+		},
+	], 'qux')
+	assert multi == 'a qux b qux', 'every span renamed'
+	assert renamed_text('hi', [
+		RenameSpan{
+			line:  5
+			start: 0
+			end:   2
+		},
+	], 'x') == 'hi', 'span past the end skipped'
+	mut check_spans := map[string][]RenameSpan{}
+	check_spans['/a.v'] = [
+		RenameSpan{
+			line:  0
+			start: 4
+			end:   7
+		},
+	]
+	rc := RenameCheck{
+		old_name: 'foo'
+		new_name: 'longer'
+		spans:    check_spans
+	}
+	assert rc.renamed_col('/a.v', 0, 2) == 2, 'column before the span kept'
+	assert rc.renamed_col('/a.v', 0, 4) == 4, 'span start kept'
+	assert rc.renamed_col('/a.v', 0, 7) == 10, 'column after the span shifted by the growth'
+	assert rc.renamed_col('/b.v', 0, 9) == 9, 'file without spans kept'
+	assert rc.original_pos(NamePos{
+		path: '/a.v'
+		line: 0
+		col:  4
+	}) == NamePos{
+		path: '/a.v'
+		line: 0
+		col:  4
+	}, 'position inside the new name maps back'
+	assert rc.original_pos(NamePos{
+		path: '/a.v'
+		line: 0
+		col:  10
+	}) == NamePos{
+		path: '/a.v'
+		line: 0
+		col:  7
+	}, 'position after the new name shifted back'
+	assert rc.original_pos(NamePos{
+		path: '/b.v'
+		line: 0
+		col:  3
+	}) == NamePos{
+		path: '/b.v'
+		line: 0
+		col:  3
+	}, 'file without spans kept'
+	assert rc.is_renamed(NamePos{
+		path: '/a.v'
+		line: 0
+		col:  4
+	}), 'span start is renamed'
+	assert !rc.is_renamed(NamePos{
+		path: '/a.v'
+		line: 0
+		col:  0
+	}), 'other column is not'
+	assert !rc.is_renamed(NamePos{
+		path: '/b.v'
+		line: 0
+		col:  4
+	}), 'other file is not'
+	assert same_name_pos(NamePos{
+		path: '/a.v'
+		line: 1
+		col:  5
+	}, NamePos{
+		path: '/a.v'
+		line: 1
+		col:  6
+	}), 'one byte of drift matches'
+	assert !same_name_pos(NamePos{
+		path: '/a.v'
+		line: 1
+		col:  5
+	}, NamePos{
+		path: '/a.v'
+		line: 1
+		col:  7
+	}), 'two bytes differ'
+	assert !same_name_pos(NamePos{
+		path: '/a.v'
+		line: 1
+		col:  5
+	}, NamePos{
+		path: '/b.v'
+		line: 1
+		col:  5
+	}), 'other file differs'
+	assert name_pos_text(NamePos{
+		path: '/tmp/proj/main.v'
+		line: 2
+		col:  6
+	}) == 'main.v:3:7', 'written from 1'
+	assert without_quoted_names('say `hi` loud') == 'say `` loud', 'quoted names dropped'
+	assert (new_check_message([], ['/tmp/main.v:4: error: boom']) or { '' }) == 'break the program: boom (main.v:4)', 'new error breaks'
+	assert (new_check_message([], ['program: warning: shaky']) or { '' }) == 'make V warn: shaky', 'program warning warns'
+	assert (new_check_message(['a `x` b'], ['a `y` b']) or { 'same' }) == 'same', 'renamed quotes compare equal'
+	assert (new_check_message(['a'], ['a']) or { 'same' }) == 'same', 'nothing new is none'
+	got_messages := check_messages('/tmp/main.v:4:7: error: boom `x`\nwarning: shaky\nnotice: fyi\n')
+	assert got_messages == ['/tmp/main.v:4: error: boom `x`', 'program: warning: shaky'], 'errors and warnings, no notices'
+	overlay := CompilationOverlay{
+		source_display_root: '/src/proj'
+		temp_root:           '/tmp/cov_overlay'
+		temp_work_dir:       '/tmp/cov_overlay'
+	}
+	if pos := parse_name_pos('/tmp/cov_overlay/main.v:3:7', overlay) {
+		assert pos.path == '/src/proj/main.v' && pos.line == 2 && pos.col == 7, 'copy position mapped back'
+	} else {
+		assert false, 'valid answer parses'
+	}
+	assert parse_name_pos('', overlay) == none, 'empty answer is none'
+	assert parse_name_pos('/tmp/x.v:3', overlay) == none, 'answer without a column is none'
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	uri := 'file:///cov_name_pos.v'
+	app.open_files[uri] = 'fn main() {}\n'
+	at := Location{
+		uri:   uri
+		range: LSPRange{
+			start: Position{ line: 0, char: 3 }
+			end:   Position{ line: 0, char: 7 }
+		}
+	}
+	named := app.name_pos_of(at)
+	assert named.line == 0 && named.col == 3, 'position in bytes'
+	assert named.path == '/cov_name_pos.v', 'path without the scheme'
+}
+
+fn test_cov_rename_pure_helpers() {
+	old_cap := os.getenv('VLS_RENAME_MAX_OCCURRENCES')
+	defer {
+		if old_cap == '' {
+			os.unsetenv('VLS_RENAME_MAX_OCCURRENCES')
+		} else {
+			os.setenv('VLS_RENAME_MAX_OCCURRENCES', old_cap, true)
+		}
+	}
+	os.unsetenv('VLS_RENAME_MAX_OCCURRENCES')
+	assert rename_max_occurrences() == reference_semantic_max_candidates, 'default cap used'
+	os.setenv('VLS_RENAME_MAX_OCCURRENCES', '5', true)
+	assert rename_max_occurrences() == 5, 'environment cap used'
+	os.setenv('VLS_RENAME_MAX_OCCURRENCES', 'many', true)
+	assert rename_max_occurrences() == reference_semantic_max_candidates, 'garbage cap ignored'
+	decl_lines := ['fn foo() {', '\tx := 1', '}', 'fn bar() {', '}']
+	assert declaration_end_line(decl_lines, decl_lines, 0) == 2, 'ends before the next declaration'
+	assert declaration_end_line(decl_lines, decl_lines, 3) == 4, 'last declaration runs on'
+	check_new_name('count', 'total') or { assert false, 'valid rename refused: ${err}' }
+	check_new_name('count', 'count') or { assert false, 'same name refused: ${err}' }
+	mut refused_empty := false
+	check_new_name('count', '') or {
+		refused_empty = true
+		assert err.msg().contains('valid'), 'empty name needs the valid-name reason'
+	}
+	assert refused_empty, 'empty name refused'
+	mut refused_keyword := false
+	check_new_name('count', 'fn') or {
+		refused_keyword = true
+		assert err.msg().contains('keyword'), 'keyword needs the keyword reason'
+	}
+	assert refused_keyword, 'keyword refused'
+	mut refused_case := false
+	check_new_name('Point', 'point') or {
+		refused_case = true
+		assert err.msg().contains('capital'), 'case needs the capital reason'
+	}
+	assert refused_case, 'capitalized type keeps its capital'
+	mut refused_lower := false
+	check_new_name('count', 'Total') or {
+		refused_lower = true
+		assert err.msg().contains('lowercase'), 'lowercase name stays lowercase'
+	}
+	assert refused_lower, 'lowercase name keeps its case'
+	str_content := 'fn f() {\n\ts := "{x}" // }\n}'
+	masked := code_only(str_content)
+	assert masked.len == str_content.len, 'masking keeps positions'
+	assert masked.contains('fn f()'), 'code kept'
+	assert !masked.contains('{x}') && !masked.contains('//'), 'strings and comments masked'
+	assert code_only('fn f() { s := "\${x}" }').contains('x'), 'interpolation is code'
+	assert in_comptime_branch(['\$if debug {', '\tx := 1', '}'], 1, 6), 'body of \$if is conditional'
+	assert !in_comptime_branch(['fn f() {', '\tx := 1', '}'], 1, 6), 'plain body is not'
+	assert declaration_receiver('fn (mut p Process) kill() {') == 'Process', 'receiver read'
+	assert declaration_receiver('pub fn (p Point) moved() Point {') == 'Point', 'pub receiver read'
+	assert declaration_receiver('fn plain() {') == '', 'plain function has none'
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	assert app.rename_anchor_cache().len == 0, 'fresh cache is empty'
+	app.keep_rename_anchors(map[string]?Location{})
+	uri := 'file:///cov_rename_helpers.v'
+	content := 'module main\n\nimport time\n\nfn f() {\n\ttime.now()\n}\n'
+	app.open_files[uri] = content
+	assert app.file_text(uri) == content, 'open buffer read'
+	assert app.index_doc_symbols(uri).len == 0, 'no index without one'
+	dot_use := Location{
+		uri:   uri
+		range: LSPRange{
+			start: Position{ line: 5, char: 6 }
+			end:   Position{ line: 5, char: 9 }
+		}
+	}
+	assert app.is_reached_through_dot(dot_use), 'name after a dot reached through it'
+	assert (app.line_text(dot_use) or { '' }) == '\ttime.now()', 'line read back'
+	assert app.line_at(dot_use) == '\ttime.now()', 'line at the location'
+	if word := app.word_location(uri, 5, 6) {
+		assert word.range.start.char == 6 && word.range.end.char == 9, 'word bounds found'
+		assert app.identifier_at(word) == 'now', 'identifier read'
+	} else {
+		assert false, 'word at the use found'
+	}
+	mod_qual := Location{
+		uri:   uri
+		range: LSPRange{
+			start: Position{ line: 5, char: 1 }
+			end:   Position{ line: 5, char: 5 }
+		}
+	}
+	assert !app.is_reached_through_dot(mod_qual), 'qualifier not reached through a dot'
+	assert app.is_module_qualifier(mod_qual), 'imported name before a dot qualifies'
+	assert !app.is_module_qualifier(dot_use), 'called name does not'
+	mod_uri := 'file:///cov_sub/mod.v'
+	app.open_files[mod_uri] = 'module mymod\n\nfn f() {}\n'
+	mod_name := Location{
+		uri:   mod_uri
+		range: LSPRange{
+			start: Position{ line: 0, char: 7 }
+			end:   Position{ line: 0, char: 12 }
+		}
+	}
+	assert app.is_module_line_occurrence(mod_name), 'module line names a module'
+	assert !app.is_module_line_occurrence(dot_use), 'call does not'
+	assert app.in_module_of(dot_use, dot_use), 'same file is its own module'
+	assert !app.in_module_of(mod_name, dot_use), 'other module is not the same'
+	assert app.line_text(Location{
+		uri:   uri
+		range: LSPRange{
+			start: Position{ line: 99, char: 0 }
+			end:   Position{ line: 99, char: 1 }
+		}
+	}) == none, 'line past the end is none'
+}
+
+fn test_cov_module_import_pure_helpers() {
+	assert attribute_value("@[deprecated_after: '2026-01-31']", 'deprecated_after') == '2026-01-31', 'single quotes read'
+	assert attribute_value('@[deprecated_after: "2026-01-31"]', 'deprecated_after') == '2026-01-31', 'double quotes read'
+	assert attribute_value('@[deprecated]', 'deprecated_after') == '', 'missing value empty'
+	assert attribute_value('', 'deprecated') == '', 'empty attribute empty'
+	after_imports := import_spot('module m\n\nimport os\n\nfn main() {}\n')
+	assert after_imports.line == 3 && after_imports.after == '\n', 'after the last import'
+	after_module := import_spot('module m\n\nfn main() {}\n')
+	assert after_module.line == 1 && after_module.before == '\n' && after_module.after == '\n', 'own paragraph after module'
+	bare_top := import_spot('fn main() {}\n')
+	assert bare_top.line == 0 && bare_top.after == '\n\n', 'top without a module'
+	edit := after_imports.edit('json')
+	assert edit.new_text == 'import json\n', 'import line written'
+	assert edit.range.start.line == 3 && edit.range.start.char == 0, 'edit at the spot'
+	str_content := 'fn main() {\n\tx := "hello"\n}\n'
+	assert position_in_string_or_comment(str_content, Position{ line: 1, char: 8 }, .utf8), 'inside a string'
+	assert !position_in_string_or_comment(str_content, Position{ line: 1, char: 2 }, .utf8), 'code is not'
+	comment_content := 'fn main() {\n\t// note\n\tx := 1\n}\n'
+	assert position_in_string_or_comment(comment_content, Position{ line: 1, char: 5 }, .utf8), 'inside a comment'
+	assert !position_in_string_or_comment(str_content, Position{ line: 0, char: 0 }, .utf8), 'start of line is not'
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	root := os.join_path(app.temp_dir, 'covimports')
+	must_mkdir_all(root)
+	must_write_file(os.join_path(root, 'main.v'), 'module main\n\nfn main() {}\n')
+	m1_dir := os.join_path(root, 'm1')
+	must_mkdir_all(m1_dir)
+	must_write_file(os.join_path(m1_dir, 'm1.v'), 'module m1\n\nimport os\n\npub fn hello() int {\n\treturn 1\n}\n')
+	m2_dir := os.join_path(root, 'm2')
+	must_mkdir_all(m2_dir)
+	must_write_file(os.join_path(m2_dir, 'm2.v'), 'module m2\n\nimport m1\n\npub fn double() int {\n\treturn 1\n}\n')
+	assert declared_module_of_dir(m1_dir) == 'm1', 'module read'
+	assert declared_module_of_dir(root) == 'main', 'file without module is main'
+	assert declared_module_of_dir(os.join_path(app.temp_dir, 'cov_missing_dir')) == '', 'missing dir empty'
+	assert module_line_attributes(os.join_path(m1_dir, 'm1.v')) == [], 'no attributes without any'
+	dep_dir := os.join_path(root, 'dep')
+	must_mkdir_all(dep_dir)
+	must_write_file(os.join_path(dep_dir, 'dep.v'), '@[deprecated]\nmodule dep\n')
+	assert module_line_attributes(os.join_path(dep_dir, 'dep.v')) == ['@[deprecated]'], 'attribute above module read'
+	dated_dir := os.join_path(root, 'dated')
+	must_mkdir_all(dated_dir)
+	must_write_file(os.join_path(dated_dir, 'dated.v'), "@[deprecated_after: '2000-01-01']\nmodule dated\n")
+	future_dir := os.join_path(root, 'future')
+	must_mkdir_all(future_dir)
+	must_write_file(os.join_path(future_dir, 'future.v'), "@[deprecated_after: '2999-01-01']\nmodule future\n")
+	dep, dep_refused := module_deprecation(dep_dir)
+	assert dep && !dep_refused, 'deprecated warns'
+	dated_dep, dated_refused := module_deprecation(dated_dir)
+	assert dated_dep && dated_refused, 'past date refuses'
+	future_dep, future_refused := module_deprecation(future_dir)
+	assert future_dep && !future_refused, 'future date still warns'
+	plain_dep, plain_refused := module_deprecation(m1_dir)
+	assert !plain_dep && !plain_refused, 'plain module is neither'
+	assert module_dir_imports(m1_dir) == ['os'], 'imports read'
+	flag_dir := os.join_path(root, 'flagged')
+	must_mkdir_all(flag_dir)
+	must_write_file(os.join_path(flag_dir, 'x_notd_flag.v'), "\$compile_error('needs -d flag')\nmodule flagged\n")
+	assert module_needs_flag(flag_dir), 'guarded file needs a flag'
+	assert !module_needs_flag(m1_dir), 'plain module needs none'
+	mut found := []ImportableModule{}
+	mut seen_paths := map[string]bool{}
+	mut seen_dirs := map[string]bool{}
+	collect_importable_modules(root, '', .project, 0, mut found, mut seen_paths, mut seen_dirs)
+	assert found.any(it.path == 'm1'), 'nested module collected'
+	m1_mod := ImportableModule{
+		path:   'm1'
+		name:   'm1'
+		dir:    os.real_path(m1_dir)
+		origin: .project
+	}
+	m2_mod := ImportableModule{
+		path:   'm2'
+		name:   'm2'
+		dir:    os.real_path(m2_dir)
+		origin: .project
+	}
+	assert app.module_imports_of(m1_mod) == ['os'], 'cached imports read'
+	reaching := app.modules_reaching([m1_mod], [m1_mod, m2_mod])
+	assert reaching['m2'], 'importer reaches the module'
+	assert m1_mod.dir in app.module_imports_cache, 'imports cached'
+	app.forget_module_folder(os.join_path(m1_dir, 'm1.v'))
+	assert m1_mod.dir !in app.module_imports_cache, 'forgotten folder dropped'
+	main_path := os.join_path(root, 'main.v')
+	offered := app.importable_modules(main_path)
+	assert offered.any(it.path == 'm1'), 'project module offered'
+	assert offered.any(it.path == 'os'), 'vlib module offered'
+	assert app.cached_importable_modules(root).any(it.path == 'm1'), 'cached project module'
+	completions := app.module_import_completions(path_to_uri(main_path), 'module main\n\nfn main() {}\n',
+		Position{ line: 2, char: 0 })
+	assert completions.any(it.label == 'm1'), 'missing module completed'
+	line_items := app.import_line_module_completions(main_path, 'import m')
+	assert line_items.any(it.label == 'm1'), 'import line completed by segment'
+}
+
+fn test_cov_expression_type_constructors() {
+	field := language_field('array fixed', 'len', 'int')
+	assert field.kinds == ['array', 'fixed'] && field.name == 'len' && field.ret == 'int' && field.is_field, 'field built'
+	method := language_method('array', 'first', '', '{E}')
+	assert method.kinds == ['array'] && method.name == 'first' && method.params == '' && method.ret == '{E}' && !method.is_field && !method.is_static, 'method built'
+	on := language_method_on('flag', 'e &{T}', 'has', 'flag_ {T}', 'bool')
+	assert on.receiver == 'e &{T}' && on.name == 'has' && on.params == 'flag_ {T}' && on.ret == 'bool', 'receiver method built'
+	enum_static := language_static('enum', 'from', '[W]', 'input W', '!{T}')
+	assert enum_static.generic == '[W]' && enum_static.is_static && enum_static.name == 'from', 'static built'
+	assert language_receiver_name(['array']) == 'a', 'array receiver'
+	assert language_receiver_name(['fixed']) == 'a', 'fixed receiver'
+	assert language_receiver_name(['map']) == 'm', 'map receiver'
+	assert language_receiver_name(['chan']) == 'ch', 'channel receiver'
+	assert language_receiver_name(['enum']) == 'e', 'enum receiver'
+	assert language_receiver_name(['sum']) == 'x', 'sum receiver'
+	assert composite_member_kinds('typeof') == ['typeof'], 'typeof kinds'
+	assert composite_member_kinds('[]string') == ['array', 'array_string', 'printable'], 'string array kinds'
+	assert composite_member_kinds('[]int') == ['array', 'printable'], 'array kinds'
+	assert composite_member_kinds('[10]int') == ['fixed', 'printable'], 'fixed kinds'
+	assert composite_member_kinds('map[string]int') == ['map', 'printable'], 'map kinds'
+	assert composite_member_kinds('chan int') == ['chan'], 'channel kinds'
+	assert composite_member_kinds('int') == []string{}, 'named type has none'
+	map_elem, map_key, map_value := composite_type_parts('map[string]int')
+	assert map_elem == '' && map_key == 'string' && map_value == 'int', 'map parts'
+	arr_elem, arr_key, arr_value := composite_type_parts('[]int')
+	assert arr_elem == 'int' && arr_key == '' && arr_value == '', 'array element'
+	chan_elem, chan_key, chan_value := composite_type_parts('chan int')
+	assert chan_elem == 'int' && chan_key == '' && chan_value == '', 'channel element'
+	assert member_receiver_type('mut &?Point') == 'Point', 'modifiers stripped'
+	assert member_receiver_type('shared []int') == '[]int', 'shared stripped'
+	assert member_receiver_type('int') == 'int', 'plain kept'
+	assert type_modifiers('&Point') == '&', 'reference kept'
+	assert type_modifiers('?&Point') == '?&', 'option reference kept'
+	assert type_modifiers('Point') == '', 'plain has none'
+	assert slice_result_type('[]int') == '[]int', 'array slices to array'
+	assert slice_result_type('[10]int') == '[]int', 'fixed slices to array'
+	assert slice_result_type('int') == 'int', 'plain is no slice'
+	assert unwrap_option_type('?Point') == 'Point', 'option unwrapped'
+	assert unwrap_option_type('!Point') == 'Point', 'result unwrapped'
+	assert unwrap_option_type('Point') == 'Point', 'plain kept'
+	assert index_expression_type('string') == 'u8', 'string indexes to a byte'
+	assert index_expression_type('[]int') == 'int', 'array element'
+	assert index_expression_type('map[string]int') == 'int', 'map value'
+	assert is_type_name('Point'), 'capitalized is a type'
+	assert is_type_name('time.Time'), 'qualified type'
+	assert !is_type_name('point'), 'lowercase is not'
+	assert !is_type_name(''), 'empty is not'
+	assert declaration_has_attribute(['@[flag]', 'enum Color {'], 1, 'flag'), 'new attribute style'
+	assert declaration_has_attribute(['[flag]', 'enum Color {'], 1, 'flag'), 'old attribute style'
+	assert !declaration_has_attribute(['fn f() {}'], 0, 'flag'), 'no line above'
+	assert !declaration_has_attribute(['@[other]', 'struct S {}'], 1, 'flag'), 'other attribute'
+	assert declaration_member_kinds(TypeDeclaration{
+		kind:    'enum'
+		is_flag: true
+	}) == ['enum', 'flag', 'printable'], 'flag kinds'
+	assert declaration_member_kinds(TypeDeclaration{
+		kind: 'enum'
+	}) == ['enum', 'printable'], 'enum kinds'
+	assert declaration_member_kinds(TypeDeclaration{
+		kind: 'sum'
+	}) == ['sum', 'printable'], 'sum kinds'
+	assert declaration_member_kinds(TypeDeclaration{
+		kind: 'struct'
+	}) == ['printable'], 'struct kinds'
+	assert declaration_member_kinds(TypeDeclaration{}) == []string{}, 'unknown has none'
+	assert signature_fn_type('fn (u User) greet(name string) string') == 'fn (name string) string', 'receiver dropped'
+	assert signature_fn_type('pub fn run(port int) !int') == 'fn (port int) !int', 'pub dropped'
+	assert signature_fn_type('x := 1') == '', 'no signature'
+	assert signature_return_type('fn (p Point) moved() Point') == 'Point', 'method result'
+	assert signature_return_type('fn serve(port int) !http.Server') == '!http.Server', 'result kept'
+	assert signature_return_type('fn main()') == '', 'no result'
+	assert qualify_member_type('Duration', 'time.Time') == 'time.Duration', 'member qualified'
+	assert qualify_member_type('Time', 'Point') == 'Time', 'unqualified owner kept'
+	assert qualify_member_type('int', 'time.Time') == 'int', 'builtin kept'
+	assert top_level_slice_range('1..5'), 'range found'
+	assert !top_level_slice_range('a.b'), 'single dot is not'
+	assert !top_level_slice_range('f(1..2)'), 'nested range hidden'
+}
+
+fn test_cov_expression_text_helpers() {
+	assert expression_start_before('foo.bar', 7) == 0, 'dotted chain from the start'
+	assert expression_start_before('a + b', 5) == 4, 'operand after the operator'
+	assert opening_delimiter_before('(a)', 2) == 0, 'matching paren'
+	assert opening_delimiter_before('abc', 2) == -1, 'no delimiter'
+	assert (string_literal_end("'hi'") or { -1 }) == 4, 'single quoted'
+	assert (string_literal_end('"hi"') or { -1 }) == 4, 'double quoted'
+	assert (string_literal_end('nose') or { -1 }) == -1, 'no literal'
+	typ, after := type_at('int rest', 0)
+	assert typ == 'int' && after == 3, 'plain type'
+	arr_typ, arr_after := type_at('[]int rest', 0)
+	assert arr_typ == '[]int' && arr_after == 5, 'array type'
+	map_typ, map_after := type_at('map[string]int x', 0)
+	assert map_typ == 'map[string]int' && map_after == 14, 'map type'
+	empty_typ, empty_after := type_at('', 0)
+	assert empty_typ == '' && empty_after == 0, 'empty has none'
+	assert (function_literal_type('fn (a int) string { return a }') or { '' }) == 'fn (a int) string', 'literal with result'
+	assert (function_literal_type('fn [x] (a int) { }') or { '' }) == 'fn (a int)', 'captures dropped'
+	assert (function_literal_type('plain') or { 'none' }) == 'none', 'no literal'
+	assert without_trailing_comment('x := 1 // done') == 'x := 1 ', 'comment dropped'
+	assert without_trailing_comment('s := "a//b"') == 's := "a//b"', 'comment in string kept'
+	typeof_typ, typeof_rest := typeof_operand('(x) tail')
+	assert typeof_typ == 'typeof' && typeof_rest == ' tail', 'typeof operand'
+	bad_typ, bad_rest := typeof_operand('x')
+	assert bad_typ == '' && bad_rest == 'x', 'no operand'
+	assert binary_result_type('int', '== 1') == 'bool', 'comparison is bool'
+	assert binary_result_type('int', '+ 1') == 'int', 'arithmetic keeps the type'
+	assert binary_result_type('int', 'foo') == '', 'unknown operator'
+	assert (is_check_type('if x is Point', 'x') or { '' }) == 'Point', 'smart cast read'
+	assert (is_check_type('fn f()', 'x') or { 'none' }) == 'none', 'no check'
+	assert (match_header_subject('match x') or { '' }) == 'x', 'match subject'
+	assert (match_header_subject('match mut y') or { '' }) == 'y', 'mut subject'
+	assert (match_header_subject('fn f()') or { 'none' }) == 'none', 'no match'
+	assert (smart_cast_type(['if x is Point {', '\ty := x'], Position{ line: 1, char: 6 }, 'x',
+		.utf8) or { '' }) == 'Point', 'narrowed in if is'
+	assert (smart_cast_type(['fn f() {', '\tx := 1'], Position{ line: 1, char: 6 }, 'x',
+		.utf8) or { 'none' }) == 'none', 'no narrowing'
+	no_params := callable_member_item('clone', 'fn (a []int) clone() []int', '', 'int', 2)
+	assert (no_params.insert_text or { '' }) == 'clone()' && (no_params.insert_text_format or { 0 }) == 1, 'call without parameters'
+	callback := callable_member_item('filter', 'fn (a []int) filter(predicate fn (int) bool) []int',
+		'predicate fn (int) bool', 'int', 2)
+	assert (callback.insert_text or { '' }) == 'filter(fn (x int) bool {\n\t\$0\n})' && (callback.insert_text_format or { 0 }) == 2, 'callback skeleton inserted'
+	placeholder := callable_member_item('repeat', 'fn (a []int) repeat(count int) []int', 'count int',
+		'int', 2)
+	assert (placeholder.insert_text or { '' }) == 'repeat(\${1:count})\$0' && (placeholder.insert_text_format or { 0 }) == 2, 'first parameter as placeholder'
+	assert (callback_skeleton_text('fn (int) bool', 'int') or { '' }) == 'fn (x int) bool {\n\t\$0\n}', 'skeleton text'
+	assert (callback_skeleton_text('nope', 'int') or { 'none' }) == 'none', 'no skeleton'
+	members := language_member_items('[]int', ['array', 'printable'], false)
+	assert members.any(it.label == 'len'), 'array field offered'
+	assert members.any(it.label == 'filter'), 'array method offered'
+	statics := language_member_items('Color', ['enum', 'printable'], true)
+	assert statics.any(it.label == 'from'), 'enum static offered'
+	assert !language_member_items('[]int', ['array', 'printable'], true).any(it.label == 'len'), 'values hide statics'
+}
+
+fn test_cov_make_unique_temp_path_sequentially_distinct() {
+	// Windows reports the same `unix_nano` tick for thousands of consecutive
+	// calls, so the timestamp alone cannot separate two temp paths. The
+	// per-process counter suffix does: 50 sequential calls must all differ.
+	mut seen := map[string]bool{}
+	for _ in 0 .. 50 {
+		path := make_unique_temp_path('cov', '/tmp/example.v')
+		assert path !in seen, 'duplicate temp path: ${path}'
+		assert path.ends_with('.v') && path.contains('cov_'), 'tag and extension kept'
+		assert path.contains(os.getpid().str()), 'pid tagged'
+		seen[path] = true
+	}
+	assert seen.len == 50, 'every call unique'
+}
