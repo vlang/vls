@@ -1156,6 +1156,29 @@ fn (mut app App) operation_at_pos(method Method, request Request) Response {
 	// even when the compiler returned no completion payload for an incomplete file.
 	if method == .completion {
 		indexed := app.indexed_completions(path, params.position)
+		prefix := app.word_prefix_at_cursor(path, params.position)
+		if prefix != '' && indexed.items.len > 0 {
+			all_labels := indexed.items.map(it.label)
+			filtered := fuzzy_filter(prefix, all_labels)
+			mut filtered_set := map[string]bool{}
+			for label in filtered {
+				filtered_set[label] = true
+			}
+			mut filtered_items := []Detail{}
+			for item in indexed.items {
+				if item.label in filtered_set {
+					filtered_items << item
+				}
+			}
+			budgeted_filtered, _ := apply_completion_budget(filtered_items)
+			return Response{
+				id:     request.id
+				result: CompletionList{
+					is_incomplete: true
+					items:         budgeted_filtered
+				}
+			}
+		}
 		if indexed.use_compiler {
 			compiler_result := app.run_v_line_info(.completion, path, '${line_nr}:${byte_col}')
 			compiler_items := if compiler_result is []Detail {
@@ -1279,6 +1302,24 @@ fn apply_completion_budget(items []Detail) ([]Detail, bool) {
 	return items[..completion_item_budget], true
 }
 
+fn (app App) word_prefix_at_cursor(uri string, position Position) string {
+	content := app.open_files[uri] or { os.read_file(uri_to_path(uri)) or { '' } }
+	lines := content.split_into_lines()
+	if position.line < 0 || position.line >= lines.len {
+		return ''
+	}
+	line := lines[position.line]
+	col := position.char
+	if col <= 0 || col > line.len {
+		return ''
+	}
+	mut start := col
+	for start > 0 && is_ident_char(line[start - 1]) {
+		start--
+	}
+	return line[start..col]
+}
+
 fn merge_completion_items(indexed_items []Detail, compiler_items []Detail) []Detail {
 	mut items := indexed_items.clone()
 	mut seen_labels := map[string]bool{}
@@ -1363,6 +1404,7 @@ fn (mut app App) indexed_completions(uri string, position Position) IndexedCompl
 
 	mut details := app.callback_argument_completions(uri, content, lines, position)
 	details << app.with_builtin_calls(make_keyword_completions())
+	details << postfix_completions()
 	mut seen_labels := map[string]bool{}
 	for detail in details {
 		seen_labels[detail.label] = true
@@ -8033,6 +8075,46 @@ fn build_fn_snippet(fn_name string, params_str string) string {
 		placeholders << '\${${placeholders.len + 1}:${param_name}}'
 	}
 	return '${fn_name}(${placeholders.join(', ')})\$0'
+}
+
+fn postfix_completions() []Detail {
+	return [
+		Detail{
+			kind:               14
+			label:              '.if'
+			detail:             'postfix template'
+			insert_text:        'if expr {\n\t$0\n}'
+			insert_text_format: 2
+		},
+		Detail{
+			kind:               14
+			label:              '.match'
+			detail:             'postfix template'
+			insert_text:        'match expr {\n\t$0\n}'
+			insert_text_format: 2
+		},
+		Detail{
+			kind:               14
+			label:              '.for'
+			detail:             'postfix template'
+			insert_text:        'for x in expr {\n\t$0\n}'
+			insert_text_format: 2
+		},
+		Detail{
+			kind:               14
+			label:              '.ptr'
+			detail:             'postfix template'
+			insert_text:        '&expr'
+			insert_text_format: 2
+		},
+		Detail{
+			kind:               14
+			label:              '.unwrap'
+			detail:             'postfix template'
+			insert_text:        'expr or { $0 }'
+			insert_text_format: 2
+		},
+	]
 }
 
 fn make_keyword_completions() []Detail {
