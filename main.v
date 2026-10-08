@@ -849,7 +849,14 @@ fn (mut app App) handle_requests[T](mut reader T) {
 		match method {
 			.completion, .signature_help, .definition, .hover, .declaration, .type_definition,
 			.implementation {
+				// Phase 0 baseline: opt-in per-request timing.
+				started_ms := time.now().unix_milli()
 				resp := app.operation_at_pos(method, lsp_request)
+				if os.getenv('VLS_PERF_LOG') != '' {
+					elapsed_ms := time.now().unix_milli() - started_ms
+					app.send_log_message('request method=${method.str()} elapsed_ms=${elapsed_ms}',
+						4)
+				}
 				app.write_response_or_cancelled(lsp_request.id, resp)
 			}
 			.references {

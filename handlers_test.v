@@ -797,7 +797,9 @@ fn test_diagnostics_scheduler_requeues_active_sibling() {
 	uri_b := 'file:///project/b.v'
 	project_key := 'file:///project'
 	tickets_a := scheduler.begin_project_schedule(uri_a, project_key)
-	assert tickets_a.len == 1
+	assert tickets_a.len == 2
+	assert tickets_a.any(it.kind == .slow)
+	assert tickets_a.any(it.kind == .fast)
 	active_job := DiagnosticsJob{
 		uri:                uri_a
 		project_key:        project_key
@@ -826,8 +828,13 @@ fn diagnostics_test_pending_job(mut scheduler DiagnosticsScheduler, uri string) 
 	defer {
 		scheduler.mutex.unlock()
 	}
-	job := scheduler.pending_jobs[uri] or { return none }
-	return job
+	// One URI holds a fast and a slow job; return the first pending one.
+	for _, job in scheduler.pending_jobs {
+		if job.uri == uri {
+			return job
+		}
+	}
+	return none
 }
 
 fn test_diagnostics_scheduler_checks_staleness_while_publishing() {
@@ -13938,4 +13945,165 @@ fn test_rename_of_a_local_passed_to_a_method_named_like_an_array_one() {
 		'main.v': sorter_main
 	}, 'main.v:10:2')
 	assert edits == ['main.v:10:2', 'main.v:12:17', 'main.v:17:10'], edits.str()
+}
+
+// fast_test_project writes `files` under a tagged temp folder for fast
+// diagnostics tests.
+fn fast_test_project(mut app &App, tag string, files map[string]string) string {
+	dir := os.join_path(app.temp_dir, 'fast_diag_${tag}')
+	must_mkdir_all(dir)
+	for name, content in files {
+		path := os.join_path(dir, name)
+		must_mkdir_all(os.dir(path))
+		must_write_file(path, content)
+	}
+	return dir
+}
+
+fn test_parse_import_refs_records_positions() {
+	content := 'module main\n\nimport os\nimport math as m\n\nfn main() {}\n'
+	refs := parse_import_refs(content)
+	assert refs.map(it.path) == ['os', 'math']
+	assert refs[0].line == 2
+	assert refs[1].line == 3
+	// The path starts after `import ` on its line.
+	assert refs[0].col == 7
+	assert refs[1].col == 7
+}
+
+fn test_parse_import_refs_reads_import_blocks() {
+	content := 'module main\n\nimport (\n\tos\n\tnet.http\n)\n\nfn main() {}\n'
+	refs := parse_import_refs(content)
+	assert refs.map(it.path) == ['os', 'net.http']
+	assert refs[0].line == 3
+	assert refs[1].line == 4
+}
+
+fn test_parse_imports_matches_ref_paths() {
+	content := 'module main\n\nimport os\nimport (\n\tjson\n)\n\nfn main() {}\n'
+	assert parse_imports(content) == parse_import_refs(content).map(it.path)
+}
+
+fn test_fast_check_errors_flags_only_unresolvable_imports() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	dir := fast_test_project(mut app, 'unknown', {
+		'main.v': 'module main\n\nimport os\nimport nosuchmod_xyz\nimport C\n\nfn main() {}\n'
+	})
+	path := os.join_path(dir, 'main.v')
+	uri := path_to_uri(path)
+	content := os.read_file(path) or { panic(err) }
+	app.open_files[uri] = content
+	errors := app.fast_check_errors(uri, content)
+	assert errors.len == 1, errors.str()
+	assert errors[0].message.contains('unknown module')
+	assert errors[0].message.contains('nosuchmod_xyz')
+	assert errors[0].line_nr == 4
+	assert errors[0].level == 'error'
+}
+
+fn test_fast_check_errors_accepts_sibling_modules() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	dir := fast_test_project(mut app, 'sibling', {
+		'main.v':          'module main\n\nimport helper\n\nfn main() {\n\tprintln(helper.answer())\n}\n'
+		'helper/helper.v': "module helper\n\npub fn answer() string {\n\treturn 'x'\n}\n"
+	})
+	path := os.join_path(dir, 'main.v')
+	uri := path_to_uri(path)
+	content := os.read_file(path) or { panic(err) }
+	app.open_files[uri] = content
+	// The submodule resolves against the importing file's folder.
+	assert app.fast_check_errors(uri, content) == []
+}
+
+fn test_fast_check_errors_skips_c_interop() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	dir := fast_test_project(mut app, 'cinterop', {
+		'main.v': 'module main\n\nimport C\n\nfn main() {}\n'
+	})
+	path := os.join_path(dir, 'main.v')
+	uri := path_to_uri(path)
+	content := os.read_file(path) or { panic(err) }
+	app.open_files[uri] = content
+	assert app.fast_check_errors(uri, content) == []
+}
+
+fn test_scheduler_tickets_come_in_slow_and_fast() {
+	mut scheduler := new_diagnostics_scheduler()
+	tickets := scheduler.begin_project_schedule('file:///a.v', 'proj')
+	assert tickets.len == 2
+	assert tickets.any(it.kind == .slow)
+	assert tickets.any(it.kind == .fast)
+	assert tickets[0].generation == tickets[1].generation
+}
+
+fn test_scheduler_takes_fast_before_slow() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	mut scheduler := new_diagnostics_scheduler()
+	uri := 'file:///tiered.v'
+	mut first := true
+	for kind in [DiagnosticsKind.slow, DiagnosticsKind.fast] {
+		global_gen, gen := scheduler.next_generation(uri)
+		started := scheduler.enqueue(DiagnosticsJob{
+			uri:               uri
+			content:           'x'
+			global_generation: global_gen
+			generation:        gen
+			ready_at:          100
+			kind:              kind
+			write_mutex:       app.write_mutex
+		})
+		if first {
+			assert started
+			first = false
+		}
+	}
+	jobs, should_stop := scheduler.take_ready_jobs(100)
+	assert !should_stop
+	assert jobs.len == 1
+	assert jobs[0].kind == .fast
+	scheduler.finish(jobs[0])
+	rest, _ := scheduler.take_ready_jobs(100)
+	assert rest.len == 1
+	assert rest[0].kind == .slow
+}
+
+fn test_scheduler_cancel_drops_both_tiers() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	mut scheduler := new_diagnostics_scheduler()
+	uri := 'file:///both.v'
+	mut started := false
+	for kind in [DiagnosticsKind.slow, DiagnosticsKind.fast] {
+		global_gen, gen := scheduler.next_generation(uri)
+		if scheduler.enqueue(DiagnosticsJob{
+			uri:               uri
+			content:           'x'
+			global_generation: global_gen
+			generation:        gen
+			ready_at:          100
+			kind:              kind
+			write_mutex:       app.write_mutex
+		}) {
+			started = true
+		}
+	}
+	assert started
+	scheduler.cancel(uri)
+	jobs, should_stop := scheduler.take_ready_jobs(100)
+	assert jobs.len == 0
+	assert should_stop
 }

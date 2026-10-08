@@ -6441,36 +6441,7 @@ fn get_module_name(content string) string {
 // parse_imports extracts the module paths from `import` statements in `content`.
 // Returns a list of module paths, e.g. ['os', 'math', 'v.util'].
 fn parse_imports(content string) []string {
-	mut imports := []string{}
-	mut in_import_block := false
-	for line in content.split_into_lines() {
-		trimmed := line.trim_space()
-		if in_import_block {
-			if trimmed.starts_with(')') {
-				in_import_block = false
-				continue
-			}
-			parts := trimmed.all_before('//').fields()
-			if parts.len > 0 {
-				imports << parts[0]
-			}
-			continue
-		}
-		if !trimmed.starts_with('import ') {
-			continue
-		}
-		rest := trimmed[7..].all_before('//').trim_space()
-		if rest == '(' {
-			in_import_block = true
-			continue
-		}
-		// Strip optional `as alias` suffix
-		parts := rest.fields()
-		if parts.len > 0 {
-			imports << parts[0]
-		}
-	}
-	return imports
+	return parse_import_refs(content).map(it.path)
 }
 
 // get_import_completions returns completion items for an `import` line.
