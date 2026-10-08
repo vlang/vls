@@ -771,16 +771,17 @@ fn v_diagnostic_underline_len(line string) int {
 // cache_v_check_result never retains timed-out output because it may be partial.
 // Other failed invocations are cacheable only when they produced parsed
 // diagnostics; otherwise a transient compiler crash must be retried.
-fn (mut app App) cache_v_check_result(path string, content_hash int, generation int, errors []JsonError, exit_code int, parsed_diagnostic_count int) {
+fn (mut app App) cache_v_check_result(path string, program_root string, fingerprint string, errors []JsonError, exit_code int, parsed_diagnostic_count int) {
 	if exit_code == compiler_exit_timeout || (exit_code != 0 && parsed_diagnostic_count == 0) {
 		app.diag_cache.delete(path)
 		return
 	}
-	app.diag_cache[path] = DiagCacheEntry{
-		content_hash: content_hash
-		generation:   generation
-		errors:       errors
+	entry := DiagCacheEntry{
+		fingerprint: fingerprint
+		errors:      errors
 	}
+	app.diag_cache[path] = entry
+	save_diag_disk_entry(program_root, path, entry)
 }
 
 // Sentinel exit code returned when a compiler invocation is killed for
@@ -830,7 +831,30 @@ fn run_v_argv_cancelled(args []string, work_folder string, cancelled fn () bool)
 			output:    msg
 		}
 	}
-	v_exe := resolve_v_compiler_exe()
+	mut v_exe := resolve_v_compiler_exe()
+	if v_exe == 'v' {
+		// A bare name spawns only when the OS resolves it; resolve it here
+		// so a missing compiler degrades instead of failing loudly.
+		v_exe = os.find_abs_path_of_executable('v') or {
+			msg := 'V compiler not found on PATH'
+			log(msg)
+			return os.Result{
+				exit_code: 1
+				output:    msg
+			}
+		}
+	}
+	if !os.exists(v_exe) {
+		// Spawning a missing executable fails loudly in the OS call; refuse
+		// with an ordinary error result instead. A missing compiler must
+		// never crash the server.
+		msg := 'V compiler not found: ${v_exe}'
+		log(msg)
+		return os.Result{
+			exit_code: 1
+			output:    msg
+		}
+	}
 	timeout_ms := resolve_compiler_timeout_ms()
 	mut p := os.new_process(v_exe)
 	p.set_args(args)
@@ -1280,14 +1304,33 @@ fn (mut app App) run_v_check(path string, text string) []JsonError {
 	mut singlefile_tmppath := ''
 	mut overlay := CompilationOverlay{}
 
-	// Check the diagnostics cache before invoking the compiler.
-	content_hash := text.hash()
-	gen := app.project_generation(path)
+	// The fingerprint covers the program's contents and the compiler: an
+	// identical state reuses the answer without invoking the compiler,
+	// within the session and across restarts (see diag_cache.v).
+	program_dir := app.program_root(real_path)
+	overlay_root := program_overlay_root(real_path, program_dir)
+	fingerprint := compiler_fingerprint() + '\n' + app.program_content_fingerprint(overlay_root)
+	mut cache_hit := ''
 	if cached := app.diag_cache[path] {
-		if cached.content_hash == content_hash && cached.generation == gen {
-			log('Returning cached diagnostics for ${path}')
-			return cached.errors
+		if cached.fingerprint == fingerprint {
+			cache_hit = 'mem'
 		}
+	}
+	if cache_hit == '' {
+		app.ensure_diag_disk_cache(program_dir)
+		if cached := app.diag_cache[path] {
+			if cached.fingerprint == fingerprint {
+				cache_hit = 'disk'
+			}
+		}
+	}
+	if os.getenv('VLS_PERF_LOG') != '' {
+		app.send_log_message('diagnostics cache root=${overlay_root} fp=${fingerprint.hash().hex()} hit=${cache_hit}',
+			4)
+	}
+	if cache_hit != '' {
+		log('Returning ${cache_hit}-cached diagnostics for ${path}')
+		return app.diag_cache[path].errors
 	}
 
 	log('running v.exe check for ${real_path}')
@@ -1309,9 +1352,9 @@ fn (mut app App) run_v_check(path string, text string) []JsonError {
 	} else {
 		''
 	}
-	// The file is checked as part of its program: from the program's directory,
-	// with the local modules it imports, as `v .` there builds it.
-	program_dir := app.program_root(real_path)
+	// The file is checked as part of its program: from the program's directory
+	// (computed above for the cache fingerprint), with the local modules it
+	// imports, as `v .` there builds it.
 	// The copy of the program that the questions about it use too, whose lock
 	// this check holds until it is answered: the same check answers both.
 	mut shared_copy := &ProgramCopy(unsafe { nil })
@@ -1446,12 +1489,12 @@ fn (mut app App) run_v_check(path string, text string) []JsonError {
 		app.program_errors = found.program.clone()
 		app.program_dir_checked = overlay.source_work_dir
 		log('FILTERED ERRORS: ${found.file.len} of ${found.parsed}')
-		app.cache_v_check_result(path, content_hash, gen, found.file, x.exit_code, found.parsed)
+		app.cache_v_check_result(path, program_dir, fingerprint, found.file, x.exit_code, found.parsed)
 		return found.file
 	}
 
 	log('V3 CHECK ERRORS: ${found.parsed}')
-	app.cache_v_check_result(path, content_hash, gen, found.file, x.exit_code, found.parsed)
+	app.cache_v_check_result(path, program_dir, fingerprint, found.file, x.exit_code, found.parsed)
 	return found.file
 }
 
