@@ -2815,3 +2815,1247 @@ fn test_compat_matrix_dead_end_without_checker() {
 	assert app.line_info_mode == .missing
 	assert app.captured_output.len == 1
 }
+
+// ============================================================================
+// Tiered-diagnostics coverage for interop.v, diag_cache.v and run_command.v.
+// Every test below names the production function it covers directly.
+// ============================================================================
+
+fn test_cov_hex_nibble_decodes_and_rejects() {
+	assert (hex_nibble(`0`) or { 255 }) == 0, 'hex 0 decodes to 0'
+	assert (hex_nibble(`9`) or { 255 }) == 9, 'hex 9 decodes to 9'
+	assert (hex_nibble(`a`) or { 255 }) == 10, 'hex a decodes to 10'
+	assert (hex_nibble(`f`) or { 255 }) == 15, 'hex f decodes to 15'
+	assert (hex_nibble(`A`) or { 255 }) == 10, 'hex A decodes to 10'
+	assert (hex_nibble(`F`) or { 255 }) == 15, 'hex F decodes to 15'
+	if _ := hex_nibble(`g`) {
+		assert false, 'g is not a hex digit'
+	} else {
+		assert true, 'g is rejected'
+	}
+	if _ := hex_nibble(`/`) {
+		assert false, '/ is not a hex digit'
+	} else {
+		assert true, '/ is rejected'
+	}
+}
+
+fn test_cov_percent_decode_keeps_invalid_escapes() {
+	assert percent_decode('abc') == 'abc', 'no escape passes through'
+	assert percent_decode('a%20b') == 'a b', '%20 decodes to a space'
+	assert percent_decode('a%2Gb%') == 'a%2Gb%', 'invalid and trailing escapes are kept'
+	assert percent_decode('100%25') == '100%', '%25 decodes to percent'
+	assert percent_decode('%') == '%', 'lone percent is kept'
+}
+
+fn test_cov_path_byte_needs_escape_and_percent_encode_path() {
+	assert !path_byte_needs_escape(`a`), 'lowercase is unreserved'
+	assert !path_byte_needs_escape(`Z`), 'uppercase is unreserved'
+	assert !path_byte_needs_escape(`0`), 'digit is unreserved'
+	assert !path_byte_needs_escape(`-`), 'dash is unreserved'
+	assert !path_byte_needs_escape(`/`), 'slash is kept as separator'
+	assert !path_byte_needs_escape(`:`), 'colon is kept for drive letters'
+	assert path_byte_needs_escape(` `), 'space must be escaped'
+	assert path_byte_needs_escape(`#`), 'hash must be escaped'
+	assert path_byte_needs_escape(`%`), 'percent must be escaped'
+	assert path_byte_needs_escape(`\\`), 'backslash must be escaped'
+	assert percent_encode_path('a b#c%d:e/f-._~') == 'a%20b%23c%25d:e/f-._~', 'encodes only reserved bytes'
+}
+
+fn test_cov_path_is_within_and_path_relative_to_wrappers() {
+	assert path_is_within('/a/b/c', '/a/b'), 'child is within parent'
+	assert path_is_within('/a/b', '/a/b'), 'directory is within itself'
+	assert !path_is_within('/a/barley', '/a/bar'), 'sibling prefix is not within'
+	assert !path_is_within('/a/b', ''), 'empty dir never contains'
+	assert path_relative_to('/a/b/c', '/a/b') or { '' } == 'c', 'relative strips the prefix'
+	assert path_relative_to('/a/b', '/a/b') or { 'x' } == '', 'equal paths give empty relative'
+	if _ := path_relative_to('/other/file.v', '/a/b') {
+		assert false, 'outside path must be none'
+	} else {
+		assert true, 'outside path is none'
+	}
+}
+
+fn test_cov_make_unique_temp_path_tags_extension() {
+	tagged := make_unique_temp_path('check', '/tmp/foo.v')
+	assert tagged.contains('check'), 'tag names the purpose: ${tagged}'
+	assert tagged.ends_with('.v'), 'extension is kept: ${tagged}'
+	assert tagged.contains('foo'), 'base name is kept: ${tagged}'
+	plain := make_unique_temp_path('work', '/tmp/foo')
+	assert plain.ends_with('.v'), 'extensionless input defaults to .v: ${plain}'
+	other := make_unique_temp_path('check', '/tmp/foo.v')
+	assert other.contains('check'), 'a repeated call keeps the tag: ${other}'
+	assert other.ends_with('.v'), 'a repeated call keeps the extension: ${other}'
+}
+
+fn test_cov_build_v_line_info_args_multifile_shape() {
+	args := build_v_line_info_args_multifile('main.v', '10:gd^5')
+	assert args == ['-w', '-check', '-nocolor', '-vls-mode', '-line-info', 'main.v:10:gd^5', '.'], 'multifile line-info argv is exact: ${args}'
+}
+
+fn test_cov_compiler_is_available_reports_exe_presence() {
+	previous := os.getenv('VLS_V_COMMAND')
+	defer {
+		restore_v_command(previous)
+	}
+	base := os.join_path(os.temp_dir(), 'vls_cov_available_${os.getpid()}')
+	interop_test_must_mkdir_all(base)
+	defer {
+		os.rmdir_all(base) or {}
+	}
+	real := os.join_path(base, 'v')
+	interop_test_must_write_file(real, 'stub')
+	os.setenv('VLS_V_COMMAND', real, true)
+	assert compiler_is_available(), 'an existing configured compiler is available'
+	os.setenv('VLS_V_COMMAND', os.join_path(base, 'no-such-compiler'), true)
+	assert !compiler_is_available(), 'a missing configured compiler is unavailable'
+}
+
+fn test_cov_program_diagnostic_level_prefixes() {
+	if level, message := program_diagnostic_level('builder error: redefinition of function `main`') {
+		assert level == 'error', 'builder error maps to error'
+		assert message == 'redefinition of function `main`', 'builder message is kept'
+	} else {
+		assert false, 'builder error must parse'
+	}
+	if level, _ := program_diagnostic_level('checker error: bad') {
+		assert level == 'error', 'checker error maps to error'
+	} else {
+		assert false, 'checker error must parse'
+	}
+	if level, _ := program_diagnostic_level('parser error: bad') {
+		assert level == 'error', 'parser error maps to error'
+	} else {
+		assert false, 'parser error must parse'
+	}
+	if level, _ := program_diagnostic_level('cgen error: bad') {
+		assert level == 'error', 'cgen error maps to error'
+	} else {
+		assert false, 'cgen error must parse'
+	}
+	if level, message := program_diagnostic_level('error: plain failure') {
+		assert level == 'error', 'plain error keeps its level'
+		assert message == 'plain failure', 'plain error keeps its message'
+	} else {
+		assert false, 'plain error must parse'
+	}
+	if level, _ := program_diagnostic_level('warning: unused') {
+		assert level == 'warning', 'warning keeps its level'
+	} else {
+		assert false, 'warning must parse'
+	}
+	if level, _ := program_diagnostic_level('notice: hint') {
+		assert level == 'notice', 'notice keeps its level'
+	} else {
+		assert false, 'notice must parse'
+	}
+	if _, _ := program_diagnostic_level('/tmp/main.v:1:1: error: placed') {
+		assert false, 'a placed diagnostic is not a program diagnostic'
+	} else {
+		assert true, 'a placed diagnostic is skipped'
+	}
+}
+
+fn test_cov_quoted_words_extracts_both_quote_styles() {
+	assert quoted_words('uses `alpha` plus "beta"') == ['alpha', 'beta'], 'backticks and double quotes are read'
+	assert quoted_words('nothing quoted here') == [], 'unquoted text gives no words'
+	assert quoted_words('empty `` quotes') == [], 'empty quotes give no words'
+}
+
+fn test_cov_program_diagnostic_place_keyword_order_and_fallback() {
+	lines := ['module main', 'import lib', 'fn main() {']
+	line_nr, col, len := program_diagnostic_place(lines, ['lib'], ['import ', 'module '])
+	assert line_nr == 2, 'import keyword finds line 2, got ${line_nr}'
+	assert col == 1, 'column starts at 1, got ${col}'
+	assert len == 'import lib'.len, 'length covers the whole line, got ${len}'
+	// Keywords are tried in order: fn first finds the function even though an
+	// import of another word exists.
+	ordered := ['import lib', 'fn main() {']
+	line_fn, _, _ := program_diagnostic_place(ordered, ['main', 'lib'], ['fn ', 'import '])
+	assert line_fn == 2, 'function keyword wins when listed first, got ${line_fn}'
+	fallback_nr, fallback_col, fallback_len := program_diagnostic_place(lines, ['zzz'], [
+		'import ',
+		'fn ',
+	])
+	assert fallback_nr == 1, 'unknown words fall back to line 1, got ${fallback_nr}'
+	assert fallback_col == 1, 'fallback column is 1, got ${fallback_col}'
+	assert fallback_len == 'module main'.len, 'fallback covers the first line, got ${fallback_len}'
+	empty_nr, empty_col, empty_len := program_diagnostic_place([]string{}, ['zzz'], ['fn '])
+	assert empty_nr == 1 && empty_col == 1 && empty_len == 0, 'empty files anchor at 1:1 with length 0'
+}
+
+fn test_cov_diagnostic_source_path_is_valid_suffix_and_disk() {
+	assert diagnostic_source_path_is_valid('main.v', ''), '.v is valid without a source dir'
+	assert diagnostic_source_path_is_valid('run.vsh', ''), '.vsh is valid without a source dir'
+	assert !diagnostic_source_path_is_valid('notes.txt', ''), '.txt is never a source'
+	assert !diagnostic_source_path_is_valid('novtsuffix', ''), 'suffixless paths are rejected'
+	base := os.join_path(os.temp_dir(), 'vls_cov_valid_${os.getpid()}')
+	interop_test_must_mkdir_all(base)
+	defer {
+		os.rmdir_all(base) or {}
+	}
+	real := os.join_path(base, 'main.v')
+	interop_test_must_write_file(real, 'module main\n')
+	assert diagnostic_source_path_is_valid(real, base), 'an existing absolute file is valid'
+	assert !diagnostic_source_path_is_valid(os.join_path(base, 'missing.v'), base), 'a missing file is invalid'
+	assert diagnostic_source_path_is_valid('main.v', base), 'a relative file present on disk is valid'
+	assert !diagnostic_source_path_is_valid('missing.v', base), 'a relative file missing on disk is invalid'
+}
+
+fn test_cov_parse_v_check_diagnostic_header_accepts_and_rejects() {
+	if diag := parse_v_check_diagnostic_header('/tmp/main.v:3:7: error: boom', '') {
+		assert diag.path == '/tmp/main.v', 'path is kept'
+		assert diag.line_nr == 3, 'line is parsed'
+		assert diag.col == 7, 'column is parsed'
+		assert diag.message == 'boom', 'message is parsed'
+		assert diag.level == 'error', 'level is parsed'
+	} else {
+		assert false, 'a plain header must parse'
+	}
+	if diag := parse_v_check_diagnostic_header('/tmp/main.v:3:7: builder error: broken', '') {
+		assert diag.level == 'error', 'builder error maps to error, got ${diag.level}'
+	} else {
+		assert false, 'a builder header must parse'
+	}
+	if _ := parse_v_check_diagnostic_header('/tmp/main.v:3:x: error: boom', '') {
+		assert false, 'a non-numeric column must be rejected'
+	} else {
+		assert true, 'a non-numeric column is rejected'
+	}
+	if _ := parse_v_check_diagnostic_header('/tmp/notes.txt:3:7: error: boom', '') {
+		assert false, 'a non-V path must be rejected'
+	} else {
+		assert true, 'a non-V path is rejected'
+	}
+	if _ := parse_v_check_diagnostic_header('just some log line', '') {
+		assert false, 'a log line must be rejected'
+	} else {
+		assert true, 'a log line is rejected'
+	}
+}
+
+fn test_cov_decimal_text_is_valid_cases() {
+	assert decimal_text_is_valid('0'), 'zero is valid'
+	assert decimal_text_is_valid('123'), 'digits are valid'
+	assert !decimal_text_is_valid(''), 'empty text is invalid'
+	assert !decimal_text_is_valid('12a'), 'letters are invalid'
+	assert !decimal_text_is_valid('-3'), 'a sign is invalid'
+}
+
+fn test_cov_v_diagnostic_underline_len_cases() {
+	assert v_diagnostic_underline_len('      |   ~~~') == 3, 'tildes measure the span'
+	assert v_diagnostic_underline_len('      |   ^^^') == 3, 'carets measure the span'
+	assert v_diagnostic_underline_len('no separator here') == 0, 'a line without a pipe gives 0'
+	assert v_diagnostic_underline_len('  |   ') == 0, 'a blank marker gives 0'
+	assert v_diagnostic_underline_len('  | ~~xx') == 0, 'mixed markers give 0'
+}
+
+fn test_cov_resolve_compiler_timeout_ms_env_override() {
+	previous := os.getenv('VLS_TIMEOUT_MS')
+	defer {
+		if previous == '' {
+			os.unsetenv('VLS_TIMEOUT_MS')
+		} else {
+			os.setenv('VLS_TIMEOUT_MS', previous, true)
+		}
+	}
+	os.unsetenv('VLS_TIMEOUT_MS')
+	assert resolve_compiler_timeout_ms() == 30000, 'the default timeout is 30s'
+	os.setenv('VLS_TIMEOUT_MS', '1500', true)
+	assert resolve_compiler_timeout_ms() == 1500, 'a positive override wins'
+	os.setenv('VLS_TIMEOUT_MS', '0', true)
+	assert resolve_compiler_timeout_ms() == 30000, 'zero falls back to the default'
+	os.setenv('VLS_TIMEOUT_MS', '-5', true)
+	assert resolve_compiler_timeout_ms() == 30000, 'a negative value falls back to the default'
+	os.setenv('VLS_TIMEOUT_MS', 'abc', true)
+	assert resolve_compiler_timeout_ms() == 30000, 'a non-numeric value falls back to the default'
+}
+
+fn test_cov_compilation_overlay_root_and_work_dir() {
+	base := os.join_path(os.temp_dir(), 'vls_cov_root_${os.getpid()}')
+	plain := os.join_path(base, 'plain')
+	proj := os.join_path(base, 'proj')
+	sub := os.join_path(proj, 'repo', 'deeper')
+	interop_test_must_mkdir_all(sub)
+	interop_test_must_mkdir_all(plain)
+	interop_test_must_write_file(os.join_path(proj, 'v.mod'), "Module {\n\tname: 'covroot'\n}\n")
+	plain_file := os.join_path(plain, 'main.v')
+	interop_test_must_write_file(plain_file, 'module main\n')
+	assert compilation_overlay_root(plain_file) == normalize_overlay_path(plain), 'loose files overlay from their own dir'
+	proj_file := os.join_path(sub, 'more.v')
+	interop_test_must_write_file(proj_file, 'module main\n')
+	assert compilation_overlay_root(proj_file) == normalize_overlay_path(proj), 'v.mod files overlay from the project root'
+	assert compilation_work_dir(plain_file) == normalize_overlay_path(plain), 'loose files check from their own dir'
+	assert compilation_work_dir(proj_file) == normalize_overlay_path(sub), 'unlisted subdirs check from their own dir'
+	os.rmdir_all(base) or {}
+	listed_base := os.join_path(os.temp_dir(), 'vls_cov_subdirs_${os.getpid()}')
+	listed_proj := os.join_path(listed_base, 'proj')
+	listed_sub := os.join_path(listed_proj, 'repo')
+	interop_test_must_mkdir_all(listed_sub)
+	interop_test_must_write_file(os.join_path(listed_proj, 'v.mod'), "Module {\n\tname: 'covsub'\n\tsubdirs: ['repo']\n}\n")
+	listed_file := os.join_path(listed_sub, 'repo.v')
+	interop_test_must_write_file(listed_file, 'module main\n')
+	assert compilation_work_dir(listed_file) == normalize_overlay_path(listed_proj), 'listed subdirs check from the program root'
+	os.rmdir_all(listed_base) or {}
+}
+
+fn test_cov_should_use_compilation_overlay_branches() {
+	base := os.join_path(os.temp_dir(), 'vls_cov_should_${os.getpid()}')
+	interop_test_must_mkdir_all(base)
+	defer {
+		os.rmdir_all(base) or {}
+	}
+	lone := os.join_path(base, 'lone.v')
+	interop_test_must_write_file(lone, 'module main\n')
+	assert !should_use_compilation_overlay(lone, 1), 'a lone file with one buffer needs no overlay'
+	assert should_use_compilation_overlay(lone, 2), 'two open buffers need an overlay'
+	sibling := os.join_path(base, 'sibling.v')
+	interop_test_must_write_file(sibling, 'module main\n')
+	assert should_use_compilation_overlay(lone, 1), 'a sibling module file needs an overlay'
+	interop_test_must_write_file(os.join_path(base, 'v.mod'), "Module {\n\tname: 'covshould'\n}\n")
+	assert should_use_compilation_overlay(lone, 1), 'a v.mod project needs an overlay'
+}
+
+fn test_cov_resolve_local_module_dir_variants() {
+	base := os.join_path(os.temp_dir(), 'vls_cov_localmod_${os.getpid()}')
+	prog := os.join_path(base, 'prog')
+	interop_test_must_mkdir_all(os.join_path(prog, 'a', 'b'))
+	defer {
+		os.rmdir_all(base) or {}
+	}
+	if got := resolve_local_module_dir('a.b', prog, '') {
+		assert got == normalize_overlay_path(os.join_path(prog, 'a', 'b')), 'dotted imports resolve below the program'
+	} else {
+		assert false, 'a.b must resolve below the program'
+	}
+	if _ := resolve_local_module_dir('missing', prog, '') {
+		assert false, 'an unknown module must be none'
+	} else {
+		assert true, 'an unknown module is none'
+	}
+	// A v.mod root named proj serves proj.a from its own a/ directory.
+	root := os.join_path(base, 'proj')
+	interop_test_must_mkdir_all(os.join_path(root, 'a'))
+	if got := resolve_local_module_dir('proj.a', prog, root) {
+		assert got == normalize_overlay_path(os.join_path(root, 'a')), 'the project prefix resolves below the v.mod root'
+	} else {
+		assert false, 'proj.a must resolve below the v.mod root'
+	}
+}
+
+fn test_cov_v_files_in_and_source_text_and_has_sibling() {
+	base := os.join_path(os.temp_dir(), 'vls_cov_vfiles_${os.getpid()}')
+	interop_test_must_mkdir_all(base)
+	defer {
+		os.rmdir_all(base) or {}
+	}
+	main_file := os.join_path(base, 'main.v')
+	other_file := os.join_path(base, 'other.v')
+	interop_test_must_write_file(main_file, 'module main\n')
+	interop_test_must_write_file(other_file, 'module main\n')
+	interop_test_must_write_file(os.join_path(base, 'skip_test.v'), 'module main\n')
+	interop_test_must_write_file(os.join_path(base, 'keep_test_test.v'), 'module main\n')
+	main_uri := path_to_uri(main_file)
+	mut app := &App{
+		open_files: {
+			main_uri:                                 'buffer wins'
+			path_to_uri(os.join_path(base, 'new.v')): 'unsaved module'
+		}
+	}
+	files := app.v_files_in(normalize_overlay_path(base))
+	assert normalize_overlay_path(main_file) in files, 'disk files are listed'
+	assert normalize_overlay_path(other_file) in files, 'sibling files are listed'
+	assert files.any(it.ends_with('new.v')), 'unsaved buffers are listed'
+	assert !files.any(it.ends_with('keep_test_test.v')), 'test files are left out'
+	assert app.source_text(normalize_overlay_path(main_file)) == 'buffer wins', 'open buffers win over disk'
+	assert app.source_text(normalize_overlay_path(other_file)) == 'module main\n', 'closed files read from disk'
+	assert app.source_text(normalize_overlay_path(os.join_path(base, 'gone.v'))) == '', 'missing files read as empty'
+	assert has_sibling_v_files(base, main_file), 'a sibling .v file is detected'
+	lone_dir := os.join_path(base, 'lone')
+	interop_test_must_mkdir_all(lone_dir)
+	lone_file := os.join_path(lone_dir, 'only.v')
+	interop_test_must_write_file(lone_file, 'module main\n')
+	assert !has_sibling_v_files(lone_dir, lone_file), 'a lone file has no siblings'
+	assert !has_sibling_v_files(os.join_path(base, 'no-such-dir'), lone_file), 'a missing dir has no siblings'
+}
+
+fn test_cov_program_reaches_is_program_dir_imports_local() {
+	base := os.join_path(os.temp_dir(), 'vls_cov_reaches_${os.getpid()}')
+	interop_test_must_mkdir_all(os.join_path(base, 'lib'))
+	interop_test_must_mkdir_all(os.join_path(base, 'lone'))
+	defer {
+		os.rmdir_all(base) or {}
+	}
+	interop_test_must_write_file(os.join_path(base, 'main.v'), 'module main\n\nimport lib\n\nfn main() {}\n')
+	interop_test_must_write_file(os.join_path(base, 'lib', 'lib.v'), 'module lib\n')
+	interop_test_must_write_file(os.join_path(base, 'lone', 'lone.v'), 'module lone\n')
+	interop_test_must_write_file(os.join_path(base, 'plain.v'), 'module main\n\nfn main() {}\n')
+	lib_dir := normalize_overlay_path(os.join_path(base, 'lib'))
+	lone_dir := normalize_overlay_path(os.join_path(base, 'lone'))
+	root := normalize_overlay_path(base)
+	mut app := &App{
+		open_files: map[string]string{}
+	}
+	assert app.program_reaches(root, '', lib_dir), 'the program reaches its imported module'
+	assert !app.program_reaches(root, '', lone_dir), 'the program does not reach an unimported module'
+	assert !app.program_reaches(lib_dir, '', lone_dir), 'a library dir is not a program'
+	assert app.is_program_dir(root), 'a dir with module main is a program dir'
+	assert !app.is_program_dir(lib_dir), 'a library dir is not a program dir'
+	assert app.imports_local_module(os.join_path(base, 'main.v'), root), 'main.v imports a local module'
+	assert !app.imports_local_module(os.join_path(base, 'plain.v'), root), 'a file without local imports needs no program check'
+}
+
+fn test_cov_prepare_compilation_overlay_in_and_with_and_line_info() {
+	base := os.join_path(os.temp_dir(), 'vls_cov_prep_${os.getpid()}')
+	proj := os.join_path(base, 'proj')
+	interop_test_must_mkdir_all(proj)
+	work := os.join_path(base, 'work')
+	interop_test_must_mkdir_all(work)
+	defer {
+		os.rmdir_all(base) or {}
+	}
+	main_file := os.join_path(proj, 'main.v')
+	interop_test_must_write_file(main_file, 'module main\n')
+	main_uri := path_to_uri(main_file)
+	unsaved := 'module main\n\nfn unsaved() {}\n'
+	mut app := &App{
+		temp_dir:   work
+		open_files: {
+			main_uri: unsaved
+		}
+	}
+	overlay := app.prepare_compilation_overlay_in(main_file, proj) or {
+		assert false, 'prepare in must succeed: ${err}'
+		return
+	}
+	defer {
+		os.rmdir_all(overlay.temp_root) or {}
+	}
+	assert os.read_file(overlay.temp_source_file) or { '' } == unsaved, 'the buffer is materialized'
+	assert overlay.source_work_dir == normalize_overlay_path(proj), 'the work dir is kept'
+	with_overlay := app.prepare_compilation_overlay_with(main_file, proj, map[string]string{}) or {
+		assert false, 'prepare with must succeed: ${err}'
+		return
+	}
+	defer {
+		os.rmdir_all(with_overlay.temp_root) or {}
+	}
+	assert with_overlay.source_work_dir == normalize_overlay_path(proj), 'prepare with keeps the work dir'
+	line_overlay := app.prepare_line_info_overlay(main_file, proj) or {
+		assert false, 'line info overlay must succeed: ${err}'
+		return
+	}
+	defer {
+		os.rmdir_all(line_overlay.temp_root) or {}
+	}
+	assert os.read_file(line_overlay.temp_source_file) or { '' } == unsaved, 'line info overlay keeps the buffer'
+	// A work dir outside the source tree cannot hold the file.
+	if _ := app.prepare_compilation_overlay_with(main_file, os.join_path(base, 'elsewhere'), map[string]string{}) {
+		assert false, 'an outside work dir must fail'
+	} else {
+		assert true, 'an outside work dir fails'
+	}
+}
+
+fn test_cov_program_open_files_maps_program_members() {
+	base := os.join_path(os.temp_dir(), 'vls_cov_progfiles_${os.getpid()}')
+	interop_test_must_mkdir_all(base)
+	other_dir := os.join_path(base, 'other')
+	interop_test_must_mkdir_all(other_dir)
+	defer {
+		os.rmdir_all(base) or {}
+	}
+	main_file := os.join_path(base, 'main.v')
+	other_file := os.join_path(base, 'other.v')
+	far_file := os.join_path(other_dir, 'far.v')
+	for path in [main_file, other_file, far_file] {
+		interop_test_must_write_file(path, 'module main\n')
+	}
+	main_uri := path_to_uri(main_file)
+	other_uri := path_to_uri(other_file)
+	far_uri := path_to_uri(far_file)
+	mut app := &App{
+		open_files: {
+			main_uri:  'module main\n'
+			other_uri: 'module main\n'
+			far_uri:   'module main\n'
+		}
+	}
+	overlay := CompilationOverlay{
+		source_root:      normalize_overlay_path(base)
+		temp_work_dir:    normalize_overlay_path(base)
+		source_work_dir:  normalize_overlay_path(base)
+		temp_source_file: normalize_overlay_path(main_file)
+	}
+	got := app.program_open_files(normalize_overlay_path(main_file), overlay)
+	assert got.len == 1, 'only the other program file is mapped, got ${got.len}'
+	assert got[normalized_index_path(normalize_overlay_path(other_file))] == other_uri, 'the other file maps to its uri'
+}
+
+fn test_cov_split_check_errors_single_and_program_paths() {
+	base := os.join_path(os.temp_dir(), 'vls_cov_split_${os.getpid()}')
+	src := os.join_path(base, 'src')
+	overlay_root := os.join_path(base, 'overlay')
+	interop_test_must_mkdir_all(src)
+	interop_test_must_mkdir_all(overlay_root)
+	defer {
+		os.rmdir_all(base) or {}
+	}
+	main_src := os.join_path(src, 'main.v')
+	other_src := os.join_path(src, 'other.v')
+	interop_test_must_write_file(main_src, 'module main\n')
+	interop_test_must_write_file(other_src, 'module main\n')
+	main_tmp := os.join_path(overlay_root, 'main.v')
+	other_tmp := os.join_path(overlay_root, 'other.v')
+	interop_test_must_write_file(main_tmp, 'module main\n')
+	interop_test_must_write_file(other_tmp, 'module main\n')
+	single_out := '${main_src}:2:3: error: boom\n'
+	single := split_check_errors(single_out, src, main_src, false, CompilationOverlay{}, main_src, map[string]string{},
+		src)
+	assert single.file.len == 1, 'single-file output keeps its diagnostic'
+	assert single.parsed == 1, 'single-file parsed counts the diagnostic'
+	assert single.file[0].message == 'boom', 'single-file message is kept'
+	overlay := CompilationOverlay{
+		source_root:         normalize_overlay_path(src)
+		source_display_root: normalize_overlay_path(src)
+		temp_root:           normalize_overlay_path(overlay_root)
+		source_work_dir:     normalize_overlay_path(src)
+		temp_work_dir:       normalize_overlay_path(overlay_root)
+		temp_source_file:    normalize_overlay_path(main_tmp)
+	}
+	other_uri := 'file:///other.v'
+	program_uris := {
+		normalized_index_path(normalize_overlay_path(other_src)): other_uri
+	}
+	multi_out := '${main_tmp}:2:3: error: boom\n${other_tmp}:4:1: warning: slow\n'
+	multi := split_check_errors(multi_out, overlay_root, main_tmp, true, overlay, main_src,
+		program_uris, overlay_root)
+	assert multi.parsed == 2, 'program output parses both diagnostics, got ${multi.parsed}'
+	assert multi.file.len == 1, 'only the requested file is kept, got ${multi.file.len}'
+	assert multi.file[0].path == main_src, 'kept errors point at the real path'
+	assert multi.program[other_uri].len == 1, 'the other program file gets its diagnostic'
+	assert multi.program[other_uri][0].level == 'warning', 'levels survive the split'
+}
+
+fn test_cov_new_overlay_copy_budget_and_try_reserve() {
+	mut budget := new_overlay_copy_budget()
+	assert budget.max_files == 4096, 'the file cap is 4096'
+	assert budget.max_bytes == u64(64 * 1024 * 1024), 'the byte cap is 64MiB'
+	base := os.join_path(os.temp_dir(), 'vls_cov_budget_${os.getpid()}')
+	interop_test_must_mkdir_all(base)
+	defer {
+		os.rmdir_all(base) or {}
+	}
+	small := os.join_path(base, 'small.v')
+	content := 'module main\n'
+	interop_test_must_write_file(small, content)
+	assert budget.try_reserve(small), 'a small file fits the budget'
+	assert budget.files == 1, 'the file count moves'
+	assert budget.bytes == u64(content.len), 'the byte count moves'
+	mut tiny := OverlayCopyBudget{
+		max_files: 1
+		max_bytes: 1024
+	}
+	assert tiny.try_reserve(small), 'one file fits a cap of one'
+	assert !tiny.try_reserve(small), 'a second file breaks the file cap'
+	mut bytes := OverlayCopyBudget{
+		max_files: 10
+		max_bytes: 4
+	}
+	assert !bytes.try_reserve(small), 'an over-size file breaks the byte cap'
+	assert bytes.bytes == 0, 'a refused reservation moves nothing'
+}
+
+fn test_cov_overlay_path_in_and_has_descendant_wrappers() {
+	assert overlay_path_in('src/main.v', ['src/main.v']), 'an exact path is in the set'
+	assert !overlay_path_in('src/other.v', ['src/main.v']), 'another path is not in the set'
+	assert overlay_path_has_descendant('src', ['src/main.v']), 'a parent has a descendant in the set'
+	assert !overlay_path_has_descendant('src/main.v', ['src']), 'a file has no descendant in a parent set'
+	assert !overlay_path_in('src/main.v', []), 'an empty set contains nothing'
+}
+
+fn test_cov_create_links_and_materialize_overlay_file() {
+	base := os.join_path(os.temp_dir(), 'vls_cov_links_${os.getpid()}')
+	interop_test_must_mkdir_all(base)
+	defer {
+		os.rmdir_all(base) or {}
+	}
+	source := os.join_path(base, 'source.v')
+	interop_test_must_write_file(source, 'module main\n')
+	linked := os.join_path(base, 'linked.v')
+	create_overlay_symlink(source, linked) or {
+		// Symlinks need privileges on some machines; the fallback below is the
+		// portable assertion.
+		return
+	}
+	assert os.exists(linked), 'a symlinked overlay entry exists'
+	hard := os.join_path(base, 'hard.v')
+	create_overlay_hard_link(source, hard) or {
+		assert false, 'a hard link must be created: ${err}'
+		return
+	}
+	assert os.is_file(hard), 'a hard-linked overlay entry is a file'
+	mut budget := new_overlay_copy_budget()
+	materialized := materialize_overlay_file(source, os.join_path(base, 'mat.v'), mut budget) or {
+		assert false, 'materialize must succeed: ${err}'
+		return
+	}
+	assert materialized, 'a linkable file materializes'
+	assert budget.files == 0, 'a linked file costs no budget'
+	mut empty := OverlayCopyBudget{
+		max_files: 0
+		max_bytes: 0
+	}
+	denied := materialize_overlay_file_with_linker(source, os.join_path(base, 'denied.v'), deny_overlay_symlink, mut
+		empty) or {
+		assert false, 'an exhausted budget must not fail: ${err}'
+		return
+	}
+	assert !denied, 'an exhausted budget skips the file'
+	assert !os.exists(os.join_path(base, 'denied.v')), 'a skipped file is not written'
+}
+
+fn test_cov_local_import_rel_dirs_closure() {
+	base := os.join_path(os.temp_dir(), 'vls_cov_imports_${os.getpid()}')
+	root := os.join_path(base, 'proj')
+	interop_test_must_mkdir_all(os.join_path(root, 'mathutil', 'inner'))
+	defer {
+		os.rmdir_all(base) or {}
+	}
+	main_content := 'module main\n\nimport mathutil\n'
+	interop_test_must_write_file(os.join_path(root, 'main.v'), main_content)
+	interop_test_must_write_file(os.join_path(root, 'mathutil', 'mathutil.v'), 'module mathutil\n\nimport mathutil.inner\n')
+	interop_test_must_write_file(os.join_path(root, 'mathutil', 'inner', 'inner.v'), 'module inner\n')
+	main_uri := path_to_uri(os.join_path(root, 'main.v'))
+	tracked := {
+		main_uri: main_content
+	}
+	got := local_import_rel_dirs(normalize_overlay_path(root), normalize_overlay_path(root), tracked)
+	assert 'mathutil' in got, 'a directly imported module is found: ${got}'
+	assert 'mathutil/inner' in got, 'a transitively imported module is found: ${got}'
+	empty := local_import_rel_dirs(normalize_overlay_path(root), normalize_overlay_path(root), map[string]string{})
+	assert empty.len == 0, 'no buffers means no imports'
+}
+
+fn test_cov_parse_embed_and_vmodroot_paths() {
+	content := 'module main\n\nconst a = \$embed_file(\'assets/a.json\')\nconst b = \$embed_file( "assets/b.txt" )\nconst c = \$embed_file(r\'assets/c.dat\')\n'
+	embed := parse_embed_file_literal_paths(content)
+	assert embed == ['assets/a.json', 'assets/b.txt', 'assets/c.dat'], 'quoted embed paths are read: ${embed}'
+	assert parse_embed_file_literal_paths('no marker here') == [], 'missing markers give nothing'
+	assert parse_embed_file_literal_paths('\$embed_file without a call') == [], 'a bare marker gives nothing'
+	flagged := "module main\n#flag -I @VMODROOT/thirdparty/native\n// uses @VMODROOT/thirdparty/lib/lib.h\nconst x = \$embed_file('thirdparty/native/embedded.json')"
+	thirdparty := parse_vmodroot_thirdparty_paths(flagged)
+	assert thirdparty == ['@VMODROOT/thirdparty/native', '@VMODROOT/thirdparty/lib/lib.h'], 'vmodroot references are read: ${thirdparty}'
+	assert parse_vmodroot_thirdparty_paths('nothing here') == [], 'missing vmodroot markers give nothing'
+}
+
+fn test_cov_resolve_thirdparty_overlay_reference_cases() {
+	base := os.join_path(os.temp_dir(), 'vls_cov_third_${os.getpid()}')
+	root := os.join_path(base, 'proj')
+	lib := os.join_path(root, 'thirdparty', 'lib')
+	interop_test_must_mkdir_all(lib)
+	defer {
+		os.rmdir_all(base) or {}
+	}
+	header := os.join_path(lib, 'lib.h')
+	interop_test_must_write_file(header, '#define X 1\n')
+	source_file := os.join_path(root, 'main.v')
+	interop_test_must_write_file(source_file, 'module main\n')
+	if got := resolve_thirdparty_overlay_reference('@VMODROOT/thirdparty/lib/lib.h', source_file, normalize_overlay_path(root)) {
+		assert got == 'thirdparty/lib/lib.h', 'vmodroot references resolve, got ${got}'
+	} else {
+		assert false, 'a present thirdparty file must resolve'
+	}
+	if got := resolve_thirdparty_overlay_reference('thirdparty/lib/lib.h', source_file, normalize_overlay_path(root)) {
+		assert got == 'thirdparty/lib/lib.h', 'relative references resolve from the source dir, got ${got}'
+	} else {
+		assert false, 'a relative thirdparty file must resolve'
+	}
+	if _ := resolve_thirdparty_overlay_reference('@VMODROOT/thirdparty/lib/missing.h', source_file, normalize_overlay_path(root)) {
+		assert false, 'a missing thirdparty file must be none'
+	} else {
+		assert true, 'a missing thirdparty file is none'
+	}
+	if _ := resolve_thirdparty_overlay_reference('/abs/thirdparty/lib/lib.h', source_file, normalize_overlay_path(root)) {
+		assert false, 'an absolute reference must be none'
+	} else {
+		assert true, 'an absolute reference is none'
+	}
+	if _ := resolve_thirdparty_overlay_reference('@VEXEROOT/thirdparty/lib/lib.h', source_file, normalize_overlay_path(root)) {
+		assert false, 'a vexeroot reference must be none'
+	} else {
+		assert true, 'a vexeroot reference is none'
+	}
+	interop_test_must_write_file(os.join_path(root, 'plain.v'), 'module main\n')
+	if _ := resolve_thirdparty_overlay_reference('plain.v', source_file, normalize_overlay_path(root)) {
+		assert false, 'a non-thirdparty reference must be none'
+	} else {
+		assert true, 'a non-thirdparty reference is none'
+	}
+}
+
+fn test_cov_referenced_thirdparty_rel_paths_collects() {
+	base := os.join_path(os.temp_dir(), 'vls_cov_refthird_${os.getpid()}')
+	root := os.join_path(base, 'proj')
+	lib := os.join_path(root, 'thirdparty', 'lib')
+	interop_test_must_mkdir_all(lib)
+	defer {
+		os.rmdir_all(base) or {}
+	}
+	interop_test_must_write_file(os.join_path(lib, 'embedded.json'), '{}\n')
+	main_content := "module main\n#flag -I @VMODROOT/thirdparty/lib\nconst x = \$embed_file('thirdparty/lib/embedded.json')\n"
+	main_file := os.join_path(root, 'main.v')
+	interop_test_must_write_file(main_file, main_content)
+	got := referenced_thirdparty_rel_paths(normalize_overlay_path(root), normalize_overlay_path(root), {
+		path_to_uri(main_file): main_content
+	}, []string{})
+	assert got.contains('thirdparty/lib/embedded.json'), 'embed references are collected: ${got}'
+	assert got == got.clone().sorted(), 'references are sorted'
+}
+
+fn test_cov_is_overlay_compilation_file_suffixes() {
+	assert is_overlay_compilation_file('v.mod'), 'the manifest is a compilation file'
+	assert is_overlay_compilation_file('main.v'), '.v is a compilation file'
+	assert is_overlay_compilation_file('run.vsh'), '.vsh is a compilation file'
+	assert is_overlay_compilation_file('native.h'), '.h is a compilation file'
+	assert is_overlay_compilation_file('lib.a'), '.a is a compilation file'
+	assert !is_overlay_compilation_file('notes.txt'), '.txt is an asset'
+	assert !is_overlay_compilation_file('data.json'), '.json is an asset'
+	assert !is_overlay_compilation_file('README.md'), '.md is an asset'
+}
+
+fn test_cov_copy_bounded_overlay_entry_pass_cycle_and_filter() {
+	base := os.join_path(os.temp_dir(), 'vls_cov_pass_${os.getpid()}')
+	src := os.join_path(base, 'src')
+	dst := os.join_path(base, 'dst')
+	interop_test_must_mkdir_all(os.join_path(src, '.git'))
+	interop_test_must_mkdir_all(dst)
+	defer {
+		os.rmdir_all(base) or {}
+	}
+	interop_test_must_write_file(os.join_path(src, 'main.v'), 'module main\n')
+	interop_test_must_write_file(os.join_path(src, 'notes.txt'), 'asset\n')
+	interop_test_must_write_file(os.join_path(src, '.git', 'hidden.v'), 'module hidden\n')
+	mut budget := new_overlay_copy_budget()
+	mut visited := map[string]bool{}
+	compilation := copy_bounded_overlay_entry_pass(src, dst, true, mut budget, mut visited) or {
+		assert false, 'the compilation pass must succeed: ${err}'
+		return
+	}
+	assert compilation == 1, 'only the .v file copies in the compilation pass, got ${compilation}'
+	assert os.is_file(os.join_path(dst, 'main.v')), 'the compilation file lands'
+	assert !os.exists(os.join_path(dst, '.git', 'hidden.v')), 'excluded dirs never copy'
+	again := copy_bounded_overlay_entry_pass(src, dst, true, mut budget, mut visited) or {
+		assert false, 'a repeated pass must succeed: ${err}'
+		return
+	}
+	assert again == 0, 'visited dirs and existing targets copy nothing, got ${again}'
+	mut assets_visited := map[string]bool{}
+	assets := copy_bounded_overlay_entry_pass(src, os.join_path(base, 'assets'), false, mut budget, mut
+		assets_visited) or {
+		assert false, 'the asset pass must succeed: ${err}'
+		return
+	}
+	assert assets == 1, 'only the asset copies in the asset pass, got ${assets}'
+}
+
+fn test_cov_materialize_referenced_thirdparty_inputs_copies() {
+	base := os.join_path(os.temp_dir(), 'vls_cov_matthird_${os.getpid()}')
+	src := os.join_path(base, 'src')
+	dst := os.join_path(base, 'dst')
+	lib := os.join_path(src, 'thirdparty', 'lib')
+	interop_test_must_mkdir_all(lib)
+	interop_test_must_mkdir_all(dst)
+	defer {
+		os.rmdir_all(base) or {}
+	}
+	interop_test_must_write_file(os.join_path(lib, 'lib.v'), 'module lib\n')
+	interop_test_must_write_file(os.join_path(lib, 'notes.txt'), 'asset\n')
+	mut budget := new_overlay_copy_budget()
+	materialize_referenced_thirdparty_inputs(normalize_overlay_path(src), os.join_path(dst, ''), [
+		'thirdparty/lib',
+	], mut budget) or {
+		assert false, 'materialize must succeed: ${err}'
+		return
+	}
+	assert os.is_file(os.join_path(dst, 'thirdparty', 'lib', 'lib.v')), 'referenced compilation inputs copy'
+	assert !os.exists(os.join_path(dst, 'thirdparty', 'lib', 'notes.txt')), 'assets do not copy for dir references'
+}
+
+fn test_cov_own_overlay_dirs_creates_missing_chain() {
+	base := os.join_path(os.temp_dir(), 'vls_cov_own_${os.getpid()}')
+	src := os.join_path(base, 'src')
+	tmp := os.join_path(base, 'tmp')
+	interop_test_must_mkdir_all(os.join_path(src, 'a', 'b'))
+	interop_test_must_mkdir_all(tmp)
+	defer {
+		os.rmdir_all(base) or {}
+	}
+	mut budget := new_overlay_copy_budget()
+	owned := own_overlay_dirs(normalize_overlay_path(src), tmp, 'a/b', mut budget) or {
+		assert false, 'own must succeed: ${err}'
+		return
+	}
+	assert owned.len == 0, 'created dirs need no link replacement, got ${owned}'
+	assert os.is_dir(os.join_path(tmp, 'a', 'b')), 'the missing chain is created'
+}
+
+fn test_cov_compiler_hover_augments_and_falls_back() {
+	payload := '{"contents":{"kind":"markdown","value":"fn helper()"}}'
+	payload_hover := compiler_hover(payload, '')
+	assert payload_hover is Hover, 'a compiler payload answers hover'
+	augmented := compiler_hover(payload, 'extra docs')
+	assert augmented is Hover, 'augmented hover stays hover'
+	if augmented is Hover {
+		assert (augmented as Hover).contents.value.contains('fn helper()'), 'the compiler value is kept'
+		assert (augmented as Hover).contents.value.contains('extra docs'), 'missing docs are appended'
+	}
+	unchanged := compiler_hover(payload, 'fn helper()')
+	assert unchanged is Hover, 'unchanged hover stays hover'
+	if unchanged is Hover {
+		assert !(unchanged as Hover).contents.value.contains('\n\nfn helper()'), 'present docs are not duplicated'
+	}
+	doc_only := compiler_hover('{}', 'vdoc comment')
+	assert doc_only is Hover, 'docs alone answer hover'
+	if doc_only is Hover {
+		assert (doc_only as Hover).contents.value == 'vdoc comment', 'docs alone answer hover'
+	}
+	assert compiler_hover('', '') == ResponseResult('null'), 'no payload and no docs answer null'
+}
+
+fn test_cov_line_info_result_branches() {
+	base := os.join_path(os.temp_dir(), 'vls_cov_lires_${os.getpid()}')
+	interop_test_must_mkdir_all(base)
+	defer {
+		os.rmdir_all(base) or {}
+	}
+	source := os.join_path(base, 'main.v')
+	content := 'module main\n\nfn helper() {}\n\nfn main() {\n\thelper()\n}\n'
+	interop_test_must_write_file(source, content)
+	uri := path_to_uri(source)
+	mut app := &App{
+		open_files: {
+			uri: content
+		}
+	}
+	overlay := CompilationOverlay{}
+	completion := app.line_info_result(.completion, uri, '6:1', '{"details":[{"label":"println","kind":3},{"label":"+op","kind":3}]}',
+		false, '', overlay, '')
+	if completion is []Detail {
+		assert (completion as []Detail).len == 1, 'operator completions are filtered'
+		assert (completion as []Detail)[0].label == 'println', 'code completions are kept'
+	} else {
+		assert false, 'completion must decode to details'
+	}
+	assert app.line_info_result(.signature_help, uri, '1:1', '{"signatures":[]}', false, '', overlay,
+		'') == ResponseResult('null'), 'an empty signature answers null'
+	sig := app.line_info_result(.signature_help, uri, '1:1', '{"signatures":[{"label":"fn f()","parameters":[]}],"activeSignature":0}',
+		false, '', overlay, '')
+	assert sig is SignatureHelp, 'a found signature answers help'
+	hover := app.line_info_result(.hover, uri, '4:hv^1', '{"contents":{"kind":"markdown","value":"fn helper()"}}',
+		false, '', overlay, '')
+	assert hover is Hover, 'a compiler hover answers hover'
+	assert app.line_info_result(.inlay_hint, uri, '1:1', '', false, '', overlay, '') == ResponseResult('null'), 'an empty inlay answer is null'
+	hints := app.line_info_result(.inlay_hint, uri, '1:1', '{"inlay_hints":[{"line":0,"col":1,"label":": int","kind":1,"tooltip":""}]}',
+		false, '', overlay, '')
+	assert hints is []InlayHint, 'inlay payload decodes to hints'
+	assert app.line_info_result(.definition, uri, '1:1', '', false, '', overlay, '') == ResponseResult('null'), 'an empty definition is null'
+	definition := app.line_info_result(.definition, uri, '1:1', '${source}:3:5', false, '', overlay,
+		'')
+	assert definition is Location, 'a definition maps to a location'
+	if definition is Location {
+		assert (definition as Location).uri == uri, 'the definition reuses the open uri'
+		assert (definition as Location).range.start.line == 2, 'definition lines are zero-based'
+	}
+}
+
+fn test_cov_run_v_argv_cancelled_branches() {
+	cancelled := run_v_argv_cancelled(['-check', '.'], '', fn () bool {
+		return true
+	})
+	assert cancelled.exit_code == diagnostics_check_cancelled, 'a cancelled check reports cancellation'
+	missing_dir := os.join_path(os.temp_dir(), 'vls_cov_nodir_${os.getpid()}')
+	missing := run_v_argv_cancelled(['-check', '.'], missing_dir, fn () bool {
+		return false
+	})
+	assert missing.exit_code != 0, 'a missing work dir fails'
+	assert missing.output.contains('Working dir does not exist'), 'a missing work dir is reported'
+	previous := os.getenv('VLS_V_COMMAND')
+	defer {
+		restore_v_command(previous)
+	}
+	os.setenv('VLS_V_COMMAND', os.join_path(os.temp_dir(), 'vls_cov_no_compiler_${os.getpid()}'), true)
+	base := os.join_path(os.temp_dir(), 'vls_cov_argv_${os.getpid()}')
+	interop_test_must_mkdir_all(base)
+	defer {
+		os.rmdir_all(base) or {}
+	}
+	gone := run_v_argv_cancelled(['-check', '.'], base, fn () bool {
+		return false
+	})
+	assert gone.exit_code != 0, 'a missing compiler fails'
+	assert gone.output.contains('not found'), 'a missing compiler is reported: ${gone.output}'
+}
+
+fn test_cov_run_v_line_info_once_singlefile_via_stub() {
+	$if windows {
+		// The stand-in compiler is a POSIX shell script.
+		return
+	}
+	previous := os.getenv('VLS_V_COMMAND')
+	mut app, uri, root := line_info_stub_app('vls_cov_once', compat_matrix_modern_direct_stub)
+	defer {
+		restore_v_command(previous)
+		os.rmdir_all(root) or {}
+	}
+	work_dir := os.dir(uri_to_path(uri))
+	result := app.run_v_line_info_once(.hover, uri, '6:hv^4', work_dir)
+	assert app.line_info_mode == .direct, 'a direct compiler probes direct'
+	assert result is Hover, 'a direct single-file lookup answers hover'
+	if result is Hover {
+		assert (result as Hover).contents.value.contains('fn helper()'), 'the stub payload is kept'
+	}
+}
+
+fn test_cov_run_v_line_info_pooled_returns_none_without_pool() {
+	mut compat_app := App{
+		line_info_mode: .compat
+	}
+	if _ := compat_app.run_v_line_info_pooled(.hover, 'file:///tmp/x.v', '1:hv^1') {
+		assert false, 'compat mode never uses the pool'
+	} else {
+		assert true, 'compat mode skips the pool'
+	}
+	mut missing_app := App{
+		line_info_mode: .missing
+	}
+	if _ := missing_app.run_v_line_info_pooled(.hover, 'file:///tmp/x.v', '1:hv^1') {
+		assert false, 'missing mode never uses the pool'
+	} else {
+		assert true, 'missing mode skips the pool'
+	}
+}
+
+fn test_cov_names_a_local_detects_locals() {
+	content := 'module main\n\nfn main() {\n\tx := 1\n\tprintln(x)\n}\n'
+	line := '\tprintln(x)'
+	mut app := App{}
+	at_use := Position{
+		line: 4
+		char: 10
+	}
+	assert app.names_a_local(content, line, 'x', at_use), 'a use names its local'
+	assert !app.names_a_local(content, line, 'zzz', at_use), 'an unknown name is not a local'
+	params := 'module main\n\nfn greet(name string) {\n\tprintln(name)\n}\n'
+	param_line := '\tprintln(name)'
+	param_pos := Position{
+		line: 3
+		char: 14
+	}
+	assert app.names_a_local(params, param_line, 'name', param_pos), 'a use names its parameter'
+}
+
+fn test_cov_diag_cache_base_dir_override_and_default() {
+	previous := os.getenv('VLS_DIAG_CACHE_DIR')
+	defer {
+		restore_diag_cache_dir(previous)
+	}
+	custom := os.join_path(os.temp_dir(), 'vls_cov_cachebase_${os.getpid()}')
+	os.setenv('VLS_DIAG_CACHE_DIR', custom, true)
+	assert diag_cache_base_dir() == custom, 'an override wins'
+	os.unsetenv('VLS_DIAG_CACHE_DIR')
+	assert diag_cache_base_dir() == os.join_path(os.cache_dir(), 'vls', 'check-diag'), 'the default joins the cache dir'
+}
+
+fn test_cov_code_lens_complete_utf8_prefix_len_boundaries() {
+	assert code_lens_complete_utf8_prefix_len('') == 0, 'empty input gives 0'
+	assert code_lens_complete_utf8_prefix_len('abc') == 3, 'ascii is complete'
+	full := 'abé'
+	assert code_lens_complete_utf8_prefix_len(full) == full.len, 'a complete multi-byte tail is kept'
+	truncated := full[..full.len - 1]
+	assert code_lens_complete_utf8_prefix_len(truncated) == 2, 'a split multi-byte tail is cut, got ${code_lens_complete_utf8_prefix_len(truncated)}'
+	emoji := 'a🙂'
+	assert code_lens_complete_utf8_prefix_len(emoji) == emoji.len, 'a complete emoji is kept'
+	cut_emoji := emoji[..emoji.len - 1]
+	assert code_lens_complete_utf8_prefix_len(cut_emoji) == 1, 'a split emoji is cut'
+}
+
+fn test_cov_v_source_code_mask_hides_strings_and_comments() {
+	mask := v_source_code_mask('a "b" c')
+	mask_str := mask.bytestr()
+	assert mask.len == 'a "b" c'.len, 'the mask keeps the length'
+	assert mask_str[0..1] == 'a', 'code before a string is kept'
+	assert mask_str[6..7] == 'c', 'code after a string is kept'
+	assert mask_str[2..5] == '   ', 'string contents are hidden: ${mask_str}'
+	line_mask := v_source_code_mask('code // comment\nnext')
+	line_str := line_mask.bytestr()
+	assert line_str.contains('code'), 'code before a comment is kept'
+	assert !line_str.contains('comment'), 'line comments are hidden: ${line_str}'
+	assert line_str.contains('\n'), 'newlines survive the mask'
+	block_mask := v_source_code_mask('/* hidden */ code')
+	block_str := block_mask.bytestr()
+	assert block_str.ends_with('code'), 'code after a block comment is kept'
+	assert !block_str.contains('hidden'), 'block comments are hidden: ${block_str}'
+	interp_mask := v_source_code_mask("'\${x}y'")
+	interp_str := interp_mask.bytestr()
+	assert interp_str.contains('x'), 'interpolations stay visible: ${interp_str}'
+}
+
+fn test_cov_code_lens_mask_token_and_hash_directive() {
+	source := 'println(@FILE) @FILEX'
+	mask := v_source_code_mask(source)
+	at := source.index('@FILE') or { -1 }
+	assert at >= 0, 'the fixture contains @FILE'
+	assert code_lens_mask_has_at_token(mask, at, '@FILE'), '@FILE matches at its position'
+	assert !code_lens_mask_has_at_token(mask, at + 1, '@FILE'), '@FILE does not match off by one'
+	assert !code_lens_mask_has_at_token(mask, mask.len - 2, '@FILE'), 'a token past the end never matches'
+	second := source.last_index('@FILE') or { -1 }
+	assert !code_lens_mask_has_at_token(mask, second, '@FILE'), '@FILEX is not @FILE'
+	hash_source := '#flag -I @VMODROOT/x\nprintln(@FILE)'
+	hash_mask := v_source_code_mask(hash_source)
+	hash_at := hash_source.index('@VMODROOT') or { -1 }
+	plain_at := hash_source.index('@FILE') or { -1 }
+	assert code_lens_token_is_in_hash_directive(hash_mask, hash_at), 'a flag token sits in a hash directive'
+	assert !code_lens_token_is_in_hash_directive(hash_mask, plain_at), 'a call token is not a directive'
+}
+
+fn test_cov_code_lens_run_target_and_executable_and_args() {
+	base := os.join_path(os.temp_dir(), 'vls_cov_target_${os.getpid()}')
+	interop_test_must_mkdir_all(base)
+	defer {
+		os.rmdir_all(base) or {}
+	}
+	path := os.join_path(base, 'main.v')
+	interop_test_must_write_file(path, 'module main\n')
+	holder := App{}
+	mut main_job := CodeLensRunJob{
+		kind:        .main
+		title:       'Run Main'
+		uri:         path_to_uri(path)
+		path:        path
+		open_files:  map[string]string{}
+		write_mutex: holder.write_mutex
+	}
+	main_target := code_lens_run_target(main_job)
+	assert main_target.starts_with('main:'), 'main jobs tag main: ${main_target}'
+	assert main_target.ends_with(':${main_job.fn_name}'), 'the target carries the function name'
+	file_job := CodeLensRunJob{
+		kind:        .test_file
+		title:       'Run File'
+		uri:         path_to_uri(path)
+		path:        path
+		open_files:  map[string]string{}
+		write_mutex: holder.write_mutex
+	}
+	assert code_lens_run_target(file_job).starts_with('test-file:'), 'file jobs tag test-file'
+	fn_job := CodeLensRunJob{
+		kind:        .test_function
+		title:       'Run Test'
+		uri:         path_to_uri(path)
+		path:        path
+		fn_name:     'test_one'
+		open_files:  map[string]string{}
+		write_mutex: holder.write_mutex
+	}
+	fn_target := code_lens_run_target(fn_job)
+	assert fn_target.starts_with('test-function:'), 'function jobs tag test-function: ${fn_target}'
+	assert fn_target.ends_with(':test_one'), 'function targets carry the test name: ${fn_target}'
+	exe := code_lens_executable_path(base)
+	assert exe.contains('code_lens_program'), 'the executable is named: ${exe}'
+	$if windows {
+		assert exe.ends_with('.exe'), 'windows executables carry .exe: ${exe}'
+	} $else {
+		assert !exe.ends_with('.exe'), 'posix executables carry no .exe: ${exe}'
+	}
+	assert code_lens_compile_args(main_job, path, exe) == build_v_run_compile_args(exe), 'main compiles as a run'
+	assert code_lens_compile_args(file_job, path, exe) == build_v_test_compile_args(path, '', exe), 'a file compiles as a test file'
+	assert code_lens_compile_args(fn_job, path, exe) == build_v_test_compile_args(path, 'test_one', exe), 'a function compiles with -run-only'
+	assert code_lens_display_args(main_job) == build_v_run_args(), 'main displays as a run'
+	assert code_lens_display_args(file_job) == build_v_test_args(path, ''), 'a file displays as a test file'
+	assert code_lens_display_args(fn_job) == build_v_test_args(path, 'test_one'), 'a function displays with -run-only'
+}
+
+fn test_cov_run_command_manager_lifecycle() {
+	mut manager := new_run_command_manager()
+	assert manager.next_id == 0, 'a fresh manager has no ids'
+	base := os.join_path(os.temp_dir(), 'vls_cov_mgr_${os.getpid()}')
+	interop_test_must_mkdir_all(base)
+	defer {
+		os.rmdir_all(base) or {}
+	}
+	path := os.join_path(base, 'main.v')
+	interop_test_must_write_file(path, 'module main\n')
+	holder := App{}
+	job := CodeLensRunJob{
+		kind:        .main
+		title:       'Run Main'
+		uri:         path_to_uri(path)
+		path:        path
+		open_files:  map[string]string{}
+		write_mutex: holder.write_mutex
+	}
+	target := code_lens_run_target(job)
+	id, accepted := manager.begin_job(target)
+	assert accepted, 'a fresh target is accepted'
+	assert !manager.job_is_cancelled(id, target), 'a fresh job is not cancelled'
+	manager.cancel_process_locked(id)
+	assert !manager.job_is_cancelled(id, target), 'an empty cancel changes nothing'
+	id2, accepted2 := manager.begin_job(target)
+	assert accepted2, 'a newer run for the same target is accepted'
+	assert manager.job_is_cancelled(id, target), 'the older run is cancelled'
+	assert !manager.job_is_cancelled(id2, target), 'the newer run is current'
+	mut dummy := os.new_process('v')
+	assert !manager.register_process(999, target, dummy), 'an unknown id never registers'
+	assert manager.register_process(id2, target, dummy), 'the current id registers'
+	manager.unregister_process(id2)
+	assert !manager.job_is_cancelled(id2, target), 'unregistering keeps the target current'
+	manager.finish_job(id, target)
+	manager.finish_job(id2, target)
+	assert manager.job_is_cancelled(id2, target), 'a finished target reads as cancelled'
+	// A stopped manager refuses every new worker without spawning anything.
+	manager.cancel_all_and_wait()
+	_, refused := manager.begin_job(target)
+	assert !refused, 'a stopped manager refuses new jobs'
+	assert !manager.launch(job), 'a stopped manager refuses launches'
+	assert manager.run_sync(job) == [], 'a stopped manager runs nothing synchronously'
+	assert manager.job_is_cancelled(id2, target), 'a stopped manager cancels everything'
+	mut stopped_dummy := os.new_process('v')
+	assert !manager.register_process(id2, target, stopped_dummy), 'a stopped manager registers nothing'
+}
+
+fn test_cov_run_managed_process_cancelled_and_missing_dir() {
+	mut manager := new_run_command_manager()
+	base := os.join_path(os.temp_dir(), 'vls_cov_managed_${os.getpid()}')
+	interop_test_must_mkdir_all(base)
+	defer {
+		os.rmdir_all(base) or {}
+	}
+	target := 'main:4:${base}:'
+	old_id, _ := manager.begin_job(target)
+	new_id, _ := manager.begin_job(target)
+	stale := run_managed_process(mut manager, old_id, target, 'v', [], base)
+	assert stale.cancelled, 'a replaced job is cancelled without spawning'
+	assert stale.result.exit_code == 0, 'a cancelled job carries no result'
+	missing := run_managed_process(mut manager, new_id, target, 'v', [], os.join_path(base, 'no-such-dir'))
+	assert !missing.cancelled, 'a current job is not cancelled'
+	assert missing.result.exit_code != 0, 'a missing work dir fails'
+	assert missing.result.output.contains('Working dir does not exist'), 'a missing work dir is reported'
+	manager.finish_job(old_id, target)
+	manager.finish_job(new_id, target)
+	manager.cancel_all_and_wait()
+}
+
+fn test_cov_log_code_lens_output_and_get_manager() {
+	mut worker := App{
+		capture_output: true
+	}
+	overlay := CompilationOverlay{
+		source_display_root: '/src/proj'
+		temp_root:           '/tmp/overlay'
+	}
+	log_code_lens_output(mut worker, os.Result{
+		exit_code: 0
+		output:    'built /tmp/overlay/main.v\n'
+	}, overlay)
+	assert worker.captured_output.len == 1, 'compiler output is logged'
+	assert worker.captured_output[0].contains('/src/proj/main.v'), 'overlay paths map back to sources'
+	assert worker.captured_output[0].contains('logMessage'), 'output goes to the log channel'
+	mut quiet := App{
+		capture_output: true
+	}
+	log_code_lens_output(mut quiet, os.Result{
+		exit_code: 0
+	}, overlay)
+	assert quiet.captured_output.len == 0, 'empty output logs nothing'
+	mut app := App{}
+	first := app.get_run_command_manager()
+	second := app.get_run_command_manager()
+	first.cancel_all_and_wait()
+	_, accepted := second.begin_job('probe')
+	assert !accepted, 'both handles are the same manager'
+	app.stop_run_commands()
+}
+
+fn test_cov_preserve_code_lens_overlay_rewrites_pseudos() {
+	base := os.join_path(os.temp_dir(), 'vls_cov_pseudo_${os.getpid()}')
+	src := os.join_path(base, 'src')
+	tmp := os.join_path(base, 'tmp')
+	interop_test_must_mkdir_all(src)
+	interop_test_must_mkdir_all(tmp)
+	defer {
+		os.rmdir_all(base) or {}
+	}
+	source := 'module main\n\nfn main() {\n\tprintln(@FILE)\n}\n'
+	source_path := os.join_path(src, 'main.v')
+	interop_test_must_write_file(source_path, source)
+	temp_path := os.join_path(tmp, 'main.v')
+	interop_test_must_write_file(temp_path, source)
+	overlay := CompilationOverlay{
+		source_root:         normalize_overlay_path(src)
+		source_display_root: normalize_overlay_path(src)
+		temp_root:           normalize_overlay_path(tmp)
+		source_work_dir:     normalize_overlay_path(src)
+		temp_work_dir:       normalize_overlay_path(tmp)
+		temp_source_file:    normalize_overlay_path(temp_path)
+	}
+	open_sources := {
+		normalize_overlay_path(source_path): source
+	}
+	preserve_code_lens_overlay_dir(overlay, normalize_overlay_path(tmp), open_sources) or {
+		assert false, 'preserve dir must succeed: ${err}'
+		return
+	}
+	rewritten := os.read_file(temp_path) or { '' }
+	assert !rewritten.contains('@FILE'), 'pseudos are rewritten: ${rewritten}'
+	assert rewritten.contains('main.v'), 'the real file name survives: ${rewritten}'
+	// The map form derives the same sources from open files.
+	interop_test_must_write_file(temp_path, source)
+	preserve_code_lens_overlay_source_paths(overlay, {
+		path_to_uri(source_path): source
+	}) or {
+		assert false, 'preserve paths must succeed: ${err}'
+		return
+	}
+	again := os.read_file(temp_path) or { '' }
+	assert !again.contains('@FILE'), 'the map form rewrites too: ${again}'
+}
+
+fn test_cov_run_code_lens_job_cancelled_and_start_refused() {
+	mut manager := new_run_command_manager()
+	base := os.join_path(os.temp_dir(), 'vls_cov_codelens_${os.getpid()}')
+	interop_test_must_mkdir_all(base)
+	defer {
+		os.rmdir_all(base) or {}
+	}
+	path := os.join_path(base, 'main.v')
+	interop_test_must_write_file(path, 'module main\n\nfn main() {}\n')
+	holder := App{}
+	job := CodeLensRunJob{
+		kind:           .main
+		title:          'Run Main'
+		uri:            path_to_uri(path)
+		path:           path
+		open_files:     map[string]string{}
+		write_mutex:    holder.write_mutex
+		capture_output: true
+	}
+	target := code_lens_run_target(job)
+	old_id, _ := manager.begin_job(target)
+	new_id, _ := manager.begin_job(target)
+	out := run_code_lens_job(mut manager, old_id, target, job)
+	assert out.len == 1, 'a cancelled job only keeps its start log line: ${out}'
+	assert out[0].contains('Run Main'), 'the start log names the job: ${out[0]}'
+	assert !out[0].contains('showMessage'), 'a cancelled job sends no show message'
+	// run_code_lens_job already finished old_id; only the replacing job is left.
+	manager.finish_job(new_id, target)
+	// A stopping server refuses new runs with a message instead of spawning.
+	mut app := App{
+		capture_output: true
+	}
+	app.run_command_manager = new_run_command_manager()
+	app.get_run_command_manager().cancel_all_and_wait()
+	app.start_code_lens_run(job)
+	assert app.captured_output.len == 1, 'a refused start tells the client'
+	assert app.captured_output[0].contains('cannot start'), 'the refusal names the problem: ${app.captured_output[0]}'
+	app.stop_run_commands()
+}

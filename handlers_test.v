@@ -14340,3 +14340,1092 @@ fn test_scheduler_cancel_drops_both_tiers() {
 	assert jobs.len == 0
 	assert should_stop
 }
+
+// Coverage for handlers.v pure helpers: delimiters, parameters and names.
+
+fn test_cov_bracket_depth_counts_delimiters_outside_strings() {
+	assert bracket_depth('fn main() {') == 1, 'open brace'
+	assert bracket_depth('fn main() {}') == 0, 'balanced braces'
+	assert bracket_depth('a { b {') == 2, 'nested opens'
+	assert bracket_depth('}') == -1, 'lone closer'
+	assert bracket_depth('a[b(c)]') == 0, 'mixed delimiters balance'
+	assert bracket_depth('s := "{ not a block"') == 0, 'brace in string is skipped'
+}
+
+fn test_cov_matching_delimiter_finds_pairs() {
+	assert matching_delimiter('(a(b)c)', 0, `(`, `)`) == 6, 'nested parens'
+	assert matching_delimiter('[x]', 0, `[`, `]`) == 2, 'brackets'
+	assert matching_delimiter('(unclosed', 0, `(`, `)`) == -1, 'unclosed'
+	assert matching_delimiter('abc', 1, `(`, `)`) == -1, 'not an opener'
+	assert matching_delimiter('', 0, `(`, `)`) == -1, 'empty text'
+}
+
+fn test_cov_split_top_level_commas() {
+	assert split_top_level_commas('a, b, c') == ['a', ' b', ' c'], 'flat list'
+	assert split_top_level_commas('f(a, b), c') == ['f(a, b)', ' c'], 'nested call stays whole'
+	assert split_top_level_commas('') == [''], 'empty text is one part'
+}
+
+fn test_cov_function_parameter_names() {
+	assert function_parameter_names('fn foo(a int, b string) int') == ['a', 'b'], 'plain params'
+	assert function_parameter_names('fn (mut app App) foo(x int)') == ['app', 'x'], 'receiver first'
+	assert function_parameter_names('not a function') == [], 'no signature'
+}
+
+fn test_cov_utf8_helpers() {
+	assert utf8_seq_len(`a`) == 1, 'ascii'
+	assert utf8_seq_len(0xc3) == 2, 'two byte lead'
+	assert utf8_seq_len(0xe2) == 3, 'three byte lead'
+	assert utf8_seq_len(0xf0) == 4, 'four byte lead'
+	assert utf8_seq_len(0x80) == 1, 'continuation byte advances by one'
+	s := 'h\xc3\xa9llo'
+	assert utf8_char_to_byte_index(s, 2) == 3, 'second char starts at byte 3'
+	assert utf8_byte_to_char_index(s, 3) == 2, 'byte 3 is the second char'
+	assert utf8_char_to_byte_index(s, 0) == 0, 'zero char is zero byte'
+	assert utf8_byte_to_char_index(s, 0) == 0, 'zero byte is zero char'
+}
+
+fn test_cov_ident_predicates_and_encoding_names() {
+	assert is_ident_start(`a`), 'letter starts an identifier'
+	assert is_ident_start(`_`), 'underscore starts an identifier'
+	assert !is_ident_start(`1`), 'digit cannot start an identifier'
+	assert is_ident_char(`1`), 'digit continues an identifier'
+	assert !is_ident_char(`-`), 'dash is not an identifier char'
+	assert position_encoding_string(.utf16) == 'utf-16', 'utf16 wire name'
+	assert position_encoding_string(.utf8) == 'utf-8', 'utf8 wire name'
+	assert position_encoding_string(.utf32) == 'utf-32', 'utf32 wire name'
+}
+
+fn test_cov_line_offsets_and_position_mapping() {
+	assert line_start_offsets('a\nb\nc') == [0, 2, 4], 'lf offsets'
+	assert line_start_offsets('a\r\nb') == [0, 3], 'crlf offsets'
+	assert line_start_offsets('a\rb') == [0, 2], 'cr offsets'
+	starts := line_start_offsets('ab\ncd')
+	assert line_text_without_terminator('ab\ncd', starts, 0) == 'ab', 'first line text'
+	assert line_text_without_terminator('ab\ncd', starts, 1) == 'cd', 'last line text'
+	assert position_to_byte_offset('ab\ncd', starts, 1, 1, .utf8) == 4, 'second line second byte'
+	assert position_to_byte_offset('ab\ncd', starts, 9, 0, .utf8) == 5, 'past last line clamps'
+}
+
+fn test_cov_find_word_bounds_and_substr() {
+	start, end := find_word_bounds_at_col('fn main()', 4, .utf8)
+	assert start == 3 && end == 7, 'word bounds of main'
+	after_start, after_end := find_word_bounds_at_col('fn main()', 7, .utf8)
+	assert after_start == 3 && after_end == 7, 'column just past the word still resolves'
+	bad_start, bad_end := find_word_bounds_at_col('f (', 2, .utf8)
+	assert bad_start == -1 && bad_end == -1, 'no identifier at column'
+	assert substr_by_char_bounds('fn main()', 3, 7, .utf8) == 'main', 'substr of bounds'
+}
+
+fn test_cov_parse_import_binding() {
+	if b := parse_import_binding('os') {
+		assert b.alias == 'os', 'plain import aliases itself'
+		assert b.module_path == 'os', 'plain import keeps path'
+	} else {
+		assert false, 'os should parse'
+	}
+	if b := parse_import_binding('net.http as nh') {
+		assert b.alias == 'nh', 'as alias wins'
+		assert b.module_path == 'net.http', 'as keeps full path'
+	} else {
+		assert false, 'aliased import should parse'
+	}
+	if _ := parse_import_binding('') {
+		assert false, 'empty text should not parse'
+	}
+	bindings := parse_import_bindings('module main\n\nimport os\nimport net.http as nh\n')
+	assert bindings.map(it.alias) == ['os', 'nh'], 'single line bindings'
+}
+
+fn test_cov_get_word_before_dot() {
+	assert get_word_before_dot('os.args', 2, .utf8) == 'os', 'receiver before dot'
+	assert get_word_before_dot('os.args', 0, .utf8) == '', 'no dot at column'
+	assert get_word_before_dot('', 0, .utf8) == '', 'empty line'
+	assert get_word_before_dot('.foo', 0, .utf8) == '', 'nothing before dot'
+}
+
+fn test_cov_normalize_receiver_type() {
+	assert normalize_receiver_type('&User') == 'User', 'reference stripped'
+	assert normalize_receiver_type('?Foo') == 'Foo', 'option stripped'
+	assert normalize_receiver_type('&User[T]') == 'User', 'generics cut'
+	assert normalize_receiver_type('  string  ') == 'string', 'space trimmed'
+}
+
+fn test_cov_expression_names_its_type() {
+	assert expression_names_its_type('[]int{}'), 'array literal names its type'
+	assert expression_names_its_type('User{name: 1}'), 'struct literal names its type'
+	assert !expression_names_its_type('foo()'), 'call does not'
+	assert !expression_names_its_type('x'), 'plain variable does not'
+}
+
+fn test_cov_callable_or_constructor() {
+	name, is_ctor := callable_or_constructor('foo()')
+	assert name == 'foo' && !is_ctor, 'plain call'
+	tname, tis_ctor := callable_or_constructor('User{}')
+	assert tname == 'User' && tis_ctor, 'struct literal is a constructor'
+	ename, ector := callable_or_constructor('  ')
+	assert ename == '' && !ector, 'blank has no callable'
+	assert source_fragment_starts_with_literal('"hi"'), 'double quoted literal'
+	assert source_fragment_starts_with_literal('r"raw"'), 'raw string literal'
+	assert !source_fragment_starts_with_literal('foo'), 'identifier is not a literal'
+	assert !source_fragment_starts_with_literal(''), 'empty is not a literal'
+}
+
+fn test_cov_binding_and_local_names() {
+	assert binding_identifiers('foo bar') == ['foo', 'bar'], 'words are bindings'
+	assert binding_identifiers('mut x') == ['x'], 'mut is skipped'
+	assert local_declaration_names('x := 1; y := 2') == ['x', 'y'], 'walrus declarations'
+	assert local_declaration_names('for i in xs') == ['i'], 'for binding'
+	assert starts_or_block_header('or'), 'bare or header'
+	assert starts_or_block_header('x or'), 'trailing or header'
+	assert !starts_or_block_header('for'), 'for is not an or header'
+	pos := Position{
+		line: 3
+		char: 1
+	}
+	assert containing_function_start(['module main', '', 'fn main() {', '\tx := 1', '}'], pos, .utf8) == 2, 'enclosing fn'
+	assert identifier_index('foo bar foo', 'foo') == 0, 'first occurrence'
+	assert identifier_index('xfoo foo', 'foo') == 5, 'identifier boundary respected'
+	assert identifier_index('abc', 'z') == -1, 'absent name'
+	params := parameter_list_of('fn foo(a int, b string) int') or { '' }
+	assert params == 'a int, b string', 'parameter list text'
+	if _ := parameter_list_of('no parens') {
+		assert false, 'parameter list of plain text should be none'
+	}
+	assert last_fn_keyword_before('x := fn (a int) int {', 20) == 5, 'closure fn found'
+	assert last_fn_keyword_before('x := 1', 6) == -1, 'no closure fn'
+}
+
+// Coverage for folding_range.v.
+
+fn test_cov_line_brace_delta() {
+	assert line_brace_delta('fn main() {') == 1, 'open brace'
+	assert line_brace_delta('}') == -1, 'close brace'
+	assert line_brace_delta('}{') == 0, 'balanced on one line'
+	assert line_brace_delta('s := "{ not code"') == 0, 'brace in string skipped'
+	assert line_brace_delta('a := 1 // }') == 0, 'brace in comment skipped'
+	assert line_brace_delta('/* { */') == 0, 'brace in block comment skipped'
+}
+
+fn test_cov_compute_folding_ranges_groups_blocks() {
+	content := 'module main\n\nimport os\nimport time\n\n/*\nblock\ncomment\n*/\nfn main() {\n\tprintln(1)\n}\n'
+	ranges := compute_folding_ranges(content)
+	assert ranges.any(it.kind == 'imports' && it.start_line == 2 && it.end_line == 3), 'import group'
+	assert ranges.any(it.kind == 'comment' && it.start_line == 5 && it.end_line == 8), 'block comment'
+	assert ranges.any(it.kind == 'region' && it.start_line == 9 && it.end_line == 11), 'fn body'
+	single := compute_folding_ranges('module main\n\nimport os\n\nfn main() {}\n')
+	assert !single.any(it.kind == 'imports'), 'one import is not a group'
+}
+
+fn test_cov_find_fn_body_end_tracks_braces() {
+	assert find_fn_body_end(['fn main() {', '\tx := 1', '}'], 0) == 2, 'closing brace line'
+	assert find_fn_body_end(['fn main() {', '\tx := 1'], 0) == 1, 'falls back to last line'
+}
+
+fn test_cov_folding_range_empty_doc_returns_no_ranges() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	uri := 'file:///cov_folding_empty.v'
+	app.open_files[uri] = ''
+	response := app.handle_folding_range(Request{
+		id:     910
+		method: 'textDocument/foldingRange'
+		params: json2.encode(FoldingRangeParams{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+		},
+			escape_unicode: true
+		)
+	})
+	assert response.id == 910, 'id echoes'
+	assert response.result is []FoldingRange, 'empty doc answers an empty list'
+	assert (response.result as []FoldingRange).len == 0, 'no ranges for empty doc'
+}
+
+// Coverage for document_highlight.v.
+
+fn test_cov_highlight_has_word_boundaries() {
+	assert highlight_has_word('foo bar foo', 'foo'), 'plain word found'
+	assert highlight_has_word('(foo)', 'foo'), 'punctuation boundaries count'
+	assert !highlight_has_word('foobar', 'foo'), 'prefix of longer name rejected'
+	assert !highlight_has_word('foo2', 'foo'), 'digit suffix rejected'
+	assert !highlight_has_word('', 'foo'), 'empty text has no word'
+	assert !highlight_has_word('foo', ''), 'empty word never matches'
+}
+
+fn test_cov_is_for_binding_highlight() {
+	assert is_for_binding_highlight('for x in xs {', 4, 5), 'for value binding'
+	assert is_for_binding_highlight('for k, v in m {', 7, 8), 'for key-value binding'
+	assert !is_for_binding_highlight('x := 1', 0, 1), 'plain assignment is not a for binding'
+	assert !is_for_binding_highlight('format(x) in y', 0, 6), 'for inside call rejected'
+}
+
+fn test_cov_is_fn_parameter_highlight() {
+	assert is_fn_parameter_highlight('fn foo(x int)', 7, 8), 'parameter followed by type'
+	assert is_fn_parameter_highlight('fn (u User) save()', 4, 5), 'receiver followed by type'
+	assert !is_fn_parameter_highlight('x := 1', 0, 1), 'assignment is not a parameter'
+	assert !is_fn_parameter_highlight('foo(x)', 4, 5), 'call argument is not a parameter'
+}
+
+// Coverage for semantic_tokens.v.
+
+fn test_cov_semantic_token_modifiers_legend() {
+	assert semantic_token_modifiers() == ['declaration', 'readonly'], 'modifier legend'
+}
+
+fn test_cov_variable_binding_key_and_mark() {
+	assert variable_binding_key(1, 'x') == '1:x', 'scope qualified key'
+	mut readonly := map[string]bool{}
+	mut mutable := map[string]bool{}
+	mark_variable_binding('x', false, 1, mut readonly, mut mutable)
+	assert readonly['1:x'], 'immutable binding is readonly'
+	mark_variable_binding('y', true, 1, mut readonly, mut mutable)
+	assert mutable['1:y'], 'mut binding is mutable'
+	mark_variable_binding('_', false, 1, mut readonly, mut mutable)
+	mark_variable_binding('', false, 1, mut readonly, mut mutable)
+	assert readonly.len == 1, 'blank names are skipped'
+	collect_fn_parameter_bindings('fn foo(a int, mut b string)', 2, mut readonly, mut mutable)
+	assert readonly['2:a'], 'parameter is readonly'
+	assert mutable['2:b'], 'mut parameter is mutable'
+}
+
+fn test_cov_collect_readonly_variables() {
+	readonly, scopes := collect_readonly_variables(['const x = 1', 'fn main() {', '\ty := 2', '}'])
+	assert readonly['0:x'], 'const is readonly'
+	assert readonly['1:y'], 'immutable local is readonly'
+	assert scopes.len == 4, 'one scope per line'
+	assert scopes[0] == 0, 'file level scope'
+	assert scopes[1] == 1, 'function scope'
+}
+
+fn test_cov_classify_identifier_and_dot_helpers() {
+	assert identifier_before_dot('user.name', 4) == 'user', 'receiver before dot'
+	assert identifier_before_dot('abc', 1) == '', 'no dot at column'
+	assert is_method_declaration_identifier('fn (u User) save()', 12), 'method name after receiver'
+	assert !is_method_declaration_identifier('fn (u User) save()', 0), 'fn keyword is not the method'
+	assert !is_method_declaration_identifier('fn main()', 3), 'plain fn has no receiver'
+	aliases := map[string]bool{}
+	assert classify_v_identifier_at('fn main() {}', 0, 2, 'fn', aliases) == sem_tok_keyword, 'keyword'
+	assert classify_v_identifier_at('x := User{}', 5, 9, 'User', aliases) == sem_tok_type, 'uppercase type'
+	// Off-by-one evidence: 'zzz_fn_qq'.len == 9 so end is 9 (line[9] == `(`,
+	// line[8] == `q`), and 'zzz_save_qq'.len == 11 so end is 5 + 11 == 16.
+	assert classify_v_identifier_at('zzz_fn_qq(x)', 0, 9, 'zzz_fn_qq', aliases) == sem_tok_function, 'call'
+	assert classify_v_identifier_at('user.zzz_save_qq()', 5, 16, 'zzz_save_qq', aliases) == sem_tok_method, 'method call'
+	assert classify_v_identifier_at('user.zzz_prop_qq', 5, 16, 'zzz_prop_qq', aliases) == sem_tok_property, 'property'
+	assert classify_v_identifier_at('import os', 7, 9, 'os', aliases) == sem_tok_namespace, 'import name'
+	aliased := {
+		'nh': true
+	}
+	assert classify_v_identifier_at('nh.get()', 0, 2, 'nh', aliased) == sem_tok_namespace, 'import alias'
+}
+
+fn test_cov_interpolation_end_and_string_tokens() {
+	line := 'x := "\${a}!"'
+	assert interpolation_end(line, 7, line.len) == 9, 'closing brace of interpolation'
+	assert interpolation_end('x \${a', 3, 5) == -1, 'unclosed interpolation'
+	mut toks := []SemToken{}
+	mut str_state := TokenizeState{
+		import_aliases:     map[string]bool{}
+		readonly_variables: map[string]bool{}
+	}
+	assert tokenize_v_string('"hi"', 0, 4, 0, mut str_state, mut toks) == 4, 'column after closing quote'
+	assert toks.len == 1 && toks[0].type_idx == sem_tok_string, 'whole literal is one string token'
+	mut interp_state := TokenizeState{
+		import_aliases:     map[string]bool{}
+		readonly_variables: map[string]bool{}
+	}
+	mut interp_toks := []SemToken{}
+	tokenize_v_string('"\${x}!"', 0, 7, 0, mut interp_state, mut interp_toks)
+	assert interp_toks.len == 3, 'string, code and string parts'
+	assert interp_toks[0].type_idx == sem_tok_string, 'opening quote is string'
+	assert interp_toks[1].type_idx == sem_tok_variable, 'interpolated name is code'
+	assert interp_toks[2].type_idx == sem_tok_string, 'tail is string'
+	before := interp_toks.len
+	append_string_token(mut interp_toks, 0, 5, 5)
+	assert interp_toks.len == before, 'empty span appends nothing'
+}
+
+fn test_cov_tokenize_line_and_encode() {
+	mut state := TokenizeState{
+		import_aliases:     map[string]bool{}
+		readonly_variables: map[string]bool{}
+	}
+	mut toks := []SemToken{}
+	tokenize_v_line('// hi', 3, mut state, mut toks)
+	assert toks.len == 1, 'line comment is one token'
+	assert toks[0].type_idx == sem_tok_comment, 'comment type'
+	assert toks[0].line == 3 && toks[0].start == 0 && toks[0].length == 5, 'comment span'
+	mut code_toks := []SemToken{}
+	tokenize_v_code('a := 1 // done', 0, 14, 0, mut state, mut code_toks)
+	assert code_toks.any(it.type_idx == sem_tok_number), 'number tokenised'
+	assert code_toks.any(it.type_idx == sem_tok_comment), 'trailing comment tokenised'
+	mut block_state := TokenizeState{
+		import_aliases:     map[string]bool{}
+		readonly_variables: map[string]bool{}
+	}
+	mut block_toks := []SemToken{}
+	tokenize_v_line('/* open', 0, mut block_state, mut block_toks)
+	assert block_state.in_block_comment, 'unclosed block comment carries over'
+	tokenize_v_line('still comment */ x := 1', 1, mut block_state, mut block_toks)
+	assert !block_state.in_block_comment, 'closing marker ends the comment'
+	raw := [SemToken{ line: 0, start: 0, length: 3, type_idx: sem_tok_keyword },
+		SemToken{ line: 0, start: 5, length: 2, type_idx: sem_tok_function }]
+	assert encode_semantic_tokens(raw) == [0, 0, 3, 0, 0, 0, 5, 2, 5, 0], 'delta encoding'
+	utf8_same := convert_tokens_to_encoding(raw, ['abcdefgh'], .utf8)
+	assert utf8_same[1].start == 5 && utf8_same[1].length == 2, 'utf8 keeps byte offsets'
+	utf16_same := convert_tokens_to_encoding(raw, ['abcdefgh'], .utf16)
+	assert utf16_same[1].start == 5 && utf16_same[1].length == 2, 'ascii is identical in utf16'
+	oor := convert_tokens_to_encoding(raw, ['ab'], .utf16)
+	assert oor.len == 2, 'out of range lines pass through'
+}
+
+// Coverage for fast_diagnostics.v.
+
+fn test_cov_fast_import_is_skipped() {
+	assert fast_import_is_skipped(''), 'empty path skipped'
+	assert fast_import_is_skipped('C'), 'C interop skipped'
+	assert fast_import_is_skipped('foo(bar'), 'grouping skipped'
+	assert fast_import_is_skipped('a"b'), 'quoting skipped'
+	assert !fast_import_is_skipped('os'), 'plain module checked'
+	assert !fast_import_is_skipped('net.http'), 'dotted module checked'
+}
+
+fn test_cov_fast_last_non_empty_and_continuation() {
+	assert fast_last_non_empty(['a', '', '  ']) == 0, 'last text line'
+	assert fast_last_non_empty(['', '  ']) == -1, 'no text lines'
+	assert fast_last_non_empty([]string{}) == -1, 'no lines'
+	open_state := FastParseState{
+		stack: [FastParseBracket{ ch: `{`, line: 0, col: 10 }]
+	}
+	assert fast_last_line_is_continuation(['fn main() {'], 0, &open_state), 'unclosed opener on last line'
+	empty_state := FastParseState{}
+	assert !fast_last_line_is_continuation(['x := 1'], 0, &empty_state), 'complete statement'
+	assert fast_last_line_is_continuation(['x :='], 0, &empty_state), 'operator tail continues'
+}
+
+fn test_cov_fast_scan_code_flags_stray_closer() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	mut state := FastParseState{}
+	mut errors := []JsonError{}
+	end := fast_scan_code(')', 0, 0, 'cov.v', mut state, mut errors)
+	assert end == 1, 'scanner consumed the closer'
+	assert errors.len == 1, 'stray closer reported'
+	assert errors[0].message == "unexpected token ')'", 'stray message'
+	mut lit_state := FastParseState{}
+	mut lit_errors := []JsonError{}
+	after := fast_scan_literal('"abc" + x', 0, 0, 'cov.v', mut lit_state, mut lit_errors)
+	assert after == 5, 'column after closing quote'
+	assert lit_state.quote == 0, 'literal closed'
+	assert lit_errors.len == 0, 'balanced literal reports nothing'
+}
+
+fn test_cov_fast_module_dir_declares() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	mod_dir := os.join_path(app.temp_dir, 'covmod', 'mymod')
+	must_mkdir_all(mod_dir)
+	must_write_file(os.join_path(mod_dir, 'mymod.v'), 'module mymod\n\npub fn hi() {}\n')
+	assert fast_module_dir_declares(mod_dir, 'mymod'), 'folder declaring its own name'
+	assert !fast_module_dir_declares(mod_dir, 'other'), 'wrong name rejected'
+	assert !fast_module_dir_declares(mod_dir, 'main'), 'main never counts'
+	assert !fast_module_dir_declares(os.join_path(app.temp_dir, 'covmod', 'missing'), 'mymod'), 'missing dir'
+}
+
+fn test_cov_run_fast_diagnostics_job_handles_clean_buffer() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	mut scheduler := new_diagnostics_scheduler()
+	uri := 'file:///cov_fast_job.v'
+	content := 'module main\n\nfn main() {}\n'
+	stale := DiagnosticsJob{
+		uri:               uri
+		content:           content
+		global_generation: 1
+		generation:        999
+		ready_at:          100
+		kind:              .fast
+		write_mutex:       app.write_mutex
+	}
+	assert !scheduler.is_job_current(stale), 'unknown generation is not current'
+	global_gen, gen := scheduler.next_generation(uri)
+	job := DiagnosticsJob{
+		uri:               uri
+		content:           content
+		open_files:        {
+			uri: content
+		}
+		global_generation: global_gen
+		generation:        gen
+		ready_at:          100
+		kind:              .fast
+		write_mutex:       app.write_mutex
+	}
+	assert scheduler.enqueue(job), 'clean fast job enqueued'
+	assert scheduler.is_job_current(job), 'enqueued job is current'
+	run_fast_diagnostics_job(mut scheduler, job)
+	assert scheduler.is_job_current(job), 'clean buffer publishes nothing and stays current'
+}
+
+// Coverage for call_hierarchy.v.
+
+fn test_cov_find_fn_calls_in_line_collects_callees() {
+	mut calls := map[string][]LSPRange{}
+	find_fn_calls_in_line('helper(x) + other()', 2, .utf8, mut calls)
+	assert 'helper' in calls, 'first call found'
+	assert 'other' in calls, 'second call found'
+	assert calls['helper'][0].start.char == 0, 'call starts at line start'
+	assert calls['helper'][0].end.char == 6, 'call ends after the name'
+	mut skipped := map[string][]LSPRange{}
+	find_fn_calls_in_line('if (x) {}', 0, .utf8, mut skipped)
+	assert skipped.len == 0, 'keywords are not calls'
+	mut quiet := map[string][]LSPRange{}
+	find_fn_calls_in_line('"foo(" + x // bar(', 1, .utf8, mut quiet)
+	assert quiet.len == 0, 'strings and comments hold no calls'
+}
+
+fn test_cov_find_fn_in_content_resolves_item() {
+	uri := 'file:///cov_find_fn.v'
+	content := 'module main\n\nfn helper() {}\n\nfn main() {}\n'
+	item := find_fn_in_content('helper', content, uri, .utf8)
+	assert item.name == 'helper', 'helper resolved'
+	assert item.uri == uri, 'uri carried over'
+	missing := find_fn_in_content('nosuchfn', content, uri, .utf8)
+	assert missing.name == '', 'unknown name resolves to nothing'
+}
+
+fn test_cov_scan_for_callers_groups_by_caller() {
+	mut results := []CallHierarchyIncomingCall{}
+	scan_for_callers('helper', 'file:///cov_scan.v', 'module main\n\nfn helper() {}\n\nfn main() {\n\thelper()\n}\n', .utf8, mut results)
+	assert results.any(it.from.name == 'main' && it.from_ranges.len == 1), 'main calls helper once'
+	mut no_callers := []CallHierarchyIncomingCall{}
+	scan_for_callers('nosuchfn', 'file:///cov_scan.v', 'module main\n\nfn main() {}\n', .utf8, mut no_callers)
+	assert no_callers.len == 0, 'no callers without calls'
+}
+
+fn test_cov_find_fn_declaration_prefers_project() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	root := os.join_path(app.temp_dir, 'cov_decl')
+	must_mkdir_all(root)
+	path := os.join_path(root, 'main.v')
+	content := 'module main\n\nfn helper() int {\n\treturn 1\n}\n\nfn main() {\n\tprintln(helper())\n}\n'
+	must_write_file(path, content)
+	uri := path_to_uri(path)
+	app.open_files[uri] = content
+	app.workspace_roots = [root]
+	item := app.find_fn_declaration('helper', app.workspace_search_dirs(root), false)
+	assert item.name == 'helper', 'project function found through the index'
+	assert item.uri == uri, 'index points at the project file'
+}
+
+fn test_cov_call_hierarchy_outgoing_skips_recursion() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	root := os.join_path(app.temp_dir, 'cov_outgoing')
+	must_mkdir_all(root)
+	path := os.join_path(root, 'main.v')
+	content := 'module main\n\nfn main() {\n\tmain()\n}\n'
+	must_write_file(path, content)
+	uri := path_to_uri(path)
+	app.open_files[uri] = content
+	app.workspace_roots = [root]
+	resp := app.handle_call_hierarchy_outgoing(Request{
+		id:     911
+		method: 'callHierarchy/outgoingCalls'
+		params: json2.encode(CallHierarchyOutgoingCallsParams{
+			item: CallHierarchyItem{
+				name:            'main'
+				kind:            sym_kind_function
+				uri:             uri
+				range:           LSPRange{
+					start: Position{
+						line: 2
+						char: 0
+					}
+					end:   Position{
+						line: 4
+						char: 1
+					}
+				}
+				selection_range: LSPRange{
+					start: Position{
+						line: 2
+						char: 3
+					}
+					end:   Position{
+						line: 2
+						char: 7
+					}
+				}
+			}
+		},
+			escape_unicode: true
+		)
+	})
+	assert resp.id == 911, 'id echoes'
+	assert resp.result is []CallHierarchyOutgoingCall, 'outgoing answers a list'
+	assert (resp.result as []CallHierarchyOutgoingCall).len == 0, 'direct recursion is skipped'
+}
+
+// Coverage for pure handlers.v helpers: declarations and signatures.
+
+fn test_cov_source_declaration_opens_body() {
+	assert source_declaration_opens_body('fn main(){}'.bytes()), 'fn opens a body'
+	assert source_declaration_opens_body('pub unsafe fn foo() {}'.bytes()), 'modifiers are skipped'
+	assert source_declaration_opens_body('struct Foo {}'.bytes()), 'struct opens a body'
+	assert source_declaration_opens_body('@[if windows]\nfn foo() {}'.bytes()), 'attributes are skipped'
+	assert !source_declaration_opens_body('x := 1'.bytes()), 'assignment opens nothing'
+	assert !source_declaration_opens_body(''.bytes()), 'empty mask opens nothing'
+}
+
+fn test_cov_declares_function_at() {
+	assert declares_function_at(['fn main() {}'], 0, 3), 'plain function'
+	assert declares_function_at(['pub fn foo() {}'], 0, 7), 'pub function'
+	assert declares_function_at(['fn foo[T](x T) int {}'], 0, 3), 'generic parameters are skipped'
+	assert !declares_function_at(['x := 1'], 0, 0), 'assignment is not a function'
+	assert !declares_function_at(['fn main() {}'], 0, 10), 'whitespace starts nothing'
+	assert !declares_function_at(['foo()'], 0, 0), 'bare call is not a declaration'
+}
+
+fn test_cov_declaration_expression_span() {
+	text, end_line := declaration_expression_span(['a := [1,', '2]'], 0, '[1,')
+	assert text == '[1, 2]', 'continued expression is joined'
+	assert end_line == 1, 'expression ends on the second line'
+	assert declaration_expression(['x := 1'], 0, '1') == '1', 'single line wrapper'
+	single, single_line := declaration_expression_span(['x := 1'], 0, '1')
+	assert single == '1' && single_line == 0, 'balanced expression stays put'
+}
+
+fn test_cov_cursor_is_inside_parameters() {
+	assert cursor_is_inside_parameters('fn foo(a int)', 7, 'fn foo(a int)', 0), 'inside inline parameters'
+	assert !cursor_is_inside_parameters('fn foo(a int)', 0, 'fn foo(a int)', 0), 'name is outside parameters'
+	assert cursor_is_inside_parameters('fn foo(a int', 5, '', -1), 'open signature continues'
+	assert !cursor_is_inside_parameters('fn foo() {', 10, '', -1), 'body is past the parameters'
+	assert !cursor_is_inside_parameters('x', 0, 'zzz', 0), 'missing parens answer false'
+}
+
+fn test_cov_type_text_names() {
+	assert type_text_names('int x', 'int'), 'whole word matches'
+	assert type_text_names('x int.', 'int'), 'punctuation bounds the word'
+	assert !type_text_names('print(x)', 'int'), 'absent name never matches'
+	assert !type_text_names('aint b', 'int'), 'identifier prefix is not a match'
+}
+
+fn test_cov_merge_completion_items() {
+	a := Detail{ label: 'a' }
+	b := Detail{ label: 'b' }
+	c := Detail{ label: 'c' }
+	merged := merge_completion_items([a, b], [b, c])
+	assert merged.map(it.label) == ['a', 'b', 'c'], 'compiler items fill the gaps'
+	assert merge_completion_items([]Detail{}, []Detail{}).len == 0, 'empty merges to empty'
+	assert without_operator_completions([Detail{ label: '+' }, Detail{ label: 'foo' }]).map(it.label) == [
+		'foo',
+	], 'operators are dropped'
+}
+
+fn test_cov_binding_scope_headers() {
+	assert starts_binding_scope_header('for x in xs {'), 'for opens a scope'
+	assert starts_binding_scope_header('\$for x in y {'), 'comptime for opens a scope'
+	assert starts_binding_scope_header('if x == 1 {'), 'if opens a scope'
+	assert !starts_binding_scope_header('x := 1'), 'assignment opens no scope'
+	assert binding_scope_header_ends_with_literal_type('if e := Foo'), 'trailing type ends the header'
+	assert !binding_scope_header_ends_with_literal_type('if x is int'), 'smart cast is not a literal'
+	assert !binding_scope_header_ends_with_literal_type('x := 1'), 'non type is not a literal'
+}
+
+fn test_cov_fn_keyword_and_match_helpers() {
+	assert last_fn_keyword_index('a := fn (x int) int {') == 5, 'last fn keyword'
+	assert last_fn_keyword_index('x := 1') == -1, 'no fn keyword'
+	assert last_fn_keyword_index('afn') == -1, 'identifier tail is not a keyword'
+	header := anonymous_function_header('fn (x int) string')
+	assert header.found && header.complete, 'literal header parses'
+	assert header.parameter_names == ['x'], 'parameter name kept'
+	assert header.parameter_types['x'] == 'int', 'parameter type kept'
+	bare := anonymous_function_header('fn')
+	assert bare.found && !bare.complete, 'bare fn is incomplete'
+	assert !anonymous_function_header('zzz').found, 'no fn means no header'
+	assert last_match_keyword_index('x := match y {') == 5, 'match keyword found'
+	assert last_match_keyword_index('rematch') == -1, 'identifier is not match'
+	assert brace_starts_match_body('match x {', 8), 'brace after subject starts the body'
+	assert !brace_starts_match_body('foo() {', 6), 'call brace starts no match body'
+	assert previous_unmatched_open_brace('a { b { c', 9) == 6, 'inner brace is unmatched'
+	assert previous_unmatched_open_brace('a { b } c', 9) == -1, 'balanced braces match'
+	assert struct_literal_brace_is_match_arm('match x {\n1: {', 13), 'arm brace nests in match'
+	assert !struct_literal_brace_is_match_arm('x := User{', 9), 'struct brace is no arm'
+}
+
+fn test_cov_expression_line_continued() {
+	assert expression_line_is_continued('x := 1 +'), 'operator tail continues'
+	assert !expression_line_is_continued('x := 1'), 'complete statement stops'
+	assert !expression_line_is_continued(''), 'empty line stops'
+}
+
+fn test_cov_implicit_bindings() {
+	// open_paren is the index of the `(` itself: in 'xs.map(' it sits at 6.
+	assert implicit_call_bindings('xs.map(', 6) == ['it'], 'map binds it'
+	assert implicit_call_bindings('foo(', 4).len == 0, 'plain call binds nothing'
+	assert implicit_bindings_at_cursor('xs.map(a') == ['it'], 'open map call binds it'
+	assert implicit_bindings_at_cursor('foo(a').len == 0, 'plain call binds nothing'
+}
+
+fn test_cov_local_binding_column() {
+	assert local_binding_column('  x int', 10, 'x') == 12, 'column is segment relative'
+	assert local_binding_column('yyy', 0, 'x') == -1, 'missing name is -1'
+}
+
+fn test_cov_type_after_identifier() {
+	assert type_after_identifier('x int', 'x') == 'int', 'type follows the name'
+	assert type_after_identifier('x := 1', 'x') == '', 'assignment has no type'
+	assert complete_function_signature(['fn foo(a int,', 'b string) string {'], 0,
+		'fn foo(a int,') == 'fn foo(a int, b string) string {', 'signature joins lines'
+	assert complete_function_signature([]string{}, 5, 'x') == 'x', 'out of range keeps initial'
+	assert method_receiver_type('(mut u User)') == 'User', 'receiver type extracted'
+	assert method_receiver_type('foo') == '', 'plain name has no receiver'
+	assert method_receiver_type('(u)') == '', 'bare variable is no type'
+}
+
+fn test_cov_builtin_composite_owner() {
+	assert builtin_composite_owner('[]int') == 'array', 'array owner'
+	assert builtin_composite_owner('map[string]int') == 'map', 'map owner'
+	assert builtin_composite_owner('?[]int') == 'array', 'option prefix is stripped'
+	assert builtin_composite_owner('int') == '', 'scalar has no owner'
+	assert qualify_embedded_receiver_type('mod.Parent', 'Child') == 'mod.Child', 'child takes parent module'
+	assert qualify_embedded_receiver_type('P', 'mod.Child') == 'mod.Child', 'qualified type is kept'
+	assert struct_field_source_type('name string', 'name') == 'string', 'field type read'
+	assert struct_field_source_type('other int', 'name') == '', 'wrong name reads nothing'
+	assert embedded_struct_type('Address') == 'Address', 'bare embedded type'
+	assert embedded_struct_type('x int') == '', 'field line is no embedding'
+}
+
+fn test_cov_thread_channel_and_literal_types() {
+	assert thread_type_for_return('') == 'thread', 'empty returns bare thread'
+	assert thread_type_for_return('void') == 'thread', 'void returns bare thread'
+	assert thread_type_for_return('int') == 'thread int', 'payload is kept'
+	assert fn_literal_return_type('fn (x int) string {') == 'string', 'literal return read'
+	assert fn_literal_return_type('fn () {') == '', 'no return is empty'
+	assert fn_literal_return_type('zzz') == '', 'no parens is empty'
+	assert (thread_array_literal_type('[]thread int{len: 2}') or { '' }) == '[]thread int', 'thread array kept'
+	assert (thread_array_literal_type('[]int{}') or { 'none' }) == 'none', 'plain array rejected'
+	wait_item := thread_wait_completion('thread int') or { Detail{} }
+	assert wait_item.label == 'wait', 'wait offered'
+	assert wait_item.detail == 'fn (t thread int) wait() int', 'wait signature typed'
+	assert (thread_wait_completion('int') or { Detail{ label: 'none' } }).label == 'none', 'non thread rejected'
+	assert (channel_literal_type('chan int{cap: 1}') or { '' }) == 'chan int', 'chan type kept'
+	assert (channel_literal_type('int') or { 'none' }) == 'none', 'non chan rejected'
+	assert (receiver_literal_type('true') or { '' }) == 'bool', 'bool literal'
+	assert (receiver_literal_type('5') or { '' }) == 'int', 'int literal'
+	assert (receiver_literal_type('1.5') or { '' }) == 'f64', 'float literal'
+	assert (receiver_literal_type("'hi'") or { '' }) == 'string', 'string literal'
+	assert (receiver_literal_type('`a`') or { '' }) == 'rune', 'rune literal'
+	assert (receiver_literal_type("'a' + b") or { 'none' }) == 'none', 'expression rejected'
+}
+
+fn test_cov_selector_match_and_array_helpers() {
+	assert trailing_selector('if p.color') == 'p.color', 'chain at the end'
+	assert trailing_selector('x') == 'x', 'bare name'
+	assert trailing_selector('') == '', 'empty has no selector'
+	assert (enclosing_match_subject(['match x {', '\t1: 1'], 1) or { '' }) == 'x', 'match subject found'
+	assert (enclosing_match_subject(['fn main() {', '}'], 1) or { 'none' }) == 'none', 'no match above'
+	assert (array_literal_type('[1, 2]') or { '' }) == '[]int', 'inferred element type'
+	assert (array_literal_type('[]string{}') or { '' }) == '[]string', 'written element type'
+	assert (array_literal_type('x') or { 'none' }) == 'none', 'non array rejected'
+	assert struct_literal_type_before(['x := User{'], 1, '') == 'User', 'literal type before brace'
+	assert struct_literal_type_before([]string{}, 0, '') == '', 'no brace means no type'
+}
+
+fn test_cov_parameter_parts() {
+	mod1, name1, typ1 := parameter_parts('mut buf []u8')
+	assert mod1 == 'mut ' && name1 == 'buf' && typ1 == '[]u8', 'mut parameter splits'
+	mod2, name2, typ2 := parameter_parts('c chan Color')
+	assert mod2 == '' && name2 == 'c' && typ2 == 'chan Color', 'chan parameter splits'
+	_, whole_name, whole_type := parameter_parts('thread int')
+	assert whole_name == '' && whole_type == 'thread int', 'whole type has no name'
+}
+
+fn test_cov_module_completion_helpers() {
+	assert module_type_completion_name('Foo[T]') == 'Foo', 'generics stripped'
+	assert module_type_completion_name('bar') == 'bar', 'plain name kept'
+	assert module_completion_declaration('pub fn foo()', false), 'public function completes'
+	assert !module_completion_declaration('fn (u User) save()', false), 'method is no module item'
+	assert module_completion_declaration('struct Foo', false), 'struct completes'
+	assert !module_completion_declaration('x := 1', false), 'assignment is no declaration'
+	assert !module_completion_declaration('fn foo()', true), 'private hidden when public only'
+	assert const_block_assignment_name('MAX = 100') == 'MAX', 'const name read'
+	assert const_block_assignment_name('x := 1') == '', 'short declaration has no const name'
+	assert const_block_assignment_name('f(a = 1)') == '', 'nested assignment ignored'
+	assert update_expression_delimiter_depth('a(b', 0) == 1, 'opener deepens'
+	assert update_expression_delimiter_depth('a)', 1) == 0, 'closer shallows'
+	assert update_expression_delimiter_depth('x', 0) == 0, 'plain line keeps depth'
+	assert resolve_import_module_dir('definitely_not_a_module_xyz', '') == '', 'unknown module resolves nowhere'
+}
+
+fn test_cov_source_definition_support() {
+	assert source_definition_kind_is_supported(sym_kind_function), 'function supported'
+	assert source_definition_kind_is_supported(sym_kind_struct), 'struct supported'
+	assert !source_definition_kind_is_supported(999), 'unknown kind unsupported'
+	sym := make_symbol('foo', sym_kind_function, 0, 'fn foo() {}')
+	assert sym.selection_range.start.char == 3, 'selection starts at the name'
+	assert sym.selection_range.end.char == 6, 'selection ends after the name'
+	occ := [TokenOccurrence{ line: 0, start_char: 3, end_char: 6 }]
+	assert source_declaration_occurrence_is_code(sym, occ), 'matching occurrence is code'
+	assert !source_declaration_occurrence_is_code(sym, []TokenOccurrence{}), 'no occurrence is no code'
+	assert source_attribute_content_is_conditional('if debug'), 'if attribute is conditional'
+	assert !source_attribute_content_is_conditional('x'), 'plain attribute is not'
+}
+
+fn test_cov_source_occurrence_suffix_helpers() {
+	assert source_occurrence_has_colon_suffix('x: int', 1), 'colon suffix'
+	assert !source_occurrence_has_colon_suffix('x', 1), 'no colon suffix'
+	assert source_occurrence_has_dot_suffix('x.', 1), 'dot suffix'
+	assert !source_occurrence_has_dot_suffix('x', 1), 'no dot suffix'
+	assert source_occurrence_is_goto_target('goto label', 5), 'goto names its label'
+	assert !source_occurrence_is_goto_target('foo', 0), 'plain word is no goto'
+	assert source_line_is_module_or_import_declaration(['module main'], 0), 'module line'
+	assert source_line_is_module_or_import_declaration(['import os'], 0), 'import line'
+	assert source_line_is_module_or_import_declaration(['import (', 'os', ')'], 1), 'import block line'
+	assert !source_line_is_module_or_import_declaration(['x := 1'], 0), 'code is neither'
+	assert source_occurrence_has_compile_time_prefix('\$if x', 1), 'dollar prefix'
+	assert source_occurrence_has_compile_time_prefix('@[if x]', 1), 'attribute prefix'
+	assert !source_occurrence_has_compile_time_prefix('x', 0), 'plain start has no prefix'
+	assert source_line_is_hash_directive(['#flag x'], 0), 'hash directive'
+	assert !source_line_is_hash_directive(['x'], 0), 'code is no directive'
+	assert source_occurrence_is_asm_block(['asm {', 'mov'], 1, 3), 'inside asm block'
+	assert !source_occurrence_is_asm_block(['x := 1'], 0, 1), 'plain code is no asm'
+	assert source_occurrence_is_sql_expression(['sql db {', 'select'], 1, 2), 'inside sql block'
+	assert !source_occurrence_is_sql_expression(['x := 1'], 0, 1), 'plain code is no sql'
+	assert source_occurrence_is_interface_method_signature(['interface Foo {', '\tfoo()'], 1,
+		1, 4), 'method inside interface'
+	assert !source_occurrence_is_interface_method_signature(['fn foo()'], 0, 3, 6), 'plain fn is no method'
+	assert source_occurrence_is_enum_member_declaration('module m\n\nenum Color {\n\tred\n}\n',
+		'red', 3), 'enum member found'
+	assert !source_occurrence_is_enum_member_declaration('module m\n\nfn foo() {}\n', 'red',
+		1), 'missing member rejected'
+	assert source_occurrence_is_generic_parameter(['fn foo[T](x T) {}'], 0, 7, 8), 'generic parameter'
+	assert !source_occurrence_is_generic_parameter(['x := 1'], 0, 0, 1), 'plain code has none'
+}
+
+fn test_cov_name_needs_other_defines() {
+	assert name_needs_other_defines('foo_d_linux.c.v'), 'unknown define needed'
+	assert !name_needs_other_defines('foo_d_v3_backend.c.v'), 'own define needs nothing'
+	assert !name_needs_other_defines('plain.v'), 'plain file needs nothing'
+	assert name_needs_other_defines('x_notd_v3_backend.c.v'), 'negated own define needed'
+}
+
+fn test_cov_doc_comment_helpers() {
+	assert doc_comment_markdown(['hello']) == 'hello', 'single line'
+	assert doc_comment_markdown(['a', 'b']) == 'a  \nb', 'lines break hard'
+	assert doc_comment_markdown(['Example: foo()']) == 'Example:  \n```v\nfoo()\n```', 'example fenced'
+	assert (inline_doc_example('Example: foo()') or { '' }) == 'foo()', 'example code read'
+	assert (inline_doc_example('hello') or { 'none' }) == 'none', 'plain line is no example'
+	assert (inline_doc_example('Example: ') or { 'none' }) == 'none', 'empty example rejected'
+}
+
+fn test_cov_parse_fn_signatures_into() {
+	mut index := map[string]string{}
+	content := 'pub fn greet(name string) string {\n}\nfn (u User) save() int {\n}\nfn multi() (int, int) {\n}\nfn novoid() {\n}\n'
+	parse_fn_signatures_into(content, 'mymod', mut index)
+	assert index['greet'] == 'string', 'return type indexed'
+	assert index['mymod.greet'] == 'string', 'module qualified entry'
+	assert !('save' in index), 'methods skipped'
+	assert !('multi' in index), 'multi return skipped'
+	assert !('novoid' in index), 'void skipped'
+}
+
+fn test_cov_make_symbol_variants() {
+	method_sym := make_symbol('save', sym_kind_method, 0, 'fn (u User) save() {}')
+	// 'save' starts at column 12 in 'fn (u User) save() {}'.
+	assert method_sym.selection_range.start.char == 12, 'method name after receiver'
+	assert method_sym.selection_range.end.char == 16, 'method selection spans the name'
+	generic_sym := make_symbol('Foo[T]', sym_kind_struct, 1, 'struct Foo[T] {}')
+	assert generic_sym.name == 'Foo[T]', 'full name kept'
+	assert generic_sym.selection_range.start.char == 7, 'generic selection strips params'
+}
+
+fn test_cov_anchor_and_line_endings() {
+	mk_loc := fn (uri string, line int, charac int) Location {
+		return Location{
+			uri:   uri
+			range: LSPRange{
+				start: Position{ line: line, char: charac }
+				end:   Position{ line: line, char: charac + 1 }
+			}
+		}
+	}
+	assert same_anchor_location(mk_loc('file:///a.v', 1, 5), mk_loc('file:///a.v', 1, 6)), 'one unit drift matches'
+	assert !same_anchor_location(mk_loc('file:///a.v', 1, 5), mk_loc('file:///a.v', 1, 7)), 'two units differ'
+	assert !same_anchor_location(mk_loc('file:///a.v', 1, 5), mk_loc('file:///b.v', 1, 5)), 'other file differs'
+	assert line_ending_after_line('a\r\nb\r\n', 0) == '\r\n', 'crlf kept'
+	assert line_ending_after_line('a\nb\n', 0) == '\n', 'lf kept'
+	assert line_ending_after_line('a', 0) == '\n', 'no break defaults to lf'
+}
+
+fn test_cov_normalize_and_client_caps() {
+	if path := normalize_workspace_root('C:\\proj') {
+		assert path == 'C:\\proj', 'root kept'
+	} else {
+		assert false, 'root must resolve'
+	}
+	assert (normalize_workspace_root('  ') or { 'fallback' }) == 'fallback', 'blank is none'
+	assert (normalize_workspace_root('/') or { 'fallback' }) == 'fallback', 'slash is none'
+	assert !client_supports_dynamic_watched_files_registration(InitializeParams{}), 'no caps means no watching'
+	assert client_supports_dynamic_watched_files_registration(InitializeParams{
+		capabilities: ClientCapabilities{
+			workspace: WorkspaceClientCapabilities{
+				did_change_watched_files: DidChangeWatchedFilesClientCapabilities{
+					dynamic_registration: true
+				}
+			}
+		}
+	}), 'watching advertised'
+	assert !client_supports_work_done_progress(InitializeParams{}), 'no caps means no progress'
+	assert client_supports_work_done_progress(InitializeParams{
+		capabilities: ClientCapabilities{
+			window: WindowClientCapabilities{
+				work_done_progress: true
+			}
+		}
+	}), 'progress advertised'
+	assert resolve_initialize_workspace_roots(InitializeParams{
+		root_path: 'C:\\proj'
+	}) == ['C:\\proj'], 'root path resolves'
+	assert resolve_initialize_workspace_roots(InitializeParams{}).len == 0, 'no roots without params'
+}
+
+fn test_cov_workspace_settings() {
+	mut resolved := ResolvedWorkspaceSettings{}
+	merge_workspace_settings(mut resolved, true, false)
+	assert resolved.has_inlay_hints, 'inlay hints recorded'
+	assert (resolved.inlay_hints or { false }) == true, 'inlay hints set'
+	assert resolved.has_diagnostics, 'diagnostics recorded'
+	assert (resolved.diagnostics or { true }) == false, 'diagnostics set'
+	merge_workspace_settings(mut resolved, false, true)
+	assert (resolved.inlay_hints or { false }) == true
+		&& (resolved.diagnostics or { true }) == false, 'first write wins'
+	empty := resolve_workspace_settings('{}')
+	assert !empty.has_inlay_hints && !empty.has_diagnostics, 'empty json sets nothing'
+}
+
+fn test_cov_code_lens_helpers() {
+	assert code_lens_fn_name('fn main() {}') == 'main', 'main found'
+	assert code_lens_fn_name('pub fn run() {}') == 'run', 'pub stripped'
+	assert code_lens_fn_name('fn (u User) save() {}') == '', 'methods skipped'
+	assert code_lens_fn_name('x := 1') == '', 'code is no function'
+	lens_range := code_lens_range(2, 'fn main() {}', .utf8)
+	assert lens_range.start.line == 2 && lens_range.start.char == 0, 'lens starts the line'
+	assert lens_range.end.char == 12, 'lens spans the line'
+}
+
+fn test_cov_static_method_doc() {
+	assert static_method_doc_symbol_at('User.create', 5, 'create') == 'User.create', 'receiver qualifies symbol'
+	assert static_method_doc_symbol_at('x', 0, 'x') == 'x', 'bare word is kept'
+}
+
+fn test_cov_on_initialize_and_workspace() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	if msg := app.on_initialize(Request{
+		id:     1
+		method: 'initialize'
+		params: '{}'
+	}) {
+		assert msg == '', 'unexpected initialize error: ${msg}'
+	}
+	if msg := app.on_initialize(Request{
+		id:     2
+		method: 'initialize'
+		params: 'not json at all {'
+	}) {
+		assert msg.contains('Invalid initialize params'), 'bad params reported'
+	} else {
+		assert false, 'bad params must error'
+	}
+	root := os.join_path(app.temp_dir, 'cov_ws')
+	must_mkdir_all(root)
+	app.workspace_roots = [root]
+	assert app.workspace_root_containing(os.join_path(root, 'a.v')) == root, 'file maps to its root'
+	assert app.workspace_root_containing(os.join_path(app.temp_dir, 'elsewhere', 'a.v')) == '', 'outside maps nowhere'
+}
+
+fn test_cov_indexed_definition_visibility() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	uri := 'file:///cov_pub.v'
+	content := 'pub fn foo() {}\n'
+	app.open_files[uri] = content
+	sym := make_symbol('foo', sym_kind_function, 0, 'pub fn foo() {}')
+	assert source_declaration_is_public(uri, sym, app), 'pub line is public'
+	priv_uri := 'file:///cov_priv.v'
+	app.open_files[priv_uri] = 'fn bar() {}\n'
+	priv_sym := make_symbol('bar', sym_kind_function, 0, 'fn bar() {}')
+	assert !source_declaration_is_public(priv_uri, priv_sym, app), 'plain line is private'
+}
+
+fn test_cov_search_doc_in_vlib_dir() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	dir := os.join_path(app.temp_dir, 'covdoc')
+	must_mkdir_all(dir)
+	must_write_file(os.join_path(dir, 'mymod.v'), '// does things\nfn myhelper() int {\n\treturn 1\n}\n')
+	found := search_doc_in_vlib_dir(dir, 'myhelper')
+	assert found.contains('does things'), 'doc comment found'
+	assert search_doc_in_vlib_dir(dir, 'nosuchfn') == '', 'missing symbol finds nothing'
+}
+
+fn test_cov_receiver_rhs_helpers() {
+	assert receiver_rhs_has_open_delimiter('foo('), 'open paren'
+	assert receiver_rhs_has_open_delimiter('a[0'), 'open bracket'
+	assert receiver_rhs_has_open_delimiter('a{'), 'open brace'
+	assert !receiver_rhs_has_open_delimiter('foo'), 'balanced rhs'
+	assert !receiver_rhs_has_open_delimiter(''), 'empty rhs'
+	mut scan := ImportScanState{}
+	assert receiver_rhs_needs_continuation('foo(', false, &scan), 'open delimiter continues'
+	assert receiver_rhs_needs_continuation('foo', false, &scan), 'missing expression continues'
+	assert !receiver_rhs_needs_continuation('', true, &scan), 'empty expression stops'
+	assert receiver_rhs_needs_continuation('x +', true, &scan), 'operator tail continues'
+	assert !receiver_rhs_needs_continuation('x', true, &scan), 'complete expression stops'
+}
+
+fn test_cov_struct_literal_cursor() {
+	assert struct_literal_cursor_is_at_field('User{\n', 4, ['User{']), 'field position'
+	assert !struct_literal_cursor_is_at_field('User{\nname: ', 4, ['User{', 'name: ']), 'value position'
+}
+
+fn test_cov_encode_and_col_helpers() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	uri := 'file:///cov_cols.v'
+	content := 'fn main() {}\n'
+	app.open_files[uri] = content
+	assert app.client_col_to_byte_col(uri, 0, 3) == 3, 'ascii column round trips down'
+	assert app.byte_col_to_client_col(uri, 0, 3) == 3, 'ascii column round trips up'
+	assert app.client_col_to_byte_col('file:///missing.v', 0, 3) == 3, 'missing file keeps column'
+	assert app.byte_col_to_client_col(uri, 9, 3) == 3, 'missing line keeps column'
+	diag := LSPDiagnostic{
+		range:    LSPRange{
+			start: Position{ line: 0, char: 3 }
+			end:   Position{ line: 0, char: 6 }
+		}
+		message:  'm'
+		severity: 1
+	}
+	encoded := app.encode_diagnostic_range(diag, ['fn main() {}'])
+	assert encoded.range.start.char == 3 && encoded.range.end.char == 6, 'ascii range kept'
+	assert encoded.message == 'm', 'payload carried over'
+	outside := app.encode_diagnostic_range(diag, []string{})
+	assert outside.range.start.char == 3, 'missing lines keep the range'
+}
+
+fn test_cov_code_lens_command_target() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	_, _, missing := app.code_lens_command_target([]string{})
+	assert missing == 'missing file argument', 'empty args rejected'
+	_, _, remote := app.code_lens_command_target(['https://example.com/x.v'])
+	assert remote == 'only local files can be run', 'remote files rejected'
+	_, _, gone := app.code_lens_command_target(['file:///definitely_missing_dir_xyz/main.v'])
+	assert gone.contains('file does not exist'), 'missing file rejected'
+	dir := os.join_path(app.temp_dir, 'covrun')
+	must_mkdir_all(dir)
+	path := os.join_path(dir, 'main.v')
+	must_write_file(path, 'module main\n\nfn main() {}\n')
+	_, real_path, real_err := app.code_lens_command_target([path])
+	assert real_err == '', 'real file accepted'
+	assert real_path.ends_with('main.v'), 'path kept'
+	uri := path_to_uri(path)
+	app.open_files[uri] = 'module main\n\nfn main() {}\n'
+	got_uri, _, open_err := app.code_lens_command_target([uri])
+	assert open_err == '' && got_uri == uri, 'open file resolves'
+}
+
+fn test_cov_with_builtin_calls() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	out := app.with_builtin_calls([Detail{ label: 'foo' }, Detail{ label: 'println' }])
+	assert out.map(it.label) == ['foo', 'println'], 'labels kept'
+	cached := app.builtin_call_items()
+	assert cached['println'].label == 'println', 'println declared in vlib builtin'
+}
+
+fn test_cov_organize_imports_action() {
+	uri := 'file:///cov_imports.v'
+	content := 'module m\n\nimport os\nimport json\n\nfn main() {}\n'
+	lines := content.split_into_lines()
+	if action := build_safe_organize_imports_action(uri, content, lines, .utf8) {
+		assert action.title == 'Organize Imports', 'action titled'
+		edit := action.edit or { WorkspaceEdit{} }
+		edits := edit.changes[uri] or { []TextEdit{} }
+		assert edits.len == 1, 'one edit offered'
+		assert edits[0].new_text == 'import json\nimport os', 'imports sorted'
+	} else {
+		assert false, 'unsorted imports offer an action'
+	}
+	sorted_content := 'module m\n\nimport json\nimport os\n\nfn main() {}\n'
+	if _ := build_safe_organize_imports_action(uri, sorted_content, sorted_content.split_into_lines(),
+		.utf8) {
+		assert false, 'sorted imports offer nothing'
+	}
+	if _ := build_safe_organize_imports_action(uri, 'module m\n', ['module m'], .utf8) {
+		assert false, 'no imports offer nothing'
+	}
+	scattered := 'module m\n\nimport os\n\nfn main() {}\n\nimport json\n'
+	if _ := build_safe_organize_imports_action(uri, scattered, scattered.split_into_lines(),
+		.utf8) {
+		assert false, 'scattered imports offer nothing'
+	}
+}
+
+fn test_cov_compile_time_condition() {
+	occ := [TokenOccurrence{ line: 0, start_char: 1, end_char: 3 }]
+	assert source_occurrence_is_compile_time_condition(['\$if x'], 0, 5, occ, .utf8), 'condition reaches'
+	assert !source_occurrence_is_compile_time_condition(['\$if x {', 'y'], 1, 1, occ, .utf8), 'block brace stops it'
+	assert !source_occurrence_is_compile_time_condition(['x := 1'], 0, 1, []TokenOccurrence{},
+		.utf8), 'no directive means no condition'
+}
+
+fn test_cov_potential_local_binding() {
+	generic := [TokenOccurrence{ line: 0, start_char: 7, end_char: 8 }]
+	assert source_occurrences_have_potential_local_binding(['fn foo[T](x T) {}'], generic,
+		.utf8), 'generic parameter binds'
+	call_arg := [TokenOccurrence{ line: 0, start_char: 8, end_char: 9 }]
+	assert !source_occurrences_have_potential_local_binding(['println(x)'], call_arg, .utf8), 'call argument binds nothing'
+	assert !source_occurrences_have_potential_local_binding(['x'], []TokenOccurrence{}, .utf8), 'no occurrences bind nothing'
+}
+
+fn test_cov_add_workspace_symbol() {
+	mut results := []WorkspaceSymbol{}
+	mut seen := map[string]bool{}
+	rng := LSPRange{
+		start: Position{ line: 0, char: 3 }
+		end:   Position{ line: 0, char: 6 }
+	}
+	add_workspace_symbol(mut results, mut seen, 'foo', sym_kind_function, 'file:///a.v', rng)
+	add_workspace_symbol(mut results, mut seen, 'foo', sym_kind_function, 'file:///a.v', rng)
+	assert results.len == 1, 'duplicate suppressed'
+	assert results[0].name == 'foo' && results[0].location.uri == 'file:///a.v', 'symbol kept'
+}

@@ -1074,3 +1074,107 @@ fn test_large_vlang_v_workspace_from_env() {
 		assert false, 'expected to find a production fn main under vlang/v cmd'
 	}
 }
+
+fn test_index_encode_range_chars_converts_byte_cols_to_encoding() {
+	r := LSPRange{
+		start: Position{
+			line: 0
+			char: 2
+		}
+		end:   Position{
+			line: 1
+			char: 3
+		}
+	}
+	lines := ['abcdef', 'xyz']
+	got := encode_range_chars(r, lines, .utf8)
+	assert got.start.line == 0, 'start line is preserved'
+	assert got.start.char == 2, 'utf-8 start col passes through'
+	assert got.end.line == 1, 'end line is preserved'
+	assert got.end.char == 3, 'utf-8 end col passes through'
+	oob := LSPRange{
+		start: Position{
+			line: 9
+			char: 4
+		}
+		end:   Position{
+			line: 9
+			char: 6
+		}
+	}
+	oob_got := encode_range_chars(oob, lines, .utf8)
+	assert oob_got.start.line == 9, 'out-of-range start line is preserved'
+	assert oob_got.start.char == 0, 'out-of-range line measures against empty text'
+	assert oob_got.end.char == 0, 'out-of-range end col measures against empty text'
+}
+
+fn test_index_encode_range_chars_counts_multibyte_units_in_utf16() {
+	r := LSPRange{
+		start: Position{
+			line: 0
+			char: 2
+		}
+		end:   Position{
+			line: 0
+			char: 3
+		}
+	}
+	// U+00E9 is two bytes in UTF-8 but one UTF-16 unit.
+	got := encode_range_chars(r, ['éx'], .utf16)
+	assert got.start.char == 1, 'two leading bytes are one utf-16 unit'
+	assert got.end.char == 2, 'three leading bytes are two utf-16 units'
+}
+
+fn test_index_path_is_in_index_scope_matches_recursive_scope() {
+	assert !path_is_in_index_scope('/a/b/c.v', IndexScope{}), 'empty scope matches nothing'
+	rec := IndexScope{
+		dir:       '/a/b'
+		recursive: true
+	}
+	assert path_is_in_index_scope('/a/b/c.v', rec), 'direct child is in recursive scope'
+	assert path_is_in_index_scope('/a/b/sub/c.v', rec), 'nested child is in recursive scope'
+	assert !path_is_in_index_scope('/a/barley/c.v', rec), 'name with shared prefix is not inside'
+	assert !path_is_in_index_scope('/a/c.v', rec), 'sibling is not in recursive scope'
+}
+
+fn test_index_path_is_in_index_scope_shallow_matches_same_dir_only() {
+	dir := os.join_path(os.temp_dir(), 'vls_scope_${os.getpid()}_${time.now().unix_nano()}')
+	os.mkdir_all(dir) or { assert false, 'mkdir failed: ${err}' }
+	defer {
+		os.rmdir_all(dir) or {}
+	}
+	sub := os.join_path(dir, 'sub')
+	os.mkdir_all(sub) or { assert false, 'mkdir sub failed: ${err}' }
+	shallow := IndexScope{
+		dir: dir
+	}
+	assert path_is_in_index_scope(os.join_path(dir, 'a.v'), shallow), 'file in scope dir matches'
+	assert !path_is_in_index_scope(os.join_path(sub, 'b.v'), shallow), 'file in subdir does not match shallow scope'
+}
+
+fn test_index_uri_is_in_index_scope_delegates_to_path_scope() {
+	dir := os.join_path(os.temp_dir(), 'vls_uri_scope_${os.getpid()}_${time.now().unix_nano()}')
+	os.mkdir_all(dir) or { assert false, 'mkdir failed: ${err}' }
+	defer {
+		os.rmdir_all(dir) or {}
+	}
+	uri := path_to_uri(os.join_path(dir, 'a.v'))
+	rec := IndexScope{
+		dir:       dir
+		recursive: true
+	}
+	assert uri_is_in_index_scope(uri, rec), 'uri under recursive dir is in scope'
+	assert !uri_is_in_index_scope(uri, IndexScope{}), 'empty scope matches no uri'
+}
+
+fn test_index_uri_within_any_matches_paths_under_dirs() {
+	dir := os.join_path(os.temp_dir(), 'vls_within_${os.getpid()}_${time.now().unix_nano()}')
+	os.mkdir_all(dir) or { assert false, 'mkdir failed: ${err}' }
+	defer {
+		os.rmdir_all(dir) or {}
+	}
+	uri := path_to_uri(os.join_path(dir, 'a.v'))
+	assert uri_within_any(uri, [dir]), 'uri under dir matches'
+	assert !uri_within_any(uri, [os.join_path(dir, 'sub')]), 'uri outside subdir does not match'
+	assert !uri_within_any(uri, []string{}), 'empty dir list matches nothing'
+}
