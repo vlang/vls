@@ -32,6 +32,7 @@ mut:
 	inlay_hints_enabled                         bool = true // toggled via workspace/didChangeConfiguration
 	diagnostics_enabled                         bool = true // toggled via workspace/didChangeConfiguration
 	diag_cache                                  map[string]DiagCacheEntry // Per-URI cached diagnostics
+	diag_disk_roots                             map[string]bool           // Program roots whose disk cache merged this session
 	open_files_generation                       int                       // Incremented on every workspace file mutation
 	project_generations                         map[string]int            // Per-project-dir revision, for scoped cache invalidation
 	cancelled_requests                          map[int]bool              // Request ids cancelled via $/cancelRequest
@@ -87,11 +88,12 @@ struct JsonVarAC {
 	details []Detail
 }
 
-// DiagCacheEntry stores a cached diagnostic result for one file.
+// DiagCacheEntry stores a cached diagnostic result for one file. The
+// fingerprint covers the program's contents and the compiler (see
+// diag_cache.v): only an identical state reuses the errors.
 struct DiagCacheEntry {
-	content_hash int
-	generation   int
-	errors       []JsonError
+	fingerprint string
+	errors      []JsonError
 }
 
 // Keep runtime-derived settings behind functions. Function-call module constants can crash V3's

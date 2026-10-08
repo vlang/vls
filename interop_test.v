@@ -1046,11 +1046,10 @@ fn test_cache_v_check_result_retries_failure_without_diagnostics() {
 	mut app := App{}
 	path := 'file:///tmp/main.v'
 	app.diag_cache[path] = DiagCacheEntry{
-		content_hash: 1
-		generation:   1
-		errors:       []
+		fingerprint: 'fp'
+		errors:      []
 	}
-	app.cache_v_check_result(path, 2, 2, [], compiler_exit_timeout, 0)
+	app.cache_v_check_result(path, '', 'fp2', [], compiler_exit_timeout, 0)
 	assert path !in app.diag_cache
 }
 
@@ -1058,9 +1057,8 @@ fn test_cache_v_check_result_retries_timeout_with_partial_diagnostics() {
 	mut app := App{}
 	path := 'file:///tmp/main.v'
 	app.diag_cache[path] = DiagCacheEntry{
-		content_hash: 1
-		generation:   1
-		errors:       []
+		fingerprint: 'fp'
+		errors:      []
 	}
 	partial_errors := [
 		JsonError{
@@ -1071,21 +1069,206 @@ fn test_cache_v_check_result_retries_timeout_with_partial_diagnostics() {
 			level:   'error'
 		},
 	]
-	app.cache_v_check_result(path, 2, 2, partial_errors, compiler_exit_timeout, partial_errors.len)
+	app.cache_v_check_result(path, '', 'fp2', partial_errors, compiler_exit_timeout, partial_errors.len)
 	assert path !in app.diag_cache
 }
 
 fn test_cache_v_check_result_keeps_valid_clean_and_diagnostic_results() {
 	mut app := App{}
 	path := 'file:///tmp/main.v'
-	app.cache_v_check_result(path, 1, 1, [], 0, 0)
+	app.cache_v_check_result(path, '', 'fp1', [], 0, 0)
 	assert path in app.diag_cache
 	assert app.diag_cache[path].errors.len == 0
 
-	app.cache_v_check_result(path, 2, 2, [], 1, 1)
+	app.cache_v_check_result(path, '', 'fp2', [], 1, 1)
 	assert path in app.diag_cache
-	assert app.diag_cache[path].content_hash == 2
-	assert app.diag_cache[path].generation == 2
+	assert app.diag_cache[path].fingerprint == 'fp2'
+}
+
+// with_temp_diag_cache_dir points VLS_DIAG_CACHE_DIR at a fresh temp folder.
+fn with_temp_diag_cache_dir(tag string) string {
+	dir := os.join_path(os.temp_dir(), 'vls_diagcache_${tag}_${os.getpid()}_${time.now().unix_nano()}')
+	interop_test_must_mkdir_all(dir)
+	previous := os.getenv('VLS_DIAG_CACHE_DIR')
+	os.setenv('VLS_DIAG_CACHE_DIR', dir, true)
+	return previous
+}
+
+fn restore_diag_cache_dir(previous string) {
+	if previous == '' {
+		os.unsetenv('VLS_DIAG_CACHE_DIR')
+	} else {
+		os.setenv('VLS_DIAG_CACHE_DIR', previous, true)
+	}
+}
+
+fn test_program_content_fingerprint_tracks_buffers_and_siblings() {
+	root := os.join_path(os.temp_dir(), 'vls_fp_${os.getpid()}_${time.now().unix_nano()}')
+	interop_test_must_mkdir_all(root)
+	main_file := os.join_path(root, 'main.v')
+	other_file := os.join_path(root, 'other.v')
+	interop_test_must_write_file(main_file, 'module main\n\nfn main() {}\n')
+	interop_test_must_write_file(other_file, 'module main\n\nfn helper() {}\n')
+	main_uri := path_to_uri(main_file)
+	app := App{
+		open_files: {
+			main_uri: 'module main\n\nfn main() {}\n'
+		}
+	}
+	// Deterministic for an unchanged state, buffers included.
+	before := app.program_content_fingerprint(root)
+	assert before == app.program_content_fingerprint(root)
+	// An unsaved buffer change alters it without touching disk.
+	mut changed := App{
+		open_files: {
+			main_uri: 'module main\n\nfn main() {\n\tprintln(1)\n}\n'
+		}
+	}
+	assert changed.program_content_fingerprint(root) != before
+	// So does a sibling changing on disk.
+	interop_test_must_write_file(other_file, 'module main\n\nfn helper() int {\n\treturn 2\n}\n')
+	assert app.program_content_fingerprint(root) != before
+	os.rmdir_all(root) or {}
+}
+
+fn test_diag_disk_cache_round_trip_and_rejections() {
+	previous := with_temp_diag_cache_dir('roundtrip')
+	defer {
+		restore_diag_cache_dir(previous)
+	}
+	root := os.join_path(os.temp_dir(), 'vls_dc_${os.getpid()}_${time.now().unix_nano()}')
+	interop_test_must_mkdir_all(root)
+	entry := DiagCacheEntry{
+		fingerprint: 'fp1'
+		errors:      [
+			JsonError{
+				path:    os.join_path(root, 'main.v')
+				message: 'seeded error'
+				line_nr: 2
+				col:     3
+				len:     4
+				level:   'error'
+			},
+		]
+	}
+	save_diag_disk_entry(root, 'file:///main.v', entry)
+	loaded := load_diag_disk_cache(root)
+	assert loaded['file:///main.v'].fingerprint == 'fp1'
+	assert loaded['file:///main.v'].errors.len == 1
+	assert loaded['file:///main.v'].errors[0].message == 'seeded error'
+	assert loaded['file:///main.v'].errors[0].line_nr == 2
+	// Unreadable content is dropped, not fatal.
+	os.write_file(diag_cache_file(root), 'not json') or { panic(err) }
+	assert load_diag_disk_cache(root).len == 0
+	// Results written by another compiler are dropped.
+	save_diag_disk_entry(root, 'file:///main.v', entry)
+	previous_command := os.getenv('VLS_V_COMMAND')
+	os.setenv('VLS_V_COMMAND', os.join_path(root, 'no-such-compiler'), true)
+	assert load_diag_disk_cache(root).len == 0
+	restore_v_command(previous_command)
+	os.rmdir_all(root) or {}
+}
+
+fn test_diag_disk_cache_serves_a_later_session() {
+	previous := with_temp_diag_cache_dir('twosession')
+	defer {
+		restore_diag_cache_dir(previous)
+	}
+	root := os.join_path(os.temp_dir(), 'vls_2sess_${os.getpid()}_${time.now().unix_nano()}')
+	interop_test_must_mkdir_all(root)
+	source := os.join_path(root, 'main.v')
+	content := 'module main\n\nfn main() {}\n'
+	interop_test_must_write_file(source, content)
+	uri := path_to_uri(source)
+	// First session: compute the fingerprint exactly as run_v_check does and
+	// store a result on disk.
+	mut first := &App{
+		open_files: {
+			uri: content
+		}
+	}
+	real_path := uri_to_path(uri)
+	program_dir := first.program_root(real_path)
+	fingerprint := compiler_fingerprint() + '\n' +
+		first.program_content_fingerprint(program_overlay_root(real_path, program_dir))
+	entry := DiagCacheEntry{
+		fingerprint: fingerprint
+		errors:      [
+			JsonError{
+				path:    real_path
+				message: 'persisted diagnostic'
+				line_nr: 1
+				col:     1
+				level:   'error'
+			},
+		]
+	}
+	save_diag_disk_entry(program_dir, uri, entry)
+	// Second session: a fresh App must merge and match the same fingerprint.
+	mut second := &App{
+		open_files: {
+			uri: content
+		}
+	}
+	second.ensure_diag_disk_cache(second.program_root(real_path))
+	assert uri in second.diag_cache, 'disk results did not merge'
+	refingerprint := compiler_fingerprint() + '\n' +
+		second.program_content_fingerprint(program_overlay_root(real_path,
+			second.program_root(real_path)))
+	assert second.diag_cache[uri].fingerprint == refingerprint, 'fingerprint moved between sessions'
+	assert second.diag_cache[uri].errors[0].message == 'persisted diagnostic'
+	os.rmdir_all(root) or {}
+}
+
+fn test_run_v_check_returns_cached_result_without_compiler() {
+	previous_cache := with_temp_diag_cache_dir('hit')
+	previous_command := os.getenv('VLS_V_COMMAND')
+	defer {
+		restore_diag_cache_dir(previous_cache)
+		restore_v_command(previous_command)
+	}
+	root := os.join_path(os.temp_dir(), 'vls_hit_${os.getpid()}_${time.now().unix_nano()}')
+	work := os.join_path(root, 'work')
+	interop_test_must_mkdir_all(work)
+	os.setenv('VLS_V_COMMAND', os.join_path(root, 'no-such-compiler'), true)
+	source := os.join_path(root, 'main.v')
+	content := 'module main\n\nfn main() {}\n'
+	interop_test_must_write_file(source, content)
+	uri := path_to_uri(source)
+	mut app := &App{
+		temp_dir:   work
+		open_files: {
+			uri: content
+		}
+	}
+	// Seed exactly the state run_v_check will compute: with a compiler
+	// that does not exist, only a fingerprint hit can answer.
+	real_path := uri_to_path(uri)
+	program_dir := app.program_root(real_path)
+	fingerprint := compiler_fingerprint() + '\n' +
+		app.program_content_fingerprint(program_overlay_root(real_path, program_dir))
+	cached_errors := [
+		JsonError{
+			path:    real_path
+			message: 'seeded diagnostic'
+			line_nr: 1
+			col:     1
+			level:   'error'
+		},
+	]
+	app.diag_cache[uri] = DiagCacheEntry{
+		fingerprint: fingerprint
+		errors:      cached_errors
+	}
+	got := app.run_v_check(uri, content)
+	assert got.len == 1
+	assert got[0].message == 'seeded diagnostic'
+	// A changed buffer misses and, with no compiler, answers nothing.
+	changed := content + '\n// changed\n'
+	app.open_files[uri] = changed
+	missing := app.run_v_check(uri, changed)
+	assert missing.len == 0, missing.str()
+	os.rmdir_all(root) or {}
 }
 
 fn test_run_v_argv_reports_missing_working_dir() {

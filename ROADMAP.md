@@ -55,7 +55,26 @@ whole edits "vanished". Discard any run whose message count
 disagrees with the protocol; the sampler now drains
 continuously into a file.
 
-## Phase 1 — foundation
+## Phase 1b — done (2026-10-08): persistent fingerprint cache
+
+`run_v_check` fingerprints the program (compiler id + sorted
+per-file content hashes, buffers winning over disk) before touching
+the overlay or the compiler. Identical states reuse the answer from
+memory, or from a per-program JSON file under the OS cache dir,
+across restarts. New code: diag_cache.v. Two adjacent fixes fell out:
+a missing compiler panicked the spawn path (now an ordinary error
+result), and the disk save first keyed on a different root than the
+load (unified on the program dir).
+
+Measured: reopening this repo unchanged serves diagnostics in ~15ms
+from disk instead of ~5s cold (~340x). Clean-file traffic unchanged.
+
+Known environment failure (pre-existing, verified on the pristine
+base): `test_conditional_methods_request_receiver_completion_fallback`
+needs the V1 compatibility compiler, which this host cannot build
+(`make` missing).
+
+## Phase 1 — foundation (remaining)
 
 - Split diagnostics: fast (parse + open-file errors, ~100ms
   debounce) vs slow (workspace check after ~1s idle).
