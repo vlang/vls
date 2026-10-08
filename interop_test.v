@@ -2645,3 +2645,173 @@ fn test_publish_diagnostics_params() {
 	assert params.uri == 'file:///test.v'
 	assert params.diagnostics.len == 1
 }
+
+// ============================================================================
+// Compiler-compatibility matrix: one stub compiler per LineInfoMode.
+// Each stub answers `-check` with a diagnostic (so diagnostics are
+// independent of the `-line-info` mode) and answers `-line-info` the way
+// its generation does. Every test asserts the probed mode, that a
+// diagnostics spot-check still returns results, and that the mode never
+// regresses within the session once probed.
+// ============================================================================
+
+// A current compiler answers `-line-info` itself: no refusal, no selector.
+const compat_matrix_modern_direct_stub = r'#!/bin/sh
+case " $* " in
+  *"-line-info"*)
+    case " $* " in
+      *hv^4*) echo "{\"contents\":{\"kind\":\"markdown\",\"value\":\"fn helper()\"}}" ;;
+    esac
+    exit 0
+    ;;
+esac
+case " $* " in
+  *" -check "*)
+    for last in "$@"; do :; done
+    echo "${last}:1:1: error: stub check error" >&2
+    exit 1
+    ;;
+esac
+exit 0
+'
+
+// An older launcher refuses `-line-info` until `-old-compiler` selects it.
+const compat_matrix_old_flag_stub = r'#!/bin/sh
+case " $* " in
+  *"-line-info"*)
+    for arg in "$@"; do
+      if [ "$arg" = "-old-compiler" ]; then
+        echo "\`-old-compiler\` was requested; retrying with \`/v1_fallback\`." >&2
+        echo "{\"contents\":{\"kind\":\"markdown\",\"value\":\"fn helper()\"}}"
+        exit 0
+      fi
+    done
+    echo "unknown option \`-vls-mode\`" >&2
+    exit 1
+    ;;
+esac
+case " $* " in
+  *" -check "*)
+    for last in "$@"; do :; done
+    echo "${last}:1:1: error: stub check error" >&2
+    exit 1
+    ;;
+esac
+exit 0
+'
+
+// A launcher with no checker refuses the options and the selector outright.
+const compat_matrix_dead_end_stub = r'#!/bin/sh
+case " $* " in
+  *"-line-info"*)
+    for arg in "$@"; do
+      if [ "$arg" = "-old-compiler" ]; then
+        echo "unknown option \`-old-compiler\`" >&2
+        exit 1
+      fi
+    done
+    echo "unknown option \`-vls-mode\`" >&2
+    exit 1
+    ;;
+esac
+case " $* " in
+  *" -check "*)
+    for last in "$@"; do :; done
+    echo "${last}:1:1: error: stub check error" >&2
+    exit 1
+    ;;
+esac
+exit 0
+'
+
+fn test_compat_matrix_modern_direct_probes_direct() {
+	$if windows {
+		// The stand-in compiler is a POSIX shell script.
+		return
+	}
+	previous := os.getenv('VLS_V_COMMAND')
+	mut app, uri, root := line_info_stub_app('vls_compat_modern', compat_matrix_modern_direct_stub)
+	defer {
+		restore_v_command(previous)
+		os.rmdir_all(root) or {}
+	}
+	assert app.line_info_mode == .unknown
+
+	hover := app.run_v_line_info(.hover, uri, '6:hv^4')
+	assert app.line_info_mode == .direct
+	assert hover is Hover
+	if hover is Hover {
+		assert hover.contents.value.contains('fn helper()')
+	}
+
+	content := os.read_file(uri_to_path(uri)) or { '' }
+	check := app.run_v_check(uri, content)
+	assert check.len > 0, 'expected diagnostics from the modern stub'
+	assert check[0].message.contains('stub check error')
+
+	// A probed mode never regresses within the session.
+	again := app.run_v_line_info(.hover, uri, '6:hv^4')
+	assert app.line_info_mode == .direct
+	assert again is Hover
+}
+
+fn test_compat_matrix_old_flag_needs_explicit_selector() {
+	$if windows {
+		// The stand-in compiler is a POSIX shell script.
+		return
+	}
+	previous := os.getenv('VLS_V_COMMAND')
+	mut app, uri, root := line_info_stub_app('vls_compat_old_flag', compat_matrix_old_flag_stub)
+	defer {
+		restore_v_command(previous)
+		os.rmdir_all(root) or {}
+	}
+	assert app.line_info_mode == .unknown
+
+	hover := app.run_v_line_info(.hover, uri, '6:hv^4')
+	assert app.line_info_mode == .compat
+	assert hover is Hover
+	if hover is Hover {
+		assert hover.contents.value.contains('fn helper()')
+	}
+
+	content := os.read_file(uri_to_path(uri)) or { '' }
+	check := app.run_v_check(uri, content)
+	assert check.len > 0, 'expected diagnostics from the old-flag stub'
+	assert check[0].message.contains('stub check error')
+
+	// Compat stays compat: the retry keeps selecting the checker directly.
+	again := app.run_v_line_info(.hover, uri, '6:hv^4')
+	assert app.line_info_mode == .compat
+	assert again is Hover
+}
+
+fn test_compat_matrix_dead_end_without_checker() {
+	$if windows {
+		// The stand-in compiler is a POSIX shell script.
+		return
+	}
+	previous := os.getenv('VLS_V_COMMAND')
+	mut app, uri, root := line_info_stub_app('vls_compat_dead_end', compat_matrix_dead_end_stub)
+	defer {
+		restore_v_command(previous)
+		os.rmdir_all(root) or {}
+	}
+	app.capture_output = true
+	assert app.line_info_mode == .unknown
+
+	assert app.run_v_line_info(.hover, uri, '6:hv^4') == ResponseResult('null')
+	assert app.line_info_mode == .missing
+
+	// Retiring the lookups must not retire diagnostics: `v check` needs
+	// no compatibility compiler.
+	content := os.read_file(uri_to_path(uri)) or { '' }
+	check := app.run_v_check(uri, content)
+	assert check.len > 0, 'expected diagnostics from the dead-end stub'
+	assert check[0].message.contains('stub check error')
+
+	// Retired stays retired: no new process, no second notice.
+	assert app.run_v_line_info(.hover, uri, '6:hv^4') == ResponseResult('null')
+	assert app.line_info_mode == .missing
+	assert app.captured_output.len == 1
+}
