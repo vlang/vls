@@ -2,6 +2,9 @@
 
 Build with: `v .`
 
+Check the installed version with `vls --version` or `vls version`. Both print `VLS 0.0.3`
+and exit without starting the server. LSP `initialize` reports the same version in `serverInfo`.
+
 Place the vls binary in your `PATH`. For example, on Linux you can place it in `/usr/local/bin`. On
 Windows, you can place it in a directory that is included in your `PATH`
 environment variable.
@@ -69,6 +72,21 @@ Build VLS with `v .` and make the `vls` binary available in VS Code's `PATH`, or
 The extension includes `V: Build`, `V: Run`, and `V: Test` in the Command Palette and in
 `Tasks: Run Task`. Runnable CodeLens actions show their output in a task terminal. Test tasks
 also visualize line coverage; set `v.vls.coverage.enabled` to `false` to turn that off.
+
+### Code behind a compile-time flag
+
+V compiles the code inside `$if flag ? { ... }` only when the program is built with `-d flag`.
+VLS runs the compiler without defines, so that code is not checked: it gets no errors, and hover
+and go-to-definition find little or nothing in it. V adds the options in the `VFLAGS` environment
+variable to every command, so set it where VLS runs to work on such a block. For example, close
+the editor and start it again from a shell:
+
+```sh
+VFLAGS='-d flag' code .
+```
+
+In Sublime Text, add `"VFLAGS": "-d flag"` to the `env` of its server configuration. The code
+inside `$if !flag ? { ... }` is then the one left unchecked.
 
 ### Features
 

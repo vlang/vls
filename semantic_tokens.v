@@ -119,9 +119,9 @@ fn tokenize_v_line(line string, line_idx int, mut state TokenizeState, mut token
 		}
 		if col > start {
 			tokens << SemToken{
-				line: line_idx
-				start: start
-				length: col - start
+				line:     line_idx
+				start:    start
+				length:   col - start
 				type_idx: sem_tok_comment
 			}
 		}
@@ -163,9 +163,9 @@ fn tokenize_v_code(line string, from int, to int, line_idx int, mut state Tokeni
 				state.in_block_comment = true
 			}
 			tokens << SemToken{
-				line: line_idx
-				start: start
-				length: col - start
+				line:     line_idx
+				start:    start
+				length:   col - start
 				type_idx: sem_tok_comment
 			}
 			continue
@@ -174,9 +174,9 @@ fn tokenize_v_code(line string, from int, to int, line_idx int, mut state Tokeni
 		// Line comment: // …
 		if col + 1 < n && c == `/` && line[col + 1] == `/` {
 			tokens << SemToken{
-				line: line_idx
-				start: col
-				length: n - col
+				line:     line_idx
+				start:    col
+				length:   n - col
 				type_idx: sem_tok_comment
 			}
 			return
@@ -200,9 +200,9 @@ fn tokenize_v_code(line string, from int, to int, line_idx int, mut state Tokeni
 				col++
 			}
 			tokens << SemToken{
-				line: line_idx
-				start: start
-				length: col - start
+				line:     line_idx
+				start:    start
+				length:   col - start
 				type_idx: sem_tok_string
 			}
 			continue
@@ -226,9 +226,9 @@ fn tokenize_v_code(line string, from int, to int, line_idx int, mut state Tokeni
 				}
 			}
 			tokens << SemToken{
-				line: line_idx
-				start: start
-				length: col - start
+				line:     line_idx
+				start:    start
+				length:   col - start
 				type_idx: sem_tok_number
 			}
 			continue
@@ -249,13 +249,13 @@ fn tokenize_v_code(line string, from int, to int, line_idx int, mut state Tokeni
 			tok_type := classify_v_identifier_at(line, start, col, word, state.import_aliases)
 			if tok_type >= 0 {
 				tokens << SemToken{
-					line: line_idx
-					start: start
-					length: col - start
+					line:     line_idx
+					start:    start
+					length:   col - start
 					type_idx: tok_type
 					mod_bits: if tok_type == sem_tok_variable
 						&& (variable_binding_key(state.variable_scope, word) in state.readonly_variables
-						|| variable_binding_key(0, word) in state.readonly_variables) {
+							|| variable_binding_key(0, word) in state.readonly_variables) {
 						sem_mod_readonly
 					} else {
 						0
@@ -454,9 +454,9 @@ fn identifier_before_dot(line string, dot int) string {
 }
 
 // tokenize_v_string scans the string literal whose quote is at `line[start]` and
-// returns the column after it. Only its literal parts are string tokens:
-// `${expr}` is tokenized as code and `$name` gets no token, so the editor colors
-// both as the code they are instead of as text.
+// returns the column after it. Only its literal parts are string tokens: a
+// `${expr}` is tokenized as the code it is. An unbraced `$name` is text, since V
+// interpolates only `${}`, so it stays in the string token.
 fn tokenize_v_string(line string, start int, to int, line_idx int, mut state TokenizeState, mut tokens []SemToken) int {
 	quote := line[start]
 	mut segment_start := start
@@ -483,16 +483,6 @@ fn tokenize_v_string(line string, start int, to int, line_idx int, mut state Tok
 			segment_start = col
 			continue
 		}
-		if ch == `$` && col + 1 < to && line[col + 1] in identifier_start_chars {
-			append_string_token(mut tokens, line_idx, segment_start, col)
-			col++
-			for col < to && (line[col] in identifier_chars
-				|| (line[col] == `.` && col + 1 < to && line[col + 1] in identifier_start_chars)) {
-				col++
-			}
-			segment_start = col
-			continue
-		}
 		col++
 	}
 	if col > to {
@@ -505,9 +495,9 @@ fn tokenize_v_string(line string, start int, to int, line_idx int, mut state Tok
 fn append_string_token(mut tokens []SemToken, line_idx int, start int, end int) {
 	if end > start {
 		tokens << SemToken{
-			line: line_idx
-			start: start
-			length: end - start
+			line:     line_idx
+			start:    start
+			length:   end - start
 			type_idx: sem_tok_string
 		}
 	}
@@ -579,7 +569,7 @@ fn convert_tokens_to_encoding(tokens []SemToken, lines []string, enc PositionEnc
 		enc_end := byte_to_encoded_col(line, tok.start + tok.length, enc)
 		out << SemToken{
 			...tok
-			start: enc_start
+			start:  enc_start
 			length: enc_end - enc_start
 		}
 	}
@@ -615,7 +605,7 @@ fn (mut app App) handle_semantic_tokens(request Request) Response {
 			log('Failed to decode SemanticTokensParams: ${err}')
 		}
 		return Response{
-			id: request.id
+			id:     request.id
 			result: 'null'
 		}
 	}
@@ -624,7 +614,7 @@ fn (mut app App) handle_semantic_tokens(request Request) Response {
 	if content == '' {
 		// An empty document has an empty token set, not a null result (P2-01).
 		return Response{
-			id: request.id
+			id:     request.id
 			result: SemanticTokens{
 				data: []
 			}
@@ -634,7 +624,7 @@ fn (mut app App) handle_semantic_tokens(request Request) Response {
 	raw_tokens := convert_tokens_to_encoding(tokenize_v_source(content), lines, app.position_encoding)
 	encoded := encode_semantic_tokens(raw_tokens)
 	return Response{
-		id: request.id
+		id:     request.id
 		result: SemanticTokens{
 			data: encoded
 		}
@@ -650,7 +640,7 @@ fn (mut app App) handle_semantic_tokens_range(request Request) Response {
 			log('Failed to decode SemanticTokensRangeParams: ${err}')
 		}
 		return Response{
-			id: request.id
+			id:     request.id
 			result: 'null'
 		}
 	}
@@ -658,7 +648,7 @@ fn (mut app App) handle_semantic_tokens_range(request Request) Response {
 	content := app.open_files[uri] or { os.read_file(uri_to_path(uri)) or { '' } }
 	if content == '' {
 		return Response{
-			id: request.id
+			id:     request.id
 			result: SemanticTokens{
 				data: []
 			}
@@ -679,7 +669,7 @@ fn (mut app App) handle_semantic_tokens_range(request Request) Response {
 		&& (it.line < end_line || (it.line == end_line && it.start < end_char)))
 	encoded := encode_semantic_tokens(range_tokens)
 	return Response{
-		id: request.id
+		id:     request.id
 		result: SemanticTokens{
 			data: encoded
 		}
