@@ -2824,7 +2824,7 @@ fn test_integration_sublime_text_lsp_handshake() {
 	assert output.len == 2
 	assert output[0].contains('"id":1')
 	assert output[0].contains('"positionEncoding":"utf-16"')
-	assert output[0].contains('"serverInfo":{"name":"vls","version":"0.0.2"}')
+	assert output[0].contains('"serverInfo":{"name":"vls","version":"0.0.3"}')
 	assert output[1].contains('"method":"client/registerCapability"')
 	assert output[1].contains('"workspace/didChangeWatchedFiles"')
 }
@@ -3045,5 +3045,5 @@ fn test_integration_initialize_advertises_every_implemented_feature() {
 	assert output.contains('"documentHighlightProvider":true')
 	assert output.contains('"selectionRangeProvider":true')
 	assert output.contains('"workspaceFolders":{"supported":true,"changeNotifications":true}')
-	assert output.contains('"serverInfo":{"name":"vls","version":"0.0.2"}')
+	assert output.contains('"serverInfo":{"name":"vls","version":"0.0.3"}')
 }

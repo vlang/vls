@@ -9,6 +9,8 @@ import sync
 import time
 import io
 
+const vls_version = '0.0.3'
+
 // App represents the context of the server during its lifetime.
 pub struct App {
 	cur_mod string = 'main'
@@ -254,7 +256,17 @@ fn new_stdin_buffered_reader() &StdinBufferedReader {
 	return new_stdin_buffered_reader_for_fd(0, transport_buffer_cap)
 }
 
+fn is_version_request(args []string) bool {
+	return args.len == 2 && args[1] in ['--version', 'version']
+}
+
 fn main() {
+	// A version query must finish without opening a transport or requiring V.
+	if is_version_request(os.args) {
+		println('VLS ${vls_version}')
+		return
+	}
+
 	log('VLS started. Reading from stdin...')
 
 	// Check for --port PORT argument to start as a TCP multi-client server.
@@ -980,7 +992,7 @@ fn (mut app App) handle_requests[T](mut reader T) {
 						}
 						server_info:  ServerInfo{
 							name:    'vls'
-							version: '0.0.2'
+							version: vls_version
 						}
 					}
 				}
