@@ -106,20 +106,24 @@ needs the V1 compatibility compiler, which this host cannot build
   default on, runtime toggle, no restart.
 - Richer hover (const values, methods, doc links).
 
-## Phase 3 — full refactors
+## Phase 3 — refactors (partial)
 
-- Safe rename (shadowing, interface satisfaction).
-- Extract function/variable, inline, fillStruct/fillSwitch,
-  stub-missing-members. Each with before/after doc-tests.
+- Safe rename: DONE — refuses names already live in the
+  enclosing scope (locals, parameters, import aliases, outer
+  scopes a nested reference would capture) and names that are
+  members of an interface, naming the conflict.
+- Fill struct literal quickfix: DONE (assists.v) — missing
+  fields added with zero values, existing ones untouched;
+  skipped for unknown types and complete literals.
+- Extract function/variable, inline, stub-missing-members:
+  NOT started.
 
-## Phase 4 — build / config UX
+## Phase 5 — finish or drop stubs: DONE
 
-- Layered config: settings > `vls.json` (+ schema) >
-  per-project overrides > env. `defines: [...]`
-  replaces `VFLAGS`-in-shell folklore.
-- Fast `v check`-only mode vs full build (zls check-step).
-
-## Phase 5 — finish or drop stubs
-
-Implement or unadvertise: range-formatting, on-type
-formatting, file-op hooks, inlineValue, linkedEditing.
+Advertised now they are implemented and tested: range formatting
+(emits a hunk only inside the requested range), inline values
+(type of a `:=` literal). Linked editing was same-line text
+matching — replaced with the occurrence set a rename would edit,
+across files, and advertised. On-type formatting stays
+unadvertised by design (would run `v fmt` per keystroke);
+file-operation hooks and willSave remain unadvertised no-ops.
