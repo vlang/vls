@@ -7939,6 +7939,14 @@ fn (mut app App) handle_code_action(request Request) Response {
 		}
 	}
 
+	// 3. Fill struct literal — add the fields a literal omits, with their zero
+	// values, so an incomplete literal can be completed from the lightbulb.
+	if code_action_kind_wanted(only, code_action_kind_quickfix) {
+		if action := app.build_fill_struct_literal_action(uri, content, params.range) {
+			actions << action
+		}
+	}
+
 	return Response{
 		id:     request.id
 		result: actions

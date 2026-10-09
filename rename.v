@@ -395,21 +395,38 @@ fn (mut app App) check_implicit_name(target RenameTarget, new_name string) ! {
 // around and prints it through them.
 const ierror_method_names = ['msg', 'code']
 
+// InterfaceDeclaration is an interface, and where its own name is declared.
+struct InterfaceDeclaration {
+	name  string
+	where Location
+}
+
+// InterfaceMember is a method or field that an interface declares, and the
+// interface that declares it.
+struct InterfaceMember {
+	member string
+	iface  InterfaceDeclaration
+}
+
 // check_interface_member refuses a rename of a member of an interface, or of a
 // method or a field with the name of one: V needs no declaration to implement
 // an interface, so the types that implement it must keep that name, and a
-// rename cannot see which types those are.
+// rename cannot see which types those are. The rename does not change the
+// interface with it, so it is refused, and the interface that declares the
+// member is named.
 fn (mut app App) check_interface_member(anchor Location, symbol string, scope IndexScope) ! {
-	if app.in_interface_body(anchor) {
-		return error('`${symbol}` is a member of an interface: the types that implement it must keep that name, and V does not say which types those are, so this rename could break the program')
+	if iface := app.enclosing_interface(anchor) {
+		return error('`${symbol}` is a member of the interface `${iface.name}` at ${name_pos_text(app.name_pos_of(iface.where))}: the types that implement it must keep that name, and V does not say which types those are, so this rename could break the program')
 	}
 	kind := app.indexed_declaration_kind(anchor)
 	if kind !in [sym_kind_method, sym_kind_field] {
 		return
 	}
-	if (kind == sym_kind_method && symbol in ierror_method_names)
-		|| symbol in app.interface_member_names(scope) {
-		return error('`${symbol}` has the name of a member of an interface: a type that implements it must keep that name, and V does not say which types those are, so this rename could break the program')
+	if member := app.interface_member_owner(symbol, scope) {
+		return error('`${symbol}` is a member of the interface `${member.iface.name}` at ${name_pos_text(app.name_pos_of(member.iface.where))}: a type that implements it must keep that name, and V does not say which types those are, so this rename could break the program')
+	}
+	if kind == sym_kind_method && symbol in ierror_method_names {
+		return error('`${symbol}` is a member of the interface `IError` that V declares itself: a type that has them is an error, and V passes it around and prints it through them, so this rename could break the program')
 	}
 }
 
@@ -429,10 +446,10 @@ fn (mut app App) indexed_declaration_kind(loc Location) int {
 	return 0
 }
 
-// in_interface_body reports whether `loc` is in the body of an interface: the
-// name of one of its members, which the index does not list.
-fn (mut app App) in_interface_body(loc Location) bool {
-	content := app.open_files[loc.uri] or { os.read_file(uri_to_path(loc.uri)) or { return false } }
+// enclosing_interface returns the interface whose body holds `loc`: where the
+// name of one of its members is, which the index does not list.
+fn (mut app App) enclosing_interface(loc Location) ?InterfaceDeclaration {
+	content := app.file_text(loc.uri)
 	lines := content.split_into_lines()
 	code := source_code_lines(content)
 	for s in app.index_doc_symbols(loc.uri) {
@@ -441,16 +458,33 @@ fn (mut app App) in_interface_body(loc Location) bool {
 		}
 		first := s.range.start.line
 		if loc.range.start.line > first && loc.range.start.line <= declaration_end_line(lines, code, first) {
-			return true
+			return InterfaceDeclaration{
+				name:  s.name
+				where: Location{
+					uri:   loc.uri
+					range: s.selection_range
+				}
+			}
 		}
 	}
-	return false
+	return none
 }
 
-// interface_member_names returns the names of the methods and fields that the
-// interfaces of `scope` declare.
-fn (mut app App) interface_member_names(scope IndexScope) []string {
-	mut names := []string{}
+// interface_member_owner returns the interface of `scope` that declares
+// `member` as one of its methods or fields.
+fn (mut app App) interface_member_owner(member string, scope IndexScope) ?InterfaceMember {
+	for found in app.interface_members(scope) {
+		if found.member == member {
+			return found
+		}
+	}
+	return none
+}
+
+// interface_members returns the methods and fields that the interfaces of
+// `scope` declare, each with the interface that declares it.
+fn (mut app App) interface_members(scope IndexScope) []InterfaceMember {
+	mut members := []InterfaceMember{}
 	mut uris := app.symbol_index.keys()
 	uris.sort()
 	for uri in uris {
@@ -458,12 +492,19 @@ fn (mut app App) interface_member_names(scope IndexScope) []string {
 			|| !app.index_doc_symbols(uri).any(it.kind == sym_kind_interface) {
 			continue
 		}
-		content := app.open_files[uri] or { os.read_file(uri_to_path(uri)) or { continue } }
+		content := app.file_text(uri)
 		lines := content.split_into_lines()
 		code := source_code_lines(content)
 		for s in app.index_doc_symbols(uri) {
 			if s.kind != sym_kind_interface {
 				continue
+			}
+			iface := InterfaceDeclaration{
+				name:  s.name
+				where: Location{
+					uri:   uri
+					range: s.selection_range
+				}
 			}
 			first := s.range.start.line
 			last := declaration_end_line(lines, code, first)
@@ -479,12 +520,15 @@ fn (mut app App) interface_member_names(scope IndexScope) []string {
 				// An embedded interface is a type, capitalized; `mut:` opens a section.
 				name := member[..end]
 				if name != '' && !name[0].is_capital() && !member[end..].starts_with(':') {
-					names << name
+					members << InterfaceMember{
+						member: name
+						iface:  iface
+					}
 				}
 			}
 		}
 	}
-	return names
+	return members
 }
 
 const type_declaration_kinds = [sym_kind_struct, sym_kind_enum, sym_kind_interface, sym_kind_class]
@@ -880,8 +924,19 @@ fn (mut app App) in_conditional_code(loc Location) bool {
 // `lines`, code without its comments and the text of its strings, is inside
 // the braces of a `$if` or `$else` branch.
 fn in_comptime_branch(lines []string, line int, col int) bool {
+	return comptime_branch_chain(lines, line, col).len > 0
+}
+
+// comptime_branch_chain returns the lines of the `$if` and `$else` blocks that
+// hold the column `col` of the line `line` of `code`, code without its comments
+// and the text of its strings, outermost first, and empty when it is outside
+// any of them. Two positions in the same file chain are inside the same branch,
+// whatever the platform that builds it: V compiles the branch this build takes,
+// and nothing of the other one.
+fn comptime_branch_chain(code []string, line int, col int) []int {
+	mut opened := []int{}
 	mut branches := []bool{}
-	for i, text in lines {
+	for i, text in code {
 		if i > line {
 			break
 		}
@@ -891,11 +946,13 @@ fn in_comptime_branch(lines []string, line int, col int) bool {
 			match text[j] {
 				`{` {
 					head := text[head_start..j]
+					opened << i
 					branches << (head.contains('\$if') || head.contains('\$else'))
 					head_start = j + 1
 				}
 				`}` {
-					if branches.len > 0 {
+					if opened.len > 0 {
+						opened.pop()
 						branches.pop()
 					}
 					head_start = j + 1
@@ -907,7 +964,13 @@ fn in_comptime_branch(lines []string, line int, col int) bool {
 			}
 		}
 	}
-	return branches.any(it)
+	mut chain := []int{}
+	for k, is_branch in branches {
+		if is_branch {
+			chain << opened[k]
+		}
+	}
+	return chain
 }
 
 // in_module_of reports whether `loc` is in a file of the module whose file

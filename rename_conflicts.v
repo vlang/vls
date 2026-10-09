@@ -96,6 +96,7 @@ fn (mut app App) check_rename_conflicts(target RenameTarget, locations []Locatio
 		existing: existing
 		uris:     uris
 	}
+	app.check_rename_shadowing(target, rc)!
 	// The files of a program are checked together, each program apart.
 	mut programs := map[string][]string{}
 	for path, _ in uris {
@@ -109,6 +110,180 @@ fn (mut app App) check_rename_conflicts(target RenameTarget, locations []Locatio
 			return error('renaming `${target.symbol}` to `${new_name}` would ${reason}')
 		}
 	}
+}
+
+// check_rename_shadowing refuses a rename whose new name is already a live
+// binding in the scope of the renamed declaration, in a `$if` or `$else` branch
+// that this build leaves out. V reports a redefinition between two names its
+// check reads (see rename_clash_in), so what is left for this check is the one
+// it cannot read: the build of the platform that takes that branch would report
+// it, where a use of the new name would name the binding instead of the
+// renamed declaration.
+fn (mut app App) check_rename_shadowing(target RenameTarget, rc RenameCheck) ! {
+	anchor_path := normalize_overlay_path(uri_to_path(target.anchor.uri))
+	anchor_col := app.client_col_to_byte_col(target.anchor.uri, target.anchor.range.start.line,
+		target.anchor.range.start.char)
+	anchor_chain := comptime_branch_chain(source_code_lines(app.file_text(target.anchor.uri)),
+		target.anchor.range.start.line, anchor_col)
+	for pos in rc.existing {
+		uri := rc.uris[pos.path] or { continue }
+		lines := app.file_text(uri).split_into_lines()
+		if pos.line < 0 || pos.line >= lines.len {
+			continue
+		}
+		code := source_code_lines(lines.join('\n'))
+		at := Location{
+			uri:   uri
+			range: LSPRange{
+				start: Position{
+					line: pos.line
+					char: byte_to_encoded_col(lines[pos.line], pos.col, app.position_encoding)
+				}
+			}
+		}
+		if !app.is_live_binding(target, at, rc.new_name, code) {
+			continue
+		}
+		chain := comptime_branch_chain(code, pos.line, pos.col)
+		// Two names the check reads it reports itself, so they are left to it.
+		if anchor_chain.len == 0 && chain.len == 0 {
+			continue
+		}
+		if anchor_path == pos.path && anchor_chain == chain {
+			continue
+		}
+		return error(shadowing_refusal(rc, pos, anchor_chain, chain))
+	}
+}
+
+// is_live_binding reports whether `at`, an occurrence of the new name, declares
+// a binding that is live where the renamed declaration is: an import of its
+// file, a parameter or a local of the function around it, or a declaration its
+// module makes at the top level of one of its files.
+fn (mut app App) is_live_binding(target RenameTarget, at Location, name string, code []string) bool {
+	line := at.range.start.line
+	if line < 0 || line >= code.len {
+		return false
+	}
+	alias := import_alias_on(code[line])
+	if alias != '' {
+		return name == alias
+	}
+	// A local or a parameter: what is live where it is, is in the function
+	// around it.
+	if app.indexed_declaration_kind(target.anchor) == 0 {
+		first, last := app.enclosing_fn_lines(target.anchor) or { return false }
+		if line >= first && line <= last && line_declares_local(code[line], name, line == first) {
+			return true
+		}
+	}
+	// A name of the module, which a local or a declaration there shadows. A
+	// file of another module is a program of its own, whatever its directory.
+	if at.uri != target.anchor.uri && !app.in_module_of(at, target.anchor) {
+		return false
+	}
+	return line_declares_top_level(code[line], name)
+}
+
+// import_alias_on returns the alias that the `import` line declares, or '' when
+// `line` imports nothing.
+fn import_alias_on(line string) string {
+	mut rest := line.trim_left(' \t')
+	if !rest.starts_with('import ') {
+		return ''
+	}
+	rest = rest['import '.len..].trim_left(' \t')
+	if as_at := rest.index(' as ') {
+		return leading_identifier(rest[as_at + ' as '.len..])
+	}
+	// `import my.mod` and `import my.mod { X }` are reached as `mod`.
+	return leading_identifier(rest.all_after_last('.'))
+}
+
+// line_declares_local reports whether `line` of code declares `name` as a
+// parameter, a local or a variable of a loop.
+fn line_declares_local(line string, name string, is_signature bool) bool {
+	if name == '' {
+		return false
+	}
+	mut from := 0
+	for {
+		at := line.index_after(name, from) or { return false }
+		from = at + name.len
+		if (at > 0 && is_ident_char(line[at - 1]))
+			|| (from < line.len && is_ident_char(line[from])) {
+			continue
+		}
+		before := line[..at].trim_right(' \t')
+		after := line[from..].trim_left(' \t')
+		// A parameter of the signature, or of a closure written on this line.
+		if (before.ends_with('(') || before.ends_with(','))
+			&& (is_signature || line.contains('fn (')) {
+			return true
+		}
+		// `name :=`, `mut name :=`, `name, other :=`, `for name in`.
+		if after.starts_with(':=') || before.ends_with('for') || before.ends_with('mut')
+			|| (after.starts_with(',') && after.contains(':='))
+			|| (before.ends_with(',') && after.starts_with('in ')) {
+			return true
+		}
+	}
+	return false
+}
+
+// line_declares_top_level reports whether `line` of code declares `name` at the
+// top level of a file.
+fn line_declares_top_level(line string, name string) bool {
+	if name == '' {
+		return false
+	}
+	mut rest := line.trim_left(' \t')
+	if rest.starts_with('pub ') {
+		rest = rest['pub '.len..].trim_left(' \t')
+	}
+	for keyword in top_level_declaration_keywords {
+		if !rest.starts_with(keyword) {
+			continue
+		}
+		mut after := rest[keyword.len..]
+		if after.starts_with('(') {
+			// A method: its receiver comes before the name it declares.
+			close := after.index(')') or { return false }
+			after = after[close + 1..].trim_left(' \t')
+		}
+		return leading_identifier(after) == name
+	}
+	return false
+}
+
+// The keywords a declaration at the top level of a file starts with, `pub `
+// already taken off.
+const top_level_declaration_keywords = ['fn ', 'const ', 'struct ', 'enum ', 'interface ', 'type ',
+	'__global ']
+
+// leading_identifier returns the identifier `text` starts with, or '' when it
+// starts with none.
+fn leading_identifier(text string) string {
+	mut end := 0
+	for end < text.len && is_ident_char(text[end]) {
+		end++
+	}
+	return text[..end]
+}
+
+// shadowing_refusal says why the rename cannot put the new name where it is
+// already declared: the check of this build reads the branch it takes, and
+// nothing of the other one.
+fn shadowing_refusal(rc RenameCheck, pos NamePos, anchor_chain []int, chain []int) string {
+	mut where := '`${rc.new_name}` is already declared at ${name_pos_text(pos)}'
+	if anchor_chain.len == 0 {
+		where += ', in a `$if` branch that this build leaves out'
+	} else if chain.len == 0 {
+		where += ', and the declaration this rename writes is in a `$if` branch that this build leaves out'
+	} else {
+		where += ', in the `$if` branch that this build leaves out'
+	}
+	return '${where}: the compiler cannot see the clash, and the build of the platform that takes that branch would report a redefinition of `${rc.new_name}`'
 }
 
 // rename_clash_in returns how the rename `rc` would change the program in

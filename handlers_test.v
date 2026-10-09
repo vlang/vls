@@ -10593,6 +10593,378 @@ fn test_code_action_kind_wanted_respects_only_filter() {
 	assert !code_action_kind_wanted(['source.organizeImports'], 'quickfix')
 }
 
+// --- Fill struct literal ---
+
+const fill_literal_types = 'module main
+
+enum Mode {
+	idle
+	fast
+}
+
+struct Shade {
+	level int
+}
+
+struct Pixel {
+	name    string
+	x       int
+	ratio   f64
+	tags    []string
+	scores  map[string]int
+	shade   Shade
+	mode    Mode
+	retries ?int
+	hidden  bool
+}
+'
+
+// fill_literal_main returns a project whose main() holds `body`, with `Pixel`,
+// `Shade` and `Mode` declared for it to use.
+fn fill_literal_main(body string) string {
+	return fill_literal_types + '\nfn main() {\n' + body + '\n}\n'
+}
+
+// new_fill_literal_app writes `files` into a project on disk, opens them all in
+// the editor and returns the app with the URI of each file.
+fn new_fill_literal_app(files map[string]string) (&App, map[string]string) {
+	mut app := create_test_app()
+	dir := os.join_path(app.temp_dir, 'fill_project')
+	must_mkdir_all(dir)
+	must_write_file(os.join_path(dir, 'v.mod'), 'Module {}\n')
+	mut uris := map[string]string{}
+	for name, content in files {
+		path := os.join_path(dir, name)
+		must_mkdir_all(os.dir(path))
+		must_write_file(path, content)
+		uri := path_to_uri(path)
+		app.open_files[uri] = content
+		uris[name] = uri
+	}
+	app.workspace_roots = [dir]
+	return app, uris
+}
+
+// fill_literal_action returns the "Fill struct literal" action offered for the
+// range `sel` in `uri`, or none when the request offers no such action.
+fn fill_literal_action(mut app App, uri string, sel LSPRange, only []string) ?CodeAction {
+	resp := app.handle_code_action(Request{
+		id:     1
+		params: json2.encode(CodeActionParams{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			range:         sel
+			context:       CodeActionContext{
+				only: only
+			}
+		},
+			escape_unicode: true
+		)
+	})
+	if resp.result is []CodeAction {
+		for action in resp.result as []CodeAction {
+			if action.title == 'Fill struct literal' {
+				return action
+			}
+		}
+	}
+	return none
+}
+
+// position_of returns where the first `needle` of `content` sits, which is both
+// where a cursor on it lands and where a range selecting it starts.
+fn position_of(content string, needle string) Position {
+	for line, text in content.split_into_lines() {
+		if col := text.index(needle) {
+			return Position{
+				line: line
+				char: col
+			}
+		}
+	}
+	assert false, 'fixture holds no ${needle}'
+	return Position{}
+}
+
+// cursor_range returns the empty range an editor reports for a cursor sitting on
+// the first `needle` of `content`.
+fn cursor_range(content string, needle string) LSPRange {
+	at := position_of(content, needle)
+	return LSPRange{
+		start: at
+		end:   at
+	}
+}
+
+// selection_range returns the range covering the first `needle` of `content`,
+// what an editor reports for a selected token.
+fn selection_range(content string, needle string) LSPRange {
+	at := position_of(content, needle)
+	return LSPRange{
+		start: at
+		end:   Position{
+			line: at.line
+			char: at.char + needle.len
+		}
+	}
+}
+
+// apply_text_edit applies one edit to `content`, so a test can assert what the
+// document looks like once the quick fix is taken.
+fn apply_text_edit(content string, edit TextEdit) string {
+	mut lines := content.split_into_lines()
+	line := lines[edit.range.start.line]
+	lines[edit.range.start.line] = line[..edit.range.start.char] + edit.new_text +
+		line[edit.range.end.char..]
+	return if content.ends_with('\n') { lines.join('\n') + '\n' } else { lines.join('\n') }
+}
+
+// The mask every scan below reads keeps the length of the text it stands for, so
+// an offset found in it addresses the same byte of the original document, and it
+// blanks a string body where it sits rather than at the end of its line. A line
+// comment, a block comment, and a string holding a brace all have to survive.
+fn test_masked_v_code_keeps_every_offset_pointing_at_the_same_byte() {
+	for content in ['', 'a', 'a\n', 'p := Pixel{}\n', 'x := "{" + \'}\'\n', '// c\np := Pixel{}\n',
+		'p := Pixel{ // c\n}\n', 'p := Pixel{\n\t\tx: 1\n\t}\n', 's := "x${1 + 2}y"\n'] {
+		assert masked_v_code(content).len == content.len, 'the mask of `${content}` keeps its length'
+	}
+	assert masked_v_code('x := "}"\n').len == 9, 'the mask of a string keeps its length'
+	assert masked_v_code('x := "}"\n')[5] == `"`, 'the quote that opens a string stays'
+	assert masked_v_code('x := "}"\n')[6] == ` `, 'a string body is blanked where it sits'
+	assert masked_v_code('x := "}"\n')[7] == `"`, 'the quote that closes a string stays'
+	assert masked_v_code('x := "}"\n')[0] == `x`, 'the code around a string is untouched'
+	assert !masked_v_code('// dropped\np := Pixel{}\n').contains('dropped'), 'a comment is masked away'
+	assert masked_v_code('/* multi\nline */ p := x\n').contains('p := x'), 'code after a block comment stays'
+}
+
+// A one-line literal gains every field the index can give a zero value for, in
+// the order the struct declares them: the nested struct the index sees becomes
+// `Shade{}`, and the enum field and the optional one are left out because no
+// literal can be written for either.
+fn test_fill_struct_literal_adds_the_missing_fields() {
+	mut app, uris := new_fill_literal_app({
+		'main.v': fill_literal_main('\tp := Pixel{}\n\tprintln(p)')
+	})
+	defer {
+		cleanup_test_app(app)
+	}
+	uri := uris['main.v']
+	content := app.open_files[uri] or { '' }
+	action := fill_literal_action(mut app, uri, selection_range(content, 'Pixel{}'), []) or {
+		assert false, 'a literal that omits fields must offer "Fill struct literal"'
+		return
+	}
+	assert action.kind == code_action_kind_quickfix, 'the fill is offered as a quick fix'
+	edit := action.edit or {
+		assert false, 'the fill action must carry an edit'
+		return
+	}
+	edits := edit.changes[uri]
+	assert edits.len == 1, 'one edit fills the literal'
+	assert edits[0].range.start == edits[0].range.end, 'the fill inserts, it replaces nothing'
+	literal_line := position_of(content, 'Pixel{}').line
+	assert edits[0].range.start.line == literal_line, 'the edit is on the line of the literal'
+	assert edits[0].range.start.char == '\tp := Pixel{'.len, 'the edit goes before the closing brace'
+	assert edits[0].new_text == "name: '', x: 0, ratio: 0, tags: []string{}, scores: map[string]int{}, shade: Shade{}, hidden: false", 'each missing field is added with its zero value'
+	got := apply_text_edit(content, edits[0]).split_into_lines()
+	assert got.len == content.split_into_lines().len, 'a one-line fill adds and removes no line'
+	assert got[literal_line] == "\tp := Pixel{name: '', x: 0, ratio: 0, tags: []string{}, scores: map[string]int{}, shade: Shade{}, hidden: false}", 'the filled literal holds every field on one line'
+}
+
+// A literal already spanning lines keeps the fields it sets and gains the rest
+// on their own lines at the indentation its last field uses, with its closing
+// brace left on a line of its own.
+fn test_fill_struct_literal_keeps_the_fields_already_set() {
+	body := '\tp := Pixel{\n\t\tx: 1\n\t}\n\tprintln(p)'
+	mut app, uris := new_fill_literal_app({
+		'main.v': fill_literal_main(body)
+	})
+	defer {
+		cleanup_test_app(app)
+	}
+	uri := uris['main.v']
+	content := app.open_files[uri] or { '' }
+	action := fill_literal_action(mut app, uri, selection_range(content, 'Pixel{'), []) or {
+		assert false, 'a partial literal must offer "Fill struct literal"'
+		return
+	}
+	edit := action.edit or {
+		assert false, 'the fill action must carry an edit'
+		return
+	}
+	edits := edit.changes[uri]
+	assert edits.len == 1, 'one edit fills the literal'
+	literal_line := position_of(content, 'Pixel{').line
+	got := apply_text_edit(content, edits[0]).split_into_lines()
+	assert got[literal_line..] == [
+		'\tp := Pixel{',
+		'\t\tx: 1,',
+		"\t\tname: '',",
+		'\t\tratio: 0,',
+		'\t\ttags: []string{},',
+		'\t\tscores: map[string]int{},',
+		'\t\tshade: Shade{},',
+		'\t\thidden: false',
+		'\t}',
+		'\tprintln(p)',
+		'}',
+	], 'the fields already set are kept and the rest follow at their indentation'
+}
+
+// A brace inside a string must not close the literal, and a comment after the
+// last field must not take its place: the new fields follow the field, and the
+// comment ends up on the last of them.
+fn test_fill_struct_literal_ignores_braces_in_strings_and_comments() {
+	body := '\tp := Pixel{\n\t\tname: "a}b"\n\t\tx: 1 // note , here\n\t}\n\tprintln(p)'
+	mut app, uris := new_fill_literal_app({
+		'main.v': fill_literal_main(body)
+	})
+	defer {
+		cleanup_test_app(app)
+	}
+	uri := uris['main.v']
+	content := app.open_files[uri] or { '' }
+	action := fill_literal_action(mut app, uri, selection_range(content, 'Pixel{'), []) or {
+		assert false, 'a literal with a brace in a string must offer "Fill struct literal"'
+		return
+	}
+	edit := action.edit or {
+		assert false, 'the fill action must carry an edit'
+		return
+	}
+	edits := edit.changes[uri]
+	assert edits.len == 1, 'one edit fills the literal'
+	literal_line := position_of(content, 'Pixel{').line
+	got := apply_text_edit(content, edits[0]).split_into_lines()
+	assert got[literal_line..] == [
+		'\tp := Pixel{',
+		'\t\tname: "a}b"',
+		'\t\tx: 1,',
+		'\t\tratio: 0,',
+		'\t\ttags: []string{},',
+		'\t\tscores: map[string]int{},',
+		'\t\tshade: Shade{},',
+		'\t\thidden: false // note , here',
+		'\t}',
+		'\tprintln(p)',
+		'}',
+	], 'the fields follow the last field, and the comment ends up on the last of them'
+}
+
+// A literal that spans lines but holds no field yet takes its fields one level
+// past the statement that opens it, and its closing brace stays where it was.
+fn test_fill_struct_literal_indents_an_empty_multiline_literal() {
+	body := '\tp := Pixel{\n\t}\n\tprintln(p)'
+	mut app, uris := new_fill_literal_app({
+		'main.v': fill_literal_main(body)
+	})
+	defer {
+		cleanup_test_app(app)
+	}
+	uri := uris['main.v']
+	content := app.open_files[uri] or { '' }
+	action := fill_literal_action(mut app, uri, selection_range(content, 'Pixel{'), []) or {
+		assert false, 'an empty multi-line literal must offer "Fill struct literal"'
+		return
+	}
+	edit := action.edit or {
+		assert false, 'the fill action must carry an edit'
+		return
+	}
+	literal_line := position_of(content, 'Pixel{').line
+	got := apply_text_edit(content, edit.changes[uri][0]).split_into_lines()
+	assert got[literal_line..] == [
+		'\tp := Pixel{',
+		"\t\tname: '',",
+		'\t\tx: 0,',
+		'\t\tratio: 0,',
+		'\t\ttags: []string{},',
+		'\t\tscores: map[string]int{},',
+		'\t\tshade: Shade{},',
+		'\t\thidden: false',
+		'\t}',
+		'\tprintln(p)',
+		'}',
+	], 'the first fields of an empty literal sit one level past the statement'
+}
+
+// A literal that already sets every field it can be given has nothing to add,
+// and so does one left with only an enum field and an optional one missing.
+fn test_fill_struct_literal_is_not_offered_when_nothing_can_be_added() {
+	complete := "\tp := Pixel{\n\t\tname:    'a'\n\t\tx:       1\n\t\tratio:   0.5\n\t\ttags:    ['t']\n\t\tscores:  {'a': 1}\n\t\tshade:   Shade{level: 1}\n\t\tmode:    Mode.fast\n\t\tretries: 2\n\t\thidden:  false\n\t}\n\tprintln(p)"
+	only_unfillable_left := "\tp := Pixel{\n\t\tname:   'a'\n\t\tx:      1\n\t\tratio:  0.5\n\t\ttags:   []\n\t\tscores: map[string]int{}\n\t\tshade:  Shade{}\n\t\thidden: false\n\t}\n\tprintln(p)"
+	for body in [complete, only_unfillable_left] {
+		mut app, uris := new_fill_literal_app({
+			'main.v': fill_literal_main(body)
+		})
+		uri := uris['main.v']
+		content := app.open_files[uri] or { '' }
+		assert fill_literal_action(mut app, uri, selection_range(content, 'Pixel{'), []) == none, 'a literal with nothing that can be filled must not offer the action'
+		cleanup_test_app(app)
+	}
+}
+
+// A type the index does not know is never filled: guessing its fields would
+// invent code.
+fn test_fill_struct_literal_is_not_offered_for_an_unknown_type() {
+	mut app, uris := new_fill_literal_app({
+		'main.v': fill_literal_main('\tp := Ghost{}\n\tprintln(p)')
+	})
+	defer {
+		cleanup_test_app(app)
+	}
+	uri := uris['main.v']
+	content := app.open_files[uri] or { '' }
+	assert fill_literal_action(mut app, uri, selection_range(content, 'Ghost{}'), []) == none, 'a literal of an unknown type must not offer the action'
+}
+
+// A quick fix is offered for a struct literal and nothing else: not for a block
+// or a function body, not for a composite or an anonymous element literal, not
+// for a struct declaration body, and not for a literal still being typed.
+fn test_fill_struct_literal_is_not_offered_outside_a_struct_literal() {
+	blocks := fill_literal_main('\tprintln("hi")\n\tpixels := []Pixel{\n\t\t{x: 1},\n\t}\n\tprintln(pixels)')
+	mut app, uris := new_fill_literal_app({
+		'main.v': blocks
+	})
+	uri := uris['main.v']
+	content := app.open_files[uri] or { '' }
+	for needle in ['println("hi")', 'println(pixels)', 'pixels', '[]Pixel{', '{x: 1},', 'retries ?int'] {
+		assert fill_literal_action(mut app, uri, cursor_range(content, needle), []) == none, 'a cursor on `${needle}` is not on a struct literal'
+	}
+	cleanup_test_app(app)
+
+	partial := fill_literal_types + '\nfn main() {\n\tp := Pixel{\n\t\tna\n'
+	mut partial_app, partial_uris := new_fill_literal_app({
+		'main.v': partial
+	})
+	defer {
+		cleanup_test_app(partial_app)
+	}
+	partial_content := partial_app.open_files[partial_uris['main.v']] or { '' }
+	assert fill_literal_action(mut partial_app, partial_uris['main.v'], cursor_range(partial_content,
+		'na'), []) == none, 'a literal with no closing brace yet must not be filled'
+}
+
+// A client that asks for one kind of action is sent that kind: the quick fix
+// filter sees the fill, a filter asking only for something else does not.
+fn test_fill_struct_literal_respects_the_kind_the_client_asks_for() {
+	mut app, uris := new_fill_literal_app({
+		'main.v': fill_literal_main('\tp := Pixel{}\n\tprintln(p)')
+	})
+	defer {
+		cleanup_test_app(app)
+	}
+	uri := uris['main.v']
+	content := app.open_files[uri] or { '' }
+	sel := selection_range(content, 'Pixel{}')
+	fill_literal_action(mut app, uri, sel, ['quickfix']) or {
+		assert false, 'a client asking for quick fixes must see the fill'
+		return
+	}
+	assert fill_literal_action(mut app, uri, sel, ['refactor']) == none, 'a client asking only for refactors must not be sent a quick fix'
+}
+
 // --- P0-01: PositionCodec (UTF-16 / UTF-8 / UTF-32) ---
 
 fn test_encoded_col_to_byte_ascii() {
@@ -12011,6 +12383,156 @@ fn test_rename_occurrence_cap_comes_from_the_environment() {
 	}
 	os.unsetenv('VLS_RENAME_MAX_OCCURRENCES')
 	assert rename_edit_count(mut app, uris, tock) or { panic(err) } == 12
+}
+
+// A local renamed to a name that a `$if` branch this build leaves out already
+// holds, and the same the other way round: V checks the branch this build takes,
+// so neither clash is visible here, and the platform that builds the branch
+// would report a redefinition.
+const rename_branch_main = 'module main
+
+fn main() {
+	x := 1
+	$if !windows {
+		y := 2
+		println(y)
+	}
+	println(x)
+}
+'
+
+const rename_import_branch_main = 'module main
+
+import time
+
+fn main() {
+	read := 1
+	$if !windows {
+		value := 2
+		println(value)
+	}
+	println(read + time.now().year)
+}
+'
+
+fn test_rename_refuses_a_name_that_a_branch_the_build_leaves_out_would_shadow() {
+	mut app, uris := new_rename_project_app_with({
+		'main.v': rename_branch_main
+	})
+	defer {
+		cleanup_rename_app(mut app)
+	}
+	// From the branch, to a name live outside it.
+	if _ := app.rename_request(rename_request_named(uris, 'main.v:6:3', 'x')) {
+		assert false, 'renaming `y` to `x` must be refused'
+	} else {
+		assert err.msg().contains('`x` is already declared at main.v:4'), err.msg()
+		assert err.msg().contains('redefinition of `x`'), err.msg()
+	}
+	// From outside it, to a name live in the branch.
+	if _ := app.rename_request(rename_request_named(uris, 'main.v:4:2', 'y')) {
+		assert false, 'renaming `x` to `y` must be refused'
+	} else {
+		assert err.msg().contains('`y` is already declared at main.v:6'), err.msg()
+		assert err.msg().contains('redefinition of `y`'), err.msg()
+	}
+	// A name nothing else holds is renamed as before, branch included.
+	assert rename_edits_in({
+		'main.v': rename_branch_main
+	}, 'main.v:6:3') == ['main.v:6:3', 'main.v:7:11']
+}
+
+// A local inside a branch this build leaves out, renamed to the name of an
+// imported module: the other platform reports a duplicate of an import symbol,
+// and every use of the module in that function would name the local.
+fn test_rename_refuses_a_name_that_a_branch_the_build_leaves_out_would_import() {
+	mut app, uris := new_rename_project_app_with({
+		'main.v': rename_import_branch_main
+	})
+	defer {
+		cleanup_rename_app(mut app)
+	}
+	if _ := app.rename_request(rename_request_named(uris, 'main.v:8:3', 'time')) {
+		assert false, 'renaming `value` to `time` must be refused'
+	} else {
+		assert err.msg().contains('`time` is already declared at main.v:3'), err.msg()
+		assert err.msg().contains('redefinition of `time`'), err.msg()
+	}
+	// The module itself is renamed by none of this: its uses stay where they are.
+	assert rename_edits_in({
+		'main.v': rename_import_branch_main
+	}, 'main.v:8:3') == ['main.v:8:3', 'main.v:9:11']
+}
+
+// A struct method with the name of a method an interface declares: the types
+// that implement the interface must keep that name, the rename does not change
+// the interface with it, so it is refused and the interface is named.
+const rename_interface_methods_main = "module main
+
+interface Speaker {
+	speak() string
+}
+
+struct Dog {
+	name string
+}
+
+fn (d Dog) speak() string {
+	return 'woof'
+}
+
+fn (d Dog) fetch() int {
+	return 1
+}
+
+fn greet(s Speaker) string {
+	return s.speak()
+}
+
+fn main() {
+	d := Dog{
+		name: 'rex'
+	}
+	println(greet(d) + d.speak())
+	println(d.fetch())
+}
+"
+
+fn test_rename_refuses_a_method_an_interface_declares_and_names_the_interface() {
+	mut app, uris := new_rename_project_app_with({
+		'main.v': rename_interface_methods_main
+	})
+	defer {
+		cleanup_rename_app(mut app)
+	}
+	// The method of the type that implements the interface.
+	if _ := app.rename_request(rename_request_named(uris, 'main.v:11:12', 'bark')) {
+		assert false, 'renaming a method an interface declares must be refused'
+	} else {
+		assert err.msg().contains('is a member of the interface `Speaker`'), err.msg()
+	}
+	// And the member of the interface itself.
+	if _ := app.rename_request(rename_request_named(uris, 'main.v:4:2', 'talk')) {
+		assert false, 'renaming a member of an interface must be refused'
+	} else {
+		assert err.msg().contains('is a member of the interface `Speaker`'), err.msg()
+	}
+	// A method no interface declares is renamed, with its use.
+	assert rename_edits_in({
+		'main.v': rename_interface_methods_main
+	}, 'main.v:15:12') == ['main.v:15:12', 'main.v:28:12']
+	// The methods of V's own error interface are named as such.
+	mut ierror_app, ierror_uris := new_rename_project_app_with({
+		'main.v': rename_interface_main
+	})
+	defer {
+		cleanup_rename_app(mut ierror_app)
+	}
+	if _ := ierror_app.rename_request(rename_request_named(ierror_uris, 'main.v:21:13', 'message')) {
+		assert false, 'renaming a method of `IError` must be refused'
+	} else {
+		assert err.msg().contains('interface `IError`'), err.msg()
+	}
 }
 
 fn test_folding_range_covers_imports_comments_and_code_blocks() {
