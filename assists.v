@@ -657,3 +657,908 @@ fn masked_v_code(content string) string {
 	}
 	return out.bytestr()
 }
+
+// --- Extract variable ---
+
+// AssistExprScan walks a masked expression byte by byte and refuses anything
+// that is not one of the pure forms. One level of the scan is one expression:
+// a primary, the field, call and index trailers hanging off it, and the base
+// identifier they all traverse from. The base of every level that calls or
+// indexes is kept, because those are the only receivers the caller can check
+// against the buffer — a call on anything but a local is a call the language
+// server cannot vouch for.
+struct AssistExprScan {
+	masked string
+mut:
+	pos       int
+	levels    []string
+	receivers []string
+}
+
+// assist_pure_expression reports whether `masked` is a side-effect-free
+// expression — an identifier, a literal, a field access, a call or an index on
+// a local, or a parenthesised combination of those — and returns the receiver
+// of every call and index it holds. Each receiver must be a local before the
+// expression is extracted, which the caller verifies against the buffer.
+fn assist_pure_expression(masked string) ?[]string {
+	mut scan := AssistExprScan{
+		masked: masked
+	}
+	if !scan.parse_expr() {
+		return none
+	}
+	scan.skip_ws()
+	if scan.pos != masked.len {
+		return none
+	}
+	if !assist_expression_alphabet_is_safe(masked) {
+		return none
+	}
+	return scan.receivers
+}
+
+fn (mut s AssistExprScan) at_end() bool {
+	return s.pos >= s.masked.len
+}
+
+fn (mut s AssistExprScan) skip_ws() {
+	for !s.at_end() && s.masked[s.pos] in [` `, `\t`, `\r`, `\n`] {
+		s.pos++
+	}
+}
+
+// parse_expr parses one expression: a primary followed by the field, call and
+// index trailers that hang off it. Trailing text the grammar does not reach
+// makes it fail, so `x + y` and `x or { 0 }` are both refused.
+fn (mut s AssistExprScan) parse_expr() bool {
+	s.levels << ''
+	level := s.levels.len - 1
+	if !s.parse_primary(level) {
+		s.drop_level()
+		return false
+	}
+	mut calls_or_indexes := false
+	for {
+		s.skip_ws()
+		if s.at_end() {
+			break
+		}
+		c := s.masked[s.pos]
+		if c == `.` {
+			s.pos++
+			if !s.parse_ident(level) {
+				s.drop_level()
+				return false
+			}
+			continue
+		}
+		if c == `(` || c == `[` {
+			closing := if c == `(` { `)` } else { `]` }
+			if !s.parse_group(c, closing) {
+				s.drop_level()
+				return false
+			}
+			calls_or_indexes = true
+			continue
+		}
+		// Any other byte ends this expression, and the reader around it decides
+		// whether that was legal: the top level check that the whole selection
+		// was consumed, or the bracket that holds this expression.
+		break
+	}
+	base := s.levels[level]
+	s.drop_level()
+	// A call or an index runs code the language server cannot read, so the value
+	// it runs on has to be a local: `s.replace(...)`, `items[0]`, `foo.bar()`.
+	if calls_or_indexes && base != '' {
+		s.receivers << base
+	}
+	return true
+}
+
+// drop_level closes the level on top of the stack, handing its base to the level
+// below when that one has none. A parenthesised primary is the base of the
+// expression around it, so `(a).b()` traverses `a` and not `b`.
+fn (mut s AssistExprScan) drop_level() {
+	level := s.levels.len - 1
+	base := s.levels[level]
+	s.levels.delete_last()
+	if base != '' && s.levels.len > 0 && s.levels[s.levels.len - 1] == '' {
+		s.levels[s.levels.len - 1] = base
+	}
+}
+
+// parse_primary parses the value an expression starts from: a parenthesised
+// expression, a string or a number, or an identifier.
+fn (mut s AssistExprScan) parse_primary(level int) bool {
+	s.skip_ws()
+	if s.at_end() {
+		return false
+	}
+	c := s.masked[s.pos]
+	if c == `(` {
+		s.pos++
+		s.skip_ws()
+		// An empty group is not an expression, so `()` is never a candidate.
+		if s.at_end() || s.masked[s.pos] == `)` {
+			return false
+		}
+		if !s.parse_expr() {
+			return false
+		}
+		s.skip_ws()
+		if s.at_end() || s.masked[s.pos] != `)` {
+			return false
+		}
+		s.pos++
+		return true
+	}
+	if c == `'` || c == `"` || c == 96 {
+		return s.parse_string(c)
+	}
+	if c >= `0` && c <= `9` {
+		return s.parse_number()
+	}
+	return s.parse_ident(level)
+}
+
+// parse_group parses a call's arguments or an index. An index holds exactly one
+// expression; a call may hold any number of them, and every one of those is
+// itself held to the same purity by the recursive parse_expr.
+fn (mut s AssistExprScan) parse_group(open u8, close u8) bool {
+	s.pos++
+	s.skip_ws()
+	if !s.at_end() && s.masked[s.pos] == close {
+		// `x[]` is not an index; `x()` is a call taking nothing.
+		if open == `[` {
+			return false
+		}
+		s.pos++
+		return true
+	}
+	mut items := 0
+	for {
+		if !s.parse_expr() {
+			return false
+		}
+		items++
+		s.skip_ws()
+		if s.at_end() {
+			return false
+		}
+		c := s.masked[s.pos]
+		if c == close {
+			if close == `]` && items != 1 {
+				return false
+			}
+			s.pos++
+			return true
+		}
+		if c != `,` {
+			return false
+		}
+		s.pos++
+	}
+	return false
+}
+
+// parse_ident consumes one identifier and remembers it as the base of `level`
+// when that level has none yet. It refuses the keywords that only look like a
+// value: `fn`, `unsafe`, `or`, `int` and the rest never denote a value on their
+// own.
+fn (mut s AssistExprScan) parse_ident(level int) bool {
+	s.skip_ws()
+	mut start := s.pos
+	for !s.at_end() && is_ident_char(s.masked[s.pos]) {
+		s.pos++
+	}
+	if s.pos == start {
+		return false
+	}
+	if s.masked[start..s.pos] in assist_non_value_keywords {
+		s.pos = start
+		return false
+	}
+	if s.levels[level] == '' {
+		s.levels[level] = s.masked[start..s.pos]
+	}
+	return true
+}
+
+// parse_string consumes a string or a rune literal. The mask has already
+// blanked its body, quotes included where they are escaped, so the first
+// unblanked quote after the opener is the one that closes it.
+fn (mut s AssistExprScan) parse_string(quote u8) bool {
+	s.pos++
+	for !s.at_end() && s.masked[s.pos] != quote {
+		s.pos++
+	}
+	if s.at_end() {
+		return false
+	}
+	s.pos++
+	return true
+}
+
+// parse_number consumes one numeric literal, including its radix prefix, its
+// digit separators and the exponent that follows an `e`.
+fn (mut s AssistExprScan) parse_number() bool {
+	for !s.at_end() {
+		c := s.masked[s.pos]
+		if is_ident_char(c) || c == `.` || c == `_` {
+			s.pos++
+			continue
+		}
+		if (c == `+` || c == `-`) && s.pos > 0 && (s.masked[s.pos - 1] == `e`
+			|| s.masked[s.pos - 1] == `E`) {
+			s.pos++
+			continue
+		}
+		break
+	}
+	return s.pos > 0
+}
+
+// assist_expression_alphabet_is_safe reports whether every byte of a candidate
+// expression is one a pure form can hold: an identifier, a literal, a bracket, a
+// comma or whitespace. A `{`, an `=`, an `&`, a `?`, a `#` or a `$` refuses the
+// expression whatever the grammar made of it.
+fn assist_expression_alphabet_is_safe(masked string) bool {
+	for i in 0 .. masked.len {
+		c := masked[i]
+		if is_ident_char(c) || c == 96 {
+			continue
+		}
+		match c {
+			` `, `\t`, `\r`, `\n`, `.`, `(`, `)`, `[`, `]`, `,`, `'`, `"`, `+`, `-` {}
+			else {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// Words that never denote a value, so none of them may be the expression a
+// variable is extracted from: the control-flow keywords, the type names that
+// only look like a value in a declaration, and the module-level words.
+const assist_non_value_keywords = ['fn', 'if', 'for', 'match', 'mut', 'unsafe', 'or', 'go', 'spawn',
+	'return', 'in', 'is', 'as', 'typeof', 'sizeof', 'dump', 'panic', 'error', 'select', 'lock',
+	'rlock', 'shared', 'static', 'atomic', 'defer', 'continue', 'break', 'import', 'module', 'const',
+	'struct', 'enum', 'interface', 'type', 'assert', 'nil', 'bool', 'byte', 'charptr', 'f32', 'f64',
+	'i8', 'i16', 'i32', 'i64', 'i128', 'int', 'isize', 'rune', 'string', 'u8', 'u16', 'u32', 'u64',
+	'u128', 'usize', 'voidptr']!
+
+// build_extract_variable_action returns the "Extract variable" quick fix for
+// the expression the range selects: the selection is replaced by a fresh name
+// and that name is bound to the text of the selection in front of the statement
+// holding it. It is refused when the selection does not cover exactly one pure
+// expression, when it is the target of an assignment, or when the statement it
+// sits in cannot be located.
+fn (app &App) build_extract_variable_action(uri string, content string, sel_range LSPRange) ?CodeAction {
+	starts := line_start_offsets(content)
+	mut start := position_to_byte_offset(content, starts, sel_range.start.line, sel_range.start.char,
+		app.position_encoding)
+	mut end := start
+	if sel_range.end.line != sel_range.start.line || sel_range.end.char != sel_range.start.char {
+		end = position_to_byte_offset(content, starts, sel_range.end.line, sel_range.end.char,
+			app.position_encoding)
+	}
+	if end <= start || start < 0 || end > content.len {
+		return none
+	}
+	masked := masked_v_code(content)
+	for start < end && masked[start] in [` `, `\t`, `\r`, `\n`] {
+		start++
+	}
+	for end > start && masked[end - 1] in [` `, `\t`, `\r`, `\n`] {
+		end--
+	}
+	if end <= start {
+		return none
+	}
+	stmt_start := assist_statement_start(masked, starts, start)
+	if stmt_start < 0 || stmt_start > start {
+		return none
+	}
+	// The left of an assignment is not a value: binding `extracted_0 := x` in
+	// front of `x := f(x)` would read x before it is written. An index inside the
+	// target is not itself the target: `arr[i] = 1` assigns to arr, not to i.
+	if assist_selection_is_assignment_target(masked, stmt_start, start, end) {
+		return none
+	}
+	receivers := assist_pure_expression(masked[start..end]) or { return none }
+	for receiver in receivers {
+		if !assist_binding_exists_before(masked, receiver, start) {
+			return none
+		}
+	}
+	// The base of a longer selector is only a value when it is a local: `math`
+	// in `math.pi` names a module, which no variable can hold.
+	if end < masked.len && masked[end] == `.` {
+		base := assist_identifier_at(masked, start) or { return none }
+		if !assist_binding_exists_before(masked, base, start) {
+			return none
+		}
+	}
+	name := assist_fresh_extract_name(content, app.position_encoding)
+	stmt_line := assist_line_of(starts, stmt_start)
+	insert_at := byte_offset_to_position(content, starts[stmt_line], app.position_encoding)
+	indent := line_indent(line_text_without_terminator(content, starts, stmt_line))
+	return CodeAction{
+		title: 'Extract variable'
+		kind:  code_action_kind_quickfix
+		edit:  WorkspaceEdit{
+			changes: {
+				uri: [
+					TextEdit{
+						range:    LSPRange{
+							start: insert_at
+							end:   insert_at
+						}
+						new_text: indent + 'mut ${name} := ' + content[start..end] + '\n'
+					},
+					TextEdit{
+						range:    LSPRange{
+							start: byte_offset_to_position(content, start, app.position_encoding)
+							end:   byte_offset_to_position(content, end, app.position_encoding)
+						}
+						new_text: name
+					},
+				]
+			}
+		}
+	}
+}
+
+// assist_statement_start returns the byte offset at which the statement holding
+// `probe` begins, or -1 when no statement can be located for it. A `;`, a brace
+// or a `:` at bracket depth zero opens a later statement on the same line, and
+// the lines the statement continues from are absorbed before that. A statement
+// that begins in the middle of its line is refused: a declaration cannot be
+// written in front of a `case` arm or an `else` without leaving its block.
+fn assist_statement_start(masked string, starts []int, probe int) int {
+	if probe < 0 || probe >= masked.len {
+		return -1
+	}
+	mut line := assist_line_of(starts, probe)
+	for line > 0 && assist_line_continues_previous(masked, starts, line - 1) {
+		line--
+	}
+	mut stmt := starts[line] + line_indent(line_text_without_terminator(masked, starts, line)).len
+	stop := assist_statement_separator(masked, stmt, probe)
+	if probe < assist_line_end(masked.len, starts, line) && stop >= 0 {
+		stmt = stop
+	}
+	stmt_line := assist_line_of(starts, stmt)
+	if stmt != starts[stmt_line] + line_indent(line_text_without_terminator(masked, starts,
+		stmt_line)).len {
+		return -1
+	}
+	if assist_line_takes_no_declaration(line_text_without_terminator(masked, starts, stmt_line)) {
+		return -1
+	}
+	return stmt
+}
+
+// assist_line_continues_previous reports whether `prev_line` is a line the next
+// one continues: empty, or ending on a token that needs a right operand.
+fn assist_line_continues_previous(masked string, starts []int, prev_line int) bool {
+	trimmed := line_text_without_terminator(masked, starts, prev_line).trim_space()
+	if trimmed == '' {
+		return true
+	}
+	return trimmed[trimmed.len - 1] in [`,`, `.`, `(`, `[`, `+`, `-`, `*`, `/`, `%`, `&`, `|`,
+		`^`, `<`, `>`, `=`, `!`, `?`]
+}
+
+// assist_statement_separator returns the byte offset just past the `;`, brace or
+// `:` at bracket depth zero in [from, to), or -1 when there is none. Each of
+// those opens a statement that is not the one starting at `from`.
+fn assist_statement_separator(masked string, from int, to int) int {
+	mut depth := 0
+	for i in from .. to {
+		c := masked[i]
+		if c == `(` || c == `[` {
+			depth++
+			continue
+		}
+		if c == `)` || c == `]` {
+			if depth > 0 {
+				depth--
+			}
+			continue
+		}
+		if c == `}` {
+			if depth == 0 {
+				return i + 1
+			}
+			depth--
+			continue
+		}
+		if (c == `;` || c == `:`) && depth == 0 {
+			return i + 1
+		}
+	}
+	return -1
+}
+
+// assist_line_takes_no_declaration reports whether a declaration can be written
+// in front of the statement on `line`: never for a blank line, and never for a
+// line beginning with a token that only continues a block — `}`, `else` or
+// `case` — because the declaration would then move out of the block that holds
+// it.
+fn assist_line_takes_no_declaration(line string) bool {
+	trimmed := line.trim_space()
+	return trimmed == '' || trimmed.starts_with('}') || trimmed.starts_with('else')
+		|| trimmed.starts_with('case ')
+}
+
+// assist_selection_is_assignment_target reports whether the selection sits on
+// the left of an assignment: `x = 1`, `x += 1` and `x := 1` all bind x, so
+// extracting x would bind a name to a value that is not in scope yet. The `==`
+// of a comparison, and the `<=`, `>=` and `!=` that share its byte, are not
+// assignments. An expression inside a bracketed index is not the target either:
+// `arr[i] = 1` assigns to arr, not to i.
+fn assist_selection_is_assignment_target(masked string, stmt_start int, sel_start int, sel_end int) bool {
+	mut line_end := stmt_start
+	for line_end < masked.len && masked[line_end] != `\n` {
+		line_end++
+	}
+	mut depth := 0
+	mut sel_depth := 0
+	mut operator := -1
+	for i in stmt_start .. line_end {
+		c := masked[i]
+		if i == sel_start {
+			sel_depth = depth
+		}
+		if c == `(` || c == `[` || c == `{` {
+			depth++
+			continue
+		}
+		if c == `)` || c == `]` || c == `}` {
+			if depth > 0 {
+				depth--
+			}
+			continue
+		}
+		if depth != 0 || c != `=` {
+			continue
+		}
+		if i + 1 < line_end && masked[i + 1] == `=` {
+			return false
+		}
+		if i > 0 && masked[i - 1] in [`<`, `>`, `!`] {
+			return false
+		}
+		operator = i
+		break
+	}
+	if operator < 0 {
+		return false
+	}
+	return sel_depth == 0 && sel_end <= operator
+}
+
+// assist_fresh_extract_name returns the first `extracted_N` that no identifier
+// in `content` already uses, so the new name cannot capture an existing binding.
+fn assist_fresh_extract_name(content string, enc PositionEncoding) string {
+	used := extract_identifier_occurrences(content, enc)
+	mut n := 0
+	for 'extracted_${n}' in used {
+		n++
+	}
+	return 'extracted_${n}'
+}
+
+// assist_binding_exists_before reports whether `name` is bound before `offset`,
+// either by a `name :=` declaration or as a parameter of the enclosing function.
+// That is what makes it a *local*, and therefore the only kind of receiver a
+// call chain on it can be trusted not to have side effects.
+fn assist_binding_exists_before(masked string, name string, offset int) bool {
+	mut i := 0
+	for i < offset {
+		if i + name.len <= masked.len && masked[i..i + name.len] == name
+			&& (i == 0 || !is_ident_char(masked[i - 1]))
+			&& (i + name.len == masked.len || !is_ident_char(masked[i + name.len])) {
+			mut k := i + name.len
+			for k < offset && (masked[k] == ` ` || masked[k] == `\t`) {
+				k++
+			}
+			if k + 1 < masked.len && masked[k] == `:` && masked[k + 1] == `=` {
+				return true
+			}
+		}
+		i++
+	}
+	return assist_fn_parameter_before(masked, name, offset)
+}
+
+// assist_fn_parameter_before reports whether `name` is a parameter of the
+// function enclosing `offset`. A call chain on a parameter is exactly as pure
+// as one on a `:=` local, so refusing it would refuse the commonest case there
+// is: `s.len()` inside `fn f(s string)`.
+fn assist_fn_parameter_before(masked string, name string, offset int) bool {
+	fn_index := last_fn_keyword_index(masked[..offset])
+	if fn_index < 0 {
+		return false
+	}
+	mut open := fn_index
+	for open < offset && masked[open] != `(` {
+		open++
+	}
+	if open >= offset {
+		return false
+	}
+	close := matching_delimiter(masked, open, `(`, `)`)
+	if close < 0 || close >= offset {
+		return false
+	}
+	for param in masked[open + 1..close].split(',') {
+		mut token := param.trim_space()
+		if token.starts_with('mut ') {
+			token = token[4..].trim_space()
+		}
+		if token.all_before(' ').all_before('\t') == name {
+			return true
+		}
+	}
+	return false
+}
+
+// assist_identifier_at returns the identifier covering byte `offset`, or none
+// when that byte is not inside one.
+fn assist_identifier_at(text string, offset int) ?string {
+	if offset < 0 || offset >= text.len {
+		return none
+	}
+	mut end := offset
+	for end < text.len && is_ident_char(text[end]) {
+		end++
+	}
+	mut start := offset
+	for start > 0 && is_ident_char(text[start - 1]) {
+		start--
+	}
+	if start == end {
+		return none
+	}
+	name := text[start..end]
+	if !is_valid_v_identifier_name(name) {
+		return none
+	}
+	return name
+}
+
+// assist_line_of returns the index of the line holding byte `offset`.
+fn assist_line_of(starts []int, offset int) int {
+	mut line := 0
+	for line + 1 < starts.len && starts[line + 1] <= offset {
+		line++
+	}
+	return line
+}
+
+// assist_line_end returns the byte offset at which the terminator of `line`
+// begins, which is also where the next line starts.
+fn assist_line_end(text_len int, starts []int, line int) int {
+	return if line + 1 < starts.len { starts[line + 1] } else { text_len }
+}
+
+// assist_block_end_line returns the first line after `decl_line` whose
+// indentation comes back in above the declaration's, or the line count when
+// nothing brings it back. That closing line is the brace of the block the local
+// was declared in, so everything from it on belongs to another scope.
+fn assist_block_end_line(content string, starts []int, decl_line int, decl_indent int) int {
+	mut i := decl_line + 1
+	for i < starts.len {
+		if line_indent(line_text_without_terminator(content, starts, i)).len < decl_indent {
+			return i
+		}
+		i++
+	}
+	return starts.len
+}
+
+// --- Inline variable ---
+
+// AssistInline is a local that can be folded back into its uses: the name it
+// binds, the expression it was bound to, the line declaring it, and every use
+// the expression replaces.
+struct AssistInline {
+	name      string
+	expr      string
+	decl_line int
+	uses      []TokenOccurrence
+}
+
+// build_inline_variable_action returns the "Inline variable" quick fix for the
+// local the cursor or range sits on: the declaration line is removed and every
+// later use of the name is replaced by the expression it was bound to. It is
+// refused unless the name is declared `name := expr` on a line of its own and is
+// never assigned or rebound afterwards, since a second writing of the
+// identifier would have to be reordered to inline it.
+fn (app &App) build_inline_variable_action(uri string, content string, sel_range LSPRange) ?CodeAction {
+	inline := app.inline_variable_span(content, sel_range) or { return none }
+	enc := app.position_encoding
+	starts := line_start_offsets(content)
+	decl_end := assist_line_end(content.len, starts, inline.decl_line)
+	mut edits := []TextEdit{}
+	// The whole line goes, terminator included, so no blank line is left where
+	// the declaration was. The final line of a file without a terminator is
+	// ended by the last character instead of the start of a line that does not
+	// exist, which some clients reject as an out-of-range edit.
+	edits << TextEdit{
+		range:    LSPRange{
+			start: Position{
+				line: inline.decl_line
+				char: 0
+			}
+			end:   if inline.decl_line + 1 < starts.len {
+				Position{
+					line: inline.decl_line + 1
+					char: 0
+				}
+			} else {
+				byte_offset_to_position(content, decl_end, enc)
+			}
+		}
+		new_text: ''
+	}
+	for use in inline.uses {
+		line_text := line_text_without_terminator(content, starts, use.line)
+		start := starts[use.line] + encoded_col_to_byte(line_text, use.start_char, enc)
+		end := starts[use.line] + encoded_col_to_byte(line_text, use.end_char, enc)
+		edits << TextEdit{
+			range:    LSPRange{
+				start: byte_offset_to_position(content, start, enc)
+				end:   byte_offset_to_position(content, end, enc)
+			}
+			new_text: inline.expr
+		}
+	}
+	return CodeAction{
+		title: 'Inline variable'
+		kind:  code_action_kind_quickfix
+		edit:  WorkspaceEdit{
+			changes: {
+				uri: edits
+			}
+		}
+	}
+}
+
+// inline_variable_span resolves the local under `sel_range` into the
+// declaration, the uses and the reassignment verdict, or none when the cursor is
+// not on a local that can be folded back into its uses.
+fn (app &App) inline_variable_span(content string, sel_range LSPRange) ?AssistInline {
+	starts := line_start_offsets(content)
+	start := position_to_byte_offset(content, starts, sel_range.start.line, sel_range.start.char,
+		app.position_encoding)
+	mut end := start
+	if sel_range.end.line != sel_range.start.line || sel_range.end.char != sel_range.start.char {
+		end = position_to_byte_offset(content, starts, sel_range.end.line, sel_range.end.char,
+			app.position_encoding)
+	}
+	masked := masked_v_code(content)
+	mut selected := ''
+	if end > start {
+		candidate := content[start..end].trim_space()
+		if is_valid_v_identifier_name(candidate) {
+			selected = candidate
+		}
+	}
+	name := if selected != '' {
+		selected
+	} else {
+		assist_identifier_at(masked, start) or { return none }
+	}
+	if name in assist_non_value_keywords {
+		return none
+	}
+	decl_line := assist_declaration_line(content, masked, starts, name,
+		assist_line_of(starts, start))
+	if decl_line < 0 {
+		return none
+	}
+	expr := assist_line_declaration(content, masked, starts, decl_line, name) or { return none }
+	// An expression that mentions the name being removed would keep a reference
+	// to a binding that no longer exists.
+	if name in extract_identifier_occurrences(expr, app.position_encoding) {
+		return none
+	}
+	mut uses := []TokenOccurrence{}
+	// A local lives inside the block that declares it, and in a Go-shaped file
+	// that block ends where the indentation comes back in. A same-named local
+	// further down the file belongs to another scope, so it keeps its name.
+	decl_indent := line_indent(line_text_without_terminator(content, starts, decl_line)).len
+	block_end := assist_block_end_line(content, starts, decl_line, decl_indent)
+	for occurrence in extract_identifier_occurrences(content, app.position_encoding)[name] or {
+		return none
+	} {
+		if occurrence.line <= decl_line || occurrence.line >= block_end {
+			continue
+		}
+		line_text := line_text_without_terminator(content, starts, occurrence.line)
+		use_start := starts[occurrence.line] + encoded_col_to_byte(line_text, occurrence.start_char,
+			app.position_encoding)
+		use_end := starts[occurrence.line] + encoded_col_to_byte(line_text, occurrence.end_char,
+			app.position_encoding)
+		if assist_is_reassignment(masked, use_end) {
+			return none
+		}
+		// A field of another object (`obj.x`), a struct field initialiser or a
+		// label (`x:`), and a declaration of some other `x` (`x int` in a struct
+		// body or a parameter list) are not uses of this local, and inlining
+		// them would rewrite a different symbol.
+		if !assist_is_use(masked, use_start, use_end) {
+			continue
+		}
+		uses << occurrence
+	}
+	if uses.len == 0 {
+		return none
+	}
+	return AssistInline{
+		name:      name
+		expr:      expr
+		decl_line: decl_line
+		uses:      uses
+	}
+}
+
+// assist_declaration_line returns the line of the `name := expr` declaration
+// the cursor's `line` can see, searching upwards from it, or -1 when it has
+// none. The first match wins, so a use further down a file inlines the nearest
+// declaration above it.
+fn assist_declaration_line(content string, masked string, starts []int, name string, line int) int {
+	mut i := line
+	for i >= 0 {
+		if _ := assist_line_declaration(content, masked, starts, i, name) {
+			return i
+		}
+		i--
+	}
+	return -1
+}
+
+// assist_line_declaration returns the expression `name` is bound to by the
+// `name := expr` declaration that is the whole code of `line`, or none when that
+// line does not declare it. A line shared with other code, a multi-target
+// declaration, a re-binding with `=` and a trailing comment are all refused: a
+// deletion of that line would take the other code, or the comment, with it.
+fn assist_line_declaration(content string, masked string, starts []int, line int, name string) ?string {
+	masked_line := line_text_without_terminator(masked, starts, line)
+	mut pos := line_indent(masked_line).len
+	if word := assist_word_at(masked_line, pos) {
+		if word == 'mut' {
+			pos += word.len
+			for pos < masked_line.len && masked_line[pos] in [` `, `\t`] {
+				pos++
+			}
+		}
+	}
+	bound := assist_word_at(masked_line, pos) or { return none }
+	if bound != name {
+		return none
+	}
+	pos += bound.len
+	for pos < masked_line.len && masked_line[pos] in [` `, `\t`] {
+		pos++
+	}
+	if pos + 1 >= masked_line.len || masked_line[pos] != `:` || masked_line[pos + 1] != `=` {
+		return none
+	}
+	pos += 2
+	// The expression is read from the unmasked line: the mask blanks string
+	// bodies, and the binding would then carry a blank string instead of the
+	// value the file holds. With no comment on the line the two lines agree on
+	// where the expression ends, because a mask only ever turns bytes into
+	// spaces.
+	expr := line_text_without_terminator(content, starts, line)[pos..].trim_space()
+	if expr == '' {
+		return none
+	}
+	if assist_comment_offset(line_text_without_terminator(content, starts, line)) >= 0 {
+		return none
+	}
+	return expr
+}
+
+// assist_word_at returns the identifier starting at byte `pos`, or none when
+// none starts there.
+fn assist_word_at(text string, pos int) ?string {
+	mut i := pos
+	for i < text.len && is_ident_char(text[i]) {
+		i++
+	}
+	if i == pos {
+		return none
+	}
+	return text[pos..i]
+}
+
+// assist_comment_offset returns the offset of the `//` that starts a comment on
+// `text`, or -1 when the line has none. String bodies are skipped, so a `//` in
+// a literal is not mistaken for the start of one.
+fn assist_comment_offset(text string) int {
+	mut quote := u8(0)
+	mut i := 0
+	for i < text.len {
+		c := text[i]
+		if quote != 0 {
+			if c == `\\` {
+				i += 2
+				continue
+			}
+			if c == quote {
+				quote = 0
+			}
+			i++
+			continue
+		}
+		if c == `"` || c == `'` || c == 96 {
+			quote = c
+			i++
+			continue
+		}
+		if c == `/` && i + 1 < text.len && text[i + 1] == `/` {
+			return i
+		}
+		i++
+	}
+	return -1
+}
+
+// assist_is_reassignment reports whether the identifier ending at `end` is
+// followed by an assignment: `x = 1`, `x += 1` and `x := 1` all write x, and a
+// use that writes the name being inlined would have to be reordered with the
+// declaration the edit removes. A `==` compares, and the `<=`, `>=`, `!=`,
+// `<<=` and `>>=` that share its operator bytes are told apart by what follows
+// the pair.
+fn assist_is_reassignment(masked string, end int) bool {
+	mut k := end
+	for k < masked.len && masked[k] in [` `, `\t`] {
+		k++
+	}
+	if k >= masked.len {
+		return false
+	}
+	c := masked[k]
+	if c == `=` {
+		return !(k + 1 < masked.len && masked[k + 1] == `=`)
+	}
+	if c == `:` {
+		return k + 1 < masked.len && masked[k + 1] == `=`
+	}
+	if c == `<` || c == `>` {
+		return k + 1 < masked.len && masked[k + 1] == c
+	}
+	return c in [`+`, `-`, `*`, `/`, `%`, `&`, `|`, `^`]
+		&& k + 1 < masked.len && masked[k + 1] == `=`
+}
+
+// assist_is_use reports whether the identifier occupying [start, end) is a value
+// use of it rather than the same name belonging to something else: a field
+// access (`obj.x`), a field initialiser or a label (`x:`), and a declaration of
+// a different `x` (`x int` in a struct body or a parameter list) all keep the
+// name and are left alone.
+fn assist_is_use(masked string, start int, end int) bool {
+	if start > 0 && (is_ident_char(masked[start - 1]) || masked[start - 1] == `.`) {
+		return false
+	}
+	if end < masked.len {
+		if is_ident_char(masked[end]) || masked[end] == `:` {
+			return false
+		}
+		mut k := end
+		for k < masked.len && masked[k] in [` `, `\t`] {
+			k++
+		}
+		if k < masked.len && is_ident_char(masked[k]) {
+			return false
+		}
+	}
+	return true
+}
