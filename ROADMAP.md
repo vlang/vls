@@ -98,8 +98,12 @@ needs the V1 compatibility compiler, which this host cannot build
 
 ## Phase 2 — navigation / hints parity
 
-- Fuzzy workspace symbols (trigram index).
-- Granular inlay-hint toggles, conservative defaults.
+- Fuzzy workspace symbols (trigram index): DONE — per-symbol
+  trigram caches in index entries, overlap then match-class
+  ranking, case/underscore insensitive, capped per symbol.
+- Granular inlay-hint toggles, conservative defaults: DONE —
+  `vls.inlayHints.variableTypes` / `.parameterNames`, both
+  default on, runtime toggle, no restart.
 - Richer hover (const values, methods, doc links).
 
 ## Phase 3 — full refactors
