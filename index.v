@@ -397,6 +397,13 @@ fn (app &App) path_is_in_removed_workspace(path string) bool {
 fn (mut app App) reindex_uri(uri string) {
 	mut content := ''
 	if open_content := app.open_files[uri] {
+		// Open buffers bypass the disk size gate below; apply it here so a
+		// huge buffer cannot force an unbounded index build.
+		if u64(open_content.len) > index_max_file_bytes {
+			app.drop_index_uri(uri)
+			app.index_skipped_uris[uri] = true
+			return
+		}
 		content = open_content
 		app.index_skipped_uris.delete(uri)
 	} else {

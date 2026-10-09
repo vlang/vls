@@ -130,6 +130,33 @@ fn test_watched_file_reindex_drops_oversized_disk_entry() {
 	assert uri !in app.ref_occurrences
 }
 
+fn test_open_buffer_reindex_skips_oversized_content() {
+	// Open buffers bypass the disk size gate; a huge buffer must not force
+	// an unbounded index build.
+	root := index_test_tmpdir('open_large')
+	defer {
+		os.rmdir_all(root) or {}
+	}
+	path := os.join_path(root, 'large.v')
+	uri := path_to_uri(path)
+	os.write_file(path, 'module main\n\nfn small() {}\n') or {
+		assert false, 'write initial file failed: ${err}'
+		return
+	}
+	mut app := index_test_app()
+	big := 'x'.repeat(int(index_max_file_bytes) + 1)
+	app.open_files[uri] = big
+	app.reindex_uri(uri)
+	assert uri !in app.symbol_index
+	assert uri !in app.ref_occurrences
+	assert uri in app.index_skipped_uris
+	// Shrinking the buffer below the gate re-indexes it.
+	app.open_files[uri] = 'module main\n\nfn small_again() {}\n'
+	app.reindex_uri(uri)
+	assert uri in app.symbol_index
+	assert uri !in app.index_skipped_uris
+}
+
 fn test_watched_file_reindex_obeys_total_entry_limit() {
 	root := index_test_tmpdir('watched_count')
 	defer {
