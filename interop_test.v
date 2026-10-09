@@ -4187,3 +4187,194 @@ fn test_run_v_check_logs_single_stage_line_with_perf_log() {
 	assert quiet_got.len == 0, 'the changed file is still clean: ${quiet_got}'
 	assert quiet.captured_output.filter(it.contains('diagnostics stages')).len == 0, 'no stage line without VLS_PERF_LOG: ${quiet.captured_output}'
 }
+
+// interop_test_wait_for_next_second waits until the wall-clock second flips,
+// so a file rewrite after this lands in a strictly newer second than any mtime
+// read before it: an unchanged mtime then proves no write happened.
+fn interop_test_wait_for_next_second() {
+	start := time.now().unix()
+	for _ in 0 .. 100 {
+		if time.now().unix() != start {
+			return
+		}
+		time.sleep(20 * time.millisecond)
+	}
+	assert time.now().unix() != start, 'the wall-clock second never flipped'
+}
+
+fn test_overlay_file_content_matches_compares_hashes() {
+	base := os.join_path(os.temp_dir(), 'vls_overlay_match_${os.getpid()}_${time.now().unix_nano()}')
+	interop_test_must_mkdir_all(base)
+	defer {
+		os.rmdir_all(base) or {}
+	}
+	probe := os.join_path(base, 'probe.v')
+	assert !overlay_file_content_matches(probe, 'module main\n'), 'a missing file never matches'
+	interop_test_must_write_file(probe, 'module main\n')
+	assert overlay_file_content_matches(probe, 'module main\n'), 'identical content matches'
+	assert !overlay_file_content_matches(probe, 'module main\n\n'), 'changed content does not match'
+	assert !overlay_file_content_matches(probe, ''), 'emptied content does not match'
+	interop_test_must_write_file(probe, '')
+	assert overlay_file_content_matches(probe, ''), 'empty content matches empty'
+}
+
+fn test_stable_overlay_syncs_only_changed_files() {
+	base := os.join_path(os.temp_dir(), 'vls_stable_overlay_${os.getpid()}_${time.now().unix_nano()}')
+	interop_test_must_mkdir_all(base)
+	defer {
+		os.rmdir_all(base) or {}
+	}
+	project := os.join_path(base, 'project')
+	interop_test_must_mkdir_all(project)
+	work := os.join_path(base, 'work')
+	interop_test_must_mkdir_all(work)
+	main_file := os.join_path(project, 'main.v')
+	util_file := os.join_path(project, 'util.v')
+	disk_main := 'module main\n\nfn main() {\n\tprintln(helper())\n}\n'
+	disk_util := "module main\n\nfn helper() string {\n\treturn 'hi'\n}\n"
+	interop_test_must_write_file(main_file, disk_main)
+	interop_test_must_write_file(util_file, disk_util)
+	main_uri := path_to_uri(main_file)
+	util_uri := path_to_uri(util_file)
+	// The main buffer is unsaved, so closing it later must restore the disk
+	// content in the overlay instead of keeping the stale buffer.
+	main_buffer := disk_main + '\n// unsaved\n'
+	mut app := &App{
+		temp_dir:   work
+		open_files: {
+			main_uri: main_buffer
+			util_uri: disk_util
+		}
+	}
+	// A stable overlay persists across checks instead of being rebuilt.
+	stable := os.join_path(work, 'stable_project')
+	app.overlay_dir = stable
+	overlay1 := app.prepare_compilation_overlay_in(main_file, app.program_root(main_file)) or {
+		assert false, 'first overlay prepare failed: ${err}'
+		return
+	}
+	assert overlay1.temp_root == normalize_overlay_path(os.real_path(stable)), 'the stable overlay is reused, not rebuilt elsewhere: ${overlay1.temp_root}'
+	overlay_main := os.join_path(overlay1.temp_root, 'main.v')
+	overlay_util := os.join_path(overlay1.temp_root, 'util.v')
+	assert os.read_file(overlay_main) or { '' } == main_buffer, 'the overlay holds the main buffer'
+	assert os.read_file(overlay_util) or { '' } == disk_util, 'the overlay holds the util buffer'
+	// An identical prepare rewrites nothing: every mtime stands still.
+	interop_test_wait_for_next_second()
+	main_mtime := os.file_last_mod_unix(overlay_main)
+	util_mtime := os.file_last_mod_unix(overlay_util)
+	interop_test_wait_for_next_second()
+	overlay2 := app.prepare_compilation_overlay_in(main_file, app.program_root(main_file)) or {
+		assert false, 'second overlay prepare failed: ${err}'
+		return
+	}
+	assert overlay2.temp_root == overlay1.temp_root, 'the stable directory persists across prepares'
+	assert os.file_last_mod_unix(overlay_main) == main_mtime, 'an unchanged buffer is not rewritten'
+	assert os.file_last_mod_unix(overlay_util) == util_mtime, 'an unchanged buffer is not rewritten'
+	// Changing one buffer rewrites exactly that file: the changed file itself
+	// is never skipped.
+	changed_util := disk_util.replace("'hi'", "'changed'")
+	app.open_files[util_uri] = changed_util
+	interop_test_wait_for_next_second()
+	overlay3 := app.prepare_compilation_overlay_in(main_file, app.program_root(main_file)) or {
+		assert false, 'third overlay prepare failed: ${err}'
+		return
+	}
+	assert os.read_file(overlay_util) or { '' } == changed_util, 'the changed buffer reaches the overlay'
+	assert os.file_last_mod_unix(overlay_util) > util_mtime, 'the changed file is rewritten'
+	assert os.file_last_mod_unix(overlay_main) == main_mtime, 'the other buffer stays untouched'
+	assert os.read_file(overlay_main) or { '' } == main_buffer, 'the untouched buffer keeps its content'
+	// Closing a file returns its overlay entry to disk content.
+	app.open_files.delete(main_uri)
+	overlay4 := app.prepare_compilation_overlay_in(util_file, app.program_root(util_file)) or {
+		assert false, 'fourth overlay prepare failed: ${err}'
+		return
+	}
+	assert overlay4.temp_root == overlay1.temp_root, 'the stable directory still persists'
+	assert os.read_file(os.join_path(overlay4.temp_root, 'main.v')) or { '' } == disk_main, 'a closed buffer reads from disk again'
+	assert os.read_file(os.join_path(overlay4.temp_root, 'util.v')) or { '' } == changed_util, 'the open buffer is still the buffer'
+}
+
+fn test_stable_overlay_slow_check_reports_stage_timings() {
+	assert compiler_is_available(), 'a V compiler must be reachable to time a real slow check'
+	previous_perf := os.getenv('VLS_PERF_LOG')
+	previous_cache := with_temp_diag_cache_dir('stableprep')
+	// The stable overlay path is the one through a diagnostics server pool. The
+	// V in use may speak a newer server protocol than this branch, so the
+	// checks may fall back to one-shot compiler runs; the overlay they prepare
+	// is still the stable per-program directory either way.
+	previous_server := os.getenv('VLS_DIAGNOSTICS_SERVER')
+	server_exe := resolve_v_compiler_exe()
+	assert os.exists(server_exe), 'a V compiler must be reachable to time a real slow check'
+	base := os.join_path(os.temp_dir(), 'vls_stableprep_${os.getpid()}_${time.now().unix_nano()}')
+	interop_test_must_mkdir_all(base)
+	defer {
+		if previous_perf == '' {
+			os.unsetenv('VLS_PERF_LOG')
+		} else {
+			os.setenv('VLS_PERF_LOG', previous_perf, true)
+		}
+		if previous_server == '' {
+			os.unsetenv('VLS_DIAGNOSTICS_SERVER')
+		} else {
+			os.setenv('VLS_DIAGNOSTICS_SERVER', previous_server, true)
+		}
+		restore_diag_cache_dir(previous_cache)
+		os.rmdir_all(base) or {}
+	}
+	os.setenv('VLS_PERF_LOG', '1', true)
+	os.setenv('VLS_DIAGNOSTICS_SERVER', server_exe, true)
+	work := os.join_path(base, 'work')
+	interop_test_must_mkdir_all(work)
+	project := os.join_path(base, 'project')
+	interop_test_must_mkdir_all(project)
+	main_file := os.join_path(project, 'main.v')
+	util_file := os.join_path(project, 'util.v')
+	main_content := 'module main\n\nfn main() {\n\tprintln(helper())\n}\n'
+	util_content := "module main\n\nfn helper() string {\n\treturn 'hi'\n}\n"
+	interop_test_must_write_file(main_file, main_content)
+	interop_test_must_write_file(util_file, util_content)
+	// Siblings that are never opened: the cold check links every one of them
+	// into the overlay, while the warm check leaves them all alone.
+	for i in 0 .. 50 {
+		interop_test_must_write_file(os.join_path(project, 'extra_${i}.v'),
+			'module main\n\nfn extra_${i}() {}\n')
+	}
+	main_uri := path_to_uri(main_file)
+	util_uri := path_to_uri(util_file)
+	mut pool := new_diagnostics_server_pool()
+	defer {
+		pool.stop_all()
+	}
+	mut app := &App{
+		temp_dir:            work
+		capture_output:      true
+		open_files:          {
+			main_uri: main_content
+			util_uri: util_content
+		}
+		diagnostics_servers: pool
+	}
+	// The cold check builds the stable overlay; the warm one, with a single
+	// changed buffer, only syncs it.
+	first := app.run_v_check(main_uri, main_content)
+	assert first.len == 0, 'a clean program reports no diagnostics: ${first}'
+	program_dir := app.program_root(main_file)
+	expected_stable := pool.stable_dir('project', program_overlay_root(normalize_overlay_path(main_file),
+		program_dir))
+	assert os.is_dir(expected_stable), 'the slow check used the stable overlay directory: ${expected_stable}'
+	assert os.is_file(os.join_path(expected_stable, 'main.v')), 'the stable overlay holds main.v'
+	assert os.is_file(os.join_path(expected_stable, 'util.v')), 'the stable overlay holds util.v'
+	changed_util := util_content.replace("'hi'", "'warm'")
+	app.open_files[util_uri] = changed_util
+	second := app.run_v_check(util_uri, changed_util)
+	assert second.len == 0, 'the changed program is still clean: ${second}'
+	stage_lines := app.captured_output.filter(it.contains('diagnostics stages'))
+	assert stage_lines.len == 2, 'one stage line per slow check: ${app.captured_output}'
+	for line in stage_lines {
+		assert line.contains('prep='), 'the stage line reports prep time: ${line}'
+	}
+	os.write_file(os.join_path(os.temp_dir(), 'vls_stable_overlay_prep_${os.getpid()}.log'),
+		stage_lines.join('\n') + '\n') or {
+		assert false, 'could not record stage timings: ${err}'
+	}
+}

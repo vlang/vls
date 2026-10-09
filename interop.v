@@ -1225,6 +1225,76 @@ fn (mut app App) prepare_line_info_overlay(real_path string, work_dir string) !C
 	return app.prepare_compilation_overlay_with(real_path, work_dir, importers)
 }
 
+// overlay_file_content_matches reports whether the file at `existing_path`
+// already holds `content`, comparing content hashes before any write: an
+// overlay that persists across checks rewrites only what changed. A file that
+// changed always differs, so it is never skipped.
+fn overlay_file_content_matches(existing_path string, content string) bool {
+	existing := os.read_file(existing_path) or { return false }
+	if existing.len != content.len {
+		return false
+	}
+	return existing.hash() == content.hash()
+}
+
+// drop_failed_overlay removes a freshly built overlay after a failure. A stable
+// overlay is kept: it still holds the last good sync, and the next check syncs
+// it again.
+fn drop_failed_overlay(temp_root string, stable bool) {
+	if stable {
+		return
+	}
+	os.rmdir_all(temp_root) or {}
+}
+
+// remove_stale_stable_overlay_files drops what a stable overlay holds that the
+// current sync no longer tracks: a buffer that is closed again reads from disk,
+// so its copy goes and the symlink step links it back, and a link whose source
+// is gone goes too. Copies that still match disk stay, wherever they came from.
+fn remove_stale_stable_overlay_files(temp_root string, source_root string, tracked map[string]string) {
+	mut keep := map[string]bool{}
+	for uri, _ in tracked {
+		if rel := overlay_relative_path(normalize_overlay_path(uri_to_path(uri)), source_root) {
+			keep[normalize_overlay_path(rel)] = true
+		}
+	}
+	mut pending := ['']
+
+	for pending.len > 0 {
+		rel_dir := pending.pop()
+		dir := if rel_dir == '' { temp_root } else { os.join_path(temp_root, rel_dir) }
+		for entry in os.ls(dir) or { continue } {
+			entry_rel := if rel_dir == '' { entry } else { rel_dir + '/' + entry }
+			normalized_rel := normalize_overlay_path(entry_rel)
+			copy_path := os.join_path(temp_root, entry_rel)
+			if os.is_link(copy_path) {
+				if normalized_rel in keep {
+					continue
+				}
+				if !os.exists(os.join_path(source_root, entry_rel)) {
+					os.rm(copy_path) or {}
+				}
+				continue
+			}
+			if os.is_dir(copy_path) {
+				pending << entry_rel
+				continue
+			}
+			if normalized_rel in keep {
+				continue
+			}
+			source_path := os.join_path(source_root, entry_rel)
+			if !os.is_file(source_path) {
+				os.rm(copy_path) or {}
+				continue
+			}
+			if !overlay_file_content_matches(copy_path, os.read_file(source_path) or { '' }) {
+				os.rm(copy_path) or {}
+			}
+		}
+	}
+}
+
 // prepare_compilation_overlay_with builds the overlay with `importers`, files
 // from disk by path, written into it next to the buffers.
 fn (mut app App) prepare_compilation_overlay_with(real_path string, work_dir string, importers map[string]string) !CompilationOverlay {
@@ -1232,28 +1302,38 @@ fn (mut app App) prepare_compilation_overlay_with(real_path string, work_dir str
 	source_work_dir := normalize_overlay_path(work_dir)
 	source_root := program_overlay_root(source_path, source_work_dir)
 	source_display_root := source_root
+	// A stable overlay persists across checks: it is synced, not rebuilt, so
+	// only files whose buffer content differs get rewritten.
+	stable := app.overlay_dir != ''
+	had_stable_overlay := stable && os.is_dir(app.overlay_dir)
 	temp_root_unresolved := app.write_tracked_files_to_temp(source_root)!
 	temp_root := normalize_overlay_path(os.real_path(temp_root_unresolved))
 	mut tracked := app.open_files.clone()
 	for path, content in importers {
 		rel := overlay_relative_path(path, source_root) or { continue }
-		os.write_file(os.join_path(temp_root, rel), content) or {
-			os.rmdir_all(temp_root) or {}
-			return error('Failed to write ${rel} into the compilation overlay: ${err}')
+		target := os.join_path(temp_root, rel)
+		if !overlay_file_content_matches(target, content) {
+			os.write_file(target, content) or {
+				drop_failed_overlay(temp_root, stable)
+				return error('Failed to write ${rel} into the compilation overlay: ${err}')
+			}
 		}
 		tracked[path_to_uri(path)] = content
 	}
+	if had_stable_overlay {
+		remove_stale_stable_overlay_files(temp_root, source_root, tracked)
+	}
 	symlink_untracked_files(source_root, source_work_dir, temp_root, tracked) or {
-		os.rmdir_all(temp_root) or {}
+		drop_failed_overlay(temp_root, stable)
 		return error('Failed to populate compilation overlay: ${err}')
 	}
 
 	work_rel := overlay_relative_path(source_work_dir, source_root) or {
-		os.rmdir_all(temp_root) or {}
+		drop_failed_overlay(temp_root, stable)
 		return error('Source work directory is outside overlay root: ${source_work_dir}')
 	}
 	file_rel := overlay_relative_path(source_path, source_root) or {
-		os.rmdir_all(temp_root) or {}
+		drop_failed_overlay(temp_root, stable)
 		return error('Source file is outside overlay root: ${source_path}')
 	}
 	temp_work_dir := if work_rel == '' {
@@ -1263,7 +1343,7 @@ fn (mut app App) prepare_compilation_overlay_with(real_path string, work_dir str
 	}
 	if !os.exists(temp_work_dir) {
 		os.mkdir_all(temp_work_dir) or {
-			os.rmdir_all(temp_root) or {}
+			drop_failed_overlay(temp_root, stable)
 			return error('Failed to create overlay work directory ${temp_work_dir}: ${err}')
 		}
 	}
@@ -1602,10 +1682,9 @@ fn split_check_errors(output string, diagnostic_source_dir string, file_to_check
 fn (mut app App) write_tracked_files_to_temp(working_dir string) !string {
 	log('WRITING ${app.open_files.len} tracked files to temp directory')
 
-	// create subdir; a diagnostics server checks the same one every time, so it
-	// is rebuilt in place
+	// create subdir; a diagnostics server checks the same stable directory every
+	// time, so it is synced in place instead of rebuilt
 	temp_project_dir := if app.overlay_dir != '' {
-		os.rmdir_all(app.overlay_dir) or {}
 		app.overlay_dir
 	} else {
 		os.join_path(app.temp_dir, 'project_${time.now().unix_nano()}')
@@ -1628,6 +1707,14 @@ fn (mut app App) write_tracked_files_to_temp(working_dir string) !string {
 			rel_path = os.file_name(file_path)
 		}
 		temp_file_path := os.join_path(temp_project_dir, rel_path)
+
+		// Sync-only-changed: a buffer the overlay already holds is left alone,
+		// keeping its modification time. A file that changed always differs, so
+		// the file the check runs for is never skipped.
+		if overlay_file_content_matches(temp_file_path, content) {
+			log('KEPT FILE: ${temp_file_path}')
+			continue
+		}
 
 		// create parent dir
 		temp_file_dir := os.dir(temp_file_path)
