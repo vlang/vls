@@ -1402,7 +1402,16 @@ fn (mut app App) run_v_check(path string, text string) []JsonError {
 	// within the session and across restarts (see diag_cache.v).
 	program_dir := app.program_root(real_path)
 	overlay_root := program_overlay_root(real_path, program_dir)
-	fingerprint := compiler_fingerprint() + '\n' + app.program_content_fingerprint(overlay_root)
+	// The defines a check runs with are resolved here, before the fingerprint
+	// they salt and the arguments they are appended to (see vls_config.v).
+	defines := app.check_defines(real_path)
+	mut fingerprint := compiler_fingerprint() + '\n' + app.program_content_fingerprint(overlay_root)
+	if defines.len > 0 {
+		// Other defines answer other errors for the same sources, so they are
+		// part of the fingerprint. An empty set adds nothing, which leaves
+		// every result cached before defines existed exactly as it was.
+		fingerprint += '\ndefines:${defines.join(' ')}'
+	}
 	fp_ms := time.now().unix_milli() - fp_stage_start_ms
 	mut cache_hit := ''
 	if cached := app.diag_cache[path] {
@@ -1522,10 +1531,11 @@ fn (mut app App) run_v_check(path string, text string) []JsonError {
 		module_name != '' && module_name != 'main'
 	}
 	if use_multifile {
-		cmd_args = build_v_check_args_multifile(is_library_module)
+		cmd_args = check_args_with_defines(build_v_check_args_multifile(is_library_module), defines)
 		log('MULTIFILE CMD - compile_target=${compile_target}): v ${cmd_args.join(' ')}')
 	} else {
-		cmd_args = build_v_check_args_single(file_to_check, is_library_module)
+		cmd_args = check_args_with_defines(build_v_check_args_single(file_to_check, is_library_module),
+			defines)
 		log('SINGLEFILE CMD: v ${cmd_args.join(' ')}')
 	}
 
@@ -2261,6 +2271,9 @@ fn (mut app App) on_did_change_watched_files(request Request) {
 	app.importable_modules_cache = map[string]ImportableModulesCache{}
 	for change in params.changes {
 		app.forget_module_folder(uri_to_path(change.uri))
+		// A project's `vls.json` holds the defines its checks run with, so a
+		// change of it is a change of the configuration (see vls_config.v).
+		app.forget_config_file(uri_to_path(change.uri))
 	}
 	open_uris_by_path := app.open_index_uris_by_path()
 	for change in params.changes {

@@ -7947,6 +7947,17 @@ fn (mut app App) handle_code_action(request Request) Response {
 		}
 	}
 
+	// 4. Extract variable — lift a pure expression into a variable of its own.
+	// 5. Inline variable — fold a local that is written once back into its uses.
+	if code_action_kind_wanted(only, code_action_kind_quickfix) {
+		if action := app.build_extract_variable_action(uri, content, params.range) {
+			actions << action
+		}
+		if action := app.build_inline_variable_action(uri, content, params.range) {
+			actions << action
+		}
+	}
+
 	return Response{
 		id:     request.id
 		result: actions
@@ -8496,6 +8507,11 @@ fn (mut app App) on_did_change_configuration(request Request) {
 			log('VLS: diagnostics_enabled=${enabled}')
 		}
 	}
+	// Layered configuration: the editor's own settings are the top tier, a
+	// project's `vls.json` the next, and VLS_DEFINES the last. Storing the
+	// editor tier here also applies the merged result to the switches above,
+	// and records the defines the checks of a project run with (vls_config.v).
+	app.apply_editor_configuration(request.params)
 }
 
 struct ResolvedWorkspaceSettings {

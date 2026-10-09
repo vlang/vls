@@ -76,23 +76,33 @@ also visualize line coverage; set `v.vls.coverage.enabled` to `false` to turn th
 ### Code behind a compile-time flag
 
 V compiles the code inside `$if flag ? { ... }` only when the program is built with `-d flag`.
-VLS runs the compiler without defines, so that code is not checked: it gets no errors, and hover
-and go-to-definition find little or nothing in it. V adds the options in the `VFLAGS` environment
-variable to every command, so set it where VLS runs to work on such a block. For example, close
-the editor and start it again from a shell:
+VLS runs the compiler without defines, so that code used to get no errors, and hover and
+go-to-definition found little or nothing in it. It now checks that code when the flag is given.
 
-```sh
-VFLAGS='-d flag' code .
+Set `vls.defines` in the editor's settings for VLS, naming the flag the code uses:
+
+```json
+"vls.defines": ["-d", "flag"]
 ```
 
-In Sublime Text, add `"VFLAGS": "-d flag"` to the `env` of its server configuration. The code
-inside `$if !flag ? { ... }` is then the one left unchecked.
+The joined spelling, `["-dflag"]`, is accepted too. To keep the flag with the project rather than
+in the editor, put a `vls.json` in the folder that holds the nearest `v.mod`:
+
+```json
+{ "defines": ["-d", "flag"] }
+```
+
+A `vls.json` may also set `inlayHints` and `diagnostics`, the two feature switches. The settings
+the editor sends win over the project's file, and the file over `VLS_DEFINES` in the environment,
+which also works for an editor with no settings of its own. The defines reach the checks only:
+`v fmt`, hover, go-to-definition and completion run without them. The code inside
+`$if !flag ? { ... }` is then the one left unchecked.
 
 ### Features
 
 #### Instant errors
 
-<img width="1932" height="432" alt="image" src="https://github.com/user-attachments/assets/a842e103-b3c2-427f-956f-fffff07970dc" />
+![image](https://github.com/user-attachments/assets/a842e103-b3c2-427f-956f-fffff07970dc)
 
 #### Go to definition
 
@@ -100,15 +110,15 @@ https://github.com/user-attachments/assets/fb4ee6ff-4765-46b7-a21e-267691253d8e
 
 #### Autocomplete for module functions
 
-<img width="1246" height="592" alt="image" src="https://github.com/user-attachments/assets/0d4e1849-2e6c-47f8-9a45-322fe25d9bef" />
+![image](https://github.com/user-attachments/assets/0d4e1849-2e6c-47f8-9a45-322fe25d9bef)
 
 #### Information about function parameters
 
-<img width="1494" height="450" alt="image" src="https://github.com/user-attachments/assets/46cc391b-fcdc-4083-ab62-97edd815ddd9" />
+![image](https://github.com/user-attachments/assets/46cc391b-fcdc-4083-ab62-97edd815ddd9)
 
 #### Autocomplete for struct fields and methods
 
-<img width="1804" height="392" alt="image" src="https://github.com/user-attachments/assets/478bfd20-201a-476f-88cd-583fad52d6cc" />
+![image](https://github.com/user-attachments/assets/478bfd20-201a-476f-88cd-583fad52d6cc)
 
 ### Zed
 
