@@ -15946,3 +15946,148 @@ fn test_cov_make_unique_temp_path_sequentially_distinct() {
 	}
 	assert seen.len == 50, 'every call unique'
 }
+
+fn test_completion_cold_open_sees_unopened_sibling_banner() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	// vlang/vls#473: banner.v and main.v share one `module main` directory.
+	// Only main.v is opened; banner.v stays on disk and the index starts empty.
+	project_dir := os.join_path(app.temp_dir, 'banner_cold_open_completion')
+	must_mkdir_all(project_dir)
+	banner_path := os.join_path(project_dir, 'banner.v')
+	main_path := os.join_path(project_dir, 'main.v')
+	must_write_file(banner_path, 'module main\n\npub fn banner() string {\n\treturn "hi"\n}\n')
+	main_content := 'module main\n\nfn main() {\n\tban\n}\n'
+	must_write_file(main_path, main_content)
+	main_uri := path_to_uri(main_path)
+	app.open_files[main_uri] = main_content
+	app.text = main_content
+	assert app.symbol_index.len == 0, 'index starts empty on cold open'
+	response := app.operation_at_pos(.completion, Request{
+		id:     1
+		method: 'textDocument/completion'
+		params: json2.encode(Params{
+			text_document: TextDocumentIdentifier{
+				uri: main_uri
+			}
+			position:      Position{
+				line: 3
+				char: 4
+			}
+		},
+			escape_unicode: true
+		)
+	})
+	assert response.id == 1, 'response id echoes'
+	assert response.result is CompletionList, 'completion answers a list on cold open'
+	labels := (response.result as CompletionList).items.map(it.label)
+	assert 'banner' in labels, 'unopened sibling fn banner offered on cold open'
+}
+
+fn test_definition_cold_open_resolves_unopened_sibling_banner() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	// vlang/vls#473: same cold-open shape as the completion test, but the
+	// cursor sits on the `banner()` call and must resolve into banner.v.
+	project_dir := os.join_path(app.temp_dir, 'banner_cold_open_definition')
+	must_mkdir_all(project_dir)
+	banner_path := os.join_path(project_dir, 'banner.v')
+	main_path := os.join_path(project_dir, 'main.v')
+	must_write_file(banner_path, 'module main\n\npub fn banner() string {\n\treturn "hi"\n}\n')
+	main_content := 'module main\n\nfn main() {\n\tbanner()\n}\n'
+	must_write_file(main_path, main_content)
+	main_uri := path_to_uri(main_path)
+	app.open_files[main_uri] = main_content
+	app.text = main_content
+	assert app.symbol_index.len == 0, 'index starts empty on cold open'
+	location := app.resolve_indexed_definition(main_uri, Position{
+		line: 3
+		char: 3
+	}) or {
+		assert false, 'cold-open definition of banner resolves into banner.v'
+		return
+	}
+	assert location.uri == path_to_uri(banner_path), 'definition points at the sibling file'
+	assert location.range.start.line == 2, 'definition points at the banner declaration'
+}
+
+fn test_diagnostics_cold_open_resolves_sibling_banner_call() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	// vlang/vls#473: on a cold open only main.v is open; its `banner()` call
+	// must not be reported as unknown while banner.v sits beside it on disk.
+	project_dir := os.join_path(app.temp_dir, 'banner_cold_open_diagnostics')
+	must_mkdir_all(project_dir)
+	banner_path := os.join_path(project_dir, 'banner.v')
+	main_path := os.join_path(project_dir, 'main.v')
+	must_write_file(banner_path, 'module main\n\npub fn banner() string {\n\treturn "hi"\n}\n')
+	main_content := 'module main\n\nfn main() {\n\tbanner()\n}\n'
+	must_write_file(main_path, main_content)
+	main_uri := path_to_uri(main_path)
+	app.open_files[main_uri] = main_content
+	app.text = main_content
+	errors := app.run_v_check(main_uri, main_content)
+	assert !errors.any(it.message.contains('banner')), 'sibling call resolves on cold open'
+}
+
+fn test_cold_open_via_did_open_sees_sibling_banner() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	// vlang/vls#473 through the real open handler: main.v opens with no text
+	// payload (read from disk) and no edit follows; banner.v stays unopened.
+	// Completion and definition must both see the sibling straight away.
+	project_dir := os.join_path(app.temp_dir, 'banner_cold_open_did_open')
+	must_mkdir_all(project_dir)
+	banner_path := os.join_path(project_dir, 'banner.v')
+	main_path := os.join_path(project_dir, 'main.v')
+	must_write_file(banner_path, 'module main\n\npub fn banner() string {\n\treturn "hi"\n}\n')
+	main_content := 'module main\n\nfn main() {\n\tbanner()\n}\n'
+	must_write_file(main_path, main_content)
+	main_uri := path_to_uri(main_path)
+	app.on_did_open(Request{
+		params: json2.encode(Params{
+			text_document: TextDocumentIdentifier{
+				uri: main_uri
+			}
+		},
+			escape_unicode: true
+		)
+	})
+	assert main_uri in app.open_files, 'main.v is tracked after open'
+	assert app.symbol_index.len == 0, 'index starts empty on cold open'
+	response := app.operation_at_pos(.completion, Request{
+		id:     1
+		method: 'textDocument/completion'
+		params: json2.encode(Params{
+			text_document: TextDocumentIdentifier{
+				uri: main_uri
+			}
+			position:      Position{
+				line: 3
+				char: 4
+			}
+		},
+			escape_unicode: true
+		)
+	})
+	assert response.result is CompletionList, 'completion answers a list on cold open'
+	labels := (response.result as CompletionList).items.map(it.label)
+	assert 'banner' in labels, 'unopened sibling fn banner offered on cold open'
+	location := app.resolve_indexed_definition(main_uri, Position{
+		line: 3
+		char: 3
+	}) or {
+		assert false, 'cold-open definition of banner resolves into banner.v'
+		return
+	}
+	assert location.uri == path_to_uri(banner_path), 'definition points at the sibling file'
+	assert location.range.start.line == 2, 'definition points at the banner declaration'
+}

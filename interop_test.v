@@ -1271,6 +1271,71 @@ fn test_run_v_check_returns_cached_result_without_compiler() {
 	os.rmdir_all(root) or {}
 }
 
+fn test_run_v_check_nested_program_subdir_is_clean() {
+	// Issue vlang/vls#474: a project whose main module sits in a subdirectory
+	// reported false errors while v-analyzer stayed clean. The file must be
+	// checked from its own program directory, with errors mapped back to it.
+	assert compiler_is_available(), 'a V compiler must be reachable to check the nested fixture'
+	previous_cache := with_temp_diag_cache_dir('nested474')
+	defer {
+		restore_diag_cache_dir(previous_cache)
+	}
+	base := os.join_path(os.temp_dir(), 'vls_nested474_${os.getpid()}_${time.now().unix_nano()}')
+	interop_test_must_mkdir_all(base)
+	defer {
+		os.rmdir_all(base) or {}
+	}
+	work := os.join_path(base, 'work')
+	interop_test_must_mkdir_all(work)
+	for with_vmod in [false, true] {
+		tag := if with_vmod { 'with_vmod' } else { 'without_vmod' }
+		project := os.join_path(base, tag)
+		app_dir := os.join_path(project, 'app')
+		interop_test_must_mkdir_all(app_dir)
+		if with_vmod {
+			interop_test_must_write_file(os.join_path(project, 'v.mod'), "Module {\n\tname: 'nested474'\n}\n")
+		}
+		main_file := os.join_path(app_dir, 'main.v')
+		util_file := os.join_path(app_dir, 'util.v')
+		clean_main := 'module main\n\nfn main() {\n\tprintln(helper())\n}\n'
+		util_content := "module main\n\nfn helper() string {\n\treturn 'hi'\n}\n"
+		interop_test_must_write_file(main_file, clean_main)
+		interop_test_must_write_file(util_file, util_content)
+		main_uri := path_to_uri(main_file)
+		util_uri := path_to_uri(util_file)
+		mut app := &App{
+			temp_dir:   work
+			open_files: {
+				main_uri: clean_main
+				util_uri: util_content
+			}
+		}
+		// The nested program is checked from its own directory.
+		program_dir := app.program_root(main_file)
+		assert program_dir == normalize_overlay_path(app_dir), '${tag}: program of ${main_file} is ${program_dir}, not ${app_dir}'
+		overlay := app.prepare_compilation_overlay(main_file) or {
+			assert false, '${tag}: overlay failed: ${err}'
+			continue
+		}
+		assert overlay.source_work_dir == normalize_overlay_path(app_dir), '${tag}: overlay checks from ${overlay.source_work_dir}, not ${app_dir}'
+		mapped := source_path_from_overlay(overlay.temp_source_file, overlay, overlay.temp_work_dir)
+		assert normalize_overlay_path(mapped) == normalize_overlay_path(main_file), '${tag}: overlay maps to ${mapped}, not ${main_file}'
+		os.rmdir_all(overlay.temp_root) or {}
+		// A clean nested program reports no diagnostics.
+		clean := app.run_v_check(main_uri, clean_main)
+		assert clean.len == 0, '${tag}: false errors for a clean nested program: ${clean}'
+		// A real error in the unsaved buffer still surfaces at the right place,
+		// which proves the clean answer above came from checking the program.
+		broken_main := 'module main\n\nfn main() {\n\tprintln(unknown_ident_474)\n}\n'
+		app.open_files[main_uri] = broken_main
+		broken := app.run_v_check(main_uri, broken_main)
+		assert broken.len == 1, '${tag}: expected one error, got ${broken}'
+		assert broken[0].message.contains('unknown_ident_474'), '${tag}: error names the wrong thing: ${broken[0].message}'
+		assert broken[0].line_nr == 4, '${tag}: error is on line ${broken[0].line_nr}, not 4'
+		assert normalize_overlay_path(broken[0].path) == normalize_overlay_path(main_file), '${tag}: error mapped to ${broken[0].path}, not ${main_file}'
+	}
+}
+
 fn test_run_v_argv_reports_missing_working_dir() {
 	missing_dir := os.join_path(os.temp_dir(), 'vls_missing_dir_${os.getpid()}_${time.now().unix_nano()}')
 	original := os.getwd()
