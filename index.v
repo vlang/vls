@@ -637,6 +637,15 @@ fn (mut app App) ensure_dirs_indexed(dirs []string) {
 		walk_complete := collect_v_files(dir, mut files)
 		if !walk_complete {
 			app.index_incomplete_scopes[scope] = true
+		} else {
+			// Pre-size once: inserting thousands of entries one by one would
+			// otherwise double the backing store repeatedly, and a late
+			// doubling can fail under a fragmented heap (GC_alloc_large abort
+			// on big trees). Reserve is a no-op for non-empty maps.
+			want := app.symbol_index.len + files.len
+			if want > 0 && want <= index_max_files {
+				app.symbol_index.reserve(u32(want))
+			}
 		}
 		mut present := map[string]bool{}
 		for f in files {
