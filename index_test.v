@@ -19,6 +19,28 @@ fn index_test_tmpdir(tag string) string {
 	return dir
 }
 
+fn test_bulk_walk_presizes_symbol_index_without_losing_entries() {
+	// ensure_dirs_indexed reserves the map before a bulk walk so inserts do
+	// not double the backing store repeatedly under a fragmented heap.
+	mut app := index_test_app()
+	app.symbol_index['file:///old.v'] = IndexEntry{}
+	app.symbol_index.reserve(1000)
+	assert app.symbol_index.len == 1, 'reserve must keep existing entries'
+	root := index_test_tmpdir('presized')
+	defer {
+		os.rmdir_all(root) or {}
+	}
+	for i in 0 .. 50 {
+		os.write_file(os.join_path(root, 'f${i}.v'), 'module main\n\nfn f${i}() {}\n') or {
+			assert false, 'write fixture failed: ${err}'
+			return
+		}
+	}
+	app.ensure_dirs_indexed([root])
+	assert app.symbol_index.len == 51, 'got ${app.symbol_index.len}'
+	assert 'file:///old.v' in app.symbol_index
+}
+
 fn test_index_workspace_symbols_from_open_buffers() {
 	mut app := index_test_app()
 	app.open_files['file:///tmp/a.v'] = 'module main\n\nfn alpha() {}\n\nstruct Beta {\n\tx int\n}\n'
