@@ -19,6 +19,41 @@ fn index_test_tmpdir(tag string) string {
 	return dir
 }
 
+fn test_index_reserve_target_covers_partial_walks() {
+	// A partial walk reserves what it found too, so growth toward the global
+	// cap is bounded either way: both branches share this target.
+	assert index_reserve_target(0, 0) == 0
+	assert index_reserve_target(0, 50) == 50
+	assert index_reserve_target(500, 50) == 550
+	assert index_reserve_target(0, index_max_files) == index_max_files
+	// Already at or above the cap: reserve nothing.
+	assert index_reserve_target(index_max_files, 1) == 0
+	assert index_reserve_target(index_max_files + 100, 1) == 0
+}
+
+fn test_partial_walk_still_reserves_what_it_found() {
+	// The reservation is not gated on the walk being complete: an incomplete
+	// walk indexes what it found, and that count still sizes the map. An
+	// incomplete scope marked by an earlier walk is cleared when a later one
+	// completes, as before.
+	root := index_test_tmpdir('partial_reserve')
+	defer {
+		os.rmdir_all(root) or {}
+	}
+	for i in 0 .. 20 {
+		os.write_file(os.join_path(root, 'p${i}.v'), 'module p${i}\n\nfn p${i}() {}\n') or {
+			assert false, 'write fixture failed: ${err}'
+			return
+		}
+	}
+	mut app := index_test_app()
+	app.index_incomplete_scopes['recursive:${root}'] = true
+	assert index_reserve_target(0, 20) == 20
+	app.ensure_dirs_indexed([root])
+	assert app.symbol_index.len == 20, 'got ${app.symbol_index.len}'
+	assert 'recursive:${root}' !in app.index_incomplete_scopes
+}
+
 fn test_bulk_walk_presizes_symbol_index_without_losing_entries() {
 	// ensure_dirs_indexed reserves the map before a bulk walk so inserts do
 	// not double the backing store repeatedly under a fragmented heap.

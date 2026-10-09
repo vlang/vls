@@ -509,6 +509,17 @@ fn collect_v_files(root string, mut acc []string) bool {
 	return collect_v_files_bounded(root, index_max_files, mut acc)
 }
 
+// index_reserve_target is how many index entries a walk should pre-size for,
+// bounded by the global file cap. A partial walk reserves what it found, so
+// growth toward that cap stays bounded in both cases; 0 means reserve nothing.
+fn index_reserve_target(indexed int, found int) int {
+	want := indexed + found
+	if want <= 0 || want > index_max_files {
+		return 0
+	}
+	return want
+}
+
 // collect_v_files_bounded stops at the caller's file limit, and at four times
 // that many directory entries so trees without V files are bounded too.
 fn collect_v_files_bounded(root string, max_files int, mut acc []string) bool {
@@ -637,15 +648,15 @@ fn (mut app App) ensure_dirs_indexed(dirs []string) {
 		walk_complete := collect_v_files(dir, mut files)
 		if !walk_complete {
 			app.index_incomplete_scopes[scope] = true
-		} else {
-			// Pre-size once: inserting thousands of entries one by one would
-			// otherwise double the backing store repeatedly, and a late
-			// doubling can fail under a fragmented heap (GC_alloc_large abort
-			// on big trees). Reserve is a no-op for non-empty maps.
-			want := app.symbol_index.len + files.len
-			if want > 0 && want <= index_max_files {
-				app.symbol_index.reserve(u32(want))
-			}
+		}
+		// Pre-size once: inserting thousands of entries one by one would
+		// otherwise double the backing store repeatedly, and a late doubling
+		// can fail under a fragmented heap (GC_alloc_large abort on big trees).
+		// A partial walk reserves what it found, so growth toward the global
+		// cap stays bounded in both cases.
+		target := index_reserve_target(app.symbol_index.len, files.len)
+		if target > 0 {
+			app.symbol_index.reserve(u32(target))
 		}
 		mut present := map[string]bool{}
 		for f in files {
