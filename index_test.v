@@ -19,6 +19,63 @@ fn index_test_tmpdir(tag string) string {
 	return dir
 }
 
+fn test_index_reserve_target_covers_partial_walks() {
+	// A partial walk reserves what it found too, so growth toward the global
+	// cap is bounded either way: both branches share this target.
+	assert index_reserve_target(0, 0) == 0
+	assert index_reserve_target(0, 50) == 50
+	assert index_reserve_target(500, 50) == 550
+	assert index_reserve_target(0, index_max_files) == index_max_files
+	// Already at or above the cap: reserve nothing.
+	assert index_reserve_target(index_max_files, 1) == 0
+	assert index_reserve_target(index_max_files + 100, 1) == 0
+}
+
+fn test_partial_walk_still_reserves_what_it_found() {
+	// The reservation is not gated on the walk being complete: an incomplete
+	// walk indexes what it found, and that count still sizes the map. An
+	// incomplete scope marked by an earlier walk is cleared when a later one
+	// completes, as before.
+	root := index_test_tmpdir('partial_reserve')
+	defer {
+		os.rmdir_all(root) or {}
+	}
+	for i in 0 .. 20 {
+		os.write_file(os.join_path(root, 'p${i}.v'), 'module p${i}\n\nfn p${i}() {}\n') or {
+			assert false, 'write fixture failed: ${err}'
+			return
+		}
+	}
+	mut app := index_test_app()
+	app.index_incomplete_scopes['recursive:${root}'] = true
+	assert index_reserve_target(0, 20) == 20
+	app.ensure_dirs_indexed([root])
+	assert app.symbol_index.len == 20, 'got ${app.symbol_index.len}'
+	assert 'recursive:${root}' !in app.index_incomplete_scopes
+}
+
+fn test_bulk_walk_presizes_symbol_index_without_losing_entries() {
+	// ensure_dirs_indexed reserves the map before a bulk walk so inserts do
+	// not double the backing store repeatedly under a fragmented heap.
+	mut app := index_test_app()
+	app.symbol_index['file:///old.v'] = IndexEntry{}
+	app.symbol_index.reserve(1000)
+	assert app.symbol_index.len == 1, 'reserve must keep existing entries'
+	root := index_test_tmpdir('presized')
+	defer {
+		os.rmdir_all(root) or {}
+	}
+	for i in 0 .. 50 {
+		os.write_file(os.join_path(root, 'f${i}.v'), 'module main\n\nfn f${i}() {}\n') or {
+			assert false, 'write fixture failed: ${err}'
+			return
+		}
+	}
+	app.ensure_dirs_indexed([root])
+	assert app.symbol_index.len == 51, 'got ${app.symbol_index.len}'
+	assert 'file:///old.v' in app.symbol_index
+}
+
 fn test_index_workspace_symbols_from_open_buffers() {
 	mut app := index_test_app()
 	app.open_files['file:///tmp/a.v'] = 'module main\n\nfn alpha() {}\n\nstruct Beta {\n\tx int\n}\n'
@@ -128,6 +185,33 @@ fn test_watched_file_reindex_drops_oversized_disk_entry() {
 	})
 	assert uri !in app.symbol_index
 	assert uri !in app.ref_occurrences
+}
+
+fn test_open_buffer_reindex_skips_oversized_content() {
+	// Open buffers bypass the disk size gate; a huge buffer must not force
+	// an unbounded index build.
+	root := index_test_tmpdir('open_large')
+	defer {
+		os.rmdir_all(root) or {}
+	}
+	path := os.join_path(root, 'large.v')
+	uri := path_to_uri(path)
+	os.write_file(path, 'module main\n\nfn small() {}\n') or {
+		assert false, 'write initial file failed: ${err}'
+		return
+	}
+	mut app := index_test_app()
+	big := 'x'.repeat(int(index_max_file_bytes) + 1)
+	app.open_files[uri] = big
+	app.reindex_uri(uri)
+	assert uri !in app.symbol_index
+	assert uri !in app.ref_occurrences
+	assert uri in app.index_skipped_uris
+	// Shrinking the buffer below the gate re-indexes it.
+	app.open_files[uri] = 'module main\n\nfn small_again() {}\n'
+	app.reindex_uri(uri)
+	assert uri in app.symbol_index
+	assert uri !in app.index_skipped_uris
 }
 
 fn test_watched_file_reindex_obeys_total_entry_limit() {
