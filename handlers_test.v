@@ -16091,3 +16091,174 @@ fn test_cold_open_via_did_open_sees_sibling_banner() {
 	assert location.uri == path_to_uri(banner_path), 'definition points at the sibling file'
 	assert location.range.start.line == 2, 'definition points at the banner declaration'
 }
+
+fn test_inlay_hint_toggles_default_to_enabled() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	toggles := app.inlay_hint_toggles()
+	assert toggles.variable_types, 'variable type hints are enabled by default'
+	assert toggles.parameter_names, 'parameter name hints are enabled by default'
+	uri := 'file:///test_inlay_toggles_default.v'
+	content := 'module main\n\nfn main() {\n\tx := 42\n}\n'
+	app.open_files[uri] = content
+	hints := inlay_hints_request(mut app, uri, content)
+	assert hints.len == 1, 'expected one heuristic type hint, got ${hints.len}'
+	assert hints[0].kind == inlay_hint_kind_type, 'the heuristic hint is a type hint'
+	assert hints[0].label == ': int', 'the heuristic hint labels the int type, got ${hints[0].label}'
+}
+
+fn test_inlay_hint_variable_types_toggle_filters_type_hints() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	uri := 'file:///test_inlay_toggles_variable_types.v'
+	content := 'module main\n\nfn main() {\n\tx := 42\n}\n'
+	app.open_files[uri] = content
+	assert inlay_hints_request(mut app, uri, content).len == 1, 'baseline shows the type hint'
+	app.on_did_change_configuration(Request{
+		method: 'workspace/didChangeConfiguration'
+		params: '{"settings":{"vls":{"inlayHints":{"variableTypes":false}}}}'
+	})
+	assert !app.inlay_hint_toggles().variable_types, 'variableTypes:false is stored'
+	assert app.inlay_hint_toggles().parameter_names, 'parameterNames stays enabled'
+	assert app.inlay_hints_enabled, 'a sub-option leaves the master switch untouched'
+	assert inlay_hints_request(mut app, uri, content).len == 0, 'a disabled type hint filters out'
+	app.on_did_change_configuration(Request{
+		method: 'workspace/didChangeConfiguration'
+		params: '{"settings":{"vls":{"inlayHints":{"variableTypes":true}}}}'
+	})
+	assert app.inlay_hint_toggles().variable_types, 'variableTypes:true re-enables without restart'
+	assert inlay_hints_request(mut app, uri, content).len == 1, 'a re-enabled type hint shows again'
+}
+
+fn test_inlay_hint_parameter_names_toggle_filters_parameter_hints() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	uri := 'file:///test_inlay_toggles_parameter_names.v'
+	content := 'module main\n\nfn main() {}\n'
+	app.open_files[uri] = content
+	app.inlay_hint_cache[uri] = CachedInlayHints{
+		stamp: app.inlay_hint_stamp(uri, content)
+		hints: [
+			InlayHint{
+				position: Position{
+					line: 2
+					char: 10
+				}
+				label:    ': string'
+				kind:     inlay_hint_kind_type
+			},
+			InlayHint{
+				position: Position{
+					line: 2
+					char: 16
+				}
+				label:    'name: '
+				kind:     inlay_hint_kind_parameter
+			},
+		]
+	}
+	labels := inlay_hints_request(mut app, uri, content).map(it.label)
+	assert ': string' in labels, 'baseline shows the type hint: ${labels}'
+	assert 'name: ' in labels, 'baseline shows the parameter hint: ${labels}'
+	app.on_did_change_configuration(Request{
+		method: 'workspace/didChangeConfiguration'
+		params: '{"settings":{"vls":{"inlayHints":{"parameterNames":false}}}}'
+	})
+	filtered := inlay_hints_request(mut app, uri, content).map(it.label)
+	assert filtered == [': string'], 'only the parameter hint filters out: ${filtered}'
+	app.on_did_change_configuration(Request{
+		method: 'workspace/didChangeConfiguration'
+		params: '{"settings":{"vls":{"inlayHints":{"parameterNames":true}}}}'
+	})
+	restored := inlay_hints_request(mut app, uri, content).map(it.label)
+	assert restored.len == 2, 'a re-enabled parameter hint shows again: ${restored}'
+}
+
+fn test_inlay_hint_toggles_ignore_unknown_keys() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	app.on_did_change_configuration(Request{
+		method: 'workspace/didChangeConfiguration'
+		params: '{"settings":{"vls":{"inlayHints":{"variableTypes":false,"futureKind":true,"nested":{"deep":true}}}}}'
+	})
+	toggles := app.inlay_hint_toggles()
+	assert !toggles.variable_types, 'a known sub-option applies despite unknown siblings'
+	assert toggles.parameter_names, 'parameterNames stays enabled'
+	assert app.inlay_hints_enabled, 'unknown keys never touch the master switch'
+}
+
+fn test_inlay_hint_toggles_cover_all_configuration_shapes() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	// Direct settings shape without the `vls` section.
+	app.on_did_change_configuration(Request{
+		method: 'workspace/didChangeConfiguration'
+		params: '{"settings":{"inlayHints":{"parameterNames":false}}}'
+	})
+	assert !app.inlay_hint_toggles().parameter_names, 'the direct shape applies parameterNames'
+	assert app.inlay_hint_toggles().variable_types, 'the direct shape leaves variableTypes alone'
+	// Nested shape carrying the master switch together with sub-options.
+	app.on_did_change_configuration(Request{
+		method: 'workspace/didChangeConfiguration'
+		params: '{"settings":{"vls":{"inlayHints":{"enabled":true,"variableTypes":false,"parameterNames":true},"diagnostics":{"enabled":true}}}}'
+	})
+	assert app.inlay_hints_enabled, 'a nested enabled applies alongside sub-options'
+	assert !app.inlay_hint_toggles().variable_types, 'the nested shape applies variableTypes'
+	assert app.inlay_hint_toggles().parameter_names, 'the nested shape applies parameterNames'
+	assert app.diagnostics_enabled, 'a sibling diagnostics shape still applies'
+	// The flat boolean master switch keeps working and leaves sub-options alone.
+	app.on_did_change_configuration(Request{
+		method: 'workspace/didChangeConfiguration'
+		params: '{"settings":{"vls":{"inlayHints":false}}}'
+	})
+	assert !app.inlay_hints_enabled, 'the flat master switch still disables hints'
+	assert !app.inlay_hint_toggles().variable_types, 'the flat master switch leaves variableTypes alone'
+	assert app.inlay_hint_toggles().parameter_names, 'the flat master switch leaves parameterNames alone'
+}
+
+fn test_filter_inlay_hints_by_toggles_keeps_unknown_kinds() {
+	hints := [
+		InlayHint{
+			position: Position{
+				line: 0
+				char: 1
+			}
+			label:    ': int'
+			kind:     inlay_hint_kind_type
+		},
+		InlayHint{
+			position: Position{
+				line: 0
+				char: 5
+			}
+			label:    'name: '
+			kind:     inlay_hint_kind_parameter
+		},
+		InlayHint{
+			position: Position{
+				line: 0
+				char: 9
+			}
+			label:    '?'
+			kind:     99
+		},
+	]
+	all_on := filter_inlay_hints_by_toggles(hints, InlayHintToggles{})
+	assert all_on.len == 3, 'enabled toggles keep every hint, got ${all_on.len}'
+	all_off := filter_inlay_hints_by_toggles(hints, InlayHintToggles{
+		variable_types:  false
+		parameter_names: false
+	})
+	assert all_off.len == 1, 'disabled toggles filter only the known kinds, got ${all_off.len}'
+	assert all_off[0].kind == 99, 'an unknown future kind passes through'
+}

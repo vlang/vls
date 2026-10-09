@@ -389,9 +389,16 @@ struct WorkspaceVlsSettings {
 }
 
 // WorkspaceInlayHintsSettings supports client payloads that send
-// `settings.vls.inlayHints.enabled` as a nested object.
+// `settings.vls.inlayHints` as a nested object. `enabled` is the master
+// switch; `variableTypes` filters the type hints (kind 1, `: int`) and
+// `parameterNames` filters the parameter hints (kind 2, `name: `, including
+// the field names of positional struct literals, which the compiler reports
+// with the same kind). Absent keys keep the current value, so old payloads
+// behave exactly as before; unknown keys are ignored by the decoder.
 struct WorkspaceInlayHintsSettings {
-	enabled ?bool
+	enabled         ?bool
+	variable_types  ?bool @[json: 'variableTypes']
+	parameter_names ?bool @[json: 'parameterNames']
 }
 
 // WorkspaceDiagnosticsSettings supports client payloads that send
@@ -781,8 +788,10 @@ struct TextEdit {
 	new_text string @[json: 'newText']
 }
 
-// InlayHintKind 1 = Type hint, 2 = Parameter hint
+// InlayHintKind 1 = Type hint, 2 = Parameter hint. The compiler reports both:
+// variable and const types as 1, call argument and struct field names as 2.
 const inlay_hint_kind_type = 1
+const inlay_hint_kind_parameter = 2
 
 // InlayHint represents a hint shown inline in the editor (type or parameter).
 struct InlayHint {

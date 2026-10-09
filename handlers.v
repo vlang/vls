@@ -6904,11 +6904,13 @@ fn (mut app App) handle_inlay_hints(request Request) Response {
 
 	// The compiler knows the type of every variable and the parameter names of
 	// every call; the source heuristics below only run when it cannot answer.
+	// Both paths report the same two LSP kinds, so the granular toggles filter
+	// either answer without invalidating the compiler cache.
 	if compiler_hints := app.compiler_inlay_hints(uri, content) {
 		return Response{
 			id:     request.id
-			result: compiler_hints.filter(it.position.line >= start_line
-				&& it.position.line <= end_line)
+			result: filter_inlay_hints_by_toggles(compiler_hints.filter(it.position.line >= start_line
+				&& it.position.line <= end_line), app.inlay_hint_toggles())
 		}
 	}
 
@@ -7041,8 +7043,78 @@ fn (mut app App) handle_inlay_hints(request Request) Response {
 
 	return Response{
 		id:     request.id
-		result: hints
+		result: filter_inlay_hints_by_toggles(hints, app.inlay_hint_toggles())
 	}
+}
+
+// inlay_hint_variable_types_disabled_key and
+// inlay_hint_parameter_names_disabled_key are reserved entries of
+// inlay_hint_cache holding the granular inlay-hint switches: a present entry
+// means the client disabled that kind, an absent one means it is enabled, so
+// a fresh server shows every hint exactly as before. Each key holds a space,
+// which a document URI never holds raw, so the per-URI cache logic never
+// reads them as a document. They live in the cache because App is declared
+// in another file: no new server state can be added from here, and a module
+// global would need `-enable-globals`, which the build does not pass.
+const inlay_hint_variable_types_disabled_key = 'vls inlay variable types disabled'
+const inlay_hint_parameter_names_disabled_key = 'vls inlay parameter names disabled'
+
+// InlayHintToggles carries the granular inlay-hint switches of
+// `vls.inlayHints`: `variable_types` filters the type hints (kind 1) and
+// `parameter_names` filters the parameter hints (kind 2, which also covers
+// the field names of positional struct literals: the compiler reports both
+// with the same kind, so they cannot be toggled apart downstream).
+struct InlayHintToggles {
+mut:
+	variable_types  bool = true
+	parameter_names bool = true
+}
+
+// inlay_hint_toggles reports the granular switches, both enabled unless the
+// client disabled them through workspace/didChangeConfiguration.
+fn (app &App) inlay_hint_toggles() InlayHintToggles {
+	return InlayHintToggles{
+		variable_types:  inlay_hint_variable_types_disabled_key !in app.inlay_hint_cache
+		parameter_names: inlay_hint_parameter_names_disabled_key !in app.inlay_hint_cache
+	}
+}
+
+// set_inlay_hint_toggles stores the granular switches for the inlayHint
+// requests that follow. It takes effect without a restart and without
+// invalidating the cached compiler hints, which the toggles filter after.
+fn (mut app App) set_inlay_hint_toggles(toggles InlayHintToggles) {
+	if toggles.variable_types {
+		app.inlay_hint_cache.delete(inlay_hint_variable_types_disabled_key)
+	} else {
+		app.inlay_hint_cache[inlay_hint_variable_types_disabled_key] = CachedInlayHints{}
+	}
+	if toggles.parameter_names {
+		app.inlay_hint_cache.delete(inlay_hint_parameter_names_disabled_key)
+	} else {
+		app.inlay_hint_cache[inlay_hint_parameter_names_disabled_key] = CachedInlayHints{}
+	}
+}
+
+// inlay_hint_kind_allowed reports whether a hint of `kind` survives the
+// granular toggles. A kind the toggles do not know passes through, so a
+// newer compiler reporting a new kind keeps showing it.
+fn inlay_hint_kind_allowed(kind int, toggles InlayHintToggles) bool {
+	if kind == inlay_hint_kind_type {
+		return toggles.variable_types
+	}
+	if kind == inlay_hint_kind_parameter {
+		return toggles.parameter_names
+	}
+	return true
+}
+
+// filter_inlay_hints_by_toggles drops the hint kinds the client disabled.
+// With every toggle on it returns the input unchanged.
+fn filter_inlay_hints_by_toggles(hints []InlayHint, toggles InlayHintToggles) []InlayHint {
+	if toggles.variable_types && toggles.parameter_names {
+		return hints
+	}
+	return hints.filter(inlay_hint_kind_allowed(it.kind, toggles))
 }
 
 struct CachedInlayHints {
@@ -8385,6 +8457,8 @@ fn (mut app App) handle_selection_range(request Request) Response {
 // on_did_change_configuration handles the workspace/didChangeConfiguration notification.
 // It applies settings that affect server behaviour:
 //   vls.inlayHints  – enable or disable inlay type hints
+//   vls.inlayHints.variableTypes – enable or disable the type hints (kind 1)
+//   vls.inlayHints.parameterNames – enable or disable the parameter hints (kind 2)
 //   vls.diagnostics – enable or disable live compile-time diagnostics
 fn (mut app App) on_did_change_configuration(request Request) {
 	resolved := resolve_workspace_settings(request.params)
@@ -8393,6 +8467,17 @@ fn (mut app App) on_did_change_configuration(request Request) {
 			app.inlay_hints_enabled = enabled
 			log('VLS: inlay_hints_enabled=${enabled}')
 		}
+	}
+	if resolved.has_variable_types || resolved.has_parameter_names {
+		mut toggles := app.inlay_hint_toggles()
+		if variable_types := resolved.variable_types {
+			toggles.variable_types = variable_types
+		}
+		if parameter_names := resolved.parameter_names {
+			toggles.parameter_names = parameter_names
+		}
+		app.set_inlay_hint_toggles(toggles)
+		log('VLS: inlay_hint_toggles=variableTypes:${toggles.variable_types},parameterNames:${toggles.parameter_names}')
 	}
 	if resolved.has_diagnostics {
 		if enabled := resolved.diagnostics {
@@ -8407,10 +8492,14 @@ fn (mut app App) on_did_change_configuration(request Request) {
 
 struct ResolvedWorkspaceSettings {
 mut:
-	inlay_hints     ?bool
-	diagnostics     ?bool
-	has_inlay_hints bool
-	has_diagnostics bool
+	inlay_hints         ?bool
+	diagnostics         ?bool
+	variable_types      ?bool
+	parameter_names     ?bool
+	has_inlay_hints     bool
+	has_diagnostics     bool
+	has_variable_types  bool
+	has_parameter_names bool
 }
 
 fn resolve_workspace_settings(params_json string) ResolvedWorkspaceSettings {
@@ -8425,6 +8514,7 @@ fn resolve_workspace_settings(params_json string) ResolvedWorkspaceSettings {
 		DidChangeConfigurationParamsCompat{}
 	}
 	merge_workspace_settings(mut resolved, sectioned_inlay_nested.settings.vls.inlay_hints.enabled, sectioned_inlay_nested.settings.vls.diagnostics)
+	merge_inlay_hint_options(mut resolved, sectioned_inlay_nested.settings.vls.inlay_hints)
 
 	sectioned_diagnostics_nested := json2.decode[DidChangeConfigurationParamsNestedDiagnosticsCompat](params_json) or {
 		DidChangeConfigurationParamsNestedDiagnosticsCompat{}
@@ -8435,6 +8525,7 @@ fn resolve_workspace_settings(params_json string) ResolvedWorkspaceSettings {
 		DidChangeConfigurationParamsNestedFeaturesCompat{}
 	}
 	merge_workspace_settings(mut resolved, sectioned_nested.settings.vls.inlay_hints.enabled, sectioned_nested.settings.vls.diagnostics.enabled)
+	merge_inlay_hint_options(mut resolved, sectioned_nested.settings.vls.inlay_hints)
 
 	direct_flat := json2.decode[DidChangeConfigurationDirectParams](params_json) or {
 		DidChangeConfigurationDirectParams{}
@@ -8445,6 +8536,7 @@ fn resolve_workspace_settings(params_json string) ResolvedWorkspaceSettings {
 		DidChangeConfigurationDirectParamsCompat{}
 	}
 	merge_workspace_settings(mut resolved, direct_inlay_nested.settings.inlay_hints.enabled, direct_inlay_nested.settings.diagnostics)
+	merge_inlay_hint_options(mut resolved, direct_inlay_nested.settings.inlay_hints)
 
 	direct_diagnostics_nested := json2.decode[DidChangeConfigurationDirectParamsNestedDiagnosticsCompat](params_json) or {
 		DidChangeConfigurationDirectParamsNestedDiagnosticsCompat{}
@@ -8455,6 +8547,7 @@ fn resolve_workspace_settings(params_json string) ResolvedWorkspaceSettings {
 		DidChangeConfigurationDirectParamsNestedFeaturesCompat{}
 	}
 	merge_workspace_settings(mut resolved, direct_nested.settings.inlay_hints.enabled, direct_nested.settings.diagnostics.enabled)
+	merge_inlay_hint_options(mut resolved, direct_nested.settings.inlay_hints)
 	return resolved
 }
 
@@ -8470,6 +8563,26 @@ fn merge_workspace_settings(mut resolved ResolvedWorkspaceSettings, inlay_hints 
 		if enabled := diagnostics {
 			resolved.diagnostics = enabled
 			resolved.has_diagnostics = true
+		}
+	}
+}
+
+// merge_inlay_hint_options folds the granular inlay-hint switches of one
+// decoded settings shape into the resolved settings. Like
+// merge_workspace_settings it is first-wins: an absent key keeps whatever an
+// earlier shape already set, and unknown keys never reach it because the
+// decoder drops them.
+fn merge_inlay_hint_options(mut resolved ResolvedWorkspaceSettings, inlay_hints WorkspaceInlayHintsSettings) {
+	if !resolved.has_variable_types {
+		if variable_types := inlay_hints.variable_types {
+			resolved.variable_types = variable_types
+			resolved.has_variable_types = true
+		}
+	}
+	if !resolved.has_parameter_names {
+		if parameter_names := inlay_hints.parameter_names {
+			resolved.parameter_names = parameter_names
+			resolved.has_parameter_names = true
 		}
 	}
 }
