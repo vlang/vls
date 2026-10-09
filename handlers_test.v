@@ -5,6 +5,7 @@ module main
 import os
 import json2
 import time
+import io
 
 fn must_mkdir_all(path string) {
 	os.mkdir_all(path) or {
@@ -10104,25 +10105,37 @@ fn test_inline_value_returns_empty_for_no_assignments() {
 // ── linked editing range ──────────────────────────────────────────────────────
 
 fn test_linked_editing_range_returns_ranges_for_identifier() {
+	// The occurrence set is the one a rename edits, and V1 alone does not tell
+	// where every name is declared.
+	if !v3_answers_line_info {
+		return
+	}
 	mut app := create_test_app()
 	defer {
-		cleanup_test_app(app)
+		cleanup_rename_app(mut app)
 	}
-	uri := 'file:///tmp/linked.v'
-	// Line 2: `foo := foo + 1` — "foo" appears twice
-	content := 'module main\n\nfn main() {\n\tfoo := foo\n}\n'
+	app.v3_line_info_enabled = v3_answers_line_info
+	test_dir := os.join_path(app.temp_dir, 'linked_editing_feature')
+	must_mkdir_all(test_dir)
+	must_write_file(os.join_path(test_dir, 'v.mod'), 'Module {}\n')
+	test_file := os.join_path(test_dir, 'main.v')
+	content := 'module main\n\nfn main() {\n\ttotal := 1\n\tprintln(total)\n}\n'
+	must_write_file(test_file, content)
+	uri := path_to_uri(test_file)
 	app.open_files[uri] = content
+	app.open_files_versions[uri] = 1
+	app.workspace_roots = [test_dir]
 
 	resp := app.handle_linked_editing_range(Request{
 		id:     840
 		method: 'textDocument/linkedEditingRange'
-		params: json2.encode(TextDocumentPositionParams{
+		params: json2.encode(LinkedEditingRangeParams{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
 			position:      Position{
 				line: 3
-				char: 2
+				char: 3
 			}
 		},
 			escape_unicode: true
@@ -10132,7 +10145,9 @@ fn test_linked_editing_range_returns_ranges_for_identifier() {
 	assert resp.id == 840
 	assert resp.result is LinkedEditingRanges
 	ler := resp.result as LinkedEditingRanges
-	assert ler.ranges.len >= 2
+	assert ler.ranges.len == 2, 'the declaration and the use, got ${ler.ranges.len}'
+	assert ler.ranges.any(it.start.line == 3), 'the declaration is linked'
+	assert ler.ranges.any(it.start.line == 4), 'the use is linked'
 }
 
 fn test_linked_editing_range_returns_null_when_not_on_identifier() {
@@ -16783,4 +16798,274 @@ fn test_filter_inlay_hints_by_toggles_keeps_unknown_kinds() {
 	})
 	assert all_off.len == 1, 'disabled toggles filter only the known kinds, got ${all_off.len}'
 	assert all_off[0].kind == 99, 'an unknown future kind passes through'
+}
+
+// --- advertised capabilities: what initialize says is implemented ---
+
+// The three capabilities this phase turned on are on the wire, and the stub
+// that returns no edits stays off it.
+fn test_integration_initialize_advertises_range_formatting_inline_values_linked_editing() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	payload := '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}'
+	input_path := os.join_path(app.temp_dir, 'phase5_capabilities.txt')
+	must_write_file(input_path, 'Content-Length: ${payload.len}\r\n\r\n${payload}')
+	mut input := os.open(input_path) or {
+		assert false, 'Failed to open ${input_path}: ${err}'
+		return
+	}
+	defer {
+		input.close()
+	}
+	app.capture_output = true
+	mut reader := io.new_buffered_reader(reader: input, cap: 1)
+	app.handle_requests(mut reader)
+	initialize := app.captured_output.join('')
+
+	assert initialize.contains('"documentRangeFormattingProvider":true'), 'range formatting is advertised'
+	assert initialize.contains('"inlineValueProvider":true'), 'inline values are advertised'
+	assert initialize.contains('"linkedEditingRangeProvider":true'), 'linked editing is advertised'
+	assert !initialize.contains('documentOnTypeFormattingProvider'), 'on-type formatting is still a stub and stays off the wire'
+}
+
+// --- range formatting: nothing outside the requested range ---
+
+// v fmt formats whole files, so a document with a change inside and a change
+// outside the requested range has one changed hunk that reaches past it. The
+// handler then offers no edit at all rather than touch text the client did not
+// ask about.
+fn test_range_formatting_leaves_a_change_outside_the_requested_range_alone() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'range_format_outside_request')
+	must_mkdir_all(test_dir)
+	test_file := os.join_path(test_dir, 'main.v')
+	// Line 3 is inside the requested range, line 7 is not, and both need
+	// formatting, so the changed hunk spans both.
+	content := 'module main\n\nfn main() {\n\tx:=1\n}\n\nfn other() {\n\ty:=2\n}\n'
+	must_write_file(test_file, content)
+	uri := path_to_uri(test_file)
+	app.open_files[uri] = content
+
+	response := app.handle_range_formatting(Request{
+		id:     911
+		method: 'textDocument/rangeFormatting'
+		params: json2.encode(DocumentRangeFormattingParams{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			range:         LSPRange{
+				start: Position{
+					line: 3
+				}
+				end:   Position{
+					line: 3
+					char: 4
+				}
+			}
+			options:       FormattingOptions{
+				tab_size: 4
+			}
+		},
+			escape_unicode: true
+		)
+	})
+
+	assert response.id == 911
+	assert response.result is []TextEdit
+	edits := response.result as []TextEdit
+	assert edits.len == 0, 'a changed hunk reaching past the requested range must not be edited, got ${edits.len}'
+}
+
+// --- inline values: every literal in the range, and nothing else ---
+
+fn test_inline_value_returns_a_hint_for_each_literal_in_the_range() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	uri := 'file:///tmp/inlineval_multi.v'
+	content := 'module main\n\nfn main() {\n\ta := 1\n\tb := "two"\n\tc := true\n\td := 3.5\n}\n'
+	app.open_files[uri] = content
+
+	resp := app.handle_inline_value(Request{
+		id:     832
+		method: 'textDocument/inlineValue'
+		params: json2.encode(InlineValueParams{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			range:         LSPRange{
+				start: Position{
+					line: 0
+					char: 0
+				}
+				end:   Position{
+					line: 7
+					char: 0
+				}
+			}
+		},
+			escape_unicode: true
+		)
+	})
+
+	assert resp.id == 832
+	assert resp.result is []InlineValueText
+	values := resp.result as []InlineValueText
+	assert values.len == 4, 'one hint per literal, got ${values.len}'
+	for hint in [': int', ': string', ': bool', ': f64'] {
+		assert values.any(it.text == hint), 'the hint `${hint}` is missing from ${values.map(it.text)}'
+	}
+	hint := values[0]
+	assert hint.range.start.line == 3 && hint.range.start.char == 1, 'the hint sits on the name it belongs to: ${hint.range.start}'
+	assert hint.text.starts_with(': '), 'the hint is appended to the name: ${hint.text}'
+}
+
+// An expression the compiler has to evaluate is not a value the client can be
+// shown, so a call, an arithmetic expression and a composite literal get no hint.
+fn test_inline_value_has_no_hint_for_a_non_literal_assignment() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	uri := 'file:///tmp/inlineval_notliteral.v'
+	content := 'module main\n\nfn one() int {\n\treturn 1\n}\n\nfn main() {\n\tx := one()\n\ty := 1 + 2\n\tz := []int{}\n}\n'
+	app.open_files[uri] = content
+
+	resp := app.handle_inline_value(Request{
+		id:     833
+		method: 'textDocument/inlineValue'
+		params: json2.encode(InlineValueParams{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			range:         LSPRange{
+				start: Position{
+					line: 0
+					char: 0
+				}
+				end:   Position{
+					line: 9
+					char: 0
+				}
+			}
+		},
+			escape_unicode: true
+		)
+	})
+
+	assert resp.id == 833
+	assert resp.result is []InlineValueText
+	values := resp.result as []InlineValueText
+	assert values.len == 0, 'a call, a sum and a composite literal are not values: ${values.map(it.text)}'
+}
+
+// --- linked editing: the cross-file set, this document's ranges ---
+
+// The name under the cursor is declared in another file and used twice here,
+// and a local of the same name in a third function is not it. The answer is
+// the two uses in this file and no range of the local.
+fn test_linked_editing_range_of_a_use_follows_the_declaration_into_another_file() {
+	// V1 alone does not tell where every name is declared.
+	if !v3_answers_line_info {
+		return
+	}
+	mut app := create_test_app()
+	defer {
+		cleanup_rename_app(mut app)
+	}
+	app.v3_line_info_enabled = v3_answers_line_info
+	test_dir := os.join_path(app.temp_dir, 'linked_editing_cross_file')
+	must_mkdir_all(test_dir)
+	must_write_file(os.join_path(test_dir, 'v.mod'), 'Module {}\n')
+	main_content := 'module main\n\nfn main() {\n\tprintln(shared_value())\n\tprintln(shared_value())\n}\n\nfn decoy() int {\n\tshared_value := 5\n\treturn shared_value\n}\n'
+	other_content := 'module main\n\nfn shared_value() int {\n\treturn 1\n}\n'
+	main_file := os.join_path(test_dir, 'main.v')
+	other_file := os.join_path(test_dir, 'other.v')
+	must_write_file(main_file, main_content)
+	must_write_file(other_file, other_content)
+	main_uri := path_to_uri(main_file)
+	other_uri := path_to_uri(other_file)
+	app.open_files[main_uri] = main_content
+	app.open_files_versions[main_uri] = 1
+	app.open_files[other_uri] = other_content
+	app.open_files_versions[other_uri] = 1
+	app.workspace_roots = [test_dir]
+
+	resp := app.handle_linked_editing_range(Request{
+		id:     842
+		method: 'textDocument/linkedEditingRange'
+		params: json2.encode(LinkedEditingRangeParams{
+			text_document: TextDocumentIdentifier{
+				uri: main_uri
+			}
+			position:      Position{
+				line: 3
+				char: 12
+			}
+		},
+			escape_unicode: true
+		)
+	})
+
+	assert resp.id == 842
+	assert resp.result is LinkedEditingRanges
+	ler := resp.result as LinkedEditingRanges
+	assert ler.ranges.len == 2, 'the two uses, got ${ler.ranges.len}'
+	main_lines := main_content.split_into_lines()
+	for r in ler.ranges {
+		assert r.start.line in [3, 4], 'the local of another function is not linked: line ${r.start.line}'
+		assert main_lines[r.start.line][r.start.char..r.end.char] == 'shared_value', 'the range is the name itself'
+	}
+}
+
+// Two functions of one file each declare a local of the same name. Linked
+// editing from one of them returns that one and the uses of that one.
+fn test_linked_editing_range_keeps_a_local_apart_from_a_namesake_in_another_function() {
+	// V1 alone does not tell where every name is declared.
+	if !v3_answers_line_info {
+		return
+	}
+	mut app := create_test_app()
+	defer {
+		cleanup_rename_app(mut app)
+	}
+	app.v3_line_info_enabled = v3_answers_line_info
+	test_dir := os.join_path(app.temp_dir, 'linked_editing_namesake')
+	must_mkdir_all(test_dir)
+	must_write_file(os.join_path(test_dir, 'v.mod'), 'Module {}\n')
+	test_file := os.join_path(test_dir, 'main.v')
+	content := 'module main\n\nfn first() int {\n\tvalue := 1\n\treturn value\n}\n\nfn second() int {\n\tvalue := 2\n\treturn value\n}\n'
+	must_write_file(test_file, content)
+	uri := path_to_uri(test_file)
+	app.open_files[uri] = content
+	app.open_files_versions[uri] = 1
+	app.workspace_roots = [test_dir]
+
+	resp := app.handle_linked_editing_range(Request{
+		id:     843
+		method: 'textDocument/linkedEditingRange'
+		params: json2.encode(LinkedEditingRangeParams{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			position:      Position{
+				line: 3
+				char: 3
+			}
+		},
+			escape_unicode: true
+		)
+	})
+
+	assert resp.id == 843
+	assert resp.result is LinkedEditingRanges
+	ler := resp.result as LinkedEditingRanges
+	assert ler.ranges.len == 2, 'the declaration and the use of this local, got ${ler.ranges.len}'
+	assert ler.ranges.all(it.start.line in [3, 4]), 'the namesake in `second` is not linked: ${ler.ranges.map(it.start.line)}'
 }

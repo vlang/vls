@@ -930,10 +930,9 @@ fn (mut app App) handle_requests[T](mut reader T) {
 						capabilities: Capability{
 							// NOTE: Placeholder/stub capabilities are intentionally NOT
 							// advertised (P1-07 / Stage 0): on-type formatting (always
-							// empty), inline values (wrong abstraction), linked editing
-							// (wrong abstraction), file-operation hooks (no-ops), and
-							// willSave (never dispatched). Advertising only working
-							// features gives a better editor experience than broken UI.
+							// empty), file-operation hooks (no-ops), and willSave
+							// (never dispatched). Advertising only working features
+							// gives a better editor experience than broken UI.
 							text_document_sync:                 TextDocumentSyncOptions{
 								open_close:           true
 								change:               2 // Incremental
@@ -967,6 +966,11 @@ fn (mut app App) handle_requests[T](mut reader T) {
 								commands: ['vls.runFile', 'vls.runTests']
 							}
 							code_lens_provider:                 CodeLensOptions{}
+							// Inline values are the type the literal on the right of a
+							// `:=` gives the variable; linked editing is the occurrence
+							// set a rename would edit. Neither is a placeholder.
+							inline_value_provider:              true
+							linked_editing_range_provider:      true
 							semantic_tokens_provider:           SemanticTokensOptions{
 								legend: SemanticTokensLegend{
 									token_types:     semantic_token_types()
@@ -979,11 +983,11 @@ fn (mut app App) handle_requests[T](mut reader T) {
 							call_hierarchy_provider:            true
 							document_highlight_provider:        true
 							selection_range_provider:           true
-							// Range formatting is NOT advertised: v fmt only formats whole
-							// files, so a correct range implementation needs a
-							// character-accurate, EOL-preserving diff restricted to the
-							// requested range, which is not yet implemented (P0-08).
-							document_range_formatting_provider: false
+							// Range formatting is advertised: `v fmt` only formats whole
+							// files, so the handler formats the document and returns the
+							// changed hunk only when it lies entirely inside the requested
+							// range, and no edit at all otherwise.
+							document_range_formatting_provider: true
 							position_encoding:                  position_encoding_string(app.position_encoding)
 							workspace:                          WorkspaceCapability{
 								workspace_folders: WorkspaceFoldersServerCapability{

@@ -9088,12 +9088,19 @@ fn (mut app App) handle_inline_value(request Request) Response {
 }
 
 // handle_linked_editing_range handles textDocument/linkedEditingRange.
-// Returns ranges for all occurrences of the identifier under the cursor in the
-// same line (identifier and its declaration) for linked editing.
+// Linked editing rewrites every occurrence of the name under the cursor at
+// once, so its set is the set a rename would edit, resolved across the whole
+// program: an occurrence in this file may name a declaration in another, and a
+// same-named local elsewhere in the program is not it. Asking the rename where
+// it would edit cannot produce a set that disagrees with the rename, and every
+// refusal of a rename — a name V owns, a name declared outside the project, an
+// occurrence the compiler cannot place, a project only partly indexed —
+// answers nothing here, which the client reads as "no linked editing" instead
+// of an edit that leaves an occurrence behind.
 fn (mut app App) handle_linked_editing_range(request Request) Response {
-	params := json2.decode[TextDocumentPositionParams](request.params) or {
+	params := json2.decode[LinkedEditingRangeParams](request.params) or {
 		$if debug {
-			log('Failed to decode TextDocumentPositionParams for linkedEditingRange: ${err}')
+			log('Failed to decode LinkedEditingRangeParams: ${err}')
 		}
 		return Response{
 			id:     request.id
@@ -9101,46 +9108,54 @@ fn (mut app App) handle_linked_editing_range(request Request) Response {
 		}
 	}
 	uri := params.text_document.uri
-	content := app.open_files[uri] or { os.read_file(uri_to_path(uri)) or { '' } }
-	lines := content.split_into_lines()
-	if params.position.line < 0 || params.position.line >= lines.len {
+	scope := app.index_scope_for_uri(uri)
+	app.ensure_index_scope(scope)
+	if !app.index_is_complete_for_scope(scope) {
+		app.send_log_message('linked editing refused: ${scope.dir} is only partly indexed', 2)
 		return Response{
 			id:     request.id
 			result: 'null'
 		}
 	}
-	line_text := lines[params.position.line]
-	start, end := find_word_bounds_at_col(line_text, params.position.char, app.position_encoding)
-	if start < 0 || end <= start {
+	mut cache := app.rename_anchor_cache()
+	defer {
+		app.keep_rename_anchors(cache)
+	}
+	target := app.rename_target(uri, params.position.line, params.position.char, scope, mut cache) or {
 		return Response{
 			id:     request.id
 			result: 'null'
 		}
 	}
-	symbol := substr_by_char_bounds(line_text, start, end, app.position_encoding)
-	// Collect all occurrences of the symbol on this line.
+	locations := app.rename_locations(target, scope, request.id, mut cache) or {
+		app.send_log_message('linked editing refused: ${err.msg()}', 2)
+		return Response{
+			id:     request.id
+			result: 'null'
+		}
+	}
 	mut ranges := []LSPRange{}
-	mut col := 0
-	for col < line_text.len {
-		idx := line_text[col..].index(symbol) or { break }
-		abs_idx := col + idx
-		before_ok := abs_idx == 0 || !is_ident_char(line_text[abs_idx - 1])
-		after_ok := abs_idx + symbol.len >= line_text.len || !is_ident_char(line_text[abs_idx + symbol.len])
-		if before_ok && after_ok {
-			sc := byte_to_encoded_col(line_text, abs_idx, app.position_encoding)
-			ec := byte_to_encoded_col(line_text, abs_idx + symbol.len, app.position_encoding)
-			ranges << LSPRange{
-				start: Position{
-					line: params.position.line
-					char: sc
-				}
-				end:   Position{
-					line: params.position.line
-					char: ec
-				}
+	for loc in locations {
+		// LinkedEditingRanges carries no document, so a range that belongs to
+		// another file would be applied to this one: keep this file's ranges,
+		// from the cross-file set, so that the answer is exact here.
+		if loc.uri != uri {
+			continue
+		}
+		// The answer for some occurrences carries no end column, so the length
+		// of the name stands in for it, as it does in a rename.
+		end_char := if loc.range.end.char > loc.range.start.char {
+			loc.range.end.char
+		} else {
+			loc.range.start.char + byte_to_encoded_col(target.symbol, target.symbol.len, app.position_encoding)
+		}
+		ranges << LSPRange{
+			start: loc.range.start
+			end:   Position{
+				line: loc.range.start.line
+				char: end_char
 			}
 		}
-		col = abs_idx + 1
 	}
 	if ranges.len == 0 {
 		return Response{
