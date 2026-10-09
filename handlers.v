@@ -7949,11 +7949,23 @@ fn (mut app App) handle_code_action(request Request) Response {
 
 	// 4. Extract variable — lift a pure expression into a variable of its own.
 	// 5. Inline variable — fold a local that is written once back into its uses.
+	// 6. Extract function — lift whole statements into a function of their own.
+	// 7. Add import — the inverse of removing one, for a module the file uses.
+	// 8. Implement missing members — stub the interface this struct is for.
 	if code_action_kind_wanted(only, code_action_kind_quickfix) {
 		if action := app.build_extract_variable_action(uri, content, params.range) {
 			actions << action
 		}
 		if action := app.build_inline_variable_action(uri, content, params.range) {
+			actions << action
+		}
+		if action := app.build_extract_function_action(uri, content, params.range) {
+			actions << action
+		}
+		if action := app.build_add_import_action(uri, content, params.range) {
+			actions << action
+		}
+		if action := app.build_implement_members_action(uri, content, params.range) {
 			actions << action
 		}
 	}
