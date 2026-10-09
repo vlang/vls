@@ -162,12 +162,12 @@ fn extract_fn_locals(lines []string, decl_line int) map[string]string {
 				lhs := rest[..space]
 				tail := rest[space + 1..].trim_space()
 				if is_plain_identifier(lhs) {
-				if tail.starts_with('=') {
-					stype := extract_inferred_type(tail[1..].trim_space())
-					if stype != '' {
-						locals[lhs] = stype
-					}
-				} else if is_type_text(tail) {
+					if tail.starts_with('=') {
+						stype := extract_inferred_type(tail[1..].trim_space())
+						if stype != '' {
+							locals[lhs] = stype
+						}
+					} else if is_type_text(tail) {
 						locals[lhs] = tail
 					}
 				}
@@ -188,7 +188,7 @@ fn extract_inferred_type(rhs string) string {
 	if first == `'` || first == `"` || first == `$` {
 		return 'string'
 	}
-	if r.starts_with('r\'') || r.starts_with('r\"') {
+	if r.starts_with("r'") || r.starts_with('r\"') {
 		return 'string'
 	}
 	if r == 'true' || r == 'false' {

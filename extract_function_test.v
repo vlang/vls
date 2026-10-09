@@ -22,7 +22,7 @@ fn xtr_app(tag string, content string) (&App, string) {
 		open_files: {
 			uri: content
 		}
-		temp_dir: dir
+		temp_dir:   dir
 	}, uri
 }
 
@@ -98,8 +98,7 @@ fn test_extract_function_returns_the_single_assigned_local() {
 fn test_extract_function_refuses_two_assigned_locals() {
 	content := 'module main\n\nfn run(input int) {\n\tmut a := 0\n\tmut b := 0\n\ta = input\n\tb = input\n\tprintln(a, b)\n}\n'
 	mut app, uri := xtr_app('two', content)
-	assert app.build_extract_function_action(uri, content, xtr_range(content, 4, 5)) == none,
-		'two reassigned locals must not become two return values'
+	assert app.build_extract_function_action(uri, content, xtr_range(content, 4, 5)) == none, 'two reassigned locals must not become two return values'
 }
 
 fn test_extract_function_refuses_a_return_of_the_enclosing_function() {
@@ -170,7 +169,7 @@ fn test_extract_function_numbers_the_new_name() {
 
 fn test_extract_function_skips_braces_and_comments() {
 	// A brace inside a comment must not shift the enclosing depth scan.
-	content := "module main\n\nfn run(a int) {\n\t// if a { } else { }\n\tprintln(a)\n}\n"
+	content := 'module main\n\nfn run(a int) {\n\t// if a { } else { }\n\tprintln(a)\n}\n'
 	texts := xtr_run('braces', content, 4, 4)
 	assert texts.len == 2, texts.str()
 	assert texts[0].starts_with('fn extracted_0(a int) {'), texts[0]
