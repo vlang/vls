@@ -4124,3 +4124,66 @@ fn test_cov_run_code_lens_job_cancelled_and_start_refused() {
 	assert app.captured_output[0].contains('cannot start'), 'the refusal names the problem: ${app.captured_output[0]}'
 	app.stop_run_commands()
 }
+
+fn test_run_v_check_logs_single_stage_line_with_perf_log() {
+	// The slow-check stage breakdown is pure observation: one summary line
+	// gated on VLS_PERF_LOG, with no change to check semantics or caching.
+	assert compiler_is_available(), 'a V compiler must be reachable to time a real check'
+	previous_perf := os.getenv('VLS_PERF_LOG')
+	previous_cache := with_temp_diag_cache_dir('stages')
+	base := os.join_path(os.temp_dir(), 'vls_stages_${os.getpid()}_${time.now().unix_nano()}')
+	interop_test_must_mkdir_all(base)
+	defer {
+		if previous_perf == '' {
+			os.unsetenv('VLS_PERF_LOG')
+		} else {
+			os.setenv('VLS_PERF_LOG', previous_perf, true)
+		}
+		restore_diag_cache_dir(previous_cache)
+		os.rmdir_all(base) or {}
+	}
+	os.setenv('VLS_PERF_LOG', '1', true)
+	work := os.join_path(base, 'work')
+	interop_test_must_mkdir_all(work)
+	// A lone file with no siblings and no v.mod takes the single-file path,
+	// so the check spawns the compiler exactly once.
+	source := os.join_path(base, 'main.v')
+	content := 'module main\n\nfn main() {\n\tprintln("hi")\n}\n'
+	interop_test_must_write_file(source, content)
+	uri := path_to_uri(source)
+	mut app := &App{
+		temp_dir:       work
+		capture_output: true
+		open_files:     {
+			uri: content
+		}
+	}
+	got := app.run_v_check(uri, content)
+	assert got.len == 0, 'a clean lone file reports no diagnostics: ${got}'
+	stages_lines := app.captured_output.filter(it.contains('diagnostics stages'))
+	assert stages_lines.len == 1, 'one stage line per slow check: ${app.captured_output}'
+	line := stages_lines[0]
+	for key in ['fp=', 'prep=', 'run=', 'parse=', 'total='] {
+		assert line.contains(key), 'the stage line names every stage: ${line}'
+	}
+	assert line.contains('window/logMessage'), 'the stage line goes to the log channel: ${line}'
+	// A cache hit reuses the answer without checking again, so it logs the
+	// cache line but no second stage line.
+	again := app.run_v_check(uri, content)
+	assert again.len == 0, 'a cached check answers the same: ${again}'
+	assert app.captured_output.filter(it.contains('diagnostics stages')).len == 1, 'a cache hit logs no stage line: ${app.captured_output}'
+	// Without VLS_PERF_LOG a slow check logs no stage line either.
+	os.unsetenv('VLS_PERF_LOG')
+	changed := 'module main\n\n// staged timings stay gated\n\nfn main() {\n\tprintln("hi")\n}\n'
+	interop_test_must_write_file(source, changed)
+	mut quiet := &App{
+		temp_dir:       work
+		capture_output: true
+		open_files:     {
+			uri: changed
+		}
+	}
+	quiet_got := quiet.run_v_check(uri, changed)
+	assert quiet_got.len == 0, 'the changed file is still clean: ${quiet_got}'
+	assert quiet.captured_output.filter(it.contains('diagnostics stages')).len == 0, 'no stage line without VLS_PERF_LOG: ${quiet.captured_output}'
+}

@@ -1304,6 +1304,10 @@ fn source_path_from_overlay(reported_path string, overlay CompilationOverlay, ba
 }
 
 fn (mut app App) run_v_check(path string, text string) []JsonError {
+	// Stage timings are pure observation: each stage records wall-clock
+	// milliseconds, and one summary line is logged at the end of the check.
+	stages_total_start_ms := time.now().unix_milli()
+	fp_stage_start_ms := time.now().unix_milli()
 	real_path := uri_to_path(path)
 	working_dir := os.dir(real_path)
 	mut temp_project_dir := ''
@@ -1319,6 +1323,7 @@ fn (mut app App) run_v_check(path string, text string) []JsonError {
 	program_dir := app.program_root(real_path)
 	overlay_root := program_overlay_root(real_path, program_dir)
 	fingerprint := compiler_fingerprint() + '\n' + app.program_content_fingerprint(overlay_root)
+	fp_ms := time.now().unix_milli() - fp_stage_start_ms
 	mut cache_hit := ''
 	if cached := app.diag_cache[path] {
 		if cached.fingerprint == fingerprint {
@@ -1341,7 +1346,9 @@ fn (mut app App) run_v_check(path string, text string) []JsonError {
 		log('Returning ${cache_hit}-cached diagnostics for ${path}')
 		return app.diag_cache[path].errors
 	}
-
+	// Prep covers overlay/program-copy/single-file preparation and argument
+	// setup, up to just before the compiler is spawned.
+	prep_stage_start_ms := time.now().unix_milli()
 	log('running v.exe check for ${real_path}')
 	log('Open files count: ${app.open_files.len}')
 	mut pool := app.diagnostics_servers
@@ -1468,6 +1475,8 @@ fn (mut app App) run_v_check(path string, text string) []JsonError {
 			return false
 		}
 	}
+	prep_ms := time.now().unix_milli() - prep_stage_start_ms
+	run_stage_start_ms := time.now().unix_milli()
 	x := if server_exe != '' {
 		mut servers := app.diagnostics_servers
 		servers.check(server_exe, cmd_args, exec_dir, cancelled, partial) or {
@@ -1476,6 +1485,7 @@ fn (mut app App) run_v_check(path string, text string) []JsonError {
 	} else {
 		run_v_argv_cancelled(cmd_args, exec_dir, cancelled)
 	}
+	run_ms := time.now().unix_milli() - run_stage_start_ms
 	if shared_copy != unsafe { nil } {
 		shared_copy.mutex.unlock()
 	}
@@ -1485,9 +1495,16 @@ fn (mut app App) run_v_check(path string, text string) []JsonError {
 		// A newer check replaced this one; its answer goes nowhere.
 		return []
 	}
-
+	// Parse covers splitting the compiler output into per-file diagnostics.
+	parse_stage_start_ms := time.now().unix_milli()
 	found := split_check_errors(x.output, diagnostic_source_dir, file_to_check, use_multifile,
 		overlay, real_path, program_uris, compile_target)
+	parse_ms := time.now().unix_milli() - parse_stage_start_ms
+	if os.getenv('VLS_PERF_LOG') != '' {
+		total_ms := time.now().unix_milli() - stages_total_start_ms
+		app.send_log_message('diagnostics stages fp=${fp_ms} prep=${prep_ms} run=${run_ms} parse=${parse_ms} total=${total_ms}',
+			4)
+	}
 	if server_exe == '' {
 		cleanup_compilation_temp(temp_project_dir, singlefile_tmppath)
 	}
