@@ -106,7 +106,7 @@ needs the V1 compatibility compiler, which this host cannot build
   default on, runtime toggle, no restart.
 - Richer hover (const values, methods, doc links).
 
-## Phase 3 — refactors (partial)
+## Phase 3 — refactors
 
 - Safe rename: DONE — refuses names already live in the
   enclosing scope (locals, parameters, import aliases, outer
@@ -115,8 +115,21 @@ needs the V1 compatibility compiler, which this host cannot build
 - Fill struct literal quickfix: DONE (assists.v) — missing
   fields added with zero values, existing ones untouched;
   skipped for unknown types and complete literals.
-- Extract function/variable, inline, stub-missing-members:
-  NOT started.
+- Extract variable / inline variable: DONE (assists.v) — both
+  pure text edits with purity gates; inline requires a
+  single-assignment local.
+- stub-missing-members: NOT started.
+
+## Phase 4 — build / config UX: DONE
+
+`defines` reaches the check path (editor settings > project
+`vls.json` > `VLS_DEFINES`), so code behind `$if flag` is checked
+without starting the editor with `VFLAGS=-d flag`. Defines are
+salted into the diagnostics fingerprint so a cached answer never
+survives a change of defines. `v fmt`, hover and completion run
+without them, as before. `vls.json` is cached per project root,
+dropped on a watched change, and drops that project's cached
+diagnostics.
 
 ## Phase 5 — finish or drop stubs: DONE
 
