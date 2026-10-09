@@ -1205,3 +1205,73 @@ fn test_index_uri_within_any_matches_paths_under_dirs() {
 	assert !uri_within_any(uri, [os.join_path(dir, 'sub')]), 'uri outside subdir does not match'
 	assert !uri_within_any(uri, []string{}), 'empty dir list matches nothing'
 }
+
+// --- trigram/fuzzy workspace symbol ranking (see fuzzy_index.v) ---
+
+fn test_fuzzy_normalize_drops_underscores_and_case() {
+	assert fuzzy_normalize('Helper_Name') == 'helpername', 'underscore and case are dropped'
+	assert fuzzy_normalize('abc') == 'abc', 'plain names pass through'
+	assert fuzzy_normalize('') == '', 'empty stays empty'
+}
+
+fn test_fuzzy_trigrams_cap_bounds_memory() {
+	assert fuzzy_trigrams('ab').len == 0, 'names shorter than 3 contribute no trigrams'
+	assert fuzzy_trigrams('abc') == ['abc'], 'a 3-letter name yields its single trigram'
+	tris := fuzzy_trigrams('abcdefghijklmnopqrstuvwxyz0123456789')
+	assert tris.len == fuzzy_trigram_max_per_symbol, 'long names are capped, got ${tris.len}'
+	assert tris[0] == 'abc', 'trigrams keep first-seen order'
+}
+
+fn test_query_workspace_symbols_ranks_overlap_then_match_class() {
+	mut app := index_test_app()
+	app.open_files['file:///tmp/fuzzy_rank.v'] = 'module main\n\nfn alphabet() {}\n\nfn xxalphabet() {}\n\nfn axlphabet() {}\n'
+	app.ensure_dirs_indexed(app.index_query_dirs())
+	got := app.query_workspace_symbols('alphabet').map(it.name)
+	assert got == ['alphabet', 'xxalphabet', 'axlphabet'], 'exact, then higher-overlap substring, then subsequence-only, got ${got}'
+}
+
+fn test_query_workspace_symbols_matches_underscore_insensitive_and_subsequence() {
+	mut app := index_test_app()
+	app.open_files['file:///tmp/fuzzy_sub.v'] = 'module main\n\nfn helper_name() {}\n\nfn unrelated() {}\n'
+	app.ensure_dirs_indexed(app.index_query_dirs())
+	exact := app.query_workspace_symbols('helpername').map(it.name)
+	assert exact == ['helper_name'], 'underscore-insensitive exact match, got ${exact}'
+	sub := app.query_workspace_symbols('hlprnm').map(it.name)
+	assert sub == ['helper_name'], 'subsequence-only match with zero trigram overlap, got ${sub}'
+}
+
+fn test_query_workspace_symbols_short_query_keeps_substring_recall() {
+	mut app := index_test_app()
+	app.open_files['file:///tmp/fuzzy_short.v'] = 'module main\n\nfn alpha() {}\n\nfn beta() {}\n'
+	app.ensure_dirs_indexed(app.index_query_dirs())
+	got := app.query_workspace_symbols('al').map(it.name)
+	assert got == ['alpha'], 'two-letter query keeps legacy substring recall, got ${got}'
+}
+
+fn test_fuzzy_trigram_cache_follows_reindex_and_drop() {
+	mut app := index_test_app()
+	uri := 'file:///tmp/fuzzy_inc.v'
+	app.open_files[uri] = 'module main\n\nfn one() {}\n'
+	app.reindex_uri(uri)
+	assert 'one' in app.symbol_index[uri].symbol_trigrams, 'reindex caches trigrams for the new symbol'
+	assert app.symbol_index[uri].symbol_trigrams['one'].len > 0, 'short symbol one still yields a trigram'
+	app.open_files[uri] = 'module main\n\nfn two() {}\n'
+	app.reindex_uri(uri)
+	assert 'one' !in app.symbol_index[uri].symbol_trigrams, 'reindex drops trigrams of the removed symbol'
+	assert 'two' in app.symbol_index[uri].symbol_trigrams, 'reindex caches trigrams of the new symbol'
+	assert app.query_workspace_symbols('one').len == 0, 'removed symbol is not found'
+	assert app.query_workspace_symbols('two').len == 1, 'new symbol is found'
+	app.drop_index_uri(uri)
+	assert app.query_workspace_symbols('two').len == 0, 'dropped uri yields no symbols'
+}
+
+fn test_fuzzy_trigram_cache_caps_long_names() {
+	mut app := index_test_app()
+	uri := 'file:///tmp/fuzzy_cap.v'
+	long_name := 'abcdefghijklmnopqrstuvwxyz0123456789'
+	app.open_files[uri] = 'module main\n\nfn ${long_name}() {}\n'
+	app.reindex_uri(uri)
+	cached := app.symbol_index[uri].symbol_trigrams[long_name]
+	assert cached.len == fuzzy_trigram_max_per_symbol, 'cached trigrams of a long name are capped, got ${cached.len}'
+	assert app.query_workspace_symbols(long_name).any(it.name == long_name), 'capped long name is still found exactly'
+}

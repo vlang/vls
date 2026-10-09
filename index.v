@@ -27,7 +27,8 @@ struct IndexEntry {
 	public_module_completions          []Detail          // exported completion items for imported modules
 	has_conditional_module_completions bool
 	has_conditional_public_completions bool
-	conditional_lines                  []bool // declarations guarded by $if/$else or @[if]
+	conditional_lines                  []bool              // declarations guarded by $if/$else or @[if]
+	symbol_trigrams                    map[string][]string // display name -> capped trigram list for fuzzy ranking (see fuzzy_index.v)
 }
 
 // build_index_entry parses `content` into an IndexEntry. Symbol ranges are
@@ -67,6 +68,7 @@ fn build_index_entry(content string, enc PositionEncoding) IndexEntry {
 		has_conditional_module_completions: module_completion_index.has_conditional
 		has_conditional_public_completions: public_module_completion_index.has_conditional
 		conditional_lines:                  conditional_lines
+		symbol_trigrams:                    fuzzy_entry_trigrams(doc_syms)
 	}
 }
 
@@ -966,27 +968,48 @@ fn (mut app App) ensure_loose_file_dirs_shallow_indexed() {
 	}
 }
 
-// query_workspace_symbols returns all indexed symbols whose name contains
-// `query` (case-insensitive; empty matches all), including struct fields and
-// enum members as `Parent.child`. The index must already be populated.
+// query_workspace_symbols returns indexed symbols matching `query`,
+// ranked by trigram overlap first and by exact/prefix/substring/subsequence
+// preference second (see fuzzy_index.v). An empty query lists every indexed
+// symbol, including struct fields and enum members as `Parent.child`. The
+// index must already be populated.
 fn (app &App) query_workspace_symbols(query string) []WorkspaceSymbol {
 	q := query.to_lower()
-	mut results := []WorkspaceSymbol{}
-	mut seen := map[string]bool{}
 	mut uris := app.symbol_index.keys()
 	uris.sort()
-	for uri in uris {
-		entry := app.symbol_index[uri] or { continue }
-		for sym in entry.doc_symbols {
-			if q == '' || sym.name.to_lower().contains(q) {
+	if q == '' {
+		mut results := []WorkspaceSymbol{}
+		mut seen := map[string]bool{}
+		for uri in uris {
+			entry := app.symbol_index[uri] or { continue }
+			for sym in entry.doc_symbols {
 				add_workspace_symbol(mut results, mut seen, sym.name, sym.kind, uri, sym.selection_range)
-			}
-			for child in sym.children {
-				if q == '' || child.name.to_lower().contains(q) {
+				for child in sym.children {
 					add_workspace_symbol(mut results, mut seen, '${sym.name}.${child.name}', child.kind, uri, child.selection_range)
 				}
 			}
 		}
+		return results
+	}
+	nq := fuzzy_normalize(query)
+	use_fuzzy_recall := nq.len >= 3
+	query_tris := fuzzy_trigrams(nq)
+	mut ranked := []FuzzyRankedSymbol{}
+	for uri in uris {
+		entry := app.symbol_index[uri] or { continue }
+		for sym in entry.doc_symbols {
+			fuzzy_rank_symbol(mut ranked, uri, sym.name, sym.kind, sym.selection_range, entry.symbol_trigrams[sym.name], q, nq, query_tris, use_fuzzy_recall)
+			for child in sym.children {
+				child_name := '${sym.name}.${child.name}'
+				fuzzy_rank_symbol(mut ranked, uri, child_name, child.kind, child.selection_range, entry.symbol_trigrams[child_name], q, nq, query_tris, use_fuzzy_recall)
+			}
+		}
+	}
+	ranked.sort_with_compare(fuzzy_rank_compare)
+	mut results := []WorkspaceSymbol{}
+	mut seen := map[string]bool{}
+	for r in ranked {
+		add_workspace_symbol(mut results, mut seen, r.name, r.kind, r.uri, r.sel)
 	}
 	return results
 }
