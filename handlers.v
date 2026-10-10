@@ -5035,6 +5035,9 @@ fn (mut app App) on_did_save(request Request) ?Notification {
 			}
 		}
 	}
+	// The copy of this program is built and synced now rather than by the next
+	// question, which would otherwise pay for it; the check below reuses it.
+	app.prewarm_program_copy(uri_to_path(uri))
 	if diagnostics_mutation.tickets.len > 0 {
 		if app.finish_diagnostics_project_schedule(diagnostics_mutation, uri, content) {
 			return none

@@ -435,6 +435,32 @@ fn (mut app App) v3_query_pool() &DiagnosticsServerPool {
 	return app.v3_query_servers
 }
 
+// prewarm_program_copy builds and syncs the copy of the program the file at
+// `real_path` belongs to, so a hover, definition or rename that arrives a
+// moment later is answered from a copy that already holds the saved buffer.
+// It runs after a save and answers nothing itself; failure is silent, because
+// the request that needs the copy would build it anyway.
+fn (mut app App) prewarm_program_copy(real_path string) {
+	if real_path == '' || !os.exists(real_path) {
+		return
+	}
+	program_dir := app.program_root(real_path)
+	mut pool := app.v3_query_pool()
+	if !pool.begin_operation() {
+		return
+	}
+	defer {
+		pool.end_operation()
+	}
+	mut program := pool.program_copy(program_dir)
+	program.mutex.lock()
+	defer {
+		program.mutex.unlock()
+	}
+	app.prepare_program_copy(mut pool, mut program, real_path, program_dir) or { return }
+	app.v3_sync_open_files(mut program.project) or {}
+}
+
 // pooled_program_question asks the servers that answer this editor's questions
 // to run `argv` in `work_dir`, or to answer `question` about the same program
 // when there is one. The pool keeps one server for each `(exe, argv, work_dir)`

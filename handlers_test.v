@@ -694,6 +694,50 @@ fn test_diagnostics_scheduler_requeues_sibling_after_save_text() {
 	assert new_job_a.project_generation > old_job_a.project_generation
 }
 
+fn test_did_save_warms_the_copy_the_next_question_uses() {
+	// The copy of the program is built and synced at save time, so a hover or
+	// rename a moment later is answered from it rather than paying for it.
+	mut app := create_test_app()
+	defer {
+		app.stop_diagnostics_servers()
+		cleanup_test_app(app)
+	}
+	project_dir := os.join_path(app.temp_dir, 'save_prewarm_project')
+	must_mkdir_all(project_dir)
+	path := os.join_path(project_dir, 'main.v')
+	uri := path_to_uri(path)
+	must_write_file(path, 'module main\n\nfn helper() {}\n')
+	app.open_files[uri] = 'module main\n\nfn helper() {}\n'
+
+	result := app.on_did_save(Request{
+		params: json2.encode(DidSaveTextDocumentParams{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			text:          'module main\n\nfn helper() int {\n\treturn 1\n}\n'
+		},
+			escape_unicode: true
+		)
+	})
+	// Without a diagnostics worker the save answers with a notification; with
+	// one it schedules and answers none. Either way the copy is already warm.
+	assert result != none, 'expected a notification without a scheduler'
+	if notification := result {
+		assert notification.method == 'textDocument/publishDiagnostics'
+	}
+	// The copy holds the saved buffer, which is what a later question reads.
+	mut pool := app.v3_query_pool()
+	program_root_path := app.program_root(path)
+	mut program := pool.program_copy(program_root_path)
+	program.mutex.lock()
+	defer {
+		program.mutex.unlock()
+	}
+	copy_text := program.project.written[normalize_overlay_path(path)] or { '' }
+	assert copy_text != '', 'the save built no copy of the file'
+	assert copy_text.contains('fn helper() int'), 'the copy holds the old text: ${copy_text}'
+}
+
 fn test_diagnostics_scheduler_requeues_sibling_after_close() {
 	mut app := create_test_app()
 	defer {
