@@ -56,7 +56,8 @@ mut:
 	exit_was_requested                          bool                        // True when the exit notification was received
 	received_initialize                         bool                        // True after initialize request was processed
 	next_request_id                             int = 1 // Counter for server-initiated request ids
-	diagnostics_scheduler                       ?&DiagnosticsScheduler // Production-only async diagnostics
+	diagnostics_scheduler                       ?&DiagnosticsScheduler  // Production-only async diagnostics
+	index_refresh                               ?&IndexRefreshScheduler // Production-only background index refresh (see index.v)
 	diagnostics_servers                         &DiagnosticsServerPool = unsafe { nil } // Compilers answering checks from one process (see diagnostics_server.v)
 	v3_line_info_enabled                        bool // Whether V3 answers `-line-info` questions first (see v3_line_info.v); off in tests
 	v3_one_shot_unsupported                     bool // The V in use has no V3 that answers `-line-info` in a process of its own
@@ -71,10 +72,15 @@ mut:
 	run_command_manager                         ?&RunCommandManager // Async code-lens process lifecycle
 	execute_commands_synchronously              bool                // Test hook for deterministic command assertions
 	write_mutex                                 &sync.Mutex = sync.new_mutex() // Serializes worker and request-loop writes
-	importable_modules_cache                    map[string]ImportableModulesCache // Modules a file can import, per project root (see module_imports.v)
-	vlib_modules_cache                          map[string][]ImportableModule     // The modules of vlib, per vlib folder
-	module_imports_cache                        map[string]ModuleImports          // The modules each module folder imports (see module_imports.v)
-	builtin_calls_cache                         map[string]map[string]Detail      // V's builtin functions as completion items, per vlib/builtin folder
+	// What the compiler's answer cost, per document and method: below the budget
+	// in answer_budget.v the answer is waited for instead of answered twice.
+	compiler_answer_ms map[string]i64
+	// The threads that replace an index answer with the compiler's (see answer_budget.v).
+	answer_followups         &sync.WaitGroup = sync.new_waitgroup()
+	importable_modules_cache map[string]ImportableModulesCache // Modules a file can import, per project root (see module_imports.v)
+	vlib_modules_cache       map[string][]ImportableModule     // The modules of vlib, per vlib folder
+	module_imports_cache     map[string]ModuleImports          // The modules each module imports (see module_imports.v)
+	builtin_calls_cache      map[string]map[string]Detail      // V's builtin functions as completion items, per vlib/builtin folder
 }
 
 struct JsonError {
@@ -315,6 +321,7 @@ fn main() {
 		open_files:            map[string]string{}
 		temp_dir:              temp_dir
 		diagnostics_scheduler: new_diagnostics_scheduler()
+		index_refresh:         new_index_refresh_scheduler()
 		v3_line_info_enabled:  true
 	}
 	// os.File.read uses C fread, which waits for the entire buffer on an open
@@ -391,8 +398,8 @@ fn handle_tcp_client(mut conn net.TcpConn) {
 		text:                  ''
 		open_files:            map[string]string{}
 		temp_dir:              temp_dir
-		tcp_conn:              &conn
 		diagnostics_scheduler: new_diagnostics_scheduler()
+		index_refresh:         new_index_refresh_scheduler()
 		v3_line_info_enabled:  true
 	}
 	mut reader := io.new_buffered_reader(reader: conn, cap: transport_buffer_cap)
@@ -725,10 +732,17 @@ fn (mut app App) handle_requests[T](mut reader T) {
 		reading.wait()
 		app.cancel_all_scheduled_diagnostics()
 		app.stop_run_commands()
+		// A deferred answer asks through the pooled compilers and writes on the
+		// transport, so both outlive the request that scheduled it and are joined
+		// before the session stops them.
+		app.wait_answer_followups()
 		// However the session ends, its compilers end, and the files they
 		// checked go: no other session uses them.
 		app.stop_diagnostics_servers()
 		app.stop_v3_queries()
+		// A background refresh must not still be walking the workspace after
+		// the session it was indexing for is gone.
+		app.stop_index_refresh()
 	}
 	mut pending := []IncomingMessage{}
 	for {
@@ -832,7 +846,7 @@ fn (mut app App) handle_requests[T](mut reader T) {
 		}
 		if method_requires_response(method) && app.request_is_cancelled(lsp_request.id) {
 			app.write_error_response(make_cancelled_error_response(lsp_request.id))
-			app.consume_cancelled_request(lsp_request.id)
+			app.consume_cancelled_request(lsp_request.id, app.current_request_raw_id)
 			continue
 		}
 		// After shutdown, reject all requests except exit.
@@ -1062,6 +1076,7 @@ fn (mut app App) handle_requests[T](mut reader T) {
 				// leave the persistent compilers running.
 				app.stop_diagnostics_servers()
 				app.stop_v3_queries()
+				app.stop_index_refresh()
 				app.exit_was_requested = true
 				break
 			}
@@ -1529,6 +1544,7 @@ fn (mut app App) accept_shutdown(id int) {
 	app.stop_run_commands()
 	app.stop_diagnostics_servers()
 	app.stop_v3_queries()
+	app.stop_index_refresh()
 	app.is_shutdown = true
 	app.write_response(Response{
 		id:     id
@@ -2152,25 +2168,42 @@ fn (mut app App) on_initialized(_ Request) {
 // write_response_or_cancelled sends a cancelled error if the request was
 // cancelled while being processed; otherwise it sends the normal response.
 fn (mut app App) write_response_or_cancelled(id int, response Response) {
-	if app.consume_cancelled_request(id) {
-		app.write_error_response(make_cancelled_error_response(id))
+	app.write_response_for(id, app.current_request_raw_id, response)
+}
+
+// write_deferred_response sends the answer that follows the one already sent for
+// a request whose turn is over (see answer_budget.v). It is
+// write_response_or_cancelled for such a request: the raw id of that request
+// travels with the answer, because both the id echoed and the cancellation
+// record read must belong to it and not to whichever request the loop is
+// handling by the time the answer is ready.
+fn (mut app App) write_deferred_response(id int, raw_id string, response Response) {
+	app.write_response_for(id, raw_id, response)
+}
+
+// write_response_for sends `response` for the request whose numeric id is `id`
+// and whose raw JSON id is `raw_id`, or a cancelled error for it.
+fn (mut app App) write_response_for(id int, raw_id string, response Response) {
+	if app.consume_cancelled_request(id, raw_id) {
+		app.send_framed(inject_raw_id(encode_error_response_payload(make_cancelled_error_response(id)),
+			raw_id))
 		return
 	}
 	// Defensive: catch response/request id mismatches caused by programming errors.
 	if response.id != id {
-		app.write_error_response(make_internal_error_response(id, 'Response id mismatch: expected ${id}, got ${response.id}'))
+		app.send_framed(inject_raw_id(encode_error_response_payload(make_internal_error_response(id,
+			'Response id mismatch: expected ${id}, got ${response.id}')), raw_id))
 		return
 	}
-	app.write_response(response)
+	app.send_framed(inject_raw_id(encode_response_payload(response), raw_id))
 }
 
-fn (mut app App) consume_cancelled_request(id int) bool {
-	raw := app.current_request_raw_id
+fn (mut app App) consume_cancelled_request(id int, raw_id string) bool {
 	mut was_cancelled := false
-	if raw != '' {
+	if raw_id != '' {
 		// Consume every request by its exact raw id when it is available.
-		if raw in app.cancelled_raw_ids {
-			app.cancelled_raw_ids.delete(raw)
+		if raw_id in app.cancelled_raw_ids {
+			app.cancelled_raw_ids.delete(raw_id)
 			was_cancelled = true
 		}
 		return was_cancelled

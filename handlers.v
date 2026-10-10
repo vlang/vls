@@ -422,6 +422,9 @@ fn (mut app App) hover_with_written_declaration(uri string, position Position, r
 // documentation of its own declaration. `line_info` asks the hover.
 fn (mut app App) hover_result(uri string, position Position, line_info string) ResponseResult {
 	real_path := uri_to_path(uri)
+	// A read flushes the debounce: the slow check runs now, so the overlay this
+	// hover is read against is the one the pause was going to publish anyway.
+	app.rush_pending_diagnostics(uri)
 	mut located := false
 	if answer := app.v3_hover(uri, real_path, line_info) {
 		if location := answer.declared_at {
@@ -1151,6 +1154,24 @@ fn (mut app App) operation_at_pos(method Method, request Request) Response {
 	// before building the -line-info string (P0-01).
 	byte_col := app.client_col_to_byte_col(path, params.position.line, col)
 
+	// The `-line-info` question each method asks the compiler. It names no state,
+	// so the answers the index gives below carry it: a question the compiler is
+	// held for is asked again afterwards, on a thread of its own.
+	line_info := match method {
+		.hover {
+			'${line_nr}:hv^${byte_col}'
+		}
+		.signature_help {
+			'${line_nr}:fn^${byte_col}'
+		}
+		.definition, .declaration, .type_definition, .implementation {
+			'${line_nr}:gd^${byte_col}'
+		}
+		else {
+			''
+		}
+	}
+
 	// Completion is served from the incremental source index. Starting a fresh V
 	// compiler process here used to cost hundreds of milliseconds on every request,
 	// even when the compiler returned no completion payload for an incomplete file.
@@ -1213,6 +1234,7 @@ fn (mut app App) operation_at_pos(method Method, request Request) Response {
 	// and aware of unsaved files.
 	if method in [.definition, .declaration, .type_definition, .implementation] {
 		if location := app.resolve_indexed_definition(path, params.position) {
+			app.schedule_answer_followup(method, request, path, params.position, line_info)
 			return Response{
 				id:     request.id
 				result: location
@@ -1234,6 +1256,7 @@ fn (mut app App) operation_at_pos(method Method, request Request) Response {
 					}
 				}
 			}
+			app.schedule_answer_followup(.hover, request, path, params.position, line_info)
 			return Response{
 				id:     request.id
 				result: binding
@@ -1244,44 +1267,30 @@ fn (mut app App) operation_at_pos(method Method, request Request) Response {
 		// declaration from the index waits until after the compiler, which brings
 		// the documentation with its answer.
 		if member := app.member_selector_hover(path, params.position) {
+			app.schedule_answer_followup(.hover, request, path, params.position, line_info)
 			return Response{
 				id:     request.id
 				result: member
 			}
 		}
-	}
-
-	line_info := match method {
-		.hover {
-			'${line_nr}:hv^${byte_col}'
-		}
-		.signature_help {
-			'${line_nr}:fn^${byte_col}'
-		}
-		.definition, .declaration, .type_definition, .implementation {
-			'${line_nr}:gd^${byte_col}'
-		}
-		else {
-			''
-		}
-	}
-
-	mut result := if method == .hover {
-		app.hover_result(path, params.position, line_info)
-	} else {
-		app.run_v_line_info(method, path, line_info)
-	}
-	if result is string && result == 'null' {
-		if method == .hover {
-			if fallback := app.source_hover_fallback(path, params.position) {
-				result = fallback
-			}
-		} else if method == .signature_help {
-			if fallback := app.source_signature_fallback(path, params.position) {
-				result = fallback
+		// Nothing the index answers on its own was found, so this question falls
+		// through to the compiler. The declaration the index resolves is still an
+		// answer, and a check that holds the compilers makes it worth sending now:
+		// the compiler's answer follows, on the same id (answer_budget.v).
+		if app.compiler_answer_is_held(path, .hover) {
+			if declaration := app.source_hover_fallback(path, params.position) {
+				app.schedule_answer_followup(.hover, request, path, params.position, line_info)
+				return Response{
+					id:     request.id
+					result: declaration
+				}
 			}
 		}
 	}
+
+	started_ms := time.now().unix_milli()
+	mut result := app.compiler_answer(method, path, params.position, line_info)
+	app.note_compiler_answer(path, method, time.now().unix_milli() - started_ms)
 	$if debug {
 		log(result.str())
 	}
@@ -1289,6 +1298,31 @@ fn (mut app App) operation_at_pos(method Method, request Request) Response {
 		id:     request.id
 		result: result
 	}
+}
+
+// compiler_answer asks the compiler what the index could not say: what the name
+// under the cursor is, or where it is declared, with the fallbacks applied to an
+// answer the compiler has none for. The deferred answer of a request the index
+// already answered ends here too (see answer_budget.v), so the two cannot drift
+// apart.
+fn (mut app App) compiler_answer(method Method, uri string, position Position, line_info string) ResponseResult {
+	mut result := if method == .hover {
+		app.hover_result(uri, position, line_info)
+	} else {
+		app.run_v_line_info(method, uri, line_info)
+	}
+	if result is string && result == 'null' {
+		if method == .hover {
+			if fallback := app.source_hover_fallback(uri, position) {
+				result = fallback
+			}
+		} else if method == .signature_help {
+			if fallback := app.source_signature_fallback(uri, position) {
+				result = fallback
+			}
+		}
+	}
+	return result
 }
 
 // apply_completion_budget caps the items sent to the client so a huge index
@@ -4840,7 +4874,9 @@ fn (mut app App) prepare_rename_request(request Request) !Response {
 	}
 	uri := params.text_document.uri
 	scope := app.index_scope_for_uri(uri)
-	app.ensure_index_scope(scope)
+	// prepareRename only answers what the name is: it never edits anything, so
+	// it waits for no index refresh (the rename that follows does its own).
+	app.ensure_index_scope_for_request(scope)
 	mut cache := app.rename_anchor_cache()
 	defer {
 		app.keep_rename_anchors(cache)
@@ -4941,7 +4977,7 @@ fn (mut app App) handle_workspace_symbol(request Request) Response {
 	// Populate/refresh the persistent index once, then answer from it. Tests are
 	// included so test functions/types are discoverable (P2-11). Subsequent
 	// queries reuse the index instead of re-reading and re-parsing the workspace.
-	app.ensure_dirs_indexed(app.index_query_dirs())
+	app.ensure_indexed_for_request(app.index_query_dirs())
 	app.ensure_loose_file_dirs_shallow_indexed()
 	results := app.query_workspace_symbols(query)
 	app.end_progress(token, '')
@@ -6611,8 +6647,10 @@ fn (mut app App) find_doc_comment_for_symbol(symbol string, current_lines []stri
 	// 2 & 3. Other open files and project .v files, via the persistent index
 	// (avoids re-reading and re-parsing the whole project on every hover, P1-08).
 	// Scope the lookup to the current module directory, then the current project,
-	// so a same-named symbol from an unrelated project/module is never used.
-	app.ensure_dirs_indexed(app.index_query_dirs())
+	// so a same-named symbol from an unrelated project/module is never used. The
+	// refresh runs in the background, so the hover answers from the index as it
+	// stands and never walks the project on the request thread.
+	app.ensure_indexed_for_request(app.index_query_dirs())
 	cur_dir := os.dir(uri_to_path(current_file_uri))
 	scope_root := find_project_root(cur_dir)
 	if imported_module != '' {
@@ -7650,9 +7688,11 @@ fn (app &App) workspace_search_dirs(primary_dir string) []string {
 
 // search_symbol_in_dirs returns every lexical occurrence of `symbol` across the
 // indexed project, read from the reference-occurrence index rather than by
-// re-walking and re-tokenizing the workspace on each request (P1-05).
+// re-walking and re-tokenizing the workspace on each request (P1-05). The
+// refresh of a stale index is left to the background worker: a references
+// request answers from the index as it stands.
 fn (mut app App) search_symbol_in_dirs(symbol string, request_id int) []Location {
-	app.ensure_dirs_indexed(app.index_query_dirs())
+	app.ensure_indexed_for_request(app.index_query_dirs())
 	app.ensure_loose_file_dirs_shallow_indexed()
 	mut locations := []Location{}
 	mut uris := app.symbol_index.keys()

@@ -2505,6 +2505,10 @@ fn (mut app App) run_v_line_info(method Method, path string, line_info string) R
 	real_path := uri_to_path(path)
 	log('real_path=${real_path}, method=${method}')
 
+	// A read flushes the debounce: the slow check runs now, so the overlay this
+	// answer is read against is the one the pause was going to publish anyway.
+	app.rush_pending_diagnostics(path)
+
 	// V3 answers first; V1 what it cannot, such as a file that does not parse.
 	if served := app.v3_line_info(method, path, real_path, line_info) {
 		return served

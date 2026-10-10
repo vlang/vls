@@ -17069,3 +17069,302 @@ fn test_linked_editing_range_keeps_a_local_apart_from_a_namesake_in_another_func
 	assert ler.ranges.len == 2, 'the declaration and the use of this local, got ${ler.ranges.len}'
 	assert ler.ranges.all(it.start.line in [3, 4]), 'the namesake in `second` is not linked: ${ler.ranges.map(it.start.line)}'
 }
+
+// ── answer budget: the index first, the compiler after it ─────────────────────
+
+// budget_test_source is the shape a hover question about a documented function
+// needs: the index resolves its declaration, and the answer the compiler gives
+// adds the documentation written above it, so the two cannot be mistaken for
+// one another.
+const budget_test_source = 'module main\n\n// helper doubles a number.\nfn helper(n int) int {\n\treturn n * 2\n}\n\nfn main() {\n\tprintln(helper(2))\n}\n'
+
+// budget_helper_position is the `helper` of `println(helper(2))`.
+fn budget_helper_position() Position {
+	return Position{
+		line: 8
+		char: 10
+	}
+}
+
+// budget_completion_source has a prefix the index answers on its own, so the
+// completion test costs no compiler at all.
+const budget_completion_source = 'module main\n\nfn helper() {}\n\nfn helper_two() {}\n\nfn main() {\n\thel\n}\n'
+
+// budget_completion_position is the `hel` of the last line.
+fn budget_completion_position() Position {
+	return Position{
+		line: 7
+		char: 4
+	}
+}
+
+// budget_test_open writes `content` as the document under test and returns its
+// URI, with its buffer open so the index reads what the editor holds.
+fn budget_test_open(mut app App, name string, content string) string {
+	dir := os.join_path(app.temp_dir, name)
+	must_mkdir_all(dir)
+	path := os.join_path(dir, 'main.v')
+	must_write_file(path, content)
+	uri := path_to_uri(path)
+	app.open_files[uri] = content
+	app.text = content
+	return uri
+}
+
+// budget_test_check_in_flight gives the app a diagnostics check for `uri` that
+// is pending behind its debounce, which is what holds the compilers a question
+// about the same document would ask.
+fn budget_test_check_in_flight(mut app App, uri string, kind DiagnosticsKind) {
+	mut scheduler := new_diagnostics_scheduler()
+	scheduler.enqueue(DiagnosticsJob{
+		uri:         uri
+		content:     app.open_files[uri] or { '' }
+		project_key: app.generation_key(uri)
+		write_mutex: app.write_mutex
+		kind:        kind
+	})
+	app.diagnostics_scheduler = scheduler
+}
+
+// budget_test_request asks `method` about the helper position of `uri`.
+fn budget_test_request(method string, id int, uri string) Request {
+	return Request{
+		id:     id
+		method: method
+		params: json2.encode(Params{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			position:      budget_helper_position()
+		},
+			escape_unicode: true
+		)
+	}
+}
+
+// budget_completion_request asks `method` about the `hel` prefix of `uri`.
+fn budget_completion_request(method string, id int, uri string) Request {
+	return Request{
+		id:     id
+		method: method
+		params: json2.encode(Params{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			position:      budget_completion_position()
+		},
+			escape_unicode: true
+		)
+	}
+}
+
+// budget_test_answers returns the outbound messages that carry `id`, read under
+// the mutex the transport writes with.
+fn budget_test_answers(mut app App, id int) []string {
+	app.write_mutex.lock()
+	defer {
+		app.write_mutex.unlock()
+	}
+	return app.captured_output.filter(it.contains('"id":${id},'))
+}
+
+fn test_hover_answers_from_the_index_while_a_check_is_pending() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	uri := budget_test_open(mut app, 'hover_pending', budget_test_source)
+	budget_test_check_in_flight(mut app, uri, .slow)
+	app.capture_output = true
+
+	app.write_mutex.lock()
+	// The transport is held, so nothing a deferred answer writes can land while
+	// this is checked: the only answer that exists is the one the request
+	// returns, and it is the index's.
+	response := app.operation_at_pos(.hover, budget_test_request('textDocument/hover', 1, uri))
+	assert app.captured_output.len == 0, 'nothing is written while the request is answered'
+	app.write_mutex.unlock()
+
+	assert response.id == 1, 'the answer carries the id of the request'
+	assert response.result is Hover, 'hover answers a Hover: ${response.result}'
+	hover := response.result as Hover
+	assert hover.contents.value == '```v\nfn helper(n int) int\n```', 'the answer is the declaration the index holds: ${hover.contents.value}'
+}
+
+fn test_hover_followup_carries_the_compilers_answer_on_the_same_id() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	uri := budget_test_open(mut app, 'hover_followup', budget_test_source)
+	budget_test_check_in_flight(mut app, uri, .slow)
+	app.capture_output = true
+
+	response := app.operation_at_pos(.hover, budget_test_request('textDocument/hover', 1, uri))
+	app.write_response_or_cancelled(1, response)
+	app.wait_answer_followups()
+
+	answers := budget_test_answers(mut app, 1)
+	assert answers.len == 2, 'the index answered and the compiler replaced it: ${answers}'
+	assert answers.all(it.contains('"id":1,')), 'both answers carry the id of the one request: ${answers}'
+	assert answers.any(it.contains('fn helper(n int) int')), 'the declaration is in the answer: ${answers}'
+	// Only the compiler's answer carries the documentation above the declaration.
+	assert answers.any(it.contains('helper doubles a number.')), 'the compiler answer follows on the same id: ${answers}'
+	assert answer_budget_key(uri, .hover) in app.compiler_answer_ms, 'the follow-up measured what the compiler answer cost'
+}
+
+fn test_hover_does_not_answer_twice_when_no_check_is_in_flight() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	uri := budget_test_open(mut app, 'hover_idle', budget_test_source)
+	app.capture_output = true
+
+	response := app.operation_at_pos(.hover, budget_test_request('textDocument/hover', 1, uri))
+	app.write_response_or_cancelled(1, response)
+	app.wait_answer_followups()
+
+	// No check holds the compiler, so the behaviour is what it was: the compiler
+	// answers, with the documentation the index answer has no room for.
+	assert response.result is Hover, 'hover answers a Hover: ${response.result}'
+	value := (response.result as Hover).contents.value
+	assert value.contains('helper doubles a number.'), 'the compiler answer is not deferred: ${value}'
+	answers := budget_test_answers(mut app, 1)
+	assert answers.len == 1, 'one answer, as before: ${answers}'
+}
+
+fn test_definition_followup_carries_the_compilers_answer_on_the_same_id() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	uri := budget_test_open(mut app, 'definition_followup', budget_test_source)
+	budget_test_check_in_flight(mut app, uri, .slow)
+	app.capture_output = true
+
+	response := app.operation_at_pos(.definition, budget_test_request('textDocument/definition', 2, uri))
+	assert response.result is Location, 'definition answers a Location: ${response.result}'
+	declared := response.result as Location
+	assert declared.uri == uri && declared.range.start.line == 3, 'the index points at the declaration: ${declared.range.start.line}'
+	app.write_response_or_cancelled(2, response)
+	app.wait_answer_followups()
+
+	answers := budget_test_answers(mut app, 2)
+	assert answers.len == 2, 'the index answered and the compiler replaced it: ${answers}'
+	assert answers.all(it.contains('"id":2,')), 'both answers carry the id of the one request: ${answers}'
+	// What the compiler answers is exactly what the same question answers when
+	// it is asked again, on the same buffers and the same position.
+	compiler_answer := app.compiler_answer(.definition, uri, budget_helper_position(), '9:gd^10')
+	expected := encode_response_payload(Response{
+		id:     2
+		result: compiler_answer
+	})
+	assert answers.any(it.contains(expected)), 'the second answer is the one the compiler gives: ${answers}'
+	assert answer_budget_key(uri, .definition) in app.compiler_answer_ms, 'the follow-up measured what the compiler answer cost'
+}
+
+fn test_definition_answers_from_the_index_while_a_check_is_pending() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	uri := budget_test_open(mut app, 'definition_pending', budget_test_source)
+	budget_test_check_in_flight(mut app, uri, .slow)
+	app.capture_output = true
+
+	app.write_mutex.lock()
+	response := app.operation_at_pos(.definition, budget_test_request('textDocument/definition', 2, uri))
+	assert app.captured_output.len == 0, 'nothing is written while the request is answered'
+	app.write_mutex.unlock()
+
+	assert response.result is Location, 'definition answers a Location without the compiler: ${response.result}'
+	declared := response.result as Location
+	assert declared.uri == uri && declared.range.start.line == 3, 'the index points at the declaration: ${declared.range.start.line}'
+}
+
+fn test_definition_does_not_answer_twice_when_no_check_is_in_flight() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	uri := budget_test_open(mut app, 'definition_idle', budget_test_source)
+	app.capture_output = true
+
+	response := app.operation_at_pos(.definition, budget_test_request('textDocument/definition', 2, uri))
+	app.write_response_or_cancelled(2, response)
+	app.wait_answer_followups()
+
+	assert response.result is Location, 'definition answers a Location: ${response.result}'
+	answers := budget_test_answers(mut app, 2)
+	assert answers.len == 1, 'one answer, as before: ${answers}'
+}
+
+fn test_completion_is_never_answered_twice_while_a_check_is_pending() {
+	// Completion is left as it was: its index answer and the compiler answer
+	// differ in ways that make a stale list confusing.
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	uri := budget_test_open(mut app, 'completion_pending', budget_completion_source)
+	budget_test_check_in_flight(mut app, uri, .slow)
+	app.capture_output = true
+
+	response := app.operation_at_pos(.completion, budget_completion_request('textDocument/completion', 3, uri))
+	app.write_response_or_cancelled(3, response)
+	app.wait_answer_followups()
+
+	assert response.result is CompletionList, 'completion answers a list: ${response.result}'
+	labels := (response.result as CompletionList).items.map(it.label)
+	assert 'helper' in labels, 'the index offered the function: ${labels}'
+	answers := budget_test_answers(mut app, 3)
+	assert answers.len == 1, 'completion is answered once: ${answers}'
+	assert app.compiler_answer_ms.len == 0, 'completion schedules no deferred answer'
+}
+
+fn test_followup_answer_is_suppressed_when_the_request_is_cancelled() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	uri := budget_test_open(mut app, 'hover_cancelled', budget_test_source)
+	budget_test_check_in_flight(mut app, uri, .slow)
+	app.capture_output = true
+
+	response := app.operation_at_pos(.hover, budget_test_request('textDocument/hover', 4, uri))
+	// The client cancels the request while the compiler still works.
+	app.cancelled_requests[4] = true
+	app.wait_answer_followups()
+
+	answers := budget_test_answers(mut app, 4)
+	assert answers.len == 1, 'a cancelled request is not answered a second time: ${answers}'
+	assert answers[0].contains('"code":${jsonrpc_err_request_cancelled}'), 'the cancellation is reported: ${answers[0]}'
+}
+
+fn test_a_quick_compiler_answer_is_waited_for_instead_of_doubled() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	uri := budget_test_open(mut app, 'hover_quick', budget_test_source)
+	app.capture_output = true
+
+	// The first question measures what the compiler answer costs here.
+	first := app.operation_at_pos(.hover, budget_test_request('textDocument/hover', 5, uri))
+	assert first.result is Hover, 'hover answers a Hover: ${first.result}'
+	elapsed_ms := app.compiler_answer_ms[answer_budget_key(uri, .hover)] or { -1 }
+	assert elapsed_ms in 0 .. answer_budget_ms, 'the answer measured inside the budget: ${elapsed_ms} ms'
+
+	// A check that is now pending does not make it worth answering twice.
+	budget_test_check_in_flight(mut app, uri, .slow)
+	app.write_response_or_cancelled(5, first)
+	second := app.operation_at_pos(.hover, budget_test_request('textDocument/hover', 6, uri))
+	app.write_response_or_cancelled(6, second)
+	app.wait_answer_followups()
+
+	value := (second.result as Hover).contents.value
+	assert value.contains('helper doubles a number.'), 'a quick compiler answer is waited for: ${value}'
+	answers := budget_test_answers(mut app, 6)
+	assert answers.len == 1, 'one answer, because the compiler answer is cheap: ${answers}'
+}

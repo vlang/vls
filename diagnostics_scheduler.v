@@ -258,6 +258,43 @@ fn (mut scheduler DiagnosticsScheduler) take_ready_jobs(now i64) ([]DiagnosticsJ
 	return ready, should_stop
 }
 
+// rush_pending_slow_job moves the deadline of the pending slow job of `uri` to
+// now, so the check a read waits for starts on the worker's next poll instead of
+// waiting out its debounce: a question about the program — a hover, a definition,
+// a signature — is answered against what the editor already shows, and until the
+// slow check publishes that is last-keystroke's overlay (clangd's debounce
+// policy "read"). A busy worker is never jumped, and a job a newer change
+// superseded is left waiting, because the generation checks decide what runs.
+fn (mut scheduler DiagnosticsScheduler) rush_pending_slow_job(uri string) {
+	scheduler.mutex.lock()
+	defer {
+		scheduler.mutex.unlock()
+	}
+	if scheduler.active_uri != '' {
+		return
+	}
+	slow_key := diagnostics_job_key(uri, .slow)
+	job := scheduler.pending_jobs[slow_key] or { return }
+	if !scheduler.is_job_current_locked(job) {
+		return
+	}
+	// The fast tier publishes first and the slow answer supersedes it, so a fast
+	// job of the same project still waiting out its own debounce holds this one
+	// back: flushed past it, the two would publish the wrong way round. One that
+	// is already due is taken on the poll before this one, so the order holds
+	// there too.
+	now := time.now().unix_milli()
+	for _, pending in scheduler.pending_jobs {
+		if pending.kind == .fast && pending.project_key == job.project_key && pending.ready_at > now {
+			return
+		}
+	}
+	scheduler.pending_jobs[slow_key] = DiagnosticsJob{
+		...job
+		ready_at: now
+	}
+}
+
 fn (mut scheduler DiagnosticsScheduler) finish(job DiagnosticsJob) {
 	scheduler.mutex.lock()
 	if scheduler.active_uri == job.uri && scheduler.active_generation == job.generation {
@@ -266,6 +303,26 @@ fn (mut scheduler DiagnosticsScheduler) finish(job DiagnosticsJob) {
 		scheduler.active_generation = 0
 	}
 	scheduler.mutex.unlock()
+}
+
+// check_in_flight reports whether a check for the document at `uri` waits for
+// its debounce deadline or already runs. Either holds the compilers of the
+// buffers it checks, so a question about the same files asked alongside it is
+// answered late (see answer_budget.v).
+fn (mut scheduler DiagnosticsScheduler) check_in_flight(uri string) bool {
+	scheduler.mutex.lock()
+	defer {
+		scheduler.mutex.unlock()
+	}
+	if scheduler.active_uri == uri {
+		return true
+	}
+	for key in [diagnostics_job_key(uri, .slow), diagnostics_job_key(uri, .fast)] {
+		if key in scheduler.pending_jobs {
+			return true
+		}
+	}
+	return false
 }
 
 fn (mut scheduler DiagnosticsScheduler) cancel(uri string) {
@@ -434,6 +491,23 @@ fn (mut app App) cancel_scheduled_diagnostics(uri string) {
 fn (mut app App) cancel_all_scheduled_diagnostics() {
 	if mut scheduler := app.diagnostics_scheduler {
 		scheduler.cancel_all()
+	}
+}
+
+// rush_pending_diagnostics starts the slow check of `uri` at once, when one is
+// pending and the worker is idle, so a request answered while a check waits does
+// not read last-keystroke's overlay: the compiler that answers the question
+// checks the same program the check is about to, which warms the check into the
+// bargain (clangd's debounce policy "read"). It asks the scheduler and nothing
+// more — no job is queued, none is started — and it asks nothing when
+// diagnostics are off, since a check is either pending for a reason or none at
+// all, which makes it safe on every request path.
+fn (mut app App) rush_pending_diagnostics(uri string) {
+	if !app.diagnostics_enabled {
+		return
+	}
+	if mut scheduler := app.diagnostics_scheduler {
+		scheduler.rush_pending_slow_job(uri)
 	}
 }
 

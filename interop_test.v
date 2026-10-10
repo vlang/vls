@@ -4474,3 +4474,259 @@ fn test_stable_overlay_slow_check_reports_stage_timings() {
 		assert false, 'could not record stage timings: ${err}'
 	}
 }
+
+// rush_test_app builds an App whose diagnostics go to a scheduler of its own,
+// next to a real file to name in the jobs, and returns that file's URI and the
+// temporary root to remove afterwards.
+fn rush_test_app(name string) (&App, string, string) {
+	root := os.join_path(os.temp_dir(), '${name}_${os.getpid()}_${time.now().unix_nano()}')
+	source_dir := os.join_path(root, 'src')
+	interop_test_must_mkdir_all(source_dir)
+	source_file := os.join_path(source_dir, 'main.v')
+	interop_test_must_write_file(source_file, 'module main\n\nfn helper() {}\n\nfn main() {\n\thelper()\n}\n')
+	mut app := &App{
+		temp_dir:              os.join_path(root, 'work')
+		diagnostics_enabled:   true
+		diagnostics_scheduler: new_diagnostics_scheduler()
+	}
+	return app, path_to_uri(source_file), root
+}
+
+// rush_test_schedule leaves the two jobs one change to `uri` schedules pending:
+// the fast tier due at `fast_ready_at` and the slow one at `slow_ready_at`, both
+// from one generation, as begin_project_mutation builds them.
+fn rush_test_schedule(mut scheduler DiagnosticsScheduler, mut app App, uri string, project_key string, fast_ready_at i64, slow_ready_at i64) {
+	global_generation, generation := scheduler.next_generation(uri)
+	base := DiagnosticsJob{
+		uri:               uri
+		content:           'x'
+		project_key:       project_key
+		global_generation: global_generation
+		generation:        generation
+		write_mutex:       app.write_mutex
+	}
+	scheduler.enqueue(DiagnosticsJob{
+		...base
+		ready_at: fast_ready_at
+		kind:     .fast
+	})
+	scheduler.enqueue(DiagnosticsJob{
+		...base
+		ready_at: slow_ready_at
+		kind:     .slow
+	})
+}
+
+// rush_test_pending_job returns the pending job of `uri` and `kind`, so a test
+// can read the deadline a rush left behind.
+fn rush_test_pending_job(mut scheduler DiagnosticsScheduler, uri string, kind DiagnosticsKind) ?DiagnosticsJob {
+	scheduler.mutex.lock()
+	defer {
+		scheduler.mutex.unlock()
+	}
+	return scheduler.pending_jobs[diagnostics_job_key(uri, kind)] or { return none }
+}
+
+fn rush_test_scheduler(mut app App) &DiagnosticsScheduler {
+	return app.diagnostics_scheduler or { panic('the rush test app needs a diagnostics scheduler') }
+}
+
+fn test_rush_starts_a_waiting_slow_job_on_the_next_poll() {
+	mut app, uri, root := rush_test_app('vls_rush_idle')
+	defer {
+		os.rmdir_all(root) or {}
+	}
+	mut scheduler := rush_test_scheduler(mut app)
+	project_key := 'file:///rush_project'
+	now := time.now().unix_milli()
+	// The change of the last keystroke, whose fast answer has published.
+	rush_test_schedule(mut scheduler, mut app, uri, project_key, now, now + diagnostics_slow_debounce_ms)
+	published, _ := scheduler.take_ready_jobs(now)
+	assert published.len == 1, 'the worker takes the job that is due'
+	assert published[0].kind == .fast, 'the fast tier publishes first'
+	scheduler.finish(published[0])
+
+	// A question about the program while the slow check still waits.
+	app.rush_pending_diagnostics(uri)
+
+	rushed := rush_test_pending_job(mut scheduler, uri, .slow) or {
+		assert false, 'the slow job is still pending'
+		return
+	}
+	assert rushed.ready_at <= time.now().unix_milli(), 'the read moved the deadline to now'
+	jobs, should_stop := scheduler.take_ready_jobs(time.now().unix_milli())
+	assert !should_stop, 'the worker keeps the job it was handed'
+	assert jobs.len == 1, 'the worker takes the flushed job on its next poll'
+	assert jobs[0].uri == uri, 'the flushed job is the one the file asked for'
+	assert jobs[0].kind == .slow, 'the slow tier answers the question'
+	scheduler.finish(jobs[0])
+}
+
+fn test_rush_does_nothing_while_the_worker_runs_a_job() {
+	mut app, uri, root := rush_test_app('vls_rush_busy')
+	defer {
+		os.rmdir_all(root) or {}
+	}
+	mut scheduler := rush_test_scheduler(mut app)
+	project_key := 'file:///rush_project'
+	now := time.now().unix_milli()
+	rush_test_schedule(mut scheduler, mut app, uri, project_key, now, now + diagnostics_slow_debounce_ms)
+	published, _ := scheduler.take_ready_jobs(now)
+	assert published.len == 1, 'the worker takes the job that is due'
+	scheduler.finish(published[0])
+
+	// A second change: the worker runs its fast answer, and its slow check waits.
+	other_uri := '${uri}~2'
+	rush_test_schedule(mut scheduler, mut app, other_uri, project_key, now, now + 2 * diagnostics_slow_debounce_ms)
+	active, _ := scheduler.take_ready_jobs(now)
+	assert active.len == 1, "the worker takes the second change's fast answer"
+	assert active[0].uri == other_uri, 'the running job belongs to the second change'
+
+	app.rush_pending_diagnostics(uri)
+
+	waiting := rush_test_pending_job(mut scheduler, uri, .slow) or {
+		assert false, 'the slow job of the first change is still pending'
+		return
+	}
+	assert waiting.ready_at == now + diagnostics_slow_debounce_ms, 'a busy worker is not jumped'
+	jobs, _ := scheduler.take_ready_jobs(time.now().unix_milli())
+	assert jobs.len == 0, 'no second job starts behind the running one'
+	scheduler.finish(active[0])
+	later, _ := scheduler.take_ready_jobs(now + diagnostics_slow_debounce_ms)
+	assert later.len == 1, 'the waiting job runs at its own deadline'
+	assert later[0].uri == uri, 'the job that waited is the one that runs'
+	assert later[0].kind == .slow, 'the slow tier answers it'
+	scheduler.finish(later[0])
+}
+
+fn test_rush_is_a_noop_without_a_pending_job() {
+	mut app, uri, root := rush_test_app('vls_rush_noop')
+	defer {
+		os.rmdir_all(root) or {}
+	}
+	mut scheduler := rush_test_scheduler(mut app)
+	project_key := 'file:///rush_project'
+	now := time.now().unix_milli()
+
+	// Nothing is pending at all.
+	app.rush_pending_diagnostics(uri)
+	jobs, should_stop := scheduler.take_ready_jobs(now)
+	assert jobs.len == 0, 'an empty queue stays empty'
+	assert should_stop, 'the worker has nothing left to do'
+
+	// The change of the last keystroke, whose fast answer has published.
+	rush_test_schedule(mut scheduler, mut app, uri, project_key, now, now + diagnostics_slow_debounce_ms)
+	published, _ := scheduler.take_ready_jobs(now)
+	assert published.len == 1, 'the worker takes the job that is due'
+	scheduler.finish(published[0])
+	app.diagnostics_enabled = false
+	app.rush_pending_diagnostics(uri)
+	app.diagnostics_enabled = true
+	waiting := rush_test_pending_job(mut scheduler, uri, .slow) or {
+		assert false, 'the slow job is pending'
+		return
+	}
+	assert waiting.ready_at == now + diagnostics_slow_debounce_ms, 'switched-off diagnostics are not flushed'
+
+	// A session with no scheduler has nothing to ask and nothing to flush.
+	app.diagnostics_scheduler = none
+	app.rush_pending_diagnostics(uri)
+	app.diagnostics_scheduler = scheduler
+	untouched := rush_test_pending_job(mut scheduler, uri, .slow) or {
+		assert false, 'the slow job is still pending'
+		return
+	}
+	assert untouched.ready_at == now + diagnostics_slow_debounce_ms, 'a session without a scheduler flushes nothing'
+}
+
+fn test_rush_leaves_a_job_whose_generation_is_stale() {
+	mut app, uri, root := rush_test_app('vls_rush_stale')
+	defer {
+		os.rmdir_all(root) or {}
+	}
+	mut scheduler := rush_test_scheduler(mut app)
+	project_key := 'file:///rush_project'
+	deadline := time.now().unix_milli() + diagnostics_slow_debounce_ms
+	rush_test_schedule(mut scheduler, mut app, uri, project_key, deadline, deadline)
+	published, _ := scheduler.take_ready_jobs(deadline)
+	assert published.len == 1, 'the worker takes the job that is due'
+	scheduler.finish(published[0])
+	// A newer change supersedes the pending slow job: the generation checks,
+	// and not the deadline, decide what may run.
+	scheduler.next_generation(uri)
+	pending := rush_test_pending_job(mut scheduler, uri, .slow) or {
+		assert false, 'the slow job is pending'
+		return
+	}
+	assert !scheduler.is_job_current(pending), 'a newer change supersedes the pending job'
+
+	app.rush_pending_diagnostics(uri)
+
+	superseded := rush_test_pending_job(mut scheduler, uri, .slow) or {
+		assert false, 'the superseded job is still queued'
+		return
+	}
+	assert superseded.ready_at == deadline, 'a stale generation is not rushed'
+	jobs, _ := scheduler.take_ready_jobs(time.now().unix_milli())
+	assert jobs.len == 0, 'the superseded job is not taken early either'
+}
+
+fn test_rush_leaves_the_slow_job_behind_a_waiting_fast_job() {
+	mut app, uri, root := rush_test_app('vls_rush_order')
+	defer {
+		os.rmdir_all(root) or {}
+	}
+	mut scheduler := rush_test_scheduler(mut app)
+	project_key := 'file:///rush_project'
+	now := time.now().unix_milli()
+	rush_test_schedule(mut scheduler, mut app, uri, project_key, now + diagnostics_fast_debounce_ms,
+		now + diagnostics_slow_debounce_ms)
+
+	app.rush_pending_diagnostics(uri)
+
+	slow := rush_test_pending_job(mut scheduler, uri, .slow) or {
+		assert false, 'the slow job is pending'
+		return
+	}
+	assert slow.ready_at == now + diagnostics_slow_debounce_ms, 'a fast job still waiting holds the slow one back'
+	jobs, _ := scheduler.take_ready_jobs(time.now().unix_milli())
+	assert jobs.len == 0, 'neither tier is due yet, so nothing publishes'
+	fast, _ := scheduler.take_ready_jobs(now + diagnostics_fast_debounce_ms)
+	assert fast.len == 1, 'the fast tier publishes at its own deadline'
+	assert fast[0].kind == .fast, 'the fast tier is the one that publishes'
+	scheduler.finish(fast[0])
+	answer, _ := scheduler.take_ready_jobs(now + diagnostics_slow_debounce_ms)
+	assert answer.len == 1, 'the slow answer follows the fast one'
+	assert answer[0].kind == .slow, 'the slow tier is the one that follows'
+	scheduler.finish(answer[0])
+}
+
+fn test_rush_publishes_the_fast_tier_before_the_flushed_slow_one() {
+	mut app, uri, root := rush_test_app('vls_rush_order_due')
+	defer {
+		os.rmdir_all(root) or {}
+	}
+	mut scheduler := rush_test_scheduler(mut app)
+	project_key := 'file:///rush_project'
+	now := time.now().unix_milli()
+	// The fast answer of the change is due and not yet taken, and the slow one
+	// is still waiting out its debounce.
+	rush_test_schedule(mut scheduler, mut app, uri, project_key, now, now + diagnostics_slow_debounce_ms)
+
+	app.rush_pending_diagnostics(uri)
+
+	rushed := rush_test_pending_job(mut scheduler, uri, .slow) or {
+		assert false, 'the slow job is pending'
+		return
+	}
+	assert rushed.ready_at <= time.now().unix_milli(), 'the read flushed the slow job'
+	first, _ := scheduler.take_ready_jobs(time.now().unix_milli())
+	assert first.len == 1, 'the worker takes one job at a time'
+	assert first[0].kind == .fast, 'the fast tier publishes before the flushed slow one'
+	scheduler.finish(first[0])
+	second, _ := scheduler.take_ready_jobs(time.now().unix_milli())
+	assert second.len == 1, 'the flushed job follows the fast one'
+	assert second[0].kind == .slow, 'the slow answer supersedes the fast one'
+	assert second[0].uri == uri, 'the flushed job is the one the file asked for'
+	scheduler.finish(second[0])
+}
