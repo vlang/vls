@@ -1110,7 +1110,7 @@ fn test_program_content_fingerprint_tracks_buffers_and_siblings() {
 	interop_test_must_write_file(main_file, 'module main\n\nfn main() {}\n')
 	interop_test_must_write_file(other_file, 'module main\n\nfn helper() {}\n')
 	main_uri := path_to_uri(main_file)
-	app := App{
+	mut app := App{
 		open_files: {
 			main_uri: 'module main\n\nfn main() {}\n'
 		}
@@ -1129,6 +1129,48 @@ fn test_program_content_fingerprint_tracks_buffers_and_siblings() {
 	interop_test_must_write_file(other_file, 'module main\n\nfn helper() int {\n\treturn 2\n}\n')
 	assert app.program_content_fingerprint(root) != before
 	os.rmdir_all(root) or {}
+}
+
+fn test_program_content_fingerprint_reuses_the_listing_and_the_hashes() {
+	// The listing and the content hashes are memoised between edits; the same
+	// bytes must give the same fingerprint, and a new file must change it.
+	root := os.join_path(os.temp_dir(), 'vls_fpmemo_${os.getpid()}_${time.now().unix_nano()}')
+	interop_test_must_mkdir_all(root)
+	defer {
+		os.rmdir_all(root) or {}
+	}
+	for i in 0 .. 4 {
+		interop_test_must_write_file(os.join_path(root, 'f${i}.v'), 'module m${i}\n\nfn f${i}() {}\n')
+	}
+	mut app := App{}
+	first := app.program_content_fingerprint(root)
+	// A second call within the TTL reuses the listing and the hashes: identical.
+	assert app.program_content_fingerprint(root) == first
+	// The listing cache really holds: dropping it must not change the answer.
+	app.forget_project_files()
+	assert app.program_content_fingerprint(root) == first
+	// A file appearing changes it the way production learns about it: a
+	// create watcher event, or the file being opened (on_did_open drops the
+	// listing for exactly this reason). Without that, a listing memo would
+	// hide a new file for its TTL.
+	interop_test_must_write_file(os.join_path(root, 'added.v'), 'module added\n\nfn added() {}\n')
+	assert app.program_content_fingerprint(root) == first, 'the memo still hides the new file'
+	app.forget_project_files()
+	assert app.program_content_fingerprint(root) != first, 'a new file must change the fingerprint'
+}
+
+fn test_program_content_fingerprint_drops_the_listing_on_create_and_delete() {
+	root := os.join_path(os.temp_dir(), 'vls_fpdrop_${os.getpid()}_${time.now().unix_nano()}')
+	interop_test_must_mkdir_all(root)
+	defer {
+		os.rmdir_all(root) or {}
+	}
+	interop_test_must_write_file(os.join_path(root, 'main.v'), 'module main\n\nfn main() {}\n')
+	mut app := App{}
+	assert app.program_content_fingerprint(root) != ''
+	assert root in app.file_list_cache
+	app.forget_project_files()
+	assert app.file_list_cache.len == 0
 }
 
 fn test_diag_disk_cache_round_trip_and_rejections() {
@@ -1152,21 +1194,72 @@ fn test_diag_disk_cache_round_trip_and_rejections() {
 		]
 	}
 	save_diag_disk_entry(root, 'file:///main.v', entry)
-	loaded := load_diag_disk_cache(root)
-	assert loaded['file:///main.v'].fingerprint == 'fp1'
-	assert loaded['file:///main.v'].errors.len == 1
-	assert loaded['file:///main.v'].errors[0].message == 'seeded error'
-	assert loaded['file:///main.v'].errors[0].line_nr == 2
+	loaded := load_diag_disk_cache(root) or {
+		assert false, 'expected a stored state'
+		return
+	}
+	assert loaded.fingerprint == 'fp1'
+	assert loaded.files['file:///main.v'].len == 1
+	assert loaded.files['file:///main.v'][0].message == 'seeded error'
+	assert loaded.files['file:///main.v'][0].line_nr == 2
 	// Unreadable content is dropped, not fatal.
 	os.write_file(diag_cache_file(root), 'not json') or { panic(err) }
-	assert load_diag_disk_cache(root).len == 0
+	assert load_diag_disk_cache(root) == none
 	// Results written by another compiler are dropped.
 	save_diag_disk_entry(root, 'file:///main.v', entry)
 	previous_command := os.getenv('VLS_V_COMMAND')
 	os.setenv('VLS_V_COMMAND', os.join_path(root, 'no-such-compiler'), true)
-	assert load_diag_disk_cache(root).len == 0
+	assert load_diag_disk_cache(root) == none
 	restore_v_command(previous_command)
 	os.rmdir_all(root) or {}
+}
+
+fn test_diag_disk_state_keeps_only_the_state_its_fingerprint_names() {
+	// A second file of the same check joins the state; a result from a
+	// different fingerprint replaces it, so a program is never answered from
+	// bytes it was not checked at.
+	previous := with_temp_diag_cache_dir('states')
+	defer {
+		restore_diag_cache_dir(previous)
+	}
+	root := os.join_path(os.temp_dir(), 'vls_dcstates_${os.getpid()}_${time.now().unix_nano()}')
+	interop_test_must_mkdir_all(root)
+	defer {
+		os.rmdir_all(root) or {}
+	}
+	first := DiagCacheEntry{
+		fingerprint: 'fp-a'
+		errors:      []
+	}
+	second := DiagCacheEntry{
+		fingerprint: 'fp-a'
+		errors:      [JsonError{
+			message: 'only b'
+			line_nr: 7
+			level:   'error'
+		}]
+	}
+	other := DiagCacheEntry{
+		fingerprint: 'fp-b'
+		errors:      []
+	}
+	save_diag_disk_entry(root, 'file:///a.v', first)
+	save_diag_disk_entry(root, 'file:///b.v', second)
+	state := load_diag_disk_cache(root) or {
+		assert false, 'expected a stored state'
+		return
+	}
+	assert state.fingerprint == 'fp-a'
+	assert 'file:///a.v' in state.files
+	assert 'file:///b.v' in state.files
+	// The old state's results go with it.
+	save_diag_disk_entry(root, 'file:///a.v', other)
+	replaced := load_diag_disk_cache(root) or {
+		assert false, 'expected a stored state'
+		return
+	}
+	assert replaced.fingerprint == 'fp-b'
+	assert 'file:///b.v' !in replaced.files, 'the superseded state was kept'
 }
 
 fn test_diag_disk_cache_serves_a_later_session() {
@@ -1210,13 +1303,16 @@ fn test_diag_disk_cache_serves_a_later_session() {
 			uri: content
 		}
 	}
-	second.ensure_diag_disk_cache(second.program_root(real_path))
-	assert uri in second.diag_cache, 'disk results did not merge'
 	refingerprint := compiler_fingerprint() + '\n' +
 		second.program_content_fingerprint(program_overlay_root(real_path,
 			second.program_root(real_path)))
+	second.ensure_diag_disk_cache(second.program_root(real_path), refingerprint)
+	assert uri in second.diag_cache, 'disk results did not merge'
 	assert second.diag_cache[uri].fingerprint == refingerprint, 'fingerprint moved between sessions'
 	assert second.diag_cache[uri].errors[0].message == 'persisted diagnostic'
+	// A state that does not describe these bytes merges nothing.
+	second.ensure_diag_disk_cache(second.program_root(real_path), 'some other fingerprint')
+	assert second.diag_cache.len == 1, 'an unrelated state was merged'
 	os.rmdir_all(root) or {}
 }
 

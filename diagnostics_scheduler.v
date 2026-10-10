@@ -375,6 +375,11 @@ fn (mut app App) finish_diagnostics_project_mutation(mutation DiagnosticsProject
 fn (mut app App) enqueue_diagnostics_tickets(mut scheduler DiagnosticsScheduler, tickets []DiagnosticsTicket, project_key string, changed_uri string, changed_content string, excluded_uri string) {
 	now := time.now().unix_milli()
 	mut should_start := false
+	// Every job of one mutation sees the same buffers, so the snapshot is
+	// cloned once. Cloning per ticket made a mutation cost two clones per
+	// affected URI, which is where the keystroke time went on a wide project.
+	job_open_files := app.open_files.clone()
+	job_generations := app.project_generations.clone()
 	for ticket in tickets {
 		if ticket.uri == excluded_uri {
 			continue
@@ -402,8 +407,8 @@ fn (mut app App) enqueue_diagnostics_tickets(mut scheduler DiagnosticsScheduler,
 			project_key:         project_key
 			project_generation:  ticket.project_generation
 			position_encoding:   app.position_encoding
-			open_files:          app.open_files.clone()
-			project_generations: app.project_generations.clone()
+			open_files:          job_open_files
+			project_generations: job_generations
 			write_mutex:         app.write_mutex
 			tcp_conn:            app.tcp_conn
 			global_generation:   ticket.global_generation

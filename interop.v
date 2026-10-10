@@ -1420,7 +1420,7 @@ fn (mut app App) run_v_check(path string, text string) []JsonError {
 		}
 	}
 	if cache_hit == '' {
-		app.ensure_diag_disk_cache(program_dir)
+		app.ensure_diag_disk_cache(program_dir, fingerprint)
 		if cached := app.diag_cache[path] {
 			if cached.fingerprint == fingerprint {
 				cache_hit = 'disk'
@@ -2274,6 +2274,12 @@ fn (mut app App) on_did_change_watched_files(request Request) {
 		// A project's `vls.json` holds the defines its checks run with, so a
 		// change of it is a change of the configuration (see vls_config.v).
 		app.forget_config_file(uri_to_path(change.uri))
+		// A file appearing or disappearing changes the listing a fingerprint
+		// walks; a file only changing does not, because the content memo gates
+		// on its size, inode and mtime.
+		if change.event_type == 1 || change.event_type == 3 {
+			app.forget_project_files()
+		}
 	}
 	open_uris_by_path := app.open_index_uris_by_path()
 	for change in params.changes {

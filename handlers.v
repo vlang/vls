@@ -4517,6 +4517,10 @@ fn (mut app App) on_did_open(request Request) bool {
 	}
 	diagnostics_mutation := app.begin_diagnostics_project_schedule(uri)
 	app.open_files[uri] = content
+	// A file appearing is what the fingerprint's listing memo cannot see by
+	// itself, so an opened file retires it (create/delete watcher events do
+	// the same for the ones no editor ever opens).
+	app.forget_project_files()
 	if version := params.text_document.version {
 		app.open_files_versions[uri] = version
 	}

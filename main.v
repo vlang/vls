@@ -33,6 +33,8 @@ mut:
 	diagnostics_enabled                         bool = true // toggled via workspace/didChangeConfiguration
 	diag_cache                                  map[string]DiagCacheEntry // Per-URI cached diagnostics
 	diag_disk_roots                             map[string]bool           // Program roots whose disk cache merged this session
+	file_list_cache                             map[string]FileListEntry  // Per-project .v listings, so a fingerprint does not re-walk the tree
+	content_memo                                map[string]ContentMemo    // Per-file content hash with the size, inode and mtime it was read at
 	open_files_generation                       int                       // Incremented on every workspace file mutation
 	project_generations                         map[string]int            // Per-project-dir revision, for scoped cache invalidation
 	cancelled_requests                          map[int]bool              // Request ids cancelled via $/cancelRequest
