@@ -2980,7 +2980,7 @@ fn test_integration_numeric_cancel_ids_match_exact_raw_token() {
 	assert !app.request_is_cancelled(1)
 	app.current_request_raw_id = '1.25'
 	assert app.request_is_cancelled(1)
-	assert app.consume_cancelled_request(1)
+	assert app.consume_cancelled_request(1, app.current_request_raw_id)
 	assert !app.request_is_cancelled(1)
 
 	app.on_cancel_request(Request{

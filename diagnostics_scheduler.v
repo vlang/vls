@@ -11,8 +11,19 @@ import time
 // that runs, whose answer would be stale, and a question goes to a server of
 // its own, which a check does not hold (see DiagnosticsServer.busy). The worker
 // looks for ready jobs often while one waits for its time.
-const diagnostics_debounce_ms = 0
+// The fast tier answers from the index without a compiler; the slow tier
+// runs the full check after the user pauses. The slow answer replaces the
+// fast one, so a fast finding the check does not reproduce is corrected.
+const diagnostics_fast_debounce_ms = 150
+const diagnostics_slow_debounce_ms = 800
 const diagnostics_worker_poll = 5 * time.millisecond
+
+// DiagnosticsKind is the tier a job belongs to. Slow is the zero value, so
+// a job built without a kind behaves like today's single-tier check.
+enum DiagnosticsKind {
+	slow
+	fast
+}
 
 struct DiagnosticsJob {
 	uri                 string
@@ -28,6 +39,7 @@ struct DiagnosticsJob {
 	global_generation   u64
 	generation          u64
 	ready_at            i64
+	kind                DiagnosticsKind
 }
 
 struct DiagnosticsTicket {
@@ -35,6 +47,14 @@ struct DiagnosticsTicket {
 	global_generation  u64
 	generation         u64
 	project_generation u64
+	kind               DiagnosticsKind
+}
+
+// diagnostics_job_key identifies a pending job: one URI holds a fast and a
+// slow job with independent debounce deadlines.
+fn diagnostics_job_key(uri string, kind DiagnosticsKind) string {
+	suffix := if kind == .fast { 'fast' } else { 'slow' }
+	return '${uri}\x00${suffix}'
 }
 
 struct DiagnosticsProjectMutation {
@@ -108,29 +128,32 @@ fn (mut scheduler DiagnosticsScheduler) begin_project_mutation(project_key strin
 	for other in others {
 		affected[other] = true
 	}
-	mut pending_uris := []string{}
-	for pending_uri, job in scheduler.pending_jobs {
+	mut pending_keys := []string{}
+	for key, job in scheduler.pending_jobs {
 		if job.project_key == project_key {
-			affected[pending_uri] = true
-			pending_uris << pending_uri
+			affected[job.uri] = true
+			pending_keys << key
 		}
 	}
-	for pending_uri in pending_uris {
-		scheduler.pending_jobs.delete(pending_uri)
+	for key in pending_keys {
+		scheduler.pending_jobs.delete(key)
 	}
 	if scheduler.active_project_key == project_key && scheduler.active_uri != '' {
 		affected[scheduler.active_uri] = true
 	}
 	scheduler.project_generations[project_key] = scheduler.project_generations[project_key] + 1
 	project_generation := scheduler.project_generations[project_key]
-	mut tickets := []DiagnosticsTicket{cap: affected.len}
+	mut tickets := []DiagnosticsTicket{cap: affected.len * 2}
 	for affected_uri, _ in affected {
 		scheduler.generations[affected_uri] = scheduler.generations[affected_uri] + 1
-		tickets << DiagnosticsTicket{
-			uri:                affected_uri
-			global_generation:  scheduler.global_generation
-			generation:         scheduler.generations[affected_uri]
-			project_generation: project_generation
+		for kind in [DiagnosticsKind.slow, DiagnosticsKind.fast] {
+			tickets << DiagnosticsTicket{
+				uri:                affected_uri
+				global_generation:  scheduler.global_generation
+				generation:         scheduler.generations[affected_uri]
+				project_generation: project_generation
+				kind:               kind
+			}
 		}
 	}
 	return tickets
@@ -172,7 +195,7 @@ fn (mut scheduler DiagnosticsScheduler) enqueue(job DiagnosticsJob) bool {
 	if scheduler.stopped {
 		return false
 	}
-	scheduler.pending_jobs[job.uri] = job
+	scheduler.pending_jobs[diagnostics_job_key(job.uri, job.kind)] = job
 	if scheduler.paused {
 		return false
 	}
@@ -193,19 +216,36 @@ fn (mut scheduler DiagnosticsScheduler) take_ready_jobs(now i64) ([]DiagnosticsJ
 		scheduler.mutex.unlock()
 	}
 	mut ready := []DiagnosticsJob{cap: 1}
-	mut ready_uri := ''
+	mut ready_key := ''
 	if scheduler.active_uri == '' {
-		for uri, job in scheduler.pending_jobs {
-			if job.ready_at <= now {
+		// A ready fast job wins over a ready slow one: index answers publish
+		// while the compiler check still waits out its longer debounce.
+		mut slow_key := ''
+		mut has_slow := false
+		for key, job in scheduler.pending_jobs {
+			if job.ready_at > now {
+				continue
+			}
+			if job.kind == .fast {
 				ready << job
-				ready_uri = uri
+				ready_key = key
 				break
+			}
+			if !has_slow {
+				has_slow = true
+				slow_key = key
+			}
+		}
+		if ready_key == '' && has_slow {
+			if slow_job := scheduler.pending_jobs[slow_key] {
+				ready << slow_job
+				ready_key = slow_key
 			}
 		}
 	}
-	if ready_uri != '' {
+	if ready_key != '' {
 		job := ready[0]
-		scheduler.pending_jobs.delete(ready_uri)
+		scheduler.pending_jobs.delete(ready_key)
 		scheduler.active_uri = job.uri
 		scheduler.active_project_key = job.project_key
 		scheduler.active_generation = job.generation
@@ -218,6 +258,43 @@ fn (mut scheduler DiagnosticsScheduler) take_ready_jobs(now i64) ([]DiagnosticsJ
 	return ready, should_stop
 }
 
+// rush_pending_slow_job moves the deadline of the pending slow job of `uri` to
+// now, so the check a read waits for starts on the worker's next poll instead of
+// waiting out its debounce: a question about the program — a hover, a definition,
+// a signature — is answered against what the editor already shows, and until the
+// slow check publishes that is last-keystroke's overlay (clangd's debounce
+// policy "read"). A busy worker is never jumped, and a job a newer change
+// superseded is left waiting, because the generation checks decide what runs.
+fn (mut scheduler DiagnosticsScheduler) rush_pending_slow_job(uri string) {
+	scheduler.mutex.lock()
+	defer {
+		scheduler.mutex.unlock()
+	}
+	if scheduler.active_uri != '' {
+		return
+	}
+	slow_key := diagnostics_job_key(uri, .slow)
+	job := scheduler.pending_jobs[slow_key] or { return }
+	if !scheduler.is_job_current_locked(job) {
+		return
+	}
+	// The fast tier publishes first and the slow answer supersedes it, so a fast
+	// job of the same project still waiting out its own debounce holds this one
+	// back: flushed past it, the two would publish the wrong way round. One that
+	// is already due is taken on the poll before this one, so the order holds
+	// there too.
+	now := time.now().unix_milli()
+	for _, pending in scheduler.pending_jobs {
+		if pending.kind == .fast && pending.project_key == job.project_key && pending.ready_at > now {
+			return
+		}
+	}
+	scheduler.pending_jobs[slow_key] = DiagnosticsJob{
+		...job
+		ready_at: now
+	}
+}
+
 fn (mut scheduler DiagnosticsScheduler) finish(job DiagnosticsJob) {
 	scheduler.mutex.lock()
 	if scheduler.active_uri == job.uri && scheduler.active_generation == job.generation {
@@ -228,10 +305,31 @@ fn (mut scheduler DiagnosticsScheduler) finish(job DiagnosticsJob) {
 	scheduler.mutex.unlock()
 }
 
+// check_in_flight reports whether a check for the document at `uri` waits for
+// its debounce deadline or already runs. Either holds the compilers of the
+// buffers it checks, so a question about the same files asked alongside it is
+// answered late (see answer_budget.v).
+fn (mut scheduler DiagnosticsScheduler) check_in_flight(uri string) bool {
+	scheduler.mutex.lock()
+	defer {
+		scheduler.mutex.unlock()
+	}
+	if scheduler.active_uri == uri {
+		return true
+	}
+	for key in [diagnostics_job_key(uri, .slow), diagnostics_job_key(uri, .fast)] {
+		if key in scheduler.pending_jobs {
+			return true
+		}
+	}
+	return false
+}
+
 fn (mut scheduler DiagnosticsScheduler) cancel(uri string) {
 	scheduler.mutex.lock()
 	scheduler.generations[uri] = scheduler.generations[uri] + 1
-	scheduler.pending_jobs.delete(uri)
+	scheduler.pending_jobs.delete(diagnostics_job_key(uri, .slow))
+	scheduler.pending_jobs.delete(diagnostics_job_key(uri, .fast))
 	scheduler.mutex.unlock()
 }
 
@@ -332,8 +430,13 @@ fn (mut app App) finish_diagnostics_project_mutation(mutation DiagnosticsProject
 }
 
 fn (mut app App) enqueue_diagnostics_tickets(mut scheduler DiagnosticsScheduler, tickets []DiagnosticsTicket, project_key string, changed_uri string, changed_content string, excluded_uri string) {
-	ready_at := time.now().unix_milli() + diagnostics_debounce_ms
+	now := time.now().unix_milli()
 	mut should_start := false
+	// Every job of one mutation sees the same buffers, so the snapshot is
+	// cloned once. Cloning per ticket made a mutation cost two clones per
+	// affected URI, which is where the keystroke time went on a wide project.
+	job_open_files := app.open_files.clone()
+	job_generations := app.project_generations.clone()
 	for ticket in tickets {
 		if ticket.uri == excluded_uri {
 			continue
@@ -349,6 +452,11 @@ fn (mut app App) enqueue_diagnostics_tickets(mut scheduler DiagnosticsScheduler,
 		if current_version := app.open_files_versions[ticket.uri] {
 			version = current_version
 		}
+		ready_at := if ticket.kind == .fast {
+			now + diagnostics_fast_debounce_ms
+		} else {
+			now + diagnostics_slow_debounce_ms
+		}
 		job := DiagnosticsJob{
 			uri:                 ticket.uri
 			content:             job_content
@@ -356,13 +464,14 @@ fn (mut app App) enqueue_diagnostics_tickets(mut scheduler DiagnosticsScheduler,
 			project_key:         project_key
 			project_generation:  ticket.project_generation
 			position_encoding:   app.position_encoding
-			open_files:          app.open_files.clone()
-			project_generations: app.project_generations.clone()
+			open_files:          job_open_files
+			project_generations: job_generations
 			write_mutex:         app.write_mutex
 			tcp_conn:            app.tcp_conn
 			global_generation:   ticket.global_generation
 			generation:          ticket.generation
 			ready_at:            ready_at
+			kind:                ticket.kind
 		}
 		if scheduler.enqueue(job) {
 			should_start = true
@@ -385,6 +494,23 @@ fn (mut app App) cancel_all_scheduled_diagnostics() {
 	}
 }
 
+// rush_pending_diagnostics starts the slow check of `uri` at once, when one is
+// pending and the worker is idle, so a request answered while a check waits does
+// not read last-keystroke's overlay: the compiler that answers the question
+// checks the same program the check is about to, which warms the check into the
+// bargain (clangd's debounce policy "read"). It asks the scheduler and nothing
+// more — no job is queued, none is started — and it asks nothing when
+// diagnostics are off, since a check is either pending for a reason or none at
+// all, which makes it safe on every request path.
+fn (mut app App) rush_pending_diagnostics(uri string) {
+	if !app.diagnostics_enabled {
+		return
+	}
+	if mut scheduler := app.diagnostics_scheduler {
+		scheduler.rush_pending_slow_job(uri)
+	}
+}
+
 fn run_diagnostics_worker(mut scheduler DiagnosticsScheduler) {
 	scheduler.mutex.lock()
 	done := scheduler.worker_done
@@ -402,7 +528,11 @@ fn run_diagnostics_worker(mut scheduler DiagnosticsScheduler) {
 			continue
 		}
 		for job in jobs {
-			run_diagnostics_job(mut scheduler, job)
+			if job.kind == .fast {
+				run_fast_diagnostics_job(mut scheduler, job)
+			} else {
+				run_diagnostics_job(mut scheduler, job)
+			}
 			scheduler.finish(job)
 		}
 	}
@@ -412,6 +542,8 @@ fn run_diagnostics_job(mut scheduler DiagnosticsScheduler, job DiagnosticsJob) {
 	if !scheduler.is_job_current(job) {
 		return
 	}
+	// Phase 0 baseline: opt-in timing for the full diagnostics job.
+	started_ms := time.now().unix_milli()
 	temp_dir := os.join_path(os.temp_dir(), 'vls_diag_${os.getpid()}_${job.generation}_${time.now().unix_nano()}')
 	os.mkdir_all(temp_dir) or { return }
 	defer {
@@ -446,6 +578,11 @@ fn run_diagnostics_job(mut scheduler DiagnosticsScheduler, job DiagnosticsJob) {
 		}
 	}
 	notification := worker.build_diagnostics_notification(job.uri, job.content)
+	if os.getenv('VLS_PERF_LOG') != '' {
+		diag_elapsed_ms := time.now().unix_milli() - started_ms
+		worker.send_log_message('diagnostics uri=${job.uri} kind=slow elapsed_ms=${diag_elapsed_ms}',
+			4)
+	}
 	if !scheduler.publish_if_current(mut worker, job, notification) {
 		return
 	}

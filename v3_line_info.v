@@ -79,7 +79,7 @@ fn (mut app App) v3_line_info(method Method, path string, real_path string, line
 	}
 	log('V3 answered ${output.len} bytes')
 	return app.line_info_result(method, path, line_info, output, true, result.project.overlay.temp_root,
-		result.project.overlay)
+		result.project.overlay, result.project.overlay.temp_work_dir)
 }
 
 // V3Hover is what V3 answers for a hover: what it says of the name under the
@@ -117,7 +117,8 @@ fn (mut app App) v3_hover(uri string, real_path string, line_info string) ?V3Hov
 	mut declared_at := ?Location(none)
 	if definition != '' {
 		located := app.line_info_result(.definition, uri, definition_info, definition,
-			true, result.project.overlay.temp_root, result.project.overlay)
+			true, result.project.overlay.temp_root, result.project.overlay,
+			result.project.overlay.temp_work_dir)
 		if located is Location {
 			declared_at = located
 		}
@@ -434,6 +435,50 @@ fn (mut app App) v3_query_pool() &DiagnosticsServerPool {
 	return app.v3_query_servers
 }
 
+// prewarm_program_copy builds and syncs the copy of the program the file at
+// `real_path` belongs to, so a hover, definition or rename that arrives a
+// moment later is answered from a copy that already holds the saved buffer.
+// It runs after a save and answers nothing itself; failure is silent, because
+// the request that needs the copy would build it anyway.
+fn (mut app App) prewarm_program_copy(real_path string) {
+	if real_path == '' || !os.exists(real_path) {
+		return
+	}
+	program_dir := app.program_root(real_path)
+	mut pool := app.v3_query_pool()
+	if !pool.begin_operation() {
+		return
+	}
+	defer {
+		pool.end_operation()
+	}
+	mut program := pool.program_copy(program_dir)
+	program.mutex.lock()
+	defer {
+		program.mutex.unlock()
+	}
+	app.prepare_program_copy(mut pool, mut program, real_path, program_dir) or { return }
+	app.v3_sync_open_files(mut program.project) or {}
+}
+
+// pooled_program_question asks the servers that answer this editor's questions
+// to run `argv` in `work_dir`, or to answer `question` about the same program
+// when there is one. The pool keeps one server for each `(exe, argv, work_dir)`
+// key it is asked for and starts it only once, so a warm server answers without
+// a compiler process of its own. None means no server can answer, which leaves
+// the caller to run the compiler itself, exactly as it would have without a
+// pool: the V in use serves no diagnostics server, it died, or the pool closed.
+fn (mut app App) pooled_program_question(argv []string, work_dir string, question string) ?os.Result {
+	exe := resolve_diagnostics_server_exe() or { return none }
+	mut pool := app.v3_query_pool()
+	if question == '' {
+		return pool.check(exe, argv, work_dir, fn () bool {
+			return false
+		}, unsafe { nil })
+	}
+	return pool.query(exe, argv, work_dir, question)
+}
+
 // v3_copies returns the copies of the programs that are built and current.
 fn (mut app App) v3_copies() []V3QueryProject {
 	mut pool := app.v3_query_pool()
@@ -510,7 +555,8 @@ fn (mut app App) v3_prefetch_anchors(locations []Location, mut cache map[string]
 				continue
 			}
 			found := app.line_info_result(.definition, loc.uri, questions[i].line_info, output,
-				true, result.project.overlay.temp_root, result.project.overlay)
+				true, result.project.overlay.temp_root, result.project.overlay,
+				result.project.overlay.temp_work_dir)
 			if found is Location && found.uri != '' {
 				cache[anchor_cache_key(loc.uri, loc.range.start.line, loc.range.start.char)] = found
 			}

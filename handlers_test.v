@@ -5,6 +5,7 @@ module main
 import os
 import json2
 import time
+import io
 
 fn must_mkdir_all(path string) {
 	os.mkdir_all(path) or {
@@ -693,6 +694,50 @@ fn test_diagnostics_scheduler_requeues_sibling_after_save_text() {
 	assert new_job_a.project_generation > old_job_a.project_generation
 }
 
+fn test_did_save_warms_the_copy_the_next_question_uses() {
+	// The copy of the program is built and synced at save time, so a hover or
+	// rename a moment later is answered from it rather than paying for it.
+	mut app := create_test_app()
+	defer {
+		app.stop_diagnostics_servers()
+		cleanup_test_app(app)
+	}
+	project_dir := os.join_path(app.temp_dir, 'save_prewarm_project')
+	must_mkdir_all(project_dir)
+	path := os.join_path(project_dir, 'main.v')
+	uri := path_to_uri(path)
+	must_write_file(path, 'module main\n\nfn helper() {}\n')
+	app.open_files[uri] = 'module main\n\nfn helper() {}\n'
+
+	result := app.on_did_save(Request{
+		params: json2.encode(DidSaveTextDocumentParams{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			text:          'module main\n\nfn helper() int {\n\treturn 1\n}\n'
+		},
+			escape_unicode: true
+		)
+	})
+	// Without a diagnostics worker the save answers with a notification; with
+	// one it schedules and answers none. Either way the copy is already warm.
+	assert result != none, 'expected a notification without a scheduler'
+	if notification := result {
+		assert notification.method == 'textDocument/publishDiagnostics'
+	}
+	// The copy holds the saved buffer, which is what a later question reads.
+	mut pool := app.v3_query_pool()
+	program_root_path := app.program_root(path)
+	mut program := pool.program_copy(program_root_path)
+	program.mutex.lock()
+	defer {
+		program.mutex.unlock()
+	}
+	copy_text := program.project.written[normalize_overlay_path(path)] or { '' }
+	assert copy_text != '', 'the save built no copy of the file'
+	assert copy_text.contains('fn helper() int'), 'the copy holds the old text: ${copy_text}'
+}
+
 fn test_diagnostics_scheduler_requeues_sibling_after_close() {
 	mut app := create_test_app()
 	defer {
@@ -797,7 +842,9 @@ fn test_diagnostics_scheduler_requeues_active_sibling() {
 	uri_b := 'file:///project/b.v'
 	project_key := 'file:///project'
 	tickets_a := scheduler.begin_project_schedule(uri_a, project_key)
-	assert tickets_a.len == 1
+	assert tickets_a.len == 2
+	assert tickets_a.any(it.kind == .slow)
+	assert tickets_a.any(it.kind == .fast)
 	active_job := DiagnosticsJob{
 		uri:                uri_a
 		project_key:        project_key
@@ -826,8 +873,13 @@ fn diagnostics_test_pending_job(mut scheduler DiagnosticsScheduler, uri string) 
 	defer {
 		scheduler.mutex.unlock()
 	}
-	job := scheduler.pending_jobs[uri] or { return none }
-	return job
+	// One URI holds a fast and a slow job; return the first pending one.
+	for _, job in scheduler.pending_jobs {
+		if job.uri == uri {
+			return job
+		}
+	}
+	return none
 }
 
 fn test_diagnostics_scheduler_checks_staleness_while_publishing() {
@@ -10097,25 +10149,37 @@ fn test_inline_value_returns_empty_for_no_assignments() {
 // ── linked editing range ──────────────────────────────────────────────────────
 
 fn test_linked_editing_range_returns_ranges_for_identifier() {
+	// The occurrence set is the one a rename edits, and V1 alone does not tell
+	// where every name is declared.
+	if !v3_answers_line_info {
+		return
+	}
 	mut app := create_test_app()
 	defer {
-		cleanup_test_app(app)
+		cleanup_rename_app(mut app)
 	}
-	uri := 'file:///tmp/linked.v'
-	// Line 2: `foo := foo + 1` — "foo" appears twice
-	content := 'module main\n\nfn main() {\n\tfoo := foo\n}\n'
+	app.v3_line_info_enabled = v3_answers_line_info
+	test_dir := os.join_path(app.temp_dir, 'linked_editing_feature')
+	must_mkdir_all(test_dir)
+	must_write_file(os.join_path(test_dir, 'v.mod'), 'Module {}\n')
+	test_file := os.join_path(test_dir, 'main.v')
+	content := 'module main\n\nfn main() {\n\ttotal := 1\n\tprintln(total)\n}\n'
+	must_write_file(test_file, content)
+	uri := path_to_uri(test_file)
 	app.open_files[uri] = content
+	app.open_files_versions[uri] = 1
+	app.workspace_roots = [test_dir]
 
 	resp := app.handle_linked_editing_range(Request{
 		id:     840
 		method: 'textDocument/linkedEditingRange'
-		params: json2.encode(TextDocumentPositionParams{
+		params: json2.encode(LinkedEditingRangeParams{
 			text_document: TextDocumentIdentifier{
 				uri: uri
 			}
 			position:      Position{
 				line: 3
-				char: 2
+				char: 3
 			}
 		},
 			escape_unicode: true
@@ -10125,7 +10189,9 @@ fn test_linked_editing_range_returns_ranges_for_identifier() {
 	assert resp.id == 840
 	assert resp.result is LinkedEditingRanges
 	ler := resp.result as LinkedEditingRanges
-	assert ler.ranges.len >= 2
+	assert ler.ranges.len == 2, 'the declaration and the use, got ${ler.ranges.len}'
+	assert ler.ranges.any(it.start.line == 3), 'the declaration is linked'
+	assert ler.ranges.any(it.start.line == 4), 'the use is linked'
 }
 
 fn test_linked_editing_range_returns_null_when_not_on_identifier() {
@@ -10584,6 +10650,378 @@ fn test_code_action_kind_wanted_respects_only_filter() {
 	assert code_action_kind_wanted(['source.organizeImports'], 'source.organizeImports')
 	assert !code_action_kind_wanted(['quickfix'], 'source.organizeImports')
 	assert !code_action_kind_wanted(['source.organizeImports'], 'quickfix')
+}
+
+// --- Fill struct literal ---
+
+const fill_literal_types = 'module main
+
+enum Mode {
+	idle
+	fast
+}
+
+struct Shade {
+	level int
+}
+
+struct Pixel {
+	name    string
+	x       int
+	ratio   f64
+	tags    []string
+	scores  map[string]int
+	shade   Shade
+	mode    Mode
+	retries ?int
+	hidden  bool
+}
+'
+
+// fill_literal_main returns a project whose main() holds `body`, with `Pixel`,
+// `Shade` and `Mode` declared for it to use.
+fn fill_literal_main(body string) string {
+	return fill_literal_types + '\nfn main() {\n' + body + '\n}\n'
+}
+
+// new_fill_literal_app writes `files` into a project on disk, opens them all in
+// the editor and returns the app with the URI of each file.
+fn new_fill_literal_app(files map[string]string) (&App, map[string]string) {
+	mut app := create_test_app()
+	dir := os.join_path(app.temp_dir, 'fill_project')
+	must_mkdir_all(dir)
+	must_write_file(os.join_path(dir, 'v.mod'), 'Module {}\n')
+	mut uris := map[string]string{}
+	for name, content in files {
+		path := os.join_path(dir, name)
+		must_mkdir_all(os.dir(path))
+		must_write_file(path, content)
+		uri := path_to_uri(path)
+		app.open_files[uri] = content
+		uris[name] = uri
+	}
+	app.workspace_roots = [dir]
+	return app, uris
+}
+
+// fill_literal_action returns the "Fill struct literal" action offered for the
+// range `sel` in `uri`, or none when the request offers no such action.
+fn fill_literal_action(mut app App, uri string, sel LSPRange, only []string) ?CodeAction {
+	resp := app.handle_code_action(Request{
+		id:     1
+		params: json2.encode(CodeActionParams{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			range:         sel
+			context:       CodeActionContext{
+				only: only
+			}
+		},
+			escape_unicode: true
+		)
+	})
+	if resp.result is []CodeAction {
+		for action in resp.result as []CodeAction {
+			if action.title == 'Fill struct literal' {
+				return action
+			}
+		}
+	}
+	return none
+}
+
+// position_of returns where the first `needle` of `content` sits, which is both
+// where a cursor on it lands and where a range selecting it starts.
+fn position_of(content string, needle string) Position {
+	for line, text in content.split_into_lines() {
+		if col := text.index(needle) {
+			return Position{
+				line: line
+				char: col
+			}
+		}
+	}
+	assert false, 'fixture holds no ${needle}'
+	return Position{}
+}
+
+// cursor_range returns the empty range an editor reports for a cursor sitting on
+// the first `needle` of `content`.
+fn cursor_range(content string, needle string) LSPRange {
+	at := position_of(content, needle)
+	return LSPRange{
+		start: at
+		end:   at
+	}
+}
+
+// selection_range returns the range covering the first `needle` of `content`,
+// what an editor reports for a selected token.
+fn selection_range(content string, needle string) LSPRange {
+	at := position_of(content, needle)
+	return LSPRange{
+		start: at
+		end:   Position{
+			line: at.line
+			char: at.char + needle.len
+		}
+	}
+}
+
+// apply_text_edit applies one edit to `content`, so a test can assert what the
+// document looks like once the quick fix is taken.
+fn apply_text_edit(content string, edit TextEdit) string {
+	mut lines := content.split_into_lines()
+	line := lines[edit.range.start.line]
+	lines[edit.range.start.line] = line[..edit.range.start.char] + edit.new_text +
+		line[edit.range.end.char..]
+	return if content.ends_with('\n') { lines.join('\n') + '\n' } else { lines.join('\n') }
+}
+
+// The mask every scan below reads keeps the length of the text it stands for, so
+// an offset found in it addresses the same byte of the original document, and it
+// blanks a string body where it sits rather than at the end of its line. A line
+// comment, a block comment, and a string holding a brace all have to survive.
+fn test_masked_v_code_keeps_every_offset_pointing_at_the_same_byte() {
+	for content in ['', 'a', 'a\n', 'p := Pixel{}\n', 'x := "{" + \'}\'\n', '// c\np := Pixel{}\n',
+		'p := Pixel{ // c\n}\n', 'p := Pixel{\n\t\tx: 1\n\t}\n', 's := "x${1 + 2}y"\n'] {
+		assert masked_v_code(content).len == content.len, 'the mask of `${content}` keeps its length'
+	}
+	assert masked_v_code('x := "}"\n').len == 9, 'the mask of a string keeps its length'
+	assert masked_v_code('x := "}"\n')[5] == `"`, 'the quote that opens a string stays'
+	assert masked_v_code('x := "}"\n')[6] == ` `, 'a string body is blanked where it sits'
+	assert masked_v_code('x := "}"\n')[7] == `"`, 'the quote that closes a string stays'
+	assert masked_v_code('x := "}"\n')[0] == `x`, 'the code around a string is untouched'
+	assert !masked_v_code('// dropped\np := Pixel{}\n').contains('dropped'), 'a comment is masked away'
+	assert masked_v_code('/* multi\nline */ p := x\n').contains('p := x'), 'code after a block comment stays'
+}
+
+// A one-line literal gains every field the index can give a zero value for, in
+// the order the struct declares them: the nested struct the index sees becomes
+// `Shade{}`, and the enum field and the optional one are left out because no
+// literal can be written for either.
+fn test_fill_struct_literal_adds_the_missing_fields() {
+	mut app, uris := new_fill_literal_app({
+		'main.v': fill_literal_main('\tp := Pixel{}\n\tprintln(p)')
+	})
+	defer {
+		cleanup_test_app(app)
+	}
+	uri := uris['main.v']
+	content := app.open_files[uri] or { '' }
+	action := fill_literal_action(mut app, uri, selection_range(content, 'Pixel{}'), []) or {
+		assert false, 'a literal that omits fields must offer "Fill struct literal"'
+		return
+	}
+	assert action.kind == code_action_kind_quickfix, 'the fill is offered as a quick fix'
+	edit := action.edit or {
+		assert false, 'the fill action must carry an edit'
+		return
+	}
+	edits := edit.changes[uri]
+	assert edits.len == 1, 'one edit fills the literal'
+	assert edits[0].range.start == edits[0].range.end, 'the fill inserts, it replaces nothing'
+	literal_line := position_of(content, 'Pixel{}').line
+	assert edits[0].range.start.line == literal_line, 'the edit is on the line of the literal'
+	assert edits[0].range.start.char == '\tp := Pixel{'.len, 'the edit goes before the closing brace'
+	assert edits[0].new_text == "name: '', x: 0, ratio: 0, tags: []string{}, scores: map[string]int{}, shade: Shade{}, hidden: false", 'each missing field is added with its zero value'
+	got := apply_text_edit(content, edits[0]).split_into_lines()
+	assert got.len == content.split_into_lines().len, 'a one-line fill adds and removes no line'
+	assert got[literal_line] == "\tp := Pixel{name: '', x: 0, ratio: 0, tags: []string{}, scores: map[string]int{}, shade: Shade{}, hidden: false}", 'the filled literal holds every field on one line'
+}
+
+// A literal already spanning lines keeps the fields it sets and gains the rest
+// on their own lines at the indentation its last field uses, with its closing
+// brace left on a line of its own.
+fn test_fill_struct_literal_keeps_the_fields_already_set() {
+	body := '\tp := Pixel{\n\t\tx: 1\n\t}\n\tprintln(p)'
+	mut app, uris := new_fill_literal_app({
+		'main.v': fill_literal_main(body)
+	})
+	defer {
+		cleanup_test_app(app)
+	}
+	uri := uris['main.v']
+	content := app.open_files[uri] or { '' }
+	action := fill_literal_action(mut app, uri, selection_range(content, 'Pixel{'), []) or {
+		assert false, 'a partial literal must offer "Fill struct literal"'
+		return
+	}
+	edit := action.edit or {
+		assert false, 'the fill action must carry an edit'
+		return
+	}
+	edits := edit.changes[uri]
+	assert edits.len == 1, 'one edit fills the literal'
+	literal_line := position_of(content, 'Pixel{').line
+	got := apply_text_edit(content, edits[0]).split_into_lines()
+	assert got[literal_line..] == [
+		'\tp := Pixel{',
+		'\t\tx: 1,',
+		"\t\tname: '',",
+		'\t\tratio: 0,',
+		'\t\ttags: []string{},',
+		'\t\tscores: map[string]int{},',
+		'\t\tshade: Shade{},',
+		'\t\thidden: false',
+		'\t}',
+		'\tprintln(p)',
+		'}',
+	], 'the fields already set are kept and the rest follow at their indentation'
+}
+
+// A brace inside a string must not close the literal, and a comment after the
+// last field must not take its place: the new fields follow the field, and the
+// comment ends up on the last of them.
+fn test_fill_struct_literal_ignores_braces_in_strings_and_comments() {
+	body := '\tp := Pixel{\n\t\tname: "a}b"\n\t\tx: 1 // note , here\n\t}\n\tprintln(p)'
+	mut app, uris := new_fill_literal_app({
+		'main.v': fill_literal_main(body)
+	})
+	defer {
+		cleanup_test_app(app)
+	}
+	uri := uris['main.v']
+	content := app.open_files[uri] or { '' }
+	action := fill_literal_action(mut app, uri, selection_range(content, 'Pixel{'), []) or {
+		assert false, 'a literal with a brace in a string must offer "Fill struct literal"'
+		return
+	}
+	edit := action.edit or {
+		assert false, 'the fill action must carry an edit'
+		return
+	}
+	edits := edit.changes[uri]
+	assert edits.len == 1, 'one edit fills the literal'
+	literal_line := position_of(content, 'Pixel{').line
+	got := apply_text_edit(content, edits[0]).split_into_lines()
+	assert got[literal_line..] == [
+		'\tp := Pixel{',
+		'\t\tname: "a}b"',
+		'\t\tx: 1,',
+		'\t\tratio: 0,',
+		'\t\ttags: []string{},',
+		'\t\tscores: map[string]int{},',
+		'\t\tshade: Shade{},',
+		'\t\thidden: false // note , here',
+		'\t}',
+		'\tprintln(p)',
+		'}',
+	], 'the fields follow the last field, and the comment ends up on the last of them'
+}
+
+// A literal that spans lines but holds no field yet takes its fields one level
+// past the statement that opens it, and its closing brace stays where it was.
+fn test_fill_struct_literal_indents_an_empty_multiline_literal() {
+	body := '\tp := Pixel{\n\t}\n\tprintln(p)'
+	mut app, uris := new_fill_literal_app({
+		'main.v': fill_literal_main(body)
+	})
+	defer {
+		cleanup_test_app(app)
+	}
+	uri := uris['main.v']
+	content := app.open_files[uri] or { '' }
+	action := fill_literal_action(mut app, uri, selection_range(content, 'Pixel{'), []) or {
+		assert false, 'an empty multi-line literal must offer "Fill struct literal"'
+		return
+	}
+	edit := action.edit or {
+		assert false, 'the fill action must carry an edit'
+		return
+	}
+	literal_line := position_of(content, 'Pixel{').line
+	got := apply_text_edit(content, edit.changes[uri][0]).split_into_lines()
+	assert got[literal_line..] == [
+		'\tp := Pixel{',
+		"\t\tname: '',",
+		'\t\tx: 0,',
+		'\t\tratio: 0,',
+		'\t\ttags: []string{},',
+		'\t\tscores: map[string]int{},',
+		'\t\tshade: Shade{},',
+		'\t\thidden: false',
+		'\t}',
+		'\tprintln(p)',
+		'}',
+	], 'the first fields of an empty literal sit one level past the statement'
+}
+
+// A literal that already sets every field it can be given has nothing to add,
+// and so does one left with only an enum field and an optional one missing.
+fn test_fill_struct_literal_is_not_offered_when_nothing_can_be_added() {
+	complete := "\tp := Pixel{\n\t\tname:    'a'\n\t\tx:       1\n\t\tratio:   0.5\n\t\ttags:    ['t']\n\t\tscores:  {'a': 1}\n\t\tshade:   Shade{level: 1}\n\t\tmode:    Mode.fast\n\t\tretries: 2\n\t\thidden:  false\n\t}\n\tprintln(p)"
+	only_unfillable_left := "\tp := Pixel{\n\t\tname:   'a'\n\t\tx:      1\n\t\tratio:  0.5\n\t\ttags:   []\n\t\tscores: map[string]int{}\n\t\tshade:  Shade{}\n\t\thidden: false\n\t}\n\tprintln(p)"
+	for body in [complete, only_unfillable_left] {
+		mut app, uris := new_fill_literal_app({
+			'main.v': fill_literal_main(body)
+		})
+		uri := uris['main.v']
+		content := app.open_files[uri] or { '' }
+		assert fill_literal_action(mut app, uri, selection_range(content, 'Pixel{'), []) == none, 'a literal with nothing that can be filled must not offer the action'
+		cleanup_test_app(app)
+	}
+}
+
+// A type the index does not know is never filled: guessing its fields would
+// invent code.
+fn test_fill_struct_literal_is_not_offered_for_an_unknown_type() {
+	mut app, uris := new_fill_literal_app({
+		'main.v': fill_literal_main('\tp := Ghost{}\n\tprintln(p)')
+	})
+	defer {
+		cleanup_test_app(app)
+	}
+	uri := uris['main.v']
+	content := app.open_files[uri] or { '' }
+	assert fill_literal_action(mut app, uri, selection_range(content, 'Ghost{}'), []) == none, 'a literal of an unknown type must not offer the action'
+}
+
+// A quick fix is offered for a struct literal and nothing else: not for a block
+// or a function body, not for a composite or an anonymous element literal, not
+// for a struct declaration body, and not for a literal still being typed.
+fn test_fill_struct_literal_is_not_offered_outside_a_struct_literal() {
+	blocks := fill_literal_main('\tprintln("hi")\n\tpixels := []Pixel{\n\t\t{x: 1},\n\t}\n\tprintln(pixels)')
+	mut app, uris := new_fill_literal_app({
+		'main.v': blocks
+	})
+	uri := uris['main.v']
+	content := app.open_files[uri] or { '' }
+	for needle in ['println("hi")', 'println(pixels)', 'pixels', '[]Pixel{', '{x: 1},', 'retries ?int'] {
+		assert fill_literal_action(mut app, uri, cursor_range(content, needle), []) == none, 'a cursor on `${needle}` is not on a struct literal'
+	}
+	cleanup_test_app(app)
+
+	partial := fill_literal_types + '\nfn main() {\n\tp := Pixel{\n\t\tna\n'
+	mut partial_app, partial_uris := new_fill_literal_app({
+		'main.v': partial
+	})
+	defer {
+		cleanup_test_app(partial_app)
+	}
+	partial_content := partial_app.open_files[partial_uris['main.v']] or { '' }
+	assert fill_literal_action(mut partial_app, partial_uris['main.v'], cursor_range(partial_content,
+		'na'), []) == none, 'a literal with no closing brace yet must not be filled'
+}
+
+// A client that asks for one kind of action is sent that kind: the quick fix
+// filter sees the fill, a filter asking only for something else does not.
+fn test_fill_struct_literal_respects_the_kind_the_client_asks_for() {
+	mut app, uris := new_fill_literal_app({
+		'main.v': fill_literal_main('\tp := Pixel{}\n\tprintln(p)')
+	})
+	defer {
+		cleanup_test_app(app)
+	}
+	uri := uris['main.v']
+	content := app.open_files[uri] or { '' }
+	sel := selection_range(content, 'Pixel{}')
+	fill_literal_action(mut app, uri, sel, ['quickfix']) or {
+		assert false, 'a client asking for quick fixes must see the fill'
+		return
+	}
+	assert fill_literal_action(mut app, uri, sel, ['refactor']) == none, 'a client asking only for refactors must not be sent a quick fix'
 }
 
 // --- P0-01: PositionCodec (UTF-16 / UTF-8 / UTF-32) ---
@@ -12004,6 +12442,156 @@ fn test_rename_occurrence_cap_comes_from_the_environment() {
 	}
 	os.unsetenv('VLS_RENAME_MAX_OCCURRENCES')
 	assert rename_edit_count(mut app, uris, tock) or { panic(err) } == 12
+}
+
+// A local renamed to a name that a `$if` branch this build leaves out already
+// holds, and the same the other way round: V checks the branch this build takes,
+// so neither clash is visible here, and the platform that builds the branch
+// would report a redefinition.
+const rename_branch_main = 'module main
+
+fn main() {
+	x := 1
+	$if !windows {
+		y := 2
+		println(y)
+	}
+	println(x)
+}
+'
+
+const rename_import_branch_main = 'module main
+
+import time
+
+fn main() {
+	read := 1
+	$if !windows {
+		value := 2
+		println(value)
+	}
+	println(read + time.now().year)
+}
+'
+
+fn test_rename_refuses_a_name_that_a_branch_the_build_leaves_out_would_shadow() {
+	mut app, uris := new_rename_project_app_with({
+		'main.v': rename_branch_main
+	})
+	defer {
+		cleanup_rename_app(mut app)
+	}
+	// From the branch, to a name live outside it.
+	if _ := app.rename_request(rename_request_named(uris, 'main.v:6:3', 'x')) {
+		assert false, 'renaming `y` to `x` must be refused'
+	} else {
+		assert err.msg().contains('`x` is already declared at main.v:4'), err.msg()
+		assert err.msg().contains('redefinition of `x`'), err.msg()
+	}
+	// From outside it, to a name live in the branch.
+	if _ := app.rename_request(rename_request_named(uris, 'main.v:4:2', 'y')) {
+		assert false, 'renaming `x` to `y` must be refused'
+	} else {
+		assert err.msg().contains('`y` is already declared at main.v:6'), err.msg()
+		assert err.msg().contains('redefinition of `y`'), err.msg()
+	}
+	// A name nothing else holds is renamed as before, branch included.
+	assert rename_edits_in({
+		'main.v': rename_branch_main
+	}, 'main.v:6:3') == ['main.v:6:3', 'main.v:7:11']
+}
+
+// A local inside a branch this build leaves out, renamed to the name of an
+// imported module: the other platform reports a duplicate of an import symbol,
+// and every use of the module in that function would name the local.
+fn test_rename_refuses_a_name_that_a_branch_the_build_leaves_out_would_import() {
+	mut app, uris := new_rename_project_app_with({
+		'main.v': rename_import_branch_main
+	})
+	defer {
+		cleanup_rename_app(mut app)
+	}
+	if _ := app.rename_request(rename_request_named(uris, 'main.v:8:3', 'time')) {
+		assert false, 'renaming `value` to `time` must be refused'
+	} else {
+		assert err.msg().contains('`time` is already declared at main.v:3'), err.msg()
+		assert err.msg().contains('redefinition of `time`'), err.msg()
+	}
+	// The module itself is renamed by none of this: its uses stay where they are.
+	assert rename_edits_in({
+		'main.v': rename_import_branch_main
+	}, 'main.v:8:3') == ['main.v:8:3', 'main.v:9:11']
+}
+
+// A struct method with the name of a method an interface declares: the types
+// that implement the interface must keep that name, the rename does not change
+// the interface with it, so it is refused and the interface is named.
+const rename_interface_methods_main = "module main
+
+interface Speaker {
+	speak() string
+}
+
+struct Dog {
+	name string
+}
+
+fn (d Dog) speak() string {
+	return 'woof'
+}
+
+fn (d Dog) fetch() int {
+	return 1
+}
+
+fn greet(s Speaker) string {
+	return s.speak()
+}
+
+fn main() {
+	d := Dog{
+		name: 'rex'
+	}
+	println(greet(d) + d.speak())
+	println(d.fetch())
+}
+"
+
+fn test_rename_refuses_a_method_an_interface_declares_and_names_the_interface() {
+	mut app, uris := new_rename_project_app_with({
+		'main.v': rename_interface_methods_main
+	})
+	defer {
+		cleanup_rename_app(mut app)
+	}
+	// The method of the type that implements the interface.
+	if _ := app.rename_request(rename_request_named(uris, 'main.v:11:12', 'bark')) {
+		assert false, 'renaming a method an interface declares must be refused'
+	} else {
+		assert err.msg().contains('is a member of the interface `Speaker`'), err.msg()
+	}
+	// And the member of the interface itself.
+	if _ := app.rename_request(rename_request_named(uris, 'main.v:4:2', 'talk')) {
+		assert false, 'renaming a member of an interface must be refused'
+	} else {
+		assert err.msg().contains('is a member of the interface `Speaker`'), err.msg()
+	}
+	// A method no interface declares is renamed, with its use.
+	assert rename_edits_in({
+		'main.v': rename_interface_methods_main
+	}, 'main.v:15:12') == ['main.v:15:12', 'main.v:28:12']
+	// The methods of V's own error interface are named as such.
+	mut ierror_app, ierror_uris := new_rename_project_app_with({
+		'main.v': rename_interface_main
+	})
+	defer {
+		cleanup_rename_app(mut ierror_app)
+	}
+	if _ := ierror_app.rename_request(rename_request_named(ierror_uris, 'main.v:21:13', 'message')) {
+		assert false, 'renaming a method of `IError` must be refused'
+	} else {
+		assert err.msg().contains('interface `IError`'), err.msg()
+	}
 }
 
 fn test_folding_range_covers_imports_comments_and_code_blocks() {
@@ -13938,4 +14526,3351 @@ fn test_rename_of_a_local_passed_to_a_method_named_like_an_array_one() {
 		'main.v': sorter_main
 	}, 'main.v:10:2')
 	assert edits == ['main.v:10:2', 'main.v:12:17', 'main.v:17:10'], edits.str()
+}
+
+// fast_test_project writes `files` under a tagged temp folder for fast
+// diagnostics tests.
+fn fast_test_project(mut app &App, tag string, files map[string]string) string {
+	dir := os.join_path(app.temp_dir, 'fast_diag_${tag}')
+	must_mkdir_all(dir)
+	for name, content in files {
+		path := os.join_path(dir, name)
+		must_mkdir_all(os.dir(path))
+		must_write_file(path, content)
+	}
+	return dir
+}
+
+fn test_parse_import_refs_records_positions() {
+	content := 'module main\n\nimport os\nimport math as m\n\nfn main() {}\n'
+	refs := parse_import_refs(content)
+	assert refs.map(it.path) == ['os', 'math']
+	assert refs[0].line == 2
+	assert refs[1].line == 3
+	// The path starts after `import ` on its line.
+	assert refs[0].col == 7
+	assert refs[1].col == 7
+}
+
+fn test_parse_import_refs_reads_import_blocks() {
+	content := 'module main\n\nimport (\n\tos\n\tnet.http\n)\n\nfn main() {}\n'
+	refs := parse_import_refs(content)
+	assert refs.map(it.path) == ['os', 'net.http']
+	assert refs[0].line == 3
+	assert refs[1].line == 4
+}
+
+fn test_parse_imports_matches_ref_paths() {
+	content := 'module main\n\nimport os\nimport (\n\tjson\n)\n\nfn main() {}\n'
+	assert parse_imports(content) == parse_import_refs(content).map(it.path)
+}
+
+fn test_fast_check_errors_flags_only_unresolvable_imports() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	dir := fast_test_project(mut app, 'unknown', {
+		'main.v': 'module main\n\nimport os\nimport nosuchmod_xyz\nimport C\n\nfn main() {}\n'
+	})
+	path := os.join_path(dir, 'main.v')
+	uri := path_to_uri(path)
+	content := os.read_file(path) or { panic(err) }
+	app.open_files[uri] = content
+	errors := app.fast_check_errors(uri, content)
+	assert errors.len == 1, errors.str()
+	assert errors[0].message.contains('unknown module')
+	assert errors[0].message.contains('nosuchmod_xyz')
+	assert errors[0].line_nr == 4
+	assert errors[0].level == 'error'
+}
+
+fn test_fast_check_errors_accepts_sibling_modules() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	dir := fast_test_project(mut app, 'sibling', {
+		'main.v':          'module main\n\nimport helper\n\nfn main() {\n\tprintln(helper.answer())\n}\n'
+		'helper/helper.v': "module helper\n\npub fn answer() string {\n\treturn 'x'\n}\n"
+	})
+	path := os.join_path(dir, 'main.v')
+	uri := path_to_uri(path)
+	content := os.read_file(path) or { panic(err) }
+	app.open_files[uri] = content
+	// The submodule resolves against the importing file's folder.
+	assert app.fast_check_errors(uri, content) == []
+}
+
+fn test_fast_check_errors_skips_c_interop() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	dir := fast_test_project(mut app, 'cinterop', {
+		'main.v': 'module main\n\nimport C\n\nfn main() {}\n'
+	})
+	path := os.join_path(dir, 'main.v')
+	uri := path_to_uri(path)
+	content := os.read_file(path) or { panic(err) }
+	app.open_files[uri] = content
+	assert app.fast_check_errors(uri, content) == []
+}
+
+fn test_fast_parse_errors_flags_stray_closing_delimiter() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	content := 'module main\n\nfn main() {\n}\n}\n'
+	dir := fast_test_project(mut app, 'parse_stray', {
+		'main.v': content
+	})
+	path := os.join_path(dir, 'main.v')
+	uri := path_to_uri(path)
+	text := os.read_file(path) or { panic(err) }
+	errors := app.fast_parse_errors(uri, text)
+	assert errors.len == 1, errors.str()
+	assert errors[0].message == "unexpected token '}'"
+	assert errors[0].line_nr == 5
+	assert errors[0].col == 1
+	assert errors[0].level == 'error'
+	// A stray closer publishes through the same notification path as slow errors.
+	notif := app.diagnostics_notification_for(uri, text, errors)
+	assert notif.method == 'textDocument/publishDiagnostics'
+	assert notif.params.uri == uri
+	assert notif.params.diagnostics.len == 1
+	assert (notif.params.diagnostics[0].source or { '' }) == 'vlang'
+	assert notif.params.diagnostics[0].severity == 1
+	assert notif.params.diagnostics[0].message == "unexpected token '}'"
+}
+
+fn test_fast_parse_errors_accepts_balanced_code() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	content := "module main\n\nfn main() {\n\tprintln('hi')\n}\n"
+	dir := fast_test_project(mut app, 'parse_balanced', {
+		'main.v': content
+	})
+	path := os.join_path(dir, 'main.v')
+	uri := path_to_uri(path)
+	text := os.read_file(path) or { panic(err) }
+	assert app.fast_parse_errors(uri, text) == []
+}
+
+fn test_fast_parse_errors_ignores_brackets_in_strings_comments_and_runes() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	content := 'module main\n\nfn main() {\n\ts := \'()[]{}\'\n\tt := "([{}])"\n\tu := `}{)(`\n\tr := r\'(raw)\'\n\t// comment with ) ] }\n\t/* block with ( [ { */\n\t	w := \'interp \${s} done\'\n\tch := `)`\n\tprintln(s, t, u, r, w, ch)\n}\n'
+	dir := fast_test_project(mut app, 'parse_skipped', {
+		'main.v': content
+	})
+	path := os.join_path(dir, 'main.v')
+	uri := path_to_uri(path)
+	text := os.read_file(path) or { panic(err) }
+	assert app.fast_parse_errors(uri, text) == []
+}
+
+fn test_fast_parse_errors_flags_unclosed_delimiter_at_eof() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	content := 'module main\n\nfn main() {\n\tprintln(x)\n'
+	dir := fast_test_project(mut app, 'parse_unclosed', {
+		'main.v': content
+	})
+	path := os.join_path(dir, 'main.v')
+	uri := path_to_uri(path)
+	text := os.read_file(path) or { panic(err) }
+	errors := app.fast_parse_errors(uri, text)
+	assert errors.len == 1, errors.str()
+	assert errors[0].message == "unclosed delimiter '{'"
+	assert errors[0].line_nr == 3
+	assert errors[0].col == 11
+	assert errors[0].level == 'error'
+}
+
+fn test_fast_parse_errors_suppresses_obvious_continuations() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	still_typing := [
+		'',
+		'module main\n\nfn main() {',
+		'module main\n\nfn main() {\n\tx := [1, 2',
+		'module main\n\nfn main() {\n\tx := 1 +',
+		"module main\n\nfn main() {\n\ts := 'abc",
+		'module main\n\nfn main() {\n\t/* note',
+	]
+	for content in still_typing {
+		uri := path_to_uri(os.join_path(app.temp_dir, 'parse_cont.v'))
+		assert app.fast_parse_errors(uri, content) == [], content
+	}
+}
+
+fn test_fast_parse_errors_flags_unclosed_string() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	content := "module main\n\nfn main() {\n\ts := 'hello\n\tprintln(s)\n}\n"
+	dir := fast_test_project(mut app, 'parse_string', {
+		'main.v': content
+	})
+	path := os.join_path(dir, 'main.v')
+	uri := path_to_uri(path)
+	text := os.read_file(path) or { panic(err) }
+	errors := app.fast_parse_errors(uri, text)
+	assert errors.len == 1, errors.str()
+	assert errors[0].message == 'unclosed string literal'
+	assert errors[0].line_nr == 4
+	assert errors[0].col == 7
+}
+
+fn test_fast_parse_errors_flags_unclosed_block_comment() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	content := 'module main\n\nfn main() {\n\t/* open\n\tprintln(x)\n}\n'
+	dir := fast_test_project(mut app, 'parse_comment', {
+		'main.v': content
+	})
+	path := os.join_path(dir, 'main.v')
+	uri := path_to_uri(path)
+	text := os.read_file(path) or { panic(err) }
+	errors := app.fast_parse_errors(uri, text)
+	assert errors.len == 1, errors.str()
+	assert errors[0].message == 'unclosed block comment'
+	assert errors[0].line_nr == 4
+	assert errors[0].col == 2
+}
+
+fn test_fast_parse_errors_ignores_multiline_backtick_string() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	// A backtick string may legally span lines, so this looks exactly like a
+	// multiline string that is still being typed. The slow check decides.
+	content := 'module main\n\nfn main() {\n\ts := `abc\n\tdef\n}\n'
+	dir := fast_test_project(mut app, 'parse_backtick', {
+		'main.v': content
+	})
+	path := os.join_path(dir, 'main.v')
+	uri := path_to_uri(path)
+	text := os.read_file(path) or { panic(err) }
+	assert app.fast_parse_errors(uri, text) == []
+}
+
+fn test_fast_parse_errors_flags_unclosed_interpolation() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	content := "module main\n\nfn main() {\n\ts := '\${abc\n\tdef\n"
+	dir := fast_test_project(mut app, 'parse_interp', {
+		'main.v': content
+	})
+	path := os.join_path(dir, 'main.v')
+	uri := path_to_uri(path)
+	text := os.read_file(path) or { panic(err) }
+	errors := app.fast_parse_errors(uri, text)
+	assert errors.len == 1, errors.str()
+	assert errors[0].message == 'unclosed string interpolation'
+	assert errors[0].line_nr == 4
+	assert errors[0].col == 8
+}
+
+fn test_fast_parse_errors_flags_string_left_open_by_interpolation() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	// The quote after the interpolation start opens a new literal inside the
+	// interpolation code, so the file ends inside a string opened earlier.
+	content := "module main\n\nfn main() {\n\ts := '\${name'\n\tprintln(s)\n}\n"
+	dir := fast_test_project(mut app, 'parse_interp_quote', {
+		'main.v': content
+	})
+	path := os.join_path(dir, 'main.v')
+	uri := path_to_uri(path)
+	text := os.read_file(path) or { panic(err) }
+	errors := app.fast_parse_errors(uri, text)
+	assert errors.len == 1, errors.str()
+	assert errors[0].message == 'unclosed string literal'
+	assert errors[0].line_nr == 4
+}
+
+fn test_fast_parse_errors_reports_mismatch_as_unclosed() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	// A crossed closer is uncertain mid-keystroke, so the scan leaves the
+	// stack alone and the EOF remainder reports the first unclosed opener.
+	content := 'module main\n\nfn main() {\n\tx := ([)]\n\tprintln(x)\n}\n'
+	dir := fast_test_project(mut app, 'parse_mismatch', {
+		'main.v': content
+	})
+	path := os.join_path(dir, 'main.v')
+	uri := path_to_uri(path)
+	text := os.read_file(path) or { panic(err) }
+	errors := app.fast_parse_errors(uri, text)
+	assert errors.len == 1, errors.str()
+	assert errors[0].message == "unclosed delimiter '{'"
+	assert errors[0].line_nr == 3
+}
+
+fn test_fast_parse_errors_combines_with_import_errors() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	content := 'module main\n\nimport nosuchmod_xyz\n\nfn main() {\n}\n}\n'
+	dir := fast_test_project(mut app, 'parse_combined', {
+		'main.v': content
+	})
+	path := os.join_path(dir, 'main.v')
+	uri := path_to_uri(path)
+	text := os.read_file(path) or { panic(err) }
+	app.open_files[uri] = text
+	import_errors := app.fast_check_errors(uri, text)
+	parse_errors := app.fast_parse_errors(uri, text)
+	assert import_errors.len == 1, import_errors.str()
+	assert parse_errors.len == 1, parse_errors.str()
+	mut combined := import_errors.clone()
+	combined << parse_errors
+	assert combined.len == 2
+}
+
+fn test_scheduler_tickets_come_in_slow_and_fast() {
+	mut scheduler := new_diagnostics_scheduler()
+	tickets := scheduler.begin_project_schedule('file:///a.v', 'proj')
+	assert tickets.len == 2
+	assert tickets.any(it.kind == .slow)
+	assert tickets.any(it.kind == .fast)
+	assert tickets[0].generation == tickets[1].generation
+}
+
+fn test_scheduler_takes_fast_before_slow() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	mut scheduler := new_diagnostics_scheduler()
+	uri := 'file:///tiered.v'
+	mut first := true
+	for kind in [DiagnosticsKind.slow, DiagnosticsKind.fast] {
+		global_gen, gen := scheduler.next_generation(uri)
+		started := scheduler.enqueue(DiagnosticsJob{
+			uri:               uri
+			content:           'x'
+			global_generation: global_gen
+			generation:        gen
+			ready_at:          100
+			kind:              kind
+			write_mutex:       app.write_mutex
+		})
+		if first {
+			assert started
+			first = false
+		}
+	}
+	jobs, should_stop := scheduler.take_ready_jobs(100)
+	assert !should_stop
+	assert jobs.len == 1
+	assert jobs[0].kind == .fast
+	scheduler.finish(jobs[0])
+	rest, _ := scheduler.take_ready_jobs(100)
+	assert rest.len == 1
+	assert rest[0].kind == .slow
+}
+
+fn test_scheduler_cancel_drops_both_tiers() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	mut scheduler := new_diagnostics_scheduler()
+	uri := 'file:///both.v'
+	mut started := false
+	for kind in [DiagnosticsKind.slow, DiagnosticsKind.fast] {
+		global_gen, gen := scheduler.next_generation(uri)
+		if scheduler.enqueue(DiagnosticsJob{
+			uri:               uri
+			content:           'x'
+			global_generation: global_gen
+			generation:        gen
+			ready_at:          100
+			kind:              kind
+			write_mutex:       app.write_mutex
+		}) {
+			started = true
+		}
+	}
+	assert started
+	scheduler.cancel(uri)
+	jobs, should_stop := scheduler.take_ready_jobs(100)
+	assert jobs.len == 0
+	assert should_stop
+}
+
+// Coverage for handlers.v pure helpers: delimiters, parameters and names.
+
+fn test_cov_bracket_depth_counts_delimiters_outside_strings() {
+	assert bracket_depth('fn main() {') == 1, 'open brace'
+	assert bracket_depth('fn main() {}') == 0, 'balanced braces'
+	assert bracket_depth('a { b {') == 2, 'nested opens'
+	assert bracket_depth('}') == -1, 'lone closer'
+	assert bracket_depth('a[b(c)]') == 0, 'mixed delimiters balance'
+	assert bracket_depth('s := "{ not a block"') == 0, 'brace in string is skipped'
+}
+
+fn test_cov_matching_delimiter_finds_pairs() {
+	assert matching_delimiter('(a(b)c)', 0, `(`, `)`) == 6, 'nested parens'
+	assert matching_delimiter('[x]', 0, `[`, `]`) == 2, 'brackets'
+	assert matching_delimiter('(unclosed', 0, `(`, `)`) == -1, 'unclosed'
+	assert matching_delimiter('abc', 1, `(`, `)`) == -1, 'not an opener'
+	assert matching_delimiter('', 0, `(`, `)`) == -1, 'empty text'
+}
+
+fn test_cov_split_top_level_commas() {
+	assert split_top_level_commas('a, b, c') == ['a', ' b', ' c'], 'flat list'
+	assert split_top_level_commas('f(a, b), c') == ['f(a, b)', ' c'], 'nested call stays whole'
+	assert split_top_level_commas('') == [''], 'empty text is one part'
+}
+
+fn test_cov_function_parameter_names() {
+	assert function_parameter_names('fn foo(a int, b string) int') == ['a', 'b'], 'plain params'
+	assert function_parameter_names('fn (mut app App) foo(x int)') == ['app', 'x'], 'receiver first'
+	assert function_parameter_names('not a function') == [], 'no signature'
+}
+
+fn test_cov_utf8_helpers() {
+	assert utf8_seq_len(`a`) == 1, 'ascii'
+	assert utf8_seq_len(0xc3) == 2, 'two byte lead'
+	assert utf8_seq_len(0xe2) == 3, 'three byte lead'
+	assert utf8_seq_len(0xf0) == 4, 'four byte lead'
+	assert utf8_seq_len(0x80) == 1, 'continuation byte advances by one'
+	s := 'h\xc3\xa9llo'
+	assert utf8_char_to_byte_index(s, 2) == 3, 'second char starts at byte 3'
+	assert utf8_byte_to_char_index(s, 3) == 2, 'byte 3 is the second char'
+	assert utf8_char_to_byte_index(s, 0) == 0, 'zero char is zero byte'
+	assert utf8_byte_to_char_index(s, 0) == 0, 'zero byte is zero char'
+}
+
+fn test_cov_ident_predicates_and_encoding_names() {
+	assert is_ident_start(`a`), 'letter starts an identifier'
+	assert is_ident_start(`_`), 'underscore starts an identifier'
+	assert !is_ident_start(`1`), 'digit cannot start an identifier'
+	assert is_ident_char(`1`), 'digit continues an identifier'
+	assert !is_ident_char(`-`), 'dash is not an identifier char'
+	assert position_encoding_string(.utf16) == 'utf-16', 'utf16 wire name'
+	assert position_encoding_string(.utf8) == 'utf-8', 'utf8 wire name'
+	assert position_encoding_string(.utf32) == 'utf-32', 'utf32 wire name'
+}
+
+fn test_cov_line_offsets_and_position_mapping() {
+	assert line_start_offsets('a\nb\nc') == [0, 2, 4], 'lf offsets'
+	assert line_start_offsets('a\r\nb') == [0, 3], 'crlf offsets'
+	assert line_start_offsets('a\rb') == [0, 2], 'cr offsets'
+	starts := line_start_offsets('ab\ncd')
+	assert line_text_without_terminator('ab\ncd', starts, 0) == 'ab', 'first line text'
+	assert line_text_without_terminator('ab\ncd', starts, 1) == 'cd', 'last line text'
+	assert position_to_byte_offset('ab\ncd', starts, 1, 1, .utf8) == 4, 'second line second byte'
+	assert position_to_byte_offset('ab\ncd', starts, 9, 0, .utf8) == 5, 'past last line clamps'
+}
+
+fn test_cov_find_word_bounds_and_substr() {
+	start, end := find_word_bounds_at_col('fn main()', 4, .utf8)
+	assert start == 3 && end == 7, 'word bounds of main'
+	after_start, after_end := find_word_bounds_at_col('fn main()', 7, .utf8)
+	assert after_start == 3 && after_end == 7, 'column just past the word still resolves'
+	bad_start, bad_end := find_word_bounds_at_col('f (', 2, .utf8)
+	assert bad_start == -1 && bad_end == -1, 'no identifier at column'
+	assert substr_by_char_bounds('fn main()', 3, 7, .utf8) == 'main', 'substr of bounds'
+}
+
+fn test_cov_parse_import_binding() {
+	if b := parse_import_binding('os') {
+		assert b.alias == 'os', 'plain import aliases itself'
+		assert b.module_path == 'os', 'plain import keeps path'
+	} else {
+		assert false, 'os should parse'
+	}
+	if b := parse_import_binding('net.http as nh') {
+		assert b.alias == 'nh', 'as alias wins'
+		assert b.module_path == 'net.http', 'as keeps full path'
+	} else {
+		assert false, 'aliased import should parse'
+	}
+	if _ := parse_import_binding('') {
+		assert false, 'empty text should not parse'
+	}
+	bindings := parse_import_bindings('module main\n\nimport os\nimport net.http as nh\n')
+	assert bindings.map(it.alias) == ['os', 'nh'], 'single line bindings'
+}
+
+fn test_cov_get_word_before_dot() {
+	assert get_word_before_dot('os.args', 2, .utf8) == 'os', 'receiver before dot'
+	assert get_word_before_dot('os.args', 0, .utf8) == '', 'no dot at column'
+	assert get_word_before_dot('', 0, .utf8) == '', 'empty line'
+	assert get_word_before_dot('.foo', 0, .utf8) == '', 'nothing before dot'
+}
+
+fn test_cov_normalize_receiver_type() {
+	assert normalize_receiver_type('&User') == 'User', 'reference stripped'
+	assert normalize_receiver_type('?Foo') == 'Foo', 'option stripped'
+	assert normalize_receiver_type('&User[T]') == 'User', 'generics cut'
+	assert normalize_receiver_type('  string  ') == 'string', 'space trimmed'
+}
+
+fn test_cov_expression_names_its_type() {
+	assert expression_names_its_type('[]int{}'), 'array literal names its type'
+	assert expression_names_its_type('User{name: 1}'), 'struct literal names its type'
+	assert !expression_names_its_type('foo()'), 'call does not'
+	assert !expression_names_its_type('x'), 'plain variable does not'
+}
+
+fn test_cov_callable_or_constructor() {
+	name, is_ctor := callable_or_constructor('foo()')
+	assert name == 'foo' && !is_ctor, 'plain call'
+	tname, tis_ctor := callable_or_constructor('User{}')
+	assert tname == 'User' && tis_ctor, 'struct literal is a constructor'
+	ename, ector := callable_or_constructor('  ')
+	assert ename == '' && !ector, 'blank has no callable'
+	assert source_fragment_starts_with_literal('"hi"'), 'double quoted literal'
+	assert source_fragment_starts_with_literal('r"raw"'), 'raw string literal'
+	assert !source_fragment_starts_with_literal('foo'), 'identifier is not a literal'
+	assert !source_fragment_starts_with_literal(''), 'empty is not a literal'
+}
+
+fn test_cov_binding_and_local_names() {
+	assert binding_identifiers('foo bar') == ['foo', 'bar'], 'words are bindings'
+	assert binding_identifiers('mut x') == ['x'], 'mut is skipped'
+	assert local_declaration_names('x := 1; y := 2') == ['x', 'y'], 'walrus declarations'
+	assert local_declaration_names('for i in xs') == ['i'], 'for binding'
+	assert starts_or_block_header('or'), 'bare or header'
+	assert starts_or_block_header('x or'), 'trailing or header'
+	assert !starts_or_block_header('for'), 'for is not an or header'
+	pos := Position{
+		line: 3
+		char: 1
+	}
+	assert containing_function_start(['module main', '', 'fn main() {', '\tx := 1', '}'], pos, .utf8) == 2, 'enclosing fn'
+	assert identifier_index('foo bar foo', 'foo') == 0, 'first occurrence'
+	assert identifier_index('xfoo foo', 'foo') == 5, 'identifier boundary respected'
+	assert identifier_index('abc', 'z') == -1, 'absent name'
+	params := parameter_list_of('fn foo(a int, b string) int') or { '' }
+	assert params == 'a int, b string', 'parameter list text'
+	if _ := parameter_list_of('no parens') {
+		assert false, 'parameter list of plain text should be none'
+	}
+	assert last_fn_keyword_before('x := fn (a int) int {', 20) == 5, 'closure fn found'
+	assert last_fn_keyword_before('x := 1', 6) == -1, 'no closure fn'
+}
+
+// Coverage for folding_range.v.
+
+fn test_cov_line_brace_delta() {
+	assert line_brace_delta('fn main() {') == 1, 'open brace'
+	assert line_brace_delta('}') == -1, 'close brace'
+	assert line_brace_delta('}{') == 0, 'balanced on one line'
+	assert line_brace_delta('s := "{ not code"') == 0, 'brace in string skipped'
+	assert line_brace_delta('a := 1 // }') == 0, 'brace in comment skipped'
+	assert line_brace_delta('/* { */') == 0, 'brace in block comment skipped'
+}
+
+fn test_cov_compute_folding_ranges_groups_blocks() {
+	content := 'module main\n\nimport os\nimport time\n\n/*\nblock\ncomment\n*/\nfn main() {\n\tprintln(1)\n}\n'
+	ranges := compute_folding_ranges(content)
+	assert ranges.any(it.kind == 'imports' && it.start_line == 2 && it.end_line == 3), 'import group'
+	assert ranges.any(it.kind == 'comment' && it.start_line == 5 && it.end_line == 8), 'block comment'
+	assert ranges.any(it.kind == 'region' && it.start_line == 9 && it.end_line == 11), 'fn body'
+	single := compute_folding_ranges('module main\n\nimport os\n\nfn main() {}\n')
+	assert !single.any(it.kind == 'imports'), 'one import is not a group'
+}
+
+fn test_cov_find_fn_body_end_tracks_braces() {
+	assert find_fn_body_end(['fn main() {', '\tx := 1', '}'], 0) == 2, 'closing brace line'
+	assert find_fn_body_end(['fn main() {', '\tx := 1'], 0) == 1, 'falls back to last line'
+}
+
+fn test_cov_folding_range_empty_doc_returns_no_ranges() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	uri := 'file:///cov_folding_empty.v'
+	app.open_files[uri] = ''
+	response := app.handle_folding_range(Request{
+		id:     910
+		method: 'textDocument/foldingRange'
+		params: json2.encode(FoldingRangeParams{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+		},
+			escape_unicode: true
+		)
+	})
+	assert response.id == 910, 'id echoes'
+	assert response.result is []FoldingRange, 'empty doc answers an empty list'
+	assert (response.result as []FoldingRange).len == 0, 'no ranges for empty doc'
+}
+
+// Coverage for document_highlight.v.
+
+fn test_cov_highlight_has_word_boundaries() {
+	assert highlight_has_word('foo bar foo', 'foo'), 'plain word found'
+	assert highlight_has_word('(foo)', 'foo'), 'punctuation boundaries count'
+	assert !highlight_has_word('foobar', 'foo'), 'prefix of longer name rejected'
+	assert !highlight_has_word('foo2', 'foo'), 'digit suffix rejected'
+	assert !highlight_has_word('', 'foo'), 'empty text has no word'
+	assert !highlight_has_word('foo', ''), 'empty word never matches'
+}
+
+fn test_cov_is_for_binding_highlight() {
+	assert is_for_binding_highlight('for x in xs {', 4, 5), 'for value binding'
+	assert is_for_binding_highlight('for k, v in m {', 7, 8), 'for key-value binding'
+	assert !is_for_binding_highlight('x := 1', 0, 1), 'plain assignment is not a for binding'
+	assert !is_for_binding_highlight('format(x) in y', 0, 6), 'for inside call rejected'
+}
+
+fn test_cov_is_fn_parameter_highlight() {
+	assert is_fn_parameter_highlight('fn foo(x int)', 7, 8), 'parameter followed by type'
+	assert is_fn_parameter_highlight('fn (u User) save()', 4, 5), 'receiver followed by type'
+	assert !is_fn_parameter_highlight('x := 1', 0, 1), 'assignment is not a parameter'
+	assert !is_fn_parameter_highlight('foo(x)', 4, 5), 'call argument is not a parameter'
+}
+
+// Coverage for semantic_tokens.v.
+
+fn test_cov_semantic_token_modifiers_legend() {
+	assert semantic_token_modifiers() == ['declaration', 'readonly'], 'modifier legend'
+}
+
+fn test_cov_variable_binding_key_and_mark() {
+	assert variable_binding_key(1, 'x') == '1:x', 'scope qualified key'
+	mut readonly := map[string]bool{}
+	mut mutable := map[string]bool{}
+	mark_variable_binding('x', false, 1, mut readonly, mut mutable)
+	assert readonly['1:x'], 'immutable binding is readonly'
+	mark_variable_binding('y', true, 1, mut readonly, mut mutable)
+	assert mutable['1:y'], 'mut binding is mutable'
+	mark_variable_binding('_', false, 1, mut readonly, mut mutable)
+	mark_variable_binding('', false, 1, mut readonly, mut mutable)
+	assert readonly.len == 1, 'blank names are skipped'
+	collect_fn_parameter_bindings('fn foo(a int, mut b string)', 2, mut readonly, mut mutable)
+	assert readonly['2:a'], 'parameter is readonly'
+	assert mutable['2:b'], 'mut parameter is mutable'
+}
+
+fn test_cov_collect_readonly_variables() {
+	readonly, scopes := collect_readonly_variables(['const x = 1', 'fn main() {', '\ty := 2', '}'])
+	assert readonly['0:x'], 'const is readonly'
+	assert readonly['1:y'], 'immutable local is readonly'
+	assert scopes.len == 4, 'one scope per line'
+	assert scopes[0] == 0, 'file level scope'
+	assert scopes[1] == 1, 'function scope'
+}
+
+fn test_cov_classify_identifier_and_dot_helpers() {
+	assert identifier_before_dot('user.name', 4) == 'user', 'receiver before dot'
+	assert identifier_before_dot('abc', 1) == '', 'no dot at column'
+	assert is_method_declaration_identifier('fn (u User) save()', 12), 'method name after receiver'
+	assert !is_method_declaration_identifier('fn (u User) save()', 0), 'fn keyword is not the method'
+	assert !is_method_declaration_identifier('fn main()', 3), 'plain fn has no receiver'
+	aliases := map[string]bool{}
+	assert classify_v_identifier_at('fn main() {}', 0, 2, 'fn', aliases) == sem_tok_keyword, 'keyword'
+	assert classify_v_identifier_at('x := User{}', 5, 9, 'User', aliases) == sem_tok_type, 'uppercase type'
+	// Off-by-one evidence: 'zzz_fn_qq'.len == 9 so end is 9 (line[9] == `(`,
+	// line[8] == `q`), and 'zzz_save_qq'.len == 11 so end is 5 + 11 == 16.
+	assert classify_v_identifier_at('zzz_fn_qq(x)', 0, 9, 'zzz_fn_qq', aliases) == sem_tok_function, 'call'
+	assert classify_v_identifier_at('user.zzz_save_qq()', 5, 16, 'zzz_save_qq', aliases) == sem_tok_method, 'method call'
+	assert classify_v_identifier_at('user.zzz_prop_qq', 5, 16, 'zzz_prop_qq', aliases) == sem_tok_property, 'property'
+	assert classify_v_identifier_at('import os', 7, 9, 'os', aliases) == sem_tok_namespace, 'import name'
+	aliased := {
+		'nh': true
+	}
+	assert classify_v_identifier_at('nh.get()', 0, 2, 'nh', aliased) == sem_tok_namespace, 'import alias'
+}
+
+fn test_cov_interpolation_end_and_string_tokens() {
+	line := 'x := "\${a}!"'
+	assert interpolation_end(line, 7, line.len) == 9, 'closing brace of interpolation'
+	assert interpolation_end('x \${a', 3, 5) == -1, 'unclosed interpolation'
+	mut toks := []SemToken{}
+	mut str_state := TokenizeState{
+		import_aliases:     map[string]bool{}
+		readonly_variables: map[string]bool{}
+	}
+	assert tokenize_v_string('"hi"', 0, 4, 0, mut str_state, mut toks) == 4, 'column after closing quote'
+	assert toks.len == 1 && toks[0].type_idx == sem_tok_string, 'whole literal is one string token'
+	mut interp_state := TokenizeState{
+		import_aliases:     map[string]bool{}
+		readonly_variables: map[string]bool{}
+	}
+	mut interp_toks := []SemToken{}
+	tokenize_v_string('"\${x}!"', 0, 7, 0, mut interp_state, mut interp_toks)
+	assert interp_toks.len == 3, 'string, code and string parts'
+	assert interp_toks[0].type_idx == sem_tok_string, 'opening quote is string'
+	assert interp_toks[1].type_idx == sem_tok_variable, 'interpolated name is code'
+	assert interp_toks[2].type_idx == sem_tok_string, 'tail is string'
+	before := interp_toks.len
+	append_string_token(mut interp_toks, 0, 5, 5)
+	assert interp_toks.len == before, 'empty span appends nothing'
+}
+
+fn test_cov_tokenize_line_and_encode() {
+	mut state := TokenizeState{
+		import_aliases:     map[string]bool{}
+		readonly_variables: map[string]bool{}
+	}
+	mut toks := []SemToken{}
+	tokenize_v_line('// hi', 3, mut state, mut toks)
+	assert toks.len == 1, 'line comment is one token'
+	assert toks[0].type_idx == sem_tok_comment, 'comment type'
+	assert toks[0].line == 3 && toks[0].start == 0 && toks[0].length == 5, 'comment span'
+	mut code_toks := []SemToken{}
+	tokenize_v_code('a := 1 // done', 0, 14, 0, mut state, mut code_toks)
+	assert code_toks.any(it.type_idx == sem_tok_number), 'number tokenised'
+	assert code_toks.any(it.type_idx == sem_tok_comment), 'trailing comment tokenised'
+	mut block_state := TokenizeState{
+		import_aliases:     map[string]bool{}
+		readonly_variables: map[string]bool{}
+	}
+	mut block_toks := []SemToken{}
+	tokenize_v_line('/* open', 0, mut block_state, mut block_toks)
+	assert block_state.in_block_comment, 'unclosed block comment carries over'
+	tokenize_v_line('still comment */ x := 1', 1, mut block_state, mut block_toks)
+	assert !block_state.in_block_comment, 'closing marker ends the comment'
+	raw := [SemToken{ line: 0, start: 0, length: 3, type_idx: sem_tok_keyword },
+		SemToken{ line: 0, start: 5, length: 2, type_idx: sem_tok_function }]
+	assert encode_semantic_tokens(raw) == [0, 0, 3, 0, 0, 0, 5, 2, 5, 0], 'delta encoding'
+	utf8_same := convert_tokens_to_encoding(raw, ['abcdefgh'], .utf8)
+	assert utf8_same[1].start == 5 && utf8_same[1].length == 2, 'utf8 keeps byte offsets'
+	utf16_same := convert_tokens_to_encoding(raw, ['abcdefgh'], .utf16)
+	assert utf16_same[1].start == 5 && utf16_same[1].length == 2, 'ascii is identical in utf16'
+	oor := convert_tokens_to_encoding(raw, ['ab'], .utf16)
+	assert oor.len == 2, 'out of range lines pass through'
+}
+
+// Coverage for fast_diagnostics.v.
+
+fn test_cov_fast_import_is_skipped() {
+	assert fast_import_is_skipped(''), 'empty path skipped'
+	assert fast_import_is_skipped('C'), 'C interop skipped'
+	assert fast_import_is_skipped('foo(bar'), 'grouping skipped'
+	assert fast_import_is_skipped('a"b'), 'quoting skipped'
+	assert !fast_import_is_skipped('os'), 'plain module checked'
+	assert !fast_import_is_skipped('net.http'), 'dotted module checked'
+}
+
+fn test_cov_fast_last_non_empty_and_continuation() {
+	assert fast_last_non_empty(['a', '', '  ']) == 0, 'last text line'
+	assert fast_last_non_empty(['', '  ']) == -1, 'no text lines'
+	assert fast_last_non_empty([]string{}) == -1, 'no lines'
+	open_state := FastParseState{
+		stack: [FastParseBracket{ ch: `{`, line: 0, col: 10 }]
+	}
+	assert fast_last_line_is_continuation(['fn main() {'], 0, &open_state), 'unclosed opener on last line'
+	empty_state := FastParseState{}
+	assert !fast_last_line_is_continuation(['x := 1'], 0, &empty_state), 'complete statement'
+	assert fast_last_line_is_continuation(['x :='], 0, &empty_state), 'operator tail continues'
+}
+
+fn test_cov_fast_scan_code_flags_stray_closer() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	mut state := FastParseState{}
+	mut errors := []JsonError{}
+	end := fast_scan_code(')', 0, 0, 'cov.v', mut state, mut errors)
+	assert end == 1, 'scanner consumed the closer'
+	assert errors.len == 1, 'stray closer reported'
+	assert errors[0].message == "unexpected token ')'", 'stray message'
+	mut lit_state := FastParseState{}
+	mut lit_errors := []JsonError{}
+	after := fast_scan_literal('"abc" + x', 0, 0, 'cov.v', mut lit_state, mut lit_errors)
+	assert after == 5, 'column after closing quote'
+	assert lit_state.quote == 0, 'literal closed'
+	assert lit_errors.len == 0, 'balanced literal reports nothing'
+}
+
+fn test_cov_fast_module_dir_declares() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	mod_dir := os.join_path(app.temp_dir, 'covmod', 'mymod')
+	must_mkdir_all(mod_dir)
+	must_write_file(os.join_path(mod_dir, 'mymod.v'), 'module mymod\n\npub fn hi() {}\n')
+	assert fast_module_dir_declares(mod_dir, 'mymod'), 'folder declaring its own name'
+	assert !fast_module_dir_declares(mod_dir, 'other'), 'wrong name rejected'
+	assert !fast_module_dir_declares(mod_dir, 'main'), 'main never counts'
+	assert !fast_module_dir_declares(os.join_path(app.temp_dir, 'covmod', 'missing'), 'mymod'), 'missing dir'
+}
+
+fn test_cov_run_fast_diagnostics_job_handles_clean_buffer() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	mut scheduler := new_diagnostics_scheduler()
+	uri := 'file:///cov_fast_job.v'
+	content := 'module main\n\nfn main() {}\n'
+	stale := DiagnosticsJob{
+		uri:               uri
+		content:           content
+		global_generation: 1
+		generation:        999
+		ready_at:          100
+		kind:              .fast
+		write_mutex:       app.write_mutex
+	}
+	assert !scheduler.is_job_current(stale), 'unknown generation is not current'
+	global_gen, gen := scheduler.next_generation(uri)
+	job := DiagnosticsJob{
+		uri:               uri
+		content:           content
+		open_files:        {
+			uri: content
+		}
+		global_generation: global_gen
+		generation:        gen
+		ready_at:          100
+		kind:              .fast
+		write_mutex:       app.write_mutex
+	}
+	assert scheduler.enqueue(job), 'clean fast job enqueued'
+	assert scheduler.is_job_current(job), 'enqueued job is current'
+	run_fast_diagnostics_job(mut scheduler, job)
+	assert scheduler.is_job_current(job), 'clean buffer publishes nothing and stays current'
+}
+
+// Coverage for call_hierarchy.v.
+
+fn test_cov_find_fn_calls_in_line_collects_callees() {
+	mut calls := map[string][]LSPRange{}
+	find_fn_calls_in_line('helper(x) + other()', 2, .utf8, mut calls)
+	assert 'helper' in calls, 'first call found'
+	assert 'other' in calls, 'second call found'
+	assert calls['helper'][0].start.char == 0, 'call starts at line start'
+	assert calls['helper'][0].end.char == 6, 'call ends after the name'
+	mut skipped := map[string][]LSPRange{}
+	find_fn_calls_in_line('if (x) {}', 0, .utf8, mut skipped)
+	assert skipped.len == 0, 'keywords are not calls'
+	mut quiet := map[string][]LSPRange{}
+	find_fn_calls_in_line('"foo(" + x // bar(', 1, .utf8, mut quiet)
+	assert quiet.len == 0, 'strings and comments hold no calls'
+}
+
+fn test_cov_find_fn_in_content_resolves_item() {
+	uri := 'file:///cov_find_fn.v'
+	content := 'module main\n\nfn helper() {}\n\nfn main() {}\n'
+	item := find_fn_in_content('helper', content, uri, .utf8)
+	assert item.name == 'helper', 'helper resolved'
+	assert item.uri == uri, 'uri carried over'
+	missing := find_fn_in_content('nosuchfn', content, uri, .utf8)
+	assert missing.name == '', 'unknown name resolves to nothing'
+}
+
+fn test_cov_scan_for_callers_groups_by_caller() {
+	mut results := []CallHierarchyIncomingCall{}
+	scan_for_callers('helper', 'file:///cov_scan.v', 'module main\n\nfn helper() {}\n\nfn main() {\n\thelper()\n}\n', .utf8, mut results)
+	assert results.any(it.from.name == 'main' && it.from_ranges.len == 1), 'main calls helper once'
+	mut no_callers := []CallHierarchyIncomingCall{}
+	scan_for_callers('nosuchfn', 'file:///cov_scan.v', 'module main\n\nfn main() {}\n', .utf8, mut no_callers)
+	assert no_callers.len == 0, 'no callers without calls'
+}
+
+fn test_cov_find_fn_declaration_prefers_project() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	root := os.join_path(app.temp_dir, 'cov_decl')
+	must_mkdir_all(root)
+	path := os.join_path(root, 'main.v')
+	content := 'module main\n\nfn helper() int {\n\treturn 1\n}\n\nfn main() {\n\tprintln(helper())\n}\n'
+	must_write_file(path, content)
+	uri := path_to_uri(path)
+	app.open_files[uri] = content
+	app.workspace_roots = [root]
+	item := app.find_fn_declaration('helper', app.workspace_search_dirs(root), false)
+	assert item.name == 'helper', 'project function found through the index'
+	assert item.uri == uri, 'index points at the project file'
+}
+
+fn test_cov_call_hierarchy_outgoing_skips_recursion() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	root := os.join_path(app.temp_dir, 'cov_outgoing')
+	must_mkdir_all(root)
+	path := os.join_path(root, 'main.v')
+	content := 'module main\n\nfn main() {\n\tmain()\n}\n'
+	must_write_file(path, content)
+	uri := path_to_uri(path)
+	app.open_files[uri] = content
+	app.workspace_roots = [root]
+	resp := app.handle_call_hierarchy_outgoing(Request{
+		id:     911
+		method: 'callHierarchy/outgoingCalls'
+		params: json2.encode(CallHierarchyOutgoingCallsParams{
+			item: CallHierarchyItem{
+				name:            'main'
+				kind:            sym_kind_function
+				uri:             uri
+				range:           LSPRange{
+					start: Position{
+						line: 2
+						char: 0
+					}
+					end:   Position{
+						line: 4
+						char: 1
+					}
+				}
+				selection_range: LSPRange{
+					start: Position{
+						line: 2
+						char: 3
+					}
+					end:   Position{
+						line: 2
+						char: 7
+					}
+				}
+			}
+		},
+			escape_unicode: true
+		)
+	})
+	assert resp.id == 911, 'id echoes'
+	assert resp.result is []CallHierarchyOutgoingCall, 'outgoing answers a list'
+	assert (resp.result as []CallHierarchyOutgoingCall).len == 0, 'direct recursion is skipped'
+}
+
+// Coverage for pure handlers.v helpers: declarations and signatures.
+
+fn test_cov_source_declaration_opens_body() {
+	assert source_declaration_opens_body('fn main(){}'.bytes()), 'fn opens a body'
+	assert source_declaration_opens_body('pub unsafe fn foo() {}'.bytes()), 'modifiers are skipped'
+	assert source_declaration_opens_body('struct Foo {}'.bytes()), 'struct opens a body'
+	assert source_declaration_opens_body('@[if windows]\nfn foo() {}'.bytes()), 'attributes are skipped'
+	assert !source_declaration_opens_body('x := 1'.bytes()), 'assignment opens nothing'
+	assert !source_declaration_opens_body(''.bytes()), 'empty mask opens nothing'
+}
+
+fn test_cov_declares_function_at() {
+	assert declares_function_at(['fn main() {}'], 0, 3), 'plain function'
+	assert declares_function_at(['pub fn foo() {}'], 0, 7), 'pub function'
+	assert declares_function_at(['fn foo[T](x T) int {}'], 0, 3), 'generic parameters are skipped'
+	assert !declares_function_at(['x := 1'], 0, 0), 'assignment is not a function'
+	assert !declares_function_at(['fn main() {}'], 0, 10), 'whitespace starts nothing'
+	assert !declares_function_at(['foo()'], 0, 0), 'bare call is not a declaration'
+}
+
+fn test_cov_declaration_expression_span() {
+	text, end_line := declaration_expression_span(['a := [1,', '2]'], 0, '[1,')
+	assert text == '[1, 2]', 'continued expression is joined'
+	assert end_line == 1, 'expression ends on the second line'
+	assert declaration_expression(['x := 1'], 0, '1') == '1', 'single line wrapper'
+	single, single_line := declaration_expression_span(['x := 1'], 0, '1')
+	assert single == '1' && single_line == 0, 'balanced expression stays put'
+}
+
+fn test_cov_cursor_is_inside_parameters() {
+	assert cursor_is_inside_parameters('fn foo(a int)', 7, 'fn foo(a int)', 0), 'inside inline parameters'
+	assert !cursor_is_inside_parameters('fn foo(a int)', 0, 'fn foo(a int)', 0), 'name is outside parameters'
+	assert cursor_is_inside_parameters('fn foo(a int', 5, '', -1), 'open signature continues'
+	assert !cursor_is_inside_parameters('fn foo() {', 10, '', -1), 'body is past the parameters'
+	assert !cursor_is_inside_parameters('x', 0, 'zzz', 0), 'missing parens answer false'
+}
+
+fn test_cov_type_text_names() {
+	assert type_text_names('int x', 'int'), 'whole word matches'
+	assert type_text_names('x int.', 'int'), 'punctuation bounds the word'
+	assert !type_text_names('print(x)', 'int'), 'absent name never matches'
+	assert !type_text_names('aint b', 'int'), 'identifier prefix is not a match'
+}
+
+fn test_cov_merge_completion_items() {
+	a := Detail{ label: 'a' }
+	b := Detail{ label: 'b' }
+	c := Detail{ label: 'c' }
+	merged := merge_completion_items([a, b], [b, c])
+	assert merged.map(it.label) == ['a', 'b', 'c'], 'compiler items fill the gaps'
+	assert merge_completion_items([]Detail{}, []Detail{}).len == 0, 'empty merges to empty'
+	assert without_operator_completions([Detail{ label: '+' }, Detail{ label: 'foo' }]).map(it.label) == [
+		'foo',
+	], 'operators are dropped'
+}
+
+fn test_cov_binding_scope_headers() {
+	assert starts_binding_scope_header('for x in xs {'), 'for opens a scope'
+	assert starts_binding_scope_header('\$for x in y {'), 'comptime for opens a scope'
+	assert starts_binding_scope_header('if x == 1 {'), 'if opens a scope'
+	assert !starts_binding_scope_header('x := 1'), 'assignment opens no scope'
+	assert binding_scope_header_ends_with_literal_type('if e := Foo'), 'trailing type ends the header'
+	assert !binding_scope_header_ends_with_literal_type('if x is int'), 'smart cast is not a literal'
+	assert !binding_scope_header_ends_with_literal_type('x := 1'), 'non type is not a literal'
+}
+
+fn test_cov_fn_keyword_and_match_helpers() {
+	assert last_fn_keyword_index('a := fn (x int) int {') == 5, 'last fn keyword'
+	assert last_fn_keyword_index('x := 1') == -1, 'no fn keyword'
+	assert last_fn_keyword_index('afn') == -1, 'identifier tail is not a keyword'
+	header := anonymous_function_header('fn (x int) string')
+	assert header.found && header.complete, 'literal header parses'
+	assert header.parameter_names == ['x'], 'parameter name kept'
+	assert header.parameter_types['x'] == 'int', 'parameter type kept'
+	bare := anonymous_function_header('fn')
+	assert bare.found && !bare.complete, 'bare fn is incomplete'
+	assert !anonymous_function_header('zzz').found, 'no fn means no header'
+	assert last_match_keyword_index('x := match y {') == 5, 'match keyword found'
+	assert last_match_keyword_index('rematch') == -1, 'identifier is not match'
+	assert brace_starts_match_body('match x {', 8), 'brace after subject starts the body'
+	assert !brace_starts_match_body('foo() {', 6), 'call brace starts no match body'
+	assert previous_unmatched_open_brace('a { b { c', 9) == 6, 'inner brace is unmatched'
+	assert previous_unmatched_open_brace('a { b } c', 9) == -1, 'balanced braces match'
+	assert struct_literal_brace_is_match_arm('match x {\n1: {', 13), 'arm brace nests in match'
+	assert !struct_literal_brace_is_match_arm('x := User{', 9), 'struct brace is no arm'
+}
+
+fn test_cov_expression_line_continued() {
+	assert expression_line_is_continued('x := 1 +'), 'operator tail continues'
+	assert !expression_line_is_continued('x := 1'), 'complete statement stops'
+	assert !expression_line_is_continued(''), 'empty line stops'
+}
+
+fn test_cov_implicit_bindings() {
+	// open_paren is the index of the `(` itself: in 'xs.map(' it sits at 6.
+	assert implicit_call_bindings('xs.map(', 6) == ['it'], 'map binds it'
+	assert implicit_call_bindings('foo(', 4).len == 0, 'plain call binds nothing'
+	assert implicit_bindings_at_cursor('xs.map(a') == ['it'], 'open map call binds it'
+	assert implicit_bindings_at_cursor('foo(a').len == 0, 'plain call binds nothing'
+}
+
+fn test_cov_local_binding_column() {
+	assert local_binding_column('  x int', 10, 'x') == 12, 'column is segment relative'
+	assert local_binding_column('yyy', 0, 'x') == -1, 'missing name is -1'
+}
+
+fn test_cov_type_after_identifier() {
+	assert type_after_identifier('x int', 'x') == 'int', 'type follows the name'
+	assert type_after_identifier('x := 1', 'x') == '', 'assignment has no type'
+	assert complete_function_signature(['fn foo(a int,', 'b string) string {'], 0,
+		'fn foo(a int,') == 'fn foo(a int, b string) string {', 'signature joins lines'
+	assert complete_function_signature([]string{}, 5, 'x') == 'x', 'out of range keeps initial'
+	assert method_receiver_type('(mut u User)') == 'User', 'receiver type extracted'
+	assert method_receiver_type('foo') == '', 'plain name has no receiver'
+	assert method_receiver_type('(u)') == '', 'bare variable is no type'
+}
+
+fn test_cov_builtin_composite_owner() {
+	assert builtin_composite_owner('[]int') == 'array', 'array owner'
+	assert builtin_composite_owner('map[string]int') == 'map', 'map owner'
+	assert builtin_composite_owner('?[]int') == 'array', 'option prefix is stripped'
+	assert builtin_composite_owner('int') == '', 'scalar has no owner'
+	assert qualify_embedded_receiver_type('mod.Parent', 'Child') == 'mod.Child', 'child takes parent module'
+	assert qualify_embedded_receiver_type('P', 'mod.Child') == 'mod.Child', 'qualified type is kept'
+	assert struct_field_source_type('name string', 'name') == 'string', 'field type read'
+	assert struct_field_source_type('other int', 'name') == '', 'wrong name reads nothing'
+	assert embedded_struct_type('Address') == 'Address', 'bare embedded type'
+	assert embedded_struct_type('x int') == '', 'field line is no embedding'
+}
+
+fn test_cov_thread_channel_and_literal_types() {
+	assert thread_type_for_return('') == 'thread', 'empty returns bare thread'
+	assert thread_type_for_return('void') == 'thread', 'void returns bare thread'
+	assert thread_type_for_return('int') == 'thread int', 'payload is kept'
+	assert fn_literal_return_type('fn (x int) string {') == 'string', 'literal return read'
+	assert fn_literal_return_type('fn () {') == '', 'no return is empty'
+	assert fn_literal_return_type('zzz') == '', 'no parens is empty'
+	assert (thread_array_literal_type('[]thread int{len: 2}') or { '' }) == '[]thread int', 'thread array kept'
+	assert (thread_array_literal_type('[]int{}') or { 'none' }) == 'none', 'plain array rejected'
+	wait_item := thread_wait_completion('thread int') or { Detail{} }
+	assert wait_item.label == 'wait', 'wait offered'
+	assert wait_item.detail == 'fn (t thread int) wait() int', 'wait signature typed'
+	assert (thread_wait_completion('int') or { Detail{ label: 'none' } }).label == 'none', 'non thread rejected'
+	assert (channel_literal_type('chan int{cap: 1}') or { '' }) == 'chan int', 'chan type kept'
+	assert (channel_literal_type('int') or { 'none' }) == 'none', 'non chan rejected'
+	assert (receiver_literal_type('true') or { '' }) == 'bool', 'bool literal'
+	assert (receiver_literal_type('5') or { '' }) == 'int', 'int literal'
+	assert (receiver_literal_type('1.5') or { '' }) == 'f64', 'float literal'
+	assert (receiver_literal_type("'hi'") or { '' }) == 'string', 'string literal'
+	assert (receiver_literal_type('`a`') or { '' }) == 'rune', 'rune literal'
+	assert (receiver_literal_type("'a' + b") or { 'none' }) == 'none', 'expression rejected'
+}
+
+fn test_cov_selector_match_and_array_helpers() {
+	assert trailing_selector('if p.color') == 'p.color', 'chain at the end'
+	assert trailing_selector('x') == 'x', 'bare name'
+	assert trailing_selector('') == '', 'empty has no selector'
+	assert (enclosing_match_subject(['match x {', '\t1: 1'], 1) or { '' }) == 'x', 'match subject found'
+	assert (enclosing_match_subject(['fn main() {', '}'], 1) or { 'none' }) == 'none', 'no match above'
+	assert (array_literal_type('[1, 2]') or { '' }) == '[]int', 'inferred element type'
+	assert (array_literal_type('[]string{}') or { '' }) == '[]string', 'written element type'
+	assert (array_literal_type('x') or { 'none' }) == 'none', 'non array rejected'
+	assert struct_literal_type_before(['x := User{'], 1, '') == 'User', 'literal type before brace'
+	assert struct_literal_type_before([]string{}, 0, '') == '', 'no brace means no type'
+}
+
+fn test_cov_parameter_parts() {
+	mod1, name1, typ1 := parameter_parts('mut buf []u8')
+	assert mod1 == 'mut ' && name1 == 'buf' && typ1 == '[]u8', 'mut parameter splits'
+	mod2, name2, typ2 := parameter_parts('c chan Color')
+	assert mod2 == '' && name2 == 'c' && typ2 == 'chan Color', 'chan parameter splits'
+	_, whole_name, whole_type := parameter_parts('thread int')
+	assert whole_name == '' && whole_type == 'thread int', 'whole type has no name'
+}
+
+fn test_cov_module_completion_helpers() {
+	assert module_type_completion_name('Foo[T]') == 'Foo', 'generics stripped'
+	assert module_type_completion_name('bar') == 'bar', 'plain name kept'
+	assert module_completion_declaration('pub fn foo()', false), 'public function completes'
+	assert !module_completion_declaration('fn (u User) save()', false), 'method is no module item'
+	assert module_completion_declaration('struct Foo', false), 'struct completes'
+	assert !module_completion_declaration('x := 1', false), 'assignment is no declaration'
+	assert !module_completion_declaration('fn foo()', true), 'private hidden when public only'
+	assert const_block_assignment_name('MAX = 100') == 'MAX', 'const name read'
+	assert const_block_assignment_name('x := 1') == '', 'short declaration has no const name'
+	assert const_block_assignment_name('f(a = 1)') == '', 'nested assignment ignored'
+	assert update_expression_delimiter_depth('a(b', 0) == 1, 'opener deepens'
+	assert update_expression_delimiter_depth('a)', 1) == 0, 'closer shallows'
+	assert update_expression_delimiter_depth('x', 0) == 0, 'plain line keeps depth'
+	assert resolve_import_module_dir('definitely_not_a_module_xyz', '') == '', 'unknown module resolves nowhere'
+}
+
+fn test_cov_source_definition_support() {
+	assert source_definition_kind_is_supported(sym_kind_function), 'function supported'
+	assert source_definition_kind_is_supported(sym_kind_struct), 'struct supported'
+	assert !source_definition_kind_is_supported(999), 'unknown kind unsupported'
+	sym := make_symbol('foo', sym_kind_function, 0, 'fn foo() {}')
+	assert sym.selection_range.start.char == 3, 'selection starts at the name'
+	assert sym.selection_range.end.char == 6, 'selection ends after the name'
+	occ := [TokenOccurrence{ line: 0, start_char: 3, end_char: 6 }]
+	assert source_declaration_occurrence_is_code(sym, occ), 'matching occurrence is code'
+	assert !source_declaration_occurrence_is_code(sym, []TokenOccurrence{}), 'no occurrence is no code'
+	assert source_attribute_content_is_conditional('if debug'), 'if attribute is conditional'
+	assert !source_attribute_content_is_conditional('x'), 'plain attribute is not'
+}
+
+fn test_cov_source_occurrence_suffix_helpers() {
+	assert source_occurrence_has_colon_suffix('x: int', 1), 'colon suffix'
+	assert !source_occurrence_has_colon_suffix('x', 1), 'no colon suffix'
+	assert source_occurrence_has_dot_suffix('x.', 1), 'dot suffix'
+	assert !source_occurrence_has_dot_suffix('x', 1), 'no dot suffix'
+	assert source_occurrence_is_goto_target('goto label', 5), 'goto names its label'
+	assert !source_occurrence_is_goto_target('foo', 0), 'plain word is no goto'
+	assert source_line_is_module_or_import_declaration(['module main'], 0), 'module line'
+	assert source_line_is_module_or_import_declaration(['import os'], 0), 'import line'
+	assert source_line_is_module_or_import_declaration(['import (', 'os', ')'], 1), 'import block line'
+	assert !source_line_is_module_or_import_declaration(['x := 1'], 0), 'code is neither'
+	assert source_occurrence_has_compile_time_prefix('\$if x', 1), 'dollar prefix'
+	assert source_occurrence_has_compile_time_prefix('@[if x]', 1), 'attribute prefix'
+	assert !source_occurrence_has_compile_time_prefix('x', 0), 'plain start has no prefix'
+	assert source_line_is_hash_directive(['#flag x'], 0), 'hash directive'
+	assert !source_line_is_hash_directive(['x'], 0), 'code is no directive'
+	assert source_occurrence_is_asm_block(['asm {', 'mov'], 1, 3), 'inside asm block'
+	assert !source_occurrence_is_asm_block(['x := 1'], 0, 1), 'plain code is no asm'
+	assert source_occurrence_is_sql_expression(['sql db {', 'select'], 1, 2), 'inside sql block'
+	assert !source_occurrence_is_sql_expression(['x := 1'], 0, 1), 'plain code is no sql'
+	assert source_occurrence_is_interface_method_signature(['interface Foo {', '\tfoo()'], 1,
+		1, 4), 'method inside interface'
+	assert !source_occurrence_is_interface_method_signature(['fn foo()'], 0, 3, 6), 'plain fn is no method'
+	assert source_occurrence_is_enum_member_declaration('module m\n\nenum Color {\n\tred\n}\n',
+		'red', 3), 'enum member found'
+	assert !source_occurrence_is_enum_member_declaration('module m\n\nfn foo() {}\n', 'red',
+		1), 'missing member rejected'
+	assert source_occurrence_is_generic_parameter(['fn foo[T](x T) {}'], 0, 7, 8), 'generic parameter'
+	assert !source_occurrence_is_generic_parameter(['x := 1'], 0, 0, 1), 'plain code has none'
+}
+
+fn test_cov_name_needs_other_defines() {
+	assert name_needs_other_defines('foo_d_linux.c.v'), 'unknown define needed'
+	assert !name_needs_other_defines('foo_d_v3_backend.c.v'), 'own define needs nothing'
+	assert !name_needs_other_defines('plain.v'), 'plain file needs nothing'
+	assert name_needs_other_defines('x_notd_v3_backend.c.v'), 'negated own define needed'
+}
+
+fn test_cov_doc_comment_helpers() {
+	assert doc_comment_markdown(['hello']) == 'hello', 'single line'
+	assert doc_comment_markdown(['a', 'b']) == 'a  \nb', 'lines break hard'
+	assert doc_comment_markdown(['Example: foo()']) == 'Example:  \n```v\nfoo()\n```', 'example fenced'
+	assert (inline_doc_example('Example: foo()') or { '' }) == 'foo()', 'example code read'
+	assert (inline_doc_example('hello') or { 'none' }) == 'none', 'plain line is no example'
+	assert (inline_doc_example('Example: ') or { 'none' }) == 'none', 'empty example rejected'
+}
+
+fn test_cov_parse_fn_signatures_into() {
+	mut index := map[string]string{}
+	content := 'pub fn greet(name string) string {\n}\nfn (u User) save() int {\n}\nfn multi() (int, int) {\n}\nfn novoid() {\n}\n'
+	parse_fn_signatures_into(content, 'mymod', mut index)
+	assert index['greet'] == 'string', 'return type indexed'
+	assert index['mymod.greet'] == 'string', 'module qualified entry'
+	assert !('save' in index), 'methods skipped'
+	assert !('multi' in index), 'multi return skipped'
+	assert !('novoid' in index), 'void skipped'
+}
+
+fn test_cov_make_symbol_variants() {
+	method_sym := make_symbol('save', sym_kind_method, 0, 'fn (u User) save() {}')
+	// 'save' starts at column 12 in 'fn (u User) save() {}'.
+	assert method_sym.selection_range.start.char == 12, 'method name after receiver'
+	assert method_sym.selection_range.end.char == 16, 'method selection spans the name'
+	generic_sym := make_symbol('Foo[T]', sym_kind_struct, 1, 'struct Foo[T] {}')
+	assert generic_sym.name == 'Foo[T]', 'full name kept'
+	assert generic_sym.selection_range.start.char == 7, 'generic selection strips params'
+}
+
+fn test_cov_anchor_and_line_endings() {
+	mk_loc := fn (uri string, line int, charac int) Location {
+		return Location{
+			uri:   uri
+			range: LSPRange{
+				start: Position{ line: line, char: charac }
+				end:   Position{ line: line, char: charac + 1 }
+			}
+		}
+	}
+	assert same_anchor_location(mk_loc('file:///a.v', 1, 5), mk_loc('file:///a.v', 1, 6)), 'one unit drift matches'
+	assert !same_anchor_location(mk_loc('file:///a.v', 1, 5), mk_loc('file:///a.v', 1, 7)), 'two units differ'
+	assert !same_anchor_location(mk_loc('file:///a.v', 1, 5), mk_loc('file:///b.v', 1, 5)), 'other file differs'
+	assert line_ending_after_line('a\r\nb\r\n', 0) == '\r\n', 'crlf kept'
+	assert line_ending_after_line('a\nb\n', 0) == '\n', 'lf kept'
+	assert line_ending_after_line('a', 0) == '\n', 'no break defaults to lf'
+}
+
+fn test_cov_normalize_and_client_caps() {
+	if path := normalize_workspace_root('C:\\proj') {
+		assert path == 'C:\\proj', 'root kept'
+	} else {
+		assert false, 'root must resolve'
+	}
+	assert (normalize_workspace_root('  ') or { 'fallback' }) == 'fallback', 'blank is none'
+	assert (normalize_workspace_root('/') or { 'fallback' }) == 'fallback', 'slash is none'
+	assert !client_supports_dynamic_watched_files_registration(InitializeParams{}), 'no caps means no watching'
+	assert client_supports_dynamic_watched_files_registration(InitializeParams{
+		capabilities: ClientCapabilities{
+			workspace: WorkspaceClientCapabilities{
+				did_change_watched_files: DidChangeWatchedFilesClientCapabilities{
+					dynamic_registration: true
+				}
+			}
+		}
+	}), 'watching advertised'
+	assert !client_supports_work_done_progress(InitializeParams{}), 'no caps means no progress'
+	assert client_supports_work_done_progress(InitializeParams{
+		capabilities: ClientCapabilities{
+			window: WindowClientCapabilities{
+				work_done_progress: true
+			}
+		}
+	}), 'progress advertised'
+	assert resolve_initialize_workspace_roots(InitializeParams{
+		root_path: 'C:\\proj'
+	}) == ['C:\\proj'], 'root path resolves'
+	assert resolve_initialize_workspace_roots(InitializeParams{}).len == 0, 'no roots without params'
+}
+
+fn test_cov_workspace_settings() {
+	mut resolved := ResolvedWorkspaceSettings{}
+	merge_workspace_settings(mut resolved, true, false)
+	assert resolved.has_inlay_hints, 'inlay hints recorded'
+	assert (resolved.inlay_hints or { false }) == true, 'inlay hints set'
+	assert resolved.has_diagnostics, 'diagnostics recorded'
+	assert (resolved.diagnostics or { true }) == false, 'diagnostics set'
+	merge_workspace_settings(mut resolved, false, true)
+	assert (resolved.inlay_hints or { false }) == true
+		&& (resolved.diagnostics or { true }) == false, 'first write wins'
+	empty := resolve_workspace_settings('{}')
+	assert !empty.has_inlay_hints && !empty.has_diagnostics, 'empty json sets nothing'
+}
+
+fn test_cov_code_lens_helpers() {
+	assert code_lens_fn_name('fn main() {}') == 'main', 'main found'
+	assert code_lens_fn_name('pub fn run() {}') == 'run', 'pub stripped'
+	assert code_lens_fn_name('fn (u User) save() {}') == '', 'methods skipped'
+	assert code_lens_fn_name('x := 1') == '', 'code is no function'
+	lens_range := code_lens_range(2, 'fn main() {}', .utf8)
+	assert lens_range.start.line == 2 && lens_range.start.char == 0, 'lens starts the line'
+	assert lens_range.end.char == 12, 'lens spans the line'
+}
+
+fn test_cov_static_method_doc() {
+	assert static_method_doc_symbol_at('User.create', 5, 'create') == 'User.create', 'receiver qualifies symbol'
+	assert static_method_doc_symbol_at('x', 0, 'x') == 'x', 'bare word is kept'
+}
+
+fn test_cov_on_initialize_and_workspace() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	if msg := app.on_initialize(Request{
+		id:     1
+		method: 'initialize'
+		params: '{}'
+	}) {
+		assert msg == '', 'unexpected initialize error: ${msg}'
+	}
+	if msg := app.on_initialize(Request{
+		id:     2
+		method: 'initialize'
+		params: 'not json at all {'
+	}) {
+		assert msg.contains('Invalid initialize params'), 'bad params reported'
+	} else {
+		assert false, 'bad params must error'
+	}
+	root := os.join_path(app.temp_dir, 'cov_ws')
+	must_mkdir_all(root)
+	app.workspace_roots = [root]
+	assert app.workspace_root_containing(os.join_path(root, 'a.v')) == root, 'file maps to its root'
+	assert app.workspace_root_containing(os.join_path(app.temp_dir, 'elsewhere', 'a.v')) == '', 'outside maps nowhere'
+}
+
+fn test_cov_indexed_definition_visibility() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	uri := 'file:///cov_pub.v'
+	content := 'pub fn foo() {}\n'
+	app.open_files[uri] = content
+	sym := make_symbol('foo', sym_kind_function, 0, 'pub fn foo() {}')
+	assert source_declaration_is_public(uri, sym, app), 'pub line is public'
+	priv_uri := 'file:///cov_priv.v'
+	app.open_files[priv_uri] = 'fn bar() {}\n'
+	priv_sym := make_symbol('bar', sym_kind_function, 0, 'fn bar() {}')
+	assert !source_declaration_is_public(priv_uri, priv_sym, app), 'plain line is private'
+}
+
+fn test_cov_search_doc_in_vlib_dir() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	dir := os.join_path(app.temp_dir, 'covdoc')
+	must_mkdir_all(dir)
+	must_write_file(os.join_path(dir, 'mymod.v'), '// does things\nfn myhelper() int {\n\treturn 1\n}\n')
+	found := search_doc_in_vlib_dir(dir, 'myhelper')
+	assert found.contains('does things'), 'doc comment found'
+	assert search_doc_in_vlib_dir(dir, 'nosuchfn') == '', 'missing symbol finds nothing'
+}
+
+fn test_cov_receiver_rhs_helpers() {
+	assert receiver_rhs_has_open_delimiter('foo('), 'open paren'
+	assert receiver_rhs_has_open_delimiter('a[0'), 'open bracket'
+	assert receiver_rhs_has_open_delimiter('a{'), 'open brace'
+	assert !receiver_rhs_has_open_delimiter('foo'), 'balanced rhs'
+	assert !receiver_rhs_has_open_delimiter(''), 'empty rhs'
+	mut scan := ImportScanState{}
+	assert receiver_rhs_needs_continuation('foo(', false, &scan), 'open delimiter continues'
+	assert receiver_rhs_needs_continuation('foo', false, &scan), 'missing expression continues'
+	assert !receiver_rhs_needs_continuation('', true, &scan), 'empty expression stops'
+	assert receiver_rhs_needs_continuation('x +', true, &scan), 'operator tail continues'
+	assert !receiver_rhs_needs_continuation('x', true, &scan), 'complete expression stops'
+}
+
+fn test_cov_struct_literal_cursor() {
+	assert struct_literal_cursor_is_at_field('User{\n', 4, ['User{']), 'field position'
+	assert !struct_literal_cursor_is_at_field('User{\nname: ', 4, ['User{', 'name: ']), 'value position'
+}
+
+fn test_cov_encode_and_col_helpers() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	uri := 'file:///cov_cols.v'
+	content := 'fn main() {}\n'
+	app.open_files[uri] = content
+	assert app.client_col_to_byte_col(uri, 0, 3) == 3, 'ascii column round trips down'
+	assert app.byte_col_to_client_col(uri, 0, 3) == 3, 'ascii column round trips up'
+	assert app.client_col_to_byte_col('file:///missing.v', 0, 3) == 3, 'missing file keeps column'
+	assert app.byte_col_to_client_col(uri, 9, 3) == 3, 'missing line keeps column'
+	diag := LSPDiagnostic{
+		range:    LSPRange{
+			start: Position{ line: 0, char: 3 }
+			end:   Position{ line: 0, char: 6 }
+		}
+		message:  'm'
+		severity: 1
+	}
+	encoded := app.encode_diagnostic_range(diag, ['fn main() {}'])
+	assert encoded.range.start.char == 3 && encoded.range.end.char == 6, 'ascii range kept'
+	assert encoded.message == 'm', 'payload carried over'
+	outside := app.encode_diagnostic_range(diag, []string{})
+	assert outside.range.start.char == 3, 'missing lines keep the range'
+}
+
+fn test_cov_code_lens_command_target() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	_, _, missing := app.code_lens_command_target([]string{})
+	assert missing == 'missing file argument', 'empty args rejected'
+	_, _, remote := app.code_lens_command_target(['https://example.com/x.v'])
+	assert remote == 'only local files can be run', 'remote files rejected'
+	_, _, gone := app.code_lens_command_target(['file:///definitely_missing_dir_xyz/main.v'])
+	assert gone.contains('file does not exist'), 'missing file rejected'
+	dir := os.join_path(app.temp_dir, 'covrun')
+	must_mkdir_all(dir)
+	path := os.join_path(dir, 'main.v')
+	must_write_file(path, 'module main\n\nfn main() {}\n')
+	_, real_path, real_err := app.code_lens_command_target([path])
+	assert real_err == '', 'real file accepted'
+	assert real_path.ends_with('main.v'), 'path kept'
+	uri := path_to_uri(path)
+	app.open_files[uri] = 'module main\n\nfn main() {}\n'
+	got_uri, _, open_err := app.code_lens_command_target([uri])
+	assert open_err == '' && got_uri == uri, 'open file resolves'
+}
+
+fn test_cov_with_builtin_calls() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	out := app.with_builtin_calls([Detail{ label: 'foo' }, Detail{ label: 'println' }])
+	assert out.map(it.label) == ['foo', 'println'], 'labels kept'
+	cached := app.builtin_call_items()
+	assert cached['println'].label == 'println', 'println declared in vlib builtin'
+}
+
+fn test_cov_organize_imports_action() {
+	uri := 'file:///cov_imports.v'
+	content := 'module m\n\nimport os\nimport json\n\nfn main() {}\n'
+	lines := content.split_into_lines()
+	if action := build_safe_organize_imports_action(uri, content, lines, .utf8) {
+		assert action.title == 'Organize Imports', 'action titled'
+		edit := action.edit or { WorkspaceEdit{} }
+		edits := edit.changes[uri] or { []TextEdit{} }
+		assert edits.len == 1, 'one edit offered'
+		assert edits[0].new_text == 'import json\nimport os', 'imports sorted'
+	} else {
+		assert false, 'unsorted imports offer an action'
+	}
+	sorted_content := 'module m\n\nimport json\nimport os\n\nfn main() {}\n'
+	if _ := build_safe_organize_imports_action(uri, sorted_content, sorted_content.split_into_lines(),
+		.utf8) {
+		assert false, 'sorted imports offer nothing'
+	}
+	if _ := build_safe_organize_imports_action(uri, 'module m\n', ['module m'], .utf8) {
+		assert false, 'no imports offer nothing'
+	}
+	scattered := 'module m\n\nimport os\n\nfn main() {}\n\nimport json\n'
+	if _ := build_safe_organize_imports_action(uri, scattered, scattered.split_into_lines(),
+		.utf8) {
+		assert false, 'scattered imports offer nothing'
+	}
+}
+
+fn test_cov_compile_time_condition() {
+	occ := [TokenOccurrence{ line: 0, start_char: 1, end_char: 3 }]
+	assert source_occurrence_is_compile_time_condition(['\$if x'], 0, 5, occ, .utf8), 'condition reaches'
+	assert !source_occurrence_is_compile_time_condition(['\$if x {', 'y'], 1, 1, occ, .utf8), 'block brace stops it'
+	assert !source_occurrence_is_compile_time_condition(['x := 1'], 0, 1, []TokenOccurrence{},
+		.utf8), 'no directive means no condition'
+}
+
+fn test_cov_potential_local_binding() {
+	generic := [TokenOccurrence{ line: 0, start_char: 7, end_char: 8 }]
+	assert source_occurrences_have_potential_local_binding(['fn foo[T](x T) {}'], generic,
+		.utf8), 'generic parameter binds'
+	call_arg := [TokenOccurrence{ line: 0, start_char: 8, end_char: 9 }]
+	assert !source_occurrences_have_potential_local_binding(['println(x)'], call_arg, .utf8), 'call argument binds nothing'
+	assert !source_occurrences_have_potential_local_binding(['x'], []TokenOccurrence{}, .utf8), 'no occurrences bind nothing'
+}
+
+fn test_cov_add_workspace_symbol() {
+	mut results := []WorkspaceSymbol{}
+	mut seen := map[string]bool{}
+	rng := LSPRange{
+		start: Position{ line: 0, char: 3 }
+		end:   Position{ line: 0, char: 6 }
+	}
+	add_workspace_symbol(mut results, mut seen, 'foo', sym_kind_function, 'file:///a.v', rng)
+	add_workspace_symbol(mut results, mut seen, 'foo', sym_kind_function, 'file:///a.v', rng)
+	assert results.len == 1, 'duplicate suppressed'
+	assert results[0].name == 'foo' && results[0].location.uri == 'file:///a.v', 'symbol kept'
+}
+
+fn test_cov_rename_conflicts_pure_helpers() {
+	// Renaming replaces the bytes of each span and nothing else.
+	single := renamed_text('fn foo() {\n\tfoo()\n}', [
+		RenameSpan{
+			line:  1
+			start: 1
+			end:   4
+		},
+	], 'bar')
+	assert single == 'fn foo() {\n\tbar()\n}', 'span renamed, rest kept'
+	multi := renamed_text('a foo b foo', [
+		RenameSpan{
+			line:  0
+			start: 2
+			end:   5
+		},
+		RenameSpan{
+			line:  0
+			start: 8
+			end:   11
+		},
+	], 'qux')
+	assert multi == 'a qux b qux', 'every span renamed'
+	assert renamed_text('hi', [
+		RenameSpan{
+			line:  5
+			start: 0
+			end:   2
+		},
+	], 'x') == 'hi', 'span past the end skipped'
+	mut check_spans := map[string][]RenameSpan{}
+	check_spans['/a.v'] = [
+		RenameSpan{
+			line:  0
+			start: 4
+			end:   7
+		},
+	]
+	rc := RenameCheck{
+		old_name: 'foo'
+		new_name: 'longer'
+		spans:    check_spans
+	}
+	assert rc.renamed_col('/a.v', 0, 2) == 2, 'column before the span kept'
+	assert rc.renamed_col('/a.v', 0, 4) == 4, 'span start kept'
+	assert rc.renamed_col('/a.v', 0, 7) == 10, 'column after the span shifted by the growth'
+	assert rc.renamed_col('/b.v', 0, 9) == 9, 'file without spans kept'
+	assert rc.original_pos(NamePos{
+		path: '/a.v'
+		line: 0
+		col:  4
+	}) == NamePos{
+		path: '/a.v'
+		line: 0
+		col:  4
+	}, 'position inside the new name maps back'
+	assert rc.original_pos(NamePos{
+		path: '/a.v'
+		line: 0
+		col:  10
+	}) == NamePos{
+		path: '/a.v'
+		line: 0
+		col:  7
+	}, 'position after the new name shifted back'
+	assert rc.original_pos(NamePos{
+		path: '/b.v'
+		line: 0
+		col:  3
+	}) == NamePos{
+		path: '/b.v'
+		line: 0
+		col:  3
+	}, 'file without spans kept'
+	assert rc.is_renamed(NamePos{
+		path: '/a.v'
+		line: 0
+		col:  4
+	}), 'span start is renamed'
+	assert !rc.is_renamed(NamePos{
+		path: '/a.v'
+		line: 0
+		col:  0
+	}), 'other column is not'
+	assert !rc.is_renamed(NamePos{
+		path: '/b.v'
+		line: 0
+		col:  4
+	}), 'other file is not'
+	assert same_name_pos(NamePos{
+		path: '/a.v'
+		line: 1
+		col:  5
+	}, NamePos{
+		path: '/a.v'
+		line: 1
+		col:  6
+	}), 'one byte of drift matches'
+	assert !same_name_pos(NamePos{
+		path: '/a.v'
+		line: 1
+		col:  5
+	}, NamePos{
+		path: '/a.v'
+		line: 1
+		col:  7
+	}), 'two bytes differ'
+	assert !same_name_pos(NamePos{
+		path: '/a.v'
+		line: 1
+		col:  5
+	}, NamePos{
+		path: '/b.v'
+		line: 1
+		col:  5
+	}), 'other file differs'
+	assert name_pos_text(NamePos{
+		path: '/tmp/proj/main.v'
+		line: 2
+		col:  6
+	}) == 'main.v:3:7', 'written from 1'
+	assert without_quoted_names('say `hi` loud') == 'say `` loud', 'quoted names dropped'
+	assert (new_check_message([], ['/tmp/main.v:4: error: boom']) or { '' }) == 'break the program: boom (main.v:4)', 'new error breaks'
+	assert (new_check_message([], ['program: warning: shaky']) or { '' }) == 'make V warn: shaky', 'program warning warns'
+	assert (new_check_message(['a `x` b'], ['a `y` b']) or { 'same' }) == 'same', 'renamed quotes compare equal'
+	assert (new_check_message(['a'], ['a']) or { 'same' }) == 'same', 'nothing new is none'
+	got_messages := check_messages('/tmp/main.v:4:7: error: boom `x`\nwarning: shaky\nnotice: fyi\n')
+	assert got_messages == ['/tmp/main.v:4: error: boom `x`', 'program: warning: shaky'], 'errors and warnings, no notices'
+	overlay := CompilationOverlay{
+		source_display_root: '/src/proj'
+		temp_root:           '/tmp/cov_overlay'
+		temp_work_dir:       '/tmp/cov_overlay'
+	}
+	if pos := parse_name_pos('/tmp/cov_overlay/main.v:3:7', overlay) {
+		assert pos.path == '/src/proj/main.v' && pos.line == 2 && pos.col == 7, 'copy position mapped back'
+	} else {
+		assert false, 'valid answer parses'
+	}
+	assert parse_name_pos('', overlay) == none, 'empty answer is none'
+	assert parse_name_pos('/tmp/x.v:3', overlay) == none, 'answer without a column is none'
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	uri := 'file:///cov_name_pos.v'
+	app.open_files[uri] = 'fn main() {}\n'
+	at := Location{
+		uri:   uri
+		range: LSPRange{
+			start: Position{ line: 0, char: 3 }
+			end:   Position{ line: 0, char: 7 }
+		}
+	}
+	named := app.name_pos_of(at)
+	assert named.line == 0 && named.col == 3, 'position in bytes'
+	assert named.path == '/cov_name_pos.v', 'path without the scheme'
+}
+
+fn test_cov_rename_pure_helpers() {
+	old_cap := os.getenv('VLS_RENAME_MAX_OCCURRENCES')
+	defer {
+		if old_cap == '' {
+			os.unsetenv('VLS_RENAME_MAX_OCCURRENCES')
+		} else {
+			os.setenv('VLS_RENAME_MAX_OCCURRENCES', old_cap, true)
+		}
+	}
+	os.unsetenv('VLS_RENAME_MAX_OCCURRENCES')
+	assert rename_max_occurrences() == reference_semantic_max_candidates, 'default cap used'
+	os.setenv('VLS_RENAME_MAX_OCCURRENCES', '5', true)
+	assert rename_max_occurrences() == 5, 'environment cap used'
+	os.setenv('VLS_RENAME_MAX_OCCURRENCES', 'many', true)
+	assert rename_max_occurrences() == reference_semantic_max_candidates, 'garbage cap ignored'
+	decl_lines := ['fn foo() {', '\tx := 1', '}', 'fn bar() {', '}']
+	assert declaration_end_line(decl_lines, decl_lines, 0) == 2, 'ends before the next declaration'
+	assert declaration_end_line(decl_lines, decl_lines, 3) == 4, 'last declaration runs on'
+	check_new_name('count', 'total') or { assert false, 'valid rename refused: ${err}' }
+	check_new_name('count', 'count') or { assert false, 'same name refused: ${err}' }
+	mut refused_empty := false
+	check_new_name('count', '') or {
+		refused_empty = true
+		assert err.msg().contains('valid'), 'empty name needs the valid-name reason'
+	}
+	assert refused_empty, 'empty name refused'
+	mut refused_keyword := false
+	check_new_name('count', 'fn') or {
+		refused_keyword = true
+		assert err.msg().contains('keyword'), 'keyword needs the keyword reason'
+	}
+	assert refused_keyword, 'keyword refused'
+	mut refused_case := false
+	check_new_name('Point', 'point') or {
+		refused_case = true
+		assert err.msg().contains('capital'), 'case needs the capital reason'
+	}
+	assert refused_case, 'capitalized type keeps its capital'
+	mut refused_lower := false
+	check_new_name('count', 'Total') or {
+		refused_lower = true
+		assert err.msg().contains('lowercase'), 'lowercase name stays lowercase'
+	}
+	assert refused_lower, 'lowercase name keeps its case'
+	str_content := 'fn f() {\n\ts := "{x}" // }\n}'
+	masked := code_only(str_content)
+	assert masked.len == str_content.len, 'masking keeps positions'
+	assert masked.contains('fn f()'), 'code kept'
+	assert !masked.contains('{x}') && !masked.contains('//'), 'strings and comments masked'
+	assert code_only('fn f() { s := "\${x}" }').contains('x'), 'interpolation is code'
+	assert in_comptime_branch(['\$if debug {', '\tx := 1', '}'], 1, 6), 'body of \$if is conditional'
+	assert !in_comptime_branch(['fn f() {', '\tx := 1', '}'], 1, 6), 'plain body is not'
+	assert declaration_receiver('fn (mut p Process) kill() {') == 'Process', 'receiver read'
+	assert declaration_receiver('pub fn (p Point) moved() Point {') == 'Point', 'pub receiver read'
+	assert declaration_receiver('fn plain() {') == '', 'plain function has none'
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	assert app.rename_anchor_cache().len == 0, 'fresh cache is empty'
+	app.keep_rename_anchors(map[string]?Location{})
+	uri := 'file:///cov_rename_helpers.v'
+	content := 'module main\n\nimport time\n\nfn f() {\n\ttime.now()\n}\n'
+	app.open_files[uri] = content
+	assert app.file_text(uri) == content, 'open buffer read'
+	assert app.index_doc_symbols(uri).len == 0, 'no index without one'
+	dot_use := Location{
+		uri:   uri
+		range: LSPRange{
+			start: Position{ line: 5, char: 6 }
+			end:   Position{ line: 5, char: 9 }
+		}
+	}
+	assert app.is_reached_through_dot(dot_use), 'name after a dot reached through it'
+	assert (app.line_text(dot_use) or { '' }) == '\ttime.now()', 'line read back'
+	assert app.line_at(dot_use) == '\ttime.now()', 'line at the location'
+	if word := app.word_location(uri, 5, 6) {
+		assert word.range.start.char == 6 && word.range.end.char == 9, 'word bounds found'
+		assert app.identifier_at(word) == 'now', 'identifier read'
+	} else {
+		assert false, 'word at the use found'
+	}
+	mod_qual := Location{
+		uri:   uri
+		range: LSPRange{
+			start: Position{ line: 5, char: 1 }
+			end:   Position{ line: 5, char: 5 }
+		}
+	}
+	assert !app.is_reached_through_dot(mod_qual), 'qualifier not reached through a dot'
+	assert app.is_module_qualifier(mod_qual), 'imported name before a dot qualifies'
+	assert !app.is_module_qualifier(dot_use), 'called name does not'
+	mod_uri := 'file:///cov_sub/mod.v'
+	app.open_files[mod_uri] = 'module mymod\n\nfn f() {}\n'
+	mod_name := Location{
+		uri:   mod_uri
+		range: LSPRange{
+			start: Position{ line: 0, char: 7 }
+			end:   Position{ line: 0, char: 12 }
+		}
+	}
+	assert app.is_module_line_occurrence(mod_name), 'module line names a module'
+	assert !app.is_module_line_occurrence(dot_use), 'call does not'
+	assert app.in_module_of(dot_use, dot_use), 'same file is its own module'
+	assert !app.in_module_of(mod_name, dot_use), 'other module is not the same'
+	assert app.line_text(Location{
+		uri:   uri
+		range: LSPRange{
+			start: Position{ line: 99, char: 0 }
+			end:   Position{ line: 99, char: 1 }
+		}
+	}) == none, 'line past the end is none'
+}
+
+fn test_cov_module_import_pure_helpers() {
+	assert attribute_value("@[deprecated_after: '2026-01-31']", 'deprecated_after') == '2026-01-31', 'single quotes read'
+	assert attribute_value('@[deprecated_after: "2026-01-31"]', 'deprecated_after') == '2026-01-31', 'double quotes read'
+	assert attribute_value('@[deprecated]', 'deprecated_after') == '', 'missing value empty'
+	assert attribute_value('', 'deprecated') == '', 'empty attribute empty'
+	after_imports := import_spot('module m\n\nimport os\n\nfn main() {}\n')
+	assert after_imports.line == 3 && after_imports.after == '\n', 'after the last import'
+	after_module := import_spot('module m\n\nfn main() {}\n')
+	assert after_module.line == 1 && after_module.before == '\n' && after_module.after == '\n', 'own paragraph after module'
+	bare_top := import_spot('fn main() {}\n')
+	assert bare_top.line == 0 && bare_top.after == '\n\n', 'top without a module'
+	edit := after_imports.edit('json')
+	assert edit.new_text == 'import json\n', 'import line written'
+	assert edit.range.start.line == 3 && edit.range.start.char == 0, 'edit at the spot'
+	str_content := 'fn main() {\n\tx := "hello"\n}\n'
+	assert position_in_string_or_comment(str_content, Position{ line: 1, char: 8 }, .utf8), 'inside a string'
+	assert !position_in_string_or_comment(str_content, Position{ line: 1, char: 2 }, .utf8), 'code is not'
+	comment_content := 'fn main() {\n\t// note\n\tx := 1\n}\n'
+	assert position_in_string_or_comment(comment_content, Position{ line: 1, char: 5 }, .utf8), 'inside a comment'
+	assert !position_in_string_or_comment(str_content, Position{ line: 0, char: 0 }, .utf8), 'start of line is not'
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	root := os.join_path(app.temp_dir, 'covimports')
+	must_mkdir_all(root)
+	must_write_file(os.join_path(root, 'main.v'), 'module main\n\nfn main() {}\n')
+	m1_dir := os.join_path(root, 'm1')
+	must_mkdir_all(m1_dir)
+	must_write_file(os.join_path(m1_dir, 'm1.v'), 'module m1\n\nimport os\n\npub fn hello() int {\n\treturn 1\n}\n')
+	m2_dir := os.join_path(root, 'm2')
+	must_mkdir_all(m2_dir)
+	must_write_file(os.join_path(m2_dir, 'm2.v'), 'module m2\n\nimport m1\n\npub fn double() int {\n\treturn 1\n}\n')
+	assert declared_module_of_dir(m1_dir) == 'm1', 'module read'
+	assert declared_module_of_dir(root) == 'main', 'file without module is main'
+	assert declared_module_of_dir(os.join_path(app.temp_dir, 'cov_missing_dir')) == '', 'missing dir empty'
+	assert module_line_attributes(os.join_path(m1_dir, 'm1.v')) == [], 'no attributes without any'
+	dep_dir := os.join_path(root, 'dep')
+	must_mkdir_all(dep_dir)
+	must_write_file(os.join_path(dep_dir, 'dep.v'), '@[deprecated]\nmodule dep\n')
+	assert module_line_attributes(os.join_path(dep_dir, 'dep.v')) == ['@[deprecated]'], 'attribute above module read'
+	dated_dir := os.join_path(root, 'dated')
+	must_mkdir_all(dated_dir)
+	must_write_file(os.join_path(dated_dir, 'dated.v'), "@[deprecated_after: '2000-01-01']\nmodule dated\n")
+	future_dir := os.join_path(root, 'future')
+	must_mkdir_all(future_dir)
+	must_write_file(os.join_path(future_dir, 'future.v'), "@[deprecated_after: '2999-01-01']\nmodule future\n")
+	dep, dep_refused := module_deprecation(dep_dir)
+	assert dep && !dep_refused, 'deprecated warns'
+	dated_dep, dated_refused := module_deprecation(dated_dir)
+	assert dated_dep && dated_refused, 'past date refuses'
+	future_dep, future_refused := module_deprecation(future_dir)
+	assert future_dep && !future_refused, 'future date still warns'
+	plain_dep, plain_refused := module_deprecation(m1_dir)
+	assert !plain_dep && !plain_refused, 'plain module is neither'
+	assert module_dir_imports(m1_dir) == ['os'], 'imports read'
+	flag_dir := os.join_path(root, 'flagged')
+	must_mkdir_all(flag_dir)
+	must_write_file(os.join_path(flag_dir, 'x_notd_flag.v'), "\$compile_error('needs -d flag')\nmodule flagged\n")
+	assert module_needs_flag(flag_dir), 'guarded file needs a flag'
+	assert !module_needs_flag(m1_dir), 'plain module needs none'
+	mut found := []ImportableModule{}
+	mut seen_paths := map[string]bool{}
+	mut seen_dirs := map[string]bool{}
+	collect_importable_modules(root, '', .project, 0, mut found, mut seen_paths, mut seen_dirs)
+	assert found.any(it.path == 'm1'), 'nested module collected'
+	m1_mod := ImportableModule{
+		path:   'm1'
+		name:   'm1'
+		dir:    os.real_path(m1_dir)
+		origin: .project
+	}
+	m2_mod := ImportableModule{
+		path:   'm2'
+		name:   'm2'
+		dir:    os.real_path(m2_dir)
+		origin: .project
+	}
+	assert app.module_imports_of(m1_mod) == ['os'], 'cached imports read'
+	reaching := app.modules_reaching([m1_mod], [m1_mod, m2_mod])
+	assert reaching['m2'], 'importer reaches the module'
+	assert m1_mod.dir in app.module_imports_cache, 'imports cached'
+	app.forget_module_folder(os.join_path(m1_dir, 'm1.v'))
+	assert m1_mod.dir !in app.module_imports_cache, 'forgotten folder dropped'
+	main_path := os.join_path(root, 'main.v')
+	offered := app.importable_modules(main_path)
+	assert offered.any(it.path == 'm1'), 'project module offered'
+	assert offered.any(it.path == 'os'), 'vlib module offered'
+	assert app.cached_importable_modules(root).any(it.path == 'm1'), 'cached project module'
+	completions := app.module_import_completions(path_to_uri(main_path), 'module main\n\nfn main() {}\n',
+		Position{ line: 2, char: 0 })
+	assert completions.any(it.label == 'm1'), 'missing module completed'
+	line_items := app.import_line_module_completions(main_path, 'import m')
+	assert line_items.any(it.label == 'm1'), 'import line completed by segment'
+}
+
+fn test_cov_expression_type_constructors() {
+	field := language_field('array fixed', 'len', 'int')
+	assert field.kinds == ['array', 'fixed'] && field.name == 'len' && field.ret == 'int' && field.is_field, 'field built'
+	method := language_method('array', 'first', '', '{E}')
+	assert method.kinds == ['array'] && method.name == 'first' && method.params == '' && method.ret == '{E}' && !method.is_field && !method.is_static, 'method built'
+	on := language_method_on('flag', 'e &{T}', 'has', 'flag_ {T}', 'bool')
+	assert on.receiver == 'e &{T}' && on.name == 'has' && on.params == 'flag_ {T}' && on.ret == 'bool', 'receiver method built'
+	enum_static := language_static('enum', 'from', '[W]', 'input W', '!{T}')
+	assert enum_static.generic == '[W]' && enum_static.is_static && enum_static.name == 'from', 'static built'
+	assert language_receiver_name(['array']) == 'a', 'array receiver'
+	assert language_receiver_name(['fixed']) == 'a', 'fixed receiver'
+	assert language_receiver_name(['map']) == 'm', 'map receiver'
+	assert language_receiver_name(['chan']) == 'ch', 'channel receiver'
+	assert language_receiver_name(['enum']) == 'e', 'enum receiver'
+	assert language_receiver_name(['sum']) == 'x', 'sum receiver'
+	assert composite_member_kinds('typeof') == ['typeof'], 'typeof kinds'
+	assert composite_member_kinds('[]string') == ['array', 'array_string', 'printable'], 'string array kinds'
+	assert composite_member_kinds('[]int') == ['array', 'printable'], 'array kinds'
+	assert composite_member_kinds('[10]int') == ['fixed', 'printable'], 'fixed kinds'
+	assert composite_member_kinds('map[string]int') == ['map', 'printable'], 'map kinds'
+	assert composite_member_kinds('chan int') == ['chan'], 'channel kinds'
+	assert composite_member_kinds('int') == []string{}, 'named type has none'
+	map_elem, map_key, map_value := composite_type_parts('map[string]int')
+	assert map_elem == '' && map_key == 'string' && map_value == 'int', 'map parts'
+	arr_elem, arr_key, arr_value := composite_type_parts('[]int')
+	assert arr_elem == 'int' && arr_key == '' && arr_value == '', 'array element'
+	chan_elem, chan_key, chan_value := composite_type_parts('chan int')
+	assert chan_elem == 'int' && chan_key == '' && chan_value == '', 'channel element'
+	assert member_receiver_type('mut &?Point') == 'Point', 'modifiers stripped'
+	assert member_receiver_type('shared []int') == '[]int', 'shared stripped'
+	assert member_receiver_type('int') == 'int', 'plain kept'
+	assert type_modifiers('&Point') == '&', 'reference kept'
+	assert type_modifiers('?&Point') == '?&', 'option reference kept'
+	assert type_modifiers('Point') == '', 'plain has none'
+	assert slice_result_type('[]int') == '[]int', 'array slices to array'
+	assert slice_result_type('[10]int') == '[]int', 'fixed slices to array'
+	assert slice_result_type('int') == 'int', 'plain is no slice'
+	assert unwrap_option_type('?Point') == 'Point', 'option unwrapped'
+	assert unwrap_option_type('!Point') == 'Point', 'result unwrapped'
+	assert unwrap_option_type('Point') == 'Point', 'plain kept'
+	assert index_expression_type('string') == 'u8', 'string indexes to a byte'
+	assert index_expression_type('[]int') == 'int', 'array element'
+	assert index_expression_type('map[string]int') == 'int', 'map value'
+	assert is_type_name('Point'), 'capitalized is a type'
+	assert is_type_name('time.Time'), 'qualified type'
+	assert !is_type_name('point'), 'lowercase is not'
+	assert !is_type_name(''), 'empty is not'
+	assert declaration_has_attribute(['@[flag]', 'enum Color {'], 1, 'flag'), 'new attribute style'
+	assert declaration_has_attribute(['[flag]', 'enum Color {'], 1, 'flag'), 'old attribute style'
+	assert !declaration_has_attribute(['fn f() {}'], 0, 'flag'), 'no line above'
+	assert !declaration_has_attribute(['@[other]', 'struct S {}'], 1, 'flag'), 'other attribute'
+	assert declaration_member_kinds(TypeDeclaration{
+		kind:    'enum'
+		is_flag: true
+	}) == ['enum', 'flag', 'printable'], 'flag kinds'
+	assert declaration_member_kinds(TypeDeclaration{
+		kind: 'enum'
+	}) == ['enum', 'printable'], 'enum kinds'
+	assert declaration_member_kinds(TypeDeclaration{
+		kind: 'sum'
+	}) == ['sum', 'printable'], 'sum kinds'
+	assert declaration_member_kinds(TypeDeclaration{
+		kind: 'struct'
+	}) == ['printable'], 'struct kinds'
+	assert declaration_member_kinds(TypeDeclaration{}) == []string{}, 'unknown has none'
+	assert signature_fn_type('fn (u User) greet(name string) string') == 'fn (name string) string', 'receiver dropped'
+	assert signature_fn_type('pub fn run(port int) !int') == 'fn (port int) !int', 'pub dropped'
+	assert signature_fn_type('x := 1') == '', 'no signature'
+	assert signature_return_type('fn (p Point) moved() Point') == 'Point', 'method result'
+	assert signature_return_type('fn serve(port int) !http.Server') == '!http.Server', 'result kept'
+	assert signature_return_type('fn main()') == '', 'no result'
+	assert qualify_member_type('Duration', 'time.Time') == 'time.Duration', 'member qualified'
+	assert qualify_member_type('Time', 'Point') == 'Time', 'unqualified owner kept'
+	assert qualify_member_type('int', 'time.Time') == 'int', 'builtin kept'
+	assert top_level_slice_range('1..5'), 'range found'
+	assert !top_level_slice_range('a.b'), 'single dot is not'
+	assert !top_level_slice_range('f(1..2)'), 'nested range hidden'
+}
+
+fn test_cov_expression_text_helpers() {
+	assert expression_start_before('foo.bar', 7) == 0, 'dotted chain from the start'
+	assert expression_start_before('a + b', 5) == 4, 'operand after the operator'
+	assert opening_delimiter_before('(a)', 2) == 0, 'matching paren'
+	assert opening_delimiter_before('abc', 2) == -1, 'no delimiter'
+	assert (string_literal_end("'hi'") or { -1 }) == 4, 'single quoted'
+	assert (string_literal_end('"hi"') or { -1 }) == 4, 'double quoted'
+	assert (string_literal_end('nose') or { -1 }) == -1, 'no literal'
+	typ, after := type_at('int rest', 0)
+	assert typ == 'int' && after == 3, 'plain type'
+	arr_typ, arr_after := type_at('[]int rest', 0)
+	assert arr_typ == '[]int' && arr_after == 5, 'array type'
+	map_typ, map_after := type_at('map[string]int x', 0)
+	assert map_typ == 'map[string]int' && map_after == 14, 'map type'
+	empty_typ, empty_after := type_at('', 0)
+	assert empty_typ == '' && empty_after == 0, 'empty has none'
+	assert (function_literal_type('fn (a int) string { return a }') or { '' }) == 'fn (a int) string', 'literal with result'
+	assert (function_literal_type('fn [x] (a int) { }') or { '' }) == 'fn (a int)', 'captures dropped'
+	assert (function_literal_type('plain') or { 'none' }) == 'none', 'no literal'
+	assert without_trailing_comment('x := 1 // done') == 'x := 1 ', 'comment dropped'
+	assert without_trailing_comment('s := "a//b"') == 's := "a//b"', 'comment in string kept'
+	typeof_typ, typeof_rest := typeof_operand('(x) tail')
+	assert typeof_typ == 'typeof' && typeof_rest == ' tail', 'typeof operand'
+	bad_typ, bad_rest := typeof_operand('x')
+	assert bad_typ == '' && bad_rest == 'x', 'no operand'
+	assert binary_result_type('int', '== 1') == 'bool', 'comparison is bool'
+	assert binary_result_type('int', '+ 1') == 'int', 'arithmetic keeps the type'
+	assert binary_result_type('int', 'foo') == '', 'unknown operator'
+	assert (is_check_type('if x is Point', 'x') or { '' }) == 'Point', 'smart cast read'
+	assert (is_check_type('fn f()', 'x') or { 'none' }) == 'none', 'no check'
+	assert (match_header_subject('match x') or { '' }) == 'x', 'match subject'
+	assert (match_header_subject('match mut y') or { '' }) == 'y', 'mut subject'
+	assert (match_header_subject('fn f()') or { 'none' }) == 'none', 'no match'
+	assert (smart_cast_type(['if x is Point {', '\ty := x'], Position{ line: 1, char: 6 }, 'x',
+		.utf8) or { '' }) == 'Point', 'narrowed in if is'
+	assert (smart_cast_type(['fn f() {', '\tx := 1'], Position{ line: 1, char: 6 }, 'x',
+		.utf8) or { 'none' }) == 'none', 'no narrowing'
+	no_params := callable_member_item('clone', 'fn (a []int) clone() []int', '', 'int', 2)
+	assert (no_params.insert_text or { '' }) == 'clone()' && (no_params.insert_text_format or { 0 }) == 1, 'call without parameters'
+	callback := callable_member_item('filter', 'fn (a []int) filter(predicate fn (int) bool) []int',
+		'predicate fn (int) bool', 'int', 2)
+	assert (callback.insert_text or { '' }) == 'filter(fn (x int) bool {\n\t\$0\n})' && (callback.insert_text_format or { 0 }) == 2, 'callback skeleton inserted'
+	placeholder := callable_member_item('repeat', 'fn (a []int) repeat(count int) []int', 'count int',
+		'int', 2)
+	assert (placeholder.insert_text or { '' }) == 'repeat(\${1:count})\$0' && (placeholder.insert_text_format or { 0 }) == 2, 'first parameter as placeholder'
+	assert (callback_skeleton_text('fn (int) bool', 'int') or { '' }) == 'fn (x int) bool {\n\t\$0\n}', 'skeleton text'
+	assert (callback_skeleton_text('nope', 'int') or { 'none' }) == 'none', 'no skeleton'
+	members := language_member_items('[]int', ['array', 'printable'], false)
+	assert members.any(it.label == 'len'), 'array field offered'
+	assert members.any(it.label == 'filter'), 'array method offered'
+	statics := language_member_items('Color', ['enum', 'printable'], true)
+	assert statics.any(it.label == 'from'), 'enum static offered'
+	assert !language_member_items('[]int', ['array', 'printable'], true).any(it.label == 'len'), 'values hide statics'
+}
+
+fn test_cov_make_unique_temp_path_sequentially_distinct() {
+	// Windows reports the same `unix_nano` tick for thousands of consecutive
+	// calls, so the timestamp alone cannot separate two temp paths. The
+	// per-process counter suffix does: 50 sequential calls must all differ.
+	mut seen := map[string]bool{}
+	for _ in 0 .. 50 {
+		path := make_unique_temp_path('cov', '/tmp/example.v')
+		assert path !in seen, 'duplicate temp path: ${path}'
+		assert path.ends_with('.v') && path.contains('cov_'), 'tag and extension kept'
+		assert path.contains(os.getpid().str()), 'pid tagged'
+		seen[path] = true
+	}
+	assert seen.len == 50, 'every call unique'
+}
+
+fn test_completion_cold_open_sees_unopened_sibling_banner() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	// vlang/vls#473: banner.v and main.v share one `module main` directory.
+	// Only main.v is opened; banner.v stays on disk and the index starts empty.
+	project_dir := os.join_path(app.temp_dir, 'banner_cold_open_completion')
+	must_mkdir_all(project_dir)
+	banner_path := os.join_path(project_dir, 'banner.v')
+	main_path := os.join_path(project_dir, 'main.v')
+	must_write_file(banner_path, 'module main\n\npub fn banner() string {\n\treturn "hi"\n}\n')
+	main_content := 'module main\n\nfn main() {\n\tban\n}\n'
+	must_write_file(main_path, main_content)
+	main_uri := path_to_uri(main_path)
+	app.open_files[main_uri] = main_content
+	app.text = main_content
+	assert app.symbol_index.len == 0, 'index starts empty on cold open'
+	response := app.operation_at_pos(.completion, Request{
+		id:     1
+		method: 'textDocument/completion'
+		params: json2.encode(Params{
+			text_document: TextDocumentIdentifier{
+				uri: main_uri
+			}
+			position:      Position{
+				line: 3
+				char: 4
+			}
+		},
+			escape_unicode: true
+		)
+	})
+	assert response.id == 1, 'response id echoes'
+	assert response.result is CompletionList, 'completion answers a list on cold open'
+	labels := (response.result as CompletionList).items.map(it.label)
+	assert 'banner' in labels, 'unopened sibling fn banner offered on cold open'
+}
+
+fn test_definition_cold_open_resolves_unopened_sibling_banner() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	// vlang/vls#473: same cold-open shape as the completion test, but the
+	// cursor sits on the `banner()` call and must resolve into banner.v.
+	project_dir := os.join_path(app.temp_dir, 'banner_cold_open_definition')
+	must_mkdir_all(project_dir)
+	banner_path := os.join_path(project_dir, 'banner.v')
+	main_path := os.join_path(project_dir, 'main.v')
+	must_write_file(banner_path, 'module main\n\npub fn banner() string {\n\treturn "hi"\n}\n')
+	main_content := 'module main\n\nfn main() {\n\tbanner()\n}\n'
+	must_write_file(main_path, main_content)
+	main_uri := path_to_uri(main_path)
+	app.open_files[main_uri] = main_content
+	app.text = main_content
+	assert app.symbol_index.len == 0, 'index starts empty on cold open'
+	location := app.resolve_indexed_definition(main_uri, Position{
+		line: 3
+		char: 3
+	}) or {
+		assert false, 'cold-open definition of banner resolves into banner.v'
+		return
+	}
+	assert location.uri == path_to_uri(banner_path), 'definition points at the sibling file'
+	assert location.range.start.line == 2, 'definition points at the banner declaration'
+}
+
+fn test_diagnostics_cold_open_resolves_sibling_banner_call() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	// vlang/vls#473: on a cold open only main.v is open; its `banner()` call
+	// must not be reported as unknown while banner.v sits beside it on disk.
+	project_dir := os.join_path(app.temp_dir, 'banner_cold_open_diagnostics')
+	must_mkdir_all(project_dir)
+	banner_path := os.join_path(project_dir, 'banner.v')
+	main_path := os.join_path(project_dir, 'main.v')
+	must_write_file(banner_path, 'module main\n\npub fn banner() string {\n\treturn "hi"\n}\n')
+	main_content := 'module main\n\nfn main() {\n\tbanner()\n}\n'
+	must_write_file(main_path, main_content)
+	main_uri := path_to_uri(main_path)
+	app.open_files[main_uri] = main_content
+	app.text = main_content
+	errors := app.run_v_check(main_uri, main_content)
+	assert !errors.any(it.message.contains('banner')), 'sibling call resolves on cold open'
+}
+
+fn test_cold_open_via_did_open_sees_sibling_banner() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	// vlang/vls#473 through the real open handler: main.v opens with no text
+	// payload (read from disk) and no edit follows; banner.v stays unopened.
+	// Completion and definition must both see the sibling straight away.
+	project_dir := os.join_path(app.temp_dir, 'banner_cold_open_did_open')
+	must_mkdir_all(project_dir)
+	banner_path := os.join_path(project_dir, 'banner.v')
+	main_path := os.join_path(project_dir, 'main.v')
+	must_write_file(banner_path, 'module main\n\npub fn banner() string {\n\treturn "hi"\n}\n')
+	main_content := 'module main\n\nfn main() {\n\tbanner()\n}\n'
+	must_write_file(main_path, main_content)
+	main_uri := path_to_uri(main_path)
+	app.on_did_open(Request{
+		params: json2.encode(Params{
+			text_document: TextDocumentIdentifier{
+				uri: main_uri
+			}
+		},
+			escape_unicode: true
+		)
+	})
+	assert main_uri in app.open_files, 'main.v is tracked after open'
+	assert app.symbol_index.len == 0, 'index starts empty on cold open'
+	response := app.operation_at_pos(.completion, Request{
+		id:     1
+		method: 'textDocument/completion'
+		params: json2.encode(Params{
+			text_document: TextDocumentIdentifier{
+				uri: main_uri
+			}
+			position:      Position{
+				line: 3
+				char: 4
+			}
+		},
+			escape_unicode: true
+		)
+	})
+	assert response.result is CompletionList, 'completion answers a list on cold open'
+	labels := (response.result as CompletionList).items.map(it.label)
+	assert 'banner' in labels, 'unopened sibling fn banner offered on cold open'
+	location := app.resolve_indexed_definition(main_uri, Position{
+		line: 3
+		char: 3
+	}) or {
+		assert false, 'cold-open definition of banner resolves into banner.v'
+		return
+	}
+	assert location.uri == path_to_uri(banner_path), 'definition points at the sibling file'
+	assert location.range.start.line == 2, 'definition points at the banner declaration'
+}
+
+fn test_inlay_hint_toggles_default_to_enabled() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	toggles := app.inlay_hint_toggles()
+	assert toggles.variable_types, 'variable type hints are enabled by default'
+	assert toggles.parameter_names, 'parameter name hints are enabled by default'
+	uri := 'file:///test_inlay_toggles_default.v'
+	content := 'module main\n\nfn main() {\n\tx := 42\n}\n'
+	app.open_files[uri] = content
+	hints := inlay_hints_request(mut app, uri, content)
+	assert hints.len == 1, 'expected one heuristic type hint, got ${hints.len}'
+	assert hints[0].kind == inlay_hint_kind_type, 'the heuristic hint is a type hint'
+	assert hints[0].label == ': int', 'the heuristic hint labels the int type, got ${hints[0].label}'
+}
+
+fn test_inlay_hint_variable_types_toggle_filters_type_hints() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	uri := 'file:///test_inlay_toggles_variable_types.v'
+	content := 'module main\n\nfn main() {\n\tx := 42\n}\n'
+	app.open_files[uri] = content
+	assert inlay_hints_request(mut app, uri, content).len == 1, 'baseline shows the type hint'
+	app.on_did_change_configuration(Request{
+		method: 'workspace/didChangeConfiguration'
+		params: '{"settings":{"vls":{"inlayHints":{"variableTypes":false}}}}'
+	})
+	assert !app.inlay_hint_toggles().variable_types, 'variableTypes:false is stored'
+	assert app.inlay_hint_toggles().parameter_names, 'parameterNames stays enabled'
+	assert app.inlay_hints_enabled, 'a sub-option leaves the master switch untouched'
+	assert inlay_hints_request(mut app, uri, content).len == 0, 'a disabled type hint filters out'
+	app.on_did_change_configuration(Request{
+		method: 'workspace/didChangeConfiguration'
+		params: '{"settings":{"vls":{"inlayHints":{"variableTypes":true}}}}'
+	})
+	assert app.inlay_hint_toggles().variable_types, 'variableTypes:true re-enables without restart'
+	assert inlay_hints_request(mut app, uri, content).len == 1, 'a re-enabled type hint shows again'
+}
+
+fn test_inlay_hint_parameter_names_toggle_filters_parameter_hints() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	uri := 'file:///test_inlay_toggles_parameter_names.v'
+	content := 'module main\n\nfn main() {}\n'
+	app.open_files[uri] = content
+	app.inlay_hint_cache[uri] = CachedInlayHints{
+		stamp: app.inlay_hint_stamp(uri, content)
+		hints: [
+			InlayHint{
+				position: Position{
+					line: 2
+					char: 10
+				}
+				label:    ': string'
+				kind:     inlay_hint_kind_type
+			},
+			InlayHint{
+				position: Position{
+					line: 2
+					char: 16
+				}
+				label:    'name: '
+				kind:     inlay_hint_kind_parameter
+			},
+		]
+	}
+	labels := inlay_hints_request(mut app, uri, content).map(it.label)
+	assert ': string' in labels, 'baseline shows the type hint: ${labels}'
+	assert 'name: ' in labels, 'baseline shows the parameter hint: ${labels}'
+	app.on_did_change_configuration(Request{
+		method: 'workspace/didChangeConfiguration'
+		params: '{"settings":{"vls":{"inlayHints":{"parameterNames":false}}}}'
+	})
+	filtered := inlay_hints_request(mut app, uri, content).map(it.label)
+	assert filtered == [': string'], 'only the parameter hint filters out: ${filtered}'
+	app.on_did_change_configuration(Request{
+		method: 'workspace/didChangeConfiguration'
+		params: '{"settings":{"vls":{"inlayHints":{"parameterNames":true}}}}'
+	})
+	restored := inlay_hints_request(mut app, uri, content).map(it.label)
+	assert restored.len == 2, 'a re-enabled parameter hint shows again: ${restored}'
+}
+
+fn test_inlay_hint_toggles_ignore_unknown_keys() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	app.on_did_change_configuration(Request{
+		method: 'workspace/didChangeConfiguration'
+		params: '{"settings":{"vls":{"inlayHints":{"variableTypes":false,"futureKind":true,"nested":{"deep":true}}}}}'
+	})
+	toggles := app.inlay_hint_toggles()
+	assert !toggles.variable_types, 'a known sub-option applies despite unknown siblings'
+	assert toggles.parameter_names, 'parameterNames stays enabled'
+	assert app.inlay_hints_enabled, 'unknown keys never touch the master switch'
+}
+
+fn test_inlay_hint_toggles_cover_all_configuration_shapes() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	// Direct settings shape without the `vls` section.
+	app.on_did_change_configuration(Request{
+		method: 'workspace/didChangeConfiguration'
+		params: '{"settings":{"inlayHints":{"parameterNames":false}}}'
+	})
+	assert !app.inlay_hint_toggles().parameter_names, 'the direct shape applies parameterNames'
+	assert app.inlay_hint_toggles().variable_types, 'the direct shape leaves variableTypes alone'
+	// Nested shape carrying the master switch together with sub-options.
+	app.on_did_change_configuration(Request{
+		method: 'workspace/didChangeConfiguration'
+		params: '{"settings":{"vls":{"inlayHints":{"enabled":true,"variableTypes":false,"parameterNames":true},"diagnostics":{"enabled":true}}}}'
+	})
+	assert app.inlay_hints_enabled, 'a nested enabled applies alongside sub-options'
+	assert !app.inlay_hint_toggles().variable_types, 'the nested shape applies variableTypes'
+	assert app.inlay_hint_toggles().parameter_names, 'the nested shape applies parameterNames'
+	assert app.diagnostics_enabled, 'a sibling diagnostics shape still applies'
+	// The flat boolean master switch keeps working and leaves sub-options alone.
+	app.on_did_change_configuration(Request{
+		method: 'workspace/didChangeConfiguration'
+		params: '{"settings":{"vls":{"inlayHints":false}}}'
+	})
+	assert !app.inlay_hints_enabled, 'the flat master switch still disables hints'
+	assert !app.inlay_hint_toggles().variable_types, 'the flat master switch leaves variableTypes alone'
+	assert app.inlay_hint_toggles().parameter_names, 'the flat master switch leaves parameterNames alone'
+}
+
+fn test_filter_inlay_hints_by_toggles_keeps_unknown_kinds() {
+	hints := [
+		InlayHint{
+			position: Position{
+				line: 0
+				char: 1
+			}
+			label:    ': int'
+			kind:     inlay_hint_kind_type
+		},
+		InlayHint{
+			position: Position{
+				line: 0
+				char: 5
+			}
+			label:    'name: '
+			kind:     inlay_hint_kind_parameter
+		},
+		InlayHint{
+			position: Position{
+				line: 0
+				char: 9
+			}
+			label:    '?'
+			kind:     99
+		},
+	]
+	all_on := filter_inlay_hints_by_toggles(hints, InlayHintToggles{})
+	assert all_on.len == 3, 'enabled toggles keep every hint, got ${all_on.len}'
+	all_off := filter_inlay_hints_by_toggles(hints, InlayHintToggles{
+		variable_types:  false
+		parameter_names: false
+	})
+	assert all_off.len == 1, 'disabled toggles filter only the known kinds, got ${all_off.len}'
+	assert all_off[0].kind == 99, 'an unknown future kind passes through'
+}
+
+// --- advertised capabilities: what initialize says is implemented ---
+
+// The three capabilities this phase turned on are on the wire, and the stub
+// that returns no edits stays off it.
+fn test_integration_initialize_advertises_range_formatting_inline_values_linked_editing() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	payload := '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}'
+	input_path := os.join_path(app.temp_dir, 'phase5_capabilities.txt')
+	must_write_file(input_path, 'Content-Length: ${payload.len}\r\n\r\n${payload}')
+	mut input := os.open(input_path) or {
+		assert false, 'Failed to open ${input_path}: ${err}'
+		return
+	}
+	defer {
+		input.close()
+	}
+	app.capture_output = true
+	mut reader := io.new_buffered_reader(reader: input, cap: 1)
+	app.handle_requests(mut reader)
+	initialize := app.captured_output.join('')
+
+	assert initialize.contains('"documentRangeFormattingProvider":true'), 'range formatting is advertised'
+	assert initialize.contains('"inlineValueProvider":true'), 'inline values are advertised'
+	assert initialize.contains('"linkedEditingRangeProvider":true'), 'linked editing is advertised'
+	assert !initialize.contains('documentOnTypeFormattingProvider'), 'on-type formatting is still a stub and stays off the wire'
+}
+
+// --- range formatting: nothing outside the requested range ---
+
+// v fmt formats whole files, so a document with a change inside and a change
+// outside the requested range has one changed hunk that reaches past it. The
+// handler then offers no edit at all rather than touch text the client did not
+// ask about.
+fn test_range_formatting_leaves_a_change_outside_the_requested_range_alone() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'range_format_outside_request')
+	must_mkdir_all(test_dir)
+	test_file := os.join_path(test_dir, 'main.v')
+	// Line 3 is inside the requested range, line 7 is not, and both need
+	// formatting, so the changed hunk spans both.
+	content := 'module main\n\nfn main() {\n\tx:=1\n}\n\nfn other() {\n\ty:=2\n}\n'
+	must_write_file(test_file, content)
+	uri := path_to_uri(test_file)
+	app.open_files[uri] = content
+
+	response := app.handle_range_formatting(Request{
+		id:     911
+		method: 'textDocument/rangeFormatting'
+		params: json2.encode(DocumentRangeFormattingParams{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			range:         LSPRange{
+				start: Position{
+					line: 3
+				}
+				end:   Position{
+					line: 3
+					char: 4
+				}
+			}
+			options:       FormattingOptions{
+				tab_size: 4
+			}
+		},
+			escape_unicode: true
+		)
+	})
+
+	assert response.id == 911
+	assert response.result is []TextEdit
+	edits := response.result as []TextEdit
+	assert edits.len == 0, 'a changed hunk reaching past the requested range must not be edited, got ${edits.len}'
+}
+
+// --- inline values: every literal in the range, and nothing else ---
+
+fn test_inline_value_returns_a_hint_for_each_literal_in_the_range() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	uri := 'file:///tmp/inlineval_multi.v'
+	content := 'module main\n\nfn main() {\n\ta := 1\n\tb := "two"\n\tc := true\n\td := 3.5\n}\n'
+	app.open_files[uri] = content
+
+	resp := app.handle_inline_value(Request{
+		id:     832
+		method: 'textDocument/inlineValue'
+		params: json2.encode(InlineValueParams{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			range:         LSPRange{
+				start: Position{
+					line: 0
+					char: 0
+				}
+				end:   Position{
+					line: 7
+					char: 0
+				}
+			}
+		},
+			escape_unicode: true
+		)
+	})
+
+	assert resp.id == 832
+	assert resp.result is []InlineValueText
+	values := resp.result as []InlineValueText
+	assert values.len == 4, 'one hint per literal, got ${values.len}'
+	for hint in [': int', ': string', ': bool', ': f64'] {
+		assert values.any(it.text == hint), 'the hint `${hint}` is missing from ${values.map(it.text)}'
+	}
+	hint := values[0]
+	assert hint.range.start.line == 3 && hint.range.start.char == 1, 'the hint sits on the name it belongs to: ${hint.range.start}'
+	assert hint.text.starts_with(': '), 'the hint is appended to the name: ${hint.text}'
+}
+
+// An expression the compiler has to evaluate is not a value the client can be
+// shown, so a call, an arithmetic expression and a composite literal get no hint.
+fn test_inline_value_has_no_hint_for_a_non_literal_assignment() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	uri := 'file:///tmp/inlineval_notliteral.v'
+	content := 'module main\n\nfn one() int {\n\treturn 1\n}\n\nfn main() {\n\tx := one()\n\ty := 1 + 2\n\tz := []int{}\n}\n'
+	app.open_files[uri] = content
+
+	resp := app.handle_inline_value(Request{
+		id:     833
+		method: 'textDocument/inlineValue'
+		params: json2.encode(InlineValueParams{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			range:         LSPRange{
+				start: Position{
+					line: 0
+					char: 0
+				}
+				end:   Position{
+					line: 9
+					char: 0
+				}
+			}
+		},
+			escape_unicode: true
+		)
+	})
+
+	assert resp.id == 833
+	assert resp.result is []InlineValueText
+	values := resp.result as []InlineValueText
+	assert values.len == 0, 'a call, a sum and a composite literal are not values: ${values.map(it.text)}'
+}
+
+// --- linked editing: the cross-file set, this document's ranges ---
+
+// The name under the cursor is declared in another file and used twice here,
+// and a local of the same name in a third function is not it. The answer is
+// the two uses in this file and no range of the local.
+fn test_linked_editing_range_of_a_use_follows_the_declaration_into_another_file() {
+	// V1 alone does not tell where every name is declared.
+	if !v3_answers_line_info {
+		return
+	}
+	mut app := create_test_app()
+	defer {
+		cleanup_rename_app(mut app)
+	}
+	app.v3_line_info_enabled = v3_answers_line_info
+	test_dir := os.join_path(app.temp_dir, 'linked_editing_cross_file')
+	must_mkdir_all(test_dir)
+	must_write_file(os.join_path(test_dir, 'v.mod'), 'Module {}\n')
+	main_content := 'module main\n\nfn main() {\n\tprintln(shared_value())\n\tprintln(shared_value())\n}\n\nfn decoy() int {\n\tshared_value := 5\n\treturn shared_value\n}\n'
+	other_content := 'module main\n\nfn shared_value() int {\n\treturn 1\n}\n'
+	main_file := os.join_path(test_dir, 'main.v')
+	other_file := os.join_path(test_dir, 'other.v')
+	must_write_file(main_file, main_content)
+	must_write_file(other_file, other_content)
+	main_uri := path_to_uri(main_file)
+	other_uri := path_to_uri(other_file)
+	app.open_files[main_uri] = main_content
+	app.open_files_versions[main_uri] = 1
+	app.open_files[other_uri] = other_content
+	app.open_files_versions[other_uri] = 1
+	app.workspace_roots = [test_dir]
+
+	resp := app.handle_linked_editing_range(Request{
+		id:     842
+		method: 'textDocument/linkedEditingRange'
+		params: json2.encode(LinkedEditingRangeParams{
+			text_document: TextDocumentIdentifier{
+				uri: main_uri
+			}
+			position:      Position{
+				line: 3
+				char: 12
+			}
+		},
+			escape_unicode: true
+		)
+	})
+
+	assert resp.id == 842
+	assert resp.result is LinkedEditingRanges
+	ler := resp.result as LinkedEditingRanges
+	assert ler.ranges.len == 2, 'the two uses, got ${ler.ranges.len}'
+	main_lines := main_content.split_into_lines()
+	for r in ler.ranges {
+		assert r.start.line in [3, 4], 'the local of another function is not linked: line ${r.start.line}'
+		assert main_lines[r.start.line][r.start.char..r.end.char] == 'shared_value', 'the range is the name itself'
+	}
+}
+
+// Two functions of one file each declare a local of the same name. Linked
+// editing from one of them returns that one and the uses of that one.
+fn test_linked_editing_range_keeps_a_local_apart_from_a_namesake_in_another_function() {
+	// V1 alone does not tell where every name is declared.
+	if !v3_answers_line_info {
+		return
+	}
+	mut app := create_test_app()
+	defer {
+		cleanup_rename_app(mut app)
+	}
+	app.v3_line_info_enabled = v3_answers_line_info
+	test_dir := os.join_path(app.temp_dir, 'linked_editing_namesake')
+	must_mkdir_all(test_dir)
+	must_write_file(os.join_path(test_dir, 'v.mod'), 'Module {}\n')
+	test_file := os.join_path(test_dir, 'main.v')
+	content := 'module main\n\nfn first() int {\n\tvalue := 1\n\treturn value\n}\n\nfn second() int {\n\tvalue := 2\n\treturn value\n}\n'
+	must_write_file(test_file, content)
+	uri := path_to_uri(test_file)
+	app.open_files[uri] = content
+	app.open_files_versions[uri] = 1
+	app.workspace_roots = [test_dir]
+
+	resp := app.handle_linked_editing_range(Request{
+		id:     843
+		method: 'textDocument/linkedEditingRange'
+		params: json2.encode(LinkedEditingRangeParams{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			position:      Position{
+				line: 3
+				char: 3
+			}
+		},
+			escape_unicode: true
+		)
+	})
+
+	assert resp.id == 843
+	assert resp.result is LinkedEditingRanges
+	ler := resp.result as LinkedEditingRanges
+	assert ler.ranges.len == 2, 'the declaration and the use of this local, got ${ler.ranges.len}'
+	assert ler.ranges.all(it.start.line in [3, 4]), 'the namesake in `second` is not linked: ${ler.ranges.map(it.start.line)}'
+}
+
+// ── answer budget: the index first, the compiler after it ─────────────────────
+
+// budget_test_source is the shape a hover question about a documented function
+// needs: the index resolves its declaration, and the answer the compiler gives
+// adds the documentation written above it, so the two cannot be mistaken for
+// one another.
+const budget_test_source = 'module main\n\n// helper doubles a number.\nfn helper(n int) int {\n\treturn n * 2\n}\n\nfn main() {\n\tprintln(helper(2))\n}\n'
+
+// budget_helper_position is the `helper` of `println(helper(2))`.
+fn budget_helper_position() Position {
+	return Position{
+		line: 8
+		char: 10
+	}
+}
+
+// budget_completion_source has a prefix the index answers on its own, so the
+// completion test costs no compiler at all.
+const budget_completion_source = 'module main\n\nfn helper() {}\n\nfn helper_two() {}\n\nfn main() {\n\thel\n}\n'
+
+// budget_completion_position is the `hel` of the last line.
+fn budget_completion_position() Position {
+	return Position{
+		line: 7
+		char: 4
+	}
+}
+
+// budget_test_open writes `content` as the document under test and returns its
+// URI, with its buffer open so the index reads what the editor holds.
+fn budget_test_open(mut app App, name string, content string) string {
+	dir := os.join_path(app.temp_dir, name)
+	must_mkdir_all(dir)
+	path := os.join_path(dir, 'main.v')
+	must_write_file(path, content)
+	uri := path_to_uri(path)
+	app.open_files[uri] = content
+	app.text = content
+	return uri
+}
+
+// budget_test_check_in_flight gives the app a diagnostics check for `uri` that
+// is pending behind its debounce, which is what holds the compilers a question
+// about the same document would ask.
+fn budget_test_check_in_flight(mut app App, uri string, kind DiagnosticsKind) {
+	mut scheduler := new_diagnostics_scheduler()
+	scheduler.enqueue(DiagnosticsJob{
+		uri:         uri
+		content:     app.open_files[uri] or { '' }
+		project_key: app.generation_key(uri)
+		write_mutex: app.write_mutex
+		kind:        kind
+	})
+	app.diagnostics_scheduler = scheduler
+}
+
+// budget_test_request asks `method` about the helper position of `uri`.
+fn budget_test_request(method string, id int, uri string) Request {
+	return Request{
+		id:     id
+		method: method
+		params: json2.encode(Params{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			position:      budget_helper_position()
+		},
+			escape_unicode: true
+		)
+	}
+}
+
+// budget_completion_request asks `method` about the `hel` prefix of `uri`.
+fn budget_completion_request(method string, id int, uri string) Request {
+	return Request{
+		id:     id
+		method: method
+		params: json2.encode(Params{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			position:      budget_completion_position()
+		},
+			escape_unicode: true
+		)
+	}
+}
+
+// budget_test_answers returns the outbound messages that carry `id`, read under
+// the mutex the transport writes with.
+fn budget_test_answers(mut app App, id int) []string {
+	app.write_mutex.lock()
+	defer {
+		app.write_mutex.unlock()
+	}
+	return app.captured_output.filter(it.contains('"id":${id},'))
+}
+
+fn test_hover_answers_from_the_index_while_a_check_is_pending() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	uri := budget_test_open(mut app, 'hover_pending', budget_test_source)
+	budget_test_check_in_flight(mut app, uri, .slow)
+	app.capture_output = true
+
+	app.write_mutex.lock()
+	// The transport is held, so nothing a deferred answer writes can land while
+	// this is checked: the only answer that exists is the one the request
+	// returns, and it is the index's.
+	response := app.operation_at_pos(.hover, budget_test_request('textDocument/hover', 1, uri))
+	assert app.captured_output.len == 0, 'nothing is written while the request is answered'
+	app.write_mutex.unlock()
+
+	assert response.id == 1, 'the answer carries the id of the request'
+	assert response.result is Hover, 'hover answers a Hover: ${response.result}'
+	hover := response.result as Hover
+	assert hover.contents.value == '```v\nfn helper(n int) int\n```', 'the answer is the declaration the index holds: ${hover.contents.value}'
+}
+
+fn test_hover_followup_carries_the_compilers_answer_on_the_same_id() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	uri := budget_test_open(mut app, 'hover_followup', budget_test_source)
+	budget_test_check_in_flight(mut app, uri, .slow)
+	app.capture_output = true
+
+	response := app.operation_at_pos(.hover, budget_test_request('textDocument/hover', 1, uri))
+	app.write_response_or_cancelled(1, response)
+	app.wait_answer_followups()
+
+	answers := budget_test_answers(mut app, 1)
+	assert answers.len == 2, 'the index answered and the compiler replaced it: ${answers}'
+	assert answers.all(it.contains('"id":1,')), 'both answers carry the id of the one request: ${answers}'
+	assert answers.any(it.contains('fn helper(n int) int')), 'the declaration is in the answer: ${answers}'
+	// Only the compiler's answer carries the documentation above the declaration.
+	assert answers.any(it.contains('helper doubles a number.')), 'the compiler answer follows on the same id: ${answers}'
+	assert answer_budget_key(uri, .hover) in app.compiler_answer_ms, 'the follow-up measured what the compiler answer cost'
+}
+
+fn test_hover_does_not_answer_twice_when_no_check_is_in_flight() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	uri := budget_test_open(mut app, 'hover_idle', budget_test_source)
+	app.capture_output = true
+
+	response := app.operation_at_pos(.hover, budget_test_request('textDocument/hover', 1, uri))
+	app.write_response_or_cancelled(1, response)
+	app.wait_answer_followups()
+
+	// No check holds the compiler, so the behaviour is what it was: the compiler
+	// answers, with the documentation the index answer has no room for.
+	assert response.result is Hover, 'hover answers a Hover: ${response.result}'
+	value := (response.result as Hover).contents.value
+	assert value.contains('helper doubles a number.'), 'the compiler answer is not deferred: ${value}'
+	answers := budget_test_answers(mut app, 1)
+	assert answers.len == 1, 'one answer, as before: ${answers}'
+}
+
+fn test_definition_followup_carries_the_compilers_answer_on_the_same_id() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	uri := budget_test_open(mut app, 'definition_followup', budget_test_source)
+	budget_test_check_in_flight(mut app, uri, .slow)
+	app.capture_output = true
+
+	response := app.operation_at_pos(.definition, budget_test_request('textDocument/definition', 2, uri))
+	assert response.result is Location, 'definition answers a Location: ${response.result}'
+	declared := response.result as Location
+	assert declared.uri == uri && declared.range.start.line == 3, 'the index points at the declaration: ${declared.range.start.line}'
+	app.write_response_or_cancelled(2, response)
+	app.wait_answer_followups()
+
+	answers := budget_test_answers(mut app, 2)
+	assert answers.len == 2, 'the index answered and the compiler replaced it: ${answers}'
+	assert answers.all(it.contains('"id":2,')), 'both answers carry the id of the one request: ${answers}'
+	// What the compiler answers is exactly what the same question answers when
+	// it is asked again, on the same buffers and the same position.
+	compiler_answer := app.compiler_answer(.definition, uri, budget_helper_position(), '9:gd^10')
+	expected := encode_response_payload(Response{
+		id:     2
+		result: compiler_answer
+	})
+	assert answers.any(it.contains(expected)), 'the second answer is the one the compiler gives: ${answers}'
+	assert answer_budget_key(uri, .definition) in app.compiler_answer_ms, 'the follow-up measured what the compiler answer cost'
+}
+
+fn test_definition_answers_from_the_index_while_a_check_is_pending() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	uri := budget_test_open(mut app, 'definition_pending', budget_test_source)
+	budget_test_check_in_flight(mut app, uri, .slow)
+	app.capture_output = true
+
+	app.write_mutex.lock()
+	response := app.operation_at_pos(.definition, budget_test_request('textDocument/definition', 2, uri))
+	assert app.captured_output.len == 0, 'nothing is written while the request is answered'
+	app.write_mutex.unlock()
+
+	assert response.result is Location, 'definition answers a Location without the compiler: ${response.result}'
+	declared := response.result as Location
+	assert declared.uri == uri && declared.range.start.line == 3, 'the index points at the declaration: ${declared.range.start.line}'
+}
+
+fn test_definition_does_not_answer_twice_when_no_check_is_in_flight() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	uri := budget_test_open(mut app, 'definition_idle', budget_test_source)
+	app.capture_output = true
+
+	response := app.operation_at_pos(.definition, budget_test_request('textDocument/definition', 2, uri))
+	app.write_response_or_cancelled(2, response)
+	app.wait_answer_followups()
+
+	assert response.result is Location, 'definition answers a Location: ${response.result}'
+	answers := budget_test_answers(mut app, 2)
+	assert answers.len == 1, 'one answer, as before: ${answers}'
+}
+
+fn test_completion_is_never_answered_twice_while_a_check_is_pending() {
+	// Completion is left as it was: its index answer and the compiler answer
+	// differ in ways that make a stale list confusing.
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	uri := budget_test_open(mut app, 'completion_pending', budget_completion_source)
+	budget_test_check_in_flight(mut app, uri, .slow)
+	app.capture_output = true
+
+	response := app.operation_at_pos(.completion, budget_completion_request('textDocument/completion', 3, uri))
+	app.write_response_or_cancelled(3, response)
+	app.wait_answer_followups()
+
+	assert response.result is CompletionList, 'completion answers a list: ${response.result}'
+	labels := (response.result as CompletionList).items.map(it.label)
+	assert 'helper' in labels, 'the index offered the function: ${labels}'
+	answers := budget_test_answers(mut app, 3)
+	assert answers.len == 1, 'completion is answered once: ${answers}'
+	assert app.compiler_answer_ms.len == 0, 'completion schedules no deferred answer'
+}
+
+fn test_followup_answer_is_suppressed_when_the_request_is_cancelled() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	uri := budget_test_open(mut app, 'hover_cancelled', budget_test_source)
+	budget_test_check_in_flight(mut app, uri, .slow)
+	app.capture_output = true
+
+	response := app.operation_at_pos(.hover, budget_test_request('textDocument/hover', 4, uri))
+	// The client cancels the request while the compiler still works.
+	app.cancelled_requests[4] = true
+	app.wait_answer_followups()
+
+	answers := budget_test_answers(mut app, 4)
+	assert answers.len == 1, 'a cancelled request is not answered a second time: ${answers}'
+	assert answers[0].contains('"code":${jsonrpc_err_request_cancelled}'), 'the cancellation is reported: ${answers[0]}'
+}
+
+fn test_a_quick_compiler_answer_is_waited_for_instead_of_doubled() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	uri := budget_test_open(mut app, 'hover_quick', budget_test_source)
+	app.capture_output = true
+
+	// The first question measures what the compiler answer costs here.
+	first := app.operation_at_pos(.hover, budget_test_request('textDocument/hover', 5, uri))
+	assert first.result is Hover, 'hover answers a Hover: ${first.result}'
+	elapsed_ms := app.compiler_answer_ms[answer_budget_key(uri, .hover)] or { -1 }
+	assert elapsed_ms in 0 .. answer_budget_ms, 'the answer measured inside the budget: ${elapsed_ms} ms'
+
+	// A check that is now pending does not make it worth answering twice.
+	budget_test_check_in_flight(mut app, uri, .slow)
+	app.write_response_or_cancelled(5, first)
+	second := app.operation_at_pos(.hover, budget_test_request('textDocument/hover', 6, uri))
+	app.write_response_or_cancelled(6, second)
+	app.wait_answer_followups()
+
+	value := (second.result as Hover).contents.value
+	assert value.contains('helper doubles a number.'), 'a quick compiler answer is waited for: ${value}'
+	answers := budget_test_answers(mut app, 6)
+	assert answers.len == 1, 'one answer, because the compiler answer is cheap: ${answers}'
+}
+
+// renp_stub_source is the fake V compiler the pooled rename tests drive. It
+// speaks the diagnostics-server protocol when it is started as a server, and
+// otherwise answers the `-line-info` question of a compiler process of its own,
+// the way a compiler that says every name is declared where it is written does.
+// Each process records what it was asked in the file VLS_RENP_MARKER names, and
+// keeps the .v files of the directory it runs in, which is the copy of the
+// program the request is about: a test then sees which processes ran, with what
+// command line, and what the copy they read held. Every line is flushed, since
+// the output of a child that goes to a pipe is buffered until it is.
+const renp_stub_source = r"module main
+
+import os
+
+fn C.fflush(stream voidptr) int
+
+fn main() {
+	if os.getenv('V_DIAGNOSTICS_SERVER') == '1' {
+		note('server ' + os.args[1..].join(' '))
+		snapshot()
+		serve()
+		return
+	}
+	note('oneshot ' + os.args[1..].join(' '))
+	snapshot()
+	one_shot()
+}
+
+// serve answers the requests of the protocol until it is told to end.
+fn serve() {
+	println('v-diagnostics-server: ready')
+	flush()
+	for {
+		line := os.get_line()
+		if line == '' {
+			return
+		}
+		parts := line.split(' ')
+		kind := parts[0]
+		if kind == 'quit' {
+			return
+		}
+		token := parts[1]
+		rest := parts[2..].join(' ')
+		note(kind + ' ' + rest)
+		snapshot()
+		println('v-diagnostics-server: child 1 ' + token)
+		if kind == 'check' {
+			println('main.v:3:5: error: redefinition of `renamed`')
+		} else {
+			println(own_position(rest))
+		}
+		println('')
+		println('v-diagnostics-server: end 0 ' + token)
+		flush()
+	}
+}
+
+// one_shot answers the question a compiler process of its own is asked.
+fn one_shot() {
+	mut question := ''
+	for i, arg in os.args {
+		if i > 0 && os.args[i - 1] == '-line-info' {
+			question = arg
+		}
+	}
+	if question == '' {
+		return
+	}
+	println(own_position(question))
+	flush()
+}
+
+// own_position answers `file:line:1` for a question about a file and a line.
+fn own_position(question string) string {
+	without_code := question.all_before_last(':')
+	line := without_code.all_after_last(':')
+	if !line.is_int() {
+		return ''
+	}
+	return without_code.all_before_last(':') + ':' + line + ':1'
+}
+
+// note records what this process was asked.
+fn note(text string) {
+	marker := os.getenv('VLS_RENP_MARKER')
+	if marker == '' {
+		return
+	}
+	mut f := os.open_append(marker) or { return }
+	f.write_string(text + '\n') or {}
+	f.close()
+}
+
+// snapshot keeps the .v files of the directory this process runs in, each time
+// under a number of its own, so the first one is the copy of the first request.
+fn snapshot() {
+	root := os.getenv('VLS_RENP_SNAP')
+	if root == '' {
+		return
+	}
+	entries := os.ls(os.getwd()) or { return }
+	mut n := 0
+	if count := os.read_file(os.join_path(root, 'count')) {
+		n = count.trim_space().int()
+	}
+	dir := os.join_path(root, 'copy_${n}')
+	os.mkdir_all(dir) or { return }
+	for entry in entries {
+		if !entry.ends_with('.v') {
+			continue
+		}
+		os.cp(os.join_path(os.getwd(), entry), os.join_path(dir, entry)) or { continue }
+	}
+	os.write_file(os.join_path(root, 'count'), '${n + 1}') or {}
+}
+
+fn flush() {
+	C.fflush(unsafe { nil })
+}
+"
+
+// RenpStub is the fake compiler of the pooled rename tests, and the project it
+// is asked about.
+struct RenpStub {
+mut:
+	dir      string
+	exe      string
+	marker   string
+	snap     string
+	project  string
+	previous string
+}
+
+// renp_stub_exe returns the fake compiler, built once for this test process, or
+// '' when this machine has no V to build it with.
+fn renp_stub_exe() string {
+	root := os.join_path(os.temp_dir(), 'vls_renp_stub_${os.getpid()}_${renp_stub_source.hash().hex()}')
+	must_mkdir_all(root)
+	built := $if windows {
+		os.join_path(root, 'stub.exe')
+	} $else {
+		os.join_path(root, 'stub')
+	}
+	if os.exists(built) {
+		return built
+	}
+	src := os.join_path(root, 'stub.v')
+	must_write_file(src, renp_stub_source)
+	// The compiler of this machine builds it: VLS_V_COMMAND is what the tests
+	// are driving, and it must not be asked for.
+	previous := os.getenv('VLS_V_COMMAND')
+	os.unsetenv('VLS_V_COMMAND')
+	result := run_v_argv(['-o', built, src], root)
+	renp_restore_v_command(previous)
+	if result.exit_code != 0 || !os.exists(built) {
+		os.rm(built) or {}
+		eprintln('skipped: could not build the fake compiler: ${result.output}')
+		return ''
+	}
+	$if !windows {
+		os.chmod(built, 0o755) or {
+			eprintln('skipped: could not run the fake compiler: ${err}')
+			return ''
+		}
+	}
+	return built
+}
+
+// renp_restore_v_command puts VLS_V_COMMAND back as it was.
+fn renp_restore_v_command(previous string) {
+	if previous == '' {
+		os.unsetenv('VLS_V_COMMAND')
+	} else {
+		os.setenv('VLS_V_COMMAND', previous, true)
+	}
+}
+
+// renp_stub_app builds the fake compiler, writes the project it answers for,
+// points VLS at it, and returns an app that asks the questions of a rename
+// through the pool.
+fn renp_stub_app(name string) (&App, RenpStub) {
+	dir := os.join_path(os.temp_dir(), 'vls_renp_${name}_${os.getpid()}_${time.now().unix_nano()}')
+	must_mkdir_all(dir)
+	snap := os.join_path(dir, 'snap')
+	must_mkdir_all(snap)
+	project := os.join_path(dir, 'project')
+	must_mkdir_all(project)
+	must_write_file(os.join_path(project, 'main.v'), renp_project_main)
+	must_write_file(os.join_path(project, 'other.v'), renp_project_other)
+	must_write_file(os.join_path(project, 'third.v'), renp_project_third)
+	exe := renp_stub_exe()
+	previous := os.getenv('VLS_V_COMMAND')
+	if exe != '' {
+		// The fake compiler is the one in use, and the one that serves the
+		// checks and the questions of this editor.
+		os.setenv('VLS_V_COMMAND', exe, true)
+		os.setenv('VLS_DIAGNOSTICS_SERVER', exe, true)
+		os.setenv('VLS_RENP_MARKER', os.join_path(dir, 'marker.txt'), true)
+		os.setenv('VLS_RENP_SNAP', snap, true)
+	}
+	mut app := &App{
+		temp_dir:             dir
+		open_files:           map[string]string{}
+		v3_line_info_enabled: true
+	}
+	return app, RenpStub{
+		dir:      dir
+		exe:      exe
+		marker:   os.join_path(dir, 'marker.txt')
+		snap:     snap
+		project:  project
+		previous: previous
+	}
+}
+
+// renp_stub_done ends the servers the app started and puts the environment back.
+fn renp_stub_done(mut app App, stub RenpStub) {
+	app.stop_v3_queries()
+	os.unsetenv('VLS_RENP_MARKER')
+	os.unsetenv('VLS_RENP_SNAP')
+	os.unsetenv('VLS_DIAGNOSTICS_SERVER')
+	renp_restore_v_command(stub.previous)
+	os.rmdir_all(stub.dir) or {}
+}
+
+// renp_asked returns what the fake compiler was asked, one line per process and
+// per request: `server ...` where a diagnostics server ran, `oneshot ...` where
+// a compiler process of its own did, and `check ...` or `query ...` for what a
+// server answered.
+fn renp_asked(stub RenpStub) []string {
+	return (os.read_file(stub.marker) or { '' }).split_into_lines().filter(it != '')
+}
+
+// renp_snapshot_count is how many snapshots the fake compiler has taken of the
+// copy it read.
+fn renp_snapshot_count(stub RenpStub) int {
+	return (os.read_file(os.join_path(stub.snap, 'count')) or { '0' }).trim_space().int()
+}
+
+// renp_copy returns the .v files of the copy the fake compiler read for its
+// `at`-th invocation, by name.
+fn renp_copy(stub RenpStub, at int) map[string]string {
+	mut files := map[string]string{}
+	for entry in os.ls(os.join_path(stub.snap, 'copy_${at}')) or { return files } {
+		if entry.ends_with('.v') {
+			files[entry] = os.read_file(os.join_path(stub.snap, 'copy_${at}', entry)) or { continue }
+		}
+	}
+	return files
+}
+
+// renp_rename renames the identifier at `line:col` (1-based) of `uri`.
+fn renp_rename(uri string, line int, col int, new_name string) Request {
+	return Request{
+		id:     904
+		method: 'textDocument/rename'
+		params: json2.encode(RenameParams{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			position:      Position{
+				line: line - 1
+				char: col - 1
+			}
+			new_name:      new_name
+		})
+	}
+}
+
+// renp_rename_p renames `p` of `p := 1` in the main file of `stub`, whose buffer
+// is written for it first.
+fn renp_rename_p(mut app App, stub RenpStub) {
+	path := os.join_path(stub.project, 'main.v')
+	uri := path_to_uri(path)
+	app.open_files[uri] = os.read_file(path) or { renp_project_main }
+	app.workspace_roots = [stub.project]
+	app.rename_request(renp_rename(uri, 4, 2, 'q')) or {}
+}
+
+const renp_project_main = 'module main
+
+fn main() {
+	p := 1
+	println(p)
+}
+'
+
+const renp_project_other = 'module main
+
+fn other() {
+	q := 2
+	println(q)
+}
+'
+
+// renp_project_third is a file of the project that a rename of `p` does not
+// touch: what its buffer holds is what shows whether the copy was synced.
+const renp_project_third = 'module main
+
+fn third() {
+	r := 3
+	println(r)
+}
+'
+
+fn test_renp_a_warm_server_answers_the_rename_check_without_a_compiler_of_its_own() {
+	mut app, stub := renp_stub_app('pooled')
+	defer {
+		renp_stub_done(mut app, stub)
+	}
+	if stub.exe == '' {
+		return
+	}
+	renp_rename_p(mut app, stub)
+	asked := renp_asked(stub)
+	assert asked.any(it.starts_with('server ')), 'no diagnostics server was asked: ${asked.str()}'
+	assert asked.any(it.starts_with('check ')), 'the server answered no check: ${asked.str()}'
+	assert !asked.any(it.starts_with('oneshot ')), 'a compiler process of its own ran: ${asked.str()}'
+	assert app.v3_query_pool().servers.len > 0, 'no server stayed warm in the pool'
+}
+
+fn test_renp_a_second_rename_asks_the_server_the_first_one_started() {
+	mut app, stub := renp_stub_app('warm')
+	defer {
+		renp_stub_done(mut app, stub)
+	}
+	if stub.exe == '' {
+		return
+	}
+	renp_rename_p(mut app, stub)
+	started := renp_asked(stub).filter(it.starts_with('server ')).len
+	assert started == 1, 'the first rename started ${started} servers'
+	renp_rename_p(mut app, stub)
+	assert renp_asked(stub).filter(it.starts_with('server ')).len == started, 'the second rename started another server: ${renp_asked(stub).str()}'
+	assert app.v3_query_pool().servers.len == 1, 'the pool did not keep one server warm'
+}
+
+fn test_renp_the_check_asks_for_the_server_of_the_copy_it_validates() {
+	mut app, stub := renp_stub_app('key')
+	defer {
+		renp_stub_done(mut app, stub)
+	}
+	if stub.exe == '' {
+		return
+	}
+	renp_rename_p(mut app, stub)
+	mut pool := app.v3_query_pool()
+	keys := pool.servers.keys()
+	assert keys.len == 1, 'one server answers for this program: ${keys.str()}'
+	assert keys[0].starts_with(stub.exe), 'the server is not the configured compiler: ${keys[0]}'
+	assert keys[0].ends_with('\n.'), 'the check asked for the program of the directory: ${keys[0]}'
+	assert keys[0].contains(app.v3_copies()[0].overlay.temp_work_dir), 'the server is not the one of the copy the check ran in: ${keys[0]}'
+}
+
+fn test_renp_the_check_reads_the_copy_that_holds_the_buffer() {
+	mut app, stub := renp_stub_app('synced')
+	defer {
+		renp_stub_done(mut app, stub)
+	}
+	if stub.exe == '' {
+		return
+	}
+	path := os.join_path(stub.project, 'main.v')
+	uri := path_to_uri(path)
+	// The editor is ahead of the disk, in the file the rename edits and in one
+	// it does not: only the second one shows whether the copy was synced, since
+	// the first is written for the rename itself.
+	buffer := renp_project_main + '\nprintln(3)\n'
+	must_write_file(path, renp_project_main)
+	third := os.join_path(stub.project, 'third.v')
+	must_write_file(third, renp_project_third)
+	third_buffer := renp_project_third + '\nfn third_more() {}\n'
+	app.open_files[uri] = buffer
+	app.open_files[path_to_uri(third)] = third_buffer
+	app.workspace_roots = [stub.project]
+	app.rename_request(renp_rename(uri, 4, 2, 'q')) or {}
+	copied := renp_copy(stub, 0)
+	read := copied['main.v'] or { '' }
+	assert read == buffer, 'the copy the compiler read held stale text: ${read}'
+	assert read != os.read_file(path) or { '' }, 'the copy the compiler read held the disk text'
+	held := copied['third.v'] or { '' }
+	assert held == third_buffer, 'the copy the compiler read held the disk text of a file the rename does not edit: ${held}'
+}
+
+fn test_renp_the_conflict_check_reads_the_copy_it_syncs_the_buffer_into() {
+	mut app, stub := renp_stub_app('sync')
+	defer {
+		renp_stub_done(mut app, stub)
+	}
+	if stub.exe == '' {
+		return
+	}
+	path := os.join_path(stub.project, 'main.v')
+	uri := path_to_uri(path)
+	third := os.join_path(stub.project, 'third.v')
+	must_write_file(third, renp_project_third)
+	third_buffer := renp_project_third + '\nfn third_more() {}\n'
+	must_write_file(path, renp_project_main)
+	app.open_files[uri] = renp_project_main
+	app.workspace_roots = [stub.project]
+	// The keys of a RenameCheck are normalized paths, as check_rename_conflicts
+	// builds them.
+	normalized := normalize_overlay_path(path)
+	mut spans := map[string][]RenameSpan{}
+	mut uris := map[string]string{}
+	spans[normalized] = [
+		RenameSpan{
+			line:  3
+			start: 1
+			end:   2
+		},
+	]
+	uris[normalized] = uri
+	rc := RenameCheck{
+		old_name: 'p'
+		new_name: 'q'
+		spans:    spans
+		existing: []NamePos{}
+		uris:     uris
+	}
+	// The copy is built with what the project holds on disk, third.v not open.
+	app.rename_clash_in(stub.project, [normalized], rc) or {
+		assert false, 'the first conflict check failed: ${err}'
+		return
+	}
+	// Then the editor opens that file with a buffer the disk does not have, and
+	// the same check runs again in the copy that was built already.
+	app.open_files[path_to_uri(third)] = third_buffer
+	reason := app.rename_clash_in(stub.project, [normalized], rc) or {
+		assert false, 'the second conflict check failed: ${err}'
+		return
+	}
+	assert reason == '', 'the fake compiler reports no clash: ${reason}'
+	assert renp_snapshot_count(stub) > 1, 'the compiler read no copy of its own: ${renp_snapshot_count(stub)}'
+	copied := renp_copy(stub, renp_snapshot_count(stub) - 1)
+	held := copied['third.v'] or { '' }
+	assert held == third_buffer, 'the check read the disk text of a file the rename does not edit: ${held}'
+	assert held != os.read_file(third) or { '' }, 'the copy the compiler read held the disk text'
+}
+
+fn test_renp_without_a_server_the_check_runs_in_a_compiler_of_its_own() {
+	mut app, stub := renp_stub_app('oneshot')
+	defer {
+		renp_stub_done(mut app, stub)
+	}
+	if stub.exe == '' {
+		return
+	}
+	// No server can answer here, so the check runs in a compiler of its own,
+	// with the command line it always had.
+	os.setenv('VLS_DIAGNOSTICS_SERVER', 'off', true)
+	renp_rename_p(mut app, stub)
+	asked := renp_asked(stub)
+	assert !asked.any(it.starts_with('server ')), 'a server was started where none can answer: ${asked.str()}'
+	checks := asked.filter(it.starts_with('oneshot ') && it.contains(' -check ')
+		&& !it.contains(' -line-info '))
+	assert checks.len >= 2, 'the check ran in no compiler of its own: ${asked.str()}'
+	for line in checks {
+		assert line == 'oneshot -new-compiler -check -nocolor .', 'the check ran another command line: ${line}'
+	}
 }
