@@ -3,6 +3,7 @@
 module main
 
 import os
+import sync
 import time
 
 // Persistent, incremental symbol index (audit Stage 4).
@@ -378,13 +379,21 @@ fn index_uri_for_path(path string, open_uris_by_path map[string]string) string {
 // explicitly removed by the client. A currently active root takes precedence,
 // allowing a nested folder to be added again under a removed parent.
 fn (app &App) path_is_in_removed_workspace(path string) bool {
+	return path_is_under_removed_root(path, app.workspace_roots, app.removed_workspace_roots)
+}
+
+// path_is_under_removed_root is path_is_in_removed_workspace for a snapshot of
+// the roots. The background index worker carries one: the request thread may
+// replace the App's root slices at any time, and the worker must not read a
+// slice while that happens.
+fn path_is_under_removed_root(path string, active_roots []string, removed_roots []string) bool {
 	p := path.replace('\\', '/')
-	for root in app.workspace_roots {
+	for root in active_roots {
 		if path_is_within(p, root.replace('\\', '/')) {
 			return false
 		}
 	}
-	for root in app.removed_workspace_roots {
+	for root in removed_roots {
 		if path_is_within(p, root.replace('\\', '/')) {
 			return true
 		}
@@ -843,7 +852,438 @@ fn uri_is_in_index_scope(uri string, scope IndexScope) bool {
 	return path_is_in_index_scope(uri_to_path(uri), scope)
 }
 
-// ensure_index_scope indexes only the project/module relevant to a request.
+// A read request must not pay for the refresh it finds due. A hover, a
+// workspace/symbol, a reference or a prepareRename used to walk the workspace
+// on the request thread; they now answer from the index as it stands and leave
+// the rebuild to one background worker. The worker walks and parses, but it
+// never writes the shared index: a request handler may be reading it, and V
+// maps are not safe to read while another thread inserts. Its result is merged
+// by the request thread at a point where nothing else is reading the index
+// (apply_index_refresh_results), which is the same split the diagnostics worker
+// uses when it publishes through the scheduler's mutex.
+
+// IndexRefreshJob is one directory a read request found stale, carrying the
+// state the refresh needs. That state is snapshotted on the request thread,
+// because the worker must reach the index only through this job: the index it
+// rebuilds is the one the request handlers read.
+struct IndexRefreshJob {
+	dir               string
+	indexed_count     int             // entries the index held, for the total entry cap
+	fingerprints      map[string]int  // uri -> fingerprint of the entry held
+	open_uris         map[string]bool // open buffers, which the request thread indexes
+	open_uris_by_path map[string]string
+	workspace_roots   []string
+	removed_roots     []string
+	started_ms        i64
+}
+
+// IndexRefreshResult is what one refresh walk decided. Nothing in it refers to
+// the App, so the request thread can merge it after the worker has stopped.
+struct IndexRefreshResult {
+mut:
+	dir           string
+	started_ms    i64
+	entries       map[string]IndexEntry // built from the content the walk read
+	deletions     []string              // indexed uris whose file the walk no longer found
+	skipped       []string              // files left out of the bounded index
+	reindexed     int                   // files this walk parsed
+	skipped_files int                   // files whose fingerprint was unchanged
+	incomplete    bool
+	walk_ms       i64
+}
+
+// IndexRefreshScheduler owns the single background index worker. It mirrors
+// DiagnosticsScheduler: one worker at a time, a done channel the worker closes,
+// and a stop that joins it.
+@[heap]
+struct IndexRefreshScheduler {
+mut:
+	mutex   sync.Mutex
+	pending []IndexRefreshJob
+	// outstanding holds every directory with a refresh queued, running, or
+	// finished and awaiting its merge. A directory leaves it when the request
+	// thread merges the refresh's result, which is what makes a directory's
+	// refresh happen once per stale generation however many requests asked.
+	outstanding     map[string]bool
+	results         []IndexRefreshResult
+	worker_running  bool
+	worker_started  bool
+	worker_done     chan bool
+	stopped         bool
+	workers_started u64
+	refreshes       u64
+	reindexed_files u64
+	skipped_files   u64
+}
+
+fn new_index_refresh_scheduler() &IndexRefreshScheduler {
+	return &IndexRefreshScheduler{
+		outstanding: map[string]bool{}
+	}
+}
+
+// enqueue records a job and reports whether the caller must start the single
+// background worker. A directory that is outstanding is not queued again, so a
+// burst of requests coalesces into one refresh, and the one worker ends when
+// the queue runs dry instead of lingering.
+fn (mut scheduler IndexRefreshScheduler) enqueue(job IndexRefreshJob) bool {
+	scheduler.mutex.lock()
+	defer {
+		scheduler.mutex.unlock()
+	}
+	if scheduler.stopped || scheduler.outstanding[job.dir] {
+		return false
+	}
+	scheduler.outstanding[job.dir] = true
+	scheduler.pending << job
+	should_start := !scheduler.worker_running
+	if should_start {
+		scheduler.worker_started = true
+		scheduler.worker_done = chan bool{}
+		scheduler.workers_started++
+	}
+	scheduler.worker_running = true
+	return should_start
+}
+
+// is_outstanding reports whether a refresh of `dir` is already queued, running,
+// or finished and awaiting its merge. The request thread asks first, so a burst
+// of requests builds one job snapshot instead of one per request.
+fn (mut scheduler IndexRefreshScheduler) is_outstanding(dir string) bool {
+	scheduler.mutex.lock()
+	defer {
+		scheduler.mutex.unlock()
+	}
+	return scheduler.outstanding[dir]
+}
+
+// take_next_job removes the scope to refresh next, and reports that there is
+// none by stopping the worker, exactly as the diagnostics scheduler does.
+fn (mut scheduler IndexRefreshScheduler) take_next_job() ?IndexRefreshJob {
+	scheduler.mutex.lock()
+	defer {
+		scheduler.mutex.unlock()
+	}
+	if scheduler.pending.len == 0 {
+		scheduler.worker_running = false
+		return none
+	}
+	job := scheduler.pending[0]
+	scheduler.pending.delete(0)
+	return job
+}
+
+// publish_result records a finished refresh, which the request thread merges.
+fn (mut scheduler IndexRefreshScheduler) publish_result(result IndexRefreshResult) {
+	scheduler.mutex.lock()
+	defer {
+		scheduler.mutex.unlock()
+	}
+	scheduler.results << result
+	scheduler.refreshes++
+	scheduler.reindexed_files += u64(result.reindexed)
+	scheduler.skipped_files += u64(result.skipped_files)
+}
+
+// take_results hands the finished refreshes over, clears them, and releases the
+// directories they covered so a later request can refresh them again.
+fn (mut scheduler IndexRefreshScheduler) take_results() []IndexRefreshResult {
+	scheduler.mutex.lock()
+	defer {
+		scheduler.mutex.unlock()
+	}
+	if scheduler.results.len == 0 {
+		return []IndexRefreshResult{}
+	}
+	for result in scheduler.results {
+		scheduler.outstanding.delete(result.dir)
+	}
+	finished := scheduler.results.clone()
+	scheduler.results.clear()
+	return finished
+}
+
+// stop_and_wait joins the background index worker, so the process cannot exit
+// while a refresh is still reading files. A refresh that is still queued is not
+// dropped: the worker drains it before it ends, so what the index is left with
+// does not depend on when the shutdown happened to arrive. This is
+// DiagnosticsScheduler's stop_and_wait for the index worker; the diagnostics one
+// is untouched.
+fn (mut scheduler IndexRefreshScheduler) stop_and_wait() {
+	scheduler.mutex.lock()
+	scheduler.stopped = true
+	started := scheduler.worker_started
+	done := scheduler.worker_done
+	scheduler.mutex.unlock()
+	if started {
+		_ := <-done or {}
+	}
+}
+
+// ensure_indexed_for_request is what a read request calls instead of
+// ensure_dirs_indexed. It answers from the index as it stands: not one directory
+// is listed on the request thread, and the refresh of whatever is stale is left
+// to the background worker, whose result a later request merges.
+fn (mut app App) ensure_indexed_for_request(dirs []string) {
+	// Open buffers are authoritative, and didOpen/didChange invalidate their
+	// entry, so refresh them here. That is one fingerprint comparison per open
+	// file: no directory walk, and no parse of unchanged content.
+	for uri, _ in app.open_files {
+		app.reindex_uri(uri)
+	}
+	// A refresh that already finished is merged before this request answers, so
+	// the request after the one that scheduled it sees what it asked for.
+	app.apply_index_refresh_results()
+	app.schedule_index_refresh(app.stale_index_dirs(dirs))
+}
+
+// stale_index_dirs returns the project directories a read request needs indexed:
+// those that were never walked, or whose throttle has expired because the client
+// has no file watchers (see index_dir_needs_refresh).
+fn (mut app App) stale_index_dirs(dirs []string) []string {
+	mut stale := []string{}
+	for dir in dirs {
+		if dir == '' || dir == '/' || app.path_is_in_removed_workspace(dir) || !os.is_dir(dir) {
+			continue
+		}
+		if dir in app.indexed_dirs && !app.index_dir_needs_refresh(dir) {
+			continue
+		}
+		stale << dir
+	}
+	return stale
+}
+
+// schedule_index_refresh queues `dirs` for the single background worker. Without
+// a scheduler — every App built by a test, and none other — the refresh runs on
+// the request thread instead, which is what these paths did before.
+fn (mut app App) schedule_index_refresh(dirs []string) {
+	if dirs.len == 0 {
+		return
+	}
+	if mut scheduler := app.index_refresh {
+		for dir in dirs {
+			if scheduler.is_outstanding(dir) {
+				continue
+			}
+			job := app.index_refresh_job(dir)
+			if scheduler.enqueue(job) {
+				spawn run_index_refresh_worker(mut app, mut scheduler)
+			}
+		}
+		return
+	}
+	app.ensure_dirs_indexed(dirs)
+}
+
+// index_refresh_job snapshots the index state a refresh of `dir` needs. It runs
+// on the request thread, so the snapshot is consistent.
+fn (app &App) index_refresh_job(dir string) IndexRefreshJob {
+	mut fingerprints := map[string]int{}
+	for uri, entry in app.symbol_index {
+		fingerprints[uri] = entry.fingerprint
+	}
+	mut open_uris := map[string]bool{}
+	for uri, _ in app.open_files {
+		open_uris[uri] = true
+	}
+	return IndexRefreshJob{
+		dir:               dir
+		indexed_count:     app.symbol_index.len
+		fingerprints:      fingerprints
+		open_uris:         open_uris
+		open_uris_by_path: app.open_index_uris_by_path()
+		workspace_roots:   app.workspace_roots.clone()
+		removed_roots:     app.removed_workspace_roots.clone()
+		started_ms:        time.now().unix_milli()
+	}
+}
+
+// run_index_refresh_worker is the single background index worker. It refreshes
+// one directory at a time and returns once the queue is empty, so a burst of
+// requests costs one thread that ends with the work.
+fn run_index_refresh_worker(mut app App, mut scheduler IndexRefreshScheduler) {
+	scheduler.mutex.lock()
+	done := scheduler.worker_done
+	scheduler.mutex.unlock()
+	defer {
+		done.close()
+	}
+	for {
+		if job := scheduler.take_next_job() {
+			scheduler.publish_result(app.run_recursive_index_refresh(job))
+			continue
+		}
+		return
+	}
+}
+
+// run_recursive_index_refresh is ensure_dirs_indexed for one directory, with the
+// writes collected into a result instead of applied. It reads the filesystem and
+// parses, and it touches no App state.
+fn (mut app App) run_recursive_index_refresh(job IndexRefreshJob) IndexRefreshResult {
+	mut result := IndexRefreshResult{
+		dir:        job.dir
+		started_ms: job.started_ms
+		walk_ms:    time.now().unix_milli()
+	}
+	mut files := []string{}
+	walk_complete := collect_v_files(job.dir, mut files)
+	result.incomplete = !walk_complete
+	mut entries := map[string]IndexEntry{}
+	mut present := map[string]bool{}
+	for f in files {
+		present[index_uri_for_path(f, job.open_uris_by_path)] = true
+	}
+	// Reconcile before the file loop, while `walk_complete` still says whether
+	// every file of the directory was seen: an incomplete walk could simply not
+	// have reached a file that is still there (see reconcile_indexed_dir).
+	if walk_complete {
+		dir_norm := job.dir.replace('\\', '/')
+		for uri, _ in job.fingerprints {
+			if uri in present || uri in job.open_uris {
+				continue
+			}
+			if path_is_within(uri_to_path(uri).replace('\\', '/'), dir_norm) {
+				result.deletions << uri
+			}
+		}
+	}
+	for f in files {
+		uri := index_uri_for_path(f, job.open_uris_by_path)
+		if uri in job.open_uris {
+			continue
+		}
+		if app.index_refresh_file(uri, job, mut result, mut entries) {
+			break
+		}
+	}
+	result.entries = entries.move()
+	return result
+}
+
+// index_refresh_file decides what a refresh does with the file at `uri`: build
+// its entry, skip it because its content fingerprint is unchanged or it is out
+// of the index's bounds, or drop it because it is gone. It returns true when the
+// walk must stop, which is only at the total entry cap.
+fn (mut app App) index_refresh_file(uri string, job IndexRefreshJob, mut result IndexRefreshResult, mut entries map[string]IndexEntry) bool {
+	path := uri_to_path(uri)
+	if path_is_under_removed_root(path, job.workspace_roots, job.removed_roots) {
+		result.deletions << uri
+		return false
+	}
+	if !os.is_file(path) {
+		result.deletions << uri
+		return false
+	}
+	if os.file_size(path) > index_max_file_bytes {
+		result.skipped << uri
+		return false
+	}
+	content := os.read_file(path) or {
+		result.skipped << uri
+		return false
+	}
+	fingerprint := content.hash()
+	if previous := job.fingerprints[uri] {
+		if previous == fingerprint {
+			result.skipped_files++
+			return false
+		}
+	}
+	if uri !in job.fingerprints && job.indexed_count + entries.len >= index_max_files {
+		result.incomplete = true
+		result.skipped << uri
+		return true
+	}
+	entries[uri] = build_index_entry(content, app.position_encoding)
+	result.reindexed++
+	return false
+}
+
+// apply_index_refresh_results merges the refreshes the background worker
+// finished. It runs on the request thread, where no other thread is reading the
+// index, which is why the worker never writes the index itself.
+fn (mut app App) apply_index_refresh_results() {
+	mut scheduler := app.index_refresh or { return }
+	for mut result in scheduler.take_results() {
+		app.merge_index_refresh(mut result)
+	}
+}
+
+fn (mut app App) merge_index_refresh(mut result IndexRefreshResult) {
+	dir := result.dir
+	scope := 'recursive:${dir}'
+	if dir == '' || dir == '/' || app.path_is_in_removed_workspace(dir) {
+		// A root removed while the refresh ran: nothing it found belongs here.
+		return
+	}
+	if !os.is_dir(dir) {
+		// The folder vanished during the walk, so the walk found nothing in it,
+		// which is what a complete walk of it would have recorded.
+		result.incomplete = true
+	}
+	if result.entries.len > 0 {
+		// Pre-size once, for the same reason ensure_dirs_indexed does.
+		app.symbol_index.reserve(u32(index_reserve_target(app.symbol_index.len, result.entries.len)))
+	}
+	for uri, entry in result.entries {
+		if uri in app.open_files {
+			continue // the request thread indexes open buffers itself
+		}
+		app.symbol_index[uri] = entry
+	}
+	for uri in result.skipped {
+		if uri in app.open_files {
+			continue
+		}
+		app.drop_index_uri(uri)
+		app.index_skipped_uris[uri] = true
+	}
+	for uri in result.deletions {
+		if uri in app.open_files {
+			continue
+		}
+		app.drop_index_uri(uri)
+		app.index_skipped_uris.delete(uri)
+	}
+	app.indexed_dirs[dir] = true
+	if result.walk_ms > 0 {
+		app.indexed_dir_walk_ms[dir] = result.walk_ms
+	}
+	if result.incomplete {
+		app.index_incomplete_scopes[scope] = true
+	} else {
+		app.index_incomplete_scopes.delete(scope)
+	}
+	if os.getenv('VLS_PERF_LOG') != '' {
+		elapsed_ms := time.now().unix_milli() - result.started_ms
+		app.send_log_message('index-refresh scope=${scope} indexed=${result.reindexed} skipped=${result.skipped_files} deleted=${result.deletions.len} elapsed_ms=${elapsed_ms}',
+			4)
+	}
+}
+
+// stop_index_refresh joins the background index worker, so the process cannot
+// exit while a refresh is still reading files. It is the equivalent of
+// stop_diagnostics_servers for the index worker.
+fn (mut app App) stop_index_refresh() {
+	if mut scheduler := app.index_refresh {
+		scheduler.stop_and_wait()
+	}
+}
+
+// index_scope_key names a scope the way the index already stores it: a
+// recursive walk of a project root and a shallow walk of a loose module
+// directory are different scopes, even for the same directory.
+fn index_scope_key(scope IndexScope) string {
+	kind := if scope.recursive { 'recursive' } else { 'shallow' }
+	return '${kind}:${scope.dir}'
+}
+
+// ensure_index_scope indexes only the project/module relevant to a request, on
+// the thread that asked. A destructive request (rename, linked editing) must
+// not answer before its own scope is indexed; a read request uses
+// ensure_index_scope_for_request instead.
 fn (mut app App) ensure_index_scope(scope IndexScope) {
 	if scope.dir == '' || scope.dir == '/' {
 		return
@@ -852,6 +1292,13 @@ fn (mut app App) ensure_index_scope(scope IndexScope) {
 		app.ensure_dirs_indexed([scope.dir])
 		return
 	}
+	app.ensure_shallow_scope_indexed(scope)
+}
+
+// ensure_shallow_scope_indexed indexes the open buffers of `scope` and the
+// directory itself, shallowly: a V module occupies one directory, so this is
+// all a same-module lookup needs and it costs one listing.
+fn (mut app App) ensure_shallow_scope_indexed(scope IndexScope) {
 	for uri, _ in app.open_files {
 		if uri_is_in_index_scope(uri, scope) {
 			app.reindex_uri(uri)
@@ -860,14 +1307,29 @@ fn (mut app App) ensure_index_scope(scope IndexScope) {
 	app.ensure_dir_shallow_indexed(scope.dir)
 }
 
+// ensure_index_scope_for_request is the read-request answer to
+// ensure_index_scope: the open buffers are refreshed (a fingerprint check per
+// open file, no walk), and the scope's walk is left to the background worker.
+// A shallow scope stays on the request thread, because it has always been the
+// cost of one directory listing.
+fn (mut app App) ensure_index_scope_for_request(scope IndexScope) {
+	if scope.dir == '' || scope.dir == '/' {
+		return
+	}
+	if scope.recursive {
+		app.ensure_indexed_for_request([scope.dir])
+		return
+	}
+	app.ensure_shallow_scope_indexed(scope)
+}
+
 // index_is_complete_for_scope reports whether every source relevant to a
 // destructive operation in `scope` was indexed.
 fn (app &App) index_is_complete_for_scope(scope IndexScope) bool {
 	if scope.dir == '' {
 		return false
 	}
-	scope_kind := if scope.recursive { 'recursive' } else { 'shallow' }
-	if '${scope_kind}:${scope.dir}' in app.index_incomplete_scopes {
+	if index_scope_key(scope) in app.index_incomplete_scopes {
 		return false
 	}
 	for uri, _ in app.index_skipped_uris {

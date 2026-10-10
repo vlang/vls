@@ -1334,3 +1334,233 @@ fn test_fuzzy_trigram_cache_caps_long_names() {
 	assert cached.len == fuzzy_trigram_max_per_symbol, 'cached trigrams of a long name are capped, got ${cached.len}'
 	assert app.query_workspace_symbols(long_name).any(it.name == long_name), 'capped long name is still found exactly'
 }
+
+// index_request_refresh_app returns an app whose read requests answer from the
+// index and leave a refresh to the background worker, over `root` as its project.
+fn index_request_refresh_app(root string) (&App, &IndexRefreshScheduler) {
+	mut app := index_test_app()
+	mut scheduler := new_index_refresh_scheduler()
+	app.index_refresh = scheduler
+	app.supports_dynamic_watched_files_registration = false // no client watchers
+	app.ensure_dirs_indexed([root])
+	return app, scheduler
+}
+
+fn test_indexed_for_request_answers_from_the_index_as_it_stands() {
+	root := index_test_tmpdir('request_nowalk')
+	defer {
+		os.rmdir_all(root) or {}
+	}
+	os.write_file(os.join_path(root, 'v.mod'), 'Module {}\n') or {
+		assert false, 'write v.mod failed: ${err}'
+		return
+	}
+	os.write_file(os.join_path(root, 'a.v'), 'module main\n\nfn alpha() {}\n') or {
+		assert false, 'write a.v failed: ${err}'
+		return
+	}
+	mut app, scheduler := index_request_refresh_app(root)
+	assert app.query_workspace_symbols('alpha').len == 1, 'the project walk indexed a.v'
+	assert app.query_workspace_symbols('beta').len == 0, 'beta does not exist yet'
+
+	// A file created after the walk makes the directory stale for the next
+	// request: its throttle has expired and it would be re-walked.
+	os.write_file(os.join_path(root, 'b.v'), 'module main\n\nfn beta() {}\n') or {
+		assert false, 'write b.v failed: ${err}'
+		return
+	}
+	app.indexed_dir_walk_ms[root] = 0
+
+	app.ensure_indexed_for_request([root])
+	assert app.query_workspace_symbols('alpha').len == 1, 'the already-indexed symbol is still answered from the index'
+	assert app.query_workspace_symbols('beta').len == 0, 'a read request must not walk the workspace: it answered with the symbol of the file it had not indexed'
+
+	// The refresh did run, on the background worker: joining it and merging its
+	// result is what makes the new file visible.
+	app.stop_index_refresh()
+	assert scheduler.refreshes == 1, 'the request left exactly one refresh for the worker, got ${scheduler.refreshes}'
+	app.apply_index_refresh_results()
+	assert app.query_workspace_symbols('beta').len == 1, 'the background refresh indexed the file it found'
+	assert app.query_workspace_symbols('alpha').len == 1, 'the untouched file keeps its entry'
+}
+
+fn test_indexed_for_request_coalesces_a_burst_of_requests() {
+	root := index_test_tmpdir('request_burst')
+	defer {
+		os.rmdir_all(root) or {}
+	}
+	os.write_file(os.join_path(root, 'v.mod'), 'Module {}\n') or {
+		assert false, 'write v.mod failed: ${err}'
+		return
+	}
+	os.write_file(os.join_path(root, 'a.v'), 'module main\n\nfn alpha() {}\n') or {
+		assert false, 'write a.v failed: ${err}'
+		return
+	}
+	mut app, scheduler := index_request_refresh_app(root)
+	os.write_file(os.join_path(root, 'b.v'), 'module main\n\nfn beta() {}\n') or {
+		assert false, 'write b.v failed: ${err}'
+		return
+	}
+	app.indexed_dir_walk_ms[root] = 0 // a refresh is due on every one of these
+
+	for _ in 0 .. 20 {
+		app.ensure_indexed_for_request([root])
+	}
+	assert scheduler.workers_started == 1, 'a burst of 20 requests started ${scheduler.workers_started} workers'
+
+	app.stop_index_refresh()
+	assert scheduler.refreshes == 1, 'a burst of 20 requests ran ${scheduler.refreshes} refreshes'
+	assert scheduler.pending.len == 0, 'the queue must be drained when the worker ends'
+	assert scheduler.reindexed_files == 1, 'the one refresh indexed the one new file, got ${scheduler.reindexed_files}'
+	app.apply_index_refresh_results()
+	assert app.query_workspace_symbols('beta').len == 1, 'the one refresh merged the one new file'
+
+	// A stopped scheduler starts no thread again, even for a directory that went
+	// stale again afterwards.
+	app.indexed_dir_walk_ms[root] = 0
+	for _ in 0 .. 10 {
+		app.ensure_indexed_for_request([root])
+	}
+	assert scheduler.workers_started == 1, 'a stopped scheduler starts no further worker, ${scheduler.workers_started} started'
+	assert app.query_workspace_symbols('alpha').len == 1, 'the index still answers from what the one refresh merged'
+}
+
+fn test_watcher_event_still_indexes_on_the_request_thread() {
+	root := index_test_tmpdir('watcher_sync')
+	defer {
+		os.rmdir_all(root) or {}
+	}
+	// The scheduler is in place, so only the watcher's own path can explain the
+	// file being indexed without waiting for the worker.
+	_, scheduler := index_request_refresh_app(root)
+	path := os.join_path(root, 'watched.v')
+	uri := path_to_uri(path)
+	os.write_file(path, 'module main\n\nfn watched_symbol() {}\n') or {
+		assert false, 'write watched.v failed: ${err}'
+		return
+	}
+	mut app := index_test_app()
+	app.index_refresh = scheduler
+
+	app.on_did_change_watched_files(Request{
+		params: json2.encode(DidChangeWatchedFilesParams{
+			changes: [FileEvent{
+				uri:        uri
+				event_type: 1
+			}]
+		})
+	})
+
+	assert uri in app.symbol_index, 'a watcher event indexes the file on the thread it arrived on'
+	assert app.query_workspace_symbols('watched_symbol').len == 1, 'a watcher event needs no background refresh to be visible'
+	assert scheduler.workers_started == 0, 'a watcher event schedules no background refresh, ${scheduler.workers_started} started'
+}
+
+fn test_shutdown_joins_the_background_index_worker() {
+	root := index_test_tmpdir('shutdown_join')
+	defer {
+		os.rmdir_all(root) or {}
+	}
+	os.write_file(os.join_path(root, 'v.mod'), 'Module {}\n') or {
+		assert false, 'write v.mod failed: ${err}'
+		return
+	}
+	os.write_file(os.join_path(root, 'a.v'), 'module main\n\nfn alpha() {}\n') or {
+		assert false, 'write a.v failed: ${err}'
+		return
+	}
+	mut app, scheduler := index_request_refresh_app(root)
+	os.write_file(os.join_path(root, 'b.v'), 'module main\n\nfn beta() {}\n') or {
+		assert false, 'write b.v failed: ${err}'
+		return
+	}
+	app.indexed_dir_walk_ms[root] = 0
+	app.ensure_indexed_for_request([root])
+	assert app.query_workspace_symbols('beta').len == 0, 'the request answered before the refresh landed'
+
+	app.stop_index_refresh()
+	assert scheduler.refreshes == 1, 'shutdown joined the worker: the refresh had not finished (${scheduler.refreshes} done)'
+	assert scheduler.results.len == 1, 'the finished refresh is published for the merge'
+	assert !scheduler.worker_running, 'no worker may outlive the join'
+	app.apply_index_refresh_results()
+	assert app.query_workspace_symbols('beta').len == 1, 'the joined refresh left its result to merge'
+}
+
+fn test_background_refresh_skips_unchanged_files_by_fingerprint() {
+	root := index_test_tmpdir('request_fingerprint')
+	defer {
+		os.rmdir_all(root) or {}
+	}
+	os.write_file(os.join_path(root, 'v.mod'), 'Module {}\n') or {
+		assert false, 'write v.mod failed: ${err}'
+		return
+	}
+	os.write_file(os.join_path(root, 'a.v'), 'module main\n\nfn alpha() {}\n') or {
+		assert false, 'write a.v failed: ${err}'
+		return
+	}
+	os.write_file(os.join_path(root, 'b.v'), 'module main\n\nfn beta() {}\n') or {
+		assert false, 'write b.v failed: ${err}'
+		return
+	}
+	mut app, scheduler := index_request_refresh_app(root)
+	uri_a := path_to_uri(os.join_path(root, 'a.v'))
+	fingerprint_a := app.symbol_index[uri_a].fingerprint
+	assert app.symbol_index.len == 2, 'both files were indexed, got ${app.symbol_index.len}'
+
+	// A refresh with nothing changed on disk parses nothing: the fingerprint of
+	// every entry already matches the content on disk, which is what keeps an
+	// unchanged workspace from being re-parsed on every throttled refresh.
+	app.indexed_dir_walk_ms[root] = 0
+	app.ensure_indexed_for_request([root])
+	app.stop_index_refresh()
+	app.apply_index_refresh_results()
+	assert scheduler.refreshes == 1, 'one refresh ran, got ${scheduler.refreshes}'
+	assert scheduler.skipped_files == 2, 'the refresh skipped both unchanged files, got ${scheduler.skipped_files}'
+	assert scheduler.reindexed_files == 0, 'no unchanged file was re-parsed, got ${scheduler.reindexed_files}'
+	assert app.symbol_index.len == 2, 'the index still holds exactly the two entries, got ${app.symbol_index.len}'
+	assert app.symbol_index[uri_a].fingerprint == fingerprint_a, 'the untouched file keeps its entry'
+	assert app.query_workspace_symbols('alpha').len == 1, 'the untouched file is still findable'
+}
+
+fn test_background_refresh_reindexes_the_file_that_changed() {
+	// The control for the skip above: the same background path on the same shape
+	// of project does pick up an edit to an unopened file, so a skipped file is
+	// the fingerprint deciding and not a refresh that does nothing.
+	root := index_test_tmpdir('request_edit')
+	defer {
+		os.rmdir_all(root) or {}
+	}
+	os.write_file(os.join_path(root, 'v.mod'), 'Module {}\n') or {
+		assert false, 'write v.mod failed: ${err}'
+		return
+	}
+	os.write_file(os.join_path(root, 'a.v'), 'module main\n\nfn alpha() {}\n') or {
+		assert false, 'write a.v failed: ${err}'
+		return
+	}
+	b_path := os.join_path(root, 'b.v')
+	os.write_file(b_path, 'module main\n\nfn beta() {}\n') or {
+		assert false, 'write b.v failed: ${err}'
+		return
+	}
+	mut app, scheduler := index_request_refresh_app(root)
+	uri_a := path_to_uri(os.join_path(root, 'a.v'))
+	fingerprint_a := app.symbol_index[uri_a].fingerprint
+
+	os.write_file(b_path, 'module main\n\nfn gamma() {}\n') or {
+		assert false, 'rewrite b.v failed: ${err}'
+		return
+	}
+	app.indexed_dir_walk_ms[root] = 0
+	app.ensure_indexed_for_request([root])
+	app.stop_index_refresh()
+	app.apply_index_refresh_results()
+	assert scheduler.reindexed_files == 1, 'the edited file was re-parsed, got ${scheduler.reindexed_files}'
+	assert scheduler.skipped_files == 1, 'the other file was skipped, got ${scheduler.skipped_files}'
+	assert app.query_workspace_symbols('gamma').len == 1, 'the refreshed index has the new symbol'
+	assert app.query_workspace_symbols('beta').len == 0, 'the refreshed index dropped the old symbol'
+	assert app.symbol_index[uri_a].fingerprint == fingerprint_a, 'the untouched file still keeps its entry'
+	assert app.symbol_index.len == 2, 'the refresh added no entry, got ${app.symbol_index.len}'
+}
