@@ -435,6 +435,24 @@ fn (mut app App) v3_query_pool() &DiagnosticsServerPool {
 	return app.v3_query_servers
 }
 
+// pooled_program_question asks the servers that answer this editor's questions
+// to run `argv` in `work_dir`, or to answer `question` about the same program
+// when there is one. The pool keeps one server for each `(exe, argv, work_dir)`
+// key it is asked for and starts it only once, so a warm server answers without
+// a compiler process of its own. None means no server can answer, which leaves
+// the caller to run the compiler itself, exactly as it would have without a
+// pool: the V in use serves no diagnostics server, it died, or the pool closed.
+fn (mut app App) pooled_program_question(argv []string, work_dir string, question string) ?os.Result {
+	exe := resolve_diagnostics_server_exe() or { return none }
+	mut pool := app.v3_query_pool()
+	if question == '' {
+		return pool.check(exe, argv, work_dir, fn () bool {
+			return false
+		}, unsafe { nil })
+	}
+	return pool.query(exe, argv, work_dir, question)
+}
+
 // v3_copies returns the copies of the programs that are built and current.
 fn (mut app App) v3_copies() []V3QueryProject {
 	mut pool := app.v3_query_pool()

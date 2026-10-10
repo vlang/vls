@@ -422,19 +422,18 @@ fn (mut app App) rename_clash_in(program_dir string, paths []string, rc RenameCh
 // An error means V could not check it; compiler diagnostics are returned.
 fn (mut app App) v3_check_copy(project V3QueryProject, target string) !string {
 	is_library := target == '.' && !app.is_program_dir(project.overlay.source_work_dir)
-	if exe := resolve_diagnostics_server_exe() {
-		// The command line of the questions (see v3_run): the same server.
-		mut args := v3_compiler_selection_args()
-		if is_library {
-			args << '-shared'
-		}
-		args << ['-check', '-nocolor', target]
-		mut servers := app.v3_query_pool()
-		if result := servers.check(exe, args, project.overlay.temp_work_dir, fn () bool {
-			return false
-		}, unsafe { nil }) {
-			return rename_check_output(result.exit_code, result.output)
-		}
+	// The command line of the checks of the diagnostics and of the questions
+	// (see v3_run and build_v_check_args_multifile), which the copy of `project`
+	// is the one those run in: asked for the same key, the server that is warm
+	// for them answers this check too, and no compiler process of its own
+	// starts (see pooled_program_question).
+	mut asked := v3_compiler_selection_args()
+	if is_library {
+		asked << '-shared'
+	}
+	asked << ['-check', '-nocolor', target]
+	if answer := app.pooled_program_question(asked, project.overlay.temp_work_dir, '') {
+		return rename_check_output(answer.exit_code, answer.output)
 	}
 	if app.v3_one_shot_unsupported {
 		return error('this compiler cannot validate rename conflicts')

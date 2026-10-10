@@ -429,7 +429,7 @@ fn (mut app App) hover_result(uri string, position Position, line_info string) R
 	if answer := app.v3_hover(uri, real_path, line_info) {
 		if location := answer.declared_at {
 			located = true
-			if hover := app.function_declaration_hover(location) {
+			if hover := app.function_declaration_hover(uri, location) {
 				return hover
 			}
 			// A local or a parameter V3 knows no type of: nothing else can tell
@@ -446,7 +446,7 @@ fn (mut app App) hover_result(uri string, position Position, line_info string) R
 	// function is declared, and V1 what anything else is.
 	if !located {
 		if location := app.resolve_indexed_definition(uri, position) {
-			if hover := app.function_declaration_hover(location) {
+			if hover := app.function_declaration_hover(uri, location) {
 				return hover
 			}
 		}
@@ -462,8 +462,10 @@ fn (mut app App) hover_result(uri string, position Position, line_info string) R
 // function_declaration_hover shows the function, the method or the method of an
 // interface declared at `location` as its declaration writes it, with the
 // documentation written above it: what a hover shows for its declaration and
-// for each of its uses. None when something else is declared there.
-fn (mut app App) function_declaration_hover(location Location) ?Hover {
+// for each of its uses. `uri` is the document the hover is asked in, so a
+// declaration from another file of the project links to it. None when something
+// else is declared there.
+fn (mut app App) function_declaration_hover(uri string, location Location) ?Hover {
 	content := app.index_source_for(location.uri) or { return none }
 	lines := content.split_into_lines()
 	line := location.range.start.line
@@ -479,10 +481,18 @@ fn (mut app App) function_declaration_hover(location Location) ?Hover {
 		return none
 	}
 	doc := extract_doc_comment(lines, line)
+	link := app.declaration_file_link(uri, location)
+	mut value := '```v\n${declaration}\n```'
+	if doc != '' {
+		value += '\n\n${doc}'
+	}
+	if link != '' {
+		value += '\n\n${link}'
+	}
 	return Hover{
 		contents: MarkupContent{
 			kind:  'markdown'
-			value: '```v\n${declaration}\n```' + if doc == '' { '' } else { '\n\n${doc}' }
+			value: value
 		}
 	}
 }
@@ -577,12 +587,117 @@ fn (mut app App) source_hover_fallback(uri string, position Position) ?Hover {
 	if declaration == '' {
 		return none
 	}
+	// The members of a struct or an enum are the index's to tell, from the same
+	// file the reads above have just opened.
+	content := app.index_source_for(location.uri) or { '' }
 	return Hover{
 		contents: MarkupContent{
 			kind:  'markdown'
-			value: '```v\n${declaration}\n```'
+			value: app.declaration_hover_value(location.uri, content, declaration)
 		}
 	}
+}
+
+// hover_member_cap bounds how many members a hover lists of one type, so a
+// struct with a hundred fields does not fill the screen.
+const hover_member_cap = 20
+
+// declaration_hover_value is the markdown a hover on a declaration shows: the
+// declaration as the source writes it, and — inside the same fence — the members
+// the index knows of a struct or an enum, so hovering the type shows its shape.
+fn (mut app App) declaration_hover_value(uri string, content string, declaration string) string {
+	mut body := declaration
+	name := declaration_type_name(declaration)
+	if name != '' {
+		members := app.hover_type_member_lines(uri, content, name)
+		if members.len > 0 {
+			// The declaration the source writes is cut at the `{`, so the shape
+			// opens it again before listing what is inside.
+			body += ' {\n\t' + members.join('\n\t') + '\n}'
+		}
+	}
+	return '```v\n${body}\n```'
+}
+
+// declaration_type_name returns the name the type of a `struct` or an `enum`
+// declaration header declares, without the type parameters a generic one writes
+// after it (`Pair[T]` gives `Pair`), or '' for any other declaration.
+fn declaration_type_name(declaration string) string {
+	mut text := declaration.trim_space()
+	if text.starts_with('pub ') {
+		text = text[4..].trim_space()
+	}
+	keyword := if text.starts_with('struct ') {
+		'struct '
+	} else if text.starts_with('enum ') {
+		'enum '
+	} else {
+		return ''
+	}
+	rest := text[keyword.len..].trim_space()
+	mut end := 0
+	for end < rest.len && (is_ident_char(rest[end]) || rest[end] == `.`) {
+		end++
+	}
+	name := rest[..end]
+	if name == '' {
+		return ''
+	}
+	return name.all_after_last('.')
+}
+
+// hover_type_member_lines lists what the index knows of the type `typ` for a
+// hover: the fields of a struct as `name Type`, as the source writes the type,
+// or the variants of an enum as their names, both in declaration order and both
+// capped at hover_member_cap with a tail that says how many were left out.
+// Empty when the index names no members of it, which is what makes a hover fall
+// back to the declaration alone.
+fn (mut app App) hover_type_member_lines(uri string, content string, typ string) []string {
+	members := app.type_members(uri, content, typ)
+	mut listed := []string{}
+	if members.field_declared_types.len > 0 {
+		for name, declared in members.field_declared_types {
+			listed << '${name} ${declared}'
+		}
+	} else if variants := app.indexed_enum_members(uri, content, typ) {
+		for variant in variants {
+			listed << variant.label
+		}
+	}
+	if listed.len == 0 {
+		return []string{}
+	}
+	mut lines := []string{cap: hover_member_cap + 1}
+	for line in listed {
+		if lines.len == hover_member_cap {
+			break
+		}
+		lines << line
+	}
+	if listed.len > hover_member_cap {
+		lines << '// ... ${listed.len - hover_member_cap} more'
+	}
+	return lines
+}
+
+// declaration_file_link is the markdown link to the file a hover's declaration
+// lives in, relative to the project root, the way rust-analyzer links a
+// declaration in another file. '' when it is the file the hover is asked in, or
+// when the two share no project root.
+fn (mut app App) declaration_file_link(uri string, location Location) string {
+	if uri == '' || location.uri == '' || location.uri == uri {
+		return ''
+	}
+	root := find_project_root(os.dir(uri_to_path(uri)))
+	if root == '' {
+		return ''
+	}
+	relative := path_relative_to(uri_to_path(location.uri).replace('\\', '/'), root.replace('\\',
+		'/')) or { return '' }
+	if relative == '' {
+		return ''
+	}
+	return '[${relative}](${relative})'
 }
 
 // hovered_variable_name returns the identifier at `position` when it references a
@@ -863,6 +978,11 @@ fn (mut app App) member_selector_hover(uri string, position Position) ?Hover {
 	if static_member := app.language_static_hover(uri, content, receiver, name) {
 		return static_member
 	}
+	// A variant of an enum, `Color.red`, which the compiler says nothing of and
+	// the index has the declaration of: what it carries after `=`.
+	if variant := app.enum_variant_hover(uri, content, receiver, name) {
+		return variant
+	}
 	typ := app.expression_type(uri, content, receiver, position)
 	if typ == '' {
 		return none
@@ -941,6 +1061,109 @@ fn language_member_hover(name string, signature string) Hover {
 			value: '```v\n${signature}\n```' + if doc == '' { '' } else { '\n\n${doc}' }
 		}
 	}
+}
+
+// enum_variant_hover answers for `Type.variant` when `Type` is an enum the index
+// knows: the variant with the value its declaration carries. None for anything
+// else, and for a variant that declares no value.
+fn (mut app App) enum_variant_hover(uri string, content string, receiver string, name string) ?Hover {
+	if receiver == '' || name == '' || !is_type_name(receiver) {
+		return none
+	}
+	declaration := app.indexed_enum_member_declaration(uri, content, receiver, name)
+	if declaration == '' {
+		return none
+	}
+	value := declaration_const_value(declaration, name)
+	if value == '' {
+		return none
+	}
+	return Hover{
+		contents: MarkupContent{
+			kind:  'markdown'
+			value: '```v\n${receiver}.${name} = ${value}\n```'
+		}
+	}
+}
+
+// indexed_enum_member_declaration returns the line that declares the member
+// `name` of the enum `typ`, as the file the index holds it in writes it, or ''
+// when the index names no such member.
+fn (mut app App) indexed_enum_member_declaration(uri string, content string, typ string, name string) string {
+	dir, type_name, _, expected_module := app.receiver_type_scope(uri, content, typ)
+	if dir == '' || type_name == '' || expected_module == '' || !os.is_dir(dir) {
+		return ''
+	}
+	app.ensure_dir_shallow_indexed(dir)
+	normalized_dir := normalized_index_path(dir)
+	mut indexed_uris := app.symbol_index.keys()
+	indexed_uris.sort()
+	for indexed_uri in indexed_uris {
+		entry := app.symbol_index[indexed_uri] or { continue }
+		if normalized_index_path(os.dir(uri_to_path(indexed_uri))) != normalized_dir
+			|| entry.module_name != expected_module {
+			continue
+		}
+		source := app.index_source_for(indexed_uri) or { continue }
+		source_lines := source.split_into_lines()
+		for symbol in entry.doc_symbols {
+			if symbol.kind != sym_kind_enum || symbol.name != type_name {
+				continue
+			}
+			for member in symbol.children {
+				if member.kind != sym_kind_enum_member || member.name != name {
+					continue
+				}
+				if member.range.start.line < 0 || member.range.start.line >= source_lines.len {
+					return ''
+				}
+				return source_lines[member.range.start.line].trim_space()
+			}
+		}
+	}
+	return ''
+}
+
+// declaration_const_value returns the value the declaration `declaration`
+// carries for `name` after its `=`: the literal of a constant (`name = 100`), or
+// the whole parenthesised group of an enum variant's value (`name = (1 << 2)`).
+// '' when the declaration carries no value of that name.
+fn declaration_const_value(declaration string, name string) string {
+	if name == '' {
+		return ''
+	}
+	mut from := 0
+	for from < declaration.len {
+		relative := declaration[from..].index(name) or { return '' }
+		start := from + relative
+		from = start + name.len
+		if (start > 0 && is_ident_char(declaration[start - 1]))
+			|| (from < declaration.len && is_ident_char(declaration[from])) {
+			continue
+		}
+		mut rest := declaration[from..].trim_left(' \t')
+		if !rest.starts_with('=') || rest.starts_with('==') {
+			continue
+		}
+		return const_value_text(rest[1..].trim_space())
+	}
+	return ''
+}
+
+// const_value_text is the value written after the `=` of a declaration: up to a
+// trailing comment, and through the matching `)` when it is parenthesised.
+fn const_value_text(rest string) string {
+	if rest.starts_with('(') {
+		close := matching_delimiter(rest, 0, `(`, `)`)
+		if close > 0 {
+			return rest[..close + 1]
+		}
+	}
+	mut end := 0
+	for end < rest.len && rest[end] !in [` `, `\t`] && !rest[end..].starts_with('//') {
+		end++
+	}
+	return rest[..end].trim_space()
 }
 
 // binding_type_narrows reports whether the compiler tells better than the index

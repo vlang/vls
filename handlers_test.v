@@ -17368,3 +17368,465 @@ fn test_a_quick_compiler_answer_is_waited_for_instead_of_doubled() {
 	answers := budget_test_answers(mut app, 6)
 	assert answers.len == 1, 'one answer, because the compiler answer is cheap: ${answers}'
 }
+
+// renp_stub_source is the fake V compiler the pooled rename tests drive. It
+// speaks the diagnostics-server protocol when it is started as a server, and
+// otherwise answers the `-line-info` question of a compiler process of its own,
+// the way a compiler that says every name is declared where it is written does.
+// Each process records what it was asked in the file VLS_RENP_MARKER names, and
+// keeps the .v files of the directory it runs in, which is the copy of the
+// program the request is about: a test then sees which processes ran, with what
+// command line, and what the copy they read held. Every line is flushed, since
+// the output of a child that goes to a pipe is buffered until it is.
+const renp_stub_source = r"module main
+
+import os
+
+fn C.fflush(stream voidptr) int
+
+fn main() {
+	if os.getenv('V_DIAGNOSTICS_SERVER') == '1' {
+		note('server ' + os.args[1..].join(' '))
+		snapshot()
+		serve()
+		return
+	}
+	note('oneshot ' + os.args[1..].join(' '))
+	snapshot()
+	one_shot()
+}
+
+// serve answers the requests of the protocol until it is told to end.
+fn serve() {
+	println('v-diagnostics-server: ready')
+	flush()
+	for {
+		line := os.get_line()
+		if line == '' {
+			return
+		}
+		parts := line.split(' ')
+		kind := parts[0]
+		if kind == 'quit' {
+			return
+		}
+		token := parts[1]
+		rest := parts[2..].join(' ')
+		note(kind + ' ' + rest)
+		snapshot()
+		println('v-diagnostics-server: child 1 ' + token)
+		if kind == 'check' {
+			println('main.v:3:5: error: redefinition of `renamed`')
+		} else {
+			println(own_position(rest))
+		}
+		println('')
+		println('v-diagnostics-server: end 0 ' + token)
+		flush()
+	}
+}
+
+// one_shot answers the question a compiler process of its own is asked.
+fn one_shot() {
+	mut question := ''
+	for i, arg in os.args {
+		if i > 0 && os.args[i - 1] == '-line-info' {
+			question = arg
+		}
+	}
+	if question == '' {
+		return
+	}
+	println(own_position(question))
+	flush()
+}
+
+// own_position answers `file:line:1` for a question about a file and a line.
+fn own_position(question string) string {
+	without_code := question.all_before_last(':')
+	line := without_code.all_after_last(':')
+	if !line.is_int() {
+		return ''
+	}
+	return without_code.all_before_last(':') + ':' + line + ':1'
+}
+
+// note records what this process was asked.
+fn note(text string) {
+	marker := os.getenv('VLS_RENP_MARKER')
+	if marker == '' {
+		return
+	}
+	mut f := os.open_append(marker) or { return }
+	f.write_string(text + '\n') or {}
+	f.close()
+}
+
+// snapshot keeps the .v files of the directory this process runs in, each time
+// under a number of its own, so the first one is the copy of the first request.
+fn snapshot() {
+	root := os.getenv('VLS_RENP_SNAP')
+	if root == '' {
+		return
+	}
+	entries := os.ls(os.getwd()) or { return }
+	mut n := 0
+	if count := os.read_file(os.join_path(root, 'count')) {
+		n = count.trim_space().int()
+	}
+	dir := os.join_path(root, 'copy_${n}')
+	os.mkdir_all(dir) or { return }
+	for entry in entries {
+		if !entry.ends_with('.v') {
+			continue
+		}
+		os.cp(os.join_path(os.getwd(), entry), os.join_path(dir, entry)) or { continue }
+	}
+	os.write_file(os.join_path(root, 'count'), '${n + 1}') or {}
+}
+
+fn flush() {
+	C.fflush(unsafe { nil })
+}
+"
+
+// RenpStub is the fake compiler of the pooled rename tests, and the project it
+// is asked about.
+struct RenpStub {
+mut:
+	dir      string
+	exe      string
+	marker   string
+	snap     string
+	project  string
+	previous string
+}
+
+// renp_stub_exe returns the fake compiler, built once for this test process, or
+// '' when this machine has no V to build it with.
+fn renp_stub_exe() string {
+	root := os.join_path(os.temp_dir(), 'vls_renp_stub_${os.getpid()}_${renp_stub_source.hash().hex()}')
+	must_mkdir_all(root)
+	built := $if windows {
+		os.join_path(root, 'stub.exe')
+	} $else {
+		os.join_path(root, 'stub')
+	}
+	if os.exists(built) {
+		return built
+	}
+	src := os.join_path(root, 'stub.v')
+	must_write_file(src, renp_stub_source)
+	// The compiler of this machine builds it: VLS_V_COMMAND is what the tests
+	// are driving, and it must not be asked for.
+	previous := os.getenv('VLS_V_COMMAND')
+	os.unsetenv('VLS_V_COMMAND')
+	result := run_v_argv(['-o', built, src], root)
+	renp_restore_v_command(previous)
+	if result.exit_code != 0 || !os.exists(built) {
+		os.rm(built) or {}
+		eprintln('skipped: could not build the fake compiler: ${result.output}')
+		return ''
+	}
+	$if !windows {
+		os.chmod(built, 0o755) or {
+			eprintln('skipped: could not run the fake compiler: ${err}')
+			return ''
+		}
+	}
+	return built
+}
+
+// renp_restore_v_command puts VLS_V_COMMAND back as it was.
+fn renp_restore_v_command(previous string) {
+	if previous == '' {
+		os.unsetenv('VLS_V_COMMAND')
+	} else {
+		os.setenv('VLS_V_COMMAND', previous, true)
+	}
+}
+
+// renp_stub_app builds the fake compiler, writes the project it answers for,
+// points VLS at it, and returns an app that asks the questions of a rename
+// through the pool.
+fn renp_stub_app(name string) (&App, RenpStub) {
+	dir := os.join_path(os.temp_dir(), 'vls_renp_${name}_${os.getpid()}_${time.now().unix_nano()}')
+	must_mkdir_all(dir)
+	snap := os.join_path(dir, 'snap')
+	must_mkdir_all(snap)
+	project := os.join_path(dir, 'project')
+	must_mkdir_all(project)
+	must_write_file(os.join_path(project, 'main.v'), renp_project_main)
+	must_write_file(os.join_path(project, 'other.v'), renp_project_other)
+	must_write_file(os.join_path(project, 'third.v'), renp_project_third)
+	exe := renp_stub_exe()
+	previous := os.getenv('VLS_V_COMMAND')
+	if exe != '' {
+		// The fake compiler is the one in use, and the one that serves the
+		// checks and the questions of this editor.
+		os.setenv('VLS_V_COMMAND', exe, true)
+		os.setenv('VLS_DIAGNOSTICS_SERVER', exe, true)
+		os.setenv('VLS_RENP_MARKER', os.join_path(dir, 'marker.txt'), true)
+		os.setenv('VLS_RENP_SNAP', snap, true)
+	}
+	mut app := &App{
+		temp_dir:             dir
+		open_files:           map[string]string{}
+		v3_line_info_enabled: true
+	}
+	return app, RenpStub{
+		dir:      dir
+		exe:      exe
+		marker:   os.join_path(dir, 'marker.txt')
+		snap:     snap
+		project:  project
+		previous: previous
+	}
+}
+
+// renp_stub_done ends the servers the app started and puts the environment back.
+fn renp_stub_done(mut app App, stub RenpStub) {
+	app.stop_v3_queries()
+	os.unsetenv('VLS_RENP_MARKER')
+	os.unsetenv('VLS_RENP_SNAP')
+	os.unsetenv('VLS_DIAGNOSTICS_SERVER')
+	renp_restore_v_command(stub.previous)
+	os.rmdir_all(stub.dir) or {}
+}
+
+// renp_asked returns what the fake compiler was asked, one line per process and
+// per request: `server ...` where a diagnostics server ran, `oneshot ...` where
+// a compiler process of its own did, and `check ...` or `query ...` for what a
+// server answered.
+fn renp_asked(stub RenpStub) []string {
+	return (os.read_file(stub.marker) or { '' }).split_into_lines().filter(it != '')
+}
+
+// renp_snapshot_count is how many snapshots the fake compiler has taken of the
+// copy it read.
+fn renp_snapshot_count(stub RenpStub) int {
+	return (os.read_file(os.join_path(stub.snap, 'count')) or { '0' }).trim_space().int()
+}
+
+// renp_copy returns the .v files of the copy the fake compiler read for its
+// `at`-th invocation, by name.
+fn renp_copy(stub RenpStub, at int) map[string]string {
+	mut files := map[string]string{}
+	for entry in os.ls(os.join_path(stub.snap, 'copy_${at}')) or { return files } {
+		if entry.ends_with('.v') {
+			files[entry] = os.read_file(os.join_path(stub.snap, 'copy_${at}', entry)) or { continue }
+		}
+	}
+	return files
+}
+
+// renp_rename renames the identifier at `line:col` (1-based) of `uri`.
+fn renp_rename(uri string, line int, col int, new_name string) Request {
+	return Request{
+		id:     904
+		method: 'textDocument/rename'
+		params: json2.encode(RenameParams{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			position:      Position{
+				line: line - 1
+				char: col - 1
+			}
+			new_name:      new_name
+		})
+	}
+}
+
+// renp_rename_p renames `p` of `p := 1` in the main file of `stub`, whose buffer
+// is written for it first.
+fn renp_rename_p(mut app App, stub RenpStub) {
+	path := os.join_path(stub.project, 'main.v')
+	uri := path_to_uri(path)
+	app.open_files[uri] = os.read_file(path) or { renp_project_main }
+	app.workspace_roots = [stub.project]
+	app.rename_request(renp_rename(uri, 4, 2, 'q')) or {}
+}
+
+const renp_project_main = 'module main
+
+fn main() {
+	p := 1
+	println(p)
+}
+'
+
+const renp_project_other = 'module main
+
+fn other() {
+	q := 2
+	println(q)
+}
+'
+
+// renp_project_third is a file of the project that a rename of `p` does not
+// touch: what its buffer holds is what shows whether the copy was synced.
+const renp_project_third = 'module main
+
+fn third() {
+	r := 3
+	println(r)
+}
+'
+
+fn test_renp_a_warm_server_answers_the_rename_check_without_a_compiler_of_its_own() {
+	mut app, stub := renp_stub_app('pooled')
+	defer {
+		renp_stub_done(mut app, stub)
+	}
+	if stub.exe == '' {
+		return
+	}
+	renp_rename_p(mut app, stub)
+	asked := renp_asked(stub)
+	assert asked.any(it.starts_with('server ')), 'no diagnostics server was asked: ${asked.str()}'
+	assert asked.any(it.starts_with('check ')), 'the server answered no check: ${asked.str()}'
+	assert !asked.any(it.starts_with('oneshot ')), 'a compiler process of its own ran: ${asked.str()}'
+	assert app.v3_query_pool().servers.len > 0, 'no server stayed warm in the pool'
+}
+
+fn test_renp_a_second_rename_asks_the_server_the_first_one_started() {
+	mut app, stub := renp_stub_app('warm')
+	defer {
+		renp_stub_done(mut app, stub)
+	}
+	if stub.exe == '' {
+		return
+	}
+	renp_rename_p(mut app, stub)
+	started := renp_asked(stub).filter(it.starts_with('server ')).len
+	assert started == 1, 'the first rename started ${started} servers'
+	renp_rename_p(mut app, stub)
+	assert renp_asked(stub).filter(it.starts_with('server ')).len == started, 'the second rename started another server: ${renp_asked(stub).str()}'
+	assert app.v3_query_pool().servers.len == 1, 'the pool did not keep one server warm'
+}
+
+fn test_renp_the_check_asks_for_the_server_of_the_copy_it_validates() {
+	mut app, stub := renp_stub_app('key')
+	defer {
+		renp_stub_done(mut app, stub)
+	}
+	if stub.exe == '' {
+		return
+	}
+	renp_rename_p(mut app, stub)
+	mut pool := app.v3_query_pool()
+	keys := pool.servers.keys()
+	assert keys.len == 1, 'one server answers for this program: ${keys.str()}'
+	assert keys[0].starts_with(stub.exe), 'the server is not the configured compiler: ${keys[0]}'
+	assert keys[0].ends_with('\n.'), 'the check asked for the program of the directory: ${keys[0]}'
+	assert keys[0].contains(app.v3_copies()[0].overlay.temp_work_dir), 'the server is not the one of the copy the check ran in: ${keys[0]}'
+}
+
+fn test_renp_the_check_reads_the_copy_that_holds_the_buffer() {
+	mut app, stub := renp_stub_app('synced')
+	defer {
+		renp_stub_done(mut app, stub)
+	}
+	if stub.exe == '' {
+		return
+	}
+	path := os.join_path(stub.project, 'main.v')
+	uri := path_to_uri(path)
+	// The editor is ahead of the disk, in the file the rename edits and in one
+	// it does not: only the second one shows whether the copy was synced, since
+	// the first is written for the rename itself.
+	buffer := renp_project_main + '\nprintln(3)\n'
+	must_write_file(path, renp_project_main)
+	third := os.join_path(stub.project, 'third.v')
+	must_write_file(third, renp_project_third)
+	third_buffer := renp_project_third + '\nfn third_more() {}\n'
+	app.open_files[uri] = buffer
+	app.open_files[path_to_uri(third)] = third_buffer
+	app.workspace_roots = [stub.project]
+	app.rename_request(renp_rename(uri, 4, 2, 'q')) or {}
+	copied := renp_copy(stub, 0)
+	read := copied['main.v'] or { '' }
+	assert read == buffer, 'the copy the compiler read held stale text: ${read}'
+	assert read != os.read_file(path) or { '' }, 'the copy the compiler read held the disk text'
+	held := copied['third.v'] or { '' }
+	assert held == third_buffer, 'the copy the compiler read held the disk text of a file the rename does not edit: ${held}'
+}
+
+fn test_renp_the_conflict_check_reads_the_copy_it_syncs_the_buffer_into() {
+	mut app, stub := renp_stub_app('sync')
+	defer {
+		renp_stub_done(mut app, stub)
+	}
+	if stub.exe == '' {
+		return
+	}
+	path := os.join_path(stub.project, 'main.v')
+	uri := path_to_uri(path)
+	third := os.join_path(stub.project, 'third.v')
+	must_write_file(third, renp_project_third)
+	third_buffer := renp_project_third + '\nfn third_more() {}\n'
+	must_write_file(path, renp_project_main)
+	app.open_files[uri] = renp_project_main
+	app.workspace_roots = [stub.project]
+	// The keys of a RenameCheck are normalized paths, as check_rename_conflicts
+	// builds them.
+	normalized := normalize_overlay_path(path)
+	mut spans := map[string][]RenameSpan{}
+	mut uris := map[string]string{}
+	spans[normalized] = [
+		RenameSpan{
+			line:  3
+			start: 1
+			end:   2
+		},
+	]
+	uris[normalized] = uri
+	rc := RenameCheck{
+		old_name: 'p'
+		new_name: 'q'
+		spans:    spans
+		existing: []NamePos{}
+		uris:     uris
+	}
+	// The copy is built with what the project holds on disk, third.v not open.
+	app.rename_clash_in(stub.project, [normalized], rc) or {
+		assert false, 'the first conflict check failed: ${err}'
+		return
+	}
+	// Then the editor opens that file with a buffer the disk does not have, and
+	// the same check runs again in the copy that was built already.
+	app.open_files[path_to_uri(third)] = third_buffer
+	reason := app.rename_clash_in(stub.project, [normalized], rc) or {
+		assert false, 'the second conflict check failed: ${err}'
+		return
+	}
+	assert reason == '', 'the fake compiler reports no clash: ${reason}'
+	assert renp_snapshot_count(stub) > 1, 'the compiler read no copy of its own: ${renp_snapshot_count(stub)}'
+	copied := renp_copy(stub, renp_snapshot_count(stub) - 1)
+	held := copied['third.v'] or { '' }
+	assert held == third_buffer, 'the check read the disk text of a file the rename does not edit: ${held}'
+	assert held != os.read_file(third) or { '' }, 'the copy the compiler read held the disk text'
+}
+
+fn test_renp_without_a_server_the_check_runs_in_a_compiler_of_its_own() {
+	mut app, stub := renp_stub_app('oneshot')
+	defer {
+		renp_stub_done(mut app, stub)
+	}
+	if stub.exe == '' {
+		return
+	}
+	// No server can answer here, so the check runs in a compiler of its own,
+	// with the command line it always had.
+	os.setenv('VLS_DIAGNOSTICS_SERVER', 'off', true)
+	renp_rename_p(mut app, stub)
+	asked := renp_asked(stub)
+	assert !asked.any(it.starts_with('server ')), 'a server was started where none can answer: ${asked.str()}'
+	checks := asked.filter(it.starts_with('oneshot ') && it.contains(' -check ')
+		&& !it.contains(' -line-info '))
+	assert checks.len >= 2, 'the check ran in no compiler of its own: ${asked.str()}'
+	for line in checks {
+		assert line == 'oneshot -new-compiler -check -nocolor .', 'the check ran another command line: ${line}'
+	}
+}
