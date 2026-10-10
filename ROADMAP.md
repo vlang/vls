@@ -96,7 +96,40 @@ needs the V1 compatibility compiler, which this host cannot build
   that shrinks scope instead of failing.
 - Compat matrix test: old/mid/new compiler stubs.
 
-## Phase 2 — navigation / hints parity
+## Optimization pass (2026-10-10)
+
+Measured on this host: parallelism is NOT the lever (read+hash tops out
+at 1.54x with 3 threads and degrades past that, because the OS filter
+stack owns the cost). Avoidance is: `os.stat` runs at 109,000 files/s
+against 11,000 for read+hash, a 10x lever.
+
+Done:
+
+- Project `.v` listing reused for 2s; dropped by a create/delete
+  watcher event or an open file (a new file must not be invisible
+  for the TTL — pinned by a test).
+- Content hashes gated on (size, inode, mtime); an unchanged file
+  is never re-read.
+- Open buffers looked up in one map instead of a scan per candidate.
+- Job snapshot cloned once per mutation, not twice per URI.
+- Disk cache holds one state per program, not one entry per file,
+  which also fixes the 2 MiB cap being reached at ~7 files, after
+  which saving silently stopped and the cache was dead.
+- A waiting slow check is rushed when a compiler request arrives.
+- Hover and the definition family answer from the index while a
+  check is in flight, then follow up on the same request id.
+- Index refresh runs in the background; requests answer from the
+  index as it stands.
+- Rename's before/after checks go through the warm server.
+- The program copy is built and synced at save time, so the check
+  after it and the next question both reuse it.
+- Hover lists struct fields and enum variants, shows a variant's
+  value, and links a declaration in another file.
+
+Not done: raising the main loop's thread priority on Windows
+(needs `unsafe` FFI and a benchmark to justify), and splitting the
+diagnostics worker into latency/background intents (queue position
+only; the copy lock is what actually blocks a hover).
 
 - Fuzzy workspace symbols (trigram index): DONE — per-symbol
   trigram caches in index entries, overlap then match-class
