@@ -1004,6 +1004,9 @@ fn (mut app App) handle_requests[T](mut reader T) {
 							// changed hunk only when it lies entirely inside the requested
 							// range, and no edit at all otherwise.
 							document_range_formatting_provider: true
+							// Imports link to the module they name, and a URL in a doc
+							// comment is clickable as written.
+							document_link_provider:             true
 							position_encoding:                  position_encoding_string(app.position_encoding)
 							workspace:                          WorkspaceCapability{
 								workspace_folders: WorkspaceFoldersServerCapability{
@@ -1124,6 +1127,10 @@ fn (mut app App) handle_requests[T](mut reader T) {
 			}
 			.range_formatting {
 				resp := app.handle_range_formatting(lsp_request)
+				app.write_response_or_cancelled(lsp_request.id, resp)
+			}
+			.document_link {
+				resp := app.handle_document_link(lsp_request)
 				app.write_response_or_cancelled(lsp_request.id, resp)
 			}
 			.did_change_watched_files {
@@ -1926,6 +1933,14 @@ fn validate_request_params(method Method, params_json string) ?string {
 		.range_formatting {
 			params := json2.decode[DocumentRangeFormattingParams](params_json) or {
 				return 'Invalid rangeFormatting params: ${err.msg()}'
+			}
+			if params.text_document.uri == '' {
+				return 'Missing textDocument.uri'
+			}
+		}
+		.document_link {
+			params := json2.decode[DocumentLinkParams](params_json) or {
+				return 'Invalid documentLink params: ${err.msg()}'
 			}
 			if params.text_document.uri == '' {
 				return 'Missing textDocument.uri'

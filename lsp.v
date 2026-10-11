@@ -111,6 +111,7 @@ type ResponseResult = string
 	| []DocumentHighlight
 	| []SelectionRange
 	| []CodeLens
+	| []DocumentLink
 	| CodeLens
 	| []InlineValueText
 	| LinkedEditingRanges
@@ -283,6 +284,7 @@ struct Capability {
 	execute_command_provider           ?ExecuteCommandOptions   @[json: 'executeCommandProvider']
 	document_formatting_provider       bool                     @[json: 'documentFormattingProvider']
 	document_range_formatting_provider bool                     @[json: 'documentRangeFormattingProvider']
+	document_link_provider             bool                     @[json: 'documentLinkProvider']
 	document_symbol_provider           bool                     @[json: 'documentSymbolProvider']
 	workspace_symbol_provider          bool                     @[json: 'workspaceSymbolProvider']
 	inlay_hint_provider                bool                     @[json: 'inlayHintProvider']
@@ -890,6 +892,18 @@ struct DocumentRangeFormattingParams {
 	options       FormattingOptions
 }
 
+// DocumentLink is one clickable link in a document: the range of the text that
+// carries it and the URI it opens.
+struct DocumentLink {
+	range  LSPRange
+	target string
+}
+
+// DocumentLinkParams holds parameters for textDocument/documentLink.
+struct DocumentLinkParams {
+	text_document TextDocumentIdentifier @[json: 'textDocument']
+}
+
 // DidChangeWatchedFilesParams holds file-change events sent by the client watcher.
 struct DidChangeWatchedFilesParams {
 	changes []FileEvent
@@ -936,6 +950,7 @@ enum Method {
 	selection_range
 	semantic_tokens_range
 	range_formatting
+	document_link
 	will_save
 	will_save_wait_until
 	did_change_watched_files
@@ -1087,6 +1102,7 @@ fn Method.from_string(s string) Method {
 		'textDocument/selectionRange' { .selection_range }
 		'textDocument/semanticTokens/range' { .semantic_tokens_range }
 		'textDocument/rangeFormatting' { .range_formatting }
+		'textDocument/documentLink' { .document_link }
 		'textDocument/willSave' { .will_save }
 		'textDocument/willSaveWaitUntil' { .will_save_wait_until }
 		'workspace/didChangeWatchedFiles' { .did_change_watched_files }
@@ -1140,6 +1156,7 @@ fn (m Method) str() string {
 		.selection_range { 'textDocument/selectionRange' }
 		.semantic_tokens_range { 'textDocument/semanticTokens/range' }
 		.range_formatting { 'textDocument/rangeFormatting' }
+		.document_link { 'textDocument/documentLink' }
 		.will_save { 'textDocument/willSave' }
 		.will_save_wait_until { 'textDocument/willSaveWaitUntil' }
 		.did_change_watched_files { 'workspace/didChangeWatchedFiles' }
