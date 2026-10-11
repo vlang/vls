@@ -304,6 +304,13 @@ fn (mut app App) occurrences_for(uri string) map[string][]TokenOccurrence {
 		app.ref_occurrences.delete(uri)
 		return map[string][]TokenOccurrence{}
 	}
+	if u64(content.len) > index_max_file_bytes {
+		// The gate reindex_uri applies, for the same reason: an occurrence map
+		// of a source this large is built without a bound, and the local
+		// binding hover builds one per keystroke.
+		app.ref_occurrences.delete(uri)
+		return map[string][]TokenOccurrence{}
+	}
 	fp := content.hash()
 	if existing := app.ref_occurrences[uri] {
 		if existing.fingerprint == fp {
@@ -521,13 +528,17 @@ fn collect_v_files(root string, mut acc []string) bool {
 }
 
 // index_reserve_target is how many index entries a walk should pre-size for,
-// bounded by the global file cap. A partial walk reserves what it found, so
-// the growth toward that cap stays bounded in both cases; 0 means reserve
-// nothing.
+// clamped to the global file cap. A partial walk reserves what it found, so
+// growth toward that cap stays bounded in both cases; 0 means reserve nothing,
+// which is also the answer when the index is already at the cap, since no more
+// entries can be added however many remain.
 fn index_reserve_target(indexed int, found int) int {
-	want := indexed + found
-	if want <= 0 || want > index_max_files {
+	if indexed >= index_max_files || found <= 0 {
 		return 0
+	}
+	mut want := indexed + found
+	if want > index_max_files {
+		want = index_max_files
 	}
 	return want
 }
@@ -1333,7 +1344,11 @@ fn (app &App) index_is_complete_for_scope(scope IndexScope) bool {
 		return false
 	}
 	for uri, _ in app.index_skipped_uris {
-		if uri_is_in_index_scope(uri, scope) && os.is_file(uri_to_path(uri)) {
+		// An unsaved buffer has no file on disk, so "is there a file" would
+		// read a skipped open buffer as indexed and a destructive operation
+		// would proceed over references it never saw.
+		if uri_is_in_index_scope(uri, scope)
+			&& ((uri in app.open_files) || os.is_file(uri_to_path(uri))) {
 			return false
 		}
 	}
@@ -1341,13 +1356,15 @@ fn (app &App) index_is_complete_for_scope(scope IndexScope) bool {
 }
 
 // index_is_complete reports whether every discovered disk source was indexed.
-// Non-destructive queries may use a partial bounded index.
+// Non-destructive queries may use a partial bounded index. An oversized buffer
+// still open counts as not indexed, as it does for a scope: no file may exist
+// for it, so the file test alone would miss it.
 fn (app &App) index_is_complete() bool {
 	if app.index_incomplete_scopes.len > 0 {
 		return false
 	}
 	for uri, _ in app.index_skipped_uris {
-		if os.is_file(uri_to_path(uri)) {
+		if (uri in app.open_files) || os.is_file(uri_to_path(uri)) {
 			return false
 		}
 	}
