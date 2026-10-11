@@ -126,10 +126,19 @@ Done:
 - Hover lists struct fields and enum variants, shows a variant's
   value, and links a declaration in another file.
 
-Not done: raising the main loop's thread priority on Windows
-(needs `unsafe` FFI and a benchmark to justify), and splitting the
-diagnostics worker into latency/background intents (queue position
-only; the copy lock is what actually blocks a hover).
+Measured and dropped: raising the main loop's thread priority on
+Windows, as rust-analyzer does. Built both variants and measured
+interleaved (128 completion samples per variant, 124-126 hover):
+completion p50 56 vs 52ms, p95 102 vs 103ms — noise, and hover,
+which is pure main-loop work, showed nothing (p50 3 vs 3). The task
+that would have shown a win (a completion spends ~53 of its ~56ms
+blocked on the compiler) is exactly the one a thread priority
+cannot help, so the code was deleted rather than shipped behind a
+flag.
+
+Also not done: splitting the diagnostics worker into
+latency/background intents (queue position only; the copy lock is
+what actually blocks a hover).
 
 - Fuzzy workspace symbols (trigram index): DONE — per-symbol
   trigram caches in index entries, overlap then match-class
