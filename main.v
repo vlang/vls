@@ -1000,7 +1000,10 @@ fn (mut app App) handle_requests[T](mut reader T) {
 							document_highlight_provider:        true
 							selection_range_provider:           true
 							// Pull diagnostics: a pull answers for one document, no workspace pull.
-							diagnostic_provider:                DiagnosticOptions{}
+							diagnostic_provider:                DiagnosticOptions{
+								inter_file_dependencies: false
+								workspace_diagnostics:   true
+							}
 							// Range formatting is advertised: `v fmt` only formats whole
 							// files, so the handler formats the document and returns the
 							// changed hunk only when it lies entirely inside the requested
@@ -1137,6 +1140,10 @@ fn (mut app App) handle_requests[T](mut reader T) {
 			}
 			.diagnostic {
 				resp := app.handle_pull_diagnostic(lsp_request)
+				app.write_response_or_cancelled(lsp_request.id, resp)
+			}
+			.workspace_diagnostic {
+				resp := app.handle_workspace_diagnostic(lsp_request)
 				app.write_response_or_cancelled(lsp_request.id, resp)
 			}
 			.did_change_watched_files {
@@ -1654,7 +1661,7 @@ fn method_requires_response(method Method) bool {
 		.callhierarchy_outgoing, .document_highlight, .selection_range, .semantic_tokens_range,
 		.range_formatting, .document_link, .code_lens, .code_lens_resolve, .execute_command,
 		.inline_value, .linked_editing_range, .will_create_files, .will_rename_files,
-		.will_delete_files, .on_type_formatting, .diagnostic {
+		.will_delete_files, .on_type_formatting, .diagnostic, .workspace_diagnostic {
 			true
 		}
 		else {
@@ -1958,6 +1965,11 @@ fn validate_request_params(method Method, params_json string) ?string {
 			}
 			if params.text_document.uri == '' {
 				return 'Missing textDocument.uri'
+			}
+		}
+		.workspace_diagnostic {
+			params := json2.decode[WorkspaceDiagnosticParams](params_json) or {
+				return 'Invalid workspace/diagnostic params: ${err.msg()}'
 			}
 		}
 		.linked_editing_range {

@@ -112,6 +112,7 @@ type ResponseResult = string
 	| []SelectionRange
 	| []CodeLens
 	| []DocumentLink
+	| []WorkspaceDiagnosticReport
 	| CodeLens
 	| []InlineValueText
 	| LinkedEditingRanges
@@ -217,6 +218,33 @@ struct UnchangedDocumentDiagnosticReport {
 // DocumentDiagnosticReport is the result of textDocument/diagnostic.
 type DocumentDiagnosticReport = FullDocumentDiagnosticReport
 	| UnchangedDocumentDiagnosticReport
+
+// WorkspaceDiagnosticParams is textDocument/diagnostic's whole-workspace
+// sibling: the identifiers whose documents the client wants, and the id it
+// already holds for each, so an unchanged document is answered with nothing.
+struct WorkspaceDiagnosticParams {
+	identifier          string
+	previous_result_ids map[string]string @[json: 'previousResultIds']
+}
+
+// WorkspaceDocumentReport is one document's answer inside a workspace report.
+struct WorkspaceDocumentReport {
+	uri       string
+	kind      string = 'full'
+	version   ?i64
+	result_id ?string @[json: 'resultId']
+	items     []LSPDiagnostic
+}
+
+// WorkspaceUnchangedReport is a document whose id the client already holds.
+struct WorkspaceUnchangedReport {
+	uri       string
+	kind      string = 'unchanged'
+	result_id string @[json: 'resultId']
+}
+
+// WorkspaceDiagnosticReport is the result of workspace/diagnostic.
+type WorkspaceDiagnosticReport = WorkspaceDocumentReport | WorkspaceUnchangedReport
 
 // Detail represents a completion or symbol detail item.
 struct Detail {
@@ -1004,6 +1032,7 @@ enum Method {
 	will_delete_files
 	on_type_formatting
 	diagnostic
+	workspace_diagnostic
 	set_trace
 	cancel_request
 	shutdown
@@ -1157,6 +1186,7 @@ fn Method.from_string(s string) Method {
 		'workspace/willDeleteFiles' { .will_delete_files }
 		'textDocument/onTypeFormatting' { .on_type_formatting }
 		'textDocument/diagnostic' { .diagnostic }
+		'workspace/diagnostic' { .workspace_diagnostic }
 		'shutdown' { .shutdown }
 		'exit' { .exit }
 		else { .unknown }
@@ -1212,6 +1242,7 @@ fn (m Method) str() string {
 		.will_delete_files { 'workspace/willDeleteFiles' }
 		.on_type_formatting { 'textDocument/onTypeFormatting' }
 		.diagnostic { 'textDocument/diagnostic' }
+		.workspace_diagnostic { 'workspace/diagnostic' }
 		.set_trace { u8(36).ascii_str() + '/setTrace' }
 		.cancel_request { u8(36).ascii_str() + '/cancelRequest' }
 		.shutdown { 'shutdown' }

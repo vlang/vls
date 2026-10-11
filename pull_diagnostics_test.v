@@ -269,5 +269,175 @@ fn test_pull_diagnostic_capability_is_advertised_in_initialize() {
 
 	assert initialize.contains('"diagnosticProvider"'), 'pull diagnostics is advertised'
 	assert initialize.contains('"interFileDependencies":false')
-	assert initialize.contains('"workspaceDiagnostics":false')
+	assert initialize.contains('"workspaceDiagnostics":true')
+}
+
+// pd_ws_seed records the last check of one document, as a save of it would, and
+// returns the folder it wrote so a test can clean it up.
+fn pd_ws_seed(mut app App, tag string, text string) (string, string) {
+	dir, uri, _ := pd_project(tag, text)
+	app.open_files[uri] = text
+	pd_seed(mut app, uri, [
+		JsonError{
+			message: 'error in ${tag}'
+			line_nr: 3
+			col:     1
+			len:     1
+			level:   'error'
+		},
+	])
+	return dir, uri
+}
+
+// pd_ws_pull asks for the whole workspace, echoing the ids the caller holds.
+fn pd_ws_pull(mut app App, previous_result_ids map[string]string) Response {
+	return app.handle_workspace_diagnostic(Request{
+		id:     9
+		method: 'workspace/diagnostic'
+		params: json2.encode(WorkspaceDiagnosticParams{
+			previous_result_ids: previous_result_ids
+		})
+	})
+}
+
+// pd_ws_reports decodes the reports of a workspace pull.
+fn pd_ws_reports(response Response) []WorkspaceDiagnosticReport {
+	return response.result as []WorkspaceDiagnosticReport
+}
+
+// pd_ws_ids is the id a workspace pull computes for one document, so a test can
+// echo it back.
+fn pd_ws_ids(mut app App, uris []string) map[string]string {
+	mut ids := map[string]string{}
+	for uri in uris {
+		items := app.pull_diagnostics_items(uri)
+		ids[uri] = pull_diagnostics_result_id(uri, items)
+	}
+	return ids
+}
+
+fn test_ws_diagnostic_reports_every_document_with_diagnostics() {
+	mut app := App{}
+	_, first := pd_ws_seed(mut app, 'ws_first', pd_main_source)
+	_, second := pd_ws_seed(mut app, 'ws_second', pd_main_source)
+	reports := pd_ws_reports(pd_ws_pull(mut app, map[string]string{}))
+	assert reports.len == 2, 'expected both documents, got ${reports.len}'
+	assert reports[0].uri == first, 'first is '
+	assert reports[1].uri == second, 'second is '
+	assert reports[0].kind == 'full', 'first kind is '
+	assert reports[0].items.len == 1, 'first items '
+	assert reports[0].items[0].message.contains('ws_first'), reports[0].items[0].message
+}
+
+fn test_ws_diagnostic_answers_unchanged_for_every_document_the_client_holds() {
+	mut app := App{}
+	_, first := pd_ws_seed(mut app, 'ws_hold_a', pd_main_source)
+	_, second := pd_ws_seed(mut app, 'ws_hold_b', pd_main_source)
+	ids := pd_ws_ids(mut app, [first, second])
+	reports := pd_ws_reports(pd_ws_pull(mut app, ids))
+	assert reports.len == 2, 'expected two reports, got '
+	for report in reports {
+		assert report.kind == 'unchanged', '${report.uri} is ${report.kind}'
+		match report {
+			WorkspaceUnchangedReport {
+				assert report.result_id != '', '${report.uri} carries no id'
+			}
+			else {
+				assert false, '${report.uri} is not an unchanged report'
+			}
+		}
+	}
+}
+
+fn test_ws_diagnostic_answers_a_mix_when_the_client_holds_one_of_two() {
+	mut app := App{}
+	_, first := pd_ws_seed(mut app, 'ws_mix_a', pd_main_source)
+	_, second := pd_ws_seed(mut app, 'ws_mix_b', pd_main_source)
+	ids := pd_ws_ids(mut app, [first])
+	reports := pd_ws_reports(pd_ws_pull(mut app, ids))
+	assert reports.len == 2, 'expected two reports, got '
+	mut unchanged := 0
+	mut full := 0
+	for report in reports {
+		if report.kind == 'unchanged' {
+			unchanged++
+		} else {
+			full++
+		}
+	}
+	assert unchanged == 1, 'unchanged '
+	assert full == 1, 'full '
+}
+
+fn test_ws_diagnostic_of_a_document_never_checked_is_absent() {
+	mut app := App{}
+	dir, checked, _ := pd_project('ws_unchecked_a', pd_main_source)
+	defer {
+		pd_cleanup(dir)
+	}
+	pd_seed(mut app, checked, pd_errors(1))
+	dir2, unchecked, _ := pd_project('ws_unchecked_b', pd_main_source)
+	defer {
+		pd_cleanup(dir2)
+	}
+	app.open_files[unchecked] = pd_main_source
+	reports := pd_ws_reports(pd_ws_pull(mut app, map[string]string{}))
+	assert reports.len == 1, 'only the checked document is reported, got '
+	assert reports[0].uri == checked, reports[0].uri
+}
+
+fn test_ws_diagnostic_truncates_and_says_so() {
+	mut app := App{}
+	mut uris := []string{}
+	mut dirs := []string{}
+	defer {
+		for dir in dirs {
+			pd_cleanup(dir)
+		}
+	}
+	for i in 0 .. (workspace_diagnostic_max_documents + 12) {
+		one, uri := pd_ws_seed(mut app, 'ws_cap_${i}', pd_main_source)
+		dirs << one
+		uris << uri
+	}
+	assert uris.len == workspace_diagnostic_max_documents + 12, 'seeded ${uris.len}'
+	reports := pd_ws_reports(pd_ws_pull(mut app, map[string]string{}))
+	assert reports.len == workspace_diagnostic_max_documents + 1, 'expected the cap and the truncation report, got ${reports.len}'
+	last := reports[workspace_diagnostic_max_documents]
+	assert last.uri == workspace_diagnostic_truncated_uri, last.uri
+	assert last.kind == 'full', 'the truncation report is a full report'
+	match last {
+		WorkspaceDocumentReport {
+			assert last.items.len == 1, 'the truncation report carries one entry, got ${last.items.len}'
+			assert last.items[0].message.contains('12'), 'the truncation says how many: ${last.items[0].message}'
+		}
+		else {
+			assert false, 'the truncation report is not a full report'
+		}
+	}
+}
+
+fn test_ws_diagnostic_capability_is_advertised_in_initialize() {
+	dir, uri, _ := pd_project('ws_capabilities', pd_main_source)
+	defer {
+		pd_cleanup(dir)
+	}
+	mut app := App{}
+	app.open_files[uri] = pd_main_source
+	payload := '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}'
+	input_path := os.join_path(dir, 'initialize.txt')
+	os.write_file(input_path, 'Content-Length: ${payload.len}\r\n\r\n${payload}') or {
+		assert false, 'Failed to write ${input_path}: ${err}'
+	}
+	mut input := os.open(input_path) or {
+		assert false, 'Failed to open ${input_path}: ${err}'
+		return
+	}
+	defer {
+		input.close()
+	}
+	app.capture_output = true
+	mut reader := io.new_buffered_reader(reader: input, cap: 1)
+	app.handle_requests(mut reader)
+	assert app.captured_output.join('').contains('"workspaceDiagnostics":true')
 }
