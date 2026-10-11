@@ -115,6 +115,7 @@ type ResponseResult = string
 	| CodeLens
 	| []InlineValueText
 	| LinkedEditingRanges
+	| DocumentDiagnosticReport
 
 // WorkspaceSymbol represents a symbol found across the workspace.
 struct WorkspaceSymbol {
@@ -187,6 +188,35 @@ struct LSPRange {
 	start Position
 	end   Position
 }
+
+// DocumentDiagnosticParams holds the parameters of textDocument/diagnostic, the
+// LSP 3.17 pull-diagnostics request. A client sends the resultId it holds for
+// the document, so the server can answer only what changed since.
+struct DocumentDiagnosticParams {
+	text_document      TextDocumentIdentifier @[json: 'textDocument']
+	identifier         ?string
+	previous_result_id ?string @[json: 'previousResultId']
+}
+
+// FullDocumentDiagnosticReport answers a pull with the whole item list and the
+// resultId the client holds for its next pull.
+struct FullDocumentDiagnosticReport {
+	kind      string = 'full'
+	result_id ?string @[json: 'resultId']
+	items     []LSPDiagnostic
+}
+
+// UnchangedDocumentDiagnosticReport answers a pull whose previousResultId still
+// describes the document. It carries no items, so the client keeps the markers
+// it already shows.
+struct UnchangedDocumentDiagnosticReport {
+	kind      string = 'unchanged'
+	result_id string @[json: 'resultId']
+}
+
+// DocumentDiagnosticReport is the result of textDocument/diagnostic.
+type DocumentDiagnosticReport = FullDocumentDiagnosticReport
+	| UnchangedDocumentDiagnosticReport
 
 // Detail represents a completion or symbol detail item.
 struct Detail {
@@ -269,6 +299,15 @@ struct CodeLensOptions {
 	resolve_provider ?bool @[json: 'resolveProvider']
 }
 
+// DiagnosticOptions advertises pull diagnostics (LSP 3.17 DiagnosticOptions).
+// interFileDependencies is false because a pull answers for the one document it
+// is asked about, and workspaceDiagnostics is false because
+// workspace/diagnostic is not served.
+struct DiagnosticOptions {
+	inter_file_dependencies bool @[json: 'interFileDependencies']
+	workspace_diagnostics   bool @[json: 'workspaceDiagnostics']
+}
+
 // Capability lists supported LSP features for the server.
 struct Capability {
 	completion_provider                CompletionProvider       @[json: 'completionProvider']
@@ -299,7 +338,8 @@ struct Capability {
 	document_highlight_provider        bool                     @[json: 'documentHighlightProvider']
 	selection_range_provider           bool                     @[json: 'selectionRangeProvider']
 	workspace                          WorkspaceCapability
-	position_encoding                  ?string @[json: 'positionEncoding']
+	position_encoding                  ?string           @[json: 'positionEncoding']
+	diagnostic_provider                DiagnosticOptions @[json: 'diagnosticProvider']
 }
 
 // OnTypeFormattingOptions describes the triggers for on-type formatting.
@@ -963,6 +1003,7 @@ enum Method {
 	will_rename_files
 	will_delete_files
 	on_type_formatting
+	diagnostic
 	set_trace
 	cancel_request
 	shutdown
@@ -1115,6 +1156,7 @@ fn Method.from_string(s string) Method {
 		'workspace/willRenameFiles' { .will_rename_files }
 		'workspace/willDeleteFiles' { .will_delete_files }
 		'textDocument/onTypeFormatting' { .on_type_formatting }
+		'textDocument/diagnostic' { .diagnostic }
 		'shutdown' { .shutdown }
 		'exit' { .exit }
 		else { .unknown }
@@ -1169,6 +1211,7 @@ fn (m Method) str() string {
 		.will_rename_files { 'workspace/willRenameFiles' }
 		.will_delete_files { 'workspace/willDeleteFiles' }
 		.on_type_formatting { 'textDocument/onTypeFormatting' }
+		.diagnostic { 'textDocument/diagnostic' }
 		.set_trace { u8(36).ascii_str() + '/setTrace' }
 		.cancel_request { u8(36).ascii_str() + '/cancelRequest' }
 		.shutdown { 'shutdown' }

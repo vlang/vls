@@ -999,6 +999,8 @@ fn (mut app App) handle_requests[T](mut reader T) {
 							call_hierarchy_provider:            true
 							document_highlight_provider:        true
 							selection_range_provider:           true
+							// Pull diagnostics: a pull answers for one document, no workspace pull.
+							diagnostic_provider:                DiagnosticOptions{}
 							// Range formatting is advertised: `v fmt` only formats whole
 							// files, so the handler formats the document and returns the
 							// changed hunk only when it lies entirely inside the requested
@@ -1131,6 +1133,10 @@ fn (mut app App) handle_requests[T](mut reader T) {
 			}
 			.document_link {
 				resp := app.handle_document_link(lsp_request)
+				app.write_response_or_cancelled(lsp_request.id, resp)
+			}
+			.diagnostic {
+				resp := app.handle_pull_diagnostic(lsp_request)
 				app.write_response_or_cancelled(lsp_request.id, resp)
 			}
 			.did_change_watched_files {
@@ -1646,9 +1652,9 @@ fn method_requires_response(method Method) bool {
 		.workspace_symbol, .formatting, .document_symbols, .inlay_hint, .shutdown, .code_action,
 		.semantic_tokens, .folding_range, .callhierarchy_prepare, .callhierarchy_incoming,
 		.callhierarchy_outgoing, .document_highlight, .selection_range, .semantic_tokens_range,
-		.range_formatting, .code_lens, .code_lens_resolve, .execute_command, .inline_value,
-		.linked_editing_range, .will_create_files, .will_rename_files, .will_delete_files,
-		.on_type_formatting {
+		.range_formatting, .document_link, .code_lens, .code_lens_resolve, .execute_command,
+		.inline_value, .linked_editing_range, .will_create_files, .will_rename_files,
+		.will_delete_files, .on_type_formatting, .diagnostic {
 			true
 		}
 		else {
@@ -1941,6 +1947,14 @@ fn validate_request_params(method Method, params_json string) ?string {
 		.document_link {
 			params := json2.decode[DocumentLinkParams](params_json) or {
 				return 'Invalid documentLink params: ${err.msg()}'
+			}
+			if params.text_document.uri == '' {
+				return 'Missing textDocument.uri'
+			}
+		}
+		.diagnostic {
+			params := json2.decode[DocumentDiagnosticParams](params_json) or {
+				return 'Invalid textDocument/diagnostic params: ${err.msg()}'
 			}
 			if params.text_document.uri == '' {
 				return 'Missing textDocument.uri'
