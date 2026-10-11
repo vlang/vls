@@ -301,6 +301,13 @@ fn (mut app App) occurrences_for(uri string) map[string][]TokenOccurrence {
 		app.ref_occurrences.delete(uri)
 		return map[string][]TokenOccurrence{}
 	}
+	if u64(content.len) > index_max_file_bytes {
+		// The gate reindex_uri applies, for the same reason: an occurrence map
+		// of a source this large is built without a bound, and the local
+		// binding hover builds one per keystroke.
+		app.ref_occurrences.delete(uri)
+		return map[string][]TokenOccurrence{}
+	}
 	fp := content.hash()
 	if existing := app.ref_occurrences[uri] {
 		if existing.fingerprint == fp {
@@ -505,17 +512,36 @@ fn find_project_root(dir string) string {
 // collect_v_files recursively gathers `.v` files under `root`, skipping hidden
 // and known heavy directories and stopping once `index_max_files` is reached.
 // It returns false when a limit or filesystem error prevents a complete walk.
-fn collect_v_files(root string, mut acc []string) bool {
-	return collect_v_files_bounded(root, index_max_files, mut acc)
+// project_walk_budget is the file ceiling one project walk uses. It is the
+// global cap unless a test lowers it, which is how a genuinely partial walk is
+// produced without writing twenty thousand files.
+fn (app &App) project_walk_budget() int {
+	if app.index_walk_budget > 0 {
+		return app.index_walk_budget
+	}
+	return index_max_files
+}
+
+// collect_v_files recursively gathers `.v` files under `root`, skipping hidden
+// and known heavy directories and stopping once `max_files` is reached. It
+// returns false when a limit or filesystem error prevents a complete walk, so
+// a caller that must know whether the walk was partial learns it here.
+fn collect_v_files(root string, max_files int, mut acc []string) bool {
+	return collect_v_files_bounded(root, max_files, mut acc)
 }
 
 // index_reserve_target is how many index entries a walk should pre-size for,
-// bounded by the global file cap. A partial walk reserves what it found, so
-// growth toward that cap stays bounded in both cases; 0 means reserve nothing.
+// clamped to the global file cap. A partial walk reserves what it found, so
+// growth toward that cap stays bounded in both cases; 0 means reserve nothing,
+// which is also the answer when the index is already at the cap, since no more
+// entries can be added however many remain.
 fn index_reserve_target(indexed int, found int) int {
-	want := indexed + found
-	if want <= 0 || want > index_max_files {
+	if indexed >= index_max_files || found <= 0 {
 		return 0
+	}
+	mut want := indexed + found
+	if want > index_max_files {
+		want = index_max_files
 	}
 	return want
 }
@@ -645,7 +671,7 @@ fn (mut app App) ensure_dirs_indexed(dirs []string) {
 		mut files := []string{}
 		scope := 'recursive:${dir}'
 		app.index_incomplete_scopes.delete(scope)
-		walk_complete := collect_v_files(dir, mut files)
+		walk_complete := collect_v_files(dir, app.project_walk_budget(), mut files)
 		if !walk_complete {
 			app.index_incomplete_scopes[scope] = true
 		}
@@ -870,7 +896,11 @@ fn (app &App) index_is_complete_for_scope(scope IndexScope) bool {
 		return false
 	}
 	for uri, _ in app.index_skipped_uris {
-		if uri_is_in_index_scope(uri, scope) && os.is_file(uri_to_path(uri)) {
+		// An unsaved buffer has no file on disk, so "is there a file" would
+		// read a skipped open buffer as indexed and a destructive operation
+		// would proceed over references it never saw.
+		if uri_is_in_index_scope(uri, scope)
+			&& ((uri in app.open_files) || os.is_file(uri_to_path(uri))) {
 			return false
 		}
 	}
@@ -878,13 +908,15 @@ fn (app &App) index_is_complete_for_scope(scope IndexScope) bool {
 }
 
 // index_is_complete reports whether every discovered disk source was indexed.
-// Non-destructive queries may use a partial bounded index.
+// Non-destructive queries may use a partial bounded index. An oversized buffer
+// still open counts as not indexed, as it does for a scope: no file may exist
+// for it, so the file test alone would miss it.
 fn (app &App) index_is_complete() bool {
 	if app.index_incomplete_scopes.len > 0 {
 		return false
 	}
 	for uri, _ in app.index_skipped_uris {
-		if os.is_file(uri_to_path(uri)) {
+		if (uri in app.open_files) || os.is_file(uri_to_path(uri)) {
 			return false
 		}
 	}
