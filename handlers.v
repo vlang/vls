@@ -8356,6 +8356,9 @@ fn (mut app App) handle_code_action(request Request) Response {
 		if action := app.build_extract_function_action(uri, content, params.range) {
 			actions << action
 		}
+		if action := app.build_extract_to_file_action(uri, content, params.range) {
+			actions << action
+		}
 		if action := app.build_add_import_action(uri, content, params.range) {
 			actions << action
 		}

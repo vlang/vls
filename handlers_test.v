@@ -11980,8 +11980,10 @@ fn test_rename_refuses_interface_members_and_the_names_they_share() {
 	}
 	// V needs no declaration to implement an interface: the types that
 	// implement one must keep the names of its members, and a rename cannot
-	// see which types those are.
-	for at in ['main.v:4:2', 'main.v:5:2', 'main.v:13:15', 'main.v:10:2', 'main.v:28:15', 'main.v:21:13'] {
+	// see which types those are. A method the interface declares is followed
+	// into them (see test_ifr_rename_edits_the_declaration_and_every_implementor);
+	// a field of it is not, and the names they share stay where they are.
+	for at in ['main.v:5:2', 'main.v:13:15', 'main.v:10:2', 'main.v:21:13'] {
 		count := rename_edit_count(mut app, uris, at) or {
 			if v3_answers_line_info {
 				assert err.msg().contains('interface'), '${at}: ${err}'
@@ -11994,6 +11996,10 @@ fn test_rename_refuses_interface_members_and_the_names_they_share() {
 	assert rename_edits_in({
 		'main.v': rename_interface_main
 	}, 'main.v:34:2') == ['main.v:34:2', 'main.v:38:10']
+	// The method the interface declares is renamed with its implementation.
+	assert rename_edits_in({
+		'main.v': rename_interface_main
+	}, 'main.v:4:2') == ['main.v:13:15', 'main.v:28:15', 'main.v:4:2']
 }
 
 // The types V builds in are the ones of V: `i128` and `u128` since V's #28877,
@@ -12570,12 +12576,11 @@ fn test_rename_refuses_a_method_an_interface_declares_and_names_the_interface() 
 	} else {
 		assert err.msg().contains('is a member of the interface `Speaker`'), err.msg()
 	}
-	// And the member of the interface itself.
-	if _ := app.rename_request(rename_request_named(uris, 'main.v:4:2', 'talk')) {
-		assert false, 'renaming a member of an interface must be refused'
-	} else {
-		assert err.msg().contains('is a member of the interface `Speaker`'), err.msg()
-	}
+	// And the member of the interface itself, which the types that implement
+	// it follow (see test_ifr_rename_edits_the_declaration_and_every_implementor).
+	assert rename_edits_in({
+		'main.v': rename_interface_methods_main
+	}, 'main.v:4:2') == ['main.v:11:12', 'main.v:20:11', 'main.v:27:23', 'main.v:4:2']
 	// A method no interface declares is renamed, with its use.
 	assert rename_edits_in({
 		'main.v': rename_interface_methods_main
@@ -17941,4 +17946,127 @@ fn test_cap_dedup_runs_before_the_cap() {
 	assert got.len == 101, 'dedup then cap leaves 101: got ${got.len}'
 	assert got[100].message == '... and 50 more', 'dedup ran before the cap: ${got[100].message}'
 	assert (got[100].source or { 'none' }) == 'none', 'the marker carries no source: ${got[100].source}'
+}
+
+// A program whose interface two files' types implement: the rename of a member
+// follows them, wherever they are declared.
+const ifr_two_files_main = "module main
+
+interface Speaker {
+	speak() string
+}
+
+struct Cat {
+	name string
+}
+
+fn (c Cat) speak() string {
+	return 'meow'
+}
+
+fn greet(s Speaker) string {
+	return s.speak()
+}
+
+fn main() {
+	d := Dog{
+		name: 'rex'
+	}
+	println(greet(d) + d.speak())
+}
+"
+
+const ifr_two_files_other = "module main
+
+struct Dog {
+	name string
+}
+
+fn (d Dog) speak() string {
+	return 'woof'
+}
+"
+
+fn test_ifr_rename_edits_the_declaration_and_every_implementor() {
+	// The declaration, the method of each implementor, and every use, over the
+	// files of the program.
+	assert rename_edits_in({
+		'main.v':  ifr_two_files_main
+		'other.v': ifr_two_files_other
+	}, 'main.v:4:2') == ['main.v:11:12', 'main.v:16:11', 'main.v:23:23', 'main.v:4:2', 'other.v:7:12']
+	// An interface no type implements: its declaration and the uses that name it.
+	assert rename_edits_in({
+		'main.v': 'module main\n\ninterface Speaker {\n\tspeak() string\n}\n\nfn greet(s Speaker) string {\n\treturn s.speak()\n}\n'
+	}, 'main.v:4:2') == ['main.v:4:2', 'main.v:8:11']
+}
+
+// What a rename of a member cannot follow, and a method that only shares a
+// member's name: refused, with the interface named, as they always were.
+fn test_ifr_refuses_what_it_cannot_follow() {
+	mut app, uris := new_rename_project_app_with({
+		'main.v': rename_interface_methods_main
+	})
+	defer {
+		cleanup_rename_app(mut app)
+	}
+	// The method of a third type: the interface keeps its member, so it stays.
+	if _ := app.rename_request(rename_request_named(uris, 'main.v:11:12', 'bark')) {
+		assert false, 'a method an interface declares must be refused'
+	} else {
+		assert err.msg() == '`speak` is a member of the interface `Speaker` at main.v:3:11: a type that implements it must keep that name, and V does not say which types those are, so this rename could break the program', err.msg()
+	}
+	// An interface whose second member is declared over several lines: the
+	// implementations of the first cannot be told apart.
+	mut multi, multi_uris := new_rename_project_app_with({
+		'main.v': "module main\n\ninterface Speaker {\n\tspeak() string\n\tannounce(\n\t\twho string\n\t) string\n}\n\nstruct Dog {\n\tname string\n}\n\nfn (d Dog) speak() string {\n\treturn 'woof'\n}\n\nfn main() {\n\td := Dog{\n\t\tname: 'rex'\n\t}\n\tprintln(d.speak())\n}\n"
+	})
+	defer {
+		cleanup_rename_app(mut multi)
+	}
+	if _ := multi.rename_request(rename_request_named(multi_uris, 'main.v:4:2', 'talk')) {
+		assert false, 'a member this cannot follow must be refused'
+	} else {
+		assert err.msg().contains('interface `Speaker`'), err.msg()
+		assert err.msg().contains('signature that cannot be matched'), err.msg()
+	}
+	// The shadowing refusals are what they were.
+	mut branch, branch_uris := new_rename_project_app_with({
+		'main.v': rename_branch_main
+	})
+	defer {
+		cleanup_rename_app(mut branch)
+	}
+	if _ := branch.rename_request(rename_request_named(branch_uris, 'main.v:6:3', 'x')) {
+		assert false, 'renaming `y` to `x` must be refused'
+	} else {
+		assert err.msg().contains('`x` is already declared at main.v:4'), err.msg()
+		assert err.msg().contains('redefinition of `x`'), err.msg()
+	}
+	// A name two interfaces declare: the implementations of this one cannot be
+	// told apart from the ones of the other.
+	mut shared, shared_uris := new_rename_project_app_with({
+		'main.v': "module main\n\ninterface Speaker {\n\tspeak() string\n}\n\ninterface Loud {\n\tspeak() string\n}\n\nstruct Dog {\n\tname string\n}\n\nfn (d Dog) speak() string {\n\treturn 'woof'\n}\n\nfn main() {\n\td := Dog{\n\t\tname: 'rex'\n\t}\n\tprintln(d.speak())\n}\n"
+	})
+	defer {
+		cleanup_rename_app(mut shared)
+	}
+	if _ := shared.rename_request(rename_request_named(shared_uris, 'main.v:4:2', 'talk')) {
+		assert false, 'a member two interfaces declare must be refused'
+	} else {
+		assert err.msg().contains('interface `Loud`'), err.msg()
+	}
+	// A `pub` interface a method of another module implements: that module is
+	// outside the program the rename walks, so the refusal stands.
+	mut cross, cross_uris := new_rename_project_app_with({
+		'main.v':      "module main\n\npub interface Speaker {\n\tspeak() string\n}\n\nstruct Cat {\n\tname string\n}\n\nfn (c Cat) speak() string {\n\treturn 'meow'\n}\n\nfn main() {\n\tc := Cat{\n\t\tname: 'rex'\n\t}\n\tprintln(c.speak())\n}\n"
+		'lib/thing.v': "module lib\n\nstruct Widget {\n\tname string\n}\n\npub fn (w Widget) speak() string {\n\treturn 'hi'\n}\n"
+	})
+	defer {
+		cleanup_rename_app(mut cross)
+	}
+	if _ := cross.rename_request(rename_request_named(cross_uris, 'main.v:4:2', 'talk')) {
+		assert false, 'a member a method of another module implements must be refused'
+	} else {
+		assert err.msg() == '`speak` is a member of the interface `Speaker` at main.v:3:15: the types that implement it must keep that name, and V does not say which types those are, so this rename could break the program', err.msg()
+	}
 }

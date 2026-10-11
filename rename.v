@@ -8,11 +8,13 @@ import os
 // names, but it gives nothing for a declaration itself or for the key of a
 // struct literal, and in `Color.red` it names the value for `Color` as well.
 
-// RenameTarget is the symbol that a rename changes: its name and the position
-// of the name in its declaration.
+// RenameTarget is the symbol that a rename changes: its name, the position of
+// the name in its declaration, and where each implementor of an interface
+// member declares its method of that name.
 struct RenameTarget {
-	symbol string
-	anchor Location
+	symbol       string
+	anchor       Location
+	implementors ?[]Location
 }
 
 // rename_anchor_cache returns where the names that renames asked about are
@@ -68,10 +70,16 @@ fn (mut app App) rename_target(uri string, line int, ch int, scope IndexScope, m
 	if !uri_is_in_index_scope(anchor.uri, scope) {
 		return error('`${symbol}` is declared in ${os.file_name(uri_to_path(anchor.uri))}, outside this project, so it cannot be renamed here')
 	}
-	app.check_interface_member(anchor, symbol, scope)!
+	mut implementors := ?[]Location(none)
+	if iface := app.enclosing_interface(anchor) {
+		implementors = app.interface_implementors(anchor, symbol, iface, scope)!
+	} else {
+		app.check_interface_member(anchor, symbol, scope)!
+	}
 	return RenameTarget{
-		symbol: symbol
-		anchor: anchor
+		symbol:       symbol
+		anchor:       anchor
+		implementors: implementors
 	}
 }
 
@@ -170,7 +178,9 @@ fn rename_max_occurrences() int {
 }
 
 // rename_locations returns every occurrence of `target` in `scope`. It refuses
-// when an occurrence cannot be told apart from the target.
+// when an occurrence cannot be told apart from the target. For a member of an
+// interface it returns the occurrences of each implementor's method of that
+// name as well: the interface cannot keep its member while they change.
 fn (mut app App) rename_locations(target RenameTarget, scope IndexScope, request_id int, mut cache map[string]?Location) ![]Location {
 	candidates := app.rename_candidates(target.symbol, scope, target.anchor)
 	max_occurrences := rename_max_occurrences()
@@ -284,6 +294,17 @@ fn (mut app App) rename_locations(target RenameTarget, scope IndexScope, request
 			continue
 		}
 		return error('`${target.symbol}` at ${os.file_name(uri_to_path(cand.uri))}:${cand.range.start.line + 1}:${cand.range.start.char + 1} could not be resolved, and renaming around it could break the program')
+	}
+	// A member of an interface: the method each implementor declares is renamed
+	// with the member, and their occurrences are walked the same way.
+	if implementors := target.implementors {
+		for method in implementors {
+			each := RenameTarget{
+				symbol: target.symbol
+				anchor: method
+			}
+			locations << app.rename_locations(each, scope, request_id, mut cache)!
+		}
 	}
 	return locations
 }
@@ -399,6 +420,7 @@ const ierror_method_names = ['msg', 'code']
 struct InterfaceDeclaration {
 	name  string
 	where Location
+	first int // the line its declaration starts on, where its body follows
 }
 
 // InterfaceMember is a method or field that an interface declares, and the
@@ -408,16 +430,14 @@ struct InterfaceMember {
 	iface  InterfaceDeclaration
 }
 
-// check_interface_member refuses a rename of a member of an interface, or of a
-// method or a field with the name of one: V needs no declaration to implement
-// an interface, so the types that implement it must keep that name, and a
-// rename cannot see which types those are. The rename does not change the
-// interface with it, so it is refused, and the interface that declares the
-// member is named.
+// check_interface_member refuses a rename of a method or a field with the name
+// of one that an interface declares: V needs no declaration to implement an
+// interface, so the types that implement it must keep that name, and a rename
+// cannot see which types those are. The rename does not change the interface
+// with it, so it is refused, and the interface that declares the member is
+// named. A member declared inside an interface is not this case: the rename
+// follows it into the types that implement it (see interface_implementors).
 fn (mut app App) check_interface_member(anchor Location, symbol string, scope IndexScope) ! {
-	if iface := app.enclosing_interface(anchor) {
-		return error('`${symbol}` is a member of the interface `${iface.name}` at ${name_pos_text(app.name_pos_of(iface.where))}: the types that implement it must keep that name, and V does not say which types those are, so this rename could break the program')
-	}
 	kind := app.indexed_declaration_kind(anchor)
 	if kind !in [sym_kind_method, sym_kind_field] {
 		return
@@ -428,6 +448,141 @@ fn (mut app App) check_interface_member(anchor Location, symbol string, scope In
 	if kind == sym_kind_method && symbol in ierror_method_names {
 		return error('`${symbol}` is a member of the interface `IError` that V declares itself: a type that has them is an error, and V passes it around and prints it through them, so this rename could break the program')
 	}
+}
+
+// interface_implementors returns where the program declares each method named
+// `symbol`, a member of `iface`: the methods the rename edits with it, since a
+// type that has the method implements the interface. V matches an interface by
+// shape, so the interface cannot keep its member while those methods change.
+//
+// What cannot be followed is refused. A field member: an implementor declares it
+// as a field of its own, where the uses that name it are the uses of that field
+// alone, so the rename would edit code that has nothing to do with the
+// interface. A body this cannot read, or a name another interface declares too:
+// the types that implement the member cannot be told apart from the ones that
+// implement something else. A method of a `pub` interface that another module
+// declares: that module is outside the program the rename walks, so the methods
+// this finds say nothing about the ones it cannot see, and the refusal the
+// interface member always had stands.
+fn (mut app App) interface_implementors(anchor Location, symbol string, iface InterfaceDeclaration, scope IndexScope) ![]Location {
+	start := '`${symbol}` is a member of the interface `${iface.name}` at ${name_pos_text(app.name_pos_of(iface.where))}'
+	body_first, body := app.interface_body(iface)
+	mut at := anchor.range.start.line - body_first
+	if at < 0 || at >= body.len {
+		at = 0
+	}
+	for line in body {
+		if interface_member_form(line) == .unreadable {
+			return error('${start}: it declares a member with a signature that cannot be matched, so the types that implement it cannot be told apart, and this rename could break the program')
+		}
+	}
+	// Only a method is followed: an implementor declares a field member as a
+	// field of its own, and the uses that name it are the uses of that field.
+	if interface_member_form(body[at]) != .method {
+		return error('${start}: the types that implement it must keep that name, and V does not say which types those are, so this rename could break the program')
+	}
+	for other in app.interface_members(scope) {
+		if other.member != symbol || same_anchor_location(other.iface.where, iface.where) {
+			continue
+		}
+		return error('${start}: the interface `${other.iface.name}` declares a member of that name too, so the types that implement it cannot be told apart, and this rename could break the program')
+	}
+	methods := app.interface_method_declarations(symbol, scope)
+	if app.line_at(iface.where).trim_left(' \t').starts_with('pub ') {
+		for method in methods {
+			if !app.in_module_of(method, iface.where) {
+				return error('${start}: the types that implement it must keep that name, and V does not say which types those are, so this rename could break the program')
+			}
+		}
+	}
+	return methods
+}
+
+// interface_body returns the line the body of `iface` starts on and its lines,
+// between the one its name is on and the one its closing brace is on, with
+// their comments and the text of their strings taken out.
+fn (mut app App) interface_body(iface InterfaceDeclaration) (int, []string) {
+	content := app.file_text(iface.where.uri)
+	lines := content.split_into_lines()
+	code := source_code_lines(content)
+	last := declaration_end_line(lines, code, iface.first)
+	mut body := []string{}
+	for i in iface.first + 1 .. int_min(last + 1, code.len) {
+		if code[i].trim_space().starts_with('}') {
+			break
+		}
+		body << code[i]
+	}
+	return iface.first + 1, body
+}
+
+// What a line of an interface body declares.
+enum InterfaceMemberForm {
+	method     // `name(...) ret`
+	field      // `name Type`
+	embedded   // `Name`, an interface this one extends
+	section    // `mut:`, the line that opens one
+	blank      // nothing
+	unreadable // what this cannot read
+}
+
+// interface_member_form reads what `line`, one line of an interface body,
+// declares.
+fn interface_member_form(line string) InterfaceMemberForm {
+	mut rest := line.trim_space()
+	if rest == '' {
+		return .blank
+	}
+	if rest.starts_with('pub ') {
+		rest = rest['pub '.len..].trim_left(' \t')
+	}
+	if rest.starts_with('mut:') || rest.starts_with('__global:') {
+		return .section
+	}
+	mut end := 0
+	for end < rest.len && is_ident_char(rest[end]) {
+		end++
+	}
+	if end == 0 {
+		return .unreadable
+	}
+	if rest[0].is_capital() {
+		return .embedded
+	}
+	after := rest[end..].trim_left(' \t')
+	if !after.starts_with('(') {
+		return .field
+	}
+	// The signature has to close on the line it opens on: one that does not
+	// cannot be read as a member at all.
+	open := end + (rest.len - end - after.len)
+	if matching_delimiter(rest, open, `(`, `)`) < 0 {
+		return .unreadable
+	}
+	return .method
+}
+
+// interface_method_declarations returns where the files of `scope` declare each
+// method named `member`.
+fn (mut app App) interface_method_declarations(member string, scope IndexScope) []Location {
+	mut found := []Location{}
+	mut uris := app.symbol_index.keys()
+	uris.sort()
+	for uri in uris {
+		if !uri_is_in_index_scope(uri, scope) {
+			continue
+		}
+		for s in app.index_doc_symbols(uri) {
+			if s.kind != sym_kind_method || extract_simple_fn_name(s.name) != member {
+				continue
+			}
+			found << Location{
+				uri:   uri
+				range: s.selection_range
+			}
+		}
+	}
+	return found
 }
 
 // indexed_declaration_kind is the kind of the declaration of the index whose
@@ -464,6 +619,7 @@ fn (mut app App) enclosing_interface(loc Location) ?InterfaceDeclaration {
 					uri:   loc.uri
 					range: s.selection_range
 				}
+				first: first
 			}
 		}
 	}
@@ -505,6 +661,7 @@ fn (mut app App) interface_members(scope IndexScope) []InterfaceMember {
 					uri:   uri
 					range: s.selection_range
 				}
+				first: s.range.start.line
 			}
 			first := s.range.start.line
 			last := declaration_end_line(lines, code, first)
