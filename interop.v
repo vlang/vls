@@ -1124,6 +1124,57 @@ fn (app &App) imports_local_module(path string, program_dir string) bool {
 	return false
 }
 
+// narrow_check_dir returns the module directory of the file at `real_path` when
+// a check of that directory alone, as `v -check -shared .` there, answers for
+// the program it belongs to — the cheapest sufficient answer for a change that
+// cannot alter what the program resolves — or '' when the program's own
+// directory stays the target. Three things are required, and none of them is
+// assumed:
+//
+//   - The program's directory is not the module's own, so the narrowed target
+//     covers strictly less than the program tree does.
+//   - The parsed imports of the new content are those of the content the
+//     program was last checked with, so the change can be no new, removed or
+//     reordered import: what the program resolves is the resolve it already
+//     resolved, and the compiler finds every module of it in the same place.
+//   - The program's main module imports the module of the changed file, and
+//     every module of the project its files import sits in that module's
+//     directory. The check walks the directory it is run in and what that
+//     imports, so a module the program imports from elsewhere would stop being
+//     checked at all, and the program's other open files would lose the answer
+//     the whole program gives them.
+//
+// The reachability is read off program_reaches and the per-import resolution
+// off resolve_local_module_dir; no import closure is walked again here.
+fn (app &App) narrow_check_dir(real_path string, program_dir string, text string) string {
+	module_dir := normalize_overlay_path(os.dir(normalize_overlay_path(real_path)))
+	if module_dir == program_dir {
+		return ''
+	}
+	// The file's previous content is the one the program was last checked
+	// from: what the file holds on disk, since a buffer that was never saved
+	// has none, and a buffer that was saved has its own save as the previous
+	// state.
+	previous := os.read_file(real_path) or { return '' }
+	if parse_imports(text) != parse_imports(previous) {
+		return ''
+	}
+	vmod_root := normalize_overlay_path(find_project_root(program_dir))
+	if !app.program_reaches(program_dir, vmod_root, module_dir) {
+		return ''
+	}
+	for program_file in app.v_files_in(program_dir) {
+		for module_path in parse_imports(app.source_text(program_file)) {
+			if imported := resolve_local_module_dir(module_path, program_dir, vmod_root) {
+				if imported != module_dir {
+					return ''
+				}
+			}
+		}
+	}
+	return module_dir
+}
+
 // resolve_local_module_dir returns the directory of the module imported as
 // `module_path` by a program in `program_dir`, if it is one of the project's:
 // `a.b` is `a/b` below the program or below the v.mod root, and `proj.a` is `a`
@@ -1402,6 +1453,11 @@ fn (mut app App) run_v_check(path string, text string) []JsonError {
 	// within the session and across restarts (see diag_cache.v).
 	program_dir := app.program_root(real_path)
 	overlay_root := program_overlay_root(real_path, program_dir)
+	// The target the check runs against: the program's directory, or the
+	// module directory of the changed file when that alone answers for the
+	// program (see narrow_check_dir).
+	mut narrow_dir := app.narrow_check_dir(real_path, program_dir, text)
+	check_target := if narrow_dir != '' { 'narrow' } else { 'full' }
 	// The defines a check runs with are resolved here, before the fingerprint
 	// they salt and the arguments they are appended to (see vls_config.v).
 	defines := app.check_defines(real_path)
@@ -1428,7 +1484,7 @@ fn (mut app App) run_v_check(path string, text string) []JsonError {
 		}
 	}
 	if os.getenv('VLS_PERF_LOG') != '' {
-		app.send_log_message('diagnostics cache root=${overlay_root} fp=${fingerprint.hash().hex()} hit=${cache_hit}',
+		app.send_log_message('diagnostics cache root=${overlay_root} fp=${fingerprint.hash().hex()} hit=${cache_hit} target=${check_target}',
 			4)
 	}
 	if cache_hit != '' {
@@ -1522,17 +1578,34 @@ fn (mut app App) run_v_check(path string, text string) []JsonError {
 		compile_target = singlefile_tmppath
 	}
 
+	// A narrowed check walks only the module directory of the changed file, in
+	// its counterpart inside the same overlay: the buffers that overlay holds
+	// are the ones it reads, and the rest of the program is not walked at all.
+	mut narrow_work_dir := ''
+	if narrow_dir != '' && use_multifile {
+		if narrow_rel := overlay_relative_path(narrow_dir, overlay.source_root) {
+			narrow_work_dir = os.join_path(overlay.temp_root, narrow_rel)
+		}
+	}
+	if narrow_work_dir != '' {
+		compile_target = narrow_work_dir
+	} else {
+		// No overlay to narrow it in: the whole program stays the target.
+		narrow_dir = ''
+	}
 	mut cmd_args := []string{}
 	module_name := get_module_name(text)
-	// A module checked with the program that imports it is not a library there.
+	// A module checked with the program that imports it is not a library there,
+	// and the directory a narrowed check walks holds a library module on its
+	// own, which has no `fn main()` of its own to satisfy.
 	is_library_module := if use_multifile {
-		!app.is_program_dir(overlay.source_work_dir)
+		!app.is_program_dir(if narrow_dir != '' { narrow_dir } else { overlay.source_work_dir })
 	} else {
 		module_name != '' && module_name != 'main'
 	}
 	if use_multifile {
 		cmd_args = check_args_with_defines(build_v_check_args_multifile(is_library_module), defines)
-		log('MULTIFILE CMD - compile_target=${compile_target}): v ${cmd_args.join(' ')}')
+		log('MULTIFILE CMD - compile_target=${compile_target} narrow=${narrow_dir != ''}): v ${cmd_args.join(' ')}')
 	} else {
 		cmd_args = check_args_with_defines(build_v_check_args_single(file_to_check, is_library_module),
 			defines)
@@ -1542,7 +1615,7 @@ fn (mut app App) run_v_check(path string, text string) []JsonError {
 	exec_dir := if use_multifile { compile_target } else { working_dir }
 	diagnostic_source_dir := if use_multifile { exec_dir } else { os.dir(file_to_check) }
 	program_uris := if use_multifile {
-		app.program_open_files(real_path, overlay)
+		app.program_open_files_answered(real_path, program_dir, narrow_dir)
 	} else {
 		map[string]string{}
 	}
@@ -1592,7 +1665,7 @@ fn (mut app App) run_v_check(path string, text string) []JsonError {
 	parse_ms := time.now().unix_milli() - parse_stage_start_ms
 	if os.getenv('VLS_PERF_LOG') != '' {
 		total_ms := time.now().unix_milli() - stages_total_start_ms
-		app.send_log_message('diagnostics stages fp=${fp_ms} prep=${prep_ms} run=${run_ms} parse=${parse_ms} total=${total_ms}',
+		app.send_log_message('diagnostics stages fp=${fp_ms} prep=${prep_ms} run=${run_ms} parse=${parse_ms} total=${total_ms} target=${check_target}',
 			4)
 	}
 	if server_exe == '' {
@@ -1601,9 +1674,16 @@ fn (mut app App) run_v_check(path string, text string) []JsonError {
 
 	if use_multifile {
 		// The check covered the whole program, so it answers for every open file
-		// of that program too, including the ones it found nothing in.
+		// of that program too, including the ones it found nothing in. A narrowed
+		// one covered the module directory of the changed file alone, so
+		// program_uris held only the program's open files that sit inside it: the
+		// rest are not published for at all and keep what they already show.
 		app.program_errors = found.program.clone()
-		app.program_dir_checked = overlay.source_work_dir
+		app.program_dir_checked = if narrow_dir != '' {
+			narrow_dir
+		} else {
+			overlay.source_work_dir
+		}
 		log('FILTERED ERRORS: ${found.file.len} of ${found.parsed}')
 		app.cache_v_check_result(path, program_dir, fingerprint, found.file, x.exit_code, found.parsed)
 		return found.file
@@ -1626,13 +1706,30 @@ struct CheckErrors {
 // program_open_files returns the other open files of the program `overlay`
 // checks than the file at `real_path`: their URIs by normalized path.
 fn (app &App) program_open_files(real_path string, overlay CompilationOverlay) map[string]string {
+	return app.program_open_files_answered(real_path, overlay.source_work_dir, '')
+}
+
+// program_open_files_answered is program_open_files for the program directory
+// given directly, restricted to the files inside `answered_dir` when the check
+// answers only for those (a narrowed target, see narrow_check_dir). A check of
+// one module directory says nothing about the program's other open files, so
+// they keep the diagnostics they have rather than be told they hold none: an
+// empty set would clear the errors the last check of the whole program found in
+// them.
+fn (app &App) program_open_files_answered(real_path string, program_dir string, answered_dir string) map[string]string {
 	mut program_uris := map[string]string{}
 	for open_uri, _ in app.open_files {
 		open_path := uri_to_path(open_uri)
-		if normalized_index_path(open_path) != normalized_index_path(real_path)
-			&& app.program_root(open_path) == overlay.source_work_dir {
-			program_uris[normalized_index_path(open_path)] = open_uri
+		if normalized_index_path(open_path) == normalized_index_path(real_path) {
+			continue
 		}
+		if app.program_root(open_path) != program_dir {
+			continue
+		}
+		if answered_dir != '' && !path_is_within(normalize_overlay_path(open_path), answered_dir) {
+			continue
+		}
+		program_uris[normalized_index_path(open_path)] = open_uri
 	}
 	return program_uris
 }

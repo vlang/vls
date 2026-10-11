@@ -4725,8 +4725,412 @@ fn test_rush_publishes_the_fast_tier_before_the_flushed_slow_one() {
 	assert first[0].kind == .fast, 'the fast tier publishes before the flushed slow one'
 	scheduler.finish(first[0])
 	second, _ := scheduler.take_ready_jobs(time.now().unix_milli())
-	assert second.len == 1, 'the flushed job follows the fast one'
+	assert second.len == 1, 'the flushed job follows the fast tier'
 	assert second[0].kind == .slow, 'the slow answer supersedes the fast one'
 	assert second[0].uri == uri, 'the flushed job is the one the file asked for'
 	scheduler.finish(second[0])
+}
+
+// ============================================================================
+// The narrowed check target: the module directory of the changed file
+// ============================================================================
+
+// nrw_base_files is the project of these tests: a program whose main module
+// imports the module of the changed file, which sits in a directory of its own
+// with a second file of the same module next to it. The changed file imports
+// only the standard library, so its own directory answers for it.
+fn nrw_base_files() map[string]string {
+	return {
+		'v.mod':         "Module {\n\tname: 'nrwproj'\n}\n"
+		'main.v':        'module main\n\nimport util\n\nfn main() {\n\tprintln(util.value())\n}\n'
+		'util/util.v':   "module util\n\nimport os\nimport strings\n\npub fn value() string {\n\treturn strings.to_upper(os.file_name('a'))\n}\n"
+		'util/helper.v': 'module util\n\npub fn other() int {\n\treturn 1\n}\n'
+	}
+}
+
+// NrwStub is the fixture of the narrowed-check tests: the project, the paths a
+// test names in it, and what VLS_V_COMMAND was before the stand-in compiler.
+struct NrwStub {
+	dir       string // the temporary root, removed afterwards
+	marker    string // where the stand-in compiler records what it was asked
+	proj      string // the project root the program is checked from
+	main_uri  string
+	util_uri  string
+	other_uri string
+	previous  string
+}
+
+// nrw_stub_source is a stand-in for the V compiler. It records what it was
+// asked — the argv, the working directory it was run in, and the `.v` files it
+// found there — in the file VLS_NRW_MARKER names, and answers a check with one
+// diagnostic per `.v` file of that directory, at line 3 column 5, so a check
+// that walks a directory is told apart from one that walks the whole project.
+const nrw_stub_source = r"module main
+
+import os
+
+fn main() {
+	mut files := os.ls(os.getwd()) or { [] }
+	files.sort()
+	marker := os.getenv('VLS_NRW_MARKER')
+	if marker != '' {
+		mut f := os.open_append(marker) or { return }
+		f.write_string('---\n') or {}
+		f.write_string('argv=' + os.args[1..].join(' ') + '\n') or {}
+		f.write_string('cwd=' + os.getwd() + '\n') or {}
+		for entry in files {
+			if entry.ends_with('.v') {
+				f.write_string('file=' + entry + '\n') or {}
+			}
+		}
+		f.close()
+	}
+	for entry in files {
+		if entry.ends_with('.v') {
+			println(entry + ':3:5: error: nrw stub error in ' + entry)
+		}
+	}
+}
+"
+
+// nrw_stub_exe builds the stand-in compiler once for this test process, or ''
+// when this machine has no V to build it with.
+fn nrw_stub_exe() string {
+	root := os.join_path(os.temp_dir(), 'vls_nrw_stub_${os.getpid()}_${nrw_stub_source.hash().hex()}')
+	interop_test_must_mkdir_all(root)
+	built := $if windows {
+		os.join_path(root, 'stub.exe')
+	} $else {
+		os.join_path(root, 'stub')
+	}
+	if os.exists(built) {
+		return built
+	}
+	src := os.join_path(root, 'stub.v')
+	interop_test_must_write_file(src, nrw_stub_source)
+	// The compiler of this machine builds it: VLS_V_COMMAND is what the tests
+	// are driving, and it must not be asked for.
+	previous := os.getenv('VLS_V_COMMAND')
+	os.unsetenv('VLS_V_COMMAND')
+	result := run_v_argv(['-o', built, src], root)
+	restore_v_command(previous)
+	if result.exit_code != 0 || !os.exists(built) {
+		os.rm(built) or {}
+		eprintln('skipped: could not build the stand-in compiler: ${result.output}')
+		return ''
+	}
+	$if !windows {
+		os.chmod(built, 0o755) or {
+			eprintln('skipped: could not run the stand-in compiler: ${err}')
+			return ''
+		}
+	}
+	return built
+}
+
+// nrw_stub_app writes `files` (project-relative path to content) as the project
+// of a check, opens every one of them, and points VLS_V_COMMAND at the
+// stand-in compiler, which records what it was asked into the fixture's marker.
+fn nrw_stub_app(name string, files map[string]string) (&App, NrwStub) {
+	dir := os.join_path(os.temp_dir(), 'vls_nrw_${name}_${os.getpid()}_${time.now().unix_nano()}')
+	proj := os.join_path(dir, 'nrwproj')
+	work := os.join_path(dir, 'work')
+	interop_test_must_mkdir_all(proj)
+	interop_test_must_mkdir_all(work)
+	mut open_files := map[string]string{}
+	mut uris := map[string]string{}
+	for rel, content in files {
+		path := os.join_path(proj, rel.replace('/', os.path_separator))
+		interop_test_must_mkdir_all(os.dir(path))
+		interop_test_must_write_file(path, content)
+		uris[rel] = path_to_uri(path)
+		open_files[uris[rel]] = content
+	}
+	previous := os.getenv('VLS_V_COMMAND')
+	marker := os.join_path(dir, 'marker.txt')
+	exe := nrw_stub_exe()
+	if exe != '' {
+		os.setenv('VLS_V_COMMAND', exe, true)
+		os.setenv('VLS_NRW_MARKER', marker, true)
+	}
+	mut app := &App{
+		temp_dir:   work
+		open_files: open_files
+	}
+	return app, NrwStub{
+		dir:       dir
+		marker:    marker
+		proj:      proj
+		main_uri:  uris['main.v']
+		util_uri:  uris['util/util.v']
+		other_uri: uris['util/helper.v']
+		previous:  previous
+	}
+}
+
+// nrw_stub_done puts the environment back and removes the fixture.
+fn nrw_stub_done(stub NrwStub) {
+	os.unsetenv('VLS_NRW_MARKER')
+	restore_v_command(stub.previous)
+	os.rmdir_all(stub.dir) or {}
+}
+
+// nrw_last_run returns the argv, the working directory and the `.v` files of
+// the stand-in compiler's last invocation.
+fn nrw_last_run(marker string) (string, string, []string) {
+	content := os.read_file(marker) or { return '', '', []string{} }
+	blocks := content.split('---\n')
+	last := if blocks.len > 0 { blocks.last() } else { '' }
+	mut argv := ''
+	mut cwd := ''
+	mut files := []string{}
+	for line in last.split_into_lines() {
+		if line.starts_with('argv=') {
+			argv = line['argv='.len..]
+		} else if line.starts_with('cwd=') {
+			cwd = line['cwd='.len..]
+		} else if line.starts_with('file=') {
+			files << line['file='.len..]
+		}
+	}
+	files.sort()
+	return argv, cwd, files
+}
+
+// nrw_check_argv is what the stand-in compiler was run with, one argument at a
+// time, so a target is told apart from an option.
+fn nrw_check_argv(marker string) []string {
+	argv, _, _ := nrw_last_run(marker)
+	return argv.split(' ')
+}
+
+fn test_nrw_a_body_edit_checks_the_module_directory_alone() {
+	// A change that cannot alter what the program resolves does not need the
+	// program walked: the module directory of the changed file answers for it.
+	previous_cache := with_temp_diag_cache_dir('nrwtarget')
+	defer {
+		restore_diag_cache_dir(previous_cache)
+	}
+	mut app, stub := nrw_stub_app('target', nrw_base_files())
+	defer {
+		nrw_stub_done(stub)
+	}
+	if !compiler_is_available() {
+		return
+	}
+	edited := nrw_base_files()['util/util.v'].replace("'a'", "'b'")
+	app.open_files[stub.util_uri] = edited
+	app.run_v_check(stub.util_uri, edited)
+	argv := nrw_check_argv(stub.marker)
+	_, cwd, files := nrw_last_run(stub.marker)
+	assert argv.len > 0, 'the stand-in compiler was never asked: ${stub.marker}'
+	assert argv.last() == '.', 'the check asks for a directory, not a file: ${argv}'
+	assert !argv.any(it.ends_with('.v')), 'no file is passed as the target: ${argv}'
+	assert os.file_name(cwd) == 'util', 'the check runs in the module directory: ${cwd}'
+	assert files == ['helper.v', 'util.v'], 'only the module directory is walked: ${files}'
+}
+
+fn test_nrw_adding_an_import_checks_the_whole_program() {
+	// A new import changes what the program resolves, so the program's own
+	// directory stays the target.
+	previous_cache := with_temp_diag_cache_dir('nrwimport')
+	defer {
+		restore_diag_cache_dir(previous_cache)
+	}
+	mut app, stub := nrw_stub_app('import', nrw_base_files())
+	defer {
+		nrw_stub_done(stub)
+	}
+	if !compiler_is_available() {
+		return
+	}
+	// A third import the file did not have.
+	edited := "module util\n\nimport os\nimport strings\nimport sort\n\npub fn value() string {\n\treturn strings.to_upper(os.file_name('a'))\n}\n"
+	app.open_files[stub.util_uri] = edited
+	app.run_v_check(stub.util_uri, edited)
+	argv := nrw_check_argv(stub.marker)
+	_, cwd, files := nrw_last_run(stub.marker)
+	assert argv.len > 0, 'the stand-in compiler was never asked: ${stub.marker}'
+	assert argv.last() == '.', 'the check asks for a directory, not a file: ${argv}'
+	assert os.file_name(cwd) != 'util', 'the check does not run in the module directory: ${cwd}'
+	assert files == ['main.v'], 'the whole program is walked from its root: ${files}'
+}
+
+fn test_nrw_a_module_another_module_imports_checks_the_whole_program() {
+	// The program's main imports the changed file's module through another one,
+	// so the module directory does not hold every file the program imports and
+	// the program's own directory stays the target.
+	previous_cache := with_temp_diag_cache_dir('nrwcore')
+	defer {
+		restore_diag_cache_dir(previous_cache)
+	}
+	mut files := nrw_base_files()
+	files['util/util.v'] = 'module util\n\nimport os\nimport core\n\npub fn value() string {\n\treturn core.name()\n}\n'
+	files['core/core.v'] = "module core\n\npub fn name() string {\n\treturn 'core'\n}\n"
+	mut app, stub := nrw_stub_app('core', files)
+	defer {
+		nrw_stub_done(stub)
+	}
+	if !compiler_is_available() {
+		return
+	}
+	edited := files['core/core.v'].replace("'core'", "'renamed'")
+	core_uri := path_to_uri(os.join_path(stub.proj, 'core', 'core.v'))
+	app.open_files[core_uri] = edited
+	app.run_v_check(core_uri, edited)
+	argv := nrw_check_argv(stub.marker)
+	_, cwd, walked := nrw_last_run(stub.marker)
+	assert argv.len > 0, 'the stand-in compiler was never asked: ${stub.marker}'
+	assert argv.last() == '.', 'the check asks for a directory, not a file: ${argv}'
+	assert os.file_name(cwd) != 'core', 'the check does not run in the imported module directory: ${cwd}'
+	assert walked == ['main.v'], 'the whole program is walked from its root: ${walked}'
+}
+
+fn test_nrw_the_narrow_check_reports_the_edited_files_own_errors() {
+	// The narrowed target answers for the file it was run for, at the right
+	// place, which is what makes it sufficient rather than merely cheaper.
+	previous_cache := with_temp_diag_cache_dir('nrwerrors')
+	defer {
+		restore_diag_cache_dir(previous_cache)
+	}
+	mut app, stub := nrw_stub_app('errors', nrw_base_files())
+	defer {
+		nrw_stub_done(stub)
+	}
+	if !compiler_is_available() {
+		return
+	}
+	edited := nrw_base_files()['util/util.v'].replace("'a'", "'b'")
+	app.open_files[stub.util_uri] = edited
+	got := app.run_v_check(stub.util_uri, edited)
+	assert got.len == 1, 'the edited file reports its own diagnostics: ${got}'
+	assert normalize_overlay_path(got[0].path) == normalize_overlay_path(os.join_path(stub.proj,
+		'util', 'util.v')), 'the error is mapped back to the edited file: ${got[0].path}'
+	assert got[0].message.contains('nrw stub error'), 'the error is the check%s own: ${got[0].message}'
+	assert got[0].line_nr == 3 && got[0].col == 5, 'the error keeps its position: ${got[0].line_nr}:${got[0].col}'
+	assert got[0].level == 'error', 'the error keeps its level: ${got[0].level}'
+}
+
+fn test_nrw_the_programs_other_open_files_keep_their_diagnostics() {
+	// A narrowed check answers for the program's other open files only where it
+	// walked, so the ones outside the module directory are published nothing at
+	// all: an empty set would clear the errors a full check found in them.
+	previous_cache := with_temp_diag_cache_dir('nrwothers')
+	defer {
+		restore_diag_cache_dir(previous_cache)
+	}
+	mut app, stub := nrw_stub_app('others', nrw_base_files())
+	defer {
+		nrw_stub_done(stub)
+	}
+	if !compiler_is_available() {
+		return
+	}
+	base := nrw_base_files()
+	edited := base['util/util.v'].replace("'a'", "'b'")
+	app.open_files[stub.util_uri] = edited
+	app.run_v_check(stub.util_uri, edited)
+	narrow_answers := app.program_errors.clone()
+	assert stub.other_uri in narrow_answers, 'the module directory%s other open file is answered by the same check: ${narrow_answers.keys()}'
+	assert narrow_answers[stub.other_uri].len == 1, 'that file keeps the diagnostics the check found in it: ${narrow_answers[stub.other_uri]}'
+	assert stub.main_uri !in narrow_answers, 'the program%s main module is published nothing, so it keeps what it shows: ${narrow_answers.keys()}'
+	// The whole program answers for both of them.
+	with_import := "module util\n\nimport os\nimport strings\nimport sort\n\npub fn value() string {\n\treturn strings.to_upper(os.file_name('a'))\n}\n"
+	app.open_files[stub.util_uri] = with_import
+	app.run_v_check(stub.util_uri, with_import)
+	full_answers := app.program_errors.clone()
+	assert stub.main_uri in full_answers, 'the full check answers for the main module: ${full_answers.keys()}'
+	assert full_answers[stub.main_uri].len == 1, 'and publishes what it found there: ${full_answers[stub.main_uri]}'
+	assert stub.other_uri in full_answers, 'the full check answers for the module directory%s other file: ${full_answers.keys()}'
+	assert full_answers[stub.other_uri].len == 0, 'which holds nothing, so it is cleared to that: ${full_answers[stub.other_uri]}'
+}
+
+fn test_nrw_the_stage_line_names_the_chosen_target() {
+	// The target is observation, like the rest of the stage line: it names which
+	// of the two the check ran against, under the same VLS_PERF_LOG gate.
+	previous_perf := os.getenv('VLS_PERF_LOG')
+	previous_cache := with_temp_diag_cache_dir('nrwperf')
+	defer {
+		if previous_perf == '' {
+			os.unsetenv('VLS_PERF_LOG')
+		} else {
+			os.setenv('VLS_PERF_LOG', previous_perf, true)
+		}
+		restore_diag_cache_dir(previous_cache)
+	}
+	mut app, stub := nrw_stub_app('perf', nrw_base_files())
+	defer {
+		nrw_stub_done(stub)
+	}
+	if !compiler_is_available() {
+		return
+	}
+	os.setenv('VLS_PERF_LOG', '1', true)
+	app.capture_output = true
+	base := nrw_base_files()
+	edited := base['util/util.v'].replace("'a'", "'b'")
+	app.open_files[stub.util_uri] = edited
+	app.run_v_check(stub.util_uri, edited)
+	with_import := "module util\n\nimport os\nimport strings\nimport sort\n\npub fn value() string {\n\treturn strings.to_upper(os.file_name('a'))\n}\n"
+	app.open_files[stub.util_uri] = with_import
+	app.run_v_check(stub.util_uri, with_import)
+	stage_lines := app.captured_output.filter(it.contains('diagnostics stages'))
+	assert stage_lines.len == 2, 'one stage line per slow check: ${app.captured_output}'
+	assert stage_lines[0].contains('target=narrow'), 'the narrowed check names its target: ${stage_lines[0]}'
+	assert stage_lines[1].contains('target=full'), 'the full check names its target: ${stage_lines[1]}'
+	cache_lines := app.captured_output.filter(it.contains('diagnostics cache'))
+	assert cache_lines.len == 2, 'one cache line per slow check: ${app.captured_output}'
+	assert cache_lines[0].contains('target=narrow'), 'the cache line names the target too: ${cache_lines[0]}'
+	assert cache_lines[1].contains('target=full'), 'the cache line names the target too: ${cache_lines[1]}'
+}
+
+fn test_nrw_check_dir_requires_an_unchanged_import_block() {
+	// The validity condition, without a compiler: each requirement on its own,
+	// so a narrowing that dropped one is caught here rather than in a check.
+	temp_dir := os.join_path(os.vtmp_dir(), 'vls_nrw_predicate_${os.getpid()}')
+	os.rmdir_all(temp_dir) or {}
+	defer {
+		os.rmdir_all(temp_dir) or {}
+	}
+	proj := os.join_path(temp_dir, 'nrwproj')
+	for rel, content in nrw_base_files() {
+		path := os.join_path(proj, rel.replace('/', os.path_separator))
+		interop_test_must_mkdir_all(os.dir(path))
+		interop_test_must_write_file(path, content)
+	}
+	util_file := os.join_path(proj, 'util', 'util.v')
+	main_file := os.join_path(proj, 'main.v')
+	program_dir := normalize_overlay_path(proj)
+	module_dir := normalize_overlay_path(os.join_path(proj, 'util'))
+	mut app := &App{
+		open_files: {
+			path_to_uri(util_file): nrw_base_files()['util/util.v']
+		}
+	}
+	// A change confined to a function body narrows the target.
+	body_edit := nrw_base_files()['util/util.v'].replace("'a'", "'b'")
+	assert app.narrow_check_dir(util_file, program_dir, body_edit) == module_dir, 'a body edit narrows the target'
+	// A new import, a removed import, and a reordered one do not.
+	for _, changed in [
+		"module util\n\nimport os\nimport strings\nimport sort\n\npub fn value() string {\n\treturn 'b'\n}\n",
+		"module util\n\nimport os\n\npub fn value() string {\n\treturn 'b'\n}\n",
+		"module util\n\nimport strings\nimport os\n\npub fn value() string {\n\treturn 'b'\n}\n",
+	] {
+		assert app.narrow_check_dir(util_file, program_dir, changed) == '', 'a changed import block keeps the program the target'
+	}
+	// A file that was never saved has no previous content to compare with.
+	unsaved := os.join_path(proj, 'util', 'never_saved.v')
+	assert app.narrow_check_dir(unsaved, program_dir, 'module util\n\nimport os\n\npub fn extra() int {\n\treturn 2\n}\n') == '', 'an unsaved file keeps the program the target'
+	// A file whose module directory is the program's own has nothing to narrow.
+	assert app.narrow_check_dir(main_file, app.program_root(main_file), 'module main\n\nimport util\n\nfn main() {}\n') == '', 'the program%s own directory is already the whole program'
+	// A module the program imports through another one is not held by the
+	// changed file's directory.
+	mut nested := nrw_base_files()
+	nested['util/util.v'] = 'module util\n\nimport os\nimport core\n\npub fn value() string {\n\treturn core.name()\n}\n'
+	nested['core/core.v'] = "module core\n\npub fn name() string {\n\treturn 'core'\n}\n"
+	core_dir := os.join_path(proj, 'core')
+	interop_test_must_mkdir_all(core_dir)
+	interop_test_must_write_file(os.join_path(core_dir, 'core.v'), nested['core/core.v'])
+	core_file := os.join_path(core_dir, 'core.v')
+	assert app.narrow_check_dir(core_file, program_dir, nested['core/core.v']) == '', 'a module reached through another keeps the program the target'
 }
