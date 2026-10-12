@@ -124,25 +124,37 @@ fn test_ssr_refuses_a_match_inside_a_comptime_branch() {
 	assert reason.contains('not reported'), reason
 }
 
-fn test_ssr_refuses_a_match_spanning_an_interpolation() {
-	content := "module main\n\nfn main() {\n\ts := 'abc'\n\tprintln(s + 'x')\n\tprintln(s)\n}\n"
+fn test_ssr_refuses_a_match_that_starts_inside_an_interpolation() {
+	rule := ssr_parse_rule('f($a) ==>> g($a)') or {
+		assert false, 'invalid rule: ${err}'
+		return
+	}
+	// The pattern matched the interpolation's own expression, so the match
+	// starts on the two bytes after `${`.
+	content := "module main\n\nfn main() {\n\ts := 'a\${f(1)}c'\n}\n"
+	matches := ssr_find_matches(content, rule)
+	assert matches.len == 1, matches.len.str()
+	mut app := App{}
+	reason := app.ssr_match_refusal(content, matches[0])
+	assert reason.contains('interpolation'), reason
+	// A match further into the span is refused too, not only one that starts
+	// on the interpolation's first byte.
+	deep := "module main\n\nfn main() {\n\ts := 'a\${x + f(1)}c'\n}\n"
+	deep_matches := ssr_find_matches(deep, rule)
+	assert deep_matches.len == 1, deep_matches.len.str()
+	assert app.ssr_match_refusal(deep, deep_matches[0]).contains('interpolation')
+}
+
+fn test_ssr_refuses_a_plain_match_for_nothing() {
 	rule := ssr_parse_rule('println($a) ==>> dump($a)') or {
 		assert false, 'invalid rule: ${err}'
 		return
 	}
-	with_spanning := "module main\n\nfn main() {\n\ts := 'a\${b}c'\n\tprintln(s)\n}\n"
-	matches := ssr_find_matches(with_spanning, rule)
-	if matches.len > 0 {
-		mut app := App{}
-		// Every match must at least be readable; the interpolation check is
-		// per-match and is exercised by the direct call below.
-		_ = app.ssr_match_refusal(with_spanning, matches[0])
-	}
-	// A plain call is refused for nothing.
-	plain := ssr_find_matches(content, rule)
-	assert plain.len == 2
-	mut app2 := App{}
-	assert app2.ssr_match_refusal(content, plain[0]) == ''
+	content := "module main\n\nfn main() {\n\ts := 'abc'\n\tprintln(s)\n}\n"
+	matches := ssr_find_matches(content, rule)
+	assert matches.len == 1, matches.len.str()
+	mut app := App{}
+	assert app.ssr_match_refusal(content, matches[0]) == ''
 }
 
 fn test_ssr_refuses_a_match_in_a_type_position() {

@@ -39,10 +39,6 @@ struct SsrMatch {
 	text  string
 }
 
-// ssr_refusal is why a rule could not be applied. One is never withheld when
-// a rule is refused: the user acts on what it says.
-type SsrRefusal = string
-
 // ssr_parse_rule parses `pattern ==>> template`. The separator is exactly
 // three `>` after an `=`, and it may appear only once. A placeholder is `$`
 // and an identifier, repeated at most once in the pattern, and every template
@@ -489,14 +485,15 @@ fn (app &App) ssr_match_refusal(content string, hit SsrMatch) string {
 	if app.ssr_in_comptime_branch(content, line) {
 		return 'the match at line ${line + 1} is inside a `$if` branch this build does not compile, so a wrong rewrite is not reported'
 	}
-	// A match that touches an interpolation is inside code the mask kept as
+	// A match inside an interpolation sits inside code the mask kept as
 	// code; the render cannot know how to write it back into the string.
-	for i in hit.start .. hit.end {
-		if i > 0 && content[i - 1] == `$` && content[i] == `{` {
-			return 'the match at line ${line + 1} spans an interpolation, and the replacement would break the string'
-		}
-		if i > 0 && content[i - 1] == `}` && i > 1 && content[i - 2] == `{` {
-			// Inside an interpolation: no closing brace may be produced there.
+	if ssr_in_interpolation(content, hit.start) {
+		return 'the match at line ${line + 1} starts inside an interpolation, and the replacement would break the string'
+	}
+	// A rewrite whose own span holds an interpolation rewrites inside the
+	// string that surrounds it.
+	for i in hit.start .. hit.end - 1 {
+		if content[i] == `$` && content[i + 1] == `{` {
 			return 'the match at line ${line + 1} spans an interpolation, and the replacement would break the string'
 		}
 	}
@@ -506,6 +503,39 @@ fn (app &App) ssr_match_refusal(content string, hit SsrMatch) string {
 		return 'the match at line ${line + 1} is in a type position, which a structural replace does not write'
 	}
 	return ''
+}
+
+// ssr_in_interpolation reports whether the offset sits inside a `${...}`
+// interpolation. A V string literal may not span a line, so scanning the
+// offset's own line is enough to tell: the quote that opened the string and
+// the brace depth inside it decide where the interpolation runs.
+fn ssr_in_interpolation(content string, at int) bool {
+	newline := content[..at].last_index('\n') or { -1 }
+	line_start := if newline < 0 { 0 } else { newline + 1 }
+	mut quote := u8(0)
+	mut depth := 0
+	mut i := line_start
+	for i < at {
+		c := content[i]
+		if quote == 0 {
+			if c == `'` || c == `"` {
+				quote = c
+			}
+		} else if c == `\\` {
+			// An escaped quote does not close the string, so the byte after
+			// the backslash is skipped.
+			i++
+		} else if c == quote {
+			quote = 0
+		} else if c == `$` && i + 1 < content.len && content[i + 1] == `{` {
+			depth++
+			i++
+		} else if c == `}` && depth > 0 {
+			depth--
+		}
+		i++
+	}
+	return depth > 0
 }
 
 // ssr_in_comptime_branch reports whether the given line is inside a
