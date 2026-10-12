@@ -2796,6 +2796,79 @@ fn test_source_call_target_handles_multiline_and_generic_calls() {
 	assert multiline_target.active_parameter == 1
 }
 
+fn test_source_call_target_reports_the_innermost_call() {
+	// A cursor inside a nested call names the inner callee, not the outer one:
+	// `outer(a, inner(b, c))` at `c` is `inner`, and the parameter is inner's
+	// second. The reported column probes the callee's own name.
+	nested := '	inner(b, outer(1, 2))'
+	outer_start := nested.index('outer(') or {
+		assert false, 'expected the nested call'
+		return
+	}
+	on_inner := source_call_target(nested, Position{
+		char: nested.len - 1
+	}, .utf8) or {
+		assert false, 'expected call target inside a nested call'
+		return
+	}
+	assert on_inner.position == Position{
+		line: 0
+		char: 3
+	}
+	assert on_inner.active_parameter == 1
+
+	// A cursor on the inner's own `(` is still the inner's first parameter, not
+	// the outer's.
+	on_inner_paren := source_call_target(nested, Position{
+		char: outer_start + 'outer'.len + 1
+	}, .utf8) or {
+		assert false, 'expected call target on the inner call'
+		return
+	}
+	assert on_inner_paren.position == Position{
+		line: 0
+		char: outer_start + 2
+	}
+	assert on_inner_paren.active_parameter == 0
+
+	// Three levels: `f(g(h(1)))` at the literal names `h`.
+	deep := 'f(g(h(1)))'
+	h_start := deep.index('h(') or {
+		assert false, 'expected the innermost call'
+		return
+	}
+	on_h := source_call_target(deep, Position{
+		char: h_start + 2
+	}, .utf8) or {
+		assert false, 'expected call target at three levels of nesting'
+		return
+	}
+	assert on_h.position == Position{
+		line: 0
+		char: h_start
+	}
+	assert on_h.active_parameter == 0
+
+	// A chain reads the same: `item.rewrap(value)` at `value` names `rewrap`.
+	chain := 'item.rewrap(value)'
+	on_rewrap := source_call_target(chain, Position{
+		char: chain.len - 1
+	}, .utf8) or {
+		assert false, 'expected call target of a method call'
+		return
+	}
+	assert on_rewrap.position == Position{
+		line: 0
+		char: 7
+	}
+	assert on_rewrap.active_parameter == 0
+
+	// Past every closing paren there is no enclosing call to name.
+	assert source_call_target(deep, Position{
+		char: deep.len
+	}, .utf8) == none
+}
+
 fn test_declaration_signature_label_keeps_generics_and_return_type() {
 	declaration := 'pub fn convert[T](value T) !T'
 	assert declaration_signature_label(declaration, 'convert') == 'convert[T](value T) !T'
