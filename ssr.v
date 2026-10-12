@@ -162,8 +162,9 @@ fn ssr_brackets_balance(tokens []string) bool {
 }
 
 // ssr_find_matches returns where the rule applies in `content`, in order and
-// without overlap. `code_only` is the mask, not the string-blinding one: a
-// `${...}` interpolation is code, and a match that touches it is refused.
+// without overlap. Interpolations are matched as code rather than skipped:
+// a `${...}` holds real code, so the refusal layer decides what is safe there
+// instead of the matcher hiding it.
 fn ssr_find_matches(content string, rule SsrRule) []SsrMatch {
 	mut matches := []SsrMatch{}
 	mut search_from := 0
@@ -497,6 +498,11 @@ fn (app &App) ssr_match_refusal(content string, hit SsrMatch) string {
 			return 'the match at line ${line + 1} spans an interpolation, and the replacement would break the string'
 		}
 	}
+	// A match inside an attribute changes how the declaration is compiled,
+	// which is not a text change the slow check would report.
+	if ssr_in_attribute(content, hit.start) {
+		return 'the match at line ${line + 1} is inside an `@[...]` attribute, which changes how the declaration is compiled'
+	}
 	// A placeholder in a type position renames a type parameter of a generic
 	// declaration, which the render would write as its type argument.
 	if app.ssr_in_type_position(content, hit.start) {
@@ -552,8 +558,19 @@ fn (app &App) ssr_in_comptime_branch(content string, line int) bool {
 	mut i := line - 1
 	for i >= 0 {
 		text := lines[i]
-		if text.trim_space().starts_with('}') {
+		mut rest := text.trim_space()
+		if rest.starts_with('}') {
 			depth++
+			rest = rest[1..].trim_space()
+			// `} $else {` closes one branch and opens the next. A match under
+			// it is inside the branch, not below the pair, so the opener is
+			// settled before the line is done with.
+			if rest.starts_with('$') && rest.contains('{') {
+				if depth == 0 {
+					return true
+				}
+				depth--
+			}
 			i--
 			continue
 		}
@@ -569,6 +586,29 @@ fn (app &App) ssr_in_comptime_branch(content string, line int) bool {
 	return false
 }
 
+// ssr_in_attribute reports whether the match starts inside an `@[...]`
+// attribute, or on its opening two bytes. An attribute changes how the
+// declaration is compiled, so a rewrite inside one is not a text change
+// the slow check would report.
+fn ssr_in_attribute(content string, at int) bool {
+	newline := content[..at].last_index('\n') or { -1 }
+	mut i := at - 1
+	for i > newline {
+		c := content[i]
+		if c == `[` {
+			return i > 0 && content[i - 1] == `@`
+		}
+		if c == `]` || c == `@` {
+			// An attribute that closes before the match does not hold it,
+			// and one that opens after it has not been reached yet.
+			return false
+		}
+		i--
+	}
+	// The match starts on the `@[` of the attribute itself.
+	return at + 1 < content.len && content[at] == `@` && content[at + 1] == `[`
+}
+
 // ssr_in_type_position reports whether the match starts in a type position:
 // after a generic argument's `[`, after a field's `:`, after a declaration's
 // `)`, or on a struct field's type. A placeholder there would be written as
@@ -579,23 +619,47 @@ fn (app &App) ssr_in_type_position(content string, at int) bool {
 	line_end := content[line_start..].index('\n') or { content.len - line_start }
 	prefix := content[line_start..at].trim_space()
 	rest := content[at..line_start + line_end].trim_space()
-	if prefix.ends_with('[') || prefix.ends_with(':') {
+	if prefix.ends_with(':') {
 		return true
 	}
+	// `[` after a name is either a generic argument or an index, and text
+	// alone cannot tell them apart, so both are refused. `[` after an
+	// operator is a literal, whose elements a replace writes as usual, and
+	// `@[` is an attribute, which is refused as one.
+	if prefix.ends_with('[') {
+		return prefix.len >= 2 && ssr_is_ident_char(prefix[prefix.len - 2])
+	}
 	// A declaration that closes its parameter list on this line follows it
-	// with the return type, so a match starting there is inside one.
-	if prefix.ends_with(')') && ssr_line_first_word(content, line_start, line_end) == 'fn' {
+	// with the return type, so a match starting there is inside one. An
+	// assignment cannot appear in such a declaration, which is what rules a
+	// match that merely follows a call in an expression.
+	if prefix.ends_with(')') && !prefix.contains('=') {
 		return true
 	}
 	// A struct field is written `item T` or `mut x T`: the line starts with a
-	// field modifier and holds nothing but names, and the match starts on its
-	// type, the final name. A statement such as `mut x := 0` carries an
-	// operator after the match, which rules it out.
+	// field modifier and holds nothing but names up to the match. The type
+	// may carry an attribute after it, and a statement such as `mut x := 0`
+	// carries an assignment, which rules it out.
 	if ssr_is_field_modifier(ssr_line_first_word(content, line_start, line_end))
-		&& ssr_is_all_bare_names(prefix) && ssr_is_all_bare_names(rest) {
+		&& ssr_is_all_bare_names(prefix) && ssr_starts_bare_name_without_assignment(rest) {
 		return true
 	}
 	return false
+}
+
+// ssr_starts_bare_name_without_assignment reports whether the text starts
+// with an identifier and holds no assignment, so `T` and `T @[json: json]`
+// are a field's type while `x := 0` is a statement.
+fn ssr_starts_bare_name_without_assignment(text string) bool {
+	trimmed := text.trim_space()
+	if trimmed == '' {
+		return false
+	}
+	first := if trimmed.contains(' ') { trimmed.all_before(' ') } else { trimmed }
+	if !ssr_is_bare_name(first) {
+		return false
+	}
+	return !trimmed.contains('=')
 }
 
 // ssr_line_first_word is the leading word of a line, or '' for a blank one.

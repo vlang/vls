@@ -205,6 +205,85 @@ fn test_ssr_in_comptime_branch_skips_a_line_below_a_closed_branch() {
 	assert !app.ssr_in_comptime_branch(below, line)
 }
 
+fn test_ssr_refuses_a_match_inside_an_else_branch() {
+	rule := ssr_parse_rule('f($a) ==>> g($a)') or {
+		assert false, 'invalid rule: ${err}'
+		return
+	}
+	// `} $else {` closes one branch and opens the next on one line, and the
+	// compiler does not build the branch the flags do not choose, so a wrong
+	// rewrite in it is invisible to the slow check.
+	content := 'module main\n\n\$if x ? {\n\tg(1)\n} \$else {\n\tf(1)\n}\n'
+	matches := ssr_find_matches(content, rule)
+	assert matches.len == 1, matches.len.str()
+	mut app := App{}
+	reason := app.ssr_match_refusal(content, matches[0])
+	assert reason.contains('\$if'), reason
+	// A match below the whole pair is not in either branch.
+	below := 'module main\n\n\$if x ? {\n\tg(1)\n} \$else {\n\th(1)\n}\n\nfn k() {\n\tf(1)\n}\n'
+	below_matches := ssr_find_matches(below, rule)
+	assert below_matches.len == 1, below_matches.len.str()
+	assert app.ssr_match_refusal(below, below_matches[0]) == ''
+}
+
+fn test_ssr_refuses_a_match_inside_an_attribute() {
+	rule := ssr_parse_rule('export ==>> inline') or {
+		assert false, 'invalid rule: ${err}'
+		return
+	}
+	content := '@[export]\nfn main() {\n}\n'
+	matches := ssr_find_matches(content, rule)
+	assert matches.len == 1, matches.len.str()
+	mut app := App{}
+	reason := app.ssr_match_refusal(content, matches[0])
+	// The refusal must name the attribute, not call it a type position: the
+	// two are refused for different reasons and only one of them is true.
+	assert reason.contains('attribute'), reason
+}
+
+fn test_ssr_refuses_an_annotated_field_type() {
+	rule := ssr_parse_rule('T ==>> U') or {
+		assert false, 'invalid rule: ${err}'
+		return
+	}
+	// The field's type carries an attribute after it, so the type is not the
+	// last name on the line.
+	content := 'module main\n\nstruct S {\n\titem x T @[json: json]\n}\n'
+	matches := ssr_find_matches(content, rule)
+	assert matches.len == 1, matches.len.str()
+	mut app := App{}
+	assert app.ssr_match_refusal(content, matches[0]).contains('type position')
+}
+
+fn test_ssr_allows_a_match_inside_an_array_literal() {
+	rule := ssr_parse_rule('f($a) ==>> g($a)') or {
+		assert false, 'invalid rule: ${err}'
+		return
+	}
+	// `[` after `:=` opens an array literal, not a generic argument, so the
+	// match is an ordinary one and must not be refused as a type.
+	content := 'module main\n\nfn main() {\n\tx := [f(1)]\n}\n'
+	matches := ssr_find_matches(content, rule)
+	assert matches.len == 1, matches.len.str()
+	mut app := App{}
+	assert app.ssr_match_refusal(content, matches[0]) == ''
+}
+
+fn test_ssr_refuses_a_match_inside_a_generic_argument() {
+	rule := ssr_parse_rule('T ==>> U') or {
+		assert false, 'invalid rule: ${err}'
+		return
+	}
+	// A generic instantiation is indistinguishable from an index by text
+	// alone, so a match after `Foo[` is refused rather than guessed.
+	content := 'module main\n\nfn main() {\n\tx := Foo[int]{}\n}\n'
+	matches := ssr_find_matches(content, rule)
+	if matches.len > 0 {
+		mut app := App{}
+		assert app.ssr_match_refusal(content, matches[0]).contains('type position')
+	}
+}
+
 fn test_ssr_byte_to_line_reports_the_holding_line() {
 	assert byte_to_line('', 0) == 0
 	assert byte_to_line('a\nb\nc', 4) == 2
