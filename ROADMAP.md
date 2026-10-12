@@ -160,7 +160,13 @@ what actually blocks a hover).
 - Extract variable / inline variable: DONE (assists.v) — both
   pure text edits with purity gates; inline requires a
   single-assignment local.
-- stub-missing-members: NOT started.
+- Implement missing interface members: DONE (implement_members.v)
+  — offered when exactly one interface of the module is a superset
+  of the struct's methods; stubs carry the interface member's
+  signature and a zero value for its return type.
+- Extract to a new file: DONE (extract_to_file.v) — a selected
+  declaration moves into a module of its own, the `import` lands
+  via import_spot, and the name collision falls back beside it.
 
 ## Phase 4 — build / config UX: DONE
 
