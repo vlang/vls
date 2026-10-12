@@ -8367,6 +8367,16 @@ fn (mut app App) handle_code_action(request Request) Response {
 		}
 	}
 
+	// 9. Structural replace — the rule written on the line of the selection.
+	if code_action_kind_wanted(only, code_action_kind_refactor) {
+		rule := app.ssr_rule_at_selection(uri, params.range)
+		if rule != '' {
+			if action := app.build_ssr_action(uri, content, params.range, rule) {
+				actions << action
+			}
+		}
+	}
+
 	return Response{
 		id:     request.id
 		result: actions

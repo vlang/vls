@@ -158,6 +158,7 @@ const sym_kind_struct = 23
 
 // LSP CodeActionKind constants
 const code_action_kind_quickfix = 'quickfix'
+const code_action_kind_refactor = 'refactor.rewrite'
 const code_action_kind_source_organize_imports = 'source.organizeImports'
 
 // Notification represents an LSP notification sent to the client.

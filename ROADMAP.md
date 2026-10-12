@@ -167,6 +167,18 @@ what actually blocks a hover).
 - Extract to a new file: DONE (extract_to_file.v) — a selected
   declaration moves into a module of its own, the `import` lands
   via import_spot, and the name collision falls back beside it.
+- Structural search and replace: DONE (ssr.v) — a rule written as
+  a comment on the line the selection starts on, `pattern ==>>`
+  `template`, with `$name` placeholders carrying the text they
+  matched. Every match is inside the selection, and the preview is
+  the edit set itself. The rule is refused as a whole, naming the
+  reason, when any match sits in a `$if` branch, spans a `${...}`
+  interpolation, or starts where V writes a type — a struct field's
+  type, a generic argument, an annotation, or a return type. The
+  placeholder's own precedence decides parentheses in the render,
+  because there is no parser to re-read the result with.
+  Deliberately absent: typed wildcards, rules that span files, and
+  declaration-shape rewrites.
 
 ## Phase 4 — build / config UX: DONE
 
