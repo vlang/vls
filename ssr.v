@@ -293,9 +293,12 @@ fn ssr_skip_trivia(content string, pos int) int {
 			at++
 			continue
 		}
-		// A line comment runs to the end of the line.
-		if c == `/` && pos + 1 < content.len && content[pos + 1] == `/` {
-			for pos < content.len && content[pos] != `\n` {
+		// A line comment runs to the end of the line. The scan is of `at`, not
+		// of the offset the function was called with: `pos` never moves, so a
+		// loop bound on it never terminates.
+		if c == `/` && at + 1 < content.len && content[at + 1] == `/` {
+			at += 2
+			for at < content.len && content[at] != `\n` {
 				at++
 			}
 			continue
@@ -429,7 +432,17 @@ fn (mut app App) build_ssr_action(uri string, content string, selection LSPRange
 	}
 	lines := content.split_into_lines()
 	starts := line_start_offsets(content)
-	from := ssr_selection_start(content, starts, selection)
+	// The rule is carried by a comment on the line the selection starts on, so
+	// that comment is inside the selected region — and the rule's own text
+	// matches its pattern. The region searched therefore starts after the
+	// rule's line, which is also where the rewrite is meant to apply.
+	rule_line_end := if selection.start.line + 1 < starts.len {
+		starts[selection.start.line + 1]
+	} else {
+		content.len
+	}
+	selection_from := ssr_selection_start(content, starts, selection)
+	from := if selection_from > rule_line_end { selection_from } else { rule_line_end }
 	to := ssr_selection_end(content, starts, lines, selection)
 	region := content[from..to]
 	matches := ssr_find_matches(region, rule)

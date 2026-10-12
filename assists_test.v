@@ -428,3 +428,63 @@ fn test_inline_variable_is_offered_as_a_quickfix_only() {
 	}
 	assert assists_test_action(mut app, uri, content, sel, ['refactor'], 'Inline variable') == none, 'a client asking only for refactors must not be sent a quick fix'
 }
+
+// The rule's own text matches its pattern, so a region searched from the
+// selection's start offers a rewrite of the comment that carries the rule and
+// destroys it. The region starts after the rule's line instead.
+fn test_ssr_does_not_rewrite_the_comment_that_carries_the_rule() {
+	content := '// f(\$a) ==>> g(\$a)\nmodule main\n\nfn main() {\n}\n'
+	mut app := assists_test_app()
+	sel := LSPRange{
+		start: Position{
+			line: 0
+			char: 0
+		}
+		end:   Position{
+			line: 4
+			char: 1
+		}
+	}
+	assert assists_test_action(mut app, 'file:///tmp/ssr_action/main.v', content, sel, [code_action_kind_refactor],
+		'Structural replace (1 match)') == none, 'a rewrite was offered against the rule itself'
+}
+
+// --- Structural search and replace ---
+
+// The rule is written as a comment on the line the selection starts on, so the
+// comment sits inside the selected region. A rule must be offered through the
+// real handler, with the edits pointing at the code rather than at its own rule.
+fn test_ssr_rewrites_the_calls_a_rule_names() {
+	content := 'module main\n\nfn main() {\n\t// f($a) ==>> g($a)\n\tf(1)\n\tf(2)\n}\n'
+	mut app := assists_test_app()
+	sel := LSPRange{
+		start: Position{
+			line: 3
+			char: 0
+		}
+		end:   Position{
+			line: 5
+			char: 5
+		}
+	}
+	action := assists_test_action(mut app, 'file:///tmp/ssr_action/main.v', content, sel, [code_action_kind_refactor],
+		'Structural replace (2 matches)') or {
+		assert false, 'the structural replace was not offered, so no action was titled that'
+		return
+	}
+	assert action.kind == code_action_kind_refactor
+	edit := action.edit or {
+		assert false, 'the action carries no workspace edit'
+		WorkspaceEdit{}
+	}
+	edits := edit.changes['file:///tmp/ssr_action/main.v'] or {
+		assert false, 'the action carries no edit for its document'
+		[]TextEdit{}
+	}
+	assert edits.len == 2, edits.len.str()
+	assert edits[0].new_text == 'g(1)', edits[0].new_text
+	assert edits[1].new_text == 'g(2)', edits[1].new_text
+	// The edit points at the call, not at the newline that precedes it.
+	assert edits[0].range.start.line == 4, edits[0].range.start.line.str()
+	assert edits[1].range.start.line == 5, edits[1].range.start.line.str()
+}

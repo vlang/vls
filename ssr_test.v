@@ -284,6 +284,20 @@ fn test_ssr_refuses_a_match_inside_a_generic_argument() {
 	}
 }
 
+fn test_ssr_matches_across_a_line_comment_between_the_pattern_tokens() {
+	rule := ssr_parse_rule('f(1) ==>> g(1)') or {
+		assert false, 'invalid rule: ${err}'
+		return
+	}
+	// The `(` is matched, and the `1` the pattern names sits after a line
+	// comment. Trivia is skipped by an offset that moves: a scan bound on the
+	// offset the function was called with never terminates here.
+	content := 'module main\n\nfn main() {\n\tf( // a note\n\t  1)\n}\n'
+	matches := ssr_find_matches(content, rule)
+	assert matches.len == 1, matches.len.str()
+	assert matches[0].text == 'g(1)', matches[0].text
+}
+
 fn test_ssr_byte_to_line_reports_the_holding_line() {
 	assert byte_to_line('', 0) == 0
 	assert byte_to_line('a\nb\nc', 4) == 2
