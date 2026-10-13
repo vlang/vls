@@ -81,6 +81,22 @@ fn test_ssr_matches_every_occurrence() {
 	assert matches.map(it.text) == ['g(1)', 'g(2)', 'g(x)']
 }
 
+fn test_ssr_bounds_how_many_matches_a_rule_applies() {
+	rule := ssr_parse_rule('f($a) ==>> g($a)') or {
+		assert false, 'invalid rule: ${err}'
+		return
+	}
+	// The bound is what keeps one rule from rewriting a whole program in one
+	// edit set, so it is asserted rather than left to hold by construction.
+	mut parts := ['module main', '', 'fn main() {']
+	for _ in 0 .. 250 {
+		parts << '\tf(1)'
+	}
+	parts << '}'
+	matches := ssr_find_matches(parts.join('\n'), rule)
+	assert matches.len == ssr_max_matches, matches.len.str()
+}
+
 fn test_ssr_parenthesises_a_binding_that_precedence_would_split() {
 	rule := ssr_parse_rule('f($a) ==>> g($a)') or {
 		assert false, 'invalid rule: ${err}'
@@ -139,7 +155,7 @@ fn test_ssr_allows_a_match_after_an_escaped_interpolation_marker() {
 	matches := ssr_find_matches(content, rule)
 	assert matches.len == 1, matches.len.str()
 	mut app := App{}
-	assert app.ssr_match_refusal(content, matches[0]) == ''
+	assert ssr_match_refusal(content, matches[0]) == ''
 }
 
 fn test_ssr_allows_a_match_inside_a_backtick_string() {
@@ -152,7 +168,7 @@ fn test_ssr_allows_a_match_inside_a_backtick_string() {
 	matches := ssr_find_matches(content, rule)
 	assert matches.len == 1, matches.len.str()
 	mut app := App{}
-	assert app.ssr_match_refusal(content, matches[0]) == ''
+	assert ssr_match_refusal(content, matches[0]) == ''
 }
 
 fn test_ssr_does_not_match_across_an_identifier_boundary() {
@@ -173,7 +189,7 @@ fn test_ssr_refuses_a_match_inside_a_comptime_branch() {
 	matches := ssr_find_matches(content, rule)
 	assert matches.len == 1
 	mut app := App{}
-	reason := app.ssr_match_refusal(content, matches[0])
+	reason := ssr_match_refusal(content, matches[0])
 	assert reason.contains('$if'), reason
 	assert reason.contains('not reported'), reason
 }
@@ -189,14 +205,14 @@ fn test_ssr_refuses_a_match_that_starts_inside_an_interpolation() {
 	matches := ssr_find_matches(content, rule)
 	assert matches.len == 1, matches.len.str()
 	mut app := App{}
-	reason := app.ssr_match_refusal(content, matches[0])
+	reason := ssr_match_refusal(content, matches[0])
 	assert reason.contains('interpolation'), reason
 	// A match further into the span is refused too, not only one that starts
 	// on the interpolation's first byte.
 	deep := "module main\n\nfn main() {\n\ts := 'a\${x + f(1)}c'\n}\n"
 	deep_matches := ssr_find_matches(deep, rule)
 	assert deep_matches.len == 1, deep_matches.len.str()
-	assert app.ssr_match_refusal(deep, deep_matches[0]).contains('interpolation')
+	assert ssr_match_refusal(deep, deep_matches[0]).contains('interpolation')
 }
 
 fn test_ssr_refuses_a_plain_match_for_nothing() {
@@ -208,7 +224,7 @@ fn test_ssr_refuses_a_plain_match_for_nothing() {
 	matches := ssr_find_matches(content, rule)
 	assert matches.len == 1, matches.len.str()
 	mut app := App{}
-	assert app.ssr_match_refusal(content, matches[0]) == ''
+	assert ssr_match_refusal(content, matches[0]) == ''
 }
 
 fn test_ssr_refuses_a_match_in_a_type_position() {
@@ -220,7 +236,7 @@ fn test_ssr_refuses_a_match_in_a_type_position() {
 		start: at + 5
 		end:   at + 6
 	}
-	reason := app.ssr_match_refusal(content, hit)
+	reason := ssr_match_refusal(content, hit)
 	assert reason.contains('type position'), reason
 }
 
@@ -252,11 +268,11 @@ fn test_ssr_in_comptime_branch_skips_a_line_below_a_closed_branch() {
 	mut app := App{}
 	content := 'module main\n\nfn main() {\n\tf(1)\n}\n'
 	at := content.index('f(1)') or { return }
-	assert !app.ssr_in_comptime_branch(content, ssr_byte_to_line(content, at))
+	assert !ssr_in_comptime_branch(content, ssr_byte_to_line(content, at))
 	// The branch closed above the match, so the match is not inside it.
 	below := '\$if x ? {\n\tg(1)\n}\n\nfn h() {\n\tf(1)\n}\n'
 	line := ssr_byte_to_line(below, below.index('f(1)') or { return })
-	assert !app.ssr_in_comptime_branch(below, line)
+	assert !ssr_in_comptime_branch(below, line)
 }
 
 fn test_ssr_refuses_a_match_inside_an_else_branch() {
@@ -271,13 +287,13 @@ fn test_ssr_refuses_a_match_inside_an_else_branch() {
 	matches := ssr_find_matches(content, rule)
 	assert matches.len == 1, matches.len.str()
 	mut app := App{}
-	reason := app.ssr_match_refusal(content, matches[0])
+	reason := ssr_match_refusal(content, matches[0])
 	assert reason.contains('\$if'), reason
 	// A match below the whole pair is not in either branch.
 	below := 'module main\n\n\$if x ? {\n\tg(1)\n} \$else {\n\th(1)\n}\n\nfn k() {\n\tf(1)\n}\n'
 	below_matches := ssr_find_matches(below, rule)
 	assert below_matches.len == 1, below_matches.len.str()
-	assert app.ssr_match_refusal(below, below_matches[0]) == ''
+	assert ssr_match_refusal(below, below_matches[0]) == ''
 }
 
 fn test_ssr_refuses_a_match_inside_an_attribute() {
@@ -289,7 +305,7 @@ fn test_ssr_refuses_a_match_inside_an_attribute() {
 	matches := ssr_find_matches(content, rule)
 	assert matches.len == 1, matches.len.str()
 	mut app := App{}
-	reason := app.ssr_match_refusal(content, matches[0])
+	reason := ssr_match_refusal(content, matches[0])
 	// The refusal must name the attribute, not call it a type position: the
 	// two are refused for different reasons and only one of them is true.
 	assert reason.contains('attribute'), reason
@@ -306,7 +322,7 @@ fn test_ssr_refuses_an_annotated_field_type() {
 	matches := ssr_find_matches(content, rule)
 	assert matches.len == 1, matches.len.str()
 	mut app := App{}
-	assert app.ssr_match_refusal(content, matches[0]).contains('type position')
+	assert ssr_match_refusal(content, matches[0]).contains('type position')
 }
 
 fn test_ssr_allows_a_match_inside_an_array_literal() {
@@ -320,7 +336,7 @@ fn test_ssr_allows_a_match_inside_an_array_literal() {
 	matches := ssr_find_matches(content, rule)
 	assert matches.len == 1, matches.len.str()
 	mut app := App{}
-	assert app.ssr_match_refusal(content, matches[0]) == ''
+	assert ssr_match_refusal(content, matches[0]) == ''
 }
 
 fn test_ssr_refuses_a_match_inside_a_generic_argument() {
@@ -334,7 +350,7 @@ fn test_ssr_refuses_a_match_inside_a_generic_argument() {
 	matches := ssr_find_matches(content, rule)
 	if matches.len > 0 {
 		mut app := App{}
-		assert app.ssr_match_refusal(content, matches[0]).contains('type position')
+		assert ssr_match_refusal(content, matches[0]).contains('type position')
 	}
 }
 

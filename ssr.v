@@ -474,7 +474,7 @@ fn (mut app App) build_ssr_action(uri string, content string, selection LSPRange
 			end:   from + hit.end
 			text:  hit.text
 		}
-		reason := app.ssr_match_refusal(content, absolute)
+		reason := ssr_match_refusal(content, absolute)
 		if reason != '' {
 			app.send_log_message('ssr refused: ${reason}', 2)
 			return none
@@ -508,10 +508,11 @@ fn (mut app App) build_ssr_action(uri string, content string, selection LSPRange
 }
 
 // ssr_match_refusal reports why the match at `at` cannot be rewritten, or ''
-// when it can.
-fn (app &App) ssr_match_refusal(content string, hit SsrMatch) string {
+// when it can. It is a free function: it reads the document and nothing
+// else, as the four guards it consults do.
+fn ssr_match_refusal(content string, hit SsrMatch) string {
 	line := ssr_byte_to_line(content, hit.start)
-	if app.ssr_in_comptime_branch(content, line) {
+	if ssr_in_comptime_branch(content, line) {
 		return 'the match at line ${line + 1} is inside a `$if`/`$else` branch this build does not compile, so a wrong rewrite is not reported'
 	}
 	// A match inside an interpolation sits inside code the mask kept as
@@ -533,7 +534,7 @@ fn (app &App) ssr_match_refusal(content string, hit SsrMatch) string {
 	}
 	// A placeholder in a type position renames a type parameter of a generic
 	// declaration, which the render would write as its type argument.
-	if app.ssr_in_type_position(content, hit.start) {
+	if ssr_in_type_position(content, hit.start) {
 		return 'the match at line ${line + 1} is in a type position, which a structural replace does not write'
 	}
 	return ''
@@ -582,7 +583,7 @@ fn ssr_in_interpolation(content string, at int) bool {
 // ssr_in_comptime_branch reports whether the given line is inside a
 // compile-time branch. The compiler only builds the branch the flags
 // choose, so a match inside one is invisible to the slow check.
-fn (app &App) ssr_in_comptime_branch(content string, line int) bool {
+fn ssr_in_comptime_branch(content string, line int) bool {
 	if line <= 0 {
 		return false
 	}
@@ -647,7 +648,7 @@ fn ssr_in_attribute(content string, at int) bool {
 // after a generic argument's `[`, after a field's `:`, after a declaration's
 // `)`, or on a struct field's type. A placeholder there would be written as
 // a value where V expects a type, so the whole rule is refused instead.
-fn (app &App) ssr_in_type_position(content string, at int) bool {
+fn ssr_in_type_position(content string, at int) bool {
 	line_start := ssr_line_start_before(content, at)
 	line_end := content[line_start..].index('\n') or { content.len - line_start }
 	prefix := content[line_start..at].trim_space()

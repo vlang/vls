@@ -496,6 +496,25 @@ fn test_ssr_survives_an_inverted_selection() {
 	assert false, 'an inverted selection must not be rewritten: ${action.title}'
 }
 
+fn test_ssr_is_not_offered_to_a_client_that_asks_only_for_quick_fixes() {
+	// The mirror of the inline-variable filter: a rewrite must not reach a
+	// client that asked only for quick fixes.
+	content := 'module main\n\nfn main() {\n\tf(1) // f(\$a) ==>> g(\$a)\n}\n'
+	mut app := assists_test_app()
+	sel := LSPRange{
+		start: Position{
+			line: 3
+			char: 0
+		}
+		end:   Position{
+			line: 3
+			char: 4
+		}
+	}
+	assert assists_test_action(mut app, 'file:///tmp/ssr_action/main.v', content, sel, ['quickfix'],
+		'Structural replace (1 match)') == none, 'a client asking only for quick fixes must not be sent one'
+}
+
 fn test_ssr_rewrites_a_call_that_shares_its_line_with_the_rule() {
 	// The rule is a comment at the end of the line the selection starts on, so
 	// the code before it on that line is a match like any other.
