@@ -432,6 +432,27 @@ fn test_inline_variable_is_offered_as_a_quickfix_only() {
 // The rule's own text matches its pattern, so a region searched from the
 // selection's start offers a rewrite of the comment that carries the rule and
 // destroys it. The region starts after the rule's line instead.
+fn test_ssr_survives_an_inverted_selection() {
+	// A client may send a range whose end precedes its start. The action is not
+	// offered, and the server keeps running: an inverted slice panics.
+	content := 'module main\n\nfn main() {\n\tf(1) // f(\$a) ==>> g(\$a)\n}\n'
+	mut app := App{}
+	uri := 'file:///tmp/ssr_action/main.v'
+	app.open_files[uri] = content
+	sel := LSPRange{
+		start: Position{
+			line: 3
+			char: 0
+		}
+		end:   Position{
+			line: 1
+			char: 2
+		}
+	}
+	action := app.build_ssr_action(uri, content, sel, 'f(\$a) ==>> g(\$a)') or { return }
+	assert false, 'an inverted selection must not be rewritten: ${action.title}'
+}
+
 fn test_ssr_rewrites_a_call_that_shares_its_line_with_the_rule() {
 	// The rule is a comment at the end of the line the selection starts on, so
 	// the code before it on that line is a match like any other.

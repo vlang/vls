@@ -433,7 +433,12 @@ fn (mut app App) build_ssr_action(uri string, content string, selection LSPRange
 	lines := content.split_into_lines()
 	starts := line_start_offsets(content)
 	from := ssr_selection_start(content, starts, selection)
-	to := ssr_selection_end(content, starts, lines, selection)
+	mut to := ssr_selection_end(content, starts, lines, selection)
+	// A client may send a range whose end precedes its start. An inverted
+	// slice panics, so the region is clamped to empty instead.
+	if to < from {
+		to = from
+	}
 	region := content[from..to]
 	found := ssr_find_matches(region, rule)
 	// The rule is carried by a comment on the line the selection starts on, and
