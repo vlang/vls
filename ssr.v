@@ -244,7 +244,7 @@ fn ssr_try_match(content string, at int, rule SsrRule) ?SsrMatch {
 		if !ssr_token_matches_at(content, pos, token) {
 			return none
 		}
-		pos = ssr_skip_token(pos, token)
+		pos += token.len
 		token_index++
 	}
 	// Every placeholder the pattern writes must have bound something.
@@ -279,10 +279,6 @@ fn ssr_token_matches_at(content string, pos int, token string) bool {
 		}
 	}
 	return true
-}
-
-fn ssr_skip_token(pos int, token string) int {
-	return pos + token.len
 }
 
 fn ssr_skip_trivia(content string, pos int) int {
@@ -514,7 +510,7 @@ fn (mut app App) build_ssr_action(uri string, content string, selection LSPRange
 // ssr_match_refusal reports why the match at `at` cannot be rewritten, or ''
 // when it can.
 fn (app &App) ssr_match_refusal(content string, hit SsrMatch) string {
-	line := byte_to_line(content, hit.start)
+	line := ssr_byte_to_line(content, hit.start)
 	if app.ssr_in_comptime_branch(content, line) {
 		return 'the match at line ${line + 1} is inside a `$if`/`$else` branch this build does not compile, so a wrong rewrite is not reported'
 	}
@@ -547,9 +543,16 @@ fn (app &App) ssr_match_refusal(content string, hit SsrMatch) string {
 // interpolation. A V string literal may not span a line, so scanning the
 // offset's own line is enough to tell: the quote that opened the string and
 // the brace depth inside it decide where the interpolation runs.
-fn ssr_in_interpolation(content string, at int) bool {
+// ssr_line_start_before is the byte offset the line holding `at` begins at, as
+// the newline before it. The three guards below each read the offset's own
+// line, so they share it rather than each searching for the newline.
+fn ssr_line_start_before(content string, at int) int {
 	newline := content[..at].last_index('\n') or { -1 }
-	line_start := if newline < 0 { 0 } else { newline + 1 }
+	return if newline < 0 { 0 } else { newline + 1 }
+}
+
+fn ssr_in_interpolation(content string, at int) bool {
+	line_start := ssr_line_start_before(content, at)
 	mut quote := u8(0)
 	mut depth := 0
 	mut i := line_start
@@ -623,9 +626,8 @@ fn (app &App) ssr_in_comptime_branch(content string, line int) bool {
 // declaration is compiled, so a rewrite inside one is not a text change
 // the slow check would report.
 fn ssr_in_attribute(content string, at int) bool {
-	newline := content[..at].last_index('\n') or { -1 }
 	mut i := at - 1
-	for i > newline {
+	for i >= ssr_line_start_before(content, at) {
 		c := content[i]
 		if c == `[` {
 			return i > 0 && content[i - 1] == `@`
@@ -646,8 +648,7 @@ fn ssr_in_attribute(content string, at int) bool {
 // `)`, or on a struct field's type. A placeholder there would be written as
 // a value where V expects a type, so the whole rule is refused instead.
 fn (app &App) ssr_in_type_position(content string, at int) bool {
-	newline := content[..at].last_index('\n') or { -1 }
-	line_start := if newline < 0 { 0 } else { newline + 1 }
+	line_start := ssr_line_start_before(content, at)
 	line_end := content[line_start..].index('\n') or { content.len - line_start }
 	prefix := content[line_start..at].trim_space()
 	rest := content[at..line_start + line_end].trim_space()
@@ -764,8 +765,10 @@ fn ssr_selection_end(content string, starts []int, lines []string, selection LSP
 	return ssr_position_to_byte(content, starts, selection.end)
 }
 
-// byte_to_line returns the 0-based line of a byte offset.
-fn byte_to_line(content string, at int) int {
+// ssr_byte_to_line returns the 0-based line of a byte offset, for the callers
+// that hold the document rather than a starts array. Where the array is at
+// hand, byte_to_line_number is the one that answers.
+fn ssr_byte_to_line(content string, at int) int {
 	mut line := 0
 	for i in 0 .. at {
 		if content[i] == `\n` {
@@ -778,8 +781,8 @@ fn byte_to_line(content string, at int) int {
 // ssr_position_at converts an absolute byte offset into an LSP position in the
 // negotiating client's encoding.
 fn ssr_position_at(content string, starts []int, offset int, enc PositionEncoding) Position {
-	line := byte_to_line(content, offset)
-	return ssr_byte_to_position(content, starts, offset, line, enc)
+	return ssr_byte_to_position(content, starts, offset, byte_to_line_number(starts, offset),
+		enc)
 }
 
 // ssr_byte_to_position converts an absolute byte offset into an LSP position

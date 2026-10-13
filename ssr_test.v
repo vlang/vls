@@ -252,10 +252,10 @@ fn test_ssr_in_comptime_branch_skips_a_line_below_a_closed_branch() {
 	mut app := App{}
 	content := 'module main\n\nfn main() {\n\tf(1)\n}\n'
 	at := content.index('f(1)') or { return }
-	assert !app.ssr_in_comptime_branch(content, byte_to_line(content, at))
+	assert !app.ssr_in_comptime_branch(content, ssr_byte_to_line(content, at))
 	// The branch closed above the match, so the match is not inside it.
 	below := '\$if x ? {\n\tg(1)\n}\n\nfn h() {\n\tf(1)\n}\n'
-	line := byte_to_line(below, below.index('f(1)') or { return })
+	line := ssr_byte_to_line(below, below.index('f(1)') or { return })
 	assert !app.ssr_in_comptime_branch(below, line)
 }
 
@@ -353,9 +353,9 @@ fn test_ssr_matches_across_a_line_comment_between_the_pattern_tokens() {
 }
 
 fn test_ssr_byte_to_line_reports_the_holding_line() {
-	assert byte_to_line('', 0) == 0
-	assert byte_to_line('a\nb\nc', 4) == 2
-	assert byte_to_line('a\nb\nc', 0) == 0
+	assert ssr_byte_to_line('', 0) == 0
+	assert ssr_byte_to_line('a\nb\nc', 4) == 2
+	assert ssr_byte_to_line('a\nb\nc', 0) == 0
 }
 
 fn test_ssr_position_round_trips_a_byte_offset() {
@@ -364,7 +364,7 @@ fn test_ssr_position_round_trips_a_byte_offset() {
 	mut app := App{}
 	for offset in [0, 3, 4, 8, 10] {
 		position := ssr_position_at(content, starts, offset, .utf16)
-		assert position.line == byte_to_line(content, offset), 'offset ${offset}'
+		assert position.line == ssr_byte_to_line(content, offset), 'offset ${offset}'
 	}
 	_ = app
 }
