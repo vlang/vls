@@ -432,6 +432,49 @@ fn test_inline_variable_is_offered_as_a_quickfix_only() {
 // The rule's own text matches its pattern, so a region searched from the
 // selection's start offers a rewrite of the comment that carries the rule and
 // destroys it. The region starts after the rule's line instead.
+fn test_ssr_survives_malformed_selection_positions() {
+	// A client sends whatever it likes: a negative line or character, or one
+	// past the end. None of them may panic the server, and an action that is
+	// offered despite them must still stay inside the document.
+	content := 'module main\n\nfn main() {\n\tf(1) // f(\$a) ==>> g(\$a)\n\tf(2)\n}\n'
+	uri := 'file:///tmp/ssr_action/main.v'
+	mut offered := 0
+	mut checked := 0
+	for enc in [PositionEncoding.utf8, PositionEncoding.utf16] {
+		for line in [-1, 0, 99] {
+			for chr in [-1, 0, 999] {
+				mut app := App{}
+				app.position_encoding = enc
+				app.open_files[uri] = content
+				sel := LSPRange{
+					start: Position{
+						line: line
+						char: chr
+					}
+					end:   Position{
+						line: line
+						char: chr
+					}
+				}
+				if action := app.build_ssr_action(uri, content, sel, 'f(\$a) ==>> g(\$a)') {
+					offered++
+					edit := action.edit or { continue }
+					edits := edit.changes[uri] or { continue }
+					for e in edits {
+						checked++
+						assert e.new_text != '', 'an edit must replace with something'
+						assert e.range.start.line >= 0 && e.range.end.line >= 0
+						assert e.range.start.char >= 0 && e.range.end.char >= 0
+						assert e.range.start.line <= 5 && e.range.end.line <= 5, 'an edit must stay inside the document'
+					}
+				}
+			}
+		}
+	}
+	assert offered >= 1, 'the matrix offered nothing, so it tested nothing'
+	assert checked >= 1, 'no edit was inspected'
+}
+
 fn test_ssr_survives_an_inverted_selection() {
 	// A client may send a range whose end precedes its start. The action is not
 	// offered, and the server keeps running: an inverted slice panics.
