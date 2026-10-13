@@ -172,13 +172,17 @@ what actually blocks a hover).
   `template`, with `$name` placeholders carrying the text they
   matched. Every match is inside the selection, and the preview is
   the edit set itself. The rule is refused as a whole, naming the
-  reason, when any match sits in a `$if` branch, spans a `${...}`
-  interpolation, or starts where V writes a type — a struct field's
-  type, a generic argument, an annotation, or a return type. The
-  placeholder's own precedence decides parentheses in the render,
-  because there is no parser to re-read the result with.
-  Deliberately absent: typed wildcards, rules that span files, and
-  declaration-shape rewrites.
+  reason, when any match sits in a `$if`/`$else` branch (where
+  `} $else {` closes one branch and opens the next on a line), starts
+  inside or spans a `${...}` interpolation, sits inside an `@[...]`
+  attribute, or starts where V writes a type — a struct field's type
+  (an `@[json: ...]` annotation after it included), a generic
+  argument, an annotation, or a return type. An escaped `\${` and a
+  backtick string hold text rather than an interpolation, so a match
+  there is an ordinary one. The placeholder's own precedence decides
+  parentheses in the render, because there is no parser to re-read
+  the result with. Deliberately absent: typed wildcards, rules that
+  span files, and declaration-shape rewrites.
 
 ## Phase 4 — build / config UX: DONE
 
