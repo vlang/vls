@@ -432,20 +432,34 @@ fn (mut app App) build_ssr_action(uri string, content string, selection LSPRange
 	}
 	lines := content.split_into_lines()
 	starts := line_start_offsets(content)
-	// The rule is carried by a comment on the line the selection starts on, so
-	// that comment is inside the selected region — and the rule's own text
-	// matches its pattern. The region searched therefore starts after the
-	// rule's line, which is also where the rewrite is meant to apply.
+	from := ssr_selection_start(content, starts, selection)
+	to := ssr_selection_end(content, starts, lines, selection)
+	region := content[from..to]
+	found := ssr_find_matches(region, rule)
+	// The rule is carried by a comment on the line the selection starts on, and
+	// that comment's own text matches its pattern. A match reaching into the
+	// comment is dropped, so the rule is never a rewrite of itself — and the
+	// code before it on the same line is rewritten like any other.
 	rule_line_end := if selection.start.line + 1 < starts.len {
 		starts[selection.start.line + 1]
 	} else {
 		content.len
 	}
-	selection_from := ssr_selection_start(content, starts, selection)
-	from := if selection_from > rule_line_end { selection_from } else { rule_line_end }
-	to := ssr_selection_end(content, starts, lines, selection)
-	region := content[from..to]
-	matches := ssr_find_matches(region, rule)
+	mut comment_start := -1
+	if selection.start.line >= 0 && selection.start.line < lines.len {
+		if at := lines[selection.start.line].index('//') {
+			comment_start = starts[selection.start.line] + at
+		}
+	}
+	mut matches := []SsrMatch{cap: found.len}
+	for hit in found {
+		abs_start := from + hit.start
+		abs_end := from + hit.end
+		if comment_start >= 0 && abs_start < rule_line_end && abs_end > comment_start {
+			continue
+		}
+		matches << hit
+	}
 	if matches.len == 0 {
 		return none
 	}

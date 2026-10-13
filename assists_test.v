@@ -432,6 +432,35 @@ fn test_inline_variable_is_offered_as_a_quickfix_only() {
 // The rule's own text matches its pattern, so a region searched from the
 // selection's start offers a rewrite of the comment that carries the rule and
 // destroys it. The region starts after the rule's line instead.
+fn test_ssr_rewrites_a_call_that_shares_its_line_with_the_rule() {
+	// The rule is a comment at the end of the line the selection starts on, so
+	// the code before it on that line is a match like any other.
+	content := 'module main\n\nfn main() {\n\tf(1) // f(\$a) ==>> g(\$a)\n\tf(2)\n}\n'
+	mut app := assists_test_app()
+	sel := LSPRange{
+		start: Position{
+			line: 3
+			char: 0
+		}
+		end:   Position{
+			line: 4
+			char: 5
+		}
+	}
+	action := assists_test_action(mut app, 'file:///tmp/ssr_action/main.v', content, sel, [code_action_kind_refactor],
+		'Structural replace (2 matches)') or {
+		assert false, 'the call before the rule on its own line was not offered'
+		return
+	}
+	edits := (action.edit or { WorkspaceEdit{} }).changes['file:///tmp/ssr_action/main.v'] or {
+		assert false, 'the action carries no edit for its document'
+		[]TextEdit{}
+	}
+	assert edits.len == 2, edits.len.str()
+	assert edits[0].range.start.line == 3, edits[0].range.start.line.str()
+	assert edits[1].range.start.line == 4, edits[1].range.start.line.str()
+}
+
 fn test_ssr_does_not_rewrite_the_comment_that_carries_the_rule() {
 	content := '// f(\$a) ==>> g(\$a)\nmodule main\n\nfn main() {\n}\n'
 	mut app := assists_test_app()
