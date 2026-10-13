@@ -497,7 +497,7 @@ fn (mut app App) build_ssr_action(uri string, content string, selection LSPRange
 fn (app &App) ssr_match_refusal(content string, hit SsrMatch) string {
 	line := byte_to_line(content, hit.start)
 	if app.ssr_in_comptime_branch(content, line) {
-		return 'the match at line ${line + 1} is inside a `$if` branch this build does not compile, so a wrong rewrite is not reported'
+		return 'the match at line ${line + 1} is inside a `$if`/`$else` branch this build does not compile, so a wrong rewrite is not reported'
 	}
 	// A match inside an interpolation sits inside code the mask kept as
 	// code; the render cannot know how to write it back into the string.

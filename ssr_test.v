@@ -101,6 +101,60 @@ fn test_ssr_leaves_a_balanced_binding_unwrapped() {
 	assert matches[0].text == 'g(h(1))', matches[0].text
 }
 
+fn test_ssr_wraps_a_binding_that_a_template_operator_would_split() {
+	rule := ssr_parse_rule('f($a) ==>> g($a + 1)') or {
+		assert false, 'invalid rule: ${err}'
+		return
+	}
+	// The template adds to the binding, so a binding the operators run
+	// through is wrapped or the render's meaning changes. The spacing is
+	// tight because the tokenizer drops the rule's own; `v fmt` unwinds it,
+	// and the wrap is what keeps the meaning.
+	matches := ssr_find_matches('f(1 + 2)', rule)
+	assert matches.len == 1
+	assert matches[0].text == 'g((1 + 2)+1)', matches[0].text
+}
+
+fn test_ssr_leaves_a_primary_binding_unwrapped_before_an_operator() {
+	rule := ssr_parse_rule('f($a) ==>> g($a + 1)') or {
+		assert false, 'invalid rule: ${err}'
+		return
+	}
+	// A single name is already a primary, so wrapping it would only add
+	// parentheses the rule's author never wrote.
+	matches := ssr_find_matches('f(x)', rule)
+	assert matches.len == 1
+	assert matches[0].text == 'g(x+1)', matches[0].text
+}
+
+fn test_ssr_allows_a_match_after_an_escaped_interpolation_marker() {
+	rule := ssr_parse_rule('f($a) ==>> g($a)') or {
+		assert false, 'invalid rule: ${err}'
+		return
+	}
+	// `\${` is an escaped dollar: the string holds those characters rather
+	// than an interpolation, so a match there is an ordinary one. Refusing it
+	// would make a rewrite inside an escaped string impossible.
+	content := "module main\n\nfn main() {\n\ts := 'a\\\${f(1)}c'\n}\n"
+	matches := ssr_find_matches(content, rule)
+	assert matches.len == 1, matches.len.str()
+	mut app := App{}
+	assert app.ssr_match_refusal(content, matches[0]) == ''
+}
+
+fn test_ssr_allows_a_match_inside_a_backtick_string() {
+	rule := ssr_parse_rule('f($a) ==>> g($a)') or {
+		assert false, 'invalid rule: ${err}'
+		return
+	}
+	// A backtick string is raw, so `${` is its text and not an interpolation.
+	content := 'module main\n\nfn main() {\n\ts := `a\${f(1)}c`\n}\n'
+	matches := ssr_find_matches(content, rule)
+	assert matches.len == 1, matches.len.str()
+	mut app := App{}
+	assert app.ssr_match_refusal(content, matches[0]) == ''
+}
+
 fn test_ssr_does_not_match_across_an_identifier_boundary() {
 	rule := ssr_parse_rule('f($a) ==>> g($a)') or {
 		assert false, 'invalid rule: ${err}'
