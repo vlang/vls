@@ -19,6 +19,10 @@
       "type": "boolean",
       "default": true,
       "description": "Whether the editor runs compile-time diagnostics for this project's files."
+    },
+    "coverageDirectory": {
+      "type": "string",
+      "description": "A coverage directory a test run recorded with `v -coverage`. It is what the generate-test code actions read to tell which functions are untested."
     }
   }
 }

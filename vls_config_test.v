@@ -412,3 +412,79 @@ fn test_config_opening_a_file_leaves_the_defines_of_a_check_alone() {
 	assert app.check_defines(source) == ['-d', 'bespin'], 'an open reads the same configuration a check does'
 	assert app.inlay_hints_enabled, 'a file that sets only defines leaves the switches alone'
 }
+
+fn test_config_the_coverage_directory_comes_from_the_project_file() {
+	root := config_test_project('coverage')
+	defer {
+		os.rmdir_all(root) or {}
+	}
+	directory := os.join_path(root, 'vcov')
+	config_test_write(os.join_path(root, 'vls.json'), '{"coverageDirectory":"${directory.replace('\\', '\\\\')}"}')
+	source := os.join_path(root, 'main.v')
+	config_test_write(source, 'module main\n\nfn main() {}\n')
+	mut app := config_test_app(root)
+	assert app.coverage_directory_for_path(source) == directory
+}
+
+fn test_config_the_editor_coverage_directory_wins_over_the_project_file() {
+	root := config_test_project('coverageeditor')
+	defer {
+		os.rmdir_all(root) or {}
+	}
+	from_project := os.join_path(root, 'vcov')
+	from_editor := os.join_path(root, 'vcov-editor')
+	config_test_write(os.join_path(root, 'vls.json'),
+		'{"coverageDirectory":"${from_project.replace('\\', '\\\\')}"}')
+	source := os.join_path(root, 'main.v')
+	config_test_write(source, 'module main\n\nfn main() {}\n')
+	mut app := config_test_app(root)
+	// The payload is JSON the way an editor sends it, so it is encoded from a
+	// struct rather than interpolated into a literal: a Windows path holds
+	// backslashes that a literal would have to escape by hand.
+	editor_payload := json2.encode(EditorCoverageDirectoryParams{
+		settings: EditorCoverageDirectorySettings{
+			vls: CoverageDirectorySetting{
+				coverage_directory: from_editor
+			}
+		}
+	})
+	app.apply_editor_configuration(editor_payload)
+	assert app.coverage_directory_for_path(source) == from_editor
+}
+
+fn test_config_a_project_without_a_coverage_directory_reports_none() {
+	root := config_test_project('nocoverage')
+	defer {
+		os.rmdir_all(root) or {}
+	}
+	source := os.join_path(root, 'main.v')
+	config_test_write(source, 'module main\n\nfn main() {}\n')
+	mut app := config_test_app(root)
+	assert app.coverage_directory_for_path(source) == ''
+}
+
+fn test_config_an_empty_coverage_directory_is_not_one() {
+	root := config_test_project('emptycoverage')
+	defer {
+		os.rmdir_all(root) or {}
+	}
+	config_test_write(os.join_path(root, 'vls.json'), '{"coverageDirectory":"   "}')
+	source := os.join_path(root, 'main.v')
+	config_test_write(source, 'module main\n\nfn main() {}\n')
+	mut app := config_test_app(root)
+	assert app.coverage_directory_for_path(source) == ''
+}
+
+// EditorCoverageDirectoryParams is the shape an editor's configuration payload
+// has for the coverage directory: nested under `settings.vls`, like the switches.
+struct EditorCoverageDirectoryParams {
+	settings EditorCoverageDirectorySettings
+}
+
+struct EditorCoverageDirectorySettings {
+	vls CoverageDirectorySetting
+}
+
+struct CoverageDirectorySetting {
+	coverage_directory ?string @[json: 'coverageDirectory']
+}

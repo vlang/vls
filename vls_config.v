@@ -34,9 +34,10 @@ const vls_defines_env_var = 'VLS_DEFINES'
 // leaves the decision to the tier below it.
 struct EditorSettings {
 mut:
-	defines     []string
-	inlay_hints ?bool
-	diagnostics ?bool
+	defines            []string
+	inlay_hints        ?bool
+	diagnostics        ?bool
+	coverage_directory ?string
 }
 
 // EditorDefinesParams is the shape an editor's configuration payload has: the
@@ -60,18 +61,20 @@ struct EditorDefines {
 // whole file.
 struct VlsProjectFile {
 mut:
-	defines     []string
-	inlay_hints ?bool @[json: 'inlayHints']
-	diagnostics ?bool
+	defines            []string
+	inlay_hints        ?bool @[json: 'inlayHints']
+	diagnostics        ?bool
+	coverage_directory ?string @[json: 'coverageDirectory']
 }
 
 // VlsProjectConfig is the merged result for one project root: the argument pairs
 // a check runs with, and the switches the feature handlers apply.
 struct VlsProjectConfig {
 mut:
-	defines     []string
-	inlay_hints ?bool
-	diagnostics ?bool
+	defines            []string
+	inlay_hints        ?bool
+	diagnostics        ?bool
+	coverage_directory ?string
 }
 
 // VlsConfigCacheEntry is one project root's configuration and when it was read.
@@ -123,6 +126,9 @@ fn (mut app App) apply_editor_configuration(params_json string) {
 	if enabled := resolved.diagnostics {
 		editor.diagnostics = enabled
 	}
+	if directory := resolved.coverage_directory {
+		editor.coverage_directory = directory
+	}
 	// The editor tier is part of every merge, so the results cached for the
 	// project roots are the ones computed without it.
 	store.set_editor_settings(editor)
@@ -171,6 +177,18 @@ fn (mut app App) check_defines(path string) []string {
 
 // apply_project_settings writes the switches of `config` into the App fields the
 // feature handlers read. A tier that says nothing leaves the field as it is.
+// coverage_directory_for_path returns the coverage directory the configuration
+// names for the project root that owns `path`. It is where an editor's own
+// coverage run recorded its counters, which is what a test-generation action
+// reads instead of running a second one.
+fn (mut app App) coverage_directory_for_path(path string) string {
+	config := app.project_config_for_path(path)
+	if directory := config.coverage_directory {
+		return directory
+	}
+	return ''
+}
+
 fn (mut app App) apply_project_settings(config VlsProjectConfig) {
 	if enabled := config.inlay_hints {
 		app.inlay_hints_enabled = enabled
@@ -354,6 +372,15 @@ fn merge_config_tiers(editor EditorSettings, file VlsProjectFile, env []string) 
 	} else if enabled := file.diagnostics {
 		config.diagnostics = enabled
 	}
+	if directory := editor.coverage_directory {
+		if directory.trim_space() != '' {
+			config.coverage_directory = directory.trim_space()
+		}
+	} else if directory := file.coverage_directory {
+		if directory.trim_space() != '' {
+			config.coverage_directory = directory.trim_space()
+		}
+	}
 	return config
 }
 
@@ -366,6 +393,9 @@ fn config_signature(config VlsProjectConfig) string {
 	}
 	if enabled := config.diagnostics {
 		parts << 'diagnostics:${enabled}'
+	}
+	if directory := config.coverage_directory {
+		parts << 'coverageDirectory:${directory}'
 	}
 	return parts.join('|')
 }
