@@ -1102,6 +1102,70 @@ fn restore_diag_cache_dir(previous string) {
 	}
 }
 
+fn test_diag_code_sketch_drops_comments_and_keeps_lines_and_strings() {
+	// The sketch is cache-key material: a comment's words must not reach it,
+	// and the newlines a comment held must, because every line under them
+	// moves with them.
+	for content in [
+		'x := 1 // note',
+		'// leading\nfn main() {\n\t// inner\n\tprintln(1)\n}\n',
+		'/* block\n   spans */\nx := 2\n',
+	] {
+		sketch := diag_code_sketch(content)
+		assert sketch.count('\n') == content.count('\n'), 'the sketch of `${content}` keeps its lines'
+	}
+	assert !diag_code_sketch('// dropped\np := 1 // also\n').contains('dropped')
+	assert !diag_code_sketch('/* gone */\np := 1\n').contains('gone')
+	assert diag_code_sketch('/* gone */\np := 1\n').contains('p := 1')
+	// A string's body is kept, so an interpolation inside one still counts.
+	assert diag_code_sketch("s := 'a\${b}c' // note").contains('\${b}')
+	// `*/` inside a string does not close a block comment.
+	assert diag_code_sketch('x := "*/" /* real */\n').contains('"*/"')
+	// Rewriting a comment's words changes nothing; adding a line does.
+	with_words := 'module main\n\nfn main() {\n\tprintln(1) // a note\n}\n'
+	longer := 'module main\n\nfn main() {\n\tprintln(1) // a considerably longer note\n}\n'
+	assert diag_code_sketch(with_words) == diag_code_sketch(longer), 'a comment edit changed the sketch'
+	added := 'module main\n\n// a note\nfn main() {\n\tprintln(1)\n}\n'
+	assert diag_code_sketch(with_words) != diag_code_sketch(added), 'a line added was treated as free'
+}
+
+fn test_diag_fingerprint_ignores_a_comment_edit_and_not_an_interpolation_one() {
+	root := os.join_path(os.temp_dir(), 'vls_fpmask_${os.getpid()}_${time.now().unix_nano()}')
+	interop_test_must_mkdir_all(root)
+	main_file := os.join_path(root, 'main.v')
+	uri := path_to_uri(main_file)
+	base := "module main\n\nfn main() {\n\ts := 'a\${x}b' // note\n\tprintln(s)\n}\n"
+	interop_test_must_write_file(main_file, base)
+	mut app := App{
+		open_files: {
+			uri: base
+		}
+	}
+	before := app.program_content_fingerprint(root)
+	assert before == app.program_content_fingerprint(root), 'the fingerprint is deterministic'
+	// Rewriting the words of a comment cannot change a diagnostic, and does
+	// not change the fingerprint, so the cached answer is reused.
+	commented := base.replace('// note', '// a much longer note about the same line')
+	assert commented != base
+	assert commented.count('\n') == base.count('\n')
+	mut with_comment := App{
+		open_files: {
+			uri: commented
+		}
+	}
+	assert with_comment.program_content_fingerprint(root) == before, 'a comment edit changed the fingerprint'
+	// Editing inside an interpolation is editing code, and must not be free.
+	interpolated := base.replace('x}b', 'bad_fn()}b')
+	assert interpolated != base
+	mut with_interpolation := App{
+		open_files: {
+			uri: interpolated
+		}
+	}
+	assert with_interpolation.program_content_fingerprint(root) != before, 'an edit inside an interpolation was treated as free'
+	os.rmdir_all(root) or {}
+}
+
 fn test_program_content_fingerprint_tracks_buffers_and_siblings() {
 	root := os.join_path(os.temp_dir(), 'vls_fp_${os.getpid()}_${time.now().unix_nano()}')
 	interop_test_must_mkdir_all(root)

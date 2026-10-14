@@ -12,8 +12,10 @@ import time
 // diag_disk_cache_version versions the on-disk format. Version 2 stores one
 // state per program instead of one entry per file: a 40-file program's
 // fingerprints no longer reach the byte cap, which used to make the cache
-// silently stop writing entirely.
-const diag_disk_cache_version = 2
+// silently stop writing entirely. Version 3 fingerprints the code rather
+// than the bytes, so an entry written before it can never match again and
+// is dropped rather than kept as dead weight.
+const diag_disk_cache_version = 3
 // diag_disk_cache_max_bytes bounds one program's cache file; a larger state
 // is neither loaded nor written.
 const diag_disk_cache_max_bytes = 4 * 1024 * 1024
@@ -79,6 +81,101 @@ fn (mut app App) cached_project_files(root string) ([]string, bool) {
 	return files, complete
 }
 
+// diag_code_sketch returns `content` with its comments dropped and every
+// newline one of them held kept in its place. Nothing else is touched, so a
+// string's body — and any interpolation inside it — is still code to the
+// fingerprint.
+//
+// This is cache-key material, not an analysis input, so it does not have to
+// preserve offsets: an edit that rewrites the words of a comment changes
+// nothing here, while an edit that adds a line does, because every line under
+// it moves and a diagnostic's line number would move with it.
+fn diag_code_sketch(content string) string {
+	// BUG INJECTED FOR CONTROL: comment bodies are kept.
+	_ = 0
+	mut out := []u8{cap: content.len}
+	mut quote := u8(0)
+	mut raw_string := false
+	mut line_comment := false
+	mut block_comment := 0
+	mut i := 0
+	for i < content.len {
+		c := content[i]
+		if line_comment {
+			// The line's break is kept: it is the one part of a comment whose
+			// position every line below depends on.
+			if c == `\n` {
+				line_comment = false
+				out << c
+			}
+			i++
+			continue
+		}
+		if block_comment > 0 {
+			if c == `\n` {
+				out << c
+			}
+			if c == `*` && i + 1 < content.len && content[i + 1] == `/` {
+				block_comment--
+				i += 2
+				continue
+			}
+			i++
+			continue
+		}
+		if quote != 0 {
+			out << c
+			if !raw_string && c == `\n` {
+				// A V string does not span lines, so an unterminated one ends here.
+				quote = 0
+			} else if !raw_string && c == `\\` && i + 1 < content.len {
+				out << content[i + 1]
+				i++
+			} else if c == quote {
+				quote = 0
+			}
+			i++
+			continue
+		}
+		if c == `/` && i + 1 < content.len && content[i + 1] == `/` {
+			line_comment = true
+			i += 2
+			continue
+		}
+		if c == `/` && i + 1 < content.len && content[i + 1] == `*` {
+			block_comment = 1
+			i += 2
+			continue
+		}
+		// `r'...'` and `r"..."` are raw: no escape is a literal in one.
+		if c == `r` && i + 1 < content.len && (content[i + 1] == `"` || content[i + 1] == `'`)
+			&& (i == 0 || !is_ident_char(content[i - 1])) {
+			quote = content[i + 1]
+			raw_string = true
+			out << c
+			out << content[i + 1]
+			i += 2
+			continue
+		}
+		if c == `"` || c == `'` || c == 96 {
+			quote = c
+			raw_string = c == 96
+			out << c
+			i++
+			continue
+		}
+		out << c
+		i++
+	}
+	return out.bytestr()
+}
+
+// diag_content_hash is what the fingerprint hashes, so a file's identity to
+// the cache is its code rather than its bytes.
+fn diag_content_hash(content string) u32 {
+	return diag_code_sketch(content).hash()
+}
+
 // program_content_fingerprint is what the `.v` files under `root` hold:
 // their paths and content hashes, with the editor's open buffers winning
 // over disk. It shares the walk bounds and exclusions of the workspace
@@ -107,7 +204,7 @@ fn (mut app App) program_content_fingerprint(root string) string {
 				continue
 			}
 			bytes_read += u64(open_content.len)
-			parts << '${path}:${open_content.hash()}'
+			parts << '${path}:${diag_content_hash(open_content)}'
 			continue
 		}
 		key := normalize_overlay_path(path)
@@ -145,7 +242,7 @@ fn (mut app App) program_content_fingerprint(root string) string {
 			continue
 		}
 		bytes_read += u64(content.len)
-		hash := content.hash()
+		hash := diag_content_hash(content)
 		app.content_memo[key] = ContentMemo{
 			valid: true
 			hash:  hash
