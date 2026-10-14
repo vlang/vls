@@ -86,15 +86,20 @@ needs the V1 compatibility compiler, which this host cannot build
   and dead-end stub compilers assert probed mode, diagnostics,
   and mode stability.
 
-## Phase 1 — foundation (remaining)
+## Phase 1 — what remains
 
-- Split diagnostics: fast (parse + open-file errors, ~100ms
-  debounce) vs slow (workspace check after ~1s idle).
-- Persistent export-summary cache across restarts; only
-  re-check importers whose summary changed.
-- Per-request cancellation + completion budget (~100-200ms)
-  that shrinks scope instead of failing.
-- Compat matrix test: old/mid/new compiler stubs.
+Of the four items this carried, three are done and were recorded
+above: the fast/slow split is Phase 1a, the compat matrix is Phase
+1c, and per-request cancellation plus the completion budget are in
+the tree — a bounded set of cancelled request ids checked by the
+handlers and `call_hierarchy`, `scheduler.cancel`, and tests. What
+stands is the one item the fingerprint cache above does not cover:
+
+- **Export-summary cache with importer-only re-check.** The cache
+  reuses an answer for a program that has not changed; it does not
+  avoid re-checking a program whose *importers* changed exports
+  only. That is real incrementality and it is the gap COMPARISON.md
+  records against export summaries, Salsa and per-module units.
 
 ## Optimization pass (2026-10-10)
 
@@ -146,7 +151,6 @@ what actually blocks a hover).
 - Granular inlay-hint toggles, conservative defaults: DONE —
   `vls.inlayHints.variableTypes` / `.parameterNames`, both
   default on, runtime toggle, no restart.
-- Richer hover (const values, methods, doc links).
 
 ## Phase 3 — refactors
 
