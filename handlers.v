@@ -8374,6 +8374,17 @@ fn (mut app App) handle_code_action(request Request) Response {
 			if action := app.build_ssr_action(uri, content, params.range, rule) {
 				actions << action
 			}
+		} else {
+			// A rule the user wrote somewhere else in the file is the one case
+			// where offering nothing silently is a dead end, so the log says
+			// where the rule is and what it needs. A file with no rule at all
+			// stays quiet, so every ordinary request costs nothing.
+			rule_line := ssr_rule_line(content)
+			if rule_line >= 0 {
+				rule_at := rule_line + 1
+				app.send_log_message('structural replace: the rule is on line ${rule_at}, and the selection must start on it',
+					2)
+			}
 		}
 	}
 

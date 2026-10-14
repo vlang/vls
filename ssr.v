@@ -817,6 +817,20 @@ fn ssr_position_to_byte(content string, starts []int, position Position) int {
 	return byte_offset
 }
 
+// ssr_rule_line returns the 0-based line the file writes a
+// `pattern ==>> template` rule on, or -1 when it writes none. It is what
+// turns "no action offered" into a sentence when the user did write a rule
+// but started the selection somewhere else.
+fn ssr_rule_line(content string) int {
+	for i, line in content.split_into_lines() {
+		hash := line.index('//') or { continue }
+		if line[hash + 2..].contains('==>>') {
+			return i
+		}
+	}
+	return -1
+}
+
 // ssr_rule_at_selection returns the `pattern ==>> template` rule written on
 // the line the selection starts on. A rule is written as a comment, as
 // rust-analyzer's SSR accept one in a comment; a selection that starts on no

@@ -496,6 +496,50 @@ fn test_ssr_survives_an_inverted_selection() {
 	assert false, 'an inverted selection must not be rewritten: ${action.title}'
 }
 
+fn test_ssr_names_the_line_a_rule_written_elsewhere_sits_on() {
+	// A rule written somewhere else in the file is the one case where offering
+	// nothing is a dead end: the log says where the rule is.
+	content := 'module main\n\n// f(\$a) ==>> g(\$a)\nfn main() {\n\tf(1)\n}\n'
+	mut app := assists_test_app()
+	app.capture_output = true
+	sel := LSPRange{
+		start: Position{
+			line: 4
+			char: 1
+		}
+		end:   Position{
+			line: 4
+			char: 4
+		}
+	}
+	assert assists_test_action(mut app, 'file:///tmp/ssr_action/main.v', content, sel, [code_action_kind_refactor],
+		'Structural replace (1 match)') == none, 'a rule on another line must not be read'
+	logged := app.captured_output.join('')
+	assert logged.contains('structural replace'), logged
+	assert logged.contains('line 3'), logged
+}
+
+fn test_ssr_stays_quiet_when_the_file_carries_no_rule() {
+	// Every ordinary codeAction request must cost nothing, so a file with no
+	// rule anywhere is answered without a word.
+	content := 'module main\n\nfn main() {\n\tf(1)\n}\n'
+	mut app := assists_test_app()
+	app.capture_output = true
+	sel := LSPRange{
+		start: Position{
+			line: 3
+			char: 1
+		}
+		end:   Position{
+			line: 3
+			char: 4
+		}
+	}
+	assert assists_test_action(mut app, 'file:///tmp/ssr_action/main.v', content, sel, [code_action_kind_refactor],
+		'Structural replace (1 match)') == none, 'no rule, no action'
+	assert app.captured_output.len == 0, app.captured_output.join('')
+}
+
 fn test_ssr_is_not_offered_to_a_client_that_asks_only_for_quick_fixes() {
 	// The mirror of the inline-variable filter: a rewrite must not reach a
 	// client that asked only for quick fixes.
