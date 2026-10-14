@@ -4092,6 +4092,53 @@ fn test_handle_rename_refuses_incomplete_oversized_sibling_index() {
 	assert (resp.result as string) == 'null'
 }
 
+fn test_rename_refuses_an_unsaved_oversized_buffer() {
+	// The on-disk oversized file above has a file to point at; a buffer that
+	// was never saved has none, and its skipped entry must still stop the
+	// rename rather than let it silently omit the file's references.
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'unsaved_oversized')
+	must_mkdir_all(test_dir)
+	test_file := os.join_path(test_dir, 'main.v')
+	content := 'module main\n\nfn target() {\n\ttarget()\n}\n'
+	must_write_file(test_file, content)
+	unsaved := os.join_path(test_dir, 'unsaved.v')
+	uri := path_to_uri(test_file)
+	unsaved_uri := path_to_uri(unsaved)
+	assert !os.exists(unsaved), 'the unsaved file must not exist on disk'
+	app.open_files[uri] = content
+	app.open_files[unsaved_uri] = 'x'.repeat(int(index_max_file_bytes) + 1)
+	app.reindex_uri(unsaved_uri)
+	// The state the rename must read is asserted before running it, since the
+	// handler re-indexes and may clear what it needs.
+	assert app.index_scope_for_uri(uri).dir != ''
+	assert !app.index_is_complete()
+	assert !app.index_is_complete_for_scope(app.index_scope_for_uri(uri))
+
+	resp := app.handle_rename(Request{
+		id:     904
+		method: 'textDocument/rename'
+		params: json2.encode(RenameParams{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			position:      Position{
+				line: 2
+				char: 4
+			}
+			new_name:      'renamed'
+		},
+			escape_unicode: true
+		)
+	})
+
+	assert resp.result is string
+	assert (resp.result as string) == 'null'
+}
+
 fn test_parse_document_symbols_empty_content() {
 	syms := parse_document_symbols('')
 	assert syms.len == 0

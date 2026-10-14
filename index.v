@@ -523,8 +523,22 @@ fn find_project_root(dir string) string {
 // collect_v_files recursively gathers `.v` files under `root`, skipping hidden
 // and known heavy directories and stopping once `index_max_files` is reached.
 // It returns false when a limit or filesystem error prevents a complete walk.
-fn collect_v_files(root string, mut acc []string) bool {
-	return collect_v_files_bounded(root, index_max_files, mut acc)
+// project_walk_budget is the file ceiling one project walk uses. It is the
+// global cap unless a test lowers it, which is how a genuinely partial walk is
+// produced without writing twenty thousand files.
+fn (app &App) project_walk_budget() int {
+	if app.index_walk_budget > 0 {
+		return app.index_walk_budget
+	}
+	return index_max_files
+}
+
+// collect_v_files recursively gathers `.v` files under `root`, skipping hidden
+// and known heavy directories and stopping once `max_files` is reached. It
+// returns false when a limit or filesystem error prevents a complete walk, so
+// a caller that must know whether the walk was partial learns it here.
+fn collect_v_files(root string, max_files int, mut acc []string) bool {
+	return collect_v_files_bounded(root, max_files, mut acc)
 }
 
 // index_reserve_target is how many index entries a walk should pre-size for,
@@ -668,13 +682,15 @@ fn (mut app App) ensure_dirs_indexed(dirs []string) {
 		mut files := []string{}
 		scope := 'recursive:${dir}'
 		app.index_incomplete_scopes.delete(scope)
-		walk_complete := collect_v_files(dir, mut files)
+		walk_complete := collect_v_files(dir, app.project_walk_budget(), mut files)
 		if !walk_complete {
 			app.index_incomplete_scopes[scope] = true
 		}
 		// Pre-size once: inserting thousands of entries one by one would
 		// otherwise double the backing store repeatedly, and a late doubling
 		// can fail under a fragmented heap (GC_alloc_large abort on big trees).
+		// A partial walk reserves what it found, so growth toward the global
+		// cap stays bounded in both cases.
 		target := index_reserve_target(app.symbol_index.len, files.len)
 		if target > 0 {
 			app.symbol_index.reserve(u32(target))
@@ -1139,7 +1155,7 @@ fn (mut app App) run_recursive_index_refresh(job IndexRefreshJob) IndexRefreshRe
 		walk_ms:    time.now().unix_milli()
 	}
 	mut files := []string{}
-	walk_complete := collect_v_files(job.dir, mut files)
+	walk_complete := collect_v_files(job.dir, app.project_walk_budget(), mut files)
 	result.incomplete = !walk_complete
 	mut entries := map[string]IndexEntry{}
 	mut present := map[string]bool{}

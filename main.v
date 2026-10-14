@@ -47,6 +47,7 @@ mut:
 	ref_occurrences                             map[string]OccEntry          // Per-URI identifier occurrences for references (see index.v)
 	index_skipped_uris                          map[string]bool              // Disk files omitted from the bounded index
 	index_incomplete_scopes                     map[string]bool              // Index walks that could not finish
+	index_walk_budget                           int                          // Test seam: file ceiling for one project walk, 0 = index_max_files
 	vlib_fn_cache                               map[string]map[string]string // Per-vlib-module fn→return-type index (immutable during a session)
 	expression_type_depth                       int                         // Nesting of expression_type, which a binding's declaration re-enters
 	line_info_mode                              LineInfoMode                // How the configured `v` reaches the `-line-info` checker (see interop.v)
