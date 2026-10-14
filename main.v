@@ -979,7 +979,7 @@ fn (mut app App) handle_requests[T](mut reader T) {
 							inlay_hint_provider:                true
 							code_action_provider:               true
 							execute_command_provider:           ExecuteCommandOptions{
-								commands: ['vls.runFile', 'vls.runTests']
+								commands: ['vls.runFile', 'vls.runTests', 'vls.generateTest']
 							}
 							code_lens_provider:                 CodeLensOptions{}
 							// Inline values are the type the literal on the right of a

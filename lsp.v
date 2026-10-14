@@ -455,8 +455,9 @@ struct CallHierarchyOutgoingCallsParams {
 // server behaviour. Fields use optional types so that absent keys are ignored
 // and existing values are not clobbered.
 struct WorkspaceVlsSettings {
-	inlay_hints ?bool @[json: 'inlayHints'] // enable / disable inlay type hints
-	diagnostics ?bool // enable / disable live diagnostics
+	inlay_hints        ?bool @[json: 'inlayHints'] // enable / disable inlay type hints
+	diagnostics        ?bool // enable / disable live diagnostics
+	coverage_directory ?string @[json: 'coverageDirectory'] // where a coverage run recorded
 }
 
 // WorkspaceInlayHintsSettings supports client payloads that send
@@ -481,22 +482,25 @@ struct WorkspaceDiagnosticsSettings {
 // WorkspaceVlsSettingsCompat mirrors WorkspaceVlsSettings but with nested
 // inlay-hints shape used by some clients.
 struct WorkspaceVlsSettingsCompat {
-	inlay_hints WorkspaceInlayHintsSettings @[json: 'inlayHints']
-	diagnostics ?bool
+	inlay_hints        WorkspaceInlayHintsSettings @[json: 'inlayHints']
+	diagnostics        ?bool
+	coverage_directory ?string @[json: 'coverageDirectory']
 }
 
 // WorkspaceVlsSettingsNestedDiagnosticsCompat supports flat inlay hints with
 // nested diagnostics.
 struct WorkspaceVlsSettingsNestedDiagnosticsCompat {
-	inlay_hints ?bool @[json: 'inlayHints']
-	diagnostics WorkspaceDiagnosticsSettings
+	inlay_hints        ?bool @[json: 'inlayHints']
+	diagnostics        WorkspaceDiagnosticsSettings
+	coverage_directory ?string @[json: 'coverageDirectory']
 }
 
 // WorkspaceVlsSettingsNestedFeaturesCompat supports both feature settings as
 // nested objects.
 struct WorkspaceVlsSettingsNestedFeaturesCompat {
-	inlay_hints WorkspaceInlayHintsSettings @[json: 'inlayHints']
-	diagnostics WorkspaceDiagnosticsSettings
+	inlay_hints        WorkspaceInlayHintsSettings @[json: 'inlayHints']
+	diagnostics        WorkspaceDiagnosticsSettings
+	coverage_directory ?string @[json: 'coverageDirectory']
 }
 
 // WorkspaceSettings is the top-level object inside DidChangeConfigurationParams.
@@ -879,7 +883,11 @@ struct CodeAction {
 	kind         string
 	is_preferred ?bool @[json: 'isPreferred'] // true marks the primary fix in the UI
 	edit         ?WorkspaceEdit
-	diagnostics  ?[]LSPDiagnostic
+	// command is what an action carries when the work is done by a tool the
+	// server calls, rather than by an edit the server computes. The client runs
+	// it through workspace/executeCommand.
+	command     ?Command
+	diagnostics ?[]LSPDiagnostic
 }
 
 // LSP CodeActionParams struct
