@@ -8388,6 +8388,13 @@ fn (mut app App) handle_code_action(request Request) Response {
 		}
 	}
 
+	// 10. Generate test for an untested function — reads the coverage run the
+	// project's `vls.json` or its editor settings point at.
+	if code_action_kind_wanted(only, code_action_kind_quickfix) {
+		source_path := normalize_overlay_path(os.abs_path(uri_to_path(uri)))
+		actions << app.build_untested_test_actions(uri, source_path, params.range)
+	}
+
 	return Response{
 		id:     request.id
 		result: actions
@@ -8946,14 +8953,16 @@ fn (mut app App) on_did_change_configuration(request Request) {
 
 struct ResolvedWorkspaceSettings {
 mut:
-	inlay_hints         ?bool
-	diagnostics         ?bool
-	variable_types      ?bool
-	parameter_names     ?bool
-	has_inlay_hints     bool
-	has_diagnostics     bool
-	has_variable_types  bool
-	has_parameter_names bool
+	inlay_hints            ?bool
+	diagnostics            ?bool
+	variable_types         ?bool
+	parameter_names        ?bool
+	coverage_directory     ?string
+	has_inlay_hints        bool
+	has_diagnostics        bool
+	has_variable_types     bool
+	has_parameter_names    bool
+	has_coverage_directory bool
 }
 
 fn resolve_workspace_settings(params_json string) ResolvedWorkspaceSettings {
@@ -8962,51 +8971,55 @@ fn resolve_workspace_settings(params_json string) ResolvedWorkspaceSettings {
 	sectioned_flat := json2.decode[DidChangeConfigurationParams](params_json) or {
 		DidChangeConfigurationParams{}
 	}
-	merge_workspace_settings(mut resolved, sectioned_flat.settings.vls.inlay_hints, sectioned_flat.settings.vls.diagnostics)
+	merge_workspace_settings(mut resolved, sectioned_flat.settings.vls.inlay_hints, sectioned_flat.settings.vls.diagnostics, sectioned_flat.settings.vls.coverage_directory)
 
 	sectioned_inlay_nested := json2.decode[DidChangeConfigurationParamsCompat](params_json) or {
 		DidChangeConfigurationParamsCompat{}
 	}
-	merge_workspace_settings(mut resolved, sectioned_inlay_nested.settings.vls.inlay_hints.enabled, sectioned_inlay_nested.settings.vls.diagnostics)
+	merge_workspace_settings(mut resolved, sectioned_inlay_nested.settings.vls.inlay_hints.enabled, sectioned_inlay_nested.settings.vls.diagnostics, sectioned_inlay_nested.settings.vls.coverage_directory)
 	merge_inlay_hint_options(mut resolved, sectioned_inlay_nested.settings.vls.inlay_hints)
 
 	sectioned_diagnostics_nested := json2.decode[DidChangeConfigurationParamsNestedDiagnosticsCompat](params_json) or {
 		DidChangeConfigurationParamsNestedDiagnosticsCompat{}
 	}
-	merge_workspace_settings(mut resolved, sectioned_diagnostics_nested.settings.vls.inlay_hints, sectioned_diagnostics_nested.settings.vls.diagnostics.enabled)
+	merge_workspace_settings(mut resolved, sectioned_diagnostics_nested.settings.vls.inlay_hints, sectioned_diagnostics_nested.settings.vls.diagnostics.enabled, sectioned_diagnostics_nested.settings.vls.coverage_directory)
 
 	sectioned_nested := json2.decode[DidChangeConfigurationParamsNestedFeaturesCompat](params_json) or {
 		DidChangeConfigurationParamsNestedFeaturesCompat{}
 	}
-	merge_workspace_settings(mut resolved, sectioned_nested.settings.vls.inlay_hints.enabled, sectioned_nested.settings.vls.diagnostics.enabled)
+	merge_workspace_settings(mut resolved, sectioned_nested.settings.vls.inlay_hints.enabled, sectioned_nested.settings.vls.diagnostics.enabled, sectioned_nested.settings.vls.coverage_directory)
 	merge_inlay_hint_options(mut resolved, sectioned_nested.settings.vls.inlay_hints)
 
 	direct_flat := json2.decode[DidChangeConfigurationDirectParams](params_json) or {
 		DidChangeConfigurationDirectParams{}
 	}
-	merge_workspace_settings(mut resolved, direct_flat.settings.inlay_hints, direct_flat.settings.diagnostics)
+	merge_workspace_settings(mut resolved, direct_flat.settings.inlay_hints, direct_flat.settings.diagnostics, direct_flat.settings.coverage_directory)
 
 	direct_inlay_nested := json2.decode[DidChangeConfigurationDirectParamsCompat](params_json) or {
 		DidChangeConfigurationDirectParamsCompat{}
 	}
-	merge_workspace_settings(mut resolved, direct_inlay_nested.settings.inlay_hints.enabled, direct_inlay_nested.settings.diagnostics)
+	merge_workspace_settings(mut resolved, direct_inlay_nested.settings.inlay_hints.enabled, direct_inlay_nested.settings.diagnostics, direct_inlay_nested.settings.coverage_directory)
 	merge_inlay_hint_options(mut resolved, direct_inlay_nested.settings.inlay_hints)
 
 	direct_diagnostics_nested := json2.decode[DidChangeConfigurationDirectParamsNestedDiagnosticsCompat](params_json) or {
 		DidChangeConfigurationDirectParamsNestedDiagnosticsCompat{}
 	}
-	merge_workspace_settings(mut resolved, direct_diagnostics_nested.settings.inlay_hints, direct_diagnostics_nested.settings.diagnostics.enabled)
+	merge_workspace_settings(mut resolved, direct_diagnostics_nested.settings.inlay_hints, direct_diagnostics_nested.settings.diagnostics.enabled, direct_diagnostics_nested.settings.coverage_directory)
 
 	direct_nested := json2.decode[DidChangeConfigurationDirectParamsNestedFeaturesCompat](params_json) or {
 		DidChangeConfigurationDirectParamsNestedFeaturesCompat{}
 	}
-	merge_workspace_settings(mut resolved, direct_nested.settings.inlay_hints.enabled, direct_nested.settings.diagnostics.enabled)
+	merge_workspace_settings(mut resolved, direct_nested.settings.inlay_hints.enabled, direct_nested.settings.diagnostics.enabled, direct_nested.settings.coverage_directory)
 	merge_inlay_hint_options(mut resolved, direct_nested.settings.inlay_hints)
 	return resolved
 }
 
+// merge_workspace_settings folds the switched settings of one decoded settings
+// shape into the resolved settings. First-wins: an absent key keeps whatever an
+// earlier shape already set, and unknown keys never reach it because the decoder
+// drops them.
 fn merge_workspace_settings(mut resolved ResolvedWorkspaceSettings, inlay_hints ?bool,
-	diagnostics ?bool) {
+	diagnostics ?bool, coverage_directory ?string) {
 	if !resolved.has_inlay_hints {
 		if enabled := inlay_hints {
 			resolved.inlay_hints = enabled
@@ -9017,6 +9030,12 @@ fn merge_workspace_settings(mut resolved ResolvedWorkspaceSettings, inlay_hints 
 		if enabled := diagnostics {
 			resolved.diagnostics = enabled
 			resolved.has_diagnostics = true
+		}
+	}
+	if !resolved.has_coverage_directory {
+		if directory := coverage_directory {
+			resolved.coverage_directory = directory
+			resolved.has_coverage_directory = true
 		}
 	}
 }
@@ -9468,6 +9487,27 @@ fn (mut app App) handle_execute_command(request Request) Response {
 							capture_output: app.capture_output
 						})
 					}
+				}
+			}
+		}
+		'vls.generateTest' {
+			// The test body is written by `v cover --write-tests`, which is the one
+			// tool that generates it. The server names the file and reports what
+			// the tool wrote; the editor then reflects the file back to itself.
+			args := params.arguments or { [] }
+			uri, path, path_error := app.code_lens_command_target(args)
+			if path_error != '' {
+				app.send_show_message('vls: cannot generate a test: ${path_error}', 1)
+			} else if !compiler_is_available() {
+				app.send_show_message('vls: the V compiler (`v`) was not found on PATH.', 1)
+			} else {
+				directory := app.coverage_directory_for_path(path)
+				if directory == '' {
+					app.send_show_message(coverage_missing_message(), 1)
+				} else if written := write_tests_for_file(directory, path) {
+					app.send_show_message('vls: ${written.trim_space()}', 3)
+				} else {
+					app.send_show_message('vls: could not write the tests: ${err.msg()}', 1)
 				}
 			}
 		}

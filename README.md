@@ -92,13 +92,35 @@ in the editor, put a `vls.json` in the folder that holds the nearest `v.mod`:
 { "defines": ["-d", "flag"] }
 ```
 
-A `vls.json` may also set `inlayHints` and `diagnostics`, the two feature switches. The settings
+A `vls.json` may also set `inlayHints`, `diagnostics` and `coverageDirectory`. The settings
 the editor sends win over the project's file, and the file over `VLS_DEFINES` in the environment,
 which also works for an editor with no settings of its own. The nearest `vls.json` is read when a
 file of its project is opened, so its switches apply before the first check rather than after it.
 The keys the file accepts are listed in [`vls.schema.json`](vls.schema.json). The defines reach
 the checks only: `v fmt`, hover, go-to-definition and completion run without them. The code inside
 `$if !flag ? { ... }` is then the one left unchecked.
+
+### Generating tests for untested functions
+
+A coverage recording is what tells VLS which functions a test run never entered. Record one, then
+point the project at it:
+
+```sh
+v -no-skip-unused -coverage vcov/ test ./
+```
+
+```json
+{ "coverageDirectory": "vcov" }
+```
+
+`coverageDirectory` may also be sent by the editor as `vls.coverageDirectory`, which wins over the
+file. With it set, a `.v` file whose functions were never entered offers a code action per
+function: `Generate test for 'foo'`. The action runs `v cover --write-tests`, which appends one
+`test_foo()` beside the source with a zero-value call and a `// TODO:` line. It is a starting
+point, not a test: the generator cannot know what the function should return.
+
+`-no-skip-unused` belongs with the recording. Without it a function nothing calls is dropped from
+the build, so its coverage cannot be reported at all.
 
 ### Features
 
