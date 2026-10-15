@@ -290,12 +290,20 @@ fn pd_ws_seed(mut app App, tag string, text string) (string, string) {
 }
 
 // pd_ws_pull asks for the whole workspace, echoing the ids the caller holds.
+// The caller's map is the convenient test shape; the wire shape is an array.
 fn pd_ws_pull(mut app App, previous_result_ids map[string]string) Response {
+	mut previous := []PreviousResultId{}
+	for uri, value in previous_result_ids {
+		previous << PreviousResultId{
+			uri:   uri
+			value: value
+		}
+	}
 	return app.handle_workspace_diagnostic(Request{
 		id:     9
 		method: 'workspace/diagnostic'
 		params: json2.encode(WorkspaceDiagnosticParams{
-			previous_result_ids: previous_result_ids
+			previous_result_ids: previous
 		})
 	})
 }
@@ -303,6 +311,25 @@ fn pd_ws_pull(mut app App, previous_result_ids map[string]string) Response {
 // pd_ws_reports decodes the reports of a workspace pull.
 fn pd_ws_reports(response Response) []WorkspaceDiagnosticReport {
 	return response.result as []WorkspaceDiagnosticReport
+}
+
+// A client with no held results sends an empty array, not an empty object.
+// That empty array must decode and answer a full report.
+fn test_ws_diagnostic_accepts_empty_previous_result_ids_array() {
+	mut app := App{}
+	dir, uri := pd_ws_seed(mut app, 'ws_empty_previous', pd_main_source)
+	defer {
+		pd_cleanup(dir)
+	}
+	response := app.handle_workspace_diagnostic(Request{
+		id:     9
+		method: 'workspace/diagnostic'
+		params: '{"identifier":"","previousResultIds":[]}'
+	})
+	reports := pd_ws_reports(response)
+	assert reports.len == 1, 'expected one report, got ${reports.len}'
+	assert reports[0].uri == uri, reports[0].uri
+	assert reports[0].kind == 'full', 'empty previous results mean a full report'
 }
 
 // pd_ws_ids is the id a workspace pull computes for one document, so a test can

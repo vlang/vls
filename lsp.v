@@ -220,12 +220,20 @@ struct UnchangedDocumentDiagnosticReport {
 type DocumentDiagnosticReport = FullDocumentDiagnosticReport
 	| UnchangedDocumentDiagnosticReport
 
+// PreviousResultId is one held workspace result: the document it describes and
+// the id the client already holds. LSP sends these as an array, including an
+// empty array when the client holds nothing.
+struct PreviousResultId {
+	uri   string
+	value string
+}
+
 // WorkspaceDiagnosticParams is textDocument/diagnostic's whole-workspace
-// sibling: the identifiers whose documents the client wants, and the id it
+// sibling: the identifiers whose documents the client wants, and the ids it
 // already holds for each, so an unchanged document is answered with nothing.
 struct WorkspaceDiagnosticParams {
 	identifier          string
-	previous_result_ids map[string]string @[json: 'previousResultIds']
+	previous_result_ids []PreviousResultId @[json: 'previousResultIds']
 }
 
 // WorkspaceDocumentReport is one document's answer inside a workspace report.
