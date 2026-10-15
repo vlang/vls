@@ -7314,6 +7314,65 @@ fn test_hover_prefers_shadowing_closure_parameter_type() {
 	assert !hover.contents.value.contains('x int'), hover.contents.value
 }
 
+fn test_hover_does_not_rush_the_pending_slow_check() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'hover_no_rush')
+	must_mkdir_all(test_dir)
+	// The file carries a diagnostics error the slow check has not published
+	// yet; the hover below must answer without running it.
+	content := 'module main\n\nfn greet(name string) string {\n\treturn name\n}\n\nfn main() {\n\tprintln(greet(undefined_name))\n}\n'
+	main_file := os.join_path(test_dir, 'main.v')
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	// No compiler in this test: the hover below answers through the
+	// compiler-free tail of hover_result, so the scheduler state it leaves
+	// behind is the whole observation.
+	app.v3_line_info_enabled = false
+	app.line_info_mode = .missing
+	mut scheduler := new_diagnostics_scheduler()
+	app.diagnostics_scheduler = scheduler
+	far_future := time.now().unix_milli() + 3600_000
+	global_generation, generation := scheduler.next_generation(uri)
+	scheduler.enqueue(DiagnosticsJob{
+		uri:               uri
+		content:           content
+		project_key:       'file:///hover_no_rush_project'
+		global_generation: global_generation
+		generation:        generation
+		write_mutex:       app.write_mutex
+		ready_at:          far_future
+		kind:              .slow
+	})
+	key := diagnostics_job_key(uri, .slow)
+	scheduler.mutex.lock()
+	before := scheduler.pending_jobs[key] or {
+		scheduler.mutex.unlock()
+		assert false, 'the slow job was never pending'
+		return
+	}
+	ready_before := before.ready_at
+	scheduler.mutex.unlock()
+	// Hover over the `greet(` call. The index has no entry for it here, so
+	// the request runs the compiler-free tail of hover_result.
+	_ := app.hover_result(uri, Position{
+		line: 6
+		char: 9
+	}, '7:hv^9')
+	scheduler.mutex.lock()
+	after := scheduler.pending_jobs[key] or {
+		scheduler.mutex.unlock()
+		assert false, 'the slow job vanished'
+		return
+	}
+	ready_after := after.ready_at
+	scheduler.mutex.unlock()
+	assert ready_after == ready_before, 'hover moved the slow job deadline'
+}
+
 fn test_hover_does_not_treat_member_selector_as_local_binding() {
 	mut app := create_test_app()
 	defer {

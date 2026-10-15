@@ -422,9 +422,14 @@ fn (mut app App) hover_with_written_declaration(uri string, position Position, r
 // documentation of its own declaration. `line_info` asks the hover.
 fn (mut app App) hover_result(uri string, position Position, line_info string) ResponseResult {
 	real_path := uri_to_path(uri)
-	// A read flushes the debounce: the slow check runs now, so the overlay this
-	// hover is read against is the one the pause was going to publish anyway.
-	app.rush_pending_diagnostics(uri)
+	// No flush here: every read below answers from the buffer or the index,
+	// never from the overlay a pending slow check would publish. v3_hover
+	// asks with the buffer's own content, the indexed lookups read the index
+	// as it stands, and the one-shot line-info writes the buffer to its own
+	// overlay. Flushing would only start a full compile concurrently with the
+	// one these reads may already run, and the debounced slow check still
+	// publishes on its own afterwards. (run_v_line_info keeps its flush: the
+	// definition family can read what only a checked program says.)
 	mut located := false
 	if answer := app.v3_hover(uri, real_path, line_info) {
 		if location := answer.declared_at {
