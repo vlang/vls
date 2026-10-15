@@ -20,7 +20,12 @@ fn (mut app App) handle_workspace_diagnostic(request Request) Response {
 		}
 	}
 	uris := app.uris_with_diagnostics()
-	mut reports, dropped := app.workspace_diagnostic_reports(uris, params.previous_result_ids)
+	// The wire shape is an array; the lookup below stays a map.
+	mut previous_ids := map[string]string{}
+	for held in params.previous_result_ids {
+		previous_ids[held.uri] = held.value
+	}
+	mut reports, dropped := app.workspace_diagnostic_reports(uris, previous_ids)
 	if dropped > 0 {
 		// The truncation is a report of its own rather than a silent gap: a
 		// client that sees it knows the pane is partial.
