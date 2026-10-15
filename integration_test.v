@@ -239,7 +239,7 @@ fn test_integration_initialize_workspace_capabilities() {
 		result: Capabilities{
 			capabilities: Capability{
 				execute_command_provider: ExecuteCommandOptions{
-					commands: ['vls.runFile', 'vls.runTests']
+					commands: ['vls.runFile', 'vls.runTests', 'vls.generateTest']
 				}
 				workspace:                WorkspaceCapability{
 					file_operations:   WorkspaceFileOperations{
