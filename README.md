@@ -2,6 +2,9 @@
 
 Build with: `v .`
 
+Or let the compiler install it for you: `v ls --install` (see `v help ls`
+for update and source-build options).
+
 Check the installed version with `vls --version` or `vls version`. Both print `VLS 0.0.3`
 and exit without starting the server. LSP `initialize` reports the same version in `serverInfo`.
 
