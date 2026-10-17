@@ -38,17 +38,22 @@ jobs:
       ${{ matrix.os == 'ubuntu' && (vars.VLS_RUNNER_LINUX || 'ubuntu-latest') ||
       matrix.os == 'macos' && (vars.VLS_RUNNER_MACOS || 'macos-latest') ||
       (vars.VLS_RUNNER_WINDOWS || 'windows-latest') }}
+    # A last-resort ceiling, not the fail-fast mechanism. Every step below
+    # carries its own `timeout-minutes`, so a step that wedges fails at its own
+    # budget instead of letting the job spend the rest of this one on it. The
+    # budgets sit well above what a healthy run needs and sum to more than this
+    # value on purpose: a `-prod` master push runs every one of them, and this
+    # should never be the thing that fires first.
     timeout-minutes: 60
 
     steps:
       - name: Checkout V
-        id: checkout_v
+        timeout-minutes: 10
         uses: actions/checkout@v5
         with:
           repository: vlang/v
       - name: Checkout VLS
-        id: checkout_vls
-        if: ${{ success() && !cancelled() && steps.checkout_v.outcome == 'success' }}
+        timeout-minutes: 10
         uses: actions/checkout@v5
         with:
           path: vls
@@ -57,9 +62,11 @@ jobs:
       # nothing here is pinned and every run tests against the latest compiler.
       - name: Build V
         if: matrix.os != 'windows'
+        timeout-minutes: 20
         run: make latest_tcc && make -j4 && ./v symlink
       - name: Build V (Windows)
         if: matrix.os == 'windows'
+        timeout-minutes: 20
         run: ./makev.bat latest_tcc && ./makev.bat && ./v symlink
 
       # Hover, completion, signature help, and go to definition run through
@@ -67,16 +74,15 @@ jobs:
       # V3 is the default backend. `makev.bat` already builds it on Windows.
       - name: Build the V compatibility compiler
         if: matrix.os != 'windows'
+        timeout-minutes: 15
         run: make v1
 
       - name: Check formatting
-        id: check_formatting
-        if: ${{ success() && !cancelled() && steps.checkout_vls.outcome == 'success' }}
+        timeout-minutes: 5
         run: v fmt -verify vls/
 
       - name: Run all tests, including the vlang/v workspace tests
-        id: run_all_tests_including_the_vlang_v_workspace_tests
-        if: ${{ success() && !cancelled() && steps.check_formatting.outcome == 'success' }}
+        timeout-minutes: 30
         env:
           VLS_VLANG_V_REPO: ${{ github.workspace }}
           V_MACOS_V3_NO_FALLBACK: ${{ matrix.os == 'windows' && '0' || '1' }}
@@ -94,6 +100,7 @@ jobs:
         if: matrix.os == 'windows' && github.event_name != 'pull_request'
         timeout-minutes: 30
         env:
+          VLS_VLANG_V_REPO: ${{ github.workspace }}
           V_MACOS_V3_NO_FALLBACK: "0"
         run: v -no-memory-limit -nocache -prod test vls/
 
@@ -110,12 +117,12 @@ jobs:
       # unnoticed until someone built with -new-compiler by hand. Both paths are
       # cheap to compile, so cover all three platforms.
       - name: Compile project with V3
-        id: compile_project_with_v3
-        if: ${{ success() && !cancelled() && steps.run_all_tests_including_the_vlang_v_workspace_tests.outcome == 'success' }}
+        timeout-minutes: 15
         env:
           V_MACOS_V3_NO_FALLBACK: "1"
         run: v -no-memory-limit -nocache -new-compiler vls/
 
       - name: Compile project
         if: matrix.os == 'windows'
+        timeout-minutes: 15
         run: v -nocache vls/
