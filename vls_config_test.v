@@ -44,6 +44,7 @@ fn config_test_app(root string) &App {
 	return &App{
 		temp_dir:        root
 		workspace_roots: [root]
+		config_store:    store
 	}
 }
 
@@ -299,6 +300,7 @@ fn test_config_the_defines_make_the_compiler_check_the_gated_code() {
 			uri: content
 		}
 		workspace_roots: [root]
+		config_store:    vls_config_store()
 	}
 	// Without a define the gated body is not compiled, so it is not checked.
 	assert app.run_v_check(uri, content).len == 0, 'no define checks no gated code'
@@ -322,6 +324,7 @@ fn config_test_app_open(root string) &App {
 		workspace_roots:     [root]
 		inlay_hints_enabled: true
 		diagnostics_enabled: true
+		config_store:        store
 	}
 }
 

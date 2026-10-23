@@ -32,6 +32,7 @@ mut:
 	inlay_hints_enabled                         bool = true // toggled via workspace/didChangeConfiguration
 	diagnostics_enabled                         bool = true // toggled via workspace/didChangeConfiguration
 	diag_cache                                  map[string]DiagCacheEntry // Per-URI cached diagnostics
+	config_store                                &VlsConfigStore = &VlsConfigStore{} // Per-App config (P1: config leak between TCP clients)
 	diag_disk_roots                             map[string]bool           // Program roots whose disk cache merged this session
 	file_list_cache                             map[string]FileListEntry  // Per-project .v listings, so a fingerprint does not re-walk the tree
 	content_memo                                map[string]ContentMemo    // Per-file content hash with the size, inode and mtime it was read at

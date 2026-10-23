@@ -114,7 +114,7 @@ fn vls_config_store() &VlsConfigStore {
 // a changed defines value drops the cached diagnostics, which were computed with
 // the old ones.
 fn (mut app App) apply_editor_configuration(params_json string) {
-	mut store := vls_config_store()
+	mut store := app.config_store
 	previous := store.editor_settings().defines
 	mut editor := EditorSettings{
 		defines: resolve_editor_defines(params_json)
@@ -153,7 +153,7 @@ fn (mut app App) project_config_for_path(path string) VlsProjectConfig {
 // cached result for `vls_config_ttl_ms`. When a re-read finds a different
 // configuration, the diagnostics computed with the old one are dropped.
 fn (mut app App) project_config_for_root(root string) VlsProjectConfig {
-	store := vls_config_store()
+	store := app.config_store
 	if cached := store.cached_config(root, time.now().unix_milli()) {
 		return cached
 	}
@@ -209,7 +209,7 @@ fn (mut app App) forget_config_file(path string) {
 		return
 	}
 	root := project_root_for_path(path)
-	mut store := vls_config_store()
+	mut store := app.config_store
 	store.drop_config(root)
 	app.forget_project_diagnostics(root)
 }
