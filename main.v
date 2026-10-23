@@ -76,6 +76,9 @@ mut:
 	// What the compiler's answer cost, per document and method: below the budget
 	// in answer_budget.v the answer is waited for instead of answered twice.
 	compiler_answer_ms map[string]i64
+	// Serializes reads/writes of compiler_answer_ms, which run_answer_followup
+	// touches from a worker thread while the request loop reads it (P1).
+	compiler_answer_ms_mutex &sync.Mutex = sync.new_mutex()
 	// The threads that replace an index answer with the compiler's (see answer_budget.v).
 	answer_followups         &sync.WaitGroup = sync.new_waitgroup()
 	importable_modules_cache map[string]ImportableModulesCache // Modules a file can import, per project root (see module_imports.v)

@@ -90,6 +90,10 @@ fn (app &App) compiler_answer_is_held(uri string, method Method) bool {
 // and this method in under the budget the last time it was asked: then its
 // answer costs no more than the index's and must not be doubled.
 fn (app &App) compiler_answer_is_quick(uri string, method Method) bool {
+	app.compiler_answer_ms_mutex.lock()
+	defer {
+		app.compiler_answer_ms_mutex.unlock()
+	}
 	elapsed_ms := app.compiler_answer_ms[answer_budget_key(uri, method)] or { return false }
 	return elapsed_ms in 0 .. answer_budget_ms
 }
