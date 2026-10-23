@@ -74,6 +74,11 @@ mut:
 	worker_started      bool
 	worker_done         chan bool
 	stopped             bool
+	// Shared diagnostics cache populated by worker checks, so pull requests
+	// (handle_pull_diagnostic) can serve the errors a check published even
+	// though they run on the main App, whose own diag_cache the worker never
+	// touches (P1: pull diagnostics never receive async results).
+	diag_cache          map[string]DiagCacheEntry
 	active_uri          string
 	active_project_key  string
 	active_generation   u64
@@ -95,6 +100,7 @@ fn new_diagnostics_scheduler() &DiagnosticsScheduler {
 		generations:         map[string]u64{}
 		project_generations: map[string]u64{}
 		pending_jobs:        map[string]DiagnosticsJob{}
+		diag_cache:          map[string]DiagCacheEntry{}
 	}
 }
 
@@ -303,6 +309,30 @@ fn (mut scheduler DiagnosticsScheduler) finish(job DiagnosticsJob) {
 		scheduler.active_generation = 0
 	}
 	scheduler.mutex.unlock()
+}
+
+// store_diag_cache_entries merges a worker's cached check results into the
+// scheduler's shared cache, so pull diagnostics can serve them.
+fn (mut scheduler DiagnosticsScheduler) store_diag_cache_entries(entries map[string]DiagCacheEntry) {
+	scheduler.mutex.lock()
+	defer {
+		scheduler.mutex.unlock()
+	}
+	for uri, entry in entries {
+		scheduler.diag_cache[uri] = entry
+	}
+}
+
+// diag_cache_entry returns the cached errors for `uri` from the shared cache.
+fn (mut scheduler DiagnosticsScheduler) diag_cache_entry(uri string) ?DiagCacheEntry {
+	scheduler.mutex.lock()
+	defer {
+		scheduler.mutex.unlock()
+	}
+	if entry := scheduler.diag_cache[uri] {
+		return entry
+	}
+	return none
 }
 
 // check_in_flight reports whether a check for the document at `uri` waits for
@@ -578,6 +608,10 @@ fn run_diagnostics_job(mut scheduler DiagnosticsScheduler, job DiagnosticsJob) {
 		}
 	}
 	notification := worker.build_diagnostics_notification(job.uri, job.content)
+	// Publish the worker's cached check results into the shared cache, so
+	// pull diagnostics (handle_pull_diagnostic) can serve them: the worker
+	// runs in a cloned App whose own diag_cache would otherwise be discarded.
+	scheduler.store_diag_cache_entries(worker.diag_cache)
 	if os.getenv('VLS_PERF_LOG') != '' {
 		diag_elapsed_ms := time.now().unix_milli() - started_ms
 		worker.send_log_message('diagnostics uri=${job.uri} kind=slow elapsed_ms=${diag_elapsed_ms}',

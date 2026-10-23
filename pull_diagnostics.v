@@ -51,6 +51,12 @@ fn (mut app App) pull_diagnostics_items(uri string) []LSPDiagnostic {
 	mut v_errors := []JsonError{}
 	if cached := app.diag_cache[uri] {
 		v_errors = cached.errors
+	} else if mut scheduler := app.diagnostics_scheduler {
+		// Fall back to the shared cache populated by worker checks, since the
+		// main App's own diag_cache is never touched by the worker (P1).
+		if cached := scheduler.diag_cache_entry(uri) {
+			v_errors = cached.errors
+		}
 	}
 	content := app.open_files[uri] or { os.read_file(uri_to_path(uri)) or { '' } }
 	return app.diagnostics_notification_for(uri, content, v_errors).params.diagnostics
