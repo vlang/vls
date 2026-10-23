@@ -66,16 +66,33 @@ const workspace_diagnostic_truncated_uri = 'vls.workspace.diagnosticTruncated'
 const workspace_diagnostic_max_documents = 500
 
 // uris_with_diagnostics lists the documents a check has answered for. A file
-// checked and found clean is left out: a workspace report answers what the
-// client asked about, and listing every clean file of a project would flood it.
-// The order is the cache's own, and only the count is bounded.
-fn (app &App) uris_with_diagnostics() []string {
+// checked and found clean is still listed: the client holding previous errors
+// for it needs an empty report to clear them, otherwise stale diagnostics
+// never go away (P1: workspace diagnostics cannot clear stale errors). Only
+// files a check has actually answered for are listed, so the set stays bounded
+// by the cache rather than by the project.
+fn (mut app App) uris_with_diagnostics() []string {
+	mut seen := map[string]bool{}
 	mut uris := []string{cap: app.diag_cache.len}
-	for uri, cached in app.diag_cache {
-		if cached.errors.len == 0 {
+	for uri, _ in app.diag_cache {
+		if uri in seen {
 			continue
 		}
+		seen[uri] = true
 		uris << uri
+	}
+	// Include URIs the worker has answered for (shared cache), so a document
+	// checked asynchronously still gets an empty report when it becomes clean.
+	if mut scheduler := app.diagnostics_scheduler {
+		scheduler.mutex.lock()
+		for uri, _ in scheduler.diag_cache {
+			if uri in seen {
+				continue
+			}
+			seen[uri] = true
+			uris << uri
+		}
+		scheduler.mutex.unlock()
 	}
 	uris.sort()
 	return uris
