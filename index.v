@@ -804,6 +804,12 @@ fn (mut app App) ensure_dir_shallow_indexed(dir string) {
 			if uri in present {
 				continue
 			}
+			// An oversized/unsaved open buffer is not on disk, so it is never
+			// in `present`; deleting it here would lose the skipped marker and
+			// make completeness wrongly report true (P1: rename oversize marker).
+			if uri in app.open_files {
+				continue
+			}
 			if os.dir(uri_to_path(uri)).replace('\\', '/').trim_right('/') == dir_norm {
 				app.index_skipped_uris.delete(uri)
 			}
