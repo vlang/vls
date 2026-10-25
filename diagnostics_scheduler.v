@@ -78,10 +78,10 @@ mut:
 	// (handle_pull_diagnostic) can serve the errors a check published even
 	// though they run on the main App, whose own diag_cache the worker never
 	// touches (P1: pull diagnostics never receive async results).
-	diag_cache          map[string]DiagCacheEntry
-	active_uri          string
-	active_project_key  string
-	active_generation   u64
+	diag_cache         map[string]DiagCacheEntry
+	active_uri         string
+	active_project_key string
+	active_generation  u64
 	// The open files the last check of each program answered for, by program
 	// directory.
 	program_members map[string][]string

@@ -33,14 +33,14 @@ mut:
 	diagnostics_enabled                         bool = true // toggled via workspace/didChangeConfiguration
 	diag_cache                                  map[string]DiagCacheEntry // Per-URI cached diagnostics
 	config_store                                &VlsConfigStore = &VlsConfigStore{} // Per-App config (P1: config leak between TCP clients)
-	diag_disk_roots                             map[string]bool           // Program roots whose disk cache merged this session
-	file_list_cache                             map[string]FileListEntry  // Per-project .v listings, so a fingerprint does not re-walk the tree
-	content_memo                                map[string]ContentMemo    // Per-file content hash with the size, inode and mtime it was read at
-	open_files_generation                       int                       // Incremented on every workspace file mutation
-	project_generations                         map[string]int            // Per-project-dir revision, for scoped cache invalidation
-	cancelled_requests                          map[int]bool              // Request ids cancelled via $/cancelRequest
-	cancelled_raw_ids                           map[string]bool           // String/raw request ids cancelled via $/cancelRequest
-	current_request_raw_id                      string                    // Raw JSON id of the request being processed (echoed verbatim)
+	diag_disk_roots                             map[string]bool          // Program roots whose disk cache merged this session
+	file_list_cache                             map[string]FileListEntry // Per-project .v listings, so a fingerprint does not re-walk the tree
+	content_memo                                map[string]ContentMemo   // Per-file content hash with the size, inode and mtime it was read at
+	open_files_generation                       int                      // Incremented on every workspace file mutation
+	project_generations                         map[string]int           // Per-project-dir revision, for scoped cache invalidation
+	cancelled_requests                          map[int]bool             // Request ids cancelled via $/cancelRequest
+	cancelled_raw_ids                           map[string]bool          // String/raw request ids cancelled via $/cancelRequest
+	current_request_raw_id                      string                   // Raw JSON id of the request being processed (echoed verbatim)
 	position_encoding                           PositionEncoding = .utf16 // Negotiated LSP position encoding (default UTF-16)
 	symbol_index                                map[string]IndexEntry        // Persistent per-URI symbol index (see index.v)
 	indexed_dirs                                map[string]bool              // Project dirs already walked into the index
