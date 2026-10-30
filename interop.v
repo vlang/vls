@@ -185,8 +185,9 @@ fn path_is_within_with_case(path string, dir string, case_insensitive bool) bool
 	if dir == '' {
 		return false
 	}
-	mut p := path
-	mut d := dir.trim_right('/')
+	// Normalize path separators so Windows backslash paths compare correctly.
+	mut p := path.replace('\\', '/')
+	mut d := dir.replace('\\', '/').trim_right('/')
 	if case_insensitive {
 		p = p.to_lower()
 		d = d.to_lower()
