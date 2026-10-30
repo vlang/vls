@@ -241,8 +241,7 @@ fn (mut app App) v3_run(project V3QueryProject, specs []string, target string) ?
 	}
 	// `-new-compiler` is only needed where V3 is not the default; on Windows the
 	// established compiler already serves `-vls-mode` / `-line-info`.
-	mut argv := v3_compiler_selection_args()
-	argv << ['-w', '-check', '-nocolor']
+	mut argv := ['-new-compiler', '-w', '-check', '-nocolor']
 	if is_library {
 		argv << '-shared'
 	}
