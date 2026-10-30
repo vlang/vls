@@ -179,5 +179,5 @@ fn test_snapshot_definition_basic() {
 
 fn test_snapshot_completion_member() {
 	content := 'module main\n\nstruct User {\n\tname string\n\tage  int\n}\n\nfn main() {\n\tu := User{}\n\tu.\n}\n'
-	snapshot_completion('completion_member', content, 10, 3)
+	snapshot_completion('completion_member', content, 9, 3)
 }

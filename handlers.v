@@ -1494,28 +1494,6 @@ fn (mut app App) operation_at_pos(method Method, request Request) Response {
 	if method == .completion {
 		indexed := app.indexed_completions(path, params.position)
 		prefix := app.word_prefix_at_cursor(path, params.position)
-		if prefix != '' && indexed.items.len > 0 {
-			all_labels := indexed.items.map(it.label)
-			filtered := fuzzy_filter(prefix, all_labels)
-			mut filtered_set := map[string]bool{}
-			for label in filtered {
-				filtered_set[label] = true
-			}
-			mut filtered_items := []Detail{}
-			for item in indexed.items {
-				if item.label in filtered_set {
-					filtered_items << item
-				}
-			}
-			budgeted_filtered, _ := apply_completion_budget(filtered_items)
-			return Response{
-				id:     request.id
-				result: CompletionList{
-					is_incomplete: true
-					items:         budgeted_filtered
-				}
-			}
-		}
 		if indexed.use_compiler {
 			compiler_result := app.run_v_line_info(.completion, path, '${line_nr}:${byte_col}')
 			compiler_items := if compiler_result is []Detail {
@@ -1530,6 +1508,28 @@ fn (mut app App) operation_at_pos(method Method, request Request) Response {
 				result: CompletionList{
 					is_incomplete: truncated
 					items:         budgeted
+				}
+			}
+		}
+		if prefix != '' && indexed.items.len > 0 {
+			all_labels := indexed.items.map(it.label)
+			filtered := fuzzy_filter(prefix, all_labels)
+			mut filtered_set := map[string]bool{}
+			for label in filtered {
+				filtered_set[label] = true
+			}
+			mut filtered_items := []Detail{}
+			for item in indexed.items {
+				if item.label in filtered_set {
+					filtered_items << item
+				}
+			}
+			budgeted_filtered, truncated_filtered := apply_completion_budget(filtered_items)
+			return Response{
+				id:     request.id
+				result: CompletionList{
+					is_incomplete: truncated_filtered
+					items:         budgeted_filtered
 				}
 			}
 		}

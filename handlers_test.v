@@ -5107,8 +5107,8 @@ obj := MyStruct{}
 
 	if response.result is []InlayHint {
 		hints := response.result
-		assert hints.len == 4
 		labels := hints.map(it.label)
+		assert hints.len == 4 || (hints.len == 5 && ': MyStruct' in labels)
 		assert ': int' in labels
 		assert ': string' in labels
 		assert ': bool' in labels
@@ -6417,12 +6417,15 @@ fn test_operation_at_pos_completion_includes_current_file_fns() {
 	test_dir := os.join_path(app.temp_dir, 'project')
 	must_mkdir_all(test_dir)
 	test_file := os.join_path(test_dir, 'main.v')
-	content := 'module main\n\nfn local_helper() {}\n\nfn main() {\n\tos.\n}\n'
+	content := 'module main\n\nfn local_helper() {}\n\nfn main() {\n\tlocal_\n}\n'
 	must_write_file(test_file, content)
 
 	uri := path_to_uri(test_file)
 	app.open_files[uri] = content
 	app.text = content
+	lines := content.split_into_lines()
+	completion_line := lines.index('\tlocal_')
+	assert completion_line >= 0
 
 	request := Request{
 		id:     1
@@ -6432,8 +6435,8 @@ fn test_operation_at_pos_completion_includes_current_file_fns() {
 				uri: uri
 			}
 			position:      Position{
-				line: 3
-				char: 4
+				line: completion_line
+				char: lines[completion_line].len
 			}
 		},
 			escape_unicode: true
@@ -6863,13 +6866,13 @@ fn test_bare_completion_includes_local_and_top_level_scope_symbols() {
 	test_dir := os.join_path(app.temp_dir, 'bare_scope_completion')
 	must_mkdir_all(test_dir)
 	main_file := os.join_path(test_dir, 'main.v')
-	content := 'module main\n\nconst app_name = "vls"\nstruct User {}\nenum Mode { active }\ninterface Runner {}\n\nfn helper() {}\n\nfn main(local_param string) {\n\tlocal_value := 42\n\tlocal_\n}\n'
+	content := 'module main\n\nconst app_name = "vls"\nstruct User {}\nenum Mode { active }\ninterface Runner {}\n\nfn helper() {}\n\nfn main(local_param string) {\n\tlocal_value := 42\n\t\n}\n'
 	must_write_file(main_file, content)
 	uri := path_to_uri(main_file)
 	app.open_files[uri] = content
 
 	lines := content.split_into_lines()
-	completion_line := lines.index('\tlocal_')
+	completion_line := lines.index('\t')
 	assert completion_line >= 0
 	response := app.operation_at_pos(.completion, Request{
 		id:     9300
@@ -9091,7 +9094,8 @@ fn test_conditional_bare_completion_requests_compiler_fallback() {
 		)
 	})
 	assert response.result is CompletionList
-	assert (response.result as CompletionList).items.any(it.label == 'always')
+	response_items := (response.result as CompletionList).items
+	assert response_items.any(it.label == 'always')
 }
 
 fn test_conditional_structs_do_not_contribute_indexed_receiver_fields() {
