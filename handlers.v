@@ -7278,6 +7278,23 @@ fn (mut app App) handle_document_symbols(request Request) Response {
 	}
 }
 
+// is_explicit_init_declaration reports whether `line` is a variable declaration
+// whose right-hand side is a struct, array or map construction, which is
+// already explicitly typed in the source.
+fn is_explicit_init_declaration(line string) bool {
+	trimmed := line.trim_space()
+	idx := trimmed.index(' := ') or {
+		return false
+	}
+	rhs := trimmed[idx + 4..].trim_space()
+	// Strip a trailing `or { ... }` so an error-handling suffix cannot hide the init.
+	mut clean := rhs
+	if or_idx := rhs.index(' or ') {
+		clean = rhs[..or_idx].trim_space()
+	}
+	return clean.contains('{') || clean.contains('[')
+}
+
 // handle_inlay_hints handles the LSP inlayHint request, returning type hints for variables.
 fn (mut app App) handle_inlay_hints(request Request) Response {
 	if !app.inlay_hints_enabled {
@@ -7304,9 +7321,22 @@ fn (mut app App) handle_inlay_hints(request Request) Response {
 	// Both paths report the same two LSP kinds, so the granular toggles filter
 	// either answer without invalidating the compiler cache.
 	if compiler_hints := app.compiler_inlay_hints(uri, content) {
+		// The compiler also types variables whose initializer is an explicit
+		// struct, array or map construction. Those are already spelled out in
+		// the source, so the heuristic path skips them (see infer_type_from_literal);
+		// drop them here too, so both paths agree on the count.
+		mut filtered := []InlayHint{}
+		source_lines := content.split_into_lines()
+		for hint in compiler_hints {
+			drop := hint.label.starts_with(':') && hint.position.line < source_lines.len
+				&& is_explicit_init_declaration(source_lines[hint.position.line])
+			if !drop {
+				filtered << hint
+			}
+		}
 		return Response{
 			id:     request.id
-			result: filter_inlay_hints_by_toggles(compiler_hints.filter(it.position.line >= start_line
+			result: filter_inlay_hints_by_toggles(filtered.filter(it.position.line >= start_line
 				&& it.position.line <= end_line), app.inlay_hint_toggles())
 		}
 	}
