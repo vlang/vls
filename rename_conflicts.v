@@ -438,7 +438,8 @@ fn (mut app App) v3_check_copy(project V3QueryProject, target string) !string {
 	if app.v3_one_shot_unsupported {
 		return error('this compiler cannot validate rename conflicts')
 	}
-	mut argv := ['-new-compiler', '-check', '-nocolor']
+	mut argv := v3_compiler_selection_args()
+	argv << ['-check', '-nocolor']
 	if is_library {
 		argv << '-shared'
 	}

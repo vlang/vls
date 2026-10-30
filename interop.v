@@ -361,13 +361,13 @@ const line_info_flags = ['-line-info', '-vls-mode', '-json-errors']
 // anchored to a whole line so a diagnostic that merely quotes the text cannot
 // change how VLS drives the compiler for the rest of the session.
 fn compiler_rejects_any_option(output string, options []string) bool {
-	if !output.contains('unknown option `') {
+	if !output.contains('unknown option `') && !output.contains('Unknown argument `') {
 		return false
 	}
 	for line in output.split_into_lines() {
 		trimmed := line.trim_space()
 		for option in options {
-			if trimmed == 'unknown option `${option}`' {
+			if trimmed == 'unknown option `${option}`' || trimmed == 'Unknown argument `${option}`' {
 				return true
 			}
 		}

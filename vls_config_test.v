@@ -38,7 +38,7 @@ fn config_test_write(path string, content string) {
 // config_test_app returns an App whose only workspace root is `root`, with the
 // configuration store emptied, so no earlier test leaves a tier behind.
 fn config_test_app(root string) &App {
-	mut store := vls_config_store()
+	mut store := &VlsConfigStore{}
 	store.set_editor_settings(EditorSettings{})
 	store.drop_config(root)
 	return &App{
@@ -170,7 +170,7 @@ fn test_config_environment_is_the_last_tier() {
 	mut app := config_test_app(root)
 	assert app.project_config_for_root(root).defines == ['-d', 'bespin'], 'VLS_DEFINES is the last tier'
 	config_test_write(os.join_path(root, 'vls.json'), '{"defines":["-d","naboo"]}')
-	mut store := vls_config_store()
+	mut store := app.config_store
 	store.drop_config(root)
 	assert app.project_config_for_root(root).defines == ['-d', 'naboo'], 'the project file beats the environment'
 }
@@ -180,12 +180,11 @@ fn test_config_project_file_is_cached_for_the_ttl() {
 	defer {
 		os.rmdir_all(root) or {}
 	}
-	mut store := vls_config_store()
 	mut app := config_test_app(root)
 	assert app.project_config_for_root(root).defines.len == 0, 'no file defines nothing'
 	config_test_write(os.join_path(root, 'vls.json'), '{"defines":["-d","bespin"]}')
 	assert app.project_config_for_root(root).defines.len == 0, 'the cached configuration is reused inside the ttl'
-	store.drop_config(root)
+	app.config_store.drop_config(root)
 	assert app.project_config_for_root(root).defines == ['-d', 'bespin'], 'a dropped entry is read again'
 }
 
@@ -294,19 +293,19 @@ fn test_config_the_defines_make_the_compiler_check_the_gated_code() {
 	source := os.join_path(root, 'main.v')
 	config_test_write(source, content)
 	uri := path_to_uri(source)
+	mut store := &VlsConfigStore{}
 	mut app := &App{
 		temp_dir:        work
 		open_files:      {
 			uri: content
 		}
 		workspace_roots: [root]
-		config_store:    vls_config_store()
+		config_store:    store
 	}
 	// Without a define the gated body is not compiled, so it is not checked.
 	assert app.run_v_check(uri, content).len == 0, 'no define checks no gated code'
 	// The project file supplies the define, and the check then finds the error.
 	config_test_write(os.join_path(root, 'vls.json'), '{"defines":["-dbespin"]}')
-	mut store := vls_config_store()
 	store.drop_config(root)
 	gated := app.run_v_check(uri, content)
 	assert gated.any(it.message.contains('undef_fn_bespin_probe')), 'the define made the compiler check the gated code: ${gated}'
@@ -316,7 +315,7 @@ fn test_config_the_defines_make_the_compiler_check_the_gated_code() {
 // two switches start on, as they do in the server, so a project's `vls.json` is
 // the only thing that can turn one off.
 fn config_test_app_open(root string) &App {
-	mut store := vls_config_store()
+	mut store := &VlsConfigStore{}
 	store.set_editor_settings(EditorSettings{})
 	store.drop_config(root)
 	return &App{

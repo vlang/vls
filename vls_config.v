@@ -95,19 +95,6 @@ mut:
 	mu     &sync.RwMutex = sync.new_rwmutex()
 }
 
-// vls_config_store returns the store, created on first use. A function-local
-// static holds it because the configuration has no field in App to live in; the
-// same pattern keeps interop.v's temp path counter out of module scope.
-fn vls_config_store() &VlsConfigStore {
-	unsafe {
-		mut static store := &VlsConfigStore{}
-		if store == unsafe { nil } {
-			store = &VlsConfigStore{}
-		}
-		return store
-	}
-}
-
 // apply_editor_configuration folds a workspace/didChangeConfiguration payload
 // into the configuration. The editor's settings are the top tier, so they are
 // stored first; the merged result is then applied for every workspace root, and
