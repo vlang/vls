@@ -1550,7 +1550,7 @@ fn (mut app App) operation_at_pos(method Method, request Request) Response {
 	// and aware of unsaved files.
 	if method in [.definition, .declaration, .type_definition, .implementation] {
 		if location := app.resolve_indexed_definition(path, params.position) {
-			app.schedule_answer_followup(method, request, path, params.position, line_info)
+			app.schedule_answer_followup(method, path, params.position, line_info)
 			return Response{
 				id:     request.id
 				result: location
@@ -1572,7 +1572,7 @@ fn (mut app App) operation_at_pos(method Method, request Request) Response {
 					}
 				}
 			}
-			app.schedule_answer_followup(.hover, request, path, params.position, line_info)
+			app.schedule_answer_followup(.hover, path, params.position, line_info)
 			return Response{
 				id:     request.id
 				result: binding
@@ -1583,7 +1583,7 @@ fn (mut app App) operation_at_pos(method Method, request Request) Response {
 		// declaration from the index waits until after the compiler, which brings
 		// the documentation with its answer.
 		if member := app.member_selector_hover(path, params.position) {
-			app.schedule_answer_followup(.hover, request, path, params.position, line_info)
+			app.schedule_answer_followup(.hover, path, params.position, line_info)
 			return Response{
 				id:     request.id
 				result: member
@@ -1595,7 +1595,7 @@ fn (mut app App) operation_at_pos(method Method, request Request) Response {
 		// the compiler's answer follows, on the same id (answer_budget.v).
 		if app.compiler_answer_is_held(path, .hover) {
 			if declaration := app.source_hover_fallback(path, params.position) {
-				app.schedule_answer_followup(.hover, request, path, params.position, line_info)
+				app.schedule_answer_followup(.hover, path, params.position, line_info)
 				return Response{
 					id:     request.id
 					result: declaration
@@ -5076,6 +5076,11 @@ fn (mut app App) on_did_change(request Request) ?Notification {
 	diagnostics_mutation := app.begin_diagnostics_project_schedule(uri)
 	app.text = content
 	app.open_files[uri] = content // Update tracked file
+	// The buffer changed, so the check result cached for the old content no
+	// longer describes it: drop it rather than letting a pull re-serve fixed
+	// errors until the new check publishes. The scheduler entry for the same
+	// document is dropped by the mutation above.
+	app.diag_cache.delete(uri)
 	if version := params.text_document.version {
 		app.open_files_versions[uri] = version
 	}

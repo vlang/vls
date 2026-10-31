@@ -911,6 +911,104 @@ fn test_diagnostics_scheduler_checks_staleness_while_publishing() {
 	assert app.captured_output.len == 1
 }
 
+fn stale_test_notification(uri string) Notification {
+	return Notification{
+		method: 'textDocument/publishDiagnostics'
+		params: PublishDiagnosticsParams{
+			uri: uri
+		}
+	}
+}
+
+// A pull serves the last published result, not a fixed one: an edit drops the
+// published errors, and a superseded publish records nothing over them.
+fn test_published_errors_track_the_current_document() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	app.capture_output = true
+	mut scheduler := new_diagnostics_scheduler()
+	app.diagnostics_scheduler = scheduler
+	uri := 'file:///stale.v'
+	project_key := 'stale-proj'
+	content := 'module main\n\nfn main() {}\n'
+	app.open_files[uri] = content
+	first := [
+		JsonError{
+			message: 'first'
+			line_nr: 1
+			col:     1
+			len:     1
+			level:   'error'
+		},
+	]
+	second := [
+		JsonError{
+			message: 'second'
+			line_nr: 2
+			col:     1
+			len:     1
+			level:   'error'
+		},
+	]
+
+	// The first check publishes; the pull serves what was published.
+	tickets_a := scheduler.begin_project_mutation(project_key, uri, [])
+	slow_a := tickets_a.filter(it.kind == .slow)[0]
+	job_a := DiagnosticsJob{
+		uri:                uri
+		project_key:        project_key
+		project_generation: slow_a.project_generation
+		global_generation:  slow_a.global_generation
+		generation:         slow_a.generation
+		write_mutex:        app.write_mutex
+	}
+	assert scheduler.publish_published_if_current(mut app, job_a, stale_test_notification(uri), uri,
+		first)
+	if cached := scheduler.diag_cache_entry(uri) {
+		assert cached.errors.len == 1 && cached.errors[0].message == 'first'
+	} else {
+		assert false, 'the published errors are recorded'
+	}
+	assert app.pull_diagnostics_items(uri).len == 1, 'the pull serves the last published result'
+
+	// An edit drops the published result; the pull serves nothing stale.
+	scheduler.begin_project_mutation(project_key, uri, [])
+	if _ := scheduler.diag_cache_entry(uri) {
+		assert false, 'an edit invalidates the published result'
+	}
+	assert app.pull_diagnostics_items(uri).len == 0, 'the pull serves no fixed errors'
+
+	// A publish from the superseded check records nothing.
+	assert !scheduler.publish_published_if_current(mut app, job_a, stale_test_notification(uri), uri,
+		second)
+	if _ := scheduler.diag_cache_entry(uri) {
+		assert false, 'a superseded publish records nothing'
+	}
+
+	// The new check publishes; the pull serves the new result.
+	tickets_b := scheduler.begin_project_mutation(project_key, uri, [])
+	slow_b := tickets_b.filter(it.kind == .slow)[0]
+	job_b := DiagnosticsJob{
+		uri:                uri
+		project_key:        project_key
+		project_generation: slow_b.project_generation
+		global_generation:  slow_b.global_generation
+		generation:         slow_b.generation
+		write_mutex:        app.write_mutex
+	}
+	assert scheduler.publish_published_if_current(mut app, job_b, stale_test_notification(uri), uri,
+		second)
+	if cached := scheduler.diag_cache_entry(uri) {
+		assert cached.errors.len == 1 && cached.errors[0].message == 'second'
+	} else {
+		assert false, 'the new published errors are recorded'
+	}
+	items := app.pull_diagnostics_items(uri)
+	assert items.len == 1 && items[0].message == 'second', 'the pull serves the new result'
+}
+
 fn test_on_did_change_multiple_changes() {
 	mut app := create_test_app()
 	defer {

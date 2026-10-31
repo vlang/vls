@@ -17,8 +17,6 @@ const answer_budget_ms = 50
 // AnswerFollowup measures what the compiler's answer costs for a request the
 // index has already answered, so the next question knows whether to wait.
 struct AnswerFollowup {
-	id        int
-	raw_id    string
 	method    Method
 	uri       string
 	position  Position
@@ -39,18 +37,15 @@ fn answer_budget_key(uri string, method Method) string {
 // it only records the cost for the next question. Completion is never
 // deferred: its index answer and the compiler answer differ in ways that make
 // a stale list confusing.
-fn (mut app App) schedule_answer_followup(method Method, request Request, uri string, position Position, line_info string) {
+fn (mut app App) schedule_answer_followup(method Method, uri string, position Position, line_info string) {
 	if !app.compiler_answer_is_held(uri, method) {
 		return
 	}
-	// The session outlives the request, so the thread shares it: the pooled
-	// compilers it asks through and the transport it writes on are the ones the
-	// request itself would have used.
+	// The session outlives the request, so the thread shares the pooled
+	// compilers the request itself would have asked through.
 	mut session := &app
 	app.answer_followups.add(1)
 	spawn run_answer_followup(mut session, AnswerFollowup{
-		id:        request.id
-		raw_id:    app.current_request_raw_id
 		method:    method
 		uri:       uri
 		position:  position
