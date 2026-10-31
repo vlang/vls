@@ -151,6 +151,10 @@ fn (mut scheduler DiagnosticsScheduler) begin_project_mutation(project_key strin
 	project_generation := scheduler.project_generations[project_key]
 	mut tickets := []DiagnosticsTicket{cap: affected.len * 2}
 	for affected_uri, _ in affected {
+		// The document changed, so the last published result no longer describes
+		// it: drop it rather than letting a pull re-serve fixed errors until
+		// the new check completes.
+		scheduler.diag_cache.delete(affected_uri)
 		scheduler.generations[affected_uri] = scheduler.generations[affected_uri] + 1
 		for kind in [DiagnosticsKind.slow, DiagnosticsKind.fast] {
 			tickets << DiagnosticsTicket{
@@ -320,6 +324,22 @@ fn (mut scheduler DiagnosticsScheduler) store_diag_cache_entries(entries map[str
 	}
 	for uri, entry in entries {
 		scheduler.diag_cache[uri] = entry
+	}
+}
+
+// store_published_errors records the errors last published for `uri`, so a
+// pull serves what the last push showed even when it came from a fast or
+// partial answer rather than a full slow check. The fingerprint marks the
+// entry as a published result rather than a checked state, so a later check
+// still re-runs against its own fingerprint instead of reusing this one.
+fn (mut scheduler DiagnosticsScheduler) store_published_errors(uri string, errors []JsonError) {
+	scheduler.mutex.lock()
+	defer {
+		scheduler.mutex.unlock()
+	}
+	scheduler.diag_cache[uri] = DiagCacheEntry{
+		fingerprint: 'published'
+		errors:      errors.clone()
 	}
 }
 
@@ -659,13 +679,17 @@ fn (mut scheduler DiagnosticsScheduler) publish_partial(job DiagnosticsJob, uri 
 		diagnostics_enabled: true
 	}
 	if uri == job.uri {
-		scheduler.publish_if_current(mut writer, job, writer.diagnostics_notification_for(uri,
-			job.content, found.file))
+		if scheduler.publish_if_current(mut writer, job, writer.diagnostics_notification_for(uri,
+			job.content, found.file)) {
+			scheduler.store_published_errors(uri, found.file)
+		}
 	}
 	for other_uri, other_errors in found.program {
 		other_content := job.open_files[other_uri] or { continue }
-		scheduler.publish_if_current(mut writer, job, writer.diagnostics_notification_for(other_uri,
-			other_content, other_errors))
+		if scheduler.publish_if_current(mut writer, job, writer.diagnostics_notification_for(other_uri,
+			other_content, other_errors)) {
+			scheduler.store_published_errors(other_uri, other_errors)
+		}
 	}
 }
 

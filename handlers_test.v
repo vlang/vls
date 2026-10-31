@@ -17423,7 +17423,7 @@ fn test_hover_answers_from_the_index_while_a_check_is_pending() {
 	assert hover.contents.value == '```v\nfn helper(n int) int\n```', 'the answer is the declaration the index holds: ${hover.contents.value}'
 }
 
-fn test_hover_followup_carries_the_compilers_answer_on_the_same_id() {
+fn test_hover_followup_measures_the_compiler_answer_without_answering_twice() {
 	mut app := create_test_app()
 	defer {
 		cleanup_test_app(app)
@@ -17436,12 +17436,13 @@ fn test_hover_followup_carries_the_compilers_answer_on_the_same_id() {
 	app.write_response_or_cancelled(1, response)
 	app.wait_answer_followups()
 
+	// JSON-RPC allows one response per request: the index answers once and the
+	// follow-up only records what the compiler answer costs for the next
+	// question, sending nothing further on the same id.
 	answers := budget_test_answers(mut app, 1)
-	assert answers.len == 2, 'the index answered and the compiler replaced it: ${answers}'
-	assert answers.all(it.contains('"id":1,')), 'both answers carry the id of the one request: ${answers}'
-	assert answers.any(it.contains('fn helper(n int) int')), 'the declaration is in the answer: ${answers}'
-	// Only the compiler's answer carries the documentation above the declaration.
-	assert answers.any(it.contains('helper doubles a number.')), 'the compiler answer follows on the same id: ${answers}'
+	assert answers.len == 1, 'the request is answered once: ${answers}'
+	assert answers[0].contains('"id":1,'), 'the answer carries the id of the request: ${answers}'
+	assert answers[0].contains('fn helper(n int) int'), 'the declaration is in the answer: ${answers}'
 	assert answer_budget_key(uri, .hover) in app.compiler_answer_ms, 'the follow-up measured what the compiler answer cost'
 }
 
@@ -17466,7 +17467,7 @@ fn test_hover_does_not_answer_twice_when_no_check_is_in_flight() {
 	assert answers.len == 1, 'one answer, as before: ${answers}'
 }
 
-fn test_definition_followup_carries_the_compilers_answer_on_the_same_id() {
+fn test_definition_followup_measures_the_compiler_answer_without_answering_twice() {
 	mut app := create_test_app()
 	defer {
 		cleanup_test_app(app)
@@ -17482,17 +17483,12 @@ fn test_definition_followup_carries_the_compilers_answer_on_the_same_id() {
 	app.write_response_or_cancelled(2, response)
 	app.wait_answer_followups()
 
+	// JSON-RPC allows one response per request: the index answers once and the
+	// follow-up only records what the compiler answer costs for the next
+	// question, sending nothing further on the same id.
 	answers := budget_test_answers(mut app, 2)
-	assert answers.len == 2, 'the index answered and the compiler replaced it: ${answers}'
-	assert answers.all(it.contains('"id":2,')), 'both answers carry the id of the one request: ${answers}'
-	// What the compiler answers is exactly what the same question answers when
-	// it is asked again, on the same buffers and the same position.
-	compiler_answer := app.compiler_answer(.definition, uri, budget_helper_position(), '9:gd^10')
-	expected := encode_response_payload(Response{
-		id:     2
-		result: compiler_answer
-	})
-	assert answers.any(it.contains(expected)), 'the second answer is the one the compiler gives: ${answers}'
+	assert answers.len == 1, 'the request is answered once: ${answers}'
+	assert answers[0].contains('"id":2,'), 'the answer carries the id of the request: ${answers}'
 	assert answer_budget_key(uri, .definition) in app.compiler_answer_ms, 'the follow-up measured what the compiler answer cost'
 }
 
@@ -17567,10 +17563,11 @@ fn test_followup_answer_is_suppressed_when_the_request_is_cancelled() {
 	response := app.operation_at_pos(.hover, budget_test_request('textDocument/hover', 4, uri))
 	// The client cancels the request while the compiler still works.
 	app.cancelled_requests[4] = true
+	app.write_response_or_cancelled(4, response)
 	app.wait_answer_followups()
 
 	answers := budget_test_answers(mut app, 4)
-	assert answers.len == 1, 'a cancelled request is not answered a second time: ${answers}'
+	assert answers.len == 1, 'a cancelled request is answered once: ${answers}'
 	assert answers[0].contains('"code":${jsonrpc_err_request_cancelled}'), 'the cancellation is reported: ${answers[0]}'
 }
 

@@ -16,11 +16,13 @@ fn (mut app App) handle_workspace_diagnostic(request Request) Response {
 		}
 		return Response{
 			id:     request.id
-			result: []WorkspaceDiagnosticReport{}
+			result: WorkspaceDiagnosticResult{
+				items: []WorkspaceDiagnosticReport{}
+			}
 		}
 	}
 	uris := app.uris_with_diagnostics()
-	// The wire shape is an array; the lookup below stays a map.
+	// The wire shape is an object with an items array (LSP 3.17); the lookup below stays a map.
 	mut previous_ids := map[string]string{}
 	for held in params.previous_result_ids {
 		previous_ids[held.uri] = held.value
@@ -51,7 +53,9 @@ fn (mut app App) handle_workspace_diagnostic(request Request) Response {
 	}
 	return Response{
 		id:     request.id
-		result: reports
+		result: WorkspaceDiagnosticResult{
+			items: reports
+		}
 	}
 }
 
@@ -113,10 +117,16 @@ fn (mut app App) workspace_diagnostic_reports(uris []string, previous_ids map[st
 		}
 		items := app.pull_diagnostics_items(uri)
 		result_id := pull_diagnostics_result_id(uri, items)
+		version := if uri in app.open_files_versions {
+			?i64(app.open_files_versions[uri])
+		} else {
+			none
+		}
 		if previous_id := previous_ids[uri] {
 			if previous_id == result_id {
 				reports << WorkspaceUnchangedReport{
 					uri:       uri
+					version:   version
 					result_id: result_id
 				}
 				continue
@@ -124,11 +134,7 @@ fn (mut app App) workspace_diagnostic_reports(uris []string, previous_ids map[st
 		}
 		reports << WorkspaceDocumentReport{
 			uri:       uri
-			version:   if uri in app.open_files_versions {
-				?i64(app.open_files_versions[uri])
-			} else {
-				none
-			}
+			version:   version
 			result_id: result_id
 			items:     items
 		}

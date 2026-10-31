@@ -81,18 +81,16 @@ fn (mut app App) cached_project_files(root string) ([]string, bool) {
 	return files, complete
 }
 
-// diag_code_sketch returns `content` with its comments dropped and every
+// diag_code_sketch returns `content` with its comments blanked and every
 // newline one of them held kept in its place. Nothing else is touched, so a
 // string's body — and any interpolation inside it — is still code to the
 // fingerprint.
 //
-// This is cache-key material, not an analysis input, so it does not have to
-// preserve offsets: an edit that rewrites the words of a comment changes
-// nothing here, while an edit that adds a line does, because every line under
-// it moves and a diagnostic's line number would move with it.
+// Comment bytes become spaces of the same length, so the columns of the code
+// around them do not move: lengthening `/*x*/` into `/*longer*/` on a line
+// changes the sketch (the spaces grow with it) and forces a fresh check
+// instead of reusing column positions the longer comment shifted.
 fn diag_code_sketch(content string) string {
-	// BUG INJECTED FOR CONTROL: comment bodies are kept.
-	_ = 0
 	mut out := []u8{cap: content.len}
 	mut quote := u8(0)
 	mut raw_string := false
@@ -103,22 +101,30 @@ fn diag_code_sketch(content string) string {
 		c := content[i]
 		if line_comment {
 			// The line's break is kept: it is the one part of a comment whose
-			// position every line below depends on.
+			// position every line below depends on. Every other byte becomes
+			// a space, so the columns of the code after the comment do not
+			// move when the comment's words change.
 			if c == `\n` {
 				line_comment = false
 				out << c
+			} else {
+				out << ` `
 			}
 			i++
 			continue
 		}
 		if block_comment > 0 {
-			if c == `\n` {
-				out << c
-			}
 			if c == `*` && i + 1 < content.len && content[i + 1] == `/` {
 				block_comment--
+				out << ` `
+				out << ` `
 				i += 2
 				continue
+			}
+			if c == `\n` {
+				out << c
+			} else {
+				out << ` `
 			}
 			i++
 			continue
@@ -139,11 +145,15 @@ fn diag_code_sketch(content string) string {
 		}
 		if c == `/` && i + 1 < content.len && content[i + 1] == `/` {
 			line_comment = true
+			out << ` `
+			out << ` `
 			i += 2
 			continue
 		}
 		if c == `/` && i + 1 < content.len && content[i + 1] == `*` {
 			block_comment = 1
+			out << ` `
+			out << ` `
 			i += 2
 			continue
 		}
@@ -252,6 +262,38 @@ fn (mut app App) program_content_fingerprint(root string) string {
 			mtime: info.mtime
 		}
 		parts << '${path}:${hash}'
+	}
+	// Open buffers that are not on disk yet (a new unsaved `new.v`) never
+	// appear in the walk above, so without this their edits leave the
+	// fingerprint unchanged and a check reuses diagnostics for older code.
+	// Only in-scope `.v` buffers join the fingerprint, in a stable order.
+	mut seen := map[string]bool{}
+	for path in files {
+		seen[normalize_overlay_path(path)] = true
+	}
+	mut extra := []string{}
+	for open_path, _ in open_by_path {
+		if open_path in seen {
+			continue
+		}
+		if !open_path.ends_with('.v') {
+			continue
+		}
+		if !path_is_within(open_path, normalize_overlay_path(root)) {
+			continue
+		}
+		extra << open_path
+	}
+	extra.sort()
+	for open_path in extra {
+		open_content := open_by_path[open_path]
+		if u64(open_content.len) > index_max_file_bytes
+			|| u64(open_content.len) > project_disk_max_bytes - bytes_read {
+			complete = false
+			continue
+		}
+		bytes_read += u64(open_content.len)
+		parts << '${open_path}:${diag_content_hash(open_content)}'
 	}
 	if !complete {
 		parts << 'incomplete:${time.now().unix_nano()}'

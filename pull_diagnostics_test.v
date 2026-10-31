@@ -310,7 +310,7 @@ fn pd_ws_pull(mut app App, previous_result_ids map[string]string) Response {
 
 // pd_ws_reports decodes the reports of a workspace pull.
 fn pd_ws_reports(response Response) []WorkspaceDiagnosticReport {
-	return response.result as []WorkspaceDiagnosticReport
+	return (response.result as WorkspaceDiagnosticResult).items
 }
 
 // A client with no held results sends an empty array, not an empty object.
@@ -440,6 +440,34 @@ fn test_ws_diagnostic_truncates_and_says_so() {
 		}
 		else {
 			assert false, 'the truncation report is not a full report'
+		}
+	}
+}
+
+// The workspace answer is an object with an items array on the wire (LSP 3.17),
+// not a bare array, and an unchanged report carries a version.
+fn test_ws_diagnostic_wire_shape_is_an_object_with_items() {
+	mut app := App{}
+	_, first := pd_ws_seed(mut app, 'ws_wire_a', pd_main_source)
+	_, second := pd_ws_seed(mut app, 'ws_wire_b', pd_main_source)
+	ids := pd_ws_ids(mut app, [second])
+	response := pd_ws_pull(mut app, ids)
+	encoded := encode_response_payload(response)
+	assert encoded.contains('"items":['), 'the wire shape wraps reports in items'
+	for report in pd_ws_reports(response) {
+		if report.uri == second {
+			assert report.kind == 'unchanged', 'held id means unchanged'
+			match report {
+				WorkspaceUnchangedReport {
+					assert report.result_id != '', 'unchanged carries its id'
+					_ = report.version
+				}
+				else {
+					assert false, 'not an unchanged report'
+				}
+			}
+		} else if report.uri == first {
+			assert report.kind == 'full', 'unheld id means full'
 		}
 	}
 }

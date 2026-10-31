@@ -1104,7 +1104,8 @@ fn restore_diag_cache_dir(previous string) {
 
 fn test_diag_code_sketch_drops_comments_and_keeps_lines_and_strings() {
 	// The sketch is cache-key material: a comment's words must not reach it,
-	// and the newlines a comment held must, because every line under them
+	// only its length (as blank bytes, so code columns around it do not move).
+	// The newlines a comment held must reach it, because every line under them
 	// moves with them.
 	for content in [
 		'x := 1 // note',
@@ -1121,10 +1122,19 @@ fn test_diag_code_sketch_drops_comments_and_keeps_lines_and_strings() {
 	assert diag_code_sketch("s := 'a\${b}c' // note").contains('\${b}')
 	// `*/` inside a string does not close a block comment.
 	assert diag_code_sketch('x := "*/" /* real */\n').contains('"*/"')
-	// Rewriting a comment's words changes nothing; adding a line does.
+	// Rewriting a comment's words with the same length changes nothing; the
+	// blanked bytes are identical. Lengthening it moves the columns of the code
+	// after it on the same line, so the sketch changes and the check re-runs
+	// instead of reusing stale column positions.
 	with_words := 'module main\n\nfn main() {\n\tprintln(1) // a note\n}\n'
+	same_len := 'module main\n\nfn main() {\n\tprintln(1) // b note\n}\n'
+	assert diag_code_sketch(with_words) == diag_code_sketch(same_len), 'a same-length comment edit changed the sketch'
 	longer := 'module main\n\nfn main() {\n\tprintln(1) // a considerably longer note\n}\n'
-	assert diag_code_sketch(with_words) == diag_code_sketch(longer), 'a comment edit changed the sketch'
+	assert diag_code_sketch(with_words) != diag_code_sketch(longer), 'a longer comment on a code line was treated as free'
+	before_code_short := '/*x*/ missing_fn()\n'
+	before_code_long := '/*longer comment*/ missing_fn()\n'
+	assert diag_code_sketch(before_code_short) != diag_code_sketch(before_code_long), 'a longer leading comment was treated as free'
+
 	added := 'module main\n\n// a note\nfn main() {\n\tprintln(1)\n}\n'
 	assert diag_code_sketch(with_words) != diag_code_sketch(added), 'a line added was treated as free'
 }
@@ -1143,9 +1153,9 @@ fn test_diag_fingerprint_ignores_a_comment_edit_and_not_an_interpolation_one() {
 	}
 	before := app.program_content_fingerprint(root)
 	assert before == app.program_content_fingerprint(root), 'the fingerprint is deterministic'
-	// Rewriting the words of a comment cannot change a diagnostic, and does
-	// not change the fingerprint, so the cached answer is reused.
-	commented := base.replace('// note', '// a much longer note about the same line')
+	// Rewriting the words of a comment with the same length moves no columns,
+	// so the fingerprint is unchanged and the cached answer is reused.
+	commented := base.replace('// note', '// moto')
 	assert commented != base
 	assert commented.count('\n') == base.count('\n')
 	mut with_comment := App{
@@ -1154,6 +1164,14 @@ fn test_diag_fingerprint_ignores_a_comment_edit_and_not_an_interpolation_one() {
 		}
 	}
 	assert with_comment.program_content_fingerprint(root) == before, 'a comment edit changed the fingerprint'
+	// Lengthening the comment moves the columns after it, so the fingerprint
+	// changes and the check re-runs instead of reusing stale positions.
+	mut with_longer := App{
+		open_files: {
+			uri: base.replace('// note', '// a much longer note about the same line')
+		}
+	}
+	assert with_longer.program_content_fingerprint(root) != before, 'a longer comment on a code line was treated as free'
 	// Editing inside an interpolation is editing code, and must not be free.
 	interpolated := base.replace('x}b', 'bad_fn()}b')
 	assert interpolated != base
@@ -1193,6 +1211,29 @@ fn test_program_content_fingerprint_tracks_buffers_and_siblings() {
 	interop_test_must_write_file(other_file, 'module main\n\nfn helper() int {\n\treturn 2\n}\n')
 	assert app.program_content_fingerprint(root) != before
 	os.rmdir_all(root) or {}
+}
+
+// A new file that was never saved is not on disk, so the walk cannot see it:
+// without the open buffers the fingerprint would stay unchanged across edits
+// and a check would reuse diagnostics for older code.
+fn test_program_content_fingerprint_tracks_a_new_unsaved_file() {
+	root := os.join_path(os.temp_dir(), 'vls_fpnew_${os.getpid()}_${time.now().unix_nano()}')
+	interop_test_must_mkdir_all(root)
+	defer {
+		os.rmdir_all(root) or {}
+	}
+	interop_test_must_write_file(os.join_path(root, 'main.v'), 'module main\n\nfn main() {}\n')
+	new_file := os.join_path(root, 'new.v')
+	new_uri := path_to_uri(new_file)
+	mut app := App{
+		open_files: {
+			new_uri: 'module main\n\nfn added() int {\n\treturn 1\n}\n'
+		}
+	}
+	first := app.program_content_fingerprint(root)
+	assert first == app.program_content_fingerprint(root), 'an unchanged unsaved buffer is stable'
+	app.open_files[new_uri] = 'module main\n\nfn added() int {\n\treturn 2\n}\n'
+	assert app.program_content_fingerprint(root) != first, 'editing a new unsaved file twice changes the fingerprint'
 }
 
 fn test_program_content_fingerprint_reuses_the_listing_and_the_hashes() {

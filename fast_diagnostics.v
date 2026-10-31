@@ -476,7 +476,9 @@ fn run_fast_diagnostics_job(mut scheduler DiagnosticsScheduler, job DiagnosticsJ
 		return
 	}
 	notification := worker.diagnostics_notification_for(job.uri, job.content, errors)
-	scheduler.publish_if_current(mut worker, job, notification)
+	if scheduler.publish_if_current(mut worker, job, notification) {
+		scheduler.store_published_errors(job.uri, errors)
+	}
 	if os.getenv('VLS_PERF_LOG') != '' {
 		fast_elapsed_ms := time.now().unix_milli() - started_ms
 		worker.send_log_message('diagnostics uri=${job.uri} kind=fast elapsed_ms=${fast_elapsed_ms}',

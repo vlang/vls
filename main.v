@@ -80,7 +80,8 @@ mut:
 	// Serializes reads/writes of compiler_answer_ms, which run_answer_followup
 	// touches from a worker thread while the request loop reads it (P1).
 	compiler_answer_ms_mutex &sync.Mutex = sync.new_mutex()
-	// The threads that replace an index answer with the compiler's (see answer_budget.v).
+	// The threads that measure a compiler answer after the index has answered
+	// (see answer_budget.v).
 	answer_followups         &sync.WaitGroup = sync.new_waitgroup()
 	importable_modules_cache map[string]ImportableModulesCache // Modules a file can import, per project root (see module_imports.v)
 	vlib_modules_cache       map[string][]ImportableModule     // The modules of vlib, per vlib folder
@@ -2215,16 +2216,6 @@ fn (mut app App) on_initialized(_ Request) {
 // cancelled while being processed; otherwise it sends the normal response.
 fn (mut app App) write_response_or_cancelled(id int, response Response) {
 	app.write_response_for(id, app.current_request_raw_id, response)
-}
-
-// write_deferred_response sends the answer that follows the one already sent for
-// a request whose turn is over (see answer_budget.v). It is
-// write_response_or_cancelled for such a request: the raw id of that request
-// travels with the answer, because both the id echoed and the cancellation
-// record read must belong to it and not to whichever request the loop is
-// handling by the time the answer is ready.
-fn (mut app App) write_deferred_response(id int, raw_id string, response Response) {
-	app.write_response_for(id, raw_id, response)
 }
 
 // write_response_for sends `response` for the request whose numeric id is `id`
