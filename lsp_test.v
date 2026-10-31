@@ -1937,3 +1937,25 @@ fn test_a_request_that_asks_no_compiler_goes_before_one_that_may() {
 		eof: true
 	}, tokens]) == 0
 }
+
+fn test_position_to_json_encodes_line_and_character() {
+	assert position_to_json(Position{
+		line: 1
+		char: 2
+	}) == '{"line":1,"character":2}', 'position encodes line and character'
+	assert position_to_json(Position{}) == '{"line":0,"character":0}', 'zero position encodes zeros'
+}
+
+fn test_lsprange_to_json_nests_start_and_end() {
+	r := LSPRange{
+		start: Position{
+			line: 1
+			char: 2
+		}
+		end:   Position{
+			line: 3
+			char: 4
+		}
+	}
+	assert lsprange_to_json(r) == '{"start":{"line":1,"character":2},"end":{"line":3,"character":4}}', 'range nests both positions'
+}

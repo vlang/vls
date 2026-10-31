@@ -13,9 +13,51 @@ import time
 fn resolve_v_compiler_exe() string {
 	configured := os.getenv('VLS_V_COMMAND').trim_space()
 	if configured != '' {
+		unwrapped := resolve_wrapper_target(configured)
+		if unwrapped != '' {
+			return unwrapped
+		}
 		return configured
 	}
-	return os.find_abs_path_of_executable('v') or { 'v' }
+	found := os.find_abs_path_of_executable('v') or { 'v' }
+	unwrapped := resolve_wrapper_target(found)
+	if unwrapped != '' {
+		return unwrapped
+	}
+	return found
+}
+
+// resolve_wrapper_target unwraps a Windows launcher shim (a `.bat`/`.cmd`
+// file that forwards to the real compiler executable) so compiler-relative
+// lookups such as the vlib directory resolve against the real installation
+// instead of the shim's directory. It returns '' when `candidate` is not a
+// wrapper or no usable target is found, in which case the caller keeps the
+// original path.
+fn resolve_wrapper_target(candidate string) string {
+	if candidate == '' || candidate == 'v' {
+		return ''
+	}
+	lower := candidate.to_lower()
+	if !(lower.ends_with('.bat') || lower.ends_with('.cmd')) {
+		return ''
+	}
+	content := os.read_file(candidate) or { return '' }
+	for line in content.split_into_lines() {
+		trimmed := line.trim_space()
+		if !trimmed.starts_with('"') {
+			continue
+		}
+		end := trimmed[1..].index('"') or { continue }
+		target := trimmed[1..end + 1]
+		target_lower := target.to_lower()
+		if target_lower.ends_with('.bat') || target_lower.ends_with('.cmd') {
+			continue
+		}
+		if os.is_file(target) {
+			return target
+		}
+	}
+	return ''
 }
 
 // compiler_is_available reports whether the V compiler was resolved to a real
@@ -143,8 +185,9 @@ fn path_is_within_with_case(path string, dir string, case_insensitive bool) bool
 	if dir == '' {
 		return false
 	}
-	mut p := path
-	mut d := dir.trim_right('/')
+	// Normalize path separators so Windows backslash paths compare correctly.
+	mut p := path.replace('\\', '/')
+	mut d := dir.replace('\\', '/').trim_right('/')
 	if case_insensitive {
 		p = p.to_lower()
 		d = d.to_lower()
@@ -221,15 +264,24 @@ fn path_to_uri(path string) string {
 }
 
 // make_unique_temp_path returns a collision-resistant temp file path in the
-// system temp dir, tagged with the caller's purpose, the pid, and a nanosecond
-// timestamp, so concurrent requests for same-named files never overwrite one
-// another (P1-12).
+// system temp dir, tagged with the caller's purpose, the pid, a nanosecond
+// timestamp, and a per-process counter, so sequential requests for same-named
+// files never return the same path (P1-12). The counter is what separates two
+// calls: on Windows consecutive `unix_nano` readings usually fall in the same
+// tick, so the timestamp alone does not tell them apart.
 fn make_unique_temp_path(tag string, real_path string) string {
 	ext := os.file_ext(real_path)
 	safe_ext := if ext == '' { '.v' } else { ext }
 	name := os.file_name(real_path)
 	base := if name.contains('.') { name.all_before_last('.') } else { name }
-	return os.join_path(os.temp_dir(), '${tag}_${os.getpid()}_${time.now().unix_nano()}_${base}${safe_ext}')
+	// A function-local static keeps the counter out of module scope. It needs
+	// `unsafe` because statics are unchecked shared state; the bump happens
+	// before anything else reads it.
+	unsafe {
+		mut static seq := u64(0)
+		seq++
+		return os.join_path(os.temp_dir(), '${tag}_${os.getpid()}_${time.now().unix_nano()}_${seq}_${base}${safe_ext}')
+	}
 }
 
 fn make_singlefile_temp_path(temp_root string, real_path string, purpose string) string {
@@ -310,13 +362,13 @@ const line_info_flags = ['-line-info', '-vls-mode', '-json-errors']
 // anchored to a whole line so a diagnostic that merely quotes the text cannot
 // change how VLS drives the compiler for the rest of the session.
 fn compiler_rejects_any_option(output string, options []string) bool {
-	if !output.contains('unknown option `') {
+	if !output.contains('unknown option `') && !output.contains('Unknown argument `') {
 		return false
 	}
 	for line in output.split_into_lines() {
 		trimmed := line.trim_space()
 		for option in options {
-			if trimmed == 'unknown option `${option}`' {
+			if trimmed == 'unknown option `${option}`' || trimmed == 'Unknown argument `${option}`' {
 				return true
 			}
 		}
@@ -729,16 +781,17 @@ fn v_diagnostic_underline_len(line string) int {
 // cache_v_check_result never retains timed-out output because it may be partial.
 // Other failed invocations are cacheable only when they produced parsed
 // diagnostics; otherwise a transient compiler crash must be retried.
-fn (mut app App) cache_v_check_result(path string, content_hash int, generation int, errors []JsonError, exit_code int, parsed_diagnostic_count int) {
+fn (mut app App) cache_v_check_result(path string, program_root string, fingerprint string, errors []JsonError, exit_code int, parsed_diagnostic_count int) {
 	if exit_code == compiler_exit_timeout || (exit_code != 0 && parsed_diagnostic_count == 0) {
 		app.diag_cache.delete(path)
 		return
 	}
-	app.diag_cache[path] = DiagCacheEntry{
-		content_hash: content_hash
-		generation:   generation
-		errors:       errors
+	entry := DiagCacheEntry{
+		fingerprint: fingerprint
+		errors:      errors
 	}
+	app.diag_cache[path] = entry
+	save_diag_disk_entry(program_root, path, entry)
 }
 
 // Sentinel exit code returned when a compiler invocation is killed for
@@ -788,7 +841,30 @@ fn run_v_argv_cancelled(args []string, work_folder string, cancelled fn () bool)
 			output:    msg
 		}
 	}
-	v_exe := resolve_v_compiler_exe()
+	mut v_exe := resolve_v_compiler_exe()
+	if v_exe == 'v' {
+		// A bare name spawns only when the OS resolves it; resolve it here
+		// so a missing compiler degrades instead of failing loudly.
+		v_exe = os.find_abs_path_of_executable('v') or {
+			msg := 'V compiler not found on PATH'
+			log(msg)
+			return os.Result{
+				exit_code: 1
+				output:    msg
+			}
+		}
+	}
+	if !os.exists(v_exe) {
+		// Spawning a missing executable fails loudly in the OS call; refuse
+		// with an ordinary error result instead. A missing compiler must
+		// never crash the server.
+		msg := 'V compiler not found: ${v_exe}'
+		log(msg)
+		return os.Result{
+			exit_code: 1
+			output:    msg
+		}
+	}
 	timeout_ms := resolve_compiler_timeout_ms()
 	mut p := os.new_process(v_exe)
 	p.set_args(args)
@@ -1049,6 +1125,57 @@ fn (app &App) imports_local_module(path string, program_dir string) bool {
 	return false
 }
 
+// narrow_check_dir returns the module directory of the file at `real_path` when
+// a check of that directory alone, as `v -check -shared .` there, answers for
+// the program it belongs to — the cheapest sufficient answer for a change that
+// cannot alter what the program resolves — or '' when the program's own
+// directory stays the target. Three things are required, and none of them is
+// assumed:
+//
+//   - The program's directory is not the module's own, so the narrowed target
+//     covers strictly less than the program tree does.
+//   - The parsed imports of the new content are those of the content the
+//     program was last checked with, so the change can be no new, removed or
+//     reordered import: what the program resolves is the resolve it already
+//     resolved, and the compiler finds every module of it in the same place.
+//   - The program's main module imports the module of the changed file, and
+//     every module of the project its files import sits in that module's
+//     directory. The check walks the directory it is run in and what that
+//     imports, so a module the program imports from elsewhere would stop being
+//     checked at all, and the program's other open files would lose the answer
+//     the whole program gives them.
+//
+// The reachability is read off program_reaches and the per-import resolution
+// off resolve_local_module_dir; no import closure is walked again here.
+fn (app &App) narrow_check_dir(real_path string, program_dir string, text string) string {
+	module_dir := normalize_overlay_path(os.dir(normalize_overlay_path(real_path)))
+	if module_dir == program_dir {
+		return ''
+	}
+	// The file's previous content is the one the program was last checked
+	// from: what the file holds on disk, since a buffer that was never saved
+	// has none, and a buffer that was saved has its own save as the previous
+	// state.
+	previous := os.read_file(real_path) or { return '' }
+	if parse_imports(text) != parse_imports(previous) {
+		return ''
+	}
+	vmod_root := normalize_overlay_path(find_project_root(program_dir))
+	if !app.program_reaches(program_dir, vmod_root, module_dir) {
+		return ''
+	}
+	for program_file in app.v_files_in(program_dir) {
+		for module_path in parse_imports(app.source_text(program_file)) {
+			if imported := resolve_local_module_dir(module_path, program_dir, vmod_root) {
+				if imported != module_dir {
+					return ''
+				}
+			}
+		}
+	}
+	return module_dir
+}
+
 // resolve_local_module_dir returns the directory of the module imported as
 // `module_path` by a program in `program_dir`, if it is one of the project's:
 // `a.b` is `a/b` below the program or below the v.mod root, and `proj.a` is `a`
@@ -1150,6 +1277,76 @@ fn (mut app App) prepare_line_info_overlay(real_path string, work_dir string) !C
 	return app.prepare_compilation_overlay_with(real_path, work_dir, importers)
 }
 
+// overlay_file_content_matches reports whether the file at `existing_path`
+// already holds `content`, comparing content hashes before any write: an
+// overlay that persists across checks rewrites only what changed. A file that
+// changed always differs, so it is never skipped.
+fn overlay_file_content_matches(existing_path string, content string) bool {
+	existing := os.read_file(existing_path) or { return false }
+	if existing.len != content.len {
+		return false
+	}
+	return existing.hash() == content.hash()
+}
+
+// drop_failed_overlay removes a freshly built overlay after a failure. A stable
+// overlay is kept: it still holds the last good sync, and the next check syncs
+// it again.
+fn drop_failed_overlay(temp_root string, stable bool) {
+	if stable {
+		return
+	}
+	os.rmdir_all(temp_root) or {}
+}
+
+// remove_stale_stable_overlay_files drops what a stable overlay holds that the
+// current sync no longer tracks: a buffer that is closed again reads from disk,
+// so its copy goes and the symlink step links it back, and a link whose source
+// is gone goes too. Copies that still match disk stay, wherever they came from.
+fn remove_stale_stable_overlay_files(temp_root string, source_root string, tracked map[string]string) {
+	mut keep := map[string]bool{}
+	for uri, _ in tracked {
+		if rel := overlay_relative_path(normalize_overlay_path(uri_to_path(uri)), source_root) {
+			keep[normalize_overlay_path(rel)] = true
+		}
+	}
+	mut pending := ['']
+
+	for pending.len > 0 {
+		rel_dir := pending.pop()
+		dir := if rel_dir == '' { temp_root } else { os.join_path(temp_root, rel_dir) }
+		for entry in os.ls(dir) or { continue } {
+			entry_rel := if rel_dir == '' { entry } else { rel_dir + '/' + entry }
+			normalized_rel := normalize_overlay_path(entry_rel)
+			copy_path := os.join_path(temp_root, entry_rel)
+			if os.is_link(copy_path) {
+				if normalized_rel in keep {
+					continue
+				}
+				if !os.exists(os.join_path(source_root, entry_rel)) {
+					os.rm(copy_path) or {}
+				}
+				continue
+			}
+			if os.is_dir(copy_path) {
+				pending << entry_rel
+				continue
+			}
+			if normalized_rel in keep {
+				continue
+			}
+			source_path := os.join_path(source_root, entry_rel)
+			if !os.is_file(source_path) {
+				os.rm(copy_path) or {}
+				continue
+			}
+			if !overlay_file_content_matches(copy_path, os.read_file(source_path) or { '' }) {
+				os.rm(copy_path) or {}
+			}
+		}
+	}
+}
+
 // prepare_compilation_overlay_with builds the overlay with `importers`, files
 // from disk by path, written into it next to the buffers.
 fn (mut app App) prepare_compilation_overlay_with(real_path string, work_dir string, importers map[string]string) !CompilationOverlay {
@@ -1157,28 +1354,38 @@ fn (mut app App) prepare_compilation_overlay_with(real_path string, work_dir str
 	source_work_dir := normalize_overlay_path(work_dir)
 	source_root := program_overlay_root(source_path, source_work_dir)
 	source_display_root := source_root
+	// A stable overlay persists across checks: it is synced, not rebuilt, so
+	// only files whose buffer content differs get rewritten.
+	stable := app.overlay_dir != ''
+	had_stable_overlay := stable && os.is_dir(app.overlay_dir)
 	temp_root_unresolved := app.write_tracked_files_to_temp(source_root)!
 	temp_root := normalize_overlay_path(os.real_path(temp_root_unresolved))
 	mut tracked := app.open_files.clone()
 	for path, content in importers {
 		rel := overlay_relative_path(path, source_root) or { continue }
-		os.write_file(os.join_path(temp_root, rel), content) or {
-			os.rmdir_all(temp_root) or {}
-			return error('Failed to write ${rel} into the compilation overlay: ${err}')
+		target := os.join_path(temp_root, rel)
+		if !overlay_file_content_matches(target, content) {
+			os.write_file(target, content) or {
+				drop_failed_overlay(temp_root, stable)
+				return error('Failed to write ${rel} into the compilation overlay: ${err}')
+			}
 		}
 		tracked[path_to_uri(path)] = content
 	}
+	if had_stable_overlay {
+		remove_stale_stable_overlay_files(temp_root, source_root, tracked)
+	}
 	symlink_untracked_files(source_root, source_work_dir, temp_root, tracked) or {
-		os.rmdir_all(temp_root) or {}
+		drop_failed_overlay(temp_root, stable)
 		return error('Failed to populate compilation overlay: ${err}')
 	}
 
 	work_rel := overlay_relative_path(source_work_dir, source_root) or {
-		os.rmdir_all(temp_root) or {}
+		drop_failed_overlay(temp_root, stable)
 		return error('Source work directory is outside overlay root: ${source_work_dir}')
 	}
 	file_rel := overlay_relative_path(source_path, source_root) or {
-		os.rmdir_all(temp_root) or {}
+		drop_failed_overlay(temp_root, stable)
 		return error('Source file is outside overlay root: ${source_path}')
 	}
 	temp_work_dir := if work_rel == '' {
@@ -1188,7 +1395,7 @@ fn (mut app App) prepare_compilation_overlay_with(real_path string, work_dir str
 	}
 	if !os.exists(temp_work_dir) {
 		os.mkdir_all(temp_work_dir) or {
-			os.rmdir_all(temp_root) or {}
+			drop_failed_overlay(temp_root, stable)
 			return error('Failed to create overlay work directory ${temp_work_dir}: ${err}')
 		}
 	}
@@ -1204,12 +1411,13 @@ fn (mut app App) prepare_compilation_overlay_with(real_path string, work_dir str
 
 // source_path_from_overlay maps compiler paths in the temporary project back to
 // their original source paths.
-fn source_path_from_overlay_with_windows_rules(reported_path string, overlay CompilationOverlay, windows bool) string {
+fn source_path_from_overlay_with_windows_rules(reported_path string, overlay CompilationOverlay, windows bool, base_dir string) string {
 	mut candidate := normalize_overlay_path_with_windows_rules(reported_path, windows)
+	resolve_base := if base_dir != '' { base_dir } else { overlay.temp_work_dir }
 	if candidate.starts_with('./') || candidate.starts_with('.\\') {
-		candidate = os.join_path(overlay.temp_work_dir, candidate[2..])
+		candidate = os.join_path(resolve_base, candidate[2..])
 	} else if !os.is_abs_path(candidate) {
-		candidate = os.join_path(overlay.temp_work_dir, candidate)
+		candidate = os.join_path(resolve_base, candidate)
 	}
 	candidate = normalize_overlay_path_with_windows_rules(candidate, windows)
 	temp_root := normalize_overlay_path_with_windows_rules(overlay.temp_root, windows)
@@ -1220,14 +1428,18 @@ fn source_path_from_overlay_with_windows_rules(reported_path string, overlay Com
 	return candidate
 }
 
-fn source_path_from_overlay(reported_path string, overlay CompilationOverlay) string {
+fn source_path_from_overlay(reported_path string, overlay CompilationOverlay, base_dir string) string {
 	$if windows {
-		return source_path_from_overlay_with_windows_rules(reported_path, overlay, true)
+		return source_path_from_overlay_with_windows_rules(reported_path, overlay, true, base_dir)
 	}
-	return source_path_from_overlay_with_windows_rules(reported_path, overlay, false)
+	return source_path_from_overlay_with_windows_rules(reported_path, overlay, false, base_dir)
 }
 
 fn (mut app App) run_v_check(path string, text string) []JsonError {
+	// Stage timings are pure observation: each stage records wall-clock
+	// milliseconds, and one summary line is logged at the end of the check.
+	stages_total_start_ms := time.now().unix_milli()
+	fp_stage_start_ms := time.now().unix_milli()
 	real_path := uri_to_path(path)
 	working_dir := os.dir(real_path)
 	mut temp_project_dir := ''
@@ -1237,16 +1449,52 @@ fn (mut app App) run_v_check(path string, text string) []JsonError {
 	mut singlefile_tmppath := ''
 	mut overlay := CompilationOverlay{}
 
-	// Check the diagnostics cache before invoking the compiler.
-	content_hash := text.hash()
-	gen := app.project_generation(path)
+	// The fingerprint covers the program's contents and the compiler: an
+	// identical state reuses the answer without invoking the compiler,
+	// within the session and across restarts (see diag_cache.v).
+	program_dir := app.program_root(real_path)
+	overlay_root := program_overlay_root(real_path, program_dir)
+	// The target the check runs against: the program's directory, or the
+	// module directory of the changed file when that alone answers for the
+	// program (see narrow_check_dir).
+	mut narrow_dir := app.narrow_check_dir(real_path, program_dir, text)
+	check_target := if narrow_dir != '' { 'narrow' } else { 'full' }
+	// The defines a check runs with are resolved here, before the fingerprint
+	// they salt and the arguments they are appended to (see vls_config.v).
+	defines := app.check_defines(real_path)
+	mut fingerprint := compiler_fingerprint() + '\n' + app.program_content_fingerprint(overlay_root)
+	if defines.len > 0 {
+		// Other defines answer other errors for the same sources, so they are
+		// part of the fingerprint. An empty set adds nothing, which leaves
+		// every result cached before defines existed exactly as it was.
+		fingerprint += '\ndefines:${defines.join(' ')}'
+	}
+	fp_ms := time.now().unix_milli() - fp_stage_start_ms
+	mut cache_hit := ''
 	if cached := app.diag_cache[path] {
-		if cached.content_hash == content_hash && cached.generation == gen {
-			log('Returning cached diagnostics for ${path}')
-			return cached.errors
+		if cached.fingerprint == fingerprint {
+			cache_hit = 'mem'
 		}
 	}
-
+	if cache_hit == '' {
+		app.ensure_diag_disk_cache(program_dir, fingerprint)
+		if cached := app.diag_cache[path] {
+			if cached.fingerprint == fingerprint {
+				cache_hit = 'disk'
+			}
+		}
+	}
+	if os.getenv('VLS_PERF_LOG') != '' {
+		app.send_log_message('diagnostics cache root=${overlay_root} fp=${fingerprint.hash().hex()} hit=${cache_hit} target=${check_target}',
+			4)
+	}
+	if cache_hit != '' {
+		log('Returning ${cache_hit}-cached diagnostics for ${path}')
+		return app.diag_cache[path].errors
+	}
+	// Prep covers overlay/program-copy/single-file preparation and argument
+	// setup, up to just before the compiler is spawned.
+	prep_stage_start_ms := time.now().unix_milli()
 	log('running v.exe check for ${real_path}')
 	log('Open files count: ${app.open_files.len}')
 	mut pool := app.diagnostics_servers
@@ -1266,9 +1514,9 @@ fn (mut app App) run_v_check(path string, text string) []JsonError {
 	} else {
 		''
 	}
-	// The file is checked as part of its program: from the program's directory,
-	// with the local modules it imports, as `v .` there builds it.
-	program_dir := app.program_root(real_path)
+	// The file is checked as part of its program: from the program's directory
+	// (computed above for the cache fingerprint), with the local modules it
+	// imports, as `v .` there builds it.
 	// The copy of the program that the questions about it use too, whose lock
 	// this check holds until it is answered: the same check answers both.
 	mut shared_copy := &ProgramCopy(unsafe { nil })
@@ -1331,26 +1579,44 @@ fn (mut app App) run_v_check(path string, text string) []JsonError {
 		compile_target = singlefile_tmppath
 	}
 
+	// A narrowed check walks only the module directory of the changed file, in
+	// its counterpart inside the same overlay: the buffers that overlay holds
+	// are the ones it reads, and the rest of the program is not walked at all.
+	mut narrow_work_dir := ''
+	if narrow_dir != '' && use_multifile {
+		if narrow_rel := overlay_relative_path(narrow_dir, overlay.source_root) {
+			narrow_work_dir = os.join_path(overlay.temp_root, narrow_rel)
+		}
+	}
+	if narrow_work_dir != '' {
+		compile_target = narrow_work_dir
+	} else {
+		// No overlay to narrow it in: the whole program stays the target.
+		narrow_dir = ''
+	}
 	mut cmd_args := []string{}
 	module_name := get_module_name(text)
-	// A module checked with the program that imports it is not a library there.
+	// A module checked with the program that imports it is not a library there,
+	// and the directory a narrowed check walks holds a library module on its
+	// own, which has no `fn main()` of its own to satisfy.
 	is_library_module := if use_multifile {
-		!app.is_program_dir(overlay.source_work_dir)
+		!app.is_program_dir(if narrow_dir != '' { narrow_dir } else { overlay.source_work_dir })
 	} else {
 		module_name != '' && module_name != 'main'
 	}
 	if use_multifile {
-		cmd_args = build_v_check_args_multifile(is_library_module)
-		log('MULTIFILE CMD - compile_target=${compile_target}): v ${cmd_args.join(' ')}')
+		cmd_args = check_args_with_defines(build_v_check_args_multifile(is_library_module), defines)
+		log('MULTIFILE CMD - compile_target=${compile_target} narrow=${narrow_dir != ''}): v ${cmd_args.join(' ')}')
 	} else {
-		cmd_args = build_v_check_args_single(file_to_check, is_library_module)
+		cmd_args = check_args_with_defines(build_v_check_args_single(file_to_check, is_library_module),
+			defines)
 		log('SINGLEFILE CMD: v ${cmd_args.join(' ')}')
 	}
 
 	exec_dir := if use_multifile { compile_target } else { working_dir }
 	diagnostic_source_dir := if use_multifile { exec_dir } else { os.dir(file_to_check) }
 	program_uris := if use_multifile {
-		app.program_open_files(real_path, overlay)
+		app.program_open_files_answered(real_path, program_dir, narrow_dir)
 	} else {
 		map[string]string{}
 	}
@@ -1358,9 +1624,9 @@ fn (mut app App) run_v_check(path string, text string) []JsonError {
 	// check: they are shown at once (see DiagnosticsServer.ask).
 	publish := app.diagnostics_partial
 	partial := if publish != unsafe { nil } {
-		fn [publish, diagnostic_source_dir, file_to_check, use_multifile, overlay, real_path, program_uris, path] (answer os.Result) {
+		fn [publish, diagnostic_source_dir, file_to_check, use_multifile, overlay, real_path, program_uris, compile_target, path] (answer os.Result) {
 			found := split_check_errors(answer.output, diagnostic_source_dir, file_to_check,
-				use_multifile, overlay, real_path, program_uris)
+				use_multifile, overlay, real_path, program_uris, compile_target)
 			publish(path, found)
 		}
 	} else {
@@ -1373,6 +1639,8 @@ fn (mut app App) run_v_check(path string, text string) []JsonError {
 			return false
 		}
 	}
+	prep_ms := time.now().unix_milli() - prep_stage_start_ms
+	run_stage_start_ms := time.now().unix_milli()
 	x := if server_exe != '' {
 		mut servers := app.diagnostics_servers
 		servers.check(server_exe, cmd_args, exec_dir, cancelled, partial) or {
@@ -1381,6 +1649,7 @@ fn (mut app App) run_v_check(path string, text string) []JsonError {
 	} else {
 		run_v_argv_cancelled(cmd_args, exec_dir, cancelled)
 	}
+	run_ms := time.now().unix_milli() - run_stage_start_ms
 	if shared_copy != unsafe { nil } {
 		shared_copy.mutex.unlock()
 	}
@@ -1390,25 +1659,39 @@ fn (mut app App) run_v_check(path string, text string) []JsonError {
 		// A newer check replaced this one; its answer goes nowhere.
 		return []
 	}
-
+	// Parse covers splitting the compiler output into per-file diagnostics.
+	parse_stage_start_ms := time.now().unix_milli()
 	found := split_check_errors(x.output, diagnostic_source_dir, file_to_check, use_multifile,
-		overlay, real_path, program_uris)
+		overlay, real_path, program_uris, compile_target)
+	parse_ms := time.now().unix_milli() - parse_stage_start_ms
+	if os.getenv('VLS_PERF_LOG') != '' {
+		total_ms := time.now().unix_milli() - stages_total_start_ms
+		app.send_log_message('diagnostics stages fp=${fp_ms} prep=${prep_ms} run=${run_ms} parse=${parse_ms} total=${total_ms} target=${check_target}',
+			4)
+	}
 	if server_exe == '' {
 		cleanup_compilation_temp(temp_project_dir, singlefile_tmppath)
 	}
 
 	if use_multifile {
 		// The check covered the whole program, so it answers for every open file
-		// of that program too, including the ones it found nothing in.
+		// of that program too, including the ones it found nothing in. A narrowed
+		// one covered the module directory of the changed file alone, so
+		// program_uris held only the program's open files that sit inside it: the
+		// rest are not published for at all and keep what they already show.
 		app.program_errors = found.program.clone()
-		app.program_dir_checked = overlay.source_work_dir
+		app.program_dir_checked = if narrow_dir != '' {
+			narrow_dir
+		} else {
+			overlay.source_work_dir
+		}
 		log('FILTERED ERRORS: ${found.file.len} of ${found.parsed}')
-		app.cache_v_check_result(path, content_hash, gen, found.file, x.exit_code, found.parsed)
+		app.cache_v_check_result(path, program_dir, fingerprint, found.file, x.exit_code, found.parsed)
 		return found.file
 	}
 
 	log('V3 CHECK ERRORS: ${found.parsed}')
-	app.cache_v_check_result(path, content_hash, gen, found.file, x.exit_code, found.parsed)
+	app.cache_v_check_result(path, program_dir, fingerprint, found.file, x.exit_code, found.parsed)
 	return found.file
 }
 
@@ -1424,13 +1707,30 @@ struct CheckErrors {
 // program_open_files returns the other open files of the program `overlay`
 // checks than the file at `real_path`: their URIs by normalized path.
 fn (app &App) program_open_files(real_path string, overlay CompilationOverlay) map[string]string {
+	return app.program_open_files_answered(real_path, overlay.source_work_dir, '')
+}
+
+// program_open_files_answered is program_open_files for the program directory
+// given directly, restricted to the files inside `answered_dir` when the check
+// answers only for those (a narrowed target, see narrow_check_dir). A check of
+// one module directory says nothing about the program's other open files, so
+// they keep the diagnostics they have rather than be told they hold none: an
+// empty set would clear the errors the last check of the whole program found in
+// them.
+fn (app &App) program_open_files_answered(real_path string, program_dir string, answered_dir string) map[string]string {
 	mut program_uris := map[string]string{}
 	for open_uri, _ in app.open_files {
 		open_path := uri_to_path(open_uri)
-		if normalized_index_path(open_path) != normalized_index_path(real_path)
-			&& app.program_root(open_path) == overlay.source_work_dir {
-			program_uris[normalized_index_path(open_path)] = open_uri
+		if normalized_index_path(open_path) == normalized_index_path(real_path) {
+			continue
 		}
+		if app.program_root(open_path) != program_dir {
+			continue
+		}
+		if answered_dir != '' && !path_is_within(normalize_overlay_path(open_path), answered_dir) {
+			continue
+		}
+		program_uris[normalized_index_path(open_path)] = open_uri
 	}
 	return program_uris
 }
@@ -1438,7 +1738,7 @@ fn (app &App) program_open_files(real_path string, overlay CompilationOverlay) m
 // split_check_errors reads the diagnostics of `output`, what a check printed,
 // for the file at `real_path`, and, when the check covered its program, for the
 // other open files of the program, `program_uris` (see program_open_files).
-fn split_check_errors(output string, diagnostic_source_dir string, file_to_check string, use_multifile bool, overlay CompilationOverlay, real_path string, program_uris map[string]string) CheckErrors {
+fn split_check_errors(output string, diagnostic_source_dir string, file_to_check string, use_multifile bool, overlay CompilationOverlay, real_path string, program_uris map[string]string, base_dir string) CheckErrors {
 	// Parse V3's native flat-AST checker diagnostics so ordinary diagnostics stay
 	// on the default backend.
 	mut v_errors := parse_v_check_diagnostics(output, diagnostic_source_dir)
@@ -1455,7 +1755,7 @@ fn split_check_errors(output string, diagnostic_source_dir string, file_to_check
 	}
 	mut filtered_errors := []JsonError{}
 	for err in v_errors {
-		err_file := source_path_from_overlay(err.path, overlay)
+		err_file := source_path_from_overlay(err.path, overlay, base_dir)
 		if normalized_index_path(err_file) == normalized_index_path(real_path) {
 			filtered_errors << JsonError{
 				path:    real_path
@@ -1490,10 +1790,9 @@ fn split_check_errors(output string, diagnostic_source_dir string, file_to_check
 fn (mut app App) write_tracked_files_to_temp(working_dir string) !string {
 	log('WRITING ${app.open_files.len} tracked files to temp directory')
 
-	// create subdir; a diagnostics server checks the same one every time, so it
-	// is rebuilt in place
+	// create subdir; a diagnostics server checks the same stable directory every
+	// time, so it is synced in place instead of rebuilt
 	temp_project_dir := if app.overlay_dir != '' {
-		os.rmdir_all(app.overlay_dir) or {}
 		app.overlay_dir
 	} else {
 		os.join_path(app.temp_dir, 'project_${time.now().unix_nano()}')
@@ -1516,6 +1815,14 @@ fn (mut app App) write_tracked_files_to_temp(working_dir string) !string {
 			rel_path = os.file_name(file_path)
 		}
 		temp_file_path := os.join_path(temp_project_dir, rel_path)
+
+		// Sync-only-changed: a buffer the overlay already holds is left alone,
+		// keeping its modification time. A file that changed always differs, so
+		// the file the check runs for is never skipped.
+		if overlay_file_content_matches(temp_file_path, content) {
+			log('KEPT FILE: ${temp_file_path}')
+			continue
+		}
 
 		// create parent dir
 		temp_file_dir := os.dir(temp_file_path)
@@ -2062,6 +2369,15 @@ fn (mut app App) on_did_change_watched_files(request Request) {
 	app.importable_modules_cache = map[string]ImportableModulesCache{}
 	for change in params.changes {
 		app.forget_module_folder(uri_to_path(change.uri))
+		// A project's `vls.json` holds the defines its checks run with, so a
+		// change of it is a change of the configuration (see vls_config.v).
+		app.forget_config_file(uri_to_path(change.uri))
+		// A file appearing or disappearing changes the listing a fingerprint
+		// walks; a file only changing does not, because the content memo gates
+		// on its size, inode and mtime.
+		if change.event_type == 1 || change.event_type == 3 {
+			app.forget_project_files()
+		}
 	}
 	open_uris_by_path := app.open_index_uris_by_path()
 	for change in params.changes {
@@ -2287,6 +2603,10 @@ fn (mut app App) run_v_line_info(method Method, path string, line_info string) R
 	real_path := uri_to_path(path)
 	log('real_path=${real_path}, method=${method}')
 
+	// A read flushes the debounce: the slow check runs now, so the overlay this
+	// answer is read against is the one the pause was going to publish anyway.
+	app.rush_pending_diagnostics(path)
+
 	// V3 answers first; V1 what it cannot, such as a file that does not parse.
 	if served := app.v3_line_info(method, path, real_path, line_info) {
 		return served
@@ -2303,12 +2623,93 @@ fn (mut app App) run_v_line_info(method Method, path string, line_info string) R
 	return app.run_v_line_info_once(method, path, line_info, compilation_work_dir(normalize_overlay_path(real_path)))
 }
 
+// PooledLineInfo is the answer of the shared diagnostics-server pool to one
+// `-line-info` question, with the copy of the program it comes from.
+struct PooledLineInfo {
+	output  string
+	overlay CompilationOverlay
+}
+
+// run_v_line_info_pooled answers from the shared diagnostics-server pool,
+// which checks the same copy of the program the diagnostics slow path checks
+// (see ProgramCopy): a warm server answers in a fraction of the time a
+// compiler process of its own takes to start. None means the pool has no
+// answer, and the caller falls back to that one-shot process. The pool never
+// changes how the session drives the compiler: compat and missing modes keep
+// their one-shot path, and the mode probes there still run.
+fn (mut app App) run_v_line_info_pooled(method Method, path string, line_info string) ?PooledLineInfo {
+	if app.line_info_mode == .compat || app.line_info_mode == .missing {
+		return none
+	}
+	exe := resolve_diagnostics_server_exe() or { return none }
+	real_path := uri_to_path(path)
+	program_dir := app.program_root(real_path)
+	mut pool := app.v3_query_pool()
+	if !pool.begin_operation() {
+		return none
+	}
+	defer {
+		pool.end_operation()
+	}
+	mut program := pool.program_copy(program_dir)
+	program.mutex.lock()
+	defer {
+		program.mutex.unlock()
+	}
+	app.prepare_program_copy(mut pool, mut program, real_path, program_dir) or {
+		log('no pooled copy of ${program_dir}: ${err}')
+		return none
+	}
+	app.v3_sync_open_files(mut program.project) or {
+		log('no pooled copy of ${program_dir}: ${err}')
+		return none
+	}
+	content := app.open_files[path] or { os.read_file(real_path) or { return none } }
+	copy_path := program.project.write(normalize_overlay_path(real_path), content) or {
+		log('no pooled copy of ${program_dir}: ${err}')
+		return none
+	}
+	project := program.project
+	// A test file is a program of its own, which V builds with the files of
+	// its module: the program of the directory leaves it out.
+	target := if copy_path.ends_with('_test.v') { copy_path } else { '.' }
+	// The command line of the checks of the diagnostics (see
+	// build_v_check_args_multifile), whose servers answer the questions too.
+	is_library := target == '.' && !app.is_program_dir(project.overlay.source_work_dir)
+	mut args := v3_compiler_selection_args()
+	if is_library {
+		args << '-shared'
+	}
+	args << ['-check', '-nocolor', target]
+	mut servers := app.v3_query_pool()
+	result := servers.query(exe, args, project.overlay.temp_work_dir, '${copy_path}:${line_info}') or {
+		return none
+	}
+	if result.exit_code != 0 {
+		return none
+	}
+	output := normalize_v_line_info_output(result.output, method)
+	if output == '' {
+		return none
+	}
+	return PooledLineInfo{
+		output:  output
+		overlay: project.overlay
+	}
+}
+
 // run_v_line_info_once answers from a compiler process of its own, which checks
 // the program from `work_dir`.
 fn (mut app App) run_v_line_info_once(method Method, path string, line_info string, work_dir string) ResponseResult {
 	real_path := uri_to_path(path)
 	if app.line_info_mode == .missing {
 		return app.line_info_unavailable_result(method, path, line_info)
+	}
+	// A warm shared server answers from the copy of the program it already
+	// checks, without the overlay and the compiler process of its own below.
+	if pooled := app.run_v_line_info_pooled(method, path, line_info) {
+		return app.line_info_result(method, path, line_info, pooled.output, true,
+			pooled.overlay.temp_root, pooled.overlay, pooled.overlay.temp_work_dir)
 	}
 	mut working_dir := os.dir(real_path)
 	mut file_to_check := real_path
@@ -2439,13 +2840,13 @@ fn (mut app App) run_v_line_info_once(method Method, path string, line_info stri
 
 	log('RUN RES ${x}')
 	return app.line_info_result(method, path, line_info, output, use_multifile, temp_project_dir,
-		overlay)
+		overlay, compile_target)
 }
 
 // line_info_result turns what the compiler printed into the answer the client
 // expects. Both the one-shot process and the persistent compiler end here, so
 // the two paths cannot drift apart.
-fn (mut app App) line_info_result(method Method, path string, line_info string, output string, use_multifile bool, temp_project_dir string, overlay CompilationOverlay) ResponseResult {
+fn (mut app App) line_info_result(method Method, path string, line_info string, output string, use_multifile bool, temp_project_dir string, overlay CompilationOverlay, compile_target string) ResponseResult {
 	// Default to JSON null so any unhandled method branch produces a valid LSP response.
 	mut result := ResponseResult('null')
 	match method {
@@ -2508,7 +2909,7 @@ fn (mut app App) line_info_result(method Method, path string, line_info string, 
 				col := fields[fields.len - 1].int()
 				mut uri_path := os.to_slash(fields[..fields.len - 2].join(':'))
 				if use_multifile && temp_project_dir != '' {
-					uri_path = source_path_from_overlay(uri_path, overlay)
+					uri_path = source_path_from_overlay(uri_path, overlay, compile_target)
 					log('MAPPED TO uri_path=${uri_path}')
 				}
 				// Build a proper percent-encoded DocumentUri so paths containing
@@ -2518,7 +2919,6 @@ fn (mut app App) line_info_result(method Method, path string, line_info string, 
 				result = app.compiler_location(uri_path, line_nr, col)
 			}
 		}
-		else {}
 	}
 
 	return result

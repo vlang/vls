@@ -16,6 +16,16 @@ Build & test (development)
 # V struct JSON attributes
 - Use `@[json]` attributes only when a field name does not exactly match the JSON name.
 
+# Rewording a commit that is not HEAD
+- Do not use `git rebase -i`: this host runs the sequence editor through `sh`, so
+  `%1` never expands and the rebase dies with "there was a problem with the editor".
+- The reliable path is a temp branch plus a replay, which needs no force-push:
+  `git checkout -b tmp <sha>`, `git commit --amend -F msg.txt` there, then
+  `git rebase --onto tmp <old-sha> feat/<branch>` and `git branch -D tmp`.
+- Always run `git add` and `git commit` sequentially, never as parallel tool calls:
+  two parallel calls race and one commit ends up holding both tracks' files, which
+  then needs the reword above. After grouping, verify with `git log --stat -1`.
+
 Mandatory guardrails (enforced for all agent work)
  - Add `2>&1` to commands so all output is captured.
  - Keep `.md` lines ≤ 100 characters.

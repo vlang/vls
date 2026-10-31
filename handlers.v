@@ -422,11 +422,19 @@ fn (mut app App) hover_with_written_declaration(uri string, position Position, r
 // documentation of its own declaration. `line_info` asks the hover.
 fn (mut app App) hover_result(uri string, position Position, line_info string) ResponseResult {
 	real_path := uri_to_path(uri)
+	// No flush here: every read below answers from the buffer or the index,
+	// never from the overlay a pending slow check would publish. v3_hover
+	// asks with the buffer's own content, the indexed lookups read the index
+	// as it stands, and the one-shot line-info writes the buffer to its own
+	// overlay. Flushing would only start a full compile concurrently with the
+	// one these reads may already run, and the debounced slow check still
+	// publishes on its own afterwards. (run_v_line_info keeps its flush: the
+	// definition family can read what only a checked program says.)
 	mut located := false
 	if answer := app.v3_hover(uri, real_path, line_info) {
 		if location := answer.declared_at {
 			located = true
-			if hover := app.function_declaration_hover(location) {
+			if hover := app.function_declaration_hover(uri, location) {
 				return hover
 			}
 			// A local or a parameter V3 knows no type of: nothing else can tell
@@ -443,7 +451,7 @@ fn (mut app App) hover_result(uri string, position Position, line_info string) R
 	// function is declared, and V1 what anything else is.
 	if !located {
 		if location := app.resolve_indexed_definition(uri, position) {
-			if hover := app.function_declaration_hover(location) {
+			if hover := app.function_declaration_hover(uri, location) {
 				return hover
 			}
 		}
@@ -459,8 +467,10 @@ fn (mut app App) hover_result(uri string, position Position, line_info string) R
 // function_declaration_hover shows the function, the method or the method of an
 // interface declared at `location` as its declaration writes it, with the
 // documentation written above it: what a hover shows for its declaration and
-// for each of its uses. None when something else is declared there.
-fn (mut app App) function_declaration_hover(location Location) ?Hover {
+// for each of its uses. `uri` is the document the hover is asked in, so a
+// declaration from another file of the project links to it. None when something
+// else is declared there.
+fn (mut app App) function_declaration_hover(uri string, location Location) ?Hover {
 	content := app.index_source_for(location.uri) or { return none }
 	lines := content.split_into_lines()
 	line := location.range.start.line
@@ -476,10 +486,18 @@ fn (mut app App) function_declaration_hover(location Location) ?Hover {
 		return none
 	}
 	doc := extract_doc_comment(lines, line)
+	link := app.declaration_file_link(uri, location)
+	mut value := '```v\n${declaration}\n```'
+	if doc != '' {
+		value += '\n\n${doc}'
+	}
+	if link != '' {
+		value += '\n\n${link}'
+	}
 	return Hover{
 		contents: MarkupContent{
 			kind:  'markdown'
-			value: '```v\n${declaration}\n```' + if doc == '' { '' } else { '\n\n${doc}' }
+			value: value
 		}
 	}
 }
@@ -574,12 +592,117 @@ fn (mut app App) source_hover_fallback(uri string, position Position) ?Hover {
 	if declaration == '' {
 		return none
 	}
+	// The members of a struct or an enum are the index's to tell, from the same
+	// file the reads above have just opened.
+	content := app.index_source_for(location.uri) or { '' }
 	return Hover{
 		contents: MarkupContent{
 			kind:  'markdown'
-			value: '```v\n${declaration}\n```'
+			value: app.declaration_hover_value(location.uri, content, declaration)
 		}
 	}
+}
+
+// hover_member_cap bounds how many members a hover lists of one type, so a
+// struct with a hundred fields does not fill the screen.
+const hover_member_cap = 20
+
+// declaration_hover_value is the markdown a hover on a declaration shows: the
+// declaration as the source writes it, and — inside the same fence — the members
+// the index knows of a struct or an enum, so hovering the type shows its shape.
+fn (mut app App) declaration_hover_value(uri string, content string, declaration string) string {
+	mut body := declaration
+	name := declaration_type_name(declaration)
+	if name != '' {
+		members := app.hover_type_member_lines(uri, content, name)
+		if members.len > 0 {
+			// The declaration the source writes is cut at the `{`, so the shape
+			// opens it again before listing what is inside.
+			body += ' {\n\t' + members.join('\n\t') + '\n}'
+		}
+	}
+	return '```v\n${body}\n```'
+}
+
+// declaration_type_name returns the name the type of a `struct` or an `enum`
+// declaration header declares, without the type parameters a generic one writes
+// after it (`Pair[T]` gives `Pair`), or '' for any other declaration.
+fn declaration_type_name(declaration string) string {
+	mut text := declaration.trim_space()
+	if text.starts_with('pub ') {
+		text = text[4..].trim_space()
+	}
+	keyword := if text.starts_with('struct ') {
+		'struct '
+	} else if text.starts_with('enum ') {
+		'enum '
+	} else {
+		return ''
+	}
+	rest := text[keyword.len..].trim_space()
+	mut end := 0
+	for end < rest.len && (is_ident_char(rest[end]) || rest[end] == `.`) {
+		end++
+	}
+	name := rest[..end]
+	if name == '' {
+		return ''
+	}
+	return name.all_after_last('.')
+}
+
+// hover_type_member_lines lists what the index knows of the type `typ` for a
+// hover: the fields of a struct as `name Type`, as the source writes the type,
+// or the variants of an enum as their names, both in declaration order and both
+// capped at hover_member_cap with a tail that says how many were left out.
+// Empty when the index names no members of it, which is what makes a hover fall
+// back to the declaration alone.
+fn (mut app App) hover_type_member_lines(uri string, content string, typ string) []string {
+	members := app.type_members(uri, content, typ)
+	mut listed := []string{}
+	if members.field_declared_types.len > 0 {
+		for name, declared in members.field_declared_types {
+			listed << '${name} ${declared}'
+		}
+	} else if variants := app.indexed_enum_members(uri, content, typ) {
+		for variant in variants {
+			listed << variant.label
+		}
+	}
+	if listed.len == 0 {
+		return []string{}
+	}
+	mut lines := []string{cap: hover_member_cap + 1}
+	for line in listed {
+		if lines.len == hover_member_cap {
+			break
+		}
+		lines << line
+	}
+	if listed.len > hover_member_cap {
+		lines << '// ... ${listed.len - hover_member_cap} more'
+	}
+	return lines
+}
+
+// declaration_file_link is the markdown link to the file a hover's declaration
+// lives in, relative to the project root, the way rust-analyzer links a
+// declaration in another file. '' when it is the file the hover is asked in, or
+// when the two share no project root.
+fn (mut app App) declaration_file_link(uri string, location Location) string {
+	if uri == '' || location.uri == '' || location.uri == uri {
+		return ''
+	}
+	root := find_project_root(os.dir(uri_to_path(uri)))
+	if root == '' {
+		return ''
+	}
+	relative := path_relative_to(uri_to_path(location.uri).replace('\\', '/'), root.replace('\\',
+		'/')) or { return '' }
+	if relative == '' {
+		return ''
+	}
+	return '[${relative}](${relative})'
 }
 
 // hovered_variable_name returns the identifier at `position` when it references a
@@ -860,6 +983,17 @@ fn (mut app App) member_selector_hover(uri string, position Position) ?Hover {
 	if static_member := app.language_static_hover(uri, content, receiver, name) {
 		return static_member
 	}
+	// A variant of an enum, `Color.red`, which the compiler says nothing of and
+	// the index has the declaration of: what it carries after `=`.
+	if variant := app.enum_variant_hover(uri, content, receiver, name) {
+		return variant
+	}
+	// A constant of a module, `shapes.max_size`, whose value its declaration
+	// states: the index has the module's files, and the compiler answers
+	// nothing for a qualified name it did not resolve to an import.
+	if module_const := app.module_const_hover(uri, content, receiver, name) {
+		return module_const
+	}
 	typ := app.expression_type(uri, content, receiver, position)
 	if typ == '' {
 		return none
@@ -938,6 +1072,191 @@ fn language_member_hover(name string, signature string) Hover {
 			value: '```v\n${signature}\n```' + if doc == '' { '' } else { '\n\n${doc}' }
 		}
 	}
+}
+
+// enum_variant_hover answers for `Type.variant` when `Type` is an enum the index
+// knows: the variant with the value its declaration carries. None for anything
+// else, and for a variant that declares no value.
+fn (mut app App) enum_variant_hover(uri string, content string, receiver string, name string) ?Hover {
+	if receiver == '' || name == '' || !is_type_name(receiver) {
+		return none
+	}
+	declaration := app.indexed_enum_member_declaration(uri, content, receiver, name)
+	if declaration == '' {
+		return none
+	}
+	value := declaration_const_value(declaration, name)
+	if value == '' {
+		return none
+	}
+	return Hover{
+		contents: MarkupContent{
+			kind:  'markdown'
+			value: '```v\n${receiver}.${name} = ${value}\n```'
+		}
+	}
+}
+
+// module_receiver_is_local reports whether `name` is bound in this file: a
+// local, a parameter, or a declaration. A bound name is never a module, even
+// when a folder shares its name.
+fn module_receiver_is_local(content string, candidate string) bool {
+	if candidate == '' {
+		return false
+	}
+	for raw in content.split_into_lines() {
+		trimmed := raw.trim_space()
+		if trimmed.starts_with('//') {
+			continue
+		}
+		op := trimmed.index(' := ') or { -1 }
+		if op > 0 {
+			lhs := trimmed[..op].trim_space().trim_string_left('mut ').trim_space()
+			if lhs == candidate {
+				return true
+			}
+		}
+		if trimmed.starts_with('mut ') {
+			rest := trimmed[4..].trim_space()
+			space := rest.index(' ') or { -1 }
+			if space > 0 && rest[..space] == candidate {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// module_const_hover answers for a constant reached through its module,
+// `shapes.max_size`. The module is resolved the way an import of it would be,
+// so a local named like the module is never followed, and the value is the one
+// the declaration line states. Nothing is invented: no module, no declaration
+// or no literal means no hover.
+fn (mut app App) module_const_hover(uri string, content string, module_name string, name string) ?Hover {
+	if module_name == '' || name == '' || !is_plain_identifier(module_name)
+		|| module_name in v_keywords {
+		return none
+	}
+	// A local of this file is not a module, even when a folder shares its name.
+	if module_receiver_is_local(content, module_name) {
+		return none
+	}
+	module_dir := app.resolve_indexed_import_module_dir(module_name, os.dir(uri_to_path(uri)))
+	if module_dir == '' {
+		return none
+	}
+	app.ensure_dir_shallow_indexed(module_dir)
+	normalized_dir := normalized_index_path(module_dir)
+	mut indexed_uris := app.symbol_index.keys()
+	indexed_uris.sort()
+	for indexed_uri in indexed_uris {
+		indexed_entry := app.symbol_index[indexed_uri] or { continue }
+		if normalized_index_path(os.dir(uri_to_path(indexed_uri))) != normalized_dir {
+			continue
+		}
+		source := app.index_source_for(indexed_uri) or { continue }
+		source_lines := source.split_into_lines()
+		for symbol in indexed_entry.doc_symbols {
+			if symbol.kind != sym_kind_constant || symbol.name != name {
+				continue
+			}
+			if symbol.range.start.line < 0 || symbol.range.start.line >= source_lines.len {
+				continue
+			}
+			declaration := source_lines[symbol.range.start.line]
+			value := declaration_const_value(declaration, name)
+			if value == '' {
+				continue
+			}
+			return Hover{
+				contents: MarkupContent{
+					kind:  'markdown'
+					value: '```v\n${module_name}.${name} = ${value}\n```'
+				}
+			}
+		}
+	}
+	return none
+}
+
+// indexed_enum_member_declaration returns the line that declares the member
+// `name` of the enum `typ`, as the file the index holds it in writes it, or ''
+// when the index names no such member.
+fn (mut app App) indexed_enum_member_declaration(uri string, content string, typ string, name string) string {
+	dir, type_name, _, expected_module := app.receiver_type_scope(uri, content, typ)
+	if dir == '' || type_name == '' || expected_module == '' || !os.is_dir(dir) {
+		return ''
+	}
+	app.ensure_dir_shallow_indexed(dir)
+	normalized_dir := normalized_index_path(dir)
+	mut indexed_uris := app.symbol_index.keys()
+	indexed_uris.sort()
+	for indexed_uri in indexed_uris {
+		entry := app.symbol_index[indexed_uri] or { continue }
+		if normalized_index_path(os.dir(uri_to_path(indexed_uri))) != normalized_dir
+			|| entry.module_name != expected_module {
+			continue
+		}
+		source := app.index_source_for(indexed_uri) or { continue }
+		source_lines := source.split_into_lines()
+		for symbol in entry.doc_symbols {
+			if symbol.kind != sym_kind_enum || symbol.name != type_name {
+				continue
+			}
+			for member in symbol.children {
+				if member.kind != sym_kind_enum_member || member.name != name {
+					continue
+				}
+				if member.range.start.line < 0 || member.range.start.line >= source_lines.len {
+					return ''
+				}
+				return source_lines[member.range.start.line].trim_space()
+			}
+		}
+	}
+	return ''
+}
+
+// declaration_const_value returns the value the declaration `declaration`
+// carries for `name` after its `=`: the literal of a constant (`name = 100`), or
+// the whole parenthesised group of an enum variant's value (`name = (1 << 2)`).
+// '' when the declaration carries no value of that name.
+fn declaration_const_value(declaration string, name string) string {
+	if name == '' {
+		return ''
+	}
+	mut from := 0
+	for from < declaration.len {
+		relative := declaration[from..].index(name) or { return '' }
+		start := from + relative
+		from = start + name.len
+		if (start > 0 && is_ident_char(declaration[start - 1]))
+			|| (from < declaration.len && is_ident_char(declaration[from])) {
+			continue
+		}
+		mut rest := declaration[from..].trim_left(' \t')
+		if !rest.starts_with('=') || rest.starts_with('==') {
+			continue
+		}
+		return const_value_text(rest[1..].trim_space())
+	}
+	return ''
+}
+
+// const_value_text is the value written after the `=` of a declaration: up to a
+// trailing comment, and through the matching `)` when it is parenthesised.
+fn const_value_text(rest string) string {
+	if rest.starts_with('(') {
+		close := matching_delimiter(rest, 0, `(`, `)`)
+		if close > 0 {
+			return rest[..close + 1]
+		}
+	}
+	mut end := 0
+	for end < rest.len && rest[end] !in [` `, `\t`] && !rest[end..].starts_with('//') {
+		end++
+	}
+	return rest[..end].trim_space()
 }
 
 // binding_type_narrows reports whether the compiler tells better than the index
@@ -1151,34 +1470,30 @@ fn (mut app App) operation_at_pos(method Method, request Request) Response {
 	// before building the -line-info string (P0-01).
 	byte_col := app.client_col_to_byte_col(path, params.position.line, col)
 
+	// The `-line-info` question each method asks the compiler. It names no state,
+	// so the answers the index gives below carry it: a question the compiler is
+	// held for is asked again afterwards, on a thread of its own.
+	line_info := match method {
+		.hover {
+			'${line_nr}:hv^${byte_col}'
+		}
+		.signature_help {
+			'${line_nr}:fn^${byte_col}'
+		}
+		.definition, .declaration, .type_definition, .implementation {
+			'${line_nr}:gd^${byte_col}'
+		}
+		else {
+			''
+		}
+	}
+
 	// Completion is served from the incremental source index. Starting a fresh V
 	// compiler process here used to cost hundreds of milliseconds on every request,
 	// even when the compiler returned no completion payload for an incomplete file.
 	if method == .completion {
 		indexed := app.indexed_completions(path, params.position)
 		prefix := app.word_prefix_at_cursor(path, params.position)
-		if prefix != '' && indexed.items.len > 0 {
-			all_labels := indexed.items.map(it.label)
-			filtered := fuzzy_filter(prefix, all_labels)
-			mut filtered_set := map[string]bool{}
-			for label in filtered {
-				filtered_set[label] = true
-			}
-			mut filtered_items := []Detail{}
-			for item in indexed.items {
-				if item.label in filtered_set {
-					filtered_items << item
-				}
-			}
-			budgeted_filtered, _ := apply_completion_budget(filtered_items)
-			return Response{
-				id:     request.id
-				result: CompletionList{
-					is_incomplete: true
-					items:         budgeted_filtered
-				}
-			}
-		}
 		if indexed.use_compiler {
 			compiler_result := app.run_v_line_info(.completion, path, '${line_nr}:${byte_col}')
 			compiler_items := if compiler_result is []Detail {
@@ -1193,6 +1508,28 @@ fn (mut app App) operation_at_pos(method Method, request Request) Response {
 				result: CompletionList{
 					is_incomplete: truncated
 					items:         budgeted
+				}
+			}
+		}
+		if prefix != '' && indexed.items.len > 0 {
+			all_labels := indexed.items.map(it.label)
+			filtered := fuzzy_filter(prefix, all_labels)
+			mut filtered_set := map[string]bool{}
+			for label in filtered {
+				filtered_set[label] = true
+			}
+			mut filtered_items := []Detail{}
+			for item in indexed.items {
+				if item.label in filtered_set {
+					filtered_items << item
+				}
+			}
+			budgeted_filtered, truncated_filtered := apply_completion_budget(filtered_items)
+			return Response{
+				id:     request.id
+				result: CompletionList{
+					is_incomplete: truncated_filtered
+					items:         budgeted_filtered
 				}
 			}
 		}
@@ -1213,6 +1550,7 @@ fn (mut app App) operation_at_pos(method Method, request Request) Response {
 	// and aware of unsaved files.
 	if method in [.definition, .declaration, .type_definition, .implementation] {
 		if location := app.resolve_indexed_definition(path, params.position) {
+			app.schedule_answer_followup(method, path, params.position, line_info)
 			return Response{
 				id:     request.id
 				result: location
@@ -1234,6 +1572,7 @@ fn (mut app App) operation_at_pos(method Method, request Request) Response {
 					}
 				}
 			}
+			app.schedule_answer_followup(.hover, path, params.position, line_info)
 			return Response{
 				id:     request.id
 				result: binding
@@ -1244,44 +1583,30 @@ fn (mut app App) operation_at_pos(method Method, request Request) Response {
 		// declaration from the index waits until after the compiler, which brings
 		// the documentation with its answer.
 		if member := app.member_selector_hover(path, params.position) {
+			app.schedule_answer_followup(.hover, path, params.position, line_info)
 			return Response{
 				id:     request.id
 				result: member
 			}
 		}
-	}
-
-	line_info := match method {
-		.hover {
-			'${line_nr}:hv^${byte_col}'
-		}
-		.signature_help {
-			'${line_nr}:fn^${byte_col}'
-		}
-		.definition, .declaration, .type_definition, .implementation {
-			'${line_nr}:gd^${byte_col}'
-		}
-		else {
-			''
-		}
-	}
-
-	mut result := if method == .hover {
-		app.hover_result(path, params.position, line_info)
-	} else {
-		app.run_v_line_info(method, path, line_info)
-	}
-	if result is string && result == 'null' {
-		if method == .hover {
-			if fallback := app.source_hover_fallback(path, params.position) {
-				result = fallback
-			}
-		} else if method == .signature_help {
-			if fallback := app.source_signature_fallback(path, params.position) {
-				result = fallback
+		// Nothing the index answers on its own was found, so this question falls
+		// through to the compiler. The declaration the index resolves is still an
+		// answer, and a check that holds the compilers makes it worth sending now:
+		// the compiler's answer follows, on the same id (answer_budget.v).
+		if app.compiler_answer_is_held(path, .hover) {
+			if declaration := app.source_hover_fallback(path, params.position) {
+				app.schedule_answer_followup(.hover, path, params.position, line_info)
+				return Response{
+					id:     request.id
+					result: declaration
+				}
 			}
 		}
 	}
+
+	started_ms := time.now().unix_milli()
+	mut result := app.compiler_answer(method, path, params.position, line_info)
+	app.note_compiler_answer(path, method, time.now().unix_milli() - started_ms)
 	$if debug {
 		log(result.str())
 	}
@@ -1289,6 +1614,31 @@ fn (mut app App) operation_at_pos(method Method, request Request) Response {
 		id:     request.id
 		result: result
 	}
+}
+
+// compiler_answer asks the compiler what the index could not say: what the name
+// under the cursor is, or where it is declared, with the fallbacks applied to an
+// answer the compiler has none for. The deferred answer of a request the index
+// already answered ends here too (see answer_budget.v), so the two cannot drift
+// apart.
+fn (mut app App) compiler_answer(method Method, uri string, position Position, line_info string) ResponseResult {
+	mut result := if method == .hover {
+		app.hover_result(uri, position, line_info)
+	} else {
+		app.run_v_line_info(method, uri, line_info)
+	}
+	if result is string && result == 'null' {
+		if method == .hover {
+			if fallback := app.source_hover_fallback(uri, position) {
+				result = fallback
+			}
+		} else if method == .signature_help {
+			if fallback := app.source_signature_fallback(uri, position) {
+				result = fallback
+			}
+		}
+	}
+	return result
 }
 
 // apply_completion_budget caps the items sent to the client so a huge index
@@ -4515,8 +4865,15 @@ fn (mut app App) on_did_open(request Request) bool {
 			return false
 		}
 	}
+	// A project's `vls.json` is read when one of its files is opened, so its
+	// switches are in step with the first check rather than the next one.
+	app.apply_project_settings(app.project_config_for_path(uri_to_path(uri)))
 	diagnostics_mutation := app.begin_diagnostics_project_schedule(uri)
 	app.open_files[uri] = content
+	// A file appearing is what the fingerprint's listing memo cannot see by
+	// itself, so an opened file retires it (create/delete watcher events do
+	// the same for the ones no editor ever opens).
+	app.forget_project_files()
 	if version := params.text_document.version {
 		app.open_files_versions[uri] = version
 	}
@@ -4592,6 +4949,13 @@ fn (mut app App) build_diagnostics_notification(uri string, content string) Noti
 	return app.diagnostics_notification_for(uri, content, v_errors)
 }
 
+// The editor repaints every diagnostic published for one file, so a file the
+// compiler reports hundreds of errors for makes the editor itself slow to
+// respond. 100 is far above the handful a cascade produces and above what the
+// Problems panel is useful for, while the first ones in position order carry
+// the real error the cascade grew from.
+const max_published_diagnostics = 100
+
 // diagnostics_notification_for turns the compiler's errors for one file into
 // the notification that publishes them.
 fn (mut app App) diagnostics_notification_for(uri string, content string, v_errors []JsonError) Notification {
@@ -4610,6 +4974,32 @@ fn (mut app App) diagnostics_notification_for(uri string, content string, v_erro
 		// The compiler reports byte columns; re-encode the diagnostic range in
 		// the client's negotiated encoding (P0-01).
 		diagnostics << app.encode_diagnostic_range(v_error_to_lsp_diagnostic(v_err), lines)
+	}
+	// Cap what reaches the editor, keeping the first diagnostics in the order
+	// the compiler reported them (position order), so a cascade never buries
+	// its first, real error under its own fallout. The marker is appended so
+	// the truncation is visible instead of silently hiding diagnostics; the
+	// dedup above already ran, so `trimmed` counts real diagnostics.
+	if diagnostics.len > max_published_diagnostics {
+		trimmed := diagnostics.len - max_published_diagnostics
+		diagnostics.trim(max_published_diagnostics)
+		diagnostics << LSPDiagnostic{
+			range:    LSPRange{
+				start: Position{
+					line: 0
+					char: 0
+				}
+				end:   Position{
+					line: 0
+					char: 0
+				}
+			}
+			message:  '... and ${trimmed} more'
+			severity: 3 // information
+			source:   none
+			code:     none
+			tags:     none
+		}
 	}
 	pd_params := PublishDiagnosticsParams{
 		uri:         uri
@@ -4686,6 +5076,11 @@ fn (mut app App) on_did_change(request Request) ?Notification {
 	diagnostics_mutation := app.begin_diagnostics_project_schedule(uri)
 	app.text = content
 	app.open_files[uri] = content // Update tracked file
+	// The buffer changed, so the check result cached for the old content no
+	// longer describes it: drop it rather than letting a pull re-serve fixed
+	// errors until the new check publishes. The scheduler entry for the same
+	// document is dropped by the mutation above.
+	app.diag_cache.delete(uri)
 	if version := params.text_document.version {
 		app.open_files_versions[uri] = version
 	}
@@ -4774,6 +5169,9 @@ fn (mut app App) on_did_save(request Request) ?Notification {
 			}
 		}
 	}
+	// The copy of this program is built and synced now rather than by the next
+	// question, which would otherwise pay for it; the check below reuses it.
+	app.prewarm_program_copy(uri_to_path(uri))
 	if diagnostics_mutation.tickets.len > 0 {
 		if app.finish_diagnostics_project_schedule(diagnostics_mutation, uri, content) {
 			return none
@@ -4836,7 +5234,9 @@ fn (mut app App) prepare_rename_request(request Request) !Response {
 	}
 	uri := params.text_document.uri
 	scope := app.index_scope_for_uri(uri)
-	app.ensure_index_scope(scope)
+	// prepareRename only answers what the name is: it never edits anything, so
+	// it waits for no index refresh (the rename that follows does its own).
+	app.ensure_index_scope_for_request(scope)
 	mut cache := app.rename_anchor_cache()
 	defer {
 		app.keep_rename_anchors(cache)
@@ -4937,7 +5337,7 @@ fn (mut app App) handle_workspace_symbol(request Request) Response {
 	// Populate/refresh the persistent index once, then answer from it. Tests are
 	// included so test functions/types are discoverable (P2-11). Subsequent
 	// queries reuse the index instead of re-reading and re-parsing the workspace.
-	app.ensure_dirs_indexed(app.index_query_dirs())
+	app.ensure_indexed_for_request(app.index_query_dirs())
 	app.ensure_loose_file_dirs_shallow_indexed()
 	results := app.query_workspace_symbols(query)
 	app.end_progress(token, '')
@@ -6498,36 +6898,7 @@ fn get_module_name(content string) string {
 // parse_imports extracts the module paths from `import` statements in `content`.
 // Returns a list of module paths, e.g. ['os', 'math', 'v.util'].
 fn parse_imports(content string) []string {
-	mut imports := []string{}
-	mut in_import_block := false
-	for line in content.split_into_lines() {
-		trimmed := line.trim_space()
-		if in_import_block {
-			if trimmed.starts_with(')') {
-				in_import_block = false
-				continue
-			}
-			parts := trimmed.all_before('//').fields()
-			if parts.len > 0 {
-				imports << parts[0]
-			}
-			continue
-		}
-		if !trimmed.starts_with('import ') {
-			continue
-		}
-		rest := trimmed[7..].all_before('//').trim_space()
-		if rest == '(' {
-			in_import_block = true
-			continue
-		}
-		// Strip optional `as alias` suffix
-		parts := rest.fields()
-		if parts.len > 0 {
-			imports << parts[0]
-		}
-	}
-	return imports
+	return parse_import_refs(content).map(it.path)
 }
 
 // get_import_completions returns completion items for an `import` line.
@@ -6636,8 +7007,10 @@ fn (mut app App) find_doc_comment_for_symbol(symbol string, current_lines []stri
 	// 2 & 3. Other open files and project .v files, via the persistent index
 	// (avoids re-reading and re-parsing the whole project on every hover, P1-08).
 	// Scope the lookup to the current module directory, then the current project,
-	// so a same-named symbol from an unrelated project/module is never used.
-	app.ensure_dirs_indexed(app.index_query_dirs())
+	// so a same-named symbol from an unrelated project/module is never used. The
+	// refresh runs in the background, so the hover answers from the index as it
+	// stands and never walks the project on the request thread.
+	app.ensure_indexed_for_request(app.index_query_dirs())
 	cur_dir := os.dir(uri_to_path(current_file_uri))
 	scope_root := find_project_root(cur_dir)
 	if imported_module != '' {
@@ -6933,11 +7306,13 @@ fn (mut app App) handle_inlay_hints(request Request) Response {
 
 	// The compiler knows the type of every variable and the parameter names of
 	// every call; the source heuristics below only run when it cannot answer.
+	// Both paths report the same two LSP kinds, so the granular toggles filter
+	// either answer without invalidating the compiler cache.
 	if compiler_hints := app.compiler_inlay_hints(uri, content) {
 		return Response{
 			id:     request.id
-			result: compiler_hints.filter(it.position.line >= start_line
-				&& it.position.line <= end_line)
+			result: filter_inlay_hints_by_toggles(compiler_hints.filter(it.position.line >= start_line
+				&& it.position.line <= end_line), app.inlay_hint_toggles())
 		}
 	}
 
@@ -7070,8 +7445,78 @@ fn (mut app App) handle_inlay_hints(request Request) Response {
 
 	return Response{
 		id:     request.id
-		result: hints
+		result: filter_inlay_hints_by_toggles(hints, app.inlay_hint_toggles())
 	}
+}
+
+// inlay_hint_variable_types_disabled_key and
+// inlay_hint_parameter_names_disabled_key are reserved entries of
+// inlay_hint_cache holding the granular inlay-hint switches: a present entry
+// means the client disabled that kind, an absent one means it is enabled, so
+// a fresh server shows every hint exactly as before. Each key holds a space,
+// which a document URI never holds raw, so the per-URI cache logic never
+// reads them as a document. They live in the cache because App is declared
+// in another file: no new server state can be added from here, and a module
+// global would need `-enable-globals`, which the build does not pass.
+const inlay_hint_variable_types_disabled_key = 'vls inlay variable types disabled'
+const inlay_hint_parameter_names_disabled_key = 'vls inlay parameter names disabled'
+
+// InlayHintToggles carries the granular inlay-hint switches of
+// `vls.inlayHints`: `variable_types` filters the type hints (kind 1) and
+// `parameter_names` filters the parameter hints (kind 2, which also covers
+// the field names of positional struct literals: the compiler reports both
+// with the same kind, so they cannot be toggled apart downstream).
+struct InlayHintToggles {
+mut:
+	variable_types  bool = true
+	parameter_names bool = true
+}
+
+// inlay_hint_toggles reports the granular switches, both enabled unless the
+// client disabled them through workspace/didChangeConfiguration.
+fn (app &App) inlay_hint_toggles() InlayHintToggles {
+	return InlayHintToggles{
+		variable_types:  inlay_hint_variable_types_disabled_key !in app.inlay_hint_cache
+		parameter_names: inlay_hint_parameter_names_disabled_key !in app.inlay_hint_cache
+	}
+}
+
+// set_inlay_hint_toggles stores the granular switches for the inlayHint
+// requests that follow. It takes effect without a restart and without
+// invalidating the cached compiler hints, which the toggles filter after.
+fn (mut app App) set_inlay_hint_toggles(toggles InlayHintToggles) {
+	if toggles.variable_types {
+		app.inlay_hint_cache.delete(inlay_hint_variable_types_disabled_key)
+	} else {
+		app.inlay_hint_cache[inlay_hint_variable_types_disabled_key] = CachedInlayHints{}
+	}
+	if toggles.parameter_names {
+		app.inlay_hint_cache.delete(inlay_hint_parameter_names_disabled_key)
+	} else {
+		app.inlay_hint_cache[inlay_hint_parameter_names_disabled_key] = CachedInlayHints{}
+	}
+}
+
+// inlay_hint_kind_allowed reports whether a hint of `kind` survives the
+// granular toggles. A kind the toggles do not know passes through, so a
+// newer compiler reporting a new kind keeps showing it.
+fn inlay_hint_kind_allowed(kind int, toggles InlayHintToggles) bool {
+	if kind == inlay_hint_kind_type {
+		return toggles.variable_types
+	}
+	if kind == inlay_hint_kind_parameter {
+		return toggles.parameter_names
+	}
+	return true
+}
+
+// filter_inlay_hints_by_toggles drops the hint kinds the client disabled.
+// With every toggle on it returns the input unchanged.
+fn filter_inlay_hints_by_toggles(hints []InlayHint, toggles InlayHintToggles) []InlayHint {
+	if toggles.variable_types && toggles.parameter_names {
+		return hints
+	}
+	return hints.filter(inlay_hint_kind_allowed(it.kind, toggles))
 }
 
 struct CachedInlayHints {
@@ -7603,9 +8048,11 @@ fn (app &App) workspace_search_dirs(primary_dir string) []string {
 
 // search_symbol_in_dirs returns every lexical occurrence of `symbol` across the
 // indexed project, read from the reference-occurrence index rather than by
-// re-walking and re-tokenizing the workspace on each request (P1-05).
+// re-walking and re-tokenizing the workspace on each request (P1-05). The
+// refresh of a stale index is left to the background worker: a references
+// request answers from the index as it stands.
 fn (mut app App) search_symbol_in_dirs(symbol string, request_id int) []Location {
-	app.ensure_dirs_indexed(app.index_query_dirs())
+	app.ensure_indexed_for_request(app.index_query_dirs())
 	app.ensure_loose_file_dirs_shallow_indexed()
 	mut locations := []Location{}
 	mut uris := app.symbol_index.keys()
@@ -7894,6 +8341,68 @@ fn (mut app App) handle_code_action(request Request) Response {
 		if action := build_safe_organize_imports_action(uri, content, lines, app.position_encoding) {
 			actions << action
 		}
+	}
+
+	// 3. Fill struct literal — add the fields a literal omits, with their zero
+	// values, so an incomplete literal can be completed from the lightbulb.
+	if code_action_kind_wanted(only, code_action_kind_quickfix) {
+		if action := app.build_fill_struct_literal_action(uri, content, params.range) {
+			actions << action
+		}
+	}
+
+	// 4. Extract variable — lift a pure expression into a variable of its own.
+	// 5. Inline variable — fold a local that is written once back into its uses.
+	// 6. Extract function — lift whole statements into a function of their own.
+	// 7. Add import — the inverse of removing one, for a module the file uses.
+	// 8. Implement missing members — stub the interface this struct is for.
+	if code_action_kind_wanted(only, code_action_kind_quickfix) {
+		if action := app.build_extract_variable_action(uri, content, params.range) {
+			actions << action
+		}
+		if action := app.build_inline_variable_action(uri, content, params.range) {
+			actions << action
+		}
+		if action := app.build_extract_function_action(uri, content, params.range) {
+			actions << action
+		}
+		if action := app.build_extract_to_file_action(uri, content, params.range) {
+			actions << action
+		}
+		if action := app.build_add_import_action(uri, content, params.range) {
+			actions << action
+		}
+		if action := app.build_implement_members_action(uri, content, params.range) {
+			actions << action
+		}
+	}
+
+	// 9. Structural replace — the rule written on the line of the selection.
+	if code_action_kind_wanted(only, code_action_kind_refactor) {
+		rule := app.ssr_rule_at_selection(uri, params.range)
+		if rule != '' {
+			if action := app.build_ssr_action(uri, content, params.range, rule) {
+				actions << action
+			}
+		} else {
+			// A rule the user wrote somewhere else in the file is the one case
+			// where offering nothing silently is a dead end, so the log says
+			// where the rule is and what it needs. A file with no rule at all
+			// stays quiet, so every ordinary request costs nothing.
+			rule_line := ssr_rule_line(content)
+			if rule_line >= 0 {
+				rule_at := rule_line + 1
+				app.send_log_message('structural replace: the rule is on line ${rule_at}, and the selection must start on it',
+					2)
+			}
+		}
+	}
+
+	// 10. Generate test for an untested function — reads the coverage run the
+	// project's `vls.json` or its editor settings point at.
+	if code_action_kind_wanted(only, code_action_kind_quickfix) {
+		source_path := normalize_overlay_path(os.abs_path(uri_to_path(uri)))
+		actions << app.build_untested_test_actions(uri, source_path, params.range)
 	}
 
 	return Response{
@@ -8414,6 +8923,8 @@ fn (mut app App) handle_selection_range(request Request) Response {
 // on_did_change_configuration handles the workspace/didChangeConfiguration notification.
 // It applies settings that affect server behaviour:
 //   vls.inlayHints  – enable or disable inlay type hints
+//   vls.inlayHints.variableTypes – enable or disable the type hints (kind 1)
+//   vls.inlayHints.parameterNames – enable or disable the parameter hints (kind 2)
 //   vls.diagnostics – enable or disable live compile-time diagnostics
 fn (mut app App) on_did_change_configuration(request Request) {
 	resolved := resolve_workspace_settings(request.params)
@@ -8422,6 +8933,17 @@ fn (mut app App) on_did_change_configuration(request Request) {
 			app.inlay_hints_enabled = enabled
 			log('VLS: inlay_hints_enabled=${enabled}')
 		}
+	}
+	if resolved.has_variable_types || resolved.has_parameter_names {
+		mut toggles := app.inlay_hint_toggles()
+		if variable_types := resolved.variable_types {
+			toggles.variable_types = variable_types
+		}
+		if parameter_names := resolved.parameter_names {
+			toggles.parameter_names = parameter_names
+		}
+		app.set_inlay_hint_toggles(toggles)
+		log('VLS: inlay_hint_toggles=variableTypes:${toggles.variable_types},parameterNames:${toggles.parameter_names}')
 	}
 	if resolved.has_diagnostics {
 		if enabled := resolved.diagnostics {
@@ -8432,14 +8954,25 @@ fn (mut app App) on_did_change_configuration(request Request) {
 			log('VLS: diagnostics_enabled=${enabled}')
 		}
 	}
+	// Layered configuration: the editor's own settings are the top tier, a
+	// project's `vls.json` the next, and VLS_DEFINES the last. Storing the
+	// editor tier here also applies the merged result to the switches above,
+	// and records the defines the checks of a project run with (vls_config.v).
+	app.apply_editor_configuration(request.params)
 }
 
 struct ResolvedWorkspaceSettings {
 mut:
-	inlay_hints     ?bool
-	diagnostics     ?bool
-	has_inlay_hints bool
-	has_diagnostics bool
+	inlay_hints            ?bool
+	diagnostics            ?bool
+	variable_types         ?bool
+	parameter_names        ?bool
+	coverage_directory     ?string
+	has_inlay_hints        bool
+	has_diagnostics        bool
+	has_variable_types     bool
+	has_parameter_names    bool
+	has_coverage_directory bool
 }
 
 fn resolve_workspace_settings(params_json string) ResolvedWorkspaceSettings {
@@ -8448,47 +8981,55 @@ fn resolve_workspace_settings(params_json string) ResolvedWorkspaceSettings {
 	sectioned_flat := json2.decode[DidChangeConfigurationParams](params_json) or {
 		DidChangeConfigurationParams{}
 	}
-	merge_workspace_settings(mut resolved, sectioned_flat.settings.vls.inlay_hints, sectioned_flat.settings.vls.diagnostics)
+	merge_workspace_settings(mut resolved, sectioned_flat.settings.vls.inlay_hints, sectioned_flat.settings.vls.diagnostics, sectioned_flat.settings.vls.coverage_directory)
 
 	sectioned_inlay_nested := json2.decode[DidChangeConfigurationParamsCompat](params_json) or {
 		DidChangeConfigurationParamsCompat{}
 	}
-	merge_workspace_settings(mut resolved, sectioned_inlay_nested.settings.vls.inlay_hints.enabled, sectioned_inlay_nested.settings.vls.diagnostics)
+	merge_workspace_settings(mut resolved, sectioned_inlay_nested.settings.vls.inlay_hints.enabled, sectioned_inlay_nested.settings.vls.diagnostics, sectioned_inlay_nested.settings.vls.coverage_directory)
+	merge_inlay_hint_options(mut resolved, sectioned_inlay_nested.settings.vls.inlay_hints)
 
 	sectioned_diagnostics_nested := json2.decode[DidChangeConfigurationParamsNestedDiagnosticsCompat](params_json) or {
 		DidChangeConfigurationParamsNestedDiagnosticsCompat{}
 	}
-	merge_workspace_settings(mut resolved, sectioned_diagnostics_nested.settings.vls.inlay_hints, sectioned_diagnostics_nested.settings.vls.diagnostics.enabled)
+	merge_workspace_settings(mut resolved, sectioned_diagnostics_nested.settings.vls.inlay_hints, sectioned_diagnostics_nested.settings.vls.diagnostics.enabled, sectioned_diagnostics_nested.settings.vls.coverage_directory)
 
 	sectioned_nested := json2.decode[DidChangeConfigurationParamsNestedFeaturesCompat](params_json) or {
 		DidChangeConfigurationParamsNestedFeaturesCompat{}
 	}
-	merge_workspace_settings(mut resolved, sectioned_nested.settings.vls.inlay_hints.enabled, sectioned_nested.settings.vls.diagnostics.enabled)
+	merge_workspace_settings(mut resolved, sectioned_nested.settings.vls.inlay_hints.enabled, sectioned_nested.settings.vls.diagnostics.enabled, sectioned_nested.settings.vls.coverage_directory)
+	merge_inlay_hint_options(mut resolved, sectioned_nested.settings.vls.inlay_hints)
 
 	direct_flat := json2.decode[DidChangeConfigurationDirectParams](params_json) or {
 		DidChangeConfigurationDirectParams{}
 	}
-	merge_workspace_settings(mut resolved, direct_flat.settings.inlay_hints, direct_flat.settings.diagnostics)
+	merge_workspace_settings(mut resolved, direct_flat.settings.inlay_hints, direct_flat.settings.diagnostics, direct_flat.settings.coverage_directory)
 
 	direct_inlay_nested := json2.decode[DidChangeConfigurationDirectParamsCompat](params_json) or {
 		DidChangeConfigurationDirectParamsCompat{}
 	}
-	merge_workspace_settings(mut resolved, direct_inlay_nested.settings.inlay_hints.enabled, direct_inlay_nested.settings.diagnostics)
+	merge_workspace_settings(mut resolved, direct_inlay_nested.settings.inlay_hints.enabled, direct_inlay_nested.settings.diagnostics, direct_inlay_nested.settings.coverage_directory)
+	merge_inlay_hint_options(mut resolved, direct_inlay_nested.settings.inlay_hints)
 
 	direct_diagnostics_nested := json2.decode[DidChangeConfigurationDirectParamsNestedDiagnosticsCompat](params_json) or {
 		DidChangeConfigurationDirectParamsNestedDiagnosticsCompat{}
 	}
-	merge_workspace_settings(mut resolved, direct_diagnostics_nested.settings.inlay_hints, direct_diagnostics_nested.settings.diagnostics.enabled)
+	merge_workspace_settings(mut resolved, direct_diagnostics_nested.settings.inlay_hints, direct_diagnostics_nested.settings.diagnostics.enabled, direct_diagnostics_nested.settings.coverage_directory)
 
 	direct_nested := json2.decode[DidChangeConfigurationDirectParamsNestedFeaturesCompat](params_json) or {
 		DidChangeConfigurationDirectParamsNestedFeaturesCompat{}
 	}
-	merge_workspace_settings(mut resolved, direct_nested.settings.inlay_hints.enabled, direct_nested.settings.diagnostics.enabled)
+	merge_workspace_settings(mut resolved, direct_nested.settings.inlay_hints.enabled, direct_nested.settings.diagnostics.enabled, direct_nested.settings.coverage_directory)
+	merge_inlay_hint_options(mut resolved, direct_nested.settings.inlay_hints)
 	return resolved
 }
 
+// merge_workspace_settings folds the switched settings of one decoded settings
+// shape into the resolved settings. First-wins: an absent key keeps whatever an
+// earlier shape already set, and unknown keys never reach it because the decoder
+// drops them.
 fn merge_workspace_settings(mut resolved ResolvedWorkspaceSettings, inlay_hints ?bool,
-	diagnostics ?bool) {
+	diagnostics ?bool, coverage_directory ?string) {
 	if !resolved.has_inlay_hints {
 		if enabled := inlay_hints {
 			resolved.inlay_hints = enabled
@@ -8499,6 +9040,32 @@ fn merge_workspace_settings(mut resolved ResolvedWorkspaceSettings, inlay_hints 
 		if enabled := diagnostics {
 			resolved.diagnostics = enabled
 			resolved.has_diagnostics = true
+		}
+	}
+	if !resolved.has_coverage_directory {
+		if directory := coverage_directory {
+			resolved.coverage_directory = directory
+			resolved.has_coverage_directory = true
+		}
+	}
+}
+
+// merge_inlay_hint_options folds the granular inlay-hint switches of one
+// decoded settings shape into the resolved settings. Like
+// merge_workspace_settings it is first-wins: an absent key keeps whatever an
+// earlier shape already set, and unknown keys never reach it because the
+// decoder drops them.
+fn merge_inlay_hint_options(mut resolved ResolvedWorkspaceSettings, inlay_hints WorkspaceInlayHintsSettings) {
+	if !resolved.has_variable_types {
+		if variable_types := inlay_hints.variable_types {
+			resolved.variable_types = variable_types
+			resolved.has_variable_types = true
+		}
+	}
+	if !resolved.has_parameter_names {
+		if parameter_names := inlay_hints.parameter_names {
+			resolved.parameter_names = parameter_names
+			resolved.has_parameter_names = true
 		}
 	}
 }
@@ -8515,6 +9082,11 @@ fn (mut app App) on_initialize(request Request) ?string {
 	if roots.len > 0 {
 		app.workspace_roots = roots
 		log('VLS: workspace roots set to ${roots}')
+		// A workspace root's own `vls.json` is read at once, so a project
+		// folder's switches apply before any of its files is opened.
+		for root in roots {
+			app.apply_project_settings(app.project_config_for_root(root))
+		}
 	}
 	app.supports_dynamic_watched_files_registration =
 		client_supports_dynamic_watched_files_registration(params)
@@ -8928,6 +9500,27 @@ fn (mut app App) handle_execute_command(request Request) Response {
 				}
 			}
 		}
+		'vls.generateTest' {
+			// The test body is written by `v cover --write-tests`, which is the one
+			// tool that generates it. The server names the file and reports what
+			// the tool wrote; the editor then reflects the file back to itself.
+			args := params.arguments or { [] }
+			uri, path, path_error := app.code_lens_command_target(args)
+			if path_error != '' {
+				app.send_show_message('vls: cannot generate a test: ${path_error}', 1)
+			} else if !compiler_is_available() {
+				app.send_show_message('vls: the V compiler (`v`) was not found on PATH.', 1)
+			} else {
+				directory := app.coverage_directory_for_path(path)
+				if directory == '' {
+					app.send_show_message(coverage_missing_message(), 1)
+				} else if written := write_tests_for_file(directory, path) {
+					app.send_show_message('vls: ${written.trim_space()}', 3)
+				} else {
+					app.send_show_message('vls: could not write the tests: ${err.msg()}', 1)
+				}
+			}
+		}
 		else {
 			app.send_show_message('vls: unknown command ${params.command}', 2)
 		}
@@ -8996,12 +9589,19 @@ fn (mut app App) handle_inline_value(request Request) Response {
 }
 
 // handle_linked_editing_range handles textDocument/linkedEditingRange.
-// Returns ranges for all occurrences of the identifier under the cursor in the
-// same line (identifier and its declaration) for linked editing.
+// Linked editing rewrites every occurrence of the name under the cursor at
+// once, so its set is the set a rename would edit, resolved across the whole
+// program: an occurrence in this file may name a declaration in another, and a
+// same-named local elsewhere in the program is not it. Asking the rename where
+// it would edit cannot produce a set that disagrees with the rename, and every
+// refusal of a rename — a name V owns, a name declared outside the project, an
+// occurrence the compiler cannot place, a project only partly indexed —
+// answers nothing here, which the client reads as "no linked editing" instead
+// of an edit that leaves an occurrence behind.
 fn (mut app App) handle_linked_editing_range(request Request) Response {
-	params := json2.decode[TextDocumentPositionParams](request.params) or {
+	params := json2.decode[LinkedEditingRangeParams](request.params) or {
 		$if debug {
-			log('Failed to decode TextDocumentPositionParams for linkedEditingRange: ${err}')
+			log('Failed to decode LinkedEditingRangeParams: ${err}')
 		}
 		return Response{
 			id:     request.id
@@ -9009,46 +9609,54 @@ fn (mut app App) handle_linked_editing_range(request Request) Response {
 		}
 	}
 	uri := params.text_document.uri
-	content := app.open_files[uri] or { os.read_file(uri_to_path(uri)) or { '' } }
-	lines := content.split_into_lines()
-	if params.position.line < 0 || params.position.line >= lines.len {
+	scope := app.index_scope_for_uri(uri)
+	app.ensure_index_scope(scope)
+	if !app.index_is_complete_for_scope(scope) {
+		app.send_log_message('linked editing refused: ${scope.dir} is only partly indexed', 2)
 		return Response{
 			id:     request.id
 			result: 'null'
 		}
 	}
-	line_text := lines[params.position.line]
-	start, end := find_word_bounds_at_col(line_text, params.position.char, app.position_encoding)
-	if start < 0 || end <= start {
+	mut cache := app.rename_anchor_cache()
+	defer {
+		app.keep_rename_anchors(cache)
+	}
+	target := app.rename_target(uri, params.position.line, params.position.char, scope, mut cache) or {
 		return Response{
 			id:     request.id
 			result: 'null'
 		}
 	}
-	symbol := substr_by_char_bounds(line_text, start, end, app.position_encoding)
-	// Collect all occurrences of the symbol on this line.
+	locations := app.rename_locations(target, scope, request.id, mut cache) or {
+		app.send_log_message('linked editing refused: ${err.msg()}', 2)
+		return Response{
+			id:     request.id
+			result: 'null'
+		}
+	}
 	mut ranges := []LSPRange{}
-	mut col := 0
-	for col < line_text.len {
-		idx := line_text[col..].index(symbol) or { break }
-		abs_idx := col + idx
-		before_ok := abs_idx == 0 || !is_ident_char(line_text[abs_idx - 1])
-		after_ok := abs_idx + symbol.len >= line_text.len || !is_ident_char(line_text[abs_idx + symbol.len])
-		if before_ok && after_ok {
-			sc := byte_to_encoded_col(line_text, abs_idx, app.position_encoding)
-			ec := byte_to_encoded_col(line_text, abs_idx + symbol.len, app.position_encoding)
-			ranges << LSPRange{
-				start: Position{
-					line: params.position.line
-					char: sc
-				}
-				end:   Position{
-					line: params.position.line
-					char: ec
-				}
+	for loc in locations {
+		// LinkedEditingRanges carries no document, so a range that belongs to
+		// another file would be applied to this one: keep this file's ranges,
+		// from the cross-file set, so that the answer is exact here.
+		if loc.uri != uri {
+			continue
+		}
+		// The answer for some occurrences carries no end column, so the length
+		// of the name stands in for it, as it does in a rename.
+		end_char := if loc.range.end.char > loc.range.start.char {
+			loc.range.end.char
+		} else {
+			loc.range.start.char + byte_to_encoded_col(target.symbol, target.symbol.len, app.position_encoding)
+		}
+		ranges << LSPRange{
+			start: loc.range.start
+			end:   Position{
+				line: loc.range.start.line
+				char: end_char
 			}
 		}
-		col = abs_idx + 1
 	}
 	if ranges.len == 0 {
 		return Response{

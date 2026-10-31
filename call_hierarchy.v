@@ -224,8 +224,9 @@ fn find_fn_in_content(fn_name string, content string, uri string, enc PositionEn
 // find_fn_declaration resolves a function/method named `fn_name` from the
 // persistent symbol index, restricted to `search_dirs`.
 fn (mut app App) find_fn_declaration(fn_name string, search_dirs []string, include_tests bool) CallHierarchyItem {
-	// Answer from the persistent symbol index instead of re-scanning every file.
-	app.ensure_dirs_indexed(search_dirs)
+	// Call hierarchy is a read request: it answers from the persistent symbol
+	// index and leaves the walk of a stale index to the background worker.
+	app.ensure_indexed_for_request(search_dirs)
 	// Prefer a declaration in the primary (current module) directory, then widen
 	// to the full search set; never look outside the supplied dirs, so a
 	// same-named function in an unrelated indexed workspace root is not returned.

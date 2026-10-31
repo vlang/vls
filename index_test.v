@@ -19,6 +19,79 @@ fn index_test_tmpdir(tag string) string {
 	return dir
 }
 
+fn test_index_reserve_target_covers_partial_walks() {
+	// A partial walk reserves what it found too, so growth toward the global
+	// cap is bounded either way: both branches share this target.
+	assert index_reserve_target(0, 0) == 0
+	assert index_reserve_target(0, 50) == 50
+	assert index_reserve_target(500, 50) == 550
+	assert index_reserve_target(0, index_max_files) == index_max_files
+	// Crossing the cap clamps to it rather than dropping the reservation: the
+	// walk can still add entries up to the cap one at a time.
+	assert index_reserve_target(12_000, 10_000) == index_max_files
+	assert index_reserve_target(12_000, 20) == 12_020
+	// Already at or above the cap: reserve nothing.
+	assert index_reserve_target(index_max_files, 1) == 0
+	assert index_reserve_target(index_max_files + 100, 1) == 0
+	// Nothing new to add.
+	assert index_reserve_target(500, 0) == 0
+	assert index_reserve_target(0, 0) == 0
+}
+
+fn test_partial_walk_still_reserves_what_it_found() {
+	// The reservation is not gated on the walk being complete: an incomplete
+	// walk indexes what it found, and that count still sizes the map. The walk
+	// here is genuinely partial — the budget cuts it off — rather than a
+	// complete one with the scope marked afterwards.
+	root := index_test_tmpdir('partial_reserve')
+	defer {
+		os.rmdir_all(root) or {}
+	}
+	for i in 0 .. 30 {
+		os.write_file(os.join_path(root, 'p${i}.v'), 'module p${i}\n\nfn p${i}() {}\n') or {
+			assert false, 'write fixture failed: ${err}'
+			return
+		}
+	}
+	mut app := index_test_app()
+	app.index_walk_budget = 12
+	assert index_reserve_target(0, 12) == 12
+	app.ensure_dirs_indexed([root])
+	// The walk stopped at the budget, so the scope is incomplete and only what
+	// it found was indexed: the reservation counted those files.
+	assert 'recursive:${root}' in app.index_incomplete_scopes, 'the walk completed'
+	assert app.symbol_index.len == 12, 'got ${app.symbol_index.len}'
+	assert index_reserve_target(0, 30) == 30
+	// With the budget lifted the same walk completes and clears the scope.
+	app.index_walk_budget = 0
+	app.indexed_dirs.delete(root)
+	app.ensure_dirs_indexed([root])
+	assert 'recursive:${root}' !in app.index_incomplete_scopes
+	assert app.symbol_index.len == 30, 'got ${app.symbol_index.len}'
+}
+
+fn test_bulk_walk_presizes_symbol_index_without_losing_entries() {
+	// ensure_dirs_indexed reserves the map before a bulk walk so inserts do
+	// not double the backing store repeatedly under a fragmented heap.
+	mut app := index_test_app()
+	app.symbol_index['file:///old.v'] = IndexEntry{}
+	app.symbol_index.reserve(1000)
+	assert app.symbol_index.len == 1, 'reserve must keep existing entries'
+	root := index_test_tmpdir('presized')
+	defer {
+		os.rmdir_all(root) or {}
+	}
+	for i in 0 .. 50 {
+		os.write_file(os.join_path(root, 'f${i}.v'), 'module main\n\nfn f${i}() {}\n') or {
+			assert false, 'write fixture failed: ${err}'
+			return
+		}
+	}
+	app.ensure_dirs_indexed([root])
+	assert app.symbol_index.len == 51, 'got ${app.symbol_index.len}'
+	assert 'file:///old.v' in app.symbol_index
+}
+
 fn test_index_workspace_symbols_from_open_buffers() {
 	mut app := index_test_app()
 	app.open_files['file:///tmp/a.v'] = 'module main\n\nfn alpha() {}\n\nstruct Beta {\n\tx int\n}\n'
@@ -128,6 +201,103 @@ fn test_watched_file_reindex_drops_oversized_disk_entry() {
 	})
 	assert uri !in app.symbol_index
 	assert uri !in app.ref_occurrences
+}
+
+fn test_open_buffer_reindex_skips_oversized_content() {
+	// Open buffers bypass the disk size gate; a huge buffer must not force
+	// an unbounded index build.
+	root := index_test_tmpdir('open_large')
+	defer {
+		os.rmdir_all(root) or {}
+	}
+	path := os.join_path(root, 'large.v')
+	uri := path_to_uri(path)
+	os.write_file(path, 'module main\n\nfn small() {}\n') or {
+		assert false, 'write initial file failed: ${err}'
+		return
+	}
+	mut app := index_test_app()
+	big := 'x'.repeat(int(index_max_file_bytes) + 1)
+	app.open_files[uri] = big
+	app.reindex_uri(uri)
+	assert uri !in app.symbol_index
+	assert uri !in app.ref_occurrences
+	assert uri in app.index_skipped_uris
+	// Shrinking the buffer below the gate re-indexes it.
+	app.open_files[uri] = 'module main\n\nfn small_again() {}\n'
+	app.reindex_uri(uri)
+	assert uri in app.symbol_index
+	assert uri !in app.index_skipped_uris
+}
+
+fn test_an_unsaved_oversized_buffer_counts_as_not_indexed() {
+	// An unsaved buffer has no file on disk, so the file test alone would read
+	// its skipped entry as indexed: a destructive operation would proceed over
+	// references it never saw. Both completeness checks must say otherwise.
+	root := index_test_tmpdir('unsaved_large')
+	defer {
+		os.rmdir_all(root) or {}
+	}
+	// The two files live in separate projects, so one scope's skipped entry
+	// does not describe the other.
+	large_dir := os.join_path(root, 'big')
+	small_dir := os.join_path(root, 'small')
+	os.mkdir_all(large_dir) or {
+		assert false, 'mkdir big failed: ${err}'
+		return
+	}
+	os.mkdir_all(small_dir) or {
+		assert false, 'mkdir small failed: ${err}'
+		return
+	}
+	small := os.join_path(small_dir, 'main.v')
+	small_content := 'module main\n\nfn main() {}\n'
+	os.write_file(small, small_content) or {
+		assert false, 'write small file failed: ${err}'
+		return
+	}
+	unsaved := os.join_path(large_dir, 'unsaved.v')
+	unsaved_uri := path_to_uri(unsaved)
+	assert !os.exists(unsaved), 'the fixture must not write the file'
+	mut app := index_test_app()
+	small_uri := path_to_uri(small)
+	app.open_files[small_uri] = small_content
+	app.open_files[unsaved_uri] = 'x'.repeat(int(index_max_file_bytes) + 1)
+	app.reindex_uri(unsaved_uri)
+
+	assert unsaved_uri in app.index_skipped_uris
+	assert unsaved_uri !in app.symbol_index
+	assert !app.index_is_complete_for_scope(app.index_scope_for_uri(unsaved_uri)), 'an unsaved oversized buffer reads as indexed'
+	assert !app.index_is_complete(), 'an unsaved oversized buffer reads as indexed'
+	// The other project's scope is unaffected by the first file's size.
+	assert app.index_is_complete_for_scope(app.index_scope_for_uri(small_uri))
+}
+
+fn test_occurrences_of_an_oversized_source_are_not_built() {
+	// The occurrence map of a source this large is unbounded work, and the
+	// local-binding hover builds one per keystroke: the same gate the index
+	// applies applies here.
+	root := index_test_tmpdir('occ_large')
+	defer {
+		os.rmdir_all(root) or {}
+	}
+	path := os.join_path(root, 'large.v')
+	uri := path_to_uri(path)
+	os.write_file(path, 'module main\n\nfn small() {}\n') or {
+		assert false, 'write initial file failed: ${err}'
+		return
+	}
+	mut app := index_test_app()
+	app.open_files[uri] = 'x'.repeat(int(index_max_file_bytes) + 1)
+	occ := app.occurrences_for(uri)
+	assert occ.len == 0, 'a large buffer built ${occ.len} occurrence groups'
+	assert uri !in app.ref_occurrences, 'a large buffer was cached'
+	// Below the gate the occurrences are built and cached as before.
+	app.open_files[uri] = 'module main\n\nfn alpha() {\n\talpha()\n}\n'
+	small := app.occurrences_for(uri)
+	assert small.len > 0, 'a normal buffer built nothing'
+	assert 'alpha' in small, 'a normal buffer is missing its names'
+	assert uri in app.ref_occurrences
 }
 
 fn test_watched_file_reindex_obeys_total_entry_limit() {
@@ -330,7 +500,7 @@ fn test_collect_v_files_excludes_hidden_and_heavy_dirs() {
 	os.write_file(os.join_path(root, 'sub', 'lib.v'), 'module main\n') or { return }
 
 	mut files := []string{}
-	assert collect_v_files(root, mut files)
+	assert collect_v_files(root, index_max_files, mut files)
 	assert files.any(it.ends_with('main.v'))
 	assert files.any(it.ends_with('lib.v'))
 	assert files.all(!it.contains('.git'))
@@ -358,7 +528,7 @@ fn test_collect_v_files_excludes_out_of_tree_symlink() {
 		return
 	}
 	mut files := []string{}
-	assert collect_v_files(root, mut files)
+	assert collect_v_files(root, index_max_files, mut files)
 	assert files.any(it.ends_with('in.v'))
 	// The out-of-tree file reachable only via the symlink must NOT be indexed.
 	assert files.all(!it.ends_with('out.v'))
@@ -386,7 +556,7 @@ fn test_collect_v_files_excludes_out_of_tree_file_symlink() {
 	}
 
 	mut files := []string{}
-	assert collect_v_files(root, mut files)
+	assert collect_v_files(root, index_max_files, mut files)
 	assert files.any(it.ends_with('in.v'))
 	assert files.all(!it.ends_with('external.v'))
 }
@@ -407,7 +577,7 @@ fn test_collect_v_files_deduplicates_in_tree_file_symlink() {
 	}
 
 	mut files := []string{}
-	assert collect_v_files(root, mut files)
+	assert collect_v_files(root, index_max_files, mut files)
 	assert files.len == 1
 	assert normalized_index_path(files[0]) == normalized_index_path(real_file)
 
@@ -1046,7 +1216,7 @@ fn test_large_vlang_v_workspace_from_env() {
 	assert os.is_file(os.join_path(root, 'v.mod')), 'VLS_VLANG_V_REPO must point at a vlang/v checkout'
 
 	mut files := []string{}
-	assert collect_v_files(root, mut files), 'vlang/v walk must finish without hitting index bounds'
+	assert collect_v_files(root, index_max_files, mut files), 'vlang/v walk must finish without hitting index bounds'
 	assert files.len >= 2000, 'expected a large vlang/v checkout, found only ${files.len} V files'
 
 	mut app := index_test_app()
@@ -1073,4 +1243,408 @@ fn test_large_vlang_v_workspace_from_env() {
 	} else {
 		assert false, 'expected to find a production fn main under vlang/v cmd'
 	}
+}
+
+fn test_index_encode_range_chars_converts_byte_cols_to_encoding() {
+	r := LSPRange{
+		start: Position{
+			line: 0
+			char: 2
+		}
+		end:   Position{
+			line: 1
+			char: 3
+		}
+	}
+	lines := ['abcdef', 'xyz']
+	got := encode_range_chars(r, lines, .utf8)
+	assert got.start.line == 0, 'start line is preserved'
+	assert got.start.char == 2, 'utf-8 start col passes through'
+	assert got.end.line == 1, 'end line is preserved'
+	assert got.end.char == 3, 'utf-8 end col passes through'
+	oob := LSPRange{
+		start: Position{
+			line: 9
+			char: 4
+		}
+		end:   Position{
+			line: 9
+			char: 6
+		}
+	}
+	oob_got := encode_range_chars(oob, lines, .utf8)
+	assert oob_got.start.line == 9, 'out-of-range start line is preserved'
+	assert oob_got.start.char == 0, 'out-of-range line measures against empty text'
+	assert oob_got.end.char == 0, 'out-of-range end col measures against empty text'
+}
+
+fn test_index_encode_range_chars_counts_multibyte_units_in_utf16() {
+	r := LSPRange{
+		start: Position{
+			line: 0
+			char: 2
+		}
+		end:   Position{
+			line: 0
+			char: 3
+		}
+	}
+	// U+00E9 is two bytes in UTF-8 but one UTF-16 unit.
+	got := encode_range_chars(r, ['éx'], .utf16)
+	assert got.start.char == 1, 'two leading bytes are one utf-16 unit'
+	assert got.end.char == 2, 'three leading bytes are two utf-16 units'
+}
+
+fn test_index_path_is_in_index_scope_matches_recursive_scope() {
+	assert !path_is_in_index_scope('/a/b/c.v', IndexScope{}), 'empty scope matches nothing'
+	rec := IndexScope{
+		dir:       '/a/b'
+		recursive: true
+	}
+	assert path_is_in_index_scope('/a/b/c.v', rec), 'direct child is in recursive scope'
+	assert path_is_in_index_scope('/a/b/sub/c.v', rec), 'nested child is in recursive scope'
+	assert !path_is_in_index_scope('/a/barley/c.v', rec), 'name with shared prefix is not inside'
+	assert !path_is_in_index_scope('/a/c.v', rec), 'sibling is not in recursive scope'
+}
+
+fn test_index_path_is_in_index_scope_shallow_matches_same_dir_only() {
+	dir := os.join_path(os.temp_dir(), 'vls_scope_${os.getpid()}_${time.now().unix_nano()}')
+	os.mkdir_all(dir) or { assert false, 'mkdir failed: ${err}' }
+	defer {
+		os.rmdir_all(dir) or {}
+	}
+	sub := os.join_path(dir, 'sub')
+	os.mkdir_all(sub) or { assert false, 'mkdir sub failed: ${err}' }
+	shallow := IndexScope{
+		dir: dir
+	}
+	assert path_is_in_index_scope(os.join_path(dir, 'a.v'), shallow), 'file in scope dir matches'
+	assert !path_is_in_index_scope(os.join_path(sub, 'b.v'), shallow), 'file in subdir does not match shallow scope'
+}
+
+fn test_index_uri_is_in_index_scope_delegates_to_path_scope() {
+	dir := os.join_path(os.temp_dir(), 'vls_uri_scope_${os.getpid()}_${time.now().unix_nano()}')
+	os.mkdir_all(dir) or { assert false, 'mkdir failed: ${err}' }
+	defer {
+		os.rmdir_all(dir) or {}
+	}
+	uri := path_to_uri(os.join_path(dir, 'a.v'))
+	rec := IndexScope{
+		dir:       dir
+		recursive: true
+	}
+	assert uri_is_in_index_scope(uri, rec), 'uri under recursive dir is in scope'
+	assert !uri_is_in_index_scope(uri, IndexScope{}), 'empty scope matches no uri'
+}
+
+fn test_index_uri_within_any_matches_paths_under_dirs() {
+	dir := os.join_path(os.temp_dir(), 'vls_within_${os.getpid()}_${time.now().unix_nano()}')
+	os.mkdir_all(dir) or { assert false, 'mkdir failed: ${err}' }
+	defer {
+		os.rmdir_all(dir) or {}
+	}
+	uri := path_to_uri(os.join_path(dir, 'a.v'))
+	assert uri_within_any(uri, [dir]), 'uri under dir matches'
+	assert !uri_within_any(uri, [os.join_path(dir, 'sub')]), 'uri outside subdir does not match'
+	assert !uri_within_any(uri, []string{}), 'empty dir list matches nothing'
+}
+
+// --- trigram/fuzzy workspace symbol ranking (see fuzzy_index.v) ---
+
+fn test_fuzzy_normalize_drops_underscores_and_case() {
+	assert fuzzy_normalize('Helper_Name') == 'helpername', 'underscore and case are dropped'
+	assert fuzzy_normalize('abc') == 'abc', 'plain names pass through'
+	assert fuzzy_normalize('') == '', 'empty stays empty'
+}
+
+fn test_fuzzy_trigrams_cap_bounds_memory() {
+	assert fuzzy_trigrams('ab').len == 0, 'names shorter than 3 contribute no trigrams'
+	assert fuzzy_trigrams('abc') == ['abc'], 'a 3-letter name yields its single trigram'
+	tris := fuzzy_trigrams('abcdefghijklmnopqrstuvwxyz0123456789')
+	assert tris.len == fuzzy_trigram_max_per_symbol, 'long names are capped, got ${tris.len}'
+	assert tris[0] == 'abc', 'trigrams keep first-seen order'
+}
+
+fn test_query_workspace_symbols_ranks_overlap_then_match_class() {
+	mut app := index_test_app()
+	app.open_files['file:///tmp/fuzzy_rank.v'] = 'module main\n\nfn alphabet() {}\n\nfn xxalphabet() {}\n\nfn axlphabet() {}\n'
+	app.ensure_dirs_indexed(app.index_query_dirs())
+	got := app.query_workspace_symbols('alphabet').map(it.name)
+	assert got == ['alphabet', 'xxalphabet', 'axlphabet'], 'exact, then higher-overlap substring, then subsequence-only, got ${got}'
+}
+
+fn test_query_workspace_symbols_matches_underscore_insensitive_and_subsequence() {
+	mut app := index_test_app()
+	app.open_files['file:///tmp/fuzzy_sub.v'] = 'module main\n\nfn helper_name() {}\n\nfn unrelated() {}\n'
+	app.ensure_dirs_indexed(app.index_query_dirs())
+	exact := app.query_workspace_symbols('helpername').map(it.name)
+	assert exact == ['helper_name'], 'underscore-insensitive exact match, got ${exact}'
+	sub := app.query_workspace_symbols('hlprnm').map(it.name)
+	assert sub == ['helper_name'], 'subsequence-only match with zero trigram overlap, got ${sub}'
+}
+
+fn test_query_workspace_symbols_short_query_keeps_substring_recall() {
+	mut app := index_test_app()
+	app.open_files['file:///tmp/fuzzy_short.v'] = 'module main\n\nfn alpha() {}\n\nfn beta() {}\n'
+	app.ensure_dirs_indexed(app.index_query_dirs())
+	got := app.query_workspace_symbols('al').map(it.name)
+	assert got == ['alpha'], 'two-letter query keeps legacy substring recall, got ${got}'
+}
+
+fn test_fuzzy_trigram_cache_follows_reindex_and_drop() {
+	mut app := index_test_app()
+	uri := 'file:///tmp/fuzzy_inc.v'
+	app.open_files[uri] = 'module main\n\nfn one() {}\n'
+	app.reindex_uri(uri)
+	assert 'one' in app.symbol_index[uri].symbol_trigrams, 'reindex caches trigrams for the new symbol'
+	assert app.symbol_index[uri].symbol_trigrams['one'].len > 0, 'short symbol one still yields a trigram'
+	app.open_files[uri] = 'module main\n\nfn two() {}\n'
+	app.reindex_uri(uri)
+	assert 'one' !in app.symbol_index[uri].symbol_trigrams, 'reindex drops trigrams of the removed symbol'
+	assert 'two' in app.symbol_index[uri].symbol_trigrams, 'reindex caches trigrams of the new symbol'
+	assert app.query_workspace_symbols('one').len == 0, 'removed symbol is not found'
+	assert app.query_workspace_symbols('two').len == 1, 'new symbol is found'
+	app.drop_index_uri(uri)
+	assert app.query_workspace_symbols('two').len == 0, 'dropped uri yields no symbols'
+}
+
+fn test_fuzzy_trigram_cache_caps_long_names() {
+	mut app := index_test_app()
+	uri := 'file:///tmp/fuzzy_cap.v'
+	long_name := 'abcdefghijklmnopqrstuvwxyz0123456789'
+	app.open_files[uri] = 'module main\n\nfn ${long_name}() {}\n'
+	app.reindex_uri(uri)
+	cached := app.symbol_index[uri].symbol_trigrams[long_name]
+	assert cached.len == fuzzy_trigram_max_per_symbol, 'cached trigrams of a long name are capped, got ${cached.len}'
+	assert app.query_workspace_symbols(long_name).any(it.name == long_name), 'capped long name is still found exactly'
+}
+
+// index_request_refresh_app returns an app whose read requests answer from the
+// index and leave a refresh to the background worker, over `root` as its project.
+fn index_request_refresh_app(root string) (&App, &IndexRefreshScheduler) {
+	mut app := index_test_app()
+	mut scheduler := new_index_refresh_scheduler()
+	app.index_refresh = scheduler
+	app.supports_dynamic_watched_files_registration = false // no client watchers
+	app.ensure_dirs_indexed([root])
+	return app, scheduler
+}
+
+fn test_indexed_for_request_answers_from_the_index_as_it_stands() {
+	root := index_test_tmpdir('request_nowalk')
+	defer {
+		os.rmdir_all(root) or {}
+	}
+	os.write_file(os.join_path(root, 'v.mod'), 'Module {}\n') or {
+		assert false, 'write v.mod failed: ${err}'
+		return
+	}
+	os.write_file(os.join_path(root, 'a.v'), 'module main\n\nfn alpha() {}\n') or {
+		assert false, 'write a.v failed: ${err}'
+		return
+	}
+	mut app, scheduler := index_request_refresh_app(root)
+	assert app.query_workspace_symbols('alpha').len == 1, 'the project walk indexed a.v'
+	assert app.query_workspace_symbols('beta').len == 0, 'beta does not exist yet'
+
+	// A file created after the walk makes the directory stale for the next
+	// request: its throttle has expired and it would be re-walked.
+	os.write_file(os.join_path(root, 'b.v'), 'module main\n\nfn beta() {}\n') or {
+		assert false, 'write b.v failed: ${err}'
+		return
+	}
+	app.indexed_dir_walk_ms[root] = 0
+
+	app.ensure_indexed_for_request([root])
+	assert app.query_workspace_symbols('alpha').len == 1, 'the already-indexed symbol is still answered from the index'
+	assert app.query_workspace_symbols('beta').len == 0, 'a read request must not walk the workspace: it answered with the symbol of the file it had not indexed'
+
+	// The refresh did run, on the background worker: joining it and merging its
+	// result is what makes the new file visible.
+	app.stop_index_refresh()
+	assert scheduler.refreshes == 1, 'the request left exactly one refresh for the worker, got ${scheduler.refreshes}'
+	app.apply_index_refresh_results()
+	assert app.query_workspace_symbols('beta').len == 1, 'the background refresh indexed the file it found'
+	assert app.query_workspace_symbols('alpha').len == 1, 'the untouched file keeps its entry'
+}
+
+fn test_indexed_for_request_coalesces_a_burst_of_requests() {
+	root := index_test_tmpdir('request_burst')
+	defer {
+		os.rmdir_all(root) or {}
+	}
+	os.write_file(os.join_path(root, 'v.mod'), 'Module {}\n') or {
+		assert false, 'write v.mod failed: ${err}'
+		return
+	}
+	os.write_file(os.join_path(root, 'a.v'), 'module main\n\nfn alpha() {}\n') or {
+		assert false, 'write a.v failed: ${err}'
+		return
+	}
+	mut app, scheduler := index_request_refresh_app(root)
+	os.write_file(os.join_path(root, 'b.v'), 'module main\n\nfn beta() {}\n') or {
+		assert false, 'write b.v failed: ${err}'
+		return
+	}
+	app.indexed_dir_walk_ms[root] = 0 // a refresh is due on every one of these
+
+	for _ in 0 .. 20 {
+		app.ensure_indexed_for_request([root])
+	}
+	assert scheduler.workers_started == 1, 'a burst of 20 requests started ${scheduler.workers_started} workers'
+
+	app.stop_index_refresh()
+	assert scheduler.refreshes == 1, 'a burst of 20 requests ran ${scheduler.refreshes} refreshes'
+	assert scheduler.pending.len == 0, 'the queue must be drained when the worker ends'
+	assert scheduler.reindexed_files == 1, 'the one refresh indexed the one new file, got ${scheduler.reindexed_files}'
+	app.apply_index_refresh_results()
+	assert app.query_workspace_symbols('beta').len == 1, 'the one refresh merged the one new file'
+
+	// A stopped scheduler starts no thread again, even for a directory that went
+	// stale again afterwards.
+	app.indexed_dir_walk_ms[root] = 0
+	for _ in 0 .. 10 {
+		app.ensure_indexed_for_request([root])
+	}
+	assert scheduler.workers_started == 1, 'a stopped scheduler starts no further worker, ${scheduler.workers_started} started'
+	assert app.query_workspace_symbols('alpha').len == 1, 'the index still answers from what the one refresh merged'
+}
+
+fn test_watcher_event_still_indexes_on_the_request_thread() {
+	root := index_test_tmpdir('watcher_sync')
+	defer {
+		os.rmdir_all(root) or {}
+	}
+	// The scheduler is in place, so only the watcher's own path can explain the
+	// file being indexed without waiting for the worker.
+	_, scheduler := index_request_refresh_app(root)
+	path := os.join_path(root, 'watched.v')
+	uri := path_to_uri(path)
+	os.write_file(path, 'module main\n\nfn watched_symbol() {}\n') or {
+		assert false, 'write watched.v failed: ${err}'
+		return
+	}
+	mut app := index_test_app()
+	app.index_refresh = scheduler
+
+	app.on_did_change_watched_files(Request{
+		params: json2.encode(DidChangeWatchedFilesParams{
+			changes: [FileEvent{
+				uri:        uri
+				event_type: 1
+			}]
+		})
+	})
+
+	assert uri in app.symbol_index, 'a watcher event indexes the file on the thread it arrived on'
+	assert app.query_workspace_symbols('watched_symbol').len == 1, 'a watcher event needs no background refresh to be visible'
+	assert scheduler.workers_started == 0, 'a watcher event schedules no background refresh, ${scheduler.workers_started} started'
+}
+
+fn test_shutdown_joins_the_background_index_worker() {
+	root := index_test_tmpdir('shutdown_join')
+	defer {
+		os.rmdir_all(root) or {}
+	}
+	os.write_file(os.join_path(root, 'v.mod'), 'Module {}\n') or {
+		assert false, 'write v.mod failed: ${err}'
+		return
+	}
+	os.write_file(os.join_path(root, 'a.v'), 'module main\n\nfn alpha() {}\n') or {
+		assert false, 'write a.v failed: ${err}'
+		return
+	}
+	mut app, scheduler := index_request_refresh_app(root)
+	os.write_file(os.join_path(root, 'b.v'), 'module main\n\nfn beta() {}\n') or {
+		assert false, 'write b.v failed: ${err}'
+		return
+	}
+	app.indexed_dir_walk_ms[root] = 0
+	app.ensure_indexed_for_request([root])
+	assert app.query_workspace_symbols('beta').len == 0, 'the request answered before the refresh landed'
+
+	app.stop_index_refresh()
+	assert scheduler.refreshes == 1, 'shutdown joined the worker: the refresh had not finished (${scheduler.refreshes} done)'
+	assert scheduler.results.len == 1, 'the finished refresh is published for the merge'
+	assert !scheduler.worker_running, 'no worker may outlive the join'
+	app.apply_index_refresh_results()
+	assert app.query_workspace_symbols('beta').len == 1, 'the joined refresh left its result to merge'
+}
+
+fn test_background_refresh_skips_unchanged_files_by_fingerprint() {
+	root := index_test_tmpdir('request_fingerprint')
+	defer {
+		os.rmdir_all(root) or {}
+	}
+	os.write_file(os.join_path(root, 'v.mod'), 'Module {}\n') or {
+		assert false, 'write v.mod failed: ${err}'
+		return
+	}
+	os.write_file(os.join_path(root, 'a.v'), 'module main\n\nfn alpha() {}\n') or {
+		assert false, 'write a.v failed: ${err}'
+		return
+	}
+	os.write_file(os.join_path(root, 'b.v'), 'module main\n\nfn beta() {}\n') or {
+		assert false, 'write b.v failed: ${err}'
+		return
+	}
+	mut app, scheduler := index_request_refresh_app(root)
+	uri_a := path_to_uri(os.join_path(root, 'a.v'))
+	fingerprint_a := app.symbol_index[uri_a].fingerprint
+	assert app.symbol_index.len == 2, 'both files were indexed, got ${app.symbol_index.len}'
+
+	// A refresh with nothing changed on disk parses nothing: the fingerprint of
+	// every entry already matches the content on disk, which is what keeps an
+	// unchanged workspace from being re-parsed on every throttled refresh.
+	app.indexed_dir_walk_ms[root] = 0
+	app.ensure_indexed_for_request([root])
+	app.stop_index_refresh()
+	app.apply_index_refresh_results()
+	assert scheduler.refreshes == 1, 'one refresh ran, got ${scheduler.refreshes}'
+	assert scheduler.skipped_files == 2, 'the refresh skipped both unchanged files, got ${scheduler.skipped_files}'
+	assert scheduler.reindexed_files == 0, 'no unchanged file was re-parsed, got ${scheduler.reindexed_files}'
+	assert app.symbol_index.len == 2, 'the index still holds exactly the two entries, got ${app.symbol_index.len}'
+	assert app.symbol_index[uri_a].fingerprint == fingerprint_a, 'the untouched file keeps its entry'
+	assert app.query_workspace_symbols('alpha').len == 1, 'the untouched file is still findable'
+}
+
+fn test_background_refresh_reindexes_the_file_that_changed() {
+	// The control for the skip above: the same background path on the same shape
+	// of project does pick up an edit to an unopened file, so a skipped file is
+	// the fingerprint deciding and not a refresh that does nothing.
+	root := index_test_tmpdir('request_edit')
+	defer {
+		os.rmdir_all(root) or {}
+	}
+	os.write_file(os.join_path(root, 'v.mod'), 'Module {}\n') or {
+		assert false, 'write v.mod failed: ${err}'
+		return
+	}
+	os.write_file(os.join_path(root, 'a.v'), 'module main\n\nfn alpha() {}\n') or {
+		assert false, 'write a.v failed: ${err}'
+		return
+	}
+	b_path := os.join_path(root, 'b.v')
+	os.write_file(b_path, 'module main\n\nfn beta() {}\n') or {
+		assert false, 'write b.v failed: ${err}'
+		return
+	}
+	mut app, scheduler := index_request_refresh_app(root)
+	uri_a := path_to_uri(os.join_path(root, 'a.v'))
+	fingerprint_a := app.symbol_index[uri_a].fingerprint
+
+	os.write_file(b_path, 'module main\n\nfn gamma() {}\n') or {
+		assert false, 'rewrite b.v failed: ${err}'
+		return
+	}
+	app.indexed_dir_walk_ms[root] = 0
+	app.ensure_indexed_for_request([root])
+	app.stop_index_refresh()
+	app.apply_index_refresh_results()
+	assert scheduler.reindexed_files == 1, 'the edited file was re-parsed, got ${scheduler.reindexed_files}'
+	assert scheduler.skipped_files == 1, 'the other file was skipped, got ${scheduler.skipped_files}'
+	assert app.query_workspace_symbols('gamma').len == 1, 'the refreshed index has the new symbol'
+	assert app.query_workspace_symbols('beta').len == 0, 'the refreshed index dropped the old symbol'
+	assert app.symbol_index[uri_a].fingerprint == fingerprint_a, 'the untouched file still keeps its entry'
+	assert app.symbol_index.len == 2, 'the refresh added no entry, got ${app.symbol_index.len}'
 }

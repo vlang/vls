@@ -1,0 +1,28 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "VLS project configuration",
+  "description": "Per-project settings of the V Language Server, read from a project's vls.json.",
+  "type": "object",
+  "properties": {
+    "defines": {
+      "type": "array",
+      "items": { "type": "string" },
+      "default": [],
+      "description": "Compile-time defines a check runs with: [\"-d\", \"flag\"] or [\"-dflag\"]."
+    },
+    "inlayHints": {
+      "type": "boolean",
+      "default": true,
+      "description": "Whether the editor shows inlay type and parameter hints in this project."
+    },
+    "diagnostics": {
+      "type": "boolean",
+      "default": true,
+      "description": "Whether the editor runs compile-time diagnostics for this project's files."
+    },
+    "coverageDirectory": {
+      "type": "string",
+      "description": "A coverage directory a test run recorded with `v -coverage`. It is what the generate-test code actions read to tell which functions are untested."
+    }
+  }
+}
