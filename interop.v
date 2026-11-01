@@ -1205,15 +1205,21 @@ fn resolve_local_module_dir(module_path string, program_dir string, vmod_root st
 // out: those on disk, and those open in the editor and not saved yet.
 fn (app &App) v_files_in(dir string) []string {
 	mut files := []string{}
+	mut seen := map[string]bool{}
 	for entry in os.ls(dir) or { []string{} } {
 		if entry.ends_with('.v') && !entry.ends_with('_test.v') {
-			files << normalize_overlay_path(os.join_path(dir, entry))
+			p := normalize_overlay_path(os.join_path(dir, entry))
+			if p !in seen {
+				seen[p] = true
+				files << p
+			}
 		}
 	}
 	for uri, _ in app.open_files {
 		path := normalize_overlay_path(uri_to_path(uri))
 		if path.ends_with('.v') && !path.ends_with('_test.v') && os.dir(path) == dir
-			&& path !in files {
+			&& path !in seen {
+			seen[path] = true
 			files << path
 		}
 	}
