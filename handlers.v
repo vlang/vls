@@ -1639,11 +1639,26 @@ fn apply_completion_budget(items []Detail) ([]Detail, bool) {
 
 fn (app App) word_prefix_at_cursor(uri string, position Position) string {
 	content := app.open_files[uri] or { os.read_file(uri_to_path(uri)) or { '' } }
-	lines := content.split_into_lines()
-	if position.line < 0 || position.line >= lines.len {
+	// Find the requested line without splitting the whole document.
+	mut line_start := 0
+	mut line_idx := 0
+	for line_idx < position.line && line_start < content.len {
+		if nl := content.index_after('\n', line_start) {
+			line_start = nl + 1
+			line_idx++
+		} else {
+			line_start = content.len
+			break
+		}
+	}
+	if line_idx != position.line {
 		return ''
 	}
-	line := lines[position.line]
+	mut line_end := content.len
+	if nl := content.index_after('\n', line_start) {
+		line_end = nl
+	}
+	line := content[line_start..line_end]
 	col := position.char
 	if col <= 0 || col > line.len {
 		return ''
