@@ -52,14 +52,16 @@ fn fuzzy_match(pattern string, text string) ?FuzzyMatch {
 // allocating the matched-index slice that fuzzy_match keeps for highlighting.
 // Completion and other hot paths only need the score, so this avoids one
 // allocation per candidate.
-fn fuzzy_score(pattern string, text string) ?int {
-	if pattern == '' {
+// fuzzy_score_lowered is the hot path used by fuzzy_filter, where the pattern is
+// constant across all candidates: it avoids re-lowercasing the pattern for
+// every item.
+fn fuzzy_score_lowered(pattern_lower string, text string) ?int {
+	if pattern_lower == '' {
 		return 0
 	}
 	if text == '' {
 		return none
 	}
-	pattern_lower := pattern.to_lower()
 	text_lower := text.to_lower()
 	mut pattern_idx := 0
 	mut score := 0
@@ -88,13 +90,21 @@ fn fuzzy_score(pattern string, text string) ?int {
 	return score
 }
 
+fn fuzzy_score(pattern string, text string) ?int {
+	if pattern == '' {
+		return 0
+	}
+	return fuzzy_score_lowered(pattern.to_lower(), text)
+}
+
 fn fuzzy_filter(pattern string, items []string) []string {
 	if pattern == '' {
 		return items.clone()
 	}
+	pattern_lower := pattern.to_lower()
 	mut scored := []ScoredItem{}
 	for item in items {
-		if s := fuzzy_score(pattern, item) {
+		if s := fuzzy_score_lowered(pattern_lower, item) {
 			scored << ScoredItem{ item: item, score: s }
 		}
 	}
