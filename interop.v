@@ -1365,7 +1365,14 @@ fn (mut app App) prepare_compilation_overlay_with(real_path string, work_dir str
 	had_stable_overlay := stable && os.is_dir(app.overlay_dir)
 	temp_root_unresolved := app.write_tracked_files_to_temp(source_root)!
 	temp_root := normalize_overlay_path(os.real_path(temp_root_unresolved))
-	mut tracked := app.open_files.clone()
+	mut tracked := map[string]string{}
+	for uri, content in app.open_files {
+		open_path := normalize_overlay_path(uri_to_path(uri))
+		if overlay_relative_path(open_path, source_root) == none {
+			continue
+		}
+		tracked[uri] = content
+	}
 	for path, content in importers {
 		rel := overlay_relative_path(path, source_root) or { continue }
 		target := os.join_path(temp_root, rel)
