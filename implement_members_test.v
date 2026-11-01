@@ -19,7 +19,7 @@ struct ImplSpan {
 fn impl_test_app(content string, uri string) App {
 	mut app := App{}
 	app.open_files[uri] = content
-	app.symbol_index[uri] = build_index_entry(content, app.position_encoding)
+	app.symbol_index[uri] = build_index_entry(content, app.position_encoding, content.hash())
 	return app
 }
 
@@ -279,7 +279,7 @@ interface Speaker {
 '
 	mut app := impl_test_app(dog, uri)
 	app.open_files[other] = speaker
-	app.symbol_index[other] = build_index_entry(speaker, app.position_encoding)
+	app.symbol_index[other] = build_index_entry(speaker, app.position_encoding, speaker.hash())
 	action := app.build_implement_members_action(uri, dog, impl_cursor(dog, 'struct Dog')) or {
 		assert false, 'an interface in a sibling file of the module must be offered too'
 		return
