@@ -239,7 +239,7 @@ fn test_integration_initialize_workspace_capabilities() {
 		result: Capabilities{
 			capabilities: Capability{
 				execute_command_provider: ExecuteCommandOptions{
-					commands: ['vls.runFile', 'vls.runTests']
+					commands: ['vls.runFile', 'vls.runTests', 'vls.generateTest']
 				}
 				workspace:                WorkspaceCapability{
 					file_operations:   WorkspaceFileOperations{
@@ -281,7 +281,7 @@ fn test_integration_initialize_workspace_capabilities() {
 	}
 
 	encoded := json2.encode(response, escape_unicode: true)
-	assert encoded.contains('"executeCommandProvider":{"commands":["vls.runFile","vls.runTests"]}')
+	assert encoded.contains('"executeCommandProvider":{"commands":["vls.runFile","vls.runTests","vls.generateTest"]}')
 	assert encoded.contains('"workspaceFolders":{"supported":true,"changeNotifications":true}')
 	assert encoded.contains('"fileOperations":{"willCreate"')
 	assert encoded.contains('"glob":"**/*.v"')
@@ -2854,7 +2854,7 @@ fn test_integration_initialize_advertises_runnable_code_lenses() {
 	])
 	assert out.len >= 1
 	assert out[0].contains('"codeLensProvider":{}')
-	assert out[0].contains('"executeCommandProvider":{"commands":["vls.runFile","vls.runTests"]}')
+	assert out[0].contains('"executeCommandProvider":{"commands":["vls.runFile","vls.runTests","vls.generateTest"]}')
 }
 
 fn test_integration_client_response_is_consumed_not_dispatched() {
@@ -2980,7 +2980,7 @@ fn test_integration_numeric_cancel_ids_match_exact_raw_token() {
 	assert !app.request_is_cancelled(1)
 	app.current_request_raw_id = '1.25'
 	assert app.request_is_cancelled(1)
-	assert app.consume_cancelled_request(1)
+	assert app.consume_cancelled_request(1, app.current_request_raw_id)
 	assert !app.request_is_cancelled(1)
 
 	app.on_cancel_request(Request{
