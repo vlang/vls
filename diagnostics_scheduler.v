@@ -35,13 +35,13 @@ struct DiagnosticsJob {
 	open_files          map[string]string
 	project_generations map[string]int
 	// The worker must see the request loop's editor defines and project config.
-	config_store        &VlsConfigStore = &VlsConfigStore{}
-	write_mutex         &sync.Mutex
-	tcp_conn            ?&net.TcpConn
-	global_generation   u64
-	generation          u64
-	ready_at            i64
-	kind                DiagnosticsKind
+	config_store      &VlsConfigStore = &VlsConfigStore{}
+	write_mutex       &sync.Mutex
+	tcp_conn          ?&net.TcpConn
+	global_generation u64
+	generation        u64
+	ready_at          i64
+	kind              DiagnosticsKind
 }
 
 struct DiagnosticsTicket {
@@ -75,6 +75,7 @@ mut:
 	worker_running      bool
 	worker_started      bool
 	worker_done         chan bool
+	wake                chan bool
 	stopped             bool
 	// Shared diagnostics cache populated by worker checks, so pull requests
 	// (handle_pull_diagnostic) can serve the errors a check published even
@@ -103,6 +104,7 @@ fn new_diagnostics_scheduler() &DiagnosticsScheduler {
 		project_generations: map[string]u64{}
 		pending_jobs:        map[string]DiagnosticsJob{}
 		diag_cache:          map[string]DiagCacheEntry{}
+		wake:                chan bool{cap: 1}
 	}
 }
 
@@ -214,6 +216,13 @@ fn (mut scheduler DiagnosticsScheduler) enqueue(job DiagnosticsJob) bool {
 	scheduler.pending_jobs[diagnostics_job_key(job.uri, job.kind)] = job
 	if scheduler.paused {
 		return false
+	}
+	// Wake the worker if it is sleeping on a debounce deadline.
+	select {
+		scheduler.wake <- true {
+		}
+		else {
+		}
 	}
 	should_start := !scheduler.worker_running
 	if should_start {
@@ -621,7 +630,30 @@ fn run_diagnostics_worker(mut scheduler DiagnosticsScheduler) {
 			return
 		}
 		if jobs.len == 0 {
-			time.sleep(diagnostics_worker_poll)
+			scheduler.mutex.lock()
+			mut delay := i64(diagnostics_worker_poll / time.millisecond)
+			now_ms := time.now().unix_milli()
+			for _, job in scheduler.pending_jobs {
+				d := job.ready_at - now_ms
+				if d > 0 && d < delay {
+					delay = d
+				}
+			}
+			if scheduler.pending_jobs.len == 0 {
+				delay = i64(diagnostics_worker_poll / time.millisecond)
+			}
+			scheduler.mutex.unlock()
+			if delay < 1 {
+				delay = 1
+			}
+			mut timer := time.new_timer(delay * time.millisecond)
+			select {
+				_ := <-scheduler.wake {
+				}
+				_ := <-timer.c {
+				}
+			}
+			timer.stop()
 			continue
 		}
 		for job in jobs {
@@ -658,7 +690,7 @@ fn run_diagnostics_job(mut scheduler DiagnosticsScheduler, job DiagnosticsJob) {
 		diagnostics_enabled:   true
 		diag_cache:            map[string]DiagCacheEntry{}
 		project_generations:   job.project_generations
-		config_store:           job.config_store
+		config_store:          job.config_store
 		position_encoding:     job.position_encoding
 		write_mutex:           job.write_mutex
 		tcp_conn:              job.tcp_conn

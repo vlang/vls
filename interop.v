@@ -1206,15 +1206,21 @@ fn resolve_local_module_dir(module_path string, program_dir string, vmod_root st
 // out: those on disk, and those open in the editor and not saved yet.
 fn (app &App) v_files_in(dir string) []string {
 	mut files := []string{}
+	mut seen := map[string]bool{}
 	for entry in os.ls(dir) or { []string{} } {
 		if entry.ends_with('.v') && !entry.ends_with('_test.v') {
-			files << normalize_overlay_path(os.join_path(dir, entry))
+			p := normalize_overlay_path(os.join_path(dir, entry))
+			if p !in seen {
+				seen[p] = true
+				files << p
+			}
 		}
 	}
 	for uri, _ in app.open_files {
 		path := normalize_overlay_path(uri_to_path(uri))
 		if path.ends_with('.v') && !path.ends_with('_test.v') && os.dir(path) == dir
-			&& path !in files {
+			&& path !in seen {
+			seen[path] = true
 			files << path
 		}
 	}
@@ -1360,7 +1366,14 @@ fn (mut app App) prepare_compilation_overlay_with(real_path string, work_dir str
 	had_stable_overlay := stable && os.is_dir(app.overlay_dir)
 	temp_root_unresolved := app.write_tracked_files_to_temp(source_root)!
 	temp_root := normalize_overlay_path(os.real_path(temp_root_unresolved))
-	mut tracked := app.open_files.clone()
+	mut tracked := map[string]string{}
+	for uri, content in app.open_files {
+		open_path := normalize_overlay_path(uri_to_path(uri))
+		if overlay_relative_path(open_path, source_root) == none {
+			continue
+		}
+		tracked[uri] = content
+	}
 	for path, content in importers {
 		rel := overlay_relative_path(path, source_root) or { continue }
 		target := os.join_path(temp_root, rel)
@@ -1719,9 +1732,11 @@ fn (app &App) program_open_files(real_path string, overlay CompilationOverlay) m
 // them.
 fn (app &App) program_open_files_answered(real_path string, program_dir string, answered_dir string) map[string]string {
 	mut program_uris := map[string]string{}
+	real_norm := normalized_index_path(real_path)
 	for open_uri, _ in app.open_files {
 		open_path := uri_to_path(open_uri)
-		if normalized_index_path(open_path) == normalized_index_path(real_path) {
+		open_norm := normalized_index_path(open_path)
+		if open_norm == real_norm {
 			continue
 		}
 		if app.program_root(open_path) != program_dir {
@@ -1730,7 +1745,7 @@ fn (app &App) program_open_files_answered(real_path string, program_dir string, 
 		if answered_dir != '' && !path_is_within(normalize_overlay_path(open_path), answered_dir) {
 			continue
 		}
-		program_uris[normalized_index_path(open_path)] = open_uri
+		program_uris[open_norm] = open_uri
 	}
 	return program_uris
 }
@@ -1754,9 +1769,11 @@ fn split_check_errors(output string, diagnostic_source_dir string, file_to_check
 		program[open_uri] = []JsonError{}
 	}
 	mut filtered_errors := []JsonError{}
+	real_norm := normalized_index_path(real_path)
 	for err in v_errors {
 		err_file := source_path_from_overlay(err.path, overlay, base_dir)
-		if normalized_index_path(err_file) == normalized_index_path(real_path) {
+		err_norm := normalized_index_path(err_file)
+		if err_norm == real_norm {
 			filtered_errors << JsonError{
 				path:    real_path
 				message: err.message
@@ -1767,7 +1784,7 @@ fn split_check_errors(output string, diagnostic_source_dir string, file_to_check
 			}
 			log('INCLUDING ERROR from err_file=${err_file}: ${err.message}')
 		} else {
-			if other_uri := program_uris[normalized_index_path(err_file)] {
+			if other_uri := program_uris[err_norm] {
 				program[other_uri] << JsonError{
 					path:    err_file
 					message: err.message
