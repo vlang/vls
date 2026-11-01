@@ -381,6 +381,57 @@ fn main() {
 		}
 		return
 	}
+	if os.args.len >= 5 && os.args[1] == 'definition' {
+		path := os.args[2]
+		line := os.args[3].int()
+		col := os.args[4].int()
+		content := os.read_file(path) or {
+			eprintln('cannot read ${path}: ${err}')
+			return
+		}
+		mut app := &App{
+			text:                  content
+			open_files:            map[string]string{}
+			temp_dir:              os.join_path(os.temp_dir(), 'vls_def_${os.getpid()}')
+			diagnostics_scheduler: new_diagnostics_scheduler()
+			index_refresh:         new_index_refresh_scheduler()
+			v3_line_info_enabled:  true
+		}
+		os.mkdir_all(app.temp_dir) or {}
+		uri := path_to_uri(path)
+		app.open_files[uri] = content
+		app.reindex_uri(uri)
+		if loc := app.resolve_indexed_definition(uri, Position{ line: line, char: col }) {
+			println(json2.encode(loc))
+		} else {
+			println('null')
+		}
+		return
+	}
+	if os.args.len >= 5 && os.args[1] == 'references' {
+		path := os.args[2]
+		line := os.args[3].int()
+		col := os.args[4].int()
+		content := os.read_file(path) or {
+			eprintln('cannot read ${path}: ${err}')
+			return
+		}
+		mut app := &App{
+			text:                  content
+			open_files:            map[string]string{}
+			temp_dir:              os.join_path(os.temp_dir(), 'vls_refs_${os.getpid()}')
+			diagnostics_scheduler: new_diagnostics_scheduler()
+			index_refresh:         new_index_refresh_scheduler()
+			v3_line_info_enabled:  true
+		}
+		os.mkdir_all(app.temp_dir) or {}
+		uri := path_to_uri(path)
+		app.open_files[uri] = content
+		params := '{"textDocument":{"uri":"${uri}"},"position":{"line":${line},"character":${col}}}'
+		resp := app.find_references(Request{ id: 1, method: 'textDocument/references', params: params })
+		println(resp.result)
+		return
+	}
 
 	// Stdio mode (default).
 	temp_dir := os.join_path(os.temp_dir(), 'vls_${os.getpid()}')
