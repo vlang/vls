@@ -696,8 +696,11 @@ fn (mut app App) ensure_dirs_indexed(dirs []string) {
 			app.symbol_index.reserve(u32(target))
 		}
 		mut present := map[string]bool{}
+		mut file_uris := []string{cap: files.len}
 		for f in files {
-			present[index_uri_for_path(f, open_uris_by_path)] = true
+			uri := index_uri_for_path(f, open_uris_by_path)
+			present[uri] = true
+			file_uris << uri
 		}
 		// Reconcile the existing index against what is actually on disk: drop
 		// entries for non-open files under `dir` that the walk no longer found.
@@ -705,8 +708,7 @@ fn (mut app App) ensure_dirs_indexed(dirs []string) {
 		// unopened file would otherwise linger in symbol/hover/call results. A
 		// partial walk must retain old entries it may simply not have reached.
 		app.reconcile_indexed_dir(dir, present, walk_complete)
-		for f in files {
-			uri := index_uri_for_path(f, open_uris_by_path)
+		for uri in file_uris {
 			if uri in app.open_files {
 				continue
 			}
