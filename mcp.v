@@ -101,7 +101,7 @@ fn handle_mcp_message(mut app App, body string) {
 		return
 	}
 	if method == 'tools/list' {
-		resp := '{"jsonrpc":"2.0","id":${id},"result":{"tools":[{"name":"vls_check","description":"Compile-check a V source file and return diagnostics.","inputSchema":{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}},{"name":"vls_hover","description":"Hover information at a position in a V source file.","inputSchema":{"type":"object","properties":{"path":{"type":"string"},"line":{"type":"integer"},"character":{"type":"integer"}},"required":["path","line","character"]}}]}}'
+		resp := '{"jsonrpc":"2.0","id":${id},"result":{"tools":[{"name":"vls_check","description":"Compile-check a V source file and return diagnostics.","inputSchema":{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}},{"name":"vls_hover","description":"Hover information at a position in a V source file.","inputSchema":{"type":"object","properties":{"path":{"type":"string"},"line":{"type":"integer"},"character":{"type":"integer"}},"required":["path","line","character"]}},{"name":"vls_definition","description":"Go to definition at a position in a V source file.","inputSchema":{"type":"object","properties":{"path":{"type":"string"},"line":{"type":"integer"},"character":{"type":"integer"}},"required":["path","line","character"]}},{"name":"vls_references","description":"Find references at a position in a V source file.","inputSchema":{"type":"object","properties":{"path":{"type":"string"},"line":{"type":"integer"},"character":{"type":"integer"}},"required":["path","line","character"]}}]}}'
 		app.send_framed(resp)
 		return
 	}
@@ -144,6 +144,48 @@ fn handle_mcp_message(mut app App, body string) {
 			result := if h := hover { json2.encode(h) } else { '{"contents":null}' }
 			resp := '{"jsonrpc":"2.0","id":${id},"result":{"content":[{"type":"text","text":${json2.encode(result)}}],"isError":false}}'
 			app.send_framed(resp)
+			return
+		}
+		if tool_name == 'vls_definition' {
+			p := mcp_json_field(args, 'path')
+			if p == '' {
+				app.send_framed('{"jsonrpc":"2.0","id":${id},"error":{"code":-32602,"message":"missing path"}}')
+				return
+			}
+			content := os.read_file(p) or {
+				app.send_framed('{"jsonrpc":"2.0","id":${id},"error":{"code":-32603,"message":"cannot read file"}}')
+				return
+			}
+			line := mcp_json_field(args, 'line').int()
+			col := mcp_json_field(args, 'character').int()
+			uri := path_to_uri(p)
+			app.open_files[uri] = content
+			params := '{"textDocument":{"uri":"${uri}"},"position":{"line":${line},"character":${col}}}'
+			resp := app.operation_at_pos(.definition, Request{ id: 1, method: 'textDocument/definition', params: params })
+			result := resp.result
+			out := '{"jsonrpc":"2.0","id":${id},"result":{"content":[{"type":"text","text":${json2.encode(result)}}],"isError":false}}'
+			app.send_framed(out)
+			return
+		}
+		if tool_name == 'vls_references' {
+			p := mcp_json_field(args, 'path')
+			if p == '' {
+				app.send_framed('{"jsonrpc":"2.0","id":${id},"error":{"code":-32602,"message":"missing path"}}')
+				return
+			}
+			content := os.read_file(p) or {
+				app.send_framed('{"jsonrpc":"2.0","id":${id},"error":{"code":-32603,"message":"cannot read file"}}')
+				return
+			}
+			line := mcp_json_field(args, 'line').int()
+			col := mcp_json_field(args, 'character').int()
+			uri := path_to_uri(p)
+			app.open_files[uri] = content
+			params := '{"textDocument":{"uri":"${uri}"},"position":{"line":${line},"character":${col}}}'
+			resp := app.find_references(Request{ id: 1, method: 'textDocument/references', params: params })
+			result := resp.result
+			out := '{"jsonrpc":"2.0","id":${id},"result":{"content":[{"type":"text","text":${json2.encode(result)}}],"isError":false}}'
+			app.send_framed(out)
 			return
 		}
 		app.send_framed('{"jsonrpc":"2.0","id":${id},"error":{"code":-32601,"message":"unknown tool"}}')
