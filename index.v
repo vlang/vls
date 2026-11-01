@@ -1541,9 +1541,14 @@ fn (app &App) find_indexed_doc_in_scope(name string, cur_dir string, scope_root 
 	pd := preferred_dir.replace('\\', '/').trim_right('/')
 	mut uris := app.symbol_index.keys()
 	uris.sort()
+	// Precompute each URI's directory once.
+	mut uri_dirs := map[string]string{}
+	for uri in uris {
+		uri_dirs[uri] = os.dir(uri_to_path(uri)).replace('\\', '/').trim_right('/')
+	}
 	if pd != '' {
 		for uri in uris {
-			if os.dir(uri_to_path(uri)).replace('\\', '/').trim_right('/') != pd {
+			if uri_dirs[uri] != pd {
 				continue
 			}
 			entry := app.symbol_index[uri] or { continue }
@@ -1558,7 +1563,7 @@ fn (app &App) find_indexed_doc_in_scope(name string, cur_dir string, scope_root 
 	// Pass 1: the current module directory (where a same-module symbol lives).
 	if cd != '' {
 		for uri in uris {
-			if os.dir(uri_to_path(uri)).replace('\\', '/').trim_right('/') != cd {
+			if uri_dirs[uri] != cd {
 				continue
 			}
 			entry := app.symbol_index[uri] or { continue }
@@ -1576,7 +1581,7 @@ fn (app &App) find_indexed_doc_in_scope(name string, cur_dir string, scope_root 
 	}
 	for uri in uris {
 		p := uri_to_path(uri).replace('\\', '/')
-		if !path_is_within(p, sr) || os.dir(p).trim_right('/') == cd {
+		if !path_is_within(p, sr) || uri_dirs[uri] == cd {
 			continue
 		}
 		entry := app.symbol_index[uri] or { continue }
