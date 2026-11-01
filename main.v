@@ -321,8 +321,7 @@ fn main() {
 	// MCP mode is planned (see the v-vls skill) but not yet implemented:
 	// VLS speaks LSP over stdio today. Print a hint instead of starting LSP.
 	if os.args.contains('--mcp') {
-		eprintln('VLS MCP mode is not implemented yet.')
-		eprintln('Use `v mcp serve` for compiler-level facts, or run VLS as an LSP server.')
+		run_mcp_mode()
 		return
 	}
 	// `vls check <file>` runs a single-file compile check and prints JSON diagnostics.
