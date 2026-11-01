@@ -395,13 +395,21 @@ fn (app &App) path_is_in_removed_workspace(path string) bool {
 // slice while that happens.
 fn path_is_under_removed_root(path string, active_roots []string, removed_roots []string) bool {
 	p := path.replace('\\', '/')
+	mut active := []string{cap: active_roots.len}
 	for root in active_roots {
-		if path_is_within(p, root.replace('\\', '/')) {
+		active << root.replace('\\', '/')
+	}
+	mut removed := []string{cap: removed_roots.len}
+	for root in removed_roots {
+		removed << root.replace('\\', '/')
+	}
+	for root in active {
+		if path_is_within(p, root) {
 			return false
 		}
 	}
-	for root in removed_roots {
-		if path_is_within(p, root.replace('\\', '/')) {
+	for root in removed {
+		if path_is_within(p, root) {
 			return true
 		}
 	}
