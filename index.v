@@ -28,13 +28,13 @@ struct IndexEntry {
 	public_module_completions          []Detail          // exported completion items for imported modules
 	has_conditional_module_completions bool
 	has_conditional_public_completions bool
-	conditional_lines                  []bool              // declarations guarded by $if/$else or @[if]
+	conditional_lines                  []bool // declarations guarded by $if/$else or @[if]
 }
 
 // build_index_entry parses `content` into an IndexEntry. Symbol ranges are
 // re-encoded into `enc` so document/workspace symbol positions match the
 // negotiated encoding for non-ASCII lines (P0-01).
-fn build_index_entry(content string, enc PositionEncoding) IndexEntry {
+fn build_index_entry(content string, enc PositionEncoding, fingerprint int) IndexEntry {
 	lines := content.split_into_lines()
 	// Reuse one masked line scan for symbols and completions, instead of
 	// allocating two large arrays for every indexed source file.
@@ -61,7 +61,7 @@ fn build_index_entry(content string, enc PositionEncoding) IndexEntry {
 		}
 	}
 	return IndexEntry{
-		fingerprint:                        content.hash()
+		fingerprint:                        fingerprint
 		module_name:                        get_module_name(content)
 		doc_symbols:                        doc_syms
 		docs:                               docs
@@ -118,6 +118,32 @@ fn encode_range_chars(r LSPRange, lines []string, enc PositionEncoding) LSPRange
 			char: byte_to_encoded_col(end_line, r.end.char, enc)
 		}
 	}
+}
+
+// indexed_uris_in_dir returns the URIs in the symbol index whose file lives in
+// `dir`, sorted, with each directory normalized only once.
+fn (app &App) indexed_uris_in_dir(dir string) []string {
+	normalized_dir := normalized_index_path(dir)
+	mut out := []string{}
+	for uri in app.symbol_index.keys() {
+		if normalized_index_path(os.dir(uri_to_path(uri))) != normalized_dir {
+			continue
+		}
+		out << uri
+	}
+	out.sort()
+	return out
+}
+
+// cached_normalized_index_path memoizes normalized_index_path results on the
+// App, avoiding repeated os.real_path syscalls for the same input path.
+fn (mut app App) cached_normalized_index_path(path string) string {
+	if cached := app.real_path_cache[path] {
+		return cached
+	}
+	result := normalized_index_path(path)
+	app.real_path_cache[path] = result
+	return result
 }
 
 // index_source_for returns the authoritative content for `uri`: the open buffer
@@ -336,21 +362,29 @@ fn (mut app App) drop_index_uri(uri string) {
 // file, retaining `keep_uri` when it is the canonical disk key or another open
 // buffer still owns the file.
 fn (mut app App) drop_index_aliases_for_path(path string, keep_uri string) {
-	target_path := normalized_index_path(path)
+	target_path := app.cached_normalized_index_path(path)
+	// Compute each URI's normalized path once instead of three times.
+	mut normalized := map[string]string{}
 	for uri in app.symbol_index.keys() {
-		if uri != keep_uri && normalized_index_path(uri_to_path(uri)) == target_path {
-			app.symbol_index.delete(uri)
-		}
+		normalized[uri] = app.cached_normalized_index_path(uri_to_path(uri))
 	}
 	for uri in app.ref_occurrences.keys() {
-		if uri != keep_uri && normalized_index_path(uri_to_path(uri)) == target_path {
-			app.ref_occurrences.delete(uri)
+		if uri !in normalized {
+			normalized[uri] = app.cached_normalized_index_path(uri_to_path(uri))
 		}
 	}
 	for uri in app.index_skipped_uris.keys() {
-		if uri != keep_uri && normalized_index_path(uri_to_path(uri)) == target_path {
-			app.index_skipped_uris.delete(uri)
+		if uri !in normalized {
+			normalized[uri] = app.cached_normalized_index_path(uri_to_path(uri))
 		}
+	}
+	for uri, np in normalized {
+		if uri == keep_uri || np != target_path {
+			continue
+		}
+		app.symbol_index.delete(uri)
+		app.ref_occurrences.delete(uri)
+		app.index_skipped_uris.delete(uri)
 	}
 }
 
@@ -396,13 +430,21 @@ fn (app &App) path_is_in_removed_workspace(path string) bool {
 // slice while that happens.
 fn path_is_under_removed_root(path string, active_roots []string, removed_roots []string) bool {
 	p := path.replace('\\', '/')
+	mut active := []string{cap: active_roots.len}
 	for root in active_roots {
-		if path_is_within(p, root.replace('\\', '/')) {
+		active << root.replace('\\', '/')
+	}
+	mut removed := []string{cap: removed_roots.len}
+	for root in removed_roots {
+		removed << root.replace('\\', '/')
+	}
+	for root in active {
+		if path_is_within(p, root) {
 			return false
 		}
 	}
-	for root in removed_roots {
-		if path_is_within(p, root.replace('\\', '/')) {
+	for root in removed {
+		if path_is_within(p, root) {
 			return true
 		}
 	}
@@ -460,7 +502,7 @@ fn (mut app App) reindex_uri(uri string) {
 			return
 		}
 	}
-	app.symbol_index[uri] = build_index_entry(content, app.position_encoding)
+	app.symbol_index[uri] = build_index_entry(content, app.position_encoding, fp)
 }
 
 // invalidate_index_uri drops a URI's entry so it is re-parsed on next access.
@@ -1242,7 +1284,9 @@ fn (mut app App) run_recursive_index_refresh(job IndexRefreshJob) IndexRefreshRe
 		if uri in job.open_uris {
 			continue
 		}
-		if app.index_refresh_file(uri, job, mut result, mut entries, mut bytes_seen) {
+		stopped, new_bytes := app.index_refresh_file(uri, job, mut result, mut entries, bytes_seen)
+		bytes_seen = new_bytes
+		if stopped {
 			break
 		}
 	}
@@ -1254,46 +1298,47 @@ fn (mut app App) run_recursive_index_refresh(job IndexRefreshJob) IndexRefreshRe
 // its entry, skip it because its content fingerprint is unchanged or it is out
 // of the index's bounds, or drop it because it is gone. It returns true when the
 // walk must stop, which is only at the total entry cap.
-fn (mut app App) index_refresh_file(uri string, job IndexRefreshJob, mut result IndexRefreshResult, mut entries map[string]IndexEntry, mut bytes_seen u64) bool {
+fn (mut app App) index_refresh_file(uri string, job IndexRefreshJob, mut result IndexRefreshResult, mut entries map[string]IndexEntry, bytes_seen u64) (bool, u64) {
 	path := uri_to_path(uri)
+	mut bs := bytes_seen
 	if path_is_under_removed_root(path, job.workspace_roots, job.removed_roots) {
 		result.deletions << uri
-		return false
+		return false, bs
 	}
 	if !os.is_file(path) {
 		result.deletions << uri
-		return false
+		return false, bs
 	}
 	size := os.file_size(path)
 	if size > index_max_file_bytes {
 		result.skipped << uri
-		return false
+		return false, bs
 	}
-	if size > job.byte_budget - bytes_seen {
+	if size > job.byte_budget - bs {
 		result.skipped << uri
 		result.incomplete = true
-		return false
+		return false, bs
 	}
-	bytes_seen += size
+	bs += size
 	content := os.read_file(path) or {
 		result.skipped << uri
-		return false
+		return false, bs
 	}
 	fingerprint := content.hash()
 	if previous := job.fingerprints[uri] {
 		if previous == fingerprint {
 			result.skipped_files++
-			return false
+			return false, bs
 		}
 	}
 	if uri !in job.fingerprints && job.indexed_count + entries.len >= index_max_files {
 		result.incomplete = true
 		result.skipped << uri
-		return true
+		return true, bs
 	}
-	entries[uri] = build_index_entry(content, app.position_encoding)
+	entries[uri] = build_index_entry(content, app.position_encoding, fingerprint)
 	result.reindexed++
-	return false
+	return false, bs
 }
 
 // apply_index_refresh_results merges the refreshes the background worker
@@ -1616,9 +1661,13 @@ fn (app &App) find_indexed_doc_in_scope(name string, cur_dir string, scope_root 
 	pd := preferred_dir.replace('\\', '/').trim_right('/')
 	mut uris := app.symbol_index.keys()
 	uris.sort()
+	mut uri_dirs := map[string]string{}
+	for uri in uris {
+		uri_dirs[uri] = os.dir(uri_to_path(uri)).replace('\\', '/').trim_right('/')
+	}
 	if pd != '' {
 		for uri in uris {
-			if os.dir(uri_to_path(uri)).replace('\\', '/').trim_right('/') != pd {
+			if uri_dirs[uri] != pd {
 				continue
 			}
 			entry := app.symbol_index[uri] or { continue }
@@ -1633,7 +1682,7 @@ fn (app &App) find_indexed_doc_in_scope(name string, cur_dir string, scope_root 
 	// Pass 1: the current module directory (where a same-module symbol lives).
 	if cd != '' {
 		for uri in uris {
-			if os.dir(uri_to_path(uri)).replace('\\', '/').trim_right('/') != cd {
+			if uri_dirs[uri] != cd {
 				continue
 			}
 			entry := app.symbol_index[uri] or { continue }
@@ -1651,7 +1700,7 @@ fn (app &App) find_indexed_doc_in_scope(name string, cur_dir string, scope_root 
 	}
 	for uri in uris {
 		p := uri_to_path(uri).replace('\\', '/')
-		if !path_is_within(p, sr) || os.dir(p).trim_right('/') == cd {
+		if !path_is_within(p, sr) || uri_dirs[uri] == cd {
 			continue
 		}
 		entry := app.symbol_index[uri] or { continue }
