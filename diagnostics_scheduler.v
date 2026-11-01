@@ -73,6 +73,7 @@ mut:
 	worker_running      bool
 	worker_started      bool
 	worker_done         chan bool
+	wake                chan bool
 	stopped             bool
 	active_uri          string
 	active_project_key  string
@@ -95,6 +96,7 @@ fn new_diagnostics_scheduler() &DiagnosticsScheduler {
 		generations:         map[string]u64{}
 		project_generations: map[string]u64{}
 		pending_jobs:        map[string]DiagnosticsJob{}
+		wake:                chan bool{cap: 1}
 	}
 }
 
@@ -198,6 +200,13 @@ fn (mut scheduler DiagnosticsScheduler) enqueue(job DiagnosticsJob) bool {
 	scheduler.pending_jobs[diagnostics_job_key(job.uri, job.kind)] = job
 	if scheduler.paused {
 		return false
+	}
+	// Wake the worker if it is sleeping on a debounce deadline.
+	select {
+		scheduler.wake <- true {
+		}
+		else {
+		}
 	}
 	should_start := !scheduler.worker_running
 	if should_start {
@@ -524,9 +533,6 @@ fn run_diagnostics_worker(mut scheduler DiagnosticsScheduler) {
 			return
 		}
 		if jobs.len == 0 {
-			// Sleep only until the next pending job's debounce deadline (capped
-			// at the poll interval), instead of a fixed 5ms, so a job that
-			// becomes ready sooner is picked up without an extra wake-up.
 			scheduler.mutex.lock()
 			mut delay := i64(diagnostics_worker_poll / time.millisecond)
 			now_ms := time.now().unix_milli()
@@ -543,7 +549,14 @@ fn run_diagnostics_worker(mut scheduler DiagnosticsScheduler) {
 			if delay < 1 {
 				delay = 1
 			}
-			time.sleep(delay * time.millisecond)
+			mut timer := time.new_timer(delay * time.millisecond)
+			select {
+				_ := <-scheduler.wake {
+				}
+				_ := <-timer.c {
+				}
+			}
+			timer.stop()
 			continue
 		}
 		for job in jobs {
