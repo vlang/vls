@@ -111,9 +111,12 @@ type ResponseResult = string
 	| []DocumentHighlight
 	| []SelectionRange
 	| []CodeLens
+	| []DocumentLink
+	| WorkspaceDiagnosticResult
 	| CodeLens
 	| []InlineValueText
 	| LinkedEditingRanges
+	| DocumentDiagnosticReport
 
 // WorkspaceSymbol represents a symbol found across the workspace.
 struct WorkspaceSymbol {
@@ -155,6 +158,7 @@ const sym_kind_struct = 23
 
 // LSP CodeActionKind constants
 const code_action_kind_quickfix = 'quickfix'
+const code_action_kind_refactor = 'refactor.rewrite'
 const code_action_kind_source_organize_imports = 'source.organizeImports'
 
 // Notification represents an LSP notification sent to the client.
@@ -185,6 +189,77 @@ struct LSPDiagnostic {
 struct LSPRange {
 	start Position
 	end   Position
+}
+
+// DocumentDiagnosticParams holds the parameters of textDocument/diagnostic, the
+// LSP 3.17 pull-diagnostics request. A client sends the resultId it holds for
+// the document, so the server can answer only what changed since.
+struct DocumentDiagnosticParams {
+	text_document      TextDocumentIdentifier @[json: 'textDocument']
+	identifier         ?string
+	previous_result_id ?string @[json: 'previousResultId']
+}
+
+// FullDocumentDiagnosticReport answers a pull with the whole item list and the
+// resultId the client holds for its next pull.
+struct FullDocumentDiagnosticReport {
+	kind      string = 'full'
+	result_id ?string @[json: 'resultId']
+	items     []LSPDiagnostic
+}
+
+// UnchangedDocumentDiagnosticReport answers a pull whose previousResultId still
+// describes the document. It carries no items, so the client keeps the markers
+// it already shows.
+struct UnchangedDocumentDiagnosticReport {
+	kind      string = 'unchanged'
+	result_id string @[json: 'resultId']
+}
+
+// DocumentDiagnosticReport is the result of textDocument/diagnostic.
+type DocumentDiagnosticReport = FullDocumentDiagnosticReport
+	| UnchangedDocumentDiagnosticReport
+
+// PreviousResultId is one held workspace result: the document it describes and
+// the id the client already holds. LSP sends these as an array, including an
+// empty array when the client holds nothing.
+struct PreviousResultId {
+	uri   string
+	value string
+}
+
+// WorkspaceDiagnosticParams is textDocument/diagnostic's whole-workspace
+// sibling: the identifiers whose documents the client wants, and the ids it
+// already holds for each, so an unchanged document is answered with nothing.
+struct WorkspaceDiagnosticParams {
+	identifier          string
+	previous_result_ids []PreviousResultId @[json: 'previousResultIds']
+}
+
+// WorkspaceDocumentReport is one document's answer inside a workspace report.
+struct WorkspaceDocumentReport {
+	uri       string
+	kind      string = 'full'
+	version   ?i64
+	result_id ?string @[json: 'resultId']
+	items     []LSPDiagnostic
+}
+
+// WorkspaceUnchangedReport is a document whose id the client already holds.
+struct WorkspaceUnchangedReport {
+	uri       string
+	kind      string = 'unchanged'
+	version   ?i64   @[json: 'version']
+	result_id string @[json: 'resultId']
+}
+
+// WorkspaceDiagnosticReport is the result of workspace/diagnostic.
+type WorkspaceDiagnosticReport = WorkspaceDocumentReport | WorkspaceUnchangedReport
+
+// WorkspaceDiagnosticResult is the wire shape of a workspace/diagnostic
+// answer (LSP 3.17): an object with an `items` array, not a bare array.
+struct WorkspaceDiagnosticResult {
+	items []WorkspaceDiagnosticReport
 }
 
 // Detail represents a completion or symbol detail item.
@@ -268,6 +343,15 @@ struct CodeLensOptions {
 	resolve_provider ?bool @[json: 'resolveProvider']
 }
 
+// DiagnosticOptions advertises pull diagnostics (LSP 3.17 DiagnosticOptions).
+// interFileDependencies is false because a pull answers for the one document it
+// is asked about, and workspaceDiagnostics is false because
+// workspace/diagnostic is not served.
+struct DiagnosticOptions {
+	inter_file_dependencies bool @[json: 'interFileDependencies']
+	workspace_diagnostics   bool @[json: 'workspaceDiagnostics']
+}
+
 // Capability lists supported LSP features for the server.
 struct Capability {
 	completion_provider                CompletionProvider       @[json: 'completionProvider']
@@ -283,6 +367,7 @@ struct Capability {
 	execute_command_provider           ?ExecuteCommandOptions   @[json: 'executeCommandProvider']
 	document_formatting_provider       bool                     @[json: 'documentFormattingProvider']
 	document_range_formatting_provider bool                     @[json: 'documentRangeFormattingProvider']
+	document_link_provider             bool                     @[json: 'documentLinkProvider']
 	document_symbol_provider           bool                     @[json: 'documentSymbolProvider']
 	workspace_symbol_provider          bool                     @[json: 'workspaceSymbolProvider']
 	inlay_hint_provider                bool                     @[json: 'inlayHintProvider']
@@ -297,7 +382,8 @@ struct Capability {
 	document_highlight_provider        bool                     @[json: 'documentHighlightProvider']
 	selection_range_provider           bool                     @[json: 'selectionRangeProvider']
 	workspace                          WorkspaceCapability
-	position_encoding                  ?string @[json: 'positionEncoding']
+	position_encoding                  ?string           @[json: 'positionEncoding']
+	diagnostic_provider                DiagnosticOptions @[json: 'diagnosticProvider']
 }
 
 // OnTypeFormattingOptions describes the triggers for on-type formatting.
@@ -384,14 +470,22 @@ struct CallHierarchyOutgoingCallsParams {
 // server behaviour. Fields use optional types so that absent keys are ignored
 // and existing values are not clobbered.
 struct WorkspaceVlsSettings {
-	inlay_hints ?bool @[json: 'inlayHints'] // enable / disable inlay type hints
-	diagnostics ?bool // enable / disable live diagnostics
+	inlay_hints        ?bool @[json: 'inlayHints'] // enable / disable inlay type hints
+	diagnostics        ?bool // enable / disable live diagnostics
+	coverage_directory ?string @[json: 'coverageDirectory'] // where a coverage run recorded
 }
 
 // WorkspaceInlayHintsSettings supports client payloads that send
-// `settings.vls.inlayHints.enabled` as a nested object.
+// `settings.vls.inlayHints` as a nested object. `enabled` is the master
+// switch; `variableTypes` filters the type hints (kind 1, `: int`) and
+// `parameterNames` filters the parameter hints (kind 2, `name: `, including
+// the field names of positional struct literals, which the compiler reports
+// with the same kind). Absent keys keep the current value, so old payloads
+// behave exactly as before; unknown keys are ignored by the decoder.
 struct WorkspaceInlayHintsSettings {
-	enabled ?bool
+	enabled         ?bool
+	variable_types  ?bool @[json: 'variableTypes']
+	parameter_names ?bool @[json: 'parameterNames']
 }
 
 // WorkspaceDiagnosticsSettings supports client payloads that send
@@ -403,22 +497,25 @@ struct WorkspaceDiagnosticsSettings {
 // WorkspaceVlsSettingsCompat mirrors WorkspaceVlsSettings but with nested
 // inlay-hints shape used by some clients.
 struct WorkspaceVlsSettingsCompat {
-	inlay_hints WorkspaceInlayHintsSettings @[json: 'inlayHints']
-	diagnostics ?bool
+	inlay_hints        WorkspaceInlayHintsSettings @[json: 'inlayHints']
+	diagnostics        ?bool
+	coverage_directory ?string @[json: 'coverageDirectory']
 }
 
 // WorkspaceVlsSettingsNestedDiagnosticsCompat supports flat inlay hints with
 // nested diagnostics.
 struct WorkspaceVlsSettingsNestedDiagnosticsCompat {
-	inlay_hints ?bool @[json: 'inlayHints']
-	diagnostics WorkspaceDiagnosticsSettings
+	inlay_hints        ?bool @[json: 'inlayHints']
+	diagnostics        WorkspaceDiagnosticsSettings
+	coverage_directory ?string @[json: 'coverageDirectory']
 }
 
 // WorkspaceVlsSettingsNestedFeaturesCompat supports both feature settings as
 // nested objects.
 struct WorkspaceVlsSettingsNestedFeaturesCompat {
-	inlay_hints WorkspaceInlayHintsSettings @[json: 'inlayHints']
-	diagnostics WorkspaceDiagnosticsSettings
+	inlay_hints        WorkspaceInlayHintsSettings @[json: 'inlayHints']
+	diagnostics        WorkspaceDiagnosticsSettings
+	coverage_directory ?string @[json: 'coverageDirectory']
 }
 
 // WorkspaceSettings is the top-level object inside DidChangeConfigurationParams.
@@ -781,8 +878,10 @@ struct TextEdit {
 	new_text string @[json: 'newText']
 }
 
-// InlayHintKind 1 = Type hint, 2 = Parameter hint
+// InlayHintKind 1 = Type hint, 2 = Parameter hint. The compiler reports both:
+// variable and const types as 1, call argument and struct field names as 2.
 const inlay_hint_kind_type = 1
+const inlay_hint_kind_parameter = 2
 
 // InlayHint represents a hint shown inline in the editor (type or parameter).
 struct InlayHint {
@@ -799,7 +898,11 @@ struct CodeAction {
 	kind         string
 	is_preferred ?bool @[json: 'isPreferred'] // true marks the primary fix in the UI
 	edit         ?WorkspaceEdit
-	diagnostics  ?[]LSPDiagnostic
+	// command is what an action carries when the work is done by a tool the
+	// server calls, rather than by an edit the server computes. The client runs
+	// it through workspace/executeCommand.
+	command     ?Command
+	diagnostics ?[]LSPDiagnostic
 }
 
 // LSP CodeActionParams struct
@@ -881,6 +984,18 @@ struct DocumentRangeFormattingParams {
 	options       FormattingOptions
 }
 
+// DocumentLink is one clickable link in a document: the range of the text that
+// carries it and the URI it opens.
+struct DocumentLink {
+	range  LSPRange
+	target string
+}
+
+// DocumentLinkParams holds parameters for textDocument/documentLink.
+struct DocumentLinkParams {
+	text_document TextDocumentIdentifier @[json: 'textDocument']
+}
+
 // DidChangeWatchedFilesParams holds file-change events sent by the client watcher.
 struct DidChangeWatchedFilesParams {
 	changes []FileEvent
@@ -927,6 +1042,7 @@ enum Method {
 	selection_range
 	semantic_tokens_range
 	range_formatting
+	document_link
 	will_save
 	will_save_wait_until
 	did_change_watched_files
@@ -939,6 +1055,8 @@ enum Method {
 	will_rename_files
 	will_delete_files
 	on_type_formatting
+	diagnostic
+	workspace_diagnostic
 	set_trace
 	cancel_request
 	shutdown
@@ -1078,6 +1196,7 @@ fn Method.from_string(s string) Method {
 		'textDocument/selectionRange' { .selection_range }
 		'textDocument/semanticTokens/range' { .semantic_tokens_range }
 		'textDocument/rangeFormatting' { .range_formatting }
+		'textDocument/documentLink' { .document_link }
 		'textDocument/willSave' { .will_save }
 		'textDocument/willSaveWaitUntil' { .will_save_wait_until }
 		'workspace/didChangeWatchedFiles' { .did_change_watched_files }
@@ -1090,6 +1209,8 @@ fn Method.from_string(s string) Method {
 		'workspace/willRenameFiles' { .will_rename_files }
 		'workspace/willDeleteFiles' { .will_delete_files }
 		'textDocument/onTypeFormatting' { .on_type_formatting }
+		'textDocument/diagnostic' { .diagnostic }
+		'workspace/diagnostic' { .workspace_diagnostic }
 		'shutdown' { .shutdown }
 		'exit' { .exit }
 		else { .unknown }
@@ -1131,6 +1252,7 @@ fn (m Method) str() string {
 		.selection_range { 'textDocument/selectionRange' }
 		.semantic_tokens_range { 'textDocument/semanticTokens/range' }
 		.range_formatting { 'textDocument/rangeFormatting' }
+		.document_link { 'textDocument/documentLink' }
 		.will_save { 'textDocument/willSave' }
 		.will_save_wait_until { 'textDocument/willSaveWaitUntil' }
 		.did_change_watched_files { 'workspace/didChangeWatchedFiles' }
@@ -1143,6 +1265,8 @@ fn (m Method) str() string {
 		.will_rename_files { 'workspace/willRenameFiles' }
 		.will_delete_files { 'workspace/willDeleteFiles' }
 		.on_type_formatting { 'textDocument/onTypeFormatting' }
+		.diagnostic { 'textDocument/diagnostic' }
+		.workspace_diagnostic { 'workspace/diagnostic' }
 		.set_trace { u8(36).ascii_str() + '/setTrace' }
 		.cancel_request { u8(36).ascii_str() + '/cancelRequest' }
 		.shutdown { 'shutdown' }
