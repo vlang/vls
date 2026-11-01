@@ -325,6 +325,27 @@ fn main() {
 		eprintln('Use `v mcp serve` for compiler-level facts, or run VLS as an LSP server.')
 		return
 	}
+	// `vls check <file>` runs a single-file compile check and prints JSON diagnostics.
+	if os.args.len >= 3 && os.args[1] == 'check' {
+		path := os.args[2]
+		content := os.read_file(path) or {
+			eprintln('cannot read ${path}: ${err}')
+			return
+		}
+		mut app := &App{
+			text:                  content
+			open_files:            map[string]string{}
+			temp_dir:              os.join_path(os.temp_dir(), 'vls_check_${os.getpid()}')
+			diagnostics_scheduler: new_diagnostics_scheduler()
+			index_refresh:         new_index_refresh_scheduler()
+			v3_line_info_enabled:  true
+		}
+		os.mkdir_all(app.temp_dir) or {}
+		app.open_files[path_to_uri(path)] = content
+		notification := app.build_diagnostics_notification(path_to_uri(path), content)
+		println(json2.encode(notification))
+		return
+	}
 
 	// Stdio mode (default).
 	temp_dir := os.join_path(os.temp_dir(), 'vls_${os.getpid()}')
