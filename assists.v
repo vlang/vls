@@ -376,12 +376,9 @@ fn (mut app App) struct_declared_fields(uri string, content string, type_name st
 	active_names := app.active_indexed_source_file_names(dir, active_test_name)
 	mut fields := []StructDeclaredField{}
 	mut seen := map[string]bool{}
-	mut indexed_uris := app.symbol_index.keys()
-	indexed_uris.sort()
-	for indexed_uri in indexed_uris {
+	for indexed_uri in app.indexed_uris_in_dir(dir) {
 		entry := app.symbol_index[indexed_uri] or { continue }
-		if normalized_index_path(os.dir(uri_to_path(indexed_uri))) != normalized_dir
-			|| os.file_name(uri_to_path(indexed_uri)) !in active_names
+		if os.file_name(uri_to_path(indexed_uri)) !in active_names
 			|| entry.module_name != expected_module {
 			continue
 		}
