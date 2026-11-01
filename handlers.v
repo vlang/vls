@@ -1177,13 +1177,9 @@ fn (mut app App) indexed_enum_member_declaration(uri string, content string, typ
 		return ''
 	}
 	app.ensure_dir_shallow_indexed(dir)
-	normalized_dir := normalized_index_path(dir)
-	mut indexed_uris := app.symbol_index.keys()
-	indexed_uris.sort()
-	for indexed_uri in indexed_uris {
+	for indexed_uri in app.indexed_uris_in_dir(dir) {
 		entry := app.symbol_index[indexed_uri] or { continue }
-		if normalized_index_path(os.dir(uri_to_path(indexed_uri))) != normalized_dir
-			|| entry.module_name != expected_module {
+		if entry.module_name != expected_module {
 			continue
 		}
 		source := app.index_source_for(indexed_uri) or { continue }
@@ -2986,12 +2982,9 @@ fn (mut app App) module_function_return_type_raw(uri string, content string, fn_
 	app.ensure_dir_shallow_indexed(dir)
 	normalized_dir := normalized_index_path(dir)
 	module_name := get_module_name(content)
-	mut indexed_uris := app.symbol_index.keys()
-	indexed_uris.sort()
-	for indexed_uri in indexed_uris {
+	for indexed_uri in app.indexed_uris_in_dir(dir) {
 		entry := app.symbol_index[indexed_uri] or { continue }
-		if normalized_index_path(os.dir(uri_to_path(indexed_uri))) != normalized_dir
-			|| entry.module_name != module_name
+		if entry.module_name != module_name
 			|| !entry.doc_symbols.any(it.kind == sym_kind_function && it.name == fn_name) {
 			continue
 		}
@@ -3821,12 +3814,9 @@ fn (mut app App) indexed_enum_members(uri string, content string, type_name stri
 			app.reindex_uri(open_uri)
 		}
 	}
-	mut indexed_uris := app.symbol_index.keys()
-	indexed_uris.sort()
-	for indexed_uri in indexed_uris {
+	for indexed_uri in app.indexed_uris_in_dir(dir) {
 		entry := app.symbol_index[indexed_uri] or { continue }
-		if normalized_index_path(os.dir(uri_to_path(indexed_uri))) != normalized_dir
-			|| entry.module_name != expected_module {
+		if entry.module_name != expected_module {
 			continue
 		}
 		for symbol in entry.doc_symbols {
