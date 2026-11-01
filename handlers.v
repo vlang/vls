@@ -1146,14 +1146,8 @@ fn (mut app App) module_const_hover(uri string, content string, module_name stri
 		return none
 	}
 	app.ensure_dir_shallow_indexed(module_dir)
-	normalized_dir := normalized_index_path(module_dir)
-	mut indexed_uris := app.symbol_index.keys()
-	indexed_uris.sort()
-	for indexed_uri in indexed_uris {
+	for indexed_uri in app.indexed_uris_in_dir(module_dir) {
 		indexed_entry := app.symbol_index[indexed_uri] or { continue }
-		if normalized_index_path(os.dir(uri_to_path(indexed_uri))) != normalized_dir {
-			continue
-		}
 		source := app.index_source_for(indexed_uri) or { continue }
 		source_lines := source.split_into_lines()
 		for symbol in indexed_entry.doc_symbols {
@@ -1654,11 +1648,26 @@ fn apply_completion_budget(items []Detail) ([]Detail, bool) {
 
 fn (app App) word_prefix_at_cursor(uri string, position Position) string {
 	content := app.open_files[uri] or { os.read_file(uri_to_path(uri)) or { '' } }
-	lines := content.split_into_lines()
-	if position.line < 0 || position.line >= lines.len {
+	// Find the requested line without splitting the whole document.
+	mut line_start := 0
+	mut line_idx := 0
+	for line_idx < position.line && line_start < content.len {
+		if nl := content.index_after('\n', line_start) {
+			line_start = nl + 1
+			line_idx++
+		} else {
+			line_start = content.len
+			break
+		}
+	}
+	if line_idx != position.line {
 		return ''
 	}
-	line := lines[position.line]
+	mut line_end := content.len
+	if nl := content.index_after('\n', line_start) {
+		line_end = nl
+	}
+	line := content[line_start..line_end]
 	col := position.char
 	if col <= 0 || col > line.len {
 		return ''
