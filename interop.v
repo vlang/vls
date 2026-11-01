@@ -1718,9 +1718,11 @@ fn (app &App) program_open_files(real_path string, overlay CompilationOverlay) m
 // them.
 fn (app &App) program_open_files_answered(real_path string, program_dir string, answered_dir string) map[string]string {
 	mut program_uris := map[string]string{}
+	real_norm := normalized_index_path(real_path)
 	for open_uri, _ in app.open_files {
 		open_path := uri_to_path(open_uri)
-		if normalized_index_path(open_path) == normalized_index_path(real_path) {
+		open_norm := normalized_index_path(open_path)
+		if open_norm == real_norm {
 			continue
 		}
 		if app.program_root(open_path) != program_dir {
@@ -1729,7 +1731,7 @@ fn (app &App) program_open_files_answered(real_path string, program_dir string, 
 		if answered_dir != '' && !path_is_within(normalize_overlay_path(open_path), answered_dir) {
 			continue
 		}
-		program_uris[normalized_index_path(open_path)] = open_uri
+		program_uris[open_norm] = open_uri
 	}
 	return program_uris
 }
