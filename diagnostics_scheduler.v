@@ -34,6 +34,8 @@ struct DiagnosticsJob {
 	position_encoding   PositionEncoding
 	open_files          map[string]string
 	project_generations map[string]int
+	// The worker must see the request loop's editor defines and project config.
+	config_store        &VlsConfigStore = &VlsConfigStore{}
 	write_mutex         &sync.Mutex
 	tcp_conn            ?&net.TcpConn
 	global_generation   u64
@@ -319,18 +321,6 @@ fn (mut scheduler DiagnosticsScheduler) finish(job DiagnosticsJob) {
 	scheduler.mutex.unlock()
 }
 
-// store_diag_cache_entries merges a worker's cached check results into the
-// scheduler's shared cache, so pull diagnostics can serve them.
-fn (mut scheduler DiagnosticsScheduler) store_diag_cache_entries(entries map[string]DiagCacheEntry) {
-	scheduler.mutex.lock()
-	defer {
-		scheduler.mutex.unlock()
-	}
-	for uri, entry in entries {
-		scheduler.diag_cache[uri] = entry
-	}
-}
-
 // forget_published_errors drops the last published result for `uri`, so a
 // pull stops serving it. Lock-guarded: callers outside the scheduler mutex
 // (the request loop, the worker) must not touch the map directly.
@@ -412,7 +402,8 @@ fn (mut app App) schedule_diagnostics(uri string, content string) bool {
 }
 
 fn (mut app App) begin_diagnostics_project_schedule(uri string) DiagnosticsProjectMutation {
-	if !app.diagnostics_enabled {
+	if !app.diagnostics_enabled_for_uri(uri) {
+		app.cancel_scheduled_diagnostics(uri)
 		return DiagnosticsProjectMutation{}
 	}
 	if mut scheduler := app.diagnostics_scheduler {
@@ -426,7 +417,7 @@ fn (mut app App) begin_diagnostics_project_schedule(uri string) DiagnosticsProje
 }
 
 fn (mut app App) finish_diagnostics_project_schedule(mutation DiagnosticsProjectMutation, uri string, content string) bool {
-	if !app.diagnostics_enabled || mutation.tickets.len == 0 {
+	if mutation.tickets.len == 0 || !app.diagnostics_enabled_for_uri(uri) {
 		return false
 	}
 	if mut scheduler := app.diagnostics_scheduler {
@@ -474,7 +465,7 @@ fn (app &App) open_files_affected_by(uri string, project_key string) []string {
 }
 
 fn (mut app App) finish_diagnostics_project_mutation(mutation DiagnosticsProjectMutation, excluded_uri string) {
-	if !app.diagnostics_enabled || mutation.tickets.len == 0 {
+	if mutation.tickets.len == 0 {
 		return
 	}
 	if mut scheduler := app.diagnostics_scheduler {
@@ -490,8 +481,30 @@ fn (mut app App) enqueue_diagnostics_tickets(mut scheduler DiagnosticsScheduler,
 	// affected URI, which is where the keystroke time went on a wide project.
 	job_open_files := app.open_files.clone()
 	job_generations := app.project_generations.clone()
+	mut cleared := map[string]bool{}
 	for ticket in tickets {
 		if ticket.uri == excluded_uri {
+			continue
+		}
+		if !app.diagnostics_enabled_for_uri(ticket.uri) {
+			// A project disabling diagnostics must clear its own existing
+			// markers without affecting other projects' queued checks.
+			if ticket.uri !in cleared {
+				cleared[ticket.uri] = true
+				scheduler.forget_published_errors(ticket.uri)
+				app.write_notification(Notification{
+					method: 'textDocument/publishDiagnostics'
+					params: PublishDiagnosticsParams{
+						uri:         ticket.uri
+						version:     if ticket.uri in app.open_files_versions {
+							?i64(app.open_files_versions[ticket.uri])
+						} else {
+							none
+						}
+						diagnostics: []LSPDiagnostic{}
+					}
+				})
+			}
 			continue
 		}
 		job_content := if ticket.uri == changed_uri {
@@ -519,6 +532,7 @@ fn (mut app App) enqueue_diagnostics_tickets(mut scheduler DiagnosticsScheduler,
 			position_encoding:   app.position_encoding
 			open_files:          job_open_files
 			project_generations: job_generations
+			config_store:        app.config_store
 			write_mutex:         app.write_mutex
 			tcp_conn:            app.tcp_conn
 			global_generation:   ticket.global_generation
@@ -538,6 +552,7 @@ fn (mut app App) enqueue_diagnostics_tickets(mut scheduler DiagnosticsScheduler,
 fn (mut app App) cancel_scheduled_diagnostics(uri string) {
 	if mut scheduler := app.diagnostics_scheduler {
 		scheduler.cancel(uri)
+		scheduler.forget_published_errors(uri)
 	}
 }
 
@@ -556,7 +571,7 @@ fn (mut app App) cancel_all_scheduled_diagnostics() {
 // diagnostics are off, since a check is either pending for a reason or none at
 // all, which makes it safe on every request path.
 fn (mut app App) rush_pending_diagnostics(uri string) {
-	if !app.diagnostics_enabled {
+	if !app.diagnostics_enabled_for_uri(uri) {
 		return
 	}
 	if mut scheduler := app.diagnostics_scheduler {
@@ -614,6 +629,7 @@ fn run_diagnostics_job(mut scheduler DiagnosticsScheduler, job DiagnosticsJob) {
 		diagnostics_enabled:   true
 		diag_cache:            map[string]DiagCacheEntry{}
 		project_generations:   job.project_generations
+		config_store:           job.config_store
 		position_encoding:     job.position_encoding
 		write_mutex:           job.write_mutex
 		tcp_conn:              job.tcp_conn
@@ -631,15 +647,9 @@ fn run_diagnostics_job(mut scheduler DiagnosticsScheduler, job DiagnosticsJob) {
 		}
 	}
 	notification := worker.build_diagnostics_notification(job.uri, job.content)
-	// Publish the worker's cached check results into the shared cache, so
-	// pull diagnostics (handle_pull_diagnostic) can serve them: the worker
-	// runs in a cloned App whose own diag_cache would otherwise be discarded.
-	// A superseded job stores nothing: an edit that landed while it ran means
-	// a newer fast result may already be published, which older errors must
-	// not overwrite.
-	if scheduler.is_job_current(job) {
-		scheduler.store_diag_cache_entries(worker.diag_cache)
-	}
+	// Publish the exact diagnostic items and update the pull cache under the
+	// same generation lock. Never store a completed worker's cache first: an
+	// intervening edit could otherwise resurrect its old result.
 	if os.getenv('VLS_PERF_LOG') != '' {
 		diag_elapsed_ms := time.now().unix_milli() - started_ms
 		worker.send_log_message('diagnostics uri=${job.uri} kind=slow elapsed_ms=${diag_elapsed_ms}',
@@ -666,12 +676,9 @@ fn run_diagnostics_job(mut scheduler DiagnosticsScheduler, job DiagnosticsJob) {
 	for other_uri in scheduler.swap_program_members(worker.program_dir_checked, members) {
 		other_content := job.open_files[other_uri] or { continue }
 		other := worker.build_diagnostics_notification(other_uri, other_content)
-		if scheduler.publish_if_current(mut worker, job, other) {
-			// The file left the program and its cleared state was published:
-			// the pull must agree with that instead of the errors the
-			// program used to report for it.
-			scheduler.forget_published_errors(other_uri)
-		}
+		// Publish a clean report as an actual empty cached result, so a
+		// workspace pull can clear the old errors for this URI too.
+		scheduler.publish_if_current(mut worker, job, other)
 	}
 }
 
@@ -692,13 +699,13 @@ fn (mut scheduler DiagnosticsScheduler) publish_partial(job DiagnosticsJob, uri 
 		diagnostics_enabled: true
 	}
 	if uri == job.uri {
-		scheduler.publish_published_if_current(mut writer, job, writer.diagnostics_notification_for(uri,
-			job.content, found.file), uri, found.file)
+		scheduler.publish_if_current(mut writer, job, writer.diagnostics_notification_for(uri,
+			job.content, found.file))
 	}
 	for other_uri, other_errors in found.program {
 		other_content := job.open_files[other_uri] or { continue }
-		scheduler.publish_published_if_current(mut writer, job, writer.diagnostics_notification_for(other_uri,
-			other_content, other_errors), other_uri, other_errors)
+		scheduler.publish_if_current(mut writer, job, writer.diagnostics_notification_for(other_uri,
+			other_content, other_errors))
 	}
 }
 
@@ -715,30 +722,10 @@ fn (mut scheduler DiagnosticsScheduler) swap_program_members(program_dir string,
 	return previous.filter(it !in members)
 }
 
-// publish_published_if_current publishes `notification` while `job` is current
-// and records `errors` as the last published result for `uri`, atomically: an
-// edit landing between the publish and the record cannot resurrect a stale
-// entry, and a superseded job records nothing. Pulls serve the recorded
-// errors until a newer result replaces them.
-fn (mut scheduler DiagnosticsScheduler) publish_published_if_current(mut app App, job DiagnosticsJob, notification Notification, uri string, errors []JsonError) bool {
-	scheduler.mutex.lock()
-	defer {
-		scheduler.mutex.unlock()
-	}
-	if !scheduler.is_job_current_locked(job) {
-		return false
-	}
-	app.write_notification(notification)
-	scheduler.diag_cache[uri] = DiagCacheEntry{
-		fingerprint: 'published'
-		errors:      errors.clone()
-	}
-	return true
-}
-
-// publish_if_current keeps validation and the transport write atomic with
-// cancellation. A close or disable that wins this lock suppresses the result;
-// one that follows it will publish its clearing notification afterward.
+// publish_if_current writes a notification and caches its exact LSP items
+// atomically under the same generation lock. A fast or partial publish, a
+// completed check, and an empty clearing publish all become the source of truth
+// for subsequent pull requests; a superseded job can do neither.
 fn (mut scheduler DiagnosticsScheduler) publish_if_current(mut app App, job DiagnosticsJob, notification Notification) bool {
 	scheduler.mutex.lock()
 	defer {
@@ -748,5 +735,9 @@ fn (mut scheduler DiagnosticsScheduler) publish_if_current(mut app App, job Diag
 		return false
 	}
 	app.write_notification(notification)
+	scheduler.diag_cache[notification.params.uri] = DiagCacheEntry{
+		fingerprint:     'published'
+		published_items: notification.params.diagnostics.clone()
+	}
 	return true
 }

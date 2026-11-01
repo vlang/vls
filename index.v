@@ -907,6 +907,7 @@ struct IndexRefreshJob {
 	open_uris_by_path map[string]string
 	workspace_roots   []string
 	removed_roots     []string
+	generation        int // open/disk mutation counter when the walk was requested
 	started_ms        i64
 }
 
@@ -916,6 +917,7 @@ struct IndexRefreshResult {
 mut:
 	dir           string
 	started_ms    i64
+	generation    int
 	entries       map[string]IndexEntry // built from the content the walk read
 	deletions     []string              // indexed uris whose file the walk no longer found
 	skipped       []string              // files left out of the bounded index
@@ -1128,6 +1130,7 @@ fn (app &App) index_refresh_job(dir string) IndexRefreshJob {
 		open_uris_by_path: app.open_index_uris_by_path()
 		workspace_roots:   app.workspace_roots.clone()
 		removed_roots:     app.removed_workspace_roots.clone()
+		generation:        app.open_files_generation
 		started_ms:        time.now().unix_milli()
 	}
 }
@@ -1158,6 +1161,7 @@ fn (mut app App) run_recursive_index_refresh(job IndexRefreshJob) IndexRefreshRe
 	mut result := IndexRefreshResult{
 		dir:        job.dir
 		started_ms: job.started_ms
+		generation: job.generation
 		walk_ms:    time.now().unix_milli()
 	}
 	mut files := []string{}
@@ -1249,6 +1253,17 @@ fn (mut app App) merge_index_refresh(mut result IndexRefreshResult) {
 	scope := 'recursive:${dir}'
 	if dir == '' || dir == '/' || app.path_is_in_removed_workspace(dir) {
 		// A root removed while the refresh ran: nothing it found belongs here.
+		return
+	}
+	// An open-buffer edit or watcher event can update the live index after
+	// this worker read the filesystem. The worker's snapshot must never put
+	// an older symbol back or resurrect a file deleted by a watcher. Reject
+	// the entire stale walk and force the next request to refresh the scope;
+	// destructive requests will synchronously rebuild before editing.
+	if result.generation != app.open_files_generation {
+		app.indexed_dirs.delete(dir)
+		app.indexed_dir_walk_ms.delete(dir)
+		app.index_incomplete_scopes[scope] = true
 		return
 	}
 	if !os.is_dir(dir) {

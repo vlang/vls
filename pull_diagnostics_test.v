@@ -496,3 +496,45 @@ fn test_ws_diagnostic_capability_is_advertised_in_initialize() {
 	app.handle_requests(mut reader)
 	assert app.captured_output.join('').contains('"workspaceDiagnostics":true')
 }
+
+// Pull diagnostics must match the last published fast, partial, final, or
+// clearing notification. A superseded job must never restore older errors.
+fn test_pull_diagnostics_use_the_last_generation_checked_publish() {
+	dir, uri, content := pd_project('pd_atomic_push', pd_main_source)
+	defer {
+		pd_cleanup(dir)
+	}
+	mut scheduler := new_diagnostics_scheduler()
+	mut app := App{
+		capture_output:        true
+		diagnostics_scheduler: scheduler
+		open_files:            {
+			uri: content
+		}
+	}
+	project_key := app.generation_key(uri)
+	tickets := scheduler.begin_project_schedule(uri, project_key)
+	assert tickets.len == 2
+	job := DiagnosticsJob{
+		uri:                uri
+		project_key:        project_key
+		global_generation:  tickets[0].global_generation
+		generation:         tickets[0].generation
+		project_generation: tickets[0].project_generation
+	}
+	fast := app.diagnostics_notification_for(uri, content, pd_errors(2))
+	assert scheduler.publish_if_current(mut app, job, fast)
+	assert pd_report(pd_pull(mut app, uri, '')).items.len == 2
+
+	// A clean slow check replaces the fast errors; it is not an absent cache.
+	clean := app.diagnostics_notification_for(uri, content, []JsonError{})
+	assert scheduler.publish_if_current(mut app, job, clean)
+	assert pd_report(pd_pull(mut app, uri, '')).items.len == 0
+	assert uri in scheduler.diag_cache, 'empty reports remain visible to workspace pulls'
+
+	// The next edit invalidates the old generation before the replacement job.
+	_ = scheduler.begin_project_schedule(uri, project_key)
+	assert !scheduler.publish_if_current(mut app, job, fast)
+	assert pd_report(pd_pull(mut app, uri, '')).items.len == 0
+	assert uri !in scheduler.diag_cache, 'an old worker cannot repopulate the cache'
+}

@@ -1648,3 +1648,66 @@ fn test_background_refresh_reindexes_the_file_that_changed() {
 	assert app.symbol_index[uri_a].fingerprint == fingerprint_a, 'the untouched file still keeps its entry'
 	assert app.symbol_index.len == 2, 'the refresh added no entry, got ${app.symbol_index.len}'
 }
+
+
+// A background scan may have read stale bytes when the filesystem watcher
+// replaces or deletes that file before the scan's result reaches the App.
+// The old scan must neither restore the previous symbols nor claim completion.
+fn test_background_refresh_does_not_overwrite_newer_watcher_symbols() {
+	root := index_test_tmpdir('refresh_watcher_edit')
+	defer {
+		os.rmdir_all(root) or {}
+	}
+	path := os.join_path(root, 'item.v')
+	uri := path_to_uri(path)
+	os.write_file(path, 'module main\n\nfn original() {}\n') or { panic(err) }
+	mut app := index_test_app()
+	app.ensure_dirs_indexed([root])
+	job := app.index_refresh_job(root)
+	os.write_file(path, 'module main\n\nfn scanned() {}\n') or { panic(err) }
+	mut result := app.run_recursive_index_refresh(job)
+	assert result.entries.len == 1
+	os.write_file(path, 'module main\n\nfn latest() {}\n') or { panic(err) }
+	app.on_did_change_watched_files(Request{
+		params: json2.encode(DidChangeWatchedFilesParams{
+			changes: [FileEvent{
+				uri:        uri
+				event_type: 2
+			}]
+		})
+	})
+	assert app.query_workspace_symbols('latest').len == 1
+	app.merge_index_refresh(mut result)
+	assert app.query_workspace_symbols('latest').len == 1
+	assert app.query_workspace_symbols('scanned').len == 0
+	assert root !in app.indexed_dirs, 'the stale scan must be scheduled again'
+	assert 'recursive:${root}' in app.index_incomplete_scopes
+	app.ensure_dirs_indexed([root])
+	assert 'recursive:${root}' !in app.index_incomplete_scopes
+}
+
+fn test_background_refresh_does_not_resurrect_watcher_deleted_file() {
+	root := index_test_tmpdir('refresh_watcher_delete')
+	defer {
+		os.rmdir_all(root) or {}
+	}
+	path := os.join_path(root, 'item.v')
+	uri := path_to_uri(path)
+	os.write_file(path, 'module main\n\nfn original() {}\n') or { panic(err) }
+	mut app := index_test_app()
+	job := app.index_refresh_job(root)
+	mut result := app.run_recursive_index_refresh(job)
+	assert result.entries.len == 1
+	os.rm(path) or { panic(err) }
+	app.on_did_change_watched_files(Request{
+		params: json2.encode(DidChangeWatchedFilesParams{
+			changes: [FileEvent{
+				uri:        uri
+				event_type: 3
+			}]
+		})
+	})
+	app.merge_index_refresh(mut result)
+	assert uri !in app.symbol_index, 'the deleted file cannot be brought back'
+	assert 'recursive:${root}' in app.index_incomplete_scopes
+}

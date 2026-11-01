@@ -71,8 +71,8 @@ fn run_answer_followup(mut app App, followup AnswerFollowup) {
 // at `uri` is held: a diagnostics check for it waits for its debounce or already
 // runs, and the last answer measured for it and this method was not quick enough
 // to make asking twice cheaper than waiting.
-fn (app &App) compiler_answer_is_held(uri string, method Method) bool {
-	if !app.diagnostics_enabled {
+fn (mut app App) compiler_answer_is_held(uri string, method Method) bool {
+	if !app.diagnostics_enabled_for_uri(uri) {
 		return false
 	}
 	scheduler := app.diagnostics_scheduler or { return false }

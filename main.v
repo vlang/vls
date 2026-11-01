@@ -106,8 +106,9 @@ struct JsonVarAC {
 // fingerprint covers the program's contents and the compiler (see
 // diag_cache.v): only an identical state reuses the errors.
 struct DiagCacheEntry {
-	fingerprint string
-	errors      []JsonError
+	fingerprint     string
+	errors          []JsonError
+	published_items ?[]LSPDiagnostic // exact last push; only set in scheduler's shared cache
 }
 
 // Keep runtime-derived settings behind functions. Function-call module constants can crash V3's

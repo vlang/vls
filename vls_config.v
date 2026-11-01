@@ -97,9 +97,8 @@ mut:
 
 // apply_editor_configuration folds a workspace/didChangeConfiguration payload
 // into the configuration. The editor's settings are the top tier, so they are
-// stored first; the merged result is then applied for every workspace root, and
-// a changed defines value drops the cached diagnostics, which were computed with
-// the old ones.
+// stored first; subsequent requests resolve per-project settings from it.
+// A changed defines value invalidates checks computed with the old ones.
 fn (mut app App) apply_editor_configuration(params_json string) {
 	mut store := app.config_store
 	previous := store.editor_settings().defines
@@ -121,13 +120,26 @@ fn (mut app App) apply_editor_configuration(params_json string) {
 	store.set_editor_settings(editor)
 	current := editor.defines
 	if current != previous {
-		// A check's fingerprint covers the sources and the compiler, so every
-		// result cached for any file is the one the old defines produce.
+		// A check's fingerprint covers the defines, but a worker may already
+		// be running with the previous editor tier. Invalidate its generation
+		// and enqueue the open documents again with the updated configuration.
 		app.diag_cache = map[string]DiagCacheEntry{}
+		app.cancel_all_scheduled_diagnostics()
+		for uri, content in app.open_files {
+			app.schedule_diagnostics(uri, content)
+		}
 		log('VLS: defines=${current}')
 	}
-	for root in app.workspace_roots {
-		app.apply_project_settings(app.project_config_for_root(root))
+	// Project switches are consulted per URI instead of applied to session-
+	// global booleans: otherwise opening one project disables another one.
+	if enabled := editor.inlay_hints {
+		app.inlay_hints_enabled = enabled
+	}
+	if enabled := editor.diagnostics {
+		app.diagnostics_enabled = enabled
+		if !enabled {
+			app.cancel_all_scheduled_diagnostics()
+		}
 	}
 }
 
@@ -153,17 +165,28 @@ fn (mut app App) project_config_for_root(root string) VlsProjectConfig {
 	return config
 }
 
-// check_defines returns the defines the check of `path` runs with, and applies
-// the switches of the same configuration, so a project's `vls.json` is in step
-// even when the client's settings were sent before it was ever read.
+// check_defines returns the defines for this particular source. A compiler
+// check cannot rewrite the session-wide feature switches for other projects.
 fn (mut app App) check_defines(path string) []string {
-	config := app.project_config_for_path(path)
-	app.apply_project_settings(config)
-	return config.defines.clone()
+	return app.project_config_for_path(path).defines.clone()
 }
 
-// apply_project_settings writes the switches of `config` into the App fields the
-// feature handlers read. A tier that says nothing leaves the field as it is.
+// Feature flags are project-scoped: the top-tier editor setting is already
+// included in the merged config; absent project keys use the session default.
+fn (mut app App) diagnostics_enabled_for_uri(uri string) bool {
+	if enabled := app.project_config_for_path(uri_to_path(uri)).diagnostics {
+		return enabled
+	}
+	return app.diagnostics_enabled
+}
+
+fn (mut app App) inlay_hints_enabled_for_uri(uri string) bool {
+	if enabled := app.project_config_for_path(uri_to_path(uri)).inlay_hints {
+		return enabled
+	}
+	return app.inlay_hints_enabled
+}
+
 // coverage_directory_for_path returns the coverage directory the configuration
 // names for the project root that owns `path`. It is where an editor's own
 // coverage run recorded its counters, which is what a test-generation action
@@ -174,18 +197,6 @@ fn (mut app App) coverage_directory_for_path(path string) string {
 		return directory
 	}
 	return ''
-}
-
-fn (mut app App) apply_project_settings(config VlsProjectConfig) {
-	if enabled := config.inlay_hints {
-		app.inlay_hints_enabled = enabled
-	}
-	if enabled := config.diagnostics {
-		app.diagnostics_enabled = enabled
-		if !enabled {
-			app.cancel_all_scheduled_diagnostics()
-		}
-	}
 }
 
 // forget_config_file drops the configuration cached for the project root that

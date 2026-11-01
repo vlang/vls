@@ -4865,9 +4865,9 @@ fn (mut app App) on_did_open(request Request) bool {
 			return false
 		}
 	}
-	// A project's `vls.json` is read when one of its files is opened, so its
-	// switches are in step with the first check rather than the next one.
-	app.apply_project_settings(app.project_config_for_path(uri_to_path(uri)))
+	// Load this project's configuration before scheduling checks. Feature
+	// switches are resolved per URI, not written to App-wide state.
+	_ = app.project_config_for_path(uri_to_path(uri))
 	diagnostics_mutation := app.begin_diagnostics_project_schedule(uri)
 	app.open_files[uri] = content
 	// A file appearing is what the fingerprint's listing memo cannot see by
@@ -4878,6 +4878,7 @@ fn (mut app App) on_did_open(request Request) bool {
 		app.open_files_versions[uri] = version
 	}
 	app.bump_generation(uri)
+	app.diag_cache.delete(uri)
 	app.invalidate_index_uri(uri) // re-parse from the buffer on next query
 	app.text = content
 	$if debug {
@@ -4930,7 +4931,7 @@ fn (mut app App) on_did_close(request Request) {
 }
 
 fn (mut app App) build_diagnostics_notification(uri string, content string) Notification {
-	if !app.diagnostics_enabled {
+	if !app.diagnostics_enabled_for_uri(uri) {
 		return Notification{
 			method: 'textDocument/publishDiagnostics'
 			params: PublishDiagnosticsParams{
@@ -5085,6 +5086,7 @@ fn (mut app App) on_did_change(request Request) ?Notification {
 		app.open_files_versions[uri] = version
 	}
 	app.bump_generation(uri)
+	app.diag_cache.delete(uri)
 	app.invalidate_index_uri(uri) // symbols re-parsed lazily on next query
 	if app.finish_diagnostics_project_schedule(diagnostics_mutation, uri, content) {
 		return none
@@ -5150,6 +5152,7 @@ fn (mut app App) on_did_save(request Request) ?Notification {
 			app.open_files[uri] = text
 			app.text = text
 			app.bump_generation(uri)
+			app.diag_cache.delete(uri)
 			app.invalidate_index_uri(uri)
 		}
 	} else {
@@ -7285,12 +7288,6 @@ fn (mut app App) handle_document_symbols(request Request) Response {
 
 // handle_inlay_hints handles the LSP inlayHint request, returning type hints for variables.
 fn (mut app App) handle_inlay_hints(request Request) Response {
-	if !app.inlay_hints_enabled {
-		return Response{
-			id:     request.id
-			result: []InlayHint{}
-		}
-	}
 	params := json2.decode[InlayHintParams](request.params) or {
 		log('Failed to decode InlayHintParams: ${err}')
 		return Response{
@@ -7299,6 +7296,12 @@ fn (mut app App) handle_inlay_hints(request Request) Response {
 		}
 	}
 	uri := params.text_document.uri
+	if !app.inlay_hints_enabled_for_uri(uri) {
+		return Response{
+			id:     request.id
+			result: []InlayHint{}
+		}
+	}
 	content := app.open_files[uri] or { '' }
 	lines := content.split_into_lines()
 	start_line := params.range.start.line

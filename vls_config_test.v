@@ -245,20 +245,22 @@ fn test_config_a_changed_editor_defines_value_drops_every_cached_diagnostic() {
 	assert uri !in app.diag_cache, 'a new defines value drops the cached diagnostics of every file'
 }
 
-fn test_config_the_project_switches_are_applied_to_the_app() {
+fn test_config_the_project_switches_are_resolved_per_uri() {
 	root := config_test_project('switch')
 	defer {
 		os.rmdir_all(root) or {}
 	}
 	config_test_write(os.join_path(root, 'vls.json'), '{"inlayHints":false,"diagnostics":false}')
 	mut app := config_test_app(root)
+	uri := path_to_uri(os.join_path(root, 'main.v'))
 	app.apply_editor_configuration('{}')
-	assert !app.inlay_hints_enabled, 'the project file turns inlay hints off'
-	assert !app.diagnostics_enabled, 'the project file turns diagnostics off'
+	assert !app.inlay_hints_enabled_for_uri(uri), 'the project turns its hints off'
+	assert !app.diagnostics_enabled_for_uri(uri), 'the project turns its checks off'
+	assert app.inlay_hints_enabled && app.diagnostics_enabled, 'a project must not mutate global flags'
 	// The editor's own settings win again once it says something.
 	app.apply_editor_configuration('{"settings":{"vls":{"inlayHints":true}}}')
-	assert app.inlay_hints_enabled, 'the editor turns inlay hints back on'
-	assert !app.diagnostics_enabled, 'a key the editor did not send keeps the project value'
+	assert app.inlay_hints_enabled_for_uri(uri), 'the editor turns inlay hints back on'
+	assert !app.diagnostics_enabled_for_uri(uri), 'the project still disables diagnostics'
 }
 
 fn test_config_the_defines_reach_only_the_check_argument_vector() {
@@ -348,8 +350,10 @@ fn test_config_opening_a_file_applies_the_project_switches_at_once() {
 	mut app := config_test_app_open(root)
 	assert app.inlay_hints_enabled && app.diagnostics_enabled, 'both switches start on'
 	app.on_did_open(config_test_did_open_request(path_to_uri(source)))
-	assert !app.inlay_hints_enabled, 'opening a file applies the project inlayHints, not the next check'
-	assert !app.diagnostics_enabled, 'opening a file applies the project diagnostics'
+	uri := path_to_uri(source)
+	assert !app.inlay_hints_enabled_for_uri(uri), 'project hints are off immediately'
+	assert !app.diagnostics_enabled_for_uri(uri), 'project diagnostics are off immediately'
+	assert app.inlay_hints_enabled && app.diagnostics_enabled, 'other projects keep the defaults'
 }
 
 fn test_config_opening_a_file_keeps_the_editor_switches() {
@@ -363,8 +367,8 @@ fn test_config_opening_a_file_keeps_the_editor_switches() {
 	mut app := config_test_app_open(root)
 	app.apply_editor_configuration('{"settings":{"vls":{"inlayHints":true,"diagnostics":true}}}')
 	app.on_did_open(config_test_did_open_request(path_to_uri(source)))
-	assert app.inlay_hints_enabled, 'the editor inlayHints wins over the file of the opened project'
-	assert app.diagnostics_enabled, 'the editor diagnostics wins over the file of the opened project'
+	assert app.inlay_hints_enabled_for_uri(path_to_uri(source)), 'editor inlayHints wins'
+	assert app.diagnostics_enabled_for_uri(path_to_uri(source)), 'editor diagnostics wins'
 }
 
 fn test_config_opening_a_file_of_a_project_without_a_config_changes_nothing() {
@@ -376,8 +380,8 @@ fn test_config_opening_a_file_of_a_project_without_a_config_changes_nothing() {
 	config_test_write(source, 'module main\n\nfn main() {}\n')
 	mut app := config_test_app_open(root)
 	app.on_did_open(config_test_did_open_request(path_to_uri(source)))
-	assert app.inlay_hints_enabled, 'a project without vls.json leaves inlay hints alone'
-	assert app.diagnostics_enabled, 'a project without vls.json leaves diagnostics alone'
+	assert app.inlay_hints_enabled_for_uri(path_to_uri(source)), 'no vls.json leaves hints on'
+	assert app.diagnostics_enabled_for_uri(path_to_uri(source)), 'no vls.json leaves diagnostics on'
 }
 
 fn test_config_opening_a_file_of_the_nearest_project_uses_its_own_config() {
@@ -396,9 +400,10 @@ fn test_config_opening_a_file_of_the_nearest_project_uses_its_own_config() {
 	config_test_write(outer_source, 'module main\n\nfn main() {}\n')
 	mut app := config_test_app_open(outer)
 	app.on_did_open(config_test_did_open_request(path_to_uri(inner_source)))
-	assert app.inlay_hints_enabled, 'the nearest v.mod decides, not the one at the workspace root'
+	assert app.inlay_hints_enabled_for_uri(path_to_uri(inner_source)), 'the nearest v.mod wins'
 	app.on_did_open(config_test_did_open_request(path_to_uri(outer_source)))
-	assert !app.inlay_hints_enabled, 'a file of the outer project uses the outer vls.json'
+	assert !app.inlay_hints_enabled_for_uri(path_to_uri(outer_source)), 'outer project uses its own config'
+	assert app.inlay_hints_enabled_for_uri(path_to_uri(inner_source)), 'the inner project stays enabled'
 }
 
 fn test_config_opening_a_file_leaves_the_defines_of_a_check_alone() {
@@ -489,4 +494,94 @@ struct EditorCoverageDirectorySettings {
 
 struct CoverageDirectorySetting {
 	coverage_directory ?string @[json: 'coverageDirectory']
+}
+
+// A single LSP connection can open multiple projects with different switches.
+// Opening the disabled project must not cancel diagnostics for its sibling.
+fn test_config_multi_root_project_switches_do_not_leak_between_files() {
+	first := config_test_project('multi_first')
+	defer {
+		os.rmdir_all(first) or {}
+	}
+	second := config_test_project('multi_second')
+	defer {
+		os.rmdir_all(second) or {}
+	}
+	config_test_write(os.join_path(first, 'vls.json'), '{"diagnostics":false,"inlayHints":false}')
+	first_path := os.join_path(first, 'main.v')
+	second_path := os.join_path(second, 'main.v')
+	config_test_write(first_path, 'module main\n\nfn main() {}\n')
+	config_test_write(second_path, 'module main\n\nfn main() {}\n')
+	mut scheduler := new_diagnostics_scheduler()
+	scheduler.paused = true
+	mut app := &App{
+		workspace_roots:       [first, second]
+		diagnostics_scheduler: scheduler
+	}
+	app.on_did_open(config_test_did_open_request(path_to_uri(first_path)))
+	assert !app.diagnostics_enabled_for_uri(path_to_uri(first_path))
+	assert !app.inlay_hints_enabled_for_uri(path_to_uri(first_path))
+	assert app.diagnostics_enabled && app.inlay_hints_enabled
+	app.on_did_open(config_test_did_open_request(path_to_uri(second_path)))
+	assert app.diagnostics_enabled_for_uri(path_to_uri(second_path))
+	assert app.inlay_hints_enabled_for_uri(path_to_uri(second_path))
+	assert diagnostics_job_key(path_to_uri(first_path), .slow) !in scheduler.pending_jobs
+	assert diagnostics_job_key(path_to_uri(second_path), .slow) in scheduler.pending_jobs
+}
+
+// Worker checks must inherit the editor's defines, not silently use a fresh
+// default App store that knows only project files and environment variables.
+fn test_config_diagnostics_worker_inherits_editor_defines() {
+	root := config_test_project('job_defines')
+	defer {
+		os.rmdir_all(root) or {}
+	}
+	source := os.join_path(root, 'main.v')
+	content := 'module main\n\nfn main() {}\n'
+	config_test_write(source, content)
+	uri := path_to_uri(source)
+	mut scheduler := new_diagnostics_scheduler()
+	scheduler.paused = true
+	mut app := config_test_app_open(root)
+	app.diagnostics_scheduler = scheduler
+	app.open_files[uri] = content
+	app.apply_editor_configuration('{"settings":{"vls":{"defines":["-d","nebula"]}}}')
+	assert app.schedule_diagnostics(uri, content)
+	job := scheduler.pending_jobs[diagnostics_job_key(uri, .slow)] or {
+		assert false, 'slow diagnostics job was not enqueued'
+		return
+	}
+	mut worker := App{
+		config_store: job.config_store
+	}
+	assert worker.check_defines(source) == ['-d', 'nebula']
+}
+
+// Turning off diagnostics in one project clears what was last published for
+// its open files, rather than leaving stale markers in pull clients.
+fn test_config_project_disable_clears_published_errors() {
+	root := config_test_project('disable_clears')
+	defer {
+		os.rmdir_all(root) or {}
+	}
+	path := os.join_path(root, 'main.v')
+	config_path := os.join_path(root, 'vls.json')
+	content := 'module main\n\nfn main() {}\n'
+	config_test_write(path, content)
+	uri := path_to_uri(path)
+	mut scheduler := new_diagnostics_scheduler()
+	scheduler.paused = true
+	mut app := config_test_app_open(root)
+	app.capture_output = true
+	app.diagnostics_scheduler = scheduler
+	app.open_files[uri] = content
+	scheduler.diag_cache[uri] = DiagCacheEntry{
+		fingerprint: 'published'
+	}
+	config_test_write(config_path, '{"diagnostics":false}')
+	app.forget_config_file(config_path)
+	mutation := app.begin_diagnostics_project_mutation(path_to_uri(config_path))
+	app.finish_diagnostics_project_mutation(mutation, '')
+	assert uri !in scheduler.diag_cache, 'a disabled project cannot keep an old pull result'
+	assert app.captured_output.join('').contains('"diagnostics":[]'), 'the client must receive a clearing notification'
 }
