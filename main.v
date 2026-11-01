@@ -11,6 +11,20 @@ import io
 
 const vls_version = '0.0.3'
 
+// cli_app builds a minimal App for single-file CLI commands.
+fn cli_app(content string, temp_name string) &App {
+	mut app := &App{
+		text:                  content
+		open_files:            map[string]string{}
+		temp_dir:              os.join_path(os.temp_dir(), temp_name)
+		diagnostics_scheduler: new_diagnostics_scheduler()
+		index_refresh:         new_index_refresh_scheduler()
+		v3_line_info_enabled:  true
+	}
+	os.mkdir_all(app.temp_dir) or {}
+	return app
+}
+
 // App represents the context of the server during its lifetime.
 pub struct App {
 	cur_mod string = 'main'
@@ -333,6 +347,15 @@ fn main() {
 		println('}')
 		return
 	}
+	if os.args.len >= 2 && os.args[1] == 'mcp' && os.args.len >= 3 && os.args[2] == 'install' {
+		// Print an MCP client config snippet for VLS.
+		println('{')
+		println('  "mcpServers": {')
+		println('    "vls": { "command": "vls", "args": ["--mcp"] }')
+		println('  }')
+		println('}')
+		return
+	}
 	// `vls check <file>` runs a single-file compile check and prints JSON diagnostics.
 	if os.args.len >= 3 && os.args[1] == 'check' {
 		path := os.args[2]
@@ -340,17 +363,10 @@ fn main() {
 			eprintln('cannot read ${path}: ${err}')
 			return
 		}
-		mut app := &App{
-			text:                  content
-			open_files:            map[string]string{}
-			temp_dir:              os.join_path(os.temp_dir(), 'vls_check_${os.getpid()}')
-			diagnostics_scheduler: new_diagnostics_scheduler()
-			index_refresh:         new_index_refresh_scheduler()
-			v3_line_info_enabled:  true
-		}
-		os.mkdir_all(app.temp_dir) or {}
-		app.open_files[path_to_uri(path)] = content
-		notification := app.build_diagnostics_notification(path_to_uri(path), content)
+		mut app := cli_app(content, 'vls_check_${os.getpid()}')
+		uri := path_to_uri(path)
+		app.open_files[uri] = content
+		notification := app.build_diagnostics_notification(uri, content)
 		println(json2.encode(notification))
 		return
 	}
@@ -362,15 +378,7 @@ fn main() {
 			eprintln('cannot read ${path}: ${err}')
 			return
 		}
-		mut app := &App{
-			text:                  content
-			open_files:            map[string]string{}
-			temp_dir:              os.join_path(os.temp_dir(), 'vls_hover_${os.getpid()}')
-			diagnostics_scheduler: new_diagnostics_scheduler()
-			index_refresh:         new_index_refresh_scheduler()
-			v3_line_info_enabled:  true
-		}
-		os.mkdir_all(app.temp_dir) or {}
+		mut app := cli_app(content, 'vls_hover_${os.getpid()}')
 		uri := path_to_uri(path)
 		app.open_files[uri] = content
 		hover := app.hover_at(uri, Position{ line: line, char: col })
@@ -389,15 +397,7 @@ fn main() {
 			eprintln('cannot read ${path}: ${err}')
 			return
 		}
-		mut app := &App{
-			text:                  content
-			open_files:            map[string]string{}
-			temp_dir:              os.join_path(os.temp_dir(), 'vls_def_${os.getpid()}')
-			diagnostics_scheduler: new_diagnostics_scheduler()
-			index_refresh:         new_index_refresh_scheduler()
-			v3_line_info_enabled:  true
-		}
-		os.mkdir_all(app.temp_dir) or {}
+		mut app := cli_app(content, 'vls_def_${os.getpid()}')
 		uri := path_to_uri(path)
 		app.open_files[uri] = content
 		app.reindex_uri(uri)
@@ -416,15 +416,7 @@ fn main() {
 			eprintln('cannot read ${path}: ${err}')
 			return
 		}
-		mut app := &App{
-			text:                  content
-			open_files:            map[string]string{}
-			temp_dir:              os.join_path(os.temp_dir(), 'vls_refs_${os.getpid()}')
-			diagnostics_scheduler: new_diagnostics_scheduler()
-			index_refresh:         new_index_refresh_scheduler()
-			v3_line_info_enabled:  true
-		}
-		os.mkdir_all(app.temp_dir) or {}
+		mut app := cli_app(content, 'vls_refs_${os.getpid()}')
 		uri := path_to_uri(path)
 		app.open_files[uri] = content
 		params := '{"textDocument":{"uri":"${uri}"},"position":{"line":${line},"character":${col}}}'
@@ -438,15 +430,7 @@ fn main() {
 			eprintln('cannot read ${path}: ${err}')
 			return
 		}
-		mut app := &App{
-			text:                  content
-			open_files:            map[string]string{}
-			temp_dir:              os.join_path(os.temp_dir(), 'vls_symbols_${os.getpid()}')
-			diagnostics_scheduler: new_diagnostics_scheduler()
-			index_refresh:         new_index_refresh_scheduler()
-			v3_line_info_enabled:  true
-		}
-		os.mkdir_all(app.temp_dir) or {}
+		mut app := cli_app(content, 'vls_symbols_${os.getpid()}')
 		uri := path_to_uri(path)
 		app.open_files[uri] = content
 		app.reindex_uri(uri)
@@ -465,15 +449,7 @@ fn main() {
 			eprintln('cannot read ${path}: ${err}')
 			return
 		}
-		mut app := &App{
-			text:                  content
-			open_files:            map[string]string{}
-			temp_dir:              os.join_path(os.temp_dir(), 'vls_completion_${os.getpid()}')
-			diagnostics_scheduler: new_diagnostics_scheduler()
-			index_refresh:         new_index_refresh_scheduler()
-			v3_line_info_enabled:  true
-		}
-		os.mkdir_all(app.temp_dir) or {}
+		mut app := cli_app(content, 'vls_completion_${os.getpid()}')
 		uri := path_to_uri(path)
 		app.open_files[uri] = content
 		app.reindex_uri(uri)
@@ -490,15 +466,7 @@ fn main() {
 			eprintln('cannot read ${path}: ${err}')
 			return
 		}
-		mut app := &App{
-			text:                  content
-			open_files:            map[string]string{}
-			temp_dir:              os.join_path(os.temp_dir(), 'vls_rename_${os.getpid()}')
-			diagnostics_scheduler: new_diagnostics_scheduler()
-			index_refresh:         new_index_refresh_scheduler()
-			v3_line_info_enabled:  true
-		}
-		os.mkdir_all(app.temp_dir) or {}
+		mut app := cli_app(content, 'vls_rename_${os.getpid()}')
 		uri := path_to_uri(path)
 		app.open_files[uri] = content
 		params := '{"textDocument":{"uri":"${uri}"},"position":{"line":${line},"character":${col}},"newName":"${new_name}"}'
