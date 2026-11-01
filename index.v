@@ -369,12 +369,12 @@ fn (mut app App) drop_index_aliases_for_path(path string, keep_uri string) {
 	}
 	for uri in app.ref_occurrences.keys() {
 		if uri !in normalized {
-			normalized[uri] = normalized_index_path(uri_to_path(uri))
+			normalized[uri] = app.cached_normalized_index_path(uri_to_path(uri))
 		}
 	}
 	for uri in app.index_skipped_uris.keys() {
 		if uri !in normalized {
-			normalized[uri] = normalized_index_path(uri_to_path(uri))
+			normalized[uri] = app.cached_normalized_index_path(uri_to_path(uri))
 		}
 	}
 	for uri, np in normalized {
