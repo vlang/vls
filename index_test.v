@@ -1430,8 +1430,7 @@ fn test_fuzzy_long_names_remain_ranked_with_bounded_on_demand_trigrams() {
 	app.open_files[uri] = 'module main\n\nfn ${long_name}() {}\n'
 	app.reindex_uri(uri)
 	assert fuzzy_trigrams(fuzzy_normalize(long_name)).len == fuzzy_trigram_max_per_symbol
-	assert app.query_workspace_symbols(long_name).any(it.name == long_name),
-		'long symbol still ranks as an exact match'
+	assert app.query_workspace_symbols(long_name).any(it.name == long_name), 'long symbol still ranks as an exact match'
 }
 
 // index_request_refresh_app returns an app whose read requests answer from the
@@ -1663,7 +1662,6 @@ fn test_background_refresh_reindexes_the_file_that_changed() {
 	assert app.symbol_index[uri_a].fingerprint == fingerprint_a, 'the untouched file still keeps its entry'
 	assert app.symbol_index.len == 2, 'the refresh added no entry, got ${app.symbol_index.len}'
 }
-
 
 // A background scan may have read stale bytes when the filesystem watcher
 // replaces or deletes that file before the scan's result reaches the App.
