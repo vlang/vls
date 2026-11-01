@@ -78,3 +78,12 @@ fn test_fuzzy_score_matches_fuzzy_match() {
 		}
 	}
 }
+
+fn test_fuzzy_filter_large_input() {
+	mut items := []string{}
+	for i in 0 .. 10000 {
+		items << 'symbol_${i}'
+	}
+	result := fuzzy_filter('sym', items)
+	assert result.len > 0
+}
