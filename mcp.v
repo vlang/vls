@@ -66,6 +66,9 @@ fn read_mcp_frame[T](mut reader T) !string {
 			len = parsed
 			continue
 		}
+		if lower.starts_with('content-type:') {
+			continue
+		}
 	}
 	if header_error != '' {
 		return error(header_error)
@@ -87,7 +90,6 @@ fn read_mcp_frame[T](mut reader T) !string {
 
 // handle_mcp_message dispatches a single JSON-RPC request and writes the response.
 fn handle_mcp_message(mut app App, body string) {
-	// Parse minimal fields manually to avoid tight coupling to json2 types.
 	method := mcp_json_field(body, 'method')
 	id := mcp_json_field(body, 'id')
 	if method == 'initialize' {
@@ -99,27 +101,52 @@ fn handle_mcp_message(mut app App, body string) {
 		return
 	}
 	if method == 'tools/list' {
-		resp := '{"jsonrpc":"2.0","id":${id},"result":{"tools":[{"name":"vls_check","description":"Compile-check a V source file and return diagnostics.","inputSchema":{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}}]}}'
+		resp := '{"jsonrpc":"2.0","id":${id},"result":{"tools":[{"name":"vls_check","description":"Compile-check a V source file and return diagnostics.","inputSchema":{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}},{"name":"vls_hover","description":"Hover information at a position in a V source file.","inputSchema":{"type":"object","properties":{"path":{"type":"string"},"line":{"type":"integer"},"character":{"type":"integer"}},"required":["path","line","character"]}}]}}'
 		app.send_framed(resp)
 		return
 	}
 	if method == 'tools/call' {
-		// Extract path argument (best-effort).
-		path := mcp_json_nested(body, 'arguments', 'path')
-		if path == '' {
-			app.send_framed('{"jsonrpc":"2.0","id":${id},"error":{"code":-32602,"message":"missing path"}}')
+		tool_name := mcp_json_nested(body, 'params', 'name')
+		args := mcp_json_nested(body, 'params', 'arguments')
+		if tool_name == 'vls_check' {
+			p := mcp_json_field(args, 'path')
+			if p == '' {
+				app.send_framed('{"jsonrpc":"2.0","id":${id},"error":{"code":-32602,"message":"missing path"}}')
+				return
+			}
+			content := os.read_file(p) or {
+				app.send_framed('{"jsonrpc":"2.0","id":${id},"error":{"code":-32603,"message":"cannot read file"}}')
+				return
+			}
+			uri := path_to_uri(p)
+			app.open_files[uri] = content
+			notification := app.build_diagnostics_notification(uri, content)
+			result := json2.encode(notification)
+			resp := '{"jsonrpc":"2.0","id":${id},"result":{"content":[{"type":"text","text":${json2.encode(result)}}],"isError":false}}'
+			app.send_framed(resp)
 			return
 		}
-		content := os.read_file(path) or {
-			app.send_framed('{"jsonrpc":"2.0","id":${id},"error":{"code":-32603,"message":"cannot read file"}}')
+		if tool_name == 'vls_hover' {
+			p := mcp_json_field(args, 'path')
+			if p == '' {
+				app.send_framed('{"jsonrpc":"2.0","id":${id},"error":{"code":-32602,"message":"missing path"}}')
+				return
+			}
+			content := os.read_file(p) or {
+				app.send_framed('{"jsonrpc":"2.0","id":${id},"error":{"code":-32603,"message":"cannot read file"}}')
+				return
+			}
+			line := mcp_json_field(args, 'line').int()
+			col := mcp_json_field(args, 'character').int()
+			uri := path_to_uri(p)
+			app.open_files[uri] = content
+			hover := app.hover_at(uri, Position{ line: line, char: col })
+			result := if h := hover { json2.encode(h) } else { '{"contents":null}' }
+			resp := '{"jsonrpc":"2.0","id":${id},"result":{"content":[{"type":"text","text":${json2.encode(result)}}],"isError":false}}'
+			app.send_framed(resp)
 			return
 		}
-		uri := path_to_uri(path)
-		app.open_files[uri] = content
-		notification := app.build_diagnostics_notification(uri, content)
-		result := json2.encode(notification)
-		resp := '{"jsonrpc":"2.0","id":${id},"result":{"content":[{"type":"text","text":${json2.encode(result)}}],"isError":false}}'
-		app.send_framed(resp)
+		app.send_framed('{"jsonrpc":"2.0","id":${id},"error":{"code":-32601,"message":"unknown tool"}}')
 		return
 	}
 	// Unknown method.
@@ -131,7 +158,6 @@ fn mcp_json_field(body string, field string) string {
 	key := '"${field}"'
 	idx := body.index(key) or { return '' }
 	rest := body[idx + key.len..]
-	// skip colon and whitespace
 	mut i := 0
 	for i < rest.len && (rest[i] == `:` || rest[i] == ` ` || rest[i] == `\t` || rest[i] == `\n` || rest[i] == `\r`) {
 		i++
@@ -140,7 +166,6 @@ fn mcp_json_field(body string, field string) string {
 		return ''
 	}
 	if rest[i] == `"` {
-		// string value
 		mut j := i + 1
 		mut out := ''
 		for j < rest.len {
@@ -148,7 +173,7 @@ fn mcp_json_field(body string, field string) string {
 				break
 			}
 			if rest[j] == `\\` && j + 1 < rest.len {
-				out += rest[j..j+2]
+				out += rest[j..j + 2]
 				j += 2
 				continue
 			}
@@ -157,7 +182,6 @@ fn mcp_json_field(body string, field string) string {
 		}
 		return out
 	}
-	// non-string: read until comma/brace
 	mut j := i
 	mut out := ''
 	for j < rest.len && rest[j] != `,` && rest[j] != `}` && rest[j] != `]` {
@@ -168,11 +192,12 @@ fn mcp_json_field(body string, field string) string {
 }
 
 // mcp_json_nested extracts a string field nested under `parent` object.
+// Handles one level of nesting by finding the parent key then searching within.
 fn mcp_json_nested(body string, parent string, field string) string {
 	key := '"${parent}"'
 	idx := body.index(key) or { return '' }
 	rest := body[idx + key.len..]
-	// find the nested object
+	// find the opening brace of the nested object
 	brace := rest.index('{') or { return '' }
 	nested := rest[brace..]
 	return mcp_json_field(nested, field)
