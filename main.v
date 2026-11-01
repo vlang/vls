@@ -432,6 +432,31 @@ fn main() {
 		println(resp.result)
 		return
 	}
+	if os.args.len >= 3 && os.args[1] == 'symbols' {
+		path := os.args[2]
+		content := os.read_file(path) or {
+			eprintln('cannot read ${path}: ${err}')
+			return
+		}
+		mut app := &App{
+			text:                  content
+			open_files:            map[string]string{}
+			temp_dir:              os.join_path(os.temp_dir(), 'vls_symbols_${os.getpid()}')
+			diagnostics_scheduler: new_diagnostics_scheduler()
+			index_refresh:         new_index_refresh_scheduler()
+			v3_line_info_enabled:  true
+		}
+		os.mkdir_all(app.temp_dir) or {}
+		uri := path_to_uri(path)
+		app.open_files[uri] = content
+		app.reindex_uri(uri)
+		if entry := app.symbol_index[uri] {
+			println(json2.encode(entry.doc_symbols))
+		} else {
+			println('[]')
+		}
+		return
+	}
 	if os.args.len >= 6 && os.args[1] == 'rename' {
 		path := os.args[2]
 		line := os.args[3].int()
