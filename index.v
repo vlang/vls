@@ -1161,8 +1161,11 @@ fn (mut app App) run_recursive_index_refresh(job IndexRefreshJob) IndexRefreshRe
 	result.incomplete = !walk_complete
 	mut entries := map[string]IndexEntry{}
 	mut present := map[string]bool{}
+	mut file_uris := []string{cap: files.len}
 	for f in files {
-		present[index_uri_for_path(f, job.open_uris_by_path)] = true
+		uri := index_uri_for_path(f, job.open_uris_by_path)
+		present[uri] = true
+		file_uris << uri
 	}
 	// Reconcile before the file loop, while `walk_complete` still says whether
 	// every file of the directory was seen: an incomplete walk could simply not
@@ -1178,8 +1181,7 @@ fn (mut app App) run_recursive_index_refresh(job IndexRefreshJob) IndexRefreshRe
 			}
 		}
 	}
-	for f in files {
-		uri := index_uri_for_path(f, job.open_uris_by_path)
+	for uri in file_uris {
 		if uri in job.open_uris {
 			continue
 		}
