@@ -36,6 +36,7 @@ mut:
 	file_list_cache                             map[string]FileListEntry  // Per-project .v listings, so a fingerprint does not re-walk the tree
 	content_memo                                map[string]ContentMemo    // Per-file content hash with the size, inode and mtime it was read at
 	open_files_generation                       int                       // Incremented on every workspace file mutation
+	real_path_cache                             map[string]string         // Memoized normalized_index_path results by input path
 	project_generations                         map[string]int            // Per-project-dir revision, for scoped cache invalidation
 	cancelled_requests                          map[int]bool              // Request ids cancelled via $/cancelRequest
 	cancelled_raw_ids                           map[string]bool           // String/raw request ids cancelled via $/cancelRequest

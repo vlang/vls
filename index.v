@@ -134,6 +134,17 @@ fn (app &App) indexed_uris_in_dir(dir string) []string {
 	return out
 }
 
+// cached_normalized_index_path memoizes normalized_index_path results on the
+// App, avoiding repeated os.real_path syscalls for the same input path.
+fn (mut app App) cached_normalized_index_path(path string) string {
+	if cached := app.real_path_cache[path] {
+		return cached
+	}
+	result := normalized_index_path(path)
+	app.real_path_cache[path] = result
+	return result
+}
+
 // index_source_for returns the authoritative content for `uri`: the open buffer
 // when the document is open, otherwise the on-disk file. Returns none when the
 // file is neither open nor readable.
@@ -350,11 +361,11 @@ fn (mut app App) drop_index_uri(uri string) {
 // file, retaining `keep_uri` when it is the canonical disk key or another open
 // buffer still owns the file.
 fn (mut app App) drop_index_aliases_for_path(path string, keep_uri string) {
-	target_path := normalized_index_path(path)
+	target_path := app.cached_normalized_index_path(path)
 	// Compute each URI's normalized path once instead of three times.
 	mut normalized := map[string]string{}
 	for uri in app.symbol_index.keys() {
-		normalized[uri] = normalized_index_path(uri_to_path(uri))
+		normalized[uri] = app.cached_normalized_index_path(uri_to_path(uri))
 	}
 	for uri in app.ref_occurrences.keys() {
 		if uri !in normalized {
@@ -380,6 +391,11 @@ fn (mut app App) drop_index_aliases_for_path(path string, keep_uri string) {
 // discovered by a directory walk to an already-open document URI. Resolving the
 // real path collapses equivalent URI spellings such as file://localhost/tmp/a.v
 // and file:///tmp/a.v. Windows filesystem paths are case-insensitive.
+// normalized_index_path_cache memoizes os.real_path results, which are a
+// filesystem syscall on every call. The cache is process-global: real_path is
+// a property of the filesystem entry and does not change during a session.
+// A sync.Mutex guards concurrent access from the background index worker.
+
 fn normalized_index_path(path string) string {
 	mut normalized := os.real_path(path).replace('\\', '/')
 	$if windows {
