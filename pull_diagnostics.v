@@ -49,7 +49,19 @@ fn (mut app App) handle_pull_diagnostic(request Request) Response {
 // a pull of a file on disk that was never opened answers from disk.
 fn (mut app App) pull_diagnostics_items(uri string) []LSPDiagnostic {
 	mut v_errors := []JsonError{}
-	if cached := app.diag_cache[uri] {
+	// Async workers publish under the scheduler mutex. Those published LSP
+	// items are authoritative over the main App's compile cache and must not
+	// be recomputed from a newer (or older) document's text.
+	if mut scheduler := app.diagnostics_scheduler {
+		if cached := scheduler.diag_cache_entry(uri) {
+			if items := cached.published_items {
+				return items.clone()
+			}
+			v_errors = cached.errors
+		} else if cached := app.diag_cache[uri] {
+			v_errors = cached.errors
+		}
+	} else if cached := app.diag_cache[uri] {
 		v_errors = cached.errors
 	}
 	content := app.open_files[uri] or { os.read_file(uri_to_path(uri)) or { '' } }

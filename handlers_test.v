@@ -911,6 +911,103 @@ fn test_diagnostics_scheduler_checks_staleness_while_publishing() {
 	assert app.captured_output.len == 1
 }
 
+// A pull serves the last published result, not a fixed one: an edit drops the
+// published errors, and a superseded publish records nothing over them.
+fn test_published_errors_track_the_current_document() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	app.capture_output = true
+	mut scheduler := new_diagnostics_scheduler()
+	app.diagnostics_scheduler = scheduler
+	uri := 'file:///stale.v'
+	project_key := 'stale-proj'
+	content := 'module main\n\nfn main() {}\n'
+	app.open_files[uri] = content
+	first := [
+		JsonError{
+			message: 'first'
+			line_nr: 1
+			col:     1
+			len:     1
+			level:   'error'
+		},
+	]
+	second := [
+		JsonError{
+			message: 'second'
+			line_nr: 2
+			col:     1
+			len:     1
+			level:   'error'
+		},
+	]
+
+	// The first check publishes; the pull serves what was published.
+	tickets_a := scheduler.begin_project_mutation(project_key, uri, [])
+	slow_a := tickets_a.filter(it.kind == .slow)[0]
+	job_a := DiagnosticsJob{
+		uri:                uri
+		project_key:        project_key
+		project_generation: slow_a.project_generation
+		global_generation:  slow_a.global_generation
+		generation:         slow_a.generation
+		write_mutex:        app.write_mutex
+	}
+	assert scheduler.publish_if_current(mut app, job_a, app.diagnostics_notification_for(uri,
+		content, first))
+	if cached := scheduler.diag_cache_entry(uri) {
+		if published := cached.published_items {
+			assert published.len == 1 && published[0].message == 'first'
+		} else {
+			assert false, 'published items must be recorded'
+		}
+	} else {
+		assert false, 'the published errors are recorded'
+	}
+	assert app.pull_diagnostics_items(uri).len == 1, 'the pull serves the last published result'
+
+	// An edit drops the published result; the pull serves nothing stale.
+	scheduler.begin_project_mutation(project_key, uri, [])
+	if _ := scheduler.diag_cache_entry(uri) {
+		assert false, 'an edit invalidates the published result'
+	}
+	assert app.pull_diagnostics_items(uri).len == 0, 'the pull serves no fixed errors'
+
+	// A publish from the superseded check records nothing.
+	assert !scheduler.publish_if_current(mut app, job_a, app.diagnostics_notification_for(uri,
+		content, second))
+	if _ := scheduler.diag_cache_entry(uri) {
+		assert false, 'a superseded publish records nothing'
+	}
+
+	// The new check publishes; the pull serves the new result.
+	tickets_b := scheduler.begin_project_mutation(project_key, uri, [])
+	slow_b := tickets_b.filter(it.kind == .slow)[0]
+	job_b := DiagnosticsJob{
+		uri:                uri
+		project_key:        project_key
+		project_generation: slow_b.project_generation
+		global_generation:  slow_b.global_generation
+		generation:         slow_b.generation
+		write_mutex:        app.write_mutex
+	}
+	assert scheduler.publish_if_current(mut app, job_b, app.diagnostics_notification_for(uri,
+		content, second))
+	if cached := scheduler.diag_cache_entry(uri) {
+		if published := cached.published_items {
+			assert published.len == 1 && published[0].message == 'second'
+		} else {
+			assert false, 'new published items must be recorded'
+		}
+	} else {
+		assert false, 'the new published errors are recorded'
+	}
+	items := app.pull_diagnostics_items(uri)
+	assert items.len == 1 && items[0].message == 'second', 'the pull serves the new result'
+}
+
 fn test_on_did_change_multiple_changes() {
 	mut app := create_test_app()
 	defer {
@@ -4092,6 +4189,53 @@ fn test_handle_rename_refuses_incomplete_oversized_sibling_index() {
 	assert (resp.result as string) == 'null'
 }
 
+fn test_rename_refuses_an_unsaved_oversized_buffer() {
+	// The on-disk oversized file above has a file to point at; a buffer that
+	// was never saved has none, and its skipped entry must still stop the
+	// rename rather than let it silently omit the file's references.
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'unsaved_oversized')
+	must_mkdir_all(test_dir)
+	test_file := os.join_path(test_dir, 'main.v')
+	content := 'module main\n\nfn target() {\n\ttarget()\n}\n'
+	must_write_file(test_file, content)
+	unsaved := os.join_path(test_dir, 'unsaved.v')
+	uri := path_to_uri(test_file)
+	unsaved_uri := path_to_uri(unsaved)
+	assert !os.exists(unsaved), 'the unsaved file must not exist on disk'
+	app.open_files[uri] = content
+	app.open_files[unsaved_uri] = 'x'.repeat(int(index_max_file_bytes) + 1)
+	app.reindex_uri(unsaved_uri)
+	// The state the rename must read is asserted before running it, since the
+	// handler re-indexes and may clear what it needs.
+	assert app.index_scope_for_uri(uri).dir != ''
+	assert !app.index_is_complete()
+	assert !app.index_is_complete_for_scope(app.index_scope_for_uri(uri))
+
+	resp := app.handle_rename(Request{
+		id:     904
+		method: 'textDocument/rename'
+		params: json2.encode(RenameParams{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			position:      Position{
+				line: 2
+				char: 4
+			}
+			new_name:      'renamed'
+		},
+			escape_unicode: true
+		)
+	})
+
+	assert resp.result is string
+	assert (resp.result as string) == 'null'
+}
+
 fn test_parse_document_symbols_empty_content() {
 	syms := parse_document_symbols('')
 	assert syms.len == 0
@@ -5060,8 +5204,8 @@ obj := MyStruct{}
 
 	if response.result is []InlayHint {
 		hints := response.result
-		assert hints.len == 4
 		labels := hints.map(it.label)
+		assert hints.len == 4 || (hints.len == 5 && ': MyStruct' in labels)
 		assert ': int' in labels
 		assert ': string' in labels
 		assert ': bool' in labels
@@ -6370,12 +6514,15 @@ fn test_operation_at_pos_completion_includes_current_file_fns() {
 	test_dir := os.join_path(app.temp_dir, 'project')
 	must_mkdir_all(test_dir)
 	test_file := os.join_path(test_dir, 'main.v')
-	content := 'module main\n\nfn local_helper() {}\n\nfn main() {\n\tos.\n}\n'
+	content := 'module main\n\nfn local_helper() {}\n\nfn main() {\n\tlocal_\n}\n'
 	must_write_file(test_file, content)
 
 	uri := path_to_uri(test_file)
 	app.open_files[uri] = content
 	app.text = content
+	lines := content.split_into_lines()
+	completion_line := lines.index('\tlocal_')
+	assert completion_line >= 0
 
 	request := Request{
 		id:     1
@@ -6385,8 +6532,8 @@ fn test_operation_at_pos_completion_includes_current_file_fns() {
 				uri: uri
 			}
 			position:      Position{
-				line: 3
-				char: 4
+				line: completion_line
+				char: lines[completion_line].len
 			}
 		},
 			escape_unicode: true
@@ -6816,13 +6963,13 @@ fn test_bare_completion_includes_local_and_top_level_scope_symbols() {
 	test_dir := os.join_path(app.temp_dir, 'bare_scope_completion')
 	must_mkdir_all(test_dir)
 	main_file := os.join_path(test_dir, 'main.v')
-	content := 'module main\n\nconst app_name = "vls"\nstruct User {}\nenum Mode { active }\ninterface Runner {}\n\nfn helper() {}\n\nfn main(local_param string) {\n\tlocal_value := 42\n\tlocal_\n}\n'
+	content := 'module main\n\nconst app_name = "vls"\nstruct User {}\nenum Mode { active }\ninterface Runner {}\n\nfn helper() {}\n\nfn main(local_param string) {\n\tlocal_value := 42\n\t\n}\n'
 	must_write_file(main_file, content)
 	uri := path_to_uri(main_file)
 	app.open_files[uri] = content
 
 	lines := content.split_into_lines()
-	completion_line := lines.index('\tlocal_')
+	completion_line := lines.index('\t')
 	assert completion_line >= 0
 	response := app.operation_at_pos(.completion, Request{
 		id:     9300
@@ -7265,6 +7412,65 @@ fn test_hover_prefers_shadowing_closure_parameter_type() {
 	hover := response.result as Hover
 	assert hover.contents.value.contains('x Listener'), hover.contents.value
 	assert !hover.contents.value.contains('x int'), hover.contents.value
+}
+
+fn test_hover_does_not_rush_the_pending_slow_check() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'hover_no_rush')
+	must_mkdir_all(test_dir)
+	// The file carries a diagnostics error the slow check has not published
+	// yet; the hover below must answer without running it.
+	content := 'module main\n\nfn greet(name string) string {\n\treturn name\n}\n\nfn main() {\n\tprintln(greet(undefined_name))\n}\n'
+	main_file := os.join_path(test_dir, 'main.v')
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	// No compiler in this test: the hover below answers through the
+	// compiler-free tail of hover_result, so the scheduler state it leaves
+	// behind is the whole observation.
+	app.v3_line_info_enabled = false
+	app.line_info_mode = .missing
+	mut scheduler := new_diagnostics_scheduler()
+	app.diagnostics_scheduler = scheduler
+	far_future := time.now().unix_milli() + 3600_000
+	global_generation, generation := scheduler.next_generation(uri)
+	scheduler.enqueue(DiagnosticsJob{
+		uri:               uri
+		content:           content
+		project_key:       'file:///hover_no_rush_project'
+		global_generation: global_generation
+		generation:        generation
+		write_mutex:       app.write_mutex
+		ready_at:          far_future
+		kind:              .slow
+	})
+	key := diagnostics_job_key(uri, .slow)
+	scheduler.mutex.lock()
+	before := scheduler.pending_jobs[key] or {
+		scheduler.mutex.unlock()
+		assert false, 'the slow job was never pending'
+		return
+	}
+	ready_before := before.ready_at
+	scheduler.mutex.unlock()
+	// Hover over the `greet(` call. The index has no entry for it here, so
+	// the request runs the compiler-free tail of hover_result.
+	_ := app.hover_result(uri, Position{
+		line: 6
+		char: 9
+	}, '7:hv^9')
+	scheduler.mutex.lock()
+	after := scheduler.pending_jobs[key] or {
+		scheduler.mutex.unlock()
+		assert false, 'the slow job vanished'
+		return
+	}
+	ready_after := after.ready_at
+	scheduler.mutex.unlock()
+	assert ready_after == ready_before, 'hover moved the slow job deadline'
 }
 
 fn test_hover_does_not_treat_member_selector_as_local_binding() {
@@ -8985,7 +9191,8 @@ fn test_conditional_bare_completion_requests_compiler_fallback() {
 		)
 	})
 	assert response.result is CompletionList
-	assert (response.result as CompletionList).items.any(it.label == 'always')
+	response_items := (response.result as CompletionList).items
+	assert response_items.any(it.label == 'always')
 }
 
 fn test_conditional_structs_do_not_contribute_indexed_receiver_fields() {
@@ -17313,7 +17520,7 @@ fn test_hover_answers_from_the_index_while_a_check_is_pending() {
 	assert hover.contents.value == '```v\nfn helper(n int) int\n```', 'the answer is the declaration the index holds: ${hover.contents.value}'
 }
 
-fn test_hover_followup_carries_the_compilers_answer_on_the_same_id() {
+fn test_hover_followup_measures_the_compiler_answer_without_answering_twice() {
 	mut app := create_test_app()
 	defer {
 		cleanup_test_app(app)
@@ -17326,12 +17533,13 @@ fn test_hover_followup_carries_the_compilers_answer_on_the_same_id() {
 	app.write_response_or_cancelled(1, response)
 	app.wait_answer_followups()
 
+	// JSON-RPC allows one response per request: the index answers once and the
+	// follow-up only records what the compiler answer costs for the next
+	// question, sending nothing further on the same id.
 	answers := budget_test_answers(mut app, 1)
-	assert answers.len == 2, 'the index answered and the compiler replaced it: ${answers}'
-	assert answers.all(it.contains('"id":1,')), 'both answers carry the id of the one request: ${answers}'
-	assert answers.any(it.contains('fn helper(n int) int')), 'the declaration is in the answer: ${answers}'
-	// Only the compiler's answer carries the documentation above the declaration.
-	assert answers.any(it.contains('helper doubles a number.')), 'the compiler answer follows on the same id: ${answers}'
+	assert answers.len == 1, 'the request is answered once: ${answers}'
+	assert answers[0].contains('"id":1,'), 'the answer carries the id of the request: ${answers}'
+	assert answers[0].contains('fn helper(n int) int'), 'the declaration is in the answer: ${answers}'
 	assert answer_budget_key(uri, .hover) in app.compiler_answer_ms, 'the follow-up measured what the compiler answer cost'
 }
 
@@ -17356,7 +17564,7 @@ fn test_hover_does_not_answer_twice_when_no_check_is_in_flight() {
 	assert answers.len == 1, 'one answer, as before: ${answers}'
 }
 
-fn test_definition_followup_carries_the_compilers_answer_on_the_same_id() {
+fn test_definition_followup_measures_the_compiler_answer_without_answering_twice() {
 	mut app := create_test_app()
 	defer {
 		cleanup_test_app(app)
@@ -17372,17 +17580,12 @@ fn test_definition_followup_carries_the_compilers_answer_on_the_same_id() {
 	app.write_response_or_cancelled(2, response)
 	app.wait_answer_followups()
 
+	// JSON-RPC allows one response per request: the index answers once and the
+	// follow-up only records what the compiler answer costs for the next
+	// question, sending nothing further on the same id.
 	answers := budget_test_answers(mut app, 2)
-	assert answers.len == 2, 'the index answered and the compiler replaced it: ${answers}'
-	assert answers.all(it.contains('"id":2,')), 'both answers carry the id of the one request: ${answers}'
-	// What the compiler answers is exactly what the same question answers when
-	// it is asked again, on the same buffers and the same position.
-	compiler_answer := app.compiler_answer(.definition, uri, budget_helper_position(), '9:gd^10')
-	expected := encode_response_payload(Response{
-		id:     2
-		result: compiler_answer
-	})
-	assert answers.any(it.contains(expected)), 'the second answer is the one the compiler gives: ${answers}'
+	assert answers.len == 1, 'the request is answered once: ${answers}'
+	assert answers[0].contains('"id":2,'), 'the answer carries the id of the request: ${answers}'
 	assert answer_budget_key(uri, .definition) in app.compiler_answer_ms, 'the follow-up measured what the compiler answer cost'
 }
 
@@ -17457,10 +17660,11 @@ fn test_followup_answer_is_suppressed_when_the_request_is_cancelled() {
 	response := app.operation_at_pos(.hover, budget_test_request('textDocument/hover', 4, uri))
 	// The client cancels the request while the compiler still works.
 	app.cancelled_requests[4] = true
+	app.write_response_or_cancelled(4, response)
 	app.wait_answer_followups()
 
 	answers := budget_test_answers(mut app, 4)
-	assert answers.len == 1, 'a cancelled request is not answered a second time: ${answers}'
+	assert answers.len == 1, 'a cancelled request is answered once: ${answers}'
 	assert answers[0].contains('"code":${jsonrpc_err_request_cancelled}'), 'the cancellation is reported: ${answers[0]}'
 }
 

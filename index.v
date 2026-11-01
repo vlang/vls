@@ -29,16 +29,18 @@ struct IndexEntry {
 	has_conditional_module_completions bool
 	has_conditional_public_completions bool
 	conditional_lines                  []bool              // declarations guarded by $if/$else or @[if]
-	symbol_trigrams                    map[string][]string // display name -> capped trigram list for fuzzy ranking (see fuzzy_index.v)
 }
 
 // build_index_entry parses `content` into an IndexEntry. Symbol ranges are
 // re-encoded into `enc` so document/workspace symbol positions match the
 // negotiated encoding for non-ASCII lines (P0-01).
-fn build_index_entry(content string, enc PositionEncoding, fingerprint int) IndexEntry {
+fn build_index_entry(content string, enc PositionEncoding) IndexEntry {
 	lines := content.split_into_lines()
-	doc_syms := encode_document_symbols(parse_document_symbols(content), lines, enc)
-	code_lines := source_code_lines_from_lines(lines)
+	// Reuse one masked line scan for symbols and completions, instead of
+	// allocating two large arrays for every indexed source file.
+	code_lines := source_code_lines(content)
+	doc_syms := encode_document_symbols(parse_document_symbols_from_lines(lines, code_lines),
+		lines, enc)
 	conditional_lines := compile_time_conditional_lines(content)
 	module_completion_index := parse_module_member_completions_from_lines(code_lines, conditional_lines, false)
 	public_module_completion_index := parse_module_member_completions_from_lines(code_lines, conditional_lines, true)
@@ -59,7 +61,7 @@ fn build_index_entry(content string, enc PositionEncoding, fingerprint int) Inde
 		}
 	}
 	return IndexEntry{
-		fingerprint:                        fingerprint
+		fingerprint:                        content.hash()
 		module_name:                        get_module_name(content)
 		doc_symbols:                        doc_syms
 		docs:                               docs
@@ -69,7 +71,6 @@ fn build_index_entry(content string, enc PositionEncoding, fingerprint int) Inde
 		has_conditional_module_completions: module_completion_index.has_conditional
 		has_conditional_public_completions: public_module_completion_index.has_conditional
 		conditional_lines:                  conditional_lines
-		symbol_trigrams:                    fuzzy_entry_trigrams(doc_syms)
 	}
 }
 
@@ -117,32 +118,6 @@ fn encode_range_chars(r LSPRange, lines []string, enc PositionEncoding) LSPRange
 			char: byte_to_encoded_col(end_line, r.end.char, enc)
 		}
 	}
-}
-
-// indexed_uris_in_dir returns the URIs in the symbol index whose file lives in
-// `dir`, sorted, with each directory normalized only once.
-fn (app &App) indexed_uris_in_dir(dir string) []string {
-	normalized_dir := normalized_index_path(dir)
-	mut out := []string{}
-	for uri in app.symbol_index.keys() {
-		if normalized_index_path(os.dir(uri_to_path(uri))) != normalized_dir {
-			continue
-		}
-		out << uri
-	}
-	out.sort()
-	return out
-}
-
-// cached_normalized_index_path memoizes normalized_index_path results on the
-// App, avoiding repeated os.real_path syscalls for the same input path.
-fn (mut app App) cached_normalized_index_path(path string) string {
-	if cached := app.real_path_cache[path] {
-		return cached
-	}
-	result := normalized_index_path(path)
-	app.real_path_cache[path] = result
-	return result
 }
 
 // index_source_for returns the authoritative content for `uri`: the open buffer
@@ -361,29 +336,21 @@ fn (mut app App) drop_index_uri(uri string) {
 // file, retaining `keep_uri` when it is the canonical disk key or another open
 // buffer still owns the file.
 fn (mut app App) drop_index_aliases_for_path(path string, keep_uri string) {
-	target_path := app.cached_normalized_index_path(path)
-	// Compute each URI's normalized path once instead of three times.
-	mut normalized := map[string]string{}
+	target_path := normalized_index_path(path)
 	for uri in app.symbol_index.keys() {
-		normalized[uri] = app.cached_normalized_index_path(uri_to_path(uri))
+		if uri != keep_uri && normalized_index_path(uri_to_path(uri)) == target_path {
+			app.symbol_index.delete(uri)
+		}
 	}
 	for uri in app.ref_occurrences.keys() {
-		if uri !in normalized {
-			normalized[uri] = app.cached_normalized_index_path(uri_to_path(uri))
+		if uri != keep_uri && normalized_index_path(uri_to_path(uri)) == target_path {
+			app.ref_occurrences.delete(uri)
 		}
 	}
 	for uri in app.index_skipped_uris.keys() {
-		if uri !in normalized {
-			normalized[uri] = app.cached_normalized_index_path(uri_to_path(uri))
+		if uri != keep_uri && normalized_index_path(uri_to_path(uri)) == target_path {
+			app.index_skipped_uris.delete(uri)
 		}
-	}
-	for uri, np in normalized {
-		if uri == keep_uri || np != target_path {
-			continue
-		}
-		app.symbol_index.delete(uri)
-		app.ref_occurrences.delete(uri)
-		app.index_skipped_uris.delete(uri)
 	}
 }
 
@@ -391,11 +358,6 @@ fn (mut app App) drop_index_aliases_for_path(path string, keep_uri string) {
 // discovered by a directory walk to an already-open document URI. Resolving the
 // real path collapses equivalent URI spellings such as file://localhost/tmp/a.v
 // and file:///tmp/a.v. Windows filesystem paths are case-insensitive.
-// normalized_index_path_cache memoizes os.real_path results, which are a
-// filesystem syscall on every call. The cache is process-global: real_path is
-// a property of the filesystem entry and does not change during a session.
-// A sync.Mutex guards concurrent access from the background index worker.
-
 fn normalized_index_path(path string) string {
 	mut normalized := os.real_path(path).replace('\\', '/')
 	$if windows {
@@ -434,21 +396,13 @@ fn (app &App) path_is_in_removed_workspace(path string) bool {
 // slice while that happens.
 fn path_is_under_removed_root(path string, active_roots []string, removed_roots []string) bool {
 	p := path.replace('\\', '/')
-	mut active := []string{cap: active_roots.len}
 	for root in active_roots {
-		active << root.replace('\\', '/')
-	}
-	mut removed := []string{cap: removed_roots.len}
-	for root in removed_roots {
-		removed << root.replace('\\', '/')
-	}
-	for root in active {
-		if path_is_within(p, root) {
+		if path_is_within(p, root.replace('\\', '/')) {
 			return false
 		}
 	}
-	for root in removed {
-		if path_is_within(p, root) {
+	for root in removed_roots {
+		if path_is_within(p, root.replace('\\', '/')) {
 			return true
 		}
 	}
@@ -506,7 +460,7 @@ fn (mut app App) reindex_uri(uri string) {
 			return
 		}
 	}
-	app.symbol_index[uri] = build_index_entry(content, app.position_encoding, fp)
+	app.symbol_index[uri] = build_index_entry(content, app.position_encoding)
 }
 
 // invalidate_index_uri drops a URI's entry so it is re-parsed on next access.
@@ -546,6 +500,13 @@ fn (mut app App) drop_index_under(dir_path string) {
 // pull the entire tree into the index (audit: "unbounded workspace traversal").
 const index_max_files = 20000
 const index_max_file_bytes = u64(2 * 1024 * 1024)
+// Windows CI uses a limited address space with the TCC/GC runtime; indexing
+// tens of thousands of source lines can materialize much more than their disk
+// size in symbols, masked text, and completion entries. Bound the *aggregate*
+// bytes parsed in each walk, not just individual files. Exceeding this cap is
+// an incomplete index: destructive refactors refuse rather than miss usages.
+const index_windows_walk_max_bytes = u64(48 * 1024 * 1024)
+const index_other_walk_max_bytes = u64(256 * 1024 * 1024)
 const index_excluded_dirs = ['.git', '.svn', '.hg', 'node_modules', '.vmodules', 'thirdparty',
 	'_build', 'build', 'target', '.cache']
 
@@ -570,8 +531,35 @@ fn find_project_root(dir string) string {
 // collect_v_files recursively gathers `.v` files under `root`, skipping hidden
 // and known heavy directories and stopping once `index_max_files` is reached.
 // It returns false when a limit or filesystem error prevents a complete walk.
-fn collect_v_files(root string, mut acc []string) bool {
-	return collect_v_files_bounded(root, index_max_files, mut acc)
+// project_walk_budget is the file ceiling one project walk uses. It is the
+// global cap unless a test lowers it, which is how a genuinely partial walk is
+// produced without writing twenty thousand files.
+fn (app &App) project_walk_budget() int {
+	if app.index_walk_budget > 0 {
+		return app.index_walk_budget
+	}
+	return index_max_files
+}
+
+// The same ceiling applies to synchronous and background refreshes. Tests
+// lower it without writing enormous fixtures to reproduce a partial index.
+fn (app &App) project_index_byte_budget() u64 {
+	if app.index_walk_byte_budget > 0 {
+		return app.index_walk_byte_budget
+	}
+	$if windows {
+		return index_windows_walk_max_bytes
+	} $else {
+		return index_other_walk_max_bytes
+	}
+}
+
+// collect_v_files recursively gathers `.v` files under `root`, skipping hidden
+// and known heavy directories and stopping once `max_files` is reached. It
+// returns false when a limit or filesystem error prevents a complete walk, so
+// a caller that must know whether the walk was partial learns it here.
+fn collect_v_files(root string, max_files int, mut acc []string) bool {
+	return collect_v_files_bounded(root, max_files, mut acc)
 }
 
 // index_reserve_target is how many index entries a walk should pre-size for,
@@ -715,23 +703,22 @@ fn (mut app App) ensure_dirs_indexed(dirs []string) {
 		mut files := []string{}
 		scope := 'recursive:${dir}'
 		app.index_incomplete_scopes.delete(scope)
-		walk_complete := collect_v_files(dir, mut files)
+		walk_complete := collect_v_files(dir, app.project_walk_budget(), mut files)
 		if !walk_complete {
 			app.index_incomplete_scopes[scope] = true
 		}
 		// Pre-size once: inserting thousands of entries one by one would
 		// otherwise double the backing store repeatedly, and a late doubling
 		// can fail under a fragmented heap (GC_alloc_large abort on big trees).
+		// A partial walk reserves what it found, so growth toward the global
+		// cap stays bounded in both cases.
 		target := index_reserve_target(app.symbol_index.len, files.len)
 		if target > 0 {
 			app.symbol_index.reserve(u32(target))
 		}
 		mut present := map[string]bool{}
-		mut file_uris := []string{cap: files.len}
 		for f in files {
-			uri := index_uri_for_path(f, open_uris_by_path)
-			present[uri] = true
-			file_uris << uri
+			present[index_uri_for_path(f, open_uris_by_path)] = true
 		}
 		// Reconcile the existing index against what is actually on disk: drop
 		// entries for non-open files under `dir` that the walk no longer found.
@@ -739,9 +726,24 @@ fn (mut app App) ensure_dirs_indexed(dirs []string) {
 		// unopened file would otherwise linger in symbol/hover/call results. A
 		// partial walk must retain old entries it may simply not have reached.
 		app.reconcile_indexed_dir(dir, present, walk_complete)
-		for uri in file_uris {
+		mut bytes_seen := u64(0)
+		byte_budget := app.project_index_byte_budget()
+		for f in files {
+			uri := index_uri_for_path(f, open_uris_by_path)
 			if uri in app.open_files {
 				continue
+			}
+			// Account for unchanged files as well: an incremental re-walk must
+			// not keep a larger index than a fresh walk would be allowed to build.
+			size := os.file_size(f)
+			if size <= index_max_file_bytes {
+				if size > byte_budget - bytes_seen {
+					app.drop_index_uri(uri)
+					app.index_skipped_uris[uri] = true
+					app.index_incomplete_scopes[scope] = true
+					continue
+				}
+				bytes_seen += size
 			}
 			if uri in app.symbol_index {
 				// Already indexed: on a refresh walk, re-read from disk so edits to
@@ -785,6 +787,8 @@ fn (mut app App) ensure_dir_shallow_indexed(dir string) {
 	}
 	entries.sort()
 	mut scan_complete := true
+	mut bytes_seen := u64(0)
+	byte_budget := app.project_index_byte_budget()
 	for entry in entries {
 		if !entry.ends_with('.v') {
 			continue
@@ -804,6 +808,17 @@ fn (mut app App) ensure_dir_shallow_indexed(dir string) {
 		present[uri] = true
 		if uri in app.open_files {
 			continue
+		}
+		size := os.file_size(full)
+		if size <= index_max_file_bytes {
+			if size > byte_budget - bytes_seen {
+				app.drop_index_uri(uri)
+				app.index_skipped_uris[uri] = true
+				app.index_incomplete_scopes[scope] = true
+				scan_complete = false
+				continue
+			}
+			bytes_seen += size
 		}
 		if uri in app.symbol_index {
 			// Already indexed: on a throttled refresh re-read from disk so external
@@ -835,6 +850,12 @@ fn (mut app App) ensure_dir_shallow_indexed(dir string) {
 		}
 		for uri in app.index_skipped_uris.keys() {
 			if uri in present {
+				continue
+			}
+			// An oversized/unsaved open buffer is not on disk, so it is never
+			// in `present`; deleting it here would lose the skipped marker and
+			// make completeness wrongly report true (P1: rename oversize marker).
+			if uri in app.open_files {
 				continue
 			}
 			if os.dir(uri_to_path(uri)).replace('\\', '/').trim_right('/') == dir_norm {
@@ -932,8 +953,10 @@ struct IndexRefreshJob {
 	fingerprints      map[string]int  // uri -> fingerprint of the entry held
 	open_uris         map[string]bool // open buffers, which the request thread indexes
 	open_uris_by_path map[string]string
+	byte_budget       u64 // maximum source bytes one refresh can retain
 	workspace_roots   []string
 	removed_roots     []string
+	generation        int // open/disk mutation counter when the walk was requested
 	started_ms        i64
 }
 
@@ -943,6 +966,7 @@ struct IndexRefreshResult {
 mut:
 	dir           string
 	started_ms    i64
+	generation    int
 	entries       map[string]IndexEntry // built from the content the walk read
 	deletions     []string              // indexed uris whose file the walk no longer found
 	skipped       []string              // files left out of the bounded index
@@ -1153,8 +1177,10 @@ fn (app &App) index_refresh_job(dir string) IndexRefreshJob {
 		fingerprints:      fingerprints
 		open_uris:         open_uris
 		open_uris_by_path: app.open_index_uris_by_path()
+		byte_budget:       app.project_index_byte_budget()
 		workspace_roots:   app.workspace_roots.clone()
 		removed_roots:     app.removed_workspace_roots.clone()
+		generation:        app.open_files_generation
 		started_ms:        time.now().unix_milli()
 	}
 }
@@ -1185,18 +1211,16 @@ fn (mut app App) run_recursive_index_refresh(job IndexRefreshJob) IndexRefreshRe
 	mut result := IndexRefreshResult{
 		dir:        job.dir
 		started_ms: job.started_ms
+		generation: job.generation
 		walk_ms:    time.now().unix_milli()
 	}
 	mut files := []string{}
-	walk_complete := collect_v_files(job.dir, mut files)
+	walk_complete := collect_v_files(job.dir, app.project_walk_budget(), mut files)
 	result.incomplete = !walk_complete
 	mut entries := map[string]IndexEntry{}
 	mut present := map[string]bool{}
-	mut file_uris := []string{cap: files.len}
 	for f in files {
-		uri := index_uri_for_path(f, job.open_uris_by_path)
-		present[uri] = true
-		file_uris << uri
+		present[index_uri_for_path(f, job.open_uris_by_path)] = true
 	}
 	// Reconcile before the file loop, while `walk_complete` still says whether
 	// every file of the directory was seen: an incomplete walk could simply not
@@ -1212,11 +1236,13 @@ fn (mut app App) run_recursive_index_refresh(job IndexRefreshJob) IndexRefreshRe
 			}
 		}
 	}
-	for uri in file_uris {
+	mut bytes_seen := u64(0)
+	for f in files {
+		uri := index_uri_for_path(f, job.open_uris_by_path)
 		if uri in job.open_uris {
 			continue
 		}
-		if app.index_refresh_file(uri, job, mut result, mut entries) {
+		if app.index_refresh_file(uri, job, mut result, mut entries, mut bytes_seen) {
 			break
 		}
 	}
@@ -1228,7 +1254,7 @@ fn (mut app App) run_recursive_index_refresh(job IndexRefreshJob) IndexRefreshRe
 // its entry, skip it because its content fingerprint is unchanged or it is out
 // of the index's bounds, or drop it because it is gone. It returns true when the
 // walk must stop, which is only at the total entry cap.
-fn (mut app App) index_refresh_file(uri string, job IndexRefreshJob, mut result IndexRefreshResult, mut entries map[string]IndexEntry) bool {
+fn (mut app App) index_refresh_file(uri string, job IndexRefreshJob, mut result IndexRefreshResult, mut entries map[string]IndexEntry, mut bytes_seen u64) bool {
 	path := uri_to_path(uri)
 	if path_is_under_removed_root(path, job.workspace_roots, job.removed_roots) {
 		result.deletions << uri
@@ -1238,10 +1264,17 @@ fn (mut app App) index_refresh_file(uri string, job IndexRefreshJob, mut result 
 		result.deletions << uri
 		return false
 	}
-	if os.file_size(path) > index_max_file_bytes {
+	size := os.file_size(path)
+	if size > index_max_file_bytes {
 		result.skipped << uri
 		return false
 	}
+	if size > job.byte_budget - bytes_seen {
+		result.skipped << uri
+		result.incomplete = true
+		return false
+	}
+	bytes_seen += size
 	content := os.read_file(path) or {
 		result.skipped << uri
 		return false
@@ -1258,7 +1291,7 @@ fn (mut app App) index_refresh_file(uri string, job IndexRefreshJob, mut result 
 		result.skipped << uri
 		return true
 	}
-	entries[uri] = build_index_entry(content, app.position_encoding, fingerprint)
+	entries[uri] = build_index_entry(content, app.position_encoding)
 	result.reindexed++
 	return false
 }
@@ -1278,6 +1311,17 @@ fn (mut app App) merge_index_refresh(mut result IndexRefreshResult) {
 	scope := 'recursive:${dir}'
 	if dir == '' || dir == '/' || app.path_is_in_removed_workspace(dir) {
 		// A root removed while the refresh ran: nothing it found belongs here.
+		return
+	}
+	// An open-buffer edit or watcher event can update the live index after
+	// this worker read the filesystem. The worker's snapshot must never put
+	// an older symbol back or resurrect a file deleted by a watcher. Reject
+	// the entire stale walk and force the next request to refresh the scope;
+	// destructive requests will synchronously rebuild before editing.
+	if result.generation != app.open_files_generation {
+		app.indexed_dirs.delete(dir)
+		app.indexed_dir_walk_ms.delete(dir)
+		app.index_incomplete_scopes[scope] = true
 		return
 	}
 	if !os.is_dir(dir) {
@@ -1547,10 +1591,10 @@ fn (app &App) query_workspace_symbols(query string) []WorkspaceSymbol {
 	for uri in uris {
 		entry := app.symbol_index[uri] or { continue }
 		for sym in entry.doc_symbols {
-			fuzzy_rank_symbol(mut ranked, uri, sym.name, sym.kind, sym.selection_range, entry.symbol_trigrams[sym.name], q, nq, query_tris, use_fuzzy_recall)
+			fuzzy_rank_symbol(mut ranked, uri, sym.name, sym.kind, sym.selection_range, q, nq, query_tris, use_fuzzy_recall)
 			for child in sym.children {
 				child_name := '${sym.name}.${child.name}'
-				fuzzy_rank_symbol(mut ranked, uri, child_name, child.kind, child.selection_range, entry.symbol_trigrams[child_name], q, nq, query_tris, use_fuzzy_recall)
+				fuzzy_rank_symbol(mut ranked, uri, child_name, child.kind, child.selection_range, q, nq, query_tris, use_fuzzy_recall)
 			}
 		}
 	}
@@ -1572,14 +1616,9 @@ fn (app &App) find_indexed_doc_in_scope(name string, cur_dir string, scope_root 
 	pd := preferred_dir.replace('\\', '/').trim_right('/')
 	mut uris := app.symbol_index.keys()
 	uris.sort()
-	// Precompute each URI's directory once.
-	mut uri_dirs := map[string]string{}
-	for uri in uris {
-		uri_dirs[uri] = os.dir(uri_to_path(uri)).replace('\\', '/').trim_right('/')
-	}
 	if pd != '' {
 		for uri in uris {
-			if uri_dirs[uri] != pd {
+			if os.dir(uri_to_path(uri)).replace('\\', '/').trim_right('/') != pd {
 				continue
 			}
 			entry := app.symbol_index[uri] or { continue }
@@ -1594,7 +1633,7 @@ fn (app &App) find_indexed_doc_in_scope(name string, cur_dir string, scope_root 
 	// Pass 1: the current module directory (where a same-module symbol lives).
 	if cd != '' {
 		for uri in uris {
-			if uri_dirs[uri] != cd {
+			if os.dir(uri_to_path(uri)).replace('\\', '/').trim_right('/') != cd {
 				continue
 			}
 			entry := app.symbol_index[uri] or { continue }
@@ -1612,7 +1651,7 @@ fn (app &App) find_indexed_doc_in_scope(name string, cur_dir string, scope_root 
 	}
 	for uri in uris {
 		p := uri_to_path(uri).replace('\\', '/')
-		if !path_is_within(p, sr) || uri_dirs[uri] == cd {
+		if !path_is_within(p, sr) || os.dir(p).trim_right('/') == cd {
 			continue
 		}
 		entry := app.symbol_index[uri] or { continue }

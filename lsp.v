@@ -112,7 +112,7 @@ type ResponseResult = string
 	| []SelectionRange
 	| []CodeLens
 	| []DocumentLink
-	| []WorkspaceDiagnosticReport
+	| WorkspaceDiagnosticResult
 	| CodeLens
 	| []InlineValueText
 	| LinkedEditingRanges
@@ -249,11 +249,18 @@ struct WorkspaceDocumentReport {
 struct WorkspaceUnchangedReport {
 	uri       string
 	kind      string = 'unchanged'
+	version   ?i64   @[json: 'version']
 	result_id string @[json: 'resultId']
 }
 
 // WorkspaceDiagnosticReport is the result of workspace/diagnostic.
 type WorkspaceDiagnosticReport = WorkspaceDocumentReport | WorkspaceUnchangedReport
+
+// WorkspaceDiagnosticResult is the wire shape of a workspace/diagnostic
+// answer (LSP 3.17): an object with an `items` array, not a bare array.
+struct WorkspaceDiagnosticResult {
+	items []WorkspaceDiagnosticReport
+}
 
 // Detail represents a completion or symbol detail item.
 struct Detail {

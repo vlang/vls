@@ -16,11 +16,13 @@ fn (mut app App) handle_workspace_diagnostic(request Request) Response {
 		}
 		return Response{
 			id:     request.id
-			result: []WorkspaceDiagnosticReport{}
+			result: WorkspaceDiagnosticResult{
+				items: []WorkspaceDiagnosticReport{}
+			}
 		}
 	}
 	uris := app.uris_with_diagnostics()
-	// The wire shape is an array; the lookup below stays a map.
+	// The wire shape is an object with an items array (LSP 3.17); the lookup below stays a map.
 	mut previous_ids := map[string]string{}
 	for held in params.previous_result_ids {
 		previous_ids[held.uri] = held.value
@@ -51,7 +53,9 @@ fn (mut app App) handle_workspace_diagnostic(request Request) Response {
 	}
 	return Response{
 		id:     request.id
-		result: reports
+		result: WorkspaceDiagnosticResult{
+			items: reports
+		}
 	}
 }
 
@@ -66,16 +70,33 @@ const workspace_diagnostic_truncated_uri = 'vls.workspace.diagnosticTruncated'
 const workspace_diagnostic_max_documents = 500
 
 // uris_with_diagnostics lists the documents a check has answered for. A file
-// checked and found clean is left out: a workspace report answers what the
-// client asked about, and listing every clean file of a project would flood it.
-// The order is the cache's own, and only the count is bounded.
-fn (app &App) uris_with_diagnostics() []string {
+// checked and found clean is still listed: the client holding previous errors
+// for it needs an empty report to clear them, otherwise stale diagnostics
+// never go away (P1: workspace diagnostics cannot clear stale errors). Only
+// files a check has actually answered for are listed, so the set stays bounded
+// by the cache rather than by the project.
+fn (mut app App) uris_with_diagnostics() []string {
+	mut seen := map[string]bool{}
 	mut uris := []string{cap: app.diag_cache.len}
-	for uri, cached in app.diag_cache {
-		if cached.errors.len == 0 {
+	for uri, _ in app.diag_cache {
+		if uri in seen {
 			continue
 		}
+		seen[uri] = true
 		uris << uri
+	}
+	// Include URIs the worker has answered for (shared cache), so a document
+	// checked asynchronously still gets an empty report when it becomes clean.
+	if mut scheduler := app.diagnostics_scheduler {
+		scheduler.mutex.lock()
+		for uri, _ in scheduler.diag_cache {
+			if uri in seen {
+				continue
+			}
+			seen[uri] = true
+			uris << uri
+		}
+		scheduler.mutex.unlock()
 	}
 	uris.sort()
 	return uris
@@ -96,10 +117,16 @@ fn (mut app App) workspace_diagnostic_reports(uris []string, previous_ids map[st
 		}
 		items := app.pull_diagnostics_items(uri)
 		result_id := pull_diagnostics_result_id(uri, items)
+		version := if uri in app.open_files_versions {
+			?i64(app.open_files_versions[uri])
+		} else {
+			none
+		}
 		if previous_id := previous_ids[uri] {
 			if previous_id == result_id {
 				reports << WorkspaceUnchangedReport{
 					uri:       uri
+					version:   version
 					result_id: result_id
 				}
 				continue
@@ -107,11 +134,7 @@ fn (mut app App) workspace_diagnostic_reports(uris []string, previous_ids map[st
 		}
 		reports << WorkspaceDocumentReport{
 			uri:       uri
-			version:   if uri in app.open_files_versions {
-				?i64(app.open_files_versions[uri])
-			} else {
-				none
-			}
+			version:   version
 			result_id: result_id
 			items:     items
 		}

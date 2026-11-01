@@ -118,7 +118,7 @@ fn test_coverage_missing_message_names_the_settings_key() {
 // `module main`, but a test runner compiles each file on its own, so a helper
 // defined in another file is not visible here.
 fn cov_test_app(root string) &App {
-	mut store := vls_config_store()
+	mut store := &VlsConfigStore{}
 	store.set_editor_settings(EditorSettings{})
 	store.drop_config(root)
 	return &App{

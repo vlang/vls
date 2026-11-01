@@ -839,7 +839,13 @@ fn test_a_server_that_does_not_end_is_stopped_anyway() {
 	select {
 		_ := <-done {
 		}
-		5 * time.second {
+		// `stop()` gives the server a second to end on its own and then kills
+		// it, so it returns in about a second. The budget below is not that
+		// second but a ceiling on a freeze: a loaded runner can stretch a
+		// second of sleeping well past five, which is what the macOS job hit
+		// twice. A `stop()` that really waits never returns, so a generous
+		// ceiling still catches it.
+		30 * time.second {
 			assert false, 'stop() waited for a server that does not end'
 		}
 	}

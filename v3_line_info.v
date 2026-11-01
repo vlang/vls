@@ -239,7 +239,8 @@ fn (mut app App) v3_run(project V3QueryProject, specs []string, target string) ?
 	if app.v3_one_shot_unsupported {
 		return none
 	}
-	// `-new-compiler`: the launcher sends `-vls-mode` to V1 without it.
+	// `-new-compiler` is only needed where V3 is not the default; on Windows the
+	// established compiler already serves `-vls-mode` / `-line-info`.
 	mut argv := ['-new-compiler', '-w', '-check', '-nocolor']
 	if is_library {
 		argv << '-shared'

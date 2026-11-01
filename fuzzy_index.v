@@ -1,22 +1,8 @@
 module main
 
-// Trigram/fuzzy ranking for workspace symbols (see query_workspace_symbols).
-//
-// Per-symbol trigrams are extracted lowercased and underscore-insensitive, and
-// cached in IndexEntry.symbol_trigrams keyed by display name (`Parent.child`
-// for members, mirroring the query traversal). The trigram-to-symbols reverse
-// map is assembled per query from that cache and used to score candidates by
-// trigram overlap; matches are then ranked by overlap first and by
-// exact/prefix/substring/subsequence preference second.
-//
-// The cache is maintained incrementally by construction: build_index_entry
-// fills it on every (re)parse, the content fingerprint in reindex_uri skips
-// rebuilds for unchanged files, and every drop path (drop_index_uri,
-// drop_index_aliases_for_path, drop_index_under, reconcile_indexed_dir,
-// invalidate_index_uri) deletes the entry and its trigrams together — the same
-// lifecycle as symbol_index/ref_occurrences. No separate bookkeeping map is
-// kept: this repo builds without `-enable-globals`, and the App struct lives
-// in main.v, so an index-side global reverse map is not available.
+// Fuzzy workspace-symbol ranking. Trigrams are calculated only for symbols
+// that match the current query: persisting 32 short strings plus map entries
+// per symbol consumed substantial memory on large Windows workspaces.
 
 // fuzzy_trigram_max_per_symbol caps the stored trigram list per symbol, so the
 // cache grows with the symbol count and never with name length.
@@ -54,21 +40,6 @@ fn fuzzy_trigrams(normalized string) []string {
 		}
 		seen[tri] = true
 		out << tri
-	}
-	return out
-}
-
-// fuzzy_entry_trigrams flattens `doc_symbols` (top-level symbols plus one
-// level of `Parent.child` members, mirroring query_workspace_symbols) into
-// display-name to trigram lists for IndexEntry.symbol_trigrams.
-fn fuzzy_entry_trigrams(doc_symbols []DocumentSymbol) map[string][]string {
-	mut out := map[string][]string{}
-	for sym in doc_symbols {
-		out[sym.name] = fuzzy_trigrams(fuzzy_normalize(sym.name))
-		for child in sym.children {
-			child_name := '${sym.name}.${child.name}'
-			out[child_name] = fuzzy_trigrams(fuzzy_normalize(child_name))
-		}
 	}
 	return out
 }
@@ -148,12 +119,11 @@ fn fuzzy_rank_compare(a &FuzzyRankedSymbol, b &FuzzyRankedSymbol) int {
 	return 0
 }
 
-// fuzzy_rank_symbol scores one display name against the query and appends it
-// to `ranked` when it matches. `cached_tris` is the symbol's trigram list from
-// IndexEntry.symbol_trigrams (empty when the entry predates the cache).
-// Subsequence-only recall needs a normalized query of at least 3 characters;
-// shorter queries keep the legacy substring behavior exactly.
-fn fuzzy_rank_symbol(mut ranked []FuzzyRankedSymbol, uri string, name string, kind int, sel LSPRange, cached_tris []string, q string, nq string, query_tris []string, use_fuzzy_recall bool) {
+// fuzzy_rank_symbol scores a display name against the query, generating at
+// most 32 trigrams only when that name is an actual candidate. A large index
+// keeps no per-symbol trigram maps resident between queries.
+// Subsequence-only recall needs a normalized query of at least 3 characters.
+fn fuzzy_rank_symbol(mut ranked []FuzzyRankedSymbol, uri string, name string, kind int, sel LSPRange, q string, nq string, query_tris []string, use_fuzzy_recall bool) {
 	raw_lower := name.to_lower()
 	normalized := fuzzy_normalize(name)
 	cls := fuzzy_match_class(normalized, raw_lower, q, nq)
@@ -164,13 +134,12 @@ fn fuzzy_rank_symbol(mut ranked []FuzzyRankedSymbol, uri string, name string, ki
 		return
 	}
 	mut overlap := 0
-	if query_tris.len > 0 && cached_tris.len > 0 {
-		mut sym_set := map[string]bool{}
-		for tri in cached_tris {
-			sym_set[tri] = true
-		}
+	if query_tris.len > 0 {
+		// The slices are capped at 32 trigrams each. For candidates, this
+		// small scan avoids allocating a persistent map for every symbol.
+		trigrams := fuzzy_trigrams(normalized)
 		for tri in query_tris {
-			if tri in sym_set {
+			if tri in trigrams {
 				overlap++
 			}
 		}

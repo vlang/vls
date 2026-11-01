@@ -310,7 +310,7 @@ fn pd_ws_pull(mut app App, previous_result_ids map[string]string) Response {
 
 // pd_ws_reports decodes the reports of a workspace pull.
 fn pd_ws_reports(response Response) []WorkspaceDiagnosticReport {
-	return response.result as []WorkspaceDiagnosticReport
+	return (response.result as WorkspaceDiagnosticResult).items
 }
 
 // A client with no held results sends an empty array, not an empty object.
@@ -444,6 +444,34 @@ fn test_ws_diagnostic_truncates_and_says_so() {
 	}
 }
 
+// The workspace answer is an object with an items array on the wire (LSP 3.17),
+// not a bare array, and an unchanged report carries a version.
+fn test_ws_diagnostic_wire_shape_is_an_object_with_items() {
+	mut app := App{}
+	_, first := pd_ws_seed(mut app, 'ws_wire_a', pd_main_source)
+	_, second := pd_ws_seed(mut app, 'ws_wire_b', pd_main_source)
+	ids := pd_ws_ids(mut app, [second])
+	response := pd_ws_pull(mut app, ids)
+	encoded := encode_response_payload(response)
+	assert encoded.contains('"items":['), 'the wire shape wraps reports in items'
+	for report in pd_ws_reports(response) {
+		if report.uri == second {
+			assert report.kind == 'unchanged', 'held id means unchanged'
+			match report {
+				WorkspaceUnchangedReport {
+					assert report.result_id != '', 'unchanged carries its id'
+					_ = report.version
+				}
+				else {
+					assert false, 'not an unchanged report'
+				}
+			}
+		} else if report.uri == first {
+			assert report.kind == 'full', 'unheld id means full'
+		}
+	}
+}
+
 fn test_ws_diagnostic_capability_is_advertised_in_initialize() {
 	dir, uri, _ := pd_project('ws_capabilities', pd_main_source)
 	defer {
@@ -467,4 +495,46 @@ fn test_ws_diagnostic_capability_is_advertised_in_initialize() {
 	mut reader := io.new_buffered_reader(reader: input, cap: 1)
 	app.handle_requests(mut reader)
 	assert app.captured_output.join('').contains('"workspaceDiagnostics":true')
+}
+
+// Pull diagnostics must match the last published fast, partial, final, or
+// clearing notification. A superseded job must never restore older errors.
+fn test_pull_diagnostics_use_the_last_generation_checked_publish() {
+	dir, uri, content := pd_project('pd_atomic_push', pd_main_source)
+	defer {
+		pd_cleanup(dir)
+	}
+	mut scheduler := new_diagnostics_scheduler()
+	mut app := App{
+		capture_output:        true
+		diagnostics_scheduler: scheduler
+		open_files:            {
+			uri: content
+		}
+	}
+	project_key := app.generation_key(uri)
+	tickets := scheduler.begin_project_schedule(uri, project_key)
+	assert tickets.len == 2
+	job := DiagnosticsJob{
+		uri:                uri
+		project_key:        project_key
+		global_generation:  tickets[0].global_generation
+		generation:         tickets[0].generation
+		project_generation: tickets[0].project_generation
+	}
+	fast := app.diagnostics_notification_for(uri, content, pd_errors(2))
+	assert scheduler.publish_if_current(mut app, job, fast)
+	assert pd_report(pd_pull(mut app, uri, '')).items.len == 2
+
+	// A clean slow check replaces the fast errors; it is not an absent cache.
+	clean := app.diagnostics_notification_for(uri, content, []JsonError{})
+	assert scheduler.publish_if_current(mut app, job, clean)
+	assert pd_report(pd_pull(mut app, uri, '')).items.len == 0
+	assert uri in scheduler.diag_cache, 'empty reports remain visible to workspace pulls'
+
+	// The next edit invalidates the old generation before the replacement job.
+	_ = scheduler.begin_project_schedule(uri, project_key)
+	assert !scheduler.publish_if_current(mut app, job, fast)
+	assert pd_report(pd_pull(mut app, uri, '')).items.len == 0
+	assert uri !in scheduler.diag_cache, 'an old worker cannot repopulate the cache'
 }

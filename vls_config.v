@@ -95,27 +95,14 @@ mut:
 	mu     &sync.RwMutex = sync.new_rwmutex()
 }
 
-// vls_config_store returns the store, created on first use. A function-local
-// static holds it because the configuration has no field in App to live in; the
-// same pattern keeps interop.v's temp path counter out of module scope.
-fn vls_config_store() &VlsConfigStore {
-	unsafe {
-		mut static store := &VlsConfigStore{}
-		if store == unsafe { nil } {
-			store = &VlsConfigStore{}
-		}
-		return store
-	}
-}
-
 // apply_editor_configuration folds a workspace/didChangeConfiguration payload
 // into the configuration. The editor's settings are the top tier, so they are
-// stored first; the merged result is then applied for every workspace root, and
-// a changed defines value drops the cached diagnostics, which were computed with
-// the old ones.
+// stored first; subsequent requests resolve per-project settings from it.
+// A changed defines value invalidates checks computed with the old ones.
 fn (mut app App) apply_editor_configuration(params_json string) {
-	mut store := vls_config_store()
-	previous := store.editor_settings().defines
+	mut store := app.config_store
+	previous := store.editor_settings()
+	old_diagnostics_enabled := app.diagnostics_enabled
 	mut editor := EditorSettings{
 		defines: resolve_editor_defines(params_json)
 	}
@@ -129,18 +116,35 @@ fn (mut app App) apply_editor_configuration(params_json string) {
 	if directory := resolved.coverage_directory {
 		editor.coverage_directory = directory
 	}
-	// The editor tier is part of every merge, so the results cached for the
-	// project roots are the ones computed without it.
+	// The editor's payload is a complete settings snapshot: a key that is no
+	// longer sent returns to the server default rather than inheriting an old
+	// override from some other project or an earlier configuration change.
 	store.set_editor_settings(editor)
-	current := editor.defines
-	if current != previous {
-		// A check's fingerprint covers the sources and the compiler, so every
-		// result cached for any file is the one the old defines produce.
+	app.inlay_hints_enabled = editor.inlay_hints or { true }
+	app.diagnostics_enabled = editor.diagnostics or { true }
+	defines_changed := editor.defines != previous.defines
+	checks_toggled := app.diagnostics_enabled != old_diagnostics_enabled
+	if defines_changed || checks_toggled {
 		app.diag_cache = map[string]DiagCacheEntry{}
-		log('VLS: defines=${current}')
+		// A worker still running with the old settings must not publish; its
+		// old cache is invalid even if it happened to find the same source.
+		app.cancel_all_scheduled_diagnostics()
+		if mut scheduler := app.diagnostics_scheduler {
+			scheduler.clear_published_diagnostics()
+		}
+		if app.diagnostics_enabled {
+			for uri, content in app.open_files {
+				app.schedule_diagnostics(uri, content)
+			}
+		} else {
+			for uri, content in app.open_files {
+				app.write_notification(app.diagnostics_notification_for(uri, content,
+					[]JsonError{}))
+			}
+		}
 	}
-	for root in app.workspace_roots {
-		app.apply_project_settings(app.project_config_for_root(root))
+	if defines_changed {
+		log('VLS: defines=${editor.defines}')
 	}
 }
 
@@ -153,7 +157,7 @@ fn (mut app App) project_config_for_path(path string) VlsProjectConfig {
 // cached result for `vls_config_ttl_ms`. When a re-read finds a different
 // configuration, the diagnostics computed with the old one are dropped.
 fn (mut app App) project_config_for_root(root string) VlsProjectConfig {
-	store := vls_config_store()
+	store := app.config_store
 	if cached := store.cached_config(root, time.now().unix_milli()) {
 		return cached
 	}
@@ -166,17 +170,28 @@ fn (mut app App) project_config_for_root(root string) VlsProjectConfig {
 	return config
 }
 
-// check_defines returns the defines the check of `path` runs with, and applies
-// the switches of the same configuration, so a project's `vls.json` is in step
-// even when the client's settings were sent before it was ever read.
+// check_defines returns the defines for this particular source. A compiler
+// check cannot rewrite the session-wide feature switches for other projects.
 fn (mut app App) check_defines(path string) []string {
-	config := app.project_config_for_path(path)
-	app.apply_project_settings(config)
-	return config.defines.clone()
+	return app.project_config_for_path(path).defines.clone()
 }
 
-// apply_project_settings writes the switches of `config` into the App fields the
-// feature handlers read. A tier that says nothing leaves the field as it is.
+// Feature flags are project-scoped: the top-tier editor setting is already
+// included in the merged config; absent project keys use the session default.
+fn (mut app App) diagnostics_enabled_for_uri(uri string) bool {
+	if enabled := app.project_config_for_path(uri_to_path(uri)).diagnostics {
+		return enabled
+	}
+	return app.diagnostics_enabled
+}
+
+fn (mut app App) inlay_hints_enabled_for_uri(uri string) bool {
+	if enabled := app.project_config_for_path(uri_to_path(uri)).inlay_hints {
+		return enabled
+	}
+	return app.inlay_hints_enabled
+}
+
 // coverage_directory_for_path returns the coverage directory the configuration
 // names for the project root that owns `path`. It is where an editor's own
 // coverage run recorded its counters, which is what a test-generation action
@@ -189,18 +204,6 @@ fn (mut app App) coverage_directory_for_path(path string) string {
 	return ''
 }
 
-fn (mut app App) apply_project_settings(config VlsProjectConfig) {
-	if enabled := config.inlay_hints {
-		app.inlay_hints_enabled = enabled
-	}
-	if enabled := config.diagnostics {
-		app.diagnostics_enabled = enabled
-		if !enabled {
-			app.cancel_all_scheduled_diagnostics()
-		}
-	}
-}
-
 // forget_config_file drops the configuration cached for the project root that
 // owns `path` when `path` is that project's `vls.json`, together with the
 // diagnostics computed with it, so the next check reads the file again.
@@ -209,7 +212,7 @@ fn (mut app App) forget_config_file(path string) {
 		return
 	}
 	root := project_root_for_path(path)
-	mut store := vls_config_store()
+	mut store := app.config_store
 	store.drop_config(root)
 	app.forget_project_diagnostics(root)
 }
@@ -229,6 +232,9 @@ fn (mut app App) forget_project_diagnostics(root string) {
 	}
 	for uri in stale {
 		app.diag_cache.delete(uri)
+	}
+	if mut scheduler := app.diagnostics_scheduler {
+		scheduler.clear_published_diagnostics_for_root(root)
 	}
 }
 

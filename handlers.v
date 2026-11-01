@@ -422,9 +422,14 @@ fn (mut app App) hover_with_written_declaration(uri string, position Position, r
 // documentation of its own declaration. `line_info` asks the hover.
 fn (mut app App) hover_result(uri string, position Position, line_info string) ResponseResult {
 	real_path := uri_to_path(uri)
-	// A read flushes the debounce: the slow check runs now, so the overlay this
-	// hover is read against is the one the pause was going to publish anyway.
-	app.rush_pending_diagnostics(uri)
+	// No flush here: every read below answers from the buffer or the index,
+	// never from the overlay a pending slow check would publish. v3_hover
+	// asks with the buffer's own content, the indexed lookups read the index
+	// as it stands, and the one-shot line-info writes the buffer to its own
+	// overlay. Flushing would only start a full compile concurrently with the
+	// one these reads may already run, and the debounced slow check still
+	// publishes on its own afterwards. (run_v_line_info keeps its flush: the
+	// definition family can read what only a checked program says.)
 	mut located := false
 	if answer := app.v3_hover(uri, real_path, line_info) {
 		if location := answer.declared_at {
@@ -1141,8 +1146,14 @@ fn (mut app App) module_const_hover(uri string, content string, module_name stri
 		return none
 	}
 	app.ensure_dir_shallow_indexed(module_dir)
-	for indexed_uri in app.indexed_uris_in_dir(module_dir) {
+	normalized_dir := normalized_index_path(module_dir)
+	mut indexed_uris := app.symbol_index.keys()
+	indexed_uris.sort()
+	for indexed_uri in indexed_uris {
 		indexed_entry := app.symbol_index[indexed_uri] or { continue }
+		if normalized_index_path(os.dir(uri_to_path(indexed_uri))) != normalized_dir {
+			continue
+		}
 		source := app.index_source_for(indexed_uri) or { continue }
 		source_lines := source.split_into_lines()
 		for symbol in indexed_entry.doc_symbols {
@@ -1177,9 +1188,13 @@ fn (mut app App) indexed_enum_member_declaration(uri string, content string, typ
 		return ''
 	}
 	app.ensure_dir_shallow_indexed(dir)
-	for indexed_uri in app.indexed_uris_in_dir(dir) {
+	normalized_dir := normalized_index_path(dir)
+	mut indexed_uris := app.symbol_index.keys()
+	indexed_uris.sort()
+	for indexed_uri in indexed_uris {
 		entry := app.symbol_index[indexed_uri] or { continue }
-		if entry.module_name != expected_module {
+		if normalized_index_path(os.dir(uri_to_path(indexed_uri))) != normalized_dir
+			|| entry.module_name != expected_module {
 			continue
 		}
 		source := app.index_source_for(indexed_uri) or { continue }
@@ -1479,28 +1494,6 @@ fn (mut app App) operation_at_pos(method Method, request Request) Response {
 	if method == .completion {
 		indexed := app.indexed_completions(path, params.position)
 		prefix := app.word_prefix_at_cursor(path, params.position)
-		if prefix != '' && indexed.items.len > 0 {
-			all_labels := indexed.items.map(it.label)
-			filtered := fuzzy_filter(prefix, all_labels)
-			mut filtered_set := map[string]bool{}
-			for label in filtered {
-				filtered_set[label] = true
-			}
-			mut filtered_items := []Detail{}
-			for item in indexed.items {
-				if item.label in filtered_set {
-					filtered_items << item
-				}
-			}
-			budgeted_filtered, _ := apply_completion_budget(filtered_items)
-			return Response{
-				id:     request.id
-				result: CompletionList{
-					is_incomplete: true
-					items:         budgeted_filtered
-				}
-			}
-		}
 		if indexed.use_compiler {
 			compiler_result := app.run_v_line_info(.completion, path, '${line_nr}:${byte_col}')
 			compiler_items := if compiler_result is []Detail {
@@ -1515,6 +1508,28 @@ fn (mut app App) operation_at_pos(method Method, request Request) Response {
 				result: CompletionList{
 					is_incomplete: truncated
 					items:         budgeted
+				}
+			}
+		}
+		if prefix != '' && indexed.items.len > 0 {
+			all_labels := indexed.items.map(it.label)
+			filtered := fuzzy_filter(prefix, all_labels)
+			mut filtered_set := map[string]bool{}
+			for label in filtered {
+				filtered_set[label] = true
+			}
+			mut filtered_items := []Detail{}
+			for item in indexed.items {
+				if item.label in filtered_set {
+					filtered_items << item
+				}
+			}
+			budgeted_filtered, truncated_filtered := apply_completion_budget(filtered_items)
+			return Response{
+				id:     request.id
+				result: CompletionList{
+					is_incomplete: truncated_filtered
+					items:         budgeted_filtered
 				}
 			}
 		}
@@ -1535,7 +1550,7 @@ fn (mut app App) operation_at_pos(method Method, request Request) Response {
 	// and aware of unsaved files.
 	if method in [.definition, .declaration, .type_definition, .implementation] {
 		if location := app.resolve_indexed_definition(path, params.position) {
-			app.schedule_answer_followup(method, request, path, params.position, line_info)
+			app.schedule_answer_followup(method, path, params.position, line_info)
 			return Response{
 				id:     request.id
 				result: location
@@ -1557,7 +1572,7 @@ fn (mut app App) operation_at_pos(method Method, request Request) Response {
 					}
 				}
 			}
-			app.schedule_answer_followup(.hover, request, path, params.position, line_info)
+			app.schedule_answer_followup(.hover, path, params.position, line_info)
 			return Response{
 				id:     request.id
 				result: binding
@@ -1568,7 +1583,7 @@ fn (mut app App) operation_at_pos(method Method, request Request) Response {
 		// declaration from the index waits until after the compiler, which brings
 		// the documentation with its answer.
 		if member := app.member_selector_hover(path, params.position) {
-			app.schedule_answer_followup(.hover, request, path, params.position, line_info)
+			app.schedule_answer_followup(.hover, path, params.position, line_info)
 			return Response{
 				id:     request.id
 				result: member
@@ -1580,7 +1595,7 @@ fn (mut app App) operation_at_pos(method Method, request Request) Response {
 		// the compiler's answer follows, on the same id (answer_budget.v).
 		if app.compiler_answer_is_held(path, .hover) {
 			if declaration := app.source_hover_fallback(path, params.position) {
-				app.schedule_answer_followup(.hover, request, path, params.position, line_info)
+				app.schedule_answer_followup(.hover, path, params.position, line_info)
 				return Response{
 					id:     request.id
 					result: declaration
@@ -1639,26 +1654,11 @@ fn apply_completion_budget(items []Detail) ([]Detail, bool) {
 
 fn (app App) word_prefix_at_cursor(uri string, position Position) string {
 	content := app.open_files[uri] or { os.read_file(uri_to_path(uri)) or { '' } }
-	// Find the requested line without splitting the whole document.
-	mut line_start := 0
-	mut line_idx := 0
-	for line_idx < position.line && line_start < content.len {
-		if nl := content.index_after('\n', line_start) {
-			line_start = nl + 1
-			line_idx++
-		} else {
-			line_start = content.len
-			break
-		}
-	}
-	if line_idx != position.line {
+	lines := content.split_into_lines()
+	if position.line < 0 || position.line >= lines.len {
 		return ''
 	}
-	mut line_end := content.len
-	if nl := content.index_after('\n', line_start) {
-		line_end = nl
-	}
-	line := content[line_start..line_end]
+	line := lines[position.line]
 	col := position.char
 	if col <= 0 || col > line.len {
 		return ''
@@ -1671,11 +1671,10 @@ fn (app App) word_prefix_at_cursor(uri string, position Position) string {
 }
 
 fn merge_completion_items(indexed_items []Detail, compiler_items []Detail) []Detail {
-	mut items := []Detail{cap: indexed_items.len + compiler_items.len}
+	mut items := indexed_items.clone()
 	mut seen_labels := map[string]bool{}
 	for item in indexed_items {
 		seen_labels[item.label] = true
-		items << item
 	}
 	for item in compiler_items {
 		if item.label in seen_labels {
@@ -2959,9 +2958,9 @@ fn (mut app App) function_return_type_raw(uri string, content string, candidate 
 	}
 	expected_module := module_path.all_after_last('.')
 	mut return_types := map[string]bool{}
-	for indexed_uri in app.indexed_uris_in_dir(dir) {
-		entry := app.symbol_index[indexed_uri] or { continue }
-		if entry.module_name != expected_module {
+	for indexed_uri, entry in app.symbol_index {
+		if normalized_index_path(os.dir(uri_to_path(indexed_uri))) != normalized_dir
+			|| entry.module_name != expected_module {
 			continue
 		}
 		for symbol in entry.doc_symbols {
@@ -2997,9 +2996,12 @@ fn (mut app App) module_function_return_type_raw(uri string, content string, fn_
 	app.ensure_dir_shallow_indexed(dir)
 	normalized_dir := normalized_index_path(dir)
 	module_name := get_module_name(content)
-	for indexed_uri in app.indexed_uris_in_dir(dir) {
+	mut indexed_uris := app.symbol_index.keys()
+	indexed_uris.sort()
+	for indexed_uri in indexed_uris {
 		entry := app.symbol_index[indexed_uri] or { continue }
-		if entry.module_name != module_name
+		if normalized_index_path(os.dir(uri_to_path(indexed_uri))) != normalized_dir
+			|| entry.module_name != module_name
 			|| !entry.doc_symbols.any(it.kind == sym_kind_function && it.name == fn_name) {
 			continue
 		}
@@ -3354,9 +3356,12 @@ fn (mut app App) indexed_method_symbols(uri string, content string, receiver_typ
 	mut matches := []Location{}
 	mut items := []Detail{}
 	mut has_conditional := false
-	for indexed_uri in app.indexed_uris_in_dir(dir) {
+	mut indexed_uris := app.symbol_index.keys()
+	indexed_uris.sort()
+	for indexed_uri in indexed_uris {
 		entry := app.symbol_index[indexed_uri] or { continue }
-		if os.file_name(uri_to_path(indexed_uri)) !in active_names || entry.module_name != expected_module {
+		if normalized_index_path(os.dir(uri_to_path(indexed_uri))) != normalized_dir
+			|| os.file_name(uri_to_path(indexed_uri)) !in active_names || entry.module_name != expected_module {
 			continue
 		}
 		source := app.index_source_for(indexed_uri) or { continue }
@@ -3553,9 +3558,12 @@ fn (mut app App) indexed_struct_field_completions_visited(uri string, content st
 	mut has_conditional := false
 	mut has_unresolved_embedded := false
 	mut resolved_type := false
-	for indexed_uri in app.indexed_uris_in_dir(dir) {
+	mut indexed_uris := app.symbol_index.keys()
+	indexed_uris.sort()
+	for indexed_uri in indexed_uris {
 		entry := app.symbol_index[indexed_uri] or { continue }
-		if os.file_name(uri_to_path(indexed_uri)) !in active_names || entry.module_name != expected_module {
+		if normalized_index_path(os.dir(uri_to_path(indexed_uri))) != normalized_dir
+			|| os.file_name(uri_to_path(indexed_uri)) !in active_names || entry.module_name != expected_module {
 			continue
 		}
 		source := app.index_source_for(indexed_uri) or { continue }
@@ -3829,9 +3837,12 @@ fn (mut app App) indexed_enum_members(uri string, content string, type_name stri
 			app.reindex_uri(open_uri)
 		}
 	}
-	for indexed_uri in app.indexed_uris_in_dir(dir) {
+	mut indexed_uris := app.symbol_index.keys()
+	indexed_uris.sort()
+	for indexed_uri in indexed_uris {
 		entry := app.symbol_index[indexed_uri] or { continue }
-		if entry.module_name != expected_module {
+		if normalized_index_path(os.dir(uri_to_path(indexed_uri))) != normalized_dir
+			|| entry.module_name != expected_module {
 			continue
 		}
 		for symbol in entry.doc_symbols {
@@ -4349,16 +4360,15 @@ fn source_line_import_code(line string, mut state ImportScanState) string {
 }
 
 fn source_code_lines(content string) []string {
-	return source_code_lines_from_lines(content.split_into_lines())
-}
-
-fn source_code_lines_from_lines(lines []string) []string {
-	mut out := []string{cap: lines.len}
+	raw_lines := content.split_into_lines()
+	// Reserve once: repeated array growth fragmented the Windows GC heap
+	// while indexing the compiler's many large source files.
+	mut lines := []string{cap: raw_lines.len}
 	mut scan_state := ImportScanState{}
-	for raw_line in lines {
-		out << source_line_import_code(raw_line, mut scan_state)
+	for raw_line in raw_lines {
+		lines << source_line_import_code(raw_line, mut scan_state)
 	}
-	return out
+	return lines
 }
 
 fn parse_import_binding(text string) ?ImportedModuleBinding {
@@ -4439,9 +4449,12 @@ fn (mut app App) get_imported_module_member_completions(module_path string, work
 	expected_module := module_path.all_after_last('.')
 	mut seen_labels := map[string]bool{}
 	mut has_conditional := false
-	for indexed_uri in app.indexed_uris_in_dir(module_dir) {
+	mut indexed_uris := app.symbol_index.keys()
+	indexed_uris.sort()
+	for indexed_uri in indexed_uris {
 		entry := app.symbol_index[indexed_uri] or { continue }
-		if os.file_name(uri_to_path(indexed_uri)) !in active_names || entry.module_name != expected_module {
+		if normalized_index_path(os.dir(uri_to_path(indexed_uri))) != normalized_dir
+			|| os.file_name(uri_to_path(indexed_uri)) !in active_names || entry.module_name != expected_module {
 			continue
 		}
 		if entry.has_conditional_public_completions {
@@ -4855,9 +4868,9 @@ fn (mut app App) on_did_open(request Request) bool {
 			return false
 		}
 	}
-	// A project's `vls.json` is read when one of its files is opened, so its
-	// switches are in step with the first check rather than the next one.
-	app.apply_project_settings(app.project_config_for_path(uri_to_path(uri)))
+	// Load this project's configuration before scheduling checks. Feature
+	// switches are resolved per URI, not written to App-wide state.
+	_ = app.project_config_for_path(uri_to_path(uri))
 	diagnostics_mutation := app.begin_diagnostics_project_schedule(uri)
 	app.open_files[uri] = content
 	// A file appearing is what the fingerprint's listing memo cannot see by
@@ -4868,6 +4881,7 @@ fn (mut app App) on_did_open(request Request) bool {
 		app.open_files_versions[uri] = version
 	}
 	app.bump_generation(uri)
+	app.diag_cache.delete(uri)
 	app.invalidate_index_uri(uri) // re-parse from the buffer on next query
 	app.text = content
 	$if debug {
@@ -4920,7 +4934,7 @@ fn (mut app App) on_did_close(request Request) {
 }
 
 fn (mut app App) build_diagnostics_notification(uri string, content string) Notification {
-	if !app.diagnostics_enabled {
+	if !app.diagnostics_enabled_for_uri(uri) {
 		return Notification{
 			method: 'textDocument/publishDiagnostics'
 			params: PublishDiagnosticsParams{
@@ -5066,10 +5080,16 @@ fn (mut app App) on_did_change(request Request) ?Notification {
 	diagnostics_mutation := app.begin_diagnostics_project_schedule(uri)
 	app.text = content
 	app.open_files[uri] = content // Update tracked file
+	// The buffer changed, so the check result cached for the old content no
+	// longer describes it: drop it rather than letting a pull re-serve fixed
+	// errors until the new check publishes. The scheduler entry for the same
+	// document is dropped by the mutation above.
+	app.diag_cache.delete(uri)
 	if version := params.text_document.version {
 		app.open_files_versions[uri] = version
 	}
 	app.bump_generation(uri)
+	app.diag_cache.delete(uri)
 	app.invalidate_index_uri(uri) // symbols re-parsed lazily on next query
 	if app.finish_diagnostics_project_schedule(diagnostics_mutation, uri, content) {
 		return none
@@ -5135,6 +5155,7 @@ fn (mut app App) on_did_save(request Request) ?Notification {
 			app.open_files[uri] = text
 			app.text = text
 			app.bump_generation(uri)
+			app.diag_cache.delete(uri)
 			app.invalidate_index_uri(uri)
 		}
 	} else {
@@ -7270,12 +7291,6 @@ fn (mut app App) handle_document_symbols(request Request) Response {
 
 // handle_inlay_hints handles the LSP inlayHint request, returning type hints for variables.
 fn (mut app App) handle_inlay_hints(request Request) Response {
-	if !app.inlay_hints_enabled {
-		return Response{
-			id:     request.id
-			result: []InlayHint{}
-		}
-	}
 	params := json2.decode[InlayHintParams](request.params) or {
 		log('Failed to decode InlayHintParams: ${err}')
 		return Response{
@@ -7284,6 +7299,12 @@ fn (mut app App) handle_inlay_hints(request Request) Response {
 		}
 	}
 	uri := params.text_document.uri
+	if !app.inlay_hints_enabled_for_uri(uri) {
+		return Response{
+			id:     request.id
+			result: []InlayHint{}
+		}
+	}
 	content := app.open_files[uri] or { '' }
 	lines := content.split_into_lines()
 	start_line := params.range.start.line
@@ -7795,8 +7816,12 @@ fn lookup_fn_return_type(rhs string, index map[string]string) string {
 // V declarations: functions, methods, structs, enums, interfaces, constants,
 // and type aliases. Struct fields and enum members are returned as children.
 fn parse_document_symbols(content string) []DocumentSymbol {
-	lines := content.split_into_lines()
-	code_lines := source_code_lines(content)
+	return parse_document_symbols_from_lines(content.split_into_lines(), source_code_lines(content))
+}
+
+// The workspace index already has both the original and masked source lines:
+// accepting them here avoids redoing the full masking allocation per file.
+fn parse_document_symbols_from_lines(lines []string, code_lines []string) []DocumentSymbol {
 	mut symbols := []DocumentSymbol{}
 	// Track whether we are inside a struct or enum block to collect children.
 	mut in_struct := false
@@ -8543,9 +8568,12 @@ fn (mut app App) collect_module_completions(current_file_uri string, working_dir
 	normalized_dir := normalized_index_path(working_dir)
 	mut items := []Detail{}
 	mut has_conditional := false
-	for indexed_uri in app.indexed_uris_in_dir(working_dir) {
+	mut indexed_uris := app.symbol_index.keys()
+	indexed_uris.sort()
+	for indexed_uri in indexed_uris {
 		entry := app.symbol_index[indexed_uri] or { continue }
-		if os.file_name(uri_to_path(indexed_uri)) !in active_names || entry.module_name != current_module {
+		if normalized_index_path(os.dir(uri_to_path(indexed_uri))) != normalized_dir
+			|| os.file_name(uri_to_path(indexed_uri)) !in active_names || entry.module_name != current_module {
 			continue
 		}
 		if entry.has_conditional_module_completions {
@@ -8910,12 +8938,6 @@ fn (mut app App) handle_selection_range(request Request) Response {
 //   vls.diagnostics – enable or disable live compile-time diagnostics
 fn (mut app App) on_did_change_configuration(request Request) {
 	resolved := resolve_workspace_settings(request.params)
-	if resolved.has_inlay_hints {
-		if enabled := resolved.inlay_hints {
-			app.inlay_hints_enabled = enabled
-			log('VLS: inlay_hints_enabled=${enabled}')
-		}
-	}
 	if resolved.has_variable_types || resolved.has_parameter_names {
 		mut toggles := app.inlay_hint_toggles()
 		if variable_types := resolved.variable_types {
@@ -8927,19 +8949,9 @@ fn (mut app App) on_did_change_configuration(request Request) {
 		app.set_inlay_hint_toggles(toggles)
 		log('VLS: inlay_hint_toggles=variableTypes:${toggles.variable_types},parameterNames:${toggles.parameter_names}')
 	}
-	if resolved.has_diagnostics {
-		if enabled := resolved.diagnostics {
-			app.diagnostics_enabled = enabled
-			if !enabled {
-				app.cancel_all_scheduled_diagnostics()
-			}
-			log('VLS: diagnostics_enabled=${enabled}')
-		}
-	}
-	// Layered configuration: the editor's own settings are the top tier, a
-	// project's `vls.json` the next, and VLS_DEFINES the last. Storing the
-	// editor tier here also applies the merged result to the switches above,
-	// and records the defines the checks of a project run with (vls_config.v).
+	// Layered configuration updates the feature switches and worker cache
+	// coherently; don't mutate the booleans before it captures their old
+	// values or toggling diagnostics off will fail to clear published errors.
 	app.apply_editor_configuration(request.params)
 }
 
@@ -9064,10 +9076,10 @@ fn (mut app App) on_initialize(request Request) ?string {
 	if roots.len > 0 {
 		app.workspace_roots = roots
 		log('VLS: workspace roots set to ${roots}')
-		// A workspace root's own `vls.json` is read at once, so a project
-		// folder's switches apply before any of its files is opened.
+		// Cache each root's settings, but never apply one project's switches
+		// to the entire LSP session: feature handlers resolve them per URI.
 		for root in roots {
-			app.apply_project_settings(app.project_config_for_root(root))
+			_ = app.project_config_for_root(root)
 		}
 	}
 	app.supports_dynamic_watched_files_registration =
