@@ -1666,10 +1666,11 @@ fn (app App) word_prefix_at_cursor(uri string, position Position) string {
 }
 
 fn merge_completion_items(indexed_items []Detail, compiler_items []Detail) []Detail {
-	mut items := indexed_items.clone()
+	mut items := []Detail{cap: indexed_items.len + compiler_items.len}
 	mut seen_labels := map[string]bool{}
 	for item in indexed_items {
 		seen_labels[item.label] = true
+		items << item
 	}
 	for item in compiler_items {
 		if item.label in seen_labels {
