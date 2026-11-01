@@ -911,15 +911,6 @@ fn test_diagnostics_scheduler_checks_staleness_while_publishing() {
 	assert app.captured_output.len == 1
 }
 
-fn stale_test_notification(uri string) Notification {
-	return Notification{
-		method: 'textDocument/publishDiagnostics'
-		params: PublishDiagnosticsParams{
-			uri: uri
-		}
-	}
-}
-
 // A pull serves the last published result, not a fixed one: an edit drops the
 // published errors, and a superseded publish records nothing over them.
 fn test_published_errors_track_the_current_document() {
@@ -964,10 +955,14 @@ fn test_published_errors_track_the_current_document() {
 		generation:         slow_a.generation
 		write_mutex:        app.write_mutex
 	}
-	assert scheduler.publish_published_if_current(mut app, job_a, stale_test_notification(uri), uri,
-		first)
+	assert scheduler.publish_if_current(mut app, job_a, app.diagnostics_notification_for(uri,
+		content, first))
 	if cached := scheduler.diag_cache_entry(uri) {
-		assert cached.errors.len == 1 && cached.errors[0].message == 'first'
+		if published := cached.published_items {
+			assert published.len == 1 && published[0].message == 'first'
+		} else {
+			assert false, 'published items must be recorded'
+		}
 	} else {
 		assert false, 'the published errors are recorded'
 	}
@@ -981,8 +976,8 @@ fn test_published_errors_track_the_current_document() {
 	assert app.pull_diagnostics_items(uri).len == 0, 'the pull serves no fixed errors'
 
 	// A publish from the superseded check records nothing.
-	assert !scheduler.publish_published_if_current(mut app, job_a, stale_test_notification(uri), uri,
-		second)
+	assert !scheduler.publish_if_current(mut app, job_a, app.diagnostics_notification_for(uri,
+		content, second))
 	if _ := scheduler.diag_cache_entry(uri) {
 		assert false, 'a superseded publish records nothing'
 	}
@@ -998,10 +993,14 @@ fn test_published_errors_track_the_current_document() {
 		generation:         slow_b.generation
 		write_mutex:        app.write_mutex
 	}
-	assert scheduler.publish_published_if_current(mut app, job_b, stale_test_notification(uri), uri,
-		second)
+	assert scheduler.publish_if_current(mut app, job_b, app.diagnostics_notification_for(uri,
+		content, second))
 	if cached := scheduler.diag_cache_entry(uri) {
-		assert cached.errors.len == 1 && cached.errors[0].message == 'second'
+		if published := cached.published_items {
+			assert published.len == 1 && published[0].message == 'second'
+		} else {
+			assert false, 'new published items must be recorded'
+		}
 	} else {
 		assert false, 'the new published errors are recorded'
 	}

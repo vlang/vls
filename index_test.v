@@ -1224,13 +1224,30 @@ fn test_large_vlang_v_workspace_from_env() {
 	app.watched_files_active = true
 	app.ensure_dirs_indexed([root])
 
-	assert app.index_is_complete()
-	assert app.symbol_index.len >= 2000
-	assert app.index_skipped_uris.len == 0
-	assert app.symbol_index.len == files.len
+	// On Windows the index has a stricter aggregate source-byte ceiling:
+	// a complete index is preferred, but a memory-safe partial index must
+	// explicitly refuse destructive requests rather than exhaust the GC heap.
+	if app.index_is_complete() {
+		assert app.symbol_index.len >= 2000
+		assert app.index_skipped_uris.len == 0
+		assert app.symbol_index.len == files.len
+	} else {
+		assert app.symbol_index.len > 0
+		assert app.symbol_index.len < files.len
+		assert app.index_skipped_uris.len > 0
+		assert 'recursive:${root}' in app.index_incomplete_scopes
+		assert !app.index_is_complete_for_scope(IndexScope{
+			dir:       root
+			recursive: true
+		})
+	}
 
 	preferences := app.query_workspace_symbols('Preferences')
-	assert preferences.len > 0
+	if preferences.len == 0 {
+		// The source-byte budget may stop before the file defining this symbol.
+		assert !app.index_is_complete()
+		return
+	}
 	preferences_uri := preferences[0].location.uri
 	preference_occurrences := app.occurrences_for(preferences_uri)
 	assert preference_occurrences['Preferences'].len > 0
@@ -1241,7 +1258,8 @@ fn test_large_vlang_v_workspace_from_env() {
 		assert main_uri.starts_with(path_to_uri(os.join_path(root, 'cmd')))
 		assert main_symbol.name == 'main'
 	} else {
-		assert false, 'expected to find a production fn main under vlang/v cmd'
+		// A bounded partial index may not have visited the cmd directory.
+		assert !app.index_is_complete(), 'complete workspace must contain a production main'
 	}
 }
 
@@ -1391,32 +1409,29 @@ fn test_query_workspace_symbols_short_query_keeps_substring_recall() {
 	assert got == ['alpha'], 'two-letter query keeps legacy substring recall, got ${got}'
 }
 
-fn test_fuzzy_trigram_cache_follows_reindex_and_drop() {
+fn test_fuzzy_ranking_follows_reindex_and_drop_without_resident_cache() {
 	mut app := index_test_app()
 	uri := 'file:///tmp/fuzzy_inc.v'
 	app.open_files[uri] = 'module main\n\nfn one() {}\n'
 	app.reindex_uri(uri)
-	assert 'one' in app.symbol_index[uri].symbol_trigrams, 'reindex caches trigrams for the new symbol'
-	assert app.symbol_index[uri].symbol_trigrams['one'].len > 0, 'short symbol one still yields a trigram'
+	assert app.query_workspace_symbols('one').len == 1
 	app.open_files[uri] = 'module main\n\nfn two() {}\n'
 	app.reindex_uri(uri)
-	assert 'one' !in app.symbol_index[uri].symbol_trigrams, 'reindex drops trigrams of the removed symbol'
-	assert 'two' in app.symbol_index[uri].symbol_trigrams, 'reindex caches trigrams of the new symbol'
-	assert app.query_workspace_symbols('one').len == 0, 'removed symbol is not found'
-	assert app.query_workspace_symbols('two').len == 1, 'new symbol is found'
+	assert app.query_workspace_symbols('one').len == 0, 'old symbol must not match'
+	assert app.query_workspace_symbols('two').len == 1, 'new symbol must match'
 	app.drop_index_uri(uri)
 	assert app.query_workspace_symbols('two').len == 0, 'dropped uri yields no symbols'
 }
 
-fn test_fuzzy_trigram_cache_caps_long_names() {
+fn test_fuzzy_long_names_remain_ranked_with_bounded_on_demand_trigrams() {
 	mut app := index_test_app()
 	uri := 'file:///tmp/fuzzy_cap.v'
 	long_name := 'abcdefghijklmnopqrstuvwxyz0123456789'
 	app.open_files[uri] = 'module main\n\nfn ${long_name}() {}\n'
 	app.reindex_uri(uri)
-	cached := app.symbol_index[uri].symbol_trigrams[long_name]
-	assert cached.len == fuzzy_trigram_max_per_symbol, 'cached trigrams of a long name are capped, got ${cached.len}'
-	assert app.query_workspace_symbols(long_name).any(it.name == long_name), 'capped long name is still found exactly'
+	assert fuzzy_trigrams(fuzzy_normalize(long_name)).len == fuzzy_trigram_max_per_symbol
+	assert app.query_workspace_symbols(long_name).any(it.name == long_name),
+		'long symbol still ranks as an exact match'
 }
 
 // index_request_refresh_app returns an app whose read requests answer from the
@@ -1710,4 +1725,80 @@ fn test_background_refresh_does_not_resurrect_watcher_deleted_file() {
 	app.merge_index_refresh(mut result)
 	assert uri !in app.symbol_index, 'the deleted file cannot be brought back'
 	assert 'recursive:${root}' in app.index_incomplete_scopes
+}
+
+// An aggregate source-byte ceiling prevents large workspaces from exhausting
+// limited Windows address space. A partial index must never authorize rename.
+fn test_index_walk_byte_budget_refuses_incomplete_destructive_scope() {
+	root := index_test_tmpdir('source_byte_budget')
+	defer {
+		os.rmdir_all(root) or {}
+	}
+	for i in 0 .. 4 {
+		os.write_file(os.join_path(root, 'entry_${i}.v'),
+			'module main\n\nfn fn_${i}() {\n\tprintln("hello")\n}\n') or {
+			assert false, 'fixture write failed: ${err}'
+			return
+		}
+	}
+	mut app := index_test_app()
+	app.index_walk_byte_budget = 90
+	app.ensure_dirs_indexed([root])
+	assert app.symbol_index.len > 0
+	assert app.symbol_index.len < 4, 'the aggregate budget must stop the walk'
+	assert app.index_skipped_uris.len > 0
+	assert 'recursive:${root}' in app.index_incomplete_scopes
+	assert !app.index_is_complete_for_scope(IndexScope{
+		dir:       root
+		recursive: true
+	}), 'an incomplete index must refuse destructive operations'
+}
+
+fn test_background_index_refresh_respects_source_byte_budget() {
+	root := index_test_tmpdir('background_source_budget')
+	defer {
+		os.rmdir_all(root) or {}
+	}
+	for i in 0 .. 4 {
+		os.write_file(os.join_path(root, 'entry_${i}.v'),
+			'module main\n\nfn fn_${i}() {\n\tprintln("hello")\n}\n') or {
+			assert false, 'fixture write failed: ${err}'
+			return
+		}
+	}
+	mut app := index_test_app()
+	app.index_walk_byte_budget = 90
+	job := app.index_refresh_job(root)
+	mut result := app.run_recursive_index_refresh(job)
+	assert result.incomplete, 'the asynchronous walk must enforce the same cap'
+	assert result.skipped.len > 0
+	app.merge_index_refresh(mut result)
+	assert !app.index_is_complete_for_scope(IndexScope{
+		dir:       root
+		recursive: true
+	})
+}
+
+// A loose module is scanned shallowly, but it still needs a byte ceiling:
+// a single directory can otherwise hold enough sources to exhaust Windows GC.
+fn test_shallow_index_source_byte_budget_is_reported_incomplete() {
+	root := index_test_tmpdir('shallow_source_budget')
+	defer {
+		os.rmdir_all(root) or {}
+	}
+	for i in 0 .. 4 {
+		os.write_file(os.join_path(root, 'entry_${i}.v'),
+			'module main\n\nfn fn_${i}() {\n\tprintln("hello")\n}\n') or {
+			assert false, 'fixture write failed: ${err}'
+			return
+		}
+	}
+	mut app := index_test_app()
+	app.index_walk_byte_budget = 90
+	app.ensure_dir_shallow_indexed(root)
+	assert app.symbol_index.len < 4
+	assert 'shallow:${root}' in app.index_incomplete_scopes
+	assert !app.index_is_complete_for_scope(IndexScope{
+		dir: root
+	})
 }

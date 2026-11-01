@@ -29,7 +29,6 @@ struct IndexEntry {
 	has_conditional_module_completions bool
 	has_conditional_public_completions bool
 	conditional_lines                  []bool              // declarations guarded by $if/$else or @[if]
-	symbol_trigrams                    map[string][]string // display name -> capped trigram list for fuzzy ranking (see fuzzy_index.v)
 }
 
 // build_index_entry parses `content` into an IndexEntry. Symbol ranges are
@@ -37,8 +36,11 @@ struct IndexEntry {
 // negotiated encoding for non-ASCII lines (P0-01).
 fn build_index_entry(content string, enc PositionEncoding) IndexEntry {
 	lines := content.split_into_lines()
-	doc_syms := encode_document_symbols(parse_document_symbols(content), lines, enc)
+	// Reuse one masked line scan for symbols and completions, instead of
+	// allocating two large arrays for every indexed source file.
 	code_lines := source_code_lines(content)
+	doc_syms := encode_document_symbols(parse_document_symbols_from_lines(lines, code_lines),
+		lines, enc)
 	conditional_lines := compile_time_conditional_lines(content)
 	module_completion_index := parse_module_member_completions_from_lines(code_lines, conditional_lines, false)
 	public_module_completion_index := parse_module_member_completions_from_lines(code_lines, conditional_lines, true)
@@ -69,7 +71,6 @@ fn build_index_entry(content string, enc PositionEncoding) IndexEntry {
 		has_conditional_module_completions: module_completion_index.has_conditional
 		has_conditional_public_completions: public_module_completion_index.has_conditional
 		conditional_lines:                  conditional_lines
-		symbol_trigrams:                    fuzzy_entry_trigrams(doc_syms)
 	}
 }
 
@@ -499,6 +500,13 @@ fn (mut app App) drop_index_under(dir_path string) {
 // pull the entire tree into the index (audit: "unbounded workspace traversal").
 const index_max_files = 20000
 const index_max_file_bytes = u64(2 * 1024 * 1024)
+// Windows CI uses a limited address space with the TCC/GC runtime; indexing
+// tens of thousands of source lines can materialize much more than their disk
+// size in symbols, masked text, and completion entries. Bound the *aggregate*
+// bytes parsed in each walk, not just individual files. Exceeding this cap is
+// an incomplete index: destructive refactors refuse rather than miss usages.
+const index_windows_walk_max_bytes = u64(48 * 1024 * 1024)
+const index_other_walk_max_bytes = u64(256 * 1024 * 1024)
 const index_excluded_dirs = ['.git', '.svn', '.hg', 'node_modules', '.vmodules', 'thirdparty',
 	'_build', 'build', 'target', '.cache']
 
@@ -531,6 +539,19 @@ fn (app &App) project_walk_budget() int {
 		return app.index_walk_budget
 	}
 	return index_max_files
+}
+
+// The same ceiling applies to synchronous and background refreshes. Tests
+// lower it without writing enormous fixtures to reproduce a partial index.
+fn (app &App) project_index_byte_budget() u64 {
+	if app.index_walk_byte_budget > 0 {
+		return app.index_walk_byte_budget
+	}
+	$if windows {
+		return index_windows_walk_max_bytes
+	} $else {
+		return index_other_walk_max_bytes
+	}
 }
 
 // collect_v_files recursively gathers `.v` files under `root`, skipping hidden
@@ -705,10 +726,24 @@ fn (mut app App) ensure_dirs_indexed(dirs []string) {
 		// unopened file would otherwise linger in symbol/hover/call results. A
 		// partial walk must retain old entries it may simply not have reached.
 		app.reconcile_indexed_dir(dir, present, walk_complete)
+		mut bytes_seen := u64(0)
+		byte_budget := app.project_index_byte_budget()
 		for f in files {
 			uri := index_uri_for_path(f, open_uris_by_path)
 			if uri in app.open_files {
 				continue
+			}
+			// Account for unchanged files as well: an incremental re-walk must
+			// not keep a larger index than a fresh walk would be allowed to build.
+			size := os.file_size(f)
+			if size <= index_max_file_bytes {
+				if size > byte_budget - bytes_seen {
+					app.drop_index_uri(uri)
+					app.index_skipped_uris[uri] = true
+					app.index_incomplete_scopes[scope] = true
+					continue
+				}
+				bytes_seen += size
 			}
 			if uri in app.symbol_index {
 				// Already indexed: on a refresh walk, re-read from disk so edits to
@@ -752,6 +787,8 @@ fn (mut app App) ensure_dir_shallow_indexed(dir string) {
 	}
 	entries.sort()
 	mut scan_complete := true
+	mut bytes_seen := u64(0)
+	byte_budget := app.project_index_byte_budget()
 	for entry in entries {
 		if !entry.ends_with('.v') {
 			continue
@@ -771,6 +808,17 @@ fn (mut app App) ensure_dir_shallow_indexed(dir string) {
 		present[uri] = true
 		if uri in app.open_files {
 			continue
+		}
+		size := os.file_size(full)
+		if size <= index_max_file_bytes {
+			if size > byte_budget - bytes_seen {
+				app.drop_index_uri(uri)
+				app.index_skipped_uris[uri] = true
+				app.index_incomplete_scopes[scope] = true
+				scan_complete = false
+				continue
+			}
+			bytes_seen += size
 		}
 		if uri in app.symbol_index {
 			// Already indexed: on a throttled refresh re-read from disk so external
@@ -905,6 +953,7 @@ struct IndexRefreshJob {
 	fingerprints      map[string]int  // uri -> fingerprint of the entry held
 	open_uris         map[string]bool // open buffers, which the request thread indexes
 	open_uris_by_path map[string]string
+	byte_budget       u64 // maximum source bytes one refresh can retain
 	workspace_roots   []string
 	removed_roots     []string
 	generation        int // open/disk mutation counter when the walk was requested
@@ -1128,6 +1177,7 @@ fn (app &App) index_refresh_job(dir string) IndexRefreshJob {
 		fingerprints:      fingerprints
 		open_uris:         open_uris
 		open_uris_by_path: app.open_index_uris_by_path()
+		byte_budget:       app.project_index_byte_budget()
 		workspace_roots:   app.workspace_roots.clone()
 		removed_roots:     app.removed_workspace_roots.clone()
 		generation:        app.open_files_generation
@@ -1186,12 +1236,13 @@ fn (mut app App) run_recursive_index_refresh(job IndexRefreshJob) IndexRefreshRe
 			}
 		}
 	}
+	mut bytes_seen := u64(0)
 	for f in files {
 		uri := index_uri_for_path(f, job.open_uris_by_path)
 		if uri in job.open_uris {
 			continue
 		}
-		if app.index_refresh_file(uri, job, mut result, mut entries) {
+		if app.index_refresh_file(uri, job, mut result, mut entries, mut bytes_seen) {
 			break
 		}
 	}
@@ -1203,7 +1254,7 @@ fn (mut app App) run_recursive_index_refresh(job IndexRefreshJob) IndexRefreshRe
 // its entry, skip it because its content fingerprint is unchanged or it is out
 // of the index's bounds, or drop it because it is gone. It returns true when the
 // walk must stop, which is only at the total entry cap.
-fn (mut app App) index_refresh_file(uri string, job IndexRefreshJob, mut result IndexRefreshResult, mut entries map[string]IndexEntry) bool {
+fn (mut app App) index_refresh_file(uri string, job IndexRefreshJob, mut result IndexRefreshResult, mut entries map[string]IndexEntry, mut bytes_seen u64) bool {
 	path := uri_to_path(uri)
 	if path_is_under_removed_root(path, job.workspace_roots, job.removed_roots) {
 		result.deletions << uri
@@ -1213,10 +1264,17 @@ fn (mut app App) index_refresh_file(uri string, job IndexRefreshJob, mut result 
 		result.deletions << uri
 		return false
 	}
-	if os.file_size(path) > index_max_file_bytes {
+	size := os.file_size(path)
+	if size > index_max_file_bytes {
 		result.skipped << uri
 		return false
 	}
+	if size > job.byte_budget - bytes_seen {
+		result.skipped << uri
+		result.incomplete = true
+		return false
+	}
+	bytes_seen += size
 	content := os.read_file(path) or {
 		result.skipped << uri
 		return false
@@ -1533,10 +1591,10 @@ fn (app &App) query_workspace_symbols(query string) []WorkspaceSymbol {
 	for uri in uris {
 		entry := app.symbol_index[uri] or { continue }
 		for sym in entry.doc_symbols {
-			fuzzy_rank_symbol(mut ranked, uri, sym.name, sym.kind, sym.selection_range, entry.symbol_trigrams[sym.name], q, nq, query_tris, use_fuzzy_recall)
+			fuzzy_rank_symbol(mut ranked, uri, sym.name, sym.kind, sym.selection_range, q, nq, query_tris, use_fuzzy_recall)
 			for child in sym.children {
 				child_name := '${sym.name}.${child.name}'
-				fuzzy_rank_symbol(mut ranked, uri, child_name, child.kind, child.selection_range, entry.symbol_trigrams[child_name], q, nq, query_tris, use_fuzzy_recall)
+				fuzzy_rank_symbol(mut ranked, uri, child_name, child.kind, child.selection_range, q, nq, query_tris, use_fuzzy_recall)
 			}
 		}
 	}

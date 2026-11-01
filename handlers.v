@@ -4360,9 +4360,12 @@ fn source_line_import_code(line string, mut state ImportScanState) string {
 }
 
 fn source_code_lines(content string) []string {
-	mut lines := []string{}
+	raw_lines := content.split_into_lines()
+	// Reserve once: repeated array growth fragmented the Windows GC heap
+	// while indexing the compiler's many large source files.
+	mut lines := []string{cap: raw_lines.len}
 	mut scan_state := ImportScanState{}
-	for raw_line in content.split_into_lines() {
+	for raw_line in raw_lines {
 		lines << source_line_import_code(raw_line, mut scan_state)
 	}
 	return lines
@@ -7813,8 +7816,12 @@ fn lookup_fn_return_type(rhs string, index map[string]string) string {
 // V declarations: functions, methods, structs, enums, interfaces, constants,
 // and type aliases. Struct fields and enum members are returned as children.
 fn parse_document_symbols(content string) []DocumentSymbol {
-	lines := content.split_into_lines()
-	code_lines := source_code_lines(content)
+	return parse_document_symbols_from_lines(content.split_into_lines(), source_code_lines(content))
+}
+
+// The workspace index already has both the original and masked source lines:
+// accepting them here avoids redoing the full masking allocation per file.
+fn parse_document_symbols_from_lines(lines []string, code_lines []string) []DocumentSymbol {
 	mut symbols := []DocumentSymbol{}
 	// Track whether we are inside a struct or enum block to collect children.
 	mut in_struct := false
@@ -8931,12 +8938,6 @@ fn (mut app App) handle_selection_range(request Request) Response {
 //   vls.diagnostics – enable or disable live compile-time diagnostics
 fn (mut app App) on_did_change_configuration(request Request) {
 	resolved := resolve_workspace_settings(request.params)
-	if resolved.has_inlay_hints {
-		if enabled := resolved.inlay_hints {
-			app.inlay_hints_enabled = enabled
-			log('VLS: inlay_hints_enabled=${enabled}')
-		}
-	}
 	if resolved.has_variable_types || resolved.has_parameter_names {
 		mut toggles := app.inlay_hint_toggles()
 		if variable_types := resolved.variable_types {
@@ -8948,19 +8949,9 @@ fn (mut app App) on_did_change_configuration(request Request) {
 		app.set_inlay_hint_toggles(toggles)
 		log('VLS: inlay_hint_toggles=variableTypes:${toggles.variable_types},parameterNames:${toggles.parameter_names}')
 	}
-	if resolved.has_diagnostics {
-		if enabled := resolved.diagnostics {
-			app.diagnostics_enabled = enabled
-			if !enabled {
-				app.cancel_all_scheduled_diagnostics()
-			}
-			log('VLS: diagnostics_enabled=${enabled}')
-		}
-	}
-	// Layered configuration: the editor's own settings are the top tier, a
-	// project's `vls.json` the next, and VLS_DEFINES the last. Storing the
-	// editor tier here also applies the merged result to the switches above,
-	// and records the defines the checks of a project run with (vls_config.v).
+	// Layered configuration updates the feature switches and worker cache
+	// coherently; don't mutate the booleans before it captures their old
+	// values or toggling diagnostics off will fail to clear published errors.
 	app.apply_editor_configuration(request.params)
 }
 
@@ -9085,10 +9076,10 @@ fn (mut app App) on_initialize(request Request) ?string {
 	if roots.len > 0 {
 		app.workspace_roots = roots
 		log('VLS: workspace roots set to ${roots}')
-		// A workspace root's own `vls.json` is read at once, so a project
-		// folder's switches apply before any of its files is opened.
+		// Cache each root's settings, but never apply one project's switches
+		// to the entire LSP session: feature handlers resolve them per URI.
 		for root in roots {
-			app.apply_project_settings(app.project_config_for_root(root))
+			_ = app.project_config_for_root(root)
 		}
 	}
 	app.supports_dynamic_watched_files_registration =

@@ -585,3 +585,57 @@ fn test_config_project_disable_clears_published_errors() {
 	assert uri !in scheduler.diag_cache, 'a disabled project cannot keep an old pull result'
 	assert app.captured_output.join('').contains('"diagnostics":[]'), 'the client must receive a clearing notification'
 }
+
+// Removing a whole-state editor override must restore the server defaults,
+// rather than leaving its previous false value on the App indefinitely.
+fn test_config_removing_editor_switch_restores_default_and_reschedules() {
+	root := config_test_project('editor_switch_reset')
+	defer {
+		os.rmdir_all(root) or {}
+	}
+	path := os.join_path(root, 'main.v')
+	content := 'module main\n\nfn main() {}\n'
+	config_test_write(path, content)
+	uri := path_to_uri(path)
+	mut scheduler := new_diagnostics_scheduler()
+	scheduler.paused = true
+	mut app := config_test_app_open(root)
+	app.capture_output = true
+	app.diagnostics_scheduler = scheduler
+	app.open_files[uri] = content
+	app.apply_editor_configuration('{"settings":{"vls":{"diagnostics":false,"inlayHints":false}}}')
+	assert !app.diagnostics_enabled_for_uri(uri)
+	assert !app.inlay_hints_enabled_for_uri(uri)
+	assert app.captured_output.join('').contains('"diagnostics":[]'), 'disabling diagnostics must clear previously published errors'
+	app.apply_editor_configuration('{}')
+	assert app.diagnostics_enabled_for_uri(uri)
+	assert app.inlay_hints_enabled_for_uri(uri)
+	assert diagnostics_job_key(uri, .slow) in scheduler.pending_jobs, 're-enabling diagnostics must enqueue a new authoritative check'
+}
+
+// A vls.json change invalidates the async pull cache for the affected project
+// only; other workspace roots must retain their last published results.
+fn test_config_project_invalidation_does_not_clear_other_project_pulls() {
+	first := config_test_project('invalidate_one')
+	defer {
+		os.rmdir_all(first) or {}
+	}
+	second := config_test_project('invalidate_two')
+	defer {
+		os.rmdir_all(second) or {}
+	}
+	first_uri := path_to_uri(os.join_path(first, 'main.v'))
+	second_uri := path_to_uri(os.join_path(second, 'main.v'))
+	mut scheduler := new_diagnostics_scheduler()
+	mut app := config_test_app_open(first)
+	app.diagnostics_scheduler = scheduler
+	scheduler.diag_cache[first_uri] = DiagCacheEntry{
+		fingerprint: 'published'
+	}
+	scheduler.diag_cache[second_uri] = DiagCacheEntry{
+		fingerprint: 'published'
+	}
+	app.forget_project_diagnostics(first)
+	assert first_uri !in scheduler.diag_cache
+	assert second_uri in scheduler.diag_cache
+}

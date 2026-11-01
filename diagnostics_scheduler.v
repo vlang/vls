@@ -321,6 +321,35 @@ fn (mut scheduler DiagnosticsScheduler) finish(job DiagnosticsJob) {
 	scheduler.mutex.unlock()
 }
 
+// clear_published_diagnostics forgets every push result. A change of editor
+// defines or a global diagnostics switch invalidates the meaning of all results.
+fn (mut scheduler DiagnosticsScheduler) clear_published_diagnostics() {
+	scheduler.mutex.lock()
+	defer {
+		scheduler.mutex.unlock()
+	}
+	scheduler.diag_cache.clear()
+}
+
+// clear_published_diagnostics_for_root forgets only one project's results
+// when its vls.json or resolved configuration changes.
+fn (mut scheduler DiagnosticsScheduler) clear_published_diagnostics_for_root(root string) {
+	scheduler.mutex.lock()
+	defer {
+		scheduler.mutex.unlock()
+	}
+	root_path := normalize_overlay_path(root)
+	mut stale := []string{}
+	for uri, _ in scheduler.diag_cache {
+		if path_is_within(normalize_overlay_path(uri_to_path(uri)), root_path) {
+			stale << uri
+		}
+	}
+	for uri in stale {
+		scheduler.diag_cache.delete(uri)
+	}
+}
+
 // forget_published_errors drops the last published result for `uri`, so a
 // pull stops serving it. Lock-guarded: callers outside the scheduler mutex
 // (the request loop, the worker) must not touch the map directly.

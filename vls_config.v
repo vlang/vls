@@ -101,7 +101,8 @@ mut:
 // A changed defines value invalidates checks computed with the old ones.
 fn (mut app App) apply_editor_configuration(params_json string) {
 	mut store := app.config_store
-	previous := store.editor_settings().defines
+	previous := store.editor_settings()
+	old_diagnostics_enabled := app.diagnostics_enabled
 	mut editor := EditorSettings{
 		defines: resolve_editor_defines(params_json)
 	}
@@ -115,31 +116,35 @@ fn (mut app App) apply_editor_configuration(params_json string) {
 	if directory := resolved.coverage_directory {
 		editor.coverage_directory = directory
 	}
-	// The editor tier is part of every merge, so the results cached for the
-	// project roots are the ones computed without it.
+	// The editor's payload is a complete settings snapshot: a key that is no
+	// longer sent returns to the server default rather than inheriting an old
+	// override from some other project or an earlier configuration change.
 	store.set_editor_settings(editor)
-	current := editor.defines
-	if current != previous {
-		// A check's fingerprint covers the defines, but a worker may already
-		// be running with the previous editor tier. Invalidate its generation
-		// and enqueue the open documents again with the updated configuration.
+	app.inlay_hints_enabled = editor.inlay_hints or { true }
+	app.diagnostics_enabled = editor.diagnostics or { true }
+	defines_changed := editor.defines != previous.defines
+	checks_toggled := app.diagnostics_enabled != old_diagnostics_enabled
+	if defines_changed || checks_toggled {
 		app.diag_cache = map[string]DiagCacheEntry{}
+		// A worker still running with the old settings must not publish; its
+		// old cache is invalid even if it happened to find the same source.
 		app.cancel_all_scheduled_diagnostics()
-		for uri, content in app.open_files {
-			app.schedule_diagnostics(uri, content)
+		if mut scheduler := app.diagnostics_scheduler {
+			scheduler.clear_published_diagnostics()
 		}
-		log('VLS: defines=${current}')
-	}
-	// Project switches are consulted per URI instead of applied to session-
-	// global booleans: otherwise opening one project disables another one.
-	if enabled := editor.inlay_hints {
-		app.inlay_hints_enabled = enabled
-	}
-	if enabled := editor.diagnostics {
-		app.diagnostics_enabled = enabled
-		if !enabled {
-			app.cancel_all_scheduled_diagnostics()
+		if app.diagnostics_enabled {
+			for uri, content in app.open_files {
+				app.schedule_diagnostics(uri, content)
+			}
+		} else {
+			for uri, content in app.open_files {
+				app.write_notification(app.diagnostics_notification_for(uri, content,
+					[]JsonError{}))
+			}
 		}
+	}
+	if defines_changed {
+		log('VLS: defines=${editor.defines}')
 	}
 }
 
@@ -227,6 +232,9 @@ fn (mut app App) forget_project_diagnostics(root string) {
 	}
 	for uri in stale {
 		app.diag_cache.delete(uri)
+	}
+	if mut scheduler := app.diagnostics_scheduler {
+		scheduler.clear_published_diagnostics_for_root(root)
 	}
 }
 
