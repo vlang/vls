@@ -65,3 +65,16 @@ fn test_fuzzy_filter_empty_items() {
 	result := fuzzy_filter('test', []string{})
 	assert result.len == 0
 }
+
+fn test_fuzzy_score_matches_fuzzy_match() {
+	items := ['hello', 'hallo', 'help', 'hero']
+	for item in items {
+		a := fuzzy_match('he', item)
+		b := fuzzy_score('he', item)
+		if a == none {
+			assert b == none
+		} else {
+			assert b != none && b == a.score
+		}
+	}
+}
