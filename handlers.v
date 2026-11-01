@@ -4355,12 +4355,16 @@ fn source_line_import_code(line string, mut state ImportScanState) string {
 }
 
 fn source_code_lines(content string) []string {
-	mut lines := []string{}
+	return source_code_lines_from_lines(content.split_into_lines())
+}
+
+fn source_code_lines_from_lines(lines []string) []string {
+	mut out := []string{cap: lines.len}
 	mut scan_state := ImportScanState{}
-	for raw_line in content.split_into_lines() {
-		lines << source_line_import_code(raw_line, mut scan_state)
+	for raw_line in lines {
+		out << source_line_import_code(raw_line, mut scan_state)
 	}
-	return lines
+	return out
 }
 
 fn parse_import_binding(text string) ?ImportedModuleBinding {

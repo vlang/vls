@@ -38,7 +38,7 @@ struct IndexEntry {
 fn build_index_entry(content string, enc PositionEncoding, fingerprint int) IndexEntry {
 	lines := content.split_into_lines()
 	doc_syms := encode_document_symbols(parse_document_symbols(content), lines, enc)
-	code_lines := source_code_lines(content)
+	code_lines := source_code_lines_from_lines(lines)
 	conditional_lines := compile_time_conditional_lines(content)
 	module_completion_index := parse_module_member_completions_from_lines(code_lines, conditional_lines, false)
 	public_module_completion_index := parse_module_member_completions_from_lines(code_lines, conditional_lines, true)
