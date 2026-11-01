@@ -35,7 +35,7 @@ struct IndexEntry {
 // build_index_entry parses `content` into an IndexEntry. Symbol ranges are
 // re-encoded into `enc` so document/workspace symbol positions match the
 // negotiated encoding for non-ASCII lines (P0-01).
-fn build_index_entry(content string, enc PositionEncoding) IndexEntry {
+fn build_index_entry(content string, enc PositionEncoding, fingerprint int) IndexEntry {
 	lines := content.split_into_lines()
 	doc_syms := encode_document_symbols(parse_document_symbols(content), lines, enc)
 	code_lines := source_code_lines(content)
@@ -59,7 +59,7 @@ fn build_index_entry(content string, enc PositionEncoding) IndexEntry {
 		}
 	}
 	return IndexEntry{
-		fingerprint:                        content.hash()
+		fingerprint:                        fingerprint
 		module_name:                        get_module_name(content)
 		doc_symbols:                        doc_syms
 		docs:                               docs
@@ -459,7 +459,7 @@ fn (mut app App) reindex_uri(uri string) {
 			return
 		}
 	}
-	app.symbol_index[uri] = build_index_entry(content, app.position_encoding)
+	app.symbol_index[uri] = build_index_entry(content, app.position_encoding, fp)
 }
 
 // invalidate_index_uri drops a URI's entry so it is re-parsed on next access.
@@ -1207,7 +1207,7 @@ fn (mut app App) index_refresh_file(uri string, job IndexRefreshJob, mut result 
 		result.skipped << uri
 		return true
 	}
-	entries[uri] = build_index_entry(content, app.position_encoding)
+	entries[uri] = build_index_entry(content, app.position_encoding, fingerprint)
 	result.reindexed++
 	return false
 }
