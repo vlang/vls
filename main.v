@@ -318,6 +318,13 @@ fn main() {
 		run_tcp_server(host, port, allow_remote)
 		return
 	}
+	// MCP mode is planned (see the v-vls skill) but not yet implemented:
+	// VLS speaks LSP over stdio today. Print a hint instead of starting LSP.
+	if os.args.contains('--mcp') {
+		eprintln('VLS MCP mode is not implemented yet.')
+		eprintln('Use `v mcp serve` for compiler-level facts, or run VLS as an LSP server.')
+		return
+	}
 
 	// Stdio mode (default).
 	temp_dir := os.join_path(os.temp_dir(), 'vls_${os.getpid()}')
