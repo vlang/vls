@@ -1755,9 +1755,11 @@ fn split_check_errors(output string, diagnostic_source_dir string, file_to_check
 		program[open_uri] = []JsonError{}
 	}
 	mut filtered_errors := []JsonError{}
+	real_norm := normalized_index_path(real_path)
 	for err in v_errors {
 		err_file := source_path_from_overlay(err.path, overlay, base_dir)
-		if normalized_index_path(err_file) == normalized_index_path(real_path) {
+		err_norm := normalized_index_path(err_file)
+		if err_norm == real_norm {
 			filtered_errors << JsonError{
 				path:    real_path
 				message: err.message
@@ -1768,7 +1770,7 @@ fn split_check_errors(output string, diagnostic_source_dir string, file_to_check
 			}
 			log('INCLUDING ERROR from err_file=${err_file}: ${err.message}')
 		} else {
-			if other_uri := program_uris[normalized_index_path(err_file)] {
+			if other_uri := program_uris[err_norm] {
 				program[other_uri] << JsonError{
 					path:    err_file
 					message: err.message
