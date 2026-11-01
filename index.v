@@ -119,6 +119,21 @@ fn encode_range_chars(r LSPRange, lines []string, enc PositionEncoding) LSPRange
 	}
 }
 
+// indexed_uris_in_dir returns the URIs in the symbol index whose file lives in
+// `dir`, sorted, with each directory normalized only once.
+fn (app &App) indexed_uris_in_dir(dir string) []string {
+	normalized_dir := normalized_index_path(dir)
+	mut out := []string{}
+	for uri in app.symbol_index.keys() {
+		if normalized_index_path(os.dir(uri_to_path(uri))) != normalized_dir {
+			continue
+		}
+		out << uri
+	}
+	out.sort()
+	return out
+}
+
 // index_source_for returns the authoritative content for `uri`: the open buffer
 // when the document is open, otherwise the on-disk file. Returns none when the
 // file is neither open nor readable.

@@ -1141,14 +1141,8 @@ fn (mut app App) module_const_hover(uri string, content string, module_name stri
 		return none
 	}
 	app.ensure_dir_shallow_indexed(module_dir)
-	normalized_dir := normalized_index_path(module_dir)
-	mut indexed_uris := app.symbol_index.keys()
-	indexed_uris.sort()
-	for indexed_uri in indexed_uris {
+	for indexed_uri in app.indexed_uris_in_dir(module_dir) {
 		indexed_entry := app.symbol_index[indexed_uri] or { continue }
-		if normalized_index_path(os.dir(uri_to_path(indexed_uri))) != normalized_dir {
-			continue
-		}
 		source := app.index_source_for(indexed_uri) or { continue }
 		source_lines := source.split_into_lines()
 		for symbol in indexed_entry.doc_symbols {
