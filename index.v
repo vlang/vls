@@ -1299,8 +1299,8 @@ fn (mut app App) run_recursive_index_refresh(job IndexRefreshJob) IndexRefreshRe
 // of the index's bounds, or drop it because it is gone. It returns true when the
 // walk must stop, which is only at the total entry cap.
 fn (mut app App) index_refresh_file(uri string, job IndexRefreshJob, mut result IndexRefreshResult, mut entries map[string]IndexEntry, bytes_seen u64) (bool, u64) {
-	path := uri_to_path(uri)
 	mut bs := bytes_seen
+	path := uri_to_path(uri)
 	if path_is_under_removed_root(path, job.workspace_roots, job.removed_roots) {
 		result.deletions << uri
 		return false, bs
