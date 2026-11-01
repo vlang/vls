@@ -324,6 +324,15 @@ fn main() {
 		run_mcp_mode()
 		return
 	}
+	if os.args.len >= 2 && os.args[1] == 'mcp' && os.args.len >= 3 && os.args[2] == 'install' {
+		// Print an MCP client config snippet for VLS.
+		println('{')
+		println('  "mcpServers": {')
+		println('    "vls": { "command": "vls", "args": ["--mcp"] }')
+		println('  }')
+		println('}')
+		return
+	}
 	// `vls check <file>` runs a single-file compile check and prints JSON diagnostics.
 	if os.args.len >= 3 && os.args[1] == 'check' {
 		path := os.args[2]
