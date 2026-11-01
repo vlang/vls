@@ -336,20 +336,28 @@ fn (mut app App) drop_index_uri(uri string) {
 // buffer still owns the file.
 fn (mut app App) drop_index_aliases_for_path(path string, keep_uri string) {
 	target_path := normalized_index_path(path)
+	// Compute each URI's normalized path once instead of three times.
+	mut normalized := map[string]string{}
 	for uri in app.symbol_index.keys() {
-		if uri != keep_uri && normalized_index_path(uri_to_path(uri)) == target_path {
-			app.symbol_index.delete(uri)
-		}
+		normalized[uri] = normalized_index_path(uri_to_path(uri))
 	}
 	for uri in app.ref_occurrences.keys() {
-		if uri != keep_uri && normalized_index_path(uri_to_path(uri)) == target_path {
-			app.ref_occurrences.delete(uri)
+		if uri !in normalized {
+			normalized[uri] = normalized_index_path(uri_to_path(uri))
 		}
 	}
 	for uri in app.index_skipped_uris.keys() {
-		if uri != keep_uri && normalized_index_path(uri_to_path(uri)) == target_path {
-			app.index_skipped_uris.delete(uri)
+		if uri !in normalized {
+			normalized[uri] = normalized_index_path(uri_to_path(uri))
 		}
+	}
+	for uri, np in normalized {
+		if uri == keep_uri || np != target_path {
+			continue
+		}
+		app.symbol_index.delete(uri)
+		app.ref_occurrences.delete(uri)
+		app.index_skipped_uris.delete(uri)
 	}
 }
 
