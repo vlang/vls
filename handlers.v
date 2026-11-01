@@ -3346,12 +3346,9 @@ fn (mut app App) indexed_method_symbols(uri string, content string, receiver_typ
 	mut matches := []Location{}
 	mut items := []Detail{}
 	mut has_conditional := false
-	mut indexed_uris := app.symbol_index.keys()
-	indexed_uris.sort()
-	for indexed_uri in indexed_uris {
+	for indexed_uri in app.indexed_uris_in_dir(dir) {
 		entry := app.symbol_index[indexed_uri] or { continue }
-		if normalized_index_path(os.dir(uri_to_path(indexed_uri))) != normalized_dir
-			|| os.file_name(uri_to_path(indexed_uri)) !in active_names || entry.module_name != expected_module {
+		if os.file_name(uri_to_path(indexed_uri)) !in active_names || entry.module_name != expected_module {
 			continue
 		}
 		source := app.index_source_for(indexed_uri) or { continue }
@@ -3548,12 +3545,9 @@ fn (mut app App) indexed_struct_field_completions_visited(uri string, content st
 	mut has_conditional := false
 	mut has_unresolved_embedded := false
 	mut resolved_type := false
-	mut indexed_uris := app.symbol_index.keys()
-	indexed_uris.sort()
-	for indexed_uri in indexed_uris {
+	for indexed_uri in app.indexed_uris_in_dir(dir) {
 		entry := app.symbol_index[indexed_uri] or { continue }
-		if normalized_index_path(os.dir(uri_to_path(indexed_uri))) != normalized_dir
-			|| os.file_name(uri_to_path(indexed_uri)) !in active_names || entry.module_name != expected_module {
+		if os.file_name(uri_to_path(indexed_uri)) !in active_names || entry.module_name != expected_module {
 			continue
 		}
 		source := app.index_source_for(indexed_uri) or { continue }
@@ -4440,12 +4434,9 @@ fn (mut app App) get_imported_module_member_completions(module_path string, work
 	expected_module := module_path.all_after_last('.')
 	mut seen_labels := map[string]bool{}
 	mut has_conditional := false
-	mut indexed_uris := app.symbol_index.keys()
-	indexed_uris.sort()
-	for indexed_uri in indexed_uris {
+	for indexed_uri in app.indexed_uris_in_dir(module_dir) {
 		entry := app.symbol_index[indexed_uri] or { continue }
-		if normalized_index_path(os.dir(uri_to_path(indexed_uri))) != normalized_dir
-			|| os.file_name(uri_to_path(indexed_uri)) !in active_names || entry.module_name != expected_module {
+		if os.file_name(uri_to_path(indexed_uri)) !in active_names || entry.module_name != expected_module {
 			continue
 		}
 		if entry.has_conditional_public_completions {
@@ -8547,12 +8538,9 @@ fn (mut app App) collect_module_completions(current_file_uri string, working_dir
 	normalized_dir := normalized_index_path(working_dir)
 	mut items := []Detail{}
 	mut has_conditional := false
-	mut indexed_uris := app.symbol_index.keys()
-	indexed_uris.sort()
-	for indexed_uri in indexed_uris {
+	for indexed_uri in app.indexed_uris_in_dir(working_dir) {
 		entry := app.symbol_index[indexed_uri] or { continue }
-		if normalized_index_path(os.dir(uri_to_path(indexed_uri))) != normalized_dir
-			|| os.file_name(uri_to_path(indexed_uri)) !in active_names || entry.module_name != current_module {
+		if os.file_name(uri_to_path(indexed_uri)) !in active_names || entry.module_name != current_module {
 			continue
 		}
 		if entry.has_conditional_module_completions {
