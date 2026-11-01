@@ -2948,9 +2948,9 @@ fn (mut app App) function_return_type_raw(uri string, content string, candidate 
 	}
 	expected_module := module_path.all_after_last('.')
 	mut return_types := map[string]bool{}
-	for indexed_uri, entry in app.symbol_index {
-		if normalized_index_path(os.dir(uri_to_path(indexed_uri))) != normalized_dir
-			|| entry.module_name != expected_module {
+	for indexed_uri in app.indexed_uris_in_dir(dir) {
+		entry := app.symbol_index[indexed_uri] or { continue }
+		if entry.module_name != expected_module {
 			continue
 		}
 		for symbol in entry.doc_symbols {
