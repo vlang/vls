@@ -85,13 +85,13 @@ fn read_mcp_frame[T](mut reader T) !string {
 		}
 		total += n
 	}
-	return string(buf)
+	return buf.bytestr()
 }
 
 // handle_mcp_message dispatches a single JSON-RPC request and writes the response.
 fn handle_mcp_message(mut app App, body string) {
 	method := mcp_json_field(body, 'method')
-	id := mcp_json_field(body, 'id')
+	id := mcp_json_raw_field(body, 'id')
 	if method == 'initialize' {
 		resp := '{"jsonrpc":"2.0","id":${id},"result":{"protocolVersion":"2024-11-05","capabilities":{"tools":{}},"serverInfo":{"name":"vls","version":"${vls_version}"}}}'
 		app.send_framed(resp)
@@ -286,7 +286,7 @@ fn mcp_json_field(body string, field string) string {
 				j += 2
 				continue
 			}
-			out += rest[j].str()
+			out += rest[j..j+1]
 			j++
 		}
 		return out
@@ -294,7 +294,49 @@ fn mcp_json_field(body string, field string) string {
 	mut j := i
 	mut out := ''
 	for j < rest.len && rest[j] != `,` && rest[j] != `}` && rest[j] != `]` {
-		out += rest[j].str()
+		out += rest[j..j+1]
+		j++
+	}
+	return out.trim_space()
+}
+
+// mcp_json_raw_field returns the raw JSON value of a top-level field (including
+// quotes for strings), so string IDs are preserved verbatim in responses.
+fn mcp_json_raw_field(body string, field string) string {
+	key := '"${field}"'
+	idx := body.index(key) or { return 'null' }
+	rest := body[idx + key.len..]
+	mut i := 0
+	for i < rest.len && (rest[i] == `:` || rest[i] == ` ` || rest[i] == `\t` || rest[i] == `\n` || rest[i] == `\r`) {
+		i++
+	}
+	if i >= rest.len {
+		return 'null'
+	}
+	if rest[i] == `"` {
+		// string: read until closing quote, handling escapes
+		mut j := i + 1
+		mut out := '"'
+		for j < rest.len {
+			out += rest[j..j+1]
+			if rest[j] == `\\` && j + 1 < rest.len {
+				out += rest[j+1..j+2]
+				j += 2
+				continue
+			}
+			if rest[j] == `"` {
+				j++
+				break
+			}
+			j++
+		}
+		return out
+	}
+	// non-string: read until comma/brace
+	mut j := i
+	mut out := ''
+	for j < rest.len && rest[j] != `,` && rest[j] != `}` && rest[j] != `]` {
+		out += rest[j..j+1]
 		j++
 	}
 	return out.trim_space()
