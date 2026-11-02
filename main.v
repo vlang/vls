@@ -1178,7 +1178,7 @@ fn (mut app App) handle_requests[T](mut reader T) {
 							document_range_formatting_provider: true
 							// Imports link to the module they name, and a URL in a doc
 							// comment is clickable as written.
-							document_link_provider:             true
+							document_link_provider:             DocumentLinkOptions{}
 							position_encoding:                  position_encoding_string(app.position_encoding)
 							workspace:                          WorkspaceCapability{
 								workspace_folders: WorkspaceFoldersServerCapability{

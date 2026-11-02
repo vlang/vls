@@ -343,6 +343,14 @@ struct CodeLensOptions {
 	resolve_provider ?bool @[json: 'resolveProvider']
 }
 
+// DocumentLinkOptions advertises document link support (LSP 3.17
+// DocumentLinkOptions). The spec type is an object, not a boolean, so a
+// boolean here breaks strict clients. VLS resolves every link target
+// up front, so resolve_provider stays unset.
+struct DocumentLinkOptions {
+	resolve_provider ?bool @[json: 'resolveProvider']
+}
+
 // DiagnosticOptions advertises pull diagnostics (LSP 3.17 DiagnosticOptions).
 // interFileDependencies is false because a pull answers for the one document it
 // is asked about, and workspaceDiagnostics is false because
@@ -367,7 +375,7 @@ struct Capability {
 	execute_command_provider           ?ExecuteCommandOptions   @[json: 'executeCommandProvider']
 	document_formatting_provider       bool                     @[json: 'documentFormattingProvider']
 	document_range_formatting_provider bool                     @[json: 'documentRangeFormattingProvider']
-	document_link_provider             bool                     @[json: 'documentLinkProvider']
+	document_link_provider             ?DocumentLinkOptions     @[json: 'documentLinkProvider']
 	document_symbol_provider           bool                     @[json: 'documentSymbolProvider']
 	workspace_symbol_provider          bool                     @[json: 'workspaceSymbolProvider']
 	inlay_hint_provider                bool                     @[json: 'inlayHintProvider']
