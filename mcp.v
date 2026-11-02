@@ -122,11 +122,12 @@ fn handle_mcp_message(mut app App, body string) {
 		tool_name := mcp_json_nested(body, 'params', 'name')
 		args := mcp_json_nested(body, 'params', 'arguments')
 		if tool_name == 'vls_check' {
-			p := mcp_json_field(args, 'path')
-			if p == '' {
-				app.send_framed('{"jsonrpc":"2.0","id":${id},"error":{"code":-32602,"message":"missing path"}}')
-				return
-			}
+			raw_path := mcp_json_field(args, 'path')
+		if raw_path == '' {
+			app.send_framed('{"jsonrpc":"2.0","id":${id},"error":{"code":-32602,"message":"missing path"}}')
+			return
+		}
+		p := os.real_path(raw_path)
 			content := os.read_file(p) or {
 				app.send_framed('{"jsonrpc":"2.0","id":${id},"error":{"code":-32603,"message":"cannot read file"}}')
 				return
@@ -140,11 +141,12 @@ fn handle_mcp_message(mut app App, body string) {
 			return
 		}
 		if tool_name == 'vls_hover' {
-			p := mcp_json_field(args, 'path')
-			if p == '' {
-				app.send_framed('{"jsonrpc":"2.0","id":${id},"error":{"code":-32602,"message":"missing path"}}')
-				return
-			}
+			raw_path := mcp_json_field(args, 'path')
+		if raw_path == '' {
+			app.send_framed('{"jsonrpc":"2.0","id":${id},"error":{"code":-32602,"message":"missing path"}}')
+			return
+		}
+		p := os.real_path(raw_path)
 			content := os.read_file(p) or {
 				app.send_framed('{"jsonrpc":"2.0","id":${id},"error":{"code":-32603,"message":"cannot read file"}}')
 				return
@@ -160,11 +162,12 @@ fn handle_mcp_message(mut app App, body string) {
 			return
 		}
 		if tool_name == 'vls_definition' {
-			p := mcp_json_field(args, 'path')
-			if p == '' {
-				app.send_framed('{"jsonrpc":"2.0","id":${id},"error":{"code":-32602,"message":"missing path"}}')
-				return
-			}
+			raw_path := mcp_json_field(args, 'path')
+		if raw_path == '' {
+			app.send_framed('{"jsonrpc":"2.0","id":${id},"error":{"code":-32602,"message":"missing path"}}')
+			return
+		}
+		p := os.real_path(raw_path)
 			content := os.read_file(p) or {
 				app.send_framed('{"jsonrpc":"2.0","id":${id},"error":{"code":-32603,"message":"cannot read file"}}')
 				return
@@ -181,11 +184,12 @@ fn handle_mcp_message(mut app App, body string) {
 			return
 		}
 		if tool_name == 'vls_references' {
-			p := mcp_json_field(args, 'path')
-			if p == '' {
-				app.send_framed('{"jsonrpc":"2.0","id":${id},"error":{"code":-32602,"message":"missing path"}}')
-				return
-			}
+			raw_path := mcp_json_field(args, 'path')
+		if raw_path == '' {
+			app.send_framed('{"jsonrpc":"2.0","id":${id},"error":{"code":-32602,"message":"missing path"}}')
+			return
+		}
+		p := os.real_path(raw_path)
 			content := os.read_file(p) or {
 				app.send_framed('{"jsonrpc":"2.0","id":${id},"error":{"code":-32603,"message":"cannot read file"}}')
 				return
@@ -202,11 +206,12 @@ fn handle_mcp_message(mut app App, body string) {
 			return
 		}
 		if tool_name == 'vls_rename' {
-			p := mcp_json_field(args, 'path')
-			if p == '' {
-				app.send_framed('{"jsonrpc":"2.0","id":${id},"error":{"code":-32602,"message":"missing path"}}')
-				return
-			}
+			raw_path := mcp_json_field(args, 'path')
+		if raw_path == '' {
+			app.send_framed('{"jsonrpc":"2.0","id":${id},"error":{"code":-32602,"message":"missing path"}}')
+			return
+		}
+		p := os.real_path(raw_path)
 			content := os.read_file(p) or {
 				app.send_framed('{"jsonrpc":"2.0","id":${id},"error":{"code":-32603,"message":"cannot read file"}}')
 				return
@@ -231,11 +236,12 @@ fn handle_mcp_message(mut app App, body string) {
 			return
 		}
 		if tool_name == 'vls_symbols' {
-			p := mcp_json_field(args, 'path')
-			if p == '' {
-				app.send_framed('{"jsonrpc":"2.0","id":${id},"error":{"code":-32602,"message":"missing path"}}')
-				return
-			}
+			raw_path := mcp_json_field(args, 'path')
+		if raw_path == '' {
+			app.send_framed('{"jsonrpc":"2.0","id":${id},"error":{"code":-32602,"message":"missing path"}}')
+			return
+		}
+		p := os.real_path(raw_path)
 			content := os.read_file(p) or {
 				app.send_framed('{"jsonrpc":"2.0","id":${id},"error":{"code":-32603,"message":"cannot read file"}}')
 				return
@@ -250,11 +256,12 @@ fn handle_mcp_message(mut app App, body string) {
 			return
 		}
 		if tool_name == 'vls_completion' {
-			p := mcp_json_field(args, 'path')
-			if p == '' {
-				app.send_framed('{"jsonrpc":"2.0","id":${id},"error":{"code":-32602,"message":"missing path"}}')
-				return
-			}
+			raw_path := mcp_json_field(args, 'path')
+		if raw_path == '' {
+			app.send_framed('{"jsonrpc":"2.0","id":${id},"error":{"code":-32602,"message":"missing path"}}')
+			return
+		}
+		p := os.real_path(raw_path)
 			content := os.read_file(p) or {
 				app.send_framed('{"jsonrpc":"2.0","id":${id},"error":{"code":-32603,"message":"cannot read file"}}')
 				return
@@ -271,7 +278,11 @@ fn handle_mcp_message(mut app App, body string) {
 		app.send_framed('{"jsonrpc":"2.0","id":${id},"error":{"code":-32601,"message":"unknown tool"}}')
 		return
 	}
-	// Unknown method.
+	// Unknown method. Notifications (no id) must never receive a response.
+	if id == 'null' {
+		handle_mcp_notification(method)
+		return
+	}
 	app.send_framed('{"jsonrpc":"2.0","id":${id},"error":{"code":-32601,"message":"method not found"}}')
 }
 
@@ -281,6 +292,9 @@ fn handle_mcp_message(mut app App, body string) {
 fn handle_mcp_notification(method string) {
 	if method == 'notifications/initialized' {
 		log('VLS MCP initialized.')
+	}
+	if method == 'ping' {
+		// Ping as a notification is a no-op.
 	}
 }
 
