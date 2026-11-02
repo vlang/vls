@@ -26,7 +26,8 @@ fn run_mcp_mode() {
 	}
 	mut reader := new_stdin_buffered_reader()
 	for {
-		body := read_mcp_frame(mut reader) or { break }
+		line := reader.read_line() or { break }
+		body := line.trim_space()
 		if body == '' {
 			continue
 		}
@@ -38,61 +39,7 @@ fn run_mcp_mode() {
 	log('VLS MCP exiting.')
 }
 
-// read_mcp_frame reads one Content-Length framed JSON-RPC message from stdin.
-fn read_mcp_frame[T](mut reader T) !string {
-	mut header_bytes := 0
-	mut len := -1
-	mut header_error := ''
-	for {
-		line := reader.read_line() or {
-			if err is io.Eof {
-				return error('eof')
-			}
-			return err
-		}
-		header_bytes += line.len + 2
-		if header_bytes > max_header_bytes {
-			return error('header too large')
-		}
-		trimmed := line.trim_space()
-		if trimmed == '' {
-			break
-		}
-		lower := trimmed.to_lower()
-		if lower.starts_with('content-length:') {
-			parsed := trimmed.all_after(':').trim_space().int()
-			if parsed < 0 {
-				header_error = 'invalid content-length'
-				continue
-			}
-			if parsed > max_content_length {
-				header_error = 'content-length too large'
-				continue
-			}
-			len = parsed
-			continue
-		}
-		if lower.starts_with('content-type:') {
-			continue
-		}
-	}
-	if header_error != '' {
-		return error(header_error)
-	}
-	if len < 0 {
-		return ''
-	}
-	mut buf := []u8{len: len}
-	mut total := 0
-	for total < len {
-		n := reader.read(mut buf[total..]) or { return error('read body failed') }
-		if n <= 0 {
-			return error('unexpected eof')
-		}
-		total += n
-	}
-	return buf.bytestr()
-}
+
 
 // handle_mcp_message dispatches a single JSON-RPC message and writes the
 // response, unless it is a notification, which must never receive one.
@@ -178,7 +125,7 @@ fn handle_mcp_message(mut app App, body string) {
 			app.open_files[uri] = content
 			params := '{"textDocument":{"uri":"${uri}"},"position":{"line":${line},"character":${col}}}'
 			resp := app.operation_at_pos(.definition, Request{ id: 1, method: 'textDocument/definition', params: params })
-			result := resp.result
+			result := json2.encode(resp.result)
 			out := '{"jsonrpc":"2.0","id":${id},"result":{"content":[{"type":"text","text":${json2.encode(result)}}],"isError":false}}'
 			app.send_framed(out)
 			return
@@ -200,7 +147,7 @@ fn handle_mcp_message(mut app App, body string) {
 			app.open_files[uri] = content
 			params := '{"textDocument":{"uri":"${uri}"},"position":{"line":${line},"character":${col}}}'
 			resp := app.find_references(Request{ id: 1, method: 'textDocument/references', params: params })
-			result := resp.result
+			result := json2.encode(resp.result)
 			out := '{"jsonrpc":"2.0","id":${id},"result":{"content":[{"type":"text","text":${json2.encode(result)}}],"isError":false}}'
 			app.send_framed(out)
 			return
@@ -230,7 +177,7 @@ fn handle_mcp_message(mut app App, body string) {
 				app.send_framed('{"jsonrpc":"2.0","id":${id},"error":{"code":-32603,"message":"${err.msg()}"}}')
 				return
 			}
-			result := resp.result
+			result := json2.encode(resp.result)
 			out := '{"jsonrpc":"2.0","id":${id},"result":{"content":[{"type":"text","text":${json2.encode(result)}}],"isError":false}}'
 			app.send_framed(out)
 			return
@@ -250,7 +197,7 @@ fn handle_mcp_message(mut app App, body string) {
 			app.open_files[uri] = content
 			params := '{"textDocument":{"uri":"${uri}"}}'
 			resp := app.handle_document_symbols(Request{ id: 1, method: 'textDocument/documentSymbol', params: params })
-			result := resp.result
+			result := json2.encode(resp.result)
 			out := '{"jsonrpc":"2.0","id":${id},"result":{"content":[{"type":"text","text":${json2.encode(result)}}],"isError":false}}'
 			app.send_framed(out)
 			return
@@ -271,7 +218,8 @@ fn handle_mcp_message(mut app App, body string) {
 			uri := path_to_uri(p)
 			app.open_files[uri] = content
 			result := app.indexed_completions(uri, Position{ line: line, char: col })
-			out := '{"jsonrpc":"2.0","id":${id},"result":{"content":[{"type":"text","text":${json2.encode(result)}}],"isError":false}}'
+			result_json := json2.encode(result)
+			out := '{"jsonrpc":"2.0","id":${id},"result":{"content":[{"type":"text","text":${json2.encode(result_json)}}],"isError":false}}'
 			app.send_framed(out)
 			return
 		}
