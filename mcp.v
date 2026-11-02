@@ -286,7 +286,7 @@ fn mcp_json_field(body string, field string) string {
 				j += 2
 				continue
 			}
-			out += rest[j..j+1]
+			out += rest[j..j + 1]
 			j++
 		}
 		return out
@@ -294,7 +294,7 @@ fn mcp_json_field(body string, field string) string {
 	mut j := i
 	mut out := ''
 	for j < rest.len && rest[j] != `,` && rest[j] != `}` && rest[j] != `]` {
-		out += rest[j..j+1]
+		out += rest[j..j + 1]
 		j++
 	}
 	return out.trim_space()
@@ -318,9 +318,9 @@ fn mcp_json_raw_field(body string, field string) string {
 		mut j := i + 1
 		mut out := '"'
 		for j < rest.len {
-			out += rest[j..j+1]
+			out += rest[j..j + 1]
 			if rest[j] == `\\` && j + 1 < rest.len {
-				out += rest[j+1..j+2]
+				out += rest[j + 1..j + 2]
 				j += 2
 				continue
 			}
@@ -336,7 +336,7 @@ fn mcp_json_raw_field(body string, field string) string {
 	mut j := i
 	mut out := ''
 	for j < rest.len && rest[j] != `,` && rest[j] != `}` && rest[j] != `]` {
-		out += rest[j..j+1]
+		out += rest[j..j + 1]
 		j++
 	}
 	return out.trim_space()
