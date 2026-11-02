@@ -63,6 +63,12 @@ jobs:
       - name: Build V
         if: matrix.os != 'windows'
         timeout-minutes: 20
+        env:
+          # Xcode 16+ promotes implicit function declarations to hard errors,
+          # which currently breaks the vlang/v bootstrap on macos-latest
+          # (undeclared FastC Mach-O helpers). Downgrade to a warning until
+          # upstream V declares them. No-op on other platforms.
+          CFLAGS: ${{ matrix.os == 'macos' && '-Wno-error=implicit-function-declaration' || '' }}
         run: make latest_tcc && make -j4 && ./v symlink
       - name: Build V (Windows)
         if: matrix.os == 'windows'
@@ -75,6 +81,9 @@ jobs:
       - name: Build the V compatibility compiler
         if: matrix.os != 'windows'
         timeout-minutes: 15
+        env:
+          # Same Xcode 16 workaround as the Build V step above.
+          CFLAGS: ${{ matrix.os == 'macos' && '-Wno-error=implicit-function-declaration' || '' }}
         run: make v1
 
       - name: Check formatting
