@@ -49,3 +49,21 @@ fn test_mcp_object_at_skips_braces_in_strings() {
 	assert mcp_object_at('{"a":"}","b":1} trailing') == '{"a":"}","b":1}'
 	assert mcp_object_at('{"a":1') == ''
 }
+
+// P2: ping answers with an empty successful result.
+fn test_mcp_ping_returns_empty_result() {
+	mut app := &App{capture_output: true}
+	handle_mcp_message(mut app, '{"jsonrpc":"2.0","id":5,"method":"ping"}')
+	assert app.captured_output.len == 1
+	assert app.captured_output[0].contains('"id":5')
+	assert app.captured_output[0].contains('"result":{}')
+}
+
+// P2: notifications (no id) must never receive a response.
+fn test_mcp_notification_gets_no_response() {
+	mut app := &App{capture_output: true}
+	handle_mcp_message(mut app, '{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"reason":"x"}}')
+	assert app.captured_output.len == 0
+	handle_mcp_message(mut app, '{"jsonrpc":"2.0","method":"notifications/initialized"}')
+	assert app.captured_output.len == 0
+}

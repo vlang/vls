@@ -88,16 +88,23 @@ fn read_mcp_frame[T](mut reader T) !string {
 	return buf.bytestr()
 }
 
-// handle_mcp_message dispatches a single JSON-RPC request and writes the response.
+// handle_mcp_message dispatches a single JSON-RPC message and writes the
+// response, unless it is a notification, which must never receive one.
 fn handle_mcp_message(mut app App, body string) {
 	method := mcp_json_field(body, 'method')
 	id := mcp_json_raw_field(body, 'id')
+	if id == 'null' {
+		// JSON-RPC notification (no id): fire-and-forget, never answered.
+		handle_mcp_notification(method)
+		return
+	}
+	if method == 'ping' {
+		app.send_framed('{"jsonrpc":"2.0","id":${id},"result":{}}')
+		return
+	}
 	if method == 'initialize' {
 		resp := '{"jsonrpc":"2.0","id":${id},"result":{"protocolVersion":"2024-11-05","capabilities":{"tools":{}},"serverInfo":{"name":"vls","version":"${vls_version}"}}}'
 		app.send_framed(resp)
-		return
-	}
-	if method == 'notifications/initialized' {
 		return
 	}
 	if method == 'tools/list' {
@@ -260,6 +267,15 @@ fn handle_mcp_message(mut app App, body string) {
 	}
 	// Unknown method.
 	app.send_framed('{"jsonrpc":"2.0","id":${id},"error":{"code":-32601,"message":"method not found"}}')
+}
+
+// handle_mcp_notification answers fire-and-forget JSON-RPC notifications,
+// which must never receive a response. The synchronous MCP server has no
+// cancellable operations, so cancellation is a no-op.
+fn handle_mcp_notification(method string) {
+	if method == 'notifications/initialized' {
+		log('VLS MCP initialized.')
+	}
 }
 
 // mcp_json_field extracts a top-level scalar field value from a JSON object.
