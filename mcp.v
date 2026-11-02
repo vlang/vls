@@ -262,42 +262,80 @@ fn handle_mcp_message(mut app App, body string) {
 	app.send_framed('{"jsonrpc":"2.0","id":${id},"error":{"code":-32601,"message":"method not found"}}')
 }
 
-// mcp_json_field extracts a top-level string field value from a JSON object.
+// mcp_json_field extracts a top-level scalar field value from a JSON object.
+// Strings are unescaped; numbers and literals are returned verbatim.
 fn mcp_json_field(body string, field string) string {
 	key := '"${field}"'
 	idx := body.index(key) or { return '' }
-	rest := body[idx + key.len..]
+	return mcp_parse_value(body[idx + key.len..])
+}
+
+// mcp_parse_value parses one JSON value at the start of `s`, after an
+// optional colon and whitespace. Strings are unescaped, objects are returned
+// balanced and complete, and numbers and literals are returned verbatim.
+fn mcp_parse_value(s string) string {
 	mut i := 0
-	for i < rest.len && (rest[i] == `:` || rest[i] == ` ` || rest[i] == `\t` || rest[i] == `\n` || rest[i] == `\r`) {
+	for i < s.len && (s[i] == `:` || s[i] == ` ` || s[i] == `\t` || s[i] == `\n` || s[i] == `\r`) {
 		i++
 	}
-	if i >= rest.len {
+	if i >= s.len {
 		return ''
 	}
-	if rest[i] == `"` {
-		mut j := i + 1
-		mut out := ''
-		for j < rest.len {
-			if rest[j] == `"` {
-				break
-			}
-			if rest[j] == `\\` && j + 1 < rest.len {
-				out += rest[j..j + 2]
-				j += 2
-				continue
-			}
-			out += rest[j..j + 1]
-			j++
-		}
-		return out
+	if s[i] == `"` {
+		return mcp_parse_string(s[i..])
 	}
-	mut j := i
+	if s[i] == `{` {
+		return mcp_object_at(s[i..])
+	}
 	mut out := ''
-	for j < rest.len && rest[j] != `,` && rest[j] != `}` && rest[j] != `]` {
-		out += rest[j..j + 1]
+	mut j := i
+	for j < s.len && s[j] != `,` && s[j] != `}` && s[j] != `]` {
+		out += s[j..j + 1]
 		j++
 	}
 	return out.trim_space()
+}
+
+// mcp_object_at returns the balanced JSON object starting at s[0] == `{`,
+// skipping over braces inside strings. Returns '' when unbalanced.
+fn mcp_object_at(s string) string {
+	mut depth := 0
+	mut in_str := false
+	mut i := 0
+	for i < s.len {
+		c := s[i]
+		if in_str {
+			if c == `\\` {
+				i += 2
+				continue
+			}
+			if c == `"` {
+				in_str = false
+			}
+			i++
+			continue
+		}
+		if c == `"` {
+			in_str = true
+		} else if c == `{` {
+			depth++
+		} else if c == `}` {
+			depth--
+			if depth == 0 {
+				return s[..i + 1]
+			}
+		}
+		i++
+	}
+	return ''
+}
+
+// mcp_parse_string decodes one JSON string starting at s[0] == `"`,
+// reusing the request parser's decoder so escapes (including \uXXXX with
+// surrogate pairs) behave identically on both transports.
+fn mcp_parse_string(s string) string {
+	str, _ := read_json_string_token(s, 0)
+	return str
 }
 
 // mcp_json_raw_field returns the raw JSON value of a top-level field (including
@@ -342,14 +380,30 @@ fn mcp_json_raw_field(body string, field string) string {
 	return out.trim_space()
 }
 
-// mcp_json_nested extracts a string field nested under `parent` object.
-// Handles one level of nesting by finding the parent key then searching within.
+// mcp_json_nested extracts a field nested one level under `parent`.
+// Object values are returned balanced and complete, so an `arguments`
+// object with several keys survives intact; scalars are decoded.
 fn mcp_json_nested(body string, parent string, field string) string {
-	key := '"${parent}"'
-	idx := body.index(key) or { return '' }
-	rest := body[idx + key.len..]
-	// find the opening brace of the nested object
-	brace := rest.index('{') or { return '' }
-	nested := rest[brace..]
-	return mcp_json_field(nested, field)
+	pkey := '"${parent}"'
+	pidx := body.index(pkey) or { return '' }
+	pobj := mcp_object_at_value(body[pidx + pkey.len..])
+	if pobj == '' {
+		return ''
+	}
+	fkey := '"${field}"'
+	fidx := pobj.index(fkey) or { return '' }
+	return mcp_parse_value(pobj[fidx + fkey.len..])
+}
+
+// mcp_object_at_value skips a colon and whitespace, then returns the balanced
+// object that follows, or '' when there is none.
+fn mcp_object_at_value(s string) string {
+	mut i := 0
+	for i < s.len && (s[i] == `:` || s[i] == ` ` || s[i] == `\t` || s[i] == `\n` || s[i] == `\r`) {
+		i++
+	}
+	if i >= s.len || s[i] != `{` {
+		return ''
+	}
+	return mcp_object_at(s[i..])
 }
