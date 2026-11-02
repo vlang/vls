@@ -21,6 +21,9 @@ fn run_mcp_mode() {
 		eprintln('Failed to create temp directory: ${err}')
 		return
 	}
+	defer {
+		os.rmdir_all(app.temp_dir) or {}
+	}
 	mut reader := new_stdin_buffered_reader()
 	for {
 		body := read_mcp_frame(mut reader) or { break }
@@ -28,6 +31,9 @@ fn run_mcp_mode() {
 			continue
 		}
 		handle_mcp_message(mut app, body)
+		// Drop per-request buffers so a later query never sees stale
+		// source from an earlier one (issue: MCP-loaded buffers linger).
+		app.open_files.clear()
 	}
 	log('VLS MCP exiting.')
 }
@@ -92,7 +98,7 @@ fn read_mcp_frame[T](mut reader T) !string {
 // response, unless it is a notification, which must never receive one.
 fn handle_mcp_message(mut app App, body string) {
 	method := mcp_json_field(body, 'method')
-	id := mcp_json_raw_field(body, 'id')
+	id := mcp_top_level_raw_field(body, 'id')
 	if id == 'null' {
 		// JSON-RPC notification (no id): fire-and-forget, never answered.
 		handle_mcp_notification(method)
@@ -352,6 +358,56 @@ fn mcp_object_at(s string) string {
 fn mcp_parse_string(s string) string {
 	str, _ := read_json_string_token(s, 0)
 	return str
+}
+
+// mcp_top_level_raw_field returns the raw JSON value of a field that is a
+// direct child of the top-level object, so a nested `id` (e.g. inside
+// `capabilities.experimental`) can never shadow the request id.
+fn mcp_top_level_raw_field(body string, field string) string {
+	key := '"${field}"'
+	// Find the top-level object's opening brace.
+	start := body.index('{') or { return 'null' }
+	mut depth := 0
+	mut in_str := false
+	mut i := start
+	for i < body.len {
+		c := body[i]
+		if in_str {
+			if c == `\\` {
+				i += 2
+				continue
+			}
+			if c == `"` {
+				in_str = false
+			}
+			i++
+			continue
+		}
+		if c == `"` {
+			// Candidate key at depth 1?
+			if depth == 1 && body[i..].starts_with(key) {
+				// Ensure it is a real key: followed by optional ws then colon.
+				mut j := i + key.len
+				for j < body.len && (body[j] == ` ` || body[j] == `\t` || body[j] == `\n` || body[j] == `\r`) {
+					j++
+				}
+				if j < body.len && body[j] == `:` {
+					// Parse the value starting after the colon.
+					return mcp_parse_value(body[j..])
+				}
+			}
+			in_str = true
+		} else if c == `{` {
+			depth++
+		} else if c == `}` {
+			depth--
+			if depth == 0 {
+				break
+			}
+		}
+		i++
+	}
+	return 'null'
 }
 
 // mcp_json_raw_field returns the raw JSON value of a top-level field (including

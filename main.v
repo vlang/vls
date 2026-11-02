@@ -11,17 +11,18 @@ import io
 
 const vls_version = '0.0.3'
 
-// cli_app builds a minimal App for single-file CLI commands.
+// cli_app builds a minimal App for single-file CLI commands. It reuses the
+// OS temp directory directly so no per-invocation directory is left behind.
 fn cli_app(content string, temp_name string) &App {
+	_ = temp_name
 	mut app := &App{
 		text:                  content
 		open_files:            map[string]string{}
-		temp_dir:              os.join_path(os.temp_dir(), temp_name)
+		temp_dir:              os.temp_dir()
 		diagnostics_scheduler: new_diagnostics_scheduler()
 		index_refresh:         new_index_refresh_scheduler()
 		v3_line_info_enabled:  true
 	}
-	os.mkdir_all(app.temp_dir) or {}
 	return app
 }
 
@@ -360,6 +361,7 @@ fn main() {
 		path := os.args[2]
 		content := os.read_file(path) or {
 			eprintln('cannot read ${path}: ${err}')
+			exit(1)
 			return
 		}
 		mut app := cli_app(content, 'vls_check_${os.getpid()}')
@@ -375,6 +377,7 @@ fn main() {
 		col := os.args[4].int()
 		content := os.read_file(path) or {
 			eprintln('cannot read ${path}: ${err}')
+			exit(1)
 			return
 		}
 		mut app := cli_app(content, 'vls_hover_${os.getpid()}')
@@ -394,6 +397,7 @@ fn main() {
 		col := os.args[4].int()
 		content := os.read_file(path) or {
 			eprintln('cannot read ${path}: ${err}')
+			exit(1)
 			return
 		}
 		mut app := cli_app(content, 'vls_def_${os.getpid()}')
@@ -413,6 +417,7 @@ fn main() {
 		col := os.args[4].int()
 		content := os.read_file(path) or {
 			eprintln('cannot read ${path}: ${err}')
+			exit(1)
 			return
 		}
 		mut app := cli_app(content, 'vls_refs_${os.getpid()}')
@@ -427,6 +432,7 @@ fn main() {
 		path := os.args[2]
 		content := os.read_file(path) or {
 			eprintln('cannot read ${path}: ${err}')
+			exit(1)
 			return
 		}
 		mut app := cli_app(content, 'vls_symbols_${os.getpid()}')
@@ -446,6 +452,7 @@ fn main() {
 		col := os.args[4].int()
 		content := os.read_file(path) or {
 			eprintln('cannot read ${path}: ${err}')
+			exit(1)
 			return
 		}
 		mut app := cli_app(content, 'vls_completion_${os.getpid()}')
@@ -463,6 +470,7 @@ fn main() {
 		new_name := os.args[5]
 		content := os.read_file(path) or {
 			eprintln('cannot read ${path}: ${err}')
+			exit(1)
 			return
 		}
 		mut app := cli_app(content, 'vls_rename_${os.getpid()}')
