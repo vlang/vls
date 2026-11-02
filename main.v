@@ -358,7 +358,7 @@ fn main() {
 	}
 	// `vls check <file>` runs a single-file compile check and prints JSON diagnostics.
 	if os.args.len >= 3 && os.args[1] == 'check' {
-		path := os.args[2]
+		path := os.real_path(os.args[2])
 		content := os.read_file(path) or {
 			eprintln('cannot read ${path}: ${err}')
 			exit(1)
@@ -372,7 +372,7 @@ fn main() {
 		return
 	}
 	if os.args.len >= 5 && os.args[1] == 'hover' {
-		path := os.args[2]
+		path := os.real_path(os.args[2])
 		line := os.args[3].int()
 		col := os.args[4].int()
 		content := os.read_file(path) or {
@@ -392,7 +392,7 @@ fn main() {
 		return
 	}
 	if os.args.len >= 5 && os.args[1] == 'definition' {
-		path := os.args[2]
+		path := os.real_path(os.args[2])
 		line := os.args[3].int()
 		col := os.args[4].int()
 		content := os.read_file(path) or {
@@ -412,7 +412,7 @@ fn main() {
 		return
 	}
 	if os.args.len >= 5 && os.args[1] == 'references' {
-		path := os.args[2]
+		path := os.real_path(os.args[2])
 		line := os.args[3].int()
 		col := os.args[4].int()
 		content := os.read_file(path) or {
@@ -429,7 +429,7 @@ fn main() {
 		return
 	}
 	if os.args.len >= 3 && os.args[1] == 'symbols' {
-		path := os.args[2]
+		path := os.real_path(os.args[2])
 		content := os.read_file(path) or {
 			eprintln('cannot read ${path}: ${err}')
 			exit(1)
@@ -447,7 +447,7 @@ fn main() {
 		return
 	}
 	if os.args.len >= 5 && os.args[1] == 'completion' {
-		path := os.args[2]
+		path := os.real_path(os.args[2])
 		line := os.args[3].int()
 		col := os.args[4].int()
 		content := os.read_file(path) or {
@@ -464,7 +464,7 @@ fn main() {
 		return
 	}
 	if os.args.len >= 6 && os.args[1] == 'rename' {
-		path := os.args[2]
+		path := os.real_path(os.args[2])
 		line := os.args[3].int()
 		col := os.args[4].int()
 		new_name := os.args[5]
