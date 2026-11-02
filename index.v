@@ -135,17 +135,6 @@ fn (app &App) indexed_uris_in_dir(dir string) []string {
 	return out
 }
 
-// cached_normalized_index_path memoizes normalized_index_path results on the
-// App, avoiding repeated os.real_path syscalls for the same input path.
-fn (mut app App) cached_normalized_index_path(path string) string {
-	if cached := app.real_path_cache[path] {
-		return cached
-	}
-	result := normalized_index_path(path)
-	app.real_path_cache[path] = result
-	return result
-}
-
 // index_source_for returns the authoritative content for `uri`: the open buffer
 // when the document is open, otherwise the on-disk file. Returns none when the
 // file is neither open nor readable.
@@ -362,20 +351,20 @@ fn (mut app App) drop_index_uri(uri string) {
 // file, retaining `keep_uri` when it is the canonical disk key or another open
 // buffer still owns the file.
 fn (mut app App) drop_index_aliases_for_path(path string, keep_uri string) {
-	target_path := app.cached_normalized_index_path(path)
+	target_path := normalized_index_path(path)
 	// Compute each URI's normalized path once instead of three times.
 	mut normalized := map[string]string{}
 	for uri in app.symbol_index.keys() {
-		normalized[uri] = app.cached_normalized_index_path(uri_to_path(uri))
+		normalized[uri] = normalized_index_path(uri_to_path(uri))
 	}
 	for uri in app.ref_occurrences.keys() {
 		if uri !in normalized {
-			normalized[uri] = app.cached_normalized_index_path(uri_to_path(uri))
+			normalized[uri] = normalized_index_path(uri_to_path(uri))
 		}
 	}
 	for uri in app.index_skipped_uris.keys() {
 		if uri !in normalized {
-			normalized[uri] = app.cached_normalized_index_path(uri_to_path(uri))
+			normalized[uri] = normalized_index_path(uri_to_path(uri))
 		}
 	}
 	for uri, np in normalized {
