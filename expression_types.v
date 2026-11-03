@@ -811,7 +811,6 @@ fn (mut app App) type_static_completions(uri string, content string, type_name s
 // declared_static_functions lists the `fn Type.name()` functions declared for the
 // type of `decl`.
 fn (mut app App) declared_static_functions(decl TypeDeclaration) []Detail {
-	normalized_dir := normalized_index_path(decl.dir)
 	prefix := '${decl.name}.'
 	mut items := []Detail{}
 	for indexed_uri in app.indexed_uris_in_dir(decl.dir) {

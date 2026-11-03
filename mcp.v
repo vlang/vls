@@ -6,8 +6,8 @@ import json2
 import os
 
 // run_mcp_mode starts VLS as a minimal MCP server over stdio. It speaks
-// JSON-RPC 2.0 with Content-Length framing (the same framing as LSP) and
-// exposes a small set of tools backed by the VLS App.
+// JSON-RPC 2.0 with newline-delimited stdio messages and exposes a small set
+// of tools backed by the VLS App.
 fn run_mcp_mode() {
 	mut app := &App{
 		text:                  ''
@@ -39,6 +39,10 @@ fn run_mcp_mode() {
 	log('VLS MCP exiting.')
 }
 
+fn (mut app App) send_mcp_message(content string) {
+	app.write_data('${content}\n')
+}
+
 // handle_mcp_message dispatches a single JSON-RPC message and writes the
 // response, unless it is a notification, which must never receive one.
 fn handle_mcp_message(mut app App, body string) {
@@ -50,17 +54,17 @@ fn handle_mcp_message(mut app App, body string) {
 		return
 	}
 	if method == 'ping' {
-		app.send_framed('{"jsonrpc":"2.0","id":${id},"result":{}}')
+		app.send_mcp_message('{"jsonrpc":"2.0","id":${id},"result":{}}')
 		return
 	}
 	if method == 'initialize' {
 		resp := '{"jsonrpc":"2.0","id":${id},"result":{"protocolVersion":"2024-11-05","capabilities":{"tools":{}},"serverInfo":{"name":"vls","version":"${vls_version}"}}}'
-		app.send_framed(resp)
+		app.send_mcp_message(resp)
 		return
 	}
 	if method == 'tools/list' {
 		resp := '{"jsonrpc":"2.0","id":${id},"result":{"tools":[{"name":"vls_check","description":"Compile-check a V source file and return diagnostics.","inputSchema":{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}},{"name":"vls_hover","description":"Hover information at a position in a V source file.","inputSchema":{"type":"object","properties":{"path":{"type":"string"},"line":{"type":"integer"},"character":{"type":"integer"}},"required":["path","line","character"]}},{"name":"vls_definition","description":"Go to definition at a position in a V source file.","inputSchema":{"type":"object","properties":{"path":{"type":"string"},"line":{"type":"integer"},"character":{"type":"integer"}},"required":["path","line","character"]}},{"name":"vls_references","description":"Find references at a position in a V source file.","inputSchema":{"type":"object","properties":{"path":{"type":"string"},"line":{"type":"integer"},"character":{"type":"integer"}},"required":["path","line","character"]}},{"name":"vls_rename","description":"Rename a symbol at a position in a V source file.","inputSchema":{"type":"object","properties":{"path":{"type":"string"},"line":{"type":"integer"},"character":{"type":"integer"},"newName":{"type":"string"}},"required":["path","line","character","newName"]}},{"name":"vls_symbols","description":"List document symbols in a V source file.","inputSchema":{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}},{"name":"vls_completion","description":"Completion candidates at a position in a V source file.","inputSchema":{"type":"object","properties":{"path":{"type":"string"},"line":{"type":"integer"},"character":{"type":"integer"}},"required":["path","line","character"]}}]}}'
-		app.send_framed(resp)
+		app.send_mcp_message(resp)
 		return
 	}
 	if method == 'tools/call' {
@@ -69,12 +73,12 @@ fn handle_mcp_message(mut app App, body string) {
 		if tool_name == 'vls_check' {
 			raw_path := mcp_json_field(args, 'path')
 			if raw_path == '' {
-				app.send_framed('{"jsonrpc":"2.0","id":${id},"error":{"code":-32602,"message":"missing path"}}')
+				app.send_mcp_message('{"jsonrpc":"2.0","id":${id},"error":{"code":-32602,"message":"missing path"}}')
 				return
 			}
 			p := os.real_path(raw_path)
 			content := os.read_file(p) or {
-				app.send_framed('{"jsonrpc":"2.0","id":${id},"error":{"code":-32603,"message":"cannot read file"}}')
+				app.send_mcp_message('{"jsonrpc":"2.0","id":${id},"error":{"code":-32603,"message":"cannot read file"}}')
 				return
 			}
 			uri := path_to_uri(p)
@@ -82,18 +86,18 @@ fn handle_mcp_message(mut app App, body string) {
 			notification := app.build_diagnostics_notification(uri, content)
 			result := json2.encode(notification)
 			resp := '{"jsonrpc":"2.0","id":${id},"result":{"content":[{"type":"text","text":${json2.encode(result)}}],"isError":false}}'
-			app.send_framed(resp)
+			app.send_mcp_message(resp)
 			return
 		}
 		if tool_name == 'vls_hover' {
 			raw_path := mcp_json_field(args, 'path')
 			if raw_path == '' {
-				app.send_framed('{"jsonrpc":"2.0","id":${id},"error":{"code":-32602,"message":"missing path"}}')
+				app.send_mcp_message('{"jsonrpc":"2.0","id":${id},"error":{"code":-32602,"message":"missing path"}}')
 				return
 			}
 			p := os.real_path(raw_path)
 			content := os.read_file(p) or {
-				app.send_framed('{"jsonrpc":"2.0","id":${id},"error":{"code":-32603,"message":"cannot read file"}}')
+				app.send_mcp_message('{"jsonrpc":"2.0","id":${id},"error":{"code":-32603,"message":"cannot read file"}}')
 				return
 			}
 			line := mcp_json_field(args, 'line').int()
@@ -103,18 +107,18 @@ fn handle_mcp_message(mut app App, body string) {
 			hover := app.hover_at(uri, Position{ line: line, char: col })
 			result := if h := hover { json2.encode(h) } else { '{"contents":null}' }
 			resp := '{"jsonrpc":"2.0","id":${id},"result":{"content":[{"type":"text","text":${json2.encode(result)}}],"isError":false}}'
-			app.send_framed(resp)
+			app.send_mcp_message(resp)
 			return
 		}
 		if tool_name == 'vls_definition' {
 			raw_path := mcp_json_field(args, 'path')
 			if raw_path == '' {
-				app.send_framed('{"jsonrpc":"2.0","id":${id},"error":{"code":-32602,"message":"missing path"}}')
+				app.send_mcp_message('{"jsonrpc":"2.0","id":${id},"error":{"code":-32602,"message":"missing path"}}')
 				return
 			}
 			p := os.real_path(raw_path)
 			content := os.read_file(p) or {
-				app.send_framed('{"jsonrpc":"2.0","id":${id},"error":{"code":-32603,"message":"cannot read file"}}')
+				app.send_mcp_message('{"jsonrpc":"2.0","id":${id},"error":{"code":-32603,"message":"cannot read file"}}')
 				return
 			}
 			line := mcp_json_field(args, 'line').int()
@@ -125,18 +129,18 @@ fn handle_mcp_message(mut app App, body string) {
 			resp := app.operation_at_pos(.definition, Request{ id: 1, method: 'textDocument/definition', params: params })
 			result := json2.encode(resp.result)
 			out := '{"jsonrpc":"2.0","id":${id},"result":{"content":[{"type":"text","text":${json2.encode(result)}}],"isError":false}}'
-			app.send_framed(out)
+			app.send_mcp_message(out)
 			return
 		}
 		if tool_name == 'vls_references' {
 			raw_path := mcp_json_field(args, 'path')
 			if raw_path == '' {
-				app.send_framed('{"jsonrpc":"2.0","id":${id},"error":{"code":-32602,"message":"missing path"}}')
+				app.send_mcp_message('{"jsonrpc":"2.0","id":${id},"error":{"code":-32602,"message":"missing path"}}')
 				return
 			}
 			p := os.real_path(raw_path)
 			content := os.read_file(p) or {
-				app.send_framed('{"jsonrpc":"2.0","id":${id},"error":{"code":-32603,"message":"cannot read file"}}')
+				app.send_mcp_message('{"jsonrpc":"2.0","id":${id},"error":{"code":-32603,"message":"cannot read file"}}')
 				return
 			}
 			line := mcp_json_field(args, 'line').int()
@@ -147,48 +151,48 @@ fn handle_mcp_message(mut app App, body string) {
 			resp := app.find_references(Request{ id: 1, method: 'textDocument/references', params: params })
 			result := json2.encode(resp.result)
 			out := '{"jsonrpc":"2.0","id":${id},"result":{"content":[{"type":"text","text":${json2.encode(result)}}],"isError":false}}'
-			app.send_framed(out)
+			app.send_mcp_message(out)
 			return
 		}
 		if tool_name == 'vls_rename' {
 			raw_path := mcp_json_field(args, 'path')
 			if raw_path == '' {
-				app.send_framed('{"jsonrpc":"2.0","id":${id},"error":{"code":-32602,"message":"missing path"}}')
+				app.send_mcp_message('{"jsonrpc":"2.0","id":${id},"error":{"code":-32602,"message":"missing path"}}')
 				return
 			}
 			p := os.real_path(raw_path)
 			content := os.read_file(p) or {
-				app.send_framed('{"jsonrpc":"2.0","id":${id},"error":{"code":-32603,"message":"cannot read file"}}')
+				app.send_mcp_message('{"jsonrpc":"2.0","id":${id},"error":{"code":-32603,"message":"cannot read file"}}')
 				return
 			}
 			line := mcp_json_field(args, 'line').int()
 			col := mcp_json_field(args, 'character').int()
 			new_name := mcp_json_field(args, 'newName')
 			if new_name == '' {
-				app.send_framed('{"jsonrpc":"2.0","id":${id},"error":{"code":-32602,"message":"missing newName"}}')
+				app.send_mcp_message('{"jsonrpc":"2.0","id":${id},"error":{"code":-32602,"message":"missing newName"}}')
 				return
 			}
 			uri := path_to_uri(p)
 			app.open_files[uri] = content
 			params := '{"textDocument":{"uri":"${uri}"},"position":{"line":${line},"character":${col}},"newName":"${new_name}"}'
 			resp := app.rename_request(Request{ id: 1, method: 'textDocument/rename', params: params }) or {
-				app.send_framed('{"jsonrpc":"2.0","id":${id},"error":{"code":-32603,"message":"${err.msg()}"}}')
+				app.send_mcp_message('{"jsonrpc":"2.0","id":${id},"error":{"code":-32603,"message":"${err.msg()}"}}')
 				return
 			}
 			result := json2.encode(resp.result)
 			out := '{"jsonrpc":"2.0","id":${id},"result":{"content":[{"type":"text","text":${json2.encode(result)}}],"isError":false}}'
-			app.send_framed(out)
+			app.send_mcp_message(out)
 			return
 		}
 		if tool_name == 'vls_symbols' {
 			raw_path := mcp_json_field(args, 'path')
 			if raw_path == '' {
-				app.send_framed('{"jsonrpc":"2.0","id":${id},"error":{"code":-32602,"message":"missing path"}}')
+				app.send_mcp_message('{"jsonrpc":"2.0","id":${id},"error":{"code":-32602,"message":"missing path"}}')
 				return
 			}
 			p := os.real_path(raw_path)
 			content := os.read_file(p) or {
-				app.send_framed('{"jsonrpc":"2.0","id":${id},"error":{"code":-32603,"message":"cannot read file"}}')
+				app.send_mcp_message('{"jsonrpc":"2.0","id":${id},"error":{"code":-32603,"message":"cannot read file"}}')
 				return
 			}
 			uri := path_to_uri(p)
@@ -197,18 +201,18 @@ fn handle_mcp_message(mut app App, body string) {
 			resp := app.handle_document_symbols(Request{ id: 1, method: 'textDocument/documentSymbol', params: params })
 			result := json2.encode(resp.result)
 			out := '{"jsonrpc":"2.0","id":${id},"result":{"content":[{"type":"text","text":${json2.encode(result)}}],"isError":false}}'
-			app.send_framed(out)
+			app.send_mcp_message(out)
 			return
 		}
 		if tool_name == 'vls_completion' {
 			raw_path := mcp_json_field(args, 'path')
 			if raw_path == '' {
-				app.send_framed('{"jsonrpc":"2.0","id":${id},"error":{"code":-32602,"message":"missing path"}}')
+				app.send_mcp_message('{"jsonrpc":"2.0","id":${id},"error":{"code":-32602,"message":"missing path"}}')
 				return
 			}
 			p := os.real_path(raw_path)
 			content := os.read_file(p) or {
-				app.send_framed('{"jsonrpc":"2.0","id":${id},"error":{"code":-32603,"message":"cannot read file"}}')
+				app.send_mcp_message('{"jsonrpc":"2.0","id":${id},"error":{"code":-32603,"message":"cannot read file"}}')
 				return
 			}
 			line := mcp_json_field(args, 'line').int()
@@ -218,10 +222,10 @@ fn handle_mcp_message(mut app App, body string) {
 			result := app.indexed_completions(uri, Position{ line: line, char: col })
 			result_json := json2.encode(result)
 			out := '{"jsonrpc":"2.0","id":${id},"result":{"content":[{"type":"text","text":${json2.encode(result_json)}}],"isError":false}}'
-			app.send_framed(out)
+			app.send_mcp_message(out)
 			return
 		}
-		app.send_framed('{"jsonrpc":"2.0","id":${id},"error":{"code":-32601,"message":"unknown tool"}}')
+		app.send_mcp_message('{"jsonrpc":"2.0","id":${id},"error":{"code":-32601,"message":"unknown tool"}}')
 		return
 	}
 	// Unknown method. Notifications (no id) must never receive a response.
@@ -229,7 +233,7 @@ fn handle_mcp_message(mut app App, body string) {
 		handle_mcp_notification(method)
 		return
 	}
-	app.send_framed('{"jsonrpc":"2.0","id":${id},"error":{"code":-32601,"message":"method not found"}}')
+	app.send_mcp_message('{"jsonrpc":"2.0","id":${id},"error":{"code":-32601,"message":"method not found"}}')
 }
 
 // handle_mcp_notification answers fire-and-forget JSON-RPC notifications,
@@ -353,7 +357,7 @@ fn mcp_top_level_raw_field(body string, field string) string {
 				}
 				if j < body.len && body[j] == `:` {
 					// Parse the value starting after the colon.
-					return mcp_parse_value(body[j..])
+					return mcp_raw_json_value(body[j..])
 				}
 			}
 			in_str = true
@@ -370,46 +374,31 @@ fn mcp_top_level_raw_field(body string, field string) string {
 	return 'null'
 }
 
-// mcp_json_raw_field returns the raw JSON value of a top-level field (including
-// quotes for strings), so string IDs are preserved verbatim in responses.
-fn mcp_json_raw_field(body string, field string) string {
-	key := '"${field}"'
-	idx := body.index(key) or { return 'null' }
-	rest := body[idx + key.len..]
+// mcp_raw_json_value preserves a scalar JSON value, including quotes and
+// escapes in strings, for echoing request IDs in JSON-RPC responses.
+fn mcp_raw_json_value(value string) string {
 	mut i := 0
-	for i < rest.len && (rest[i] == `:` || rest[i] == ` ` || rest[i] == `\t` || rest[i] == `\n` || rest[i] == `\r`) {
+	for i < value.len && (value[i] == `:` || value[i] == ` ` || value[i] == `\t` || value[i] == `\n` || value[i] == `\r`) {
 		i++
 	}
-	if i >= rest.len {
+	if i >= value.len {
 		return 'null'
 	}
-	if rest[i] == `"` {
-		// string: read until closing quote, handling escapes
+	if value[i] == `"` {
 		mut j := i + 1
-		mut out := '"'
-		for j < rest.len {
-			out += rest[j..j + 1]
-			if rest[j] == `\\` && j + 1 < rest.len {
-				out += rest[j + 1..j + 2]
+		for j < value.len {
+			if value[j] == `\\` {
 				j += 2
 				continue
 			}
-			if rest[j] == `"` {
-				j++
-				break
+			if value[j] == `"` {
+				return value[i..j + 1]
 			}
 			j++
 		}
-		return out
+		return 'null'
 	}
-	// non-string: read until comma/brace
-	mut j := i
-	mut out := ''
-	for j < rest.len && rest[j] != `,` && rest[j] != `}` && rest[j] != `]` {
-		out += rest[j..j + 1]
-		j++
-	}
-	return out.trim_space()
+	return mcp_parse_value(value[i..])
 }
 
 // mcp_json_nested extracts a field nested one level under `parent`.

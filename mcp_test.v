@@ -37,11 +37,17 @@ fn test_mcp_json_field_decodes_unicode_escapes() {
 	assert mcp_json_field('{"name":"\\ud83d\\ude00"}', 'name') == rune(0x1F600).str()
 }
 
-// String request IDs must round-trip verbatim (with quotes) for responses.
-fn test_mcp_json_raw_field_preserves_string_id() {
-	body := '{"jsonrpc":"2.0","id":"request-1","method":"initialize"}'
-	assert mcp_json_raw_field(body, 'id') == '"request-1"'
-	assert mcp_json_raw_field(body, 'missing') == 'null'
+// The production ID extractor must preserve strings and ignore nested IDs.
+fn test_mcp_top_level_raw_field_preserves_string_id() {
+	body := '{"jsonrpc":"2.0","id":"request-1","method":"initialize","params":{"id":7}}'
+	assert mcp_top_level_raw_field(body, 'id') == '"request-1"'
+	assert mcp_top_level_raw_field(body, 'missing') == 'null'
+}
+
+fn test_mcp_send_message_uses_newline_framing() {
+	mut app := &App{ capture_output: true }
+	app.send_mcp_message('{"jsonrpc":"2.0","id":1,"result":{}}')
+	assert app.captured_output == ['{"jsonrpc":"2.0","id":1,"result":{}}\n']
 }
 
 // Balanced-object parsing must skip braces inside strings.
@@ -54,9 +60,13 @@ fn test_mcp_object_at_skips_braces_in_strings() {
 fn test_mcp_ping_returns_empty_result() {
 	mut app := &App{ capture_output: true }
 	handle_mcp_message(mut app, '{"jsonrpc":"2.0","id":5,"method":"ping"}')
-	assert app.captured_output.len == 1
-	assert app.captured_output[0].contains('"id":5')
-	assert app.captured_output[0].contains('"result":{}')
+	assert app.captured_output == ['{"jsonrpc":"2.0","id":5,"result":{}}\n']
+}
+
+fn test_mcp_ping_preserves_string_request_id() {
+	mut app := &App{ capture_output: true }
+	handle_mcp_message(mut app, '{"jsonrpc":"2.0","id":"request-1","method":"ping"}')
+	assert app.captured_output == ['{"jsonrpc":"2.0","id":"request-1","result":{}}\n']
 }
 
 // P2: notifications (no id) must never receive a response.
