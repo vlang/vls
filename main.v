@@ -22,8 +22,26 @@ fn cli_app(content string, temp_name string) &App {
 		diagnostics_scheduler: new_diagnostics_scheduler()
 		index_refresh:         new_index_refresh_scheduler()
 		v3_line_info_enabled:  true
+		suppress_lsp_output:   true
 	}
 	return app
+}
+
+fn json_response_result(result ResponseResult) string {
+	content := strip_response_sum_type_tags(json2.encode(result, escape_unicode: true))
+	if result is string && (result as string) == 'null' {
+		return 'null'
+	}
+	return content
+}
+
+fn (mut app App) stop_standalone_session() {
+	app.cancel_all_scheduled_diagnostics()
+	app.stop_run_commands()
+	app.wait_answer_followups()
+	app.stop_diagnostics_servers()
+	app.stop_v3_queries()
+	app.stop_index_refresh()
 }
 
 fn (mut app App) completion_result_at(uri string, position Position) CompletionList {
@@ -68,11 +86,12 @@ mut:
 	removed_workspace_roots                     []string          // Roots explicitly removed by the client
 	capture_output                              bool              // Test hook: capture outbound transport messages instead of writing
 	captured_output                             []string          // Test hook buffer for outbound transport messages
-	supports_dynamic_watched_files_registration bool              // Client supports dynamic workspace watcher registration
-	supports_work_done_progress                 bool              // Client supports window/workDoneProgress + $/progress
-	sent_watched_files_registration             bool              // client/registerCapability watcher registration was sent
-	watched_files_registration_id               string            // Raw id of the watcher registration request, to match its response
-	watched_files_active                        bool              // True once the client acknowledged watcher registration (not rejected)
+	suppress_lsp_output                         bool
+	supports_dynamic_watched_files_registration bool   // Client supports dynamic workspace watcher registration
+	supports_work_done_progress                 bool   // Client supports window/workDoneProgress + $/progress
+	sent_watched_files_registration             bool   // client/registerCapability watcher registration was sent
+	watched_files_registration_id               string // Raw id of the watcher registration request, to match its response
+	watched_files_active                        bool   // True once the client acknowledged watcher registration (not rejected)
 	inlay_hints_enabled                         bool = true // toggled via workspace/didChangeConfiguration
 	diagnostics_enabled                         bool = true // toggled via workspace/didChangeConfiguration
 	diag_cache                                  map[string]DiagCacheEntry // Per-URI cached diagnostics
@@ -361,8 +380,7 @@ fn main() {
 		run_tcp_server(host, port, allow_remote)
 		return
 	}
-	// MCP mode is planned (see the v-vls skill) but not yet implemented:
-	// VLS speaks LSP over stdio today. Print a hint instead of starting LSP.
+	// MCP mode uses newline-delimited JSON-RPC over stdio.
 	if os.args.contains('--mcp') {
 		run_mcp_mode()
 		return
@@ -380,6 +398,9 @@ fn main() {
 			return
 		}
 		mut app := cli_app(content, 'vls_check_${os.getpid()}')
+		defer {
+			app.stop_standalone_session()
+		}
 		uri := path_to_uri(path)
 		app.open_files[uri] = content
 		notification := app.build_diagnostics_notification(uri, content)
@@ -396,6 +417,9 @@ fn main() {
 			return
 		}
 		mut app := cli_app(content, 'vls_hover_${os.getpid()}')
+		defer {
+			app.stop_standalone_session()
+		}
 		uri := path_to_uri(path)
 		app.open_files[uri] = content
 		hover := app.hover_at(uri, Position{ line: line, char: col })
@@ -416,6 +440,9 @@ fn main() {
 			return
 		}
 		mut app := cli_app(content, 'vls_def_${os.getpid()}')
+		defer {
+			app.stop_standalone_session()
+		}
 		uri := path_to_uri(path)
 		app.open_files[uri] = content
 		app.reindex_uri(uri)
@@ -436,6 +463,9 @@ fn main() {
 			return
 		}
 		mut app := cli_app(content, 'vls_refs_${os.getpid()}')
+		defer {
+			app.stop_standalone_session()
+		}
 		uri := path_to_uri(path)
 		app.open_files[uri] = content
 		params := json2.encode(ReferenceParams{
@@ -453,7 +483,7 @@ fn main() {
 			method: 'textDocument/references'
 			params: params
 		})
-		println(resp.result)
+		println(json_response_result(resp.result))
 		return
 	}
 	if os.args.len >= 3 && os.args[1] == 'symbols' {
@@ -464,6 +494,9 @@ fn main() {
 			return
 		}
 		mut app := cli_app(content, 'vls_symbols_${os.getpid()}')
+		defer {
+			app.stop_standalone_session()
+		}
 		uri := path_to_uri(path)
 		app.open_files[uri] = content
 		app.reindex_uri(uri)
@@ -484,6 +517,9 @@ fn main() {
 			return
 		}
 		mut app := cli_app(content, 'vls_completion_${os.getpid()}')
+		defer {
+			app.stop_standalone_session()
+		}
 		uri := path_to_uri(path)
 		app.open_files[uri] = content
 		app.reindex_uri(uri)
@@ -505,6 +541,9 @@ fn main() {
 			return
 		}
 		mut app := cli_app(content, 'vls_rename_${os.getpid()}')
+		defer {
+			app.stop_standalone_session()
+		}
 		uri := path_to_uri(path)
 		app.open_files[uri] = content
 		params := json2.encode(RenameParams{
@@ -522,11 +561,12 @@ fn main() {
 			method: 'textDocument/rename'
 			params: params
 		}) or {
+			app.stop_standalone_session()
 			eprintln('rename failed: ${err.msg()}')
 			exit(1)
 			return
 		}
-		println(resp.result)
+		println(json_response_result(resp.result))
 		return
 	}
 
@@ -639,6 +679,9 @@ fn (mut app App) write_data(data string) {
 	app.write_mutex.lock()
 	defer {
 		app.write_mutex.unlock()
+	}
+	if app.suppress_lsp_output {
+		return
 	}
 	if app.capture_output {
 		app.captured_output << data

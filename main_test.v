@@ -4,6 +4,22 @@ module main
 
 import os
 import time
+import json2
+
+fn test_json_response_result_encodes_reference_and_rename_results() {
+	references := json_response_result(ResponseResult([
+		Location{
+			uri: 'file:///tmp/main.v'
+		},
+	]))
+	reference_value := json2.decode[[]Location](references) or { panic(err) }
+	assert reference_value.len == 1
+	assert !references.contains('"_type"')
+
+	rename := json_response_result(ResponseResult(WorkspaceEdit{}))
+	_ := json2.decode[WorkspaceEdit](rename) or { panic(err) }
+	assert json_response_result(ResponseResult('null')) == 'null'
+}
 
 fn test_version_request_only_matches_standalone_arguments() {
 	assert is_version_request(['vls', '--version'])
@@ -29,6 +45,13 @@ fn main_test_write(path string, content string) {
 	os.write_file(path, content) or {
 		assert false, 'Failed to write ${path}: ${err}'
 	}
+}
+
+fn test_cli_app_suppresses_lsp_output() {
+	mut app := cli_app('', 'test')
+	app.capture_output = true
+	app.send_log_message('internal diagnostic', 4)
+	assert app.captured_output.len == 0
 }
 
 // The plain case: the executable sits directly beside vlib.

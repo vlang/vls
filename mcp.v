@@ -133,12 +133,14 @@ fn run_mcp_mode() {
 		diagnostics_scheduler: new_diagnostics_scheduler()
 		index_refresh:         new_index_refresh_scheduler()
 		v3_line_info_enabled:  true
+		suppress_lsp_output:   true
 	}
 	os.mkdir_all(app.temp_dir) or {
 		eprintln('Failed to create temp directory: ${err}')
 		return
 	}
 	defer {
+		app.stop_standalone_session()
 		os.rmdir_all(app.temp_dir) or {}
 	}
 	mut reader := new_stdin_buffered_reader()
@@ -157,7 +159,20 @@ fn run_mcp_mode() {
 }
 
 fn (mut app App) send_mcp_message(content string) {
-	app.write_data('${content}\n')
+	app.write_mcp_data('${content}\n')
+}
+
+fn (mut app App) write_mcp_data(data string) {
+	app.write_mutex.lock()
+	defer {
+		app.write_mutex.unlock()
+	}
+	if app.capture_output {
+		app.captured_output << data
+		return
+	}
+	print(data)
+	flush_stdout()
 }
 
 fn (mut app App) send_mcp_success(id json2.Any, result_json string) {
@@ -178,15 +193,19 @@ fn (mut app App) send_mcp_error(id json2.Any, code int, message string) {
 	}))
 }
 
-fn (mut app App) send_mcp_tool_result(id json2.Any, text string) {
+fn (mut app App) send_mcp_tool_result(id json2.Any, text string, is_error bool) {
 	result := McpToolCallResult{
 		content:  [McpTextContent{
 			content_type: 'text'
 			text:         text
 		}]
-		is_error: false
+		is_error: is_error
 	}
 	app.send_mcp_success(id, json2.encode(result))
+}
+
+fn (mut app App) send_mcp_tool_error(id json2.Any, message string) {
+	app.send_mcp_tool_result(id, message, true)
 }
 
 // handle_mcp_message dispatches a single JSON-RPC message and writes the
@@ -201,10 +220,33 @@ fn mcp_request_object(body string) !map[string]json2.Any {
 
 fn handle_mcp_message(mut app App, body string) {
 	request := mcp_request_object(body) or {
-		app.send_mcp_error(json2.null, -32700, 'parse error')
+		if err.msg() == 'JSON-RPC message must be an object' {
+			app.send_mcp_error(json2.null, -32600, 'invalid request')
+		} else {
+			app.send_mcp_error(json2.null, -32700, 'parse error')
+		}
 		return
 	}
-	method := (request['method'] or { json2.null }).str()
+	if mcp_string_field(request, 'jsonrpc') != '2.0' {
+		app.send_mcp_error(json2.null, -32600, 'invalid request')
+		return
+	}
+	method_value := request['method'] or {
+		app.send_mcp_error(json2.null, -32600, 'invalid request')
+		return
+	}
+	if method_value !is string {
+		app.send_mcp_error(json2.null, -32600, 'invalid request')
+		return
+	}
+	if 'id' in request {
+		id_value := request['id'] or { json2.null }
+		if id_value is []json2.Any || id_value is map[string]json2.Any || id_value is bool {
+			app.send_mcp_error(json2.null, -32600, 'invalid request')
+			return
+		}
+	}
+	method := method_value as string
 	if 'id' !in request {
 		// JSON-RPC notification (no id): fire-and-forget, never answered.
 		handle_mcp_notification(method)
@@ -242,12 +284,15 @@ fn handle_mcp_message(mut app App, body string) {
 		if tool_name == 'vls_check' {
 			document := mcp_load_document(mut app, id, args) or { return }
 			notification := app.build_diagnostics_notification(document.uri, document.content)
-			app.send_mcp_tool_result(id, json2.encode(notification))
+			app.send_mcp_tool_result(id, json2.encode(notification), false)
 			return
 		}
 		if tool_name == 'vls_hover' {
 			document := mcp_load_document(mut app, id, args) or { return }
-			position := mcp_position(args)
+			position := mcp_position(args) or {
+				app.send_mcp_tool_error(id, 'line and character must be non-negative integers')
+				return
+			}
 			hover := app.hover_at(document.uri, position)
 			result := if h := hover {
 				json2.encode(h)
@@ -256,12 +301,15 @@ fn handle_mcp_message(mut app App, body string) {
 					'contents': json2.null
 				})
 			}
-			app.send_mcp_tool_result(id, result)
+			app.send_mcp_tool_result(id, result, false)
 			return
 		}
 		if tool_name == 'vls_definition' {
 			document := mcp_load_document(mut app, id, args) or { return }
-			position := mcp_position(args)
+			position := mcp_position(args) or {
+				app.send_mcp_tool_error(id, 'line and character must be non-negative integers')
+				return
+			}
 			params_json := json2.encode(TextDocumentPositionParams{
 				text_document: TextDocumentIdentifier{
 					uri: document.uri
@@ -273,12 +321,15 @@ fn handle_mcp_message(mut app App, body string) {
 				method: 'textDocument/definition'
 				params: params_json
 			})
-			app.send_mcp_tool_result(id, json2.encode(response.result))
+			app.send_mcp_tool_result(id, json_response_result(response.result), false)
 			return
 		}
 		if tool_name == 'vls_references' {
 			document := mcp_load_document(mut app, id, args) or { return }
-			position := mcp_position(args)
+			position := mcp_position(args) or {
+				app.send_mcp_tool_error(id, 'line and character must be non-negative integers')
+				return
+			}
 			params_json := json2.encode(ReferenceParams{
 				text_document: TextDocumentIdentifier{
 					uri: document.uri
@@ -291,15 +342,18 @@ fn handle_mcp_message(mut app App, body string) {
 				method: 'textDocument/references'
 				params: params_json
 			})
-			app.send_mcp_tool_result(id, json2.encode(response.result))
+			app.send_mcp_tool_result(id, json_response_result(response.result), false)
 			return
 		}
 		if tool_name == 'vls_rename' {
 			document := mcp_load_document(mut app, id, args) or { return }
-			position := mcp_position(args)
+			position := mcp_position(args) or {
+				app.send_mcp_tool_error(id, 'line and character must be non-negative integers')
+				return
+			}
 			new_name := mcp_string_field(args, 'newName')
 			if new_name == '' {
-				app.send_mcp_error(id, -32602, 'missing newName')
+				app.send_mcp_tool_error(id, 'missing newName')
 				return
 			}
 			params_json := json2.encode(RenameParams{
@@ -314,10 +368,10 @@ fn handle_mcp_message(mut app App, body string) {
 				method: 'textDocument/rename'
 				params: params_json
 			}) or {
-				app.send_mcp_error(id, -32603, err.msg())
+				app.send_mcp_tool_error(id, err.msg())
 				return
 			}
-			app.send_mcp_tool_result(id, json2.encode(response.result))
+			app.send_mcp_tool_result(id, json_response_result(response.result), false)
 			return
 		}
 		if tool_name == 'vls_symbols' {
@@ -332,17 +386,20 @@ fn handle_mcp_message(mut app App, body string) {
 				method: 'textDocument/documentSymbol'
 				params: params_json
 			})
-			app.send_mcp_tool_result(id, json2.encode(response.result))
+			app.send_mcp_tool_result(id, json_response_result(response.result), false)
 			return
 		}
 		if tool_name == 'vls_completion' {
 			document := mcp_load_document(mut app, id, args) or { return }
-			position := mcp_position(args)
+			position := mcp_position(args) or {
+				app.send_mcp_tool_error(id, 'line and character must be non-negative integers')
+				return
+			}
 			result := app.completion_result_at(document.uri, position)
-			app.send_mcp_tool_result(id, json2.encode(result))
+			app.send_mcp_tool_result(id, json2.encode(result), false)
 			return
 		}
-		app.send_mcp_error(id, -32601, 'unknown tool')
+		app.send_mcp_tool_error(id, 'unknown tool')
 		return
 	}
 	app.send_mcp_error(id, -32601, 'method not found')
@@ -381,30 +438,105 @@ fn mcp_string_field(object map[string]json2.Any, field string) string {
 	return ''
 }
 
-fn mcp_int_field(object map[string]json2.Any, field string) int {
-	value := object[field] or { return 0 }
-	return value.int()
+fn mcp_int_field(object map[string]json2.Any, field string) ?int {
+	value := object[field] or { return none }
+	if value is f64 {
+		if value < 0 || value >= f64(max_int) {
+			return none
+		}
+		converted := int(value)
+		return if f64(converted) == value { ?int(converted) } else { none }
+	}
+	if value is f32 {
+		if value < 0 || value >= f32(max_int) {
+			return none
+		}
+		converted := int(value)
+		return if f32(converted) == value { ?int(converted) } else { none }
+	}
+	if value is i64 {
+		if value < i64(min_int) || value > i64(max_int) {
+			return none
+		}
+		converted := int(value)
+		return if i64(converted) == value { ?int(converted) } else { none }
+	}
+	if value is int {
+		return value
+	}
+	if value is i32 {
+		return int(value)
+	}
+	if value is i16 {
+		return int(value)
+	}
+	if value is i8 {
+		return int(value)
+	}
+	if value is u64 {
+		if value > u64(max_int) {
+			return none
+		}
+		converted := int(value)
+		return if converted >= 0 && u64(converted) == value { ?int(converted) } else { none }
+	}
+	if value is u32 {
+		if value > u32(max_int) {
+			return none
+		}
+		converted := int(value)
+		return if converted >= 0 && u32(converted) == value { ?int(converted) } else { none }
+	}
+	if value is u16 {
+		return int(value)
+	}
+	if value is u8 {
+		return int(value)
+	}
+	return none
 }
 
-fn mcp_position(arguments map[string]json2.Any) Position {
+fn mcp_position(arguments map[string]json2.Any) ?Position {
+	line := mcp_int_field(arguments, 'line') or { return none }
+	character := mcp_int_field(arguments, 'character') or { return none }
+	if line < 0 || character < 0 {
+		return none
+	}
 	return Position{
-		line: mcp_int_field(arguments, 'line')
-		char: mcp_int_field(arguments, 'character')
+		line: line
+		char: character
 	}
 }
 
 fn mcp_load_document(mut app App, id json2.Any, arguments map[string]json2.Any) ?McpDocument {
 	raw_path := mcp_string_field(arguments, 'path')
 	if raw_path == '' {
-		app.send_mcp_error(id, -32602, 'missing path')
+		app.send_mcp_tool_error(id, 'missing path')
 		return none
 	}
 	path := os.real_path(raw_path)
+	file_info := os.stat(path) or {
+		app.send_mcp_tool_error(id, 'cannot read file')
+		return none
+	}
+	if file_info.get_mode().typ != .regular {
+		app.send_mcp_tool_error(id, 'path is not a regular file')
+		return none
+	}
+	if file_info.size > index_max_file_bytes {
+		app.send_mcp_tool_error(id, 'source file is too large')
+		return none
+	}
 	content := os.read_file(path) or {
-		app.send_mcp_error(id, -32603, 'cannot read file')
+		app.send_mcp_tool_error(id, 'cannot read file')
+		return none
+	}
+	if u64(content.len) > index_max_file_bytes {
+		app.send_mcp_tool_error(id, 'source file is too large')
 		return none
 	}
 	uri := path_to_uri(path)
+	app.bump_generation(uri)
 	app.open_files[uri] = content
 	return McpDocument{
 		uri:     uri
