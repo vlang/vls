@@ -10,6 +10,7 @@ struct ScoredItem {
 	score int
 }
 
+/*
 fn fuzzy_match(pattern string, text string) ?FuzzyMatch {
 	if pattern == '' {
 		return FuzzyMatch{ score: 0, matched: []int{} }
@@ -47,6 +48,7 @@ fn fuzzy_match(pattern string, text string) ?FuzzyMatch {
 	score -= text.len / 4
 	return FuzzyMatch{ score: score, matched: matched }
 }
+*/
 
 // fuzzy_score returns the match score for `pattern` against `text` without
 // allocating the matched-index slice that fuzzy_match keeps for highlighting.
@@ -90,12 +92,14 @@ fn fuzzy_score_lowered(pattern_lower string, text string) ?int {
 	return score
 }
 
+/*
 fn fuzzy_score(pattern string, text string) ?int {
 	if pattern == '' {
 		return 0
 	}
 	return fuzzy_score_lowered(pattern.to_lower(), text)
 }
+*/
 
 fn fuzzy_filter(pattern string, items []string) []string {
 	if pattern == '' {

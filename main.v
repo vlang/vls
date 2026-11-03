@@ -26,6 +26,35 @@ fn cli_app(content string, temp_name string) &App {
 	return app
 }
 
+fn (mut app App) completion_result_at(uri string, position Position) CompletionList {
+	params := json2.encode(TextDocumentPositionParams{
+		text_document: TextDocumentIdentifier{
+			uri: uri
+		}
+		position:      position
+	})
+	response := app.operation_at_pos(.completion, Request{
+		id:     1
+		method: 'textDocument/completion'
+		params: params
+	})
+	if response.result is CompletionList {
+		return response.result as CompletionList
+	}
+	return CompletionList{}
+}
+
+fn mcp_install_config() string {
+	return json2.encode(map[string]json2.Any{
+		'mcpServers': json2.Any(map[string]json2.Any{
+			'vls': json2.Any(map[string]json2.Any{
+				'command': json2.Any('vls')
+				'args':    json2.Any([json2.Any('--mcp')])
+			})
+		})
+	})
+}
+
 // App represents the context of the server during its lifetime.
 pub struct App {
 	cur_mod string = 'main'
@@ -339,21 +368,7 @@ fn main() {
 		return
 	}
 	if os.args.len >= 2 && os.args[1] == 'mcp' && os.args.len >= 3 && os.args[2] == 'install' {
-		// Print an MCP client config snippet for VLS.
-		println('{')
-		println('  "mcpServers": {')
-		println('    "vls": { "command": "vls", "args": ["--mcp"] }')
-		println('  }')
-		println('}')
-		return
-	}
-	if os.args.len >= 2 && os.args[1] == 'mcp' && os.args.len >= 3 && os.args[2] == 'install' {
-		// Print an MCP client config snippet for VLS.
-		println('{')
-		println('  "mcpServers": {')
-		println('    "vls": { "command": "vls", "args": ["--mcp"] }')
-		println('  }')
-		println('}')
+		println(mcp_install_config())
 		return
 	}
 	// `vls check <file>` runs a single-file compile check and prints JSON diagnostics.
@@ -423,8 +438,21 @@ fn main() {
 		mut app := cli_app(content, 'vls_refs_${os.getpid()}')
 		uri := path_to_uri(path)
 		app.open_files[uri] = content
-		params := '{"textDocument":{"uri":"${uri}"},"position":{"line":${line},"character":${col}}}'
-		resp := app.find_references(Request{ id: 1, method: 'textDocument/references', params: params })
+		params := json2.encode(ReferenceParams{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			position:      Position{
+				line: line
+				char: col
+			}
+			context:       ReferenceContext{}
+		})
+		resp := app.find_references(Request{
+			id:     1
+			method: 'textDocument/references'
+			params: params
+		})
 		println(resp.result)
 		return
 	}
@@ -459,7 +487,10 @@ fn main() {
 		uri := path_to_uri(path)
 		app.open_files[uri] = content
 		app.reindex_uri(uri)
-		result := app.indexed_completions(uri, Position{ line: line, char: col })
+		result := app.completion_result_at(uri, Position{
+			line: line
+			char: col
+		})
 		println(json2.encode(result.items))
 		return
 	}
@@ -476,9 +507,23 @@ fn main() {
 		mut app := cli_app(content, 'vls_rename_${os.getpid()}')
 		uri := path_to_uri(path)
 		app.open_files[uri] = content
-		params := '{"textDocument":{"uri":"${uri}"},"position":{"line":${line},"character":${col}},"newName":"${new_name}"}'
-		resp := app.rename_request(Request{ id: 1, method: 'textDocument/rename', params: params }) or {
+		params := json2.encode(RenameParams{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			position:      Position{
+				line: line
+				char: col
+			}
+			new_name:      new_name
+		})
+		resp := app.rename_request(Request{
+			id:     1
+			method: 'textDocument/rename'
+			params: params
+		}) or {
 			eprintln('rename failed: ${err.msg()}')
+			exit(1)
 			return
 		}
 		println(resp.result)
