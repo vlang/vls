@@ -11,6 +11,68 @@ import io
 
 const vls_version = '0.0.3'
 
+// cli_app builds a minimal App for single-file CLI commands. It reuses the
+// OS temp directory directly so no per-invocation directory is left behind.
+fn cli_app(content string, temp_name string) &App {
+	_ = temp_name
+	mut app := &App{
+		text:                  content
+		open_files:            map[string]string{}
+		temp_dir:              os.temp_dir()
+		diagnostics_scheduler: new_diagnostics_scheduler()
+		index_refresh:         new_index_refresh_scheduler()
+		v3_line_info_enabled:  true
+		suppress_lsp_output:   true
+	}
+	return app
+}
+
+fn json_response_result(result ResponseResult) string {
+	content := strip_response_sum_type_tags(json2.encode(result, escape_unicode: true))
+	if result is string && (result as string) == 'null' {
+		return 'null'
+	}
+	return content
+}
+
+fn (mut app App) stop_standalone_session() {
+	app.cancel_all_scheduled_diagnostics()
+	app.stop_run_commands()
+	app.wait_answer_followups()
+	app.stop_diagnostics_servers()
+	app.stop_v3_queries()
+	app.stop_index_refresh()
+}
+
+fn (mut app App) completion_result_at(uri string, position Position) CompletionList {
+	params := json2.encode(TextDocumentPositionParams{
+		text_document: TextDocumentIdentifier{
+			uri: uri
+		}
+		position:      position
+	})
+	response := app.operation_at_pos(.completion, Request{
+		id:     1
+		method: 'textDocument/completion'
+		params: params
+	})
+	if response.result is CompletionList {
+		return response.result as CompletionList
+	}
+	return CompletionList{}
+}
+
+fn mcp_install_config() string {
+	return json2.encode(map[string]json2.Any{
+		'mcpServers': json2.Any(map[string]json2.Any{
+			'vls': json2.Any(map[string]json2.Any{
+				'command': json2.Any('vls')
+				'args':    json2.Any([json2.Any('--mcp')])
+			})
+		})
+	})
+}
+
 // App represents the context of the server during its lifetime.
 pub struct App {
 	cur_mod string = 'main'
@@ -24,11 +86,12 @@ mut:
 	removed_workspace_roots                     []string          // Roots explicitly removed by the client
 	capture_output                              bool              // Test hook: capture outbound transport messages instead of writing
 	captured_output                             []string          // Test hook buffer for outbound transport messages
-	supports_dynamic_watched_files_registration bool              // Client supports dynamic workspace watcher registration
-	supports_work_done_progress                 bool              // Client supports window/workDoneProgress + $/progress
-	sent_watched_files_registration             bool              // client/registerCapability watcher registration was sent
-	watched_files_registration_id               string            // Raw id of the watcher registration request, to match its response
-	watched_files_active                        bool              // True once the client acknowledged watcher registration (not rejected)
+	suppress_lsp_output                         bool
+	supports_dynamic_watched_files_registration bool   // Client supports dynamic workspace watcher registration
+	supports_work_done_progress                 bool   // Client supports window/workDoneProgress + $/progress
+	sent_watched_files_registration             bool   // client/registerCapability watcher registration was sent
+	watched_files_registration_id               string // Raw id of the watcher registration request, to match its response
+	watched_files_active                        bool   // True once the client acknowledged watcher registration (not rejected)
 	inlay_hints_enabled                         bool = true // toggled via workspace/didChangeConfiguration
 	diagnostics_enabled                         bool = true // toggled via workspace/didChangeConfiguration
 	diag_cache                                  map[string]DiagCacheEntry // Per-URI cached diagnostics
@@ -317,6 +380,195 @@ fn main() {
 		run_tcp_server(host, port, allow_remote)
 		return
 	}
+	// MCP mode uses newline-delimited JSON-RPC over stdio.
+	if os.args.contains('--mcp') {
+		run_mcp_mode()
+		return
+	}
+	if os.args.len >= 2 && os.args[1] == 'mcp' && os.args.len >= 3 && os.args[2] == 'install' {
+		println(mcp_install_config())
+		return
+	}
+	// `vls check <file>` runs a single-file compile check and prints JSON diagnostics.
+	if os.args.len >= 3 && os.args[1] == 'check' {
+		path := os.real_path(os.args[2])
+		content := os.read_file(path) or {
+			eprintln('cannot read ${path}: ${err}')
+			exit(1)
+			return
+		}
+		mut app := cli_app(content, 'vls_check_${os.getpid()}')
+		defer {
+			app.stop_standalone_session()
+		}
+		uri := path_to_uri(path)
+		app.open_files[uri] = content
+		notification := app.build_diagnostics_notification(uri, content)
+		println(json2.encode(notification))
+		return
+	}
+	if os.args.len >= 5 && os.args[1] == 'hover' {
+		path := os.real_path(os.args[2])
+		line := os.args[3].int()
+		col := os.args[4].int()
+		content := os.read_file(path) or {
+			eprintln('cannot read ${path}: ${err}')
+			exit(1)
+			return
+		}
+		mut app := cli_app(content, 'vls_hover_${os.getpid()}')
+		defer {
+			app.stop_standalone_session()
+		}
+		uri := path_to_uri(path)
+		app.open_files[uri] = content
+		hover := app.hover_at(uri, Position{ line: line, char: col })
+		if h := hover {
+			println(json2.encode(h))
+		} else {
+			println('null')
+		}
+		return
+	}
+	if os.args.len >= 5 && os.args[1] == 'definition' {
+		path := os.real_path(os.args[2])
+		line := os.args[3].int()
+		col := os.args[4].int()
+		content := os.read_file(path) or {
+			eprintln('cannot read ${path}: ${err}')
+			exit(1)
+			return
+		}
+		mut app := cli_app(content, 'vls_def_${os.getpid()}')
+		defer {
+			app.stop_standalone_session()
+		}
+		uri := path_to_uri(path)
+		app.open_files[uri] = content
+		app.reindex_uri(uri)
+		if loc := app.resolve_indexed_definition(uri, Position{ line: line, char: col }) {
+			println(json2.encode(loc))
+		} else {
+			println('null')
+		}
+		return
+	}
+	if os.args.len >= 5 && os.args[1] == 'references' {
+		path := os.real_path(os.args[2])
+		line := os.args[3].int()
+		col := os.args[4].int()
+		content := os.read_file(path) or {
+			eprintln('cannot read ${path}: ${err}')
+			exit(1)
+			return
+		}
+		mut app := cli_app(content, 'vls_refs_${os.getpid()}')
+		defer {
+			app.stop_standalone_session()
+		}
+		uri := path_to_uri(path)
+		app.open_files[uri] = content
+		params := json2.encode(ReferenceParams{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			position:      Position{
+				line: line
+				char: col
+			}
+			context:       ReferenceContext{}
+		})
+		resp := app.find_references(Request{
+			id:     1
+			method: 'textDocument/references'
+			params: params
+		})
+		println(json_response_result(resp.result))
+		return
+	}
+	if os.args.len >= 3 && os.args[1] == 'symbols' {
+		path := os.real_path(os.args[2])
+		content := os.read_file(path) or {
+			eprintln('cannot read ${path}: ${err}')
+			exit(1)
+			return
+		}
+		mut app := cli_app(content, 'vls_symbols_${os.getpid()}')
+		defer {
+			app.stop_standalone_session()
+		}
+		uri := path_to_uri(path)
+		app.open_files[uri] = content
+		app.reindex_uri(uri)
+		if entry := app.symbol_index[uri] {
+			println(json2.encode(entry.doc_symbols))
+		} else {
+			println('[]')
+		}
+		return
+	}
+	if os.args.len >= 5 && os.args[1] == 'completion' {
+		path := os.real_path(os.args[2])
+		line := os.args[3].int()
+		col := os.args[4].int()
+		content := os.read_file(path) or {
+			eprintln('cannot read ${path}: ${err}')
+			exit(1)
+			return
+		}
+		mut app := cli_app(content, 'vls_completion_${os.getpid()}')
+		defer {
+			app.stop_standalone_session()
+		}
+		uri := path_to_uri(path)
+		app.open_files[uri] = content
+		app.reindex_uri(uri)
+		result := app.completion_result_at(uri, Position{
+			line: line
+			char: col
+		})
+		println(json2.encode(result.items))
+		return
+	}
+	if os.args.len >= 6 && os.args[1] == 'rename' {
+		path := os.real_path(os.args[2])
+		line := os.args[3].int()
+		col := os.args[4].int()
+		new_name := os.args[5]
+		content := os.read_file(path) or {
+			eprintln('cannot read ${path}: ${err}')
+			exit(1)
+			return
+		}
+		mut app := cli_app(content, 'vls_rename_${os.getpid()}')
+		defer {
+			app.stop_standalone_session()
+		}
+		uri := path_to_uri(path)
+		app.open_files[uri] = content
+		params := json2.encode(RenameParams{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			position:      Position{
+				line: line
+				char: col
+			}
+			new_name:      new_name
+		})
+		resp := app.rename_request(Request{
+			id:     1
+			method: 'textDocument/rename'
+			params: params
+		}) or {
+			app.stop_standalone_session()
+			eprintln('rename failed: ${err.msg()}')
+			exit(1)
+			return
+		}
+		println(json_response_result(resp.result))
+		return
+	}
 
 	// Stdio mode (default).
 	temp_dir := os.join_path(os.temp_dir(), 'vls_${os.getpid()}')
@@ -427,6 +679,9 @@ fn (mut app App) write_data(data string) {
 	app.write_mutex.lock()
 	defer {
 		app.write_mutex.unlock()
+	}
+	if app.suppress_lsp_output {
+		return
 	}
 	if app.capture_output {
 		app.captured_output << data
@@ -1019,7 +1274,7 @@ fn (mut app App) handle_requests[T](mut reader T) {
 							document_range_formatting_provider: true
 							// Imports link to the module they name, and a URL in a doc
 							// comment is clickable as written.
-							document_link_provider:             true
+							document_link_provider:             DocumentLinkOptions{}
 							position_encoding:                  position_encoding_string(app.position_encoding)
 							workspace:                          WorkspaceCapability{
 								workspace_folders: WorkspaceFoldersServerCapability{

@@ -621,7 +621,23 @@ fn run_diagnostics_worker(mut scheduler DiagnosticsScheduler) {
 			return
 		}
 		if jobs.len == 0 {
-			time.sleep(diagnostics_worker_poll)
+			scheduler.mutex.lock()
+			mut delay := i64(diagnostics_worker_poll / time.millisecond)
+			now_ms := time.now().unix_milli()
+			for _, job in scheduler.pending_jobs {
+				d := job.ready_at - now_ms
+				if d > 0 && d < delay {
+					delay = d
+				}
+			}
+			if scheduler.pending_jobs.len == 0 {
+				delay = i64(diagnostics_worker_poll / time.millisecond)
+			}
+			scheduler.mutex.unlock()
+			if delay < 1 {
+				delay = 1
+			}
+			time.sleep(delay * time.millisecond)
 			continue
 		}
 		for job in jobs {
