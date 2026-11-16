@@ -327,7 +327,9 @@ fn test_mcp_install_config_is_json2_encoded() {
 		panic(err)
 	}
 	servers := mcp_object_field(config, 'mcpServers')
+	assert servers.len == 1
 	server := mcp_object_field(servers, 'vls')
+	assert server.len == 2
 	assert mcp_string_field(server, 'command') == 'vls'
 	args := (server['args'] or { json2.null }).as_array()
 	assert args.len == 1
@@ -440,4 +442,194 @@ fn test_mcp_notification_gets_no_response() {
 	assert app.captured_output.len == 0
 	handle_mcp_message(mut app, '{"jsonrpc":"2.0","method":"notifications/initialized"}')
 	assert app.captured_output.len == 0
+}
+
+// strip_non_code_segments blanks single-line string contents and cuts line
+// comments so the map-init scan below only sees real code.
+fn strip_non_code_segments(line string) string {
+	mut out := []u8{cap: line.len}
+	mut i := 0
+	for i < line.len {
+		c := line[i]
+		if c == `"` || c == `'` {
+			quote := c
+			i++
+			for i < line.len && line[i] != quote {
+				if line[i] == `\\` && i + 1 < line.len {
+					i += 2
+					continue
+				}
+				i++
+			}
+			i++ // past the closing quote (or EOL on unterminated input)
+			out << ` `
+			continue
+		}
+		if c == `/` && i + 1 < line.len && line[i + 1] == `/` {
+			break
+		}
+		out << c
+		i++
+	}
+	return out.bytestr()
+}
+
+// explicit_map_init_offenders lists `path:line` rows for non-empty map
+// literals written with explicit type parameters (`map[string]T{...}` with
+// entries). Released V compilers reject that form (`explicit map
+// initialization does not support parameters`), so letting one into the tree
+// breaks `v .` builds and the `v ls --install` source fallback on stable
+// toolchains. Empty `map[string]T{}` literals and inferred `{...}` literals
+// are fine and are not reported.
+fn explicit_map_init_offenders(files []string) []string {
+	mut offenders := []string{}
+	for path in files {
+		content := os.read_file(path) or { continue }
+		lines := content.split_into_lines()
+		for idx in 0 .. lines.len {
+			code := strip_non_code_segments(lines[idx])
+			mut search := 0
+			for {
+				rel := code[search..].index('map[string') or { break }
+				start := search + rel
+				// `map[` in type position, not a literal: a fn return
+				// type (`)`, `!` before it) or an `is` type test.
+				mut b := start - 1
+				for b >= 0 && (code[b] == ` ` || code[b] == `\t`) {
+					b--
+				}
+				if b >= 0 && (code[b] == `)` || code[b] == `!`) {
+					search = start + 1
+					continue
+				}
+				if b >= 0 && code[b].is_letter() {
+					mut w := b
+					for w >= 0 && (code[w].is_letter() || code[w] == `_`) {
+						w--
+					}
+					if code[w + 1..b + 1] == 'is' {
+						search = start + 1
+						continue
+					}
+				}
+				// The value type is one token (dots allowed for
+				// qualified types like `json2.Any`); anything else (`,`,
+				// `)`, `=`) means a declaration, parameter, or return type.
+				rest := code[start + 'map[string'.len..]
+				mut t := 0
+				for t < rest.len {
+					c := rest[t]
+					if !(c.is_letter() || c.is_digit() || c == `_` || c == `?` || c == `&`
+						|| c == `|` || c == `[` || c == `]` || c == `.`) {
+						break
+					}
+					t++
+				}
+				after_type := rest[t..].trim_left(' \t')
+				if !after_type.starts_with('{') {
+					search = start + 1
+					continue
+				}
+				after := after_type[1..].trim_space()
+				if after.starts_with('}') {
+					// empty `map[string]T{}` literal; keep scanning the line
+					search = start + 1
+					continue
+				}
+				if after == '' {
+					// `{` ends the line: entries on following lines are the
+					// banned shape, unless the next line just closes it.
+					mut j := idx + 1
+					for j < lines.len && lines[j].trim_space() == '' {
+						j++
+					}
+					if j < lines.len
+						&& strip_non_code_segments(lines[j]).trim_space().starts_with('}') {
+						break
+					}
+				}
+				offenders << '${path}:${idx + 1}: ${lines[idx].trim_space()}'
+				break
+			}
+		}
+	}
+	return offenders
+}
+
+fn test_sources_have_no_explicit_nonempty_map_init() {
+	src_dir := os.dir(@FILE)
+	entries := os.ls(src_dir) or { panic(err) }
+	mut files := []string{}
+	for entry in entries {
+		if entry.ends_with('.v') && !entry.starts_with('.') {
+			files << os.join_path(src_dir, entry)
+		}
+	}
+	offenders := explicit_map_init_offenders(files)
+	assert offenders.len == 0, 'map init with explicit type params is rejected by released V:\n' + offenders.join('\n')
+}
+
+fn test_explicit_map_init_scan_catches_banned_form() {
+	temp_dir := os.join_path(os.temp_dir(), 'vls_map_scan_${os.getpid()}')
+	os.mkdir_all(temp_dir) or { panic(err) }
+	defer {
+		os.rmdir_all(temp_dir) or {}
+	}
+	bad := os.join_path(temp_dir, 'bad.v')
+	os.write_file(bad, "module main\nfn main() {\n\tmut m := map[string]int{\n\t\t'a': 1\n\t}\n\tmut m2 := json2.Any(map[string]json2.Any{\n\t\t'b': json2.Any(2)\n\t})\n\tprintln(m)\n\tprintln(m2)\n}\n") or {
+		panic(err)
+	}
+	good := os.join_path(temp_dir, 'good.v')
+	os.write_file(good, 'module main\n// map[string]int{\'a\': 1} in a comment is fine\nfn main() {\n\tmut e := map[string]int{}\n\tmut i := {\'a\': 1}\n\tcontent := "ages := map[string]int{\\n\\t\\t\'a\': 1\\n\\t}\\n"\n\tprintln(e)\n\tprintln(i)\n\tprintln(content)\n}\n') or {
+		panic(err)
+	}
+	offenders := explicit_map_init_offenders([bad, good])
+	assert offenders.len == 2
+	assert offenders[0].contains('bad.v')
+	assert offenders[1].contains('bad.v')
+}
+
+fn test_mcp_hover_without_result_returns_null_contents() {
+	temp_dir := os.join_path(os.temp_dir(), 'vls_mcp_hover_null_${os.getpid()}')
+	os.mkdir_all(temp_dir) or { panic(err) }
+	defer {
+		os.rmdir_all(temp_dir) or {}
+	}
+	path := os.join_path(temp_dir, 'main.v')
+	mcp_test_write_file(path, 'module main\nfn main() {}\n\n')
+	mut app := &App{ capture_output: true }
+	body := json2.encode({
+		'jsonrpc': json2.Any('2.0')
+		'id':      json2.Any('hover-null')
+		'method':  json2.Any('tools/call')
+		'params':  json2.Any({
+			'name':      json2.Any('vls_hover')
+			'arguments': json2.Any({
+				'path':      json2.Any(path)
+				'line':      json2.Any(2)
+				'character': json2.Any(0)
+			})
+		})
+	})
+	handle_mcp_message(mut app, body)
+	assert app.captured_output.len >= 1
+	// Select the tool response by id: depending on the configured V
+	// compiler, an unrelated window/showMessage notice (missing V1
+	// compatibility compiler) may be captured alongside it.
+	mut found := ''
+	for m in app.captured_output {
+		if m.contains('"id":"hover-null"') {
+			found = m
+		}
+	}
+	assert found != '', 'missing tools/call response among ${app.captured_output.len} captured message(s)'
+	response := json2.decode_standard[map[string]json2.Any](found.trim_space()) or {
+		panic(err)
+	}
+	assert 'error' !in response
+	result := mcp_object_field(response, 'result')
+	assert json2.encode(result['isError'] or { json2.null }) == 'false'
+	content := (result['content'] or { json2.null }).as_array()
+	assert content.len == 1
+	assert mcp_string_field(content[0].as_map(), 'text') == '{"contents":null}'
 }
