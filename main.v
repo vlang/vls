@@ -1208,23 +1208,94 @@ fn request_content_has_id(content string) bool {
 
 // raw_id_to_int converts a raw JSON id token to an int for internal use. String
 // ids (and absent ids) collapse to 0; the exact id is preserved separately via
-// the raw id and echoed verbatim in responses.
+// the raw id and echoed verbatim in responses. Only canonical integers map to
+// their value: anything else (floats, malformed numbers) collapses to 0 so two
+// different wire ids can never share one internal id through lenient parsing.
 fn raw_id_to_int(raw string) int {
-	if raw == '' || raw.starts_with('"') {
+	if raw == '' || raw == 'null' || raw.starts_with('"') {
+		return 0
+	}
+	if !raw_is_canonical_int(raw) {
 		return 0
 	}
 	return raw.int()
 }
 
+// raw_is_canonical_int reports whether `raw` is an optional `-` followed by one
+// or more ASCII digits and nothing else.
+fn raw_is_canonical_int(raw string) bool {
+	if raw == '' {
+		return false
+	}
+	mut i := 0
+	if raw[0] == `-` {
+		if raw.len == 1 {
+			return false
+		}
+		i = 1
+	}
+	for ; i < raw.len; i++ {
+		if raw[i] < `0` || raw[i] > `9` {
+			return false
+		}
+	}
+	return true
+}
+
+// raw_is_json_number reports whether `raw` has the shape of a JSON number
+// (optional `-`, digits, optional fraction and exponent), so float ids stay
+// valid requests even though they collapse to 0 internally.
+fn raw_is_json_number(raw string) bool {
+	mut i := 0
+	if i < raw.len && raw[i] == `-` {
+		i++
+	}
+	if i >= raw.len {
+		return false
+	}
+	if raw[i] == `0` {
+		i++
+	} else if raw[i] >= `1` && raw[i] <= `9` {
+		for i < raw.len && raw[i] >= `0` && raw[i] <= `9` {
+			i++
+		}
+	} else {
+		return false
+	}
+	if i < raw.len && raw[i] == `.` {
+		i++
+		if i >= raw.len || raw[i] < `0` || raw[i] > `9` {
+			return false
+		}
+		for i < raw.len && raw[i] >= `0` && raw[i] <= `9` {
+			i++
+		}
+	}
+	if i < raw.len && (raw[i] == `e` || raw[i] == `E`) {
+		i++
+		if i < raw.len && (raw[i] == `+` || raw[i] == `-`) {
+			i++
+		}
+		if i >= raw.len || raw[i] < `0` || raw[i] > `9` {
+			return false
+		}
+		for i < raw.len && raw[i] >= `0` && raw[i] <= `9` {
+			i++
+		}
+	}
+	return i == raw.len
+}
+
 // raw_id_is_valid reports whether a raw JSON id token is a legal JSON-RPC id: a
 // string, a number, or null. Objects, arrays, and booleans are rejected. An
 // absent id is represented by an empty token and is handled by the caller.
+// Numbers accept the full JSON number shape so float ids stay valid (they
+// collapse to 0 internally); trailing garbage such as `12x` is rejected.
 fn raw_id_is_valid(raw string) bool {
 	if raw == '' || raw == 'null' || raw[0] == `"` {
 		return true
 	}
-	c := raw[0]
-	return c == `-` || (c >= `0` && c <= `9`)
+	return raw_is_canonical_int(raw) || raw_is_json_number(raw)
 }
 
 // json_is_ws reports whether a byte is JSON insignificant whitespace.
