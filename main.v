@@ -63,9 +63,9 @@ fn (mut app App) completion_result_at(uri string, position Position) CompletionL
 }
 
 fn mcp_install_config() string {
-	return json2.encode(map[string]json2.Any{
-		'mcpServers': json2.Any(map[string]json2.Any{
-			'vls': json2.Any(map[string]json2.Any{
+	return json2.encode({
+		'mcpServers': json2.Any({
+			'vls': json2.Any({
 				'command': json2.Any('vls')
 				'args':    json2.Any([json2.Any('--mcp')])
 			})

@@ -72,13 +72,13 @@ fn test_mcp_missing_position_returns_tool_error() {
 	path := os.join_path(temp_dir, 'main.v')
 	mcp_test_write_file(path, 'module main\nfn main() {}\n')
 	mut app := &App{ capture_output: true }
-	body := json2.encode(map[string]json2.Any{
+	body := json2.encode({
 		'jsonrpc': json2.Any('2.0')
 		'id':      json2.Any('missing-position')
 		'method':  json2.Any('tools/call')
-		'params':  json2.Any(map[string]json2.Any{
+		'params':  json2.Any({
 			'name':      json2.Any('vls_hover')
-			'arguments': json2.Any(map[string]json2.Any{
+			'arguments': json2.Any({
 				'path': json2.Any(path)
 			})
 		})
@@ -175,13 +175,13 @@ fn test_mcp_tool_failure_uses_is_error_result() {
 		os.rmdir_all(temp_dir) or {}
 	}
 	mut app := &App{ capture_output: true }
-	body := json2.encode(map[string]json2.Any{
+	body := json2.encode({
 		'jsonrpc': json2.Any('2.0')
 		'id':      json2.Any('missing-file')
 		'method':  json2.Any('tools/call')
-		'params':  json2.Any(map[string]json2.Any{
+		'params':  json2.Any({
 			'name':      json2.Any('vls_check')
-			'arguments': json2.Any(map[string]json2.Any{
+			'arguments': json2.Any({
 				'path': json2.Any(os.join_path(temp_dir, 'missing.v'))
 			})
 		})
@@ -251,13 +251,13 @@ fn test_mcp_symbols_return_standard_json() {
 		open_files:     map[string]string{}
 		capture_output: true
 	}
-	body := json2.encode(map[string]json2.Any{
+	body := json2.encode({
 		'jsonrpc': json2.Any('2.0')
 		'id':      json2.Any('symbols')
 		'method':  json2.Any('tools/call')
-		'params':  json2.Any(map[string]json2.Any{
+		'params':  json2.Any({
 			'name':      json2.Any('vls_symbols')
-			'arguments': json2.Any(map[string]json2.Any{
+			'arguments': json2.Any({
 				'path': json2.Any(path)
 			})
 		})
@@ -283,13 +283,13 @@ fn test_mcp_invalid_rename_returns_tool_error_result() {
 	path := os.join_path(temp_dir, 'main.v')
 	mcp_test_write_file(path, 'module main\nfn main() {}\n')
 	mut app := &App{ capture_output: true }
-	body := json2.encode(map[string]json2.Any{
+	body := json2.encode({
 		'jsonrpc': json2.Any('2.0')
 		'id':      json2.Any(7)
 		'method':  json2.Any('tools/call')
-		'params':  json2.Any(map[string]json2.Any{
+		'params':  json2.Any({
 			'name':      json2.Any('vls_rename')
-			'arguments': json2.Any(map[string]json2.Any{
+			'arguments': json2.Any({
 				'path':      json2.Any(path)
 				'line':      json2.Any(0)
 				'character': json2.Any(0)
@@ -404,13 +404,13 @@ fn test_mcp_completion_uses_filtered_completion_pipeline() {
 	line := content.split_into_lines().index('\tapp')
 	assert line >= 0
 	character := content.split_into_lines()[line].len
-	body := json2.encode(map[string]json2.Any{
+	body := json2.encode({
 		'jsonrpc': json2.Any('2.0')
 		'id':      json2.Any('completion-1')
 		'method':  json2.Any('tools/call')
-		'params':  json2.Any(map[string]json2.Any{
+		'params':  json2.Any({
 			'name':      json2.Any('vls_completion')
-			'arguments': json2.Any(map[string]json2.Any{
+			'arguments': json2.Any({
 				'path':      json2.Any(path)
 				'line':      json2.Any(line)
 				'character': json2.Any(character)

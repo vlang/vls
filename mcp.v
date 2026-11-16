@@ -297,7 +297,7 @@ fn handle_mcp_message(mut app App, body string) {
 			result := if h := hover {
 				json2.encode(h)
 			} else {
-				json2.encode(map[string]json2.Any{
+				json2.encode({
 					'contents': json2.null
 				})
 			}
