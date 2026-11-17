@@ -802,6 +802,19 @@ fn (mut app App) handle_requests[T](mut reader T) {
 		// Preserve the exact id (numeric or string) so responses echo it
 		// verbatim; string ids would otherwise collapse to 0 (P0-02).
 		app.current_request_raw_id = extract_raw_id(content) or { '' }
+		// Decode the body WITHOUT the id field first: json2 aborts the whole
+		// decode on a string value in an int field, which would otherwise make
+		// every string-id request undecodable. The numeric id is derived from
+		// the raw id (0 for non-numeric ids), while the exact id is echoed via
+		// the raw id. Decoding first also keeps malformed JSON (e.g. an id of
+		// `12x`) on the Parse Error (-32700) path: only valid JSON with a
+		// disallowed id type (object, array, boolean) is an Invalid Request.
+		body := json2.decode[RequestBody](content) or {
+			log('Failed to decode JSON request: ${err.msg()}. Content: "${content}"')
+			app.current_request_raw_id = 'null'
+			app.write_error_response(make_parse_error_response(err.msg()))
+			continue
+		}
 		// JSON-RPC ids may only be a string, number, or null (an absent raw id).
 		// A present id of any other type (object, array, boolean) is an Invalid
 		// Request: respond with a null id — the id could not be validly
@@ -809,16 +822,6 @@ fn (mut app App) handle_requests[T](mut reader T) {
 		if app.current_request_raw_id != '' && !raw_id_is_valid(app.current_request_raw_id) {
 			app.current_request_raw_id = 'null'
 			app.write_error_response(make_invalid_request_error_response(0, 'Request id must be a string, number, or null'))
-			continue
-		}
-		// Decode the body WITHOUT the id field: json2 aborts the whole decode on
-		// a string value in an int field, which would otherwise make every
-		// string-id request undecodable. The numeric id is derived from the raw
-		// id (0 for non-numeric ids), while the exact id is echoed via the raw id.
-		body := json2.decode[RequestBody](content) or {
-			log('Failed to decode JSON request: ${err.msg()}. Content: "${content}"')
-			app.current_request_raw_id = 'null'
-			app.write_error_response(make_parse_error_response(err.msg()))
 			continue
 		}
 		// A message with an id + result/error but no method is a response to a
