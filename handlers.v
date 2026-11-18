@@ -879,6 +879,19 @@ fn (mut app App) operation_at_pos(method Method, request Request) Response {
 		}
 	}
 
+	// Prefer the index-backed signature before spawning the compiler: a
+	// resolved declaration plus its parameter list answers plain calls without
+	// paying a full `v` run per keystroke, mirroring hover and completion.
+	// Anything the index cannot resolve still falls through to the compiler.
+	if method == .signature_help {
+		if sig := app.source_signature_fallback(path, params.position) {
+			return Response{
+				id: request.id
+				result: sig
+			}
+		}
+	}
+
 	mut result := app.run_v_line_info(method, path, line_info)
 	if method == .hover {
 		result = app.hover_with_written_declaration(path, params.position, result)
@@ -886,10 +899,6 @@ fn (mut app App) operation_at_pos(method Method, request Request) Response {
 	if result is string && result == 'null' {
 		if method == .hover {
 			if fallback := app.source_hover_fallback(path, params.position) {
-				result = fallback
-			}
-		} else if method == .signature_help {
-			if fallback := app.source_signature_fallback(path, params.position) {
 				result = fallback
 			}
 		}
