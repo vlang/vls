@@ -725,6 +725,13 @@ fn run_diagnostics_job(mut scheduler DiagnosticsScheduler, job DiagnosticsJob) {
 		// workspace pull can clear the old errors for this URI too.
 		scheduler.publish_if_current(mut worker, job, other)
 	}
+	// The check answered for its program's other open files too, so their
+	// still-pending slow jobs would only re-derive what was just published.
+	// A timed-out or crashed check caches nothing: its empty answer must not
+	// retire anything.
+	if job.uri in worker.diag_cache {
+		scheduler.retire_superseded_slow_jobs(job, members)
+	}
 }
 
 // publish_partial publishes the diagnostics a check of `job` found before its
@@ -765,6 +772,45 @@ fn (mut scheduler DiagnosticsScheduler) swap_program_members(program_dir string,
 	previous := scheduler.program_members[program_dir] or { []string{} }
 	scheduler.program_members[program_dir] = members
 	return previous.filter(it !in members)
+}
+
+// retire_superseded_slow_jobs drops the still-pending slow jobs for `members`,
+// the open files a completed slow check just published for, when they would
+// only re-derive the published answer. Only jobs of the completed check's own
+// snapshot retire: the same project at the same project generation, so a file
+// changed after the check started keeps its newer job. Per-URI generations are
+// not compared across files: sequential opens bump earlier files more, so a
+// numeric comparison would keep redundant jobs depending on which file the
+// worker took first. A superseded completion retires nothing: its publishes
+// were refused, so nothing was shared.
+fn (mut scheduler DiagnosticsScheduler) retire_superseded_slow_jobs(completed DiagnosticsJob, members []string) {
+	scheduler.mutex.lock()
+	defer {
+		scheduler.mutex.unlock()
+	}
+	if completed.kind != .slow {
+		return
+	}
+	if !scheduler.is_job_current_locked(completed) {
+		return
+	}
+	for uri in members {
+		key := diagnostics_job_key(uri, .slow)
+		if pending := scheduler.pending_jobs[key] {
+			if pending.project_key != completed.project_key {
+				continue
+			}
+			if pending.global_generation != completed.global_generation {
+				continue
+			}
+			if pending.project_generation != completed.project_generation {
+				continue
+			}
+			// The pending job carries the same snapshot the check published
+			// from, so running it would compile the same program again.
+			scheduler.pending_jobs.delete(key)
+		}
+	}
 }
 
 // publish_if_current writes a notification and caches its exact LSP items
