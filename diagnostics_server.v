@@ -194,9 +194,18 @@ fn (mut pool DiagnosticsServerPool) check(exe string, args []string, work_dir st
 // protocol, `<file>:<line>:<code><column>`, as `-line-info` does, and returns
 // the answer as the output of the request.
 fn (mut pool DiagnosticsServerPool) query(exe string, args []string, work_dir string, question string) ?os.Result {
-	return pool.request(exe, args, work_dir, question, v3_query_answer_ms, fn () bool {
+	return pool.query_cancelled(exe, args, work_dir, question, fn () bool {
 		return false
-	}, unsafe { nil })
+	})
+}
+
+// query_cancelled is query with a cancellation callback: when it reports true
+// the wait stops and the pooled child is killed, instead of holding the caller
+// until the query times out. Async line-info workers pass their request's
+// flag so a $/cancelRequest frees the worker promptly.
+fn (mut pool DiagnosticsServerPool) query_cancelled(exe string, args []string, work_dir string, question string, cancelled fn () bool) ?os.Result {
+	return pool.request(exe, args, work_dir, question, v3_query_answer_ms, cancelled,
+		unsafe { nil })
 }
 
 // request sends a `check`, or a `query` of `question` when there is one, and

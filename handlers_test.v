@@ -18347,3 +18347,149 @@ fn test_ifr_refuses_what_it_cannot_follow() {
 		assert err.msg() == '`speak` is a member of the interface `Speaker` at main.v:3:15: the types that implement it must keep that name, and V does not say which types those are, so this rename could break the program', err.msg()
 	}
 }
+
+fn test_operation_at_pos_indexed_defers_narrowed_hover_to_compiler() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	app.v3_line_info_enabled = true
+	test_dir := os.join_path(app.temp_dir, 'narrowed_indexed_hover')
+	must_mkdir_all(test_dir)
+	content := 'module main\n\ntype MySum = int | string\n\nfn main() {\n\tx := MySum(1)\n\ty := 7\n\tprintln(x)\n\tprintln(y)\n}\n'
+	main_file := os.join_path(test_dir, 'main.v')
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	app.reindex_uri(uri)
+	lines := content.split_into_lines()
+	sum_line := lines.index('\tprintln(x)')
+	assert sum_line >= 0
+	sum_col := lines[sum_line].index('x') or { -1 }
+	assert sum_col >= 0
+	sum_position := Position{
+		line: sum_line
+		char: sum_col + 1
+	}
+	binding := app.local_binding_hover(uri, sum_position) or {
+		assert false, 'expected a local binding hover for x'
+		return
+	}
+	assert app.binding_type_narrows(uri, sum_position, binding), 'a sum-typed local narrows: ${binding.contents.value}'
+	phased := app.operation_at_pos_indexed(.hover, Request{
+		id:     1
+		method: 'textDocument/hover'
+		params: json2.encode(TextDocumentPositionParams{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			position:      sum_position
+		})
+	})
+	assert !phased.done, 'a narrowed hover falls through to the compiler'
+	// A binding the compiler cannot narrow still answers from the index.
+	int_line := lines.index('\tprintln(y)')
+	assert int_line >= 0
+	int_col := lines[int_line].index('y') or { -1 }
+	assert int_col >= 0
+	int_position := Position{
+		line: int_line
+		char: int_col + 1
+	}
+	plain := app.local_binding_hover(uri, int_position) or {
+		assert false, 'expected a local binding hover for y'
+		return
+	}
+	assert !app.binding_type_narrows(uri, int_position, plain), 'an int local never narrows: ${plain.contents.value}'
+	answered := app.operation_at_pos_indexed(.hover, Request{
+		id:     2
+		method: 'textDocument/hover'
+		params: json2.encode(TextDocumentPositionParams{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			position:      int_position
+		})
+	})
+	assert answered.done, 'a plain hover still answers from the index'
+}
+
+fn test_prune_inlay_fn_cache_bounds_stale_entries() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	mut store := app.inlay_fn_cache_store()
+	// One live entry plus a full cache of files the session no longer holds.
+	store.entries['file:///live.v'] = InlayFnEntry{
+		fingerprint: 1
+		fns:         {
+			'live_fn': 'int'
+		}
+	}
+	for i in 0 .. inlay_fn_cache_max_entries + 16 {
+		store.entries['file:///stale_${i}.v'] = InlayFnEntry{
+			fingerprint: i
+			fns:         {
+				'f': 'int'
+			}
+		}
+	}
+	app.open_files['file:///live.v'] = 'module main\nfn live_fn() int {\n\treturn 1\n}\n'
+	app.prune_inlay_fn_cache()
+	assert store.entries.len <= inlay_fn_cache_max_entries, 'the cache stays bounded'
+	assert 'file:///live.v' in store.entries, 'a live entry survives the prune'
+	assert 'file:///stale_0.v' !in store.entries, 'a dropped file leaves the cache'
+}
+
+fn test_drop_index_uri_evicts_inlay_fn_entry() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	uri := 'file:///evicted.v'
+	other := 'file:///kept.v'
+	mut store := app.inlay_fn_cache_store()
+	store.entries[uri] = InlayFnEntry{
+		fingerprint: 3
+		fns:         {
+			'f': 'void'
+		}
+	}
+	store.entries[other] = InlayFnEntry{
+		fingerprint: 4
+		fns:         {
+			'g': 'void'
+		}
+	}
+	app.drop_index_uri(uri)
+	assert uri !in store.entries, 'a dropped file leaves the cache'
+	assert other in store.entries, 'an unrelated entry stays'
+}
+
+fn test_evict_inlay_fn_cache_under_drops_workspace_entries() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'evict_ws')
+	must_mkdir_all(test_dir)
+	gone_uri := path_to_uri(os.join_path(test_dir, 'gone.v'))
+	kept_uri := path_to_uri(os.join_path(app.temp_dir, 'kept.v'))
+	mut store := app.inlay_fn_cache_store()
+	store.entries[gone_uri] = InlayFnEntry{
+		fingerprint: 5
+		fns:         {
+			'f': 'void'
+		}
+	}
+	store.entries[kept_uri] = InlayFnEntry{
+		fingerprint: 6
+		fns:         {
+			'g': 'void'
+		}
+	}
+	app.drop_index_under(test_dir)
+	assert gone_uri !in store.entries, 'a removed workspace leaves the cache'
+	assert kept_uri in store.entries, 'a file outside the workspace stays'
+}

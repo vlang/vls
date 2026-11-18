@@ -369,6 +369,9 @@ fn (mut app App) evict_ref_occurrences() {
 fn (mut app App) drop_index_uri(uri string) {
 	app.symbol_index.delete(uri)
 	app.ref_occurrences.delete(uri)
+	if mut store := app.inlay_fn_cache {
+		store.entries.delete(uri)
+	}
 }
 
 // drop_index_aliases_for_path removes cached URI spellings for the same physical
@@ -585,6 +588,7 @@ fn (mut app App) drop_index_under(dir_path string) {
 			app.index_skipped_uris.delete(uri)
 		}
 	}
+	app.evict_inlay_fn_cache_under(dir_path)
 	// Re-walk on next query (a removed folder must not be re-indexed).
 	app.indexed_dirs.clear()
 	app.indexed_dir_walk_ms.clear()

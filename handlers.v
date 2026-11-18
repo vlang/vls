@@ -1446,7 +1446,7 @@ fn (mut app App) operation_at_pos_indexed(method Method, request Request) Indexe
 		return IndexedPhase{
 			done: true
 			resp: Response{
-				id: request.id
+				id:     request.id
 				result: 'null'
 			}
 		}
@@ -1455,7 +1455,7 @@ fn (mut app App) operation_at_pos_indexed(method Method, request Request) Indexe
 		return IndexedPhase{
 			done: true
 			resp: Response{
-				id: request.id
+				id:     request.id
 				result: 'null'
 			}
 		}
@@ -1464,7 +1464,7 @@ fn (mut app App) operation_at_pos_indexed(method Method, request Request) Indexe
 		return IndexedPhase{
 			done: true
 			resp: Response{
-				id: request.id
+				id:     request.id
 				result: 'null'
 			}
 		}
@@ -1484,7 +1484,7 @@ fn (mut app App) operation_at_pos_indexed(method Method, request Request) Indexe
 			return IndexedPhase{
 				done: true
 				resp: Response{
-					id: request.id
+					id:     request.id
 					result: location
 				}
 			}
@@ -1493,10 +1493,17 @@ fn (mut app App) operation_at_pos_indexed(method Method, request Request) Indexe
 	}
 	if method == .hover {
 		if binding := app.local_binding_hover(path, params.position) {
+			// What a `$if`, `is` or `match` makes of a value the compiler
+			// narrows, the index cannot tell: fall through to the compiler
+			// instead of answering the broad declared type, mirroring the
+			// synchronous path in operation_at_pos below.
+			if app.binding_type_narrows(path, params.position, binding) {
+				return IndexedPhase{}
+			}
 			return IndexedPhase{
 				done: true
 				resp: Response{
-					id: request.id
+					id:     request.id
 					result: binding
 				}
 			}
@@ -1505,7 +1512,7 @@ fn (mut app App) operation_at_pos_indexed(method Method, request Request) Indexe
 			return IndexedPhase{
 				done: true
 				resp: Response{
-					id: request.id
+					id:     request.id
 					result: member
 				}
 			}
@@ -1519,10 +1526,10 @@ fn (mut app App) operation_at_pos_indexed(method Method, request Request) Indexe
 			return IndexedPhase{
 				done: true
 				resp: Response{
-					id: request.id
+					id:     request.id
 					result: Hover{
 						contents: MarkupContent{
-							kind: 'markdown'
+							kind:  'markdown'
 							value: value
 						}
 					}
@@ -1536,7 +1543,7 @@ fn (mut app App) operation_at_pos_indexed(method Method, request Request) Indexe
 			return IndexedPhase{
 				done: true
 				resp: Response{
-					id: request.id
+					id:     request.id
 					result: sig
 				}
 			}
@@ -5101,8 +5108,8 @@ fn (mut app App) build_diagnostics_notification_for_errors(uri string, content s
 		return Notification{
 			method: 'textDocument/publishDiagnostics'
 			params: PublishDiagnosticsParams{
-				uri: uri
-				version: if uri in app.open_files_versions {
+				uri:         uri
+				version:     if uri in app.open_files_versions {
 					?i64(app.open_files_versions[uri])
 				} else {
 					none
@@ -7478,6 +7485,11 @@ mut:
 	entries map[string]InlayFnEntry
 }
 
+// inlay_fn_cache_max_entries bounds the fn-signature cache: entries are only
+// added, never refreshed in place, so without a bound a long-lived session
+// that changes workspaces would retain maps for every file it ever indexed.
+const inlay_fn_cache_max_entries = 4096
+
 fn new_inlay_fn_cache() &InlayFnCache {
 	return &InlayFnCache{
 		entries: map[string]InlayFnEntry{}
@@ -7491,6 +7503,38 @@ fn (mut app App) inlay_fn_cache_store() &InlayFnCache {
 	store := new_inlay_fn_cache()
 	app.inlay_fn_cache = store
 	return store
+}
+
+// prune_inlay_fn_cache drops fn-signature entries the session no longer holds:
+// files that are neither open nor indexed. When even the live set exceeds the
+// bound (a pathological workspace), the cache is cleared and rebuilt lazily,
+// which keeps memory bounded at the cost of one re-parse.
+fn (mut app App) prune_inlay_fn_cache() {
+	mut store := app.inlay_fn_cache_store()
+	if store.entries.len <= inlay_fn_cache_max_entries {
+		return
+	}
+	for key in store.entries.keys() {
+		if key !in app.open_files && key !in app.symbol_index {
+			store.entries.delete(key)
+		}
+	}
+	if store.entries.len > inlay_fn_cache_max_entries {
+		store.entries.clear()
+	}
+}
+
+// evict_inlay_fn_cache_under drops the fn-signature entries of the files under
+// `dir_path`: the index entries they mirror were just dropped (a workspace
+// folder was removed or its files re-walked), so the cache must not keep them.
+fn (mut app App) evict_inlay_fn_cache_under(dir_path string) {
+	mut store := app.inlay_fn_cache or { return }
+	d := dir_path.replace('\\', '/')
+	for key in store.entries.keys() {
+		if path_is_within(uri_to_path(key).replace('\\', '/'), d) {
+			store.entries.delete(key)
+		}
+	}
 }
 
 // put_inlay_fn_entry parses `content` into the shared fn index unless the
@@ -7512,7 +7556,7 @@ fn (mut store InlayFnCache) put_inlay_fn_entry(key string, fingerprint int, cont
 	}
 	store.entries[key] = InlayFnEntry{
 		fingerprint: fingerprint
-		fns: fns
+		fns:         fns
 	}
 }
 
@@ -7527,6 +7571,9 @@ fn (mut app App) collect_inlay_fn_index(uri string, working_dir string) map[stri
 		app.ensure_index_scope(scope)
 	}
 	mut store := app.inlay_fn_cache_store()
+	// The cache only grows as files are parsed; drop what the session no
+	// longer holds before it can retain every file ever indexed.
+	app.prune_inlay_fn_cache()
 	// Open buffers are authoritative; parse them directly without disk I/O.
 	for open_uri, open_content in app.open_files {
 		if open_uri == uri {
@@ -8514,7 +8561,7 @@ fn (mut app App) semantic_candidate_fast(symbol string, anchor Location, anchor_
 		content := app.index_source_for(cand.uri) or { return none }
 		fresh := SemanticFileSnapshot{
 			content: content
-			lines: content.split_into_lines()
+			lines:   content.split_into_lines()
 		}
 		file_snaps[cand.uri] = fresh
 		fresh
@@ -8561,7 +8608,7 @@ fn (mut app App) semantic_candidate_fast(symbol string, anchor Location, anchor_
 		}
 		cand_is_decl := !source_occurrence_is_method_declaration(snap.lines, cand_pos.line, start_byte)
 			&& (source_occurrence_precedes_local_declaration(snap.lines, cand_pos.line, end_byte)
-			|| is_fn_parameter_highlight(line_text, start_byte, end_byte))
+				|| is_fn_parameter_highlight(line_text, start_byte, end_byte))
 		if cand_is_decl && cand_pos.line == anchor.range.start.line {
 			return true
 		}
@@ -8638,7 +8685,7 @@ fn (mut app App) search_symbol_in_dirs_semantic(symbol string, anchor Location, 
 	}
 	anchor_is_decl := anchor_start_byte >= 0
 		&& (source_occurrence_precedes_local_declaration(anchor_lines, anchor.range.start.line, anchor_end_byte)
-		|| is_fn_parameter_highlight(anchor_line_text, anchor_start_byte, anchor_end_byte))
+			|| is_fn_parameter_highlight(anchor_line_text, anchor_start_byte, anchor_end_byte))
 	mut file_snaps := map[string]SemanticFileSnapshot{}
 	app.v3_prefetch_anchors(candidates, mut anchor_cache)
 	for cand in candidates {

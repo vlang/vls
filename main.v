@@ -36,6 +36,7 @@ fn json_response_result(result ResponseResult) string {
 }
 
 fn (mut app App) stop_standalone_session() {
+	app.cancel_and_join_line_info_workers()
 	app.cancel_all_scheduled_diagnostics()
 	app.stop_run_commands()
 	app.wait_answer_followups()
@@ -120,10 +121,10 @@ mut:
 	inlay_fn_cache                              ?&InlayFnCache              // Per-file fn→return-type cache for inlay hints (see handlers.v)
 	open_uris_cache                             map[string]string           // open_files_generation-scoped normalized path → uri map
 	open_uris_cache_gen                         int = -1 // open_files_generation at which open_uris_cache was built
-	tcp_conn                                    ?&net.TcpConn               // Non-nil when serving a TCP client
-	is_shutdown                                 bool                        // True after shutdown request was acknowledged
-	exit_was_requested                          bool                        // True when the exit notification was received
-	received_initialize                         bool                        // True after initialize request was processed
+	tcp_conn                                    ?&net.TcpConn // Non-nil when serving a TCP client
+	is_shutdown                                 bool          // True after shutdown request was acknowledged
+	exit_was_requested                          bool          // True when the exit notification was received
+	received_initialize                         bool          // True after initialize request was processed
 	next_request_id                             int = 1 // Counter for server-initiated request ids
 	diagnostics_scheduler                       ?&DiagnosticsScheduler  // Production-only async diagnostics
 	index_refresh                               ?&IndexRefreshScheduler // Production-only background index refresh (see index.v)
@@ -138,12 +139,16 @@ mut:
 	program_dir_checked                         string                 // The program the last check covered, when it covered one
 	diagnostics_cancelled                       fn () bool                         = unsafe { nil } // Whether a newer check made the running one useless
 	diagnostics_partial                         fn (uri string, found CheckErrors) = unsafe { nil } // Publishes the errors a check found before its end (see DiagnosticsServer.ask)
-	run_command_manager                         ?&RunCommandManager // Async code-lens process lifecycle
-	overlay_cache_store                         ?&OverlayCacheStore // Shared compilation overlay cache (see interop.v)
-	line_info_cancel                            ?&CancelFlag // Set while a line-info compiler run may be cancelled
+	run_command_manager                         ?&RunCommandManager    // Async code-lens process lifecycle
+	overlay_cache_store                         ?&OverlayCacheStore    // Shared compilation overlay cache (see interop.v)
+	line_info_cancel                            ?&CancelFlag           // Set while a line-info compiler run may be cancelled
 	line_info_cancels                           map[string]&CancelFlag // In-flight line-info cancels by raw id (loop thread only)
-	execute_commands_synchronously              bool                // Test hook for deterministic command assertions
-	write_mutex                                 &sync.Mutex = sync.new_mutex() // Serializes worker and request-loop writes
+	// The async line-info workers (see interop.v). The session cancels and
+	// joins them before it stops the compiler pools and drops the overlays
+	// they compile against and answer through.
+	line_info_workers              &sync.WaitGroup = sync.new_waitgroup()
+	execute_commands_synchronously bool // Test hook for deterministic command assertions
+	write_mutex                    &sync.Mutex = sync.new_mutex() // Serializes worker and request-loop writes
 	// What the compiler's answer cost, per document and method: below the budget
 	// in answer_budget.v the answer is waited for instead of answered twice.
 	compiler_answer_ms map[string]i64
@@ -1004,6 +1009,11 @@ fn (mut app App) handle_requests[T](mut reader T) {
 	defer {
 		incoming.close()
 		reading.wait()
+		// An async line-info worker compiles against a cached overlay and
+		// answers through this session's transport, so both outlive the
+		// request that scheduled them and are joined before the session
+		// stops them.
+		app.cancel_and_join_line_info_workers()
 		app.cancel_all_scheduled_diagnostics()
 		app.stop_run_commands()
 		// A deferred answer asks through the pooled compilers and writes on the

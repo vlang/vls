@@ -232,7 +232,8 @@ fn (mut app App) v3_run(project V3QueryProject, specs []string, target string) ?
 		}
 		args << ['-check', '-nocolor', target]
 		mut servers := app.v3_query_pool()
-		if result := servers.query(exe, args, project.overlay.temp_work_dir, question) {
+		if result := servers.query_cancelled(exe, args, project.overlay.temp_work_dir,
+			question, app.line_info_cancel_fn()) {
 			return if result.exit_code == 0 { result.output } else { none }
 		}
 	}
@@ -473,11 +474,9 @@ fn (mut app App) pooled_program_question(argv []string, work_dir string, questio
 	exe := resolve_diagnostics_server_exe() or { return none }
 	mut pool := app.v3_query_pool()
 	if question == '' {
-		return pool.check(exe, argv, work_dir, fn () bool {
-			return false
-		}, unsafe { nil })
+		return pool.check(exe, argv, work_dir, app.line_info_cancel_fn(), unsafe { nil })
 	}
-	return pool.query(exe, argv, work_dir, question)
+	return pool.query_cancelled(exe, argv, work_dir, question, app.line_info_cancel_fn())
 }
 
 // v3_copies returns the copies of the programs that are built and current.

@@ -5239,3 +5239,139 @@ fn test_nrw_check_dir_requires_an_unchanged_import_block() {
 	core_file := os.join_path(core_dir, 'core.v')
 	assert app.narrow_check_dir(core_file, program_dir, nested['core/core.v']) == '', 'a module reached through another keeps the program the target'
 }
+
+fn test_line_info_cancel_fn_reports_the_request_flag() {
+	mut app := &App{}
+	quiet := app.line_info_cancel_fn()
+	assert quiet() == false, 'no flag means no cancellation'
+	flag := &CancelFlag{}
+	app.line_info_cancel = flag
+	poll := app.line_info_cancel_fn()
+	assert poll() == false, 'an unset flag does not cancel'
+	flag.cancel()
+	assert poll() == true, 'a cancelled flag cancels the pooled wait'
+}
+
+fn test_line_info_snapshot_shares_the_session_query_pool() {
+	mut app := &App{
+		open_files:           map[string]string{}
+		v3_line_info_enabled: true
+	}
+	_ = app.v3_query_pool()
+	defer {
+		app.stop_v3_queries()
+	}
+	flag := &CancelFlag{}
+	snap := app.line_info_snapshot(flag)
+	assert snap.v3_query_servers == app.v3_query_servers, 'the worker reuses the session pool instead of making its own'
+	assert snap.v3_line_info_enabled == true, 'the worker keeps the session enablement'
+	assert snap.v3_one_shot_unsupported == app.v3_one_shot_unsupported, 'the worker keeps the session one-shot state'
+	assert snap.line_info_workers == app.line_info_workers, 'the worker joins through the session group'
+}
+
+fn test_cancel_and_join_line_info_workers_cancels_in_flight() {
+	mut app := &App{
+		line_info_cancels: map[string]&CancelFlag{}
+	}
+	// No workers: joining returns at once.
+	app.cancel_and_join_line_info_workers()
+	flag := &CancelFlag{}
+	app.line_info_cancels['7'] = flag
+	app.cancel_and_join_line_info_workers()
+	assert flag.is_cancelled(), 'shutdown cancels the in-flight worker flag'
+}
+
+fn cached_overlay_test_app(base string, proj string, sub string, main_content string) (&App, string, string) {
+	interop_test_must_mkdir_all(sub)
+	work := os.join_path(base, 'work')
+	interop_test_must_mkdir_all(work)
+	importer := os.join_path(proj, 'helper.v')
+	interop_test_must_write_file(importer, 'module main\n\nfn helper() int {\n\treturn 1\n}\n')
+	main_file := os.join_path(sub, 'main.v')
+	interop_test_must_write_file(main_file, 'module main\n\nfn main() {\n}\n')
+	main_uri := path_to_uri(main_file)
+	mut app := &App{
+		temp_dir:            work
+		open_files:          {
+			main_uri: main_content
+		}
+		overlay_cache_store: new_overlay_cache_store()
+	}
+	return app, main_file, importer
+}
+
+fn test_prepare_cached_overlay_keeps_line_info_importers() {
+	base := os.join_path(os.temp_dir(), 'vls_cached_importers_${os.getpid()}')
+	proj := os.join_path(base, 'proj')
+	sub := os.join_path(proj, 'sub')
+	defer {
+		os.rmdir_all(base) or {}
+	}
+	main_content := 'module main\n\nfn main() {\n\tprintln(helper())\n}\n'
+	mut app, main_file, importer := cached_overlay_test_app(base, proj, sub, main_content)
+	defer {
+		app.drop_all_overlays()
+	}
+	importer_content := os.read_file(importer) or { '' }
+	first := app.prepare_line_info_overlay(main_file, proj) or {
+		assert false, 'first cached overlay must succeed: ${err}'
+		return
+	}
+	assert os.read_file(first.temp_source_file) or { '' } == main_content, 'the buffer is materialized'
+	first_copy := os.join_path(first.temp_root, 'helper.v')
+	assert !os.is_link(first_copy), 'the cached tree holds the importer as a file, not a symlink'
+	assert os.read_file(first_copy) or { '' } == importer_content, 'the importer content is materialized'
+	// A cache hit keeps the importer: it is part of the tracked set, not
+	// re-linked from disk.
+	second := app.prepare_line_info_overlay(main_file, proj) or {
+		assert false, 'second cached overlay must succeed: ${err}'
+		return
+	}
+	assert second.temp_root == first.temp_root, 'the second request hits the cache'
+	second_copy := os.join_path(second.temp_root, 'helper.v')
+	assert !os.is_link(second_copy), 'the cache hit keeps the importer as a file'
+	assert os.read_file(second_copy) or { '' } == importer_content, 'the cache hit keeps the importer content'
+}
+
+fn test_invalidate_overlay_for_disk_change_stales_only_covering_entries() {
+	base := os.join_path(os.temp_dir(), 'vls_overlay_invalidate_${os.getpid()}')
+	proj := os.join_path(base, 'proj')
+	sub := os.join_path(proj, 'sub')
+	defer {
+		os.rmdir_all(base) or {}
+	}
+	main_content := 'module main\n\nfn main() {\n\tprintln(helper())\n}\n'
+	mut app, main_file, _ := cached_overlay_test_app(base, proj, sub, main_content)
+	defer {
+		app.drop_all_overlays()
+	}
+	first := app.prepare_line_info_overlay(main_file, proj) or {
+		assert false, 'cached overlay must succeed: ${err}'
+		return
+	}
+	mut store := app.overlay_cache_store or {
+		assert false, 'the cached path sets the store'
+		return
+	}
+	mut key := ''
+	for k in store.entries.keys() {
+		key = k
+	}
+	entry := store.entries[key] or {
+		assert false, 'the cached entry exists'
+		return
+	}
+	assert entry.built_ms > 0, 'a fresh entry is trusted'
+	// A file outside the project leaves the entry alone.
+	app.invalidate_overlay_for_disk_change(os.join_path(base, 'elsewhere.v'))
+	assert (store.entries[key] or { entry }).built_ms == entry.built_ms, 'an unrelated path invalidates nothing'
+	// A created file inside the project stales the entry, so the next
+	// request rebuilds the tree instead of refreshing the old listing.
+	app.invalidate_overlay_for_disk_change(os.join_path(proj, 'new.v'))
+	assert (store.entries[key] or { entry }).built_ms == 0, 'a disk create stales the covering entry'
+	second := app.prepare_line_info_overlay(main_file, proj) or {
+		assert false, 'overlay after invalidation must succeed: ${err}'
+		return
+	}
+	assert second.temp_root != first.temp_root, 'a staled entry rebuilds the tree'
+}
