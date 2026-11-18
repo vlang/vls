@@ -7,27 +7,41 @@ import os
 import sync
 import time
 
-// Wait until typing pauses before starting a compiler process. Completion requests
-// can then overtake diagnostics instead of sitting behind a compile on every key.
-const diagnostics_debounce_ms = 300
-const diagnostics_worker_poll = 25 * time.millisecond
+// A check starts as soon as a change arrives: a newer change stops the check
+// that runs, whose answer would be stale, and a question goes to a server of
+// its own, which a check does not hold (see DiagnosticsServer.busy). The worker
+// looks for ready jobs often while one waits for its time.
+// The fast tier answers from the index without a compiler; the slow tier
+// runs the full check after the user pauses. The slow answer replaces the
+// fast one, so a fast finding the check does not reproduce is corrected.
+const diagnostics_fast_debounce_ms = 150
+const diagnostics_slow_debounce_ms = 800
+const diagnostics_worker_poll = 5 * time.millisecond
+
+// DiagnosticsKind is the tier a job belongs to. Slow is the zero value, so
+// a job built without a kind behaves like today's single-tier check.
+enum DiagnosticsKind {
+	slow
+	fast
+}
 
 struct DiagnosticsJob {
 	uri                 string
 	content             string
-	overlay_store       ?&OverlayCacheStore
-	scheduler           ?&DiagnosticsScheduler
 	version             ?i64
 	project_key         string
 	project_generation  u64
 	position_encoding   PositionEncoding
 	open_files          map[string]string
 	project_generations map[string]int
-	write_mutex         &sync.Mutex
-	tcp_conn            ?&net.TcpConn
-	global_generation   u64
-	generation          u64
-	ready_at            i64
+	// The worker must see the request loop's editor defines and project config.
+	config_store      &VlsConfigStore = &VlsConfigStore{}
+	write_mutex       &sync.Mutex
+	tcp_conn          ?&net.TcpConn
+	global_generation u64
+	generation        u64
+	ready_at          i64
+	kind              DiagnosticsKind
 }
 
 struct DiagnosticsTicket {
@@ -35,6 +49,14 @@ struct DiagnosticsTicket {
 	global_generation  u64
 	generation         u64
 	project_generation u64
+	kind               DiagnosticsKind
+}
+
+// diagnostics_job_key identifies a pending job: one URI holds a fast and a
+// slow job with independent debounce deadlines.
+fn diagnostics_job_key(uri string, kind DiagnosticsKind) string {
+	suffix := if kind == .fast { 'fast' } else { 'slow' }
+	return '${uri}\x00${suffix}'
 }
 
 struct DiagnosticsProjectMutation {
@@ -43,40 +65,44 @@ struct DiagnosticsProjectMutation {
 }
 
 @[heap]
-// ProjectDiagResult caches one project-wide compiler run for batching: the
-// unfiltered errors plus the overlay layout needed to map them back to
-// source paths. Only shared-overlay runs are stored, so the layout stays
-// valid while the entry is reachable.
-struct ProjectDiagResult {
-	generation          int
-	errors              []JsonError
-	temp_root           string
-	temp_work_dir       string
-	source_display_root string
-}
-
 struct DiagnosticsScheduler {
 mut:
 	mutex               sync.Mutex
 	generations         map[string]u64
 	project_generations map[string]u64
-	diag_results        map[string]DiagCacheEntry
-	project_results     map[string]ProjectDiagResult
 	global_generation   u64
 	pending_jobs        map[string]DiagnosticsJob
 	worker_running      bool
-	active_uri          string
-	active_project_key  string
-	active_generation   u64
+	worker_started      bool
+	worker_done         chan bool
+	stopped             bool
+	// Shared diagnostics cache populated by worker checks, so pull requests
+	// (handle_pull_diagnostic) can serve the errors a check published even
+	// though they run on the main App, whose own diag_cache the worker never
+	// touches (P1: pull diagnostics never receive async results).
+	diag_cache         map[string]DiagCacheEntry
+	active_uri         string
+	active_project_key string
+	active_generation  u64
+	// The open files the last check of each program answered for, by program
+	// directory.
+	program_members map[string][]string
+	// The diagnostics servers outlive the worker, which exits when idle. Each
+	// one parses and collects builtin once, and they answer the questions about
+	// the programs they check too, from the same checks (see ProgramCopy).
+	servers &DiagnosticsServerPool = new_shared_diagnostics_server_pool()
+	// A paused scheduler starts no worker and keeps its jobs pending: a test
+	// can look at the queue a change leaves, which a check started at once
+	// would empty.
+	paused bool
 }
 
 fn new_diagnostics_scheduler() &DiagnosticsScheduler {
 	return &DiagnosticsScheduler{
-		generations: map[string]u64{}
+		generations:         map[string]u64{}
 		project_generations: map[string]u64{}
-		pending_jobs: map[string]DiagnosticsJob{}
-		diag_results: map[string]DiagCacheEntry{}
-		project_results: map[string]ProjectDiagResult{}
+		pending_jobs:        map[string]DiagnosticsJob{}
+		diag_cache:          map[string]DiagCacheEntry{}
 	}
 }
 
@@ -92,12 +118,13 @@ fn (mut scheduler DiagnosticsScheduler) next_generation(uri string) (u64, u64) {
 // begin_project_schedule invalidates jobs whose snapshots include an older
 // buffer from the same project, then returns tickets for replacement jobs.
 fn (mut scheduler DiagnosticsScheduler) begin_project_schedule(uri string, project_key string) []DiagnosticsTicket {
-	return scheduler.begin_project_mutation(project_key, uri)
+	return scheduler.begin_project_mutation(project_key, uri, [])
 }
 
 // begin_project_mutation invalidates pending and active jobs in a project. A
-// non-empty requested_uri also schedules diagnostics for that document.
-fn (mut scheduler DiagnosticsScheduler) begin_project_mutation(project_key string, requested_uri string) []DiagnosticsTicket {
+// non-empty requested_uri also schedules diagnostics for that document, and
+// `others` for documents the mutation can change the diagnostics of.
+fn (mut scheduler DiagnosticsScheduler) begin_project_mutation(project_key string, requested_uri string, others []string) []DiagnosticsTicket {
 	scheduler.mutex.lock()
 	defer {
 		scheduler.mutex.unlock()
@@ -106,29 +133,43 @@ fn (mut scheduler DiagnosticsScheduler) begin_project_mutation(project_key strin
 	if requested_uri != '' {
 		affected[requested_uri] = true
 	}
-	mut pending_uris := []string{}
-	for pending_uri, job in scheduler.pending_jobs {
+	for other in others {
+		affected[other] = true
+	}
+	mut pending_keys := []string{}
+	for key, job in scheduler.pending_jobs {
 		if job.project_key == project_key {
-			affected[pending_uri] = true
-			pending_uris << pending_uri
+			affected[job.uri] = true
+			pending_keys << key
 		}
 	}
-	for pending_uri in pending_uris {
-		scheduler.pending_jobs.delete(pending_uri)
+	for key in pending_keys {
+		scheduler.pending_jobs.delete(key)
 	}
 	if scheduler.active_project_key == project_key && scheduler.active_uri != '' {
 		affected[scheduler.active_uri] = true
 	}
 	scheduler.project_generations[project_key] = scheduler.project_generations[project_key] + 1
 	project_generation := scheduler.project_generations[project_key]
-	mut tickets := []DiagnosticsTicket{cap: affected.len}
+	if requested_uri != '' {
+		// The document changed, so the last published result no longer describes
+		// it: drop it rather than letting a pull re-serve fixed errors until
+		// the new check completes. Other affected documents keep their entries:
+		// their content did not change, so the last published result is still
+		// what a pull must agree with until their recheck publishes.
+		scheduler.diag_cache.delete(requested_uri)
+	}
+	mut tickets := []DiagnosticsTicket{cap: affected.len * 2}
 	for affected_uri, _ in affected {
 		scheduler.generations[affected_uri] = scheduler.generations[affected_uri] + 1
-		tickets << DiagnosticsTicket{
-			uri: affected_uri
-			global_generation: scheduler.global_generation
-			generation: scheduler.generations[affected_uri]
-			project_generation: project_generation
+		for kind in [DiagnosticsKind.slow, DiagnosticsKind.fast] {
+			tickets << DiagnosticsTicket{
+				uri:                affected_uri
+				global_generation:  scheduler.global_generation
+				generation:         scheduler.generations[affected_uri]
+				project_generation: project_generation
+				kind:               kind
+			}
 		}
 	}
 	return tickets
@@ -145,14 +186,6 @@ fn (mut scheduler DiagnosticsScheduler) is_current(uri string, global_generation
 fn (scheduler &DiagnosticsScheduler) is_current_locked(uri string, global_generation u64, generation u64) bool {
 	return scheduler.global_generation == global_generation
 		&& scheduler.generations[uri] == generation
-}
-
-fn (mut scheduler DiagnosticsScheduler) is_generation_current(global_generation u64) bool {
-	scheduler.mutex.lock()
-	defer {
-		scheduler.mutex.unlock()
-	}
-	return scheduler.global_generation == global_generation
 }
 
 fn (mut scheduler DiagnosticsScheduler) is_job_current(job DiagnosticsJob) bool {
@@ -175,8 +208,18 @@ fn (mut scheduler DiagnosticsScheduler) enqueue(job DiagnosticsJob) bool {
 	defer {
 		scheduler.mutex.unlock()
 	}
-	scheduler.pending_jobs[job.uri] = job
+	if scheduler.stopped {
+		return false
+	}
+	scheduler.pending_jobs[diagnostics_job_key(job.uri, job.kind)] = job
+	if scheduler.paused {
+		return false
+	}
 	should_start := !scheduler.worker_running
+	if should_start {
+		scheduler.worker_started = true
+		scheduler.worker_done = chan bool{}
+	}
 	scheduler.worker_running = true
 	return should_start
 }
@@ -188,22 +231,40 @@ fn (mut scheduler DiagnosticsScheduler) take_ready_jobs(now i64) ([]DiagnosticsJ
 	defer {
 		scheduler.mutex.unlock()
 	}
-	mut ready := []DiagnosticsJob{}
+	mut ready := []DiagnosticsJob{cap: 1}
+	mut ready_key := ''
 	if scheduler.active_uri == '' {
-		for _, job in scheduler.pending_jobs {
-			if job.ready_at <= now {
+		// A ready fast job wins over a ready slow one: index answers publish
+		// while the compiler check still waits out its longer debounce.
+		mut slow_key := ''
+		mut has_slow := false
+		for key, job in scheduler.pending_jobs {
+			if job.ready_at > now {
+				continue
+			}
+			if job.kind == .fast {
 				ready << job
+				ready_key = key
+				break
+			}
+			if !has_slow {
+				has_slow = true
+				slow_key = key
 			}
 		}
-		for job in ready {
-			scheduler.pending_jobs.delete(job.uri)
+		if ready_key == '' && has_slow {
+			if slow_job := scheduler.pending_jobs[slow_key] {
+				ready << slow_job
+				ready_key = slow_key
+			}
 		}
-		if ready.len > 0 {
-			first := ready[0]
-			scheduler.active_uri = first.uri
-			scheduler.active_project_key = first.project_key
-			scheduler.active_generation = first.generation
-		}
+	}
+	if ready_key != '' {
+		job := ready[0]
+		scheduler.pending_jobs.delete(ready_key)
+		scheduler.active_uri = job.uri
+		scheduler.active_project_key = job.project_key
+		scheduler.active_generation = job.generation
 	}
 	should_stop := ready.len == 0 && scheduler.pending_jobs.len == 0
 		&& scheduler.active_uri == ''
@@ -211,6 +272,43 @@ fn (mut scheduler DiagnosticsScheduler) take_ready_jobs(now i64) ([]DiagnosticsJ
 		scheduler.worker_running = false
 	}
 	return ready, should_stop
+}
+
+// rush_pending_slow_job moves the deadline of the pending slow job of `uri` to
+// now, so the check a read waits for starts on the worker's next poll instead of
+// waiting out its debounce: a question about the program — a hover, a definition,
+// a signature — is answered against what the editor already shows, and until the
+// slow check publishes that is last-keystroke's overlay (clangd's debounce
+// policy "read"). A busy worker is never jumped, and a job a newer change
+// superseded is left waiting, because the generation checks decide what runs.
+fn (mut scheduler DiagnosticsScheduler) rush_pending_slow_job(uri string) {
+	scheduler.mutex.lock()
+	defer {
+		scheduler.mutex.unlock()
+	}
+	if scheduler.active_uri != '' {
+		return
+	}
+	slow_key := diagnostics_job_key(uri, .slow)
+	job := scheduler.pending_jobs[slow_key] or { return }
+	if !scheduler.is_job_current_locked(job) {
+		return
+	}
+	// The fast tier publishes first and the slow answer supersedes it, so a fast
+	// job of the same project still waiting out its own debounce holds this one
+	// back: flushed past it, the two would publish the wrong way round. One that
+	// is already due is taken on the poll before this one, so the order holds
+	// there too.
+	now := time.now().unix_milli()
+	for _, pending in scheduler.pending_jobs {
+		if pending.kind == .fast && pending.project_key == job.project_key && pending.ready_at > now {
+			return
+		}
+	}
+	scheduler.pending_jobs[slow_key] = DiagnosticsJob{
+		...job
+		ready_at: now
+	}
 }
 
 fn (mut scheduler DiagnosticsScheduler) finish(job DiagnosticsJob) {
@@ -223,67 +321,83 @@ fn (mut scheduler DiagnosticsScheduler) finish(job DiagnosticsJob) {
 	scheduler.mutex.unlock()
 }
 
-// cached_diag returns scheduler-cached checker errors for `uri` when they were
-// computed for exactly this content hash and project generation. The cache is
-// populated whenever a diagnostics job (or a synchronous check) publishes, so
-// repeat requests such as reopening or re-saving an unchanged file reuse the
-// result instead of spawning another `v` process.
-fn (mut scheduler DiagnosticsScheduler) cached_diag(uri string, content_hash int, generation int) ?[]JsonError {
+// clear_published_diagnostics forgets every push result. A change of editor
+// defines or a global diagnostics switch invalidates the meaning of all results.
+fn (mut scheduler DiagnosticsScheduler) clear_published_diagnostics() {
 	scheduler.mutex.lock()
 	defer {
 		scheduler.mutex.unlock()
 	}
-	if entry := scheduler.diag_results[uri] {
-		if entry.content_hash == content_hash && entry.generation == generation {
-			return entry.errors
+	scheduler.diag_cache.clear()
+}
+
+// clear_published_diagnostics_for_root forgets only one project's results
+// when its vls.json or resolved configuration changes.
+fn (mut scheduler DiagnosticsScheduler) clear_published_diagnostics_for_root(root string) {
+	scheduler.mutex.lock()
+	defer {
+		scheduler.mutex.unlock()
+	}
+	root_path := normalize_overlay_path(root)
+	mut stale := []string{}
+	for uri, _ in scheduler.diag_cache {
+		if path_is_within(normalize_overlay_path(uri_to_path(uri)), root_path) {
+			stale << uri
 		}
+	}
+	for uri in stale {
+		scheduler.diag_cache.delete(uri)
+	}
+}
+
+// forget_published_errors drops the last published result for `uri`, so a
+// pull stops serving it. Lock-guarded: callers outside the scheduler mutex
+// (the request loop, the worker) must not touch the map directly.
+fn (mut scheduler DiagnosticsScheduler) forget_published_errors(uri string) {
+	scheduler.mutex.lock()
+	defer {
+		scheduler.mutex.unlock()
+	}
+	scheduler.diag_cache.delete(uri)
+}
+
+// diag_cache_entry returns the cached errors for `uri` from the shared cache.
+fn (mut scheduler DiagnosticsScheduler) diag_cache_entry(uri string) ?DiagCacheEntry {
+	scheduler.mutex.lock()
+	defer {
+		scheduler.mutex.unlock()
+	}
+	if entry := scheduler.diag_cache[uri] {
+		return entry
 	}
 	return none
 }
 
-fn (mut scheduler DiagnosticsScheduler) store_diag(uri string, content_hash int, generation int, errors []JsonError) {
+// check_in_flight reports whether a check for the document at `uri` waits for
+// its debounce deadline or already runs. Either holds the compilers of the
+// buffers it checks, so a question about the same files asked alongside it is
+// answered late (see answer_budget.v).
+fn (mut scheduler DiagnosticsScheduler) check_in_flight(uri string) bool {
 	scheduler.mutex.lock()
 	defer {
 		scheduler.mutex.unlock()
 	}
-	scheduler.diag_results[uri] = DiagCacheEntry{
-		content_hash: content_hash
-		generation: generation
-		errors: errors
+	if scheduler.active_uri == uri {
+		return true
 	}
-}
-
-fn (mut scheduler DiagnosticsScheduler) store_project_diag(key string, generation int, errors []JsonError, temp_root string, temp_work_dir string, source_display_root string) {
-	scheduler.mutex.lock()
-	defer {
-		scheduler.mutex.unlock()
-	}
-	scheduler.project_results[key] = ProjectDiagResult{
-		generation: generation
-		errors: errors
-		temp_root: temp_root
-		temp_work_dir: temp_work_dir
-		source_display_root: source_display_root
-	}
-}
-
-fn (mut scheduler DiagnosticsScheduler) cached_project_diag(key string, generation int) ?ProjectDiagResult {
-	scheduler.mutex.lock()
-	defer {
-		scheduler.mutex.unlock()
-	}
-	if entry := scheduler.project_results[key] {
-		if entry.generation == generation {
-			return entry
+	for key in [diagnostics_job_key(uri, .slow), diagnostics_job_key(uri, .fast)] {
+		if key in scheduler.pending_jobs {
+			return true
 		}
 	}
-	return none
+	return false
 }
 
 fn (mut scheduler DiagnosticsScheduler) cancel(uri string) {
 	scheduler.mutex.lock()
 	scheduler.generations[uri] = scheduler.generations[uri] + 1
-	scheduler.pending_jobs.delete(uri)
+	scheduler.pending_jobs.delete(diagnostics_job_key(uri, .slow))
+	scheduler.pending_jobs.delete(diagnostics_job_key(uri, .fast))
 	scheduler.mutex.unlock()
 }
 
@@ -294,27 +408,45 @@ fn (mut scheduler DiagnosticsScheduler) cancel_all() {
 	scheduler.mutex.unlock()
 }
 
+// stop_and_wait cancels the session's last check and waits for its compiler,
+// files and transport borrower to be released before the session can return.
+fn (mut scheduler DiagnosticsScheduler) stop_and_wait() {
+	scheduler.mutex.lock()
+	scheduler.stopped = true
+	scheduler.global_generation++
+	scheduler.pending_jobs.clear()
+	started := scheduler.worker_started
+	done := scheduler.worker_done
+	scheduler.mutex.unlock()
+	scheduler.servers.stop_all()
+	if started {
+		_ := <-done or {}
+	}
+	scheduler.servers.wait_closed()
+}
+
 fn (mut app App) schedule_diagnostics(uri string, content string) bool {
 	mutation := app.begin_diagnostics_project_schedule(uri)
 	return app.finish_diagnostics_project_schedule(mutation, uri, content)
 }
 
 fn (mut app App) begin_diagnostics_project_schedule(uri string) DiagnosticsProjectMutation {
-	if !app.diagnostics_enabled {
+	if !app.diagnostics_enabled_for_uri(uri) {
+		app.cancel_scheduled_diagnostics(uri)
 		return DiagnosticsProjectMutation{}
 	}
 	if mut scheduler := app.diagnostics_scheduler {
 		project_key := app.generation_key(uri)
 		return DiagnosticsProjectMutation{
 			project_key: project_key
-			tickets: scheduler.begin_project_schedule(uri, project_key)
+			tickets:     scheduler.begin_project_schedule(uri, project_key)
 		}
 	}
 	return DiagnosticsProjectMutation{}
 }
 
 fn (mut app App) finish_diagnostics_project_schedule(mutation DiagnosticsProjectMutation, uri string, content string) bool {
-	if !app.diagnostics_enabled || mutation.tickets.len == 0 {
+	if mutation.tickets.len == 0 || !app.diagnostics_enabled_for_uri(uri) {
 		return false
 	}
 	if mut scheduler := app.diagnostics_scheduler {
@@ -328,17 +460,41 @@ fn (mut app App) finish_diagnostics_project_schedule(mutation DiagnosticsProject
 // changes. finish_diagnostics_project_mutation rebuilds them from fresh state.
 fn (mut app App) begin_diagnostics_project_mutation(uri string) DiagnosticsProjectMutation {
 	if mut scheduler := app.diagnostics_scheduler {
+		// The changed document's last published result no longer describes it.
+		// The schedule path drops its own document through the requested URI;
+		// this path carries none, so drop it here instead.
+		scheduler.forget_published_errors(uri)
 		project_key := app.generation_key(uri)
 		return DiagnosticsProjectMutation{
 			project_key: project_key
-			tickets: scheduler.begin_project_mutation(project_key, '')
+			tickets:     scheduler.begin_project_mutation(project_key, '', app.open_files_affected_by(uri,
+				project_key))
 		}
 	}
 	return DiagnosticsProjectMutation{}
 }
 
+// open_files_affected_by returns the other open files whose diagnostics a change
+// to the file at `uri` can change without them changing: those of its project,
+// and those of any program whose directory holds it, since creating, deleting or
+// renaming a file there decides whether an import resolves.
+fn (app &App) open_files_affected_by(uri string, project_key string) []string {
+	changed := normalize_overlay_path(uri_to_path(uri))
+	mut affected := []string{}
+	for open_uri, _ in app.open_files {
+		if open_uri == uri {
+			continue
+		}
+		key := app.generation_key(open_uri)
+		if key == project_key || path_is_within(changed, normalize_overlay_path(key)) {
+			affected << open_uri
+		}
+	}
+	return affected
+}
+
 fn (mut app App) finish_diagnostics_project_mutation(mutation DiagnosticsProjectMutation, excluded_uri string) {
-	if !app.diagnostics_enabled || mutation.tickets.len == 0 {
+	if mutation.tickets.len == 0 {
 		return
 	}
 	if mut scheduler := app.diagnostics_scheduler {
@@ -347,10 +503,37 @@ fn (mut app App) finish_diagnostics_project_mutation(mutation DiagnosticsProject
 }
 
 fn (mut app App) enqueue_diagnostics_tickets(mut scheduler DiagnosticsScheduler, tickets []DiagnosticsTicket, project_key string, changed_uri string, changed_content string, excluded_uri string) {
-	ready_at := time.now().unix_milli() + diagnostics_debounce_ms
+	now := time.now().unix_milli()
 	mut should_start := false
+	// Every job of one mutation sees the same buffers, so the snapshot is
+	// cloned once. Cloning per ticket made a mutation cost two clones per
+	// affected URI, which is where the keystroke time went on a wide project.
+	job_open_files := app.open_files.clone()
+	job_generations := app.project_generations.clone()
+	mut cleared := map[string]bool{}
 	for ticket in tickets {
 		if ticket.uri == excluded_uri {
+			continue
+		}
+		if !app.diagnostics_enabled_for_uri(ticket.uri) {
+			// A project disabling diagnostics must clear its own existing
+			// markers without affecting other projects' queued checks.
+			if ticket.uri !in cleared {
+				cleared[ticket.uri] = true
+				scheduler.forget_published_errors(ticket.uri)
+				app.write_notification(Notification{
+					method: 'textDocument/publishDiagnostics'
+					params: PublishDiagnosticsParams{
+						uri:         ticket.uri
+						version:     if ticket.uri in app.open_files_versions {
+							?i64(app.open_files_versions[ticket.uri])
+						} else {
+							none
+						}
+						diagnostics: []LSPDiagnostic{}
+					}
+				})
+			}
 			continue
 		}
 		job_content := if ticket.uri == changed_uri {
@@ -364,22 +547,27 @@ fn (mut app App) enqueue_diagnostics_tickets(mut scheduler DiagnosticsScheduler,
 		if current_version := app.open_files_versions[ticket.uri] {
 			version = current_version
 		}
+		ready_at := if ticket.kind == .fast {
+			now + diagnostics_fast_debounce_ms
+		} else {
+			now + diagnostics_slow_debounce_ms
+		}
 		job := DiagnosticsJob{
-			uri: ticket.uri
-			content: job_content
-			overlay_store: app.overlay_cache_store
-			scheduler: app.diagnostics_scheduler
-			version: version
-			project_key: project_key
-			project_generation: ticket.project_generation
-			position_encoding: app.position_encoding
-			open_files: app.open_files.clone()
-			project_generations: app.project_generations.clone()
-			write_mutex: app.write_mutex
-			tcp_conn: app.tcp_conn
-			global_generation: ticket.global_generation
-			generation: ticket.generation
-			ready_at: ready_at
+			uri:                 ticket.uri
+			content:             job_content
+			version:             version
+			project_key:         project_key
+			project_generation:  ticket.project_generation
+			position_encoding:   app.position_encoding
+			open_files:          job_open_files
+			project_generations: job_generations
+			config_store:        app.config_store
+			write_mutex:         app.write_mutex
+			tcp_conn:            app.tcp_conn
+			global_generation:   ticket.global_generation
+			generation:          ticket.generation
+			ready_at:            ready_at
+			kind:                ticket.kind
 		}
 		if scheduler.enqueue(job) {
 			should_start = true
@@ -393,6 +581,7 @@ fn (mut app App) enqueue_diagnostics_tickets(mut scheduler DiagnosticsScheduler,
 fn (mut app App) cancel_scheduled_diagnostics(uri string) {
 	if mut scheduler := app.diagnostics_scheduler {
 		scheduler.cancel(uri)
+		scheduler.forget_published_errors(uri)
 	}
 }
 
@@ -402,155 +591,62 @@ fn (mut app App) cancel_all_scheduled_diagnostics() {
 	}
 }
 
-// publish_group_if_current publishes one file's share of a batched project
-// check. The result was compiled from the latest snapshot, so per-file and
-// per-project generations are not rechecked; a shutdown or a closed document
-// still suppresses the publish.
-fn (mut scheduler DiagnosticsScheduler) publish_group_if_current(mut app App, job DiagnosticsJob, notification Notification) bool {
-	scheduler.mutex.lock()
-	defer {
-		scheduler.mutex.unlock()
-	}
-	if scheduler.global_generation != job.global_generation {
-		return false
-	}
-	if job.uri !in app.open_files {
-		return false
-	}
-	app.write_notification(notification)
-	return true
-}
-
-// run_diagnostics_batch compiles one shared project snapshot for a group of
-// same-project jobs and publishes per-file results. Opening N files schedules
-// N jobs for one project; without batching each would run a full `v check`
-// serially even though a single project check answers all of them.
-fn run_diagnostics_batch(mut scheduler DiagnosticsScheduler, group []DiagnosticsJob) {
-	mut leader_idx := 0
-	for i, job in group {
-		if job.project_generation > group[leader_idx].project_generation
-			|| (job.project_generation == group[leader_idx].project_generation
-			&& job.generation > group[leader_idx].generation) {
-			leader_idx = i
-		}
-	}
-	leader := group[leader_idx]
-	if !scheduler.is_generation_current(leader.global_generation) {
-		for job in group {
-			scheduler.finish(job)
-		}
+// rush_pending_diagnostics starts the slow check of `uri` at once, when one is
+// pending and the worker is idle, so a request answered while a check waits does
+// not read last-keystroke's overlay: the compiler that answers the question
+// checks the same program the check is about to, which warms the check into the
+// bargain (clangd's debounce policy "read"). It asks the scheduler and nothing
+// more — no job is queued, none is started — and it asks nothing when
+// diagnostics are off, since a check is either pending for a reason or none at
+// all, which makes it safe on every request path.
+fn (mut app App) rush_pending_diagnostics(uri string) {
+	if !app.diagnostics_enabled_for_uri(uri) {
 		return
 	}
-	log('diagnostics batch: project=${leader.project_key} jobs=${group.len}')
-	temp_dir := os.join_path(os.temp_dir(), 'vls_diag_${os.getpid()}_${leader.generation}_${time.now().unix_nano()}')
-	os.mkdir_all(temp_dir) or {
-		for job in group {
-			scheduler.finish(job)
-		}
-		return
-	}
-	defer {
-		os.rmdir_all(temp_dir) or {}
-	}
-	mut versions := map[string]i64{}
-	if version := leader.version {
-		versions[leader.uri] = version
-	}
-	mut worker := App{
-		text: leader.content
-		open_files: leader.open_files
-		open_files_versions: versions
-		temp_dir: temp_dir
-		diagnostics_enabled: true
-		diag_cache: map[string]DiagCacheEntry{}
-		project_generations: leader.project_generations
-		position_encoding: leader.position_encoding
-		write_mutex: leader.write_mutex
-		tcp_conn: leader.tcp_conn
-		overlay_cache_store: leader.overlay_store
-		diagnostics_scheduler: leader.scheduler
-	}
-	leader_errors := worker.run_v_check(leader.uri, leader.content)
-	leader_key := worker.generation_key(leader.uri)
-	leader_gen := worker.project_generation(leader.uri)
-	for job in group {
-		scheduler.finish(job)
-	}
-	content_hash := leader.content.hash()
-	if entry := worker.diag_cache[leader.uri] {
-		if entry.content_hash == content_hash && entry.generation == leader_gen {
-			scheduler.store_diag(leader.uri, content_hash, leader_gen, entry.errors)
-		}
-	}
-	notification := worker.build_diagnostics_notification_for_errors(leader.uri, leader.content, leader_errors)
-	scheduler.publish_if_current(mut worker, leader, notification)
-	project_errors := scheduler.cached_project_diag(leader_key, leader_gen)
-	for job in group {
-		if job.uri == leader.uri {
-			continue
-		}
-		proj := project_errors or {
-			if scheduler.is_job_current(job) {
-				run_diagnostics_job(mut scheduler, job)
-			}
-			continue
-		}
-		member_content := leader.open_files[job.uri] or {
-			if scheduler.is_job_current(job) {
-				run_diagnostics_job(mut scheduler, job)
-			}
-			continue
-		}
-		if member_content != job.content {
-			if scheduler.is_job_current(job) {
-				run_diagnostics_job(mut scheduler, job)
-			}
-			continue
-		}
-		member_overlay := CompilationOverlay{
-			temp_root: proj.temp_root
-			temp_work_dir: proj.temp_work_dir
-			source_display_root: proj.source_display_root
-		}
-		filtered := filter_v_errors_to_file(proj.errors, member_overlay, uri_to_path(job.uri))
-		member_hash := job.content.hash()
-		member_gen := job.project_generations[job.project_key]
-		scheduler.store_diag(job.uri, member_hash, member_gen, filtered)
-		mut member_versions := map[string]i64{}
-		if version := job.version {
-			member_versions[job.uri] = version
-		}
-		mut member_app := App{
-			text: job.content
-			open_files_versions: member_versions
-			position_encoding: job.position_encoding
-			diagnostics_enabled: true
-		}
-		member_notification := member_app.build_diagnostics_notification_for_errors(job.uri, job.content, filtered)
-		scheduler.publish_group_if_current(mut worker, job, member_notification)
+	if mut scheduler := app.diagnostics_scheduler {
+		scheduler.rush_pending_slow_job(uri)
 	}
 }
 
 fn run_diagnostics_worker(mut scheduler DiagnosticsScheduler) {
+	scheduler.mutex.lock()
+	done := scheduler.worker_done
+	scheduler.mutex.unlock()
+	defer {
+		done.close()
+	}
 	for {
-		time.sleep(diagnostics_worker_poll)
 		jobs, should_stop := scheduler.take_ready_jobs(time.now().unix_milli())
 		if should_stop {
 			return
 		}
-		mut groups := map[string][]DiagnosticsJob{}
-		for job in jobs {
-			mut g := groups[job.project_key] or { []DiagnosticsJob{} }
-			g << job
-			groups[job.project_key] = g
-		}
-		for _, group in groups {
-			if group.len == 1 {
-				run_diagnostics_job(mut scheduler, group[0])
-				scheduler.finish(group[0])
-			} else {
-				run_diagnostics_batch(mut scheduler, group)
+		if jobs.len == 0 {
+			scheduler.mutex.lock()
+			mut delay := i64(diagnostics_worker_poll / time.millisecond)
+			now_ms := time.now().unix_milli()
+			for _, job in scheduler.pending_jobs {
+				d := job.ready_at - now_ms
+				if d > 0 && d < delay {
+					delay = d
+				}
 			}
+			if scheduler.pending_jobs.len == 0 {
+				delay = i64(diagnostics_worker_poll / time.millisecond)
+			}
+			scheduler.mutex.unlock()
+			if delay < 1 {
+				delay = 1
+			}
+			time.sleep(delay * time.millisecond)
+			continue
+		}
+		for job in jobs {
+			if job.kind == .fast {
+				run_fast_diagnostics_job(mut scheduler, job)
+			} else {
+				run_diagnostics_job(mut scheduler, job)
+			}
+			scheduler.finish(job)
 		}
 	}
 }
@@ -559,6 +655,8 @@ fn run_diagnostics_job(mut scheduler DiagnosticsScheduler, job DiagnosticsJob) {
 	if !scheduler.is_job_current(job) {
 		return
 	}
+	// Phase 0 baseline: opt-in timing for the full diagnostics job.
+	started_ms := time.now().unix_milli()
 	temp_dir := os.join_path(os.temp_dir(), 'vls_diag_${os.getpid()}_${job.generation}_${time.now().unix_nano()}')
 	os.mkdir_all(temp_dir) or { return }
 	defer {
@@ -569,42 +667,110 @@ fn run_diagnostics_job(mut scheduler DiagnosticsScheduler, job DiagnosticsJob) {
 		versions[job.uri] = version
 	}
 	mut worker := App{
-		text: job.content
-		open_files: job.open_files
-		overlay_cache_store: job.overlay_store
-		diagnostics_scheduler: job.scheduler
-		open_files_versions: versions
-		temp_dir: temp_dir
-		diagnostics_enabled: true
-		diag_cache: map[string]DiagCacheEntry{}
-		project_generations: job.project_generations
-		position_encoding: job.position_encoding
-		write_mutex: job.write_mutex
-		tcp_conn: job.tcp_conn
-	}
-	content_hash := job.content.hash()
-	gen := job.project_generations[job.project_key]
-	v_errors := if cached_errors := scheduler.cached_diag(job.uri, content_hash, gen) {
-		log('Reusing scheduler-cached diagnostics for ${job.uri}')
-		cached_errors
-	} else {
-		worker.run_v_check(job.uri, job.content)
-	}
-	notification := worker.build_diagnostics_notification_for_errors(job.uri, job.content, v_errors)
-	// Mirror the worker's cache decision into the scheduler cache: the entry
-	// is present exactly when the check was cacheable (no timeout or crash),
-	// so the scheduler learns the same rule without a signature change.
-	if entry := worker.diag_cache[job.uri] {
-		if entry.content_hash == content_hash && entry.generation == gen {
-			scheduler.store_diag(job.uri, content_hash, gen, entry.errors)
+		text:                  job.content
+		open_files:            job.open_files
+		open_files_versions:   versions
+		temp_dir:              temp_dir
+		diagnostics_enabled:   true
+		diag_cache:            map[string]DiagCacheEntry{}
+		project_generations:   job.project_generations
+		config_store:          job.config_store
+		position_encoding:     job.position_encoding
+		write_mutex:           job.write_mutex
+		tcp_conn:              job.tcp_conn
+		diagnostics_servers:   scheduler.servers
+		v3_query_servers:      scheduler.servers
+		// A change that arrives while this check runs stops it: its answer would
+		// be stale, and the newer check can start at once.
+		diagnostics_cancelled: fn [mut scheduler, job] () bool {
+			return !scheduler.is_job_current(job)
+		}
+		// The errors a check found before its slow end, the instances of generic
+		// functions above all, are shown at once; its full answer replaces them.
+		diagnostics_partial:   fn [mut scheduler, job] (uri string, found CheckErrors) {
+			scheduler.publish_partial(job, uri, found)
 		}
 	}
-	scheduler.publish_if_current(mut worker, job, notification)
+	notification := worker.build_diagnostics_notification(job.uri, job.content)
+	// Publish the exact diagnostic items and update the pull cache under the
+	// same generation lock. Never store a completed worker's cache first: an
+	// intervening edit could otherwise resurrect its old result.
+	if os.getenv('VLS_PERF_LOG') != '' {
+		diag_elapsed_ms := time.now().unix_milli() - started_ms
+		worker.send_log_message('diagnostics uri=${job.uri} kind=slow elapsed_ms=${diag_elapsed_ms}',
+			4)
+	}
+	if !scheduler.publish_if_current(mut worker, job, notification) {
+		return
+	}
+	// The same check found the diagnostics of the program's other open files: a
+	// change in one file shows in the others without checking them again.
+	for other_uri, errors in worker.program_errors {
+		other_content := job.open_files[other_uri] or { continue }
+		other := worker.diagnostics_notification_for(other_uri, other_content, errors)
+		scheduler.publish_if_current(mut worker, job, other)
+	}
+	if worker.program_dir_checked == '' {
+		return
+	}
+	// A file that the last check of this program answered for, and this one does
+	// not, left the program, as a module does when the program stops importing
+	// it: nothing else checks it again, and it would keep what the program said.
+	mut members := worker.program_errors.keys()
+	members << job.uri
+	for other_uri in scheduler.swap_program_members(worker.program_dir_checked, members) {
+		other_content := job.open_files[other_uri] or { continue }
+		other := worker.build_diagnostics_notification(other_uri, other_content)
+		// Publish a clean report as an actual empty cached result, so a
+		// workspace pull can clear the old errors for this URI too.
+		scheduler.publish_if_current(mut worker, job, other)
+	}
 }
 
-// publish_if_current keeps validation and the transport write atomic with
-// cancellation. A close or disable that wins this lock suppresses the result;
-// one that follows it will publish its clearing notification afterward.
+// publish_partial publishes the diagnostics a check of `job` found before its
+// end, for the file at `uri` and the other open files of its program, while the
+// job is current.
+fn (mut scheduler DiagnosticsScheduler) publish_partial(job DiagnosticsJob, uri string, found CheckErrors) {
+	mut versions := map[string]i64{}
+	if version := job.version {
+		versions[job.uri] = version
+	}
+	mut writer := App{
+		open_files:          job.open_files
+		open_files_versions: versions
+		position_encoding:   job.position_encoding
+		write_mutex:         job.write_mutex
+		tcp_conn:            job.tcp_conn
+		diagnostics_enabled: true
+	}
+	if uri == job.uri {
+		scheduler.publish_if_current(mut writer, job, writer.diagnostics_notification_for(uri,
+			job.content, found.file))
+	}
+	for other_uri, other_errors in found.program {
+		other_content := job.open_files[other_uri] or { continue }
+		scheduler.publish_if_current(mut writer, job, writer.diagnostics_notification_for(other_uri,
+			other_content, other_errors))
+	}
+}
+
+// swap_program_members records `members`, the open files a check of the program
+// in `program_dir` answered for, and returns those the previous check of that
+// program answered for and this one does not.
+fn (mut scheduler DiagnosticsScheduler) swap_program_members(program_dir string, members []string) []string {
+	scheduler.mutex.lock()
+	defer {
+		scheduler.mutex.unlock()
+	}
+	previous := scheduler.program_members[program_dir] or { []string{} }
+	scheduler.program_members[program_dir] = members
+	return previous.filter(it !in members)
+}
+
+// publish_if_current writes a notification and caches its exact LSP items
+// atomically under the same generation lock. A fast or partial publish, a
+// completed check, and an empty clearing publish all become the source of truth
+// for subsequent pull requests; a superseded job can do neither.
 fn (mut scheduler DiagnosticsScheduler) publish_if_current(mut app App, job DiagnosticsJob, notification Notification) bool {
 	scheduler.mutex.lock()
 	defer {
@@ -614,5 +780,9 @@ fn (mut scheduler DiagnosticsScheduler) publish_if_current(mut app App, job Diag
 		return false
 	}
 	app.write_notification(notification)
+	scheduler.diag_cache[notification.params.uri] = DiagCacheEntry{
+		fingerprint:     'published'
+		published_items: notification.params.diagnostics.clone()
+	}
 	return true
 }

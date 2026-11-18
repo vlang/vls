@@ -9,57 +9,154 @@ import sync
 import time
 import io
 
+const vls_version = '0.0.3'
+
+// cli_app builds a minimal App for single-file CLI commands. It reuses the
+// OS temp directory directly so no per-invocation directory is left behind.
+fn cli_app(content string, temp_name string) &App {
+	_ = temp_name
+	mut app := &App{
+		text:                  content
+		open_files:            map[string]string{}
+		temp_dir:              os.temp_dir()
+		diagnostics_scheduler: new_diagnostics_scheduler()
+		index_refresh:         new_index_refresh_scheduler()
+		v3_line_info_enabled:  true
+		suppress_lsp_output:   true
+	}
+	return app
+}
+
+fn json_response_result(result ResponseResult) string {
+	content := strip_response_sum_type_tags(json2.encode(result, escape_unicode: true))
+	if result is string && (result as string) == 'null' {
+		return 'null'
+	}
+	return content
+}
+
+fn (mut app App) stop_standalone_session() {
+	app.cancel_all_scheduled_diagnostics()
+	app.stop_run_commands()
+	app.wait_answer_followups()
+	app.stop_diagnostics_servers()
+	app.stop_v3_queries()
+	app.stop_index_refresh()
+}
+
+fn (mut app App) completion_result_at(uri string, position Position) CompletionList {
+	params := json2.encode(TextDocumentPositionParams{
+		text_document: TextDocumentIdentifier{
+			uri: uri
+		}
+		position:      position
+	})
+	response := app.operation_at_pos(.completion, Request{
+		id:     1
+		method: 'textDocument/completion'
+		params: params
+	})
+	if response.result is CompletionList {
+		return response.result as CompletionList
+	}
+	return CompletionList{}
+}
+
+fn mcp_install_config() string {
+	return json2.encode({
+		'mcpServers': json2.Any({
+			'vls': json2.Any({
+				'command': json2.Any('vls')
+				'args':    json2.Any([json2.Any('--mcp')])
+			})
+		})
+	})
+}
+
 // App represents the context of the server during its lifetime.
 pub struct App {
 	cur_mod string = 'main'
-	exit    bool = os.args.contains('exit')
+	exit    bool   = os.args.contains('exit')
 mut:
-	text                                        string // Current file content
+	text                                        string            // Current file content
 	open_files                                  map[string]string // Map of file URI to file content
-	open_files_versions                         map[string]i64 // Per-URI document version from the client
-	temp_dir                                    string // Temporary directory for multi-file compilation
-	workspace_roots                             []string // Workspace root directories from initialize
-	removed_workspace_roots                     []string // Roots explicitly removed by the client
-	capture_output                              bool // Test hook: capture outbound transport messages instead of writing
-	captured_output                             []string // Test hook buffer for outbound transport messages
-	supports_dynamic_watched_files_registration bool // Client supports dynamic workspace watcher registration
-	supports_work_done_progress                 bool // Client supports window/workDoneProgress + $/progress
-	sent_watched_files_registration             bool // client/registerCapability watcher registration was sent
+	open_files_versions                         map[string]i64    // Per-URI document version from the client
+	temp_dir                                    string            // Temporary directory for multi-file compilation
+	workspace_roots                             []string          // Workspace root directories from initialize
+	removed_workspace_roots                     []string          // Roots explicitly removed by the client
+	capture_output                              bool              // Test hook: capture outbound transport messages instead of writing
+	captured_output                             []string          // Test hook buffer for outbound transport messages
+	suppress_lsp_output                         bool
+	supports_dynamic_watched_files_registration bool   // Client supports dynamic workspace watcher registration
+	supports_work_done_progress                 bool   // Client supports window/workDoneProgress + $/progress
+	sent_watched_files_registration             bool   // client/registerCapability watcher registration was sent
 	watched_files_registration_id               string // Raw id of the watcher registration request, to match its response
-	watched_files_active                        bool // True once the client acknowledged watcher registration (not rejected)
+	watched_files_active                        bool   // True once the client acknowledged watcher registration (not rejected)
 	inlay_hints_enabled                         bool = true // toggled via workspace/didChangeConfiguration
 	diagnostics_enabled                         bool = true // toggled via workspace/didChangeConfiguration
 	diag_cache                                  map[string]DiagCacheEntry // Per-URI cached diagnostics
-	open_files_generation                       int // Incremented on every workspace file mutation
-	project_generations                         map[string]int // Per-project-dir revision, for scoped cache invalidation
-	cancelled_requests                          map[int]bool // Request ids cancelled via $/cancelRequest
-	cancelled_raw_ids                           map[string]bool // String/raw request ids cancelled via $/cancelRequest
-	current_request_raw_id                      string // Raw JSON id of the request being processed (echoed verbatim)
+	config_store                                &VlsConfigStore = &VlsConfigStore{} // Per-App config (P1: config leak between TCP clients)
+	diag_disk_roots                             map[string]bool          // Program roots whose disk cache merged this session
+	file_list_cache                             map[string]FileListEntry // Per-project .v listings, so a fingerprint does not re-walk the tree
+	content_memo                                map[string]ContentMemo   // Per-file content hash with the size, inode and mtime it was read at
+	open_files_generation                       int                      // Incremented on every workspace file mutation
+	project_generations                         map[string]int           // Per-project-dir revision, for scoped cache invalidation
+	cancelled_requests                          map[int]bool             // Request ids cancelled via $/cancelRequest
+	cancelled_raw_ids                           map[string]bool          // String/raw request ids cancelled via $/cancelRequest
+	current_request_raw_id                      string                   // Raw JSON id of the request being processed (echoed verbatim)
 	position_encoding                           PositionEncoding = .utf16 // Negotiated LSP position encoding (default UTF-16)
-	symbol_index                                map[string]IndexEntry // Persistent per-URI symbol index (see index.v)
-	indexed_dirs                                map[string]bool // Project dirs already walked into the index
-	indexed_dir_walk_ms                         map[string]i64 // Last walk time per dir, for watcher-less refresh
-	ref_occurrences                             map[string]OccEntry // Per-URI identifier occurrences for references (see index.v)
-	index_skipped_uris                          map[string]bool // Disk files omitted from the bounded index
-	index_incomplete_scopes                     map[string]bool // Index walks that could not finish
+	symbol_index                                map[string]IndexEntry        // Persistent per-URI symbol index (see index.v)
+	indexed_dirs                                map[string]bool              // Project dirs already walked into the index
+	indexed_dir_walk_ms                         map[string]i64               // Last walk time per dir, for watcher-less refresh
+	ref_occurrences                             map[string]OccEntry          // Per-URI identifier occurrences for references (see index.v)
+	index_skipped_uris                          map[string]bool              // Disk files omitted from the bounded index
+	index_incomplete_scopes                     map[string]bool              // Index walks that could not finish
+	index_walk_budget                           int                          // Test seam: file ceiling for one project walk, 0 = index_max_files
+	index_walk_byte_budget                      u64                          // Test seam: total disk bytes indexed per walk, 0 = platform budget
 	vlib_fn_cache                               map[string]map[string]string // Per-vlib-module fn→return-type index (immutable during a session)
-	inlay_fn_cache                              ?&InlayFnCache // Per-file fn→return-type cache for inlay hints (see handlers.v)
-	open_uris_cache                             map[string]string // open_files_generation-scoped normalized path → uri map
+	expression_type_depth                       int                         // Nesting of expression_type, which a binding's declaration re-enters
+	line_info_mode                              LineInfoMode                // How the configured `v` reaches the `-line-info` checker (see interop.v)
+	inlay_hint_cache                            map[string]CachedInlayHints // Per-URI compiler inlay hints, see compiler_inlay_hints
+	inlay_fn_cache                              ?&InlayFnCache              // Per-file fn→return-type cache for inlay hints (see handlers.v)
+	open_uris_cache                             map[string]string           // open_files_generation-scoped normalized path → uri map
 	open_uris_cache_gen                         int = -1 // open_files_generation at which open_uris_cache was built
-	expression_type_depth                       int // Nesting of expression_type, which a binding's declaration re-enters
-	line_info_mode                              LineInfoMode // How the configured `v` reaches the `-line-info` checker (see interop.v)
-	tcp_conn                                    ?&net.TcpConn // Non-nil when serving a TCP client
-	is_shutdown                                 bool // True after shutdown request was acknowledged
-	exit_was_requested                          bool // True when the exit notification was received
-	received_initialize                         bool // True after initialize request was processed
+	tcp_conn                                    ?&net.TcpConn               // Non-nil when serving a TCP client
+	is_shutdown                                 bool                        // True after shutdown request was acknowledged
+	exit_was_requested                          bool                        // True when the exit notification was received
+	received_initialize                         bool                        // True after initialize request was processed
 	next_request_id                             int = 1 // Counter for server-initiated request ids
-	diagnostics_scheduler                       ?&DiagnosticsScheduler // Production-only async diagnostics
+	diagnostics_scheduler                       ?&DiagnosticsScheduler  // Production-only async diagnostics
+	index_refresh                               ?&IndexRefreshScheduler // Production-only background index refresh (see index.v)
+	diagnostics_servers                         &DiagnosticsServerPool = unsafe { nil } // Compilers answering checks from one process (see diagnostics_server.v)
+	v3_line_info_enabled                        bool // Whether V3 answers `-line-info` questions first (see v3_line_info.v); off in tests
+	v3_one_shot_unsupported                     bool // The V in use has no V3 that answers `-line-info` in a process of its own
+	v3_query_servers                            &DiagnosticsServerPool = unsafe { nil } // V3 servers answering `-line-info` questions
+	rename_anchors                              map[string]?Location   // Where the names a rename asked about are declared, for the rename that follows
+	rename_anchors_generation                   int                    // open_files_generation when rename_anchors were asked
+	overlay_dir                                 string                 // When set, the one directory a compilation overlay is rebuilt in
+	program_errors                              map[string][]JsonError // Other open files the last check covered, and their errors
+	program_dir_checked                         string                 // The program the last check covered, when it covered one
+	diagnostics_cancelled                       fn () bool                         = unsafe { nil } // Whether a newer check made the running one useless
+	diagnostics_partial                         fn (uri string, found CheckErrors) = unsafe { nil } // Publishes the errors a check found before its end (see DiagnosticsServer.ask)
 	run_command_manager                         ?&RunCommandManager // Async code-lens process lifecycle
 	overlay_cache_store                         ?&OverlayCacheStore // Shared compilation overlay cache (see interop.v)
 	line_info_cancel                            ?&CancelFlag // Set while a line-info compiler run may be cancelled
 	line_info_cancels                           map[string]&CancelFlag // In-flight line-info cancels by raw id (loop thread only)
-	execute_commands_synchronously              bool // Test hook for deterministic command assertions
+	execute_commands_synchronously              bool                // Test hook for deterministic command assertions
 	write_mutex                                 &sync.Mutex = sync.new_mutex() // Serializes worker and request-loop writes
+	// What the compiler's answer cost, per document and method: below the budget
+	// in answer_budget.v the answer is waited for instead of answered twice.
+	compiler_answer_ms map[string]i64
+	// Serializes reads/writes of compiler_answer_ms, which run_answer_followup
+	// touches from a worker thread while the request loop reads it (P1).
+	compiler_answer_ms_mutex &sync.Mutex = sync.new_mutex()
+	// The threads that measure a compiler answer after the index has answered
+	// (see answer_budget.v).
+	answer_followups         &sync.WaitGroup = sync.new_waitgroup()
+	importable_modules_cache map[string]ImportableModulesCache // Modules a file can import, per project root (see module_imports.v)
+	vlib_modules_cache       map[string][]ImportableModule     // The modules of vlib, per vlib folder
+	module_imports_cache     map[string]ModuleImports          // The modules each module imports (see module_imports.v)
+	builtin_calls_cache      map[string]map[string]Detail      // V's builtin functions as completion items, per vlib/builtin folder
 }
 
 struct JsonError {
@@ -75,23 +172,50 @@ struct JsonVarAC {
 	details []Detail
 }
 
-// DiagCacheEntry stores a cached diagnostic result for one file.
+// DiagCacheEntry stores a cached diagnostic result for one file. The
+// fingerprint covers the program's contents and the compiler (see
+// diag_cache.v): only an identical state reuses the errors.
 struct DiagCacheEntry {
-	content_hash int
-	generation   int
-	errors       []JsonError
+	fingerprint     string
+	errors          []JsonError
+	published_items ?[]LSPDiagnostic // exact last push; only set in scheduler's shared cache
 }
 
 // Keep runtime-derived settings behind functions. Function-call module constants can crash V3's
 // parallel constant precomputation while compiling VLS.
-// find_v_dir resolves the V home directory by finding the V executable and
-// returning its parent directory.
+// find_v_dir resolves the V home directory, meaning the directory that holds `vlib`.
 fn find_v_dir() string {
-	v_exe := resolve_v_compiler_exe()
+	return find_v_dir_from_exe(resolve_v_compiler_exe())
+}
+
+// find_v_dir_from_exe locates the directory holding `vlib` for a given compiler
+// executable. Trusting the executable's own directory is not enough: V's Windows
+// launcher is a `.bat` wrapper in `.bin/` that forwards to the real `v.exe` one
+// level up, so the executable's directory has no `vlib` at all. Every vlib lookup
+// then silently resolves to nothing, which empties import completions and breaks
+// hover and go-to-definition for vlib symbols. Walk up until a directory that
+// actually contains `vlib` is found, so both layouts work.
+fn find_v_dir_from_exe(v_exe string) string {
 	if v_exe == 'v' || !os.is_file(v_exe) {
 		return ''
 	}
-	return os.dir(os.real_path(v_exe))
+	mut dir := os.parent_dir(os.real_path(v_exe))
+	// A V checkout nests vlib directly under its root, so the root is at or above
+	// the executable. The bound stops a pathological layout from walking to the
+	// filesystem root one component at a time.
+	for _ in 0 .. 8 {
+		if os.is_dir(os.join_path(dir, 'vlib')) {
+			return dir
+		}
+		parent := os.parent_dir(dir)
+		// Only absolute ancestors are safe to search. In particular, a Windows
+		// drive-relative path would search that drive's current directory instead.
+		if parent == dir || !os.is_abs_path(parent) {
+			break
+		}
+		dir = parent
+	}
+	return ''
 }
 
 // logging_enabled gates all diagnostic logging. Logging is OFF by default:
@@ -209,7 +333,7 @@ fn (mut reader StdinBufferedReader) read_line(config io.BufferedReadLineConfig) 
 
 fn new_stdin_buffered_reader_for_fd(fd int, cap int) &StdinBufferedReader {
 	return &StdinBufferedReader{
-		fd: fd
+		fd:  fd
 		buf: []u8{len: cap}
 	}
 }
@@ -219,7 +343,17 @@ fn new_stdin_buffered_reader() &StdinBufferedReader {
 	return new_stdin_buffered_reader_for_fd(0, transport_buffer_cap)
 }
 
+fn is_version_request(args []string) bool {
+	return args.len == 2 && args[1] in ['--version', 'version']
+}
+
 fn main() {
+	// A version query must finish without opening a transport or requiring V.
+	if is_version_request(os.args) {
+		println('VLS ${vls_version}')
+		return
+	}
+
 	log('VLS started. Reading from stdin...')
 
 	// Check for --port PORT argument to start as a TCP multi-client server.
@@ -252,6 +386,195 @@ fn main() {
 		run_tcp_server(host, port, allow_remote)
 		return
 	}
+	// MCP mode uses newline-delimited JSON-RPC over stdio.
+	if os.args.contains('--mcp') {
+		run_mcp_mode()
+		return
+	}
+	if os.args.len >= 2 && os.args[1] == 'mcp' && os.args.len >= 3 && os.args[2] == 'install' {
+		println(mcp_install_config())
+		return
+	}
+	// `vls check <file>` runs a single-file compile check and prints JSON diagnostics.
+	if os.args.len >= 3 && os.args[1] == 'check' {
+		path := os.real_path(os.args[2])
+		content := os.read_file(path) or {
+			eprintln('cannot read ${path}: ${err}')
+			exit(1)
+			return
+		}
+		mut app := cli_app(content, 'vls_check_${os.getpid()}')
+		defer {
+			app.stop_standalone_session()
+		}
+		uri := path_to_uri(path)
+		app.open_files[uri] = content
+		notification := app.build_diagnostics_notification(uri, content)
+		println(json2.encode(notification))
+		return
+	}
+	if os.args.len >= 5 && os.args[1] == 'hover' {
+		path := os.real_path(os.args[2])
+		line := os.args[3].int()
+		col := os.args[4].int()
+		content := os.read_file(path) or {
+			eprintln('cannot read ${path}: ${err}')
+			exit(1)
+			return
+		}
+		mut app := cli_app(content, 'vls_hover_${os.getpid()}')
+		defer {
+			app.stop_standalone_session()
+		}
+		uri := path_to_uri(path)
+		app.open_files[uri] = content
+		hover := app.hover_at(uri, Position{ line: line, char: col })
+		if h := hover {
+			println(json2.encode(h))
+		} else {
+			println('null')
+		}
+		return
+	}
+	if os.args.len >= 5 && os.args[1] == 'definition' {
+		path := os.real_path(os.args[2])
+		line := os.args[3].int()
+		col := os.args[4].int()
+		content := os.read_file(path) or {
+			eprintln('cannot read ${path}: ${err}')
+			exit(1)
+			return
+		}
+		mut app := cli_app(content, 'vls_def_${os.getpid()}')
+		defer {
+			app.stop_standalone_session()
+		}
+		uri := path_to_uri(path)
+		app.open_files[uri] = content
+		app.reindex_uri(uri)
+		if loc := app.resolve_indexed_definition(uri, Position{ line: line, char: col }) {
+			println(json2.encode(loc))
+		} else {
+			println('null')
+		}
+		return
+	}
+	if os.args.len >= 5 && os.args[1] == 'references' {
+		path := os.real_path(os.args[2])
+		line := os.args[3].int()
+		col := os.args[4].int()
+		content := os.read_file(path) or {
+			eprintln('cannot read ${path}: ${err}')
+			exit(1)
+			return
+		}
+		mut app := cli_app(content, 'vls_refs_${os.getpid()}')
+		defer {
+			app.stop_standalone_session()
+		}
+		uri := path_to_uri(path)
+		app.open_files[uri] = content
+		params := json2.encode(ReferenceParams{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			position:      Position{
+				line: line
+				char: col
+			}
+			context:       ReferenceContext{}
+		})
+		resp := app.find_references(Request{
+			id:     1
+			method: 'textDocument/references'
+			params: params
+		})
+		println(json_response_result(resp.result))
+		return
+	}
+	if os.args.len >= 3 && os.args[1] == 'symbols' {
+		path := os.real_path(os.args[2])
+		content := os.read_file(path) or {
+			eprintln('cannot read ${path}: ${err}')
+			exit(1)
+			return
+		}
+		mut app := cli_app(content, 'vls_symbols_${os.getpid()}')
+		defer {
+			app.stop_standalone_session()
+		}
+		uri := path_to_uri(path)
+		app.open_files[uri] = content
+		app.reindex_uri(uri)
+		if entry := app.symbol_index[uri] {
+			println(json2.encode(entry.doc_symbols))
+		} else {
+			println('[]')
+		}
+		return
+	}
+	if os.args.len >= 5 && os.args[1] == 'completion' {
+		path := os.real_path(os.args[2])
+		line := os.args[3].int()
+		col := os.args[4].int()
+		content := os.read_file(path) or {
+			eprintln('cannot read ${path}: ${err}')
+			exit(1)
+			return
+		}
+		mut app := cli_app(content, 'vls_completion_${os.getpid()}')
+		defer {
+			app.stop_standalone_session()
+		}
+		uri := path_to_uri(path)
+		app.open_files[uri] = content
+		app.reindex_uri(uri)
+		result := app.completion_result_at(uri, Position{
+			line: line
+			char: col
+		})
+		println(json2.encode(result.items))
+		return
+	}
+	if os.args.len >= 6 && os.args[1] == 'rename' {
+		path := os.real_path(os.args[2])
+		line := os.args[3].int()
+		col := os.args[4].int()
+		new_name := os.args[5]
+		content := os.read_file(path) or {
+			eprintln('cannot read ${path}: ${err}')
+			exit(1)
+			return
+		}
+		mut app := cli_app(content, 'vls_rename_${os.getpid()}')
+		defer {
+			app.stop_standalone_session()
+		}
+		uri := path_to_uri(path)
+		app.open_files[uri] = content
+		params := json2.encode(RenameParams{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			position:      Position{
+				line: line
+				char: col
+			}
+			new_name:      new_name
+		})
+		resp := app.rename_request(Request{
+			id:     1
+			method: 'textDocument/rename'
+			params: params
+		}) or {
+			app.stop_standalone_session()
+			eprintln('rename failed: ${err.msg()}')
+			exit(1)
+			return
+		}
+		println(json_response_result(resp.result))
+		return
+	}
 
 	// Stdio mode (default).
 	temp_dir := os.join_path(os.temp_dir(), 'vls_${os.getpid()}')
@@ -260,12 +583,14 @@ fn main() {
 		return
 	}
 	mut app := &App{
-		text: ''
-		open_files: map[string]string{}
-		temp_dir: temp_dir
+		text:                  ''
+		open_files:            map[string]string{}
+		temp_dir:              temp_dir
 		diagnostics_scheduler: new_diagnostics_scheduler()
-		overlay_cache_store: new_overlay_cache_store()
-		line_info_cancels: map[string]&CancelFlag{}
+		overlay_cache_store:   new_overlay_cache_store()
+		line_info_cancels:     map[string]&CancelFlag{}
+		index_refresh:         new_index_refresh_scheduler()
+		v3_line_info_enabled:  true
 	}
 	// os.File.read uses C fread, which waits for the entire buffer on an open
 	// pipe. LSP clients keep stdin open, so use the raw descriptor-backed pipe
@@ -338,13 +663,15 @@ fn handle_tcp_client(mut conn net.TcpConn) {
 		return
 	}
 	mut app := &App{
-		text: ''
-		open_files: map[string]string{}
-		temp_dir: temp_dir
-		tcp_conn: &conn
+		text:                  ''
+		open_files:            map[string]string{}
+		temp_dir:              temp_dir
+		tcp_conn:              &conn
 		diagnostics_scheduler: new_diagnostics_scheduler()
-		overlay_cache_store: new_overlay_cache_store()
-		line_info_cancels: map[string]&CancelFlag{}
+		overlay_cache_store:   new_overlay_cache_store()
+		line_info_cancels:     map[string]&CancelFlag{}
+		index_refresh:         new_index_refresh_scheduler()
+		v3_line_info_enabled:  true
 	}
 	mut reader := io.new_buffered_reader(reader: conn, cap: transport_buffer_cap)
 	app.handle_requests(mut reader)
@@ -363,6 +690,9 @@ fn (mut app App) write_data(data string) {
 	app.write_mutex.lock()
 	defer {
 		app.write_mutex.unlock()
+	}
+	if app.suppress_lsp_output {
+		return
 	}
 	if app.capture_output {
 		app.captured_output << data
@@ -390,6 +720,105 @@ const transport_buffer_cap = 64 * 1024 // buffered reader capacity
 const max_content_length = 64 * 1024 * 1024 // 64 MiB max JSON-RPC body
 const max_header_bytes = 64 * 1024 // total header section size cap
 const max_charset = 'utf-8' // LSP content is always UTF-8
+
+// incoming_message_queue is how many messages the reading thread keeps ready.
+const incoming_message_queue = 256
+
+// IncomingMessage is a message the client sent, or the end of what it sends.
+struct IncomingMessage {
+	content string
+	// eof is set when the client closed the stream, and failure when reading
+	// failed otherwise: either ends the session.
+	eof     bool
+	failure string
+	// is_request is set for a message with an id, and method is its method.
+	is_request bool
+	method     Method
+}
+
+// IncomingReader borrows the session reader until its reading thread joins.
+@[heap]
+struct IncomingReader[T] {
+mut:
+	reader &T
+}
+
+fn run_incoming_reader[T](mut borrowed IncomingReader[T], incoming chan IncomingMessage) {
+	read_incoming_messages(mut borrowed.reader, incoming)
+}
+
+// read_incoming_messages reads the messages of the client into `incoming`, up to
+// the end of the stream or the first failure, which it sends too.
+fn read_incoming_messages[T](mut reader T, incoming chan IncomingMessage) {
+	for {
+		content := read_request(mut reader) or {
+			incoming <- IncomingMessage{
+				eof:     err is io.Eof
+				failure: if err is io.Eof { '' } else { err.msg() }
+			} or {}
+			return
+		}
+		mut message := IncomingMessage{
+			content:    content
+			is_request: request_content_has_id(content)
+		}
+		if body := json2.decode[RequestBody](content) {
+			message = IncomingMessage{
+				...message
+				method: Method.from_string(body.method)
+			}
+		}
+		incoming <- message or { return }
+		// Exit ends the stream even if a TCP peer keeps its socket open. Do not
+		// borrow the caller's reader for another blocking read after this message.
+		if message.method == .exit && !message.is_request {
+			return
+		}
+	}
+}
+
+// next_incoming_index returns the index in `pending`, the messages that arrived
+// and wait, of the one to handle now: the first, unless it is a request that may
+// ask the compiler, and a request that never does follows it with only such
+// requests between them; that one goes first. After a change an editor asks at
+// once for the semantic tokens and for the hover or the highlights at the
+// cursor: the tokens take no time, and a question to the compiler can take a
+// whole check. A notification, the end of the stream and any other request keep
+// their place, so no request moves past a change it came after.
+fn next_incoming_index(pending []IncomingMessage) int {
+	if pending.len < 2 || !pending[0].is_request || !method_may_ask_compiler(pending[0].method) {
+		return 0
+	}
+	for i in 1 .. pending.len {
+		message := pending[i]
+		if !message.is_request || message.eof || message.failure != '' {
+			break
+		}
+		if method_never_asks_compiler(message.method) {
+			return i
+		}
+		if !method_may_ask_compiler(message.method) {
+			break
+		}
+	}
+	return 0
+}
+
+// method_may_ask_compiler reports whether a request of `method` may wait for the
+// compiler, or for `v fmt`.
+fn method_may_ask_compiler(method Method) bool {
+	return method in [.definition, .declaration, .type_definition, .implementation, .completion,
+		.signature_help, .hover, .references, .rename, .prepare_rename, .formatting, .range_formatting,
+		.inlay_hint, .document_highlight, .callhierarchy_prepare, .callhierarchy_incoming,
+		.callhierarchy_outgoing]
+}
+
+// method_never_asks_compiler reports whether a request of `method` is answered
+// from the text and the index alone.
+fn method_never_asks_compiler(method Method) bool {
+	return method in [.semantic_tokens, .semantic_tokens_range, .document_symbols, .folding_range,
+		.selection_range, .code_action]
+}
 
 fn read_request[T](mut reader T) !string {
 	mut len := -1
@@ -563,33 +992,77 @@ fn parse_content_length_header(s string) !int {
 
 // handle_requests is the main request handler loop for both stdio and TCP modes.
 fn (mut app App) handle_requests[T](mut reader T) {
+	// The messages are read on a thread of their own, so that the ones that
+	// already arrived can be told apart: see next_incoming_index.
+	incoming := chan IncomingMessage{cap: incoming_message_queue}
+	// The thread joins before this session returns, so the borrowed reader's
+	// address remains valid even when its caller owns it on the stack.
+	mut borrowed := &IncomingReader[T]{
+		reader: unsafe { &reader }
+	}
+	reading := spawn run_incoming_reader(mut borrowed, incoming)
 	defer {
+		incoming.close()
+		reading.wait()
 		app.cancel_all_scheduled_diagnostics()
 		app.stop_run_commands()
+		// A deferred answer asks through the pooled compilers and writes on the
+		// transport, so both outlive the request that scheduled it and are joined
+		// before the session stops them.
+		app.wait_answer_followups()
+		// However the session ends, its compilers end, and the files they
+		// checked go: no other session uses them.
+		app.stop_diagnostics_servers()
+		app.stop_v3_queries()
+		// A background refresh must not still be walking the workspace after
+		// the session it was indexing for is gone.
+		app.stop_index_refresh()
+		// Session overlays are temp dirs no later session uses; drop them only
+		// after the workers and compiler pools above have stopped.
 		app.drop_all_overlays()
 	}
+	mut pending := []IncomingMessage{}
 	for {
 		// Reset the per-request raw id so a stale id can never leak into an
 		// error response emitted before a new message is fully read.
 		app.current_request_raw_id = ''
-		content := read_request(mut reader) or {
-			if err is io.Eof {
+		if pending.len == 0 {
+			first := <-incoming or { break }
+			pending << first
+		}
+		// Dispatch a bounded batch even when the client keeps the queue full.
+		for pending.len < incoming_message_queue {
+			select {
+				next := <-incoming {
+					pending << next
+				}
+				else {
+					break
+				}
+			}
+		}
+		index := next_incoming_index(pending)
+		message := pending[index]
+		pending.delete(index)
+		if message.failure != '' || message.eof {
+			if message.eof {
 				log('Client closed connection. Exiting.')
 				break
 			}
-			if err.msg().starts_with('invalid header:') {
+			if message.failure.starts_with('invalid header:') {
 				// The frame body was not consumed, so the stream is now
 				// desynchronized: the unread body would be misread as the next
 				// header. Report the error, then close the connection rather than
 				// attempting to resynchronize (P0-11).
-				app.write_error_response(make_parse_error_response(err.msg()))
+				app.write_error_response(make_parse_error_response(message.failure))
 				break
 			}
 			$if debug {
-				log('Error reading request: ${err.msg()}')
+				log('Error reading request: ${message.failure}')
 			}
 			break
 		}
+		content := message.content
 		if content.len == 0 {
 			continue
 		}
@@ -628,10 +1101,10 @@ fn (mut app App) handle_requests[T](mut reader T) {
 			continue
 		}
 		lsp_request := Request{
-			id: raw_id_to_int(app.current_request_raw_id)
-			method: body.method
+			id:      raw_id_to_int(app.current_request_raw_id)
+			method:  body.method
 			jsonrpc: body.jsonrpc
-			params: body.params
+			params:  body.params
 		}
 		log('\n\nRECV (pretty): ${content}')
 		method := Method.from_string(lsp_request.method)
@@ -650,7 +1123,7 @@ fn (mut app App) handle_requests[T](mut reader T) {
 		}
 		if method_requires_response(method) && app.request_is_cancelled(lsp_request.id) {
 			app.write_error_response(make_cancelled_error_response(lsp_request.id))
-			app.consume_cancelled_request(lsp_request.id)
+			app.consume_cancelled_request(lsp_request.id, app.current_request_raw_id)
 			continue
 		}
 		// After shutdown, reject all requests except exit.
@@ -682,10 +1155,17 @@ fn (mut app App) handle_requests[T](mut reader T) {
 		}
 		match method {
 			.completion {
+				// Phase 0 baseline: opt-in per-request timing.
+				started_ms := time.now().unix_milli()
 				resp := app.operation_at_pos(method, lsp_request)
+				if os.getenv('VLS_PERF_LOG') != '' {
+					elapsed_ms := time.now().unix_milli() - started_ms
+					app.send_log_message('request method=${method.str()} elapsed_ms=${elapsed_ms}',
+						4)
+				}
 				app.write_response_or_cancelled(lsp_request.id, resp)
 			}
-			.signature_help, .hover, .declaration, .type_definition, .implementation {
+			.signature_help, .definition, .hover, .declaration, .type_definition, .implementation {
 				phased := app.operation_at_pos_indexed(method, lsp_request)
 				if phased.done {
 					app.write_response_or_cancelled(lsp_request.id, phased.resp)
@@ -705,11 +1185,19 @@ fn (mut app App) handle_requests[T](mut reader T) {
 				app.write_response_or_cancelled(lsp_request.id, resp)
 			}
 			.rename {
-				resp := app.handle_rename(lsp_request)
+				resp := app.rename_request(lsp_request) or {
+					app.write_error_response(make_request_failed_error_response(lsp_request.id,
+						'Cannot rename: ${err.msg()}'))
+					continue
+				}
 				app.write_response_or_cancelled(lsp_request.id, resp)
 			}
 			.prepare_rename {
-				resp := app.handle_prepare_rename(lsp_request)
+				resp := app.prepare_rename_request(lsp_request) or {
+					app.write_error_response(make_request_failed_error_response(lsp_request.id,
+						'Cannot rename: ${err.msg()}'))
+					continue
+				}
 				app.write_response_or_cancelled(lsp_request.id, resp)
 			}
 			.workspace_symbol {
@@ -744,76 +1232,88 @@ fn (mut app App) handle_requests[T](mut reader T) {
 				}
 				// Return all supported capabilities, matching the LSP spec and what is implemented.
 				response := Response{
-					id: lsp_request.id
+					id:     lsp_request.id
 					result: Capabilities{
 						capabilities: Capability{
 							// NOTE: Placeholder/stub capabilities are intentionally NOT
 							// advertised (P1-07 / Stage 0): on-type formatting (always
-							// empty), inline values (wrong abstraction), linked editing
-							// (wrong abstraction), file-operation hooks (no-ops), and
-							// willSave (never dispatched). Advertising only working
-							// features gives a better editor experience than broken UI.
-							text_document_sync: TextDocumentSyncOptions{
-								open_close: true
-								change: 2 // Incremental
-								save: SaveOptions{
+							// empty), file-operation hooks (no-ops), and willSave
+							// (never dispatched). Advertising only working features
+							// gives a better editor experience than broken UI.
+							text_document_sync:                 TextDocumentSyncOptions{
+								open_close:           true
+								change:               2 // Incremental
+								save:                 SaveOptions{
 									include_text: true
 								}
-								will_save: false
+								will_save:            false
 								will_save_wait_until: true
 							}
-							completion_provider: CompletionProvider{
+							completion_provider:                CompletionProvider{
 								trigger_characters: ['.']
 							}
-							signature_help_provider: SignatureHelpOptions{
+							signature_help_provider:            SignatureHelpOptions{
 								trigger_characters: ['(', ',']
 							}
-							definition_provider: true
-							declaration_provider: true
-							type_definition_provider: true
-							implementation_provider: true
-							hover_provider: true
-							references_provider: true
-							rename_provider: RenameOptions{
+							definition_provider:                true
+							declaration_provider:               true
+							type_definition_provider:           true
+							implementation_provider:            true
+							hover_provider:                     true
+							references_provider:                true
+							rename_provider:                    RenameOptions{
 								prepare_provider: true
 							}
-							document_formatting_provider: true
-							document_symbol_provider: true
-							workspace_symbol_provider: true
-							inlay_hint_provider: true
-							code_action_provider: true
-							execute_command_provider: ExecuteCommandOptions{
-								commands: ['vls.runFile', 'vls.runTests']
+							document_formatting_provider:       true
+							document_symbol_provider:           true
+							workspace_symbol_provider:          true
+							inlay_hint_provider:                true
+							code_action_provider:               true
+							execute_command_provider:           ExecuteCommandOptions{
+								commands: ['vls.runFile', 'vls.runTests', 'vls.generateTest']
 							}
-							code_lens_provider: CodeLensOptions{}
-							semantic_tokens_provider: SemanticTokensOptions{
+							code_lens_provider:                 CodeLensOptions{}
+							// Inline values are the type the literal on the right of a
+							// `:=` gives the variable; linked editing is the occurrence
+							// set a rename would edit. Neither is a placeholder.
+							inline_value_provider:              true
+							linked_editing_range_provider:      true
+							semantic_tokens_provider:           SemanticTokensOptions{
 								legend: SemanticTokensLegend{
-									token_types: semantic_token_types()
+									token_types:     semantic_token_types()
 									token_modifiers: semantic_token_modifiers()
 								}
-								full: true
-								range: true
+								full:   true
+								range:  true
 							}
-							folding_range_provider: true
-							call_hierarchy_provider: true
-							document_highlight_provider: true
-							selection_range_provider: true
-							// Range formatting is NOT advertised: v fmt only formats whole
-							// files, so a correct range implementation needs a
-							// character-accurate, EOL-preserving diff restricted to the
-							// requested range, which is not yet implemented (P0-08).
-							document_range_formatting_provider: false
-							position_encoding: position_encoding_string(app.position_encoding)
-							workspace: WorkspaceCapability{
+							folding_range_provider:             true
+							call_hierarchy_provider:            true
+							document_highlight_provider:        true
+							selection_range_provider:           true
+							// Pull diagnostics: a pull answers for one document, no workspace pull.
+							diagnostic_provider:                DiagnosticOptions{
+								inter_file_dependencies: false
+								workspace_diagnostics:   true
+							}
+							// Range formatting is advertised: `v fmt` only formats whole
+							// files, so the handler formats the document and returns the
+							// changed hunk only when it lies entirely inside the requested
+							// range, and no edit at all otherwise.
+							document_range_formatting_provider: true
+							// Imports link to the module they name, and a URL in a doc
+							// comment is clickable as written.
+							document_link_provider:             DocumentLinkOptions{}
+							position_encoding:                  position_encoding_string(app.position_encoding)
+							workspace:                          WorkspaceCapability{
 								workspace_folders: WorkspaceFoldersServerCapability{
-									supported: true
+									supported:            true
 									change_notifications: true
 								}
 							}
 						}
-						server_info: ServerInfo{
-							name: 'vls'
-							version: '0.0.2'
+						server_info:  ServerInfo{
+							name:    'vls'
+							version: vls_version
 						}
 					}
 				}
@@ -842,7 +1342,7 @@ fn (mut app App) handle_requests[T](mut reader T) {
 					app.write_notification(Notification{
 						method: 'textDocument/publishDiagnostics'
 						params: PublishDiagnosticsParams{
-							uri: params.text_document.uri
+							uri:         params.text_document.uri
 							diagnostics: []
 						}
 					})
@@ -871,6 +1371,11 @@ fn (mut app App) handle_requests[T](mut reader T) {
 			}
 			.exit {
 				log('Received exit notification. Terminating.')
+				// A client that exits without shutting down first would otherwise
+				// leave the persistent compilers running.
+				app.stop_diagnostics_servers()
+				app.stop_v3_queries()
+				app.stop_index_refresh()
 				app.exit_was_requested = true
 				break
 			}
@@ -920,6 +1425,18 @@ fn (mut app App) handle_requests[T](mut reader T) {
 				resp := app.handle_range_formatting(lsp_request)
 				app.write_response_or_cancelled(lsp_request.id, resp)
 			}
+			.document_link {
+				resp := app.handle_document_link(lsp_request)
+				app.write_response_or_cancelled(lsp_request.id, resp)
+			}
+			.diagnostic {
+				resp := app.handle_pull_diagnostic(lsp_request)
+				app.write_response_or_cancelled(lsp_request.id, resp)
+			}
+			.workspace_diagnostic {
+				resp := app.handle_workspace_diagnostic(lsp_request)
+				app.write_response_or_cancelled(lsp_request.id, resp)
+			}
 			.did_change_watched_files {
 				app.on_did_change_watched_files(lsp_request)
 			}
@@ -946,7 +1463,7 @@ fn (mut app App) handle_requests[T](mut reader T) {
 			.will_create_files, .will_rename_files, .will_delete_files {
 				// Return null — vls has no pre-operation file mutations to apply.
 				app.write_response(Response{
-					id: lsp_request.id
+					id:     lsp_request.id
 					result: 'null'
 				})
 			}
@@ -1336,9 +1853,12 @@ fn (mut app App) accept_shutdown(id int) {
 	log('Received shutdown request.')
 	app.cancel_all_scheduled_diagnostics()
 	app.stop_run_commands()
+	app.stop_diagnostics_servers()
+	app.stop_v3_queries()
+	app.stop_index_refresh()
 	app.is_shutdown = true
 	app.write_response(Response{
-		id: id
+		id:     id
 		result: 'null'
 	})
 }
@@ -1380,17 +1900,17 @@ fn v_error_to_lsp_diagnostic(e JsonError) LSPDiagnostic {
 
 	code, tags := derive_diagnostic_code_and_tags(e.message)
 	return LSPDiagnostic{
-		message: e.message
+		message:  e.message
 		severity: severity
-		source: 'vlang'
-		code: code
-		tags: tags
-		range: LSPRange{
+		source:   'vlang'
+		code:     code
+		tags:     tags
+		range:    LSPRange{
 			start: Position{
 				line: start_line
 				char: start_char
 			}
-			end: Position{
+			end:   Position{
 				line: start_line
 				char: end_char
 			}
@@ -1425,7 +1945,14 @@ fn derive_diagnostic_code_and_tags(message string) (?string, ?[]int) {
 
 fn method_requires_response(method Method) bool {
 	return match method {
-		.initialize, .completion, .signature_help, .definition, .hover, .declaration, .type_definition, .implementation, .references, .rename, .prepare_rename, .workspace_symbol, .formatting, .document_symbols, .inlay_hint, .shutdown, .code_action, .semantic_tokens, .folding_range, .callhierarchy_prepare, .callhierarchy_incoming, .callhierarchy_outgoing, .document_highlight, .selection_range, .semantic_tokens_range, .range_formatting, .code_lens, .code_lens_resolve, .execute_command, .inline_value, .linked_editing_range, .will_create_files, .will_rename_files, .will_delete_files, .on_type_formatting {
+		.initialize, .completion, .signature_help, .definition, .hover, .declaration,
+		.type_definition, .implementation, .references, .rename, .prepare_rename,
+		.workspace_symbol, .formatting, .document_symbols, .inlay_hint, .shutdown, .code_action,
+		.semantic_tokens, .folding_range, .callhierarchy_prepare, .callhierarchy_incoming,
+		.callhierarchy_outgoing, .document_highlight, .selection_range, .semantic_tokens_range,
+		.range_formatting, .document_link, .code_lens, .code_lens_resolve, .execute_command,
+		.inline_value, .linked_editing_range, .will_create_files, .will_rename_files,
+		.will_delete_files, .on_type_formatting, .diagnostic, .workspace_diagnostic {
 			true
 		}
 		else {
@@ -1440,7 +1967,9 @@ fn method_requires_response(method Method) bool {
 // regardless of whether a client mistakenly attaches an id.
 fn method_is_notification_only(method Method) bool {
 	return match method {
-		.initialized, .did_open, .did_change, .did_close, .did_save, .did_change_watched_files, .workspace_did_change_configuration, .workspace_did_change_workspace_folders, .set_trace, .cancel_request, .will_save {
+		.initialized, .did_open, .did_change, .did_close, .did_save, .did_change_watched_files,
+		.workspace_did_change_configuration, .workspace_did_change_workspace_folders, .set_trace,
+		.cancel_request, .will_save {
 			true
 		}
 		else {
@@ -1460,12 +1989,24 @@ fn (app &App) request_is_cancelled(id int) bool {
 	return id in app.cancelled_requests
 }
 
+// make_request_failed_error_response tells the client why a valid request could
+// not be done, such as a rename that would break the program.
+fn make_request_failed_error_response(id int, message string) ErrorResponse {
+	return ErrorResponse{
+		id:    id
+		error: ResponseError{
+			code:    jsonrpc_err_request_failed
+			message: message
+		}
+	}
+}
+
 fn make_invalid_request_error_response(id int, message string) ErrorResponse {
 	msg := if message != '' { message } else { 'Invalid request' }
 	return ErrorResponse{
-		id: id
+		id:    id
 		error: ResponseError{
-			code: jsonrpc_err_invalid_request
+			code:    jsonrpc_err_invalid_request
 			message: msg
 		}
 	}
@@ -1473,9 +2014,9 @@ fn make_invalid_request_error_response(id int, message string) ErrorResponse {
 
 fn make_server_not_initialized_error_response(id int) ErrorResponse {
 	return ErrorResponse{
-		id: id
+		id:    id
 		error: ResponseError{
-			code: jsonrpc_err_server_not_initialized
+			code:    jsonrpc_err_server_not_initialized
 			message: 'Server not yet initialized'
 		}
 	}
@@ -1483,9 +2024,9 @@ fn make_server_not_initialized_error_response(id int) ErrorResponse {
 
 fn make_server_already_initialized_error_response(id int) ErrorResponse {
 	return ErrorResponse{
-		id: id
+		id:    id
 		error: ResponseError{
-			code: jsonrpc_err_invalid_request
+			code:    jsonrpc_err_invalid_request
 			message: 'Server already initialized'
 		}
 	}
@@ -1493,9 +2034,9 @@ fn make_server_already_initialized_error_response(id int) ErrorResponse {
 
 fn make_server_shutdown_error_response(id int) ErrorResponse {
 	return ErrorResponse{
-		id: id
+		id:    id
 		error: ResponseError{
-			code: jsonrpc_err_invalid_request
+			code:    jsonrpc_err_invalid_request
 			message: 'Server has been shut down'
 		}
 	}
@@ -1503,9 +2044,9 @@ fn make_server_shutdown_error_response(id int) ErrorResponse {
 
 fn make_cancelled_error_response(id int) ErrorResponse {
 	return ErrorResponse{
-		id: id
+		id:    id
 		error: ResponseError{
-			code: jsonrpc_err_request_cancelled
+			code:    jsonrpc_err_request_cancelled
 			message: 'Request cancelled'
 		}
 	}
@@ -1514,9 +2055,9 @@ fn make_cancelled_error_response(id int) ErrorResponse {
 fn make_parse_error_response(message string) ErrorResponse {
 	msg := if message != '' { message } else { 'Invalid JSON' }
 	return ErrorResponse{
-		id: 0
+		id:    0
 		error: ResponseError{
-			code: jsonrpc_err_parse_error
+			code:    jsonrpc_err_parse_error
 			message: msg
 		}
 	}
@@ -1524,9 +2065,9 @@ fn make_parse_error_response(message string) ErrorResponse {
 
 fn make_method_not_found_error_response(id int, method string) ErrorResponse {
 	return ErrorResponse{
-		id: id
+		id:    id
 		error: ResponseError{
-			code: jsonrpc_err_method_not_found
+			code:    jsonrpc_err_method_not_found
 			message: 'Method not found: ${method}'
 		}
 	}
@@ -1535,9 +2076,9 @@ fn make_method_not_found_error_response(id int, method string) ErrorResponse {
 fn make_invalid_params_error_response(id int, message string) ErrorResponse {
 	msg := if message != '' { message } else { 'Invalid params' }
 	return ErrorResponse{
-		id: id
+		id:    id
 		error: ResponseError{
-			code: jsonrpc_err_invalid_params
+			code:    jsonrpc_err_invalid_params
 			message: msg
 		}
 	}
@@ -1546,9 +2087,9 @@ fn make_invalid_params_error_response(id int, message string) ErrorResponse {
 fn make_internal_error_response(id int, message string) ErrorResponse {
 	msg := if message != '' { message } else { 'Internal error' }
 	return ErrorResponse{
-		id: id
+		id:    id
 		error: ResponseError{
-			code: jsonrpc_err_internal_error
+			code:    jsonrpc_err_internal_error
 			message: msg
 		}
 	}
@@ -1568,7 +2109,8 @@ fn validate_request_params(method Method, params_json string) ?string {
 				}
 			}
 		}
-		.completion, .signature_help, .definition, .hover, .declaration, .type_definition, .implementation, .prepare_rename, .document_highlight {
+		.completion, .signature_help, .definition, .hover, .declaration, .type_definition,
+		.implementation, .prepare_rename, .document_highlight {
 			params := json2.decode[TextDocumentPositionParams](params_json) or {
 				return 'Invalid textDocument/position params: ${err.msg()}'
 			}
@@ -1698,6 +2240,27 @@ fn validate_request_params(method Method, params_json string) ?string {
 			}
 			if params.text_document.uri == '' {
 				return 'Missing textDocument.uri'
+			}
+		}
+		.document_link {
+			params := json2.decode[DocumentLinkParams](params_json) or {
+				return 'Invalid documentLink params: ${err.msg()}'
+			}
+			if params.text_document.uri == '' {
+				return 'Missing textDocument.uri'
+			}
+		}
+		.diagnostic {
+			params := json2.decode[DocumentDiagnosticParams](params_json) or {
+				return 'Invalid textDocument/diagnostic params: ${err.msg()}'
+			}
+			if params.text_document.uri == '' {
+				return 'Missing textDocument.uri'
+			}
+		}
+		.workspace_diagnostic {
+			params := json2.decode[WorkspaceDiagnosticParams](params_json) or {
+				return 'Invalid workspace/diagnostic params: ${err.msg()}'
 			}
 		}
 		.linked_editing_range {
@@ -1831,7 +2394,7 @@ fn (mut app App) write_raw_request(id int, method string, params_json string) {
 // level: 1=Error, 2=Warning, 3=Info, 4=Log.
 fn (mut app App) send_show_message(msg string, level int) {
 	params := ShowMessageParams{
-		type_: level
+		type_:   level
 		message: msg
 	}
 	app.write_raw_notification('window/showMessage', json2.encode(params, escape_unicode: true))
@@ -1841,7 +2404,7 @@ fn (mut app App) send_show_message(msg string, level int) {
 // level: 1=Error, 2=Warning, 3=Info, 4=Log.
 fn (mut app App) send_log_message(msg string, level int) {
 	params := LogMessageParams{
-		type_: level
+		type_:   level
 		message: msg
 	}
 	app.write_raw_notification('window/logMessage', json2.encode(params, escape_unicode: true))
@@ -1879,7 +2442,7 @@ fn (mut app App) report_progress(token string, message string, percentage int) {
 		return
 	}
 	report := WorkDoneProgressReport{
-		message: message
+		message:    message
 		percentage: percentage
 	}
 	progress_json := '{"token":"${token}","value":${json2.encode(report, escape_unicode: true)}}'
@@ -1911,12 +2474,12 @@ fn (mut app App) on_initialized(_ Request) {
 	}
 	reg_id := app.next_request_id
 	reg := RegisterCapabilityRequest{
-		id: reg_id
+		id:     reg_id
 		params: WatcherRegistrationParams{
 			registrations: [
 				WatcherRegistration{
-					id: 'vls-file-watcher'
-					method: 'workspace/didChangeWatchedFiles'
+					id:               'vls-file-watcher'
+					method:           'workspace/didChangeWatchedFiles'
 					register_options: WatcherRegisterOptions{
 						watchers: [
 							FileSystemWatcher{
@@ -1937,25 +2500,32 @@ fn (mut app App) on_initialized(_ Request) {
 // write_response_or_cancelled sends a cancelled error if the request was
 // cancelled while being processed; otherwise it sends the normal response.
 fn (mut app App) write_response_or_cancelled(id int, response Response) {
-	if app.consume_cancelled_request(id) {
-		app.write_error_response(make_cancelled_error_response(id))
+	app.write_response_for(id, app.current_request_raw_id, response)
+}
+
+// write_response_for sends `response` for the request whose numeric id is `id`
+// and whose raw JSON id is `raw_id`, or a cancelled error for it.
+fn (mut app App) write_response_for(id int, raw_id string, response Response) {
+	if app.consume_cancelled_request(id, raw_id) {
+		app.send_framed(inject_raw_id(encode_error_response_payload(make_cancelled_error_response(id)),
+			raw_id))
 		return
 	}
 	// Defensive: catch response/request id mismatches caused by programming errors.
 	if response.id != id {
-		app.write_error_response(make_internal_error_response(id, 'Response id mismatch: expected ${id}, got ${response.id}'))
+		app.send_framed(inject_raw_id(encode_error_response_payload(make_internal_error_response(id,
+			'Response id mismatch: expected ${id}, got ${response.id}')), raw_id))
 		return
 	}
-	app.write_response(response)
+	app.send_framed(inject_raw_id(encode_response_payload(response), raw_id))
 }
 
-fn (mut app App) consume_cancelled_request(id int) bool {
-	raw := app.current_request_raw_id
+fn (mut app App) consume_cancelled_request(id int, raw_id string) bool {
 	mut was_cancelled := false
-	if raw != '' {
+	if raw_id != '' {
 		// Consume every request by its exact raw id when it is available.
-		if raw in app.cancelled_raw_ids {
-			app.cancelled_raw_ids.delete(raw)
+		if raw_id in app.cancelled_raw_ids {
+			app.cancelled_raw_ids.delete(raw_id)
 			was_cancelled = true
 		}
 		return was_cancelled
@@ -1974,9 +2544,14 @@ fn (mut app App) consume_cancelled_request(id int) bool {
 // import it — otherwise an importer keyed on its own directory would reuse
 // diagnostics computed against the imported module's old API (P1-06).
 fn (app &App) generation_key(uri string) string {
-	dir := os.dir(uri_to_path(uri))
-	root := find_project_root(dir)
-	return if root != '' { root } else { dir }
+	path := uri_to_path(uri)
+	root := find_project_root(os.dir(path))
+	if root != '' {
+		return root
+	}
+	// Without a v.mod, the project is the program the file belongs to, whose
+	// directory also holds the local modules it imports.
+	return app.program_root(path)
 }
 
 // bump_generation records a mutation to `uri`, advancing both the global counter
