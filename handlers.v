@@ -7686,10 +7686,22 @@ fn (mut app App) collect_module_completions(current_file_uri string, working_dir
 		os.read_file(uri_to_path(current_file_uri)) or { '' }
 	}
 	current_module := get_module_name(current_content)
-	for uri, _ in app.open_files {
-		if normalized_index_path(os.dir(uri_to_path(uri))) == normalized_index_path(working_dir) {
-			app.reindex_uri(uri)
+	normalized_working_dir := normalized_index_path(working_dir)
+	working_prefix := if normalized_working_dir.ends_with('/') {
+		normalized_working_dir
+	} else {
+		normalized_working_dir + '/'
+	}
+	for norm_path, open_uri in app.open_index_uris_cached() {
+		// The cached keys are already canonical paths, so a lexical
+		// same-directory check replaces a real_path call per open file.
+		if !norm_path.starts_with(working_prefix) {
+			continue
 		}
+		if norm_path[working_prefix.len..].contains('/') {
+			continue
+		}
+		app.reindex_uri(open_uri)
 	}
 	app.ensure_dir_shallow_indexed(working_dir)
 	requesting_path := uri_to_path(current_file_uri)
@@ -7706,8 +7718,13 @@ fn (mut app App) collect_module_completions(current_file_uri string, working_dir
 	indexed_uris.sort()
 	for indexed_uri in indexed_uris {
 		entry := app.symbol_index[indexed_uri] or { continue }
-		if normalized_index_path(os.dir(uri_to_path(indexed_uri))) != normalized_dir
-			|| os.file_name(uri_to_path(indexed_uri)) !in active_names || entry.module_name != current_module {
+		indexed_path := uri_to_path(indexed_uri)
+		if os.dir(indexed_path).replace('\\', '/') != normalized_dir {
+			if normalized_index_path(os.dir(indexed_path)) != normalized_dir {
+				continue
+			}
+		}
+		if os.file_name(indexed_path) !in active_names || entry.module_name != current_module {
 			continue
 		}
 		if entry.has_conditional_module_completions {

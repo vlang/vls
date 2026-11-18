@@ -350,6 +350,23 @@ fn normalized_index_path(path string) string {
 	return normalized
 }
 
+// open_index_uris_cached memoizes open_index_uris_by_path for the current
+// open-files generation. The map only depends on the open URI set, which
+// open_files_generation tracks on every mutation, so it stays exact without
+// any TTL. Callers must treat the result as read-only.
+fn (mut app App) open_index_uris_cached() map[string]string {
+	if app.open_uris_cache_gen == app.open_files_generation {
+		return app.open_uris_cache
+	}
+	mut uris := map[string]string{}
+	for uri, _ in app.open_files {
+		uris[normalized_index_path(uri_to_path(uri))] = uri
+	}
+	app.open_uris_cache = uris.clone()
+	app.open_uris_cache_gen = app.open_files_generation
+	return uris
+}
+
 // open_index_uris_by_path maps normalized filesystem paths to the original URI
 // supplied by the client. Open buffers are authoritative, so index entries and
 // result locations must retain that URI rather than a reconstructed equivalent.
@@ -595,7 +612,7 @@ fn (mut app App) ensure_dirs_indexed(dirs []string) {
 	for uri, _ in app.open_files {
 		app.reindex_uri(uri)
 	}
-	open_uris_by_path := app.open_index_uris_by_path()
+	open_uris_by_path := app.open_index_uris_cached()
 	for dir in dirs {
 		if dir == '' || dir == '/' || app.path_is_in_removed_workspace(dir) || !os.is_dir(dir) {
 			continue
@@ -659,7 +676,7 @@ fn (mut app App) ensure_dir_shallow_indexed(dir string) {
 	app.index_incomplete_scopes.delete(scope)
 	refresh := app.index_dir_needs_refresh(dir)
 	canonical_dir := os.real_path(dir).replace('\\', '/')
-	open_uris_by_path := app.open_index_uris_by_path()
+	open_uris_by_path := app.open_index_uris_cached()
 	mut present := map[string]bool{}
 	mut entries := os.ls(dir) or {
 		app.index_incomplete_scopes[scope] = true
@@ -675,10 +692,15 @@ fn (mut app App) ensure_dir_shallow_indexed(dir string) {
 		if !os.is_file(full) {
 			continue
 		}
-		// os.is_file follows symlinks. Resolve the candidate as well so a
-		// directly contained link cannot pull an external source into this
-		// loose-module scope.
-		real_file := os.real_path(full).replace('\\', '/')
+		// os.is_file follows symlinks. Resolve link candidates so a directly
+		// contained link cannot pull an external source into this loose-module
+		// scope; plain files are already contained lexically, which avoids a
+		// real_path syscall per file on every request.
+		real_file := if os.is_link(full) {
+			os.real_path(full).replace('\\', '/')
+		} else {
+			full.replace('\\', '/')
+		}
 		if !path_is_within(real_file, canonical_dir) {
 			continue
 		}

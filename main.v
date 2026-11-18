@@ -44,6 +44,8 @@ mut:
 	index_incomplete_scopes                     map[string]bool // Index walks that could not finish
 	vlib_fn_cache                               map[string]map[string]string // Per-vlib-module fn→return-type index (immutable during a session)
 	inlay_fn_cache                              ?&InlayFnCache // Per-file fn→return-type cache for inlay hints (see handlers.v)
+	open_uris_cache                             map[string]string // open_files_generation-scoped normalized path → uri map
+	open_uris_cache_gen                         int = -1 // open_files_generation at which open_uris_cache was built
 	expression_type_depth                       int // Nesting of expression_type, which a binding's declaration re-enters
 	line_info_mode                              LineInfoMode // How the configured `v` reaches the `-line-info` checker (see interop.v)
 	tcp_conn                                    ?&net.TcpConn // Non-nil when serving a TCP client
