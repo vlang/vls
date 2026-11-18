@@ -47,6 +47,7 @@ mut:
 	mutex               sync.Mutex
 	generations         map[string]u64
 	project_generations map[string]u64
+	diag_results        map[string]DiagCacheEntry
 	global_generation   u64
 	pending_jobs        map[string]DiagnosticsJob
 	worker_running      bool
@@ -60,6 +61,7 @@ fn new_diagnostics_scheduler() &DiagnosticsScheduler {
 		generations: map[string]u64{}
 		project_generations: map[string]u64{}
 		pending_jobs: map[string]DiagnosticsJob{}
+		diag_results: map[string]DiagCacheEntry{}
 	}
 }
 
@@ -197,6 +199,36 @@ fn (mut scheduler DiagnosticsScheduler) finish(job DiagnosticsJob) {
 		scheduler.active_generation = 0
 	}
 	scheduler.mutex.unlock()
+}
+
+// cached_diag returns scheduler-cached checker errors for `uri` when they were
+// computed for exactly this content hash and project generation. The cache is
+// populated whenever a diagnostics job (or a synchronous check) publishes, so
+// repeat requests such as reopening or re-saving an unchanged file reuse the
+// result instead of spawning another `v` process.
+fn (mut scheduler DiagnosticsScheduler) cached_diag(uri string, content_hash int, generation int) ?[]JsonError {
+	scheduler.mutex.lock()
+	defer {
+		scheduler.mutex.unlock()
+	}
+	if entry := scheduler.diag_results[uri] {
+		if entry.content_hash == content_hash && entry.generation == generation {
+			return entry.errors
+		}
+	}
+	return none
+}
+
+fn (mut scheduler DiagnosticsScheduler) store_diag(uri string, content_hash int, generation int, errors []JsonError) {
+	scheduler.mutex.lock()
+	defer {
+		scheduler.mutex.unlock()
+	}
+	scheduler.diag_results[uri] = DiagCacheEntry{
+		content_hash: content_hash
+		generation: generation
+		errors: errors
+	}
 }
 
 fn (mut scheduler DiagnosticsScheduler) cancel(uri string) {
@@ -360,7 +392,23 @@ fn run_diagnostics_job(mut scheduler DiagnosticsScheduler, job DiagnosticsJob) {
 		write_mutex: job.write_mutex
 		tcp_conn: job.tcp_conn
 	}
-	notification := worker.build_diagnostics_notification(job.uri, job.content)
+	content_hash := job.content.hash()
+	gen := job.project_generations[job.project_key]
+	v_errors := if cached_errors := scheduler.cached_diag(job.uri, content_hash, gen) {
+		log('Reusing scheduler-cached diagnostics for ${job.uri}')
+		cached_errors
+	} else {
+		worker.run_v_check(job.uri, job.content)
+	}
+	notification := worker.build_diagnostics_notification_for_errors(job.uri, job.content, v_errors)
+	// Mirror the worker's cache decision into the scheduler cache: the entry
+	// is present exactly when the check was cacheable (no timeout or crash),
+	// so the scheduler learns the same rule without a signature change.
+	if entry := worker.diag_cache[job.uri] {
+		if entry.content_hash == content_hash && entry.generation == gen {
+			scheduler.store_diag(job.uri, content_hash, gen, entry.errors)
+		}
+	}
 	scheduler.publish_if_current(mut worker, job, notification)
 }
 

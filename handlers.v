@@ -4067,6 +4067,37 @@ fn (mut app App) build_diagnostics_notification(uri string, content string) Noti
 		}
 	}
 	v_errors := app.run_v_check(uri, content)
+	if mut sched := app.diagnostics_scheduler {
+		if entry := app.diag_cache[uri] {
+			content_hash := content.hash()
+			gen := app.project_generation(uri)
+			if entry.content_hash == content_hash && entry.generation == gen {
+				sched.store_diag(uri, content_hash, gen, entry.errors)
+			}
+		}
+	}
+	return app.build_diagnostics_notification_for_errors(uri, content, v_errors)
+}
+
+// build_diagnostics_notification_for_errors converts already-computed checker
+// errors into a publishDiagnostics notification. Splitting the conversion from
+// the compiler run lets diagnostics jobs reuse cached errors without spawning
+// `v` again, while keeping a single conversion implementation.
+fn (mut app App) build_diagnostics_notification_for_errors(uri string, content string, v_errors []JsonError) Notification {
+	if !app.diagnostics_enabled {
+		return Notification{
+			method: 'textDocument/publishDiagnostics'
+			params: PublishDiagnosticsParams{
+				uri: uri
+				version: if uri in app.open_files_versions {
+					?i64(app.open_files_versions[uri])
+				} else {
+					none
+				}
+				diagnostics: []
+			}
+		}
+	}
 	log('run_v_check errors:${v_errors}')
 	lines := content.split_into_lines()
 	mut diagnostics := []LSPDiagnostic{}

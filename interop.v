@@ -1024,6 +1024,12 @@ fn (mut app App) run_v_check(path string, text string) []JsonError {
 	// Check the diagnostics cache before invoking the compiler.
 	content_hash := text.hash()
 	gen := app.project_generation(path)
+	if mut sched := app.diagnostics_scheduler {
+		if cached_errors := sched.cached_diag(path, content_hash, gen) {
+			log('Returning scheduler-cached diagnostics for ${path}')
+			return cached_errors
+		}
+	}
 	if cached := app.diag_cache[path] {
 		if cached.content_hash == content_hash && cached.generation == gen {
 			log('Returning cached diagnostics for ${path}')
