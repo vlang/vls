@@ -15,6 +15,7 @@ const diagnostics_worker_poll = 25 * time.millisecond
 struct DiagnosticsJob {
 	uri                 string
 	content             string
+	overlay_store       ?&OverlayCacheStore
 	version             ?i64
 	project_key         string
 	project_generation  u64
@@ -285,6 +286,7 @@ fn (mut app App) enqueue_diagnostics_tickets(mut scheduler DiagnosticsScheduler,
 		job := DiagnosticsJob{
 			uri: ticket.uri
 			content: job_content
+			overlay_store: app.overlay_cache_store
 			version: version
 			project_key: project_key
 			project_generation: ticket.project_generation
@@ -348,6 +350,7 @@ fn run_diagnostics_job(mut scheduler DiagnosticsScheduler, job DiagnosticsJob) {
 	mut worker := App{
 		text: job.content
 		open_files: job.open_files
+		overlay_cache_store: job.overlay_store
 		open_files_versions: versions
 		temp_dir: temp_dir
 		diagnostics_enabled: true

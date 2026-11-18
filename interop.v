@@ -5,6 +5,7 @@ module main
 import json2
 import os
 import strings
+import sync
 import time
 
 // Keep runtime-derived compiler settings behind functions. Function-call module constants can
@@ -642,6 +643,169 @@ fn cleanup_compilation_temp(temp_project_dir string, singlefile_tmppath string) 
 	}
 }
 
+// OverlayCacheEntry is one reusable compilation overlay: a temp project view
+// whose symlinked tree is rebuilt only when the tracked file set changes or
+// the entry grows stale. Open buffers are still rewritten per request, but
+// only when their content hash changed.
+struct OverlayCacheEntry {
+	temp_root         string
+	source_root       string
+	built_ms          i64
+	tracked_rel_paths []string
+	file_hashes       map[string]int
+}
+
+// OverlayCacheStore shares overlay entries between the request thread and the
+// diagnostics worker. Entries self-validate (tracked set + TTL), so a nil
+// store simply means today's per-request behavior.
+@[heap]
+struct OverlayCacheStore {
+mut:
+	mutex   sync.Mutex
+	entries map[string]OverlayCacheEntry
+}
+
+fn new_overlay_cache_store() &OverlayCacheStore {
+	return &OverlayCacheStore{
+		entries: map[string]OverlayCacheEntry{}
+	}
+}
+
+// overlay_cache_ttl_ms bounds how long a symlinked overlay tree is trusted
+// without a rebuild. It mirrors index_refresh_interval_ms: file-system changes
+// can linger for the same window the symbol index already accepts.
+const overlay_cache_ttl_ms = i64(10_000)
+
+// overlay_temp_root returns the stable process-wide directory for the overlay
+// of `source_root`. Stable names (instead of per-request unique dirs) are what
+// makes reuse across requests and across diagnostics jobs possible.
+fn overlay_temp_root(source_root string) string {
+	return os.join_path(os.temp_dir(), 'vls_ov_${os.getpid()}_${source_root.hash()}')
+}
+
+// tracked_overlay_rel_paths lists every open buffer under `source_root`, as
+// paths relative to it. The set must match the cached entry: opening or
+// closing a file changes which paths are materialized versus symlinked.
+fn (app &App) tracked_overlay_rel_paths(source_root string) []string {
+	mut rel_paths := []string{}
+	for uri, _ in app.open_files {
+		file_path := normalize_overlay_path(uri_to_path(uri))
+		rel := overlay_relative_path(file_path, source_root) or { continue }
+		rel_path := if rel == '' { os.file_name(file_path) } else { rel }
+		rel_paths << rel_path
+	}
+	rel_paths.sort()
+	return rel_paths
+}
+
+// materialize_overlay_buffers writes every open buffer under `source_root`
+// into the overlay, skipping files whose content hash matches `known_hashes`.
+// It returns the fresh hash map for the cache entry.
+fn materialize_overlay_buffers(temp_root string, source_root string, open_files map[string]string, known_hashes map[string]int) !map[string]int {
+	mut hashes := map[string]int{}
+	for uri, content in open_files {
+		file_path := normalize_overlay_path(uri_to_path(uri))
+		rel := overlay_relative_path(file_path, source_root) or { continue }
+		rel_path := if rel == '' { os.file_name(file_path) } else { rel }
+		hash := content.hash()
+		hashes[rel_path] = hash
+		if known_hash := known_hashes[rel_path] {
+			if known_hash == hash {
+				continue
+			}
+		}
+		temp_file_path := os.join_path(temp_root, rel_path)
+		os.mkdir_all(os.dir(temp_file_path)) or {
+			return error('Failed to create overlay directory ${os.dir(temp_file_path)}: ${err}')
+		}
+		os.write_file(temp_file_path, content) or {
+			return error('Failed to write overlay file ${temp_file_path}: ${err}')
+		}
+	}
+	return hashes
+}
+
+// overlay_work_paths derives the compiler working directory and the temp file
+// relative path inside a (possibly reused) overlay root.
+fn overlay_work_paths(source_root string, source_work_dir string, source_path string, temp_root string) !(string, string) {
+	work_rel := overlay_relative_path(source_work_dir, source_root) or {
+		return error('Source work directory is outside overlay root: ${source_work_dir}')
+	}
+	file_rel := overlay_relative_path(source_path, source_root) or {
+		return error('Source file is outside overlay root: ${source_path}')
+	}
+	temp_work_dir := if work_rel == '' {
+		temp_root
+	} else {
+		os.join_path(temp_root, work_rel)
+	}
+	if !os.exists(temp_work_dir) {
+		os.mkdir_all(temp_work_dir) or {
+			return error('Failed to create overlay work directory ${temp_work_dir}: ${err}')
+		}
+	}
+	return temp_work_dir, file_rel
+}
+
+// overlay_is_shared reports whether `temp_root` belongs to the overlay cache.
+// Callers use it to skip deleting a tree that later requests still need. A nil
+// store (tests, code-lens runs) always reports false, preserving the old
+// per-request cleanup behavior exactly.
+fn (mut app App) overlay_is_shared(temp_root string) bool {
+	if temp_root == '' {
+		return false
+	}
+	mut store := app.overlay_cache_store or { return false }
+	store.mutex.lock()
+	defer {
+		store.mutex.unlock()
+	}
+	for _, entry in store.entries {
+		if entry.temp_root == temp_root {
+			return true
+		}
+	}
+	return false
+}
+
+// drop_overlay_temp_root removes one cached overlay and deletes its tree, so
+// the next request rebuilds from a clean tree instead of reusing a suspect one.
+fn (mut app App) drop_overlay_temp_root(temp_root string) {
+	if temp_root == '' {
+		return
+	}
+	mut store := app.overlay_cache_store or { return }
+	store.mutex.lock()
+	mut found := ''
+	for key, entry in store.entries {
+		if entry.temp_root == temp_root {
+			found = key
+			break
+		}
+	}
+	if found != '' {
+		store.entries.delete(found)
+	}
+	store.mutex.unlock()
+	os.rmdir_all(temp_root) or {}
+}
+
+// drop_all_overlays deletes every cached overlay tree. It runs on shutdown so
+// a long-lived session does not leave a temp directory per project behind.
+fn (mut app App) drop_all_overlays() {
+	mut store := app.overlay_cache_store or { return }
+	store.mutex.lock()
+	mut roots := []string{}
+	for _, entry in store.entries {
+		roots << entry.temp_root
+	}
+	store.entries.clear()
+	store.mutex.unlock()
+	for root in roots {
+		os.rmdir_all(root) or {}
+	}
+}
+
 struct CompilationOverlay {
 	source_root         string
 	source_display_root string
@@ -711,6 +875,20 @@ fn (mut app App) prepare_compilation_overlay(real_path string) !CompilationOverl
 	source_root := compilation_overlay_root(source_path)
 	source_display_root := source_root
 	source_work_dir := normalize_overlay_path(os.dir(source_path))
+	// A nil store (tests, code-lens runs) keeps the historical per-request
+	// overlay: a unique temp dir under the app temp dir, cleaned by the caller.
+	if mut store := app.overlay_cache_store {
+		return app.prepare_cached_overlay(mut store, source_path, source_root,
+			source_display_root, source_work_dir)
+	}
+	return app.prepare_uncached_overlay(source_path, source_root, source_display_root, source_work_dir)
+}
+
+// prepare_uncached_overlay builds a private temporary project view in which
+// every open buffer is materialized and unchanged project paths are symlinked
+// back to disk. The compiler runs in the overlaid counterpart of the source
+// module. The caller deletes the temp tree when the request is done.
+fn (mut app App) prepare_uncached_overlay(source_path string, source_root string, source_display_root string, source_work_dir string) !CompilationOverlay {
 	temp_root_unresolved := app.write_tracked_files_to_temp(source_root)!
 	temp_root := normalize_overlay_path(os.real_path(temp_root_unresolved))
 	symlink_untracked_files(source_root, source_work_dir, temp_root, app.open_files) or {
@@ -736,6 +914,67 @@ fn (mut app App) prepare_compilation_overlay(real_path string) !CompilationOverl
 			os.rmdir_all(temp_root) or {}
 			return error('Failed to create overlay work directory ${temp_work_dir}: ${err}')
 		}
+	}
+	return CompilationOverlay{
+		source_root: source_root
+		source_display_root: source_display_root
+		temp_root: temp_root
+		source_work_dir: source_work_dir
+		temp_work_dir: temp_work_dir
+		temp_source_file: os.join_path(temp_root, file_rel)
+	}
+}
+
+// prepare_cached_overlay reuses the symlinked project tree of `source_root`
+// across requests and diagnostics jobs. Only open buffers whose content hash
+// changed are rewritten; the expensive full-tree symlink walk runs only when
+// the tracked file set changes or the entry grows stale.
+fn (mut app App) prepare_cached_overlay(mut store &OverlayCacheStore, source_path string, source_root string, source_display_root string, source_work_dir string) !CompilationOverlay {
+	store.mutex.lock()
+	defer {
+		store.mutex.unlock()
+	}
+	tracked := app.tracked_overlay_rel_paths(source_root)
+	now_ms := time.now().unix_milli()
+	if entry := store.entries[source_root] {
+		if entry.temp_root != '' && now_ms - entry.built_ms < overlay_cache_ttl_ms
+			&& entry.tracked_rel_paths == tracked && os.is_dir(entry.temp_root) {
+			hashes := materialize_overlay_buffers(entry.temp_root, source_root, app.open_files,
+				entry.file_hashes)!
+			temp_work_dir, file_rel := overlay_work_paths(source_root, source_work_dir, source_path,
+				entry.temp_root)!
+			store.entries[source_root] = OverlayCacheEntry{
+				...entry
+				built_ms: now_ms
+				file_hashes: hashes
+			}
+			return CompilationOverlay{
+				source_root: source_root
+				source_display_root: source_display_root
+				temp_root: entry.temp_root
+				source_work_dir: source_work_dir
+				temp_work_dir: temp_work_dir
+				temp_source_file: os.join_path(entry.temp_root, file_rel)
+			}
+		}
+	}
+	temp_root := overlay_temp_root(source_root)
+	os.rmdir_all(temp_root) or {}
+	os.mkdir_all(temp_root) or {
+		return error('Failed to create compilation overlay directory ${temp_root}: ${err}')
+	}
+	hashes := materialize_overlay_buffers(temp_root, source_root, app.open_files, map[string]int{})!
+	symlink_untracked_files(source_root, source_work_dir, temp_root, app.open_files) or {
+		os.rmdir_all(temp_root) or {}
+		return error('Failed to populate compilation overlay: ${err}')
+	}
+	temp_work_dir, file_rel := overlay_work_paths(source_root, source_work_dir, source_path, temp_root)!
+	store.entries[source_root] = OverlayCacheEntry{
+		temp_root: temp_root
+		source_root: source_root
+		built_ms: now_ms
+		tracked_rel_paths: tracked
+		file_hashes: hashes
 	}
 	return CompilationOverlay{
 		source_root: source_root
@@ -840,7 +1079,7 @@ fn (mut app App) run_v_check(path string, text string) []JsonError {
 	// on the default backend.
 	diagnostic_source_dir := if use_multifile { exec_dir } else { os.dir(file_to_check) }
 	v_errors := parse_v_check_diagnostics(x.output, diagnostic_source_dir)
-	cleanup_compilation_temp(temp_project_dir, singlefile_tmppath)
+	if !app.overlay_is_shared(temp_project_dir) { cleanup_compilation_temp(temp_project_dir, singlefile_tmppath) }
 
 	// error filtlering
 	if use_multifile {
@@ -1628,7 +1867,7 @@ fn (mut app App) run_v_line_info(method Method, path string, line_info string) R
 		// index-backed answers and source fallbacks take over from here.
 		log('no usable compatibility compiler for -line-info; falling back to the index')
 		app.line_info_mode = .missing
-		cleanup_compilation_temp(temp_project_dir, singlefile_tmppath)
+		if !app.overlay_is_shared(temp_project_dir) { cleanup_compilation_temp(temp_project_dir, singlefile_tmppath) }
 		return app.line_info_unavailable_result(method, path, line_info)
 	}
 	if compiler_rejects_line_info(x.output) && app.line_info_mode == .unknown {
@@ -1659,7 +1898,7 @@ fn (mut app App) run_v_line_info(method Method, path string, line_info string) R
 		// compiler-backed hover, signature, and receiver definition.
 		log('no compiler serves -line-info; falling back to the index')
 		app.line_info_mode = .missing
-		cleanup_compilation_temp(temp_project_dir, singlefile_tmppath)
+		if !app.overlay_is_shared(temp_project_dir) { cleanup_compilation_temp(temp_project_dir, singlefile_tmppath) }
 		return app.line_info_unavailable_result(method, path, line_info)
 	}
 	if app.line_info_mode == .unknown {
@@ -1670,7 +1909,11 @@ fn (mut app App) run_v_line_info(method Method, path string, line_info string) R
 		|| method == .implementation) && use_multifile
 		&& (x.exit_code != 0 || output == '') {
 		if temp_project_dir != '' {
-			os.rmdir_all(temp_project_dir) or { log('Failed to clean up temp project dir: ${err}') }
+			if app.overlay_is_shared(temp_project_dir) {
+				app.drop_overlay_temp_root(temp_project_dir)
+			} else {
+				os.rmdir_all(temp_project_dir) or { log('Failed to clean up temp project dir: ${err}') }
+			}
 			temp_project_dir = ''
 		}
 		file_to_check = real_path
@@ -1682,7 +1925,7 @@ fn (mut app App) run_v_line_info(method Method, path string, line_info string) R
 		log('Fallback RUN RES ${x}')
 	}
 
-	cleanup_compilation_temp(temp_project_dir, singlefile_tmppath)
+	if !app.overlay_is_shared(temp_project_dir) { cleanup_compilation_temp(temp_project_dir, singlefile_tmppath) }
 
 	log('RUN RES ${x}')
 	// Default to JSON null so any unhandled method branch produces a valid LSP response.

@@ -52,6 +52,7 @@ mut:
 	next_request_id                             int = 1 // Counter for server-initiated request ids
 	diagnostics_scheduler                       ?&DiagnosticsScheduler // Production-only async diagnostics
 	run_command_manager                         ?&RunCommandManager // Async code-lens process lifecycle
+	overlay_cache_store                         ?&OverlayCacheStore // Shared compilation overlay cache (see interop.v)
 	execute_commands_synchronously              bool // Test hook for deterministic command assertions
 	write_mutex                                 &sync.Mutex = sync.new_mutex() // Serializes worker and request-loop writes
 }
@@ -258,6 +259,7 @@ fn main() {
 		open_files: map[string]string{}
 		temp_dir: temp_dir
 		diagnostics_scheduler: new_diagnostics_scheduler()
+		overlay_cache_store: new_overlay_cache_store()
 	}
 	// os.File.read uses C fread, which waits for the entire buffer on an open
 	// pipe. LSP clients keep stdin open, so use the raw descriptor-backed pipe
@@ -335,6 +337,7 @@ fn handle_tcp_client(mut conn net.TcpConn) {
 		temp_dir: temp_dir
 		tcp_conn: &conn
 		diagnostics_scheduler: new_diagnostics_scheduler()
+		overlay_cache_store: new_overlay_cache_store()
 	}
 	mut reader := io.new_buffered_reader(reader: conn, cap: transport_buffer_cap)
 	app.handle_requests(mut reader)
@@ -556,6 +559,7 @@ fn (mut app App) handle_requests[T](mut reader T) {
 	defer {
 		app.cancel_all_scheduled_diagnostics()
 		app.stop_run_commands()
+		app.drop_all_overlays()
 	}
 	for {
 		// Reset the per-request raw id so a stale id can never leak into an
