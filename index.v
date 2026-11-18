@@ -389,6 +389,30 @@ fn normalized_index_path(path string) string {
 	return normalized
 }
 
+// lexical_index_path normalizes separators and case without touching the
+// filesystem. Hot paths compare with it first; normalized_index_path
+// (real_path) stays the fallback for disagreements caused by symlinks,
+// case aliases, or 8.3 short names.
+fn lexical_index_path(path string) string {
+	mut normalized := path.replace('\\', '/')
+	$if windows {
+		normalized = normalized.to_lower()
+	}
+	return normalized
+}
+
+// same_index_dir reports whether the directory `path_dir` names the same
+// directory as `dir`, whose lexical and canonical forms are `lex_dir` and
+// `normalized_dir`. The lexical comparison needs no syscalls and wins in the
+// common case; the canonical fallback only runs for symlink, case, or
+// 8.3-short-name aliases.
+fn same_index_dir(path_dir string, lex_dir string, normalized_dir string) bool {
+	if lexical_index_path(path_dir) == lex_dir {
+		return true
+	}
+	return normalized_index_path(path_dir) == normalized_dir
+}
+
 // open_index_uris_cached memoizes open_index_uris_by_path for the current
 // open-files generation. The map only depends on the open URI set, which
 // open_files_generation tracks on every mutation, so it stays exact without
@@ -826,8 +850,21 @@ fn (mut app App) ensure_dir_shallow_indexed(dir string) {
 	scope := 'shallow:${dir}'
 	app.index_incomplete_scopes.delete(scope)
 	refresh := app.index_dir_needs_refresh(dir)
+	// One real_path per walk for the link-containment fallback. Everything
+	// else below is lexical: os.join_path(dir, entry) is trivially inside
+	// `dir`, so only symlinks (which can point outside the module scope)
+	// pay for canonicalization.
 	canonical_dir := os.real_path(dir).replace('\\', '/')
-	open_uris_by_path := app.open_index_uris_cached()
+	// Open buffers shadow their disk names. Match them lexically (no
+	// real_path per file); a directly contained symlink that aliases an
+	// open buffer still resolves through the canonical lookup below, which
+	// is built lazily so the common walk never pays for it.
+	mut open_lexical := map[string]string{}
+	for uri, _ in app.open_files {
+		open_lexical[lexical_index_path(uri_to_path(uri))] = uri
+	}
+	mut open_uris_by_path := map[string]string{}
+	mut open_uris_loaded := false
 	mut present := map[string]bool{}
 	mut entries := os.ls(dir) or {
 		app.index_incomplete_scopes[scope] = true
@@ -842,19 +879,27 @@ fn (mut app App) ensure_dir_shallow_indexed(dir string) {
 			continue
 		}
 		full := os.join_path(dir, entry)
-		// Resolve link candidates so a directly contained link cannot pull an
-		// external source into this loose-module scope. Anything else is
-		// lexically contained; existence and readability are enforced later
-		// by reindex_uri, which already validates every file it indexes.
-		real_file := if os.is_link(full) {
-			os.real_path(full).replace('\\', '/')
+		lex := lexical_index_path(full)
+		mut uri := ''
+		if lex in open_lexical {
+			uri = open_lexical[lex]
+		} else if os.is_link(full) {
+			// Resolve link candidates so a directly contained link cannot
+			// pull an external source into this loose-module scope, and so
+			// a link aliasing an open buffer maps to the client's URI.
+			// Existence and readability are enforced later by reindex_uri,
+			// which already validates every file it indexes.
+			if !path_is_within(lexical_index_path(os.real_path(full)), canonical_dir) {
+				continue
+			}
+			if !open_uris_loaded {
+				open_uris_by_path = app.open_index_uris_cached()
+				open_uris_loaded = true
+			}
+			uri = index_uri_for_path(full, open_uris_by_path)
 		} else {
-			full.replace('\\', '/')
+			uri = path_to_uri(full)
 		}
-		if !path_is_within(real_file, canonical_dir) {
-			continue
-		}
-		uri := index_uri_for_path(full, open_uris_by_path)
 		present[uri] = true
 		if uri in app.open_files {
 			continue
