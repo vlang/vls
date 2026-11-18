@@ -223,7 +223,30 @@ fn (mut app App) handle_document_highlight(request Request) Response {
 			result: []DocumentHighlight{}
 		}
 	}
-	anchor := app.resolve_symbol_anchor(uri, params.position.line, start)
+	cursor_pos := Position{
+		line: params.position.line
+		char: start
+	}
+	// Prefer the index for the anchor: a top-level symbol resolves without
+	// spawning the compiler. Locals and unresolvable symbols keep the single
+	// compiler lookup for the anchor; candidates are then decided below.
+	index_anchor := app.resolve_indexed_definition(uri, cursor_pos)
+	mut anchor := index_anchor
+	if anchor == none {
+		anchor = app.resolve_symbol_anchor(uri, params.position.line, start)
+	}
+	had_index_anchor := index_anchor != none
+	cursor_start_byte := encoded_col_to_byte(line_text, start, app.position_encoding)
+	cursor_end_byte := encoded_col_to_byte(line_text, end, app.position_encoding)
+	_, cursor_has_member, _ := member_qualifier_at_cursor(line_text, end, app.position_encoding)
+	mut cursor_keys := map[string]int{}
+	for b in app.local_scope_bindings(content, cursor_pos) {
+		if b.name == symbol {
+			cursor_keys[highlight_binding_key(b.name, b.line, b.column)] = b.line
+		}
+	}
+	cursor_is_decl := source_occurrence_precedes_local_declaration(lines, params.position.line, cursor_end_byte)
+		|| is_fn_parameter_highlight(line_text, cursor_start_byte, cursor_end_byte)
 	mut anchor_cache := map[string]?Location{}
 	if a := anchor {
 		// The initial lookup already resolved the selected occurrence.
@@ -234,7 +257,11 @@ fn (mut app App) handle_document_highlight(request Request) Response {
 		line := lines[candidate.line_idx]
 		start_char := byte_to_encoded_col(line, candidate.start_byte, app.position_encoding)
 		end_char := byte_to_encoded_col(line, candidate.end_byte, app.position_encoding)
-		if a := anchor {
+		if accept := app.highlight_candidate_fast(content, lines, symbol, params.position.line, cursor_keys, cursor_has_member, cursor_is_decl, had_index_anchor, candidate.line_idx, start_char, end_char, line, candidate.start_byte, candidate.end_byte) {
+			if !accept {
+				continue
+			}
+		} else if a := anchor {
 			if resolved := app.resolve_symbol_anchor_cached(uri, candidate.line_idx, start_char, mut anchor_cache) {
 				if !same_anchor_location(resolved, a) {
 					continue
@@ -276,4 +303,117 @@ fn (mut app App) handle_document_highlight(request Request) Response {
 		id: request.id
 		result: highlights
 	}
+}
+
+// highlight_binding_key identifies one local binding for highlight comparison.
+fn highlight_binding_key(name string, line int, column int) string {
+	return '${name}:${line}:${column}'
+}
+
+// highlight_candidate_is_top_level reports whether a lexical candidate can be
+// accepted as the same top-level symbol without compiler verification. Every
+// syntactic position that could hide a different same-spelled symbol (locals,
+// members, parameters, generics, compile-time code) returns false so the
+// caller keeps the precise compiler check for exactly those.
+fn highlight_candidate_is_top_level(lines []string, line_text string, line_idx int, start_byte int, end_byte int) bool {
+	if source_line_is_module_or_import_declaration(lines, line_idx) {
+		return false
+	}
+	if is_for_binding_highlight(line_text, start_byte, end_byte) {
+		return false
+	}
+	if source_occurrence_is_for_binding(lines, line_idx, start_byte, end_byte) {
+		return false
+	}
+	if source_occurrence_precedes_local_declaration(lines, line_idx, end_byte) {
+		return false
+	}
+	if source_occurrence_is_generic_parameter(lines, line_idx, start_byte, end_byte) {
+		return false
+	}
+	if source_occurrence_has_type_suffix(lines, line_idx, end_byte) {
+		return false
+	}
+	if is_fn_parameter_highlight(line_text, start_byte, end_byte) {
+		return false
+	}
+	if source_occurrence_is_method_declaration(lines, line_idx, start_byte) {
+		return false
+	}
+	if source_occurrence_has_dot_suffix(line_text, end_byte) {
+		return false
+	}
+	trimmed := line_text.trim_space()
+	if trimmed.starts_with('#') || trimmed.starts_with('$') {
+		return false
+	}
+	return true
+}
+
+// highlight_candidate_fast decides one highlight candidate without spawning
+// the compiler: true accepts it, false rejects it, none defers to the
+// existing compiler verification. Identity is the set of visible same-named
+// local bindings; equal sets mean the same declaration is referenced. A side
+// sitting on the binding's own declaration matches by line. Bare top-level
+// uses additionally require an index anchor and a top-level-safe position.
+fn (app &App) highlight_candidate_fast(content string, lines []string, symbol string, cursor_line int, cursor_keys map[string]int, cursor_member bool, cursor_is_decl bool, index_anchor bool, cand_line int, start_char int, end_char int, line_text string, start_byte int, end_byte int) ?bool {
+	if symbol == 'it' || symbol == 'err' {
+		return none
+	}
+	if cursor_member {
+		return none
+	}
+	_, cand_member, _ := member_qualifier_at_cursor(line_text, end_char, app.position_encoding)
+	if cand_member {
+		return none
+	}
+	cand_pos := Position{
+		line: cand_line
+		char: start_char
+	}
+	mut cand_keys := map[string]int{}
+	for b in app.local_scope_bindings(content, cand_pos) {
+		if b.name == symbol {
+			cand_keys[highlight_binding_key(b.name, b.line, b.column)] = b.line
+		}
+	}
+	if cand_keys.len == cursor_keys.len {
+		mut same := true
+		for key, _ in cursor_keys {
+			if key !in cand_keys {
+				same = false
+				break
+			}
+		}
+		if same {
+			if cursor_keys.len == 0 {
+				if index_anchor
+					&& highlight_candidate_is_top_level(lines, line_text, cand_line, start_byte, end_byte) {
+					return true
+				}
+				return none
+			}
+			return true
+		}
+	}
+	cand_is_decl := source_occurrence_precedes_local_declaration(lines, cand_line, end_byte)
+		|| is_fn_parameter_highlight(line_text, start_byte, end_byte)
+	if cand_is_decl {
+		for _, decl_line in cursor_keys {
+			if decl_line == cand_line {
+				return true
+			}
+		}
+	}
+	if cursor_is_decl {
+		for _, decl_line in cand_keys {
+			if decl_line == cursor_line {
+				return true
+			}
+		}
+	}
+	if cand_keys.len == 0 && cursor_keys.len == 0 {
+		return none
+	}
+	return false
 }
