@@ -317,6 +317,16 @@ fn compiler_rejects_line_info(output string) bool {
 	return compiler_rejects_any_option(output, line_info_flags)
 }
 
+// compiler_reports_missing_compat_compiler reports whether the compiler output
+// shows the V3 launcher has no usable V1 compatibility compiler for
+// `-vls-mode` / `-line-info` (e.g. "`-vls-mode` requires the compatibility
+// compiler, but no usable ... fallback was found"). Retrying with
+// `-old-compiler` cannot succeed either, so the session should retire
+// compiler-backed lookups instead of paying doomed process spawns per request.
+fn compiler_reports_missing_compat_compiler(output string) bool {
+	return output.contains('requires the compatibility compiler') && output.contains('no usable')
+}
+
 // compiler_refused_and_stopped reports whether an invocation printed its refusal
 // and nothing else, which is how a launcher with no answer at all behaves. One
 // that recovers by rerunning the request against a compatibility compiler always
@@ -1611,6 +1621,16 @@ fn (mut app App) run_v_line_info(method Method, path string, line_info string) R
 	exec_dir := if use_multifile { compile_target } else { working_dir }
 	mut x := run_v_argv(app.with_line_info_selection(cmd_args), exec_dir)
 	mut output := normalize_v_line_info_output(x.output, method)
+	if compiler_reports_missing_compat_compiler(x.output) && app.line_info_mode == .unknown {
+		// The launcher cannot serve `-line-info`: no usable V1 compatibility
+		// compiler exists, so retrying (here or on later requests) only burns
+		// another compile. Retire compiler-backed lookups for the session;
+		// index-backed answers and source fallbacks take over from here.
+		log('no usable compatibility compiler for -line-info; falling back to the index')
+		app.line_info_mode = .missing
+		cleanup_compilation_temp(temp_project_dir, singlefile_tmppath)
+		return app.line_info_unavailable_result(method, path, line_info)
+	}
 	if compiler_rejects_line_info(x.output) && app.line_info_mode == .unknown {
 		// This V has no in-tree `-line-info` checker. Its launcher may recover on
 		// its own by rerunning the failed request against the compatibility
