@@ -54,6 +54,8 @@ mut:
 	diagnostics_scheduler                       ?&DiagnosticsScheduler // Production-only async diagnostics
 	run_command_manager                         ?&RunCommandManager // Async code-lens process lifecycle
 	overlay_cache_store                         ?&OverlayCacheStore // Shared compilation overlay cache (see interop.v)
+	line_info_cancel                            ?&CancelFlag // Set while a line-info compiler run may be cancelled
+	line_info_cancels                           map[string]&CancelFlag // In-flight line-info cancels by raw id (loop thread only)
 	execute_commands_synchronously              bool // Test hook for deterministic command assertions
 	write_mutex                                 &sync.Mutex = sync.new_mutex() // Serializes worker and request-loop writes
 }
@@ -261,6 +263,7 @@ fn main() {
 		temp_dir: temp_dir
 		diagnostics_scheduler: new_diagnostics_scheduler()
 		overlay_cache_store: new_overlay_cache_store()
+		line_info_cancels: map[string]&CancelFlag{}
 	}
 	// os.File.read uses C fread, which waits for the entire buffer on an open
 	// pipe. LSP clients keep stdin open, so use the raw descriptor-backed pipe
@@ -339,6 +342,7 @@ fn handle_tcp_client(mut conn net.TcpConn) {
 		tcp_conn: &conn
 		diagnostics_scheduler: new_diagnostics_scheduler()
 		overlay_cache_store: new_overlay_cache_store()
+		line_info_cancels: map[string]&CancelFlag{}
 	}
 	mut reader := io.new_buffered_reader(reader: conn, cap: transport_buffer_cap)
 	app.handle_requests(mut reader)
@@ -675,9 +679,12 @@ fn (mut app App) handle_requests[T](mut reader T) {
 			}
 		}
 		match method {
-			.completion, .signature_help, .definition, .hover, .declaration, .type_definition, .implementation {
+			.completion {
 				resp := app.operation_at_pos(method, lsp_request)
 				app.write_response_or_cancelled(lsp_request.id, resp)
+			}
+			.signature_help, .hover, .definition, .declaration, .type_definition, .implementation {
+				app.dispatch_async_line_info(method, lsp_request)
 			}
 			.references {
 				resp := app.find_references(lsp_request)

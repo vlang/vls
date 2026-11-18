@@ -558,7 +558,48 @@ fn resolve_compiler_timeout_ms() i64 {
 // would silently drop them. The child is killed if it exceeds
 // compiler_timeout_ms. This is the single, shell-free entry point for all
 // compiler invocations.
-fn run_v_argv(args []string, work_folder string) os.Result {
+// CancelFlag lets the request loop cancel an in-flight compiler run. The
+// worker polls it in its drain loop; the loop sets it on $/cancelRequest.
+struct CancelFlag {
+mut:
+	mutex     sync.Mutex
+	cancelled bool
+	finished  bool
+}
+
+fn (mut flag CancelFlag) cancel() {
+	flag.mutex.lock()
+	defer {
+		flag.mutex.unlock()
+	}
+	flag.cancelled = true
+}
+
+fn (mut flag CancelFlag) is_cancelled() bool {
+	flag.mutex.lock()
+	defer {
+		flag.mutex.unlock()
+	}
+	return flag.cancelled
+}
+
+fn (mut flag CancelFlag) finish() {
+	flag.mutex.lock()
+	defer {
+		flag.mutex.unlock()
+	}
+	flag.finished = true
+}
+
+fn (mut flag CancelFlag) is_finished() bool {
+	flag.mutex.lock()
+	defer {
+		flag.mutex.unlock()
+	}
+	return flag.finished
+}
+
+fn run_v_argv_cancellable(args []string, work_folder string, cancel ?&CancelFlag) os.Result {
 	if work_folder != '' && !os.is_dir(work_folder) {
 		msg := 'Working dir does not exist: ${work_folder}'
 		log(msg)
@@ -607,6 +648,14 @@ fn run_v_argv(args []string, work_folder string) os.Result {
 			out.write_string(chunk)
 			got_data = true
 		}
+		if mut flag := cancel {
+			if flag.is_cancelled() {
+				log('v invocation cancelled; killing child')
+				p.signal_kill()
+				timed_out = true
+				break
+			}
+		}
 		if time.now().unix_milli() - start_ms > timeout_ms {
 			log('v invocation exceeded ${timeout_ms}ms; killing child')
 			p.signal_kill()
@@ -633,6 +682,13 @@ fn run_v_argv(args []string, work_folder string) os.Result {
 		exit_code: code
 		output: out.str()
 	}
+}
+
+// run_v_argv executes the V compiler without cancellation support. Async
+// workers use run_v_argv_cancellable directly so $/cancelRequest can kill
+// the child process instead of waiting out the full compiler timeout.
+fn run_v_argv(args []string, work_folder string) os.Result {
+	return run_v_argv_cancellable(args, work_folder, none)
 }
 
 fn cleanup_compilation_temp(temp_project_dir string, singlefile_tmppath string) {
@@ -1817,6 +1873,137 @@ fn (mut app App) line_info_unavailable_result(method Method, path string, line_i
 	}
 }
 
+// LineInfoJob carries everything an async line-info worker needs. The snapshot
+// shares immutable index values with the request loop (entries are only ever
+// replaced, never mutated) but owns private copies of every map it writes, so
+// the loop never blocks on a compiler run.
+struct LineInfoJob {
+mut:
+	snapshot   &App
+	method     Method
+	request    Request
+	cancel     &CancelFlag
+}
+
+// line_info_snapshot clones the request-loop state an async line-info worker
+// needs: open buffers, workspace roots, the fingerprint-checked index (values
+// are shared read-only; the maps themselves are private copies), the vlib
+// cache, and the transport write path. Generation counters and diagnostics
+// state are intentionally left behind: the worker answers one request from a
+// frozen snapshot and never publishes diagnostics.
+fn (mut app App) line_info_snapshot(cancel &CancelFlag) &App {
+	mut open_files := map[string]string{}
+	for uri, content in app.open_files {
+		open_files[uri] = content
+	}
+	mut roots := []string{}
+	for r in app.workspace_roots {
+		roots << r
+	}
+	mut removed := []string{}
+	for r in app.removed_workspace_roots {
+		removed << r
+	}
+	mut index := map[string]IndexEntry{}
+	for uri, entry in app.symbol_index {
+		index[uri] = entry
+	}
+	mut vlib_fns := map[string]map[string]string{}
+	for mod_name, fns in app.vlib_fn_cache {
+		vlib_fns[mod_name] = fns
+	}
+	mut dirs := map[string]bool{}
+	for dir, done in app.indexed_dirs {
+		dirs[dir] = done
+	}
+	mut walk_ms := map[string]i64{}
+	for dir, ms in app.indexed_dir_walk_ms {
+		walk_ms[dir] = ms
+	}
+	mut skipped := map[string]bool{}
+	for uri, skipped_uri in app.index_skipped_uris {
+		skipped[uri] = skipped_uri
+	}
+	mut incomplete := map[string]bool{}
+	for scope, incomplete_scope in app.index_incomplete_scopes {
+		incomplete[scope] = incomplete_scope
+	}
+	return &App{
+		text: app.text
+		open_files: open_files
+		open_files_versions: map[string]i64{}
+		workspace_roots: roots
+		removed_workspace_roots: removed
+		position_encoding: app.position_encoding
+		symbol_index: index
+		ref_occurrences: map[string]OccEntry{}
+		vlib_fn_cache: vlib_fns
+		indexed_dirs: dirs
+		indexed_dir_walk_ms: walk_ms
+		index_skipped_uris: skipped
+		index_incomplete_scopes: incomplete
+		diag_cache: map[string]DiagCacheEntry{}
+		project_generations: map[string]int{}
+		line_info_mode: app.line_info_mode
+		current_request_raw_id: app.current_request_raw_id
+		write_mutex: app.write_mutex
+		tcp_conn: app.tcp_conn
+		capture_output: app.capture_output
+		temp_dir: os.temp_dir()
+		line_info_cancel: cancel
+		overlay_cache_store: app.overlay_cache_store
+		cancelled_requests: map[int]bool{}
+		cancelled_raw_ids: map[string]bool{}
+		line_info_cancels: map[string]&CancelFlag{}
+	}
+}
+
+fn run_async_line_info_job(job LineInfoJob) {
+	mut snap := job.snapshot
+	resp := snap.operation_at_pos(job.method, job.request)
+	mut flag := job.cancel
+	finished_cancelled := flag.is_cancelled()
+	flag.finish()
+	if finished_cancelled {
+		return
+	}
+	snap.write_response(resp)
+}
+
+fn (mut app App) purge_finished_line_info() {
+	mut done := []string{}
+	for raw_id in app.line_info_cancels.keys() {
+		mut f := app.line_info_cancels[raw_id] or { continue }
+		if f.is_finished() {
+			done << raw_id
+		}
+	}
+	for raw_id in done {
+		app.line_info_cancels.delete(raw_id)
+	}
+}
+
+fn (mut app App) dispatch_async_line_info(method Method, request Request) {
+	if app.line_info_mode == .unknown {
+		// First line-info request of the session runs synchronously so the
+		// probe learns whether a compiler can answer; every later request
+		// runs on a worker while the loop stays responsive.
+		resp := app.operation_at_pos(method, request)
+		app.write_response_or_cancelled(request.id, resp)
+		return
+	}
+	app.purge_finished_line_info()
+	flag := &CancelFlag{}
+	app.line_info_cancels[app.current_request_raw_id] = flag
+	snapshot := app.line_info_snapshot(flag)
+	spawn run_async_line_info_job(LineInfoJob{
+		snapshot: snapshot
+		method: method
+		request: request
+		cancel: flag
+	})
+}
+
 fn (mut app App) run_v_line_info(method Method, path string, line_info string) ResponseResult {
 	// Convert URI to local file path
 	real_path := uri_to_path(path)
@@ -1899,7 +2086,7 @@ fn (mut app App) run_v_line_info(method Method, path string, line_info string) R
 	}
 
 	exec_dir := if use_multifile { compile_target } else { working_dir }
-	mut x := run_v_argv(app.with_line_info_selection(cmd_args), exec_dir)
+	mut x := run_v_argv_cancellable(app.with_line_info_selection(cmd_args), exec_dir, app.line_info_cancel)
 	mut output := normalize_v_line_info_output(x.output, method)
 	if compiler_reports_missing_compat_compiler(x.output) && app.line_info_mode == .unknown {
 		// The launcher cannot serve `-line-info`: no usable V1 compatibility
@@ -1919,7 +2106,7 @@ fn (mut app App) run_v_line_info(method Method, path string, line_info string) R
 		// The probe runs once: from here on the session has a mode to drive.
 		log('compiler rejected the -line-info options; retrying with -old-compiler')
 		app.line_info_mode = .compat
-		retry := run_v_argv(app.with_line_info_selection(cmd_args), exec_dir)
+		retry := run_v_argv_cancellable(app.with_line_info_selection(cmd_args), exec_dir, app.line_info_cancel)
 		if compiler_rejects_any_option(retry.output, ['-old-compiler']) {
 			// There is no selector to ask with, so whatever the launcher does on
 			// its own is the best available. Keep driving it that way.
@@ -1961,7 +2148,7 @@ fn (mut app App) run_v_line_info(method Method, path string, line_info string) R
 		compile_target = real_path
 		cmd_fallback := app.with_line_info_selection(build_v_line_info_args_single(file_to_check, line_info, compile_target))
 		log('cmd_fallback=v ${cmd_fallback.join(' ')}')
-		x = run_v_argv(cmd_fallback, working_dir)
+		x = run_v_argv_cancellable(cmd_fallback, working_dir, app.line_info_cancel)
 		output = normalize_v_line_info_output(x.output, method)
 		log('Fallback RUN RES ${x}')
 	}

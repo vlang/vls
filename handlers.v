@@ -8080,6 +8080,10 @@ fn (mut app App) on_cancel_request(request Request) {
 	// (P0-02/P0-03).
 	if raw := extract_raw_id(request.params) {
 		app.cancelled_raw_ids[raw] = true
+		if raw in app.line_info_cancels {
+			mut flag := app.line_info_cancels[raw] or { &CancelFlag{} }
+			flag.cancel()
+		}
 		// Match every valid id by its exact raw token. Narrowing a fractional or
 		// out-of-range numeric id to int can collide with a different request.
 		log('VLS: request ${raw} marked as cancelled')
