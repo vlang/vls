@@ -4627,7 +4627,16 @@ fn (mut app App) find_references(request Request) Response {
 
 	// Resolve references from the project's reference-occurrence index.
 	scope := app.index_scope_for_uri(path)
-	anchor := app.resolve_symbol_anchor(path, line, col)
+	// Prefer the index for the anchor: a top-level symbol resolves without
+	// spawning the compiler. Per-candidate verification below still filters
+	// anything the index cannot prove, so this stays precise.
+	mut anchor := app.resolve_indexed_definition(path, Position{
+		line: line
+		char: col
+	})
+	if anchor == none {
+		anchor = app.resolve_symbol_anchor(path, line, col)
+	}
 	mut locations := if a := anchor {
 		// References may fall back to lexical occurrences past the candidate cap.
 		app.search_symbol_in_dirs_semantic(symbol, a, scope, request.id, true)
@@ -7057,6 +7066,115 @@ fn (mut app App) collect_semantic_candidates(symbol string, scope IndexScope) []
 	return candidates
 }
 
+// SemanticFileSnapshot caches one candidate file's content for a scan.
+struct SemanticFileSnapshot {
+	content string
+	lines   []string
+}
+
+// visible_binding_keys returns the set of same-named local bindings visible at
+// `pos`, keyed by declaration identity. Two occurrences reference the same
+// local exactly when these sets single out the same declaration.
+fn (app &App) visible_binding_keys(content string, pos Position, symbol string) map[string]int {
+	mut keys := map[string]int{}
+	for b in app.local_scope_bindings(content, pos) {
+		if b.name == symbol {
+			keys[highlight_binding_key(b.name, b.line, b.column)] = b.line
+		}
+	}
+	return keys
+}
+
+// semantic_candidate_fast decides one references/rename candidate without the
+// compiler: true accepts it, false rejects it, none defers to the existing
+// compiler verification. Same-file candidates compare visible binding sets
+// against the anchor; bare top-level uses additionally require an
+// index-resolved declaration matching the anchor.
+fn (mut app App) semantic_candidate_fast(symbol string, anchor Location, anchor_keys map[string]int, anchor_member bool, anchor_is_decl bool, cand Location, mut file_snaps map[string]SemanticFileSnapshot) ?bool {
+	if symbol == 'it' || symbol == 'err' {
+		return none
+	}
+	if anchor_member {
+		return none
+	}
+	snap := file_snaps[cand.uri] or {
+		content := app.index_source_for(cand.uri) or { return none }
+		fresh := SemanticFileSnapshot{
+			content: content
+			lines: content.split_into_lines()
+		}
+		file_snaps[cand.uri] = fresh
+		fresh
+	}
+	cand_pos := cand.range.start
+	line_text := if cand_pos.line >= 0 && cand_pos.line < snap.lines.len {
+		snap.lines[cand_pos.line]
+	} else {
+		''
+	}
+	if line_text == '' {
+		return none
+	}
+	_, cand_member, _ := member_qualifier_at_cursor(line_text, cand_pos.char, app.position_encoding)
+	if cand_member {
+		return none
+	}
+	start_byte := encoded_col_to_byte(line_text, cand_pos.char, app.position_encoding)
+	end_byte := encoded_col_to_byte(line_text, cand.range.end.char, app.position_encoding)
+	if cand.uri == anchor.uri {
+		cand_keys := app.visible_binding_keys(snap.content, cand_pos, symbol)
+		if cand_keys.len == anchor_keys.len {
+			mut same := true
+			for key, _ in anchor_keys {
+				if key !in cand_keys {
+					same = false
+					break
+				}
+			}
+			if same {
+				if anchor_keys.len == 0 {
+					if idx := app.resolve_indexed_definition(cand.uri, cand_pos) {
+						if !same_anchor_location(idx, anchor) {
+							return false
+						}
+						if highlight_candidate_is_top_level(snap.lines, line_text, cand_pos.line, start_byte, end_byte) {
+							return true
+						}
+					}
+					return none
+				}
+				return true
+			}
+		}
+		cand_is_decl := !source_occurrence_is_method_declaration(snap.lines, cand_pos.line, start_byte)
+			&& (source_occurrence_precedes_local_declaration(snap.lines, cand_pos.line, end_byte)
+			|| is_fn_parameter_highlight(line_text, start_byte, end_byte))
+		if cand_is_decl && cand_pos.line == anchor.range.start.line {
+			return true
+		}
+		if anchor_is_decl {
+			for _, decl_line in cand_keys {
+				if decl_line == anchor.range.start.line {
+					return true
+				}
+			}
+		}
+		if cand_keys.len == 0 && anchor_keys.len == 0 {
+			return none
+		}
+		return false
+	}
+	if idx := app.resolve_indexed_definition(cand.uri, cand_pos) {
+		if !same_anchor_location(idx, anchor) {
+			return false
+		}
+		if highlight_candidate_is_top_level(snap.lines, line_text, cand_pos.line, start_byte, end_byte) {
+			return true
+		}
+	}
+	return none
+}
+
 // search_symbol_in_dirs_semantic reads scoped candidate occurrences of `symbol`
 // from the reference index and keeps only those whose compiler definition lookup
 // resolves to the same declaration anchor. Compiler work is capped after scope
@@ -7085,6 +7203,30 @@ fn (mut app App) search_symbol_in_dirs_semantic(symbol string, anchor Location, 
 
 	mut locations := []Location{}
 	mut anchor_cache := map[string]?Location{}
+	// Anchor-side context for the compiler-free candidate decision below.
+	anchor_content := app.index_source_for(anchor.uri) or { '' }
+	anchor_lines := anchor_content.split_into_lines()
+	anchor_keys := app.visible_binding_keys(anchor_content, anchor.range.start, symbol)
+	anchor_line_text := if anchor.range.start.line >= 0 && anchor.range.start.line < anchor_lines.len {
+		anchor_lines[anchor.range.start.line]
+	} else {
+		''
+	}
+	_, anchor_member, _ := member_qualifier_at_cursor(anchor_line_text, anchor.range.start.char, app.position_encoding)
+	anchor_start_byte := if anchor_line_text == '' {
+		-1
+	} else {
+		encoded_col_to_byte(anchor_line_text, anchor.range.start.char, app.position_encoding)
+	}
+	anchor_end_byte := if anchor_line_text == '' {
+		-1
+	} else {
+		encoded_col_to_byte(anchor_line_text, anchor.range.end.char, app.position_encoding)
+	}
+	anchor_is_decl := anchor_start_byte >= 0
+		&& (source_occurrence_precedes_local_declaration(anchor_lines, anchor.range.start.line, anchor_end_byte)
+		|| is_fn_parameter_highlight(anchor_line_text, anchor_start_byte, anchor_end_byte))
+	mut file_snaps := map[string]SemanticFileSnapshot{}
 	for cand in candidates {
 		if request_id in app.cancelled_requests {
 			return locations
@@ -7094,6 +7236,14 @@ fn (mut app App) search_symbol_in_dirs_semantic(symbol string, anchor Location, 
 		// is the canonical anchor returned for the user's selected occurrence.
 		if same_anchor_location(cand, anchor) {
 			locations << cand
+			continue
+		}
+		// Decide from the index and lexical scope first; only genuinely
+		// ambiguous candidates pay for a compiler definition lookup.
+		if fast := app.semantic_candidate_fast(symbol, anchor, anchor_keys, anchor_member, anchor_is_decl, cand, mut file_snaps) {
+			if fast {
+				locations << cand
+			}
 			continue
 		}
 		resolved := app.resolve_symbol_anchor_cached(cand.uri, cand.range.start.line, cand.range.start.char, mut anchor_cache) or { continue }
