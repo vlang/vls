@@ -1011,6 +1011,32 @@ fn source_path_from_overlay(reported_path string, overlay CompilationOverlay) st
 	return source_path_from_overlay_with_windows_rules(reported_path, overlay, false)
 }
 
+// filter_v_errors_to_file keeps the checker errors that belong to `real_path`,
+// mapping overlay paths back to their source paths. It is used by the batched
+// diagnostics worker; the single-file wrapper keeps its historical inline
+// version.
+fn filter_v_errors_to_file(v_errors []JsonError, overlay CompilationOverlay, real_path string) []JsonError {
+	mut filtered_errors := []JsonError{}
+	for err in v_errors {
+		err_file := source_path_from_overlay(err.path, overlay)
+		if normalized_index_path(err_file) == normalized_index_path(real_path) {
+			filtered_errors << JsonError{
+				path: real_path
+				message: err.message
+				line_nr: err.line_nr
+				col: err.col
+				len: err.len
+				level: err.level
+			}
+			log('INCLUDING ERROR from err_file=${err_file}: ${err.message}')
+		} else {
+			log('EXCLUDING ERROR from err_file=${err_file} real_path=${real_path}')
+		}
+	}
+	return filtered_errors
+}
+
+
 fn (mut app App) run_v_check(path string, text string) []JsonError {
 	real_path := uri_to_path(path)
 	working_dir := os.dir(real_path)
@@ -1085,6 +1111,15 @@ fn (mut app App) run_v_check(path string, text string) []JsonError {
 	// on the default backend.
 	diagnostic_source_dir := if use_multifile { exec_dir } else { os.dir(file_to_check) }
 	v_errors := parse_v_check_diagnostics(x.output, diagnostic_source_dir)
+	// Share project-wide errors for batching: one project check answers every
+	// open file in it. Only shared-overlay runs qualify, and timed-out or
+	// crashed runs are never shared, mirroring the per-file cache rules.
+	if use_multifile && (x.exit_code == 0 || v_errors.len > 0)
+		&& app.overlay_is_shared(temp_project_dir) {
+		if mut sched := app.diagnostics_scheduler {
+			sched.store_project_diag(app.generation_key(path), gen, v_errors, temp_project_dir, compile_target, overlay.source_display_root)
+		}
+	}
 	if !app.overlay_is_shared(temp_project_dir) { cleanup_compilation_temp(temp_project_dir, singlefile_tmppath) }
 
 	// error filtlering

@@ -42,12 +42,25 @@ struct DiagnosticsProjectMutation {
 }
 
 @[heap]
+// ProjectDiagResult caches one project-wide compiler run for batching: the
+// unfiltered errors plus the overlay layout needed to map them back to
+// source paths. Only shared-overlay runs are stored, so the layout stays
+// valid while the entry is reachable.
+struct ProjectDiagResult {
+	generation          int
+	errors              []JsonError
+	temp_root           string
+	temp_work_dir       string
+	source_display_root string
+}
+
 struct DiagnosticsScheduler {
 mut:
 	mutex               sync.Mutex
 	generations         map[string]u64
 	project_generations map[string]u64
 	diag_results        map[string]DiagCacheEntry
+	project_results     map[string]ProjectDiagResult
 	global_generation   u64
 	pending_jobs        map[string]DiagnosticsJob
 	worker_running      bool
@@ -62,6 +75,7 @@ fn new_diagnostics_scheduler() &DiagnosticsScheduler {
 		project_generations: map[string]u64{}
 		pending_jobs: map[string]DiagnosticsJob{}
 		diag_results: map[string]DiagCacheEntry{}
+		project_results: map[string]ProjectDiagResult{}
 	}
 }
 
@@ -132,6 +146,14 @@ fn (scheduler &DiagnosticsScheduler) is_current_locked(uri string, global_genera
 		&& scheduler.generations[uri] == generation
 }
 
+fn (mut scheduler DiagnosticsScheduler) is_generation_current(global_generation u64) bool {
+	scheduler.mutex.lock()
+	defer {
+		scheduler.mutex.unlock()
+	}
+	return scheduler.global_generation == global_generation
+}
+
 fn (mut scheduler DiagnosticsScheduler) is_job_current(job DiagnosticsJob) bool {
 	scheduler.mutex.lock()
 	defer {
@@ -165,23 +187,22 @@ fn (mut scheduler DiagnosticsScheduler) take_ready_jobs(now i64) ([]DiagnosticsJ
 	defer {
 		scheduler.mutex.unlock()
 	}
-	mut ready := []DiagnosticsJob{cap: 1}
-	mut ready_uri := ''
+	mut ready := []DiagnosticsJob{}
 	if scheduler.active_uri == '' {
-		for uri, job in scheduler.pending_jobs {
+		for _, job in scheduler.pending_jobs {
 			if job.ready_at <= now {
 				ready << job
-				ready_uri = uri
-				break
 			}
 		}
-	}
-	if ready_uri != '' {
-		job := ready[0]
-		scheduler.pending_jobs.delete(ready_uri)
-		scheduler.active_uri = job.uri
-		scheduler.active_project_key = job.project_key
-		scheduler.active_generation = job.generation
+		for job in ready {
+			scheduler.pending_jobs.delete(job.uri)
+		}
+		if ready.len > 0 {
+			first := ready[0]
+			scheduler.active_uri = first.uri
+			scheduler.active_project_key = first.project_key
+			scheduler.active_generation = first.generation
+		}
 	}
 	should_stop := ready.len == 0 && scheduler.pending_jobs.len == 0
 		&& scheduler.active_uri == ''
@@ -229,6 +250,33 @@ fn (mut scheduler DiagnosticsScheduler) store_diag(uri string, content_hash int,
 		generation: generation
 		errors: errors
 	}
+}
+
+fn (mut scheduler DiagnosticsScheduler) store_project_diag(key string, generation int, errors []JsonError, temp_root string, temp_work_dir string, source_display_root string) {
+	scheduler.mutex.lock()
+	defer {
+		scheduler.mutex.unlock()
+	}
+	scheduler.project_results[key] = ProjectDiagResult{
+		generation: generation
+		errors: errors
+		temp_root: temp_root
+		temp_work_dir: temp_work_dir
+		source_display_root: source_display_root
+	}
+}
+
+fn (mut scheduler DiagnosticsScheduler) cached_project_diag(key string, generation int) ?ProjectDiagResult {
+	scheduler.mutex.lock()
+	defer {
+		scheduler.mutex.unlock()
+	}
+	if entry := scheduler.project_results[key] {
+		if entry.generation == generation {
+			return entry
+		}
+	}
+	return none
 }
 
 fn (mut scheduler DiagnosticsScheduler) cancel(uri string) {
@@ -352,6 +400,134 @@ fn (mut app App) cancel_all_scheduled_diagnostics() {
 	}
 }
 
+// publish_group_if_current publishes one file's share of a batched project
+// check. The result was compiled from the latest snapshot, so per-file and
+// per-project generations are not rechecked; a shutdown or a closed document
+// still suppresses the publish.
+fn (mut scheduler DiagnosticsScheduler) publish_group_if_current(mut app App, job DiagnosticsJob, notification Notification) bool {
+	scheduler.mutex.lock()
+	defer {
+		scheduler.mutex.unlock()
+	}
+	if scheduler.global_generation != job.global_generation {
+		return false
+	}
+	if job.uri !in app.open_files {
+		return false
+	}
+	app.write_notification(notification)
+	return true
+}
+
+// run_diagnostics_batch compiles one shared project snapshot for a group of
+// same-project jobs and publishes per-file results. Opening N files schedules
+// N jobs for one project; without batching each would run a full `v check`
+// serially even though a single project check answers all of them.
+fn run_diagnostics_batch(mut scheduler DiagnosticsScheduler, group []DiagnosticsJob) {
+	mut leader_idx := 0
+	for i, job in group {
+		if job.project_generation > group[leader_idx].project_generation
+			|| (job.project_generation == group[leader_idx].project_generation
+			&& job.generation > group[leader_idx].generation) {
+			leader_idx = i
+		}
+	}
+	leader := group[leader_idx]
+	if !scheduler.is_generation_current(leader.global_generation) {
+		for job in group {
+			scheduler.finish(job)
+		}
+		return
+	}
+	log('diagnostics batch: project=${leader.project_key} jobs=${group.len}')
+	temp_dir := os.join_path(os.temp_dir(), 'vls_diag_${os.getpid()}_${leader.generation}_${time.now().unix_nano()}')
+	os.mkdir_all(temp_dir) or {
+		for job in group {
+			scheduler.finish(job)
+		}
+		return
+	}
+	defer {
+		os.rmdir_all(temp_dir) or {}
+	}
+	mut versions := map[string]i64{}
+	if version := leader.version {
+		versions[leader.uri] = version
+	}
+	mut worker := App{
+		text: leader.content
+		open_files: leader.open_files
+		open_files_versions: versions
+		temp_dir: temp_dir
+		diagnostics_enabled: true
+		diag_cache: map[string]DiagCacheEntry{}
+		project_generations: leader.project_generations
+		position_encoding: leader.position_encoding
+		write_mutex: leader.write_mutex
+		tcp_conn: leader.tcp_conn
+		overlay_cache_store: leader.overlay_store
+	}
+	leader_errors := worker.run_v_check(leader.uri, leader.content)
+	leader_key := worker.generation_key(leader.uri)
+	leader_gen := worker.project_generation(leader.uri)
+	for job in group {
+		scheduler.finish(job)
+	}
+	content_hash := leader.content.hash()
+	if entry := worker.diag_cache[leader.uri] {
+		if entry.content_hash == content_hash && entry.generation == leader_gen {
+			scheduler.store_diag(leader.uri, content_hash, leader_gen, entry.errors)
+		}
+	}
+	notification := worker.build_diagnostics_notification_for_errors(leader.uri, leader.content, leader_errors)
+	scheduler.publish_if_current(mut worker, leader, notification)
+	project_errors := scheduler.cached_project_diag(leader_key, leader_gen)
+	for job in group {
+		if job.uri == leader.uri {
+			continue
+		}
+		proj := project_errors or {
+			if scheduler.is_job_current(job) {
+				run_diagnostics_job(mut scheduler, job)
+			}
+			continue
+		}
+		member_content := leader.open_files[job.uri] or {
+			if scheduler.is_job_current(job) {
+				run_diagnostics_job(mut scheduler, job)
+			}
+			continue
+		}
+		if member_content != job.content {
+			if scheduler.is_job_current(job) {
+				run_diagnostics_job(mut scheduler, job)
+			}
+			continue
+		}
+		member_overlay := CompilationOverlay{
+			temp_root: proj.temp_root
+			temp_work_dir: proj.temp_work_dir
+			source_display_root: proj.source_display_root
+		}
+		filtered := filter_v_errors_to_file(proj.errors, member_overlay, uri_to_path(job.uri))
+		member_hash := job.content.hash()
+		member_gen := job.project_generations[job.project_key]
+		scheduler.store_diag(job.uri, member_hash, member_gen, filtered)
+		mut member_versions := map[string]i64{}
+		if version := job.version {
+			member_versions[job.uri] = version
+		}
+		mut member_app := App{
+			text: job.content
+			open_files_versions: member_versions
+			position_encoding: job.position_encoding
+			diagnostics_enabled: true
+		}
+		member_notification := member_app.build_diagnostics_notification_for_errors(job.uri, job.content, filtered)
+		scheduler.publish_group_if_current(mut worker, job, member_notification)
+	}
+}
+
 fn run_diagnostics_worker(mut scheduler DiagnosticsScheduler) {
 	for {
 		time.sleep(diagnostics_worker_poll)
@@ -359,9 +535,19 @@ fn run_diagnostics_worker(mut scheduler DiagnosticsScheduler) {
 		if should_stop {
 			return
 		}
+		mut groups := map[string][]DiagnosticsJob{}
 		for job in jobs {
-			run_diagnostics_job(mut scheduler, job)
-			scheduler.finish(job)
+			mut g := groups[job.project_key] or { []DiagnosticsJob{} }
+			g << job
+			groups[job.project_key] = g
+		}
+		for _, group in groups {
+			if group.len == 1 {
+				run_diagnostics_job(mut scheduler, group[0])
+				scheduler.finish(group[0])
+			} else {
+				run_diagnostics_batch(mut scheduler, group)
+			}
 		}
 	}
 }
