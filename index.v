@@ -689,13 +689,10 @@ fn (mut app App) ensure_dir_shallow_indexed(dir string) {
 			continue
 		}
 		full := os.join_path(dir, entry)
-		if !os.is_file(full) {
-			continue
-		}
-		// os.is_file follows symlinks. Resolve link candidates so a directly
-		// contained link cannot pull an external source into this loose-module
-		// scope; plain files are already contained lexically, which avoids a
-		// real_path syscall per file on every request.
+		// Resolve link candidates so a directly contained link cannot pull an
+		// external source into this loose-module scope. Anything else is
+		// lexically contained; existence and readability are enforced later
+		// by reindex_uri, which already validates every file it indexes.
 		real_file := if os.is_link(full) {
 			os.real_path(full).replace('\\', '/')
 		} else {
