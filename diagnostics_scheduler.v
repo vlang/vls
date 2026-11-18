@@ -16,6 +16,7 @@ struct DiagnosticsJob {
 	uri                 string
 	content             string
 	overlay_store       ?&OverlayCacheStore
+	scheduler           ?&DiagnosticsScheduler
 	version             ?i64
 	project_key         string
 	project_generation  u64
@@ -367,6 +368,7 @@ fn (mut app App) enqueue_diagnostics_tickets(mut scheduler DiagnosticsScheduler,
 			uri: ticket.uri
 			content: job_content
 			overlay_store: app.overlay_cache_store
+			scheduler: app.diagnostics_scheduler
 			version: version
 			project_key: project_key
 			project_generation: ticket.project_generation
@@ -466,6 +468,7 @@ fn run_diagnostics_batch(mut scheduler DiagnosticsScheduler, group []Diagnostics
 		write_mutex: leader.write_mutex
 		tcp_conn: leader.tcp_conn
 		overlay_cache_store: leader.overlay_store
+		diagnostics_scheduler: leader.scheduler
 	}
 	leader_errors := worker.run_v_check(leader.uri, leader.content)
 	leader_key := worker.generation_key(leader.uri)
@@ -569,6 +572,7 @@ fn run_diagnostics_job(mut scheduler DiagnosticsScheduler, job DiagnosticsJob) {
 		text: job.content
 		open_files: job.open_files
 		overlay_cache_store: job.overlay_store
+		diagnostics_scheduler: job.scheduler
 		open_files_versions: versions
 		temp_dir: temp_dir
 		diagnostics_enabled: true
