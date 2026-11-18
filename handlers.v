@@ -841,6 +841,27 @@ fn (mut app App) operation_at_pos(method Method, request Request) Response {
 				result: member
 			}
 		}
+		// Answer from the index before spawning the compiler: a resolved
+		// declaration plus its vdoc comment covers free functions and other
+		// top-level symbols without paying a full `v` run per hover, mirroring
+		// how completion prefers the index. Receiver-typed members, locals and
+		// anything the index cannot resolve still fall through to the compiler.
+		if fallback := app.source_hover_fallback(path, params.position) {
+			doc := app.hover_doc_comment(path, '${line_nr}:hv^${byte_col}')
+			mut value := fallback.contents.value
+			if doc != '' && !value.contains(doc) {
+				value += '\n\n' + doc
+			}
+			return Response{
+				id: request.id
+				result: Hover{
+					contents: MarkupContent{
+						kind: 'markdown'
+						value: value
+					}
+				}
+			}
+		}
 	}
 
 	line_info := match method {
