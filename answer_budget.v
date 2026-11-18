@@ -43,7 +43,7 @@ fn (mut app App) schedule_answer_followup(method Method, uri string, position Po
 	}
 	// The session outlives the request, so the thread shares the pooled
 	// compilers the request itself would have asked through.
-	mut session := &app
+	mut session := unsafe { &app }
 	app.answer_followups.add(1)
 	spawn run_answer_followup(mut session, AnswerFollowup{
 		method:    method
@@ -75,7 +75,7 @@ fn (mut app App) compiler_answer_is_held(uri string, method Method) bool {
 	if !app.diagnostics_enabled_for_uri(uri) {
 		return false
 	}
-	scheduler := app.diagnostics_scheduler or { return false }
+	mut scheduler := app.diagnostics_scheduler or { return false }
 	if !scheduler.check_in_flight(uri) {
 		return false
 	}

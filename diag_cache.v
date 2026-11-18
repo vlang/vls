@@ -182,7 +182,7 @@ fn diag_code_sketch(content string) string {
 
 // diag_content_hash is what the fingerprint hashes, so a file's identity to
 // the cache is its code rather than its bytes.
-fn diag_content_hash(content string) u32 {
+fn diag_content_hash(content string) int {
 	return diag_code_sketch(content).hash()
 }
 
