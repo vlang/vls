@@ -361,9 +361,12 @@ fn (mut app App) struct_declared_fields(uri string, content string, type_name st
 		return []StructDeclaredField{}
 	}
 	app.ensure_dir_shallow_indexed(dir)
+	lex_dir := lexical_index_path(dir)
 	normalized_dir := normalized_index_path(dir)
 	for open_uri, _ in app.open_files {
-		if normalized_index_path(os.dir(uri_to_path(open_uri))) == normalized_dir {
+		// Lexical first: no real_path per open file on the hot path.
+		// The canonical fallback only runs for symlink/case aliases.
+		if same_index_dir(os.dir(uri_to_path(open_uri)), lex_dir, normalized_dir) {
 			app.reindex_uri(open_uri)
 		}
 	}
@@ -380,9 +383,17 @@ fn (mut app App) struct_declared_fields(uri string, content string, type_name st
 	indexed_uris.sort()
 	for indexed_uri in indexed_uris {
 		entry := app.symbol_index[indexed_uri] or { continue }
-		if normalized_index_path(os.dir(uri_to_path(indexed_uri))) != normalized_dir
-			|| os.file_name(uri_to_path(indexed_uri)) !in active_names
-			|| entry.module_name != expected_module {
+		// Cheapest filters first: module match is pure memory, filename is
+		// one map lookup. The directory check only canonicalizes when the
+		// lexical comparison disagrees (symlink/case aliases).
+		if entry.module_name != expected_module {
+			continue
+		}
+		indexed_path := uri_to_path(indexed_uri)
+		if os.file_name(indexed_path) !in active_names {
+			continue
+		}
+		if !same_index_dir(os.dir(indexed_path), lex_dir, normalized_dir) {
 			continue
 		}
 		source := app.index_source_for(indexed_uri) or { continue }

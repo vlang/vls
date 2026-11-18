@@ -119,12 +119,14 @@ fn encode_range_chars(r LSPRange, lines []string, enc PositionEncoding) LSPRange
 }
 
 // indexed_uris_in_dir returns the URIs in the symbol index whose file lives in
-// `dir`, sorted, with each directory normalized only once.
+// `dir`, sorted. The directory check compares lexically first (no real_path
+// per file); the canonical fallback only runs for symlink/case aliases.
 fn (app &App) indexed_uris_in_dir(dir string) []string {
+	lex_dir := lexical_index_path(dir)
 	normalized_dir := normalized_index_path(dir)
 	mut out := []string{}
 	for uri in app.symbol_index.keys() {
-		if normalized_index_path(os.dir(uri_to_path(uri))) != normalized_dir {
+		if !same_index_dir(os.dir(uri_to_path(uri)), lex_dir, normalized_dir) {
 			continue
 		}
 		out << uri

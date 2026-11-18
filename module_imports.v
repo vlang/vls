@@ -132,7 +132,17 @@ fn collect_importable_modules(dir string, prefix string, origin ModuleOrigin, de
 	if depth >= importable_module_max_depth || found.len >= importable_module_max_count {
 		return
 	}
-	real := os.real_path(dir)
+	collect_importable_modules_canonical(dir, os.real_path(dir), prefix, origin, depth, mut found, mut
+		seen_paths, mut seen_dirs)
+}
+
+// collect_importable_modules_canonical is collect_importable_modules for a folder
+// already canonicalized to `real`. The walk reuses that value for the cycle
+// check and the module record instead of resolving the same folder twice.
+fn collect_importable_modules_canonical(dir string, real string, prefix string, origin ModuleOrigin, depth int, mut found []ImportableModule, mut seen_paths map[string]bool, mut seen_dirs map[string]bool) {
+	if depth >= importable_module_max_depth || found.len >= importable_module_max_count {
+		return
+	}
 	if real in seen_dirs {
 		return
 	}
@@ -150,21 +160,43 @@ fn collect_importable_modules(dir string, prefix string, origin ModuleOrigin, de
 			continue
 		}
 		path := if prefix == '' { entry } else { '${prefix}.${entry}' }
+		// Mirror the cap check the recursion would hit before paying for
+		// canonicalization. The module record for `sub` itself is still
+		// collected, exactly as the uncapped walk does.
+		if depth + 1 >= importable_module_max_depth || found.len >= importable_module_max_count {
+			if entry != 'main' && path !in seen_paths && declared_module_of_dir(sub) == entry {
+				seen_paths[path] = true
+				deprecated, refused := module_deprecation(sub)
+				found << ImportableModule{
+					path:       path
+					name:       entry
+					dir:        os.real_path(sub)
+					origin:     origin
+					offered:    !(origin == .vlib && (path == 'builtin' || 'internal' in path.split('.')))
+						&& !refused && !module_needs_flag(sub)
+					deprecated: deprecated
+				}
+			}
+			continue
+		}
+		// Canonicalize once per folder: the value below feeds the module
+		// record and the recursion's cycle check together.
+		sub_real := os.real_path(sub)
 		if entry != 'main' && path !in seen_paths && declared_module_of_dir(sub) == entry {
 			seen_paths[path] = true
 			deprecated, refused := module_deprecation(sub)
 			found << ImportableModule{
 				path:       path
 				name:       entry
-				dir:        os.real_path(sub)
+				dir:        sub_real
 				origin:     origin
 				offered:    !(origin == .vlib && (path == 'builtin' || 'internal' in path.split('.')))
 					&& !refused && !module_needs_flag(sub)
 				deprecated: deprecated
 			}
 		}
-		collect_importable_modules(sub, path, origin, depth + 1, mut found, mut seen_paths, mut
-			seen_dirs)
+		collect_importable_modules_canonical(sub, sub_real, path, origin, depth + 1, mut found, mut
+			seen_paths, mut seen_dirs)
 	}
 }
 

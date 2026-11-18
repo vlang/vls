@@ -435,9 +435,12 @@ fn (mut app App) type_declaration(uri string, content string, typ string) TypeDe
 		return TypeDeclaration{}
 	}
 	app.ensure_dir_shallow_indexed(dir)
+	lex_dir := lexical_index_path(dir)
 	normalized_dir := normalized_index_path(dir)
 	for open_uri, _ in app.open_files {
-		if normalized_index_path(os.dir(uri_to_path(open_uri))) == normalized_dir {
+		// Lexical first: no real_path per open file on the hot path.
+		// The canonical fallback only runs for symlink/case aliases.
+		if same_index_dir(os.dir(uri_to_path(open_uri)), lex_dir, normalized_dir) {
 			app.reindex_uri(open_uri)
 		}
 	}
