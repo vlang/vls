@@ -1962,9 +1962,10 @@ fn run_async_line_info_job(job LineInfoJob) {
 	mut snap := job.snapshot
 	resp := snap.operation_at_pos(job.method, job.request)
 	mut flag := job.cancel
-	finished_cancelled := flag.is_cancelled()
+	was_cancelled := flag.is_cancelled()
 	flag.finish()
-	if finished_cancelled {
+	if was_cancelled {
+		snap.write_error_response(make_cancelled_error_response(job.request.id))
 		return
 	}
 	snap.write_response(resp)
