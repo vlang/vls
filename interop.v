@@ -1984,8 +1984,25 @@ fn (mut app App) purge_finished_line_info() {
 	}
 }
 
+// max_async_line_info caps concurrent line-info workers. Past the cap the
+// request runs synchronously instead: still correct, and it bounds thread
+// pileup when many compiler runs hang at once.
+const max_async_line_info_workers = 8
+
 fn (mut app App) dispatch_async_line_info(method Method, request Request) {
 	app.purge_finished_line_info()
+	mut in_flight := 0
+	for raw_id in app.line_info_cancels.keys() {
+		mut f := app.line_info_cancels[raw_id] or { continue }
+		if !f.is_finished() {
+			in_flight++
+		}
+	}
+	if in_flight >= max_async_line_info_workers {
+		resp := app.operation_at_pos(method, request)
+		app.write_response_or_cancelled(request.id, resp)
+		return
+	}
 	flag := &CancelFlag{}
 	app.line_info_cancels[app.current_request_raw_id] = flag
 	snapshot := app.line_info_snapshot(flag)
