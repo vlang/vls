@@ -6352,6 +6352,104 @@ fn (mut app App) handle_document_symbols(request Request) Response {
 	}
 }
 
+// InlayFnEntry caches one file's fn→return-type map for inlay hints.
+struct InlayFnEntry {
+	fingerprint int
+	fns         map[string]string
+}
+
+// InlayFnCache maps document URIs to their parsed fn signatures. Entries are
+// keyed by content fingerprint, so unchanged files are never re-read or
+// re-parsed on the hot path.
+@[heap]
+struct InlayFnCache {
+mut:
+	entries map[string]InlayFnEntry
+}
+
+fn new_inlay_fn_cache() &InlayFnCache {
+	return &InlayFnCache{
+		entries: map[string]InlayFnEntry{}
+	}
+}
+
+fn (mut app App) inlay_fn_cache_store() &InlayFnCache {
+	if store := app.inlay_fn_cache {
+		return store
+	}
+	store := new_inlay_fn_cache()
+	app.inlay_fn_cache = store
+	return store
+}
+
+// put_inlay_fn_entry parses `content` into the shared fn index unless the
+// cache already holds this exact version, keyed like build_fn_index does:
+// bare names plus file-stem-qualified names.
+fn (mut store InlayFnCache) put_inlay_fn_entry(key string, fingerprint int, content string, stem string, mut index map[string]string) {
+	if cached := store.entries[key] {
+		if cached.fingerprint == fingerprint {
+			for name, ret in cached.fns {
+				index[name] = ret
+			}
+			return
+		}
+	}
+	mut fns := map[string]string{}
+	parse_fn_signatures_into(content, stem, mut fns)
+	for name, ret in fns {
+		index[name] = ret
+	}
+	store.entries[key] = InlayFnEntry{
+		fingerprint: fingerprint
+		fns: fns
+	}
+}
+
+// collect_inlay_fn_index builds the fn→return-type map for inlay hints from
+// open buffers and the persistent symbol index instead of walking and
+// re-reading the project on every request. Disk files reuse the index entry
+// fingerprint, so only new or changed files are read and parsed.
+fn (mut app App) collect_inlay_fn_index(uri string, working_dir string) map[string]string {
+	mut index := map[string]string{}
+	if working_dir != '' && working_dir != '/' && os.is_dir(working_dir) {
+		scope := app.index_scope_for_uri(uri)
+		app.ensure_index_scope(scope)
+	}
+	mut store := app.inlay_fn_cache_store()
+	// Open buffers are authoritative; parse them directly without disk I/O.
+	for open_uri, open_content in app.open_files {
+		if open_uri == uri {
+			continue
+		}
+		stem := os.file_name(uri_to_path(open_uri)).replace('.v', '')
+		store.put_inlay_fn_entry(open_uri, open_content.hash(), open_content, stem, mut index)
+	}
+	// Disk files: reuse the symbol index fingerprint so unchanged files are
+	// never re-read or re-parsed on the hot path.
+	if working_dir != '' && working_dir != '/' && os.is_dir(working_dir) {
+		dir_norm := working_dir.replace('\\', '/')
+		mut uris := app.symbol_index.keys()
+		uris.sort()
+		for duri in uris {
+			if duri == uri || duri in app.open_files {
+				continue
+			}
+			dpath := uri_to_path(duri)
+			if !path_is_within(dpath.replace('\\', '/'), dir_norm) {
+				continue
+			}
+			if dpath.ends_with('_test.v') {
+				continue
+			}
+			entry := app.symbol_index[duri] or { continue }
+			content := app.index_source_for(duri) or { continue }
+			stem := os.file_name(dpath).replace('.v', '')
+			store.put_inlay_fn_entry(duri, entry.fingerprint, content, stem, mut index)
+		}
+	}
+	return index
+}
+
 // handle_inlay_hints handles the LSP inlayHint request, returning type hints for variables.
 fn (mut app App) handle_inlay_hints(request Request) Response {
 	if !app.inlay_hints_enabled {
@@ -6373,37 +6471,23 @@ fn (mut app App) handle_inlay_hints(request Request) Response {
 	start_line := params.range.start.line
 	end_line := params.range.end.line
 
-	// Build fn index lazily: current file + open files + vlib modules imported in this file
-	file_path := uri_to_path(uri)
-	working_dir := os.dir(file_path)
-	mut index_files := []string{}
-
-	// Collect all open file paths
-	for open_uri, _ in app.open_files {
-		p := uri_to_path(open_uri)
-		if p != '' && p != file_path {
-			index_files << p
-		}
-	}
+	// Build the fn index from open buffers and the persistent symbol index
+	// instead of walking and re-reading the project on every request.
+	working_dir := os.dir(uri_to_path(uri))
+	mut fn_index := app.collect_inlay_fn_index(uri, working_dir)
 
 	// Only scan project directory if working_dir is a real, accessible directory.
 	// Guard against fake URIs (e.g. tests using file:///test.v) which resolve
 	// working_dir to '/' and would cause a full filesystem walk.
 	mut imported_mods := []string{}
 	if working_dir != '' && working_dir != '/' && os.is_dir(working_dir) {
-		project_files := os.walk_ext(working_dir, '.v')
-		for pf in project_files {
-			if !pf.ends_with('_test.v') && pf != file_path {
-				index_files << pf
-			}
-		}
+		// Project files come from the symbol index now (see collect_inlay_fn_index).
 		imported_mods = parse_imports(content)
 	}
 
-	// Project/open files are re-read live (they may change mid-session). vlib
-	// module indexes are merged from a session cache below — walking and parsing
-	// vlib on every inlayHint request was the dominant, needlessly repeated cost.
-	mut fn_index := build_fn_index(index_files)
+	// vlib module indexes are merged from a session cache below — walking and
+	// parsing vlib on every inlayHint request was the dominant, needlessly
+	// repeated cost.
 	for mod in imported_mods {
 		app.merge_vlib_module_fns(mod, mut fn_index)
 	}
