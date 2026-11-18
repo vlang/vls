@@ -1019,13 +1019,24 @@ fn cleanup_compilation_temp(temp_project_dir string, singlefile_tmppath string) 
 // OverlayCacheEntry is one reusable compilation overlay: a temp project view
 // whose symlinked tree is rebuilt only when the tracked file set changes or
 // the entry grows stale. Open buffers are still rewritten per request, but
-// only when their content hash changed.
+// only when their content hash changed. Rebuilds publish a fresh staging
+// directory and retire the previous tree instead of deleting it in place, so
+// an in-flight compiler run never reads a half-rebuilt tree.
 struct OverlayCacheEntry {
+mut:
 	temp_root         string
 	source_root       string
 	built_ms          i64
 	tracked_rel_paths []string
 	file_hashes       map[string]int
+	retired           []RetiredOverlay
+}
+
+// RetiredOverlay is a superseded overlay tree kept alive for in-flight
+// readers. It is deleted once older than any possible compiler run.
+struct RetiredOverlay {
+	root       string
+	retired_ms i64
 }
 
 // OverlayCacheStore shares overlay entries between the request thread and the
@@ -1054,6 +1065,37 @@ const overlay_cache_ttl_ms = i64(10_000)
 // makes reuse across requests and across diagnostics jobs possible.
 fn overlay_temp_root(source_root string) string {
 	return os.join_path(os.temp_dir(), 'vls_ov_${os.getpid()}_${source_root.hash()}')
+}
+
+// overlay_staging_root returns a unique directory for building the next overlay
+// generation of `source_root`. Rebuilds never touch the published tree: the
+// staging tree becomes visible only when the cache entry is swapped to it.
+fn overlay_staging_root(source_root string) string {
+	return overlay_temp_root(source_root) + '_staging_${time.now().unix_nano()}'
+}
+
+// overlay_retired_ttl_ms bounds how long a retired tree is kept for draining
+// readers: longer than any compiler run the server will wait for.
+fn overlay_retired_ttl_ms() i64 {
+	return resolve_compiler_timeout_ms() + 30_000
+}
+
+// write_file_atomic replaces `dest_path` without an observable truncated
+// state: readers see either the complete old content or the complete new
+// content, never a half-written file.
+fn write_file_atomic(dest_path string, content string) ! {
+	tmp_path := '${dest_path}.tmp_${os.getpid()}_${time.now().unix_nano()}'
+	os.write_file(tmp_path, content) or {
+		return error('Failed to write overlay file ${tmp_path}: ${err}')
+	}
+	os.mv(tmp_path, dest_path) or {
+		// Some Windows CRT renames do not replace: remove and retry once.
+		os.rm(dest_path) or {}
+		os.mv(tmp_path, dest_path) or {
+			os.rm(tmp_path) or {}
+			return error('Failed to replace overlay file ${dest_path}: ${err}')
+		}
+	}
 }
 
 // tracked_overlay_rel_paths lists every open buffer under `source_root`, as
@@ -1091,9 +1133,9 @@ fn materialize_overlay_buffers(temp_root string, source_root string, open_files 
 		os.mkdir_all(os.dir(temp_file_path)) or {
 			return error('Failed to create overlay directory ${os.dir(temp_file_path)}: ${err}')
 		}
-		os.write_file(temp_file_path, content) or {
-			return error('Failed to write overlay file ${temp_file_path}: ${err}')
-		}
+		// Atomic replace: an in-flight compile reading this buffer must see
+		// a complete version, never a truncated one.
+		write_file_atomic(temp_file_path, content) or { return err }
 	}
 	return hashes
 }
@@ -1120,10 +1162,10 @@ fn overlay_work_paths(source_root string, source_work_dir string, source_path st
 	return temp_work_dir, file_rel
 }
 
-// overlay_is_shared reports whether `temp_root` belongs to the overlay cache.
-// Callers use it to skip deleting a tree that later requests still need. A nil
-// store (tests, code-lens runs) always reports false, preserving the old
-// per-request cleanup behavior exactly.
+// overlay_is_shared reports whether `temp_root` belongs to the overlay cache,
+// current or retired. Callers use it to skip deleting a tree that later
+// requests still need. A nil store (tests, code-lens runs) always reports
+// false, preserving the old per-request cleanup behavior exactly.
 fn (mut app App) overlay_is_shared(temp_root string) bool {
 	if temp_root == '' {
 		return false
@@ -1137,17 +1179,47 @@ fn (mut app App) overlay_is_shared(temp_root string) bool {
 		if entry.temp_root == temp_root {
 			return true
 		}
+		for retired in entry.retired {
+			if retired.root == temp_root {
+				return true
+			}
+		}
 	}
 	return false
 }
 
-// drop_overlay_temp_root removes one cached overlay and deletes its tree, so
-// the next request rebuilds from a clean tree instead of reusing a suspect one.
+// retire_overlay_entry_locked moves the entry's current tree to the retired
+// list and collects age-eligible retired roots for deletion. The caller must
+// hold the store mutex; deletion of the collected roots happens after unlock.
+fn retire_overlay_entry_locked(mut entry OverlayCacheEntry, now_ms i64, mut gc_roots []string) {
+	if entry.temp_root != '' {
+		entry.retired << RetiredOverlay{
+			root: entry.temp_root
+			retired_ms: now_ms
+		}
+		entry.temp_root = ''
+	}
+	mut keep := []RetiredOverlay{cap: entry.retired.len}
+	for retired in entry.retired {
+		if now_ms - retired.retired_ms > overlay_retired_ttl_ms() {
+			gc_roots << retired.root
+		} else {
+			keep << retired
+		}
+	}
+	entry.retired = keep
+}
+
+// drop_overlay_temp_root retires one cached overlay so the next request
+// rebuilds from a clean tree instead of reusing a suspect one. The tree
+// itself is deleted only once no in-flight reader can still use it, so this
+// never pulls the tree out from under a running compiler.
 fn (mut app App) drop_overlay_temp_root(temp_root string) {
 	if temp_root == '' {
 		return
 	}
 	mut store := app.overlay_cache_store or { return }
+	now_ms := time.now().unix_milli()
 	store.mutex.lock()
 	mut found := ''
 	for key, entry in store.entries {
@@ -1156,21 +1228,36 @@ fn (mut app App) drop_overlay_temp_root(temp_root string) {
 			break
 		}
 	}
+	mut gc_roots := []string{}
 	if found != '' {
-		store.entries.delete(found)
+		mut entry := store.entries[found]
+		retire_overlay_entry_locked(mut entry, now_ms, mut gc_roots)
+		if entry.temp_root == '' && entry.retired.len == 0 {
+			store.entries.delete(found)
+		} else {
+			store.entries[found] = entry
+		}
 	}
 	store.mutex.unlock()
-	os.rmdir_all(temp_root) or {}
+	for root in gc_roots {
+		os.rmdir_all(root) or {}
+	}
 }
 
-// drop_all_overlays deletes every cached overlay tree. It runs on shutdown so
-// a long-lived session does not leave a temp directory per project behind.
+// drop_all_overlays deletes every cached overlay tree, including retired ones
+// draining in-flight readers. It runs on shutdown after workers are joined,
+// so no reader can still reference these trees.
 fn (mut app App) drop_all_overlays() {
 	mut store := app.overlay_cache_store or { return }
 	store.mutex.lock()
 	mut roots := []string{}
 	for _, entry in store.entries {
-		roots << entry.temp_root
+		if entry.temp_root != '' {
+			roots << entry.temp_root
+		}
+		for retired in entry.retired {
+			roots << retired.root
+		}
 	}
 	store.entries.clear()
 	store.mutex.unlock()
@@ -1662,63 +1749,135 @@ fn (mut app App) prepare_compilation_overlay_with(real_path string, work_dir str
 
 // prepare_cached_overlay reuses the symlinked project tree of `source_root`
 // across requests and diagnostics jobs. Only open buffers whose content hash
-// changed are rewritten; the expensive full-tree symlink walk runs only when
-// the tracked file set changes or the entry grows stale.
+// changed are rewritten (atomically); the expensive full-tree symlink walk
+// runs only when the tracked file set changes or the entry grows stale, and
+// it builds a fresh staging directory that becomes visible only at publish.
+// A rebuild therefore never deletes or half-rewrites a tree an in-flight
+// compiler run is reading; the previous tree is retired for draining readers
+// and deleted once older than any possible compiler run. The store mutex is
+// held only for snapshots and publishes, never across filesystem IO.
 fn (mut app App) prepare_cached_overlay(mut store &OverlayCacheStore, source_path string, source_root string, source_display_root string, source_work_dir string) !CompilationOverlay {
-	store.mutex.lock()
-	defer {
-		store.mutex.unlock()
-	}
-	tracked := app.tracked_overlay_rel_paths(source_root)
-	now_ms := time.now().unix_milli()
-	if entry := store.entries[source_root] {
-		if entry.temp_root != '' && now_ms - entry.built_ms < overlay_cache_ttl_ms
-			&& entry.tracked_rel_paths == tracked && os.is_dir(entry.temp_root) {
-			hashes := materialize_overlay_buffers(entry.temp_root, source_root, app.open_files,
-				entry.file_hashes)!
-			temp_work_dir, file_rel := overlay_work_paths(source_root, source_work_dir, source_path,
-				entry.temp_root)!
-			store.entries[source_root] = OverlayCacheEntry{
-				...entry
-				built_ms: now_ms
-				file_hashes: hashes
-			}
-			return CompilationOverlay{
-				source_root: source_root
-				source_display_root: source_display_root
-				temp_root: entry.temp_root
-				source_work_dir: source_work_dir
-				temp_work_dir: temp_work_dir
-				temp_source_file: os.join_path(entry.temp_root, file_rel)
+	for _ in 0 .. 3 {
+		// Snapshot under one short lock: the entry, the tracked set, and the
+		// open buffers the build must materialize.
+		store.mutex.lock()
+		tracked := app.tracked_overlay_rel_paths(source_root)
+		open_snapshot := app.open_files.clone()
+		now_ms := time.now().unix_milli()
+		mut hit_root := ''
+		mut hit_hashes := map[string]int{}
+		if entry := store.entries[source_root] {
+			if entry.temp_root != '' && now_ms - entry.built_ms < overlay_cache_ttl_ms
+				&& entry.tracked_rel_paths == tracked && os.is_dir(entry.temp_root) {
+				hit_root = entry.temp_root
+				hit_hashes = entry.file_hashes.clone()
 			}
 		}
+		store.mutex.unlock()
+
+		if hit_root != '' {
+			hashes := materialize_overlay_buffers(hit_root, source_root, open_snapshot,
+				hit_hashes)!
+			temp_work_dir, file_rel := overlay_work_paths(source_root, source_work_dir,
+				source_path, hit_root)!
+			// Commit only if the entry was not swapped underneath us; a
+			// concurrent rebuild wins and we serve its tree instead.
+			store.mutex.lock()
+			mut current_root := ''
+			if entry := store.entries[source_root] {
+				current_root = entry.temp_root
+				if entry.temp_root == hit_root {
+					store.entries[source_root] = OverlayCacheEntry{
+						...entry
+						built_ms: now_ms
+						file_hashes: hashes
+					}
+				}
+			}
+			store.mutex.unlock()
+			if current_root == '' || current_root == hit_root {
+				return CompilationOverlay{
+					source_root: source_root
+					source_display_root: source_display_root
+					temp_root: hit_root
+					source_work_dir: source_work_dir
+					temp_work_dir: temp_work_dir
+					temp_source_file: os.join_path(hit_root, file_rel)
+				}
+			}
+			// Swapped concurrently: retry against the new tree.
+			continue
+		}
+
+		staging := overlay_staging_root(source_root)
+		os.mkdir_all(staging) or {
+			return error('Failed to create compilation overlay directory ${staging}: ${err}')
+		}
+		hashes := materialize_overlay_buffers(staging, source_root, open_snapshot, map[string]int{}) or {
+			os.rmdir_all(staging) or {}
+			return err
+		}
+		symlink_untracked_files(source_root, source_work_dir, staging, open_snapshot) or {
+			os.rmdir_all(staging) or {}
+			return error('Failed to populate compilation overlay: ${err}')
+		}
+		temp_work_dir, file_rel := overlay_work_paths(source_root, source_work_dir, source_path,
+			staging) or {
+			os.rmdir_all(staging) or {}
+			return err
+		}
+		// Publish: the staging tree becomes visible here, fully built. The
+		// previous tree is retired for draining readers. A concurrent
+		// rebuild publishes its own staging; both trees stay valid and the
+		// last publish wins for new readers.
+		store.mutex.lock()
+		mut gc_roots := []string{}
+		publish_ms := time.now().unix_milli()
+		if mut entry := store.entries[source_root] {
+			if entry.temp_root != '' && entry.temp_root != staging {
+				entry.retired << RetiredOverlay{
+					root: entry.temp_root
+					retired_ms: publish_ms
+				}
+			}
+			mut keep := []RetiredOverlay{cap: entry.retired.len}
+			for retired in entry.retired {
+				if publish_ms - retired.retired_ms > overlay_retired_ttl_ms() {
+					gc_roots << retired.root
+				} else {
+					keep << retired
+				}
+			}
+			entry.retired = keep
+			entry.temp_root = staging
+			entry.source_root = source_root
+			entry.built_ms = publish_ms
+			entry.tracked_rel_paths = tracked
+			entry.file_hashes = hashes
+			store.entries[source_root] = entry
+		} else {
+			store.entries[source_root] = OverlayCacheEntry{
+				temp_root: staging
+				source_root: source_root
+				built_ms: publish_ms
+				tracked_rel_paths: tracked
+				file_hashes: hashes
+			}
+		}
+		store.mutex.unlock()
+		for root in gc_roots {
+			os.rmdir_all(root) or {}
+		}
+		return CompilationOverlay{
+			source_root: source_root
+			source_display_root: source_display_root
+			temp_root: staging
+			source_work_dir: source_work_dir
+			temp_work_dir: temp_work_dir
+			temp_source_file: os.join_path(staging, file_rel)
+		}
 	}
-	temp_root := overlay_temp_root(source_root)
-	os.rmdir_all(temp_root) or {}
-	os.mkdir_all(temp_root) or {
-		return error('Failed to create compilation overlay directory ${temp_root}: ${err}')
-	}
-	hashes := materialize_overlay_buffers(temp_root, source_root, app.open_files, map[string]int{})!
-	symlink_untracked_files(source_root, source_work_dir, temp_root, app.open_files) or {
-		os.rmdir_all(temp_root) or {}
-		return error('Failed to populate compilation overlay: ${err}')
-	}
-	temp_work_dir, file_rel := overlay_work_paths(source_root, source_work_dir, source_path, temp_root)!
-	store.entries[source_root] = OverlayCacheEntry{
-		temp_root: temp_root
-		source_root: source_root
-		built_ms: now_ms
-		tracked_rel_paths: tracked
-		file_hashes: hashes
-	}
-	return CompilationOverlay{
-		source_root: source_root
-		source_display_root: source_display_root
-		temp_root: temp_root
-		source_work_dir: source_work_dir
-		temp_work_dir: temp_work_dir
-		temp_source_file: os.join_path(temp_root, file_rel)
-	}
+	return error('Failed to prepare compilation overlay: entry swapped repeatedly')
 }
 
 // source_path_from_overlay maps compiler paths in the temporary project back to
