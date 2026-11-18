@@ -808,8 +808,23 @@ fn (mut app App) handle_requests[T](mut reader T) {
 		// the raw id (0 for non-numeric ids), while the exact id is echoed via
 		// the raw id. Decoding first also keeps malformed JSON (e.g. an id of
 		// `12x`) on the Parse Error (-32700) path: only valid JSON with a
-		// disallowed id type (object, array, boolean) is an Invalid Request.
+		// disallowed id type (object, array, boolean) or a mistyped member
+		// (e.g. a numeric `method`) is an Invalid Request (-32600). json2
+		// fails both cases, so a generic syntax decode tells them apart.
 		body := json2.decode[RequestBody](content) or {
+			if _ := json2.decode[json2.Any](content) {
+				// Valid JSON but not a valid Request object.
+				if app.current_request_raw_id != '' && !raw_id_is_valid(app.current_request_raw_id) {
+					app.current_request_raw_id = 'null'
+					app.write_error_response(make_invalid_request_error_response(0, 'Request id must be a string, number, or null'))
+				} else {
+					if app.current_request_raw_id == '' {
+						app.current_request_raw_id = 'null'
+					}
+					app.write_error_response(make_invalid_request_error_response(raw_id_to_int(app.current_request_raw_id), 'Invalid request: ${err.msg()}'))
+				}
+				continue
+			}
 			log('Failed to decode JSON request: ${err.msg()}. Content: "${content}"')
 			app.current_request_raw_id = 'null'
 			app.write_error_response(make_parse_error_response(err.msg()))
