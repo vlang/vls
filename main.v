@@ -74,6 +74,7 @@ fn mcp_install_config() string {
 }
 
 // App represents the context of the server during its lifetime.
+@[heap]
 pub struct App {
 	cur_mod string = 'main'
 	exit    bool   = os.args.contains('exit')

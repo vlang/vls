@@ -108,6 +108,7 @@ fn aimp_qualifier_before(masked string, start int) ?string {
 		}
 		dot = begin - 1
 	}
+	return none
 }
 
 // aimp_used_as_module_prefix reports whether the buffer writes `name` as the
@@ -131,6 +132,7 @@ fn aimp_used_as_module_prefix(masked string, name string) bool {
 			return true
 		}
 	}
+	return false
 }
 
 // aimp_offered_module returns the module the file at `file_path` can import that
