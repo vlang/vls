@@ -23,7 +23,6 @@ struct IndexEntry {
 	module_name                        string
 	doc_symbols                        []DocumentSymbol  // hierarchical symbols (as parse_document_symbols returns)
 	docs                               map[string]string // simple symbol name -> leading vdoc comment
-	fn_completions                     []Detail          // free-function completion items for this file
 	module_completions                 []Detail          // all same-module top-level completion items
 	public_module_completions          []Detail          // exported completion items for imported modules
 	has_conditional_module_completions bool
@@ -65,7 +64,6 @@ fn build_index_entry(content string, enc PositionEncoding, fingerprint int) Inde
 		module_name:                        get_module_name(content)
 		doc_symbols:                        doc_syms
 		docs:                               docs
-		fn_completions:                     module_completion_index.items.filter(it.kind == 3)
 		module_completions:                 module_completion_index.items
 		public_module_completions:          public_module_completion_index.items
 		has_conditional_module_completions: module_completion_index.has_conditional
@@ -314,7 +312,12 @@ fn extract_identifier_occurrences(content string, enc PositionEncoding) map[stri
 
 // occurrences_for returns the identifier occurrences of `uri`, building and
 // caching them from the authoritative source (open buffer or disk) and reusing
-// the cache while the content fingerprint is unchanged.
+// the cache while the content fingerprint is unchanged. The cache is bounded:
+// files nobody has open are evicted past the cap and rebuilt on demand, so a
+// references sweep over a large workspace cannot pin its token maps in RAM
+// for the rest of the session.
+const index_max_occ_entries = 512
+
 fn (mut app App) occurrences_for(uri string) map[string][]TokenOccurrence {
 	content := app.index_source_for(uri) or {
 		app.ref_occurrences.delete(uri)
@@ -338,7 +341,26 @@ fn (mut app App) occurrences_for(uri string) map[string][]TokenOccurrence {
 		fingerprint: fp
 		occ:         occ
 	}
+	if app.ref_occurrences.len > index_max_occ_entries {
+		app.evict_ref_occurrences()
+	}
 	return occ
+}
+
+// evict_ref_occurrences drops cached occurrence maps for files nobody has
+// open until the cache is back under its cap. Open buffers are never evicted:
+// hover rebuilds one per keystroke. Evicted files rebuild lazily on the next
+// references, rename, or highlight query that needs them.
+fn (mut app App) evict_ref_occurrences() {
+	for uri in app.ref_occurrences.keys() {
+		if app.ref_occurrences.len <= index_max_occ_entries / 2 {
+			break
+		}
+		if uri in app.open_files {
+			continue
+		}
+		app.ref_occurrences.delete(uri)
+	}
 }
 
 // drop_index_uri removes all cached index data for `uri`.
@@ -1587,7 +1609,14 @@ fn (app &App) query_module_fn_completions(module_name string, exclude_uri string
 		if module_name != '' && entry.module_name != module_name {
 			continue
 		}
-		items << entry.fn_completions
+		// Free functions are the kind-3 subset of the module completions;
+		// filtering at query time avoids storing a duplicated item list
+		// per file in the index.
+		for item in entry.module_completions {
+			if item.kind == 3 {
+				items << item
+			}
+		}
 	}
 	return items
 }
