@@ -683,8 +683,20 @@ fn (mut app App) handle_requests[T](mut reader T) {
 				resp := app.operation_at_pos(method, lsp_request)
 				app.write_response_or_cancelled(lsp_request.id, resp)
 			}
-			.signature_help, .hover, .definition, .declaration, .type_definition, .implementation {
-				app.dispatch_async_line_info(method, lsp_request)
+			.signature_help, .hover, .declaration, .type_definition, .implementation {
+				phased := app.operation_at_pos_indexed(method, lsp_request)
+				if phased.done {
+					app.write_response_or_cancelled(lsp_request.id, phased.resp)
+				} else if app.line_info_mode == .unknown {
+					// First line-info request of the session runs synchronously
+					// so the probe learns whether a compiler can answer; every
+					// later request runs on a worker while the loop stays
+					// responsive.
+					resp := app.operation_at_pos(method, lsp_request)
+					app.write_response_or_cancelled(lsp_request.id, resp)
+				} else {
+					app.dispatch_async_line_info(method, lsp_request)
+				}
 			}
 			.references {
 				resp := app.find_references(lsp_request)

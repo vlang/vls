@@ -1985,14 +1985,6 @@ fn (mut app App) purge_finished_line_info() {
 }
 
 fn (mut app App) dispatch_async_line_info(method Method, request Request) {
-	if app.line_info_mode == .unknown {
-		// First line-info request of the session runs synchronously so the
-		// probe learns whether a compiler can answer; every later request
-		// runs on a worker while the loop stays responsive.
-		resp := app.operation_at_pos(method, request)
-		app.write_response_or_cancelled(request.id, resp)
-		return
-	}
 	app.purge_finished_line_info()
 	flag := &CancelFlag{}
 	app.line_info_cancels[app.current_request_raw_id] = flag

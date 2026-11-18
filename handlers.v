@@ -744,6 +744,124 @@ fn (mut app App) source_signature_fallback(uri string, position Position) ?Signa
 	}
 }
 
+// IndexedPhase is the result of the index-first half of operation_at_pos.
+// done reports whether the index fully answered the request; resp is only
+// meaningful when done is true.
+struct IndexedPhase {
+	done bool
+	resp Response
+}
+
+// operation_at_pos_indexed answers hover, signature help, and go-to requests
+// from the incremental source index without spawning the compiler. It mirrors
+// the index-first half of operation_at_pos; when it cannot answer, the caller
+// falls back to the compiler (synchronously or on a worker). Completion stays
+// on the synchronous path and is never dispatched here.
+fn (mut app App) operation_at_pos_indexed(method Method, request Request) IndexedPhase {
+	params := json2.decode[TextDocumentPositionParams](request.params) or {
+		return IndexedPhase{
+			done: true
+			resp: Response{
+				id: request.id
+				result: 'null'
+			}
+		}
+	}
+	if params.text_document.uri == '' {
+		return IndexedPhase{
+			done: true
+			resp: Response{
+				id: request.id
+				result: 'null'
+			}
+		}
+	}
+	if params.position.line < 0 || params.position.char < 0 {
+		return IndexedPhase{
+			done: true
+			resp: Response{
+				id: request.id
+				result: 'null'
+			}
+		}
+	}
+	if method == .completion {
+		return IndexedPhase{}
+	}
+	line_nr := params.position.line + 1
+	col := params.position.char
+	path := params.text_document.uri
+	byte_col := app.client_col_to_byte_col(path, params.position.line, col)
+
+	// Resolve declarations from the index before reaching for the
+	// compatibility compiler, matching operation_at_pos.
+	if method in [.definition, .declaration, .type_definition, .implementation] {
+		if location := app.resolve_indexed_definition(path, params.position) {
+			return IndexedPhase{
+				done: true
+				resp: Response{
+					id: request.id
+					result: location
+				}
+			}
+		}
+		return IndexedPhase{}
+	}
+	if method == .hover {
+		if binding := app.local_binding_hover(path, params.position) {
+			return IndexedPhase{
+				done: true
+				resp: Response{
+					id: request.id
+					result: binding
+				}
+			}
+		}
+		if member := app.member_selector_hover(path, params.position) {
+			return IndexedPhase{
+				done: true
+				resp: Response{
+					id: request.id
+					result: member
+				}
+			}
+		}
+		if fallback := app.source_hover_fallback(path, params.position) {
+			doc := app.hover_doc_comment(path, '${line_nr}:hv^${byte_col}')
+			mut value := fallback.contents.value
+			if doc != '' && !value.contains(doc) {
+				value += '\n\n' + doc
+			}
+			return IndexedPhase{
+				done: true
+				resp: Response{
+					id: request.id
+					result: Hover{
+						contents: MarkupContent{
+							kind: 'markdown'
+							value: value
+						}
+					}
+				}
+			}
+		}
+		return IndexedPhase{}
+	}
+	if method == .signature_help {
+		if sig := app.source_signature_fallback(path, params.position) {
+			return IndexedPhase{
+				done: true
+				resp: Response{
+					id: request.id
+					result: sig
+				}
+			}
+		}
+		return IndexedPhase{}
+	}
+	return IndexedPhase{}
+}
+
 // operation_at_pos handles LSP requests at a given position (completion, hover, signature, definition).
 fn (mut app App) operation_at_pos(method Method, request Request) Response {
 	params := json2.decode[TextDocumentPositionParams](request.params) or {
