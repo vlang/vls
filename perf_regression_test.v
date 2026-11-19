@@ -139,8 +139,7 @@ fn test_mem_occurrences_bounded() {
 		p := os.join_path(root, 'util${i}.v')
 		_ := app.occurrences_for(path_to_uri(p))
 	}
-	assert app.ref_occurrences.len <= index_max_occ_entries,
-		'occurrence cache unbounded: ${app.ref_occurrences.len}'
+	assert app.ref_occurrences.len <= index_max_occ_entries, 'occurrence cache unbounded: ${app.ref_occurrences.len}'
 	assert main_uri in app.ref_occurrences, 'open buffer entry must never be evicted'
 	// An evicted file rebuilds on demand with identical content.
 	evicted_uri := path_to_uri(os.join_path(root, 'util0.v'))

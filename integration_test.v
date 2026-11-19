@@ -5,6 +5,7 @@ module main
 import os
 import json2
 import io
+import time
 
 fn integration_test_must_mkdir_all(path string) {
 	os.mkdir_all(path) or {
@@ -52,18 +53,27 @@ fn integration_test_slurp_fd(fd int, output chan string) {
 }
 
 fn create_integration_test_env() (&App, string) {
-	temp_dir := os.join_path(os.temp_dir(), 'vls_integration_test_${os.getpid()}')
-	integration_test_must_mkdir_all(temp_dir)
+	// Use a unique directory per test so a stale Windows file lock or a
+	// leftover file from a previous test can never pollute the next one.
+	// On Windows consecutive unix_nano readings usually fall in the same
+	// tick, so a static counter separates two calls (see
+	// make_unique_temp_path for the same pattern).
+	unsafe {
+		mut static seq := u64(0)
+		seq++
+		temp_dir := os.join_path(os.temp_dir(), 'vls_integration_test_${os.getpid()}_${time.now().unix_nano()}_${seq}')
+		integration_test_must_mkdir_all(temp_dir)
 
-	project_dir := os.join_path(temp_dir, 'test_project')
-	integration_test_must_mkdir_all(project_dir)
+		project_dir := os.join_path(temp_dir, 'test_project')
+		integration_test_must_mkdir_all(project_dir)
 
-	app := &App{
-		text:       ''
-		open_files: map[string]string{}
-		temp_dir:   temp_dir
+		app := &App{
+			text:       ''
+			open_files: map[string]string{}
+			temp_dir:   temp_dir
+		}
+		return app, project_dir
 	}
-	return app, project_dir
 }
 
 fn cleanup_integration_test_env(_ &App, project_dir string) {
@@ -2608,6 +2618,13 @@ fn test_integration_prepare_rename_returns_symbol_range() {
 	defer {
 		cleanup_integration_test_env(app, project_dir)
 	}
+
+	// A v.mod forces the multifile overlay (relative paths) instead of the
+	// single-file absolute path. The single-file `-line-info` form carries a
+	// Windows drive colon (C:/...) that the compiler does not parse, so the
+	// local lookup fails only on Windows without this project marker.
+	integration_test_must_write_file(os.join_path(project_dir, 'v.mod'), "Module {\n\tname: 'testproj'\n}\n")
+	app.workspace_roots = [project_dir]
 
 	test_file := os.join_path(project_dir, 'prepare_rename.v')
 	content := 'module main\n\nfn main() {\n\tvalue := 1\n\tprintln(value)\n}\n'
