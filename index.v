@@ -28,7 +28,7 @@ struct IndexEntry {
 	public_module_completions          []Detail          // exported completion items for imported modules
 	has_conditional_module_completions bool
 	has_conditional_public_completions bool
-	conditional_lines                  []bool              // declarations guarded by $if/$else or @[if]
+	conditional_lines                  []bool // declarations guarded by $if/$else or @[if]
 }
 
 // build_index_entry parses `content` into an IndexEntry. Symbol ranges are
@@ -1242,7 +1242,9 @@ fn (mut app App) run_recursive_index_refresh(job IndexRefreshJob) IndexRefreshRe
 		if uri in job.open_uris {
 			continue
 		}
-		if app.index_refresh_file(uri, job, mut result, mut entries, mut bytes_seen) {
+		stopped, new_bytes := app.index_refresh_file(uri, job, mut result, mut entries, bytes_seen)
+		bytes_seen = new_bytes
+		if stopped {
 			break
 		}
 	}
@@ -1254,46 +1256,47 @@ fn (mut app App) run_recursive_index_refresh(job IndexRefreshJob) IndexRefreshRe
 // its entry, skip it because its content fingerprint is unchanged or it is out
 // of the index's bounds, or drop it because it is gone. It returns true when the
 // walk must stop, which is only at the total entry cap.
-fn (mut app App) index_refresh_file(uri string, job IndexRefreshJob, mut result IndexRefreshResult, mut entries map[string]IndexEntry, mut bytes_seen u64) bool {
+fn (mut app App) index_refresh_file(uri string, job IndexRefreshJob, mut result IndexRefreshResult, mut entries map[string]IndexEntry, bytes_seen u64) (bool, u64) {
+	mut bs := bytes_seen
 	path := uri_to_path(uri)
 	if path_is_under_removed_root(path, job.workspace_roots, job.removed_roots) {
 		result.deletions << uri
-		return false
+		return false, bs
 	}
 	if !os.is_file(path) {
 		result.deletions << uri
-		return false
+		return false, bs
 	}
 	size := os.file_size(path)
 	if size > index_max_file_bytes {
 		result.skipped << uri
-		return false
+		return false, bs
 	}
-	if size > job.byte_budget - bytes_seen {
+	if size > job.byte_budget - bs {
 		result.skipped << uri
 		result.incomplete = true
-		return false
+		return false, bs
 	}
-	bytes_seen += size
+	bs += size
 	content := os.read_file(path) or {
 		result.skipped << uri
-		return false
+		return false, bs
 	}
 	fingerprint := content.hash()
 	if previous := job.fingerprints[uri] {
 		if previous == fingerprint {
 			result.skipped_files++
-			return false
+			return false, bs
 		}
 	}
 	if uri !in job.fingerprints && job.indexed_count + entries.len >= index_max_files {
 		result.incomplete = true
 		result.skipped << uri
-		return true
+		return true, bs
 	}
 	entries[uri] = build_index_entry(content, app.position_encoding)
 	result.reindexed++
-	return false
+	return false, bs
 }
 
 // apply_index_refresh_results merges the refreshes the background worker

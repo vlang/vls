@@ -521,6 +521,7 @@ fn test_pull_diagnostics_use_the_last_generation_checked_publish() {
 		global_generation:  tickets[0].global_generation
 		generation:         tickets[0].generation
 		project_generation: tickets[0].project_generation
+		write_mutex:        app.write_mutex
 	}
 	fast := app.diagnostics_notification_for(uri, content, pd_errors(2))
 	assert scheduler.publish_if_current(mut app, job, fast)

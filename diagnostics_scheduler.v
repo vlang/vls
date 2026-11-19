@@ -35,13 +35,13 @@ struct DiagnosticsJob {
 	open_files          map[string]string
 	project_generations map[string]int
 	// The worker must see the request loop's editor defines and project config.
-	config_store        &VlsConfigStore = &VlsConfigStore{}
-	write_mutex         &sync.Mutex
-	tcp_conn            ?&net.TcpConn
-	global_generation   u64
-	generation          u64
-	ready_at            i64
-	kind                DiagnosticsKind
+	config_store      &VlsConfigStore = &VlsConfigStore{}
+	write_mutex       &sync.Mutex
+	tcp_conn          ?&net.TcpConn
+	global_generation u64
+	generation        u64
+	ready_at          i64
+	kind              DiagnosticsKind
 }
 
 struct DiagnosticsTicket {
@@ -658,7 +658,7 @@ fn run_diagnostics_job(mut scheduler DiagnosticsScheduler, job DiagnosticsJob) {
 		diagnostics_enabled:   true
 		diag_cache:            map[string]DiagCacheEntry{}
 		project_generations:   job.project_generations
-		config_store:           job.config_store
+		config_store:          job.config_store
 		position_encoding:     job.position_encoding
 		write_mutex:           job.write_mutex
 		tcp_conn:              job.tcp_conn
