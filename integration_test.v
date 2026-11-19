@@ -2625,6 +2625,11 @@ fn test_integration_prepare_rename_returns_symbol_range() {
 	// local lookup fails only on Windows without this project marker.
 	integration_test_must_write_file(os.join_path(project_dir, 'v.mod'), "Module {\n\tname: 'testproj'\n}\n")
 	app.workspace_roots = [project_dir]
+	// The perf branch serves `-line-info` through the shared overlay cache.
+	// The one-shot fallback mis-handles this single-file layout on Windows,
+	// while the pooled V3 path (used by the passing rename tests) answers
+	// from the same program copy the diagnostics use.
+	app.v3_line_info_enabled = true
 
 	test_file := os.join_path(project_dir, 'prepare_rename.v')
 	content := 'module main\n\nfn main() {\n\tvalue := 1\n\tprintln(value)\n}\n'
