@@ -492,14 +492,19 @@ fn (mut s DiagnosticsServer) ask(line string, token string, timeout_ms int, canc
 		if !marker.starts_with(diagnostics_server_partial) {
 			break
 		}
-		// The errors found so far; the answer goes on after them.
+		// The errors found so far; the answer goes on after them. Validate the
+		// code even without a callback so a malformed marker cannot be skipped.
+		code_text := marker[diagnostics_server_partial.len..].trim_space()
+		code := strconv.atoi(code_text) or {
+			return error('malformed partial exit code: ${code_text#[..40]}')
+		}
 		if partial != unsafe { nil } {
 			mut output := collected[..line_start]
 			if output.ends_with('\n') {
 				output = output[..output.len - 1]
 			}
 			partial(os.Result{
-				exit_code: marker[diagnostics_server_partial.len..].int()
+				exit_code: code
 				output:    output
 			})
 		}
@@ -513,8 +518,12 @@ fn (mut s DiagnosticsServer) ask(line string, token string, timeout_ms int, canc
 	if output.ends_with('\n') {
 		output = output[..output.len - 1]
 	}
+	end_code_text := end_line[diagnostics_server_end.len..].trim_space()
+	end_code := strconv.atoi(end_code_text) or {
+		return error('malformed end exit code: ${end_code_text#[..40]}')
+	}
 	return os.Result{
-		exit_code: end_line[diagnostics_server_end.len..].int()
+		exit_code: end_code
 		output:    output
 	}
 }

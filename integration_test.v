@@ -2027,6 +2027,130 @@ fn test_integration_malformed_json_request_writes_parse_error_response() {
 	assert outbound.contains('"id":null')
 }
 
+fn test_integration_malformed_numeric_id_writes_parse_error_response() {
+	// `12x` is not valid JSON, so it must be a Parse Error (-32700), not an
+	// Invalid Request: only valid JSON with a disallowed id type is -32600.
+	mut app, project_dir := create_integration_test_env()
+	defer {
+		cleanup_integration_test_env(app, project_dir)
+	}
+
+	payload := '{"jsonrpc":"2.0","id":12x,"method":"initialize","params":{}}'
+	framed := integration_test_frame_message(payload)
+	input_path := os.join_path(project_dir, 'malformed_numeric_id_input.txt')
+	integration_test_must_write_file(input_path, framed)
+
+	mut input := os.open(input_path) or {
+		assert false, 'Failed to open malformed numeric id input: ${err}'
+		return
+	}
+	defer {
+		input.close()
+	}
+
+	app.capture_output = true
+	mut reader := io.new_buffered_reader(reader: input, cap: 1)
+	app.handle_requests(mut reader)
+
+	assert app.captured_output.len >= 1
+	outbound := app.captured_output[0]
+	assert outbound.contains('"code":-32700')
+	assert outbound.contains('"id":null')
+}
+
+fn test_integration_bool_id_writes_invalid_request_response() {
+	// `true` is valid JSON but not a legal JSON-RPC id, so it must be an
+	// Invalid Request (-32600), distinct from malformed JSON (-32700).
+	mut app, project_dir := create_integration_test_env()
+	defer {
+		cleanup_integration_test_env(app, project_dir)
+	}
+
+	payload := '{"jsonrpc":"2.0","id":true,"method":"initialize","params":{}}'
+	framed := integration_test_frame_message(payload)
+	input_path := os.join_path(project_dir, 'bool_id_input.txt')
+	integration_test_must_write_file(input_path, framed)
+
+	mut input := os.open(input_path) or {
+		assert false, 'Failed to open bool id input: ${err}'
+		return
+	}
+	defer {
+		input.close()
+	}
+
+	app.capture_output = true
+	mut reader := io.new_buffered_reader(reader: input, cap: 1)
+	app.handle_requests(mut reader)
+
+	assert app.captured_output.len >= 1
+	outbound := app.captured_output[0]
+	assert outbound.contains('"code":-32600')
+	assert outbound.contains('"id":null')
+}
+
+fn test_integration_bool_id_numeric_method_writes_invalid_request_response() {
+	// Valid JSON with two defects at once (boolean id, numeric method) must
+	// still be Invalid Request (-32600): only malformed JSON is -32700.
+	mut app, project_dir := create_integration_test_env()
+	defer {
+		cleanup_integration_test_env(app, project_dir)
+	}
+
+	payload := '{"jsonrpc":"2.0","id":true,"method":123}'
+	framed := integration_test_frame_message(payload)
+	input_path := os.join_path(project_dir, 'bool_id_numeric_method_input.txt')
+	integration_test_must_write_file(input_path, framed)
+
+	mut input := os.open(input_path) or {
+		assert false, 'Failed to open bool id numeric method input: ${err}'
+		return
+	}
+	defer {
+		input.close()
+	}
+
+	app.capture_output = true
+	mut reader := io.new_buffered_reader(reader: input, cap: 1)
+	app.handle_requests(mut reader)
+
+	assert app.captured_output.len >= 1
+	outbound := app.captured_output[0]
+	assert outbound.contains('"code":-32600')
+	assert outbound.contains('"id":null')
+}
+
+fn test_integration_valid_id_numeric_method_writes_invalid_request_response() {
+	// Valid JSON with a valid id but a mistyped `method` is an Invalid
+	// Request (-32600) that echoes the id, not a Parse Error.
+	mut app, project_dir := create_integration_test_env()
+	defer {
+		cleanup_integration_test_env(app, project_dir)
+	}
+
+	payload := '{"jsonrpc":"2.0","id":1,"method":123}'
+	framed := integration_test_frame_message(payload)
+	input_path := os.join_path(project_dir, 'valid_id_numeric_method_input.txt')
+	integration_test_must_write_file(input_path, framed)
+
+	mut input := os.open(input_path) or {
+		assert false, 'Failed to open valid id numeric method input: ${err}'
+		return
+	}
+	defer {
+		input.close()
+	}
+
+	app.capture_output = true
+	mut reader := io.new_buffered_reader(reader: input, cap: 1)
+	app.handle_requests(mut reader)
+
+	assert app.captured_output.len >= 1
+	outbound := app.captured_output[0]
+	assert outbound.contains('"code":-32600')
+	assert outbound.contains('"id":1')
+}
+
 fn test_integration_non_default_charset_content_type_header_is_rejected() {
 	// LSP content must be UTF-8. A declared utf-16 charset is rejected with a
 	// parse error rather than silently misdecoded (P0-11).

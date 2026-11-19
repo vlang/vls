@@ -1779,6 +1779,15 @@ fn test_raw_id_is_valid_accepts_strings_and_numbers() {
 	assert raw_id_is_valid('5')
 	assert raw_id_is_valid('-3')
 	assert raw_id_is_valid('"abc-1"')
+	assert raw_id_is_valid('1.5'), 'float ids stay valid requests'
+	assert raw_id_is_valid('-1.5e+3'), 'exponent ids stay valid requests'
+}
+
+fn test_raw_id_is_valid_rejects_trailing_garbage() {
+	assert !raw_id_is_valid('12x'), 'trailing garbage is not a number'
+	assert !raw_id_is_valid('--3'), 'double minus is not a number'
+	assert !raw_id_is_valid('-'), 'lone minus is not a number'
+	assert !raw_id_is_valid('1.'), 'dangling dot is not a number'
 }
 
 fn test_raw_id_is_valid_rejects_other_types() {

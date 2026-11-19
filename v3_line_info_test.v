@@ -1518,6 +1518,52 @@ fn test_a_check_gets_the_partial_answer_of_the_server_first() {
 	assert plain.output == result.output
 }
 
+const fake_server_with_malformed_partial = r"#!/bin/sh
+echo v-diagnostics-server: ready
+while read -r request rest; do
+	case $request in quit) exit 0 ;; esac
+	token=${rest%% *}
+	echo v-diagnostics-server: child 1 $token
+	echo 'main.v:3:5: error: found first'
+	printf '\nv-diagnostics-server: partial 0junk %s\n' $token
+	echo 'main.v:3:5: error: found first'
+	printf '\nv-diagnostics-server: end 1 %s\n' $token
+done
+"
+
+fn test_malformed_partial_exit_code_fails_without_callback() {
+	dir := os.join_path(os.vtmp_dir(), 'vls_malformed_partial_${os.getpid()}')
+	os.mkdir_all(dir)!
+	defer {
+		os.rmdir_all(dir) or {}
+	}
+	exe := os.join_path(dir, 'v')
+	os.write_file(exe, fake_server_with_malformed_partial)!
+	os.chmod(exe, 0o755)!
+	// A malformed partial marker must fail even when no partial callback is
+	// set; otherwise it would be silently skipped and the final answer trusted.
+	// Each check gets a fresh pool so the second one replays the malformed
+	// marker instead of reusing a server stopped by the first failure.
+	mut pool := new_diagnostics_server_pool()
+	defer {
+		pool.stop_all()
+	}
+	answer := pool.check(exe, ['-check', '.'], dir, fn () bool {
+		return false
+	}, unsafe { nil })
+	assert answer == none, 'malformed partial exit code was skipped without a callback'
+	pool.stop_all()
+	mut pool_cb := new_diagnostics_server_pool()
+	defer {
+		pool_cb.stop_all()
+	}
+	// With a callback it must fail the same way.
+	with_cb := pool_cb.check(exe, ['-check', '.'], dir, fn () bool {
+		return false
+	}, fn (answer os.Result) {})
+	assert with_cb == none, 'malformed partial exit code was accepted with a callback'
+}
+
 // hover_text_at is what a hover at `line` and `col` of `uri` shows.
 fn hover_text_at(mut app App, uri string, line int, col int) string {
 	response := app.operation_at_pos(.hover, Request{

@@ -75,6 +75,7 @@ fn mcp_install_config() string {
 }
 
 // App represents the context of the server during its lifetime.
+@[heap]
 pub struct App {
 	cur_mod string = 'main'
 	exit    bool   = os.args.contains('exit')
@@ -1081,6 +1082,34 @@ fn (mut app App) handle_requests[T](mut reader T) {
 		// Preserve the exact id (numeric or string) so responses echo it
 		// verbatim; string ids would otherwise collapse to 0 (P0-02).
 		app.current_request_raw_id = extract_raw_id(content) or { '' }
+		// Decode the body WITHOUT the id field first: json2 aborts the whole
+		// decode on a string value in an int field, which would otherwise make
+		// every string-id request undecodable. The numeric id is derived from
+		// the raw id (0 for non-numeric ids), while the exact id is echoed via
+		// the raw id. Decoding first also keeps malformed JSON (e.g. an id of
+		// `12x`) on the Parse Error (-32700) path: only valid JSON with a
+		// disallowed id type (object, array, boolean) or a mistyped member
+		// (e.g. a numeric `method`) is an Invalid Request (-32600). json2
+		// fails both cases, so a generic syntax decode tells them apart.
+		body := json2.decode[RequestBody](content) or {
+			if _ := json2.decode[json2.Any](content) {
+				// Valid JSON but not a valid Request object.
+				if app.current_request_raw_id != '' && !raw_id_is_valid(app.current_request_raw_id) {
+					app.current_request_raw_id = 'null'
+					app.write_error_response(make_invalid_request_error_response(0, 'Request id must be a string, number, or null'))
+				} else {
+					if app.current_request_raw_id == '' {
+						app.current_request_raw_id = 'null'
+					}
+					app.write_error_response(make_invalid_request_error_response(raw_id_to_int(app.current_request_raw_id), 'Invalid request: ${err.msg()}'))
+				}
+				continue
+			}
+			log('Failed to decode JSON request: ${err.msg()}. Content: "${content}"')
+			app.current_request_raw_id = 'null'
+			app.write_error_response(make_parse_error_response(err.msg()))
+			continue
+		}
 		// JSON-RPC ids may only be a string, number, or null (an absent raw id).
 		// A present id of any other type (object, array, boolean) is an Invalid
 		// Request: respond with a null id — the id could not be validly
@@ -1088,16 +1117,6 @@ fn (mut app App) handle_requests[T](mut reader T) {
 		if app.current_request_raw_id != '' && !raw_id_is_valid(app.current_request_raw_id) {
 			app.current_request_raw_id = 'null'
 			app.write_error_response(make_invalid_request_error_response(0, 'Request id must be a string, number, or null'))
-			continue
-		}
-		// Decode the body WITHOUT the id field: json2 aborts the whole decode on
-		// a string value in an int field, which would otherwise make every
-		// string-id request undecodable. The numeric id is derived from the raw
-		// id (0 for non-numeric ids), while the exact id is echoed via the raw id.
-		body := json2.decode[RequestBody](content) or {
-			log('Failed to decode JSON request: ${err.msg()}. Content: "${content}"')
-			app.current_request_raw_id = 'null'
-			app.write_error_response(make_parse_error_response(err.msg()))
 			continue
 		}
 		// A message with an id + result/error but no method is a response to a
@@ -1501,23 +1520,94 @@ fn request_content_has_id(content string) bool {
 
 // raw_id_to_int converts a raw JSON id token to an int for internal use. String
 // ids (and absent ids) collapse to 0; the exact id is preserved separately via
-// the raw id and echoed verbatim in responses.
+// the raw id and echoed verbatim in responses. Only canonical integers map to
+// their value: anything else (floats, malformed numbers) collapses to 0 so two
+// different wire ids can never share one internal id through lenient parsing.
 fn raw_id_to_int(raw string) int {
-	if raw == '' || raw.starts_with('"') {
+	if raw == '' || raw == 'null' || raw.starts_with('"') {
+		return 0
+	}
+	if !raw_is_canonical_int(raw) {
 		return 0
 	}
 	return raw.int()
 }
 
+// raw_is_canonical_int reports whether `raw` is an optional `-` followed by one
+// or more ASCII digits and nothing else.
+fn raw_is_canonical_int(raw string) bool {
+	if raw == '' {
+		return false
+	}
+	mut i := 0
+	if raw[0] == `-` {
+		if raw.len == 1 {
+			return false
+		}
+		i = 1
+	}
+	for ; i < raw.len; i++ {
+		if raw[i] < `0` || raw[i] > `9` {
+			return false
+		}
+	}
+	return true
+}
+
+// raw_is_json_number reports whether `raw` has the shape of a JSON number
+// (optional `-`, digits, optional fraction and exponent), so float ids stay
+// valid requests even though they collapse to 0 internally.
+fn raw_is_json_number(raw string) bool {
+	mut i := 0
+	if i < raw.len && raw[i] == `-` {
+		i++
+	}
+	if i >= raw.len {
+		return false
+	}
+	if raw[i] == `0` {
+		i++
+	} else if raw[i] >= `1` && raw[i] <= `9` {
+		for i < raw.len && raw[i] >= `0` && raw[i] <= `9` {
+			i++
+		}
+	} else {
+		return false
+	}
+	if i < raw.len && raw[i] == `.` {
+		i++
+		if i >= raw.len || raw[i] < `0` || raw[i] > `9` {
+			return false
+		}
+		for i < raw.len && raw[i] >= `0` && raw[i] <= `9` {
+			i++
+		}
+	}
+	if i < raw.len && (raw[i] == `e` || raw[i] == `E`) {
+		i++
+		if i < raw.len && (raw[i] == `+` || raw[i] == `-`) {
+			i++
+		}
+		if i >= raw.len || raw[i] < `0` || raw[i] > `9` {
+			return false
+		}
+		for i < raw.len && raw[i] >= `0` && raw[i] <= `9` {
+			i++
+		}
+	}
+	return i == raw.len
+}
+
 // raw_id_is_valid reports whether a raw JSON id token is a legal JSON-RPC id: a
 // string, a number, or null. Objects, arrays, and booleans are rejected. An
 // absent id is represented by an empty token and is handled by the caller.
+// Numbers accept the full JSON number shape so float ids stay valid (they
+// collapse to 0 internally); trailing garbage such as `12x` is rejected.
 fn raw_id_is_valid(raw string) bool {
 	if raw == '' || raw == 'null' || raw[0] == `"` {
 		return true
 	}
-	c := raw[0]
-	return c == `-` || (c >= `0` && c <= `9`)
+	return raw_is_canonical_int(raw) || raw_is_json_number(raw)
 }
 
 // json_is_ws reports whether a byte is JSON insignificant whitespace.

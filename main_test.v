@@ -204,6 +204,10 @@ fn test_main_raw_id_to_int_collapses_non_numeric_ids() {
 	assert raw_id_to_int('null') == 0, 'null id collapses to 0'
 	assert raw_id_to_int('5') == 5, 'numeric id converts'
 	assert raw_id_to_int('-3') == -3, 'negative id converts'
+	assert raw_id_to_int('12x') == 0, 'trailing garbage must not collide with a real id'
+	assert raw_id_to_int('1.5') == 0, 'float id collapses instead of truncating'
+	assert raw_id_to_int('--3') == 0, 'malformed number collapses to 0'
+	assert raw_id_to_int('-') == 0, 'lone minus collapses to 0'
 }
 
 fn test_main_json_is_ws_matches_insignificant_bytes_only() {
