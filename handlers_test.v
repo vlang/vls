@@ -18432,7 +18432,7 @@ fn test_operation_at_pos_indexed_defers_is_narrowed_hover_to_compiler() {
 	app.open_files[uri] = content
 	app.reindex_uri(uri)
 	lines := content.split_into_lines()
-	branch_line := -1
+	mut branch_line := -1
 	for i, line in lines {
 		if line.contains('println(x)') && i > 0 {
 			branch_line = i
