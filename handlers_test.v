@@ -517,6 +517,38 @@ fn test_diagnostics_scheduler_invalidates_only_changed_document() {
 	assert !scheduler.is_current('file:///b.v', global_b, generation_b)
 }
 
+fn test_diagnostics_scheduler_stale_job_keeps_program_members() {
+	// A job that goes stale after publishing must not overwrite the program
+	// member set a newer check recorded: the newer check would diff against
+	// the stale set and miss clearing diagnostics for files that left the
+	// program. The swap runs under the same lock as the currency check.
+	mut scheduler := new_diagnostics_scheduler()
+	program_dir := '/proj'
+	uri_a := 'file:///proj/a.v'
+	uri_b := 'file:///proj/b.v'
+	app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	global_first, generation_first := scheduler.next_generation(uri_a)
+	current := DiagnosticsJob{
+		uri:               uri_a
+		global_generation: global_first
+		generation:        generation_first
+		project_key:       'proj'
+		write_mutex:       app.write_mutex
+	}
+	left := scheduler.swap_program_members_if_current(current, program_dir, [uri_a, uri_b])
+	assert left == []
+	// An edit arrives while the stale job's clearing publishes are refused:
+	// the job is no longer current.
+	tickets := scheduler.begin_project_mutation('proj', uri_a, [])
+	assert tickets.len > 0
+	stale_left := scheduler.swap_program_members_if_current(current, program_dir, [uri_a])
+	assert stale_left == [], 'a stale job swaps nothing and reports no departures'
+	assert (scheduler.program_members[program_dir] or { []string{} }) == [uri_a, uri_b], 'the stale swap keeps the current member set'
+}
+
 fn test_diagnostics_scheduler_coalesces_pending_jobs() {
 	mut app := create_test_app()
 	defer {
@@ -9462,6 +9494,138 @@ fn test_receiver_inference_uses_innermost_same_line_binding() {
 	}
 	assert location.uri == uri
 	assert location.range.start.line == lines.index('fn (value B) target() {}')
+}
+
+fn test_semantic_scan_separates_same_line_shadowed_bindings() {
+	// Two shadowing `value` bindings share one line: an occurrence anchored on
+	// the outer declaration must not resolve to the inner binding, and one
+	// anchored on the inner binding must not resolve to the outer one. A
+	// line-only fast-path match merges them.
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	app.capture_output = true // don't write log notifications to stdout during the test
+	content := 'module main\n\nfn main() {\n\tvalue := 1; if true { value := 2; println(value) }; println(value)\n}\n'
+	test_dir := os.join_path(app.temp_dir, 'same_line_shadow_scan')
+	must_mkdir_all(test_dir)
+	main_file := os.join_path(test_dir, 'main.v')
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	lines := content.split_into_lines()
+	use_line := 3
+	line_text := lines[use_line]
+	outer_decl_col := line_text.index('value') or { -1 }
+	inner_decl_col := line_text.index('value := 2') or { -1 }
+	inner_use_col := line_text.index('println(value) }') or { -1 } + 'println('.len
+	outer_use_col := line_text.last_index('value)') or { -1 }
+	assert outer_decl_col == 1
+	assert inner_decl_col > outer_decl_col
+	assert inner_use_col > inner_decl_col
+	assert outer_use_col > inner_use_col
+	scope := app.index_scope_for_uri(uri)
+	outer_anchor := Location{
+		uri:   uri
+		range: LSPRange{
+			start: Position{
+				line: use_line
+				char: outer_use_col
+			}
+		}
+	}
+	outer_refs := app.search_symbol_in_dirs_semantic('value', outer_anchor, scope, 0, true)
+	mut outer_starts := []string{}
+	for loc in outer_refs {
+		outer_starts << '${loc.range.start.line}:${loc.range.start.char}'
+	}
+	outer_starts.sort()
+	assert outer_starts == ['${use_line}:${outer_decl_col}', '${use_line}:${outer_use_col}'], 'the outer anchor keeps only the outer binding: ${outer_starts}'
+	inner_anchor := Location{
+		uri:   uri
+		range: LSPRange{
+			start: Position{
+				line: use_line
+				char: inner_use_col
+			}
+		}
+	}
+	inner_refs := app.search_symbol_in_dirs_semantic('value', inner_anchor, scope, 0, true)
+	mut inner_starts := []string{}
+	for loc in inner_refs {
+		inner_starts << '${loc.range.start.line}:${loc.range.start.char}'
+	}
+	inner_starts.sort()
+	assert inner_starts == ['${use_line}:${inner_decl_col}', '${use_line}:${inner_use_col}'], 'the inner anchor keeps only the inner binding: ${inner_starts}'
+}
+
+fn test_document_highlight_separates_same_line_shadowed_bindings() {
+	// Same-line shadowing for document highlights: highlighting the outer use
+	// must not mix in the inner binding's occurrences, and vice versa.
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	content := 'module main\n\nfn main() {\n\tvalue := 1; if true { value := 2; println(value) }; println(value)\n}\n'
+	test_dir := os.join_path(app.temp_dir, 'same_line_shadow_highlight')
+	must_mkdir_all(test_dir)
+	test_file := os.join_path(test_dir, 'main.v')
+	must_write_file(test_file, content)
+	uri := path_to_uri(test_file)
+	app.open_files[uri] = content
+	lines := content.split_into_lines()
+	use_line := 3
+	line_text := lines[use_line]
+	outer_decl_col := line_text.index('value') or { -1 }
+	inner_decl_col := line_text.index('value := 2') or { -1 }
+	inner_use_col := line_text.index('println(value) }') or { -1 } + 'println('.len
+	outer_use_col := line_text.last_index('value)') or { -1 }
+
+	outer_response := app.handle_document_highlight(Request{
+		id:     907
+		method: 'textDocument/documentHighlight'
+		params: json2.encode(DocumentHighlightParams{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			position:      Position{
+				line: use_line
+				char: outer_use_col
+			}
+		},
+			escape_unicode: true
+		)
+	})
+	assert outer_response.result is []DocumentHighlight
+	mut outer_starts := []string{}
+	for highlight in (outer_response.result as []DocumentHighlight) {
+		outer_starts << '${highlight.range.start.line}:${highlight.range.start.char}'
+	}
+	outer_starts.sort()
+	assert outer_starts == ['${use_line}:${outer_decl_col}', '${use_line}:${outer_use_col}'], 'the outer highlight keeps only the outer binding: ${outer_starts}'
+
+	inner_response := app.handle_document_highlight(Request{
+		id:     908
+		method: 'textDocument/documentHighlight'
+		params: json2.encode(DocumentHighlightParams{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			position:      Position{
+				line: use_line
+				char: inner_use_col
+			}
+		},
+			escape_unicode: true
+		)
+	})
+	assert inner_response.result is []DocumentHighlight
+	mut inner_starts := []string{}
+	for highlight in (inner_response.result as []DocumentHighlight) {
+		inner_starts << '${highlight.range.start.line}:${highlight.range.start.char}'
+	}
+	inner_starts.sort()
+	assert inner_starts == ['${use_line}:${inner_decl_col}', '${use_line}:${inner_use_col}'], 'the inner highlight keeps only the inner binding: ${inner_starts}'
 }
 
 fn test_closure_parameters_are_scoped_local_completions() {

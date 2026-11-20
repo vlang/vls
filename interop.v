@@ -1296,8 +1296,8 @@ fn (mut app App) drop_all_overlays() {
 // to a file's content needs nothing (a symlink shows it, a buffered file is
 // rewritten from what the editor holds), but a file created or deleted
 // changes the tree itself: the tracked set only covers open buffers, so
-// without this a hot entry would keep serving its old listing indefinitely
-// (every hit refreshes `built_ms`).
+// without this a hot entry would keep serving its old listing until its
+// build-anchored TTL expires. Hits never refresh that deadline.
 fn (mut app App) invalidate_overlay_for_disk_change(changed_path string) {
 	mut store := app.overlay_cache_store or { return }
 	changed := normalize_overlay_path(changed_path)
@@ -1811,7 +1811,10 @@ fn (mut app App) prepare_compilation_overlay_with(real_path string, work_dir str
 // snapshot (files plus committed hashes) consistent. A hit whose buffers
 // differ from the entry therefore rebuilds a private staging tree instead of
 // overwriting the tree another compiler is reading; only an exact content
-// match reuses the published root. `importers` are the disk files the
+// match reuses the published root. A hit preserves the entry's build time, so
+// the TTL stays anchored to the build: refreshing it on every hit would let
+// requests less than one TTL apart keep a stale symlinked listing (a new or
+// deleted `.v` sibling on disk) alive indefinitely. `importers` are the disk files the
 // line-info overlay writes next to the buffers (see prepare_line_info_overlay);
 // they travel through the cache like buffers so the cached tree keeps them.
 fn (mut app App) prepare_cached_overlay(mut store &OverlayCacheStore, source_path string, source_root string, source_display_root string, source_work_dir string, importers map[string]string) !CompilationOverlay {
@@ -1882,15 +1885,15 @@ fn (mut app App) prepare_cached_overlay(mut store &OverlayCacheStore, source_pat
 					store.mutex.unlock()
 					return err
 				}
+				// The hit reuses the published tree as-is: its build time is
+				// preserved so the TTL stays anchored to the build. Refreshing
+				// it here would let requests less than one TTL apart keep a
+				// stale symlinked listing (a new or deleted `.v` sibling) alive
+				// indefinitely. The entry expires on its original deadline and
+				// the next rebuild re-symlinks the current tree.
 				mut current_root := ''
 				if entry := store.entries[source_root] {
 					current_root = entry.temp_root
-					if entry.temp_root == hit_root {
-						store.entries[source_root] = OverlayCacheEntry{
-							...entry
-							built_ms: now_ms
-						}
-					}
 				}
 				store.mutex.unlock()
 				if current_root == '' || current_root == hit_root {
@@ -3287,6 +3290,16 @@ fn (mut app App) purge_finished_line_info() {
 	}
 	for raw_id in done {
 		app.line_info_cancels.delete(raw_id)
+		// The worker answered its request (cancelled or not): consume any
+		// $/cancelRequest entry for it. The worker answers through its
+		// snapshot, whose cancellation maps are private copies, so it cannot
+		// consume the session's entry itself; without this a later request
+		// reusing the id would look cancelled for a cancel aimed at the
+		// answered one.
+		app.cancelled_raw_ids.delete(raw_id)
+		if raw_is_canonical_int(raw_id) {
+			app.cancelled_requests.delete(raw_id_to_int(raw_id))
+		}
 	}
 }
 

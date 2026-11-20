@@ -718,7 +718,7 @@ fn run_diagnostics_job(mut scheduler DiagnosticsScheduler, job DiagnosticsJob) {
 	// it: nothing else checks it again, and it would keep what the program said.
 	mut members := worker.program_errors.keys()
 	members << job.uri
-	for other_uri in scheduler.swap_program_members(worker.program_dir_checked, members) {
+	for other_uri in scheduler.swap_program_members_if_current(job, worker.program_dir_checked, members) {
 		other_content := job.open_files[other_uri] or { continue }
 		other := worker.build_diagnostics_notification(other_uri, other_content)
 		// Publish a clean report as an actual empty cached result, so a
@@ -761,13 +761,22 @@ fn (mut scheduler DiagnosticsScheduler) publish_partial(job DiagnosticsJob, uri 
 	}
 }
 
-// swap_program_members records `members`, the open files a check of the program
-// in `program_dir` answered for, and returns those the previous check of that
-// program answered for and this one does not.
-fn (mut scheduler DiagnosticsScheduler) swap_program_members(program_dir string, members []string) []string {
+// swap_program_members_if_current records `members`, the open files a check of
+// the program in `program_dir` answered for, and returns those the previous
+// check of that program answered for and this one does not — but only when
+// `job` is still current. The swap runs under the same lock as the currency
+// check: a job that goes stale after publishing must not overwrite the member
+// set a newer check published, or the newer check would diff against a stale
+// set and miss clearing diagnostics for files that left the program. A stale
+// job swaps nothing and reports no departures; its own clearing publishes
+// were already refused.
+fn (mut scheduler DiagnosticsScheduler) swap_program_members_if_current(job DiagnosticsJob, program_dir string, members []string) []string {
 	scheduler.mutex.lock()
 	defer {
 		scheduler.mutex.unlock()
+	}
+	if !scheduler.is_job_current_locked(job) {
+		return []string{}
 	}
 	previous := scheduler.program_members[program_dir] or { []string{} }
 	scheduler.program_members[program_dir] = members

@@ -5376,6 +5376,53 @@ fn test_invalidate_overlay_for_disk_change_stales_only_covering_entries() {
 	assert second.temp_root != first.temp_root, 'a staled entry rebuilds the tree'
 }
 
+fn test_prepare_cached_overlay_hit_preserves_build_time() {
+	// The overlay TTL is anchored to the build: a cache hit reuses the tree
+	// without refreshing its deadline. Refreshing it on every hit would let
+	// requests less than one TTL apart keep a stale symlinked listing (a new
+	// or deleted `.v` sibling on disk) alive indefinitely.
+	base := os.join_path(os.temp_dir(), 'vls_overlay_ttl_${os.getpid()}')
+	proj := os.join_path(base, 'proj')
+	sub := os.join_path(proj, 'sub')
+	defer {
+		os.rmdir_all(base) or {}
+	}
+	main_content := 'module main\n\nfn main() {\n\tprintln(helper())\n}\n'
+	mut app, main_file, _ := cached_overlay_test_app(base, proj, sub, main_content)
+	defer {
+		app.drop_all_overlays()
+	}
+	first := app.prepare_line_info_overlay(main_file, proj) or {
+		assert false, 'first cached overlay must succeed: ${err}'
+		return
+	}
+	mut store := app.overlay_cache_store or {
+		assert false, 'the cached path sets the store'
+		return
+	}
+	mut key := ''
+	for k in store.entries.keys() {
+		key = k
+	}
+	entry := store.entries[key] or {
+		assert false, 'the cached entry exists'
+		return
+	}
+	// Age the entry within the TTL, so the next request still hits the cache
+	// but a refresh of the deadline would show.
+	aged_ms := time.now().unix_milli() - 1000
+	store.entries[key] = OverlayCacheEntry{
+		...entry
+		built_ms: aged_ms
+	}
+	second := app.prepare_line_info_overlay(main_file, proj) or {
+		assert false, 'second cached overlay must succeed: ${err}'
+		return
+	}
+	assert second.temp_root == first.temp_root, 'the second request hits the cache'
+	assert (store.entries[key] or { entry }).built_ms == aged_ms, 'a hit preserves the build time instead of refreshing the TTL'
+}
+
 fn test_tcp_disconnect_teardown_joins_line_info_workers() {
 	// The request loop joins async line-info workers before it tears the
 	// session down, and the TCP handler joins again before it closes the

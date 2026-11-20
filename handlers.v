@@ -8590,9 +8590,11 @@ fn (app &App) visible_binding_keys(content string, pos Position, symbol string) 
 // semantic_candidate_fast decides one references/rename candidate without the
 // compiler: true accepts it, false rejects it, none defers to the existing
 // compiler verification. Same-file candidates compare visible binding sets
-// against the anchor; bare top-level uses additionally require an
+// against the anchor; a side sitting on the binding's own declaration matches
+// by (line, column) identity instead, since a line alone cannot tell same-line
+// shadowing declarations apart. Bare top-level uses additionally require an
 // index-resolved declaration matching the anchor.
-fn (mut app App) semantic_candidate_fast(symbol string, anchor Location, anchor_keys map[string]int, anchor_member bool, anchor_is_decl bool, cand Location, mut file_snaps map[string]SemanticFileSnapshot) ?bool {
+fn (mut app App) semantic_candidate_fast(symbol string, anchor Location, anchor_keys map[string]int, anchor_member bool, anchor_is_decl bool, anchor_start_byte int, cand Location, mut file_snaps map[string]SemanticFileSnapshot) ?bool {
 	if symbol == 'it' || symbol == 'err' {
 		return none
 	}
@@ -8625,7 +8627,13 @@ fn (mut app App) semantic_candidate_fast(symbol string, anchor Location, anchor_
 	end_byte := encoded_col_to_byte(line_text, cand.range.end.char, app.position_encoding)
 	if cand.uri == anchor.uri {
 		cand_keys := app.visible_binding_keys(snap.content, cand_pos, symbol)
-		if cand_keys.len == anchor_keys.len {
+		cand_is_decl := !source_occurrence_is_method_declaration(snap.lines, cand_pos.line, start_byte)
+			&& (source_occurrence_precedes_local_declaration(snap.lines, cand_pos.line, end_byte)
+				|| is_fn_parameter_highlight(line_text, start_byte, end_byte))
+		// A declaration truncates its own visible set, so the set-equality
+		// check below only decides uses: equal sets of uses reference the
+		// same binding.
+		if !cand_is_decl && cand_keys.len == anchor_keys.len {
 			mut same := true
 			for key, _ in anchor_keys {
 				if key !in cand_keys {
@@ -8648,16 +8656,43 @@ fn (mut app App) semantic_candidate_fast(symbol string, anchor Location, anchor_
 				return true
 			}
 		}
-		cand_is_decl := !source_occurrence_is_method_declaration(snap.lines, cand_pos.line, start_byte)
-			&& (source_occurrence_precedes_local_declaration(snap.lines, cand_pos.line, end_byte)
-				|| is_fn_parameter_highlight(line_text, start_byte, end_byte))
 		if cand_is_decl && cand_pos.line == anchor.range.start.line {
-			return true
+			if anchor_is_decl {
+				// Two declarations are one binding only for the same
+				// occurrence. Both sides are occurrence bytes, so they
+				// compare directly.
+				if start_byte == anchor_start_byte {
+					return true
+				}
+				return false
+			}
+			if visible_binding_matches(anchor_keys, cand_pos.line, start_byte) {
+				return true
+			}
+			for key, _ in anchor_keys {
+				key_line, _ := binding_key_line_col(key)
+				if key_line == cand_pos.line {
+					// Same line but a different (or shadowed) declaration:
+					// the line alone cannot tell them apart.
+					return false
+				}
+			}
 		}
 		if anchor_is_decl {
-			for _, decl_line in cand_keys {
-				if decl_line == anchor.range.start.line {
-					return true
+			if cand_is_decl {
+				// Distinct declarations are never one binding; the shared
+				// occurrence itself was accepted before the fast path.
+				return false
+			}
+			if visible_binding_matches(cand_keys, anchor.range.start.line, anchor_start_byte) {
+				return true
+			}
+			for key, _ in cand_keys {
+				key_line, _ := binding_key_line_col(key)
+				if key_line == anchor.range.start.line {
+					// Same line but a different (or shadowing) use: the
+					// line alone cannot tell them apart.
+					return false
 				}
 			}
 		}
@@ -8743,7 +8778,7 @@ fn (mut app App) search_symbol_in_dirs_semantic(symbol string, anchor Location, 
 		}
 		// Decide from the index and lexical scope first; only genuinely
 		// ambiguous candidates pay for a compiler definition lookup.
-		if fast := app.semantic_candidate_fast(symbol, anchor, anchor_keys, anchor_member, anchor_is_decl, cand, mut file_snaps) {
+		if fast := app.semantic_candidate_fast(symbol, anchor, anchor_keys, anchor_member, anchor_is_decl, anchor_start_byte, cand, mut file_snaps) {
 			if fast {
 				locations << cand
 			}

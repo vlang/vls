@@ -278,7 +278,7 @@ fn (mut app App) handle_document_highlight(request Request) Response {
 		line := lines[candidate.line_idx]
 		start_char := byte_to_encoded_col(line, candidate.start_byte, app.position_encoding)
 		end_char := byte_to_encoded_col(line, candidate.end_byte, app.position_encoding)
-		if accept := app.highlight_candidate_fast(content, lines, symbol, params.position.line, cursor_keys, cursor_has_member, cursor_is_decl, had_index_anchor, candidate.line_idx, start_char, end_char, line, candidate.start_byte, candidate.end_byte) {
+		if accept := app.highlight_candidate_fast(content, lines, symbol, params.position.line, cursor_start_byte, cursor_keys, cursor_has_member, cursor_is_decl, had_index_anchor, candidate.line_idx, start_char, end_char, line, candidate.start_byte, candidate.end_byte) {
 			if !accept {
 				continue
 			}
@@ -331,6 +331,36 @@ fn highlight_binding_key(name string, line int, column int) string {
 	return '${name}:${line}:${column}'
 }
 
+// binding_key_line_col splits a highlight_binding_key back into the
+// declaration line and column it identifies. Parameter bindings record an
+// unknown column (-1); visible_binding_matches treats that as a wildcard.
+fn binding_key_line_col(key string) (int, int) {
+	column := key.all_after_last(':').int()
+	line := key.all_before_last(':').all_after_last(':').int()
+	return line, column
+}
+
+// visible_binding_matches reports whether (line, column) identifies the
+// innermost same-named binding in `keys`: present and textually last, since an
+// inner scope shadows an outer one — including two declarations sharing one
+// line. A stored column of -1 (parameters, whose headers record no column)
+// matches any column on the same line, so parameter fast paths keep working.
+fn visible_binding_matches(keys map[string]int, line int, column int) bool {
+	mut best_line := -1
+	mut best_column := -2
+	for key, _ in keys {
+		key_line, key_column := binding_key_line_col(key)
+		if key_line > best_line || (key_line == best_line && key_column > best_column) {
+			best_line = key_line
+			best_column = key_column
+		}
+	}
+	if best_line != line {
+		return false
+	}
+	return best_column == column || best_column < 0 || column < 0
+}
+
 // highlight_candidate_is_top_level reports whether a lexical candidate can be
 // accepted as the same top-level symbol without compiler verification. Every
 // syntactic position that could hide a different same-spelled symbol (locals,
@@ -374,10 +404,12 @@ fn highlight_candidate_is_top_level(lines []string, line_text string, line_idx i
 // highlight_candidate_fast decides one highlight candidate without spawning
 // the compiler: true accepts it, false rejects it, none defers to the
 // existing compiler verification. Identity is the set of visible same-named
-// local bindings; equal sets mean the same declaration is referenced. A side
-// sitting on the binding's own declaration matches by line. Bare top-level
-// uses additionally require an index anchor and a top-level-safe position.
-fn (app &App) highlight_candidate_fast(content string, lines []string, symbol string, cursor_line int, cursor_keys map[string]int, cursor_member bool, cursor_is_decl bool, index_anchor bool, cand_line int, start_char int, end_char int, line_text string, start_byte int, end_byte int) ?bool {
+// local bindings; equal sets of uses mean the same declaration is referenced.
+// A side sitting on the binding's own declaration matches by (line, column)
+// identity instead: a line alone cannot tell same-line shadowing declarations
+// apart. Bare top-level uses additionally require an index anchor and a
+// top-level-safe position.
+fn (app &App) highlight_candidate_fast(content string, lines []string, symbol string, cursor_line int, cursor_start_byte int, cursor_keys map[string]int, cursor_member bool, cursor_is_decl bool, index_anchor bool, cand_line int, start_char int, end_char int, line_text string, start_byte int, end_byte int) ?bool {
 	if symbol == 'it' || symbol == 'err' {
 		return none
 	}
@@ -398,7 +430,11 @@ fn (app &App) highlight_candidate_fast(content string, lines []string, symbol st
 			cand_keys[highlight_binding_key(b.name, b.line, b.column)] = b.line
 		}
 	}
-	if cand_keys.len == cursor_keys.len {
+	cand_is_decl := source_occurrence_precedes_local_declaration(lines, cand_line, end_byte)
+		|| is_fn_parameter_highlight(line_text, start_byte, end_byte)
+	// A declaration truncates its own visible set, so the set-equality check
+	// below only decides uses: equal sets of uses reference the same binding.
+	if !cand_is_decl && cand_keys.len == cursor_keys.len {
 		mut same := true
 		for key, _ in cursor_keys {
 			if key !in cand_keys {
@@ -417,19 +453,36 @@ fn (app &App) highlight_candidate_fast(content string, lines []string, symbol st
 			return true
 		}
 	}
-	cand_is_decl := source_occurrence_precedes_local_declaration(lines, cand_line, end_byte)
-		|| is_fn_parameter_highlight(line_text, start_byte, end_byte)
 	if cand_is_decl {
-		for _, decl_line in cursor_keys {
-			if decl_line == cand_line {
+		if cursor_is_decl {
+			// Two declarations are one binding only for the same occurrence.
+			if cand_line == cursor_line && start_byte == cursor_start_byte {
 				return true
+			}
+			return false
+		}
+		if visible_binding_matches(cursor_keys, cand_line, start_byte) {
+			return true
+		}
+		for key, _ in cursor_keys {
+			key_line, _ := binding_key_line_col(key)
+			if key_line == cand_line {
+				// Same line but a different (or shadowed) declaration: the
+				// line alone cannot tell them apart.
+				return false
 			}
 		}
 	}
 	if cursor_is_decl {
-		for _, decl_line in cand_keys {
-			if decl_line == cursor_line {
-				return true
+		if visible_binding_matches(cand_keys, cursor_line, cursor_start_byte) {
+			return true
+		}
+		for key, _ in cand_keys {
+			key_line, _ := binding_key_line_col(key)
+			if key_line == cursor_line {
+				// Same line but a different (or shadowing) use: the line
+				// alone cannot tell them apart.
+				return false
 			}
 		}
 	}

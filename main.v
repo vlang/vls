@@ -1155,6 +1155,15 @@ fn (mut app App) handle_requests[T](mut reader T) {
 			log('Dropping notification-shaped message for request-only method ${lsp_request.method}')
 			continue
 		}
+		// Reap finished async line-info workers before deciding cancellation:
+		// a worker that already answered consumed its request, so its
+		// $/cancelRequest entry is dropped here and a later request reusing
+		// the id is not treated as cancelled. The worker itself answers
+		// through a snapshot with private cancellation maps and cannot drop
+		// the session's entry.
+		if app.line_info_cancels.len > 0 {
+			app.purge_finished_line_info()
+		}
 		if method_requires_response(method) && app.request_is_cancelled(lsp_request.id) {
 			app.write_error_response(make_cancelled_error_response(lsp_request.id))
 			app.consume_cancelled_request(lsp_request.id, app.current_request_raw_id)
