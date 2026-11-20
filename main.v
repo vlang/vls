@@ -681,6 +681,11 @@ fn handle_tcp_client(mut conn net.TcpConn) {
 	}
 	mut reader := io.new_buffered_reader(reader: conn, cap: transport_buffer_cap)
 	app.handle_requests(mut reader)
+	// The request loop already joined the async line-info workers before it
+	// returned, but joining here as well keeps the TCP teardown explicit: if
+	// the client disconnects mid-compile, no worker may outlive the session
+	// and write through the snapshot's `tcp_conn` pointer after it closes.
+	app.cancel_and_join_line_info_workers()
 	log('TCP client disconnected')
 	os.rmdir_all(temp_dir) or {
 		$if debug {

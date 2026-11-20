@@ -583,6 +583,23 @@ fn (mut app App) source_hover_fallback(uri string, position Position) ?Hover {
 	location := app.resolve_indexed_definition(uri, position) or {
 		app.resolve_symbol_anchor(uri, position.line, position.char) or { return none }
 	}
+	return app.hover_for_indexed_location(location)
+}
+
+// source_hover_fallback_indexed is the index-only half of
+// source_hover_fallback for the preflight phase: it never spawns the
+// compiler. When the index cannot resolve the name, the caller defers to the
+// async worker instead of blocking the request loop and repeating the lookup
+// there.
+fn (mut app App) source_hover_fallback_indexed(uri string, position Position) ?Hover {
+	location := app.resolve_indexed_definition(uri, position) or { return none }
+	return app.hover_for_indexed_location(location)
+}
+
+// hover_for_indexed_location renders the hover for a location the index
+// resolved, shared by the compiler-touching and index-only fallbacks so the
+// two cannot drift apart.
+fn (mut app App) hover_for_indexed_location(location Location) ?Hover {
 	// What declares a local or a parameter is a statement or a signature, not
 	// what it is.
 	if app.declares_local_at(location) {
@@ -1411,6 +1428,31 @@ fn (mut app App) source_signature_fallback(uri string, position Position) ?Signa
 	location := app.resolve_indexed_definition(uri, target_position) or {
 		app.resolve_symbol_anchor(uri, target_position.line, target_position.char) or { return none }
 	}
+	return app.signature_for_indexed_location(location, name, target.active_parameter)
+}
+
+// source_signature_fallback_indexed is the index-only half of
+// source_signature_fallback for the preflight phase: it never spawns the
+// compiler. Unresolved calls defer to the async worker instead of blocking
+// the request loop on a compiler lookup the worker would repeat.
+fn (mut app App) source_signature_fallback_indexed(uri string, position Position) ?SignatureHelp {
+	content := app.index_source_for(uri) or { return none }
+	target := source_call_target(content, position, app.position_encoding) or {
+		return none
+	}
+	target_position := target.position
+	name := app.get_word_at_position(uri, target_position.line, target_position.char)
+	if name == '' {
+		return none
+	}
+	location := app.resolve_indexed_definition(uri, target_position) or { return none }
+	return app.signature_for_indexed_location(location, name, target.active_parameter)
+}
+
+// signature_for_indexed_location renders the signature help for a location
+// the index resolved, shared by the compiler-touching and index-only
+// fallbacks so the two cannot drift apart.
+fn (mut app App) signature_for_indexed_location(location Location, name string, active_parameter int) ?SignatureHelp {
 	declaration := app.source_declaration_at(location)
 	label := declaration_signature_label(declaration, name)
 	if label == '' {
@@ -1424,7 +1466,7 @@ fn (mut app App) source_signature_fallback(uri string, position Position) ?Signa
 				parameters: parameters
 			},
 		]
-		active_parameter: signature_active_parameter(parameters, target.active_parameter)
+		active_parameter: signature_active_parameter(parameters, active_parameter)
 	}
 }
 
@@ -1517,7 +1559,7 @@ fn (mut app App) operation_at_pos_indexed(method Method, request Request) Indexe
 				}
 			}
 		}
-		if fallback := app.source_hover_fallback(path, params.position) {
+		if fallback := app.source_hover_fallback_indexed(path, params.position) {
 			doc := app.hover_doc_comment(path, '${line_nr}:hv^${byte_col}')
 			mut value := fallback.contents.value
 			if doc != '' && !value.contains(doc) {
@@ -1539,7 +1581,7 @@ fn (mut app App) operation_at_pos_indexed(method Method, request Request) Indexe
 		return IndexedPhase{}
 	}
 	if method == .signature_help {
-		if sig := app.source_signature_fallback(path, params.position) {
+		if sig := app.source_signature_fallback_indexed(path, params.position) {
 			return IndexedPhase{
 				done: true
 				resp: Response{

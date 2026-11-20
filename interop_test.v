@@ -5375,3 +5375,69 @@ fn test_invalidate_overlay_for_disk_change_stales_only_covering_entries() {
 	}
 	assert second.temp_root != first.temp_root, 'a staled entry rebuilds the tree'
 }
+
+fn test_tcp_disconnect_teardown_joins_line_info_workers() {
+	// The request loop joins async line-info workers before it tears the
+	// session down, and the TCP handler joins again before it closes the
+	// connection: a client that disconnects mid-compile must never leave a
+	// worker writing through the snapshot's `tcp_conn` pointer afterwards.
+	// Joining twice is safe (the second join returns at once).
+	mut app := &App{
+		line_info_cancels: map[string]&CancelFlag{}
+	}
+	flag := &CancelFlag{}
+	app.line_info_cancels['9'] = flag
+	app.line_info_workers.add(1)
+	app.line_info_workers.done()
+	app.cancel_and_join_line_info_workers()
+	assert flag.is_cancelled(), 'teardown cancels the in-flight worker flag'
+	app.cancel_and_join_line_info_workers()
+}
+
+fn test_missing_compat_compiler_warning_pairing() {
+	// The detector and the user-facing repair stay paired: the output the
+	// launcher prints when no usable V1 compatibility compiler exists is
+	// recognized, and the warning names the repair. Windows-compatible (no
+	// compiler stub); the Unix stub test covers the end-to-end retire.
+	assert compiler_reports_missing_compat_compiler('`-vls-mode` requires the compatibility compiler, but no usable fallback was found; run `make v1` now...')
+	mut app := &App{
+		capture_output: true
+	}
+	app.report_missing_compatibility_compiler()
+	assert app.captured_output.len == 1, 'the repair is reported once'
+	assert app.captured_output[0].contains('make v1'), 'the repair names `make v1`'
+	assert app.captured_output[0].contains('VLS_V_COMMAND'), 'the repair names `VLS_V_COMMAND`'
+}
+
+fn test_prepare_cached_overlay_isolates_concurrent_snapshots() {
+	// Two async requests carry different open-file snapshots against the same
+	// root. Sharing one published tree would let the second worker's files
+	// mix with the first's: each snapshot gets its own tree, and the first
+	// tree keeps its own content instead of being overwritten in place.
+	base := os.join_path(os.temp_dir(), 'vls_cached_isolate_${os.getpid()}')
+	proj := os.join_path(base, 'proj')
+	sub := os.join_path(proj, 'sub')
+	defer {
+		os.rmdir_all(base) or {}
+	}
+	first_content := 'module main\n\nfn main() {\n\tprintln(1)\n}\n'
+	mut app, main_file, _ := cached_overlay_test_app(base, proj, sub, first_content)
+	defer {
+		app.drop_all_overlays()
+	}
+	first := app.prepare_line_info_overlay(main_file, proj) or {
+		assert false, 'first cached overlay must succeed: ${err}'
+		return
+	}
+	assert os.read_file(first.temp_source_file) or { '' } == first_content, 'the first tree holds the first snapshot'
+	second_content := 'module main\n\nfn main() {\n\tprintln(2)\n}\n'
+	main_uri := path_to_uri(main_file)
+	app.open_files[main_uri] = second_content
+	second := app.prepare_line_info_overlay(main_file, proj) or {
+		assert false, 'second cached overlay must succeed: ${err}'
+		return
+	}
+	assert second.temp_root != first.temp_root, 'a different snapshot gets its own tree, never an in-place overwrite'
+	assert os.read_file(first.temp_source_file) or { '' } == first_content, 'the first tree still holds the first snapshot for its draining reader'
+	assert os.read_file(second.temp_source_file) or { '' } == second_content, 'the second tree holds the second snapshot'
+}

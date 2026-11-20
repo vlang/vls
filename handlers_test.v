@@ -18414,6 +18414,130 @@ fn test_operation_at_pos_indexed_defers_narrowed_hover_to_compiler() {
 	assert answered.done, 'a plain hover still answers from the index'
 }
 
+fn test_operation_at_pos_indexed_defers_is_narrowed_hover_to_compiler() {
+	// A sum-typed value narrowed by an `is` branch reads as its broad type
+	// from the index; only the compiler knows the narrowed type, so the
+	// indexed preflight must defer to the worker instead of answering.
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	app.v3_line_info_enabled = true
+	test_dir := os.join_path(app.temp_dir, 'is_narrowed_indexed_hover')
+	must_mkdir_all(test_dir)
+	content := 'module main\n\ntype MySum = int | string\n\nfn main() {\n\tx := MySum(1)\n\tif x is int {\n\t\tprintln(x)\n\t}\n}\n'
+	main_file := os.join_path(test_dir, 'main.v')
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	app.reindex_uri(uri)
+	lines := content.split_into_lines()
+	branch_line := -1
+	for i, line in lines {
+		if line.contains('println(x)') && i > 0 {
+			branch_line = i
+			break
+		}
+	}
+	assert branch_line >= 0, 'the narrowed use exists'
+	col := lines[branch_line].index('x') or { -1 }
+	assert col >= 0
+	pos := Position{
+		line: branch_line
+		char: col + 1
+	}
+	binding := app.local_binding_hover(uri, pos) or {
+		assert false, 'expected a local binding hover for the narrowed x'
+		return
+	}
+	assert app.binding_type_narrows(uri, pos, binding), 'an `is`-narrowed sum value narrows: ${binding.contents.value}'
+	phased := app.operation_at_pos_indexed(.hover, Request{
+		id:     1
+		method: 'textDocument/hover'
+		params: json2.encode(TextDocumentPositionParams{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			position:      pos
+		})
+	})
+	assert !phased.done, 'an `is`-narrowed hover falls through to the compiler instead of showing the broad type'
+}
+
+fn test_operation_at_pos_indexed_never_spawns_the_compiler() {
+	// The preflight phase is index-only: when the index cannot resolve a
+	// hover or signature, it defers to the async worker instead of blocking
+	// the request loop on a compiler lookup the worker would repeat. A
+	// compiler probe would move the session out of `.unknown`; staying there
+	// proves no compiler ran.
+	previous := os.getenv('VLS_V_COMMAND')
+	os.setenv('VLS_V_COMMAND', os.join_path(os.temp_dir(), 'vls_no_such_compiler'), true)
+	defer {
+		if previous == '' {
+			os.unsetenv('VLS_V_COMMAND')
+		} else {
+			os.setenv('VLS_V_COMMAND', previous, true)
+		}
+	}
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	app.line_info_mode = .unknown
+	test_dir := os.join_path(app.temp_dir, 'indexed_preflight_no_compiler')
+	must_mkdir_all(test_dir)
+	content := 'module main\n\nfn helper(a int) int {\n\treturn a\n}\n\nfn main() {\n\thelper(1)\n}\n'
+	main_file := os.join_path(test_dir, 'main.v')
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	app.reindex_uri(uri)
+	// Hover over a name the index cannot resolve on its own: the compiler
+	// could, but the preflight must not ask it.
+	lines := content.split_into_lines()
+	call_line := lines.index('\thelper(1)')
+	assert call_line >= 0
+	call_col := lines[call_line].index('helper') or { -1 }
+	assert call_col >= 0
+	hover_pos := Position{
+		line: call_line
+		char: call_col + 1
+	}
+	// Drop the index entry so only the compiler could answer: the preflight
+	// must defer without touching it.
+	app.symbol_index.delete(uri)
+	phased := app.operation_at_pos_indexed(.hover, Request{
+		id:     1
+		method: 'textDocument/hover'
+		params: json2.encode(TextDocumentPositionParams{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			position:      hover_pos
+		})
+	})
+	assert !phased.done, 'an index miss defers to the worker instead of blocking the loop on the compiler'
+	assert app.line_info_mode == .unknown, 'the preflight runs no compiler probe'
+	// The same holds for signature help: an unresolvable call defers with no
+	// compiler touch.
+	sig_pos := Position{
+		line: call_line
+		char: call_col + 7
+	}
+	sig_phased := app.operation_at_pos_indexed(.signature_help, Request{
+		id:     2
+		method: 'textDocument/signatureHelp'
+		params: json2.encode(TextDocumentPositionParams{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			position:      sig_pos
+		})
+	})
+	assert !sig_phased.done, 'an unresolvable signature defers without a compiler lookup'
+	assert app.line_info_mode == .unknown, 'signature preflight runs no compiler probe'
+}
+
 fn test_prune_inlay_fn_cache_bounds_stale_entries() {
 	mut app := create_test_app()
 	defer {

@@ -1805,13 +1805,15 @@ fn (mut app App) prepare_compilation_overlay_with(real_path string, work_dir str
 // it builds a fresh staging directory that becomes visible only at publish.
 // A rebuild therefore never deletes or half-rewrites a tree an in-flight
 // compiler run is reading; the previous tree is retired for draining readers
-// and deleted once older than any possible compiler run. The store mutex is
-// held across a cache-hit materialization too: concurrent workers share the
-// entry, and per-file atomic replacement cannot keep a whole snapshot (files
-// plus committed hashes) consistent unless the writes and their commit are
-// one critical section. `importers` are the disk files the line-info overlay
-// writes next to the buffers (see prepare_line_info_overlay); they travel
-// through the cache like buffers so the cached tree keeps them.
+// and deleted once older than any possible compiler run. A cache hit never
+// mutates the published tree: concurrent async requests carry different
+// open-file snapshots, and per-file atomic replacement cannot keep a whole
+// snapshot (files plus committed hashes) consistent. A hit whose buffers
+// differ from the entry therefore rebuilds a private staging tree instead of
+// overwriting the tree another compiler is reading; only an exact content
+// match reuses the published root. `importers` are the disk files the
+// line-info overlay writes next to the buffers (see prepare_line_info_overlay);
+// they travel through the cache like buffers so the cached tree keeps them.
 fn (mut app App) prepare_cached_overlay(mut store &OverlayCacheStore, source_path string, source_root string, source_display_root string, source_work_dir string, importers map[string]string) !CompilationOverlay {
 	for _ in 0 .. 3 {
 		// Snapshot under one short lock: the entry, the tracked set, and the
@@ -1843,49 +1845,70 @@ fn (mut app App) prepare_cached_overlay(mut store &OverlayCacheStore, source_pat
 		}
 
 		if hit_root != '' {
-			// A cache hit rewrites the entry's tree in place, so concurrent
-			// workers must not interleave here: one worker's files with
-			// another's committed hashes would describe different versions.
-			// The hit-path IO stays small (only changed buffers), while the
-			// rebuild path below still builds staging lock-free.
-			hashes := materialize_overlay_buffers(hit_root, source_root, open_snapshot,
-				hit_hashes) or {
-				store.mutex.unlock()
-				return err
+			// A hit reuses the published tree only when the requesting
+			// snapshot holds exactly what the entry holds: concurrent async
+			// requests carry different open-file snapshots against the same
+			// root, and overwriting the shared tree in place would let one
+			// worker's files mix with another's committed hashes. A content
+			// mismatch falls through to the staging rebuild below, which
+			// publishes a private tree and retires the previous one for
+			// draining readers instead of mutating it under them.
+			mut matches := true
+			mut seen := 0
+			for uri, content in open_snapshot {
+				file_path := normalize_overlay_path(uri_to_path(uri))
+				rel := overlay_relative_path(file_path, source_root) or { continue }
+				rel_path := if rel == '' { os.file_name(file_path) } else { rel }
+				seen++
+				if known := hit_hashes[rel_path] {
+					if known != content.hash() {
+						matches = false
+						break
+					}
+				} else {
+					matches = false
+					break
+				}
 			}
-			temp_work_dir, file_rel := overlay_work_paths(source_root, source_work_dir,
-				source_path, hit_root) or {
-				store.mutex.unlock()
-				return err
+			if matches && seen != hit_hashes.len {
+				matches = false
 			}
-			// Commit only if the entry was not swapped underneath us; a
-			// concurrent rebuild wins and we serve its tree instead.
-			mut current_root := ''
-			if entry := store.entries[source_root] {
-				current_root = entry.temp_root
-				if entry.temp_root == hit_root {
-					store.entries[source_root] = OverlayCacheEntry{
-						...entry
-						built_ms:    now_ms
-						file_hashes: hashes
+			if !matches {
+				store.mutex.unlock()
+				// A different snapshot: rebuild below instead of overwriting.
+			} else {
+				temp_work_dir, file_rel := overlay_work_paths(source_root, source_work_dir,
+					source_path, hit_root) or {
+					store.mutex.unlock()
+					return err
+				}
+				mut current_root := ''
+				if entry := store.entries[source_root] {
+					current_root = entry.temp_root
+					if entry.temp_root == hit_root {
+						store.entries[source_root] = OverlayCacheEntry{
+							...entry
+							built_ms: now_ms
+						}
 					}
 				}
-			}
-			store.mutex.unlock()
-			if current_root == '' || current_root == hit_root {
-				return CompilationOverlay{
-					source_root:         source_root
-					source_display_root: source_display_root
-					temp_root:           hit_root
-					source_work_dir:     source_work_dir
-					temp_work_dir:       temp_work_dir
-					temp_source_file:    os.join_path(hit_root, file_rel)
+				store.mutex.unlock()
+				if current_root == '' || current_root == hit_root {
+					return CompilationOverlay{
+						source_root:         source_root
+						source_display_root: source_display_root
+						temp_root:           hit_root
+						source_work_dir:     source_work_dir
+						temp_work_dir:       temp_work_dir
+						temp_source_file:    os.join_path(hit_root, file_rel)
+					}
 				}
+				// Swapped concurrently: retry against the new tree.
+				continue
 			}
-			// Swapped concurrently: retry against the new tree.
-			continue
+		} else {
+			store.mutex.unlock()
 		}
-		store.mutex.unlock()
 
 		staging := overlay_staging_root(source_root)
 		os.mkdir_all(staging) or {
