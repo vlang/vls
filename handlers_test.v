@@ -517,6 +517,38 @@ fn test_diagnostics_scheduler_invalidates_only_changed_document() {
 	assert !scheduler.is_current('file:///b.v', global_b, generation_b)
 }
 
+fn test_diagnostics_scheduler_stale_job_keeps_program_members() {
+	// A job that goes stale after publishing must not overwrite the program
+	// member set a newer check recorded: the newer check would diff against
+	// the stale set and miss clearing diagnostics for files that left the
+	// program. The swap runs under the same lock as the currency check.
+	mut scheduler := new_diagnostics_scheduler()
+	program_dir := '/proj'
+	uri_a := 'file:///proj/a.v'
+	uri_b := 'file:///proj/b.v'
+	app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	global_first, generation_first := scheduler.next_generation(uri_a)
+	current := DiagnosticsJob{
+		uri:               uri_a
+		global_generation: global_first
+		generation:        generation_first
+		project_key:       'proj'
+		write_mutex:       app.write_mutex
+	}
+	left := scheduler.swap_program_members_if_current(current, program_dir, [uri_a, uri_b])
+	assert left == []
+	// An edit arrives while the stale job's clearing publishes are refused:
+	// the job is no longer current.
+	tickets := scheduler.begin_project_mutation('proj', uri_a, [])
+	assert tickets.len > 0
+	stale_left := scheduler.swap_program_members_if_current(current, program_dir, [uri_a])
+	assert stale_left == [], 'a stale job swaps nothing and reports no departures'
+	assert (scheduler.program_members[program_dir] or { []string{} }) == [uri_a, uri_b], 'the stale swap keeps the current member set'
+}
+
 fn test_diagnostics_scheduler_coalesces_pending_jobs() {
 	mut app := create_test_app()
 	defer {
@@ -9464,6 +9496,138 @@ fn test_receiver_inference_uses_innermost_same_line_binding() {
 	assert location.range.start.line == lines.index('fn (value B) target() {}')
 }
 
+fn test_semantic_scan_separates_same_line_shadowed_bindings() {
+	// Two shadowing `value` bindings share one line: an occurrence anchored on
+	// the outer declaration must not resolve to the inner binding, and one
+	// anchored on the inner binding must not resolve to the outer one. A
+	// line-only fast-path match merges them.
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	app.capture_output = true // don't write log notifications to stdout during the test
+	content := 'module main\n\nfn main() {\n\tvalue := 1; if true { value := 2; println(value) }; println(value)\n}\n'
+	test_dir := os.join_path(app.temp_dir, 'same_line_shadow_scan')
+	must_mkdir_all(test_dir)
+	main_file := os.join_path(test_dir, 'main.v')
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	lines := content.split_into_lines()
+	use_line := 3
+	line_text := lines[use_line]
+	outer_decl_col := line_text.index('value') or { -1 }
+	inner_decl_col := line_text.index('value := 2') or { -1 }
+	inner_use_col := line_text.index('println(value) }') or { -1 } + 'println('.len
+	outer_use_col := line_text.last_index('value)') or { -1 }
+	assert outer_decl_col == 1
+	assert inner_decl_col > outer_decl_col
+	assert inner_use_col > inner_decl_col
+	assert outer_use_col > inner_use_col
+	scope := app.index_scope_for_uri(uri)
+	outer_anchor := Location{
+		uri:   uri
+		range: LSPRange{
+			start: Position{
+				line: use_line
+				char: outer_use_col
+			}
+		}
+	}
+	outer_refs := app.search_symbol_in_dirs_semantic('value', outer_anchor, scope, 0, true)
+	mut outer_starts := []string{}
+	for loc in outer_refs {
+		outer_starts << '${loc.range.start.line}:${loc.range.start.char}'
+	}
+	outer_starts.sort()
+	assert outer_starts == ['${use_line}:${outer_decl_col}', '${use_line}:${outer_use_col}'], 'the outer anchor keeps only the outer binding: ${outer_starts}'
+	inner_anchor := Location{
+		uri:   uri
+		range: LSPRange{
+			start: Position{
+				line: use_line
+				char: inner_use_col
+			}
+		}
+	}
+	inner_refs := app.search_symbol_in_dirs_semantic('value', inner_anchor, scope, 0, true)
+	mut inner_starts := []string{}
+	for loc in inner_refs {
+		inner_starts << '${loc.range.start.line}:${loc.range.start.char}'
+	}
+	inner_starts.sort()
+	assert inner_starts == ['${use_line}:${inner_decl_col}', '${use_line}:${inner_use_col}'], 'the inner anchor keeps only the inner binding: ${inner_starts}'
+}
+
+fn test_document_highlight_separates_same_line_shadowed_bindings() {
+	// Same-line shadowing for document highlights: highlighting the outer use
+	// must not mix in the inner binding's occurrences, and vice versa.
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	content := 'module main\n\nfn main() {\n\tvalue := 1; if true { value := 2; println(value) }; println(value)\n}\n'
+	test_dir := os.join_path(app.temp_dir, 'same_line_shadow_highlight')
+	must_mkdir_all(test_dir)
+	test_file := os.join_path(test_dir, 'main.v')
+	must_write_file(test_file, content)
+	uri := path_to_uri(test_file)
+	app.open_files[uri] = content
+	lines := content.split_into_lines()
+	use_line := 3
+	line_text := lines[use_line]
+	outer_decl_col := line_text.index('value') or { -1 }
+	inner_decl_col := line_text.index('value := 2') or { -1 }
+	inner_use_col := line_text.index('println(value) }') or { -1 } + 'println('.len
+	outer_use_col := line_text.last_index('value)') or { -1 }
+
+	outer_response := app.handle_document_highlight(Request{
+		id:     907
+		method: 'textDocument/documentHighlight'
+		params: json2.encode(DocumentHighlightParams{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			position:      Position{
+				line: use_line
+				char: outer_use_col
+			}
+		},
+			escape_unicode: true
+		)
+	})
+	assert outer_response.result is []DocumentHighlight
+	mut outer_starts := []string{}
+	for highlight in (outer_response.result as []DocumentHighlight) {
+		outer_starts << '${highlight.range.start.line}:${highlight.range.start.char}'
+	}
+	outer_starts.sort()
+	assert outer_starts == ['${use_line}:${outer_decl_col}', '${use_line}:${outer_use_col}'], 'the outer highlight keeps only the outer binding: ${outer_starts}'
+
+	inner_response := app.handle_document_highlight(Request{
+		id:     908
+		method: 'textDocument/documentHighlight'
+		params: json2.encode(DocumentHighlightParams{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			position:      Position{
+				line: use_line
+				char: inner_use_col
+			}
+		},
+			escape_unicode: true
+		)
+	})
+	assert inner_response.result is []DocumentHighlight
+	mut inner_starts := []string{}
+	for highlight in (inner_response.result as []DocumentHighlight) {
+		inner_starts << '${highlight.range.start.line}:${highlight.range.start.char}'
+	}
+	inner_starts.sort()
+	assert inner_starts == ['${use_line}:${inner_decl_col}', '${use_line}:${inner_use_col}'], 'the inner highlight keeps only the inner binding: ${inner_starts}'
+}
+
 fn test_closure_parameters_are_scoped_local_completions() {
 	mut app := create_test_app()
 	defer {
@@ -18346,4 +18510,278 @@ fn test_ifr_refuses_what_it_cannot_follow() {
 	} else {
 		assert err.msg() == '`speak` is a member of the interface `Speaker` at main.v:3:15: the types that implement it must keep that name, and V does not say which types those are, so this rename could break the program', err.msg()
 	}
+}
+
+fn test_operation_at_pos_indexed_defers_narrowed_hover_to_compiler() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	app.v3_line_info_enabled = true
+	test_dir := os.join_path(app.temp_dir, 'narrowed_indexed_hover')
+	must_mkdir_all(test_dir)
+	content := 'module main\n\ntype MySum = int | string\n\nfn main() {\n\tx := MySum(1)\n\ty := 7\n\tprintln(x)\n\tprintln(y)\n}\n'
+	main_file := os.join_path(test_dir, 'main.v')
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	app.reindex_uri(uri)
+	lines := content.split_into_lines()
+	sum_line := lines.index('\tprintln(x)')
+	assert sum_line >= 0
+	sum_col := lines[sum_line].index('x') or { -1 }
+	assert sum_col >= 0
+	sum_position := Position{
+		line: sum_line
+		char: sum_col + 1
+	}
+	binding := app.local_binding_hover(uri, sum_position) or {
+		assert false, 'expected a local binding hover for x'
+		return
+	}
+	assert app.binding_type_narrows(uri, sum_position, binding), 'a sum-typed local narrows: ${binding.contents.value}'
+	phased := app.operation_at_pos_indexed(.hover, Request{
+		id:     1
+		method: 'textDocument/hover'
+		params: json2.encode(TextDocumentPositionParams{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			position:      sum_position
+		})
+	})
+	assert !phased.done, 'a narrowed hover falls through to the compiler'
+	// A binding the compiler cannot narrow still answers from the index.
+	int_line := lines.index('\tprintln(y)')
+	assert int_line >= 0
+	int_col := lines[int_line].index('y') or { -1 }
+	assert int_col >= 0
+	int_position := Position{
+		line: int_line
+		char: int_col + 1
+	}
+	plain := app.local_binding_hover(uri, int_position) or {
+		assert false, 'expected a local binding hover for y'
+		return
+	}
+	assert !app.binding_type_narrows(uri, int_position, plain), 'an int local never narrows: ${plain.contents.value}'
+	answered := app.operation_at_pos_indexed(.hover, Request{
+		id:     2
+		method: 'textDocument/hover'
+		params: json2.encode(TextDocumentPositionParams{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			position:      int_position
+		})
+	})
+	assert answered.done, 'a plain hover still answers from the index'
+}
+
+fn test_operation_at_pos_indexed_defers_is_narrowed_hover_to_compiler() {
+	// A sum-typed value narrowed by an `is` branch reads as its broad type
+	// from the index; only the compiler knows the narrowed type, so the
+	// indexed preflight must defer to the worker instead of answering.
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	app.v3_line_info_enabled = true
+	test_dir := os.join_path(app.temp_dir, 'is_narrowed_indexed_hover')
+	must_mkdir_all(test_dir)
+	content := 'module main\n\ntype MySum = int | string\n\nfn main() {\n\tx := MySum(1)\n\tif x is int {\n\t\tprintln(x)\n\t}\n}\n'
+	main_file := os.join_path(test_dir, 'main.v')
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	app.reindex_uri(uri)
+	lines := content.split_into_lines()
+	mut branch_line := -1
+	for i, line in lines {
+		if line.contains('println(x)') && i > 0 {
+			branch_line = i
+			break
+		}
+	}
+	assert branch_line >= 0, 'the narrowed use exists'
+	col := lines[branch_line].index('x') or { -1 }
+	assert col >= 0
+	pos := Position{
+		line: branch_line
+		char: col + 1
+	}
+	binding := app.local_binding_hover(uri, pos) or {
+		assert false, 'expected a local binding hover for the narrowed x'
+		return
+	}
+	assert app.binding_type_narrows(uri, pos, binding), 'an `is`-narrowed sum value narrows: ${binding.contents.value}'
+	phased := app.operation_at_pos_indexed(.hover, Request{
+		id:     1
+		method: 'textDocument/hover'
+		params: json2.encode(TextDocumentPositionParams{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			position:      pos
+		})
+	})
+	assert !phased.done, 'an `is`-narrowed hover falls through to the compiler instead of showing the broad type'
+}
+
+fn test_operation_at_pos_indexed_never_spawns_the_compiler() {
+	// The preflight phase is index-only: when the index cannot resolve a
+	// hover or signature, it defers to the async worker instead of blocking
+	// the request loop on a compiler lookup the worker would repeat. A
+	// compiler probe would move the session out of `.unknown`; staying there
+	// proves no compiler ran.
+	previous := os.getenv('VLS_V_COMMAND')
+	os.setenv('VLS_V_COMMAND', os.join_path(os.temp_dir(), 'vls_no_such_compiler'), true)
+	defer {
+		if previous == '' {
+			os.unsetenv('VLS_V_COMMAND')
+		} else {
+			os.setenv('VLS_V_COMMAND', previous, true)
+		}
+	}
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	app.line_info_mode = .unknown
+	test_dir := os.join_path(app.temp_dir, 'indexed_preflight_no_compiler')
+	must_mkdir_all(test_dir)
+	content := 'module main\n\nfn main() {\n\tnosuchfn(1)\n}\n'
+	main_file := os.join_path(test_dir, 'main.v')
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	app.reindex_uri(uri)
+	// Hover over a name nothing defines: the buffer re-indexes authoritatively
+	// on query, so deleting the entry cannot simulate a miss — only a truly
+	// undefined name exercises the miss path. The compiler could answer, but
+	// the preflight must not ask it.
+	lines := content.split_into_lines()
+	call_line := lines.index('\tnosuchfn(1)')
+	assert call_line >= 0
+	call_col := lines[call_line].index('nosuchfn') or { -1 }
+	assert call_col >= 0
+	hover_pos := Position{
+		line: call_line
+		char: call_col + 1
+	}
+	// Drop the index entry so only the compiler could answer: the preflight
+	// must defer without touching it. (The open buffer re-indexes on query,
+	// so the miss holds because nosuchfn is undefined, not because the entry
+	// is gone.)
+	app.symbol_index.delete(uri)
+	phased := app.operation_at_pos_indexed(.hover, Request{
+		id:     1
+		method: 'textDocument/hover'
+		params: json2.encode(TextDocumentPositionParams{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			position:      hover_pos
+		})
+	})
+	assert !phased.done, 'an index miss defers to the worker instead of blocking the loop on the compiler'
+	assert app.line_info_mode == .unknown, 'the preflight runs no compiler probe'
+	// The same holds for signature help: an unresolvable call defers with no
+	// compiler touch.
+	sig_pos := Position{
+		line: call_line
+		char: call_col + 8
+	}
+	sig_phased := app.operation_at_pos_indexed(.signature_help, Request{
+		id:     2
+		method: 'textDocument/signatureHelp'
+		params: json2.encode(TextDocumentPositionParams{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			position:      sig_pos
+		})
+	})
+	assert !sig_phased.done, 'an unresolvable signature defers without a compiler lookup'
+	assert app.line_info_mode == .unknown, 'signature preflight runs no compiler probe'
+}
+
+fn test_prune_inlay_fn_cache_bounds_stale_entries() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	mut store := app.inlay_fn_cache_store()
+	// One live entry plus a full cache of files the session no longer holds.
+	store.entries['file:///live.v'] = InlayFnEntry{
+		fingerprint: 1
+		fns:         {
+			'live_fn': 'int'
+		}
+	}
+	for i in 0 .. inlay_fn_cache_max_entries + 16 {
+		store.entries['file:///stale_${i}.v'] = InlayFnEntry{
+			fingerprint: i
+			fns:         {
+				'f': 'int'
+			}
+		}
+	}
+	app.open_files['file:///live.v'] = 'module main\nfn live_fn() int {\n\treturn 1\n}\n'
+	app.prune_inlay_fn_cache()
+	assert store.entries.len <= inlay_fn_cache_max_entries, 'the cache stays bounded'
+	assert 'file:///live.v' in store.entries, 'a live entry survives the prune'
+	assert 'file:///stale_0.v' !in store.entries, 'a dropped file leaves the cache'
+}
+
+fn test_drop_index_uri_evicts_inlay_fn_entry() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	uri := 'file:///evicted.v'
+	other := 'file:///kept.v'
+	mut store := app.inlay_fn_cache_store()
+	store.entries[uri] = InlayFnEntry{
+		fingerprint: 3
+		fns:         {
+			'f': 'void'
+		}
+	}
+	store.entries[other] = InlayFnEntry{
+		fingerprint: 4
+		fns:         {
+			'g': 'void'
+		}
+	}
+	app.drop_index_uri(uri)
+	assert uri !in store.entries, 'a dropped file leaves the cache'
+	assert other in store.entries, 'an unrelated entry stays'
+}
+
+fn test_evict_inlay_fn_cache_under_drops_workspace_entries() {
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	test_dir := os.join_path(app.temp_dir, 'evict_ws')
+	must_mkdir_all(test_dir)
+	gone_uri := path_to_uri(os.join_path(test_dir, 'gone.v'))
+	kept_uri := path_to_uri(os.join_path(app.temp_dir, 'kept.v'))
+	mut store := app.inlay_fn_cache_store()
+	store.entries[gone_uri] = InlayFnEntry{
+		fingerprint: 5
+		fns:         {
+			'f': 'void'
+		}
+	}
+	store.entries[kept_uri] = InlayFnEntry{
+		fingerprint: 6
+		fns:         {
+			'g': 'void'
+		}
+	}
+	app.drop_index_under(test_dir)
+	assert gone_uri !in store.entries, 'a removed workspace leaves the cache'
+	assert kept_uri in store.entries, 'a file outside the workspace stays'
 }

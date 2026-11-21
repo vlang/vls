@@ -2749,6 +2749,11 @@ fn test_integration_prepare_rename_returns_symbol_range() {
 	// local lookup fails only on Windows without this project marker.
 	integration_test_must_write_file(os.join_path(project_dir, 'v.mod'), "Module {\n\tname: 'testproj'\n}\n")
 	app.workspace_roots = [project_dir]
+	// The perf branch serves `-line-info` through the shared overlay cache.
+	// The one-shot fallback mis-handles this single-file layout on Windows,
+	// while the pooled V3 path (used by the passing rename tests) answers
+	// from the same program copy the diagnostics use.
+	app.v3_line_info_enabled = true
 
 	test_file := os.join_path(project_dir, 'prepare_rename.v')
 	content := 'module main\n\nfn main() {\n\tvalue := 1\n\tprintln(value)\n}\n'
@@ -3132,6 +3137,33 @@ fn test_integration_numeric_cancel_ids_match_exact_raw_token() {
 	assert !app.request_is_cancelled(0)
 	app.current_request_raw_id = '9223372036854775808'
 	assert app.request_is_cancelled(0)
+}
+
+fn test_integration_cancelled_id_reuse_is_not_cancelled() {
+	// A $/cancelRequest entry must not outlive the async worker it targeted:
+	// once the worker answers, a later request reusing the id is a different
+	// request and must not look cancelled. The worker answers through a
+	// snapshot with private cancellation maps, so the loop consumes the entry
+	// when it reaps the finished worker.
+	mut app, project_dir := create_integration_test_env()
+	defer {
+		cleanup_integration_test_env(app, project_dir)
+	}
+	app.current_request_raw_id = ''
+	app.on_cancel_request(Request{
+		method: '\$/cancelRequest'
+		params: '{"id":7}'
+	})
+	app.current_request_raw_id = '7'
+	assert app.request_is_cancelled(7), 'the in-flight request is cancelled'
+	// The worker for request 7 answered: the loop reaps its finished flag and
+	// consumes the cancellation with it.
+	flag := &CancelFlag{}
+	flag.finish()
+	app.line_info_cancels['7'] = flag
+	app.purge_finished_line_info()
+	assert !app.request_is_cancelled(7), 'a later request reusing id 7 is not cancelled'
+	assert '7' !in app.cancelled_raw_ids, 'the consumed entry is gone'
 }
 
 fn test_integration_diagnostics_contain_real_compiler_errors() {

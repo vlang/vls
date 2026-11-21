@@ -36,6 +36,7 @@ fn json_response_result(result ResponseResult) string {
 }
 
 fn (mut app App) stop_standalone_session() {
+	app.cancel_and_join_line_info_workers()
 	app.cancel_all_scheduled_diagnostics()
 	app.stop_run_commands()
 	app.wait_answer_followups()
@@ -118,10 +119,13 @@ mut:
 	expression_type_depth                       int                         // Nesting of expression_type, which a binding's declaration re-enters
 	line_info_mode                              LineInfoMode                // How the configured `v` reaches the `-line-info` checker (see interop.v)
 	inlay_hint_cache                            map[string]CachedInlayHints // Per-URI compiler inlay hints, see compiler_inlay_hints
-	tcp_conn                                    ?&net.TcpConn               // Non-nil when serving a TCP client
-	is_shutdown                                 bool                        // True after shutdown request was acknowledged
-	exit_was_requested                          bool                        // True when the exit notification was received
-	received_initialize                         bool                        // True after initialize request was processed
+	inlay_fn_cache                              ?&InlayFnCache              // Per-file fn→return-type cache for inlay hints (see handlers.v)
+	open_uris_cache                             map[string]string           // open_files_generation-scoped normalized path → uri map
+	open_uris_cache_gen                         int = -1 // open_files_generation at which open_uris_cache was built
+	tcp_conn                                    ?&net.TcpConn // Non-nil when serving a TCP client
+	is_shutdown                                 bool          // True after shutdown request was acknowledged
+	exit_was_requested                          bool          // True when the exit notification was received
+	received_initialize                         bool          // True after initialize request was processed
 	next_request_id                             int = 1 // Counter for server-initiated request ids
 	diagnostics_scheduler                       ?&DiagnosticsScheduler  // Production-only async diagnostics
 	index_refresh                               ?&IndexRefreshScheduler // Production-only background index refresh (see index.v)
@@ -136,9 +140,16 @@ mut:
 	program_dir_checked                         string                 // The program the last check covered, when it covered one
 	diagnostics_cancelled                       fn () bool                         = unsafe { nil } // Whether a newer check made the running one useless
 	diagnostics_partial                         fn (uri string, found CheckErrors) = unsafe { nil } // Publishes the errors a check found before its end (see DiagnosticsServer.ask)
-	run_command_manager                         ?&RunCommandManager // Async code-lens process lifecycle
-	execute_commands_synchronously              bool                // Test hook for deterministic command assertions
-	write_mutex                                 &sync.Mutex = sync.new_mutex() // Serializes worker and request-loop writes
+	run_command_manager                         ?&RunCommandManager    // Async code-lens process lifecycle
+	overlay_cache_store                         ?&OverlayCacheStore    // Shared compilation overlay cache (see interop.v)
+	line_info_cancel                            ?&CancelFlag           // Set while a line-info compiler run may be cancelled
+	line_info_cancels                           map[string]&CancelFlag // In-flight line-info cancels by raw id (loop thread only)
+	// The async line-info workers (see interop.v). The session cancels and
+	// joins them before it stops the compiler pools and drops the overlays
+	// they compile against and answer through.
+	line_info_workers              &sync.WaitGroup = sync.new_waitgroup()
+	execute_commands_synchronously bool // Test hook for deterministic command assertions
+	write_mutex                    &sync.Mutex = sync.new_mutex() // Serializes worker and request-loop writes
 	// What the compiler's answer cost, per document and method: below the budget
 	// in answer_budget.v the answer is waited for instead of answered twice.
 	compiler_answer_ms map[string]i64
@@ -582,6 +593,8 @@ fn main() {
 		open_files:            map[string]string{}
 		temp_dir:              temp_dir
 		diagnostics_scheduler: new_diagnostics_scheduler()
+		overlay_cache_store:   new_overlay_cache_store()
+		line_info_cancels:     map[string]&CancelFlag{}
 		index_refresh:         new_index_refresh_scheduler()
 		v3_line_info_enabled:  true
 	}
@@ -659,12 +672,20 @@ fn handle_tcp_client(mut conn net.TcpConn) {
 		text:                  ''
 		open_files:            map[string]string{}
 		temp_dir:              temp_dir
+		tcp_conn:              &conn
 		diagnostics_scheduler: new_diagnostics_scheduler()
+		overlay_cache_store:   new_overlay_cache_store()
+		line_info_cancels:     map[string]&CancelFlag{}
 		index_refresh:         new_index_refresh_scheduler()
 		v3_line_info_enabled:  true
 	}
 	mut reader := io.new_buffered_reader(reader: conn, cap: transport_buffer_cap)
 	app.handle_requests(mut reader)
+	// The request loop already joined the async line-info workers before it
+	// returned, but joining here as well keeps the TCP teardown explicit: if
+	// the client disconnects mid-compile, no worker may outlive the session
+	// and write through the snapshot's `tcp_conn` pointer after it closes.
+	app.cancel_and_join_line_info_workers()
 	log('TCP client disconnected')
 	os.rmdir_all(temp_dir) or {
 		$if debug {
@@ -994,6 +1015,11 @@ fn (mut app App) handle_requests[T](mut reader T) {
 	defer {
 		incoming.close()
 		reading.wait()
+		// An async line-info worker compiles against a cached overlay and
+		// answers through this session's transport, so both outlive the
+		// request that scheduled them and are joined before the session
+		// stops them.
+		app.cancel_and_join_line_info_workers()
 		app.cancel_all_scheduled_diagnostics()
 		app.stop_run_commands()
 		// A deferred answer asks through the pooled compilers and writes on the
@@ -1007,6 +1033,9 @@ fn (mut app App) handle_requests[T](mut reader T) {
 		// A background refresh must not still be walking the workspace after
 		// the session it was indexing for is gone.
 		app.stop_index_refresh()
+		// Session overlays are temp dirs no later session uses; drop them only
+		// after the workers and compiler pools above have stopped.
+		app.drop_all_overlays()
 	}
 	mut pending := []IncomingMessage{}
 	for {
@@ -1126,6 +1155,15 @@ fn (mut app App) handle_requests[T](mut reader T) {
 			log('Dropping notification-shaped message for request-only method ${lsp_request.method}')
 			continue
 		}
+		// Reap finished async line-info workers before deciding cancellation:
+		// a worker that already answered consumed its request, so its
+		// $/cancelRequest entry is dropped here and a later request reusing
+		// the id is not treated as cancelled. The worker itself answers
+		// through a snapshot with private cancellation maps and cannot drop
+		// the session's entry.
+		if app.line_info_cancels.len > 0 {
+			app.purge_finished_line_info()
+		}
 		if method_requires_response(method) && app.request_is_cancelled(lsp_request.id) {
 			app.write_error_response(make_cancelled_error_response(lsp_request.id))
 			app.consume_cancelled_request(lsp_request.id, app.current_request_raw_id)
@@ -1159,8 +1197,7 @@ fn (mut app App) handle_requests[T](mut reader T) {
 			}
 		}
 		match method {
-			.completion, .signature_help, .definition, .hover, .declaration, .type_definition,
-			.implementation {
+			.completion {
 				// Phase 0 baseline: opt-in per-request timing.
 				started_ms := time.now().unix_milli()
 				resp := app.operation_at_pos(method, lsp_request)
@@ -1170,6 +1207,21 @@ fn (mut app App) handle_requests[T](mut reader T) {
 						4)
 				}
 				app.write_response_or_cancelled(lsp_request.id, resp)
+			}
+			.signature_help, .definition, .hover, .declaration, .type_definition, .implementation {
+				phased := app.operation_at_pos_indexed(method, lsp_request)
+				if phased.done {
+					app.write_response_or_cancelled(lsp_request.id, phased.resp)
+				} else if app.line_info_mode == .unknown {
+					// First line-info request of the session runs synchronously
+					// so the probe learns whether a compiler can answer; every
+					// later request runs on a worker while the loop stays
+					// responsive.
+					resp := app.operation_at_pos(method, lsp_request)
+					app.write_response_or_cancelled(lsp_request.id, resp)
+				} else {
+					app.dispatch_async_line_info(method, lsp_request)
+				}
 			}
 			.references {
 				resp := app.find_references(lsp_request)
