@@ -18650,25 +18650,29 @@ fn test_operation_at_pos_indexed_never_spawns_the_compiler() {
 	app.line_info_mode = .unknown
 	test_dir := os.join_path(app.temp_dir, 'indexed_preflight_no_compiler')
 	must_mkdir_all(test_dir)
-	content := 'module main\n\nfn helper(a int) int {\n\treturn a\n}\n\nfn main() {\n\thelper(1)\n}\n'
+	content := 'module main\n\nfn main() {\n\tnosuchfn(1)\n}\n'
 	main_file := os.join_path(test_dir, 'main.v')
 	must_write_file(main_file, content)
 	uri := path_to_uri(main_file)
 	app.open_files[uri] = content
 	app.reindex_uri(uri)
-	// Hover over a name the index cannot resolve on its own: the compiler
-	// could, but the preflight must not ask it.
+	// Hover over a name nothing defines: the buffer re-indexes authoritatively
+	// on query, so deleting the entry cannot simulate a miss — only a truly
+	// undefined name exercises the miss path. The compiler could answer, but
+	// the preflight must not ask it.
 	lines := content.split_into_lines()
-	call_line := lines.index('\thelper(1)')
+	call_line := lines.index('\tnosuchfn(1)')
 	assert call_line >= 0
-	call_col := lines[call_line].index('helper') or { -1 }
+	call_col := lines[call_line].index('nosuchfn') or { -1 }
 	assert call_col >= 0
 	hover_pos := Position{
 		line: call_line
 		char: call_col + 1
 	}
 	// Drop the index entry so only the compiler could answer: the preflight
-	// must defer without touching it.
+	// must defer without touching it. (The open buffer re-indexes on query,
+	// so the miss holds because nosuchfn is undefined, not because the entry
+	// is gone.)
 	app.symbol_index.delete(uri)
 	phased := app.operation_at_pos_indexed(.hover, Request{
 		id:     1
@@ -18686,7 +18690,7 @@ fn test_operation_at_pos_indexed_never_spawns_the_compiler() {
 	// compiler touch.
 	sig_pos := Position{
 		line: call_line
-		char: call_col + 7
+		char: call_col + 8
 	}
 	sig_phased := app.operation_at_pos_indexed(.signature_help, Request{
 		id:     2
