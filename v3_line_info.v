@@ -223,14 +223,8 @@ fn (mut app App) v3_run(project V3QueryProject, specs []string, target string) ?
 	is_library := target == '.' && !app.is_program_dir(project.overlay.source_work_dir)
 	question := specs.join('\t')
 	if exe := resolve_diagnostics_server_exe() {
-		// The command line of the checks of the diagnostics (see
-		// build_v_check_args_multifile), whose servers answer the questions too:
-		// `-w` changes no answer.
-		mut args := v3_compiler_selection_args()
-		if is_library {
-			args << '-shared'
-		}
-		args << ['-check', '-nocolor', target]
+		// Use the same command line as diagnostics to reuse its server.
+		args := build_v_check_args(target, is_library)
 		mut servers := app.v3_query_pool()
 		if result := servers.query(exe, args, project.overlay.temp_work_dir, question) {
 			return if result.exit_code == 0 { result.output } else { none }
@@ -239,15 +233,12 @@ fn (mut app App) v3_run(project V3QueryProject, specs []string, target string) ?
 	if app.v3_one_shot_unsupported {
 		return none
 	}
-	// `-new-compiler` is only needed where V3 is not the default; on Windows the
-	// established compiler already serves `-vls-mode` / `-line-info`.
-	mut argv := ['-new-compiler', '-w', '-check', '-nocolor']
-	if is_library {
-		argv << '-shared'
-	}
-	argv << ['-vls-mode', '-line-info', question, target]
+	// The V launcher routes `-vls-mode` through the compatibility checker.
+	// A bare `-line-info` lets the default checker answer first.
+	mut argv := build_v_check_args(target, is_library)
+	argv.insert(argv.len - 1, ['-line-info', question])
 	x := run_v_argv(argv, project.overlay.temp_work_dir)
-	if compiler_rejects_any_option(x.output, ['-new-compiler', '-vls-mode', '-line-info']) {
+	if compiler_rejects_any_option(x.output, ['-line-info']) {
 		log('this V has no V3 that answers -line-info')
 		app.v3_one_shot_unsupported = true
 		return none

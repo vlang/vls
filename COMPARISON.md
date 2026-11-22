@@ -15,9 +15,78 @@ peer (young systems language, breaking compiler).
 - zls: per-file `std.zig.Ast` + heuristic semantics (no
   full comptime); strict 1:1 version lock with Zig; custom
   build runner; opt-in build-on-save via a `check` step.
-- vls: per-file token index + full project re-check;
-  shell-free compiler argv + overlay; scheduler + pool
-  of max 3 diagnostic servers; index-first fallbacks.
+- vls: per-file source index, immediate buffer diagnostics and a debounced compiler check.
+  V's Linux diagnostics server can reuse parsed libraries and unchanged function checks.
+  Other platforms use one-shot checks by default.
+
+## Measured latency against gopls
+
+Build VLS with `v .` and install `gopls` using the official Go instructions.
+[Gopls installation](https://go.dev/gopls/)
+
+```sh
+python3 benchmarks/lsp_latency.py --vls ./vls --gopls gopls
+```
+
+The harness generates equivalent Go and V programs with 30 declarations per sibling file.
+It times stdio round trips on fresh server processes and measures warm requests before and after
+unsaved edits. It checks that completion includes the expected function, hover describes it, and
+definition points to its sibling file. Diagnostic timing requires the expected error or an empty
+clearing publish for the current document version. The percentiles cover elapsed wall time,
+including debounce, transport and compiler startup.
+
+The recorded runs used an Apple Silicon Mac under heavy concurrent load, V 0.5.2
+(`60a5e1f`), Go 1.27.4, and `gopls` v0.24.0. Each configuration used two fresh
+processes, 30 warm samples per request, and three edit rounds per process. The baseline
+was VLS `41a7973`, using a compiler wrapper that strips the obsolete `-new-compiler` flag
+so its type diagnostics run with the same compiler. Both VLS runs used one-shot checks.
+
+Times are p50 / p95 in milliseconds. The two startup samples report their maximum as p95.
+
+### 1 sibling file (30 declarations)
+
+| Operation | VLS before | VLS after | gopls |
+| --- | ---: | ---: | ---: |
+| Initialize | 139.93 / 258.75 | 140.89 / 269.02 | 361.82 / 635.43 |
+| First completion | 4215.52 / 4319.76 | 3185.85 / 3311.57 | 604.29 / 812.09 |
+| Completion | 2.68 / 431.31 | 3.61 / 79.45 | 0.76 / 1.71 |
+| Hover | 1008.42 / 1660.20 | 1.52 / 33.11 | 0.27 / 0.59 |
+| Definition | 1.10 / 3.75 | 1.18 / 77.34 | 0.20 / 0.96 |
+| Edit + completion | 172.88 / 1057.82 | 125.41 / 633.35 | 2.48 / 3.25 |
+| Edit + hover | 2.99 / 482.70 | 5.76 / 28.38 | 2.80 / 33.68 |
+| Edit + definition | 18.37 / 263.34 | 8.14 / 67.74 | 10.13 / 17.59 |
+| Syntax diagnostic | 152.44 / 165.21 | 52.55 / 96.64 | 3.97 / 32.68 |
+| Syntax recovery | 2769.52 / 4105.08 | 22.91 / 62.38 | 2.98 / 48.59 |
+| Type diagnostic | 2414.82 / 2705.21 | 2164.09 / 2707.84 | 3.32 / 10.62 |
+| Type recovery | 3270.42 / 3774.65 | 2562.20 / 3740.97 | 1.69 / 2.77 |
+
+### 40 sibling files (1200 declarations)
+
+| Operation | VLS before | VLS after | gopls |
+| --- | ---: | ---: | ---: |
+| Initialize | 14.32 / 16.45 | 15.57 / 16.87 | 35.51 / 37.58 |
+| First completion | 4018.40 / 4550.71 | 2665.43 / 2708.19 | 305.63 / 313.59 |
+| Completion | 11.76 / 574.03 | 16.67 / 168.40 | 16.53 / 153.17 |
+| Hover | 1223.95 / 1664.10 | 7.31 / 135.90 | 0.58 / 20.83 |
+| Definition | 7.35 / 28.61 | 3.46 / 59.82 | 0.30 / 11.26 |
+| Edit + completion | 352.51 / 711.76 | 18.33 / 377.21 | 46.30 / 202.10 |
+| Edit + hover | 7.63 / 100.89 | 3.62 / 253.63 | 12.97 / 71.01 |
+| Edit + definition | 69.10 / 156.19 | 3.04 / 4.84 | 10.61 / 21.90 |
+| Syntax diagnostic | 172.04 / 212.96 | 0.31 / 108.53 | 8.96 / 14.97 |
+| Syntax recovery | 3521.59 / 3819.06 | 0.23 / 21.58 | 8.18 / 29.17 |
+| Type diagnostic | 3220.24 / 3421.67 | 3086.63 / 3654.23 | 8.96 / 24.44 |
+| Type recovery | 3703.04 / 4237.89 | 3175.39 / 4094.13 | 8.30 / 15.01 |
+
+The larger fixture reached similar warm completion latency and lower median completion and
+navigation latency immediately after an edit. Cold completion, warm hover and definition,
+and type diagnostics still have measurable gaps. The high p95 values also vary across
+successive runs on this host.
+
+A compiler trace for the small fixture parsed about 29,500 lines across 100 files during
+a one-shot check. An isolated macOS experiment that reused a prepared compiler reduced
+median end-to-end type diagnostic latency to 555 ms on the small fixture and 2,205 ms
+on the larger fixture. The isolated prototype used the existing server protocol with one
+compiler worker. The tables above use the stock compiler.
 
 ## Feature gap summary
 
@@ -32,9 +101,8 @@ branch closed is marked; what stands is kept as it was found.
   fingerprint cache, but the unit of re-check is still a
   program, not an item.
 - Diagnostics tiers: peers split fast/slow. **Closed** —
-  each edit schedules a fast index-only check (150ms
-  debounce) and the full compiler check (800ms idle),
-  and the slow answer replaces the fast one.
+  each edit schedules an immediate buffer check and the compiler check after 75ms idle.
+  The compiler's answer replaces the early result.
 - Refactors: gopls and rust-analyzer offer extract/inline/
   fill/struct assists with safety checks; vls has 2 actions
   (remove unknown import, contiguous organizeImports).

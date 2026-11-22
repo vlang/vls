@@ -296,35 +296,25 @@ fn make_singlefile_temp_path(temp_root string, real_path string, purpose string)
 // separate argv element to os.Process, so no shell metacharacter (spaces,
 // `$()`, backticks, quotes, `;`, `&`, `|`, `%`, ...) in a filename or path can
 // alter the executed command. There is no shell involved at any point.
-fn v3_compiler_selection_args() []string {
-	$if macos || linux {
-		// Default V3 dispatch only applies to executables named `v` or `vnew`.
-		// VLS may be configured with a renamed compiler, so select V3 explicitly.
-		return ['-new-compiler']
-	}
-	return []
-}
-
 fn build_v_check_args_single(file_to_check string, is_library_module bool) []string {
-	mut args := v3_compiler_selection_args()
-	if is_library_module {
-		args << '-shared'
-	}
-	// V3 emits warnings by default. At the pinned compiler revision `-w` means
-	// "hide warnings" and also selects established-compiler compatibility.
-	args << ['-check', '-nocolor', file_to_check]
-	return args
+	return build_v_check_args(file_to_check, is_library_module)
 }
 
 fn build_v_check_args_multifile(is_library_module bool) []string {
-	mut args := v3_compiler_selection_args()
+	return build_v_check_args('.', is_library_module)
+}
+
+fn build_v_check_args(target string, is_library_module bool) []string {
+	// Use the configured compiler's default checker. Current V versions reject
+	// the old `-new-compiler` selection flag, and older V can check without it.
+	mut args := []string{cap: 4}
 	if is_library_module {
 		// Library modules have no `fn main()`. Without `-shared`, the compiler
 		// reports that absence as an error before checking the actual source.
 		args << '-shared'
 	}
 	// Do not add `-w`: omitting it preserves V3's default warning diagnostics.
-	args << ['-check', '-nocolor', '.']
+	args << ['-check', '-nocolor', target]
 	return args
 }
 
@@ -873,7 +863,12 @@ fn run_v_argv_cancelled(args []string, work_folder string, cancelled fn () bool)
 		// established compiler. Do not leak the macOS no-fallback guard into this
 		// compatibility subprocess.
 		mut child_env := os.environ()
-		child_env.delete('V_MACOS_V3_NO_FALLBACK')
+		if '-vls-mode' in args {
+			child_env.delete('V_MACOS_V3_NO_FALLBACK')
+		} else {
+			// The caller handles compatibility when the native query fails.
+			child_env['V_MACOS_V3_NO_FALLBACK'] = '1'
+		}
 		p.set_environment(child_env)
 	}
 	if work_folder != '' {
@@ -2693,11 +2688,7 @@ fn (mut app App) run_v_line_info_pooled(method Method, path string, line_info st
 	// The command line of the checks of the diagnostics (see
 	// build_v_check_args_multifile), whose servers answer the questions too.
 	is_library := target == '.' && !app.is_program_dir(project.overlay.source_work_dir)
-	mut args := v3_compiler_selection_args()
-	if is_library {
-		args << '-shared'
-	}
-	args << ['-check', '-nocolor', target]
+	args := build_v_check_args(target, is_library)
 	mut servers := app.v3_query_pool()
 	result := servers.query(exe, args, project.overlay.temp_work_dir, '${copy_path}:${line_info}') or {
 		return none

@@ -63,11 +63,14 @@ exit 1
 // A V1 compiler that answers definition questions but has no V3 checker.
 const fake_v1_definitions_only = r"#!/bin/sh
 for arg in $@; do
-	if [ $arg = -new-compiler ]; then
-		echo 'unknown option `-new-compiler`'
-		exit 1
+	if [ x$arg = x-vls-mode ]; then
+		compat=yes
 	fi
 done
+if [ x$compat != xyes ]; then
+	echo 'unknown option `-line-info`'
+	exit 1
+fi
 while [ $# -gt 0 ]; do
 	if [ $1 = -line-info ]; then
 		question=$2
@@ -90,7 +93,7 @@ exit 0
 // A V whose V3 has no query engine.
 const fake_v3_without_line_info = r"#!/bin/sh
 case ${V_DIAGNOSTICS_SERVER}x in 1x) exit 0 ;; esac
-echo 'unknown option `-vls-mode`'
+echo 'unknown option `-line-info`'
 exit 1
 "
 

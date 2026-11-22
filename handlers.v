@@ -158,8 +158,10 @@ fn source_call_target(content string, cursor Position, enc PositionEncoding) ?So
 // an unbounded scan.
 fn (app &App) source_declaration_at(location Location) string {
 	content := app.index_source_for(location.uri) or { return '' }
-	lines := content.split_into_lines()
-	start_line := location.range.start.line
+	return source_declaration_at_line(content, content.split_into_lines(), location.range.start.line)
+}
+
+fn source_declaration_at_line(content string, lines []string, start_line int) string {
 	if start_line < 0 || start_line >= lines.len {
 		return ''
 	}
@@ -481,7 +483,7 @@ fn (mut app App) function_declaration_hover(uri string, location Location) ?Hove
 	if !declares_function_at(lines, line, start) {
 		return none
 	}
-	declaration := app.source_declaration_at(location)
+	declaration := source_declaration_at_line(content, lines, line)
 	if declaration == '' {
 		return none
 	}
@@ -1464,9 +1466,6 @@ fn (mut app App) operation_at_pos(method Method, request Request) Response {
 	// before building the -line-info string (P0-01).
 	byte_col := app.client_col_to_byte_col(path, params.position.line, col)
 
-	// The `-line-info` question each method asks the compiler. It names no state,
-	// so the answers the index gives below carry it: a question the compiler is
-	// held for is asked again afterwards, on a thread of its own.
 	line_info := match method {
 		.hover {
 			'${line_nr}:hv^${byte_col}'
@@ -1506,16 +1505,14 @@ fn (mut app App) operation_at_pos(method Method, request Request) Response {
 			}
 		}
 		if prefix != '' && indexed.items.len > 0 {
-			all_labels := indexed.items.map(it.label)
-			filtered := fuzzy_filter(prefix, all_labels)
-			mut filtered_set := map[string]bool{}
-			for label in filtered {
-				filtered_set[label] = true
-			}
+			lowered_prefix := prefix.to_lower()
 			mut filtered_items := []Detail{}
 			for item in indexed.items {
-				if item.label in filtered_set {
+				if fuzzy_subsequence_matches(lowered_prefix, item.label) {
 					filtered_items << item
+					if filtered_items.len > completion_item_budget {
+						break
+					}
 				}
 			}
 			budgeted_filtered, truncated_filtered := apply_completion_budget(filtered_items)
@@ -1544,7 +1541,6 @@ fn (mut app App) operation_at_pos(method Method, request Request) Response {
 	// and aware of unsaved files.
 	if method in [.definition, .declaration, .type_definition, .implementation] {
 		if location := app.resolve_indexed_definition(path, params.position) {
-			app.schedule_answer_followup(method, path, params.position, line_info)
 			return Response{
 				id:     request.id
 				result: location
@@ -1566,7 +1562,6 @@ fn (mut app App) operation_at_pos(method Method, request Request) Response {
 					}
 				}
 			}
-			app.schedule_answer_followup(.hover, path, params.position, line_info)
 			return Response{
 				id:     request.id
 				result: binding
@@ -1577,19 +1572,25 @@ fn (mut app App) operation_at_pos(method Method, request Request) Response {
 		// declaration from the index waits until after the compiler, which brings
 		// the documentation with its answer.
 		if member := app.member_selector_hover(path, params.position) {
-			app.schedule_answer_followup(.hover, path, params.position, line_info)
 			return Response{
 				id:     request.id
 				result: member
 			}
 		}
-		// Nothing the index answers on its own was found, so this question falls
-		// through to the compiler. The declaration the index resolves is still an
-		// answer, and a check that holds the compilers makes it worth sending now:
-		// the compiler's answer follows, on the same id (answer_budget.v).
+		// A resolved function shows its written signature and documentation, the
+		// same content hover_result builds from a compiler definition location.
+		if location := app.resolve_indexed_definition(path, params.position) {
+			if function := app.function_declaration_hover(path, location) {
+				return Response{
+					id:     request.id
+					result: function
+				}
+			}
+		}
+		// When diagnostics holds the compiler, use any remaining source fallback
+		// to keep the request responsive.
 		if app.compiler_answer_is_held(path, .hover) {
 			if declaration := app.source_hover_fallback(path, params.position) {
-				app.schedule_answer_followup(.hover, path, params.position, line_info)
 				return Response{
 					id:     request.id
 					result: declaration
@@ -1612,9 +1613,7 @@ fn (mut app App) operation_at_pos(method Method, request Request) Response {
 
 // compiler_answer asks the compiler what the index could not say: what the name
 // under the cursor is, or where it is declared, with the fallbacks applied to an
-// answer the compiler has none for. The deferred answer of a request the index
-// already answered ends here too (see answer_budget.v), so the two cannot drift
-// apart.
+// answer the compiler has none for.
 fn (mut app App) compiler_answer(method Method, uri string, position Position, line_info string) ResponseResult {
 	mut result := if method == .hover {
 		app.hover_result(uri, position, line_info)
@@ -4915,9 +4914,8 @@ fn (mut app App) on_did_close(request Request) {
 	mut diagnostics_mutation := DiagnosticsProjectMutation{}
 	if is_open {
 		diagnostics_mutation = app.begin_diagnostics_project_mutation(uri)
-	} else {
-		app.cancel_scheduled_diagnostics(uri)
 	}
+	app.cancel_scheduled_diagnostics(uri)
 	if is_open {
 		app.open_files.delete(uri)
 		app.bump_generation(uri)
@@ -4972,7 +4970,7 @@ const max_published_diagnostics = 100
 // diagnostics_notification_for turns the compiler's errors for one file into
 // the notification that publishes them.
 fn (mut app App) diagnostics_notification_for(uri string, content string, v_errors []JsonError) Notification {
-	lines := content.split_into_lines()
+	lines := if v_errors.len > 0 { content.split_into_lines() } else { []string{} }
 	mut diagnostics := []LSPDiagnostic{}
 	mut seen_positions := map[string]bool{}
 	for v_err in v_errors {
@@ -6561,34 +6559,46 @@ fn name_needs_other_defines(name string) bool {
 // filtering without removing inactive sources from the broader symbol index.
 // The requesting test file is a direct compiler input, but sibling tests are
 // separate targets, so it is judged on its own.
-fn (app &App) active_indexed_source_file_names(dir string, active_test_file_name string) map[string]bool {
-	mut file_names := os.ls(dir) or { return map[string]bool{} }
-	file_names = file_names.filter(it.ends_with('.v'))
+fn (mut app App) active_indexed_source_file_names(dir string, active_test_file_name string) map[string]bool {
+	entries := os.ls(dir) or { return map[string]bool{} }
+	mut file_names := entries.filter(it.ends_with('.v'))
+	file_names.sort()
+	host := pref.host_target()
+	if cached := app.active_source_files[dir] {
+		if cached.names != file_names {
+			app.active_source_files.delete(dir)
+		}
+	}
+	if dir !in app.active_source_files {
+		// The compiler's filter settles OS, arch, defines and default file
+		// precedence together. Only the directory's file names affect it.
+		mut saved := map[string]bool{}
+		for path in pref.get_v_files_from_dir_for_target(dir, v3_own_defines, host) {
+			saved[os.file_name(path)] = true
+		}
+		app.active_source_files[dir] = ActiveSourceFiles{
+			names:  file_names
+			active: saved
+		}
+	}
+	cached := app.active_source_files[dir] or { ActiveSourceFiles{} }
+	mut active := cached.active.clone()
+	mut test_present := active_test_file_name in file_names
 	normalized_dir := normalized_index_path(dir)
+	// A buffer the client has created but not saved is invisible to that scan,
+	// so judge it from its name. Only the suffix rules can be applied this way;
+	// a `_d_` file needs a define VLS does not pass, and every other name is
+	// treated as active rather than hiding a file the user is editing.
 	for uri, _ in app.open_files {
 		path := uri_to_path(uri)
 		if normalized_index_path(os.dir(path)) != normalized_dir {
 			continue
 		}
 		name := os.file_name(path)
-		if name.ends_with('.v') && name !in file_names {
-			file_names << name
+		if name == active_test_file_name {
+			test_present = true
 		}
-	}
-	host := pref.host_target()
-	mut active := map[string]bool{}
-	// The compiler's own directory scan is authoritative for saved sources: it
-	// settles the os, arch, `_d_`/`_notd_`, and `_default.c.v` rules together,
-	// and VLS compiles with no user defines, only the ones V3 sets for itself.
-	for path in pref.get_v_files_from_dir_for_target(dir, v3_own_defines, host) {
-		active[os.file_name(path)] = true
-	}
-	// A buffer the client has created but not saved is invisible to that scan,
-	// so judge it from its name. Only the suffix rules can be applied this way;
-	// a `_d_` file needs a define VLS does not pass, and every other name is
-	// treated as active rather than hiding a file the user is editing.
-	for name in file_names {
-		if name in active || name.ends_with('_test.v') || name_needs_other_defines(name)
+		if !name.ends_with('.v') || name in active || name.ends_with('_test.v') || name_needs_other_defines(name)
 			|| os.exists(os.join_path(dir, name)) {
 			continue
 		}
@@ -6596,11 +6606,16 @@ fn (app &App) active_indexed_source_file_names(dir string, active_test_file_name
 			active[name] = true
 		}
 	}
-	if active_test_file_name in file_names
+	if test_present
 		&& pref.is_test_file_for_target(os.join_path(dir, active_test_file_name), 'c', host.os) {
 		active[active_test_file_name] = true
 	}
 	return active
+}
+
+struct ActiveSourceFiles {
+	names  []string
+	active map[string]bool
 }
 
 // find_indexed_source_definition finds one unambiguous top-level declaration
@@ -6620,47 +6635,41 @@ fn (mut app App) find_indexed_source_definition(dir string, symbol string, activ
 		}
 	}
 	active_file_names := app.active_indexed_source_file_names(dir, active_test_file_name)
-	mut matches := []Location{}
-	mut uris := app.symbol_index.keys()
-	uris.sort()
-	for uri in uris {
-		path := uri_to_path(uri)
-		if normalized_index_path(os.dir(path)) != normalized_dir {
-			continue
-		}
-		if os.file_name(path) !in active_file_names {
+	mut found := ?Location(none)
+	for uri in app.indexed_uris_in_dir(dir) {
+		if os.file_name(uri_to_path(uri)) !in active_file_names {
 			continue
 		}
 		entry := app.symbol_index[uri] or { continue }
 		if entry.module_name != expected_module {
 			continue
 		}
-		declaration_occurrences := app.occurrences_for(uri)[symbol] or { continue }
 		for sym in entry.doc_symbols {
 			if !source_definition_kind_is_supported(sym.kind)
 				|| extract_simple_fn_name(sym.name) != symbol {
-				continue
-			}
-			if !source_declaration_occurrence_is_code(sym, declaration_occurrences) {
 				continue
 			}
 			if sym.range.start.line >= 0 && sym.range.start.line < entry.conditional_lines.len
 				&& entry.conditional_lines[sym.range.start.line] {
 				continue
 			}
+			declaration_occurrences := app.occurrences_for(uri)[symbol] or { continue }
+			if !source_declaration_occurrence_is_code(sym, declaration_occurrences) {
+				continue
+			}
 			if require_public && !source_declaration_is_public(uri, sym, app) {
 				continue
 			}
-			matches << Location{
+			if found != none {
+				return none
+			}
+			found = Location{
 				uri:   uri
 				range: sym.selection_range
 			}
 		}
 	}
-	if matches.len != 1 {
-		return none
-	}
-	return matches[0]
+	return found
 }
 
 // resolve_indexed_definition handles declaration lookup that does not need
@@ -6898,14 +6907,17 @@ fn inline_doc_example(comment string) ?string {
 // Returns '' if no module declaration is found.
 fn get_module_name(content string) string {
 	mut scan_state := ImportScanState{}
-	for raw_line in content.split_into_lines() {
-		trimmed := source_line_import_code(raw_line, mut scan_state).trim_space()
+	mut start := 0
+	for start < content.len {
+		end := content.index_after('\n', start) or { content.len }
+		trimmed := source_line_import_code(content[start..end], mut scan_state).trim_space()
 		if trimmed.starts_with('module ') {
 			name := trimmed[7..].trim_space()
 			if name != '' {
 				return name
 			}
 		}
+		start = end + 1
 	}
 	return ''
 }
@@ -8561,8 +8573,9 @@ fn (mut app App) collect_module_completions(current_file_uri string, working_dir
 		os.read_file(uri_to_path(current_file_uri)) or { '' }
 	}
 	current_module := get_module_name(current_content)
+	normalized_dir := normalized_index_path(working_dir)
 	for uri, _ in app.open_files {
-		if normalized_index_path(os.dir(uri_to_path(uri))) == normalized_index_path(working_dir) {
+		if normalized_index_path(os.dir(uri_to_path(uri))) == normalized_dir {
 			app.reindex_uri(uri)
 		}
 	}
@@ -8574,15 +8587,11 @@ fn (mut app App) collect_module_completions(current_file_uri string, working_dir
 		''
 	}
 	active_names := app.active_indexed_source_file_names(working_dir, active_test_name)
-	normalized_dir := normalized_index_path(working_dir)
 	mut items := []Detail{}
 	mut has_conditional := false
-	mut indexed_uris := app.symbol_index.keys()
-	indexed_uris.sort()
-	for indexed_uri in indexed_uris {
+	for indexed_uri in app.indexed_uris_in_dir(working_dir) {
 		entry := app.symbol_index[indexed_uri] or { continue }
-		if normalized_index_path(os.dir(uri_to_path(indexed_uri))) != normalized_dir
-			|| os.file_name(uri_to_path(indexed_uri)) !in active_names || entry.module_name != current_module {
+		if os.file_name(uri_to_path(indexed_uri)) !in active_names || entry.module_name != current_module {
 			continue
 		}
 		if entry.has_conditional_module_completions {

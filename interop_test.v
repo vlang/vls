@@ -441,46 +441,28 @@ fn test_cleanup_compilation_temp_removes_project_dir() {
 
 fn test_build_v_check_args_single_passes_path_literally() {
 	args := build_v_check_args_single('/tmp/a b/test.v', false)
-	mut expected := v3_compiler_selection_args()
-	expected << ['-check', '-nocolor', '/tmp/a b/test.v']
-	assert args == expected
+	assert args == ['-check', '-nocolor', '/tmp/a b/test.v']
 	assert '-vls-mode' !in args
 	assert '-json-errors' !in args
 	// At the pinned V3 revision `-w` hides warnings; omission preserves them.
 	assert '-w' !in args
-	$if macos || linux {
-		assert '-new-compiler' in args
-	} $else {
-		assert '-new-compiler' !in args
-	}
 }
 
 fn test_build_v_check_args_multifile_uses_v3_compatible_flags() {
 	args := build_v_check_args_multifile(false)
-	mut expected := v3_compiler_selection_args()
-	expected << ['-check', '-nocolor', '.']
-	assert args == expected
+	assert args == ['-check', '-nocolor', '.']
 	assert '-vls-mode' !in args
 	assert '-json-errors' !in args
 	// V3 reports warnings by default, while `-w` requests compatibility suppression.
 	assert '-w' !in args
-	$if macos || linux {
-		assert '-new-compiler' in args
-	} $else {
-		assert '-new-compiler' !in args
-	}
 }
 
 fn test_build_v_check_args_use_shared_for_library_modules() {
 	single_args := build_v_check_args_single('/tmp/library.v', true)
-	mut expected_single := v3_compiler_selection_args()
-	expected_single << ['-shared', '-check', '-nocolor', '/tmp/library.v']
-	assert single_args == expected_single
+	assert single_args == ['-shared', '-check', '-nocolor', '/tmp/library.v']
 
 	multifile_args := build_v_check_args_multifile(true)
-	mut expected_multifile := v3_compiler_selection_args()
-	expected_multifile << ['-shared', '-check', '-nocolor', '.']
-	assert multifile_args == expected_multifile
+	assert multifile_args == ['-shared', '-check', '-nocolor', '.']
 }
 
 fn test_build_v_check_args_single_no_shell_injection() {
@@ -4784,8 +4766,9 @@ fn test_rush_leaves_the_slow_job_behind_a_waiting_fast_job() {
 	mut scheduler := rush_test_scheduler(mut app)
 	project_key := 'file:///rush_project'
 	now := time.now().unix_milli()
-	rush_test_schedule(mut scheduler, mut app, uri, project_key, now + diagnostics_fast_debounce_ms,
-		now + diagnostics_slow_debounce_ms)
+	fast_deadline := now + 10_000
+	slow_deadline := fast_deadline + diagnostics_slow_debounce_ms
+	rush_test_schedule(mut scheduler, mut app, uri, project_key, fast_deadline, slow_deadline)
 
 	app.rush_pending_diagnostics(uri)
 
@@ -4793,17 +4776,51 @@ fn test_rush_leaves_the_slow_job_behind_a_waiting_fast_job() {
 		assert false, 'the slow job is pending'
 		return
 	}
-	assert slow.ready_at == now + diagnostics_slow_debounce_ms, 'a fast job still waiting holds the slow one back'
+	assert slow.ready_at == slow_deadline, 'a fast job still waiting holds the slow one back'
 	jobs, _ := scheduler.take_ready_jobs(time.now().unix_milli())
 	assert jobs.len == 0, 'neither tier is due yet, so nothing publishes'
-	fast, _ := scheduler.take_ready_jobs(now + diagnostics_fast_debounce_ms)
+	fast, _ := scheduler.take_ready_jobs(fast_deadline)
 	assert fast.len == 1, 'the fast tier publishes at its own deadline'
 	assert fast[0].kind == .fast, 'the fast tier is the one that publishes'
 	scheduler.finish(fast[0])
-	answer, _ := scheduler.take_ready_jobs(now + diagnostics_slow_debounce_ms)
+	answer, _ := scheduler.take_ready_jobs(slow_deadline)
 	assert answer.len == 1, 'the slow answer follows the fast one'
 	assert answer[0].kind == .slow, 'the slow tier is the one that follows'
 	scheduler.finish(answer[0])
+}
+
+fn test_clean_fast_result_clears_an_earlier_fast_result_only() {
+	mut app := &App{
+		capture_output: true
+	}
+	mut scheduler := new_diagnostics_scheduler()
+	uri := 'file:///fast_clear.v'
+	global_generation, first := scheduler.next_generation(uri)
+	job := DiagnosticsJob{
+		uri:               uri
+		global_generation: global_generation
+		generation:        first
+		kind:              .fast
+		write_mutex:       app.write_mutex
+	}
+	broken := app.diagnostics_notification_for(uri, '}\n', [JsonError{
+		message: 'unexpected delimiter'
+		line_nr: 1
+		col:     1
+		len:     1
+		level:   'error'
+	}])
+	assert scheduler.publish_if_current(mut app, job, broken)
+	_, next := scheduler.next_generation(uri)
+	scheduler.forget_published_errors(uri)
+	current := DiagnosticsJob{ ...job, generation: next }
+	clean := app.diagnostics_notification_for(uri, '', [])
+	assert !scheduler.publish_if_current(mut app, job, clean)
+	assert scheduler.publish_if_current(mut app, current, clean)
+	assert !scheduler.publish_if_current(mut app, current, clean)
+	assert scheduler.publish_if_current(mut app, DiagnosticsJob{ ...current, kind: .slow }, broken)
+	assert !scheduler.publish_if_current(mut app, current, clean)
+	assert app.captured_output.len == 3
 }
 
 fn test_rush_publishes_the_fast_tier_before_the_flushed_slow_one() {

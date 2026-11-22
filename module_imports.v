@@ -129,6 +129,13 @@ fn (mut app App) vlib_modules() []ImportableModule {
 // refuses to build a program with, vlib's `builtin`, which every file has, and
 // the internals of a vlib module.
 fn collect_importable_modules(dir string, prefix string, origin ModuleOrigin, depth int, mut found []ImportableModule, mut seen_paths map[string]bool, mut seen_dirs map[string]bool) {
+	mut entries := os.ls(dir) or { return }
+	entries.sort()
+	collect_importable_module_entries(dir, prefix, origin, depth, entries, mut found, mut seen_paths,
+		mut seen_dirs)
+}
+
+fn collect_importable_module_entries(dir string, prefix string, origin ModuleOrigin, depth int, entries []string, mut found []ImportableModule, mut seen_paths map[string]bool, mut seen_dirs map[string]bool) {
 	if depth >= importable_module_max_depth || found.len >= importable_module_max_count {
 		return
 	}
@@ -137,8 +144,6 @@ fn collect_importable_modules(dir string, prefix string, origin ModuleOrigin, de
 		return
 	}
 	seen_dirs[real] = true
-	mut entries := os.ls(dir) or { return }
-	entries.sort()
 	for entry in entries {
 		if entry.starts_with('.') || entry in index_excluded_dirs
 			|| (prefix == '' && origin == .project && entry == 'vlib')
@@ -149,22 +154,24 @@ fn collect_importable_modules(dir string, prefix string, origin ModuleOrigin, de
 		if !os.is_dir(sub) {
 			continue
 		}
+		mut sub_entries := os.ls(sub) or { continue }
+		sub_entries.sort()
 		path := if prefix == '' { entry } else { '${prefix}.${entry}' }
-		if entry != 'main' && path !in seen_paths && declared_module_of_dir(sub) == entry {
+		if entry != 'main' && path !in seen_paths && declared_module_of_entries(sub, sub_entries) == entry {
 			seen_paths[path] = true
-			deprecated, refused := module_deprecation(sub)
+			deprecated, refused := module_deprecation(sub, sub_entries)
 			found << ImportableModule{
 				path:       path
 				name:       entry
 				dir:        os.real_path(sub)
 				origin:     origin
 				offered:    !(origin == .vlib && (path == 'builtin' || 'internal' in path.split('.')))
-					&& !refused && !module_needs_flag(sub)
+					&& !refused && !module_needs_flag(sub, sub_entries)
 				deprecated: deprecated
 			}
 		}
-		collect_importable_modules(sub, path, origin, depth + 1, mut found, mut seen_paths, mut
-			seen_dirs)
+		collect_importable_module_entries(sub, path, origin, depth + 1, sub_entries, mut found,
+			mut seen_paths, mut seen_dirs)
 	}
 }
 
@@ -173,6 +180,10 @@ fn collect_importable_modules(dir string, prefix string, origin ModuleOrigin, de
 fn declared_module_of_dir(dir string) string {
 	mut files := os.ls(dir) or { return '' }
 	files.sort()
+	return declared_module_of_entries(dir, files)
+}
+
+fn declared_module_of_entries(dir string, files []string) string {
 	for file in files {
 		if !file.ends_with('.v') || file.ends_with('_test.v') {
 			continue
@@ -181,18 +192,32 @@ fn declared_module_of_dir(dir string) string {
 		if os.is_dir(path) {
 			continue
 		}
-		content := os.read_file(path) or { continue }
-		name := get_module_name(content)
+		name := declared_module_of_file(path) or { continue }
 		return if name == '' { 'main' } else { name }
 	}
 	return ''
 }
 
+fn declared_module_of_file(path string) !string {
+	mut file := os.open(path)!
+	defer { file.close() }
+	mut prefix := []u8{len: 4096}
+	n := file.read(mut prefix) or { 0 }
+	if n > 0 {
+		head := prefix[..n].bytestr()
+		end := if n == prefix.len { head.last_index('\n') or { 0 } } else { n }
+		name := get_module_name(head[..end])
+		if name != '' || n < prefix.len {
+			return name
+		}
+	}
+	return get_module_name(os.read_file(path)!)
+}
+
 // module_deprecation reports whether the module in `dir` is deprecated, and
 // whether V already refuses it: a deprecated module is a warning, or a notice
 // until its `deprecated_after` date, and an error from that date on.
-fn module_deprecation(dir string) (bool, bool) {
-	files := os.ls(dir) or { return false, false }
+fn module_deprecation(dir string, files []string) (bool, bool) {
 	today := time.now().strftime('%Y-%m-%d')
 	mut deprecated := false
 	for file in files {
@@ -250,8 +275,7 @@ fn module_line_attributes(path string) []string {
 // module_needs_flag reports whether a file of the module in `dir` stops the build
 // with `$compile_error` unless a `-d` flag leaves that file out, as `sync.arc`
 // does without `-d ownership`.
-fn module_needs_flag(dir string) bool {
-	files := os.ls(dir) or { return false }
+fn module_needs_flag(dir string, files []string) bool {
 	for file in files {
 		if !file.ends_with('.v') || !file.contains('_notd_') {
 			continue

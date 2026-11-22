@@ -124,12 +124,19 @@ fn encode_range_chars(r LSPRange, lines []string, enc PositionEncoding) LSPRange
 // `dir`, sorted, with each directory normalized only once.
 fn (app &App) indexed_uris_in_dir(dir string) []string {
 	normalized_dir := normalized_index_path(dir)
+	mut matching_dirs := map[string]bool{}
+	matching_dirs[dir] = true
 	mut out := []string{}
-	for uri in app.symbol_index.keys() {
-		if normalized_index_path(os.dir(uri_to_path(uri))) != normalized_dir {
-			continue
+	for uri, _ in app.symbol_index {
+		parent := os.dir(uri_to_path(uri))
+		matches := matching_dirs[parent] or {
+			matches_dir := normalized_index_path(parent) == normalized_dir
+			matching_dirs[parent] = matches_dir
+			matches_dir
 		}
-		out << uri
+		if matches {
+			out << uri
+		}
 	}
 	out.sort()
 	return out

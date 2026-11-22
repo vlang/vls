@@ -450,9 +450,8 @@ fn (app &App) fast_parse_errors(uri string, content string) []JsonError {
 }
 
 // run_fast_diagnostics_job answers a fast job: import and parse errors from
-// the edited buffer only, no compiler, no temp copy. An empty fast answer
-// publishes nothing: the slow check publishes the file's full state, which
-// also clears a fast error it does not repeat.
+// the edited buffer only. A clean result can clear a previous fast publish
+// without waiting for the compiler to publish the file's full state.
 fn run_fast_diagnostics_job(mut scheduler DiagnosticsScheduler, job DiagnosticsJob) {
 	if !scheduler.is_job_current(job) {
 		return
@@ -472,12 +471,8 @@ fn run_fast_diagnostics_job(mut scheduler DiagnosticsScheduler, job DiagnosticsJ
 	}
 	mut errors := worker.fast_check_errors(job.uri, job.content)
 	errors << worker.fast_parse_errors(job.uri, job.content)
-	if errors.len == 0 {
-		return
-	}
 	notification := worker.diagnostics_notification_for(job.uri, job.content, errors)
-	scheduler.publish_if_current(mut worker, job, notification)
-	if os.getenv('VLS_PERF_LOG') != '' {
+	if scheduler.publish_if_current(mut worker, job, notification) && os.getenv('VLS_PERF_LOG') != '' {
 		fast_elapsed_ms := time.now().unix_milli() - started_ms
 		worker.send_log_message('diagnostics uri=${job.uri} kind=fast elapsed_ms=${fast_elapsed_ms}',
 			4)
