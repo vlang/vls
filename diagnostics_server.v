@@ -385,6 +385,24 @@ fn (mut pool DiagnosticsServerPool) wait_closed() {
 	}
 }
 
+// kill_diagnostics_child stops the forked child that owns an answer. Without
+// this, a cancelled pooled query leaves the child writing into the shared
+// server's pipe and frees neither the worker nor its place in the pool.
+fn kill_diagnostics_child(pid int) {
+	$if windows {
+		// The pid is parsed from the server's own PID line and is digits only,
+		// so it cannot turn into extra command arguments. /T takes the child's
+		// own subprocesses with it.
+		mut killer := os.new_process('taskkill')
+		killer.set_args(['/PID', pid.str(), '/T', '/F'])
+		killer.set_redirect_stdio()
+		killer.run()
+		killer.wait()
+	} $else {
+		C.kill(pid, 9)
+	}
+}
+
 // kill_compiler_process reaps a compiler even when signal_kill has already
 // marked it aborted: os.Process.wait otherwise skips that state entirely.
 fn kill_compiler_process(mut process os.Process) {
@@ -474,9 +492,7 @@ fn (mut s DiagnosticsServer) ask(line string, token string, timeout_ms int, canc
 			if !cancelled() {
 				return false
 			}
-			$if !windows {
-				C.kill(child_pid, 9)
-			}
+			kill_diagnostics_child(child_pid)
 			return true
 		}) or { return error('no answer within ${timeout_ms} ms') }
 		collected = early_output + answer

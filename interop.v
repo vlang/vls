@@ -1033,7 +1033,9 @@ struct OverlayCacheEntry {
 mut:
 	temp_root         string
 	source_root       string
+	source_work_dir   string
 	built_ms          i64
+	used_ms           i64 // last request that used the tree; eviction clocks from this
 	tracked_rel_paths []string
 	file_hashes       map[string]int
 	retired           []RetiredOverlay
@@ -1067,6 +1069,14 @@ fn new_overlay_cache_store() &OverlayCacheStore {
 // can linger for the same window the symbol index already accepts.
 const overlay_cache_ttl_ms = i64(10_000)
 
+// overlay_cache_key identifies a cached overlay by both the project root it
+// mirrors and the directory the compiler checks from. Nested programs under
+// one v.mod can have different local-import closures, so keying only by the
+// root would let one program reuse another's incomplete tree.
+fn overlay_cache_key(source_root string, source_work_dir string) string {
+	return '${source_root}\n${source_work_dir}'
+}
+
 // overlay_temp_root returns the stable process-wide directory for the overlay
 // of `source_root`. Stable names (instead of per-request unique dirs) are what
 // makes reuse across requests and across diagnostics jobs possible.
@@ -1078,7 +1088,13 @@ fn overlay_temp_root(source_root string) string {
 // generation of `source_root`. Rebuilds never touch the published tree: the
 // staging tree becomes visible only when the cache entry is swapped to it.
 fn overlay_staging_root(source_root string) string {
-	return overlay_temp_root(source_root) + '_staging_${time.now().unix_nano()}'
+	// Consecutive clock readings collide on Windows, so a counter keeps two
+	// rebuilds in the same tick from staging into the same directory.
+	unsafe {
+		mut static seq := u64(0)
+		seq++
+		return '${overlay_temp_root(source_root)}_staging_${time.now().unix_nano()}_${seq}'
+	}
 }
 
 // overlay_retired_ttl_ms bounds how long a retired tree is kept for draining
@@ -1244,6 +1260,67 @@ fn (mut app App) drop_overlay_temp_root(temp_root string) {
 		} else {
 			store.entries[found] = entry
 		}
+	}
+	store.mutex.unlock()
+	for root in gc_roots {
+		os.rmdir_all(root) or {}
+	}
+}
+
+// overlay_idle_evict_ms bounds how long an unused cache entry keeps its tree.
+// Hits already stop being trusted after overlay_cache_ttl_ms; this window is
+// longer than any compiler run the server waits for, so removing a tree here
+// cannot pull it out from under a reader.
+const overlay_idle_evict_ms = i64(60_000)
+
+// evict_expired_overlays removes entries no request has used within the idle
+// window, together with their published and retired trees. Without this an
+// entry merely stops being a cache hit while its temp directory and map slot
+// stay behind for the life of the session.
+fn (mut app App) evict_expired_overlays(now_ms i64) {
+	mut store := app.overlay_cache_store or { return }
+	mut gc_roots := []string{}
+	store.mutex.lock()
+	for key, entry in store.entries {
+		if now_ms - entry.used_ms <= overlay_idle_evict_ms {
+			continue
+		}
+		if entry.temp_root != '' {
+			gc_roots << entry.temp_root
+		}
+		for retired in entry.retired {
+			if now_ms - retired.retired_ms > overlay_retired_ttl_ms() {
+				gc_roots << retired.root
+			}
+		}
+		store.entries.delete(key)
+	}
+	store.mutex.unlock()
+	for root in gc_roots {
+		os.rmdir_all(root) or {}
+	}
+}
+
+// drop_overlays_under retires the cached overlays of a workspace folder the
+// client closed. Keeping them would leave temp trees for projects no longer
+// open in the session.
+fn (mut app App) drop_overlays_under(path string) {
+	mut store := app.overlay_cache_store or { return }
+	removed_root := normalize_overlay_path(path)
+	mut gc_roots := []string{}
+	store.mutex.lock()
+	for key, entry in store.entries {
+		if !path_is_within(entry.source_root, removed_root)
+			&& !path_is_within(removed_root, entry.source_root) {
+			continue
+		}
+		if entry.temp_root != '' {
+			gc_roots << entry.temp_root
+		}
+		for retired in entry.retired {
+			gc_roots << retired.root
+		}
+		store.entries.delete(key)
 	}
 	store.mutex.unlock()
 	for root in gc_roots {
@@ -1801,6 +1878,8 @@ fn (mut app App) prepare_compilation_overlay_with(real_path string, work_dir str
 // line-info overlay writes next to the buffers (see prepare_line_info_overlay);
 // they travel through the cache like buffers so the cached tree keeps them.
 fn (mut app App) prepare_cached_overlay(mut store &OverlayCacheStore, source_path string, source_root string, source_display_root string, source_work_dir string, importers map[string]string) !CompilationOverlay {
+	app.evict_expired_overlays(time.now().unix_milli())
+	cache_key := overlay_cache_key(source_root, source_work_dir)
 	for _ in 0 .. 3 {
 		// Snapshot under one short lock: the entry, the tracked set, and the
 		// open buffers the build must materialize.
@@ -1822,7 +1901,7 @@ fn (mut app App) prepare_cached_overlay(mut store &OverlayCacheStore, source_pat
 		now_ms := time.now().unix_milli()
 		mut hit_root := ''
 		mut hit_hashes := map[string]int{}
-		if entry := store.entries[source_root] {
+		if entry := store.entries[cache_key] {
 			if entry.temp_root != '' && now_ms - entry.built_ms < overlay_cache_ttl_ms
 				&& entry.tracked_rel_paths == tracked && os.is_dir(entry.temp_root) {
 				hit_root = entry.temp_root
@@ -1875,8 +1954,12 @@ fn (mut app App) prepare_cached_overlay(mut store &OverlayCacheStore, source_pat
 				// indefinitely. The entry expires on its original deadline and
 				// the next rebuild re-symlinks the current tree.
 				mut current_root := ''
-				if entry := store.entries[source_root] {
+				if mut entry := store.entries[cache_key] {
 					current_root = entry.temp_root
+					// Refresh only the idle clock: the build time stays anchored
+					// so the hit cannot keep a stale symlink listing alive.
+					entry.used_ms = now_ms
+					store.entries[cache_key] = entry
 				}
 				store.mutex.unlock()
 				if current_root == '' || current_root == hit_root {
@@ -1920,7 +2003,7 @@ fn (mut app App) prepare_cached_overlay(mut store &OverlayCacheStore, source_pat
 		store.mutex.lock()
 		mut gc_roots := []string{}
 		publish_ms := time.now().unix_milli()
-		if mut entry := store.entries[source_root] {
+		if mut entry := store.entries[cache_key] {
 			if entry.temp_root != '' && entry.temp_root != staging {
 				entry.retired << RetiredOverlay{
 					root:       entry.temp_root
@@ -1938,15 +2021,19 @@ fn (mut app App) prepare_cached_overlay(mut store &OverlayCacheStore, source_pat
 			entry.retired = keep
 			entry.temp_root = staging
 			entry.source_root = source_root
+			entry.source_work_dir = source_work_dir
 			entry.built_ms = publish_ms
+			entry.used_ms = publish_ms
 			entry.tracked_rel_paths = tracked
 			entry.file_hashes = hashes
-			store.entries[source_root] = entry
+			store.entries[cache_key] = entry
 		} else {
-			store.entries[source_root] = OverlayCacheEntry{
+			store.entries[cache_key] = OverlayCacheEntry{
 				temp_root:         staging
 				source_root:       source_root
+				source_work_dir:   source_work_dir
 				built_ms:          publish_ms
+				used_ms:           publish_ms
 				tracked_rel_paths: tracked
 				file_hashes:       hashes
 			}
@@ -3273,6 +3360,13 @@ fn (mut app App) purge_finished_line_info() {
 	}
 }
 
+// should_dispatch_async_line_info gates the request loop on a completed probe,
+// not on `line_info_mode`: a successful V3 or pooled answer leaves that mode
+// at `.unknown`, and keying off it would keep every later miss on the loop.
+fn (app &App) should_dispatch_async_line_info() bool {
+	return app.line_info_probe_done && app.line_info_mode != .missing
+}
+
 // max_async_line_info caps concurrent line-info workers. Past the cap the
 // request runs synchronously instead: still correct, and it bounds thread
 // pileup when many compiler runs hang at once.
@@ -3341,6 +3435,13 @@ fn compiler_hover(output string, doc string) ResponseResult {
 }
 
 fn (mut app App) run_v_line_info(method Method, path string, line_info string) ResponseResult {
+	// Any completed line-info request tells the session whether this compiler
+	// can answer, including the V3 and pooled paths that leave `line_info_mode`
+	// at `.unknown`. The request loop uses this to start dispatching later
+	// misses to workers instead of running every one of them synchronously.
+	defer {
+		app.line_info_probe_done = true
+	}
 	// Convert URI to local file path
 	real_path := uri_to_path(path)
 	log('real_path=${real_path}, method=${method}')

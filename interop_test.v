@@ -5139,6 +5139,17 @@ fn test_nrw_check_dir_requires_an_unchanged_import_block() {
 	assert app.narrow_check_dir(core_file, program_dir, nested['core/core.v']) == '', 'a module reached through another keeps the program the target'
 }
 
+fn test_async_line_info_dispatch_needs_a_completed_probe() {
+	mut app := &App{}
+	assert !app.should_dispatch_async_line_info(), 'no probe means the loop stays synchronous'
+	app.line_info_mode = .direct
+	assert !app.should_dispatch_async_line_info(), 'a mode set elsewhere is not a probe of this session'
+	app.line_info_probe_done = true
+	assert app.should_dispatch_async_line_info(), 'a probed direct compiler runs on workers'
+	app.line_info_mode = .missing
+	assert !app.should_dispatch_async_line_info(), 'a retired compiler never dispatches a worker'
+}
+
 fn test_line_info_cancel_fn_reports_the_request_flag() {
 	mut app := &App{}
 	quiet := app.line_info_cancel_fn()
@@ -5232,6 +5243,118 @@ fn test_prepare_cached_overlay_keeps_line_info_importers() {
 	assert os.read_file(second_copy) or { '' } == importer_content, 'the cache hit keeps the importer content'
 }
 
+fn test_overlay_cache_separates_nested_work_dirs() {
+	// Two programs under one v.mod mirror the same project root but can have
+	// different local-import closures. They must not share a cached tree.
+	base := os.join_path(os.temp_dir(), 'vls_overlay_workdir_${os.getpid()}')
+	proj := os.join_path(base, 'proj')
+	sub := os.join_path(proj, 'sub')
+	work := os.join_path(base, 'work')
+	interop_test_must_mkdir_all(sub)
+	interop_test_must_mkdir_all(work)
+	interop_test_must_write_file(os.join_path(proj, 'v.mod'), 'Module {}\n')
+	main_file := os.join_path(sub, 'main.v')
+	main_content := 'module main\n\nfn main() {\n}\n'
+	interop_test_must_write_file(main_file, main_content)
+	defer {
+		os.rmdir_all(base) or {}
+	}
+	mut app := &App{
+		temp_dir:            work
+		open_files:          {
+			path_to_uri(main_file): main_content
+		}
+		overlay_cache_store: new_overlay_cache_store()
+	}
+	defer {
+		app.drop_all_overlays()
+	}
+	outer := app.prepare_line_info_overlay(main_file, proj) or {
+		assert false, 'outer cached overlay must succeed: ${err}'
+		return
+	}
+	inner := app.prepare_line_info_overlay(main_file, sub) or {
+		assert false, 'inner cached overlay must succeed: ${err}'
+		return
+	}
+	assert outer.source_root == inner.source_root, 'both checks mirror the project root'
+	assert outer.source_work_dir != inner.source_work_dir, 'the checks start from different directories'
+	assert outer.temp_root != inner.temp_root, 'distinct work dirs need distinct cached trees'
+	mut store := app.overlay_cache_store or {
+		assert false, 'the cached path sets the store'
+		return
+	}
+	assert store.entries.len == 2, 'the cache keeps one entry per root and work dir'
+}
+
+fn test_evict_expired_overlays_frees_idle_trees() {
+	base := os.join_path(os.temp_dir(), 'vls_overlay_evict_${os.getpid()}')
+	proj := os.join_path(base, 'proj')
+	sub := os.join_path(proj, 'sub')
+	work := os.join_path(base, 'work')
+	defer {
+		os.rmdir_all(base) or {}
+	}
+	main_content := 'module main\n\nfn main() {\n}\n'
+	mut app, main_file, _ := cached_overlay_test_app(base, proj, sub, main_content)
+	defer {
+		app.drop_all_overlays()
+	}
+	first := app.prepare_line_info_overlay(main_file, proj) or {
+		assert false, 'cached overlay must succeed: ${err}'
+		return
+	}
+	mut store := app.overlay_cache_store or {
+		assert false, 'the cached path sets the store'
+		return
+	}
+	mut key := ''
+	for k in store.entries.keys() {
+		key = k
+	}
+	assert os.is_dir(first.temp_root), 'the published tree exists'
+	mut entry := store.entries[key] or {
+		assert false, 'the cached entry exists'
+		return
+	}
+	idle_ms := time.now().unix_milli() - overlay_idle_evict_ms - 1
+	entry.built_ms = idle_ms
+	entry.used_ms = idle_ms
+	store.entries[key] = entry
+
+	app.evict_expired_overlays(time.now().unix_milli())
+	assert key !in store.entries, 'an idle entry leaves the store'
+	assert !os.is_dir(first.temp_root), 'its tree is removed too'
+}
+
+fn test_drop_overlays_under_removes_a_closed_workspace() {
+	base := os.join_path(os.temp_dir(), 'vls_overlay_closed_ws_${os.getpid()}')
+	proj := os.join_path(base, 'proj')
+	sub := os.join_path(proj, 'sub')
+	work := os.join_path(base, 'work')
+	defer {
+		os.rmdir_all(base) or {}
+	}
+	main_content := 'module main\n\nfn main() {\n}\n'
+	mut app, main_file, _ := cached_overlay_test_app(base, proj, sub, main_content)
+	defer {
+		app.drop_all_overlays()
+	}
+	first := app.prepare_line_info_overlay(main_file, proj) or {
+		assert false, 'cached overlay must succeed: ${err}'
+		return
+	}
+	mut store := app.overlay_cache_store or {
+		assert false, 'the cached path sets the store'
+		return
+	}
+	assert store.entries.len == 1, 'the workspace has one cached entry'
+
+	app.drop_overlays_under(proj)
+	assert store.entries.len == 0, 'closing the workspace drops its entry'
+	assert !os.is_dir(first.temp_root), 'closing the workspace removes its tree'
+}
+
 fn test_invalidate_overlay_for_disk_change_stales_only_covering_entries() {
 	base := os.join_path(os.temp_dir(), 'vls_overlay_invalidate_${os.getpid()}')
 	proj := os.join_path(base, 'proj')
@@ -5320,6 +5443,7 @@ fn test_prepare_cached_overlay_hit_preserves_build_time() {
 	}
 	assert second.temp_root == first.temp_root, 'the second request hits the cache'
 	assert (store.entries[key] or { entry }).built_ms == aged_ms, 'a hit preserves the build time instead of refreshing the TTL'
+	assert (store.entries[key] or { entry }).used_ms > aged_ms, 'a hit refreshes the idle clock used for eviction'
 }
 
 fn test_tcp_disconnect_teardown_joins_line_info_workers() {

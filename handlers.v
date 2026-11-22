@@ -8764,7 +8764,11 @@ fn (mut app App) search_symbol_in_dirs_semantic(symbol string, anchor Location, 
 		&& (source_occurrence_precedes_local_declaration(anchor_lines, anchor.range.start.line, anchor_end_byte)
 			|| is_fn_parameter_highlight(anchor_line_text, anchor_start_byte, anchor_end_byte))
 	mut file_snaps := map[string]SemanticFileSnapshot{}
-	app.v3_prefetch_anchors(candidates, mut anchor_cache)
+	mut fast_decisions := map[string]?bool{}
+	mut ambiguous := []Location{}
+	// Classify every candidate from the index before asking the compiler about
+	// any of them: candidates the fast path accepts or rejects must not trigger
+	// a batched V3 query.
 	for cand in candidates {
 		if request_id in app.cancelled_requests {
 			return locations
@@ -8773,13 +8777,26 @@ fn (mut app App) search_symbol_in_dirs_semantic(symbol string, anchor Location, 
 		// location. The candidate is nevertheless safe when its indexed position
 		// is the canonical anchor returned for the user's selected occurrence.
 		if same_anchor_location(cand, anchor) {
+			continue
+		}
+		if fast := app.semantic_candidate_fast(symbol, anchor, anchor_keys, anchor_member, anchor_is_decl, anchor_start_byte, cand, mut file_snaps) {
+			fast_decisions[anchor_cache_key(cand.uri, cand.range.start.line, cand.range.start.char)] = fast
+		} else {
+			ambiguous << cand
+		}
+	}
+	app.v3_prefetch_anchors(ambiguous, mut anchor_cache)
+	for cand in candidates {
+		if request_id in app.cancelled_requests {
+			return locations
+		}
+		if same_anchor_location(cand, anchor) {
 			locations << cand
 			continue
 		}
-		// Decide from the index and lexical scope first; only genuinely
-		// ambiguous candidates pay for a compiler definition lookup.
-		if fast := app.semantic_candidate_fast(symbol, anchor, anchor_keys, anchor_member, anchor_is_decl, anchor_start_byte, cand, mut file_snaps) {
-			if fast {
+		key := anchor_cache_key(cand.uri, cand.range.start.line, cand.range.start.char)
+		if decided := fast_decisions[key] {
+			if decided {
 				locations << cand
 			}
 			continue
@@ -9752,19 +9769,38 @@ fn (mut app App) on_cancel_request(request Request) {
 	// when the id is a string, but string ids must still be cancellable
 	// (P0-02/P0-03).
 	if raw := extract_raw_id(request.params) {
-		app.cancelled_raw_ids[raw] = true
+		// Only a live request can be cancelled. A cancel that arrives after its
+		// worker finished has no answer to suppress; recording it would poison
+		// a later request that reuses the id. The reaper drops the worker flag
+		// before the loop reads this message, so that ordering is common.
 		if raw in app.line_info_cancels {
+			app.cancelled_raw_ids[raw] = true
 			mut flag := app.line_info_cancels[raw] or { &CancelFlag{} }
 			flag.cancel()
+			// Match every valid id by its exact raw token. Narrowing a fractional
+			// or out-of-range numeric id to int can collide with a request.
+			log('VLS: request ${raw} marked as cancelled')
+		} else {
+			log('VLS: ignoring late cancel for request ${raw}')
 		}
-		// Match every valid id by its exact raw token. Narrowing a fractional or
-		// out-of-range numeric id to int can collide with a different request.
-		log('VLS: request ${raw} marked as cancelled')
 		return
 	}
 	if params := json2.decode[CancelRequestParams](request.params) {
-		app.cancelled_requests[params.id] = true
-		log('VLS: request ${params.id} marked as cancelled')
+		// Numeric ids name a live worker by its canonical raw token; a stale
+		// numeric cancel must not outlive that worker either.
+		mut live := false
+		for raw_id in app.line_info_cancels.keys() {
+			if raw_is_canonical_int(raw_id) && raw_id_to_int(raw_id) == params.id {
+				live = true
+				break
+			}
+		}
+		if live {
+			app.cancelled_requests[params.id] = true
+			log('VLS: request ${params.id} marked as cancelled')
+		} else {
+			log('VLS: ignoring late cancel for request ${params.id}')
+		}
 	} else {
 		$if debug {
 			log('Failed to decode CancelRequestParams')
@@ -9805,8 +9841,10 @@ fn (mut app App) on_did_change_workspace_folders(request Request) {
 		if !already_removed {
 			app.removed_workspace_roots << path
 		}
-		// Drop now-stale index entries that belonged to the removed folder.
+		// Drop now-stale index entries and cached overlays that belonged to
+		// the removed folder.
 		app.drop_index_under(path)
+		app.drop_overlays_under(path)
 	}
 	// Add newly opened folders.
 	for folder in params.event.added {

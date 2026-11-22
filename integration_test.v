@@ -3076,8 +3076,9 @@ fn test_integration_string_id_cancel_does_not_collide_with_numeric_zero() {
 	defer {
 		cleanup_integration_test_env(app, project_dir)
 	}
-	// Cancel string id "a".
+	// Cancel string id "a" while a worker for that exact raw id is in flight.
 	app.current_request_raw_id = ''
+	app.line_info_cancels['"a"'] = &CancelFlag{}
 	app.on_cancel_request(Request{
 		method: '\$/cancelRequest'
 		params: '{"id":"a"}'
@@ -3098,8 +3099,9 @@ fn test_integration_numeric_and_string_cancel_are_independent() {
 	defer {
 		cleanup_integration_test_env(app, project_dir)
 	}
-	// Cancel numeric id 7.
+	// Cancel numeric id 7 while its worker is in flight.
 	app.current_request_raw_id = ''
+	app.line_info_cancels['7'] = &CancelFlag{}
 	app.on_cancel_request(Request{
 		method: '\$/cancelRequest'
 		params: '{"id":7}'
@@ -3117,6 +3119,7 @@ fn test_integration_numeric_cancel_ids_match_exact_raw_token() {
 		cleanup_integration_test_env(app, project_dir)
 	}
 
+	app.line_info_cancels['1.25'] = &CancelFlag{}
 	app.on_cancel_request(Request{
 		method: '\$/cancelRequest'
 		params: '{"id":1.25}'
@@ -3129,6 +3132,7 @@ fn test_integration_numeric_cancel_ids_match_exact_raw_token() {
 	assert app.consume_cancelled_request(1, app.current_request_raw_id)
 	assert !app.request_is_cancelled(1)
 
+	app.line_info_cancels['9223372036854775808'] = &CancelFlag{}
 	app.on_cancel_request(Request{
 		method: '\$/cancelRequest'
 		params: '{"id":9223372036854775808}'
@@ -3150,6 +3154,8 @@ fn test_integration_cancelled_id_reuse_is_not_cancelled() {
 		cleanup_integration_test_env(app, project_dir)
 	}
 	app.current_request_raw_id = ''
+	flag := &CancelFlag{}
+	app.line_info_cancels['7'] = flag
 	app.on_cancel_request(Request{
 		method: '\$/cancelRequest'
 		params: '{"id":7}'
@@ -3158,12 +3164,50 @@ fn test_integration_cancelled_id_reuse_is_not_cancelled() {
 	assert app.request_is_cancelled(7), 'the in-flight request is cancelled'
 	// The worker for request 7 answered: the loop reaps its finished flag and
 	// consumes the cancellation with it.
-	flag := &CancelFlag{}
 	flag.finish()
-	app.line_info_cancels['7'] = flag
 	app.purge_finished_line_info()
 	assert !app.request_is_cancelled(7), 'a later request reusing id 7 is not cancelled'
 	assert '7' !in app.cancelled_raw_ids, 'the consumed entry is gone'
+}
+
+fn test_integration_late_cancel_does_not_poison_reused_id() {
+	// The loop reaps finished workers before reading the next message. A cancel
+	// that arrives in that window has no request to stop, and must not mark the
+	// id as cancelled for a later request that reuses it.
+	mut app, project_dir := create_integration_test_env()
+	defer {
+		cleanup_integration_test_env(app, project_dir)
+	}
+	flag := &CancelFlag{}
+	flag.finish()
+	app.line_info_cancels['9'] = flag
+	app.purge_finished_line_info()
+	assert '9' !in app.line_info_cancels, 'the finished worker was reaped'
+
+	app.current_request_raw_id = ''
+	app.on_cancel_request(Request{
+		method: '\$/cancelRequest'
+		params: '{"id":9}'
+	})
+	assert '9' !in app.cancelled_raw_ids, 'a late cancel is ignored'
+	app.current_request_raw_id = '9'
+	assert !app.request_is_cancelled(9), 'a later request reusing id 9 still runs'
+}
+
+fn test_kill_diagnostics_child_stops_the_windows_child_tree() {
+	$if !windows {
+		return
+	}
+	// A cancelled pooled query must terminate its child instead of waiting for
+	// the query timeout. taskkill /T is the Windows counterpart of SIGKILL.
+	mut child := os.new_process('cmd')
+	child.set_args(['/c', 'ping -n 30 127.0.0.1 > nul'])
+	child.set_redirect_stdio()
+	child.run()
+	assert child.pid > 0, 'the child process started'
+	kill_diagnostics_child(child.pid)
+	child.wait()
+	assert child.code != 0, 'a killed child does not exit successfully'
 }
 
 fn test_integration_diagnostics_contain_real_compiler_errors() {

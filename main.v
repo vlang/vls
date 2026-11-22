@@ -118,6 +118,7 @@ mut:
 	vlib_fn_cache                               map[string]map[string]string // Per-vlib-module fn→return-type index (immutable during a session)
 	expression_type_depth                       int                         // Nesting of expression_type, which a binding's declaration re-enters
 	line_info_mode                              LineInfoMode                // How the configured `v` reaches the `-line-info` checker (see interop.v)
+	line_info_probe_done                        bool                        // A line-info request completed, so later misses may run async
 	inlay_hint_cache                            map[string]CachedInlayHints // Per-URI compiler inlay hints, see compiler_inlay_hints
 	inlay_fn_cache                              ?&InlayFnCache              // Per-file fn→return-type cache for inlay hints (see handlers.v)
 	open_uris_cache                             map[string]string           // open_files_generation-scoped normalized path → uri map
@@ -1212,15 +1213,15 @@ fn (mut app App) handle_requests[T](mut reader T) {
 				phased := app.operation_at_pos_indexed(method, lsp_request)
 				if phased.done {
 					app.write_response_or_cancelled(lsp_request.id, phased.resp)
-				} else if app.line_info_mode == .unknown {
-					// First line-info request of the session runs synchronously
-					// so the probe learns whether a compiler can answer; every
-					// later request runs on a worker while the loop stays
-					// responsive.
+				} else if app.should_dispatch_async_line_info() {
+					// A completed line-info request taught the session what this
+					// compiler can answer, so later misses run on a worker while
+					// the loop stays responsive. V3 and pooled answers leave
+					// `line_info_mode` at `.unknown`, so they cannot gate this.
+					app.dispatch_async_line_info(method, lsp_request)
+				} else {
 					resp := app.operation_at_pos(method, lsp_request)
 					app.write_response_or_cancelled(lsp_request.id, resp)
-				} else {
-					app.dispatch_async_line_info(method, lsp_request)
 				}
 			}
 			.references {

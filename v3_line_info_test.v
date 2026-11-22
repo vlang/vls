@@ -677,8 +677,10 @@ fn test_v1_line_info_uses_the_warm_shared_server() {
 	assert app.v3_copies().len == 1
 	copy_root := app.v3_copies()[0].overlay.temp_root
 	assert fake.questions()[0] == '${os.join_path(copy_root, 'main.v')}:4:hv^2'
-	// The pool never changes how the session drives the compiler.
+	// The pool answers without probing a mode, but the completed request still
+	// enables async dispatch for later misses.
 	assert app.line_info_mode == .unknown
+	assert app.line_info_probe_done, 'a pooled answer completes the line-info probe'
 	// A second request reuses the server and the copy: nothing new starts.
 	app.run_v_line_info(.hover, uri, '4:hv^2')
 	assert fake.questions().len == 2

@@ -252,12 +252,18 @@ fn (mut app App) handle_document_highlight(request Request) Response {
 		// The initial lookup already resolved the selected occurrence.
 		anchor_cache[anchor_cache_key(uri, params.position.line, start)] = a
 	}
-	if anchor != none {
-		mut locations := []Location{cap: candidates.len}
-		for candidate in candidates {
-			start_char := byte_to_encoded_col(lines[candidate.line_idx], candidate.start_byte,
-				app.position_encoding)
-			locations << Location{
+	// Classify first: only the candidates whose scope the lexical fast path
+	// cannot decide are worth a batched V3 query.
+	mut fast_decisions := map[string]?bool{}
+	mut ambiguous := []Location{cap: candidates.len}
+	for candidate in candidates {
+		line := lines[candidate.line_idx]
+		start_char := byte_to_encoded_col(line, candidate.start_byte, app.position_encoding)
+		end_char := byte_to_encoded_col(line, candidate.end_byte, app.position_encoding)
+		if accept := app.highlight_candidate_fast(content, lines, symbol, params.position.line, cursor_start_byte, cursor_keys, cursor_has_member, cursor_is_decl, had_index_anchor, candidate.line_idx, start_char, end_char, line, candidate.start_byte, candidate.end_byte) {
+			fast_decisions[anchor_cache_key(uri, candidate.line_idx, start_char)] = accept
+		} else {
+			ambiguous << Location{
 				uri:   uri
 				range: LSPRange{
 					start: Position{
@@ -271,15 +277,17 @@ fn (mut app App) handle_document_highlight(request Request) Response {
 				}
 			}
 		}
-		app.v3_prefetch_anchors(locations, mut anchor_cache)
+	}
+	if anchor != none {
+		app.v3_prefetch_anchors(ambiguous, mut anchor_cache)
 	}
 	mut highlights := []DocumentHighlight{cap: candidates.len}
 	for candidate in candidates {
 		line := lines[candidate.line_idx]
 		start_char := byte_to_encoded_col(line, candidate.start_byte, app.position_encoding)
 		end_char := byte_to_encoded_col(line, candidate.end_byte, app.position_encoding)
-		if accept := app.highlight_candidate_fast(content, lines, symbol, params.position.line, cursor_start_byte, cursor_keys, cursor_has_member, cursor_is_decl, had_index_anchor, candidate.line_idx, start_char, end_char, line, candidate.start_byte, candidate.end_byte) {
-			if !accept {
+		if decided := fast_decisions[anchor_cache_key(uri, candidate.line_idx, start_char)] {
+			if !decided {
 				continue
 			}
 		} else if a := anchor {
