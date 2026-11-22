@@ -297,34 +297,24 @@ fn make_singlefile_temp_path(temp_root string, real_path string, purpose string)
 // separate argv element to os.Process, so no shell metacharacter (spaces,
 // `$()`, backticks, quotes, `;`, `&`, `|`, `%`, ...) in a filename or path can
 // alter the executed command. There is no shell involved at any point.
-fn v3_compiler_selection_args() []string {
-	$if macos || linux {
-		// Default V3 dispatch only applies to executables named `v` or `vnew`.
-		// VLS may be configured with a renamed compiler, so select V3 explicitly.
-		return ['-new-compiler']
-	}
-	return []
-}
-
 fn build_v_check_args_single(file_to_check string, is_library_module bool) []string {
-	mut args := v3_compiler_selection_args()
+	mut args := []string{}
 	if is_library_module {
 		args << '-shared'
 	}
-	// V3 emits warnings by default. At the pinned compiler revision `-w` means
-	// "hide warnings" and also selects established-compiler compatibility.
+	// No `-w`: the compiler emits warnings by default.
 	args << ['-check', '-nocolor', file_to_check]
 	return args
 }
 
 fn build_v_check_args_multifile(is_library_module bool) []string {
-	mut args := v3_compiler_selection_args()
+	mut args := []string{}
 	if is_library_module {
 		// Library modules have no `fn main()`. Without `-shared`, the compiler
 		// reports that absence as an error before checking the actual source.
 		args << '-shared'
 	}
-	// Do not add `-w`: omitting it preserves V3's default warning diagnostics.
+	// No `-w`: omitting it preserves the compiler's default warning diagnostics.
 	args << ['-check', '-nocolor', '.']
 	return args
 }
@@ -339,21 +329,18 @@ fn build_v_line_info_args_single(file_to_check string, line_info string, compile
 		compile_target]
 }
 
-// LineInfoMode records how the configured `v` reaches the `-line-info` checker
-// that serves hover, completion, signature help, and go-to-definition. V moved
-// V3 into `vlib/v` and deleted V1, taking `-vls-mode` / `-line-info` with it, so
-// the launcher no longer routes those options anywhere by itself: reaching the
-// checker now takes an explicit `-old-compiler`. Older compilers still answer
-// without it, so the working mode is probed from the first real request rather
-// than assumed from a version number.
+// LineInfoMode records whether the configured `v` answers the `-line-info`
+// checker that serves hover, completion, signature help, and go-to-definition.
+// The mode is probed from the first real request: a compiler that refuses or
+// cannot serve the options retires compiler-backed lookups for the session
+// instead of paying a process spawn per request.
 enum LineInfoMode {
 	unknown // not probed yet — try the options as-is
 	direct  // the compiler answers `-vls-mode` / `-line-info` itself
-	compat  // reaching the checker needs `-old-compiler`
-	missing // no compatibility compiler either — answer from VLS's own index
+	missing // no compiler serves them — answer from VLS's own index
 }
 
-// line_info_flags are the options a V without the V1 checker rejects outright.
+// line_info_flags are the options a V without the line-info checker rejects outright.
 const line_info_flags = ['-line-info', '-vls-mode', '-json-errors']
 
 // compiler_rejects_any_option reports whether a compiler invocation failed
@@ -382,10 +369,9 @@ fn compiler_rejects_line_info(output string) bool {
 }
 
 // compiler_reports_missing_compat_compiler reports whether the compiler output
-// shows the V3 launcher has no usable V1 compatibility compiler for
-// `-vls-mode` / `-line-info` (e.g. "`-vls-mode` requires the compatibility
-// compiler, but no usable ... fallback was found"). Retrying with
-// `-old-compiler` cannot succeed either, so the session should retire
+// shows that no checker can serve `-vls-mode` / `-line-info` (e.g. "`-vls-mode`
+// requires the compatibility compiler, but no usable ... fallback was found").
+// Retrying would only burn another compile, so the session should retire
 // compiler-backed lookups instead of paying doomed process spawns per request.
 fn compiler_reports_missing_compat_compiler(output string) bool {
 	return output.contains('requires the compatibility compiler') && output.contains('no usable')
@@ -412,15 +398,15 @@ fn compiler_refused_and_stopped(output string) bool {
 	return refusals > 0
 }
 
-// compiler_lacks_compatibility_compiler reports whether an invocation failed
-// because the V launcher could not reach the V1 compatibility compiler, which is
-// what owns `-vls-mode` / `-line-info`. The launcher prints a single-line
-// refusal and exits without compiling, and that refusal is not an "unknown
-// option" line, so `compiler_rejects_line_info` never sees it. Without this
-// check VLS keeps paying a process launch per request for an answer that can
-// never arrive, and answers every hover, completion, and definition with an
-// empty result while saying nothing about why. Each refusal form below is one
-// `ensure_v1_fallback` failure in the launcher.
+// compiler_lacks_compatibility_compiler reports whether an older V launcher
+// could not reach the V1 compatibility compiler it used to need for
+// `-vls-mode` / `-line-info`. The launcher prints a single-line refusal and
+// exits without compiling, and that refusal is not an "unknown option" line,
+// so `compiler_rejects_line_info` never sees it. Without this check VLS keeps
+// paying a process launch per request for an answer that can never arrive,
+// and answers every hover, completion, and definition with an empty result
+// while saying nothing about why. Each refusal form below is one
+// `ensure_v1_fallback` failure in such a launcher.
 fn compiler_lacks_compatibility_compiler(output string) bool {
 	for line in output.split_into_lines() {
 		trimmed := line.trim_space()
@@ -432,10 +418,7 @@ fn compiler_lacks_compatibility_compiler(output string) bool {
 		if trimmed.contains('running `make v1` now') {
 			continue
 		}
-		// A successful explicit compatibility retry also starts with
-		// `-old-compiler` was requested, but follows it with "; retrying".
-		if trimmed.starts_with('`-vls-mode` requires the compatibility compiler, but ')
-			|| trimmed.starts_with('`-old-compiler` was requested, but ') {
+		if trimmed.starts_with('`-vls-mode` requires the compatibility compiler, but ') {
 			return true
 		}
 		if trimmed.starts_with('`make v1` failed') {
@@ -459,12 +442,12 @@ fn compiler_lacks_compatibility_compiler(output string) bool {
 // `.missing` check without reaching this point, so it is reached at most once per
 // session.
 fn (mut app App) report_missing_compatibility_compiler() {
-	app.send_show_message('vls: the configured V compiler cannot serve completion, hover, signature help, or go to definition, because its V1 compatibility compiler is missing. Install `make`, then run `make v1` in your V source directory, or set `VLS_V_COMMAND` to a V compiler that has it. Diagnostics and formatting are unaffected.', 2)
+	app.send_show_message('vls: the configured V compiler cannot serve completion, hover, signature help, or go to definition, because it does not support `-vls-mode` / `-line-info`. Set `VLS_V_COMMAND` to a V compiler that does. Diagnostics and formatting are unaffected.', 2)
 }
 
 // normalize_v_line_info_output extracts the actual line-info payload from the
-// compatibility compiler's combined stdout/stderr. Newer launchers may prepend
-// an option notice before delegating to the established compiler.
+// compiler's combined stdout/stderr. Older launchers may prepend an option
+// notice before delegating to their checker.
 fn normalize_v_line_info_output(output string, method Method) string {
 	trimmed := output.trim_space()
 	if method == .inlay_hint {
@@ -3029,19 +3012,6 @@ fn (mut app App) on_did_change_watched_files(request Request) {
 	}
 }
 
-// with_line_info_selection prefixes the compiler-selection flag this session
-// needs to reach the `-line-info` checker. `-old-compiler` is only added once a
-// refusal has proven it is required, so compilers that predate the flag never
-// see it.
-fn (app &App) with_line_info_selection(args []string) []string {
-	if app.line_info_mode != .compat {
-		return args
-	}
-	mut selected := ['-old-compiler']
-	selected << args
-	return selected
-}
-
 // hover_doc_comment returns the vdoc comment attached to the symbol under the
 // cursor described by `line_info` ("${line_nr}:hv^${byte_col}"). It augments a
 // compiler hover, and is the only hover source when no compiler can answer.
@@ -3407,10 +3377,10 @@ struct PooledLineInfo {
 // (see ProgramCopy): a warm server answers in a fraction of the time a
 // compiler process of its own takes to start. None means the pool has no
 // answer, and the caller falls back to that one-shot process. The pool never
-// changes how the session drives the compiler: compat and missing modes keep
-// their one-shot path, and the mode probes there still run.
+// changes how the session drives the compiler: a retired (.missing) session
+// keeps its one-shot path, so the mode probes there still run.
 fn (mut app App) run_v_line_info_pooled(method Method, path string, line_info string) ?PooledLineInfo {
-	if app.line_info_mode == .compat || app.line_info_mode == .missing {
+	if app.line_info_mode == .missing {
 		return none
 	}
 	exe := resolve_diagnostics_server_exe() or { return none }
@@ -3448,7 +3418,7 @@ fn (mut app App) run_v_line_info_pooled(method Method, path string, line_info st
 	// The command line of the checks of the diagnostics (see
 	// build_v_check_args_multifile), whose servers answer the questions too.
 	is_library := target == '.' && !app.is_program_dir(project.overlay.source_work_dir)
-	mut args := v3_compiler_selection_args()
+	mut args := []string{}
 	if is_library {
 		args << '-shared'
 	}
@@ -3555,39 +3525,20 @@ fn (mut app App) run_v_line_info_once(method Method, path string, line_info stri
 	}
 
 	exec_dir := if use_multifile { compile_target } else { working_dir }
-	mut x := run_v_argv_cancellable(app.with_line_info_selection(cmd_args), exec_dir, app.line_info_cancel)
+	mut x := run_v_argv_cancellable(cmd_args, exec_dir, app.line_info_cancel)
 	mut output := normalize_v_line_info_output(x.output, method)
 	if compiler_reports_missing_compat_compiler(x.output) && app.line_info_mode == .unknown {
-		// The launcher cannot serve `-line-info`: no usable V1 compatibility
-		// compiler exists, so retrying (here or on later requests) only burns
-		// another compile. Retire compiler-backed lookups for the session;
-		// index-backed answers and source fallbacks take over from here.
-		log('no usable compatibility compiler for -line-info; falling back to the index')
+		// The launcher cannot reach a checker and stops there, so retrying
+		// (here or on later requests) only burns another compile. Retire
+		// compiler-backed lookups for the session; index-backed answers and
+		// source fallbacks take over from here.
+		log('no checker for -line-info; falling back to the index')
 		app.line_info_mode = .missing
 		app.report_missing_compatibility_compiler()
 		if !app.overlay_is_shared(temp_project_dir) {
 			cleanup_compilation_temp(temp_project_dir, singlefile_tmppath)
 		}
 		return app.line_info_unavailable_result(method, path, line_info)
-	}
-	if compiler_rejects_line_info(x.output) && app.line_info_mode == .unknown {
-		// This V has no in-tree `-line-info` checker. Its launcher may recover on
-		// its own by rerunning the failed request against the compatibility
-		// compiler, but that costs a doomed compile — and an upstream bug report
-		// upload — on every keystroke, so select that compiler directly instead.
-		// The probe runs once: from here on the session has a mode to drive.
-		log('compiler rejected the -line-info options; retrying with -old-compiler')
-		app.line_info_mode = .compat
-		retry := run_v_argv_cancellable(app.with_line_info_selection(cmd_args), exec_dir, app.line_info_cancel)
-		if compiler_rejects_any_option(retry.output, ['-old-compiler']) {
-			// There is no selector to ask with, so whatever the launcher does on
-			// its own is the best available. Keep driving it that way.
-			log('this V has no -old-compiler; keeping the launcher default')
-			app.line_info_mode = .direct
-		} else {
-			x = retry
-			output = normalize_v_line_info_output(x.output, method)
-		}
 	}
 	if (compiler_rejects_line_info(x.output) && compiler_refused_and_stopped(x.output)) || compiler_lacks_compatibility_compiler(x.output) {
 		// The invocation refused the options and did nothing else, so nothing
@@ -3621,7 +3572,7 @@ fn (mut app App) run_v_line_info_once(method Method, path string, line_info stri
 		}
 		file_to_check = real_path
 		compile_target = real_path
-		cmd_fallback := app.with_line_info_selection(build_v_line_info_args_single(file_to_check, line_info, compile_target))
+		cmd_fallback := build_v_line_info_args_single(file_to_check, line_info, compile_target)
 		log('cmd_fallback=v ${cmd_fallback.join(' ')}')
 		x = run_v_argv_cancellable(cmd_fallback, working_dir, app.line_info_cancel)
 		output = normalize_v_line_info_output(x.output, method)

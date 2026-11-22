@@ -226,7 +226,7 @@ fn (mut app App) v3_run(project V3QueryProject, specs []string, target string) ?
 		// The command line of the checks of the diagnostics (see
 		// build_v_check_args_multifile), whose servers answer the questions too:
 		// `-w` changes no answer.
-		mut args := v3_compiler_selection_args()
+		mut args := []string{}
 		if is_library {
 			args << '-shared'
 		}
@@ -240,16 +240,14 @@ fn (mut app App) v3_run(project V3QueryProject, specs []string, target string) ?
 	if app.v3_one_shot_unsupported {
 		return none
 	}
-	// `-new-compiler` is only needed where V3 is not the default; on Windows the
-	// established compiler already serves `-vls-mode` / `-line-info`.
-	mut argv := ['-new-compiler', '-w', '-check', '-nocolor']
+	mut argv := ['-w', '-check', '-nocolor']
 	if is_library {
 		argv << '-shared'
 	}
 	argv << ['-vls-mode', '-line-info', question, target]
 	x := run_v_argv(argv, project.overlay.temp_work_dir)
-	if compiler_rejects_any_option(x.output, ['-new-compiler', '-vls-mode', '-line-info']) {
-		log('this V has no V3 that answers -line-info')
+	if compiler_rejects_any_option(x.output, ['-vls-mode', '-line-info']) {
+		log('this V does not answer -line-info')
 		app.v3_one_shot_unsupported = true
 		return none
 	}

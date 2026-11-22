@@ -60,11 +60,11 @@ done
 exit 1
 "
 
-// A V1 compiler that answers definition questions but has no V3 checker.
-const fake_v1_definitions_only = r"#!/bin/sh
+// A compiler that answers definition questions but cannot check a program.
+const fake_checkless_definitions_only = r"#!/bin/sh
 for arg in $@; do
-	if [ $arg = -new-compiler ]; then
-		echo 'unknown option `-new-compiler`'
+	if [ $arg = -check ]; then
+		echo 'unknown option `-check`'
 		exit 1
 	fi
 done
@@ -505,8 +505,8 @@ fn test_v1_answers_what_v3_cannot_parse() {
 	}
 }
 
-fn test_a_v1_only_compiler_refuses_a_rename_it_cannot_validate() {
-	mut app, fake := fake_v3_app('v1_rename', fake_v1_definitions_only, 'VLS_V_COMMAND')!
+fn test_a_compiler_that_cannot_check_refuses_a_rename() {
+	mut app, fake := fake_v3_app('v1_rename', fake_checkless_definitions_only, 'VLS_V_COMMAND')!
 	defer {
 		stop_fake_v3_app(mut app, fake)
 	}
@@ -518,7 +518,7 @@ fn test_a_v1_only_compiler_refuses_a_rename_it_cannot_validate() {
 	os.rm(os.join_path(fake.project, 'other.v'))!
 	app.open_files[uri] = content
 	app.workspace_roots = [fake.project]
-	// The existing V1 definition path works after the V3 option is rejected.
+	// The definition path still works when the check option is rejected.
 	resolved := app.resolve_symbol_anchor_by(uri, 12, 9, false) or {
 		panic('the fake V1 compiler did not answer the definition')
 	}
@@ -595,7 +595,7 @@ fn test_failed_sibling_buffer_write_prevents_querying_stale_overlay_text() {
 }
 
 fn test_a_failed_compiler_check_is_not_a_successful_rename_validation() {
-	for output in ['', 'compiler timed out', 'unknown option `-new-compiler`'] {
+	for output in ['', 'compiler timed out', 'unknown option `-check`'] {
 		if _ := rename_check_output(1, output) {
 			assert false, 'a failed check must not validate a rename: ${output}'
 		}
@@ -718,25 +718,6 @@ fn test_v1_line_info_falls_back_to_its_own_process() {
 	assert fake.questions().len == 1
 	alone_questions := os.read_file(os.join_path(fake.dir, 'alone', 'questions.txt')) or { '' }
 	assert alone_questions.split_into_lines().len == 1
-}
-
-fn test_v1_line_info_in_compat_mode_keeps_its_own_process() {
-	mut app, fake := fake_v3_app('v1_compat', fake_v3_query_server, 'VLS_DIAGNOSTICS_SERVER')!
-	defer {
-		stop_fake_v3_app(mut app, fake)
-	}
-	app.v3_line_info_enabled = false
-	app.line_info_mode = .compat
-	os.setenv('VLS_V_COMMAND', fake_one_shot_v(fake.dir, 'alone')!, true)
-	path := os.join_path(fake.project, 'main.v')
-	uri := path_to_uri(path)
-	result := app.run_v_line_info(.hover, uri, '4:hv^2')
-	assert result is Hover
-	assert (result as Hover).contents.value.contains('fake')
-	// Compat keeps its one-shot path: the shared server is never asked, and
-	// the mode is untouched.
-	assert !os.exists(os.join_path(fake.server, 'questions.txt'))
-	assert app.line_info_mode == .compat
 }
 
 fn test_v1_line_info_without_a_server_keeps_its_own_process() {

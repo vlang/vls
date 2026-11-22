@@ -5674,23 +5674,22 @@ fn inlay_hints_request(mut app App, uri string, content string) []InlayHint {
 }
 
 // compiler_supports_inlay_hints reports whether the configured V answers the
-// `-line-info file:L:ih^C` mode: its V3 with the query engine, or a V1 that was
-// patched for it. With any other compiler VLS falls back to its source
-// heuristics, so the tests that expect compiler hints are skipped. It asks the
-// compiler directly, not through VLS, so a broken VLS side makes those tests
-// fail instead of skipping them.
+// `-line-info file:L:ih^C` mode. With any other compiler VLS falls back to its
+// source heuristics, so the tests that expect compiler hints are skipped. It
+// asks the compiler directly, not through VLS, so a broken VLS side makes those
+// tests fail instead of skipping them.
 fn compiler_supports_inlay_hints() bool {
-	return compiler_answers_inlay_hints([['-new-compiler'], ['-old-compiler'], []string{}])
+	return compiler_answers_inlay_hints()
 }
 
-// v3_answers_inlay_hints reports whether the V3 of the configured V answers the
-// `ih^` mode: the tests that expect compiler hints then take them from V3, as
-// VLS does.
+// v3_answers_inlay_hints reports whether the configured V answers the `ih^`
+// mode: the tests that expect compiler hints then take them from the compiler,
+// as VLS does.
 fn v3_answers_inlay_hints() bool {
-	return compiler_answers_inlay_hints([['-new-compiler']])
+	return compiler_answers_inlay_hints()
 }
 
-fn compiler_answers_inlay_hints(selectors [][]string) bool {
+fn compiler_answers_inlay_hints() bool {
 	mut app := create_test_app()
 	defer {
 		cleanup_test_app(app)
@@ -5700,14 +5699,7 @@ fn compiler_answers_inlay_hints(selectors [][]string) bool {
 	main_file := os.join_path(dir, 'main.v')
 	must_write_file(main_file, 'module main\n\nfn main() {\n\tx := 1\n\tprintln(x)\n}\n')
 	args := build_v_line_info_args_single(main_file, '1:ih^1', main_file)
-	for selector in selectors {
-		mut argv := selector.clone()
-		argv << args
-		if run_v_argv(argv, dir).output.contains('{"inlay_hints":') {
-			return true
-		}
-	}
-	return false
+	return run_v_argv(args, dir).output.contains('{"inlay_hints":')
 }
 
 fn inlay_hint_summary(hints []InlayHint) []string {
@@ -12778,12 +12770,12 @@ fn main() {
 }
 "
 	}
-	// Probe the compiler, independently of VLS: older V3 versions do not yet
+	// Probe the compiler, independently of VLS: older versions do not yet
 	// accept constrained type parameters. The lexical regression above still
 	// exercises their recognition with those compilers.
 	mut probe, uris := new_rename_project_app_with(files)
 	defer { cleanup_rename_app(mut probe) }
-	checked := run_v_argv(['-new-compiler', '-check', '-nocolor', '.'],
+	checked := run_v_argv(['-check', '-nocolor', '.'],
 		os.dir(uri_to_path(uris['main.v'])))
 	if checked.exit_code != 0 { return }
 	assert rename_edits_in(files, 'main.v:7:8') == ['main.v:20:7', 'main.v:7:8']
@@ -18317,7 +18309,7 @@ fn test_renp_without_a_server_the_check_runs_in_a_compiler_of_its_own() {
 		&& !it.contains(' -line-info '))
 	assert checks.len >= 2, 'the check ran in no compiler of its own: ${asked.str()}'
 	for line in checks {
-		assert line == 'oneshot -new-compiler -check -nocolor .', 'the check ran another command line: ${line}'
+		assert line == 'oneshot -check -nocolor .', 'the check ran another command line: ${line}'
 	}
 }
 
