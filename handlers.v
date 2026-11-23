@@ -2687,7 +2687,13 @@ fn local_binding_column(segment string, segment_start int, name string) int {
 }
 
 fn (app &App) local_scope_bindings(content string, position Position) []LocalBinding {
-	lines := content.split_into_lines()
+	return app.local_scope_bindings_in_lines(content.split_into_lines(), position)
+}
+
+// local_scope_bindings_in_lines is the hot-path form: callers that already
+// hold the file's lines (the index snapshots of references and highlights)
+// avoid re-splitting the whole file for every candidate.
+fn (app &App) local_scope_bindings_in_lines(lines []string, position Position) []LocalBinding {
 	if position.line < 0 || position.line >= lines.len {
 		return []LocalBinding{}
 	}
@@ -8644,9 +8650,9 @@ fn is_loop_binding_occurrence(lines []string, line_idx int, start_byte int, end_
 // visible_binding_keys returns the set of same-named local bindings visible at
 // `pos`, keyed by declaration identity. Two occurrences reference the same
 // local exactly when these sets single out the same declaration.
-fn (app &App) visible_binding_keys(content string, pos Position, symbol string) map[string]int {
+fn (app &App) visible_binding_keys(lines []string, pos Position, symbol string) map[string]int {
 	mut keys := map[string]int{}
-	for b in app.local_scope_bindings(content, pos) {
+	for b in app.local_scope_bindings_in_lines(lines, pos) {
 		if b.name == symbol {
 			keys[highlight_binding_key(b.name, b.line, b.column)] = b.line
 		}
@@ -8696,7 +8702,7 @@ fn (mut app App) semantic_candidate_fast(symbol string, anchor Location, anchor_
 		return none
 	}
 	if cand.uri == anchor.uri {
-		cand_keys := app.visible_binding_keys(snap.content, cand_pos, symbol)
+		cand_keys := app.visible_binding_keys(snap.lines, cand_pos, symbol)
 		cand_is_decl := !source_occurrence_is_method_declaration(snap.lines, cand_pos.line, start_byte)
 			&& (source_occurrence_precedes_local_declaration(snap.lines, cand_pos.line, end_byte)
 				|| is_fn_parameter_highlight(line_text, start_byte, end_byte))
@@ -8813,7 +8819,7 @@ fn (mut app App) search_symbol_in_dirs_semantic(symbol string, anchor Location, 
 	// Anchor-side context for the compiler-free candidate decision below.
 	anchor_content := app.index_source_for(anchor.uri) or { '' }
 	anchor_lines := anchor_content.split_into_lines()
-	anchor_keys := app.visible_binding_keys(anchor_content, anchor.range.start, symbol)
+	anchor_keys := app.visible_binding_keys(anchor_lines, anchor.range.start, symbol)
 	anchor_line_text := if anchor.range.start.line >= 0 && anchor.range.start.line < anchor_lines.len {
 		anchor_lines[anchor.range.start.line]
 	} else {

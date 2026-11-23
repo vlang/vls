@@ -1506,7 +1506,8 @@ const program_root_max_depth = 4
 fn (app &App) program_root(source_path string) string {
 	normalized_source := normalize_overlay_path(source_path)
 	file_dir := normalize_overlay_path(os.dir(normalized_source))
-	if get_module_name(app.source_text(normalized_source)) in ['', 'main'] {
+	open_text := app.open_file_text_by_path()
+	if get_module_name(source_text_in(normalized_source, open_text)) in ['', 'main'] {
 		return compilation_work_dir(normalized_source)
 	}
 	vmod_root := normalize_overlay_path(find_project_root(file_dir))
@@ -1518,7 +1519,7 @@ fn (app &App) program_root(source_path string) string {
 			break
 		}
 		dir = parent
-		if app.program_reaches(dir, vmod_root, file_dir) {
+		if app.program_reaches_in(dir, vmod_root, file_dir, open_text) {
 			return dir
 		}
 	}
@@ -1528,13 +1529,44 @@ fn (app &App) program_root(source_path string) string {
 // program_reaches reports whether the program in `dir`, if there is one there,
 // imports the module in `module_dir`, directly or through other local modules.
 fn (app &App) program_reaches(dir string, vmod_root string, module_dir string) bool {
+	return app.program_reaches_in(dir, vmod_root, module_dir, app.open_file_text_by_path())
+}
+
+struct FileModuleInfo {
+	name    string
+	imports []string
+}
+
+// file_module_info caches the module declaration and imports of a file for one
+// request: a program that imports several modules visits the same file from
+// more than one hop, and parsing it again each time only repeats work.
+fn file_module_info(path string, open_text map[string]string, mut cache map[string]FileModuleInfo) FileModuleInfo {
+	if info := cache[path] {
+		return info
+	}
+	content := source_text_in(path, open_text)
+	info := FileModuleInfo{
+		name:    get_module_name(content)
+		imports: parse_imports(content)
+	}
+	cache[path] = info
+	return info
+}
+
+fn (app &App) program_reaches_in(dir string, vmod_root string, module_dir string, open_text map[string]string) bool {
+	mut open_paths := map[string]bool{}
+	for path, _ in open_text {
+		open_paths[path] = true
+	}
+	mut dir_cache := map[string][]string{}
+	mut module_cache := map[string]FileModuleInfo{}
 	mut pending := []string{}
 	mut is_program := false
-	for file in app.v_files_in(dir) {
-		content := app.source_text(file)
-		if get_module_name(content) in ['', 'main'] {
+	for file in v_files_in_cached(dir, open_paths, mut dir_cache) {
+		info := file_module_info(file, open_text, mut module_cache)
+		if info.name in ['', 'main'] {
 			is_program = true
-			pending << parse_imports(content)
+			pending << info.imports
 		}
 	}
 	if !is_program {
@@ -1551,8 +1583,8 @@ fn (app &App) program_reaches(dir string, vmod_root string, module_dir string) b
 		if imported_dir == module_dir {
 			return true
 		}
-		for file in app.v_files_in(imported_dir) {
-			pending << parse_imports(app.source_text(file))
+		for file in v_files_in_cached(imported_dir, open_paths, mut dir_cache) {
+			pending << file_module_info(file, open_text, mut module_cache).imports
 		}
 	}
 	return false
@@ -1613,11 +1645,18 @@ fn (app &App) narrow_check_dir(real_path string, program_dir string, text string
 		return ''
 	}
 	vmod_root := normalize_overlay_path(find_project_root(program_dir))
-	if !app.program_reaches(program_dir, vmod_root, module_dir) {
+	open_text := app.open_file_text_by_path()
+	mut open_paths := map[string]bool{}
+	for path, _ in open_text {
+		open_paths[path] = true
+	}
+	mut dir_cache := map[string][]string{}
+	mut module_cache := map[string]FileModuleInfo{}
+	if !app.program_reaches_in(program_dir, vmod_root, module_dir, open_text) {
 		return ''
 	}
-	for program_file in app.v_files_in(program_dir) {
-		for module_path in parse_imports(app.source_text(program_file)) {
+	for program_file in v_files_in_cached(program_dir, open_paths, mut dir_cache) {
+		for module_path in file_module_info(program_file, open_text, mut module_cache).imports {
 			if imported := resolve_local_module_dir(module_path, program_dir, vmod_root) {
 				if imported != module_dir {
 					return ''
@@ -1657,6 +1696,21 @@ fn resolve_local_module_dir(module_path string, program_dir string, vmod_root st
 // v_files_in returns the V files of `dir` that make up its module, tests left
 // out: those on disk, and those open in the editor and not saved yet.
 fn (app &App) v_files_in(dir string) []string {
+	mut open_paths := map[string]bool{}
+	for uri, _ in app.open_files {
+		open_paths[normalize_overlay_path(uri_to_path(uri))] = true
+	}
+	mut cache := map[string][]string{}
+	return v_files_in_cached(dir, open_paths, mut cache)
+}
+
+// v_files_in_cached reuses one directory listing and one open-path set across
+// the whole import walk of a request. Each hop of program_reaches used to pay
+// for an os.ls plus a scan of every open document again.
+fn v_files_in_cached(dir string, open_paths map[string]bool, mut cache map[string][]string) []string {
+	if files := cache[dir] {
+		return files
+	}
 	mut files := []string{}
 	mut seen := map[string]bool{}
 	for entry in os.ls(dir) or { []string{} } {
@@ -1668,25 +1722,38 @@ fn (app &App) v_files_in(dir string) []string {
 			}
 		}
 	}
-	for uri, _ in app.open_files {
-		path := normalize_overlay_path(uri_to_path(uri))
+	for path, _ in open_paths {
 		if path.ends_with('.v') && !path.ends_with('_test.v') && os.dir(path) == dir
 			&& path !in seen {
 			seen[path] = true
 			files << path
 		}
 	}
+	cache[dir] = files
 	return files
 }
 
 // source_text returns the text of the file at `path`: the editor's buffer when
 // the file is open, what is on disk otherwise.
 fn (app &App) source_text(path string) string {
-	normalized := normalize_overlay_path(path)
+	return source_text_in(path, app.open_file_text_by_path())
+}
+
+// open_file_text_by_path builds the normalized-path → buffer map once for a
+// request chain that reads many files (program_root walks imports recursively).
+fn (app &App) open_file_text_by_path() map[string]string {
+	mut paths := map[string]string{}
 	for uri, content in app.open_files {
-		if normalize_overlay_path(uri_to_path(uri)) == normalized {
-			return content
-		}
+		paths[normalize_overlay_path(uri_to_path(uri))] = content
+	}
+	return paths
+}
+
+// source_text_in is the O(1) form for callers that already hold the map.
+fn source_text_in(path string, open_text map[string]string) string {
+	key := normalize_overlay_path(path)
+	if content := open_text[key] {
+		return content
 	}
 	return os.read_file(path) or { '' }
 }

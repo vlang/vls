@@ -240,7 +240,7 @@ fn (mut app App) handle_document_highlight(request Request) Response {
 	cursor_end_byte := encoded_col_to_byte(line_text, end, app.position_encoding)
 	_, cursor_has_member, _ := member_qualifier_at_cursor(line_text, end, app.position_encoding)
 	mut cursor_keys := map[string]int{}
-	for b in app.local_scope_bindings(content, cursor_pos) {
+	for b in app.local_scope_bindings_in_lines(lines, cursor_pos) {
 		if b.name == symbol {
 			cursor_keys[highlight_binding_key(b.name, b.line, b.column)] = b.line
 		}
@@ -436,7 +436,7 @@ fn (app &App) highlight_candidate_fast(content string, lines []string, symbol st
 		char: start_char
 	}
 	mut cand_keys := map[string]int{}
-	for b in app.local_scope_bindings(content, cand_pos) {
+	for b in app.local_scope_bindings_in_lines(lines, cand_pos) {
 		if b.name == symbol {
 			cand_keys[highlight_binding_key(b.name, b.line, b.column)] = b.line
 		}
