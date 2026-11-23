@@ -18764,3 +18764,47 @@ fn test_evict_inlay_fn_cache_under_drops_workspace_entries() {
 	assert gone_uri !in store.entries, 'a removed workspace leaves the cache'
 	assert kept_uri in store.entries, 'a file outside the workspace stays'
 }
+
+fn loop_word_bounds(line string, word string, last bool) (int, int) {
+	idx := if last {
+		line.last_index(word) or { return -1, -1 }
+	} else {
+		line.index(word) or { return -1, -1 }
+	}
+	return idx, idx + word.len
+}
+
+fn test_is_loop_binding_occurrence_recognizes_loop_headers() {
+	lines := [
+		'for item in items {',
+		'for i, item in items {',
+		'for i := 0; i < 3; i++ {',
+		'\tprintln(item)',
+	]
+	s0, e0 := loop_word_bounds(lines[0], 'item', false)
+	assert is_loop_binding_occurrence(lines, 0, s0, e0), 'a `for item in` binding is recognized'
+	s1, e1 := loop_word_bounds(lines[1], 'item', false)
+	assert is_loop_binding_occurrence(lines, 1, s1, e1), 'a `for i, item in` binding is recognized'
+	s2, e2 := loop_word_bounds(lines[2], 'i', false)
+	assert is_loop_binding_occurrence(lines, 2, s2, e2), 'a `for i :=` binding is recognized'
+	s3, e3 := loop_word_bounds(lines[3], 'item', false)
+	assert !is_loop_binding_occurrence(lines, 3, s3, e3), 'a use in the body is not a binding'
+	one_line := ['for item in items { println(item) }']
+	su, eu := loop_word_bounds(one_line[0], 'item', true)
+	assert !is_loop_binding_occurrence(one_line, 0, su, eu), 'a use after `{` is not a binding'
+}
+
+fn test_is_loop_binding_occurrence_rejects_invalid_bounds() {
+	lines := ['for item in items {']
+	assert !is_loop_binding_occurrence(lines, -1, 4, 9), 'a negative line is rejected'
+	assert !is_loop_binding_occurrence([], 0, 4, 9), 'an out-of-range line is rejected'
+	assert !is_loop_binding_occurrence(lines, 0, -1, 9), 'a negative start is rejected'
+	assert !is_loop_binding_occurrence(lines, 0, 4, 100), 'an out-of-range end is rejected'
+	assert !is_loop_binding_occurrence(lines, 0, 4, 4), 'an empty span is rejected'
+	part_of_identifier := ['xfor item in items {']
+	s, e := loop_word_bounds(part_of_identifier[0], 'item', false)
+	assert !is_loop_binding_occurrence(part_of_identifier, 0, s, e), 'a `for` inside a name is not a keyword'
+	after_separator := ['if x { }; for item in items {']
+	ss, ee := loop_word_bounds(after_separator[0], 'item', false)
+	assert is_loop_binding_occurrence(after_separator, 0, ss, ee), 'a `for` after a separator is still a keyword'
+}
