@@ -864,6 +864,55 @@ fn test_diagnostics_scheduler_requeues_job_after_watched_file_change() {
 	assert new_job_a.project_generations[app.generation_key(uri_a)] > old_cache_generation
 }
 
+fn test_watcher_change_only_fast_checks_the_changed_document() {
+	mut app := create_test_app()
+	defer {
+		app.cancel_all_scheduled_diagnostics()
+		cleanup_test_app(app)
+	}
+	mut scheduler := new_diagnostics_scheduler()
+	scheduler.paused = true
+	app.diagnostics_scheduler = scheduler
+	project_dir := os.join_path(app.temp_dir, 'watched_fast_scope')
+	must_mkdir_all(project_dir)
+	path_a := os.join_path(project_dir, 'a.v')
+	path_b := os.join_path(project_dir, 'b.v')
+	uri_a := path_to_uri(path_a)
+	uri_b := path_to_uri(path_b)
+	content_a := 'module main\n\nfn a() {}\n'
+	content_b := 'module main\n\nfn b() {}\n'
+	must_write_file(path_a, content_a)
+	must_write_file(path_b, content_b)
+	app.open_files[uri_a] = content_a
+	app.open_files[uri_b] = content_b
+
+	app.on_did_change_watched_files(Request{
+		params: json2.encode(DidChangeWatchedFilesParams{
+			changes: [FileEvent{
+				uri:        uri_b
+				event_type: 2
+			}]
+		})
+	})
+
+	scheduler.mutex.lock()
+	defer {
+		scheduler.mutex.unlock()
+	}
+	mut sibling_fast := 0
+	mut changed_fast := 0
+	for _, job in scheduler.pending_jobs {
+		if job.uri == uri_a && job.kind == .fast {
+			sibling_fast++
+		}
+		if job.uri == uri_b && job.kind == .fast {
+			changed_fast++
+		}
+	}
+	assert sibling_fast == 0, 'an unchanged sibling must not be fast-checked'
+	assert changed_fast == 1, 'the changed document must still be fast-checked'
+}
+
 fn test_diagnostics_scheduler_requeues_active_sibling() {
 	mut app := create_test_app()
 	defer {

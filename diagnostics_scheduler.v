@@ -165,13 +165,23 @@ fn (mut scheduler DiagnosticsScheduler) begin_project_mutation(project_key strin
 	mut tickets := []DiagnosticsTicket{cap: affected.len * 2}
 	for affected_uri, _ in affected {
 		scheduler.generations[affected_uri] = scheduler.generations[affected_uri] + 1
-		for kind in [DiagnosticsKind.slow, DiagnosticsKind.fast] {
+		tickets << DiagnosticsTicket{
+			uri:                affected_uri
+			global_generation:  scheduler.global_generation
+			generation:         scheduler.generations[affected_uri]
+			project_generation: project_generation
+			kind:               .slow
+		}
+		// The fast pass only rescans a buffer for parse/import errors, which
+		// cannot appear in a document whose text did not change. Siblings need
+		// the compiler pass; only the changed document gets both.
+		if affected_uri == requested_uri {
 			tickets << DiagnosticsTicket{
 				uri:                affected_uri
 				global_generation:  scheduler.global_generation
 				generation:         scheduler.generations[affected_uri]
 				project_generation: project_generation
-				kind:               kind
+				kind:               .fast
 			}
 		}
 	}
@@ -483,7 +493,7 @@ fn (mut app App) begin_diagnostics_project_mutation_cached(uri string, mut cache
 		project_key := app.generation_key_cached(uri, mut cache)
 		return DiagnosticsProjectMutation{
 			project_key: project_key
-			tickets:     scheduler.begin_project_mutation(project_key, '', app.open_files_affected_by_cached(uri,
+			tickets:     scheduler.begin_project_mutation(project_key, uri, app.open_files_affected_by_cached(uri,
 				project_key, mut cache))
 		}
 	}
