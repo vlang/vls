@@ -6,6 +6,7 @@ import json2
 import os
 import v.vmod
 import strings
+import sync
 import time
 
 // Keep runtime-derived compiler settings behind functions. Function-call module constants can
@@ -326,6 +327,17 @@ fn build_v_line_info_args_single(file_to_check string, line_info string, compile
 		compile_target]
 }
 
+// LineInfoMode records whether the configured `v` answers the `-line-info`
+// checker that serves hover, completion, signature help, and go-to-definition.
+// The mode is probed from the first real request: a compiler that refuses or
+// cannot serve the options retires compiler-backed lookups for the session
+// instead of paying a process spawn per request.
+enum LineInfoMode {
+	unknown // not probed yet — try the options as-is
+	direct  // the compiler answers `-vls-mode` / `-line-info` itself
+	missing // no compiler serves them — answer from VLS's own index
+}
+
 // line_info_flags are the options older compilers may reject when asked for line info.
 const line_info_flags = ['-line-info', '-vls-mode', '-json-errors']
 
@@ -354,6 +366,15 @@ fn compiler_rejects_line_info(output string) bool {
 	return compiler_rejects_any_option(output, line_info_flags)
 }
 
+// compiler_reports_missing_compat_compiler reports whether the compiler output
+// shows that no checker can serve `-vls-mode` / `-line-info` (e.g. "`-vls-mode`
+// requires the compatibility compiler, but no usable ... fallback was found").
+// Retrying would only burn another compile, so the session should retire
+// compiler-backed lookups instead of paying doomed process spawns per request.
+fn compiler_reports_missing_compat_compiler(output string) bool {
+	return output.contains('requires the compatibility compiler') && output.contains('no usable')
+}
+
 // compiler_refused_and_stopped reports whether an invocation printed its refusal
 // and nothing else, which is how a launcher with no answer at all behaves. One
 // that recovers by rerunning the request against a compatibility compiler always
@@ -375,15 +396,15 @@ fn compiler_refused_and_stopped(output string) bool {
 	return refusals > 0
 }
 
-// compiler_lacks_compatibility_compiler reports whether an invocation failed
-// because the V launcher could not reach the V1 compatibility compiler, which is
-// what owns `-vls-mode` / `-line-info`. The launcher prints a single-line
-// refusal and exits without compiling, and that refusal is not an "unknown
-// option" line, so `compiler_rejects_line_info` never sees it. Without this
-// check VLS keeps paying a process launch per request for an answer that can
-// never arrive, and answers every hover, completion, and definition with an
-// empty result while saying nothing about why. Each refusal form below is one
-// `ensure_v1_fallback` failure in the launcher.
+// compiler_lacks_compatibility_compiler reports whether an older V launcher
+// could not reach the V1 compatibility compiler it used to need for
+// `-vls-mode` / `-line-info`. The launcher prints a single-line refusal and
+// exits without compiling, and that refusal is not an "unknown option" line,
+// so `compiler_rejects_line_info` never sees it. Without this check VLS keeps
+// paying a process launch per request for an answer that can never arrive,
+// and answers every hover, completion, and definition with an empty result
+// while saying nothing about why. Each refusal form below is one
+// `ensure_v1_fallback` failure in such a launcher.
 fn compiler_lacks_compatibility_compiler(output string) bool {
 	for line in output.split_into_lines() {
 		trimmed := line.trim_space()
@@ -406,6 +427,20 @@ fn compiler_lacks_compatibility_compiler(output string) bool {
 		}
 	}
 	return false
+}
+
+// report_missing_compatibility_compiler tells the user that the configured `v`
+// cannot serve the compiler-backed lookups, and how to fix it. Without this the
+// editor shows a VLS that highlights code but silently answers nothing for
+// completion, hover, signature help, and go to definition, which is
+// indistinguishable from VLS being broken.
+//
+// No "already warned" flag is needed: the caller sets `line_info_mode` to
+// `.missing` first, and from then on `run_v_line_info` returns from its early
+// `.missing` check without reaching this point, so it is reached at most once per
+// session.
+fn (mut app App) report_missing_compatibility_compiler() {
+	app.send_show_message('vls: the configured V compiler cannot serve completion, hover, signature help, or go to definition, because it does not support `-vls-mode` / `-line-info`. Set `VLS_V_COMMAND` to a V compiler that does. Diagnostics and formatting are unaffected.', 2)
 }
 
 // report_line_info_unavailable runs once per session when the compiler refuses
@@ -786,6 +821,93 @@ fn resolve_compiler_timeout_ms() i64 {
 // would silently drop them. The child is killed if it exceeds
 // compiler_timeout_ms. This is the single, shell-free entry point for all
 // compiler invocations.
+// CancelFlag lets the request loop cancel an in-flight compiler run. The
+// worker polls it in its drain loop; the loop sets it on $/cancelRequest.
+// It also carries capability findings back: the worker answers through a
+// private snapshot, so a refusal or unsupported-probe it discovers must be
+// handed to the session through this shared flag, or the session would keep
+// dispatching workers that repeat the same doomed probe.
+struct CancelFlag {
+mut:
+	mutex     sync.Mutex
+	cancelled bool
+	finished  bool
+	// Capability findings recorded by the worker under the same mutex, merged
+	// into the session by purge_finished_line_info before the flag is dropped.
+	line_info_missing       bool
+	v3_one_shot_unsupported bool
+}
+
+fn (mut flag CancelFlag) cancel() {
+	flag.mutex.lock()
+	defer {
+		flag.mutex.unlock()
+	}
+	flag.cancelled = true
+}
+
+fn (mut flag CancelFlag) is_cancelled() bool {
+	flag.mutex.lock()
+	defer {
+		flag.mutex.unlock()
+	}
+	return flag.cancelled
+}
+
+fn (mut flag CancelFlag) finish() {
+	flag.mutex.lock()
+	defer {
+		flag.mutex.unlock()
+	}
+	flag.finished = true
+}
+
+fn (mut flag CancelFlag) is_finished() bool {
+	flag.mutex.lock()
+	defer {
+		flag.mutex.unlock()
+	}
+	return flag.finished
+}
+
+// record_line_info_missing notes that the compiler definitively refused a
+// one-shot editor query, so the session retires compiler-backed lookups.
+fn (mut flag CancelFlag) record_line_info_missing() {
+	flag.mutex.lock()
+	defer {
+		flag.mutex.unlock()
+	}
+	flag.line_info_missing = true
+}
+
+// record_v3_one_shot_unsupported notes that the V in use has no V3 answering
+// `-line-info` in a process of its own, so the session stops probing it.
+fn (mut flag CancelFlag) record_v3_one_shot_unsupported() {
+	flag.mutex.lock()
+	defer {
+		flag.mutex.unlock()
+	}
+	flag.v3_one_shot_unsupported = true
+}
+
+// line_info_missing_reported reads the worker's recorded refusal.
+fn (mut flag CancelFlag) line_info_missing_reported() bool {
+	flag.mutex.lock()
+	defer {
+		flag.mutex.unlock()
+	}
+	return flag.line_info_missing
+}
+
+// v3_one_shot_unsupported_reported reads the worker's recorded probe result.
+fn (mut flag CancelFlag) v3_one_shot_unsupported_reported() bool {
+	flag.mutex.lock()
+	defer {
+		flag.mutex.unlock()
+	}
+	return flag.v3_one_shot_unsupported
+}
+
 fn run_v_argv(args []string, work_folder string) os.Result {
 	return run_v_argv_cancelled(args, work_folder, fn () bool {
 		return false
@@ -914,11 +1036,446 @@ fn run_v_argv_cancelled(args []string, work_folder string, cancelled fn () bool)
 	}
 }
 
+// run_v_argv_cancellable bridges the async line-info workers' CancelFlag to
+// run_v_argv_cancelled: $/cancelRequest sets the flag and the drain loop kills
+// the child instead of waiting out the full compiler timeout.
+fn run_v_argv_cancellable(args []string, work_folder string, cancel ?&CancelFlag) os.Result {
+	// Unwrap the optional before closing over it: a closure over the
+	// optional itself miscompiles (it calls a per-option wrapper that is
+	// never generated), while one over the plain pointer calls the method
+	// directly.
+	if flag := cancel {
+		mut f := flag
+		return run_v_argv_cancelled(args, work_folder, fn [mut f] () bool {
+			return f.is_cancelled()
+		})
+	}
+	return run_v_argv(args, work_folder)
+}
+
+// line_info_cancel_fn bridges the request's CancelFlag to the polling callbacks
+// the pooled compilers take: $/cancelRequest sets the flag and a pooled wait
+// stops instead of holding a worker until the query times out. A request with
+// no flag to set (the request loop's own one-shot runs) never cancels.
+fn (app &App) line_info_cancel_fn() fn () bool {
+	// Unwrap the optional before closing over it: a closure over the
+	// optional itself miscompiles (it calls a per-option wrapper that is
+	// never generated), while one over the plain pointer calls the method
+	// directly.
+	if flag := app.line_info_cancel {
+		mut f := flag
+		return fn [mut f] () bool {
+			return f.is_cancelled()
+		}
+	}
+	return fn () bool {
+		return false
+	}
+}
+
 fn cleanup_compilation_temp(temp_project_dir string, singlefile_tmppath string) {
 	if temp_project_dir != '' {
 		os.rmdir_all(temp_project_dir) or { log('Failed to clean up temp project dir: ${err}') }
 	} else if singlefile_tmppath != '' {
 		os.rm(singlefile_tmppath) or { log('Failed to remove temp file: ${err}') }
+	}
+}
+
+// OverlayCacheEntry is one reusable compilation overlay: a temp project view
+// whose symlinked tree is rebuilt only when the tracked file set changes or
+// the entry grows stale. Open buffers are still rewritten per request, but
+// only when their content hash changed. Rebuilds publish a fresh staging
+// directory and retire the previous tree instead of deleting it in place, so
+// an in-flight compiler run never reads a half-rebuilt tree.
+struct OverlayCacheEntry {
+mut:
+	temp_root         string
+	source_root       string
+	source_work_dir   string
+	built_ms          i64
+	used_ms           i64 // last request that used the tree; eviction clocks from this
+	tracked_rel_paths []string
+	file_hashes       map[string]int
+	retired           []RetiredOverlay
+}
+
+// RetiredOverlay is a superseded overlay tree kept alive for in-flight
+// readers. It is deleted once older than any possible compiler run.
+struct RetiredOverlay {
+	root       string
+	retired_ms i64
+}
+
+// OverlayCacheStore shares overlay entries between the request thread and the
+// diagnostics worker. Entries self-validate (tracked set + TTL), so a nil
+// store simply means today's per-request behavior.
+@[heap]
+struct OverlayCacheStore {
+mut:
+	mutex   sync.Mutex
+	entries map[string]OverlayCacheEntry
+	// Bumped by every watcher invalidation. A staging build snapshots it before
+	// building and refuses to publish if it changed meanwhile: the disk it
+	// mirrored is no longer current, so publishing would overwrite the
+	// invalidation with stale contents.
+	epoch u64
+}
+
+fn new_overlay_cache_store() &OverlayCacheStore {
+	return &OverlayCacheStore{
+		entries: map[string]OverlayCacheEntry{}
+	}
+}
+
+// overlay_cache_ttl_ms bounds how long a symlinked overlay tree is trusted
+// without a rebuild. It mirrors index_refresh_interval_ms: file-system changes
+// can linger for the same window the symbol index already accepts.
+const overlay_cache_ttl_ms = i64(10_000)
+
+// overlay_cache_key identifies a cached overlay by both the project root it
+// mirrors and the directory the compiler checks from. Nested programs under
+// one v.mod can have different local-import closures, so keying only by the
+// root would let one program reuse another's incomplete tree.
+fn overlay_cache_key(source_root string, source_work_dir string) string {
+	return '${source_root}\n${source_work_dir}'
+}
+
+// overlay_temp_root returns the stable process-wide directory for the overlay
+// of `source_root`. Stable names (instead of per-request unique dirs) are what
+// makes reuse across requests and across diagnostics jobs possible.
+fn overlay_temp_root(source_root string) string {
+	return os.join_path(os.temp_dir(), 'vls_ov_${os.getpid()}_${source_root.hash()}')
+}
+
+// overlay_staging_root returns a unique directory for building the next overlay
+// generation of `source_root`. Rebuilds never touch the published tree: the
+// staging tree becomes visible only when the cache entry is swapped to it.
+fn overlay_staging_root(source_root string) string {
+	// Consecutive clock readings collide on Windows, so a counter keeps two
+	// rebuilds in the same tick from staging into the same directory.
+	unsafe {
+		mut static seq := u64(0)
+		seq++
+		return '${overlay_temp_root(source_root)}_staging_${time.now().unix_nano()}_${seq}'
+	}
+}
+
+// overlay_retired_ttl_ms bounds how long a retired tree is kept for draining
+// readers: longer than any compiler run the server will wait for.
+fn overlay_retired_ttl_ms() i64 {
+	return resolve_compiler_timeout_ms() + 30_000
+}
+
+// write_file_atomic replaces `dest_path` without an observable truncated
+// state: readers see either the complete old content or the complete new
+// content, never a half-written file.
+fn write_file_atomic(dest_path string, content string) ! {
+	tmp_path := '${dest_path}.tmp_${os.getpid()}_${time.now().unix_nano()}'
+	os.write_file(tmp_path, content) or {
+		return error('Failed to write overlay file ${tmp_path}: ${err}')
+	}
+	os.mv(tmp_path, dest_path) or {
+		// Some Windows CRT renames do not replace: remove and retry once.
+		os.rm(dest_path) or {}
+		os.mv(tmp_path, dest_path) or {
+			os.rm(tmp_path) or {}
+			return error('Failed to replace overlay file ${dest_path}: ${err}')
+		}
+	}
+}
+
+// tracked_overlay_rel_paths lists every open buffer under `source_root`, as
+// paths relative to it. The set must match the cached entry: opening or
+// closing a file changes which paths are materialized versus symlinked.
+fn (app &App) tracked_overlay_rel_paths(source_root string) []string {
+	mut rel_paths := []string{}
+	for uri, _ in app.open_files {
+		file_path := normalize_overlay_path(uri_to_path(uri))
+		rel := overlay_relative_path(file_path, source_root) or { continue }
+		rel_path := if rel == '' { os.file_name(file_path) } else { rel }
+		rel_paths << rel_path
+	}
+	rel_paths.sort()
+	return rel_paths
+}
+
+// materialize_overlay_buffers writes every open buffer under `source_root`
+// into the overlay, skipping files whose content hash matches `known_hashes`.
+// It returns the fresh hash map for the cache entry.
+fn materialize_overlay_buffers(temp_root string, source_root string, open_files map[string]string, known_hashes map[string]int) !map[string]int {
+	mut hashes := map[string]int{}
+	for uri, content in open_files {
+		file_path := normalize_overlay_path(uri_to_path(uri))
+		rel := overlay_relative_path(file_path, source_root) or { continue }
+		rel_path := if rel == '' { os.file_name(file_path) } else { rel }
+		hash := content.hash()
+		hashes[rel_path] = hash
+		if known_hash := known_hashes[rel_path] {
+			if known_hash == hash {
+				continue
+			}
+		}
+		temp_file_path := os.join_path(temp_root, rel_path)
+		os.mkdir_all(os.dir(temp_file_path)) or {
+			return error('Failed to create overlay directory ${os.dir(temp_file_path)}: ${err}')
+		}
+		// Atomic replace: an in-flight compile reading this buffer must see
+		// a complete version, never a truncated one.
+		write_file_atomic(temp_file_path, content) or { return err }
+	}
+	return hashes
+}
+
+// overlay_work_paths derives the compiler working directory and the temp file
+// relative path inside a (possibly reused) overlay root.
+fn overlay_work_paths(source_root string, source_work_dir string, source_path string, temp_root string) !(string, string) {
+	work_rel := overlay_relative_path(source_work_dir, source_root) or {
+		return error('Source work directory is outside overlay root: ${source_work_dir}')
+	}
+	file_rel := overlay_relative_path(source_path, source_root) or {
+		return error('Source file is outside overlay root: ${source_path}')
+	}
+	temp_work_dir := if work_rel == '' {
+		temp_root
+	} else {
+		os.join_path(temp_root, work_rel)
+	}
+	if !os.exists(temp_work_dir) {
+		os.mkdir_all(temp_work_dir) or {
+			return error('Failed to create overlay work directory ${temp_work_dir}: ${err}')
+		}
+	}
+	return temp_work_dir, file_rel
+}
+
+// overlay_is_shared reports whether `temp_root` belongs to the overlay cache,
+// current or retired. Callers use it to skip deleting a tree that later
+// requests still need. A nil store (tests, code-lens runs) always reports
+// false, preserving the old per-request cleanup behavior exactly.
+fn (mut app App) overlay_is_shared(temp_root string) bool {
+	if temp_root == '' {
+		return false
+	}
+	mut store := app.overlay_cache_store or { return false }
+	store.mutex.lock()
+	defer {
+		store.mutex.unlock()
+	}
+	for _, entry in store.entries {
+		if entry.temp_root == temp_root {
+			return true
+		}
+		for retired in entry.retired {
+			if retired.root == temp_root {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// retire_overlay_entry_locked moves the entry's current tree to the retired
+// list and collects age-eligible retired roots for deletion. The caller must
+// hold the store mutex; deletion of the collected roots happens after unlock.
+fn retire_overlay_entry_locked(mut entry OverlayCacheEntry, now_ms i64, mut gc_roots []string) {
+	if entry.temp_root != '' {
+		entry.retired << RetiredOverlay{
+			root:       entry.temp_root
+			retired_ms: now_ms
+		}
+		entry.temp_root = ''
+	}
+	mut keep := []RetiredOverlay{cap: entry.retired.len}
+	for retired in entry.retired {
+		if now_ms - retired.retired_ms > overlay_retired_ttl_ms() {
+			gc_roots << retired.root
+		} else {
+			keep << retired
+		}
+	}
+	entry.retired = keep
+}
+
+// drop_overlay_temp_root retires one cached overlay so the next request
+// rebuilds from a clean tree instead of reusing a suspect one. The tree
+// itself is deleted only once no in-flight reader can still use it, so this
+// never pulls the tree out from under a running compiler.
+fn (mut app App) drop_overlay_temp_root(temp_root string) {
+	if temp_root == '' {
+		return
+	}
+	mut store := app.overlay_cache_store or { return }
+	now_ms := time.now().unix_milli()
+	store.mutex.lock()
+	mut found := ''
+	for key, entry in store.entries {
+		if entry.temp_root == temp_root {
+			found = key
+			break
+		}
+	}
+	mut gc_roots := []string{}
+	if found != '' {
+		mut entry := store.entries[found]
+		retire_overlay_entry_locked(mut entry, now_ms, mut gc_roots)
+		if entry.temp_root == '' && entry.retired.len == 0 {
+			store.entries.delete(found)
+		} else {
+			store.entries[found] = entry
+		}
+	}
+	store.mutex.unlock()
+	for root in gc_roots {
+		os.rmdir_all(root) or {}
+	}
+}
+
+// overlay_idle_evict_ms bounds how long an unused cache entry keeps its tree.
+// Hits already stop being trusted after overlay_cache_ttl_ms; this window is
+// longer than any compiler run the server waits for, so removing a tree here
+// cannot pull it out from under a reader.
+const overlay_idle_evict_ms = i64(60_000)
+
+// evict_expired_overlays removes entries no request has used within the idle
+// window. The published tree is retired rather than deleted at once: a compiler
+// run may have started just before the idle window closed and still be reading
+// it (VLS_TIMEOUT_MS can exceed the idle window), so it is deleted only once
+// older than any possible compiler run, like a superseded rebuild.
+fn (mut app App) evict_expired_overlays(now_ms i64) {
+	mut store := app.overlay_cache_store or { return }
+	mut gc_roots := []string{}
+	store.mutex.lock()
+	for key, entry in store.entries {
+		if now_ms - entry.used_ms <= overlay_idle_evict_ms {
+			continue
+		}
+		mut young := []RetiredOverlay{}
+		if entry.temp_root != '' {
+			young << RetiredOverlay{
+				root:       entry.temp_root
+				retired_ms: now_ms
+			}
+		}
+		for retired in entry.retired {
+			if now_ms - retired.retired_ms > overlay_retired_ttl_ms() {
+				gc_roots << retired.root
+			} else {
+				// Still needed by an in-flight reader: keep the owner so a
+				// later pass (or session teardown) can delete it.
+				young << retired
+			}
+		}
+		if young.len == 0 {
+			store.entries.delete(key)
+		} else {
+			mut kept := entry
+			kept.temp_root = ''
+			kept.retired = young
+			store.entries[key] = kept
+		}
+	}
+	store.mutex.unlock()
+	for root in gc_roots {
+		os.rmdir_all(root) or {}
+	}
+}
+
+// drop_overlays_under retires the cached overlays of a workspace folder the
+// client closed. Keeping them as cache hits would leave temp trees for projects
+// no longer open in the session. The trees themselves are retired, not deleted:
+// an async compiler worker may still be reading one, so each is deleted only
+// once older than any possible compiler run, like a superseded rebuild.
+fn (mut app App) drop_overlays_under(path string) {
+	mut store := app.overlay_cache_store or { return }
+	removed_root := normalize_overlay_path(path)
+	now_ms := time.now().unix_milli()
+	mut gc_roots := []string{}
+	store.mutex.lock()
+	for key, entry in store.entries {
+		if !path_is_within(entry.source_root, removed_root)
+			&& !path_is_within(removed_root, entry.source_root) {
+			continue
+		}
+		mut young := []RetiredOverlay{}
+		if entry.temp_root != '' {
+			young << RetiredOverlay{
+				root:       entry.temp_root
+				retired_ms: now_ms
+			}
+		}
+		for retired in entry.retired {
+			if now_ms - retired.retired_ms > overlay_retired_ttl_ms() {
+				gc_roots << retired.root
+			} else {
+				young << retired
+			}
+		}
+		if young.len == 0 {
+			store.entries.delete(key)
+		} else {
+			// Keep the owner with no published tree so a later eviction pass
+			// (or session teardown) deletes the draining trees by age.
+			store.entries[key] = OverlayCacheEntry{
+				source_root:     entry.source_root
+				source_work_dir: entry.source_work_dir
+				retired:         young
+			}
+		}
+	}
+	store.mutex.unlock()
+	for root in gc_roots {
+		os.rmdir_all(root) or {}
+	}
+}
+
+// drop_all_overlays deletes every cached overlay tree, including retired ones
+// draining in-flight readers. It runs on shutdown after workers are joined,
+// so no reader can still reference these trees.
+fn (mut app App) drop_all_overlays() {
+	mut store := app.overlay_cache_store or { return }
+	store.mutex.lock()
+	mut roots := []string{}
+	for _, entry in store.entries {
+		if entry.temp_root != '' {
+			roots << entry.temp_root
+		}
+		for retired in entry.retired {
+			roots << retired.root
+		}
+	}
+	store.entries.clear()
+	store.mutex.unlock()
+	for root in roots {
+		os.rmdir_all(root) or {}
+	}
+}
+
+// invalidate_overlay_for_disk_change marks the cached overlay entries that
+// hold `changed_path` stale, so the next request rebuilds the symlinked tree
+// instead of serving a stale listing or stale materialized bytes. The tracked
+// set only covers open buffers: local imports are materialized as links or
+// copies, so a closed file's content change can leave a hard link pointing at
+// the old inode. Hits never refresh the build-anchored TTL, so without this a
+// hot entry would keep serving old source indefinitely.
+fn (mut app App) invalidate_overlay_for_disk_change(changed_path string) {
+	mut store := app.overlay_cache_store or { return }
+	changed := normalize_overlay_path(changed_path)
+	store.mutex.lock()
+	defer {
+		store.mutex.unlock()
+	}
+	// Any staging build in flight mirrored the disk before this change; bumping
+	// the epoch makes it discard its tree instead of publishing stale contents.
+	store.epoch++
+	for key, mut entry in store.entries {
+		if entry.temp_root == '' {
+			continue
+		}
+		if overlay_relative_path(changed, entry.source_root) != none
+			|| overlay_relative_path(entry.source_root, changed) != none {
+			entry.built_ms = 0
+			store.entries[key] = entry
+		}
 	}
 }
 
@@ -1025,7 +1582,8 @@ const program_root_max_depth = 4
 fn (app &App) program_root(source_path string) string {
 	normalized_source := normalize_overlay_path(source_path)
 	file_dir := normalize_overlay_path(os.dir(normalized_source))
-	if get_module_name(app.source_text(normalized_source)) in ['', 'main'] {
+	open_text := app.open_file_text_by_path()
+	if get_module_name(source_text_in(normalized_source, open_text)) in ['', 'main'] {
 		return compilation_work_dir(normalized_source)
 	}
 	vmod_root := normalize_overlay_path(find_project_root(file_dir))
@@ -1037,7 +1595,7 @@ fn (app &App) program_root(source_path string) string {
 			break
 		}
 		dir = parent
-		if app.program_reaches(dir, vmod_root, file_dir) {
+		if app.program_reaches_in(dir, vmod_root, file_dir, open_text) {
 			return dir
 		}
 	}
@@ -1047,13 +1605,44 @@ fn (app &App) program_root(source_path string) string {
 // program_reaches reports whether the program in `dir`, if there is one there,
 // imports the module in `module_dir`, directly or through other local modules.
 fn (app &App) program_reaches(dir string, vmod_root string, module_dir string) bool {
+	return app.program_reaches_in(dir, vmod_root, module_dir, app.open_file_text_by_path())
+}
+
+struct FileModuleInfo {
+	name    string
+	imports []string
+}
+
+// file_module_info caches the module declaration and imports of a file for one
+// request: a program that imports several modules visits the same file from
+// more than one hop, and parsing it again each time only repeats work.
+fn file_module_info(path string, open_text map[string]string, mut cache map[string]FileModuleInfo) FileModuleInfo {
+	if info := cache[path] {
+		return info
+	}
+	content := source_text_in(path, open_text)
+	info := FileModuleInfo{
+		name:    get_module_name(content)
+		imports: parse_imports(content)
+	}
+	cache[path] = info
+	return info
+}
+
+fn (app &App) program_reaches_in(dir string, vmod_root string, module_dir string, open_text map[string]string) bool {
+	mut open_paths := map[string]bool{}
+	for path, _ in open_text {
+		open_paths[path] = true
+	}
+	mut dir_cache := map[string][]string{}
+	mut module_cache := map[string]FileModuleInfo{}
 	mut pending := []string{}
 	mut is_program := false
-	for file in app.v_files_in(dir) {
-		content := app.source_text(file)
-		if get_module_name(content) in ['', 'main'] {
+	for file in v_files_in_cached(dir, open_paths, mut dir_cache) {
+		info := file_module_info(file, open_text, mut module_cache)
+		if info.name in ['', 'main'] {
 			is_program = true
-			pending << parse_imports(content)
+			pending << info.imports
 		}
 	}
 	if !is_program {
@@ -1070,8 +1659,8 @@ fn (app &App) program_reaches(dir string, vmod_root string, module_dir string) b
 		if imported_dir == module_dir {
 			return true
 		}
-		for file in app.v_files_in(imported_dir) {
-			pending << parse_imports(app.source_text(file))
+		for file in v_files_in_cached(imported_dir, open_paths, mut dir_cache) {
+			pending << file_module_info(file, open_text, mut module_cache).imports
 		}
 	}
 	return false
@@ -1132,11 +1721,18 @@ fn (app &App) narrow_check_dir(real_path string, program_dir string, text string
 		return ''
 	}
 	vmod_root := normalize_overlay_path(find_project_root(program_dir))
-	if !app.program_reaches(program_dir, vmod_root, module_dir) {
+	open_text := app.open_file_text_by_path()
+	mut open_paths := map[string]bool{}
+	for path, _ in open_text {
+		open_paths[path] = true
+	}
+	mut dir_cache := map[string][]string{}
+	mut module_cache := map[string]FileModuleInfo{}
+	if !app.program_reaches_in(program_dir, vmod_root, module_dir, open_text) {
 		return ''
 	}
-	for program_file in app.v_files_in(program_dir) {
-		for module_path in parse_imports(app.source_text(program_file)) {
+	for program_file in v_files_in_cached(program_dir, open_paths, mut dir_cache) {
+		for module_path in file_module_info(program_file, open_text, mut module_cache).imports {
 			if imported := resolve_local_module_dir(module_path, program_dir, vmod_root) {
 				if imported != module_dir {
 					return ''
@@ -1176,6 +1772,21 @@ fn resolve_local_module_dir(module_path string, program_dir string, vmod_root st
 // v_files_in returns the V files of `dir` that make up its module, tests left
 // out: those on disk, and those open in the editor and not saved yet.
 fn (app &App) v_files_in(dir string) []string {
+	mut open_paths := map[string]bool{}
+	for uri, _ in app.open_files {
+		open_paths[normalize_overlay_path(uri_to_path(uri))] = true
+	}
+	mut cache := map[string][]string{}
+	return v_files_in_cached(dir, open_paths, mut cache)
+}
+
+// v_files_in_cached reuses one directory listing and one open-path set across
+// the whole import walk of a request. Each hop of program_reaches used to pay
+// for an os.ls plus a scan of every open document again.
+fn v_files_in_cached(dir string, open_paths map[string]bool, mut cache map[string][]string) []string {
+	if files := cache[dir] {
+		return files
+	}
 	mut files := []string{}
 	mut seen := map[string]bool{}
 	for entry in os.ls(dir) or { []string{} } {
@@ -1187,25 +1798,38 @@ fn (app &App) v_files_in(dir string) []string {
 			}
 		}
 	}
-	for uri, _ in app.open_files {
-		path := normalize_overlay_path(uri_to_path(uri))
+	for path, _ in open_paths {
 		if path.ends_with('.v') && !path.ends_with('_test.v') && os.dir(path) == dir
 			&& path !in seen {
 			seen[path] = true
 			files << path
 		}
 	}
+	cache[dir] = files
 	return files
 }
 
 // source_text returns the text of the file at `path`: the editor's buffer when
 // the file is open, what is on disk otherwise.
 fn (app &App) source_text(path string) string {
-	normalized := normalize_overlay_path(path)
+	return source_text_in(path, app.open_file_text_by_path())
+}
+
+// open_file_text_by_path builds the normalized-path → buffer map once for a
+// request chain that reads many files (program_root walks imports recursively).
+fn (app &App) open_file_text_by_path() map[string]string {
+	mut paths := map[string]string{}
 	for uri, content in app.open_files {
-		if normalize_overlay_path(uri_to_path(uri)) == normalized {
-			return content
-		}
+		paths[normalize_overlay_path(uri_to_path(uri))] = content
+	}
+	return paths
+}
+
+// source_text_in is the O(1) form for callers that already hold the map.
+fn source_text_in(path string, open_text map[string]string) string {
+	key := normalize_overlay_path(path)
+	if content := open_text[key] {
+		return content
 	}
 	return os.read_file(path) or { '' }
 }
@@ -1332,7 +1956,17 @@ fn (mut app App) prepare_compilation_overlay_with(real_path string, work_dir str
 	source_root := program_overlay_root(source_path, source_work_dir)
 	source_display_root := source_root
 	// A stable overlay persists across checks: it is synced, not rebuilt, so
-	// only files whose buffer content differs get rewritten.
+	// only files whose buffer content differs get rewritten. Otherwise the
+	// shared cache reuses the symlinked project tree of `source_root` across
+	// requests and diagnostics jobs; a nil store (tests, code-lens runs) falls
+	// through to the historical per-request overlay below, which the caller
+	// cleans.
+	if app.overlay_dir == '' {
+		if mut store := app.overlay_cache_store {
+			return app.prepare_cached_overlay(mut store, source_path, source_root,
+				source_display_root, source_work_dir, importers)
+		}
+	}
 	stable := app.overlay_dir != ''
 	had_stable_overlay := stable && os.is_dir(app.overlay_dir)
 	temp_root_unresolved := app.write_tracked_files_to_temp(source_root)!
@@ -1391,6 +2025,211 @@ fn (mut app App) prepare_compilation_overlay_with(real_path string, work_dir str
 		temp_work_dir:       temp_work_dir
 		temp_source_file:    os.join_path(temp_root, file_rel)
 	}
+}
+
+// prepare_cached_overlay reuses the symlinked project tree of `source_root`
+// across requests and diagnostics jobs. Only open buffers whose content hash
+// changed are rewritten (atomically); the expensive full-tree symlink walk
+// runs only when the tracked file set changes or the entry grows stale, and
+// it builds a fresh staging directory that becomes visible only at publish.
+// A rebuild therefore never deletes or half-rewrites a tree an in-flight
+// compiler run is reading; the previous tree is retired for draining readers
+// and deleted once older than any possible compiler run. A cache hit never
+// mutates the published tree: concurrent async requests carry different
+// open-file snapshots, and per-file atomic replacement cannot keep a whole
+// snapshot (files plus committed hashes) consistent. A hit whose buffers
+// differ from the entry therefore rebuilds a private staging tree instead of
+// overwriting the tree another compiler is reading; only an exact content
+// match reuses the published root. A hit preserves the entry's build time, so
+// the TTL stays anchored to the build: refreshing it on every hit would let
+// requests less than one TTL apart keep a stale symlinked listing (a new or
+// deleted `.v` sibling on disk) alive indefinitely. `importers` are the disk files the
+// line-info overlay writes next to the buffers (see prepare_line_info_overlay);
+// they travel through the cache like buffers so the cached tree keeps them.
+fn (mut app App) prepare_cached_overlay(mut store &OverlayCacheStore, source_path string, source_root string, source_display_root string, source_work_dir string, importers map[string]string) !CompilationOverlay {
+	app.evict_expired_overlays(time.now().unix_milli())
+	cache_key := overlay_cache_key(source_root, source_work_dir)
+	for _ in 0 .. 3 {
+		// Snapshot under one short lock: the entry, the tracked set, and the
+		// open buffers the build must materialize.
+		store.mutex.lock()
+		build_epoch := store.epoch
+		mut tracked := app.tracked_overlay_rel_paths(source_root)
+		for path, _ in importers {
+			if rel := overlay_relative_path(path, source_root) {
+				rel_path := if rel == '' { os.file_name(path) } else { rel }
+				if rel_path !in tracked {
+					tracked << rel_path
+				}
+			}
+		}
+		tracked.sort()
+		mut open_snapshot := app.open_files.clone()
+		for path, content in importers {
+			open_snapshot[path_to_uri(path)] = content
+		}
+		now_ms := time.now().unix_milli()
+		mut hit_root := ''
+		mut hit_hashes := map[string]int{}
+		if entry := store.entries[cache_key] {
+			if entry.temp_root != '' && now_ms - entry.built_ms < overlay_cache_ttl_ms
+				&& entry.tracked_rel_paths == tracked && os.is_dir(entry.temp_root) {
+				hit_root = entry.temp_root
+				hit_hashes = entry.file_hashes.clone()
+			}
+		}
+
+		if hit_root != '' {
+			// A hit reuses the published tree only when the requesting
+			// snapshot holds exactly what the entry holds: concurrent async
+			// requests carry different open-file snapshots against the same
+			// root, and overwriting the shared tree in place would let one
+			// worker's files mix with another's committed hashes. A content
+			// mismatch falls through to the staging rebuild below, which
+			// publishes a private tree and retires the previous one for
+			// draining readers instead of mutating it under them.
+			mut matches := true
+			mut seen := 0
+			for uri, content in open_snapshot {
+				file_path := normalize_overlay_path(uri_to_path(uri))
+				rel := overlay_relative_path(file_path, source_root) or { continue }
+				rel_path := if rel == '' { os.file_name(file_path) } else { rel }
+				seen++
+				if known := hit_hashes[rel_path] {
+					if known != content.hash() {
+						matches = false
+						break
+					}
+				} else {
+					matches = false
+					break
+				}
+			}
+			if matches && seen != hit_hashes.len {
+				matches = false
+			}
+			if !matches {
+				store.mutex.unlock()
+				// A different snapshot: rebuild below instead of overwriting.
+			} else {
+				temp_work_dir, file_rel := overlay_work_paths(source_root, source_work_dir,
+					source_path, hit_root) or {
+					store.mutex.unlock()
+					return err
+				}
+				// The hit reuses the published tree as-is: its build time is
+				// preserved so the TTL stays anchored to the build. Refreshing
+				// it here would let requests less than one TTL apart keep a
+				// stale symlinked listing (a new or deleted `.v` sibling) alive
+				// indefinitely. The entry expires on its original deadline and
+				// the next rebuild re-symlinks the current tree.
+				mut current_root := ''
+				if mut entry := store.entries[cache_key] {
+					current_root = entry.temp_root
+					// Refresh only the idle clock: the build time stays anchored
+					// so the hit cannot keep a stale symlink listing alive.
+					entry.used_ms = now_ms
+					store.entries[cache_key] = entry
+				}
+				store.mutex.unlock()
+				if current_root == '' || current_root == hit_root {
+					return CompilationOverlay{
+						source_root:         source_root
+						source_display_root: source_display_root
+						temp_root:           hit_root
+						source_work_dir:     source_work_dir
+						temp_work_dir:       temp_work_dir
+						temp_source_file:    os.join_path(hit_root, file_rel)
+					}
+				}
+				// Swapped concurrently: retry against the new tree.
+				continue
+			}
+		} else {
+			store.mutex.unlock()
+		}
+
+		staging := overlay_staging_root(source_root)
+		os.mkdir_all(staging) or {
+			return error('Failed to create compilation overlay directory ${staging}: ${err}')
+		}
+		hashes := materialize_overlay_buffers(staging, source_root, open_snapshot, map[string]int{}) or {
+			os.rmdir_all(staging) or {}
+			return err
+		}
+		symlink_untracked_files(source_root, source_work_dir, staging, open_snapshot) or {
+			os.rmdir_all(staging) or {}
+			return error('Failed to populate compilation overlay: ${err}')
+		}
+		temp_work_dir, file_rel := overlay_work_paths(source_root, source_work_dir, source_path,
+			staging) or {
+			os.rmdir_all(staging) or {}
+			return err
+		}
+		// Publish: the staging tree becomes visible here, fully built. The
+		// previous tree is retired for draining readers. A concurrent
+		// rebuild publishes its own staging; both trees stay valid and the
+		// last publish wins for new readers.
+		store.mutex.lock()
+		if store.epoch != build_epoch {
+			// A watcher invalidated the disk this staging mirrored while it was
+			// building. Publishing would overwrite that invalidation with stale
+			// contents; discard the tree and rebuild against the current disk.
+			store.mutex.unlock()
+			os.rmdir_all(staging) or {}
+			continue
+		}
+		mut gc_roots := []string{}
+		publish_ms := time.now().unix_milli()
+		if mut entry := store.entries[cache_key] {
+			if entry.temp_root != '' && entry.temp_root != staging {
+				entry.retired << RetiredOverlay{
+					root:       entry.temp_root
+					retired_ms: publish_ms
+				}
+			}
+			mut keep := []RetiredOverlay{cap: entry.retired.len}
+			for retired in entry.retired {
+				if publish_ms - retired.retired_ms > overlay_retired_ttl_ms() {
+					gc_roots << retired.root
+				} else {
+					keep << retired
+				}
+			}
+			entry.retired = keep
+			entry.temp_root = staging
+			entry.source_root = source_root
+			entry.source_work_dir = source_work_dir
+			entry.built_ms = publish_ms
+			entry.used_ms = publish_ms
+			entry.tracked_rel_paths = tracked
+			entry.file_hashes = hashes
+			store.entries[cache_key] = entry
+		} else {
+			store.entries[cache_key] = OverlayCacheEntry{
+				temp_root:         staging
+				source_root:       source_root
+				source_work_dir:   source_work_dir
+				built_ms:          publish_ms
+				used_ms:           publish_ms
+				tracked_rel_paths: tracked
+				file_hashes:       hashes
+			}
+		}
+		store.mutex.unlock()
+		for root in gc_roots {
+			os.rmdir_all(root) or {}
+		}
+		return CompilationOverlay{
+			source_root:         source_root
+			source_display_root: source_display_root
+			temp_root:           staging
+			source_work_dir:     source_work_dir
+			temp_work_dir:       temp_work_dir
+			temp_source_file:    os.join_path(staging, file_rel)
+		}
+	}
+	return error('Failed to prepare compilation overlay: entry swapped repeatedly')
 }
 
 // source_path_from_overlay maps compiler paths in the temporary project back to
@@ -1653,7 +2492,10 @@ fn (mut app App) run_v_check(path string, text string) []JsonError {
 		app.send_log_message('diagnostics stages fp=${fp_ms} prep=${prep_ms} run=${run_ms} parse=${parse_ms} total=${total_ms} target=${check_target}',
 			4)
 	}
-	if server_exe == '' {
+	// A shared cache entry outlives the check that populated it: the next
+	// request or check revalidates it (tracked set + TTL) instead of
+	// rebuilding the symlinked tree.
+	if server_exe == '' && !app.overlay_is_shared(temp_project_dir) {
 		cleanup_compilation_temp(temp_project_dir, singlefile_tmppath)
 	}
 
@@ -2353,9 +3195,22 @@ fn (mut app App) on_did_change_watched_files(request Request) {
 		}
 		return
 	}
+	// An editor save often emits several events for the same file. Every step
+	// below invalidates by URI, so repeating one only repeats the syscalls and
+	// the diagnostics requeues. Collapse identical (uri, type) pairs first.
+	mut seen_changes := map[string]bool{}
+	mut changes := []FileEvent{cap: params.changes.len}
+	for change in params.changes {
+		key := '${change.uri}\x00${change.event_type}'
+		if key in seen_changes {
+			continue
+		}
+		seen_changes[key] = true
+		changes << change
+	}
 	// A module folder may have appeared, gone or changed its module name.
 	app.importable_modules_cache = map[string]ImportableModulesCache{}
-	for change in params.changes {
+	for change in changes {
 		app.forget_module_folder(uri_to_path(change.uri))
 		// A project's `vls.json` holds the defines its checks run with, so a
 		// change of it is a change of the configuration (see vls_config.v).
@@ -2364,11 +3219,22 @@ fn (mut app App) on_did_change_watched_files(request Request) {
 		// walks; a file only changing does not, because the content memo gates
 		// on its size, inode and mtime.
 		if change.event_type == 1 || change.event_type == 3 {
-			app.forget_project_files()
+			app.forget_project_files_in(uri_to_path(change.uri))
+			// The worker fingerprint memo holds a listing and per-file hashes;
+			// both can go stale when a file appears or disappears. A content
+			// change needs no clear: the per-file stat gate detects it.
+			if mut scheduler := app.diagnostics_scheduler {
+				scheduler.mutex.lock()
+				scheduler.forget_diagnostics_memo()
+				scheduler.mutex.unlock()
+			}
 		}
 	}
 	open_uris_by_path := app.open_index_uris_by_path()
-	for change in params.changes {
+	// Project keys do not change during a notification (no v.mod is created
+	// here), so resolve each URI once and share the result across events.
+	mut key_cache := map[string]string{}
+	for change in changes {
 		event_uri := change.uri
 		uri := open_uris_by_path[normalized_index_path(uri_to_path(event_uri))] or { event_uri }
 		// A watcher may spell an open document URI differently from the client
@@ -2381,9 +3247,16 @@ fn (mut app App) on_did_change_watched_files(request Request) {
 			app.diag_cache.delete(event_uri)
 		}
 		app.v3_query_notice_disk_change(uri_to_path(event_uri), change.event_type)
+		// A create/delete changes the overlay's tree itself. A content change
+		// of a closed file matters too: local imports are materialized as hard
+		// links or copies, so a shared-cache hit can keep serving stale bytes
+		// until its build-anchored TTL expires. Rebuild on all three.
+		if change.event_type == 1 || change.event_type == 2 || change.event_type == 3 {
+			app.invalidate_overlay_for_disk_change(uri_to_path(event_uri))
+		}
 		match change.event_type {
 			3 {
-				diagnostics_mutation := app.begin_diagnostics_project_mutation(uri)
+				diagnostics_mutation := app.begin_diagnostics_project_mutation_cached(uri, mut key_cache)
 				is_open := uri in app.open_files
 				// Deleted on disk. Invalidate cached diagnostics, but do NOT drop
 				// an open editor buffer: the editor still owns the in-memory
@@ -2391,7 +3264,11 @@ fn (mut app App) on_did_change_watched_files(request Request) {
 				if uri in app.diag_cache {
 					app.diag_cache.delete(uri)
 				}
-				app.bump_generation(uri)
+				if diagnostics_mutation.project_key != '' {
+					app.bump_generation_for_key(diagnostics_mutation.project_key)
+				} else {
+					app.bump_generation(uri)
+				}
 				// Re-index from disk when no editor buffer owns the URI (the file
 				// was removed, so this drops the entry).
 				if uri !in app.open_files {
@@ -2405,7 +3282,7 @@ fn (mut app App) on_did_change_watched_files(request Request) {
 				log('on_did_change_watched_files: disk delete for ${uri}')
 			}
 			1, 2 {
-				diagnostics_mutation := app.begin_diagnostics_project_mutation(uri)
+				diagnostics_mutation := app.begin_diagnostics_project_mutation_cached(uri, mut key_cache)
 				// Created or Changed on disk. The editor buffer is authoritative
 				// for any open document, so we must never overwrite open_files
 				// with disk content — doing so would erase unsaved edits (P0-07
@@ -2420,7 +3297,30 @@ fn (mut app App) on_did_change_watched_files(request Request) {
 				if uri in app.diag_cache {
 					app.diag_cache.delete(uri)
 				}
-				app.bump_generation(uri)
+				// Inlay hints of a document can name parameters declared in a
+				// closed file of the same program. A disk change to that file
+				// must drop the per-document hint answers and the cached
+				// signatures from its directory, or the old names survive.
+				for hint_uri in app.inlay_hint_cache.keys() {
+					if hint_uri.starts_with('file://') {
+						app.inlay_hint_cache.delete(hint_uri)
+					}
+				}
+				app.evict_inlay_fn_cache_under(os.dir(uri_to_path(uri)))
+				// Reuse the project key already resolved for the mutation instead
+				// of walking ancestors again.
+				if diagnostics_mutation.project_key != '' {
+					app.bump_generation_for_key(diagnostics_mutation.project_key)
+				} else {
+					app.bump_generation(uri)
+				}
+				// A closed file's change can affect hints and diagnostics of any
+				// project that imports it, and generation_key of the importer is
+				// not always the key of the changed file. Bump every project so
+				// every dependent stamp changes.
+				for key in app.project_generations.keys() {
+					app.project_generations[key]++
+				}
 				app.finish_diagnostics_project_mutation(diagnostics_mutation, '')
 			}
 			else {}
@@ -2541,6 +3441,175 @@ fn (mut app App) line_info_unavailable_result(method Method, path string, line_i
 	}
 }
 
+// LineInfoJob carries everything an async line-info worker needs. The snapshot
+// shares immutable index values with the request loop (entries are only ever
+// replaced, never mutated) but owns private copies of every map it writes, so
+// the loop never blocks on a compiler run.
+struct LineInfoJob {
+mut:
+	snapshot &App
+	method   Method
+	request  Request
+	cancel   &CancelFlag
+}
+
+// line_info_snapshot clones the request-loop state an async line-info worker
+// needs: open buffers, workspace roots, the fingerprint-checked index (values
+// are shared read-only; the maps themselves are private copies), the vlib
+// cache, and the transport write path. Generation counters and diagnostics
+// state are intentionally left behind: the worker answers one request from a
+// frozen snapshot and never publishes diagnostics.
+fn (mut app App) line_info_snapshot(cancel &CancelFlag) &App {
+	// clone() copies the map's key/value and metadata arrays in bulk. Filling
+	// a new map entry by entry hashes every key again, which was the dominant
+	// cost of starting an async line-info worker on a large index.
+	// The worker asks the same pooled compilers the session asks through, so
+	// the pool (already the session's, created below in dispatch when needed)
+	// and the flags that gate it are shared, never duplicated: a worker that
+	// made its own pool would leave query servers the session shutdown never
+	// stops. The worker never stops the shared pool; the session does, after
+	// it has joined the workers. The async worker threads are joined through
+	// the same group the loop waits on at shutdown.
+	return &App{
+		text:                    app.text
+		open_files:              app.open_files.clone()
+		open_files_versions:     map[string]i64{}
+		workspace_roots:         app.workspace_roots.clone()
+		removed_workspace_roots: app.removed_workspace_roots.clone()
+		position_encoding:       app.position_encoding
+		symbol_index:            app.symbol_index.clone()
+		ref_occurrences:         map[string]OccEntry{}
+		vlib_fn_cache:           app.vlib_fn_cache.clone()
+		indexed_dirs:            app.indexed_dirs.clone()
+		indexed_dir_walk_ms:     app.indexed_dir_walk_ms.clone()
+		index_skipped_uris:      app.index_skipped_uris.clone()
+		index_incomplete_scopes: app.index_incomplete_scopes.clone()
+		diag_cache:              map[string]DiagCacheEntry{}
+		project_generations:     map[string]int{}
+		line_info_mode:          app.line_info_mode
+		v3_line_info_enabled:    app.v3_line_info_enabled
+		v3_one_shot_unsupported: app.v3_one_shot_unsupported
+		v3_query_servers:        app.v3_query_servers
+		current_request_raw_id:  app.current_request_raw_id
+		write_mutex:             app.write_mutex
+		line_info_workers:       app.line_info_workers
+		tcp_conn:                app.tcp_conn
+		capture_output:          app.capture_output
+		temp_dir:                os.temp_dir()
+		line_info_cancel:        cancel
+		overlay_cache_store:     app.overlay_cache_store
+		cancelled_requests:      map[int]bool{}
+		cancelled_raw_ids:       map[string]bool{}
+		line_info_cancels:       map[string]&CancelFlag{}
+	}
+}
+
+fn run_async_line_info_job(job LineInfoJob) {
+	defer {
+		job.snapshot.line_info_workers.done()
+	}
+	mut snap := job.snapshot
+	resp := snap.operation_at_pos(job.method, job.request)
+	mut flag := job.cancel
+	was_cancelled := flag.is_cancelled()
+	flag.finish()
+	if was_cancelled {
+		snap.write_error_response(make_cancelled_error_response(job.request.id))
+		return
+	}
+	snap.write_response(resp)
+}
+
+// cancel_and_join_line_info_workers cancels the in-flight async line-info
+// workers and waits for them: a worker compiles against a cached overlay and
+// writes through the session's transport, so the session must outlive every
+// worker it scheduled. Only the request loop calls this; workers only flip
+// their own flag bits.
+fn (mut app App) cancel_and_join_line_info_workers() {
+	for raw_id in app.line_info_cancels.keys() {
+		mut f := app.line_info_cancels[raw_id] or { continue }
+		f.cancel()
+	}
+	app.line_info_workers.wait()
+}
+
+fn (mut app App) purge_finished_line_info() {
+	mut done := []string{}
+	for raw_id in app.line_info_cancels.keys() {
+		mut f := app.line_info_cancels[raw_id] or { continue }
+		if f.is_finished() {
+			done << raw_id
+		}
+	}
+	for raw_id in done {
+		mut f := app.line_info_cancels[raw_id] or { continue }
+		// The worker answered through a private snapshot: merge the capability
+		// findings it recorded back into the session before dropping the flag,
+		// or later requests would repeat the same doomed probe or keep
+		// dispatching workers for a compiler the worker already retired.
+		if f.line_info_missing_reported() {
+			app.line_info_mode = .missing
+			app.line_info_unavailable = true
+		}
+		if f.v3_one_shot_unsupported_reported() {
+			app.v3_one_shot_unsupported = true
+		}
+		app.line_info_cancels.delete(raw_id)
+		// The worker answered its request (cancelled or not): consume any
+		// $/cancelRequest entry for it. The worker answers through its
+		// snapshot, whose cancellation maps are private copies, so it cannot
+		// consume the session's entry itself; without this a later request
+		// reusing the id would look cancelled for a cancel aimed at the
+		// answered one.
+		app.cancelled_raw_ids.delete(raw_id)
+		if raw_is_canonical_int(raw_id) {
+			app.cancelled_requests.delete(raw_id_to_int(raw_id))
+		}
+	}
+}
+
+// should_dispatch_async_line_info gates the request loop on a completed probe,
+// not on `line_info_mode`: a successful V3 or pooled answer leaves that mode
+// at `.unknown`, and keying off it would keep every later miss on the loop.
+fn (app &App) should_dispatch_async_line_info() bool {
+	return app.line_info_probe_done && app.line_info_mode != .missing
+}
+
+// max_async_line_info caps concurrent line-info workers. Past the cap the
+// request runs synchronously instead: still correct, and it bounds thread
+// pileup when many compiler runs hang at once.
+const max_async_line_info_workers = 8
+
+fn (mut app App) dispatch_async_line_info(method Method, request Request) {
+	app.purge_finished_line_info()
+	mut in_flight := 0
+	for raw_id in app.line_info_cancels.keys() {
+		mut f := app.line_info_cancels[raw_id] or { continue }
+		if !f.is_finished() {
+			in_flight++
+		}
+	}
+	if in_flight >= max_async_line_info_workers {
+		resp := app.operation_at_pos(method, request)
+		app.write_response_or_cancelled(request.id, resp)
+		return
+	}
+	flag := &CancelFlag{}
+	app.line_info_cancels[app.current_request_raw_id] = flag
+	// The worker shares the session's V3 query pool: resolve it here, on the
+	// loop thread, so the snapshot carries the session's pool instead of
+	// making one the session shutdown would never stop.
+	app.v3_query_pool()
+	snapshot := app.line_info_snapshot(flag)
+	app.line_info_workers.add(1)
+	spawn run_async_line_info_job(LineInfoJob{
+		snapshot: snapshot
+		method:   method
+		request:  request
+		cancel:   flag
+	})
+}
+
 // compiler_hover is the hover that the compiler's hv^ mode printed as `output`,
 // with the documentation `doc` after it when the compiler did not include it.
 fn compiler_hover(output string, doc string) ResponseResult {
@@ -2574,6 +3643,13 @@ fn compiler_hover(output string, doc string) ResponseResult {
 }
 
 fn (mut app App) run_v_line_info(method Method, path string, line_info string) ResponseResult {
+	// Any completed line-info request tells the session whether this compiler
+	// can answer, including the V3 and pooled paths that leave `line_info_mode`
+	// at `.unknown`. The request loop uses this to start dispatching later
+	// misses to workers instead of running every one of them synchronously.
+	defer {
+		app.line_info_probe_done = true
+	}
 	// Convert URI to local file path
 	real_path := uri_to_path(path)
 	log('real_path=${real_path}, method=${method}')
@@ -2601,8 +3677,13 @@ struct PooledLineInfo {
 // which checks the same copy of the program the diagnostics slow path checks
 // (see ProgramCopy): a warm server answers in a fraction of the time a
 // compiler process of its own takes to start. None means the pool has no
-// answer, and the caller falls back to that one-shot process.
+// answer, and the caller falls back to that one-shot process. The pool never
+// changes how the session drives the compiler: a retired (.missing) session
+// keeps its one-shot path, so the mode probes there still run.
 fn (mut app App) run_v_line_info_pooled(method Method, path string, line_info string) ?PooledLineInfo {
+	if app.line_info_mode == .missing {
+		return none
+	}
 	exe := resolve_diagnostics_server_exe() or { return none }
 	real_path := uri_to_path(path)
 	program_dir := app.program_root(real_path)
@@ -2640,7 +3721,8 @@ fn (mut app App) run_v_line_info_pooled(method Method, path string, line_info st
 	is_library := target == '.' && !app.is_program_dir(project.overlay.source_work_dir)
 	args := build_v_check_args(target, is_library)
 	mut servers := app.v3_query_pool()
-	result := servers.query(exe, args, project.overlay.temp_work_dir, '${copy_path}:${line_info}') or {
+	result := servers.query_cancelled(exe, args, project.overlay.temp_work_dir,
+		'${copy_path}:${line_info}', app.line_info_cancel_fn()) or {
 		return none
 	}
 	if result.exit_code != 0 {
@@ -2742,12 +3824,26 @@ fn (mut app App) run_v_line_info_once(method Method, path string, line_info stri
 	}
 
 	exec_dir := if use_multifile { compile_target } else { working_dir }
-	mut x := run_v_argv(cmd_args, exec_dir)
+	mut x := run_v_argv_cancellable(cmd_args, exec_dir, app.line_info_cancel)
 	mut output := normalize_v_line_info_output(x.output, method)
-	failed := x.exit_code != 0 && output == ''
-	compatibility_missing := failed && compiler_lacks_compatibility_compiler(x.output)
-	if compatibility_missing
-		|| (failed && compiler_rejects_line_info(x.output) && compiler_refused_and_stopped(x.output)) {
+	if compiler_reports_missing_compat_compiler(x.output) && app.line_info_mode == .unknown {
+		// The launcher cannot reach a checker and stops there, so retrying
+		// (here or on later requests) only burns another compile. Retire
+		// compiler-backed lookups for the session; index-backed answers and
+		// source fallbacks take over from here.
+		log('no checker for -line-info; falling back to the index')
+		app.line_info_mode = .missing
+		app.line_info_unavailable = true
+		if mut flag := app.line_info_cancel {
+			flag.record_line_info_missing()
+		}
+		app.report_missing_compatibility_compiler()
+		if !app.overlay_is_shared(temp_project_dir) {
+			cleanup_compilation_temp(temp_project_dir, singlefile_tmppath)
+		}
+		return app.line_info_unavailable_result(method, path, line_info)
+	}
+	if (compiler_rejects_line_info(x.output) && compiler_refused_and_stopped(x.output)) || compiler_lacks_compatibility_compiler(x.output) {
 		// The invocation refused the options and did nothing else, so nothing
 		// here can answer and the single-file retry below would be refused for
 		// the same reason. An empty payload alone is not evidence: on a launcher
@@ -2755,28 +3851,43 @@ fn (mut app App) run_v_line_info_once(method Method, path string, line_info stri
 		// retiring the lookups over one of those would cost the session every
 		// compiler-backed hover, signature, and receiver definition.
 		log('no compiler serves -line-info; falling back to the index')
+		app.line_info_mode = .missing
 		app.line_info_unavailable = true
-		app.report_line_info_unavailable(compatibility_missing)
-		cleanup_compilation_temp(temp_project_dir, singlefile_tmppath)
+		if mut flag := app.line_info_cancel {
+			flag.record_line_info_missing()
+		}
+		app.report_missing_compatibility_compiler()
+		if !app.overlay_is_shared(temp_project_dir) {
+			cleanup_compilation_temp(temp_project_dir, singlefile_tmppath)
+		}
 		return app.line_info_unavailable_result(method, path, line_info)
+	}
+	if app.line_info_mode == .unknown {
+		app.line_info_mode = .direct
 	}
 	if (method == .definition || method == .declaration || method == .type_definition
 		|| method == .implementation) && use_multifile
 		&& (x.exit_code != 0 || output == '') {
 		if temp_project_dir != '' {
-			os.rmdir_all(temp_project_dir) or { log('Failed to clean up temp project dir: ${err}') }
+			if app.overlay_is_shared(temp_project_dir) {
+				app.drop_overlay_temp_root(temp_project_dir)
+			} else {
+				os.rmdir_all(temp_project_dir) or { log('Failed to clean up temp project dir: ${err}') }
+			}
 			temp_project_dir = ''
 		}
 		file_to_check = real_path
 		compile_target = real_path
 		cmd_fallback := build_v_line_info_args_single(file_to_check, line_info, compile_target)
 		log('cmd_fallback=v ${cmd_fallback.join(' ')}')
-		x = run_v_argv(cmd_fallback, working_dir)
+		x = run_v_argv_cancellable(cmd_fallback, working_dir, app.line_info_cancel)
 		output = normalize_v_line_info_output(x.output, method)
 		log('Fallback RUN RES ${x}')
 	}
 
-	cleanup_compilation_temp(temp_project_dir, singlefile_tmppath)
+	if !app.overlay_is_shared(temp_project_dir) {
+		cleanup_compilation_temp(temp_project_dir, singlefile_tmppath)
+	}
 
 	log('RUN RES ${x}')
 	return app.line_info_result(method, path, line_info, output, use_multifile, temp_project_dir,

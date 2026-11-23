@@ -59,6 +59,18 @@ fn (mut app App) forget_project_files() {
 	app.file_list_cache.clear()
 }
 
+// forget_project_files_in drops only the cached listings of projects that
+// contain `path`. A create/delete under one root cannot change another root's
+// listing, and re-walking every project on each watcher event was expensive in
+// multi-root workspaces.
+fn (mut app App) forget_project_files_in(path string) {
+	for root in app.file_list_cache.keys() {
+		if path_is_within(path, root) {
+			app.file_list_cache.delete(root)
+		}
+	}
+}
+
 // cached_project_files returns the project's `.v` files, walking at most once
 // per `project_files_ttl_ms`. The listing is the expensive half of the
 // fingerprint on a large tree, and it does not change between two edits.

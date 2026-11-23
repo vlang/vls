@@ -39,7 +39,24 @@ mut:
 	// (V_DIAGNOSTICS_SHARED).
 	shared bool
 	copies map[string]&ProgramCopy
+	// Config fingerprints include file size and mtime, so they stay valid
+	// between watcher notifications. take_server asks for one on every check
+	// and every question; without this map that is up to 64 ancestor stats
+	// per request. Guarded by mutex, like the rest of the pool state.
+	config_fingerprints map[string]string
+	// When each config fingerprint was taken, under the same lock. The memo is
+	// only invalidated by watched-file events, so without notifications (a
+	// client that does not support watchers, or a disk edit without one) it
+	// would otherwise stay stale indefinitely and keep an old server in use.
+	// Entries older than config_fingerprint_ttl_ms are recomputed.
+	config_fingerprint_ms map[string]i64
 }
+
+// config_fingerprint_ttl_ms bounds how long a cached config fingerprint is
+// trusted without a watcher invalidation. It matches the index refresh
+// interval: without notifications a `v.mod` or `.vvmrc` edit is picked up on
+// the next request after this delay instead of never.
+const config_fingerprint_ttl_ms = i64(10_000)
 
 // ProgramCopy is the copy of a program that the checks and the questions of an
 // editor share, by program directory: a request holds its lock while it writes
@@ -183,6 +200,42 @@ fn (mut pool DiagnosticsServerPool) notice_disk_change(path string) {
 	}
 }
 
+// refresh_held_files_in_copies_for_path re-takes the files the program copies
+// hold by link or by copy, but only for the program whose root holds
+// `changed`: a content change elsewhere cannot stale this copy's materialized
+// bytes, so scanning every copy on every change wastes IO on unrelated
+// programs. It never blocks on a copy busy with a query: the request loop
+// calls it inline, while a V3 query holds that copy's mutex through the
+// compiler run. A busy copy is skipped, as the query's own v3_sync_open_files
+// re-takes the same files under its lock before answering, so no update is
+// lost. Doing the file IO outside the pool lock keeps the pool map responsive.
+fn (mut pool DiagnosticsServerPool) refresh_held_files_in_copies_for_path(changed string) {
+	mut programs := []&ProgramCopy{}
+	pool.mutex.lock()
+	for key in pool.copies.keys() {
+		if program := pool.copies[key] {
+			if program.root != ''
+				&& (path_is_within(changed, program.root)
+					|| path_is_within(program.root, changed)) {
+				programs << program
+			}
+		}
+	}
+	pool.mutex.unlock()
+	// Do the file IO outside the pool lock, and without waiting on a copy a
+	// query is using: a V3 query or prewarm holds that mutex while writing and
+	// reading the same overlay, and the request loop must not wait for its
+	// compiler run. ProgramCopy itself is never copied (it holds a mutex by
+	// value); only the pointer travels.
+	for mut program in programs {
+		if !program.mutex.try_lock() {
+			continue
+		}
+		program.project.refresh_held_files()
+		program.mutex.unlock()
+	}
+}
+
 // check runs the compiler with `args` in `work_dir` through a server, starting
 // one for this command line when needed. It returns none when no server can
 // answer, which leaves the caller to run the compiler itself.
@@ -194,9 +247,18 @@ fn (mut pool DiagnosticsServerPool) check(exe string, args []string, work_dir st
 // protocol, `<file>:<line>:<code><column>`, as `-line-info` does, and returns
 // the answer as the output of the request.
 fn (mut pool DiagnosticsServerPool) query(exe string, args []string, work_dir string, question string) ?os.Result {
-	return pool.request(exe, args, work_dir, question, v3_query_answer_ms, fn () bool {
+	return pool.query_cancelled(exe, args, work_dir, question, fn () bool {
 		return false
-	}, unsafe { nil })
+	})
+}
+
+// query_cancelled is query with a cancellation callback: when it reports true
+// the wait stops and the pooled child is killed, instead of holding the caller
+// until the query times out. Async line-info workers pass their request's
+// flag so a $/cancelRequest frees the worker promptly.
+fn (mut pool DiagnosticsServerPool) query_cancelled(exe string, args []string, work_dir string, question string, cancelled fn () bool) ?os.Result {
+	return pool.request(exe, args, work_dir, question, v3_query_answer_ms, cancelled,
+		unsafe { nil })
 }
 
 // request sends a `check`, or a `query` of `question` when there is one, and
@@ -243,7 +305,6 @@ fn (mut pool DiagnosticsServerPool) request(exe string, args []string, work_dir 
 fn (mut pool DiagnosticsServerPool) take_server(key string, exe string, args []string, work_dir string) ?(&DiagnosticsServer, string) {
 	// The compiler reads v.mod and .vvmrc once, before it forks, so a server
 	// started before they changed can never answer again: a new one replaces it.
-	fingerprint := project_config_fingerprint(work_dir)
 	pool.mutex.lock()
 	defer {
 		pool.mutex.unlock()
@@ -251,6 +312,7 @@ fn (mut pool DiagnosticsServerPool) take_server(key string, exe string, args []s
 	if pool.closed {
 		return none
 	}
+	fingerprint := pool.cached_config_fingerprint(work_dir)
 	if pool.unsupported['${key}\n${fingerprint}'] {
 		return none
 	}
@@ -376,6 +438,24 @@ fn (mut pool DiagnosticsServerPool) wait_closed() {
 	}
 }
 
+// kill_diagnostics_child stops the forked child that owns an answer. Without
+// this, a cancelled pooled query leaves the child writing into the shared
+// server's pipe and frees neither the worker nor its place in the pool.
+fn kill_diagnostics_child(pid int) {
+	$if windows {
+		// The pid is parsed from the server's own PID line and is digits only,
+		// so it cannot turn into extra command arguments. /T takes the child's
+		// own subprocesses with it.
+		mut killer := os.new_process('taskkill')
+		killer.set_args(['/PID', pid.str(), '/T', '/F'])
+		killer.set_redirect_stdio()
+		killer.run()
+		killer.wait()
+	} $else {
+		C.kill(pid, 9)
+	}
+}
+
 // kill_compiler_process reaps a compiler even when signal_kill has already
 // marked it aborted: os.Process.wait otherwise skips that state entirely.
 fn kill_compiler_process(mut process os.Process) {
@@ -465,9 +545,7 @@ fn (mut s DiagnosticsServer) ask(line string, token string, timeout_ms int, canc
 			if !cancelled() {
 				return false
 			}
-			$if !windows {
-				C.kill(child_pid, 9)
-			}
+			kill_diagnostics_child(child_pid)
 			return true
 		}) or { return error('no answer within ${timeout_ms} ms') }
 		collected = early_output + answer
@@ -565,6 +643,32 @@ fn (mut s DiagnosticsServer) read_until_or_cancel(marker string, timeout_ms int,
 		}
 	}
 	return none
+}
+
+// cached_config_fingerprint memoizes the config fingerprint between watcher
+// notifications. The caller must hold pool.mutex. Entries older than
+// config_fingerprint_ttl_ms are recomputed, so a `v.mod` or `.vvmrc` edit
+// without a notification (no watcher support) still starts a new server
+// within the TTL instead of reusing the old one indefinitely.
+fn (mut pool DiagnosticsServerPool) cached_config_fingerprint(dir string) string {
+	if fingerprint := pool.config_fingerprints[dir] {
+		if taken_ms := pool.config_fingerprint_ms[dir] {
+			if time.now().unix_milli() - taken_ms < config_fingerprint_ttl_ms {
+				return fingerprint
+			}
+		}
+	}
+	fingerprint := project_config_fingerprint(dir)
+	pool.config_fingerprints[dir] = fingerprint
+	pool.config_fingerprint_ms[dir] = time.now().unix_milli()
+	return fingerprint
+}
+
+// forget_config_fingerprints drops the memo after a disk change so a changed
+// v.mod or .vvmrc starts a new compiler server. Caller must hold pool.mutex.
+fn (mut pool DiagnosticsServerPool) forget_config_fingerprints() {
+	pool.config_fingerprints = map[string]string{}
+	pool.config_fingerprint_ms = map[string]i64{}
 }
 
 // project_config_fingerprint names the v.mod and .vvmrc files the compiler

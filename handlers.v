@@ -424,6 +424,12 @@ fn (mut app App) hover_with_written_declaration(uri string, position Position, r
 // it is used; anything else what the compiler says of it, with the
 // documentation of its own declaration. `line_info` asks the hover.
 fn (mut app App) hover_result(uri string, position Position, line_info string) ResponseResult {
+	// Real hovers reach v3_hover / run_v_line_info_once directly, bypassing
+	// run_v_line_info. Record the probe here too, or a session that only ever
+	// hovers keeps every later miss on the request loop.
+	defer {
+		app.line_info_probe_done = true
+	}
 	real_path := uri_to_path(uri)
 	// No flush here: every read below answers from the buffer or the index,
 	// never from the overlay a pending slow check would publish. v3_hover
@@ -582,6 +588,23 @@ fn (mut app App) source_hover_fallback(uri string, position Position) ?Hover {
 	location := app.resolve_indexed_definition(uri, position) or {
 		app.resolve_symbol_anchor(uri, position.line, position.char) or { return none }
 	}
+	return app.hover_for_indexed_location(location)
+}
+
+// source_hover_fallback_indexed is the index-only half of
+// source_hover_fallback for the preflight phase: it never spawns the
+// compiler. When the index cannot resolve the name, the caller defers to the
+// async worker instead of blocking the request loop and repeating the lookup
+// there.
+fn (mut app App) source_hover_fallback_indexed(uri string, position Position) ?Hover {
+	location := app.resolve_indexed_definition(uri, position) or { return none }
+	return app.hover_for_indexed_location(location)
+}
+
+// hover_for_indexed_location renders the hover for a location the index
+// resolved, shared by the compiler-touching and index-only fallbacks so the
+// two cannot drift apart.
+fn (mut app App) hover_for_indexed_location(location Location) ?Hover {
 	// What declares a local or a parameter is a statement or a signature, not
 	// what it is.
 	if app.declares_local_at(location) {
@@ -1410,6 +1433,31 @@ fn (mut app App) source_signature_fallback(uri string, position Position) ?Signa
 	location := app.resolve_indexed_definition(uri, target_position) or {
 		app.resolve_symbol_anchor(uri, target_position.line, target_position.char) or { return none }
 	}
+	return app.signature_for_indexed_location(location, name, target.active_parameter)
+}
+
+// source_signature_fallback_indexed is the index-only half of
+// source_signature_fallback for the preflight phase: it never spawns the
+// compiler. Unresolved calls defer to the async worker instead of blocking
+// the request loop on a compiler lookup the worker would repeat.
+fn (mut app App) source_signature_fallback_indexed(uri string, position Position) ?SignatureHelp {
+	content := app.index_source_for(uri) or { return none }
+	target := source_call_target(content, position, app.position_encoding) or {
+		return none
+	}
+	target_position := target.position
+	name := app.get_word_at_position(uri, target_position.line, target_position.char)
+	if name == '' {
+		return none
+	}
+	location := app.resolve_indexed_definition(uri, target_position) or { return none }
+	return app.signature_for_indexed_location(location, name, target.active_parameter)
+}
+
+// signature_for_indexed_location renders the signature help for a location
+// the index resolved, shared by the compiler-touching and index-only
+// fallbacks so the two cannot drift apart.
+fn (mut app App) signature_for_indexed_location(location Location, name string, active_parameter int) ?SignatureHelp {
 	declaration := app.source_declaration_at(location)
 	label := declaration_signature_label(declaration, name)
 	if label == '' {
@@ -1423,8 +1471,133 @@ fn (mut app App) source_signature_fallback(uri string, position Position) ?Signa
 				parameters: parameters
 			},
 		]
-		active_parameter: signature_active_parameter(parameters, target.active_parameter)
+		active_parameter: signature_active_parameter(parameters, active_parameter)
 	}
+}
+
+// IndexedPhase is the result of the index-first half of operation_at_pos.
+// done reports whether the index fully answered the request; resp is only
+// meaningful when done is true.
+struct IndexedPhase {
+	done bool
+	resp Response
+}
+
+// operation_at_pos_indexed answers hover, signature help, and go-to requests
+// from the incremental source index without spawning the compiler. It mirrors
+// the index-first half of operation_at_pos; when it cannot answer, the caller
+// falls back to the compiler (synchronously or on a worker). Completion stays
+// on the synchronous path and is never dispatched here.
+fn (mut app App) operation_at_pos_indexed(method Method, request Request) IndexedPhase {
+	params := json2.decode[TextDocumentPositionParams](request.params) or {
+		return IndexedPhase{
+			done: true
+			resp: Response{
+				id:     request.id
+				result: 'null'
+			}
+		}
+	}
+	if params.text_document.uri == '' {
+		return IndexedPhase{
+			done: true
+			resp: Response{
+				id:     request.id
+				result: 'null'
+			}
+		}
+	}
+	if params.position.line < 0 || params.position.char < 0 {
+		return IndexedPhase{
+			done: true
+			resp: Response{
+				id:     request.id
+				result: 'null'
+			}
+		}
+	}
+	if method == .completion {
+		return IndexedPhase{}
+	}
+	line_nr := params.position.line + 1
+	col := params.position.char
+	path := params.text_document.uri
+	byte_col := app.client_col_to_byte_col(path, params.position.line, col)
+
+	// Resolve declarations from the index before reaching for the
+	// compatibility compiler, matching operation_at_pos.
+	if method in [.definition, .declaration, .type_definition, .implementation] {
+		if location := app.resolve_indexed_definition(path, params.position) {
+			return IndexedPhase{
+				done: true
+				resp: Response{
+					id:     request.id
+					result: location
+				}
+			}
+		}
+		return IndexedPhase{}
+	}
+	if method == .hover {
+		if binding := app.local_binding_hover(path, params.position) {
+			// What a `$if`, `is` or `match` makes of a value the compiler
+			// narrows, the index cannot tell: fall through to the compiler
+			// instead of answering the broad declared type, mirroring the
+			// synchronous path in operation_at_pos below.
+			if app.binding_type_narrows(path, params.position, binding) {
+				return IndexedPhase{}
+			}
+			return IndexedPhase{
+				done: true
+				resp: Response{
+					id:     request.id
+					result: binding
+				}
+			}
+		}
+		if member := app.member_selector_hover(path, params.position) {
+			return IndexedPhase{
+				done: true
+				resp: Response{
+					id:     request.id
+					result: member
+				}
+			}
+		}
+		if fallback := app.source_hover_fallback_indexed(path, params.position) {
+			doc := app.hover_doc_comment(path, '${line_nr}:hv^${byte_col}')
+			mut value := fallback.contents.value
+			if doc != '' && !value.contains(doc) {
+				value += '\n\n' + doc
+			}
+			return IndexedPhase{
+				done: true
+				resp: Response{
+					id:     request.id
+					result: Hover{
+						contents: MarkupContent{
+							kind:  'markdown'
+							value: value
+						}
+					}
+				}
+			}
+		}
+		return IndexedPhase{}
+	}
+	if method == .signature_help {
+		if sig := app.source_signature_fallback_indexed(path, params.position) {
+			return IndexedPhase{
+				done: true
+				resp: Response{
+					id:     request.id
+					result: sig
+				}
+			}
+		}
+		return IndexedPhase{}
+	}
+	return IndexedPhase{}
 }
 
 // operation_at_pos handles LSP requests at a given position (completion, hover, signature, definition).
@@ -1475,6 +1648,19 @@ fn (mut app App) operation_at_pos(method Method, request Request) Response {
 		}
 		else {
 			''
+		}
+	}
+
+	// Prefer the index-backed signature before spawning the compiler: a
+	// resolved declaration plus its parameter list answers plain calls without
+	// paying a full `v` run per keystroke, mirroring hover and completion.
+	// Anything the index cannot resolve still falls through to the compiler.
+	if method == .signature_help {
+		if sig := app.source_signature_fallback(path, params.position) {
+			return Response{
+				id:     request.id
+				result: sig
+			}
 		}
 	}
 
@@ -2501,7 +2687,13 @@ fn local_binding_column(segment string, segment_start int, name string) int {
 }
 
 fn (app &App) local_scope_bindings(content string, position Position) []LocalBinding {
-	lines := content.split_into_lines()
+	return app.local_scope_bindings_in_lines(content.split_into_lines(), position)
+}
+
+// local_scope_bindings_in_lines is the hot-path form: callers that already
+// hold the file's lines (the index snapshots of references and highlights)
+// avoid re-splitting the whole file for every candidate.
+fn (app &App) local_scope_bindings_in_lines(lines []string, position Position) []LocalBinding {
 	if position.line < 0 || position.line >= lines.len {
 		return []LocalBinding{}
 	}
@@ -4979,6 +5171,28 @@ fn (mut app App) build_diagnostics_notification(uri string, content string) Noti
 		}
 	}
 	v_errors := app.run_v_check(uri, content)
+	return app.build_diagnostics_notification_for_errors(uri, content, v_errors)
+}
+
+// build_diagnostics_notification_for_errors converts already-computed checker
+// errors into a publishDiagnostics notification. Splitting the conversion from
+// the compiler run lets diagnostics jobs reuse cached errors without spawning
+// `v` again, while keeping a single conversion implementation.
+fn (mut app App) build_diagnostics_notification_for_errors(uri string, content string, v_errors []JsonError) Notification {
+	if !app.diagnostics_enabled {
+		return Notification{
+			method: 'textDocument/publishDiagnostics'
+			params: PublishDiagnosticsParams{
+				uri:         uri
+				version:     if uri in app.open_files_versions {
+					?i64(app.open_files_versions[uri])
+				} else {
+					none
+				}
+				diagnostics: []
+			}
+		}
+	}
 	log('run_v_check errors:${v_errors}')
 	return app.diagnostics_notification_for(uri, content, v_errors)
 }
@@ -5529,7 +5743,16 @@ fn (mut app App) find_references(request Request) Response {
 
 	// Resolve references from the project's reference-occurrence index.
 	scope := app.index_scope_for_uri(path)
-	anchor := app.resolve_symbol_anchor(path, line, col)
+	// Prefer the index for the anchor: a top-level symbol resolves without
+	// spawning the compiler. Per-candidate verification below still filters
+	// anything the index cannot prove, so this stays precise.
+	mut anchor := app.resolve_indexed_definition(path, Position{
+		line: line
+		char: col
+	})
+	if anchor == none {
+		anchor = app.resolve_symbol_anchor(path, line, col)
+	}
 	mut locations := if a := anchor {
 		// References may fall back to lexical occurrences past the candidate cap.
 		app.search_symbol_in_dirs_semantic(symbol, a, scope, request.id, true)
@@ -5979,6 +6202,19 @@ fn source_occurrence_has_colon_suffix(line string, end_byte int) bool {
 		suffix_byte++
 	}
 	return suffix_byte < line.len && line[suffix_byte] == `:`
+}
+
+// occurrence_is_field_label reports whether the identifier ending at `end_byte`
+// is a struct-literal or named-argument label (`count:` in `S{count: 2}`): a
+// colon suffix that is not a declaration (`:=`). Such a label shares the
+// visible local bindings of a same-named local but references the field, so
+// the local fast paths must leave it to compiler verification.
+fn occurrence_is_field_label(line string, end_byte int) bool {
+	if end_byte < 0 || end_byte > line.len {
+		return false
+	}
+	after := line[end_byte..].trim_left(' \t')
+	return after.starts_with(':') && !after.starts_with(':=')
 }
 
 fn source_occurrence_has_dot_suffix(line string, end_byte int) bool {
@@ -6608,13 +6844,16 @@ fn (mut app App) active_indexed_source_file_names(dir string, active_test_file_n
 	mut active := cached.active.clone()
 	mut test_present := active_test_file_name in file_names
 	normalized_dir := normalized_index_path(dir)
+	lex_dir := lexical_index_path(dir)
 	// A buffer the client has created but not saved is invisible to that scan,
 	// so judge it from its name. Only the suffix rules can be applied this way;
 	// a `_d_` file needs a define VLS does not pass, and every other name is
 	// treated as active rather than hiding a file the user is editing.
 	for uri, _ in app.open_files {
 		path := uri_to_path(uri)
-		if normalized_index_path(os.dir(path)) != normalized_dir {
+		// Lexical first: no real_path per open file on the hot path.
+		// The canonical fallback only runs for symlink/case aliases.
+		if !same_index_dir(os.dir(path), lex_dir, normalized_dir) {
 			continue
 		}
 		name := os.file_name(path)
@@ -7333,6 +7572,144 @@ fn (mut app App) handle_document_symbols(request Request) Response {
 	}
 }
 
+// InlayFnEntry caches one file's fn→return-type map for inlay hints.
+struct InlayFnEntry {
+	fingerprint int
+	fns         map[string]string
+}
+
+// InlayFnCache maps document URIs to their parsed fn signatures. Entries are
+// keyed by content fingerprint, so unchanged files are never re-read or
+// re-parsed on the hot path.
+@[heap]
+struct InlayFnCache {
+mut:
+	entries map[string]InlayFnEntry
+}
+
+// inlay_fn_cache_max_entries bounds the fn-signature cache: entries are only
+// added, never refreshed in place, so without a bound a long-lived session
+// that changes workspaces would retain maps for every file it ever indexed.
+const inlay_fn_cache_max_entries = 4096
+
+fn new_inlay_fn_cache() &InlayFnCache {
+	return &InlayFnCache{
+		entries: map[string]InlayFnEntry{}
+	}
+}
+
+fn (mut app App) inlay_fn_cache_store() &InlayFnCache {
+	if store := app.inlay_fn_cache {
+		return store
+	}
+	store := new_inlay_fn_cache()
+	app.inlay_fn_cache = store
+	return store
+}
+
+// prune_inlay_fn_cache drops fn-signature entries the session no longer holds:
+// files that are neither open nor indexed. When even the live set exceeds the
+// bound (a pathological workspace), the cache is cleared and rebuilt lazily,
+// which keeps memory bounded at the cost of one re-parse.
+fn (mut app App) prune_inlay_fn_cache() {
+	mut store := app.inlay_fn_cache_store()
+	if store.entries.len <= inlay_fn_cache_max_entries {
+		return
+	}
+	for key in store.entries.keys() {
+		if key !in app.open_files && key !in app.symbol_index {
+			store.entries.delete(key)
+		}
+	}
+	if store.entries.len > inlay_fn_cache_max_entries {
+		store.entries.clear()
+	}
+}
+
+// evict_inlay_fn_cache_under drops the fn-signature entries of the files under
+// `dir_path`: the index entries they mirror were just dropped (a workspace
+// folder was removed or its files re-walked), so the cache must not keep them.
+fn (mut app App) evict_inlay_fn_cache_under(dir_path string) {
+	mut store := app.inlay_fn_cache or { return }
+	d := dir_path.replace('\\', '/')
+	for key in store.entries.keys() {
+		if path_is_within(uri_to_path(key).replace('\\', '/'), d) {
+			store.entries.delete(key)
+		}
+	}
+}
+
+// put_inlay_fn_entry parses `content` into the shared fn index unless the
+// cache already holds this exact version, keyed like build_fn_index does:
+// bare names plus file-stem-qualified names.
+fn (mut store InlayFnCache) put_inlay_fn_entry(key string, fingerprint int, content string, stem string, mut index map[string]string) {
+	if cached := store.entries[key] {
+		if cached.fingerprint == fingerprint {
+			for name, ret in cached.fns {
+				index[name] = ret
+			}
+			return
+		}
+	}
+	mut fns := map[string]string{}
+	parse_fn_signatures_into(content, stem, mut fns)
+	for name, ret in fns {
+		index[name] = ret
+	}
+	store.entries[key] = InlayFnEntry{
+		fingerprint: fingerprint
+		fns:         fns
+	}
+}
+
+// collect_inlay_fn_index builds the fn→return-type map for inlay hints from
+// open buffers and the persistent symbol index instead of walking and
+// re-reading the project on every request. Disk files reuse the index entry
+// fingerprint, so only new or changed files are read and parsed.
+fn (mut app App) collect_inlay_fn_index(uri string, working_dir string) map[string]string {
+	mut index := map[string]string{}
+	if working_dir != '' && working_dir != '/' && os.is_dir(working_dir) {
+		scope := app.index_scope_for_uri(uri)
+		app.ensure_index_scope(scope)
+	}
+	mut store := app.inlay_fn_cache_store()
+	// The cache only grows as files are parsed; drop what the session no
+	// longer holds before it can retain every file ever indexed.
+	app.prune_inlay_fn_cache()
+	// Open buffers are authoritative; parse them directly without disk I/O.
+	for open_uri, open_content in app.open_files {
+		if open_uri == uri {
+			continue
+		}
+		stem := os.file_name(uri_to_path(open_uri)).replace('.v', '')
+		store.put_inlay_fn_entry(open_uri, open_content.hash(), open_content, stem, mut index)
+	}
+	// Disk files: reuse the symbol index fingerprint so unchanged files are
+	// never re-read or re-parsed on the hot path.
+	if working_dir != '' && working_dir != '/' && os.is_dir(working_dir) {
+		dir_norm := working_dir.replace('\\', '/')
+		mut uris := app.symbol_index.keys()
+		uris.sort()
+		for duri in uris {
+			if duri == uri || duri in app.open_files {
+				continue
+			}
+			dpath := uri_to_path(duri)
+			if !path_is_within(dpath.replace('\\', '/'), dir_norm) {
+				continue
+			}
+			if dpath.ends_with('_test.v') {
+				continue
+			}
+			entry := app.symbol_index[duri] or { continue }
+			content := app.index_source_for(duri) or { continue }
+			stem := os.file_name(dpath).replace('.v', '')
+			store.put_inlay_fn_entry(duri, entry.fingerprint, content, stem, mut index)
+		}
+	}
+	return index
+}
+
 // handle_inlay_hints handles the LSP inlayHint request, returning type hints for variables.
 fn (mut app App) handle_inlay_hints(request Request) Response {
 	params := json2.decode[InlayHintParams](request.params) or {
@@ -7366,37 +7743,23 @@ fn (mut app App) handle_inlay_hints(request Request) Response {
 		}
 	}
 
-	// Build fn index lazily: current file + open files + vlib modules imported in this file
-	file_path := uri_to_path(uri)
-	working_dir := os.dir(file_path)
-	mut index_files := []string{}
-
-	// Collect all open file paths
-	for open_uri, _ in app.open_files {
-		p := uri_to_path(open_uri)
-		if p != '' && p != file_path {
-			index_files << p
-		}
-	}
+	// Build the fn index from open buffers and the persistent symbol index
+	// instead of walking and re-reading the project on every request.
+	working_dir := os.dir(uri_to_path(uri))
+	mut fn_index := app.collect_inlay_fn_index(uri, working_dir)
 
 	// Only scan project directory if working_dir is a real, accessible directory.
 	// Guard against fake URIs (e.g. tests using file:///test.v) which resolve
 	// working_dir to '/' and would cause a full filesystem walk.
 	mut imported_mods := []string{}
 	if working_dir != '' && working_dir != '/' && os.is_dir(working_dir) {
-		project_files := os.walk_ext(working_dir, '.v')
-		for pf in project_files {
-			if !pf.ends_with('_test.v') && pf != file_path {
-				index_files << pf
-			}
-		}
+		// Project files come from the symbol index now (see collect_inlay_fn_index).
 		imported_mods = parse_imports(content)
 	}
 
-	// Project/open files are re-read live (they may change mid-session). vlib
-	// module indexes are merged from a session cache below — walking and parsing
-	// vlib on every inlayHint request was the dominant, needlessly repeated cost.
-	mut fn_index := build_fn_index(index_files)
+	// vlib module indexes are merged from a session cache below — walking and
+	// parsing vlib on every inlayHint request was the dominant, needlessly
+	// repeated cost.
 	for mod in imported_mods {
 		app.merge_vlib_module_fns(mod, mut fn_index)
 	}
@@ -8265,6 +8628,186 @@ fn (mut app App) collect_semantic_candidates(symbol string, scope IndexScope) []
 	return candidates
 }
 
+// SemanticFileSnapshot caches one candidate file's content for a scan.
+struct SemanticFileSnapshot {
+	content string
+	lines   []string
+}
+
+// is_loop_binding_occurrence reports whether the occurrence at
+// [start_byte, end_byte) on `line_idx` is the `item` of a `for item in items`
+// binding. Loop bindings are not returned by local_scope_bindings, so the
+// binding-set fast path cannot decide them and callers must defer.
+fn is_loop_binding_occurrence(lines []string, line_idx int, start_byte int, end_byte int) bool {
+	if line_idx < 0 || line_idx >= lines.len || start_byte < 0 || end_byte > lines[line_idx].len
+		|| end_byte <= start_byte {
+		return false
+	}
+	line := lines[line_idx]
+	before := line[..start_byte]
+	idx := before.last_index('for ') or { return false }
+	// The `for` must start a statement, not be the tail of another identifier.
+	if idx > 0 && is_ident_char(line[idx - 1]) {
+		return false
+	}
+	// The token must still be inside the loop header: a `{` before it means
+	// this is a use in the body, which local_scope_bindings does resolve.
+	if before[idx..].contains('{') {
+		return false
+	}
+	// Both `for item in items` and `for i := 0; ...` bind names the fast path
+	// cannot identify; deferring either to the compiler is safe.
+	return true
+}
+
+// visible_binding_keys returns the set of same-named local bindings visible at
+// `pos`, keyed by declaration identity. Two occurrences reference the same
+// local exactly when these sets single out the same declaration.
+fn (app &App) visible_binding_keys(lines []string, pos Position, symbol string) map[string]int {
+	mut keys := map[string]int{}
+	for b in app.local_scope_bindings_in_lines(lines, pos) {
+		if b.name == symbol {
+			keys[highlight_binding_key(b.name, b.line, b.column)] = b.line
+		}
+	}
+	return keys
+}
+
+// semantic_candidate_fast decides one references/rename candidate without the
+// compiler: true accepts it, false rejects it, none defers to the existing
+// compiler verification. Same-file candidates compare visible binding sets
+// against the anchor; a side sitting on the binding's own declaration matches
+// by (line, column) identity instead, since a line alone cannot tell same-line
+// shadowing declarations apart. Bare top-level uses additionally require an
+// index-resolved declaration matching the anchor.
+fn (mut app App) semantic_candidate_fast(symbol string, anchor Location, anchor_keys map[string]int, anchor_member bool, anchor_is_decl bool, anchor_start_byte int, cand Location, mut file_snaps map[string]SemanticFileSnapshot, anchor_scope_unknown bool) ?bool {
+	if symbol == 'it' || symbol == 'err' || anchor_scope_unknown {
+		return none
+	}
+	if anchor_member {
+		return none
+	}
+	snap := file_snaps[cand.uri] or {
+		content := app.index_source_for(cand.uri) or { return none }
+		fresh := SemanticFileSnapshot{
+			content: content
+			lines:   content.split_into_lines()
+		}
+		file_snaps[cand.uri] = fresh
+		fresh
+	}
+	cand_pos := cand.range.start
+	line_text := if cand_pos.line >= 0 && cand_pos.line < snap.lines.len {
+		snap.lines[cand_pos.line]
+	} else {
+		''
+	}
+	if line_text == '' {
+		return none
+	}
+	_, cand_member, _ := member_qualifier_at_cursor(line_text, cand_pos.char, app.position_encoding)
+	if cand_member {
+		return none
+	}
+	start_byte := encoded_col_to_byte(line_text, cand_pos.char, app.position_encoding)
+	end_byte := encoded_col_to_byte(line_text, cand.range.end.char, app.position_encoding)
+	if is_loop_binding_occurrence(snap.lines, cand_pos.line, start_byte, end_byte) {
+		return none
+	}
+	// A struct-literal or named-argument label (`count:` in `S{count: 2}`)
+	// shares the visible locals of a same-named local but references the
+	// field. Leave it to compiler verification instead of accepting it as a
+	// local use.
+	if occurrence_is_field_label(line_text, end_byte) {
+		return none
+	}
+	if cand.uri == anchor.uri {
+		cand_keys := app.visible_binding_keys(snap.lines, cand_pos, symbol)
+		cand_is_decl := !source_occurrence_is_method_declaration(snap.lines, cand_pos.line, start_byte)
+			&& (source_occurrence_precedes_local_declaration(snap.lines, cand_pos.line, end_byte)
+				|| is_fn_parameter_highlight(line_text, start_byte, end_byte))
+		// A declaration truncates its own visible set, so the set-equality
+		// check below only decides uses: equal sets of uses reference the
+		// same binding.
+		if !cand_is_decl && cand_keys.len == anchor_keys.len {
+			mut same := true
+			for key, _ in anchor_keys {
+				if key !in cand_keys {
+					same = false
+					break
+				}
+			}
+			if same {
+				if anchor_keys.len == 0 {
+					if idx := app.resolve_indexed_definition(cand.uri, cand_pos) {
+						if !same_anchor_location(idx, anchor) {
+							return false
+						}
+						if highlight_candidate_is_top_level(snap.lines, line_text, cand_pos.line, start_byte, end_byte) {
+							return true
+						}
+					}
+					return none
+				}
+				return true
+			}
+		}
+		if cand_is_decl && cand_pos.line == anchor.range.start.line {
+			if anchor_is_decl {
+				// Two declarations are one binding only for the same
+				// occurrence. Both sides are occurrence bytes, so they
+				// compare directly.
+				if start_byte == anchor_start_byte {
+					return true
+				}
+				return false
+			}
+			if visible_binding_matches(anchor_keys, cand_pos.line, start_byte) {
+				return true
+			}
+			for key, _ in anchor_keys {
+				key_line, _ := binding_key_line_col(key)
+				if key_line == cand_pos.line {
+					// Same line but a different (or shadowed) declaration:
+					// the line alone cannot tell them apart.
+					return false
+				}
+			}
+		}
+		if anchor_is_decl {
+			if cand_is_decl {
+				// Distinct declarations are never one binding; the shared
+				// occurrence itself was accepted before the fast path.
+				return false
+			}
+			if visible_binding_matches(cand_keys, anchor.range.start.line, anchor_start_byte) {
+				return true
+			}
+			for key, _ in cand_keys {
+				key_line, _ := binding_key_line_col(key)
+				if key_line == anchor.range.start.line {
+					// Same line but a different (or shadowing) use: the
+					// line alone cannot tell them apart.
+					return false
+				}
+			}
+		}
+		if cand_keys.len == 0 && anchor_keys.len == 0 {
+			return none
+		}
+		return false
+	}
+	if idx := app.resolve_indexed_definition(cand.uri, cand_pos) {
+		if !same_anchor_location(idx, anchor) {
+			return false
+		}
+		if highlight_candidate_is_top_level(snap.lines, line_text, cand_pos.line, start_byte, end_byte) {
+			return true
+		}
+	}
+	return none
+}
+
 // search_symbol_in_dirs_semantic reads scoped candidate occurrences of `symbol`
 // from the reference index and keeps only those whose compiler definition lookup
 // resolves to the same declaration anchor. Compiler work is capped after scope
@@ -8293,7 +8836,51 @@ fn (mut app App) search_symbol_in_dirs_semantic(symbol string, anchor Location, 
 
 	mut locations := []Location{}
 	mut anchor_cache := map[string]?Location{}
-	app.v3_prefetch_anchors(candidates, mut anchor_cache)
+	// Anchor-side context for the compiler-free candidate decision below.
+	anchor_content := app.index_source_for(anchor.uri) or { '' }
+	anchor_lines := anchor_content.split_into_lines()
+	anchor_keys := app.visible_binding_keys(anchor_lines, anchor.range.start, symbol)
+	anchor_line_text := if anchor.range.start.line >= 0 && anchor.range.start.line < anchor_lines.len {
+		anchor_lines[anchor.range.start.line]
+	} else {
+		''
+	}
+	_, anchor_member, _ := member_qualifier_at_cursor(anchor_line_text, anchor.range.start.char, app.position_encoding)
+	anchor_start_byte := if anchor_line_text == '' {
+		-1
+	} else {
+		encoded_col_to_byte(anchor_line_text, anchor.range.start.char, app.position_encoding)
+	}
+	// Compiler locations are zero-width. Recover the identifier's real end so
+	// declaration detection sees the token instead of the position before it.
+	mut anchor_end_col := anchor.range.end.char
+	if anchor_line_text != '' && anchor_end_col <= anchor.range.start.char {
+		_, token_end_col := find_word_bounds_at_col(anchor_line_text, anchor.range.start.char, app.position_encoding)
+		if token_end_col > anchor.range.start.char {
+			anchor_end_col = token_end_col
+		}
+	}
+	anchor_end_byte := if anchor_line_text == '' {
+		-1
+	} else {
+		encoded_col_to_byte(anchor_line_text, anchor_end_col, app.position_encoding)
+	}
+	anchor_is_decl := anchor_start_byte >= 0
+		&& (source_occurrence_precedes_local_declaration(anchor_lines, anchor.range.start.line, anchor_end_byte)
+			|| is_fn_parameter_highlight(anchor_line_text, anchor_start_byte, anchor_end_byte))
+	anchor_scope_unknown := is_loop_binding_occurrence(anchor_lines, anchor.range.start.line,
+		anchor_start_byte, anchor_end_byte)
+	// The anchor itself may be a struct-literal or named-argument label. Such
+	// a label is not a local reference even when its visible locals match, so
+	// leave every candidate to compiler verification.
+	anchor_is_field_label := anchor_end_byte >= 0
+		&& occurrence_is_field_label(anchor_line_text, anchor_end_byte)
+	mut file_snaps := map[string]SemanticFileSnapshot{}
+	mut fast_decisions := map[string]?bool{}
+	mut ambiguous := []Location{}
+	// Classify every candidate from the index before asking the compiler about
+	// any of them: candidates the fast path accepts or rejects must not trigger
+	// a batched V3 query.
 	for cand in candidates {
 		if request_id in app.cancelled_requests {
 			return locations
@@ -8302,7 +8889,32 @@ fn (mut app App) search_symbol_in_dirs_semantic(symbol string, anchor Location, 
 		// location. The candidate is nevertheless safe when its indexed position
 		// is the canonical anchor returned for the user's selected occurrence.
 		if same_anchor_location(cand, anchor) {
+			continue
+		}
+		if anchor_is_field_label {
+			ambiguous << cand
+			continue
+		}
+		if fast := app.semantic_candidate_fast(symbol, anchor, anchor_keys, anchor_member, anchor_is_decl, anchor_start_byte, cand, mut file_snaps, anchor_scope_unknown) {
+			fast_decisions[anchor_cache_key(cand.uri, cand.range.start.line, cand.range.start.char)] = fast
+		} else {
+			ambiguous << cand
+		}
+	}
+	app.v3_prefetch_anchors(ambiguous, mut anchor_cache)
+	for cand in candidates {
+		if request_id in app.cancelled_requests {
+			return locations
+		}
+		if same_anchor_location(cand, anchor) {
 			locations << cand
+			continue
+		}
+		key := anchor_cache_key(cand.uri, cand.range.start.line, cand.range.start.char)
+		if decided := fast_decisions[key] {
+			if decided {
+				locations << cand
+			}
 			continue
 		}
 		resolved := app.resolve_symbol_anchor_cached(cand.uri, cand.range.start.line, cand.range.start.char, mut anchor_cache) or { continue }
@@ -8596,11 +9208,22 @@ fn (mut app App) collect_module_completions(current_file_uri string, working_dir
 		os.read_file(uri_to_path(current_file_uri)) or { '' }
 	}
 	current_module := get_module_name(current_content)
-	normalized_dir := normalized_index_path(working_dir)
-	for uri, _ in app.open_files {
-		if normalized_index_path(os.dir(uri_to_path(uri))) == normalized_dir {
-			app.reindex_uri(uri)
+	normalized_working_dir := normalized_index_path(working_dir)
+	working_prefix := if normalized_working_dir.ends_with('/') {
+		normalized_working_dir
+	} else {
+		normalized_working_dir + '/'
+	}
+	for norm_path, open_uri in app.open_index_uris_cached() {
+		// The cached keys are already canonical paths, so a lexical
+		// same-directory check replaces a real_path call per open file.
+		if !norm_path.starts_with(working_prefix) {
+			continue
 		}
+		if norm_path[working_prefix.len..].contains('/') {
+			continue
+		}
+		app.reindex_uri(open_uri)
 	}
 	app.ensure_dir_shallow_indexed(working_dir)
 	requesting_path := uri_to_path(current_file_uri)
@@ -8610,11 +9233,23 @@ fn (mut app App) collect_module_completions(current_file_uri string, working_dir
 		''
 	}
 	active_names := app.active_indexed_source_file_names(working_dir, active_test_name)
+	normalized_dir := normalized_index_path(working_dir)
+	lex_dir := lexical_index_path(working_dir)
 	mut items := []Detail{}
 	mut has_conditional := false
 	for indexed_uri in app.indexed_uris_in_dir(working_dir) {
 		entry := app.symbol_index[indexed_uri] or { continue }
-		if os.file_name(uri_to_path(indexed_uri)) !in active_names || entry.module_name != current_module {
+		// Cheapest filters first: module match is pure memory, filename is
+		// one map lookup. The directory check only canonicalizes when the
+		// lexical comparison disagrees (symlink/case aliases).
+		if entry.module_name != current_module {
+			continue
+		}
+		indexed_path := uri_to_path(indexed_uri)
+		if os.file_name(indexed_path) !in active_names {
+			continue
+		}
+		if !same_index_dir(os.dir(indexed_path), lex_dir, normalized_dir) {
 			continue
 		}
 		if entry.has_conditional_module_completions {
@@ -9248,15 +9883,38 @@ fn (mut app App) on_cancel_request(request Request) {
 	// when the id is a string, but string ids must still be cancellable
 	// (P0-02/P0-03).
 	if raw := extract_raw_id(request.params) {
-		app.cancelled_raw_ids[raw] = true
-		// Match every valid id by its exact raw token. Narrowing a fractional or
-		// out-of-range numeric id to int can collide with a different request.
-		log('VLS: request ${raw} marked as cancelled')
+		// Only a live request can be cancelled. A cancel that arrives after its
+		// worker finished has no answer to suppress; recording it would poison
+		// a later request that reuses the id. The reaper drops the worker flag
+		// before the loop reads this message, so that ordering is common.
+		if raw in app.line_info_cancels {
+			app.cancelled_raw_ids[raw] = true
+			mut flag := app.line_info_cancels[raw] or { &CancelFlag{} }
+			flag.cancel()
+			// Match every valid id by its exact raw token. Narrowing a fractional
+			// or out-of-range numeric id to int can collide with a request.
+			log('VLS: request ${raw} marked as cancelled')
+		} else {
+			log('VLS: ignoring late cancel for request ${raw}')
+		}
 		return
 	}
 	if params := json2.decode[CancelRequestParams](request.params) {
-		app.cancelled_requests[params.id] = true
-		log('VLS: request ${params.id} marked as cancelled')
+		// Numeric ids name a live worker by its canonical raw token; a stale
+		// numeric cancel must not outlive that worker either.
+		mut live := false
+		for raw_id in app.line_info_cancels.keys() {
+			if raw_is_canonical_int(raw_id) && raw_id_to_int(raw_id) == params.id {
+				live = true
+				break
+			}
+		}
+		if live {
+			app.cancelled_requests[params.id] = true
+			log('VLS: request ${params.id} marked as cancelled')
+		} else {
+			log('VLS: ignoring late cancel for request ${params.id}')
+		}
 	} else {
 		$if debug {
 			log('Failed to decode CancelRequestParams')
@@ -9297,8 +9955,10 @@ fn (mut app App) on_did_change_workspace_folders(request Request) {
 		if !already_removed {
 			app.removed_workspace_roots << path
 		}
-		// Drop now-stale index entries that belonged to the removed folder.
+		// Drop now-stale index entries and cached overlays that belonged to
+		// the removed folder.
 		app.drop_index_under(path)
+		app.drop_overlays_under(path)
 	}
 	// Add newly opened folders.
 	for folder in params.event.added {

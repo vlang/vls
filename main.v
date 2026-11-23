@@ -5,11 +5,18 @@ module main
 import json2
 import net
 import os
+import strconv
 import sync
 import time
 import io
 
 const vls_version = '0.0.3'
+
+// cli_int parses a numeric CLI argument strictly. V's .int() accepts a leading
+// number followed by junk, which would silently turn "12x" into a line number.
+fn cli_int(arg string) int {
+	return strconv.atoi(arg) or { 0 }
+}
 
 // cli_app builds a minimal App for single-file CLI commands. It reuses the
 // OS temp directory directly so no per-invocation directory is left behind.
@@ -36,6 +43,7 @@ fn json_response_result(result ResponseResult) string {
 }
 
 fn (mut app App) stop_standalone_session() {
+	app.cancel_and_join_line_info_workers()
 	app.cancel_all_scheduled_diagnostics()
 	app.stop_run_commands()
 	app.stop_diagnostics_servers()
@@ -116,12 +124,17 @@ mut:
 	index_walk_byte_budget                      u64 // Test seam: total disk bytes indexed per walk, 0 = platform budget
 	vlib_fn_cache                               map[string]map[string]string // Per-vlib-module fn→return-type index (immutable during a session)
 	expression_type_depth                       int                         // Nesting of expression_type, which a binding's declaration re-enters
+	line_info_mode                              LineInfoMode                // How the configured `v` reaches the `-line-info` checker (see interop.v)
+	line_info_probe_done                        bool                        // A line-info request completed, so later misses may run async
 	line_info_unavailable                       bool                        // The configured compiler definitively refused a one-shot editor query
 	inlay_hint_cache                            map[string]CachedInlayHints // Per-URI compiler inlay hints, see compiler_inlay_hints
-	tcp_conn                                    ?&net.TcpConn               // Non-nil when serving a TCP client
-	is_shutdown                                 bool                        // True after shutdown request was acknowledged
-	exit_was_requested                          bool                        // True when the exit notification was received
-	received_initialize                         bool                        // True after initialize request was processed
+	inlay_fn_cache                              ?&InlayFnCache              // Per-file fn→return-type cache for inlay hints (see handlers.v)
+	open_uris_cache                             map[string]string           // open_files_generation-scoped normalized path → uri map
+	open_uris_cache_gen                         int = -1 // open_files_generation at which open_uris_cache was built
+	tcp_conn                                    ?&net.TcpConn // Non-nil when serving a TCP client
+	is_shutdown                                 bool          // True after shutdown request was acknowledged
+	exit_was_requested                          bool          // True when the exit notification was received
+	received_initialize                         bool          // True after initialize request was processed
 	next_request_id                             int = 1 // Counter for server-initiated request ids
 	diagnostics_scheduler                       ?&DiagnosticsScheduler  // Production-only async diagnostics
 	index_refresh                               ?&IndexRefreshScheduler // Production-only background index refresh (see index.v)
@@ -136,9 +149,16 @@ mut:
 	program_dir_checked                         string                 // The program the last check covered, when it covered one
 	diagnostics_cancelled                       fn () bool                         = unsafe { nil } // Whether a newer check made the running one useless
 	diagnostics_partial                         fn (uri string, found CheckErrors) = unsafe { nil } // Publishes the errors a check found before its end (see DiagnosticsServer.ask)
-	run_command_manager                         ?&RunCommandManager // Async code-lens process lifecycle
-	execute_commands_synchronously              bool                // Test hook for deterministic command assertions
-	write_mutex                                 &sync.Mutex = sync.new_mutex() // Serializes worker and request-loop writes
+	run_command_manager                         ?&RunCommandManager    // Async code-lens process lifecycle
+	overlay_cache_store                         ?&OverlayCacheStore    // Shared compilation overlay cache (see interop.v)
+	line_info_cancel                            ?&CancelFlag           // Set while a line-info compiler run may be cancelled
+	line_info_cancels                           map[string]&CancelFlag // In-flight line-info cancels by raw id (loop thread only)
+	// The async line-info workers (see interop.v). The session cancels and
+	// joins them before it stops the compiler pools and drops the overlays
+	// they compile against and answer through.
+	line_info_workers              &sync.WaitGroup = sync.new_waitgroup()
+	execute_commands_synchronously bool // Test hook for deterministic command assertions
+	write_mutex                    &sync.Mutex = sync.new_mutex() // Serializes worker and request-loop writes
 	// What the compiler's answer cost, per document and method: below the budget
 	// in answer_budget.v the answer is waited for instead of answered twice.
 	compiler_answer_ms            map[string]i64
@@ -407,8 +427,8 @@ fn main() {
 	}
 	if os.args.len >= 5 && os.args[1] == 'hover' {
 		path := os.real_path(os.args[2])
-		line := os.args[3].int()
-		col := os.args[4].int()
+		line := cli_int(os.args[3])
+		col := cli_int(os.args[4])
 		content := os.read_file(path) or {
 			eprintln('cannot read ${path}: ${err}')
 			exit(1)
@@ -430,8 +450,8 @@ fn main() {
 	}
 	if os.args.len >= 5 && os.args[1] == 'definition' {
 		path := os.real_path(os.args[2])
-		line := os.args[3].int()
-		col := os.args[4].int()
+		line := cli_int(os.args[3])
+		col := cli_int(os.args[4])
 		content := os.read_file(path) or {
 			eprintln('cannot read ${path}: ${err}')
 			exit(1)
@@ -453,8 +473,8 @@ fn main() {
 	}
 	if os.args.len >= 5 && os.args[1] == 'references' {
 		path := os.real_path(os.args[2])
-		line := os.args[3].int()
-		col := os.args[4].int()
+		line := cli_int(os.args[3])
+		col := cli_int(os.args[4])
 		content := os.read_file(path) or {
 			eprintln('cannot read ${path}: ${err}')
 			exit(1)
@@ -507,8 +527,8 @@ fn main() {
 	}
 	if os.args.len >= 5 && os.args[1] == 'completion' {
 		path := os.real_path(os.args[2])
-		line := os.args[3].int()
-		col := os.args[4].int()
+		line := cli_int(os.args[3])
+		col := cli_int(os.args[4])
 		content := os.read_file(path) or {
 			eprintln('cannot read ${path}: ${err}')
 			exit(1)
@@ -530,8 +550,8 @@ fn main() {
 	}
 	if os.args.len >= 6 && os.args[1] == 'rename' {
 		path := os.real_path(os.args[2])
-		line := os.args[3].int()
-		col := os.args[4].int()
+		line := cli_int(os.args[3])
+		col := cli_int(os.args[4])
 		new_name := os.args[5]
 		content := os.read_file(path) or {
 			eprintln('cannot read ${path}: ${err}')
@@ -579,6 +599,8 @@ fn main() {
 		open_files:            map[string]string{}
 		temp_dir:              temp_dir
 		diagnostics_scheduler: new_diagnostics_scheduler()
+		overlay_cache_store:   new_overlay_cache_store()
+		line_info_cancels:     map[string]&CancelFlag{}
 		index_refresh:         new_index_refresh_scheduler()
 		v3_line_info_enabled:  true
 	}
@@ -656,12 +678,20 @@ fn handle_tcp_client(mut conn net.TcpConn) {
 		text:                  ''
 		open_files:            map[string]string{}
 		temp_dir:              temp_dir
+		tcp_conn:              &conn
 		diagnostics_scheduler: new_diagnostics_scheduler()
+		overlay_cache_store:   new_overlay_cache_store()
+		line_info_cancels:     map[string]&CancelFlag{}
 		index_refresh:         new_index_refresh_scheduler()
 		v3_line_info_enabled:  true
 	}
 	mut reader := io.new_buffered_reader(reader: conn, cap: transport_buffer_cap)
 	app.handle_requests(mut reader)
+	// The request loop already joined the async line-info workers before it
+	// returned, but joining here as well keeps the TCP teardown explicit: if
+	// the client disconnects mid-compile, no worker may outlive the session
+	// and write through the snapshot's `tcp_conn` pointer after it closes.
+	app.cancel_and_join_line_info_workers()
 	log('TCP client disconnected')
 	os.rmdir_all(temp_dir) or {
 		$if debug {
@@ -697,6 +727,8 @@ fn (mut app App) write_data(data string) {
 fn (mut app App) send_framed(content string) {
 	header := 'Content-Length: ${content.len}\r\n\r\n'
 	full_message := '${header}${content}'
+	// Building the log string copies the entire response body; skip it when
+	// logging is off (the default) so a large response is copied only once.
 	if logging_is_enabled() {
 		log('SEND: ${full_message}')
 	}
@@ -721,8 +753,13 @@ struct IncomingMessage {
 	eof     bool
 	failure string
 	// is_request is set for a message with an id, and method is its method.
+	// raw_id, the has_id flag and the decoded body are computed on the reader
+	// thread so the request loop can reuse those results instead of repeating
+	// those three operations on every payload.
 	is_request bool
 	method     Method
+	raw_id     string
+	body       ?RequestBody
 }
 
 // IncomingReader borrows the session reader until its reading thread joins.
@@ -750,12 +787,11 @@ fn read_incoming_messages[T](mut reader T, incoming chan IncomingMessage) {
 		mut message := IncomingMessage{
 			content:    content
 			is_request: request_content_has_id(content)
+			raw_id:     extract_raw_id(content) or { '' }
 		}
 		if body := json2.decode[RequestBody](content) {
-			message = IncomingMessage{
-				...message
-				method: Method.from_string(body.method)
-			}
+			message.body = body
+			message.method = Method.from_string(body.method)
 		}
 		incoming <- message or { return }
 		// Exit ends the stream even if a TCP peer keeps its socket open. Do not
@@ -964,7 +1000,7 @@ fn parse_content_length_header(s string) !int {
 		return error('empty Content-Length')
 	}
 	for ch in t {
-		if ch < `0` || ch > `9` {
+		if !ch.is_digit() {
 			return error('non-numeric Content-Length')
 		}
 	}
@@ -972,7 +1008,7 @@ fn parse_content_length_header(s string) !int {
 	if t.len > 18 {
 		return error('Content-Length too large')
 	}
-	n := t.i64()
+	n := strconv.parse_int(t, 10, 64) or { return error('invalid Content-Length') }
 	if n < 0 || n > max_content_length {
 		return error('Content-Length out of range')
 	}
@@ -993,6 +1029,11 @@ fn (mut app App) handle_requests[T](mut reader T) {
 	defer {
 		incoming.close()
 		reading.wait()
+		// An async line-info worker compiles against a cached overlay and
+		// answers through this session's transport, so both outlive the
+		// request that scheduled them and are joined before the session
+		// stops them.
+		app.cancel_and_join_line_info_workers()
 		app.cancel_all_scheduled_diagnostics()
 		app.stop_run_commands()
 		// A deferred answer asks through the pooled compilers and writes on the
@@ -1005,6 +1046,9 @@ fn (mut app App) handle_requests[T](mut reader T) {
 		// A background refresh must not still be walking the workspace after
 		// the session it was indexing for is gone.
 		app.stop_index_refresh()
+		// Session overlays are temp dirs no later session uses; drop them only
+		// after the workers and compiler pools above have stopped.
+		app.drop_all_overlays()
 	}
 	mut pending := []IncomingMessage{}
 	for {
@@ -1051,11 +1095,17 @@ fn (mut app App) handle_requests[T](mut reader T) {
 		if content.len == 0 {
 			continue
 		}
-		log('\n\nRECV: ${content}')
-		has_id := request_content_has_id(content)
+		// Interpolating the body copies the whole payload; do it only when
+		// somebody actually reads the log.
+		if logging_is_enabled() {
+			log('\n\nRECV: ${content}')
+		}
+		// The reader thread already scanned the id and decoded the body; doing
+		// either again here duplicated the cost of every full-text payload.
+		has_id := message.is_request
 		// Preserve the exact id (numeric or string) so responses echo it
 		// verbatim; string ids would otherwise collapse to 0 (P0-02).
-		app.current_request_raw_id = extract_raw_id(content) or { '' }
+		app.current_request_raw_id = message.raw_id
 		// Decode the body WITHOUT the id field first: json2 aborts the whole
 		// decode on a string value in an int field, which would otherwise make
 		// every string-id request undecodable. The numeric id is derived from
@@ -1065,24 +1115,31 @@ fn (mut app App) handle_requests[T](mut reader T) {
 		// disallowed id type (object, array, boolean) or a mistyped member
 		// (e.g. a numeric `method`) is an Invalid Request (-32600). json2
 		// fails both cases, so a generic syntax decode tells them apart.
-		body := json2.decode[RequestBody](content) or {
-			if _ := json2.decode[json2.Any](content) {
-				// Valid JSON but not a valid Request object.
-				if app.current_request_raw_id != '' && !raw_id_is_valid(app.current_request_raw_id) {
-					app.current_request_raw_id = 'null'
-					app.write_error_response(make_invalid_request_error_response(0, 'Request id must be a string, number, or null'))
-				} else {
-					if app.current_request_raw_id == '' {
+		mut body := RequestBody{}
+		if decoded := message.body {
+			body = decoded
+		} else {
+			body = json2.decode[RequestBody](content) or {
+				if _ := json2.decode[json2.Any](content) {
+					// Valid JSON but not a valid Request object.
+					if app.current_request_raw_id != '' && !raw_id_is_valid(app.current_request_raw_id) {
 						app.current_request_raw_id = 'null'
+						app.write_error_response(make_invalid_request_error_response(0, 'Request id must be a string, number, or null'))
+					} else {
+						if app.current_request_raw_id == '' {
+							app.current_request_raw_id = 'null'
+						}
+						app.write_error_response(make_invalid_request_error_response(raw_id_to_int(app.current_request_raw_id), 'Invalid request: ${err.msg()}'))
 					}
-					app.write_error_response(make_invalid_request_error_response(raw_id_to_int(app.current_request_raw_id), 'Invalid request: ${err.msg()}'))
+					continue
 				}
+				if logging_is_enabled() {
+					log('Failed to decode JSON request: ${err.msg()}. Content: "${content}"')
+				}
+				app.current_request_raw_id = 'null'
+				app.write_error_response(make_parse_error_response(err.msg()))
 				continue
 			}
-			log('Failed to decode JSON request: ${err.msg()}. Content: "${content}"')
-			app.current_request_raw_id = 'null'
-			app.write_error_response(make_parse_error_response(err.msg()))
-			continue
 		}
 		// JSON-RPC ids may only be a string, number, or null (an absent raw id).
 		// A present id of any other type (object, array, boolean) is an Invalid
@@ -1100,7 +1157,9 @@ fn (mut app App) handle_requests[T](mut reader T) {
 		// capabilities or disappear without a parse error (P0-02).
 		if is_client_response_message(content) {
 			app.note_server_request_response(content)
-			log('Consumed client response to a server-initiated request: ${content}')
+			if logging_is_enabled() {
+				log('Consumed client response to a server-initiated request: ${content}')
+			}
 			continue
 		}
 		lsp_request := Request{
@@ -1109,7 +1168,9 @@ fn (mut app App) handle_requests[T](mut reader T) {
 			jsonrpc: body.jsonrpc
 			params:  body.params
 		}
-		log('\n\nRECV (pretty): ${content}')
+		if logging_is_enabled() {
+			log('\n\nRECV (pretty): ${content}')
+		}
 		method := Method.from_string(lsp_request.method)
 		log('method="${method}" request.method="${lsp_request.method}" ${method == .completion}')
 		// Enforce request/notification direction (P0-03): a message with an id
@@ -1123,6 +1184,15 @@ fn (mut app App) handle_requests[T](mut reader T) {
 		if !has_id && method_requires_response(method) {
 			log('Dropping notification-shaped message for request-only method ${lsp_request.method}')
 			continue
+		}
+		// Reap finished async line-info workers before deciding cancellation:
+		// a worker that already answered consumed its request, so its
+		// $/cancelRequest entry is dropped here and a later request reusing
+		// the id is not treated as cancelled. The worker itself answers
+		// through a snapshot with private cancellation maps and cannot drop
+		// the session's entry.
+		if app.line_info_cancels.len > 0 {
+			app.purge_finished_line_info()
 		}
 		if method_requires_response(method) && app.request_is_cancelled(lsp_request.id) {
 			app.write_error_response(make_cancelled_error_response(lsp_request.id))
@@ -1157,8 +1227,7 @@ fn (mut app App) handle_requests[T](mut reader T) {
 			}
 		}
 		match method {
-			.completion, .signature_help, .definition, .hover, .declaration, .type_definition,
-			.implementation {
+			.completion {
 				// Phase 0 baseline: opt-in per-request timing.
 				started_ms := time.now().unix_milli()
 				resp := app.operation_at_pos(method, lsp_request)
@@ -1168,6 +1237,21 @@ fn (mut app App) handle_requests[T](mut reader T) {
 						4)
 				}
 				app.write_response_or_cancelled(lsp_request.id, resp)
+			}
+			.signature_help, .definition, .hover, .declaration, .type_definition, .implementation {
+				phased := app.operation_at_pos_indexed(method, lsp_request)
+				if phased.done {
+					app.write_response_or_cancelled(lsp_request.id, phased.resp)
+				} else if app.should_dispatch_async_line_info() {
+					// A completed line-info request taught the session what this
+					// compiler can answer, so later misses run on a worker while
+					// the loop stays responsive. V3 and pooled answers leave
+					// `line_info_mode` at `.unknown`, so they cannot gate this.
+					app.dispatch_async_line_info(method, lsp_request)
+				} else {
+					resp := app.operation_at_pos(method, lsp_request)
+					app.write_response_or_cancelled(lsp_request.id, resp)
+				}
 			}
 			.references {
 				resp := app.find_references(lsp_request)
@@ -1490,7 +1574,7 @@ fn raw_id_to_int(raw string) int {
 	if !raw_is_canonical_int(raw) {
 		return 0
 	}
-	return raw.int()
+	return strconv.atoi(raw) or { 0 }
 }
 
 // raw_is_canonical_int reports whether `raw` is an optional `-` followed by one
@@ -1835,6 +1919,11 @@ fn inject_raw_id(encoded string, raw_id string) string {
 	for val_end < encoded.len && encoded[val_end] != `,` && encoded[val_end] != `}` {
 		val_end++
 	}
+	// Numeric ids are the common case and the encoder already wrote them
+	// correctly; avoid concatenating a whole copy of the response for a no-op.
+	if encoded[val_start..val_end] == raw_id {
+		return encoded
+	}
 	return encoded[..val_start] + raw_id + encoded[val_end..]
 }
 
@@ -1905,8 +1994,21 @@ fn matches_needle_at(s string, i int, needle string) bool {
 	return true
 }
 
+// framed_notification encodes and frames a notification without touching any
+// session or scheduler state. Callers that hold a lock can prepare the bytes
+// first and keep only the socket write inside the critical section.
+fn framed_notification(notification Notification) string {
+	content := json2.encode(notification, escape_unicode: true)
+	header := 'Content-Length: ${content.len}\r\n\r\n'
+	full_message := '${header}${content}'
+	if logging_is_enabled() {
+		log('SEND: ${full_message}')
+	}
+	return full_message
+}
+
 fn (mut app App) write_notification(notification Notification) {
-	app.send_framed(json2.encode(notification, escape_unicode: true))
+	app.write_data(framed_notification(notification))
 }
 
 fn (mut app App) accept_shutdown(id int) {
@@ -2604,14 +2706,29 @@ fn (mut app App) consume_cancelled_request(id int, raw_id string) bool {
 // import it — otherwise an importer keyed on its own directory would reuse
 // diagnostics computed against the imported module's old API (P1-06).
 fn (app &App) generation_key(uri string) string {
+	mut cache := map[string]string{}
+	return app.generation_key_cached(uri, mut cache)
+}
+
+// generation_key_cached is the same lookup with an explicit per-notification
+// cache. A watcher batch asks for the same handful of project keys many times;
+// each uncached lookup walks every ancestor directory checking for v.mod, plus
+// a program_root lookup, so the cache removes two stats per ancestor level.
+fn (app &App) generation_key_cached(uri string, mut cache map[string]string) string {
+	if uri in cache {
+		return cache[uri]
+	}
 	path := uri_to_path(uri)
 	root := find_project_root(os.dir(path))
-	if root != '' {
-		return root
+	key := if root != '' {
+		root
+	} else {
+		// Without a v.mod, the project is the program the file belongs to,
+		// whose directory also holds the local modules it imports.
+		app.program_root(path)
 	}
-	// Without a v.mod, the project is the program the file belongs to, whose
-	// directory also holds the local modules it imports.
-	return app.program_root(path)
+	cache[uri] = key
+	return key
 }
 
 // bump_generation records a mutation to `uri`, advancing both the global counter
@@ -2619,8 +2736,13 @@ fn (app &App) generation_key(uri string) string {
 // revision so that editing one file invalidates cached diagnostics for the whole
 // owning project (covering cross-module imports), not every open document (P1-06).
 fn (mut app App) bump_generation(uri string) {
+	app.bump_generation_for_key(app.generation_key(uri))
+}
+
+// bump_generation_for_key advances the same revision when the caller already
+// resolved the project key, as the watcher notification does.
+fn (mut app App) bump_generation_for_key(key string) {
 	app.open_files_generation++
-	key := app.generation_key(uri)
 	app.project_generations[key] = app.project_generations[key] + 1
 }
 

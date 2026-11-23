@@ -98,6 +98,24 @@ mut:
 	// can look at the queue a change leaves, which a check started at once
 	// would empty.
 	paused bool
+	// Fingerprint memo kept between slow jobs. Each worker gets a private copy
+	// and hands its warm copy back when it finishes; a watcher event clears the
+	// memo and bumps the epoch, so a job that started before the change cannot
+	// put its stale listing back. Both maps are advisory: content entries are
+	// gated by size/inode/mtime and listings have a TTL.
+	memo_epoch      u64
+	file_list_cache map[string]FileListEntry
+	content_memo    map[string]ContentMemo
+	diag_disk_roots map[string]bool
+}
+
+// forget_diagnostics_memo invalidates the fingerprint memo after a disk
+// change. Caller must hold scheduler.mutex.
+fn (mut scheduler DiagnosticsScheduler) forget_diagnostics_memo() {
+	scheduler.memo_epoch++
+	scheduler.file_list_cache = map[string]FileListEntry{}
+	scheduler.content_memo = map[string]ContentMemo{}
+	scheduler.diag_disk_roots = map[string]bool{}
 }
 
 fn new_diagnostics_scheduler() &DiagnosticsScheduler {
@@ -165,13 +183,23 @@ fn (mut scheduler DiagnosticsScheduler) begin_project_mutation(project_key strin
 	mut tickets := []DiagnosticsTicket{cap: affected.len * 2}
 	for affected_uri, _ in affected {
 		scheduler.generations[affected_uri] = scheduler.generations[affected_uri] + 1
-		for kind in [DiagnosticsKind.slow, DiagnosticsKind.fast] {
+		tickets << DiagnosticsTicket{
+			uri:                affected_uri
+			global_generation:  scheduler.global_generation
+			generation:         scheduler.generations[affected_uri]
+			project_generation: project_generation
+			kind:               .slow
+		}
+		// The fast pass only rescans a buffer for parse/import errors, which
+		// cannot appear in a document whose text did not change. Siblings need
+		// the compiler pass; only the changed document gets both.
+		if affected_uri == requested_uri {
 			tickets << DiagnosticsTicket{
 				uri:                affected_uri
 				global_generation:  scheduler.global_generation
 				generation:         scheduler.generations[affected_uri]
 				project_generation: project_generation
-				kind:               kind
+				kind:               .fast
 			}
 		}
 	}
@@ -468,16 +496,22 @@ fn (mut app App) finish_diagnostics_project_schedule(mutation DiagnosticsProject
 // begin_diagnostics_project_mutation invalidates existing jobs before App state
 // changes. finish_diagnostics_project_mutation rebuilds them from fresh state.
 fn (mut app App) begin_diagnostics_project_mutation(uri string) DiagnosticsProjectMutation {
+	mut cache := map[string]string{}
+	return app.begin_diagnostics_project_mutation_cached(uri, mut cache)
+}
+
+// begin_diagnostics_project_mutation_cached reuses project keys already
+// computed during this notification; see generation_key_cached.
+fn (mut app App) begin_diagnostics_project_mutation_cached(uri string, mut cache map[string]string) DiagnosticsProjectMutation {
 	if mut scheduler := app.diagnostics_scheduler {
-		// The changed document's last published result no longer describes it.
-		// The schedule path drops its own document through the requested URI;
-		// this path carries none, so drop it here instead.
+		// The changed document's last published result no longer describes it;
+		// drop it before the mutation rebuilds this project's tickets.
 		scheduler.forget_published_errors(uri)
-		project_key := app.generation_key(uri)
+		project_key := app.generation_key_cached(uri, mut cache)
 		return DiagnosticsProjectMutation{
 			project_key: project_key
-			tickets:     scheduler.begin_project_mutation(project_key, '', app.open_files_affected_by(uri,
-				project_key))
+			tickets:     scheduler.begin_project_mutation(project_key, uri, app.open_files_affected_by_cached(uri,
+				project_key, mut cache))
 		}
 	}
 	return DiagnosticsProjectMutation{}
@@ -488,13 +522,18 @@ fn (mut app App) begin_diagnostics_project_mutation(uri string) DiagnosticsProje
 // and those of any program whose directory holds it, since creating, deleting or
 // renaming a file there decides whether an import resolves.
 fn (app &App) open_files_affected_by(uri string, project_key string) []string {
+	mut cache := map[string]string{}
+	return app.open_files_affected_by_cached(uri, project_key, mut cache)
+}
+
+fn (app &App) open_files_affected_by_cached(uri string, project_key string, mut cache map[string]string) []string {
 	changed := normalize_overlay_path(uri_to_path(uri))
 	mut affected := []string{}
 	for open_uri, _ in app.open_files {
 		if open_uri == uri {
 			continue
 		}
-		key := app.generation_key(open_uri)
+		key := app.generation_key_cached(open_uri, mut cache)
 		if key == project_key || path_is_within(changed, normalize_overlay_path(key)) {
 			affected << open_uri
 		}
@@ -680,6 +719,16 @@ fn run_diagnostics_job(mut scheduler DiagnosticsScheduler, job DiagnosticsJob) {
 	if version := job.version {
 		versions[job.uri] = version
 	}
+	// Start from the scheduler's warm fingerprint memo instead of building a
+	// cold listing and re-reading every project file on each job. The worker
+	// owns private copies; a watcher event clears the shared memo and bumps the
+	// epoch, so a stale job cannot put its old entries back.
+	scheduler.mutex.lock()
+	memo_epoch := scheduler.memo_epoch
+	warm_files := scheduler.file_list_cache.clone()
+	warm_content := scheduler.content_memo.clone()
+	warm_disk_roots := scheduler.diag_disk_roots.clone()
+	scheduler.mutex.unlock()
 	mut worker := App{
 		text:                  job.content
 		open_files:            job.open_files
@@ -694,6 +743,9 @@ fn run_diagnostics_job(mut scheduler DiagnosticsScheduler, job DiagnosticsJob) {
 		tcp_conn:              job.tcp_conn
 		diagnostics_servers:   scheduler.servers
 		v3_query_servers:      scheduler.servers
+		file_list_cache:       warm_files
+		content_memo:          warm_content
+		diag_disk_roots:       warm_disk_roots
 		// A change that arrives while this check runs stops it: its answer would
 		// be stale, and the newer check can start at once.
 		diagnostics_cancelled: fn [mut scheduler, job] () bool {
@@ -704,6 +756,15 @@ fn run_diagnostics_job(mut scheduler DiagnosticsScheduler, job DiagnosticsJob) {
 		diagnostics_partial:   fn [mut scheduler, job] (uri string, found CheckErrors) {
 			scheduler.publish_partial(job, uri, found)
 		}
+	}
+	defer {
+		scheduler.mutex.lock()
+		if scheduler.memo_epoch == memo_epoch {
+			scheduler.file_list_cache = worker.file_list_cache.move()
+			scheduler.content_memo = worker.content_memo.move()
+			scheduler.diag_disk_roots = worker.diag_disk_roots.move()
+		}
+		scheduler.mutex.unlock()
 	}
 	notification := worker.build_diagnostics_notification(job.uri, job.content)
 	// Publish the exact diagnostic items and update the pull cache under the
@@ -732,12 +793,19 @@ fn run_diagnostics_job(mut scheduler DiagnosticsScheduler, job DiagnosticsJob) {
 	// it: nothing else checks it again, and it would keep what the program said.
 	mut members := worker.program_errors.keys()
 	members << job.uri
-	for other_uri in scheduler.swap_program_members(worker.program_dir_checked, members) {
+	for other_uri in scheduler.swap_program_members_if_current(job, worker.program_dir_checked, members) {
 		other_content := job.open_files[other_uri] or { continue }
 		other := worker.build_diagnostics_notification(other_uri, other_content)
 		// Publish a clean report as an actual empty cached result, so a
 		// workspace pull can clear the old errors for this URI too.
 		scheduler.publish_if_current(mut worker, job, other)
+	}
+	// The check answered for its program's other open files too, so their
+	// still-pending slow jobs would only re-derive what was just published.
+	// A timed-out or crashed check caches nothing: its empty answer must not
+	// retire anything.
+	if job.uri in worker.diag_cache {
+		scheduler.retire_superseded_slow_jobs(job, members)
 	}
 }
 
@@ -768,17 +836,65 @@ fn (mut scheduler DiagnosticsScheduler) publish_partial(job DiagnosticsJob, uri 
 	}
 }
 
-// swap_program_members records `members`, the open files a check of the program
-// in `program_dir` answered for, and returns those the previous check of that
-// program answered for and this one does not.
-fn (mut scheduler DiagnosticsScheduler) swap_program_members(program_dir string, members []string) []string {
+// swap_program_members_if_current records `members`, the open files a check of
+// the program in `program_dir` answered for, and returns those the previous
+// check of that program answered for and this one does not — but only when
+// `job` is still current. The swap runs under the same lock as the currency
+// check: a job that goes stale after publishing must not overwrite the member
+// set a newer check published, or the newer check would diff against a stale
+// set and miss clearing diagnostics for files that left the program. A stale
+// job swaps nothing and reports no departures; its own clearing publishes
+// were already refused.
+fn (mut scheduler DiagnosticsScheduler) swap_program_members_if_current(job DiagnosticsJob, program_dir string, members []string) []string {
 	scheduler.mutex.lock()
 	defer {
 		scheduler.mutex.unlock()
 	}
+	if !scheduler.is_job_current_locked(job) {
+		return []string{}
+	}
 	previous := scheduler.program_members[program_dir] or { []string{} }
 	scheduler.program_members[program_dir] = members
 	return previous.filter(it !in members)
+}
+
+// retire_superseded_slow_jobs drops the still-pending slow jobs for `members`,
+// the open files a completed slow check just published for, when they would
+// only re-derive the published answer. Only jobs of the completed check's own
+// snapshot retire: the same project at the same project generation, so a file
+// changed after the check started keeps its newer job. Per-URI generations are
+// not compared across files: sequential opens bump earlier files more, so a
+// numeric comparison would keep redundant jobs depending on which file the
+// worker took first. A superseded completion retires nothing: its publishes
+// were refused, so nothing was shared.
+fn (mut scheduler DiagnosticsScheduler) retire_superseded_slow_jobs(completed DiagnosticsJob, members []string) {
+	scheduler.mutex.lock()
+	defer {
+		scheduler.mutex.unlock()
+	}
+	if completed.kind != .slow {
+		return
+	}
+	if !scheduler.is_job_current_locked(completed) {
+		return
+	}
+	for uri in members {
+		key := diagnostics_job_key(uri, .slow)
+		if pending := scheduler.pending_jobs[key] {
+			if pending.project_key != completed.project_key {
+				continue
+			}
+			if pending.global_generation != completed.global_generation {
+				continue
+			}
+			if pending.project_generation != completed.project_generation {
+				continue
+			}
+			// The pending job carries the same snapshot the check published
+			// from, so running it would compile the same program again.
+			scheduler.pending_jobs.delete(key)
+		}
+	}
 }
 
 // publish_if_current writes a notification and caches its exact LSP items
@@ -786,6 +902,9 @@ fn (mut scheduler DiagnosticsScheduler) swap_program_members(program_dir string,
 // completed check, and an empty clearing publish all become the source of truth
 // for subsequent pull requests; a superseded job can do neither.
 fn (mut scheduler DiagnosticsScheduler) publish_if_current(mut app App, job DiagnosticsJob, notification Notification) bool {
+	// Encoding a diagnostics payload can be expensive; do it before taking the
+	// scheduler lock so it cannot stall pull requests or sibling publishes.
+	payload := framed_notification(notification)
 	scheduler.mutex.lock()
 	defer {
 		scheduler.mutex.unlock()
@@ -802,7 +921,7 @@ fn (mut scheduler DiagnosticsScheduler) publish_if_current(mut app App, job Diag
 		}
 		scheduler.fast_published.delete(uri)
 	}
-	app.write_notification(notification)
+	app.write_data(payload)
 	scheduler.diag_cache[uri] = DiagCacheEntry{
 		fingerprint:     'published'
 		published_items: notification.params.diagnostics.clone()

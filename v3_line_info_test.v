@@ -60,8 +60,8 @@ done
 exit 1
 "
 
-// A V1 compiler that answers definition questions but has no V3 checker.
-const fake_v1_definitions_only = r"#!/bin/sh
+// A compiler that answers definition questions but cannot check a program.
+const fake_checkless_definitions_only = r"#!/bin/sh
 for arg in $@; do
 	if [ x$arg = x-vls-mode ]; then
 		compat=yes
@@ -508,8 +508,8 @@ fn test_v1_answers_what_v3_cannot_parse() {
 	}
 }
 
-fn test_a_v1_only_compiler_refuses_a_rename_it_cannot_validate() {
-	mut app, fake := fake_v3_app('v1_rename', fake_v1_definitions_only, 'VLS_V_COMMAND')!
+fn test_a_compiler_that_cannot_check_refuses_a_rename() {
+	mut app, fake := fake_v3_app('v1_rename', fake_checkless_definitions_only, 'VLS_V_COMMAND')!
 	defer {
 		stop_fake_v3_app(mut app, fake)
 	}
@@ -521,7 +521,7 @@ fn test_a_v1_only_compiler_refuses_a_rename_it_cannot_validate() {
 	os.rm(os.join_path(fake.project, 'other.v'))!
 	app.open_files[uri] = content
 	app.workspace_roots = [fake.project]
-	// The existing V1 definition path works after the V3 option is rejected.
+	// The definition path still works when the check option is rejected.
 	resolved := app.resolve_symbol_anchor_by(uri, 12, 9, false) or {
 		panic('the fake V1 compiler did not answer the definition')
 	}
@@ -680,6 +680,10 @@ fn test_v1_line_info_uses_the_warm_shared_server() {
 	assert app.v3_copies().len == 1
 	copy_root := app.v3_copies()[0].overlay.temp_root
 	assert fake.questions()[0] == '${os.join_path(copy_root, 'main.v')}:4:hv^2'
+	// The pool answers without probing a mode, but the completed request still
+	// enables async dispatch for later misses.
+	assert app.line_info_mode == .unknown
+	assert app.line_info_probe_done, 'a pooled answer completes the line-info probe'
 	// A second request reuses the server and the copy: nothing new starts.
 	app.run_v_line_info(.hover, uri, '4:hv^2')
 	assert fake.questions().len == 2
@@ -737,7 +741,7 @@ fn test_v1_line_info_without_a_server_keeps_its_own_process() {
 	assert app.v3_copies().len == 0
 }
 
-fn test_only_a_created_or_deleted_file_rebuilds_the_copy() {
+fn test_disk_changes_rebuild_the_copy() {
 	mut app, fake := fake_v3_app('watcher', fake_v3_query_server, 'VLS_DIAGNOSTICS_SERVER')!
 	defer {
 		stop_fake_v3_app(mut app, fake)
@@ -745,9 +749,11 @@ fn test_only_a_created_or_deleted_file_rebuilds_the_copy() {
 	path := os.join_path(fake.project, 'main.v')
 	app.v3_line_info(.hover, path_to_uri(path), path, '4:hv^2') or {}
 	assert app.v3_copies().len == 1
-	// A change shows through the copy.
+	// A content change rebuilds the copy as well: the server caches answers
+	// per program copy, so reusing a copy after a change would replay the
+	// old answer with a stale token.
 	app.v3_query_notice_disk_change(path, 2)
-	assert app.v3_copies().len == 1
+	assert app.v3_copies().len == 0
 	// A new file is not in it.
 	app.v3_query_notice_disk_change(os.join_path(fake.project, 'new.v'), 1)
 	assert app.v3_copies().len == 0
@@ -781,6 +787,49 @@ fn test_a_disk_create_refreshes_the_owned_directory_of_an_existing_program_copy(
 	app.v3_query_notice_disk_change(new_file, 1)
 	app.prepare_program_copy(mut pool, mut program, main_path, os.dir(main_path))!
 	assert os.read_file(os.join_path(copy_dir, 'new.v'))! == new_content
+}
+
+fn test_refresh_held_files_skips_busy_copies_and_scopes_by_path() {
+	// The request loop calls the watcher refresh inline, while a V3 query may
+	// hold the program copy's mutex through a compiler run. The refresh must
+	// neither mutate the copy under the query nor wait for it: a busy copy is
+	// skipped, as the query's own sync re-takes the same files. It must also
+	// touch only the program holding the changed path.
+	mut app, fake := fake_v3_app('refresh_lock', fake_v3_query_server, 'VLS_DIAGNOSTICS_SERVER')!
+	defer {
+		stop_fake_v3_app(mut app, fake)
+	}
+	helper_path := os.join_path(fake.project, 'helper', 'helper.v')
+	os.mkdir_all(os.dir(helper_path))!
+	os.write_file(helper_path, 'module helper\n\npub fn answer() int {\n\treturn 42\n}\n')!
+	main_path := os.join_path(fake.project, 'main.v')
+	main_uri := path_to_uri(main_path)
+	app.open_files[main_uri] = 'module main\n\nimport helper\n\nfn main() {\n\tp := helper.answer()\n\tprintln(p)\n}\n'
+	app.v3_line_info(.hover, main_uri, main_path, '6:hv^2') or {}
+	mut pool := app.v3_query_pool()
+	mut program := pool.program_copy(os.dir(main_path))
+	assert program.built, 'the copy was built by the query'
+	copy_of_helper := os.join_path(program.project.overlay.temp_root, 'helper', 'helper.v')
+	assert os.is_file(copy_of_helper), 'the helper is materialized in the copy'
+	// Replace the file by rename, as a checkout does: a hard link keeps the
+	// old inode, so the copy stays stale until the refresh re-takes it.
+	replacement := helper_path + '.new'
+	os.write_file(replacement, 'module helper\n\npub fn answer() string {\n\treturn "x"\n}\n')!
+	os.rename(replacement, helper_path)!
+	normalized_helper := normalize_overlay_path(helper_path)
+	program.mutex.lock()
+	// While the query holds the lock, the scoped refresh must return without
+	// waiting and leave the busy copy alone. The old blocking refresh would
+	// deadlock here on the same thread.
+	pool.refresh_held_files_in_copies_for_path(normalized_helper)
+	assert os.read_file(copy_of_helper)! != os.read_file(helper_path)!, 'busy copy is skipped'
+	program.mutex.unlock()
+	// An unrelated path must not touch this copy.
+	pool.refresh_held_files_in_copies_for_path(normalize_overlay_path('/tmp/vls_unrelated_path_for_test'))
+	assert os.read_file(copy_of_helper)! != os.read_file(helper_path)!, 'unrelated path leaves the copy alone'
+	// The matching path re-takes the changed file.
+	pool.refresh_held_files_in_copies_for_path(normalized_helper)
+	assert os.read_file(copy_of_helper)! == os.read_file(helper_path)!, 'the held file was re-taken'
 }
 
 fn test_a_test_file_is_asked_as_a_program_of_its_own() {

@@ -377,6 +377,20 @@ fn (mut app App) forget_module_folder(path string) {
 	for vlib in stale {
 		app.vlib_modules_cache.delete(vlib)
 	}
+	// A changed v.mod or .vvmrc must start a new compiler server; the memo is
+	// otherwise only reused between notifications.
+	if app.diagnostics_servers != unsafe { nil } {
+		mut pool := app.diagnostics_servers
+		pool.mutex.lock()
+		pool.forget_config_fingerprints()
+		pool.mutex.unlock()
+	}
+	if app.v3_query_servers != unsafe { nil } {
+		mut pool := app.v3_query_servers
+		pool.mutex.lock()
+		pool.forget_config_fingerprints()
+		pool.mutex.unlock()
+	}
 }
 
 // module_dir_imports returns the module paths that the V files in `dir` import.

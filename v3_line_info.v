@@ -225,7 +225,8 @@ fn (mut app App) v3_run(project V3QueryProject, specs []string, target string) ?
 		// Use the same command line as diagnostics to reuse its server.
 		args := build_v_check_args(target, is_library)
 		mut servers := app.v3_query_pool()
-		if result := servers.query(exe, args, project.overlay.temp_work_dir, question) {
+		if result := servers.query_cancelled(exe, args, project.overlay.temp_work_dir,
+			question, app.line_info_cancel_fn()) {
 			return if result.exit_code == 0 { result.output } else { none }
 		}
 	}
@@ -236,10 +237,13 @@ fn (mut app App) v3_run(project V3QueryProject, specs []string, target string) ?
 	// A bare `-line-info` lets the default checker answer first.
 	mut argv := build_v_check_args(target, is_library)
 	argv.insert(argv.len - 1, ['-line-info', question])
-	x := run_v_argv(argv, project.overlay.temp_work_dir)
+	x := run_v_argv_cancellable(argv, project.overlay.temp_work_dir, app.line_info_cancel)
 	if compiler_rejects_any_option(x.output, ['-line-info']) {
 		log('this V has no V3 that answers -line-info')
 		app.v3_one_shot_unsupported = true
+		if mut flag := app.line_info_cancel {
+			flag.record_v3_one_shot_unsupported()
+		}
 		return none
 	}
 	return if x.exit_code == 0 { x.output } else { none }
@@ -463,11 +467,9 @@ fn (mut app App) pooled_program_question(argv []string, work_dir string, questio
 	exe := resolve_diagnostics_server_exe() or { return none }
 	mut pool := app.v3_query_pool()
 	if question == '' {
-		return pool.check(exe, argv, work_dir, fn () bool {
-			return false
-		}, unsafe { nil })
+		return pool.check(exe, argv, work_dir, app.line_info_cancel_fn(), unsafe { nil })
 	}
-	return pool.query(exe, argv, work_dir, question)
+	return pool.query_cancelled(exe, argv, work_dir, question, app.line_info_cancel_fn())
 }
 
 // v3_copies returns the copies of the programs that are built and current.
@@ -488,15 +490,27 @@ fn (mut app App) v3_copies() []V3QueryProject {
 
 // v3_query_notice_disk_change has the copy of the program a file was created or
 // deleted in built again: the copy links the files that were there when it was
-// built. A change to a file needs nothing: a symbolic link shows it, a file
-// written into the copy is written again from what it holds, and one that the
-// copy holds otherwise is taken again (see refresh_held_files).
+// built. A content change re-takes the files the copy holds by link or copy
+// (see refresh_held_files); a create/delete rebuilds the copy.
 fn (mut app App) v3_query_notice_disk_change(changed_path string, event_type int) {
+	mut pool := app.v3_query_pool()
+	normalized := normalize_overlay_path(changed_path)
 	if event_type == 2 {
+		// Local imports are materialized into the copy as hard links or copies,
+		// so a symbolic link does NOT show an in-place save. Re-take the held
+		// files before the next query, or a closed file's rename of a parameter
+		// stays invisible to the compiler. Only the program holding this path
+		// is refreshed, and a copy busy with a query is skipped: the query's
+		// own sync re-takes the same files, so the request loop never waits on
+		// active compiler work.
+		pool.refresh_held_files_in_copies_for_path(normalized)
+		// The server caches answers per program copy, so reusing a copy after a
+		// content change would replay the old answer. Force a fresh copy (and
+		// therefore a fresh token) for the next query.
+		pool.notice_disk_change(normalized)
 		return
 	}
-	mut pool := app.v3_query_pool()
-	pool.notice_disk_change(normalize_overlay_path(changed_path))
+	pool.notice_disk_change(normalized)
 }
 
 // v3_prefetch_anchors asks V3, in one check per program, where the name at each

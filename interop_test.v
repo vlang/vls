@@ -441,19 +441,19 @@ fn test_cleanup_compilation_temp_removes_project_dir() {
 
 fn test_build_v_check_args_single_passes_path_literally() {
 	args := build_v_check_args_single('/tmp/a b/test.v', false)
+	// Exact equality also guards against extra compiler-selection arguments.
 	assert args == ['-check', '-nocolor', '/tmp/a b/test.v']
 	assert '-vls-mode' !in args
 	assert '-json-errors' !in args
-	// At the pinned V3 revision `-w` hides warnings; omission preserves them.
+	// The compiler emits warnings by default; no `-w` here.
 	assert '-w' !in args
 }
 
-fn test_build_v_check_args_multifile_uses_v3_compatible_flags() {
+fn test_build_v_check_args_multifile_uses_plain_flags() {
 	args := build_v_check_args_multifile(false)
 	assert args == ['-check', '-nocolor', '.']
 	assert '-vls-mode' !in args
 	assert '-json-errors' !in args
-	// V3 reports warnings by default, while `-w` requests compatibility suppression.
 	assert '-w' !in args
 }
 
@@ -532,6 +532,8 @@ fn test_compiler_rejects_line_info_detects_a_v_without_the_v1_checker() {
 	// A refusal is only recognized as a whole line, so a diagnostic that merely
 	// quotes the message cannot disable compiler-backed lookups for the session.
 	assert !compiler_rejects_line_info('a.v:1:1: error: unknown option `-vls-mode` in flag list')
+	assert compiler_rejects_any_option('unknown option `-nosuchflag`', ['-nosuchflag'])
+	assert !compiler_rejects_any_option('unknown option `-vls-mode`', ['-nosuchflag'])
 }
 
 fn test_compiler_refused_and_stopped_separates_a_dead_end_from_a_recovery() {
@@ -598,7 +600,42 @@ fn test_run_v_line_info_retires_lookups_when_the_compatibility_compiler_is_missi
 	}
 
 	assert app.run_v_line_info(.hover, uri, '6:hv^4') == ResponseResult('null')
-	assert app.line_info_unavailable
+	assert app.line_info_mode == .missing
+}
+
+// A launcher that answers `-line-info` with the plain argument vector: any
+// extra compiler-selection argument makes it refuse the request.
+const plain_line_info_launcher_stub = r'#!/bin/sh
+if [ "$#" -gt 7 ]; then
+  echo "unexpected extra compiler arguments: $*" >&2
+  exit 1
+fi
+case " $* " in
+  *hv^4*) echo "{\"contents\":{\"kind\":\"markdown\",\"value\":\"fn helper()\"}}" ;;
+esac
+'
+
+fn test_run_v_line_info_sends_plain_arguments() {
+	$if windows {
+		return
+	}
+	previous := os.getenv('VLS_V_COMMAND')
+	mut app, uri, root := line_info_stub_app('vls_plain_arguments', plain_line_info_launcher_stub)
+	defer {
+		restore_v_command(previous)
+		os.rmdir_all(root) or {}
+	}
+	app.capture_output = true
+
+	for _ in 0 .. 2 {
+		hover := app.run_v_line_info(.hover, uri, '6:hv^4')
+		assert !app.line_info_unavailable, 'a direct compiler keeps line-info available'
+		assert hover is Hover
+		if hover is Hover {
+			assert hover.contents.value.contains('fn helper()')
+		}
+	}
+	assert app.captured_output.len == 0
 }
 
 const failed_compatibility_build_launcher_stub = r'#!/bin/sh
@@ -628,23 +665,20 @@ fn test_run_v_line_info_retires_lookups_after_automatic_compatibility_build_fail
 	assert app.captured_output[0].contains('window/showMessage')
 }
 
-fn test_report_line_info_unavailable_names_the_repair() {
+fn test_report_missing_compatibility_compiler_names_the_repair() {
 	// The editor otherwise shows a VLS that highlights code but answers nothing
 	// for completion, hover, signature help, or go to definition, with no hint
 	// that the compiler is the reason. Platform-independent: no stub compiler.
 	mut app := App{
 		capture_output: true
 	}
-	app.report_line_info_unavailable(false)
-	app.report_line_info_unavailable(true)
-	assert app.captured_output.len == 2
-	assert !app.captured_output[0].contains('make v1')
-	assert app.captured_output[1].contains('make v1')
-	for notice in app.captured_output {
-		assert notice.contains('window/showMessage')
-		assert notice.contains('VLS_V_COMMAND')
-		assert notice.contains('type":2')
-	}
+	app.report_missing_compatibility_compiler()
+	assert app.captured_output.len == 1
+	assert app.captured_output[0].contains('window/showMessage')
+	// Name the actual repair, not just the symptom.
+	assert app.captured_output[0].contains('VLS_V_COMMAND')
+	assert app.captured_output[0].contains('-vls-mode')
+	assert app.captured_output[0].contains('type":2')
 }
 
 fn test_a_retired_lookup_never_reports_the_missing_compiler_again() {
@@ -705,15 +739,21 @@ fn restore_v_command(previous string) {
 	}
 }
 
-// An older launcher reruns the request against a compatibility compiler on
-// its own, after reporting the initial refusal.
+// A launcher that announces a compatibility retry on every invocation but
+// still answers `-line-info`. The standing refusal must not be read as proof
+// that nothing here can serve line info.
 const recovering_launcher_stub = r'#!/bin/sh
-echo "$*" >> "$(dirname "$0")/queries.txt"
 echo "unknown option \`-vls-mode\`" >&2
 echo "V compilation failed (compiler_error); retrying with \`/v1_fallback\`." >&2
 case " $* " in
 	*hv^4*) echo "{\"contents\":{\"kind\":\"markdown\",\"value\":\"fn helper()\"}}" ;;
 esac
+'
+
+// A launcher that refuses the line-info options and stops there.
+const dead_end_launcher_stub = r'#!/bin/sh
+echo "unknown option \`-vls-mode\`" >&2
+exit 1
 '
 
 fn test_run_v_line_info_keeps_a_recovering_launcher_after_an_empty_lookup() {
@@ -744,8 +784,45 @@ fn test_run_v_line_info_keeps_a_recovering_launcher_after_an_empty_lookup() {
 	if hover is Hover {
 		assert hover.contents.value.contains('fn helper()')
 	}
-	queries := os.read_lines(os.join_path(root, 'bin', 'queries.txt'))!
-	assert queries.len == 2
+}
+
+fn test_run_v_line_info_retires_lookups_when_the_launcher_only_refuses() {
+	// The other direction: a launcher that refuses and stops really has no
+	// answer, so the session stops spawning a process per request.
+	$if windows {
+		return
+	}
+	previous := os.getenv('VLS_V_COMMAND')
+	mut app, uri, root := line_info_stub_app('vls_dead_end_launcher', dead_end_launcher_stub)
+	defer {
+		restore_v_command(previous)
+		os.rmdir_all(root) or {}
+	}
+
+	assert app.run_v_line_info(.hover, uri, '6:hv^4') == ResponseResult('null')
+	assert app.line_info_mode == .missing
+}
+
+fn test_build_v_line_info_args_are_plain() {
+	// Exact equality guards against extra compiler-selection arguments.
+	assert build_v_line_info_args_single('/tmp/a.v', '10:gd^5', '/tmp/a.v') == [
+		'-w',
+		'-check',
+		'-nocolor',
+		'-vls-mode',
+		'-line-info',
+		'/tmp/a.v:10:gd^5',
+		'/tmp/a.v',
+	]
+	assert build_v_line_info_args_multifile('a.v', '10:gd^5') == [
+		'-w',
+		'-check',
+		'-nocolor',
+		'-vls-mode',
+		'-line-info',
+		'a.v:10:gd^5',
+		'.',
+	]
 }
 
 fn test_line_info_unavailable_result_answers_hover_from_the_index() {
@@ -1168,6 +1245,29 @@ fn test_program_content_fingerprint_drops_the_listing_on_create_and_delete() {
 	assert root in app.file_list_cache
 	app.forget_project_files()
 	assert app.file_list_cache.len == 0
+}
+
+fn test_program_content_fingerprint_keeps_other_roots_listing_on_create() {
+	root_a := os.join_path(os.temp_dir(), 'vls_fpscope_${os.getpid()}_${time.now().unix_nano()}')
+	root_b := '${root_a}_b'
+	interop_test_must_mkdir_all(root_a)
+	interop_test_must_mkdir_all(root_b)
+	defer {
+		os.rmdir_all(root_a) or {}
+		os.rmdir_all(root_b) or {}
+	}
+	interop_test_must_write_file(os.join_path(root_a, 'main.v'), 'module a\n\nfn main() {}\n')
+	interop_test_must_write_file(os.join_path(root_b, 'main.v'), 'module b\n\nfn main() {}\n')
+	mut app := App{}
+	_ := app.program_content_fingerprint(root_a)
+	_ := app.program_content_fingerprint(root_b)
+	assert root_a in app.file_list_cache && root_b in app.file_list_cache
+
+	app.forget_project_files_in(os.join_path(root_a, 'added.v'))
+	assert root_a !in app.file_list_cache, 'the changed root listing must be dropped'
+	// root_b only shares a prefix with root_a; the boundary-aware comparison
+	// must keep it, or every watcher event re-walks unrelated projects.
+	assert root_b in app.file_list_cache, 'an unrelated root listing must be kept'
 }
 
 fn test_diag_disk_cache_round_trip_and_rejections() {
@@ -2804,8 +2904,16 @@ fn test_publish_diagnostics_params() {
 	assert params.diagnostics.len == 1
 }
 
-// Both stubs answer `-check` with a diagnostic. The first also answers
-// `-line-info`, and the second refuses it.
+// ============================================================================
+// Compiler-compatibility matrix: one stub compiler per probed LineInfoMode.
+// Each stub answers `-check` with a diagnostic (so diagnostics are
+// independent of the `-line-info` mode) and answers `-line-info` the way
+// its generation does. Every test asserts the probed mode, that a
+// diagnostics spot-check still returns results, and that the mode never
+// regresses within the session once probed.
+// ============================================================================
+
+// A current compiler answers `-line-info` itself: no refusal, no selector.
 const line_info_and_check_stub = r'#!/bin/sh
 case " $* " in
   *"-line-info"*)
@@ -2827,7 +2935,8 @@ esac
 exit 0
 '
 
-const line_info_refusal_stub = r'#!/bin/sh
+// A launcher with no checker refuses the line-info options outright.
+const compat_matrix_dead_end_stub = r'#!/bin/sh
 case " $* " in
   *"-line-info"*)
     echo "$*" >> "$(dirname "$0")/queries.txt"
@@ -2845,7 +2954,7 @@ esac
 exit 0
 '
 
-fn test_compiler_line_info_works_alongside_diagnostics() {
+fn test_compat_matrix_modern_direct_probes_direct() {
 	$if windows {
 		// The stand-in compiler is a POSIX shell script.
 		return
@@ -2875,13 +2984,13 @@ fn test_compiler_line_info_works_alongside_diagnostics() {
 	assert again is Hover
 }
 
-fn test_compiler_refusal_retires_line_info_only() {
+fn test_compat_matrix_dead_end_without_checker() {
 	$if windows {
 		// The stand-in compiler is a POSIX shell script.
 		return
 	}
 	previous := os.getenv('VLS_V_COMMAND')
-	mut app, uri, root := line_info_stub_app('vls_line_info_refusal', line_info_refusal_stub)
+	mut app, uri, root := line_info_stub_app('vls_compat_dead_end', compat_matrix_dead_end_stub)
 	defer {
 		restore_v_command(previous)
 		os.rmdir_all(root) or {}
@@ -3804,6 +3913,17 @@ fn test_cov_run_v_line_info_once_singlefile_via_stub() {
 	assert result is Hover, 'a direct single-file lookup answers hover'
 	if result is Hover {
 		assert (result as Hover).contents.value.contains('fn helper()'), 'the stub payload is kept'
+	}
+}
+
+fn test_cov_run_v_line_info_pooled_returns_none_when_retired() {
+	mut missing_app := App{
+		line_info_mode: .missing
+	}
+	if _ := missing_app.run_v_line_info_pooled(.hover, 'file:///tmp/x.v', '1:hv^1') {
+		assert false, 'missing mode never uses the pool'
+	} else {
+		assert true, 'missing mode skips the pool'
 	}
 }
 
@@ -5078,4 +5198,481 @@ fn test_nrw_check_dir_requires_an_unchanged_import_block() {
 	interop_test_must_write_file(os.join_path(core_dir, 'core.v'), nested['core/core.v'])
 	core_file := os.join_path(core_dir, 'core.v')
 	assert app.narrow_check_dir(core_file, program_dir, nested['core/core.v']) == '', 'a module reached through another keeps the program the target'
+}
+
+fn test_async_line_info_dispatch_needs_a_completed_probe() {
+	mut app := &App{}
+	assert !app.should_dispatch_async_line_info(), 'no probe means the loop stays synchronous'
+	app.line_info_mode = .direct
+	assert !app.should_dispatch_async_line_info(), 'a mode set elsewhere is not a probe of this session'
+	app.line_info_probe_done = true
+	assert app.should_dispatch_async_line_info(), 'a probed direct compiler runs on workers'
+	app.line_info_mode = .missing
+	assert !app.should_dispatch_async_line_info(), 'a retired compiler never dispatches a worker'
+}
+
+fn test_line_info_cancel_fn_reports_the_request_flag() {
+	mut app := &App{}
+	quiet := app.line_info_cancel_fn()
+	assert quiet() == false, 'no flag means no cancellation'
+	flag := &CancelFlag{}
+	app.line_info_cancel = flag
+	poll := app.line_info_cancel_fn()
+	assert poll() == false, 'an unset flag does not cancel'
+	flag.cancel()
+	assert poll() == true, 'a cancelled flag cancels the pooled wait'
+}
+
+fn test_line_info_snapshot_shares_the_session_query_pool() {
+	mut app := &App{
+		open_files:           map[string]string{}
+		v3_line_info_enabled: true
+	}
+	_ = app.v3_query_pool()
+	defer {
+		app.stop_v3_queries()
+	}
+	flag := &CancelFlag{}
+	snap := app.line_info_snapshot(flag)
+	assert snap.v3_query_servers == app.v3_query_servers, 'the worker reuses the session pool instead of making its own'
+	assert snap.v3_line_info_enabled == true, 'the worker keeps the session enablement'
+	assert snap.v3_one_shot_unsupported == app.v3_one_shot_unsupported, 'the worker keeps the session one-shot state'
+	assert snap.line_info_workers == app.line_info_workers, 'the worker joins through the session group'
+}
+
+fn test_purge_finished_line_info_merges_worker_capabilities() {
+	// A worker answers through a private snapshot: a refusal or unsupported
+	// probe it discovers must reach the session through the shared flag, or
+	// later requests repeat the same doomed probe and keep dispatching workers.
+	mut app := &App{
+		line_info_cancels: map[string]&CancelFlag{}
+	}
+	flag := &CancelFlag{}
+	app.line_info_cancels['11'] = flag
+	flag.record_line_info_missing()
+	flag.record_v3_one_shot_unsupported()
+	flag.finish()
+	app.purge_finished_line_info()
+	assert app.line_info_mode == .missing, 'the worker refusal retires the session lookups'
+	assert app.line_info_unavailable, 'the session stops spawning one-shot probes'
+	assert app.v3_one_shot_unsupported, 'the session stops probing the unsupported V3'
+	assert '11' !in app.line_info_cancels, 'the finished flag is dropped'
+	// A worker that found nothing changes no capability.
+	mut quiet := &App{
+		line_info_mode:    .direct
+		line_info_cancels: map[string]&CancelFlag{}
+	}
+	plain := &CancelFlag{}
+	quiet.line_info_cancels['12'] = plain
+	plain.finish()
+	quiet.purge_finished_line_info()
+	assert quiet.line_info_mode == .direct, 'a clean worker keeps the probed mode'
+	assert !quiet.line_info_unavailable
+	assert !quiet.v3_one_shot_unsupported
+}
+
+fn test_cancel_and_join_line_info_workers_cancels_in_flight() {
+	mut app := &App{
+		line_info_cancels: map[string]&CancelFlag{}
+	}
+	// No workers: joining returns at once.
+	app.cancel_and_join_line_info_workers()
+	flag := &CancelFlag{}
+	app.line_info_cancels['7'] = flag
+	app.cancel_and_join_line_info_workers()
+	assert flag.is_cancelled(), 'shutdown cancels the in-flight worker flag'
+}
+
+fn cached_overlay_test_app(base string, proj string, sub string, main_content string) (&App, string, string) {
+	interop_test_must_mkdir_all(sub)
+	work := os.join_path(base, 'work')
+	interop_test_must_mkdir_all(work)
+	importer := os.join_path(proj, 'helper.v')
+	interop_test_must_write_file(importer, 'module main\n\nfn helper() int {\n\treturn 1\n}\n')
+	main_file := os.join_path(sub, 'main.v')
+	interop_test_must_write_file(main_file, 'module main\n\nfn main() {\n}\n')
+	main_uri := path_to_uri(main_file)
+	mut app := &App{
+		temp_dir:            work
+		open_files:          {
+			main_uri: main_content
+		}
+		overlay_cache_store: new_overlay_cache_store()
+	}
+	return app, main_file, importer
+}
+
+fn test_prepare_cached_overlay_keeps_line_info_importers() {
+	base := os.join_path(os.temp_dir(), 'vls_cached_importers_${os.getpid()}')
+	proj := os.join_path(base, 'proj')
+	sub := os.join_path(proj, 'sub')
+	defer {
+		os.rmdir_all(base) or {}
+	}
+	main_content := 'module main\n\nfn main() {\n\tprintln(helper())\n}\n'
+	mut app, main_file, importer := cached_overlay_test_app(base, proj, sub, main_content)
+	defer {
+		app.drop_all_overlays()
+	}
+	importer_content := os.read_file(importer) or { '' }
+	first := app.prepare_line_info_overlay(main_file, proj) or {
+		assert false, 'first cached overlay must succeed: ${err}'
+		return
+	}
+	assert os.read_file(first.temp_source_file) or { '' } == main_content, 'the buffer is materialized'
+	first_copy := os.join_path(first.temp_root, 'helper.v')
+	assert !os.is_link(first_copy), 'the cached tree holds the importer as a file, not a symlink'
+	assert os.read_file(first_copy) or { '' } == importer_content, 'the importer content is materialized'
+	// A cache hit keeps the importer: it is part of the tracked set, not
+	// re-linked from disk.
+	second := app.prepare_line_info_overlay(main_file, proj) or {
+		assert false, 'second cached overlay must succeed: ${err}'
+		return
+	}
+	assert second.temp_root == first.temp_root, 'the second request hits the cache'
+	second_copy := os.join_path(second.temp_root, 'helper.v')
+	assert !os.is_link(second_copy), 'the cache hit keeps the importer as a file'
+	assert os.read_file(second_copy) or { '' } == importer_content, 'the cache hit keeps the importer content'
+}
+
+fn test_overlay_cache_separates_nested_work_dirs() {
+	// Two programs under one v.mod mirror the same project root but can have
+	// different local-import closures. They must not share a cached tree.
+	base := os.join_path(os.temp_dir(), 'vls_overlay_workdir_${os.getpid()}')
+	proj := os.join_path(base, 'proj')
+	sub := os.join_path(proj, 'sub')
+	work := os.join_path(base, 'work')
+	interop_test_must_mkdir_all(sub)
+	interop_test_must_mkdir_all(work)
+	interop_test_must_write_file(os.join_path(proj, 'v.mod'), 'Module {}\n')
+	main_file := os.join_path(sub, 'main.v')
+	main_content := 'module main\n\nfn main() {\n}\n'
+	interop_test_must_write_file(main_file, main_content)
+	defer {
+		os.rmdir_all(base) or {}
+	}
+	mut app := &App{
+		temp_dir:            work
+		open_files:          {
+			path_to_uri(main_file): main_content
+		}
+		overlay_cache_store: new_overlay_cache_store()
+	}
+	defer {
+		app.drop_all_overlays()
+	}
+	outer := app.prepare_line_info_overlay(main_file, proj) or {
+		assert false, 'outer cached overlay must succeed: ${err}'
+		return
+	}
+	inner := app.prepare_line_info_overlay(main_file, sub) or {
+		assert false, 'inner cached overlay must succeed: ${err}'
+		return
+	}
+	assert outer.source_root == inner.source_root, 'both checks mirror the project root'
+	assert outer.source_work_dir != inner.source_work_dir, 'the checks start from different directories'
+	assert outer.temp_root != inner.temp_root, 'distinct work dirs need distinct cached trees'
+	mut store := app.overlay_cache_store or {
+		assert false, 'the cached path sets the store'
+		return
+	}
+	assert store.entries.len == 2, 'the cache keeps one entry per root and work dir'
+}
+
+fn test_evict_expired_overlays_frees_idle_trees() {
+	base := os.join_path(os.temp_dir(), 'vls_overlay_evict_${os.getpid()}')
+	proj := os.join_path(base, 'proj')
+	sub := os.join_path(proj, 'sub')
+	work := os.join_path(base, 'work')
+	defer {
+		os.rmdir_all(base) or {}
+	}
+	main_content := 'module main\n\nfn main() {\n}\n'
+	mut app, main_file, _ := cached_overlay_test_app(base, proj, sub, main_content)
+	defer {
+		app.drop_all_overlays()
+	}
+	first := app.prepare_line_info_overlay(main_file, proj) or {
+		assert false, 'cached overlay must succeed: ${err}'
+		return
+	}
+	mut store := app.overlay_cache_store or {
+		assert false, 'the cached path sets the store'
+		return
+	}
+	mut key := ''
+	for k in store.entries.keys() {
+		key = k
+	}
+	assert os.is_dir(first.temp_root), 'the published tree exists'
+	mut entry := store.entries[key] or {
+		assert false, 'the cached entry exists'
+		return
+	}
+	idle_ms := time.now().unix_milli() - overlay_idle_evict_ms - 1
+	entry.built_ms = idle_ms
+	entry.used_ms = idle_ms
+	store.entries[key] = entry
+
+	app.evict_expired_overlays(time.now().unix_milli())
+	// The idle entry stops being a cache hit, but its tree is retired, not
+	// deleted: a compiler run may still be reading it. It stays until older
+	// than any possible compiler run.
+	assert os.is_dir(first.temp_root), 'the retired tree stays for in-flight readers'
+	mut retired_entry := store.entries[key] or {
+		assert false, 'the entry stays as the owner of the retired tree'
+		return
+	}
+	assert retired_entry.temp_root == '', 'the idle entry no longer publishes a tree'
+	assert retired_entry.retired.len == 1, 'the tree is retired for draining'
+	assert retired_entry.retired[0].root == first.temp_root
+	// Once older than any possible compiler run, a later pass deletes it.
+	aged_ms := time.now().unix_milli() + overlay_retired_ttl_ms() + 1
+	app.evict_expired_overlays(aged_ms)
+	assert key !in store.entries, 'an aged idle entry leaves the store'
+	assert !os.is_dir(first.temp_root), 'its tree is removed once no reader can use it'
+}
+
+fn test_drop_overlays_under_removes_a_closed_workspace() {
+	base := os.join_path(os.temp_dir(), 'vls_overlay_closed_ws_${os.getpid()}')
+	proj := os.join_path(base, 'proj')
+	sub := os.join_path(proj, 'sub')
+	work := os.join_path(base, 'work')
+	defer {
+		os.rmdir_all(base) or {}
+	}
+	main_content := 'module main\n\nfn main() {\n}\n'
+	mut app, main_file, _ := cached_overlay_test_app(base, proj, sub, main_content)
+	defer {
+		app.drop_all_overlays()
+	}
+	first := app.prepare_line_info_overlay(main_file, proj) or {
+		assert false, 'cached overlay must succeed: ${err}'
+		return
+	}
+	mut store := app.overlay_cache_store or {
+		assert false, 'the cached path sets the store'
+		return
+	}
+	assert store.entries.len == 1, 'the workspace has one cached entry'
+
+	app.drop_overlays_under(proj)
+	// The entry stops being a cache hit, but its tree is retired for any
+	// in-flight compiler reader, not deleted at once.
+	assert os.is_dir(first.temp_root), 'the retired tree stays for in-flight readers'
+	assert store.entries.len == 1, 'the entry stays as the owner of the retired tree'
+	mut key := ''
+	for k in store.entries.keys() {
+		key = k
+	}
+	mut retired_entry := store.entries[key] or {
+		assert false, 'the retired owner exists'
+		return
+	}
+	assert retired_entry.temp_root == '', 'closing the workspace unpublishes the tree'
+	assert retired_entry.retired.len == 1, 'the tree is retired for draining'
+	assert retired_entry.retired[0].root == first.temp_root
+	// Once older than any possible compiler run, an eviction pass deletes it.
+	aged_ms := time.now().unix_milli() + overlay_retired_ttl_ms() + 1
+	app.evict_expired_overlays(aged_ms)
+	assert store.entries.len == 0, 'an aged closed-workspace entry leaves the store'
+	assert !os.is_dir(first.temp_root), 'its tree is removed once no reader can use it'
+}
+
+fn test_invalidate_overlay_for_disk_change_stales_only_covering_entries() {
+	base := os.join_path(os.temp_dir(), 'vls_overlay_invalidate_${os.getpid()}')
+	proj := os.join_path(base, 'proj')
+	sub := os.join_path(proj, 'sub')
+	defer {
+		os.rmdir_all(base) or {}
+	}
+	main_content := 'module main\n\nfn main() {\n\tprintln(helper())\n}\n'
+	mut app, main_file, _ := cached_overlay_test_app(base, proj, sub, main_content)
+	defer {
+		app.drop_all_overlays()
+	}
+	first := app.prepare_line_info_overlay(main_file, proj) or {
+		assert false, 'cached overlay must succeed: ${err}'
+		return
+	}
+	mut store := app.overlay_cache_store or {
+		assert false, 'the cached path sets the store'
+		return
+	}
+	mut key := ''
+	for k in store.entries.keys() {
+		key = k
+	}
+	entry := store.entries[key] or {
+		assert false, 'the cached entry exists'
+		return
+	}
+	assert entry.built_ms > 0, 'a fresh entry is trusted'
+	// A file outside the project leaves the entry alone.
+	app.invalidate_overlay_for_disk_change(os.join_path(base, 'elsewhere.v'))
+	assert (store.entries[key] or { entry }).built_ms == entry.built_ms, 'an unrelated path invalidates nothing'
+	// A created file inside the project stales the entry, so the next
+	// request rebuilds the tree instead of refreshing the old listing.
+	app.invalidate_overlay_for_disk_change(os.join_path(proj, 'new.v'))
+	assert (store.entries[key] or { entry }).built_ms == 0, 'a disk create stales the covering entry'
+	second := app.prepare_line_info_overlay(main_file, proj) or {
+		assert false, 'overlay after invalidation must succeed: ${err}'
+		return
+	}
+	assert second.temp_root != first.temp_root, 'a staled entry rebuilds the tree'
+}
+
+fn test_invalidate_overlay_bumps_epoch_and_rebuild_reflects_disk() {
+	// A watcher invalidation bumps the store epoch so any staging build that
+	// mirrored the disk before the change discards its tree instead of
+	// publishing stale contents (the epoch guard in prepare_cached_overlay).
+	// This pins the invalidation -> epoch -> fresh-rebuild contract: after a
+	// create on disk, the rebuilt tree must carry the new listing.
+	base := os.join_path(os.temp_dir(), 'vls_overlay_epoch_${os.getpid()}')
+	proj := os.join_path(base, 'proj')
+	sub := os.join_path(proj, 'sub')
+	defer {
+		os.rmdir_all(base) or {}
+	}
+	main_content := 'module main\n\nfn main() {\n\tprintln(helper())\n}\n'
+	mut app, main_file, _ := cached_overlay_test_app(base, proj, sub, main_content)
+	defer {
+		app.drop_all_overlays()
+	}
+	first := app.prepare_line_info_overlay(main_file, proj) or {
+		assert false, 'first cached overlay must succeed: ${err}'
+		return
+	}
+	mut store := app.overlay_cache_store or {
+		assert false, 'the cached path sets the store'
+		return
+	}
+	epoch_before := store.epoch
+	// A create inside the project stales the entry and bumps the epoch, so a
+	// staging build in flight cannot publish its pre-change tree as fresh.
+	new_file := os.join_path(os.dir(main_file), 'added.v')
+	interop_test_must_write_file(new_file, 'module main\n\nfn added() {}\n')
+	app.invalidate_overlay_for_disk_change(new_file)
+	assert store.epoch > epoch_before, 'a disk change bumps the overlay epoch'
+	second := app.prepare_line_info_overlay(main_file, proj) or {
+		assert false, 'overlay after invalidation must succeed: ${err}'
+		return
+	}
+	assert second.temp_root != first.temp_root, 'the staled entry rebuilds the tree'
+	added_copy := os.join_path(os.dir(second.temp_source_file), os.file_name(new_file))
+	assert os.exists(added_copy), 'the rebuilt tree carries the new disk listing'
+}
+
+fn test_prepare_cached_overlay_hit_preserves_build_time() {
+	// The overlay TTL is anchored to the build: a cache hit reuses the tree
+	// without refreshing its deadline. Refreshing it on every hit would let
+	// requests less than one TTL apart keep a stale symlinked listing (a new
+	// or deleted `.v` sibling on disk) alive indefinitely.
+	base := os.join_path(os.temp_dir(), 'vls_overlay_ttl_${os.getpid()}')
+	proj := os.join_path(base, 'proj')
+	sub := os.join_path(proj, 'sub')
+	defer {
+		os.rmdir_all(base) or {}
+	}
+	main_content := 'module main\n\nfn main() {\n\tprintln(helper())\n}\n'
+	mut app, main_file, _ := cached_overlay_test_app(base, proj, sub, main_content)
+	defer {
+		app.drop_all_overlays()
+	}
+	first := app.prepare_line_info_overlay(main_file, proj) or {
+		assert false, 'first cached overlay must succeed: ${err}'
+		return
+	}
+	mut store := app.overlay_cache_store or {
+		assert false, 'the cached path sets the store'
+		return
+	}
+	mut key := ''
+	for k in store.entries.keys() {
+		key = k
+	}
+	entry := store.entries[key] or {
+		assert false, 'the cached entry exists'
+		return
+	}
+	// Age the entry within the TTL, so the next request still hits the cache
+	// but a refresh of the deadline would show.
+	aged_ms := time.now().unix_milli() - 1000
+	store.entries[key] = OverlayCacheEntry{
+		...entry
+		built_ms: aged_ms
+	}
+	second := app.prepare_line_info_overlay(main_file, proj) or {
+		assert false, 'second cached overlay must succeed: ${err}'
+		return
+	}
+	assert second.temp_root == first.temp_root, 'the second request hits the cache'
+	assert (store.entries[key] or { entry }).built_ms == aged_ms, 'a hit preserves the build time instead of refreshing the TTL'
+	assert (store.entries[key] or { entry }).used_ms > aged_ms, 'a hit refreshes the idle clock used for eviction'
+}
+
+fn test_tcp_disconnect_teardown_joins_line_info_workers() {
+	// The request loop joins async line-info workers before it tears the
+	// session down, and the TCP handler joins again before it closes the
+	// connection: a client that disconnects mid-compile must never leave a
+	// worker writing through the snapshot's `tcp_conn` pointer afterwards.
+	// Joining twice is safe (the second join returns at once).
+	mut app := &App{
+		line_info_cancels: map[string]&CancelFlag{}
+	}
+	flag := &CancelFlag{}
+	app.line_info_cancels['9'] = flag
+	app.line_info_workers.add(1)
+	app.line_info_workers.done()
+	app.cancel_and_join_line_info_workers()
+	assert flag.is_cancelled(), 'teardown cancels the in-flight worker flag'
+	app.cancel_and_join_line_info_workers()
+}
+
+fn test_missing_line_info_checker_warning_pairing() {
+	// The detector and the user-facing repair stay paired: the output an older
+	// launcher prints when no checker is available is recognized, and the
+	// warning names the repair. Windows-compatible (no compiler stub); the Unix
+	// stub test covers the end-to-end retire.
+	assert compiler_reports_missing_compat_compiler('`-vls-mode` requires the compatibility compiler, but no usable fallback was found; run `make v1` now...')
+	mut app := &App{
+		capture_output: true
+	}
+	app.report_missing_compatibility_compiler()
+	assert app.captured_output.len == 1, 'the repair is reported once'
+	assert app.captured_output[0].contains('-vls-mode'), 'the repair names the line-info options'
+	assert app.captured_output[0].contains('VLS_V_COMMAND'), 'the repair names `VLS_V_COMMAND`'
+}
+
+fn test_prepare_cached_overlay_isolates_concurrent_snapshots() {
+	// Two async requests carry different open-file snapshots against the same
+	// root. Sharing one published tree would let the second worker's files
+	// mix with the first's: each snapshot gets its own tree, and the first
+	// tree keeps its own content instead of being overwritten in place.
+	base := os.join_path(os.temp_dir(), 'vls_cached_isolate_${os.getpid()}')
+	proj := os.join_path(base, 'proj')
+	sub := os.join_path(proj, 'sub')
+	defer {
+		os.rmdir_all(base) or {}
+	}
+	first_content := 'module main\n\nfn main() {\n\tprintln(1)\n}\n'
+	mut app, main_file, _ := cached_overlay_test_app(base, proj, sub, first_content)
+	defer {
+		app.drop_all_overlays()
+	}
+	first := app.prepare_line_info_overlay(main_file, proj) or {
+		assert false, 'first cached overlay must succeed: ${err}'
+		return
+	}
+	assert os.read_file(first.temp_source_file) or { '' } == first_content, 'the first tree holds the first snapshot'
+	second_content := 'module main\n\nfn main() {\n\tprintln(2)\n}\n'
+	main_uri := path_to_uri(main_file)
+	app.open_files[main_uri] = second_content
+	second := app.prepare_line_info_overlay(main_file, proj) or {
+		assert false, 'second cached overlay must succeed: ${err}'
+		return
+	}
+	assert second.temp_root != first.temp_root, 'a different snapshot gets its own tree, never an in-place overwrite'
+	assert os.read_file(first.temp_source_file) or { '' } == first_content, 'the first tree still holds the first snapshot for its draining reader'
+	assert os.read_file(second.temp_source_file) or { '' } == second_content, 'the second tree holds the second snapshot'
 }

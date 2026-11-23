@@ -23,7 +23,6 @@ struct IndexEntry {
 	module_name                        string
 	doc_symbols                        []DocumentSymbol  // hierarchical symbols (as parse_document_symbols returns)
 	docs                               map[string]string // simple symbol name -> leading vdoc comment
-	fn_completions                     []Detail          // free-function completion items for this file
 	module_completions                 []Detail          // all same-module top-level completion items
 	public_module_completions          []Detail          // exported completion items for imported modules
 	has_conditional_module_completions bool
@@ -65,7 +64,6 @@ fn build_index_entry(content string, enc PositionEncoding, fingerprint int) Inde
 		module_name:                        get_module_name(content)
 		doc_symbols:                        doc_syms
 		docs:                               docs
-		fn_completions:                     module_completion_index.items.filter(it.kind == 3)
 		module_completions:                 module_completion_index.items
 		public_module_completions:          public_module_completion_index.items
 		has_conditional_module_completions: module_completion_index.has_conditional
@@ -121,22 +119,17 @@ fn encode_range_chars(r LSPRange, lines []string, enc PositionEncoding) LSPRange
 }
 
 // indexed_uris_in_dir returns the URIs in the symbol index whose file lives in
-// `dir`, sorted, with each directory normalized only once.
+// `dir`, sorted. The directory check compares lexically first (no real_path
+// per file); the canonical fallback only runs for symlink/case aliases.
 fn (app &App) indexed_uris_in_dir(dir string) []string {
+	lex_dir := lexical_index_path(dir)
 	normalized_dir := normalized_index_path(dir)
-	mut matching_dirs := map[string]bool{}
-	matching_dirs[dir] = true
 	mut out := []string{}
-	for uri, _ in app.symbol_index {
-		parent := os.dir(uri_to_path(uri))
-		matches := matching_dirs[parent] or {
-			matches_dir := normalized_index_path(parent) == normalized_dir
-			matching_dirs[parent] = matches_dir
-			matches_dir
+	for uri in app.symbol_index.keys() {
+		if !same_index_dir(os.dir(uri_to_path(uri)), lex_dir, normalized_dir) {
+			continue
 		}
-		if matches {
-			out << uri
-		}
+		out << uri
 	}
 	out.sort()
 	return out
@@ -321,7 +314,12 @@ fn extract_identifier_occurrences(content string, enc PositionEncoding) map[stri
 
 // occurrences_for returns the identifier occurrences of `uri`, building and
 // caching them from the authoritative source (open buffer or disk) and reusing
-// the cache while the content fingerprint is unchanged.
+// the cache while the content fingerprint is unchanged. The cache is bounded:
+// files nobody has open are evicted past the cap and rebuilt on demand, so a
+// references sweep over a large workspace cannot pin its token maps in RAM
+// for the rest of the session.
+const index_max_occ_entries = 512
+
 fn (mut app App) occurrences_for(uri string) map[string][]TokenOccurrence {
 	content := app.index_source_for(uri) or {
 		app.ref_occurrences.delete(uri)
@@ -345,13 +343,35 @@ fn (mut app App) occurrences_for(uri string) map[string][]TokenOccurrence {
 		fingerprint: fp
 		occ:         occ
 	}
+	if app.ref_occurrences.len > index_max_occ_entries {
+		app.evict_ref_occurrences()
+	}
 	return occ
+}
+
+// evict_ref_occurrences drops cached occurrence maps for files nobody has
+// open until the cache is back under its cap. Open buffers are never evicted:
+// hover rebuilds one per keystroke. Evicted files rebuild lazily on the next
+// references, rename, or highlight query that needs them.
+fn (mut app App) evict_ref_occurrences() {
+	for uri in app.ref_occurrences.keys() {
+		if app.ref_occurrences.len <= index_max_occ_entries / 2 {
+			break
+		}
+		if uri in app.open_files {
+			continue
+		}
+		app.ref_occurrences.delete(uri)
+	}
 }
 
 // drop_index_uri removes all cached index data for `uri`.
 fn (mut app App) drop_index_uri(uri string) {
 	app.symbol_index.delete(uri)
 	app.ref_occurrences.delete(uri)
+	if mut store := app.inlay_fn_cache {
+		store.entries.delete(uri)
+	}
 }
 
 // drop_index_aliases_for_path removes cached URI spellings for the same physical
@@ -394,6 +414,47 @@ fn normalized_index_path(path string) string {
 		normalized = normalized.to_lower()
 	}
 	return normalized
+}
+
+// lexical_index_path normalizes separators and case without touching the
+// filesystem. Hot paths compare with it first; normalized_index_path
+// (real_path) stays the fallback for disagreements caused by symlinks,
+// case aliases, or 8.3 short names.
+fn lexical_index_path(path string) string {
+	mut normalized := path.replace('\\', '/')
+	$if windows {
+		normalized = normalized.to_lower()
+	}
+	return normalized
+}
+
+// same_index_dir reports whether the directory `path_dir` names the same
+// directory as `dir`, whose lexical and canonical forms are `lex_dir` and
+// `normalized_dir`. The lexical comparison needs no syscalls and wins in the
+// common case; the canonical fallback only runs for symlink, case, or
+// 8.3-short-name aliases.
+fn same_index_dir(path_dir string, lex_dir string, normalized_dir string) bool {
+	if lexical_index_path(path_dir) == lex_dir {
+		return true
+	}
+	return normalized_index_path(path_dir) == normalized_dir
+}
+
+// open_index_uris_cached memoizes open_index_uris_by_path for the current
+// open-files generation. The map only depends on the open URI set, which
+// open_files_generation tracks on every mutation, so it stays exact without
+// any TTL. Callers must treat the result as read-only.
+fn (mut app App) open_index_uris_cached() map[string]string {
+	if app.open_uris_cache_gen == app.open_files_generation {
+		return app.open_uris_cache
+	}
+	mut uris := map[string]string{}
+	for uri, _ in app.open_files {
+		uris[normalized_index_path(uri_to_path(uri))] = uri
+	}
+	app.open_uris_cache = uris.clone()
+	app.open_uris_cache_gen = app.open_files_generation
+	return uris
 }
 
 // open_index_uris_by_path maps normalized filesystem paths to the original URI
@@ -527,6 +588,7 @@ fn (mut app App) drop_index_under(dir_path string) {
 			app.index_skipped_uris.delete(uri)
 		}
 	}
+	app.evict_inlay_fn_cache_under(dir_path)
 	// Re-walk on next query (a removed folder must not be re-indexed).
 	app.indexed_dirs.clear()
 	app.indexed_dir_walk_ms.clear()
@@ -730,7 +792,7 @@ fn (mut app App) ensure_dirs_indexed(dirs []string) {
 	for uri, _ in app.open_files {
 		app.reindex_uri(uri)
 	}
-	open_uris_by_path := app.open_index_uris_by_path()
+	open_uris_by_path := app.open_index_uris_cached()
 	for dir in dirs {
 		if dir == '' || dir == '/' || app.path_is_in_removed_workspace(dir) || !os.is_dir(dir) {
 			continue
@@ -816,8 +878,26 @@ fn (mut app App) ensure_dir_shallow_indexed(dir string) {
 	scope := 'shallow:${dir}'
 	app.index_incomplete_scopes.delete(scope)
 	refresh := app.index_dir_needs_refresh(dir)
+	// One real_path per walk for the link-containment fallback. Everything
+	// else below is lexical: os.join_path(dir, entry) is trivially inside
+	// `dir`, so only symlinks (which can point outside the module scope)
+	// pay for canonicalization.
 	canonical_dir := os.real_path(dir).replace('\\', '/')
-	open_uris_by_path := app.open_index_uris_by_path()
+	// Open buffers shadow their disk names. Match them lexically (no
+	// real_path per file); a directly contained symlink that aliases an
+	// open buffer still resolves through the canonical lookup below, which
+	// is built lazily so the common walk never pays for it.
+	mut open_lexical := map[string]string{}
+	for uri, _ in app.open_files {
+		open_path := uri_to_path(uri)
+		open_lexical[lexical_index_path(open_path)] = uri
+		// A parent directory alias (not just a symlink leaf) can make the walk
+		// see the same file under a different spelling. Index the canonical
+		// key too so that spelling still resolves to the open buffer.
+		open_lexical[normalized_index_path(open_path)] = uri
+	}
+	mut open_uris_by_path := map[string]string{}
+	mut open_uris_loaded := false
 	mut present := map[string]bool{}
 	mut entries := os.ls(dir) or {
 		app.index_incomplete_scopes[scope] = true
@@ -832,17 +912,27 @@ fn (mut app App) ensure_dir_shallow_indexed(dir string) {
 			continue
 		}
 		full := os.join_path(dir, entry)
-		if !os.is_file(full) {
-			continue
+		lex := lexical_index_path(full)
+		mut uri := ''
+		if lex in open_lexical {
+			uri = open_lexical[lex]
+		} else if os.is_link(full) {
+			// Resolve link candidates so a directly contained link cannot
+			// pull an external source into this loose-module scope, and so
+			// a link aliasing an open buffer maps to the client's URI.
+			// Existence and readability are enforced later by reindex_uri,
+			// which already validates every file it indexes.
+			if !path_is_within(lexical_index_path(os.real_path(full)), canonical_dir) {
+				continue
+			}
+			if !open_uris_loaded {
+				open_uris_by_path = app.open_index_uris_cached()
+				open_uris_loaded = true
+			}
+			uri = index_uri_for_path(full, open_uris_by_path)
+		} else {
+			uri = path_to_uri(full)
 		}
-		// os.is_file follows symlinks. Resolve the candidate as well so a
-		// directly contained link cannot pull an external source into this
-		// loose-module scope.
-		real_file := os.real_path(full).replace('\\', '/')
-		if !path_is_within(real_file, canonical_dir) {
-			continue
-		}
-		uri := index_uri_for_path(full, open_uris_by_path)
 		present[uri] = true
 		if uri in app.open_files {
 			continue
@@ -1533,7 +1623,14 @@ fn (app &App) query_module_fn_completions(module_name string, exclude_uri string
 		if module_name != '' && entry.module_name != module_name {
 			continue
 		}
-		items << entry.fn_completions
+		// Free functions are the kind-3 subset of the module completions;
+		// filtering at query time avoids storing a duplicated item list
+		// per file in the index.
+		for item in entry.module_completions {
+			if item.kind == 3 {
+				items << item
+			}
+		}
 	}
 	return items
 }
