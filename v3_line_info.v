@@ -494,19 +494,23 @@ fn (mut app App) v3_copies() []V3QueryProject {
 // (see refresh_held_files); a create/delete rebuilds the copy.
 fn (mut app App) v3_query_notice_disk_change(changed_path string, event_type int) {
 	mut pool := app.v3_query_pool()
+	normalized := normalize_overlay_path(changed_path)
 	if event_type == 2 {
 		// Local imports are materialized into the copy as hard links or copies,
 		// so a symbolic link does NOT show an in-place save. Re-take the held
 		// files before the next query, or a closed file's rename of a parameter
-		// stays invisible to the compiler.
-		pool.refresh_held_files_in_copies()
+		// stays invisible to the compiler. Only the program holding this path
+		// is refreshed, and a copy busy with a query is skipped: the query's
+		// own sync re-takes the same files, so the request loop never waits on
+		// active compiler work.
+		pool.refresh_held_files_in_copies_for_path(normalized)
 		// The server caches answers per program copy, so reusing a copy after a
 		// content change would replay the old answer. Force a fresh copy (and
 		// therefore a fresh token) for the next query.
-		pool.notice_disk_change(normalize_overlay_path(changed_path))
+		pool.notice_disk_change(normalized)
 		return
 	}
-	pool.notice_disk_change(normalize_overlay_path(changed_path))
+	pool.notice_disk_change(normalized)
 }
 
 // v3_prefetch_anchors asks V3, in one check per program, where the name at each

@@ -789,53 +789,47 @@ fn test_a_disk_create_refreshes_the_owned_directory_of_an_existing_program_copy(
 	assert os.read_file(os.join_path(copy_dir, 'new.v'))! == new_content
 }
 
-fn refresh_held_files_and_report(mut pool DiagnosticsServerPool, done chan bool) {
-	pool.refresh_held_files_in_copies()
-	done <- true
-}
-
-fn test_refresh_held_files_waits_for_the_program_copy_lock() {
-	// A watcher refresh must not mutate the shared held-file map or replace
-	// files while a V3 query holds the program copy's mutex and reads the same
-	// overlay. The refresh takes that lock per program, so it waits.
+fn test_refresh_held_files_skips_busy_copies_and_scopes_by_path() {
+	// The request loop calls the watcher refresh inline, while a V3 query may
+	// hold the program copy's mutex through a compiler run. The refresh must
+	// neither mutate the copy under the query nor wait for it: a busy copy is
+	// skipped, as the query's own sync re-takes the same files. It must also
+	// touch only the program holding the changed path.
 	mut app, fake := fake_v3_app('refresh_lock', fake_v3_query_server, 'VLS_DIAGNOSTICS_SERVER')!
 	defer {
 		stop_fake_v3_app(mut app, fake)
 	}
+	helper_path := os.join_path(fake.project, 'helper', 'helper.v')
+	os.mkdir_all(os.dir(helper_path))!
+	os.write_file(helper_path, 'module helper\n\npub fn answer() int {\n\treturn 42\n}\n')!
 	main_path := os.join_path(fake.project, 'main.v')
-	app.v3_line_info(.hover, path_to_uri(main_path), main_path, '4:hv^2') or {}
+	main_uri := path_to_uri(main_path)
+	app.open_files[main_uri] = 'module main\n\nimport helper\n\nfn main() {\n\tp := helper.answer()\n\tprintln(p)\n}\n'
+	app.v3_line_info(.hover, main_uri, main_path, '6:hv^2') or {}
 	mut pool := app.v3_query_pool()
 	mut program := pool.program_copy(os.dir(main_path))
 	assert program.built, 'the copy was built by the query'
-	// Change a held file on disk so the refresh has work to do.
-	other_path := os.join_path(fake.project, 'other.v')
-	os.write_file(other_path, 'module main\n\nfn other() {\n\tq := 3\n\tprintln(q)\n}\n')!
+	copy_of_helper := os.join_path(program.project.overlay.temp_root, 'helper', 'helper.v')
+	assert os.is_file(copy_of_helper), 'the helper is materialized in the copy'
+	// Replace the file by rename, as a checkout does: a hard link keeps the
+	// old inode, so the copy stays stale until the refresh re-takes it.
+	replacement := helper_path + '.new'
+	os.write_file(replacement, 'module helper\n\npub fn answer() string {\n\treturn "x"\n}\n')!
+	os.rename(replacement, helper_path)!
+	normalized_helper := normalize_overlay_path(helper_path)
 	program.mutex.lock()
-	done := chan bool{cap: 1}
-	spawn refresh_held_files_and_report(mut pool, done)
-	// While the query holds the lock, the refresh must not complete.
-	select {
-		_ := <-done {
-			assert false, 'the refresh ran while the program copy was locked'
-		}
-		200 * time.millisecond {
-		}
-	}
+	// While the query holds the lock, the scoped refresh must return without
+	// waiting and leave the busy copy alone. The old blocking refresh would
+	// deadlock here on the same thread.
+	pool.refresh_held_files_in_copies_for_path(normalized_helper)
+	assert os.read_file(copy_of_helper)! != os.read_file(helper_path)!, 'busy copy is skipped'
 	program.mutex.unlock()
-	// Once released, the refresh completes and re-takes the changed file.
-	select {
-		_ := <-done {
-		}
-		5 * time.second {
-			assert false, 'the refresh did not complete after the lock was released'
-		}
-	}
-	program.mutex.lock()
-	defer {
-		program.mutex.unlock()
-	}
-	copy_other := os.join_path(program.project.overlay.temp_root, 'other.v')
-	assert os.read_file(copy_other)! == os.read_file(other_path)!, 'the held file was re-taken'
+	// An unrelated path must not touch this copy.
+	pool.refresh_held_files_in_copies_for_path(normalize_overlay_path('/tmp/vls_unrelated_path_for_test'))
+	assert os.read_file(copy_of_helper)! != os.read_file(helper_path)!, 'unrelated path leaves the copy alone'
+	// The matching path re-takes the changed file.
+	pool.refresh_held_files_in_copies_for_path(normalized_helper)
+	assert os.read_file(copy_of_helper)! == os.read_file(helper_path)!, 'the held file was re-taken'
 }
 
 fn test_a_test_file_is_asked_as_a_program_of_its_own() {

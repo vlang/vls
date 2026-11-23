@@ -188,25 +188,37 @@ fn (mut pool DiagnosticsServerPool) notice_disk_change(path string) {
 	}
 }
 
-// refresh_held_files_in_copies re-takes every file the program copies hold by
-// link or by copy. A content change of a closed file leaves those materialized
-// bytes stale, so the next query would otherwise answer from the old source.
-fn (mut pool DiagnosticsServerPool) refresh_held_files_in_copies() {
+// refresh_held_files_in_copies_for_path re-takes the files the program copies
+// hold by link or by copy, but only for the program whose root holds
+// `changed`: a content change elsewhere cannot stale this copy's materialized
+// bytes, so scanning every copy on every change wastes IO on unrelated
+// programs. It never blocks on a copy busy with a query: the request loop
+// calls it inline, while a V3 query holds that copy's mutex through the
+// compiler run. A busy copy is skipped, as the query's own v3_sync_open_files
+// re-takes the same files under its lock before answering, so no update is
+// lost. Doing the file IO outside the pool lock keeps the pool map responsive.
+fn (mut pool DiagnosticsServerPool) refresh_held_files_in_copies_for_path(changed string) {
 	mut programs := []&ProgramCopy{}
 	pool.mutex.lock()
 	for key in pool.copies.keys() {
 		if program := pool.copies[key] {
-			programs << program
+			if program.root != ''
+				&& (path_is_within(changed, program.root)
+					|| path_is_within(program.root, changed)) {
+				programs << program
+			}
 		}
 	}
 	pool.mutex.unlock()
-	// Do the file IO outside the pool lock, but under each program's own lock:
-	// a V3 query or prewarm holds that mutex while writing and reading the same
-	// overlay, and refreshing the shared held-file map under it would race
-	// those readers. ProgramCopy itself is never copied (it holds a mutex by
+	// Do the file IO outside the pool lock, and without waiting on a copy a
+	// query is using: a V3 query or prewarm holds that mutex while writing and
+	// reading the same overlay, and the request loop must not wait for its
+	// compiler run. ProgramCopy itself is never copied (it holds a mutex by
 	// value); only the pointer travels.
 	for mut program in programs {
-		program.mutex.lock()
+		if !program.mutex.try_lock() {
+			continue
+		}
 		program.project.refresh_held_files()
 		program.mutex.unlock()
 	}
