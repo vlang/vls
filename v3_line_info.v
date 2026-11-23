@@ -497,6 +497,10 @@ fn (mut app App) v3_query_notice_disk_change(changed_path string, event_type int
 		// files before the next query, or a closed file's rename of a parameter
 		// stays invisible to the compiler.
 		pool.refresh_held_files_in_copies()
+		// The server caches answers per program copy, so reusing a copy after a
+		// content change would replay the old answer. Force a fresh copy (and
+		// therefore a fresh token) for the next query.
+		pool.notice_disk_change(normalize_overlay_path(changed_path))
 		return
 	}
 	pool.notice_disk_change(normalize_overlay_path(changed_path))
