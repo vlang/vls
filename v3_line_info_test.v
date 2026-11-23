@@ -741,7 +741,7 @@ fn test_v1_line_info_without_a_server_keeps_its_own_process() {
 	assert app.v3_copies().len == 0
 }
 
-fn test_only_a_created_or_deleted_file_rebuilds_the_copy() {
+fn test_disk_changes_rebuild_the_copy() {
 	mut app, fake := fake_v3_app('watcher', fake_v3_query_server, 'VLS_DIAGNOSTICS_SERVER')!
 	defer {
 		stop_fake_v3_app(mut app, fake)
@@ -749,9 +749,11 @@ fn test_only_a_created_or_deleted_file_rebuilds_the_copy() {
 	path := os.join_path(fake.project, 'main.v')
 	app.v3_line_info(.hover, path_to_uri(path), path, '4:hv^2') or {}
 	assert app.v3_copies().len == 1
-	// A change shows through the copy.
+	// A content change rebuilds the copy as well: the server caches answers
+	// per program copy, so reusing a copy after a change would replay the
+	// old answer with a stale token.
 	app.v3_query_notice_disk_change(path, 2)
-	assert app.v3_copies().len == 1
+	assert app.v3_copies().len == 0
 	// A new file is not in it.
 	app.v3_query_notice_disk_change(os.join_path(fake.project, 'new.v'), 1)
 	assert app.v3_copies().len == 0

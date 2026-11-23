@@ -629,7 +629,7 @@ fn test_run_v_line_info_sends_plain_arguments() {
 
 	for _ in 0 .. 2 {
 		hover := app.run_v_line_info(.hover, uri, '6:hv^4')
-		assert app.line_info_mode == .direct
+		assert !app.line_info_unavailable, 'a direct compiler keeps line-info available'
 		assert hover is Hover
 		if hover is Hover {
 			assert hover.contents.value.contains('fn helper()')
@@ -2939,6 +2939,7 @@ exit 0
 const compat_matrix_dead_end_stub = r'#!/bin/sh
 case " $* " in
   *"-line-info"*)
+    echo "$*" >> "$(dirname "$0")/queries.txt"
     echo "unknown option \`-vls-mode\`" >&2
     exit 1
     ;;
