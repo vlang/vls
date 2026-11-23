@@ -443,9 +443,6 @@ fn (mut app App) report_missing_compatibility_compiler() {
 	app.send_show_message('vls: the configured V compiler cannot serve completion, hover, signature help, or go to definition, because it does not support `-vls-mode` / `-line-info`. Set `VLS_V_COMMAND` to a V compiler that does. Diagnostics and formatting are unaffected.', 2)
 }
 
-// normalize_v_line_info_output extracts the actual line-info payload from the
-// compiler's combined stdout/stderr. Older launchers may prepend an option
-// notice before delegating to their checker.
 // report_line_info_unavailable runs once per session when the compiler refuses
 // the line-info request before doing any work.
 fn (mut app App) report_line_info_unavailable(compatibility_missing bool) {
@@ -3758,6 +3755,9 @@ fn (mut app App) run_v_line_info_once(method Method, path string, line_info stri
 			cleanup_compilation_temp(temp_project_dir, singlefile_tmppath)
 		}
 		return app.line_info_unavailable_result(method, path, line_info)
+	}
+	if app.line_info_mode == .unknown {
+		app.line_info_mode = .direct
 	}
 	if (method == .definition || method == .declaration || method == .type_definition
 		|| method == .implementation) && use_multifile

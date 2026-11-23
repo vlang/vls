@@ -665,7 +665,7 @@ fn test_run_v_line_info_retires_lookups_after_automatic_compatibility_build_fail
 	assert app.captured_output[0].contains('window/showMessage')
 }
 
-fn test_report_line_info_unavailable_names_the_repair() {
+fn test_report_missing_compatibility_compiler_names_the_repair() {
 	// The editor otherwise shows a VLS that highlights code but answers nothing
 	// for completion, hover, signature help, or go to definition, with no hint
 	// that the compiler is the reason. Platform-independent: no stub compiler.
