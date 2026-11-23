@@ -3308,42 +3308,9 @@ mut:
 // state are intentionally left behind: the worker answers one request from a
 // frozen snapshot and never publishes diagnostics.
 fn (mut app App) line_info_snapshot(cancel &CancelFlag) &App {
-	mut open_files := map[string]string{}
-	for uri, content in app.open_files {
-		open_files[uri] = content
-	}
-	mut roots := []string{}
-	for r in app.workspace_roots {
-		roots << r
-	}
-	mut removed := []string{}
-	for r in app.removed_workspace_roots {
-		removed << r
-	}
-	mut index := map[string]IndexEntry{}
-	for uri, entry in app.symbol_index {
-		index[uri] = entry
-	}
-	mut vlib_fns := map[string]map[string]string{}
-	for mod_name, fns in app.vlib_fn_cache {
-		vlib_fns[mod_name] = fns
-	}
-	mut dirs := map[string]bool{}
-	for dir, done in app.indexed_dirs {
-		dirs[dir] = done
-	}
-	mut walk_ms := map[string]i64{}
-	for dir, ms in app.indexed_dir_walk_ms {
-		walk_ms[dir] = ms
-	}
-	mut skipped := map[string]bool{}
-	for uri, skipped_uri in app.index_skipped_uris {
-		skipped[uri] = skipped_uri
-	}
-	mut incomplete := map[string]bool{}
-	for scope, incomplete_scope in app.index_incomplete_scopes {
-		incomplete[scope] = incomplete_scope
-	}
+	// clone() copies the map's key/value and metadata arrays in bulk. Filling
+	// a new map entry by entry hashes every key again, which was the dominant
+	// cost of starting an async line-info worker on a large index.
 	// The worker asks the same pooled compilers the session asks through, so
 	// the pool (already the session's, created below in dispatch when needed)
 	// and the flags that gate it are shared, never duplicated: a worker that
@@ -3353,18 +3320,18 @@ fn (mut app App) line_info_snapshot(cancel &CancelFlag) &App {
 	// the same group the loop waits on at shutdown.
 	return &App{
 		text:                    app.text
-		open_files:              open_files
+		open_files:              app.open_files.clone()
 		open_files_versions:     map[string]i64{}
-		workspace_roots:         roots
-		removed_workspace_roots: removed
+		workspace_roots:         app.workspace_roots.clone()
+		removed_workspace_roots: app.removed_workspace_roots.clone()
 		position_encoding:       app.position_encoding
-		symbol_index:            index
+		symbol_index:            app.symbol_index.clone()
 		ref_occurrences:         map[string]OccEntry{}
-		vlib_fn_cache:           vlib_fns
-		indexed_dirs:            dirs
-		indexed_dir_walk_ms:     walk_ms
-		index_skipped_uris:      skipped
-		index_incomplete_scopes: incomplete
+		vlib_fn_cache:           app.vlib_fn_cache.clone()
+		indexed_dirs:            app.indexed_dirs.clone()
+		indexed_dir_walk_ms:     app.indexed_dir_walk_ms.clone()
+		index_skipped_uris:      app.index_skipped_uris.clone()
+		index_incomplete_scopes: app.index_incomplete_scopes.clone()
 		diag_cache:              map[string]DiagCacheEntry{}
 		project_generations:     map[string]int{}
 		line_info_mode:          app.line_info_mode

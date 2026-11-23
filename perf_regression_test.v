@@ -224,3 +224,35 @@ fn test_perf_config_fingerprint_is_memoized() {
 	pool.forget_config_fingerprints()
 	assert pool.cached_config_fingerprint(deep) == expected
 }
+
+// test_perf_line_info_snapshot_stays_fast guards the start of every async
+// hover/definition worker: a large index must be copied in bulk rather than
+// rehashing each entry into a fresh map.
+fn test_perf_line_info_snapshot_stays_fast() {
+	root, main_uri, main_text := perf_regression_project(perf_regression_files)
+	defer {
+		perf_regression_cleanup(root)
+	}
+	mut app := perf_reg_test_app()
+	app.open_files[main_uri] = main_text
+	app.workspace_roots << root
+	for i in 0 .. perf_regression_files {
+		uri := path_to_uri(os.join_path(root, 'util${i}.v'))
+		app.symbol_index[uri] = IndexEntry{}
+		app.indexed_dirs[uri] = true
+		app.index_skipped_uris[uri] = false
+	}
+	app.vlib_fn_cache['strings'] = map[string]string{}
+	for i in 0 .. 500 {
+		app.vlib_fn_cache['strings']['fn${i}'] = 'voidptr'
+	}
+	flag := &CancelFlag{}
+	_ := app.line_info_snapshot(flag)
+	start := time.now().unix_milli()
+	for _ in 0 .. 50 {
+		snapshot := app.line_info_snapshot(flag)
+		assert snapshot.symbol_index.len == perf_regression_files
+	}
+	elapsed := time.now().unix_milli() - start
+	assert elapsed < 2000, 'line-info snapshot took ${elapsed}ms (regression?)'
+}
