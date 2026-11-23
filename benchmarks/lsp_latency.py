@@ -95,7 +95,7 @@ class Client:
             self.process.stdout.close()
 
 
-def fixture(root, language, files):
+def fixture(root, language, files, type_error):
     (root / "go.mod" if language == "go" else root / "v.mod").write_text(
         "module example.com/lspbench\n\ngo 1.23\n"
         if language == "go" else "Module { name: 'lspbench' }\n"
@@ -110,12 +110,15 @@ def fixture(root, language, files):
         (root / f"helpers{n}.{language}").write_text(header + "\n\n" + "\n".join(definitions))
     main = root / f"main.{language}"
     source = f"{header}\n\n{function} main() {{\n\tx := helper0_0(1)\n\tprintln(x)\n}}\n"
+    if type_error == "return-type":
+        source = source.replace("helper0_0(1)", "helper0_0(1) + typed_value()")
+        source += f'\n{function} typed_value() int {{\n\treturn 1\n}}\n'
     main.write_text(source)
     return main, source
 
 
-def benchmark(command, root, language, files, samples, edits, log):
-    main, source = fixture(root, language, files)
+def benchmark(command, root, language, files, samples, edits, type_error, log):
+    main, source = fixture(root, language, files, type_error)
     document = {"uri": main.as_uri()}
     location = {"textDocument": document, "position": {"line": 3, "character": 10}}
     measurements = {}
@@ -189,16 +192,21 @@ def benchmark(command, root, language, files, samples, edits, log):
                 query(method, "edit + " + method)
             for kind in ("syntax", "type"):
                 version += 1
-                broken = (
-                    source + f"}} // {i}\n"
-                    if kind == "syntax" else source.replace("println(x)", f"println(missing{i})")
-                )
-                line = 6 if kind == "syntax" else 4
+                if kind == "syntax":
+                    broken = source + f"}} // {i}\n"
+                    line, expected_text = len(source.splitlines()), ()
+                elif type_error == "return-type":
+                    broken = source.replace("return 1", f'return "bad {i}"')
+                    line = source.splitlines().index("\treturn 1")
+                    expected_text = ("string", "int", "return")
+                else:
+                    broken = source.replace("println(x)", f"println(missing{i})")
+                    line, expected_text = 4, (f"missing{i}",)
                 started = time.perf_counter_ns()
                 change(version, broken)
                 diagnostic(version, kind, lambda items: any(
                     d["range"]["start"]["line"] == line and d.get("severity") == 1
-                    and (kind == "syntax" or f"missing{i}" in d["message"])
+                    and all(text in d["message"] for text in expected_text)
                     for d in items
                 ))
                 record(kind + " diagnostic", started)
@@ -222,12 +230,14 @@ def main():
     parser.add_argument("--samples", type=int, default=40)
     parser.add_argument("--edits", type=int, default=5)
     parser.add_argument("--runs", type=int, default=3)
+    parser.add_argument("--type-error", choices=["undefined-name", "return-type"],
+                        default="undefined-name")
     options = parser.parse_args()
     if min(*options.files, options.samples, options.runs) < 1 or options.edits < 0:
         parser.error("files, samples and runs must be positive; edits can be zero")
 
     for files in options.files:
-        print(f"\nSibling files: {files} ({30 * files} declarations)", flush=True)
+        print(f"\nSibling files: {files} ({30 * files} declarations), type error: {options.type_error}", flush=True)
         totals = {}
         for run in range(options.runs):
             servers = [("v", [options.vls]), ("go", [options.gopls, "serve"])]
@@ -239,7 +249,8 @@ def main():
                     with tempfile.TemporaryFile(mode="w+b") as log:
                         try:
                             result = benchmark(
-                                command, root, language, files, options.samples, options.edits, log
+                                command, root, language, files, options.samples, options.edits,
+                                options.type_error, log
                             )
                         except Exception:
                             log.seek(0)

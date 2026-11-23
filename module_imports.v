@@ -34,6 +34,7 @@ struct ImportableModule {
 }
 
 struct ImportableModulesCache {
+	prefix  string
 	modules []ImportableModule
 	at_ms   i64
 }
@@ -47,15 +48,31 @@ struct ModuleImports {
 // importable_modules lists the modules `file_path` can import: the folders under
 // the project root (its v.mod folder, or the program that imports the file),
 // under each VMODULES path and under vlib whose files declare the module named
-// after the folder. The file's own module is left out, and so are the modules
-// that already import it: V3 accepts that cycle, but V1, which VLS asks for
-// definitions and hints, does not.
-fn (mut app App) importable_modules(file_path string) []ImportableModule {
-	file_dir := os.dir(file_path)
-	vmod_root := find_project_root(file_dir)
-	root := if vmod_root != '' { vmod_root } else { app.program_root(file_path) }
-	all := app.cached_importable_modules(root)
-	own_dir := os.real_path(file_dir)
+// after the folder. The file's own module is left out, as are the modules
+// that already import it, to avoid offering import cycles.
+fn (mut app App) importable_modules(file_path string, queries ...string) []ImportableModule {
+	query := queries[0] or { '' }
+	return app.importable_modules_in_scope(os.real_path(os.dir(file_path)),
+		app.importable_module_root(file_path), query)
+}
+
+fn (app &App) importable_module_root(file_path string) string {
+	proj := find_project_root(os.dir(file_path))
+	return os.real_path(if proj != '' { proj } else { app.program_root(file_path) })
+}
+
+fn (mut app App) importable_modules_in_scope(own_dir string, root string, query string) []ImportableModule {
+	// The project root has no import path of its own. In that case, we can
+	// validate only matching modules without needing their full import graph.
+	prefix := if query != '' && own_dir == os.real_path(root)
+		&& !os.vmodules_paths().any(path_is_within(own_dir, os.real_path(it)))
+		&& !path_is_within(own_dir, os.real_path(os.join_path(find_v_dir(), 'vlib')))
+		&& declared_module_of_dir(own_dir) == 'main' {
+		query
+	} else {
+		''
+	}
+	all := app.cached_importable_modules(root, prefix)
 	own := all.filter(it.dir == own_dir)
 	reaching := app.modules_reaching(own, all)
 	return all.filter(it.offered && it.dir != own_dir && it.path !in reaching)
@@ -65,12 +82,13 @@ fn (mut app App) importable_modules(file_path string) []ImportableModule {
 // every `importable_modules_ttl_ms`; a watched file change clears the cache.
 // vlib comes last: a module of the same path in the project or in VMODULES is
 // the one V imports.
-fn (mut app App) cached_importable_modules(root string) []ImportableModule {
+fn (mut app App) cached_importable_modules(root string, queries ...string) []ImportableModule {
+	prefix := queries[0] or { '' }
 	vmodules := os.vmodules_paths()
 	key := '${root}|${vmodules.join('|')}'
 	now := time.now().unix_milli()
 	if cached := app.importable_modules_cache[key] {
-		if now - cached.at_ms < importable_modules_ttl_ms {
+		if now - cached.at_ms < importable_modules_ttl_ms && prefix.starts_with(cached.prefix) {
 			return cached.modules
 		}
 	}
@@ -79,20 +97,21 @@ fn (mut app App) cached_importable_modules(root string) []ImportableModule {
 	mut seen_dirs := map[string]bool{}
 	if root != '' && os.is_dir(root) {
 		collect_importable_modules(root, '', .project, 0, mut found, mut seen_paths, mut
-			seen_dirs)
+			seen_dirs, prefix)
 	}
 	for dir in vmodules {
 		if os.is_dir(dir) {
-			collect_importable_modules(dir, '', .vpm, 0, mut found, mut seen_paths, mut seen_dirs)
+			collect_importable_modules(dir, '', .vpm, 0, mut found, mut seen_paths, mut seen_dirs, prefix)
 		}
 	}
-	for m in app.vlib_modules() {
-		if m.path !in seen_paths {
+	for m in app.vlib_modules(prefix) {
+		if m.path !in seen_paths && fuzzy_subsequence_matches(prefix, m.name) {
 			seen_paths[m.path] = true
 			found << m
 		}
 	}
 	app.importable_modules_cache[key] = ImportableModulesCache{
+		prefix:  prefix
 		modules: found
 		at_ms:   now
 	}
@@ -101,23 +120,26 @@ fn (mut app App) cached_importable_modules(root string) []ImportableModule {
 
 // vlib_modules lists the modules of V's vlib. It is walked once, and again
 // after a watched file of vlib changes, as when working on V itself.
-fn (mut app App) vlib_modules() []ImportableModule {
+fn (mut app App) vlib_modules(prefix string) []ImportableModule {
 	v_dir := find_v_dir()
 	if v_dir == '' {
 		return []
 	}
 	vlib := os.join_path(v_dir, 'vlib')
-	if vlib !in app.vlib_modules_cache {
-		mut found := []ImportableModule{}
-		mut seen_paths := map[string]bool{}
-		mut seen_dirs := map[string]bool{}
-		if os.is_dir(vlib) {
-			collect_importable_modules(vlib, '', .vlib, 0, mut found, mut seen_paths, mut
-				seen_dirs)
+	if cached := app.vlib_modules_cache[vlib] {
+		if prefix.starts_with(cached.prefix) {
+			return cached.modules
 		}
-		app.vlib_modules_cache[vlib] = found
 	}
-	return app.vlib_modules_cache[vlib] or { [] }
+	mut found := []ImportableModule{}
+	mut seen_paths := map[string]bool{}
+	mut seen_dirs := map[string]bool{}
+	collect_importable_modules(vlib, '', .vlib, 0, mut found, mut seen_paths, mut seen_dirs, prefix)
+	app.vlib_modules_cache[vlib] = ImportableModulesCache{
+		prefix:  prefix
+		modules: found
+	}
+	return found
 }
 
 // collect_importable_modules walks the folders below `dir`. A folder is a module
@@ -128,15 +150,16 @@ fn (mut app App) vlib_modules() []ImportableModule {
 // folders of tests and examples. Not offered, though found: a module that V
 // refuses to build a program with, vlib's `builtin`, which every file has, and
 // the internals of a vlib module.
-fn collect_importable_modules(dir string, prefix string, origin ModuleOrigin, depth int, mut found []ImportableModule, mut seen_paths map[string]bool, mut seen_dirs map[string]bool) {
-	mut entries := os.ls(dir) or { return }
-	entries.sort()
+fn collect_importable_modules(dir string, prefix string, origin ModuleOrigin, depth int, mut found []ImportableModule, mut seen_paths map[string]bool, mut seen_dirs map[string]bool, queries ...string) {
+	query := queries[0] or { '' }
+	entries := module_directory_entries(dir) or { return }
 	collect_importable_module_entries(dir, prefix, origin, depth, entries, mut found, mut seen_paths,
-		mut seen_dirs)
+		mut seen_dirs, query)
 }
 
-fn collect_importable_module_entries(dir string, prefix string, origin ModuleOrigin, depth int, entries []string, mut found []ImportableModule, mut seen_paths map[string]bool, mut seen_dirs map[string]bool) {
-	if depth >= importable_module_max_depth || found.len >= importable_module_max_count {
+fn collect_importable_module_entries(dir string, prefix string, origin ModuleOrigin, depth int, entries ModuleDirectoryEntries, mut found []ImportableModule, mut seen_paths map[string]bool, mut seen_dirs map[string]bool, query string) {
+	if entries.folders.len == 0 || depth >= importable_module_max_depth
+		|| found.len >= importable_module_max_count || seen_dirs.len >= index_max_files {
 		return
 	}
 	real := os.real_path(dir)
@@ -144,34 +167,31 @@ fn collect_importable_module_entries(dir string, prefix string, origin ModuleOri
 		return
 	}
 	seen_dirs[real] = true
-	for entry in entries {
+	for entry in entries.folders {
 		if entry.starts_with('.') || entry in index_excluded_dirs
 			|| (prefix == '' && origin == .project && entry == 'vlib')
 			|| (origin == .vlib && entry in vlib_scaffolding_dirs) {
 			continue
 		}
 		sub := os.join_path(dir, entry)
-		if !os.is_dir(sub) {
-			continue
-		}
-		mut sub_entries := os.ls(sub) or { continue }
-		sub_entries.sort()
+		sub_entries := module_directory_entries(sub) or { continue }
 		path := if prefix == '' { entry } else { '${prefix}.${entry}' }
-		if entry != 'main' && path !in seen_paths && declared_module_of_entries(sub, sub_entries) == entry {
+		if entry != 'main' && path !in seen_paths && fuzzy_subsequence_matches(query, entry)
+			&& declared_module_of_entries(sub, sub_entries.sources) == entry {
 			seen_paths[path] = true
-			deprecated, refused := module_deprecation(sub, sub_entries)
+			deprecated, refused := module_deprecation(sub, sub_entries.sources)
 			found << ImportableModule{
 				path:       path
 				name:       entry
 				dir:        os.real_path(sub)
 				origin:     origin
 				offered:    !(origin == .vlib && (path == 'builtin' || 'internal' in path.split('.')))
-					&& !refused && !module_needs_flag(sub, sub_entries)
+					&& !refused && !module_needs_flag(sub, sub_entries.sources)
 				deprecated: deprecated
 			}
 		}
 		collect_importable_module_entries(sub, path, origin, depth + 1, sub_entries, mut found,
-			mut seen_paths, mut seen_dirs)
+			mut seen_paths, mut seen_dirs, query)
 	}
 }
 
@@ -350,6 +370,8 @@ fn (mut app App) module_imports_of(m ImportableModule) []string {
 fn (mut app App) forget_module_folder(path string) {
 	dir := os.real_path(os.dir(path))
 	app.module_imports_cache.delete(dir)
+	app.completion_imports_cache.clear()
+	app.completion_imports_generation++
 	app.builtin_calls_cache.delete(dir)
 	stale := app.vlib_modules_cache.keys().filter(path_is_within(dir, it))
 	for vlib in stale {
@@ -378,10 +400,15 @@ fn module_dir_imports(dir string) []string {
 // module_import_completions offers the importable modules that `content` does
 // not import yet; accepting one also inserts its `import` line. Nothing is
 // offered inside a string or a comment.
-fn (mut app App) module_import_completions(uri string, content string, position Position) []Detail {
+fn (mut app App) module_import_completions(uri string, content string, position Position, queries ...string) []Detail {
+	query := queries[0] or { '' }
 	if position_in_string_or_comment(content, position, app.position_encoding) {
 		return []
 	}
+	return module_import_items(content, query, app.importable_modules(uri_to_path(uri), query))
+}
+
+fn module_import_items(content string, query string, modules []ImportableModule) []Detail {
 	mut taken := map[string]bool{}
 	for binding in parse_import_bindings(content) {
 		taken[binding.module_path] = true
@@ -389,8 +416,8 @@ fn (mut app App) module_import_completions(uri string, content string, position 
 	}
 	spot := import_spot(content)
 	mut items := []Detail{}
-	for m in app.importable_modules(uri_to_path(uri)) {
-		if m.path in taken || m.name in taken {
+	for m in modules {
+		if m.path in taken || m.name in taken || !fuzzy_subsequence_matches(query, m.name) {
 			continue
 		}
 		items << Detail{

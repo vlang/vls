@@ -83,6 +83,7 @@ mut:
 	// Tracks what is still displayed even after an edit invalidates its pull
 	// cache entry. A clean fast result may clear only an earlier fast publish.
 	fast_published     map[string]bool
+	fast_type_builtin  FastTypeBuiltin
 	active_uri         string
 	active_project_key string
 	active_generation  u64

@@ -88,6 +88,48 @@ median end-to-end type diagnostic latency to 555 ms on the small fixture and 2,2
 on the larger fixture. The isolated prototype used the existing server protocol with one
 compiler worker. The tables above use the stock compiler.
 
+### First completion and interactive type diagnostics
+
+VLS returns indexed completion items while it discovers optional auto-imports in a
+background worker. The completion list is marked incomplete while the scan runs.
+Explicit import completions and requests with no matching indexed items still
+search for imports before responding.
+
+The fast diagnostics tier reports unresolved bare call arguments when it can check
+their source scope, and incompatible scalar literals in explicitly typed returns.
+The full compiler handles the remaining cases and supplies the authoritative result.
+
+Run the two workloads separately on the same VLS build.
+
+```sh
+python3 benchmarks/lsp_latency.py --type-error undefined-name --samples 8 --runs 9 --edits 5
+python3 benchmarks/lsp_latency.py --type-error return-type --samples 8 --runs 9 --edits 5
+```
+
+On the same Apple Silicon Mac with V 0.5.2 (`60a5e1f`), Go 1.27.4, and
+`gopls` v0.24.0, each workload and project size used nine fresh server processes
+per language and 45 edits. First completion validates a sibling declaration.
+The diagnostic benchmark waits for an error at the edited line and version.
+The cold p95 is the maximum of nine samples. Times are p50 / p95 in milliseconds.
+
+| Declarations | Operation | VLS | gopls |
+| ---: | --- | ---: | ---: |
+| 30 | First completion (undefined name fixture) | 5.17 / 16.05 | 244.10 / 281.20 |
+| 30 | Undefined name diagnostic | 0.57 / 15.91 | 1.11 / 2.30 |
+| 30 | Undefined name recovery | 0.29 / 0.84 | 1.18 / 3.62 |
+| 1200 | First completion (undefined name fixture) | 34.80 / 88.15 | 279.69 / 366.88 |
+| 1200 | Undefined name diagnostic | 2.76 / 13.54 | 8.49 / 120.64 |
+| 1200 | Undefined name recovery | 0.35 / 24.08 | 8.59 / 37.99 |
+| 30 | First completion (return mismatch fixture) | 8.83 / 59.26 | 347.05 / 503.79 |
+| 30 | Return mismatch diagnostic | 0.46 / 22.64 | 1.54 / 11.51 |
+| 30 | Return mismatch recovery | 0.56 / 29.68 | 1.72 / 14.18 |
+| 1200 | First completion (return mismatch fixture) | 87.52 / 180.34 | 344.68 / 389.25 |
+| 1200 | Return mismatch diagnostic | 0.56 / 40.97 | 9.12 / 69.81 |
+| 1200 | Return mismatch recovery | 0.63 / 30.69 | 9.31 / 74.88 |
+
+First completion and both type diagnostics had lower median latency on both fixtures.
+The small fixture's diagnostic p95 was higher during this run under heavy concurrent load.
+
 ## Feature gap summary
 
 Measured against the tree as of the last pass over it. What this

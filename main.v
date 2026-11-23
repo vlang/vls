@@ -141,11 +141,14 @@ mut:
 	write_mutex                                 &sync.Mutex = sync.new_mutex() // Serializes worker and request-loop writes
 	// What the compiler's answer cost, per document and method: below the budget
 	// in answer_budget.v the answer is waited for instead of answered twice.
-	compiler_answer_ms       map[string]i64
-	importable_modules_cache map[string]ImportableModulesCache // Modules a file can import, per project root (see module_imports.v)
-	vlib_modules_cache       map[string][]ImportableModule     // The modules of vlib, per vlib folder
-	module_imports_cache     map[string]ModuleImports          // The modules each module imports (see module_imports.v)
-	builtin_calls_cache      map[string]map[string]Detail      // V's builtin functions as completion items, per vlib/builtin folder
+	compiler_answer_ms            map[string]i64
+	completion_imports_scan       ?CompletionImportsScan
+	completion_imports_cache      map[string]ImportableModulesCache
+	completion_imports_generation u64
+	importable_modules_cache      map[string]ImportableModulesCache // Modules a file can import, per project root (see module_imports.v)
+	vlib_modules_cache            map[string]ImportableModulesCache // The modules of vlib, per vlib folder
+	module_imports_cache          map[string]ModuleImports          // The modules each module imports (see module_imports.v)
+	builtin_calls_cache           map[string]map[string]Detail      // V's builtin functions as completion items, per vlib/builtin folder
 }
 
 struct JsonError {

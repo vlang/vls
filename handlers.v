@@ -26,9 +26,10 @@ const v_builtin_types = ['any', 'array', 'bool', 'byteptr', 'chan', 'char', 'cha
 const completion_item_budget = 200
 
 struct IndexedCompletionResult {
-	items          []Detail
-	use_compiler   bool
-	embedded_types []string
+	imports_pending bool
+	items           []Detail
+	use_compiler    bool
+	embedded_types  []string
 	// field_types holds each field's type as member lookup needs it, without
 	// `&`, `?` or `!`; field_declared_types keeps it as the source writes it.
 	field_types          map[string]string
@@ -1481,8 +1482,8 @@ fn (mut app App) operation_at_pos(method Method, request Request) Response {
 	// compiler process here used to cost hundreds of milliseconds on every request,
 	// even when the compiler returned no completion payload for an incomplete file.
 	if method == .completion {
-		indexed := app.indexed_completions(path, params.position)
 		prefix := app.word_prefix_at_cursor(path, params.position)
+		indexed := app.indexed_completions(path, params.position, prefix.to_lower())
 		if indexed.use_compiler {
 			compiler_result := app.run_v_line_info(.completion, path, '${line_nr}:${byte_col}')
 			compiler_items := if compiler_result is []Detail {
@@ -1495,7 +1496,7 @@ fn (mut app App) operation_at_pos(method Method, request Request) Response {
 			return Response{
 				id:     request.id
 				result: CompletionList{
-					is_incomplete: truncated
+					is_incomplete: truncated || indexed.imports_pending
 					items:         budgeted
 				}
 			}
@@ -1515,7 +1516,7 @@ fn (mut app App) operation_at_pos(method Method, request Request) Response {
 			return Response{
 				id:     request.id
 				result: CompletionList{
-					is_incomplete: truncated_filtered
+					is_incomplete: truncated_filtered || indexed.imports_pending
 					items:         budgeted_filtered
 				}
 			}
@@ -1524,7 +1525,7 @@ fn (mut app App) operation_at_pos(method Method, request Request) Response {
 		return Response{
 			id:     request.id
 			result: CompletionList{
-				is_incomplete: truncated_indexed
+				is_incomplete: truncated_indexed || indexed.imports_pending
 				items:         budgeted_indexed
 			}
 		}
@@ -1692,7 +1693,7 @@ fn merge_completion_items(indexed_items []Detail, compiler_items []Detail) []Det
 // indexed_completions returns useful completions without compiling the project.
 // The compiler-backed path rebuilt an unsaved project overlay and launched V for
 // every request; on vlang/v that was roughly 400 ms even for a warm request.
-fn (mut app App) indexed_completions(uri string, position Position) IndexedCompletionResult {
+fn (mut app App) indexed_completions(uri string, position Position, queries ...string) IndexedCompletionResult {
 	content := app.open_files[uri] or { os.read_file(uri_to_path(uri)) or { '' } }
 	lines := content.split_into_lines()
 	if position.line < 0 || position.line >= lines.len {
@@ -1755,8 +1756,21 @@ fn (mut app App) indexed_completions(uri string, position Position) IndexedCompl
 		}
 	}
 
+	working_dir := os.dir(uri_to_path(uri))
+	module_result := if working_dir != '' {
+		app.collect_module_completions(uri, working_dir)
+	} else {
+		IndexedModuleCompletionResult{}
+	}
+	query := if module_result.use_compiler { '' } else { queries[0] or { '' } }
 	mut details := app.callback_argument_completions(uri, content, lines, position)
-	details << app.with_builtin_calls(make_keyword_completions())
+	keywords := make_keyword_completions()
+	details << if query == '' || v_builtins.any(fuzzy_subsequence_matches(query, it))
+		|| v_builtin_keyword_functions.any(fuzzy_subsequence_matches(query, it)) {
+		app.with_builtin_calls(keywords)
+	} else {
+		keywords
+	}
 	details << postfix_completions()
 	mut seen_labels := map[string]bool{}
 	for detail in details {
@@ -1778,27 +1792,37 @@ fn (mut app App) indexed_completions(uri string, position Position) IndexedCompl
 			seen_labels[binding.alias] = true
 		}
 	}
-	working_dir := os.dir(uri_to_path(uri))
-	mut use_compiler := false
-	if working_dir != '' {
-		module_result := app.collect_module_completions(uri, working_dir)
-		use_compiler = module_result.use_compiler
-		for detail in module_result.items {
+	for detail in module_result.items {
+		if detail.label !in seen_labels {
+			details << detail
+			seen_labels[detail.label] = true
+		}
+	}
+	// Auto imports come last. They cannot enter the result once the earlier
+	// matching items already fill the budget and make the list incomplete.
+	matching := details.count(fuzzy_subsequence_matches(query, it.label))
+	mut imports_pending := false
+	if queries.len == 0 || matching <= completion_item_budget {
+		mut imports := []Detail{}
+		if app.received_initialize && matching > 0 && !module_result.use_compiler && queries.len > 0 {
+			if !position_in_string_or_comment(content, position, app.position_encoding) {
+				modules, pending := app.completion_imports(uri_to_path(uri), query)
+				imports = module_import_items(content, query, modules)
+				imports_pending = pending
+			}
+		} else {
+			imports = app.module_import_completions(uri, content, position, query)
+		}
+		for detail in imports {
 			if detail.label !in seen_labels {
 				details << detail
-				seen_labels[detail.label] = true
 			}
 		}
 	}
-	// Modules not imported yet: accepting one also adds its `import` line.
-	for detail in app.module_import_completions(uri, content, position) {
-		if detail.label !in seen_labels {
-			details << detail
-		}
-	}
 	return IndexedCompletionResult{
-		items:        details
-		use_compiler: use_compiler
+		items:           details
+		use_compiler:    module_result.use_compiler
+		imports_pending: imports_pending
 	}
 }
 
@@ -3769,7 +3793,11 @@ fn without_operator_completions(items []Detail) []Detail {
 // followed by a `//` comment, or none. Anything more (`'abc'.len`, `'a' + b`)
 // is left to the other inference paths.
 fn receiver_literal_type(rhs string) ?string {
-	r := rhs.trim_space()
+	kind, _ := receiver_scalar_literal(rhs.trim_space())?
+	return kind
+}
+
+fn receiver_scalar_literal(r string) ?(string, int) {
 	if r == '' {
 		return none
 	}
@@ -3818,7 +3846,7 @@ fn receiver_literal_type(rhs string) ?string {
 	if rest != '' && !rest.starts_with('//') {
 		return none
 	}
-	return literal_type
+	return literal_type, end
 }
 
 // indexed_enum_members lists the values of the enum `type_name` (`Color`, or

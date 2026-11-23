@@ -1410,10 +1410,13 @@ fn (mut app App) merge_index_refresh(mut result IndexRefreshResult) {
 	}
 }
 
-// stop_index_refresh joins the background index worker, so the process cannot
-// exit while a refresh is still reading files. It is the equivalent of
-// stop_diagnostics_servers for the index worker.
+// stop_index_refresh joins the index and auto-import workers before shutdown,
+// so the session releases them after their file reads finish.
 fn (mut app App) stop_index_refresh() {
+	if scan := app.completion_imports_scan {
+		_ := <-scan.result or {}
+		app.completion_imports_scan = none
+	}
 	if mut scheduler := app.index_refresh {
 		scheduler.stop_and_wait()
 	}
