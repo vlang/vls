@@ -241,6 +241,9 @@ fn (mut app App) v3_run(project V3QueryProject, specs []string, target string) ?
 	if compiler_rejects_any_option(x.output, ['-line-info']) {
 		log('this V has no V3 that answers -line-info')
 		app.v3_one_shot_unsupported = true
+		if mut flag := app.line_info_cancel {
+			flag.record_v3_one_shot_unsupported()
+		}
 		return none
 	}
 	return if x.exit_code == 0 { x.output } else { none }

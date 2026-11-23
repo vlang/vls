@@ -5240,6 +5240,37 @@ fn test_line_info_snapshot_shares_the_session_query_pool() {
 	assert snap.line_info_workers == app.line_info_workers, 'the worker joins through the session group'
 }
 
+fn test_purge_finished_line_info_merges_worker_capabilities() {
+	// A worker answers through a private snapshot: a refusal or unsupported
+	// probe it discovers must reach the session through the shared flag, or
+	// later requests repeat the same doomed probe and keep dispatching workers.
+	mut app := &App{
+		line_info_cancels: map[string]&CancelFlag{}
+	}
+	flag := &CancelFlag{}
+	app.line_info_cancels['11'] = flag
+	flag.record_line_info_missing()
+	flag.record_v3_one_shot_unsupported()
+	flag.finish()
+	app.purge_finished_line_info()
+	assert app.line_info_mode == .missing, 'the worker refusal retires the session lookups'
+	assert app.line_info_unavailable, 'the session stops spawning one-shot probes'
+	assert app.v3_one_shot_unsupported, 'the session stops probing the unsupported V3'
+	assert '11' !in app.line_info_cancels, 'the finished flag is dropped'
+	// A worker that found nothing changes no capability.
+	mut quiet := &App{
+		line_info_mode:    .direct
+		line_info_cancels: map[string]&CancelFlag{}
+	}
+	plain := &CancelFlag{}
+	quiet.line_info_cancels['12'] = plain
+	plain.finish()
+	quiet.purge_finished_line_info()
+	assert quiet.line_info_mode == .direct, 'a clean worker keeps the probed mode'
+	assert !quiet.line_info_unavailable
+	assert !quiet.v3_one_shot_unsupported
+}
+
 fn test_cancel_and_join_line_info_workers_cancels_in_flight() {
 	mut app := &App{
 		line_info_cancels: map[string]&CancelFlag{}
@@ -5384,8 +5415,22 @@ fn test_evict_expired_overlays_frees_idle_trees() {
 	store.entries[key] = entry
 
 	app.evict_expired_overlays(time.now().unix_milli())
-	assert key !in store.entries, 'an idle entry leaves the store'
-	assert !os.is_dir(first.temp_root), 'its tree is removed too'
+	// The idle entry stops being a cache hit, but its tree is retired, not
+	// deleted: a compiler run may still be reading it. It stays until older
+	// than any possible compiler run.
+	assert os.is_dir(first.temp_root), 'the retired tree stays for in-flight readers'
+	mut retired_entry := store.entries[key] or {
+		assert false, 'the entry stays as the owner of the retired tree'
+		return
+	}
+	assert retired_entry.temp_root == '', 'the idle entry no longer publishes a tree'
+	assert retired_entry.retired.len == 1, 'the tree is retired for draining'
+	assert retired_entry.retired[0].root == first.temp_root
+	// Once older than any possible compiler run, a later pass deletes it.
+	aged_ms := time.now().unix_milli() + overlay_retired_ttl_ms() + 1
+	app.evict_expired_overlays(aged_ms)
+	assert key !in store.entries, 'an aged idle entry leaves the store'
+	assert !os.is_dir(first.temp_root), 'its tree is removed once no reader can use it'
 }
 
 fn test_drop_overlays_under_removes_a_closed_workspace() {
@@ -5412,8 +5457,26 @@ fn test_drop_overlays_under_removes_a_closed_workspace() {
 	assert store.entries.len == 1, 'the workspace has one cached entry'
 
 	app.drop_overlays_under(proj)
-	assert store.entries.len == 0, 'closing the workspace drops its entry'
-	assert !os.is_dir(first.temp_root), 'closing the workspace removes its tree'
+	// The entry stops being a cache hit, but its tree is retired for any
+	// in-flight compiler reader, not deleted at once.
+	assert os.is_dir(first.temp_root), 'the retired tree stays for in-flight readers'
+	assert store.entries.len == 1, 'the entry stays as the owner of the retired tree'
+	mut key := ''
+	for k in store.entries.keys() {
+		key = k
+	}
+	mut retired_entry := store.entries[key] or {
+		assert false, 'the retired owner exists'
+		return
+	}
+	assert retired_entry.temp_root == '', 'closing the workspace unpublishes the tree'
+	assert retired_entry.retired.len == 1, 'the tree is retired for draining'
+	assert retired_entry.retired[0].root == first.temp_root
+	// Once older than any possible compiler run, an eviction pass deletes it.
+	aged_ms := time.now().unix_milli() + overlay_retired_ttl_ms() + 1
+	app.evict_expired_overlays(aged_ms)
+	assert store.entries.len == 0, 'an aged closed-workspace entry leaves the store'
+	assert !os.is_dir(first.temp_root), 'its tree is removed once no reader can use it'
 }
 
 fn test_invalidate_overlay_for_disk_change_stales_only_covering_entries() {
@@ -5457,6 +5520,47 @@ fn test_invalidate_overlay_for_disk_change_stales_only_covering_entries() {
 		return
 	}
 	assert second.temp_root != first.temp_root, 'a staled entry rebuilds the tree'
+}
+
+fn test_invalidate_overlay_bumps_epoch_and_rebuild_reflects_disk() {
+	// A watcher invalidation bumps the store epoch so any staging build that
+	// mirrored the disk before the change discards its tree instead of
+	// publishing stale contents (the epoch guard in prepare_cached_overlay).
+	// This pins the invalidation -> epoch -> fresh-rebuild contract: after a
+	// create on disk, the rebuilt tree must carry the new listing.
+	base := os.join_path(os.temp_dir(), 'vls_overlay_epoch_${os.getpid()}')
+	proj := os.join_path(base, 'proj')
+	sub := os.join_path(proj, 'sub')
+	defer {
+		os.rmdir_all(base) or {}
+	}
+	main_content := 'module main\n\nfn main() {\n\tprintln(helper())\n}\n'
+	mut app, main_file, _ := cached_overlay_test_app(base, proj, sub, main_content)
+	defer {
+		app.drop_all_overlays()
+	}
+	first := app.prepare_line_info_overlay(main_file, proj) or {
+		assert false, 'first cached overlay must succeed: ${err}'
+		return
+	}
+	mut store := app.overlay_cache_store or {
+		assert false, 'the cached path sets the store'
+		return
+	}
+	epoch_before := store.epoch
+	// A create inside the project stales the entry and bumps the epoch, so a
+	// staging build in flight cannot publish its pre-change tree as fresh.
+	new_file := os.join_path(os.dir(main_file), 'added.v')
+	interop_test_must_write_file(new_file, 'module main\n\nfn added() {}\n')
+	app.invalidate_overlay_for_disk_change(new_file)
+	assert store.epoch > epoch_before, 'a disk change bumps the overlay epoch'
+	second := app.prepare_line_info_overlay(main_file, proj) or {
+		assert false, 'overlay after invalidation must succeed: ${err}'
+		return
+	}
+	assert second.temp_root != first.temp_root, 'the staled entry rebuilds the tree'
+	added_copy := os.join_path(os.dir(second.temp_source_file), os.file_name(new_file))
+	assert os.exists(added_copy), 'the rebuilt tree carries the new disk listing'
 }
 
 fn test_prepare_cached_overlay_hit_preserves_build_time() {

@@ -823,11 +823,19 @@ fn resolve_compiler_timeout_ms() i64 {
 // compiler invocations.
 // CancelFlag lets the request loop cancel an in-flight compiler run. The
 // worker polls it in its drain loop; the loop sets it on $/cancelRequest.
+// It also carries capability findings back: the worker answers through a
+// private snapshot, so a refusal or unsupported-probe it discovers must be
+// handed to the session through this shared flag, or the session would keep
+// dispatching workers that repeat the same doomed probe.
 struct CancelFlag {
 mut:
 	mutex     sync.Mutex
 	cancelled bool
 	finished  bool
+	// Capability findings recorded by the worker under the same mutex, merged
+	// into the session by purge_finished_line_info before the flag is dropped.
+	line_info_missing       bool
+	v3_one_shot_unsupported bool
 }
 
 fn (mut flag CancelFlag) cancel() {
@@ -860,6 +868,44 @@ fn (mut flag CancelFlag) is_finished() bool {
 		flag.mutex.unlock()
 	}
 	return flag.finished
+}
+
+// record_line_info_missing notes that the compiler definitively refused a
+// one-shot editor query, so the session retires compiler-backed lookups.
+fn (mut flag CancelFlag) record_line_info_missing() {
+	flag.mutex.lock()
+	defer {
+		flag.mutex.unlock()
+	}
+	flag.line_info_missing = true
+}
+
+// record_v3_one_shot_unsupported notes that the V in use has no V3 answering
+// `-line-info` in a process of its own, so the session stops probing it.
+fn (mut flag CancelFlag) record_v3_one_shot_unsupported() {
+	flag.mutex.lock()
+	defer {
+		flag.mutex.unlock()
+	}
+	flag.v3_one_shot_unsupported = true
+}
+
+// line_info_missing_reported reads the worker's recorded refusal.
+fn (mut flag CancelFlag) line_info_missing_reported() bool {
+	flag.mutex.lock()
+	defer {
+		flag.mutex.unlock()
+	}
+	return flag.line_info_missing
+}
+
+// v3_one_shot_unsupported_reported reads the worker's recorded probe result.
+fn (mut flag CancelFlag) v3_one_shot_unsupported_reported() bool {
+	flag.mutex.lock()
+	defer {
+		flag.mutex.unlock()
+	}
+	return flag.v3_one_shot_unsupported
 }
 
 fn run_v_argv(args []string, work_folder string) os.Result {
@@ -1068,6 +1114,11 @@ struct OverlayCacheStore {
 mut:
 	mutex   sync.Mutex
 	entries map[string]OverlayCacheEntry
+	// Bumped by every watcher invalidation. A staging build snapshots it before
+	// building and refuses to publish if it changed meanwhile: the disk it
+	// mirrored is no longer current, so publishing would overwrite the
+	// invalidation with stale contents.
+	epoch u64
 }
 
 fn new_overlay_cache_store() &OverlayCacheStore {
@@ -1286,9 +1337,10 @@ fn (mut app App) drop_overlay_temp_root(temp_root string) {
 const overlay_idle_evict_ms = i64(60_000)
 
 // evict_expired_overlays removes entries no request has used within the idle
-// window, together with their published and retired trees. Without this an
-// entry merely stops being a cache hit while its temp directory and map slot
-// stay behind for the life of the session.
+// window. The published tree is retired rather than deleted at once: a compiler
+// run may have started just before the idle window closed and still be reading
+// it (VLS_TIMEOUT_MS can exceed the idle window), so it is deleted only once
+// older than any possible compiler run, like a superseded rebuild.
 fn (mut app App) evict_expired_overlays(now_ms i64) {
 	mut store := app.overlay_cache_store or { return }
 	mut gc_roots := []string{}
@@ -1297,10 +1349,13 @@ fn (mut app App) evict_expired_overlays(now_ms i64) {
 		if now_ms - entry.used_ms <= overlay_idle_evict_ms {
 			continue
 		}
-		if entry.temp_root != '' {
-			gc_roots << entry.temp_root
-		}
 		mut young := []RetiredOverlay{}
+		if entry.temp_root != '' {
+			young << RetiredOverlay{
+				root:       entry.temp_root
+				retired_ms: now_ms
+			}
+		}
 		for retired in entry.retired {
 			if now_ms - retired.retired_ms > overlay_retired_ttl_ms() {
 				gc_roots << retired.root
@@ -1326,11 +1381,14 @@ fn (mut app App) evict_expired_overlays(now_ms i64) {
 }
 
 // drop_overlays_under retires the cached overlays of a workspace folder the
-// client closed. Keeping them would leave temp trees for projects no longer
-// open in the session.
+// client closed. Keeping them as cache hits would leave temp trees for projects
+// no longer open in the session. The trees themselves are retired, not deleted:
+// an async compiler worker may still be reading one, so each is deleted only
+// once older than any possible compiler run, like a superseded rebuild.
 fn (mut app App) drop_overlays_under(path string) {
 	mut store := app.overlay_cache_store or { return }
 	removed_root := normalize_overlay_path(path)
+	now_ms := time.now().unix_milli()
 	mut gc_roots := []string{}
 	store.mutex.lock()
 	for key, entry in store.entries {
@@ -1338,13 +1396,31 @@ fn (mut app App) drop_overlays_under(path string) {
 			&& !path_is_within(removed_root, entry.source_root) {
 			continue
 		}
+		mut young := []RetiredOverlay{}
 		if entry.temp_root != '' {
-			gc_roots << entry.temp_root
+			young << RetiredOverlay{
+				root:       entry.temp_root
+				retired_ms: now_ms
+			}
 		}
 		for retired in entry.retired {
-			gc_roots << retired.root
+			if now_ms - retired.retired_ms > overlay_retired_ttl_ms() {
+				gc_roots << retired.root
+			} else {
+				young << retired
+			}
 		}
-		store.entries.delete(key)
+		if young.len == 0 {
+			store.entries.delete(key)
+		} else {
+			// Keep the owner with no published tree so a later eviction pass
+			// (or session teardown) deletes the draining trees by age.
+			store.entries[key] = OverlayCacheEntry{
+				source_root:     entry.source_root
+				source_work_dir: entry.source_work_dir
+				retired:         young
+			}
+		}
 	}
 	store.mutex.unlock()
 	for root in gc_roots {
@@ -1388,6 +1464,9 @@ fn (mut app App) invalidate_overlay_for_disk_change(changed_path string) {
 	defer {
 		store.mutex.unlock()
 	}
+	// Any staging build in flight mirrored the disk before this change; bumping
+	// the epoch makes it discard its tree instead of publishing stale contents.
+	store.epoch++
 	for key, mut entry in store.entries {
 		if entry.temp_root == '' {
 			continue
@@ -1974,6 +2053,7 @@ fn (mut app App) prepare_cached_overlay(mut store &OverlayCacheStore, source_pat
 		// Snapshot under one short lock: the entry, the tracked set, and the
 		// open buffers the build must materialize.
 		store.mutex.lock()
+		build_epoch := store.epoch
 		mut tracked := app.tracked_overlay_rel_paths(source_root)
 		for path, _ in importers {
 			if rel := overlay_relative_path(path, source_root) {
@@ -2091,6 +2171,14 @@ fn (mut app App) prepare_cached_overlay(mut store &OverlayCacheStore, source_pat
 		// rebuild publishes its own staging; both trees stay valid and the
 		// last publish wins for new readers.
 		store.mutex.lock()
+		if store.epoch != build_epoch {
+			// A watcher invalidated the disk this staging mirrored while it was
+			// building. Publishing would overwrite that invalidation with stale
+			// contents; discard the tree and rebuild against the current disk.
+			store.mutex.unlock()
+			os.rmdir_all(staging) or {}
+			continue
+		}
 		mut gc_roots := []string{}
 		publish_ms := time.now().unix_milli()
 		if mut entry := store.entries[cache_key] {
@@ -3454,6 +3542,18 @@ fn (mut app App) purge_finished_line_info() {
 		}
 	}
 	for raw_id in done {
+		mut f := app.line_info_cancels[raw_id] or { continue }
+		// The worker answered through a private snapshot: merge the capability
+		// findings it recorded back into the session before dropping the flag,
+		// or later requests would repeat the same doomed probe or keep
+		// dispatching workers for a compiler the worker already retired.
+		if f.line_info_missing_reported() {
+			app.line_info_mode = .missing
+			app.line_info_unavailable = true
+		}
+		if f.v3_one_shot_unsupported_reported() {
+			app.v3_one_shot_unsupported = true
+		}
 		app.line_info_cancels.delete(raw_id)
 		// The worker answered its request (cancelled or not): consume any
 		// $/cancelRequest entry for it. The worker answers through its
@@ -3734,6 +3834,9 @@ fn (mut app App) run_v_line_info_once(method Method, path string, line_info stri
 		log('no checker for -line-info; falling back to the index')
 		app.line_info_mode = .missing
 		app.line_info_unavailable = true
+		if mut flag := app.line_info_cancel {
+			flag.record_line_info_missing()
+		}
 		app.report_missing_compatibility_compiler()
 		if !app.overlay_is_shared(temp_project_dir) {
 			cleanup_compilation_temp(temp_project_dir, singlefile_tmppath)
@@ -3750,6 +3853,9 @@ fn (mut app App) run_v_line_info_once(method Method, path string, line_info stri
 		log('no compiler serves -line-info; falling back to the index')
 		app.line_info_mode = .missing
 		app.line_info_unavailable = true
+		if mut flag := app.line_info_cancel {
+			flag.record_line_info_missing()
+		}
 		app.report_missing_compatibility_compiler()
 		if !app.overlay_is_shared(temp_project_dir) {
 			cleanup_compilation_temp(temp_project_dir, singlefile_tmppath)

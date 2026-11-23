@@ -789,6 +789,55 @@ fn test_a_disk_create_refreshes_the_owned_directory_of_an_existing_program_copy(
 	assert os.read_file(os.join_path(copy_dir, 'new.v'))! == new_content
 }
 
+fn refresh_held_files_and_report(mut pool DiagnosticsServerPool, done chan bool) {
+	pool.refresh_held_files_in_copies()
+	done <- true
+}
+
+fn test_refresh_held_files_waits_for_the_program_copy_lock() {
+	// A watcher refresh must not mutate the shared held-file map or replace
+	// files while a V3 query holds the program copy's mutex and reads the same
+	// overlay. The refresh takes that lock per program, so it waits.
+	mut app, fake := fake_v3_app('refresh_lock', fake_v3_query_server, 'VLS_DIAGNOSTICS_SERVER')!
+	defer {
+		stop_fake_v3_app(mut app, fake)
+	}
+	main_path := os.join_path(fake.project, 'main.v')
+	app.v3_line_info(.hover, path_to_uri(main_path), main_path, '4:hv^2') or {}
+	mut pool := app.v3_query_pool()
+	mut program := pool.program_copy(os.dir(main_path))
+	assert program.built, 'the copy was built by the query'
+	// Change a held file on disk so the refresh has work to do.
+	other_path := os.join_path(fake.project, 'other.v')
+	os.write_file(other_path, 'module main\n\nfn other() {\n\tq := 3\n\tprintln(q)\n}\n')!
+	program.mutex.lock()
+	done := chan bool{cap: 1}
+	spawn refresh_held_files_and_report(mut pool, done)
+	// While the query holds the lock, the refresh must not complete.
+	select {
+		_ := <-done {
+			assert false, 'the refresh ran while the program copy was locked'
+		}
+		200 * time.millisecond {
+		}
+	}
+	program.mutex.unlock()
+	// Once released, the refresh completes and re-takes the changed file.
+	select {
+		_ := <-done {
+		}
+		5 * time.second {
+			assert false, 'the refresh did not complete after the lock was released'
+		}
+	}
+	program.mutex.lock()
+	defer {
+		program.mutex.unlock()
+	}
+	copy_other := os.join_path(program.project.overlay.temp_root, 'other.v')
+	assert os.read_file(copy_other)! == os.read_file(other_path)!, 'the held file was re-taken'
+}
+
 fn test_a_test_file_is_asked_as_a_program_of_its_own() {
 	mut app, fake := fake_v3_app('test_file', fake_v3_notes_targets, 'VLS_V_COMMAND')!
 	defer {
