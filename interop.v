@@ -3068,6 +3068,14 @@ fn (mut app App) on_did_change_watched_files(request Request) {
 		// on its size, inode and mtime.
 		if change.event_type == 1 || change.event_type == 3 {
 			app.forget_project_files_in(uri_to_path(change.uri))
+			// The worker fingerprint memo holds a listing and per-file hashes;
+			// both can go stale when a file appears or disappears. A content
+			// change needs no clear: the per-file stat gate detects it.
+			if mut scheduler := app.diagnostics_scheduler {
+				scheduler.mutex.lock()
+				scheduler.forget_diagnostics_memo()
+				scheduler.mutex.unlock()
+			}
 		}
 	}
 	open_uris_by_path := app.open_index_uris_by_path()

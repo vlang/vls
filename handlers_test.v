@@ -864,6 +864,39 @@ fn test_diagnostics_scheduler_requeues_job_after_watched_file_change() {
 	assert new_job_a.project_generations[app.generation_key(uri_a)] > old_cache_generation
 }
 
+fn test_diagnostics_fingerprint_memo_invalidation() {
+	mut scheduler := new_diagnostics_scheduler()
+	scheduler.file_list_cache['/root'] = FileListEntry{
+		files:    ['/root/a.v']
+		at_ms:    1
+		complete: true
+		valid:    true
+	}
+	scheduler.content_memo['/root/a.v'] = ContentMemo{
+		valid: true
+		hash:  7
+		len:   3
+		inode: 1
+		size:  3
+		mtime: 1
+	}
+	scheduler.diag_disk_roots['/root'] = true
+	epoch := scheduler.memo_epoch
+
+	warm_files := scheduler.file_list_cache.clone()
+	assert '/root' in warm_files
+	assert '/root/a.v' in scheduler.content_memo
+
+	scheduler.forget_diagnostics_memo()
+	assert scheduler.memo_epoch == epoch + 1
+	assert scheduler.file_list_cache.len == 0
+	assert scheduler.content_memo.len == 0
+	assert scheduler.diag_disk_roots.len == 0
+	// A worker that started before the change keeps its private copies; the
+	// epoch guard in run_diagnostics_job discards them at write-back.
+	assert '/root' in warm_files
+}
+
 fn test_watcher_change_only_fast_checks_the_changed_document() {
 	mut app := create_test_app()
 	defer {

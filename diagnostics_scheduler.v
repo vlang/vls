@@ -98,6 +98,24 @@ mut:
 	// can look at the queue a change leaves, which a check started at once
 	// would empty.
 	paused bool
+	// Fingerprint memo kept between slow jobs. Each worker gets a private copy
+	// and hands its warm copy back when it finishes; a watcher event clears the
+	// memo and bumps the epoch, so a job that started before the change cannot
+	// put its stale listing back. Both maps are advisory: content entries are
+	// gated by size/inode/mtime and listings have a TTL.
+	memo_epoch      u64
+	file_list_cache map[string]FileListEntry
+	content_memo    map[string]ContentMemo
+	diag_disk_roots map[string]bool
+}
+
+// forget_diagnostics_memo invalidates the fingerprint memo after a disk
+// change. Caller must hold scheduler.mutex.
+fn (mut scheduler DiagnosticsScheduler) forget_diagnostics_memo() {
+	scheduler.memo_epoch++
+	scheduler.file_list_cache = map[string]FileListEntry{}
+	scheduler.content_memo = map[string]ContentMemo{}
+	scheduler.diag_disk_roots = map[string]bool{}
 }
 
 fn new_diagnostics_scheduler() &DiagnosticsScheduler {
@@ -702,6 +720,16 @@ fn run_diagnostics_job(mut scheduler DiagnosticsScheduler, job DiagnosticsJob) {
 	if version := job.version {
 		versions[job.uri] = version
 	}
+	// Start from the scheduler's warm fingerprint memo instead of building a
+	// cold listing and re-reading every project file on each job. The worker
+	// owns private copies; a watcher event clears the shared memo and bumps the
+	// epoch, so a stale job cannot put its old entries back.
+	scheduler.mutex.lock()
+	memo_epoch := scheduler.memo_epoch
+	warm_files := scheduler.file_list_cache.clone()
+	warm_content := scheduler.content_memo.clone()
+	warm_disk_roots := scheduler.diag_disk_roots.clone()
+	scheduler.mutex.unlock()
 	mut worker := App{
 		text:                  job.content
 		open_files:            job.open_files
@@ -716,6 +744,9 @@ fn run_diagnostics_job(mut scheduler DiagnosticsScheduler, job DiagnosticsJob) {
 		tcp_conn:              job.tcp_conn
 		diagnostics_servers:   scheduler.servers
 		v3_query_servers:      scheduler.servers
+		file_list_cache:       warm_files
+		content_memo:          warm_content
+		diag_disk_roots:       warm_disk_roots
 		// A change that arrives while this check runs stops it: its answer would
 		// be stale, and the newer check can start at once.
 		diagnostics_cancelled: fn [mut scheduler, job] () bool {
@@ -726,6 +757,15 @@ fn run_diagnostics_job(mut scheduler DiagnosticsScheduler, job DiagnosticsJob) {
 		diagnostics_partial:   fn [mut scheduler, job] (uri string, found CheckErrors) {
 			scheduler.publish_partial(job, uri, found)
 		}
+	}
+	defer {
+		scheduler.mutex.lock()
+		if scheduler.memo_epoch == memo_epoch {
+			scheduler.file_list_cache = worker.file_list_cache.move()
+			scheduler.content_memo = worker.content_memo.move()
+			scheduler.diag_disk_roots = worker.diag_disk_roots.move()
+		}
+		scheduler.mutex.unlock()
 	}
 	notification := worker.build_diagnostics_notification(job.uri, job.content)
 	// Publish the exact diagnostic items and update the pull cache under the
