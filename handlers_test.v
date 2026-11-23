@@ -9717,6 +9717,132 @@ fn test_document_highlight_separates_same_line_shadowed_bindings() {
 	assert inner_starts == ['${use_line}:${inner_decl_col}', '${use_line}:${inner_use_col}'], 'the inner highlight keeps only the inner binding: ${inner_starts}'
 }
 
+fn test_occurrence_is_field_label() {
+	assert occurrence_is_field_label('count: 2', 5), 'colon suffix is a label'
+	assert occurrence_is_field_label('count : 2', 5), 'spaced colon is a label'
+	assert !occurrence_is_field_label('count := 1', 5), 'declaration is not a label'
+	assert !occurrence_is_field_label('count', 5), 'bare use is not a label'
+	assert !occurrence_is_field_label('println(count)', 13), 'call use is not a label'
+}
+
+fn test_semantic_scan_excludes_struct_field_labels() {
+	// A local `count` and a struct-literal label `count:` share the same
+	// visible locals, but the label references the field. The fast path must
+	// leave it to compiler verification instead of accepting it as a local.
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	app.capture_output = true
+	content := 'module main\n\nstruct S {\n\tcount int\n}\n\nfn main() {\n\tcount := 1\n\tx := S{\n\t\tcount: 2\n\t}\n\tprintln(count)\n}\n'
+	test_dir := os.join_path(app.temp_dir, 'field_label_scan')
+	must_mkdir_all(test_dir)
+	main_file := os.join_path(test_dir, 'main.v')
+	must_write_file(main_file, content)
+	uri := path_to_uri(main_file)
+	app.open_files[uri] = content
+	lines := content.split_into_lines()
+	use_line := lines.index('\tprintln(count)')
+	assert use_line >= 0
+	use_col := lines[use_line].index('count)') or { -1 }
+	assert use_col >= 0
+	label_line := lines.index('\t\tcount: 2')
+	assert label_line >= 0
+	label_col := lines[label_line].index('count') or { -1 }
+	assert label_col >= 0
+	scope := app.index_scope_for_uri(uri)
+	anchor := Location{
+		uri:   uri
+		range: LSPRange{
+			start: Position{
+				line: use_line
+				char: use_col
+			}
+		}
+	}
+	refs := app.search_symbol_in_dirs_semantic('count', anchor, scope, 0, true)
+	mut starts := []string{}
+	for loc in refs {
+		starts << '${loc.range.start.line}:${loc.range.start.char}'
+	}
+	assert !starts.any(it.starts_with('${label_line}:')), 'field label is not a local reference: ${starts}'
+}
+
+fn test_document_highlight_excludes_struct_field_labels() {
+	// Highlighting a local must not mix in the struct-literal label of the
+	// same name, which references the field instead.
+	mut app := create_test_app()
+	defer {
+		cleanup_test_app(app)
+	}
+	content := 'module main\n\nstruct S {\n\tcount int\n}\n\nfn main() {\n\tcount := 1\n\tx := S{\n\t\tcount: 2\n\t}\n\tprintln(count)\n}\n'
+	test_dir := os.join_path(app.temp_dir, 'field_label_highlight')
+	must_mkdir_all(test_dir)
+	test_file := os.join_path(test_dir, 'main.v')
+	must_write_file(test_file, content)
+	uri := path_to_uri(test_file)
+	app.open_files[uri] = content
+	lines := content.split_into_lines()
+	use_line := lines.index('\tprintln(count)')
+	assert use_line >= 0
+	use_col := lines[use_line].index('count)') or { -1 }
+	assert use_col >= 0
+	label_line := lines.index('\t\tcount: 2')
+	assert label_line >= 0
+	response := app.handle_document_highlight(Request{
+		id:     909
+		method: 'textDocument/documentHighlight'
+		params: json2.encode(DocumentHighlightParams{
+			text_document: TextDocumentIdentifier{
+				uri: uri
+			}
+			position:      Position{
+				line: use_line
+				char: use_col
+			}
+		},
+			escape_unicode: true
+		)
+	})
+	assert response.result is []DocumentHighlight
+	mut starts := []string{}
+	for highlight in (response.result as []DocumentHighlight) {
+		starts << '${highlight.range.start.line}:${highlight.range.start.char}'
+	}
+	assert !starts.any(it.starts_with('${label_line}:')), 'field label is not highlighted as a local: ${starts}'
+}
+
+fn test_config_fingerprint_ttl_recomputes_without_watcher() {
+	// Without watcher notifications the memo would otherwise keep an old
+	// server in use indefinitely after a `v.mod` edit. Entries older than the
+	// TTL are recomputed.
+	root := os.join_path(os.temp_dir(), 'vls_config_ttl_${os.getpid()}')
+	os.mkdir_all(root) or { assert false, 'mkdir failed: ${err}' }
+	defer {
+		os.rmdir_all(root) or {}
+	}
+	vmod := os.join_path(root, 'v.mod')
+	os.write_file(vmod, 'Module { name: a }') or { assert false, 'write failed: ${err}' }
+	mut pool := new_shared_diagnostics_server_pool()
+	defer {
+		pool.stop_all()
+	}
+	first := pool.cached_config_fingerprint(root)
+	os.write_file(vmod, 'Module { name: a_longer_name_to_change_size }') or {
+		assert false, 'rewrite failed: ${err}'
+	}
+	// Within the TTL the memo still wins, preserving the perf benefit.
+	assert pool.cached_config_fingerprint(root) == first, 'memo holds within TTL'
+	// After the TTL the changed `v.mod` is picked up again.
+	pool.config_fingerprint_ms[root] = time.now().unix_milli() - config_fingerprint_ttl_ms - 1
+	second := pool.cached_config_fingerprint(root)
+	assert second != first, 'expired memo recomputes: ${first} vs ${second}'
+	assert second == project_config_fingerprint(root), 'recomputed value matches disk'
+	pool.forget_config_fingerprints()
+	assert pool.config_fingerprints.len == 0, 'forget clears fingerprints'
+	assert pool.config_fingerprint_ms.len == 0, 'forget clears timestamps'
+}
+
 fn test_closure_parameters_are_scoped_local_completions() {
 	mut app := create_test_app()
 	defer {

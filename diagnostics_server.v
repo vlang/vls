@@ -44,7 +44,19 @@ mut:
 	// and every question; without this map that is up to 64 ancestor stats
 	// per request. Guarded by mutex, like the rest of the pool state.
 	config_fingerprints map[string]string
+	// When each config fingerprint was taken, under the same lock. The memo is
+	// only invalidated by watched-file events, so without notifications (a
+	// client that does not support watchers, or a disk edit without one) it
+	// would otherwise stay stale indefinitely and keep an old server in use.
+	// Entries older than config_fingerprint_ttl_ms are recomputed.
+	config_fingerprint_ms map[string]i64
 }
+
+// config_fingerprint_ttl_ms bounds how long a cached config fingerprint is
+// trusted without a watcher invalidation. It matches the index refresh
+// interval: without notifications a `v.mod` or `.vvmrc` edit is picked up on
+// the next request after this delay instead of never.
+const config_fingerprint_ttl_ms = i64(10_000)
 
 // ProgramCopy is the copy of a program that the checks and the questions of an
 // editor share, by program directory: a request holds its lock while it writes
@@ -634,13 +646,21 @@ fn (mut s DiagnosticsServer) read_until_or_cancel(marker string, timeout_ms int,
 }
 
 // cached_config_fingerprint memoizes the config fingerprint between watcher
-// notifications. The caller must hold pool.mutex.
+// notifications. The caller must hold pool.mutex. Entries older than
+// config_fingerprint_ttl_ms are recomputed, so a `v.mod` or `.vvmrc` edit
+// without a notification (no watcher support) still starts a new server
+// within the TTL instead of reusing the old one indefinitely.
 fn (mut pool DiagnosticsServerPool) cached_config_fingerprint(dir string) string {
-	if dir in pool.config_fingerprints {
-		return pool.config_fingerprints[dir]
+	if fingerprint := pool.config_fingerprints[dir] {
+		if taken_ms := pool.config_fingerprint_ms[dir] {
+			if time.now().unix_milli() - taken_ms < config_fingerprint_ttl_ms {
+				return fingerprint
+			}
+		}
 	}
 	fingerprint := project_config_fingerprint(dir)
 	pool.config_fingerprints[dir] = fingerprint
+	pool.config_fingerprint_ms[dir] = time.now().unix_milli()
 	return fingerprint
 }
 
@@ -648,6 +668,7 @@ fn (mut pool DiagnosticsServerPool) cached_config_fingerprint(dir string) string
 // v.mod or .vvmrc starts a new compiler server. Caller must hold pool.mutex.
 fn (mut pool DiagnosticsServerPool) forget_config_fingerprints() {
 	pool.config_fingerprints = map[string]string{}
+	pool.config_fingerprint_ms = map[string]i64{}
 }
 
 // project_config_fingerprint names the v.mod and .vvmrc files the compiler

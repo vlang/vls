@@ -249,6 +249,10 @@ fn (mut app App) handle_document_highlight(request Request) Response {
 		|| is_fn_parameter_highlight(line_text, cursor_start_byte, cursor_end_byte)
 	cursor_scope_unknown := is_loop_binding_occurrence(lines, params.position.line,
 		cursor_start_byte, cursor_end_byte)
+	// The cursor itself may sit on a struct-literal or named-argument label.
+	// Such a label is not a local reference even when its visible locals match,
+	// so leave every candidate to compiler verification.
+	cursor_is_field_label := occurrence_is_field_label(line_text, cursor_end_byte)
 	mut anchor_cache := map[string]?Location{}
 	if a := anchor {
 		// The initial lookup already resolved the selected occurrence.
@@ -262,6 +266,22 @@ fn (mut app App) handle_document_highlight(request Request) Response {
 		line := lines[candidate.line_idx]
 		start_char := byte_to_encoded_col(line, candidate.start_byte, app.position_encoding)
 		end_char := byte_to_encoded_col(line, candidate.end_byte, app.position_encoding)
+		if cursor_is_field_label {
+			ambiguous << Location{
+				uri:   uri
+				range: LSPRange{
+					start: Position{
+						line: candidate.line_idx
+						char: start_char
+					}
+					end:   Position{
+						line: candidate.line_idx
+						char: start_char
+					}
+				}
+			}
+			continue
+		}
 		if accept := app.highlight_candidate_fast(content, lines, symbol, params.position.line, cursor_start_byte, cursor_keys, cursor_has_member, cursor_is_decl, had_index_anchor, candidate.line_idx, start_char, end_char, line, candidate.start_byte, candidate.end_byte, cursor_scope_unknown) {
 			fast_decisions[anchor_cache_key(uri, candidate.line_idx, start_char)] = accept
 		} else {
@@ -429,6 +449,12 @@ fn (app &App) highlight_candidate_fast(content string, lines []string, symbol st
 	}
 	_, cand_member, _ := member_qualifier_at_cursor(line_text, end_char, app.position_encoding)
 	if cand_member {
+		return none
+	}
+	// A struct-literal or named-argument label shares the visible locals of a
+	// same-named local but references the field. Leave it to compiler
+	// verification instead of highlighting it as a local use.
+	if occurrence_is_field_label(line_text, end_byte) {
 		return none
 	}
 	cand_pos := Position{

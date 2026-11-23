@@ -6204,6 +6204,19 @@ fn source_occurrence_has_colon_suffix(line string, end_byte int) bool {
 	return suffix_byte < line.len && line[suffix_byte] == `:`
 }
 
+// occurrence_is_field_label reports whether the identifier ending at `end_byte`
+// is a struct-literal or named-argument label (`count:` in `S{count: 2}`): a
+// colon suffix that is not a declaration (`:=`). Such a label shares the
+// visible local bindings of a same-named local but references the field, so
+// the local fast paths must leave it to compiler verification.
+fn occurrence_is_field_label(line string, end_byte int) bool {
+	if end_byte < 0 || end_byte > line.len {
+		return false
+	}
+	after := line[end_byte..].trim_left(' \t')
+	return after.starts_with(':') && !after.starts_with(':=')
+}
+
 fn source_occurrence_has_dot_suffix(line string, end_byte int) bool {
 	if end_byte < 0 || end_byte > line.len {
 		return false
@@ -8701,6 +8714,13 @@ fn (mut app App) semantic_candidate_fast(symbol string, anchor Location, anchor_
 	if is_loop_binding_occurrence(snap.lines, cand_pos.line, start_byte, end_byte) {
 		return none
 	}
+	// A struct-literal or named-argument label (`count:` in `S{count: 2}`)
+	// shares the visible locals of a same-named local but references the
+	// field. Leave it to compiler verification instead of accepting it as a
+	// local use.
+	if occurrence_is_field_label(line_text, end_byte) {
+		return none
+	}
 	if cand.uri == anchor.uri {
 		cand_keys := app.visible_binding_keys(snap.lines, cand_pos, symbol)
 		cand_is_decl := !source_occurrence_is_method_declaration(snap.lines, cand_pos.line, start_byte)
@@ -8850,6 +8870,11 @@ fn (mut app App) search_symbol_in_dirs_semantic(symbol string, anchor Location, 
 			|| is_fn_parameter_highlight(anchor_line_text, anchor_start_byte, anchor_end_byte))
 	anchor_scope_unknown := is_loop_binding_occurrence(anchor_lines, anchor.range.start.line,
 		anchor_start_byte, anchor_end_byte)
+	// The anchor itself may be a struct-literal or named-argument label. Such
+	// a label is not a local reference even when its visible locals match, so
+	// leave every candidate to compiler verification.
+	anchor_is_field_label := anchor_end_byte >= 0
+		&& occurrence_is_field_label(anchor_line_text, anchor_end_byte)
 	mut file_snaps := map[string]SemanticFileSnapshot{}
 	mut fast_decisions := map[string]?bool{}
 	mut ambiguous := []Location{}
@@ -8864,6 +8889,10 @@ fn (mut app App) search_symbol_in_dirs_semantic(symbol string, anchor Location, 
 		// location. The candidate is nevertheless safe when its indexed position
 		// is the canonical anchor returned for the user's selected occurrence.
 		if same_anchor_location(cand, anchor) {
+			continue
+		}
+		if anchor_is_field_label {
+			ambiguous << cand
 			continue
 		}
 		if fast := app.semantic_candidate_fast(symbol, anchor, anchor_keys, anchor_member, anchor_is_decl, anchor_start_byte, cand, mut file_snaps, anchor_scope_unknown) {
