@@ -247,6 +247,8 @@ fn (mut app App) handle_document_highlight(request Request) Response {
 	}
 	cursor_is_decl := source_occurrence_precedes_local_declaration(lines, params.position.line, cursor_end_byte)
 		|| is_fn_parameter_highlight(line_text, cursor_start_byte, cursor_end_byte)
+	cursor_scope_unknown := is_loop_binding_occurrence(lines, params.position.line,
+		cursor_start_byte, cursor_end_byte)
 	mut anchor_cache := map[string]?Location{}
 	if a := anchor {
 		// The initial lookup already resolved the selected occurrence.
@@ -260,7 +262,7 @@ fn (mut app App) handle_document_highlight(request Request) Response {
 		line := lines[candidate.line_idx]
 		start_char := byte_to_encoded_col(line, candidate.start_byte, app.position_encoding)
 		end_char := byte_to_encoded_col(line, candidate.end_byte, app.position_encoding)
-		if accept := app.highlight_candidate_fast(content, lines, symbol, params.position.line, cursor_start_byte, cursor_keys, cursor_has_member, cursor_is_decl, had_index_anchor, candidate.line_idx, start_char, end_char, line, candidate.start_byte, candidate.end_byte) {
+		if accept := app.highlight_candidate_fast(content, lines, symbol, params.position.line, cursor_start_byte, cursor_keys, cursor_has_member, cursor_is_decl, had_index_anchor, candidate.line_idx, start_char, end_char, line, candidate.start_byte, candidate.end_byte, cursor_scope_unknown) {
 			fast_decisions[anchor_cache_key(uri, candidate.line_idx, start_char)] = accept
 		} else {
 			ambiguous << Location{
@@ -417,8 +419,9 @@ fn highlight_candidate_is_top_level(lines []string, line_text string, line_idx i
 // identity instead: a line alone cannot tell same-line shadowing declarations
 // apart. Bare top-level uses additionally require an index anchor and a
 // top-level-safe position.
-fn (app &App) highlight_candidate_fast(content string, lines []string, symbol string, cursor_line int, cursor_start_byte int, cursor_keys map[string]int, cursor_member bool, cursor_is_decl bool, index_anchor bool, cand_line int, start_char int, end_char int, line_text string, start_byte int, end_byte int) ?bool {
-	if symbol == 'it' || symbol == 'err' {
+fn (app &App) highlight_candidate_fast(content string, lines []string, symbol string, cursor_line int, cursor_start_byte int, cursor_keys map[string]int, cursor_member bool, cursor_is_decl bool, index_anchor bool, cand_line int, start_char int, end_char int, line_text string, start_byte int, end_byte int, cursor_scope_unknown bool) ?bool {
+	if symbol == 'it' || symbol == 'err' || cursor_scope_unknown
+		|| is_loop_binding_occurrence(lines, cand_line, start_byte, end_byte) {
 		return none
 	}
 	if cursor_member {

@@ -424,6 +424,12 @@ fn (mut app App) hover_with_written_declaration(uri string, position Position, r
 // it is used; anything else what the compiler says of it, with the
 // documentation of its own declaration. `line_info` asks the hover.
 fn (mut app App) hover_result(uri string, position Position, line_info string) ResponseResult {
+	// Real hovers reach v3_hover / run_v_line_info_once directly, bypassing
+	// run_v_line_info. Record the probe here too, or a session that only ever
+	// hovers keeps every later miss on the request loop.
+	defer {
+		app.line_info_probe_done = true
+	}
 	real_path := uri_to_path(uri)
 	// No flush here: every read below answers from the buffer or the index,
 	// never from the overlay a pending slow check would publish. v3_hover
@@ -8609,6 +8615,26 @@ struct SemanticFileSnapshot {
 	lines   []string
 }
 
+// is_loop_binding_occurrence reports whether the occurrence at
+// [start_byte, end_byte) on `line_idx` is the `item` of a `for item in items`
+// binding. Loop bindings are not returned by local_scope_bindings, so the
+// binding-set fast path cannot decide them and callers must defer.
+fn is_loop_binding_occurrence(lines []string, line_idx int, start_byte int, end_byte int) bool {
+	if line_idx < 0 || line_idx >= lines.len || start_byte < 0 || end_byte > lines[line_idx].len
+		|| end_byte <= start_byte {
+		return false
+	}
+	line := lines[line_idx]
+	before := line[..start_byte]
+	after := line[end_byte..]
+	if !after.trim_space().starts_with('in') {
+		return false
+	}
+	idx := before.last_index('for ') or { return false }
+	between := before[idx + 4..].trim_space()
+	return between == '' || between.ends_with(',')
+}
+
 // visible_binding_keys returns the set of same-named local bindings visible at
 // `pos`, keyed by declaration identity. Two occurrences reference the same
 // local exactly when these sets single out the same declaration.
@@ -8629,8 +8655,8 @@ fn (app &App) visible_binding_keys(content string, pos Position, symbol string) 
 // by (line, column) identity instead, since a line alone cannot tell same-line
 // shadowing declarations apart. Bare top-level uses additionally require an
 // index-resolved declaration matching the anchor.
-fn (mut app App) semantic_candidate_fast(symbol string, anchor Location, anchor_keys map[string]int, anchor_member bool, anchor_is_decl bool, anchor_start_byte int, cand Location, mut file_snaps map[string]SemanticFileSnapshot) ?bool {
-	if symbol == 'it' || symbol == 'err' {
+fn (mut app App) semantic_candidate_fast(symbol string, anchor Location, anchor_keys map[string]int, anchor_member bool, anchor_is_decl bool, anchor_start_byte int, cand Location, mut file_snaps map[string]SemanticFileSnapshot, anchor_scope_unknown bool) ?bool {
+	if symbol == 'it' || symbol == 'err' || anchor_scope_unknown {
 		return none
 	}
 	if anchor_member {
@@ -8660,6 +8686,9 @@ fn (mut app App) semantic_candidate_fast(symbol string, anchor Location, anchor_
 	}
 	start_byte := encoded_col_to_byte(line_text, cand_pos.char, app.position_encoding)
 	end_byte := encoded_col_to_byte(line_text, cand.range.end.char, app.position_encoding)
+	if is_loop_binding_occurrence(snap.lines, cand_pos.line, start_byte, end_byte) {
+		return none
+	}
 	if cand.uri == anchor.uri {
 		cand_keys := app.visible_binding_keys(snap.content, cand_pos, symbol)
 		cand_is_decl := !source_occurrence_is_method_declaration(snap.lines, cand_pos.line, start_byte)
@@ -8790,14 +8819,25 @@ fn (mut app App) search_symbol_in_dirs_semantic(symbol string, anchor Location, 
 	} else {
 		encoded_col_to_byte(anchor_line_text, anchor.range.start.char, app.position_encoding)
 	}
+	// Compiler locations are zero-width. Recover the identifier's real end so
+	// declaration detection sees the token instead of the position before it.
+	mut anchor_end_col := anchor.range.end.char
+	if anchor_line_text != '' && anchor_end_col <= anchor.range.start.char {
+		_, token_end_col := find_word_bounds_at_col(anchor_line_text, anchor.range.start.char, app.position_encoding)
+		if token_end_col > anchor.range.start.char {
+			anchor_end_col = token_end_col
+		}
+	}
 	anchor_end_byte := if anchor_line_text == '' {
 		-1
 	} else {
-		encoded_col_to_byte(anchor_line_text, anchor.range.end.char, app.position_encoding)
+		encoded_col_to_byte(anchor_line_text, anchor_end_col, app.position_encoding)
 	}
 	anchor_is_decl := anchor_start_byte >= 0
 		&& (source_occurrence_precedes_local_declaration(anchor_lines, anchor.range.start.line, anchor_end_byte)
 			|| is_fn_parameter_highlight(anchor_line_text, anchor_start_byte, anchor_end_byte))
+	anchor_scope_unknown := is_loop_binding_occurrence(anchor_lines, anchor.range.start.line,
+		anchor_start_byte, anchor_end_byte)
 	mut file_snaps := map[string]SemanticFileSnapshot{}
 	mut fast_decisions := map[string]?bool{}
 	mut ambiguous := []Location{}
@@ -8814,7 +8854,7 @@ fn (mut app App) search_symbol_in_dirs_semantic(symbol string, anchor Location, 
 		if same_anchor_location(cand, anchor) {
 			continue
 		}
-		if fast := app.semantic_candidate_fast(symbol, anchor, anchor_keys, anchor_member, anchor_is_decl, anchor_start_byte, cand, mut file_snaps) {
+		if fast := app.semantic_candidate_fast(symbol, anchor, anchor_keys, anchor_member, anchor_is_decl, anchor_start_byte, cand, mut file_snaps, anchor_scope_unknown) {
 			fast_decisions[anchor_cache_key(cand.uri, cand.range.start.line, cand.range.start.char)] = fast
 		} else {
 			ambiguous << cand

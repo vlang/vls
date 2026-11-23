@@ -237,7 +237,7 @@ fn (mut app App) v3_run(project V3QueryProject, specs []string, target string) ?
 	// A bare `-line-info` lets the default checker answer first.
 	mut argv := build_v_check_args(target, is_library)
 	argv.insert(argv.len - 1, ['-line-info', question])
-	x := run_v_argv(argv, project.overlay.temp_work_dir)
+	x := run_v_argv_cancellable(argv, project.overlay.temp_work_dir, app.line_info_cancel)
 	if compiler_rejects_any_option(x.output, ['-line-info']) {
 		log('this V has no V3 that answers -line-info')
 		app.v3_one_shot_unsupported = true

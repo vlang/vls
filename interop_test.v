@@ -2891,7 +2891,7 @@ fn test_publish_diagnostics_params() {
 // ============================================================================
 
 // A current compiler answers `-line-info` itself: no refusal, no selector.
-const compat_matrix_modern_direct_stub = r'#!/bin/sh
+const line_info_and_check_stub = r'#!/bin/sh
 case " $* " in
   *"-line-info"*)
     [ "$#" -eq 7 ] && [ "$1" = "-w" ] && [ "$2" = "-check" ] &&

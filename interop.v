@@ -1303,12 +1303,24 @@ fn (mut app App) evict_expired_overlays(now_ms i64) {
 		if entry.temp_root != '' {
 			gc_roots << entry.temp_root
 		}
+		mut young := []RetiredOverlay{}
 		for retired in entry.retired {
 			if now_ms - retired.retired_ms > overlay_retired_ttl_ms() {
 				gc_roots << retired.root
+			} else {
+				// Still needed by an in-flight reader: keep the owner so a
+				// later pass (or session teardown) can delete it.
+				young << retired
 			}
 		}
-		store.entries.delete(key)
+		if young.len == 0 {
+			store.entries.delete(key)
+		} else {
+			mut kept := entry
+			kept.temp_root = ''
+			kept.retired = young
+			store.entries[key] = kept
+		}
 	}
 	store.mutex.unlock()
 	for root in gc_roots {
@@ -1367,12 +1379,11 @@ fn (mut app App) drop_all_overlays() {
 
 // invalidate_overlay_for_disk_change marks the cached overlay entries that
 // hold `changed_path` stale, so the next request rebuilds the symlinked tree
-// instead of refreshing a tree that no longer lists what is on disk. A change
-// to a file's content needs nothing (a symlink shows it, a buffered file is
-// rewritten from what the editor holds), but a file created or deleted
-// changes the tree itself: the tracked set only covers open buffers, so
-// without this a hot entry would keep serving its old listing until its
-// build-anchored TTL expires. Hits never refresh that deadline.
+// instead of serving a stale listing or stale materialized bytes. The tracked
+// set only covers open buffers: local imports are materialized as links or
+// copies, so a closed file's content change can leave a hard link pointing at
+// the old inode. Hits never refresh the build-anchored TTL, so without this a
+// hot entry would keep serving old source indefinitely.
 fn (mut app App) invalidate_overlay_for_disk_change(changed_path string) {
 	mut store := app.overlay_cache_store or { return }
 	changed := normalize_overlay_path(changed_path)
@@ -3060,11 +3071,11 @@ fn (mut app App) on_did_change_watched_files(request Request) {
 			app.diag_cache.delete(event_uri)
 		}
 		app.v3_query_notice_disk_change(uri_to_path(event_uri), change.event_type)
-		// A file created or deleted changes the compilation overlay's
-		// symlinked tree itself; without this the cache keeps refreshing a
-		// tree that no longer lists what is on disk. Content changes need
-		// nothing: the tree links the file or holds the editor's buffer.
-		if change.event_type == 1 || change.event_type == 3 {
+		// A create/delete changes the overlay's tree itself. A content change
+		// of a closed file matters too: local imports are materialized as hard
+		// links or copies, so a shared-cache hit can keep serving stale bytes
+		// until its build-anchored TTL expires. Rebuild on all three.
+		if change.event_type == 1 || change.event_type == 2 || change.event_type == 3 {
 			app.invalidate_overlay_for_disk_change(uri_to_path(event_uri))
 		}
 		match change.event_type {

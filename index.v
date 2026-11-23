@@ -889,7 +889,12 @@ fn (mut app App) ensure_dir_shallow_indexed(dir string) {
 	// is built lazily so the common walk never pays for it.
 	mut open_lexical := map[string]string{}
 	for uri, _ in app.open_files {
-		open_lexical[lexical_index_path(uri_to_path(uri))] = uri
+		open_path := uri_to_path(uri)
+		open_lexical[lexical_index_path(open_path)] = uri
+		// A parent directory alias (not just a symlink leaf) can make the walk
+		// see the same file under a different spelling. Index the canonical
+		// key too so that spelling still resolves to the open buffer.
+		open_lexical[normalized_index_path(open_path)] = uri
 	}
 	mut open_uris_by_path := map[string]string{}
 	mut open_uris_loaded := false
