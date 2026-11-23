@@ -3067,7 +3067,7 @@ fn (mut app App) on_did_change_watched_files(request Request) {
 		// walks; a file only changing does not, because the content memo gates
 		// on its size, inode and mtime.
 		if change.event_type == 1 || change.event_type == 3 {
-			app.forget_project_files()
+			app.forget_project_files_in(uri_to_path(change.uri))
 		}
 	}
 	open_uris_by_path := app.open_index_uris_by_path()

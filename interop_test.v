@@ -1247,6 +1247,29 @@ fn test_program_content_fingerprint_drops_the_listing_on_create_and_delete() {
 	assert app.file_list_cache.len == 0
 }
 
+fn test_program_content_fingerprint_keeps_other_roots_listing_on_create() {
+	root_a := os.join_path(os.temp_dir(), 'vls_fpscope_${os.getpid()}_${time.now().unix_nano()}')
+	root_b := '${root_a}_b'
+	interop_test_must_mkdir_all(root_a)
+	interop_test_must_mkdir_all(root_b)
+	defer {
+		os.rmdir_all(root_a) or {}
+		os.rmdir_all(root_b) or {}
+	}
+	interop_test_must_write_file(os.join_path(root_a, 'main.v'), 'module a\n\nfn main() {}\n')
+	interop_test_must_write_file(os.join_path(root_b, 'main.v'), 'module b\n\nfn main() {}\n')
+	mut app := App{}
+	_ := app.program_content_fingerprint(root_a)
+	_ := app.program_content_fingerprint(root_b)
+	assert root_a in app.file_list_cache && root_b in app.file_list_cache
+
+	app.forget_project_files_in(os.join_path(root_a, 'added.v'))
+	assert root_a !in app.file_list_cache, 'the changed root listing must be dropped'
+	// root_b only shares a prefix with root_a; the boundary-aware comparison
+	// must keep it, or every watcher event re-walks unrelated projects.
+	assert root_b in app.file_list_cache, 'an unrelated root listing must be kept'
+}
+
 fn test_diag_disk_cache_round_trip_and_rejections() {
 	previous := with_temp_diag_cache_dir('roundtrip')
 	defer {

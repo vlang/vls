@@ -1986,8 +1986,21 @@ fn matches_needle_at(s string, i int, needle string) bool {
 	return true
 }
 
+// framed_notification encodes and frames a notification without touching any
+// session or scheduler state. Callers that hold a lock can prepare the bytes
+// first and keep only the socket write inside the critical section.
+fn framed_notification(notification Notification) string {
+	content := json2.encode(notification, escape_unicode: true)
+	header := 'Content-Length: ${content.len}\r\n\r\n'
+	full_message := '${header}${content}'
+	if logging_is_enabled() {
+		log('SEND: ${full_message}')
+	}
+	return full_message
+}
+
 fn (mut app App) write_notification(notification Notification) {
-	app.send_framed(json2.encode(notification, escape_unicode: true))
+	app.write_data(framed_notification(notification))
 }
 
 fn (mut app App) accept_shutdown(id int) {

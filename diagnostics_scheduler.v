@@ -853,6 +853,9 @@ fn (mut scheduler DiagnosticsScheduler) retire_superseded_slow_jobs(completed Di
 // completed check, and an empty clearing publish all become the source of truth
 // for subsequent pull requests; a superseded job can do neither.
 fn (mut scheduler DiagnosticsScheduler) publish_if_current(mut app App, job DiagnosticsJob, notification Notification) bool {
+	// Encoding a diagnostics payload can be expensive; do it before taking the
+	// scheduler lock so it cannot stall pull requests or sibling publishes.
+	payload := framed_notification(notification)
 	scheduler.mutex.lock()
 	defer {
 		scheduler.mutex.unlock()
@@ -869,7 +872,7 @@ fn (mut scheduler DiagnosticsScheduler) publish_if_current(mut app App, job Diag
 		}
 		scheduler.fast_published.delete(uri)
 	}
-	app.write_notification(notification)
+	app.write_data(payload)
 	scheduler.diag_cache[uri] = DiagCacheEntry{
 		fingerprint:     'published'
 		published_items: notification.params.diagnostics.clone()
