@@ -187,15 +187,19 @@ fn (mut pool DiagnosticsServerPool) notice_disk_change(path string) {
 // link or by copy. A content change of a closed file leaves those materialized
 // bytes stale, so the next query would otherwise answer from the old source.
 fn (mut pool DiagnosticsServerPool) refresh_held_files_in_copies() {
+	mut projects := []V3QueryProject{}
 	pool.mutex.lock()
-	defer {
-		pool.mutex.unlock()
-	}
 	for key in pool.copies.keys() {
-		if mut program := pool.copies[key] {
-			program.project.refresh_held_files()
-			pool.copies[key] = program
+		if program := pool.copies[key] {
+			projects << program.project
 		}
+	}
+	pool.mutex.unlock()
+	// Do the file IO outside the pool lock. Each project's `held` map has
+	// shared backing storage, so refreshing the snapshot updates the live
+	// copy; ProgramCopy itself is never copied (it holds a mutex by value).
+	for mut project in projects {
+		project.refresh_held_files()
 	}
 }
 
