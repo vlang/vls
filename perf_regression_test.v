@@ -147,3 +147,80 @@ fn test_mem_occurrences_bounded() {
 	second := app.occurrences_for(evicted_uri)
 	assert first.len == second.len && first.len > 0, 'evicted occurrences must rebuild'
 }
+
+// test_perf_watcher_project_key_cache guards the watched-files path: a batch
+// of events asks for the same project keys many times. Without the explicit
+// cache every lookup walks all ancestors checking for v.mod and then calls
+// program_root, so the cost multiplies by the number of open buffers.
+fn test_perf_watcher_project_key_cache() {
+	root, _, _ := perf_regression_project(perf_regression_files)
+	defer {
+		perf_regression_cleanup(root)
+	}
+	deep := os.join_path(root, 'a', 'b', 'c', 'd')
+	os.mkdir_all(deep) or { panic(err) }
+	mut app := perf_reg_test_app()
+	app.workspace_roots << root
+	for i in 0 .. 30 {
+		p := os.join_path(deep, 'util${i}.v')
+		app.open_files[path_to_uri(p)] = 'module perfreg\n\npub fn scalefn${i}(a int) int { return a }\n'
+	}
+	uris := app.open_files.keys()
+	assert uris.len == 30
+
+	mut cache := map[string]string{}
+	for uri in uris {
+		assert app.generation_key(uri) == app.generation_key_cached(uri, mut cache), 'cached key differs'
+	}
+
+	uncached_start := time.now().unix_milli()
+	for _ in 0 .. 50 {
+		for uri in uris {
+			_ := app.generation_key(uri)
+		}
+	}
+	uncached_ms := time.now().unix_milli() - uncached_start
+
+	cached_start := time.now().unix_milli()
+	mut shared_cache := map[string]string{}
+	for _ in 0 .. 50 {
+		for uri in uris {
+			_ := app.generation_key_cached(uri, mut shared_cache)
+		}
+	}
+	cached_ms := time.now().unix_milli() - cached_start
+
+	assert cached_ms * 2 < uncached_ms, 'key cache not effective: ${cached_ms}ms vs ${uncached_ms}ms'
+}
+
+// test_perf_config_fingerprint_is_memoized guards every compiler request: the
+// fingerprint walks up to 64 ancestors checking v.mod and .vvmrc, and is asked
+// again on each check and each question until a watcher event invalidates it.
+fn test_perf_config_fingerprint_is_memoized() {
+	root, _, _ := perf_regression_project(perf_regression_files)
+	defer {
+		perf_regression_cleanup(root)
+	}
+	deep := os.join_path(root, 'a', 'b', 'c', 'd', 'e', 'f')
+	os.mkdir_all(deep) or { panic(err) }
+	expected := project_config_fingerprint(deep)
+	mut pool := new_shared_diagnostics_server_pool()
+	assert pool.cached_config_fingerprint(deep) == expected
+
+	uncached_start := time.now().unix_milli()
+	for _ in 0 .. 200 {
+		_ := project_config_fingerprint(deep)
+	}
+	uncached_ms := time.now().unix_milli() - uncached_start
+
+	cached_start := time.now().unix_milli()
+	for _ in 0 .. 200 {
+		_ := pool.cached_config_fingerprint(deep)
+	}
+	cached_ms := time.now().unix_milli() - cached_start
+
+	assert cached_ms * 2 < uncached_ms, 'config fingerprint memo not effective: ${cached_ms}ms vs ${uncached_ms}ms'
+	// Invalidation must make the next lookup see the current files again.
+	pool.forget_config_fingerprints()
+	assert pool.cached_config_fingerprint(deep) == expected
+}

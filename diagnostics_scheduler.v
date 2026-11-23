@@ -468,16 +468,23 @@ fn (mut app App) finish_diagnostics_project_schedule(mutation DiagnosticsProject
 // begin_diagnostics_project_mutation invalidates existing jobs before App state
 // changes. finish_diagnostics_project_mutation rebuilds them from fresh state.
 fn (mut app App) begin_diagnostics_project_mutation(uri string) DiagnosticsProjectMutation {
+	mut cache := map[string]string{}
+	return app.begin_diagnostics_project_mutation_cached(uri, mut cache)
+}
+
+// begin_diagnostics_project_mutation_cached reuses project keys already
+// computed during this notification; see generation_key_cached.
+fn (mut app App) begin_diagnostics_project_mutation_cached(uri string, mut cache map[string]string) DiagnosticsProjectMutation {
 	if mut scheduler := app.diagnostics_scheduler {
 		// The changed document's last published result no longer describes it.
 		// The schedule path drops its own document through the requested URI;
 		// this path carries none, so drop it here instead.
 		scheduler.forget_published_errors(uri)
-		project_key := app.generation_key(uri)
+		project_key := app.generation_key_cached(uri, mut cache)
 		return DiagnosticsProjectMutation{
 			project_key: project_key
-			tickets:     scheduler.begin_project_mutation(project_key, '', app.open_files_affected_by(uri,
-				project_key))
+			tickets:     scheduler.begin_project_mutation(project_key, '', app.open_files_affected_by_cached(uri,
+				project_key, mut cache))
 		}
 	}
 	return DiagnosticsProjectMutation{}
@@ -488,13 +495,18 @@ fn (mut app App) begin_diagnostics_project_mutation(uri string) DiagnosticsProje
 // and those of any program whose directory holds it, since creating, deleting or
 // renaming a file there decides whether an import resolves.
 fn (app &App) open_files_affected_by(uri string, project_key string) []string {
+	mut cache := map[string]string{}
+	return app.open_files_affected_by_cached(uri, project_key, mut cache)
+}
+
+fn (app &App) open_files_affected_by_cached(uri string, project_key string, mut cache map[string]string) []string {
 	changed := normalize_overlay_path(uri_to_path(uri))
 	mut affected := []string{}
 	for open_uri, _ in app.open_files {
 		if open_uri == uri {
 			continue
 		}
-		key := app.generation_key(open_uri)
+		key := app.generation_key_cached(open_uri, mut cache)
 		if key == project_key || path_is_within(changed, normalize_overlay_path(key)) {
 			affected << open_uri
 		}

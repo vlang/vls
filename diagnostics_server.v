@@ -39,6 +39,11 @@ mut:
 	// (V_DIAGNOSTICS_SHARED).
 	shared bool
 	copies map[string]&ProgramCopy
+	// Config fingerprints include file size and mtime, so they stay valid
+	// between watcher notifications. take_server asks for one on every check
+	// and every question; without this map that is up to 64 ancestor stats
+	// per request. Guarded by mutex, like the rest of the pool state.
+	config_fingerprints map[string]string
 }
 
 // ProgramCopy is the copy of a program that the checks and the questions of an
@@ -272,7 +277,6 @@ fn (mut pool DiagnosticsServerPool) request(exe string, args []string, work_dir 
 fn (mut pool DiagnosticsServerPool) take_server(key string, exe string, args []string, work_dir string) ?(&DiagnosticsServer, string) {
 	// The compiler reads v.mod and .vvmrc once, before it forks, so a server
 	// started before they changed can never answer again: a new one replaces it.
-	fingerprint := project_config_fingerprint(work_dir)
 	pool.mutex.lock()
 	defer {
 		pool.mutex.unlock()
@@ -280,6 +284,7 @@ fn (mut pool DiagnosticsServerPool) take_server(key string, exe string, args []s
 	if pool.closed {
 		return none
 	}
+	fingerprint := pool.cached_config_fingerprint(work_dir)
 	if pool.unsupported['${key}\n${fingerprint}'] {
 		return none
 	}
@@ -610,6 +615,23 @@ fn (mut s DiagnosticsServer) read_until_or_cancel(marker string, timeout_ms int,
 		}
 	}
 	return none
+}
+
+// cached_config_fingerprint memoizes the config fingerprint between watcher
+// notifications. The caller must hold pool.mutex.
+fn (mut pool DiagnosticsServerPool) cached_config_fingerprint(dir string) string {
+	if dir in pool.config_fingerprints {
+		return pool.config_fingerprints[dir]
+	}
+	fingerprint := project_config_fingerprint(dir)
+	pool.config_fingerprints[dir] = fingerprint
+	return fingerprint
+}
+
+// forget_config_fingerprints drops the memo after a disk change so a changed
+// v.mod or .vvmrc starts a new compiler server. Caller must hold pool.mutex.
+fn (mut pool DiagnosticsServerPool) forget_config_fingerprints() {
+	pool.config_fingerprints = map[string]string{}
 }
 
 // project_config_fingerprint names the v.mod and .vvmrc files the compiler

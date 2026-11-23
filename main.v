@@ -720,6 +720,8 @@ fn (mut app App) write_data(data string) {
 fn (mut app App) send_framed(content string) {
 	header := 'Content-Length: ${content.len}\r\n\r\n'
 	full_message := '${header}${content}'
+	// Building the log string copies the entire response body; skip it when
+	// logging is off (the default) so a large response is copied only once.
 	if logging_is_enabled() {
 		log('SEND: ${full_message}')
 	}
@@ -1082,7 +1084,11 @@ fn (mut app App) handle_requests[T](mut reader T) {
 		if content.len == 0 {
 			continue
 		}
-		log('\n\nRECV: ${content}')
+		// Interpolating the body copies the whole payload; do it only when
+		// somebody actually reads the log.
+		if logging_is_enabled() {
+			log('\n\nRECV: ${content}')
+		}
 		has_id := request_content_has_id(content)
 		// Preserve the exact id (numeric or string) so responses echo it
 		// verbatim; string ids would otherwise collapse to 0 (P0-02).
@@ -1110,7 +1116,9 @@ fn (mut app App) handle_requests[T](mut reader T) {
 				}
 				continue
 			}
-			log('Failed to decode JSON request: ${err.msg()}. Content: "${content}"')
+			if logging_is_enabled() {
+				log('Failed to decode JSON request: ${err.msg()}. Content: "${content}"')
+			}
 			app.current_request_raw_id = 'null'
 			app.write_error_response(make_parse_error_response(err.msg()))
 			continue
@@ -1131,7 +1139,9 @@ fn (mut app App) handle_requests[T](mut reader T) {
 		// capabilities or disappear without a parse error (P0-02).
 		if is_client_response_message(content) {
 			app.note_server_request_response(content)
-			log('Consumed client response to a server-initiated request: ${content}')
+			if logging_is_enabled() {
+				log('Consumed client response to a server-initiated request: ${content}')
+			}
 			continue
 		}
 		lsp_request := Request{
@@ -1140,7 +1150,9 @@ fn (mut app App) handle_requests[T](mut reader T) {
 			jsonrpc: body.jsonrpc
 			params:  body.params
 		}
-		log('\n\nRECV (pretty): ${content}')
+		if logging_is_enabled() {
+			log('\n\nRECV (pretty): ${content}')
+		}
 		method := Method.from_string(lsp_request.method)
 		log('method="${method}" request.method="${lsp_request.method}" ${method == .completion}')
 		// Enforce request/notification direction (P0-03): a message with an id
@@ -2658,14 +2670,29 @@ fn (mut app App) consume_cancelled_request(id int, raw_id string) bool {
 // import it — otherwise an importer keyed on its own directory would reuse
 // diagnostics computed against the imported module's old API (P1-06).
 fn (app &App) generation_key(uri string) string {
+	mut cache := map[string]string{}
+	return app.generation_key_cached(uri, mut cache)
+}
+
+// generation_key_cached is the same lookup with an explicit per-notification
+// cache. A watcher batch asks for the same handful of project keys many times;
+// each uncached lookup walks every ancestor directory checking for v.mod, plus
+// a program_root lookup, so the cache removes two stats per ancestor level.
+fn (app &App) generation_key_cached(uri string, mut cache map[string]string) string {
+	if uri in cache {
+		return cache[uri]
+	}
 	path := uri_to_path(uri)
 	root := find_project_root(os.dir(path))
-	if root != '' {
-		return root
+	key := if root != '' {
+		root
+	} else {
+		// Without a v.mod, the project is the program the file belongs to,
+		// whose directory also holds the local modules it imports.
+		app.program_root(path)
 	}
-	// Without a v.mod, the project is the program the file belongs to, whose
-	// directory also holds the local modules it imports.
-	return app.program_root(path)
+	cache[uri] = key
+	return key
 }
 
 // bump_generation records a mutation to `uri`, advancing both the global counter
@@ -2673,8 +2700,13 @@ fn (app &App) generation_key(uri string) string {
 // revision so that editing one file invalidates cached diagnostics for the whole
 // owning project (covering cross-module imports), not every open document (P1-06).
 fn (mut app App) bump_generation(uri string) {
+	app.bump_generation_for_key(app.generation_key(uri))
+}
+
+// bump_generation_for_key advances the same revision when the caller already
+// resolved the project key, as the watcher notification does.
+fn (mut app App) bump_generation_for_key(key string) {
 	app.open_files_generation++
-	key := app.generation_key(uri)
 	app.project_generations[key] = app.project_generations[key] + 1
 }
 

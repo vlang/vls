@@ -3043,9 +3043,22 @@ fn (mut app App) on_did_change_watched_files(request Request) {
 		}
 		return
 	}
+	// An editor save often emits several events for the same file. Every step
+	// below invalidates by URI, so repeating one only repeats the syscalls and
+	// the diagnostics requeues. Collapse identical (uri, type) pairs first.
+	mut seen_changes := map[string]bool{}
+	mut changes := []FileEvent{cap: params.changes.len}
+	for change in params.changes {
+		key := '${change.uri}\x00${change.event_type}'
+		if key in seen_changes {
+			continue
+		}
+		seen_changes[key] = true
+		changes << change
+	}
 	// A module folder may have appeared, gone or changed its module name.
 	app.importable_modules_cache = map[string]ImportableModulesCache{}
-	for change in params.changes {
+	for change in changes {
 		app.forget_module_folder(uri_to_path(change.uri))
 		// A project's `vls.json` holds the defines its checks run with, so a
 		// change of it is a change of the configuration (see vls_config.v).
@@ -3058,7 +3071,10 @@ fn (mut app App) on_did_change_watched_files(request Request) {
 		}
 	}
 	open_uris_by_path := app.open_index_uris_by_path()
-	for change in params.changes {
+	// Project keys do not change during a notification (no v.mod is created
+	// here), so resolve each URI once and share the result across events.
+	mut key_cache := map[string]string{}
+	for change in changes {
 		event_uri := change.uri
 		uri := open_uris_by_path[normalized_index_path(uri_to_path(event_uri))] or { event_uri }
 		// A watcher may spell an open document URI differently from the client
@@ -3080,7 +3096,7 @@ fn (mut app App) on_did_change_watched_files(request Request) {
 		}
 		match change.event_type {
 			3 {
-				diagnostics_mutation := app.begin_diagnostics_project_mutation(uri)
+				diagnostics_mutation := app.begin_diagnostics_project_mutation_cached(uri, mut key_cache)
 				is_open := uri in app.open_files
 				// Deleted on disk. Invalidate cached diagnostics, but do NOT drop
 				// an open editor buffer: the editor still owns the in-memory
@@ -3088,7 +3104,11 @@ fn (mut app App) on_did_change_watched_files(request Request) {
 				if uri in app.diag_cache {
 					app.diag_cache.delete(uri)
 				}
-				app.bump_generation(uri)
+				if diagnostics_mutation.project_key != '' {
+					app.bump_generation_for_key(diagnostics_mutation.project_key)
+				} else {
+					app.bump_generation(uri)
+				}
 				// Re-index from disk when no editor buffer owns the URI (the file
 				// was removed, so this drops the entry).
 				if uri !in app.open_files {
@@ -3102,7 +3122,7 @@ fn (mut app App) on_did_change_watched_files(request Request) {
 				log('on_did_change_watched_files: disk delete for ${uri}')
 			}
 			1, 2 {
-				diagnostics_mutation := app.begin_diagnostics_project_mutation(uri)
+				diagnostics_mutation := app.begin_diagnostics_project_mutation_cached(uri, mut key_cache)
 				// Created or Changed on disk. The editor buffer is authoritative
 				// for any open document, so we must never overwrite open_files
 				// with disk content — doing so would erase unsaved edits (P0-07
@@ -3127,7 +3147,13 @@ fn (mut app App) on_did_change_watched_files(request Request) {
 					}
 				}
 				app.evict_inlay_fn_cache_under(os.dir(uri_to_path(uri)))
-				app.bump_generation(uri)
+				// Reuse the project key already resolved for the mutation instead
+				// of walking ancestors again.
+				if diagnostics_mutation.project_key != '' {
+					app.bump_generation_for_key(diagnostics_mutation.project_key)
+				} else {
+					app.bump_generation(uri)
+				}
 				// A closed file's change can affect hints and diagnostics of any
 				// project that imports it, and generation_key of the importer is
 				// not always the key of the changed file. Bump every project so
