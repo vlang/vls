@@ -116,7 +116,7 @@ mut:
 	index_walk_byte_budget                      u64 // Test seam: total disk bytes indexed per walk, 0 = platform budget
 	vlib_fn_cache                               map[string]map[string]string // Per-vlib-module fn→return-type index (immutable during a session)
 	expression_type_depth                       int                         // Nesting of expression_type, which a binding's declaration re-enters
-	line_info_mode                              LineInfoMode                // How the configured `v` reaches the `-line-info` checker (see interop.v)
+	line_info_unavailable                       bool                        // The configured compiler definitively refused a one-shot editor query
 	inlay_hint_cache                            map[string]CachedInlayHints // Per-URI compiler inlay hints, see compiler_inlay_hints
 	tcp_conn                                    ?&net.TcpConn               // Non-nil when serving a TCP client
 	is_shutdown                                 bool                        // True after shutdown request was acknowledged

@@ -69,22 +69,15 @@ load (unified on the program dir).
 Measured: reopening this repo unchanged serves diagnostics in ~15ms
 from disk instead of ~5s cold (~340x). Clean-file traffic unchanged.
 
-Known environment failure (pre-existing, verified on the pristine
-base): `test_conditional_methods_request_receiver_completion_fallback`
-needs the V1 compatibility compiler, which this host cannot build
-(`make` missing).
-
-## Phase 1c — done: pooled line-info, fast parse errors, compat matrix
+## Phase 1c — done: pooled line-info and fast parse errors
 
 - `run_v_line_info_once` answers from the shared diagnostics-server
-  pool first (same copy the slow check uses), one-shot fallback
-  preserved; compat/missing modes untouched.
+  pool first (same copy the slow check uses), with a one-shot fallback.
 - Fast tier also reports certain parse errors (stray closers,
   unclosed delimiters/strings/comments at EOF); mid-keystroke
   states stay silent.
-- Compiler-compatibility matrix tests: modern-direct, old-flag,
-  and dead-end stub compilers assert probed mode, diagnostics,
-  and mode stability.
+- Compiler stubs cover direct answers, automatic launcher fallback,
+  and definitive query refusals while diagnostics continue to work.
 
 ## Phase 1 — what remains
 

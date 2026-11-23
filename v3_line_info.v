@@ -8,10 +8,9 @@ import os
 // files linked from disk, and kept: each request writes into it only the files
 // that changed. The V in use answers through the `query` requests of its
 // diagnostics server when it runs one, and otherwise in a compiler process of
-// its own. V1 is left what V3 cannot answer, such as a file that does not parse
-// while it is being written. Where the checks of the diagnostics run on the
-// same servers, they check the same copy (see ProgramCopy): the check of each
-// version of a program answers its questions too.
+// its own. The caller can try the VLS-mode invocation when this path fails.
+// Where diagnostics run on the same servers, they check the same copy (see
+// ProgramCopy): the check of each version of a program answers its questions too.
 
 // v3_completion_placeholder is the name written after the dot the cursor
 // follows when completion is asked for: V3 has to parse the member access it
@@ -57,7 +56,7 @@ struct V3Answers {
 }
 
 // v3_line_info answers `line_info` for the file at `path` from V3, or returns
-// none when V3 cannot: the caller then asks V1.
+// none when the caller should try the fallback invocation.
 fn (mut app App) v3_line_info(method Method, path string, real_path string, line_info string) ?ResponseResult {
 	if !app.v3_line_info_enabled || os.getenv('VLS_V3_LINE_INFO') == 'off' {
 		return none
@@ -233,7 +232,7 @@ fn (mut app App) v3_run(project V3QueryProject, specs []string, target string) ?
 	if app.v3_one_shot_unsupported {
 		return none
 	}
-	// The V launcher routes `-vls-mode` through the compatibility checker.
+	// Older V launchers can route `-vls-mode` through a compatibility checker.
 	// A bare `-line-info` lets the default checker answer first.
 	mut argv := build_v_check_args(target, is_library)
 	argv.insert(argv.len - 1, ['-line-info', question])

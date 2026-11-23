@@ -5608,6 +5608,7 @@ greeting := get_greeting()
 fn inlay_hints_for_file(dir_name string, content string) []InlayHint {
 	mut app := create_test_app()
 	defer {
+		app.stop_v3_queries()
 		cleanup_test_app(app)
 	}
 	app.v3_line_info_enabled = v3_answers_inlay_hints()
@@ -5653,17 +5654,17 @@ fn inlay_hints_request(mut app App, uri string, content string) []InlayHint {
 // compiler directly, not through VLS, so a broken VLS side makes those tests
 // fail instead of skipping them.
 fn compiler_supports_inlay_hints() bool {
-	return compiler_answers_inlay_hints([['-new-compiler'], ['-old-compiler'], []string{}])
+	return v3_answers_inlay_hints() || compiler_answers_inlay_hints(true)
 }
 
 // v3_answers_inlay_hints reports whether the V3 of the configured V answers the
 // `ih^` mode: the tests that expect compiler hints then take them from V3, as
 // VLS does.
 fn v3_answers_inlay_hints() bool {
-	return compiler_answers_inlay_hints([['-new-compiler']])
+	return compiler_answers_inlay_hints(false)
 }
 
-fn compiler_answers_inlay_hints(selectors [][]string) bool {
+fn compiler_answers_inlay_hints(vls_mode bool) bool {
 	mut app := create_test_app()
 	defer {
 		cleanup_test_app(app)
@@ -5672,15 +5673,12 @@ fn compiler_answers_inlay_hints(selectors [][]string) bool {
 	must_mkdir_all(dir)
 	main_file := os.join_path(dir, 'main.v')
 	must_write_file(main_file, 'module main\n\nfn main() {\n\tx := 1\n\tprintln(x)\n}\n')
-	args := build_v_line_info_args_single(main_file, '1:ih^1', main_file)
-	for selector in selectors {
-		mut argv := selector.clone()
-		argv << args
-		if run_v_argv(argv, dir).output.contains('{"inlay_hints":') {
-			return true
-		}
+	args := if vls_mode {
+		build_v_line_info_args_single(main_file, '1:ih^1', main_file)
+	} else {
+		['-check', '-nocolor', '-line-info', '${main_file}:1:ih^1', main_file]
 	}
-	return false
+	return run_v_argv(args, dir).output.contains('{"inlay_hints":')
 }
 
 fn inlay_hint_summary(hints []InlayHint) []string {
@@ -5718,6 +5716,7 @@ fn test_inlay_hints_follow_disk_changes_in_files_that_are_not_open() {
 	}
 	mut app := create_test_app()
 	defer {
+		app.stop_v3_queries()
 		cleanup_test_app(app)
 	}
 	app.v3_line_info_enabled = v3_answers_inlay_hints()
@@ -5756,6 +5755,7 @@ fn test_inlay_hints_follow_unsaved_edits_in_other_open_files() {
 	}
 	mut app := create_test_app()
 	defer {
+		app.stop_v3_queries()
 		cleanup_test_app(app)
 	}
 	app.v3_line_info_enabled = v3_answers_inlay_hints()
@@ -7437,7 +7437,7 @@ fn test_hover_does_not_rush_the_pending_slow_check() {
 	// compiler-free tail of hover_result, so the scheduler state it leaves
 	// behind is the whole observation.
 	app.v3_line_info_enabled = false
-	app.line_info_mode = .missing
+	app.line_info_unavailable = true
 	mut scheduler := new_diagnostics_scheduler()
 	app.diagnostics_scheduler = scheduler
 	far_future := time.now().unix_milli() + 3600_000
@@ -9230,7 +9230,10 @@ fn test_conditional_structs_do_not_contribute_indexed_receiver_fields() {
 
 fn test_conditional_methods_request_receiver_completion_fallback() {
 	mut app := create_test_app()
+	// Use the editor's query path, which makes the incomplete selector parseable.
+	app.v3_line_info_enabled = true
 	defer {
+		app.stop_v3_queries()
 		cleanup_test_app(app)
 	}
 	test_dir := os.join_path(app.temp_dir, 'conditional_receiver_methods')
@@ -13359,9 +13362,11 @@ fn test_operator_overloads_are_not_offered_as_completions() {
 	for operator in ['+', '==', '<'] {
 		assert operator !in string_labels, string_labels.str()
 	}
-	// The compiler's list includes the operator overloads that builtin declares.
+	// Exercise compiler-backed completion at the incomplete selector too.
 	mut app := create_test_app()
+	app.v3_line_info_enabled = true
 	defer {
+		app.stop_v3_queries()
 		cleanup_test_app(app)
 	}
 	dir := os.join_path(app.temp_dir, 'compiler_operator_completion')
@@ -14593,7 +14598,7 @@ fn test_hover_shows_a_function_as_declared_without_v3() {
 	defer {
 		cleanup_test_app(app)
 	}
-	app.line_info_mode = .missing
+	app.line_info_unavailable = true
 	for want, places in function_hovers {
 		if !want.contains('fn add(') && !want.contains('fn first[') {
 			continue

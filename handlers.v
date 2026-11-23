@@ -449,8 +449,8 @@ fn (mut app App) hover_result(uri string, position Position, line_info string) R
 			return app.hover_with_written_declaration(uri, position, answer.hover, answer.declared_at)
 		}
 	}
-	// V3 cannot tell, as while a file does not parse: the index says where a
-	// function is declared, and V1 what anything else is.
+	// If the query did not resolve a function, try the source index before
+	// making a one-shot compiler request.
 	if !located {
 		if location := app.resolve_indexed_definition(uri, position) {
 			if hover := app.function_declaration_hover(uri, location) {
@@ -458,11 +458,7 @@ fn (mut app App) hover_result(uri string, position Position, line_info string) R
 			}
 		}
 	}
-	result := if app.line_info_mode == .missing {
-		app.line_info_unavailable_result(.hover, uri, line_info)
-	} else {
-		app.run_v_line_info_once(.hover, uri, line_info, compilation_work_dir(normalize_overlay_path(real_path)))
-	}
+	result := app.run_v_line_info_once(.hover, uri, line_info, compilation_work_dir(normalize_overlay_path(real_path)))
 	return app.hover_with_written_declaration(uri, position, result, none)
 }
 
@@ -1535,8 +1531,7 @@ fn (mut app App) operation_at_pos(method Method, request Request) Response {
 	}
 
 	// Resolve declarations from VLS's authoritative source index before reaching
-	// for the compatibility compiler's `-line-info` mode, which a V without the
-	// V1 checker cannot serve at all. Free functions and top-level declarations
+	// for a compiler `-line-info` query. Free functions and top-level declarations
 	// do not require receiver type inference, so this path is both deterministic
 	// and aware of unsaved files.
 	if method in [.definition, .declaration, .type_definition, .implementation] {

@@ -523,6 +523,7 @@ fn test_compiler_rejects_line_info_detects_a_v_without_the_v1_checker() {
 	// V prints exactly this and exits before doing any work.
 	assert compiler_rejects_line_info('unknown option `-vls-mode`')
 	assert compiler_rejects_line_info('unknown option `-line-info`')
+	assert compiler_rejects_line_info('Unknown argument `-line-info`')
 	assert compiler_rejects_line_info('unknown option `-json-errors`')
 	// A compiler that understands the options answers with its payload instead.
 	assert !compiler_rejects_line_info('{"contents":{"kind":"markdown","value":"fn f()"}}')
@@ -531,16 +532,13 @@ fn test_compiler_rejects_line_info_detects_a_v_without_the_v1_checker() {
 	// A refusal is only recognized as a whole line, so a diagnostic that merely
 	// quotes the message cannot disable compiler-backed lookups for the session.
 	assert !compiler_rejects_line_info('a.v:1:1: error: unknown option `-vls-mode` in flag list')
-	assert compiler_rejects_any_option('unknown option `-old-compiler`', [
-		'-old-compiler',
-	])
-	assert !compiler_rejects_any_option('unknown option `-vls-mode`', ['-old-compiler'])
 }
 
 fn test_compiler_refused_and_stopped_separates_a_dead_end_from_a_recovery() {
 	// A launcher with no answer prints its refusal and exits.
 	assert compiler_refused_and_stopped('unknown option `-vls-mode`')
 	assert compiler_refused_and_stopped('unknown option `-vls-mode`\n\n')
+	assert compiler_refused_and_stopped('Unknown argument `-line-info`')
 	// One that reruns the request against a compatibility compiler says more,
 	// even when that rerun finds nothing to report.
 	assert !compiler_refused_and_stopped('unknown option `-vls-mode`\nV compilation failed (compiler_error); retrying with `/v1_fallback`.')
@@ -561,9 +559,6 @@ fn test_compiler_lacks_compatibility_compiler_detects_every_launcher_refusal() {
 	// the lookups, and this test has to hold either side of that change.
 	assert compiler_lacks_compatibility_compiler('`-vls-mode` requires the compatibility compiler, but no usable V 0.5.2 fallback was found and make is unavailable. On Windows, install GNU make in MSYS2 (`make` or `mingw32-make`) and put its tools, including `sh`, on PATH. Then run `make v1` in `C:\\Users\\me\\v`.')
 	assert compiler_lacks_compatibility_compiler('`-vls-mode` requires the compatibility compiler, but the V source tree could not be found. Run `make v1` in the V source directory.')
-	assert compiler_lacks_compatibility_compiler('`-old-compiler` was requested, but no usable V 0.5.2 fallback was found and make is unavailable. Install make, then run `make v1` in `/home/me/v`.')
-	// The same rewrite as above, on the host where the hint is the short one.
-	assert compiler_lacks_compatibility_compiler('`-old-compiler` was requested, but no usable V 0.5.2 fallback was found and make is unavailable. Install make. Then run `make v1` in `/home/me/v`.')
 	assert compiler_lacks_compatibility_compiler('`make v1` failed with exit code 2. Run it manually in `/home/me/v` for more details.')
 	assert compiler_lacks_compatibility_compiler('`make v1` completed without installing a usable V 0.5.2 fallback at `/home/me/.cache/v1_fallback`.')
 	// A launcher that recovers on its own only announces the fallback before
@@ -572,7 +567,6 @@ fn test_compiler_lacks_compatibility_compiler_detects_every_launcher_refusal() {
 	assert !compiler_lacks_compatibility_compiler('unknown option `-vls-mode`')
 	assert !compiler_lacks_compatibility_compiler('unknown option `-vls-mode`\nV compilation failed (compiler_error); retrying with `/v1_fallback`.')
 	assert !compiler_lacks_compatibility_compiler('`-vls-mode` requires the compatibility compiler, but no usable V 0.5.2 fallback was found; running `make v1` now...\n{"contents":{"kind":"markdown","value":"fn f()"}}')
-	assert !compiler_lacks_compatibility_compiler('`-old-compiler` was requested; retrying with `/v1_fallback`.\n{"contents":{"kind":"markdown","value":"fn f()"}}')
 	// Starting an automatic fallback build does not mean that it succeeds.
 	building := '`-vls-mode` requires the compatibility compiler, but no usable V 0.5.2 fallback was found; running `make v1` now...\n'
 	assert compiler_lacks_compatibility_compiler(building + '`make v1` failed with exit code 2. Run it manually in `/v` for more details.')
@@ -604,43 +598,7 @@ fn test_run_v_line_info_retires_lookups_when_the_compatibility_compiler_is_missi
 	}
 
 	assert app.run_v_line_info(.hover, uri, '6:hv^4') == ResponseResult('null')
-	assert app.line_info_mode == .missing
-}
-
-const explicit_compatibility_launcher_stub = r'#!/bin/sh
-for arg in "$@"; do
-	if [ "$arg" = "-old-compiler" ]; then
-		echo "\`-old-compiler\` was requested; retrying with \`/v1_fallback\`." >&2
-		echo "{\"contents\":{\"kind\":\"markdown\",\"value\":\"fn helper()\"}}"
-		exit 0
-	fi
-done
-echo "unknown option \`-vls-mode\`" >&2
-exit 1
-'
-
-fn test_run_v_line_info_keeps_successful_explicit_compatibility_retry() {
-	$if windows {
-		return
-	}
-	previous := os.getenv('VLS_V_COMMAND')
-	mut app, uri, root := line_info_stub_app('vls_explicit_compatibility', explicit_compatibility_launcher_stub)
-	defer {
-		restore_v_command(previous)
-		os.rmdir_all(root) or {}
-	}
-	app.capture_output = true
-
-	// An explicit compatibility retry carries a notice before the valid payload.
-	for _ in 0 .. 2 {
-		hover := app.run_v_line_info(.hover, uri, '6:hv^4')
-		assert app.line_info_mode == .compat
-		assert hover is Hover
-		if hover is Hover {
-			assert hover.contents.value.contains('fn helper()')
-		}
-	}
-	assert app.captured_output.len == 0
+	assert app.line_info_unavailable
 }
 
 const failed_compatibility_build_launcher_stub = r'#!/bin/sh
@@ -664,38 +622,39 @@ fn test_run_v_line_info_retires_lookups_after_automatic_compatibility_build_fail
 	for _ in 0 .. 2 {
 		result := app.run_v_line_info(.hover, uri, '6:hv^4')
 		assert result == ResponseResult('null')
-		assert app.line_info_mode == .missing
+		assert app.line_info_unavailable
 	}
 	assert app.captured_output.len == 1
 	assert app.captured_output[0].contains('window/showMessage')
 }
 
-fn test_report_missing_compatibility_compiler_names_the_repair() {
+fn test_report_line_info_unavailable_names_the_repair() {
 	// The editor otherwise shows a VLS that highlights code but answers nothing
 	// for completion, hover, signature help, or go to definition, with no hint
 	// that the compiler is the reason. Platform-independent: no stub compiler.
 	mut app := App{
 		capture_output: true
 	}
-	app.report_missing_compatibility_compiler()
-	assert app.captured_output.len == 1
-	assert app.captured_output[0].contains('window/showMessage')
-	// Name the actual repair, not just the symptom.
-	assert app.captured_output[0].contains('make v1')
-	assert app.captured_output[0].contains('VLS_V_COMMAND')
-	assert app.captured_output[0].contains('type":2')
+	app.report_line_info_unavailable(false)
+	app.report_line_info_unavailable(true)
+	assert app.captured_output.len == 2
+	assert !app.captured_output[0].contains('make v1')
+	assert app.captured_output[1].contains('make v1')
+	for notice in app.captured_output {
+		assert notice.contains('window/showMessage')
+		assert notice.contains('VLS_V_COMMAND')
+		assert notice.contains('type":2')
+	}
 }
 
 fn test_a_retired_lookup_never_reports_the_missing_compiler_again() {
-	// Once the lookups are retired, `run_v_line_info` answers from the index at
-	// its early `.missing` check, so it never spawns the compiler and never
-	// re-reports. That structural guarantee is why the notice needs no
-	// "already warned" flag.
+	// Once the one-shot lookups are retired, the index answers subsequent
+	// queries without spawning the compiler or sending another notice.
 	previous := os.getenv('VLS_V_COMMAND')
 	mut app := App{
-		capture_output: true
-		line_info_mode: .missing
-		open_files:     map[string]string{}
+		capture_output:        true
+		line_info_unavailable: true
+		open_files:            map[string]string{}
 	}
 	uri := 'file:///tmp/vls_retired_lookup.v'
 	app.open_files[uri] = 'module main\n\n// greet writes a greeting.\nfn greet() {}\n\nfn main() {\n\tgreet()\n}\n'
@@ -713,7 +672,7 @@ fn test_a_retired_lookup_never_reports_the_missing_compiler_again() {
 	}
 	// Nothing was said to the client, and no compiler was launched.
 	assert app.captured_output.len == 0
-	assert app.line_info_mode == .missing
+	assert app.line_info_unavailable
 }
 
 // line_info_stub_app writes `script` as an executable stand-in for `v`, points
@@ -746,34 +705,15 @@ fn restore_v_command(previous string) {
 	}
 }
 
-// A launcher with no in-tree `-line-info` checker that refuses the
-// `-old-compiler` selector but reruns the request against a compatibility
-// compiler on its own. The refusal is on every invocation, so an empty answer
-// through it must not be read as "nothing here can serve line info".
+// An older launcher reruns the request against a compatibility compiler on
+// its own, after reporting the initial refusal.
 const recovering_launcher_stub = r'#!/bin/sh
-for arg in "$@"; do
-	if [ "$arg" = "-old-compiler" ]; then
-		echo "unknown option \`-old-compiler\`" >&2
-		exit 1
-	fi
-done
+echo "$*" >> "$(dirname "$0")/queries.txt"
 echo "unknown option \`-vls-mode\`" >&2
 echo "V compilation failed (compiler_error); retrying with \`/v1_fallback\`." >&2
 case " $* " in
 	*hv^4*) echo "{\"contents\":{\"kind\":\"markdown\",\"value\":\"fn helper()\"}}" ;;
 esac
-'
-
-// A launcher that refuses both the options and the selector, and stops there.
-const dead_end_launcher_stub = r'#!/bin/sh
-for arg in "$@"; do
-	if [ "$arg" = "-old-compiler" ]; then
-		echo "unknown option \`-old-compiler\`" >&2
-		exit 1
-	fi
-done
-echo "unknown option \`-vls-mode\`" >&2
-exit 1
 '
 
 fn test_run_v_line_info_keeps_a_recovering_launcher_after_an_empty_lookup() {
@@ -795,47 +735,17 @@ fn test_run_v_line_info_keeps_a_recovering_launcher_after_an_empty_lookup() {
 	// A hover past the end of the file resolves nothing, which is an ordinary
 	// answer and not a reason to stop asking.
 	assert app.run_v_line_info(.hover, uri, '9:hv^1') == ResponseResult('null')
-	assert app.line_info_mode == .direct
+	assert !app.line_info_unavailable
 
 	// So the very next hover still reaches the launcher.
 	hover := app.run_v_line_info(.hover, uri, '6:hv^4')
-	assert app.line_info_mode == .direct
+	assert !app.line_info_unavailable
 	assert hover is Hover
 	if hover is Hover {
 		assert hover.contents.value.contains('fn helper()')
 	}
-}
-
-fn test_run_v_line_info_retires_lookups_when_the_launcher_only_refuses() {
-	// The other direction: a launcher that refuses and stops really has no
-	// answer, so the session stops spawning a process per request.
-	$if windows {
-		return
-	}
-	previous := os.getenv('VLS_V_COMMAND')
-	mut app, uri, root := line_info_stub_app('vls_dead_end_launcher', dead_end_launcher_stub)
-	defer {
-		restore_v_command(previous)
-		os.rmdir_all(root) or {}
-	}
-
-	assert app.run_v_line_info(.hover, uri, '6:hv^4') == ResponseResult('null')
-	assert app.line_info_mode == .missing
-}
-
-fn test_with_line_info_selection_only_asks_for_the_compatibility_compiler_when_needed() {
-	base := build_v_line_info_args_single('/tmp/a.v', '10:gd^5', '/tmp/a.v')
-	mut app := App{}
-	// Unprobed and known-direct compilers are driven without a selection flag, so
-	// V releases that predate `-old-compiler` never see it.
-	assert app.line_info_mode == .unknown
-	assert app.with_line_info_selection(base) == base
-	app.line_info_mode = .direct
-	assert app.with_line_info_selection(base) == base
-	app.line_info_mode = .compat
-	selected := app.with_line_info_selection(base)
-	assert selected[0] == '-old-compiler'
-	assert selected[1..] == base
+	queries := os.read_lines(os.join_path(root, 'bin', 'queries.txt'))!
+	assert queries.len == 2
 }
 
 fn test_line_info_unavailable_result_answers_hover_from_the_index() {
@@ -2894,19 +2804,13 @@ fn test_publish_diagnostics_params() {
 	assert params.diagnostics.len == 1
 }
 
-// ============================================================================
-// Compiler-compatibility matrix: one stub compiler per LineInfoMode.
-// Each stub answers `-check` with a diagnostic (so diagnostics are
-// independent of the `-line-info` mode) and answers `-line-info` the way
-// its generation does. Every test asserts the probed mode, that a
-// diagnostics spot-check still returns results, and that the mode never
-// regresses within the session once probed.
-// ============================================================================
-
-// A current compiler answers `-line-info` itself: no refusal, no selector.
-const compat_matrix_modern_direct_stub = r'#!/bin/sh
+// Both stubs answer `-check` with a diagnostic. The first also answers
+// `-line-info`, and the second refuses it.
+const line_info_and_check_stub = r'#!/bin/sh
 case " $* " in
   *"-line-info"*)
+    [ "$#" -eq 7 ] && [ "$1" = "-w" ] && [ "$2" = "-check" ] &&
+      [ "$3" = "-nocolor" ] && [ "$4" = "-vls-mode" ] && [ "$5" = "-line-info" ] || exit 2
     case " $* " in
       *hv^4*) echo "{\"contents\":{\"kind\":\"markdown\",\"value\":\"fn helper()\"}}" ;;
     esac
@@ -2923,17 +2827,10 @@ esac
 exit 0
 '
 
-// An older launcher refuses `-line-info` until `-old-compiler` selects it.
-const compat_matrix_old_flag_stub = r'#!/bin/sh
+const line_info_refusal_stub = r'#!/bin/sh
 case " $* " in
   *"-line-info"*)
-    for arg in "$@"; do
-      if [ "$arg" = "-old-compiler" ]; then
-        echo "\`-old-compiler\` was requested; retrying with \`/v1_fallback\`." >&2
-        echo "{\"contents\":{\"kind\":\"markdown\",\"value\":\"fn helper()\"}}"
-        exit 0
-      fi
-    done
+    echo "$*" >> "$(dirname "$0")/queries.txt"
     echo "unknown option \`-vls-mode\`" >&2
     exit 1
     ;;
@@ -2948,45 +2845,21 @@ esac
 exit 0
 '
 
-// A launcher with no checker refuses the options and the selector outright.
-const compat_matrix_dead_end_stub = r'#!/bin/sh
-case " $* " in
-  *"-line-info"*)
-    for arg in "$@"; do
-      if [ "$arg" = "-old-compiler" ]; then
-        echo "unknown option \`-old-compiler\`" >&2
-        exit 1
-      fi
-    done
-    echo "unknown option \`-vls-mode\`" >&2
-    exit 1
-    ;;
-esac
-case " $* " in
-  *" -check "*)
-    for last in "$@"; do :; done
-    echo "${last}:1:1: error: stub check error" >&2
-    exit 1
-    ;;
-esac
-exit 0
-'
-
-fn test_compat_matrix_modern_direct_probes_direct() {
+fn test_compiler_line_info_works_alongside_diagnostics() {
 	$if windows {
 		// The stand-in compiler is a POSIX shell script.
 		return
 	}
 	previous := os.getenv('VLS_V_COMMAND')
-	mut app, uri, root := line_info_stub_app('vls_compat_modern', compat_matrix_modern_direct_stub)
+	mut app, uri, root := line_info_stub_app('vls_line_info_and_check', line_info_and_check_stub)
 	defer {
 		restore_v_command(previous)
 		os.rmdir_all(root) or {}
 	}
-	assert app.line_info_mode == .unknown
+	assert !app.line_info_unavailable
 
 	hover := app.run_v_line_info(.hover, uri, '6:hv^4')
-	assert app.line_info_mode == .direct
+	assert !app.line_info_unavailable
 	assert hover is Hover
 	if hover is Hover {
 		assert hover.contents.value.contains('fn helper()')
@@ -2997,62 +2870,29 @@ fn test_compat_matrix_modern_direct_probes_direct() {
 	assert check.len > 0, 'expected diagnostics from the modern stub'
 	assert check[0].message.contains('stub check error')
 
-	// A probed mode never regresses within the session.
 	again := app.run_v_line_info(.hover, uri, '6:hv^4')
-	assert app.line_info_mode == .direct
+	assert !app.line_info_unavailable
 	assert again is Hover
 }
 
-fn test_compat_matrix_old_flag_needs_explicit_selector() {
+fn test_compiler_refusal_retires_line_info_only() {
 	$if windows {
 		// The stand-in compiler is a POSIX shell script.
 		return
 	}
 	previous := os.getenv('VLS_V_COMMAND')
-	mut app, uri, root := line_info_stub_app('vls_compat_old_flag', compat_matrix_old_flag_stub)
-	defer {
-		restore_v_command(previous)
-		os.rmdir_all(root) or {}
-	}
-	assert app.line_info_mode == .unknown
-
-	hover := app.run_v_line_info(.hover, uri, '6:hv^4')
-	assert app.line_info_mode == .compat
-	assert hover is Hover
-	if hover is Hover {
-		assert hover.contents.value.contains('fn helper()')
-	}
-
-	content := os.read_file(uri_to_path(uri)) or { '' }
-	check := app.run_v_check(uri, content)
-	assert check.len > 0, 'expected diagnostics from the old-flag stub'
-	assert check[0].message.contains('stub check error')
-
-	// Compat stays compat: the retry keeps selecting the checker directly.
-	again := app.run_v_line_info(.hover, uri, '6:hv^4')
-	assert app.line_info_mode == .compat
-	assert again is Hover
-}
-
-fn test_compat_matrix_dead_end_without_checker() {
-	$if windows {
-		// The stand-in compiler is a POSIX shell script.
-		return
-	}
-	previous := os.getenv('VLS_V_COMMAND')
-	mut app, uri, root := line_info_stub_app('vls_compat_dead_end', compat_matrix_dead_end_stub)
+	mut app, uri, root := line_info_stub_app('vls_line_info_refusal', line_info_refusal_stub)
 	defer {
 		restore_v_command(previous)
 		os.rmdir_all(root) or {}
 	}
 	app.capture_output = true
-	assert app.line_info_mode == .unknown
+	assert !app.line_info_unavailable
 
 	assert app.run_v_line_info(.hover, uri, '6:hv^4') == ResponseResult('null')
-	assert app.line_info_mode == .missing
+	assert app.line_info_unavailable
 
-	// Retiring the lookups must not retire diagnostics: `v check` needs
-	// no compatibility compiler.
+	// Diagnostics still use the compiler after it refuses the editor query.
 	content := os.read_file(uri_to_path(uri)) or { '' }
 	check := app.run_v_check(uri, content)
 	assert check.len > 0, 'expected diagnostics from the dead-end stub'
@@ -3060,8 +2900,10 @@ fn test_compat_matrix_dead_end_without_checker() {
 
 	// Retired stays retired: no new process, no second notice.
 	assert app.run_v_line_info(.hover, uri, '6:hv^4') == ResponseResult('null')
-	assert app.line_info_mode == .missing
+	assert app.line_info_unavailable
 	assert app.captured_output.len == 1
+	queries := os.read_lines(os.join_path(root, 'bin', 'queries.txt'))!
+	assert queries.len == 1
 }
 
 // ============================================================================
@@ -3951,36 +3793,17 @@ fn test_cov_run_v_line_info_once_singlefile_via_stub() {
 		return
 	}
 	previous := os.getenv('VLS_V_COMMAND')
-	mut app, uri, root := line_info_stub_app('vls_cov_once', compat_matrix_modern_direct_stub)
+	mut app, uri, root := line_info_stub_app('vls_cov_once', line_info_and_check_stub)
 	defer {
 		restore_v_command(previous)
 		os.rmdir_all(root) or {}
 	}
 	work_dir := os.dir(uri_to_path(uri))
 	result := app.run_v_line_info_once(.hover, uri, '6:hv^4', work_dir)
-	assert app.line_info_mode == .direct, 'a direct compiler probes direct'
+	assert !app.line_info_unavailable
 	assert result is Hover, 'a direct single-file lookup answers hover'
 	if result is Hover {
 		assert (result as Hover).contents.value.contains('fn helper()'), 'the stub payload is kept'
-	}
-}
-
-fn test_cov_run_v_line_info_pooled_returns_none_without_pool() {
-	mut compat_app := App{
-		line_info_mode: .compat
-	}
-	if _ := compat_app.run_v_line_info_pooled(.hover, 'file:///tmp/x.v', '1:hv^1') {
-		assert false, 'compat mode never uses the pool'
-	} else {
-		assert true, 'compat mode skips the pool'
-	}
-	mut missing_app := App{
-		line_info_mode: .missing
-	}
-	if _ := missing_app.run_v_line_info_pooled(.hover, 'file:///tmp/x.v', '1:hv^1') {
-		assert false, 'missing mode never uses the pool'
-	} else {
-		assert true, 'missing mode skips the pool'
 	}
 }
 

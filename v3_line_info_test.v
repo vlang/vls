@@ -554,7 +554,7 @@ fn test_a_rename_refuses_when_known_definitions_disappear_after_editing() {
 	defer {
 		stop_fake_v3_app(mut app, fake)
 	}
-	app.line_info_mode = .missing
+	app.line_info_unavailable = true
 	path := os.join_path(fake.project, 'main.v')
 	uri := path_to_uri(path)
 	app.open_files[uri] = os.read_file(path)!
@@ -598,7 +598,7 @@ fn test_failed_sibling_buffer_write_prevents_querying_stale_overlay_text() {
 }
 
 fn test_a_failed_compiler_check_is_not_a_successful_rename_validation() {
-	for output in ['', 'compiler timed out', 'unknown option `-new-compiler`'] {
+	for output in ['', 'compiler timed out', 'unknown option `-check`'] {
 		if _ := rename_check_output(1, output) {
 			assert false, 'a failed check must not validate a rename: ${output}'
 		}
@@ -680,8 +680,6 @@ fn test_v1_line_info_uses_the_warm_shared_server() {
 	assert app.v3_copies().len == 1
 	copy_root := app.v3_copies()[0].overlay.temp_root
 	assert fake.questions()[0] == '${os.join_path(copy_root, 'main.v')}:4:hv^2'
-	// The pool never changes how the session drives the compiler.
-	assert app.line_info_mode == .unknown
 	// A second request reuses the server and the copy: nothing new starts.
 	app.run_v_line_info(.hover, uri, '4:hv^2')
 	assert fake.questions().len == 2
@@ -721,25 +719,6 @@ fn test_v1_line_info_falls_back_to_its_own_process() {
 	assert fake.questions().len == 1
 	alone_questions := os.read_file(os.join_path(fake.dir, 'alone', 'questions.txt')) or { '' }
 	assert alone_questions.split_into_lines().len == 1
-}
-
-fn test_v1_line_info_in_compat_mode_keeps_its_own_process() {
-	mut app, fake := fake_v3_app('v1_compat', fake_v3_query_server, 'VLS_DIAGNOSTICS_SERVER')!
-	defer {
-		stop_fake_v3_app(mut app, fake)
-	}
-	app.v3_line_info_enabled = false
-	app.line_info_mode = .compat
-	os.setenv('VLS_V_COMMAND', fake_one_shot_v(fake.dir, 'alone')!, true)
-	path := os.join_path(fake.project, 'main.v')
-	uri := path_to_uri(path)
-	result := app.run_v_line_info(.hover, uri, '4:hv^2')
-	assert result is Hover
-	assert (result as Hover).contents.value.contains('fake')
-	// Compat keeps its one-shot path: the shared server is never asked, and
-	// the mode is untouched.
-	assert !os.exists(os.join_path(fake.server, 'questions.txt'))
-	assert app.line_info_mode == .compat
 }
 
 fn test_v1_line_info_without_a_server_keeps_its_own_process() {
@@ -925,7 +904,7 @@ fn test_a_rename_asks_again_what_its_prepare_rename_could_not_tell() {
 		stop_fake_v3_app(mut app, fake)
 	}
 	// No V1 either: a question V3 leaves unanswered gets no answer.
-	app.line_info_mode = .missing
+	app.line_info_unavailable = true
 	path := os.join_path(fake.project, 'main.v')
 	uri := path_to_uri(path)
 	app.open_files[uri] = os.read_file(path)!

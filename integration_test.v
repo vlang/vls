@@ -1100,6 +1100,13 @@ const vlang_v_module_call_anchors = [
 // Method calls on a local variable, for receiver-type inference.
 const vlang_v_method_call_anchors = [
 	VlangVCallAnchor{
+		call:      'build.set_args(build_args)'
+		qualifier: 'build.'
+		name:      'set_args'
+		decl_rel:  'vlib/os/process.v'
+		decl_text: 'fn (mut p Process) set_args('
+	},
+	VlangVCallAnchor{
 		call:      'process.set_args('
 		qualifier: 'process.'
 		name:      'set_args'
@@ -1280,16 +1287,16 @@ fn test_integration_vlang_v_indexed_completion_and_receiver_definition_from_env(
 		assert false, 'no known module call anchor found in cmd/v/v.v'
 		return
 	}
-	method_anchor, timer_line := find_vlang_v_call_anchor(root, lines, vlang_v_method_call_anchors) or {
+	method_anchor, method_line := find_vlang_v_call_anchor(root, lines, vlang_v_method_call_anchors) or {
 		assert false, 'no known method call anchor found in cmd/v/v.v'
 		return
 	}
 	compile_dot_col := (lines[compile_line].index(module_anchor.qualifier) or { -1 }) + module_anchor.qualifier.len
-	timer_dot_col := (lines[timer_line].index(method_anchor.qualifier) or { -1 }) + method_anchor.qualifier.len
-	show_col := lines[timer_line].index(method_anchor.name) or { -1 }
+	method_dot_col := (lines[method_line].index(method_anchor.qualifier) or { -1 }) + method_anchor.qualifier.len
+	method_col := lines[method_line].index(method_anchor.name) or { -1 }
 	assert compile_dot_col >= module_anchor.qualifier.len
-	assert timer_dot_col >= method_anchor.qualifier.len
-	assert show_col >= 0
+	assert method_dot_col >= method_anchor.qualifier.len
+	assert method_col >= 0
 
 	mut app, scratch_project := create_integration_test_env()
 	defer {
@@ -1325,8 +1332,8 @@ fn test_integration_vlang_v_indexed_completion_and_receiver_definition_from_env(
 				uri: main_uri
 			}
 			position:      Position{
-				line: timer_line
-				char: timer_dot_col
+				line: method_line
+				char: method_dot_col
 			}
 		},
 			escape_unicode: true
@@ -1343,8 +1350,8 @@ fn test_integration_vlang_v_indexed_completion_and_receiver_definition_from_env(
 				uri: main_uri
 			}
 			position:      Position{
-				line: timer_line
-				char: show_col + 2
+				line: method_line
+				char: method_col + 2
 			}
 		},
 			escape_unicode: true

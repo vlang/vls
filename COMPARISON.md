@@ -38,8 +38,8 @@ including debounce, transport and compiler startup.
 The recorded runs used an Apple Silicon Mac under heavy concurrent load, V 0.5.2
 (`60a5e1f`), Go 1.27.4, and `gopls` v0.24.0. Each configuration used two fresh
 processes, 30 warm samples per request, and three edit rounds per process. The baseline
-was VLS `41a7973`, using a compiler wrapper that strips the obsolete `-new-compiler` flag
-so its type diagnostics run with the same compiler. Both VLS runs used one-shot checks.
+was VLS `41a7973`, using a compiler wrapper that lets its type diagnostics use the same
+compiler's default checker. Both VLS runs used one-shot checks.
 
 Times are p50 / p95 in milliseconds. The two startup samples report their maximum as p95.
 
