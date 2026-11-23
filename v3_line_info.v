@@ -8,10 +8,9 @@ import os
 // files linked from disk, and kept: each request writes into it only the files
 // that changed. The V in use answers through the `query` requests of its
 // diagnostics server when it runs one, and otherwise in a compiler process of
-// its own. V1 is left what V3 cannot answer, such as a file that does not parse
-// while it is being written. Where the checks of the diagnostics run on the
-// same servers, they check the same copy (see ProgramCopy): the check of each
-// version of a program answers its questions too.
+// its own. The caller can try the VLS-mode invocation when this path fails.
+// Where diagnostics run on the same servers, they check the same copy (see
+// ProgramCopy): the check of each version of a program answers its questions too.
 
 // v3_completion_placeholder is the name written after the dot the cursor
 // follows when completion is asked for: V3 has to parse the member access it
@@ -57,7 +56,7 @@ struct V3Answers {
 }
 
 // v3_line_info answers `line_info` for the file at `path` from V3, or returns
-// none when V3 cannot: the caller then asks V1.
+// none when the caller should try the fallback invocation.
 fn (mut app App) v3_line_info(method Method, path string, real_path string, line_info string) ?ResponseResult {
 	if !app.v3_line_info_enabled || os.getenv('VLS_V3_LINE_INFO') == 'off' {
 		return none
@@ -223,14 +222,8 @@ fn (mut app App) v3_run(project V3QueryProject, specs []string, target string) ?
 	is_library := target == '.' && !app.is_program_dir(project.overlay.source_work_dir)
 	question := specs.join('\t')
 	if exe := resolve_diagnostics_server_exe() {
-		// The command line of the checks of the diagnostics (see
-		// build_v_check_args_multifile), whose servers answer the questions too:
-		// `-w` changes no answer.
-		mut args := []string{}
-		if is_library {
-			args << '-shared'
-		}
-		args << ['-check', '-nocolor', target]
+		// Use the same command line as diagnostics to reuse its server.
+		args := build_v_check_args(target, is_library)
 		mut servers := app.v3_query_pool()
 		if result := servers.query_cancelled(exe, args, project.overlay.temp_work_dir,
 			question, app.line_info_cancel_fn()) {
@@ -240,14 +233,13 @@ fn (mut app App) v3_run(project V3QueryProject, specs []string, target string) ?
 	if app.v3_one_shot_unsupported {
 		return none
 	}
-	mut argv := ['-w', '-check', '-nocolor']
-	if is_library {
-		argv << '-shared'
-	}
-	argv << ['-vls-mode', '-line-info', question, target]
+	// Older V launchers can route `-vls-mode` through a compatibility checker.
+	// A bare `-line-info` lets the default checker answer first.
+	mut argv := build_v_check_args(target, is_library)
+	argv.insert(argv.len - 1, ['-line-info', question])
 	x := run_v_argv(argv, project.overlay.temp_work_dir)
-	if compiler_rejects_any_option(x.output, ['-vls-mode', '-line-info']) {
-		log('this V does not answer -line-info')
+	if compiler_rejects_any_option(x.output, ['-line-info']) {
+		log('this V has no V3 that answers -line-info')
 		app.v3_one_shot_unsupported = true
 		return none
 	}

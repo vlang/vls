@@ -2477,6 +2477,11 @@ fn test_active_indexed_source_file_names_applies_compiler_build_rules() {
 	// A test that cannot run on this platform is not activated by requesting it.
 	inactive_active := app.active_indexed_source_file_names(test_dir, 'sibling_${inactive_os}_test.v')
 	assert 'sibling_${inactive_os}_test.v' !in inactive_active
+	new_file := os.join_path(test_dir, 'new_sibling.v')
+	must_write_file(new_file, source)
+	assert 'new_sibling.v' in app.active_indexed_source_file_names(test_dir, '')
+	os.rm(new_file) or { panic(err) }
+	assert 'new_sibling.v' !in app.active_indexed_source_file_names(test_dir, '')
 }
 
 // V3 sets `v3_backend` for itself, and vlib keeps what only V3 builds in
@@ -5635,6 +5640,7 @@ greeting := get_greeting()
 fn inlay_hints_for_file(dir_name string, content string) []InlayHint {
 	mut app := create_test_app()
 	defer {
+		app.stop_v3_queries()
 		cleanup_test_app(app)
 	}
 	app.v3_line_info_enabled = v3_answers_inlay_hints()
@@ -5679,17 +5685,17 @@ fn inlay_hints_request(mut app App, uri string, content string) []InlayHint {
 // asks the compiler directly, not through VLS, so a broken VLS side makes those
 // tests fail instead of skipping them.
 fn compiler_supports_inlay_hints() bool {
-	return compiler_answers_inlay_hints()
+	return v3_answers_inlay_hints() || compiler_answers_inlay_hints(true)
 }
 
 // v3_answers_inlay_hints reports whether the configured V answers the `ih^`
 // mode: the tests that expect compiler hints then take them from the compiler,
 // as VLS does.
 fn v3_answers_inlay_hints() bool {
-	return compiler_answers_inlay_hints()
+	return compiler_answers_inlay_hints(false)
 }
 
-fn compiler_answers_inlay_hints() bool {
+fn compiler_answers_inlay_hints(vls_mode bool) bool {
 	mut app := create_test_app()
 	defer {
 		cleanup_test_app(app)
@@ -5698,7 +5704,11 @@ fn compiler_answers_inlay_hints() bool {
 	must_mkdir_all(dir)
 	main_file := os.join_path(dir, 'main.v')
 	must_write_file(main_file, 'module main\n\nfn main() {\n\tx := 1\n\tprintln(x)\n}\n')
-	args := build_v_line_info_args_single(main_file, '1:ih^1', main_file)
+	args := if vls_mode {
+		build_v_line_info_args_single(main_file, '1:ih^1', main_file)
+	} else {
+		['-check', '-nocolor', '-line-info', '${main_file}:1:ih^1', main_file]
+	}
 	return run_v_argv(args, dir).output.contains('{"inlay_hints":')
 }
 
@@ -5737,6 +5747,7 @@ fn test_inlay_hints_follow_disk_changes_in_files_that_are_not_open() {
 	}
 	mut app := create_test_app()
 	defer {
+		app.stop_v3_queries()
 		cleanup_test_app(app)
 	}
 	app.v3_line_info_enabled = v3_answers_inlay_hints()
@@ -5775,6 +5786,7 @@ fn test_inlay_hints_follow_unsaved_edits_in_other_open_files() {
 	}
 	mut app := create_test_app()
 	defer {
+		app.stop_v3_queries()
 		cleanup_test_app(app)
 	}
 	app.v3_line_info_enabled = v3_answers_inlay_hints()
@@ -7456,7 +7468,7 @@ fn test_hover_does_not_rush_the_pending_slow_check() {
 	// compiler-free tail of hover_result, so the scheduler state it leaves
 	// behind is the whole observation.
 	app.v3_line_info_enabled = false
-	app.line_info_mode = .missing
+	app.line_info_unavailable = true
 	mut scheduler := new_diagnostics_scheduler()
 	app.diagnostics_scheduler = scheduler
 	far_future := time.now().unix_milli() + 3600_000
@@ -9249,7 +9261,10 @@ fn test_conditional_structs_do_not_contribute_indexed_receiver_fields() {
 
 fn test_conditional_methods_request_receiver_completion_fallback() {
 	mut app := create_test_app()
+	// Use the editor's query path, which makes the incomplete selector parseable.
+	app.v3_line_info_enabled = true
 	defer {
+		app.stop_v3_queries()
 		cleanup_test_app(app)
 	}
 	test_dir := os.join_path(app.temp_dir, 'conditional_receiver_methods')
@@ -13510,9 +13525,11 @@ fn test_operator_overloads_are_not_offered_as_completions() {
 	for operator in ['+', '==', '<'] {
 		assert operator !in string_labels, string_labels.str()
 	}
-	// The compiler's list includes the operator overloads that builtin declares.
+	// Exercise compiler-backed completion at the incomplete selector too.
 	mut app := create_test_app()
+	app.v3_line_info_enabled = true
 	defer {
+		app.stop_v3_queries()
 		cleanup_test_app(app)
 	}
 	dir := os.join_path(app.temp_dir, 'compiler_operator_completion')
@@ -14744,7 +14761,7 @@ fn test_hover_shows_a_function_as_declared_without_v3() {
 	defer {
 		cleanup_test_app(app)
 	}
-	app.line_info_mode = .missing
+	app.line_info_unavailable = true
 	for want, places in function_hovers {
 		if !want.contains('fn add(') && !want.contains('fn first[') {
 			continue
@@ -16771,20 +16788,20 @@ fn test_cov_module_import_pure_helpers() {
 	future_dir := os.join_path(root, 'future')
 	must_mkdir_all(future_dir)
 	must_write_file(os.join_path(future_dir, 'future.v'), "@[deprecated_after: '2999-01-01']\nmodule future\n")
-	dep, dep_refused := module_deprecation(dep_dir)
+	dep, dep_refused := module_deprecation(dep_dir, os.ls(dep_dir) or { []string{} })
 	assert dep && !dep_refused, 'deprecated warns'
-	dated_dep, dated_refused := module_deprecation(dated_dir)
+	dated_dep, dated_refused := module_deprecation(dated_dir, os.ls(dated_dir) or { []string{} })
 	assert dated_dep && dated_refused, 'past date refuses'
-	future_dep, future_refused := module_deprecation(future_dir)
+	future_dep, future_refused := module_deprecation(future_dir, os.ls(future_dir) or { []string{} })
 	assert future_dep && !future_refused, 'future date still warns'
-	plain_dep, plain_refused := module_deprecation(m1_dir)
+	plain_dep, plain_refused := module_deprecation(m1_dir, os.ls(m1_dir) or { []string{} })
 	assert !plain_dep && !plain_refused, 'plain module is neither'
 	assert module_dir_imports(m1_dir) == ['os'], 'imports read'
 	flag_dir := os.join_path(root, 'flagged')
 	must_mkdir_all(flag_dir)
 	must_write_file(os.join_path(flag_dir, 'x_notd_flag.v'), "\$compile_error('needs -d flag')\nmodule flagged\n")
-	assert module_needs_flag(flag_dir), 'guarded file needs a flag'
-	assert !module_needs_flag(m1_dir), 'plain module needs none'
+	assert module_needs_flag(flag_dir, os.ls(flag_dir) or { []string{} }), 'guarded file needs a flag'
+	assert !module_needs_flag(m1_dir, os.ls(m1_dir) or { []string{} }), 'plain module needs none'
 	mut found := []ImportableModule{}
 	mut seen_paths := map[string]bool{}
 	mut seen_dirs := map[string]bool{}
@@ -17663,9 +17680,6 @@ fn test_hover_answers_from_the_index_while_a_check_is_pending() {
 	app.capture_output = true
 
 	app.write_mutex.lock()
-	// The transport is held, so nothing a deferred answer writes can land while
-	// this is checked: the only answer that exists is the one the request
-	// returns, and it is the index's.
 	response := app.operation_at_pos(.hover, budget_test_request('textDocument/hover', 1, uri))
 	assert app.captured_output.len == 0, 'nothing is written while the request is answered'
 	app.write_mutex.unlock()
@@ -17673,10 +17687,10 @@ fn test_hover_answers_from_the_index_while_a_check_is_pending() {
 	assert response.id == 1, 'the answer carries the id of the request'
 	assert response.result is Hover, 'hover answers a Hover: ${response.result}'
 	hover := response.result as Hover
-	assert hover.contents.value == '```v\nfn helper(n int) int\n```', 'the answer is the declaration the index holds: ${hover.contents.value}'
+	assert hover.contents.value == '```v\nfn helper(n int) int\n```\n\nhelper doubles a number.'
 }
 
-fn test_hover_followup_measures_the_compiler_answer_without_answering_twice() {
+fn test_indexed_function_hover_needs_no_compiler_followup() {
 	mut app := create_test_app()
 	defer {
 		cleanup_test_app(app)
@@ -17687,16 +17701,12 @@ fn test_hover_followup_measures_the_compiler_answer_without_answering_twice() {
 
 	response := app.operation_at_pos(.hover, budget_test_request('textDocument/hover', 1, uri))
 	app.write_response_or_cancelled(1, response)
-	app.wait_answer_followups()
 
-	// JSON-RPC allows one response per request: the index answers once and the
-	// follow-up only records what the compiler answer costs for the next
-	// question, sending nothing further on the same id.
 	answers := budget_test_answers(mut app, 1)
 	assert answers.len == 1, 'the request is answered once: ${answers}'
 	assert answers[0].contains('"id":1,'), 'the answer carries the id of the request: ${answers}'
 	assert answers[0].contains('fn helper(n int) int'), 'the declaration is in the answer: ${answers}'
-	assert answer_budget_key(uri, .hover) in app.compiler_answer_ms, 'the follow-up measured what the compiler answer cost'
+	assert app.compiler_answer_ms.len == 0
 }
 
 fn test_hover_does_not_answer_twice_when_no_check_is_in_flight() {
@@ -17709,18 +17719,16 @@ fn test_hover_does_not_answer_twice_when_no_check_is_in_flight() {
 
 	response := app.operation_at_pos(.hover, budget_test_request('textDocument/hover', 1, uri))
 	app.write_response_or_cancelled(1, response)
-	app.wait_answer_followups()
 
-	// No check holds the compiler, so the behaviour is what it was: the compiler
-	// answers, with the documentation the index answer has no room for.
 	assert response.result is Hover, 'hover answers a Hover: ${response.result}'
 	value := (response.result as Hover).contents.value
-	assert value.contains('helper doubles a number.'), 'the compiler answer is not deferred: ${value}'
+	assert value.contains('helper doubles a number.'), 'the indexed function includes its docs: ${value}'
+	assert app.compiler_answer_ms.len == 0
 	answers := budget_test_answers(mut app, 1)
 	assert answers.len == 1, 'one answer, as before: ${answers}'
 }
 
-fn test_definition_followup_measures_the_compiler_answer_without_answering_twice() {
+fn test_indexed_definition_needs_no_compiler_followup() {
 	mut app := create_test_app()
 	defer {
 		cleanup_test_app(app)
@@ -17734,15 +17742,11 @@ fn test_definition_followup_measures_the_compiler_answer_without_answering_twice
 	declared := response.result as Location
 	assert declared.uri == uri && declared.range.start.line == 3, 'the index points at the declaration: ${declared.range.start.line}'
 	app.write_response_or_cancelled(2, response)
-	app.wait_answer_followups()
 
-	// JSON-RPC allows one response per request: the index answers once and the
-	// follow-up only records what the compiler answer costs for the next
-	// question, sending nothing further on the same id.
 	answers := budget_test_answers(mut app, 2)
 	assert answers.len == 1, 'the request is answered once: ${answers}'
 	assert answers[0].contains('"id":2,'), 'the answer carries the id of the request: ${answers}'
-	assert answer_budget_key(uri, .definition) in app.compiler_answer_ms, 'the follow-up measured what the compiler answer cost'
+	assert app.compiler_answer_ms.len == 0
 }
 
 fn test_definition_answers_from_the_index_while_a_check_is_pending() {
@@ -17774,7 +17778,6 @@ fn test_definition_does_not_answer_twice_when_no_check_is_in_flight() {
 
 	response := app.operation_at_pos(.definition, budget_test_request('textDocument/definition', 2, uri))
 	app.write_response_or_cancelled(2, response)
-	app.wait_answer_followups()
 
 	assert response.result is Location, 'definition answers a Location: ${response.result}'
 	answers := budget_test_answers(mut app, 2)
@@ -17794,7 +17797,6 @@ fn test_completion_is_never_answered_twice_while_a_check_is_pending() {
 
 	response := app.operation_at_pos(.completion, budget_completion_request('textDocument/completion', 3, uri))
 	app.write_response_or_cancelled(3, response)
-	app.wait_answer_followups()
 
 	assert response.result is CompletionList, 'completion answers a list: ${response.result}'
 	labels := (response.result as CompletionList).items.map(it.label)
@@ -17804,7 +17806,7 @@ fn test_completion_is_never_answered_twice_while_a_check_is_pending() {
 	assert app.compiler_answer_ms.len == 0, 'completion schedules no deferred answer'
 }
 
-fn test_followup_answer_is_suppressed_when_the_request_is_cancelled() {
+fn test_cancelled_indexed_hover_returns_cancellation() {
 	mut app := create_test_app()
 	defer {
 		cleanup_test_app(app)
@@ -17814,17 +17816,15 @@ fn test_followup_answer_is_suppressed_when_the_request_is_cancelled() {
 	app.capture_output = true
 
 	response := app.operation_at_pos(.hover, budget_test_request('textDocument/hover', 4, uri))
-	// The client cancels the request while the compiler still works.
 	app.cancelled_requests[4] = true
 	app.write_response_or_cancelled(4, response)
-	app.wait_answer_followups()
 
 	answers := budget_test_answers(mut app, 4)
 	assert answers.len == 1, 'a cancelled request is answered once: ${answers}'
 	assert answers[0].contains('"code":${jsonrpc_err_request_cancelled}'), 'the cancellation is reported: ${answers[0]}'
 }
 
-fn test_a_quick_compiler_answer_is_waited_for_instead_of_doubled() {
+fn test_a_quick_compiler_answer_does_not_hold_a_request() {
 	mut app := create_test_app()
 	defer {
 		cleanup_test_app(app)
@@ -17832,23 +17832,10 @@ fn test_a_quick_compiler_answer_is_waited_for_instead_of_doubled() {
 	uri := budget_test_open(mut app, 'hover_quick', budget_test_source)
 	app.capture_output = true
 
-	// The first question measures what the compiler answer costs here.
-	first := app.operation_at_pos(.hover, budget_test_request('textDocument/hover', 5, uri))
-	assert first.result is Hover, 'hover answers a Hover: ${first.result}'
-	elapsed_ms := app.compiler_answer_ms[answer_budget_key(uri, .hover)] or { -1 }
-	assert elapsed_ms in 0 .. answer_budget_ms, 'the answer measured inside the budget: ${elapsed_ms} ms'
-
-	// A check that is now pending does not make it worth answering twice.
 	budget_test_check_in_flight(mut app, uri, .slow)
-	app.write_response_or_cancelled(5, first)
-	second := app.operation_at_pos(.hover, budget_test_request('textDocument/hover', 6, uri))
-	app.write_response_or_cancelled(6, second)
-	app.wait_answer_followups()
-
-	value := (second.result as Hover).contents.value
-	assert value.contains('helper doubles a number.'), 'a quick compiler answer is waited for: ${value}'
-	answers := budget_test_answers(mut app, 6)
-	assert answers.len == 1, 'one answer, because the compiler answer is cheap: ${answers}'
+	assert app.compiler_answer_is_held(uri, .hover)
+	app.note_compiler_answer(uri, .hover, answer_budget_ms - 1)
+	assert !app.compiler_answer_is_held(uri, .hover)
 }
 
 // renp_stub_source is the fake V compiler the pooled rename tests drive. It

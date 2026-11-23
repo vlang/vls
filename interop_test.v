@@ -523,6 +523,7 @@ fn test_compiler_rejects_line_info_detects_a_v_without_the_v1_checker() {
 	// V prints exactly this and exits before doing any work.
 	assert compiler_rejects_line_info('unknown option `-vls-mode`')
 	assert compiler_rejects_line_info('unknown option `-line-info`')
+	assert compiler_rejects_line_info('Unknown argument `-line-info`')
 	assert compiler_rejects_line_info('unknown option `-json-errors`')
 	// A compiler that understands the options answers with its payload instead.
 	assert !compiler_rejects_line_info('{"contents":{"kind":"markdown","value":"fn f()"}}')
@@ -539,6 +540,7 @@ fn test_compiler_refused_and_stopped_separates_a_dead_end_from_a_recovery() {
 	// A launcher with no answer prints its refusal and exits.
 	assert compiler_refused_and_stopped('unknown option `-vls-mode`')
 	assert compiler_refused_and_stopped('unknown option `-vls-mode`\n\n')
+	assert compiler_refused_and_stopped('Unknown argument `-line-info`')
 	// One that reruns the request against a compatibility compiler says more,
 	// even when that rerun finds nothing to report.
 	assert !compiler_refused_and_stopped('unknown option `-vls-mode`\nV compilation failed (compiler_error); retrying with `/v1_fallback`.')
@@ -657,13 +659,13 @@ fn test_run_v_line_info_retires_lookups_after_automatic_compatibility_build_fail
 	for _ in 0 .. 2 {
 		result := app.run_v_line_info(.hover, uri, '6:hv^4')
 		assert result == ResponseResult('null')
-		assert app.line_info_mode == .missing
+		assert app.line_info_unavailable
 	}
 	assert app.captured_output.len == 1
 	assert app.captured_output[0].contains('window/showMessage')
 }
 
-fn test_report_missing_compatibility_compiler_names_the_repair() {
+fn test_report_line_info_unavailable_names_the_repair() {
 	// The editor otherwise shows a VLS that highlights code but answers nothing
 	// for completion, hover, signature help, or go to definition, with no hint
 	// that the compiler is the reason. Platform-independent: no stub compiler.
@@ -680,15 +682,13 @@ fn test_report_missing_compatibility_compiler_names_the_repair() {
 }
 
 fn test_a_retired_lookup_never_reports_the_missing_compiler_again() {
-	// Once the lookups are retired, `run_v_line_info` answers from the index at
-	// its early `.missing` check, so it never spawns the compiler and never
-	// re-reports. That structural guarantee is why the notice needs no
-	// "already warned" flag.
+	// Once the one-shot lookups are retired, the index answers subsequent
+	// queries without spawning the compiler or sending another notice.
 	previous := os.getenv('VLS_V_COMMAND')
 	mut app := App{
-		capture_output: true
-		line_info_mode: .missing
-		open_files:     map[string]string{}
+		capture_output:        true
+		line_info_unavailable: true
+		open_files:            map[string]string{}
 	}
 	uri := 'file:///tmp/vls_retired_lookup.v'
 	app.open_files[uri] = 'module main\n\n// greet writes a greeting.\nfn greet() {}\n\nfn main() {\n\tgreet()\n}\n'
@@ -706,7 +706,7 @@ fn test_a_retired_lookup_never_reports_the_missing_compiler_again() {
 	}
 	// Nothing was said to the client, and no compiler was launched.
 	assert app.captured_output.len == 0
-	assert app.line_info_mode == .missing
+	assert app.line_info_unavailable
 }
 
 // line_info_stub_app writes `script` as an executable stand-in for `v`, points
@@ -775,11 +775,11 @@ fn test_run_v_line_info_keeps_a_recovering_launcher_after_an_empty_lookup() {
 	// A hover past the end of the file resolves nothing, which is an ordinary
 	// answer and not a reason to stop asking.
 	assert app.run_v_line_info(.hover, uri, '9:hv^1') == ResponseResult('null')
-	assert app.line_info_mode == .direct
+	assert !app.line_info_unavailable
 
 	// So the very next hover still reaches the launcher.
 	hover := app.run_v_line_info(.hover, uri, '6:hv^4')
-	assert app.line_info_mode == .direct
+	assert !app.line_info_unavailable
 	assert hover is Hover
 	if hover is Hover {
 		assert hover.contents.value.contains('fn helper()')
@@ -2894,6 +2894,8 @@ fn test_publish_diagnostics_params() {
 const compat_matrix_modern_direct_stub = r'#!/bin/sh
 case " $* " in
   *"-line-info"*)
+    [ "$#" -eq 7 ] && [ "$1" = "-w" ] && [ "$2" = "-check" ] &&
+      [ "$3" = "-nocolor" ] && [ "$4" = "-vls-mode" ] && [ "$5" = "-line-info" ] || exit 2
     case " $* " in
       *hv^4*) echo "{\"contents\":{\"kind\":\"markdown\",\"value\":\"fn helper()\"}}" ;;
     esac
@@ -2934,15 +2936,15 @@ fn test_compat_matrix_modern_direct_probes_direct() {
 		return
 	}
 	previous := os.getenv('VLS_V_COMMAND')
-	mut app, uri, root := line_info_stub_app('vls_compat_modern', compat_matrix_modern_direct_stub)
+	mut app, uri, root := line_info_stub_app('vls_line_info_and_check', line_info_and_check_stub)
 	defer {
 		restore_v_command(previous)
 		os.rmdir_all(root) or {}
 	}
-	assert app.line_info_mode == .unknown
+	assert !app.line_info_unavailable
 
 	hover := app.run_v_line_info(.hover, uri, '6:hv^4')
-	assert app.line_info_mode == .direct
+	assert !app.line_info_unavailable
 	assert hover is Hover
 	if hover is Hover {
 		assert hover.contents.value.contains('fn helper()')
@@ -2953,9 +2955,8 @@ fn test_compat_matrix_modern_direct_probes_direct() {
 	assert check.len > 0, 'expected diagnostics from the modern stub'
 	assert check[0].message.contains('stub check error')
 
-	// A probed mode never regresses within the session.
 	again := app.run_v_line_info(.hover, uri, '6:hv^4')
-	assert app.line_info_mode == .direct
+	assert !app.line_info_unavailable
 	assert again is Hover
 }
 
@@ -2971,13 +2972,12 @@ fn test_compat_matrix_dead_end_without_checker() {
 		os.rmdir_all(root) or {}
 	}
 	app.capture_output = true
-	assert app.line_info_mode == .unknown
+	assert !app.line_info_unavailable
 
 	assert app.run_v_line_info(.hover, uri, '6:hv^4') == ResponseResult('null')
-	assert app.line_info_mode == .missing
+	assert app.line_info_unavailable
 
-	// Retiring the lookups must not retire diagnostics: `v check` needs
-	// no compatibility compiler.
+	// Diagnostics still use the compiler after it refuses the editor query.
 	content := os.read_file(uri_to_path(uri)) or { '' }
 	check := app.run_v_check(uri, content)
 	assert check.len > 0, 'expected diagnostics from the dead-end stub'
@@ -2985,8 +2985,10 @@ fn test_compat_matrix_dead_end_without_checker() {
 
 	// Retired stays retired: no new process, no second notice.
 	assert app.run_v_line_info(.hover, uri, '6:hv^4') == ResponseResult('null')
-	assert app.line_info_mode == .missing
+	assert app.line_info_unavailable
 	assert app.captured_output.len == 1
+	queries := os.read_lines(os.join_path(root, 'bin', 'queries.txt'))!
+	assert queries.len == 1
 }
 
 // ============================================================================
@@ -3876,14 +3878,14 @@ fn test_cov_run_v_line_info_once_singlefile_via_stub() {
 		return
 	}
 	previous := os.getenv('VLS_V_COMMAND')
-	mut app, uri, root := line_info_stub_app('vls_cov_once', compat_matrix_modern_direct_stub)
+	mut app, uri, root := line_info_stub_app('vls_cov_once', line_info_and_check_stub)
 	defer {
 		restore_v_command(previous)
 		os.rmdir_all(root) or {}
 	}
 	work_dir := os.dir(uri_to_path(uri))
 	result := app.run_v_line_info_once(.hover, uri, '6:hv^4', work_dir)
-	assert app.line_info_mode == .direct, 'a direct compiler probes direct'
+	assert !app.line_info_unavailable
 	assert result is Hover, 'a direct single-file lookup answers hover'
 	if result is Hover {
 		assert (result as Hover).contents.value.contains('fn helper()'), 'the stub payload is kept'
@@ -4683,8 +4685,9 @@ fn test_rush_leaves_the_slow_job_behind_a_waiting_fast_job() {
 	mut scheduler := rush_test_scheduler(mut app)
 	project_key := 'file:///rush_project'
 	now := time.now().unix_milli()
-	rush_test_schedule(mut scheduler, mut app, uri, project_key, now + diagnostics_fast_debounce_ms,
-		now + diagnostics_slow_debounce_ms)
+	fast_deadline := now + 10_000
+	slow_deadline := fast_deadline + diagnostics_slow_debounce_ms
+	rush_test_schedule(mut scheduler, mut app, uri, project_key, fast_deadline, slow_deadline)
 
 	app.rush_pending_diagnostics(uri)
 
@@ -4692,17 +4695,51 @@ fn test_rush_leaves_the_slow_job_behind_a_waiting_fast_job() {
 		assert false, 'the slow job is pending'
 		return
 	}
-	assert slow.ready_at == now + diagnostics_slow_debounce_ms, 'a fast job still waiting holds the slow one back'
+	assert slow.ready_at == slow_deadline, 'a fast job still waiting holds the slow one back'
 	jobs, _ := scheduler.take_ready_jobs(time.now().unix_milli())
 	assert jobs.len == 0, 'neither tier is due yet, so nothing publishes'
-	fast, _ := scheduler.take_ready_jobs(now + diagnostics_fast_debounce_ms)
+	fast, _ := scheduler.take_ready_jobs(fast_deadline)
 	assert fast.len == 1, 'the fast tier publishes at its own deadline'
 	assert fast[0].kind == .fast, 'the fast tier is the one that publishes'
 	scheduler.finish(fast[0])
-	answer, _ := scheduler.take_ready_jobs(now + diagnostics_slow_debounce_ms)
+	answer, _ := scheduler.take_ready_jobs(slow_deadline)
 	assert answer.len == 1, 'the slow answer follows the fast one'
 	assert answer[0].kind == .slow, 'the slow tier is the one that follows'
 	scheduler.finish(answer[0])
+}
+
+fn test_clean_fast_result_clears_an_earlier_fast_result_only() {
+	mut app := &App{
+		capture_output: true
+	}
+	mut scheduler := new_diagnostics_scheduler()
+	uri := 'file:///fast_clear.v'
+	global_generation, first := scheduler.next_generation(uri)
+	job := DiagnosticsJob{
+		uri:               uri
+		global_generation: global_generation
+		generation:        first
+		kind:              .fast
+		write_mutex:       app.write_mutex
+	}
+	broken := app.diagnostics_notification_for(uri, '}\n', [JsonError{
+		message: 'unexpected delimiter'
+		line_nr: 1
+		col:     1
+		len:     1
+		level:   'error'
+	}])
+	assert scheduler.publish_if_current(mut app, job, broken)
+	_, next := scheduler.next_generation(uri)
+	scheduler.forget_published_errors(uri)
+	current := DiagnosticsJob{ ...job, generation: next }
+	clean := app.diagnostics_notification_for(uri, '', [])
+	assert !scheduler.publish_if_current(mut app, job, clean)
+	assert scheduler.publish_if_current(mut app, current, clean)
+	assert !scheduler.publish_if_current(mut app, current, clean)
+	assert scheduler.publish_if_current(mut app, DiagnosticsJob{ ...current, kind: .slow }, broken)
+	assert !scheduler.publish_if_current(mut app, current, clean)
+	assert app.captured_output.len == 3
 }
 
 fn test_rush_publishes_the_fast_tier_before_the_flushed_slow_one() {

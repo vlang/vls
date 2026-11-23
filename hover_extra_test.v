@@ -243,7 +243,7 @@ fn test_hx_cross_file_function_hover_links_the_file() {
 	lib_uri := uris['area.v'] or { '' }
 	assert main_uri != '', 'hx_cross_file_function_hover_links_the_file: no uri for main.v'
 	assert lib_uri != '', 'hx_cross_file_function_hover_links_the_file: no uri for area.v'
-	app.line_info_mode = .missing
+	app.line_info_unavailable = true
 	// Asked from main.v, the declaration is in area.v: the link is its path
 	// relative to the project root.
 	got := hx_hover(mut app, main_uri, 'println(area(2))', 'area')

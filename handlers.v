@@ -26,9 +26,10 @@ const v_builtin_types = ['any', 'array', 'bool', 'byteptr', 'chan', 'char', 'cha
 const completion_item_budget = 200
 
 struct IndexedCompletionResult {
-	items          []Detail
-	use_compiler   bool
-	embedded_types []string
+	imports_pending bool
+	items           []Detail
+	use_compiler    bool
+	embedded_types  []string
 	// field_types holds each field's type as member lookup needs it, without
 	// `&`, `?` or `!`; field_declared_types keeps it as the source writes it.
 	field_types          map[string]string
@@ -158,8 +159,10 @@ fn source_call_target(content string, cursor Position, enc PositionEncoding) ?So
 // an unbounded scan.
 fn (app &App) source_declaration_at(location Location) string {
 	content := app.index_source_for(location.uri) or { return '' }
-	lines := content.split_into_lines()
-	start_line := location.range.start.line
+	return source_declaration_at_line(content, content.split_into_lines(), location.range.start.line)
+}
+
+fn source_declaration_at_line(content string, lines []string, start_line int) string {
 	if start_line < 0 || start_line >= lines.len {
 		return ''
 	}
@@ -447,8 +450,8 @@ fn (mut app App) hover_result(uri string, position Position, line_info string) R
 			return app.hover_with_written_declaration(uri, position, answer.hover, answer.declared_at)
 		}
 	}
-	// V3 cannot tell, as while a file does not parse: the index says where a
-	// function is declared, and V1 what anything else is.
+	// If the query did not resolve a function, try the source index before
+	// making a one-shot compiler request.
 	if !located {
 		if location := app.resolve_indexed_definition(uri, position) {
 			if hover := app.function_declaration_hover(uri, location) {
@@ -456,11 +459,7 @@ fn (mut app App) hover_result(uri string, position Position, line_info string) R
 			}
 		}
 	}
-	result := if app.line_info_mode == .missing {
-		app.line_info_unavailable_result(.hover, uri, line_info)
-	} else {
-		app.run_v_line_info_once(.hover, uri, line_info, compilation_work_dir(normalize_overlay_path(real_path)))
-	}
+	result := app.run_v_line_info_once(.hover, uri, line_info, compilation_work_dir(normalize_overlay_path(real_path)))
 	return app.hover_with_written_declaration(uri, position, result, none)
 }
 
@@ -481,7 +480,7 @@ fn (mut app App) function_declaration_hover(uri string, location Location) ?Hove
 	if !declares_function_at(lines, line, start) {
 		return none
 	}
-	declaration := app.source_declaration_at(location)
+	declaration := source_declaration_at_line(content, lines, line)
 	if declaration == '' {
 		return none
 	}
@@ -1631,9 +1630,6 @@ fn (mut app App) operation_at_pos(method Method, request Request) Response {
 	// before building the -line-info string (P0-01).
 	byte_col := app.client_col_to_byte_col(path, params.position.line, col)
 
-	// The `-line-info` question each method asks the compiler. It names no state,
-	// so the answers the index gives below carry it: a question the compiler is
-	// held for is asked again afterwards, on a thread of its own.
 	line_info := match method {
 		.hover {
 			'${line_nr}:hv^${byte_col}'
@@ -1666,8 +1662,8 @@ fn (mut app App) operation_at_pos(method Method, request Request) Response {
 	// compiler process here used to cost hundreds of milliseconds on every request,
 	// even when the compiler returned no completion payload for an incomplete file.
 	if method == .completion {
-		indexed := app.indexed_completions(path, params.position)
 		prefix := app.word_prefix_at_cursor(path, params.position)
+		indexed := app.indexed_completions(path, params.position, prefix.to_lower())
 		if indexed.use_compiler {
 			compiler_result := app.run_v_line_info(.completion, path, '${line_nr}:${byte_col}')
 			compiler_items := if compiler_result is []Detail {
@@ -1680,29 +1676,27 @@ fn (mut app App) operation_at_pos(method Method, request Request) Response {
 			return Response{
 				id:     request.id
 				result: CompletionList{
-					is_incomplete: truncated
+					is_incomplete: truncated || indexed.imports_pending
 					items:         budgeted
 				}
 			}
 		}
 		if prefix != '' && indexed.items.len > 0 {
-			all_labels := indexed.items.map(it.label)
-			filtered := fuzzy_filter(prefix, all_labels)
-			mut filtered_set := map[string]bool{}
-			for label in filtered {
-				filtered_set[label] = true
-			}
+			lowered_prefix := prefix.to_lower()
 			mut filtered_items := []Detail{}
 			for item in indexed.items {
-				if item.label in filtered_set {
+				if fuzzy_subsequence_matches(lowered_prefix, item.label) {
 					filtered_items << item
+					if filtered_items.len > completion_item_budget {
+						break
+					}
 				}
 			}
 			budgeted_filtered, truncated_filtered := apply_completion_budget(filtered_items)
 			return Response{
 				id:     request.id
 				result: CompletionList{
-					is_incomplete: truncated_filtered
+					is_incomplete: truncated_filtered || indexed.imports_pending
 					items:         budgeted_filtered
 				}
 			}
@@ -1711,20 +1705,18 @@ fn (mut app App) operation_at_pos(method Method, request Request) Response {
 		return Response{
 			id:     request.id
 			result: CompletionList{
-				is_incomplete: truncated_indexed
+				is_incomplete: truncated_indexed || indexed.imports_pending
 				items:         budgeted_indexed
 			}
 		}
 	}
 
 	// Resolve declarations from VLS's authoritative source index before reaching
-	// for the compatibility compiler's `-line-info` mode, which a V without the
-	// V1 checker cannot serve at all. Free functions and top-level declarations
+	// for a compiler `-line-info` query. Free functions and top-level declarations
 	// do not require receiver type inference, so this path is both deterministic
 	// and aware of unsaved files.
 	if method in [.definition, .declaration, .type_definition, .implementation] {
 		if location := app.resolve_indexed_definition(path, params.position) {
-			app.schedule_answer_followup(method, path, params.position, line_info)
 			return Response{
 				id:     request.id
 				result: location
@@ -1746,7 +1738,6 @@ fn (mut app App) operation_at_pos(method Method, request Request) Response {
 					}
 				}
 			}
-			app.schedule_answer_followup(.hover, path, params.position, line_info)
 			return Response{
 				id:     request.id
 				result: binding
@@ -1757,19 +1748,25 @@ fn (mut app App) operation_at_pos(method Method, request Request) Response {
 		// declaration from the index waits until after the compiler, which brings
 		// the documentation with its answer.
 		if member := app.member_selector_hover(path, params.position) {
-			app.schedule_answer_followup(.hover, path, params.position, line_info)
 			return Response{
 				id:     request.id
 				result: member
 			}
 		}
-		// Nothing the index answers on its own was found, so this question falls
-		// through to the compiler. The declaration the index resolves is still an
-		// answer, and a check that holds the compilers makes it worth sending now:
-		// the compiler's answer follows, on the same id (answer_budget.v).
+		// A resolved function shows its written signature and documentation, the
+		// same content hover_result builds from a compiler definition location.
+		if location := app.resolve_indexed_definition(path, params.position) {
+			if function := app.function_declaration_hover(path, location) {
+				return Response{
+					id:     request.id
+					result: function
+				}
+			}
+		}
+		// When diagnostics holds the compiler, use any remaining source fallback
+		// to keep the request responsive.
 		if app.compiler_answer_is_held(path, .hover) {
 			if declaration := app.source_hover_fallback(path, params.position) {
-				app.schedule_answer_followup(.hover, path, params.position, line_info)
 				return Response{
 					id:     request.id
 					result: declaration
@@ -1792,9 +1789,7 @@ fn (mut app App) operation_at_pos(method Method, request Request) Response {
 
 // compiler_answer asks the compiler what the index could not say: what the name
 // under the cursor is, or where it is declared, with the fallbacks applied to an
-// answer the compiler has none for. The deferred answer of a request the index
-// already answered ends here too (see answer_budget.v), so the two cannot drift
-// apart.
+// answer the compiler has none for.
 fn (mut app App) compiler_answer(method Method, uri string, position Position, line_info string) ResponseResult {
 	mut result := if method == .hover {
 		app.hover_result(uri, position, line_info)
@@ -1878,7 +1873,7 @@ fn merge_completion_items(indexed_items []Detail, compiler_items []Detail) []Det
 // indexed_completions returns useful completions without compiling the project.
 // The compiler-backed path rebuilt an unsaved project overlay and launched V for
 // every request; on vlang/v that was roughly 400 ms even for a warm request.
-fn (mut app App) indexed_completions(uri string, position Position) IndexedCompletionResult {
+fn (mut app App) indexed_completions(uri string, position Position, queries ...string) IndexedCompletionResult {
 	content := app.open_files[uri] or { os.read_file(uri_to_path(uri)) or { '' } }
 	lines := content.split_into_lines()
 	if position.line < 0 || position.line >= lines.len {
@@ -1941,8 +1936,21 @@ fn (mut app App) indexed_completions(uri string, position Position) IndexedCompl
 		}
 	}
 
+	working_dir := os.dir(uri_to_path(uri))
+	module_result := if working_dir != '' {
+		app.collect_module_completions(uri, working_dir)
+	} else {
+		IndexedModuleCompletionResult{}
+	}
+	query := if module_result.use_compiler { '' } else { queries[0] or { '' } }
 	mut details := app.callback_argument_completions(uri, content, lines, position)
-	details << app.with_builtin_calls(make_keyword_completions())
+	keywords := make_keyword_completions()
+	details << if query == '' || v_builtins.any(fuzzy_subsequence_matches(query, it))
+		|| v_builtin_keyword_functions.any(fuzzy_subsequence_matches(query, it)) {
+		app.with_builtin_calls(keywords)
+	} else {
+		keywords
+	}
 	details << postfix_completions()
 	mut seen_labels := map[string]bool{}
 	for detail in details {
@@ -1964,27 +1972,37 @@ fn (mut app App) indexed_completions(uri string, position Position) IndexedCompl
 			seen_labels[binding.alias] = true
 		}
 	}
-	working_dir := os.dir(uri_to_path(uri))
-	mut use_compiler := false
-	if working_dir != '' {
-		module_result := app.collect_module_completions(uri, working_dir)
-		use_compiler = module_result.use_compiler
-		for detail in module_result.items {
+	for detail in module_result.items {
+		if detail.label !in seen_labels {
+			details << detail
+			seen_labels[detail.label] = true
+		}
+	}
+	// Auto imports come last. They cannot enter the result once the earlier
+	// matching items already fill the budget and make the list incomplete.
+	matching := details.count(fuzzy_subsequence_matches(query, it.label))
+	mut imports_pending := false
+	if queries.len == 0 || matching <= completion_item_budget {
+		mut imports := []Detail{}
+		if app.received_initialize && matching > 0 && !module_result.use_compiler && queries.len > 0 {
+			if !position_in_string_or_comment(content, position, app.position_encoding) {
+				modules, pending := app.completion_imports(uri_to_path(uri), query)
+				imports = module_import_items(content, query, modules)
+				imports_pending = pending
+			}
+		} else {
+			imports = app.module_import_completions(uri, content, position, query)
+		}
+		for detail in imports {
 			if detail.label !in seen_labels {
 				details << detail
-				seen_labels[detail.label] = true
 			}
 		}
 	}
-	// Modules not imported yet: accepting one also adds its `import` line.
-	for detail in app.module_import_completions(uri, content, position) {
-		if detail.label !in seen_labels {
-			details << detail
-		}
-	}
 	return IndexedCompletionResult{
-		items:        details
-		use_compiler: use_compiler
+		items:           details
+		use_compiler:    module_result.use_compiler
+		imports_pending: imports_pending
 	}
 }
 
@@ -3955,7 +3973,11 @@ fn without_operator_completions(items []Detail) []Detail {
 // followed by a `//` comment, or none. Anything more (`'abc'.len`, `'a' + b`)
 // is left to the other inference paths.
 fn receiver_literal_type(rhs string) ?string {
-	r := rhs.trim_space()
+	kind, _ := receiver_scalar_literal(rhs.trim_space())?
+	return kind
+}
+
+fn receiver_scalar_literal(r string) ?(string, int) {
 	if r == '' {
 		return none
 	}
@@ -4004,7 +4026,7 @@ fn receiver_literal_type(rhs string) ?string {
 	if rest != '' && !rest.starts_with('//') {
 		return none
 	}
-	return literal_type
+	return literal_type, end
 }
 
 // indexed_enum_members lists the values of the enum `type_name` (`Color`, or
@@ -5095,9 +5117,8 @@ fn (mut app App) on_did_close(request Request) {
 	mut diagnostics_mutation := DiagnosticsProjectMutation{}
 	if is_open {
 		diagnostics_mutation = app.begin_diagnostics_project_mutation(uri)
-	} else {
-		app.cancel_scheduled_diagnostics(uri)
 	}
+	app.cancel_scheduled_diagnostics(uri)
 	if is_open {
 		app.open_files.delete(uri)
 		app.bump_generation(uri)
@@ -5174,7 +5195,7 @@ const max_published_diagnostics = 100
 // diagnostics_notification_for turns the compiler's errors for one file into
 // the notification that publishes them.
 fn (mut app App) diagnostics_notification_for(uri string, content string, v_errors []JsonError) Notification {
-	lines := content.split_into_lines()
+	lines := if v_errors.len > 0 { content.split_into_lines() } else { []string{} }
 	mut diagnostics := []LSPDiagnostic{}
 	mut seen_positions := map[string]bool{}
 	for v_err in v_errors {
@@ -6772,11 +6793,37 @@ fn name_needs_other_defines(name string) bool {
 // filtering without removing inactive sources from the broader symbol index.
 // The requesting test file is a direct compiler input, but sibling tests are
 // separate targets, so it is judged on its own.
-fn (app &App) active_indexed_source_file_names(dir string, active_test_file_name string) map[string]bool {
-	mut file_names := os.ls(dir) or { return map[string]bool{} }
-	file_names = file_names.filter(it.ends_with('.v'))
-	lex_dir := lexical_index_path(dir)
+fn (mut app App) active_indexed_source_file_names(dir string, active_test_file_name string) map[string]bool {
+	entries := os.ls(dir) or { return map[string]bool{} }
+	mut file_names := entries.filter(it.ends_with('.v'))
+	file_names.sort()
+	host := pref.host_target()
+	if cached := app.active_source_files[dir] {
+		if cached.names != file_names {
+			app.active_source_files.delete(dir)
+		}
+	}
+	if dir !in app.active_source_files {
+		// The compiler's filter settles OS, arch, defines and default file
+		// precedence together. Only the directory's file names affect it.
+		mut saved := map[string]bool{}
+		for path in pref.get_v_files_from_dir_for_target(dir, v3_own_defines, host) {
+			saved[os.file_name(path)] = true
+		}
+		app.active_source_files[dir] = ActiveSourceFiles{
+			names:  file_names
+			active: saved
+		}
+	}
+	cached := app.active_source_files[dir] or { ActiveSourceFiles{} }
+	mut active := cached.active.clone()
+	mut test_present := active_test_file_name in file_names
 	normalized_dir := normalized_index_path(dir)
+	lex_dir := lexical_index_path(dir)
+	// A buffer the client has created but not saved is invisible to that scan,
+	// so judge it from its name. Only the suffix rules can be applied this way;
+	// a `_d_` file needs a define VLS does not pass, and every other name is
+	// treated as active rather than hiding a file the user is editing.
 	for uri, _ in app.open_files {
 		path := uri_to_path(uri)
 		// Lexical first: no real_path per open file on the hot path.
@@ -6785,24 +6832,10 @@ fn (app &App) active_indexed_source_file_names(dir string, active_test_file_name
 			continue
 		}
 		name := os.file_name(path)
-		if name.ends_with('.v') && name !in file_names {
-			file_names << name
+		if name == active_test_file_name {
+			test_present = true
 		}
-	}
-	host := pref.host_target()
-	mut active := map[string]bool{}
-	// The compiler's own directory scan is authoritative for saved sources: it
-	// settles the os, arch, `_d_`/`_notd_`, and `_default.c.v` rules together,
-	// and VLS compiles with no user defines, only the ones V3 sets for itself.
-	for path in pref.get_v_files_from_dir_for_target(dir, v3_own_defines, host) {
-		active[os.file_name(path)] = true
-	}
-	// A buffer the client has created but not saved is invisible to that scan,
-	// so judge it from its name. Only the suffix rules can be applied this way;
-	// a `_d_` file needs a define VLS does not pass, and every other name is
-	// treated as active rather than hiding a file the user is editing.
-	for name in file_names {
-		if name in active || name.ends_with('_test.v') || name_needs_other_defines(name)
+		if !name.ends_with('.v') || name in active || name.ends_with('_test.v') || name_needs_other_defines(name)
 			|| os.exists(os.join_path(dir, name)) {
 			continue
 		}
@@ -6810,11 +6843,16 @@ fn (app &App) active_indexed_source_file_names(dir string, active_test_file_name
 			active[name] = true
 		}
 	}
-	if active_test_file_name in file_names
+	if test_present
 		&& pref.is_test_file_for_target(os.join_path(dir, active_test_file_name), 'c', host.os) {
 		active[active_test_file_name] = true
 	}
 	return active
+}
+
+struct ActiveSourceFiles {
+	names  []string
+	active map[string]bool
 }
 
 // find_indexed_source_definition finds one unambiguous top-level declaration
@@ -6834,47 +6872,41 @@ fn (mut app App) find_indexed_source_definition(dir string, symbol string, activ
 		}
 	}
 	active_file_names := app.active_indexed_source_file_names(dir, active_test_file_name)
-	mut matches := []Location{}
-	mut uris := app.symbol_index.keys()
-	uris.sort()
-	for uri in uris {
-		path := uri_to_path(uri)
-		if normalized_index_path(os.dir(path)) != normalized_dir {
-			continue
-		}
-		if os.file_name(path) !in active_file_names {
+	mut found := ?Location(none)
+	for uri in app.indexed_uris_in_dir(dir) {
+		if os.file_name(uri_to_path(uri)) !in active_file_names {
 			continue
 		}
 		entry := app.symbol_index[uri] or { continue }
 		if entry.module_name != expected_module {
 			continue
 		}
-		declaration_occurrences := app.occurrences_for(uri)[symbol] or { continue }
 		for sym in entry.doc_symbols {
 			if !source_definition_kind_is_supported(sym.kind)
 				|| extract_simple_fn_name(sym.name) != symbol {
-				continue
-			}
-			if !source_declaration_occurrence_is_code(sym, declaration_occurrences) {
 				continue
 			}
 			if sym.range.start.line >= 0 && sym.range.start.line < entry.conditional_lines.len
 				&& entry.conditional_lines[sym.range.start.line] {
 				continue
 			}
+			declaration_occurrences := app.occurrences_for(uri)[symbol] or { continue }
+			if !source_declaration_occurrence_is_code(sym, declaration_occurrences) {
+				continue
+			}
 			if require_public && !source_declaration_is_public(uri, sym, app) {
 				continue
 			}
-			matches << Location{
+			if found != none {
+				return none
+			}
+			found = Location{
 				uri:   uri
 				range: sym.selection_range
 			}
 		}
 	}
-	if matches.len != 1 {
-		return none
-	}
-	return matches[0]
+	return found
 }
 
 // resolve_indexed_definition handles declaration lookup that does not need
@@ -7112,14 +7144,17 @@ fn inline_doc_example(comment string) ?string {
 // Returns '' if no module declaration is found.
 fn get_module_name(content string) string {
 	mut scan_state := ImportScanState{}
-	for raw_line in content.split_into_lines() {
-		trimmed := source_line_import_code(raw_line, mut scan_state).trim_space()
+	mut start := 0
+	for start < content.len {
+		end := content.index_after('\n', start) or { content.len }
+		trimmed := source_line_import_code(content[start..end], mut scan_state).trim_space()
 		if trimmed.starts_with('module ') {
 			name := trimmed[7..].trim_space()
 			if name != '' {
 				return name
 			}
 		}
+		start = end + 1
 	}
 	return ''
 }
@@ -9121,9 +9156,7 @@ fn (mut app App) collect_module_completions(current_file_uri string, working_dir
 	lex_dir := lexical_index_path(working_dir)
 	mut items := []Detail{}
 	mut has_conditional := false
-	mut indexed_uris := app.symbol_index.keys()
-	indexed_uris.sort()
-	for indexed_uri in indexed_uris {
+	for indexed_uri in app.indexed_uris_in_dir(working_dir) {
 		entry := app.symbol_index[indexed_uri] or { continue }
 		// Cheapest filters first: module match is pure memory, filename is
 		// one map lookup. The directory check only canonicalizes when the

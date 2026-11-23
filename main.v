@@ -39,7 +39,6 @@ fn (mut app App) stop_standalone_session() {
 	app.cancel_and_join_line_info_workers()
 	app.cancel_all_scheduled_diagnostics()
 	app.stop_run_commands()
-	app.wait_answer_followups()
 	app.stop_diagnostics_servers()
 	app.stop_v3_queries()
 	app.stop_index_refresh()
@@ -108,17 +107,19 @@ mut:
 	current_request_raw_id                      string                   // Raw JSON id of the request being processed (echoed verbatim)
 	position_encoding                           PositionEncoding = .utf16 // Negotiated LSP position encoding (default UTF-16)
 	symbol_index                                map[string]IndexEntry        // Persistent per-URI symbol index (see index.v)
+	active_source_files                         map[string]ActiveSourceFiles // Saved build-file selection per directory
 	indexed_dirs                                map[string]bool              // Project dirs already walked into the index
 	indexed_dir_walk_ms                         map[string]i64               // Last walk time per dir, for watcher-less refresh
 	ref_occurrences                             map[string]OccEntry          // Per-URI identifier occurrences for references (see index.v)
 	index_skipped_uris                          map[string]bool              // Disk files omitted from the bounded index
 	index_incomplete_scopes                     map[string]bool              // Index walks that could not finish
-	index_walk_budget                           int                          // Test seam: file ceiling for one project walk, 0 = index_max_files
-	index_walk_byte_budget                      u64                          // Test seam: total disk bytes indexed per walk, 0 = platform budget
+	index_walk_budget                           int // Test seam: file ceiling for one project walk, 0 = index_max_files
+	index_walk_byte_budget                      u64 // Test seam: total disk bytes indexed per walk, 0 = platform budget
 	vlib_fn_cache                               map[string]map[string]string // Per-vlib-module fn→return-type index (immutable during a session)
 	expression_type_depth                       int                         // Nesting of expression_type, which a binding's declaration re-enters
 	line_info_mode                              LineInfoMode                // How the configured `v` reaches the `-line-info` checker (see interop.v)
 	line_info_probe_done                        bool                        // A line-info request completed, so later misses may run async
+	line_info_unavailable                       bool                        // The configured compiler definitively refused a one-shot editor query
 	inlay_hint_cache                            map[string]CachedInlayHints // Per-URI compiler inlay hints, see compiler_inlay_hints
 	inlay_fn_cache                              ?&InlayFnCache              // Per-file fn→return-type cache for inlay hints (see handlers.v)
 	open_uris_cache                             map[string]string           // open_files_generation-scoped normalized path → uri map
@@ -153,17 +154,14 @@ mut:
 	write_mutex                    &sync.Mutex = sync.new_mutex() // Serializes worker and request-loop writes
 	// What the compiler's answer cost, per document and method: below the budget
 	// in answer_budget.v the answer is waited for instead of answered twice.
-	compiler_answer_ms map[string]i64
-	// Serializes reads/writes of compiler_answer_ms, which run_answer_followup
-	// touches from a worker thread while the request loop reads it (P1).
-	compiler_answer_ms_mutex &sync.Mutex = sync.new_mutex()
-	// The threads that measure a compiler answer after the index has answered
-	// (see answer_budget.v).
-	answer_followups         &sync.WaitGroup = sync.new_waitgroup()
-	importable_modules_cache map[string]ImportableModulesCache // Modules a file can import, per project root (see module_imports.v)
-	vlib_modules_cache       map[string][]ImportableModule     // The modules of vlib, per vlib folder
-	module_imports_cache     map[string]ModuleImports          // The modules each module imports (see module_imports.v)
-	builtin_calls_cache      map[string]map[string]Detail      // V's builtin functions as completion items, per vlib/builtin folder
+	compiler_answer_ms            map[string]i64
+	completion_imports_scan       ?CompletionImportsScan
+	completion_imports_cache      map[string]ImportableModulesCache
+	completion_imports_generation u64
+	importable_modules_cache      map[string]ImportableModulesCache // Modules a file can import, per project root (see module_imports.v)
+	vlib_modules_cache            map[string]ImportableModulesCache // The modules of vlib, per vlib folder
+	module_imports_cache          map[string]ModuleImports          // The modules each module imports (see module_imports.v)
+	builtin_calls_cache           map[string]map[string]Detail      // V's builtin functions as completion items, per vlib/builtin folder
 }
 
 struct JsonError {
@@ -722,7 +720,9 @@ fn (mut app App) write_data(data string) {
 fn (mut app App) send_framed(content string) {
 	header := 'Content-Length: ${content.len}\r\n\r\n'
 	full_message := '${header}${content}'
-	log('SEND: ${full_message}')
+	if logging_is_enabled() {
+		log('SEND: ${full_message}')
+	}
 	app.write_data(full_message)
 }
 
@@ -1026,7 +1026,6 @@ fn (mut app App) handle_requests[T](mut reader T) {
 		// A deferred answer asks through the pooled compilers and writes on the
 		// transport, so both outlive the request that scheduled it and are joined
 		// before the session stops them.
-		app.wait_answer_followups()
 		// However the session ends, its compilers end, and the files they
 		// checked go: no other session uses them.
 		app.stop_diagnostics_servers()

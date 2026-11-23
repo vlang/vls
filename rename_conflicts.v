@@ -427,27 +427,14 @@ fn (mut app App) v3_check_copy(project V3QueryProject, target string) !string {
 	// is the one those run in: asked for the same key, the server that is warm
 	// for them answers this check too, and no compiler process of its own
 	// starts (see pooled_program_question).
-	mut asked := []string{}
-	if is_library {
-		asked << '-shared'
-	}
-	asked << ['-check', '-nocolor', target]
-	if answer := app.pooled_program_question(asked, project.overlay.temp_work_dir, '') {
+	args := build_v_check_args(target, is_library)
+	if answer := app.pooled_program_question(args, project.overlay.temp_work_dir, '') {
 		return rename_check_output(answer.exit_code, answer.output)
 	}
 	if app.v3_one_shot_unsupported {
 		return error('this compiler cannot validate rename conflicts')
 	}
-	mut argv := ['-check', '-nocolor']
-	if is_library {
-		argv << '-shared'
-	}
-	argv << target
-	result := run_v_argv(argv, project.overlay.temp_work_dir)
-	if compiler_rejects_any_option(result.output, ['-check', '-nocolor', '-shared']) {
-		app.v3_one_shot_unsupported = true
-		return error('this compiler cannot validate rename conflicts')
-	}
+	result := run_v_argv(args, project.overlay.temp_work_dir)
 	return rename_check_output(result.exit_code, result.output)
 }
 

@@ -10,13 +10,11 @@ import time
 // A check starts as soon as a change arrives: a newer change stops the check
 // that runs, whose answer would be stale, and a question goes to a server of
 // its own, which a check does not hold (see DiagnosticsServer.busy). The worker
-// looks for ready jobs often while one waits for its time.
+// wakes when work arrives or a deadline passes.
 // The fast tier answers from the index without a compiler; the slow tier
 // runs the full check after the user pauses. The slow answer replaces the
 // fast one, so a fast finding the check does not reproduce is corrected.
-const diagnostics_fast_debounce_ms = 150
-const diagnostics_slow_debounce_ms = 800
-const diagnostics_worker_poll = 5 * time.millisecond
+const diagnostics_slow_debounce_ms = 75
 
 // DiagnosticsKind is the tier a job belongs to. Slow is the zero value, so
 // a job built without a kind behaves like today's single-tier check.
@@ -75,12 +73,17 @@ mut:
 	worker_running      bool
 	worker_started      bool
 	worker_done         chan bool
+	wake                chan bool = chan bool{cap: 1}
 	stopped             bool
 	// Shared diagnostics cache populated by worker checks, so pull requests
 	// (handle_pull_diagnostic) can serve the errors a check published even
 	// though they run on the main App, whose own diag_cache the worker never
 	// touches (P1: pull diagnostics never receive async results).
-	diag_cache         map[string]DiagCacheEntry
+	diag_cache map[string]DiagCacheEntry
+	// Tracks what is still displayed even after an edit invalidates its pull
+	// cache entry. A clean fast result may clear only an earlier fast publish.
+	fast_published     map[string]bool
+	fast_type_builtin  FastTypeBuiltin
 	active_uri         string
 	active_project_key string
 	active_generation  u64
@@ -221,6 +224,7 @@ fn (mut scheduler DiagnosticsScheduler) enqueue(job DiagnosticsJob) bool {
 		scheduler.worker_done = chan bool{}
 	}
 	scheduler.worker_running = true
+	scheduler.wake.try_push(true)
 	return should_start
 }
 
@@ -275,7 +279,7 @@ fn (mut scheduler DiagnosticsScheduler) take_ready_jobs(now i64) ([]DiagnosticsJ
 }
 
 // rush_pending_slow_job moves the deadline of the pending slow job of `uri` to
-// now, so the check a read waits for starts on the worker's next poll instead of
+// now, so the check a read waits for can start on the worker instead of
 // waiting out its debounce: a question about the program — a hover, a definition,
 // a signature — is answered against what the editor already shows, and until the
 // slow check publishes that is last-keystroke's overlay (clangd's debounce
@@ -309,6 +313,7 @@ fn (mut scheduler DiagnosticsScheduler) rush_pending_slow_job(uri string) {
 		...job
 		ready_at: now
 	}
+	scheduler.wake.try_push(true)
 }
 
 fn (mut scheduler DiagnosticsScheduler) finish(job DiagnosticsJob) {
@@ -398,6 +403,8 @@ fn (mut scheduler DiagnosticsScheduler) cancel(uri string) {
 	scheduler.generations[uri] = scheduler.generations[uri] + 1
 	scheduler.pending_jobs.delete(diagnostics_job_key(uri, .slow))
 	scheduler.pending_jobs.delete(diagnostics_job_key(uri, .fast))
+	scheduler.fast_published.delete(uri)
+	scheduler.wake.try_push(true)
 	scheduler.mutex.unlock()
 }
 
@@ -405,6 +412,7 @@ fn (mut scheduler DiagnosticsScheduler) cancel_all() {
 	scheduler.mutex.lock()
 	scheduler.global_generation++
 	scheduler.pending_jobs.clear()
+	scheduler.wake.try_push(true)
 	scheduler.mutex.unlock()
 }
 
@@ -415,6 +423,7 @@ fn (mut scheduler DiagnosticsScheduler) stop_and_wait() {
 	scheduler.stopped = true
 	scheduler.global_generation++
 	scheduler.pending_jobs.clear()
+	scheduler.wake.try_push(true)
 	started := scheduler.worker_started
 	done := scheduler.worker_done
 	scheduler.mutex.unlock()
@@ -548,7 +557,7 @@ fn (mut app App) enqueue_diagnostics_tickets(mut scheduler DiagnosticsScheduler,
 			version = current_version
 		}
 		ready_at := if ticket.kind == .fast {
-			now + diagnostics_fast_debounce_ms
+			now
 		} else {
 			now + diagnostics_slow_debounce_ms
 		}
@@ -611,6 +620,7 @@ fn (mut app App) rush_pending_diagnostics(uri string) {
 fn run_diagnostics_worker(mut scheduler DiagnosticsScheduler) {
 	scheduler.mutex.lock()
 	done := scheduler.worker_done
+	wake := scheduler.wake
 	scheduler.mutex.unlock()
 	defer {
 		done.close()
@@ -622,22 +632,26 @@ fn run_diagnostics_worker(mut scheduler DiagnosticsScheduler) {
 		}
 		if jobs.len == 0 {
 			scheduler.mutex.lock()
-			mut delay := i64(diagnostics_worker_poll / time.millisecond)
 			now_ms := time.now().unix_milli()
+			mut delay := i64(diagnostics_slow_debounce_ms)
+			if scheduler.pending_jobs.len == 0 {
+				delay = 0
+			}
 			for _, job in scheduler.pending_jobs {
 				d := job.ready_at - now_ms
-				if d > 0 && d < delay {
+				if d < delay {
 					delay = d
 				}
 			}
-			if scheduler.pending_jobs.len == 0 {
-				delay = i64(diagnostics_worker_poll / time.millisecond)
-			}
 			scheduler.mutex.unlock()
-			if delay < 1 {
-				delay = 1
+			if delay > 0 {
+				select {
+					_ := <-wake {
+					}
+					delay * time.millisecond {
+					}
+				}
 			}
-			time.sleep(delay * time.millisecond)
 			continue
 		}
 		for job in jobs {
@@ -834,8 +848,17 @@ fn (mut scheduler DiagnosticsScheduler) publish_if_current(mut app App, job Diag
 	if !scheduler.is_job_current_locked(job) {
 		return false
 	}
+	uri := notification.params.uri
+	if job.kind == .fast && notification.params.diagnostics.len > 0 {
+		scheduler.fast_published[uri] = true
+	} else {
+		if job.kind == .fast && uri !in scheduler.fast_published {
+			return false
+		}
+		scheduler.fast_published.delete(uri)
+	}
 	app.write_notification(notification)
-	scheduler.diag_cache[notification.params.uri] = DiagCacheEntry{
+	scheduler.diag_cache[uri] = DiagCacheEntry{
 		fingerprint:     'published'
 		published_items: notification.params.diagnostics.clone()
 	}

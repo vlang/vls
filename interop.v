@@ -298,24 +298,22 @@ fn make_singlefile_temp_path(temp_root string, real_path string, purpose string)
 // `$()`, backticks, quotes, `;`, `&`, `|`, `%`, ...) in a filename or path can
 // alter the executed command. There is no shell involved at any point.
 fn build_v_check_args_single(file_to_check string, is_library_module bool) []string {
-	mut args := []string{}
-	if is_library_module {
-		args << '-shared'
-	}
-	// No `-w`: the compiler emits warnings by default.
-	args << ['-check', '-nocolor', file_to_check]
-	return args
+	return build_v_check_args(file_to_check, is_library_module)
 }
 
 fn build_v_check_args_multifile(is_library_module bool) []string {
-	mut args := []string{}
+	return build_v_check_args('.', is_library_module)
+}
+
+fn build_v_check_args(target string, is_library_module bool) []string {
+	mut args := []string{cap: 4}
 	if is_library_module {
 		// Library modules have no `fn main()`. Without `-shared`, the compiler
 		// reports that absence as an error before checking the actual source.
 		args << '-shared'
 	}
-	// No `-w`: omitting it preserves the compiler's default warning diagnostics.
-	args << ['-check', '-nocolor', '.']
+	// Do not add `-w`: omitting it preserves V3's default warning diagnostics.
+	args << ['-check', '-nocolor', target]
 	return args
 }
 
@@ -340,7 +338,7 @@ enum LineInfoMode {
 	missing // no compiler serves them — answer from VLS's own index
 }
 
-// line_info_flags are the options a V without the line-info checker rejects outright.
+// line_info_flags are the options older compilers may reject when asked for line info.
 const line_info_flags = ['-line-info', '-vls-mode', '-json-errors']
 
 // compiler_rejects_any_option reports whether a compiler invocation failed
@@ -390,7 +388,7 @@ fn compiler_refused_and_stopped(output string) bool {
 		if trimmed == '' {
 			continue
 		}
-		if !trimmed.starts_with('unknown option `') {
+		if !trimmed.starts_with('unknown option `') && !trimmed.starts_with('Unknown argument `') {
 			return false
 		}
 		refusals++
@@ -448,6 +446,19 @@ fn (mut app App) report_missing_compatibility_compiler() {
 // normalize_v_line_info_output extracts the actual line-info payload from the
 // compiler's combined stdout/stderr. Older launchers may prepend an option
 // notice before delegating to their checker.
+// report_line_info_unavailable runs once per session when the compiler refuses
+// the line-info request before doing any work.
+fn (mut app App) report_line_info_unavailable(compatibility_missing bool) {
+	mut message := 'vls: the configured V compiler cannot answer editor queries. Hover, completion, signature help, and go to definition may have limited results.'
+	if compatibility_missing {
+		message += ' To build the compatibility compiler for this V version, run `make v1` in its source directory.'
+	}
+	message += ' Update V or set `VLS_V_COMMAND` to a V compiler that supports `-line-info`.'
+	app.send_show_message(message, 2)
+}
+
+// normalize_v_line_info_output extracts the line-info payload from combined
+// stdout and stderr, which may also contain compiler diagnostics or notices.
 fn normalize_v_line_info_output(output string, method Method) string {
 	trimmed := output.trim_space()
 	if method == .inlay_hint {
@@ -904,11 +915,15 @@ fn run_v_argv_cancelled(args []string, work_folder string, cancelled fn () bool)
 	mut p := os.new_process(v_exe)
 	p.set_args(args)
 	if '-line-info' in args {
-		// CI enforces V3 for VLS itself, but line-info is still served by the
-		// established compiler. Do not leak the macOS no-fallback guard into this
-		// compatibility subprocess.
+		// Older macOS launchers honor this setting. Let the default checker
+		// answer bare queries and allow normal launcher routing for VLS mode.
 		mut child_env := os.environ()
-		child_env.delete('V_MACOS_V3_NO_FALLBACK')
+		if '-vls-mode' in args {
+			child_env.delete('V_MACOS_V3_NO_FALLBACK')
+		} else {
+			// The caller handles compatibility when the native query fails.
+			child_env['V_MACOS_V3_NO_FALLBACK'] = '1'
+		}
 		p.set_environment(child_env)
 	}
 	if work_folder != '' {
@@ -3450,19 +3465,11 @@ fn (mut app App) run_v_line_info(method Method, path string, line_info string) R
 	// answer is read against is the one the pause was going to publish anyway.
 	app.rush_pending_diagnostics(path)
 
-	// V3 answers first; V1 what it cannot, such as a file that does not parse.
+	// Ask on the shared program copy first, then try a one-shot lookup.
 	if served := app.v3_line_info(method, path, real_path, line_info) {
 		return served
 	}
 
-	// Once no compiler on this machine can serve `-line-info`, never spawn
-	// another process for it. Requests that verify many candidates — references
-	// and rename run up to reference_semantic_max_candidates serial `gd^`
-	// lookups — would otherwise pay a process launch each to reread one error.
-	if app.line_info_mode == .missing {
-		log('no compiler serves -line-info; answering from the index')
-		return app.line_info_unavailable_result(method, path, line_info)
-	}
 	return app.run_v_line_info_once(method, path, line_info, compilation_work_dir(normalize_overlay_path(real_path)))
 }
 
@@ -3519,11 +3526,7 @@ fn (mut app App) run_v_line_info_pooled(method Method, path string, line_info st
 	// The command line of the checks of the diagnostics (see
 	// build_v_check_args_multifile), whose servers answer the questions too.
 	is_library := target == '.' && !app.is_program_dir(project.overlay.source_work_dir)
-	mut args := []string{}
-	if is_library {
-		args << '-shared'
-	}
-	args << ['-check', '-nocolor', target]
+	args := build_v_check_args(target, is_library)
 	mut servers := app.v3_query_pool()
 	result := servers.query_cancelled(exe, args, project.overlay.temp_work_dir,
 		'${copy_path}:${line_info}', app.line_info_cancel_fn()) or {
@@ -3545,10 +3548,12 @@ fn (mut app App) run_v_line_info_pooled(method Method, path string, line_info st
 // run_v_line_info_once answers from a compiler process of its own, which checks
 // the program from `work_dir`.
 fn (mut app App) run_v_line_info_once(method Method, path string, line_info string, work_dir string) ResponseResult {
-	real_path := uri_to_path(path)
-	if app.line_info_mode == .missing {
+	// Reuse a definitive refusal for the rest of the session. References and
+	// rename can issue many serial definition lookups in one request.
+	if app.line_info_unavailable {
 		return app.line_info_unavailable_result(method, path, line_info)
 	}
+	real_path := uri_to_path(path)
 	// A warm shared server answers from the copy of the program it already
 	// checks, without the overlay and the compiler process of its own below.
 	if pooled := app.run_v_line_info_pooled(method, path, line_info) {
@@ -3635,6 +3640,7 @@ fn (mut app App) run_v_line_info_once(method Method, path string, line_info stri
 		// source fallbacks take over from here.
 		log('no checker for -line-info; falling back to the index')
 		app.line_info_mode = .missing
+		app.line_info_unavailable = true
 		app.report_missing_compatibility_compiler()
 		if !app.overlay_is_shared(temp_project_dir) {
 			cleanup_compilation_temp(temp_project_dir, singlefile_tmppath)
@@ -3650,16 +3656,13 @@ fn (mut app App) run_v_line_info_once(method Method, path string, line_info stri
 		// compiler-backed hover, signature, and receiver definition.
 		log('no compiler serves -line-info; falling back to the index')
 		app.line_info_mode = .missing
+		app.line_info_unavailable = true
 		app.report_missing_compatibility_compiler()
 		if !app.overlay_is_shared(temp_project_dir) {
 			cleanup_compilation_temp(temp_project_dir, singlefile_tmppath)
 		}
 		return app.line_info_unavailable_result(method, path, line_info)
 	}
-	if app.line_info_mode == .unknown {
-		app.line_info_mode = .direct
-	}
-
 	if (method == .definition || method == .declaration || method == .type_definition
 		|| method == .implementation) && use_multifile
 		&& (x.exit_code != 0 || output == '') {

@@ -63,11 +63,14 @@ exit 1
 // A compiler that answers definition questions but cannot check a program.
 const fake_checkless_definitions_only = r"#!/bin/sh
 for arg in $@; do
-	if [ $arg = -check ]; then
-		echo 'unknown option `-check`'
-		exit 1
+	if [ x$arg = x-vls-mode ]; then
+		compat=yes
 	fi
 done
+if [ x$compat != xyes ]; then
+	echo 'unknown option `-line-info`'
+	exit 1
+fi
 while [ $# -gt 0 ]; do
 	if [ $1 = -line-info ]; then
 		question=$2
@@ -90,7 +93,7 @@ exit 0
 // A V whose V3 has no query engine.
 const fake_v3_without_line_info = r"#!/bin/sh
 case ${V_DIAGNOSTICS_SERVER}x in 1x) exit 0 ;; esac
-echo 'unknown option `-vls-mode`'
+echo 'unknown option `-line-info`'
 exit 1
 "
 
@@ -551,7 +554,7 @@ fn test_a_rename_refuses_when_known_definitions_disappear_after_editing() {
 	defer {
 		stop_fake_v3_app(mut app, fake)
 	}
-	app.line_info_mode = .missing
+	app.line_info_unavailable = true
 	path := os.join_path(fake.project, 'main.v')
 	uri := path_to_uri(path)
 	app.open_files[uri] = os.read_file(path)!
@@ -905,7 +908,7 @@ fn test_a_rename_asks_again_what_its_prepare_rename_could_not_tell() {
 		stop_fake_v3_app(mut app, fake)
 	}
 	// No V1 either: a question V3 leaves unanswered gets no answer.
-	app.line_info_mode = .missing
+	app.line_info_unavailable = true
 	path := os.join_path(fake.project, 'main.v')
 	uri := path_to_uri(path)
 	app.open_files[uri] = os.read_file(path)!

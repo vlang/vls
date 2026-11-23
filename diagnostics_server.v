@@ -681,9 +681,8 @@ fn (mut s DiagnosticsServer) stop() {
 
 // resolve_diagnostics_server_exe picks the compiler that answers checks and
 // queries from one process: VLS_DIAGNOSTICS_SERVER names it, or turns the
-// servers off with `off`, and otherwise it is the V in use. A V without a
-// server, or where it cannot run one, finishes as a one-shot check without
-// saying it is ready, and VLS then starts a compiler for every check.
+// servers off with `off`. The shipped V server is Linux-only, so on other
+// platforms use one-shot checks unless a server is explicitly configured.
 fn resolve_diagnostics_server_exe() ?string {
 	from_env := os.getenv('VLS_DIAGNOSTICS_SERVER')
 	if from_env == 'off' {
@@ -691,6 +690,9 @@ fn resolve_diagnostics_server_exe() ?string {
 	}
 	if from_env != '' {
 		return if os.exists(from_env) { from_env } else { none }
+	}
+	$if !linux {
+		return none
 	}
 	v_exe := resolve_v_compiler_exe()
 	return if os.exists(v_exe) { v_exe } else { none }
