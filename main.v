@@ -5,11 +5,18 @@ module main
 import json2
 import net
 import os
+import strconv
 import sync
 import time
 import io
 
 const vls_version = '0.0.3'
+
+// cli_int parses a numeric CLI argument strictly. V's .int() accepts a leading
+// number followed by junk, which would silently turn "12x" into a line number.
+fn cli_int(arg string) int {
+	return strconv.atoi(arg) or { 0 }
+}
 
 // cli_app builds a minimal App for single-file CLI commands. It reuses the
 // OS temp directory directly so no per-invocation directory is left behind.
@@ -420,8 +427,8 @@ fn main() {
 	}
 	if os.args.len >= 5 && os.args[1] == 'hover' {
 		path := os.real_path(os.args[2])
-		line := os.args[3].int()
-		col := os.args[4].int()
+		line := cli_int(os.args[3])
+		col := cli_int(os.args[4])
 		content := os.read_file(path) or {
 			eprintln('cannot read ${path}: ${err}')
 			exit(1)
@@ -443,8 +450,8 @@ fn main() {
 	}
 	if os.args.len >= 5 && os.args[1] == 'definition' {
 		path := os.real_path(os.args[2])
-		line := os.args[3].int()
-		col := os.args[4].int()
+		line := cli_int(os.args[3])
+		col := cli_int(os.args[4])
 		content := os.read_file(path) or {
 			eprintln('cannot read ${path}: ${err}')
 			exit(1)
@@ -466,8 +473,8 @@ fn main() {
 	}
 	if os.args.len >= 5 && os.args[1] == 'references' {
 		path := os.real_path(os.args[2])
-		line := os.args[3].int()
-		col := os.args[4].int()
+		line := cli_int(os.args[3])
+		col := cli_int(os.args[4])
 		content := os.read_file(path) or {
 			eprintln('cannot read ${path}: ${err}')
 			exit(1)
@@ -520,8 +527,8 @@ fn main() {
 	}
 	if os.args.len >= 5 && os.args[1] == 'completion' {
 		path := os.real_path(os.args[2])
-		line := os.args[3].int()
-		col := os.args[4].int()
+		line := cli_int(os.args[3])
+		col := cli_int(os.args[4])
 		content := os.read_file(path) or {
 			eprintln('cannot read ${path}: ${err}')
 			exit(1)
@@ -543,8 +550,8 @@ fn main() {
 	}
 	if os.args.len >= 6 && os.args[1] == 'rename' {
 		path := os.real_path(os.args[2])
-		line := os.args[3].int()
-		col := os.args[4].int()
+		line := cli_int(os.args[3])
+		col := cli_int(os.args[4])
 		new_name := os.args[5]
 		content := os.read_file(path) or {
 			eprintln('cannot read ${path}: ${err}')
@@ -993,7 +1000,7 @@ fn parse_content_length_header(s string) !int {
 		return error('empty Content-Length')
 	}
 	for ch in t {
-		if ch < `0` || ch > `9` {
+		if !ch.is_digit() {
 			return error('non-numeric Content-Length')
 		}
 	}
@@ -1001,7 +1008,7 @@ fn parse_content_length_header(s string) !int {
 	if t.len > 18 {
 		return error('Content-Length too large')
 	}
-	n := t.i64()
+	n := strconv.parse_int(t, 10, 64) or { return error('invalid Content-Length') }
 	if n < 0 || n > max_content_length {
 		return error('Content-Length out of range')
 	}
@@ -1567,7 +1574,7 @@ fn raw_id_to_int(raw string) int {
 	if !raw_is_canonical_int(raw) {
 		return 0
 	}
-	return raw.int()
+	return strconv.atoi(raw) or { 0 }
 }
 
 // raw_is_canonical_int reports whether `raw` is an optional `-` followed by one
