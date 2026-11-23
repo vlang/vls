@@ -51,6 +51,20 @@ fn test_tcp_reader_finishes_on_exit_while_the_peer_remains_open() {
 	exit_message := <-incoming
 	assert invalid.method == .exit && invalid.is_request
 	assert exit_message.method == .exit && !exit_message.is_request
+	// The reader decodes the body once and hands it to the request loop; the
+	// loop must not have to scan or parse the payload a second time.
+	assert invalid.raw_id == '1', 'reader lost the raw id: ${invalid.raw_id}'
+	assert exit_message.raw_id == '', 'notification unexpectedly has a raw id'
+	if body := invalid.body {
+		assert body.method == 'exit' && body.jsonrpc == '2.0', 'reader did not decode the body'
+	} else {
+		assert false, 'reader did not decode the body'
+	}
+	if body := exit_message.body {
+		assert body.method == 'exit', 'reader did not decode the notification body'
+	} else {
+		assert false, 'reader did not decode the notification body'
+	}
 }
 
 fn test_stdio_reader_processes_frame_before_eof() {

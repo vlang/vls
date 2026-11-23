@@ -746,8 +746,12 @@ struct IncomingMessage {
 	eof     bool
 	failure string
 	// is_request is set for a message with an id, and method is its method.
+	// raw_id, has_id-scan and the decoded body are computed on the reader
+	// thread so the request loop never scans or parses the same payload twice.
 	is_request bool
 	method     Method
+	raw_id     string
+	body       ?RequestBody
 }
 
 // IncomingReader borrows the session reader until its reading thread joins.
@@ -775,12 +779,11 @@ fn read_incoming_messages[T](mut reader T, incoming chan IncomingMessage) {
 		mut message := IncomingMessage{
 			content:    content
 			is_request: request_content_has_id(content)
+			raw_id:     extract_raw_id(content) or { '' }
 		}
 		if body := json2.decode[RequestBody](content) {
-			message = IncomingMessage{
-				...message
-				method: Method.from_string(body.method)
-			}
+			message.body = body
+			message.method = Method.from_string(body.method)
 		}
 		incoming <- message or { return }
 		// Exit ends the stream even if a TCP peer keeps its socket open. Do not
@@ -1089,10 +1092,12 @@ fn (mut app App) handle_requests[T](mut reader T) {
 		if logging_is_enabled() {
 			log('\n\nRECV: ${content}')
 		}
-		has_id := request_content_has_id(content)
+		// The reader thread already scanned the id and decoded the body; doing
+		// either again here duplicated the cost of every full-text payload.
+		has_id := message.is_request
 		// Preserve the exact id (numeric or string) so responses echo it
 		// verbatim; string ids would otherwise collapse to 0 (P0-02).
-		app.current_request_raw_id = extract_raw_id(content) or { '' }
+		app.current_request_raw_id = message.raw_id
 		// Decode the body WITHOUT the id field first: json2 aborts the whole
 		// decode on a string value in an int field, which would otherwise make
 		// every string-id request undecodable. The numeric id is derived from
@@ -1102,26 +1107,31 @@ fn (mut app App) handle_requests[T](mut reader T) {
 		// disallowed id type (object, array, boolean) or a mistyped member
 		// (e.g. a numeric `method`) is an Invalid Request (-32600). json2
 		// fails both cases, so a generic syntax decode tells them apart.
-		body := json2.decode[RequestBody](content) or {
-			if _ := json2.decode[json2.Any](content) {
-				// Valid JSON but not a valid Request object.
-				if app.current_request_raw_id != '' && !raw_id_is_valid(app.current_request_raw_id) {
-					app.current_request_raw_id = 'null'
-					app.write_error_response(make_invalid_request_error_response(0, 'Request id must be a string, number, or null'))
-				} else {
-					if app.current_request_raw_id == '' {
+		mut body := RequestBody{}
+		if decoded := message.body {
+			body = decoded
+		} else {
+			body = json2.decode[RequestBody](content) or {
+				if _ := json2.decode[json2.Any](content) {
+					// Valid JSON but not a valid Request object.
+					if app.current_request_raw_id != '' && !raw_id_is_valid(app.current_request_raw_id) {
 						app.current_request_raw_id = 'null'
+						app.write_error_response(make_invalid_request_error_response(0, 'Request id must be a string, number, or null'))
+					} else {
+						if app.current_request_raw_id == '' {
+							app.current_request_raw_id = 'null'
+						}
+						app.write_error_response(make_invalid_request_error_response(raw_id_to_int(app.current_request_raw_id), 'Invalid request: ${err.msg()}'))
 					}
-					app.write_error_response(make_invalid_request_error_response(raw_id_to_int(app.current_request_raw_id), 'Invalid request: ${err.msg()}'))
+					continue
 				}
+				if logging_is_enabled() {
+					log('Failed to decode JSON request: ${err.msg()}. Content: "${content}"')
+				}
+				app.current_request_raw_id = 'null'
+				app.write_error_response(make_parse_error_response(err.msg()))
 				continue
 			}
-			if logging_is_enabled() {
-				log('Failed to decode JSON request: ${err.msg()}. Content: "${content}"')
-			}
-			app.current_request_raw_id = 'null'
-			app.write_error_response(make_parse_error_response(err.msg()))
-			continue
 		}
 		// JSON-RPC ids may only be a string, number, or null (an absent raw id).
 		// A present id of any other type (object, array, boolean) is an Invalid
@@ -1900,6 +1910,11 @@ fn inject_raw_id(encoded string, raw_id string) string {
 	mut val_end := val_start
 	for val_end < encoded.len && encoded[val_end] != `,` && encoded[val_end] != `}` {
 		val_end++
+	}
+	// Numeric ids are the common case and the encoder already wrote them
+	// correctly; avoid concatenating a whole copy of the response for a no-op.
+	if encoded[val_start..val_end] == raw_id {
+		return encoded
 	}
 	return encoded[..val_start] + raw_id + encoded[val_end..]
 }
