@@ -8626,13 +8626,19 @@ fn is_loop_binding_occurrence(lines []string, line_idx int, start_byte int, end_
 	}
 	line := lines[line_idx]
 	before := line[..start_byte]
-	after := line[end_byte..]
-	if !after.trim_space().starts_with('in') {
+	idx := before.last_index('for ') or { return false }
+	// The `for` must start a statement, not be the tail of another identifier.
+	if idx > 0 && is_ident_char(line[idx - 1]) {
 		return false
 	}
-	idx := before.last_index('for ') or { return false }
-	between := before[idx + 4..].trim_space()
-	return between == '' || between.ends_with(',')
+	// The token must still be inside the loop header: a `{` before it means
+	// this is a use in the body, which local_scope_bindings does resolve.
+	if before[idx..].contains('{') {
+		return false
+	}
+	// Both `for item in items` and `for i := 0; ...` bind names the fast path
+	// cannot identify; deferring either to the compiler is safe.
+	return true
 }
 
 // visible_binding_keys returns the set of same-named local bindings visible at

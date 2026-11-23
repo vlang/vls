@@ -487,14 +487,18 @@ fn (mut app App) v3_copies() []V3QueryProject {
 
 // v3_query_notice_disk_change has the copy of the program a file was created or
 // deleted in built again: the copy links the files that were there when it was
-// built. A change to a file needs nothing: a symbolic link shows it, a file
-// written into the copy is written again from what it holds, and one that the
-// copy holds otherwise is taken again (see refresh_held_files).
+// built. A content change re-takes the files the copy holds by link or copy
+// (see refresh_held_files); a create/delete rebuilds the copy.
 fn (mut app App) v3_query_notice_disk_change(changed_path string, event_type int) {
+	mut pool := app.v3_query_pool()
 	if event_type == 2 {
+		// Local imports are materialized into the copy as hard links or copies,
+		// so a symbolic link does NOT show an in-place save. Re-take the held
+		// files before the next query, or a closed file's rename of a parameter
+		// stays invisible to the compiler.
+		pool.refresh_held_files_in_copies()
 		return
 	}
-	mut pool := app.v3_query_pool()
 	pool.notice_disk_change(normalize_overlay_path(changed_path))
 }
 

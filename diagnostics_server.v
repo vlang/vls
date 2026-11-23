@@ -183,6 +183,22 @@ fn (mut pool DiagnosticsServerPool) notice_disk_change(path string) {
 	}
 }
 
+// refresh_held_files_in_copies re-takes every file the program copies hold by
+// link or by copy. A content change of a closed file leaves those materialized
+// bytes stale, so the next query would otherwise answer from the old source.
+fn (mut pool DiagnosticsServerPool) refresh_held_files_in_copies() {
+	pool.mutex.lock()
+	defer {
+		pool.mutex.unlock()
+	}
+	for key in pool.copies.keys() {
+		if mut program := pool.copies[key] {
+			program.project.refresh_held_files()
+			pool.copies[key] = program
+		}
+	}
+}
+
 // check runs the compiler with `args` in `work_dir` through a server, starting
 // one for this command line when needed. It returns none when no server can
 // answer, which leaves the caller to run the compiler itself.

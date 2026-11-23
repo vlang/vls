@@ -3117,7 +3117,24 @@ fn (mut app App) on_did_change_watched_files(request Request) {
 				if uri in app.diag_cache {
 					app.diag_cache.delete(uri)
 				}
+				// Inlay hints of a document can name parameters declared in a
+				// closed file of the same program. A disk change to that file
+				// must drop the per-document hint answers and the cached
+				// signatures from its directory, or the old names survive.
+				for hint_uri in app.inlay_hint_cache.keys() {
+					if hint_uri.starts_with('file://') {
+						app.inlay_hint_cache.delete(hint_uri)
+					}
+				}
+				app.evict_inlay_fn_cache_under(os.dir(uri_to_path(uri)))
 				app.bump_generation(uri)
+				// A closed file's change can affect hints and diagnostics of any
+				// project that imports it, and generation_key of the importer is
+				// not always the key of the changed file. Bump every project so
+				// every dependent stamp changes.
+				for key in app.project_generations.keys() {
+					app.project_generations[key]++
+				}
 				app.finish_diagnostics_project_mutation(diagnostics_mutation, '')
 			}
 			else {}
