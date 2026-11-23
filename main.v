@@ -746,8 +746,9 @@ struct IncomingMessage {
 	eof     bool
 	failure string
 	// is_request is set for a message with an id, and method is its method.
-	// raw_id, has_id-scan and the decoded body are computed on the reader
-	// thread so the request loop never scans or parses the same payload twice.
+	// raw_id, the has_id flag and the decoded body are computed on the reader
+	// thread so the request loop can reuse those results instead of repeating
+	// those three operations on every payload.
 	is_request bool
 	method     Method
 	raw_id     string

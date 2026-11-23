@@ -504,9 +504,8 @@ fn (mut app App) begin_diagnostics_project_mutation(uri string) DiagnosticsProje
 // computed during this notification; see generation_key_cached.
 fn (mut app App) begin_diagnostics_project_mutation_cached(uri string, mut cache map[string]string) DiagnosticsProjectMutation {
 	if mut scheduler := app.diagnostics_scheduler {
-		// The changed document's last published result no longer describes it.
-		// The schedule path drops its own document through the requested URI;
-		// this path carries none, so drop it here instead.
+		// The changed document's last published result no longer describes it;
+		// drop it before the mutation rebuilds this project's tickets.
 		scheduler.forget_published_errors(uri)
 		project_key := app.generation_key_cached(uri, mut cache)
 		return DiagnosticsProjectMutation{
